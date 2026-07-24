@@ -24,6 +24,7 @@ const expectedUsage = `Usage:
 Options:
   --provider <provider>              provider to use (anthropic|openai|xai|echo); overrides config
   --model <model>                    model id; overrides config
+  --effort <level>                   reasoning effort (off|low|medium|high|xhigh|max); overrides config
   --dangerously-skip-permissions     allow all tool calls without permission checks for this invocation
   -h, --help                         show help
 `

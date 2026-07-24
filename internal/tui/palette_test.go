@@ -29,6 +29,7 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 	want := []paletteEntry{
 		{ID: "command:provider", Label: "/provider", Description: "select a provider and model", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/provider"}},
 		{ID: "command:model", Label: "/model", Description: "select a model for the current provider", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/model"}},
+		{ID: "command:effort", Label: "/effort", Description: "set how much reasoning the model spends", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/effort"}},
 		{ID: "command:auth", Label: "/auth", Description: "manage provider authentication", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/auth"}},
 		{ID: "agent:build", Label: "/agent build", Description: "select an agent", Action: paletteAction{Kind: paletteActionAgent, Value: "build"}},
 		{ID: "command:help", Label: "/help", Description: "show available commands", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/help"}},

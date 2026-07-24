@@ -57,7 +57,7 @@ func (m *providerModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 	case "ctrl+d":
 		// Save the highlighted provider as the global default.
 		name := m.statuses[m.cursor].Name
-		return m, saveDefaultsThroughCmd(m.settings, name, "", "", "provider "+name)
+		return m, saveDefaultsThroughCmd(m.settings, name, "", "", "", "provider "+name)
 	case "enter":
 		return m.selectCurrent()
 	}

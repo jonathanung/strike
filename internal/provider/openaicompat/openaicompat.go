@@ -47,9 +47,10 @@ func NewXAI(bearer BearerSource) *Provider {
 // Wire types for the chat completions API.
 
 type chatRequest struct {
-	Model    string        `json:"model"`
-	Messages []chatMessage `json:"messages"`
-	Tools    []chatTool    `json:"tools,omitempty"`
+	Model           string        `json:"model"`
+	Messages        []chatMessage `json:"messages"`
+	Tools           []chatTool    `json:"tools,omitempty"`
+	ReasoningEffort string        `json:"reasoning_effort,omitempty"`
 }
 
 type chatMessage struct {
@@ -120,7 +121,7 @@ func (p *Provider) Stream(ctx context.Context, req provider.Request) (<-chan pro
 }
 
 func toChatRequest(req provider.Request) chatRequest {
-	out := chatRequest{Model: req.Model}
+	out := chatRequest{Model: req.Model, ReasoningEffort: base.OpenAIEffort(req.Effort)}
 	if req.System != "" {
 		out.Messages = append(out.Messages, chatMessage{Role: "system", Content: req.System})
 	}

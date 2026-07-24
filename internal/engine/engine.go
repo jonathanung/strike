@@ -5,6 +5,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -28,13 +29,14 @@ feedback instead of retrying the same call.`
 // SelectModel op (or InitialProvider at startup).
 type SelectFunc func(name string) (provider.Provider, string, error)
 
-// Agent is a named persona: a system prompt plus optional provider/model
-// pins applied when the agent is selected.
+// Agent is a named persona: a system prompt plus optional provider/model/
+// effort pins applied when the agent is selected.
 type Agent struct {
 	Name        string
 	Description string
 	Provider    string
 	Model       string
+	Effort      protocol.Effort
 	Prompt      string
 }
 
@@ -46,6 +48,9 @@ type Options struct {
 	// silent (the user selects interactively later).
 	InitialProvider string
 	InitialModel    string
+	// InitialEffort is the reasoning dial at startup; the zero value leaves
+	// each provider's own default in place.
+	InitialEffort protocol.Effort
 	// Agents are the selectable personas; the first is the default unless
 	// InitialAgent names another.
 	Agents       []Agent
@@ -64,6 +69,7 @@ type Engine struct {
 	prov     provider.Provider
 	provName string
 	model    string
+	effort   protocol.Effort
 	agent    Agent
 	messages []provider.Message
 
@@ -105,6 +111,13 @@ func (e *Engine) Run(ctx context.Context) {
 			e.setProvider(e.opts.InitialProvider, p, model)
 		}
 	}
+	// The configured effort is applied before the agent so an agent's own
+	// effort pin, if it has one, wins. An unset dial stays silent: there is
+	// nothing to confirm, and emitting it would announce "provider default"
+	// on every launch.
+	if e.opts.InitialEffort != protocol.EffortDefault {
+		e.setEffort(e.opts.InitialEffort)
+	}
 	initialAgent := e.opts.Agents[0].Name
 	if e.opts.InitialAgent != "" {
 		if _, ok := e.findAgent(e.opts.InitialAgent); ok {
@@ -136,6 +149,12 @@ func (e *Engine) Run(ctx context.Context) {
 					continue
 				}
 				e.handleSelectAgent(op)
+			case protocol.SetEffort:
+				if e.turnActive() {
+					e.emit(protocol.EngineError{Message: "cannot change effort while a turn is running"})
+					continue
+				}
+				e.setEffort(op.Level)
 			case protocol.PermissionReply:
 				e.perms.Reply(op)
 			case protocol.Interrupt:
@@ -173,6 +192,48 @@ func (e *Engine) setProvider(name string, p provider.Provider, model string) {
 	e.emit(protocol.ModelSelected{Provider: name, Model: model})
 }
 
+// setEffort records the reasoning dial and confirms it. An unrecognized level
+// is rejected rather than silently forwarded to a provider that would 400 on
+// it.
+func (e *Engine) setEffort(level protocol.Effort) {
+	parsed, ok := protocol.ParseEffort(string(level))
+	if !ok {
+		e.emit(protocol.EngineError{Message: fmt.Sprintf("unknown effort %q (want %s)", level, effortNames())})
+		return
+	}
+	e.effort = parsed
+	e.emit(protocol.EffortSelected{Level: parsed})
+}
+
+func effortNames() string {
+	names := make([]string, 0, len(protocol.Efforts()))
+	for _, level := range protocol.Efforts() {
+		names = append(names, string(level))
+	}
+	return strings.Join(names, "|")
+}
+
+// providerEffort translates the frontend-facing dial into the provider
+// vocabulary. The two ladders are kept in lockstep by TestProviderEffortCoversEveryLevel.
+func providerEffort(level protocol.Effort) provider.Effort {
+	switch level {
+	case protocol.EffortOff:
+		return provider.EffortOff
+	case protocol.EffortLow:
+		return provider.EffortLow
+	case protocol.EffortMedium:
+		return provider.EffortMedium
+	case protocol.EffortHigh:
+		return provider.EffortHigh
+	case protocol.EffortXHigh:
+		return provider.EffortXHigh
+	case protocol.EffortMax:
+		return provider.EffortMax
+	default:
+		return provider.EffortDefault
+	}
+}
+
 func (e *Engine) findAgent(name string) (Agent, bool) {
 	for _, a := range e.opts.Agents {
 		if a.Name == name {
@@ -192,6 +253,9 @@ func (e *Engine) handleSelectAgent(op protocol.SelectAgent) {
 	}
 	e.agent = agent
 	e.emit(protocol.AgentSelected{Name: agent.Name})
+	if agent.Effort != protocol.EffortDefault {
+		e.setEffort(agent.Effort)
+	}
 	switch {
 	case agent.Provider != "" && e.opts.Select != nil:
 		p, defaultModel, err := e.opts.Select(agent.Provider)
@@ -256,6 +320,7 @@ func (e *Engine) runTurn(ctx context.Context, text string) {
 			Messages:  e.messages,
 			Tools:     e.opts.Registry.Schemas(),
 			MaxTokens: e.opts.MaxTokens,
+			Effort:    providerEffort(e.effort),
 		})
 		if err != nil {
 			e.failTurn(err)
@@ -264,6 +329,7 @@ func (e *Engine) runTurn(ctx context.Context, text string) {
 
 		var textBuf strings.Builder
 		var calls []provider.ToolCall
+		var reasoning []json.RawMessage
 		stopReason := ""
 		for ev := range stream {
 			switch ev.Type {
@@ -272,6 +338,11 @@ func (e *Engine) runTurn(ctx context.Context, text string) {
 				e.emit(protocol.TextDelta{Text: ev.Text})
 			case provider.EventToolCall:
 				calls = append(calls, *ev.ToolCall)
+			case provider.EventReasoning:
+				// Kept on the message but never emitted: reasoning artifacts
+				// exist so the next request can replay them, and current
+				// models do not return readable chain of thought anyway.
+				reasoning = append(reasoning, ev.Reasoning)
 			case provider.EventDone:
 				stopReason = ev.StopReason
 			case provider.EventError:
@@ -288,6 +359,7 @@ func (e *Engine) runTurn(ctx context.Context, text string) {
 			Role:      provider.RoleAssistant,
 			Text:      textBuf.String(),
 			ToolCalls: calls,
+			Reasoning: reasoning,
 		})
 		if len(calls) == 0 {
 			e.emit(protocol.TurnCompleted{StopReason: stopReason})

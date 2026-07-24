@@ -24,6 +24,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 	}{
 		"/provider": {"select a provider and model", "[name [model]]", commandSourceBuiltin},
 		"/model":    {"select a model for the current provider", "[model]", commandSourceBuiltin},
+		"/effort":   {"set how much reasoning the model spends", "[level]", commandSourceBuiltin},
 		"/auth":     {"manage provider authentication", "[provider]", commandSourceBuiltin},
 		"/agent":    {"select an agent", "[name]", commandSourceBuiltin},
 		"/help":     {"show available commands", "", commandSourceBuiltin},

@@ -28,6 +28,12 @@ type Message struct {
 	ToolCalls []ToolCall
 	// ToolResult is set on RoleTool messages.
 	ToolResult *ToolResult
+	// Reasoning holds the reasoning artifacts this assistant turn produced,
+	// verbatim. Anthropic rejects a thinking block whose content was
+	// modified, so these are carried as opaque bytes and replayed byte-for-byte
+	// rather than parsed and rebuilt. Only the adapter that produced them
+	// consumes them; others ignore the field.
+	Reasoning []json.RawMessage
 }
 
 type ToolCall struct {
@@ -55,6 +61,9 @@ type Request struct {
 	Messages  []Message
 	Tools     []ToolSchema
 	MaxTokens int
+	// Effort is the reasoning dial for this request. EffortDefault leaves the
+	// provider's own default in place.
+	Effort Effort
 }
 
 type StreamEventType int
@@ -62,17 +71,21 @@ type StreamEventType int
 const (
 	EventTextDelta StreamEventType = iota
 	EventToolCall
+	EventReasoning
 	EventDone
 	EventError
 )
 
 // StreamEvent is the normalized event union all providers emit.
 type StreamEvent struct {
-	Type       StreamEventType
-	Text       string    // EventTextDelta
-	ToolCall   *ToolCall // EventToolCall (complete call)
-	StopReason string    // EventDone
-	Err        error     // EventError
+	Type     StreamEventType
+	Text     string    // EventTextDelta
+	ToolCall *ToolCall // EventToolCall (complete call)
+	// Reasoning is the opaque reasoning artifact for EventReasoning, to be
+	// stored on the assistant message and replayed unmodified.
+	Reasoning  json.RawMessage
+	StopReason string // EventDone
+	Err        error  // EventError
 }
 
 // Provider streams one model response. The returned channel is closed when
