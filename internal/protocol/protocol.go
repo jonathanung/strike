@@ -5,7 +5,68 @@
 // JSONL log of events (see internal/session).
 package protocol
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
+
+// Effort is the reasoning dial as the user sees it: how much internal
+// reasoning the model spends before answering. It is the frontend-facing
+// vocabulary, deliberately independent of provider.Effort — the engine
+// translates between the two so internal/tui never reaches into the provider
+// layer. The zero value means "unset", leaving the provider default in place.
+type Effort string
+
+const (
+	EffortDefault Effort = ""
+	EffortOff     Effort = "off"
+	EffortLow     Effort = "low"
+	EffortMedium  Effort = "medium"
+	EffortHigh    Effort = "high"
+	EffortXHigh   Effort = "xhigh"
+	EffortMax     Effort = "max"
+)
+
+// Efforts lists the selectable levels from least to most reasoning,
+// excluding the unset sentinel.
+func Efforts() []Effort {
+	return []Effort{EffortOff, EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax}
+}
+
+// ParseEffort resolves a user-typed level, case- and space-insensitively.
+// An empty string yields EffortDefault; anything unrecognized reports false.
+func ParseEffort(value string) (Effort, bool) {
+	normalized := Effort(strings.ToLower(strings.TrimSpace(value)))
+	if normalized == EffortDefault {
+		return EffortDefault, true
+	}
+	for _, level := range Efforts() {
+		if normalized == level {
+			return level, true
+		}
+	}
+	return EffortDefault, false
+}
+
+// Describe returns the one-line rationale rendered in the picker and help.
+func (e Effort) Describe() string {
+	switch e {
+	case EffortOff:
+		return "no reasoning — fastest and cheapest"
+	case EffortLow:
+		return "minimal reasoning for short, scoped tasks"
+	case EffortMedium:
+		return "balanced reasoning for routine work"
+	case EffortHigh:
+		return "thorough reasoning — the provider default"
+	case EffortXHigh:
+		return "deeper reasoning, best for coding and agentic work"
+	case EffortMax:
+		return "maximum reasoning when correctness beats cost"
+	default:
+		return "provider default"
+	}
+}
 
 // Decision is a user's answer to a permission ask.
 type Decision string
@@ -49,11 +110,18 @@ type SelectAgent struct {
 	Name string `json:"name"`
 }
 
+// SetEffort changes the reasoning dial for subsequent turns. Rejected while
+// a turn is running, like the other selection ops.
+type SetEffort struct {
+	Level Effort `json:"level"`
+}
+
 func (UserInput) isOp()       {}
 func (PermissionReply) isOp() {}
 func (Interrupt) isOp()       {}
 func (SelectModel) isOp()     {}
 func (SelectAgent) isOp()     {}
+func (SetEffort) isOp()       {}
 
 // Event is an engine -> client notification.
 type Event interface{ isEvent() }
@@ -116,6 +184,12 @@ type AgentSelected struct {
 	Name string `json:"name"`
 }
 
+// EffortSelected confirms the active reasoning level, at startup and after
+// each SetEffort.
+type EffortSelected struct {
+	Level Effort `json:"level"`
+}
+
 type EngineError struct {
 	Message string `json:"message"`
 }
@@ -130,4 +204,5 @@ func (PermissionResolved) isEvent() {}
 func (TurnCompleted) isEvent()      {}
 func (ModelSelected) isEvent()      {}
 func (AgentSelected) isEvent()      {}
+func (EffortSelected) isEvent()     {}
 func (EngineError) isEvent()        {}

@@ -15,11 +15,13 @@ import (
 	"path/filepath"
 
 	"github.com/jonathanung/strike-cli/internal/permission"
+	"github.com/jonathanung/strike-cli/internal/protocol"
 )
 
 type Config struct {
 	Provider     string             `json:"provider,omitempty"`
 	Model        string             `json:"model,omitempty"`
+	Effort       protocol.Effort    `json:"effort,omitempty"`
 	SystemPrompt string             `json:"systemPrompt,omitempty"`
 	DefaultAgent string             `json:"defaultAgent,omitempty"`
 	Permissions  permission.Ruleset `json:"permissions,omitempty"`
@@ -103,6 +105,9 @@ func merge(base, layer Config) Config {
 	}
 	if layer.Model != "" {
 		base.Model = layer.Model
+	}
+	if layer.Effort != "" {
+		base.Effort = layer.Effort
 	}
 	if layer.SystemPrompt != "" {
 		base.SystemPrompt = layer.SystemPrompt

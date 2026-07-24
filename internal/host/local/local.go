@@ -16,6 +16,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/history"
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/models"
+	"github.com/jonathanung/strike-cli/internal/protocol"
 )
 
 // New builds the local host services backed by the real auth store, prompt
@@ -177,6 +178,10 @@ func (catalogAdapter) ModelIDs(ctx context.Context, provider string) ([]string, 
 // settingsAdapter adapts global config persistence to host.Settings.
 type settingsAdapter struct{}
 
-func (settingsAdapter) SaveDefaults(provider, model, agent string) error {
-	return config.SetGlobalDefaults(provider, model, agent)
+func (settingsAdapter) SaveDefaults(provider, model, agent, effort string) error {
+	level, ok := protocol.ParseEffort(effort)
+	if !ok {
+		return fmt.Errorf("unknown effort %q", effort)
+	}
+	return config.SetGlobalDefaults(provider, model, agent, level)
 }

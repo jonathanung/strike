@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/jonathanung/strike-cli/internal/permission"
+	"github.com/jonathanung/strike-cli/internal/protocol"
 )
 
 func TestDefaultModel(t *testing.T) {
@@ -121,7 +122,7 @@ func TestSetGlobalDefaultsPreserves(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := SetGlobalDefaults("openai", "new-model", "build"); err != nil {
+	if err := SetGlobalDefaults("openai", "new-model", "build", protocol.EffortHigh); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(path)
@@ -140,7 +141,7 @@ func TestSetGlobalDefaultsPreserves(t *testing.T) {
 	}
 
 	// empty fields leave existing values
-	if err := SetGlobalDefaults("", "", ""); err != nil {
+	if err := SetGlobalDefaults("", "", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	data, _ = os.ReadFile(path)
@@ -160,7 +161,7 @@ func TestSetGlobalDefaultsCorrupt(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`not-json`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := SetGlobalDefaults("x", "y", ""); err == nil {
+	if err := SetGlobalDefaults("x", "y", "", ""); err == nil {
 		t.Fatal("expected corrupt config error")
 	}
 }

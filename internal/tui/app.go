@@ -87,6 +87,7 @@ type Model struct {
 	providerName string
 	modelName    string
 	agentName    string
+	effort       protocol.Effort
 	agents       []string     // cycled with tab
 	skills       []host.Skill // slash-command templates, pre-filtered by the host
 	notice       string
@@ -316,7 +317,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.setNotice("nothing to save — select a provider first", true)
 				return m, nil
 			}
-			return m, m.saveDefaultsCmd(m.providerName, m.modelName, m.agentName, m.providerName+"/"+m.modelName+" · "+m.agentName)
+			return m, m.saveDefaultsCmd(m.providerName, m.modelName, m.agentName, string(m.effort), m.providerName+"/"+m.modelName+" · "+m.agentName)
 		case "tab":
 			// Tab cycles agents (opencode-style build/plan switching).
 			if len(m.agents) > 1 && !m.turnRunning {
@@ -555,6 +556,9 @@ func (m *Model) applyEvent(ev protocol.Event) {
 		m.refreshOpenPalette()
 	case protocol.AgentSelected:
 		m.agentName = ev.Name
+	case protocol.EffortSelected:
+		m.effort = ev.Level
+		m.setNotice("effort: "+string(ev.Level)+" — "+ev.Level.Describe(), false)
 	case protocol.EngineError:
 		// Mid-turn failures belong in the transcript; idle-state errors
 		// (no model selected, bad /provider, …) show in the notice line.
@@ -616,6 +620,25 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 			return m, loadModelsCmd(m.services.Catalog, m.providerName)
 		}
 		return m.sendSelect(protocol.SelectModel{Provider: m.providerName, Model: fields[1]})
+	case "/effort":
+		if len(fields) < 2 {
+			// Bare /effort opens the centered picker.
+			m.resetComposer()
+			m.modal = newEffortModal(m.effort, m.ops, m.services.Settings)
+			return m, nil
+		}
+		level, ok := protocol.ParseEffort(fields[1])
+		if !ok || level == protocol.EffortDefault {
+			m.setNotice("unknown effort "+fields[1]+" — want "+effortChoices(), true)
+			return m, nil
+		}
+		m.resetComposer()
+		m.clearNotice()
+		ops := m.ops
+		return m, func() tea.Msg {
+			ops <- protocol.SetEffort{Level: level}
+			return nil
+		}
 	case "/auth":
 		m.resetComposer()
 		return m.handleAuth(fields[1:])
@@ -633,7 +656,7 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 			return nil
 		}
 	case "/help":
-		m.setNotice("commands: /provider [name [model]] · /model <model> · /agent [name] · /auth · skills as /<name> · tab cycles agents", false)
+		m.setNotice("commands: /provider [name [model]] · /model <model> · /effort <"+effortChoices()+"> · /agent [name] · /auth · skills as /<name> · tab cycles agents", false)
 		m.resetComposer()
 		return m, nil
 	default:
@@ -686,10 +709,19 @@ func (m Model) sendSelect(op protocol.SelectModel) (tea.Model, tea.Cmd) {
 	}
 }
 
-// saveDefaultsCmd persists provider/model/agent defaults through the host
-// settings service, reporting the outcome as a defaultsSavedMsg.
-func (m Model) saveDefaultsCmd(provider, model, agent, text string) tea.Cmd {
-	return saveDefaultsThroughCmd(m.services.Settings, provider, model, agent, text)
+// saveDefaultsCmd persists provider/model/agent/effort defaults through the
+// host settings service, reporting the outcome as a defaultsSavedMsg.
+func (m Model) saveDefaultsCmd(provider, model, agent, effort, text string) tea.Cmd {
+	return saveDefaultsThroughCmd(m.services.Settings, provider, model, agent, effort, text)
+}
+
+// effortChoices renders the selectable levels for error and help text.
+func effortChoices() string {
+	names := make([]string, 0, len(protocol.Efforts()))
+	for _, level := range protocol.Efforts() {
+		names = append(names, string(level))
+	}
+	return strings.Join(names, "|")
 }
 
 func (m *Model) setNotice(text string, isErr bool) {

@@ -59,9 +59,11 @@ type Catalog interface {
 
 // Settings persists user-chosen defaults. Empty fields mean "leave as is".
 type Settings interface {
-	// SaveDefaults persists the chosen provider, model, and agent; each
-	// empty string leaves the corresponding stored value unchanged.
-	SaveDefaults(provider, model, agent string) error
+	// SaveDefaults persists the chosen provider, model, agent, and reasoning
+	// effort; each empty string leaves the corresponding stored value
+	// unchanged. Effort is a plain string so this contract stays
+	// stdlib-only; an unrecognized level is rejected with an error.
+	SaveDefaults(provider, model, agent, effort string) error
 }
 
 // History is project-scoped prompt history. Enqueue is async; the channel

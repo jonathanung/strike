@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jonathanung/strike-cli/internal/host"
+	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 	"github.com/jonathanung/strike-cli/internal/tui/ui"
 )
@@ -19,16 +20,16 @@ var errNoSettings = errors.New("saving defaults is unavailable")
 // wired (a degraded frontend built without host.Services.Catalog).
 var errNoCatalog = errors.New("model catalog is unavailable")
 
-// saveDefaultsThroughCmd persists provider/model/agent defaults through the
-// given settings service and reports the outcome as a defaultsSavedMsg. A nil
-// service degrades to a graceful failure rather than a panic. Both the model's
-// ctrl+d path and the picker modals share it.
-func saveDefaultsThroughCmd(settings host.Settings, provider, model, agent, text string) tea.Cmd {
+// saveDefaultsThroughCmd persists provider/model/agent/effort defaults through
+// the given settings service and reports the outcome as a defaultsSavedMsg. A
+// nil service degrades to a graceful failure rather than a panic. Both the
+// model's ctrl+d path and the picker modals share it.
+func saveDefaultsThroughCmd(settings host.Settings, provider, model, agent, effort, text string) tea.Cmd {
 	return func() tea.Msg {
 		if settings == nil {
 			return defaultsSavedMsg{text: text, err: errNoSettings}
 		}
-		return defaultsSavedMsg{text: text, err: settings.SaveDefaults(provider, model, agent)}
+		return defaultsSavedMsg{text: text, err: settings.SaveDefaults(provider, model, agent, effort)}
 	}
 }
 
@@ -53,6 +54,11 @@ func (m Model) headerView(width int) string {
 	// not host-filtered, so every render site guards the name itself.
 	if m.agentName != "" && validAgentName(m.agentName) {
 		left += " " + ui.Badge(m.th, ui.ToneAccentAlt, ic.Agent+" "+sanitizeDisplayData(m.agentName))
+	}
+	// Only shown once a level is set — an unset dial means "whatever the
+	// provider does by default", which is not worth a badge.
+	if m.effort != protocol.EffortDefault {
+		left += " " + ui.Badge(m.th, ui.ToneMuted, "effort "+string(m.effort))
 	}
 
 	right := ""

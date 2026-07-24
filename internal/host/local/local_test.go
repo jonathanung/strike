@@ -223,7 +223,7 @@ func TestSaveDefaultsWritesGlobalConfig(t *testing.T) {
 	t.Setenv("HOME", home)
 	svc := New(nil, nil, nil, nil)
 
-	if err := svc.Settings.SaveDefaults("openai", "gpt-5.5", "build"); err != nil {
+	if err := svc.Settings.SaveDefaults("openai", "gpt-5.5", "build", "high"); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(config.GlobalPath())

@@ -13,6 +13,7 @@ type commandID string
 const (
 	commandProvider commandID = "provider"
 	commandModel    commandID = "model"
+	commandEffort   commandID = "effort"
 	commandAuth     commandID = "auth"
 	commandAgent    commandID = "agent"
 	commandHelp     commandID = "help"
@@ -36,6 +37,7 @@ type commandSpec struct {
 var builtinCommandSpecs = []commandSpec{
 	{ID: commandProvider, Name: "/provider", Description: "select a provider and model", ArgsHint: "[name [model]]", Source: commandSourceBuiltin},
 	{ID: commandModel, Name: "/model", Description: "select a model for the current provider", ArgsHint: "[model]", Source: commandSourceBuiltin},
+	{ID: commandEffort, Name: "/effort", Description: "set how much reasoning the model spends", ArgsHint: "[level]", Source: commandSourceBuiltin},
 	{ID: commandAuth, Name: "/auth", Description: "manage provider authentication", ArgsHint: "[provider]", Source: commandSourceBuiltin},
 	{ID: commandAgent, Name: "/agent", Description: "select an agent", ArgsHint: "[name]", Source: commandSourceBuiltin},
 	{ID: commandHelp, Name: "/help", Description: "show available commands", Source: commandSourceBuiltin},
@@ -91,6 +93,7 @@ func sanitizeDisplayData(value string) string {
 var reservedCommandNames = map[string]struct{}{
 	"provider": {},
 	"model":    {},
+	"effort":   {},
 	"auth":     {},
 	"agent":    {},
 	"help":     {},
