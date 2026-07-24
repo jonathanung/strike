@@ -9,7 +9,6 @@
 package tui
 
 import (
-	"context"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/spinner"
