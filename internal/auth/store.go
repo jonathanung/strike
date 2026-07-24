@@ -1,0 +1,109 @@
+// Package auth manages provider credentials: API keys and OAuth tokens,
+// persisted to a 0600 auth.json, plus the OAuth flows that obtain them.
+package auth
+
+import (
+	"encoding/json"
+	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"sort"
+	"sync"
+	"time"
+)
+
+type CredentialType string
+
+const (
+	TypeAPIKey CredentialType = "api"
+	TypeOAuth  CredentialType = "oauth"
+)
+
+type Credential struct {
+	Type CredentialType `json:"type"`
+	// APIKey is set for TypeAPIKey, and may also be set on a TypeOAuth
+	// credential when the OAuth flow yielded an exchanged API key
+	// (OpenAI's ChatGPT login does this).
+	APIKey    string    `json:"apiKey,omitempty"`
+	Access    string    `json:"access,omitempty"`
+	Refresh   string    `json:"refresh,omitempty"`
+	IDToken   string    `json:"idToken,omitempty"`
+	ExpiresAt time.Time `json:"expiresAt,omitempty"`
+	// AccountID is the ChatGPT account id (OpenAI subscription mode).
+	AccountID string `json:"accountId,omitempty"`
+}
+
+type Store struct {
+	path  string
+	mu    sync.Mutex
+	creds map[string]Credential
+}
+
+// DefaultPath is ~/.strike/auth.json — ~/.strike is strike's home for all
+// user-level state.
+func DefaultPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(os.TempDir(), "strike", "auth.json")
+	}
+	return filepath.Join(home, ".strike", "auth.json")
+}
+
+func OpenStore(path string) (*Store, error) {
+	s := &Store{path: path, creds: map[string]Credential{}}
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return s, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(data, &s.creds); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+func (s *Store) Get(provider string) (Credential, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.creds[provider]
+	return c, ok
+}
+
+func (s *Store) Set(provider string, c Credential) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.creds[provider] = c
+	return s.saveLocked()
+}
+
+func (s *Store) Delete(provider string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.creds, provider)
+	return s.saveLocked()
+}
+
+func (s *Store) Providers() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, 0, len(s.creds))
+	for p := range s.creds {
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (s *Store) saveLocked() error {
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(s.creds, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.path, data, 0o600)
+}

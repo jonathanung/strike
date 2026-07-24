@@ -1,1 +1,190 @@
 # strike-cli
+
+An agentic coding TUI in Go/BubbleTea. Architecture informed by deep-dives
+into [opencode](https://github.com/sst/opencode) and
+[codex](https://github.com/openai/codex) — see [PLAN.md](PLAN.md) for the
+full design rationale and roadmap.
+
+## Build & run
+
+Requires Go 1.26+ (`brew install go`).
+
+```sh
+make setup          # one-time: creates ~/.strike (config + example
+                    # plan agent and commit skill); never overwrites
+make build          # builds ./strike        (or: go build -o strike ./cmd/strike)
+make run-echo       # offline dev loop — no API key needed. Type
+                    # `run <command>` to exercise tool dispatch and the
+                    # permission prompt.
+make run            # real agent with your configured provider
+make test           # go test ./...
+make vet            # go vet ./...
+```
+
+strike launches without any provider configured. Pick one inside the TUI:
+
+```
+/provider                      # centered picker: providers + auth status;
+                               # selecting an unauthenticated one starts its
+                               # login and switches once it succeeds
+/provider anthropic            # direct switch (or openai, xai, echo)
+/provider openai gpt-5.5       # optional explicit model
+/model                         # centered model picker for the current
+                               # provider (live models.dev catalog, cached
+                               # 24h; type to filter)
+/model grok-4.5                # direct switch on the current provider
+/auth                          # same picker as /provider
+/auth openai                   # OAuth login in the browser (async — the TUI
+                               # keeps working; result shows in the notice line)
+/auth xai device               # RFC 8628 device flow for headless machines
+/auth anthropic                # masked API-key input (also: /auth <p> key)
+/auth status                   # anthropic: none · openai: oauth+key · …
+/auth logout <provider>
+/help                          # list commands
+```
+
+Submitting a prompt before selecting shows "No model selected" in the
+notice line above the composer (your prompt stays in the input). Talking to
+a real provider needs credentials (see Auth below):
+
+```sh
+export ANTHROPIC_API_KEY=sk-ant-…   # or: strike auth login anthropic
+./strike                            # tries the config default silently;
+                                    # otherwise select with /provider
+./strike --provider openai          # explicit — fails loudly if no creds
+./strike --model claude-opus-4-8    # pre-select a model
+```
+
+Defaults when a provider is chosen without a model: `claude-sonnet-5`,
+`gpt-5.5`, `grok-4.5`.
+
+If you use the `strike` shell alias (points at this repo's built binary),
+re-run `make build` after pulling changes to refresh it.
+
+## Auth
+
+Credentials live in `~/.strike/auth.json` (0600). Environment
+variables (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `XAI_API_KEY`) always
+take precedence over stored credentials.
+
+**OpenAI billing routing**: a ChatGPT OAuth login routes requests to the
+ChatGPT backend (`chatgpt.com/backend-api/codex`, Responses API, streamed) —
+billed to your ChatGPT Plus/Pro subscription, using the access token +
+`ChatGPT-Account-Id` header. An explicit API key (`OPENAI_API_KEY` or
+`/auth openai key`) routes to `api.openai.com` instead — billed to your
+platform API account. Subscription mode supports the Codex model set
+(`gpt-5.5`, `gpt-5.4`, …), not `-pro` models.
+
+Log in either inside the TUI (`/auth <provider>`, see above) or from the
+shell:
+
+```sh
+strike auth login openai            # OAuth "Sign in with ChatGPT" (browser);
+                                    # also exchanges the id_token for a real
+                                    # API key usable on api.openai.com
+strike auth login xai               # xAI Grok OAuth (browser, PKCE)
+strike auth login xai --device      # RFC 8628 device flow for headless/SSH
+strike auth login <provider> --api-key   # paste a key instead (any provider)
+strike auth status
+strike auth logout <provider>
+```
+
+Both OAuth integrations reuse public CLI client registrations (Codex CLI's
+for OpenAI, Grok-CLI's for xAI — the same approach opencode ships), so the
+loopback callback ports are fixed: `localhost:1455` for OpenAI,
+`127.0.0.1:56121` for xAI. OAuth access tokens auto-refresh ~2 minutes
+before expiry, and rotated refresh tokens are persisted.
+
+Provider selection happens in-app with `/provider`; `--provider` on the
+command line just pre-selects (and validates credentials eagerly).
+
+Keys: `enter` send · `esc` interrupt turn / reject permission ·
+`1/2/3` or `←/→ + enter` answer permission prompts · `pgup/pgdn` scroll ·
+`ctrl+c` quit.
+
+## Architecture in one paragraph
+
+The TUI and the agent engine are separate halves connected only by
+`internal/protocol` — frontends submit **Ops** (`UserInput`,
+`PermissionReply`, `Interrupt`), the engine emits **Events** (`TextDelta`,
+`ToolCallBegin/End`, `PermissionAsked`, `TurnCompleted`, …) — codex's SQ/EQ
+pattern, in-process over Go channels for now. The event stream *is* the
+transcript: every session is persisted as a JSONL event log
+(`~/.strike/sessions/`). Tools return
+`{Title, Output, Metadata}` separating model-facing text from UI rendering
+data (opencode's contract). Permissions are ordered allow/ask/deny rulesets
+with last-match-wins evaluation; an "ask" suspends the tool goroutine until
+the user answers, and rejections carry feedback back to the model.
+
+## Config
+
+`~/.strike/config` (global) merged with `./.strike/config` (project), both
+JSON:
+
+```json
+{
+  "provider": "anthropic",
+  "model": "claude-sonnet-5",
+  "defaultAgent": "build",
+  "permissions": [
+    { "permission": "bash", "pattern": "go *", "action": "allow" },
+    { "permission": "write", "pattern": "**/*.env", "action": "deny" }
+  ]
+}
+```
+
+Rules concatenate across layers; the last matching rule wins, so project
+config overrides global, and session "always" grants override both.
+
+**ctrl+d saves defaults**: on the main screen it persists the current
+provider/model/agent to `~/.strike/config`; in the provider picker it saves
+the highlighted provider; in the model picker it saves provider + model.
+
+## Agents & skills
+
+Both `.strike` roots (global and project) can hold `agents/` and `skills/`
+folders of markdown files; project files override same-named global ones.
+
+**Agents** (`agents/*.md`) are personas — a system prompt with optional
+provider/model pins. The built-in **build** agent is the default (define
+your own `build.md` to replace it). **Tab cycles agents**; `/agent [name]`
+lists or selects; the active agent shows in the status bar.
+
+```markdown
+---
+description: reviews diffs for correctness
+provider: openai
+model: gpt-5.5
+---
+You are a meticulous code reviewer. Focus on correctness…
+```
+
+**Skills** (`skills/*.md`) are prompt templates invoked as slash commands:
+`/commit fix the auth bug` runs the `commit.md` template with `$ARGUMENTS`
+replaced by "fix the auth bug" (arguments are appended if the placeholder
+is absent).
+
+```markdown
+---
+description: stage and commit with a good message
+---
+Look at the uncommitted changes and commit them: $ARGUMENTS
+```
+
+## Layout
+
+```
+cmd/strike/            entrypoint & wiring
+internal/protocol/     Op/Event types — the seam between engine and frontends
+internal/engine/       turn loop & tool dispatch
+internal/auth/         credential store + OAuth (PKCE, device) flows
+internal/provider/     provider interface; base/ (embeddable client: HTTP,
+                       auth, JSON/SSE, error shaping) embedded by anthropic,
+                       openaicompat (openai platform + xai), chatgpt
+                       (subscription backend); echo dev adapter
+internal/tool/         tool contract, registry, read/glob/grep/edit/write/bash
+internal/permission/   rulesets + suspend/resume ask service
+internal/session/      JSONL event-log persistence
+internal/config/       layered config
+internal/tui/          BubbleTea app: transcript cells, modals, composer
+```

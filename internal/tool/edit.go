@@ -1,0 +1,85 @@
+package tool
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
+)
+
+type editTool struct{}
+
+func NewEdit() Tool { return editTool{} }
+
+func (editTool) Name() string { return "edit" }
+
+func (editTool) Description() string {
+	return "Perform an exact string replacement in a file. oldString must match the file content exactly and be unique unless replaceAll is true."
+}
+
+func (editTool) Schema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"filePath": {"type": "string", "description": "Path to the file to modify"},
+			"oldString": {"type": "string", "description": "Exact text to replace"},
+			"newString": {"type": "string", "description": "Replacement text"},
+			"replaceAll": {"type": "boolean", "description": "Replace every occurrence (default false)"}
+		},
+		"required": ["filePath", "oldString", "newString"]
+	}`)
+}
+
+type editArgs struct {
+	FilePath   string `json:"filePath"`
+	OldString  string `json:"oldString"`
+	NewString  string `json:"newString"`
+	ReplaceAll bool   `json:"replaceAll"`
+}
+
+func (editTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
+	var a editArgs
+	if err := json.Unmarshal(args, &a); err != nil {
+		return Result{}, fmt.Errorf("invalid arguments: %w", err)
+	}
+	if a.OldString == a.NewString {
+		return Result{}, fmt.Errorf("oldString and newString are identical")
+	}
+	path := absPath(tc.WorkDir, a.FilePath)
+	rel := relPath(tc.WorkDir, path)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Result{}, err
+	}
+	content := string(data)
+	count := strings.Count(content, a.OldString)
+	if count == 0 {
+		return Result{}, fmt.Errorf("oldString not found in %s; read the file and match the content exactly", rel)
+	}
+	if count > 1 && !a.ReplaceAll {
+		return Result{}, fmt.Errorf("oldString matches %d locations in %s; provide more surrounding context to make it unique, or set replaceAll", count, rel)
+	}
+	// Metadata carries the change for UI diff rendering, independent of the
+	// model-facing output.
+	meta, _ := json.Marshal(map[string]any{"oldString": a.OldString, "newString": a.NewString, "count": count})
+	if err := tc.Ask(ctx, AskRequest{Permission: "edit", Patterns: []string{rel}, Always: []string{"*"}, Metadata: meta}); err != nil {
+		return Result{}, err
+	}
+	var updated string
+	replaced := 1
+	if a.ReplaceAll {
+		updated = strings.ReplaceAll(content, a.OldString, a.NewString)
+		replaced = count
+	} else {
+		updated = strings.Replace(content, a.OldString, a.NewString, 1)
+	}
+	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
+		return Result{}, err
+	}
+	return Result{
+		Title:    rel,
+		Output:   fmt.Sprintf("Edited %s (%d replacement(s))", rel, replaced),
+		Metadata: meta,
+	}, nil
+}
