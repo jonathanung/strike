@@ -121,12 +121,20 @@ type SetEffort struct {
 	Level Effort `json:"level"`
 }
 
+// SetFast toggles OpenAI priority (fast) service tier for subsequent turns.
+// Rejected while a turn is running. Providers and models that do not support
+// priority tier ignore the flag silently.
+type SetFast struct {
+	Enabled bool `json:"enabled"`
+}
+
 func (UserInput) isOp()       {}
 func (PermissionReply) isOp() {}
 func (Interrupt) isOp()       {}
 func (SelectModel) isOp()     {}
 func (SelectAgent) isOp()     {}
 func (SetEffort) isOp()       {}
+func (SetFast) isOp()         {}
 
 // Event is an engine -> client notification.
 type Event interface{ isEvent() }
@@ -195,6 +203,11 @@ type EffortSelected struct {
 	Level Effort `json:"level"`
 }
 
+// FastSelected confirms the session priority-tier preference after SetFast.
+type FastSelected struct {
+	Enabled bool `json:"enabled"`
+}
+
 type EngineError struct {
 	Message string `json:"message"`
 }
@@ -210,4 +223,5 @@ func (TurnCompleted) isEvent()      {}
 func (ModelSelected) isEvent()      {}
 func (AgentSelected) isEvent()      {}
 func (EffortSelected) isEvent()     {}
+func (FastSelected) isEvent()       {}
 func (EngineError) isEvent()        {}

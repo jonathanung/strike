@@ -18,6 +18,7 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 		TurnCompleted{StopReason: "end_turn"},
 		ModelSelected{Provider: "echo", Model: "echo"},
 		AgentSelected{Name: "build"},
+		FastSelected{Enabled: true},
 		EngineError{Message: "boom"},
 	}
 	for _, want := range events {

@@ -27,6 +27,35 @@ func TestModelIDs(t *testing.T) {
 	}
 }
 
+func TestSupportsPriority(t *testing.T) {
+	c := Catalog{
+		"openai": {ID: "openai", Models: map[string]Model{
+			"gpt-5.6-sol": {
+				ID: "gpt-5.6-sol",
+				Experimental: &experimental{Modes: map[string]json.RawMessage{
+					"fast": json.RawMessage(`{}`),
+				}},
+			},
+			"gpt-old": {ID: "gpt-old"},
+		}},
+		"anthropic": {ID: "anthropic", Models: map[string]Model{
+			"claude": {ID: "claude"},
+		}},
+	}
+	if !c.SupportsPriority("openai", "gpt-5.6-sol") {
+		t.Fatal("expected gpt-5.6-sol to support priority")
+	}
+	if c.SupportsPriority("openai", "gpt-old") {
+		t.Fatal("gpt-old must not support priority")
+	}
+	if c.SupportsPriority("anthropic", "claude") {
+		t.Fatal("anthropic must not support priority")
+	}
+	if c.SupportsPriority("missing", "x") {
+		t.Fatal("missing provider must not support priority")
+	}
+}
+
 func TestLoadFreshCache(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

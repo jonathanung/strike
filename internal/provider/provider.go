@@ -64,6 +64,10 @@ type Request struct {
 	// Effort is the reasoning dial for this request. EffortDefault leaves the
 	// provider's own default in place.
 	Effort Effort
+	// Priority requests the provider's accelerated service tier when one
+	// exists (OpenAI platform service_tier=priority). Adapters that do not
+	// support it ignore the flag.
+	Priority bool
 }
 
 type StreamEventType int

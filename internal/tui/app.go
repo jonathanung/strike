@@ -88,14 +88,16 @@ type Model struct {
 	modelName    string
 	agentName    string
 	effort       protocol.Effort
-	agents       []string     // cycled with tab
-	skills       []host.Skill // slash-command templates, pre-filtered by the host
-	notice       string
-	noticeErr    bool
-	turnRunning  bool
-	width        int
-	height       int
-	ready        bool
+	// fastEnabled is the session priority-tier preference from /fast.
+	fastEnabled bool
+	agents      []string     // cycled with tab
+	skills      []host.Skill // slash-command templates, pre-filtered by the host
+	notice      string
+	noticeErr   bool
+	turnRunning bool
+	width       int
+	height      int
+	ready       bool
 }
 
 // New builds the frontend model. services supplies every host capability; any
@@ -559,6 +561,9 @@ func (m *Model) applyEvent(ev protocol.Event) {
 	case protocol.EffortSelected:
 		m.effort = ev.Level
 		m.setNotice("effort: "+string(ev.Level)+" — "+ev.Level.Describe(), false)
+	case protocol.FastSelected:
+		m.fastEnabled = ev.Enabled
+		m.setNotice(m.fastNotice(ev.Enabled), false)
 	case protocol.EngineError:
 		// Mid-turn failures belong in the transcript; idle-state errors
 		// (no model selected, bad /provider, …) show in the notice line.
@@ -655,8 +660,10 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 			ops <- protocol.SelectAgent{Name: name}
 			return nil
 		}
+	case "/fast":
+		return m.handleFastCommand(fields[1:])
 	case "/help":
-		m.setNotice("commands: /provider [name [model]] · /model <model> · /effort <"+effortChoices()+"> · /agent [name] · /auth · skills as /<name> · tab cycles agents", false)
+		m.setNotice("commands: /provider [name [model]] · /model <model> · /effort <"+effortChoices()+"> · /fast [on|off] · /agent [name] · /auth · skills as /<name> · tab cycles agents", false)
 		m.resetComposer()
 		return m, nil
 	default:
@@ -707,6 +714,39 @@ func (m Model) sendSelect(op protocol.SelectModel) (tea.Model, tea.Cmd) {
 		ops <- op
 		return nil
 	}
+}
+
+// handleFastCommand toggles or sets the session priority-tier preference.
+// Bare /fast flips the current value; on/off/true/false/1/0 set it explicitly.
+func (m Model) handleFastCommand(args []string) (tea.Model, tea.Cmd) {
+	enabled := !m.fastEnabled
+	if len(args) > 0 {
+		switch strings.ToLower(args[0]) {
+		case "on", "true", "1", "yes":
+			enabled = true
+		case "off", "false", "0", "no":
+			enabled = false
+		default:
+			m.setNotice("usage: /fast [on|off]", true)
+			return m, nil
+		}
+	}
+	m.resetComposer()
+	m.clearNotice()
+	ops := m.ops
+	return m, func() tea.Msg {
+		ops <- protocol.SetFast{Enabled: enabled}
+		return nil
+	}
+}
+
+// fastNotice explains what the toggle means. Kept free of host I/O so it is
+// safe to call from the Bubble Tea update path (no catalog/network).
+func (m Model) fastNotice(enabled bool) string {
+	if !enabled {
+		return "fast off"
+	}
+	return "fast on — OpenAI platform priority tier (~2×); ignored by other providers and ChatGPT subscription"
 }
 
 // saveDefaultsCmd persists provider/model/agent/effort defaults through the

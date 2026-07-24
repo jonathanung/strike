@@ -16,6 +16,7 @@ const (
 	commandEffort   commandID = "effort"
 	commandAuth     commandID = "auth"
 	commandAgent    commandID = "agent"
+	commandFast     commandID = "fast"
 	commandHelp     commandID = "help"
 )
 
@@ -40,6 +41,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandEffort, Name: "/effort", Description: "set how much reasoning the model spends", ArgsHint: "[level]", Source: commandSourceBuiltin},
 	{ID: commandAuth, Name: "/auth", Description: "manage provider authentication", ArgsHint: "[provider]", Source: commandSourceBuiltin},
 	{ID: commandAgent, Name: "/agent", Description: "select an agent", ArgsHint: "[name]", Source: commandSourceBuiltin},
+	{ID: commandFast, Name: "/fast", Description: "toggle OpenAI priority tier (faster, ~2× cost)", ArgsHint: "[on|off]", Source: commandSourceBuiltin},
 	{ID: commandHelp, Name: "/help", Description: "show available commands", Source: commandSourceBuiltin},
 }
 
@@ -96,6 +98,7 @@ var reservedCommandNames = map[string]struct{}{
 	"effort":   {},
 	"auth":     {},
 	"agent":    {},
+	"fast":     {},
 	"help":     {},
 }
 
