@@ -43,17 +43,29 @@ func commandCatalog(skills []config.Skill) []commandSpec {
 	catalog := make([]commandSpec, len(builtinCommandSpecs), len(builtinCommandSpecs)+len(skills))
 	copy(catalog, builtinCommandSpecs)
 	for _, skill := range skills {
+		if err := config.ValidateSkillName(skill.Name); err != nil {
+			continue
+		}
 		argsHint := ""
 		if strings.Contains(skill.Template, "$ARGUMENTS") {
 			argsHint = "$ARGUMENTS"
 		}
 		catalog = append(catalog, commandSpec{
 			ID:          commandID("skill:" + skill.Name),
-			Name:        "/" + skill.Name,
-			Description: skill.Description,
+			Name:        "/" + sanitizeDisplayData(skill.Name),
+			Description: sanitizeDisplayData(skill.Description),
 			ArgsHint:    argsHint,
 			Source:      commandSourceSkill,
 		})
 	}
 	return catalog
+}
+
+func sanitizeDisplayData(value string) string {
+	return strings.Map(func(r rune) rune {
+		if r <= '\u001f' || r >= '\u007f' && r <= '\u009f' {
+			return '\uFFFD'
+		}
+		return r
+	}, value)
 }

@@ -11,7 +11,9 @@ import (
 	"github.com/jonathanung/strike-cli/internal/auth"
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/engine"
+	"github.com/jonathanung/strike-cli/internal/history"
 	"github.com/jonathanung/strike-cli/internal/permission"
+	"github.com/jonathanung/strike-cli/internal/project"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
 	"github.com/jonathanung/strike-cli/internal/provider/anthropic"
@@ -37,7 +39,7 @@ func main() {
 	}
 }
 
-func run() error {
+func run() (runErr error) {
 	provFlag := flag.String("provider", "", "provider to use (anthropic|echo); overrides config")
 	modelFlag := flag.String("model", "", "model id; overrides config")
 	flag.Parse()
@@ -46,6 +48,23 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	projectIdentity, err := project.Resolve(context.Background(), workDir)
+	if err != nil {
+		return fmt.Errorf("resolving project identity: %w", err)
+	}
+	globalRoot := config.GlobalRoot()
+	if globalRoot == "" {
+		return fmt.Errorf("opening prompt history: global config root is unavailable")
+	}
+	historyStore, err := history.Open(globalRoot, projectIdentity.Key)
+	if err != nil {
+		return fmt.Errorf("opening prompt history: %w", err)
+	}
+	defer func() {
+		if err := historyStore.Close(); err != nil && runErr == nil {
+			runErr = fmt.Errorf("closing prompt history: %w", err)
+		}
+	}()
 	cfg, err := config.Load(workDir)
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
@@ -132,14 +151,21 @@ func run() error {
 		buildPrompt = cfg.SystemPrompt
 	}
 	agents := []engine.Agent{{Name: "build", Description: "general coding agent", Prompt: buildPrompt}}
-	for _, a := range config.LoadAgents(workDir) {
+	loadedAgents, err := config.LoadAgentsWithError(workDir)
+	if err != nil {
+		return fmt.Errorf("loading agents: %w", err)
+	}
+	for _, a := range loadedAgents {
 		if a.Name == "build" {
 			agents[0] = engine.Agent(a) // user-defined build overrides the built-in
 			continue
 		}
 		agents = append(agents, engine.Agent(a))
 	}
-	skills := config.LoadSkills(workDir)
+	skills, err := config.LoadSkillsWithError(workDir)
+	if err != nil {
+		return fmt.Errorf("loading skills: %w", err)
+	}
 
 	eng := engine.New(engine.Options{
 		Select:          selectProvider,
@@ -176,7 +202,7 @@ func run() error {
 	for i, a := range agents {
 		agentNames[i] = a.Name
 	}
-	program := tea.NewProgram(tui.New(eng.Ops(), events, authStore, agentNames, skills), tea.WithAltScreen())
+	program := tea.NewProgram(tui.New(eng.Ops(), events, authStore, agentNames, skills, tui.Options{History: historyStore}), tea.WithAltScreen())
 	if _, err := program.Run(); err != nil {
 		return err
 	}

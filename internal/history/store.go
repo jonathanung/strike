@@ -21,45 +21,80 @@ const (
 	maxEntries    = 100
 )
 
+var errClosed = errors.New("history: store is closed")
+
 type record struct {
 	Version   int       `json:"version"`
 	Timestamp time.Time `json:"timestamp"`
 	Prompt    string    `json:"prompt"`
 }
 
+type request struct {
+	prompt string
+	done   chan error
+}
+
+type pathState struct {
+	mu             sync.Mutex
+	refs           int
+	appendDisabled bool
+	needsSeparator bool
+}
+
+var pathStates = struct {
+	sync.Mutex
+	states map[string]*pathState
+}{states: make(map[string]*pathState)}
+
 type Store struct {
-	mu            sync.Mutex
-	f             *os.File
-	entries       []string
-	malformedTail bool
+	mu      sync.Mutex
+	f       *os.File
+	entries []string
+	path    string
+	state   *pathState
+
+	submitMu sync.Mutex
+	wakeup   *sync.Cond
+	closed   bool
+	requests []request
+	worker   sync.WaitGroup
+	close    sync.Once
+	closeErr error
 }
 
 // Open opens the history log for projectKey below globalRoot/history.
 func Open(globalRoot, projectKey string) (*Store, error) {
-	dir := filepath.Join(globalRoot, "history")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("create history directory: %w", err)
-	}
-	if err := os.Chmod(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("secure history directory: %w", err)
-	}
-
 	digest := sha256.Sum256([]byte(projectKey))
-	path := filepath.Join(dir, hex.EncodeToString(digest[:])+".jsonl")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0o600)
+	name := hex.EncodeToString(digest[:]) + ".jsonl"
+	path, err := filepath.Abs(filepath.Join(globalRoot, "history", name))
 	if err != nil {
-		return nil, fmt.Errorf("open history: %w", err)
+		return nil, fmt.Errorf("resolve history path: %w", err)
 	}
-	if err := f.Chmod(0o600); err != nil {
-		f.Close()
-		return nil, fmt.Errorf("secure history file: %w", err)
-	}
+	state := retainPathState(path)
 
-	s := &Store{f: f}
-	if err := s.load(); err != nil {
-		f.Close()
+	f, err := secureOpenHistory(globalRoot, name)
+	if err != nil {
+		releasePathState(path, state)
 		return nil, err
 	}
+
+	s := &Store{
+		f:     f,
+		path:  path,
+		state: state,
+	}
+	s.wakeup = sync.NewCond(&s.submitMu)
+	state.mu.Lock()
+	err = s.load()
+	state.mu.Unlock()
+	if err != nil {
+		f.Close()
+		releasePathState(path, state)
+		return nil, err
+	}
+
+	s.worker.Add(1)
+	go s.run()
 	return s, nil
 }
 
@@ -70,15 +105,72 @@ func (s *Store) Entries() []string {
 	return append([]string(nil), s.entries...)
 }
 
+// Enqueue accepts an exact submitted prompt for serial durable append.
+func (s *Store) Enqueue(prompt string) <-chan error {
+	done := make(chan error, 1)
+	s.submitMu.Lock()
+	if s.closed {
+		s.submitMu.Unlock()
+		done <- errClosed
+		close(done)
+		return done
+	}
+	s.requests = append(s.requests, request{prompt: prompt, done: done})
+	s.wakeup.Signal()
+	s.submitMu.Unlock()
+	return done
+}
+
 // Add durably appends an exact submitted prompt. Whitespace-only prompts are ignored.
 func (s *Store) Add(prompt string) error {
+	return <-s.Enqueue(prompt)
+}
+
+// Close rejects new requests, drains accepted requests, and closes the history file.
+func (s *Store) Close() error {
+	s.close.Do(func() {
+		s.submitMu.Lock()
+		s.closed = true
+		s.wakeup.Broadcast()
+		s.submitMu.Unlock()
+
+		s.worker.Wait()
+		s.closeErr = s.f.Close()
+		releasePathState(s.path, s.state)
+	})
+	return s.closeErr
+}
+
+func (s *Store) run() {
+	defer s.worker.Done()
+	for {
+		s.submitMu.Lock()
+		for len(s.requests) == 0 && !s.closed {
+			s.wakeup.Wait()
+		}
+		if len(s.requests) == 0 {
+			s.submitMu.Unlock()
+			return
+		}
+		req := s.requests[0]
+		s.requests[0] = request{}
+		s.requests = s.requests[1:]
+		s.submitMu.Unlock()
+
+		err := s.append(req.prompt)
+		req.done <- err
+		close(req.done)
+	}
+}
+
+func (s *Store) append(prompt string) error {
 	if strings.TrimSpace(prompt) == "" {
 		return nil
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.malformedTail {
+	s.state.mu.Lock()
+	defer s.state.mu.Unlock()
+	if s.state.appendDisabled {
 		return errors.New("history: cannot append after a malformed final record")
 	}
 
@@ -91,28 +183,28 @@ func (s *Store) Add(prompt string) error {
 		return fmt.Errorf("encode history record: %w", err)
 	}
 	data = append(data, '\n')
+	if s.state.needsSeparator {
+		data = append([]byte{'\n'}, data...)
+	}
 	n, err := s.f.Write(data)
 	if err != nil {
 		if n != 0 {
-			s.malformedTail = true
+			s.state.appendDisabled = true
 		}
 		return fmt.Errorf("append history record: %w", err)
 	}
 	if n != len(data) {
-		s.malformedTail = true
+		s.state.appendDisabled = true
 		return fmt.Errorf("append history record: %w", io.ErrShortWrite)
 	}
+	s.state.needsSeparator = false
 	if err := s.f.Sync(); err != nil {
 		return fmt.Errorf("sync history record: %w", err)
 	}
-	s.remember(prompt)
-	return nil
-}
-
-func (s *Store) Close() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.f.Close()
+	s.remember(prompt)
+	s.mu.Unlock()
+	return nil
 }
 
 func (s *Store) load() error {
@@ -120,25 +212,30 @@ func (s *Store) load() error {
 	for lineNumber := 1; ; lineNumber++ {
 		line, readErr := reader.ReadBytes('\n')
 		if len(line) != 0 {
-			var rec record
-			decodeErr := json.Unmarshal(line, &rec)
-			if decodeErr == nil && rec.Version != recordVersion {
-				decodeErr = fmt.Errorf("unsupported record version %d", rec.Version)
-			}
-			if decodeErr != nil {
-				if readErr == io.EOF {
-					s.malformedTail = true
-					return nil
-				}
+			final := readErr == io.EOF
+			if !final {
 				if _, err := reader.Peek(1); err == io.EOF {
-					s.malformedTail = true
-					return nil
+					final = true
 				} else if err != nil {
 					return fmt.Errorf("read history after line %d: %w", lineNumber, err)
 				}
-				return fmt.Errorf("decode history line %d: %w", lineNumber, decodeErr)
+			}
+
+			var rec record
+			if err := json.Unmarshal(line, &rec); err != nil {
+				if final {
+					s.state.appendDisabled = true
+					return nil
+				}
+				return fmt.Errorf("decode history line %d: %w", lineNumber, err)
+			}
+			if rec.Version != recordVersion {
+				return fmt.Errorf("decode history line %d: unsupported record version %d", lineNumber, rec.Version)
 			}
 			s.remember(rec.Prompt)
+			if readErr == io.EOF {
+				s.state.needsSeparator = true
+			}
 		}
 
 		if readErr == io.EOF {
@@ -162,5 +259,26 @@ func (s *Store) remember(prompt string) {
 	if len(s.entries) > maxEntries {
 		copy(s.entries, s.entries[len(s.entries)-maxEntries:])
 		s.entries = s.entries[:maxEntries]
+	}
+}
+
+func retainPathState(path string) *pathState {
+	pathStates.Lock()
+	defer pathStates.Unlock()
+	state := pathStates.states[path]
+	if state == nil {
+		state = &pathState{}
+		pathStates.states[path] = state
+	}
+	state.refs++
+	return state
+}
+
+func releasePathState(path string, state *pathState) {
+	pathStates.Lock()
+	defer pathStates.Unlock()
+	state.refs--
+	if state.refs == 0 {
+		delete(pathStates.states, path)
 	}
 }

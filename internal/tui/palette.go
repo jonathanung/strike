@@ -6,6 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
 
@@ -22,16 +23,26 @@ type paletteEntry struct {
 	ID             string
 	Label          string
 	Description    string
-	Command        string
-	InsertOnly     bool
+	Action         paletteAction
 	DisabledReason string
 }
 
-// paletteInvokeMsg leaves execution to Model's existing command handling.
-// InsertOnly commands should be placed in the composer instead of submitted.
+type paletteActionKind uint8
+
+const (
+	paletteActionUnknown paletteActionKind = iota
+	paletteActionBuiltin
+	paletteActionAgent
+	paletteActionSkill
+)
+
+type paletteAction struct {
+	Kind  paletteActionKind
+	Value string
+}
+
 type paletteInvokeMsg struct {
-	Command    string
-	InsertOnly bool
+	Action paletteAction
 }
 
 type paletteModal struct {
@@ -42,6 +53,24 @@ type paletteModal struct {
 
 func newPaletteModal(specs []commandSpec, agents []string, availability paletteAvailability) *paletteModal {
 	return &paletteModal{entries: buildPaletteEntries(specs, agents, availability)}
+}
+
+func (m *paletteModal) refresh(entries []paletteEntry) {
+	oldCursor := m.cursor
+	selectedID := ""
+	if filtered := m.filtered(); oldCursor >= 0 && oldCursor < len(filtered) {
+		selectedID = filtered[oldCursor].ID
+	}
+
+	m.entries = entries
+	filtered := m.filtered()
+	for i, entry := range filtered {
+		if entry.ID == selectedID {
+			m.cursor = i
+			return
+		}
+	}
+	m.cursor = max(0, min(oldCursor, len(filtered)-1))
 }
 
 func buildPaletteEntries(specs []commandSpec, agents []string, availability paletteAvailability) []paletteEntry {
@@ -60,9 +89,9 @@ func buildPaletteEntries(specs []commandSpec, agents []string, availability pale
 		}
 		entry := paletteEntry{
 			ID:          "command:" + string(id),
-			Label:       spec.Name,
-			Description: spec.Description,
-			Command:     spec.Name,
+			Label:       sanitizeDisplayData(spec.Name),
+			Description: sanitizeDisplayData(spec.Description),
+			Action:      paletteAction{Kind: paletteActionBuiltin, Value: spec.Name},
 		}
 		switch {
 		case availability.TurnRunning:
@@ -76,11 +105,15 @@ func buildPaletteEntries(specs []commandSpec, agents []string, availability pale
 	agentSpec, hasAgentSpec := byID[commandAgent]
 	if hasAgentSpec {
 		for _, name := range agents {
+			if err := config.ValidateAgentName(name); err != nil {
+				continue
+			}
+			displayName := sanitizeDisplayData(name)
 			entry := paletteEntry{
 				ID:          "agent:" + name,
-				Label:       "/agent " + name,
-				Description: agentSpec.Description,
-				Command:     "/agent " + name,
+				Label:       "/agent " + displayName,
+				Description: sanitizeDisplayData(agentSpec.Description),
+				Action:      paletteAction{Kind: paletteActionAgent, Value: name},
 			}
 			if availability.TurnRunning {
 				entry.DisabledReason = "unavailable while a turn is running"
@@ -92,9 +125,9 @@ func buildPaletteEntries(specs []commandSpec, agents []string, availability pale
 	if spec, ok := byID[commandHelp]; ok {
 		entries = append(entries, paletteEntry{
 			ID:          "command:" + string(commandHelp),
-			Label:       spec.Name,
-			Description: spec.Description,
-			Command:     spec.Name,
+			Label:       sanitizeDisplayData(spec.Name),
+			Description: sanitizeDisplayData(spec.Description),
+			Action:      paletteAction{Kind: paletteActionBuiltin, Value: spec.Name},
 		})
 	}
 
@@ -102,12 +135,15 @@ func buildPaletteEntries(specs []commandSpec, agents []string, availability pale
 		if spec.Source != commandSourceSkill {
 			continue
 		}
+		name := strings.TrimPrefix(spec.Name, "/")
+		if err := config.ValidateSkillName(name); err != nil || spec.Name != "/"+name {
+			continue
+		}
 		entry := paletteEntry{
-			ID:          "skill:" + strings.TrimPrefix(spec.Name, "/"),
-			Label:       spec.Name,
-			Description: spec.Description,
-			Command:     spec.Name + " ",
-			InsertOnly:  true,
+			ID:          "skill:" + name,
+			Label:       sanitizeDisplayData(spec.Name),
+			Description: sanitizeDisplayData(spec.Description),
+			Action:      paletteAction{Kind: paletteActionSkill, Value: name},
 		}
 		if availability.TurnRunning {
 			entry.DisabledReason = "unavailable while a turn is running"
@@ -140,7 +176,7 @@ func (m *paletteModal) filtered() []paletteEntry {
 }
 
 func paletteMatchRank(entry paletteEntry, query string) int {
-	fields := []string{entry.Label, entry.Command, entry.Description}
+	fields := []string{entry.Label, entry.Action.Value, entry.Description}
 	best := -1
 	for _, field := range fields {
 		field = strings.ToLower(strings.TrimPrefix(field, "/"))
@@ -185,7 +221,7 @@ func (m *paletteModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 		}
 		entry := list[m.cursor]
 		return nil, func() tea.Msg {
-			return paletteInvokeMsg{Command: entry.Command, InsertOnly: entry.InsertOnly}
+			return paletteInvokeMsg{Action: entry.Action}
 		}
 	default:
 		if msg.Type == tea.KeyRunes {
@@ -204,7 +240,7 @@ func (m *paletteModal) view(width int, th theme.Theme) string {
 	normal := lipgloss.NewStyle().Foreground(th.Text)
 	selected := lipgloss.NewStyle().Foreground(th.Accent).Bold(true)
 
-	filterLine := muted.Render("filter: ") + normal.Render(truncateDisplay(m.filter+"▏", max(1, innerWidth-8)))
+	filterLine := muted.Render("filter: ") + normal.Render(truncateDisplay(sanitizeDisplayData(m.filter)+"▏", max(1, innerWidth-8)))
 	list := m.filtered()
 	if m.cursor >= len(list) {
 		m.cursor = max(0, len(list)-1)

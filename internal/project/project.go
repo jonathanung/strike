@@ -21,6 +21,10 @@ type Identity struct {
 // Resolve returns the canonical Git root containing cwd, or the canonical cwd
 // when Git is unavailable or cannot identify a valid work tree.
 func Resolve(ctx context.Context, cwd string) (Identity, error) {
+	if cwd == "" {
+		return Identity{}, fmt.Errorf("resolve project cwd: cwd is empty")
+	}
+
 	canonicalCWD, err := canonicalDir(cwd)
 	if err != nil {
 		return Identity{}, fmt.Errorf("resolve project cwd: %w", err)

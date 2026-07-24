@@ -1,10 +1,13 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Agent is a named persona: a system prompt with optional provider/model
@@ -35,9 +38,77 @@ type Skill struct {
 	Template    string
 }
 
+var reservedSkillNames = map[string]struct{}{
+	"provider": {},
+	"model":    {},
+	"auth":     {},
+	"agent":    {},
+	"help":     {},
+}
+
+// ValidateSkillName rejects names that cannot be represented safely as slash commands.
+func ValidateSkillName(name string) error {
+	if err := validateConfigIdentifier(name, "skill"); err != nil {
+		return err
+	}
+	if _, reserved := reservedSkillNames[name]; reserved {
+		return fmt.Errorf("skill name %q is reserved", name)
+	}
+	for _, r := range name {
+		if r == '/' {
+			return fmt.Errorf("skill name %q contains '/'", name)
+		}
+		if unicode.IsSpace(r) {
+			return fmt.Errorf("skill name %q contains whitespace or a control character", name)
+		}
+	}
+	return nil
+}
+
+// ValidateAgentName rejects names that cannot be selected or displayed safely.
+func ValidateAgentName(name string) error {
+	if err := validateConfigIdentifier(name, "agent"); err != nil {
+		return err
+	}
+	if strings.TrimSpace(name) != name {
+		return fmt.Errorf("agent name %q has leading or trailing whitespace", name)
+	}
+	return nil
+}
+
+func validateConfigIdentifier(name, kind string) error {
+	if name == "" {
+		return fmt.Errorf("%s name is empty", kind)
+	}
+	if !utf8.ValidString(name) {
+		return fmt.Errorf("%s name is not valid UTF-8", kind)
+	}
+	for _, r := range name {
+		if r <= '\u001f' || r >= '\u007f' && r <= '\u009f' {
+			detail := "a control character"
+			if kind == "skill" {
+				detail = "whitespace or a control character"
+			}
+			return fmt.Errorf("%s name %q contains %s", kind, name, detail)
+		}
+	}
+	return nil
+}
+
 // LoadAgents reads agents/*.md from the global then project .strike roots;
 // a project agent overrides a global one with the same name.
 func LoadAgents(workDir string) []Agent {
+	agents, err := LoadAgentsWithError(workDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "loading agents: %v\n", err)
+		return nil
+	}
+	return agents
+}
+
+// LoadAgentsWithError reads agents/*.md from the global then project .strike
+// roots; a project agent overrides a global one with the same name.
+func LoadAgentsWithError(workDir string) ([]Agent, error) {
 	byName := map[string]Agent{}
 	var order []string
 	for _, dir := range []string{filepath.Join(GlobalRoot(), "agents"), filepath.Join(projectRoot(workDir), "agents")} {
@@ -53,6 +124,9 @@ func LoadAgents(workDir string) []Agent {
 			name := strings.TrimSuffix(filepath.Base(path), ".md")
 			if meta["name"] != "" {
 				name = meta["name"]
+			}
+			if err := ValidateAgentName(name); err != nil {
+				return nil, fmt.Errorf("load agent %s: %w", path, err)
 			}
 			if _, exists := byName[name]; !exists {
 				order = append(order, name)
@@ -70,12 +144,23 @@ func LoadAgents(workDir string) []Agent {
 	for _, name := range order {
 		agents = append(agents, byName[name])
 	}
-	return agents
+	return agents, nil
 }
 
-// LoadSkills reads skills/*.md from the global then project .strike roots;
-// a project skill overrides a global one with the same name.
+// LoadSkills reads skills/*.md. Invalid names are reported clearly on stderr;
+// callers that need to handle the error directly can use LoadSkillsWithError.
 func LoadSkills(workDir string) []Skill {
+	skills, err := LoadSkillsWithError(workDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "loading skills: %v\n", err)
+		return nil
+	}
+	return skills
+}
+
+// LoadSkillsWithError reads skills/*.md from the global then project .strike
+// roots; a project skill overrides a global one with the same name.
+func LoadSkillsWithError(workDir string) ([]Skill, error) {
 	byName := map[string]Skill{}
 	var order []string
 	for _, dir := range []string{filepath.Join(GlobalRoot(), "skills"), filepath.Join(projectRoot(workDir), "skills")} {
@@ -92,6 +177,9 @@ func LoadSkills(workDir string) []Skill {
 			if meta["name"] != "" {
 				name = meta["name"]
 			}
+			if err := ValidateSkillName(name); err != nil {
+				return nil, fmt.Errorf("load skill %s: %w", path, err)
+			}
 			if _, exists := byName[name]; !exists {
 				order = append(order, name)
 			}
@@ -102,7 +190,7 @@ func LoadSkills(workDir string) []Skill {
 	for _, name := range order {
 		skills = append(skills, byName[name])
 	}
-	return skills
+	return skills, nil
 }
 
 // Render substitutes the skill's arguments into its template.

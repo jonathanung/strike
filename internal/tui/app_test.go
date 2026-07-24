@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/jonathanung/strike-cli/internal/auth"
 	"github.com/jonathanung/strike-cli/internal/config"
+	"github.com/jonathanung/strike-cli/internal/history"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
@@ -290,15 +292,15 @@ func TestModelAndAgentSlashCommandsEmitSelections(t *testing.T) {
 		assertNoAppOp(t, ops)
 	})
 
-	t.Run("agent selects named agent", func(t *testing.T) {
-		m, ops := newAppTestModel([]string{"build", "plan"}, nil)
-		m.composer.SetValue("/agent plan")
+	t.Run("agent preserves multi-word name", func(t *testing.T) {
+		m, ops := newAppTestModel([]string{"build", "code reviewer"}, nil)
+		m.composer.SetValue("/agent code reviewer")
 
 		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		m = updated.(Model)
 		runAppCmd(t, cmd)
 
-		want := protocol.SelectAgent{Name: "plan"}
+		want := protocol.SelectAgent{Name: "code reviewer"}
 		if got := receiveAppOp(t, ops); got != want {
 			t.Errorf("operation = %#v, want %#v", got, want)
 		}
@@ -376,6 +378,522 @@ func TestEscapeInterruptsRunningTurnExactlyOnceWithoutInputOwner(t *testing.T) {
 	assertNoAppOp(t, ops)
 }
 
+func TestOptionalHistoryIsBackwardCompatibleWhenOmitted(t *testing.T) {
+	m, ops := newAppTestModel(nil, nil)
+	m.providerName = "echo"
+	m.composer.SetValue("no history configured")
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	runAppCmd(t, cmd)
+
+	if got := receiveAppOp(t, ops); got != (protocol.UserInput{Text: "no history configured"}) {
+		t.Errorf("operation = %#v, want ordinary UserInput", got)
+	}
+	if m.composer.Value() != "" || m.historyPos != -1 {
+		t.Errorf("submission did not reset composer state: value=%q historyPos=%d", m.composer.Value(), m.historyPos)
+	}
+}
+
+func TestHistoryNavigationRecallsEntriesAndRestoresEmptyDraftAtNewestBoundary(t *testing.T) {
+	store := openAppHistory(t, "navigation")
+	for _, prompt := range []string{"oldest", "middle", "newest"} {
+		if err := store.Add(prompt); err != nil {
+			t.Fatalf("Add(%q) error = %v", prompt, err)
+		}
+	}
+	m, _ := newAppTestModelWithHistory(nil, nil, store)
+
+	for i, want := range []string{"newest", "middle", "oldest", "oldest"} {
+		m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyUp})
+		if got := m.composer.Value(); got != want {
+			t.Fatalf("up %d value = %q, want %q", i+1, got, want)
+		}
+	}
+	for i, want := range []string{"middle", "newest", ""} {
+		m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyDown})
+		if got := m.composer.Value(); got != want {
+			t.Fatalf("down %d value = %q, want %q", i+1, got, want)
+		}
+	}
+	if m.historyPos != -1 {
+		t.Errorf("historyPos = %d after moving past newest, want browsing exited", m.historyPos)
+	}
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	if got := m.composer.Value(); got != "" {
+		t.Errorf("down outside history changed empty draft to %q", got)
+	}
+}
+
+func TestHistoryKeysOnNonemptyDraftRemainTextareaNavigation(t *testing.T) {
+	store := openAppHistory(t, "textarea-navigation")
+	if err := store.Add("must not replace draft"); err != nil {
+		t.Fatal(err)
+	}
+	m, _ := newAppTestModelWithHistory(nil, nil, store)
+	m.setComposerValueAt("first line\nsecond line", len([]rune("first line\nsecond line")))
+
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	if got := m.composer.Value(); got != "first line\nsecond line" || m.composer.Line() != 0 {
+		t.Errorf("up replaced draft or failed textarea navigation: value=%q line=%d", got, m.composer.Line())
+	}
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	if got := m.composer.Value(); got != "first line\nsecond line" || m.composer.Line() != 1 {
+		t.Errorf("down replaced draft or failed textarea navigation: value=%q line=%d", got, m.composer.Line())
+	}
+	if m.historyPos != -1 {
+		t.Errorf("nonempty draft entered history browsing at position %d", m.historyPos)
+	}
+}
+
+func TestHistoryRecallReflowsMultilineUnicodeAndEditingExitsBrowsing(t *testing.T) {
+	store := openAppHistory(t, "unicode-layout")
+	prompt := "界界界界界界界界\nsecond 🙂 line"
+	if err := store.Add(prompt); err != nil {
+		t.Fatal(err)
+	}
+	m, _ := newAppTestModelWithHistory(nil, nil, store)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 12, Height: 20})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyUp})
+
+	if got := m.composer.Value(); got != prompt {
+		t.Fatalf("recalled value = %q, want %q", got, prompt)
+	}
+	if m.composer.Height() <= composerMinHeight || m.composer.Line() != 1 {
+		t.Errorf("recall did not safely reflow/place cursor: height=%d line=%d", m.composer.Height(), m.composer.Line())
+	}
+	_ = m.View()
+	m = typeAppText(t, m, "!")
+	if m.historyPos != -1 || !strings.HasSuffix(m.composer.Value(), "!") {
+		t.Errorf("ordinary edit did not exit browsing: value=%q historyPos=%d", m.composer.Value(), m.historyPos)
+	}
+}
+
+func TestSubmissionsPersistDisplayPromptAndStillEmitUserInput(t *testing.T) {
+	tests := []struct {
+		name        string
+		skills      []config.Skill
+		composer    string
+		wantInput   string
+		wantHistory string
+	}{
+		{name: "ordinary", composer: "  hello 界\nnext line  ", wantInput: "hello 界\nnext line", wantHistory: "hello 界\nnext line"},
+		{name: "skill", skills: []config.Skill{{Name: "review", Template: "Rendered: $ARGUMENTS"}}, composer: "/review exact invocation", wantInput: "Rendered: exact invocation", wantHistory: "/review exact invocation"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := openAppHistory(t, "submit-"+tt.name)
+			m, ops := newAppTestModelWithHistory(nil, tt.skills, store)
+			m.providerName = "echo"
+			m.composer.SetValue(tt.composer)
+
+			updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			m = updated.(Model)
+			for _, msg := range runAllAppCmds(t, cmd) {
+				m = updateApp(t, m, msg)
+			}
+			if got := receiveAppOp(t, ops); got != (protocol.UserInput{Text: tt.wantInput}) {
+				t.Errorf("operation = %#v, want UserInput %q", got, tt.wantInput)
+			}
+			if got := store.Entries(); !slices.Equal(got, []string{tt.wantHistory}) {
+				t.Errorf("history = %q, want exact display prompt %q", got, tt.wantHistory)
+			}
+			if m.composer.Value() != "" || m.historyPos != -1 || m.historyDraft != "" {
+				t.Errorf("submission did not reset history/composer state: value=%q pos=%d draft=%q", m.composer.Value(), m.historyPos, m.historyDraft)
+			}
+		})
+	}
+}
+
+func TestRapidSubmissionsEnqueueHistoryInSubmissionOrderBeforeCommandCompletion(t *testing.T) {
+	store := openAppHistory(t, "rapid-order")
+	m, ops := newAppTestModelWithHistory(nil, nil, store)
+	m.providerName = "echo"
+
+	var batches []tea.BatchMsg
+	for _, prompt := range []string{"first prompt", "second prompt"} {
+		m.composer.SetValue(prompt)
+		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m = updated.(Model)
+		msg := runAppCmd(t, cmd)
+		batch, ok := msg.(tea.BatchMsg)
+		if !ok || len(batch) != 2 {
+			t.Fatalf("submission command = %T with %#v, want send and persistence batch", msg, msg)
+		}
+		batches = append(batches, batch)
+	}
+
+	// Engine sends do not wait for either persistence completion.
+	for i, batch := range batches {
+		if msg := runAppCmd(t, batch[0]); msg != nil {
+			t.Errorf("engine send %d returned unexpected message %#v", i, msg)
+		}
+	}
+	for i, want := range []string{"first prompt", "second prompt"} {
+		if got := receiveAppOp(t, ops); got != (protocol.UserInput{Text: want}) {
+			t.Errorf("engine operation %d = %#v, want UserInput %q", i, got, want)
+		}
+	}
+
+	// Await persistence in the opposite order from submission. Acceptance order
+	// must still determine durable and in-memory history order.
+	for i := len(batches) - 1; i >= 0; i-- {
+		msg := runAppCmd(t, batches[i][1])
+		if added, ok := msg.(historyAddedMsg); !ok || added.err != nil {
+			t.Fatalf("persistence completion %d = %#v, want successful historyAddedMsg", i, msg)
+		}
+	}
+	if got, want := store.Entries(), []string{"first prompt", "second prompt"}; !slices.Equal(got, want) {
+		t.Errorf("history = %q, want submission order %q", got, want)
+	}
+}
+
+func TestHistoryFailureShowsNoticeWithoutSuppressingSubmission(t *testing.T) {
+	store := openAppHistory(t, "closed-store")
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	m, ops := newAppTestModelWithHistory(nil, nil, store)
+	m.providerName = "echo"
+	m.composer.SetValue("send despite persistence failure")
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	for _, msg := range runAllAppCmds(t, cmd) {
+		m = updateApp(t, m, msg)
+	}
+	if got := receiveAppOp(t, ops); got != (protocol.UserInput{Text: "send despite persistence failure"}) {
+		t.Errorf("operation = %#v, want submission despite history failure", got)
+	}
+	if !m.noticeErr || !strings.Contains(m.notice, "saving prompt history failed") {
+		t.Errorf("history failure notice = %q (error=%v)", m.notice, m.noticeErr)
+	}
+}
+
+func TestSubmittingRecalledHistoryResetsBrowsingState(t *testing.T) {
+	store := openAppHistory(t, "submit-recalled")
+	if err := store.Add("recalled prompt"); err != nil {
+		t.Fatal(err)
+	}
+	m, ops := newAppTestModelWithHistory(nil, nil, store)
+	m.providerName = "echo"
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	if m.historyPos < 0 {
+		t.Fatal("up did not enter history browsing")
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	for _, msg := range runAllAppCmds(t, cmd) {
+		m = updateApp(t, m, msg)
+	}
+	if got := receiveAppOp(t, ops); got != (protocol.UserInput{Text: "recalled prompt"}) {
+		t.Errorf("operation = %#v, want recalled prompt submission", got)
+	}
+	if m.historyPos != -1 || m.historyDraft != "" || m.composer.Value() != "" {
+		t.Errorf("recalled submission retained browsing state: pos=%d draft=%q value=%q", m.historyPos, m.historyDraft, m.composer.Value())
+	}
+}
+
+func TestControlKPreservesComposerClosesCompletionAndOpensPalette(t *testing.T) {
+	m, ops := newAppTestModel([]string{"build"}, nil)
+	m.providerName = "echo"
+	m.setComposerValueAt("keep this suffix", len([]rune("keep")))
+	m.completion = leadingSlashCompletion("/", 0, 1, m.commands)
+
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+	if got := m.composer.Value(); got != "keep this suffix" {
+		t.Errorf("ctrl+k applied textarea kill-to-end: composer=%q", got)
+	}
+	if m.completion != nil {
+		t.Error("ctrl+k left inline completion open")
+	}
+	if _, ok := m.modal.(*paletteModal); !ok {
+		t.Fatalf("ctrl+k modal = %T, want command palette", m.modal)
+	}
+	assertNoAppOp(t, ops)
+}
+
+func TestActiveModalOwnsControlK(t *testing.T) {
+	t.Run("other modal", func(t *testing.T) {
+		m, _ := newAppTestModel(nil, nil)
+		probe := &appProbeModal{}
+		m.modal = probe
+		m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+		if probe.keys != 1 || m.modal != probe {
+			t.Errorf("ctrl+k did not remain with active modal: keys=%d modal=%T", probe.keys, m.modal)
+		}
+	})
+	t.Run("permission modal", func(t *testing.T) {
+		m, ops := newAppTestModel(nil, nil)
+		permission := newPermissionModal(protocol.PermissionAsked{RequestID: "req", Permission: "bash"}, ops)
+		m.modal = permission
+		m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+		if m.modal != permission {
+			t.Errorf("ctrl+k replaced permission modal with %T", m.modal)
+		}
+		assertNoAppOp(t, ops)
+	})
+}
+
+func TestPermissionResolvedOnlyClosesMatchingPermissionModal(t *testing.T) {
+	t.Run("unrelated resolution leaves palette open", func(t *testing.T) {
+		m, _ := newAppTestModel(nil, nil)
+		palette := newPaletteModal(m.commands, nil, paletteAvailability{})
+		m.modal = palette
+
+		m.applyEvent(protocol.PermissionResolved{RequestID: "req-1"})
+
+		if m.modal != palette {
+			t.Fatalf("unrelated permission resolution changed palette to %T", m.modal)
+		}
+	})
+
+	t.Run("only matching permission request closes", func(t *testing.T) {
+		m, ops := newAppTestModel(nil, nil)
+		permission := newPermissionModal(protocol.PermissionAsked{RequestID: "req-2", Permission: "bash"}, ops)
+		m.modal = permission
+
+		m.applyEvent(protocol.PermissionResolved{RequestID: "req-1"})
+		if m.modal != permission {
+			t.Fatalf("req-1 resolution changed req-2 permission modal to %T", m.modal)
+		}
+		m.applyEvent(protocol.PermissionResolved{RequestID: "req-2"})
+		if m.modal != nil {
+			t.Fatalf("req-2 resolution left matching modal open as %T", m.modal)
+		}
+	})
+}
+
+func TestPaletteInvokeUsesExistingCommandBehavior(t *testing.T) {
+	t.Run("provider", func(t *testing.T) {
+		ops := make(chan protocol.Op, 8)
+		m := New(ops, make(chan protocol.Event), &auth.Store{}, nil, nil)
+		m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+		m = updateApp(t, m, paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/provider"}})
+		if view := m.View(); !strings.Contains(view, "Select provider") {
+			t.Errorf("provider palette action did not open picker:\n%s", view)
+		}
+		assertNoAppOp(t, ops)
+	})
+	t.Run("model", func(t *testing.T) {
+		m, ops := newAppTestModel(nil, nil)
+		m.providerName = "echo"
+		m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+		updated, cmd := m.Update(paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/model"}})
+		m = updated.(Model)
+		if cmd == nil || !strings.Contains(m.View(), "Select model") || !strings.Contains(m.View(), "echo") {
+			t.Errorf("model palette action did not reuse model picker behavior")
+		}
+		assertNoAppOp(t, ops)
+	})
+	t.Run("auth", func(t *testing.T) {
+		ops := make(chan protocol.Op, 8)
+		m := New(ops, make(chan protocol.Event), &auth.Store{}, nil, nil)
+		m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+		m = updateApp(t, m, paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/auth"}})
+		if !strings.Contains(m.View(), "Select provider") {
+			t.Error("auth palette action did not open auth provider status")
+		}
+		assertNoAppOp(t, ops)
+	})
+	t.Run("help", func(t *testing.T) {
+		m, ops := newAppTestModel(nil, nil)
+		m = updateApp(t, m, paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/help"}})
+		if !strings.Contains(m.notice, "commands:") {
+			t.Errorf("help palette action notice = %q", m.notice)
+		}
+		assertNoAppOp(t, ops)
+	})
+	t.Run("agent", func(t *testing.T) {
+		m, ops := newAppTestModel([]string{"build", "code reviewer"}, nil)
+		updated, cmd := m.Update(paletteInvokeMsg{Action: paletteAction{Kind: paletteActionAgent, Value: "code reviewer"}})
+		m = updated.(Model)
+		runAppCmd(t, cmd)
+		if got := receiveAppOp(t, ops); got != (protocol.SelectAgent{Name: "code reviewer"}) {
+			t.Errorf("agent operation = %#v", got)
+		}
+	})
+}
+
+func TestPaletteInsertOnlyFocusesComposerWithoutSubmissionOrHistoryWrite(t *testing.T) {
+	store := openAppHistory(t, "insert-only")
+	if err := store.Add("existing"); err != nil {
+		t.Fatal(err)
+	}
+	m, ops := newAppTestModelWithHistory(nil, []config.Skill{{Name: "review", Template: "$ARGUMENTS"}}, store)
+	m.providerName = "echo"
+	m.composer.Blur()
+	m.historyPos = 0
+	m.historyDraft = "draft"
+
+	updated, cmd := m.Update(paletteInvokeMsg{Action: paletteAction{Kind: paletteActionSkill, Value: "review"}})
+	m = updated.(Model)
+	runAppCmd(t, cmd)
+	if m.composer.Value() != "/review " || !m.composer.Focused() {
+		t.Errorf("insert-only composer value/focus = %q/%v", m.composer.Value(), m.composer.Focused())
+	}
+	if m.historyPos != -1 || m.historyDraft != "" {
+		t.Errorf("insert-only did not exit history browsing: pos=%d draft=%q", m.historyPos, m.historyDraft)
+	}
+	if got := store.Entries(); !slices.Equal(got, []string{"existing"}) {
+		t.Errorf("insert-only wrote history: %q", got)
+	}
+	assertNoAppOp(t, ops)
+}
+
+func TestControlKPaletteAvailabilityTracksProviderAndTurn(t *testing.T) {
+	tests := []struct {
+		name       string
+		provider   string
+		turn       bool
+		command    string
+		wantReason string
+	}{
+		{name: "model needs provider", command: "/model", wantReason: "select a provider first"},
+		{name: "turn disables provider", provider: "echo", turn: true, command: "/provider", wantReason: "unavailable while a turn is running"},
+		{name: "idle provider enables model", provider: "echo", command: "/model"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, _ := newAppTestModel(nil, nil)
+			m.providerName, m.turnRunning = tt.provider, tt.turn
+			m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+			palette := m.modal.(*paletteModal)
+			for _, entry := range palette.entries {
+				if entry.Label == tt.command {
+					if entry.DisabledReason != tt.wantReason {
+						t.Errorf("%s disabled reason = %q, want %q", tt.command, entry.DisabledReason, tt.wantReason)
+					}
+					return
+				}
+			}
+			t.Fatalf("palette omitted %s", tt.command)
+		})
+	}
+}
+
+func TestOpenPaletteRefreshesWhenTurnStartsAndKeepsHelpAvailable(t *testing.T) {
+	m, ops := newAppTestModel([]string{"build"}, []config.Skill{{Name: "review", Description: "review code"}})
+	m.providerName = "echo"
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+	palette := m.modal.(*paletteModal)
+
+	m.applyEvent(protocol.TurnStarted{})
+	if m.modal != palette {
+		t.Fatalf("turn start replaced open palette with %T", m.modal)
+	}
+
+	for _, label := range []string{"/provider", "/model", "/auth", "/agent build", "/review"} {
+		copy := *palette
+		assertPaletteDisabled(t, &copy, label, "unavailable while a turn is running")
+	}
+	help := *palette
+	assertPaletteInvoke(t, &help, "/help", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/help"}})
+	assertNoAppOp(t, ops)
+}
+
+func TestOpenPaletteReenablesRestrictedEntriesWhenTurnCompletes(t *testing.T) {
+	m, ops := newAppTestModel([]string{"build"}, []config.Skill{{Name: "review", Description: "review code"}})
+	m.providerName = "echo"
+	m.turnRunning = true
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+	palette := m.modal.(*paletteModal)
+
+	m.applyEvent(protocol.TurnCompleted{})
+	if m.modal != palette {
+		t.Fatalf("turn completion replaced open palette with %T", m.modal)
+	}
+	for _, entry := range palette.entries {
+		if entry.Label == "/help" {
+			continue
+		}
+		copy := *palette
+		assertPaletteInvoke(t, &copy, entry.Label, paletteInvokeMsg{Action: entry.Action})
+	}
+	assertNoAppOp(t, ops)
+}
+
+func TestOpenPaletteRefreshesProviderDependentEntriesAfterModelSelected(t *testing.T) {
+	m, ops := newAppTestModel(nil, []config.Skill{{Name: "review", Description: "review code"}})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+	palette := m.modal.(*paletteModal)
+	for _, label := range []string{"/model", "/review"} {
+		copy := *palette
+		assertPaletteDisabled(t, &copy, label, "select a provider first")
+	}
+
+	m.applyEvent(protocol.ModelSelected{Provider: "echo", Model: "test-model"})
+	if m.modal != palette {
+		t.Fatalf("model selection replaced open palette with %T", m.modal)
+	}
+	for _, label := range []string{"/model", "/review"} {
+		copy := *palette
+		var want paletteInvokeMsg
+		if label == "/model" {
+			want.Action = paletteAction{Kind: paletteActionBuiltin, Value: "/model"}
+		} else {
+			want.Action = paletteAction{Kind: paletteActionSkill, Value: "review"}
+		}
+		assertPaletteInvoke(t, &copy, label, want)
+	}
+	assertNoAppOp(t, ops)
+}
+
+func TestConstructedRestrictedPaletteInvokeIsRejectedAgainstCurrentAvailability(t *testing.T) {
+	tests := []struct {
+		name       string
+		provider   string
+		turn       bool
+		action     paletteAction
+		wantNotice string
+	}{
+		{
+			name:       "agent while turn is running",
+			provider:   "echo",
+			turn:       true,
+			action:     paletteAction{Kind: paletteActionAgent, Value: "build"},
+			wantNotice: "unavailable while a turn is running",
+		},
+		{
+			name:       "model without provider",
+			action:     paletteAction{Kind: paletteActionBuiltin, Value: "/model"},
+			wantNotice: "select a provider first",
+		},
+		{
+			name:       "skill without provider",
+			action:     paletteAction{Kind: paletteActionSkill, Value: "review"},
+			wantNotice: "select a provider first",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, ops := newAppTestModel([]string{"build"}, []config.Skill{{Name: "review", Description: "review code"}})
+			m.providerName, m.turnRunning = tt.provider, tt.turn
+			m.composer.SetValue("unchanged draft")
+			m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+			palette := m.modal
+			focused := m.composer.Focused()
+
+			updated, cmd := m.Update(paletteInvokeMsg{Action: tt.action})
+			m = updated.(Model)
+			if cmd != nil {
+				t.Fatal("restricted constructed invoke returned a command")
+			}
+			if m.modal != palette {
+				t.Errorf("restricted constructed invoke changed modal from %T to %T", palette, m.modal)
+			}
+			if m.composer.Value() != "unchanged draft" || m.composer.Focused() != focused {
+				t.Errorf("restricted constructed invoke changed composer to %q/focused=%v", m.composer.Value(), m.composer.Focused())
+			}
+			if m.notice != tt.wantNotice || !m.noticeErr {
+				t.Errorf("restricted constructed invoke notice = %q/error=%v, want %q/error=true", m.notice, m.noticeErr, tt.wantNotice)
+			}
+			assertNoAppOp(t, ops)
+		})
+	}
+}
+
 type appProbeModal struct {
 	keys int
 }
@@ -391,6 +909,24 @@ func newAppTestModel(agents []string, skills []config.Skill) (Model, chan protoc
 	ops := make(chan protocol.Op, 8)
 	events := make(chan protocol.Event)
 	return New(ops, events, nil, agents, skills), ops
+}
+
+func newAppTestModelWithHistory(agents []string, skills []config.Skill, store *history.Store) (Model, chan protocol.Op) {
+	ops := make(chan protocol.Op, 8)
+	events := make(chan protocol.Event)
+	return New(ops, events, nil, agents, skills, Options{History: store}), ops
+}
+
+func openAppHistory(t *testing.T, project string) *history.Store {
+	t.Helper()
+	store, err := history.Open(t.TempDir(), project)
+	if err != nil {
+		t.Fatalf("history.Open() error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = store.Close()
+	})
+	return store
 }
 
 func updateApp(t *testing.T, m Model, msg tea.Msg) Model {
@@ -418,6 +954,23 @@ func runAppCmd(t *testing.T, cmd tea.Cmd) tea.Msg {
 		t.Fatalf("tea command did not complete within %s", appCmdTimeout)
 		return nil
 	}
+}
+
+func runAllAppCmds(t *testing.T, cmd tea.Cmd) []tea.Msg {
+	t.Helper()
+	if cmd == nil {
+		return nil
+	}
+	msg := runAppCmd(t, cmd)
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		return []tea.Msg{msg}
+	}
+	var messages []tea.Msg
+	for _, nested := range batch {
+		messages = append(messages, runAllAppCmds(t, nested)...)
+	}
+	return messages
 }
 
 func receiveAppOp(t *testing.T, ops <-chan protocol.Op) protocol.Op {

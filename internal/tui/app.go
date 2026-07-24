@@ -15,6 +15,7 @@ import (
 
 	"github.com/jonathanung/strike-cli/internal/auth"
 	"github.com/jonathanung/strike-cli/internal/config"
+	"github.com/jonathanung/strike-cli/internal/history"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
@@ -38,6 +39,14 @@ type defaultsSavedMsg struct {
 	err  error
 }
 
+type historyAddedMsg struct {
+	err error
+}
+
+type Options struct {
+	History *history.Store
+}
+
 type Model struct {
 	ops    chan<- protocol.Op
 	events <-chan protocol.Event
@@ -51,11 +60,15 @@ type Model struct {
 	toolByID map[string]*toolCell
 	modal    modal
 
-	viewport   viewport.Model
-	composer   textarea.Model
-	completion *completionState
-	commands   []commandSpec
-	spin       spinner.Model
+	viewport     viewport.Model
+	composer     textarea.Model
+	completion   *completionState
+	commands     []commandSpec
+	spin         spinner.Model
+	history      *history.Store
+	entries      []string
+	historyPos   int
+	historyDraft string
 
 	providerName string
 	modelName    string
@@ -70,7 +83,7 @@ type Model struct {
 	ready        bool
 }
 
-func New(ops chan<- protocol.Op, events <-chan protocol.Event, authStore *auth.Store, agents []string, skills []config.Skill) Model {
+func New(ops chan<- protocol.Op, events <-chan protocol.Event, authStore *auth.Store, agents []string, skills []config.Skill, options ...Options) Model {
 	ta := textarea.New()
 	ta.Placeholder = "Ask strike anything… (/provider to pick a model, enter to send)"
 	ta.Prompt = "┃ "
@@ -82,18 +95,26 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, authStore *auth.S
 	sp := spinner.New()
 	sp.Spinner = spinner.MiniDot
 
-	return Model{
-		ops:       ops,
-		events:    events,
-		authStore: authStore,
-		agents:    agents,
-		skills:    skills,
-		commands:  commandCatalog(skills),
-		th:        theme.Default(),
-		toolByID:  map[string]*toolCell{},
-		composer:  ta,
-		spin:      sp,
+	m := Model{
+		ops:        ops,
+		events:     events,
+		authStore:  authStore,
+		agents:     agents,
+		skills:     skills,
+		commands:   commandCatalog(skills),
+		th:         theme.Default(),
+		toolByID:   map[string]*toolCell{},
+		composer:   ta,
+		spin:       sp,
+		historyPos: -1,
 	}
+	for _, option := range options {
+		if option.History != nil {
+			m.history = option.History
+			m.entries = option.History.Entries()
+		}
+	}
+	return m
 }
 
 func (m Model) Init() tea.Cmd {
@@ -164,6 +185,49 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case historyAddedMsg:
+		if msg.err != nil {
+			m.setNotice("saving prompt history failed: "+msg.err.Error(), true)
+		} else if m.history != nil {
+			m.entries = m.history.Entries()
+		}
+		return m, nil
+
+	case paletteInvokeMsg:
+		entry, ok := m.currentPaletteEntry(msg.Action)
+		if !ok {
+			m.refreshOpenPalette()
+			m.setNotice("palette action is no longer available", true)
+			return m, nil
+		}
+		if entry.DisabledReason != "" {
+			m.refreshOpenPalette()
+			m.setNotice(entry.DisabledReason, true)
+			return m, nil
+		}
+		if _, ok := m.modal.(*paletteModal); ok {
+			m.modal = nil
+		}
+		switch msg.Action.Kind {
+		case paletteActionBuiltin:
+			return m.handleCommand(msg.Action.Value)
+		case paletteActionAgent:
+			m.resetComposer()
+			ops, name := m.ops, msg.Action.Value
+			return m, func() tea.Msg {
+				ops <- protocol.SelectAgent{Name: name}
+				return nil
+			}
+		case paletteActionSkill:
+			m.resetHistoryBrowsing()
+			text := "/" + msg.Action.Value + " "
+			m.setComposerValueAt(text, len([]rune(text)))
+			m.recomputeCompletion()
+			m.reflow()
+			return m, m.composer.Focus()
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
@@ -173,6 +237,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.modal, cmd = m.modal.update(msg)
 			m.reflow()
 			return m, cmd
+		}
+		if msg.String() == "ctrl+k" {
+			m.completion = nil
+			m.modal = newPaletteModal(m.commands, m.agents, m.currentPaletteAvailability())
+			m.reflow()
+			return m, nil
 		}
 		if m.completion != nil {
 			switch msg.String() {
@@ -200,8 +270,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.updateComposer(msg)
 			}
 		}
+		if m.handleHistoryKey(msg.String()) {
+			return m, nil
+		}
 		switch msg.String() {
 		case "alt+enter":
+			m.resetHistoryBrowsing()
 			m.composer.InsertString("\n")
 			m.recomputeCompletion()
 			m.reflow()
@@ -218,13 +292,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.setNotice("No model selected — use /provider <anthropic|openai|xai|echo> [model]", true)
 				return m, nil // keep the typed prompt in the composer
 			}
-			m.resetComposer()
-			m.clearNotice()
-			ops := m.ops
-			return m, func() tea.Msg {
-				ops <- protocol.UserInput{Text: text}
-				return nil
-			}
+			return m.submit(protocol.UserInput{Text: text}, text)
 		case "ctrl+d":
 			// Persist the current provider/model/agent as global defaults.
 			if m.providerName == "" {
@@ -279,14 +347,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateComposer(msg tea.Msg) (tea.Model, tea.Cmd) {
+	before := m.composer.Value()
 	var cmd tea.Cmd
 	m.composer, cmd = m.composer.Update(msg)
+	if m.historyPos >= 0 && m.composer.Value() != before {
+		m.resetHistoryBrowsing()
+	}
 	m.recomputeCompletion()
 	m.reflow()
 	return m, cmd
 }
 
 func (m *Model) recomputeCompletion() {
+	if m.historyPos >= 0 {
+		m.completion = nil
+		return
+	}
 	line := m.composer.Line()
 	info := m.composer.LineInfo()
 	col := info.StartColumn + info.ColumnOffset
@@ -337,7 +413,51 @@ func (m *Model) setComposerValueAt(value string, offset int) {
 func (m *Model) resetComposer() {
 	m.composer.Reset()
 	m.completion = nil
+	m.resetHistoryBrowsing()
 	m.reflow()
+}
+
+func (m *Model) handleHistoryKey(key string) bool {
+	if m.historyPos >= 0 {
+		switch key {
+		case "up":
+			if m.historyPos > 0 {
+				m.historyPos--
+			}
+			m.recallHistory(m.entries[m.historyPos])
+			return true
+		case "down":
+			if m.historyPos < len(m.entries)-1 {
+				m.historyPos++
+				m.recallHistory(m.entries[m.historyPos])
+			} else {
+				draft := m.historyDraft
+				m.resetHistoryBrowsing()
+				m.setComposerValueAt(draft, len([]rune(draft)))
+				m.recomputeCompletion()
+				m.reflow()
+			}
+			return true
+		}
+	}
+	if key != "up" || m.composer.Value() != "" || len(m.entries) == 0 {
+		return false
+	}
+	m.historyDraft = m.composer.Value()
+	m.historyPos = len(m.entries) - 1
+	m.recallHistory(m.entries[m.historyPos])
+	return true
+}
+
+func (m *Model) recallHistory(prompt string) {
+	m.setComposerValueAt(prompt, len([]rune(prompt)))
+	m.recomputeCompletion()
+	m.reflow()
+}
+
+func (m *Model) resetHistoryBrowsing() {
+	m.historyPos = -1
+	m.historyDraft = ""
 }
 
 func (m *Model) reflow() {
@@ -386,6 +506,7 @@ func (m *Model) applyEvent(ev protocol.Event) {
 		m.cells = append(m.cells, &userCell{text: ev.Text})
 	case protocol.TurnStarted:
 		m.turnRunning = true
+		m.refreshOpenPalette()
 	case protocol.TextDelta:
 		if last, ok := lastCell[*assistantCell](m.cells); ok {
 			last.text += ev.Text
@@ -403,12 +524,16 @@ func (m *Model) applyEvent(ev protocol.Event) {
 	case protocol.PermissionAsked:
 		m.modal = newPermissionModal(ev, m.ops)
 	case protocol.PermissionResolved:
-		m.modal = nil
+		if modal, ok := m.modal.(*permissionModal); ok && modal.req.RequestID == ev.RequestID {
+			m.modal = nil
+		}
 	case protocol.TurnCompleted:
 		m.turnRunning = false
+		m.refreshOpenPalette()
 	case protocol.ModelSelected:
 		m.providerName, m.modelName = ev.Provider, ev.Model
 		m.setNotice("model: "+ev.Provider+"/"+ev.Model, false)
+		m.refreshOpenPalette()
 	case protocol.AgentSelected:
 		m.agentName = ev.Name
 	case protocol.EngineError:
@@ -420,6 +545,28 @@ func (m *Model) applyEvent(ev protocol.Event) {
 			m.setNotice(ev.Message, true)
 		}
 	}
+}
+
+func (m Model) currentPaletteAvailability() paletteAvailability {
+	return paletteAvailability{
+		HasProvider: m.providerName != "",
+		TurnRunning: m.turnRunning,
+	}
+}
+
+func (m *Model) refreshOpenPalette() {
+	if palette, ok := m.modal.(*paletteModal); ok {
+		palette.refresh(buildPaletteEntries(m.commands, m.agents, m.currentPaletteAvailability()))
+	}
+}
+
+func (m Model) currentPaletteEntry(action paletteAction) (paletteEntry, bool) {
+	for _, entry := range buildPaletteEntries(m.commands, m.agents, m.currentPaletteAvailability()) {
+		if entry.Action == action {
+			return entry, true
+		}
+	}
+	return paletteEntry{}, false
 }
 
 // handleCommand processes slash commands locally; they never reach the model.
@@ -460,7 +607,8 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.resetComposer()
-		ops, name := m.ops, fields[1]
+		ops := m.ops
+		name := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(text), fields[0]))
 		return m, func() tea.Msg {
 			ops <- protocol.SelectAgent{Name: name}
 			return nil
@@ -483,17 +631,30 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 			}
 			args := strings.TrimSpace(strings.TrimPrefix(text, fields[0]))
 			prompt := skill.Render(args)
-			m.resetComposer()
-			m.clearNotice()
-			ops := m.ops
-			return m, func() tea.Msg {
-				ops <- protocol.UserInput{Text: prompt}
-				return nil
-			}
+			return m.submit(protocol.UserInput{Text: prompt}, text)
 		}
 		m.setNotice("unknown command "+fields[0]+" — try /help", true)
 		return m, nil
 	}
+}
+
+func (m Model) submit(op protocol.UserInput, displayPrompt string) (tea.Model, tea.Cmd) {
+	m.resetComposer()
+	m.clearNotice()
+	ops := m.ops
+	send := func() tea.Msg {
+		ops <- op
+		return nil
+	}
+	if m.history == nil {
+		return m, send
+	}
+	done := m.history.Enqueue(displayPrompt)
+	persist := func() tea.Msg {
+		err := <-done
+		return historyAddedMsg{err: err}
+	}
+	return m, tea.Batch(send, persist)
 }
 
 func (m Model) sendSelect(op protocol.SelectModel) (tea.Model, tea.Cmd) {
