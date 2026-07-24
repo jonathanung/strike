@@ -19,6 +19,8 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 		TurnCompleted{Correlation: corr, StopReason: "end_turn"},
 		ModelSelected{Correlation: corr, Provider: "echo", Model: "echo"},
 		AgentSelected{Correlation: corr, Name: "build"},
+		EffortSelected{Correlation: corr, Level: EffortXHigh},
+		FastSelected{Correlation: corr, Enabled: true},
 		EngineError{Correlation: corr, Message: "boom"},
 	}
 	for _, want := range events {
@@ -41,6 +43,33 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 		if string(wantJSON) != string(gotJSON) {
 			t.Errorf("%s: got %s, want %s", env.Type, gotJSON, wantJSON)
 		}
+	}
+}
+
+func TestFastSelectedJSONIsFlatAndOptional(t *testing.T) {
+	b, err := json.Marshal(FastSelected{
+		Correlation: Correlation{SessionID: "session-1", TurnID: "turn-1", ProviderRequestID: "provider-1"},
+		Enabled:     true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]string{
+		"sessionId":         `"session-1"`,
+		"turnId":            `"turn-1"`,
+		"providerRequestId": `"provider-1"`,
+		"enabled":           `true`,
+	} {
+		if string(got[key]) != want {
+			t.Errorf("%s = %s, want %s; JSON: %s", key, got[key], want, b)
+		}
+	}
+	if _, ok := got["correlation"]; ok {
+		t.Errorf("correlation must not be nested: %s", b)
 	}
 }
 
@@ -109,6 +138,28 @@ func TestDecodeLiteralLegacyEnvelopeHasEmptyCorrelation(t *testing.T) {
 	}
 }
 
+func TestDecodeLiteralLegacyFastEnvelopeHasEmptyCorrelation(t *testing.T) {
+	literal := `{"type":"fast.selected","time":"2020-01-01T00:00:00Z","data":{"enabled":true}}`
+	var env Envelope
+	if err := json.Unmarshal([]byte(literal), &env); err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := env.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := decoded.(FastSelected)
+	if !ok {
+		t.Fatalf("decoded event = %T, want FastSelected", decoded)
+	}
+	if got.Correlation != (Correlation{}) {
+		t.Errorf("legacy correlation = %#v, want empty", got.Correlation)
+	}
+	if !got.Enabled {
+		t.Error("enabled = false, want true")
+	}
+}
+
 func TestWrapUnknownEvent(t *testing.T) {
 	type unknown struct{}
 	// unknown does not implement Event; use a typed nil Event via empty interface cast workaround
@@ -140,6 +191,8 @@ func TestEventTypeCoverage(t *testing.T) {
 		"turn.completed":      TurnCompleted{},
 		"model.selected":      ModelSelected{},
 		"agent.selected":      AgentSelected{},
+		"effort.selected":     EffortSelected{},
+		"fast.selected":       FastSelected{},
 		"engine.error":        EngineError{},
 	}
 	for typ, ev := range want {

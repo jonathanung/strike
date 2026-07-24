@@ -16,6 +16,7 @@ import (
 type cliOptions struct {
 	provider                   string
 	model                      string
+	effort                     string
 	dangerouslySkipPermissions bool
 	providerSet                bool
 }
@@ -42,6 +43,14 @@ var optionSpecs = []optionSpec{
 		description: "model id; overrides config",
 		register: func(fs *flag.FlagSet, opts *cliOptions) {
 			fs.StringVar(&opts.model, "model", "", "")
+		},
+	},
+	{
+		names:       []string{"effort"},
+		valueName:   "level",
+		description: "reasoning effort (off|low|medium|high|xhigh|max); overrides config",
+		register: func(fs *flag.FlagSet, opts *cliOptions) {
+			fs.StringVar(&opts.effort, "effort", "", "")
 		},
 	},
 	{

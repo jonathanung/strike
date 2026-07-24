@@ -23,6 +23,9 @@ type BearerSource = func(ctx context.Context) (string, error)
 type Provider struct {
 	base.Client
 	baseURL string
+	// priorityTier is true for the OpenAI platform API, which accepts
+	// service_tier=priority. xAI and other OpenAI-compatible hosts do not.
+	priorityTier bool
 }
 
 func New(name, baseURL string, bearer BearerSource) *Provider {
@@ -37,7 +40,9 @@ func New(name, baseURL string, bearer BearerSource) *Provider {
 }
 
 func NewOpenAI(bearer BearerSource) *Provider {
-	return New("openai", "https://api.openai.com/v1", bearer)
+	p := New("openai", "https://api.openai.com/v1", bearer)
+	p.priorityTier = true
+	return p
 }
 
 func NewXAI(bearer BearerSource) *Provider {
@@ -47,9 +52,11 @@ func NewXAI(bearer BearerSource) *Provider {
 // Wire types for the chat completions API.
 
 type chatRequest struct {
-	Model    string        `json:"model"`
-	Messages []chatMessage `json:"messages"`
-	Tools    []chatTool    `json:"tools,omitempty"`
+	Model           string        `json:"model"`
+	Messages        []chatMessage `json:"messages"`
+	Tools           []chatTool    `json:"tools,omitempty"`
+	ReasoningEffort string        `json:"reasoning_effort,omitempty"`
+	ServiceTier     string        `json:"service_tier,omitempty"`
 }
 
 type chatMessage struct {
@@ -89,7 +96,7 @@ type chatResponse struct {
 }
 
 func (p *Provider) Stream(ctx context.Context, req provider.Request) (<-chan provider.StreamEvent, error) {
-	chatReq := toChatRequest(req)
+	chatReq := toChatRequest(req, p.priorityTier)
 	return base.Stream(func(ch chan<- provider.StreamEvent) {
 		var resp chatResponse
 		if err := p.PostJSON(ctx, p.baseURL+"/chat/completions", chatReq, &resp); err != nil {
@@ -119,8 +126,11 @@ func (p *Provider) Stream(ctx context.Context, req provider.Request) (<-chan pro
 	}), nil
 }
 
-func toChatRequest(req provider.Request) chatRequest {
-	out := chatRequest{Model: req.Model}
+func toChatRequest(req provider.Request, priorityTier bool) chatRequest {
+	out := chatRequest{Model: req.Model, ReasoningEffort: base.OpenAIEffort(req.Effort)}
+	if req.Priority && priorityTier {
+		out.ServiceTier = "priority"
+	}
 	if req.System != "" {
 		out.Messages = append(out.Messages, chatMessage{Role: "system", Content: req.System})
 	}

@@ -7,12 +7,14 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+
+	"github.com/jonathanung/strike-cli/internal/protocol"
 )
 
 // SetGlobalDefaults persists non-empty fields into ~/.strike/config,
 // creating it if needed. Fields passed as "" are left unchanged, and
 // unrelated config (permissions, systemPrompt) is preserved.
-func SetGlobalDefaults(provider, model, agent string) error {
+func SetGlobalDefaults(provider, model, agent string, effort protocol.Effort) error {
 	path := GlobalPath()
 	if path == "" {
 		return fmt.Errorf("cannot locate home directory")
@@ -38,6 +40,13 @@ func SetGlobalDefaults(provider, model, agent string) error {
 	}
 	if agent != "" {
 		cfg.DefaultAgent = agent
+	}
+	if effort != "" {
+		parsed, ok := protocol.ParseEffort(string(effort))
+		if !ok {
+			return fmt.Errorf("unknown effort %q", effort)
+		}
+		cfg.Effort = parsed
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err

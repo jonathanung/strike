@@ -33,6 +33,12 @@ strike launches without any provider configured. Pick one inside the TUI:
                                # provider (live models.dev catalog, cached
                                # 24h; type to filter)
 /model grok-4.5                # direct switch on the current provider
+/effort                        # centered picker for reasoning effort
+/effort xhigh                  # off | low | medium | high | xhigh | max
+/fast                          # toggle OpenAI priority tier (~2×, lower
+                               # latency). Sticky session preference; no-op
+                               # on Anthropic, xAI, ChatGPT subscription, or
+                               # models without a fast mode. /fast on|off
 /auth                          # same picker as /provider
 /auth openai                   # OAuth login in the browser (async — the TUI
                                # keeps working; result shows in the notice line)
@@ -54,10 +60,12 @@ export ANTHROPIC_API_KEY=sk-ant-…   # or: strike auth login anthropic
 ./strike --provider <provider>       # anthropic, openai, xai, or echo;
                                     # fails loudly if no credentials
 ./strike --model <model>             # pre-select a model
+./strike --effort <level>            # off, low, medium, high, xhigh, or max
 ```
 
-`--provider <provider>` and `--model <model>` may be combined. To bypass
-permission checks for one invocation, use `--dangerously-skip-permissions`.
+`--provider <provider>`, `--model <model>`, and `--effort <level>` may be
+combined. To bypass permission checks for one invocation, use
+`--dangerously-skip-permissions`.
 **Warning:** this allows all tool calls without asks or denies. It applies
 only to that process invocation, does not persist config or permission rules,
 and is visibly marked as dangerous mode in the TUI. Run `strike --help` for
@@ -159,6 +167,7 @@ JSON:
 {
   "provider": "anthropic",
   "model": "claude-sonnet-5",
+  "effort": "high",
   "defaultAgent": "build",
   "permissions": [
     { "permission": "bash", "pattern": "go *", "action": "allow" },
@@ -171,8 +180,31 @@ Rules concatenate across layers; the last matching rule wins, so project
 config overrides global, and session "always" grants override both.
 
 **ctrl+d saves defaults**: on the main screen it persists the current
-provider/model/agent to `~/.strike/config`; in the provider picker it saves
-the highlighted provider; in the model picker it saves provider + model.
+provider/model/agent/effort to `~/.strike/config`; in the provider picker it
+saves the highlighted provider; in the model picker it saves provider + model;
+in the effort picker it saves the highlighted level.
+
+### Reasoning effort
+
+`/effort` sets how much internal reasoning the model spends before answering.
+The ladder is normalized across vendors and each adapter maps it to its own
+wire fields — Anthropic to adaptive thinking plus `output_config.effort`, the
+OpenAI family to a `reasoning_effort` string. With no level set, strike sends
+no reasoning fields at all and each provider's own default applies.
+
+The two ends of the ladder are requests, not guarantees, because the vendor
+ladders differ in length: `off` disables thinking outright on Anthropic but
+floors at `minimal` on the OpenAI family (which has no zero setting), and
+`xhigh`/`max` clamp down to `high` there for the same reason.
+
+| Level | Meaning |
+|---|---|
+| `off` | least reasoning the provider allows — fastest and cheapest |
+| `low` | minimal reasoning for short, scoped tasks |
+| `medium` | balanced reasoning for routine work |
+| `high` | thorough reasoning — the provider default |
+| `xhigh` | deeper reasoning, best for coding and agentic work |
+| `max` | maximum reasoning when correctness beats cost |
 
 ## Agents & skills
 
@@ -180,7 +212,7 @@ Both `.strike` roots (global and project) can hold `agents/` and `skills/`
 folders of markdown files; project files override same-named global ones.
 
 **Agents** (`agents/*.md`) are personas — a system prompt with optional
-provider/model pins. The built-in **build** agent is the default (define
+provider/model/effort pins. The built-in **build** agent is the default (define
 your own `build.md` to replace it). **Tab cycles agents**; `/agent [name]`
 lists or selects; the active agent shows in the status bar.
 
@@ -189,6 +221,7 @@ lists or selects; the active agent shows in the status bar.
 description: reviews diffs for correctness
 provider: openai
 model: gpt-5.5
+effort: xhigh
 ---
 You are a meticulous code reviewer. Focus on correctness…
 ```

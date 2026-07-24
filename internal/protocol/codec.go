@@ -36,6 +36,10 @@ func eventType(ev Event) string {
 		return "model.selected"
 	case AgentSelected:
 		return "agent.selected"
+	case EffortSelected:
+		return "effort.selected"
+	case FastSelected:
+		return "fast.selected"
 	case EngineError:
 		return "engine.error"
 	default:
@@ -80,6 +84,10 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &ModelSelected{}
 	case "agent.selected":
 		ev = &AgentSelected{}
+	case "effort.selected":
+		ev = &EffortSelected{}
+	case "fast.selected":
+		ev = &FastSelected{}
 	case "engine.error":
 		ev = &EngineError{}
 	default:
@@ -112,6 +120,10 @@ func deref(ev Event) Event {
 	case *ModelSelected:
 		return *v
 	case *AgentSelected:
+		return *v
+	case *EffortSelected:
+		return *v
+	case *FastSelected:
 		return *v
 	case *EngineError:
 		return *v

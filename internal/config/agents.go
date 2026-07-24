@@ -8,15 +8,18 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/jonathanung/strike-cli/internal/protocol"
 )
 
-// Agent is a named persona: a system prompt with optional provider/model
-// pins. Defined as markdown files with frontmatter in agents/ folders:
+// Agent is a named persona: a system prompt with optional provider/model/
+// effort pins. Defined as markdown files with frontmatter in agents/ folders:
 //
 //	---
 //	description: reviews code for correctness
 //	model: gpt-5.5
 //	provider: openai
+//	effort: high
 //	---
 //	You are a meticulous code reviewer...
 //
@@ -26,6 +29,7 @@ type Agent struct {
 	Description string
 	Provider    string
 	Model       string
+	Effort      protocol.Effort
 	Prompt      string
 }
 
@@ -41,8 +45,10 @@ type Skill struct {
 var reservedSkillNames = map[string]struct{}{
 	"provider": {},
 	"model":    {},
+	"effort":   {},
 	"auth":     {},
 	"agent":    {},
+	"fast":     {},
 	"help":     {},
 }
 
@@ -128,6 +134,10 @@ func LoadAgentsWithError(workDir string) ([]Agent, error) {
 			if err := ValidateAgentName(name); err != nil {
 				return nil, fmt.Errorf("load agent %s: %w", path, err)
 			}
+			effort, ok := protocol.ParseEffort(meta["effort"])
+			if !ok {
+				return nil, fmt.Errorf("load agent %s: unknown effort %q", path, meta["effort"])
+			}
 			if _, exists := byName[name]; !exists {
 				order = append(order, name)
 			}
@@ -136,6 +146,7 @@ func LoadAgentsWithError(workDir string) ([]Agent, error) {
 				Description: meta["description"],
 				Provider:    meta["provider"],
 				Model:       meta["model"],
+				Effort:      effort,
 				Prompt:      body,
 			}
 		}

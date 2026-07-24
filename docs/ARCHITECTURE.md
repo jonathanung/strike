@@ -12,10 +12,10 @@ cmd/strike/wire.go (run) — composition root
 ├── builds internal/engine, then reads/writes it on two channels:
 │     Ops()    chan<- protocol.Op     ◄── internal/tui submits UserInput,
 │                                          PermissionReply, Interrupt,
-│                                          SelectModel, SelectAgent
+│                                          SelectModel, SelectAgent, SetEffort
 │     Events() <-chan protocol.Event  ──► internal/tui renders TextDelta,
 │                                          ToolCallBegin/End, PermissionAsked,
-│                                          TurnCompleted, ModelSelected, …
+│                                          TurnCompleted, ModelSelected, EffortSelected, …
 │
 ├── tees every Event through internal/session before it reaches the TUI:
 │     for ev := range eng.Events() { _ = store.Append(ev); events <- ev }

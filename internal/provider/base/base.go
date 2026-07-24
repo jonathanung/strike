@@ -148,3 +148,25 @@ func Stream(fn func(ch chan<- provider.StreamEvent)) <-chan provider.StreamEvent
 func Fail(ch chan<- provider.StreamEvent, err error) {
 	ch <- provider.StreamEvent{Type: provider.EventError, Err: err}
 }
+
+// OpenAIEffort spells the normalized reasoning dial the way the OpenAI family
+// accepts it — one string, shared by chat-completions (reasoning_effort) and
+// the Responses API (reasoning.effort). The vendor ladder is shorter at both
+// ends, so this mapping is deliberately lossy: it tops out at "high", so
+// EffortXHigh and EffortMax clamp down, and it has no zero setting, so
+// EffortOff floors at "minimal" rather than truly disabling reasoning the way
+// the Anthropic adapter can. An empty result means "omit the field".
+func OpenAIEffort(effort provider.Effort) string {
+	switch effort {
+	case provider.EffortOff:
+		return "minimal"
+	case provider.EffortLow:
+		return "low"
+	case provider.EffortMedium:
+		return "medium"
+	case provider.EffortHigh, provider.EffortXHigh, provider.EffortMax:
+		return "high"
+	default:
+		return ""
+	}
+}

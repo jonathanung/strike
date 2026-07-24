@@ -150,6 +150,15 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 	if opts.model != "" {
 		cfg.Model = opts.model
 	}
+	// An explicit --effort must be a level we can actually send; a bad one is
+	// a startup error rather than a silent fall-through to the default.
+	if opts.effort != "" {
+		level, ok := protocol.ParseEffort(opts.effort)
+		if !ok || level == protocol.EffortDefault {
+			return fmt.Errorf("unknown effort %q (want off, low, medium, high, xhigh, or max)", opts.effort)
+		}
+		cfg.Effort = level
+	}
 
 	authStore, err := auth.OpenStore(auth.DefaultPath())
 	if err != nil {
@@ -252,6 +261,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 		WorkDir:         workDir,
 		InitialProvider: cfg.Provider,
 		InitialModel:    cfg.Model,
+		InitialEffort:   cfg.Effort,
 		Agents:          agents,
 		InitialAgent:    cfg.DefaultAgent,
 		Rules:           permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),

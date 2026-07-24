@@ -65,15 +65,20 @@ func chatGPTAuth(source TokenSource) base.AuthFunc {
 // Responses API wire types (the subset we use).
 
 type responsesRequest struct {
-	Model             string         `json:"model"`
-	Instructions      string         `json:"instructions,omitempty"`
-	Input             []inputItem    `json:"input"`
-	Tools             []responseTool `json:"tools,omitempty"`
-	ToolChoice        string         `json:"tool_choice"`
-	ParallelToolCalls bool           `json:"parallel_tool_calls"`
-	Store             bool           `json:"store"`
-	Stream            bool           `json:"stream"`
-	Include           []string       `json:"include"`
+	Model             string           `json:"model"`
+	Instructions      string           `json:"instructions,omitempty"`
+	Input             []inputItem      `json:"input"`
+	Tools             []responseTool   `json:"tools,omitempty"`
+	ToolChoice        string           `json:"tool_choice"`
+	ParallelToolCalls bool             `json:"parallel_tool_calls"`
+	Store             bool             `json:"store"`
+	Stream            bool             `json:"stream"`
+	Include           []string         `json:"include"`
+	Reasoning         *reasoningConfig `json:"reasoning,omitempty"`
+}
+
+type reasoningConfig struct {
+	Effort string `json:"effort,omitempty"`
 }
 
 type inputItem struct {
@@ -194,6 +199,9 @@ func toResponsesRequest(req provider.Request) responsesRequest {
 		Store:        false,
 		Stream:       true,
 		Include:      []string{},
+	}
+	if effort := base.OpenAIEffort(req.Effort); effort != "" {
+		out.Reasoning = &reasoningConfig{Effort: effort}
 	}
 	for _, t := range req.Tools {
 		out.Tools = append(out.Tools, responseTool{

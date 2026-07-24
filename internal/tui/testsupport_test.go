@@ -127,6 +127,7 @@ type savedDefaults struct {
 	provider string
 	model    string
 	agent    string
+	effort   string
 }
 
 type fakeSettings struct {
@@ -134,8 +135,8 @@ type fakeSettings struct {
 	err   error
 }
 
-func (s *fakeSettings) SaveDefaults(provider, model, agent string) error {
-	s.saved = append(s.saved, savedDefaults{provider: provider, model: model, agent: agent})
+func (s *fakeSettings) SaveDefaults(provider, model, agent, effort string) error {
+	s.saved = append(s.saved, savedDefaults{provider: provider, model: model, agent: agent, effort: effort})
 	return s.err
 }
 

@@ -81,7 +81,7 @@ func buildPaletteEntries(specs []commandSpec, agents []string, availability pale
 	}
 
 	entries := make([]paletteEntry, 0, 4+len(agents)+len(specs))
-	for _, id := range []commandID{commandProvider, commandModel, commandAuth} {
+	for _, id := range []commandID{commandProvider, commandModel, commandEffort, commandAuth} {
 		spec, ok := byID[id]
 		if !ok {
 			continue
