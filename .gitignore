@@ -1,3 +1,4 @@
 /strike
 *.log
 .DS_Store
+.plan
