@@ -269,4 +269,3 @@ func (p *reasoningProvider) Stream(_ context.Context, req provider.Request) (<-c
 	close(ch)
 	return ch, nil
 }
-
