@@ -19,12 +19,17 @@ type Effort string
 
 const (
 	EffortDefault Effort = ""
-	EffortOff     Effort = "off"
-	EffortLow     Effort = "low"
-	EffortMedium  Effort = "medium"
-	EffortHigh    Effort = "high"
-	EffortXHigh   Effort = "xhigh"
-	EffortMax     Effort = "max"
+	// EffortOff asks for as little reasoning as the provider allows. It is
+	// not a guarantee of zero: Anthropic disables thinking outright, but the
+	// OpenAI family has no zero setting and floors at "minimal".
+	EffortOff    Effort = "off"
+	EffortLow    Effort = "low"
+	EffortMedium Effort = "medium"
+	EffortHigh   Effort = "high"
+	// EffortXHigh and EffortMax exist on Anthropic's ladder; providers whose
+	// own ladder tops out lower clamp them down to their highest level.
+	EffortXHigh Effort = "xhigh"
+	EffortMax   Effort = "max"
 )
 
 // Efforts lists the selectable levels from least to most reasoning,
@@ -52,7 +57,7 @@ func ParseEffort(value string) (Effort, bool) {
 func (e Effort) Describe() string {
 	switch e {
 	case EffortOff:
-		return "no reasoning — fastest and cheapest"
+		return "least reasoning the provider allows — fastest and cheapest"
 	case EffortLow:
 		return "minimal reasoning for short, scoped tasks"
 	case EffortMedium:

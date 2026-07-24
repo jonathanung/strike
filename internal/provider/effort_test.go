@@ -32,15 +32,12 @@ func TestParseEffortEmptyIsDefaultAndUnknownIsRejected(t *testing.T) {
 	}
 }
 
-// TestEffortsExcludesTheUnsetSentinel keeps the picker from offering "" as a
-// choice — it means "leave the provider alone", not a level.
+// TestEffortsExcludesTheUnsetSentinel keeps "" out of the ladder — it means
+// "leave the provider alone", not a level a caller selects.
 func TestEffortsExcludesTheUnsetSentinel(t *testing.T) {
 	for _, level := range provider.Efforts() {
 		if level == provider.EffortDefault {
 			t.Fatal("Efforts() contains the unset sentinel")
-		}
-		if level.Describe() == "" {
-			t.Errorf("%q has no description", level)
 		}
 	}
 }

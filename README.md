@@ -185,13 +185,17 @@ in the effort picker it saves the highlighted level.
 `/effort` sets how much internal reasoning the model spends before answering.
 The ladder is normalized across vendors and each adapter maps it to its own
 wire fields — Anthropic to adaptive thinking plus `output_config.effort`, the
-OpenAI family to a `reasoning_effort` string (whose own ladder stops at
-`high`, so `xhigh` and `max` clamp down there). With no level set, strike
-sends no reasoning fields at all and each provider's own default applies.
+OpenAI family to a `reasoning_effort` string. With no level set, strike sends
+no reasoning fields at all and each provider's own default applies.
+
+The two ends of the ladder are requests, not guarantees, because the vendor
+ladders differ in length: `off` disables thinking outright on Anthropic but
+floors at `minimal` on the OpenAI family (which has no zero setting), and
+`xhigh`/`max` clamp down to `high` there for the same reason.
 
 | Level | Meaning |
 |---|---|
-| `off` | no reasoning — fastest and cheapest |
+| `off` | least reasoning the provider allows — fastest and cheapest |
 | `low` | minimal reasoning for short, scoped tasks |
 | `medium` | balanced reasoning for routine work |
 | `high` | thorough reasoning — the provider default |

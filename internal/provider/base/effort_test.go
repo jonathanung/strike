@@ -7,10 +7,11 @@ import (
 	"github.com/jonathanung/strike-cli/internal/provider/base"
 )
 
-// TestOpenAIEffortClampsAboveHigh documents the deliberate lossiness: the
-// OpenAI family's ladder stops at "high", so the two rungs above it clamp down
-// rather than sending a value the API would reject.
-func TestOpenAIEffortClampsAboveHigh(t *testing.T) {
+// TestOpenAIEffortClampsAtBothEnds documents the deliberate lossiness: the
+// OpenAI family's ladder is shorter at both ends, so the two rungs above
+// "high" clamp down, and "off" floors at "minimal" — this vendor has no zero
+// setting, so it cannot honor "off" as literally as Anthropic does.
+func TestOpenAIEffortClampsAtBothEnds(t *testing.T) {
 	cases := map[provider.Effort]string{
 		provider.EffortDefault: "",
 		provider.EffortOff:     "minimal",

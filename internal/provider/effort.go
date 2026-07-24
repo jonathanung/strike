@@ -13,8 +13,11 @@ type Effort string
 const (
 	// EffortDefault sends no reasoning fields at all.
 	EffortDefault Effort = ""
-	// EffortOff explicitly disables reasoning rather than leaving it to the
-	// provider default (which, on current Claude models, is on).
+	// EffortOff asks for as little reasoning as the vendor allows, rather
+	// than leaving it to the provider default (which, on current Claude
+	// models, is on). How far "off" actually goes is vendor-dependent:
+	// Anthropic disables thinking outright, while the OpenAI family has no
+	// zero setting and floors at "minimal".
 	EffortOff    Effort = "off"
 	EffortLow    Effort = "low"
 	EffortMedium Effort = "medium"
@@ -48,22 +51,6 @@ func ParseEffort(value string) (Effort, bool) {
 	return EffortDefault, false
 }
 
-// Describe returns the one-line rationale shown in pickers and help text.
-func (e Effort) Describe() string {
-	switch e {
-	case EffortOff:
-		return "no reasoning — fastest and cheapest"
-	case EffortLow:
-		return "minimal reasoning for short, scoped tasks"
-	case EffortMedium:
-		return "balanced reasoning for routine work"
-	case EffortHigh:
-		return "thorough reasoning — the provider default"
-	case EffortXHigh:
-		return "deeper reasoning, best for coding and agentic work"
-	case EffortMax:
-		return "maximum reasoning when correctness beats cost"
-	default:
-		return "provider default"
-	}
-}
+// User-facing descriptions of these levels deliberately live on
+// protocol.Effort, not here: they are frontend copy, and one owner keeps the
+// picker, the notice line, and the help text from drifting apart.
