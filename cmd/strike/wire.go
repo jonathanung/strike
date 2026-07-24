@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"sync"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -24,6 +26,92 @@ import (
 	"github.com/jonathanung/strike-cli/internal/tool"
 	"github.com/jonathanung/strike-cli/internal/tui"
 )
+
+// sessionStore is the narrow persistence surface runSession needs from a
+// session event log.
+type sessionStore interface {
+	Append(protocol.Event) error
+	Close() error
+}
+
+// runSession owns the engine/frontend/session lifecycle: it starts the engine
+// and an event tee, runs the frontend, then on frontend return signals
+// frontend-done and cancels the engine. The tee appends every engine event
+// before optional frontend delivery; after frontend-done it stops forwarding
+// but keeps draining and persisting until engine events close. Store.Close
+// runs only after the engine and tee have both finished.
+func runSession(
+	parent context.Context,
+	engineRun func(context.Context),
+	engineEvents <-chan protocol.Event,
+	store sessionStore,
+	frontend func(<-chan protocol.Event) error,
+) error {
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+
+	frontendEvents := make(chan protocol.Event, 256)
+	frontendDone := make(chan struct{})
+
+	var appendErr error
+	teeDone := make(chan struct{})
+	go func() {
+		defer close(teeDone)
+		var closeFrontendOnce sync.Once
+		closeFrontend := func() {
+			closeFrontendOnce.Do(func() { close(frontendEvents) })
+		}
+		defer closeFrontend()
+
+		forwarding := true
+		for ev := range engineEvents {
+			if err := store.Append(ev); err != nil && appendErr == nil {
+				appendErr = err
+			}
+			if !forwarding {
+				continue
+			}
+			select {
+			case <-frontendDone:
+				forwarding = false
+				closeFrontend()
+				continue
+			default:
+			}
+			select {
+			case frontendEvents <- ev:
+			case <-frontendDone:
+				forwarding = false
+				closeFrontend()
+			}
+		}
+	}()
+
+	engineDone := make(chan struct{})
+	go func() {
+		defer close(engineDone)
+		engineRun(ctx)
+	}()
+
+	frontendErr := frontend(frontendEvents)
+	close(frontendDone)
+	cancel()
+
+	<-engineDone
+	<-teeDone
+
+	var out error
+	if frontendErr != nil {
+		out = errors.Join(out, fmt.Errorf("frontend: %w", frontendErr))
+	}
+	if appendErr != nil {
+		out = errors.Join(out, fmt.Errorf("append: %w", appendErr))
+	}
+	if closeErr := store.Close(); closeErr != nil {
+		out = errors.Join(out, fmt.Errorf("close: %w", closeErr))
+	}
+	return out
+}
 
 // run is the composition root: it resolves the project, opens the backend
 // stores, assembles the engine, wraps the stores in the local host.Services
@@ -154,7 +242,11 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 		return fmt.Errorf("loading skills: %w", err)
 	}
 
+	// One session ID shared by the engine (event correlation) and the JSONL
+	// filename so transcript identity matches runtime correlation.
+	sessionID := session.NewID()
 	eng := engine.New(engine.Options{
+		SessionID:       sessionID,
 		Select:          selectProvider,
 		Registry:        registry,
 		WorkDir:         workDir,
@@ -165,26 +257,22 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 		Rules:           permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),
 	})
 
-	store, err := session.Open(session.DefaultDir(), session.NewID())
+	store, err := session.Open(session.DefaultDir(), sessionID)
 	if err != nil {
 		return fmt.Errorf("opening session store: %w", err)
 	}
-	defer store.Close()
-
-	// Tee engine events into the session log on their way to the TUI.
-	events := make(chan protocol.Event, 256)
-	go func() {
-		defer close(events)
-		for ev := range eng.Events() {
-			_ = store.Append(ev)
-			events <- ev
+	// runSession takes ownership of store (closes it). If setup fails before
+	// that handoff, close here without double-closing.
+	storeOwned := false
+	defer func() {
+		if !storeOwned {
+			if cerr := store.Close(); cerr != nil && runErr == nil {
+				runErr = fmt.Errorf("closing session store: %w", cerr)
+			}
 		}
 	}()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	writeDangerousPermissionsWarning(stderr, opts.dangerouslySkipPermissions)
-	go eng.Run(ctx)
 
 	agentNames := make([]string, len(agents))
 	for i, a := range agents {
@@ -193,10 +281,15 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 	// local.New wraps the real backend stores in the host.Services contract;
 	// the TUI never sees auth/config/models/history directly.
 	services := local.New(authStore, historyStore, agentNames, skills)
-	program := tea.NewProgram(tui.New(eng.Ops(), events, services, tui.Options{
-		DangerouslySkipPermissions: opts.dangerouslySkipPermissions,
-	}), tea.WithAltScreen(), tea.WithOutput(stdout))
-	if _, err := program.Run(); err != nil {
+
+	storeOwned = true
+	if err := runSession(context.Background(), eng.Run, eng.Events(), store, func(events <-chan protocol.Event) error {
+		program := tea.NewProgram(tui.New(eng.Ops(), events, services, tui.Options{
+			DangerouslySkipPermissions: opts.dangerouslySkipPermissions,
+		}), tea.WithAltScreen(), tea.WithOutput(stdout))
+		_, err := program.Run()
+		return err
+	}); err != nil {
 		return err
 	}
 	fmt.Fprintln(stdout, "session log:", store.Path())

@@ -7,18 +7,19 @@ import (
 )
 
 func TestWrapDecodeRoundTrip(t *testing.T) {
+	corr := Correlation{SessionID: "session-1", TurnID: "turn-1", ProviderRequestID: "provider-1"}
 	events := []Event{
-		UserMessage{Text: "hi"},
-		TurnStarted{},
-		TextDelta{Text: "chunk"},
-		ToolCallBegin{CallID: "c1", Name: "bash", Args: json.RawMessage(`{"command":"echo"}`)},
-		ToolCallEnd{CallID: "c1", Title: "echo", Output: "ok", IsError: false, Metadata: json.RawMessage(`{"exitCode":0}`)},
-		PermissionAsked{RequestID: "p1", Permission: "bash", Patterns: []string{"echo hi"}},
-		PermissionResolved{RequestID: "p1", Decision: DecisionOnce},
-		TurnCompleted{StopReason: "end_turn"},
-		ModelSelected{Provider: "echo", Model: "echo"},
-		AgentSelected{Name: "build"},
-		EngineError{Message: "boom"},
+		UserMessage{Correlation: corr, Text: "hi"},
+		TurnStarted{Correlation: corr},
+		TextDelta{Correlation: corr, Text: "chunk"},
+		ToolCallBegin{Correlation: corr, CallID: "c1", Name: "bash", Args: json.RawMessage(`{"command":"echo"}`)},
+		ToolCallEnd{Correlation: corr, CallID: "c1", Title: "echo", Output: "ok", IsError: false, Metadata: json.RawMessage(`{"exitCode":0}`)},
+		PermissionAsked{Correlation: corr, RequestID: "p1", Permission: "bash", Patterns: []string{"echo hi"}},
+		PermissionResolved{Correlation: corr, RequestID: "p1", Decision: DecisionOnce},
+		TurnCompleted{Correlation: corr, StopReason: "end_turn"},
+		ModelSelected{Correlation: corr, Provider: "echo", Model: "echo"},
+		AgentSelected{Correlation: corr, Name: "build"},
+		EngineError{Correlation: corr, Message: "boom"},
 	}
 	for _, want := range events {
 		env, err := Wrap(want)
@@ -40,6 +41,71 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 		if string(wantJSON) != string(gotJSON) {
 			t.Errorf("%s: got %s, want %s", env.Type, gotJSON, wantJSON)
 		}
+	}
+}
+
+func TestCorrelationJSONIsFlatAndOptional(t *testing.T) {
+	ev := PermissionAsked{
+		Correlation: Correlation{
+			SessionID:         "session-1",
+			TurnID:            "turn-1",
+			ProviderRequestID: "provider-1",
+		},
+		RequestID:  "permission-1",
+		Permission: "bash",
+		Patterns:   []string{"echo hi"},
+	}
+	b, err := json.Marshal(ev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"sessionId":         `"session-1"`,
+		"turnId":            `"turn-1"`,
+		"providerRequestId": `"provider-1"`,
+		"requestId":         `"permission-1"`,
+	}
+	for key, value := range want {
+		if string(got[key]) != value {
+			t.Errorf("%s = %s, want %s; JSON: %s", key, got[key], value, b)
+		}
+	}
+	if _, ok := got["correlation"]; ok {
+		t.Errorf("correlation must not be nested: %s", b)
+	}
+
+	empty, err := json.Marshal(TurnStarted{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(empty) != `{}` {
+		t.Errorf("empty correlation JSON = %s, want {}", empty)
+	}
+}
+
+func TestDecodeLiteralLegacyEnvelopeHasEmptyCorrelation(t *testing.T) {
+	literal := `{"type":"permission.asked","time":"2020-01-01T00:00:00Z","data":{"requestId":"perm_7","permission":"bash","patterns":["echo hi"]}}`
+	var env Envelope
+	if err := json.Unmarshal([]byte(literal), &env); err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := env.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := decoded.(PermissionAsked)
+	if !ok {
+		t.Fatalf("decoded event = %T, want PermissionAsked", decoded)
+	}
+	if got.Correlation != (Correlation{}) {
+		t.Errorf("legacy correlation = %#v, want empty", got.Correlation)
+	}
+	if got.RequestID != "perm_7" {
+		t.Errorf("requestId = %q, want perm_7", got.RequestID)
 	}
 }
 
