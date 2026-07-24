@@ -68,3 +68,38 @@ func TestBearerSourcePrecedence(t *testing.T) {
 		t.Errorf("bearer = %q, want env-key", got)
 	}
 }
+
+func TestAPIKey(t *testing.T) {
+	st, err := OpenStore(filepath.Join(t.TempDir(), "auth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OPENAI_API_KEY", "")
+	if _, ok := APIKey("openai", st); ok {
+		t.Fatal("expected no key")
+	}
+	if err := st.Set("openai", Credential{Type: TypeAPIKey, APIKey: "stored"}); err != nil {
+		t.Fatal(err)
+	}
+	if key, ok := APIKey("openai", st); !ok || key != "stored" {
+		t.Errorf("key=%q ok=%v", key, ok)
+	}
+	t.Setenv("OPENAI_API_KEY", "from-env")
+	if key, ok := APIKey("openai", st); !ok || key != "from-env" {
+		t.Errorf("key=%q ok=%v", key, ok)
+	}
+}
+
+func TestNewPKCE(t *testing.T) {
+	a := newPKCE()
+	b := newPKCE()
+	if a.verifier == "" || a.challenge == "" {
+		t.Fatalf("empty pkce: %+v", a)
+	}
+	if a.verifier == b.verifier || a.challenge == b.challenge {
+		t.Fatal("expected unique pkce pairs")
+	}
+	if len(a.verifier) != 64 {
+		t.Errorf("verifier len = %d", len(a.verifier))
+	}
+}

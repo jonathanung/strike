@@ -2,6 +2,8 @@
 
 Backlog of UX improvements, roughly grouped. Items marked ★ are the ones
 that most shaped how good opencode/codex feel and are worth doing early.
+Dependency/checkpoint breakdown for the larger features lives in
+[features-checkpoints.md](features-checkpoints.md).
 
 ## Composer & input
 
@@ -48,14 +50,85 @@ that most shaped how good opencode/codex feel and are worth doing early.
 
 ## Editor integration
 
-- **`/vim <fpath>` split editor** — open vim/nvim in a right-hand split
-  (or full-screen takeover on narrow terminals) for quick edits without
-  leaving the session; on save/quit, strike notes the file changed so the
-  agent re-reads it. Fallback to $EDITOR.
+- **`/vim <fpath>` embedded editor** — run nvim in a PTY rendered inside
+  the TUI, in one of two user-configurable modes (setting in config):
+  a right-pane window, or a modal overlay sitting above the app. Either
+  way the session keeps running behind it (streaming continues). On
+  save/quit, strike notes the file changed so the agent re-reads it.
+  Fallback to $EDITOR.
 - **Open-at-line** — file:line references in the transcript are actionable:
   enter/click opens the editor at that exact line.
 - **Post-edit review** — after the agent edits files, `v` on the tool cell
   opens the touched file in the editor at the first changed hunk.
+
+## Right pane & layout
+
+Goal: never need to hop back to the IDE. The right pane is a slot that can
+host swappable "windows"; the session transcript stays on the left.
+
+- ★ **Right-pane window system** — a single right-hand slot that hosts one
+  of several windows: file explorer, vim, markdown reader, and later an
+  agent visualizer. Windows register like plugins so new ones can be added.
+- ★ **Focus keybindings** — `ctrl+j` toggles focus between the left
+  (transcript/composer) and right pane; `ctrl+l` (or `ctrl+o`) cycles
+  between windows inside the right pane. `ctrl+k` stays reserved for the
+  command palette.
+- **File explorer window** — traversible project tree in the right pane:
+  expand/collapse dirs, enter to open a file in vim or the markdown reader,
+  respects .gitignore.
+- **Markdown reader window** — `/md-read <fpath>` (or select in the
+  explorer) renders markdown in the right pane via glamour; mermaid blocks
+  rendered as ASCII/unicode diagrams if feasible. HTML preview is likely
+  out of reach in a TUI — investigate w3m/lynx-style dump as a fallback.
+- **Visualizer window (future)** — reserved slot for an agent/session
+  visualizer once multi-agent lands.
+
+## Hooks, phases & observability
+
+- ★ **Hook system (rules + commands)** — two tiers. Declarative rules in
+  config cover the common cases: event matchers → actions (log all tool
+  calls to a review log, block writes in a phase, notify). Shell-command
+  hooks cover arbitrary logic: event JSON on stdin, exit code decides
+  allow/block, stdout can inject a message back to the model. Fired on
+  engine events (tool call start/end, file write, phase transition, turn
+  end…).
+- ★ **Workflow files (user-defined phases)** — a JSON/YAML file defines an
+  ordered sequence of phases; each phase declares a context payload to
+  load (ctx1, ctx2…), a tool/permission profile, hooks, and an exit gate
+  (clear1, clear2…). When a phase's gate is met, its context is swapped
+  out and the next phase's context loads, and the agent continues.
+  Blocked tool calls bounce with a message telling the agent why (e.g.
+  "planning phase: writes not allowed").
+- **Configurable exit gates** — each gate declares who clears it:
+  `agent` (self-affirms done — the default), `user` (explicit approval in
+  the TUI), or `check` (a shell command that must exit 0, e.g. tests
+  pass). Mix per phase: self-affirm for cheap phases, hard checks for
+  code phases.
+- **Built-in plan mode** — a default shipped workflow: a read-only
+  planning phase (write/edit tools bounce) followed by an implement
+  phase, so the phase system is useful before anyone writes a custom
+  workflow file.
+
+## Memory & issue tracking
+
+- **Project-local memory / issue DB (agent-first, both-facing)** — a small
+  local database keyed to the directory strike was launched from (e.g.
+  `.strike/db` or hashed path in ~/.strike). Never global — only
+  accessible relative to the launch fpath. Agent side: read/write tools
+  to remember facts across sessions and file/close issues as it works.
+  User side: `/issues` and `/memory` slash commands, plus a right-pane
+  browser window for the DB.
+
+## Multi-agent
+
+- **Agent pane multiplexing (sessions + subagents in one tree)** — a tree
+  view (file-explorer style, expand/collapse): top-level nodes are
+  independent concurrent sessions launched side by side; each expands to
+  show the subagents it spawned, nested under their parents. Select any
+  node to watch that agent's live transcript; launch new concurrent
+  agents from the tree. Pairs with the right-pane visualizer slot.
+  Requires the engine to support both concurrent sessions and subagent
+  spawning.
 
 ## Commands, palette & discovery
 
