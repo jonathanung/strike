@@ -35,6 +35,10 @@ strike launches without any provider configured. Pick one inside the TUI:
 /model grok-4.5                # direct switch on the current provider
 /effort                        # centered picker for reasoning effort
 /effort xhigh                  # off | low | medium | high | xhigh | max
+/fast                          # toggle OpenAI priority tier (~2×, lower
+                               # latency). Sticky session preference; no-op
+                               # on Anthropic, xAI, ChatGPT subscription, or
+                               # models without a fast mode. /fast on|off
 /auth                          # same picker as /provider
 /auth openai                   # OAuth login in the browser (async — the TUI
                                # keeps working; result shows in the notice line)

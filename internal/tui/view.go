@@ -60,6 +60,10 @@ func (m Model) headerView(width int) string {
 	if m.effort != protocol.EffortDefault {
 		left += " " + ui.Badge(m.th, ui.ToneMuted, "effort "+string(m.effort))
 	}
+	if m.fastEnabled {
+		// Warning tone: priority tier is a cost-visible session preference.
+		left += " " + ui.Badge(m.th, ui.ToneWarning, "fast")
+	}
 
 	right := ""
 	if m.turnRunning {

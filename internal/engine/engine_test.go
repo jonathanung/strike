@@ -173,3 +173,36 @@ func TestRejectionFeedsBackToModel(t *testing.T) {
 		}
 	}
 }
+
+func TestSetFast(t *testing.T) {
+	eng := engine.New(engine.Options{
+		Select:   selectEcho,
+		Registry: tool.NewRegistry(),
+		WorkDir:  t.TempDir(),
+		Rules:    []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.SetFast{Enabled: true}
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for FastSelected")
+		case ev := <-eng.Events():
+			switch ev := ev.(type) {
+			case protocol.FastSelected:
+				if !ev.Enabled {
+					t.Fatalf("Enabled = false, want true")
+				}
+				return
+			case protocol.AgentSelected:
+				// startup agent selection; ignore
+			case protocol.EngineError:
+				t.Fatalf("engine error: %s", ev.Message)
+			}
+		}
+	}
+}

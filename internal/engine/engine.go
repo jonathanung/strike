@@ -71,6 +71,9 @@ type Engine struct {
 	model    string
 	effort   protocol.Effort
 	agent    Agent
+	// priority requests OpenAI service_tier=priority on subsequent turns.
+	// Sticky across model switches; adapters that do not support it no-op.
+	priority bool
 	messages []provider.Message
 
 	turnCancel context.CancelFunc
@@ -155,6 +158,12 @@ func (e *Engine) Run(ctx context.Context) {
 					continue
 				}
 				e.setEffort(op.Level)
+			case protocol.SetFast:
+				if e.turnActive() {
+					e.emit(protocol.EngineError{Message: "cannot change fast while a turn is running"})
+					continue
+				}
+				e.setFast(op.Enabled)
 			case protocol.PermissionReply:
 				e.perms.Reply(op)
 			case protocol.Interrupt:
@@ -232,6 +241,11 @@ func providerEffort(level protocol.Effort) provider.Effort {
 	default:
 		return provider.EffortDefault
 	}
+}
+
+func (e *Engine) setFast(enabled bool) {
+	e.priority = enabled
+	e.emit(protocol.FastSelected{Enabled: enabled})
 }
 
 func (e *Engine) findAgent(name string) (Agent, bool) {
@@ -321,6 +335,7 @@ func (e *Engine) runTurn(ctx context.Context, text string) {
 			Tools:     e.opts.Registry.Schemas(),
 			MaxTokens: e.opts.MaxTokens,
 			Effort:    providerEffort(e.effort),
+			Priority:  e.priority,
 		})
 		if err != nil {
 			e.failTurn(err)

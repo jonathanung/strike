@@ -24,8 +24,15 @@ const (
 )
 
 type Model struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID           string        `json:"id"`
+	Name         string        `json:"name"`
+	Experimental *experimental `json:"experimental,omitempty"`
+}
+
+// experimental holds optional models.dev mode metadata. The "fast" mode
+// marks models that accept OpenAI's priority service tier.
+type experimental struct {
+	Modes map[string]json.RawMessage `json:"modes,omitempty"`
 }
 
 type Provider struct {
@@ -77,6 +84,22 @@ func (c Catalog) ModelIDs(provider string) []string {
 	}
 	sort.Strings(ids)
 	return ids
+}
+
+// SupportsPriority reports whether models.dev lists a "fast" experimental
+// mode for the model (OpenAI priority service tier). Unknown providers or
+// models return false.
+func (c Catalog) SupportsPriority(provider, model string) bool {
+	p, ok := c[provider]
+	if !ok {
+		return false
+	}
+	m, ok := p.Models[model]
+	if !ok || m.Experimental == nil {
+		return false
+	}
+	_, ok = m.Experimental.Modes["fast"]
+	return ok
 }
 
 func fetch(ctx context.Context) (Catalog, []byte, error) {

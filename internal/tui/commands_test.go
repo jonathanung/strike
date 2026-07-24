@@ -27,6 +27,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/effort":   {"set how much reasoning the model spends", "[level]", commandSourceBuiltin},
 		"/auth":     {"manage provider authentication", "[provider]", commandSourceBuiltin},
 		"/agent":    {"select an agent", "[name]", commandSourceBuiltin},
+		"/fast":     {"toggle OpenAI priority tier (faster, ~2× cost)", "[on|off]", commandSourceBuiltin},
 		"/help":     {"show available commands", "", commandSourceBuiltin},
 		"/review":   {"review a change", "$ARGUMENTS", commandSourceSkill},
 		"/explain":  {"explain code", "", commandSourceSkill},
