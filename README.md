@@ -51,9 +51,17 @@ a real provider needs credentials (see Auth below):
 export ANTHROPIC_API_KEY=sk-ant-…   # or: strike auth login anthropic
 ./strike                            # tries the config default silently;
                                     # otherwise select with /provider
-./strike --provider openai          # explicit — fails loudly if no creds
-./strike --model claude-opus-4-8    # pre-select a model
+./strike --provider <provider>       # anthropic, openai, xai, or echo;
+                                    # fails loudly if no credentials
+./strike --model <model>             # pre-select a model
 ```
+
+`--provider <provider>` and `--model <model>` may be combined. To bypass
+permission checks for one invocation, use `--dangerously-skip-permissions`.
+**Warning:** this allows all tool calls without asks or denies. It applies
+only to that process invocation, does not persist config or permission rules,
+and is visibly marked as dangerous mode in the TUI. Run `strike --help` for
+the authoritative CLI usage and option list.
 
 Defaults when a provider is chosen without a model: `claude-sonnet-5`,
 `gpt-5.5`, `grok-4.5`.

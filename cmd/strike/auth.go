@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -29,20 +30,20 @@ Login methods:
 API keys can also be provided via ANTHROPIC_API_KEY / OPENAI_API_KEY /
 XAI_API_KEY, which take precedence over stored credentials.`
 
-func runAuth(args []string) error {
+func runAuth(args []string, output io.Writer) error {
 	store, err := auth.OpenStore(auth.DefaultPath())
 	if err != nil {
 		return fmt.Errorf("opening auth store: %w", err)
 	}
 	if len(args) == 0 {
-		fmt.Println(authUsage)
+		fmt.Fprintln(output, authUsage)
 		return nil
 	}
 	switch args[0] {
 	case "login":
-		return runAuthLogin(store, args[1:])
+		return runAuthLogin(store, args[1:], output)
 	case "status":
-		return runAuthStatus(store)
+		return runAuthStatus(store, output)
 	case "logout":
 		if len(args) < 2 {
 			return fmt.Errorf("usage: strike auth logout <provider>")
@@ -50,15 +51,15 @@ func runAuth(args []string) error {
 		if err := store.Delete(args[1]); err != nil {
 			return err
 		}
-		fmt.Println("Logged out of", args[1])
+		fmt.Fprintln(output, "Logged out of", args[1])
 		return nil
 	default:
-		fmt.Println(authUsage)
+		fmt.Fprintln(output, authUsage)
 		return fmt.Errorf("unknown auth command %q", args[0])
 	}
 }
 
-func runAuthLogin(store *auth.Store, args []string) error {
+func runAuthLogin(store *auth.Store, args []string, output io.Writer) error {
 	if len(args) == 0 {
 		return fmt.Errorf("usage: strike auth login <anthropic|openai|xai> [--api-key] [--device]")
 	}
@@ -69,24 +70,24 @@ func runAuthLogin(store *auth.Store, args []string) error {
 
 	switch prov {
 	case "anthropic":
-		return loginAPIKey(store, prov)
+		return loginAPIKey(store, prov, output)
 	case "openai":
 		if useAPIKey {
-			return loginAPIKey(store, prov)
+			return loginAPIKey(store, prov, output)
 		}
-		return loginOpenAIOAuth(ctx, store)
+		return loginOpenAIOAuth(ctx, store, output)
 	case "xai":
 		if useAPIKey {
-			return loginAPIKey(store, prov)
+			return loginAPIKey(store, prov, output)
 		}
-		return loginXAIOAuth(ctx, store, useDevice)
+		return loginXAIOAuth(ctx, store, useDevice, output)
 	default:
 		return fmt.Errorf("unknown provider %q (want anthropic, openai, or xai)", prov)
 	}
 }
 
-func loginAPIKey(store *auth.Store, prov string) error {
-	key, err := promptSecret(fmt.Sprintf("Paste your %s API key: ", prov))
+func loginAPIKey(store *auth.Store, prov string, output io.Writer) error {
+	key, err := promptSecret(output, fmt.Sprintf("Paste your %s API key: ", prov))
 	if err != nil {
 		return err
 	}
@@ -96,11 +97,11 @@ func loginAPIKey(store *auth.Store, prov string) error {
 	if err := store.Set(prov, auth.Credential{Type: auth.TypeAPIKey, APIKey: key}); err != nil {
 		return err
 	}
-	fmt.Printf("Stored %s API key in %s\n", prov, auth.DefaultPath())
+	fmt.Fprintf(output, "Stored %s API key in %s\n", prov, auth.DefaultPath())
 	return nil
 }
 
-func loginOpenAIOAuth(ctx context.Context, store *auth.Store) error {
+func loginOpenAIOAuth(ctx context.Context, store *auth.Store, output io.Writer) error {
 	tokens, err := auth.OpenAIFlow().Login(ctx)
 	if err != nil {
 		return err
@@ -109,11 +110,11 @@ func loginOpenAIOAuth(ctx context.Context, store *auth.Store) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(outcome)
+	fmt.Fprintln(output, outcome)
 	return nil
 }
 
-func loginXAIOAuth(ctx context.Context, store *auth.Store, device bool) error {
+func loginXAIOAuth(ctx context.Context, store *auth.Store, device bool, output io.Writer) error {
 	var tokens *auth.Tokens
 	var err error
 	if device {
@@ -122,11 +123,11 @@ func loginXAIOAuth(ctx context.Context, store *auth.Store, device bool) error {
 		if reqErr != nil {
 			return reqErr
 		}
-		fmt.Printf("Open %s on any device and enter code: %s\n", code.VerificationURI, code.UserCode)
+		fmt.Fprintf(output, "Open %s on any device and enter code: %s\n", code.VerificationURI, code.UserCode)
 		if code.VerificationURIComplete != "" {
-			fmt.Println("Or open directly:", code.VerificationURIComplete)
+			fmt.Fprintln(output, "Or open directly:", code.VerificationURIComplete)
 		}
-		fmt.Println("Waiting for authorization…")
+		fmt.Fprintln(output, "Waiting for authorization…")
 		tokens, err = flow.Poll(ctx, code)
 	} else {
 		tokens, err = auth.XAIFlow().Login(ctx)
@@ -138,11 +139,11 @@ func loginXAIOAuth(ctx context.Context, store *auth.Store, device bool) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(outcome)
+	fmt.Fprintln(output, outcome)
 	return nil
 }
 
-func runAuthStatus(store *auth.Store) error {
+func runAuthStatus(store *auth.Store, output io.Writer) error {
 	providers := store.Providers()
 	for _, name := range []string{"anthropic", "openai", "xai"} {
 		status := "not logged in"
@@ -160,11 +161,11 @@ func runAuthStatus(store *auth.Store) error {
 				status = "OAuth"
 			}
 		}
-		fmt.Printf("  %-10s %s\n", name, status)
+		fmt.Fprintf(output, "  %-10s %s\n", name, status)
 	}
 	for _, p := range providers {
 		if p != "anthropic" && p != "openai" && p != "xai" {
-			fmt.Printf("  %-10s credential stored (unknown provider)\n", p)
+			fmt.Fprintf(output, "  %-10s credential stored (unknown provider)\n", p)
 		}
 	}
 	return nil
@@ -191,11 +192,11 @@ func hasFlag(args []string, flag string) bool {
 	return false
 }
 
-func promptSecret(prompt string) (string, error) {
-	fmt.Print(prompt)
+func promptSecret(output io.Writer, prompt string) (string, error) {
+	fmt.Fprint(output, prompt)
 	if term.IsTerminal(int(os.Stdin.Fd())) {
 		key, err := term.ReadPassword(int(os.Stdin.Fd()))
-		fmt.Println()
+		fmt.Fprintln(output)
 		return strings.TrimSpace(string(key)), err
 	}
 	line, err := bufio.NewReader(os.Stdin).ReadString('\n')

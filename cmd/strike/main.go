@@ -4,7 +4,9 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -25,24 +27,183 @@ import (
 	"github.com/jonathanung/strike-cli/internal/tui"
 )
 
+type cliOptions struct {
+	provider                   string
+	model                      string
+	dangerouslySkipPermissions bool
+	providerSet                bool
+}
+
+type optionSpec struct {
+	names       []string
+	valueName   string
+	description string
+	register    func(*flag.FlagSet, *cliOptions)
+}
+
+var optionSpecs = []optionSpec{
+	{
+		names:       []string{"provider"},
+		valueName:   "provider",
+		description: "provider to use (anthropic|openai|xai|echo); overrides config",
+		register: func(fs *flag.FlagSet, opts *cliOptions) {
+			fs.StringVar(&opts.provider, "provider", "", "")
+		},
+	},
+	{
+		names:       []string{"model"},
+		valueName:   "model",
+		description: "model id; overrides config",
+		register: func(fs *flag.FlagSet, opts *cliOptions) {
+			fs.StringVar(&opts.model, "model", "", "")
+		},
+	},
+	{
+		names:       []string{"dangerously-skip-permissions"},
+		description: "allow all tool calls without permission checks for this invocation",
+		register: func(fs *flag.FlagSet, opts *cliOptions) {
+			fs.BoolVar(&opts.dangerouslySkipPermissions, "dangerously-skip-permissions", false, "")
+		},
+	},
+	{
+		names:       []string{"h", "help"},
+		description: "show help",
+	},
+}
+
+const dangerousPermissionsWarning = "WARNING: --dangerously-skip-permissions is enabled; all tool calls will be allowed without permission checks for this invocation only."
+
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "auth" {
-		if err := runAuth(os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, "strike:", err)
-			os.Exit(1)
+	os.Exit(runCLI(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+func runCLI(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "auth" {
+		if err := runAuth(args[1:], stdout); err != nil {
+			fmt.Fprintln(stderr, "strike:", err)
+			return 1
 		}
-		return
+		return 0
 	}
-	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, "strike:", err)
-		os.Exit(1)
+
+	opts, err := parseCLIOptions(args)
+	if err != nil {
+		if err == flag.ErrHelp {
+			writeUsage(stdout)
+			return 0
+		}
+		fmt.Fprintln(stderr, "strike:", err)
+		writeUsage(stderr)
+		return 2
+	}
+	if err := run(opts, stdout, stderr); err != nil {
+		fmt.Fprintln(stderr, "strike:", err)
+		return 1
+	}
+	return 0
+}
+
+func parseCLIOptions(args []string) (cliOptions, error) {
+	var opts cliOptions
+	fs := flag.NewFlagSet("strike", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	for _, spec := range optionSpecs {
+		if spec.register != nil {
+			spec.register(fs, &opts)
+		}
+	}
+	if err := prevalidateCLIOptions(args, fs); err != nil {
+		return cliOptions{}, err
+	}
+	if err := fs.Parse(args); err != nil {
+		return cliOptions{}, err
+	}
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "provider" && opts.provider != "" {
+			opts.providerSet = true
+		}
+	})
+	if fs.NArg() != 0 {
+		return cliOptions{}, fmt.Errorf("unexpected argument %q", fs.Arg(0))
+	}
+	return opts, nil
+}
+
+func prevalidateCLIOptions(args []string, fs *flag.FlagSet) error {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "-h" || arg == "--help" {
+			return flag.ErrHelp
+		}
+		if arg == "--" || len(arg) < 2 || arg[0] != '-' {
+			return nil
+		}
+
+		prefixLen := 1
+		if len(arg) > 2 && arg[1] == '-' {
+			prefixLen = 2
+		}
+		name := arg[prefixLen:]
+		if equals := strings.IndexByte(name, '='); equals >= 0 {
+			name = name[:equals]
+		}
+		f := fs.Lookup(name)
+		if f == nil {
+			return nil
+		}
+		if prefixLen == 1 {
+			return fmt.Errorf("flag provided but not defined: -%s", name)
+		}
+		if !isBoolFlag(f) && len(name)+prefixLen == len(arg) && i+1 < len(args) {
+			i++
+		}
+	}
+	return nil
+}
+
+func isBoolFlag(f *flag.Flag) bool {
+	bf, ok := f.Value.(interface{ IsBoolFlag() bool })
+	return ok && bf.IsBoolFlag()
+}
+
+func writeUsage(w io.Writer) {
+	fmt.Fprintln(w, "Usage:")
+	fmt.Fprintln(w, "  strike [options]")
+	fmt.Fprintln(w, "  strike auth <command> [arguments]")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Options:")
+	for _, spec := range optionSpecs {
+		var spelling string
+		if len(spec.names) == 2 && spec.names[0] == "h" {
+			spelling = "-h, --help"
+		} else {
+			spelling = "--" + spec.names[0]
+			if spec.valueName != "" {
+				spelling += " <" + spec.valueName + ">"
+			}
+		}
+		fmt.Fprintf(w, "  %-34s %s\n", spelling, spec.description)
 	}
 }
 
-func run() (runErr error) {
-	provFlag := flag.String("provider", "", "provider to use (anthropic|echo); overrides config")
-	modelFlag := flag.String("model", "", "model id; overrides config")
-	flag.Parse()
+func permissionLayers(configured permission.Ruleset, dangerouslySkip bool) []permission.Ruleset {
+	layers := []permission.Ruleset{
+		permission.Defaults(),
+		append(permission.Ruleset(nil), configured...),
+	}
+	if dangerouslySkip {
+		layers = append(layers, permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.Allow}})
+	}
+	return layers
+}
+
+func writeDangerousPermissionsWarning(w io.Writer, enabled bool) {
+	if enabled {
+		fmt.Fprintln(w, dangerousPermissionsWarning)
+	}
+}
+
+func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 
 	workDir, err := os.Getwd()
 	if err != nil {
@@ -69,11 +230,11 @@ func run() (runErr error) {
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
-	if *provFlag != "" {
-		cfg.Provider = *provFlag
+	if opts.providerSet && opts.provider != "" {
+		cfg.Provider = opts.provider
 	}
-	if *modelFlag != "" {
-		cfg.Model = *modelFlag
+	if opts.model != "" {
+		cfg.Model = opts.model
 	}
 
 	authStore, err := auth.OpenStore(auth.DefaultPath())
@@ -129,7 +290,7 @@ func run() (runErr error) {
 	// An explicit --provider must work or fail loudly; the config default is
 	// only a silent best-effort initial selection (pick one in-app with
 	// /provider otherwise).
-	if *provFlag != "" {
+	if opts.providerSet && opts.provider != "" {
 		if _, _, err := selectProvider(cfg.Provider); err != nil {
 			return err
 		}
@@ -175,7 +336,7 @@ func run() (runErr error) {
 		InitialModel:    cfg.Model,
 		Agents:          agents,
 		InitialAgent:    cfg.DefaultAgent,
-		Rules:           []permission.Ruleset{permission.Defaults(), cfg.Permissions},
+		Rules:           permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),
 	})
 
 	store, err := session.Open(session.DefaultDir(), session.NewID())
@@ -196,16 +357,20 @@ func run() (runErr error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	writeDangerousPermissionsWarning(stderr, opts.dangerouslySkipPermissions)
 	go eng.Run(ctx)
 
 	agentNames := make([]string, len(agents))
 	for i, a := range agents {
 		agentNames[i] = a.Name
 	}
-	program := tea.NewProgram(tui.New(eng.Ops(), events, authStore, agentNames, skills, tui.Options{History: historyStore}), tea.WithAltScreen())
+	program := tea.NewProgram(tui.New(eng.Ops(), events, authStore, agentNames, skills, tui.Options{
+		History:                    historyStore,
+		DangerouslySkipPermissions: opts.dangerouslySkipPermissions,
+	}), tea.WithAltScreen(), tea.WithOutput(stdout))
 	if _, err := program.Run(); err != nil {
 		return err
 	}
-	fmt.Println("session log:", store.Path())
+	fmt.Fprintln(stdout, "session log:", store.Path())
 	return nil
 }

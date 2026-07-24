@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/auth"
 	"github.com/jonathanung/strike-cli/internal/config"
@@ -236,6 +237,178 @@ func TestLayoutReflowHandlesTinyWindowsPopupPasteResizeAndReset(t *testing.T) {
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	if m.viewport.Width != 80 || m.viewport.Height < 0 {
 		t.Errorf("resize did not restore effective viewport dimensions: %dx%d", m.viewport.Width, m.viewport.Height)
+	}
+}
+
+func TestDangerousPermissionsIndicatorPersistsAcrossStateAndNoticeChanges(t *testing.T) {
+	const indicator = "DANGER: permissions bypassed"
+	m, _ := newAppTestModelWithOptions(Options{DangerouslySkipPermissions: true})
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	assertViewContainsPlainText(t, m.View(), indicator)
+	m.applyEvent(protocol.TurnStarted{})
+	plain := ansi.Strip(m.View())
+	if !strings.Contains(plain, indicator) || !strings.Contains(plain, "working") {
+		t.Errorf("running view does not retain danger indicator and running status:\n%s", plain)
+	}
+
+	m.applyEvent(protocol.ModelSelected{Provider: "echo", Model: "test-model"})
+	assertViewContainsPlainText(t, m.View(), indicator)
+	if !strings.Contains(ansi.Strip(m.View()), "model: echo/test-model") {
+		t.Errorf("model selection notice was not rendered alongside danger indicator:\n%s", ansi.Strip(m.View()))
+	}
+	m.applyEvent(protocol.EngineError{Message: "transient engine error"})
+	assertViewContainsPlainText(t, m.View(), indicator)
+	m.applyEvent(protocol.TurnCompleted{})
+	assertViewContainsPlainText(t, m.View(), indicator)
+}
+
+func TestDangerousPermissionsIndicatorIsOptInAndSafeAtTinyWidths(t *testing.T) {
+	const indicator = "DANGER: permissions bypassed"
+	normal, _ := newAppTestModelWithOptions(Options{})
+	assertViewOmitsPlainText(t, normal.View(), indicator)
+	normal = updateApp(t, normal, tea.WindowSizeMsg{Width: 80, Height: 24})
+	assertViewOmitsPlainText(t, normal.View(), indicator)
+
+	dangerous, _ := newAppTestModelWithOptions(Options{DangerouslySkipPermissions: true})
+	assertViewContainsPlainText(t, dangerous.View(), indicator)
+	for _, size := range []tea.WindowSizeMsg{
+		{Width: 0, Height: 0},
+		{Width: 1, Height: 1},
+		{Width: 3, Height: 2},
+		{Width: 9, Height: 4},
+	} {
+		dangerous = updateApp(t, dangerous, size)
+		plain := ansi.Strip(dangerous.View())
+		wantPrefix := indicator[:min(max(1, size.Width), len(indicator))]
+		if !strings.Contains(plain, wantPrefix) {
+			t.Errorf("danger indicator at size %dx%d = %q, want semantic prefix %q", size.Width, size.Height, plain, wantPrefix)
+		}
+	}
+}
+
+func TestDangerousPermissionsIndicatorRemainsVisibleWithActiveModals(t *testing.T) {
+	const indicator = "DANGER: permissions bypassed"
+	tests := []struct {
+		name        string
+		open        func(*Model)
+		content     []string
+		tinyContent string
+	}{
+		{
+			name: "model picker",
+			open: func(m *Model) {
+				picker := newModelModal("echo", "", m.ops)
+				picker.loading = false
+				picker.all = []string{"echo-regression-model"}
+				m.modal = picker
+			},
+			content:     []string{"Select model — echo", "echo-regression-model"},
+			tinyContent: "Select model",
+		},
+		{
+			name: "provider picker",
+			open: func(m *Model) {
+				m.modal = newProviderModal(&auth.Store{}, "", m.ops, m.th)
+			},
+			content:     []string{"Select provider", "echo"},
+			tinyContent: "Select provider",
+		},
+		{
+			name: "permission prompt",
+			open: func(m *Model) {
+				m.applyEvent(protocol.PermissionAsked{
+					RequestID:  "danger-modal-regression",
+					Permission: "bash",
+					Patterns:   []string{"go test ./..."},
+				})
+			},
+			content:     []string{"Permission required:", "bash", "allow once", "reject"},
+			tinyContent: "Permission",
+		},
+		{
+			name: "command palette",
+			open: func(m *Model) {
+				m.modal = newPaletteModal(m.commands, nil, m.currentPaletteAvailability())
+			},
+			content:     []string{"Command palette", "/provider", "/help"},
+			tinyContent: "Command palette",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, size := range []struct {
+				window tea.WindowSizeMsg
+				tiny   bool
+			}{
+				{window: tea.WindowSizeMsg{Width: 80, Height: 22}},
+				{window: tea.WindowSizeMsg{Width: 32, Height: 14}},
+				{window: tea.WindowSizeMsg{Width: 9, Height: 4}, tiny: true},
+			} {
+				name := itoa(size.window.Width) + "x" + itoa(size.window.Height)
+				t.Run(name, func(t *testing.T) {
+					dangerous, _ := newAppTestModelWithOptions(Options{DangerouslySkipPermissions: true})
+					dangerous = updateApp(t, dangerous, size.window)
+					tt.open(&dangerous)
+					plain := ansi.Strip(dangerous.View())
+					content := tt.content
+					wantIndicator := indicator
+					if size.tiny {
+						content = []string{tt.tinyContent}
+						wantIndicator = indicator[:size.window.Width]
+					}
+					for _, want := range append([]string{wantIndicator}, content...) {
+						contains := strings.Contains(plain, want)
+						if size.tiny && want != wantIndicator {
+							contains = strings.Contains(compactAppPlainText(plain), compactAppPlainText(want))
+						}
+						if !contains {
+							t.Errorf("dangerous modal view at %dx%d does not contain %q:\n%s", size.window.Width, size.window.Height, want, plain)
+						}
+					}
+
+					normal, _ := newAppTestModelWithOptions(Options{})
+					normal = updateApp(t, normal, size.window)
+					tt.open(&normal)
+					normalPlain := ansi.Strip(normal.View())
+					if strings.Contains(normalPlain, wantIndicator) {
+						t.Errorf("normal modal view at %dx%d unexpectedly contains danger indicator:\n%s", size.window.Width, size.window.Height, normalPlain)
+					}
+					for _, want := range content {
+						contains := strings.Contains(normalPlain, want)
+						if size.tiny {
+							contains = strings.Contains(compactAppPlainText(normalPlain), compactAppPlainText(want))
+						}
+						if !contains {
+							t.Errorf("normal modal view at %dx%d does not contain %q:\n%s", size.window.Width, size.window.Height, want, normalPlain)
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestDangerousPermissionsIndicatorAndModalPersistAcrossRunningStateAndNotice(t *testing.T) {
+	const indicator = "DANGER: permissions bypassed"
+	m, _ := newAppTestModelWithOptions(Options{DangerouslySkipPermissions: true})
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 22})
+	m.modal = newPaletteModal(m.commands, nil, m.currentPaletteAvailability())
+
+	m.applyEvent(protocol.TurnStarted{})
+	m.applyEvent(protocol.ModelSelected{Provider: "echo", Model: "notice-regression-model"})
+
+	plain := ansi.Strip(m.View())
+	for _, want := range []string{
+		indicator,
+		"Command palette",
+		"working",
+		"model: echo/notice-regression-model",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("running modal view with notice does not contain %q:\n%s", want, plain)
+		}
 	}
 }
 
@@ -909,6 +1082,40 @@ func newAppTestModel(agents []string, skills []config.Skill) (Model, chan protoc
 	ops := make(chan protocol.Op, 8)
 	events := make(chan protocol.Event)
 	return New(ops, events, nil, agents, skills), ops
+}
+
+func newAppTestModelWithOptions(options Options) (Model, chan protocol.Op) {
+	ops := make(chan protocol.Op, 8)
+	events := make(chan protocol.Event)
+	return New(ops, events, nil, nil, nil, options), ops
+}
+
+func assertViewContainsPlainText(t *testing.T, view, want string) {
+	t.Helper()
+	if plain := ansi.Strip(view); !strings.Contains(plain, want) {
+		t.Errorf("view does not contain %q after stripping ANSI:\n%s", want, plain)
+	}
+}
+
+func assertViewOmitsPlainText(t *testing.T, view, unwanted string) {
+	t.Helper()
+	if plain := ansi.Strip(view); strings.Contains(plain, unwanted) {
+		t.Errorf("view unexpectedly contains %q after stripping ANSI:\n%s", unwanted, plain)
+	}
+}
+
+func compactAppPlainText(text string) string {
+	return strings.NewReplacer(
+		" ", "",
+		"\t", "",
+		"\n", "",
+		"│", "",
+		"╭", "",
+		"╮", "",
+		"╰", "",
+		"╯", "",
+		"─", "",
+	).Replace(text)
 }
 
 func newAppTestModelWithHistory(agents []string, skills []config.Skill, store *history.Store) (Model, chan protocol.Op) {

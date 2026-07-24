@@ -44,7 +44,8 @@ type historyAddedMsg struct {
 }
 
 type Options struct {
-	History *history.Store
+	History                    *history.Store
+	DangerouslySkipPermissions bool
 }
 
 type Model struct {
@@ -60,15 +61,16 @@ type Model struct {
 	toolByID map[string]*toolCell
 	modal    modal
 
-	viewport     viewport.Model
-	composer     textarea.Model
-	completion   *completionState
-	commands     []commandSpec
-	spin         spinner.Model
-	history      *history.Store
-	entries      []string
-	historyPos   int
-	historyDraft string
+	viewport                   viewport.Model
+	composer                   textarea.Model
+	completion                 *completionState
+	commands                   []commandSpec
+	spin                       spinner.Model
+	history                    *history.Store
+	entries                    []string
+	historyPos                 int
+	historyDraft               string
+	dangerouslySkipPermissions bool
 
 	providerName string
 	modelName    string
@@ -109,6 +111,7 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, authStore *auth.S
 		historyPos: -1,
 	}
 	for _, option := range options {
+		m.dangerouslySkipPermissions = option.DangerouslySkipPermissions
 		if option.History != nil {
 			m.history = option.History
 			m.entries = option.History.Entries()
@@ -496,7 +499,11 @@ func (m *Model) reflow() {
 
 	if m.ready {
 		m.viewport.Width = max(1, m.width)
-		m.viewport.Height = max(0, m.height-2-composerRows-popupHeight)
+		footerRows := 2
+		if m.dangerouslySkipPermissions {
+			footerRows++
+		}
+		m.viewport.Height = max(0, m.height-footerRows-composerRows-popupHeight)
 	}
 }
 
@@ -700,16 +707,27 @@ func (m *Model) refreshViewport() {
 
 func (m Model) View() string {
 	if !m.ready {
+		if warning := m.dangerLine(); warning != "" {
+			return warning + "\nstarting…"
+		}
 		return "starting…"
 	}
-	sections := []string{m.viewport.View(), m.statusLine(), m.noticeLine()}
+	sections := []string{m.viewport.View(), m.statusLine()}
+	if warning := m.dangerLine(); warning != "" {
+		sections = append(sections, warning)
+	}
+	sections = append(sections, m.noticeLine())
 	if popup := m.completion.view(m.width, m.th); popup != "" {
 		sections = append(sections, popup)
 	}
 	sections = append(sections, m.composer.View())
 	base := strings.Join(sections, "\n")
 	if m.modal != nil {
-		return overlayCenter(base, m.modal.view(max(8, modalWidth(m.width)), m.th), m.width, m.height)
+		overlay := m.modal.view(max(8, modalWidth(m.width)), m.th)
+		if warning := m.dangerLine(); warning != "" {
+			overlay = lipgloss.JoinVertical(lipgloss.Center, warning, overlay)
+		}
+		return overlayCenter(base, overlay, m.width, m.height)
 	}
 	return base
 }
@@ -730,6 +748,19 @@ func (m Model) statusLine() string {
 		left += " " + m.spin.View() + muted.Render(" working (esc to interrupt)")
 	}
 	return lipgloss.NewStyle().MaxWidth(max(1, m.width)).Render(left)
+}
+
+func (m Model) dangerLine() string {
+	if !m.dangerouslySkipPermissions {
+		return ""
+	}
+	style := lipgloss.NewStyle().
+		Foreground(m.th.Error).
+		Bold(true)
+	if m.ready {
+		style = style.MaxWidth(max(1, m.width))
+	}
+	return style.Render("DANGER: permissions bypassed")
 }
 
 // noticeLine is a reserved row above the composer for transient feedback:
