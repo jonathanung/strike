@@ -2,7 +2,9 @@
 // defaults, then global (~/.strike/config), then project (./.strike/config)
 // — all JSON. Scalar fields override; permission rules concatenate so later
 // layers win under last-match-wins evaluation. The same two .strike roots
-// also hold agents/ and skills/ folders (see agents.go).
+// also hold agents/ and skills/ folders (see agents.go). Loaded by
+// cmd/strike at startup and wrapped by internal/host/local (Settings, and
+// the agent/skill listings); internal/tui never imports it directly.
 package config
 
 import (

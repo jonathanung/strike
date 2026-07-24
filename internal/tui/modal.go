@@ -9,6 +9,7 @@ import (
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
+	"github.com/jonathanung/strike-cli/internal/tui/ui"
 )
 
 // modal is anything that temporarily takes over input, rendered as a
@@ -103,36 +104,53 @@ func (m *permissionModal) replyWithMessage(d protocol.Decision, message string) 
 }
 
 func (m *permissionModal) view(width int, th theme.Theme) string {
-	title := lipgloss.NewStyle().Foreground(th.Warning).Bold(true).
-		Render("Permission required: " + m.req.Permission)
-	detail := lipgloss.NewStyle().Foreground(th.Text).Width(width - 6).
-		Render(strings.Join(m.req.Patterns, "\n"))
-	box := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(th.Warning).
-		Padding(0, 1).
-		Width(width - 2)
+	st := th.S()
+	inner := max(1, ui.InnerWidth(width))
+	heading := wrapToWidth(st.Warning.Bold(true).Render("Permission required: "+m.req.Permission), inner)
+	detail := wrapToWidth(st.Text.Render(strings.Join(m.req.Patterns, "\n")), inner)
 
 	if m.state == permissionModalFeedback {
-		prompt := lipgloss.NewStyle().Foreground(th.Text).
-			Render("Optional feedback for the rejection:")
-		m.feedback.Width = width - 8
-		hint := lipgloss.NewStyle().Foreground(th.TextMuted).
-			Render("enter reject with feedback · esc reject without feedback")
-		return box.Render(title + "\n" + detail + "\n\n" + prompt + "\n" + m.feedback.View() + "\n" + hint)
+		prompt := st.Text.Render("Optional feedback for the rejection:")
+		m.feedback.Width = max(1, inner-4)
+		body := heading + "\n" + detail + "\n\n" + prompt + "\n" + m.feedback.View()
+		return ui.Dialog(th, ui.DialogOpts{
+			Title: "permission",
+			Hint:  "enter reject with feedback · esc reject without feedback",
+			Width: width,
+			Tone:  ui.ToneWarning,
+		}, body)
 	}
 
-	var choices []string
+	choices := make([]string, len(permChoices))
+	plain := 0
 	for i, c := range permChoices {
-		label := " " + itoa(i+1) + ") " + c.label + " "
-		style := lipgloss.NewStyle().Foreground(th.TextMuted)
+		label := itoa(i+1) + ") " + c.label
+		style := st.Muted
 		if i == m.choice {
-			style = lipgloss.NewStyle().Foreground(th.Accent).Bold(true).Underline(true)
+			style = lipgloss.NewStyle().Foreground(th.Highlight).Bold(true).Underline(true)
 		}
-		choices = append(choices, style.Render(label))
+		choices[i] = style.Render(label)
+		plain += lipgloss.Width(label) + 2
 	}
-	hint := lipgloss.NewStyle().Foreground(th.TextMuted).
-		Render("←/→ select · enter confirm · esc reject")
+	sep := "  "
+	if plain > inner {
+		sep = "\n" // stack choices when the row would overflow a narrow dialog
+	}
+	body := heading + "\n" + detail + "\n\n" + strings.Join(choices, sep)
+	return ui.Dialog(th, ui.DialogOpts{
+		Title: "permission",
+		Hint:  "←/→ select · enter confirm · esc reject",
+		Width: width,
+		Tone:  ui.ToneWarning,
+	}, body)
+}
 
-	return box.Render(title + "\n" + detail + "\n\n" + strings.Join(choices, " ") + "\n" + hint)
+// wrapToWidth hard-wraps already-styled text to width display cells, preserving
+// ANSI. It is how modals pre-wrap bodies before handing them to ui.Panel/Dialog
+// (which truncate, not wrap).
+func wrapToWidth(s string, width int) string {
+	if width < 1 {
+		return s
+	}
+	return lipgloss.NewStyle().Width(width).Render(s)
 }

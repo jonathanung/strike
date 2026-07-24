@@ -64,17 +64,17 @@ func TestDecodeMalformedData(t *testing.T) {
 func TestEventTypeCoverage(t *testing.T) {
 	// Ensure every known event maps to a stable type string used by sessions.
 	want := map[string]Event{
-		"user.message":         UserMessage{},
-		"turn.started":         TurnStarted{},
-		"text.delta":           TextDelta{},
-		"tool.begin":           ToolCallBegin{},
-		"tool.end":             ToolCallEnd{},
-		"permission.asked":     PermissionAsked{},
-		"permission.resolved":  PermissionResolved{},
-		"turn.completed":       TurnCompleted{},
-		"model.selected":       ModelSelected{},
-		"agent.selected":       AgentSelected{},
-		"engine.error":         EngineError{},
+		"user.message":        UserMessage{},
+		"turn.started":        TurnStarted{},
+		"text.delta":          TextDelta{},
+		"tool.begin":          ToolCallBegin{},
+		"tool.end":            ToolCallEnd{},
+		"permission.asked":    PermissionAsked{},
+		"permission.resolved": PermissionResolved{},
+		"turn.completed":      TurnCompleted{},
+		"model.selected":      ModelSelected{},
+		"agent.selected":      AgentSelected{},
+		"engine.error":        EngineError{},
 	}
 	for typ, ev := range want {
 		env, err := Wrap(ev)

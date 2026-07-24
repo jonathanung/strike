@@ -1,4 +1,4 @@
-package tui
+package ui
 
 import (
 	"strings"
@@ -7,10 +7,16 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// overlayCenter composites fg (a rendered box) over bg, centered on a
-// width×height screen. ANSI-aware: background lines are cut around the box
-// with escape sequences kept balanced, so styles don't bleed into the modal.
-func overlayCenter(bg, fg string, width, height int) string {
+// OverlayCenter composites fg (a rendered box) over bg, centered on a
+// width×height screen. It is ANSI-aware: each background line is cut around
+// the box with escape sequences kept balanced, so background styling never
+// bleeds into the modal.
+//
+//	screen := ui.OverlayCenter(baseView, ui.Dialog(th, opts, body), width, height)
+//
+// fg is placed at the center; if the screen is smaller than fg it is pinned to
+// the top-left and clipped by the terminal.
+func OverlayCenter(bg, fg string, width, height int) string {
 	bgLines := strings.Split(bg, "\n")
 	for len(bgLines) < height {
 		bgLines = append(bgLines, "")
@@ -35,7 +41,8 @@ func overlayCenter(bg, fg string, width, height int) string {
 	return strings.Join(bgLines, "\n")
 }
 
-// modalWidth is the standard width for centered dialogs.
-func modalWidth(screenWidth int) int {
+// ModalWidth is the standard outer width for a centered dialog on a screen of
+// the given width: capped at 72 columns, with a 2-column margin each side.
+func ModalWidth(screenWidth int) int {
 	return min(72, screenWidth-4)
 }

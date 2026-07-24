@@ -1,0 +1,218 @@
+# Architecture
+
+Reference for agents modifying strike-cli. States what exists in the code;
+verify against source before relying on a detail here, since this file can
+drift.
+
+## Dataflow
+
+```
+cmd/strike/wire.go (run) — composition root
+│
+├── builds internal/engine, then reads/writes it on two channels:
+│     Ops()    chan<- protocol.Op     ◄── internal/tui submits UserInput,
+│                                          PermissionReply, Interrupt,
+│                                          SelectModel, SelectAgent
+│     Events() <-chan protocol.Event  ──► internal/tui renders TextDelta,
+│                                          ToolCallBegin/End, PermissionAsked,
+│                                          TurnCompleted, ModelSelected, …
+│
+├── tees every Event through internal/session before it reaches the TUI:
+│     for ev := range eng.Events() { _ = store.Append(ev); events <- ev }
+│     store.Append persists one JSONL line per event (~/.strike/sessions/…)
+│
+├── builds host.Services via internal/host/local.New(authStore, historyStore,
+│     agentNames, skills) — wraps internal/{auth,config,models,history}
+│     into host.Services{Auth, Catalog, Settings, History, Agents, Skills}
+│
+└── tui.New(eng.Ops(), events, services, tui.Options{...})
+      internal/tui's entire view of the world: two protocol channels plus
+      one host.Services bundle. Nothing else crosses the boundary.
+```
+
+The engine never touches a terminal and the TUI never touches a model API,
+tool, or credential directly — `internal/protocol` is the only channel
+between them, and `internal/host` is the only channel from the TUI to
+anything host-side. A session transcript is fully reconstructable by
+re-reading its JSONL log, since the log is a serialized copy of the exact
+event stream the TUI rendered from (see `internal/protocol/codec.go`).
+
+## Packages
+
+| Package | Role | May import |
+|---|---|---|
+| `cmd/strike` | CLI entry (`main.go`: flags, usage, `strike auth` subcommand) + composition root (`wire.go`: assembles engine, host/local, session store, tui) | anything — the only package that wires the whole tree |
+| `internal/protocol` | Op/Event seam between engine and frontends; the JSONL envelope (`codec.go`) is the session persistence format | stdlib only |
+| `internal/engine` | Headless agent runtime: turn loop, tool dispatch, permission integration | `protocol`, `provider`, `tool`, `permission` |
+| `internal/provider` | LLM provider abstraction: `Provider` interface, normalized `StreamEvent`s | stdlib |
+| `internal/provider/base` | Shared HTTP/JSON/SSE/auth client concrete adapters embed | `provider`, stdlib, net/http |
+| `internal/provider/{anthropic,openaicompat,chatgpt,echo}` | Concrete adapters (openaicompat covers both the OpenAI platform API and xAI; chatgpt is the ChatGPT-subscription backend; echo is the offline dev provider) | `provider`, `provider/base` (all but echo), stdlib |
+| `internal/tool` | Tool contract (`Tool`, `Context`, `Result`) + built-ins: read/glob/grep/edit/write/bash | `provider` (for `ToolSchema`), stdlib |
+| `internal/permission` | Ordered allow/ask/deny rulesets, last-match-wins; the ask service that suspends a tool call for user input | `protocol`, `tool` (for `AskRequest`), stdlib |
+| `internal/session` | JSONL event-log persistence (append/replay) | `protocol`, stdlib |
+| `internal/auth` | Credential store (0600 `auth.json`) + OAuth/PKCE/device flows | stdlib, net/http |
+| `internal/config` | Layered JSON config (defaults → global → project) + agents/skills markdown loading | `permission` (Ruleset is a config field), stdlib |
+| `internal/models` | models.dev catalog client, 24h cache with stale fallback | stdlib, net/http |
+| `internal/history` | Project-scoped prompt history | stdlib |
+| `internal/project` | Stable filesystem identity for project-scoped state (git-aware) | stdlib, os/exec |
+| `internal/host` | **Frozen contract**: the services a frontend needs from its host process | stdlib only — enforced by the boundary test |
+| `internal/host/local` | Real `host.Services` implementation; wraps auth/config/models/history for the frontend | `auth`, `config`, `history`, `host`, `models` |
+| `internal/tui` | Bubble Tea frontend: app model, layout, transcript cells, modals, composer | `protocol`, `host`, `tui/...` only — enforced by the boundary test |
+| `internal/tui/theme` | Design tokens: adaptive colors (`Theme`), glyphs (`Icons`), precomputed `Styles` | lipgloss, stdlib |
+| `internal/tui/ui` | Reusable component library (Panel, Dialog, Badge, KeyHints, StatusBar, List, Notice, Card/Bento, OverlayCenter, Logo) | stdlib, lipgloss, bubbles, charmbracelet/x/ansi, `tui/theme` |
+
+## Dependency rules
+
+Verbatim from the refactor spec (`.plan/refactor-agents-ui.md`):
+
+- `internal/host` (contract pkg only, not local/): stdlib imports only.
+- `internal/tui/...`: no `internal/*` imports except `protocol`, `host`,
+  `tui/...`.
+- No backend package imports `internal/tui/...`.
+
+These are enforced mechanically, not just by convention: `internal/tui/boundary_test.go`
+(`TestArchitectureBoundaries`) walks every non-test `.go` file in the module
+with `go/parser` and fails, naming the offending file and import, on any
+violation. Run it like any other test (`go test ./internal/tui/...`); there
+is no way to silently cross the boundary.
+
+## Why a host-services seam
+
+`internal/host` exists so `internal/tui` has exactly one door to everything
+that isn't the model turn loop: credentials, the model catalog, saved
+defaults, prompt history, and the agent/skill listings. The TUI talks to
+`host.Auth`, `host.Catalog`, `host.Settings`, and `host.History` — never to
+`internal/auth`, `internal/config`, `internal/models`, or `internal/history`.
+
+Two things fall out of that:
+
+1. **Backend work can stage invisibly.** Adding a new host service (or a new
+   `internal/protocol` event) and its `internal/host/local` implementation
+   needs no TUI change to build, vet, or pass tests — the feature simply
+   isn't called from any view yet. A later phase wires it up when it's ready
+   to be user-facing. This is how "add a service without touching the
+   frontend" works in practice, not just in principle.
+2. **The frontend develops and tests against fakes.** `internal/tui/testsupport_test.go`
+   defines scriptable fakes for every `host.Services` capability
+   (`fakeAuth`, `fakeCatalog`, `fakeSettings`, `fakeHistory`) plus the
+   `New(...)`-wrapping helpers the test suite builds models with. No TUI test
+   touches a real credential file, the network, or project history on disk —
+   see that file before writing a new TUI test.
+
+`host.Services` fields may be nil or empty (a fake in a narrow test, a future
+frontend that doesn't support one capability); every frontend call site
+degrades gracefully instead of panicking — see `services.History != nil`
+checks in `internal/tui/app.go` and `saveDefaultsThroughCmd`'s nil-`Settings`
+branch in `internal/tui/view.go` for the pattern.
+
+## Recipes
+
+### Add a provider
+
+1. Implement `provider.Provider` (`Name() string`; `Stream(ctx, Request) (<-chan StreamEvent, error)`,
+   `internal/provider/provider.go`). For a real HTTP backend, embed
+   `provider/base.Client` for transport/auth/JSON-SSE/error-shaping (see
+   `internal/provider/anthropic/anthropic.go` or `openaicompat/openaicompat.go`);
+   for something synthetic, see `internal/provider/echo/echo.go`.
+2. Wire construction into the `selectProvider` closure in `cmd/strike/wire.go`
+   (the `switch name { case "anthropic": ... }` block) — it returns the
+   `provider.Provider`, its default model, and an error for missing
+   credentials or an unknown name.
+3. Add the provider's default model id to `config.DefaultModel` in
+   `internal/config/config.go`.
+4. If the frontend should offer login/selection for it, add an entry to
+   `credentialProviders` in `internal/host/local/local.go` with its
+   capability flags (`APIKey`/`OAuth`/`Device`), and add `BeginOAuth`/`BeginDevice`
+   switch cases if it supports those flows (see `auth.OpenAIFlow`,
+   `auth.XAIFlow`, `auth.XAIDeviceFlow` in `internal/auth` for the pattern
+   each wraps). Skip this for an env-var-only or builtin provider (like echo).
+5. No `internal/tui` change is needed: `/provider`, the provider picker, and
+   `/auth` are entirely data-driven from `host.Auth.Statuses()`.
+
+### Add a tool
+
+1. Implement `tool.Tool` (`Name`, `Description`, `Schema`, `Execute`) in a new
+   file under `internal/tool/` — `internal/tool/glob.go` is a minimal
+   example; `edit.go`/`write.go`/`bash.go` show the permission-ask pattern.
+2. Register it in the `tool.NewRegistry(...)` call in `cmd/strike/wire.go`.
+3. If it mutates state or has side effects, call
+   `tc.Ask(ctx, tool.AskRequest{Permission: "yourperm", Patterns: []string{...}})`
+   inside `Execute`, and add a default rule for `"yourperm"` to
+   `permission.Defaults()` in `internal/permission/permission.go` (Allow for
+   read-only, Ask for anything mutating — see the existing six rules).
+4. No `internal/tui` change is needed: tool calls render generically from
+   `protocol.ToolCallBegin`/`ToolCallEnd` via `toolCell` in
+   `internal/tui/cells.go` (name, title, output preview, ok/err glyph).
+   `tool.Result.Metadata` exists for tool-specific rendering data but nothing
+   in the TUI consumes it yet — wiring that up is frontend work, not part of
+   adding the tool itself.
+
+### Add a slash command
+
+Two different mechanisms, depending on whether it needs Go code:
+
+- **Skill (no code).** Drop a markdown file with frontmatter into
+  `~/.strike/skills/<name>.md` or `./.strike/skills/<name>.md` — see
+  `LoadSkillsWithError` in `internal/config/agents.go` for the frontmatter
+  format (`description:`) and `$ARGUMENTS` substitution. It becomes
+  `/<name>` on the next launch automatically, through
+  `host.Services.Skills`. Reserved names (`provider`, `model`, `auth`,
+  `agent`, `help`) are rejected by `config.ValidateSkillName` before they
+  ever reach the frontend.
+- **Builtin command (code).** Add a `commandSpec` to `builtinCommandSpecs`
+  in `internal/tui/commands.go`, a `case "/yourcmd":` arm in
+  `Model.handleCommand` (`internal/tui/app.go`), and — if it's a primary
+  action — a hint in `hintsView` (`internal/tui/view.go`).
+
+### Add a UI component
+
+1. Add `internal/tui/ui/yourname.go`. Imports are limited to stdlib,
+   lipgloss, bubbles, `charmbracelet/x/ansi`, and `internal/tui/theme` (see
+   the package doc in `internal/tui/ui/doc.go`). Meet its three guarantees:
+   width-safe (never render wider than asked — check with `lipgloss.Width`),
+   graceful at tiny widths (drop borders/truncate rather than panic), and
+   zero-value tolerant (use `resolveIcons(th)` so a bare `theme.Theme{}`
+   still renders, matching every existing component).
+2. Give the exported function a doc comment with a short usage snippet (see
+   `internal/tui/ui/badge.go` or `panel.go` for the format).
+3. Add a rendered-string test at a few fixed widths in
+   `internal/tui/ui/yourname_test.go` — assert structure (`lipgloss.Width`,
+   substrings, line counts), not literal ANSI bytes; `panel_test.go` and
+   `list_test.go` show the pattern.
+4. Consume it from a view in `internal/tui/*.go`. Views never build a raw
+   lipgloss box or list — that is what this package is for.
+
+### Add a host service
+
+1. Add the method/interface/field to `host.Services` in
+   `internal/host/host.go`. This package is a stdlib-only contract — no
+   importing `auth`, `config`, `models`, or `history` here, even for a type
+   reference (the boundary test fails the build otherwise). Look at
+   `Auth`/`Catalog`/`Settings`/`History` for the shape: small, frontend-facing,
+   `context`-aware when it may block.
+2. Implement it in `internal/host/local/local.go`, wrapping the real backend
+   package. This file is the seam that is allowed to import both `internal/host`
+   and the backend packages; keep new implementations here unless there's a
+   reason to add another implementation package.
+3. Consume it from `internal/tui` through `Model.services` (or pass the
+   specific sub-interface into a modal constructor, as `providerModal` and
+   `modelModal` do) — never import the backend package directly from
+   `internal/tui`.
+4. This is also the staging mechanism from the "why a host-services seam"
+   section above: steps 1–2 alone (add the service, implement it, no TUI call
+   site) leave `go build`/`go vet`/`go test ./...` green with zero visible
+   change — the frontend wiring is a separate, later step.
+
+### Add a theme token
+
+1. Add the field to `theme.Theme` in `internal/tui/theme/theme.go` — an
+   `lipgloss.AdaptiveColor` for a color role, or a glyph on `theme.Icons` in
+   `icons.go` — and give both the light and dark member of `Default()` a
+   value (or the new `DefaultIcons()` field a glyph).
+2. If most views will read it, add a precomputed field to `theme.Styles` and
+   set it in `(Theme).S()` (`internal/tui/theme/styles.go`), so call sites
+   write `th.S().YourField` instead of repeating
+   `lipgloss.NewStyle().Foreground(th.YourField)`.
+3. Never hardcode a hex color or a literal glyph in a view or component —
+   every color and glyph traces back to a `Theme`/`Icons` field, which is
+   what makes a future palette or glyph swap a one-file edit.

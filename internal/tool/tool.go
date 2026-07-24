@@ -1,4 +1,8 @@
-// Package tool defines the tool contract and the built-in tool set.
+// Package tool defines the tool contract and the built-in tool set
+// (read/glob/grep/edit/write/bash). Used by internal/engine (dispatch),
+// internal/permission (AskRequest, for the Context.Ask signature), and
+// cmd/strike (registry construction); internal/tui never imports it — tool
+// calls reach the frontend only as protocol.ToolCallBegin/End events.
 package tool
 
 import (

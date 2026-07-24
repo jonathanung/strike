@@ -4,10 +4,9 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
-	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
+	"github.com/jonathanung/strike-cli/internal/tui/ui"
 )
 
 const paletteMaxRows = 8
@@ -105,7 +104,7 @@ func buildPaletteEntries(specs []commandSpec, agents []string, availability pale
 	agentSpec, hasAgentSpec := byID[commandAgent]
 	if hasAgentSpec {
 		for _, name := range agents {
-			if err := config.ValidateAgentName(name); err != nil {
+			if !validAgentName(name) {
 				continue
 			}
 			displayName := sanitizeDisplayData(name)
@@ -136,7 +135,7 @@ func buildPaletteEntries(specs []commandSpec, agents []string, availability pale
 			continue
 		}
 		name := strings.TrimPrefix(spec.Name, "/")
-		if err := config.ValidateSkillName(name); err != nil || spec.Name != "/"+name {
+		if !validSkillName(name) || spec.Name != "/"+name {
 			continue
 		}
 		entry := paletteEntry{
@@ -233,66 +232,43 @@ func (m *paletteModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 }
 
 func (m *paletteModal) view(width int, th theme.Theme) string {
-	width = max(0, width)
-	innerWidth := max(1, width-4)
-	title := lipgloss.NewStyle().Foreground(th.Accent).Bold(true).Render("Command palette")
-	muted := lipgloss.NewStyle().Foreground(th.TextMuted)
-	normal := lipgloss.NewStyle().Foreground(th.Text)
-	selected := lipgloss.NewStyle().Foreground(th.Accent).Bold(true)
-
-	filterLine := muted.Render("filter: ") + normal.Render(truncateDisplay(sanitizeDisplayData(m.filter)+"▏", max(1, innerWidth-8)))
 	list := m.filtered()
 	if m.cursor >= len(list) {
 		m.cursor = max(0, len(list)-1)
 	}
-	rows := min(paletteMaxRows, len(list))
-	start := max(0, min(m.cursor-rows/2, len(list)-rows))
-	end := min(len(list), start+rows)
-	lines := make([]string, 0, max(1, rows))
-	for i := start; i < end; i++ {
-		entry := list[i]
-		marker := "  "
-		labelStyle := normal
-		if i == m.cursor {
-			marker = "▸ "
-		}
-		if entry.DisabledReason != "" {
-			labelStyle = muted
-		} else if i == m.cursor {
-			labelStyle = selected
-		}
+	items := make([]ui.ListItem, len(list))
+	for i, entry := range list {
 		detail := entry.Description
 		if entry.DisabledReason != "" {
 			detail = entry.DisabledReason
 		}
-		plain := marker + entry.Label
-		if detail != "" {
-			plain += " — " + detail
+		items[i] = ui.ListItem{
+			Label:    entry.Label,
+			Detail:   detail,
+			Disabled: entry.DisabledReason != "",
 		}
-		plain = truncateDisplay(plain, innerWidth)
-
-		line := marker + labelStyle.Render(entry.Label)
-		if detail != "" {
-			line += muted.Render(" — " + detail)
-		}
-		if lipgloss.Width(line) > innerWidth {
-			line = labelStyle.Render(plain)
-		}
-		lines = append(lines, line)
-	}
-	if len(lines) == 0 {
-		lines = append(lines, muted.Render(truncateDisplay("no matching actions", innerWidth)))
 	}
 
-	hint := muted.Render(truncateDisplay("type to filter · ↑/↓ move · enter select · esc close", innerWidth))
-	body := title + "\n" + filterLine + "\n\n" + strings.Join(lines, "\n") + "\n\n" + hint
+	listWidth := max(1, ui.InnerWidth(width))
+	if width < 4 {
+		listWidth = max(1, width) // too narrow for a dialog frame
+	}
+	body := ui.List(th, ui.ListOpts{
+		Items:      items,
+		Cursor:     m.cursor,
+		Width:      listWidth,
+		Visible:    paletteMaxRows,
+		ShowFilter: true,
+		Filter:     sanitizeDisplayData(m.filter),
+		Total:      len(m.entries),
+		Empty:      "no matching actions",
+	})
 	if width < 4 {
 		return body
 	}
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(th.BorderFocus).
-		Padding(0, 1).
-		Width(max(1, width-2)).
-		Render(body)
+	return ui.Dialog(th, ui.DialogOpts{
+		Title: "Command palette",
+		Hint:  "type to filter · ↑/↓ move · enter select · esc close",
+		Width: width,
+	}, body)
 }

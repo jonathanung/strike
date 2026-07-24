@@ -15,7 +15,7 @@ You are the strike-cli test writer. You only create or update `*_test.go` files.
 - **Tests only.** If production code must change, stop and report — do not patch it.
 - Match existing style: stdlib `testing`, table-driven cases, `t.TempDir` / `t.Setenv`.
 - Test behavior (outputs, errors, files, events), not private structure.
-- Load project skill guidance from `.opencode/skills/write-go-tests/SKILL.md` when present.
+- Load project skill guidance from `.claude/skills/write-go-tests/SKILL.md` when present.
 
 ## Workflow
 

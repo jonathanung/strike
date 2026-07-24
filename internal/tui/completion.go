@@ -4,9 +4,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/charmbracelet/lipgloss"
-
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
+	"github.com/jonathanung/strike-cli/internal/tui/ui"
 )
 
 const (
@@ -110,79 +109,34 @@ func (c *completionState) move(delta int) {
 	c.Source = c.Candidates[c.Selected].Source
 }
 
+// view renders the inline slash-command completion popup as a bordered panel of
+// candidate rows above the composer. c.rows (set by reflow) bounds the visible
+// window; keyboard handling stays in the app model.
 func (c *completionState) view(width int, th theme.Theme) string {
 	if c == nil || c.rows <= 0 || len(c.Candidates) == 0 || width <= 0 {
 		return ""
 	}
-	rows := min(c.rows, len(c.Candidates))
-	start := max(0, min(c.Selected-rows/2, len(c.Candidates)-rows))
-	end := min(len(c.Candidates), start+rows)
 	popupWidth := min(width, completionMaxWidth)
-	innerWidth := max(1, popupWidth-2)
-
-	muted := lipgloss.NewStyle().Foreground(th.TextMuted)
-	selected := lipgloss.NewStyle().Foreground(th.Accent).Bold(true)
-	normal := lipgloss.NewStyle().Foreground(th.Text)
-	lines := make([]string, 0, rows)
-	for i := start; i < end; i++ {
-		candidate := c.Candidates[i]
-		marker := "  "
-		nameStyle := normal
-		if i == c.Selected {
-			marker = "▸ "
-			nameStyle = selected
-		}
+	items := make([]ui.ListItem, len(c.Candidates))
+	for i, candidate := range c.Candidates {
 		name := candidate.Spec.Name
 		if candidate.Spec.ArgsHint != "" {
 			name += " " + candidate.Spec.ArgsHint
 		}
-		description := candidate.Spec.Description
-		plain := marker + name
-		if description != "" {
-			plain += " — " + description
-		}
-		plain = truncateDisplay(plain, innerWidth)
-
-		styledName := marker + nameStyle.Render(name)
-		if description != "" {
-			styledName += muted.Render(" — " + description)
-		}
-		if lipgloss.Width(styledName) > innerWidth {
-			styledName = normal.Render(plain)
-		}
-		lines = append(lines, styledName)
+		items[i] = ui.ListItem{Label: name, Detail: candidate.Spec.Description}
 	}
-
-	body := strings.Join(lines, "\n")
+	bodyWidth := max(1, ui.InnerWidth(popupWidth))
+	if popupWidth < 4 {
+		bodyWidth = max(1, popupWidth)
+	}
+	body := ui.List(th, ui.ListOpts{
+		Items:   items,
+		Cursor:  c.Selected,
+		Width:   bodyWidth,
+		Visible: min(c.rows, len(c.Candidates)),
+	})
 	if popupWidth < 4 {
 		return body
 	}
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(th.BorderFocus).
-		Width(innerWidth).
-		Render(body)
-}
-
-func truncateDisplay(value string, width int) string {
-	if width <= 0 {
-		return ""
-	}
-	if lipgloss.Width(value) <= width {
-		return value
-	}
-	if width == 1 {
-		return "…"
-	}
-	var out strings.Builder
-	used := 0
-	for _, r := range value {
-		runeWidth := lipgloss.Width(string(r))
-		if used+runeWidth > width-1 {
-			break
-		}
-		out.WriteRune(r)
-		used += runeWidth
-	}
-	return out.String() + "…"
+	return ui.Panel(th, ui.PanelOpts{Width: popupWidth, Focused: true}, body)
 }

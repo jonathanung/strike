@@ -1,6 +1,8 @@
 // Package session persists a session as a JSONL log of protocol events —
 // the event stream is the transcript, so resume/replay is just re-reading
-// the log.
+// the log. cmd/strike is the only importer: it tees engine events through a
+// store on their way to the frontend. internal/tui never imports this
+// package directly.
 package session
 
 import (

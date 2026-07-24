@@ -1,4 +1,6 @@
-// Package project resolves the stable filesystem identity used for project-scoped state.
+// Package project resolves the stable filesystem identity used for
+// project-scoped state. cmd/strike is the only importer, resolving the
+// identity once at startup for history and config scoping.
 package project
 
 import (

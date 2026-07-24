@@ -11,7 +11,9 @@ import (
 )
 
 // cell is one transcript block. The transcript is an ordered list of cells,
-// each responsible for its own rendering (codex "history cell" pattern).
+// each responsible for its own rendering (codex "history cell" pattern). Cells
+// draw from theme.Icons for glyphs and theme.Styles for colors, never inline
+// literals.
 type cell interface {
 	render(width int, th theme.Theme) string
 }
@@ -21,8 +23,9 @@ type userCell struct {
 }
 
 func (c *userCell) render(width int, th theme.Theme) string {
-	label := lipgloss.NewStyle().Foreground(th.UserLabel).Bold(true).Render("❯ you")
-	body := lipgloss.NewStyle().Foreground(th.Text).Width(width - 2).Render(c.text)
+	ic := iconsFor(th)
+	label := lipgloss.NewStyle().Foreground(th.UserLabel).Bold(true).Render(ic.Prompt + " you")
+	body := lipgloss.NewStyle().Foreground(th.Text).Width(max(1, width-2)).Render(c.text)
 	return label + "\n" + indent(body, "  ")
 }
 
@@ -31,9 +34,9 @@ type assistantCell struct {
 }
 
 func (c *assistantCell) render(width int, th theme.Theme) string {
-	label := lipgloss.NewStyle().Foreground(th.Accent).Bold(true).Render("● strike")
-	// Markdown rendering (glamour) lands in Phase 1; raw text for now.
-	body := lipgloss.NewStyle().Foreground(th.Text).Width(width - 2).Render(strings.TrimSpace(c.text))
+	ic := iconsFor(th)
+	label := lipgloss.NewStyle().Foreground(th.Accent).Bold(true).Render(ic.Assistant + " strike")
+	body := lipgloss.NewStyle().Foreground(th.Text).Width(max(1, width-2)).Render(strings.TrimSpace(c.text))
 	return label + "\n" + indent(body, "  ")
 }
 
@@ -50,6 +53,8 @@ type toolCell struct {
 const toolPreviewLines = 6
 
 func (c *toolCell) render(width int, th theme.Theme) string {
+	ic := iconsFor(th)
+	st := th.S()
 	labelStyle := lipgloss.NewStyle().Foreground(th.ToolLabel).Bold(true)
 	head := c.name
 	if c.title != "" {
@@ -57,19 +62,19 @@ func (c *toolCell) render(width int, th theme.Theme) string {
 	} else if len(c.args) > 0 {
 		head += " " + compactJSON(c.args, 60)
 	}
-	status := "…"
+	status := st.Muted.Render("…")
 	if c.done {
 		if c.isError {
-			status = lipgloss.NewStyle().Foreground(th.Error).Render("✗")
+			status = st.Error.Render(ic.Err)
 		} else {
-			status = lipgloss.NewStyle().Foreground(th.Success).Render("✓")
+			status = st.Success.Render(ic.OK)
 		}
 	}
-	out := labelStyle.Render("⚙ "+head) + " " + status
+	out := labelStyle.Render(ic.Tool+" "+head) + " " + status
 	if c.done && c.output != "" {
 		preview := previewLines(c.output, toolPreviewLines)
-		body := lipgloss.NewStyle().Foreground(th.TextMuted).Width(width - 4).Render(preview)
-		out += "\n" + indent(body, "  │ ")
+		body := st.Muted.Width(max(1, width-4)).Render(preview)
+		out += "\n" + indent(body, "  "+st.Muted.Render("│")+" ")
 	}
 	return out
 }
@@ -81,7 +86,8 @@ type infoCell struct {
 }
 
 func (c *infoCell) render(width int, th theme.Theme) string {
-	return lipgloss.NewStyle().Foreground(th.Warning).Width(width).Render("◦ " + c.text)
+	ic := iconsFor(th)
+	return lipgloss.NewStyle().Foreground(th.Warning).Width(max(1, width)).Render(ic.Info + " " + c.text)
 }
 
 type errorCell struct {
@@ -89,7 +95,8 @@ type errorCell struct {
 }
 
 func (c *errorCell) render(width int, th theme.Theme) string {
-	return lipgloss.NewStyle().Foreground(th.Error).Width(width).Render("✗ " + c.text)
+	ic := iconsFor(th)
+	return lipgloss.NewStyle().Foreground(th.Error).Width(max(1, width)).Render(ic.Err + " " + c.text)
 }
 
 func indent(s, prefix string) string {

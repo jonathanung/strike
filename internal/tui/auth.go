@@ -7,26 +7,27 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
-	"github.com/jonathanung/strike-cli/internal/auth"
+	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
+	"github.com/jonathanung/strike-cli/internal/tui/ui"
 )
 
-// Async messages for the auth flows. OAuth runs in tea.Cmd goroutines so
-// the event loop stays responsive while the user is in the browser; the
-// centered authWaitModal shows progress and the login link meanwhile.
+// Async messages for the auth flows. Logins run in tea.Cmd goroutines so the
+// event loop stays responsive while the user is in the browser; the centered
+// authWaitModal shows progress and the login link meanwhile. Credentials are
+// persisted inside the host login handles — these messages carry only
+// user-facing outcome strings, never tokens.
 
 type authStartedMsg struct {
 	provider string
-	pending  *auth.PendingLogin
+	login    *host.OAuthLogin
 }
 
 type authDeviceMsg struct {
 	provider string
-	flow     auth.DeviceConfig
-	code     *auth.DeviceCode
+	login    *host.DeviceLogin
 }
 
 type authDoneMsg struct {
@@ -36,31 +37,41 @@ type authDoneMsg struct {
 	selectAfter bool // switch to the provider once login succeeds
 }
 
-const authProviders = "anthropic|openai|xai"
-
 // handleAuth dispatches "/auth ..." commands. Bare /auth is an alias for
-// bare /provider: the same centered picker with auth status, where
-// selecting an unauthenticated provider starts its login.
+// bare /provider: the same centered picker with auth status, where selecting
+// an unauthenticated provider starts its login. Provider names, usage strings,
+// and per-provider login methods are all data-driven from host.Auth.Statuses().
 func (m Model) handleAuth(args []string) (tea.Model, tea.Cmd) {
 	m.composer.Reset()
-	if len(args) == 0 {
-		m.modal = newProviderModal(m.authStore, m.providerName, m.ops, m.th)
+	authsvc := m.services.Auth
+	if authsvc == nil {
+		m.setNotice("authentication is unavailable", true)
 		return m, nil
 	}
-	if args[0] == "status" {
+	statuses := authsvc.Statuses()
+	names := credentialProviderNames(statuses)
+
+	if len(args) == 0 {
+		m.modal = newProviderModal(m.services, m.providerName, m.ops, m.th)
+		return m, nil
+	}
+	switch args[0] {
+	case "status":
 		var parts []string
-		for _, p := range []string{"anthropic", "openai", "xai"} {
-			parts = append(parts, p+": "+auth.Describe(p, m.authStore))
+		for _, s := range statuses {
+			if s.Builtin {
+				continue
+			}
+			parts = append(parts, s.Name+": "+authsvc.Describe(s.Name))
 		}
 		m.setNotice(strings.Join(parts, " · "), false)
 		return m, nil
-	}
-	if args[0] == "logout" {
+	case "logout":
 		if len(args) < 2 {
-			m.setNotice("usage: /auth logout <"+authProviders+">", true)
+			m.setNotice("usage: /auth logout <"+strings.Join(names, "|")+">", true)
 			return m, nil
 		}
-		if err := m.authStore.Delete(args[1]); err != nil {
+		if err := authsvc.Logout(args[1]); err != nil {
 			m.setNotice("logout failed: "+err.Error(), true)
 			return m, nil
 		}
@@ -69,41 +80,82 @@ func (m Model) handleAuth(args []string) (tea.Model, tea.Cmd) {
 	}
 
 	provider := args[0]
+	st, ok := findStatus(statuses, provider)
+	if !ok || st.Builtin {
+		m.setNotice("unknown provider "+provider+" — usage: /auth <"+strings.Join(names, "|")+"> [key|device]", true)
+		return m, nil
+	}
 	method := ""
 	if len(args) > 1 {
 		method = args[1]
 	}
-	switch provider {
-	case "anthropic":
-		m.modal = newAPIKeyModal(provider, m.authStore, m.th, false)
-		return m, nil
-	case "openai", "xai":
-		switch method {
-		case "key":
-			m.modal = newAPIKeyModal(provider, m.authStore, m.th, false)
+	switch method {
+	case "key":
+		if !st.APIKey {
+			m.setNotice(provider+" does not accept an API key", true)
 			return m, nil
-		case "device":
-			if provider != "xai" {
-				m.setNotice("device flow is only available for xai", true)
-				return m, nil
-			}
-			var cmd tea.Cmd
-			m.modal, cmd = startDeviceModal(provider, false)
-			return m, cmd
-		default:
-			var cmd tea.Cmd
-			m.modal, cmd = startOAuthModal(provider, false)
-			return m, cmd
 		}
-	default:
-		m.setNotice("unknown provider "+provider+" — usage: /auth <"+authProviders+"> [key|device]", true)
+		m.modal = newAPIKeyModal(provider, authsvc, m.th, false)
 		return m, nil
+	case "device":
+		if !st.Device {
+			m.setNotice("device flow is only available for "+strings.Join(deviceProviderNames(statuses), ", "), true)
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.modal, cmd = startDeviceModal(authsvc, provider, false)
+		return m, cmd
+	default:
+		switch {
+		case st.OAuth:
+			var cmd tea.Cmd
+			m.modal, cmd = startOAuthModal(authsvc, provider, false)
+			return m, cmd
+		case st.APIKey:
+			m.modal = newAPIKeyModal(provider, authsvc, m.th, false)
+			return m, nil
+		default:
+			m.setNotice(provider+" has no supported login method", true)
+			return m, nil
+		}
 	}
 }
 
-// authWaitModal is the centered dialog shown while an OAuth or device flow
-// is in flight: it carries the login link (in case the browser didn't
-// open) or the device code, and esc cancels the flow.
+// credentialProviderNames is the ordered list of non-builtin provider names,
+// the ones /auth can log into.
+func credentialProviderNames(statuses []host.ProviderStatus) []string {
+	var names []string
+	for _, s := range statuses {
+		if !s.Builtin {
+			names = append(names, s.Name)
+		}
+	}
+	return names
+}
+
+// deviceProviderNames lists the providers that support the RFC 8628 device flow.
+func deviceProviderNames(statuses []host.ProviderStatus) []string {
+	var names []string
+	for _, s := range statuses {
+		if s.Device {
+			names = append(names, s.Name)
+		}
+	}
+	return names
+}
+
+func findStatus(statuses []host.ProviderStatus, name string) (host.ProviderStatus, bool) {
+	for _, s := range statuses {
+		if s.Name == name {
+			return s, true
+		}
+	}
+	return host.ProviderStatus{}, false
+}
+
+// authWaitModal is the centered dialog shown while an OAuth or device flow is
+// in flight: it carries the login link (in case the browser did not open) or
+// the device code, and esc cancels the flow.
 type authWaitModal struct {
 	provider    string
 	url         string // authorize URL once the flow has started
@@ -114,36 +166,33 @@ type authWaitModal struct {
 	cancel      context.CancelFunc
 }
 
-// startOAuthModal opens the wait dialog and begins the browser flow.
-func startOAuthModal(provider string, selectAfter bool) (modal, tea.Cmd) {
+// startOAuthModal opens the wait dialog and begins the browser flow through the
+// host auth service.
+func startOAuthModal(authsvc host.Auth, provider string, selectAfter bool) (modal, tea.Cmd) {
 	ctx, cancel := context.WithCancel(context.Background())
 	wm := &authWaitModal{provider: provider, selectAfter: selectAfter, ctx: ctx, cancel: cancel}
 	return wm, func() tea.Msg {
-		flow := auth.OpenAIFlow()
-		if provider == "xai" {
-			flow = auth.XAIFlow()
-		}
-		pending, err := flow.Begin()
+		login, err := authsvc.BeginOAuth(ctx, provider)
 		if err != nil {
 			cancel()
 			return authDoneMsg{provider: provider, err: err, selectAfter: selectAfter}
 		}
-		return authStartedMsg{provider: provider, pending: pending}
+		return authStartedMsg{provider: provider, login: login}
 	}
 }
 
-// startDeviceModal opens the wait dialog and begins the device flow.
-func startDeviceModal(provider string, selectAfter bool) (modal, tea.Cmd) {
+// startDeviceModal opens the wait dialog and begins the device flow through the
+// host auth service.
+func startDeviceModal(authsvc host.Auth, provider string, selectAfter bool) (modal, tea.Cmd) {
 	ctx, cancel := context.WithCancel(context.Background())
 	wm := &authWaitModal{provider: provider, selectAfter: selectAfter, ctx: ctx, cancel: cancel}
 	return wm, func() tea.Msg {
-		flow := auth.XAIDeviceFlow()
-		code, err := flow.RequestCode(ctx)
+		login, err := authsvc.BeginDevice(ctx, provider)
 		if err != nil {
 			cancel()
 			return authDoneMsg{provider: provider, err: err, selectAfter: selectAfter}
 		}
-		return authDeviceMsg{provider: provider, flow: flow, code: code}
+		return authDeviceMsg{provider: provider, login: login}
 	}
 }
 
@@ -156,28 +205,25 @@ func (m *authWaitModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 }
 
 func (m *authWaitModal) view(width int, th theme.Theme) string {
-	title := lipgloss.NewStyle().Foreground(th.Accent).Bold(true).
-		Render("Logging in to " + m.provider)
-	muted := lipgloss.NewStyle().Foreground(th.TextMuted)
-	body := muted.Render("starting login flow…")
+	st := th.S()
+	inner := max(1, ui.InnerWidth(width))
+	body := st.Muted.Render("starting login flow…")
 	switch {
 	case m.userCode != "":
-		body = lipgloss.NewStyle().Foreground(th.Text).Render("Open "+m.verifyURI+" on any device\nand enter code: ") +
-			lipgloss.NewStyle().Foreground(th.Warning).Bold(true).Render(m.userCode) +
-			"\n" + muted.Render("waiting for authorization…")
+		body = wrapToWidth(st.Text.Render("Open "+m.verifyURI+" on any device and enter code:"), inner) +
+			"\n" + st.Warning.Bold(true).Render(m.userCode) +
+			"\n" + st.Muted.Render("waiting for authorization…")
 	case m.url != "":
-		body = lipgloss.NewStyle().Foreground(th.Text).Render("Complete the login in your browser.") +
-			"\n" + muted.Render("If it did not open, visit:") +
-			"\n" + lipgloss.NewStyle().Foreground(th.Accent).Width(width-4).Render(m.url) +
-			"\n" + muted.Render("waiting for the callback…")
+		body = st.Text.Render("Complete the login in your browser.") +
+			"\n" + st.Muted.Render("If it did not open, visit:") +
+			"\n" + wrapToWidth(st.Accent.Render(m.url), inner) +
+			"\n" + st.Muted.Render("waiting for the callback…")
 	}
-	hint := muted.Render("esc cancel")
-	box := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(th.BorderFocus).
-		Padding(0, 1).
-		Width(width)
-	return box.Render(title + "\n\n" + body + "\n\n" + hint)
+	return ui.Dialog(th, ui.DialogOpts{
+		Title: "Logging in to " + m.provider,
+		Hint:  "esc cancel",
+		Width: width,
+	}, body)
 }
 
 // applyAuthMsg handles the async auth messages; returns false if msg is not
@@ -188,35 +234,27 @@ func (m *Model) applyAuthMsg(msg tea.Msg) (tea.Cmd, bool) {
 		ctx := context.Background()
 		selectAfter := false
 		if wm, ok := m.modal.(*authWaitModal); ok && wm.provider == msg.provider {
-			wm.url = msg.pending.URL
+			wm.url = msg.login.URL
 			ctx, selectAfter = wm.ctx, wm.selectAfter
 		}
-		store := m.authStore
+		login, provider := msg.login, msg.provider
 		return func() tea.Msg {
-			tokens, err := msg.pending.Wait(ctx)
-			if err != nil {
-				return authDoneMsg{provider: msg.provider, err: err, selectAfter: selectAfter}
-			}
-			outcome, err := auth.CompleteLogin(context.Background(), store, msg.provider, tokens)
-			return authDoneMsg{provider: msg.provider, message: outcome, err: err, selectAfter: selectAfter}
+			outcome, err := login.Wait(ctx)
+			return authDoneMsg{provider: provider, message: outcome, err: err, selectAfter: selectAfter}
 		}, true
 
 	case authDeviceMsg:
 		ctx := context.Background()
 		selectAfter := false
 		if wm, ok := m.modal.(*authWaitModal); ok && wm.provider == msg.provider {
-			wm.userCode = msg.code.UserCode
-			wm.verifyURI = msg.code.VerificationURI
+			wm.userCode = msg.login.UserCode
+			wm.verifyURI = msg.login.VerificationURI
 			ctx, selectAfter = wm.ctx, wm.selectAfter
 		}
-		store := m.authStore
+		login, provider := msg.login, msg.provider
 		return func() tea.Msg {
-			tokens, err := msg.flow.Poll(ctx, msg.code)
-			if err != nil {
-				return authDoneMsg{provider: msg.provider, err: err, selectAfter: selectAfter}
-			}
-			outcome, err := auth.CompleteLogin(context.Background(), store, msg.provider, tokens)
-			return authDoneMsg{provider: msg.provider, message: outcome, err: err, selectAfter: selectAfter}
+			outcome, err := login.Poll(ctx)
+			return authDoneMsg{provider: provider, message: outcome, err: err, selectAfter: selectAfter}
 		}, true
 
 	case authDoneMsg:
@@ -245,22 +283,23 @@ func (m *Model) applyAuthMsg(msg tea.Msg) (tea.Cmd, bool) {
 	return nil, false
 }
 
-// apiKeyModal is a masked input for pasting an API key, stored on enter.
+// apiKeyModal is a masked input for pasting an API key, stored on enter through
+// the host auth service.
 type apiKeyModal struct {
 	provider    string
-	store       *auth.Store
+	auth        host.Auth
 	input       textinput.Model
 	th          theme.Theme
 	selectAfter bool
 }
 
-func newAPIKeyModal(provider string, store *auth.Store, th theme.Theme, selectAfter bool) *apiKeyModal {
+func newAPIKeyModal(provider string, authsvc host.Auth, th theme.Theme, selectAfter bool) *apiKeyModal {
 	in := textinput.New()
 	in.Placeholder = "paste key"
 	in.EchoMode = textinput.EchoPassword
 	in.Prompt = "> "
 	in.Focus()
-	return &apiKeyModal{provider: provider, store: store, input: in, th: th, selectAfter: selectAfter}
+	return &apiKeyModal{provider: provider, auth: authsvc, input: in, th: th, selectAfter: selectAfter}
 }
 
 func (m *apiKeyModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
@@ -268,13 +307,14 @@ func (m *apiKeyModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 	case "esc":
 		return nil, nil
 	case "enter":
+		// An empty submit is ignored without touching the auth service.
 		key := strings.TrimSpace(m.input.Value())
 		if key == "" {
 			return nil, nil
 		}
-		provider, store, selectAfter := m.provider, m.store, m.selectAfter
+		provider, authsvc, selectAfter := m.provider, m.auth, m.selectAfter
 		return nil, func() tea.Msg {
-			err := store.Set(provider, auth.Credential{Type: auth.TypeAPIKey, APIKey: key})
+			err := authsvc.SetAPIKey(provider, key)
 			return authDoneMsg{provider: provider, message: "Stored " + provider + " API key", err: err, selectAfter: selectAfter}
 		}
 	}
@@ -284,14 +324,10 @@ func (m *apiKeyModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 }
 
 func (m *apiKeyModal) view(width int, th theme.Theme) string {
-	title := lipgloss.NewStyle().Foreground(th.Accent).Bold(true).
-		Render("Enter " + m.provider + " API key")
-	hint := lipgloss.NewStyle().Foreground(th.TextMuted).
-		Render("enter save · esc cancel (input is hidden)")
-	box := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(th.Accent).
-		Padding(0, 1).
-		Width(width)
-	return box.Render(title + "\n" + m.input.View() + "\n" + hint)
+	m.input.Width = max(1, ui.InnerWidth(width)-2)
+	return ui.Dialog(th, ui.DialogOpts{
+		Title: "Enter " + m.provider + " API key",
+		Hint:  "enter save · esc cancel (input is hidden)",
+		Width: width,
+	}, m.input.View())
 }

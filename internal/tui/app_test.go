@@ -9,11 +9,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/jonathanung/strike-cli/internal/auth"
-	"github.com/jonathanung/strike-cli/internal/config"
-	"github.com/jonathanung/strike-cli/internal/history"
+	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
+	"github.com/jonathanung/strike-cli/internal/tui/ui"
 )
 
 const appCmdTimeout = 2 * time.Second
@@ -31,7 +30,7 @@ func TestCompletionReplacementPreservesArgumentsAndLinesAtCursorPositions(t *tes
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			skills := []config.Skill{{Name: "部署", Description: "deploy", Template: "deploy"}}
+			skills := []host.Skill{fakeSkill("部署", "deploy", "deploy")}
 			m, _ := newAppTestModel(nil, skills)
 			m.setComposerValueAt(tt.value, tt.offset)
 			m.recomputeCompletion()
@@ -235,7 +234,7 @@ func TestLayoutReflowHandlesTinyWindowsPopupPasteResizeAndReset(t *testing.T) {
 		_ = m.View()
 	}
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
-	if m.viewport.Width != 80 || m.viewport.Height < 0 {
+	if m.viewport.Width != ui.InnerWidth(80) || m.viewport.Height < 0 {
 		t.Errorf("resize did not restore effective viewport dimensions: %dx%d", m.viewport.Width, m.viewport.Height)
 	}
 }
@@ -290,29 +289,26 @@ func TestDangerousPermissionsIndicatorIsOptInAndSafeAtTinyWidths(t *testing.T) {
 func TestDangerousPermissionsIndicatorRemainsVisibleWithActiveModals(t *testing.T) {
 	const indicator = "DANGER: permissions bypassed"
 	tests := []struct {
-		name        string
-		open        func(*Model)
-		content     []string
-		tinyContent string
+		name    string
+		open    func(*Model)
+		content []string
 	}{
 		{
 			name: "model picker",
 			open: func(m *Model) {
-				picker := newModelModal("echo", "", m.ops)
+				picker := newModelModal("echo", "", m.ops, m.services.Settings)
 				picker.loading = false
 				picker.all = []string{"echo-regression-model"}
 				m.modal = picker
 			},
-			content:     []string{"Select model — echo", "echo-regression-model"},
-			tinyContent: "Select model",
+			content: []string{"Select model — echo", "echo-regression-model"},
 		},
 		{
 			name: "provider picker",
 			open: func(m *Model) {
-				m.modal = newProviderModal(&auth.Store{}, "", m.ops, m.th)
+				m.modal = newProviderModal(m.services, "", m.ops, m.th)
 			},
-			content:     []string{"Select provider", "echo"},
-			tinyContent: "Select provider",
+			content: []string{"Select provider", "echo"},
 		},
 		{
 			name: "permission prompt",
@@ -323,16 +319,14 @@ func TestDangerousPermissionsIndicatorRemainsVisibleWithActiveModals(t *testing.
 					Patterns:   []string{"go test ./..."},
 				})
 			},
-			content:     []string{"Permission required:", "bash", "allow once", "reject"},
-			tinyContent: "Permission",
+			content: []string{"Permission required:", "bash", "allow once", "reject"},
 		},
 		{
 			name: "command palette",
 			open: func(m *Model) {
 				m.modal = newPaletteModal(m.commands, nil, m.currentPaletteAvailability())
 			},
-			content:     []string{"Command palette", "/provider", "/help"},
-			tinyContent: "Command palette",
+			content: []string{"Command palette", "/provider", "/help"},
 		},
 	}
 
@@ -355,7 +349,9 @@ func TestDangerousPermissionsIndicatorRemainsVisibleWithActiveModals(t *testing.
 					content := tt.content
 					wantIndicator := indicator
 					if size.tiny {
-						content = []string{tt.tinyContent}
+						// At an extreme 9x4 the dialog frame truncates its title
+						// and rows; only the danger banner is asserted there.
+						content = nil
 						wantIndicator = indicator[:size.window.Width]
 					}
 					for _, want := range append([]string{wantIndicator}, content...) {
@@ -430,8 +426,8 @@ func TestSlashCommandExecutionAndSkillRenderingRemainIntact(t *testing.T) {
 	})
 
 	t.Run("skill substitutes arguments and sends rendered prompt", func(t *testing.T) {
-		skill := config.Skill{Name: "review", Description: "review code", Template: "Review: $ARGUMENTS"}
-		m, ops := newAppTestModel(nil, []config.Skill{skill})
+		skill := fakeSkill("review", "review code", "Review: $ARGUMENTS")
+		m, ops := newAppTestModel(nil, []host.Skill{skill})
 		m.providerName = "echo"
 		m.composer.SetValue("/review this diff")
 		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -487,7 +483,7 @@ func TestModelAndAgentSlashCommandsEmitSelections(t *testing.T) {
 func TestBareAuthSlashCommandOpensProviderStatusModalWithoutSideEffects(t *testing.T) {
 	ops := make(chan protocol.Op, 8)
 	events := make(chan protocol.Event)
-	m := New(ops, events, &auth.Store{}, nil, nil)
+	m := New(ops, events, testServices(nil, nil))
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.composer.SetValue("/auth")
 
@@ -569,12 +565,7 @@ func TestOptionalHistoryIsBackwardCompatibleWhenOmitted(t *testing.T) {
 }
 
 func TestHistoryNavigationRecallsEntriesAndRestoresEmptyDraftAtNewestBoundary(t *testing.T) {
-	store := openAppHistory(t, "navigation")
-	for _, prompt := range []string{"oldest", "middle", "newest"} {
-		if err := store.Add(prompt); err != nil {
-			t.Fatalf("Add(%q) error = %v", prompt, err)
-		}
-	}
+	store := newFakeHistory("oldest", "middle", "newest")
 	m, _ := newAppTestModelWithHistory(nil, nil, store)
 
 	for i, want := range []string{"newest", "middle", "oldest", "oldest"} {
@@ -599,10 +590,7 @@ func TestHistoryNavigationRecallsEntriesAndRestoresEmptyDraftAtNewestBoundary(t 
 }
 
 func TestHistoryKeysOnNonemptyDraftRemainTextareaNavigation(t *testing.T) {
-	store := openAppHistory(t, "textarea-navigation")
-	if err := store.Add("must not replace draft"); err != nil {
-		t.Fatal(err)
-	}
+	store := newFakeHistory("must not replace draft")
 	m, _ := newAppTestModelWithHistory(nil, nil, store)
 	m.setComposerValueAt("first line\nsecond line", len([]rune("first line\nsecond line")))
 
@@ -620,11 +608,8 @@ func TestHistoryKeysOnNonemptyDraftRemainTextareaNavigation(t *testing.T) {
 }
 
 func TestHistoryRecallReflowsMultilineUnicodeAndEditingExitsBrowsing(t *testing.T) {
-	store := openAppHistory(t, "unicode-layout")
 	prompt := "界界界界界界界界\nsecond 🙂 line"
-	if err := store.Add(prompt); err != nil {
-		t.Fatal(err)
-	}
+	store := newFakeHistory(prompt)
 	m, _ := newAppTestModelWithHistory(nil, nil, store)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 12, Height: 20})
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyUp})
@@ -645,17 +630,17 @@ func TestHistoryRecallReflowsMultilineUnicodeAndEditingExitsBrowsing(t *testing.
 func TestSubmissionsPersistDisplayPromptAndStillEmitUserInput(t *testing.T) {
 	tests := []struct {
 		name        string
-		skills      []config.Skill
+		skills      []host.Skill
 		composer    string
 		wantInput   string
 		wantHistory string
 	}{
 		{name: "ordinary", composer: "  hello 界\nnext line  ", wantInput: "hello 界\nnext line", wantHistory: "hello 界\nnext line"},
-		{name: "skill", skills: []config.Skill{{Name: "review", Template: "Rendered: $ARGUMENTS"}}, composer: "/review exact invocation", wantInput: "Rendered: exact invocation", wantHistory: "/review exact invocation"},
+		{name: "skill", skills: []host.Skill{fakeSkill("review", "", "Rendered: $ARGUMENTS")}, composer: "/review exact invocation", wantInput: "Rendered: exact invocation", wantHistory: "/review exact invocation"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store := openAppHistory(t, "submit-"+tt.name)
+			store := newFakeHistory()
 			m, ops := newAppTestModelWithHistory(nil, tt.skills, store)
 			m.providerName = "echo"
 			m.composer.SetValue(tt.composer)
@@ -679,7 +664,7 @@ func TestSubmissionsPersistDisplayPromptAndStillEmitUserInput(t *testing.T) {
 }
 
 func TestRapidSubmissionsEnqueueHistoryInSubmissionOrderBeforeCommandCompletion(t *testing.T) {
-	store := openAppHistory(t, "rapid-order")
+	store := newFakeHistory()
 	m, ops := newAppTestModelWithHistory(nil, nil, store)
 	m.providerName = "echo"
 
@@ -722,10 +707,8 @@ func TestRapidSubmissionsEnqueueHistoryInSubmissionOrderBeforeCommandCompletion(
 }
 
 func TestHistoryFailureShowsNoticeWithoutSuppressingSubmission(t *testing.T) {
-	store := openAppHistory(t, "closed-store")
-	if err := store.Close(); err != nil {
-		t.Fatal(err)
-	}
+	store := newFakeHistory()
+	store.fail = true
 	m, ops := newAppTestModelWithHistory(nil, nil, store)
 	m.providerName = "echo"
 	m.composer.SetValue("send despite persistence failure")
@@ -744,10 +727,7 @@ func TestHistoryFailureShowsNoticeWithoutSuppressingSubmission(t *testing.T) {
 }
 
 func TestSubmittingRecalledHistoryResetsBrowsingState(t *testing.T) {
-	store := openAppHistory(t, "submit-recalled")
-	if err := store.Add("recalled prompt"); err != nil {
-		t.Fatal(err)
-	}
+	store := newFakeHistory("recalled prompt")
 	m, ops := newAppTestModelWithHistory(nil, nil, store)
 	m.providerName = "echo"
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyUp})
@@ -841,7 +821,7 @@ func TestPermissionResolvedOnlyClosesMatchingPermissionModal(t *testing.T) {
 func TestPaletteInvokeUsesExistingCommandBehavior(t *testing.T) {
 	t.Run("provider", func(t *testing.T) {
 		ops := make(chan protocol.Op, 8)
-		m := New(ops, make(chan protocol.Event), &auth.Store{}, nil, nil)
+		m := New(ops, make(chan protocol.Event), testServices(nil, nil))
 		m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 		m = updateApp(t, m, paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/provider"}})
 		if view := m.View(); !strings.Contains(view, "Select provider") {
@@ -862,7 +842,7 @@ func TestPaletteInvokeUsesExistingCommandBehavior(t *testing.T) {
 	})
 	t.Run("auth", func(t *testing.T) {
 		ops := make(chan protocol.Op, 8)
-		m := New(ops, make(chan protocol.Event), &auth.Store{}, nil, nil)
+		m := New(ops, make(chan protocol.Event), testServices(nil, nil))
 		m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 		m = updateApp(t, m, paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/auth"}})
 		if !strings.Contains(m.View(), "Select provider") {
@@ -890,11 +870,8 @@ func TestPaletteInvokeUsesExistingCommandBehavior(t *testing.T) {
 }
 
 func TestPaletteInsertOnlyFocusesComposerWithoutSubmissionOrHistoryWrite(t *testing.T) {
-	store := openAppHistory(t, "insert-only")
-	if err := store.Add("existing"); err != nil {
-		t.Fatal(err)
-	}
-	m, ops := newAppTestModelWithHistory(nil, []config.Skill{{Name: "review", Template: "$ARGUMENTS"}}, store)
+	store := newFakeHistory("existing")
+	m, ops := newAppTestModelWithHistory(nil, []host.Skill{fakeSkill("review", "", "$ARGUMENTS")}, store)
 	m.providerName = "echo"
 	m.composer.Blur()
 	m.historyPos = 0
@@ -947,7 +924,7 @@ func TestControlKPaletteAvailabilityTracksProviderAndTurn(t *testing.T) {
 }
 
 func TestOpenPaletteRefreshesWhenTurnStartsAndKeepsHelpAvailable(t *testing.T) {
-	m, ops := newAppTestModel([]string{"build"}, []config.Skill{{Name: "review", Description: "review code"}})
+	m, ops := newAppTestModel([]string{"build"}, []host.Skill{fakeSkill("review", "review code", "")})
 	m.providerName = "echo"
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
 	palette := m.modal.(*paletteModal)
@@ -967,7 +944,7 @@ func TestOpenPaletteRefreshesWhenTurnStartsAndKeepsHelpAvailable(t *testing.T) {
 }
 
 func TestOpenPaletteReenablesRestrictedEntriesWhenTurnCompletes(t *testing.T) {
-	m, ops := newAppTestModel([]string{"build"}, []config.Skill{{Name: "review", Description: "review code"}})
+	m, ops := newAppTestModel([]string{"build"}, []host.Skill{fakeSkill("review", "review code", "")})
 	m.providerName = "echo"
 	m.turnRunning = true
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
@@ -988,7 +965,7 @@ func TestOpenPaletteReenablesRestrictedEntriesWhenTurnCompletes(t *testing.T) {
 }
 
 func TestOpenPaletteRefreshesProviderDependentEntriesAfterModelSelected(t *testing.T) {
-	m, ops := newAppTestModel(nil, []config.Skill{{Name: "review", Description: "review code"}})
+	m, ops := newAppTestModel(nil, []host.Skill{fakeSkill("review", "review code", "")})
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
 	palette := m.modal.(*paletteModal)
 	for _, label := range []string{"/model", "/review"} {
@@ -1041,7 +1018,7 @@ func TestConstructedRestrictedPaletteInvokeIsRejectedAgainstCurrentAvailability(
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m, ops := newAppTestModel([]string{"build"}, []config.Skill{{Name: "review", Description: "review code"}})
+			m, ops := newAppTestModel([]string{"build"}, []host.Skill{fakeSkill("review", "review code", "")})
 			m.providerName, m.turnRunning = tt.provider, tt.turn
 			m.composer.SetValue("unchanged draft")
 			m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
@@ -1078,18 +1055,6 @@ func (m *appProbeModal) update(tea.KeyMsg) (modal, tea.Cmd) {
 
 func (m *appProbeModal) view(int, theme.Theme) string { return "probe" }
 
-func newAppTestModel(agents []string, skills []config.Skill) (Model, chan protocol.Op) {
-	ops := make(chan protocol.Op, 8)
-	events := make(chan protocol.Event)
-	return New(ops, events, nil, agents, skills), ops
-}
-
-func newAppTestModelWithOptions(options Options) (Model, chan protocol.Op) {
-	ops := make(chan protocol.Op, 8)
-	events := make(chan protocol.Event)
-	return New(ops, events, nil, nil, nil, options), ops
-}
-
 func assertViewContainsPlainText(t *testing.T, view, want string) {
 	t.Helper()
 	if plain := ansi.Strip(view); !strings.Contains(plain, want) {
@@ -1116,24 +1081,6 @@ func compactAppPlainText(text string) string {
 		"╯", "",
 		"─", "",
 	).Replace(text)
-}
-
-func newAppTestModelWithHistory(agents []string, skills []config.Skill, store *history.Store) (Model, chan protocol.Op) {
-	ops := make(chan protocol.Op, 8)
-	events := make(chan protocol.Event)
-	return New(ops, events, nil, agents, skills, Options{History: store}), ops
-}
-
-func openAppHistory(t *testing.T, project string) *history.Store {
-	t.Helper()
-	store, err := history.Open(t.TempDir(), project)
-	if err != nil {
-		t.Fatalf("history.Open() error = %v", err)
-	}
-	t.Cleanup(func() {
-		_ = store.Close()
-	})
-	return store
 }
 
 func updateApp(t *testing.T, m Model, msg tea.Msg) Model {
@@ -1197,5 +1144,21 @@ func assertNoAppOp(t *testing.T, ops <-chan protocol.Op) {
 	case op := <-ops:
 		t.Fatalf("unexpected engine operation: %#v", op)
 	default:
+	}
+}
+
+func TestHeaderAgentBadgeGuardsDisplaySafety(t *testing.T) {
+	// Agents are not host-filtered; every render site must gate the name.
+	m, _ := newAppTestModel([]string{"build"}, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	m.applyEvent(protocol.AgentSelected{Name: "evil\x1b[2Jagent"})
+	if view := m.View(); strings.Contains(view, "\x1b[2J") {
+		t.Fatalf("header rendered raw control sequence from agent name:\n%q", view)
+	}
+
+	m.applyEvent(protocol.AgentSelected{Name: "build"})
+	if plain := ansi.Strip(m.View()); !strings.Contains(plain, "build") {
+		t.Errorf("header dropped a valid agent name:\n%s", plain)
 	}
 }

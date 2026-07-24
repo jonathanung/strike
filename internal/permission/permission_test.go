@@ -307,5 +307,3 @@ func waitAskedN(t *testing.T, mu *sync.Mutex, asked *[]protocol.PermissionAsked,
 		}
 	}
 }
-
-

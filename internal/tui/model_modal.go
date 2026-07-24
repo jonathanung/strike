@@ -2,34 +2,33 @@ package tui
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
-	"github.com/jonathanung/strike-cli/internal/config"
-	"github.com/jonathanung/strike-cli/internal/models"
+	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
+	"github.com/jonathanung/strike-cli/internal/tui/ui"
 )
 
-// modelsLoadedMsg delivers the models.dev catalog result for a provider.
+// modelsLoadedMsg delivers the catalog result for a provider.
 type modelsLoadedMsg struct {
 	provider string
 	ids      []string
 	err      error
 }
 
-func loadModelsCmd(provider string) tea.Cmd {
+// loadModelsCmd fetches a provider's model ids from the host catalog. A nil
+// catalog degrades to a clear error rather than a panic.
+func loadModelsCmd(catalog host.Catalog, provider string) tea.Cmd {
 	return func() tea.Msg {
-		catalog, err := models.Load(context.Background())
+		if catalog == nil {
+			return modelsLoadedMsg{provider: provider, err: errNoCatalog}
+		}
+		ids, err := catalog.ModelIDs(context.Background(), provider)
 		if err != nil {
 			return modelsLoadedMsg{provider: provider, err: err}
-		}
-		ids := catalog.ModelIDs(provider)
-		if len(ids) == 0 {
-			return modelsLoadedMsg{provider: provider, err: fmt.Errorf("no models listed for %s on models.dev", provider)}
 		}
 		return modelsLoadedMsg{provider: provider, ids: ids}
 	}
@@ -37,9 +36,9 @@ func loadModelsCmd(provider string) tea.Cmd {
 
 const modelModalVisible = 10
 
-// modelModal is the centered model picker for the current provider, backed
-// by the models.dev catalog. Type to filter, enter to switch, ctrl+d to
-// save provider+model as global defaults.
+// modelModal is the centered model picker for the current provider, backed by
+// the host model catalog. Type to filter, enter to switch, ctrl+d to save
+// provider+model as global defaults.
 type modelModal struct {
 	provider string
 	current  string
@@ -49,10 +48,11 @@ type modelModal struct {
 	loading  bool
 	loadErr  string
 	ops      chan<- protocol.Op
+	settings host.Settings
 }
 
-func newModelModal(provider, current string, ops chan<- protocol.Op) *modelModal {
-	return &modelModal{provider: provider, current: current, loading: true, ops: ops}
+func newModelModal(provider, current string, ops chan<- protocol.Op, settings host.Settings) *modelModal {
+	return &modelModal{provider: provider, current: current, loading: true, ops: ops, settings: settings}
 }
 
 func (m *modelModal) filtered() []string {
@@ -103,10 +103,7 @@ func (m *modelModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 			return m, nil
 		}
 		provider, model := m.provider, list[m.cursor]
-		return m, func() tea.Msg {
-			err := config.SetGlobalDefaults(provider, model, "")
-			return defaultsSavedMsg{text: provider + "/" + model, err: err}
-		}
+		return m, saveDefaultsThroughCmd(m.settings, provider, model, "", provider+"/"+model)
 	default:
 		if msg.Type == tea.KeyRunes {
 			m.filter += string(msg.Runes)
@@ -117,48 +114,38 @@ func (m *modelModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 }
 
 func (m *modelModal) view(width int, th theme.Theme) string {
-	title := lipgloss.NewStyle().Foreground(th.Accent).Bold(true).
-		Render("Select model — " + m.provider)
-	muted := lipgloss.NewStyle().Foreground(th.TextMuted)
+	st := th.S()
+	inner := max(1, ui.InnerWidth(width))
 
 	var body string
 	switch {
 	case m.loading:
-		body = muted.Render("loading models.dev catalog…")
+		body = st.Muted.Render("loading models.dev catalog…")
 	case m.loadErr != "":
-		body = lipgloss.NewStyle().Foreground(th.Error).Width(width - 4).Render(m.loadErr)
+		body = wrapToWidth(st.Error.Render(m.loadErr), inner)
 	default:
 		list := m.filtered()
 		if m.cursor >= len(list) {
 			m.cursor = max(0, len(list)-1)
 		}
-		start := max(0, min(m.cursor-modelModalVisible/2, len(list)-modelModalVisible))
-		end := min(len(list), start+modelModalVisible)
-		var rows []string
-		for i := start; i < end; i++ {
-			cursor, style := "  ", lipgloss.NewStyle().Foreground(th.Text)
-			if i == m.cursor {
-				cursor, style = "▸ ", lipgloss.NewStyle().Foreground(th.Accent).Bold(true)
-			}
-			label := list[i]
-			if label == m.current {
-				label += " (current)"
-			}
-			rows = append(rows, cursor+style.Render(label))
+		items := make([]ui.ListItem, len(list))
+		for i, id := range list {
+			items[i] = ui.ListItem{Label: id, Current: id == m.current}
 		}
-		if len(rows) == 0 {
-			rows = []string{muted.Render("no matches for \"" + m.filter + "\"")}
-		}
-		filterLine := muted.Render("filter: ") + lipgloss.NewStyle().Foreground(th.Text).Render(m.filter+"▏")
-		counter := muted.Render(fmt.Sprintf("%d/%d", len(list), len(m.all)))
-		body = filterLine + " " + counter + "\n\n" + strings.Join(rows, "\n")
+		body = ui.List(th, ui.ListOpts{
+			Items:      items,
+			Cursor:     m.cursor,
+			Width:      inner,
+			Visible:    modelModalVisible,
+			ShowFilter: true,
+			Filter:     m.filter,
+			Total:      len(m.all),
+			Empty:      "no matches for \"" + m.filter + "\"",
+		})
 	}
-	hint := muted.Render("type to filter · ↑/↓ move · enter select · ctrl+d set default · esc close")
-
-	box := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(th.BorderFocus).
-		Padding(0, 1).
-		Width(width)
-	return box.Render(title + "\n\n" + body + "\n\n" + hint)
+	return ui.Dialog(th, ui.DialogOpts{
+		Title: "Select model — " + m.provider,
+		Hint:  "type to filter · ↑/↓ move · enter select · ctrl+d set default · esc close",
+		Width: width,
+	}, body)
 }

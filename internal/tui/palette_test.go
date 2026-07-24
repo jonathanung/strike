@@ -9,7 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/jonathanung/strike-cli/internal/config"
+	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
 
@@ -171,7 +171,7 @@ func TestPalettePreservesExactMultiWordAgentAction(t *testing.T) {
 }
 
 func TestInvalidAndCollidingConstructedSkillsAreOmittedFromCatalogAndPalette(t *testing.T) {
-	skills := []config.Skill{
+	skills := []host.Skill{
 		{Name: "valid-skill", Description: "kept"},
 		{Name: "", Description: "empty"},
 		{Name: "two words", Description: "whitespace"},
@@ -231,7 +231,7 @@ func TestInvalidConstructedAgentNamesAreOmittedFromPalette(t *testing.T) {
 
 func TestPaletteViewDoesNotRenderDescriptionControlPayloadAsTerminalMetadataOrRows(t *testing.T) {
 	description := "ordinary 世界\x1b]52;c;copied\x07\x1b[31m\u009b31m\ninjected-row\tcell"
-	catalog := commandCatalog([]config.Skill{{Name: "inspect", Description: description}})
+	catalog := commandCatalog([]host.Skill{{Name: "inspect", Description: description}})
 	assertNoUntrustedTerminalControls(t, catalog[len(catalog)-1].Description)
 	m := newPaletteModal(catalog, nil, paletteAvailability{HasProvider: true})
 	typePalette(t, m, "/inspect")

@@ -1,5 +1,9 @@
 // Package auth manages provider credentials: API keys and OAuth tokens,
 // persisted to a 0600 auth.json, plus the OAuth flows that obtain them.
+// Used by cmd/strike (provider construction, the `strike auth` subcommand)
+// and wrapped as host.Auth by internal/host/local; internal/tui never
+// imports it — credentials never reach the frontend, only OAuthLogin/
+// DeviceLogin handles and outcome strings do.
 package auth
 
 import (

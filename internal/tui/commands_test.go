@@ -6,14 +6,14 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/jonathanung/strike-cli/internal/config"
+	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
 
 func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
-	skills := []config.Skill{
-		{Name: "review", Description: "review a change", Template: "Review $ARGUMENTS"},
-		{Name: "explain", Description: "explain code", Template: "Explain this"},
+	skills := []host.Skill{
+		fakeSkill("review", "review a change", "Review $ARGUMENTS"),
+		fakeSkill("explain", "explain code", "Explain this"),
 	}
 	catalog := commandCatalog(skills)
 
@@ -54,7 +54,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 
 func TestCommandCatalogSanitizesUntrustedSkillDescription(t *testing.T) {
 	description := "Résumé 世界\x1b]52;c;secret\x07 tail\x1b[31m red\u009b31m line\nnext\tcell " + string([]byte{0xff})
-	catalog := commandCatalog([]config.Skill{{Name: "inspect", Description: description}})
+	catalog := commandCatalog([]host.Skill{{Name: "inspect", Description: description}})
 	spec := catalog[len(catalog)-1]
 	want := "Résumé 世界�]52;c;secret� tail�[31m red�31m line�next�cell �"
 	if spec.Description != want {
@@ -64,7 +64,7 @@ func TestCommandCatalogSanitizesUntrustedSkillDescription(t *testing.T) {
 
 func TestSlashCompletionViewDoesNotRenderDescriptionControlPayloadAsTerminalMetadataOrRows(t *testing.T) {
 	description := "ordinary 世界\x1b]52;c;copied\x07\x1b[31m\u009b31m\ninjected-row\tcell"
-	catalog := commandCatalog([]config.Skill{{Name: "inspect", Description: description}})
+	catalog := commandCatalog([]host.Skill{{Name: "inspect", Description: description}})
 	assertNoUntrustedTerminalControls(t, catalog[len(catalog)-1].Description)
 	completion := leadingSlashCompletion("/inspect", 0, len([]rune("/inspect")), catalog)
 	if completion == nil {

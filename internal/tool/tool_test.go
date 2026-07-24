@@ -146,10 +146,10 @@ func TestWriteAndEdit(t *testing.T) {
 	}
 
 	res, err = NewEdit().Execute(context.Background(), mustJSON(t, map[string]any{
-		"filePath":    "sub/b.txt",
-		"oldString":   "hello",
-		"newString":   "hi",
-		"replaceAll":  true,
+		"filePath":   "sub/b.txt",
+		"oldString":  "hello",
+		"newString":  "hi",
+		"replaceAll": true,
 	}), tc)
 	if err != nil {
 		t.Fatal(err)

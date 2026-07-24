@@ -37,9 +37,13 @@ Report exact commands and failing output verbatim. Do not claim green without ru
 
 ## Architecture map
 
+See ARCHITECTURE.md for the dataflow diagram, full package table with import
+rules, and recipes (add a provider/tool/slash command/UI component/host
+service/theme token).
+
 | Package | Role |
 |---|---|
-| `cmd/strike` | CLI flags, auth subcommands, wiring |
+| `cmd/strike` | CLI flags + auth subcommands (`main.go`), composition root wiring (`wire.go`) |
 | `internal/protocol` | Ops/Events seam; JSONL envelopes |
 | `internal/engine` | Turn loop, tool dispatch, interrupts |
 | `internal/provider` | LLM adapters (+ `base`, `echo`, anthropic, openai, xai, chatgpt) |
@@ -49,10 +53,22 @@ Report exact commands and failing output verbatim. Do not claim green without ru
 | `internal/config` | global/project JSON + agents/skills markdown |
 | `internal/session` | JSONL event log append/replay |
 | `internal/history` | project-scoped prompt history |
-| `internal/tui` | Bubble Tea UI |
+| `internal/host` | frozen stdlib-only contract: what a frontend needs from its host (auth, catalog, settings, history, agents, skills) |
+| `internal/host/local` | real `host.Services` impl, wraps auth/config/models/history |
+| `internal/tui` | Bubble Tea UI: app model, layout, cells, modals |
+| `internal/tui/theme` | design tokens: adaptive colors, `Icons`, precomputed `Styles` |
+| `internal/tui/ui` | reusable component library (Panel, Dialog, Badge, List, Bento, …) |
 
 ## Scope
 
 - Smallest correct change. Match surrounding style and comment density.
 - No new test frameworks or dependencies without an explicit ask.
 - Do not commit secrets or write real credentials into fixtures.
+- UI work goes through `internal/tui/ui` components and `internal/tui/theme`
+  tokens — no raw lipgloss styles or hardcoded glyphs in views; colors and
+  icons come from the theme. Load the `tui-components` skill before TUI
+  view/panel/modal/picker work (`.claude/skills/tui-components/`).
+- `internal/tui` may import only `internal/protocol`, `internal/host`, and
+  `internal/tui/...` — enforced by `internal/tui/boundary_test.go`
+  (`TestArchitectureBoundaries`), which fails the build on any other
+  `internal/*` import from a TUI file.

@@ -1,6 +1,9 @@
 // Package permission implements ordered allow/ask/deny rulesets with
 // last-match-wins evaluation, and the ask service that suspends a tool call
-// until the user replies.
+// until the user replies. Used by internal/engine (the ask service),
+// internal/config (Ruleset is a config field), and cmd/strike (layering
+// CLI/config rules). internal/tui never imports it — a pending ask reaches
+// the frontend only as a protocol.PermissionAsked event.
 package permission
 
 import (

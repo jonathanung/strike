@@ -1,7 +1,11 @@
-// Package tui is the BubbleTea frontend. It depends only on
-// internal/protocol (plus theme): engine events arrive on a channel via a
-// listening tea.Cmd, ops go back on the ops channel — the Go analogue of
-// codex's multi-source select loop.
+// Package tui is strike's Bubble Tea frontend. It consumes engine events from
+// a channel and sends ops back on another (the Go analogue of codex's
+// multi-source select loop), and it reaches its host process only through the
+// internal/host contract — never internal/auth, config, models, or history
+// directly. That boundary (enforced by boundary_test.go) lets the backend
+// stage services without touching the UI and lets the UI be exercised against
+// fakes. Views are built from internal/tui/ui components and internal/tui/theme
+// tokens; no view constructs raw lipgloss boxes or hardcodes a glyph.
 package tui
 
 import (
@@ -13,16 +17,20 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/jonathanung/strike-cli/internal/auth"
-	"github.com/jonathanung/strike-cli/internal/config"
-	"github.com/jonathanung/strike-cli/internal/history"
+	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
+	"github.com/jonathanung/strike-cli/internal/tui/ui"
 )
 
 const (
 	composerMinHeight = 2
 	composerMaxHeight = 8
+	// compactWidth and compactHeight are the breakpoints below which the app
+	// drops panel borders and renders the plain viewport+composer ("compact
+	// mode"), keeping every function but shedding chrome that will not fit.
+	compactWidth  = 60
+	compactHeight = 20
 )
 
 // engineEventMsg wraps a protocol.Event for the Update loop. Engine events
@@ -43,18 +51,23 @@ type historyAddedMsg struct {
 	err error
 }
 
+// Options carries frontend-only construction flags. Host capabilities
+// (credentials, catalog, settings, history, agents, skills) arrive through
+// host.Services instead.
 type Options struct {
-	History                    *history.Store
 	DangerouslySkipPermissions bool
 }
 
+// Model is the root Bubble Tea model. It holds its host services, the
+// transcript cells, the active modal, and composer/viewport state.
 type Model struct {
 	ops    chan<- protocol.Op
 	events <-chan protocol.Event
-	// authStore is host-side credential state, managed via /auth. It is
-	// deliberately not part of the engine protocol: credentials are a
-	// frontend/host concern, not agent-loop state.
-	authStore *auth.Store
+	// services is the only channel to host effects (credentials, model
+	// catalog, saved defaults, prompt history). It is deliberately not part
+	// of the engine protocol: these are frontend/host concerns, not
+	// agent-loop state.
+	services host.Services
 
 	th       theme.Theme
 	cells    []cell
@@ -66,7 +79,6 @@ type Model struct {
 	completion                 *completionState
 	commands                   []commandSpec
 	spin                       spinner.Model
-	history                    *history.Store
 	entries                    []string
 	historyPos                 int
 	historyDraft               string
@@ -75,8 +87,8 @@ type Model struct {
 	providerName string
 	modelName    string
 	agentName    string
-	agents       []string // cycled with tab
-	skills       []config.Skill
+	agents       []string     // cycled with tab
+	skills       []host.Skill // slash-command templates, pre-filtered by the host
 	notice       string
 	noticeErr    bool
 	turnRunning  bool
@@ -85,7 +97,10 @@ type Model struct {
 	ready        bool
 }
 
-func New(ops chan<- protocol.Op, events <-chan protocol.Event, authStore *auth.Store, agents []string, skills []config.Skill, options ...Options) Model {
+// New builds the frontend model. services supplies every host capability; any
+// field of it may be nil/empty and the UI degrades gracefully. Options is
+// variadic for backward-compatible call sites.
+func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Services, options ...Options) Model {
 	ta := textarea.New()
 	ta.Placeholder = "Ask strike anything… (/provider to pick a model, enter to send)"
 	ta.Prompt = "┃ "
@@ -100,10 +115,10 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, authStore *auth.S
 	m := Model{
 		ops:        ops,
 		events:     events,
-		authStore:  authStore,
-		agents:     agents,
-		skills:     skills,
-		commands:   commandCatalog(skills),
+		services:   services,
+		agents:     services.Agents,
+		skills:     services.Skills,
+		commands:   commandCatalog(services.Skills),
 		th:         theme.Default(),
 		toolByID:   map[string]*toolCell{},
 		composer:   ta,
@@ -112,10 +127,9 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, authStore *auth.S
 	}
 	for _, option := range options {
 		m.dangerouslySkipPermissions = option.DangerouslySkipPermissions
-		if option.History != nil {
-			m.history = option.History
-			m.entries = option.History.Entries()
-		}
+	}
+	if services.History != nil {
+		m.entries = services.History.Entries()
 	}
 	return m
 }
@@ -191,8 +205,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case historyAddedMsg:
 		if msg.err != nil {
 			m.setNotice("saving prompt history failed: "+msg.err.Error(), true)
-		} else if m.history != nil {
-			m.entries = m.history.Entries()
+		} else if m.services.History != nil {
+			m.entries = m.services.History.Entries()
 		}
 		return m, nil
 
@@ -302,11 +316,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.setNotice("nothing to save — select a provider first", true)
 				return m, nil
 			}
-			prov, model, agent := m.providerName, m.modelName, m.agentName
-			return m, func() tea.Msg {
-				err := config.SetGlobalDefaults(prov, model, agent)
-				return defaultsSavedMsg{text: prov + "/" + model + " · " + agent, err: err}
-			}
+			return m, m.saveDefaultsCmd(m.providerName, m.modelName, m.agentName, m.providerName+"/"+m.modelName+" · "+m.agentName)
 		case "tab":
 			// Tab cycles agents (opencode-style build/plan switching).
 			if len(m.agents) > 1 && !m.turnRunning {
@@ -464,7 +474,12 @@ func (m *Model) resetHistoryBrowsing() {
 }
 
 func (m *Model) reflow() {
-	m.composer.SetWidth(max(1, m.width-2))
+	compact := m.compact()
+	composerWidth := m.width - 2
+	if !compact {
+		composerWidth = ui.InnerWidth(m.width)
+	}
+	m.composer.SetWidth(max(1, composerWidth))
 	contentWidth := max(1, m.composer.Width())
 	lineCounter := textarea.New()
 	lineCounter.Prompt = ""
@@ -498,12 +513,9 @@ func (m *Model) reflow() {
 	}
 
 	if m.ready {
-		m.viewport.Width = max(1, m.width)
-		footerRows := 2
-		if m.dangerouslySkipPermissions {
-			footerRows++
-		}
-		m.viewport.Height = max(0, m.height-footerRows-composerRows-popupHeight)
+		l := computeLayout(m.width, m.height, composerRows, popupHeight, m.dangerouslySkipPermissions)
+		m.viewport.Width = max(1, l.transcriptInnerWidth(m.width))
+		m.viewport.Height = max(0, l.transcriptInnerHeight())
 	}
 }
 
@@ -584,7 +596,7 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		if len(fields) < 2 {
 			// Bare /provider opens the centered picker with auth status.
 			m.resetComposer()
-			m.modal = newProviderModal(m.authStore, m.providerName, m.ops, m.th)
+			m.modal = newProviderModal(m.services, m.providerName, m.ops, m.th)
 			return m, nil
 		}
 		op := protocol.SelectModel{Provider: fields[1]}
@@ -600,8 +612,8 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		if len(fields) < 2 {
 			// Bare /model opens the centered picker (models.dev catalog).
 			m.resetComposer()
-			m.modal = newModelModal(m.providerName, m.modelName, m.ops)
-			return m, loadModelsCmd(m.providerName)
+			m.modal = newModelModal(m.providerName, m.modelName, m.ops, m.services.Settings)
+			return m, loadModelsCmd(m.services.Catalog, m.providerName)
 		}
 		return m.sendSelect(protocol.SelectModel{Provider: m.providerName, Model: fields[1]})
 	case "/auth":
@@ -653,10 +665,10 @@ func (m Model) submit(op protocol.UserInput, displayPrompt string) (tea.Model, t
 		ops <- op
 		return nil
 	}
-	if m.history == nil {
+	if m.services.History == nil {
 		return m, send
 	}
-	done := m.history.Enqueue(displayPrompt)
+	done := m.services.History.Enqueue(displayPrompt)
 	persist := func() tea.Msg {
 		err := <-done
 		return historyAddedMsg{err: err}
@@ -672,6 +684,12 @@ func (m Model) sendSelect(op protocol.SelectModel) (tea.Model, tea.Cmd) {
 		ops <- op
 		return nil
 	}
+}
+
+// saveDefaultsCmd persists provider/model/agent defaults through the host
+// settings service, reporting the outcome as a defaultsSavedMsg.
+func (m Model) saveDefaultsCmd(provider, model, agent, text string) tea.Cmd {
+	return saveDefaultsThroughCmd(m.services.Settings, provider, model, agent, text)
 }
 
 func (m *Model) setNotice(text string, isErr bool) {
@@ -697,9 +715,16 @@ func (m *Model) refreshViewport() {
 	if !m.ready {
 		return
 	}
+	width := max(1, m.viewport.Width)
+	if len(m.cells) == 0 {
+		// Empty transcript: show the welcome dashboard from the top.
+		m.viewport.SetContent(m.welcomeView(width))
+		m.viewport.GotoTop()
+		return
+	}
 	blocks := make([]string, 0, len(m.cells))
 	for _, c := range m.cells {
-		blocks = append(blocks, c.render(max(1, m.viewport.Width), m.th))
+		blocks = append(blocks, c.render(width, m.th))
 	}
 	m.viewport.SetContent(strings.Join(blocks, "\n\n"))
 	m.viewport.GotoBottom()
@@ -707,71 +732,57 @@ func (m *Model) refreshViewport() {
 
 func (m Model) View() string {
 	if !m.ready {
-		if warning := m.dangerLine(); warning != "" {
+		if warning := m.dangerView(0); warning != "" {
 			return warning + "\nstarting…"
 		}
 		return "starting…"
 	}
-	sections := []string{m.viewport.View(), m.statusLine()}
-	if warning := m.dangerLine(); warning != "" {
-		sections = append(sections, warning)
-	}
-	sections = append(sections, m.noticeLine())
+
+	compact := m.compact()
+	l := computeLayout(m.width, m.height, m.composer.Height(), m.completionPopupHeight(), m.dangerouslySkipPermissions)
+
+	// content is the top band (header + transcript); footer is the reserved
+	// notice row, composer, keyhints, and danger banner. A modal floats over
+	// the content band only, so the notice, composer, and danger banner stay
+	// visible beneath it.
+	content := m.headerView(m.width) + "\n" + m.transcriptView(compact, l.transcript)
+	contentHeight := l.header + l.transcript
+
+	footer := []string{m.noticeView(m.width)}
 	if popup := m.completion.view(m.width, m.th); popup != "" {
-		sections = append(sections, popup)
+		footer = append(footer, popup)
 	}
-	sections = append(sections, m.composer.View())
-	base := strings.Join(sections, "\n")
+	footer = append(footer, m.composerView(compact))
+	footer = append(footer, m.hintsView(m.width))
+	if warning := m.dangerView(m.width); warning != "" {
+		footer = append(footer, warning)
+	}
+
 	if m.modal != nil {
-		overlay := m.modal.view(max(8, modalWidth(m.width)), m.th)
-		if warning := m.dangerLine(); warning != "" {
+		overlay := m.modal.view(max(8, ui.ModalWidth(m.width)), m.th)
+		if warning := m.dangerView(m.width); warning != "" {
 			overlay = lipgloss.JoinVertical(lipgloss.Center, warning, overlay)
 		}
-		return overlayCenter(base, overlay, m.width, m.height)
+		content = ui.OverlayCenter(content, overlay, m.width, contentHeight)
 	}
-	return base
+	return content + "\n" + strings.Join(footer, "\n")
 }
 
-func (m Model) statusLine() string {
-	muted := lipgloss.NewStyle().Foreground(m.th.TextMuted)
-	agent := ""
-	if m.agentName != "" {
-		agent = " · " + m.agentName
+// completionPopupHeight returns the reserved height of the completion popup
+// for the current View, mirroring what reflow computed.
+func (m Model) completionPopupHeight() int {
+	if m.completion == nil || m.completion.rows <= 0 {
+		return 0
 	}
-	var left string
-	if m.providerName == "" {
-		left = muted.Render("strike" + agent + " · no model — /provider <name> to select")
-	} else {
-		left = muted.Render("strike" + agent + " · " + m.providerName + "/" + m.modelName)
+	borderRows := 0
+	if min(m.width, completionMaxWidth) >= 4 {
+		borderRows = 2
 	}
-	if m.turnRunning {
-		left += " " + m.spin.View() + muted.Render(" working (esc to interrupt)")
-	}
-	return lipgloss.NewStyle().MaxWidth(max(1, m.width)).Render(left)
+	return m.completion.rows + borderRows
 }
 
-func (m Model) dangerLine() string {
-	if !m.dangerouslySkipPermissions {
-		return ""
-	}
-	style := lipgloss.NewStyle().
-		Foreground(m.th.Error).
-		Bold(true)
-	if m.ready {
-		style = style.MaxWidth(max(1, m.width))
-	}
-	return style.Render("DANGER: permissions bypassed")
-}
-
-// noticeLine is a reserved row above the composer for transient feedback:
-// errors in red (no model selected, failed /provider), confirmations muted.
-func (m Model) noticeLine() string {
-	if m.notice == "" {
-		return ""
-	}
-	style := lipgloss.NewStyle().Foreground(m.th.TextMuted)
-	if m.noticeErr {
-		style = lipgloss.NewStyle().Foreground(m.th.Error)
-	}
-	return style.MaxWidth(max(1, m.width)).Render(m.notice)
+// compact reports whether the screen is below the breakpoints for bordered
+// chrome; below it, panels degrade to plain viewport+composer.
+func (m Model) compact() bool {
+	return m.width < compactWidth || m.height < compactHeight
 }
