@@ -94,15 +94,8 @@ func TestC2ViewGeometryAndActivePanes(t *testing.T) {
 			if tt.right > 0 && !strings.Contains(plain, "context") {
 				t.Error("split/right-active view omitted right-pane title")
 			}
-			// Left-only layouts must not paint the right pane title or body.
-			if tt.right == 0 && (strings.Contains(plain, "context") || strings.Contains(plain, "Context window placeholder.")) {
-				// "context" can appear in left-pane copy only if the right pane
-				// is absent; the right-pane title is the reliable signal.
-				// Prefer checking the right-pane title is not a panel chrome hit:
-				// when rightWidth==0 the inactive right pane must not render.
-				if strings.Contains(plain, "╭─ context") || strings.Contains(plain, "Context window placeholder.") {
-					t.Error("left-only view rendered inactive right pane")
-				}
+			if tt.right == 0 && (strings.Contains(plain, "No active todos") || strings.Contains(plain, "directory")) {
+				t.Error("left-only view rendered inactive right pane")
 			}
 			if tt.left == 0 && (strings.Contains(plain, "welcome") || strings.Contains(plain, "prompt")) {
 				t.Error("right-only view rendered inactive left pane")

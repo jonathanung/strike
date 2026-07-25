@@ -286,12 +286,13 @@ func TestC3ModelSelectionPreservesExistingNoticeAndRefreshesPalette(t *testing.T
 		t.Fatalf("model selection changed fields or unrelated notice: %#v", m)
 	}
 	plain := ansi.Strip(m.View())
-	// Header badge plus right-pane context body both surface provider/model.
+	// Header badge and context pane both show provider/model when the right
+	// pane is visible; reject the legacy "model: …" chrome form.
 	if strings.Contains(plain, "model: unique-provider/unique-model") {
-		t.Errorf("legacy model: prefix leaked into view:\n%s", plain)
+		t.Errorf("legacy model chrome leaked into view:\n%s", plain)
 	}
 	if got := strings.Count(plain, "unique-provider/unique-model"); got < 1 || got > 2 {
-		t.Errorf("model occurrences = %d, want 1 (header) or 2 (header+context):\n%s", got, plain)
+		t.Errorf("model occurrences = %d, want 1 or 2 (header ± context):\n%s", got, plain)
 	}
 	if !strings.Contains(plain, "unrelated failure") {
 		t.Errorf("existing error notice disappeared:\n%s", plain)
@@ -378,9 +379,9 @@ func TestC3LongDashboardHistoryAndSelectedModelEvidence(t *testing.T) {
 
 	view, plain := m.View(), ansi.Strip(m.View())
 	assertCanvas(t, view, 160, 45)
-	// Header badge plus right-pane context both show the selected model.
+	// Header badge and context pane both surface the selection in split layout.
 	if got := strings.Count(plain, "c3-unique-provider/c3-unique-model"); got < 1 || got > 2 {
-		t.Errorf("selected provider/model occurrences = %d, want 1 or 2:\n%s", got, plain)
+		t.Errorf("selected provider/model occurrences = %d, want 1 or 2 (header ± context):\n%s", got, plain)
 	}
 	if strings.Contains(view, "\x1b[2J") || strings.ContainsRune(plain, '\x1b') || strings.ContainsAny(plain, "\x00\r\u0085") {
 		t.Errorf("dashboard retained dangerous prompt controls:\n%q", view)

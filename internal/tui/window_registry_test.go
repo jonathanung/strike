@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 	"github.com/jonathanung/strike-cli/internal/tui/ui"
 )
@@ -24,7 +25,9 @@ func (w statefulTestWindow) id() string    { return w.windowID }
 func (w statefulTestWindow) title() string { return w.windowTitle }
 func (w statefulTestWindow) init() tea.Cmd { return nil }
 func (w statefulTestWindow) update(msg tea.Msg) (window, tea.Cmd) {
-	w.updates = append(w.updates, msg.(tea.KeyMsg).String())
+	if km, ok := msg.(tea.KeyMsg); ok {
+		w.updates = append(w.updates, km.String())
+	}
 	return w, nil
 }
 func (w statefulTestWindow) resize(width, height int) window {
@@ -173,7 +176,28 @@ func TestDefaultWindowRegistryHasThreeUniqueWidthSafeWindows(t *testing.T) {
 		seenIDs[w.id()], seenTitles[w.title()] = true, true
 
 		switch w.id() {
-		case "context", "activity":
+		case "context":
+			if _, ok := w.(contextWindow); !ok {
+				t.Errorf("window = %#v, want a contextWindow", w)
+			}
+			resized := w.resize(80, 12)
+			updated, _ := resized.update(contextStateMsg{
+				WorkDir: "/tmp/proj", SessionID: "sess-1",
+				Provider: "echo", Model: "echo-1",
+				Used:         protocol.KnownTokens(215_000),
+				ContextLimit: 1_000_000, ContextLimitKnown: true,
+			})
+			view := updated.view(theme.Default())
+			if !strings.Contains(view, "directory") || !strings.Contains(ansi.Strip(view), "215k") {
+				t.Errorf("context window missing expected content: %q", view)
+			}
+			view = updated.resize(8, 12).view(theme.Default())
+			for _, line := range strings.Split(view, "\n") {
+				if got := lipgloss.Width(line); got > 8 {
+					t.Errorf("context line width = %d, want <= 8: %q", got, line)
+				}
+			}
+		case "activity":
 			if _, ok := w.(namedWindow); !ok {
 				t.Errorf("window = %#v, want a namedWindow", w)
 			}

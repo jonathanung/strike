@@ -2,11 +2,14 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -55,6 +58,9 @@ func (m Model) headerView(width int) string {
 			model = "default"
 		}
 		left += badgeGap + ui.Badge(th, ui.ToneAccent, m.providerName+"/"+model)
+		if tone, ok := providerHealthTone(m); ok {
+			left += inlineGap + ui.Badge(th, tone, ic.Dot)
+		}
 	}
 	// Same display-safety gate as the palette and welcome card: agents are
 	// not host-filtered, so every render site guards the name itself.
@@ -76,15 +82,41 @@ func (m Model) headerView(width int) string {
 	var right string
 	switch state {
 	case theme.AgentStateWorking:
-		right = m.spin.View() + inlineGap + statusStyle.Render(state.Label()+" — esc interrupts")
+		right = m.spin.View() + inlineGap + statusStyle.Render(m.workingStatusLabel(th))
 	case theme.AgentStateAttention:
-		right = statusStyle.Render(state.Label() + " — respond to prompt")
+		right = statusStyle.Render(detailJoin(th, state.Label(), "respond to prompt"))
 	case theme.AgentStateError:
 		right = statusStyle.Render(state.Label())
 	default:
 		right = statusStyle.Render(state.Label())
 	}
+
+	// Meter only when left badges + right status leave room. Reserve StatusBar's
+	// minimum mid gap (1) and the inline gap that prefixes the meter.
+	meterBudget := width - lipgloss.Width(left) - lipgloss.Width(right) - 1 - th.Spacing.XS
+	if meter := m.headerContextMeter(th, meterBudget); meter != "" {
+		left += inlineGap + meter
+	}
 	return ui.StatusBar(m.th, max(1, width), left, right)
+}
+
+// workingStatusLabel is the header right-side text while a turn runs, e.g.
+// "working (12s · 3 tool calls) — esc".
+func (m Model) workingStatusLabel(th theme.Theme) string {
+	th = th.Resolve()
+	elapsed := time.Duration(0)
+	if !m.turnStartedAt.IsZero() {
+		elapsed = time.Since(m.turnStartedAt)
+	}
+	parts := []string{formatCompactDuration(elapsed)}
+	switch {
+	case m.toolCallsThisTurn == 1:
+		parts = append(parts, "1 tool call")
+	case m.toolCallsThisTurn > 1:
+		parts = append(parts, fmt.Sprintf("%d tool calls", m.toolCallsThisTurn))
+	}
+	inner := dotJoin(th, parts...)
+	return detailJoin(th, theme.AgentStateWorking.Label()+" ("+inner+")", "esc")
 }
 
 // transcriptView renders the empty dashboard directly; populated transcripts
@@ -266,6 +298,50 @@ func (m Model) dangerView(width int) string {
 		style = style.MaxWidth(width)
 	}
 	return style.Render("DANGER: permissions bypassed")
+}
+
+// headerContextMeter is the compact usage chip for the status bar: a short
+// meter plus used/limit figures. Unknown sides render as the theme detail
+// separator (—), never as measured zero. budget is the free cells between left
+// badges and right status (after gaps); below minPair the chip is omitted,
+// below minBarPair only the figures are shown, otherwise the bar scales down.
+func (m Model) headerContextMeter(th theme.Theme, budget int) string {
+	if !m.hasContextMeter() {
+		return ""
+	}
+	const (
+		minPair    = 8  // pair-only floor (e.g. "1.2k/200k")
+		minBarPair = 14 // room for a short bar + gap + pair
+		maxBarW    = 8
+		minBarW    = 4
+	)
+	if budget < minPair {
+		return ""
+	}
+	th = th.Resolve()
+	dash := th.Icons.DetailSeparator
+	pair := formatContextTokenPair(m.usageUsed, m.contextLimit, m.contextLimitKnown, dash)
+	// Prefer Used; fall back to input+output sum only when Used is unknown but
+	// both sides are known so the header still has a numerator.
+	used := m.usageUsed
+	if !used.Known && m.usageInput.Known && m.usageOutput.Known {
+		used = protocol.KnownTokens(m.usageInput.N + m.usageOutput.N)
+		pair = formatContextTokenPair(used, m.contextLimit, m.contextLimitKnown, dash)
+	}
+	ratio := contextUsageRatio(used, m.contextLimit, m.contextLimitKnown)
+	pairStyled := th.S().Text.Render(pair)
+	if budget < minBarPair {
+		return pairStyled
+	}
+	// Scale bar into whatever remains after pair + gap; drop bar if too tight.
+	barW := budget - lipgloss.Width(pairStyled) - th.Spacing.XS
+	if barW < minBarW {
+		return pairStyled
+	}
+	if barW > maxBarW {
+		barW = maxBarW
+	}
+	return ui.Meter(th, barW, ratio) + themedSpace(th.Spacing.XS) + pairStyled
 }
 
 // themeIcons returns the model's glyph set, falling back to the defaults for a

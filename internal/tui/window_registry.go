@@ -11,11 +11,30 @@ type windowRegistry struct {
 
 func newWindowRegistry() windowRegistry {
 	return windowRegistry{windows: []window{
-		newNamedWindow("context", "context"),
+		newContextWindow(),
 		newNamedWindow("activity", "activity"),
 		newMarkdownWindow(),
 		newTerminalWindow(),
 	}}
+}
+
+// broadcast delivers msg to every window, collecting their cmds. Used to push
+// model-owned context snapshots into the right pane without dual state owners.
+func (r windowRegistry) broadcast(msg tea.Msg) (windowRegistry, tea.Cmd) {
+	if len(r.windows) == 0 {
+		return r, nil
+	}
+	windows := make([]window, len(r.windows))
+	cmds := make([]tea.Cmd, 0, len(r.windows))
+	for i, w := range r.windows {
+		next, cmd := w.update(msg)
+		windows[i] = next
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+	r.windows = windows
+	return r, tea.Batch(cmds...)
 }
 
 func (r windowRegistry) init() tea.Cmd {
