@@ -173,12 +173,12 @@ func TestProviderSwitchEmptyModelResetsToDefault(t *testing.T) {
 // (Option C / preferred routing — implementer matches this contract.)
 func TestSelectModelStripsMatchingPrefixUsesDefaultForForeignPrefix(t *testing.T) {
 	tests := []struct {
-		name        string
-		provider    string
-		model       string
-		wantModel   string
-		wantOnProv  string // which scripted provider must receive the stream
-		desc        string
+		name       string
+		provider   string
+		model      string
+		wantModel  string
+		wantOnProv string // which scripted provider must receive the stream
+		desc       string
 	}{
 		{
 			name:       "matching_prefix_stripped_to_bare_id",
@@ -303,9 +303,9 @@ func TestAgentModelOnlyPrefixedPinDoesNotPoisonProvider(t *testing.T) {
 	eng := engine.New(engine.Options{
 		Select:          multiProviderSelect(providers, defaults),
 		InitialProvider: "xai",
-		Registry: tool.NewRegistry(),
-		WorkDir:  t.TempDir(),
-		Rules:    []permission.Ruleset{permission.Defaults()},
+		Registry:        tool.NewRegistry(),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
 		Agents: []engine.Agent{
 			{Name: "build", Description: "default"},
 			{Name: "explorer", Model: "openai/gpt-5.6-luna"}, // model-only pin, prefixed
