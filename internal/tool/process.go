@@ -92,6 +92,7 @@ func RunProcess(ctx context.Context, spec ProcessSpec, obs ProcessObserver) (Pro
 	}
 
 	cmd := exec.CommandContext(runCtx, spec.Argv[0], spec.Argv[1:]...)
+	configureProcessCmd(cmd)
 	cmd.Dir = spec.Dir
 	if spec.Env != nil {
 		cmd.Env = spec.Env
