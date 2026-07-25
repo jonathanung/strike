@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -114,7 +115,13 @@ type Model struct {
 	// selectedCell is the index into cells for tool/explore expand selection
 	// (-1 = none). Only collapsible tool/explore cells are targeted.
 	selectedCell int
-	modal        modal
+	// transcriptPlainLines mirrors viewport content without ANSI, used for
+	// path:line hit-testing (open-at-line).
+	transcriptPlainLines []string
+	// selectedFileRef is set when the user click-selects a path:line citation
+	// (-1 = none). Empty-composer enter opens it when no tool expand applies.
+	selectedFileRef int
+	modal           modal
 
 	viewport                   viewport.Model
 	composer                   textarea.Model
@@ -211,23 +218,24 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 	sp := newSpinner(th)
 
 	m := Model{
-		ops:          ops,
-		events:       events,
-		services:     services,
-		agents:       services.Agents,
-		skills:       services.Skills,
-		commands:     commandCatalog(services.Skills),
-		th:           th,
-		themeID:      themeID,
-		toolByID:     map[string]*toolCell{},
-		selectedCell: -1,
-		composer:     ta,
-		keyMap:       defaultKeyMap(),
-		windows:      newWindowRegistry(),
-		spin:         sp,
-		historyPos:   -1,
-		focused:      true,
-		appearance:   appearanceAuto,
+		ops:             ops,
+		events:          events,
+		services:        services,
+		agents:          services.Agents,
+		skills:          services.Skills,
+		commands:        commandCatalog(services.Skills),
+		th:              th,
+		themeID:         themeID,
+		toolByID:        map[string]*toolCell{},
+		selectedCell:    -1,
+		selectedFileRef: -1,
+		composer:        ta,
+		keyMap:          defaultKeyMap(),
+		windows:         newWindowRegistry(),
+		spin:            sp,
+		historyPos:      -1,
+		focused:         true,
+		appearance:      appearanceAuto,
 	}
 	for _, option := range options {
 		m.dangerouslySkipPermissions = option.DangerouslySkipPermissions
@@ -604,9 +612,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.handleHistoryKey(msg) {
 			return m, nil
 		}
-		if m.handleToolCellKeys(msg) {
+		if handled, cmd := m.handleToolCellKeys(msg); handled {
 			m.reflow()
-			return m, nil
+			return m, cmd
 		}
 		switch {
 		case key.Matches(msg, m.keyMap.Newline):
@@ -620,8 +628,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keyMap.Send):
 			text := strings.TrimSpace(m.composer.Value())
 			if text == "" {
-				// Empty enter is tool expand (handleToolCellKeys); if nothing
-				// collapsible was available, stay put.
+				// Empty enter is tool expand / open-at-line (handleToolCellKeys).
 				return m, nil
 			}
 			if strings.HasPrefix(text, "/") {
@@ -671,6 +678,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.MouseButtonWheelDown:
 			m.viewport.ScrollDown(m.viewport.MouseWheelDelta)
 			return m, nil
+		case tea.MouseButtonLeft:
+			if ref, ok := m.fileRefAtMouse(msg); ok {
+				return m.openFileRef(ref)
+			}
 		}
 	}
 
@@ -1607,6 +1618,8 @@ func (m *Model) refreshViewport() {
 	if len(m.cells) == 0 {
 		m.viewport.SetContent("")
 		m.viewport.GotoTop()
+		m.transcriptPlainLines = nil
+		m.selectedFileRef = -1
 		return
 	}
 	m.syncToolSelectionFlags()
@@ -1618,7 +1631,13 @@ func (m *Model) refreshViewport() {
 	for _, c := range m.cells {
 		blocks = append(blocks, c.render(width, m.th))
 	}
-	m.viewport.SetContent(strings.Join(blocks, "\n\n"))
+	content := strings.Join(blocks, "\n\n")
+	m.transcriptPlainLines = strings.Split(ansi.Strip(content), "\n")
+	if m.selectedFileRef >= len(m.collectFileRefs()) {
+		m.selectedFileRef = -1
+	}
+	linked := postLinkifyRendered(content, m.th, m.workDir)
+	m.viewport.SetContent(linked)
 	if atBottom {
 		m.viewport.GotoBottom()
 	} else {
@@ -1627,25 +1646,34 @@ func (m *Model) refreshViewport() {
 }
 
 // handleToolCellKeys handles [, ], and empty-composer enter for tool selection
-// and expand/collapse. Returns true when the key was consumed.
-func (m *Model) handleToolCellKeys(msg tea.KeyMsg) bool {
+// and expand/collapse, and opens a path:line citation when expand does not apply.
+// Returns handled=true when the key was consumed; cmd may launch the editor.
+func (m *Model) handleToolCellKeys(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
 	if m.focus != focusLeft || m.modal != nil || m.completion != nil {
-		return false
+		return false, nil
 	}
 	if strings.TrimSpace(m.composer.Value()) != "" {
-		return false
+		return false, nil
 	}
 	switch {
 	case key.Matches(msg, m.keyMap.ToolPrev):
 		m.moveToolSelection(-1)
-		return true
+		return true, nil
 	case key.Matches(msg, m.keyMap.ToolNext):
 		m.moveToolSelection(1)
-		return true
+		return true, nil
 	case key.Matches(msg, m.keyMap.ToolExpand), key.Matches(msg, m.keyMap.Send):
-		return m.toggleSelectedTool()
+		if m.toggleSelectedTool() {
+			return true, nil
+		}
+		if ref, ok := m.fileRefForEnter(); ok {
+			next, c := m.openFileRef(ref)
+			*m = next.(Model)
+			return true, c
+		}
+		return false, nil
 	}
-	return false
+	return false, nil
 }
 
 func (m *Model) collapsibleCellIndexes() []int {
@@ -1735,6 +1763,134 @@ func (m *Model) syncToolSelectionFlags() {
 			tc.selected = sel
 		}
 	}
+}
+
+// collectFileRefs returns path:line citations in transcript order.
+func (m Model) collectFileRefs() []fileRef {
+	var refs []fileRef
+	for _, line := range m.transcriptPlainLines {
+		for _, sp := range findFileRefSpans(line) {
+			refs = append(refs, sp.fileRef)
+		}
+	}
+	return refs
+}
+
+// fileRefForEnter picks the click-selected citation, else the most recent one.
+func (m Model) fileRefForEnter() (fileRef, bool) {
+	refs := m.collectFileRefs()
+	if len(refs) == 0 {
+		return fileRef{}, false
+	}
+	if m.selectedFileRef >= 0 && m.selectedFileRef < len(refs) {
+		return refs[m.selectedFileRef], true
+	}
+	return refs[len(refs)-1], true
+}
+
+// openFileRef launches the configured editor at path:line via /vim plumbing.
+func (m Model) openFileRef(ref fileRef) (tea.Model, tea.Cmd) {
+	if strings.TrimSpace(ref.Path) == "" {
+		return m, nil
+	}
+	args := []string{ref.Path}
+	if ref.Line > 0 {
+		args = []string{ref.Path + ":" + itoa(ref.Line)}
+	}
+	// Remember selection so a subsequent empty enter re-opens the same ref.
+	refs := m.collectFileRefs()
+	m.selectedFileRef = -1
+	for i, r := range refs {
+		if r.Path == ref.Path && r.Line == ref.Line {
+			m.selectedFileRef = i
+			break
+		}
+	}
+	return m.handleVimCommand(args)
+}
+
+// fileRefAtMouse maps a left-click in the transcript viewport to a path:line.
+func (m Model) fileRefAtMouse(msg tea.MouseMsg) (fileRef, bool) {
+	if m.modal != nil || len(m.transcriptPlainLines) == 0 {
+		return fileRef{}, false
+	}
+	ox, oy, ok := m.transcriptContentOrigin()
+	if !ok {
+		return fileRef{}, false
+	}
+	relY := msg.Y - oy
+	relX := msg.X - ox
+	if relY < 0 || relX < 0 || relY >= m.viewport.Height {
+		return fileRef{}, false
+	}
+	lineIdx := m.viewport.YOffset + relY
+	if lineIdx < 0 || lineIdx >= len(m.transcriptPlainLines) {
+		return fileRef{}, false
+	}
+	return fileRefAtColumn(m.transcriptPlainLines[lineIdx], relX)
+}
+
+// transcriptContentOrigin is the top-left cell of the transcript viewport body
+// in screen coordinates (after header and panel chrome).
+func (m Model) transcriptContentOrigin() (x, y int, ok bool) {
+	if !m.ready || len(m.cells) == 0 || m.viewport.Height <= 0 {
+		return 0, 0, false
+	}
+	th := m.th.Resolve()
+	gutter := th.Spacing.XS
+	leftWidth := m.width
+	showLeft := true
+	if m.splitOrientation != orientVertical {
+		geo := computePaneGeometry(m.width, gutter, m.focus)
+		if geo.mode == paneSingle && m.focus == focusRight {
+			return 0, 0, false
+		}
+		leftWidth = geo.leftCandidateWidth(m.width)
+	} else {
+		l0 := computeLayout(m.width, m.height, m.composer.Height(), m.completionPopupHeightFor(m.width), m.dangerouslySkipPermissions, m.noticeRowsFor(m.width))
+		bodyHeight := l0.transcript + l0.notice + l0.popup + l0.composer
+		geo := computeVerticalPaneGeometry(m.width, bodyHeight, gutter, m.focus)
+		if geo.mode == paneSingle && m.focus == focusRight {
+			return 0, 0, false
+		}
+		leftWidth = m.width
+		showLeft = !(geo.mode == paneSingle && m.focus == focusRight)
+	}
+	if !showLeft {
+		return 0, 0, false
+	}
+	l := computeLayout(leftWidth, m.height, m.composer.Height(), m.completionPopupHeightFor(leftWidth), m.dangerouslySkipPermissions, m.noticeRowsFor(leftWidth))
+	if m.splitOrientation == orientVertical {
+		bodyHeight := l.transcript + l.notice + l.popup + l.composer
+		geo := computeVerticalPaneGeometry(m.width, bodyHeight, gutter, m.focus)
+		if geo.mode == paneSplit {
+			l = l.withBodyHeight(geo.leftHeight)
+		}
+	}
+	if l.transcript <= 0 {
+		return 0, 0, false
+	}
+	y = l.header
+	x = 0
+	compact := leftWidth < compactWidth || m.height < compactHeight
+	if !compact {
+		// Panel top border + left border + horizontal padding.
+		y++
+		if leftWidth >= 3 {
+			x = 1
+			if leftWidth >= 6 {
+				padX := th.Spacing.XS
+				if padX < 0 {
+					padX = 0
+				}
+				if maxPad := (leftWidth - 3) / 2; padX > maxPad {
+					padX = maxPad
+				}
+				x += padX
+			}
+		}
+	}
+	return x, y, true
 }
 
 func (m Model) View() string {

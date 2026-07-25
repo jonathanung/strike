@@ -169,10 +169,17 @@ func buildEditorCmd(bin string, baseArgs []string, absPath string, line int) *ex
 		}
 	}
 	if absPath != "" {
-		if line > 0 && isViFamily(base) {
-			args = append(args, fmt.Sprintf("+%d", line))
+		switch {
+		case line > 0 && isViFamily(base):
+			args = append(args, fmt.Sprintf("+%d", line), absPath)
+		case line > 0 && isCodeFamily(base):
+			// code -g file:line (path is not a separate argv after -g).
+			args = append(args, "-g", fmt.Sprintf("%s:%d", absPath, line))
+		case line > 0 && (base == "subl" || base == "sublime_text"):
+			args = append(args, fmt.Sprintf("%s:%d", absPath, line))
+		default:
+			args = append(args, absPath)
 		}
-		args = append(args, absPath)
 	}
 	return exec.Command(bin, args...)
 }
@@ -180,6 +187,15 @@ func buildEditorCmd(bin string, baseArgs []string, absPath string, line int) *ex
 func isViFamily(base string) bool {
 	switch base {
 	case "vi", "vim", "nvim", "view", "vimdiff", "nvim-qt":
+		return true
+	default:
+		return false
+	}
+}
+
+func isCodeFamily(base string) bool {
+	switch base {
+	case "code", "code-insiders", "codium", "code-oss":
 		return true
 	default:
 		return false

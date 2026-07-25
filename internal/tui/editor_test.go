@@ -111,8 +111,14 @@ func TestParseVimArgs(t *testing.T) {
 func TestBuildEditorCmdAddsWaitAndLine(t *testing.T) {
 	cmd := buildEditorCmd("code", nil, "/tmp/x.go", 12)
 	got := cmd.Args
-	if len(got) < 3 || got[0] != "code" || got[1] != "-w" || got[len(got)-1] != "/tmp/x.go" {
-		t.Fatalf("code args = %v", got)
+	wantCode := []string{"code", "-w", "-g", "/tmp/x.go:12"}
+	if len(got) != len(wantCode) {
+		t.Fatalf("code args = %v, want %v", got, wantCode)
+	}
+	for i := range wantCode {
+		if got[i] != wantCode[i] {
+			t.Fatalf("code args = %v, want %v", got, wantCode)
+		}
 	}
 
 	cmd = buildEditorCmd("/usr/bin/nvim", nil, "/tmp/x.go", 9)
