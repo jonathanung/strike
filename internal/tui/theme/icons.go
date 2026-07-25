@@ -23,6 +23,8 @@ type Icons struct {
 	Ellipsis        string // … truncation marker
 	LogoTopRule     string // ▁ logo top rule
 	LogoBottomRule  string // ▔ logo bottom rule
+	MeterFill       string // █ context-meter filled cell
+	MeterEmpty      string // ░ context-meter empty cell
 }
 
 // DefaultIcons returns the stock glyph set. A zero Icons value is treated as
@@ -45,6 +47,7 @@ func DefaultIcons() Icons {
 		ToolGuide:    "│",
 		BadgeLeft:    "[", BadgeRight: "]", DetailSeparator: "—", Ellipsis: "…",
 		LogoTopRule: "▁", LogoBottomRule: "▔",
+		MeterFill: "█", MeterEmpty: "░",
 	}
 }
 
@@ -105,6 +108,12 @@ func resolveIcons(i, d Icons) Icons {
 	}
 	if i.LogoBottomRule == "" {
 		i.LogoBottomRule = d.LogoBottomRule
+	}
+	if i.MeterFill == "" {
+		i.MeterFill = d.MeterFill
+	}
+	if i.MeterEmpty == "" {
+		i.MeterEmpty = d.MeterEmpty
 	}
 	return i
 }

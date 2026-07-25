@@ -101,6 +101,14 @@ type apiResponse struct {
 	// Content stays raw so thinking blocks survive the round trip untouched.
 	Content    []json.RawMessage `json:"content"`
 	StopReason string            `json:"stop_reason"`
+	Usage      *apiUsage         `json:"usage,omitempty"`
+}
+
+type apiUsage struct {
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 }
 
 func (p *Provider) Stream(ctx context.Context, req provider.Request) (<-chan provider.StreamEvent, error) {
@@ -137,7 +145,16 @@ func (p *Provider) Stream(ctx context.Context, req provider.Request) (<-chan pro
 				ch <- provider.StreamEvent{Type: provider.EventReasoning, Reasoning: raw}
 			}
 		}
-		ch <- provider.StreamEvent{Type: provider.EventDone, StopReason: resp.StopReason}
+		done := provider.StreamEvent{Type: provider.EventDone, StopReason: resp.StopReason}
+		if resp.Usage != nil {
+			done.Usage = &provider.Usage{
+				InputTokens:         resp.Usage.InputTokens,
+				OutputTokens:        resp.Usage.OutputTokens,
+				CacheReadTokens:     resp.Usage.CacheReadInputTokens,
+				CacheCreationTokens: resp.Usage.CacheCreationInputTokens,
+			}
+		}
+		ch <- done
 	}), nil
 }
 

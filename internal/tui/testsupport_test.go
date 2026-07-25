@@ -155,6 +155,14 @@ func (c *fakeCatalog) ModelIDs(ctx context.Context, provider string) ([]string, 
 	return append([]string(nil), ids...), nil
 }
 
+func (c *fakeCatalog) ContextWindow(context.Context, string, string) (int, bool, error) {
+	return 0, false, nil
+}
+
+func (c *fakeCatalog) OutputLimit(context.Context, string, string) (int, bool, error) {
+	return 0, false, nil
+}
+
 // --- fakeSettings: a recording host.Settings -----------------------------
 
 type savedDefaults struct {

@@ -10,7 +10,9 @@ package tui
 
 import (
 	"bytes"
+	"context"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -67,11 +69,28 @@ type historyAddedMsg struct {
 type Options struct {
 	DangerouslySkipPermissions bool
 	Theme                      *theme.Theme
-	// WorkDir resolves relative paths for /vim. Empty falls back to os.Getwd
-	// at launch time.
+	SessionID                  string
+	// WorkDir is display identity for the context pane and resolves relative
+	// paths for /vim. Empty falls back to os.Getwd at launch time.
 	WorkDir string
+	// FirstRun is true when the host detected a fresh strike home (no global
+	// config and no real provider credentials). The TUI shows onboarding.
+	FirstRun bool
 	// VimMode selects pane/overlay/takeover for /vim. Empty defaults to pane.
 	VimMode VimMode
+}
+
+// firstRunSetupMsg opens the provider picker once on a fresh install.
+type firstRunSetupMsg struct{}
+
+// contextLimitsMsg delivers catalog context-window and output-limit lookups
+// for a provider/model pair. Applied only when that pair is still selected.
+type contextLimitsMsg struct {
+	provider, model string
+	contextTokens   int
+	contextOK       bool
+	outputTokens    int
+	outputOK        bool
 }
 
 // Model is the root Bubble Tea model. It holds its host services, the
@@ -124,8 +143,29 @@ type Model struct {
 	width          int
 	height         int
 	ready          bool
-	workDir        string
-	vimMode        VimMode
+
+	// sessionID and workDir are display-only identity for the context pane.
+	sessionID string
+	workDir   string
+	// vimMode selects pane/overlay/takeover for /vim.
+	vimMode VimMode
+	// usage* hold the latest UsageReported figures; Known=false means unknown
+	// (never treat as measured zero). Limits come from the host catalog.
+	usageInput, usageOutput, usageUsed protocol.TokenCount
+	usageSource                        string
+	contextLimit                       int
+	contextLimitKnown                  bool
+	outputLimit                        int
+	outputLimitKnown                   bool
+
+	// firstRun drives the empty-transcript onboarding card and auto provider modal.
+	firstRun, firstRunModalOpened bool
+	// turnStartedAt / toolCallsThisTurn power the working-status elapsed label.
+	turnStartedAt     time.Time
+	toolCallsThisTurn int
+	authExpiryNoticed bool
+	focused           bool // terminal focus; default true (WithReportFocus)
+	titleTopic        string
 }
 
 // New builds the frontend model. services supplies every host capability; any
@@ -156,11 +196,18 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		windows:    newWindowRegistry(),
 		spin:       sp,
 		historyPos: -1,
+		focused:    true,
 	}
 	for _, option := range options {
 		m.dangerouslySkipPermissions = option.DangerouslySkipPermissions
+		if option.SessionID != "" {
+			m.sessionID = option.SessionID
+		}
 		if option.WorkDir != "" {
 			m.workDir = option.WorkDir
+		}
+		if option.FirstRun {
+			m.firstRun = true
 		}
 		if option.VimMode != "" {
 			m.vimMode = option.VimMode
@@ -176,8 +223,43 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(textarea.Blink, m.listen(), m.spin.Tick, m.windows.init())
+	cmds := []tea.Cmd{
+		textarea.Blink,
+		m.listen(),
+		m.spin.Tick,
+		m.windows.init(),
+		tea.SetWindowTitle(windowTitle(m)),
+	}
+	if m.firstRun {
+		cmds = append(cmds, func() tea.Msg { return firstRunSetupMsg{} })
+	}
+	if notice := m.authExpiryNoticeCmd(); notice != nil {
+		cmds = append(cmds, notice)
+	}
+	return tea.Batch(cmds...)
 }
+
+// authExpiryNoticeCmd returns a one-shot notice when the selected provider's
+// OAuth credential expires within authExpiryWarn. The noticed flag is set when
+// the resulting message is applied so Init (value receiver) stays correct.
+func (m Model) authExpiryNoticeCmd() tea.Cmd {
+	if m.authExpiryNoticed || m.providerName == "" || m.services.Auth == nil {
+		return nil
+	}
+	for _, s := range m.services.Auth.Statuses() {
+		if s.Name != m.providerName {
+			continue
+		}
+		if s.ExpiresAt.IsZero() || time.Until(s.ExpiresAt) >= authExpiryWarn {
+			return nil
+		}
+		return func() tea.Msg { return authExpiryNoticeMsg{} }
+	}
+	return nil
+}
+
+// authExpiryNoticeMsg applies the auth-expiring notice on the update path.
+type authExpiryNoticeMsg struct{}
 
 // listen waits for the next engine event; re-issued after each delivery.
 func (m Model) listen() tea.Cmd {
@@ -197,22 +279,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = max(0, msg.Width), max(0, msg.Height)
+		firstReady := !m.ready
 		if !m.ready {
 			m.viewport = viewport.New(max(1, m.width), 0)
 			m.ready = true
 		}
 		m.reflow()
 		m.refreshViewport()
-		return m, nil
+		var cmd tea.Cmd
+		if firstReady {
+			cmd = m.broadcastContextState()
+		}
+		return m, cmd
 
 	case engineClosedMsg:
 		return m, tea.Quit
 
 	case engineEventMsg:
-		m.applyEvent(msg.ev)
+		cmd := m.applyEvent(msg.ev)
 		m.reflow()
 		m.refreshViewport()
-		return m, m.listen()
+		return m, tea.Batch(m.listen(), cmd)
+
+	case contextLimitsMsg:
+		if msg.provider != m.providerName || msg.model != m.modelName {
+			return m, nil
+		}
+		m.contextLimit = msg.contextTokens
+		m.contextLimitKnown = msg.contextOK
+		m.outputLimit = msg.outputTokens
+		m.outputLimitKnown = msg.outputOK
+		return m, m.broadcastContextState()
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -260,6 +357,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case terminalExitMsg:
 		return m.applyTerminalExit(msg)
 
+	case firstRunSetupMsg:
+		if m.firstRun && !m.firstRunModalOpened && m.modal == nil && len(m.cells) == 0 {
+			m.firstRunModalOpened = true
+			m.modal = newProviderModal(m.services, m.providerName, m.ops, m.th)
+			m.reflow()
+		}
+		return m, nil
+
+	case authExpiryNoticeMsg:
+		if m.authExpiryNoticed {
+			return m, nil
+		}
+		m.authExpiryNoticed = true
+		m.setNotice("auth expiring — run /auth", false)
+		return m, nil
+
+	case tea.FocusMsg:
+		m.focused = true
+		return m, nil
+
+	case tea.BlurMsg:
+		m.focused = false
+		return m, nil
+
 	case paletteInvokeMsg:
 		priorNotice, priorNoticeErr := m.notice, m.noticeErr
 		entry, ok := m.currentPaletteEntry(msg.Action)
@@ -306,22 +427,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		// Embedded terminal captures keys while focused so nvim receives
-		// ctrl+h/j/k/l etc. ctrl+g leaves the pane; ctrl+c still quits strike.
-		if terminalCapturesKeys(m.windows, m.focus) && m.modal == nil {
-			if key.Matches(msg, m.keyMap.Quit) {
-				m.closeEmbeddedSessions()
-				return m, tea.Quit
-			}
-			if key.Matches(msg, m.keyMap.TerminalLeave) {
-				return m.leaveEmbeddedEditor()
-			}
-			var cmd tea.Cmd
-			m.windows, cmd = m.windows.update(msg)
-			return m, cmd
-		}
 		if key.Matches(msg, m.keyMap.Quit) {
-			m.closeEmbeddedSessions()
 			return m, tea.Quit
 		}
 		if m.modal != nil {
@@ -644,7 +750,7 @@ func (m *Model) reflow() {
 	}
 }
 
-func (m *Model) applyEvent(ev protocol.Event) {
+func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 	// Defense-in-depth: child-session events should only surface permissions
 	// and questions. Primary filtering is in the engine (only Permission* and
 	// Question* are forwarded).
@@ -653,17 +759,27 @@ func (m *Model) applyEvent(ev protocol.Event) {
 		case protocol.PermissionAsked, protocol.PermissionResolved,
 			protocol.QuestionAsked, protocol.QuestionResolved:
 		default:
-			return
+			return nil
 		}
 	}
 	// Status coloring tracks protocol facts before view-side side effects so
 	// agentState never depends on modal type checks.
 	m.applyAgentStateEvent(ev)
+	var cmd tea.Cmd
 	switch ev := ev.(type) {
 	case protocol.UserMessage:
 		m.cells = append(m.cells, &userCell{text: ev.Text})
+		if m.titleTopic == "" {
+			if topic := sanitizeTitleTopic(ev.Text); topic != "" {
+				m.titleTopic = topic
+				cmd = tea.SetWindowTitle(windowTitle(*m))
+			}
+		}
 	case protocol.TurnStarted:
+		m.turnStartedAt = time.Now()
+		m.toolCallsThisTurn = 0
 		m.refreshOpenPalette()
+		cmd = m.broadcastContextState()
 	case protocol.TextDelta:
 		if last, ok := lastCell[*assistantCell](m.cells); ok {
 			last.text += ev.Text
@@ -671,6 +787,7 @@ func (m *Model) applyEvent(ev protocol.Event) {
 			m.cells = append(m.cells, &assistantCell{text: ev.Text})
 		}
 	case protocol.ToolCallBegin:
+		m.toolCallsThisTurn++
 		tc := &toolCell{callID: ev.CallID, name: ev.Name, args: ev.Args}
 		m.toolByID[ev.CallID] = tc
 		m.cells = append(m.cells, tc)
@@ -680,26 +797,46 @@ func (m *Model) applyEvent(ev protocol.Event) {
 		}
 	case protocol.PermissionAsked:
 		m.modal = newPermissionModal(ev, m.ops, m.th)
+		cmd = m.broadcastContextState()
+		if !m.focused {
+			cmd = tea.Batch(cmd, notifyUnfocusedCmd("strike: permission required"))
+		}
 	case protocol.PermissionResolved:
 		if modal, ok := m.modal.(*permissionModal); ok && modal.req.RequestID == ev.RequestID {
 			m.modal = nil
 		}
+		cmd = m.broadcastContextState()
 	case protocol.QuestionAsked:
 		m.modal = newQuestionModal(ev, m.ops, m.th)
+		cmd = m.broadcastContextState()
+		if !m.focused {
+			cmd = tea.Batch(cmd, notifyUnfocusedCmd("strike: question required"))
+		}
 	case protocol.QuestionResolved:
 		if modal, ok := m.modal.(*questionModal); ok && modal.req.RequestID == ev.RequestID {
 			m.modal = nil
 		}
+		cmd = m.broadcastContextState()
 	case protocol.TurnCompleted:
+		var notify tea.Cmd
+		if !m.focused && !m.turnStartedAt.IsZero() && time.Since(m.turnStartedAt) >= notifyAfterTurn {
+			notify = notifyUnfocusedCmd("strike: turn complete")
+		}
+		m.turnStartedAt = time.Time{}
+		m.toolCallsThisTurn = 0
 		m.refreshOpenPalette()
+		cmd = tea.Batch(m.broadcastContextState(), notify)
 	case protocol.ModelSelected:
 		if m.noticeCause == noticeNeedsModel {
 			m.clearNotice()
 		}
 		m.providerName, m.modelName = ev.Provider, ev.Model
+		m.clearUsage()
 		m.refreshOpenPalette()
+		cmd = tea.Batch(m.fetchContextLimitsCmd(), m.broadcastContextState(), m.authExpiryNoticeCmd())
 	case protocol.AgentSelected:
 		m.agentName = ev.Name
+		cmd = m.broadcastContextState()
 	case protocol.EffortSelected:
 		m.effort = ev.Level
 		m.setNotice("effort: "+detailJoin(m.th, string(ev.Level), ev.Level.Describe()), false)
@@ -712,6 +849,12 @@ func (m *Model) applyEvent(ev protocol.Event) {
 		}
 		label := strings.Join(ev.Paths, ", ")
 		m.setNotice("files changed — agent will re-read: "+label, false)
+	case protocol.UsageReported:
+		m.usageInput = ev.Input
+		m.usageOutput = ev.Output
+		m.usageUsed = ev.Used
+		m.usageSource = ev.Source
+		cmd = m.broadcastContextState()
 	case protocol.EngineError:
 		// Mid-turn failures belong in the transcript; idle-state errors
 		// (no model selected, bad /provider, …) show in the notice line.
@@ -724,11 +867,13 @@ func (m *Model) applyEvent(ev protocol.Event) {
 				m.setNotice(ev.Message, true)
 			}
 		}
+		cmd = m.broadcastContextState()
 	case protocol.ChildStarted:
 		// Foreground child lifecycle is engine-owned; no tree UI yet.
 	case protocol.ChildCompleted:
 		// no-op
 	}
+	return cmd
 }
 
 // eventCorrelation extracts lineage fields when the event embeds Correlation.
@@ -762,6 +907,8 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 		return e.Correlation, true
 	case protocol.FastSelected:
 		return e.Correlation, true
+	case protocol.UsageReported:
+		return e.Correlation, true
 	case protocol.EngineError:
 		return e.Correlation, true
 	case protocol.ChildStarted:
@@ -771,6 +918,74 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	default:
 		return protocol.Correlation{}, false
 	}
+}
+
+// clearUsage drops prior token figures and catalog limits so a model switch
+// never shows stale occupancy against a new window size.
+func (m *Model) clearUsage() {
+	m.usageInput = protocol.TokenCount{}
+	m.usageOutput = protocol.TokenCount{}
+	m.usageUsed = protocol.TokenCount{}
+	m.usageSource = ""
+	m.contextLimit = 0
+	m.contextLimitKnown = false
+	m.outputLimit = 0
+	m.outputLimitKnown = false
+}
+
+// fetchContextLimitsCmd looks up context window and output limit for the
+// current provider/model via the host catalog (may hit network/cache).
+func (m Model) fetchContextLimitsCmd() tea.Cmd {
+	catalog := m.services.Catalog
+	provider, model := m.providerName, m.modelName
+	if catalog == nil || provider == "" {
+		return nil
+	}
+	return func() tea.Msg {
+		ctx := context.Background()
+		ct, cok, _ := catalog.ContextWindow(ctx, provider, model)
+		ot, ook, _ := catalog.OutputLimit(ctx, provider, model)
+		return contextLimitsMsg{
+			provider:      provider,
+			model:         model,
+			contextTokens: ct,
+			contextOK:     cok,
+			outputTokens:  ot,
+			outputOK:      ook,
+		}
+	}
+}
+
+// contextStateSnapshot copies model-owned context fields for right-pane windows.
+func (m Model) contextStateSnapshot() contextStateMsg {
+	return contextStateMsg{
+		WorkDir:           m.workDir,
+		SessionID:         m.sessionID,
+		Provider:          m.providerName,
+		Model:             m.modelName,
+		Agent:             m.agentName,
+		AgentState:        m.agentState().Label(),
+		Input:             m.usageInput,
+		Output:            m.usageOutput,
+		Used:              m.usageUsed,
+		Source:            m.usageSource,
+		ContextLimit:      m.contextLimit,
+		ContextLimitKnown: m.contextLimitKnown,
+		OutputLimit:       m.outputLimit,
+		OutputLimitKnown:  m.outputLimitKnown,
+	}
+}
+
+// broadcastContextState pushes the current snapshot to every right-pane window.
+func (m *Model) broadcastContextState() tea.Cmd {
+	var cmd tea.Cmd
+	m.windows, cmd = m.windows.broadcast(m.contextStateSnapshot())
+	return cmd
+}
+
+// hasContextMeter reports whether the header should show a compact usage chip.
+func (m Model) hasContextMeter() bool {
+	return m.usageUsed.Known || m.usageInput.Known || m.usageOutput.Known || m.contextLimitKnown
 }
 
 func (m Model) currentPaletteAvailability() paletteAvailability {

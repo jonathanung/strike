@@ -27,6 +27,61 @@ func TestModelIDs(t *testing.T) {
 	}
 }
 
+func TestContextWindowAndOutputLimit(t *testing.T) {
+	c := Catalog{
+		"openai": {ID: "openai", Models: map[string]Model{
+			"with-limit": {
+				ID:    "with-limit",
+				Limit: &ModelLimit{Context: 128_000, Output: 16_384},
+			},
+			"zero-limit": {
+				ID:    "zero-limit",
+				Limit: &ModelLimit{Context: 0, Output: 0},
+			},
+			"no-limit": {ID: "no-limit"},
+			"partial": {
+				ID:    "partial",
+				Limit: &ModelLimit{Context: 200_000, Output: 0},
+			},
+		}},
+	}
+
+	if tokens, ok := c.ContextWindow("openai", "with-limit"); !ok || tokens != 128_000 {
+		t.Errorf("ContextWindow(with-limit) = %d,%v want 128000,true", tokens, ok)
+	}
+	if tokens, ok := c.OutputLimit("openai", "with-limit"); !ok || tokens != 16_384 {
+		t.Errorf("OutputLimit(with-limit) = %d,%v want 16384,true", tokens, ok)
+	}
+
+	if tokens, ok := c.ContextWindow("openai", "no-limit"); ok || tokens != 0 {
+		t.Errorf("ContextWindow(no-limit) = %d,%v want 0,false", tokens, ok)
+	}
+	if tokens, ok := c.OutputLimit("openai", "no-limit"); ok || tokens != 0 {
+		t.Errorf("OutputLimit(no-limit) = %d,%v want 0,false", tokens, ok)
+	}
+
+	if tokens, ok := c.ContextWindow("openai", "zero-limit"); ok || tokens != 0 {
+		t.Errorf("ContextWindow(zero-limit) = %d,%v want 0,false", tokens, ok)
+	}
+	if tokens, ok := c.OutputLimit("openai", "zero-limit"); ok || tokens != 0 {
+		t.Errorf("OutputLimit(zero-limit) = %d,%v want 0,false", tokens, ok)
+	}
+
+	if tokens, ok := c.ContextWindow("openai", "partial"); !ok || tokens != 200_000 {
+		t.Errorf("ContextWindow(partial) = %d,%v want 200000,true", tokens, ok)
+	}
+	if tokens, ok := c.OutputLimit("openai", "partial"); ok || tokens != 0 {
+		t.Errorf("OutputLimit(partial) = %d,%v want 0,false", tokens, ok)
+	}
+
+	if tokens, ok := c.ContextWindow("missing", "x"); ok || tokens != 0 {
+		t.Errorf("ContextWindow(missing) = %d,%v want 0,false", tokens, ok)
+	}
+	if tokens, ok := c.OutputLimit("openai", "missing-model"); ok || tokens != 0 {
+		t.Errorf("OutputLimit(missing-model) = %d,%v want 0,false", tokens, ok)
+	}
+}
+
 func TestSupportsPriority(t *testing.T) {
 	c := Catalog{
 		"openai": {ID: "openai", Models: map[string]Model{

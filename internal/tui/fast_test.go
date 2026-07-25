@@ -114,6 +114,14 @@ func (c *fastCatalogProbe) ModelIDs(_ context.Context, _ string) ([]string, erro
 	return []string{"unused"}, nil
 }
 
+func (c *fastCatalogProbe) ContextWindow(context.Context, string, string) (int, bool, error) {
+	return 0, false, nil
+}
+
+func (c *fastCatalogProbe) OutputLimit(context.Context, string, string) (int, bool, error) {
+	return 0, false, nil
+}
+
 func TestFastSelectedHandlingDoesNotLoadCatalog(t *testing.T) {
 	probe := &fastCatalogProbe{}
 	services := testServices(nil, nil)

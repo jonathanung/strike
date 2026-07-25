@@ -102,9 +102,15 @@ func (m Model) welcomeCards(statuses []host.ProviderStatus) []welcomeCard {
 	}
 	cards := make([]welcomeCard, 0, 4)
 	if m.providerName == "" || selectedUnauthed {
-		cards = append(cards, welcomeCard{title: "get started", desired: 7, body: func(width, rows int) string {
-			return m.welcomeProviders(statuses, width, rows)
-		}})
+		if m.firstRun {
+			cards = append(cards, welcomeCard{title: "first run", desired: 7, body: func(width, rows int) string {
+				return m.welcomeFirstRun(width, rows)
+			}})
+		} else {
+			cards = append(cards, welcomeCard{title: "get started", desired: 7, body: func(width, rows int) string {
+				return m.welcomeProviders(statuses, width, rows)
+			}})
+		}
 	}
 	cards = append(cards, welcomeCard{title: "keys", desired: 10, body: func(width, rows int) string {
 		return m.welcomeKeys(width, rows)
@@ -126,7 +132,7 @@ func welcomeFits(height, cards, columns, gap int) bool {
 }
 
 func welcomeDropCard(cards []welcomeCard) []welcomeCard {
-	for _, title := range []string{"recent prompts", "agents & skills", "get started"} {
+	for _, title := range []string{"recent prompts", "agents & skills", "get started", "first run"} {
 		for i, card := range cards {
 			if card.title == title {
 				return append(cards[:i:i], cards[i+1:]...)
@@ -187,6 +193,25 @@ func welcomePadBlock(block string, width int) string {
 		if pad := width - ansi.StringWidth(line); pad > 0 {
 			lines[i] = line + themedSpace(pad)
 		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// welcomeFirstRun is the empty-transcript onboarding card for a fresh install.
+func (m Model) welcomeFirstRun(width, rows int) string {
+	th := m.th.Resolve()
+	st := th.S()
+	steps := []string{
+		detailJoin(th, "1. Sign in", "/auth or pick a provider"),
+		detailJoin(th, "2. Choose a model", "/model"),
+		"3. Send a message",
+	}
+	lines := make([]string, 0, min(len(steps), rows))
+	for _, step := range steps {
+		if len(lines) >= rows {
+			break
+		}
+		lines = append(lines, st.Text.Render(welcomeTruncate(step, width, th.Icons.Ellipsis)))
 	}
 	return strings.Join(lines, "\n")
 }

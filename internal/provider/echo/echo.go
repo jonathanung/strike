@@ -25,17 +25,23 @@ func (Provider) Stream(ctx context.Context, req provider.Request) (<-chan provid
 	go func() {
 		defer close(ch)
 		if len(req.Messages) == 0 {
-			ch <- provider.StreamEvent{Type: provider.EventDone, StopReason: "end_turn"}
+			ch <- provider.StreamEvent{
+				Type:       provider.EventDone,
+				StopReason: "end_turn",
+				Usage:      estimateUsage(req, ""),
+			}
 			return
 		}
 		last := req.Messages[len(req.Messages)-1]
+		var emitted string
 		switch {
 		case last.Role == provider.RoleTool:
 			status := "succeeded"
 			if last.ToolResult.IsError {
 				status = "failed"
 			}
-			emitText(ctx, ch, fmt.Sprintf("The tool call %s. Result:\n\n%s", status, truncate(last.ToolResult.Output, 800)))
+			emitted = fmt.Sprintf("The tool call %s. Result:\n\n%s", status, truncate(last.ToolResult.Output, 800))
+			emitText(ctx, ch, emitted)
 		case strings.HasPrefix(last.Text, "run "):
 			args, _ := json.Marshal(map[string]string{"command": strings.TrimPrefix(last.Text, "run ")})
 			ch <- provider.StreamEvent{Type: provider.EventToolCall, ToolCall: &provider.ToolCall{
@@ -43,14 +49,48 @@ func (Provider) Stream(ctx context.Context, req provider.Request) (<-chan provid
 				Name: "bash",
 				Args: args,
 			}}
-			ch <- provider.StreamEvent{Type: provider.EventDone, StopReason: "tool_use"}
+			ch <- provider.StreamEvent{
+				Type:       provider.EventDone,
+				StopReason: "tool_use",
+				Usage:      estimateUsage(req, ""),
+			}
 			return
 		default:
-			emitText(ctx, ch, "You said: "+last.Text+"\n\nTip: start a message with `run <command>` to exercise the bash tool and the permission prompt.")
+			emitted = "You said: " + last.Text + "\n\nTip: start a message with `run <command>` to exercise the bash tool and the permission prompt."
+			emitText(ctx, ch, emitted)
 		}
-		ch <- provider.StreamEvent{Type: provider.EventDone, StopReason: "end_turn"}
+		ch <- provider.StreamEvent{
+			Type:       provider.EventDone,
+			StopReason: "end_turn",
+			Usage:      estimateUsage(req, emitted),
+		}
 	}()
 	return ch, nil
+}
+
+// estimateUsage is a deterministic offline stand-in: ~4 runes per token.
+// Always non-nil with Estimated=true so the engine can emit UsageReported.
+func estimateUsage(req provider.Request, emitted string) *provider.Usage {
+	var inputRunes int
+	for _, m := range req.Messages {
+		inputRunes += len([]rune(m.Text))
+		if m.ToolResult != nil {
+			inputRunes += len([]rune(m.ToolResult.Output))
+		}
+	}
+	input := 0
+	if len(req.Messages) > 0 {
+		input = max(1, inputRunes/4)
+	}
+	output := 0
+	if emitted != "" {
+		output = max(1, len([]rune(emitted))/4)
+	}
+	return &provider.Usage{
+		InputTokens:  input,
+		OutputTokens: output,
+		Estimated:    true,
+	}
 }
 
 func emitText(ctx context.Context, ch chan<- provider.StreamEvent, text string) {

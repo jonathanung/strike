@@ -317,6 +317,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 	// the TUI never sees auth/config/models/history directly.
 	services := local.New(authStore, historyStore, agentNames, skills)
 	services.Files = local.NewFiles(workDir)
+	firstRun := isFreshStrikeHome(authStore)
 
 	storeOwned = true
 	if err := runSession(context.Background(), eng.Run, eng.Events(), store, func(events <-chan protocol.Event) error {
@@ -328,9 +329,11 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 		}
 		program := tea.NewProgram(tui.New(eng.Ops(), events, services, tui.Options{
 			DangerouslySkipPermissions: opts.dangerouslySkipPermissions,
+			SessionID:                  sessionID,
 			WorkDir:                    workDir,
+			FirstRun:                   firstRun,
 			VimMode:                    vimMode,
-		}), tea.WithAltScreen(), tea.WithOutput(stdout), tea.WithInput(tui.WrapInput(os.Stdin)))
+		}), tea.WithAltScreen(), tea.WithOutput(stdout), tea.WithInput(tui.WrapInput(os.Stdin)), tea.WithReportFocus())
 		_, err := program.Run()
 		return err
 	}); err != nil {
@@ -338,6 +341,22 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 	}
 	fmt.Fprintln(stdout, "session log:", store.Path())
 	return nil
+}
+
+// isFreshStrikeHome reports a first-run install: no global config file and no
+// real credentials for anthropic/openai/xai. echo does not count as configured.
+func isFreshStrikeHome(store *auth.Store) bool {
+	if path := config.GlobalPath(); path != "" {
+		if _, err := os.Stat(path); err == nil {
+			return false
+		}
+	}
+	for _, provider := range []string{"anthropic", "openai", "xai"} {
+		if auth.Describe(provider, store) != "none" {
+			return false
+		}
+	}
+	return true
 }
 
 func indexAgent(agents []engine.Agent, name string) int {

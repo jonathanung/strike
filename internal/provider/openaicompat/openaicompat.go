@@ -93,6 +93,13 @@ type chatResponse struct {
 		Message      chatMessage `json:"message"`
 		FinishReason string      `json:"finish_reason"`
 	} `json:"choices"`
+	Usage *chatUsage `json:"usage,omitempty"`
+}
+
+type chatUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
 }
 
 func (p *Provider) Stream(ctx context.Context, req provider.Request) (<-chan provider.StreamEvent, error) {
@@ -122,7 +129,15 @@ func (p *Provider) Stream(ctx context.Context, req provider.Request) (<-chan pro
 				Args: args,
 			}}
 		}
-		ch <- provider.StreamEvent{Type: provider.EventDone, StopReason: choice.FinishReason}
+		done := provider.StreamEvent{Type: provider.EventDone, StopReason: choice.FinishReason}
+		if resp.Usage != nil {
+			done.Usage = &provider.Usage{
+				InputTokens:  resp.Usage.PromptTokens,
+				OutputTokens: resp.Usage.CompletionTokens,
+				TotalTokens:  resp.Usage.TotalTokens,
+			}
+		}
+		ch <- done
 	}), nil
 }
 

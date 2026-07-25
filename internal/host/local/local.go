@@ -69,6 +69,9 @@ func (a authAdapter) Statuses() []host.ProviderStatus {
 	for _, p := range credentialProviders {
 		p.Detail = auth.Describe(p.Name, a.store)
 		p.Authed = p.Detail != "none"
+		if cred, ok := a.store.Get(p.Name); ok && cred.Type == auth.TypeOAuth && !cred.ExpiresAt.IsZero() {
+			p.ExpiresAt = cred.ExpiresAt
+		}
 		out = append(out, p)
 	}
 	out = append(out, host.ProviderStatus{
@@ -175,6 +178,24 @@ func (catalogAdapter) ModelIDs(ctx context.Context, provider string) ([]string, 
 		return nil, fmt.Errorf("no models listed for %s on models.dev", provider)
 	}
 	return ids, nil
+}
+
+func (catalogAdapter) ContextWindow(ctx context.Context, provider, model string) (int, bool, error) {
+	catalog, err := models.Load(ctx)
+	if err != nil {
+		return 0, false, err
+	}
+	tokens, ok := catalog.ContextWindow(provider, model)
+	return tokens, ok, nil
+}
+
+func (catalogAdapter) OutputLimit(ctx context.Context, provider, model string) (int, bool, error) {
+	catalog, err := models.Load(ctx)
+	if err != nil {
+		return 0, false, err
+	}
+	tokens, ok := catalog.OutputLimit(provider, model)
+	return tokens, ok, nil
 }
 
 // settingsAdapter adapts global config persistence to host.Settings.

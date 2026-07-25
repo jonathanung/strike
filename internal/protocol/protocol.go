@@ -317,6 +317,37 @@ type EngineError struct {
 	Message string `json:"message"`
 }
 
+// Usage source labels on UsageReported.
+const (
+	UsageSourceActual    = "actual"
+	UsageSourceEstimated = "estimated"
+)
+
+// TokenCount distinguishes unknown from zero: Known=false means the count
+// was not reported; Known=true with N=0 means the vendor reported zero.
+type TokenCount struct {
+	N     int  `json:"n,omitempty"`
+	Known bool `json:"known"`
+}
+
+// KnownTokens is a reported token count (including zero).
+func KnownTokens(n int) TokenCount { return TokenCount{N: n, Known: true} }
+
+// UnknownTokens is an absent token count.
+func UnknownTokens() TokenCount { return TokenCount{} }
+
+// UsageReported carries token accounting for one completed provider stream.
+// Emitted on every EventDone that has usage (including tool-loop intermediate
+// streams), correlated to the provider request.
+type UsageReported struct {
+	Correlation
+	Input  TokenCount `json:"input"`
+	Output TokenCount `json:"output"`
+	// Used is context-window numerator (last request occupancy).
+	Used   TokenCount `json:"used"`
+	Source string     `json:"source,omitempty"` // actual | estimated
+}
+
 func (UserMessage) isEvent()        {}
 func (TurnStarted) isEvent()        {}
 func (TextDelta) isEvent()          {}
@@ -335,3 +366,4 @@ func (FilesInvalidated) isEvent()   {}
 func (EngineError) isEvent()        {}
 func (ChildStarted) isEvent()       {}
 func (ChildCompleted) isEvent()     {}
+func (UsageReported) isEvent()      {}

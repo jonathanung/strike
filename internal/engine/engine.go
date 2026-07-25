@@ -798,6 +798,7 @@ func (e *Engine) runTurn(ctx context.Context, text string, turnID string, finish
 				reasoning = append(reasoning, ev.Reasoning)
 			case provider.EventDone:
 				stopReason = ev.StopReason
+				e.emitUsage(reqCorr, ev.Usage)
 			case provider.EventError:
 				e.failTurn(ev.Err, reqCorr, finishing)
 				return
@@ -983,6 +984,37 @@ func (e *Engine) completeTurn(finishing chan struct{}, corr protocol.Correlation
 	close(finishing)
 	e.emit(protocol.TurnCompleted{Correlation: corr, StopReason: stopReason})
 	e.applyPendingAgent()
+}
+
+// emitUsage translates provider.Usage into a protocol.UsageReported event.
+// A nil usage means the vendor did not report counts — emit nothing (unknown).
+//
+// used = InputTokens + CacheReadTokens + CacheCreationTokens + OutputTokens;
+// if all those are 0 but TotalTokens > 0, used = TotalTokens and input/output
+// stay unknown (a total alone is not a measured zero on the parts).
+func (e *Engine) emitUsage(corr protocol.Correlation, u *provider.Usage) {
+	if u == nil {
+		return
+	}
+	used := u.InputTokens + u.CacheReadTokens + u.CacheCreationTokens + u.OutputTokens
+	input := protocol.KnownTokens(u.InputTokens)
+	output := protocol.KnownTokens(u.OutputTokens)
+	if used == 0 && u.TotalTokens > 0 {
+		used = u.TotalTokens
+		input = protocol.UnknownTokens()
+		output = protocol.UnknownTokens()
+	}
+	source := protocol.UsageSourceActual
+	if u.Estimated {
+		source = protocol.UsageSourceEstimated
+	}
+	e.emit(protocol.UsageReported{
+		Correlation: corr,
+		Input:       input,
+		Output:      output,
+		Used:        protocol.KnownTokens(used),
+		Source:      source,
+	})
 }
 
 func (e *Engine) toolNames() string {

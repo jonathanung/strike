@@ -1096,8 +1096,185 @@ func eventCorrelation(t *testing.T, ev protocol.Event) protocol.Correlation {
 		return ev.Correlation
 	case protocol.EngineError:
 		return ev.Correlation
+	case protocol.UsageReported:
+		return ev.Correlation
+	case protocol.EffortSelected:
+		return ev.Correlation
+	case protocol.FastSelected:
+		return ev.Correlation
 	default:
 		t.Fatalf("event %T has no correlation assertion", ev)
 		return protocol.Correlation{}
+	}
+}
+
+func TestUsageReportedBeforeTurnCompletedWithCorrelation(t *testing.T) {
+	const sessionID = "session-usage"
+	prov := newScriptedProvider(streamStep{events: []provider.StreamEvent{
+		{Type: provider.EventTextDelta, Text: "ok"},
+		{Type: provider.EventDone, StopReason: "end_turn", Usage: &provider.Usage{
+			InputTokens:         10,
+			OutputTokens:        5,
+			CacheReadTokens:     2,
+			CacheCreationTokens: 1,
+		}},
+	}})
+	eng := engine.New(engine.Options{
+		SessionID:       sessionID,
+		Select:          func(string) (provider.Provider, string, error) { return prov, "scripted-model", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "hi"}
+	_, events := collectThroughTurnCompleted(t, eng.Events())
+
+	var usageIdx, completedIdx = -1, -1
+	var usage protocol.UsageReported
+	var completed protocol.TurnCompleted
+	for i, ev := range events {
+		switch e := ev.(type) {
+		case protocol.UsageReported:
+			usageIdx = i
+			usage = e
+		case protocol.TurnCompleted:
+			completedIdx = i
+			completed = e
+		}
+	}
+	if usageIdx < 0 {
+		t.Fatal("missing UsageReported")
+	}
+	if completedIdx < 0 {
+		t.Fatal("missing TurnCompleted")
+	}
+	if usageIdx >= completedIdx {
+		t.Fatalf("UsageReported at %d must precede TurnCompleted at %d", usageIdx, completedIdx)
+	}
+	if usage.Correlation.SessionID != sessionID {
+		t.Errorf("usage sessionId = %q, want %q", usage.Correlation.SessionID, sessionID)
+	}
+	if usage.Correlation.TurnID == "" || usage.Correlation.ProviderRequestID == "" {
+		t.Errorf("usage correlation incomplete: %+v", usage.Correlation)
+	}
+	if usage.Correlation != completed.Correlation {
+		t.Errorf("usage corr = %+v, completed corr = %+v", usage.Correlation, completed.Correlation)
+	}
+	if !usage.Input.Known || usage.Input.N != 10 {
+		t.Errorf("input = %+v, want known 10", usage.Input)
+	}
+	if !usage.Output.Known || usage.Output.N != 5 {
+		t.Errorf("output = %+v, want known 5", usage.Output)
+	}
+	// used = input + cacheRead + cacheCreation + output = 10+2+1+5 = 18
+	if !usage.Used.Known || usage.Used.N != 18 {
+		t.Errorf("used = %+v, want known 18", usage.Used)
+	}
+	if usage.Source != protocol.UsageSourceActual {
+		t.Errorf("source = %q, want %q", usage.Source, protocol.UsageSourceActual)
+	}
+}
+
+func TestNoUsageReportedWhenDoneHasNilUsage(t *testing.T) {
+	prov := newScriptedProvider(streamStep{events: []provider.StreamEvent{
+		{Type: provider.EventTextDelta, Text: "ok"},
+		{Type: provider.EventDone, StopReason: "end_turn"},
+	}})
+	eng := engine.New(engine.Options{
+		Select:          func(string) (provider.Provider, string, error) { return prov, "scripted-model", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "hi"}
+	_, events := collectThroughTurnCompleted(t, eng.Events())
+	for _, ev := range events {
+		if _, ok := ev.(protocol.UsageReported); ok {
+			t.Fatalf("unexpected UsageReported when Done.Usage is nil: %#v", events)
+		}
+	}
+}
+
+func TestUsageReportedUsesTotalTokensWhenPartsZero(t *testing.T) {
+	prov := newScriptedProvider(streamStep{events: []provider.StreamEvent{
+		{Type: provider.EventDone, StopReason: "end_turn", Usage: &provider.Usage{TotalTokens: 77}},
+	}})
+	eng := engine.New(engine.Options{
+		Select:          func(string) (provider.Provider, string, error) { return prov, "m", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "hi"}
+	_, events := collectThroughTurnCompleted(t, eng.Events())
+	var usage *protocol.UsageReported
+	for _, ev := range events {
+		if u, ok := ev.(protocol.UsageReported); ok {
+			cp := u
+			usage = &cp
+		}
+	}
+	if usage == nil {
+		t.Fatal("missing UsageReported")
+	}
+	// Parts were not broken out by the vendor — only TotalTokens. Do not
+	// fabricate Known zero for input/output; Used carries the total.
+	if usage.Input.Known {
+		t.Errorf("input = %+v, want Known=false when only TotalTokens is set", usage.Input)
+	}
+	if usage.Output.Known {
+		t.Errorf("output = %+v, want Known=false when only TotalTokens is set", usage.Output)
+	}
+	if !usage.Used.Known || usage.Used.N != 77 {
+		t.Errorf("used = %+v, want known 77 from TotalTokens fallback", usage.Used)
+	}
+}
+
+func TestUsageReportedEstimatedSource(t *testing.T) {
+	prov := newScriptedProvider(streamStep{events: []provider.StreamEvent{
+		{Type: provider.EventDone, StopReason: "end_turn", Usage: &provider.Usage{
+			InputTokens: 3, OutputTokens: 4, Estimated: true,
+		}},
+	}})
+	eng := engine.New(engine.Options{
+		Select:          func(string) (provider.Provider, string, error) { return prov, "m", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "hi"}
+	_, events := collectThroughTurnCompleted(t, eng.Events())
+	var usage *protocol.UsageReported
+	for _, ev := range events {
+		if u, ok := ev.(protocol.UsageReported); ok {
+			cp := u
+			usage = &cp
+		}
+	}
+	if usage == nil {
+		t.Fatal("missing UsageReported")
+	}
+	if usage.Source != protocol.UsageSourceEstimated {
+		t.Errorf("source = %q, want %q", usage.Source, protocol.UsageSourceEstimated)
 	}
 }

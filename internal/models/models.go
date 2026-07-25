@@ -23,9 +23,16 @@ const (
 	cacheTTL   = 24 * time.Hour
 )
 
+// ModelLimit is the models.dev token ceiling pair for a model.
+type ModelLimit struct {
+	Context int `json:"context"`
+	Output  int `json:"output"`
+}
+
 type Model struct {
 	ID           string        `json:"id"`
 	Name         string        `json:"name"`
+	Limit        *ModelLimit   `json:"limit,omitempty"`
 	Experimental *experimental `json:"experimental,omitempty"`
 }
 
@@ -100,6 +107,35 @@ func (c Catalog) SupportsPriority(provider, model string) bool {
 	}
 	_, ok = m.Experimental.Modes["fast"]
 	return ok
+}
+
+// ContextWindow returns the model's context window in tokens.
+// ok is false when the provider, model, or limit is missing, or context is zero.
+func (c Catalog) ContextWindow(provider, model string) (tokens int, ok bool) {
+	m, ok := c.lookup(provider, model)
+	if !ok || m.Limit == nil || m.Limit.Context == 0 {
+		return 0, false
+	}
+	return m.Limit.Context, true
+}
+
+// OutputLimit returns the model's max output tokens.
+// ok is false when the provider, model, or limit is missing, or output is zero.
+func (c Catalog) OutputLimit(provider, model string) (tokens int, ok bool) {
+	m, ok := c.lookup(provider, model)
+	if !ok || m.Limit == nil || m.Limit.Output == 0 {
+		return 0, false
+	}
+	return m.Limit.Output, true
+}
+
+func (c Catalog) lookup(provider, model string) (Model, bool) {
+	p, ok := c[provider]
+	if !ok {
+		return Model{}, false
+	}
+	m, ok := p.Models[model]
+	return m, ok
 }
 
 func fetch(ctx context.Context) (Catalog, []byte, error) {

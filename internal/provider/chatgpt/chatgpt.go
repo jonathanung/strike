@@ -121,6 +121,11 @@ type sseEvent struct {
 		Error  *struct {
 			Message string `json:"message"`
 		} `json:"error"`
+		Usage *struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+			TotalTokens  int `json:"total_tokens"`
+		} `json:"usage"`
 	} `json:"response"`
 	Message string `json:"message"` // top-level error events
 }
@@ -173,7 +178,16 @@ func (p *Provider) readStream(body io.Reader, ch chan<- provider.StreamEvent) er
 				}}
 			}
 		case "response.completed":
-			ch <- provider.StreamEvent{Type: provider.EventDone, StopReason: "completed"}
+			done := provider.StreamEvent{Type: provider.EventDone, StopReason: "completed"}
+			if ev.Response != nil && ev.Response.Usage != nil {
+				u := ev.Response.Usage
+				done.Usage = &provider.Usage{
+					InputTokens:  u.InputTokens,
+					OutputTokens: u.OutputTokens,
+					TotalTokens:  u.TotalTokens,
+				}
+			}
+			ch <- done
 			return nil
 		case "response.failed":
 			msg := "response failed"

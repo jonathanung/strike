@@ -80,6 +80,26 @@ const (
 	EventError
 )
 
+// Usage is token accounting for one completed provider request.
+// A nil *Usage on StreamEvent means the vendor did not report usage (unknown).
+// Zero token fields with a non-nil Usage mean the vendor reported zero.
+//
+// Context occupancy (used) is computed by the engine as:
+//
+//	used = InputTokens + CacheReadTokens + CacheCreationTokens + OutputTokens
+//	// if all those are 0 but TotalTokens > 0, used = TotalTokens
+type Usage struct {
+	InputTokens         int
+	OutputTokens        int
+	CacheReadTokens     int
+	CacheCreationTokens int
+	// TotalTokens if the vendor supplied it; 0 means not supplied.
+	TotalTokens int
+	// Estimated is true only for synthetic estimates (echo). Real providers
+	// never set this — missing vendor usage stays nil, not fabricated.
+	Estimated bool
+}
+
 // StreamEvent is the normalized event union all providers emit.
 type StreamEvent struct {
 	Type     StreamEventType
@@ -89,7 +109,10 @@ type StreamEvent struct {
 	// stored on the assistant message and replayed unmodified.
 	Reasoning  json.RawMessage
 	StopReason string // EventDone
-	Err        error  // EventError
+	// Usage is set on EventDone when the vendor reported token counts.
+	// nil means unknown (vendor omitted usage); never fabricate for real providers.
+	Usage *Usage
+	Err   error // EventError
 }
 
 // Provider streams one model response. The returned channel is closed when

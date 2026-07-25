@@ -33,6 +33,13 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 		EngineError{Correlation: corr, Message: "boom"},
 		ChildStarted{Correlation: childCorr, Agent: "build", Prompt: "do the subtask"},
 		ChildCompleted{Correlation: childCorr, Status: ChildStatusCompleted, Summary: "done"},
+		UsageReported{
+			Correlation: corr,
+			Input:       KnownTokens(100),
+			Output:      KnownTokens(50),
+			Used:        KnownTokens(150),
+			Source:      UsageSourceActual,
+		},
 	}
 	for _, want := range events {
 		env, err := Wrap(want)
@@ -266,6 +273,48 @@ func TestDecodeMalformedData(t *testing.T) {
 	}
 }
 
+func TestTokenCountKnownVsUnknown(t *testing.T) {
+	known := KnownTokens(0)
+	if !known.Known || known.N != 0 {
+		t.Errorf("KnownTokens(0) = %+v, want Known=true N=0", known)
+	}
+	known = KnownTokens(42)
+	if !known.Known || known.N != 42 {
+		t.Errorf("KnownTokens(42) = %+v, want Known=true N=42", known)
+	}
+	unknown := UnknownTokens()
+	if unknown.Known || unknown.N != 0 {
+		t.Errorf("UnknownTokens() = %+v, want Known=false N=0", unknown)
+	}
+
+	// JSON: known zero keeps "known":true; unknown omits n and known is false.
+	b, err := json.Marshal(UsageReported{
+		Input:  KnownTokens(0),
+		Output: UnknownTokens(),
+		Used:   KnownTokens(10),
+		Source: UsageSourceEstimated,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got UsageReported
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.Input.Known || got.Input.N != 0 {
+		t.Errorf("input after round-trip = %+v, want known zero", got.Input)
+	}
+	if got.Output.Known {
+		t.Errorf("output after round-trip = %+v, want unknown", got.Output)
+	}
+	if !got.Used.Known || got.Used.N != 10 {
+		t.Errorf("used after round-trip = %+v, want known 10", got.Used)
+	}
+	if got.Source != UsageSourceEstimated {
+		t.Errorf("source = %q, want %q", got.Source, UsageSourceEstimated)
+	}
+}
+
 func TestEventTypeCoverage(t *testing.T) {
 	// Ensure every known event maps to a stable type string used by sessions.
 	want := map[string]Event{
@@ -287,6 +336,7 @@ func TestEventTypeCoverage(t *testing.T) {
 		"engine.error":        EngineError{},
 		"child.started":       ChildStarted{},
 		"child.completed":     ChildCompleted{},
+		"usage.reported":      UsageReported{},
 	}
 	for typ, ev := range want {
 		env, err := Wrap(ev)
