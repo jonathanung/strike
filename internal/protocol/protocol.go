@@ -221,6 +221,11 @@ type FilesChanged struct {
 	Reason string   `json:"reason,omitempty"`
 }
 
+// Compact requests deterministic model-history compaction. Rejected while a
+// turn is running. Does not summarize via the model — older turns are replaced
+// with a compact marker while a recent tail is preserved.
+type Compact struct{}
+
 func (UserInput) isOp()       {}
 func (PermissionReply) isOp() {}
 func (QuestionReply) isOp()   {}
@@ -231,6 +236,7 @@ func (SetEffort) isOp()       {}
 func (SetAutonomy) isOp()     {}
 func (SetFast) isOp()         {}
 func (FilesChanged) isOp()    {}
+func (Compact) isOp()         {}
 
 // Event is an engine -> client notification.
 type Event interface{ isEvent() }
@@ -434,6 +440,16 @@ type AgentSelected struct {
 	Name string `json:"name"`
 }
 
+// PhaseChanged reports the active workflow phase (permission profile +
+// context). Empty Phase means no workflow phase is active.
+type PhaseChanged struct {
+	Correlation
+	Workflow string `json:"workflow,omitempty"`
+	Phase    string `json:"phase,omitempty"`
+	Index    int    `json:"index,omitempty"`
+	Gate     string `json:"gate,omitempty"` // agent | check | user
+}
+
 // EffortSelected confirms the active reasoning level, at startup and after
 // each SetEffort.
 type EffortSelected struct {
@@ -510,6 +526,29 @@ type ProviderRetrying struct {
 	Message     string `json:"message,omitempty"`
 }
 
+// Compaction reason labels on CompactionStarted / CompactionCompleted.
+const (
+	CompactionReasonManual    = "manual"
+	CompactionReasonThreshold = "threshold"
+	CompactionReasonOverflow  = "overflow"
+)
+
+// CompactionStarted announces that model-facing history compaction is about
+// to replace older messages. Emitted before the history mutation.
+type CompactionStarted struct {
+	Correlation
+	Reason string `json:"reason"` // manual | threshold | overflow
+}
+
+// CompactionCompleted records that model-facing history was replaced.
+// Removed/Kept count provider messages (not transcript events).
+type CompactionCompleted struct {
+	Correlation
+	Reason  string `json:"reason"`
+	Removed int    `json:"removed"`
+	Kept    int    `json:"kept"`
+}
+
 // SessionMeta records durable session-level metadata (e.g. a PR opened while
 // shipping). Also written to the session sidecar by the host; the event keeps
 // the JSONL transcript self-describing.
@@ -519,30 +558,33 @@ type SessionMeta struct {
 	PRNumber int    `json:"prNumber,omitempty"`
 }
 
-func (UserMessage) isEvent()        {}
-func (SessionTitled) isEvent()      {}
-func (TurnStarted) isEvent()        {}
-func (TextDelta) isEvent()          {}
-func (ToolCallBegin) isEvent()      {}
-func (ToolCallEnd) isEvent()        {}
-func (ToolCallOutput) isEvent()     {}
-func (ProcessStarted) isEvent()     {}
-func (ProcessOutput) isEvent()      {}
-func (ProcessExited) isEvent()      {}
-func (PermissionAsked) isEvent()    {}
-func (PermissionResolved) isEvent() {}
-func (QuestionAsked) isEvent()      {}
-func (QuestionResolved) isEvent()   {}
-func (TurnCompleted) isEvent()      {}
-func (ModelSelected) isEvent()      {}
-func (AgentSelected) isEvent()      {}
-func (EffortSelected) isEvent()     {}
-func (AutonomySelected) isEvent()   {}
-func (FastSelected) isEvent()       {}
-func (FilesInvalidated) isEvent()   {}
-func (EngineError) isEvent()        {}
-func (ChildStarted) isEvent()       {}
-func (ChildCompleted) isEvent()     {}
-func (UsageReported) isEvent()      {}
-func (ProviderRetrying) isEvent()   {}
-func (SessionMeta) isEvent()        {}
+func (UserMessage) isEvent()         {}
+func (SessionTitled) isEvent()       {}
+func (TurnStarted) isEvent()         {}
+func (TextDelta) isEvent()           {}
+func (ToolCallBegin) isEvent()       {}
+func (ToolCallEnd) isEvent()         {}
+func (ToolCallOutput) isEvent()      {}
+func (ProcessStarted) isEvent()      {}
+func (ProcessOutput) isEvent()       {}
+func (ProcessExited) isEvent()       {}
+func (PermissionAsked) isEvent()     {}
+func (PermissionResolved) isEvent()  {}
+func (QuestionAsked) isEvent()       {}
+func (QuestionResolved) isEvent()    {}
+func (TurnCompleted) isEvent()       {}
+func (ModelSelected) isEvent()       {}
+func (AgentSelected) isEvent()       {}
+func (PhaseChanged) isEvent()        {}
+func (EffortSelected) isEvent()      {}
+func (AutonomySelected) isEvent()    {}
+func (FastSelected) isEvent()        {}
+func (FilesInvalidated) isEvent()    {}
+func (EngineError) isEvent()         {}
+func (ChildStarted) isEvent()        {}
+func (ChildCompleted) isEvent()      {}
+func (UsageReported) isEvent()       {}
+func (ProviderRetrying) isEvent()    {}
+func (CompactionStarted) isEvent()   {}
+func (CompactionCompleted) isEvent() {}
+func (SessionMeta) isEvent()         {}

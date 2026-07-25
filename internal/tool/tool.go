@@ -1,7 +1,7 @@
 // Package tool defines the tool contract and the built-in tool set
 // (read/glob/grep/edit/write/apply_patch/bash/task/webfetch/todowrite/todoread/
 // memory_write/memory_read/issue_write/issue_read/notebook_edit/sleep/skill/question/enter_plan_mode/
-// exit_plan_mode/toolsearch).
+// exit_plan_mode/phase_done/toolsearch).
 // Used by internal/engine (dispatch), internal/permission (AskRequest, for the
 // Context.Ask signature), and cmd/strike (registry construction); internal/tui
 // never imports it — tool calls reach the frontend only as
@@ -31,17 +31,20 @@ type AskRequest struct {
 	Metadata json.RawMessage
 }
 
-// TaskRequest is a foreground child/subagent spawn request.
+// TaskRequest is a child/subagent spawn request.
 type TaskRequest struct {
 	Prompt string
 	Agent  string
 }
 
-// TaskResult is the terminal outcome of a foreground child session.
-// Status is one of "completed", "failed", or "canceled".
+// TaskResult is the outcome of spawning a child session.
+// Status is one of "started", "completed", "failed", or "canceled".
+// Non-blocking spawns return "started" with SessionID set; terminal statuses
+// are retained for callers that still wait on completion.
 type TaskResult struct {
-	Output string
-	Status string
+	Output    string
+	Status    string
+	SessionID string
 }
 
 // QuestionOption is one selectable choice on a QuestionItem.
@@ -76,9 +79,11 @@ type SessionPR struct {
 
 // Context carries per-call facilities into a tool. Ask blocks until the
 // permission is granted; it returns an error if rejected or denied.
-// SpawnTask, when non-nil, runs a blocking foreground child session.
+// SpawnTask, when non-nil, starts a child session (non-blocking for the parent).
 // AskUser, when non-nil, blocks until the user answers a question batch.
 // SwitchAgent, when non-nil, queues an agent switch applied when the turn ends.
+// EnterPlanPhase starts the built-in plan→implement workflow at plan.
+// AdvancePhase runs the active phase exit gate and loads the next phase.
 // ReportOutput, when non-nil, streams partial stdout/stderr to the UI while
 // Execute is still running (e.g. live bash output).
 // Process, when set, receives subprocess lifecycle from RunProcess (engine
@@ -91,6 +96,10 @@ type Context struct {
 	SpawnTask   func(ctx context.Context, req TaskRequest) (TaskResult, error)
 	AskUser     func(ctx context.Context, req QuestionRequest) (QuestionResponse, error)
 	SwitchAgent func(name string) error
+	// EnterPlanPhase starts the default plan-implement workflow at the plan phase.
+	EnterPlanPhase func() error
+	// AdvancePhase clears the current phase exit gate and advances (or ends).
+	AdvancePhase func(ctx context.Context) error
 	// ReportOutput streams retained output chunks (already size-capped by the
 	// tool) for live UI. Nil disables streaming; tools must still return the
 	// full Result.Output at the end.

@@ -68,6 +68,11 @@ func (m Model) headerView(width int) string {
 	if m.agentName != "" && validAgentName(m.agentName) {
 		left += inlineGap + ui.Badge(th, stateTone, ic.Agent+inlineGap+sanitizeDisplayData(m.agentName))
 	}
+	// Workflow phase badge (plan→implement, custom workflows).
+	if m.phaseName != "" {
+		label := "phase" + inlineGap + sanitizeDisplayData(m.phaseName)
+		left += inlineGap + ui.Badge(th, ui.ToneAccentAlt, label)
+	}
 	// Only shown once a level is set — an unset dial means "whatever the
 	// provider does by default", which is not worth a badge.
 	if m.effort != protocol.EffortDefault {

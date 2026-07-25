@@ -29,12 +29,14 @@ type keyMap struct {
 	ScrollDown        key.Binding
 	JumpBottom        key.Binding
 	ToggleOrientation key.Binding
-	// Tool cell selection/expand/copy when the composer is empty (enter still
-	// sends when there is text; y still types when the composer has content).
+	// Tool cell selection/expand/copy/review when the composer is empty (enter
+	// still sends when there is text; y/v still type when the composer has
+	// content; v only launches review with a selected tool cell).
 	ToolPrev   key.Binding
 	ToolNext   key.Binding
 	ToolExpand key.Binding
 	ToolCopy   key.Binding
+	ToolReview key.Binding
 
 	// Composer readline editing (focusLeft only). ctrl+k must not be stolen by
 	// CycleWindowPrev / vertical FocusRight; palette/global chords stay global.
@@ -83,7 +85,8 @@ func defaultKeyMap() keyMap {
 		ToolNext:   key.NewBinding(key.WithKeys("alt+]"), key.WithHelp("alt+]", "next tool cell")),
 		ToolExpand: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "expand tool / open file:line")),
 		// ToolCopy: bare y when composer is empty (yank selected/latest cell).
-		ToolCopy: key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy tool cell")),
+		ToolCopy:   key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy tool cell")),
+		ToolReview: key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "review edit in editor")),
 
 		KillWord:      key.NewBinding(key.WithKeys("ctrl+w"), key.WithHelp("ctrl+w", "kill word backward")),
 		WordBackward:  key.NewBinding(key.WithKeys("alt+b"), key.WithHelp("alt+b", "word backward")),
@@ -139,6 +142,7 @@ func keybindCatalog(keys keyMap) []keybindEntry {
 		from("nav.tool-next", "Navigation", keys.ToolNext),
 		from("nav.tool-expand", "Navigation", keys.ToolExpand),
 		from("nav.tool-copy", "Navigation", keys.ToolCopy),
+		from("nav.tool-review", "Navigation", keys.ToolReview),
 
 		from("global.palette", "Global", keys.Palette),
 		from("global.keyhelp", "Global", keys.KeyHelp),

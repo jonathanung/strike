@@ -35,6 +35,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/theme":    {"select a color theme or set appearance", "[name|dark|light|auto]", commandSourceBuiltin},
 		"/layout":   {"toggle horizontal/vertical pane split", "", commandSourceBuiltin},
 		"/split":    {"toggle horizontal/vertical pane split", "", commandSourceBuiltin},
+		"/compact":  {"compact model history (keep recent turns)", "", commandSourceBuiltin},
 		"/help":     {"show available commands", "", commandSourceBuiltin},
 		"/keys":     {"show keyboard shortcuts", "", commandSourceBuiltin},
 		"/memory":   {"list, get, set, or delete project memory", "[list|get|set|rm] ...", commandSourceBuiltin},
@@ -65,7 +66,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 }
 
 func TestValidSkillNameRejectsReservedBuiltinsIncludingMDRead(t *testing.T) {
-	for _, name := range []string{"provider", "model", "effort", "autonomy", "auth", "agent", "fast", "vim", "md-read", "theme", "layout", "split", "help", "keys", "memory", "issues"} {
+	for _, name := range []string{"provider", "model", "effort", "autonomy", "auth", "agent", "fast", "vim", "md-read", "theme", "layout", "split", "compact", "help", "keys", "memory", "issues"} {
 		if validSkillName(name) {
 			t.Errorf("validSkillName(%q) = true, want false for reserved builtin", name)
 		}

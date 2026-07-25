@@ -446,6 +446,8 @@ func eventSessionID(ev protocol.Event) (string, bool) {
 		return e.SessionID, true
 	case protocol.AutonomySelected:
 		return e.SessionID, true
+	case protocol.PhaseChanged:
+		return e.SessionID, true
 	case protocol.FastSelected:
 		return e.SessionID, true
 	case protocol.FilesInvalidated:
@@ -453,6 +455,10 @@ func eventSessionID(ev protocol.Event) (string, bool) {
 	case protocol.UsageReported:
 		return e.SessionID, true
 	case protocol.ProviderRetrying:
+		return e.SessionID, true
+	case protocol.CompactionStarted:
+		return e.SessionID, true
+	case protocol.CompactionCompleted:
 		return e.SessionID, true
 	case protocol.SessionMeta:
 		return e.SessionID, true
