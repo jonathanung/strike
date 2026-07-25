@@ -82,12 +82,28 @@ type Auth interface {
 	BeginDevice(ctx context.Context, provider string) (*DeviceLogin, error)
 }
 
+// ModelInfo is picker-facing metadata for one catalog model. Zero fields mean
+// unknown or unsupported; frontends must omit them from display.
+type ModelInfo struct {
+	ID         string
+	Context    int     // context window tokens; 0 = unknown
+	InputCost  float64 // USD per million input tokens
+	OutputCost float64 // USD per million output tokens
+	HasCost    bool
+	ToolCall   bool
+	Reasoning  bool
+	Attachment bool // multimodal / file attachments
+}
+
 // Catalog lists model ids and limits for a provider (may hit network/cache;
 // ctx-aware).
 type Catalog interface {
 	// ModelIDs returns the provider's available model ids, or an error when
 	// the catalog is unreachable or lists no models for the provider.
 	ModelIDs(ctx context.Context, provider string) ([]string, error)
+	// Models returns the provider's models with catalog metadata (context,
+	// cost, capabilities), sorted by id. Same empty/error contract as ModelIDs.
+	Models(ctx context.Context, provider string) ([]ModelInfo, error)
 	// ContextWindow returns the model's context window in tokens.
 	// ok is false when unknown (not the same as zero).
 	ContextWindow(ctx context.Context, provider, model string) (tokens int, ok bool, err error)
