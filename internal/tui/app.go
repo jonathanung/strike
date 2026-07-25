@@ -1982,6 +1982,11 @@ func (m Model) handleMDRead(text string, fields []string) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) submit(op protocol.UserInput, displayPrompt string) (tea.Model, tea.Cmd) {
+	// Child transcript view is display-only; engine UserInput always targets root.
+	if m.viewingChild() {
+		m.setNotice("viewing subagent — return to parent to send (esc or ctrl+x up)", true)
+		return m, nil
+	}
 	m.resetComposer()
 	m.clearNotice()
 	ops := m.ops
