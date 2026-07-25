@@ -327,6 +327,47 @@ func TestManagerListEmptyDir(t *testing.T) {
 	}
 }
 
+func TestManagerLatestRoot(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager(dir)
+	if _, err := m.LatestRoot(); err == nil {
+		t.Fatal("expected error when empty")
+	}
+
+	// Fully closed sessions on disk — mtimes control UpdatedAt.
+	writeClosed := func(id, parent string, mtime time.Time) {
+		t.Helper()
+		st, err := Open(dir, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := st.Close(); err != nil {
+			t.Fatal(err)
+		}
+		meta := Meta{ParentSessionID: parent, CreatedAt: mtime.UTC().Format(time.RFC3339Nano)}
+		if err := WriteMeta(dir, id, meta); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(LogPath(dir, id), mtime, mtime); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oldT := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	newT := time.Date(2020, 1, 2, 0, 0, 0, 0, time.UTC)
+	childT := time.Date(2020, 1, 3, 0, 0, 0, 0, time.UTC)
+	writeClosed("20200101T000000.000000000Z-old", "", oldT)
+	writeClosed("20200102T000000.000000000Z-new", "", newT)
+	writeClosed("20200103T000000.000000000Z-child", "20200102T000000.000000000Z-new", childT)
+
+	got, err := m.LatestRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != "20200102T000000.000000000Z-new" {
+		t.Fatalf("LatestRoot = %q, want newest root", got.ID)
+	}
+}
+
 func TestAppendClosedSessionErrors(t *testing.T) {
 	m := NewManager(t.TempDir())
 	if err := m.Append("nope", protocol.TurnStarted{}); err == nil {
