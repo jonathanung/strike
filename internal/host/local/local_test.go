@@ -29,7 +29,7 @@ func newTestServices(t *testing.T) (host.Services, *auth.Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return New(store, nil, []string{"build", "plan"}, nil), store
+	return New(store, nil, []string{"build", "plan"}, nil, nil), store
 }
 
 func statusByName(statuses []host.ProviderStatus) map[string]host.ProviderStatus {
@@ -137,7 +137,7 @@ func TestSetAPIKeyTrimsAndPersists0600(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := New(store, nil, nil, nil)
+	svc := New(store, nil, nil, nil, nil)
 
 	if err := svc.Auth.SetAPIKey("anthropic", "  sk-trim  "); err != nil {
 		t.Fatal(err)
@@ -221,7 +221,7 @@ func TestSkillMappingAndFiltering(t *testing.T) {
 		{Name: "auth", Description: "reserved", Template: "x"},      // reserved name -> filtered
 		{Name: "bad name", Description: "has space", Template: "y"}, // invalid name -> filtered
 	}
-	svc := New(nil, nil, nil, skills)
+	svc := New(nil, nil, nil, skills, nil)
 
 	if len(svc.Skills) != 2 {
 		t.Fatalf("got %d skills, want 2: %+v", len(svc.Skills), svc.Skills)
@@ -258,7 +258,7 @@ func TestSkillMappingAndFiltering(t *testing.T) {
 func TestSaveDefaultsWritesGlobalConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	svc := New(nil, nil, nil, nil)
+	svc := New(nil, nil, nil, nil, nil)
 
 	if err := svc.Settings.SaveDefaults("openai", "gpt-5.5", "build", "high"); err != nil {
 		t.Fatal(err)
@@ -279,7 +279,7 @@ func TestSaveDefaultsWritesGlobalConfig(t *testing.T) {
 func TestSaveThemeWritesGlobalConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	svc := New(nil, nil, nil, nil)
+	svc := New(nil, nil, nil, nil, nil)
 	if err := svc.Settings.SaveTheme("dracula"); err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +297,7 @@ func TestSaveThemeWritesGlobalConfig(t *testing.T) {
 }
 
 func TestHistoryNilTolerated(t *testing.T) {
-	svc := New(nil, nil, nil, nil)
+	svc := New(nil, nil, nil, nil, nil)
 	if svc.History != nil {
 		t.Errorf("nil hist should yield nil Services.History, got %#v", svc.History)
 	}
@@ -310,7 +310,7 @@ func TestHistoryWiredThrough(t *testing.T) {
 	}
 	defer hist.Close()
 
-	svc := New(nil, hist, nil, nil)
+	svc := New(nil, hist, nil, nil, nil)
 	if svc.History == nil {
 		t.Fatal("Services.History should be non-nil when hist is provided")
 	}
@@ -337,7 +337,7 @@ func TestCatalogFromCache(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cacheDir, "models.json"), []byte(catalog), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	svc := New(nil, nil, nil, nil)
+	svc := New(nil, nil, nil, nil, nil)
 
 	ids, err := svc.Catalog.ModelIDs(context.Background(), "anthropic")
 	if err != nil {
@@ -368,7 +368,7 @@ func TestCatalogContextWindowAndOutputLimitFromCache(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cacheDir, "models.json"), []byte(catalog), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	svc := New(nil, nil, nil, nil)
+	svc := New(nil, nil, nil, nil, nil)
 	ctx := context.Background()
 
 	tokens, ok, err := svc.Catalog.ContextWindow(ctx, "openai", "gpt-big")

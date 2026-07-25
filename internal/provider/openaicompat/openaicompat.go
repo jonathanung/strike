@@ -29,11 +29,24 @@ type Provider struct {
 }
 
 func New(name, baseURL string, bearer BearerSource) *Provider {
+	return NewWithHeaders(name, baseURL, bearer, nil)
+}
+
+// NewWithHeaders is New plus optional static headers (custom gateways).
+func NewWithHeaders(name, baseURL string, bearer BearerSource, headers map[string]string) *Provider {
+	h := map[string]string{}
+	for k, v := range headers {
+		if k == "" {
+			continue
+		}
+		h[k] = v
+	}
 	return &Provider{
 		Client: base.Client{
 			ProviderName: name,
 			HTTP:         &http.Client{Timeout: 5 * time.Minute},
 			Auth:         base.BearerAuth(bearer),
+			Headers:      h,
 		},
 		baseURL: baseURL,
 	}

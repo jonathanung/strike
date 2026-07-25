@@ -227,6 +227,58 @@ func (f *fakeHistory) Enqueue(prompt string) <-chan error {
 	return done
 }
 
+// --- fakeProviders: in-memory custom provider CRUD -----------------------
+
+type fakeProviders struct {
+	items []host.CustomProvider
+	err   error
+}
+
+func (f *fakeProviders) List() []host.CustomProvider {
+	out := make([]host.CustomProvider, len(f.items))
+	copy(out, f.items)
+	return out
+}
+
+func (f *fakeProviders) Get(name string) (host.CustomProvider, bool) {
+	for _, p := range f.items {
+		if p.Name == name {
+			return p, true
+		}
+	}
+	return host.CustomProvider{}, false
+}
+
+func (f *fakeProviders) Upsert(p host.CustomProvider) error {
+	if f.err != nil {
+		return f.err
+	}
+	for i, existing := range f.items {
+		if existing.Name == p.Name {
+			f.items[i] = p
+			return nil
+		}
+	}
+	f.items = append(f.items, p)
+	// Keep Auth.Statuses in sync when tests share a fakeAuth — callers that
+	// need status rows should update statuses themselves.
+	return nil
+}
+
+func (f *fakeProviders) Remove(name string) error {
+	if f.err != nil {
+		return f.err
+	}
+	out := f.items[:0]
+	for _, p := range f.items {
+		if p.Name != name {
+			out = append(out, p)
+		}
+	}
+	f.items = append([]host.CustomProvider(nil), out...)
+	return nil
+}
+
 // --- fakeFiles: a scriptable host.Files ----------------------------------
 
 // fakeFiles is a host.Files that matches paths exactly as passed to ReadFile
@@ -285,11 +337,12 @@ func fakeSkill(name, description, template string) host.Skill {
 // testServices bundles the default fakes with the given agents and skills.
 func testServices(agents []string, skills []host.Skill) host.Services {
 	return host.Services{
-		Auth:     newFakeAuth(),
-		Catalog:  &fakeCatalog{ids: map[string][]string{"echo": {"echo-1"}, "openai": {"gpt-test"}}},
-		Settings: &fakeSettings{},
-		Agents:   agents,
-		Skills:   skills,
+		Auth:      newFakeAuth(),
+		Catalog:   &fakeCatalog{ids: map[string][]string{"echo": {"echo-1"}, "openai": {"gpt-test"}}},
+		Settings:  &fakeSettings{},
+		Providers: &fakeProviders{},
+		Agents:    agents,
+		Skills:    skills,
 	}
 }
 

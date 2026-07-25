@@ -88,7 +88,7 @@ func buildPaletteEntries(specs []commandSpec, agents []string, availability pale
 		Description: "filterable keybind cheatsheet",
 		Action:      paletteAction{Kind: paletteActionKeybinds},
 	})
-	for _, id := range []commandID{commandProvider, commandModel, commandEffort, commandAuth, commandVim} {
+	for _, id := range []commandID{commandProvider, commandModel, commandEffort, commandAuth, commandSettings, commandVim} {
 		spec, ok := byID[id]
 		if !ok {
 			continue

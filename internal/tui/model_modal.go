@@ -91,6 +91,19 @@ func (m *modelModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 		}
 		return m, nil
 	case "enter":
+		// Freeform: when the catalog is empty/error or the filter matches
+		// nothing, Enter accepts the typed filter as a model id.
+		if len(list) == 0 {
+			model := strings.TrimSpace(m.filter)
+			if model == "" || m.loading {
+				return m, nil
+			}
+			ops, provider := m.ops, m.provider
+			return nil, func() tea.Msg {
+				ops <- protocol.SelectModel{Provider: provider, Model: model}
+				return nil
+			}
+		}
 		if m.cursor >= len(list) {
 			return m, nil
 		}
@@ -121,9 +134,13 @@ func (m *modelModal) view(width int, th theme.Theme) string {
 	var body string
 	switch {
 	case m.loading:
-		body = st.Muted.Render("loading models.dev catalog…")
+		body = st.Muted.Render("loading models" + th.Icons.Ellipsis)
 	case m.loadErr != "":
 		body = wrapToWidth(st.Error.Render(m.loadErr), inner)
+		body += "\n" + st.Muted.Render("type a model id and press enter")
+		if m.filter != "" {
+			body += "\n" + st.Text.Render("→ "+m.filter)
+		}
 	default:
 		list := m.filtered()
 		if m.cursor >= len(list) {
@@ -146,7 +163,7 @@ func (m *modelModal) view(width int, th theme.Theme) string {
 	}
 	return ui.Dialog(th, ui.DialogOpts{
 		Title: detailJoin(th, "Select model", m.provider),
-		Hint:  dotJoin(th, "type to filter", "↑/↓ move", "enter select", "ctrl+d set default", "esc close"),
+		Hint:  dotJoin(th, "type to filter or freeform id", "↑/↓ move", "enter select", "ctrl+d set default", "esc close"),
 		Width: width,
 	}, body)
 }

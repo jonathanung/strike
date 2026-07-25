@@ -26,10 +26,38 @@ type ProviderStatus struct {
 	Detail    string    // human-readable credential state: "none", "oauth+key", "offline dev provider"
 	Authed    bool      // usable right now
 	Builtin   bool      // no credentials needed (echo)
+	Custom    bool      // user-declared self-hosted / gateway provider
 	OAuth     bool      // supports browser OAuth login
 	Device    bool      // supports RFC 8628 device flow
 	APIKey    bool      // supports pasted API key
+	WireAPI   string    // custom only: "openai" | "anthropic"
+	BaseURL   string    // custom only: endpoint origin (no secrets)
 	ExpiresAt time.Time // OAuth token expiry; zero = unknown/N/A
+}
+
+// CustomProvider is a user-declared LLM endpoint. API keys are never included;
+// set them through Auth.SetAPIKey using Name as the provider id.
+type CustomProvider struct {
+	Name      string
+	BaseURL   string
+	API       string // wire dialect: "openai" | "anthropic"
+	Headers   map[string]string
+	APIKeyEnv string
+	Models    []string
+}
+
+// Providers manages custom/self-hosted provider definitions (config only).
+// Credentials stay in Auth.
+type Providers interface {
+	// List returns every custom provider in stable order.
+	List() []CustomProvider
+	// Get returns one custom provider by name.
+	Get(name string) (CustomProvider, bool)
+	// Upsert validates and inserts or replaces a custom provider.
+	Upsert(p CustomProvider) error
+	// Remove deletes a custom provider definition (does not delete keys;
+	// call Auth.Logout separately when forgetting credentials).
+	Remove(name string) error
 }
 
 // Auth manages provider credentials. All methods are safe to call from
@@ -115,11 +143,12 @@ type Files interface {
 // may be nil/empty when a capability is absent (tests, future frontends);
 // frontends must degrade gracefully.
 type Services struct {
-	Auth     Auth
-	Catalog  Catalog
-	Settings Settings
-	History  History
-	Files    Files
-	Agents   []string // selectable agent names, default first
-	Skills   []Skill
+	Auth      Auth
+	Catalog   Catalog
+	Settings  Settings
+	History   History
+	Files     Files
+	Providers Providers // custom/self-hosted provider CRUD; nil when unsupported
+	Agents    []string  // selectable agent names, default first
+	Skills    []Skill
 }
