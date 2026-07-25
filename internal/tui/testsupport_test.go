@@ -230,9 +230,10 @@ func (f *fakeHistory) Enqueue(prompt string) <-chan error {
 // --- fakeFiles: a scriptable host.Files ----------------------------------
 
 // fakeFiles is a host.Files that matches paths exactly as passed to ReadFile
-// (the TUI forwards the path argument unchanged).
+// / ListDir (the TUI forwards the path argument unchanged).
 type fakeFiles struct {
 	files map[string][]byte
+	dirs  map[string][]host.DirEntry
 	err   error
 }
 
@@ -245,6 +246,22 @@ func (f *fakeFiles) ReadFile(path string) ([]byte, error) {
 		return nil, fmt.Errorf("file not found: %s", path)
 	}
 	return append([]byte(nil), data...), nil
+}
+
+func (f *fakeFiles) ListDir(path string) ([]host.DirEntry, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.dirs == nil {
+		return nil, fmt.Errorf("directory not found: %s", path)
+	}
+	entries, ok := f.dirs[path]
+	if !ok {
+		return nil, fmt.Errorf("directory not found: %s", path)
+	}
+	out := make([]host.DirEntry, len(entries))
+	copy(out, entries)
+	return out, nil
 }
 
 // --- construction helpers ------------------------------------------------
