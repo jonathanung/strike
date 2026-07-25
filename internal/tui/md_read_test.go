@@ -116,8 +116,19 @@ func TestMDReadPathWithSpaces(t *testing.T) {
 func TestHelpNoticeIncludesMDRead(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m = runMDRead(t, m, "/help")
-	if !strings.Contains(m.notice, "/md-read") {
-		t.Errorf("help notice omits /md-read: %q", m.notice)
+	help, ok := m.modal.(*helpModal)
+	if !ok {
+		t.Fatalf("/help modal = %T, want helpModal", m.modal)
+	}
+	found := false
+	for _, entry := range help.entries {
+		if strings.HasPrefix(entry.Label, "/md-read") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("help catalog omits /md-read")
 	}
 }
 

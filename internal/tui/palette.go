@@ -81,62 +81,50 @@ func buildPaletteEntries(specs []commandSpec, agents []string, availability pale
 		}
 	}
 
-	entries := make([]paletteEntry, 0, 5+len(agents)+len(specs))
+	entries := make([]paletteEntry, 0, len(builtinCommandSpecs)+len(agents)+len(specs))
 	entries = append(entries, paletteEntry{
 		ID:          "keybinds",
 		Label:       "Keyboard shortcuts",
 		Description: "filterable keybind cheatsheet",
 		Action:      paletteAction{Kind: paletteActionKeybinds},
 	})
-	for _, id := range []commandID{commandProvider, commandModel, commandEffort, commandAutonomy, commandAuth, commandSettings, commandVim} {
-		spec, ok := byID[id]
+	// Walk the shipped builtin catalog order so the palette stays complete as
+	// commands are added to builtinCommandSpecs. Unknown builtins present only
+	// in specs (tests/future) are omitted.
+	for _, builtin := range builtinCommandSpecs {
+		spec, ok := byID[builtin.ID]
 		if !ok {
 			continue
 		}
+		if builtin.ID == commandAgent {
+			for _, name := range agents {
+				if !validAgentName(name) {
+					continue
+				}
+				displayName := sanitizeDisplayData(name)
+				entry := paletteEntry{
+					ID:          "agent:" + name,
+					Label:       "/agent " + displayName,
+					Description: sanitizeDisplayData(spec.Description),
+					Action:      paletteAction{Kind: paletteActionAgent, Value: name},
+				}
+				if reason := paletteBuiltinDisabled(commandAgent, availability); reason != "" {
+					entry.DisabledReason = reason
+				}
+				entries = append(entries, entry)
+			}
+			continue
+		}
 		entry := paletteEntry{
-			ID:          "command:" + string(id),
+			ID:          "command:" + string(builtin.ID),
 			Label:       sanitizeDisplayData(spec.Name),
 			Description: sanitizeDisplayData(spec.Description),
 			Action:      paletteAction{Kind: paletteActionBuiltin, Value: spec.Name},
 		}
-		switch {
-		case id != commandVim && availability.TurnRunning:
-			// /vim is allowed mid-turn: the TUI yields the terminal and the
-			// engine keeps running; file-change signaling still applies.
-			entry.DisabledReason = "unavailable while a turn is running"
-		case id == commandModel && !availability.HasProvider:
-			entry.DisabledReason = "select a provider first"
+		if reason := paletteBuiltinDisabled(builtin.ID, availability); reason != "" {
+			entry.DisabledReason = reason
 		}
 		entries = append(entries, entry)
-	}
-
-	agentSpec, hasAgentSpec := byID[commandAgent]
-	if hasAgentSpec {
-		for _, name := range agents {
-			if !validAgentName(name) {
-				continue
-			}
-			displayName := sanitizeDisplayData(name)
-			entry := paletteEntry{
-				ID:          "agent:" + name,
-				Label:       "/agent " + displayName,
-				Description: sanitizeDisplayData(agentSpec.Description),
-				Action:      paletteAction{Kind: paletteActionAgent, Value: name},
-			}
-			if availability.TurnRunning {
-				entry.DisabledReason = "unavailable while a turn is running"
-			}
-			entries = append(entries, entry)
-		}
-	}
-
-	if spec, ok := byID[commandHelp]; ok {
-		entries = append(entries, paletteEntry{
-			ID:          "command:" + string(commandHelp),
-			Label:       sanitizeDisplayData(spec.Name),
-			Description: sanitizeDisplayData(spec.Description),
-			Action:      paletteAction{Kind: paletteActionBuiltin, Value: spec.Name},
-		})
 	}
 
 	for _, spec := range specs {
@@ -161,6 +149,31 @@ func buildPaletteEntries(specs []commandSpec, agents []string, availability pale
 		entries = append(entries, entry)
 	}
 	return entries
+}
+
+// paletteBuiltinDisabled returns why a shipped builtin is unavailable, or "".
+// Help/keys stay available always. Vim and md-read stay available mid-turn so
+// users can inspect files without interrupting the engine.
+func paletteBuiltinDisabled(id commandID, availability paletteAvailability) string {
+	switch id {
+	case commandHelp, commandKeys:
+		return ""
+	case commandVim, commandMDRead:
+		return ""
+	case commandModel:
+		if availability.TurnRunning {
+			return "unavailable while a turn is running"
+		}
+		if !availability.HasProvider {
+			return "select a provider first"
+		}
+		return ""
+	default:
+		if availability.TurnRunning {
+			return "unavailable while a turn is running"
+		}
+		return ""
+	}
 }
 
 func (m *paletteModal) filtered() []paletteEntry {

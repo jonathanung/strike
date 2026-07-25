@@ -292,6 +292,7 @@ restored:
 		InitialModel:    "echo",
 		InitialMessages: restored.Messages,
 		InitialTitled:   restored.Titled,
+		QuietStartup:    true, // resume: do not re-emit selection events
 		Agents:          []engine.Agent{{Name: "build"}},
 	})
 	if got := eng2.Messages(); !reflect.DeepEqual(got, restored.Messages) {
@@ -301,18 +302,15 @@ restored:
 	ctx2, cancel2 := context.WithCancel(context.Background())
 	defer cancel2()
 	go eng2.Run(ctx2)
-	// Drain startup.
-	for {
-		select {
-		case ev := <-eng2.Events():
-			if _, ok := ev.(protocol.AgentSelected); ok {
-				goto second
-			}
-		case <-time.After(2 * time.Second):
-			t.Fatal("timeout eng2 startup")
+	// QuietStartup: no selection events. Settle then send the next turn.
+	select {
+	case ev := <-eng2.Events():
+		switch ev.(type) {
+		case protocol.ModelSelected, protocol.AgentSelected, protocol.AutonomySelected, protocol.EffortSelected:
+			t.Fatalf("quiet resume emitted startup selection %T", ev)
 		}
+	case <-time.After(50 * time.Millisecond):
 	}
-second:
 	eng2.Ops() <- protocol.UserInput{Text: "and again"}
 	for {
 		select {
@@ -337,6 +335,75 @@ check:
 	last := seen[len(seen)-1]
 	if last.Role != provider.RoleUser || last.Text != "and again" {
 		t.Fatalf("last message = %#v, want new user input", last)
+	}
+}
+
+func TestQuietStartupSuppressesSelectionEvents(t *testing.T) {
+	// Resume path: apply Initial* state without re-emitting selection events
+	// (JSONL already has them; tee would otherwise bloat the log every --continue).
+	reg := tool.NewRegistry()
+	eng := engine.New(engine.Options{
+		SessionID:            "sess-quiet",
+		Select:               func(string) (provider.Provider, string, error) { return echo.New(), "echo", nil },
+		Registry:             reg,
+		InitialProvider:      "echo",
+		InitialModel:         "echo",
+		InitialEffort:        protocol.EffortHigh,
+		InitialAutonomy:      protocol.AutonomyAgent,
+		InitialAgent:         "build",
+		InitialPhaseWorkflow: "plan-implement",
+		InitialPhaseIndex:    1,
+		QuietStartup:         true,
+		Agents:               []engine.Agent{{Name: "build"}, {Name: "plan"}},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	// No selection/phase events during quiet settle window.
+	deadline := time.After(80 * time.Millisecond)
+	for {
+		select {
+		case ev := <-eng.Events():
+			switch ev.(type) {
+			case protocol.ModelSelected, protocol.AgentSelected, protocol.AutonomySelected,
+				protocol.EffortSelected, protocol.PhaseChanged, protocol.FastSelected:
+				t.Fatalf("QuietStartup emitted %T: %#v", ev, ev)
+			default:
+				t.Fatalf("unexpected event during quiet startup: %T", ev)
+			}
+		case <-deadline:
+			goto afterQuiet
+		}
+	}
+afterQuiet:
+	// User-driven selection after startup must still emit.
+	eng.Ops() <- protocol.SelectModel{Provider: "echo", Model: "echo"}
+	ev := receiveEvent(t, eng.Events(), func(ev protocol.Event) bool {
+		_, ok := ev.(protocol.ModelSelected)
+		return ok
+	})
+	if ms := ev.(protocol.ModelSelected); ms.Provider != "echo" || ms.Model != "echo" {
+		t.Fatalf("post-startup ModelSelected = %+v", ms)
+	}
+	eng.Ops() <- protocol.SetAutonomy{Mode: protocol.AutonomyChecks}
+	ev = receiveEvent(t, eng.Events(), func(ev protocol.Event) bool {
+		_, ok := ev.(protocol.AutonomySelected)
+		return ok
+	})
+	if as := ev.(protocol.AutonomySelected); as.Mode != protocol.AutonomyChecks {
+		t.Fatalf("post-startup AutonomySelected = %+v", as)
+	}
+	eng.Ops() <- protocol.SelectAgent{Name: "plan"}
+	ev = receiveEvent(t, eng.Events(), func(ev protocol.Event) bool {
+		a, ok := ev.(protocol.AgentSelected)
+		return ok && a.Name == "plan"
+	})
+	if a := ev.(protocol.AgentSelected); a.Name != "plan" {
+		t.Fatalf("post-startup AgentSelected = %+v", a)
+	}
+	cancel()
+	for range eng.Events() {
 	}
 }
 

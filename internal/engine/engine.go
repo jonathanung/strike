@@ -159,6 +159,11 @@ type Options struct {
 	// InitialAlwaysGrants restores session DecisionAlways rules after the
 	// initial agent profile is applied (SetAgentRules clears grants).
 	InitialAlwaysGrants permission.Ruleset
+	// QuietStartup applies Initial* provider/model/effort/autonomy/agent/phase
+	// without emitting *Selected or PhaseChanged. Durable resume sets this:
+	// the JSONL already has those events and the TUI seeds from Replay.
+	// Cleared before the op loop so user-driven changes still emit.
+	QuietStartup bool
 }
 
 // beginAck reports whether ToolCallBegin was actually written to Events.
@@ -240,6 +245,10 @@ type Engine struct {
 	lastUsedKnown bool
 	// contextWindowTokens is the live model limit (from opts or lookup).
 	contextWindowTokens int
+
+	// quietStartup suppresses selection/phase confirms during Run's initial
+	// apply (see Options.QuietStartup). Owned by Run only.
+	quietStartup bool
 }
 
 func New(opts Options) *Engine {
@@ -299,6 +308,15 @@ func (e *Engine) Events() <-chan protocol.Event { return e.events }
 
 func (e *Engine) emit(ev protocol.Event) { e.events <- ev }
 
+// emitSelected emits selection/phase confirms unless quietStartup is set
+// (resume re-applies state without re-appending the JSONL).
+func (e *Engine) emitSelected(ev protocol.Event) {
+	if e.quietStartup {
+		return
+	}
+	e.emit(ev)
+}
+
 // baseCorr is the immutable session lineage stamped on every event.
 func (e *Engine) baseCorr() protocol.Correlation {
 	return protocol.Correlation{
@@ -323,6 +341,7 @@ func (e *Engine) Run(ctx context.Context) {
 	// Keep Events open until children finish so ChildCompleted can emit.
 	defer close(e.events)
 	defer e.shutdownChildren()
+	e.quietStartup = e.opts.QuietStartup
 	if e.opts.InitialProvider != "" && e.opts.Select != nil {
 		if p, defaultModel, err := e.opts.Select(e.opts.InitialProvider); err == nil {
 			// Same normalization as SelectModel: matching "provider/id" → bare
@@ -340,8 +359,8 @@ func (e *Engine) Run(ctx context.Context) {
 	if e.opts.InitialEffort != protocol.EffortDefault {
 		e.setEffort(e.opts.InitialEffort)
 	}
-	// Autonomy is always announced so the status line never implies a mode
-	// that is only latent in workflow config.
+	// Autonomy is always applied so the exit gate matches config/restore.
+	// Fresh sessions announce it; QuietStartup (resume) skips the emit.
 	e.setAutonomy(e.opts.InitialAutonomy)
 	initialAgent := e.opts.Agents[0].Name
 	if e.opts.InitialAgent != "" {
@@ -361,6 +380,7 @@ func (e *Engine) Run(ctx context.Context) {
 	if len(e.opts.InitialAlwaysGrants) > 0 {
 		e.perms.SeedAlwaysGrants(e.opts.InitialAlwaysGrants)
 	}
+	e.quietStartup = false
 	for {
 		e.reapTurn()
 		select {
@@ -758,7 +778,7 @@ func (e *Engine) setProvider(name string, p provider.Provider, model string) {
 	model = stripMatchingProviderPrefixes(name, model)
 	e.prov, e.provName, e.model = p, name, model
 	e.refreshContextWindow()
-	e.emit(protocol.ModelSelected{
+	e.emitSelected(protocol.ModelSelected{
 		Correlation: e.sessionCorr(),
 		Provider:    name,
 		Model:       model,
@@ -773,7 +793,7 @@ func (e *Engine) setModel(model string) {
 	}
 	e.model = model
 	e.refreshContextWindow()
-	e.emit(protocol.ModelSelected{
+	e.emitSelected(protocol.ModelSelected{
 		Correlation: e.sessionCorr(),
 		Provider:    e.provName,
 		Model:       model,
@@ -793,7 +813,7 @@ func (e *Engine) setEffort(level protocol.Effort) {
 		return
 	}
 	e.effort = parsed
-	e.emit(protocol.EffortSelected{
+	e.emitSelected(protocol.EffortSelected{
 		Correlation: e.sessionCorr(),
 		Level:       parsed,
 	})
@@ -819,7 +839,7 @@ func (e *Engine) setAutonomy(mode protocol.Autonomy) {
 		return
 	}
 	e.autonomy = parsed
-	e.emit(protocol.AutonomySelected{
+	e.emitSelected(protocol.AutonomySelected{
 		Correlation: e.sessionCorr(),
 		Mode:        parsed,
 	})
@@ -856,7 +876,7 @@ func providerEffort(level protocol.Effort) provider.Effort {
 
 func (e *Engine) setFast(enabled bool) {
 	e.priority = enabled
-	e.emit(protocol.FastSelected{
+	e.emitSelected(protocol.FastSelected{
 		Correlation: e.sessionCorr(),
 		Enabled:     enabled,
 	})
@@ -903,7 +923,7 @@ func (e *Engine) applyAgent(name string) bool {
 		agentRules = permission.DenyOnly(agentRules)
 	}
 	e.perms.SetAgentRules(agentRules)
-	e.emit(protocol.AgentSelected{
+	e.emitSelected(protocol.AgentSelected{
 		Correlation: e.sessionCorr(),
 		Name:        agent.Name,
 	})

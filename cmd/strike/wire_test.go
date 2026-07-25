@@ -13,7 +13,10 @@ import (
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/engine"
 	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike-cli/internal/provider"
+	"github.com/jonathanung/strike-cli/internal/provider/echo"
 	"github.com/jonathanung/strike-cli/internal/session"
+	"github.com/jonathanung/strike-cli/internal/tool"
 )
 
 func TestRunSessionClosesStoreAfterEngineCleanupAndFinalAppend(t *testing.T) {
@@ -296,6 +299,96 @@ func waitResult(t *testing.T, result <-chan error, description string) error {
 	case <-time.After(5 * time.Second):
 		t.Fatalf("timed out waiting for %s", description)
 		return nil
+	}
+}
+
+func TestRunSessionQuietStartupDoesNotReAppendSelections(t *testing.T) {
+	// Mirrors --continue: real engine QuietStartup + runSession tee must not
+	// re-append ModelSelected/AgentSelected/AutonomySelected already in the log.
+	dir := t.TempDir()
+	mgr := session.NewManager(dir)
+	info, err := mgr.Create(session.CreateOptions{ID: "resume-quiet"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	corr := protocol.Correlation{SessionID: info.ID}
+	prior := []protocol.Event{
+		protocol.ModelSelected{Correlation: corr, Provider: "echo", Model: "echo"},
+		protocol.AutonomySelected{Correlation: corr, Mode: protocol.AutonomySupervised},
+		protocol.AgentSelected{Correlation: corr, Name: "build"},
+		protocol.UserMessage{Correlation: corr, Text: "prior"},
+	}
+	for _, ev := range prior {
+		if err := mgr.Append(info.ID, ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = mgr.Close(info.ID)
+
+	opened, err := openResumeSession(mgr, info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// runSession owns bound.Close.
+
+	restored := engine.Restore(opened.replay)
+	eng := engine.New(engine.Options{
+		SessionID:       info.ID,
+		Select:          func(string) (provider.Provider, string, error) { return echo.New(), "echo", nil },
+		Registry:        tool.NewRegistry(),
+		WorkDir:         t.TempDir(),
+		InitialProvider: "echo",
+		InitialModel:    "echo",
+		InitialAgent:    restored.Agent,
+		InitialAutonomy: restored.Autonomy,
+		InitialMessages: restored.Messages,
+		QuietStartup:    true,
+		Agents:          []engine.Agent{{Name: "build"}},
+	})
+
+	err = runSession(context.Background(), eng.Run, eng.Events(), opened.bound, func(live <-chan protocol.Event) error {
+		// Settle long enough for quiet startup to finish, then exit (like TUI quit).
+		deadline := time.After(100 * time.Millisecond)
+		for {
+			select {
+			case ev, ok := <-live:
+				if !ok {
+					return nil
+				}
+				switch ev.(type) {
+				case protocol.ModelSelected, protocol.AgentSelected, protocol.AutonomySelected,
+					protocol.EffortSelected, protocol.PhaseChanged:
+					t.Errorf("live stream saw startup selection %T", ev)
+				}
+			case <-deadline:
+				return nil
+			}
+		}
+	})
+	if err != nil {
+		t.Fatalf("runSession: %v", err)
+	}
+
+	replay, err := mgr.Replay(info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(replay) != len(prior) {
+		t.Fatalf("replay len = %d, want %d (selections re-appended)", len(replay), len(prior))
+	}
+	var modelN, agentN, autonomyN int
+	for _, ev := range replay {
+		switch ev.(type) {
+		case protocol.ModelSelected:
+			modelN++
+		case protocol.AgentSelected:
+			agentN++
+		case protocol.AutonomySelected:
+			autonomyN++
+		}
+	}
+	if modelN != 1 || agentN != 1 || autonomyN != 1 {
+		t.Fatalf("selection counts model=%d agent=%d autonomy=%d, want 1 each", modelN, agentN, autonomyN)
 	}
 }
 

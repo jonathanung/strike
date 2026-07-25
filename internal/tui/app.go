@@ -1677,26 +1677,10 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 	case "/session":
 		return m.handleSessionCommand(fields[1:])
 	case "/help":
-		m.setNotice("commands: "+dotJoin(m.th,
-			"/provider [name [model]]",
-			"/model <model>",
-			"/effort <"+effortChoices()+">",
-			"/autonomy <"+autonomyChoices()+">",
-			"/fast [on|off]",
-			"/agent [name]",
-			"/session [id]",
-			"/auth",
-			"/vim [path[:line]]",
-			"/md-read <path>",
-			"/memory [list|get|set|rm]",
-			"/theme [name|dark|light|auto]",
-			"/layout",
-			"/compact",
-			"/keys",
-			"skills as /<name>",
-			"tab cycles agents",
-		), false)
 		m.resetComposer()
+		m.clearNotice()
+		m.modal = newHelpModal(m.commands)
+		m.reflow()
 		return m, nil
 	case "/keys":
 		m.resetComposer()

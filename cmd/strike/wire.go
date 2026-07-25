@@ -365,6 +365,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		initialPhaseWF    string
 		initialPhaseIndex int
 		initialAlways     permission.Ruleset
+		// quietStartup: resume re-applies selections without re-teeing them
+		// into JSONL (TUI seeds from replay). Fresh sessions still announce.
+		quietStartup bool
 	)
 	resumeID := strings.TrimSpace(opts.sessionID)
 	if opts.continueSession {
@@ -408,6 +411,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		if restored.Agent != "" {
 			initialAgent = restored.Agent
 		}
+		// CLI provider/model/effort overrides on resume must still be logged
+		// so the next Restore sees the switch; keep startup noisy then.
+		quietStartup = !opts.providerSet && opts.model == "" && opts.effort == ""
 	} else {
 		info, err := sessions.Create(session.CreateOptions{})
 		if err != nil {
@@ -457,6 +463,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		InitialPhaseWorkflow: initialPhaseWF,
 		InitialPhaseIndex:    initialPhaseIndex,
 		InitialAlwaysGrants:  initialAlways,
+		QuietStartup:         quietStartup,
 		Workflows:            workflows,
 		Rules:                permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),
 		Hooks:                hookDefs,
