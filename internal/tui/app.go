@@ -382,6 +382,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reflow()
 		return m, cmd
 
+	case providerLogoutMsg:
+		if pm, ok := m.modal.(*providerModal); ok {
+			pm.reloadStatuses()
+		}
+		switch {
+		case msg.err != nil:
+			m.setNotice("logout failed: "+msg.err.Error(), true)
+		default:
+			m.setNotice("logged out of "+msg.provider, false)
+		}
+		m.reflow()
+		return m, nil
+
 	case modelsLoadedMsg:
 		if mm, ok := m.modal.(*modelModal); ok && mm.provider == msg.provider {
 			mm.loading = false
