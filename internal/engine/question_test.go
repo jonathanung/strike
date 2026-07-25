@@ -1,0 +1,281 @@
+package engine_test
+
+import (
+	"context"
+	"encoding/json"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/jonathanung/strike-cli/internal/engine"
+	"github.com/jonathanung/strike-cli/internal/permission"
+	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike-cli/internal/provider"
+	"github.com/jonathanung/strike-cli/internal/tool"
+)
+
+func questionToolCall(id string, questions ...map[string]any) provider.ToolCall {
+	args, _ := json.Marshal(map[string]any{"questions": questions})
+	return provider.ToolCall{ID: id, Name: "question", Args: args}
+}
+
+func enterPlanToolCall(id string) provider.ToolCall {
+	return provider.ToolCall{ID: id, Name: "enter_plan_mode", Args: json.RawMessage(`{}`)}
+}
+
+// TestQuestionFlow mirrors permission tests: tool AskUser → QuestionAsked →
+// QuestionReply → tool end → turn complete.
+func TestQuestionFlow(t *testing.T) {
+	call := questionToolCall("qcall-1", map[string]any{
+		"id":       "pref",
+		"question": "Ship it?",
+		"options": []map[string]any{
+			{"label": "Yes", "description": "go"},
+			{"label": "No", "description": "stop"},
+		},
+	})
+	prov := newScriptedProvider(
+		toolCallStep(call),
+		completedStep("after answer"),
+	)
+	eng := engine.New(engine.Options{
+		SessionID:       "sess-q",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(tool.NewQuestion()),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "ask me"}
+
+	var (
+		sawAsked, sawResolved, sawToolEnd, sawCompleted bool
+		requestID                                       string
+		toolOutput                                      string
+	)
+	deadline := time.After(10 * time.Second)
+	for !sawCompleted {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out; asked=%v resolved=%v end=%v", sawAsked, sawResolved, sawToolEnd)
+		case ev := <-eng.Events():
+			switch ev := ev.(type) {
+			case protocol.QuestionAsked:
+				sawAsked = true
+				requestID = ev.RequestID
+				if len(ev.Questions) != 1 || ev.Questions[0].Question != "Ship it?" {
+					t.Errorf("questions = %#v", ev.Questions)
+				}
+				eng.Ops() <- protocol.QuestionReply{
+					RequestID: ev.RequestID,
+					Answers:   []string{"Yes"},
+				}
+			case protocol.QuestionResolved:
+				sawResolved = true
+				if ev.RequestID != requestID {
+					t.Errorf("resolved id = %q, want %q", ev.RequestID, requestID)
+				}
+			case protocol.ToolCallEnd:
+				if ev.CallID != "qcall-1" {
+					continue
+				}
+				sawToolEnd = true
+				toolOutput = ev.Output
+				if ev.IsError {
+					t.Errorf("tool error: %s", ev.Output)
+				}
+			case protocol.TurnCompleted:
+				sawCompleted = true
+			case protocol.EngineError:
+				t.Fatalf("engine error: %s", ev.Message)
+			}
+		}
+	}
+	if !sawAsked {
+		t.Error("no QuestionAsked")
+	}
+	if !sawResolved {
+		t.Error("no QuestionResolved")
+	}
+	if !sawToolEnd {
+		t.Error("no ToolCallEnd for question")
+	}
+	if !strings.Contains(toolOutput, "Yes") {
+		t.Errorf("tool output missing answer: %q", toolOutput)
+	}
+}
+
+func TestChildQuestionReplyRouting(t *testing.T) {
+	taskCall := taskToolCall("task-q", "ask in child")
+	childQ := questionToolCall("child-q-1", map[string]any{
+		"question": "Child question?",
+	})
+	prov := newScriptedProvider(
+		toolCallStep(taskCall),
+		toolCallStep(childQ),
+		completedStep("child after question"),
+		completedStep("parent after task"),
+	)
+	eng := engine.New(engine.Options{
+		SessionID:       "parent-q-route",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(tool.NewTask(), tool.NewQuestion()),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "delegate question"}
+
+	var events []protocol.Event
+	var sawChildAsk bool
+	guard := time.NewTimer(10 * time.Second)
+	defer guard.Stop()
+	for {
+		select {
+		case ev, ok := <-eng.Events():
+			if !ok {
+				t.Fatal("Events closed early")
+			}
+			events = append(events, ev)
+			switch ev := ev.(type) {
+			case protocol.QuestionAsked:
+				if ev.ParentSessionID == "parent-q-route" || ev.Depth > 0 {
+					sawChildAsk = true
+				}
+				eng.Ops() <- protocol.QuestionReply{
+					RequestID: ev.RequestID,
+					Answers:   []string{"from-parent"},
+				}
+			case protocol.TurnCompleted:
+				goto done
+			case protocol.EngineError:
+				t.Fatalf("engine error: %s", ev.Message)
+			}
+		case <-guard.C:
+			t.Fatalf("timed out; events=%v", summarizeEvents(events))
+		}
+	}
+done:
+	if !sawChildAsk {
+		t.Fatalf("never saw child-correlated QuestionAsked; events=%v", summarizeEvents(events))
+	}
+	if n := countEvents[protocol.ChildStarted](events); n != 1 {
+		t.Errorf("ChildStarted = %d, want 1", n)
+	}
+	if n := countEvents[protocol.ChildCompleted](events); n != 1 {
+		t.Errorf("ChildCompleted = %d, want 1", n)
+	}
+	var taskEnd *protocol.ToolCallEnd
+	for _, ev := range events {
+		if end, ok := ev.(protocol.ToolCallEnd); ok && end.CallID == "task-q" {
+			e := end
+			taskEnd = &e
+		}
+	}
+	if taskEnd == nil {
+		t.Fatal("missing task ToolCallEnd")
+	}
+	if taskEnd.IsError {
+		t.Errorf("task failed after question reply: %s", taskEnd.Output)
+	}
+	if !strings.Contains(taskEnd.Output, "child after question") {
+		t.Errorf("task output = %q, want child summary", taskEnd.Output)
+	}
+}
+
+// TestDeferredSwitchAgentAfterEnterPlanMode: enter_plan_mode queues the switch;
+// AgentSelected{plan} fires after the tool batch (before the next Stream), so
+// it may appear mid-turn before TurnCompleted.
+func TestDeferredSwitchAgentAfterEnterPlanMode(t *testing.T) {
+	call := enterPlanToolCall("enter-1")
+	prov := newScriptedProvider(
+		toolCallStep(call),
+		completedStep("planning next"),
+	)
+	eng := engine.New(engine.Options{
+		SessionID:       "sess-plan",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(tool.NewEnterPlanMode()),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+		Agents: []engine.Agent{
+			{Name: "build", Description: "build"},
+			{Name: "plan", Description: "plan"},
+		},
+		InitialAgent: "build",
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	// Drain startup AgentSelected (build).
+	startupDeadline := time.After(2 * time.Second)
+	for {
+		select {
+		case ev := <-eng.Events():
+			if a, ok := ev.(protocol.AgentSelected); ok && a.Name == "build" {
+				goto ready
+			}
+		case <-startupDeadline:
+			t.Fatal("timed out waiting for startup AgentSelected build")
+		}
+	}
+ready:
+
+	eng.Ops() <- protocol.UserInput{Text: "enter plan"}
+
+	var (
+		events                            []protocol.Event
+		sawTurnCompleted, sawPlanSelected bool
+		toolEndedIdx, planSelectedIdx     int
+		toolEnded                         bool
+	)
+	deadline := time.After(10 * time.Second)
+	for !(sawTurnCompleted && sawPlanSelected) {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out; events=%v completed=%v plan=%v", summarizeEvents(events), sawTurnCompleted, sawPlanSelected)
+		case ev := <-eng.Events():
+			events = append(events, ev)
+			switch ev := ev.(type) {
+			case protocol.ToolCallEnd:
+				if ev.CallID == "enter-1" {
+					toolEnded = true
+					toolEndedIdx = len(events) - 1
+					if ev.IsError {
+						t.Fatalf("enter_plan_mode failed: %s", ev.Output)
+					}
+				}
+			case protocol.TurnCompleted:
+				sawTurnCompleted = true
+			case protocol.AgentSelected:
+				if ev.Name == "plan" {
+					sawPlanSelected = true
+					planSelectedIdx = len(events) - 1
+				}
+			case protocol.EngineError:
+				t.Fatalf("engine error: %s", ev.Message)
+			case protocol.QuestionAsked:
+				// enter_plan_mode should not ask the user
+				t.Fatalf("unexpected QuestionAsked: %#v", ev)
+			}
+		}
+	}
+	if !toolEnded {
+		t.Error("enter_plan_mode ToolCallEnd missing")
+	}
+	// Switch applies after the tool batch that queued it, before the next Stream.
+	if planSelectedIdx <= toolEndedIdx {
+		t.Errorf("AgentSelected(plan) index %d must be after enter_plan_mode ToolCallEnd index %d; events=%v",
+			planSelectedIdx, toolEndedIdx, summarizeEvents(events))
+	}
+}

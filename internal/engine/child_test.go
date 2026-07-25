@@ -65,6 +65,12 @@ func eventSummary(ev protocol.Event) string {
 		return "ToolCallEnd " + ev.CallID + " err=" + boolString(ev.IsError)
 	case protocol.PermissionAsked:
 		return "PermissionAsked " + ev.Permission + " " + ev.RequestID
+	case protocol.QuestionAsked:
+		return "QuestionAsked " + ev.RequestID
+	case protocol.QuestionResolved:
+		return "QuestionResolved " + ev.RequestID
+	case protocol.AgentSelected:
+		return "AgentSelected " + ev.Name
 	case protocol.TurnCompleted:
 		return "TurnCompleted " + ev.StopReason
 	case protocol.EngineError:

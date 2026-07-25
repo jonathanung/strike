@@ -16,7 +16,8 @@ import (
 // spawnChild runs a blocking foreground child engine for the task tool.
 // It never calls child.Run on the parent turn worker: Run and event drain
 // each get their own goroutine. Parent emits ChildStarted/ChildCompleted;
-// only PermissionAsked/PermissionResolved are re-emitted from the child.
+// only PermissionAsked/PermissionResolved and QuestionAsked/QuestionResolved
+// are re-emitted from the child.
 func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.TaskResult, error) {
 	maxDepth := e.opts.MaxChildDepth
 	if maxDepth == 0 {
@@ -86,11 +87,13 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 
 	e.childMu.Lock()
 	e.activeChildReply = child.perms.Reply
+	e.activeChildQuestionReply = child.questions.Reply
 	e.activeChildOps = child.Ops()
 	e.childMu.Unlock()
 	defer func() {
 		e.childMu.Lock()
 		e.activeChildReply = nil
+		e.activeChildQuestionReply = nil
 		e.activeChildOps = nil
 		e.childMu.Unlock()
 	}()
@@ -121,6 +124,10 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 			case protocol.PermissionAsked:
 				e.emit(ev)
 			case protocol.PermissionResolved:
+				e.emit(ev)
+			case protocol.QuestionAsked:
+				e.emit(ev)
+			case protocol.QuestionResolved:
 				e.emit(ev)
 			case protocol.TurnCompleted:
 				select {

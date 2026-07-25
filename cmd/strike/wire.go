@@ -230,19 +230,25 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 		skillInfos[i] = tool.SkillInfo{Name: s.Name, Description: s.Description, Template: s.Template}
 	}
 
+	todoStore := tool.NewTodoStore()
 	registry := tool.NewRegistry(
 		tool.NewRead(),
 		tool.NewGlob(),
 		tool.NewGrep(),
 		tool.NewEdit(),
 		tool.NewWrite(),
+		tool.NewApplyPatch(),
 		tool.NewBash(),
 		tool.NewTask(),
 		tool.NewWebFetch(),
-		tool.NewTodoWrite(),
+		tool.NewTodoWrite(todoStore),
+		tool.NewTodoRead(todoStore),
 		tool.NewNotebookEdit(),
 		tool.NewSleep(),
 		tool.NewSkill(skillInfos),
+		tool.NewQuestion(),
+		tool.NewEnterPlanMode(),
+		tool.NewExitPlanMode(),
 	)
 	registry.Register(tool.NewToolSearch(registry))
 
