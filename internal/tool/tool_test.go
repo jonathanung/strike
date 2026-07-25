@@ -271,13 +271,24 @@ func TestBashTool(t *testing.T) {
 }
 
 func TestToolNames(t *testing.T) {
+	reg := NewRegistry()
+	ts := NewToolSearch(reg)
 	want := map[string]Tool{
-		"read":  NewRead(),
-		"write": NewWrite(),
-		"edit":  NewEdit(),
-		"glob":  NewGlob(),
-		"grep":  NewGrep(),
-		"bash":  NewBash(),
+		"read":          NewRead(),
+		"write":         NewWrite(),
+		"edit":          NewEdit(),
+		"glob":          NewGlob(),
+		"grep":          NewGrep(),
+		"bash":          NewBash(),
+		"webfetch":      NewWebFetch(),
+		"todowrite":     NewTodoWrite(),
+		"notebook_edit": NewNotebookEdit(),
+		"sleep":         NewSleep(),
+		"skill":         NewSkill(nil),
+		"toolsearch":    ts,
+	}
+	if len(want) != 12 {
+		t.Fatalf("expected 12 tools, got %d", len(want))
 	}
 	for name, tool := range want {
 		if tool.Name() != name {
