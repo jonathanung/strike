@@ -47,11 +47,34 @@ func TestIsRetryable(t *testing.T) {
 		{name: "auth failure", err: errors.New("anthropic: authentication_error: invalid x-api-key"), want: false},
 		{name: "invalid request", err: errors.New("openai: invalid_request_error: bad schema"), want: false},
 		{name: "plain failure", err: errors.New("sync stream failed"), want: false},
+		{name: "context overflow not retryable", err: errors.New("openai: context_length_exceeded: too many tokens"), want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := IsRetryable(tt.err); got != tt.want {
 				t.Fatalf("IsRetryable(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsContextOverflow(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", err: nil, want: false},
+		{name: "context_length_exceeded", err: errors.New("Error code: 400 - context_length_exceeded"), want: true},
+		{name: "maximum context length", err: errors.New("this model's maximum context length is 128000 tokens"), want: true},
+		{name: "prompt too long", err: errors.New("prompt is too long: 200000 tokens > 128000"), want: true},
+		{name: "auth", err: errors.New("authentication_error: invalid key"), want: false},
+		{name: "rate limit", err: errors.New("rate limit exceeded"), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsContextOverflow(tt.err); got != tt.want {
+				t.Fatalf("IsContextOverflow(%v) = %v, want %v", tt.err, got, tt.want)
 			}
 		})
 	}
