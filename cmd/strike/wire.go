@@ -25,6 +25,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/session"
 	"github.com/jonathanung/strike-cli/internal/tool"
 	"github.com/jonathanung/strike-cli/internal/tui"
+	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
 
 // sessionStore is the narrow persistence surface runSession needs from a
@@ -327,8 +328,19 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 		if mode, ok := tui.ParseVimMode(cfg.VimMode); ok {
 			vimMode = mode
 		}
+		themeID := theme.BuiltinID
+		var themePtr *theme.Theme
+		if cfg.Theme != "" {
+			if entry, ok := theme.Lookup(theme.Catalog(workDir), cfg.Theme); ok {
+				th := entry.Theme
+				themePtr = &th
+				themeID = entry.ID
+			}
+		}
 		program := tea.NewProgram(tui.New(eng.Ops(), events, services, tui.Options{
 			DangerouslySkipPermissions: opts.dangerouslySkipPermissions,
+			Theme:                      themePtr,
+			ThemeID:                    themeID,
 			SessionID:                  sessionID,
 			WorkDir:                    workDir,
 			FirstRun:                   firstRun,

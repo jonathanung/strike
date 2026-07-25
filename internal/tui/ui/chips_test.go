@@ -217,7 +217,7 @@ func TestNoticeCollapsesNewlinesToOneRow(t *testing.T) {
 
 func TestNoticeLinesWrapsToMultipleRows(t *testing.T) {
 	th := theme.Default()
-	text := "commands: /provider [name] · /model <model> · /theme [dark|light|auto] · /layout · /help"
+	text := "commands: /provider [name] · /model <model> · /theme [name|dark|light|auto] · /layout · /help"
 	out := NoticeLines(th, LevelInfo, text, 32, 5)
 	if out == "" {
 		t.Fatal("NoticeLines returned empty")
