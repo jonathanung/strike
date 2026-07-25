@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -346,8 +347,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		return nil, fmt.Errorf("loading workflows: %w", err)
 	}
 
-	// Concurrent session manager owns durable JSONL logs. --continue reopens
-	// the latest root session and restores model history; otherwise Create.
+	// Concurrent session manager owns durable JSONL logs. --continue /
+	// --session reopen a root session and restore model history; otherwise Create.
 	sessions := session.NewManager(session.DefaultDir())
 	var (
 		sessionID       string
@@ -361,6 +362,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		initialPriority bool
 		initialTitled   bool
 	)
+	resumeID := strings.TrimSpace(opts.sessionID)
 	if opts.continueSession {
 		info, err := sessions.LatestRoot()
 		if err != nil {
@@ -369,29 +371,19 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			_ = historyStore.Close()
 			return nil, fmt.Errorf("continue: %w", err)
 		}
-		if _, err := sessions.Open(info.ID); err != nil {
-			_ = issueStore.Close()
-			_ = memoryStore.Close()
-			_ = historyStore.Close()
-			return nil, fmt.Errorf("continue: opening session: %w", err)
-		}
-		bound, err = sessions.Bind(info.ID)
+		resumeID = info.ID
+	}
+	if resumeID != "" {
+		opened, err := openResumeSession(sessions, resumeID)
 		if err != nil {
-			_ = sessions.CloseAll()
 			_ = issueStore.Close()
 			_ = memoryStore.Close()
 			_ = historyStore.Close()
-			return nil, fmt.Errorf("continue: binding session: %w", err)
+			return nil, err
 		}
-		sessionID = info.ID
-		replay, err = sessions.Replay(sessionID)
-		if err != nil {
-			_ = bound.Close()
-			_ = issueStore.Close()
-			_ = memoryStore.Close()
-			_ = historyStore.Close()
-			return nil, fmt.Errorf("continue: replaying session: %w", err)
-		}
+		bound = opened.bound
+		sessionID = opened.id
+		replay = opened.replay
 		restored := engine.Restore(replay)
 		initialMessages = restored.Messages
 		initialPriority = restored.Priority
@@ -537,6 +529,44 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	}, nil
 }
 
+// resumeOpened is the product of openResumeSession.
+type resumeOpened struct {
+	id     string
+	bound  session.Bound
+	replay []protocol.Event
+}
+
+// openResumeSession opens an existing root session, binds it, and loads the
+// event log for engine.Restore + TUI replay. Child (subagent) sessions are
+// rejected — resume is for root transcripts only.
+func openResumeSession(sessions *session.Manager, id string) (resumeOpened, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return resumeOpened{}, fmt.Errorf("session: id is empty")
+	}
+	info, err := sessions.Get(id)
+	if err != nil {
+		return resumeOpened{}, fmt.Errorf("session: %w", err)
+	}
+	if info.ParentSessionID != "" {
+		return resumeOpened{}, fmt.Errorf("session %q is a subagent transcript; resume a root session", id)
+	}
+	if _, err := sessions.Open(id); err != nil {
+		return resumeOpened{}, fmt.Errorf("session: opening: %w", err)
+	}
+	bound, err := sessions.Bind(id)
+	if err != nil {
+		_ = sessions.CloseAll()
+		return resumeOpened{}, fmt.Errorf("session: binding: %w", err)
+	}
+	replay, err := sessions.Replay(id)
+	if err != nil {
+		_ = bound.Close()
+		return resumeOpened{}, fmt.Errorf("session: replaying: %w", err)
+	}
+	return resumeOpened{id: id, bound: bound, replay: replay}, nil
+}
+
 // withReplay prepends historical transcript events ahead of the live engine
 // stream so the TUI can repaint a resumed session without re-appending them.
 func withReplay(history []protocol.Event, live <-chan protocol.Event) <-chan protocol.Event {
@@ -557,74 +587,97 @@ func withReplay(history []protocol.Event, live <-chan protocol.Event) <-chan pro
 }
 
 // run is the interactive composition root: assemble backend, then hand the
-// host.Services bundle to the TUI frontend.
+// host.Services bundle to the TUI frontend. When the user picks another
+// session in /session, the TUI quits with PendingResume set and this loop
+// reopens that session with full engine.Restore (not transcript-only view).
 func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
-	a, err := assemble(opts, false)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := a.issuesClose(); err != nil && runErr == nil {
-			runErr = fmt.Errorf("closing project issues: %w", err)
+	warnedDangerous := false
+	for {
+		a, err := assemble(opts, false)
+		if err != nil {
+			return err
 		}
-		if err := a.memoryClose(); err != nil && runErr == nil {
-			runErr = fmt.Errorf("closing project memory: %w", err)
+		if !warnedDangerous {
+			writeDangerousPermissionsWarning(stderr, opts.dangerouslySkipPermissions)
+			warnedDangerous = true
 		}
-		if err := a.historyClose(); err != nil && runErr == nil {
-			runErr = fmt.Errorf("closing prompt history: %w", err)
-		}
-	}()
 
-	// runSession takes ownership of store (closes it). If setup fails before
-	// that handoff, close here without double-closing.
-	storeOwned := false
-	defer func() {
-		if !storeOwned {
-			if cerr := a.store.Close(); cerr != nil && runErr == nil {
-				runErr = fmt.Errorf("closing session store: %w", cerr)
+		// runSession takes ownership of store (closes it). If setup fails before
+		// that handoff, close here without double-closing.
+		storeOwned := false
+		closeAssembled := func() {
+			if !storeOwned {
+				if cerr := a.store.Close(); cerr != nil && runErr == nil {
+					runErr = fmt.Errorf("closing session store: %w", cerr)
+				}
+			}
+			if a.sessions != nil {
+				_ = a.sessions.CloseAll()
+			}
+			if err := a.issuesClose(); err != nil && runErr == nil {
+				runErr = fmt.Errorf("closing project issues: %w", err)
+			}
+			if err := a.memoryClose(); err != nil && runErr == nil {
+				runErr = fmt.Errorf("closing project memory: %w", err)
+			}
+			if err := a.historyClose(); err != nil && runErr == nil {
+				runErr = fmt.Errorf("closing prompt history: %w", err)
 			}
 		}
-	}()
 
-	writeDangerousPermissionsWarning(stderr, opts.dangerouslySkipPermissions)
-
-	storeOwned = true
-	if err := runSession(context.Background(), a.eng.Run, a.eng.Events(), a.store, func(live <-chan protocol.Event) error {
-		events := withReplay(a.replay, live)
-		restore := tui.EnableEnhancedKeys(stdout)
-		defer restore()
-		// Detect bg once before the program owns stdin — glamour/lipgloss OSC 11
-		// replies must not race into the composer (#52).
-		tui.PinAppearance()
-		vimMode := tui.VimModePane
-		if mode, ok := tui.ParseVimMode(a.cfg.VimMode); ok {
-			vimMode = mode
-		}
-		themeID := theme.BuiltinID
-		var themePtr *theme.Theme
-		if a.cfg.Theme != "" {
-			if entry, ok := theme.Lookup(theme.Catalog(a.workDir), a.cfg.Theme); ok {
-				th := entry.Theme
-				themePtr = &th
-				themeID = entry.ID
+		var pendingResume string
+		storeOwned = true
+		sessionPath := a.store.Path()
+		err = runSession(context.Background(), a.eng.Run, a.eng.Events(), a.store, func(live <-chan protocol.Event) error {
+			events := withReplay(a.replay, live)
+			restore := tui.EnableEnhancedKeys(stdout)
+			defer restore()
+			// Detect bg once before the program owns stdin — glamour/lipgloss OSC 11
+			// replies must not race into the composer (#52).
+			tui.PinAppearance()
+			vimMode := tui.VimModePane
+			if mode, ok := tui.ParseVimMode(a.cfg.VimMode); ok {
+				vimMode = mode
 			}
+			themeID := theme.BuiltinID
+			var themePtr *theme.Theme
+			if a.cfg.Theme != "" {
+				if entry, ok := theme.Lookup(theme.Catalog(a.workDir), a.cfg.Theme); ok {
+					th := entry.Theme
+					themePtr = &th
+					themeID = entry.ID
+				}
+			}
+			program := tea.NewProgram(tui.New(a.eng.Ops(), events, a.services, tui.Options{
+				DangerouslySkipPermissions: opts.dangerouslySkipPermissions,
+				Theme:                      themePtr,
+				ThemeID:                    themeID,
+				SessionID:                  a.sessionID,
+				WorkDir:                    a.workDir,
+				FirstRun:                   a.firstRun,
+				VimMode:                    vimMode,
+			}), tea.WithAltScreen(), tea.WithOutput(stdout), tea.WithInput(tui.WrapInput(os.Stdin)), tea.WithReportFocus(), tea.WithMouseCellMotion())
+			final, runProgErr := program.Run()
+			if m, ok := final.(tui.Model); ok {
+				pendingResume = m.PendingResume()
+			}
+			return runProgErr
+		})
+		closeAssembled()
+		if err != nil {
+			return err
 		}
-		program := tea.NewProgram(tui.New(a.eng.Ops(), events, a.services, tui.Options{
-			DangerouslySkipPermissions: opts.dangerouslySkipPermissions,
-			Theme:                      themePtr,
-			ThemeID:                    themeID,
-			SessionID:                  a.sessionID,
-			WorkDir:                    a.workDir,
-			FirstRun:                   a.firstRun,
-			VimMode:                    vimMode,
-		}), tea.WithAltScreen(), tea.WithOutput(stdout), tea.WithInput(tui.WrapInput(os.Stdin)), tea.WithReportFocus(), tea.WithMouseCellMotion())
-		_, err := program.Run()
-		return err
-	}); err != nil {
-		return err
+		if runErr != nil {
+			return runErr
+		}
+		if pendingResume == "" {
+			fmt.Fprintln(stdout, "session log:", sessionPath)
+			return nil
+		}
+		// Restart with the chosen session: durable resume, not transcript-only.
+		opts.continueSession = false
+		opts.sessionID = pendingResume
 	}
-	fmt.Fprintln(stdout, "session log:", a.store.Path())
-	return nil
 }
 
 // runExec is the headless one-shot composition root: same engine and session

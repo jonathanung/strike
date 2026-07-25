@@ -16,7 +16,10 @@ strike launches without any provider configured. Pick one inside the TUI:
 /model grok-4.5                # direct switch on the current provider
 /effort                        # centered picker for reasoning effort
 /effort xhigh                  # off | low | medium | high | xhigh | max
-/fast                          # toggle OpenAI priority tier (~2×, lower
+/session                       # browse past root sessions (auto-titles) and
+                               # resume one with full model history
+/session <id>                  # resume a specific session by id
+/fast                          # toggle OpenAI priority tier (~2×, lower)
                                # latency). Sticky session preference; no-op
                                # on Anthropic, xAI, ChatGPT subscription, or
                                # models without a fast mode. /fast on|off

@@ -205,6 +205,9 @@ type Model struct {
 	// sessionID and workDir are display-only identity for the context pane.
 	sessionID string
 	workDir   string
+	// pendingResume is set when /session picks another root session; the
+	// composition root reads PendingResume after tea.Quit and reopens it.
+	pendingResume string
 	// vimMode selects pane/overlay/takeover for /vim.
 	vimMode VimMode
 	// usage* hold the latest UsageReported figures; Known=false means unknown
@@ -394,6 +397,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case engineClosedMsg:
+		return m, tea.Quit
+
+	case sessionResumeMsg:
+		id := strings.TrimSpace(msg.id)
+		if id == "" || id == m.sessionID {
+			return m, nil
+		}
+		if m.turnRunning {
+			m.setNotice("wait for the current turn to finish before switching sessions", true)
+			return m, nil
+		}
+		m.pendingResume = id
+		m.modal = nil
 		return m, tea.Quit
 
 	case engineEventMsg:
@@ -1643,6 +1659,8 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 			ops <- protocol.Compact{}
 			return nil
 		}
+	case "/session":
+		return m.handleSessionCommand(fields[1:])
 	case "/help":
 		m.setNotice("commands: "+dotJoin(m.th,
 			"/provider [name [model]]",
@@ -1651,6 +1669,7 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 			"/autonomy <"+autonomyChoices()+">",
 			"/fast [on|off]",
 			"/agent [name]",
+			"/session [id]",
 			"/auth",
 			"/vim [path[:line]]",
 			"/md-read <path>",
@@ -1693,6 +1712,54 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		m.setNotice("unknown command "+fields[0]+" — try /help", true)
 		return m, nil
 	}
+}
+
+// PendingResume returns the session id selected via /session for durable
+// resume. Empty when the user quit without switching.
+func (m Model) PendingResume() string {
+	return strings.TrimSpace(m.pendingResume)
+}
+
+func (m Model) handleSessionCommand(args []string) (tea.Model, tea.Cmd) {
+	m.resetComposer()
+	m.clearNotice()
+	if m.turnRunning {
+		m.setNotice("wait for the current turn to finish before switching sessions", true)
+		return m, nil
+	}
+	if len(args) >= 1 {
+		id := strings.TrimSpace(args[0])
+		if id == "" {
+			m.setNotice("usage: /session [id]", true)
+			return m, nil
+		}
+		if id == m.sessionID {
+			m.setNotice("already on session "+shortSessionID(id), false)
+			return m, nil
+		}
+		if m.services.Sessions != nil {
+			info, ok, err := m.services.Sessions.Get(id)
+			if err != nil {
+				m.setNotice("session: "+err.Error(), true)
+				return m, nil
+			}
+			if !ok {
+				m.setNotice("session "+id+" not found", true)
+				return m, nil
+			}
+			if info.ParentID != "" {
+				m.setNotice("session is a subagent transcript; pick a root session", true)
+				return m, nil
+			}
+		}
+		return m, func() tea.Msg { return sessionResumeMsg{id: id} }
+	}
+	if m.services.Sessions == nil {
+		m.setNotice("session list unavailable", true)
+		return m, nil
+	}
+	m.modal = newSessionModal(m.services.Sessions, m.sessionID)
+	return m, nil
 }
 
 func (m Model) handleMemoryCommand(args []string) (tea.Model, tea.Cmd) {
