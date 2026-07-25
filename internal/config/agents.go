@@ -63,6 +63,7 @@ var reservedSkillNames = map[string]struct{}{
 	"keys":     {},
 	"memory":   {},
 	"issues":   {},
+	"session":  {},
 }
 
 // ValidateSkillName rejects names that cannot be represented safely as slash commands.

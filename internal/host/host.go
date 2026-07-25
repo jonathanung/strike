@@ -200,19 +200,23 @@ type Issues interface {
 
 // Session is one durable agent session the frontend can list or open.
 type Session struct {
-	ID       string
-	ParentID string // empty for root sessions
-	Title    string
-	Open     bool
+	ID        string
+	ParentID  string // empty for root sessions
+	Title     string
+	Open      bool
+	UpdatedAt time.Time // zero when unknown
 }
 
-// Sessions reads durable session logs for transcript navigation (subagents).
+// Sessions reads durable session logs for transcript navigation and resume.
 // Nil means the capability is absent; frontends must degrade gracefully.
 // Event payloads are JSONL envelopes (protocol codec) so this contract stays
 // stdlib-only.
 type Sessions interface {
 	// Get returns one session by id.
 	Get(id string) (Session, bool, error)
+	// List returns durable sessions newest-UpdatedAt first. When rootsOnly is
+	// true, only sessions without a parent are included (picker / resume).
+	List(rootsOnly bool) ([]Session, error)
 	// Children returns direct child sessions of parentID (newest first).
 	Children(parentID string) ([]Session, error)
 	// ReplayJSONL returns the raw JSONL event log for id (one envelope per line).

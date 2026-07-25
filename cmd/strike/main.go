@@ -20,6 +20,7 @@ type cliOptions struct {
 	dangerouslySkipPermissions bool
 	providerSet                bool
 	continueSession            bool
+	sessionID                  string // --session: resume a specific root session
 }
 
 type optionSpec struct {
@@ -66,6 +67,14 @@ var optionSpecs = []optionSpec{
 		description: "resume the most recent root session (model history + selections)",
 		register: func(fs *flag.FlagSet, opts *cliOptions) {
 			fs.BoolVar(&opts.continueSession, "continue", false, "")
+		},
+	},
+	{
+		names:       []string{"session"},
+		valueName:   "id",
+		description: "resume a specific session by id (model history + selections)",
+		register: func(fs *flag.FlagSet, opts *cliOptions) {
+			fs.StringVar(&opts.sessionID, "session", "", "")
 		},
 	},
 	{
@@ -131,6 +140,10 @@ func parseCLIOptions(args []string) (cliOptions, error) {
 	})
 	if fs.NArg() != 0 {
 		return cliOptions{}, fmt.Errorf("unexpected argument %q", fs.Arg(0))
+	}
+	opts.sessionID = strings.TrimSpace(opts.sessionID)
+	if opts.continueSession && opts.sessionID != "" {
+		return cliOptions{}, fmt.Errorf("cannot combine --continue and --session")
 	}
 	return opts, nil
 }

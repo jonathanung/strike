@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike-cli/internal/session"
 )
 
 func TestRunSessionClosesStoreAfterEngineCleanupAndFinalAppend(t *testing.T) {
@@ -330,4 +331,46 @@ func TestWithReplayEmptyPassthrough(t *testing.T) {
 		t.Fatal("empty history should return live channel")
 	}
 	close(live)
+}
+
+func TestOpenResumeSession(t *testing.T) {
+	dir := t.TempDir()
+	mgr := session.NewManager(dir)
+	root, err := mgr.Create(session.CreateOptions{ID: "root-1", Title: "hello"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.Append(root.ID, protocol.UserMessage{
+		Correlation: protocol.Correlation{SessionID: root.ID},
+		Text:        "hi there",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_ = mgr.Close(root.ID)
+
+	opened, err := openResumeSession(mgr, root.ID)
+	if err != nil {
+		t.Fatalf("openResumeSession: %v", err)
+	}
+	if opened.id != root.ID {
+		t.Errorf("id = %q", opened.id)
+	}
+	if len(opened.replay) != 1 {
+		t.Fatalf("replay len = %d", len(opened.replay))
+	}
+	_ = opened.bound.Close()
+
+	child, err := mgr.Create(session.CreateOptions{
+		ID: "child-1", ParentSessionID: root.ID, Title: "sub",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = mgr.Close(child.ID)
+	if _, err := openResumeSession(mgr, child.ID); err == nil {
+		t.Fatal("expected error resuming child session")
+	}
+	if _, err := openResumeSession(mgr, "missing"); err == nil {
+		t.Fatal("expected error for missing session")
+	}
 }

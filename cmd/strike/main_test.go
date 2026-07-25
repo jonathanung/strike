@@ -28,6 +28,7 @@ Options:
   --effort <level>                   reasoning effort (off|low|medium|high|xhigh|max); overrides config
   --dangerously-skip-permissions     skip configured permission prompts (agent profile denies still apply)
   --continue                         resume the most recent root session (model history + selections)
+  --session <id>                     resume a specific session by id (model history + selections)
   -h, --help                         show help
 `
 
@@ -77,6 +78,16 @@ func TestParseCLIOptionsValueFormsAndProviderExplicitness(t *testing.T) {
 			args: []string{"--continue"},
 			want: cliOptions{continueSession: true},
 		},
+		{
+			name: "session flag",
+			args: []string{"--session", "abc-123"},
+			want: cliOptions{sessionID: "abc-123"},
+		},
+		{
+			name: "session equals",
+			args: []string{"--session=abc-123"},
+			want: cliOptions{sessionID: "abc-123"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -88,6 +99,13 @@ func TestParseCLIOptionsValueFormsAndProviderExplicitness(t *testing.T) {
 				t.Fatalf("parseCLIOptions(%q) = %+v, want %+v", tt.args, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestParseCLIOptionsRejectsContinueWithSession(t *testing.T) {
+	_, err := parseCLIOptions([]string{"--continue", "--session", "abc"})
+	if err == nil || !strings.Contains(err.Error(), "cannot combine") {
+		t.Fatalf("err = %v, want cannot combine", err)
 	}
 }
 

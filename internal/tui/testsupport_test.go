@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -582,6 +583,27 @@ func (f *fakeSessions) Get(id string) (host.Session, bool, error) {
 	}
 	s, ok := f.byID[id]
 	return s, ok, nil
+}
+
+func (f *fakeSessions) List(rootsOnly bool) ([]host.Session, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	out := make([]host.Session, 0, len(f.byID))
+	for _, s := range f.byID {
+		if rootsOnly && s.ParentID != "" {
+			continue
+		}
+		out = append(out, s)
+	}
+	// Stable newest-first by UpdatedAt then ID (matches session.Manager.List).
+	sort.SliceStable(out, func(i, j int) bool {
+		if !out[i].UpdatedAt.Equal(out[j].UpdatedAt) {
+			return out[i].UpdatedAt.After(out[j].UpdatedAt)
+		}
+		return out[i].ID > out[j].ID
+	})
+	return out, nil
 }
 
 func (f *fakeSessions) Children(parentID string) ([]host.Session, error) {

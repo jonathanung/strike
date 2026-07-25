@@ -48,6 +48,20 @@ func TestSessionsAdapterChildrenAndReplay(t *testing.T) {
 	if len(kids) != 1 || kids[0].ID != child.ID {
 		t.Fatalf("Children = %+v", kids)
 	}
+	roots, err := svc.List(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(roots) != 1 || roots[0].ID != root.ID || roots[0].Title != "root" {
+		t.Fatalf("List(rootsOnly) = %+v", roots)
+	}
+	all, err := svc.List(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("List(all) len = %d, want 2", len(all))
+	}
 	data, err := svc.ReplayJSONL(child.ID)
 	if err != nil {
 		t.Fatal(err)

@@ -36,6 +36,21 @@ func (s sessionsAdapter) Get(id string) (host.Session, bool, error) {
 	return toHostSession(info), true, nil
 }
 
+func (s sessionsAdapter) List(rootsOnly bool) ([]host.Session, error) {
+	all, err := s.m.List()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]host.Session, 0, len(all))
+	for _, info := range all {
+		if rootsOnly && info.ParentSessionID != "" {
+			continue
+		}
+		out = append(out, toHostSession(info))
+	}
+	return out, nil
+}
+
 func (s sessionsAdapter) Children(parentID string) ([]host.Session, error) {
 	parentID = strings.TrimSpace(parentID)
 	if parentID == "" {
@@ -72,9 +87,10 @@ func (s sessionsAdapter) ReplayJSONL(id string) ([]byte, error) {
 
 func toHostSession(info session.Info) host.Session {
 	return host.Session{
-		ID:       info.ID,
-		ParentID: info.ParentSessionID,
-		Title:    info.Title,
-		Open:     info.Open,
+		ID:        info.ID,
+		ParentID:  info.ParentSessionID,
+		Title:     info.Title,
+		Open:      info.Open,
+		UpdatedAt: info.UpdatedAt,
 	}
 }
