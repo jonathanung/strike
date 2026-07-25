@@ -45,6 +45,7 @@ func setGlamourStyle(dark bool) {
 }
 
 func glamourRender(source string, width int) (string, error) {
+	source = expandMermaidFences(source, width)
 	r, err := glamour.NewTermRenderer(
 		glamour.WithStandardStyle(glamourStyle()),
 		glamour.WithWordWrap(max(1, width)),

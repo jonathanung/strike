@@ -27,6 +27,43 @@ func TestModelIDs(t *testing.T) {
 	}
 }
 
+func TestInfosMetadata(t *testing.T) {
+	c := Catalog{
+		"openai": {ID: "openai", Models: map[string]Model{
+			"z-bare": {ID: "z-bare"},
+			"a-full": {
+				ID:         "a-full",
+				Limit:      &ModelLimit{Context: 128_000, Output: 16_384},
+				Cost:       &ModelCost{Input: 2.5, Output: 10},
+				ToolCall:   true,
+				Reasoning:  true,
+				Attachment: true,
+			},
+		}},
+	}
+	infos := c.Infos("openai")
+	if len(infos) != 2 {
+		t.Fatalf("Infos len = %d, want 2", len(infos))
+	}
+	if infos[0].ID != "a-full" || infos[1].ID != "z-bare" {
+		t.Fatalf("order = %q, %q", infos[0].ID, infos[1].ID)
+	}
+	full := infos[0]
+	if full.Context != 128_000 || !full.HasCost || full.InputCost != 2.5 || full.OutputCost != 10 {
+		t.Errorf("a-full limits/cost = %+v", full)
+	}
+	if !full.ToolCall || !full.Reasoning || !full.Attachment {
+		t.Errorf("a-full caps = tools=%v reason=%v attach=%v", full.ToolCall, full.Reasoning, full.Attachment)
+	}
+	bare := infos[1]
+	if bare.Context != 0 || bare.HasCost || bare.ToolCall || bare.Reasoning || bare.Attachment {
+		t.Errorf("z-bare should be empty metadata: %+v", bare)
+	}
+	if c.Infos("missing") != nil {
+		t.Fatal("expected nil for missing provider")
+	}
+}
+
 func TestContextWindowAndOutputLimit(t *testing.T) {
 	c := Catalog{
 		"openai": {ID: "openai", Models: map[string]Model{

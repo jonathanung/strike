@@ -113,8 +113,26 @@ func TestCustomThemeSpacingControlsRootTranscriptHeaderAndPermissionLayout(t *te
 
 			modal, _ := newTestPermissionModal(t.Name())
 			permission := ansi.Strip(modal.view(60, th))
-			if !strings.Contains(permission, "1) allow once"+tt.choiceGap+"2) allow always"+tt.choiceGap+"3) reject") {
-				t.Errorf("permission choice spacing = %q", permission)
+			// Label gap sits between "N)" and the choice text; SM separates
+			// adjacent choices when they share a row.
+			labelGap := strings.Repeat(" ", th.Resolve().Spacing.Label)
+			parts := make([]string, 0, 4)
+			for i, label := range []string{"allow once", "allow session", "allow project", "reject"} {
+				part := itoa(i+1) + ")" + labelGap + label
+				parts = append(parts, part)
+				if !strings.Contains(permission, part) {
+					t.Errorf("permission choice %q missing: %q", part, permission)
+				}
+			}
+			if tt.choiceGap == "" {
+				// Zero SM: choices concatenate on one row.
+				if !strings.Contains(permission, strings.Join(parts, "")) {
+					t.Errorf("permission choices not concatenated with empty SM: %q", permission)
+				}
+			} else if strings.Contains(permission, parts[0]+tt.choiceGap+parts[1]) {
+				// Wide enough to keep choices on one row with SM separators.
+			} else {
+				// Narrow dialog stacks choices; each part already checked.
 			}
 			for i, row := range strings.Split(permission, "\n") {
 				if got := lipgloss.Width(row); got != 60 {

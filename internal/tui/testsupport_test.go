@@ -77,7 +77,18 @@ func (f *fakeAuth) SetAPIKey(provider, key string) error {
 
 func (f *fakeAuth) Logout(provider string) error {
 	f.logoutCalls = append(f.logoutCalls, provider)
-	return f.logoutErr
+	if f.logoutErr != nil {
+		return f.logoutErr
+	}
+	for i, s := range f.statuses {
+		if s.Name == provider && !s.Builtin {
+			s.Authed = false
+			s.Detail = "none"
+			f.statuses[i] = s
+			break
+		}
+	}
+	return nil
 }
 
 func (f *fakeAuth) BeginOAuth(ctx context.Context, provider string) (*host.OAuthLogin, error) {
@@ -140,11 +151,24 @@ func (f *fakeAuth) BeginDevice(ctx context.Context, provider string) (*host.Devi
 // --- fakeCatalog: a scriptable host.Catalog ------------------------------
 
 type fakeCatalog struct {
-	ids map[string][]string
-	err error
+	ids  map[string][]string
+	meta map[string]host.ModelInfo // key: provider/model
+	err  error
 }
 
 func (c *fakeCatalog) ModelIDs(ctx context.Context, provider string) ([]string, error) {
+	infos, err := c.Models(ctx, provider)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(infos))
+	for i, info := range infos {
+		ids[i] = info.ID
+	}
+	return ids, nil
+}
+
+func (c *fakeCatalog) Models(_ context.Context, provider string) ([]host.ModelInfo, error) {
 	if c.err != nil {
 		return nil, c.err
 	}
@@ -152,7 +176,18 @@ func (c *fakeCatalog) ModelIDs(ctx context.Context, provider string) ([]string, 
 	if len(ids) == 0 {
 		return nil, fmt.Errorf("no models listed for %s", provider)
 	}
-	return append([]string(nil), ids...), nil
+	out := make([]host.ModelInfo, len(ids))
+	for i, id := range ids {
+		if c.meta != nil {
+			if info, ok := c.meta[provider+"/"+id]; ok {
+				info.ID = id
+				out[i] = info
+				continue
+			}
+		}
+		out[i] = host.ModelInfo{ID: id}
+	}
+	return out, nil
 }
 
 func (c *fakeCatalog) ContextWindow(context.Context, string, string) (int, bool, error) {
