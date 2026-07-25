@@ -163,7 +163,7 @@ func TestVerticalFocusKeysSwapNotCycle(t *testing.T) {
 		t.Fatal("need vertical orientation")
 	}
 	startIdx := m.windows.index
-	// ctrl+j focuses top pane (left), does not cycle windows.
+	// Empty composer: ctrl+j focuses top, ctrl+k focuses bottom (no kill to claim).
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
 	if m.focus != focusLeft {
 		t.Errorf("vertical ctrl+j focus = %v, want left/top", m.focus)
@@ -174,6 +174,18 @@ func TestVerticalFocusKeysSwapNotCycle(t *testing.T) {
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
 	if m.focus != focusRight {
 		t.Errorf("vertical ctrl+k focus = %v, want right/bottom", m.focus)
+	}
+	// With text mid-line, left-focus ctrl+k kills instead of focusing bottom (#86).
+	m.focus = focusLeft
+	m.composer.Focus()
+	m.composer.SetValue("top bottom")
+	m.composer.SetCursor(3)
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+	if m.focus != focusLeft {
+		t.Errorf("vertical left ctrl+k with text focus = %v, want left", m.focus)
+	}
+	if got := m.composer.Value(); got != "top" {
+		t.Errorf("vertical left ctrl+k composer = %q, want top", got)
 	}
 	// ctrl+l cycles next window in vertical mode.
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})

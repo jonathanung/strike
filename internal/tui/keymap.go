@@ -33,6 +33,15 @@ type keyMap struct {
 	ToolPrev   key.Binding
 	ToolNext   key.Binding
 	ToolExpand key.Binding
+
+	// Composer readline editing (focusLeft only). ctrl+k must not be stolen by
+	// CycleWindowPrev / vertical FocusRight; palette/global chords stay global.
+	KillWord      key.Binding
+	WordBackward  key.Binding
+	WordForward   key.Binding
+	KillLineStart key.Binding
+	KillLineEnd   key.Binding
+	Yank          key.Binding
 }
 
 func defaultKeyMap() keyMap {
@@ -70,6 +79,13 @@ func defaultKeyMap() keyMap {
 		ToolPrev:   key.NewBinding(key.WithKeys("alt+["), key.WithHelp("alt+[", "prev tool cell")),
 		ToolNext:   key.NewBinding(key.WithKeys("alt+]"), key.WithHelp("alt+]", "next tool cell")),
 		ToolExpand: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "expand tool cell")),
+
+		KillWord:      key.NewBinding(key.WithKeys("ctrl+w"), key.WithHelp("ctrl+w", "kill word backward")),
+		WordBackward:  key.NewBinding(key.WithKeys("alt+b"), key.WithHelp("alt+b", "word backward")),
+		WordForward:   key.NewBinding(key.WithKeys("alt+f"), key.WithHelp("alt+f", "word forward")),
+		KillLineStart: key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("ctrl+u", "kill to line start")),
+		KillLineEnd:   key.NewBinding(key.WithKeys("ctrl+k"), key.WithHelp("ctrl+k", "kill to line end")),
+		Yank:          key.NewBinding(key.WithKeys("ctrl+y"), key.WithHelp("ctrl+y", "yank")),
 	}
 }
 
@@ -130,6 +146,12 @@ func keybindCatalog(keys keyMap) []keybindEntry {
 		from("composer.history-prev", "Composer", keys.HistoryPrev),
 		from("composer.history-next", "Composer", keys.HistoryNext),
 		from("composer.agent", "Composer", keys.Agent),
+		from("composer.kill-word", "Composer", keys.KillWord),
+		from("composer.word-back", "Composer", keys.WordBackward),
+		from("composer.word-fwd", "Composer", keys.WordForward),
+		from("composer.kill-line-start", "Composer", keys.KillLineStart),
+		from("composer.kill-line-end", "Composer", keys.KillLineEnd),
+		from("composer.yank", "Composer", keys.Yank),
 
 		from("completion.prev", "Completion", keys.CompletionPrev),
 		from("completion.next", "Completion", keys.CompletionNext),

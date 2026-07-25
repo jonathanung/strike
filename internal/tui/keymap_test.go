@@ -63,7 +63,12 @@ func TestKeybindCatalogCoversAppBindingsAndIsSearchable(t *testing.T) {
 		}
 		seen[entry.ID] = true
 	}
-	for _, id := range []string{"nav.focus-left", "nav.focus-right", "nav.window-next", "nav.window-prev", "global.palette", "global.keyhelp"} {
+	for _, id := range []string{
+		"nav.focus-left", "nav.focus-right", "nav.window-next", "nav.window-prev",
+		"global.palette", "global.keyhelp",
+		"composer.kill-word", "composer.word-back", "composer.word-fwd",
+		"composer.kill-line-start", "composer.kill-line-end", "composer.yank",
+	} {
 		if !seen[id] {
 			t.Errorf("catalog missing %q", id)
 		}
@@ -106,6 +111,7 @@ func TestVimPaneAndWindowKeys(t *testing.T) {
 	if m.windows.active().id() != "c" {
 		t.Errorf("second ctrl+j window = %s, want c", m.windows.active().id())
 	}
+	// Empty composer: ctrl+k still cycles prev (kill only claims when it deletes).
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
 	if m.windows.active().id() != "b" {
 		t.Errorf("ctrl+k window = %s, want b", m.windows.active().id())

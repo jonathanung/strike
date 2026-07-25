@@ -26,7 +26,7 @@ func TestLeftFocusKeymapRoutingMatrix(t *testing.T) {
 		kindFocusLeft
 		kindFocusRight
 		kindCycleNext
-		kindCyclePrev
+		kindKillLineEnd // left-focus ctrl+k is readline kill, not cycle prev
 		kindPalette
 	)
 
@@ -46,7 +46,7 @@ func TestLeftFocusKeymapRoutingMatrix(t *testing.T) {
 		{"focus left ctrl+h", tea.KeyMsg{Type: tea.KeyCtrlH}, kindFocusLeft},
 		{"focus right ctrl+l", tea.KeyMsg{Type: tea.KeyCtrlL}, kindFocusRight},
 		{"cycle next ctrl+j", tea.KeyMsg{Type: tea.KeyCtrlJ}, kindCycleNext},
-		{"cycle prev ctrl+k", tea.KeyMsg{Type: tea.KeyCtrlK}, kindCyclePrev},
+		{"kill line end ctrl+k", tea.KeyMsg{Type: tea.KeyCtrlK}, kindKillLineEnd},
 		{"palette ctrl+p", tea.KeyMsg{Type: tea.KeyCtrlP}, kindPalette},
 	}
 
@@ -71,7 +71,8 @@ func TestLeftFocusKeymapRoutingMatrix(t *testing.T) {
 			startOrient := m.splitOrientation
 			startFocus := m.focus
 			startWin := m.windows.index
-			m.composer.SetValue("hello")
+			m.composer.SetValue("hello world")
+			m.composer.SetCursor(5) // after "hello" so ctrl+k kills " world"
 			composerBefore := m.composer.Value()
 
 			updated, cmd := m.Update(tt.msg)
@@ -150,12 +151,18 @@ func TestLeftFocusKeymapRoutingMatrix(t *testing.T) {
 				if m.focus != startFocus {
 					t.Errorf("cycle next changed focus to %v", m.focus)
 				}
-			case kindCyclePrev:
-				if m.windows.index == startWin {
-					// wrap to last
-					if m.windows.active().id() != "b" && startWin == 0 {
-						t.Errorf("cycle prev window = %s", m.windows.active().id())
-					}
+			case kindKillLineEnd:
+				if m.composer.Value() != "hello" {
+					t.Errorf("ctrl+k composer = %q, want %q", m.composer.Value(), "hello")
+				}
+				if m.windows.index != startWin {
+					t.Errorf("ctrl+k cycled window %d → %d", startWin, m.windows.index)
+				}
+				if m.focus != startFocus {
+					t.Errorf("ctrl+k changed focus to %v", m.focus)
+				}
+				if _, ok := m.modal.(*paletteModal); ok {
+					t.Error("ctrl+k opened palette")
 				}
 			case kindPalette:
 				if _, ok := m.modal.(*paletteModal); !ok {

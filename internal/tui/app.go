@@ -182,6 +182,9 @@ type Model struct {
 	// children tracks active/recent subagent sessions for the activity pane.
 	// Lifecycle never appends transcript cells.
 	children []childActivity
+
+	// killBuf holds the last composer kill (ctrl+w/u/k) for ctrl+y yank.
+	killBuf string
 }
 
 // childActivity is one foreground subagent row in the activity pane.
@@ -534,6 +537,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
+		// Composer readline before nav chords so ctrl+k kills in the input
+		// instead of cycling windows / focusing the right pane.
+		if m.focus == focusLeft {
+			if next, cmd, ok := m.applyComposerReadline(msg); ok {
+				return next, cmd
+			}
+		}
 		if key.Matches(msg, m.keyMap.FocusLeft) {
 			m.completion = nil
 			cmd := m.focusPane(focusLeft)
@@ -691,6 +701,75 @@ func (m Model) updateComposer(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.recomputeCompletion()
 	m.reflow()
 	return m, cmd
+}
+
+// applyComposerReadline handles focusLeft readline chords so they are not
+// stolen by window-cycle / focus bindings (notably ctrl+k). Palette and other
+// global chords are matched earlier and remain global.
+//
+// ctrl+k only claims the event when it deletes text; at EOL / empty composer it
+// falls through so vertical FocusRight and horizontal CycleWindowPrev still work.
+func (m Model) applyComposerReadline(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	switch {
+	case key.Matches(msg, m.keyMap.Yank):
+		if m.killBuf == "" {
+			return m, nil, true
+		}
+		m.resetHistoryBrowsing()
+		m.composer.InsertString(m.killBuf)
+		m.recomputeCompletion()
+		m.reflow()
+		return m, nil, true
+	case key.Matches(msg, m.keyMap.WordBackward), key.Matches(msg, m.keyMap.WordForward):
+		next, cmd := m.updateComposer(msg)
+		return next.(Model), cmd, true
+	case key.Matches(msg, m.keyMap.KillWord), key.Matches(msg, m.keyMap.KillLineStart):
+		before := m.composer.Value()
+		next, cmd := m.updateComposer(msg)
+		nm := next.(Model)
+		if killed, ok := contiguousDeletion(before, nm.composer.Value()); ok {
+			nm.killBuf = killed
+		}
+		return nm, cmd, true
+	case key.Matches(msg, m.keyMap.KillLineEnd):
+		before := m.composer.Value()
+		next, cmd := m.updateComposer(msg)
+		nm := next.(Model)
+		killed, ok := contiguousDeletion(before, nm.composer.Value())
+		if !ok {
+			// No deletion — leave the key for nav (cycle prev / focus bottom).
+			return m, nil, false
+		}
+		nm.killBuf = killed
+		return nm, cmd, true
+	default:
+		return m, nil, false
+	}
+}
+
+// contiguousDeletion returns the single deleted span when after is before with
+// one contiguous rune range removed (kill-word / kill-line style edits).
+func contiguousDeletion(before, after string) (string, bool) {
+	br, ar := []rune(before), []rune(after)
+	if len(ar) >= len(br) {
+		return "", false
+	}
+	i := 0
+	for i < len(ar) && br[i] == ar[i] {
+		i++
+	}
+	deleted := len(br) - len(ar)
+	if i+deleted > len(br) {
+		return "", false
+	}
+	if string(br[i+deleted:]) != string(ar[i:]) {
+		return "", false
+	}
+	killed := string(br[i : i+deleted])
+	if killed == "" {
+		return "", false
+	}
+	return killed, true
 }
 
 func (m *Model) recomputeCompletion() {
