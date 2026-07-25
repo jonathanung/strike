@@ -20,7 +20,7 @@ func TestSharedBaselineHasADHDAndTools(t *testing.T) {
 		"You are strike",
 		"Response contract (ADHD-shaped, always on)",
 		"Lead with the next action",
-		"Available: `read`, `glob`, `grep`, `edit`, `write`, `apply_patch`, `bash`, `task`, `webfetch`, `todowrite`, `todoread`, `notebook_edit`, `sleep`, `skill`, `question`, `enter_plan_mode`, `exit_plan_mode`, `toolsearch`",
+		"Available: `read`, `glob`, `grep`, `edit`, `write`, `apply_patch`, `bash`, `task`, `webfetch`, `todowrite`, `todoread`, `memory_write`, `memory_read`, `notebook_edit`, `sleep`, `skill`, `question`, `enter_plan_mode`, `exit_plan_mode`, `toolsearch`",
 		"NEVER commit unless the user explicitly asks",
 		"/help",
 	} {

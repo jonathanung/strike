@@ -13,6 +13,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/history"
 	"github.com/jonathanung/strike-cli/internal/host"
+	"github.com/jonathanung/strike-cli/internal/memory"
 )
 
 // newTestServices returns services backed by an isolated, empty auth store.
@@ -29,7 +30,7 @@ func newTestServices(t *testing.T) (host.Services, *auth.Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return New(store, nil, []string{"build", "plan"}, nil), store
+	return New(store, nil, nil, []string{"build", "plan"}, nil), store
 }
 
 func statusByName(statuses []host.ProviderStatus) map[string]host.ProviderStatus {
@@ -137,7 +138,7 @@ func TestSetAPIKeyTrimsAndPersists0600(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := New(store, nil, nil, nil)
+	svc := New(store, nil, nil, nil, nil)
 
 	if err := svc.Auth.SetAPIKey("anthropic", "  sk-trim  "); err != nil {
 		t.Fatal(err)
@@ -221,7 +222,7 @@ func TestSkillMappingAndFiltering(t *testing.T) {
 		{Name: "auth", Description: "reserved", Template: "x"},      // reserved name -> filtered
 		{Name: "bad name", Description: "has space", Template: "y"}, // invalid name -> filtered
 	}
-	svc := New(nil, nil, nil, skills)
+	svc := New(nil, nil, nil, nil, skills)
 
 	if len(svc.Skills) != 2 {
 		t.Fatalf("got %d skills, want 2: %+v", len(svc.Skills), svc.Skills)
@@ -258,7 +259,7 @@ func TestSkillMappingAndFiltering(t *testing.T) {
 func TestSaveDefaultsWritesGlobalConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	svc := New(nil, nil, nil, nil)
+	svc := New(nil, nil, nil, nil, nil)
 
 	if err := svc.Settings.SaveDefaults("openai", "gpt-5.5", "build", "high"); err != nil {
 		t.Fatal(err)
@@ -277,9 +278,12 @@ func TestSaveDefaultsWritesGlobalConfig(t *testing.T) {
 }
 
 func TestHistoryNilTolerated(t *testing.T) {
-	svc := New(nil, nil, nil, nil)
+	svc := New(nil, nil, nil, nil, nil)
 	if svc.History != nil {
 		t.Errorf("nil hist should yield nil Services.History, got %#v", svc.History)
+	}
+	if svc.Memory != nil {
+		t.Errorf("nil mem should yield nil Services.Memory, got %#v", svc.Memory)
 	}
 }
 
@@ -290,7 +294,7 @@ func TestHistoryWiredThrough(t *testing.T) {
 	}
 	defer hist.Close()
 
-	svc := New(nil, hist, nil, nil)
+	svc := New(nil, hist, nil, nil, nil)
 	if svc.History == nil {
 		t.Fatal("Services.History should be non-nil when hist is provided")
 	}
@@ -299,6 +303,36 @@ func TestHistoryWiredThrough(t *testing.T) {
 	}
 	if got := svc.History.Entries(); !reflect.DeepEqual(got, []string{"hello world"}) {
 		t.Errorf("Entries = %v, want [hello world]", got)
+	}
+}
+
+func TestMemoryWiredThrough(t *testing.T) {
+	mem, err := memory.Open(t.TempDir(), "project-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mem.Close()
+
+	svc := New(nil, nil, mem, nil, nil)
+	if svc.Memory == nil {
+		t.Fatal("Services.Memory should be non-nil when mem is provided")
+	}
+	if err := svc.Memory.Put("k", "v", []string{"t"}); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := svc.Memory.Get("k")
+	if err != nil || !ok {
+		t.Fatalf("Get: ok=%v err=%v", ok, err)
+	}
+	if got.Value != "v" || !reflect.DeepEqual(got.Tags, []string{"t"}) {
+		t.Errorf("entry = %+v", got)
+	}
+	list, err := svc.Memory.List("t")
+	if err != nil || len(list) != 1 || list[0].Key != "k" {
+		t.Fatalf("List = %+v err=%v", list, err)
+	}
+	if err := svc.Memory.Delete("k"); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -317,7 +351,7 @@ func TestCatalogFromCache(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cacheDir, "models.json"), []byte(catalog), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	svc := New(nil, nil, nil, nil)
+	svc := New(nil, nil, nil, nil, nil)
 
 	ids, err := svc.Catalog.ModelIDs(context.Background(), "anthropic")
 	if err != nil {
@@ -348,7 +382,7 @@ func TestCatalogContextWindowAndOutputLimitFromCache(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cacheDir, "models.json"), []byte(catalog), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	svc := New(nil, nil, nil, nil)
+	svc := New(nil, nil, nil, nil, nil)
 	ctx := context.Background()
 
 	tokens, ok, err := svc.Catalog.ContextWindow(ctx, "openai", "gpt-big")

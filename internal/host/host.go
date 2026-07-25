@@ -1,6 +1,6 @@
 // Package host defines the services a strike frontend needs from its host
 // process, beyond the engine protocol: credentials, model catalog, saved
-// defaults, prompt history, and static agent/skill listings. Contract only:
+// defaults, prompt history, project memory, and static agent/skill listings. Contract only:
 // this package imports nothing outside the standard library so frontends
 // can be developed and tested against fakes. Implementations live in
 // internal/host/local.
@@ -96,6 +96,26 @@ type Files interface {
 	ReadFile(path string) ([]byte, error)
 }
 
+// MemoryEntry is one project-local key/value memory record.
+type MemoryEntry struct {
+	Key   string
+	Value string
+	Tags  []string
+}
+
+// Memory is project-scoped durable key/value memory for /memory and tools.
+// Nil means the capability is absent; frontends must degrade gracefully.
+type Memory interface {
+	// List returns entries sorted by key. Non-empty tag filters to that tag.
+	List(tag string) ([]MemoryEntry, error)
+	// Get returns one entry by key.
+	Get(key string) (MemoryEntry, bool, error)
+	// Put inserts or replaces key with value and optional tags.
+	Put(key, value string, tags []string) error
+	// Delete removes key. Missing keys return an error.
+	Delete(key string) error
+}
+
 // Services bundles everything a frontend receives from its host. Any field
 // may be nil/empty when a capability is absent (tests, future frontends);
 // frontends must degrade gracefully.
@@ -105,6 +125,7 @@ type Services struct {
 	Settings Settings
 	History  History
 	Files    Files
+	Memory   Memory
 	Agents   []string // selectable agent names, default first
 	Skills   []Skill
 }

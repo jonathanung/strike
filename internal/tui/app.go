@@ -1267,6 +1267,7 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 			"/auth",
 			"/vim [path[:line]]",
 			"/md-read <path>",
+			"/memory [list|get|set|rm]",
 			"/theme [dark|light|auto]",
 			"/layout",
 			"/keys",
@@ -1281,6 +1282,8 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		m.modal = newKeysModal(m.keyMap)
 		m.reflow()
 		return m, nil
+	case "/memory":
+		return m.handleMemoryCommand(fields[1:])
 	default:
 		// Unknown commands fall through to skills: /name args renders the
 		// skill template and submits it as the user message.
@@ -1298,6 +1301,95 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 			return m.submit(protocol.UserInput{Text: prompt}, text)
 		}
 		m.setNotice("unknown command "+fields[0]+" — try /help", true)
+		return m, nil
+	}
+}
+
+func (m Model) handleMemoryCommand(args []string) (tea.Model, tea.Cmd) {
+	m.resetComposer()
+	if m.services.Memory == nil {
+		m.setNotice("project memory is unavailable", true)
+		return m, nil
+	}
+	usage := "usage: /memory [list [tag]|get <key>|set <key> <value>|rm <key>]"
+	if len(args) == 0 {
+		args = []string{"list"}
+	}
+	switch args[0] {
+	case "list", "ls":
+		tag := ""
+		if len(args) > 1 {
+			tag = args[1]
+		}
+		entries, err := m.services.Memory.List(tag)
+		if err != nil {
+			m.setNotice("memory: "+err.Error(), true)
+			return m, nil
+		}
+		if len(entries) == 0 {
+			if tag != "" {
+				m.setNotice("memory: no entries with tag "+tag, false)
+			} else {
+				m.setNotice("memory: (empty)", false)
+			}
+			return m, nil
+		}
+		parts := make([]string, 0, len(entries))
+		for _, e := range entries {
+			line := e.Key + "=" + e.Value
+			if len(e.Tags) > 0 {
+				line += " [" + strings.Join(e.Tags, ", ") + "]"
+			}
+			parts = append(parts, line)
+		}
+		m.setNotice("memory: "+dotJoin(m.th, parts...), false)
+		return m, nil
+	case "get":
+		if len(args) < 2 {
+			m.setNotice(usage, true)
+			return m, nil
+		}
+		entry, ok, err := m.services.Memory.Get(args[1])
+		if err != nil {
+			m.setNotice("memory: "+err.Error(), true)
+			return m, nil
+		}
+		if !ok {
+			m.setNotice("memory: no entry for "+args[1], true)
+			return m, nil
+		}
+		msg := entry.Key + "=" + entry.Value
+		if len(entry.Tags) > 0 {
+			msg += " [" + strings.Join(entry.Tags, ", ") + "]"
+		}
+		m.setNotice("memory: "+msg, false)
+		return m, nil
+	case "set", "add", "put":
+		if len(args) < 3 {
+			m.setNotice(usage, true)
+			return m, nil
+		}
+		key := args[1]
+		value := strings.Join(args[2:], " ")
+		if err := m.services.Memory.Put(key, value, nil); err != nil {
+			m.setNotice("memory: "+err.Error(), true)
+			return m, nil
+		}
+		m.setNotice("memory: set "+key, false)
+		return m, nil
+	case "rm", "delete", "del", "remove":
+		if len(args) < 2 {
+			m.setNotice(usage, true)
+			return m, nil
+		}
+		if err := m.services.Memory.Delete(args[1]); err != nil {
+			m.setNotice("memory: "+err.Error(), true)
+			return m, nil
+		}
+		m.setNotice("memory: deleted "+args[1], false)
+		return m, nil
+	default:
+		m.setNotice(usage, true)
 		return m, nil
 	}
 }

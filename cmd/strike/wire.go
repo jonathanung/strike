@@ -15,6 +15,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/engine"
 	"github.com/jonathanung/strike-cli/internal/history"
 	"github.com/jonathanung/strike-cli/internal/host/local"
+	"github.com/jonathanung/strike-cli/internal/memory"
 	"github.com/jonathanung/strike-cli/internal/project"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
@@ -140,6 +141,15 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 			runErr = fmt.Errorf("closing prompt history: %w", err)
 		}
 	}()
+	memoryStore, err := memory.Open(globalRoot, projectIdentity.Key)
+	if err != nil {
+		return fmt.Errorf("opening project memory: %w", err)
+	}
+	defer func() {
+		if err := memoryStore.Close(); err != nil && runErr == nil {
+			runErr = fmt.Errorf("closing project memory: %w", err)
+		}
+	}()
 	cfg, err := config.Load(workDir)
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
@@ -243,6 +253,8 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 		tool.NewWebFetch(),
 		tool.NewTodoWrite(todoStore),
 		tool.NewTodoRead(todoStore),
+		tool.NewMemoryWrite(memoryStore),
+		tool.NewMemoryRead(memoryStore),
 		tool.NewNotebookEdit(),
 		tool.NewSleep(),
 		tool.NewSkill(skillInfos),
@@ -314,8 +326,8 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 		agentNames[i] = a.Name
 	}
 	// local.New wraps the real backend stores in the host.Services contract;
-	// the TUI never sees auth/config/models/history directly.
-	services := local.New(authStore, historyStore, agentNames, skills)
+	// the TUI never sees auth/config/models/history/memory directly.
+	services := local.New(authStore, historyStore, memoryStore, agentNames, skills)
 	services.Files = local.NewFiles(workDir)
 	firstRun := isFreshStrikeHome(authStore)
 

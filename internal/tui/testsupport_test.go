@@ -237,6 +237,107 @@ func (f *fakeFiles) ReadFile(path string) ([]byte, error) {
 	return append([]byte(nil), data...), nil
 }
 
+// --- fakeMemory: an in-memory host.Memory --------------------------------
+
+type fakeMemory struct {
+	mu      sync.Mutex
+	entries map[string]host.MemoryEntry
+	err     error
+}
+
+func newFakeMemory(entries ...host.MemoryEntry) *fakeMemory {
+	f := &fakeMemory{entries: make(map[string]host.MemoryEntry)}
+	for _, e := range entries {
+		f.entries[e.Key] = host.MemoryEntry{
+			Key:   e.Key,
+			Value: e.Value,
+			Tags:  append([]string(nil), e.Tags...),
+		}
+	}
+	return f
+}
+
+func (f *fakeMemory) List(tag string) ([]host.MemoryEntry, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := make([]host.MemoryEntry, 0, len(f.entries))
+	for _, e := range f.entries {
+		if tag != "" {
+			found := false
+			for _, t := range e.Tags {
+				if t == tag {
+					found = true
+					break
+				}
+			}
+			if !found {
+				continue
+			}
+		}
+		out = append(out, host.MemoryEntry{
+			Key:   e.Key,
+			Value: e.Value,
+			Tags:  append([]string(nil), e.Tags...),
+		})
+	}
+	// Stable order for notice text.
+	for i := 0; i < len(out); i++ {
+		for j := i + 1; j < len(out); j++ {
+			if out[j].Key < out[i].Key {
+				out[i], out[j] = out[j], out[i]
+			}
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeMemory) Get(key string) (host.MemoryEntry, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return host.MemoryEntry{}, false, f.err
+	}
+	e, ok := f.entries[key]
+	if !ok {
+		return host.MemoryEntry{}, false, nil
+	}
+	return host.MemoryEntry{
+		Key:   e.Key,
+		Value: e.Value,
+		Tags:  append([]string(nil), e.Tags...),
+	}, true, nil
+}
+
+func (f *fakeMemory) Put(key, value string, tags []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return f.err
+	}
+	f.entries[key] = host.MemoryEntry{
+		Key:   key,
+		Value: value,
+		Tags:  append([]string(nil), tags...),
+	}
+	return nil
+}
+
+func (f *fakeMemory) Delete(key string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return f.err
+	}
+	if _, ok := f.entries[key]; !ok {
+		return fmt.Errorf("memory: key not found")
+	}
+	delete(f.entries, key)
+	return nil
+}
+
 // --- construction helpers ------------------------------------------------
 
 // fakeSkill builds a host.Skill from a template, mirroring config.Skill.Render
@@ -261,6 +362,7 @@ func testServices(agents []string, skills []host.Skill) host.Services {
 		Auth:     newFakeAuth(),
 		Catalog:  &fakeCatalog{ids: map[string][]string{"echo": {"echo-1"}, "openai": {"gpt-test"}}},
 		Settings: &fakeSettings{},
+		Memory:   newFakeMemory(),
 		Agents:   agents,
 		Skills:   skills,
 	}

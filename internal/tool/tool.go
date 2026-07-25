@@ -1,6 +1,7 @@
 // Package tool defines the tool contract and the built-in tool set
 // (read/glob/grep/edit/write/apply_patch/bash/task/webfetch/todowrite/todoread/
-// notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/toolsearch).
+// memory_write/memory_read/notebook_edit/sleep/skill/question/enter_plan_mode/
+// exit_plan_mode/toolsearch).
 // Used by internal/engine (dispatch), internal/permission (AskRequest, for the
 // Context.Ask signature), and cmd/strike (registry construction); internal/tui
 // never imports it — tool calls reach the frontend only as
