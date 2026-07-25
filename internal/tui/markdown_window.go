@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
@@ -77,7 +78,9 @@ func (w markdownWindow) view(th theme.Theme) string {
 	}
 	if w.path == "" {
 		st := th.Resolve().S()
-		return wrapWindowText(st.Muted.Render("No file open — /md-read <path>"), w.width)
+		return lipgloss.NewStyle().Width(max(1, w.width)).Render(
+			st.Muted.Render("No file open — /md-read <path>"),
+		)
 	}
 	return w.vp.View()
 }
