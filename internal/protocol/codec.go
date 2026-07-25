@@ -18,6 +18,8 @@ func eventType(ev Event) string {
 	switch ev.(type) {
 	case UserMessage:
 		return "user.message"
+	case SessionTitled:
+		return "session.titled"
 	case TurnStarted:
 		return "turn.started"
 	case TextDelta:
@@ -80,6 +82,8 @@ func (e Envelope) Decode() (Event, error) {
 	switch e.Type {
 	case "user.message":
 		ev = &UserMessage{}
+	case "session.titled":
+		ev = &SessionTitled{}
 	case "turn.started":
 		ev = &TurnStarted{}
 	case "text.delta":
@@ -130,6 +134,8 @@ func (e Envelope) Decode() (Event, error) {
 func deref(ev Event) Event {
 	switch v := ev.(type) {
 	case *UserMessage:
+		return *v
+	case *SessionTitled:
 		return *v
 	case *TurnStarted:
 		return *v

@@ -196,3 +196,32 @@ func TestNewIDFormat(t *testing.T) {
 		t.Errorf("NewID() values are not lexically sortable in creation order")
 	}
 }
+
+func TestAppendReplaySessionTitled(t *testing.T) {
+	dir := t.TempDir()
+	st, err := Open(dir, "titled-session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := []protocol.Event{
+		protocol.UserMessage{Text: "  hello   world  "},
+		protocol.SessionTitled{Title: "hello world"},
+		protocol.TurnStarted{},
+	}
+	for _, ev := range events {
+		if err := st.Append(ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	path := st.Path()
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Replay(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if TitleFromEvents(got) != "hello world" {
+		t.Errorf("TitleFromEvents = %q", TitleFromEvents(got))
+	}
+}
