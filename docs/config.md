@@ -9,6 +9,8 @@ JSON:
   "model": "claude-sonnet-5",
   "effort": "high",
   "defaultAgent": "build",
+  "theme": "strike",
+  "vimMode": "pane",
   "permissions": [
     { "permission": "bash", "pattern": "go *", "action": "allow" },
     { "permission": "write", "pattern": "**/*.env", "action": "deny" }
@@ -20,9 +22,32 @@ Rules concatenate across layers; the last matching rule wins, so project
 config overrides global, and session "always" grants override both.
 
 **ctrl+d saves defaults**: on the main screen it persists the current
-provider/model/agent/effort to `~/.strike/config`; in the provider picker it
-saves the highlighted provider; in the model picker it saves provider + model;
-in the effort picker it saves the highlighted level.
+provider/model/agent/effort/theme to `~/.strike/config`; in the provider
+picker it saves the highlighted provider; in the model picker it saves
+provider + model; in the effort picker it saves the highlighted level; in
+the theme picker it saves the highlighted theme id.
+
+## Theme
+
+`theme` is a color-theme id: bundled JSON themes plus files under
+`~/.strike/themes` and `./.strike/themes`. Empty means the stock `strike`
+palette. In the TUI, bare `/theme` opens a picker; `/theme <id>` applies one;
+`/theme dark|light|auto` only adjusts session appearance (forced background
+detect), not the color-theme id.
+
+## Embedded editor (`vimMode`)
+
+`/vim [path[:line]]` opens a file in an editor. `vimMode` selects how:
+
+| Value | Behavior |
+|---|---|
+| `pane` (default) | embed nvim/vim in the right-pane `editor` window (PTY) |
+| `overlay` | embed in a centered modal overlay |
+| `takeover` | full-screen handoff via `tea.ExecProcess` |
+
+Unknown values are ignored at load time. GUI `$EDITOR` values always take
+over the terminal regardless of `vimMode`. Leave the embedded editor with
+`ctrl+g`.
 
 ## Reasoning effort
 
@@ -46,4 +71,4 @@ floors at `minimal` on the OpenAI family (which has no zero setting), and
 | `xhigh` | deeper reasoning, best for coding and agentic work |
 | `max` | maximum reasoning when correctness beats cost |
 
-Agents and skills (including permission rules on agents): [agents-skills.md](agents-skills.md).
+Agents, skills, and workflows: [agents-skills.md](agents-skills.md).

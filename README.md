@@ -22,10 +22,14 @@ make run            # real agent with your configured provider
 ```sh
 export ANTHROPIC_API_KEY=sk-ant-…   # or: ./strike auth login anthropic
 ./strike                            # or: --provider <p> --model <m> --effort <level>
+./strike --continue                 # resume last root session
+./strike exec "summarize this repo" # headless one-shot → stdout
 ```
 
-In the TUI: `/provider`, `/model`, `/auth`, `/help`. Enter sends; Shift+Enter
-newline; `esc` interrupts; `ctrl+c` quits. See [docs/keybinds.md](docs/keybinds.md).
+In the TUI: `/provider`, `/model`, `/auth`, `/theme`, `/help`. Enter sends;
+Shift+Enter newline; `esc` interrupts; `ctrl+t` jumps to latest output;
+`ctrl+c` quits. See [docs/keybinds.md](docs/keybinds.md) and
+[docs/usage.md](docs/usage.md).
 
 ## Docs
 
