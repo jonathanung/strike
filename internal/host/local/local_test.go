@@ -360,6 +360,51 @@ func TestMemoryWiredThrough(t *testing.T) {
 	}
 }
 
+func TestMemoryListFilterAndAll(t *testing.T) {
+	mem, err := memory.Open(t.TempDir(), "project-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mem.Close()
+	svc := New(nil, nil, mem, nil, nil, nil, nil)
+
+	empty, err := svc.Memory.List("")
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("List empty store = %+v err=%v", empty, err)
+	}
+
+	if err := svc.Memory.Put("a", "1", []string{"alpha", "shared"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Memory.Put("b", "2", []string{"beta"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Memory.Put("c", "3", []string{"shared"}); err != nil {
+		t.Fatal(err)
+	}
+
+	all, err := svc.Memory.List("")
+	if err != nil || len(all) != 3 {
+		t.Fatalf("List all = %+v err=%v", all, err)
+	}
+	if all[0].Key != "a" || all[1].Key != "b" || all[2].Key != "c" {
+		t.Fatalf("List all order = %+v, want a,b,c", all)
+	}
+
+	shared, err := svc.Memory.List("shared")
+	if err != nil || len(shared) != 2 {
+		t.Fatalf("List(shared) = %+v err=%v", shared, err)
+	}
+	if shared[0].Key != "a" || shared[1].Key != "c" {
+		t.Fatalf("List(shared) keys = %+v", shared)
+	}
+
+	none, err := svc.Memory.List("missing")
+	if err != nil || len(none) != 0 {
+		t.Fatalf("List(missing) = %+v err=%v", none, err)
+	}
+}
+
 func TestIssuesWiredThrough(t *testing.T) {
 	issStore, err := issue.Open(t.TempDir(), "project-key")
 	if err != nil {
@@ -389,6 +434,62 @@ func TestIssuesWiredThrough(t *testing.T) {
 	list, err := svc.Issues.List("closed")
 	if err != nil || len(list) != 1 || list[0].ID != 1 {
 		t.Fatalf("List = %+v err=%v", list, err)
+	}
+}
+
+func TestIssuesUpdateAndList(t *testing.T) {
+	issStore, err := issue.Open(t.TempDir(), "project-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer issStore.Close()
+	svc := New(nil, nil, nil, issStore, nil, nil, nil)
+
+	a, err := svc.Issues.Create("one", "body-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := svc.Issues.Create("two", "body-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	title := "one-renamed"
+	body := "updated-body"
+	status := "closed"
+	updated, err := svc.Issues.Update(a.ID, &title, &body, &status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Title != title || updated.Body != body || updated.Status != status {
+		t.Fatalf("Update = %+v", updated)
+	}
+
+	// Partial update leaves unspecified fields alone.
+	onlyTitle := "two-renamed"
+	partial, err := svc.Issues.Update(b.ID, &onlyTitle, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if partial.Title != onlyTitle || partial.Body != "body-b" || partial.Status != "open" {
+		t.Fatalf("partial Update = %+v", partial)
+	}
+
+	all, err := svc.Issues.List("")
+	if err != nil || len(all) != 2 {
+		t.Fatalf("List all = %+v err=%v", all, err)
+	}
+	openOnly, err := svc.Issues.List("open")
+	if err != nil || len(openOnly) != 1 || openOnly[0].ID != b.ID {
+		t.Fatalf("List open = %+v err=%v", openOnly, err)
+	}
+	closedOnly, err := svc.Issues.List("closed")
+	if err != nil || len(closedOnly) != 1 || closedOnly[0].ID != a.ID {
+		t.Fatalf("List closed = %+v err=%v", closedOnly, err)
+	}
+
+	if _, err := svc.Issues.Update(99, &title, nil, nil); err == nil {
+		t.Fatal("Update missing id should error")
 	}
 }
 
