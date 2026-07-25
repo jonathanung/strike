@@ -420,6 +420,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// the TUI never sees auth/config/models/history/memory/issues directly.
 	services := local.New(authStore, historyStore, memoryStore, issueStore, agentNames, skills, customStore)
 	services.Files = local.NewFiles(workDir)
+	services.Sessions = local.NewSessions(sessions)
 
 	return &assembled{
 		eng:       eng,

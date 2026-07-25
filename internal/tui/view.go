@@ -125,7 +125,22 @@ func (m Model) transcriptView(compact bool, width, height int) string {
 	if height <= 0 {
 		return ""
 	}
-	if len(m.cells) == 0 {
+	if len(m.displayCells()) == 0 {
+		if m.viewingChild() {
+			// Empty subagent log still shows a panel (not the root welcome card).
+			body := m.th.Resolve().S().Muted.Render("subagent transcript empty")
+			if compact {
+				return body
+			}
+			return ui.Panel(m.th, ui.PanelOpts{
+				Title:   m.sessionPanelTitle(),
+				Footer:  m.transcriptFooter(),
+				Width:   width,
+				Height:  height,
+				Focused: m.focus == focusLeft && m.modal == nil,
+				Dim:     m.focus == focusRight || m.modal != nil,
+			}, body)
+		}
 		return m.welcomeView(width, height)
 	}
 	body := m.viewport.View()
@@ -143,7 +158,15 @@ func (m Model) transcriptView(compact bool, width, height int) string {
 }
 
 // sessionPanelTitle is the transcript chrome label: auto-title when set.
+// While viewing a subagent, the child title is shown with a marker.
 func (m Model) sessionPanelTitle() string {
+	if m.viewingChild() {
+		title := strings.TrimSpace(m.viewTitle)
+		if title == "" {
+			title = "subagent"
+		}
+		return sanitizeTitleTopic(title)
+	}
 	if topic := strings.TrimSpace(m.titleTopic); topic != "" {
 		return sanitizeTitleTopic(topic)
 	}

@@ -548,6 +548,61 @@ func (f *fakeIssues) Close(id int) (host.Issue, error) {
 	return f.Update(id, nil, nil, &st)
 }
 
+// --- fakeSessions: scriptable host.Sessions ------------------------------
+
+// fakeSessions is an in-memory host.Sessions for transcript navigation tests.
+type fakeSessions struct {
+	byID      map[string]host.Session
+	children  map[string][]host.Session // parentID → kids
+	logs      map[string][]byte         // id → JSONL
+	getErr    error
+	listErr   error
+	replayErr error
+}
+
+func newFakeSessions() *fakeSessions {
+	return &fakeSessions{
+		byID:     map[string]host.Session{},
+		children: map[string][]host.Session{},
+		logs:     map[string][]byte{},
+	}
+}
+
+func (f *fakeSessions) put(s host.Session, jsonl []byte) {
+	f.byID[s.ID] = s
+	f.logs[s.ID] = jsonl
+	if s.ParentID != "" {
+		f.children[s.ParentID] = append(f.children[s.ParentID], s)
+	}
+}
+
+func (f *fakeSessions) Get(id string) (host.Session, bool, error) {
+	if f.getErr != nil {
+		return host.Session{}, false, f.getErr
+	}
+	s, ok := f.byID[id]
+	return s, ok, nil
+}
+
+func (f *fakeSessions) Children(parentID string) ([]host.Session, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	out := append([]host.Session(nil), f.children[parentID]...)
+	return out, nil
+}
+
+func (f *fakeSessions) ReplayJSONL(id string) ([]byte, error) {
+	if f.replayErr != nil {
+		return nil, f.replayErr
+	}
+	data, ok := f.logs[id]
+	if !ok {
+		return nil, fmt.Errorf("session %q not found", id)
+	}
+	return data, nil
+}
+
 // --- construction helpers ------------------------------------------------
 
 // fakeSkill builds a host.Skill from a template, mirroring config.Skill.Render

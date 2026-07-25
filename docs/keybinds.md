@@ -16,6 +16,11 @@
 | `f1` | keybind cheatsheet (`/keys`) |
 | `tab` | cycle agents |
 | `ctrl+d` | save defaults (see [config.md](config.md)) |
+| `ctrl+x` then `↓` | enter first subagent transcript |
+| `ctrl+x` then `↑` | return to parent session |
+| `ctrl+x` then `←`/`→` | cycle sibling subagents |
+| `↑`/`↓`/`←`/`→` | parent / child / siblings while viewing a subagent (composer empty) |
+| `esc` | leave subagent view (when idle) / interrupt turn |
 | `ctrl+c` | quit |
 
 In a vertical split, focus and cycle chords swap: focus is `ctrl+j`/`ctrl+k`,

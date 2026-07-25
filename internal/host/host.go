@@ -198,6 +198,27 @@ type Issues interface {
 	Close(id int) (Issue, error)
 }
 
+// Session is one durable agent session the frontend can list or open.
+type Session struct {
+	ID       string
+	ParentID string // empty for root sessions
+	Title    string
+	Open     bool
+}
+
+// Sessions reads durable session logs for transcript navigation (subagents).
+// Nil means the capability is absent; frontends must degrade gracefully.
+// Event payloads are JSONL envelopes (protocol codec) so this contract stays
+// stdlib-only.
+type Sessions interface {
+	// Get returns one session by id.
+	Get(id string) (Session, bool, error)
+	// Children returns direct child sessions of parentID (newest first).
+	Children(parentID string) ([]Session, error)
+	// ReplayJSONL returns the raw JSONL event log for id (one envelope per line).
+	ReplayJSONL(id string) ([]byte, error)
+}
+
 // Services bundles everything a frontend receives from its host. Any field
 // may be nil/empty when a capability is absent (tests, future frontends);
 // frontends must degrade gracefully.
@@ -209,6 +230,7 @@ type Services struct {
 	Files     Files
 	Memory    Memory
 	Issues    Issues
+	Sessions  Sessions  // durable session list/replay; nil when unsupported
 	Providers Providers // custom/self-hosted provider CRUD; nil when unsupported
 	Agents    []string  // selectable agent names, default first
 	Skills    []Skill

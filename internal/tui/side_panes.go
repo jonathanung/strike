@@ -129,7 +129,7 @@ func (m Model) contextPaneBody(width, height int) string {
 	return strings.Join(lines, "\n")
 }
 
-// activityPaneBody shows active/recent subagents first, then parent tool
+// activityPaneBody shows a session tree when subagents exist, then parent tool
 // activity, then idle tips. Never renders placeholder copy or child transcript.
 func (m Model) activityPaneBody(width, height int) string {
 	if width <= 0 || height <= 0 {
@@ -143,20 +143,47 @@ func (m Model) activityPaneBody(width, height int) string {
 
 	lines := make([]string, 0, height)
 
-	// Subagents: running first (newest last in slice → show newest running at top).
-	for i := len(m.children) - 1; i >= 0 && len(lines) < height; i-- {
-		ch := m.children[i]
-		if ch.status != "running" {
-			continue
+	// Session tree (root + children) when any subagent is known.
+	if len(m.listChildren(m.sessionID)) > 0 {
+		treeH := height
+		// Reserve at least one row for tools/tips when space allows.
+		if height > 4 {
+			treeH = min(height, max(2, len(ui.FlattenTree(m.sessionTreeNodes()))+1))
+			if treeH > height-1 {
+				treeH = height - 1
+			}
 		}
-		lines = append(lines, m.formatChildActivityLine(ch, width))
-	}
-	for i := len(m.children) - 1; i >= 0 && len(lines) < height; i-- {
-		ch := m.children[i]
-		if ch.status == "running" {
-			continue
+		tree := ui.Tree(th, ui.TreeOpts{
+			Nodes:   m.sessionTreeNodes(),
+			Cursor:  -1, // no interactive cursor in the activity summary
+			Width:   width,
+			Visible: treeH,
+			Empty:   "",
+		})
+		if tree != "" {
+			for _, row := range strings.Split(tree, "\n") {
+				if len(lines) >= height {
+					break
+				}
+				lines = append(lines, row)
+			}
 		}
-		lines = append(lines, m.formatChildActivityLine(ch, width))
+	} else {
+		// Flat fallback when only ephemeral children without ids exist.
+		for i := len(m.children) - 1; i >= 0 && len(lines) < height; i-- {
+			ch := m.children[i]
+			if ch.status != "running" {
+				continue
+			}
+			lines = append(lines, m.formatChildActivityLine(ch, width))
+		}
+		for i := len(m.children) - 1; i >= 0 && len(lines) < height; i-- {
+			ch := m.children[i]
+			if ch.status == "running" {
+				continue
+			}
+			lines = append(lines, m.formatChildActivityLine(ch, width))
+		}
 	}
 
 	// Parent tools (most recent first).
@@ -216,6 +243,7 @@ func (m Model) activityPaneBody(width, height int) string {
 		keyHint(m.keyMap.CycleWindowNext),
 		keyHint(m.keyMap.ToggleOrientation),
 		keyHint(m.keyMap.Newline),
+		{Key: "ctrl+x down", Label: "subagent"},
 	}
 	if len(tips) > height {
 		tips = tips[:height]

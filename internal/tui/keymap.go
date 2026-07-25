@@ -44,6 +44,13 @@ type keyMap struct {
 	KillLineStart key.Binding
 	KillLineEnd   key.Binding
 	Yank          key.Binding
+
+	// Subagent transcript navigation (opencode-style leader chords).
+	Leader            key.Binding
+	SessionChildFirst key.Binding
+	SessionParent     key.Binding
+	SessionChildNext  key.Binding
+	SessionChildPrev  key.Binding
 }
 
 func defaultKeyMap() keyMap {
@@ -91,6 +98,12 @@ func defaultKeyMap() keyMap {
 		KillLineStart: key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("ctrl+u", "kill to line start")),
 		KillLineEnd:   key.NewBinding(key.WithKeys("ctrl+k"), key.WithHelp("ctrl+k", "kill to line end")),
 		Yank:          key.NewBinding(key.WithKeys("ctrl+y"), key.WithHelp("ctrl+y", "yank")),
+
+		Leader:            key.NewBinding(key.WithKeys("ctrl+x"), key.WithHelp("ctrl+x", "leader")),
+		SessionChildFirst: key.NewBinding(key.WithKeys("down"), key.WithHelp("ctrl+x down", "enter subagent")),
+		SessionParent:     key.NewBinding(key.WithKeys("up"), key.WithHelp("ctrl+x up", "parent session")),
+		SessionChildNext:  key.NewBinding(key.WithKeys("right"), key.WithHelp("ctrl+x right", "next subagent")),
+		SessionChildPrev:  key.NewBinding(key.WithKeys("left"), key.WithHelp("ctrl+x left", "prev subagent")),
 	}
 }
 
@@ -139,6 +152,11 @@ func keybindCatalog(keys keyMap) []keybindEntry {
 		from("nav.tool-next", "Navigation", keys.ToolNext),
 		from("nav.tool-expand", "Navigation", keys.ToolExpand),
 		from("nav.tool-copy", "Navigation", keys.ToolCopy),
+		from("nav.leader", "Navigation", keys.Leader),
+		from("nav.session-child", "Navigation", keys.SessionChildFirst),
+		from("nav.session-parent", "Navigation", keys.SessionParent),
+		from("nav.session-next", "Navigation", keys.SessionChildNext),
+		from("nav.session-prev", "Navigation", keys.SessionChildPrev),
 
 		from("global.palette", "Global", keys.Palette),
 		from("global.keyhelp", "Global", keys.KeyHelp),

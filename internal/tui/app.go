@@ -228,6 +228,18 @@ type Model struct {
 	// Lifecycle never appends transcript cells.
 	children []childActivity
 
+	// Subagent transcript navigation (ctrl+x leader chords). Root live
+	// cells stay in cells/toolByID; viewingID non-empty and != sessionID
+	// shows viewCells loaded from host.Sessions.
+	leaderArmed  bool
+	leaderGen    int
+	viewingID    string
+	viewParentID string
+	viewTitle    string
+	viewCells    []cell
+	viewToolByID map[string]*toolCell
+	viewGen      int // bumps on open/close to cancel refresh ticks
+
 	// killBuf holds the last composer kill (ctrl+w/u/k) for ctrl+y yank.
 	killBuf string
 }
@@ -517,8 +529,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.gen != m.copyFlashGen {
 			return m, nil
 		}
-		if msg.idx >= 0 && msg.idx < len(m.cells) {
-			switch c := m.cells[msg.idx].(type) {
+		cells := m.displayCells()
+		if msg.idx >= 0 && msg.idx < len(cells) {
+			switch c := cells[msg.idx].(type) {
 			case *toolCell:
 				c.copiedFlash = false
 			case *exploreCell:
@@ -581,6 +594,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case leaderExpiredMsg:
+		if msg.gen == m.leaderGen {
+			m.clearLeader()
+		}
+		return m, nil
+
+	case childTranscriptRefreshMsg:
+		if msg.gen != m.viewGen || msg.id != m.viewingID {
+			return m, nil
+		}
+		return m, m.refreshViewingTranscript()
+
 	case tea.KeyMsg:
 		if key.Matches(msg, m.keyMap.Quit) {
 			return m, tea.Quit
@@ -588,6 +613,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.modal != nil {
 			var cmd tea.Cmd
 			m.modal, cmd = m.modal.update(msg)
+			m.reflow()
+			return m, cmd
+		}
+		// Leader chords before other routing so ctrl+x down is not eaten.
+		if m.leaderArmed {
+			if handled, cmd := m.handleLeaderKey(msg); handled {
+				m.reflow()
+				return m, cmd
+			}
+		}
+		if key.Matches(msg, m.keyMap.Leader) {
+			m.completion = nil
+			return m, m.armLeader()
+		}
+		if handled, cmd := m.handleSessionNavKeys(msg); handled {
 			m.reflow()
 			return m, cmd
 		}
@@ -1246,6 +1286,11 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		m.onChildStarted(ev)
 	case protocol.ChildCompleted:
 		m.onChildCompleted(ev)
+		if m.viewingChild() && (ev.SessionID == m.viewingID || ev.SessionID == "") {
+			if refresh := m.refreshViewingTranscript(); refresh != nil {
+				cmd = tea.Batch(cmd, refresh)
+			}
+		}
 	}
 	return cmd
 }
@@ -1980,7 +2025,8 @@ func (m *Model) refreshViewport() {
 		return
 	}
 	width := max(1, m.viewport.Width)
-	if len(m.cells) == 0 {
+	cells := m.displayCells()
+	if len(cells) == 0 {
 		m.viewport.SetContent("")
 		m.viewport.GotoTop()
 		m.transcriptPlainLines = nil
@@ -1992,8 +2038,8 @@ func (m *Model) refreshViewport() {
 	// so users reading history are not yanked down on each event.
 	atBottom := m.viewport.AtBottom()
 	yOff := m.viewport.YOffset
-	blocks := make([]string, 0, len(m.cells))
-	for _, c := range m.cells {
+	blocks := make([]string, 0, len(cells))
+	for _, c := range cells {
 		blocks = append(blocks, c.render(width, m.th))
 	}
 	content := strings.Join(blocks, "\n\n")
@@ -2045,7 +2091,7 @@ func (m *Model) handleToolCellKeys(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
 
 func (m *Model) collapsibleCellIndexes() []int {
 	var idx []int
-	for i, c := range m.cells {
+	for i, c := range m.displayCells() {
 		switch tc := c.(type) {
 		case *toolCell:
 			if tc.collapsible() {
@@ -2092,11 +2138,12 @@ func (m *Model) moveToolSelection(delta int) {
 }
 
 func (m *Model) toggleSelectedTool() bool {
+	cells := m.displayCells()
 	idxs := m.collapsibleCellIndexes()
 	if len(idxs) == 0 {
 		return false
 	}
-	if m.selectedCell < 0 || m.selectedCell >= len(m.cells) {
+	if m.selectedCell < 0 || m.selectedCell >= len(cells) {
 		m.selectedCell = idxs[len(idxs)-1]
 	} else {
 		// Ensure current selection is still collapsible; else jump to last.
@@ -2111,7 +2158,7 @@ func (m *Model) toggleSelectedTool() bool {
 			m.selectedCell = idxs[len(idxs)-1]
 		}
 	}
-	switch c := m.cells[m.selectedCell].(type) {
+	switch c := cells[m.selectedCell].(type) {
 	case *toolCell:
 		return c.toggleExpanded()
 	case *exploreCell:
@@ -2121,7 +2168,7 @@ func (m *Model) toggleSelectedTool() bool {
 }
 
 func (m *Model) syncToolSelectionFlags() {
-	for i, c := range m.cells {
+	for i, c := range m.displayCells() {
 		sel := i == m.selectedCell
 		switch tc := c.(type) {
 		case *toolCell:
@@ -2200,7 +2247,7 @@ func (m Model) fileRefAtMouse(msg tea.MouseMsg) (fileRef, bool) {
 // transcriptContentOrigin is the top-left cell of the transcript viewport body
 // in screen coordinates (after header and panel chrome).
 func (m Model) transcriptContentOrigin() (x, y int, ok bool) {
-	if !m.ready || len(m.cells) == 0 || m.viewport.Height <= 0 {
+	if !m.ready || len(m.displayCells()) == 0 || m.viewport.Height <= 0 {
 		return 0, 0, false
 	}
 	th := m.th.Resolve()
@@ -2264,12 +2311,13 @@ func (m Model) transcriptContentOrigin() (x, y int, ok bool) {
 // explore cell and starts a brief "copied" flash. Returns false when nothing
 // was copyable so bare y can fall through to the composer.
 func (m *Model) copySelectedCell() (bool, tea.Cmd) {
+	cells := m.displayCells()
 	idx := m.resolveCopyCellIndex()
 	if idx < 0 {
 		return false, nil
 	}
 	var text string
-	switch c := m.cells[idx].(type) {
+	switch c := cells[idx].(type) {
 	case *toolCell:
 		text = c.copyText()
 	case *exploreCell:
@@ -2282,14 +2330,14 @@ func (m *Model) copySelectedCell() (bool, tea.Cmd) {
 	m.cellClip.stage(text)
 	m.copyFlashGen++
 	gen := m.copyFlashGen
-	switch c := m.cells[idx].(type) {
+	switch c := cells[idx].(type) {
 	case *toolCell:
 		c.copiedFlash = true
 	case *exploreCell:
 		c.copiedFlash = true
 	}
 	// Clear any other cell flashes so only the copied row shows feedback.
-	for i, c := range m.cells {
+	for i, c := range cells {
 		if i == idx {
 			continue
 		}
@@ -2308,8 +2356,9 @@ func (m *Model) copySelectedCell() (bool, tea.Cmd) {
 // resolveCopyCellIndex prefers the current selection when it has copyable
 // content; otherwise the latest tool/explore cell with a non-empty payload.
 func (m *Model) resolveCopyCellIndex() int {
-	if m.selectedCell >= 0 && m.selectedCell < len(m.cells) {
-		switch c := m.cells[m.selectedCell].(type) {
+	cells := m.displayCells()
+	if m.selectedCell >= 0 && m.selectedCell < len(cells) {
+		switch c := cells[m.selectedCell].(type) {
 		case *toolCell:
 			if c.copyText() != "" {
 				return m.selectedCell
@@ -2320,8 +2369,8 @@ func (m *Model) resolveCopyCellIndex() int {
 			}
 		}
 	}
-	for i := len(m.cells) - 1; i >= 0; i-- {
-		switch c := m.cells[i].(type) {
+	for i := len(cells) - 1; i >= 0; i-- {
+		switch c := cells[i].(type) {
 		case *toolCell:
 			if c.copyText() != "" {
 				return i
