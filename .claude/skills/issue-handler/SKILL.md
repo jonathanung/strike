@@ -96,39 +96,58 @@ After the PR exists, **do not merge until this loop completes**. You (the issue 
 
 ### When to run
 - Once after first push + PR open (may run in parallel with CI).
-- Again after **any** push that changes production or test code in response to review or CI.
-- Skip re-review only for pure doc/typo commits that cannot affect behavior — when unsure, re-review.
+- Again after **any** push that changes production, test, skill, agent, workflow, or other merge-bound files — including review/CI fixes.
+- Skip re-review only for pure changelog typos that cannot affect behavior or process — when unsure, re-review.
+- A clean review on an **older** SHA does **not** satisfy merge gates after a new push.
+
+### Resolve PR identity (use these vars in recipes)
+```sh
+PR=$(gh pr view --json number -q .number)
+HEAD_SHA=$(gh pr view --json headRefOid -q .headRefOid)
+REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)   # owner/name
+```
 
 ### Spawn reviewers
-Dispatch a **read-only** `reviewer` subagent (Task tool `subagent_type: reviewer`) against the PR diff. Optionally spawn a second pass focused on tests/security if the first pass is large or the change touches auth, permissions, tools, session, or concurrency.
+**Preferred:** dispatch a read-only reviewer subagent:
+- Task `subagent_type: reviewer` when the host provides it, **or**
+- the in-repo agent at `.claude/agents/strike-reviewer.md`
 
-Reviewer prompt must include:
-- PR number/URL and base `main`
+**Fallback** if Task/reviewer is unavailable: you (the issue handler) run the same rubric in-process — still load the diff, still post findings via `gh`. Never skip the loop.
+
+Optionally spawn a second pass focused on tests/security if the first pass is large or the change touches auth, permissions, tools, session, or concurrency.
+
+Reviewer prompt **must** include:
+- PR number/URL, base branch (`main`), and current `headRefOid`
 - Issue number and acceptance criteria
+- Hard requirement: run `gh pr diff $PR` (or receive the full patch) and read surrounding callers/tests before any verdict — **never** approve from title/URL alone
 - Instruction: correctness bugs first (concrete failure scenario), then needless complexity / missed reuse; no impact-free style nits
-- Instruction: return ranked findings with `file_path:line` and severity `blocking` | `should-fix` | `nit`
-- Instruction: do **not** edit files; findings only
+- Instruction: return ranked findings with `path:line`, severity `blocking` | `should-fix` | `nit`, failure scenario, and the **head SHA actually reviewed**
+- Instruction: do **not** edit files; findings only; output must be paste-ready verbatim
 
 Also pull human/GitHub review state:
 ```sh
-gh pr view --json reviews,comments,reviewDecision
-gh api repos/{owner}/{repo}/pulls/PR/comments
-gh api repos/{owner}/{repo}/issues/PR/comments
+gh pr view "$PR" --json reviews,comments,reviewDecision,headRefOid
+gh api "repos/$REPO/pulls/$PR/comments"
+gh api "repos/$REPO/issues/$PR/comments"
 ```
 
 ### Post findings as PR review comments
-Convert reviewer output into a real GitHub review on the PR (not only a chat summary).
+Post reviewer output on the PR (not only chat). **Post the reviewer’s ranked findings verbatim** — do not omit, soften, or downgrade severity. If you disagree with a blocking/should-fix item, still post it and **stop-and-ask** (or reply on the thread with the dispute); silent drop is forbidden.
 
-**Preferred — single review with inline comments** (when line mappings are known):
+**Event policy (handler is usually the PR author):**
+- Automated/handler-authored reviews **always** use `"event": "COMMENT"` (never `REQUEST_CHANGES` or `APPROVE` — GitHub rejects self-approve and self-request-changes leaves merge gates stuck).
+- Encode severity in the review body and inline comment text (`**blocking:**`, `**should-fix:**`, `**nit:**`).
+- Reserve GitHub `APPROVE` / `REQUEST_CHANGES` for **distinct human** reviewers only.
+
+**Preferred — single COMMENT review with inline notes** (only for lines in the PR diff hunk on `$HEAD_SHA`):
 ```sh
-# Build a review payload from reviewer findings, then:
-gh api repos/{owner}/{repo}/pulls/PR/reviews \
-  --method POST \
-  --input - <<'EOF'
+HEAD_SHA=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
+# Build JSON from reviewer findings (verbatim). Example shape:
+gh api "repos/$REPO/pulls/$PR/reviews" --method POST --input - <<EOF
 {
-  "commit_id": "HEAD_SHA",
-  "event": "REQUEST_CHANGES",
-  "body": "Automated review pass N — blocking/should-fix items must be addressed before merge.",
+  "commit_id": "$HEAD_SHA",
+  "event": "COMMENT",
+  "body": "Review pass N on $HEAD_SHA\n\n(verbatim summary of blocking / should-fix / nits)",
   "comments": [
     {
       "path": "path/to/file.go",
@@ -140,14 +159,14 @@ gh api repos/{owner}/{repo}/pulls/PR/reviews \
 }
 EOF
 ```
-Use `"event": "COMMENT"` when there are only nits or no findings. Use `"event": "APPROVE"` only when the review agent reports zero blocking and zero should-fix items **and** you agree after a sanity check.
+If an inline `line` is not part of the diff hunk, the API 422s — put that finding in the top-level review body instead (do not invent lines).
 
-**Fallback — top-level PR comment** when inline line mapping fails:
+**Fallback — top-level PR comment** when inline mapping is impractical:
 ```sh
-gh pr comment PR --body "$(cat <<'EOF'
-## Review pass N
+gh pr comment "$PR" --body "$(cat <<EOF
+## Review pass N (head \`$HEAD_SHA\`)
 ### Blocking
-- `file:line` — …
+- \`file:line\` — … (failure scenario)
 
 ### Should-fix
 - …
@@ -159,10 +178,9 @@ EOF
 ```
 
 Rules for posted comments:
-- One finding per comment when inline; include severity tag and failure scenario for blocking/should-fix.
-- Quote path:line from the diff on this PR’s head SHA.
-- Do not invent line numbers; if unsure, put the item in the top-level summary with the best path anchor.
-- Do not spam duplicate comments for the same finding across passes — reply on the existing thread or mark resolved in the next summary.
+- Include severity tag and failure scenario for blocking/should-fix.
+- Anchor path:line to the diff on this PR’s current head SHA.
+- Do not spam duplicates across passes — reply on the existing thread or mark resolved in the next summary with the new SHA.
 
 ### Address comments
 1. List open review threads / new comments (human + automated).
@@ -170,18 +188,20 @@ Rules for posted comments:
 3. **Nits:** fix if cheap and clearly better; otherwise reply on the thread why deferred (one line).
 4. Commit and push (new commit; no amend/force on shared PR branch).
 5. Reply on each addressed thread (or in a single PR comment) with what changed (`commit` shortsha + brief note).
-6. Re-run local gates; watch CI; **spawn another review pass**.
+6. Re-run local gates; watch CI; **spawn another review pass on the new `headRefOid`**.
 
 ### Loop limits
-- Continue until a review pass reports **no blocking and no should-fix**, CI is green, and merge gates pass.
-- Cap at **5** review passes. If still blocked after 5, stop-and-ask with a summary of remaining disagreements.
+- Continue until a review pass on the **current** `headRefOid` reports **no blocking and no should-fix**, CI is green on that SHA, and merge gates pass.
+- Cap at **5** review passes. If **any** blocking or should-fix remains after 5, stop-and-ask with a summary (do not merge).
 - Product/design ambiguity in a comment → stop-and-ask; do not guess.
 
 ### Merge-ready checklist (all required)
-- [ ] Latest review pass: 0 blocking, 0 should-fix (nits ok if deferred with reply)
+- [ ] Clean review pass (0 blocking, 0 should-fix) recorded against **current** `headRefOid` (posted review/`commit_id` or comment must cite that SHA)
+- [ ] That SHA matches `gh pr view --json headRefOid` at merge time
+- [ ] Reviewer findings from the latest pass were posted **verbatim** on the PR
 - [ ] All actionable human review comments addressed or explicitly deferred with reason
-- [ ] `reviewDecision` is not `CHANGES_REQUESTED`
-- [ ] CI checks green on head
+- [ ] `reviewDecision` is not `CHANGES_REQUESTED` (human reviewers); do not use self-REQUEST_CHANGES
+- [ ] CI checks green on the same head SHA
 - [ ] `mergeable=MERGEABLE`, not draft, state `OPEN`
 - [ ] Local CI-equivalent gates passed on the same commit
 
@@ -235,18 +255,21 @@ Do not leave cwd inside deleted worktree. Only delete branch you created.
 6. Smallest correct change; honor `AGENTS.md` scope. TUI imports: `protocol`, `host`, `tui/…` only.
 7. `.plan/` optional research only — never required; never treat unscoped roadmap as the issue.
 8. Stop-and-ask on ambiguity rather than guess.
-9. Never merge with open blocking/should-fix review findings from the latest pass.
-10. Always post review findings on the PR via `gh` (inline review or comment) — chat-only review does not count.
+9. Never merge with open blocking/should-fix findings from the latest pass on the **current** head SHA.
+10. Always post review findings on the PR via `gh` (COMMENT review or comment) — chat-only review does not count.
+11. Post reviewer findings verbatim; never omit or downgrade severity. Disputes → stop-and-ask.
+12. Handler-authored automated reviews use `event: COMMENT` only — never self-APPROVE or self-REQUEST_CHANGES.
 
 ## Stop-and-ask
 - `gh` auth/permission failures; unclear/contradictory acceptance criteria
 - Foreign/unexpected dirty worktree; ambiguous path/branch collision; CI red outside branch after 2 reruns
 - Merge conflicts with main you cannot resolve confidently (prefer `git merge origin/main` over rebase)
 - Review requires product decision; would commit secrets or change CI/security unexpectedly
-- Review loop still has blocking findings after 5 passes
+- Review loop still has blocking or should-fix findings after 5 passes
+- Desire to drop or downgrade a reviewer’s blocking/should-fix finding
 
 ## What this skill is not
 - Not unscoped `.plan/features.md` implementer
-- Not multi-agent orchestrator requirement (beyond required PR review subagent)
+- Not multi-agent orchestrator requirement (beyond required PR review subagent / strike-reviewer)
 - Not Python CI babysitter
 - Not a substitute for sibling domain skills
