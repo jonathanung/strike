@@ -325,6 +325,15 @@ complete:
 			counts["begin"]++
 			firstProviderID = corr.ProviderRequestID
 			assertCorrelationFields(t, ev, corr, true, true)
+		case protocol.ToolCallOutput:
+			counts["output"]++
+			assertCorrelationFields(t, ev, corr, true, true)
+			if ev.CallID != call.ID {
+				t.Errorf("ToolCallOutput callId = %q, want %q", ev.CallID, call.ID)
+			}
+			if ev.Data == "" {
+				t.Error("ToolCallOutput data is empty")
+			}
 		case protocol.PermissionAsked:
 			counts["asked"]++
 			permissionID = ev.RequestID
@@ -359,6 +368,9 @@ complete:
 			t.Errorf("%s event count = %d, want 1", name, counts[name])
 		}
 	}
+	if counts["output"] < 1 {
+		t.Errorf("output event count = %d, want >= 1", counts["output"])
+	}
 	if turnID == "" {
 		t.Error("turnId is empty")
 	}
@@ -371,7 +383,7 @@ complete:
 	for _, ev := range events {
 		corr := eventCorrelation(t, ev)
 		switch ev.(type) {
-		case protocol.ToolCallBegin, protocol.ToolCallEnd, protocol.PermissionAsked, protocol.PermissionResolved:
+		case protocol.ToolCallBegin, protocol.ToolCallOutput, protocol.ToolCallEnd, protocol.PermissionAsked, protocol.PermissionResolved:
 			if corr.ProviderRequestID != firstProviderID {
 				t.Errorf("%T providerRequestId = %q, want first call %q", ev, corr.ProviderRequestID, firstProviderID)
 			}
@@ -1093,6 +1105,8 @@ func eventCorrelation(t *testing.T, ev protocol.Event) protocol.Correlation {
 	case protocol.ToolCallBegin:
 		return ev.Correlation
 	case protocol.ToolCallEnd:
+		return ev.Correlation
+	case protocol.ToolCallOutput:
 		return ev.Correlation
 	case protocol.PermissionAsked:
 		return ev.Correlation

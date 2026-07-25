@@ -28,6 +28,8 @@ func eventType(ev Event) string {
 		return "tool.begin"
 	case ToolCallEnd:
 		return "tool.end"
+	case ToolCallOutput:
+		return "tool.output"
 	case PermissionAsked:
 		return "permission.asked"
 	case PermissionResolved:
@@ -90,6 +92,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &ToolCallBegin{}
 	case "tool.end":
 		ev = &ToolCallEnd{}
+	case "tool.output":
+		ev = &ToolCallOutput{}
 	case "permission.asked":
 		ev = &PermissionAsked{}
 	case "permission.resolved":
@@ -140,6 +144,8 @@ func deref(ev Event) Event {
 	case *ToolCallBegin:
 		return *v
 	case *ToolCallEnd:
+		return *v
+	case *ToolCallOutput:
 		return *v
 	case *PermissionAsked:
 		return *v

@@ -238,6 +238,15 @@ type ToolCallEnd struct {
 	Metadata json.RawMessage `json:"metadata,omitempty"`
 }
 
+// ToolCallOutput is a chunk of streaming tool stdout/stderr while a call runs.
+// Frontends append Data in order for a live tail; ToolCallEnd still carries
+// the final model-facing Output (including truncation/exit suffixes).
+type ToolCallOutput struct {
+	Correlation
+	CallID string `json:"callId"`
+	Data   string `json:"data"`
+}
+
 // PermissionAsked suspends a tool call until a PermissionReply arrives.
 type PermissionAsked struct {
 	Correlation
@@ -362,6 +371,7 @@ func (TurnStarted) isEvent()        {}
 func (TextDelta) isEvent()          {}
 func (ToolCallBegin) isEvent()      {}
 func (ToolCallEnd) isEvent()        {}
+func (ToolCallOutput) isEvent()     {}
 func (PermissionAsked) isEvent()    {}
 func (PermissionResolved) isEvent() {}
 func (QuestionAsked) isEvent()      {}
