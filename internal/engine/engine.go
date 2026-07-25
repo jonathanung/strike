@@ -144,6 +144,14 @@ type Options struct {
 	AppendChildEvent func(childID string, ev protocol.Event) error
 	// CloseChildSession, when set, closes a child session log after completion.
 	CloseChildSession func(childID string) error
+	// InitialMessages seeds model-facing history (durable resume / --continue).
+	// Copied at New; not emitted as transcript events.
+	InitialMessages []provider.Message
+	// InitialPriority sets the sticky priority tier before Run without
+	// emitting FastSelected (resume replays prior selection events to the UI).
+	InitialPriority bool
+	// InitialTitled skips auto SessionTitled when the session was already titled.
+	InitialTitled bool
 }
 
 // beginAck reports whether ToolCallBegin was actually written to Events.
@@ -254,7 +262,12 @@ func New(opts Options) *Engine {
 		files:               &tool.FileState{},
 		children:            make(map[string]*childHandle),
 		contextWindowTokens: opts.ContextWindow,
+		priority:            opts.InitialPriority,
+		titled:              opts.InitialTitled,
 		phaseIndex:          -1,
+	}
+	if len(opts.InitialMessages) > 0 {
+		e.messages = append([]provider.Message(nil), opts.InitialMessages...)
 	}
 	e.perms = permission.New(e.emit, opts.Rules...)
 	if opts.PersistProjectRule != nil {
@@ -262,6 +275,16 @@ func New(opts Options) *Engine {
 	}
 	e.questions = question.New(e.emit)
 	return e
+}
+
+// Messages returns a copy of the model-facing conversation history.
+func (e *Engine) Messages() []provider.Message {
+	if len(e.messages) == 0 {
+		return nil
+	}
+	out := make([]provider.Message, len(e.messages))
+	copy(out, e.messages)
+	return out
 }
 
 func (e *Engine) Ops() chan<- protocol.Op       { return e.ops }

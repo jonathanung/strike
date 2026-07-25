@@ -255,6 +255,41 @@ func (m *Manager) ListOpen() []Info {
 	return out
 }
 
+// LatestRoot returns the most recent root session (no parent) for --continue.
+// Preference: newest UpdatedAt, then newest CreatedAt, then lexical ID
+// (NewID is timestamp-first so lexical order matches creation).
+func (m *Manager) LatestRoot() (Info, error) {
+	list, err := m.List()
+	if err != nil {
+		return Info{}, err
+	}
+	var best Info
+	found := false
+	for _, info := range list {
+		if info.ParentSessionID != "" {
+			continue
+		}
+		if !found || rootMoreRecent(info, best) {
+			best = info
+			found = true
+		}
+	}
+	if !found {
+		return Info{}, fmt.Errorf("no session to continue")
+	}
+	return best, nil
+}
+
+func rootMoreRecent(a, b Info) bool {
+	if !a.UpdatedAt.Equal(b.UpdatedAt) {
+		return a.UpdatedAt.After(b.UpdatedAt)
+	}
+	if !a.CreatedAt.Equal(b.CreatedAt) {
+		return a.CreatedAt.After(b.CreatedAt)
+	}
+	return a.ID > b.ID
+}
+
 // List returns all durable sessions under the manager directory (open + closed).
 // Newest UpdatedAt first. Open sessions reflect live title/updated state.
 func (m *Manager) List() ([]Info, error) {

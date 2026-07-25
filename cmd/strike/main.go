@@ -19,6 +19,7 @@ type cliOptions struct {
 	effort                     string
 	dangerouslySkipPermissions bool
 	providerSet                bool
+	continueSession            bool
 }
 
 type optionSpec struct {
@@ -58,6 +59,13 @@ var optionSpecs = []optionSpec{
 		description: "skip configured permission prompts (agent profile denies still apply)",
 		register: func(fs *flag.FlagSet, opts *cliOptions) {
 			fs.BoolVar(&opts.dangerouslySkipPermissions, "dangerously-skip-permissions", false, "")
+		},
+	},
+	{
+		names:       []string{"continue"},
+		description: "resume the most recent root session (model history + selections)",
+		register: func(fs *flag.FlagSet, opts *cliOptions) {
+			fs.BoolVar(&opts.continueSession, "continue", false, "")
 		},
 	},
 	{

@@ -123,10 +123,12 @@ func runSession(
 // assembled is the composition-root product shared by the TUI and headless
 // exec frontends: engine, session manager binding, and host services.
 type assembled struct {
-	eng          *engine.Engine
-	sessions     *session.Manager
-	store        session.Bound
-	sessionID    string
+	eng       *engine.Engine
+	sessions  *session.Manager
+	store     session.Bound
+	sessionID string
+	// replay is prior transcript events for --continue (UI only; not re-appended).
+	replay       []protocol.Event
 	workDir      string
 	cfg          config.Config
 	services     host.Services
@@ -344,25 +346,86 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		return nil, fmt.Errorf("loading workflows: %w", err)
 	}
 
-	// Concurrent session manager owns durable JSONL logs. One root session is
-	// created here; child/agent sessions can open alongside it later.
+	// Concurrent session manager owns durable JSONL logs. --continue reopens
+	// the latest root session and restores model history; otherwise Create.
 	sessions := session.NewManager(session.DefaultDir())
-	info, err := sessions.Create(session.CreateOptions{})
-	if err != nil {
-		_ = issueStore.Close()
-		_ = memoryStore.Close()
-		_ = historyStore.Close()
-		return nil, fmt.Errorf("creating session: %w", err)
+	var (
+		sessionID       string
+		bound           session.Bound
+		replay          []protocol.Event
+		initialProvider = cfg.Provider
+		initialModel    = cfg.Model
+		initialEffort   = cfg.Effort
+		initialAgent    = cfg.DefaultAgent
+		initialMessages []provider.Message
+		initialPriority bool
+		initialTitled   bool
+	)
+	if opts.continueSession {
+		info, err := sessions.LatestRoot()
+		if err != nil {
+			_ = issueStore.Close()
+			_ = memoryStore.Close()
+			_ = historyStore.Close()
+			return nil, fmt.Errorf("continue: %w", err)
+		}
+		if _, err := sessions.Open(info.ID); err != nil {
+			_ = issueStore.Close()
+			_ = memoryStore.Close()
+			_ = historyStore.Close()
+			return nil, fmt.Errorf("continue: opening session: %w", err)
+		}
+		bound, err = sessions.Bind(info.ID)
+		if err != nil {
+			_ = sessions.CloseAll()
+			_ = issueStore.Close()
+			_ = memoryStore.Close()
+			_ = historyStore.Close()
+			return nil, fmt.Errorf("continue: binding session: %w", err)
+		}
+		sessionID = info.ID
+		replay, err = sessions.Replay(sessionID)
+		if err != nil {
+			_ = bound.Close()
+			_ = issueStore.Close()
+			_ = memoryStore.Close()
+			_ = historyStore.Close()
+			return nil, fmt.Errorf("continue: replaying session: %w", err)
+		}
+		restored := engine.Restore(replay)
+		initialMessages = restored.Messages
+		initialPriority = restored.Priority
+		initialTitled = restored.Titled
+		if !opts.providerSet && restored.Provider != "" {
+			initialProvider = restored.Provider
+		}
+		if opts.model == "" && restored.Model != "" {
+			initialModel = restored.Model
+		}
+		if opts.effort == "" && restored.Effort != protocol.EffortDefault {
+			initialEffort = restored.Effort
+		}
+		if restored.Agent != "" {
+			initialAgent = restored.Agent
+		}
+	} else {
+		info, err := sessions.Create(session.CreateOptions{})
+		if err != nil {
+			_ = issueStore.Close()
+			_ = memoryStore.Close()
+			_ = historyStore.Close()
+			return nil, fmt.Errorf("creating session: %w", err)
+		}
+		bound, err = sessions.Bind(info.ID)
+		if err != nil {
+			_ = sessions.CloseAll()
+			_ = issueStore.Close()
+			_ = memoryStore.Close()
+			_ = historyStore.Close()
+			return nil, fmt.Errorf("binding session: %w", err)
+		}
+		sessionID = info.ID
 	}
-	bound, err := sessions.Bind(info.ID)
-	if err != nil {
-		_ = sessions.CloseAll()
-		_ = issueStore.Close()
-		_ = memoryStore.Close()
-		_ = historyStore.Close()
-		return nil, fmt.Errorf("binding session: %w", err)
-	}
-	sessionID := info.ID
 	sessionDir := sessions.Dir()
 	shellHooks := cfg.ShellHooks()
 	hookDefs := make([]tool.HookDef, 0, len(shellHooks))
@@ -382,11 +445,14 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		ProjectRoot:     projectIdentity.Root,
 		Instructions:    instructions,
 		SystemPrompt:    cfg.SystemPrompt,
-		InitialProvider: cfg.Provider,
-		InitialModel:    cfg.Model,
-		InitialEffort:   cfg.Effort,
+		InitialProvider: initialProvider,
+		InitialModel:    initialModel,
+		InitialEffort:   initialEffort,
 		Agents:          agents,
-		InitialAgent:    cfg.DefaultAgent,
+		InitialAgent:    initialAgent,
+		InitialMessages: initialMessages,
+		InitialPriority: initialPriority,
+		InitialTitled:   initialTitled,
 		Workflows:       workflows,
 		Rules:           permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),
 		Hooks:           hookDefs,
@@ -453,6 +519,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		sessions:  sessions,
 		store:     bound,
 		sessionID: sessionID,
+		replay:    replay,
 		workDir:   workDir,
 		cfg:       cfg,
 		services:  services,
@@ -467,6 +534,25 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			return issueStore.Close()
 		},
 	}, nil
+}
+
+// withReplay prepends historical transcript events ahead of the live engine
+// stream so the TUI can repaint a resumed session without re-appending them.
+func withReplay(history []protocol.Event, live <-chan protocol.Event) <-chan protocol.Event {
+	if len(history) == 0 {
+		return live
+	}
+	out := make(chan protocol.Event, 256)
+	go func() {
+		defer close(out)
+		for _, ev := range history {
+			out <- ev
+		}
+		for ev := range live {
+			out <- ev
+		}
+	}()
+	return out
 }
 
 // run is the interactive composition root: assemble backend, then hand the
@@ -502,7 +588,8 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 	writeDangerousPermissionsWarning(stderr, opts.dangerouslySkipPermissions)
 
 	storeOwned = true
-	if err := runSession(context.Background(), a.eng.Run, a.eng.Events(), a.store, func(events <-chan protocol.Event) error {
+	if err := runSession(context.Background(), a.eng.Run, a.eng.Events(), a.store, func(live <-chan protocol.Event) error {
+		events := withReplay(a.replay, live)
 		restore := tui.EnableEnhancedKeys(stdout)
 		defer restore()
 		// Detect bg once before the program owns stdin — glamour/lipgloss OSC 11

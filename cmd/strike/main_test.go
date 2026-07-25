@@ -27,6 +27,7 @@ Options:
   --model <model>                    model id; overrides config
   --effort <level>                   reasoning effort (off|low|medium|high|xhigh|max); overrides config
   --dangerously-skip-permissions     skip configured permission prompts (agent profile denies still apply)
+  --continue                         resume the most recent root session (model history + selections)
   -h, --help                         show help
 `
 
@@ -70,6 +71,11 @@ func TestParseCLIOptionsValueFormsAndProviderExplicitness(t *testing.T) {
 			name: "empty provider has no effective explicit override",
 			args: []string{"--provider="},
 			want: cliOptions{},
+		},
+		{
+			name: "continue flag",
+			args: []string{"--continue"},
+			want: cliOptions{continueSession: true},
 		},
 	}
 	for _, tt := range tests {

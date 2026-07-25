@@ -293,3 +293,41 @@ func waitResult(t *testing.T, result <-chan error, description string) error {
 		return nil
 	}
 }
+
+func TestWithReplayPrependsHistory(t *testing.T) {
+	live := make(chan protocol.Event, 1)
+	history := []protocol.Event{
+		protocol.UserMessage{Text: "past"},
+		protocol.TextDelta{Text: "reply"},
+	}
+	out := withReplay(history, live)
+	live <- protocol.UserMessage{Text: "live"}
+	close(live)
+
+	var got []string
+	for ev := range out {
+		switch e := ev.(type) {
+		case protocol.UserMessage:
+			got = append(got, "u:"+e.Text)
+		case protocol.TextDelta:
+			got = append(got, "t:"+e.Text)
+		}
+	}
+	want := []string{"u:past", "t:reply", "u:live"}
+	if len(got) != len(want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %#v, want %#v", got, want)
+		}
+	}
+}
+
+func TestWithReplayEmptyPassthrough(t *testing.T) {
+	live := make(chan protocol.Event, 1)
+	if withReplay(nil, live) != live {
+		t.Fatal("empty history should return live channel")
+	}
+	close(live)
+}
