@@ -82,11 +82,11 @@ re-run `make build` after pulling changes to refresh it.
 The screen has a full-width header, footer hints, and danger banner when
 needed. Its left pane is one aggregate stack: `session` transcript, reserved
 notice line, slash-command completion, and `prompt ❯` composer. The right slot
-hosts one active registered placeholder window. `ctrl+j` toggles focus between
-the aggregate left pane and right pane; `ctrl+l` and `ctrl+o` are exact aliases
-that cycle registered windows; `ctrl+k` still opens the palette. Pickers, the
-command palette, and permission prompts render as centered dialogs in the same
-panel style.
+hosts one active registered placeholder window. Vim-style pane keys: `ctrl+h` /
+`ctrl+l` focus the left or right pane; `ctrl+j` / `ctrl+k` cycle the active
+right-pane window next/previous. `ctrl+p` opens the command palette; `f1` (or
+`/keys`) opens a filterable keybind cheatsheet. Pickers, the command palette,
+and permission prompts render as centered dialogs in the same panel style.
 
 The default split appears at 93 columns and above, with a minimum 60-column
 left pane, one-column gutter, and 32-column right pane. At 92 columns and

@@ -191,9 +191,10 @@ func paneGutter(th theme.Theme, width, height int) string {
 // not fit rather than cutting mid-hint.
 func (m Model) hintsView(width int) string {
 	hints := []ui.KeyHint{
-		keyHint(m.keyMap.FocusPane),
-		keyHint(m.keyMap.CycleWindow),
+		{Key: keyHint(m.keyMap.FocusLeft).Key + "/" + keyHint(m.keyMap.FocusRight).Key, Label: "panes"},
+		{Key: keyHint(m.keyMap.CycleWindowNext).Key + "/" + keyHint(m.keyMap.CycleWindowPrev).Key, Label: "windows"},
 		keyHint(m.keyMap.Palette),
+		keyHint(m.keyMap.KeyHelp),
 		keyHint(m.keyMap.Interrupt),
 	}
 	if m.focus == focusLeft {

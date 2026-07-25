@@ -33,6 +33,7 @@ const (
 	paletteActionBuiltin
 	paletteActionAgent
 	paletteActionSkill
+	paletteActionKeybinds
 )
 
 type paletteAction struct {
@@ -80,7 +81,13 @@ func buildPaletteEntries(specs []commandSpec, agents []string, availability pale
 		}
 	}
 
-	entries := make([]paletteEntry, 0, 4+len(agents)+len(specs))
+	entries := make([]paletteEntry, 0, 5+len(agents)+len(specs))
+	entries = append(entries, paletteEntry{
+		ID:          "keybinds",
+		Label:       "Keyboard shortcuts",
+		Description: "filterable keybind cheatsheet",
+		Action:      paletteAction{Kind: paletteActionKeybinds},
+	})
 	for _, id := range []commandID{commandProvider, commandModel, commandEffort, commandAuth} {
 		spec, ok := byID[id]
 		if !ok {

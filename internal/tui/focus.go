@@ -24,3 +24,10 @@ func (m *Model) togglePaneFocus() tea.Cmd {
 	}
 	return m.setPaneFocus(focusLeft)
 }
+
+func (m *Model) focusPane(focus paneFocus) tea.Cmd {
+	if m.focus == focus {
+		return nil
+	}
+	return m.setPaneFocus(focus)
+}

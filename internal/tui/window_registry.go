@@ -32,8 +32,12 @@ func (r windowRegistry) active() window {
 }
 
 func (r windowRegistry) cycle() windowRegistry {
-	if len(r.windows) > 0 {
-		r.index = (r.index + 1) % len(r.windows)
+	return r.cycleBy(1)
+}
+
+func (r windowRegistry) cycleBy(delta int) windowRegistry {
+	if n := len(r.windows); n > 0 {
+		r.index = (r.index + delta%n + n) % n
 	}
 	return r
 }

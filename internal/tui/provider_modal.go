@@ -105,7 +105,7 @@ func (m *providerModal) view(width int, th theme.Theme) string {
 	})
 	return ui.Dialog(th, ui.DialogOpts{
 		Title: "Select provider",
-		Hint:  dotJoin(th, "↑/↓ move", "enter select or log in", "ctrl+d set default", "esc close"),
+		Hint:  dotJoin(th, "up/down/j/k move", "enter select or log in", "ctrl+d set default", "esc close"),
 		Width: width,
 	}, body)
 }
