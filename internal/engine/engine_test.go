@@ -209,7 +209,7 @@ selected:
 }
 
 // TestRejectionFeedsBackToModel verifies a rejected permission becomes a
-// correctable tool-result error, not a turn abort.
+// correctable tool-result error via the formal feedback path, not a turn abort.
 func TestRejectionFeedsBackToModel(t *testing.T) {
 	eng := engine.New(engine.Options{
 		Select:          selectEcho,
@@ -224,6 +224,7 @@ func TestRejectionFeedsBackToModel(t *testing.T) {
 
 	eng.Ops() <- protocol.UserInput{Text: "run rm -rf /"}
 
+	want := protocol.ToolFeedbackUserRejected("do not delete anything")
 	deadline := time.After(10 * time.Second)
 	for {
 		select {
@@ -241,10 +242,74 @@ func TestRejectionFeedsBackToModel(t *testing.T) {
 				if !ev.IsError {
 					t.Error("rejected call should be an error result")
 				}
-				if !strings.Contains(ev.Output, "do not delete anything") {
-					t.Errorf("rejection feedback missing from output: %q", ev.Output)
+				if ev.Output != want {
+					t.Errorf("ToolCallEnd output = %q, want %q", ev.Output, want)
 				}
 			case protocol.TurnCompleted:
+				return
+			case protocol.EngineError:
+				t.Fatalf("engine error: %s", ev.Message)
+			}
+		}
+	}
+}
+
+// TestHardDenyFeedsBackToModel verifies a ruleset deny settles through the
+// formal permission-denied feedback text without asking the user.
+func TestHardDenyFeedsBackToModel(t *testing.T) {
+	call := provider.ToolCall{ID: "deny-1", Name: "bash", Args: json.RawMessage(`{"command":"echo hi"}`)}
+	prov := newScriptedProvider(
+		streamStep{events: []provider.StreamEvent{{Type: provider.EventToolCall, ToolCall: &call}, {Type: provider.EventDone, StopReason: "tool_use"}}},
+		streamStep{events: []provider.StreamEvent{{Type: provider.EventTextDelta, Text: "ok"}, {Type: provider.EventDone, StopReason: "end_turn"}}},
+	)
+	eng := engine.New(engine.Options{
+		Select:          func(string) (provider.Provider, string, error) { return prov, "scripted", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(tool.NewBash()),
+		WorkDir:         t.TempDir(),
+		Rules: []permission.Ruleset{{
+			{Permission: "bash", Pattern: "*", Action: permission.Deny},
+		}},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "try bash"}
+
+	_ = receiveRequest(t, prov.requests) // first stream: tool call
+	second := receiveRequest(t, prov.requests)
+
+	want := protocol.ToolFeedbackPermissionDenied("a permission rule matched")
+	found := false
+	for _, msg := range second.Messages {
+		if msg.Role == provider.RoleTool && msg.ToolResult != nil && msg.ToolResult.CallID == call.ID {
+			found = true
+			if msg.ToolResult.Output != want || !msg.ToolResult.IsError {
+				t.Errorf("history tool result = %#v, want output %q IsError=true", msg.ToolResult, want)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("second request missing tool result for %q: %#v", call.ID, second.Messages)
+	}
+
+	var end protocol.ToolCallEnd
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("timed out")
+		case ev := <-eng.Events():
+			switch ev := ev.(type) {
+			case protocol.PermissionAsked:
+				t.Fatalf("hard deny must not ask; got %#v", ev)
+			case protocol.ToolCallEnd:
+				end = ev
+			case protocol.TurnCompleted:
+				if end.CallID != call.ID || !end.IsError || end.Output != want {
+					t.Errorf("ToolCallEnd = %#v, want call %q IsError output %q", end, call.ID, want)
+				}
 				return
 			case protocol.EngineError:
 				t.Fatalf("engine error: %s", ev.Message)
