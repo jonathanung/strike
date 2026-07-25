@@ -118,6 +118,135 @@ func TestRunProcessCancel(t *testing.T) {
 	}
 }
 
+func TestRunProcessCancelDuringStdoutFlood(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	dir := t.TempDir()
+	ready := filepath.Join(dir, "ready")
+	done := make(chan ProcessResult, 1)
+	errc := make(chan error, 1)
+	var (
+		mu     sync.Mutex
+		chunks int
+	)
+	go func() {
+		res, err := RunProcess(ctx, ProcessSpec{
+			// Flood stdout forever after signaling ready; cancel must still return.
+			Argv:      []string{"bash", "-c", "echo ok > '" + ready + "'; while true; do printf 'xxxxxxxx'; done"},
+			MaxOutput: 256,
+			Combine:   true,
+		}, ProcessObserver{
+			Output: func(_, _, _ string) {
+				mu.Lock()
+				chunks++
+				mu.Unlock()
+			},
+		})
+		done <- res
+		errc <- err
+	}()
+	deadline := time.After(3 * time.Second)
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("process never became ready")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	// Let some output land, then cancel mid-flood.
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	select {
+	case res := <-done:
+		if err := <-errc; err != nil && res.Status == ProcessStatusError {
+			t.Fatalf("err=%v status=%s", err, res.Status)
+		}
+		if res.Status != ProcessStatusCanceled {
+			t.Fatalf("status = %s, want canceled", res.Status)
+		}
+		if !res.Truncated {
+			t.Fatal("expected truncated flood output")
+		}
+		mu.Lock()
+		n := chunks
+		mu.Unlock()
+		if n == 0 {
+			t.Fatal("expected at least one output chunk before cancel")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("RunProcess did not return after cancel during stdout flood")
+	}
+}
+
+func TestRunProcessTimeoutVsCancel(t *testing.T) {
+	t.Run("timeout", func(t *testing.T) {
+		res, err := RunProcess(context.Background(), ProcessSpec{
+			Argv:    []string{"bash", "-c", "sleep 5"},
+			Timeout: 50 * time.Millisecond,
+		}, ProcessObserver{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Status != ProcessStatusTimeout {
+			t.Fatalf("status = %s, want timeout", res.Status)
+		}
+	})
+	t.Run("cancel", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan ProcessResult, 1)
+		errc := make(chan error, 1)
+		go func() {
+			res, err := RunProcess(ctx, ProcessSpec{
+				Argv: []string{"bash", "-c", "sleep 30"},
+			}, ProcessObserver{})
+			done <- res
+			errc <- err
+		}()
+		time.Sleep(30 * time.Millisecond)
+		cancel()
+		select {
+		case res := <-done:
+			if err := <-errc; err != nil && res.Status == ProcessStatusError {
+				t.Fatalf("err=%v status=%s", err, res.Status)
+			}
+			if res.Status != ProcessStatusCanceled {
+				t.Fatalf("status = %s, want canceled", res.Status)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("RunProcess did not return after cancel")
+		}
+	})
+	t.Run("parent cancel beats nested timeout", func(t *testing.T) {
+		// Parent cancel should surface as canceled even when Timeout is set.
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan ProcessResult, 1)
+		errc := make(chan error, 1)
+		go func() {
+			res, err := RunProcess(ctx, ProcessSpec{
+				Argv:    []string{"bash", "-c", "sleep 30"},
+				Timeout: 10 * time.Second,
+			}, ProcessObserver{})
+			done <- res
+			errc <- err
+		}()
+		time.Sleep(30 * time.Millisecond)
+		cancel()
+		select {
+		case res := <-done:
+			if err := <-errc; err != nil && res.Status == ProcessStatusError {
+				t.Fatalf("err=%v status=%s", err, res.Status)
+			}
+			if res.Status != ProcessStatusCanceled {
+				t.Fatalf("status = %s, want canceled (not timeout)", res.Status)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("RunProcess did not return after parent cancel")
+		}
+	})
+}
+
 func TestRunProcessMaxOutputTruncate(t *testing.T) {
 	res, err := RunProcess(context.Background(), ProcessSpec{
 		Argv:      []string{"bash", "-c", "printf '%s' '0123456789'"},
