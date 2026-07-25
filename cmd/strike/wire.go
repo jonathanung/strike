@@ -14,6 +14,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/engine"
 	"github.com/jonathanung/strike-cli/internal/history"
+	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/host/local"
 	"github.com/jonathanung/strike-cli/internal/memory"
 	"github.com/jonathanung/strike-cli/internal/project"
@@ -114,45 +115,52 @@ func runSession(
 	return out
 }
 
-// run is the composition root: it resolves the project, opens the backend
-// stores, assembles the engine, wraps the stores in the local host.Services
-// implementation, and hands that single bundle to the TUI. The frontend
-// depends only on the host contract; this function is the one place the real
-// auth/config/models/history packages are wired to it.
-func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
+// assembled is the composition-root product shared by the TUI and headless
+// exec frontends: engine, session store, and host services.
+type assembled struct {
+	eng          *engine.Engine
+	store        *session.Store
+	sessionID    string
+	workDir      string
+	cfg          config.Config
+	services     host.Services
+	firstRun     bool
+	historyClose func() error
+	memoryClose  func() error
+}
+
+// assemble resolves project/config/auth, builds the engine and session store,
+// and wraps host services. requireProvider forces credential validation even
+// when --provider was not set (headless exec cannot pick a provider later).
+// The caller must invoke historyClose and, if it never hands store to
+// runSession, store.Close.
+func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	workDir, err := os.Getwd()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	projectIdentity, err := project.Resolve(context.Background(), workDir)
 	if err != nil {
-		return fmt.Errorf("resolving project identity: %w", err)
+		return nil, fmt.Errorf("resolving project identity: %w", err)
 	}
 	globalRoot := config.GlobalRoot()
 	if globalRoot == "" {
-		return fmt.Errorf("opening prompt history: global config root is unavailable")
+		return nil, fmt.Errorf("opening prompt history: global config root is unavailable")
 	}
 	historyStore, err := history.Open(globalRoot, projectIdentity.Key)
 	if err != nil {
-		return fmt.Errorf("opening prompt history: %w", err)
+		return nil, fmt.Errorf("opening prompt history: %w", err)
 	}
-	defer func() {
-		if err := historyStore.Close(); err != nil && runErr == nil {
-			runErr = fmt.Errorf("closing prompt history: %w", err)
-		}
-	}()
 	memoryStore, err := memory.Open(globalRoot, projectIdentity.Key)
 	if err != nil {
-		return fmt.Errorf("opening project memory: %w", err)
+		_ = historyStore.Close()
+		return nil, fmt.Errorf("opening project memory: %w", err)
 	}
-	defer func() {
-		if err := memoryStore.Close(); err != nil && runErr == nil {
-			runErr = fmt.Errorf("closing project memory: %w", err)
-		}
-	}()
 	cfg, err := config.Load(workDir)
 	if err != nil {
-		return fmt.Errorf("loading config: %w", err)
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, fmt.Errorf("loading config: %w", err)
 	}
 	if opts.providerSet && opts.provider != "" {
 		cfg.Provider = opts.provider
@@ -165,14 +173,18 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 	if opts.effort != "" {
 		level, ok := protocol.ParseEffort(opts.effort)
 		if !ok || level == protocol.EffortDefault {
-			return fmt.Errorf("unknown effort %q (want off, low, medium, high, xhigh, or max)", opts.effort)
+			_ = memoryStore.Close()
+			_ = historyStore.Close()
+			return nil, fmt.Errorf("unknown effort %q (want off, low, medium, high, xhigh, or max)", opts.effort)
 		}
 		cfg.Effort = level
 	}
 
 	authStore, err := auth.OpenStore(auth.DefaultPath())
 	if err != nil {
-		return fmt.Errorf("opening auth store: %w", err)
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, fmt.Errorf("opening auth store: %w", err)
 	}
 
 	// selectProvider constructs a provider by name, probing credentials so
@@ -222,10 +234,17 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 
 	// An explicit --provider must work or fail loudly; the config default is
 	// only a silent best-effort initial selection (pick one in-app with
-	// /provider otherwise).
-	if opts.providerSet && opts.provider != "" {
+	// /provider otherwise). Headless exec always requires a usable provider.
+	if requireProvider || (opts.providerSet && opts.provider != "") {
+		if cfg.Provider == "" {
+			_ = memoryStore.Close()
+			_ = historyStore.Close()
+			return nil, fmt.Errorf("no provider configured (pass --provider or set provider in config)")
+		}
 		if _, _, err := selectProvider(cfg.Provider); err != nil {
-			return err
+			_ = memoryStore.Close()
+			_ = historyStore.Close()
+			return nil, err
 		}
 	}
 
@@ -233,7 +252,9 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 	// available names in its description at construction time.
 	skills, err := config.LoadSkillsWithError(workDir)
 	if err != nil {
-		return fmt.Errorf("loading skills: %w", err)
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, fmt.Errorf("loading skills: %w", err)
 	}
 	skillInfos := make([]tool.SkillInfo, len(skills))
 	for i, s := range skills {
@@ -274,7 +295,9 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 	}
 	loadedAgents, err := config.LoadAgentsWithError(workDir)
 	if err != nil {
-		return fmt.Errorf("loading agents: %w", err)
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, fmt.Errorf("loading agents: %w", err)
 	}
 	for _, a := range loadedAgents {
 		if i := indexAgent(agents, a.Name); i >= 0 {
@@ -306,20 +329,10 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 
 	store, err := session.Open(session.DefaultDir(), sessionID)
 	if err != nil {
-		return fmt.Errorf("opening session store: %w", err)
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, fmt.Errorf("opening session store: %w", err)
 	}
-	// runSession takes ownership of store (closes it). If setup fails before
-	// that handoff, close here without double-closing.
-	storeOwned := false
-	defer func() {
-		if !storeOwned {
-			if cerr := store.Close(); cerr != nil && runErr == nil {
-				runErr = fmt.Errorf("closing session store: %w", cerr)
-			}
-		}
-	}()
-
-	writeDangerousPermissionsWarning(stderr, opts.dangerouslySkipPermissions)
 
 	agentNames := make([]string, len(agents))
 	for i, a := range agents {
@@ -329,21 +342,66 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 	// the TUI never sees auth/config/models/history/memory directly.
 	services := local.New(authStore, historyStore, memoryStore, agentNames, skills)
 	services.Files = local.NewFiles(workDir)
-	firstRun := isFreshStrikeHome(authStore)
+
+	return &assembled{
+		eng:       eng,
+		store:     store,
+		sessionID: sessionID,
+		workDir:   workDir,
+		cfg:       cfg,
+		services:  services,
+		firstRun:  isFreshStrikeHome(authStore),
+		historyClose: func() error {
+			return historyStore.Close()
+		},
+		memoryClose: func() error {
+			return memoryStore.Close()
+		},
+	}, nil
+}
+
+// run is the interactive composition root: assemble backend, then hand the
+// host.Services bundle to the TUI frontend.
+func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
+	a, err := assemble(opts, false)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := a.memoryClose(); err != nil && runErr == nil {
+			runErr = fmt.Errorf("closing project memory: %w", err)
+		}
+		if err := a.historyClose(); err != nil && runErr == nil {
+			runErr = fmt.Errorf("closing prompt history: %w", err)
+		}
+	}()
+
+	// runSession takes ownership of store (closes it). If setup fails before
+	// that handoff, close here without double-closing.
+	storeOwned := false
+	defer func() {
+		if !storeOwned {
+			if cerr := a.store.Close(); cerr != nil && runErr == nil {
+				runErr = fmt.Errorf("closing session store: %w", cerr)
+			}
+		}
+	}()
+
+	writeDangerousPermissionsWarning(stderr, opts.dangerouslySkipPermissions)
 
 	storeOwned = true
-	if err := runSession(context.Background(), eng.Run, eng.Events(), store, func(events <-chan protocol.Event) error {
+	if err := runSession(context.Background(), a.eng.Run, a.eng.Events(), a.store, func(events <-chan protocol.Event) error {
 		restore := tui.EnableEnhancedKeys(stdout)
 		defer restore()
 		vimMode := tui.VimModePane
-		if mode, ok := tui.ParseVimMode(cfg.VimMode); ok {
+		if mode, ok := tui.ParseVimMode(a.cfg.VimMode); ok {
 			vimMode = mode
 		}
-		program := tea.NewProgram(tui.New(eng.Ops(), events, services, tui.Options{
+		program := tea.NewProgram(tui.New(a.eng.Ops(), events, a.services, tui.Options{
 			DangerouslySkipPermissions: opts.dangerouslySkipPermissions,
-			SessionID:                  sessionID,
-			WorkDir:                    workDir,
-			FirstRun:                   firstRun,
+			SessionID:                  a.sessionID,
+			WorkDir:                    a.workDir,
+			FirstRun:                   a.firstRun,
 			VimMode:                    vimMode,
 		}), tea.WithAltScreen(), tea.WithOutput(stdout), tea.WithInput(tui.WrapInput(os.Stdin)), tea.WithReportFocus(), tea.WithMouseCellMotion())
 		_, err := program.Run()
@@ -351,8 +409,41 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 	}); err != nil {
 		return err
 	}
-	fmt.Fprintln(stdout, "session log:", store.Path())
+	fmt.Fprintln(stdout, "session log:", a.store.Path())
 	return nil
+}
+
+// runExec is the headless one-shot composition root: same engine and session
+// log as the TUI, but streams assistant text to stdout and exits after one turn.
+func runExec(opts cliOptions, prompt string, stdout, stderr io.Writer) (runErr error) {
+	a, err := assemble(opts, true)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := a.memoryClose(); err != nil && runErr == nil {
+			runErr = fmt.Errorf("closing project memory: %w", err)
+		}
+		if err := a.historyClose(); err != nil && runErr == nil {
+			runErr = fmt.Errorf("closing prompt history: %w", err)
+		}
+	}()
+
+	storeOwned := false
+	defer func() {
+		if !storeOwned {
+			if cerr := a.store.Close(); cerr != nil && runErr == nil {
+				runErr = fmt.Errorf("closing session store: %w", cerr)
+			}
+		}
+	}()
+
+	writeDangerousPermissionsWarning(stderr, opts.dangerouslySkipPermissions)
+
+	storeOwned = true
+	return runSession(context.Background(), a.eng.Run, a.eng.Events(), a.store, func(events <-chan protocol.Event) error {
+		return runHeadlessFrontend(a.eng.Ops(), events, prompt, stdout, stderr)
+	})
 }
 
 // isFreshStrikeHome reports a first-run install: no global config file and no
