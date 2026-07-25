@@ -70,9 +70,10 @@ func (m *modelModal) filtered() []string {
 
 func (m *modelModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 	list := m.filtered()
-	switch msg.String() {
-	case "esc":
+	if isEscape(msg) {
 		return nil, nil
+	}
+	switch msg.String() {
 	case "up", "ctrl+p":
 		if m.cursor > 0 {
 			m.cursor--

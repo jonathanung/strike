@@ -292,6 +292,11 @@ func classifyEnhanced(seq []byte) (out []byte, drop bool, handled bool) {
 	alt := bits&2 != 0
 	ctrl := bits&4 != 0
 
+	// Bare Escape (CSI-u code 27, no shift/alt/ctrl) → 0x1b so KeyEsc matches.
+	// mods==1 is "none" in the 1-based Kitty/xterm scheme.
+	if code == 27 && !shift && !alt && !ctrl {
+		return []byte{0x1b}, false, true
+	}
 	// Shift/Alt+Enter (no ctrl) → Alt+Enter for Newline binding.
 	// Ctrl+Enter (code 13 with ctrl) is intentionally not rewritten.
 	if code == 13 && (shift || alt) && !ctrl {

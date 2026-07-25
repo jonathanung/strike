@@ -66,9 +66,10 @@ func keysMatchRank(entry keybindEntry, query string) int {
 
 func (m *keysModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 	list := m.filtered()
-	switch msg.String() {
-	case "esc", "q", "f1":
+	if isEscape(msg) || msg.String() == "q" || msg.String() == "f1" {
 		return nil, nil
+	}
+	switch msg.String() {
 	case "up", "ctrl+p":
 		if len(list) > 0 {
 			m.cursor = (m.cursor + len(list) - 1) % len(list)

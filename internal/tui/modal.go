@@ -59,9 +59,10 @@ func newPermissionModal(req protocol.PermissionAsked, ops chan<- protocol.Op, th
 
 func (m *permissionModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 	if m.state == permissionModalFeedback {
-		switch msg.String() {
-		case "esc":
+		if isEscape(msg) {
 			return nil, m.replyWithMessage(protocol.DecisionReject, "")
+		}
+		switch msg.String() {
 		case "enter":
 			return nil, m.replyWithMessage(protocol.DecisionReject, strings.TrimSpace(m.feedback.Value()))
 		}
@@ -70,6 +71,9 @@ func (m *permissionModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 		return m, cmd
 	}
 
+	if isEscape(msg) {
+		return nil, m.reply(protocol.DecisionReject)
+	}
 	switch msg.String() {
 	case "left", "h", "shift+tab":
 		m.choice = (m.choice + len(permChoices) - 1) % len(permChoices)
@@ -82,8 +86,6 @@ func (m *permissionModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 	case "3", "n":
 		m.state = permissionModalFeedback
 		return m, m.feedback.Focus()
-	case "esc":
-		return nil, m.reply(protocol.DecisionReject)
 	case "enter":
 		if permChoices[m.choice].decision == protocol.DecisionReject {
 			m.state = permissionModalFeedback

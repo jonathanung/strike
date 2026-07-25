@@ -53,16 +53,17 @@ func (m *questionModal) isFreeform() bool {
 
 func (m *questionModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 	if len(m.req.Questions) == 0 {
-		if msg.String() == "esc" {
+		if isEscape(msg) {
 			return nil, m.reply(nil)
 		}
 		return m, nil
 	}
 
 	if m.isFreeform() {
-		switch msg.String() {
-		case "esc":
+		if isEscape(msg) {
 			return nil, m.reply(nil)
+		}
+		switch msg.String() {
 		case "enter":
 			return m.accept(strings.TrimSpace(m.input.Value()))
 		}
@@ -73,9 +74,10 @@ func (m *questionModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 
 	q, _ := m.current()
 	n := len(q.Options)
-	switch msg.String() {
-	case "esc":
+	if isEscape(msg) {
 		return nil, m.reply(nil)
+	}
+	switch msg.String() {
 	case "up", "k":
 		if n > 0 {
 			m.cursor = (m.cursor + n - 1) % n

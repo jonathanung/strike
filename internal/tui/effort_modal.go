@@ -35,9 +35,10 @@ func newEffortModal(current protocol.Effort, ops chan<- protocol.Op, settings ho
 }
 
 func (m *effortModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
+	if isEscape(msg) {
 		return nil, nil
+	}
+	switch msg.String() {
 	case "up", "k", "ctrl+p":
 		if m.cursor > 0 {
 			m.cursor--

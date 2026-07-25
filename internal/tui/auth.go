@@ -238,14 +238,15 @@ type authMethodModal struct {
 
 func (m *authMethodModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 	if len(m.items) == 0 {
-		if msg.String() == "esc" {
+		if isEscape(msg) {
 			return nil, nil
 		}
 		return m, nil
 	}
-	switch msg.String() {
-	case "esc":
+	if isEscape(msg) {
 		return nil, nil
+	}
+	switch msg.String() {
 	case "up", "k":
 		m.cursor = (m.cursor + len(m.items) - 1) % len(m.items)
 	case "down", "j":
@@ -333,10 +334,11 @@ func startDeviceModal(authsvc host.Auth, provider string, selectAfter bool) (mod
 }
 
 func (m *authWaitModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
+	if isEscape(msg) {
 		m.cancel() // the in-flight Wait/Poll returns promptly with ctx error
 		return nil, nil
+	}
+	switch msg.String() {
 	case "enter":
 		if m.oauth == nil {
 			return m, nil
@@ -529,9 +531,10 @@ func newAPIKeyModal(provider string, authsvc host.Auth, th theme.Theme, selectAf
 }
 
 func (m *apiKeyModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
+	if isEscape(msg) {
 		return nil, nil
+	}
+	switch msg.String() {
 	case "enter":
 		// An empty submit is ignored without touching the auth service.
 		key := strings.TrimSpace(m.input.Value())
