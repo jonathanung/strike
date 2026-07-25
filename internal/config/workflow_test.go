@@ -98,6 +98,26 @@ func TestValidateWorkflowErrors(t *testing.T) {
 	}
 }
 
+func TestFindWorkflow(t *testing.T) {
+	ws := []Workflow{
+		{Name: "alpha", Phases: []Phase{{Name: "a", Exit: ExitGate{Type: GateAgent}}}},
+		{Name: "beta", Phases: []Phase{{Name: "b", Exit: ExitGate{Type: GateUser}}}},
+	}
+	got, ok := FindWorkflow(ws, "beta")
+	if !ok || got.Name != "beta" || len(got.Phases) != 1 || got.Phases[0].Name != "b" {
+		t.Fatalf("FindWorkflow(beta) = %#v ok=%v", got, ok)
+	}
+	if _, ok := FindWorkflow(ws, "missing"); ok {
+		t.Fatal("FindWorkflow(missing) should be false")
+	}
+	if _, ok := FindWorkflow(nil, "alpha"); ok {
+		t.Fatal("FindWorkflow(nil) should be false")
+	}
+	if _, ok := FindWorkflow(ws, ""); ok {
+		t.Fatal("FindWorkflow(empty name) should be false")
+	}
+}
+
 func TestLoadWorkflowsIncludesBuiltinAndOverride(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
