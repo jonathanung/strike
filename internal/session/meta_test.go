@@ -36,7 +36,12 @@ func TestReadMetaMissingIsZero(t *testing.T) {
 
 func TestUpdateMetaMerges(t *testing.T) {
 	dir := t.TempDir()
-	if err := WriteMeta(dir, "s", Meta{PRURL: "https://example.com/pull/1", PRNumber: 1}); err != nil {
+	if err := WriteMeta(dir, "s", Meta{
+		Title:           "ship it",
+		ParentSessionID: "parent-1",
+		PRURL:           "https://example.com/pull/1",
+		PRNumber:        1,
+	}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := UpdateMeta(dir, "s", func(m *Meta) {
@@ -48,6 +53,9 @@ func TestUpdateMetaMerges(t *testing.T) {
 	}
 	if got.PRURL != "https://github.com/acme/repo/pull/9" || got.PRNumber != 9 {
 		t.Fatalf("UpdateMeta = %+v", got)
+	}
+	if got.Title != "ship it" || got.ParentSessionID != "parent-1" {
+		t.Fatalf("UpdateMeta dropped fields: %+v", got)
 	}
 	// Malformed existing file surfaces.
 	if err := os.WriteFile(filepath.Join(dir, "bad.meta.json"), []byte("{"), 0o644); err != nil {

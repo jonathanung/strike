@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"os"
@@ -390,6 +391,175 @@ func TestVOnBashToolShowsNotice(t *testing.T) {
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
 	if !m.noticeErr || !strings.Contains(m.notice, "no file to review") {
 		t.Fatalf("notice = %q err=%v, want no file to review", m.notice, m.noticeErr)
+	}
+}
+
+func TestToolCellCopyTextPrefersDiffOutputCommand(t *testing.T) {
+	meta := json.RawMessage(`{"oldString":"foo\nbar","newString":"baz"}`)
+	diffCell := &toolCell{
+		name:     "edit",
+		output:   "Edited",
+		metadata: meta,
+		done:     true,
+	}
+	got := diffCell.copyText()
+	if !strings.Contains(got, "-foo") || !strings.Contains(got, "-bar") || !strings.Contains(got, "+baz") {
+		t.Errorf("diff copyText = %q, want -/ + lines", got)
+	}
+
+	outCell := &toolCell{name: "bash", title: "echo hi", output: "hello\nworld\n", done: true}
+	if got := outCell.copyText(); got != "hello\nworld" {
+		t.Errorf("output copyText = %q, want trimmed body", got)
+	}
+
+	cmdCell := &toolCell{
+		name: "bash",
+		args: json.RawMessage(`{"command":"ls -la"}`),
+		done: true,
+	}
+	if got := cmdCell.copyText(); got != "ls -la" {
+		t.Errorf("command copyText = %q, want ls -la", got)
+	}
+
+	titleCell := &toolCell{name: "bash", title: "make test", done: true}
+	if got := titleCell.copyText(); got != "make test" {
+		t.Errorf("title copyText = %q, want make test", got)
+	}
+
+	if got := (&toolCell{name: "bash"}).copyText(); got != "" {
+		t.Errorf("empty cell copyText = %q, want empty", got)
+	}
+}
+
+func TestExploreCellCopyTextListsCalls(t *testing.T) {
+	exp := &exploreCell{calls: []*toolCell{
+		{name: "read", title: "a.go"},
+		{name: "grep", title: "foo"},
+	}}
+	got := exp.copyText()
+	if !strings.Contains(got, "read a.go") || !strings.Contains(got, "grep foo") {
+		t.Errorf("explore copyText = %q", got)
+	}
+}
+
+func TestYCopiesSelectedToolCellViaOSC52(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	const body = "clipboard-body-line-one\nclipboard-body-line-two\n"
+	m.applyEvent(protocol.ToolCallBegin{CallID: "c1", Name: "bash"})
+	m.applyEvent(protocol.ToolCallEnd{CallID: "c1", Title: "run", Output: body})
+	m.composer.SetValue("")
+	// Select via empty enter expand path.
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	tc := m.toolByID["c1"]
+	if tc == nil {
+		t.Fatal("missing tool cell")
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = updated.(Model)
+	if m.composer.Value() != "" {
+		t.Fatalf("y with empty composer mutated composer: %q", m.composer.Value())
+	}
+	if !tc.copiedFlash {
+		t.Fatal("y did not set copied flash on tool cell")
+	}
+	plain := ansi.Strip(tc.render(80, m.th))
+	if !strings.Contains(plain, "copied") {
+		t.Errorf("render missing copied flash:\n%s", plain)
+	}
+	if m.cellClip == nil || m.cellClip.osc == "" {
+		t.Fatal("y did not stage OSC52")
+	}
+
+	frame := m.View()
+	if m.cellClip.osc != "" {
+		t.Error("View did not consume one-shot OSC52")
+	}
+	reqs := osc52Payloads(frame)
+	if len(reqs) != 1 {
+		t.Fatalf("View OSC52 count = %d, want 1", len(reqs))
+	}
+	payload, err := decodeOSC52Payload(reqs[0])
+	if err != nil {
+		t.Fatalf("OSC52 payload: %v", err)
+	}
+	want := strings.TrimRight(body, "\n")
+	if payload != want {
+		t.Errorf("OSC52 payload = %q, want %q", payload, want)
+	}
+	if second := osc52Payloads(m.View()); len(second) != 0 {
+		t.Errorf("second View re-emitted OSC52: %v", second)
+	}
+
+	// Flash clear timer is scheduled; apply the clear message directly.
+	if cmd == nil {
+		t.Fatal("y returned nil cmd, want flash clear tick")
+	}
+	m = updateApp(t, m, clearCellCopiedFlashMsg{idx: m.selectedCell, gen: m.copyFlashGen})
+	if tc.copiedFlash {
+		t.Error("flash still set after clear msg")
+	}
+}
+
+func decodeOSC52Payload(b64 string) (string, error) {
+	raw, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+func TestYCopiesEditDiffAndFallsBackToLatest(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	meta := json.RawMessage(`{"oldString":"aaa","newString":"bbb"}`)
+	m.applyEvent(protocol.ToolCallBegin{CallID: "e1", Name: "edit", Args: json.RawMessage(`{"path":"f.go"}`)})
+	m.applyEvent(protocol.ToolCallEnd{
+		CallID:   "e1",
+		Title:    "f.go",
+		Output:   "Edited f.go",
+		Metadata: meta,
+	})
+	m.composer.SetValue("")
+	m.selectedCell = -1 // force latest-cell fallback
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = updated.(Model)
+	tc := m.toolByID["e1"]
+	if tc == nil || !tc.copiedFlash {
+		t.Fatal("expected flash on latest edit cell")
+	}
+	frame := m.View()
+	reqs := osc52Payloads(frame)
+	if len(reqs) != 1 {
+		t.Fatalf("OSC52 count = %d, want 1", len(reqs))
+	}
+	payload, err := decodeOSC52Payload(reqs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if payload != "-aaa\n+bbb" {
+		t.Errorf("diff payload = %q, want -aaa\\n+bbb", payload)
+	}
+}
+
+func TestYWithComposerTextInsertsY(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.applyEvent(protocol.ToolCallBegin{CallID: "c1", Name: "bash"})
+	m.applyEvent(protocol.ToolCallEnd{CallID: "c1", Title: "run", Output: "out\n"})
+	m.composer.SetValue("hel")
+	// Place cursor at end so runes append.
+	m.setComposerValueAt("hel", 3)
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	if got := m.composer.Value(); got != "hely" {
+		t.Errorf("composer after y = %q, want hely", got)
+	}
+	if m.cellClip != nil && m.cellClip.osc != "" {
+		t.Error("y with composer text staged OSC52")
+	}
+	if tc := m.toolByID["c1"]; tc != nil && tc.copiedFlash {
+		t.Error("y with composer text set flash")
 	}
 }
 

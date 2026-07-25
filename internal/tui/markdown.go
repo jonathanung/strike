@@ -11,6 +11,7 @@ import (
 var markdownRender = glamourRender
 
 func glamourRender(source string, width int) (string, error) {
+	source = expandMermaidFences(source, width)
 	r, err := glamour.NewTermRenderer(
 		glamour.WithAutoStyle(),
 		glamour.WithWordWrap(max(1, width)),
