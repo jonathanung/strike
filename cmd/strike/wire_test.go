@@ -3,11 +3,14 @@ package main
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/jonathanung/strike-cli/internal/auth"
+	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/engine"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
@@ -428,5 +431,173 @@ func TestOpenResumeSession(t *testing.T) {
 	}
 	if _, err := openResumeSession(mgr, "missing"); err == nil {
 		t.Fatal("expected error for missing session")
+	}
+}
+
+func TestIndexAgent(t *testing.T) {
+	agents := []engine.Agent{
+		{Name: "build"},
+		{Name: "plan"},
+		{Name: "explore"},
+	}
+	cases := []struct {
+		name string
+		want int
+	}{
+		{"plan", 1},
+		{"build", 0},
+		{"missing", -1},
+		{"", -1},
+	}
+	for _, tc := range cases {
+		if got := indexAgent(agents, tc.name); got != tc.want {
+			t.Errorf("indexAgent(%q) = %d, want %d", tc.name, got, tc.want)
+		}
+	}
+	if got := indexAgent(nil, "plan"); got != -1 {
+		t.Errorf("indexAgent(nil) = %d, want -1", got)
+	}
+}
+
+func TestBuildCustomProvider(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	store, err := auth.OpenStore(filepath.Join(home, ".strike", "auth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Set("kimi", auth.Credential{Type: auth.TypeAPIKey, APIKey: "sk-kimi"}); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("openai", func(t *testing.T) {
+		p, model, err := buildCustomProvider(config.CustomProvider{
+			Name:    "kimi",
+			BaseURL: "https://api.moonshot.cn/v1",
+			API:     config.WireOpenAI,
+			Models:  []string{"moonshot-v1", "moonshot-v2"},
+			Headers: map[string]string{"X-Custom": "1"},
+		}, store)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p == nil {
+			t.Fatal("provider is nil")
+		}
+		if p.Name() != "kimi" {
+			t.Fatalf("Name = %q", p.Name())
+		}
+		if model != "moonshot-v1" {
+			t.Errorf("model = %q, want moonshot-v1", model)
+		}
+	})
+
+	t.Run("openai empty models", func(t *testing.T) {
+		p, model, err := buildCustomProvider(config.CustomProvider{
+			Name:    "ollama",
+			BaseURL: "http://localhost:11434/v1",
+			API:     config.WireOpenAI,
+		}, store)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p == nil || p.Name() != "ollama" {
+			t.Fatalf("provider = %v", p)
+		}
+		if model != "" {
+			t.Errorf("model = %q, want empty", model)
+		}
+	})
+
+	t.Run("anthropic", func(t *testing.T) {
+		p, model, err := buildCustomProvider(config.CustomProvider{
+			Name:    "proxy",
+			BaseURL: "https://proxy.example",
+			API:     config.WireAnthropic,
+			Models:  []string{"claude-custom"},
+		}, store)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p == nil || p.Name() != "proxy" {
+			t.Fatalf("provider = %v", p)
+		}
+		if model != "claude-custom" {
+			t.Errorf("model = %q", model)
+		}
+	})
+
+	t.Run("unknown api", func(t *testing.T) {
+		_, _, err := buildCustomProvider(config.CustomProvider{
+			Name:    "bad",
+			BaseURL: "https://x.example",
+			API:     "gemini",
+		}, store)
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "unknown api") {
+			t.Errorf("err = %v", err)
+		}
+	})
+
+	t.Run("anthropic missing name", func(t *testing.T) {
+		_, _, err := buildCustomProvider(config.CustomProvider{
+			BaseURL: "https://proxy.example",
+			API:     config.WireAnthropic,
+		}, store)
+		if err == nil {
+			t.Fatal("expected error for empty name")
+		}
+	})
+}
+
+func TestOptionalBearer(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CUSTOM_KEY", "")
+	store, err := auth.OpenStore(filepath.Join(home, ".strike", "auth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	src := optionalBearer("local", store, "CUSTOM_KEY")
+	tok, err := src(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tok != "" {
+		t.Errorf("empty credentials = %q, want empty", tok)
+	}
+
+	t.Setenv("CUSTOM_KEY", "from-env")
+	tok, err = src(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tok != "from-env" {
+		t.Errorf("env token = %q", tok)
+	}
+
+	t.Setenv("CUSTOM_KEY", "")
+	if err := store.Set("local", auth.Credential{Type: auth.TypeAPIKey, APIKey: "from-store"}); err != nil {
+		t.Fatal(err)
+	}
+	tok, err = src(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tok != "from-store" {
+		t.Errorf("store token = %q", tok)
+	}
+
+	// Env wins over store.
+	t.Setenv("CUSTOM_KEY", "env-wins")
+	tok, err = src(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tok != "env-wins" {
+		t.Errorf("env precedence = %q", tok)
 	}
 }

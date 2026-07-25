@@ -132,6 +132,42 @@ func TestLoadMergesProviders(t *testing.T) {
 	}
 }
 
+func TestCustomStoreList(t *testing.T) {
+	items := []CustomProvider{
+		{Name: "kimi", BaseURL: "https://a.example/v1", API: WireOpenAI},
+		{Name: "ollama", BaseURL: "http://localhost:11434/v1", API: WireOpenAI},
+	}
+	store := NewCustomStore(items)
+	got := store.List()
+	if len(got) != 2 || got[0].Name != "kimi" || got[1].Name != "ollama" {
+		t.Fatalf("List = %+v", got)
+	}
+	got[0].Name = "mutated"
+	again := store.List()
+	if again[0].Name != "kimi" {
+		t.Errorf("List snapshot mutated store: %+v", again)
+	}
+	empty := NewCustomStore(nil).List()
+	if empty == nil {
+		t.Fatal("List on empty store returned nil slice")
+	}
+	if len(empty) != 0 {
+		t.Fatalf("empty List = %+v", empty)
+	}
+}
+
+func TestDefaultModelCustom(t *testing.T) {
+	if got := DefaultModelCustom(CustomProvider{Models: []string{"a", "b"}}); got != "a" {
+		t.Errorf("first model = %q, want a", got)
+	}
+	if got := DefaultModelCustom(CustomProvider{}); got != "" {
+		t.Errorf("empty models = %q, want empty", got)
+	}
+	if got := DefaultModelCustom(CustomProvider{Models: nil}); got != "" {
+		t.Errorf("nil models = %q, want empty", got)
+	}
+}
+
 func TestLoadDropsInvalidProviders(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
