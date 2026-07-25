@@ -1,8 +1,12 @@
 package ui
 
 import (
+	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
@@ -18,6 +22,9 @@ type DiffPreviewOpts struct {
 	MaxLines  int // max hunk body lines; <=0 → defaultDiffMaxLines (12)
 	Width     int // required for output; <=0 → return ""
 	ShowStats bool
+	// LinkBase resolves relative Path values for OSC 8 file:// hyperlinks.
+	// Empty skips relative path links; absolute paths and empty Path are fine.
+	LinkBase string
 }
 
 type diffOp int
@@ -69,7 +76,11 @@ func DiffPreview(th theme.Theme, opts DiffPreviewOpts) string {
 	if opts.Path != "" || opts.ShowStats {
 		var headerBits []string
 		if opts.Path != "" {
-			headerBits = append(headerBits, st.Muted.Render(opts.Path))
+			pathStyled := st.Muted.Render(opts.Path)
+			if uri := fileLinkURI(opts.Path, opts.LinkBase); uri != "" {
+				pathStyled = ansi.SetHyperlink(uri) + pathStyled + ansi.ResetHyperlink()
+			}
+			headerBits = append(headerBits, pathStyled)
 		}
 		if opts.ShowStats {
 			headerBits = append(headerBits,
@@ -144,6 +155,30 @@ func splitLines(s string) []string {
 		return nil
 	}
 	return strings.Split(s, "\n")
+}
+
+// fileLinkURI builds a file:// OSC 8 target for path. Relative paths need
+// linkBase; absolute paths work alone. Returns "" when the path should not
+// be linked.
+func fileLinkURI(path, linkBase string) string {
+	path = strings.TrimSpace(path)
+	if path == "" || strings.ContainsAny(path, " \t\n\r") || strings.Contains(path, "://") {
+		return ""
+	}
+	if !filepath.IsAbs(path) {
+		if linkBase == "" {
+			return ""
+		}
+		path = filepath.Join(linkBase, path)
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		abs = filepath.Clean(path)
+	} else {
+		abs = filepath.Clean(abs)
+	}
+	u := url.URL{Scheme: "file", Path: filepath.ToSlash(abs)}
+	return u.String()
 }
 
 // lineDiff splits old and new on \n, finds the longest common prefix and
