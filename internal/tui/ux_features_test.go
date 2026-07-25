@@ -207,10 +207,12 @@ func TestThemeCommandAppearanceAndPicker(t *testing.T) {
 	savedDark := lipgloss.HasDarkBackground()
 	savedDetected := appearanceDetected
 	savedDetectedDark := appearanceDetectedDark
+	savedMDStyle := glamourStyleName
 	t.Cleanup(func() {
 		lipgloss.SetHasDarkBackground(savedDark)
 		appearanceDetected = savedDetected
 		appearanceDetectedDark = savedDetectedDark
+		glamourStyleName = savedMDStyle
 	})
 	appearanceDetected = false
 
@@ -337,10 +339,12 @@ func TestApplyAppearanceIsTestable(t *testing.T) {
 	savedDark := lipgloss.HasDarkBackground()
 	savedDetected := appearanceDetected
 	savedDetectedDark := appearanceDetectedDark
+	savedMDStyle := glamourStyleName
 	t.Cleanup(func() {
 		lipgloss.SetHasDarkBackground(savedDark)
 		appearanceDetected = savedDetected
 		appearanceDetectedDark = savedDetectedDark
+		glamourStyleName = savedMDStyle
 	})
 	// Seed detection cache as if the terminal reported dark, then force modes.
 	appearanceDetected = true
@@ -350,13 +354,22 @@ func TestApplyAppearanceIsTestable(t *testing.T) {
 	if lipgloss.HasDarkBackground() {
 		t.Error("applyAppearance(light) left dark background")
 	}
+	if glamourStyle() != "light" {
+		t.Errorf("glamour style after light = %q", glamourStyle())
+	}
 	applyAppearance(appearanceDark)
 	if !lipgloss.HasDarkBackground() {
 		t.Error("applyAppearance(dark) left light background")
 	}
+	if glamourStyle() != "dark" {
+		t.Errorf("glamour style after dark = %q", glamourStyle())
+	}
 	applyAppearance(appearanceAuto)
 	if !lipgloss.HasDarkBackground() {
 		t.Error("applyAppearance(auto) did not restore detected dark")
+	}
+	if glamourStyle() != "dark" {
+		t.Errorf("glamour style after auto = %q", glamourStyle())
 	}
 }
 

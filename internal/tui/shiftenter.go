@@ -161,8 +161,13 @@ func (s *shiftEnterReader) rewrite() []byte {
 	for i < len(s.buf) {
 		if s.buf[i] != 0x1b {
 			// Drop leaked OSC payloads whose leading ESC was consumed elsewhere
-			// (e.g. "]11;rgb:0000/0000/0000\").
-			if n := scanLeakedOSC(s.buf[i:]); n > 0 {
+			// (e.g. "]11;rgb:0000/0000/0000\"). Hold incomplete color replies so
+			// byte-at-a-time delivery cannot leak into the composer.
+			n, hold := scanLeakedOSC(s.buf[i:])
+			if hold {
+				break
+			}
+			if n > 0 {
 				i += n
 				continue
 			}
@@ -279,49 +284,149 @@ func scanOSC(b []byte) (end int, osc bool, incomplete bool) {
 	return 0, true, true
 }
 
-// scanLeakedOSC matches an OSC payload whose leading ESC was already consumed
-// (common when KeyEsc ate the introducer): "]11;rgb:…\" or "]11;rgb:…BEL".
-// Returns bytes to drop, or 0 if b does not start a leaked OSC reply.
-func scanLeakedOSC(b []byte) int {
-	if len(b) < 4 || b[0] != ']' {
-		return 0
+// scanLeakedOSC matches an OSC color reply whose leading ESC was already
+// consumed (KeyEsc ate the introducer): "]11;rgb:…\" or "]11;rgb:…BEL".
+// drop is bytes to discard; hold means the prefix is an incomplete color reply
+// and must stay buffered until a terminator or divergence arrives.
+func scanLeakedOSC(b []byte) (drop int, hold bool) {
+	if len(b) == 0 || b[0] != ']' {
+		return 0, false
 	}
-	// Require "]<digits>;" so normal ']' typing is unaffected.
+	// Require "]<digits>;" so normal ']' typing is unaffected. Hold only after
+	// that distinctive prefix (plus color payload) so chunked rgb replies are
+	// not emitted mid-sequence; bare "]" / "]1" still pass through immediately.
 	i := 1
 	if i >= len(b) || b[i] < '0' || b[i] > '9' {
-		return 0
+		return 0, false
 	}
 	for i < len(b) && b[i] >= '0' && b[i] <= '9' {
 		i++
 	}
-	if i >= len(b) || b[i] != ';' {
-		return 0
+	if i >= len(b) {
+		return 0, false
+	}
+	if b[i] != ';' {
+		return 0, false
 	}
 	i++
+	// After "]<digits>;" only color-shaped payloads are treated as OSC leaks
+	// (rgb:… / #hex). Other text like "]11;notes" passes through.
+	payloadStart := i
+	if payloadStart >= len(b) {
+		return 0, true
+	}
 	for i < len(b) {
 		switch b[i] {
 		case 0x07, 0x9c:
-			return i + 1
-		case '\\':
-			return i + 1
-		case 0x1b:
-			if i+1 < len(b) && b[i+1] == '\\' {
-				return i + 2
+			if !isOSCColorPayloadPrefix(b[payloadStart:i]) {
+				return 0, false
 			}
-			return i
+			return i + 1, false
+		case '\\':
+			if !isOSCColorPayloadPrefix(b[payloadStart:i]) {
+				return 0, false
+			}
+			return i + 1, false
+		case 0x1b:
+			if !isOSCColorPayloadPrefix(b[payloadStart:i]) {
+				return 0, false
+			}
+			if i+1 < len(b) && b[i+1] == '\\' {
+				return i + 2, false
+			}
+			return i, false
 		case '\n', '\r':
-			return i
+			if !isOSCColorPayloadPrefix(b[payloadStart:i]) {
+				return 0, false
+			}
+			return i, false
 		}
-		// Bound runaway matches (OSC payloads are short).
-		if i > 128 {
-			return 0
+		if i-payloadStart > 128 || !isOSCColorPayloadPrefix(b[payloadStart:i+1]) {
+			return 0, false
 		}
 		i++
 	}
-	// Incomplete leaked OSC: hold nothing at this layer (caller emits bytes);
-	// complete forms are what appear after submit. Drop nothing if unterminated
-	// so we don't eat user "]11;foo" mid-type forever — only terminated forms.
-	return 0
+	// Incomplete color reply — hold so chunked delivery cannot leak.
+	if !isOSCColorPayloadPrefix(b[payloadStart:]) {
+		return 0, false
+	}
+	return 0, true
+}
+
+func isOSCColorPayloadPrefix(b []byte) bool {
+	if len(b) == 0 {
+		return true
+	}
+	if b[0] == '#' {
+		for _, c := range b[1:] {
+			if !isHexByte(c) {
+				return false
+			}
+		}
+		return true
+	}
+	const prefix = "rgb:"
+	n := len(b)
+	if n > len(prefix) {
+		n = len(prefix)
+	}
+	for i := 0; i < n; i++ {
+		if b[i] != prefix[i] {
+			return false
+		}
+	}
+	if len(b) <= len(prefix) {
+		return true
+	}
+	for _, c := range b[len(prefix):] {
+		if !isOSCColorPayloadByte(c) {
+			return false
+		}
+	}
+	return true
+}
+
+func isOSCColorPayloadByte(c byte) bool {
+	return isHexByte(c) || c == '/' || c == ':'
+}
+
+func isHexByte(c byte) bool {
+	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+}
+
+// stripComposerOSCLeak removes terminated OSC 11 color replies that reached
+// the composer as typed text (chunked stdin after ESC was consumed). Only
+// terminated ]digits;rgb:…\ / BEL forms are cut so mid-sequence prefixes and
+// normal "]11;notes" typing stay intact.
+func stripComposerOSCLeak(s string) string {
+	if s == "" || (!strings.Contains(s, "]") && !strings.Contains(s, "\x1b")) {
+		return s
+	}
+	for {
+		next := stripOneComposerOSCLeak(s)
+		if next == s {
+			return s
+		}
+		s = next
+	}
+}
+
+func stripOneComposerOSCLeak(s string) string {
+	for i := 0; i < len(s); i++ {
+		if s[i] == 0x1b && i+1 < len(s) && s[i+1] == ']' {
+			end, osc, incomplete := scanOSC([]byte(s[i:]))
+			if !incomplete && osc && end > 0 {
+				return s[:i] + s[i+end:]
+			}
+		}
+		if s[i] != ']' {
+			continue
+		}
+		if n, hold := scanLeakedOSC([]byte(s[i:])); !hold && n > 0 {
+			return s[:i] + s[i+n:]
+		}
+	}
+	return s
 }
 
 // classifyEnhanced maps known enhanced-keyboard CSI sequences to legacy bytes.

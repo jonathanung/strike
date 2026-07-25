@@ -11,6 +11,8 @@ package tui
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -761,6 +763,9 @@ func (m Model) updateComposer(msg tea.Msg) (tea.Model, tea.Cmd) {
 	before := m.composer.Value()
 	var cmd tea.Cmd
 	m.composer, cmd = m.composer.Update(msg)
+	if cleaned := stripComposerOSCLeak(m.composer.Value()); cleaned != m.composer.Value() {
+		m.composer.SetValue(cleaned)
+	}
 	if m.historyPos >= 0 && m.composer.Value() != before {
 		m.resetHistoryBrowsing()
 	}
@@ -1479,6 +1484,8 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "/memory":
 		return m.handleMemoryCommand(fields[1:])
+	case "/issues":
+		return m.handleIssuesCommand(fields[1:])
 	default:
 		// Unknown commands fall through to skills: /name args renders the
 		// skill template and submits it as the user message.
@@ -1582,6 +1589,102 @@ func (m Model) handleMemoryCommand(args []string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.setNotice("memory: deleted "+args[1], false)
+		return m, nil
+	default:
+		m.setNotice(usage, true)
+		return m, nil
+	}
+}
+
+func (m Model) handleIssuesCommand(args []string) (tea.Model, tea.Cmd) {
+	m.resetComposer()
+	if m.services.Issues == nil {
+		m.setNotice("project issues are unavailable", true)
+		return m, nil
+	}
+	usage := "usage: /issues [list [open|closed]|add <title>|get <id>|close <id>]"
+	if len(args) == 0 {
+		args = []string{"list"}
+	}
+	switch args[0] {
+	case "list", "ls":
+		status := ""
+		if len(args) > 1 {
+			status = args[1]
+		}
+		items, err := m.services.Issues.List(status)
+		if err != nil {
+			m.setNotice("issues: "+err.Error(), true)
+			return m, nil
+		}
+		if len(items) == 0 {
+			if status != "" {
+				m.setNotice("issues: no "+status+" issues", false)
+			} else {
+				m.setNotice("issues: (empty)", false)
+			}
+			return m, nil
+		}
+		parts := make([]string, 0, len(items))
+		for _, iss := range items {
+			parts = append(parts, fmt.Sprintf("#%d [%s] %s", iss.ID, iss.Status, iss.Title))
+		}
+		m.setNotice("issues: "+dotJoin(m.th, parts...), false)
+		return m, nil
+	case "add", "create", "new":
+		if len(args) < 2 {
+			m.setNotice(usage, true)
+			return m, nil
+		}
+		title := strings.Join(args[1:], " ")
+		iss, err := m.services.Issues.Create(title, "")
+		if err != nil {
+			m.setNotice("issues: "+err.Error(), true)
+			return m, nil
+		}
+		m.setNotice(fmt.Sprintf("issues: opened #%d %s", iss.ID, iss.Title), false)
+		return m, nil
+	case "get", "show":
+		if len(args) < 2 {
+			m.setNotice(usage, true)
+			return m, nil
+		}
+		id, err := strconv.Atoi(args[1])
+		if err != nil || id < 1 {
+			m.setNotice("issues: id must be a positive integer", true)
+			return m, nil
+		}
+		iss, ok, err := m.services.Issues.Get(id)
+		if err != nil {
+			m.setNotice("issues: "+err.Error(), true)
+			return m, nil
+		}
+		if !ok {
+			m.setNotice(fmt.Sprintf("issues: no issue #%d", id), true)
+			return m, nil
+		}
+		msg := fmt.Sprintf("#%d [%s] %s", iss.ID, iss.Status, iss.Title)
+		if iss.Body != "" {
+			msg += ": " + iss.Body
+		}
+		m.setNotice("issues: "+msg, false)
+		return m, nil
+	case "close":
+		if len(args) < 2 {
+			m.setNotice(usage, true)
+			return m, nil
+		}
+		id, err := strconv.Atoi(args[1])
+		if err != nil || id < 1 {
+			m.setNotice("issues: id must be a positive integer", true)
+			return m, nil
+		}
+		iss, err := m.services.Issues.Close(id)
+		if err != nil {
+			m.setNotice("issues: "+err.Error(), true)
+			return m, nil
+		}
+		m.setNotice(fmt.Sprintf("issues: closed #%d %s", iss.ID, iss.Title), false)
 		return m, nil
 	default:
 		m.setNotice(usage, true)
