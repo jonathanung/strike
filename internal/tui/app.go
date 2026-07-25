@@ -115,8 +115,8 @@ type Model struct {
 	noticeErr   bool
 	noticeCause noticeCause
 	turnRunning bool
-	// awaitingPermission is true between PermissionAsked and
-	// PermissionResolved / TurnCompleted. It drives AgentStateAttention.
+	// awaitingPermission is true between PermissionAsked/QuestionAsked and
+	// the matching Resolved / TurnCompleted. It drives AgentStateAttention.
 	awaitingPermission bool
 	// sessionErrored is sticky error coloring after a failed turn or an
 	// idle-state EngineError, cleared on the next accepted user turn.
@@ -645,11 +645,13 @@ func (m *Model) reflow() {
 }
 
 func (m *Model) applyEvent(ev protocol.Event) {
-	// Defense-in-depth: child-session events should only surface permissions.
-	// Primary filtering is in the engine (only Permission* are forwarded).
+	// Defense-in-depth: child-session events should only surface permissions
+	// and questions. Primary filtering is in the engine (only Permission* and
+	// Question* are forwarded).
 	if corr, ok := eventCorrelation(ev); ok && (corr.ParentSessionID != "" || corr.Depth > 0) {
 		switch ev.(type) {
-		case protocol.PermissionAsked, protocol.PermissionResolved:
+		case protocol.PermissionAsked, protocol.PermissionResolved,
+			protocol.QuestionAsked, protocol.QuestionResolved:
 		default:
 			return
 		}
@@ -680,6 +682,12 @@ func (m *Model) applyEvent(ev protocol.Event) {
 		m.modal = newPermissionModal(ev, m.ops, m.th)
 	case protocol.PermissionResolved:
 		if modal, ok := m.modal.(*permissionModal); ok && modal.req.RequestID == ev.RequestID {
+			m.modal = nil
+		}
+	case protocol.QuestionAsked:
+		m.modal = newQuestionModal(ev, m.ops, m.th)
+	case protocol.QuestionResolved:
+		if modal, ok := m.modal.(*questionModal); ok && modal.req.RequestID == ev.RequestID {
 			m.modal = nil
 		}
 	case protocol.TurnCompleted:
@@ -739,6 +747,10 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	case protocol.PermissionAsked:
 		return e.Correlation, true
 	case protocol.PermissionResolved:
+		return e.Correlation, true
+	case protocol.QuestionAsked:
+		return e.Correlation, true
+	case protocol.QuestionResolved:
 		return e.Correlation, true
 	case protocol.TurnCompleted:
 		return e.Correlation, true

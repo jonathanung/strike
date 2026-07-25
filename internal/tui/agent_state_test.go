@@ -36,9 +36,41 @@ func TestAgentStateFromProtocolEvents(t *testing.T) {
 		t.Fatalf("after PermissionResolved = %v, want working", got)
 	}
 
+	m.applyEvent(protocol.QuestionAsked{
+		RequestID: "q1",
+		Questions: []protocol.QuestionPrompt{{Question: "Continue?"}},
+	})
+	if got := m.agentState(); got != theme.AgentStateAttention {
+		t.Fatalf("after QuestionAsked = %v, want attention", got)
+	}
+
+	m.applyEvent(protocol.QuestionResolved{RequestID: "q1"})
+	if got := m.agentState(); got != theme.AgentStateWorking {
+		t.Fatalf("after QuestionResolved = %v, want working", got)
+	}
+
 	m.applyEvent(protocol.TurnCompleted{StopReason: "end_turn"})
 	if got := m.agentState(); got != theme.AgentStateReady {
 		t.Fatalf("after successful TurnCompleted = %v, want ready", got)
+	}
+}
+
+func TestAgentStateQuestionAskedAttention(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m.applyEvent(protocol.TurnStarted{})
+	m.applyEvent(protocol.QuestionAsked{
+		RequestID: "qa",
+		Questions: []protocol.QuestionPrompt{{Question: "hi?"}},
+	})
+	if !m.awaitingPermission {
+		t.Fatal("awaitingPermission false after QuestionAsked")
+	}
+	if got := m.agentState(); got != theme.AgentStateAttention {
+		t.Fatalf("state = %v, want attention", got)
+	}
+	m.applyEvent(protocol.QuestionResolved{RequestID: "qa"})
+	if m.awaitingPermission {
+		t.Fatal("awaitingPermission still set after QuestionResolved")
 	}
 }
 

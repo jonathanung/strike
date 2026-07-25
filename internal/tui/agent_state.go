@@ -35,6 +35,11 @@ func (m *Model) applyAgentStateEvent(ev protocol.Event) {
 		m.awaitingPermission = true
 	case protocol.PermissionResolved:
 		m.awaitingPermission = false
+	case protocol.QuestionAsked:
+		// Same attention state as permission: turn is blocked on the user.
+		m.awaitingPermission = true
+	case protocol.QuestionResolved:
+		m.awaitingPermission = false
 	case protocol.TurnCompleted:
 		m.turnRunning = false
 		m.awaitingPermission = false
