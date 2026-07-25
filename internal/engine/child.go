@@ -68,6 +68,19 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		Rules:           permission.DeriveChildRules(e.opts.Rules),
 	})
 
+	// Inherit the parent's live provider/model/priority. Clearing InitialProvider
+	// avoids Run's silent Select failure leaving the child with no model while
+	// the parent is healthy. Agent pins may still re-Select in handleSelectAgent
+	// (those errors are emitted as EngineError and will surface via failMsg).
+	if e.prov != nil {
+		child.prov = e.prov
+		child.provName = e.provName
+		child.model = e.model
+		child.priority = e.priority
+		child.opts.InitialProvider = ""
+		child.opts.InitialModel = ""
+	}
+
 	childCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -97,6 +110,10 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 	// drain goroutine never blocks on a late parent reader.
 	stopCh := make(chan string, 1)
 	drainDone := make(chan struct{})
+	var (
+		failMu  sync.Mutex
+		failMsg string
+	)
 	go func() {
 		defer close(drainDone)
 		for ev := range child.Events() {
@@ -114,6 +131,13 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 				// Pre-turn failures (e.g. no provider) never emit TurnCompleted.
 				// Mid-turn errors are followed by TurnCompleted{"error"}; the
 				// first stopCh send wins either way.
+				if msg := strings.TrimSpace(ev.Message); msg != "" {
+					failMu.Lock()
+					if failMsg == "" {
+						failMsg = msg
+					}
+					failMu.Unlock()
+				}
 				select {
 				case stopCh <- "error":
 				default:
@@ -195,7 +219,15 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		}
 		complete(protocol.ChildStatusCanceled, summary)
 	case !gotStop || stopReason == "error":
-		if summary == "" {
+		failMu.Lock()
+		errText := failMsg
+		failMu.Unlock()
+		switch {
+		case errText != "" && summary != "":
+			summary = summary + "\n\nError: " + errText
+		case errText != "":
+			summary = errText
+		case summary == "":
 			summary = "task failed"
 		}
 		complete(protocol.ChildStatusFailed, summary)
