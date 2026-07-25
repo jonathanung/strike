@@ -439,7 +439,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.err != nil {
 				mm.loadErr = msg.err.Error()
 			} else {
-				mm.all = msg.ids
+				mm.all = msg.models
 			}
 		}
 		return m, nil
