@@ -312,6 +312,7 @@ func TestToolNames(t *testing.T) {
 	ts := NewToolSearch(reg)
 	store := NewTodoStore()
 	mem := openMemory(t)
+	iss := openIssue(t)
 	want := map[string]Tool{
 		"read":            NewRead(),
 		"write":           NewWrite(),
@@ -324,6 +325,8 @@ func TestToolNames(t *testing.T) {
 		"todoread":        NewTodoRead(store),
 		"memory_write":    NewMemoryWrite(mem),
 		"memory_read":     NewMemoryRead(mem),
+		"issue_write":     NewIssueWrite(iss),
+		"issue_read":      NewIssueRead(iss),
 		"notebook_edit":   NewNotebookEdit(),
 		"sleep":           NewSleep(),
 		"skill":           NewSkill(nil),
@@ -333,8 +336,8 @@ func TestToolNames(t *testing.T) {
 		"enter_plan_mode": NewEnterPlanMode(),
 		"exit_plan_mode":  NewExitPlanMode(),
 	}
-	if len(want) != 19 {
-		t.Fatalf("expected 19 tools, got %d", len(want))
+	if len(want) != 21 {
+		t.Fatalf("expected 21 tools, got %d", len(want))
 	}
 	for name, tool := range want {
 		if tool.Name() != name {

@@ -16,19 +16,20 @@ import (
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/history"
 	"github.com/jonathanung/strike-cli/internal/host"
+	"github.com/jonathanung/strike-cli/internal/issue"
 	"github.com/jonathanung/strike-cli/internal/memory"
 	"github.com/jonathanung/strike-cli/internal/models"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
 
 // New builds the local host services backed by the real auth store, prompt
-// history, project memory, and the models.dev catalog. A nil hist yields a
+// history, project memory/issues, and the models.dev catalog. A nil hist yields a
 // nil Services.History (history is optional). A nil mem yields a nil
-// Services.Memory. Agents pass through unchanged; skills whose names fail
-// config.ValidateSkillName are dropped here, since they cannot be invoked as
-// slash commands (the frontend no longer filters). customs may be nil (no
-// custom provider support).
-func New(store *auth.Store, hist *history.Store, mem *memory.Store, agents []string, skills []config.Skill, customs *config.CustomStore) host.Services {
+// Services.Memory. A nil issues yields a nil Services.Issues. Agents pass
+// through unchanged; skills whose names fail config.ValidateSkillName are
+// dropped here, since they cannot be invoked as slash commands (the frontend
+// no longer filters). customs may be nil (no custom provider support).
+func New(store *auth.Store, hist *history.Store, mem *memory.Store, issues *issue.Store, agents []string, skills []config.Skill, customs *config.CustomStore) host.Services {
 	if customs == nil {
 		customs = config.NewCustomStore(nil)
 	}
@@ -46,6 +47,9 @@ func New(store *auth.Store, hist *history.Store, mem *memory.Store, agents []str
 	}
 	if mem != nil {
 		services.Memory = memoryAdapter{store: mem}
+	}
+	if issues != nil {
+		services.Issues = issuesAdapter{store: issues}
 	}
 	for _, s := range skills {
 		if err := config.ValidateSkillName(s.Name); err != nil {
@@ -347,6 +351,64 @@ func (m memoryAdapter) Put(key, value string, tags []string) error {
 
 func (m memoryAdapter) Delete(key string) error {
 	return m.store.Delete(key)
+}
+
+// issuesAdapter adapts *issue.Store to host.Issues.
+type issuesAdapter struct {
+	store *issue.Store
+}
+
+func (a issuesAdapter) List(status string) ([]host.Issue, error) {
+	items, err := a.store.List(status)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]host.Issue, len(items))
+	for i, iss := range items {
+		out[i] = toHostIssue(iss)
+	}
+	return out, nil
+}
+
+func (a issuesAdapter) Get(id int) (host.Issue, bool, error) {
+	iss, ok, err := a.store.Get(id)
+	if err != nil || !ok {
+		return host.Issue{}, ok, err
+	}
+	return toHostIssue(iss), true, nil
+}
+
+func (a issuesAdapter) Create(title, body string) (host.Issue, error) {
+	iss, err := a.store.Create(title, body)
+	if err != nil {
+		return host.Issue{}, err
+	}
+	return toHostIssue(iss), nil
+}
+
+func (a issuesAdapter) Update(id int, title, body, status *string) (host.Issue, error) {
+	iss, err := a.store.Update(id, title, body, status)
+	if err != nil {
+		return host.Issue{}, err
+	}
+	return toHostIssue(iss), nil
+}
+
+func (a issuesAdapter) Close(id int) (host.Issue, error) {
+	iss, err := a.store.CloseIssue(id)
+	if err != nil {
+		return host.Issue{}, err
+	}
+	return toHostIssue(iss), nil
+}
+
+func toHostIssue(iss issue.Issue) host.Issue {
+	return host.Issue{
+		ID:     iss.ID,
+		Title:  iss.Title,
+		Body:   iss.Body,
+		Status: iss.Status,
+	}
 }
 
 // providersAdapter exposes custom provider CRUD through the host contract.
