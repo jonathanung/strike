@@ -75,16 +75,7 @@ func (m *providerModal) selectCurrent() (modal, tea.Cmd) {
 			return nil
 		}
 	}
-	switch {
-	case s.OAuth:
-		return startOAuthModal(m.auth, s.Name, true)
-	case s.Device:
-		return startDeviceModal(m.auth, s.Name, true)
-	case s.APIKey:
-		return newAPIKeyModal(s.Name, m.auth, m.th, true), nil
-	default:
-		return m, nil
-	}
+	return startLogin(m.auth, m.th, s.Name, "", true)
 }
 
 func (m *providerModal) view(width int, th theme.Theme) string {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -86,9 +87,42 @@ func (f *fakeAuth) BeginOAuth(ctx context.Context, provider string) (*host.OAuth
 	if l := f.oauth[provider]; l != nil {
 		return l, nil
 	}
+	// Default logins complete Wait immediately and accept any paste (no-op),
+	// matching a host that wires WithPaste even when the test does not use it.
 	return host.NewOAuthLogin("https://login.test/"+provider, func(context.Context) (string, error) {
 		return "Signed in to " + provider, nil
-	}), nil
+	}).WithPaste(func(string) error { return nil }), nil
+}
+
+// oauthLoginBlockingPaste builds an OAuth login whose Wait blocks until a
+// successful CompleteWithPaste (or ctx cancel). pasteCheck may reject pastes
+// without unblocking Wait — the TUI keeps the wait modal open on those errors.
+func oauthLoginBlockingPaste(url, outcome string, pasteCheck func(string) error) *host.OAuthLogin {
+	ready := make(chan struct{})
+	var once sync.Once
+	return host.NewOAuthLogin(url, func(ctx context.Context) (string, error) {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-ready:
+			return outcome, nil
+		}
+	}).WithPaste(func(raw string) error {
+		if pasteCheck != nil {
+			if err := pasteCheck(raw); err != nil {
+				return err
+			}
+		}
+		var opened bool
+		once.Do(func() {
+			close(ready)
+			opened = true
+		})
+		if !opened {
+			return errors.New("login already completed")
+		}
+		return nil
+	})
 }
 
 func (f *fakeAuth) BeginDevice(ctx context.Context, provider string) (*host.DeviceLogin, error) {
