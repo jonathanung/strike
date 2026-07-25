@@ -31,17 +31,20 @@ type AskRequest struct {
 	Metadata json.RawMessage
 }
 
-// TaskRequest is a foreground child/subagent spawn request.
+// TaskRequest is a child/subagent spawn request.
 type TaskRequest struct {
 	Prompt string
 	Agent  string
 }
 
-// TaskResult is the terminal outcome of a foreground child session.
-// Status is one of "completed", "failed", or "canceled".
+// TaskResult is the outcome of spawning a child session.
+// Status is one of "started", "completed", "failed", or "canceled".
+// Non-blocking spawns return "started" with SessionID set; terminal statuses
+// are retained for callers that still wait on completion.
 type TaskResult struct {
-	Output string
-	Status string
+	Output    string
+	Status    string
+	SessionID string
 }
 
 // QuestionOption is one selectable choice on a QuestionItem.
@@ -76,7 +79,7 @@ type SessionPR struct {
 
 // Context carries per-call facilities into a tool. Ask blocks until the
 // permission is granted; it returns an error if rejected or denied.
-// SpawnTask, when non-nil, runs a blocking foreground child session.
+// SpawnTask, when non-nil, starts a child session (non-blocking for the parent).
 // AskUser, when non-nil, blocks until the user answers a question batch.
 // SwitchAgent, when non-nil, queues an agent switch applied when the turn ends.
 // ReportOutput, when non-nil, streams partial stdout/stderr to the UI while

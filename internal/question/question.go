@@ -7,6 +7,7 @@ package question
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -63,7 +64,12 @@ func New(emit func(protocol.Event)) *Service {
 func (s *Service) Ask(ctx context.Context, corr protocol.Correlation, prompts []protocol.QuestionPrompt) ([]string, error) {
 	s.mu.Lock()
 	s.nextID++
+	// Session-scope IDs so concurrent parent/child engines never collide when
+	// replies fan out across services.
 	id := fmt.Sprintf("q_%d", s.nextID)
+	if sid := strings.TrimSpace(corr.SessionID); sid != "" {
+		id = sid + ":" + id
+	}
 	p := &pending{
 		prompts:     prompts,
 		correlation: corr,

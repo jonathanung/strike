@@ -142,8 +142,9 @@ type Model struct {
 	themeID  string // catalog id of th
 	cells    []cell
 	toolByID map[string]*toolCell
-	// selectedCell is the index into cells for tool/explore expand selection
-	// (-1 = none). Only collapsible tool/explore cells are targeted.
+	// selectedCell is the index into cells for tool/explore selection
+	// (-1 = none). Targets collapsible tool/explore cells and reviewable
+	// file-mutating tools (edit/write/…).
 	selectedCell int
 	// transcriptPlainLines mirrors viewport content without ANSI, used for
 	// path:line hit-testing (open-at-line).
@@ -694,6 +695,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if handled, cmd := m.handleToolCellKeys(msg); handled {
 			m.reflow()
+			m.refreshViewport()
 			return m, cmd
 		}
 		// Bracketed paste: collapse large multi-line blobs to a chip.
@@ -1220,6 +1222,14 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		m.usageUsed = ev.Used
 		m.usageSource = ev.Source
 		cmd = m.broadcastContextState()
+	case protocol.CompactionCompleted:
+		msg := fmt.Sprintf("history compacted (%s): removed %d, kept %d", ev.Reason, ev.Removed, ev.Kept)
+		if m.turnRunning {
+			m.cells = append(m.cells, &errorCell{text: msg})
+		} else {
+			m.setNotice(msg, false)
+		}
+		cmd = m.broadcastContextState()
 	case protocol.EngineError:
 		// Mid-turn failures belong in the transcript; idle-state errors
 		// (no model selected, bad /provider, …) show in the notice line.
@@ -1352,6 +1362,10 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	case protocol.FastSelected:
 		return e.Correlation, true
 	case protocol.UsageReported:
+		return e.Correlation, true
+	case protocol.CompactionStarted:
+		return e.Correlation, true
+	case protocol.CompactionCompleted:
 		return e.Correlation, true
 	case protocol.EngineError:
 		return e.Correlation, true
@@ -1541,6 +1555,14 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		}
 		m.setNotice("layout: "+label+" (ctrl+; or /layout toggles)", false)
 		return m, nil
+	case "/compact":
+		m.resetComposer()
+		m.clearNotice()
+		ops := m.ops
+		return m, func() tea.Msg {
+			ops <- protocol.Compact{}
+			return nil
+		}
 	case "/help":
 		m.setNotice("commands: "+dotJoin(m.th,
 			"/provider [name [model]]",
@@ -1549,12 +1571,12 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 			"/fast [on|off]",
 			"/agent [name]",
 			"/auth",
-			"/settings",
 			"/vim [path[:line]]",
 			"/md-read <path>",
 			"/memory [list|get|set|rm]",
 			"/theme [name|dark|light|auto]",
 			"/layout",
+			"/compact",
 			"/keys",
 			"skills as /<name>",
 			"tab cycles agents",
@@ -2016,9 +2038,10 @@ func (m *Model) renderCell(c cell, width int) string {
 	}
 }
 
-// handleToolCellKeys handles [, ], empty-composer enter, and y for tool
-// selection, expand/collapse, open-at-line, and clipboard copy. handled is true
-// when the key was consumed; cmd may launch the editor or clear a copied flash.
+// handleToolCellKeys handles tool selection (alt+[/]), expand/open-at-line
+// (enter), copy (y), and post-edit review (v) when the composer is empty.
+// handled is true when the key was consumed; cmd may launch the editor or clear
+// a copied flash.
 func (m *Model) handleToolCellKeys(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
 	if m.focus != focusLeft || m.modal != nil || m.completion != nil {
 		return false, nil
@@ -2045,16 +2068,18 @@ func (m *Model) handleToolCellKeys(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
 		return false, nil
 	case key.Matches(msg, m.keyMap.ToolCopy):
 		return m.copySelectedCell()
+	case key.Matches(msg, m.keyMap.ToolReview):
+		return m.reviewSelectedTool()
 	}
 	return false, nil
 }
 
-func (m *Model) collapsibleCellIndexes() []int {
+func (m *Model) selectableCellIndexes() []int {
 	var idx []int
 	for i, c := range m.cells {
 		switch tc := c.(type) {
 		case *toolCell:
-			if tc.collapsible() {
+			if tc.collapsible() || tc.reviewable() {
 				idx = append(idx, i)
 			}
 		case *exploreCell:
@@ -2067,7 +2092,7 @@ func (m *Model) collapsibleCellIndexes() []int {
 }
 
 func (m *Model) moveToolSelection(delta int) {
-	idxs := m.collapsibleCellIndexes()
+	idxs := m.selectableCellIndexes()
 	if len(idxs) == 0 {
 		m.selectedCell = -1
 		return
@@ -2098,7 +2123,20 @@ func (m *Model) moveToolSelection(delta int) {
 }
 
 func (m *Model) toggleSelectedTool() bool {
-	idxs := m.collapsibleCellIndexes()
+	// Expand only applies to collapsible cells; keep selection among those.
+	var idxs []int
+	for i, c := range m.cells {
+		switch tc := c.(type) {
+		case *toolCell:
+			if tc.collapsible() {
+				idxs = append(idxs, i)
+			}
+		case *exploreCell:
+			if tc.collapsible() {
+				idxs = append(idxs, i)
+			}
+		}
+	}
 	if len(idxs) == 0 {
 		return false
 	}
@@ -2124,6 +2162,31 @@ func (m *Model) toggleSelectedTool() bool {
 		return c.toggleExpanded()
 	}
 	return false
+}
+
+// reviewSelectedTool opens the selected file-mutating tool's path at the first
+// changed hunk. Does not consume "v" when nothing is selected so typing still
+// reaches the empty composer.
+func (m *Model) reviewSelectedTool() (bool, tea.Cmd) {
+	if m.selectedCell < 0 || m.selectedCell >= len(m.cells) {
+		return false, nil
+	}
+	tc, ok := m.cells[m.selectedCell].(*toolCell)
+	if !ok {
+		m.setNotice("select an edit tool cell to review", true)
+		return true, nil
+	}
+	path, line, ok := tc.reviewTarget(m.workDir)
+	if !ok {
+		m.setNotice("no file to review on this tool", true)
+		return true, nil
+	}
+	if line < 1 {
+		line = 1
+	}
+	updated, cmd := (*m).openFileRef(fileRef{Path: path, Line: line})
+	*m = updated.(Model)
+	return true, cmd
 }
 
 func (m *Model) syncToolSelectionFlags() {
