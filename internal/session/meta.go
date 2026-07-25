@@ -10,10 +10,14 @@ import (
 )
 
 // Meta is durable session-level metadata stored beside the JSONL event log
-// (e.g. a pull request opened while shipping from this session).
+// (lineage, title, shipping side-effects). Missing fields stay zero-valued so
+// older sidecars remain readable.
 type Meta struct {
-	PRURL    string `json:"prUrl,omitempty"`
-	PRNumber int    `json:"prNumber,omitempty"`
+	Title           string `json:"title,omitempty"`
+	ParentSessionID string `json:"parentSessionId,omitempty"`
+	CreatedAt       string `json:"createdAt,omitempty"` // RFC3339 UTC
+	PRURL           string `json:"prUrl,omitempty"`
+	PRNumber        int    `json:"prNumber,omitempty"`
 }
 
 // MetaPath is the sidecar JSON path for a session id under dir.

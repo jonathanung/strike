@@ -117,10 +117,11 @@ func runSession(
 }
 
 // assembled is the composition-root product shared by the TUI and headless
-// exec frontends: engine, session store, and host services.
+// exec frontends: engine, session manager binding, and host services.
 type assembled struct {
 	eng          *engine.Engine
-	store        *session.Store
+	sessions     *session.Manager
+	store        session.Bound
 	sessionID    string
 	workDir      string
 	cfg          config.Config
@@ -316,10 +317,24 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	}
 	instructions := config.LoadInstructions(workDir, projectIdentity.Root)
 
-	// One session ID shared by the engine (event correlation) and the JSONL
-	// filename so transcript identity matches runtime correlation.
-	sessionID := session.NewID()
-	sessionDir := session.DefaultDir()
+	// Concurrent session manager owns durable JSONL logs. One root session is
+	// created here; child/agent sessions can open alongside it later.
+	sessions := session.NewManager(session.DefaultDir())
+	info, err := sessions.Create(session.CreateOptions{})
+	if err != nil {
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, fmt.Errorf("creating session: %w", err)
+	}
+	bound, err := sessions.Bind(info.ID)
+	if err != nil {
+		_ = sessions.CloseAll()
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, fmt.Errorf("binding session: %w", err)
+	}
+	sessionID := info.ID
+	sessionDir := sessions.Dir()
 	eng := engine.New(engine.Options{
 		SessionID:       sessionID,
 		Select:          selectProvider,
@@ -347,13 +362,6 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		},
 	})
 
-	store, err := session.Open(sessionDir, sessionID)
-	if err != nil {
-		_ = memoryStore.Close()
-		_ = historyStore.Close()
-		return nil, fmt.Errorf("opening session store: %w", err)
-	}
-
 	agentNames := make([]string, len(agents))
 	for i, a := range agents {
 		agentNames[i] = a.Name
@@ -365,7 +373,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 
 	return &assembled{
 		eng:       eng,
-		store:     store,
+		sessions:  sessions,
+		store:     bound,
 		sessionID: sessionID,
 		workDir:   workDir,
 		cfg:       cfg,
