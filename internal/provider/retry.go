@@ -22,11 +22,16 @@ type retryMarker interface {
 // that may be retried with a new attempt identity before any tool side
 // effects from the failed attempt. Context cancellation is never retryable.
 // Permanent client errors (4xx other than 408/429) are not retryable.
+// Context-window overflow is not retryable here — the engine recovers via
+// compaction and a single model-only retry (see IsContextOverflow).
 func IsRetryable(err error) bool {
 	if err == nil {
 		return false
 	}
 	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	if IsContextOverflow(err) {
 		return false
 	}
 	if errors.Is(err, ErrIncompleteStream) {
@@ -82,4 +87,42 @@ var retrySubstrings = []string{
 	"unexpected status 503",
 	"unexpected status 504",
 	"unexpected status 429",
+}
+
+// IsContextOverflow reports whether err indicates the provider rejected the
+// request because the model context window / token limit was exceeded.
+// Classification is conservative: only well-known overflow wording matches.
+func IsContextOverflow(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, needle := range overflowSubstrings {
+		if strings.Contains(msg, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+// overflowSubstrings match provider context-window failures. Keep distinct
+// from auth/validation wording so ordinary 400s are not treated as overflow.
+var overflowSubstrings = []string{
+	"context_length_exceeded",
+	"context length exceeded",
+	"context window",
+	"maximum context length",
+	"max context length",
+	"too many tokens",
+	"token limit",
+	"prompt is too long",
+	"prompt too long",
+	"request too large",
+	"input is too long",
+	"input too long",
+	"exceeds the context",
+	"exceeded model token limit",
+	"exceeds model token limit",
+	"context_limit",
+	"string_above_max_length",
 }

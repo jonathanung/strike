@@ -11,6 +11,7 @@ package tui
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"strings"
 	"time"
 	"unicode"
@@ -1047,6 +1048,14 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		m.usageUsed = ev.Used
 		m.usageSource = ev.Source
 		cmd = m.broadcastContextState()
+	case protocol.CompactionCompleted:
+		msg := fmt.Sprintf("history compacted (%s): removed %d, kept %d", ev.Reason, ev.Removed, ev.Kept)
+		if m.turnRunning {
+			m.cells = append(m.cells, &errorCell{text: msg})
+		} else {
+			m.setNotice(msg, false)
+		}
+		cmd = m.broadcastContextState()
 	case protocol.EngineError:
 		// Mid-turn failures belong in the transcript; idle-state errors
 		// (no model selected, bad /provider, …) show in the notice line.
@@ -1173,6 +1182,10 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	case protocol.FastSelected:
 		return e.Correlation, true
 	case protocol.UsageReported:
+		return e.Correlation, true
+	case protocol.CompactionStarted:
+		return e.Correlation, true
+	case protocol.CompactionCompleted:
 		return e.Correlation, true
 	case protocol.EngineError:
 		return e.Correlation, true
@@ -1362,6 +1375,14 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		}
 		m.setNotice("layout: "+label+" (ctrl+; or /layout toggles)", false)
 		return m, nil
+	case "/compact":
+		m.resetComposer()
+		m.clearNotice()
+		ops := m.ops
+		return m, func() tea.Msg {
+			ops <- protocol.Compact{}
+			return nil
+		}
 	case "/help":
 		m.setNotice("commands: "+dotJoin(m.th,
 			"/provider [name [model]]",
@@ -1370,11 +1391,11 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 			"/fast [on|off]",
 			"/agent [name]",
 			"/auth",
-			"/settings",
 			"/vim [path[:line]]",
 			"/md-read <path>",
-			"/theme [name|dark|light|auto]",
+			"/theme [dark|light|auto]",
 			"/layout",
+			"/compact",
 			"/keys",
 			"skills as /<name>",
 			"tab cycles agents",

@@ -25,6 +25,7 @@ const (
 	commandTheme    commandID = "theme"
 	commandLayout   commandID = "layout"
 	commandSplit    commandID = "split"
+	commandCompact  commandID = "compact"
 )
 
 type commandSource string
@@ -55,6 +56,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandTheme, Name: "/theme", Description: "select a color theme or set appearance", ArgsHint: "[name|dark|light|auto]", Source: commandSourceBuiltin},
 	{ID: commandLayout, Name: "/layout", Description: "toggle horizontal/vertical pane split", Source: commandSourceBuiltin},
 	{ID: commandSplit, Name: "/split", Description: "toggle horizontal/vertical pane split", Source: commandSourceBuiltin},
+	{ID: commandCompact, Name: "/compact", Description: "compact model history (keep recent turns)", Source: commandSourceBuiltin},
 	{ID: commandHelp, Name: "/help", Description: "show available commands", Source: commandSourceBuiltin},
 	{ID: commandKeys, Name: "/keys", Description: "show keyboard shortcuts", Source: commandSourceBuiltin},
 }
@@ -119,6 +121,7 @@ var reservedCommandNames = map[string]struct{}{
 	"theme":    {},
 	"layout":   {},
 	"split":    {},
+	"compact":  {},
 	"help":     {},
 	"keys":     {},
 }
