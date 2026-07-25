@@ -16,6 +16,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
+	"github.com/jonathanung/strike-cli/internal/question"
 	"github.com/jonathanung/strike-cli/internal/tool"
 )
 
@@ -97,10 +98,11 @@ type beginReq struct {
 }
 
 type Engine struct {
-	opts   Options
-	ops    chan protocol.Op
-	events chan protocol.Event
-	perms  *permission.Service
+	opts      Options
+	ops       chan protocol.Op
+	events    chan protocol.Event
+	perms     *permission.Service
+	questions *question.Service
 
 	// beginReqs is served only by Run so Interrupt stays responsive while a
 	// worker needs ToolCallBegin emitted into a full Events buffer.
@@ -128,12 +130,19 @@ type Engine struct {
 	// treating turn Interrupt as a failed emission.
 	runCtx context.Context
 
-	// activeChildReply routes PermissionReply to a foreground child's
-	// permission service while spawnChild is in flight. Parent and child mint
-	// overlapping perm_N IDs, so dual-Reply must never happen.
-	childMu          sync.Mutex
-	activeChildReply func(protocol.PermissionReply)
-	activeChildOps   chan<- protocol.Op
+	// activeChildReply / activeChildQuestionReply route replies to a
+	// foreground child's services while spawnChild is in flight. Parent and
+	// child mint overlapping perm_N / q_N IDs, so dual-Reply must never happen.
+	childMu                  sync.Mutex
+	activeChildReply         func(protocol.PermissionReply)
+	activeChildQuestionReply func(protocol.QuestionReply)
+	activeChildOps           chan<- protocol.Op
+
+	// pendingAgent is set by tools via SwitchAgent and applied after each tool
+	// batch (so the next Stream sees the new agent/prompt) and again in
+	// completeTurn if anything remains when the turn ends.
+	pendingAgentMu sync.Mutex
+	pendingAgent   string
 
 	// files tracks tool read snapshots so external edits (FilesChanged / /vim)
 	// force the model to re-read before edit/write.
@@ -161,6 +170,7 @@ func New(opts Options) *Engine {
 		files:     &tool.FileState{},
 	}
 	e.perms = permission.New(e.emit, opts.Rules...)
+	e.questions = question.New(e.emit)
 	return e
 }
 
@@ -294,6 +304,15 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 			return
 		}
 		e.perms.Reply(op)
+	case protocol.QuestionReply:
+		e.childMu.Lock()
+		childReply := e.activeChildQuestionReply
+		e.childMu.Unlock()
+		if childReply != nil {
+			childReply(op)
+			return
+		}
+		e.questions.Reply(op)
 	case protocol.Interrupt:
 		if e.turnCancel != nil {
 			e.turnCancel()
@@ -675,6 +694,30 @@ func (e *Engine) handleSelectAgent(op protocol.SelectAgent) {
 	}
 }
 
+// queueSwitchAgent validates name and queues it for application after the
+// current tool batch (before the next provider Stream) or at turn end.
+func (e *Engine) queueSwitchAgent(name string) error {
+	if _, ok := e.findAgent(name); !ok {
+		return fmt.Errorf("unknown agent %q", name)
+	}
+	e.pendingAgentMu.Lock()
+	e.pendingAgent = name
+	e.pendingAgentMu.Unlock()
+	return nil
+}
+
+// applyPendingAgent applies a tool-queued agent switch, if any.
+func (e *Engine) applyPendingAgent() {
+	e.pendingAgentMu.Lock()
+	name := e.pendingAgent
+	e.pendingAgent = ""
+	e.pendingAgentMu.Unlock()
+	if name == "" {
+		return
+	}
+	e.handleSelectAgent(protocol.SelectAgent{Name: name})
+}
+
 func (e *Engine) turnActive() bool {
 	if e.turnDone == nil {
 		return false
@@ -788,6 +831,9 @@ func (e *Engine) runTurn(ctx context.Context, text string, turnID string, finish
 				return
 			}
 		}
+		// Apply tool-queued agent switch so the next Stream uses the new
+		// agent system prompt (not only after TurnCompleted).
+		e.applyPendingAgent()
 	}
 }
 
@@ -848,6 +894,27 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			Ask: func(ctx context.Context, req tool.AskRequest) error {
 				return e.perms.AskWithCorrelation(ctx, req, corr)
 			},
+			AskUser: func(ctx context.Context, req tool.QuestionRequest) (tool.QuestionResponse, error) {
+				prompts := make([]protocol.QuestionPrompt, len(req.Questions))
+				for i, q := range req.Questions {
+					opts := make([]protocol.QuestionOption, len(q.Options))
+					for j, o := range q.Options {
+						opts[j] = protocol.QuestionOption{Label: o.Label, Description: o.Description}
+					}
+					prompts[i] = protocol.QuestionPrompt{
+						ID:       q.ID,
+						Header:   q.Header,
+						Question: q.Question,
+						Options:  opts,
+					}
+				}
+				answers, err := e.questions.Ask(ctx, corr, prompts)
+				if err != nil {
+					return tool.QuestionResponse{}, err
+				}
+				return tool.QuestionResponse{Answers: answers}, nil
+			},
+			SwitchAgent: e.queueSwitchAgent,
 		}
 		if e.opts.Depth < e.opts.MaxChildDepth {
 			tc.SpawnTask = e.spawnChild
@@ -864,10 +931,14 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 	isError := false
 	if err != nil {
 		isError = true
-		var rejected *permission.RejectedError
-		if errors.As(err, &rejected) {
-			output = rejected.Error()
-		} else {
+		var permRejected *permission.RejectedError
+		var qRejected *question.RejectedError
+		switch {
+		case errors.As(err, &permRejected):
+			output = permRejected.Error()
+		case errors.As(err, &qRejected):
+			output = qRejected.Error()
+		default:
 			output = "Error: " + err.Error()
 		}
 	}
@@ -903,9 +974,13 @@ func (e *Engine) failTurn(err error, corr protocol.Correlation, finishing chan s
 
 // completeTurn closes finishing then emits the terminal TurnCompleted. Call
 // only once per turn, after all history mutations and any preceding EngineError.
+// Any remaining tool-queued agent switch is applied after TurnCompleted so
+// Run's join on turnDone observes the new agent (belt-and-suspenders with the
+// post-tool-batch apply in runTurn).
 func (e *Engine) completeTurn(finishing chan struct{}, corr protocol.Correlation, stopReason string) {
 	close(finishing)
 	e.emit(protocol.TurnCompleted{Correlation: corr, StopReason: stopReason})
+	e.applyPendingAgent()
 }
 
 func (e *Engine) toolNames() string {

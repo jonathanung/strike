@@ -47,8 +47,12 @@ func Defaults() Ruleset {
 		{Permission: "task", Pattern: "*", Action: Allow},
 		{Permission: "webfetch", Pattern: "*", Action: Ask},
 		{Permission: "todowrite", Pattern: "*", Action: Allow},
+		{Permission: "todoread", Pattern: "*", Action: Allow},
 		{Permission: "sleep", Pattern: "*", Action: Allow},
 		{Permission: "skill", Pattern: "*", Action: Allow},
+		{Permission: "question", Pattern: "*", Action: Allow},
+		{Permission: "enter_plan_mode", Pattern: "*", Action: Allow},
+		{Permission: "exit_plan_mode", Pattern: "*", Action: Allow},
 		{Permission: "toolsearch", Pattern: "*", Action: Allow},
 	}
 }

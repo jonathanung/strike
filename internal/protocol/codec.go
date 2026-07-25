@@ -30,6 +30,10 @@ func eventType(ev Event) string {
 		return "permission.asked"
 	case PermissionResolved:
 		return "permission.resolved"
+	case QuestionAsked:
+		return "question.asked"
+	case QuestionResolved:
+		return "question.resolved"
 	case TurnCompleted:
 		return "turn.completed"
 	case ModelSelected:
@@ -84,6 +88,10 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &PermissionAsked{}
 	case "permission.resolved":
 		ev = &PermissionResolved{}
+	case "question.asked":
+		ev = &QuestionAsked{}
+	case "question.resolved":
+		ev = &QuestionResolved{}
 	case "turn.completed":
 		ev = &TurnCompleted{}
 	case "model.selected":
@@ -126,6 +134,10 @@ func deref(ev Event) Event {
 	case *PermissionAsked:
 		return *v
 	case *PermissionResolved:
+		return *v
+	case *QuestionAsked:
+		return *v
+	case *QuestionResolved:
 		return *v
 	case *TurnCompleted:
 		return *v

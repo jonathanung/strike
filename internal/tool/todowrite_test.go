@@ -10,7 +10,7 @@ import (
 )
 
 func TestTodoWriteReplaceSuccess(t *testing.T) {
-	tw := NewTodoWrite()
+	tw := NewTodoWrite(NewTodoStore())
 	tc := allowAll(t.TempDir())
 	todos := []map[string]any{
 		{"id": "1", "content": "first", "status": "pending"},
@@ -61,7 +61,7 @@ func TestTodoWriteReplaceSuccess(t *testing.T) {
 }
 
 func TestTodoWriteEmptyListClears(t *testing.T) {
-	tw := NewTodoWrite()
+	tw := NewTodoWrite(NewTodoStore())
 	tc := allowAll(t.TempDir())
 	_, err := tw.Execute(context.Background(), mustJSON(t, map[string]any{
 		"todos": []map[string]any{
@@ -88,7 +88,7 @@ func TestTodoWriteEmptyListClears(t *testing.T) {
 // Missing or null todos must error (not silently clear). Only an explicit
 // empty array clears the list — see TestTodoWriteEmptyListClears.
 func TestTodoWriteMissingOrNullTodos(t *testing.T) {
-	tw := NewTodoWrite()
+	tw := NewTodoWrite(NewTodoStore())
 	tc := allowAll(t.TempDir())
 
 	// Seed so a buggy clear-on-nil path would wipe observable state.
@@ -140,7 +140,7 @@ func TestTodoWriteMissingOrNullTodos(t *testing.T) {
 }
 
 func TestTodoWriteValidation(t *testing.T) {
-	tw := NewTodoWrite()
+	tw := NewTodoWrite(NewTodoStore())
 	tc := allowAll(t.TempDir())
 	cases := []struct {
 		name string
@@ -199,7 +199,7 @@ func TestTodoWriteValidation(t *testing.T) {
 }
 
 func TestTodoWritePermissionDenied(t *testing.T) {
-	tw := NewTodoWrite()
+	tw := NewTodoWrite(NewTodoStore())
 	tc := &Context{
 		WorkDir: t.TempDir(),
 		Ask:     func(context.Context, AskRequest) error { return errors.New("denied") },
@@ -215,7 +215,7 @@ func TestTodoWritePermissionDenied(t *testing.T) {
 }
 
 func TestTodoWriteConcurrentExecute(t *testing.T) {
-	tw := NewTodoWrite()
+	tw := NewTodoWrite(NewTodoStore())
 	tc := allowAll(t.TempDir())
 	var wg sync.WaitGroup
 	errCh := make(chan error, 20)

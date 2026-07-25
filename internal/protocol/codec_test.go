@@ -17,6 +17,13 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 		ToolCallEnd{Correlation: corr, CallID: "c1", Title: "echo", Output: "ok", IsError: false, Metadata: json.RawMessage(`{"exitCode":0}`)},
 		PermissionAsked{Correlation: corr, RequestID: "p1", Permission: "bash", Patterns: []string{"echo hi"}},
 		PermissionResolved{Correlation: corr, RequestID: "p1", Decision: DecisionOnce},
+		QuestionAsked{Correlation: corr, RequestID: "q1", Questions: []QuestionPrompt{
+			{ID: "pref", Header: "Style", Question: "Which style?", Options: []QuestionOption{
+				{Label: "A", Description: "option a"},
+				{Label: "B", Description: "option b"},
+			}},
+		}},
+		QuestionResolved{Correlation: corr, RequestID: "q1"},
 		TurnCompleted{Correlation: corr, StopReason: "end_turn"},
 		ModelSelected{Correlation: corr, Provider: "echo", Model: "echo"},
 		AgentSelected{Correlation: corr, Name: "build"},
@@ -269,6 +276,8 @@ func TestEventTypeCoverage(t *testing.T) {
 		"tool.end":            ToolCallEnd{},
 		"permission.asked":    PermissionAsked{},
 		"permission.resolved": PermissionResolved{},
+		"question.asked":      QuestionAsked{},
+		"question.resolved":   QuestionResolved{},
 		"turn.completed":      TurnCompleted{},
 		"model.selected":      ModelSelected{},
 		"agent.selected":      AgentSelected{},
