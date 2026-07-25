@@ -19,6 +19,7 @@ import (
 
 const expectedUsage = `Usage:
   strike [options]
+  strike exec [options] <prompt>
   strike auth <command> [arguments]
 
 Options:

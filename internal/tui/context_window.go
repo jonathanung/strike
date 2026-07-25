@@ -16,15 +16,15 @@ import (
 // to every right-pane window so the context window stays in sync without
 // holding a back-reference to Model.
 type contextStateMsg struct {
-	WorkDir, SessionID     string
-	Provider, Model, Agent string
-	AgentState             string
-	Input, Output, Used    protocol.TokenCount
-	Source                 string
-	ContextLimit           int
-	ContextLimitKnown      bool
-	OutputLimit            int
-	OutputLimitKnown       bool
+	WorkDir, SessionID, SessionTitle string
+	Provider, Model, Agent           string
+	AgentState                       string
+	Input, Output, Used              protocol.TokenCount
+	Source                           string
+	ContextLimit                     int
+	ContextLimitKnown                bool
+	OutputLimit                      int
+	OutputLimitKnown                 bool
 }
 
 // contextWindow is the default right-pane surface: cwd, session, model/agent,
@@ -68,7 +68,7 @@ func (w contextWindow) view(th theme.Theme) string {
 
 	lines := make([]string, 0, 16)
 	lines = append(lines, contextKVLine(th, w.width, "directory", contextOrDash(s.WorkDir, dash)))
-	lines = append(lines, contextKVLine(th, w.width, "session", contextSessionValue(s.SessionID, w.width, th.Icons.Ellipsis, dash)))
+	lines = append(lines, contextKVLine(th, w.width, "session", contextSessionValue(s.SessionTitle, s.SessionID, w.width, th.Icons.Ellipsis, dash)))
 	lines = append(lines, contextKVLine(th, w.width, "model", contextModelValue(s.Provider, s.Model, dash)))
 	agentVal := dash
 	if s.Agent != "" && validAgentName(s.Agent) {
@@ -131,13 +131,25 @@ func contextModelValue(provider, model, dash string) string {
 	return provider + "/" + model
 }
 
-func contextSessionValue(id string, width int, ellipsis, dash string) string {
-	if id == "" {
+func contextSessionValue(title, id string, width int, ellipsis, dash string) string {
+	// Prefer auto-title; fall back to the session id fragment.
+	label := strings.TrimSpace(title)
+	if label == "" {
+		label = id
+	}
+	if label == "" {
 		return dash
 	}
 	// Leave room for the "session" label and gap on a typical pane.
 	budget := max(8, width-10)
-	return truncateMiddle(id, budget, ellipsis)
+	if strings.TrimSpace(title) != "" {
+		label = sanitizeDisplayData(label)
+		if ansi.StringWidth(label) <= budget {
+			return label
+		}
+		return ansi.Truncate(label, budget, ellipsis)
+	}
+	return truncateMiddle(label, budget, ellipsis)
 }
 
 // formatContextTokenPair renders used/limit with "—" for unknown sides.

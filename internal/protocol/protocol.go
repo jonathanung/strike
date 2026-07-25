@@ -207,6 +207,14 @@ type UserMessage struct {
 	Text string `json:"text"`
 }
 
+// SessionTitled records the human-readable session title. Emitted once when
+// the first user message is accepted (derived from that text). Later emits
+// may rename; consumers should take the last title in the log.
+type SessionTitled struct {
+	Correlation
+	Title string `json:"title"`
+}
+
 type TurnStarted struct {
 	Correlation
 }
@@ -375,6 +383,7 @@ type ProviderRetrying struct {
 }
 
 func (UserMessage) isEvent()        {}
+func (SessionTitled) isEvent()      {}
 func (TurnStarted) isEvent()        {}
 func (TextDelta) isEvent()          {}
 func (ToolCallBegin) isEvent()      {}
