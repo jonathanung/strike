@@ -9,7 +9,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/tui/ui"
 )
 
-const paletteMaxRows = 8
+const paletteMaxRows = 10
 
 // paletteAvailability is the state needed to determine whether palette
 // actions can currently be invoked.
@@ -88,7 +88,7 @@ func buildPaletteEntries(specs []commandSpec, agents []string, availability pale
 		Description: "filterable keybind cheatsheet",
 		Action:      paletteAction{Kind: paletteActionKeybinds},
 	})
-	for _, id := range []commandID{commandProvider, commandModel, commandEffort, commandAuth, commandSettings, commandVim} {
+	for _, id := range []commandID{commandProvider, commandModel, commandEffort, commandAutonomy, commandAuth, commandSettings, commandVim} {
 		spec, ok := byID[id]
 		if !ok {
 			continue

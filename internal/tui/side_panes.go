@@ -69,6 +69,13 @@ func (m Model) contextPaneBody(width, height int) string {
 			},
 		})
 	}
+	rows = append(rows, row{
+		label: "autonomy",
+		value: string(m.autonomy.Normalize()),
+		valueStyle: func(s string) string {
+			return st.Text.Render(s)
+		},
+	})
 	if m.fastEnabled {
 		rows = append(rows, row{
 			label: "fast",

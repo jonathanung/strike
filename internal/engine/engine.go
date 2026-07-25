@@ -66,6 +66,9 @@ type Options struct {
 	// InitialEffort is the reasoning dial at startup; the zero value leaves
 	// each provider's own default in place.
 	InitialEffort protocol.Effort
+	// InitialAutonomy is the exit-gate policy at startup. Empty becomes
+	// AutonomySupervised so the dial is always explicit.
+	InitialAutonomy protocol.Autonomy
 	// Agents are the selectable personas; the first is the default unless
 	// InitialAgent names another.
 	Agents       []Agent
@@ -173,6 +176,8 @@ type Engine struct {
 	provName string
 	model    string
 	effort   protocol.Effort
+	// autonomy is the session exit-gate policy (supervised|agent|checks).
+	autonomy protocol.Autonomy
 	agent    Agent
 	// priority requests OpenAI service_tier=priority on subsequent turns.
 	// Sticky across model switches; adapters that do not support it no-op.
@@ -305,6 +310,9 @@ func (e *Engine) Run(ctx context.Context) {
 	if e.opts.InitialEffort != protocol.EffortDefault {
 		e.setEffort(e.opts.InitialEffort)
 	}
+	// Autonomy is always announced so the status line never implies a mode
+	// that is only latent in workflow config.
+	e.setAutonomy(e.opts.InitialAutonomy)
 	initialAgent := e.opts.Agents[0].Name
 	if e.opts.InitialAgent != "" {
 		if _, ok := e.findAgent(e.opts.InitialAgent); ok {
@@ -374,6 +382,15 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 			return
 		}
 		e.setEffort(op.Level)
+	case protocol.SetAutonomy:
+		if e.turnActive() {
+			e.emit(protocol.EngineError{
+				Correlation: e.sessionCorr(),
+				Message:     "cannot change autonomy while a turn is running",
+			})
+			return
+		}
+		e.setAutonomy(op.Mode)
 	case protocol.SetFast:
 		if e.turnActive() {
 			e.emit(protocol.EngineError{
@@ -745,6 +762,32 @@ func effortNames() string {
 	names := make([]string, 0, len(protocol.Efforts()))
 	for _, level := range protocol.Efforts() {
 		names = append(names, string(level))
+	}
+	return strings.Join(names, "|")
+}
+
+// setAutonomy records the session exit-gate policy and confirms it. Empty
+// normalizes to supervised; unrecognized values are rejected.
+func (e *Engine) setAutonomy(mode protocol.Autonomy) {
+	parsed, ok := protocol.ParseAutonomy(string(mode))
+	if !ok {
+		e.emit(protocol.EngineError{
+			Correlation: e.sessionCorr(),
+			Message:     fmt.Sprintf("unknown autonomy %q (want %s)", mode, autonomyNames()),
+		})
+		return
+	}
+	e.autonomy = parsed
+	e.emit(protocol.AutonomySelected{
+		Correlation: e.sessionCorr(),
+		Mode:        parsed,
+	})
+}
+
+func autonomyNames() string {
+	names := make([]string, 0, len(protocol.Autonomies()))
+	for _, mode := range protocol.Autonomies() {
+		names = append(names, string(mode))
 	}
 	return strings.Join(names, "|")
 }

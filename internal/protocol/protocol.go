@@ -73,6 +73,72 @@ func (e Effort) Describe() string {
 	}
 }
 
+// Autonomy is the per-session exit-gate policy dial: who clears phase
+// progression. Unlike Effort, the zero value is not "unset" — Normalize maps
+// it to AutonomySupervised so the mode is always explicit in the status line.
+type Autonomy string
+
+const (
+	// AutonomySupervised requires a human to clear user gates (safest default).
+	AutonomySupervised Autonomy = "supervised"
+	// AutonomyAgent lets the agent self-affirm phase completion (phase_done).
+	AutonomyAgent Autonomy = "agent"
+	// AutonomyChecks advances when configured check commands exit 0.
+	AutonomyChecks Autonomy = "checks"
+)
+
+// Autonomies lists selectable modes from most to least human oversight.
+func Autonomies() []Autonomy {
+	return []Autonomy{AutonomySupervised, AutonomyAgent, AutonomyChecks}
+}
+
+// ParseAutonomy resolves a user-typed mode, case- and space-insensitively.
+// Empty input yields AutonomySupervised; unrecognized values report false.
+func ParseAutonomy(value string) (Autonomy, bool) {
+	normalized := Autonomy(strings.ToLower(strings.TrimSpace(value)))
+	if normalized == "" {
+		return AutonomySupervised, true
+	}
+	for _, mode := range Autonomies() {
+		if normalized == mode {
+			return mode, true
+		}
+	}
+	return "", false
+}
+
+// Normalize returns a concrete mode: empty becomes AutonomySupervised.
+func (a Autonomy) Normalize() Autonomy {
+	if a == "" {
+		return AutonomySupervised
+	}
+	return a
+}
+
+// Describe returns the one-line rationale rendered in the picker and help.
+func (a Autonomy) Describe() string {
+	switch a.Normalize() {
+	case AutonomyAgent:
+		return "agent clears phase gates itself — less interruption"
+	case AutonomyChecks:
+		return "commands must pass before a phase advances"
+	default:
+		return "you approve phase gates — safest default"
+	}
+}
+
+// Short is the compact status-line label (fits beside model/effort badges).
+func (a Autonomy) Short() string {
+	switch a.Normalize() {
+	case AutonomyAgent:
+		return "agent"
+	case AutonomyChecks:
+		return "checks"
+	default:
+		return "sup"
+	}
+}
+
 // Decision is a user's answer to a permission ask.
 type Decision string
 
@@ -134,6 +200,12 @@ type SetEffort struct {
 	Level Effort `json:"level"`
 }
 
+// SetAutonomy changes the session exit-gate policy. Rejected while a turn is
+// running, like the other selection ops.
+type SetAutonomy struct {
+	Mode Autonomy `json:"mode"`
+}
+
 // SetFast toggles OpenAI priority (fast) service tier for subsequent turns.
 // Rejected while a turn is running. Providers and models that do not support
 // priority tier ignore the flag silently.
@@ -161,6 +233,7 @@ func (Interrupt) isOp()       {}
 func (SelectModel) isOp()     {}
 func (SelectAgent) isOp()     {}
 func (SetEffort) isOp()       {}
+func (SetAutonomy) isOp()     {}
 func (SetFast) isOp()         {}
 func (FilesChanged) isOp()    {}
 func (Compact) isOp()         {}
@@ -384,6 +457,13 @@ type EffortSelected struct {
 	Level Effort `json:"level"`
 }
 
+// AutonomySelected confirms the session exit-gate policy, at startup and
+// after each SetAutonomy.
+type AutonomySelected struct {
+	Correlation
+	Mode Autonomy `json:"mode"`
+}
+
 // FastSelected confirms the session priority-tier preference after SetFast.
 type FastSelected struct {
 	Correlation
@@ -510,6 +590,7 @@ func (ModelSelected) isEvent()       {}
 func (AgentSelected) isEvent()       {}
 func (PhaseChanged) isEvent()        {}
 func (EffortSelected) isEvent()      {}
+func (AutonomySelected) isEvent()    {}
 func (FastSelected) isEvent()        {}
 func (FilesInvalidated) isEvent()    {}
 func (EngineError) isEvent()         {}

@@ -182,6 +182,8 @@ type Model struct {
 	phaseName     string
 	phaseWorkflow string
 	effort        protocol.Effort
+	// autonomy is the session exit-gate policy; default supervised.
+	autonomy protocol.Autonomy
 	// fastEnabled is the session priority-tier preference from /fast.
 	fastEnabled bool
 	agents      []string     // cycled with tab
@@ -282,6 +284,7 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		historyPos:      -1,
 		focused:         true,
 		appearance:      appearanceAuto,
+		autonomy:        protocol.AutonomySupervised,
 	}
 	for _, option := range options {
 		m.dangerouslySkipPermissions = option.DangerouslySkipPermissions
@@ -1214,6 +1217,9 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 	case protocol.EffortSelected:
 		m.effort = ev.Level
 		m.setNotice("effort: "+detailJoin(m.th, string(ev.Level), ev.Level.Describe()), false)
+	case protocol.AutonomySelected:
+		m.autonomy = ev.Mode.Normalize()
+		m.setNotice("autonomy: "+detailJoin(m.th, string(m.autonomy), m.autonomy.Describe()), false)
 	case protocol.FastSelected:
 		m.fastEnabled = ev.Enabled
 		m.setNotice(m.fastNotice(ev.Enabled), false)
@@ -1367,6 +1373,8 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	case protocol.PhaseChanged:
 		return e.Correlation, true
 	case protocol.EffortSelected:
+		return e.Correlation, true
+	case protocol.AutonomySelected:
 		return e.Correlation, true
 	case protocol.FastSelected:
 		return e.Correlation, true
@@ -1525,6 +1533,24 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 			ops <- protocol.SetEffort{Level: level}
 			return nil
 		}
+	case "/autonomy":
+		if len(fields) < 2 {
+			m.resetComposer()
+			m.modal = newAutonomyModal(m.autonomy, m.ops)
+			return m, nil
+		}
+		mode, ok := protocol.ParseAutonomy(fields[1])
+		if !ok {
+			m.setNotice("unknown autonomy "+fields[1]+" — want "+autonomyChoices(), true)
+			return m, nil
+		}
+		m.resetComposer()
+		m.clearNotice()
+		ops := m.ops
+		return m, func() tea.Msg {
+			ops <- protocol.SetAutonomy{Mode: mode}
+			return nil
+		}
 	case "/auth":
 		m.resetComposer()
 		return m.handleAuth(fields[1:])
@@ -1577,6 +1603,7 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 			"/provider [name [model]]",
 			"/model <model>",
 			"/effort <"+effortChoices()+">",
+			"/autonomy <"+autonomyChoices()+">",
 			"/fast [on|off]",
 			"/agent [name]",
 			"/auth",
@@ -1958,6 +1985,14 @@ func effortChoices() string {
 	names := make([]string, 0, len(protocol.Efforts()))
 	for _, level := range protocol.Efforts() {
 		names = append(names, string(level))
+	}
+	return strings.Join(names, "|")
+}
+
+func autonomyChoices() string {
+	names := make([]string, 0, len(protocol.Autonomies()))
+	for _, mode := range protocol.Autonomies() {
+		names = append(names, string(mode))
 	}
 	return strings.Join(names, "|")
 }
