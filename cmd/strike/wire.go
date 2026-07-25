@@ -17,6 +17,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/host/local"
 	"github.com/jonathanung/strike-cli/internal/memory"
+	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/project"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
@@ -349,6 +350,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		Agents:          agents,
 		InitialAgent:    cfg.DefaultAgent,
 		Rules:           permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),
+		PersistProjectRule: func(rule permission.Rule) error {
+			return config.AppendProjectPermission(workDir, rule)
+		},
 		PersistSessionMeta: func(m protocol.SessionMeta) error {
 			_, err := session.UpdateMeta(sessionDir, sessionID, func(meta *session.Meta) {
 				if m.PRURL != "" {

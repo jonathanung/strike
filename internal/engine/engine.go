@@ -90,6 +90,9 @@ type Options struct {
 	SystemPrompt string
 	// Rules are permission ruleset layers, earliest first (later wins).
 	Rules []permission.Ruleset
+	// PersistProjectRule, when set, is invoked after a DecisionProject grant
+	// so the rule can be written to project config. Optional.
+	PersistProjectRule func(permission.Rule) error
 	// MaxChildDepth bounds foreground task nesting. Zero defaults to 1 in New
 	// (root depth 0 may spawn one child; that child may not spawn further).
 	MaxChildDepth int
@@ -196,6 +199,9 @@ func New(opts Options) *Engine {
 		files:     &tool.FileState{},
 	}
 	e.perms = permission.New(e.emit, opts.Rules...)
+	if opts.PersistProjectRule != nil {
+		e.perms.SetProjectPersister(opts.PersistProjectRule)
+	}
 	e.questions = question.New(e.emit)
 	return e
 }

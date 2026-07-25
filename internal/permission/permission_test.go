@@ -1216,3 +1216,182 @@ func TestSetAgentRulesRejectsPending(t *testing.T) {
 		t.Errorf("PermissionResolved decision = %q, want reject", resolved.Decision)
 	}
 }
+
+func TestProjectGrantResolvesSiblingsAndPersists(t *testing.T) {
+	var mu sync.Mutex
+	var asked []protocol.PermissionAsked
+	var persisted []Rule
+	svc := New(func(ev protocol.Event) {
+		if a, ok := ev.(protocol.PermissionAsked); ok {
+			mu.Lock()
+			asked = append(asked, a)
+			mu.Unlock()
+		}
+	}, Ruleset{{Permission: "bash", Pattern: "*", Action: Ask}})
+	svc.SetProjectPersister(func(r Rule) error {
+		mu.Lock()
+		persisted = append(persisted, r)
+		mu.Unlock()
+		return nil
+	})
+
+	err1 := make(chan error, 1)
+	err2 := make(chan error, 1)
+	go func() {
+		err1 <- svc.Ask(context.Background(), tool.AskRequest{
+			Permission: "bash", Patterns: []string{"git status"}, Always: []string{"git *"},
+		})
+	}()
+	waitAskedN(t, &mu, &asked, 1)
+	go func() {
+		err2 <- svc.Ask(context.Background(), tool.AskRequest{
+			Permission: "bash", Patterns: []string{"git log"}, Always: []string{"git *"},
+		})
+	}()
+	waitAskedN(t, &mu, &asked, 2)
+
+	mu.Lock()
+	first := asked[0].RequestID
+	mu.Unlock()
+	svc.Reply(protocol.PermissionReply{RequestID: first, Decision: protocol.DecisionProject})
+
+	for i, ch := range []chan error{err1, err2} {
+		select {
+		case err := <-ch:
+			if err != nil {
+				t.Fatalf("ask %d: %v", i+1, err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out on ask %d", i+1)
+		}
+	}
+
+	before := len(asked)
+	if err := svc.Ask(context.Background(), tool.AskRequest{
+		Permission: "bash", Patterns: []string{"git diff"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	after := len(asked)
+	gotPersisted := append(Ruleset(nil), persisted...)
+	mu.Unlock()
+	if after != before {
+		t.Errorf("project grant still prompted; asks %d -> %d", before, after)
+	}
+	want := Rule{Permission: "bash", Pattern: "git *", Action: Allow}
+	if len(gotPersisted) != 1 || gotPersisted[0] != want {
+		t.Errorf("persisted = %#v, want [%#v]", gotPersisted, want)
+	}
+}
+
+func TestProjectGrantSurvivesAgentSwitch(t *testing.T) {
+	var mu sync.Mutex
+	var asked []protocol.PermissionAsked
+	svc := New(func(ev protocol.Event) {
+		if a, ok := ev.(protocol.PermissionAsked); ok {
+			mu.Lock()
+			asked = append(asked, a)
+			mu.Unlock()
+		}
+	}, Ruleset{{Permission: "bash", Pattern: "*", Action: Ask}})
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- svc.Ask(context.Background(), tool.AskRequest{
+			Permission: "bash",
+			Patterns:   []string{"ls"},
+			Always:     []string{"ls*"},
+		})
+	}()
+	waitAskedN(t, &mu, &asked, 1)
+	mu.Lock()
+	id := asked[0].RequestID
+	mu.Unlock()
+	svc.Reply(protocol.PermissionReply{RequestID: id, Decision: protocol.DecisionProject})
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("first Ask: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first Ask")
+	}
+
+	// Empty agent layer swap clears session grants only.
+	svc.SetAgentRules(nil)
+	before := len(asked)
+	if err := svc.Ask(context.Background(), tool.AskRequest{
+		Permission: "bash",
+		Patterns:   []string{"ls -la"},
+	}); err != nil {
+		t.Fatalf("Ask after agent swap: %v", err)
+	}
+	mu.Lock()
+	after := len(asked)
+	mu.Unlock()
+	if after != before {
+		t.Fatalf("project grant cleared on agent swap; asks %d -> %d", before, after)
+	}
+
+	// Agent deny still beats project allow.
+	svc.SetAgentRules(Ruleset{{Permission: "bash", Pattern: "*", Action: Deny}})
+	err := svc.Ask(context.Background(), tool.AskRequest{
+		Permission: "bash",
+		Patterns:   []string{"ls"},
+	})
+	var rej *RejectedError
+	if !errors.As(err, &rej) {
+		t.Fatalf("Ask under agent deny = %v, want RejectedError", err)
+	}
+}
+
+func TestProjectPersistFailureStillGrants(t *testing.T) {
+	var mu sync.Mutex
+	var asked []protocol.PermissionAsked
+	svc := New(func(ev protocol.Event) {
+		if a, ok := ev.(protocol.PermissionAsked); ok {
+			mu.Lock()
+			asked = append(asked, a)
+			mu.Unlock()
+		}
+	}, Ruleset{{Permission: "edit", Pattern: "*", Action: Ask}})
+	svc.SetProjectPersister(func(Rule) error {
+		return errors.New("disk full")
+	})
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- svc.Ask(context.Background(), tool.AskRequest{
+			Permission: "edit",
+			Patterns:   []string{"a.go"},
+		})
+	}()
+	waitAskedN(t, &mu, &asked, 1)
+	mu.Lock()
+	id := asked[0].RequestID
+	mu.Unlock()
+	svc.Reply(protocol.PermissionReply{RequestID: id, Decision: protocol.DecisionProject})
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("Ask after failed persist: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out")
+	}
+
+	before := len(asked)
+	if err := svc.Ask(context.Background(), tool.AskRequest{
+		Permission: "edit",
+		Patterns:   []string{"a.go"},
+	}); err != nil {
+		t.Fatalf("in-memory grant after persist failure: %v", err)
+	}
+	mu.Lock()
+	after := len(asked)
+	mu.Unlock()
+	if after != before {
+		t.Errorf("still prompted after project grant with persist error; asks %d -> %d", before, after)
+	}
+}

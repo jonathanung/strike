@@ -23,11 +23,11 @@ func TestPermissionModalRejectChoicesOpenFeedbackWithoutReply(t *testing.T) {
 		prepare []tea.KeyMsg
 		key     tea.KeyMsg
 	}{
-		{name: "option 3", key: permissionKey("3")},
+		{name: "option 4", key: permissionKey("4")},
 		{name: "n", key: permissionKey("n")},
 		{
 			name:    "enter on selected reject",
-			prepare: []tea.KeyMsg{permissionKey("right"), permissionKey("right")},
+			prepare: []tea.KeyMsg{permissionKey("right"), permissionKey("right"), permissionKey("right")},
 			key:     permissionKey("enter"),
 		},
 	}
@@ -115,11 +115,18 @@ func TestPermissionModalAllowsRemainImmediateAndHaveNoFeedback(t *testing.T) {
 		{name: "y", keys: []tea.KeyMsg{permissionKey("y")}, decision: protocol.DecisionOnce},
 		{name: "enter on allow once", keys: []tea.KeyMsg{permissionKey("enter")}, decision: protocol.DecisionOnce},
 		{name: "option 2", keys: []tea.KeyMsg{permissionKey("2")}, decision: protocol.DecisionAlways},
-		{name: "a", keys: []tea.KeyMsg{permissionKey("a")}, decision: protocol.DecisionAlways},
+		{name: "s", keys: []tea.KeyMsg{permissionKey("s")}, decision: protocol.DecisionAlways},
 		{
-			name:     "enter on allow always",
+			name:     "enter on allow session",
 			keys:     []tea.KeyMsg{permissionKey("right"), permissionKey("enter")},
 			decision: protocol.DecisionAlways,
+		},
+		{name: "option 3", keys: []tea.KeyMsg{permissionKey("3")}, decision: protocol.DecisionProject},
+		{name: "p", keys: []tea.KeyMsg{permissionKey("p")}, decision: protocol.DecisionProject},
+		{
+			name:     "enter on allow project",
+			keys:     []tea.KeyMsg{permissionKey("right"), permissionKey("right"), permissionKey("enter")},
+			decision: protocol.DecisionProject,
 		},
 	}
 
