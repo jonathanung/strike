@@ -369,9 +369,9 @@ func TestNormalPermissionLayersStillAskAndDeny(t *testing.T) {
 	events := make(chan protocol.Event, 1)
 	service := permission.New(func(event protocol.Event) { events <- event }, layers...)
 	err := askWithin(t, service, tool.AskRequest{Permission: "bash", Patterns: []string{"rm -rf build"}})
-	var rejected *permission.RejectedError
-	if !errors.As(err, &rejected) {
-		t.Errorf("denied Ask error = %v, want *permission.RejectedError", err)
+	var denied *permission.DeniedError
+	if !errors.As(err, &denied) {
+		t.Errorf("denied Ask error = %v, want *permission.DeniedError", err)
 	}
 	if len(events) != 0 {
 		t.Errorf("rule-denied Ask emitted %d events, want zero", len(events))
