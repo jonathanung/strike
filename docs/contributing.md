@@ -53,6 +53,8 @@ the user answers, and rejections carry feedback back to the model.
 make test          # go test ./...
 make vet           # go vet ./...
 make build         # go build -o strike ./cmd/strike
+make cover         # statement coverage → coverage.out + total %
+make cover-check   # cover + enforce COVER_MIN (default 75)
 ```
 
 Stronger checks when touching concurrency, tools, permissions, auth, or
@@ -61,6 +63,22 @@ session I/O:
 ```sh
 go test -race ./... -count=1
 ```
+
+### Coverage
+
+`make cover` runs `go test ./... -count=1 -coverprofile=coverage.out` and
+prints the total statement percentage. Inspect details with:
+
+```sh
+go tool cover -func=coverage.out    # per-function
+go tool cover -html=coverage.out    # browser
+```
+
+`make cover-check` fails if the total is below `COVER_MIN` (default **75**).
+Override locally, e.g. `make cover-check COVER_MIN=77`. This is a **local**
+floor only — CI does not hard-fail on coverage yet (soft report step only).
+Raise `COVER_MIN` in the Makefile as package coverage improves (auth,
+providers, term, wire, etc.).
 
 Offline smoke (no API keys): `make run-echo`.
 

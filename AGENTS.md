@@ -8,13 +8,15 @@ Go 1.26 agentic coding TUI. Engine emits protocol events; TUI consumes them. Ses
 make test          # go test ./...
 make vet           # go vet ./...
 make build         # go build -o strike ./cmd/strike
+make cover         # go test ./... -coverprofile=coverage.out (+ total %)
+make cover-check   # cover + fail if total statements % < COVER_MIN (default 75)
 ```
 
 Stronger checks when touching concurrency, tools, permissions, auth, or session I/O:
 
 ```sh
 go test -race ./... -count=1
-go test ./... -count=1 -cover
+make cover         # or: go test ./... -count=1 -cover
 ```
 
 Offline smoke (no API keys):

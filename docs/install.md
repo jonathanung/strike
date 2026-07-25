@@ -12,6 +12,8 @@ make run-echo       # offline dev loop — no API key needed. Type
 make run            # real agent with your configured provider
 make test           # go test ./...
 make vet            # go vet ./...
+make cover          # statement coverage profile + total %
+make cover-check    # cover + fail below COVER_MIN (default 75)
 ```
 
 ## Launch

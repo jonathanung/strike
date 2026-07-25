@@ -43,3 +43,9 @@ jobs:
 
       - name: Test
         run: go test -race ./...
+
+      # Soft coverage report only — do not hard-fail CI on the floor yet.
+      # Local gate: make cover-check (COVER_MIN in Makefile).
+      - name: Coverage (soft)
+        continue-on-error: true
+        run: make cover-check

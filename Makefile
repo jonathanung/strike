@@ -1,4 +1,10 @@
-.PHONY: build run run-echo test vet clean setup
+.PHONY: build run run-echo test vet cover cover-check clean setup
+
+# Overall statement-coverage floor for `make cover-check` (local / optional CI).
+# Soft baseline ~77%; keep below measured total so the gate does not flake.
+# Raise as package coverage PRs land. Not a hard CI fail yet.
+COVER_MIN ?= 75
+COVER_PROFILE ?= coverage.out
 
 build:
 	go build -o strike ./cmd/strike
@@ -21,5 +27,20 @@ test:
 vet:
 	go vet ./...
 
+# Per-package + total statement coverage. Writes $(COVER_PROFILE).
+cover:
+	go test ./... -count=1 -coverprofile=$(COVER_PROFILE)
+	@go tool cover -func=$(COVER_PROFILE) | awk '/^total:/{print}'
+	@echo "per-package: go tool cover -func=$(COVER_PROFILE)"
+	@echo "html:        go tool cover -html=$(COVER_PROFILE)"
+
+# Fail if total statements % is below COVER_MIN (default $(COVER_MIN)).
+cover-check: cover
+	@go tool cover -func=$(COVER_PROFILE) | awk -v min="$(COVER_MIN)" '/^total:/{ \
+		pct=$$3; gsub("%","",pct); \
+		printf "cover-check: total %s%% (floor %s%%)\n", pct, min; \
+		if (pct+0 < min+0) { print "cover-check: below COVER_MIN" > "/dev/stderr"; exit 1 } \
+	}'
+
 clean:
-	rm -f strike
+	rm -f strike $(COVER_PROFILE)
