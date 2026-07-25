@@ -50,6 +50,8 @@ func eventType(ev Event) string {
 		return "model.selected"
 	case AgentSelected:
 		return "agent.selected"
+	case PhaseChanged:
+		return "phase.changed"
 	case EffortSelected:
 		return "effort.selected"
 	case FastSelected:
@@ -72,6 +74,8 @@ func eventType(ev Event) string {
 		return "compaction.completed"
 	case SessionMeta:
 		return "session.meta"
+	case HookMatched:
+		return "hook.matched"
 	default:
 		return ""
 	}
@@ -128,6 +132,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &ModelSelected{}
 	case "agent.selected":
 		ev = &AgentSelected{}
+	case "phase.changed":
+		ev = &PhaseChanged{}
 	case "effort.selected":
 		ev = &EffortSelected{}
 	case "fast.selected":
@@ -150,6 +156,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &CompactionCompleted{}
 	case "session.meta":
 		ev = &SessionMeta{}
+	case "hook.matched":
+		ev = &HookMatched{}
 	default:
 		return nil, fmt.Errorf("protocol: unknown envelope type %q", e.Type)
 	}
@@ -195,6 +203,8 @@ func deref(ev Event) Event {
 		return *v
 	case *AgentSelected:
 		return *v
+	case *PhaseChanged:
+		return *v
 	case *EffortSelected:
 		return *v
 	case *FastSelected:
@@ -216,6 +226,8 @@ func deref(ev Event) Event {
 	case *CompactionCompleted:
 		return *v
 	case *SessionMeta:
+		return *v
+	case *HookMatched:
 		return *v
 	default:
 		return ev

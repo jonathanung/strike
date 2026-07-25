@@ -312,6 +312,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tool.NewQuestion(),
 		tool.NewEnterPlanMode(),
 		tool.NewExitPlanMode(),
+		tool.NewPhaseDone(),
 	)
 	registry.Register(tool.NewToolSearch(registry))
 
@@ -338,6 +339,12 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		agents = append(agents, engine.Agent(a))
 	}
 	instructions := config.LoadInstructions(workDir, projectIdentity.Root)
+	workflows, err := config.LoadWorkflows(workDir)
+	if err != nil {
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, fmt.Errorf("loading workflows: %w", err)
+	}
 
 	// Concurrent session manager owns durable JSONL logs. --continue reopens
 	// the latest root session and restores model history; otherwise Create.
@@ -420,8 +427,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		sessionID = info.ID
 	}
 	sessionDir := sessions.Dir()
-	hookDefs := make([]tool.HookDef, 0, len(cfg.Hooks))
-	for _, h := range cfg.Hooks {
+	shellHooks := cfg.ShellHooks()
+	hookDefs := make([]tool.HookDef, 0, len(shellHooks))
+	for _, h := range shellHooks {
 		hookDefs = append(hookDefs, tool.HookDef{
 			Event:     h.Event,
 			Command:   h.Command,
@@ -445,8 +453,10 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		InitialMessages: initialMessages,
 		InitialPriority: initialPriority,
 		InitialTitled:   initialTitled,
+		Workflows:       workflows,
 		Rules:           permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),
 		Hooks:           hookDefs,
+		HookRules:       cfg.HookRules(),
 		LookupContextWindow: func(providerName, model string) int {
 			// Best-effort catalog lookup for threshold compaction. Failures
 			// leave the window unknown; overflow recovery still works.

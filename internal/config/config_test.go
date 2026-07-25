@@ -39,7 +39,10 @@ func TestLoadMerge(t *testing.T) {
 		"theme": "nord",
 		"systemPrompt": "global",
 		"permissions": [{"permission":"bash","pattern":"*","action":"ask"}],
-		"hooks": [{"event":"pre_tool_use","command":"echo global"}]
+		"hooks": [
+			{"event":"pre_tool_use","command":"echo global"},
+			{"event":"pre_tool_use","matcher":"*","action":"log"}
+		]
 	}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +56,10 @@ func TestLoadMerge(t *testing.T) {
 		"defaultAgent": "plan",
 		"theme": "dracula",
 		"permissions": [{"permission":"bash","pattern":"git *","action":"allow"}],
-		"hooks": [{"event":"post_tool_use","command":"echo project","matcher":"bash"}]
+		"hooks": [
+			{"event":"post_tool_use","command":"echo project","matcher":"bash"},
+			{"event":"pre_tool_use","matcher":"write","action":"block","message":"no writes"}
+		]
 	}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -83,11 +89,54 @@ func TestLoadMerge(t *testing.T) {
 	if cfg.Permissions[1].Action != permission.Allow {
 		t.Errorf("second rule = %#v", cfg.Permissions[1])
 	}
-	if len(cfg.Hooks) != 2 {
+	if len(cfg.Hooks) != 4 {
 		t.Fatalf("hooks = %#v", cfg.Hooks)
 	}
-	if cfg.Hooks[0].Command != "echo global" || cfg.Hooks[1].Matcher != "bash" {
+	if cfg.Hooks[0].Command != "echo global" || cfg.Hooks[2].Matcher != "bash" {
 		t.Errorf("hooks = %#v", cfg.Hooks)
+	}
+	shell := cfg.ShellHooks()
+	if len(shell) != 2 || shell[0].Command != "echo global" {
+		t.Fatalf("ShellHooks = %#v", shell)
+	}
+	rules := cfg.HookRules()
+	if len(rules) != 2 || rules[1].Action != permission.HookActionBlock || rules[1].Message != "no writes" {
+		t.Fatalf("HookRules = %#v", rules)
+	}
+}
+
+func TestLoadDropsInvalidHooks(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+	path := filepath.Join(work, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{
+		"hooks": [
+			{"event":"pre_tool_use","matcher":"write","action":"block","message":"ok"},
+			{"event":"nope","action":"log"},
+			{"event":"post_tool_use","action":"block"},
+			{"event":"pre_tool_use","command":"echo hi","action":"log"},
+			{"event":"pre_tool_use"},
+			{"event":"pre_tool_use","command":"echo shell"}
+		]
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Hooks) != 2 {
+		t.Fatalf("hooks = %#v, want block rule + shell", cfg.Hooks)
+	}
+	if !cfg.Hooks[0].IsRule() || cfg.Hooks[0].Message != "ok" {
+		t.Errorf("first = %#v", cfg.Hooks[0])
+	}
+	if !cfg.Hooks[1].IsShell() || cfg.Hooks[1].Command != "echo shell" {
+		t.Errorf("second = %#v", cfg.Hooks[1])
 	}
 }
 

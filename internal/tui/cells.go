@@ -166,6 +166,12 @@ func (c *toolCell) copyText() string {
 }
 
 func (c *toolCell) render(width int, th theme.Theme) string {
+	return c.renderLinked(width, th, "")
+}
+
+// renderLinked is render with an optional linkBase for file:// OSC 8 targets
+// on path-like titles (session work directory).
+func (c *toolCell) renderLinked(width int, th theme.Theme, linkBase string) string {
 	th = th.Resolve()
 	ic := iconsFor(th)
 	st := th.S()
@@ -173,12 +179,6 @@ func (c *toolCell) render(width int, th theme.Theme) string {
 	labelStyle := st.ToolLabel
 	if c.selected {
 		labelStyle = st.Selected
-	}
-	head := c.name
-	if c.title != "" {
-		head = displayJoin(th, ic.Dot, head, c.title)
-	} else if len(c.args) > 0 {
-		head += space + compactJSON(c.args, 60, ic.Ellipsis)
 	}
 	status := st.Muted.Render(ic.Ellipsis)
 	if c.done {
@@ -199,7 +199,21 @@ func (c *toolCell) render(width int, th theme.Theme) string {
 		}
 		marker = labelStyle.Render(glyph) + space
 	}
-	out := marker + labelStyle.Render(ic.Tool+space+head) + space + status
+	// Build the head so path/URL titles can carry OSC 8 without wrapping the
+	// whole tool name (keeps clicks on the title span only).
+	toolPart := labelStyle.Render(ic.Tool + space + c.name)
+	var head string
+	switch {
+	case c.title != "":
+		titleStyled := labelStyle.Render(ic.Dot + space + c.title)
+		titleStyled = withHyperlink(displayURI(c.title, linkBase), titleStyled)
+		head = toolPart + space + titleStyled
+	case len(c.args) > 0:
+		head = labelStyle.Render(ic.Tool + space + c.name + space + compactJSON(c.args, 60, ic.Ellipsis))
+	default:
+		head = toolPart
+	}
+	out := marker + head + space + status
 	if c.done {
 		prefix := themedSpace(th.Spacing.SM) + st.BorderMuted.Render(ic.ToolGuide) + space
 		bodyWidth := max(1, width-lipgloss.Width(prefix))
@@ -208,13 +222,15 @@ func (c *toolCell) render(width int, th theme.Theme) string {
 			if c.expanded {
 				maxLines = diffExpandedMaxLines(meta)
 			}
+			path := c.title
 			diff := ui.DiffPreview(th, ui.DiffPreviewOpts{
-				Path:      "",
+				Path:      path,
 				Old:       meta.OldString,
 				New:       meta.NewString,
 				MaxLines:  maxLines,
 				Width:     bodyWidth,
 				ShowStats: true,
+				LinkBase:  linkBase,
 			})
 			if diff != "" {
 				out += "\n" + indent(diff, prefix)
@@ -308,6 +324,10 @@ func (c *exploreCell) anyError() bool {
 }
 
 func (c *exploreCell) render(width int, th theme.Theme) string {
+	return c.renderLinked(width, th, "")
+}
+
+func (c *exploreCell) renderLinked(width int, th theme.Theme, linkBase string) string {
 	th = th.Resolve()
 	ic := iconsFor(th)
 	st := th.S()
@@ -351,12 +371,6 @@ func (c *exploreCell) render(width int, th theme.Theme) string {
 		if tc == nil {
 			continue
 		}
-		row := tc.name
-		if tc.title != "" {
-			row = displayJoin(th, ic.Dot, tc.name, tc.title)
-		} else if len(tc.args) > 0 {
-			row += space + compactJSON(tc.args, 40, ic.Ellipsis)
-		}
 		mark := st.Muted.Render(ic.Ellipsis)
 		if tc.done {
 			if tc.isError {
@@ -365,7 +379,21 @@ func (c *exploreCell) render(width int, th theme.Theme) string {
 				mark = st.Success.Render(ic.OK)
 			}
 		}
-		line := st.Muted.Render(ansi.Hardwrap(row, max(1, bodyWidth-lipgloss.Width(space+mark)), false)) + space + mark
+		markW := lipgloss.Width(space + mark)
+		namePart := st.Muted.Render(tc.name)
+		var row string
+		if tc.title != "" {
+			titleStyled := st.Muted.Render(ic.Dot + space + tc.title)
+			titleStyled = withHyperlink(displayURI(tc.title, linkBase), titleStyled)
+			row = namePart + space + titleStyled
+		} else if len(tc.args) > 0 {
+			row = st.Muted.Render(tc.name + space + compactJSON(tc.args, 40, ic.Ellipsis))
+		} else {
+			row = namePart
+		}
+		// Hardwrap only the plain width budget; OSC 8 spans stay on one visual line.
+		_ = markW
+		line := ansi.Cut(row, 0, max(1, bodyWidth-markW)) + space + mark
 		lines = append(lines, line)
 	}
 	if len(lines) > 0 {

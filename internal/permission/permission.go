@@ -39,7 +39,8 @@ var knownPermissions = map[string]struct{}{
 	"*": {}, "read": {}, "glob": {}, "grep": {}, "edit": {}, "write": {},
 	"bash": {}, "task": {}, "webfetch": {}, "todowrite": {}, "todoread": {},
 	"memory_write": {}, "memory_read": {}, "issue_write": {}, "issue_read": {},
-	"sleep": {}, "skill": {}, "toolsearch": {}, "hook": {},
+	"sleep": {}, "skill": {}, "question": {}, "toolsearch": {}, "hook": {},
+	"enter_plan_mode": {}, "exit_plan_mode": {}, "phase_done": {},
 }
 
 func ValidAction(a Action) bool {
@@ -93,6 +94,7 @@ func Defaults() Ruleset {
 		{Permission: "question", Pattern: "*", Action: Allow},
 		{Permission: "enter_plan_mode", Pattern: "*", Action: Allow},
 		{Permission: "exit_plan_mode", Pattern: "*", Action: Allow},
+		{Permission: "phase_done", Pattern: "*", Action: Allow},
 		{Permission: "toolsearch", Pattern: "*", Action: Allow},
 	}
 }
@@ -210,9 +212,12 @@ type resolvedEmission struct {
 //	  ProjectPersister is set)
 //	→ active agent profile
 //	→ session always grants (DecisionAlways)
+//	→ active workflow phase profile
 //
 // Agent is evaluated after the optional dangerous allow-all, so role denies
 // still apply under --dangerously-skip-permissions (hard ceiling for personas).
+// Phase is last so workflow hard-denies (e.g. plan mode write/edit) cannot be
+// widened by session always-grants.
 type Service struct {
 	emit func(protocol.Event)
 
@@ -221,6 +226,7 @@ type Service struct {
 	project Ruleset // runtime project-scoped grants (DecisionProject)
 	agent   Ruleset // active agent profile; evaluated after project, before granted
 	granted Ruleset // session-scoped "always" grants (DecisionAlways)
+	phase   Ruleset // active workflow phase profile; last, hard ceiling
 	pending map[string]*pending
 	nextID  int
 
@@ -232,7 +238,7 @@ type Service struct {
 
 // New creates a Service. emit publishes events toward the frontend; base
 // rulesets are evaluated in order (later wins), then project grants, the
-// active agent profile, then session always grants.
+// active agent profile, session always grants, then the workflow phase profile.
 func New(emit func(protocol.Event), base ...Ruleset) *Service {
 	return &Service{emit: emit, base: base, pending: map[string]*pending{}}
 }
@@ -255,9 +261,27 @@ func (s *Service) SetProjectPersister(fn func(Rule) error) {
 // blocked mid-turn so pendings are normally empty). Emit/reply outside lock
 // like Reply's reject cascade.
 func (s *Service) SetAgentRules(rs Ruleset) {
+	s.replaceProfileLocked(func() {
+		s.agent = append(Ruleset(nil), rs...)
+		s.granted = nil
+	}, "agent changed")
+}
+
+// SetPhaseRules replaces the active workflow phase permission profile.
+// An empty or nil ruleset clears the phase layer. Defensively copies rs.
+// Does not clear session grants; phase is evaluated last so its denies still
+// win. Rejects any pending asks (same hygiene as SetAgentRules).
+func (s *Service) SetPhaseRules(rs Ruleset) {
+	s.replaceProfileLocked(func() {
+		s.phase = append(Ruleset(nil), rs...)
+	}, "phase changed")
+}
+
+// replaceProfileLocked applies mut under the service lock, then rejects all
+// pending asks with message outside the lock.
+func (s *Service) replaceProfileLocked(mut func(), message string) {
 	s.mu.Lock()
-	s.agent = append(Ruleset(nil), rs...)
-	s.granted = nil
+	mut()
 
 	type cascaded struct {
 		id string
@@ -293,7 +317,7 @@ func (s *Service) SetAgentRules(rs Ruleset) {
 	}
 	reply := protocol.PermissionReply{
 		Decision: protocol.DecisionReject,
-		Message:  "agent changed",
+		Message:  message,
 	}
 	for _, other := range rejected {
 		other.p.ch <- reply
@@ -482,7 +506,7 @@ func (s *Service) Reply(r protocol.PermissionReply) {
 // evaluateLocked returns the worst-case action across the ask's patterns:
 // any deny denies, any ask asks, otherwise allow.
 func (s *Service) evaluateLocked(permission string, patterns []string) Action {
-	sets := append(append(append(append([]Ruleset{}, s.base...), s.project), s.agent), s.granted)
+	sets := append(append(append(append(append([]Ruleset{}, s.base...), s.project), s.agent), s.granted), s.phase)
 	worst := Allow
 	if len(patterns) == 0 {
 		patterns = []string{"*"}

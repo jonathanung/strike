@@ -367,6 +367,16 @@ type AgentSelected struct {
 	Name string `json:"name"`
 }
 
+// PhaseChanged reports the active workflow phase (permission profile +
+// context). Empty Phase means no workflow phase is active.
+type PhaseChanged struct {
+	Correlation
+	Workflow string `json:"workflow,omitempty"`
+	Phase    string `json:"phase,omitempty"`
+	Index    int    `json:"index,omitempty"`
+	Gate     string `json:"gate,omitempty"` // agent | check | user
+}
+
 // EffortSelected confirms the active reasoning level, at startup and after
 // each SetEffort.
 type EffortSelected struct {
@@ -468,6 +478,19 @@ type SessionMeta struct {
 	PRNumber int    `json:"prNumber,omitempty"`
 }
 
+// HookMatched records that a declarative config hook rule fired (log/block/
+// notify). Persisted in the session JSONL for review and notify sinks.
+type HookMatched struct {
+	Correlation
+	Event   string `json:"event"`
+	Action  string `json:"action"`
+	Matcher string `json:"matcher,omitempty"`
+	Tool    string `json:"tool,omitempty"`
+	Message string `json:"message,omitempty"`
+	// CallID is set for tool lifecycle hooks when a call is in flight.
+	CallID string `json:"callId,omitempty"`
+}
+
 func (UserMessage) isEvent()         {}
 func (SessionTitled) isEvent()       {}
 func (TurnStarted) isEvent()         {}
@@ -485,6 +508,7 @@ func (QuestionResolved) isEvent()    {}
 func (TurnCompleted) isEvent()       {}
 func (ModelSelected) isEvent()       {}
 func (AgentSelected) isEvent()       {}
+func (PhaseChanged) isEvent()        {}
 func (EffortSelected) isEvent()      {}
 func (FastSelected) isEvent()        {}
 func (FilesInvalidated) isEvent()    {}
@@ -496,3 +520,4 @@ func (ProviderRetrying) isEvent()    {}
 func (CompactionStarted) isEvent()   {}
 func (CompactionCompleted) isEvent() {}
 func (SessionMeta) isEvent()         {}
+func (HookMatched) isEvent()         {}

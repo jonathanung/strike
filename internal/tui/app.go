@@ -178,7 +178,10 @@ type Model struct {
 	providerName string
 	modelName    string
 	agentName    string
-	effort       protocol.Effort
+	// phaseName is the active workflow phase (empty = none); shown in header.
+	phaseName     string
+	phaseWorkflow string
+	effort        protocol.Effort
 	// fastEnabled is the session priority-tier preference from /fast.
 	fastEnabled bool
 	agents      []string     // cycled with tab
@@ -759,22 +762,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateComposer(msg)
 
 	case tea.MouseMsg:
-		// Wheel scrolls the transcript viewport even when a right pane is focused.
-		if msg.Action != tea.MouseActionPress {
-			break
+		// Wheel scrolls the transcript; left-click opens refs/links or expands tools.
+		return m.handleMouse(msg)
+
+	case openURIMsg:
+		if msg.err != nil {
+			m.setNotice("open link: "+msg.err.Error(), true)
+			m.reflow()
 		}
-		switch msg.Button { //nolint:exhaustive
-		case tea.MouseButtonWheelUp:
-			m.viewport.ScrollUp(m.viewport.MouseWheelDelta)
-			return m, nil
-		case tea.MouseButtonWheelDown:
-			m.viewport.ScrollDown(m.viewport.MouseWheelDelta)
-			return m, nil
-		case tea.MouseButtonLeft:
-			if ref, ok := m.fileRefAtMouse(msg); ok {
-				return m.openFileRef(ref)
-			}
-		}
+		return m, nil
 	}
 
 	var cmd tea.Cmd
@@ -1211,6 +1207,10 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 	case protocol.AgentSelected:
 		m.agentName = ev.Name
 		cmd = m.broadcastContextState()
+	case protocol.PhaseChanged:
+		m.phaseName = ev.Phase
+		m.phaseWorkflow = ev.Workflow
+		cmd = m.broadcastContextState()
 	case protocol.EffortSelected:
 		m.effort = ev.Level
 		m.setNotice("effort: "+detailJoin(m.th, string(ev.Level), ev.Level.Describe()), false)
@@ -1363,6 +1363,8 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	case protocol.ModelSelected:
 		return e.Correlation, true
 	case protocol.AgentSelected:
+		return e.Correlation, true
+	case protocol.PhaseChanged:
 		return e.Correlation, true
 	case protocol.EffortSelected:
 		return e.Correlation, true
@@ -2016,7 +2018,7 @@ func (m *Model) refreshViewport() {
 	yOff := m.viewport.YOffset
 	blocks := make([]string, 0, len(m.cells))
 	for _, c := range m.cells {
-		blocks = append(blocks, c.render(width, m.th))
+		blocks = append(blocks, m.renderCell(c, width))
 	}
 	content := strings.Join(blocks, "\n\n")
 	m.transcriptPlainLines = strings.Split(ansi.Strip(content), "\n")
@@ -2029,6 +2031,19 @@ func (m *Model) refreshViewport() {
 		m.viewport.GotoBottom()
 	} else {
 		m.viewport.SetYOffset(yOff)
+	}
+}
+
+// renderCell paints one transcript cell, attaching OSC 8 file links using the
+// session work directory as the relative-path base.
+func (m *Model) renderCell(c cell, width int) string {
+	switch tc := c.(type) {
+	case *toolCell:
+		return tc.renderLinked(width, m.th, m.workDir)
+	case *exploreCell:
+		return tc.renderLinked(width, m.th, m.workDir)
+	default:
+		return c.render(width, m.th)
 	}
 }
 

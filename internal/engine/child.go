@@ -113,6 +113,8 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		CompactionBuffer:    e.opts.CompactionBuffer,
 		KeepUserTurns:       e.opts.KeepUserTurns,
 		Rules:               permission.DeriveChildRules(parentLayers, childAgent.Permissions),
+		Hooks:               e.opts.Hooks,
+		HookRules:           e.opts.HookRules,
 		PersistProjectRule:  e.opts.PersistProjectRule,
 	})
 
