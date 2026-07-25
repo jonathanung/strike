@@ -116,8 +116,11 @@ type Model struct {
 	selectedCell int
 	modal        modal
 
-	viewport                   viewport.Model
-	composer                   textarea.Model
+	viewport viewport.Model
+	composer textarea.Model
+	// pendingPastes holds full text for collapsed large-paste chips in the
+	// composer. Expanded on send; pruned when the chip leaves the value.
+	pendingPastes              []pasteChip
 	completion                 *completionState
 	keyMap                     keyMap
 	focus                      paneFocus
@@ -608,6 +611,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reflow()
 			return m, nil
 		}
+		// Bracketed paste: collapse large multi-line blobs to a chip.
+		if msg.Paste {
+			m.handleComposerPaste(string(msg.Runes))
+			m.recomputeCompletion()
+			m.reflow()
+			return m, nil
+		}
 		switch {
 		case key.Matches(msg, m.keyMap.Newline):
 			// Left-focus only (right pane returned above). Distinct from Send
@@ -618,7 +628,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reflow()
 			return m, nil
 		case key.Matches(msg, m.keyMap.Send):
-			text := strings.TrimSpace(m.composer.Value())
+			// Expand paste chips before send so the model sees full content.
+			text := strings.TrimSpace(m.composerTextExpanded())
 			if text == "" {
 				// Empty enter is tool expand (handleToolCellKeys); if nothing
 				// collapsible was available, stay put.
@@ -688,6 +699,9 @@ func (m Model) updateComposer(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.historyPos >= 0 && m.composer.Value() != before {
 		m.resetHistoryBrowsing()
 	}
+	if m.composer.Value() != before {
+		m.pendingPastes = prunePendingPastes(m.composer.Value(), m.pendingPastes)
+	}
 	m.recomputeCompletion()
 	m.reflow()
 	return m, cmd
@@ -744,6 +758,9 @@ func (m *Model) setComposerValueAt(value string, offset int) {
 		}
 	}
 	m.composer.SetValue(value)
+	// History/completion replacements are plain text; drop chips that no
+	// longer appear (or clear all when the value is wholly replaced).
+	m.pendingPastes = prunePendingPastes(value, m.pendingPastes)
 	for steps := 0; m.composer.Line() > targetRow && steps <= len(runes)+1; steps++ {
 		m.composer.CursorUp()
 	}
@@ -752,6 +769,7 @@ func (m *Model) setComposerValueAt(value string, offset int) {
 
 func (m *Model) resetComposer() {
 	m.composer.Reset()
+	m.pendingPastes = nil
 	m.completion = nil
 	m.resetHistoryBrowsing()
 	m.reflow()
