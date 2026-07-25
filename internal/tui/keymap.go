@@ -72,7 +72,7 @@ func defaultKeyMap() keyMap {
 		// alt+[/] avoid stealing printable brackets from the composer.
 		ToolPrev:   key.NewBinding(key.WithKeys("alt+["), key.WithHelp("alt+[", "prev tool cell")),
 		ToolNext:   key.NewBinding(key.WithKeys("alt+]"), key.WithHelp("alt+]", "next tool cell")),
-		ToolExpand: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "expand tool cell")),
+		ToolExpand: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "expand tool / open file:line")),
 		// ToolCopy: bare y when composer is empty (yank selected/latest cell).
 		ToolCopy: key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy tool cell")),
 	}
