@@ -200,21 +200,21 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 	sp := newSpinner(th)
 
 	m := Model{
-		ops:          ops,
-		events:       events,
-		services:     services,
-		agents:       services.Agents,
-		skills:       services.Skills,
-		commands:     commandCatalog(services.Skills),
-		th:           th,
-		toolByID:     map[string]*toolCell{},
-		composer:     ta,
-		keyMap:       defaultKeyMap(),
-		windows:      newWindowRegistry(),
-		spin:         sp,
-		historyPos:   -1,
-		focused:      true,
-		appearance:   appearanceAuto,
+		ops:        ops,
+		events:     events,
+		services:   services,
+		agents:     services.Agents,
+		skills:     services.Skills,
+		commands:   commandCatalog(services.Skills),
+		th:         th,
+		toolByID:   map[string]*toolCell{},
+		composer:   ta,
+		keyMap:     defaultKeyMap(),
+		windows:    newWindowRegistry(),
+		spin:       sp,
+		historyPos: -1,
+		focused:    true,
+		appearance: appearanceAuto,
 	}
 	for _, option := range options {
 		m.dangerouslySkipPermissions = option.DangerouslySkipPermissions
