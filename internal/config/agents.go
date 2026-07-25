@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
 
@@ -20,6 +22,8 @@ import (
 //	model: gpt-5.5
 //	provider: openai
 //	effort: high
+//	permission.write: deny
+//	permission.edit: deny
 //	---
 //	You are a meticulous code reviewer...
 //
@@ -31,6 +35,7 @@ type Agent struct {
 	Model       string
 	Effort      protocol.Effort
 	Prompt      string
+	Permissions permission.Ruleset
 }
 
 // Skill is a reusable prompt template invoked as a slash command
@@ -141,6 +146,10 @@ func LoadAgentsWithError(workDir string) ([]Agent, error) {
 			if !ok {
 				return nil, fmt.Errorf("load agent %s: unknown effort %q", path, meta["effort"])
 			}
+			perms, err := parseAgentPermissions(meta)
+			if err != nil {
+				return nil, fmt.Errorf("load agent %s: %w", path, err)
+			}
 			if _, exists := byName[name]; !exists {
 				order = append(order, name)
 			}
@@ -151,6 +160,7 @@ func LoadAgentsWithError(workDir string) ([]Agent, error) {
 				Model:       meta["model"],
 				Effort:      effort,
 				Prompt:      body,
+				Permissions: perms,
 			}
 		}
 	}
@@ -216,6 +226,44 @@ func (s Skill) Render(args string) string {
 		return s.Template + "\n\nArguments: " + args
 	}
 	return s.Template
+}
+
+// parseAgentPermissions builds a ruleset from agent frontmatter.
+// Compact keys (permission.<name>: <action>) are collected first, sorted by
+// permission name; an optional permissions JSON array is appended after.
+func parseAgentPermissions(meta map[string]string) (permission.Ruleset, error) {
+	var compact permission.Ruleset
+	for key, value := range meta {
+		name, ok := strings.CutPrefix(key, "permission.")
+		if !ok {
+			continue
+		}
+		if name == "" {
+			continue
+		}
+		compact = append(compact, permission.Rule{
+			Permission: name,
+			Pattern:    "*",
+			Action:     permission.Action(value),
+		})
+	}
+	sort.Slice(compact, func(i, j int) bool {
+		return compact[i].Permission < compact[j].Permission
+	})
+
+	var rs permission.Ruleset
+	rs = append(rs, compact...)
+	if raw := meta["permissions"]; raw != "" {
+		var extra permission.Ruleset
+		if err := json.Unmarshal([]byte(raw), &extra); err != nil {
+			return nil, fmt.Errorf("permissions: %w", err)
+		}
+		rs = append(rs, extra...)
+	}
+	if err := permission.ValidateRuleset(rs); err != nil {
+		return nil, err
+	}
+	return rs, nil
 }
 
 func markdownFiles(dir string) []string {

@@ -25,7 +25,7 @@ Options:
   --provider <provider>              provider to use (anthropic|openai|xai|echo); overrides config
   --model <model>                    model id; overrides config
   --effort <level>                   reasoning effort (off|low|medium|high|xhigh|max); overrides config
-  --dangerously-skip-permissions     allow all tool calls without permission checks for this invocation
+  --dangerously-skip-permissions     skip configured permission prompts (agent profile denies still apply)
   -h, --help                         show help
 `
 
@@ -378,7 +378,7 @@ func TestNormalPermissionLayersStillAskAndDeny(t *testing.T) {
 }
 
 func TestWarningTextAndPreflightFailuresDoNotWarn(t *testing.T) {
-	const wantWarning = "WARNING: --dangerously-skip-permissions is enabled; all tool calls will be allowed without permission checks for this invocation only."
+	const wantWarning = "WARNING: --dangerously-skip-permissions is enabled; configured permission asks are skipped for this invocation. Active agent permission denies still apply."
 	if dangerousPermissionsWarning != wantWarning {
 		t.Errorf("warning = %q, want %q", dangerousPermissionsWarning, wantWarning)
 	}

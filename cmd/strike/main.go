@@ -55,7 +55,7 @@ var optionSpecs = []optionSpec{
 	},
 	{
 		names:       []string{"dangerously-skip-permissions"},
-		description: "allow all tool calls without permission checks for this invocation",
+		description: "skip configured permission prompts (agent profile denies still apply)",
 		register: func(fs *flag.FlagSet, opts *cliOptions) {
 			fs.BoolVar(&opts.dangerouslySkipPermissions, "dangerously-skip-permissions", false, "")
 		},
@@ -66,7 +66,7 @@ var optionSpecs = []optionSpec{
 	},
 }
 
-const dangerousPermissionsWarning = "WARNING: --dangerously-skip-permissions is enabled; all tool calls will be allowed without permission checks for this invocation only."
+const dangerousPermissionsWarning = "WARNING: --dangerously-skip-permissions is enabled; configured permission asks are skipped for this invocation. Active agent permission denies still apply."
 
 func main() {
 	os.Exit(runCLI(os.Args[1:], os.Stdout, os.Stderr))

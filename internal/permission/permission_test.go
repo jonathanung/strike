@@ -964,3 +964,220 @@ func waitAskedN(t *testing.T, mu *sync.Mutex, asked *[]protocol.PermissionAsked,
 		}
 	}
 }
+
+func TestValidateRuleset(t *testing.T) {
+	cases := []struct {
+		name    string
+		rs      Ruleset
+		wantErr bool
+	}{
+		{
+			name: "valid write deny",
+			rs:   Ruleset{{Permission: "write", Pattern: "*", Action: Deny}},
+		},
+		{
+			name:    "unknown permission",
+			rs:      Ruleset{{Permission: "nope", Pattern: "*", Action: Deny}},
+			wantErr: true,
+		},
+		{
+			name:    "bad action",
+			rs:      Ruleset{{Permission: "write", Pattern: "*", Action: "sometimes"}},
+			wantErr: true,
+		},
+		{
+			name:    "empty permission name",
+			rs:      Ruleset{{Permission: "", Pattern: "*", Action: Deny}},
+			wantErr: true,
+		},
+		{
+			name: "star allow ok",
+			rs:   Ruleset{{Permission: "*", Pattern: "*", Action: Allow}},
+		},
+		{
+			name: "empty pattern ok",
+			rs:   Ruleset{{Permission: "write", Pattern: "", Action: Deny}},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateRuleset(tc.rs)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("ValidateRuleset(%#v) = nil, want error", tc.rs)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ValidateRuleset(%#v) = %v, want nil", tc.rs, err)
+			}
+		})
+	}
+}
+
+func TestSetAgentRulesDenyBeatsBaseAllow(t *testing.T) {
+	var events []protocol.Event
+	svc := New(func(ev protocol.Event) { events = append(events, ev) }, Ruleset{
+		{Permission: "write", Pattern: "*", Action: Allow},
+	})
+	svc.SetAgentRules(Ruleset{{Permission: "write", Pattern: "*", Action: Deny}})
+
+	err := svc.Ask(context.Background(), tool.AskRequest{
+		Permission: "write",
+		Patterns:   []string{"secret.go"},
+	})
+	var rej *RejectedError
+	if !errors.As(err, &rej) {
+		t.Fatalf("Ask = %v, want RejectedError", err)
+	}
+	if len(events) != 0 {
+		t.Errorf("expected no permission events on hard deny, got %#v", events)
+	}
+}
+
+func TestSetAgentRulesClearsAlwaysGrants(t *testing.T) {
+	// AG2 exit: session "always" grants must not survive an agent profile swap.
+	var mu sync.Mutex
+	var asked []protocol.PermissionAsked
+	svc := New(func(ev protocol.Event) {
+		if a, ok := ev.(protocol.PermissionAsked); ok {
+			mu.Lock()
+			asked = append(asked, a)
+			mu.Unlock()
+		}
+	}, Ruleset{{Permission: "write", Pattern: "*", Action: Ask}})
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- svc.Ask(context.Background(), tool.AskRequest{
+			Permission: "write",
+			Patterns:   []string{"a.go"},
+			Always:     []string{"*"},
+		})
+	}()
+	waitAskedN(t, &mu, &asked, 1)
+	mu.Lock()
+	id := asked[0].RequestID
+	mu.Unlock()
+	svc.Reply(protocol.PermissionReply{RequestID: id, Decision: protocol.DecisionAlways})
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("first Ask: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first Ask")
+	}
+
+	// Grant is live: second Ask auto-allows with no new PermissionAsked.
+	before := len(asked)
+	if err := svc.Ask(context.Background(), tool.AskRequest{
+		Permission: "write",
+		Patterns:   []string{"b.go"},
+	}); err != nil {
+		t.Fatalf("second Ask under always grant: %v", err)
+	}
+	mu.Lock()
+	afterGrant := len(asked)
+	mu.Unlock()
+	if afterGrant != before {
+		t.Fatalf("always grant still prompted; asks %d -> %d", before, afterGrant)
+	}
+
+	// Agent deny replaces the layer and clears session grants.
+	svc.SetAgentRules(Ruleset{{Permission: "write", Pattern: "*", Action: Deny}})
+	err := svc.Ask(context.Background(), tool.AskRequest{
+		Permission: "write",
+		Patterns:   []string{"c.go"},
+	})
+	var rej *RejectedError
+	if !errors.As(err, &rej) {
+		t.Fatalf("third Ask after SetAgentRules deny = %v, want RejectedError", err)
+	}
+	mu.Lock()
+	afterDeny := len(asked)
+	mu.Unlock()
+	if afterDeny != afterGrant {
+		t.Errorf("deny path emitted PermissionAsked; asks %d -> %d", afterGrant, afterDeny)
+	}
+}
+
+func TestSetAgentRulesEmptyClearsAgentLayer(t *testing.T) {
+	var events []protocol.Event
+	svc := New(func(ev protocol.Event) { events = append(events, ev) }, Ruleset{
+		{Permission: "write", Pattern: "*", Action: Allow},
+	})
+	svc.SetAgentRules(Ruleset{{Permission: "write", Pattern: "*", Action: Deny}})
+	err := svc.Ask(context.Background(), tool.AskRequest{
+		Permission: "write",
+		Patterns:   []string{"x.go"},
+	})
+	var rej *RejectedError
+	if !errors.As(err, &rej) {
+		t.Fatalf("Ask under agent deny = %v, want RejectedError", err)
+	}
+
+	svc.SetAgentRules(nil)
+	if err := svc.Ask(context.Background(), tool.AskRequest{
+		Permission: "write",
+		Patterns:   []string{"y.go"},
+	}); err != nil {
+		t.Fatalf("Ask after clearing agent layer: %v", err)
+	}
+	if len(events) != 0 {
+		t.Errorf("expected no ask events for allow/deny paths, got %#v", events)
+	}
+}
+
+func TestSetAgentRulesRejectsPending(t *testing.T) {
+	var mu sync.Mutex
+	var events []protocol.Event
+	var asked protocol.PermissionAsked
+	svc := New(func(ev protocol.Event) {
+		mu.Lock()
+		events = append(events, ev)
+		if a, ok := ev.(protocol.PermissionAsked); ok {
+			asked = a
+		}
+		mu.Unlock()
+	}, Ruleset{{Permission: "write", Pattern: "*", Action: Ask}})
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- svc.Ask(context.Background(), tool.AskRequest{
+			Permission: "write",
+			Patterns:   []string{"pending.go"},
+		})
+	}()
+	waitAsked(t, &mu, &asked)
+	waitPendingAnnounced(t, svc, asked.RequestID)
+
+	svc.SetAgentRules(Ruleset{{Permission: "bash", Pattern: "*", Action: Deny}})
+
+	select {
+	case err := <-errCh:
+		var rej *RejectedError
+		if !errors.As(err, &rej) {
+			t.Fatalf("pending Ask after SetAgentRules = %v, want RejectedError", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for pending Ask to reject")
+	}
+
+	mu.Lock()
+	got := append([]protocol.Event(nil), events...)
+	mu.Unlock()
+	var resolved *protocol.PermissionResolved
+	for _, ev := range got {
+		if r, ok := ev.(protocol.PermissionResolved); ok && r.RequestID == asked.RequestID {
+			event := r
+			resolved = &event
+		}
+	}
+	if resolved == nil {
+		t.Fatalf("expected PermissionResolved for pending ask; events=%#v", got)
+	}
+	if resolved.Decision != protocol.DecisionReject {
+		t.Errorf("PermissionResolved decision = %q, want reject", resolved.Decision)
+	}
+}

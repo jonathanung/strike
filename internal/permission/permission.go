@@ -33,6 +33,38 @@ type Rule struct {
 
 type Ruleset []Rule
 
+// Known permission names tools actually Ask with, plus "*".
+var knownPermissions = map[string]struct{}{
+	"*": {}, "read": {}, "glob": {}, "grep": {}, "edit": {}, "write": {},
+	"bash": {}, "task": {}, "webfetch": {}, "todowrite": {}, "sleep": {},
+	"skill": {}, "toolsearch": {},
+}
+
+func ValidAction(a Action) bool {
+	switch a {
+	case Allow, Ask, Deny:
+		return true
+	}
+	return false
+}
+
+// ValidateRuleset rejects empty permission names, unknown permission
+// names, and invalid actions. Empty pattern is allowed (matches as "*").
+func ValidateRuleset(rs Ruleset) error {
+	for i, r := range rs {
+		if r.Permission == "" {
+			return fmt.Errorf("rule %d: empty permission name", i)
+		}
+		if _, ok := knownPermissions[r.Permission]; !ok {
+			return fmt.Errorf("rule %d: unknown permission %q", i, r.Permission)
+		}
+		if !ValidAction(r.Action) {
+			return fmt.Errorf("rule %d: invalid action %q", i, r.Action)
+		}
+	}
+	return nil
+}
+
 // Defaults: searching and reading are free; anything that mutates or
 // executes asks. task is allowed so the root agent can spawn foreground
 // children; DeriveChildRules denies task on child sessions.
@@ -147,20 +179,84 @@ type resolvedEmission struct {
 
 // Service resolves asks against the configured rulesets, suspending on a
 // channel when user input is needed. It is safe for concurrent use.
+//
+// Evaluation order (last-match-wins):
+//
+//	base layers (defaults → config → optional dangerous allow-all)
+//	→ active agent profile
+//	→ session always grants
+//
+// Agent is evaluated after the optional dangerous allow-all, so role denies
+// still apply under --dangerously-skip-permissions (hard ceiling for personas).
 type Service struct {
 	emit func(protocol.Event)
 
 	mu      sync.Mutex
 	base    []Ruleset
+	agent   Ruleset // active agent profile; evaluated after base, before granted
 	granted Ruleset // session-scoped "always" grants
 	pending map[string]*pending
 	nextID  int
 }
 
 // New creates a Service. emit publishes events toward the frontend; base
-// rulesets are evaluated in order (later wins), with session grants last.
+// rulesets are evaluated in order (later wins), then the active agent
+// profile, then session always grants.
 func New(emit func(protocol.Event), base ...Ruleset) *Service {
 	return &Service{emit: emit, base: base, pending: map[string]*pending{}}
+}
+
+// SetAgentRules replaces the active agent profile and clears session
+// always-grants so prior role grants cannot widen the new role. An empty
+// or nil ruleset clears the agent layer. Defensively copies rs.
+//
+// Also rejects any pending asks (API hygiene; production SelectAgent is
+// blocked mid-turn so pendings are normally empty). Emit/reply outside lock
+// like Reply's reject cascade.
+func (s *Service) SetAgentRules(rs Ruleset) {
+	s.mu.Lock()
+	s.agent = append(Ruleset(nil), rs...)
+	s.granted = nil
+
+	type cascaded struct {
+		id string
+		p  *pending
+	}
+	var rejected []cascaded
+	for id, p := range s.pending {
+		delete(s.pending, id)
+		rejected = append(rejected, cascaded{id: id, p: p})
+	}
+
+	var emitNow []resolvedEmission
+	for _, other := range rejected {
+		if other.p.announced {
+			emitNow = append(emitNow, resolvedEmission{
+				id:          other.id,
+				correlation: other.p.correlation,
+				decision:    protocol.DecisionReject,
+			})
+			continue
+		}
+		other.p.hasDeferred = true
+		other.p.deferredDecision = protocol.DecisionReject
+	}
+	s.mu.Unlock()
+
+	for _, em := range emitNow {
+		s.emit(protocol.PermissionResolved{
+			Correlation: em.correlation,
+			RequestID:   em.id,
+			Decision:    em.decision,
+		})
+	}
+	reply := protocol.PermissionReply{
+		Decision: protocol.DecisionReject,
+		Message:  "agent changed",
+	}
+	for _, other := range rejected {
+		other.p.ch <- reply
+	}
 }
 
 // Ask implements tool.Context.Ask. It blocks until the permission resolves.
@@ -327,7 +423,7 @@ func (s *Service) Reply(r protocol.PermissionReply) {
 // evaluateLocked returns the worst-case action across the ask's patterns:
 // any deny denies, any ask asks, otherwise allow.
 func (s *Service) evaluateLocked(permission string, patterns []string) Action {
-	sets := append(append([]Ruleset{}, s.base...), s.granted)
+	sets := append(append(append([]Ruleset{}, s.base...), s.agent), s.granted)
 	worst := Allow
 	if len(patterns) == 0 {
 		patterns = []string{"*"}

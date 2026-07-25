@@ -3,8 +3,11 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/jonathanung/strike-cli/internal/permission"
 )
 
 func TestParseFrontmatter(t *testing.T) {
@@ -126,8 +129,197 @@ func TestLoadAgentsWithErrorAcceptsMultiWordUnicodeAndProjectOverride(t *testing
 		t.Fatalf("agents = %+v, want one overridden agent", agents)
 	}
 	want := Agent{Name: name, Description: "project override", Provider: "openai", Model: "secure", Prompt: "project prompt"}
-	if agents[0] != want {
+	if !reflect.DeepEqual(agents[0], want) {
 		t.Errorf("overridden agent = %+v, want %+v", agents[0], want)
+	}
+}
+
+func TestLoadAgentsPermissionsCompact(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	work := t.TempDir()
+	dir := filepath.Join(work, ".strike", "agents")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `---
+description: code review
+permission.write: deny
+permission.edit: deny
+permission.bash: deny
+---
+Review carefully.
+`
+	if err := os.WriteFile(filepath.Join(dir, "reviewer.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	agents, err := LoadAgentsWithError(work)
+	if err != nil {
+		t.Fatalf("LoadAgentsWithError: %v", err)
+	}
+	if len(agents) != 1 {
+		t.Fatalf("agents = %+v, want 1", agents)
+	}
+	// Compact keys are sorted by permission name: bash, edit, write.
+	want := permission.Ruleset{
+		{Permission: "bash", Pattern: "*", Action: permission.Deny},
+		{Permission: "edit", Pattern: "*", Action: permission.Deny},
+		{Permission: "write", Pattern: "*", Action: permission.Deny},
+	}
+	if !reflect.DeepEqual(agents[0].Permissions, want) {
+		t.Errorf("Permissions = %#v, want %#v", agents[0].Permissions, want)
+	}
+	if agents[0].Description != "code review" || agents[0].Prompt != "Review carefully." {
+		t.Errorf("agent meta/prompt = %+v", agents[0])
+	}
+}
+
+func TestLoadAgentsPermissionsJSON(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	work := t.TempDir()
+	dir := filepath.Join(work, ".strike", "agents")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `---
+description: patterned
+permissions: [{"permission":"bash","pattern":"git *","action":"allow"},{"permission":"write","pattern":"*","action":"deny"}]
+---
+JSON perms.
+`
+	if err := os.WriteFile(filepath.Join(dir, "patterned.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	agents, err := LoadAgentsWithError(work)
+	if err != nil {
+		t.Fatalf("LoadAgentsWithError: %v", err)
+	}
+	if len(agents) != 1 {
+		t.Fatalf("agents = %+v, want 1", agents)
+	}
+	want := permission.Ruleset{
+		{Permission: "bash", Pattern: "git *", Action: permission.Allow},
+		{Permission: "write", Pattern: "*", Action: permission.Deny},
+	}
+	if !reflect.DeepEqual(agents[0].Permissions, want) {
+		t.Errorf("Permissions = %#v, want %#v", agents[0].Permissions, want)
+	}
+}
+
+func TestLoadAgentsPermissionsRejectUnknownTool(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	work := t.TempDir()
+	dir := filepath.Join(work, ".strike", "agents")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "bad.md")
+	body := "---\npermission.nope: deny\n---\nbody\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadAgentsWithError(work)
+	if err == nil {
+		t.Fatal("LoadAgentsWithError() = nil error, want rejection")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, path) {
+		t.Errorf("error %q missing path %q", msg, path)
+	}
+	if !strings.Contains(msg, "nope") {
+		t.Errorf("error %q missing unknown tool detail", msg)
+	}
+}
+
+func TestLoadAgentsPermissionsRejectBadAction(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	work := t.TempDir()
+	dir := filepath.Join(work, ".strike", "agents")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "bad-action.md")
+	body := "---\npermission.write: sometimes\n---\nbody\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadAgentsWithError(work)
+	if err == nil {
+		t.Fatal("LoadAgentsWithError() = nil error, want rejection")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, path) {
+		t.Errorf("error %q missing path %q", msg, path)
+	}
+	if !strings.Contains(msg, "sometimes") && !strings.Contains(msg, "action") && !strings.Contains(msg, "write") {
+		t.Errorf("error %q missing useful bad-action detail", msg)
+	}
+}
+
+func TestLoadAgentsPermissionsRejectBadJSON(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	work := t.TempDir()
+	dir := filepath.Join(work, ".strike", "agents")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "bad-json.md")
+	body := "---\npermissions: not-json\n---\nbody\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadAgentsWithError(work)
+	if err == nil {
+		t.Fatal("LoadAgentsWithError() = nil error, want rejection")
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("error %q missing path %q", err, path)
+	}
+}
+
+func TestLoadAgentsPermissionsCompactAndJSONMerge(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	work := t.TempDir()
+	dir := filepath.Join(work, ".strike", "agents")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Compact rules first (sorted), then JSON rules appended — last-match-wins
+	// means the JSON write allow overrides the compact write deny when evaluated alone.
+	body := `---
+description: merge
+permission.write: deny
+permission.edit: deny
+permissions: [{"permission":"write","pattern":"*","action":"allow"}]
+---
+Merged.
+`
+	if err := os.WriteFile(filepath.Join(dir, "merge.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	agents, err := LoadAgentsWithError(work)
+	if err != nil {
+		t.Fatalf("LoadAgentsWithError: %v", err)
+	}
+	if len(agents) != 1 {
+		t.Fatalf("agents = %+v, want 1", agents)
+	}
+	want := permission.Ruleset{
+		{Permission: "edit", Pattern: "*", Action: permission.Deny},
+		{Permission: "write", Pattern: "*", Action: permission.Deny},
+		{Permission: "write", Pattern: "*", Action: permission.Allow},
+	}
+	if !reflect.DeepEqual(agents[0].Permissions, want) {
+		t.Errorf("Permissions = %#v, want %#v", agents[0].Permissions, want)
+	}
+	// Sanity: last-match-wins on the agent ruleset alone allows write.
+	if got := permission.Evaluate("write", "x.go", agents[0].Permissions); got != permission.Allow {
+		t.Errorf("Evaluate write on merged rules = %q, want allow", got)
 	}
 }
 
