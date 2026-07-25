@@ -351,16 +351,20 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// --session reopen a root session and restore model history; otherwise Create.
 	sessions := session.NewManager(session.DefaultDir())
 	var (
-		sessionID       string
-		bound           session.Bound
-		replay          []protocol.Event
-		initialProvider = cfg.Provider
-		initialModel    = cfg.Model
-		initialEffort   = cfg.Effort
-		initialAgent    = cfg.DefaultAgent
-		initialMessages []provider.Message
-		initialPriority bool
-		initialTitled   bool
+		sessionID         string
+		bound             session.Bound
+		replay            []protocol.Event
+		initialProvider   = cfg.Provider
+		initialModel      = cfg.Model
+		initialEffort     = cfg.Effort
+		initialAgent      = cfg.DefaultAgent
+		initialMessages   []provider.Message
+		initialPriority   bool
+		initialTitled     bool
+		initialAutonomy   protocol.Autonomy
+		initialPhaseWF    string
+		initialPhaseIndex int
+		initialAlways     permission.Ruleset
 	)
 	resumeID := strings.TrimSpace(opts.sessionID)
 	if opts.continueSession {
@@ -388,6 +392,10 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		initialMessages = restored.Messages
 		initialPriority = restored.Priority
 		initialTitled = restored.Titled
+		initialAutonomy = restored.Autonomy
+		initialPhaseWF = restored.PhaseWorkflow
+		initialPhaseIndex = restored.PhaseIndex
+		initialAlways = restored.AlwaysGrants
 		if !opts.providerSet && restored.Provider != "" {
 			initialProvider = restored.Provider
 		}
@@ -430,25 +438,29 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		})
 	}
 	eng := engine.New(engine.Options{
-		SessionID:       sessionID,
-		Select:          selectProvider,
-		Registry:        registry,
-		WorkDir:         workDir,
-		ProjectRoot:     projectIdentity.Root,
-		Instructions:    instructions,
-		SystemPrompt:    cfg.SystemPrompt,
-		InitialProvider: initialProvider,
-		InitialModel:    initialModel,
-		InitialEffort:   initialEffort,
-		Agents:          agents,
-		InitialAgent:    initialAgent,
-		InitialMessages: initialMessages,
-		InitialPriority: initialPriority,
-		InitialTitled:   initialTitled,
-		Workflows:       workflows,
-		Rules:           permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),
-		Hooks:           hookDefs,
-		HookRules:       cfg.HookRules(),
+		SessionID:            sessionID,
+		Select:               selectProvider,
+		Registry:             registry,
+		WorkDir:              workDir,
+		ProjectRoot:          projectIdentity.Root,
+		Instructions:         instructions,
+		SystemPrompt:         cfg.SystemPrompt,
+		InitialProvider:      initialProvider,
+		InitialModel:         initialModel,
+		InitialEffort:        initialEffort,
+		InitialAutonomy:      initialAutonomy,
+		Agents:               agents,
+		InitialAgent:         initialAgent,
+		InitialMessages:      initialMessages,
+		InitialPriority:      initialPriority,
+		InitialTitled:        initialTitled,
+		InitialPhaseWorkflow: initialPhaseWF,
+		InitialPhaseIndex:    initialPhaseIndex,
+		InitialAlwaysGrants:  initialAlways,
+		Workflows:            workflows,
+		Rules:                permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),
+		Hooks:                hookDefs,
+		HookRules:            cfg.HookRules(),
 		LookupContextWindow: func(providerName, model string) int {
 			// Best-effort catalog lookup for threshold compaction. Failures
 			// leave the window unknown; overflow recovery still works.
@@ -567,29 +579,12 @@ func openResumeSession(sessions *session.Manager, id string) (resumeOpened, erro
 	return resumeOpened{id: id, bound: bound, replay: replay}, nil
 }
 
-// withReplay prepends historical transcript events ahead of the live engine
-// stream so the TUI can repaint a resumed session without re-appending them.
-func withReplay(history []protocol.Event, live <-chan protocol.Event) <-chan protocol.Event {
-	if len(history) == 0 {
-		return live
-	}
-	out := make(chan protocol.Event, 256)
-	go func() {
-		defer close(out)
-		for _, ev := range history {
-			out <- ev
-		}
-		for ev := range live {
-			out <- ev
-		}
-	}()
-	return out
-}
-
 // run is the interactive composition root: assemble backend, then hand the
 // host.Services bundle to the TUI frontend. When the user picks another
 // session in /session, the TUI quits with PendingResume set and this loop
 // reopens that session with full engine.Restore (not transcript-only view).
+// Historical events are seeded into the TUI via Options.Replay (side-effect
+// free); only the live engine stream is consumed for applyEvent.
 func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 	warnedDangerous := false
 	for {
@@ -629,7 +624,6 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 		storeOwned = true
 		sessionPath := a.store.Path()
 		err = runSession(context.Background(), a.eng.Run, a.eng.Events(), a.store, func(live <-chan protocol.Event) error {
-			events := withReplay(a.replay, live)
 			restore := tui.EnableEnhancedKeys(stdout)
 			defer restore()
 			// Detect bg once before the program owns stdin — glamour/lipgloss OSC 11
@@ -648,7 +642,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 					themeID = entry.ID
 				}
 			}
-			program := tea.NewProgram(tui.New(a.eng.Ops(), events, a.services, tui.Options{
+			program := tea.NewProgram(tui.New(a.eng.Ops(), live, a.services, tui.Options{
 				DangerouslySkipPermissions: opts.dangerouslySkipPermissions,
 				Theme:                      themePtr,
 				ThemeID:                    themeID,
@@ -656,6 +650,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 				WorkDir:                    a.workDir,
 				FirstRun:                   a.firstRun,
 				VimMode:                    vimMode,
+				Replay:                     a.replay,
 			}), tea.WithAltScreen(), tea.WithOutput(stdout), tea.WithInput(tui.WrapInput(os.Stdin)), tea.WithReportFocus(), tea.WithMouseCellMotion())
 			final, runProgErr := program.Run()
 			if m, ok := final.(tui.Model); ok {

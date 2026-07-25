@@ -1448,3 +1448,28 @@ func TestProjectPersistFailureStillGrants(t *testing.T) {
 		t.Errorf("still prompted after project grant with persist error; asks %d -> %d", before, after)
 	}
 }
+
+func TestSeedAlwaysGrants(t *testing.T) {
+	var mu sync.Mutex
+	var asked []protocol.PermissionAsked
+	svc := New(func(ev protocol.Event) {
+		if a, ok := ev.(protocol.PermissionAsked); ok {
+			mu.Lock()
+			asked = append(asked, a)
+			mu.Unlock()
+		}
+	}, Defaults())
+	svc.SeedAlwaysGrants(Ruleset{
+		{Permission: "bash", Pattern: "git *", Action: Allow},
+	})
+	ctx := context.Background()
+	if err := svc.Ask(ctx, tool.AskRequest{Permission: "bash", Patterns: []string{"git status"}, Always: []string{"git *"}}); err != nil {
+		t.Fatalf("Ask after seed: %v", err)
+	}
+	mu.Lock()
+	n := len(asked)
+	mu.Unlock()
+	if n != 0 {
+		t.Fatalf("PermissionAsked count = %d, want 0", n)
+	}
+}

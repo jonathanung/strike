@@ -277,6 +277,14 @@ func (s *Service) SetPhaseRules(rs Ruleset) {
 	}, "phase changed")
 }
 
+// SeedAlwaysGrants replaces session-scoped DecisionAlways grants (resume).
+// Defensively copies rs. Does not touch pending asks or other layers.
+func (s *Service) SeedAlwaysGrants(rs Ruleset) {
+	s.mu.Lock()
+	s.granted = append(Ruleset(nil), rs...)
+	s.mu.Unlock()
+}
+
 // replaceProfileLocked applies mut under the service lock, then rejects all
 // pending asks with message outside the lock.
 func (s *Service) replaceProfileLocked(mut func(), message string) {
@@ -369,6 +377,7 @@ func (s *Service) ask(ctx context.Context, req tool.AskRequest, corr protocol.Co
 		RequestID:   id,
 		Permission:  req.Permission,
 		Patterns:    req.Patterns,
+		Always:      req.Always,
 		Metadata:    req.Metadata,
 	})
 

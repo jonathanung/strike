@@ -420,6 +420,144 @@ func decodeSessionJSONL(data []byte) ([]protocol.Event, error) {
 	return events, sc.Err()
 }
 
+// seedFromReplay rebuilds transcript cells and durable UI selection state from
+// a prior session log without live side effects: no modals, notices, working
+// state, or permission attention. Incomplete ChildStarted rows are marked
+// canceled so resume cannot leave a forever-running activity poll.
+func seedFromReplay(m *Model, events []protocol.Event) {
+	if m == nil || len(events) == 0 {
+		return
+	}
+	m.cells, m.toolByID = cellsFromEvents(events)
+	// Incomplete assistant/tool streams stay visible but are marked complete
+	// so resume never looks mid-stream.
+	for _, c := range m.cells {
+		switch cell := c.(type) {
+		case *assistantCell:
+			cell.complete = true
+			cell.mdCacheOK = false
+		case *toolCell:
+			if !cell.done {
+				cell.done = true
+				cell.isError = true
+				if cell.output == "" {
+					cell.output = "interrupted"
+				}
+			}
+		case *exploreCell:
+			cell.accepting = false
+			for _, tc := range cell.calls {
+				if tc != nil && !tc.done {
+					tc.done = true
+					tc.isError = true
+					if tc.output == "" {
+						tc.output = "interrupted"
+					}
+				}
+			}
+		}
+	}
+	m.turnRunning = false
+	m.awaitingPermission = false
+	m.turnStartedAt = time.Time{}
+	m.toolCallsThisTurn = 0
+	m.modal = nil
+	m.children = childrenFromEvents(events)
+	for _, ev := range events {
+		if corr, ok := eventCorrelation(ev); ok && (corr.ParentSessionID != "" || corr.Depth > 0) {
+			continue
+		}
+		switch e := ev.(type) {
+		case protocol.UserMessage:
+			if m.titleTopic == "" {
+				if topic := sanitizeTitleTopic(e.Text); topic != "" {
+					m.titleTopic = topic
+				}
+			}
+		case protocol.SessionTitled:
+			if topic := sanitizeTitleTopic(e.Title); topic != "" {
+				m.titleTopic = topic
+			}
+		case protocol.ModelSelected:
+			m.providerName, m.modelName = e.Provider, e.Model
+		case protocol.AgentSelected:
+			m.agentName = e.Name
+		case protocol.PhaseChanged:
+			m.phaseName = e.Phase
+			m.phaseWorkflow = e.Workflow
+		case protocol.EffortSelected:
+			m.effort = e.Level
+		case protocol.AutonomySelected:
+			m.autonomy = e.Mode.Normalize()
+		case protocol.FastSelected:
+			m.fastEnabled = e.Enabled
+		case protocol.UsageReported:
+			m.usageInput = e.Input
+			m.usageOutput = e.Output
+			m.usageUsed = e.Used
+			m.usageSource = e.Source
+		}
+	}
+}
+
+// childrenFromEvents rebuilds activity-pane child rows. A ChildStarted without
+// ChildCompleted is treated as canceled — the child process is gone on resume.
+func childrenFromEvents(events []protocol.Event) []childActivity {
+	var out []childActivity
+	index := map[string]int{}
+	for _, ev := range events {
+		switch e := ev.(type) {
+		case protocol.ChildStarted:
+			id := e.SessionID
+			if id == "" {
+				id = "child"
+			}
+			if i, ok := index[id]; ok {
+				out[i].agent = e.Agent
+				out[i].prompt = e.Prompt
+				out[i].status = "running"
+				continue
+			}
+			index[id] = len(out)
+			out = append(out, childActivity{
+				sessionID: id,
+				agent:     e.Agent,
+				prompt:    e.Prompt,
+				status:    "running",
+			})
+		case protocol.ChildCompleted:
+			id := e.SessionID
+			status := string(e.Status)
+			if status == "" {
+				status = string(protocol.ChildStatusCompleted)
+			}
+			if id != "" {
+				if i, ok := index[id]; ok {
+					out[i].status = status
+					continue
+				}
+			} else if len(out) > 0 {
+				out[len(out)-1].status = status
+				continue
+			}
+			if id == "" {
+				id = "child"
+			}
+			index[id] = len(out)
+			out = append(out, childActivity{sessionID: id, status: status})
+		}
+	}
+	for i := range out {
+		if out[i].status == "running" {
+			out[i].status = string(protocol.ChildStatusCanceled)
+		}
+	}
+	if len(out) > maxChildActivity {
+		out = out[len(out)-maxChildActivity:]
+	}
+	return out
+}
+
 // cellsFromEvents rebuilds transcript cells from a session event log without
 // side effects (no modals, notices, or agent-state updates).
 func cellsFromEvents(events []protocol.Event) ([]cell, map[string]*toolCell) {

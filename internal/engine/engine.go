@@ -148,10 +148,17 @@ type Options struct {
 	// Copied at New; not emitted as transcript events.
 	InitialMessages []provider.Message
 	// InitialPriority sets the sticky priority tier before Run without
-	// emitting FastSelected (resume replays prior selection events to the UI).
+	// emitting FastSelected (TUI seeds fast from resume snapshot).
 	InitialPriority bool
 	// InitialTitled skips auto SessionTitled when the session was already titled.
 	InitialTitled bool
+	// InitialPhaseWorkflow / InitialPhaseIndex restore an active workflow
+	// phase after agent selection at startup. Empty workflow skips restore.
+	InitialPhaseWorkflow string
+	InitialPhaseIndex    int
+	// InitialAlwaysGrants restores session DecisionAlways rules after the
+	// initial agent profile is applied (SetAgentRules clears grants).
+	InitialAlwaysGrants permission.Ruleset
 }
 
 // beginAck reports whether ToolCallBegin was actually written to Events.
@@ -343,6 +350,17 @@ func (e *Engine) Run(ctx context.Context) {
 		}
 	}
 	e.handleSelectAgent(protocol.SelectAgent{Name: initialAgent})
+	// Resume: re-enter the recorded workflow phase after agent select so
+	// syncPhaseWithAgent cannot leave implement/custom phases dropped, then
+	// re-seed session always-grants (SetAgentRules cleared them).
+	if wf := e.opts.InitialPhaseWorkflow; wf != "" {
+		if w, ok := e.findWorkflow(wf); ok {
+			_ = e.enterPhase(w, e.opts.InitialPhaseIndex)
+		}
+	}
+	if len(e.opts.InitialAlwaysGrants) > 0 {
+		e.perms.SeedAlwaysGrants(e.opts.InitialAlwaysGrants)
+	}
 	for {
 		e.reapTurn()
 		select {
