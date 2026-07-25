@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -95,6 +97,64 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	if strings.TrimSpace(output) == "" {
 		output = "(no output)"
 	}
-	meta, _ := json.Marshal(map[string]any{"exitCode": exitCode})
+	metaFields := map[string]any{"exitCode": exitCode}
+	if exitCode == 0 {
+		if pr, ok := extractSessionPR(a.Command, output); ok {
+			metaFields["prUrl"] = pr.URL
+			if pr.Number > 0 {
+				metaFields["prNumber"] = pr.Number
+			}
+			if tc.RecordSessionPR != nil {
+				_ = tc.RecordSessionPR(pr)
+			}
+		}
+	}
+	meta, _ := json.Marshal(metaFields)
 	return Result{Title: a.Command, Output: output, Metadata: meta}, nil
+}
+
+// githubPRURLRe matches common GitHub pull request URLs in gh CLI output.
+var githubPRURLRe = regexp.MustCompile(`https://github\.com/[\w.-]+/[\w.-]+/pull/(\d+)`)
+
+// extractSessionPR pulls a PR URL/number from successful gh pr command output.
+func extractSessionPR(command, output string) (SessionPR, bool) {
+	if !looksLikeGHPRCommand(command) {
+		return SessionPR{}, false
+	}
+	m := githubPRURLRe.FindStringSubmatch(output)
+	if m == nil {
+		return SessionPR{}, false
+	}
+	n, _ := strconv.Atoi(m[1])
+	return SessionPR{URL: m[0], Number: n}, true
+}
+
+func looksLikeGHPRCommand(command string) bool {
+	fields := strings.Fields(command)
+	if len(fields) < 2 {
+		return false
+	}
+	// Allow env prefixes: FOO=bar gh pr create …
+	idx := 0
+	for idx < len(fields) && strings.Contains(fields[idx], "=") && !strings.HasPrefix(fields[idx], "-") {
+		idx++
+	}
+	if idx >= len(fields) {
+		return false
+	}
+	cmd := fields[idx]
+	if base := fields[idx]; strings.Contains(base, "/") {
+		// path/to/gh
+		parts := strings.Split(base, "/")
+		cmd = parts[len(parts)-1]
+	}
+	if cmd != "gh" {
+		return false
+	}
+	for _, f := range fields[idx+1:] {
+		if f == "pr" {
+			return true
+		}
+	}
+	return false
 }

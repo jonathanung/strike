@@ -81,6 +81,9 @@ type Options struct {
 	Depth int
 	// ParentSessionID is the spawning session's ID; empty on root engines.
 	ParentSessionID string
+	// PersistSessionMeta, when set, writes durable session metadata (sidecar).
+	// The engine emits protocol.SessionMeta after a successful persist.
+	PersistSessionMeta func(meta protocol.SessionMeta) error
 }
 
 // beginAck reports whether ToolCallBegin was actually written to Events.
@@ -988,7 +991,8 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 				}
 				return tool.QuestionResponse{Answers: answers}, nil
 			},
-			SwitchAgent: e.queueSwitchAgent,
+			SwitchAgent:     e.queueSwitchAgent,
+			RecordSessionPR: e.recordSessionPR(corr),
 		}
 		if e.opts.Depth < e.opts.MaxChildDepth {
 			tc.SpawnTask = e.spawnChild
@@ -1025,6 +1029,28 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 		Metadata:    res.Metadata,
 	})
 	return toolResultMessage(call.ID, output, isError)
+}
+
+// recordSessionPR returns a tool callback that persists PR linkage and emits
+// protocol.SessionMeta. Nil when neither persist nor emission is useful.
+func (e *Engine) recordSessionPR(corr protocol.Correlation) func(tool.SessionPR) error {
+	return func(pr tool.SessionPR) error {
+		if pr.URL == "" {
+			return nil
+		}
+		meta := protocol.SessionMeta{
+			Correlation: corr,
+			PRURL:       pr.URL,
+			PRNumber:    pr.Number,
+		}
+		if e.opts.PersistSessionMeta != nil {
+			if err := e.opts.PersistSessionMeta(meta); err != nil {
+				return err
+			}
+		}
+		e.emit(meta)
+		return nil
+	}
 }
 
 func (e *Engine) canceledToolResult(callID string, corr protocol.Correlation) provider.Message {

@@ -276,6 +276,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 	// One session ID shared by the engine (event correlation) and the JSONL
 	// filename so transcript identity matches runtime correlation.
 	sessionID := session.NewID()
+	sessionDir := session.DefaultDir()
 	eng := engine.New(engine.Options{
 		SessionID:       sessionID,
 		Select:          selectProvider,
@@ -290,9 +291,20 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 		Agents:          agents,
 		InitialAgent:    cfg.DefaultAgent,
 		Rules:           permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),
+		PersistSessionMeta: func(m protocol.SessionMeta) error {
+			_, err := session.UpdateMeta(sessionDir, sessionID, func(meta *session.Meta) {
+				if m.PRURL != "" {
+					meta.PRURL = m.PRURL
+				}
+				if m.PRNumber != 0 {
+					meta.PRNumber = m.PRNumber
+				}
+			})
+			return err
+		},
 	})
 
-	store, err := session.Open(session.DefaultDir(), sessionID)
+	store, err := session.Open(sessionDir, sessionID)
 	if err != nil {
 		return fmt.Errorf("opening session store: %w", err)
 	}

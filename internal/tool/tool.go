@@ -67,17 +67,27 @@ type QuestionResponse struct {
 	Answers []string
 }
 
+// SessionPR is a pull request linked to the active session (from gh output).
+type SessionPR struct {
+	URL    string
+	Number int
+}
+
 // Context carries per-call facilities into a tool. Ask blocks until the
 // permission is granted; it returns an error if rejected or denied.
 // SpawnTask, when non-nil, runs a blocking foreground child session.
 // AskUser, when non-nil, blocks until the user answers a question batch.
 // SwitchAgent, when non-nil, queues an agent switch applied when the turn ends.
+// RecordSessionPR, when non-nil, persists a PR URL/number on the session
+// (used when bash captures gh pr create/view output).
 type Context struct {
 	WorkDir     string
 	Ask         func(ctx context.Context, req AskRequest) error
 	SpawnTask   func(ctx context.Context, req TaskRequest) (TaskResult, error)
 	AskUser     func(ctx context.Context, req QuestionRequest) (QuestionResponse, error)
 	SwitchAgent func(name string) error
+	// RecordSessionPR stores PR linkage on the session when non-nil.
+	RecordSessionPR func(pr SessionPR) error
 	// Files optionally tracks read snapshots for stale-edit detection after
 	// external changes (FilesChanged / /vim). Nil disables the checks.
 	Files *FileState
