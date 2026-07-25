@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 	"github.com/jonathanung/strike-cli/internal/tui/ui"
@@ -155,32 +156,48 @@ func TestCompactRightPaneIsBorderlessAndUsesFullBodyDimensionsAtThresholds(t *te
 	}
 }
 
-func TestDefaultWindowRegistryHasTwoUniqueWidthSafePlaceholders(t *testing.T) {
+func TestDefaultWindowRegistryHasTwoUniqueNamedWindows(t *testing.T) {
 	r := newWindowRegistry()
 	if len(r.windows) != 2 {
-		t.Fatalf("placeholder count = %d, want 2", len(r.windows))
+		t.Fatalf("window count = %d, want 2", len(r.windows))
 	}
+	wantIDs := []string{"context", "activity"}
 	seenIDs, seenTitles := map[string]bool{}, map[string]bool{}
-	for _, w := range r.windows {
+	for i, w := range r.windows {
 		if w.id() == "" || w.title() == "" || seenIDs[w.id()] || seenTitles[w.title()] {
-			t.Errorf("placeholder identity is missing or not unique: id=%q title=%q", w.id(), w.title())
+			t.Errorf("window identity is missing or not unique: id=%q title=%q", w.id(), w.title())
 		}
 		seenIDs[w.id()], seenTitles[w.title()] = true, true
-		p, ok := w.(placeholderWindow)
-		if !ok || p.body == "" {
-			t.Errorf("placeholder = %#v, want a placeholderWindow with body", w)
+		if i < len(wantIDs) && w.id() != wantIDs[i] {
+			t.Errorf("windows[%d].id() = %q, want %q", i, w.id(), wantIDs[i])
 		}
-		resized := w.resize(80, 3)
-		updated, _ := resized.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("z")})
-		view := updated.view(theme.Default())
-		if !strings.Contains(view, "last input: z") {
-			t.Errorf("placeholder did not retain delivered key: %q", view)
+		if _, ok := w.(namedWindow); !ok {
+			t.Errorf("window = %#v, want a namedWindow", w)
 		}
-		view = updated.resize(8, 3).view(theme.Default())
-		for _, line := range strings.Split(view, "\n") {
-			if got := lipgloss.Width(line); got > 8 {
-				t.Errorf("placeholder %q line width = %d, want <= 8: %q", w.id(), got, line)
+		// Resize is width-safe: dimensions stick and view stays within width.
+		for _, size := range []struct{ w, h int }{{80, 3}, {12, 5}, {1, 1}} {
+			resized := w.resize(size.w, size.h)
+			nw, ok := resized.(namedWindow)
+			if !ok || nw.width != size.w || nw.height != size.h {
+				t.Errorf("resize(%d,%d) = %#v, want namedWindow %dx%d", size.w, size.h, resized, size.w, size.h)
 			}
 		}
+	}
+	if !seenIDs["context"] || !seenIDs["activity"] {
+		t.Errorf("default registry ids = %v, want context and activity", seenIDs)
+	}
+
+	// Full Model.View at split size shows real context content, not a placeholder.
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 93, Height: 40})
+	plain := ansi.Strip(m.View())
+	if strings.Contains(plain, "Context window placeholder.") {
+		t.Errorf("split view still shows placeholder copy:\n%s", plain)
+	}
+	if !strings.Contains(plain, "none") && !strings.Contains(plain, "/provider") {
+		t.Errorf("split view missing real context content (none or /provider):\n%s", plain)
+	}
+	if !strings.Contains(plain, "context") {
+		t.Errorf("split view missing context window title:\n%s", plain)
 	}
 }

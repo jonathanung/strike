@@ -22,6 +22,8 @@ func TestDefaultKeyMapBindingsMatchTheirRequiredKeysAndHaveHelp(t *testing.T) {
 		{"palette", keys.Palette, tea.KeyMsg{Type: tea.KeyCtrlP}},
 		{"keyhelp", keys.KeyHelp, tea.KeyMsg{Type: tea.KeyF1}},
 		{"interrupt", keys.Interrupt, tea.KeyMsg{Type: tea.KeyEsc}},
+		{"send", keys.Send, tea.KeyMsg{Type: tea.KeyEnter}},
+		{"newline", keys.Newline, tea.KeyMsg{Type: tea.KeyEnter, Alt: true}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -33,6 +35,15 @@ func TestDefaultKeyMapBindingsMatchTheirRequiredKeysAndHaveHelp(t *testing.T) {
 				t.Errorf("binding help = %#v, want key and description", help)
 			}
 		})
+	}
+	// Newline help advertises shift+enter (the user-facing chord); the binding
+	// itself matches alt+enter after the input normalizer rewrites CSI.
+	newlineHelp := keys.Newline.Help()
+	if newlineHelp.Key != "shift+enter" {
+		t.Errorf("Newline help key = %q, want shift+enter", newlineHelp.Key)
+	}
+	if newlineHelp.Desc != "newline" {
+		t.Errorf("Newline help desc = %q, want newline", newlineHelp.Desc)
 	}
 }
 

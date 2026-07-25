@@ -92,6 +92,35 @@ func TestTextInputDefaultPromptIsTwoDisplayCells(t *testing.T) {
 	}
 }
 
+func TestComposerPlaceholderMentionsAskAnythingAndSlash(t *testing.T) {
+	ta := newComposer(theme.Default())
+	if !strings.Contains(ta.Placeholder, "Ask anything") {
+		t.Errorf("composer placeholder = %q, want it to contain %q", ta.Placeholder, "Ask anything")
+	}
+	if !strings.Contains(ta.Placeholder, "/") {
+		t.Errorf("composer placeholder = %q, want it to mention / for commands", ta.Placeholder)
+	}
+}
+
+func TestComposerFooterAdvertisesEnterAndShiftEnter(t *testing.T) {
+	// Bordered composer at a non-compact size with empty transcript should
+	// surface send/newline help in the panel footer.
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 93, Height: 40})
+	plain := ansi.Strip(m.View())
+	if !strings.Contains(plain, "enter") {
+		t.Errorf("bordered view missing enter send help:\n%s", plain)
+	}
+	if !strings.Contains(plain, "shift+enter") && !strings.Contains(plain, "newline") {
+		t.Errorf("bordered view missing shift+enter/newline help:\n%s", plain)
+	}
+	// Direct footer helper also advertises both.
+	footer := ansi.Strip(composerFooter(m.th, 60))
+	if !strings.Contains(footer, "enter") || !strings.Contains(footer, "shift+enter") {
+		t.Errorf("composerFooter = %q, want enter and shift+enter", footer)
+	}
+}
+
 func TestComposerAndTextInputHonorThemeXSPromptGap(t *testing.T) {
 	for _, tt := range []struct {
 		name string

@@ -106,7 +106,7 @@ func (m Model) welcomeCards(statuses []host.ProviderStatus) []welcomeCard {
 			return m.welcomeProviders(statuses, width, rows)
 		}})
 	}
-	cards = append(cards, welcomeCard{title: "keys", desired: 9, body: func(width, rows int) string {
+	cards = append(cards, welcomeCard{title: "keys", desired: 10, body: func(width, rows int) string {
 		return m.welcomeKeys(width, rows)
 	}})
 	if len(validAgents) > 0 || len(validSkills) > 0 {
@@ -231,6 +231,10 @@ func (m Model) welcomeProviders(statuses []host.ProviderStatus, width, rows int)
 		}
 		lines = append(lines, line)
 	}
+	if len(lines) < rows {
+		tip := welcomeTruncate(dotJoin(th, "type below", "enter to send"), width, th.Icons.Ellipsis)
+		lines = append(lines, st.Muted.Render(tip))
+	}
 	return strings.Join(lines, "\n")
 }
 
@@ -245,7 +249,7 @@ func (m Model) welcomeKeys(size ...int) string {
 	th := m.th.Resolve()
 	st := th.S()
 	gap := themedSpace(th.Spacing.SM)
-	bindings := []key.Binding{m.keyMap.FocusLeft, m.keyMap.FocusRight, m.keyMap.CycleWindowNext, m.keyMap.CycleWindowPrev, m.keyMap.Palette, m.keyMap.KeyHelp, m.keyMap.Send, m.keyMap.Interrupt}
+	bindings := []key.Binding{m.keyMap.FocusLeft, m.keyMap.FocusRight, m.keyMap.CycleWindowNext, m.keyMap.CycleWindowPrev, m.keyMap.Send, m.keyMap.Newline, m.keyMap.Palette, m.keyMap.KeyHelp, m.keyMap.Interrupt}
 	lines := make([]string, 0, min(rows, len(bindings)))
 	for _, binding := range bindings {
 		if len(lines) >= rows {

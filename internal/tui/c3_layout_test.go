@@ -216,8 +216,12 @@ func TestC3WelcomeProviderAndPromptLimits(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	statuses := []host.ProviderStatus{{Name: "one"}, {Name: "two"}, {Name: "three"}, {Name: "four"}, {Name: "five"}}
 	body := ansi.Strip(m.welcomeProviders(statuses, 30, 8))
-	if strings.Count(body, "\n")+1 != 5 || !strings.Contains(body, "/provider") || strings.Contains(body, "five") {
-		t.Errorf("provider card did not cap four rows plus action: %q", body)
+	// Four provider rows + /provider action + "type below · enter to send" tip.
+	if strings.Count(body, "\n")+1 != 6 || !strings.Contains(body, "/provider") || strings.Contains(body, "five") {
+		t.Errorf("provider card did not cap four rows plus action and tip: %q", body)
+	}
+	if !strings.Contains(body, "type below") || !strings.Contains(body, "enter") {
+		t.Errorf("provider card missing type-below/enter tip: %q", body)
 	}
 	for _, tt := range []struct {
 		name, prompt string
@@ -282,8 +286,12 @@ func TestC3ModelSelectionPreservesExistingNoticeAndRefreshesPalette(t *testing.T
 		t.Fatalf("model selection changed fields or unrelated notice: %#v", m)
 	}
 	plain := ansi.Strip(m.View())
-	if strings.Contains(plain, "model: unique-provider/unique-model") || strings.Count(plain, "unique-provider/unique-model") != 1 {
-		t.Errorf("model is not represented exactly once in full view:\n%s", plain)
+	// Header badge plus right-pane context body both surface provider/model.
+	if strings.Contains(plain, "model: unique-provider/unique-model") {
+		t.Errorf("legacy model: prefix leaked into view:\n%s", plain)
+	}
+	if got := strings.Count(plain, "unique-provider/unique-model"); got < 1 || got > 2 {
+		t.Errorf("model occurrences = %d, want 1 (header) or 2 (header+context):\n%s", got, plain)
 	}
 	if !strings.Contains(plain, "unrelated failure") {
 		t.Errorf("existing error notice disappeared:\n%s", plain)
@@ -370,8 +378,9 @@ func TestC3LongDashboardHistoryAndSelectedModelEvidence(t *testing.T) {
 
 	view, plain := m.View(), ansi.Strip(m.View())
 	assertCanvas(t, view, 160, 45)
-	if got := strings.Count(plain, "c3-unique-provider/c3-unique-model"); got != 1 {
-		t.Errorf("selected provider/model occurrences = %d, want 1:\n%s", got, plain)
+	// Header badge plus right-pane context both show the selected model.
+	if got := strings.Count(plain, "c3-unique-provider/c3-unique-model"); got < 1 || got > 2 {
+		t.Errorf("selected provider/model occurrences = %d, want 1 or 2:\n%s", got, plain)
 	}
 	if strings.Contains(view, "\x1b[2J") || strings.ContainsRune(plain, '\x1b') || strings.ContainsAny(plain, "\x00\r\u0085") {
 		t.Errorf("dashboard retained dangerous prompt controls:\n%q", view)
@@ -388,7 +397,9 @@ func TestC3LongDashboardHistoryAndSelectedModelEvidence(t *testing.T) {
 	}
 
 	recent := welcomeCardBounds(t, dashboardLines(t, plain, l), "recent prompts")
-	if want := (welcomeBounds{top: 21, bottom: 36, left: 0, right: 51}); recent != want {
+	// Keys card now includes the newline binding, shifting recent prompts one
+	// row down versus the pre-onboarding layout.
+	if want := (welcomeBounds{top: 22, bottom: 36, left: 0, right: 51}); recent != want {
 		t.Errorf("recent prompts geometry = %+v, want %+v", recent, want)
 	}
 	rows := welcomeCardPromptRows(dashboardLines(t, plain, l), recent)
