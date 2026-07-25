@@ -29,11 +29,12 @@ type keyMap struct {
 	ScrollDown        key.Binding
 	JumpBottom        key.Binding
 	ToggleOrientation key.Binding
-	// Tool cell selection/expand when the composer is empty (enter still sends
-	// when there is text).
+	// Tool cell selection/expand/copy when the composer is empty (enter still
+	// sends when there is text; y still types when the composer has content).
 	ToolPrev   key.Binding
 	ToolNext   key.Binding
 	ToolExpand key.Binding
+	ToolCopy   key.Binding
 
 	// Composer readline editing (focusLeft only). ctrl+k must not be stolen by
 	// CycleWindowPrev / vertical FocusRight; palette/global chords stay global.
@@ -81,6 +82,8 @@ func defaultKeyMap() keyMap {
 		ToolPrev:   key.NewBinding(key.WithKeys("alt+["), key.WithHelp("alt+[", "prev tool cell")),
 		ToolNext:   key.NewBinding(key.WithKeys("alt+]"), key.WithHelp("alt+]", "next tool cell")),
 		ToolExpand: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "expand tool cell")),
+		// ToolCopy: bare y when composer is empty (yank selected/latest cell).
+		ToolCopy: key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy tool cell")),
 
 		KillWord:      key.NewBinding(key.WithKeys("ctrl+w"), key.WithHelp("ctrl+w", "kill word backward")),
 		WordBackward:  key.NewBinding(key.WithKeys("alt+b"), key.WithHelp("alt+b", "word backward")),
@@ -135,6 +138,7 @@ func keybindCatalog(keys keyMap) []keybindEntry {
 		from("nav.tool-prev", "Navigation", keys.ToolPrev),
 		from("nav.tool-next", "Navigation", keys.ToolNext),
 		from("nav.tool-expand", "Navigation", keys.ToolExpand),
+		from("nav.tool-copy", "Navigation", keys.ToolCopy),
 
 		from("global.palette", "Global", keys.Palette),
 		from("global.keyhelp", "Global", keys.KeyHelp),
@@ -171,8 +175,9 @@ func keybindCatalog(keys keyMap) []keybindEntry {
 
 		{ID: "perm.choice", Category: "Permission", Keys: "left/right/h/l/tab", Action: "move choice"},
 		{ID: "perm.once", Category: "Permission", Keys: "1/y", Action: "allow once"},
-		{ID: "perm.always", Category: "Permission", Keys: "2/a", Action: "allow always"},
-		{ID: "perm.reject", Category: "Permission", Keys: "3/n/esc", Action: "reject"},
+		{ID: "perm.session", Category: "Permission", Keys: "2/s", Action: "allow session"},
+		{ID: "perm.project", Category: "Permission", Keys: "3/p", Action: "allow project"},
+		{ID: "perm.reject", Category: "Permission", Keys: "4/n/esc", Action: "reject"},
 	}
 	return entries
 }
