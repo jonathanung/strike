@@ -355,8 +355,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	}
 	sessionID := info.ID
 	sessionDir := sessions.Dir()
-	hookDefs := make([]tool.HookDef, 0, len(cfg.Hooks))
-	for _, h := range cfg.Hooks {
+	shellHooks := cfg.ShellHooks()
+	hookDefs := make([]tool.HookDef, 0, len(shellHooks))
+	for _, h := range shellHooks {
 		hookDefs = append(hookDefs, tool.HookDef{
 			Event:     h.Event,
 			Command:   h.Command,
@@ -379,6 +380,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		InitialAgent:    cfg.DefaultAgent,
 		Rules:           permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),
 		Hooks:           hookDefs,
+		HookRules:       cfg.HookRules(),
 		PersistProjectRule: func(rule permission.Rule) error {
 			return config.AppendProjectPermission(workDir, rule)
 		},

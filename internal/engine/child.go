@@ -76,6 +76,8 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		InitialEffort:      e.effort,
 		MaxTokens:          e.opts.MaxTokens,
 		Rules:              permission.DeriveChildRules(parentLayers, childAgent.Permissions),
+		Hooks:              e.opts.Hooks,
+		HookRules:          e.opts.HookRules,
 		PersistProjectRule: e.opts.PersistProjectRule,
 	})
 
