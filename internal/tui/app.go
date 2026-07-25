@@ -1805,15 +1805,8 @@ func (m Model) handleMemoryCommand(args []string) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		parts := make([]string, 0, len(entries))
-		for _, e := range entries {
-			line := e.Key + "=" + e.Value
-			if len(e.Tags) > 0 {
-				line += " [" + strings.Join(e.Tags, ", ") + "]"
-			}
-			parts = append(parts, line)
-		}
-		m.setNotice("memory: "+dotJoin(m.th, parts...), false)
+		m.clearNotice()
+		m.modal = newMemoryModal(entries, tag)
 		return m, nil
 	case "get":
 		if len(args) < 2 {
@@ -1894,11 +1887,8 @@ func (m Model) handleIssuesCommand(args []string) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		parts := make([]string, 0, len(items))
-		for _, iss := range items {
-			parts = append(parts, fmt.Sprintf("#%d [%s] %s", iss.ID, iss.Status, iss.Title))
-		}
-		m.setNotice("issues: "+dotJoin(m.th, parts...), false)
+		m.clearNotice()
+		m.modal = newIssuesModal(items, status)
 		return m, nil
 	case "add", "create", "new":
 		if len(args) < 2 {
