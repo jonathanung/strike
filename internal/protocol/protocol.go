@@ -99,6 +99,13 @@ type PermissionReply struct {
 	Message string `json:"message,omitempty"`
 }
 
+// QuestionReply resolves a pending QuestionAsked event with one answer
+// string per prompt (same order as Questions).
+type QuestionReply struct {
+	RequestID string   `json:"requestId"`
+	Answers   []string `json:"answers"`
+}
+
 // Interrupt cancels the running turn, if any.
 type Interrupt struct{}
 
@@ -138,6 +145,7 @@ type FilesChanged struct {
 
 func (UserInput) isOp()       {}
 func (PermissionReply) isOp() {}
+func (QuestionReply) isOp()   {}
 func (Interrupt) isOp()       {}
 func (SelectModel) isOp()     {}
 func (SelectAgent) isOp()     {}
@@ -237,6 +245,33 @@ type PermissionResolved struct {
 	Decision  Decision `json:"decision"`
 }
 
+// QuestionOption is one selectable choice on a QuestionPrompt.
+type QuestionOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+}
+
+// QuestionPrompt is one question in a QuestionAsked batch.
+type QuestionPrompt struct {
+	ID       string           `json:"id"`
+	Header   string           `json:"header,omitempty"`
+	Question string           `json:"question"`
+	Options  []QuestionOption `json:"options,omitempty"`
+}
+
+// QuestionAsked suspends a tool call until a QuestionReply arrives.
+type QuestionAsked struct {
+	Correlation
+	RequestID string           `json:"requestId"`
+	Questions []QuestionPrompt `json:"questions"`
+}
+
+// QuestionResolved closes a pending QuestionAsked (answer, reject, or cancel).
+type QuestionResolved struct {
+	Correlation
+	RequestID string `json:"requestId"`
+}
+
 type TurnCompleted struct {
 	Correlation
 	StopReason string `json:"stopReason,omitempty"`
@@ -289,6 +324,8 @@ func (ToolCallBegin) isEvent()      {}
 func (ToolCallEnd) isEvent()        {}
 func (PermissionAsked) isEvent()    {}
 func (PermissionResolved) isEvent() {}
+func (QuestionAsked) isEvent()      {}
+func (QuestionResolved) isEvent()   {}
 func (TurnCompleted) isEvent()      {}
 func (ModelSelected) isEvent()      {}
 func (AgentSelected) isEvent()      {}
