@@ -218,9 +218,13 @@ replace them. **Tab cycles agents**; `/agent [name]` lists or selects; the
 active agent shows in the status bar.
 
 Each model request composes the system prompt in layers (like opencode):
-agent baseline → environment (workdir, workspace root, git, platform, date,
-model) → `AGENTS.md` / `CLAUDE.md` instructions from `~/.strike` and the
-project (walked up to the git root).
+
+1. **Shared baseline** — identity, ADHD-shaped response contract, tool/safety rules
+2. **Provider overlay** — anthropic / openai (incl. chatgpt) / xai / default, chosen from the active provider and model id
+3. **Agent persona** — empty for built-in build/plan (provider overlay used); custom `agents/*.md` body replaces the provider overlay; config `systemPrompt` replaces it for build only
+4. **Plan overlay** — always added while the plan agent is active
+5. **Environment** — workdir, workspace root, git, platform, date, model id
+6. **Instructions** — `AGENTS.md` / `CLAUDE.md` from `~/.strike` and the project (walked up to the git root)
 
 ```markdown
 ---

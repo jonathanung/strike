@@ -10,28 +10,117 @@ import (
 	"time"
 )
 
+//go:embed prompt/shared.txt
+var sharedPrompt string
+
 //go:embed prompt/default.txt
-var defaultSystemPrompt string
+var defaultProviderPrompt string
+
+//go:embed prompt/anthropic.txt
+var anthropicProviderPrompt string
+
+//go:embed prompt/openai.txt
+var openaiProviderPrompt string
+
+//go:embed prompt/xai.txt
+var xaiProviderPrompt string
 
 //go:embed prompt/plan.txt
-var planSystemPrompt string
+var planPrompt string
 
-// DefaultSystemPrompt is the built-in build-agent baseline, adapted from
-// opencode's default session prompt for strike's tool set and slash commands.
-var DefaultSystemPrompt = strings.TrimSpace(defaultSystemPrompt) + "\n"
+func normPrompt(s string) string {
+	return strings.TrimSpace(s) + "\n"
+}
 
-// PlanSystemPrompt is the built-in plan-agent baseline (read-only planning).
-var PlanSystemPrompt = strings.TrimSpace(planSystemPrompt) + "\n"
+// SharedSystemPrompt is the always-on baseline (identity, ADHD response
+// contract, tools, safety). Provider and agent layers stack on top.
+var SharedSystemPrompt = normPrompt(sharedPrompt)
+
+// DefaultSystemPrompt is shared + generic provider notes — used when no
+// provider is selected yet and as the build-agent fallback content.
+var DefaultSystemPrompt = joinPromptLayers(SharedSystemPrompt, normPrompt(defaultProviderPrompt))
+
+// PlanSystemPrompt is the read-only plan overlay (composed with shared +
+// provider at request time for the plan agent).
+var PlanSystemPrompt = normPrompt(planPrompt)
+
+// ProviderSystemPrompt returns the provider-specific overlay for a strike
+// provider name and/or model id (opencode-style selection).
+func ProviderSystemPrompt(provider, model string) string {
+	switch providerPromptKind(provider, model) {
+	case "anthropic":
+		return normPrompt(anthropicProviderPrompt)
+	case "openai":
+		return normPrompt(openaiProviderPrompt)
+	case "xai":
+		return normPrompt(xaiProviderPrompt)
+	default:
+		return normPrompt(defaultProviderPrompt)
+	}
+}
+
+func providerPromptKind(provider, model string) string {
+	p := strings.ToLower(strings.TrimSpace(provider))
+	m := strings.ToLower(strings.TrimSpace(model))
+	switch p {
+	case "anthropic":
+		return "anthropic"
+	case "openai", "chatgpt":
+		return "openai"
+	case "xai":
+		return "xai"
+	}
+	switch {
+	case strings.Contains(m, "claude"):
+		return "anthropic"
+	case strings.Contains(m, "grok"):
+		return "xai"
+	case strings.Contains(m, "gpt"),
+		strings.Contains(m, "o1"),
+		strings.Contains(m, "o3"),
+		strings.Contains(m, "o4"):
+		return "openai"
+	default:
+		return "default"
+	}
+}
+
+func joinPromptLayers(layers ...string) string {
+	parts := make([]string, 0, len(layers))
+	for _, layer := range layers {
+		if s := strings.TrimSpace(layer); s != "" {
+			parts = append(parts, s)
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "\n\n") + "\n"
+}
 
 // system returns the composed system prompt for the next provider request:
-// agent baseline, then environment, then project/global instruction files.
-// Matches opencode's layered assembly (agent/provider prompt + env + AGENTS.md).
+// shared baseline → provider overlay (or agent/config override) → plan overlay
+// → environment → instruction files.
 func (e *Engine) system() string {
-	base := e.agent.Prompt
-	if base == "" {
-		base = DefaultSystemPrompt
+	parts := []string{SharedSystemPrompt}
+
+	switch {
+	case e.agent.Name == "build" && strings.TrimSpace(e.opts.SystemPrompt) != "":
+		// Config systemPrompt replaces the provider overlay for build only.
+		parts = append(parts, e.opts.SystemPrompt)
+	case strings.TrimSpace(e.agent.Prompt) != "":
+		// Custom agent (or user-defined build/plan.md) supplies the persona layer.
+		parts = append(parts, e.agent.Prompt)
+	default:
+		parts = append(parts, ProviderSystemPrompt(e.provName, e.model))
 	}
-	parts := []string{strings.TrimSpace(base)}
+
+	// Built-in plan constraints always apply while the plan agent is active,
+	// even when a user plan.md supplies extra persona text.
+	if e.agent.Name == "plan" {
+		parts = append(parts, PlanSystemPrompt)
+	}
+
 	if env := e.environmentPrompt(); env != "" {
 		parts = append(parts, env)
 	}
@@ -40,7 +129,7 @@ func (e *Engine) system() string {
 			parts = append(parts, s)
 		}
 	}
-	return strings.Join(parts, "\n\n") + "\n"
+	return joinPromptLayers(parts...)
 }
 
 func (e *Engine) environmentPrompt() string {

@@ -228,16 +228,13 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 		tool.NewBash(),
 	)
 
-	// Built-in agents first (build default, then plan), like opencode;
-	// user agents from ~/.strike/agents and ./.strike/agents follow and
-	// may override same-named built-ins.
-	buildPrompt := engine.DefaultSystemPrompt
-	if cfg.SystemPrompt != "" {
-		buildPrompt = cfg.SystemPrompt
-	}
+	// Built-in agents first (build default, then plan). Empty Prompt means
+	// "compose shared baseline + provider overlay at request time". User
+	// agents from ~/.strike/agents and ./.strike/agents follow and may
+	// override same-named built-ins (their body becomes the persona layer).
 	agents := []engine.Agent{
-		{Name: "build", Description: "The default agent. Executes tools based on configured permissions.", Prompt: buildPrompt},
-		{Name: "plan", Description: "Plan mode. Read-only analysis and implementation plans.", Prompt: engine.PlanSystemPrompt},
+		{Name: "build", Description: "The default agent. Executes tools based on configured permissions."},
+		{Name: "plan", Description: "Plan mode. Read-only analysis and implementation plans."},
 	}
 	loadedAgents, err := config.LoadAgentsWithError(workDir)
 	if err != nil {
@@ -266,6 +263,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 		WorkDir:         workDir,
 		ProjectRoot:     projectIdentity.Root,
 		Instructions:    instructions,
+		SystemPrompt:    cfg.SystemPrompt,
 		InitialProvider: cfg.Provider,
 		InitialModel:    cfg.Model,
 		InitialEffort:   cfg.Effort,

@@ -65,6 +65,9 @@ type Options struct {
 	// Instructions are preloaded AGENTS.md/CLAUDE.md blocks appended after
 	// the environment layer (see config.LoadInstructions).
 	Instructions []string
+	// SystemPrompt, when set, replaces the provider overlay for the build
+	// agent only (shared baseline still applies). From config systemPrompt.
+	SystemPrompt string
 	// Rules are permission ruleset layers, earliest first (later wins).
 	Rules []permission.Ruleset
 }
@@ -122,7 +125,7 @@ func New(opts Options) *Engine {
 		opts.SessionID = rand.Text()
 	}
 	if len(opts.Agents) == 0 {
-		opts.Agents = []Agent{{Name: "build", Description: "general coding agent", Prompt: DefaultSystemPrompt}}
+		opts.Agents = []Agent{{Name: "build", Description: "general coding agent"}}
 	}
 	if opts.MaxTokens == 0 {
 		opts.MaxTokens = 8192
