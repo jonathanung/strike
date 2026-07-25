@@ -10,6 +10,10 @@ import (
 // altEnter is Alt+Enter as delivered to Bubble Tea after rewrite (KeyEnter+Alt).
 var altEnter = []byte("\x1b\r")
 
+// altSemicolon is Alt+; — the wire form for ToggleOrientation after ctrl+;
+// CSI is rewritten (Bubble Tea has no native "ctrl+;" KeyType).
+var altSemicolon = []byte("\x1b;")
+
 // Enhanced-keyboard enable/disable sequences written at program start/exit:
 //
 //	enable  modifyOtherKeys level 2: ESC [ > 4 ; 2 m
@@ -147,7 +151,7 @@ func (s *shiftEnterReader) Read(p []byte) (int, error) {
 }
 
 // rewrite consumes complete sequences from s.buf into a passthrough/rewrite
-// buffer, leaving only an incomplete CSI prefix (if any) in s.buf.
+// buffer, leaving only an incomplete CSI/OSC prefix (if any) in s.buf.
 func (s *shiftEnterReader) rewrite() []byte {
 	if len(s.buf) == 0 {
 		return nil
@@ -156,8 +160,23 @@ func (s *shiftEnterReader) rewrite() []byte {
 	i := 0
 	for i < len(s.buf) {
 		if s.buf[i] != 0x1b {
+			// Drop leaked OSC payloads whose leading ESC was consumed elsewhere
+			// (e.g. "]11;rgb:0000/0000/0000\").
+			if n := scanLeakedOSC(s.buf[i:]); n > 0 {
+				i += n
+				continue
+			}
 			out.WriteByte(s.buf[i])
 			i++
+			continue
+		}
+		// OSC (ESC ] … BEL/ST): drop terminal replies (bg color, title, …).
+		if end, osc, incomplete := scanOSC(s.buf[i:]); osc || incomplete {
+			if incomplete {
+				break
+			}
+			// Drop complete OSC — never inject into the composer.
+			i += end
 			continue
 		}
 		end, csi, incomplete := scanCSI(s.buf[i:])
@@ -219,6 +238,90 @@ func scanCSI(b []byte) (end int, csi bool, incomplete bool) {
 	}
 	// Stream ended mid-params: hold.
 	return 0, true, true
+}
+
+// scanOSC examines b starting at ESC. It returns:
+//
+//	end         — bytes consumed when a complete OSC is found
+//	osc         — true if this is an OSC sequence (ESC ] … BEL or ST)
+//	incomplete  — true if the stream ends mid-OSC (hold for more input)
+//
+// OSC replies (e.g. bg color "ESC ] 11 ; rgb:… BEL") must not reach the
+// composer. ST is ESC \ or the C1 0x9c byte.
+func scanOSC(b []byte) (end int, osc bool, incomplete bool) {
+	if len(b) == 0 || b[0] != 0x1b {
+		return 0, false, false
+	}
+	if len(b) == 1 {
+		return 1, false, false
+	}
+	if b[1] != ']' {
+		return 0, false, false
+	}
+	for i := 2; i < len(b); i++ {
+		switch b[i] {
+		case 0x07: // BEL
+			return i + 1, true, false
+		case 0x9c: // C1 ST
+			return i + 1, true, false
+		case 0x1b: // ESC \ (ST) or interrupted
+			if i+1 < len(b) && b[i+1] == '\\' {
+				return i + 2, true, false
+			}
+			// ESC without '\': treat payload up to (not including) ESC as OSC end
+			// so a following CSI can be rescanned. Drop what we have.
+			if i+1 >= len(b) {
+				return 0, true, true
+			}
+			return i, true, false
+		}
+	}
+	return 0, true, true
+}
+
+// scanLeakedOSC matches an OSC payload whose leading ESC was already consumed
+// (common when KeyEsc ate the introducer): "]11;rgb:…\" or "]11;rgb:…BEL".
+// Returns bytes to drop, or 0 if b does not start a leaked OSC reply.
+func scanLeakedOSC(b []byte) int {
+	if len(b) < 4 || b[0] != ']' {
+		return 0
+	}
+	// Require "]<digits>;" so normal ']' typing is unaffected.
+	i := 1
+	if i >= len(b) || b[i] < '0' || b[i] > '9' {
+		return 0
+	}
+	for i < len(b) && b[i] >= '0' && b[i] <= '9' {
+		i++
+	}
+	if i >= len(b) || b[i] != ';' {
+		return 0
+	}
+	i++
+	for i < len(b) {
+		switch b[i] {
+		case 0x07, 0x9c:
+			return i + 1
+		case '\\':
+			return i + 1
+		case 0x1b:
+			if i+1 < len(b) && b[i+1] == '\\' {
+				return i + 2
+			}
+			return i
+		case '\n', '\r':
+			return i
+		}
+		// Bound runaway matches (OSC payloads are short).
+		if i > 128 {
+			return 0
+		}
+		i++
+	}
+	// Incomplete leaked OSC: hold nothing at this layer (caller emits bytes);
+	// complete forms are what appear after submit. Drop nothing if unterminated
+	// so we don't eat user "]11;foo" mid-type forever — only terminated forms.
+	return 0
 }
 
 // classifyEnhanced maps known enhanced-keyboard CSI sequences to legacy bytes.
@@ -301,6 +404,10 @@ func classifyEnhanced(seq []byte) (out []byte, drop bool, handled bool) {
 	// Ctrl+Enter (code 13 with ctrl) is intentionally not rewritten.
 	if code == 13 && (shift || alt) && !ctrl {
 		return altEnter, false, true
+	}
+	// Ctrl+; → Alt+; for ToggleOrientation (no native ctrl+; KeyType).
+	if ctrl && !shift && !alt && code == int(';') {
+		return altSemicolon, false, true
 	}
 	// Ctrl+letter → legacy control byte (code & 0x1f).
 	if ctrl && isLetterCode(code) {

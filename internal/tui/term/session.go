@@ -25,6 +25,9 @@ type Session struct {
 	done    chan struct{}
 	waitErr error
 	closed  bool
+	// readDone is set when readLoop exits; readDoneCh is closed once.
+	readDone   bool
+	readDoneCh chan struct{}
 
 	// notify is closed-or-signaled when the screen changes or the process exits.
 	// Receivers should also watch Done().
@@ -58,15 +61,26 @@ func Start(cmd *exec.Cmd, cols, rows int) (*Session, error) {
 	}
 	term := vt10x.New(vt10x.WithSize(cols, rows))
 	s := &Session{
-		cmd:    cmd,
-		ptmx:   ptmx,
-		term:   term,
-		cols:   cols,
-		rows:   rows,
-		done:   make(chan struct{}),
-		notify: make(chan struct{}, 1),
+		cmd:        cmd,
+		ptmx:       ptmx,
+		term:       term,
+		cols:       cols,
+		rows:       rows,
+		done:       make(chan struct{}),
+		readDoneCh: make(chan struct{}),
+		notify:     make(chan struct{}, 1),
 	}
-	go s.readLoop()
+	go func() {
+		s.readLoop()
+		// Reader finished (PTY EOF/error). Signal waitLoop that drain is done.
+		s.mu.Lock()
+		s.readDone = true
+		if s.readDoneCh != nil {
+			close(s.readDoneCh)
+			s.readDoneCh = nil
+		}
+		s.mu.Unlock()
+	}()
 	go s.waitLoop()
 	return s, nil
 }
@@ -185,11 +199,31 @@ func (s *Session) waitLoop() {
 	err := s.cmd.Wait()
 	s.mu.Lock()
 	s.waitErr = err
-	// Close PTY so readLoop unblocks if it hasn't already.
-	if s.ptmx != nil && !s.closed {
-		_ = s.ptmx.Close()
+	readCh := s.readDoneCh
+	already := s.readDone
+	s.mu.Unlock()
+	// Child exit closes the slave side; master Read drains remaining bytes then
+	// EOFs. Do not close the master first — that can drop the final paint
+	// (e.g. script echo) before readLoop sees it. If the reader is stuck, close
+	// the master after a short grace so Done cannot hang forever.
+	if !already && readCh != nil {
+		select {
+		case <-readCh:
+		case <-time.After(500 * time.Millisecond):
+			s.mu.Lock()
+			if s.ptmx != nil && !s.closed {
+				_ = s.ptmx.Close()
+			}
+			s.mu.Unlock()
+			<-readCh
+		}
 	}
+	s.mu.Lock()
 	s.closed = true
+	if s.ptmx != nil {
+		_ = s.ptmx.Close()
+		s.ptmx = nil
+	}
 	s.mu.Unlock()
 	s.ping()
 	close(s.done)

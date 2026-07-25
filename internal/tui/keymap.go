@@ -53,8 +53,13 @@ func defaultKeyMap() keyMap {
 		SaveDefaults:      key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "save defaults")),
 		ScrollUp:          key.NewBinding(key.WithKeys("pgup", "ctrl+up"), key.WithHelp("pgup/ctrl+up", "scroll up")),
 		ScrollDown:        key.NewBinding(key.WithKeys("pgdown", "ctrl+down"), key.WithHelp("pgdn/ctrl+down", "scroll down")),
-		JumpBottom:        key.NewBinding(key.WithKeys("ctrl+end"), key.WithHelp("ctrl+end", "jump to bottom")),
-		ToggleOrientation: key.NewBinding(key.WithKeys("ctrl+;"), key.WithHelp("ctrl+;", "toggle split")),
+		// JumpBottom: ctrl+t is the user chord. Bubble Tea names the legacy
+		// control byte KeyCtrlT ("ctrl+t").
+		JumpBottom: key.NewBinding(key.WithKeys("ctrl+t"), key.WithHelp("ctrl+t", "jump to bottom")),
+		// ToggleOrientation: user chord is ctrl+;. Bubble Tea has no KeyType for
+		// ctrl+semicolon, so WrapInput rewrites enhanced ctrl+; CSI to alt+;
+		// (same pattern as shift+enter → alt+enter for Newline).
+		ToggleOrientation: key.NewBinding(key.WithKeys("alt+;"), key.WithHelp("ctrl+;", "toggle split")),
 	}
 }
 

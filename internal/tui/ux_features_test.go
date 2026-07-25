@@ -76,14 +76,14 @@ func TestScrollBindingsCtrlUpDownAndJumpBottom(t *testing.T) {
 		t.Errorf("ctrl+down did not scroll down: offset=%d afterUp=%d", m.viewport.YOffset, afterUp)
 	}
 
-	// Scroll away, then ctrl+end jumps to bottom and re-enables follow.
+	// Scroll away, then ctrl+t jumps to bottom and re-enables follow.
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
 	if m.viewport.AtBottom() {
 		t.Fatal("pgup left viewport at bottom")
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlEnd})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlT})
 	if !m.viewport.AtBottom() {
-		t.Errorf("ctrl+end did not jump to bottom: YOffset=%d", m.viewport.YOffset)
+		t.Errorf("ctrl+t did not jump to bottom: YOffset=%d", m.viewport.YOffset)
 	}
 	m = updateApp(t, m, engineEventMsg{ev: protocol.TextDelta{Text: "follow-after-end"}})
 	if !m.viewport.AtBottom() {
@@ -141,10 +141,9 @@ func TestToggleOrientationAndLayoutCommand(t *testing.T) {
 		t.Errorf("split notice = %q, want vertical", m.notice)
 	}
 
-	// Binding still matches ToggleOrientation after orientation changes.
-	if !key.Matches(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{';'}}, m.keyMap.ToggleOrientation) &&
-		m.keyMap.ToggleOrientation.Help().Key != "ctrl+;" {
-		t.Errorf("ToggleOrientation help = %q", m.keyMap.ToggleOrientation.Help().Key)
+	// Wire form is alt+; (after WrapInput rewrites ctrl+; CSI); help stays ctrl+;.
+	if !key.Matches(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{';'}, Alt: true}, m.keyMap.ToggleOrientation) {
+		t.Error("ToggleOrientation should match alt+; KeyMsg")
 	}
 	if m.keyMap.ToggleOrientation.Help().Key != "ctrl+;" {
 		t.Errorf("ToggleOrientation help key = %q, want ctrl+;", m.keyMap.ToggleOrientation.Help().Key)

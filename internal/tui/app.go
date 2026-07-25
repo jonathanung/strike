@@ -519,6 +519,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toggleOrientation()
 			return m, nil
 		}
+		// Transcript scroll/jump always target the chat viewport, never the
+		// right-pane terminal — handle before focusRight window routing.
+		if key.Matches(msg, m.keyMap.ScrollUp) {
+			m.viewport.HalfViewUp()
+			return m, nil
+		}
+		if key.Matches(msg, m.keyMap.ScrollDown) {
+			m.viewport.HalfViewDown()
+			return m, nil
+		}
+		if key.Matches(msg, m.keyMap.JumpBottom) {
+			m.viewport.GotoBottom()
+			return m, nil
+		}
 		if m.turnRunning && key.Matches(msg, m.keyMap.Interrupt) {
 			ops := m.ops
 			return m, func() tea.Msg {
@@ -580,17 +594,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, nil
-		case key.Matches(msg, m.keyMap.ScrollUp):
-			m.viewport.HalfViewUp()
-			return m, nil
-		case key.Matches(msg, m.keyMap.ScrollDown):
-			m.viewport.HalfViewDown()
-			return m, nil
-		case key.Matches(msg, m.keyMap.JumpBottom):
-			m.viewport.GotoBottom()
-			return m, nil
 		}
 		return m.updateComposer(msg)
+
+	case tea.MouseMsg:
+		// Wheel scrolls the transcript viewport even when a right pane is focused.
+		if msg.Action != tea.MouseActionPress {
+			break
+		}
+		switch msg.Button { //nolint:exhaustive
+		case tea.MouseButtonWheelUp:
+			m.viewport.ScrollUp(m.viewport.MouseWheelDelta)
+			return m, nil
+		case tea.MouseButtonWheelDown:
+			m.viewport.ScrollDown(m.viewport.MouseWheelDelta)
+			return m, nil
+		}
 	}
 
 	var cmd tea.Cmd
