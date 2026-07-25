@@ -44,3 +44,24 @@ func (r *Registry) Schemas() []provider.ToolSchema {
 	}
 	return out
 }
+
+// CloneWithout returns a new registry with the same tools in registration
+// order, omitting any whose name is listed. Used to build child-session
+// registries without the task tool.
+func (r *Registry) CloneWithout(names ...string) *Registry {
+	if r == nil {
+		return NewRegistry()
+	}
+	skip := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		skip[name] = struct{}{}
+	}
+	tools := make([]Tool, 0, len(r.order))
+	for _, name := range r.order {
+		if _, omit := skip[name]; omit {
+			continue
+		}
+		tools = append(tools, r.tools[name])
+	}
+	return NewRegistry(tools...)
+}

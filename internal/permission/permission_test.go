@@ -27,6 +27,7 @@ func TestEvaluateLastMatchWins(t *testing.T) {
 		{"bash", "git status", Allow},
 		{"bash", "git push origin main", Deny},
 		{"edit", "x.go", Ask},
+		{"task", "*", Allow},
 		{"unknown", "*", Ask},
 	}
 	for _, tc := range cases {
@@ -34,6 +35,91 @@ func TestEvaluateLastMatchWins(t *testing.T) {
 			t.Errorf("Evaluate(%q,%q) = %q, want %q", tc.perm, tc.pattern, got, tc.want)
 		}
 	}
+}
+
+func TestDefaultsIncludesTaskAllow(t *testing.T) {
+	if got := Evaluate("task", "*", Defaults()); got != Allow {
+		t.Errorf("Defaults task = %q, want allow", got)
+	}
+}
+
+func TestDeriveChildRules(t *testing.T) {
+	t.Run("parent deny beats childExtra allow", func(t *testing.T) {
+		parent := []Ruleset{{{Permission: "bash", Pattern: "*", Action: Deny}}}
+		childExtra := Ruleset{{Permission: "bash", Pattern: "*", Action: Allow}}
+		derived := DeriveChildRules(parent, childExtra)
+		if got := Evaluate("bash", "echo hi", derived...); got != Deny {
+			t.Errorf("bash = %q, want deny (child cannot widen)", got)
+		}
+	})
+
+	t.Run("parent ask beats childExtra allow", func(t *testing.T) {
+		parent := []Ruleset{{{Permission: "bash", Pattern: "*", Action: Ask}}}
+		childExtra := Ruleset{{Permission: "bash", Pattern: "*", Action: Allow}}
+		derived := DeriveChildRules(parent, childExtra)
+		if got := Evaluate("bash", "echo hi", derived...); got != Ask {
+			t.Errorf("bash = %q, want ask (Allow dropped from childExtra)", got)
+		}
+	})
+
+	t.Run("parent allow-after-deny preserved", func(t *testing.T) {
+		parent := []Ruleset{{
+			{Permission: "bash", Pattern: "*", Action: Deny},
+			{Permission: "bash", Pattern: "git *", Action: Allow},
+		}}
+		derived := DeriveChildRules(parent)
+		if got := Evaluate("bash", "git status", derived...); got != Allow {
+			t.Errorf("git status = %q, want allow", got)
+		}
+		if got := Evaluate("bash", "rm -rf /", derived...); got != Deny {
+			t.Errorf("rm = %q, want deny", got)
+		}
+	})
+
+	t.Run("always denies task", func(t *testing.T) {
+		parent := []Ruleset{Defaults()}
+		derived := DeriveChildRules(parent)
+		if got := Evaluate("task", "*", derived...); got != Deny {
+			t.Errorf("task = %q, want deny", got)
+		}
+		// Parent defaults still allow task.
+		if got := Evaluate("task", "*", parent...); got != Allow {
+			t.Errorf("parent task = %q, want allow", got)
+		}
+	})
+
+	t.Run("deep copy does not mutate parent", func(t *testing.T) {
+		parentLayer := Ruleset{{Permission: "read", Pattern: "*", Action: Allow}}
+		parent := []Ruleset{parentLayer}
+		derived := DeriveChildRules(parent)
+		if len(derived) == 0 {
+			t.Fatal("derived empty")
+		}
+		// Mutate returned ruleset layers.
+		derived[0][0].Action = Deny
+		derived[0] = append(derived[0], Rule{Permission: "bash", Pattern: "*", Action: Deny})
+		if parentLayer[0].Action != Allow {
+			t.Errorf("parent rule mutated to %q", parentLayer[0].Action)
+		}
+		if len(parentLayer) != 1 {
+			t.Errorf("parent layer length = %d, want 1", len(parentLayer))
+		}
+		if got := Evaluate("read", "x", parent...); got != Allow {
+			t.Errorf("parent evaluate after mutate = %q, want allow", got)
+		}
+	})
+
+	t.Run("childExtra deny is kept", func(t *testing.T) {
+		parent := []Ruleset{{{Permission: "edit", Pattern: "*", Action: Allow}}}
+		childExtra := Ruleset{{Permission: "edit", Pattern: "secret.go", Action: Deny}}
+		derived := DeriveChildRules(parent, childExtra)
+		if got := Evaluate("edit", "secret.go", derived...); got != Deny {
+			t.Errorf("secret.go = %q, want deny", got)
+		}
+		if got := Evaluate("edit", "ok.go", derived...); got != Allow {
+			t.Errorf("ok.go = %q, want allow", got)
+		}
+	})
 }
 
 func TestEvaluateEmptyPatternMatchesStar(t *testing.T) {
