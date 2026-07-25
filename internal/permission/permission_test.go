@@ -171,9 +171,12 @@ func TestAskAllowAndDeny(t *testing.T) {
 		t.Fatalf("allow: %v", err)
 	}
 	err := svc.Ask(context.Background(), tool.AskRequest{Permission: "bash", Patterns: []string{"rm -rf /"}})
-	var rej *RejectedError
-	if !errors.As(err, &rej) {
-		t.Fatalf("deny err = %v, want RejectedError", err)
+	var denied *DeniedError
+	if !errors.As(err, &denied) {
+		t.Fatalf("deny err = %v, want DeniedError", err)
+	}
+	if !strings.Contains(err.Error(), "Permission denied") {
+		t.Errorf("deny err text = %q, want Permission denied", err)
 	}
 	if len(events) != 0 {
 		t.Errorf("expected no ask events for allow/deny, got %#v", events)
@@ -955,9 +958,9 @@ func TestWorstCaseAcrossPatterns(t *testing.T) {
 		Permission: "edit",
 		Patterns:   []string{"safe.go", "secret.go"},
 	})
-	var rej *RejectedError
-	if !errors.As(err, &rej) {
-		t.Fatalf("err = %v, want deny", err)
+	var denied *DeniedError
+	if !errors.As(err, &denied) {
+		t.Fatalf("err = %v, want DeniedError", err)
 	}
 }
 
@@ -1058,9 +1061,9 @@ func TestSetAgentRulesDenyBeatsBaseAllow(t *testing.T) {
 		Permission: "write",
 		Patterns:   []string{"secret.go"},
 	})
-	var rej *RejectedError
-	if !errors.As(err, &rej) {
-		t.Fatalf("Ask = %v, want RejectedError", err)
+	var denied *DeniedError
+	if !errors.As(err, &denied) {
+		t.Fatalf("Ask = %v, want DeniedError", err)
 	}
 	if len(events) != 0 {
 		t.Errorf("expected no permission events on hard deny, got %#v", events)
@@ -1122,9 +1125,9 @@ func TestSetAgentRulesClearsAlwaysGrants(t *testing.T) {
 		Permission: "write",
 		Patterns:   []string{"c.go"},
 	})
-	var rej *RejectedError
-	if !errors.As(err, &rej) {
-		t.Fatalf("third Ask after SetAgentRules deny = %v, want RejectedError", err)
+	var denied *DeniedError
+	if !errors.As(err, &denied) {
+		t.Fatalf("third Ask after SetAgentRules deny = %v, want DeniedError", err)
 	}
 	mu.Lock()
 	afterDeny := len(asked)
@@ -1144,9 +1147,9 @@ func TestSetAgentRulesEmptyClearsAgentLayer(t *testing.T) {
 		Permission: "write",
 		Patterns:   []string{"x.go"},
 	})
-	var rej *RejectedError
-	if !errors.As(err, &rej) {
-		t.Fatalf("Ask under agent deny = %v, want RejectedError", err)
+	var denied *DeniedError
+	if !errors.As(err, &denied) {
+		t.Fatalf("Ask under agent deny = %v, want DeniedError", err)
 	}
 
 	svc.SetAgentRules(nil)
