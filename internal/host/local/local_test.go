@@ -435,3 +435,38 @@ func TestCatalogContextWindowAndOutputLimitFromCache(t *testing.T) {
 		t.Errorf("OutputLimit(gpt-bare) = %d,%v want 0,false", tokens, ok)
 	}
 }
+
+func TestCatalogModelsMetadataFromCache(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cacheDir := filepath.Join(home, ".strike", "cache")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	catalog := `{"openai":{"id":"openai","name":"OpenAI","models":{` +
+		`"gpt-full":{"id":"gpt-full","name":"Full","limit":{"context":128000,"output":16384},` +
+		`"cost":{"input":2.5,"output":10},"tool_call":true,"reasoning":true,"attachment":true},` +
+		`"gpt-bare":{"id":"gpt-bare","name":"Bare"}` +
+		`}}}`
+	if err := os.WriteFile(filepath.Join(cacheDir, "models.json"), []byte(catalog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svc := New(nil, nil, nil, nil, nil, nil)
+	infos, err := svc.Catalog.Models(context.Background(), "openai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 2 || infos[0].ID != "gpt-bare" || infos[1].ID != "gpt-full" {
+		t.Fatalf("Models = %#v", infos)
+	}
+	full := infos[1]
+	if full.Context != 128_000 || !full.HasCost || full.InputCost != 2.5 || full.OutputCost != 10 {
+		t.Errorf("gpt-full meta = %+v", full)
+	}
+	if !full.ToolCall || !full.Reasoning || !full.Attachment {
+		t.Errorf("gpt-full caps = %+v", full)
+	}
+	if infos[0].HasCost || infos[0].Context != 0 {
+		t.Errorf("gpt-bare should lack meta: %+v", infos[0])
+	}
+}

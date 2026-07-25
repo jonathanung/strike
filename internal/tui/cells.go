@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -89,11 +90,15 @@ type toolCell struct {
 	isError  bool
 	expanded bool
 	selected bool // highlight while transcript selection is on this cell
+	// copiedFlash is set after y-to-copy until clearCellCopiedFlashMsg.
+	copiedFlash bool
 }
 
 const (
 	toolPreviewLines  = 6
 	toolLiveTailLines = 5
+	// cellCopiedFlash is how long the "copied" label stays on a cell after y.
+	cellCopiedFlash = 900 * time.Millisecond
 )
 
 // isExploreTool reports tools that group into an "exploring…" cell when
@@ -132,6 +137,34 @@ func (c *toolCell) toggleExpanded() bool {
 	return true
 }
 
+// copyText returns clipboard payload for y-to-copy: edit diff, full output,
+// command title, or compact args — empty when nothing useful is available.
+func (c *toolCell) copyText() string {
+	if c == nil {
+		return ""
+	}
+	if meta, ok := parseEditMetadata(c.metadata); ok {
+		return formatEditDiffCopy(meta)
+	}
+	if out := strings.TrimRight(c.output, "\n"); out != "" {
+		return out
+	}
+	if c.title != "" {
+		return c.title
+	}
+	if cmd := toolCommandArg(c.args); cmd != "" {
+		return cmd
+	}
+	if len(c.args) > 0 {
+		var buf bytes.Buffer
+		if err := json.Compact(&buf, c.args); err == nil {
+			return buf.String()
+		}
+		return string(c.args)
+	}
+	return ""
+}
+
 func (c *toolCell) render(width int, th theme.Theme) string {
 	return c.renderLinked(width, th, "")
 }
@@ -154,6 +187,9 @@ func (c *toolCell) renderLinked(width int, th theme.Theme, linkBase string) stri
 		} else {
 			status = st.Success.Render(ic.OK)
 		}
+	}
+	if c.copiedFlash {
+		status = st.Success.Render("copied")
 	}
 	marker := ""
 	if c.collapsible() {
@@ -226,6 +262,8 @@ type exploreCell struct {
 	accepting bool // still absorbing consecutive explore tools
 	expanded  bool
 	selected  bool
+	// copiedFlash is set after y-to-copy until clearCellCopiedFlashMsg.
+	copiedFlash bool
 }
 
 func (c *exploreCell) collapsible() bool {
@@ -238,6 +276,30 @@ func (c *exploreCell) toggleExpanded() bool {
 	}
 	c.expanded = !c.expanded
 	return true
+}
+
+// copyText lists each grouped tool call (name · title) for the clipboard.
+func (c *exploreCell) copyText() string {
+	if c == nil || len(c.calls) == 0 {
+		return ""
+	}
+	var lines []string
+	for _, tc := range c.calls {
+		if tc == nil {
+			continue
+		}
+		line := tc.name
+		if tc.title != "" {
+			line += " " + tc.title
+		} else if out := strings.TrimSpace(tc.output); out != "" {
+			if i := strings.IndexByte(out, '\n'); i >= 0 {
+				out = out[:i]
+			}
+			line += " " + out
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (c *exploreCell) allDone() bool {
@@ -290,6 +352,9 @@ func (c *exploreCell) renderLinked(width int, th theme.Theme, linkBase string) s
 		} else {
 			status = st.Success.Render(ic.OK)
 		}
+	}
+	if c.copiedFlash {
+		status = st.Success.Render("copied")
 	}
 	glyph := ic.TreeCollapsed
 	if c.expanded {
@@ -344,6 +409,41 @@ func diffExpandedMaxLines(meta editDiffMeta) int {
 		return diffPreviewMaxLinesCell
 	}
 	return n
+}
+
+// formatEditDiffCopy builds a plain unified-style diff for the system clipboard.
+func formatEditDiffCopy(meta editDiffMeta) string {
+	var b strings.Builder
+	writePrefixed := func(prefix, body string) {
+		if body == "" {
+			b.WriteString(prefix)
+			b.WriteByte('\n')
+			return
+		}
+		lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
+		for _, line := range lines {
+			b.WriteString(prefix)
+			b.WriteString(line)
+			b.WriteByte('\n')
+		}
+	}
+	writePrefixed("-", meta.OldString)
+	writePrefixed("+", meta.NewString)
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// toolCommandArg extracts a bash-style "command" string from tool args JSON.
+func toolCommandArg(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var parsed struct {
+		Command string `json:"command"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(parsed.Command)
 }
 
 func countLines(s string) int {
