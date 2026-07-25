@@ -42,7 +42,7 @@ func TestTaskSuccessfulSpawn(t *testing.T) {
 	var gotReq TaskRequest
 	tc.SpawnTask = func(_ context.Context, req TaskRequest) (TaskResult, error) {
 		gotReq = req
-		return TaskResult{Output: "child summary", Status: "completed"}, nil
+		return TaskResult{Output: "Started child session abc", Status: "started", SessionID: "abc12345xyz"}, nil
 	}
 	res, err := NewTask().Execute(context.Background(), mustJSON(t, map[string]any{
 		"prompt": "investigate flaky test",
@@ -51,11 +51,11 @@ func TestTaskSuccessfulSpawn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Output != "child summary" {
-		t.Errorf("output = %q, want child summary", res.Output)
+	if res.Output != "Started child session abc" {
+		t.Errorf("output = %q, want started notice", res.Output)
 	}
-	if res.Title != "task" {
-		t.Errorf("title = %q, want task", res.Title)
+	if res.Title != "task abc12345" {
+		t.Errorf("title = %q, want task abc12345", res.Title)
 	}
 	if gotReq.Prompt != "investigate flaky test" || gotReq.Agent != "plan" {
 		t.Errorf("SpawnTask req = %#v", gotReq)
@@ -111,7 +111,7 @@ func TestTaskPermissionAsk(t *testing.T) {
 			return nil
 		},
 		SpawnTask: func(context.Context, TaskRequest) (TaskResult, error) {
-			return TaskResult{Output: "ok", Status: "completed"}, nil
+			return TaskResult{Output: "ok", Status: "started", SessionID: "s1"}, nil
 		},
 	}
 	if _, err := NewTask().Execute(context.Background(), mustJSON(t, map[string]any{

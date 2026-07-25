@@ -360,6 +360,23 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			})
 			return err
 		},
+		OpenChildSession: func(parentID, childID, title string) (string, error) {
+			info, err := sessions.Create(session.CreateOptions{
+				ID:              childID,
+				ParentSessionID: parentID,
+				Title:           title,
+			})
+			if err != nil {
+				return "", err
+			}
+			return info.ID, nil
+		},
+		AppendChildEvent: func(childID string, ev protocol.Event) error {
+			return sessions.Append(childID, ev)
+		},
+		CloseChildSession: func(childID string) error {
+			return sessions.Close(childID)
+		},
 	})
 
 	agentNames := make([]string, len(agents))

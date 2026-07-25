@@ -9,6 +9,7 @@ package permission
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/bmatcuk/doublestar/v4"
@@ -67,8 +68,8 @@ func ValidateRuleset(rs Ruleset) error {
 }
 
 // Defaults: searching and reading are free; anything that mutates or
-// executes asks. task is allowed so the root agent can spawn foreground
-// children; DeriveChildRules denies task on child sessions.
+// executes asks. task is allowed so the root agent can spawn children;
+// DeriveChildRules denies task on child sessions.
 func Defaults() Ruleset {
 	return Ruleset{
 		{Permission: "read", Pattern: "*", Action: Allow},
@@ -301,7 +302,12 @@ func (s *Service) ask(ctx context.Context, req tool.AskRequest, corr protocol.Co
 		return &DeniedError{Reason: "a permission rule matched"}
 	}
 	s.nextID++
+	// Session-scope IDs so concurrent parent/child engines never collide when
+	// replies fan out across services.
 	id := fmt.Sprintf("perm_%d", s.nextID)
+	if sid := strings.TrimSpace(corr.SessionID); sid != "" {
+		id = sid + ":" + id
+	}
 	p := &pending{
 		permission:  req.Permission,
 		patterns:    req.Patterns,
