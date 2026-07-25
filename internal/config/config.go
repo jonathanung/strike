@@ -33,9 +33,24 @@ type Config struct {
 	// tea.ExecProcess handoff). Unknown values are ignored at load time.
 	VimMode     string             `json:"vimMode,omitempty"`
 	Permissions permission.Ruleset `json:"permissions,omitempty"`
+	// Hooks are shell-command lifecycle hooks (event JSON on stdin; exit
+	// allow/block; stdout inject). Global then project layers concatenate.
+	Hooks []Hook `json:"hooks,omitempty"`
 	// Providers are user-declared custom/self-hosted endpoints (name, base
 	// URL, wire api). API keys are never stored here — only in auth.json.
 	Providers []CustomProvider `json:"providers,omitempty"`
+}
+
+// Hook is a shell command fired on an engine lifecycle event.
+type Hook struct {
+	// Event is pre_tool_use or post_tool_use.
+	Event string `json:"event"`
+	// Command runs via bash -c with the event payload on stdin.
+	Command string `json:"command"`
+	// TimeoutMs bounds execution (default 30000, max 120000).
+	TimeoutMs int `json:"timeoutMs,omitempty"`
+	// Matcher is a doublestar glob over the tool name; empty matches all.
+	Matcher string `json:"matcher,omitempty"`
 }
 
 func Default() Config {
@@ -157,6 +172,7 @@ func merge(base, layer Config) Config {
 		base.VimMode = layer.VimMode
 	}
 	base.Permissions = append(base.Permissions, layer.Permissions...)
+	base.Hooks = append(base.Hooks, layer.Hooks...)
 	base.Providers = mergeProviders(base.Providers, layer.Providers)
 	return base
 }

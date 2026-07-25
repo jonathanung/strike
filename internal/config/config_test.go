@@ -38,7 +38,8 @@ func TestLoadMerge(t *testing.T) {
 		"model": "gpt-test",
 		"theme": "nord",
 		"systemPrompt": "global",
-		"permissions": [{"permission":"bash","pattern":"*","action":"ask"}]
+		"permissions": [{"permission":"bash","pattern":"*","action":"ask"}],
+		"hooks": [{"event":"pre_tool_use","command":"echo global"}]
 	}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +52,8 @@ func TestLoadMerge(t *testing.T) {
 		"model": "project-model",
 		"defaultAgent": "plan",
 		"theme": "dracula",
-		"permissions": [{"permission":"bash","pattern":"git *","action":"allow"}]
+		"permissions": [{"permission":"bash","pattern":"git *","action":"allow"}],
+		"hooks": [{"event":"post_tool_use","command":"echo project","matcher":"bash"}]
 	}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -80,6 +82,12 @@ func TestLoadMerge(t *testing.T) {
 	}
 	if cfg.Permissions[1].Action != permission.Allow {
 		t.Errorf("second rule = %#v", cfg.Permissions[1])
+	}
+	if len(cfg.Hooks) != 2 {
+		t.Fatalf("hooks = %#v", cfg.Hooks)
+	}
+	if cfg.Hooks[0].Command != "echo global" || cfg.Hooks[1].Matcher != "bash" {
+		t.Errorf("hooks = %#v", cfg.Hooks)
 	}
 }
 

@@ -335,6 +335,15 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	}
 	sessionID := info.ID
 	sessionDir := sessions.Dir()
+	hookDefs := make([]tool.HookDef, 0, len(cfg.Hooks))
+	for _, h := range cfg.Hooks {
+		hookDefs = append(hookDefs, tool.HookDef{
+			Event:     h.Event,
+			Command:   h.Command,
+			TimeoutMs: h.TimeoutMs,
+			Matcher:   h.Matcher,
+		})
+	}
 	eng := engine.New(engine.Options{
 		SessionID:       sessionID,
 		Select:          selectProvider,
@@ -349,6 +358,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		Agents:          agents,
 		InitialAgent:    cfg.DefaultAgent,
 		Rules:           permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),
+		Hooks:           hookDefs,
 		PersistSessionMeta: func(m protocol.SessionMeta) error {
 			_, err := session.UpdateMeta(sessionDir, sessionID, func(meta *session.Meta) {
 				if m.PRURL != "" {
