@@ -36,14 +36,15 @@ func saveDefaultsThroughCmd(settings host.Settings, provider, model, agent, effo
 }
 
 // headerView is the one-line header strip: the compact wordmark, the current
-// provider/model and agent badges on the left, and the turn-running status on
-// the right.
+// provider/model and agent badges on the left, and dynamic agent-state status
+// on the right. Status chrome tints from theme tokens via agentState.
 func (m Model) headerView(width int) string {
 	th := m.th.Resolve()
 	ic := iconsFor(th)
-	st := th.S()
 	badgeGap := themedSpace(th.Spacing.SM)
 	inlineGap := themedSpace(th.Spacing.XS)
+	state := m.agentState()
+	stateTone := agentStateTone(state)
 
 	left := ui.LogoCompact(th)
 	if m.providerName == "" {
@@ -57,8 +58,9 @@ func (m Model) headerView(width int) string {
 	}
 	// Same display-safety gate as the palette and welcome card: agents are
 	// not host-filtered, so every render site guards the name itself.
+	// Agent badge tone follows live runtime state (tokenized coloring).
 	if m.agentName != "" && validAgentName(m.agentName) {
-		left += inlineGap + ui.Badge(th, ui.ToneAccentAlt, ic.Agent+inlineGap+sanitizeDisplayData(m.agentName))
+		left += inlineGap + ui.Badge(th, stateTone, ic.Agent+inlineGap+sanitizeDisplayData(m.agentName))
 	}
 	// Only shown once a level is set — an unset dial means "whatever the
 	// provider does by default", which is not worth a badge.
@@ -70,9 +72,17 @@ func (m Model) headerView(width int) string {
 		left += inlineGap + ui.Badge(th, ui.ToneWarning, "fast")
 	}
 
-	right := ""
-	if m.turnRunning {
-		right = m.spin.View() + inlineGap + st.Warning.Render("working — esc interrupts")
+	statusStyle := th.AgentStateStyle(state)
+	var right string
+	switch state {
+	case theme.AgentStateWorking:
+		right = m.spin.View() + inlineGap + statusStyle.Render(state.Label()+" — esc interrupts")
+	case theme.AgentStateAttention:
+		right = statusStyle.Render(state.Label() + " — respond to prompt")
+	case theme.AgentStateError:
+		right = statusStyle.Render(state.Label())
+	default:
+		right = statusStyle.Render(state.Label())
 	}
 	return ui.StatusBar(m.th, max(1, width), left, right)
 }

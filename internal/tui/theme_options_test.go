@@ -130,7 +130,7 @@ func TestThemeStylesComposerTextInputsAndSpinnerWithoutWidgetBackgrounds(t *test
 	th := theme.Default()
 	th.Text = fixedColor("#102030")
 	th.Accent = fixedColor("#405060")
-	th.Warning = fixedColor("#708090")
+	th.AccentAlt = fixedColor("#708090")
 	th.Background = theme.NoBackground()
 	m, _ := newAppTestModelWithOptions(Options{Theme: &th})
 	m.composer.SetValue("composer")
@@ -157,7 +157,7 @@ func TestThemeStylesComposerTextInputsAndSpinnerWithoutWidgetBackgrounds(t *test
 		t.Errorf("composer text did not use the custom Text token: %q", got)
 	}
 	if got := m.spin.View(); !strings.Contains(got, rgbSGR("#708090")) {
-		t.Errorf("spinner did not use the custom Warning token: %q", got)
+		t.Errorf("spinner did not use the custom AccentAlt (working) token: %q", got)
 	}
 	for name, out := range map[string]string{
 		"API key textinput":    apiKey.input.View(),

@@ -109,9 +109,15 @@ type Model struct {
 	noticeErr   bool
 	noticeCause noticeCause
 	turnRunning bool
-	width       int
-	height      int
-	ready       bool
+	// awaitingPermission is true between PermissionAsked and
+	// PermissionResolved / TurnCompleted. It drives AgentStateAttention.
+	awaitingPermission bool
+	// sessionErrored is sticky error coloring after a failed turn or an
+	// idle-state EngineError, cleared on the next accepted user turn.
+	sessionErrored bool
+	width          int
+	height         int
+	ready          bool
 }
 
 // New builds the frontend model. services supplies every host capability; any
@@ -576,11 +582,13 @@ func (m *Model) reflow() {
 }
 
 func (m *Model) applyEvent(ev protocol.Event) {
+	// Status coloring tracks protocol facts before view-side side effects so
+	// agentState never depends on modal type checks.
+	m.applyAgentStateEvent(ev)
 	switch ev := ev.(type) {
 	case protocol.UserMessage:
 		m.cells = append(m.cells, &userCell{text: ev.Text})
 	case protocol.TurnStarted:
-		m.turnRunning = true
 		m.refreshOpenPalette()
 	case protocol.TextDelta:
 		if last, ok := lastCell[*assistantCell](m.cells); ok {
@@ -603,7 +611,6 @@ func (m *Model) applyEvent(ev protocol.Event) {
 			m.modal = nil
 		}
 	case protocol.TurnCompleted:
-		m.turnRunning = false
 		m.refreshOpenPalette()
 	case protocol.ModelSelected:
 		if m.noticeCause == noticeNeedsModel {

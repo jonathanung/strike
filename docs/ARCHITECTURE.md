@@ -251,6 +251,16 @@ Two different mechanisms, depending on whether it needs Go code:
    theme token, which is what makes a future palette or glyph swap a one-file
    edit.
 
+### Dynamic agent-state coloring
+
+Live session/agent status chrome uses `theme.AgentState` and the token map in
+`internal/tui/theme/agent_state.go` (`Ready`→`Success`, `Working`→`AccentAlt`,
+`Attention`→`Warning`, `Error`→`Error`, reserved `Dead`→`TextMuted`). The TUI
+reduces protocol events into that state in `applyAgentStateEvent` /
+`agentState` — views must not invent status from modal types. Multi-agent
+tree nodes should reuse the same mapping when M5 lands; do not add a second
+palette.
+
 ## TUI theme and style boundary
 
 `theme.Theme.Resolve` is the runtime normalization point for partial themes.
