@@ -1636,8 +1636,9 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "/agent":
 		if len(fields) < 2 {
-			m.setNotice("agents: "+dotJoin(m.th, m.agents...)+" (tab cycles)", false)
+			// Bare /agent opens the centered picker (tab still cycles).
 			m.resetComposer()
+			m.modal = newAgentModal(m.agentName, m.agents, m.ops, m.services.Settings)
 			return m, nil
 		}
 		m.resetComposer()
