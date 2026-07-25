@@ -36,7 +36,13 @@ func (c *userCell) render(width int, th theme.Theme) string {
 }
 
 type assistantCell struct {
-	text string
+	text     string
+	complete bool // true after turn/tool boundary; markdown only when complete
+
+	mdCache    string
+	mdCacheKey string
+	mdCacheW   int
+	mdCacheOK  bool
 }
 
 func (c *assistantCell) render(width int, th theme.Theme) string {
@@ -46,7 +52,29 @@ func (c *assistantCell) render(width int, th theme.Theme) string {
 	space := themedSpace(th.Spacing.XS)
 	indentation := themedSpace(th.Spacing.SM)
 	label := st.AssistantLabel.Render(ic.Assistant + space + "strike")
-	body := renderCellText(st.Text, strings.TrimSpace(c.text), max(1, width-lipgloss.Width(indentation)))
+	bodyWidth := max(1, width-lipgloss.Width(indentation))
+	src := strings.TrimSpace(c.text)
+	var body string
+	switch {
+	case src == "":
+		body = ""
+	case !c.complete:
+		// Plain text while streaming — avoid glamour on incomplete fences.
+		body = renderCellText(st.Text, src, bodyWidth)
+	case c.mdCacheOK && c.mdCacheKey == src && c.mdCacheW == bodyWidth:
+		body = c.mdCache
+	default:
+		out, err := markdownRender(src, bodyWidth)
+		if err != nil {
+			body = renderCellText(st.Text, src, bodyWidth)
+		} else {
+			body = out
+		}
+		c.mdCache = body
+		c.mdCacheKey = src
+		c.mdCacheW = bodyWidth
+		c.mdCacheOK = true
+	}
 	return label + "\n" + indent(body, indentation)
 }
 
