@@ -854,6 +854,44 @@ func TestHistoryRecallReflowsMultilineUnicodeAndEditingExitsBrowsing(t *testing.
 	}
 }
 
+func TestSubmitDuringRunningTurnKeepsComposerDraft(t *testing.T) {
+	tests := []struct {
+		name     string
+		skills   []host.Skill
+		composer string
+	}{
+		{name: "ordinary", composer: "draft while busy"},
+		{name: "skill", skills: []host.Skill{fakeSkill("review", "", "Rendered: $ARGUMENTS")}, composer: "/review keep me"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := newFakeHistory()
+			m, ops := newAppTestModelWithHistory(nil, tt.skills, store)
+			m.providerName = "echo"
+			m.turnRunning = true
+			m.composer.SetValue(tt.composer)
+
+			updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			m = updated.(Model)
+			if cmd != nil {
+				for _, msg := range runAllAppCmds(t, cmd) {
+					m = updateApp(t, m, msg)
+				}
+			}
+			assertNoAppOp(t, ops)
+			if got := m.composer.Value(); got != tt.composer {
+				t.Errorf("composer = %q, want draft kept %q", got, tt.composer)
+			}
+			if len(store.Entries()) != 0 {
+				t.Errorf("history = %q, want empty (no submit)", store.Entries())
+			}
+			if !m.noticeErr || !strings.Contains(m.notice, "turn is already running") {
+				t.Errorf("notice = %q (error=%v), want busy-turn error", m.notice, m.noticeErr)
+			}
+		})
+	}
+}
+
 func TestSubmissionsPersistDisplayPromptAndStillEmitUserInput(t *testing.T) {
 	tests := []struct {
 		name        string

@@ -1990,6 +1990,10 @@ func (m Model) submit(op protocol.UserInput, displayPrompt string) (tea.Model, t
 		m.setNotice("viewing subagent — return to parent to send (esc or ctrl+x up)", true)
 		return m, nil
 	}
+	if m.turnRunning {
+		m.setNotice("a turn is already running; interrupt it first", true)
+		return m, nil
+	}
 	m.resetComposer()
 	m.clearNotice()
 	ops := m.ops
