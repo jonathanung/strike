@@ -11,6 +11,7 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 	childCorr := Correlation{SessionID: "child-1", ParentSessionID: "session-1", Depth: 1}
 	events := []Event{
 		UserMessage{Correlation: corr, Text: "hi"},
+		SessionTitled{Correlation: Correlation{SessionID: "session-1"}, Title: "hi"},
 		TurnStarted{Correlation: corr},
 		TextDelta{Correlation: corr, Text: "chunk"},
 		ToolCallBegin{Correlation: corr, CallID: "c1", Name: "bash", Args: json.RawMessage(`{"command":"echo"}`)},

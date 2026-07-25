@@ -861,11 +861,17 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 	case protocol.UserMessage:
 		m.completeAssistantCells()
 		m.cells = append(m.cells, &userCell{text: ev.Text})
+		// Fallback for logs without session.titled (pre-auto-title sessions).
 		if m.titleTopic == "" {
 			if topic := sanitizeTitleTopic(ev.Text); topic != "" {
 				m.titleTopic = topic
-				cmd = tea.SetWindowTitle(windowTitle(*m))
+				cmd = tea.Batch(tea.SetWindowTitle(windowTitle(*m)), m.broadcastContextState())
 			}
+		}
+	case protocol.SessionTitled:
+		if topic := sanitizeTitleTopic(ev.Title); topic != "" {
+			m.titleTopic = topic
+			cmd = tea.Batch(tea.SetWindowTitle(windowTitle(*m)), m.broadcastContextState())
 		}
 	case protocol.TurnStarted:
 		m.turnStartedAt = time.Now()
@@ -1047,6 +1053,8 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	switch e := ev.(type) {
 	case protocol.UserMessage:
 		return e.Correlation, true
+	case protocol.SessionTitled:
+		return e.Correlation, true
 	case protocol.TurnStarted:
 		return e.Correlation, true
 	case protocol.TextDelta:
@@ -1127,6 +1135,7 @@ func (m Model) contextStateSnapshot() contextStateMsg {
 	return contextStateMsg{
 		WorkDir:           m.workDir,
 		SessionID:         m.sessionID,
+		SessionTitle:      m.titleTopic,
 		Provider:          m.providerName,
 		Model:             m.modelName,
 		Agent:             m.agentName,
