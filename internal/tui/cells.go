@@ -89,7 +89,10 @@ type toolCell struct {
 	isError  bool
 }
 
-const toolPreviewLines = 6
+const (
+	toolPreviewLines  = 6
+	toolLiveTailLines = 5
+)
 
 func (c *toolCell) render(width int, th theme.Theme) string {
 	th = th.Resolve()
@@ -132,6 +135,12 @@ func (c *toolCell) render(width int, th theme.Theme) string {
 			body := renderCellText(st.Muted, preview, bodyWidth)
 			out += "\n" + indent(body, prefix)
 		}
+	} else if c.output != "" {
+		// Live bash (and other streaming tools): bounded tail while running.
+		prefix := themedSpace(th.Spacing.SM) + st.BorderMuted.Render(ic.ToolGuide) + space
+		bodyWidth := max(1, width-lipgloss.Width(prefix))
+		body := renderCellText(st.Muted, tailLines(c.output, toolLiveTailLines), bodyWidth)
+		out += "\n" + indent(body, prefix)
 	}
 	return out
 }
@@ -177,6 +186,19 @@ func previewLines(s string, n int, ellipsis, space string) string {
 	}
 	shown := strings.Join(lines[:n], "\n")
 	return shown + "\n" + ellipsis + space + "(" + itoa(len(lines)-n) + space + "more lines)"
+}
+
+// tailLines returns the last n lines of s (no ellipsis), for live tool tails.
+func tailLines(s string, n int) string {
+	s = strings.TrimRight(s, "\n")
+	if s == "" || n <= 0 {
+		return ""
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) <= n {
+		return strings.Join(lines, "\n")
+	}
+	return strings.Join(lines[len(lines)-n:], "\n")
 }
 
 func compactJSON(raw json.RawMessage, maxLen int, ellipsis string) string {
