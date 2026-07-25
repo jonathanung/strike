@@ -1098,6 +1098,8 @@ func eventCorrelation(t *testing.T, ev protocol.Event) protocol.Correlation {
 		return ev.Correlation
 	case protocol.UsageReported:
 		return ev.Correlation
+	case protocol.ProviderRetrying:
+		return ev.Correlation
 	case protocol.EffortSelected:
 		return ev.Correlation
 	case protocol.FastSelected:

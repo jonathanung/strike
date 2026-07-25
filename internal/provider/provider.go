@@ -101,6 +101,14 @@ type Usage struct {
 }
 
 // StreamEvent is the normalized event union all providers emit.
+//
+// Terminal contract (enforced by NormalizeStream / base.Stream):
+//   - Exactly one terminal event per stream: EventDone (success) or
+//     EventError (failure), then the channel closes.
+//   - Non-terminal events (text, tool call, reasoning) may only precede the
+//     terminal event. Duplicates after the first terminal are dropped.
+//   - Closing without a terminal event is normalized to EventError with
+//     ErrIncompleteStream so consumers never hang on an open-ended stream.
 type StreamEvent struct {
 	Type     StreamEventType
 	Text     string    // EventTextDelta
@@ -115,8 +123,12 @@ type StreamEvent struct {
 	Err   error // EventError
 }
 
-// Provider streams one model response. The returned channel is closed when
-// the response is complete or failed (an EventError precedes close).
+// Provider streams one model response. Stream returns a channel that obeys
+// the terminal contract above (adapters should use base.Stream or
+// NormalizeStream). A non-nil error means the attempt never started — no
+// events will be delivered. Each Stream call is one attempt identity; the
+// engine mints a fresh provider-request ID (and attempt number) per call and
+// may retry only before any tool side effects from that attempt commit.
 type Provider interface {
 	Name() string
 	Stream(ctx context.Context, req Request) (<-chan StreamEvent, error)

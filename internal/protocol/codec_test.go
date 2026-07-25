@@ -40,6 +40,12 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 			Used:        KnownTokens(150),
 			Source:      UsageSourceActual,
 		},
+		ProviderRetrying{
+			Correlation: Correlation{SessionID: "session-1", TurnID: "turn-1", ProviderRequestID: "provider-1", Attempt: 1},
+			NextAttempt: 2,
+			DelayMs:     200,
+			Message:     "rate limited",
+		},
 	}
 	for _, want := range events {
 		env, err := Wrap(want)

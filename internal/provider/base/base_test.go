@@ -3,6 +3,7 @@ package base
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -66,10 +67,18 @@ func TestPostJSONSuccessAndErrors(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "invalid_request") || !strings.Contains(err.Error(), "bad") {
 		t.Fatalf("api err = %v", err)
 	}
+	var apiStatus *StatusError
+	if !errors.As(err, &apiStatus) || apiStatus.Status != http.StatusBadRequest || apiStatus.Retryable() {
+		t.Fatalf("api StatusError = %#v", err)
+	}
 
 	err = c.PostJSON(context.Background(), srv.URL+"/plain", map[string]string{}, &out)
 	if err == nil || !strings.Contains(err.Error(), "500") {
 		t.Fatalf("status err = %v", err)
+	}
+	var plainStatus *StatusError
+	if !errors.As(err, &plainStatus) || plainStatus.Status != http.StatusInternalServerError || !plainStatus.Retryable() {
+		t.Fatalf("plain StatusError = %#v", err)
 	}
 }
 
@@ -117,6 +126,19 @@ func TestStreamAndFail(t *testing.T) {
 	}
 	if _, ok := <-ch; ok {
 		t.Fatal("channel should be closed")
+	}
+}
+
+func TestStreamNormalizesMissingTerminal(t *testing.T) {
+	ch := Stream(func(ch chan<- provider.StreamEvent) {
+		ch <- provider.StreamEvent{Type: provider.EventTextDelta, Text: "x"}
+	})
+	var got []provider.StreamEvent
+	for ev := range ch {
+		got = append(got, ev)
+	}
+	if len(got) != 2 || got[1].Type != provider.EventError || !errors.Is(got[1].Err, provider.ErrIncompleteStream) {
+		t.Fatalf("events = %#v", got)
 	}
 }
 
