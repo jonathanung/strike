@@ -329,6 +329,31 @@ func TestComposerEnterBindings(t *testing.T) {
 		assertNoAppOp(t, ops)
 	})
 
+	// Shift+Enter CSI → WrapInput → KeyEnter+Alt → newline; no send, no pane cycle.
+	t.Run("shift enter CSI via WrapInput inserts newline without sending", func(t *testing.T) {
+		for _, wire := range []string{"\x1b[13;2u", "\x1b[27;2;13~"} {
+			msg := keyMsgFromWrapInput(t, wire)
+			m, ops := newAppTestModel(nil, nil)
+			m.providerName = "echo"
+			m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+			m.windows = windowRegistry{windows: []window{
+				statefulTestWindow{windowID: "a", windowTitle: "A"},
+				statefulTestWindow{windowID: "b", windowTitle: "B"},
+			}}
+			startWin := m.windows.index
+			m = typeAppText(t, m, "first")
+			m = updateApp(t, m, msg)
+			m = typeAppText(t, m, "second")
+			if got := m.composer.Value(); got != "first\nsecond" {
+				t.Errorf("wire %q composer = %q, want first\\nsecond", wire, got)
+			}
+			if m.windows.index != startWin {
+				t.Errorf("wire %q cycled window %d → %d", wire, startWin, m.windows.index)
+			}
+			assertNoAppOp(t, ops)
+		}
+	})
+
 	// Plain KeyEnter always sends. Shift+Enter is only distinguishable after
 	// the input normalizer rewrites terminal CSI to Alt+Enter; without that
 	// rewrite Bubble Tea delivers an ordinary KeyEnter, which correctly sends.

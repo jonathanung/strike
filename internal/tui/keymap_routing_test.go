@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bytes"
 	"io"
 	"strings"
 	"testing"
@@ -12,6 +13,25 @@ import (
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
+
+// keyMsgFromWrapInput feeds terminal wire bytes through WrapInput and maps the
+// legacy stream Bubble Tea would read to the KeyMsg it emits. Shift/Alt+Enter
+// CSI rewrites to ESC+\r; BT's sequence table decodes that as KeyEnter+Alt
+// (bubbletea key_sequences: "\x1b"+CR → Key{Type: KeyEnter, Alt: true}).
+func keyMsgFromWrapInput(t *testing.T, wire string) tea.KeyMsg {
+	t.Helper()
+	got, err := io.ReadAll(WrapInput(strings.NewReader(wire)))
+	if err != nil {
+		t.Fatalf("WrapInput(%q): %v", wire, err)
+	}
+	switch {
+	case bytes.Equal(got, altEnter):
+		return tea.KeyMsg{Type: tea.KeyEnter, Alt: true}
+	default:
+		t.Fatalf("WrapInput(%q) = %q (%v), no KeyMsg mapping for this test", wire, got, got)
+		return tea.KeyMsg{}
+	}
+}
 
 // TestLeftFocusKeymapRoutingMatrix pins left-focus chords so UX fixes cannot
 // silently rebind each other (#58). Each case hits exactly one handler class.
@@ -174,48 +194,129 @@ func TestLeftFocusKeymapRoutingMatrix(t *testing.T) {
 	}
 }
 
-// TestShiftEnterNewlineWithoutPaneCycle covers WrapInput CSI → Update path (#53 / #25).
+// TestShiftEnterNewlineWithoutPaneCycle covers the full WrapInput CSI → KeyMsg
+// → Model.Update path for shift/alt+enter (#53). Composer must gain a real
+// newline, no UserInput op is sent, and CycleWindow* must not fire under either
+// split orientation.
 func TestShiftEnterNewlineWithoutPaneCycle(t *testing.T) {
-	for _, tt := range []struct {
+	wires := []struct {
 		name string
 		wire string
 	}{
 		{"kitty shift+enter", "\x1b[13;2u"},
 		{"xterm shift+enter", "\x1b[27;2;13~"},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			// Byte path: CSI becomes alt+enter.
-			got, err := io.ReadAll(WrapInput(strings.NewReader(tt.wire)))
-			if err != nil {
-				t.Fatalf("WrapInput: %v", err)
-			}
-			if string(got) != string(altEnter) {
-				t.Fatalf("rewrite = %q, want alt+enter %q", got, altEnter)
-			}
-
-			m, ops := newAppTestModel(nil, nil)
-			m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
-			m.windows = windowRegistry{windows: []window{
-				statefulTestWindow{windowID: "a", windowTitle: "A"},
-				statefulTestWindow{windowID: "b", windowTitle: "B"},
-			}}
-			startWin := m.windows.index
-			m.composer.SetValue("line1")
-			// KeyMsg path after normalizer (alt+enter).
-			m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
-			if !strings.Contains(m.composer.Value(), "\n") {
-				t.Errorf("composer = %q, want newline", m.composer.Value())
-			}
-			if m.windows.index != startWin {
-				t.Errorf("shift+enter cycled window %d → %d", startWin, m.windows.index)
-			}
-			// Must not match cycle bindings.
-			if key.Matches(tea.KeyMsg{Type: tea.KeyEnter, Alt: true}, m.keyMap.CycleWindowNext, m.keyMap.CycleWindowPrev) {
-				t.Error("alt+enter matched cycle binding")
-			}
-			assertNoAppOp(t, ops)
-		})
+		{"kitty alt+enter", "\x1b[13;3u"},
+		{"xterm alt+enter", "\x1b[27;3;13~"},
+		// Shift+Alt+Enter (mods=4 → bits shift|alt) also rewrites to alt+enter.
+		{"kitty shift+alt+enter", "\x1b[13;4u"},
+		{"xterm shift+alt+enter", "\x1b[27;4;13~"},
 	}
+	orients := []struct {
+		name   string
+		orient splitOrientation
+	}{
+		{"horizontal", orientHorizontal},
+		{"vertical", orientVertical},
+	}
+
+	for _, o := range orients {
+		for _, tt := range wires {
+			t.Run(o.name+"/"+tt.name, func(t *testing.T) {
+				msg := keyMsgFromWrapInput(t, tt.wire)
+
+				m, ops := newAppTestModel(nil, nil)
+				m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+				m.providerName = "echo"
+				if o.orient == orientVertical {
+					m.toggleOrientation()
+				}
+				m.windows = windowRegistry{windows: []window{
+					statefulTestWindow{windowID: "a", windowTitle: "A"},
+					statefulTestWindow{windowID: "b", windowTitle: "B"},
+				}}
+				startWin := m.windows.index
+				startFocus := m.focus
+				startOrient := m.splitOrientation
+				m.composer.SetValue("line1")
+				// Cursor at end so InsertString("\n") appends.
+				m.composer.SetCursor(len("line1"))
+
+				if !key.Matches(msg, m.keyMap.Newline) {
+					t.Fatalf("post-WrapInput msg %v does not match Newline", msg)
+				}
+				if key.Matches(msg, m.keyMap.CycleWindowNext, m.keyMap.CycleWindowPrev) {
+					t.Fatalf("post-WrapInput msg %v matched CycleWindow*", msg)
+				}
+				if key.Matches(msg, m.keyMap.Send) {
+					t.Fatalf("post-WrapInput msg %v matched Send", msg)
+				}
+				if key.Matches(msg, m.keyMap.FocusLeft, m.keyMap.FocusRight) {
+					t.Fatalf("post-WrapInput msg %v matched Focus*", msg)
+				}
+
+				updated, cmd := m.Update(msg)
+				m = updated.(Model)
+				if cmd != nil {
+					// Newline must be pure state; drain only if a cmd slipped through.
+					if drained := runAppCmd(t, cmd); drained != nil {
+						t.Errorf("newline produced msg %T", drained)
+					}
+				}
+
+				if got := m.composer.Value(); got != "line1\n" {
+					t.Errorf("composer = %q, want %q", got, "line1\n")
+				}
+				if m.windows.index != startWin {
+					t.Errorf("window cycled %d → %d", startWin, m.windows.index)
+				}
+				if m.windows.active().id() != "a" {
+					t.Errorf("active window = %q, want a", m.windows.active().id())
+				}
+				if m.focus != startFocus {
+					t.Errorf("focus changed %v → %v", startFocus, m.focus)
+				}
+				if m.splitOrientation != startOrient {
+					t.Errorf("orientation changed %v → %v", startOrient, m.splitOrientation)
+				}
+				assertNoAppOp(t, ops)
+
+				// Continue typing on the new line; still no send.
+				m = typeAppText(t, m, "line2")
+				if got := m.composer.Value(); got != "line1\nline2" {
+					t.Errorf("after type composer = %q, want line1\\nline2", got)
+				}
+				assertNoAppOp(t, ops)
+			})
+		}
+	}
+}
+
+// TestShiftEnterNewlineWithCompletionOpen pins that shift+enter inserts a
+// newline and dismisses neither panes nor completion via CycleWindow.
+func TestShiftEnterNewlineWithCompletionOpen(t *testing.T) {
+	msg := keyMsgFromWrapInput(t, "\x1b[13;2u")
+
+	m, ops := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.windows = windowRegistry{windows: []window{
+		statefulTestWindow{windowID: "a", windowTitle: "A"},
+		statefulTestWindow{windowID: "b", windowTitle: "B"},
+	}}
+	startWin := m.windows.index
+	m = typeAppText(t, m, "/hel")
+	m.recomputeCompletion()
+	if m.completion == nil {
+		t.Fatal("expected completion open for /hel")
+	}
+
+	m = updateApp(t, m, msg)
+	if got := m.composer.Value(); !strings.Contains(got, "\n") {
+		t.Errorf("composer = %q, want embedded newline", got)
+	}
+	if m.windows.index != startWin {
+		t.Errorf("window cycled %d → %d", startWin, m.windows.index)
+	}
+	assertNoAppOp(t, ops)
 }
 
 // TestCtrlSemicolonToggleOrientationViaKeyMsg covers the real chord (#54 / #26).

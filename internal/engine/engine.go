@@ -123,6 +123,14 @@ type Options struct {
 	// PersistSessionMeta, when set, writes durable session metadata (sidecar).
 	// The engine emits protocol.SessionMeta after a successful persist.
 	PersistSessionMeta func(meta protocol.SessionMeta) error
+	// OpenChildSession, when set, opens a durable log for a spawned child.
+	// parentID and a suggested childID/title are provided; the returned id is
+	// used as the child SessionID when non-empty.
+	OpenChildSession func(parentID, childID, title string) (id string, err error)
+	// AppendChildEvent, when set, persists one event to a child session log.
+	AppendChildEvent func(childID string, ev protocol.Event) error
+	// CloseChildSession, when set, closes a child session log after completion.
+	CloseChildSession func(childID string) error
 }
 
 // beginAck reports whether ToolCallBegin was actually written to Events.
@@ -173,13 +181,11 @@ type Engine struct {
 	// treating turn Interrupt as a failed emission.
 	runCtx context.Context
 
-	// activeChildReply / activeChildQuestionReply route replies to a
-	// foreground child's services while spawnChild is in flight. Parent and
-	// child mint overlapping perm_N / q_N IDs, so dual-Reply must never happen.
-	childMu                  sync.Mutex
-	activeChildReply         func(protocol.PermissionReply)
-	activeChildQuestionReply func(protocol.QuestionReply)
-	activeChildOps           chan<- protocol.Op
+	// children tracks non-blocking child engines. Permission/question replies
+	// fan out to every child plus the parent; request IDs are session-scoped
+	// so only one service matches.
+	childMu  sync.Mutex
+	children map[string]*childHandle
 
 	// pendingAgent is set by tools via SwitchAgent and applied after each tool
 	// batch (so the next Stream sees the new agent/prompt) and again in
@@ -224,6 +230,7 @@ func New(opts Options) *Engine {
 		events:              make(chan protocol.Event, 256),
 		beginReqs:           make(chan beginReq),
 		files:               &tool.FileState{},
+		children:            make(map[string]*childHandle),
 		contextWindowTokens: opts.ContextWindow,
 	}
 	e.perms = permission.New(e.emit, opts.Rules...)
@@ -260,7 +267,9 @@ func (e *Engine) sessionCorr() protocol.Correlation {
 // closing Events.
 func (e *Engine) Run(ctx context.Context) {
 	e.runCtx = ctx
+	// Keep Events open until children finish so ChildCompleted can emit.
 	defer close(e.events)
+	defer e.shutdownChildren()
 	if e.opts.InitialProvider != "" && e.opts.Select != nil {
 		if p, defaultModel, err := e.opts.Select(e.opts.InitialProvider); err == nil {
 			// Same normalization as SelectModel: matching "provider/id" → bare
@@ -357,36 +366,14 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 		}
 		e.setFast(op.Enabled)
 	case protocol.PermissionReply:
-		e.childMu.Lock()
-		childReply := e.activeChildReply
-		e.childMu.Unlock()
-		if childReply != nil {
-			childReply(op)
-			return
-		}
-		e.perms.Reply(op)
+		e.routePermissionReply(op)
 	case protocol.QuestionReply:
-		e.childMu.Lock()
-		childReply := e.activeChildQuestionReply
-		e.childMu.Unlock()
-		if childReply != nil {
-			childReply(op)
-			return
-		}
-		e.questions.Reply(op)
+		e.routeQuestionReply(op)
 	case protocol.Interrupt:
+		// Parent turn only — non-blocking children keep running until the
+		// engine shuts down or they finish on their own.
 		if e.turnCancel != nil {
 			e.turnCancel()
-		}
-		// Best-effort: cancel a foreground child turn if one is active.
-		e.childMu.Lock()
-		childOps := e.activeChildOps
-		e.childMu.Unlock()
-		if childOps != nil {
-			select {
-			case childOps <- protocol.Interrupt{}:
-			default:
-			}
 		}
 	case protocol.FilesChanged:
 		e.handleFilesChanged(op)
