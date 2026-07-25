@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -267,6 +268,42 @@ func TestBashTool(t *testing.T) {
 	}
 	if !strings.Contains(res.Output, "timed out") {
 		t.Errorf("output = %q", res.Output)
+	}
+}
+
+func TestBashToolStreamsReportOutput(t *testing.T) {
+	dir := t.TempDir()
+	var (
+		mu     sync.Mutex
+		chunks []string
+	)
+	tc := &Context{
+		WorkDir: dir,
+		Ask:     func(context.Context, AskRequest) error { return nil },
+		ReportOutput: func(data string) {
+			mu.Lock()
+			chunks = append(chunks, data)
+			mu.Unlock()
+		},
+	}
+	// Line-buffered stdio with delays so ReportOutput fires before Execute returns.
+	res, err := NewBash().Execute(context.Background(), mustJSON(t, map[string]any{
+		"command": "printf 'line1\\n'; sleep 0.05; printf 'line2\\n'; sleep 0.05; printf 'line3\\n'",
+	}), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Output, "line1") || !strings.Contains(res.Output, "line3") {
+		t.Fatalf("final output = %q", res.Output)
+	}
+	mu.Lock()
+	joined := strings.Join(chunks, "")
+	mu.Unlock()
+	if !strings.Contains(joined, "line1") || !strings.Contains(joined, "line2") || !strings.Contains(joined, "line3") {
+		t.Fatalf("streamed chunks = %#v (joined %q)", chunks, joined)
+	}
+	if len(chunks) == 0 {
+		t.Fatal("expected at least one ReportOutput chunk")
 	}
 }
 

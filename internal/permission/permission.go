@@ -92,9 +92,23 @@ func Defaults() Ruleset {
 	}
 }
 
+// DenyOnly returns a defensive copy of rs containing only Deny rules.
+// Used so child agent profiles can further restrict without widening
+// parent Deny/Ask via Allow (AG3).
+func DenyOnly(rs Ruleset) Ruleset {
+	var out Ruleset
+	for _, rule := range rs {
+		if rule.Action == Deny {
+			out = append(out, rule)
+		}
+	}
+	return out
+}
+
 // DeriveChildRules deep-copies parentLayers, appends only Deny rules from
 // childExtra, then appends Deny task *. Does NOT copy parent session grants
-// (caller passes opts.Rules only). Child Service.granted starts empty.
+// (caller passes opts.Rules plus the parent's active agent profile).
+// Child Service.granted starts empty.
 //
 // Only Deny entries from childExtra are kept so a child cannot widen a
 // parent Deny/Ask via Allow. Parent last-match-wins order is preserved,
@@ -105,13 +119,7 @@ func DeriveChildRules(parentLayers []Ruleset, childExtra ...Ruleset) []Ruleset {
 		out = append(out, append(Ruleset(nil), layer...))
 	}
 	for _, extra := range childExtra {
-		var denies Ruleset
-		for _, rule := range extra {
-			if rule.Action == Deny {
-				denies = append(denies, rule)
-			}
-		}
-		if len(denies) > 0 {
+		if denies := DenyOnly(extra); len(denies) > 0 {
 			out = append(out, denies)
 		}
 	}
