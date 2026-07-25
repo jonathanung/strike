@@ -163,11 +163,18 @@ func (m Model) activityPaneBody(width, height int) string {
 	if len(lines) < height {
 		var tools []*toolCell
 		for i := len(m.cells) - 1; i >= 0; i-- {
-			if tc, ok := m.cells[i].(*toolCell); ok {
-				tools = append(tools, tc)
-				if len(tools)+len(lines) >= height {
-					break
+			switch c := m.cells[i].(type) {
+			case *toolCell:
+				tools = append(tools, c)
+			case *exploreCell:
+				for j := len(c.calls) - 1; j >= 0; j-- {
+					if c.calls[j] != nil {
+						tools = append(tools, c.calls[j])
+					}
 				}
+			}
+			if len(tools)+len(lines) >= height {
+				break
 			}
 		}
 		for _, tc := range tools {

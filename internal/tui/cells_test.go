@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
@@ -148,6 +149,146 @@ func TestTailLines(t *testing.T) {
 	}
 	if got := tailLines("", 3); got != "" {
 		t.Errorf("empty = %q", got)
+	}
+}
+
+func TestToolCellCollapsedPreviewHidesExtraLines(t *testing.T) {
+	th := theme.Default()
+	var b strings.Builder
+	for i := 1; i <= 10; i++ {
+		b.WriteString("line")
+		b.WriteByte(byte('0' + i%10))
+		b.WriteByte('\n')
+	}
+	th = th.Resolve()
+	cell := &toolCell{name: "bash", title: "long", output: b.String(), done: true}
+	plain := ansi.Strip(cell.render(80, th))
+	if !strings.Contains(plain, th.Icons.TreeCollapsed) {
+		t.Errorf("collapsed cell missing expand marker %q:\n%s", th.Icons.TreeCollapsed, plain)
+	}
+	// preview is first 6 lines: line1..line6
+	for _, hide := range []string{"line7", "line8", "line9"} {
+		if strings.Contains(plain, hide) {
+			t.Errorf("collapsed preview should hide %q:\n%s", hide, plain)
+		}
+	}
+	if !strings.Contains(plain, "more lines") {
+		t.Errorf("collapsed preview missing more-lines marker:\n%s", plain)
+	}
+	cell.expanded = true
+	plain = ansi.Strip(cell.render(80, th))
+	if !strings.Contains(plain, th.Icons.TreeExpanded) {
+		t.Errorf("expanded cell missing collapse marker %q:\n%s", th.Icons.TreeExpanded, plain)
+	}
+	for _, want := range []string{"line7", "line8", "line9"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("expanded output missing %q:\n%s", want, plain)
+		}
+	}
+	if strings.Contains(plain, "more lines") {
+		t.Errorf("expanded output still shows truncation marker:\n%s", plain)
+	}
+}
+
+func TestToolCellToggleExpanded(t *testing.T) {
+	short := &toolCell{name: "bash", output: "hi", done: true}
+	if short.collapsible() || short.toggleExpanded() {
+		t.Fatal("short output should not be collapsible")
+	}
+	long := &toolCell{name: "bash", output: "a\nb\nc\nd\ne\nf\ng\n", done: true}
+	if !long.collapsible() {
+		t.Fatal("long output should be collapsible")
+	}
+	if !long.toggleExpanded() || !long.expanded {
+		t.Fatal("toggle should expand")
+	}
+	if !long.toggleExpanded() || long.expanded {
+		t.Fatal("toggle should collapse")
+	}
+}
+
+func TestExploreCellGroupsConsecutiveReadGlobGrep(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m.applyEvent(protocol.ToolCallBegin{CallID: "r1", Name: "read", Args: json.RawMessage(`{"path":"a.go"}`)})
+	m.applyEvent(protocol.ToolCallEnd{CallID: "r1", Title: "a.go", Output: "package a"})
+	// Still a single tool cell.
+	if _, ok := m.cells[len(m.cells)-1].(*toolCell); !ok {
+		t.Fatalf("single read = %T, want *toolCell", m.cells[len(m.cells)-1])
+	}
+	m.applyEvent(protocol.ToolCallBegin{CallID: "g1", Name: "glob", Args: json.RawMessage(`{"pattern":"*.go"}`)})
+	m.applyEvent(protocol.ToolCallEnd{CallID: "g1", Title: "*.go", Output: "a.go"})
+	exp, ok := m.cells[len(m.cells)-1].(*exploreCell)
+	if !ok {
+		t.Fatalf("after second explore = %T, want *exploreCell", m.cells[len(m.cells)-1])
+	}
+	if len(exp.calls) != 2 {
+		t.Fatalf("explore calls = %d, want 2", len(exp.calls))
+	}
+	m.applyEvent(protocol.ToolCallBegin{CallID: "s1", Name: "grep", Args: json.RawMessage(`{"pattern":"foo"}`)})
+	m.applyEvent(protocol.ToolCallEnd{CallID: "s1", Title: "foo", Output: "hit"})
+	if len(exp.calls) != 3 {
+		t.Fatalf("explore calls after grep = %d, want 3", len(exp.calls))
+	}
+	// bash breaks the group.
+	m.applyEvent(protocol.ToolCallBegin{CallID: "b1", Name: "bash"})
+	m.applyEvent(protocol.ToolCallEnd{CallID: "b1", Title: "echo", Output: "ok"})
+	if exp.accepting {
+		t.Fatal("explore group should stop accepting after bash")
+	}
+	if _, ok := m.cells[len(m.cells)-1].(*toolCell); !ok {
+		t.Fatalf("bash cell = %T, want *toolCell", m.cells[len(m.cells)-1])
+	}
+	th := theme.Default().Resolve()
+	plain := ansi.Strip(exp.render(80, th))
+	if !strings.Contains(plain, "explored") {
+		t.Errorf("explore header missing explored:\n%s", plain)
+	}
+	if !strings.Contains(plain, "3") || !strings.Contains(plain, "tools") {
+		t.Errorf("explore header missing count:\n%s", plain)
+	}
+	// collapsed: no per-tool body
+	if strings.Contains(plain, "a.go") && strings.Contains(plain, "read") {
+		// title might appear only when expanded
+	}
+	exp.expanded = true
+	plain = ansi.Strip(exp.render(80, th))
+	for _, want := range []string{"read", "glob", "grep"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("expanded explore missing %q:\n%s", want, plain)
+		}
+	}
+}
+
+func TestEmptyEnterTogglesSelectedToolCell(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	var b strings.Builder
+	for i := 0; i < 10; i++ {
+		b.WriteString("out-line-")
+		b.WriteByte(byte('a' + i))
+		b.WriteByte('\n')
+	}
+	m.applyEvent(protocol.ToolCallBegin{CallID: "c1", Name: "bash"})
+	m.applyEvent(protocol.ToolCallEnd{CallID: "c1", Title: "run", Output: b.String()})
+	m.composer.SetValue("")
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	tc := m.toolByID["c1"]
+	if tc == nil || !tc.expanded {
+		t.Fatalf("enter should expand collapsible tool: tc=%v expanded=%v", tc != nil, tc != nil && tc.expanded)
+	}
+	if m.selectedCell < 0 {
+		t.Fatal("enter should select the tool cell")
+	}
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if tc.expanded {
+		t.Fatal("second enter should collapse")
+	}
+	// Non-empty enter still sends (no expand side effect on send path with text).
+	m.composer.SetValue("hello")
+	before := tc.expanded
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if tc.expanded != before {
+		t.Fatal("send with text must not toggle tool expand")
 	}
 }
 

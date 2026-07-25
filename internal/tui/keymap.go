@@ -28,6 +28,11 @@ type keyMap struct {
 	ScrollDown        key.Binding
 	JumpBottom        key.Binding
 	ToggleOrientation key.Binding
+	// Tool cell selection/expand when the composer is empty (enter still sends
+	// when there is text).
+	ToolPrev   key.Binding
+	ToolNext   key.Binding
+	ToolExpand key.Binding
 }
 
 func defaultKeyMap() keyMap {
@@ -60,6 +65,11 @@ func defaultKeyMap() keyMap {
 		// ctrl+semicolon, so WrapInput rewrites enhanced ctrl+; CSI to alt+;
 		// (same pattern as shift+enter → alt+enter for Newline).
 		ToggleOrientation: key.NewBinding(key.WithKeys("alt+;"), key.WithHelp("ctrl+;", "toggle split")),
+		// Tool cell nav: only when composer is empty (see Model.handleToolCellKeys).
+		// alt+[/] avoid stealing printable brackets from the composer.
+		ToolPrev:   key.NewBinding(key.WithKeys("alt+["), key.WithHelp("alt+[", "prev tool cell")),
+		ToolNext:   key.NewBinding(key.WithKeys("alt+]"), key.WithHelp("alt+]", "next tool cell")),
+		ToolExpand: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "expand tool cell")),
 	}
 }
 
@@ -104,6 +114,9 @@ func keybindCatalog(keys keyMap) []keybindEntry {
 		from("nav.scroll-down", "Navigation", keys.ScrollDown),
 		from("nav.jump-bottom", "Navigation", keys.JumpBottom),
 		from("nav.toggle-orient", "Navigation", keys.ToggleOrientation),
+		from("nav.tool-prev", "Navigation", keys.ToolPrev),
+		from("nav.tool-next", "Navigation", keys.ToolNext),
+		from("nav.tool-expand", "Navigation", keys.ToolExpand),
 
 		from("global.palette", "Global", keys.Palette),
 		from("global.keyhelp", "Global", keys.KeyHelp),

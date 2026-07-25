@@ -107,7 +107,10 @@ type Model struct {
 	th       theme.Theme
 	cells    []cell
 	toolByID map[string]*toolCell
-	modal    modal
+	// selectedCell is the index into cells for tool/explore expand selection
+	// (-1 = none). Only collapsible tool/explore cells are targeted.
+	selectedCell int
+	modal        modal
 
 	viewport                   viewport.Model
 	composer                   textarea.Model
@@ -200,21 +203,22 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 	sp := newSpinner(th)
 
 	m := Model{
-		ops:        ops,
-		events:     events,
-		services:   services,
-		agents:     services.Agents,
-		skills:     services.Skills,
-		commands:   commandCatalog(services.Skills),
-		th:         th,
-		toolByID:   map[string]*toolCell{},
-		composer:   ta,
-		keyMap:     defaultKeyMap(),
-		windows:    newWindowRegistry(),
-		spin:       sp,
-		historyPos: -1,
-		focused:    true,
-		appearance: appearanceAuto,
+		ops:          ops,
+		events:       events,
+		services:     services,
+		agents:       services.Agents,
+		skills:       services.Skills,
+		commands:     commandCatalog(services.Skills),
+		th:           th,
+		toolByID:     map[string]*toolCell{},
+		selectedCell: -1,
+		composer:     ta,
+		keyMap:       defaultKeyMap(),
+		windows:      newWindowRegistry(),
+		spin:         sp,
+		historyPos:   -1,
+		focused:      true,
+		appearance:   appearanceAuto,
 	}
 	for _, option := range options {
 		m.dangerouslySkipPermissions = option.DangerouslySkipPermissions
@@ -548,6 +552,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.handleHistoryKey(msg) {
 			return m, nil
 		}
+		if m.handleToolCellKeys(msg) {
+			m.reflow()
+			return m, nil
+		}
 		switch {
 		case key.Matches(msg, m.keyMap.Newline):
 			// Left-focus only (right pane returned above). Distinct from Send
@@ -560,6 +568,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keyMap.Send):
 			text := strings.TrimSpace(m.composer.Value())
 			if text == "" {
+				// Empty enter is tool expand (handleToolCellKeys); if nothing
+				// collapsible was available, stay put.
 				return m, nil
 			}
 			if strings.HasPrefix(text, "/") {
@@ -886,6 +896,26 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		m.toolCallsThisTurn++
 		tc := &toolCell{callID: ev.CallID, name: ev.Name, args: ev.Args}
 		m.toolByID[ev.CallID] = tc
+		if isExploreTool(ev.Name) {
+			if exp, ok := lastCell[*exploreCell](m.cells); ok && exp.accepting {
+				exp.calls = append(exp.calls, tc)
+				break
+			}
+			// First explore tool stays a normal cell; a second consecutive one
+			// promotes the pair into an exploring group.
+			if prev, ok := lastCell[*toolCell](m.cells); ok && isExploreTool(prev.name) {
+				m.cells[len(m.cells)-1] = &exploreCell{
+					calls:     []*toolCell{prev, tc},
+					accepting: true,
+				}
+				break
+			}
+			m.cells = append(m.cells, tc)
+			break
+		}
+		if exp, ok := lastCell[*exploreCell](m.cells); ok {
+			exp.accepting = false
+		}
 		m.cells = append(m.cells, tc)
 	case protocol.ToolCallOutput:
 		if tc, ok := m.toolByID[ev.CallID]; ok && !tc.done {
@@ -919,6 +949,9 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		cmd = m.broadcastContextState()
 	case protocol.TurnCompleted:
 		m.completeAssistantCells()
+		if exp, ok := lastCell[*exploreCell](m.cells); ok {
+			exp.accepting = false
+		}
 		var notify tea.Cmd
 		if !m.focused && !m.turnStartedAt.IsZero() && time.Since(m.turnStartedAt) >= notifyAfterTurn {
 			notify = notifyUnfocusedCmd("strike: turn complete")
@@ -1487,6 +1520,7 @@ func (m *Model) refreshViewport() {
 		m.viewport.GotoTop()
 		return
 	}
+	m.syncToolSelectionFlags()
 	// Stick to bottom only when already anchored; otherwise preserve scroll
 	// so users reading history are not yanked down on each event.
 	atBottom := m.viewport.AtBottom()
@@ -1500,6 +1534,117 @@ func (m *Model) refreshViewport() {
 		m.viewport.GotoBottom()
 	} else {
 		m.viewport.SetYOffset(yOff)
+	}
+}
+
+// handleToolCellKeys handles [, ], and empty-composer enter for tool selection
+// and expand/collapse. Returns true when the key was consumed.
+func (m *Model) handleToolCellKeys(msg tea.KeyMsg) bool {
+	if m.focus != focusLeft || m.modal != nil || m.completion != nil {
+		return false
+	}
+	if strings.TrimSpace(m.composer.Value()) != "" {
+		return false
+	}
+	switch {
+	case key.Matches(msg, m.keyMap.ToolPrev):
+		m.moveToolSelection(-1)
+		return true
+	case key.Matches(msg, m.keyMap.ToolNext):
+		m.moveToolSelection(1)
+		return true
+	case key.Matches(msg, m.keyMap.ToolExpand), key.Matches(msg, m.keyMap.Send):
+		return m.toggleSelectedTool()
+	}
+	return false
+}
+
+func (m *Model) collapsibleCellIndexes() []int {
+	var idx []int
+	for i, c := range m.cells {
+		switch tc := c.(type) {
+		case *toolCell:
+			if tc.collapsible() {
+				idx = append(idx, i)
+			}
+		case *exploreCell:
+			if tc.collapsible() {
+				idx = append(idx, i)
+			}
+		}
+	}
+	return idx
+}
+
+func (m *Model) moveToolSelection(delta int) {
+	idxs := m.collapsibleCellIndexes()
+	if len(idxs) == 0 {
+		m.selectedCell = -1
+		return
+	}
+	cur := -1
+	for i, cellIdx := range idxs {
+		if cellIdx == m.selectedCell {
+			cur = i
+			break
+		}
+	}
+	if cur < 0 {
+		if delta < 0 {
+			m.selectedCell = idxs[len(idxs)-1]
+		} else {
+			m.selectedCell = idxs[0]
+		}
+		return
+	}
+	next := cur + delta
+	if next < 0 {
+		next = 0
+	}
+	if next >= len(idxs) {
+		next = len(idxs) - 1
+	}
+	m.selectedCell = idxs[next]
+}
+
+func (m *Model) toggleSelectedTool() bool {
+	idxs := m.collapsibleCellIndexes()
+	if len(idxs) == 0 {
+		return false
+	}
+	if m.selectedCell < 0 || m.selectedCell >= len(m.cells) {
+		m.selectedCell = idxs[len(idxs)-1]
+	} else {
+		// Ensure current selection is still collapsible; else jump to last.
+		ok := false
+		for _, i := range idxs {
+			if i == m.selectedCell {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			m.selectedCell = idxs[len(idxs)-1]
+		}
+	}
+	switch c := m.cells[m.selectedCell].(type) {
+	case *toolCell:
+		return c.toggleExpanded()
+	case *exploreCell:
+		return c.toggleExpanded()
+	}
+	return false
+}
+
+func (m *Model) syncToolSelectionFlags() {
+	for i, c := range m.cells {
+		sel := i == m.selectedCell
+		switch tc := c.(type) {
+		case *toolCell:
+			tc.selected = sel
+		case *exploreCell:
+			tc.selected = sel
+		}
 	}
 }
 
