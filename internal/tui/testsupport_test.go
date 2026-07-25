@@ -77,7 +77,18 @@ func (f *fakeAuth) SetAPIKey(provider, key string) error {
 
 func (f *fakeAuth) Logout(provider string) error {
 	f.logoutCalls = append(f.logoutCalls, provider)
-	return f.logoutErr
+	if f.logoutErr != nil {
+		return f.logoutErr
+	}
+	for i, s := range f.statuses {
+		if s.Name == provider && !s.Builtin {
+			s.Authed = false
+			s.Detail = "none"
+			f.statuses[i] = s
+			break
+		}
+	}
+	return nil
 }
 
 func (f *fakeAuth) BeginOAuth(ctx context.Context, provider string) (*host.OAuthLogin, error) {
