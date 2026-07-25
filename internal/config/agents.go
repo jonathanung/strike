@@ -49,6 +49,7 @@ var reservedSkillNames = map[string]struct{}{
 	"auth":     {},
 	"agent":    {},
 	"fast":     {},
+	"md-read":  {},
 	"help":     {},
 }
 
