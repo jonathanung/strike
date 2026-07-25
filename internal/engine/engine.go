@@ -204,10 +204,11 @@ func (e *Engine) Run(ctx context.Context) {
 	defer close(e.events)
 	if e.opts.InitialProvider != "" && e.opts.Select != nil {
 		if p, defaultModel, err := e.opts.Select(e.opts.InitialProvider); err == nil {
-			model := e.opts.InitialModel
-			if model == "" {
-				model = defaultModel
-			}
+			// Same normalization as SelectModel: matching "provider/id" → bare
+			// id; foreign prefixes → provider default. Bare ids pass through
+			// unchanged (without a catalog we cannot tell a bare foreign id
+			// from a valid model name on this provider).
+			model := resolveSelectModel(e.opts.InitialProvider, e.opts.InitialModel, defaultModel)
 			e.setProvider(e.opts.InitialProvider, p, model)
 		}
 	}
@@ -547,6 +548,34 @@ func (e *Engine) cancelAndJoinTurn() {
 	}
 }
 
+// splitProviderModel parses "provider/model" form. Both sides of the first
+// slash must be non-empty. Only the first slash is considered so model ids
+// that themselves contain slashes remain in the model part.
+func splitProviderModel(s string) (provider, model string, ok bool) {
+	provider, model, found := strings.Cut(s, "/")
+	if !found || provider == "" || model == "" {
+		return "", "", false
+	}
+	return provider, model, true
+}
+
+// resolveSelectModel normalizes op.Model for a chosen provider: matching
+// "provider/id" prefixes become bare ids; foreign prefixes are discarded so
+// the caller falls back to the provider default; bare ids pass through.
+func resolveSelectModel(providerName, model, defaultModel string) string {
+	if prov, bare, ok := splitProviderModel(model); ok {
+		if strings.EqualFold(prov, providerName) {
+			model = bare
+		} else {
+			model = ""
+		}
+	}
+	if model == "" {
+		return defaultModel
+	}
+	return model
+}
+
 func (e *Engine) handleSelect(op protocol.SelectModel) {
 	if e.turnActive() {
 		e.emit(protocol.EngineError{
@@ -570,10 +599,7 @@ func (e *Engine) handleSelect(op protocol.SelectModel) {
 		})
 		return
 	}
-	model := op.Model
-	if model == "" {
-		model = defaultModel
-	}
+	model := resolveSelectModel(op.Provider, op.Model, defaultModel)
 	e.setProvider(op.Provider, p, model)
 }
 
@@ -671,9 +697,22 @@ func (e *Engine) handleSelectAgent(op protocol.SelectAgent) {
 	if agent.Effort != protocol.EffortDefault {
 		e.setEffort(agent.Effort)
 	}
+
+	// Model-only "provider/id" pins promote the prefix to a provider pin and
+	// keep the bare model id. When Provider is already set, strip any
+	// provider/ prefix so we never store a foreign-prefixed model string.
+	agentProvider, agentModel := agent.Provider, agent.Model
+	if agentProvider == "" {
+		if prov, bare, ok := splitProviderModel(agent.Model); ok {
+			agentProvider, agentModel = prov, bare
+		}
+	} else if _, bare, ok := splitProviderModel(agent.Model); ok {
+		agentModel = bare
+	}
+
 	switch {
-	case agent.Provider != "" && e.opts.Select != nil:
-		p, defaultModel, err := e.opts.Select(agent.Provider)
+	case agentProvider != "" && e.opts.Select != nil:
+		p, defaultModel, err := e.opts.Select(agentProvider)
 		if err != nil {
 			e.emit(protocol.EngineError{
 				Correlation: e.sessionCorr(),
@@ -681,13 +720,13 @@ func (e *Engine) handleSelectAgent(op protocol.SelectAgent) {
 			})
 			return
 		}
-		model := agent.Model
+		model := agentModel
 		if model == "" {
 			model = defaultModel
 		}
-		e.setProvider(agent.Provider, p, model)
-	case agent.Model != "" && e.prov != nil:
-		e.model = agent.Model
+		e.setProvider(agentProvider, p, model)
+	case agentModel != "" && e.prov != nil:
+		e.model = agentModel
 		e.emit(protocol.ModelSelected{
 			Correlation: e.sessionCorr(),
 			Provider:    e.provName,
