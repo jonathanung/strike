@@ -13,6 +13,7 @@ type keyMap struct {
 	Palette           key.Binding
 	KeyHelp           key.Binding
 	Interrupt         key.Binding
+	TerminalLeave     key.Binding
 	CompletionDismiss key.Binding
 	CompletionAccept  key.Binding
 	CompletionPrev    key.Binding
@@ -37,6 +38,7 @@ func defaultKeyMap() keyMap {
 		Palette:           key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "palette")),
 		KeyHelp:           key.NewBinding(key.WithKeys("f1"), key.WithHelp("f1", "keybinds")),
 		Interrupt:         key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "interrupt")),
+		TerminalLeave:     key.NewBinding(key.WithKeys("ctrl+g"), key.WithHelp("ctrl+g", "leave editor")),
 		CompletionDismiss: key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "dismiss")),
 		CompletionAccept:  key.NewBinding(key.WithKeys("tab", "enter"), key.WithHelp("tab/enter", "accept")),
 		CompletionPrev:    key.NewBinding(key.WithKeys("up"), key.WithHelp("up", "previous")),
@@ -81,6 +83,7 @@ func keybindCatalog(keys keyMap) []keybindEntry {
 		from("global.interrupt", "Global", keys.Interrupt),
 		from("global.quit", "Global", keys.Quit),
 		from("global.save-defaults", "Global", keys.SaveDefaults),
+		from("editor.leave", "Editor", keys.TerminalLeave),
 
 		from("composer.send", "Composer", keys.Send),
 		from("composer.newline", "Composer", keys.Newline),

@@ -199,15 +199,8 @@ func TestVimCommandMissingEditor(t *testing.T) {
 	if m.composer.Value() != "" {
 		t.Errorf("composer = %q, want reset", m.composer.Value())
 	}
-	msg := runAppCmd(t, cmd)
-	finished, ok := msg.(editorFinishedMsg)
-	if !ok {
-		t.Fatalf("msg = %#v, want editorFinishedMsg", msg)
-	}
-	updated, cmd = m.Update(finished)
-	m = updated.(Model)
 	if msg := runAppCmd(t, cmd); msg != nil {
-		t.Errorf("unexpected follow-up %#v", msg)
+		t.Errorf("unexpected msg %#v", msg)
 	}
 	assertNoAppOp(t, ops)
 	if !m.noticeErr || !strings.Contains(m.notice, "no editor found") {

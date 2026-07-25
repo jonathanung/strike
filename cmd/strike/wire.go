@@ -316,9 +316,14 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 	if err := runSession(context.Background(), eng.Run, eng.Events(), store, func(events <-chan protocol.Event) error {
 		restore := tui.EnableEnhancedKeys(stdout)
 		defer restore()
+		vimMode := tui.VimModePane
+		if mode, ok := tui.ParseVimMode(cfg.VimMode); ok {
+			vimMode = mode
+		}
 		program := tea.NewProgram(tui.New(eng.Ops(), events, services, tui.Options{
 			DangerouslySkipPermissions: opts.dangerouslySkipPermissions,
 			WorkDir:                    workDir,
+			VimMode:                    vimMode,
 		}), tea.WithAltScreen(), tea.WithOutput(stdout), tea.WithInput(tui.WrapInput(os.Stdin)))
 		_, err := program.Run()
 		return err

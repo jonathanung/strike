@@ -70,6 +70,8 @@ type Options struct {
 	// WorkDir resolves relative paths for /vim. Empty falls back to os.Getwd
 	// at launch time.
 	WorkDir string
+	// VimMode selects pane/overlay/takeover for /vim. Empty defaults to pane.
+	VimMode VimMode
 }
 
 // Model is the root Bubble Tea model. It holds its host services, the
@@ -123,6 +125,7 @@ type Model struct {
 	height         int
 	ready          bool
 	workDir        string
+	vimMode        VimMode
 }
 
 // New builds the frontend model. services supplies every host capability; any
@@ -159,6 +162,12 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		if option.WorkDir != "" {
 			m.workDir = option.WorkDir
 		}
+		if option.VimMode != "" {
+			m.vimMode = option.VimMode
+		}
+	}
+	if m.vimMode == "" {
+		m.vimMode = VimModePane
 	}
 	if services.History != nil {
 		m.entries = services.History.Entries()
@@ -245,6 +254,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case editorFinishedMsg:
 		return m.applyEditorFinished(msg)
 
+	case terminalOutputMsg:
+		return m.applyTerminalOutput()
+
+	case terminalExitMsg:
+		return m.applyTerminalExit(msg)
+
 	case paletteInvokeMsg:
 		priorNotice, priorNoticeErr := m.notice, m.noticeErr
 		entry, ok := m.currentPaletteEntry(msg.Action)
@@ -291,7 +306,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Embedded terminal captures keys while focused so nvim receives
+		// ctrl+h/j/k/l etc. ctrl+g leaves the pane; ctrl+c still quits strike.
+		if terminalCapturesKeys(m.windows, m.focus) && m.modal == nil {
+			if key.Matches(msg, m.keyMap.Quit) {
+				m.closeEmbeddedSessions()
+				return m, tea.Quit
+			}
+			if key.Matches(msg, m.keyMap.TerminalLeave) {
+				return m.leaveEmbeddedEditor()
+			}
+			var cmd tea.Cmd
+			m.windows, cmd = m.windows.update(msg)
+			return m, cmd
+		}
 		if key.Matches(msg, m.keyMap.Quit) {
+			m.closeEmbeddedSessions()
 			return m, tea.Quit
 		}
 		if m.modal != nil {
@@ -1067,7 +1097,13 @@ func (m Model) View() string {
 	}
 
 	if m.modal != nil {
-		overlay := m.modal.view(max(8, ui.ModalWidth(m.width)), m.th)
+		var overlay string
+		if tm, ok := m.modal.(*terminalModal); ok {
+			tm.setHostSize(m.width, contentHeight)
+			overlay = tm.view(max(40, m.width-4), m.th)
+		} else {
+			overlay = m.modal.view(max(8, ui.ModalWidth(m.width)), m.th)
+		}
 		content = ui.OverlayCenter(content, overlay, m.width, contentHeight)
 	}
 	parts := make([]string, 0, 1+len(footer))
