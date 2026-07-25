@@ -77,9 +77,15 @@ func (e Effort) Describe() string {
 type Decision string
 
 const (
-	DecisionOnce   Decision = "once"
+	DecisionOnce Decision = "once"
+	// DecisionAlways remembers the grant for the rest of this session only.
+	// The TUI labels this "allow session"; the wire value stays "always" for
+	// JSONL compatibility.
 	DecisionAlways Decision = "always"
-	DecisionReject Decision = "reject"
+	// DecisionProject remembers the grant for this session and appends it to
+	// the project config so future sessions in the same workdir inherit it.
+	DecisionProject Decision = "project"
+	DecisionReject  Decision = "reject"
 )
 
 // Op is a client -> engine submission.
@@ -252,6 +258,48 @@ type ToolCallOutput struct {
 	Data   string `json:"data"`
 }
 
+// Process stream labels on ProcessOutput.
+const (
+	ProcessStreamStdout = "stdout"
+	ProcessStreamStderr = "stderr"
+)
+
+// ProcessStatus is the terminal outcome of a managed subprocess.
+type ProcessStatus string
+
+const (
+	ProcessStatusExited   ProcessStatus = "exited"
+	ProcessStatusTimeout  ProcessStatus = "timeout"
+	ProcessStatusCanceled ProcessStatus = "canceled"
+	ProcessStatusError    ProcessStatus = "error"
+)
+
+// ProcessStarted marks the beginning of a managed subprocess (bash, hooks, …).
+// CallID is set when the process belongs to a tool call.
+type ProcessStarted struct {
+	Correlation
+	ProcessID string   `json:"processId"`
+	CallID    string   `json:"callId,omitempty"`
+	Argv      []string `json:"argv"`
+	Cwd       string   `json:"cwd,omitempty"`
+}
+
+// ProcessOutput is a chunk of subprocess stdout or stderr.
+type ProcessOutput struct {
+	Correlation
+	ProcessID string `json:"processId"`
+	Stream    string `json:"stream"` // stdout | stderr
+	Data      string `json:"data"`
+}
+
+// ProcessExited marks the end of a managed subprocess.
+type ProcessExited struct {
+	Correlation
+	ProcessID string        `json:"processId"`
+	ExitCode  int           `json:"exitCode"`
+	Status    ProcessStatus `json:"status"`
+}
+
 // PermissionAsked suspends a tool call until a PermissionReply arrives.
 type PermissionAsked struct {
 	Correlation
@@ -398,6 +446,9 @@ func (TextDelta) isEvent()          {}
 func (ToolCallBegin) isEvent()      {}
 func (ToolCallEnd) isEvent()        {}
 func (ToolCallOutput) isEvent()     {}
+func (ProcessStarted) isEvent()     {}
+func (ProcessOutput) isEvent()      {}
+func (ProcessExited) isEvent()      {}
 func (PermissionAsked) isEvent()    {}
 func (PermissionResolved) isEvent() {}
 func (QuestionAsked) isEvent()      {}

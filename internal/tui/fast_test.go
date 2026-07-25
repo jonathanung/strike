@@ -114,6 +114,11 @@ func (c *fastCatalogProbe) ModelIDs(_ context.Context, _ string) ([]string, erro
 	return []string{"unused"}, nil
 }
 
+func (c *fastCatalogProbe) Models(_ context.Context, _ string) ([]host.ModelInfo, error) {
+	c.calls++
+	return []host.ModelInfo{{ID: "unused"}}, nil
+}
+
 func (c *fastCatalogProbe) ContextWindow(context.Context, string, string) (int, bool, error) {
 	return 0, false, nil
 }

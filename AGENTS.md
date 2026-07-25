@@ -52,7 +52,7 @@ service/theme token).
 | `internal/permission` | last-match-wins allow/ask/deny + ask service |
 | `internal/auth` | credentials, OAuth/PKCE/device, env precedence |
 | `internal/config` | global/project JSON + agents/skills markdown |
-| `internal/session` | JSONL event log append/replay |
+| `internal/session` | JSONL event log append/replay + concurrent Manager |
 | `internal/history` | project-scoped prompt history |
 | `internal/memory` | project-scoped durable key/value memory |
 | `internal/issue` | project-scoped durable issue tracker |

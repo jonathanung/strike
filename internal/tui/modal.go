@@ -21,8 +21,8 @@ type modal interface {
 	view(width int, th theme.Theme) string
 }
 
-// permissionModal renders a pending permission ask with once/always/reject
-// choices. Esc always means reject — dismissal never silently continues.
+// permissionModal renders a pending permission ask with once/session/project/
+// reject choices. Esc always means reject — dismissal never silently continues.
 type permissionModal struct {
 	req      protocol.PermissionAsked
 	ops      chan<- protocol.Op
@@ -44,7 +44,8 @@ var permChoices = []struct {
 	decision protocol.Decision
 }{
 	{"allow once", protocol.DecisionOnce},
-	{"allow always", protocol.DecisionAlways},
+	{"allow session", protocol.DecisionAlways},
+	{"allow project", protocol.DecisionProject},
 	{"reject", protocol.DecisionReject},
 }
 
@@ -81,9 +82,11 @@ func (m *permissionModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 		m.choice = (m.choice + 1) % len(permChoices)
 	case "1", "y":
 		return nil, m.reply(protocol.DecisionOnce)
-	case "2", "a":
+	case "2", "s":
 		return nil, m.reply(protocol.DecisionAlways)
-	case "3", "n":
+	case "3", "p":
+		return nil, m.reply(protocol.DecisionProject)
+	case "4", "n":
 		m.state = permissionModalFeedback
 		return m, m.feedback.Focus()
 	case "enter":

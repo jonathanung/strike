@@ -235,21 +235,50 @@ type catalogAdapter struct {
 }
 
 func (c catalogAdapter) ModelIDs(ctx context.Context, provider string) ([]string, error) {
+	infos, err := c.Models(ctx, provider)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(infos))
+	for i, info := range infos {
+		ids[i] = info.ID
+	}
+	return ids, nil
+}
+
+func (c catalogAdapter) Models(ctx context.Context, provider string) ([]host.ModelInfo, error) {
 	if cp, ok := c.customs.Get(provider); ok {
-		if len(cp.Models) > 0 {
-			return append([]string(nil), cp.Models...), nil
+		if len(cp.Models) == 0 {
+			return nil, fmt.Errorf("no models configured for %s — add model ids in /settings or use /model <id>", provider)
 		}
-		return nil, fmt.Errorf("no models configured for %s — add model ids in /settings or use /model <id>", provider)
+		out := make([]host.ModelInfo, len(cp.Models))
+		for i, id := range cp.Models {
+			out[i] = host.ModelInfo{ID: id}
+		}
+		return out, nil
 	}
 	catalog, err := models.Load(ctx)
 	if err != nil {
 		return nil, err
 	}
-	ids := catalog.ModelIDs(provider)
-	if len(ids) == 0 {
+	infos := catalog.Infos(provider)
+	if len(infos) == 0 {
 		return nil, fmt.Errorf("no models listed for %s on models.dev", provider)
 	}
-	return ids, nil
+	out := make([]host.ModelInfo, len(infos))
+	for i, info := range infos {
+		out[i] = host.ModelInfo{
+			ID:         info.ID,
+			Context:    info.Context,
+			InputCost:  info.InputCost,
+			OutputCost: info.OutputCost,
+			HasCost:    info.HasCost,
+			ToolCall:   info.ToolCall,
+			Reasoning:  info.Reasoning,
+			Attachment: info.Attachment,
+		}
+	}
+	return out, nil
 }
 
 func (c catalogAdapter) ContextWindow(ctx context.Context, provider, model string) (int, bool, error) {
