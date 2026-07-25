@@ -559,13 +559,38 @@ func splitProviderModel(s string) (provider, model string, ok bool) {
 	return provider, model, true
 }
 
+// stripMatchingProviderPrefixes repeatedly strips a leading "provider/"
+// segment (EqualFold) until none remain. Caps iterations so a pathological
+// input cannot loop forever.
+//
+//	openai + "openai/openai/gpt-5.6-sol" → "gpt-5.6-sol"
+//	openai + "openai/gpt-5.6-sol"        → "gpt-5.6-sol"
+//	openai + "gpt-5.6-sol"               → "gpt-5.6-sol"
+func stripMatchingProviderPrefixes(providerName, model string) string {
+	if providerName == "" || model == "" {
+		return model
+	}
+	const maxStrip = 8
+	for range maxStrip {
+		prov, bare, ok := splitProviderModel(model)
+		if !ok || !strings.EqualFold(prov, providerName) {
+			return model
+		}
+		model = bare
+	}
+	return model
+}
+
 // resolveSelectModel normalizes op.Model for a chosen provider: matching
-// "provider/id" prefixes become bare ids; foreign prefixes are discarded so
-// the caller falls back to the provider default; bare ids pass through.
+// "provider/id" prefixes (including repeated ones) become bare ids; foreign
+// prefixes are discarded so the caller falls back to the provider default;
+// bare ids pass through.
 func resolveSelectModel(providerName, model, defaultModel string) string {
-	if prov, bare, ok := splitProviderModel(model); ok {
+	if prov, _, ok := splitProviderModel(model); ok {
 		if strings.EqualFold(prov, providerName) {
-			model = bare
+			// First segment matches: strip all matching prefixes (handles
+			// doubles like openai/openai/gpt-5.6-sol).
+			model = stripMatchingProviderPrefixes(providerName, model)
 		} else {
 			model = ""
 		}
@@ -604,10 +629,27 @@ func (e *Engine) handleSelect(op protocol.SelectModel) {
 }
 
 func (e *Engine) setProvider(name string, p provider.Provider, model string) {
+	// Chokepoint: never store a matching provider/ prefix (or doubles) on the
+	// active model string. Callers may still pass already-prefixed ids.
+	model = stripMatchingProviderPrefixes(name, model)
 	e.prov, e.provName, e.model = p, name, model
 	e.emit(protocol.ModelSelected{
 		Correlation: e.sessionCorr(),
 		Provider:    name,
+		Model:       model,
+	})
+}
+
+// setModel stores a bare model id for the current provider, stripping any
+// matching provider/ prefixes first, and emits ModelSelected.
+func (e *Engine) setModel(model string) {
+	if e.provName != "" {
+		model = stripMatchingProviderPrefixes(e.provName, model)
+	}
+	e.model = model
+	e.emit(protocol.ModelSelected{
+		Correlation: e.sessionCorr(),
+		Provider:    e.provName,
 		Model:       model,
 	})
 }
@@ -698,16 +740,14 @@ func (e *Engine) handleSelectAgent(op protocol.SelectAgent) {
 		e.setEffort(agent.Effort)
 	}
 
-	// Model-only "provider/id" pins promote the prefix to a provider pin and
-	// keep the bare model id. When Provider is already set, strip any
-	// provider/ prefix so we never store a foreign-prefixed model string.
+	// Model-only "provider/id" pins promote the prefix to a provider pin.
+	// setProvider / resolveSelectModel strip matching prefixes (including
+	// doubles) so we never store openai/openai/... on the active model.
 	agentProvider, agentModel := agent.Provider, agent.Model
 	if agentProvider == "" {
-		if prov, bare, ok := splitProviderModel(agent.Model); ok {
-			agentProvider, agentModel = prov, bare
+		if prov, _, ok := splitProviderModel(agent.Model); ok {
+			agentProvider = prov
 		}
-	} else if _, bare, ok := splitProviderModel(agent.Model); ok {
-		agentModel = bare
 	}
 
 	switch {
@@ -720,18 +760,10 @@ func (e *Engine) handleSelectAgent(op protocol.SelectAgent) {
 			})
 			return
 		}
-		model := agentModel
-		if model == "" {
-			model = defaultModel
-		}
+		model := resolveSelectModel(agentProvider, agentModel, defaultModel)
 		e.setProvider(agentProvider, p, model)
 	case agentModel != "" && e.prov != nil:
-		e.model = agentModel
-		e.emit(protocol.ModelSelected{
-			Correlation: e.sessionCorr(),
-			Provider:    e.provName,
-			Model:       e.model,
-		})
+		e.setModel(agentModel)
 	}
 }
 
