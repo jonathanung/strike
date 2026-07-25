@@ -210,6 +210,143 @@ func TestToolCellToggleExpanded(t *testing.T) {
 	}
 }
 
+func TestToolCellCollapsibleTable(t *testing.T) {
+	longOut := "a\nb\nc\nd\ne\nf\ng\n"
+	shortMeta := json.RawMessage(`{"oldString":"a","newString":"b"}`)
+	// lines = Count(old)+Count(new)+2; need > diffPreviewMaxLinesCell (8)
+	var oldB, newB strings.Builder
+	for i := 0; i < 6; i++ {
+		oldB.WriteString("old\n")
+		newB.WriteString("new\n")
+	}
+	longMeta, _ := json.Marshal(map[string]string{
+		"oldString": oldB.String(),
+		"newString": newB.String(),
+	})
+	tests := []struct {
+		name        string
+		cell        *toolCell
+		collapsible bool
+		toggleOK    bool
+	}{
+		{name: "nil", cell: nil, collapsible: false, toggleOK: false},
+		{name: "not done", cell: &toolCell{output: longOut, done: false}, collapsible: false},
+		{name: "empty output done", cell: &toolCell{output: "", done: true}, collapsible: false},
+		{name: "short output", cell: &toolCell{output: "hi", done: true}, collapsible: false},
+		{name: "long output", cell: &toolCell{output: longOut, done: true}, collapsible: true, toggleOK: true},
+		{name: "short edit meta", cell: &toolCell{metadata: shortMeta, done: true}, collapsible: false},
+		{name: "long edit meta", cell: &toolCell{metadata: longMeta, done: true}, collapsible: true, toggleOK: true},
+		{
+			name:        "expanded short output still collapsible",
+			cell:        &toolCell{output: "hi", done: true, expanded: true},
+			collapsible: true,
+			toggleOK:    true,
+		},
+		{
+			name:        "expanded short edit meta still collapsible",
+			cell:        &toolCell{metadata: shortMeta, done: true, expanded: true},
+			collapsible: true,
+			toggleOK:    true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cell.collapsible(); got != tt.collapsible {
+				t.Errorf("collapsible = %v, want %v", got, tt.collapsible)
+			}
+			before := false
+			if tt.cell != nil {
+				before = tt.cell.expanded
+			}
+			ok := tt.cell.toggleExpanded()
+			if ok != tt.toggleOK {
+				t.Errorf("toggleExpanded = %v, want %v", ok, tt.toggleOK)
+			}
+			if tt.toggleOK && tt.cell.expanded == before {
+				t.Error("toggle did not flip expanded")
+			}
+			if !tt.toggleOK && tt.cell != nil && tt.cell.expanded != before {
+				t.Error("failed toggle mutated expanded")
+			}
+		})
+	}
+}
+
+func TestExploreCellCollapsibleToggle(t *testing.T) {
+	tests := []struct {
+		name        string
+		cell        *exploreCell
+		collapsible bool
+		toggleOK    bool
+	}{
+		{name: "nil", cell: nil, collapsible: false},
+		{name: "empty calls", cell: &exploreCell{}, collapsible: false},
+		{
+			name:        "one call",
+			cell:        &exploreCell{calls: []*toolCell{{name: "read"}}},
+			collapsible: true,
+			toggleOK:    true,
+		},
+		{
+			name: "multi call toggle cycle",
+			cell: &exploreCell{calls: []*toolCell{
+				{name: "read"}, {name: "glob"},
+			}},
+			collapsible: true,
+			toggleOK:    true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cell.collapsible(); got != tt.collapsible {
+				t.Errorf("collapsible = %v, want %v", got, tt.collapsible)
+			}
+			if !tt.toggleOK {
+				if tt.cell.toggleExpanded() {
+					t.Error("toggleExpanded ok, want false")
+				}
+				return
+			}
+			if !tt.cell.toggleExpanded() || !tt.cell.expanded {
+				t.Fatal("first toggle should expand")
+			}
+			if !tt.cell.toggleExpanded() || tt.cell.expanded {
+				t.Fatal("second toggle should collapse")
+			}
+		})
+	}
+}
+
+func TestDiffExpandedMaxLines(t *testing.T) {
+	short := editDiffMeta{OldString: "a", NewString: "b"}
+	if got := diffExpandedMaxLines(short); got != diffPreviewMaxLinesCell {
+		t.Errorf("short = %d, want %d", got, diffPreviewMaxLinesCell)
+	}
+	var oldB strings.Builder
+	for i := 0; i < 20; i++ {
+		oldB.WriteString("line\n")
+	}
+	long := editDiffMeta{OldString: oldB.String(), NewString: "x\n"}
+	got := diffExpandedMaxLines(long)
+	// Count old newlines + new newlines + 4
+	want := strings.Count(long.OldString, "\n") + strings.Count(long.NewString, "\n") + 4
+	if got != want {
+		t.Errorf("long = %d, want %d", got, want)
+	}
+}
+
+func TestInfoAndErrorCellRender(t *testing.T) {
+	th := theme.Default()
+	info := ansi.Strip((&infoCell{text: "device code ABCD"}).render(40, th))
+	if !strings.Contains(info, "device code ABCD") {
+		t.Errorf("info cell = %q", info)
+	}
+	errPlain := ansi.Strip((&errorCell{text: "boom"}).render(40, th))
+	if !strings.Contains(errPlain, "boom") {
+		t.Errorf("error cell = %q", errPlain)
+	}
+}
+
 func TestExploreCellGroupsConsecutiveReadGlobGrep(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m.applyEvent(protocol.ToolCallBegin{CallID: "r1", Name: "read", Args: json.RawMessage(`{"path":"a.go"}`)})
