@@ -217,15 +217,16 @@ Two different mechanisms, depending on whether it needs Go code:
   `LoadSkillsWithError` in `internal/config/agents.go` for the frontmatter
   format (`description:`) and `$ARGUMENTS` substitution. It becomes
   `/<name>` on the next launch automatically, through
-   `host.Services.Skills`. Reserved names (`provider`, `model`, `auth`,
-   `agent`, `fast`, `vim`, `md-read`, `theme`, `layout`, `split`, `help`,
-   `keys`, `memory`, `issues`) are rejected by `config.ValidateSkillName` before they ever reach
-   the frontend. PR URLs from successful `gh pr` bash output are stored via
-   `protocol.SessionMeta` and `session` sidecar metadata.
-  `/vim` embeds nvim/vim in the right-pane `editor` window by default
-  (PTY + vt10x via `internal/tui/term`). Config key `vimMode` selects
-  `pane` (default), `overlay`, or `takeover` (full-screen `tea.ExecProcess`).
-  GUI `$EDITOR` values always take over.
+   `host.Services.Skills`. Reserved names (`provider`, `model`, `effort`,
+   `autonomy`, `auth`, `settings`, `agent`, `fast`, `vim`, `md-read`,
+   `theme`, `layout`, `split`, `compact`, `session`, `help`, `keys`,
+   `memory`, `issues`) are rejected by `config.ValidateSkillName` before
+   they ever reach the frontend. PR URLs from successful `gh pr` bash
+   output are stored via `protocol.SessionMeta` and `session` sidecar
+   metadata. `/vim` embeds nvim/vim in the right-pane `editor` window by
+   default (PTY + vt10x via `internal/tui/term`). Config key `vimMode`
+   selects `pane` (default), `overlay`, or `takeover` (full-screen
+   `tea.ExecProcess`). GUI `$EDITOR` values always take over.
 - **Builtin command (code).** Add a `commandSpec` to `builtinCommandSpecs`
   in `internal/tui/commands.go`, a `case "/yourcmd":` arm in
   `Model.handleCommand` (`internal/tui/app.go`), and — if it's a primary

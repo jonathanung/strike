@@ -66,3 +66,46 @@ description: stage and commit with a good message
 ---
 Look at the uncommitted changes and commit them: $ARGUMENTS
 ```
+
+## Workflows
+
+**Workflows** are ordered phase sequences loaded from
+`~/.strike/workflows/*.json` and `./.strike/workflows/*.json` (project
+overrides global by name). Strike always ships a built-in
+`plan-implement` workflow that may be overridden by the same name.
+
+Each phase may pin an agent, extra prompt context, a permission ruleset, and
+an exit gate:
+
+| Gate `type` | Clears when |
+|---|---|
+| `agent` (default) | the model calls `phase_done` |
+| `user` | the user approves (e.g. leave plan mode) |
+| `check` | `command` exits 0 |
+
+Built-in `plan-implement`:
+
+1. **plan** — `plan` agent, hard-deny `write`/`edit`, user exit gate
+2. **implement** — `build` agent, agent exit gate
+
+Tools `enter_plan_mode` / `exit_plan_mode` start and advance that workflow.
+The active phase shows as a badge in the TUI header. Example custom file:
+
+```json
+{
+  "name": "review-fix",
+  "description": "Review then fix",
+  "phases": [
+    {
+      "name": "review",
+      "agent": "build",
+      "exit": { "type": "user" }
+    },
+    {
+      "name": "fix",
+      "agent": "build",
+      "exit": { "type": "check", "command": "make test" }
+    }
+  ]
+}
+```

@@ -174,6 +174,77 @@ func TestActivityPaneRendersSessionTree(t *testing.T) {
 	}
 }
 
+func TestSubmitBlockedWhileViewingChild(t *testing.T) {
+	fs := newFakeSessions()
+	fs.put(host.Session{ID: "child-1", ParentID: "root", Title: "explore"}, mustSessionJSONL(t,
+		protocol.UserMessage{Text: "child work"},
+	))
+
+	m, ops := newAppTestModel(nil, nil)
+	m.sessionID = "root"
+	m.providerName = "echo"
+	m.services.Sessions = fs
+	m.children = []childActivity{{
+		sessionID: "child-1",
+		agent:     "explore",
+		status:    string(protocol.ChildStatusCompleted),
+	}}
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlX})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	if !m.viewingChild() {
+		t.Fatal("expected child view")
+	}
+
+	const draft = "should not go to parent"
+	m.composer.SetValue(draft)
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	assertNoAppOp(t, ops)
+	if m.composer.Value() != draft {
+		t.Fatalf("composer = %q, want draft kept", m.composer.Value())
+	}
+	if !m.noticeErr || !strings.Contains(m.notice, "subagent") {
+		t.Fatalf("notice = %q (err=%v), want subagent send block", m.notice, m.noticeErr)
+	}
+	if !m.viewingChild() {
+		t.Fatal("send should not leave child view")
+	}
+}
+
+func TestSkillSubmitBlockedWhileViewingChild(t *testing.T) {
+	fs := newFakeSessions()
+	fs.put(host.Session{ID: "child-1", ParentID: "root", Title: "explore"}, mustSessionJSONL(t,
+		protocol.UserMessage{Text: "child work"},
+	))
+	skill := fakeSkill("review", "review code", "Review: $ARGUMENTS")
+
+	m, ops := newAppTestModel(nil, []host.Skill{skill})
+	m.sessionID = "root"
+	m.providerName = "echo"
+	m.services.Sessions = fs
+	m.children = []childActivity{{
+		sessionID: "child-1",
+		agent:     "explore",
+		status:    string(protocol.ChildStatusCompleted),
+	}}
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlX})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	if !m.viewingChild() {
+		t.Fatal("expected child view")
+	}
+
+	m.composer.SetValue("/review this diff")
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	assertNoAppOp(t, ops)
+	if m.composer.Value() != "/review this diff" {
+		t.Fatalf("composer = %q, want skill draft kept", m.composer.Value())
+	}
+	if !m.noticeErr || !strings.Contains(m.notice, "subagent") {
+		t.Fatalf("notice = %q (err=%v), want subagent send block", m.notice, m.noticeErr)
+	}
+}
+
 func TestChildCompletedRefreshesViewingTranscript(t *testing.T) {
 	fs := newFakeSessions()
 	fs.put(host.Session{ID: "c1", ParentID: "root", Title: "work"}, mustSessionJSONL(t,
