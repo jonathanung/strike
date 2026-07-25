@@ -364,8 +364,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	}
 	sessionID := info.ID
 	sessionDir := sessions.Dir()
-	hookDefs := make([]tool.HookDef, 0, len(cfg.Hooks))
-	for _, h := range cfg.Hooks {
+	shellHooks := cfg.ShellHooks()
+	hookDefs := make([]tool.HookDef, 0, len(shellHooks))
+	for _, h := range shellHooks {
 		hookDefs = append(hookDefs, tool.HookDef{
 			Event:     h.Event,
 			Command:   h.Command,
@@ -389,6 +390,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		Workflows:       workflows,
 		Rules:           permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),
 		Hooks:           hookDefs,
+		HookRules:       cfg.HookRules(),
 		LookupContextWindow: func(providerName, model string) int {
 			// Best-effort catalog lookup for threshold compaction. Failures
 			// leave the window unknown; overflow recovery still works.

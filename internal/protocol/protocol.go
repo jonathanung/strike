@@ -478,6 +478,19 @@ type SessionMeta struct {
 	PRNumber int    `json:"prNumber,omitempty"`
 }
 
+// HookMatched records that a declarative config hook rule fired (log/block/
+// notify). Persisted in the session JSONL for review and notify sinks.
+type HookMatched struct {
+	Correlation
+	Event   string `json:"event"`
+	Action  string `json:"action"`
+	Matcher string `json:"matcher,omitempty"`
+	Tool    string `json:"tool,omitempty"`
+	Message string `json:"message,omitempty"`
+	// CallID is set for tool lifecycle hooks when a call is in flight.
+	CallID string `json:"callId,omitempty"`
+}
+
 func (UserMessage) isEvent()         {}
 func (SessionTitled) isEvent()       {}
 func (TurnStarted) isEvent()         {}
@@ -507,3 +520,4 @@ func (ProviderRetrying) isEvent()    {}
 func (CompactionStarted) isEvent()   {}
 func (CompactionCompleted) isEvent() {}
 func (SessionMeta) isEvent()         {}
+func (HookMatched) isEvent()         {}

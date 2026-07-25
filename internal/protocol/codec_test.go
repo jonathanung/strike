@@ -360,6 +360,7 @@ func TestEventTypeCoverage(t *testing.T) {
 		"compaction.started":   CompactionStarted{},
 		"compaction.completed": CompactionCompleted{},
 		"session.meta":         SessionMeta{},
+		"hook.matched":         HookMatched{},
 	}
 	for typ, ev := range want {
 		env, err := Wrap(ev)

@@ -13,6 +13,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -33,24 +34,70 @@ type Config struct {
 	// tea.ExecProcess handoff). Unknown values are ignored at load time.
 	VimMode     string             `json:"vimMode,omitempty"`
 	Permissions permission.Ruleset `json:"permissions,omitempty"`
-	// Hooks are shell-command lifecycle hooks (event JSON on stdin; exit
-	// allow/block; stdout inject). Global then project layers concatenate.
+	// Hooks mixes declarative rules (action) and shell commands (command).
+	// Global then project layers concatenate. Invalid entries are dropped.
 	Hooks []Hook `json:"hooks,omitempty"`
 	// Providers are user-declared custom/self-hosted endpoints (name, base
 	// URL, wire api). API keys are never stored here — only in auth.json.
 	Providers []CustomProvider `json:"providers,omitempty"`
 }
 
-// Hook is a shell command fired on an engine lifecycle event.
+// Hook is one lifecycle hook entry. Exactly one of Action or Command should
+// be set:
+//   - Action (log|block|notify): declarative rule evaluated in-process
+//   - Command: shell hook (event JSON on stdin; exit allow/block; stdout inject)
 type Hook struct {
-	// Event is pre_tool_use or post_tool_use.
+	// Event is pre_tool_use, post_tool_use, turn_start, or turn_end.
+	// Shell hooks only run for pre_tool_use / post_tool_use.
 	Event string `json:"event"`
-	// Command runs via bash -c with the event payload on stdin.
-	Command string `json:"command"`
-	// TimeoutMs bounds execution (default 30000, max 120000).
-	TimeoutMs int `json:"timeoutMs,omitempty"`
 	// Matcher is a doublestar glob over the tool name; empty matches all.
 	Matcher string `json:"matcher,omitempty"`
+	// Action is log, block, or notify (declarative). Mutually exclusive with Command.
+	Action string `json:"action,omitempty"`
+	// Message is optional text for block/notify declarative rules.
+	Message string `json:"message,omitempty"`
+	// Command runs via bash -c with the event payload on stdin (shell hook).
+	Command string `json:"command,omitempty"`
+	// TimeoutMs bounds shell execution (default 30000, max 120000).
+	TimeoutMs int `json:"timeoutMs,omitempty"`
+}
+
+// IsShell reports a shell-command hook (has command, no action).
+func (h Hook) IsShell() bool {
+	return strings.TrimSpace(h.Command) != "" && strings.TrimSpace(h.Action) == ""
+}
+
+// IsRule reports a declarative action hook (has action, no command).
+func (h Hook) IsRule() bool {
+	return strings.TrimSpace(h.Action) != "" && strings.TrimSpace(h.Command) == ""
+}
+
+// ShellHooks returns shell-command entries for the engine.
+func (c Config) ShellHooks() []Hook {
+	out := make([]Hook, 0, len(c.Hooks))
+	for _, h := range c.Hooks {
+		if h.IsShell() {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// HookRules returns declarative rules for the permission/engine evaluator.
+func (c Config) HookRules() permission.HookRuleset {
+	out := make(permission.HookRuleset, 0, len(c.Hooks))
+	for _, h := range c.Hooks {
+		if !h.IsRule() {
+			continue
+		}
+		out = append(out, permission.HookRule{
+			Event:   h.Event,
+			Matcher: h.Matcher,
+			Action:  h.Action,
+			Message: h.Message,
+		})
+	}
+	return out
 }
 
 func Default() Config {
@@ -145,6 +192,35 @@ func read(path string) (Config, error) {
 			valid = append(valid, p)
 		}
 		c.Providers = valid
+	}
+	// Drop invalid hooks (neither shell nor rule, or bad declarative fields).
+	if len(c.Hooks) > 0 {
+		valid := make([]Hook, 0, len(c.Hooks))
+		for _, h := range c.Hooks {
+			switch {
+			case h.IsShell():
+				// Shell hooks only fire on tool events; keep any event string
+				// and let the engine matcher filter.
+				if strings.TrimSpace(h.Event) == "" {
+					continue
+				}
+				valid = append(valid, h)
+			case h.IsRule():
+				rule := permission.HookRule{
+					Event:   h.Event,
+					Matcher: h.Matcher,
+					Action:  h.Action,
+					Message: h.Message,
+				}
+				if err := permission.ValidateHookRule(rule); err != nil {
+					continue
+				}
+				valid = append(valid, h)
+			default:
+				// Both action+command or neither: drop.
+			}
+		}
+		c.Hooks = valid
 	}
 	return c, nil
 }

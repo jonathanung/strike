@@ -111,6 +111,9 @@ type Options struct {
 	Rules []permission.Ruleset
 	// Hooks are shell-command lifecycle hooks (pre/post tool use). Empty disables.
 	Hooks []tool.HookDef
+	// HookRules are declarative config rules (event matcher → log/block/notify).
+	// Evaluated before shell hooks on pre_tool_use; block skips Execute.
+	HookRules permission.HookRuleset
 	// PersistProjectRule, when set, is invoked after a DecisionProject grant
 	// so the rule can be written to project config. Optional.
 	PersistProjectRule func(permission.Rule) error
@@ -965,6 +968,7 @@ func (e *Engine) runTurn(ctx context.Context, text string, turnID string, finish
 	e.emit(protocol.UserMessage{Correlation: turnCorr, Text: text})
 	e.maybeTitleSession(text)
 	e.emit(protocol.TurnStarted{Correlation: turnCorr})
+	e.fireHookRules(turnCorr, permission.HookEventTurnStart, "", "")
 	e.messages = append(e.messages, provider.Message{Role: provider.RoleUser, Text: text})
 
 	for {
@@ -1280,6 +1284,17 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 		return e.canceledToolResult(call.ID, corr)
 	}
 
+	// Declarative rules first (cheap, no process). Block skips shell + Execute.
+	if d := e.fireHookRules(corr, permission.HookEventPreToolUse, call.Name, call.ID); d.Block {
+		return e.settleToolFeedback(toolFeedback{
+			Corr:    corr,
+			CallID:  call.ID,
+			Output:  protocol.ToolFeedbackBlocked(d.BlockMessage()),
+			IsError: true,
+			EmitEnd: true,
+		})
+	}
+
 	pre, err := e.runToolHooks(ctx, tool.HookEventPreToolUse, call, corr, "", false)
 	if err != nil {
 		if ctx.Err() != nil || errors.Is(err, context.Canceled) {
@@ -1421,6 +1436,9 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 		}
 	}
 
+	// Declarative post rules observe the completed call (log/notify only).
+	e.fireHookRules(corr, permission.HookEventPostToolUse, call.Name, call.ID)
+
 	return e.settleToolFeedback(toolFeedback{
 		Corr:     corr,
 		CallID:   call.ID,
@@ -1505,8 +1523,40 @@ func (e *Engine) failTurn(err error, corr protocol.Correlation, finishing chan s
 // post-tool-batch apply in runTurn).
 func (e *Engine) completeTurn(finishing chan struct{}, corr protocol.Correlation, stopReason string) {
 	close(finishing)
+	e.fireHookRules(corr, permission.HookEventTurnEnd, "", "")
 	e.emit(protocol.TurnCompleted{Correlation: corr, StopReason: stopReason})
 	e.applyPendingAgent()
+}
+
+// fireHookRules evaluates declarative config rules and emits HookMatched for
+// each log/notify/block hit. Returns the decision so pre_tool_use can block
+// before shell hooks and Execute. callID is optional tool correlation.
+func (e *Engine) fireHookRules(corr protocol.Correlation, event, subject, callID string) permission.HookDecision {
+	d := permission.EvaluateHooks(e.opts.HookRules, event, subject)
+	if d.Block && strings.TrimSpace(d.BlockHit.Message) == "" {
+		d.BlockHit.Message = permission.DefaultBlockMessage(event, d.BlockHit.Matcher, subject)
+	}
+	emitHit := func(hit permission.HookHit) {
+		e.emit(protocol.HookMatched{
+			Correlation: corr,
+			Event:       hit.Event,
+			Action:      hit.Action,
+			Matcher:     hit.Matcher,
+			Tool:        hit.Tool,
+			Message:     hit.Message,
+			CallID:      callID,
+		})
+	}
+	for _, hit := range d.Log {
+		emitHit(hit)
+	}
+	for _, hit := range d.Notify {
+		emitHit(hit)
+	}
+	if d.Block {
+		emitHit(d.BlockHit)
+	}
+	return d
 }
 
 // emitUsage translates provider.Usage into a protocol.UsageReported event.
