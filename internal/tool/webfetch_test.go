@@ -410,3 +410,105 @@ func TestWebFetchAskPatterns(t *testing.T) {
 		t.Errorf("patterns = %#v", saw.Patterns)
 	}
 }
+
+func TestResolvePublicDialAddr(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("public literal", func(t *testing.T) {
+		got, err := resolvePublicDialAddr(ctx, "8.8.8.8")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != "8.8.8.8" {
+			t.Errorf("got %q", got)
+		}
+	})
+
+	blocked := []struct {
+		host string
+		sub  string
+	}{
+		{"127.0.0.1", "private or local"},
+		{"10.0.0.5", "private or local"},
+		{"192.168.1.1", "private or local"},
+		{"172.16.0.1", "private or local"},
+		{"169.254.169.254", "private or local"},
+		{"::1", "private or local"},
+		{"0.0.0.0", "private or local"},
+		{"100.64.1.1", "private or local"},
+		{"198.18.0.1", "private or local"},
+	}
+	for _, tt := range blocked {
+		t.Run(tt.host, func(t *testing.T) {
+			_, err := resolvePublicDialAddr(ctx, tt.host)
+			if err == nil {
+				t.Fatal("expected block")
+			}
+			if !strings.Contains(err.Error(), "private") && !strings.Contains(err.Error(), "local") {
+				t.Errorf("err = %v, want private/local refusal", err)
+			}
+		})
+	}
+}
+
+func TestNewWebfetchSafeTransportDialBlocksPrivate(t *testing.T) {
+	tr := newWebfetchSafeTransport()
+	if tr == nil || tr.DialContext == nil {
+		t.Fatal("expected transport with DialContext")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	cases := []string{
+		"127.0.0.1:80",
+		"10.0.0.1:443",
+		"192.168.0.1:80",
+		"169.254.169.254:80",
+		"[::1]:80",
+		"100.64.0.1:80",
+		"198.18.0.1:80",
+	}
+	for _, addr := range cases {
+		t.Run(addr, func(t *testing.T) {
+			conn, err := tr.DialContext(ctx, "tcp", addr)
+			if conn != nil {
+				_ = conn.Close()
+				t.Fatal("expected dial to be blocked")
+			}
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), "private") && !strings.Contains(err.Error(), "local") {
+				t.Errorf("err = %v, want private/local refusal", err)
+			}
+		})
+	}
+}
+
+// Dial-time guard must reject even when the pre-check allowlist would pass
+// (simulates DNS rebinding: hostname allowlisted at plan time, dial sees private IP).
+func TestWebfetchSafeTransportDialIgnoresTestAllowHost(t *testing.T) {
+	// assertPublicHTTPHost may allow webfetchTestAllowHost; DialContext must still
+	// filter the resolved/literal address.
+	prev := webfetchTestAllowHost
+	webfetchTestAllowHost = "127.0.0.1"
+	t.Cleanup(func() { webfetchTestAllowHost = prev })
+
+	if err := assertPublicHTTPHost("127.0.0.1"); err != nil {
+		t.Fatalf("allowlist should pass assertPublicHTTPHost: %v", err)
+	}
+
+	tr := newWebfetchSafeTransport()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	conn, err := tr.DialContext(ctx, "tcp", "127.0.0.1:9")
+	if conn != nil {
+		_ = conn.Close()
+	}
+	if err == nil {
+		t.Fatal("DialContext must block loopback even when test allow host is set")
+	}
+	if !strings.Contains(err.Error(), "private") && !strings.Contains(err.Error(), "local") {
+		t.Errorf("err = %v", err)
+	}
+}
