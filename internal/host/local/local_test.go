@@ -451,7 +451,7 @@ func TestCatalogModelsMetadataFromCache(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cacheDir, "models.json"), []byte(catalog), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	svc := New(nil, nil, nil, nil, nil)
+	svc := New(nil, nil, nil, nil, nil, nil)
 	infos, err := svc.Catalog.Models(context.Background(), "openai")
 	if err != nil {
 		t.Fatal(err)
