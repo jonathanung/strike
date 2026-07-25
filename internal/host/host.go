@@ -76,6 +76,15 @@ type History interface {
 	Enqueue(prompt string) <-chan error
 }
 
+// Files reads workspace files for frontend features (e.g. markdown reader).
+// Nil means the capability is absent; frontends must degrade gracefully.
+type Files interface {
+	// ReadFile resolves path (relative to the host work directory, or absolute),
+	// then reads the file. Implementations enforce a size cap. Empty path,
+	// missing files, directories, oversize content, and I/O failures return errors.
+	ReadFile(path string) ([]byte, error)
+}
+
 // Services bundles everything a frontend receives from its host. Any field
 // may be nil/empty when a capability is absent (tests, future frontends);
 // frontends must degrade gracefully.
@@ -84,6 +93,7 @@ type Services struct {
 	Catalog  Catalog
 	Settings Settings
 	History  History
+	Files    Files
 	Agents   []string // selectable agent names, default first
 	Skills   []Skill
 }

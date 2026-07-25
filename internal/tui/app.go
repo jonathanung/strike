@@ -9,6 +9,7 @@
 package tui
 
 import (
+	"bytes"
 	"strings"
 	"unicode"
 
@@ -801,8 +802,10 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		}
 	case "/fast":
 		return m.handleFastCommand(fields[1:])
+	case "/md-read":
+		return m.handleMDRead(text, fields)
 	case "/help":
-		m.setNotice("commands: "+dotJoin(m.th, "/provider [name [model]]", "/model <model>", "/effort <"+effortChoices()+">", "/fast [on|off]", "/agent [name]", "/auth", "/keys", "skills as /<name>", "tab cycles agents"), false)
+		m.setNotice("commands: "+dotJoin(m.th, "/provider [name [model]]", "/model <model>", "/effort <"+effortChoices()+">", "/fast [on|off]", "/agent [name]", "/auth", "/keys", "/md-read <path>", "skills as /<name>", "tab cycles agents"), false)
 		m.resetComposer()
 		return m, nil
 	case "/keys":
@@ -830,6 +833,40 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		m.setNotice("unknown command "+fields[0]+" — try /help", true)
 		return m, nil
 	}
+}
+
+func (m Model) handleMDRead(text string, fields []string) (tea.Model, tea.Cmd) {
+	pathArg := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(text), fields[0]))
+	m.resetComposer()
+	if pathArg == "" {
+		m.setNotice("usage: /md-read <path>", true)
+		return m, nil
+	}
+	if m.services.Files == nil {
+		m.setNotice("file reading is unavailable", true)
+		return m, nil
+	}
+	data, err := m.services.Files.ReadFile(pathArg)
+	if err != nil {
+		m.setNotice("md-read: "+err.Error(), true)
+		return m, nil
+	}
+	if bytes.IndexByte(data, 0) >= 0 {
+		m.setNotice("md-read: binary files are not supported", true)
+		return m, nil
+	}
+
+	loaded := newMarkdownWindow().load(pathArg, string(data))
+	var ok bool
+	m.windows, ok = m.windows.replace(markdownWindowID, loaded, true)
+	if !ok {
+		m.setNotice("md-read: markdown window missing", true)
+		return m, nil
+	}
+	m.clearNotice()
+	cmd := m.setPaneFocus(focusRight)
+	m.reflow() // apply pane dimensions so glamour runs at real width
+	return m, cmd
 }
 
 func (m Model) submit(op protocol.UserInput, displayPrompt string) (tea.Model, tea.Cmd) {

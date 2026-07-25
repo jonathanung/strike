@@ -310,6 +310,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 	// local.New wraps the real backend stores in the host.Services contract;
 	// the TUI never sees auth/config/models/history directly.
 	services := local.New(authStore, historyStore, agentNames, skills)
+	services.Files = local.NewFiles(workDir)
 
 	storeOwned = true
 	if err := runSession(context.Background(), eng.Run, eng.Events(), store, func(events <-chan protocol.Event) error {

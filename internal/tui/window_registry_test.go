@@ -156,35 +156,56 @@ func TestCompactRightPaneIsBorderlessAndUsesFullBodyDimensionsAtThresholds(t *te
 	}
 }
 
-func TestDefaultWindowRegistryHasTwoUniqueNamedWindows(t *testing.T) {
+func TestDefaultWindowRegistryHasThreeUniqueWidthSafeWindows(t *testing.T) {
 	r := newWindowRegistry()
-	if len(r.windows) != 2 {
-		t.Fatalf("window count = %d, want 2", len(r.windows))
+	if len(r.windows) != 3 {
+		t.Fatalf("window count = %d, want 3", len(r.windows))
 	}
-	wantIDs := []string{"context", "activity"}
+	wantIDs := []string{"context", "activity", "markdown"}
 	seenIDs, seenTitles := map[string]bool{}, map[string]bool{}
 	for i, w := range r.windows {
+		if w.id() != wantIDs[i] {
+			t.Errorf("window[%d] id = %q, want %q", i, w.id(), wantIDs[i])
+		}
 		if w.id() == "" || w.title() == "" || seenIDs[w.id()] || seenTitles[w.title()] {
 			t.Errorf("window identity is missing or not unique: id=%q title=%q", w.id(), w.title())
 		}
 		seenIDs[w.id()], seenTitles[w.title()] = true, true
-		if i < len(wantIDs) && w.id() != wantIDs[i] {
-			t.Errorf("windows[%d].id() = %q, want %q", i, w.id(), wantIDs[i])
-		}
-		if _, ok := w.(namedWindow); !ok {
-			t.Errorf("window = %#v, want a namedWindow", w)
-		}
-		// Resize is width-safe: dimensions stick and view stays within width.
-		for _, size := range []struct{ w, h int }{{80, 3}, {12, 5}, {1, 1}} {
-			resized := w.resize(size.w, size.h)
-			nw, ok := resized.(namedWindow)
-			if !ok || nw.width != size.w || nw.height != size.h {
-				t.Errorf("resize(%d,%d) = %#v, want namedWindow %dx%d", size.w, size.h, resized, size.w, size.h)
+
+		switch w.id() {
+		case "context", "activity":
+			if _, ok := w.(namedWindow); !ok {
+				t.Errorf("window = %#v, want a namedWindow", w)
 			}
+			// Resize is width-safe: dimensions stick and view stays within width.
+			for _, size := range []struct{ w, h int }{{80, 3}, {12, 5}, {1, 1}} {
+				resized := w.resize(size.w, size.h)
+				nw, ok := resized.(namedWindow)
+				if !ok || nw.width != size.w || nw.height != size.h {
+					t.Errorf("resize(%d,%d) = %#v, want namedWindow %dx%d", size.w, size.h, resized, size.w, size.h)
+				}
+			}
+		case "markdown":
+			mw, ok := w.(markdownWindow)
+			if !ok {
+				t.Fatalf("markdown window = %T, want markdownWindow", w)
+			}
+			wide := mw.resize(40, 3).view(theme.Default())
+			if !strings.Contains(wide, "No file open") {
+				t.Errorf("markdown empty state missing prompt: %q", wide)
+			}
+			view := mw.resize(8, 3).view(theme.Default())
+			for _, line := range strings.Split(view, "\n") {
+				if got := lipgloss.Width(line); got > 8 {
+					t.Errorf("markdown empty line width = %d, want <= 8: %q", got, line)
+				}
+			}
+		default:
+			t.Errorf("unexpected window id %q", w.id())
 		}
 	}
-	if !seenIDs["context"] || !seenIDs["activity"] {
-		t.Errorf("default registry ids = %v, want context and activity", seenIDs)
+	if !seenIDs["context"] || !seenIDs["activity"] || !seenIDs["markdown"] {
+		t.Errorf("default registry ids = %v, want context, activity, and markdown", seenIDs)
 	}
 
 	// Full Model.View at split size shows real context content, not a placeholder.
@@ -200,4 +221,118 @@ func TestDefaultWindowRegistryHasTwoUniqueNamedWindows(t *testing.T) {
 	if !strings.Contains(plain, "context") {
 		t.Errorf("split view missing context window title:\n%s", plain)
 	}
+}
+
+func TestWindowRegistryActivateByID(t *testing.T) {
+	r := newWindowRegistry()
+	if got := r.active().id(); got != "context" {
+		t.Fatalf("initial active = %q, want context", got)
+	}
+	next, ok := r.activate("markdown")
+	if !ok || next.active().id() != "markdown" {
+		t.Fatalf("activate(markdown) = ok=%v active=%q", ok, next.active().id())
+	}
+	if r.active().id() != "context" {
+		t.Errorf("activate mutated original registry active to %q", r.active().id())
+	}
+	_, ok = next.activate("missing")
+	if ok {
+		t.Error("activate(missing) returned ok=true")
+	}
+	if next.active().id() != "markdown" {
+		t.Errorf("failed activate changed active to %q", next.active().id())
+	}
+}
+
+func TestWindowRegistryReplaceByID(t *testing.T) {
+	r := newWindowRegistry()
+	replacement := statefulTestWindow{windowID: "markdown", windowTitle: "Replaced"}
+
+	withActivate, ok := r.replace("markdown", replacement, true)
+	if !ok {
+		t.Fatal("replace(markdown, activate) returned ok=false")
+	}
+	if withActivate.active().id() != "markdown" || withActivate.active().title() != "Replaced" {
+		t.Errorf("activated replace active = %q/%q", withActivate.active().id(), withActivate.active().title())
+	}
+
+	without, ok := r.replace("markdown", replacement, false)
+	if !ok {
+		t.Fatal("replace(markdown, no activate) returned ok=false")
+	}
+	if without.active().id() != "context" {
+		t.Errorf("replace without activate changed active to %q", without.active().id())
+	}
+	found := false
+	for _, w := range without.windows {
+		if w.id() == "markdown" && w.title() == "Replaced" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("replace without activate did not swap the markdown window")
+	}
+
+	_, ok = r.replace("missing", replacement, true)
+	if ok {
+		t.Error("replace(missing) returned ok=true")
+	}
+}
+
+func TestWindowRegistryCycleIncludesMarkdown(t *testing.T) {
+	r := newWindowRegistry()
+	var order []string
+	for range 4 {
+		order = append(order, r.active().id())
+		r = r.cycle()
+	}
+	want := []string{"context", "activity", "markdown", "context"}
+	if !stringsEqual(order, want) {
+		t.Errorf("cycle order = %q, want %q", order, want)
+	}
+}
+
+func TestWindowRegistryPreservesMarkdownScrollAcrossCycle(t *testing.T) {
+	r := newWindowRegistry()
+	mw := newMarkdownWindow()
+	mw.renderMarkdown = func(source string, width int) (string, error) {
+		var b strings.Builder
+		for i := 0; i < 80; i++ {
+			b.WriteString("scroll-line\n")
+		}
+		return b.String(), nil
+	}
+	mw = mw.resize(40, 5).(markdownWindow)
+	mw = mw.load("tall.md", "# tall")
+	r, ok := r.replace(markdownWindowID, mw, true)
+	if !ok {
+		t.Fatal("replace markdown failed")
+	}
+	r, _ = r.update(tea.KeyMsg{Type: tea.KeyPgDown})
+	r, _ = r.update(tea.KeyMsg{Type: tea.KeyPgDown})
+	active := r.active().(markdownWindow)
+	wantOffset := active.vp.YOffset
+	if wantOffset == 0 {
+		t.Fatal("setup did not scroll markdown content")
+	}
+
+	r = r.cycle() // activity
+	r = r.cycle() // context
+	r = r.cycle() // markdown again
+	got := r.active().(markdownWindow)
+	if got.vp.YOffset != wantOffset {
+		t.Errorf("YOffset after cycle away/back = %d, want %d", got.vp.YOffset, wantOffset)
+	}
+}
+
+func stringsEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

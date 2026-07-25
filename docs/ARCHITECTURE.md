@@ -23,7 +23,8 @@ cmd/strike/wire.go (run) — composition root
 │
 ├── builds host.Services via internal/host/local.New(authStore, historyStore,
 │     agentNames, skills) — wraps internal/{auth,config,models,history}
-│     into host.Services{Auth, Catalog, Settings, History, Agents, Skills}
+│     into host.Services{Auth, Catalog, Settings, History, Agents, Skills},
+│     then attaches host.Files (local.NewFiles(workDir)) for frontend file reads
 │
 └── tui.New(eng.Ops(), events, services, tui.Options{...})
       internal/tui's entire view of the world: two protocol channels plus
@@ -56,7 +57,7 @@ event stream the TUI rendered from (see `internal/protocol/codec.go`).
 | `internal/history` | Project-scoped prompt history | stdlib |
 | `internal/project` | Stable filesystem identity for project-scoped state (git-aware) | stdlib, os/exec |
 | `internal/host` | **Frozen contract**: the services a frontend needs from its host process | stdlib only — enforced by the boundary test |
-| `internal/host/local` | Real `host.Services` implementation; wraps auth/config/models/history for the frontend | `auth`, `config`, `history`, `host`, `models` |
+| `internal/host/local` | Real `host.Services` implementation; wraps auth/config/models/history/files for the frontend | `auth`, `config`, `history`, `host`, `models` |
 | `internal/tui` | Bubble Tea frontend: app model, layout, transcript cells, modals, composer | `protocol`, `host`, `tui/...` only — enforced by the boundary test |
 | `internal/tui/theme` | Resolved design tokens: adaptive color roles, terminal background, glyphs, border/spacing tokens, and precomputed styles | lipgloss, stdlib |
 | `internal/tui/ui` | Reusable component library (Panel, Dialog, Badge, KeyHints, StatusBar, List, Notice, Card/Bento, OverlayCenter, Canvas, Logo) | stdlib, lipgloss, bubbles, charmbracelet/x/ansi, `tui/theme` |
@@ -88,13 +89,15 @@ F2-style enum for separate transcript, composer, and modal focus.
 The right pane is TUI-local. Its private, value-oriented `window` interface
 has identity/title, initialization, update, resize, and view methods; updates
 and resizes return replacement values so model copies do not share mutable
-state. The registry contains exactly two named session panes (`context` for
-setup summary and `activity` for recent tools or idle tips) and exposes only
-the active window. It has no close state, plugin mechanism, file content,
-editor, or markdown reader. Window input and resize updates stay inside
-`internal/tui`: no protocol Op or Event was added for this pane infrastructure.
-Composer input treats Enter as send and Shift+Enter (normalized to Alt+Enter)
-as newline via a stdin wrapper and enhanced keyboard modes.
+state. The registry holds three windows: named session panes (`context` for
+setup summary and `activity` for recent tools or idle tips) plus a `markdown`
+reader opened via `/md-read`. It exposes only the active window and has no
+close state or plugin mechanism. File bytes reach the markdown window through
+`host.Files`, not direct disk I/O from the TUI. Window input and resize
+updates stay inside `internal/tui`: no protocol Op or Event was added for this
+pane infrastructure. Composer input treats Enter as send and Shift+Enter
+(normalized to Alt+Enter) as newline via a stdin wrapper and enhanced
+keyboard modes.
 
 `View()` composes the full-width header first; its body is a horizontal split
 of the left stack (transcript, notice, completion, composer, in that order)
@@ -190,8 +193,8 @@ Two different mechanisms, depending on whether it needs Go code:
   format (`description:`) and `$ARGUMENTS` substitution. It becomes
   `/<name>` on the next launch automatically, through
   `host.Services.Skills`. Reserved names (`provider`, `model`, `auth`,
-  `agent`, `help`) are rejected by `config.ValidateSkillName` before they
-  ever reach the frontend.
+  `agent`, `fast`, `md-read`, `help`) are rejected by
+  `config.ValidateSkillName` before they ever reach the frontend.
 - **Builtin command (code).** Add a `commandSpec` to `builtinCommandSpecs`
   in `internal/tui/commands.go`, a `case "/yourcmd":` arm in
   `Model.handleCommand` (`internal/tui/app.go`), and — if it's a primary
@@ -221,12 +224,13 @@ Two different mechanisms, depending on whether it needs Go code:
    `internal/host/host.go`. This package is a stdlib-only contract — no
    importing `auth`, `config`, `models`, or `history` here, even for a type
    reference (the boundary test fails the build otherwise). Look at
-   `Auth`/`Catalog`/`Settings`/`History` for the shape: small, frontend-facing,
-   `context`-aware when it may block.
-2. Implement it in `internal/host/local/local.go`, wrapping the real backend
-   package. This file is the seam that is allowed to import both `internal/host`
-   and the backend packages; keep new implementations here unless there's a
-   reason to add another implementation package.
+  `Auth`/`Catalog`/`Settings`/`History`/`Files` for the shape: small,
+  frontend-facing, `context`-aware when it may block.
+2. Implement it in `internal/host/local/` (e.g. `local.go`, `files.go`),
+  wrapping the real backend package. This package is the seam that is allowed
+  to import both `internal/host` and the backend packages; keep new
+  implementations here unless there's a reason to add another implementation
+  package.
 3. Consume it from `internal/tui` through `Model.services` (or pass the
    specific sub-interface into a modal constructor, as `providerModal` and
    `modelModal` do) — never import the backend package directly from

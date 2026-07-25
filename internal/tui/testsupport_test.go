@@ -209,6 +209,26 @@ func (f *fakeHistory) Enqueue(prompt string) <-chan error {
 	return done
 }
 
+// --- fakeFiles: a scriptable host.Files ----------------------------------
+
+// fakeFiles is a host.Files that matches paths exactly as passed to ReadFile
+// (the TUI forwards the path argument unchanged).
+type fakeFiles struct {
+	files map[string][]byte
+	err   error
+}
+
+func (f *fakeFiles) ReadFile(path string) ([]byte, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	data, ok := f.files[path]
+	if !ok {
+		return nil, fmt.Errorf("file not found: %s", path)
+	}
+	return append([]byte(nil), data...), nil
+}
+
 // --- construction helpers ------------------------------------------------
 
 // fakeSkill builds a host.Skill from a template, mirroring config.Skill.Render

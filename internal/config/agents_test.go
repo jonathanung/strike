@@ -140,6 +140,7 @@ func TestLoadSkillsWithErrorRejectsUnsafeAndReservedNamesClearly(t *testing.T) {
 	}{
 		{name: "empty", fileName: ".md", wantDetail: "skill name is empty"},
 		{name: "reserved", fileName: "help.md", wantDetail: `skill name "help" is reserved`},
+		{name: "reserved md-read", fileName: "md-read.md", wantDetail: `skill name "md-read" is reserved`},
 		{name: "whitespace", fileName: "two words.md", wantDetail: "whitespace or a control character"},
 		{name: "slash", fileName: "slash.md", frontName: "bad/name", wantDetail: "contains '/'"},
 		{name: "control", fileName: "control.md", frontName: "bad\u0007name", wantDetail: "whitespace or a control character"},
