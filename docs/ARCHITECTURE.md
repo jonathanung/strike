@@ -91,13 +91,15 @@ composer, and modal focus.
 The right pane is TUI-local. Its private, value-oriented `window` interface
 has identity/title, initialization, update, resize, and view methods; updates
 and resizes return replacement values so model copies do not share mutable
-state. The registry holds three windows: named session panes (`context` for
+state. The registry holds five windows: named session panes (`context` for
 setup summary and `activity` for subagent status, recent parent tools, or idle
-tips) plus a `markdown` reader opened via `/md-read`. It exposes only the
-active window and has no close state or plugin mechanism. File bytes reach the
-markdown window through `host.Files`, not direct disk I/O from the TUI. Window
-input and resize updates stay inside `internal/tui`: no protocol Op or Event
-was added for this pane infrastructure. Composer input treats Enter as send and
+tips), a `files` explorer (lazy tree via `host.Files.ListDir`), a `markdown`
+reader opened via `/md-read`, and an `editor` PTY window for `/vim`. It exposes
+only the active window and has no close state or plugin mechanism. File bytes
+and directory listings reach the markdown and files windows through
+`host.Files`, not direct disk I/O from the TUI. Window input and resize updates
+stay inside `internal/tui`: no protocol Op or Event was added for this pane
+infrastructure. Composer input treats Enter as send and
 Shift+Enter (normalized to Alt+Enter) as newline via a stdin wrapper and
 enhanced keyboard modes; bare Escape from CSI-u is normalized to `0x1b`.
 
