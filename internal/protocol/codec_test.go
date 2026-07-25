@@ -11,6 +11,7 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 	childCorr := Correlation{SessionID: "child-1", ParentSessionID: "session-1", Depth: 1}
 	events := []Event{
 		UserMessage{Correlation: corr, Text: "hi"},
+		SessionTitled{Correlation: Correlation{SessionID: "session-1"}, Title: "hi"},
 		TurnStarted{Correlation: corr},
 		TextDelta{Correlation: corr, Text: "chunk"},
 		ToolCallBegin{Correlation: corr, CallID: "c1", Name: "bash", Args: json.RawMessage(`{"command":"echo"}`)},
@@ -41,6 +42,7 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 			Used:        KnownTokens(150),
 			Source:      UsageSourceActual,
 		},
+		SessionMeta{Correlation: corr, PRURL: "https://github.com/acme/repo/pull/7", PRNumber: 7},
 	}
 	for _, want := range events {
 		env, err := Wrap(want)
@@ -339,6 +341,7 @@ func TestEventTypeCoverage(t *testing.T) {
 		"child.started":       ChildStarted{},
 		"child.completed":     ChildCompleted{},
 		"usage.reported":      UsageReported{},
+		"session.meta":        SessionMeta{},
 	}
 	for typ, ev := range want {
 		env, err := Wrap(ev)

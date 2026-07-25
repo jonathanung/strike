@@ -173,12 +173,22 @@ type savedDefaults struct {
 }
 
 type fakeSettings struct {
-	saved []savedDefaults
-	err   error
+	saved       []savedDefaults
+	savedThemes []string
+	err         error
+	themeErr    error
 }
 
 func (s *fakeSettings) SaveDefaults(provider, model, agent, effort string) error {
 	s.saved = append(s.saved, savedDefaults{provider: provider, model: model, agent: agent, effort: effort})
+	return s.err
+}
+
+func (s *fakeSettings) SaveTheme(id string) error {
+	if s.themeErr != nil {
+		return s.themeErr
+	}
+	s.savedThemes = append(s.savedThemes, id)
 	return s.err
 }
 

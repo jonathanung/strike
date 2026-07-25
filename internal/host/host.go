@@ -75,6 +75,9 @@ type Settings interface {
 	// unchanged. Effort is a plain string so this contract stays
 	// stdlib-only; an unrecognized level is rejected with an error.
 	SaveDefaults(provider, model, agent, effort string) error
+	// SaveTheme persists the preferred TUI theme id (JSON theme file stem).
+	// Empty id is rejected.
+	SaveTheme(id string) error
 }
 
 // History is project-scoped prompt history. Enqueue is async; the channel

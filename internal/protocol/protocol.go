@@ -202,6 +202,14 @@ type UserMessage struct {
 	Text string `json:"text"`
 }
 
+// SessionTitled records the human-readable session title. Emitted once when
+// the first user message is accepted (derived from that text). Later emits
+// may rename; consumers should take the last title in the log.
+type SessionTitled struct {
+	Correlation
+	Title string `json:"title"`
+}
+
 type TurnStarted struct {
 	Correlation
 }
@@ -357,7 +365,17 @@ type UsageReported struct {
 	Source string     `json:"source,omitempty"` // actual | estimated
 }
 
+// SessionMeta records durable session-level metadata (e.g. a PR opened while
+// shipping). Also written to the session sidecar by the host; the event keeps
+// the JSONL transcript self-describing.
+type SessionMeta struct {
+	Correlation
+	PRURL    string `json:"prUrl,omitempty"`
+	PRNumber int    `json:"prNumber,omitempty"`
+}
+
 func (UserMessage) isEvent()        {}
+func (SessionTitled) isEvent()      {}
 func (TurnStarted) isEvent()        {}
 func (TextDelta) isEvent()          {}
 func (ToolCallBegin) isEvent()      {}
@@ -377,3 +395,4 @@ func (EngineError) isEvent()        {}
 func (ChildStarted) isEvent()       {}
 func (ChildCompleted) isEvent()     {}
 func (UsageReported) isEvent()      {}
+func (SessionMeta) isEvent()        {}

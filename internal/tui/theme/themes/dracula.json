@@ -1,0 +1,39 @@
+{
+  "name": "Dracula",
+  "id": "dracula",
+  "defs": {
+    "bg": "#282a36",
+    "fg": "#f8f8f2",
+    "comment": "#6272a4",
+    "cyan": "#8be9fd",
+    "green": "#50fa7b",
+    "orange": "#ffb86c",
+    "pink": "#ff79c6",
+    "purple": "#bd93f9",
+    "red": "#ff5555",
+    "yellow": "#f1fa8c",
+    "lightBg": "#f8f8f2",
+    "lightFg": "#282a36",
+    "lightMuted": "#6272a4",
+    "lightBorder": "#bd93f9"
+  },
+  "colors": {
+    "text": { "light": "lightFg", "dark": "fg" },
+    "textMuted": { "light": "lightMuted", "dark": "comment" },
+    "accent": { "light": "purple", "dark": "purple" },
+    "accentAlt": { "light": "cyan", "dark": "cyan" },
+    "highlight": { "light": "pink", "dark": "fg" },
+    "success": { "light": "green", "dark": "green" },
+    "warning": { "light": "orange", "dark": "orange" },
+    "error": { "light": "red", "dark": "red" },
+    "danger": { "light": "red", "dark": "red" },
+    "background": { "light": "lightBg", "dark": "bg" },
+    "border": { "light": "lightBorder", "dark": "comment" },
+    "borderFocus": { "light": "purple", "dark": "purple" },
+    "borderMuted": { "light": "#d8d6e2", "dark": "#44475a" },
+    "userLabel": { "light": "cyan", "dark": "cyan" },
+    "toolLabel": { "light": "pink", "dark": "pink" },
+    "diffAdded": { "light": "green", "dark": "green" },
+    "diffRemoved": { "light": "red", "dark": "red" }
+  }
+}

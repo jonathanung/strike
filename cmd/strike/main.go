@@ -80,6 +80,9 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 		}
 		return 0
 	}
+	if len(args) > 0 && args[0] == "exec" {
+		return runExecCLI(args[1:], stdout, stderr)
+	}
 
 	opts, err := parseCLIOptions(args)
 	if err != nil {
@@ -164,6 +167,7 @@ func isBoolFlag(f *flag.Flag) bool {
 func writeUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  strike [options]")
+	fmt.Fprintln(w, "  strike exec [options] <prompt>")
 	fmt.Fprintln(w, "  strike auth <command> [arguments]")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Options:")

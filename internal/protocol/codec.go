@@ -18,6 +18,8 @@ func eventType(ev Event) string {
 	switch ev.(type) {
 	case UserMessage:
 		return "user.message"
+	case SessionTitled:
+		return "session.titled"
 	case TurnStarted:
 		return "turn.started"
 	case TextDelta:
@@ -56,6 +58,8 @@ func eventType(ev Event) string {
 		return "child.completed"
 	case UsageReported:
 		return "usage.reported"
+	case SessionMeta:
+		return "session.meta"
 	default:
 		return ""
 	}
@@ -80,6 +84,8 @@ func (e Envelope) Decode() (Event, error) {
 	switch e.Type {
 	case "user.message":
 		ev = &UserMessage{}
+	case "session.titled":
+		ev = &SessionTitled{}
 	case "turn.started":
 		ev = &TurnStarted{}
 	case "text.delta":
@@ -118,6 +124,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &ChildCompleted{}
 	case "usage.reported":
 		ev = &UsageReported{}
+	case "session.meta":
+		ev = &SessionMeta{}
 	default:
 		return nil, fmt.Errorf("protocol: unknown envelope type %q", e.Type)
 	}
@@ -130,6 +138,8 @@ func (e Envelope) Decode() (Event, error) {
 func deref(ev Event) Event {
 	switch v := ev.(type) {
 	case *UserMessage:
+		return *v
+	case *SessionTitled:
 		return *v
 	case *TurnStarted:
 		return *v
@@ -168,6 +178,8 @@ func deref(ev Event) Event {
 	case *ChildCompleted:
 		return *v
 	case *UsageReported:
+		return *v
+	case *SessionMeta:
 		return *v
 	default:
 		return ev

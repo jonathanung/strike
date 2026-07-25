@@ -30,7 +30,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/fast":     {"toggle OpenAI priority tier (faster, ~2× cost)", "[on|off]", commandSourceBuiltin},
 		"/vim":      {"open a file in the embedded editor (pane/overlay) or $EDITOR", "[path[:line]]", commandSourceBuiltin},
 		"/md-read":  {"open a markdown file in the right pane", "<path>", commandSourceBuiltin},
-		"/theme":    {"set appearance (dark, light, or auto)", "[dark|light|auto]", commandSourceBuiltin},
+		"/theme":    {"select a color theme or set appearance", "[name|dark|light|auto]", commandSourceBuiltin},
 		"/layout":   {"toggle horizontal/vertical pane split", "", commandSourceBuiltin},
 		"/split":    {"toggle horizontal/vertical pane split", "", commandSourceBuiltin},
 		"/help":     {"show available commands", "", commandSourceBuiltin},
