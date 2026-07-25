@@ -272,6 +272,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.recomputeCompletion()
 			m.reflow()
 			return m, m.setPaneFocus(focusLeft)
+		case paletteActionKeybinds:
+			m.modal = newKeysModal(m.keyMap)
+			m.reflow()
+			return m, nil
 		}
 		return m, nil
 
@@ -309,21 +313,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
-		if key.Matches(msg, m.keyMap.FocusPane) {
+		if key.Matches(msg, m.keyMap.FocusLeft) {
 			m.completion = nil
-			cmd := m.togglePaneFocus()
+			cmd := m.focusPane(focusLeft)
 			m.reflow()
 			return m, cmd
 		}
-		if key.Matches(msg, m.keyMap.CycleWindow) {
+		if key.Matches(msg, m.keyMap.FocusRight) {
 			m.completion = nil
-			m.windows = m.windows.cycle()
+			cmd := m.focusPane(focusRight)
+			m.reflow()
+			return m, cmd
+		}
+		if key.Matches(msg, m.keyMap.CycleWindowNext) {
+			m.completion = nil
+			m.windows = m.windows.cycleBy(1)
+			m.reflow()
+			return m, nil
+		}
+		if key.Matches(msg, m.keyMap.CycleWindowPrev) {
+			m.completion = nil
+			m.windows = m.windows.cycleBy(-1)
 			m.reflow()
 			return m, nil
 		}
 		if key.Matches(msg, m.keyMap.Palette) {
 			m.completion = nil
 			m.modal = newPaletteModal(m.commands, m.agents, m.currentPaletteAvailability())
+			m.reflow()
+			return m, nil
+		}
+		if key.Matches(msg, m.keyMap.KeyHelp) {
+			m.completion = nil
+			m.modal = newKeysModal(m.keyMap)
 			m.reflow()
 			return m, nil
 		}
@@ -729,8 +751,14 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 	case "/fast":
 		return m.handleFastCommand(fields[1:])
 	case "/help":
-		m.setNotice("commands: "+dotJoin(m.th, "/provider [name [model]]", "/model <model>", "/effort <"+effortChoices()+">", "/fast [on|off]", "/agent [name]", "/auth", "skills as /<name>", "tab cycles agents"), false)
+		m.setNotice("commands: "+dotJoin(m.th, "/provider [name [model]]", "/model <model>", "/effort <"+effortChoices()+">", "/fast [on|off]", "/agent [name]", "/auth", "/keys", "skills as /<name>", "tab cycles agents"), false)
 		m.resetComposer()
+		return m, nil
+	case "/keys":
+		m.resetComposer()
+		m.clearNotice()
+		m.modal = newKeysModal(m.keyMap)
+		m.reflow()
 		return m, nil
 	default:
 		// Unknown commands fall through to skills: /name args renders the

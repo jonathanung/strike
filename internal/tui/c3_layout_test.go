@@ -314,7 +314,7 @@ func TestC3DangerNoticeHintsAndWorkingRows(t *testing.T) {
 	lines := strings.Split(ansi.Strip(m.View()), "\n")
 	l := computeLayout(80, 24, m.composer.Height(), 0, false)
 	noticeRow := l.header + l.transcript
-	if !strings.Contains(lines[0], "working") || !strings.Contains(lines[noticeRow], "separate notice") || !strings.Contains(lines[len(lines)-1], "ctrl+j") {
+	if !strings.Contains(lines[0], "working") || !strings.Contains(lines[noticeRow], "separate notice") || !strings.Contains(lines[len(lines)-1], "ctrl+h") {
 		t.Errorf("working header, notice, and hints do not retain separate rows:\n%s", strings.Join(lines, "\n"))
 	}
 }

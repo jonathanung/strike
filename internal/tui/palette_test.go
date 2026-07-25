@@ -27,6 +27,7 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 
 	got := newPaletteModal(specs, []string{"build"}, paletteAvailability{HasProvider: true}).entries
 	want := []paletteEntry{
+		{ID: "keybinds", Label: "Keyboard shortcuts", Description: "filterable keybind cheatsheet", Action: paletteAction{Kind: paletteActionKeybinds}},
 		{ID: "command:provider", Label: "/provider", Description: "select a provider and model", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/provider"}},
 		{ID: "command:model", Label: "/model", Description: "select a model for the current provider", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/model"}},
 		{ID: "command:effort", Label: "/effort", Description: "set how much reasoning the model spends", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/effort"}},
@@ -117,7 +118,7 @@ func TestPaletteBackspaceRestoresResultsAndZeroResultsDoNotSelect(t *testing.T) 
 	}
 
 	updatePalette(t, m, tea.KeyMsg{Type: tea.KeyBackspace})
-	assertPaletteEnter(t, m, paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/provider"}})
+	assertPaletteEnter(t, m, paletteInvokeMsg{Action: paletteAction{Kind: paletteActionKeybinds}})
 }
 
 func TestPaletteNavigationKeysWrapAndSelectExpectedActions(t *testing.T) {
@@ -126,9 +127,9 @@ func TestPaletteNavigationKeysWrapAndSelectExpectedActions(t *testing.T) {
 		keys []tea.KeyMsg
 		want paletteInvokeMsg
 	}{
-		{name: "down", keys: []tea.KeyMsg{{Type: tea.KeyDown}}, want: paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/model"}}},
+		{name: "down", keys: []tea.KeyMsg{{Type: tea.KeyDown}}, want: paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/provider"}}},
 		{name: "up wraps", keys: []tea.KeyMsg{{Type: tea.KeyUp}}, want: paletteInvokeMsg{Action: paletteAction{Kind: paletteActionSkill, Value: "review"}}},
-		{name: "ctrl n", keys: []tea.KeyMsg{{Type: tea.KeyCtrlN}}, want: paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/model"}}},
+		{name: "ctrl n", keys: []tea.KeyMsg{{Type: tea.KeyCtrlN}}, want: paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/provider"}}},
 		{name: "ctrl p wraps", keys: []tea.KeyMsg{{Type: tea.KeyCtrlP}}, want: paletteInvokeMsg{Action: paletteAction{Kind: paletteActionSkill, Value: "review"}}},
 	}
 	for _, tt := range tests {

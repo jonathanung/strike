@@ -523,7 +523,7 @@ func TestDangerousPermissionsIndicatorRemainsVisibleWithActiveModals(t *testing.
 			open: func(m *Model) {
 				m.modal = newPaletteModal(m.commands, nil, m.currentPaletteAvailability())
 			},
-			content: []string{"Command palette", "/provider", "/help"},
+			content: []string{"Command palette", "Keyboard shortcuts", "/provider", "/help"},
 		},
 	}
 
@@ -946,42 +946,42 @@ func TestSubmittingRecalledHistoryResetsBrowsingState(t *testing.T) {
 	}
 }
 
-func TestControlKPreservesComposerClosesCompletionAndOpensPalette(t *testing.T) {
+func TestControlPPreservesComposerClosesCompletionAndOpensPalette(t *testing.T) {
 	m, ops := newAppTestModel([]string{"build"}, nil)
 	m.providerName = "echo"
 	m.setComposerValueAt("keep this suffix", len([]rune("keep")))
 	m.completion = leadingSlashCompletion("/", 0, 1, m.commands)
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlP})
 	if got := m.composer.Value(); got != "keep this suffix" {
-		t.Errorf("ctrl+k applied textarea kill-to-end: composer=%q", got)
+		t.Errorf("ctrl+p changed composer: composer=%q", got)
 	}
 	if m.completion != nil {
-		t.Error("ctrl+k left inline completion open")
+		t.Error("ctrl+p left inline completion open")
 	}
 	if _, ok := m.modal.(*paletteModal); !ok {
-		t.Fatalf("ctrl+k modal = %T, want command palette", m.modal)
+		t.Fatalf("ctrl+p modal = %T, want command palette", m.modal)
 	}
 	assertNoAppOp(t, ops)
 }
 
-func TestActiveModalOwnsControlK(t *testing.T) {
+func TestActiveModalOwnsControlP(t *testing.T) {
 	t.Run("other modal", func(t *testing.T) {
 		m, _ := newAppTestModel(nil, nil)
 		probe := &appProbeModal{}
 		m.modal = probe
-		m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+		m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlP})
 		if probe.keys != 1 || m.modal != probe {
-			t.Errorf("ctrl+k did not remain with active modal: keys=%d modal=%T", probe.keys, m.modal)
+			t.Errorf("ctrl+p did not remain with active modal: keys=%d modal=%T", probe.keys, m.modal)
 		}
 	})
 	t.Run("permission modal", func(t *testing.T) {
 		m, ops := newAppTestModel(nil, nil)
 		permission := newPermissionModal(protocol.PermissionAsked{RequestID: "req", Permission: "bash"}, ops)
 		m.modal = permission
-		m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+		m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlP})
 		if m.modal != permission {
-			t.Errorf("ctrl+k replaced permission modal with %T", m.modal)
+			t.Errorf("ctrl+p replaced permission modal with %T", m.modal)
 		}
 		assertNoAppOp(t, ops)
 	})
@@ -1117,7 +1117,7 @@ func TestPaletteSkillInsertionUsesOneCommandArgumentSeparatorAcrossThemes(t *tes
 					m.th = themeCase.th
 					m.providerName = "echo"
 
-					m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+					m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlP})
 					m = typeAppText(t, m, "/"+skillName)
 					updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 					m = updated.(Model)
@@ -1147,7 +1147,7 @@ func TestPaletteSkillInsertionUsesOneCommandArgumentSeparatorAcrossThemes(t *tes
 	}
 }
 
-func TestControlKPaletteAvailabilityTracksProviderAndTurn(t *testing.T) {
+func TestControlPPaletteAvailabilityTracksProviderAndTurn(t *testing.T) {
 	tests := []struct {
 		name       string
 		provider   string
@@ -1163,7 +1163,7 @@ func TestControlKPaletteAvailabilityTracksProviderAndTurn(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			m, _ := newAppTestModel(nil, nil)
 			m.providerName, m.turnRunning = tt.provider, tt.turn
-			m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+			m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlP})
 			palette := m.modal.(*paletteModal)
 			for _, entry := range palette.entries {
 				if entry.Label == tt.command {
@@ -1181,7 +1181,7 @@ func TestControlKPaletteAvailabilityTracksProviderAndTurn(t *testing.T) {
 func TestOpenPaletteRefreshesWhenTurnStartsAndKeepsHelpAvailable(t *testing.T) {
 	m, ops := newAppTestModel([]string{"build"}, []host.Skill{fakeSkill("review", "review code", "")})
 	m.providerName = "echo"
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlP})
 	palette := m.modal.(*paletteModal)
 
 	m.applyEvent(protocol.TurnStarted{})
@@ -1202,7 +1202,7 @@ func TestOpenPaletteReenablesRestrictedEntriesWhenTurnCompletes(t *testing.T) {
 	m, ops := newAppTestModel([]string{"build"}, []host.Skill{fakeSkill("review", "review code", "")})
 	m.providerName = "echo"
 	m.turnRunning = true
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlP})
 	palette := m.modal.(*paletteModal)
 
 	m.applyEvent(protocol.TurnCompleted{})
@@ -1210,7 +1210,7 @@ func TestOpenPaletteReenablesRestrictedEntriesWhenTurnCompletes(t *testing.T) {
 		t.Fatalf("turn completion replaced open palette with %T", m.modal)
 	}
 	for _, entry := range palette.entries {
-		if entry.Label == "/help" {
+		if entry.Label == "/help" || entry.Action.Kind == paletteActionKeybinds {
 			continue
 		}
 		copy := *palette
@@ -1221,7 +1221,7 @@ func TestOpenPaletteReenablesRestrictedEntriesWhenTurnCompletes(t *testing.T) {
 
 func TestOpenPaletteRefreshesProviderDependentEntriesAfterModelSelected(t *testing.T) {
 	m, ops := newAppTestModel(nil, []host.Skill{fakeSkill("review", "review code", "")})
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlP})
 	palette := m.modal.(*paletteModal)
 	for _, label := range []string{"/model", "/review"} {
 		copy := *palette
@@ -1276,7 +1276,7 @@ func TestConstructedRestrictedPaletteInvokeIsRejectedAgainstCurrentAvailability(
 			m, ops := newAppTestModel([]string{"build"}, []host.Skill{fakeSkill("review", "review code", "")})
 			m.providerName, m.turnRunning = tt.provider, tt.turn
 			m.composer.SetValue("unchanged draft")
-			m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+			m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlP})
 			palette := m.modal
 			focused := m.composer.Focused()
 
@@ -1431,16 +1431,16 @@ func TestPaneFocusStartsLeftAndPreservesComposerDraftAndCursor(t *testing.T) {
 	m.setComposerValueAt("first\nsecond", len([]rune("first\nsec")))
 	draft, line, info := m.composer.Value(), m.composer.Line(), m.composer.LineInfo()
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
 	if m.focus != focusRight || m.composer.Focused() {
-		t.Errorf("ctrl+j focus = %v/composer=%v, want right/blurred", m.focus, m.composer.Focused())
+		t.Errorf("ctrl+l focus = %v/composer=%v, want right/blurred", m.focus, m.composer.Focused())
 	}
 	if got := m.composer.Value(); got != draft {
 		t.Errorf("blur changed draft = %q, want %q", got, draft)
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlH})
 	if m.focus != focusLeft || !m.composer.Focused() {
-		t.Errorf("second ctrl+j focus = %v/composer=%v, want left/focused", m.focus, m.composer.Focused())
+		t.Errorf("ctrl+h focus = %v/composer=%v, want left/focused", m.focus, m.composer.Focused())
 	}
 	if got, gotLine, gotInfo := m.composer.Value(), m.composer.Line(), m.composer.LineInfo(); got != draft || gotLine != line || gotInfo != info {
 		t.Errorf("focus round trip changed composer: value=%q line=%d info=%+v; want %q/%d/%+v", got, gotLine, gotInfo, draft, line, info)
@@ -1453,19 +1453,24 @@ func TestFocusAndPaletteClearCompletionBeforeChangingInputOwner(t *testing.T) {
 		key   tea.KeyMsg
 		check func(*testing.T, Model)
 	}{
-		{"focus", tea.KeyMsg{Type: tea.KeyCtrlJ}, func(t *testing.T, m Model) {
+		{"focus right", tea.KeyMsg{Type: tea.KeyCtrlL}, func(t *testing.T, m Model) {
 			if m.focus != focusRight {
 				t.Errorf("focus = %v, want right", m.focus)
 			}
 		}},
-		{"cycle", tea.KeyMsg{Type: tea.KeyCtrlL}, func(t *testing.T, m Model) {
+		{"cycle next", tea.KeyMsg{Type: tea.KeyCtrlJ}, func(t *testing.T, m Model) {
 			if m.windows.index != 1 {
 				t.Errorf("window index = %d, want 1", m.windows.index)
 			}
 		}},
-		{"palette", tea.KeyMsg{Type: tea.KeyCtrlK}, func(t *testing.T, m Model) {
+		{"palette", tea.KeyMsg{Type: tea.KeyCtrlP}, func(t *testing.T, m Model) {
 			if _, ok := m.modal.(*paletteModal); !ok {
 				t.Errorf("modal = %T, want palette", m.modal)
+			}
+		}},
+		{"keyhelp", tea.KeyMsg{Type: tea.KeyF1}, func(t *testing.T, m Model) {
+			if _, ok := m.modal.(*keysModal); !ok {
+				t.Errorf("modal = %T, want keys", m.modal)
 			}
 		}},
 	} {
@@ -1481,13 +1486,12 @@ func TestFocusAndPaletteClearCompletionBeforeChangingInputOwner(t *testing.T) {
 	}
 }
 
-func TestCyclePhysicalAliasesClearOpenCompletionAndCycleOnce(t *testing.T) {
+func TestCycleWindowKeysClearOpenCompletionAndCycleOnce(t *testing.T) {
 	for _, tt := range []struct {
 		name string
 		key  tea.KeyMsg
 	}{
-		{name: "ctrl+l", key: tea.KeyMsg{Type: tea.KeyCtrlL}},
-		{name: "ctrl+o", key: tea.KeyMsg{Type: tea.KeyCtrlO}},
+		{name: "ctrl+j", key: tea.KeyMsg{Type: tea.KeyCtrlJ}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			m, ops := newAppTestModel(nil, nil)
@@ -1552,7 +1556,7 @@ func TestCompletionEscapeDismissesBeforeInterruptAndFocusChange(t *testing.T) {
 
 func TestModalOwnsGlobalKeysExceptQuit(t *testing.T) {
 	for _, msg := range []tea.KeyMsg{
-		{Type: tea.KeyCtrlJ}, {Type: tea.KeyCtrlL}, {Type: tea.KeyCtrlO}, {Type: tea.KeyCtrlK},
+		{Type: tea.KeyCtrlJ}, {Type: tea.KeyCtrlL}, {Type: tea.KeyCtrlH}, {Type: tea.KeyCtrlK}, {Type: tea.KeyCtrlP}, {Type: tea.KeyF1},
 	} {
 		t.Run(msg.String(), func(t *testing.T) {
 			m, ops := newAppTestModel(nil, nil)
@@ -1577,7 +1581,7 @@ func TestRightPaneOwnsOrdinaryKeysAndGlobalKeysRemainGlobal(t *testing.T) {
 		statefulTestWindow{windowID: "right-one"},
 		statefulTestWindow{windowID: "right-two"},
 	}}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
 	completion := leadingSlashCompletion("/", 0, 1, m.commands)
 	m.completion = completion // stale completion must not take ownership on the right.
 	startOffset, startLine, startViewport := m.composer.LineInfo().ColumnOffset, m.composer.Line(), m.viewport.YOffset
@@ -1598,7 +1602,7 @@ func TestRightPaneOwnsOrdinaryKeysAndGlobalKeysRemainGlobal(t *testing.T) {
 	}
 	assertNoAppOp(t, ops)
 
-	for _, msg := range []tea.KeyMsg{{Type: tea.KeyCtrlL}, {Type: tea.KeyCtrlO}} {
+	for _, msg := range []tea.KeyMsg{{Type: tea.KeyCtrlJ}, {Type: tea.KeyCtrlK}} {
 		before := totalWindowUpdates(t, m.windows)
 		index := m.windows.index
 		m = updateApp(t, m, msg)
@@ -1609,9 +1613,9 @@ func TestRightPaneOwnsOrdinaryKeysAndGlobalKeysRemainGlobal(t *testing.T) {
 			t.Errorf("%s was recorded by window: updates %d, want %d", msg.String(), got, before)
 		}
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlP})
 	if _, ok := m.modal.(*paletteModal); !ok {
-		t.Errorf("right-focused ctrl+k modal = %T, want palette", m.modal)
+		t.Errorf("right-focused ctrl+p modal = %T, want palette", m.modal)
 	}
 }
 
@@ -1630,7 +1634,7 @@ func TestPaletteSkillInvocationReturnsFocusToComposerFromRightPane(t *testing.T)
 func TestPaletteHelpInvocationReturnsFocusToComposerAndRendersNoticeFromRightPane(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
 	m.modal = newPaletteModal(m.commands, m.agents, m.currentPaletteAvailability())
 
 	m = updateApp(t, m, paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/help"}})
@@ -1646,7 +1650,7 @@ func TestPaletteHelpInvocationReturnsFocusToComposerAndRendersNoticeFromRightPan
 func TestPalettePickerActionsAndStaleNoticeDoNotStealRightFocus(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
 	m.setNotice("commands: stale help", false)
 	m.modal = newPaletteModal(m.commands, m.agents, m.currentPaletteAvailability())
 
@@ -1673,8 +1677,8 @@ func TestViewportScrollOffsetSurvivesRightFocusRoundTripAndRefreshesOnResizeAndE
 		t.Fatal("page up did not move long transcript off the bottom")
 	}
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlH})
 	if got := m.viewport.YOffset; got != wantOffset {
 		t.Errorf("focus round trip viewport offset = %d, want %d", got, wantOffset)
 	}
@@ -1683,7 +1687,7 @@ func TestViewportScrollOffsetSurvivesRightFocusRoundTripAndRefreshesOnResizeAndE
 	if !strings.Contains(ansi.Strip(m.viewport.View()), "transcript") {
 		t.Error("resize did not re-render transcript")
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
 	m = updateApp(t, m, engineEventMsg{ev: protocol.TextDelta{Text: "engine refresh"}})
 	if m.viewport.YOffset != m.viewport.TotalLineCount()-m.viewport.Height {
 		t.Errorf("engine event viewport offset = %d, want bottom %d", m.viewport.YOffset, m.viewport.TotalLineCount()-m.viewport.Height)
@@ -1702,7 +1706,7 @@ func totalWindowUpdates(t *testing.T, r windowRegistry) int {
 func TestProtocolEventsAndSpinnerDoNotChangeRightFocus(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
 	for _, ev := range []protocol.Event{protocol.UserMessage{Text: "user"}, protocol.TextDelta{Text: "assistant"}} {
 		m = updateApp(t, m, engineEventMsg{ev: ev})
 		if m.focus != focusRight {

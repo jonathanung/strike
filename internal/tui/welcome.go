@@ -235,7 +235,7 @@ func (m Model) welcomeProviders(statuses []host.ProviderStatus, width, rows int)
 }
 
 func (m Model) welcomeKeys(size ...int) string {
-	width, rows := 80, 7
+	width, rows := 80, 8
 	if len(size) > 0 {
 		width = size[0]
 	}
@@ -245,7 +245,7 @@ func (m Model) welcomeKeys(size ...int) string {
 	th := m.th.Resolve()
 	st := th.S()
 	gap := themedSpace(th.Spacing.SM)
-	bindings := []key.Binding{m.keyMap.FocusPane, m.keyMap.CycleWindow, m.keyMap.Send, m.keyMap.Palette, m.keyMap.Agent, m.keyMap.SaveDefaults, m.keyMap.Interrupt}
+	bindings := []key.Binding{m.keyMap.FocusLeft, m.keyMap.FocusRight, m.keyMap.CycleWindowNext, m.keyMap.CycleWindowPrev, m.keyMap.Palette, m.keyMap.KeyHelp, m.keyMap.Send, m.keyMap.Interrupt}
 	lines := make([]string, 0, min(rows, len(bindings)))
 	for _, binding := range bindings {
 		if len(lines) >= rows {
