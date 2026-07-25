@@ -81,35 +81,50 @@ is no way to silently cross the boundary.
 ## TUI pane routing and layout
 
 Key routing is deliberately ordered: quit, then modal, then completion-owned
-left-pane keys, pane actions, global actions, and finally the focused
-component. `paneFocus` is a private aggregate `left`/`right` value: left owns
-the transcript, notice, completion, and composer as one pane, while right owns
-the active window. Modal ownership remains `m.modal`; this is not a unified
-F2-style enum for separate transcript, composer, and modal focus.
+left-pane keys, pane actions, global actions (including scroll/jump and split
+orientation), and finally the focused component. `paneFocus` is a private
+aggregate `left`/`right` value: left owns the transcript, notice, completion,
+and composer as one pane, while right owns the active window. Modal ownership
+remains `m.modal`; this is not a unified F2-style enum for separate transcript,
+composer, and modal focus.
 
 The right pane is TUI-local. Its private, value-oriented `window` interface
 has identity/title, initialization, update, resize, and view methods; updates
 and resizes return replacement values so model copies do not share mutable
 state. The registry holds three windows: named session panes (`context` for
-setup summary and `activity` for recent tools or idle tips) plus a `markdown`
-reader opened via `/md-read`. It exposes only the active window and has no
-close state or plugin mechanism. File bytes reach the markdown window through
-`host.Files`, not direct disk I/O from the TUI. Window input and resize
-updates stay inside `internal/tui`: no protocol Op or Event was added for this
-pane infrastructure. Composer input treats Enter as send and Shift+Enter
-(normalized to Alt+Enter) as newline via a stdin wrapper and enhanced
-keyboard modes.
+setup summary and `activity` for subagent status, recent parent tools, or idle
+tips) plus a `markdown` reader opened via `/md-read`. It exposes only the
+active window and has no close state or plugin mechanism. File bytes reach the
+markdown window through `host.Files`, not direct disk I/O from the TUI. Window
+input and resize updates stay inside `internal/tui`: no protocol Op or Event
+was added for this pane infrastructure. Composer input treats Enter as send and
+Shift+Enter (normalized to Alt+Enter) as newline via a stdin wrapper and
+enhanced keyboard modes; bare Escape from CSI-u is normalized to `0x1b`.
 
-`View()` composes the full-width header first; its body is a horizontal split
-of the left stack (transcript, notice, completion, composer, in that order)
-and the right panel; then full-width hints and the optional danger banner.
-`ui.Canvas` is the final full-screen operation. With the default one-column
-gutter, split mode begins at width 93: left is at least 60 columns, gutter is
-1, and right is at least 32. In a split, the canonical widths are
+`View()` composes the full-width header first; its body is a horizontal
+left|right split by default, or a vertical top/bottom split when
+`splitOrientation` is vertical (`ctrl+;` or `/layout`). The left stack is
+transcript, notice, completion, composer (in that order); then full-width
+hints and the optional danger banner. `ui.Canvas` is the final full-screen
+operation. With the default one-column gutter, horizontal split mode begins at
+width 93: left is at least 60 columns, gutter is 1, and right is at least 32.
+In a horizontal split, the canonical widths are
 `right = max(32, (width-gutter)/3)` and
 `left = width-gutter-right`. At or below 92 columns, only the active pane
 uses the full width. With a custom gutter `g`, the split threshold is
-`60 + g + 32`.
+`60 + g + 32`. Vertical split keeps full width and divides body height when
+there is room; focus/cycle key chords swap so focus stays on the
+cross-axis pair.
+
+Transcript anchoring: `refreshViewport` calls `GotoBottom` only when the
+viewport was already `AtBottom` before `SetContent`; otherwise it restores
+`YOffset`. Child lifecycle events (`ChildStarted` / `ChildCompleted`) update
+activity-pane state and never append transcript cells; other child-correlated
+events remain filtered except permissions and questions.
+
+Session-local appearance (`/theme [dark|light|auto]`) calls
+`lipgloss.SetHasDarkBackground` for forced modes and restores the initially
+detected background for auto.
 
 ## Why a host-services seam
 
@@ -193,9 +208,10 @@ Two different mechanisms, depending on whether it needs Go code:
   `LoadSkillsWithError` in `internal/config/agents.go` for the frontmatter
   format (`description:`) and `$ARGUMENTS` substitution. It becomes
   `/<name>` on the next launch automatically, through
-  `host.Services.Skills`. Reserved names (`provider`, `model`, `auth`,
-  `agent`, `fast`, `vim`, `md-read`, `help`, `keys`) are rejected by
-  `config.ValidateSkillName` before they ever reach the frontend.
+   `host.Services.Skills`. Reserved names (`provider`, `model`, `auth`,
+   `agent`, `fast`, `vim`, `md-read`, `theme`, `layout`, `split`, `help`,
+   `keys`) are rejected by `config.ValidateSkillName` before they ever reach
+   the frontend.
   `/vim` embeds nvim/vim in the right-pane `editor` window by default
   (PTY + vt10x via `internal/tui/term`). Config key `vimMode` selects
   `pane` (default), `overlay`, or `takeover` (full-screen `tea.ExecProcess`).
