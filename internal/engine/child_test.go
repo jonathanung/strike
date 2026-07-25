@@ -619,4 +619,3 @@ done:
 		t.Errorf("task output = %q, want child summary", taskEnd.Output)
 	}
 }
-

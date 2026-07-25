@@ -79,10 +79,10 @@ func TestChildPermissionAskedStillOpensModal(t *testing.T) {
 		Correlation: protocol.Correlation{SessionID: "parent", TurnID: "t1"},
 	})
 	childCorr := protocol.Correlation{
-		SessionID:       "child-1",
-		ParentSessionID: "parent",
-		Depth:           1,
-		TurnID:          "ct",
+		SessionID:         "child-1",
+		ParentSessionID:   "parent",
+		Depth:             1,
+		TurnID:            "ct",
 		ProviderRequestID: "pr",
 	}
 	m.applyEvent(protocol.PermissionAsked{
