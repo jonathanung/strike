@@ -16,6 +16,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/history"
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/host/local"
+	"github.com/jonathanung/strike-cli/internal/memory"
 	"github.com/jonathanung/strike-cli/internal/project"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
@@ -116,16 +117,18 @@ func runSession(
 }
 
 // assembled is the composition-root product shared by the TUI and headless
-// exec frontends: engine, session store, and host services.
+// exec frontends: engine, session manager binding, and host services.
 type assembled struct {
 	eng          *engine.Engine
-	store        *session.Store
+	sessions     *session.Manager
+	store        session.Bound
 	sessionID    string
 	workDir      string
 	cfg          config.Config
 	services     host.Services
 	firstRun     bool
 	historyClose func() error
+	memoryClose  func() error
 }
 
 // assemble resolves project/config/auth, builds the engine and session store,
@@ -150,8 +153,14 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	if err != nil {
 		return nil, fmt.Errorf("opening prompt history: %w", err)
 	}
+	memoryStore, err := memory.Open(globalRoot, projectIdentity.Key)
+	if err != nil {
+		_ = historyStore.Close()
+		return nil, fmt.Errorf("opening project memory: %w", err)
+	}
 	cfg, err := config.Load(workDir)
 	if err != nil {
+		_ = memoryStore.Close()
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("loading config: %w", err)
 	}
@@ -166,6 +175,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	if opts.effort != "" {
 		level, ok := protocol.ParseEffort(opts.effort)
 		if !ok || level == protocol.EffortDefault {
+			_ = memoryStore.Close()
 			_ = historyStore.Close()
 			return nil, fmt.Errorf("unknown effort %q (want off, low, medium, high, xhigh, or max)", opts.effort)
 		}
@@ -174,6 +184,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 
 	authStore, err := auth.OpenStore(auth.DefaultPath())
 	if err != nil {
+		_ = memoryStore.Close()
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("opening auth store: %w", err)
 	}
@@ -235,10 +246,12 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// /provider otherwise). Headless exec always requires a usable provider.
 	if requireProvider || (opts.providerSet && opts.provider != "") {
 		if cfg.Provider == "" {
+			_ = memoryStore.Close()
 			_ = historyStore.Close()
 			return nil, fmt.Errorf("no provider configured (pass --provider or set provider in config)")
 		}
 		if _, _, err := selectProvider(cfg.Provider); err != nil {
+			_ = memoryStore.Close()
 			_ = historyStore.Close()
 			return nil, err
 		}
@@ -248,6 +261,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// available names in its description at construction time.
 	skills, err := config.LoadSkillsWithError(workDir)
 	if err != nil {
+		_ = memoryStore.Close()
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("loading skills: %w", err)
 	}
@@ -269,6 +283,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tool.NewWebFetch(),
 		tool.NewTodoWrite(todoStore),
 		tool.NewTodoRead(todoStore),
+		tool.NewMemoryWrite(memoryStore),
+		tool.NewMemoryRead(memoryStore),
 		tool.NewNotebookEdit(),
 		tool.NewSleep(),
 		tool.NewSkill(skillInfos),
@@ -288,6 +304,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	}
 	loadedAgents, err := config.LoadAgentsWithError(workDir)
 	if err != nil {
+		_ = memoryStore.Close()
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("loading agents: %w", err)
 	}
@@ -300,10 +317,24 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	}
 	instructions := config.LoadInstructions(workDir, projectIdentity.Root)
 
-	// One session ID shared by the engine (event correlation) and the JSONL
-	// filename so transcript identity matches runtime correlation.
-	sessionID := session.NewID()
-	sessionDir := session.DefaultDir()
+	// Concurrent session manager owns durable JSONL logs. One root session is
+	// created here; child/agent sessions can open alongside it later.
+	sessions := session.NewManager(session.DefaultDir())
+	info, err := sessions.Create(session.CreateOptions{})
+	if err != nil {
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, fmt.Errorf("creating session: %w", err)
+	}
+	bound, err := sessions.Bind(info.ID)
+	if err != nil {
+		_ = sessions.CloseAll()
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, fmt.Errorf("binding session: %w", err)
+	}
+	sessionID := info.ID
+	sessionDir := sessions.Dir()
 	eng := engine.New(engine.Options{
 		SessionID:       sessionID,
 		Select:          selectProvider,
@@ -331,24 +362,19 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		},
 	})
 
-	store, err := session.Open(sessionDir, sessionID)
-	if err != nil {
-		_ = historyStore.Close()
-		return nil, fmt.Errorf("opening session store: %w", err)
-	}
-
 	agentNames := make([]string, len(agents))
 	for i, a := range agents {
 		agentNames[i] = a.Name
 	}
 	// local.New wraps the real backend stores in the host.Services contract;
-	// the TUI never sees auth/config/models/history directly.
-	services := local.New(authStore, historyStore, agentNames, skills, customStore)
+	// the TUI never sees auth/config/models/history/memory directly.
+	services := local.New(authStore, historyStore, memoryStore, agentNames, skills, customStore)
 	services.Files = local.NewFiles(workDir)
 
 	return &assembled{
 		eng:       eng,
-		store:     store,
+		sessions:  sessions,
+		store:     bound,
 		sessionID: sessionID,
 		workDir:   workDir,
 		cfg:       cfg,
@@ -356,6 +382,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		firstRun:  isFreshStrikeHome(authStore),
 		historyClose: func() error {
 			return historyStore.Close()
+		},
+		memoryClose: func() error {
+			return memoryStore.Close()
 		},
 	}, nil
 }
@@ -368,6 +397,9 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 		return err
 	}
 	defer func() {
+		if err := a.memoryClose(); err != nil && runErr == nil {
+			runErr = fmt.Errorf("closing project memory: %w", err)
+		}
 		if err := a.historyClose(); err != nil && runErr == nil {
 			runErr = fmt.Errorf("closing prompt history: %w", err)
 		}
@@ -429,6 +461,9 @@ func runExec(opts cliOptions, prompt string, stdout, stderr io.Writer) (runErr e
 		return err
 	}
 	defer func() {
+		if err := a.memoryClose(); err != nil && runErr == nil {
+			runErr = fmt.Errorf("closing project memory: %w", err)
+		}
 		if err := a.historyClose(); err != nil && runErr == nil {
 			runErr = fmt.Errorf("closing prompt history: %w", err)
 		}

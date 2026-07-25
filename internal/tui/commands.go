@@ -25,6 +25,7 @@ const (
 	commandTheme    commandID = "theme"
 	commandLayout   commandID = "layout"
 	commandSplit    commandID = "split"
+	commandMemory   commandID = "memory"
 )
 
 type commandSource string
@@ -57,6 +58,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandSplit, Name: "/split", Description: "toggle horizontal/vertical pane split", Source: commandSourceBuiltin},
 	{ID: commandHelp, Name: "/help", Description: "show available commands", Source: commandSourceBuiltin},
 	{ID: commandKeys, Name: "/keys", Description: "show keyboard shortcuts", Source: commandSourceBuiltin},
+	{ID: commandMemory, Name: "/memory", Description: "list, get, set, or delete project memory", ArgsHint: "[list|get|set|rm] ...", Source: commandSourceBuiltin},
 }
 
 // commandCatalog builds the slash-command catalog from the builtins and the
@@ -121,6 +123,7 @@ var reservedCommandNames = map[string]struct{}{
 	"split":    {},
 	"help":     {},
 	"keys":     {},
+	"memory":   {},
 }
 
 // validSkillName reports whether a skill name is safe to render and select as a

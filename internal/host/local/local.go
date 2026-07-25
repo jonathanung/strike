@@ -16,17 +16,19 @@ import (
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/history"
 	"github.com/jonathanung/strike-cli/internal/host"
+	"github.com/jonathanung/strike-cli/internal/memory"
 	"github.com/jonathanung/strike-cli/internal/models"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
 
 // New builds the local host services backed by the real auth store, prompt
-// history, and the models.dev catalog. A nil hist yields a nil
-// Services.History (history is optional). Agents pass through unchanged;
-// skills whose names fail config.ValidateSkillName are dropped here, since
-// they cannot be invoked as slash commands (the frontend no longer filters).
-// customs may be nil (no custom provider support).
-func New(store *auth.Store, hist *history.Store, agents []string, skills []config.Skill, customs *config.CustomStore) host.Services {
+// history, project memory, and the models.dev catalog. A nil hist yields a
+// nil Services.History (history is optional). A nil mem yields a nil
+// Services.Memory. Agents pass through unchanged; skills whose names fail
+// config.ValidateSkillName are dropped here, since they cannot be invoked as
+// slash commands (the frontend no longer filters). customs may be nil (no
+// custom provider support).
+func New(store *auth.Store, hist *history.Store, mem *memory.Store, agents []string, skills []config.Skill, customs *config.CustomStore) host.Services {
 	if customs == nil {
 		customs = config.NewCustomStore(nil)
 	}
@@ -41,6 +43,9 @@ func New(store *auth.Store, hist *history.Store, agents []string, skills []confi
 	// use, so only wire history when it is really present.
 	if hist != nil {
 		services.History = hist
+	}
+	if mem != nil {
+		services.Memory = memoryAdapter{store: mem}
 	}
 	for _, s := range skills {
 		if err := config.ValidateSkillName(s.Name); err != nil {
@@ -280,6 +285,39 @@ func (settingsAdapter) SaveDefaults(provider, model, agent, effort string) error
 
 func (settingsAdapter) SaveTheme(id string) error {
 	return config.SetGlobalTheme(id)
+}
+
+// memoryAdapter adapts *memory.Store to host.Memory.
+type memoryAdapter struct {
+	store *memory.Store
+}
+
+func (m memoryAdapter) List(tag string) ([]host.MemoryEntry, error) {
+	entries, err := m.store.List(tag)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]host.MemoryEntry, len(entries))
+	for i, e := range entries {
+		out[i] = host.MemoryEntry{Key: e.Key, Value: e.Value, Tags: append([]string(nil), e.Tags...)}
+	}
+	return out, nil
+}
+
+func (m memoryAdapter) Get(key string) (host.MemoryEntry, bool, error) {
+	e, ok, err := m.store.Get(key)
+	if err != nil || !ok {
+		return host.MemoryEntry{}, ok, err
+	}
+	return host.MemoryEntry{Key: e.Key, Value: e.Value, Tags: append([]string(nil), e.Tags...)}, true, nil
+}
+
+func (m memoryAdapter) Put(key, value string, tags []string) error {
+	return m.store.Put(key, value, tags)
+}
+
+func (m memoryAdapter) Delete(key string) error {
+	return m.store.Delete(key)
 }
 
 // providersAdapter exposes custom provider CRUD through the host contract.

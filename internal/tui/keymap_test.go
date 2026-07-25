@@ -24,6 +24,7 @@ func TestDefaultKeyMapBindingsMatchTheirRequiredKeysAndHaveHelp(t *testing.T) {
 		{"interrupt", keys.Interrupt, tea.KeyMsg{Type: tea.KeyEsc}},
 		{"send", keys.Send, tea.KeyMsg{Type: tea.KeyEnter}},
 		{"newline", keys.Newline, tea.KeyMsg{Type: tea.KeyEnter, Alt: true}},
+		{"external editor", keys.ExternalEditor, tea.KeyMsg{Type: tea.KeyCtrlE}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -65,7 +66,7 @@ func TestKeybindCatalogCoversAppBindingsAndIsSearchable(t *testing.T) {
 	}
 	for _, id := range []string{
 		"nav.focus-left", "nav.focus-right", "nav.window-next", "nav.window-prev",
-		"global.palette", "global.keyhelp",
+		"global.palette", "global.keyhelp", "composer.external-editor",
 		"composer.kill-word", "composer.word-back", "composer.word-fwd",
 		"composer.kill-line-start", "composer.kill-line-end", "composer.yank",
 	} {
