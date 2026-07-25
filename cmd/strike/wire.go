@@ -26,6 +26,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/session"
 	"github.com/jonathanung/strike-cli/internal/tool"
 	"github.com/jonathanung/strike-cli/internal/tui"
+	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
 
 // sessionStore is the narrow persistence surface runSession needs from a
@@ -295,6 +296,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// One session ID shared by the engine (event correlation) and the JSONL
 	// filename so transcript identity matches runtime correlation.
 	sessionID := session.NewID()
+	sessionDir := session.DefaultDir()
 	eng := engine.New(engine.Options{
 		SessionID:       sessionID,
 		Select:          selectProvider,
@@ -309,9 +311,20 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		Agents:          agents,
 		InitialAgent:    cfg.DefaultAgent,
 		Rules:           permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),
+		PersistSessionMeta: func(m protocol.SessionMeta) error {
+			_, err := session.UpdateMeta(sessionDir, sessionID, func(meta *session.Meta) {
+				if m.PRURL != "" {
+					meta.PRURL = m.PRURL
+				}
+				if m.PRNumber != 0 {
+					meta.PRNumber = m.PRNumber
+				}
+			})
+			return err
+		},
 	})
 
-	store, err := session.Open(session.DefaultDir(), sessionID)
+	store, err := session.Open(sessionDir, sessionID)
 	if err != nil {
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("opening session store: %w", err)
@@ -374,8 +387,19 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 		if mode, ok := tui.ParseVimMode(a.cfg.VimMode); ok {
 			vimMode = mode
 		}
+		themeID := theme.BuiltinID
+		var themePtr *theme.Theme
+		if a.cfg.Theme != "" {
+			if entry, ok := theme.Lookup(theme.Catalog(a.workDir), a.cfg.Theme); ok {
+				th := entry.Theme
+				themePtr = &th
+				themeID = entry.ID
+			}
+		}
 		program := tea.NewProgram(tui.New(a.eng.Ops(), events, a.services, tui.Options{
 			DangerouslySkipPermissions: opts.dangerouslySkipPermissions,
+			Theme:                      themePtr,
+			ThemeID:                    themeID,
 			SessionID:                  a.sessionID,
 			WorkDir:                    a.workDir,
 			FirstRun:                   a.firstRun,

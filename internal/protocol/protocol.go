@@ -382,6 +382,15 @@ type ProviderRetrying struct {
 	Message     string `json:"message,omitempty"`
 }
 
+// SessionMeta records durable session-level metadata (e.g. a PR opened while
+// shipping). Also written to the session sidecar by the host; the event keeps
+// the JSONL transcript self-describing.
+type SessionMeta struct {
+	Correlation
+	PRURL    string `json:"prUrl,omitempty"`
+	PRNumber int    `json:"prNumber,omitempty"`
+}
+
 func (UserMessage) isEvent()        {}
 func (SessionTitled) isEvent()      {}
 func (TurnStarted) isEvent()        {}
@@ -404,3 +413,4 @@ func (ChildStarted) isEvent()       {}
 func (ChildCompleted) isEvent()     {}
 func (UsageReported) isEvent()      {}
 func (ProviderRetrying) isEvent()   {}
+func (SessionMeta) isEvent()        {}

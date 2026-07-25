@@ -208,3 +208,7 @@ func (settingsAdapter) SaveDefaults(provider, model, agent, effort string) error
 	}
 	return config.SetGlobalDefaults(provider, model, agent, level)
 }
+
+func (settingsAdapter) SaveTheme(id string) error {
+	return config.SetGlobalTheme(id)
+}

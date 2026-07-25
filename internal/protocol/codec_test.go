@@ -48,6 +48,7 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 			DelayMs:     200,
 			Message:     "rate limited",
 		},
+		SessionMeta{Correlation: corr, PRURL: "https://github.com/acme/repo/pull/7", PRNumber: 7},
 	}
 	for _, want := range events {
 		env, err := Wrap(want)
@@ -346,6 +347,7 @@ func TestEventTypeCoverage(t *testing.T) {
 		"child.started":       ChildStarted{},
 		"child.completed":     ChildCompleted{},
 		"usage.reported":      UsageReported{},
+		"session.meta":        SessionMeta{},
 	}
 	for typ, ev := range want {
 		env, err := Wrap(ev)

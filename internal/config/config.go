@@ -24,6 +24,10 @@ type Config struct {
 	Effort       protocol.Effort `json:"effort,omitempty"`
 	SystemPrompt string          `json:"systemPrompt,omitempty"`
 	DefaultAgent string          `json:"defaultAgent,omitempty"`
+	// Theme is the preferred TUI color theme id (bundled or JSON under
+	// ~/.strike/themes or ./.strike/themes). Empty means the stock "strike"
+	// palette.
+	Theme string `json:"theme,omitempty"`
 	// VimMode is how /vim presents the editor: "pane" (default, embedded
 	// right-pane PTY), "overlay" (embedded modal), or "takeover" (full-screen
 	// tea.ExecProcess handoff). Unknown values are ignored at load time.
@@ -118,6 +122,9 @@ func merge(base, layer Config) Config {
 	}
 	if layer.DefaultAgent != "" {
 		base.DefaultAgent = layer.DefaultAgent
+	}
+	if layer.Theme != "" {
+		base.Theme = layer.Theme
 	}
 	if layer.VimMode != "" {
 		base.VimMode = layer.VimMode

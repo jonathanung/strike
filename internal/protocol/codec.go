@@ -60,6 +60,8 @@ func eventType(ev Event) string {
 		return "usage.reported"
 	case ProviderRetrying:
 		return "provider.retrying"
+	case SessionMeta:
+		return "session.meta"
 	default:
 		return ""
 	}
@@ -126,6 +128,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &UsageReported{}
 	case "provider.retrying":
 		ev = &ProviderRetrying{}
+	case "session.meta":
+		ev = &SessionMeta{}
 	default:
 		return nil, fmt.Errorf("protocol: unknown envelope type %q", e.Type)
 	}
@@ -180,6 +184,8 @@ func deref(ev Event) Event {
 	case *UsageReported:
 		return *v
 	case *ProviderRetrying:
+		return *v
+	case *SessionMeta:
 		return *v
 	default:
 		return ev

@@ -122,9 +122,11 @@ viewport was already `AtBottom` before `SetContent`; otherwise it restores
 activity-pane state and never append transcript cells; other child-correlated
 events remain filtered except permissions and questions.
 
-Session-local appearance (`/theme [dark|light|auto]`) calls
-`lipgloss.SetHasDarkBackground` for forced modes and restores the initially
-detected background for auto.
+Color themes load from bundled JSON plus `~/.strike/themes` and
+`./.strike/themes`; `/theme` opens a picker (or `/theme <id>` applies one)
+and `config.theme` / ctrl+d persists the choice. Session-local appearance
+(`/theme dark|light|auto`) still calls `lipgloss.SetHasDarkBackground` for
+forced modes and restores the initially detected background for auto.
 
 ## Why a host-services seam
 
@@ -203,15 +205,18 @@ branch in `internal/tui/view.go` for the pattern.
 
 Two different mechanisms, depending on whether it needs Go code:
 
-- **Skill (no code).** Drop a markdown file with frontmatter into
-  `~/.strike/skills/<name>.md` or `./.strike/skills/<name>.md` — see
+- **Skill (no code).** Built-in shipping skills (`commit`, `push`, `pr`,
+  `ship`) are embedded under `internal/config/skills/` and always load.
+  Drop a markdown file with frontmatter into `~/.strike/skills/<name>.md`
+  or `./.strike/skills/<name>.md` to add or override — see
   `LoadSkillsWithError` in `internal/config/agents.go` for the frontmatter
   format (`description:`) and `$ARGUMENTS` substitution. It becomes
   `/<name>` on the next launch automatically, through
    `host.Services.Skills`. Reserved names (`provider`, `model`, `auth`,
    `agent`, `fast`, `vim`, `md-read`, `theme`, `layout`, `split`, `help`,
    `keys`) are rejected by `config.ValidateSkillName` before they ever reach
-   the frontend.
+   the frontend. PR URLs from successful `gh pr` bash output are stored via
+   `protocol.SessionMeta` and `session` sidecar metadata.
   `/vim` embeds nvim/vim in the right-pane `editor` window by default
   (PTY + vt10x via `internal/tui/term`). Config key `vimMode` selects
   `pane` (default), `overlay`, or `takeover` (full-screen `tea.ExecProcess`).
