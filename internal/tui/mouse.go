@@ -6,12 +6,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-
-	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
 
 // openURIMsg is emitted after a best-effort open of a clicked hyperlink.
@@ -22,7 +21,8 @@ type openURIMsg struct {
 }
 
 // handleMouse routes wheel scrolling and left-click hit testing for the
-// transcript: OSC 8 links open where present, collapsible tool cells toggle.
+// transcript: path:line refs and OSC 8 links open first; otherwise collapsible
+// tool/explore cells toggle under the click.
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if msg.Action != tea.MouseActionPress {
 		return m, nil
@@ -38,6 +38,10 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		if m.modal != nil || len(m.cells) == 0 {
 			return m, nil
 		}
+		// Prefer path:line citations (open in editor) — same as Enter.
+		if ref, ok := m.fileRefAtMouse(msg); ok {
+			return m.openFileRef(ref)
+		}
 		originX, originY, ok := m.transcriptContentOrigin()
 		if !ok {
 			return m, nil
@@ -47,11 +51,16 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		if relX < 0 || relY < 0 || relX >= m.viewport.Width || relY >= m.viewport.Height {
 			return m, nil
 		}
-		// Prefer OSC 8 targets under the cursor (file/url links).
+		// OSC 8 targets under the cursor (http(s) / bare file:// titles).
 		if uri := m.osc8AtViewport(relX, relY); uri != "" {
+			// file:// with #L fragment is handled via fileRefAtMouse above when
+			// plain text has path:line; remaining file:// opens via OS helper.
+			if ref, ok := fileRefFromURI(uri); ok {
+				return m.openFileRef(ref)
+			}
 			return m, openURICmd(uri)
 		}
-		// Otherwise toggle the collapsible tool/explore cell under the click.
+		// Toggle collapsible tool/explore cell under the click.
 		contentLine := m.viewport.YOffset + relY
 		idx := m.cellIndexAtContentLine(contentLine)
 		if idx < 0 {
@@ -81,68 +90,23 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
-// transcriptContentOrigin returns the screen coordinates of the top-left cell
-// of the transcript viewport body (inside panel chrome when bordered).
-func (m Model) transcriptContentOrigin() (x, y int, ok bool) {
-	if !m.ready || m.width <= 0 || m.height <= 0 || len(m.cells) == 0 {
-		return 0, 0, false
+// fileRefFromURI parses file:///abs/path#L12 into a fileRef when possible.
+func fileRefFromURI(raw string) (fileRef, bool) {
+	u, err := url.Parse(raw)
+	if err != nil || !strings.EqualFold(u.Scheme, "file") {
+		return fileRef{}, false
 	}
-	gutter := m.th.Resolve().Spacing.XS
-	leftWidth := m.width
-	var hGeometry paneGeometry
-	if m.splitOrientation != orientVertical {
-		hGeometry = computePaneGeometry(m.width, gutter, m.focus)
-		leftWidth = hGeometry.leftCandidateWidth(m.width)
+	path := u.Path
+	if path == "" {
+		return fileRef{}, false
 	}
-	l := computeLayout(leftWidth, m.height, m.composer.Height(), m.completionPopupHeightFor(leftWidth), m.dangerouslySkipPermissions, m.noticeRowsFor(leftWidth))
-	bodyHeight := l.transcript + l.notice + l.popup + l.composer
-
-	showLeft := true
-	if m.splitOrientation == orientVertical {
-		geo := computeVerticalPaneGeometry(m.width, bodyHeight, gutter, m.focus)
-		if geo.mode == paneSingle && m.focus == focusRight {
-			showLeft = false
+	line := 0
+	if frag := strings.TrimPrefix(u.Fragment, "L"); frag != "" && frag != u.Fragment {
+		if n, err := strconv.Atoi(frag); err == nil && n > 0 {
+			line = n
 		}
-	} else if hGeometry.mode == paneSingle && m.focus == focusRight {
-		showLeft = false
 	}
-	if !showLeft || l.transcript <= 0 || m.viewport.Height <= 0 {
-		return 0, 0, false
-	}
-
-	// Content starts after the header strip.
-	y = l.header
-	compact := leftWidth < compactWidth || m.height < compactHeight
-	if !compact {
-		// Panel top border + left border + horizontal pad.
-		y++
-		_, padX, _ := panelMetricsFor(m.th, leftWidth)
-		x = 1 + padX
-	}
-	return x, y, true
-}
-
-func panelMetricsFor(th theme.Theme, width int) (bordered bool, padX, inner int) {
-	// Mirror ui.panelMetrics without exporting it: same thresholds.
-	th = th.Resolve()
-	switch {
-	case width < 1:
-		return false, 0, 0
-	case width < 3:
-		return false, 0, width
-	case width < 6:
-		return true, 0, width - 2
-	default:
-		padX = th.Spacing.XS
-		if padX < 0 {
-			padX = 0
-		}
-		maxPad := (width - 3) / 2
-		if padX > maxPad {
-			padX = maxPad
-		}
-		return true, padX, width - 2 - 2*padX
-	}
+	return fileRef{Path: filepath.FromSlash(path), Line: line}, true
 }
 
 // cellIndexAtContentLine maps an absolute viewport content line to a cell
@@ -155,6 +119,7 @@ func (m *Model) cellIndexAtContentLine(line int) int {
 	cur := 0
 	for i, c := range m.cells {
 		block := m.renderCell(c, width)
+		// postLinkify may restyle lines but does not change line count.
 		h := lipgloss.Height(block)
 		if h < 1 {
 			h = 1
@@ -204,11 +169,9 @@ func openURI(raw string) error {
 	case "http", "https":
 		// ok
 	case "file":
-		// Reject empty / non-local targets.
 		if u.Path == "" && u.Host == "" {
 			return errInvalidURI
 		}
-		// Normalize file://localhost/path → path for the OS opener.
 		if u.Host != "" && u.Host != "localhost" {
 			return errInvalidURI
 		}

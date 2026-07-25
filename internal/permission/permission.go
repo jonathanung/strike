@@ -38,7 +38,7 @@ var knownPermissions = map[string]struct{}{
 	"*": {}, "read": {}, "glob": {}, "grep": {}, "edit": {}, "write": {},
 	"bash": {}, "task": {}, "webfetch": {}, "todowrite": {}, "todoread": {},
 	"memory_write": {}, "memory_read": {}, "issue_write": {}, "issue_read": {},
-	"sleep": {}, "skill": {}, "toolsearch": {},
+	"sleep": {}, "skill": {}, "toolsearch": {}, "hook": {},
 }
 
 func ValidAction(a Action) bool {
@@ -77,6 +77,8 @@ func Defaults() Ruleset {
 		{Permission: "edit", Pattern: "*", Action: Ask},
 		{Permission: "write", Pattern: "*", Action: Ask},
 		{Permission: "bash", Pattern: "*", Action: Ask},
+		// Project-local shell hooks execute arbitrary code — gate first run.
+		{Permission: "hook", Pattern: "*", Action: Ask},
 		{Permission: "task", Pattern: "*", Action: Allow},
 		{Permission: "webfetch", Pattern: "*", Action: Ask},
 		{Permission: "todowrite", Pattern: "*", Action: Allow},

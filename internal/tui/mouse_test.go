@@ -72,7 +72,7 @@ func TestMouseClickExpandsToolCell(t *testing.T) {
 	}
 }
 
-func TestMouseClickOpensOSC8Link(t *testing.T) {
+func TestMouseClickOpensOSC8HTTPLink(t *testing.T) {
 	var opened []string
 	prev := startOpen
 	startOpen = func(target string) error {
@@ -82,12 +82,10 @@ func TestMouseClickOpensOSC8Link(t *testing.T) {
 	t.Cleanup(func() { startOpen = prev })
 
 	m, _ := newAppTestModel(nil, nil)
-	base := t.TempDir()
-	m.workDir = base
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
-	rel := "internal/auth/store.go"
-	m.applyEvent(protocol.ToolCallBegin{CallID: "r1", Name: "read"})
-	m.applyEvent(protocol.ToolCallEnd{CallID: "r1", Title: rel, Output: "package auth\n"})
+	url := "https://example.com/doc"
+	m.applyEvent(protocol.ToolCallBegin{CallID: "w1", Name: "webfetch"})
+	m.applyEvent(protocol.ToolCallEnd{CallID: "w1", Title: url + " (text/html)", Output: "ok\n"})
 	m.refreshViewport()
 	m.viewport.GotoTop()
 
@@ -97,18 +95,15 @@ func TestMouseClickOpensOSC8Link(t *testing.T) {
 		t.Fatal("empty viewport")
 	}
 	header := lines[0]
-	if !strings.Contains(header, "\x1b]8;") {
-		t.Fatalf("expected OSC8 on tool title line: %q", header)
-	}
 	col := -1
 	for x := 0; x < ansi.StringWidth(header)+2; x++ {
-		if uri := osc8URIAtCell(header, x); strings.Contains(uri, "store.go") {
+		if uri := osc8URIAtCell(header, x); strings.HasPrefix(uri, "https://") {
 			col = x
 			break
 		}
 	}
 	if col < 0 {
-		t.Fatalf("could not find OSC8 column on header: %q", header)
+		t.Fatalf("could not find OSC8 http column on header: %q", header)
 	}
 	ox, oy, ok := m.transcriptContentOrigin()
 	if !ok {
@@ -120,9 +115,9 @@ func TestMouseClickOpensOSC8Link(t *testing.T) {
 		X:      ox + col,
 		Y:      oy,
 	})
-	m = updated.(Model)
+	_ = updated
 	if cmd == nil {
-		t.Fatal("expected openURICmd from link click")
+		t.Fatal("expected openURICmd from http link click")
 	}
 	msg := runAppCmd(t, cmd)
 	om, ok := msg.(openURIMsg)
@@ -132,17 +127,52 @@ func TestMouseClickOpensOSC8Link(t *testing.T) {
 	if om.err != nil {
 		t.Fatalf("openURI: %v", om.err)
 	}
-	if len(opened) == 0 {
-		t.Fatal("startOpen was not called")
+	if len(opened) == 0 || opened[len(opened)-1] != url {
+		t.Fatalf("opened %v, want %q", opened, url)
 	}
-	want := filepath.Join(base, rel)
-	if opened[len(opened)-1] != want {
-		t.Errorf("opened %q, want %q", opened[len(opened)-1], want)
+}
+
+func TestMouseClickFileTitleOpensEditor(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	base := t.TempDir()
+	m.workDir = base
+	m.vimMode = VimModePane
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	rel := "internal/auth/store.go"
+	m.applyEvent(protocol.ToolCallBegin{CallID: "r1", Name: "read"})
+	m.applyEvent(protocol.ToolCallEnd{CallID: "r1", Title: rel, Output: "package auth\n"})
+	m.refreshViewport()
+	m.viewport.GotoTop()
+
+	header := strings.Split(m.viewport.View(), "\n")[0]
+	col := -1
+	for x := 0; x < ansi.StringWidth(header)+2; x++ {
+		if uri := osc8URIAtCell(header, x); strings.Contains(uri, "store.go") {
+			col = x
+			break
+		}
 	}
-	// Link click must not toggle expand on a non-collapsible short read.
+	if col < 0 {
+		t.Fatalf("missing OSC8 file title: %q", header)
+	}
+	ox, oy, ok := m.transcriptContentOrigin()
+	if !ok {
+		t.Fatal("no origin")
+	}
+	m = updateApp(t, m, tea.MouseMsg{
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+		X:      ox + col,
+		Y:      oy,
+	})
+	// File OSC8 routes through openFileRef → /vim pane, not expand.
 	if tc := m.toolByID["r1"]; tc != nil && tc.expanded {
-		t.Fatal("link click should not expand non-collapsible tool")
+		t.Fatal("file title click should not expand tool")
 	}
+	if m.focus != focusRight {
+		t.Fatalf("focus = %v, want right (vim pane)", m.focus)
+	}
+	_ = filepath.Join(base, rel) // keep import used if path asserted later
 }
 
 func TestToolTitleEmitsOSC8FileLink(t *testing.T) {

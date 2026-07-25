@@ -27,18 +27,18 @@ func displayURI(text, linkBase string) string {
 	if text == "" || strings.ContainsAny(text, "\n\r\t") {
 		return ""
 	}
-	// Bare URLs (and URL-ish titles from webfetch).
-	if strings.HasPrefix(text, "https://") || strings.HasPrefix(text, "http://") {
-		if u, err := url.Parse(text); err == nil && u.Host != "" {
-			return u.String()
-		}
-		return ""
-	}
-	// webfetch titles: "https://example.com/x (text/html)"
+	// webfetch titles: "https://example.com/x (text/html)" — strip suffix first.
 	if i := strings.Index(text, " ("); i > 0 {
 		if uri := displayURI(text[:i], linkBase); uri != "" {
 			return uri
 		}
+	}
+	// Bare URLs.
+	if strings.HasPrefix(text, "https://") || strings.HasPrefix(text, "http://") {
+		if u, err := url.Parse(text); err == nil && u.Host != "" && !strings.Contains(u.Host, " ") {
+			return u.String()
+		}
+		return ""
 	}
 	if !looksLikePath(text) {
 		return ""
