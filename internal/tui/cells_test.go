@@ -3,6 +3,8 @@ package tui
 import (
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -289,6 +291,105 @@ func TestEmptyEnterTogglesSelectedToolCell(t *testing.T) {
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	if tc.expanded != before {
 		t.Fatal("send with text must not toggle tool expand")
+	}
+}
+
+func TestVReviewsSelectedEditToolAtFirstHunk(t *testing.T) {
+	dir := t.TempDir()
+	// Post-edit on-disk content (newString already applied).
+	content := "package p\n\nconst x = 2\n"
+	if err := os.WriteFile(filepath.Join(dir, "f.go"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	meta, _ := json.Marshal(map[string]any{
+		"oldString": "const x = 1",
+		"newString": "const x = 2",
+		"count":     1,
+	})
+
+	m, _ := newAppTestModel(nil, nil)
+	m.workDir = dir
+	m.vimMode = VimModeTakeover
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	m.applyEvent(protocol.ToolCallBegin{
+		CallID: "e1",
+		Name:   "edit",
+		Args:   json.RawMessage(`{"filePath":"f.go","oldString":"const x = 1","newString":"const x = 2"}`),
+	})
+	m.applyEvent(protocol.ToolCallEnd{
+		CallID:   "e1",
+		Title:    "f.go",
+		Output:   "Edited f.go (1 replacement(s))",
+		Metadata: meta,
+	})
+	m.composer.SetValue("")
+
+	// Without selection, v must reach the composer (not steal typing).
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
+	if m.composer.Value() != "v" {
+		t.Fatalf("unselected v should type into composer, got %q", m.composer.Value())
+	}
+	m.composer.SetValue("")
+
+	// Select the short edit cell (reviewable even when not collapsible).
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}, Alt: true})
+	if m.selectedCell < 0 {
+		t.Fatal("alt+] should select reviewable edit cell")
+	}
+	tc := m.toolByID["e1"]
+	if tc == nil || !tc.selected {
+		t.Fatal("edit tool cell should be selected")
+	}
+
+	// Force missing editor so launch is deterministic (no real PTY/exec).
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "")
+	t.Setenv("PATH", filepath.Join(t.TempDir(), "empty-bin"))
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
+	m = updated.(Model)
+	// reviewSelectedTool → handleVimCommand may return a cmd that delivers
+	// editorFinishedMsg with launchErr, or set notice immediately.
+	if cmd != nil {
+		if msg := runAppCmd(t, cmd); msg != nil {
+			m = updateApp(t, m, msg)
+		}
+	}
+	if !m.noticeErr || !strings.Contains(m.notice, "no editor found") {
+		// If an editor was found on PATH somehow, still require that v was
+		// consumed (composer empty) rather than typed.
+		if m.composer.Value() == "v" {
+			t.Fatalf("selected v must not type into composer; notice=%q", m.notice)
+		}
+	}
+	if m.composer.Value() != "" {
+		t.Fatalf("composer after review = %q, want empty", m.composer.Value())
+	}
+
+	// Direct unit check of the target the key would open.
+	path, line, ok := tc.reviewTarget(dir)
+	if !ok || path != "f.go" || line != 3 {
+		t.Fatalf("reviewTarget = (%q, %d, %v), want (f.go, 3, true)", path, line, ok)
+	}
+}
+
+func TestVOnBashToolShowsNotice(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	var b strings.Builder
+	for i := 0; i < 10; i++ {
+		b.WriteString("line\n")
+	}
+	m.applyEvent(protocol.ToolCallBegin{CallID: "c1", Name: "bash"})
+	m.applyEvent(protocol.ToolCallEnd{CallID: "c1", Title: "run", Output: b.String()})
+	m.composer.SetValue("")
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}, Alt: true})
+	if m.selectedCell < 0 {
+		t.Fatal("expected selection")
+	}
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
+	if !m.noticeErr || !strings.Contains(m.notice, "no file to review") {
+		t.Fatalf("notice = %q err=%v, want no file to review", m.notice, m.noticeErr)
 	}
 }
 

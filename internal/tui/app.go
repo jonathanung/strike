@@ -111,8 +111,9 @@ type Model struct {
 	themeID  string // catalog id of th
 	cells    []cell
 	toolByID map[string]*toolCell
-	// selectedCell is the index into cells for tool/explore expand selection
-	// (-1 = none). Only collapsible tool/explore cells are targeted.
+	// selectedCell is the index into cells for tool/explore selection
+	// (-1 = none). Targets collapsible tool/explore cells and reviewable
+	// file-mutating tools (edit/write/…).
 	selectedCell int
 	modal        modal
 
@@ -604,9 +605,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.handleHistoryKey(msg) {
 			return m, nil
 		}
-		if m.handleToolCellKeys(msg) {
+		if handled, cmd := m.handleToolCellKeys(msg); handled {
 			m.reflow()
-			return m, nil
+			m.refreshViewport()
+			return m, cmd
 		}
 		switch {
 		case key.Matches(msg, m.keyMap.Newline):
@@ -1626,34 +1628,37 @@ func (m *Model) refreshViewport() {
 	}
 }
 
-// handleToolCellKeys handles [, ], and empty-composer enter for tool selection
-// and expand/collapse. Returns true when the key was consumed.
-func (m *Model) handleToolCellKeys(msg tea.KeyMsg) bool {
+// handleToolCellKeys handles tool selection (alt+[/]), expand (enter), and
+// post-edit review (v) when the composer is empty. Returns true when the key
+// was consumed; cmd may launch the external/embedded editor for review.
+func (m *Model) handleToolCellKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 	if m.focus != focusLeft || m.modal != nil || m.completion != nil {
-		return false
+		return false, nil
 	}
 	if strings.TrimSpace(m.composer.Value()) != "" {
-		return false
+		return false, nil
 	}
 	switch {
 	case key.Matches(msg, m.keyMap.ToolPrev):
 		m.moveToolSelection(-1)
-		return true
+		return true, nil
 	case key.Matches(msg, m.keyMap.ToolNext):
 		m.moveToolSelection(1)
-		return true
+		return true, nil
 	case key.Matches(msg, m.keyMap.ToolExpand), key.Matches(msg, m.keyMap.Send):
-		return m.toggleSelectedTool()
+		return m.toggleSelectedTool(), nil
+	case key.Matches(msg, m.keyMap.ToolReview):
+		return m.reviewSelectedTool()
 	}
-	return false
+	return false, nil
 }
 
-func (m *Model) collapsibleCellIndexes() []int {
+func (m *Model) selectableCellIndexes() []int {
 	var idx []int
 	for i, c := range m.cells {
 		switch tc := c.(type) {
 		case *toolCell:
-			if tc.collapsible() {
+			if tc.collapsible() || tc.reviewable() {
 				idx = append(idx, i)
 			}
 		case *exploreCell:
@@ -1666,7 +1671,7 @@ func (m *Model) collapsibleCellIndexes() []int {
 }
 
 func (m *Model) moveToolSelection(delta int) {
-	idxs := m.collapsibleCellIndexes()
+	idxs := m.selectableCellIndexes()
 	if len(idxs) == 0 {
 		m.selectedCell = -1
 		return
@@ -1697,7 +1702,20 @@ func (m *Model) moveToolSelection(delta int) {
 }
 
 func (m *Model) toggleSelectedTool() bool {
-	idxs := m.collapsibleCellIndexes()
+	// Expand only applies to collapsible cells; keep selection among those.
+	var idxs []int
+	for i, c := range m.cells {
+		switch tc := c.(type) {
+		case *toolCell:
+			if tc.collapsible() {
+				idxs = append(idxs, i)
+			}
+		case *exploreCell:
+			if tc.collapsible() {
+				idxs = append(idxs, i)
+			}
+		}
+	}
 	if len(idxs) == 0 {
 		return false
 	}
@@ -1723,6 +1741,35 @@ func (m *Model) toggleSelectedTool() bool {
 		return c.toggleExpanded()
 	}
 	return false
+}
+
+// reviewSelectedTool opens the selected file-mutating tool's path at the first
+// changed hunk. Does not consume "v" when nothing is selected so typing still
+// reaches the empty composer.
+func (m *Model) reviewSelectedTool() (bool, tea.Cmd) {
+	if m.selectedCell < 0 || m.selectedCell >= len(m.cells) {
+		return false, nil
+	}
+	tc, ok := m.cells[m.selectedCell].(*toolCell)
+	if !ok {
+		m.setNotice("select an edit tool cell to review", true)
+		return true, nil
+	}
+	path, line, ok := tc.reviewTarget(m.workDir)
+	if !ok {
+		m.setNotice("no file to review on this tool", true)
+		return true, nil
+	}
+	args := []string{path}
+	if line > 1 {
+		args = []string{path + ":" + itoa(line)}
+	} else if line == 1 {
+		// Still jump to line 1 for write/new files so vi-family opens at top.
+		args = []string{path + ":1"}
+	}
+	updated, cmd := (*m).handleVimCommand(args)
+	*m = updated.(Model)
+	return true, cmd
 }
 
 func (m *Model) syncToolSelectionFlags() {

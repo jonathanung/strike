@@ -28,11 +28,12 @@ type keyMap struct {
 	ScrollDown        key.Binding
 	JumpBottom        key.Binding
 	ToggleOrientation key.Binding
-	// Tool cell selection/expand when the composer is empty (enter still sends
-	// when there is text).
+	// Tool cell selection/expand/review when the composer is empty (enter still
+	// sends when there is text; v only fires with a selected tool cell).
 	ToolPrev   key.Binding
 	ToolNext   key.Binding
 	ToolExpand key.Binding
+	ToolReview key.Binding
 }
 
 func defaultKeyMap() keyMap {
@@ -70,6 +71,7 @@ func defaultKeyMap() keyMap {
 		ToolPrev:   key.NewBinding(key.WithKeys("alt+["), key.WithHelp("alt+[", "prev tool cell")),
 		ToolNext:   key.NewBinding(key.WithKeys("alt+]"), key.WithHelp("alt+]", "next tool cell")),
 		ToolExpand: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "expand tool cell")),
+		ToolReview: key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "review edit in editor")),
 	}
 }
 
@@ -117,6 +119,7 @@ func keybindCatalog(keys keyMap) []keybindEntry {
 		from("nav.tool-prev", "Navigation", keys.ToolPrev),
 		from("nav.tool-next", "Navigation", keys.ToolNext),
 		from("nav.tool-expand", "Navigation", keys.ToolExpand),
+		from("nav.tool-review", "Navigation", keys.ToolReview),
 
 		from("global.palette", "Global", keys.Palette),
 		from("global.keyhelp", "Global", keys.KeyHelp),
