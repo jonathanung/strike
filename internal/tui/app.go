@@ -604,6 +604,15 @@ func (m *Model) reflow() {
 }
 
 func (m *Model) applyEvent(ev protocol.Event) {
+	// Defense-in-depth: child-session events should only surface permissions.
+	// Primary filtering is in the engine (only Permission* are forwarded).
+	if corr, ok := eventCorrelation(ev); ok && (corr.ParentSessionID != "" || corr.Depth > 0) {
+		switch ev.(type) {
+		case protocol.PermissionAsked, protocol.PermissionResolved:
+		default:
+			return
+		}
+	}
 	// Status coloring tracks protocol facts before view-side side effects so
 	// agentState never depends on modal type checks.
 	m.applyAgentStateEvent(ev)
@@ -660,6 +669,48 @@ func (m *Model) applyEvent(ev protocol.Event) {
 				m.setNotice(ev.Message, true)
 			}
 		}
+	case protocol.ChildStarted:
+		// Foreground child lifecycle is engine-owned; no tree UI yet.
+	case protocol.ChildCompleted:
+		// no-op
+	}
+}
+
+// eventCorrelation extracts lineage fields when the event embeds Correlation.
+func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
+	switch e := ev.(type) {
+	case protocol.UserMessage:
+		return e.Correlation, true
+	case protocol.TurnStarted:
+		return e.Correlation, true
+	case protocol.TextDelta:
+		return e.Correlation, true
+	case protocol.ToolCallBegin:
+		return e.Correlation, true
+	case protocol.ToolCallEnd:
+		return e.Correlation, true
+	case protocol.PermissionAsked:
+		return e.Correlation, true
+	case protocol.PermissionResolved:
+		return e.Correlation, true
+	case protocol.TurnCompleted:
+		return e.Correlation, true
+	case protocol.ModelSelected:
+		return e.Correlation, true
+	case protocol.AgentSelected:
+		return e.Correlation, true
+	case protocol.EffortSelected:
+		return e.Correlation, true
+	case protocol.FastSelected:
+		return e.Correlation, true
+	case protocol.EngineError:
+		return e.Correlation, true
+	case protocol.ChildStarted:
+		return e.Correlation, true
+	case protocol.ChildCompleted:
+		return e.Correlation, true
+	default:
+		return protocol.Correlation{}, false
 	}
 }
 

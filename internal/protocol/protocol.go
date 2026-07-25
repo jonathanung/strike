@@ -142,10 +142,40 @@ type Event interface{ isEvent() }
 // Correlation identifies the session, turn, and provider request that
 // produced an event. Embedded anonymously so JSON stays flat; omitempty
 // keeps legacy envelopes without IDs decodable and re-encodable as `{}`.
+// ParentSessionID and Depth record immutable child-session lineage when a
+// foreground subagent is running (root sessions leave both zero-valued).
 type Correlation struct {
 	SessionID         string `json:"sessionId,omitempty"`
 	TurnID            string `json:"turnId,omitempty"`
 	ProviderRequestID string `json:"providerRequestId,omitempty"`
+	ParentSessionID   string `json:"parentSessionId,omitempty"`
+	Depth             int    `json:"depth,omitempty"`
+}
+
+// ChildStatus is the terminal outcome of a foreground child session.
+type ChildStatus string
+
+const (
+	// Named ChildStatus* so they do not collide with the ChildCompleted event type.
+	ChildStatusCompleted ChildStatus = "completed"
+	ChildStatusFailed    ChildStatus = "failed"
+	ChildStatusCanceled  ChildStatus = "canceled"
+)
+
+// ChildStarted marks the beginning of a foreground child/subagent session.
+// Emitted by the parent engine with the child's correlation.
+type ChildStarted struct {
+	Correlation
+	Agent  string `json:"agent,omitempty"`
+	Prompt string `json:"prompt,omitempty"`
+}
+
+// ChildCompleted marks the end of a foreground child/subagent session.
+// Emitted by the parent engine with the child's correlation.
+type ChildCompleted struct {
+	Correlation
+	Status  ChildStatus `json:"status"`
+	Summary string      `json:"summary,omitempty"`
 }
 
 // UserMessage echoes accepted user input into the event stream so the
@@ -248,3 +278,5 @@ func (AgentSelected) isEvent()      {}
 func (EffortSelected) isEvent()     {}
 func (FastSelected) isEvent()       {}
 func (EngineError) isEvent()        {}
+func (ChildStarted) isEvent()       {}
+func (ChildCompleted) isEvent()     {}

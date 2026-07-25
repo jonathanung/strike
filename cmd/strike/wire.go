@@ -226,6 +226,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 		tool.NewEdit(),
 		tool.NewWrite(),
 		tool.NewBash(),
+		tool.NewTask(),
 	)
 
 	// Built-in agents first (build default, then plan). Empty Prompt means

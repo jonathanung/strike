@@ -8,6 +8,7 @@ import (
 
 func TestWrapDecodeRoundTrip(t *testing.T) {
 	corr := Correlation{SessionID: "session-1", TurnID: "turn-1", ProviderRequestID: "provider-1"}
+	childCorr := Correlation{SessionID: "child-1", ParentSessionID: "session-1", Depth: 1}
 	events := []Event{
 		UserMessage{Correlation: corr, Text: "hi"},
 		TurnStarted{Correlation: corr},
@@ -22,6 +23,8 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 		EffortSelected{Correlation: corr, Level: EffortXHigh},
 		FastSelected{Correlation: corr, Enabled: true},
 		EngineError{Correlation: corr, Message: "boom"},
+		ChildStarted{Correlation: childCorr, Agent: "build", Prompt: "do the subtask"},
+		ChildCompleted{Correlation: childCorr, Status: ChildStatusCompleted, Summary: "done"},
 	}
 	for _, want := range events {
 		env, err := Wrap(want)
@@ -116,6 +119,83 @@ func TestCorrelationJSONIsFlatAndOptional(t *testing.T) {
 	}
 }
 
+func TestCorrelationParentSessionIDAndDepthJSON(t *testing.T) {
+	withLineage := ChildStarted{
+		Correlation: Correlation{
+			SessionID:       "child-1",
+			ParentSessionID: "parent-1",
+			Depth:           1,
+		},
+		Agent:  "build",
+		Prompt: "subtask",
+	}
+	b, err := json.Marshal(withLineage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]string{
+		"sessionId":       `"child-1"`,
+		"parentSessionId": `"parent-1"`,
+		"depth":           `1`,
+		"agent":           `"build"`,
+		"prompt":          `"subtask"`,
+	} {
+		if string(got[key]) != want {
+			t.Errorf("%s = %s, want %s; JSON: %s", key, got[key], want, b)
+		}
+	}
+	if _, ok := got["correlation"]; ok {
+		t.Errorf("correlation must not be nested: %s", b)
+	}
+
+	// omitempty: zero ParentSessionID and Depth must not appear.
+	root := TurnStarted{Correlation: Correlation{SessionID: "root-1"}}
+	rootJSON, err := json.Marshal(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rootMap map[string]json.RawMessage
+	if err := json.Unmarshal(rootJSON, &rootMap); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := rootMap["parentSessionId"]; ok {
+		t.Errorf("parentSessionId present when empty: %s", rootJSON)
+	}
+	if _, ok := rootMap["depth"]; ok {
+		t.Errorf("depth present when zero: %s", rootJSON)
+	}
+	if string(rootMap["sessionId"]) != `"root-1"` {
+		t.Errorf("sessionId = %s, want root-1", rootMap["sessionId"])
+	}
+}
+
+func TestChildCompletedStatusesRoundTrip(t *testing.T) {
+	corr := Correlation{SessionID: "child-1", ParentSessionID: "parent-1", Depth: 1}
+	for _, status := range []ChildStatus{ChildStatusCompleted, ChildStatusFailed, ChildStatusCanceled} {
+		want := ChildCompleted{Correlation: corr, Status: status, Summary: string(status)}
+		env, err := Wrap(want)
+		if err != nil {
+			t.Fatalf("Wrap(%s): %v", status, err)
+		}
+		if env.Type != "child.completed" {
+			t.Errorf("type = %q, want child.completed", env.Type)
+		}
+		got, err := env.Decode()
+		if err != nil {
+			t.Fatalf("Decode(%s): %v", status, err)
+		}
+		wantJSON, _ := json.Marshal(want)
+		gotJSON, _ := json.Marshal(got)
+		if string(wantJSON) != string(gotJSON) {
+			t.Errorf("%s: got %s, want %s", status, gotJSON, wantJSON)
+		}
+	}
+}
+
 func TestDecodeLiteralLegacyEnvelopeHasEmptyCorrelation(t *testing.T) {
 	literal := `{"type":"permission.asked","time":"2020-01-01T00:00:00Z","data":{"requestId":"perm_7","permission":"bash","patterns":["echo hi"]}}`
 	var env Envelope
@@ -194,6 +274,8 @@ func TestEventTypeCoverage(t *testing.T) {
 		"effort.selected":     EffortSelected{},
 		"fast.selected":       FastSelected{},
 		"engine.error":        EngineError{},
+		"child.started":       ChildStarted{},
+		"child.completed":     ChildCompleted{},
 	}
 	for typ, ev := range want {
 		env, err := Wrap(ev)

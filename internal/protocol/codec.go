@@ -42,6 +42,10 @@ func eventType(ev Event) string {
 		return "fast.selected"
 	case EngineError:
 		return "engine.error"
+	case ChildStarted:
+		return "child.started"
+	case ChildCompleted:
+		return "child.completed"
 	default:
 		return ""
 	}
@@ -90,6 +94,10 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &FastSelected{}
 	case "engine.error":
 		ev = &EngineError{}
+	case "child.started":
+		ev = &ChildStarted{}
+	case "child.completed":
+		ev = &ChildCompleted{}
 	default:
 		return nil, fmt.Errorf("protocol: unknown envelope type %q", e.Type)
 	}
@@ -126,6 +134,10 @@ func deref(ev Event) Event {
 	case *FastSelected:
 		return *v
 	case *EngineError:
+		return *v
+	case *ChildStarted:
+		return *v
+	case *ChildCompleted:
 		return *v
 	default:
 		return ev

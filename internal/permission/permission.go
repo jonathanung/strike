@@ -34,7 +34,8 @@ type Rule struct {
 type Ruleset []Rule
 
 // Defaults: searching and reading are free; anything that mutates or
-// executes asks.
+// executes asks. task is allowed so the root agent can spawn foreground
+// children; DeriveChildRules denies task on child sessions.
 func Defaults() Ruleset {
 	return Ruleset{
 		{Permission: "read", Pattern: "*", Action: Allow},
@@ -43,7 +44,35 @@ func Defaults() Ruleset {
 		{Permission: "edit", Pattern: "*", Action: Ask},
 		{Permission: "write", Pattern: "*", Action: Ask},
 		{Permission: "bash", Pattern: "*", Action: Ask},
+		{Permission: "task", Pattern: "*", Action: Allow},
 	}
+}
+
+// DeriveChildRules deep-copies parentLayers, appends only Deny rules from
+// childExtra, then appends Deny task *. Does NOT copy parent session grants
+// (caller passes opts.Rules only). Child Service.granted starts empty.
+//
+// Only Deny entries from childExtra are kept so a child cannot widen a
+// parent Deny/Ask via Allow. Parent last-match-wins order is preserved,
+// including parent allow-after-deny patterns.
+func DeriveChildRules(parentLayers []Ruleset, childExtra ...Ruleset) []Ruleset {
+	out := make([]Ruleset, 0, len(parentLayers)+len(childExtra)+1)
+	for _, layer := range parentLayers {
+		out = append(out, append(Ruleset(nil), layer...))
+	}
+	for _, extra := range childExtra {
+		var denies Ruleset
+		for _, rule := range extra {
+			if rule.Action == Deny {
+				denies = append(denies, rule)
+			}
+		}
+		if len(denies) > 0 {
+			out = append(out, denies)
+		}
+	}
+	out = append(out, Ruleset{{Permission: "task", Pattern: "*", Action: Deny}})
+	return out
 }
 
 func (r Rule) matches(permission, pattern string) bool {
