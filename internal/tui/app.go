@@ -1982,6 +1982,10 @@ func (m Model) handleMDRead(text string, fields []string) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) submit(op protocol.UserInput, displayPrompt string) (tea.Model, tea.Cmd) {
+	if m.turnRunning {
+		m.setNotice("a turn is already running; interrupt it first", true)
+		return m, nil
+	}
 	m.resetComposer()
 	m.clearNotice()
 	ops := m.ops
