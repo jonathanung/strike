@@ -246,4 +246,3 @@ func TestPermissionResolvedClearsAttentionWithoutMatchingModal(t *testing.T) {
 		t.Fatalf("state = %v, want working", got)
 	}
 }
-

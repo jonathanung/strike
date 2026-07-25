@@ -78,7 +78,7 @@ func (m Model) headerView(width int) string {
 	case theme.AgentStateWorking:
 		right = m.spin.View() + inlineGap + statusStyle.Render(state.Label()+" — esc interrupts")
 	case theme.AgentStateAttention:
-		right = statusStyle.Render(state.Label()+" — respond to prompt")
+		right = statusStyle.Render(state.Label() + " — respond to prompt")
 	case theme.AgentStateError:
 		right = statusStyle.Render(state.Label())
 	default:
