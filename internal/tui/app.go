@@ -202,7 +202,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spin, cmd = m.spin.Update(msg)
 		return m, cmd
 
-	case authStartedMsg, authDeviceMsg, authDoneMsg:
+	case authStartedMsg, authDeviceMsg, authPasteErrMsg, authDoneMsg:
 		cmd, _ := m.applyAuthMsg(msg)
 		m.reflow()
 		return m, cmd
@@ -272,6 +272,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.recomputeCompletion()
 			m.reflow()
 			return m, m.setPaneFocus(focusLeft)
+		case paletteActionKeybinds:
+			m.modal = newKeysModal(m.keyMap)
+			m.reflow()
+			return m, nil
 		}
 		return m, nil
 
@@ -309,21 +313,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
-		if key.Matches(msg, m.keyMap.FocusPane) {
+		if key.Matches(msg, m.keyMap.FocusLeft) {
 			m.completion = nil
-			cmd := m.togglePaneFocus()
+			cmd := m.focusPane(focusLeft)
 			m.reflow()
 			return m, cmd
 		}
-		if key.Matches(msg, m.keyMap.CycleWindow) {
+		if key.Matches(msg, m.keyMap.FocusRight) {
 			m.completion = nil
-			m.windows = m.windows.cycle()
+			cmd := m.focusPane(focusRight)
+			m.reflow()
+			return m, cmd
+		}
+		if key.Matches(msg, m.keyMap.CycleWindowNext) {
+			m.completion = nil
+			m.windows = m.windows.cycleBy(1)
+			m.reflow()
+			return m, nil
+		}
+		if key.Matches(msg, m.keyMap.CycleWindowPrev) {
+			m.completion = nil
+			m.windows = m.windows.cycleBy(-1)
 			m.reflow()
 			return m, nil
 		}
 		if key.Matches(msg, m.keyMap.Palette) {
 			m.completion = nil
 			m.modal = newPaletteModal(m.commands, m.agents, m.currentPaletteAvailability())
+			m.reflow()
+			return m, nil
+		}
+		if key.Matches(msg, m.keyMap.KeyHelp) {
+			m.completion = nil
+			m.modal = newKeysModal(m.keyMap)
 			m.reflow()
 			return m, nil
 		}
@@ -582,6 +604,15 @@ func (m *Model) reflow() {
 }
 
 func (m *Model) applyEvent(ev protocol.Event) {
+	// Defense-in-depth: child-session events should only surface permissions.
+	// Primary filtering is in the engine (only Permission* are forwarded).
+	if corr, ok := eventCorrelation(ev); ok && (corr.ParentSessionID != "" || corr.Depth > 0) {
+		switch ev.(type) {
+		case protocol.PermissionAsked, protocol.PermissionResolved:
+		default:
+			return
+		}
+	}
 	// Status coloring tracks protocol facts before view-side side effects so
 	// agentState never depends on modal type checks.
 	m.applyAgentStateEvent(ev)
@@ -638,6 +669,48 @@ func (m *Model) applyEvent(ev protocol.Event) {
 				m.setNotice(ev.Message, true)
 			}
 		}
+	case protocol.ChildStarted:
+		// Foreground child lifecycle is engine-owned; no tree UI yet.
+	case protocol.ChildCompleted:
+		// no-op
+	}
+}
+
+// eventCorrelation extracts lineage fields when the event embeds Correlation.
+func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
+	switch e := ev.(type) {
+	case protocol.UserMessage:
+		return e.Correlation, true
+	case protocol.TurnStarted:
+		return e.Correlation, true
+	case protocol.TextDelta:
+		return e.Correlation, true
+	case protocol.ToolCallBegin:
+		return e.Correlation, true
+	case protocol.ToolCallEnd:
+		return e.Correlation, true
+	case protocol.PermissionAsked:
+		return e.Correlation, true
+	case protocol.PermissionResolved:
+		return e.Correlation, true
+	case protocol.TurnCompleted:
+		return e.Correlation, true
+	case protocol.ModelSelected:
+		return e.Correlation, true
+	case protocol.AgentSelected:
+		return e.Correlation, true
+	case protocol.EffortSelected:
+		return e.Correlation, true
+	case protocol.FastSelected:
+		return e.Correlation, true
+	case protocol.EngineError:
+		return e.Correlation, true
+	case protocol.ChildStarted:
+		return e.Correlation, true
+	case protocol.ChildCompleted:
+		return e.Correlation, true
+	default:
+		return protocol.Correlation{}, false
 	}
 }
 
@@ -729,8 +802,14 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 	case "/fast":
 		return m.handleFastCommand(fields[1:])
 	case "/help":
-		m.setNotice("commands: "+dotJoin(m.th, "/provider [name [model]]", "/model <model>", "/effort <"+effortChoices()+">", "/fast [on|off]", "/agent [name]", "/auth", "skills as /<name>", "tab cycles agents"), false)
+		m.setNotice("commands: "+dotJoin(m.th, "/provider [name [model]]", "/model <model>", "/effort <"+effortChoices()+">", "/fast [on|off]", "/agent [name]", "/auth", "/keys", "skills as /<name>", "tab cycles agents"), false)
 		m.resetComposer()
+		return m, nil
+	case "/keys":
+		m.resetComposer()
+		m.clearNotice()
+		m.modal = newKeysModal(m.keyMap)
+		m.reflow()
 		return m, nil
 	default:
 		// Unknown commands fall through to skills: /name args renders the
@@ -941,7 +1020,14 @@ func (m Model) View() string {
 		parts = append(parts, content)
 	}
 	parts = append(parts, footer...)
-	return ui.Canvas(m.th, m.width, m.height, strings.Join(parts, "\n"))
+	frame := ui.Canvas(m.th, m.width, m.height, strings.Join(parts, "\n"))
+	// Prepend OSC52 after Canvas so overlay/ansi.Cut cannot strip it.
+	if wm, ok := m.modal.(*authWaitModal); ok {
+		if osc := wm.TakeCopyOSC(); osc != "" {
+			return osc + frame
+		}
+	}
+	return frame
 }
 
 // paletteResultFocus reveals a newly produced left-side notice when the right

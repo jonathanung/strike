@@ -219,6 +219,17 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 		}
 	}
 
+	// Skills load before the tool registry so the skill tool can advertise
+	// available names in its description at construction time.
+	skills, err := config.LoadSkillsWithError(workDir)
+	if err != nil {
+		return fmt.Errorf("loading skills: %w", err)
+	}
+	skillInfos := make([]tool.SkillInfo, len(skills))
+	for i, s := range skills {
+		skillInfos[i] = tool.SkillInfo{Name: s.Name, Description: s.Description, Template: s.Template}
+	}
+
 	registry := tool.NewRegistry(
 		tool.NewRead(),
 		tool.NewGlob(),
@@ -226,7 +237,14 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 		tool.NewEdit(),
 		tool.NewWrite(),
 		tool.NewBash(),
+		tool.NewTask(),
+		tool.NewWebFetch(),
+		tool.NewTodoWrite(),
+		tool.NewNotebookEdit(),
+		tool.NewSleep(),
+		tool.NewSkill(skillInfos),
 	)
+	registry.Register(tool.NewToolSearch(registry))
 
 	// Built-in agents first (build default, then plan). Empty Prompt means
 	// "compose shared baseline + provider overlay at request time". User
@@ -248,10 +266,6 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 		agents = append(agents, engine.Agent(a))
 	}
 	instructions := config.LoadInstructions(workDir, projectIdentity.Root)
-	skills, err := config.LoadSkillsWithError(workDir)
-	if err != nil {
-		return fmt.Errorf("loading skills: %w", err)
-	}
 
 	// One session ID shared by the engine (event correlation) and the JSONL
 	// filename so transcript identity matches runtime correlation.

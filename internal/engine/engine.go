@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -70,6 +71,13 @@ type Options struct {
 	SystemPrompt string
 	// Rules are permission ruleset layers, earliest first (later wins).
 	Rules []permission.Ruleset
+	// MaxChildDepth bounds foreground task nesting. Zero defaults to 1 in New
+	// (root depth 0 may spawn one child; that child may not spawn further).
+	MaxChildDepth int
+	// Depth is this engine's lineage depth (0 = root).
+	Depth int
+	// ParentSessionID is the spawning session's ID; empty on root engines.
+	ParentSessionID string
 }
 
 // beginAck reports whether ToolCallBegin was actually written to Events.
@@ -118,6 +126,13 @@ type Engine struct {
 	// uses it so parent cancellation can drop an accepted begin without
 	// treating turn Interrupt as a failed emission.
 	runCtx context.Context
+
+	// activeChildReply routes PermissionReply to a foreground child's
+	// permission service while spawnChild is in flight. Parent and child mint
+	// overlapping perm_N IDs, so dual-Reply must never happen.
+	childMu          sync.Mutex
+	activeChildReply func(protocol.PermissionReply)
+	activeChildOps   chan<- protocol.Op
 }
 
 func New(opts Options) *Engine {
@@ -129,6 +144,9 @@ func New(opts Options) *Engine {
 	}
 	if opts.MaxTokens == 0 {
 		opts.MaxTokens = 8192
+	}
+	if opts.MaxChildDepth == 0 {
+		opts.MaxChildDepth = 1
 	}
 	e := &Engine{
 		opts:      opts,
@@ -145,10 +163,19 @@ func (e *Engine) Events() <-chan protocol.Event { return e.events }
 
 func (e *Engine) emit(ev protocol.Event) { e.events <- ev }
 
+// baseCorr is the immutable session lineage stamped on every event.
+func (e *Engine) baseCorr() protocol.Correlation {
+	return protocol.Correlation{
+		SessionID:       e.opts.SessionID,
+		ParentSessionID: e.opts.ParentSessionID,
+		Depth:           e.opts.Depth,
+	}
+}
+
 // sessionCorr is session-only correlation for selection events and
 // rejected ops that never enter a turn.
 func (e *Engine) sessionCorr() protocol.Correlation {
-	return protocol.Correlation{SessionID: e.opts.SessionID}
+	return e.baseCorr()
 }
 
 // Run processes ops until ctx is canceled or Ops is closed. Turns run in
@@ -253,10 +280,27 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 		}
 		e.setFast(op.Enabled)
 	case protocol.PermissionReply:
+		e.childMu.Lock()
+		childReply := e.activeChildReply
+		e.childMu.Unlock()
+		if childReply != nil {
+			childReply(op)
+			return
+		}
 		e.perms.Reply(op)
 	case protocol.Interrupt:
 		if e.turnCancel != nil {
 			e.turnCancel()
+		}
+		// Best-effort: cancel a foreground child turn if one is active.
+		e.childMu.Lock()
+		childOps := e.activeChildOps
+		e.childMu.Unlock()
+		if childOps != nil {
+			select {
+			case childOps <- protocol.Interrupt{}:
+			default:
+			}
 		}
 	}
 }
@@ -612,18 +656,17 @@ func (e *Engine) startTurn(ctx context.Context, text string) {
 // finishing is closed exactly once immediately before the terminal
 // TurnCompleted emission so Run can join the worker before the next op.
 func (e *Engine) runTurn(ctx context.Context, text string, turnID string, finishing chan struct{}) {
-	turnCorr := protocol.Correlation{SessionID: e.opts.SessionID, TurnID: turnID}
+	turnCorr := e.baseCorr()
+	turnCorr.TurnID = turnID
 	e.emit(protocol.UserMessage{Correlation: turnCorr, Text: text})
 	e.emit(protocol.TurnStarted{Correlation: turnCorr})
 	e.messages = append(e.messages, provider.Message{Role: provider.RoleUser, Text: text})
 
 	for {
 		// Distinct provider-request ID immediately before every Stream call.
-		reqCorr := protocol.Correlation{
-			SessionID:         e.opts.SessionID,
-			TurnID:            turnID,
-			ProviderRequestID: rand.Text(),
-		}
+		reqCorr := e.baseCorr()
+		reqCorr.TurnID = turnID
+		reqCorr.ProviderRequestID = rand.Text()
 		stream, err := e.prov.Stream(ctx, provider.Request{
 			Model:     e.model,
 			System:    e.system(),
@@ -750,6 +793,9 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			Ask: func(ctx context.Context, req tool.AskRequest) error {
 				return e.perms.AskWithCorrelation(ctx, req, corr)
 			},
+		}
+		if e.opts.Depth < e.opts.MaxChildDepth {
+			tc.SpawnTask = e.spawnChild
 		}
 		res, err = t.Execute(ctx, call.Args, tc)
 	}

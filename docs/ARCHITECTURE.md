@@ -47,7 +47,7 @@ event stream the TUI rendered from (see `internal/protocol/codec.go`).
 | `internal/provider` | LLM provider abstraction: `Provider` interface, normalized `StreamEvent`s | stdlib |
 | `internal/provider/base` | Shared HTTP/JSON/SSE/auth client concrete adapters embed | `provider`, stdlib, net/http |
 | `internal/provider/{anthropic,openaicompat,chatgpt,echo}` | Concrete adapters (openaicompat covers both the OpenAI platform API and xAI; chatgpt is the ChatGPT-subscription backend; echo is the offline dev provider) | `provider`, `provider/base` (all but echo), stdlib |
-| `internal/tool` | Tool contract (`Tool`, `Context`, `Result`) + built-ins: read/glob/grep/edit/write/bash | `provider` (for `ToolSchema`), stdlib |
+| `internal/tool` | Tool contract (`Tool`, `Context`, `Result`) + built-ins: read/glob/grep/edit/write/bash/task/webfetch/todowrite/notebook_edit/sleep/skill/toolsearch | `provider` (for `ToolSchema`), stdlib |
 | `internal/permission` | Ordered allow/ask/deny rulesets, last-match-wins; the ask service that suspends a tool call for user input | `protocol`, `tool` (for `AskRequest`), stdlib |
 | `internal/session` | JSONL event-log persistence (append/replay) | `protocol`, stdlib |
 | `internal/auth` | Credential store (0600 `auth.json`) + OAuth/PKCE/device flows | stdlib, net/http |
@@ -164,18 +164,19 @@ branch in `internal/tui/view.go` for the pattern.
    file under `internal/tool/` — `internal/tool/glob.go` is a minimal
    example; `edit.go`/`write.go`/`bash.go` show the permission-ask pattern.
 2. Register it in the `tool.NewRegistry(...)` call in `cmd/strike/wire.go`.
-3. If it mutates state or has side effects, call
-   `tc.Ask(ctx, tool.AskRequest{Permission: "yourperm", Patterns: []string{...}})`
-   inside `Execute`, and add a default rule for `"yourperm"` to
-   `permission.Defaults()` in `internal/permission/permission.go` (Allow for
-   read-only, Ask for anything mutating — see the existing six rules).
-4. No `internal/tui` change is needed for a generic tool: tool calls render
-   from `protocol.ToolCallBegin`/`ToolCallEnd` via `toolCell` in
-   `internal/tui/cells.go` (name, title, output preview, ok/err glyph).
-   Edit-shaped `Metadata` (`oldString`/`newString`) is consumed by the TUI
-   via `ui.DiffPreview` in the permission modal and completed tool cells;
-   other tools can keep emitting metadata without a TUI change until a
-   frontend renderer is added for them.
+  3. If it mutates state or has side effects, call
+     `tc.Ask(ctx, tool.AskRequest{Permission: "yourperm", Patterns: []string{...}})`
+     inside `Execute`, and add a default rule for `"yourperm"` to
+     `permission.Defaults()` in `internal/permission/permission.go` (Allow for
+     read-only, Ask for anything mutating — see the existing defaults; reuse
+     `edit`/`write`/`bash` when the new tool is the same class of action).
+  4. No `internal/tui` change is needed for a generic tool: tool calls render
+    from `protocol.ToolCallBegin`/`ToolCallEnd` via `toolCell` in
+    `internal/tui/cells.go` (name, title, output preview, ok/err glyph).
+    Edit-shaped `Metadata` (`oldString`/`newString`) is consumed by the TUI
+    via `ui.DiffPreview` in the permission modal and completed tool cells;
+    other tools can keep emitting metadata without a TUI change until a
+    frontend renderer is added for them.
 
 ### Add a slash command
 

@@ -75,16 +75,7 @@ func (m *providerModal) selectCurrent() (modal, tea.Cmd) {
 			return nil
 		}
 	}
-	switch {
-	case s.OAuth:
-		return startOAuthModal(m.auth, s.Name, true)
-	case s.Device:
-		return startDeviceModal(m.auth, s.Name, true)
-	case s.APIKey:
-		return newAPIKeyModal(s.Name, m.auth, m.th, true), nil
-	default:
-		return m, nil
-	}
+	return startLogin(m.auth, m.th, s.Name, "", true)
 }
 
 func (m *providerModal) view(width int, th theme.Theme) string {
@@ -105,7 +96,7 @@ func (m *providerModal) view(width int, th theme.Theme) string {
 	})
 	return ui.Dialog(th, ui.DialogOpts{
 		Title: "Select provider",
-		Hint:  dotJoin(th, "↑/↓ move", "enter select or log in", "ctrl+d set default", "esc close"),
+		Hint:  dotJoin(th, "up/down/j/k move", "enter select or log in", "ctrl+d set default", "esc close"),
 		Width: width,
 	}, body)
 }

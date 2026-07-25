@@ -125,7 +125,9 @@ func (a authAdapter) BeginOAuth(ctx context.Context, provider string) (*host.OAu
 		// lost to UI cancellation of the wait ctx.
 		return auth.CompleteLogin(context.Background(), store, provider, tokens)
 	}
-	return host.NewOAuthLogin(pending.URL, wait), nil
+	return host.NewOAuthLogin(pending.URL, wait).WithPaste(func(raw string) error {
+		return pending.CompleteWithPaste(raw)
+	}), nil
 }
 
 func (a authAdapter) BeginDevice(ctx context.Context, provider string) (*host.DeviceLogin, error) {

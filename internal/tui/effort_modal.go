@@ -38,12 +38,12 @@ func (m *effortModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		return nil, nil
-	case "up", "ctrl+p":
+	case "up", "k", "ctrl+p":
 		if m.cursor > 0 {
 			m.cursor--
 		}
 		return m, nil
-	case "down", "ctrl+n":
+	case "down", "j", "ctrl+n":
 		if m.cursor < len(m.levels)-1 {
 			m.cursor++
 		}
@@ -86,7 +86,7 @@ func (m *effortModal) view(width int, th theme.Theme) string {
 	})
 	return ui.Dialog(th, ui.DialogOpts{
 		Title: "Reasoning effort",
-		Hint:  dotJoin(th, "↑/↓ move", "enter select", "ctrl+d set default", "esc close"),
+		Hint:  dotJoin(th, "up/down/j/k move", "enter select", "ctrl+d set default", "esc close"),
 		Width: width,
 	}, body)
 }

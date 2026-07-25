@@ -124,11 +124,11 @@ func TestC2ViewGeometryAndActivePanes(t *testing.T) {
 func TestC2FocusToggleCollapsesToActivePaneImmediately(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 40})
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
 	if m.focus != focusRight || computePaneGeometry(m.width, m.th.Spacing.XS, m.focus).rightWidth != 80 {
 		t.Fatalf("right focus did not claim collapsed width: focus=%d geometry=%+v", m.focus, computePaneGeometry(m.width, m.th.Spacing.XS, m.focus))
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlH})
 	if m.focus != focusLeft || computePaneGeometry(m.width, m.th.Spacing.XS, m.focus).leftWidth != 80 {
 		t.Fatalf("left focus did not reclaim collapsed width: focus=%d geometry=%+v", m.focus, computePaneGeometry(m.width, m.th.Spacing.XS, m.focus))
 	}
@@ -195,7 +195,7 @@ func TestC2PaneFocusAndModalUseFocusAndMutedThemeTokens(t *testing.T) {
 	if !strings.Contains(strings.Join(leftRows, "\n"), rgbSGR("#010203")) || !strings.Contains(strings.Join(rightRows, "\n"), rgbSGR("#040506")) {
 		t.Fatal("left focus/right dim tokens are not visible on their respective panes")
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
 	leftRows, rightRows = rowsContaining(m.View(), "get started"), rowsContaining(m.View(), "context")
 	if !strings.Contains(strings.Join(leftRows, "\n"), rgbSGR("#040506")) || !strings.Contains(strings.Join(rightRows, "\n"), rgbSGR("#010203")) {
 		t.Fatal("focus toggle did not swap pane focus/dim tokens")
@@ -220,21 +220,21 @@ func TestC2HintsAndWelcomeKeysDeriveFromBindings(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 40})
 	leftHints := ansi.Strip(m.hintsView(80))
-	for _, binding := range []ui.KeyHint{keyHint(m.keyMap.FocusPane), keyHint(m.keyMap.CycleWindow)} {
-		if !strings.Contains(leftHints, binding.Key) || !strings.Contains(leftHints, binding.Label) {
-			t.Errorf("left hints omit binding-derived %q %q: %q", binding.Key, binding.Label, leftHints)
+	for _, binding := range []ui.KeyHint{keyHint(m.keyMap.FocusLeft), keyHint(m.keyMap.FocusRight), keyHint(m.keyMap.CycleWindowNext), keyHint(m.keyMap.CycleWindowPrev)} {
+		if !strings.Contains(leftHints, binding.Key) {
+			t.Errorf("left hints omit binding-derived key %q: %q", binding.Key, leftHints)
 		}
 	}
 	if wideLeftHints := ansi.Strip(m.hintsView(160)); !strings.Contains(wideLeftHints, keyHint(m.keyMap.Send).Label) {
 		t.Errorf("wide left hints omit left-only send binding: %q", wideLeftHints)
 	}
 	welcome := ansi.Strip(m.welcomeKeys())
-	for _, binding := range []ui.KeyHint{keyHint(m.keyMap.FocusPane), keyHint(m.keyMap.CycleWindow), keyHint(m.keyMap.Send)} {
+	for _, binding := range []ui.KeyHint{keyHint(m.keyMap.FocusLeft), keyHint(m.keyMap.FocusRight), keyHint(m.keyMap.Send)} {
 		if !strings.Contains(welcome, binding.Key) || !strings.Contains(welcome, binding.Label) {
 			t.Errorf("welcome keys omit binding-derived %q %q: %q", binding.Key, binding.Label, welcome)
 		}
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
 	rightHints := ansi.Strip(m.hintsView(160))
 	if strings.Contains(rightHints, keyHint(m.keyMap.Send).Label) {
 		t.Errorf("right/global hints retained left-only send binding: %q", rightHints)

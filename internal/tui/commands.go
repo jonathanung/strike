@@ -18,6 +18,7 @@ const (
 	commandAgent    commandID = "agent"
 	commandFast     commandID = "fast"
 	commandHelp     commandID = "help"
+	commandKeys     commandID = "keys"
 )
 
 type commandSource string
@@ -43,6 +44,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandAgent, Name: "/agent", Description: "select an agent", ArgsHint: "[name]", Source: commandSourceBuiltin},
 	{ID: commandFast, Name: "/fast", Description: "toggle OpenAI priority tier (faster, ~2× cost)", ArgsHint: "[on|off]", Source: commandSourceBuiltin},
 	{ID: commandHelp, Name: "/help", Description: "show available commands", Source: commandSourceBuiltin},
+	{ID: commandKeys, Name: "/keys", Description: "show keyboard shortcuts", Source: commandSourceBuiltin},
 }
 
 // commandCatalog builds the slash-command catalog from the builtins and the
@@ -100,6 +102,7 @@ var reservedCommandNames = map[string]struct{}{
 	"agent":    {},
 	"fast":     {},
 	"help":     {},
+	"keys":     {},
 }
 
 // validSkillName reports whether a skill name is safe to render and select as a

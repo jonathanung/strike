@@ -47,7 +47,7 @@ service/theme token).
 | `internal/protocol` | Ops/Events seam; JSONL envelopes |
 | `internal/engine` | Turn loop, tool dispatch, interrupts |
 | `internal/provider` | LLM adapters (+ `base`, `echo`, anthropic, openai, xai, chatgpt) |
-| `internal/tool` | read/glob/grep/edit/write/bash |
+| `internal/tool` | read/glob/grep/edit/write/bash/task/webfetch/todowrite/notebook_edit/sleep/skill/toolsearch |
 | `internal/permission` | last-match-wins allow/ask/deny + ask service |
 | `internal/auth` | credentials, OAuth/PKCE/device, env precedence |
 | `internal/config` | global/project JSON + agents/skills markdown |

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -73,22 +74,26 @@ type callbackResult struct {
 	err  error
 }
 
-// PendingLogin is an in-flight browser OAuth flow: the loopback server is
-// listening, the browser has been opened, and Wait blocks until the
-// callback arrives. The split lets a TUI start the flow without blocking
-// its event loop (and without stdout printing).
+// PendingLogin is an in-flight browser OAuth flow. The loopback server may
+// be listening (server != nil), or bind may have failed — in that case the
+// flow is still usable via CompleteWithPaste. Wait blocks until a code
+// arrives by either path. The split lets a TUI start the flow without
+// blocking its event loop (and without stdout printing).
 type PendingLogin struct {
 	URL string
 
 	flow    FlowConfig
 	pkce    pkceCodes
+	state   string
 	results chan callbackResult
-	server  *http.Server
+	server  *http.Server // may be nil if bind failed
+	once    sync.Once
 }
 
-// Begin binds the loopback server, opens the browser, and returns
-// immediately. Call Wait to complete the flow; Wait always releases the
-// server and port.
+// Begin builds the authorize URL and best-effort binds the loopback server.
+// A bind failure still returns a PendingLogin so the caller can complete via
+// CompleteWithPaste. Call Wait to finish the flow; Wait releases the server
+// when one was started. openBrowser is best-effort.
 func (f FlowConfig) Begin() (*PendingLogin, error) {
 	pkce := newPKCE()
 	state := randomURLSafe(32)
@@ -110,55 +115,78 @@ func (f FlowConfig) Begin() (*PendingLogin, error) {
 	}
 	authorizeURL := f.AuthorizeURL + "?" + params.Encode()
 
-	// The redirect port is part of the client registration; a bind failure
-	// usually means another login (or the vendor's own CLI) holds it.
-	ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", f.RedirectHost, f.RedirectPort))
-	if err != nil {
-		return nil, fmt.Errorf("cannot bind %s (is another login flow or CLI using it?): %w", f.redirectURI(), err)
-	}
-
-	results := make(chan callbackResult, 1)
-	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != f.RedirectPath {
-			http.NotFound(w, r)
-			return
-		}
-		q := r.URL.Query()
-		switch {
-		case q.Get("error") != "":
-			msg := q.Get("error_description")
-			if msg == "" {
-				msg = q.Get("error")
-			}
-			writeCallbackPage(w, "Login failed: "+msg)
-			results <- callbackResult{err: fmt.Errorf("authorization failed: %s", msg)}
-		case q.Get("state") != state:
-			writeCallbackPage(w, "Login failed: state mismatch.")
-			results <- callbackResult{err: fmt.Errorf("state mismatch in OAuth callback (possible CSRF)")}
-		case q.Get("code") == "":
-			writeCallbackPage(w, "Login failed: missing authorization code.")
-			results <- callbackResult{err: fmt.Errorf("callback missing authorization code")}
-		default:
-			writeCallbackPage(w, "Login complete. You can close this window and return to strike.")
-			results <- callbackResult{code: q.Get("code")}
-		}
-	})}
-	go server.Serve(ln)
-	openBrowser(authorizeURL)
-
-	return &PendingLogin{
+	p := &PendingLogin{
 		URL:     authorizeURL,
 		flow:    f,
 		pkce:    pkce,
-		results: results,
-		server:  server,
-	}, nil
+		state:   state,
+		results: make(chan callbackResult, 1),
+	}
+
+	// The redirect port is part of the client registration; a bind failure
+	// usually means another login (or the vendor's own CLI) holds it. Paste
+	// completion still works without the loopback server.
+	ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", f.RedirectHost, f.RedirectPort))
+	if err == nil {
+		p.server = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != f.RedirectPath {
+				http.NotFound(w, r)
+				return
+			}
+			q := r.URL.Query()
+			switch {
+			case q.Get("error") != "":
+				msg := q.Get("error_description")
+				if msg == "" {
+					msg = q.Get("error")
+				}
+				writeCallbackPage(w, "Login failed: "+msg)
+				_ = p.deliver(callbackResult{err: fmt.Errorf("authorization failed: %s", msg)})
+			case q.Get("state") != state:
+				writeCallbackPage(w, "Login failed: state mismatch.")
+				_ = p.deliver(callbackResult{err: fmt.Errorf("state mismatch in OAuth callback (possible CSRF)")})
+			case q.Get("code") == "":
+				writeCallbackPage(w, "Login failed: missing authorization code.")
+				_ = p.deliver(callbackResult{err: fmt.Errorf("callback missing authorization code")})
+			default:
+				writeCallbackPage(w, "Login complete. You can close this window and return to strike.")
+				_ = p.deliver(callbackResult{code: q.Get("code")})
+			}
+		})}
+		go p.server.Serve(ln)
+	}
+
+	openBrowser(authorizeURL)
+	return p, nil
+}
+
+// LoopbackListening reports whether Begin bound the redirect server. When
+// false, the flow can only complete via CompleteWithPaste (TUI); CLI Login
+// cannot Wait for a browser callback that will never arrive.
+func (p *PendingLogin) LoopbackListening() bool {
+	return p != nil && p.server != nil
+}
+
+// deliver sends the first completion result to Wait. Later calls return an
+// error without overwriting the winner.
+func (p *PendingLogin) deliver(res callbackResult) error {
+	delivered := false
+	p.once.Do(func() {
+		p.results <- res
+		delivered = true
+	})
+	if !delivered {
+		return fmt.Errorf("login already completed")
+	}
+	return nil
 }
 
 // Wait blocks until the browser callback arrives (or 5 minutes pass),
 // then exchanges the code for tokens.
 func (p *PendingLogin) Wait(ctx context.Context) (*Tokens, error) {
-	defer p.server.Close()
+	if p.server != nil {
+		defer p.server.Close()
+	}
 	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	select {
@@ -172,12 +200,89 @@ func (p *PendingLogin) Wait(ctx context.Context) (*Tokens, error) {
 	}
 }
 
+// CompleteWithPaste accepts a full redirect/callback URL or a bare authorization
+// code. When the paste includes state, it must match the pending flow.
+// On success, unblocks Wait via the same results channel as the loopback callback.
+// Validation failures return an error without completing the login (caller may retry).
+// Never echo the raw paste in error strings.
+func (p *PendingLogin) CompleteWithPaste(raw string) error {
+	code, state, err := parseOAuthPaste(raw)
+	if err != nil {
+		return err
+	}
+	if state != "" && state != p.state {
+		return fmt.Errorf("state mismatch in OAuth callback (possible CSRF)")
+	}
+	if code == "" {
+		return fmt.Errorf("callback missing authorization code")
+	}
+	return p.deliver(callbackResult{code: code})
+}
+
+// parseOAuthPaste extracts an authorization code and optional state from a
+// pasted redirect URL or bare code. Errors never include the raw paste.
+func parseOAuthPaste(raw string) (code, state string, err error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", "", fmt.Errorf("empty paste")
+	}
+
+	if !isOAuthCallbackPaste(raw) {
+		return raw, "", nil
+	}
+
+	u, perr := url.Parse(raw)
+	if perr != nil {
+		return "", "", fmt.Errorf("invalid callback URL")
+	}
+	q := u.Query()
+	// url.Parse leaves bare "code=…&state=…" in Path with an empty query.
+	if len(q) == 0 {
+		if idx := strings.Index(raw, "?"); idx >= 0 {
+			if q2, qerr := url.ParseQuery(raw[idx+1:]); qerr == nil {
+				q = q2
+			}
+		} else if strings.Contains(raw, "code=") {
+			if q2, qerr := url.ParseQuery(raw); qerr == nil {
+				q = q2
+			}
+		}
+	}
+
+	if msg := q.Get("error"); msg != "" {
+		if d := q.Get("error_description"); d != "" {
+			msg = d
+		}
+		return "", "", fmt.Errorf("authorization failed: %s", msg)
+	}
+	return q.Get("code"), q.Get("state"), nil
+}
+
+func isOAuthCallbackPaste(s string) bool {
+	// Require a real URL shape (scheme + host, or explicit ://) so bare codes
+	// that merely start with "http" are not misclassified as callback URLs.
+	if strings.Contains(s, "://") {
+		return true
+	}
+	if u, err := url.Parse(s); err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" {
+		return true
+	}
+	if strings.Contains(s, "code=") {
+		return true
+	}
+	return false
+}
+
 // Login runs the full browser flow for CLI use: Begin, print the fallback
-// URL, Wait.
+// URL, Wait. Requires a bound loopback server — without it the browser
+// callback cannot be received and there is no paste path on the CLI.
 func (f FlowConfig) Login(ctx context.Context) (*Tokens, error) {
 	pending, err := f.Begin()
 	if err != nil {
 		return nil, err
+	}
+	if !pending.LoopbackListening() {
+		return nil, fmt.Errorf("cannot bind %s (is another login flow or CLI using it?): paste-based login is available in the TUI", f.redirectURI())
 	}
 	fmt.Println("Opening browser for login…")
 	fmt.Println("If it does not open, visit:\n\n  " + pending.URL + "\n")

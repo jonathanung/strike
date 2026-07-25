@@ -76,6 +76,39 @@ func TestOAuthLoginWaitCtxCancel(t *testing.T) {
 	}
 }
 
+func TestOAuthLoginCompleteWithPaste(t *testing.T) {
+	// Nil paste handler (and nil receiver) are errors.
+	noPaste := NewOAuthLogin("https://issuer/authorize", nil)
+	if err := noPaste.CompleteWithPaste("code"); err == nil {
+		t.Error("CompleteWithPaste with nil paste: expected error")
+	}
+	var nilLogin *OAuthLogin
+	if err := nilLogin.CompleteWithPaste("code"); err == nil {
+		t.Error("CompleteWithPaste on nil login: expected error")
+	}
+
+	// WithPaste forwards the raw string and surfaces the paste error.
+	sentinel := errors.New("paste rejected")
+	var got string
+	login := NewOAuthLogin("u", nil).WithPaste(func(raw string) error {
+		got = raw
+		return sentinel
+	})
+	err := login.CompleteWithPaste("raw-paste-value")
+	if got != "raw-paste-value" {
+		t.Errorf("paste saw %q, want raw-paste-value", got)
+	}
+	if !errors.Is(err, sentinel) {
+		t.Errorf("CompleteWithPaste err = %v, want paste rejected", err)
+	}
+
+	// Success path returns nil from the handler.
+	ok := NewOAuthLogin("u", nil).WithPaste(func(string) error { return nil })
+	if err := ok.CompleteWithPaste("ok"); err != nil {
+		t.Errorf("successful paste: %v", err)
+	}
+}
+
 func TestDeviceLoginPoll(t *testing.T) {
 	// A nil poll closure is an error, and the code/URI round-trip.
 	noPoll := NewDeviceLogin("WXYZ", "https://verify.example", nil)

@@ -1,8 +1,9 @@
 // Package tool defines the tool contract and the built-in tool set
-// (read/glob/grep/edit/write/bash). Used by internal/engine (dispatch),
-// internal/permission (AskRequest, for the Context.Ask signature), and
-// cmd/strike (registry construction); internal/tui never imports it — tool
-// calls reach the frontend only as protocol.ToolCallBegin/End events.
+// (read/glob/grep/edit/write/bash/task/webfetch/todowrite/notebook_edit/sleep/skill/toolsearch).
+// Used by internal/engine (dispatch), internal/permission (AskRequest, for the
+// Context.Ask signature), and cmd/strike (registry construction); internal/tui
+// never imports it — tool calls reach the frontend only as
+// protocol.ToolCallBegin/End events.
 package tool
 
 import (
@@ -28,11 +29,26 @@ type AskRequest struct {
 	Metadata json.RawMessage
 }
 
+// TaskRequest is a foreground child/subagent spawn request.
+type TaskRequest struct {
+	Prompt string
+	Agent  string
+}
+
+// TaskResult is the terminal outcome of a foreground child session.
+// Status is one of "completed", "failed", or "canceled".
+type TaskResult struct {
+	Output string
+	Status string
+}
+
 // Context carries per-call facilities into a tool. Ask blocks until the
 // permission is granted; it returns an error if rejected or denied.
+// SpawnTask, when non-nil, runs a blocking foreground child session.
 type Context struct {
-	WorkDir string
-	Ask     func(ctx context.Context, req AskRequest) error
+	WorkDir   string
+	Ask       func(ctx context.Context, req AskRequest) error
+	SpawnTask func(ctx context.Context, req TaskRequest) (TaskResult, error)
 }
 
 type Tool interface {
