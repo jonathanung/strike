@@ -1680,6 +1680,9 @@ func TestViewportScrollOffsetSurvivesRightFocusRoundTripAndRefreshesOnResizeAndE
 	if wantOffset == 0 {
 		t.Fatal("page up did not move long transcript off the bottom")
 	}
+	if m.viewport.AtBottom() {
+		t.Fatal("page up left viewport AtBottom")
+	}
 
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlH})
@@ -1691,10 +1694,37 @@ func TestViewportScrollOffsetSurvivesRightFocusRoundTripAndRefreshesOnResizeAndE
 	if !strings.Contains(ansi.Strip(m.viewport.View()), "transcript") {
 		t.Error("resize did not re-render transcript")
 	}
+	// Scrolled-up users must keep their place when engine events refresh content.
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
 	m = updateApp(t, m, engineEventMsg{ev: protocol.TextDelta{Text: "engine refresh"}})
-	if m.viewport.YOffset != m.viewport.TotalLineCount()-m.viewport.Height {
-		t.Errorf("engine event viewport offset = %d, want bottom %d", m.viewport.YOffset, m.viewport.TotalLineCount()-m.viewport.Height)
+	if m.viewport.AtBottom() {
+		t.Error("TextDelta yanked scrolled-up viewport to bottom")
+	}
+	if got := m.viewport.YOffset; got < wantOffset-2 || got > wantOffset+2 {
+		t.Errorf("engine event viewport offset = %d, want near preserved %d", got, wantOffset)
+	}
+}
+
+// TestViewportStickToBottomFollowsTextDeltaWhenAtBottom pins that live output
+// still auto-scrolls when the user is already anchored at the bottom.
+func TestViewportStickToBottomFollowsTextDeltaWhenAtBottom(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	for i := range 40 {
+		m.applyEvent(protocol.UserMessage{Text: strings.Repeat("line ", 10) + string(rune('a'+i%26))})
+	}
+	m.refreshViewport()
+	m.viewport.GotoBottom()
+	if !m.viewport.AtBottom() {
+		t.Fatal("setup: viewport not at bottom")
+	}
+	m = updateApp(t, m, engineEventMsg{ev: protocol.TextDelta{Text: "fresh tail content"}})
+	if !m.viewport.AtBottom() {
+		t.Errorf("TextDelta while at bottom lost follow: YOffset=%d total=%d height=%d",
+			m.viewport.YOffset, m.viewport.TotalLineCount(), m.viewport.Height)
+	}
+	if !strings.Contains(ansi.Strip(m.viewport.View()), "fresh tail") {
+		t.Error("at-bottom TextDelta did not render new content in viewport")
 	}
 }
 

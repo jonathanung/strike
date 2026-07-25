@@ -30,6 +30,9 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/fast":     {"toggle OpenAI priority tier (faster, ~2× cost)", "[on|off]", commandSourceBuiltin},
 		"/vim":      {"open a file in the embedded editor (pane/overlay) or $EDITOR", "[path[:line]]", commandSourceBuiltin},
 		"/md-read":  {"open a markdown file in the right pane", "<path>", commandSourceBuiltin},
+		"/theme":    {"set appearance (dark, light, or auto)", "[dark|light|auto]", commandSourceBuiltin},
+		"/layout":   {"toggle horizontal/vertical pane split", "", commandSourceBuiltin},
+		"/split":    {"toggle horizontal/vertical pane split", "", commandSourceBuiltin},
 		"/help":     {"show available commands", "", commandSourceBuiltin},
 		"/keys":     {"show keyboard shortcuts", "", commandSourceBuiltin},
 		"/review":   {"review a change", "$ARGUMENTS", commandSourceSkill},
@@ -58,7 +61,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 }
 
 func TestValidSkillNameRejectsReservedBuiltinsIncludingMDRead(t *testing.T) {
-	for _, name := range []string{"provider", "model", "effort", "auth", "agent", "fast", "vim", "md-read", "help", "keys"} {
+	for _, name := range []string{"provider", "model", "effort", "auth", "agent", "fast", "vim", "md-read", "theme", "layout", "split", "help", "keys"} {
 		if validSkillName(name) {
 			t.Errorf("validSkillName(%q) = true, want false for reserved builtin", name)
 		}

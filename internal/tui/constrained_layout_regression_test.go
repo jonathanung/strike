@@ -41,7 +41,11 @@ func TestComputeLayoutConstrainedVerticalBudget(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := computeLayout(tt.width, tt.height, tt.composer, tt.pop, tt.danger, tt.liveNotice)
+			noticeRows := 0
+			if tt.liveNotice {
+				noticeRows = 1
+			}
+			got := computeLayout(tt.width, tt.height, tt.composer, tt.pop, tt.danger, noticeRows)
 			if tt.want != nil && got != *tt.want {
 				t.Errorf("canonical layout = %+v, want %+v", got, *tt.want)
 			}
