@@ -52,7 +52,7 @@ service/theme token).
 | `internal/permission` | last-match-wins allow/ask/deny + ask service |
 | `internal/auth` | credentials, OAuth/PKCE/device, env precedence |
 | `internal/config` | global/project JSON + agents/skills markdown |
-| `internal/session` | JSONL event log append/replay |
+| `internal/session` | JSONL event log append/replay + concurrent Manager |
 | `internal/history` | project-scoped prompt history |
 | `internal/host` | frozen stdlib-only contract: what a frontend needs from its host (auth, catalog, settings, history, agents, skills) |
 | `internal/host/local` | real `host.Services` impl, wraps auth/config/models/history |
