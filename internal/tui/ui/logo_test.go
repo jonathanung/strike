@@ -44,3 +44,26 @@ func TestLogoZeroThemeFallsBackToDefaultIcons(t *testing.T) {
 		t.Errorf("zero-theme logo lost the bolt; icon fallback failed: %q", out)
 	}
 }
+
+func TestLogoUsesCustomBoltIcon(t *testing.T) {
+	th := theme.Default()
+	th.Icons.Bolt = "*"
+	for name, out := range map[string]string{"full": Logo(th), "compact": LogoCompact(th)} {
+		if !strings.Contains(out, "*") {
+			t.Errorf("%s logo omitted custom bolt: %q", name, out)
+		}
+		if strings.Contains(out, "⚡") {
+			t.Errorf("%s logo retained default bolt: %q", name, out)
+		}
+	}
+}
+
+func TestLogoUsesCustomRuleGlyphs(t *testing.T) {
+	th := theme.Default()
+	th.Icons.LogoTopRule = "-"
+	th.Icons.LogoBottomRule = "="
+	lines := strings.Split(Logo(th), "\n")
+	if !strings.Contains(lines[0], "-") || !strings.Contains(lines[len(lines)-1], "=") {
+		t.Errorf("logo did not use custom rules: %q", Logo(th))
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -28,6 +29,7 @@ type permissionModal struct {
 	choice   int
 	state    permissionModalState
 	feedback textinput.Model
+	th       theme.Theme
 }
 
 type permissionModalState int
@@ -46,11 +48,13 @@ var permChoices = []struct {
 	{"reject", protocol.DecisionReject},
 }
 
-func newPermissionModal(req protocol.PermissionAsked, ops chan<- protocol.Op) *permissionModal {
-	in := textinput.New()
-	in.Placeholder = "optional feedback"
-	in.Prompt = "> "
-	return &permissionModal{req: req, ops: ops, feedback: in}
+func newPermissionModal(req protocol.PermissionAsked, ops chan<- protocol.Op, themes ...theme.Theme) *permissionModal {
+	th := theme.Default()
+	if len(themes) > 0 {
+		th = themes[0]
+	}
+	in := newTextInput(th, "optional feedback")
+	return &permissionModal{req: req, ops: ops, feedback: in, th: th.Resolve()}
 }
 
 func (m *permissionModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
@@ -104,18 +108,21 @@ func (m *permissionModal) replyWithMessage(d protocol.Decision, message string) 
 }
 
 func (m *permissionModal) view(width int, th theme.Theme) string {
+	th = th.Resolve()
 	st := th.S()
-	inner := max(1, ui.InnerWidth(width))
-	heading := wrapToWidth(st.Warning.Bold(true).Render("Permission required: "+m.req.Permission), inner)
+	inner := max(1, ui.PanelInnerWidth(th, width))
+	cursorWidth := max(1, ansi.StringWidth(m.feedback.Cursor.View()))
+	heading := wrapToWidth(st.WarningStrong.Render("Permission required: "+m.req.Permission), inner)
 	detail := wrapToWidth(st.Text.Render(strings.Join(m.req.Patterns, "\n")), inner)
 
 	if m.state == permissionModalFeedback {
 		prompt := st.Text.Render("Optional feedback for the rejection:")
-		m.feedback.Width = max(1, inner-4)
-		body := heading + "\n" + detail + "\n\n" + prompt + "\n" + m.feedback.View()
+		m.feedback.Width = max(1, inner-ansi.StringWidth(m.feedback.Prompt)-cursorWidth)
+		m.feedback.SetValue(m.feedback.Value())
+		body := heading + "\n" + detail + strings.Repeat("\n", max(1, th.Spacing.SM)) + prompt + "\n" + m.feedback.View()
 		return ui.Dialog(th, ui.DialogOpts{
 			Title: "permission",
-			Hint:  "enter reject with feedback · esc reject without feedback",
+			Hint:  dotJoin(th, "enter reject with feedback", "esc reject without feedback"),
 			Width: width,
 			Tone:  ui.ToneWarning,
 		}, body)
@@ -124,22 +131,22 @@ func (m *permissionModal) view(width int, th theme.Theme) string {
 	choices := make([]string, len(permChoices))
 	plain := 0
 	for i, c := range permChoices {
-		label := itoa(i+1) + ") " + c.label
+		label := itoa(i+1) + ")" + themedSpace(th.Spacing.Label) + c.label
 		style := st.Muted
 		if i == m.choice {
-			style = lipgloss.NewStyle().Foreground(th.Highlight).Bold(true).Underline(true)
+			style = st.SelectedUnderline
 		}
 		choices[i] = style.Render(label)
-		plain += lipgloss.Width(label) + 2
+		plain += lipgloss.Width(label) + lipgloss.Width(themedSpace(th.Spacing.SM))
 	}
-	sep := "  "
+	sep := themedSpace(th.Spacing.SM)
 	if plain > inner {
 		sep = "\n" // stack choices when the row would overflow a narrow dialog
 	}
-	body := heading + "\n" + detail + "\n\n" + strings.Join(choices, sep)
+	body := heading + "\n" + detail + strings.Repeat("\n", max(1, th.Spacing.SM)) + strings.Join(choices, sep)
 	return ui.Dialog(th, ui.DialogOpts{
 		Title: "permission",
-		Hint:  "←/→ select · enter confirm · esc reject",
+		Hint:  dotJoin(th, "←/→ select", "enter confirm", "esc reject"),
 		Width: width,
 		Tone:  ui.ToneWarning,
 	}, body)

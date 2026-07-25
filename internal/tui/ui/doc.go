@@ -1,7 +1,7 @@
 // Package ui is strike's reusable Bubble Tea component library. Every
-// component renders purely from theme tokens — colors via theme.Theme, glyphs
-// via theme.Icons — and never hardcodes a color or a glyph, so the whole TUI
-// restyles from one place (see internal/tui/theme).
+// component renders purely from resolved theme tokens — colors, background,
+// borders, and spacing via theme.Theme, glyphs via theme.Icons — so the whole
+// TUI restyles from one place (see internal/tui/theme).
 //
 // Components are stateless string renderers with three guarantees:
 //
@@ -9,8 +9,9 @@
 //     within it (verify with lipgloss.Width). They never overflow.
 //   - Graceful: at tiny widths they degrade (drop borders, truncate, single
 //     column) instead of panicking.
-//   - Zero-value tolerant: a bare theme.Theme{} still renders (icons fall
-//     back to theme.DefaultIcons()).
+//   - Structural panels: Panel's Borderless option omits all chrome while
+//     preserving its exact Width and optional Height contract.
+//   - Zero-value tolerant: a bare theme.Theme{} resolves to the default theme.
 //
 // Imports are limited to the standard library, lipgloss, bubbles,
 // charmbracelet/x/ansi, and internal/tui/theme. Views compose these

@@ -37,7 +37,7 @@ Report exact commands and failing output verbatim. Do not claim green without ru
 
 ## Architecture map
 
-See ARCHITECTURE.md for the dataflow diagram, full package table with import
+See docs/ARCHITECTURE.md for the dataflow diagram, full package table with import
 rules, and recipes (add a provider/tool/slash command/UI component/host
 service/theme token).
 

@@ -25,6 +25,7 @@ const (
 
 // toneColor resolves a Tone to its adaptive color for the given theme.
 func toneColor(th theme.Theme, tone Tone) lipgloss.AdaptiveColor {
+	th = th.Resolve()
 	switch tone {
 	case ToneAccent:
 		return th.Accent
@@ -45,5 +46,41 @@ func toneColor(th theme.Theme, tone Tone) lipgloss.AdaptiveColor {
 
 // toneStyle is a foreground style in the tone's color.
 func toneStyle(th theme.Theme, tone Tone) lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(toneColor(th, tone))
+	st := th.S()
+	switch tone {
+	case ToneAccent:
+		return st.Accent
+	case ToneAccentAlt:
+		return st.AccentAlt
+	case ToneSuccess:
+		return st.Success
+	case ToneWarning:
+		return st.Warning
+	case ToneError:
+		return st.Error
+	case ToneMuted:
+		return st.Muted
+	default:
+		return st.Text
+	}
+}
+
+func toneStrongStyle(th theme.Theme, tone Tone) lipgloss.Style {
+	st := th.S()
+	switch tone {
+	case ToneAccent:
+		return st.AccentStrong
+	case ToneAccentAlt:
+		return st.AccentAltStrong
+	case ToneSuccess:
+		return st.SuccessStrong
+	case ToneWarning:
+		return st.WarningStrong
+	case ToneError:
+		return st.ErrorStrong
+	case ToneMuted:
+		return st.MutedStrong
+	default:
+		return st.TextStrong
+	}
 }

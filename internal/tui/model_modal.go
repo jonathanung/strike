@@ -115,7 +115,7 @@ func (m *modelModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 
 func (m *modelModal) view(width int, th theme.Theme) string {
 	st := th.S()
-	inner := max(1, ui.InnerWidth(width))
+	inner := max(1, ui.PanelInnerWidth(th, width))
 
 	var body string
 	switch {
@@ -144,8 +144,8 @@ func (m *modelModal) view(width int, th theme.Theme) string {
 		})
 	}
 	return ui.Dialog(th, ui.DialogOpts{
-		Title: "Select model — " + m.provider,
-		Hint:  "type to filter · ↑/↓ move · enter select · ctrl+d set default · esc close",
+		Title: detailJoin(th, "Select model", m.provider),
+		Hint:  dotJoin(th, "type to filter", "↑/↓ move", "enter select", "ctrl+d set default", "esc close"),
 		Width: width,
 	}, body)
 }

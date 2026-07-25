@@ -10,7 +10,9 @@ package tui
 
 import (
 	"strings"
+	"unicode"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -31,6 +33,13 @@ const (
 	// mode"), keeping every function but shedding chrome that will not fit.
 	compactWidth  = 60
 	compactHeight = 20
+)
+
+type noticeCause uint8
+
+const (
+	noticeGeneral noticeCause = iota
+	noticeNeedsModel
 )
 
 // engineEventMsg wraps a protocol.Event for the Update loop. Engine events
@@ -56,6 +65,7 @@ type historyAddedMsg struct {
 // host.Services instead.
 type Options struct {
 	DangerouslySkipPermissions bool
+	Theme                      *theme.Theme
 }
 
 // Model is the root Bubble Tea model. It holds its host services, the
@@ -77,6 +87,9 @@ type Model struct {
 	viewport                   viewport.Model
 	composer                   textarea.Model
 	completion                 *completionState
+	keyMap                     keyMap
+	focus                      paneFocus
+	windows                    windowRegistry
 	commands                   []commandSpec
 	spin                       spinner.Model
 	entries                    []string
@@ -94,6 +107,7 @@ type Model struct {
 	skills      []host.Skill // slash-command templates, pre-filtered by the host
 	notice      string
 	noticeErr   bool
+	noticeCause noticeCause
 	turnRunning bool
 	width       int
 	height      int
@@ -104,16 +118,15 @@ type Model struct {
 // field of it may be nil/empty and the UI degrades gracefully. Options is
 // variadic for backward-compatible call sites.
 func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Services, options ...Options) Model {
-	ta := textarea.New()
-	ta.Placeholder = "Ask strike anything… (/provider to pick a model, enter to send)"
-	ta.Prompt = "┃ "
-	ta.MaxHeight = composerMaxHeight
-	ta.SetHeight(composerMinHeight)
-	ta.ShowLineNumbers = false
-	ta.Focus()
-
-	sp := spinner.New()
-	sp.Spinner = spinner.MiniDot
+	th := theme.Default()
+	for _, option := range options {
+		if option.Theme != nil {
+			th = *option.Theme
+		}
+	}
+	th = th.Resolve()
+	ta := newComposer(th)
+	sp := newSpinner(th)
 
 	m := Model{
 		ops:        ops,
@@ -122,9 +135,11 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		agents:     services.Agents,
 		skills:     services.Skills,
 		commands:   commandCatalog(services.Skills),
-		th:         theme.Default(),
+		th:         th,
 		toolByID:   map[string]*toolCell{},
 		composer:   ta,
+		keyMap:     defaultKeyMap(),
+		windows:    newWindowRegistry(),
 		spin:       sp,
 		historyPos: -1,
 	}
@@ -138,7 +153,7 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(textarea.Blink, m.listen(), m.spin.Tick)
+	return tea.Batch(textarea.Blink, m.listen(), m.spin.Tick, m.windows.init())
 }
 
 // listen waits for the next engine event; re-issued after each delivery.
@@ -214,23 +229,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case paletteInvokeMsg:
+		priorNotice, priorNoticeErr := m.notice, m.noticeErr
 		entry, ok := m.currentPaletteEntry(msg.Action)
 		if !ok {
 			m.refreshOpenPalette()
 			m.setNotice("palette action is no longer available", true)
-			return m, nil
+			return m.paletteResultFocus(priorNotice, priorNoticeErr, nil)
 		}
 		if entry.DisabledReason != "" {
 			m.refreshOpenPalette()
-			m.setNotice(entry.DisabledReason, true)
-			return m, nil
+			if entry.DisabledReason == "select a provider first" {
+				m.setNeedsModelNotice(entry.DisabledReason, true)
+			} else {
+				m.setNotice(entry.DisabledReason, true)
+			}
+			return m.paletteResultFocus(priorNotice, priorNoticeErr, nil)
 		}
-		if _, ok := m.modal.(*paletteModal); ok {
+		if _, paletteOpen := m.modal.(*paletteModal); paletteOpen {
 			m.modal = nil
 		}
 		switch msg.Action.Kind {
 		case paletteActionBuiltin:
-			return m.handleCommand(msg.Action.Value)
+			next, cmd := m.handleCommand(msg.Action.Value)
+			return next.(Model).paletteResultFocus(priorNotice, priorNoticeErr, cmd)
 		case paletteActionAgent:
 			m.resetComposer()
 			ops, name := m.ops, msg.Action.Value
@@ -244,12 +265,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setComposerValueAt(text, len([]rune(text)))
 			m.recomputeCompletion()
 			m.reflow()
-			return m, m.composer.Focus()
+			return m, m.setPaneFocus(focusLeft)
 		}
 		return m, nil
 
 	case tea.KeyMsg:
-		if msg.String() == "ctrl+c" {
+		if key.Matches(msg, m.keyMap.Quit) {
 			return m, tea.Quit
 		}
 		if m.modal != nil {
@@ -258,49 +279,71 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reflow()
 			return m, cmd
 		}
-		if msg.String() == "ctrl+k" {
+		if m.focus == focusLeft && m.completion != nil {
+			switch {
+			case key.Matches(msg, m.keyMap.CompletionDismiss):
+				m.completion = nil
+				m.reflow()
+				return m, nil
+			case key.Matches(msg, m.keyMap.CompletionAccept):
+				m.applyCompletion()
+				return m, nil
+			case key.Matches(msg, m.keyMap.CompletionPrev):
+				m.completion.move(-1)
+				m.reflow()
+				return m, nil
+			case key.Matches(msg, m.keyMap.CompletionNext):
+				m.completion.move(1)
+				m.reflow()
+				return m, nil
+			case key.Matches(msg, m.keyMap.Newline):
+				m.composer.InsertString("\n")
+				m.recomputeCompletion()
+				m.reflow()
+				return m, nil
+			}
+		}
+		if key.Matches(msg, m.keyMap.FocusPane) {
+			m.completion = nil
+			cmd := m.togglePaneFocus()
+			m.reflow()
+			return m, cmd
+		}
+		if key.Matches(msg, m.keyMap.CycleWindow) {
+			m.completion = nil
+			m.windows = m.windows.cycle()
+			m.reflow()
+			return m, nil
+		}
+		if key.Matches(msg, m.keyMap.Palette) {
 			m.completion = nil
 			m.modal = newPaletteModal(m.commands, m.agents, m.currentPaletteAvailability())
 			m.reflow()
 			return m, nil
 		}
-		if m.completion != nil {
-			switch msg.String() {
-			case "esc":
-				m.completion = nil
-				m.reflow()
-				return m, nil
-			case "tab", "enter":
-				m.applyCompletion()
-				return m, nil
-			case "up", "ctrl+p":
-				m.completion.move(-1)
-				m.reflow()
-				return m, nil
-			case "down", "ctrl+n":
-				m.completion.move(1)
-				m.reflow()
-				return m, nil
-			case "alt+enter":
-				m.composer.InsertString("\n")
-				m.recomputeCompletion()
-				m.reflow()
-				return m, nil
-			default:
-				return m.updateComposer(msg)
+		if m.turnRunning && key.Matches(msg, m.keyMap.Interrupt) {
+			ops := m.ops
+			return m, func() tea.Msg {
+				ops <- protocol.Interrupt{}
+				return nil
 			}
 		}
-		if m.handleHistoryKey(msg.String()) {
+		if m.focus == focusRight {
+			var cmd tea.Cmd
+			m.windows, cmd = m.windows.update(msg)
+			return m, cmd
+		}
+		if m.handleHistoryKey(msg) {
 			return m, nil
 		}
-		switch msg.String() {
-		case "alt+enter":
+		switch {
+		case key.Matches(msg, m.keyMap.Newline):
 			m.resetHistoryBrowsing()
 			m.composer.InsertString("\n")
 			m.recomputeCompletion()
 			m.reflow()
 			return m, nil
-		case "enter":
+		case key.Matches(msg, m.keyMap.Send):
 			text := strings.TrimSpace(m.composer.Value())
 			if text == "" {
 				return m, nil
@@ -309,18 +352,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.handleCommand(text)
 			}
 			if m.providerName == "" {
-				m.setNotice("No model selected — use /provider <anthropic|openai|xai|echo> [model]", true)
+				m.setNeedsModelNotice("No model selected — use /provider <anthropic|openai|xai|echo> [model]", true)
 				return m, nil // keep the typed prompt in the composer
 			}
 			return m.submit(protocol.UserInput{Text: text}, text)
-		case "ctrl+d":
+		case key.Matches(msg, m.keyMap.SaveDefaults):
 			// Persist the current provider/model/agent as global defaults.
 			if m.providerName == "" {
-				m.setNotice("nothing to save — select a provider first", true)
+				m.setNeedsModelNotice("nothing to save — select a provider first", true)
 				return m, nil
 			}
-			return m, m.saveDefaultsCmd(m.providerName, m.modelName, m.agentName, string(m.effort), m.providerName+"/"+m.modelName+" · "+m.agentName)
-		case "tab":
+			return m, m.saveDefaultsCmd(m.providerName, m.modelName, m.agentName, string(m.effort), dotJoin(m.th, m.providerName+"/"+m.modelName, m.agentName))
+		case key.Matches(msg, m.keyMap.Agent):
 			// Tab cycles agents (opencode-style build/plan switching).
 			if len(m.agents) > 1 && !m.turnRunning {
 				next := m.agents[0]
@@ -337,18 +380,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, nil
-		case "esc":
-			if m.turnRunning {
-				ops := m.ops
-				return m, func() tea.Msg {
-					ops <- protocol.Interrupt{}
-					return nil
-				}
-			}
-		case "pgup":
+		case key.Matches(msg, m.keyMap.ScrollUp):
 			m.viewport.HalfViewUp()
 			return m, nil
-		case "pgdown":
+		case key.Matches(msg, m.keyMap.ScrollDown):
 			m.viewport.HalfViewDown()
 			return m, nil
 		}
@@ -398,11 +433,16 @@ func (m *Model) applyCompletion() {
 		return
 	}
 	name := []rune(candidate.Spec.Name)
-	next := make([]rune, 0, len(value)-(replacement.End-replacement.Start)+len(name))
+	delimiter := []rune(nil)
+	if candidate.Source == commandSourceSkill && (replacement.End == len(value) || !unicode.IsSpace(value[replacement.End])) {
+		delimiter = []rune(" ")
+	}
+	next := make([]rune, 0, len(value)-(replacement.End-replacement.Start)+len(name)+len(delimiter))
 	next = append(next, value[:replacement.Start]...)
 	next = append(next, name...)
+	next = append(next, delimiter...)
 	next = append(next, value[replacement.End:]...)
-	m.setComposerValueAt(string(next), replacement.Start+len(name))
+	m.setComposerValueAt(string(next), replacement.Start+len(name)+len(delimiter))
 	m.completion = nil
 	m.reflow()
 }
@@ -433,16 +473,16 @@ func (m *Model) resetComposer() {
 	m.reflow()
 }
 
-func (m *Model) handleHistoryKey(key string) bool {
+func (m *Model) handleHistoryKey(msg tea.KeyMsg) bool {
 	if m.historyPos >= 0 {
-		switch key {
-		case "up":
+		switch {
+		case key.Matches(msg, m.keyMap.HistoryPrev):
 			if m.historyPos > 0 {
 				m.historyPos--
 			}
 			m.recallHistory(m.entries[m.historyPos])
 			return true
-		case "down":
+		case key.Matches(msg, m.keyMap.HistoryNext):
 			if m.historyPos < len(m.entries)-1 {
 				m.historyPos++
 				m.recallHistory(m.entries[m.historyPos])
@@ -456,7 +496,7 @@ func (m *Model) handleHistoryKey(key string) bool {
 			return true
 		}
 	}
-	if key != "up" || m.composer.Value() != "" || len(m.entries) == 0 {
+	if !key.Matches(msg, m.keyMap.HistoryPrev) || m.composer.Value() != "" || len(m.entries) == 0 {
 		return false
 	}
 	m.historyDraft = m.composer.Value()
@@ -477,10 +517,12 @@ func (m *Model) resetHistoryBrowsing() {
 }
 
 func (m *Model) reflow() {
-	compact := m.compact()
-	composerWidth := m.width - 2
+	geometry := computePaneGeometry(m.width, m.th.Resolve().Spacing.XS, m.focus)
+	leftWidth := geometry.leftCandidateWidth(m.width)
+	compact := leftWidth < compactWidth || m.height < compactHeight
+	composerWidth := leftWidth
 	if !compact {
-		composerWidth = ui.InnerWidth(m.width)
+		composerWidth = ui.PanelInnerWidth(m.th, leftWidth)
 	}
 	m.composer.SetWidth(max(1, composerWidth))
 	contentWidth := max(1, m.composer.Width())
@@ -500,11 +542,11 @@ func (m *Model) reflow() {
 	m.composer.SetHeight(composerRows)
 
 	popupHeight := 0
-	if m.completion != nil {
+	if m.completion != nil && m.modal == nil {
 		m.completion.rows = 0
-		if m.width > 0 {
+		if leftWidth > 0 {
 			borderRows := 0
-			if min(m.width, completionMaxWidth) >= 4 {
+			if leftWidth >= 4 {
 				borderRows = 2
 			}
 			available := max(0, m.height-2-composerRows-borderRows)
@@ -516,9 +558,20 @@ func (m *Model) reflow() {
 	}
 
 	if m.ready {
-		l := computeLayout(m.width, m.height, composerRows, popupHeight, m.dangerouslySkipPermissions)
-		m.viewport.Width = max(1, l.transcriptInnerWidth(m.width))
+		l := computeLayout(leftWidth, m.height, composerRows, popupHeight, m.dangerouslySkipPermissions, m.notice != "")
+		m.viewport.Width = max(1, l.transcriptInnerWidthFor(m.th, leftWidth))
 		m.viewport.Height = max(0, l.transcriptInnerHeight())
+		bodyHeight := l.transcript + l.notice + l.popup + l.composer
+		rightWidth := geometry.rightWidth
+		if rightWidth == 0 {
+			rightWidth = m.width
+		}
+		rightCompact := geometry.mode == paneSingle && (m.width < compactWidth || m.height < compactHeight)
+		if rightCompact {
+			m.windows = m.windows.resize(rightWidth, bodyHeight)
+		} else {
+			m.windows = m.windows.resize(max(0, ui.PanelInnerWidth(m.th, rightWidth)), ui.PanelInnerHeight(rightWidth, bodyHeight))
+		}
 	}
 }
 
@@ -544,7 +597,7 @@ func (m *Model) applyEvent(ev protocol.Event) {
 			tc.title, tc.output, tc.done, tc.isError = ev.Title, ev.Output, true, ev.IsError
 		}
 	case protocol.PermissionAsked:
-		m.modal = newPermissionModal(ev, m.ops)
+		m.modal = newPermissionModal(ev, m.ops, m.th)
 	case protocol.PermissionResolved:
 		if modal, ok := m.modal.(*permissionModal); ok && modal.req.RequestID == ev.RequestID {
 			m.modal = nil
@@ -553,14 +606,16 @@ func (m *Model) applyEvent(ev protocol.Event) {
 		m.turnRunning = false
 		m.refreshOpenPalette()
 	case protocol.ModelSelected:
+		if m.noticeCause == noticeNeedsModel {
+			m.clearNotice()
+		}
 		m.providerName, m.modelName = ev.Provider, ev.Model
-		m.setNotice("model: "+ev.Provider+"/"+ev.Model, false)
 		m.refreshOpenPalette()
 	case protocol.AgentSelected:
 		m.agentName = ev.Name
 	case protocol.EffortSelected:
 		m.effort = ev.Level
-		m.setNotice("effort: "+string(ev.Level)+" — "+ev.Level.Describe(), false)
+		m.setNotice("effort: "+detailJoin(m.th, string(ev.Level), ev.Level.Describe()), false)
 	case protocol.FastSelected:
 		m.fastEnabled = ev.Enabled
 		m.setNotice(m.fastNotice(ev.Enabled), false)
@@ -570,7 +625,11 @@ func (m *Model) applyEvent(ev protocol.Event) {
 		if m.turnRunning {
 			m.cells = append(m.cells, &errorCell{text: ev.Message})
 		} else {
-			m.setNotice(ev.Message, true)
+			if ev.Message == "no model selected — use /provider <anthropic|openai|xai|echo> [model]" {
+				m.setNeedsModelNotice(ev.Message, true)
+			} else {
+				m.setNotice(ev.Message, true)
+			}
 		}
 	}
 }
@@ -615,7 +674,7 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		return m.sendSelect(op)
 	case "/model":
 		if m.providerName == "" {
-			m.setNotice("select a provider first: /provider <anthropic|openai|xai|echo>", true)
+			m.setNeedsModelNotice("select a provider first: /provider <anthropic|openai|xai|echo>", true)
 			return m, nil
 		}
 		if len(fields) < 2 {
@@ -649,7 +708,7 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		return m.handleAuth(fields[1:])
 	case "/agent":
 		if len(fields) < 2 {
-			m.setNotice("agents: "+strings.Join(m.agents, " · ")+" (tab cycles)", false)
+			m.setNotice("agents: "+dotJoin(m.th, m.agents...)+" (tab cycles)", false)
 			m.resetComposer()
 			return m, nil
 		}
@@ -663,7 +722,7 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 	case "/fast":
 		return m.handleFastCommand(fields[1:])
 	case "/help":
-		m.setNotice("commands: /provider [name [model]] · /model <model> · /effort <"+effortChoices()+"> · /fast [on|off] · /agent [name] · /auth · skills as /<name> · tab cycles agents", false)
+		m.setNotice("commands: "+dotJoin(m.th, "/provider [name [model]]", "/model <model>", "/effort <"+effortChoices()+">", "/fast [on|off]", "/agent [name]", "/auth", "skills as /<name>", "tab cycles agents"), false)
 		m.resetComposer()
 		return m, nil
 	default:
@@ -675,7 +734,7 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 				continue
 			}
 			if m.providerName == "" {
-				m.setNotice("No model selected — use /provider <anthropic|openai|xai|echo> [model]", true)
+				m.setNeedsModelNotice("No model selected — use /provider <anthropic|openai|xai|echo> [model]", true)
 				return m, nil
 			}
 			args := strings.TrimSpace(strings.TrimPrefix(text, fields[0]))
@@ -766,10 +825,17 @@ func effortChoices() string {
 
 func (m *Model) setNotice(text string, isErr bool) {
 	m.notice, m.noticeErr = text, isErr
+	m.noticeCause = noticeGeneral
+}
+
+func (m *Model) setNeedsModelNotice(text string, isErr bool) {
+	m.notice, m.noticeErr = text, isErr
+	m.noticeCause = noticeNeedsModel
 }
 
 func (m *Model) clearNotice() {
 	m.notice, m.noticeErr = "", false
+	m.noticeCause = noticeGeneral
 }
 
 // lastCell returns the trailing cell if it has type T; a new message part
@@ -789,8 +855,7 @@ func (m *Model) refreshViewport() {
 	}
 	width := max(1, m.viewport.Width)
 	if len(m.cells) == 0 {
-		// Empty transcript: show the welcome dashboard from the top.
-		m.viewport.SetContent(m.welcomeView(width))
+		m.viewport.SetContent("")
 		m.viewport.GotoTop()
 		return
 	}
@@ -810,44 +875,95 @@ func (m Model) View() string {
 		return "starting…"
 	}
 
-	compact := m.compact()
-	l := computeLayout(m.width, m.height, m.composer.Height(), m.completionPopupHeight(), m.dangerouslySkipPermissions)
-
-	// content is the top band (header + transcript); footer is the reserved
-	// notice row, composer, keyhints, and danger banner. A modal floats over
-	// the content band only, so the notice, composer, and danger banner stay
-	// visible beneath it.
-	content := m.headerView(m.width) + "\n" + m.transcriptView(compact, l.transcript)
-	contentHeight := l.header + l.transcript
-
-	footer := []string{m.noticeView(m.width)}
-	if popup := m.completion.view(m.width, m.th); popup != "" {
-		footer = append(footer, popup)
+	geometry := computePaneGeometry(m.width, m.th.Resolve().Spacing.XS, m.focus)
+	leftWidth := geometry.leftCandidateWidth(m.width)
+	l := computeLayout(leftWidth, m.height, m.composer.Height(), m.completionPopupHeightFor(leftWidth), m.dangerouslySkipPermissions, m.notice != "")
+	bodyHeight := l.transcript + l.notice + l.popup + l.composer
+	compact := leftWidth < compactWidth || m.height < compactHeight
+	left := make([]string, 0, 4)
+	if l.transcript > 0 {
+		left = append(left, m.transcriptView(compact, leftWidth, l.transcript))
 	}
-	footer = append(footer, m.composerView(compact))
-	footer = append(footer, m.hintsView(m.width))
-	if warning := m.dangerView(m.width); warning != "" {
-		footer = append(footer, warning)
+	if l.notice > 0 {
+		left = append(left, m.noticeView(leftWidth))
+	}
+	if m.modal == nil && l.popup > 0 {
+		if popup := m.completion.view(leftWidth, l.popup, m.th); popup != "" {
+			left = append(left, popup)
+		}
+	}
+	if l.composer > 0 {
+		left = append(left, m.composerView(compact, leftWidth, l.composer))
+	}
+	leftBody := lipgloss.JoinVertical(lipgloss.Left, left...)
+	body := leftBody
+	if geometry.mode == paneSplit {
+		body = lipgloss.JoinHorizontal(lipgloss.Top, leftBody, paneGutter(m.th, geometry.gutter, bodyHeight), m.rightPaneView(geometry.rightWidth, bodyHeight, false))
+	} else if m.focus == focusRight {
+		rightCompact := m.width < compactWidth || m.height < compactHeight
+		body = m.rightPaneView(m.width, bodyHeight, rightCompact)
+	}
+
+	contentParts := make([]string, 0, 2)
+	if l.header > 0 {
+		contentParts = append(contentParts, m.headerView(m.width))
+	}
+	if bodyHeight > 0 {
+		contentParts = append(contentParts, body)
+	}
+	content := strings.Join(contentParts, "\n")
+	contentHeight := l.header + bodyHeight
+
+	footer := make([]string, 0, 2)
+	if l.hints > 0 {
+		footer = append(footer, m.hintsView(m.width))
+	}
+	if l.danger > 0 {
+		warning := m.dangerView(m.width)
+		if warning != "" {
+			footer = append(footer, warning)
+		}
 	}
 
 	if m.modal != nil {
 		overlay := m.modal.view(max(8, ui.ModalWidth(m.width)), m.th)
-		if warning := m.dangerView(m.width); warning != "" {
-			overlay = lipgloss.JoinVertical(lipgloss.Center, warning, overlay)
-		}
 		content = ui.OverlayCenter(content, overlay, m.width, contentHeight)
 	}
-	return content + "\n" + strings.Join(footer, "\n")
+	parts := make([]string, 0, 1+len(footer))
+	if content != "" {
+		parts = append(parts, content)
+	}
+	parts = append(parts, footer...)
+	return ui.Canvas(m.th, m.width, m.height, strings.Join(parts, "\n"))
+}
+
+// paletteResultFocus reveals a newly produced left-side notice when the right
+// pane is the only visible pane. Existing notices do not move focus: only the
+// result of the selected palette action does.
+func (m Model) paletteResultFocus(priorNotice string, priorNoticeErr bool, cmd tea.Cmd) (tea.Model, tea.Cmd) {
+	geometry := computePaneGeometry(m.width, m.th.Resolve().Spacing.XS, m.focus)
+	producedNotice := m.modal == nil && m.notice != "" && (m.notice != priorNotice || m.noticeErr != priorNoticeErr)
+	if m.focus != focusRight || geometry.mode != paneSingle || !producedNotice {
+		return m, cmd
+	}
+	focusCmd := m.setPaneFocus(focusLeft)
+	m.reflow()
+	return m, tea.Batch(cmd, focusCmd)
 }
 
 // completionPopupHeight returns the reserved height of the completion popup
 // for the current View, mirroring what reflow computed.
 func (m Model) completionPopupHeight() int {
-	if m.completion == nil || m.completion.rows <= 0 {
+	geometry := computePaneGeometry(m.width, m.th.Resolve().Spacing.XS, m.focus)
+	return m.completionPopupHeightFor(geometry.leftCandidateWidth(m.width))
+}
+
+func (m Model) completionPopupHeightFor(width int) int {
+	if m.modal != nil || m.completion == nil || m.completion.rows <= 0 {
 		return 0
 	}
 	borderRows := 0
-	if min(m.width, completionMaxWidth) >= 4 {
+	if width >= 4 {
 		borderRows = 2
 	}
 	return m.completion.rows + borderRows
@@ -856,5 +972,6 @@ func (m Model) completionPopupHeight() int {
 // compact reports whether the screen is below the breakpoints for bordered
 // chrome; below it, panels degrade to plain viewport+composer.
 func (m Model) compact() bool {
-	return m.width < compactWidth || m.height < compactHeight
+	geometry := computePaneGeometry(m.width, m.th.Resolve().Spacing.XS, m.focus)
+	return geometry.leftCandidateWidth(m.width) < compactWidth || m.height < compactHeight
 }

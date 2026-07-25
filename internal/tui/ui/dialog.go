@@ -10,7 +10,7 @@ import (
 type DialogOpts struct {
 	Title  string // woven into the top border
 	Hint   string // muted control hint, placed as the last body line
-	Width  int    // outer width; body is clamped to InnerWidth(Width)
+	Width  int    // outer width; body is clamped to PanelInnerWidth(th, Width)
 	Height int    // optional fixed outer height (0 fits content)
 	Tone   Tone   // border override (e.g. ToneWarning); default is the accent
 }
@@ -20,18 +20,19 @@ type DialogOpts struct {
 // modal (permission, api-key, pickers, palette) through Dialog makes them all
 // look identical.
 //
-//	body := ui.List(th, ui.ListOpts{Items: items, Cursor: cur, Width: ui.InnerWidth(w)})
+//	body := ui.List(th, ui.ListOpts{Items: items, Cursor: cur, Width: ui.PanelInnerWidth(th, w)})
 //	out := ui.Dialog(th, ui.DialogOpts{
 //	    Title: "Select model", Hint: "↑/↓ move · enter select · esc close", Width: w,
 //	}, body)
 //
-// The body should already be wrapped to InnerWidth(Width); Dialog truncates
-// the hint and Panel truncates any over-long body line.
+// The body should already be wrapped to PanelInnerWidth(th, Width); Dialog
+// truncates the hint and Panel truncates any over-long body line.
 func Dialog(th theme.Theme, opts DialogOpts, body string) string {
+	th = th.Resolve()
 	content := body
 	if opts.Hint != "" {
-		hint := th.S().Muted.Render(truncate(opts.Hint, InnerWidth(opts.Width)))
-		content = strings.TrimRight(body, "\n") + "\n\n" + hint
+		hint := th.S().Muted.Render(truncate(th, opts.Hint, PanelInnerWidth(th, opts.Width)))
+		content = strings.TrimRight(body, "\n") + strings.Repeat("\n", max(1, th.Spacing.SM)) + hint
 	}
 	return Panel(th, PanelOpts{
 		Title:   opts.Title,

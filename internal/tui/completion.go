@@ -9,8 +9,7 @@ import (
 )
 
 const (
-	completionMaxRows  = 6
-	completionMaxWidth = 72
+	completionMaxRows = 6
 )
 
 type runeRange struct {
@@ -112,31 +111,35 @@ func (c *completionState) move(delta int) {
 // view renders the inline slash-command completion popup as a bordered panel of
 // candidate rows above the composer. c.rows (set by reflow) bounds the visible
 // window; keyboard handling stays in the app model.
-func (c *completionState) view(width int, th theme.Theme) string {
-	if c == nil || c.rows <= 0 || len(c.Candidates) == 0 || width <= 0 {
+func (c *completionState) view(width, height int, th theme.Theme) string {
+	if c == nil {
 		return ""
 	}
-	popupWidth := min(width, completionMaxWidth)
+	if height <= 0 || len(c.Candidates) == 0 || width <= 0 {
+		return ""
+	}
+	popupWidth := width
+	th = th.Resolve()
 	items := make([]ui.ListItem, len(c.Candidates))
 	for i, candidate := range c.Candidates {
 		name := candidate.Spec.Name
 		if candidate.Spec.ArgsHint != "" {
-			name += " " + candidate.Spec.ArgsHint
+			name += themedSpace(th.Spacing.XS) + candidate.Spec.ArgsHint
 		}
 		items[i] = ui.ListItem{Label: name, Detail: candidate.Spec.Description}
 	}
-	bodyWidth := max(1, ui.InnerWidth(popupWidth))
-	if popupWidth < 4 {
+	borderless := height < 3 || popupWidth < 4
+	bodyWidth := max(1, ui.PanelInnerWidth(th, popupWidth))
+	bodyHeight := max(0, height-2)
+	if borderless {
 		bodyWidth = max(1, popupWidth)
+		bodyHeight = height
 	}
 	body := ui.List(th, ui.ListOpts{
 		Items:   items,
 		Cursor:  c.Selected,
 		Width:   bodyWidth,
-		Visible: min(c.rows, len(c.Candidates)),
+		Visible: min(bodyHeight, len(c.Candidates)),
 	})
-	if popupWidth < 4 {
-		return body
-	}
-	return ui.Panel(th, ui.PanelOpts{Width: popupWidth, Focused: true}, body)
+	return ui.Panel(th, ui.PanelOpts{Width: popupWidth, Height: height, Borderless: borderless, Focused: true}, body)
 }

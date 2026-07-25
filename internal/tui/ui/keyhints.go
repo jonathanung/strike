@@ -27,10 +27,12 @@ func KeyHints(th theme.Theme, width int, hints []KeyHint) string {
 	if width <= 0 || len(hints) == 0 {
 		return ""
 	}
+	th = th.Resolve()
 	ic := resolveIcons(th)
 	st := th.S()
-	sep := " " + st.Muted.Render(ic.Dot) + " "
-	sepWidth := lipgloss.Width(" " + ic.Dot + " ")
+	space := strings.Repeat(" ", th.Spacing.XS)
+	sep := space + st.Muted.Render(ic.Dot) + space
+	sepWidth := lipgloss.Width(space + ic.Dot + space)
 
 	var b strings.Builder
 	used := 0
@@ -38,8 +40,8 @@ func KeyHints(th theme.Theme, width int, hints []KeyHint) string {
 		seg := st.Accent.Render(h.Key)
 		plain := h.Key
 		if h.Label != "" {
-			seg += " " + st.Muted.Render(h.Label)
-			plain += " " + h.Label
+			seg += space + st.Muted.Render(h.Label)
+			plain += space + h.Label
 		}
 		need := lipgloss.Width(plain)
 		if i > 0 {
@@ -58,9 +60,9 @@ func KeyHints(th theme.Theme, width int, hints []KeyHint) string {
 		// Not even the first hint fits: truncate it to the width.
 		first := hints[0].Key
 		if hints[0].Label != "" {
-			first += " " + hints[0].Label
+			first += space + hints[0].Label
 		}
-		return st.Muted.Render(truncate(first, width))
+		return st.Muted.Render(truncate(th, first, width))
 	}
 	return b.String()
 }

@@ -5,9 +5,26 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
+
+func TestEffortModalUsesCustomDetailSeparatorWithoutChangingSemanticText(t *testing.T) {
+	th := theme.Default()
+	th.Icons.DetailSeparator = "|"
+	m := newEffortModal(protocol.EffortMedium, make(chan protocol.Op, 1), &fakeSettings{})
+	plain := ansi.Strip(m.view(60, th))
+	if !strings.Contains(plain, "| "+protocol.EffortMedium.Describe()) {
+		t.Errorf("effort detail omitted custom separator: %q", plain)
+	}
+	for _, want := range []string{"Reasoning effort", "medium", protocol.EffortMedium.Describe()} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("custom theme changed semantic text %q: %q", want, plain)
+		}
+	}
+}
 
 func TestEffortCommandWithArgumentSendsSetEffort(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)

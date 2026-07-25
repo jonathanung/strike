@@ -79,21 +79,30 @@ re-run `make build` after pulling changes to refresh it.
 
 ### UI
 
-The screen is a stack of titled, rounded panels: a one-line header with
-`⚡ strike`, provider/model and agent badges, and turn status; a `session`
-transcript panel that streams messages and tool calls; a reserved notice
-line; a focused `prompt ❯` composer panel; and a keybinding footer
-(`enter send · alt+enter newline · ctrl+k palette · tab agent · ctrl+d save
-defaults · esc interrupt · pgup/pgdn scroll`). Pickers, the command palette,
-and permission prompts render as centered dialogs in the same panel style.
-Below 60 columns or 20 rows the panels drop their borders ("compact mode")
-instead of clipping or garbling.
+The screen has a full-width header, footer hints, and danger banner when
+needed. Its left pane is one aggregate stack: `session` transcript, reserved
+notice line, slash-command completion, and `prompt ❯` composer. The right slot
+hosts one active registered placeholder window. `ctrl+j` toggles focus between
+the aggregate left pane and right pane; `ctrl+l` and `ctrl+o` are exact aliases
+that cycle registered windows; `ctrl+k` still opens the palette. Pickers, the
+command palette, and permission prompts render as centered dialogs in the same
+panel style.
 
-A fresh session with an empty transcript shows a dashboard of bento cards
-in place of a blank viewport: the strike wordmark, every provider's auth
-status, top keybindings, available agents and skills, and — once you have
-prompt history — your most recent entries. It repacks to fit the terminal
-on resize and collapses to a single column when narrow.
+The default split appears at 93 columns and above, with a minimum 60-column
+left pane, one-column gutter, and 32-column right pane. At 92 columns and
+below, only the active pane fills the full width. For a custom gutter of width
+`g`, the split threshold is `60 + g + 32`. Below 60 columns or 20 rows panels
+drop their borders ("compact mode") instead of clipping or garbling. This is
+only pane infrastructure: it has no file, editor, or markdown content, and no
+window close state or plugins.
+
+A fresh session with an empty transcript shows a dashboard of fixed-height
+cards in place of a blank viewport; the header owns the Strike brand. The
+dashboard always shows keybindings. It shows get-started provider rows only
+when no provider is selected or the selected provider needs authentication,
+with provider rows bounded to fit; agents and skills only when valid configured
+entries exist; and recent prompts only when prompt history exists. It repacks
+to fit the terminal on resize and collapses to a single column when narrow.
 
 ## Auth
 

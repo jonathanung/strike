@@ -18,25 +18,24 @@ type Card struct {
 	Tone   Tone   // border accent; ToneDefault renders a calm dim border
 }
 
-// Bento packs cards left-to-right into rows that fit width, separated by gap
-// columns, wrapping to a new row when the next card would overflow. Cards in a
-// row share a height so their borders align, and a card wider than width is
-// capped so the layout collapses to a single column on narrow screens. It is
-// the welcome dashboard layout.
+// Bento packs cards left-to-right into rows that fit width, wrapping to a new
+// row when the next card would overflow. Cards in a row share a height so
+// their borders align, and a card wider than width is capped so the layout
+// collapses to a single column on narrow screens. Spacing is taken from the
+// theme.
 //
 //	cards := []ui.Card{
-//	    {Title: "strike", Body: ui.Logo(th), Width: 30},
-//	    {Title: "get started", Body: providerLines, Width: 34},
-//	    {Title: "keys", Body: keyLines, Width: 28},
+//	    {Title: "summary", Body: summary, Width: 30},
+//	    {Title: "details", Body: details, Width: 34},
+//	    {Title: "actions", Body: actions, Width: 28},
 //	}
-//	dashboard := ui.Bento(th, viewportWidth, 2, cards)
-func Bento(th theme.Theme, width, gap int, cards []Card) string {
+//	dashboard := ui.Bento(th, viewportWidth, cards)
+func Bento(th theme.Theme, width int, cards []Card) string {
 	if width < 1 || len(cards) == 0 {
 		return ""
 	}
-	if gap < 0 {
-		gap = 0
-	}
+	th = th.Resolve()
+	gap := max(0, th.Spacing.SM)
 
 	var rows [][]Card
 	var cur []Card
@@ -91,7 +90,7 @@ func cardPanel(th theme.Theme, c Card, height int) string {
 		Height: height,
 		Dim:    c.Tone == ToneDefault,
 		Tone:   c.Tone,
-	}, wrapText(c.Body, InnerWidth(c.Width)))
+	}, wrapText(c.Body, PanelInnerWidth(th, c.Width)))
 }
 
 // joinHoriz concatenates equal-height blocks side by side, separated by gap

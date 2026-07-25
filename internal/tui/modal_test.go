@@ -6,9 +6,12 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
+	"github.com/jonathanung/strike-cli/internal/tui/ui"
 )
 
 const permissionCmdTimeout = 2 * time.Second
@@ -171,6 +174,54 @@ func TestPermissionModalFeedbackIsOneLineAndViewExplainsControls(t *testing.T) {
 	}
 	reply := receiveSinglePermissionReply(t, ops, cmd)
 	assertPermissionReply(t, reply, "one-line-request", protocol.DecisionReject, "first second third")
+}
+
+func TestPermissionModalFeedbackGeometryHonorsThemeSpacingAndInputCursor(t *testing.T) {
+	setTUITrueColor(t)
+	for _, tt := range []struct {
+		name        string
+		spacing     theme.Spacing
+		inputCursor string
+	}{
+		{name: "default", spacing: theme.Default().Spacing},
+		{name: "zero extra-small spacing", spacing: theme.NewSpacing(0, 2, 3, 4)},
+		{name: "wide extra-small spacing and multicell cursor", spacing: theme.NewSpacing(4, 2, 3, 4), inputCursor: ">>"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			th := theme.Default()
+			th.Spacing = tt.spacing
+			if tt.inputCursor != "" {
+				th.Icons.InputCursor = tt.inputCursor
+			}
+			m, _ := newTestPermissionModal(t.Name())
+			m.th = th.Resolve()
+			m.feedback = newTextInput(th, "optional feedback")
+			enterPermissionFeedback(t, m)
+			m.feedback.SetValue(strings.Repeat("feedback ", 20))
+			m.feedback.Focus()
+
+			const width = 46
+			inner := ui.PanelInnerWidth(th, width)
+			_ = m.view(width, th)
+			feedback := m.feedback.View()
+			if got := lipgloss.Width(feedback); got > inner {
+				t.Errorf("feedback width = %d, want <= dialog inner width %d: %q", got, inner, ansi.Strip(feedback))
+			}
+			if strings.Contains(ansi.Strip(feedback), th.Icons.Ellipsis) {
+				t.Errorf("feedback input used an ellipsis instead of retaining its cursor: %q", ansi.Strip(feedback))
+			}
+			if !hasReverseVideo(feedback) {
+				t.Errorf("feedback input lost its static cursor: %q", feedback)
+			}
+
+			view := m.view(width, th)
+			for i, row := range strings.Split(view, "\n") {
+				if got := lipgloss.Width(row); got != width {
+					t.Errorf("dialog row %d width = %d, want exact outer width %d: %q", i, got, width, ansi.Strip(row))
+				}
+			}
+		})
+	}
 }
 
 func newTestPermissionModal(requestID string) (*permissionModal, chan protocol.Op) {

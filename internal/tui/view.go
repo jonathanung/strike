@@ -3,7 +3,9 @@ package tui
 import (
 	"errors"
 	"strconv"
+	"strings"
 
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -37,59 +39,64 @@ func saveDefaultsThroughCmd(settings host.Settings, provider, model, agent, effo
 // provider/model and agent badges on the left, and the turn-running status on
 // the right.
 func (m Model) headerView(width int) string {
-	ic := m.themeIcons()
-	st := m.th.S()
+	th := m.th.Resolve()
+	ic := iconsFor(th)
+	st := th.S()
+	badgeGap := themedSpace(th.Spacing.SM)
+	inlineGap := themedSpace(th.Spacing.XS)
 
-	left := ui.LogoCompact(m.th)
+	left := ui.LogoCompact(th)
 	if m.providerName == "" {
-		left += "  " + ui.Badge(m.th, ui.ToneMuted, "no model")
+		left += badgeGap + ui.Badge(th, ui.ToneMuted, "no model")
 	} else {
 		model := m.modelName
 		if model == "" {
 			model = "default"
 		}
-		left += "  " + ui.Badge(m.th, ui.ToneAccent, m.providerName+"/"+model)
+		left += badgeGap + ui.Badge(th, ui.ToneAccent, m.providerName+"/"+model)
 	}
 	// Same display-safety gate as the palette and welcome card: agents are
 	// not host-filtered, so every render site guards the name itself.
 	if m.agentName != "" && validAgentName(m.agentName) {
-		left += " " + ui.Badge(m.th, ui.ToneAccentAlt, ic.Agent+" "+sanitizeDisplayData(m.agentName))
+		left += inlineGap + ui.Badge(th, ui.ToneAccentAlt, ic.Agent+inlineGap+sanitizeDisplayData(m.agentName))
 	}
 	// Only shown once a level is set — an unset dial means "whatever the
 	// provider does by default", which is not worth a badge.
 	if m.effort != protocol.EffortDefault {
-		left += " " + ui.Badge(m.th, ui.ToneMuted, "effort "+string(m.effort))
+		left += inlineGap + ui.Badge(th, ui.ToneMuted, "effort"+inlineGap+string(m.effort))
 	}
 	if m.fastEnabled {
 		// Warning tone: priority tier is a cost-visible session preference.
-		left += " " + ui.Badge(m.th, ui.ToneWarning, "fast")
+		left += inlineGap + ui.Badge(th, ui.ToneWarning, "fast")
 	}
 
 	right := ""
 	if m.turnRunning {
-		right = m.spin.View() + " " + st.Warning.Render("working — esc interrupts")
+		right = m.spin.View() + inlineGap + st.Warning.Render("working — esc interrupts")
 	}
 	return ui.StatusBar(m.th, max(1, width), left, right)
 }
 
-// transcriptView renders the transcript region: the scrolling viewport wrapped
-// in a titled panel (or bare in compact mode). The title reads "welcome" while
-// the transcript is empty (the welcome dashboard is showing) and "session"
-// once cells stream in.
-func (m Model) transcriptView(compact bool, height int) string {
+// transcriptView renders the empty dashboard directly; populated transcripts
+// retain their session panel.
+func (m Model) transcriptView(compact bool, width, height int) string {
+	if height <= 0 {
+		return ""
+	}
+	if len(m.cells) == 0 {
+		return m.welcomeView(width, height)
+	}
 	body := m.viewport.View()
 	if compact {
 		return body
 	}
-	title := "session"
-	if len(m.cells) == 0 {
-		title = "welcome"
-	}
 	return ui.Panel(m.th, ui.PanelOpts{
-		Title:  title,
-		Footer: m.transcriptFooter(),
-		Width:  m.width,
-		Height: height,
+		Title:   "session",
+		Footer:  m.transcriptFooter(),
+		Width:   width,
+		Height:  height,
+		Focused: m.focus == focusLeft && m.modal == nil,
+		Dim:     m.focus == focusRight || m.modal != nil,
 	}, body)
 }
 
@@ -99,7 +106,7 @@ func (m Model) transcriptFooter() string {
 	if m.viewport.Height <= 0 || m.viewport.TotalLineCount() <= m.viewport.Height {
 		return ""
 	}
-	return strconv.Itoa(int(m.viewport.ScrollPercent()*100)) + "% · pgup/pgdn"
+	return dotJoin(m.th, strconv.Itoa(int(m.viewport.ScrollPercent()*100))+"%", "pgup/pgdn")
 }
 
 // noticeView renders the reserved feedback row: errors in the error tone,
@@ -115,29 +122,85 @@ func (m Model) noticeView(width int) string {
 
 // composerView renders the focused composer: the textarea inside a titled
 // panel, or bare in compact mode.
-func (m Model) composerView(compact bool) string {
-	if compact {
-		return m.composer.View()
+func (m Model) composerView(compact bool, width, height int) string {
+	if height <= 0 {
+		return ""
+	}
+	composer := m.composer
+	visualFocus := composer.Focused() && m.modal == nil && m.focus == focusLeft
+	composer.Focus()
+	composer, _ = composer.Update(nil)
+
+	borderless := compact || height < 3
+	contentHeight := height
+	if !borderless {
+		contentHeight = ui.PanelInnerHeight(width, height)
+	}
+	composer.SetHeight(contentHeight)
+	composer.View()
+	composer, _ = composer.Update(nil)
+	if !visualFocus {
+		composer.Blur()
 	}
 	return ui.Panel(m.th, ui.PanelOpts{
-		Title:   "prompt " + m.themeIcons().Prompt,
-		Width:   m.width,
-		Focused: true,
-	}, m.composer.View())
+		Title:      "prompt" + themedSpace(m.th.Resolve().Spacing.XS) + m.themeIcons().Prompt,
+		Width:      width,
+		Height:     height,
+		Borderless: borderless,
+		Focused:    m.focus == focusLeft && m.modal == nil,
+		Dim:        m.focus == focusRight || m.modal != nil,
+	}, composer.View())
+}
+
+// rightPaneView frames the active window. Windows render only their content;
+// the app owns the shared pane chrome and focus state.
+func (m Model) rightPaneView(width, height int, compact bool) string {
+	var title, body string
+	if active := m.windows.active(); active != nil {
+		title, body = active.title(), active.view(m.th)
+	}
+	return ui.Panel(m.th, ui.PanelOpts{
+		Title:      title,
+		Width:      max(0, width),
+		Height:     max(0, height),
+		Borderless: compact,
+		Focused:    m.focus == focusRight && m.modal == nil,
+		Dim:        m.focus == focusLeft || m.modal != nil,
+	}, body)
+}
+
+func paneGutter(th theme.Theme, width, height int) string {
+	if width <= 0 || height <= 0 {
+		return ""
+	}
+	row := themedSpace(width)
+	return strings.TrimSuffix(strings.Repeat(row+"\n", height), "\n")
 }
 
 // hintsView is the keybinding footer. ui.KeyHints drops whole hints that do
 // not fit rather than cutting mid-hint.
 func (m Model) hintsView(width int) string {
-	return ui.KeyHints(m.th, max(1, width), []ui.KeyHint{
-		{Key: "enter", Label: "send"},
-		{Key: "alt+enter", Label: "newline"},
-		{Key: "ctrl+k", Label: "palette"},
-		{Key: "tab", Label: "agent"},
-		{Key: "ctrl+d", Label: "save defaults"},
-		{Key: "esc", Label: "interrupt"},
-		{Key: "pgup/pgdn", Label: "scroll"},
-	})
+	hints := []ui.KeyHint{
+		keyHint(m.keyMap.FocusPane),
+		keyHint(m.keyMap.CycleWindow),
+		keyHint(m.keyMap.Palette),
+		keyHint(m.keyMap.Interrupt),
+	}
+	if m.focus == focusLeft {
+		hints = append(hints,
+			keyHint(m.keyMap.Send),
+			keyHint(m.keyMap.Newline),
+			keyHint(m.keyMap.Agent),
+			keyHint(m.keyMap.SaveDefaults),
+			ui.KeyHint{Key: keyHint(m.keyMap.ScrollUp).Key + "/" + keyHint(m.keyMap.ScrollDown).Key, Label: "scroll"},
+		)
+	}
+	return ui.KeyHints(m.th, max(1, width), hints)
+}
+
+func keyHint(binding key.Binding) ui.KeyHint {
+	help := binding.Help()
+	return ui.KeyHint{Key: help.Key, Label: help.Desc}
 }
 
 // dangerView is the permissions-bypassed banner, shown only under
@@ -147,7 +210,7 @@ func (m Model) dangerView(width int) string {
 	if !m.dangerouslySkipPermissions {
 		return ""
 	}
-	style := m.th.S().Error.Bold(true)
+	style := m.th.S().DangerStrong
 	if width > 0 {
 		style = style.MaxWidth(width)
 	}

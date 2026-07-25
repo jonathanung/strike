@@ -73,7 +73,7 @@ func TestSlashCompletionViewDoesNotRenderDescriptionControlPayloadAsTerminalMeta
 		t.Fatal("completion did not open for valid skill")
 	}
 	completion.rows = 1
-	rendered := completion.view(120, theme.Default())
+	rendered := completion.view(120, 3, theme.Default())
 	if strings.Contains(rendered, "\x1b]52;c;copied\x07") {
 		t.Fatalf("completion rendered attacker OSC52 sequence: %q", rendered)
 	}

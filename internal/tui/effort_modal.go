@@ -69,7 +69,7 @@ func (m *effortModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 }
 
 func (m *effortModal) view(width int, th theme.Theme) string {
-	inner := max(1, ui.InnerWidth(width))
+	inner := max(1, ui.PanelInnerWidth(th, width))
 	items := make([]ui.ListItem, len(m.levels))
 	for i, level := range m.levels {
 		items[i] = ui.ListItem{
@@ -86,7 +86,7 @@ func (m *effortModal) view(width int, th theme.Theme) string {
 	})
 	return ui.Dialog(th, ui.DialogOpts{
 		Title: "Reasoning effort",
-		Hint:  "↑/↓ move · enter select · ctrl+d set default · esc close",
+		Hint:  dotJoin(th, "↑/↓ move", "enter select", "ctrl+d set default", "esc close"),
 		Width: width,
 	}, body)
 }

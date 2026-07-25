@@ -58,8 +58,8 @@ event stream the TUI rendered from (see `internal/protocol/codec.go`).
 | `internal/host` | **Frozen contract**: the services a frontend needs from its host process | stdlib only — enforced by the boundary test |
 | `internal/host/local` | Real `host.Services` implementation; wraps auth/config/models/history for the frontend | `auth`, `config`, `history`, `host`, `models` |
 | `internal/tui` | Bubble Tea frontend: app model, layout, transcript cells, modals, composer | `protocol`, `host`, `tui/...` only — enforced by the boundary test |
-| `internal/tui/theme` | Design tokens: adaptive colors (`Theme`), glyphs (`Icons`), precomputed `Styles` | lipgloss, stdlib |
-| `internal/tui/ui` | Reusable component library (Panel, Dialog, Badge, KeyHints, StatusBar, List, Notice, Card/Bento, OverlayCenter, Logo) | stdlib, lipgloss, bubbles, charmbracelet/x/ansi, `tui/theme` |
+| `internal/tui/theme` | Resolved design tokens: adaptive color roles, terminal background, glyphs, border/spacing tokens, and precomputed styles | lipgloss, stdlib |
+| `internal/tui/ui` | Reusable component library (Panel, Dialog, Badge, KeyHints, StatusBar, List, Notice, Card/Bento, OverlayCenter, Canvas, Logo) | stdlib, lipgloss, bubbles, charmbracelet/x/ansi, `tui/theme` |
 
 ## Dependency rules
 
@@ -75,6 +75,35 @@ These are enforced mechanically, not just by convention: `internal/tui/boundary_
 with `go/parser` and fails, naming the offending file and import, on any
 violation. Run it like any other test (`go test ./internal/tui/...`); there
 is no way to silently cross the boundary.
+
+## TUI pane routing and layout
+
+Key routing is deliberately ordered: quit, then modal, then completion-owned
+left-pane keys, pane actions, global actions, and finally the focused
+component. `paneFocus` is a private aggregate `left`/`right` value: left owns
+the transcript, notice, completion, and composer as one pane, while right owns
+the active window. Modal ownership remains `m.modal`; this is not a unified
+F2-style enum for separate transcript, composer, and modal focus.
+
+The right pane is TUI-local. Its private, value-oriented `window` interface
+has identity/title, initialization, update, resize, and view methods; updates
+and resizes return replacement values so model copies do not share mutable
+state. The registry contains exactly two placeholders (`context` and
+`activity`) and exposes only the active window. It has no close state, plugin
+mechanism, file content, editor, or markdown reader. Window input and resize
+updates stay inside `internal/tui`: no protocol Op or Event was added for this
+pane infrastructure.
+
+`View()` composes the full-width header first; its body is a horizontal split
+of the left stack (transcript, notice, completion, composer, in that order)
+and the right panel; then full-width hints and the optional danger banner.
+`ui.Canvas` is the final full-screen operation. With the default one-column
+gutter, split mode begins at width 93: left is at least 60 columns, gutter is
+1, and right is at least 32. In a split, the canonical widths are
+`right = max(32, (width-gutter)/3)` and
+`left = width-gutter-right`. At or below 92 columns, only the active pane
+uses the full width. With a custom gutter `g`, the split threshold is
+`60 + g + 32`.
 
 ## Why a host-services seam
 
@@ -206,13 +235,41 @@ Two different mechanisms, depending on whether it needs Go code:
 ### Add a theme token
 
 1. Add the field to `theme.Theme` in `internal/tui/theme/theme.go` — an
-   `lipgloss.AdaptiveColor` for a color role, or a glyph on `theme.Icons` in
-   `icons.go` — and give both the light and dark member of `Default()` a
-   value (or the new `DefaultIcons()` field a glyph).
+   `lipgloss.AdaptiveColor` for a color role, a `lipgloss.TerminalColor` for
+   the application background, a glyph on `theme.Icons`, or an appropriate
+   border/spacing token — and give `Default()`/`DefaultIcons()` a value.
 2. If most views will read it, add a precomputed field to `theme.Styles` and
    set it in `(Theme).S()` (`internal/tui/theme/styles.go`), so call sites
    write `th.S().YourField` instead of repeating
    `lipgloss.NewStyle().Foreground(th.YourField)`.
-3. Never hardcode a hex color or a literal glyph in a view or component —
-   every color and glyph traces back to a `Theme`/`Icons` field, which is
-   what makes a future palette or glyph swap a one-file edit.
+3. Resolve a supplied theme with `th = th.Resolve()` before consuming its
+   fields. `Theme.Resolve` supplies every unset token from `Default()` while
+   preserving `theme.NoBackground()` as the explicit transparent-background
+   opt-out.
+4. Never hardcode a color, glyph, border, spacing value, or emphasis modifier
+   in a root view or component — every visual choice traces back to a resolved
+   theme token, which is what makes a future palette or glyph swap a one-file
+   edit.
+
+## TUI theme and style boundary
+
+`theme.Theme.Resolve` is the runtime normalization point for partial themes.
+It fills unset colors, icons, border style, and spacing from the stock theme;
+`Background` is a `lipgloss.TerminalColor`, with `theme.NoBackground()` the
+only explicit transparent value. `(Theme).S()` derives the shared semantic
+styles from those resolved roles.
+
+Root TUI views compose completed `theme.Styles` and `ui` components, then do
+only structural work such as concatenation, joining, line selection, and
+width/height allocation. Widget setup receives the resolved theme's foreground
+and cursor/spinner styles but does not own a background. `ui.Canvas` owns the
+application background: it is the final full-screen operation after the root
+view and any overlay have composed, and paints every terminal cell unless the
+theme explicitly selected `NoBackground`.
+
+Review visual changes with this checklist:
+
+- Root views use only completed theme styles/components plus structural ops.
+- Every `ui` visual-modifier argument traces to a resolved theme value.
+- Unknown or interprocedural modifier origins are reviewed manually.
+- New colors, glyphs, borders, spacing, and emphasis live in `theme`.

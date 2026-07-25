@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
@@ -16,6 +18,16 @@ import (
 )
 
 const appCmdTimeout = 2 * time.Second
+
+func rowsContaining(view, text string) []string {
+	var rows []string
+	for _, row := range strings.Split(view, "\n") {
+		if strings.Contains(ansi.Strip(row), text) {
+			rows = append(rows, row)
+		}
+	}
+	return rows
+}
 
 func TestCompletionReplacementPreservesArgumentsAndLinesAtCursorPositions(t *testing.T) {
 	tests := []struct {
@@ -50,6 +62,105 @@ func TestCompletionReplacementPreservesArgumentsAndLinesAtCursorPositions(t *tes
 			}
 			if m.completion != nil {
 				t.Error("completion remained open after replacement")
+			}
+		})
+	}
+}
+
+func TestCompletionDelimitersRespectCommandSourceAndExistingWhitespace(t *testing.T) {
+	themes := []struct {
+		name string
+		th   theme.Theme
+	}{
+		{name: "default", th: theme.Default()},
+		{name: "zero XS", th: func() theme.Theme {
+			th := theme.Default()
+			th.Spacing = theme.NewSpacing(0, 2, 3, 4)
+			return th
+		}()},
+		{name: "wide XS", th: func() theme.Theme {
+			th := theme.Default()
+			th.Spacing = theme.NewSpacing(3, 2, 3, 4)
+			return th
+		}()},
+	}
+	skills := []host.Skill{
+		fakeSkill("review", "", "Review $ARGUMENTS"),
+		fakeSkill("explain", "", "Explain this"),
+	}
+	tests := make([]struct {
+		name   string
+		value  string
+		offset int
+		skills []host.Skill
+		th     theme.Theme
+		want   string
+	}, 0, len(builtinCommandSpecs)+len(themes)*2+4)
+	for _, spec := range builtinCommandSpecs {
+		tests = append(tests, struct {
+			name   string
+			value  string
+			offset int
+			skills []host.Skill
+			th     theme.Theme
+			want   string
+		}{
+			name:  "builtin " + spec.Name,
+			value: spec.Name,
+			want:  spec.Name,
+		})
+	}
+	for _, themeCase := range themes {
+		for _, skillName := range []string{"review", "explain"} {
+			tests = append(tests, struct {
+				name   string
+				value  string
+				offset int
+				skills []host.Skill
+				th     theme.Theme
+				want   string
+			}{
+				name:   themeCase.name + " skill " + skillName,
+				value:  "/" + skillName,
+				skills: skills,
+				th:     themeCase.th,
+				want:   "/" + skillName + " ",
+			})
+		}
+	}
+	for _, value := range []string{"/provider existing", "/fast  existing", "/review existing", "/explain  existing"} {
+		tests = append(tests, struct {
+			name   string
+			value  string
+			offset int
+			skills []host.Skill
+			th     theme.Theme
+			want   string
+		}{
+			name:   "existing whitespace " + value,
+			value:  value,
+			offset: strings.Index(value, " "),
+			skills: skills,
+			want:   value,
+		})
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, _ := newAppTestModel(nil, tt.skills)
+			m.th = tt.th
+			offset := tt.offset
+			if offset == 0 {
+				offset = len([]rune(tt.value))
+			}
+			m.setComposerValueAt(tt.value, offset)
+			m.recomputeCompletion()
+			if m.completion == nil {
+				t.Fatal("completion did not open")
+			}
+			m.applyCompletion()
+			if got := m.composer.Value(); got != tt.want {
+				t.Errorf("completion value = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -125,6 +236,68 @@ func TestModalReceivesKeysBeforeCompletionAndComposer(t *testing.T) {
 	assertNoAppOp(t, ops)
 }
 
+func TestModalVisuallyUnfocusesComposerAndSuppressesCompletionUntilClosed(t *testing.T) {
+	setTUITrueColor(t)
+	th := theme.Default()
+	th.Border = fixedColor("#112233")
+	th.BorderFocus = fixedColor("#445566")
+	th.BorderMuted = fixedColor("#778899")
+	m, ops := newAppTestModelWithOptions(Options{Theme: &th})
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.setComposerValueAt("/fa", 3)
+	m.recomputeCompletion()
+	m.reflow()
+	if m.completion == nil || m.completion.rows == 0 {
+		t.Fatal("test setup did not create a visible completion popup")
+	}
+	draft, line := m.composer.Value(), m.composer.Line()
+	probe := &appProbeModal{}
+	m.modal = probe
+	m.reflow()
+
+	withModal := m.View()
+	if !m.composer.Focused() {
+		t.Fatal("modal changed the underlying composer's focus state")
+	}
+	if m.composer.Value() != draft || m.composer.Line() != line {
+		t.Errorf("modal changed composer draft/cursor line: value=%q line=%d", m.composer.Value(), m.composer.Line())
+	}
+	if m.completion == nil {
+		t.Fatal("modal discarded completion state")
+	}
+	if m.completionPopupHeight() != 0 {
+		t.Errorf("modal reserved completion height %d, want 0", m.completionPopupHeight())
+	}
+	composerRows := rowsContaining(withModal, "prompt")
+	if len(composerRows) == 0 || !strings.Contains(strings.Join(composerRows, "\n"), rgbSGR("#778899")) || strings.Contains(strings.Join(composerRows, "\n"), rgbSGR("#445566")) {
+		t.Errorf("modal composer border was not muted/dimmed:\n%s", withModal)
+	}
+	if hasReverseVideo(withModal) {
+		t.Errorf("modal view rendered the composer's reverse-video cursor: %q", withModal)
+	}
+	if strings.Contains(ansi.Strip(withModal), "/fast") {
+		t.Errorf("modal view rendered the suppressed completion popup:\n%s", ansi.Strip(withModal))
+	}
+
+	m.modal = nil
+	m.reflow()
+	afterClose := m.View()
+	if !strings.Contains(afterClose, rgbSGR("#445566")) {
+		t.Errorf("closed modal did not restore focused composer border:\n%s", afterClose)
+	}
+	if !hasReverseVideo(afterClose) {
+		t.Errorf("closed modal did not restore static composer cursor: %q", afterClose)
+	}
+	if m.completionPopupHeight() == 0 || !strings.Contains(ansi.Strip(afterClose), "/fast") {
+		t.Errorf("closed modal did not restore completion popup: height=%d\n%s", m.completionPopupHeight(), ansi.Strip(afterClose))
+	}
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyTab})
+	if m.composer.Value() != "/fast" {
+		t.Errorf("modal changed composer cursor; completion produced %q, want /fast", m.composer.Value())
+	}
+	assertNoAppOp(t, ops)
+}
+
 func TestControlCQuitsBeforeOtherInputLayers(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)
 	m.composer.SetValue("unchanged")
@@ -186,12 +359,12 @@ func TestComposerHeightCountsWrappedLogicalLinesAtExactBoundaries(t *testing.T) 
 		{name: "empty retains minimum", value: "", wantHeight: composerMinHeight, wantCursorLine: -1},
 		{name: "short retains minimum", value: "short", wantHeight: composerMinHeight, wantCursorLine: -1},
 		{name: "non-boundary wide runes", value: strings.Repeat("界", 5), wantHeight: 2, wantCursorLine: -1},
-		{name: "sixteen unbroken ASCII characters", value: strings.Repeat("x", 16), wantHeight: 3, wantCursorLine: -1},
-		{name: "eight wide runes", value: strings.Repeat("界", 8), wantHeight: 3, wantCursorLine: -1},
+		{name: "sixteen unbroken ASCII characters", value: strings.Repeat("x", 16), wantHeight: 0, wantCursorLine: -1},
+		{name: "eight wide runes", value: strings.Repeat("界", 8), wantHeight: 0, wantCursorLine: -1},
 		{name: "eight combining graphemes", value: strings.Repeat("e\u0301", 8), wantHeight: 2, wantCursorLine: -1},
 		{name: "blank logical line", value: "one\n\nthree", wantHeight: 3, wantCursorLine: -1},
-		{name: "exact-boundary tall line before short cursor line", value: strings.Repeat("x", 16) + "\ny", wantHeight: 4, wantCursorLine: 1},
-		{name: "short line before exact-boundary tall line", value: "y\n" + strings.Repeat("x", 16), wantHeight: 4, wantCursorLine: -1},
+		{name: "exact-boundary tall line before short cursor line", value: strings.Repeat("x", 16) + "\ny", wantHeight: 0, wantCursorLine: 1},
+		{name: "short line before exact-boundary tall line", value: "y\n" + strings.Repeat("x", 16), wantHeight: 0, wantCursorLine: -1},
 		{name: "mixed explicit and soft rows cap at eight", value: strings.Repeat("x", 16) + "\na\nb\nc\nd\ne\nf", wantHeight: composerMaxHeight, wantCursorLine: -1},
 	}
 
@@ -206,8 +379,26 @@ func TestComposerHeightCountsWrappedLogicalLinesAtExactBoundaries(t *testing.T) 
 
 			m.reflow()
 
-			if got := m.composer.Height(); got != tt.wantHeight {
-				t.Errorf("composer height = %d, want %d at app width 12", got, tt.wantHeight)
+			want := tt.wantHeight
+			if want == 0 {
+				geometry := computePaneGeometry(m.width, m.th.Spacing.XS, m.focus)
+				candidate := geometry.leftCandidateWidth(m.width)
+				wantContentWidth := candidate - ansi.StringWidth(m.composer.Prompt)
+				if m.composer.Width() != wantContentWidth {
+					t.Fatalf("compact composer content width = %d, want textarea content width %d from allocated left candidate %d", m.composer.Width(), wantContentWidth, candidate)
+				}
+				counter := textarea.New()
+				counter.Prompt = ""
+				counter.ShowLineNumbers = false
+				counter.SetWidth(m.composer.Width())
+				for _, line := range strings.Split(tt.value, "\n") {
+					counter.SetValue(line)
+					want += max(1, counter.LineInfo().Height)
+				}
+				want = min(composerMaxHeight, max(composerMinHeight, want))
+			}
+			if got := m.composer.Height(); got != want {
+				t.Errorf("composer height = %d, want %d using textarea semantics at allocated left width %d", got, want, m.composer.Width())
 			}
 		})
 	}
@@ -253,8 +444,8 @@ func TestDangerousPermissionsIndicatorPersistsAcrossStateAndNoticeChanges(t *tes
 
 	m.applyEvent(protocol.ModelSelected{Provider: "echo", Model: "test-model"})
 	assertViewContainsPlainText(t, m.View(), indicator)
-	if !strings.Contains(ansi.Strip(m.View()), "model: echo/test-model") {
-		t.Errorf("model selection notice was not rendered alongside danger indicator:\n%s", ansi.Strip(m.View()))
+	if strings.Contains(ansi.Strip(m.View()), "model: echo/test-model") {
+		t.Errorf("model selection unexpectedly rendered a routine notice:\n%s", ansi.Strip(m.View()))
 	}
 	m.applyEvent(protocol.EngineError{Message: "transient engine error"})
 	assertViewContainsPlainText(t, m.View(), indicator)
@@ -279,6 +470,12 @@ func TestDangerousPermissionsIndicatorIsOptInAndSafeAtTinyWidths(t *testing.T) {
 	} {
 		dangerous = updateApp(t, dangerous, size)
 		plain := ansi.Strip(dangerous.View())
+		if size.Width == 0 && size.Height == 0 {
+			if plain != "" {
+				t.Errorf("danger indicator at size %dx%d = %q, want empty output", size.Width, size.Height, plain)
+			}
+			continue
+		}
 		wantPrefix := indicator[:min(max(1, size.Width), len(indicator))]
 		if !strings.Contains(plain, wantPrefix) {
 			t.Errorf("danger indicator at size %dx%d = %q, want semantic prefix %q", size.Width, size.Height, plain, wantPrefix)
@@ -393,6 +590,7 @@ func TestDangerousPermissionsIndicatorAndModalPersistAcrossRunningStateAndNotice
 	m.modal = newPaletteModal(m.commands, nil, m.currentPaletteAvailability())
 
 	m.applyEvent(protocol.TurnStarted{})
+	m.setNotice("unrelated notice", true)
 	m.applyEvent(protocol.ModelSelected{Provider: "echo", Model: "notice-regression-model"})
 
 	plain := ansi.Strip(m.View())
@@ -400,7 +598,7 @@ func TestDangerousPermissionsIndicatorAndModalPersistAcrossRunningStateAndNotice
 		indicator,
 		"Command palette",
 		"working",
-		"model: echo/notice-regression-model",
+		"unrelated notice",
 	} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("running modal view with notice does not contain %q:\n%s", want, plain)
@@ -892,6 +1090,63 @@ func TestPaletteInsertOnlyFocusesComposerWithoutSubmissionOrHistoryWrite(t *test
 	assertNoAppOp(t, ops)
 }
 
+func TestPaletteSkillInsertionUsesOneCommandArgumentSeparatorAcrossThemes(t *testing.T) {
+	themes := []struct {
+		name string
+		th   theme.Theme
+	}{
+		{name: "default", th: theme.Default()},
+		{name: "explicit zero XS", th: func() theme.Theme {
+			th := theme.Default()
+			th.Spacing = theme.NewSpacing(0, 2, 3, 4)
+			return th
+		}()},
+		{name: "custom XS", th: func() theme.Theme {
+			th := theme.Default()
+			th.Spacing = theme.NewSpacing(3, 2, 3, 4)
+			return th
+		}()},
+	}
+	for _, themeCase := range themes {
+		t.Run(themeCase.name, func(t *testing.T) {
+			for _, skillName := range []string{"review", "audit", "test"} {
+				t.Run(skillName, func(t *testing.T) {
+					store := newFakeHistory()
+					skill := fakeSkill(skillName, "", "executed $ARGUMENTS")
+					m, ops := newAppTestModelWithHistory(nil, []host.Skill{skill}, store)
+					m.th = themeCase.th
+					m.providerName = "echo"
+
+					m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+					m = typeAppText(t, m, "/"+skillName)
+					updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+					m = updated.(Model)
+					m = updateApp(t, m, runAppCmd(t, cmd))
+					if got := m.composer.Value(); got != "/"+skillName+" " {
+						t.Fatalf("palette insertion = %q, want %q", got, "/"+skillName+" ")
+					}
+
+					m = typeAppText(t, m, "main.go")
+					if got := m.composer.Value(); got != "/"+skillName+" main.go" {
+						t.Fatalf("composer after argument = %q", got)
+					}
+					updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+					m = updated.(Model)
+					for _, msg := range runAllAppCmds(t, cmd) {
+						m = updateApp(t, m, msg)
+					}
+					if got := receiveAppOp(t, ops); got != (protocol.UserInput{Text: "executed main.go"}) {
+						t.Errorf("operation = %#v, want rendered skill input", got)
+					}
+					if got := store.Entries(); !slices.Equal(got, []string{"/" + skillName + " main.go"}) {
+						t.Errorf("history = %q, want inserted command", got)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestControlKPaletteAvailabilityTracksProviderAndTurn(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -1069,6 +1324,10 @@ func assertViewOmitsPlainText(t *testing.T, view, unwanted string) {
 	}
 }
 
+func hasReverseVideo(s string) bool {
+	return strings.Contains(s, "\x1b[7m") || strings.Contains(s, "\x1b[7;")
+}
+
 func compactAppPlainText(text string) string {
 	return strings.NewReplacer(
 		" ", "",
@@ -1160,5 +1419,302 @@ func TestHeaderAgentBadgeGuardsDisplaySafety(t *testing.T) {
 	m.applyEvent(protocol.AgentSelected{Name: "build"})
 	if plain := ansi.Strip(m.View()); !strings.Contains(plain, "build") {
 		t.Errorf("header dropped a valid agent name:\n%s", plain)
+	}
+}
+
+func TestPaneFocusStartsLeftAndPreservesComposerDraftAndCursor(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	if m.focus != focusLeft || !m.composer.Focused() {
+		t.Fatalf("initial focus = %v/composer=%v, want left/focused", m.focus, m.composer.Focused())
+	}
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.setComposerValueAt("first\nsecond", len([]rune("first\nsec")))
+	draft, line, info := m.composer.Value(), m.composer.Line(), m.composer.LineInfo()
+
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	if m.focus != focusRight || m.composer.Focused() {
+		t.Errorf("ctrl+j focus = %v/composer=%v, want right/blurred", m.focus, m.composer.Focused())
+	}
+	if got := m.composer.Value(); got != draft {
+		t.Errorf("blur changed draft = %q, want %q", got, draft)
+	}
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	if m.focus != focusLeft || !m.composer.Focused() {
+		t.Errorf("second ctrl+j focus = %v/composer=%v, want left/focused", m.focus, m.composer.Focused())
+	}
+	if got, gotLine, gotInfo := m.composer.Value(), m.composer.Line(), m.composer.LineInfo(); got != draft || gotLine != line || gotInfo != info {
+		t.Errorf("focus round trip changed composer: value=%q line=%d info=%+v; want %q/%d/%+v", got, gotLine, gotInfo, draft, line, info)
+	}
+}
+
+func TestFocusAndPaletteClearCompletionBeforeChangingInputOwner(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		key   tea.KeyMsg
+		check func(*testing.T, Model)
+	}{
+		{"focus", tea.KeyMsg{Type: tea.KeyCtrlJ}, func(t *testing.T, m Model) {
+			if m.focus != focusRight {
+				t.Errorf("focus = %v, want right", m.focus)
+			}
+		}},
+		{"cycle", tea.KeyMsg{Type: tea.KeyCtrlL}, func(t *testing.T, m Model) {
+			if m.windows.index != 1 {
+				t.Errorf("window index = %d, want 1", m.windows.index)
+			}
+		}},
+		{"palette", tea.KeyMsg{Type: tea.KeyCtrlK}, func(t *testing.T, m Model) {
+			if _, ok := m.modal.(*paletteModal); !ok {
+				t.Errorf("modal = %T, want palette", m.modal)
+			}
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m, _ := newAppTestModel(nil, nil)
+			m.completion = leadingSlashCompletion("/", 0, 1, m.commands)
+			m = updateApp(t, m, tt.key)
+			if m.completion != nil {
+				t.Error("completion remained open")
+			}
+			tt.check(t, m)
+		})
+	}
+}
+
+func TestCyclePhysicalAliasesClearOpenCompletionAndCycleOnce(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		key  tea.KeyMsg
+	}{
+		{name: "ctrl+l", key: tea.KeyMsg{Type: tea.KeyCtrlL}},
+		{name: "ctrl+o", key: tea.KeyMsg{Type: tea.KeyCtrlO}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m, ops := newAppTestModel(nil, nil)
+			m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+			m.windows = windowRegistry{index: 1, windows: []window{
+				statefulTestWindow{windowID: "first", windowTitle: "First"},
+				statefulTestWindow{windowID: "second", windowTitle: "Second"},
+				statefulTestWindow{windowID: "third", windowTitle: "Third", updates: []string{"prior state"}},
+			}}
+			m.setComposerValueAt("/provider echo", len([]rune("/pro")))
+			m.recomputeCompletion()
+			if m.completion == nil {
+				t.Fatal("test setup did not open completion")
+			}
+			m.completion.Selected = 1
+			draft, cursor := m.composer.Value(), m.composer.LineInfo().ColumnOffset
+
+			updated, cmd := m.Update(tt.key)
+			m = updated.(Model)
+			if cmd != nil {
+				t.Error("cycle returned a command, want no composer or engine work")
+			}
+			if m.completion != nil {
+				t.Error("cycle left completion open")
+			}
+			if m.windows.index != 2 {
+				t.Errorf("window index = %d, want 2 after one cycle", m.windows.index)
+			}
+			if got := m.windows.active().title(); got != "Third" {
+				t.Errorf("active window title = %q, want Third", got)
+			}
+			if got := testWindow(t, m.windows.active()).updates; !slices.Equal(got, []string{"prior state"}) {
+				t.Errorf("active window state = %q, want preserved prior state", got)
+			}
+			if got, gotCursor := m.composer.Value(), m.composer.LineInfo().ColumnOffset; got != draft || gotCursor != cursor {
+				t.Errorf("cycle consumed composer input: value=%q cursor=%d, want %q/%d", got, gotCursor, draft, cursor)
+			}
+			assertNoAppOp(t, ops)
+		})
+	}
+}
+
+func TestCompletionEscapeDismissesBeforeInterruptAndFocusChange(t *testing.T) {
+	m, ops := newAppTestModel(nil, nil)
+	m.turnRunning = true
+	m.completion = leadingSlashCompletion("/", 0, 1, m.commands)
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(Model)
+	runAppCmd(t, cmd)
+	if m.completion != nil || m.focus != focusLeft {
+		t.Errorf("first escape completion/focus = %v/%v, want closed/left", m.completion, m.focus)
+	}
+	assertNoAppOp(t, ops)
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(Model)
+	runAppCmd(t, cmd)
+	if got := receiveAppOp(t, ops); got != (protocol.Interrupt{}) {
+		t.Errorf("second escape operation = %#v, want Interrupt", got)
+	}
+	assertNoAppOp(t, ops)
+}
+
+func TestModalOwnsGlobalKeysExceptQuit(t *testing.T) {
+	for _, msg := range []tea.KeyMsg{
+		{Type: tea.KeyCtrlJ}, {Type: tea.KeyCtrlL}, {Type: tea.KeyCtrlO}, {Type: tea.KeyCtrlK},
+	} {
+		t.Run(msg.String(), func(t *testing.T) {
+			m, ops := newAppTestModel(nil, nil)
+			m.completion = leadingSlashCompletion("/", 0, 1, m.commands)
+			probe := &appProbeModal{}
+			m.modal = probe
+			m = updateApp(t, m, msg)
+			if probe.keys != 1 || m.focus != focusLeft || m.windows.index != 0 || m.completion == nil || m.modal != probe {
+				t.Errorf("modal routing changed state: keys=%d focus=%v index=%d completion=%v modal=%T", probe.keys, m.focus, m.windows.index, m.completion, m.modal)
+			}
+			assertNoAppOp(t, ops)
+		})
+	}
+}
+
+func TestRightPaneOwnsOrdinaryKeysAndGlobalKeysRemainGlobal(t *testing.T) {
+	m, ops := newAppTestModel([]string{"build", "plan"}, nil)
+	m.providerName = "echo"
+	m.composer.SetValue("unchanged")
+	m.entries = []string{"history"}
+	m.windows = windowRegistry{windows: []window{
+		statefulTestWindow{windowID: "right-one"},
+		statefulTestWindow{windowID: "right-two"},
+	}}
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	completion := leadingSlashCompletion("/", 0, 1, m.commands)
+	m.completion = completion // stale completion must not take ownership on the right.
+	startOffset, startLine, startViewport := m.composer.LineInfo().ColumnOffset, m.composer.Line(), m.viewport.YOffset
+	for _, msg := range []tea.KeyMsg{
+		{Type: tea.KeyRunes, Runes: []rune("x")}, {Type: tea.KeyEnter}, {Type: tea.KeyTab}, {Type: tea.KeyCtrlD},
+		{Type: tea.KeyUp}, {Type: tea.KeyDown}, {Type: tea.KeyPgUp}, {Type: tea.KeyPgDown},
+	} {
+		m = updateApp(t, m, msg)
+	}
+	if m.composer.Value() != "unchanged" || m.composer.Line() != startLine || m.composer.LineInfo().ColumnOffset != startOffset || m.historyPos != -1 || m.agentName != "" || m.viewport.YOffset != startViewport {
+		t.Errorf("right-pane keys changed left state: composer=%q line=%d offset=%d history=%d agent=%q viewport=%d", m.composer.Value(), m.composer.Line(), m.composer.LineInfo().ColumnOffset, m.historyPos, m.agentName, m.viewport.YOffset)
+	}
+	if m.completion != completion || m.completion.Selected != completion.Selected {
+		t.Error("right-pane keys changed stale completion")
+	}
+	if got := testWindow(t, m.windows.active()).updates; len(got) != 8 {
+		t.Errorf("right pane received %d keys, want 8: %q", len(got), got)
+	}
+	assertNoAppOp(t, ops)
+
+	for _, msg := range []tea.KeyMsg{{Type: tea.KeyCtrlL}, {Type: tea.KeyCtrlO}} {
+		before := totalWindowUpdates(t, m.windows)
+		index := m.windows.index
+		m = updateApp(t, m, msg)
+		if m.windows.index == index || m.completion != nil {
+			t.Errorf("%s did not globally cycle and clear completion", msg.String())
+		}
+		if got := totalWindowUpdates(t, m.windows); got != before {
+			t.Errorf("%s was recorded by window: updates %d, want %d", msg.String(), got, before)
+		}
+	}
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+	if _, ok := m.modal.(*paletteModal); !ok {
+		t.Errorf("right-focused ctrl+k modal = %T, want palette", m.modal)
+	}
+}
+
+func TestPaletteSkillInvocationReturnsFocusToComposerFromRightPane(t *testing.T) {
+	m, ops := newAppTestModel(nil, []host.Skill{fakeSkill("review", "", "review $ARGUMENTS")})
+	m.providerName = "echo"
+	m.focus = focusRight
+	m.composer.Blur()
+	m = updateApp(t, m, paletteInvokeMsg{Action: paletteAction{Kind: paletteActionSkill, Value: "review"}})
+	if m.focus != focusLeft || !m.composer.Focused() || m.composer.Value() != "/review " {
+		t.Errorf("palette skill focus/composer = %v/%v/%q, want left/focused /review ", m.focus, m.composer.Focused(), m.composer.Value())
+	}
+	assertNoAppOp(t, ops)
+}
+
+func TestPaletteHelpInvocationReturnsFocusToComposerAndRendersNoticeFromRightPane(t *testing.T) {
+	m, ops := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	m.modal = newPaletteModal(m.commands, m.agents, m.currentPaletteAvailability())
+
+	m = updateApp(t, m, paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/help"}})
+	if m.focus != focusLeft || !m.composer.Focused() {
+		t.Errorf("/help from palette focus/composer = %v/%v, want left/focused", m.focus, m.composer.Focused())
+	}
+	if !strings.Contains(m.notice, "commands:") || !strings.Contains(ansi.Strip(m.View()), "commands:") {
+		t.Errorf("/help notice was not retained and rendered: notice=%q view=%q", m.notice, ansi.Strip(m.View()))
+	}
+	assertNoAppOp(t, ops)
+}
+
+func TestPalettePickerActionsAndStaleNoticeDoNotStealRightFocus(t *testing.T) {
+	m, ops := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	m.setNotice("commands: stale help", false)
+	m.modal = newPaletteModal(m.commands, m.agents, m.currentPaletteAvailability())
+
+	m = updateApp(t, m, paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/provider"}})
+	if m.focus != focusRight {
+		t.Errorf("picker action changed right focus to %v", m.focus)
+	}
+	if _, ok := m.modal.(*providerModal); !ok {
+		t.Errorf("/provider palette action modal = %T, want provider picker", m.modal)
+	}
+	assertNoAppOp(t, ops)
+}
+
+func TestViewportScrollOffsetSurvivesRightFocusRoundTripAndRefreshesOnResizeAndEvent(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	for i := range 80 {
+		m.applyEvent(protocol.UserMessage{Text: strings.Repeat("transcript ", 8) + string(rune('a'+i%26))})
+	}
+	m.refreshViewport()
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
+	wantOffset := m.viewport.YOffset
+	if wantOffset == 0 {
+		t.Fatal("page up did not move long transcript off the bottom")
+	}
+
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	if got := m.viewport.YOffset; got != wantOffset {
+		t.Errorf("focus round trip viewport offset = %d, want %d", got, wantOffset)
+	}
+
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 93, Height: 24})
+	if !strings.Contains(ansi.Strip(m.viewport.View()), "transcript") {
+		t.Error("resize did not re-render transcript")
+	}
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	m = updateApp(t, m, engineEventMsg{ev: protocol.TextDelta{Text: "engine refresh"}})
+	if m.viewport.YOffset != m.viewport.TotalLineCount()-m.viewport.Height {
+		t.Errorf("engine event viewport offset = %d, want bottom %d", m.viewport.YOffset, m.viewport.TotalLineCount()-m.viewport.Height)
+	}
+}
+
+func totalWindowUpdates(t *testing.T, r windowRegistry) int {
+	t.Helper()
+	total := 0
+	for _, w := range r.windows {
+		total += len(testWindow(t, w).updates)
+	}
+	return total
+}
+
+func TestProtocolEventsAndSpinnerDoNotChangeRightFocus(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	for _, ev := range []protocol.Event{protocol.UserMessage{Text: "user"}, protocol.TextDelta{Text: "assistant"}} {
+		m = updateApp(t, m, engineEventMsg{ev: ev})
+		if m.focus != focusRight {
+			t.Fatalf("event %T changed focus to %v", ev, m.focus)
+		}
+	}
+	if got := ansi.Strip(m.viewport.View()); !strings.Contains(got, "user") || !strings.Contains(got, "assistant") {
+		t.Errorf("protocol events did not refresh transcript: %q", got)
+	}
+	before := m.focus
+	m = updateApp(t, m, spinner.TickMsg{})
+	if m.focus != before {
+		t.Errorf("spinner tick changed focus from %v to %v", before, m.focus)
 	}
 }

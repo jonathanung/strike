@@ -249,7 +249,7 @@ func (m *paletteModal) view(width int, th theme.Theme) string {
 		}
 	}
 
-	listWidth := max(1, ui.InnerWidth(width))
+	listWidth := max(1, ui.PanelInnerWidth(th, width))
 	if width < 4 {
 		listWidth = max(1, width) // too narrow for a dialog frame
 	}
@@ -268,7 +268,7 @@ func (m *paletteModal) view(width int, th theme.Theme) string {
 	}
 	return ui.Dialog(th, ui.DialogOpts{
 		Title: "Command palette",
-		Hint:  "type to filter · ↑/↓ move · enter select · esc close",
+		Hint:  dotJoin(th, "type to filter", "↑/↓ move", "enter select", "esc close"),
 		Width: width,
 	}, body)
 }

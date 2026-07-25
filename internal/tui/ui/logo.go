@@ -15,14 +15,16 @@ import (
 //
 //	card := ui.Card{Title: "strike", Body: ui.Logo(th), Width: 30}
 func Logo(th theme.Theme) string {
+	th = th.Resolve()
 	ic := resolveIcons(th)
 	st := th.S()
-	word := ic.Bolt + " S T R I K E"
+	space := strings.Repeat(" ", th.Spacing.XS)
+	word := ic.Bolt + space + "S" + space + "T" + space + "R" + space + "I" + space + "K" + space + "E"
 	w := lipgloss.Width(word)
 
-	top := st.AccentAlt.Render(strings.Repeat("▁", w))
-	mid := st.Warning.Render(ic.Bolt) + " " + st.Title.Render("S T R I K E")
-	bot := st.Accent.Render(strings.Repeat("▔", w))
+	top := st.AccentAlt.Render(strings.Repeat(ic.LogoTopRule, w))
+	mid := st.Warning.Render(ic.Bolt) + space + st.Title.Render("S"+space+"T"+space+"R"+space+"I"+space+"K"+space+"E")
+	bot := st.Accent.Render(strings.Repeat(ic.LogoBottomRule, w))
 	return top + "\n" + mid + "\n" + bot
 }
 
@@ -33,5 +35,5 @@ func Logo(th theme.Theme) string {
 func LogoCompact(th theme.Theme) string {
 	ic := resolveIcons(th)
 	st := th.S()
-	return st.Warning.Render(ic.Bolt) + " " + st.Title.Render("strike")
+	return st.Warning.Render(ic.Bolt) + strings.Repeat(" ", th.Resolve().Spacing.XS) + st.Title.Render("strike")
 }

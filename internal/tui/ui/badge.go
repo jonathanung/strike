@@ -1,6 +1,10 @@
 package ui
 
-import "github.com/jonathanung/strike-cli/internal/tui/theme"
+import (
+	"strings"
+
+	"github.com/jonathanung/strike-cli/internal/tui/theme"
+)
 
 // Badge is a compact bracketed chip for a short status token, tone-colored.
 // Use it for header pills like the current provider/model or the active
@@ -12,7 +16,10 @@ import "github.com/jonathanung/strike-cli/internal/tui/theme"
 // Badge does not take a width; it sizes to its text. Truncate the text before
 // calling if it must fit a budget.
 func Badge(th theme.Theme, tone Tone, text string) string {
+	th = th.Resolve()
+	ic := resolveIcons(th)
 	bracket := th.S().Muted
-	label := toneStyle(th, tone).Bold(true)
-	return bracket.Render("[") + " " + label.Render(text) + " " + bracket.Render("]")
+	label := toneStrongStyle(th, tone)
+	space := strings.Repeat(" ", th.Spacing.XS)
+	return bracket.Render(ic.BadgeLeft) + space + label.Render(text) + space + bracket.Render(ic.BadgeRight)
 }

@@ -3,10 +3,12 @@ package tui
 import (
 	"context"
 	"errors"
+	"io"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -64,7 +66,7 @@ func (m Model) handleAuth(args []string) (tea.Model, tea.Cmd) {
 			}
 			parts = append(parts, s.Name+": "+authsvc.Describe(s.Name))
 		}
-		m.setNotice(strings.Join(parts, " · "), false)
+		m.setNotice(dotJoin(m.th, parts...), false)
 		return m, nil
 	case "logout":
 		if len(args) < 2 {
@@ -157,13 +159,14 @@ func findStatus(statuses []host.ProviderStatus, name string) (host.ProviderStatu
 // in flight: it carries the login link (in case the browser did not open) or
 // the device code, and esc cancels the flow.
 type authWaitModal struct {
-	provider    string
-	url         string // authorize URL once the flow has started
-	userCode    string // device flow
-	verifyURI   string // device flow
-	selectAfter bool
-	ctx         context.Context
-	cancel      context.CancelFunc
+	provider      string
+	url           string // authorize URL once the flow has started
+	userCode      string // device flow
+	verifyURI     string // device flow
+	selectAfter   bool
+	copyRequested bool
+	ctx           context.Context
+	cancel        context.CancelFunc
 }
 
 // startOAuthModal opens the wait dialog and begins the browser flow through the
@@ -197,34 +200,81 @@ func startDeviceModal(authsvc host.Auth, provider string, selectAfter bool) (mod
 }
 
 func (m *authWaitModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
-	if msg.String() == "esc" {
+	switch msg.String() {
+	case "esc":
 		m.cancel() // the in-flight Wait/Poll returns promptly with ctx error
 		return nil, nil
+	case "c":
+		if m.url != "" {
+			m.copyRequested = true
+			return m, tea.Exec(&osc52CopyCommand{text: m.url}, func(error) tea.Msg { return nil })
+		}
 	}
 	return m, nil
 }
 
 func (m *authWaitModal) view(width int, th theme.Theme) string {
 	st := th.S()
-	inner := max(1, ui.InnerWidth(width))
+	inner := max(1, ui.PanelInnerWidth(th, width))
 	body := st.Muted.Render("starting login flow…")
 	switch {
 	case m.userCode != "":
 		body = wrapToWidth(st.Text.Render("Open "+m.verifyURI+" on any device and enter code:"), inner) +
-			"\n" + st.Warning.Bold(true).Render(m.userCode) +
+			"\n" + st.WarningStrong.Render(m.userCode) +
 			"\n" + st.Muted.Render("waiting for authorization…")
 	case m.url != "":
+		status := "waiting for the callback…"
+		if m.copyRequested {
+			status = "copy requested"
+		}
 		body = st.Text.Render("Complete the login in your browser.") +
 			"\n" + st.Muted.Render("If it did not open, visit:") +
-			"\n" + wrapToWidth(st.Accent.Render(m.url), inner) +
-			"\n" + st.Muted.Render("waiting for the callback…")
+			"\n" + renderAuthURL(m.url, inner, th) +
+			"\n" + st.Muted.Render(status)
+	}
+	hint := "esc cancel"
+	if m.url != "" {
+		hint = dotJoin(th, "c copy", "esc cancel")
 	}
 	return ui.Dialog(th, ui.DialogOpts{
 		Title: "Logging in to " + m.provider,
-		Hint:  "esc cancel",
+		Hint:  hint,
 		Width: width,
 	}, body)
 }
+
+// renderAuthURL wraps the unstyled URL before making each visual line a link,
+// so every part opens the complete authorization URL.
+func renderAuthURL(url string, width int, th theme.Theme) string {
+	wrapped := ansi.Hardwrap(url, max(1, width), false)
+	st := th.S()
+	lines := strings.Split(wrapped, "\n")
+	for i, line := range lines {
+		lines[i] = ansi.SetHyperlink(url) + st.Accent.Render(line) + ansi.ResetHyperlink()
+	}
+	return strings.Join(lines, "\n")
+}
+
+// osc52CopyCommand writes a terminal clipboard request through Bubble Tea's
+// framework-owned output while the program is paused for the command.
+type osc52CopyCommand struct {
+	text   string
+	stdin  io.Reader
+	stdout io.Writer
+	stderr io.Writer
+}
+
+func (c *osc52CopyCommand) Run() error {
+	if c.stdout == nil {
+		return nil
+	}
+	_, err := io.WriteString(c.stdout, ansi.SetSystemClipboard(c.text))
+	return err
+}
+
+func (c *osc52CopyCommand) SetStdin(r io.Reader)  { c.stdin = r }
+func (c *osc52CopyCommand) SetStdout(w io.Writer) { c.stdout = w }
+func (c *osc52CopyCommand) SetStderr(w io.Writer) { c.stderr = w }
 
 // applyAuthMsg handles the async auth messages; returns false if msg is not
 // auth-related.
@@ -294,10 +344,8 @@ type apiKeyModal struct {
 }
 
 func newAPIKeyModal(provider string, authsvc host.Auth, th theme.Theme, selectAfter bool) *apiKeyModal {
-	in := textinput.New()
-	in.Placeholder = "paste key"
+	in := newTextInput(th, "paste key")
 	in.EchoMode = textinput.EchoPassword
-	in.Prompt = "> "
 	in.Focus()
 	return &apiKeyModal{provider: provider, auth: authsvc, input: in, th: th, selectAfter: selectAfter}
 }
@@ -324,10 +372,14 @@ func (m *apiKeyModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 }
 
 func (m *apiKeyModal) view(width int, th theme.Theme) string {
-	m.input.Width = max(1, ui.InnerWidth(width)-2)
+	th = th.Resolve()
+	inner := ui.PanelInnerWidth(th, width)
+	cursorWidth := max(1, ansi.StringWidth(m.input.Cursor.View()))
+	m.input.Width = max(1, inner-ansi.StringWidth(m.input.Prompt)-cursorWidth)
+	m.input.SetValue(m.input.Value())
 	return ui.Dialog(th, ui.DialogOpts{
 		Title: "Enter " + m.provider + " API key",
-		Hint:  "enter save · esc cancel (input is hidden)",
+		Hint:  dotJoin(th, "enter save", "esc cancel (input is hidden)"),
 		Width: width,
 	}, m.input.View())
 }

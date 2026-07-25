@@ -11,24 +11,24 @@ import (
 
 // truncate shortens s to at most width display cells, appending an ellipsis
 // when it must cut. ANSI- and wide-rune-aware; width <= 0 yields "".
-func truncate(s string, width int) string {
+func truncate(th theme.Theme, s string, width int) string {
 	if width <= 0 {
 		return ""
 	}
 	if lipgloss.Width(s) <= width {
 		return s
 	}
-	return ansi.Truncate(s, width, "…")
+	return ansi.Truncate(s, width, resolveIcons(th).Ellipsis)
 }
 
 // padRight fits s to exactly width display cells: truncated (with an ellipsis)
 // when wider, space-padded when narrower. The result always measures width,
 // which is what makes panels and rows rectangular.
-func padRight(s string, width int) string {
+func padRight(th theme.Theme, s string, width int) string {
 	if width <= 0 {
 		return ""
 	}
-	s = truncate(s, width)
+	s = truncate(th, s, width)
 	if gap := width - lipgloss.Width(s); gap > 0 {
 		s += strings.Repeat(" ", gap)
 	}
@@ -61,8 +61,5 @@ func lineCount(s string) int {
 // resolveIcons returns th.Icons, falling back to theme.DefaultIcons() for a
 // zero-value theme so components stay usable without a configured theme.
 func resolveIcons(th theme.Theme) theme.Icons {
-	if th.Icons.Cursor == "" {
-		return theme.DefaultIcons()
-	}
-	return th.Icons
+	return th.Resolve().Icons
 }

@@ -37,7 +37,7 @@ type ListOpts struct {
 //	body := ui.List(th, ui.ListOpts{
 //	    Items:   items,
 //	    Cursor:  cursor,
-//	    Width:   ui.InnerWidth(w),
+//	    Width:   ui.PanelInnerWidth(th, w),
 //	    Visible: 10,
 //	})
 //	out := ui.Dialog(th, ui.DialogOpts{Title: "Select model", Width: w}, body)
@@ -45,6 +45,7 @@ type ListOpts struct {
 // The window is centered on Cursor and always keeps it visible. Rows never
 // exceed Width.
 func List(th theme.Theme, opts ListOpts) string {
+	th = th.Resolve()
 	width := opts.Width
 	if width < 1 {
 		return ""
@@ -58,9 +59,9 @@ func List(th theme.Theme, opts ListOpts) string {
 		if total == 0 {
 			total = len(opts.Items)
 		}
-		filter := st.Muted.Render("filter: ") + st.Text.Render(opts.Filter+"▏")
+		filter := st.Muted.Render("filter: ") + st.InputCursor.Render(opts.Filter+ic.FilterCursor)
 		counter := st.Muted.Render(strconv.Itoa(len(opts.Items)) + "/" + strconv.Itoa(total))
-		b.WriteString(truncate(filter+"  "+counter, width))
+		b.WriteString(truncate(th, filter+strings.Repeat(" ", th.Spacing.SM)+counter, width))
 		b.WriteByte('\n')
 	}
 
@@ -69,7 +70,7 @@ func List(th theme.Theme, opts ListOpts) string {
 		if empty == "" {
 			empty = "no matches"
 		}
-		b.WriteString(st.Muted.Render(truncate(empty, width)))
+		b.WriteString(st.Muted.Render(truncate(th, empty, width)))
 		return b.String()
 	}
 
@@ -77,23 +78,24 @@ func List(th theme.Theme, opts ListOpts) string {
 	if visible <= 0 || visible > len(opts.Items) {
 		visible = len(opts.Items)
 	}
+	activeCursor := opts.Cursor >= 0 && opts.Cursor < len(opts.Items)
 	cursor := clamp(opts.Cursor, 0, len(opts.Items)-1)
 	start := clamp(cursor-visible/2, 0, max(0, len(opts.Items)-visible))
 	end := min(len(opts.Items), start+visible)
 
-	selected := lipgloss.NewStyle().Foreground(th.Highlight).Bold(true)
 	rows := make([]string, 0, end-start)
 	for i := start; i < end; i++ {
-		rows = append(rows, listRow(st, ic, selected, opts.Items[i], i == cursor, width))
+		rows = append(rows, listRow(th, st, ic, opts.Items[i], activeCursor && i == cursor, width))
 	}
 	b.WriteString(strings.Join(rows, "\n"))
 	return b.String()
 }
 
-func listRow(st theme.Styles, ic theme.Icons, selected lipgloss.Style, item ListItem, isCursor bool, width int) string {
-	marker := "  "
+func listRow(th theme.Theme, st theme.Styles, ic theme.Icons, item ListItem, isCursor bool, width int) string {
+	markerWidth := lipgloss.Width(ic.Cursor) + th.Spacing.XS
+	marker := strings.Repeat(" ", markerWidth)
 	if isCursor {
-		marker = ic.Cursor + " "
+		marker = ic.Cursor + strings.Repeat(" ", th.Spacing.XS)
 	}
 	labelStyle := st.Text
 	switch {
@@ -102,7 +104,7 @@ func listRow(st theme.Styles, ic theme.Icons, selected lipgloss.Style, item List
 		// (it stays navigable) but the label reads muted, not highlighted.
 		labelStyle = st.Muted
 	case isCursor:
-		labelStyle = selected
+		labelStyle = st.Selected
 	}
 
 	label := item.Label
@@ -112,12 +114,13 @@ func listRow(st theme.Styles, ic theme.Icons, selected lipgloss.Style, item List
 	plain := marker + label
 	line := marker + labelStyle.Render(label)
 	if item.Detail != "" {
-		plain += " — " + item.Detail
-		line += st.Muted.Render(" — " + item.Detail)
+		separator := strings.Repeat(" ", th.Spacing.XS) + ic.DetailSeparator + strings.Repeat(" ", th.Spacing.XS)
+		plain += separator + item.Detail
+		line += st.Muted.Render(separator + item.Detail)
 	}
 	if lipgloss.Width(plain) > width {
 		// Restyle the whole truncated row in one style to keep it width-safe.
-		return labelStyle.Render(truncate(plain, width))
+		return labelStyle.Render(truncate(th, plain, width))
 	}
 	return line
 }

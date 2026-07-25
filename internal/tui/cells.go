@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
@@ -23,10 +24,14 @@ type userCell struct {
 }
 
 func (c *userCell) render(width int, th theme.Theme) string {
+	th = th.Resolve()
 	ic := iconsFor(th)
-	label := lipgloss.NewStyle().Foreground(th.UserLabel).Bold(true).Render(ic.Prompt + " you")
-	body := lipgloss.NewStyle().Foreground(th.Text).Width(max(1, width-2)).Render(c.text)
-	return label + "\n" + indent(body, "  ")
+	st := th.S()
+	space := themedSpace(th.Spacing.XS)
+	indentation := themedSpace(th.Spacing.SM)
+	label := st.UserLabel.Render(ic.Prompt + space + "you")
+	body := renderCellText(st.Text, c.text, max(1, width-lipgloss.Width(indentation)))
+	return label + "\n" + indent(body, indentation)
 }
 
 type assistantCell struct {
@@ -34,10 +39,14 @@ type assistantCell struct {
 }
 
 func (c *assistantCell) render(width int, th theme.Theme) string {
+	th = th.Resolve()
 	ic := iconsFor(th)
-	label := lipgloss.NewStyle().Foreground(th.Accent).Bold(true).Render(ic.Assistant + " strike")
-	body := lipgloss.NewStyle().Foreground(th.Text).Width(max(1, width-2)).Render(strings.TrimSpace(c.text))
-	return label + "\n" + indent(body, "  ")
+	st := th.S()
+	space := themedSpace(th.Spacing.XS)
+	indentation := themedSpace(th.Spacing.SM)
+	label := st.AssistantLabel.Render(ic.Assistant + space + "strike")
+	body := renderCellText(st.Text, strings.TrimSpace(c.text), max(1, width-lipgloss.Width(indentation)))
+	return label + "\n" + indent(body, indentation)
 }
 
 type toolCell struct {
@@ -53,16 +62,18 @@ type toolCell struct {
 const toolPreviewLines = 6
 
 func (c *toolCell) render(width int, th theme.Theme) string {
+	th = th.Resolve()
 	ic := iconsFor(th)
 	st := th.S()
-	labelStyle := lipgloss.NewStyle().Foreground(th.ToolLabel).Bold(true)
+	space := themedSpace(th.Spacing.XS)
+	labelStyle := st.ToolLabel
 	head := c.name
 	if c.title != "" {
-		head += " · " + c.title
+		head = displayJoin(th, ic.Dot, head, c.title)
 	} else if len(c.args) > 0 {
-		head += " " + compactJSON(c.args, 60)
+		head += space + compactJSON(c.args, 60, ic.Ellipsis)
 	}
-	status := st.Muted.Render("…")
+	status := st.Muted.Render(ic.Ellipsis)
 	if c.done {
 		if c.isError {
 			status = st.Error.Render(ic.Err)
@@ -70,11 +81,12 @@ func (c *toolCell) render(width int, th theme.Theme) string {
 			status = st.Success.Render(ic.OK)
 		}
 	}
-	out := labelStyle.Render(ic.Tool+" "+head) + " " + status
+	out := labelStyle.Render(ic.Tool+space+head) + space + status
 	if c.done && c.output != "" {
-		preview := previewLines(c.output, toolPreviewLines)
-		body := st.Muted.Width(max(1, width-4)).Render(preview)
-		out += "\n" + indent(body, "  "+st.Muted.Render("│")+" ")
+		preview := previewLines(c.output, toolPreviewLines, ic.Ellipsis, space)
+		prefix := themedSpace(th.Spacing.SM) + st.BorderMuted.Render(ic.ToolGuide) + space
+		body := renderCellText(st.Muted, preview, max(1, width-lipgloss.Width(prefix)))
+		out += "\n" + indent(body, prefix)
 	}
 	return out
 }
@@ -86,8 +98,9 @@ type infoCell struct {
 }
 
 func (c *infoCell) render(width int, th theme.Theme) string {
+	th = th.Resolve()
 	ic := iconsFor(th)
-	return lipgloss.NewStyle().Foreground(th.Warning).Width(max(1, width)).Render(ic.Info + " " + c.text)
+	return th.S().Warning.Width(max(1, width)).Render(ic.Info + themedSpace(th.Spacing.XS) + c.text)
 }
 
 type errorCell struct {
@@ -95,8 +108,9 @@ type errorCell struct {
 }
 
 func (c *errorCell) render(width int, th theme.Theme) string {
+	th = th.Resolve()
 	ic := iconsFor(th)
-	return lipgloss.NewStyle().Foreground(th.Error).Width(max(1, width)).Render(ic.Err + " " + c.text)
+	return th.S().Error.Width(max(1, width)).Render(ic.Err + themedSpace(th.Spacing.XS) + c.text)
 }
 
 func indent(s, prefix string) string {
@@ -107,23 +121,27 @@ func indent(s, prefix string) string {
 	return strings.Join(lines, "\n")
 }
 
-func previewLines(s string, n int) string {
+func renderCellText(style lipgloss.Style, text string, width int) string {
+	return style.Render(ansi.Hardwrap(text, width, false))
+}
+
+func previewLines(s string, n int, ellipsis, space string) string {
 	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
 	if len(lines) <= n {
 		return strings.Join(lines, "\n")
 	}
 	shown := strings.Join(lines[:n], "\n")
-	return shown + "\n… (" + itoa(len(lines)-n) + " more lines)"
+	return shown + "\n" + ellipsis + space + "(" + itoa(len(lines)-n) + space + "more lines)"
 }
 
-func compactJSON(raw json.RawMessage, maxLen int) string {
+func compactJSON(raw json.RawMessage, maxLen int, ellipsis string) string {
 	s := string(raw)
 	var buf bytes.Buffer
 	if err := json.Compact(&buf, raw); err == nil {
 		s = buf.String()
 	}
 	if len(s) > maxLen {
-		s = s[:maxLen] + "…"
+		s = s[:maxLen] + ellipsis
 	}
 	return s
 }

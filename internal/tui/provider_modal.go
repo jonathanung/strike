@@ -99,13 +99,13 @@ func (m *providerModal) view(width int, th theme.Theme) string {
 	body := ui.List(th, ui.ListOpts{
 		Items:   items,
 		Cursor:  m.cursor,
-		Width:   max(1, ui.InnerWidth(width)),
+		Width:   max(1, ui.PanelInnerWidth(th, width)),
 		Visible: providerModalVisible,
 		Empty:   "no providers configured",
 	})
 	return ui.Dialog(th, ui.DialogOpts{
 		Title: "Select provider",
-		Hint:  "↑/↓ move · enter select or log in · ctrl+d set default · esc close",
+		Hint:  dotJoin(th, "↑/↓ move", "enter select or log in", "ctrl+d set default", "esc close"),
 		Width: width,
 	}, body)
 }

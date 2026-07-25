@@ -22,8 +22,12 @@ type PanelOpts struct {
 	// border and degrade to plain, truncated text.
 	Width int
 	// Height, when > 0, fixes the outer height: content is truncated or
-	// blank-padded to fit. Zero fits the content.
+	// blank-padded to fit. Heights below two render structurally without panel
+	// chrome. Zero fits the content.
 	Height int
+	// Borderless omits panel chrome and padding. The body is structurally fit
+	// to Width and Height; Title, Footer, Focused, Dim, and Tone are ignored.
+	Borderless bool
 	// Focused selects BorderFocus instead of Border. When Tone is default,
 	// Focused wins over Dim (full precedence: Tone > Focused > Dim > default).
 	Focused bool
@@ -46,25 +50,37 @@ type PanelOpts struct {
 //	// │ streaming transcript…                                    │
 //	// ╰──────────────────────────────────────────────────────────╯
 //
-// Output never exceeds Width. Callers wrap body to InnerWidth(Width) for the
-// nicest result; Panel truncates any line that is still too long.
+// Output never exceeds Width. Themed callers wrap body to
+// PanelInnerWidth(th, Width) for the nicest result; Panel truncates any line
+// that is still too long.
 func Panel(th theme.Theme, opts PanelOpts, body string) string {
+	th = th.Resolve()
 	if opts.Width < 1 {
 		return ""
 	}
 	width := opts.Width
-	bordered, padX, inner := panelMetrics(width)
+	if opts.Borderless || (opts.Height > 0 && opts.Height < 2) {
+		rows := strings.Split(body, "\n")
+		for i, row := range rows {
+			rows[i] = padRight(th, row, width)
+		}
+		if opts.Height > 0 {
+			rows = fitRows(th, rows, opts.Height, width)
+		}
+		return strings.Join(rows, "\n")
+	}
+	bordered, padX, inner := panelMetrics(th, width)
 
 	rows := strings.Split(body, "\n")
 	for i, r := range rows {
-		rows[i] = padRight(r, inner)
+		rows[i] = padRight(th, r, inner)
 	}
 	if opts.Height > 0 {
 		contentRows := opts.Height
 		if bordered {
 			contentRows = max(0, opts.Height-2)
 		}
-		rows = fitRows(rows, contentRows, inner)
+		rows = fitRows(th, rows, contentRows, inner)
 	}
 
 	if !bordered {
@@ -74,39 +90,59 @@ func Panel(th theme.Theme, opts PanelOpts, body string) string {
 
 	color := panelBorderColor(th, opts)
 	bs := lipgloss.NewStyle().Foreground(color)
+	border := th.BorderStyle
 	horiz := width - 2
 
 	var b strings.Builder
-	b.WriteString(bs.Render("╭"))
+	b.WriteString(bs.Render(border.TopLeft))
 	b.WriteString(edgeBorder(th, opts.Title, horiz, color, th.S().Title))
-	b.WriteString(bs.Render("╮"))
+	b.WriteString(bs.Render(border.TopRight))
 	for _, row := range rows {
 		b.WriteByte('\n')
-		b.WriteString(bs.Render("│"))
+		b.WriteString(bs.Render(border.Vertical))
 		b.WriteString(strings.Repeat(" ", padX))
 		b.WriteString(row)
 		b.WriteString(strings.Repeat(" ", padX))
-		b.WriteString(bs.Render("│"))
+		b.WriteString(bs.Render(border.Vertical))
 	}
 	b.WriteByte('\n')
-	b.WriteString(bs.Render("╰"))
+	b.WriteString(bs.Render(border.BottomLeft))
 	b.WriteString(edgeBorder(th, opts.Footer, horiz, color, th.S().Muted))
-	b.WriteString(bs.Render("╯"))
+	b.WriteString(bs.Render(border.BottomRight))
 	return b.String()
 }
 
-// InnerWidth is the content width available inside a Panel of the given outer
-// width, after its border and one column of padding on each side. Callers
-// wrap text to this width before handing it to Panel. Returns width itself
-// when too narrow for a border, and 0 when width <= 0.
+// InnerWidth is the default-theme compatibility helper for the content width
+// inside a Panel of the given outer width. Themed callers must use
+// PanelInnerWidth. It returns width itself when too narrow for a border, and
+// 0 when width <= 0.
 func InnerWidth(width int) int {
-	_, _, inner := panelMetrics(width)
+	return PanelInnerWidth(theme.Default(), width)
+}
+
+// PanelInnerWidth reports the content width using th's resolved panel spacing.
+// Themed callers must use this instead of InnerWidth.
+func PanelInnerWidth(th theme.Theme, width int) int {
+	_, _, inner := panelMetrics(th.Resolve(), width)
 	return inner
+}
+
+// PanelInnerHeight reports the body height available inside a Panel with the
+// supplied outer dimensions. It clamps nonpositive dimensions to zero and
+// subtracts border rows only when a border fits at width and height.
+func PanelInnerHeight(width, height int) int {
+	if width <= 0 || height <= 0 {
+		return 0
+	}
+	if width < 3 || height < 2 {
+		return height
+	}
+	return max(0, height-2)
 }
 
 // panelMetrics reports, for an outer width: whether a border fits, the
 // horizontal padding inside it, and the resulting content width.
-func panelMetrics(width int) (bordered bool, padX, inner int) {
+func panelMetrics(th theme.Theme, width int) (bordered bool, padX, inner int) {
 	switch {
 	case width < 1:
 		return false, 0, 0
@@ -115,11 +151,13 @@ func panelMetrics(width int) (bordered bool, padX, inner int) {
 	case width < 6:
 		return true, 0, width - 2
 	default:
-		return true, 1, width - 4
+		padX = clamp(th.Spacing.XS, 0, (width-3)/2)
+		return true, padX, width - 2 - 2*padX
 	}
 }
 
 func panelBorderColor(th theme.Theme, opts PanelOpts) lipgloss.AdaptiveColor {
+	th = th.Resolve()
 	switch {
 	case opts.Tone != ToneDefault:
 		return toneColor(th, opts.Tone)
@@ -142,14 +180,14 @@ func edgeBorder(th theme.Theme, label string, horiz int, color lipgloss.Adaptive
 		if n <= 0 {
 			return ""
 		}
-		return bs.Render(strings.Repeat("─", n))
+		return bs.Render(strings.Repeat(th.BorderStyle.Horizontal, n))
 	}
 	// Need "─" + " label " + at least one "─": 4 rule/space cells minimum.
 	maxLabel := horiz - 4
 	if label == "" || maxLabel < 1 {
 		return rule(horiz)
 	}
-	label = truncate(label, maxLabel)
+	label = truncate(th, label, maxLabel)
 	seg := " " + label + " "
 	trail := horiz - 1 - lipgloss.Width(seg)
 	return rule(1) + labelStyle.Render(seg) + rule(trail)
@@ -157,7 +195,7 @@ func edgeBorder(th theme.Theme, label string, horiz int, color lipgloss.Adaptive
 
 // fitRows forces rows to exactly n lines: extra trailing lines are dropped,
 // missing lines are added as blank rows of inner width.
-func fitRows(rows []string, n, inner int) []string {
+func fitRows(th theme.Theme, rows []string, n, inner int) []string {
 	if n <= 0 {
 		return nil
 	}
@@ -165,7 +203,7 @@ func fitRows(rows []string, n, inner int) []string {
 		return rows[:n]
 	}
 	for len(rows) < n {
-		rows = append(rows, padRight("", inner))
+		rows = append(rows, padRight(th, "", inner))
 	}
 	return rows
 }

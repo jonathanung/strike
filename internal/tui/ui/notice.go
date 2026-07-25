@@ -30,6 +30,7 @@ func Notice(th theme.Theme, level Level, text string, width int) string {
 	if width <= 0 || text == "" {
 		return ""
 	}
+	th = th.Resolve()
 	text = collapseNewlines(text)
 	ic := resolveIcons(th)
 	st := th.S()
@@ -43,7 +44,7 @@ func Notice(th theme.Theme, level Level, text string, width int) string {
 	case LevelError:
 		glyph, style = ic.Err, st.Error
 	}
-	return truncate(style.Render(glyph+" "+text), width)
+	return truncate(th, style.Render(glyph+strings.Repeat(" ", th.Spacing.XS)+text), width)
 }
 
 // collapseNewlines flattens multi-line text into one row: CRLF, LF, and CR

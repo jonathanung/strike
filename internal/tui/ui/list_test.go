@@ -6,10 +6,66 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
+
+func TestListAlignsSelectedAndUnselectedLabelsForCursorWidthsAndSpacing(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		th   theme.Theme
+	}{
+		{"explicit XS zero", theme.Theme{Spacing: theme.NewSpacing(0, 2, 3, 4), Icons: theme.Icons{Cursor: ">>"}}},
+		{"default", theme.Default()},
+		{"custom spacing and two-cell cursor", theme.Theme{Spacing: theme.NewSpacing(3, 2, 3, 4), Icons: theme.Icons{Cursor: ">>"}}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			out := List(tt.th, ListOpts{
+				Items:  []ListItem{{Label: "selected label"}, {Label: "other label"}},
+				Cursor: 0,
+				Width:  40,
+			})
+			selected, unselected := "", ""
+			for _, line := range strings.Split(out, "\n") {
+				plain := ansi.Strip(line)
+				switch {
+				case strings.Contains(plain, "selected label"):
+					selected = plain
+				case strings.Contains(plain, "other label"):
+					unselected = plain
+				}
+			}
+			if selected == "" || unselected == "" {
+				t.Fatalf("missing list rows in %q", out)
+			}
+			selectedColumn := lipgloss.Width(selected[:strings.Index(selected, "selected label")])
+			unselectedColumn := lipgloss.Width(unselected[:strings.Index(unselected, "other label")])
+			if selectedColumn != unselectedColumn {
+				t.Errorf("label columns selected=%d unselected=%d; selected=%q unselected=%q", selectedColumn, unselectedColumn, selected, unselected)
+			}
+		})
+	}
+}
+
+func TestListTinyWidthsAreSafe(t *testing.T) {
+	items := []ListItem{{Label: "wide label", Detail: "detail"}, {Label: "other"}}
+	for _, width := range []int{0, 1, 2} {
+		out := List(theme.Default(), ListOpts{Items: items, Cursor: 0, Width: width})
+		if width == 0 {
+			if out != "" {
+				t.Errorf("width zero output = %q, want empty", out)
+			}
+			continue
+		}
+		for row, line := range strings.Split(out, "\n") {
+			if got := lipgloss.Width(line); got > width {
+				t.Errorf("width %d row %d has display width %d: %q", width, row, got, line)
+			}
+		}
+	}
+}
 
 func listItems(n int) []ListItem {
 	items := make([]ListItem, n)
@@ -97,5 +153,32 @@ func TestListDisabledRowRendersMuted(t *testing.T) {
 	}
 	if !strings.HasPrefix(disabled, "▸ ") {
 		t.Errorf("disabled row should still keep the cursor marker: %q", disabled)
+	}
+}
+
+func TestListUsesCustomCursorAndSelectedStyle(t *testing.T) {
+	saved := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(saved) })
+
+	th := theme.Default()
+	th.Icons.Cursor = ">"
+	items := []ListItem{{Label: "selected"}, {Label: "other"}}
+	selected := List(th, ListOpts{Items: items, Cursor: 0, Width: 20})
+	unselected := List(th, ListOpts{Items: items, Cursor: 1, Width: 20})
+	if !strings.HasPrefix(selected, "> ") {
+		t.Errorf("custom cursor is not rendered: %q", selected)
+	}
+	if selected == unselected {
+		t.Error("moving the selected row does not change list rendering")
+	}
+}
+
+func TestListUsesCustomDetailSeparator(t *testing.T) {
+	th := theme.Default()
+	th.Icons.DetailSeparator = "|"
+	out := List(th, ListOpts{Items: []ListItem{{Label: "label", Detail: "detail"}}, Width: 30})
+	if !strings.Contains(out, "label | detail") {
+		t.Errorf("custom detail separator is not rendered: %q", out)
 	}
 }

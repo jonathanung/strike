@@ -45,3 +45,36 @@ func TestDialogToneOverridesBorderColor(t *testing.T) {
 		t.Error("ToneWarning did not change the dialog border color")
 	}
 }
+
+func TestDialogPlacesHintUsingThemeSpacing(t *testing.T) {
+	for _, tt := range []struct {
+		name         string
+		spacing      theme.Spacing
+		wantNewlines int
+	}{
+		{"explicit zero", theme.NewSpacing(0, 0, 0, 0), 1},
+		{"custom small", theme.NewSpacing(0, 3, 0, 0), 3},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			th := theme.Default()
+			th.Spacing = tt.spacing
+			out := Dialog(th, DialogOpts{Width: 30, Hint: "hint"}, "body")
+			lines := strings.Split(out, "\n")
+			bodyLine, hintLine := -1, -1
+			for i, line := range lines {
+				if strings.Contains(line, "body") {
+					bodyLine = i
+				}
+				if strings.Contains(line, "hint") {
+					hintLine = i
+				}
+			}
+			if bodyLine < 0 || hintLine < 0 {
+				t.Fatalf("dialog omitted body or hint: %q", out)
+			}
+			if got := hintLine - bodyLine; got != tt.wantNewlines {
+				t.Errorf("body-to-hint line distance = %d, want %d\n%s", got, tt.wantNewlines, out)
+			}
+		})
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
@@ -16,6 +17,43 @@ func TestBadgeWrapsTextInBrackets(t *testing.T) {
 	}
 	if !strings.HasPrefix(out, "[") || !strings.HasSuffix(out, "]") {
 		t.Errorf("badge is not bracketed: %q", out)
+	}
+}
+
+func TestBadgeUsesCustomDelimitersAndStrongTone(t *testing.T) {
+	th := theme.Default()
+	th.Icons.BadgeLeft = "<"
+	th.Icons.BadgeRight = ">"
+	if out := Badge(th, ToneAccent, "model"); !strings.HasPrefix(out, "<") || !strings.HasSuffix(out, ">") {
+		t.Errorf("badge did not use custom delimiters: %q", out)
+	}
+}
+
+func TestWidgetsSafelyRenderNegativeThemeSpacing(t *testing.T) {
+	for _, spacing := range []theme.Spacing{
+		theme.NewSpacing(-1, -2, -3, -4),
+		theme.Spacing{}.WithXS(-1).WithSM(-2).WithMD(-3).WithLG(-4),
+		theme.Spacing{XS: -1, SM: -2, MD: -3, LG: -4},
+	} {
+		th := theme.Default()
+		th.Spacing = spacing
+		if out := Badge(th, ToneAccent, "badge"); !strings.Contains(out, "badge") {
+			t.Errorf("Badge dropped content with negative spacing: %q", out)
+		}
+		if out := Dialog(th, DialogOpts{Width: 30, Hint: "hint"}, "body"); !strings.Contains(out, "body") || !strings.Contains(out, "hint") {
+			t.Errorf("Dialog dropped content with negative spacing: %q", out)
+		}
+		if out := List(th, ListOpts{Items: []ListItem{{Label: "item"}}, Cursor: 0, Width: 20}); !strings.Contains(out, "item") {
+			t.Errorf("List dropped content with negative spacing: %q", out)
+		}
+	}
+}
+
+func TestBadgeHonorsExplicitZeroSpacing(t *testing.T) {
+	th := theme.Default()
+	th.Spacing = theme.NewSpacing(0, 0, 0, 0)
+	if got := Badge(th, ToneAccent, "x"); got != "[x]" {
+		t.Errorf("Badge with zero XS spacing = %q, want [x]", got)
 	}
 }
 
@@ -46,6 +84,48 @@ func TestKeyHintsTruncatesByDroppingWholeHints(t *testing.T) {
 	}
 	if strings.Contains(out, "interrupt") {
 		t.Errorf("overflowing hint not dropped: %q", out)
+	}
+}
+
+func TestKeyHintsNarrowFallbackUsesThemeKeyLabelGap(t *testing.T) {
+	themes := []struct {
+		name string
+		th   theme.Theme
+		gap  string
+	}{
+		{name: "default", th: theme.Default(), gap: " "},
+		{name: "explicit zero XS", th: func() theme.Theme {
+			th := theme.Default()
+			th.Spacing = theme.NewSpacing(0, 2, 3, 4)
+			return th
+		}(), gap: ""},
+		{name: "custom XS", th: func() theme.Theme {
+			th := theme.Default()
+			th.Spacing = theme.NewSpacing(2, 2, 3, 4)
+			return th
+		}(), gap: "  "},
+	}
+	for _, tt := range themes {
+		t.Run(tt.name, func(t *testing.T) {
+			full := "enter" + tt.gap + "send"
+			out := ansi.Strip(KeyHints(tt.th, len(full), []KeyHint{{Key: "enter", Label: "send"}, {Key: "esc", Label: "close"}}))
+			if out != full {
+				t.Errorf("full hint = %q, want %q", out, full)
+			}
+			if w := lipgloss.Width(out); w != len(full) {
+				t.Errorf("full hint width = %d, want %d", w, len(full))
+			}
+
+			narrowWidth := len(full) - 1
+			out = ansi.Strip(KeyHints(tt.th, narrowWidth, []KeyHint{{Key: "enter", Label: "send"}}))
+			want := strings.TrimSuffix(full, "nd") + tt.th.Resolve().Icons.Ellipsis
+			if out != want {
+				t.Errorf("narrow hint = %q, want %q", out, want)
+			}
+			if w := lipgloss.Width(out); w != narrowWidth {
+				t.Errorf("narrow hint width = %d, want %d", w, narrowWidth)
+			}
+		})
 	}
 }
 

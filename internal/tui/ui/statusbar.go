@@ -18,19 +18,19 @@ import (
 //	right := th.S().Muted.Render("⠋ working")
 //	ui.StatusBar(th, width, left, right)
 func StatusBar(th theme.Theme, width int, left, right string) string {
-	_ = th // reserved for future base styling; kept for API symmetry
+	th = th.Resolve()
 	if width <= 0 {
 		return ""
 	}
 	lw := lipgloss.Width(left)
 	if lw >= width {
-		return truncate(left, width)
+		return truncate(th, left, width)
 	}
 	rw := lipgloss.Width(right)
 	if lw+1+rw <= width {
 		return left + strings.Repeat(" ", width-lw-rw) + right
 	}
-	r := truncate(right, width-lw-1)
+	r := truncate(th, right, width-lw-1)
 	gap := width - lw - lipgloss.Width(r)
 	return left + strings.Repeat(" ", gap) + r
 }

@@ -4,16 +4,25 @@ package theme
 // like colors, have exactly one source: views reference Icons fields instead
 // of writing "❯" or "✓" inline, and a single edit re-glyphs the whole UI.
 type Icons struct {
-	Prompt    string // ❯ user prompt / input marker
-	Assistant string // ● assistant label bullet
-	Tool      string // ⚙ tool-call label
-	OK        string // ✓ success glyph
-	Err       string // ✗ error glyph
-	Info      string // ◦ informational glyph
-	Agent     string // ◆ agent marker
-	Bolt      string // ⚡ brand motif
-	Dot       string // · inline separator
-	Cursor    string // ▸ selection cursor
+	Prompt          string // ❯ user prompt / input marker
+	Assistant       string // ● assistant label bullet
+	Tool            string // ⚙ tool-call label
+	OK              string // ✓ success glyph
+	Err             string // ✗ error glyph
+	Info            string // ◦ informational glyph
+	Agent           string // ◆ agent marker
+	Bolt            string // ⚡ brand motif
+	Dot             string // · inline separator
+	Cursor          string // ▸ selection cursor
+	InputCursor     string // > composer/text-input cursor
+	FilterCursor    string // ▏ active filter cursor
+	ToolGuide       string // │ tool transcript guide
+	BadgeLeft       string // [ badge opening delimiter
+	BadgeRight      string // ] badge closing delimiter
+	DetailSeparator string // — list detail separator
+	Ellipsis        string // … truncation marker
+	LogoTopRule     string // ▁ logo top rule
+	LogoBottomRule  string // ▔ logo bottom rule
 }
 
 // DefaultIcons returns the stock glyph set. A zero Icons value is treated as
@@ -21,15 +30,81 @@ type Icons struct {
 // usable when handed a bare theme.
 func DefaultIcons() Icons {
 	return Icons{
-		Prompt:    "❯",
-		Assistant: "●",
-		Tool:      "⚙",
-		OK:        "✓",
-		Err:       "✗",
-		Info:      "◦",
-		Agent:     "◆",
-		Bolt:      "⚡",
-		Dot:       "·",
-		Cursor:    "▸",
+		Prompt:       "❯",
+		Assistant:    "●",
+		Tool:         "⚙",
+		OK:           "✓",
+		Err:          "✗",
+		Info:         "◦",
+		Agent:        "◆",
+		Bolt:         "⚡",
+		Dot:          "·",
+		Cursor:       "▸",
+		InputCursor:  ">",
+		FilterCursor: "▏",
+		ToolGuide:    "│",
+		BadgeLeft:    "[", BadgeRight: "]", DetailSeparator: "—", Ellipsis: "…",
+		LogoTopRule: "▁", LogoBottomRule: "▔",
 	}
+}
+
+func resolveIcons(i, d Icons) Icons {
+	if i.Prompt == "" {
+		i.Prompt = d.Prompt
+	}
+	if i.Assistant == "" {
+		i.Assistant = d.Assistant
+	}
+	if i.Tool == "" {
+		i.Tool = d.Tool
+	}
+	if i.OK == "" {
+		i.OK = d.OK
+	}
+	if i.Err == "" {
+		i.Err = d.Err
+	}
+	if i.Info == "" {
+		i.Info = d.Info
+	}
+	if i.Agent == "" {
+		i.Agent = d.Agent
+	}
+	if i.Bolt == "" {
+		i.Bolt = d.Bolt
+	}
+	if i.Dot == "" {
+		i.Dot = d.Dot
+	}
+	if i.Cursor == "" {
+		i.Cursor = d.Cursor
+	}
+	if i.InputCursor == "" {
+		i.InputCursor = d.InputCursor
+	}
+	if i.FilterCursor == "" {
+		i.FilterCursor = d.FilterCursor
+	}
+	if i.ToolGuide == "" {
+		i.ToolGuide = d.ToolGuide
+	}
+	if i.BadgeLeft == "" {
+		i.BadgeLeft = d.BadgeLeft
+	}
+	if i.BadgeRight == "" {
+		i.BadgeRight = d.BadgeRight
+	}
+	if i.DetailSeparator == "" {
+		i.DetailSeparator = d.DetailSeparator
+	}
+	if i.Ellipsis == "" {
+		i.Ellipsis = d.Ellipsis
+	}
+	if i.LogoTopRule == "" {
+		i.LogoTopRule = d.LogoTopRule
+	}
+	if i.LogoBottomRule == "" {
+		i.LogoBottomRule = d.LogoBottomRule
+	}
+	return i
 }
