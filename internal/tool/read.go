@@ -65,6 +65,9 @@ func (readTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	if err != nil {
 		return Result{}, err
 	}
+	if info, statErr := os.Stat(path); statErr == nil {
+		tc.Files.Record(path, info)
+	}
 	lines := strings.Split(string(data), "\n")
 	total := len(lines)
 	offset := max(a.Offset, 1)

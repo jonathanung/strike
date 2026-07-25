@@ -49,6 +49,9 @@ type Context struct {
 	WorkDir   string
 	Ask       func(ctx context.Context, req AskRequest) error
 	SpawnTask func(ctx context.Context, req TaskRequest) (TaskResult, error)
+	// Files optionally tracks read snapshots for stale-edit detection after
+	// external changes (FilesChanged / /vim). Nil disables the checks.
+	Files *FileState
 }
 
 type Tool interface {

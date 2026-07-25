@@ -40,6 +40,8 @@ func eventType(ev Event) string {
 		return "effort.selected"
 	case FastSelected:
 		return "fast.selected"
+	case FilesInvalidated:
+		return "files.invalidated"
 	case EngineError:
 		return "engine.error"
 	case ChildStarted:
@@ -92,6 +94,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &EffortSelected{}
 	case "fast.selected":
 		ev = &FastSelected{}
+	case "files.invalidated":
+		ev = &FilesInvalidated{}
 	case "engine.error":
 		ev = &EngineError{}
 	case "child.started":
@@ -132,6 +136,8 @@ func deref(ev Event) Event {
 	case *EffortSelected:
 		return *v
 	case *FastSelected:
+		return *v
+	case *FilesInvalidated:
 		return *v
 	case *EngineError:
 		return *v

@@ -88,7 +88,7 @@ func buildPaletteEntries(specs []commandSpec, agents []string, availability pale
 		Description: "filterable keybind cheatsheet",
 		Action:      paletteAction{Kind: paletteActionKeybinds},
 	})
-	for _, id := range []commandID{commandProvider, commandModel, commandEffort, commandAuth} {
+	for _, id := range []commandID{commandProvider, commandModel, commandEffort, commandAuth, commandVim} {
 		spec, ok := byID[id]
 		if !ok {
 			continue
@@ -100,7 +100,9 @@ func buildPaletteEntries(specs []commandSpec, agents []string, availability pale
 			Action:      paletteAction{Kind: paletteActionBuiltin, Value: spec.Name},
 		}
 		switch {
-		case availability.TurnRunning:
+		case id != commandVim && availability.TurnRunning:
+			// /vim is allowed mid-turn: the TUI yields the terminal and the
+			// engine keeps running; file-change signaling still applies.
 			entry.DisabledReason = "unavailable while a turn is running"
 		case id == commandModel && !availability.HasProvider:
 			entry.DisabledReason = "select a provider first"

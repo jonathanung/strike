@@ -318,6 +318,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 		defer restore()
 		program := tea.NewProgram(tui.New(eng.Ops(), events, services, tui.Options{
 			DangerouslySkipPermissions: opts.dangerouslySkipPermissions,
+			WorkDir:                    workDir,
 		}), tea.WithAltScreen(), tea.WithOutput(stdout), tea.WithInput(tui.WrapInput(os.Stdin)))
 		_, err := program.Run()
 		return err

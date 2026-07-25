@@ -128,6 +128,14 @@ type SetFast struct {
 	Enabled bool `json:"enabled"`
 }
 
+// FilesChanged reports paths the user edited outside the agent (for example
+// via /vim). The engine invalidates any prior read snapshots for those paths
+// so a subsequent edit/write fails until the model re-reads.
+type FilesChanged struct {
+	Paths  []string `json:"paths"`
+	Reason string   `json:"reason,omitempty"`
+}
+
 func (UserInput) isOp()       {}
 func (PermissionReply) isOp() {}
 func (Interrupt) isOp()       {}
@@ -135,6 +143,7 @@ func (SelectModel) isOp()     {}
 func (SelectAgent) isOp()     {}
 func (SetEffort) isOp()       {}
 func (SetFast) isOp()         {}
+func (FilesChanged) isOp()    {}
 
 // Event is an engine -> client notification.
 type Event interface{ isEvent() }
@@ -260,6 +269,14 @@ type FastSelected struct {
 	Enabled bool `json:"enabled"`
 }
 
+// FilesInvalidated confirms the engine dropped read snapshots for paths
+// reported by a FilesChanged op (external editor, post-edit review, …).
+type FilesInvalidated struct {
+	Correlation
+	Paths  []string `json:"paths"`
+	Reason string   `json:"reason,omitempty"`
+}
+
 type EngineError struct {
 	Correlation
 	Message string `json:"message"`
@@ -277,6 +294,7 @@ func (ModelSelected) isEvent()      {}
 func (AgentSelected) isEvent()      {}
 func (EffortSelected) isEvent()     {}
 func (FastSelected) isEvent()       {}
+func (FilesInvalidated) isEvent()   {}
 func (EngineError) isEvent()        {}
 func (ChildStarted) isEvent()       {}
 func (ChildCompleted) isEvent()     {}
