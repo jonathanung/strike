@@ -30,6 +30,12 @@ func eventType(ev Event) string {
 		return "tool.end"
 	case ToolCallOutput:
 		return "tool.output"
+	case ProcessStarted:
+		return "process.started"
+	case ProcessOutput:
+		return "process.output"
+	case ProcessExited:
+		return "process.exited"
 	case PermissionAsked:
 		return "permission.asked"
 	case PermissionResolved:
@@ -102,6 +108,12 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &ToolCallEnd{}
 	case "tool.output":
 		ev = &ToolCallOutput{}
+	case "process.started":
+		ev = &ProcessStarted{}
+	case "process.output":
+		ev = &ProcessOutput{}
+	case "process.exited":
+		ev = &ProcessExited{}
 	case "permission.asked":
 		ev = &PermissionAsked{}
 	case "permission.resolved":
@@ -162,6 +174,12 @@ func deref(ev Event) Event {
 	case *ToolCallEnd:
 		return *v
 	case *ToolCallOutput:
+		return *v
+	case *ProcessStarted:
+		return *v
+	case *ProcessOutput:
+		return *v
+	case *ProcessExited:
 		return *v
 	case *PermissionAsked:
 		return *v

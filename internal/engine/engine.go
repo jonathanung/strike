@@ -27,10 +27,10 @@ import (
 // call Provider.Stream on retryable failure before the turn fails.
 const defaultMaxStreamAttempts = 3
 
-// Model-facing tool-result outputs when a turn is interrupted mid-batch.
-const (
-	canceledToolOutput  = "Tool call canceled because the turn was interrupted."
-	unstartedToolOutput = "Tool call not executed because the turn was interrupted before it started."
+// Model-facing interrupt texts (aliases of protocol.ToolFeedback* helpers).
+var (
+	canceledToolOutput  = protocol.ToolFeedbackCanceled()
+	unstartedToolOutput = protocol.ToolFeedbackUnstarted()
 )
 
 // SelectFunc constructs a provider by name, returning the provider, its
@@ -108,6 +108,9 @@ type Options struct {
 	SystemPrompt string
 	// Rules are permission ruleset layers, earliest first (later wins).
 	Rules []permission.Ruleset
+	// PersistProjectRule, when set, is invoked after a DecisionProject grant
+	// so the rule can be written to project config. Optional.
+	PersistProjectRule func(permission.Rule) error
 	// MaxChildDepth bounds foreground task nesting. Zero defaults to 1 in New
 	// (root depth 0 may spawn one child; that child may not spawn further).
 	MaxChildDepth int
@@ -222,6 +225,9 @@ func New(opts Options) *Engine {
 		contextWindowTokens: opts.ContextWindow,
 	}
 	e.perms = permission.New(e.emit, opts.Rules...)
+	if opts.PersistProjectRule != nil {
+		e.perms.SetProjectPersister(opts.PersistProjectRule)
+	}
 	e.questions = question.New(e.emit)
 	return e
 }
@@ -1156,14 +1162,66 @@ func (e *Engine) consumeStream(ctx context.Context, reqCorr protocol.Correlation
 // that never began execution after a turn interrupt.
 func (e *Engine) appendUnstartedToolResults(calls []provider.ToolCall) {
 	for _, call := range calls {
-		e.messages = append(e.messages, toolResultMessage(call.ID, unstartedToolOutput, true))
+		e.messages = append(e.messages, e.settleToolFeedback(toolFeedback{
+			CallID:  call.ID,
+			Output:  unstartedToolOutput,
+			IsError: true,
+		}))
 	}
 }
 
-func toolResultMessage(callID, output string, isError bool) provider.Message {
+// toolFeedback is the uniform settlement for one tool call: optional
+// ToolCallEnd for the frontend plus a RoleTool message for the model.
+// EmitEnd is false for unstarted calls (history-only synthetic results).
+type toolFeedback struct {
+	Corr     protocol.Correlation
+	CallID   string
+	Output   string
+	IsError  bool
+	Title    string
+	Metadata json.RawMessage
+	EmitEnd  bool
+}
+
+// settleToolFeedback is the formal tool-result feedback path: one place that
+// pairs model history with (when EmitEnd) a ToolCallEnd event. Permission
+// denials, user rejects, hook blocks, interrupts, and ordinary results all
+// settle here so future phase bounces and hook messages share the same shape.
+func (e *Engine) settleToolFeedback(fb toolFeedback) provider.Message {
+	if fb.EmitEnd {
+		e.emit(protocol.ToolCallEnd{
+			Correlation: fb.Corr,
+			CallID:      fb.CallID,
+			Title:       fb.Title,
+			Output:      fb.Output,
+			IsError:     fb.IsError,
+			Metadata:    fb.Metadata,
+		})
+	}
 	return provider.Message{
 		Role:       provider.RoleTool,
-		ToolResult: &provider.ToolResult{CallID: callID, Output: output, IsError: isError},
+		ToolResult: &provider.ToolResult{CallID: fb.CallID, Output: fb.Output, IsError: fb.IsError},
+	}
+}
+
+// modelFacingToolOutput maps Execute errors onto protocol.ToolFeedback* text.
+// Success returns the tool's own output unchanged.
+func modelFacingToolOutput(res tool.Result, err error) (output string, isError bool) {
+	if err == nil {
+		return res.Output, false
+	}
+	var permDenied *permission.DeniedError
+	var permRejected *permission.RejectedError
+	var qRejected *question.RejectedError
+	switch {
+	case errors.As(err, &permDenied):
+		return permDenied.Error(), true
+	case errors.As(err, &permRejected):
+		return permRejected.Error(), true
+	case errors.As(err, &qRejected):
+		return qRejected.Error(), true
+	default:
+		return protocol.ToolFeedbackError(err.Error()), true
 	}
 }
 
@@ -1186,11 +1244,19 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 	case e.beginReqs <- beginReq{begin: begin, result: result}:
 	case <-ctx.Done():
 		// Canceled before Run accepted the begin request — unstarted.
-		return toolResultMessage(call.ID, unstartedToolOutput, true)
+		return e.settleToolFeedback(toolFeedback{
+			CallID:  call.ID,
+			Output:  unstartedToolOutput,
+			IsError: true,
+		})
 	}
 	ack := <-result
 	if !ack.emitted {
-		return toolResultMessage(call.ID, unstartedToolOutput, true)
+		return e.settleToolFeedback(toolFeedback{
+			CallID:  call.ID,
+			Output:  unstartedToolOutput,
+			IsError: true,
+		})
 	}
 	// Begin was emitted. Pre-Execute cancel/shutdown check (no Execute).
 	if ctx.Err() != nil {
@@ -1241,6 +1307,36 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 					Data:        data,
 				})
 			},
+			Process: tool.ProcessObserver{
+				Started: func(id string, argv []string) {
+					e.emit(protocol.ProcessStarted{
+						Correlation: corr,
+						ProcessID:   id,
+						CallID:      callID,
+						Argv:        argv,
+						Cwd:         e.opts.WorkDir,
+					})
+				},
+				Output: func(id, stream, data string) {
+					if data == "" {
+						return
+					}
+					e.emit(protocol.ProcessOutput{
+						Correlation: corr,
+						ProcessID:   id,
+						Stream:      stream,
+						Data:        data,
+					})
+				},
+				Exited: func(id string, exitCode int, status tool.ProcessStatus) {
+					e.emit(protocol.ProcessExited{
+						Correlation: corr,
+						ProcessID:   id,
+						ExitCode:    exitCode,
+						Status:      protocol.ProcessStatus(status),
+					})
+				},
+			},
 			RecordSessionPR: e.recordSessionPR(corr),
 		}
 		if e.opts.Depth < e.opts.MaxChildDepth {
@@ -1254,30 +1350,16 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 		return e.canceledToolResult(call.ID, corr)
 	}
 
-	output := res.Output
-	isError := false
-	if err != nil {
-		isError = true
-		var permRejected *permission.RejectedError
-		var qRejected *question.RejectedError
-		switch {
-		case errors.As(err, &permRejected):
-			output = permRejected.Error()
-		case errors.As(err, &qRejected):
-			output = qRejected.Error()
-		default:
-			output = "Error: " + err.Error()
-		}
-	}
-	e.emit(protocol.ToolCallEnd{
-		Correlation: corr,
-		CallID:      call.ID,
-		Title:       res.Title,
-		Output:      output,
-		IsError:     isError,
-		Metadata:    res.Metadata,
+	output, isError := modelFacingToolOutput(res, err)
+	return e.settleToolFeedback(toolFeedback{
+		Corr:     corr,
+		CallID:   call.ID,
+		Output:   output,
+		IsError:  isError,
+		Title:    res.Title,
+		Metadata: res.Metadata,
+		EmitEnd:  true,
 	})
-	return toolResultMessage(call.ID, output, isError)
 }
 
 // recordSessionPR returns a tool callback that persists PR linkage and emits
@@ -1303,13 +1385,13 @@ func (e *Engine) recordSessionPR(corr protocol.Correlation) func(tool.SessionPR)
 }
 
 func (e *Engine) canceledToolResult(callID string, corr protocol.Correlation) provider.Message {
-	e.emit(protocol.ToolCallEnd{
-		Correlation: corr,
-		CallID:      callID,
-		Output:      canceledToolOutput,
-		IsError:     true,
+	return e.settleToolFeedback(toolFeedback{
+		Corr:    corr,
+		CallID:  callID,
+		Output:  canceledToolOutput,
+		IsError: true,
+		EmitEnd: true,
 	})
-	return toolResultMessage(callID, canceledToolOutput, true)
 }
 
 func (e *Engine) failTurn(err error, corr protocol.Correlation, finishing chan struct{}) {

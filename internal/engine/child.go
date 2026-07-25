@@ -83,6 +83,7 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		CompactionBuffer:    e.opts.CompactionBuffer,
 		KeepUserTurns:       e.opts.KeepUserTurns,
 		Rules:               permission.DeriveChildRules(parentLayers, childAgent.Permissions),
+		PersistProjectRule:  e.opts.PersistProjectRule,
 	})
 
 	// Inherit the parent's live provider/model/priority. Clearing InitialProvider
