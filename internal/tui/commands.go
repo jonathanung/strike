@@ -52,7 +52,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandFast, Name: "/fast", Description: "toggle OpenAI priority tier (faster, ~2× cost)", ArgsHint: "[on|off]", Source: commandSourceBuiltin},
 	{ID: commandVim, Name: "/vim", Description: "open a file in the embedded editor (pane/overlay) or $EDITOR", ArgsHint: "[path[:line]]", Source: commandSourceBuiltin},
 	{ID: commandMDRead, Name: "/md-read", Description: "open a markdown file in the right pane", ArgsHint: "<path>", Source: commandSourceBuiltin},
-	{ID: commandTheme, Name: "/theme", Description: "set appearance (dark, light, or auto)", ArgsHint: "[dark|light|auto]", Source: commandSourceBuiltin},
+	{ID: commandTheme, Name: "/theme", Description: "select a color theme or set appearance", ArgsHint: "[name|dark|light|auto]", Source: commandSourceBuiltin},
 	{ID: commandLayout, Name: "/layout", Description: "toggle horizontal/vertical pane split", Source: commandSourceBuiltin},
 	{ID: commandSplit, Name: "/split", Description: "toggle horizontal/vertical pane split", Source: commandSourceBuiltin},
 	{ID: commandHelp, Name: "/help", Description: "show available commands", Source: commandSourceBuiltin},

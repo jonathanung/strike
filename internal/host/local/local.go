@@ -278,6 +278,10 @@ func (settingsAdapter) SaveDefaults(provider, model, agent, effort string) error
 	return config.SetGlobalDefaults(provider, model, agent, level)
 }
 
+func (settingsAdapter) SaveTheme(id string) error {
+	return config.SetGlobalTheme(id)
+}
+
 // providersAdapter exposes custom provider CRUD through the host contract.
 type providersAdapter struct {
 	store *config.CustomStore

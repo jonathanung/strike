@@ -42,15 +42,34 @@ func TestLoadAgentsAndSkills(t *testing.T) {
 	}
 
 	skills := LoadSkills(work)
-	if len(skills) != 1 || skills[0].Name != "commit" {
-		t.Fatalf("skills = %+v", skills)
+	var commit *Skill
+	for i := range skills {
+		if skills[i].Name == "commit" {
+			commit = &skills[i]
+			break
+		}
 	}
-	if got := skills[0].Render("with a good message"); got != "Commit the changes: with a good message" {
+	if commit == nil {
+		t.Fatalf("skills = %+v, want overridden commit", skills)
+	}
+	if got := commit.Render("with a good message"); got != "Commit the changes: with a good message" {
 		t.Errorf("render = %q", got)
 	}
-	if got := skills[0].Render(""); got != "Commit the changes: " {
+	if got := commit.Render(""); got != "Commit the changes: " {
 		t.Errorf("render empty = %q", got)
 	}
+	// Builtins still load alongside the project override.
+	if !skillNames(skills)["ship"] {
+		t.Errorf("expected builtin ship among %+v", skills)
+	}
+}
+
+func skillNames(skills []Skill) map[string]bool {
+	m := make(map[string]bool, len(skills))
+	for _, s := range skills {
+		m[s.Name] = true
+	}
+	return m
 }
 
 func TestLoadAgentsWithErrorRejectsUnsafeNames(t *testing.T) {
@@ -396,10 +415,17 @@ func TestLoadSkillsWithErrorAcceptsUnicodeHyphenUnderscoreAndProjectOverride(t *
 	if err != nil {
 		t.Fatalf("LoadSkillsWithError() error = %v", err)
 	}
-	if len(skills) != 1 {
-		t.Fatalf("skills = %+v, want one overridden skill", skills)
+	var got *Skill
+	for i := range skills {
+		if skills[i].Name == name {
+			got = &skills[i]
+			break
+		}
 	}
-	if got := skills[0]; got.Name != name || got.Description != "project override" || got.Template != "project template" {
+	if got == nil {
+		t.Fatalf("skills = %+v, want overridden %q", skills, name)
+	}
+	if got.Description != "project override" || got.Template != "project template" {
 		t.Errorf("overridden skill = %+v, want valid project definition for %q", got, name)
 	}
 }
