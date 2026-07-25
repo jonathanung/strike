@@ -3,18 +3,12 @@ package tui
 import (
 	"bytes"
 	"io"
+	"strconv"
+	"strings"
 )
 
-// Shift+Enter terminal sequences rewritten to ESC+\r (Alt+Enter), which Bubble
-// Tea delivers as KeyEnter+Alt — matching the Newline binding.
-var (
-	// Kitty CSI-u Shift+Enter: ESC [ 13 ; 2 u
-	shiftEnterKitty = []byte("\x1b[13;2u")
-	// xterm modifyOtherKeys Shift+Enter: ESC [ 27 ; 2 ; 13 ~
-	shiftEnterXterm = []byte("\x1b[27;2;13~")
-	// Alt+Enter as delivered to Bubble Tea after rewrite.
-	altEnter = []byte("\x1b\r")
-)
+// altEnter is Alt+Enter as delivered to Bubble Tea after rewrite (KeyEnter+Alt).
+var altEnter = []byte("\x1b\r")
 
 // Enhanced-keyboard enable/disable sequences written at program start/exit:
 //
@@ -37,10 +31,11 @@ type fileReader interface {
 	Fd() uintptr
 }
 
-// WrapInput returns a reader that rewrites known Shift+Enter CSI sequences to
-// Alt+Enter. When r is file-like (Fd), the wrapper forwards Fd/Name/Close/Write
-// so Bubble Tea still enables raw mode and cancelreader can interrupt reads.
-// A nil reader is returned unchanged.
+// WrapInput returns a reader that normalizes enhanced-keyboard CSI sequences:
+// Shift/Alt+Enter → Alt+Enter (ESC+\r), and Ctrl+letter (Kitty CSI-u /
+// xterm modifyOtherKeys) → legacy control bytes. When r is file-like (Fd), the
+// wrapper forwards Fd/Name/Close/Write so Bubble Tea still enables raw mode and
+// cancelreader can interrupt reads. A nil reader is returned unchanged.
 func WrapInput(r io.Reader) io.Reader {
 	if r == nil {
 		return nil
@@ -85,9 +80,9 @@ func (s *shiftEnterFile) Name() string {
 }
 
 // EnableEnhancedKeys asks the terminal for modifyOtherKeys level 2 and Kitty
-// progressive enhancement so Shift+Enter is distinguishable from Enter. The
-// returned function restores the prior modes; it is safe to call multiple times.
-// A nil writer is a no-op.
+// progressive enhancement so Shift+Enter and Ctrl+letter are distinguishable
+// from bare keys. The returned function restores the prior modes; it is safe to
+// call multiple times. A nil writer is a no-op.
 //
 // Note: these sequences are typically written before the alt screen is entered.
 // Bubble Tea has no clean post-altscreen hook; terminals still accept the modes.
@@ -110,7 +105,7 @@ func EnableEnhancedKeys(w io.Writer) (restore func()) {
 }
 
 // shiftEnterReader buffers incomplete CSI prefixes across Read calls and
-// rewrites only complete matches of the two Shift+Enter sequences above.
+// normalizes complete enhanced-key sequences (Shift/Alt+Enter, Ctrl+letter).
 type shiftEnterReader struct {
 	r   io.Reader
 	buf []byte // unconsumed input, possibly a partial CSI prefix
@@ -165,38 +160,187 @@ func (s *shiftEnterReader) rewrite() []byte {
 			i++
 			continue
 		}
-		rest := s.buf[i:]
-		if bytes.HasPrefix(rest, shiftEnterKitty) {
-			out.Write(altEnter)
-			i += len(shiftEnterKitty)
-			continue
-		}
-		if bytes.HasPrefix(rest, shiftEnterXterm) {
-			out.Write(altEnter)
-			i += len(shiftEnterXterm)
-			continue
-		}
-		// Hold back a partial prefix of either sequence so a split Read can
-		// complete it. Anything else starting with ESC is passed through.
-		if isPartialShiftEnter(rest) {
+		end, csi, incomplete := scanCSI(s.buf[i:])
+		if incomplete {
+			// Hold incomplete CSI so a split Read can complete it.
 			break
 		}
-		out.WriteByte(s.buf[i])
-		i++
+		if !csi {
+			// Bare ESC or ESC not followed by '[': emit immediately.
+			out.WriteByte(s.buf[i])
+			i++
+			continue
+		}
+		seq := s.buf[i : i+end]
+		rewritten, drop, handled := classifyEnhanced(seq)
+		if handled && drop {
+			// Consume release events with no output.
+		} else if handled {
+			out.Write(rewritten)
+		} else {
+			out.Write(seq)
+		}
+		i += end
 	}
 	s.buf = append([]byte(nil), s.buf[i:]...)
 	return out.Bytes()
 }
 
-// isPartialShiftEnter reports whether b is a proper prefix of a known
-// Shift+Enter CSI sequence. Bare ESC alone is not partial so Escape/interrupt
-// is delivered immediately; holding starts only at ESC [ (CSI introducer).
-func isPartialShiftEnter(b []byte) bool {
-	if len(b) < 2 {
-		return false
+// scanCSI examines b starting at ESC. It returns:
+//
+//	end         — bytes consumed when a complete CSI is found
+//	csi         — true if this is a CSI sequence (ESC [ … final)
+//	incomplete  — true if the stream ends mid-CSI (hold for more input)
+//
+// Bare ESC alone is not incomplete CSI (caller emits immediately). ESC not
+// followed by '[' is not CSI.
+func scanCSI(b []byte) (end int, csi bool, incomplete bool) {
+	if len(b) == 0 || b[0] != 0x1b {
+		return 0, false, false
 	}
-	if b[0] != 0x1b || b[1] != '[' {
-		return false
+	if len(b) == 1 {
+		// Bare ESC: deliver immediately (Escape/interrupt), do not hold.
+		return 1, false, false
 	}
-	return bytes.HasPrefix(shiftEnterKitty, b) || bytes.HasPrefix(shiftEnterXterm, b)
+	if b[1] != '[' {
+		return 1, false, false
+	}
+	// After ESC [, consume parameter/intermediate bytes 0x20-0x3F; final is 0x40-0x7E.
+	for i := 2; i < len(b); i++ {
+		c := b[i]
+		if c >= 0x40 && c <= 0x7e {
+			return i + 1, true, false
+		}
+		if c < 0x20 || c > 0x3f {
+			// Invalid CSI byte before final: not a well-formed CSI; caller
+			// will emit ESC and rescan (treat as non-CSI from this ESC).
+			return 1, false, false
+		}
+	}
+	// Stream ended mid-params: hold.
+	return 0, true, true
+}
+
+// classifyEnhanced maps known enhanced-keyboard CSI sequences to legacy bytes.
+// handled=false means passthrough the original sequence unchanged.
+// drop=true (with handled) means consume with no output (e.g. key-release).
+func classifyEnhanced(seq []byte) (out []byte, drop bool, handled bool) {
+	if len(seq) < 3 || seq[0] != 0x1b || seq[1] != '[' {
+		return nil, false, false
+	}
+	final := seq[len(seq)-1]
+	params := string(seq[2 : len(seq)-1])
+
+	var code, mods, event int
+	var hasEvent bool
+	switch final {
+	case 'u':
+		// Kitty CSI-u: code | code;mods | code;mods:event
+		fields := strings.Split(params, ";")
+		if len(fields) < 1 || fields[0] == "" {
+			return nil, false, false
+		}
+		var ok bool
+		code, ok = parsePrimary(fields[0])
+		if !ok {
+			return nil, false, false
+		}
+		mods = 1
+		if len(fields) >= 2 {
+			mods, event, hasEvent, ok = parseModsEvent(fields[1])
+			if !ok {
+				return nil, false, false
+			}
+		}
+	case '~':
+		// xterm modifyOtherKeys: 27;mods;code
+		fields := strings.Split(params, ";")
+		if len(fields) != 3 {
+			return nil, false, false
+		}
+		lead, err1 := strconv.Atoi(fields[0])
+		m, err2 := strconv.Atoi(fields[1])
+		c, err3 := strconv.Atoi(fields[2])
+		if err1 != nil || err2 != nil || err3 != nil || lead != 27 {
+			return nil, false, false
+		}
+		mods, code = m, c
+	default:
+		return nil, false, false
+	}
+
+	// event==3 (release) → drop; missing/1/2 continue; other → passthrough
+	if hasEvent {
+		switch event {
+		case 3:
+			return nil, true, true
+		case 1, 2:
+			// press / repeat
+		default:
+			return nil, false, false
+		}
+	}
+
+	// Kitty/xterm mods are 1-based (1 = none). mods<=0 is invalid; avoid
+	// underflow on bits := mods-1 and passthrough the original sequence.
+	if mods <= 0 {
+		return nil, false, false
+	}
+
+	bits := mods - 1
+	shift := bits&1 != 0
+	alt := bits&2 != 0
+	ctrl := bits&4 != 0
+
+	// Shift/Alt+Enter (no ctrl) → Alt+Enter for Newline binding.
+	// Ctrl+Enter (code 13 with ctrl) is intentionally not rewritten.
+	if code == 13 && (shift || alt) && !ctrl {
+		return altEnter, false, true
+	}
+	// Ctrl+letter → legacy control byte (code & 0x1f).
+	if ctrl && isLetterCode(code) {
+		return []byte{byte(code & 0x1f)}, false, true
+	}
+	return nil, false, false
+}
+
+// parsePrimary parses the first numeric field of a Kitty CSI-u parameter
+// (before any ':' sub-params).
+func parsePrimary(field string) (int, bool) {
+	primary, _, _ := strings.Cut(field, ":")
+	if primary == "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(primary)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// parseModsEvent parses a Kitty mods field, optionally with :event
+// (e.g. "5", "5:1", "5:3").
+func parseModsEvent(field string) (mods, event int, hasEvent, ok bool) {
+	primary, rest, found := strings.Cut(field, ":")
+	if primary == "" {
+		return 0, 0, false, false
+	}
+	m, err := strconv.Atoi(primary)
+	if err != nil {
+		return 0, 0, false, false
+	}
+	if !found || rest == "" {
+		return m, 0, false, true
+	}
+	// Only the first sub-param after ':' is the event type.
+	evStr, _, _ := strings.Cut(rest, ":")
+	ev, err := strconv.Atoi(evStr)
+	if err != nil {
+		return 0, 0, false, false
+	}
+	return m, ev, true, true
+}
+
+func isLetterCode(code int) bool {
+	return (code >= 'A' && code <= 'Z') || (code >= 'a' && code <= 'z')
 }

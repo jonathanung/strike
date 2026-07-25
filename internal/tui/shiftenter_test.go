@@ -14,12 +14,20 @@ func TestWrapInputNil(t *testing.T) {
 	}
 }
 
-func TestShiftEnterRewrite(t *testing.T) {
+// TestWrapInputEnhancedRewrite pins byte-level rewrites under EnableEnhancedKeys.
+//
+// Model.Update tests that inject tea.KeyMsg{Type: KeyCtrlC} (and similar) only
+// validate routing after Bubble Tea has already decoded a key. These WrapInput
+// tests cover the terminal wire format: Kitty CSI-u and xterm modifyOtherKeys
+// sequences that must become legacy control bytes (or Alt+Enter) before the
+// tea input parser sees them.
+func TestWrapInputEnhancedRewrite(t *testing.T) {
 	tests := []struct {
 		name string
 		in   string
 		want string
 	}{
+		// --- Shift+Enter (both protocols) → ESC+\r ---
 		{
 			name: "Kitty CSI-u Shift+Enter",
 			in:   "\x1b[13;2u",
@@ -30,6 +38,146 @@ func TestShiftEnterRewrite(t *testing.T) {
 			in:   "\x1b[27;2;13~",
 			want: "\x1b\r",
 		},
+		// --- Alt+Enter (both protocols) → ESC+\r ---
+		{
+			name: "Kitty CSI-u Alt+Enter",
+			in:   "\x1b[13;3u",
+			want: "\x1b\r",
+		},
+		{
+			name: "xterm modifyOtherKeys Alt+Enter",
+			in:   "\x1b[27;3;13~",
+			want: "\x1b\r",
+		},
+		// --- Ctrl+Enter (both protocols) → passthrough (not letter, not Shift/Alt+Enter) ---
+		{
+			name: "Ctrl+Enter Kitty CSI-u passthrough",
+			in:   "\x1b[13;5u",
+			want: "\x1b[13;5u",
+		},
+		{
+			name: "Ctrl+Enter xterm modifyOtherKeys passthrough",
+			in:   "\x1b[27;5;13~",
+			want: "\x1b[27;5;13~",
+		},
+		// --- Invalid mods (<=0): passthrough, no underflow rewrite ---
+		{
+			name: "invalid mods 0 Kitty passthrough",
+			in:   "\x1b[99;0u",
+			want: "\x1b[99;0u",
+		},
+		// --- Ctrl+letter CSI → legacy control byte (code & 0x1f) ---
+		// Wire-level Ctrl+C/P coverage: Update(KeyCtrlC) tests are routing-only.
+		{
+			name: "Ctrl+C Kitty CSI-u",
+			in:   "\x1b[99;5u",
+			want: "\x03",
+		},
+		{
+			name: "Ctrl+C xterm modifyOtherKeys",
+			in:   "\x1b[27;5;99~",
+			want: "\x03",
+		},
+		{
+			name: "Ctrl+C uppercase Kitty CSI-u",
+			in:   "\x1b[67;5u",
+			want: "\x03",
+		},
+		{
+			name: "Ctrl+P Kitty CSI-u",
+			in:   "\x1b[112;5u",
+			want: "\x10",
+		},
+		{
+			name: "Ctrl+P xterm modifyOtherKeys",
+			in:   "\x1b[27;5;112~",
+			want: "\x10",
+		},
+		// Sample app letters (at least one protocol each): h j k l d
+		{
+			name: "Ctrl+H Kitty",
+			in:   "\x1b[104;5u",
+			want: "\x08",
+		},
+		{
+			name: "Ctrl+J Kitty",
+			in:   "\x1b[106;5u",
+			want: "\x0a",
+		},
+		{
+			name: "Ctrl+K Kitty",
+			in:   "\x1b[107;5u",
+			want: "\x0b",
+		},
+		{
+			name: "Ctrl+L Kitty",
+			in:   "\x1b[108;5u",
+			want: "\x0c",
+		},
+		{
+			name: "Ctrl+D Kitty",
+			in:   "\x1b[100;5u",
+			want: "\x04",
+		},
+		{
+			name: "Ctrl+H xterm",
+			in:   "\x1b[27;5;104~",
+			want: "\x08",
+		},
+		// --- Kitty event types: press (:1) / repeat (:2) rewrite; release (:3) drop ---
+		{
+			name: "Kitty Ctrl+C press event :1",
+			in:   "\x1b[99;5:1u",
+			want: "\x03",
+		},
+		{
+			name: "Kitty Ctrl+C repeat event :2",
+			in:   "\x1b[99;5:2u",
+			want: "\x03",
+		},
+		{
+			name: "Kitty Ctrl+C release event :3 dropped",
+			in:   "\x1b[99;5:3u",
+			want: "",
+		},
+		{
+			name: "Kitty release in surrounding text",
+			in:   "a\x1b[99;5:3ub",
+			want: "ab",
+		},
+		// --- Legacy control bytes and unknown CSI passthrough ---
+		{
+			name: "legacy Ctrl+C passthrough",
+			in:   "\x03",
+			want: "\x03",
+		},
+		{
+			name: "legacy Ctrl+P passthrough",
+			in:   "\x10",
+			want: "\x10",
+		},
+		{
+			name: "unrelated CSI arrow passthrough",
+			in:   "\x1b[A",
+			want: "\x1b[A",
+		},
+		{
+			name: "unrelated CSI with text",
+			in:   "up\x1b[Adown",
+			want: "up\x1b[Adown",
+		},
+		// --- Mixed / multi-sequence ---
+		{
+			name: "mixed text + Ctrl+C CSI + text",
+			in:   "ab\x1b[99;5ucd",
+			want: "ab\x03cd",
+		},
+		{
+			name: "multi-sequence Shift+Enter + Ctrl+C + Ctrl+P",
+			in:   "\x1b[13;2u\x1b[99;5u\x1b[112;5u",
+			want: "\x1b\r\x03\x10",
+		},
+		// --- Existing plain / edge cases kept green ---
 		{
 			name: "plain CR unchanged",
 			in:   "\r",
@@ -41,24 +189,14 @@ func TestShiftEnterRewrite(t *testing.T) {
 			want: "\n",
 		},
 		{
-			name: "mixed text and Kitty sequence",
+			name: "mixed text and Kitty Shift+Enter",
 			in:   "hello\x1b[13;2uworld",
 			want: "hello\x1b\rworld",
 		},
 		{
-			name: "mixed text and xterm sequence",
+			name: "mixed text and xterm Shift+Enter",
 			in:   "a\x1b[27;2;13~b",
 			want: "a\x1b\rb",
-		},
-		{
-			name: "unrelated CSI arrow passthrough",
-			in:   "\x1b[A",
-			want: "\x1b[A",
-		},
-		{
-			name: "unrelated CSI with text",
-			in:   "up\x1b[Adown",
-			want: "up\x1b[Adown",
 		},
 		{
 			name: "bare ESC passthrough",
@@ -71,12 +209,12 @@ func TestShiftEnterRewrite(t *testing.T) {
 			want: "",
 		},
 		{
-			name: "multi-sequence in one buffer",
+			name: "multi Shift+Enter sequences in one buffer",
 			in:   "\x1b[13;2u\x1b[27;2;13~\x1b[13;2u",
 			want: "\x1b\r\x1b\r\x1b\r",
 		},
 		{
-			name: "multi-sequence with text between",
+			name: "multi Shift+Enter with text between",
 			in:   "x\x1b[13;2uy\x1b[27;2;13~z",
 			want: "x\x1b\ry\x1b\rz",
 		},
@@ -92,6 +230,12 @@ func TestShiftEnterRewrite(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestShiftEnterRewrite keeps the historical name as an alias entry point so
+// -run TestShiftEnter still exercises the enhanced rewrite table.
+func TestShiftEnterRewrite(t *testing.T) {
+	TestWrapInputEnhancedRewrite(t)
 }
 
 // chunkReader yields successive chunks on each Read, then EOF.
@@ -116,7 +260,7 @@ func TestShiftEnterPartialCSIAcrossReads(t *testing.T) {
 		want   string
 	}{
 		{
-			name: "Kitty split mid-sequence",
+			name: "Kitty Shift+Enter split mid-sequence",
 			chunks: [][]byte{
 				[]byte("\x1b[13"),
 				[]byte(";2u"),
@@ -138,7 +282,7 @@ func TestShiftEnterPartialCSIAcrossReads(t *testing.T) {
 			want: "\x1b\r",
 		},
 		{
-			name: "xterm split mid-sequence",
+			name: "xterm Shift+Enter split mid-sequence",
 			chunks: [][]byte{
 				[]byte("\x1b[27;2"),
 				[]byte(";13~"),
@@ -146,7 +290,7 @@ func TestShiftEnterPartialCSIAcrossReads(t *testing.T) {
 			want: "\x1b\r",
 		},
 		{
-			name: "text then partial then completion",
+			name: "text then partial Shift+Enter then completion",
 			chunks: [][]byte{
 				[]byte("hi"),
 				[]byte("\x1b[1"),
@@ -162,6 +306,35 @@ func TestShiftEnterPartialCSIAcrossReads(t *testing.T) {
 				[]byte("A"),
 			},
 			want: "\x1b[A",
+		},
+		// Enhanced: Ctrl+letter CSI held across split reads.
+		{
+			name: "Kitty Ctrl+C split mid-sequence",
+			chunks: [][]byte{
+				[]byte("\x1b[99"),
+				[]byte(";5u"),
+			},
+			want: "\x03",
+		},
+		{
+			name: "xterm Ctrl+P split mid-sequence",
+			chunks: [][]byte{
+				[]byte("\x1b[27;5"),
+				[]byte(";112~"),
+			},
+			want: "\x10",
+		},
+		{
+			name: "Kitty Ctrl+C one byte at a time from CSI introducer",
+			chunks: func() [][]byte {
+				seq := []byte("\x1b[99;5u")
+				out := [][]byte{seq[:2]} // ESC [
+				for _, b := range seq[2:] {
+					out = append(out, []byte{b})
+				}
+				return out
+			}(),
+			want: "\x03",
 		},
 	}
 	for _, tt := range tests {
@@ -192,8 +365,8 @@ func TestBareESCDeliveredImmediately(t *testing.T) {
 	}
 }
 
-// TestDivergentCSINotStuck ensures up-arrow (and similar non-Shift+Enter CSI)
-// is delivered on the first Read and never held as a Shift+Enter prefix.
+// TestDivergentCSINotStuck ensures up-arrow (and similar non-rewritten CSI)
+// is delivered on the first Read and never held as a rewrite prefix.
 func TestDivergentCSINotStuck(t *testing.T) {
 	const seq = "\x1b[A"
 	r := WrapInput(strings.NewReader(seq))
@@ -243,8 +416,57 @@ func TestPartialCSIHeldAcrossReads(t *testing.T) {
 	}
 }
 
+// TestPartialCtrlCHeldAcrossReads asserts wire-level hold semantics for Kitty
+// Ctrl+C CSI split across reads. First partial Read returns 0, nil; completion
+// yields legacy \x03. (Update KeyCtrlC tests cover routing only.)
+func TestPartialCtrlCHeldAcrossReads(t *testing.T) {
+	cr := &chunkReader{chunks: [][]byte{
+		[]byte("\x1b[99"),
+		[]byte(";5u"),
+	}}
+	r := WrapInput(cr)
+	buf := make([]byte, 16)
+
+	n, err := r.Read(buf)
+	if n != 0 || err != nil {
+		t.Fatalf("partial Ctrl+C CSI Read = %d %q err=%v, want 0, nil", n, buf[:n], err)
+	}
+
+	n, err = r.Read(buf)
+	if err != nil && err != io.EOF {
+		t.Fatalf("complete Read err: %v", err)
+	}
+	if string(buf[:n]) != "\x03" {
+		t.Fatalf("complete Read = %q, want Ctrl+C \\x03", buf[:n])
+	}
+}
+
+// TestPartialCtrlPXtermHeldAcrossReads asserts hold semantics for xterm
+// modifyOtherKeys Ctrl+P split across reads.
+func TestPartialCtrlPXtermHeldAcrossReads(t *testing.T) {
+	cr := &chunkReader{chunks: [][]byte{
+		[]byte("\x1b[27;5"),
+		[]byte(";112~"),
+	}}
+	r := WrapInput(cr)
+	buf := make([]byte, 16)
+
+	n, err := r.Read(buf)
+	if n != 0 || err != nil {
+		t.Fatalf("partial Ctrl+P CSI Read = %d %q err=%v, want 0, nil", n, buf[:n], err)
+	}
+
+	n, err = r.Read(buf)
+	if err != nil && err != io.EOF {
+		t.Fatalf("complete Read err: %v", err)
+	}
+	if string(buf[:n]) != "\x10" {
+		t.Fatalf("complete Read = %q, want Ctrl+P \\x10", buf[:n])
+	}
+}
+
 func TestShiftEnterPartialPrefixAtEOFPassthrough(t *testing.T) {
-	// Incomplete CSI that is a prefix of a Shift+Enter sequence must not be
+	// Incomplete CSI that is a prefix of a rewritten sequence must not be
 	// dropped when the underlying reader hits EOF.
 	partial := "\x1b[13"
 	got, err := io.ReadAll(WrapInput(strings.NewReader(partial)))
@@ -253,6 +475,17 @@ func TestShiftEnterPartialPrefixAtEOFPassthrough(t *testing.T) {
 	}
 	if string(got) != partial {
 		t.Errorf("partial at EOF = %q, want passthrough %q", got, partial)
+	}
+}
+
+func TestPartialCtrlCPrefixAtEOFPassthrough(t *testing.T) {
+	partial := "\x1b[99"
+	got, err := io.ReadAll(WrapInput(strings.NewReader(partial)))
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if string(got) != partial {
+		t.Errorf("partial Ctrl+C at EOF = %q, want passthrough %q", got, partial)
 	}
 }
 
