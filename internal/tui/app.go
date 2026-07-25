@@ -202,7 +202,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spin, cmd = m.spin.Update(msg)
 		return m, cmd
 
-	case authStartedMsg, authDeviceMsg, authDoneMsg:
+	case authStartedMsg, authDeviceMsg, authPasteErrMsg, authDoneMsg:
 		cmd, _ := m.applyAuthMsg(msg)
 		m.reflow()
 		return m, cmd
@@ -969,7 +969,14 @@ func (m Model) View() string {
 		parts = append(parts, content)
 	}
 	parts = append(parts, footer...)
-	return ui.Canvas(m.th, m.width, m.height, strings.Join(parts, "\n"))
+	frame := ui.Canvas(m.th, m.width, m.height, strings.Join(parts, "\n"))
+	// Prepend OSC52 after Canvas so overlay/ansi.Cut cannot strip it.
+	if wm, ok := m.modal.(*authWaitModal); ok {
+		if osc := wm.TakeCopyOSC(); osc != "" {
+			return osc + frame
+		}
+	}
+	return frame
 }
 
 // paletteResultFocus reveals a newly produced left-side notice when the right
