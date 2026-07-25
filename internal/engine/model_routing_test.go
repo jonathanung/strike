@@ -526,15 +526,27 @@ func TestTaskChildPrefixedAgentModelPinDoesNotStreamForeignIdOnParentProvider(t 
 	)
 
 	taskCall := taskToolCallWithAgent("task-route", taskPrompt, "explorer")
-	// xai: parent tool-use, optional buggy child stream (same inherited
-	// provider), parent final. openai: preferred child stream after pin parse.
+	// xai: parent tool-use + parent final. openai: preferred child stream after pin parse.
+	// Matched steps avoid races when the child still inherits xai briefly.
 	xaiProv := newScriptedProvider(
 		toolCallStep(taskCall),
-		completedStep("buggy-child-or-parent-followup"),
-		completedStep("parent after child"),
+		func() streamStep {
+			s := completedStep("buggy-child-or-parent-followup")
+			s.match = matchUserText(taskPrompt)
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("parent after child")
+			s.match = matchToolResult("task-route")
+			return s
+		}(),
 	)
 	openaiProv := newScriptedProvider(
-		completedStep("child finished on openai"),
+		func() streamStep {
+			s := completedStep("child finished on openai")
+			s.match = matchUserText(taskPrompt)
+			return s
+		}(),
 	)
 	providers := map[string]*scriptedProvider{
 		"openai": openaiProv,

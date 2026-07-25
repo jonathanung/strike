@@ -110,15 +110,28 @@ func TestQuestionFlow(t *testing.T) {
 }
 
 func TestChildQuestionReplyRouting(t *testing.T) {
-	taskCall := taskToolCall("task-q", "ask in child")
+	const childPrompt = "ask in child"
+	taskCall := taskToolCall("task-q", childPrompt)
 	childQ := questionToolCall("child-q-1", map[string]any{
 		"question": "Child question?",
 	})
 	prov := newScriptedProvider(
 		toolCallStep(taskCall),
-		toolCallStep(childQ),
-		completedStep("child after question"),
-		completedStep("parent after task"),
+		func() streamStep {
+			s := toolCallStep(childQ)
+			s.match = matchUserText(childPrompt)
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("child after question")
+			s.match = matchToolResult("child-q-1")
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("parent after task")
+			s.match = matchToolResult("task-q")
+			return s
+		}(),
 	)
 	eng := engine.New(engine.Options{
 		SessionID:       "parent-q-route",
@@ -136,9 +149,10 @@ func TestChildQuestionReplyRouting(t *testing.T) {
 
 	var events []protocol.Event
 	var sawChildAsk bool
+	var parentDone, childDone bool
 	guard := time.NewTimer(10 * time.Second)
 	defer guard.Stop()
-	for {
+	for !(parentDone && childDone) {
 		select {
 		case ev, ok := <-eng.Events():
 			if !ok {
@@ -154,8 +168,10 @@ func TestChildQuestionReplyRouting(t *testing.T) {
 					RequestID: ev.RequestID,
 					Answers:   []string{"from-parent"},
 				}
+			case protocol.ChildCompleted:
+				childDone = true
 			case protocol.TurnCompleted:
-				goto done
+				parentDone = true
 			case protocol.EngineError:
 				t.Fatalf("engine error: %s", ev.Message)
 			}
@@ -163,7 +179,6 @@ func TestChildQuestionReplyRouting(t *testing.T) {
 			t.Fatalf("timed out; events=%v", summarizeEvents(events))
 		}
 	}
-done:
 	if !sawChildAsk {
 		t.Fatalf("never saw child-correlated QuestionAsked; events=%v", summarizeEvents(events))
 	}
@@ -186,8 +201,17 @@ done:
 	if taskEnd.IsError {
 		t.Errorf("task failed after question reply: %s", taskEnd.Output)
 	}
-	if !strings.Contains(taskEnd.Output, "child after question") {
-		t.Errorf("task output = %q, want child summary", taskEnd.Output)
+	if !strings.Contains(taskEnd.Output, "Started child session") {
+		t.Errorf("task output = %q, want started notice", taskEnd.Output)
+	}
+	var childSummary string
+	for _, ev := range events {
+		if c, ok := ev.(protocol.ChildCompleted); ok {
+			childSummary = c.Summary
+		}
+	}
+	if !strings.Contains(childSummary, "child after question") {
+		t.Errorf("ChildCompleted summary = %q, want child after question", childSummary)
 	}
 }
 

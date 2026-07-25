@@ -397,13 +397,26 @@ func TestChildCannotWidenViaAgentProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	taskCall := taskToolCallWithAgent("task-ag3", "try write", "writer")
-	writeCall := writeToolCall("w-child", "protected.txt", "pwned\n")
+	const childPrompt = "try write"
+	taskCall := taskToolCallWithAgent("task-ag3", childPrompt, "writer")
+	writeCall := writeToolCall("w-child", "secret.txt", "pwned\n")
 	prov := newScriptedProvider(
 		toolCallStep(taskCall),
-		toolCallStep(writeCall),
-		completedStep("child after deny"),
-		completedStep("parent done"),
+		func() streamStep {
+			s := toolCallStep(writeCall)
+			s.match = matchUserText(childPrompt)
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("child after deny")
+			s.match = matchToolResult("w-child")
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("parent done")
+			s.match = matchToolResult("task-ag3")
+			return s
+		}(),
 	)
 
 	// Base allows write so a missing parent ceiling would let the child succeed.
@@ -453,9 +466,10 @@ func TestChildCannotWidenViaAgentProfile(t *testing.T) {
 		taskEnd    protocol.ToolCallEnd
 		sawTask    bool
 		childDone  bool
+		parentDone bool
 	)
 	deadline := time.After(10 * time.Second)
-	for {
+	for !(parentDone && childDone && sawTask) {
 		select {
 		case <-deadline:
 			t.Fatal("timed out waiting for turn")
@@ -478,13 +492,12 @@ func TestChildCannotWidenViaAgentProfile(t *testing.T) {
 					sawTask = true
 				}
 			case protocol.TurnCompleted:
-				goto done
+				parentDone = true
 			case protocol.EngineError:
 				t.Fatalf("engine error: %s", ev.Message)
 			}
 		}
 	}
-done:
 	if askedWrite {
 		t.Error("child write emitted PermissionAsked; parent deny must hard-reject")
 	}
@@ -514,13 +527,26 @@ func TestChildAgentDenyFurtherRestricts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	taskCall := taskToolCallWithAgent("task-restrict", "try write", "reviewer")
+	const childPrompt = "try write"
+	taskCall := taskToolCallWithAgent("task-restrict", childPrompt, "reviewer")
 	writeCall := writeToolCall("w-restrict", "open.txt", "child-pwn\n")
 	prov := newScriptedProvider(
 		toolCallStep(taskCall),
-		toolCallStep(writeCall),
-		completedStep("child after deny"),
-		completedStep("parent done"),
+		func() streamStep {
+			s := toolCallStep(writeCall)
+			s.match = matchUserText(childPrompt)
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("child after deny")
+			s.match = matchToolResult("w-restrict")
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("parent done")
+			s.match = matchToolResult("task-restrict")
+			return s
+		}(),
 	)
 
 	baseAllow := permission.Ruleset{
@@ -558,9 +584,10 @@ func TestChildAgentDenyFurtherRestricts(t *testing.T) {
 		askedWrite bool
 		childDone  bool
 		sawTask    bool
+		parentDone bool
 	)
 	deadline := time.After(10 * time.Second)
-	for {
+	for !(parentDone && childDone && sawTask) {
 		select {
 		case <-deadline:
 			t.Fatal("timed out")
@@ -582,13 +609,12 @@ func TestChildAgentDenyFurtherRestricts(t *testing.T) {
 					sawTask = true
 				}
 			case protocol.TurnCompleted:
-				goto done
+				parentDone = true
 			case protocol.EngineError:
 				t.Fatalf("engine error: %s", ev.Message)
 			}
 		}
 	}
-done:
 	if askedWrite {
 		t.Error("child write emitted PermissionAsked; child deny must hard-reject")
 	}

@@ -14,9 +14,10 @@ func NewTask() Tool { return taskTool{} }
 func (taskTool) Name() string { return "task" }
 
 func (taskTool) Description() string {
-	return `Delegate a bounded subtask to a foreground child agent with its own context.
+	return `Delegate a bounded subtask to a child agent with its own context.
 
-- Blocks until the child finishes; returns one terminal result.
+- Returns immediately after the child starts (does not block this turn).
+- Result includes the child session id; a later child.completed event carries the terminal summary.
 - Optional agent selects a persona (defaults to the current agent).
 - Children cannot spawn further tasks (depth limit 1).
 - Use for scoped work that benefits from a fresh message history.`
@@ -57,18 +58,45 @@ func (taskTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 		return Result{}, err
 	}
 	out := res.Output
+	title := "task"
+	if res.SessionID != "" {
+		title = "task " + shortID(res.SessionID)
+	}
+	meta := taskMetadata(res)
 	switch res.Status {
-	case "completed":
-		return Result{Title: "task", Output: out}, nil
+	case "started", "completed":
+		return Result{Title: title, Output: out, Metadata: meta}, nil
 	case "failed", "canceled":
 		if out == "" {
 			out = "task " + res.Status
 		}
-		return Result{Title: "task", Output: out}, fmt.Errorf("%s", out)
+		return Result{Title: title, Output: out, Metadata: meta}, fmt.Errorf("%s", out)
 	default:
 		if out == "" {
 			out = "task failed"
 		}
-		return Result{Title: "task", Output: out}, fmt.Errorf("%s", out)
+		return Result{Title: title, Output: out, Metadata: meta}, fmt.Errorf("%s", out)
 	}
+}
+
+func shortID(id string) string {
+	id = strings.TrimSpace(id)
+	if len(id) <= 8 {
+		return id
+	}
+	return id[:8]
+}
+
+func taskMetadata(res TaskResult) json.RawMessage {
+	if res.SessionID == "" && res.Status == "" {
+		return nil
+	}
+	b, err := json.Marshal(map[string]string{
+		"sessionId": res.SessionID,
+		"status":    res.Status,
+	})
+	if err != nil {
+		return nil
+	}
+	return b
 }
