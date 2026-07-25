@@ -840,6 +840,7 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 	var cmd tea.Cmd
 	switch ev := ev.(type) {
 	case protocol.UserMessage:
+		m.completeAssistantCells()
 		m.cells = append(m.cells, &userCell{text: ev.Text})
 		if m.titleTopic == "" {
 			if topic := sanitizeTitleTopic(ev.Text); topic != "" {
@@ -859,6 +860,10 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 			m.cells = append(m.cells, &assistantCell{text: ev.Text})
 		}
 	case protocol.ToolCallBegin:
+		if last, ok := lastCell[*assistantCell](m.cells); ok {
+			last.complete = true
+			last.mdCacheOK = false
+		}
 		m.toolCallsThisTurn++
 		tc := &toolCell{callID: ev.CallID, name: ev.Name, args: ev.Args}
 		m.toolByID[ev.CallID] = tc
@@ -890,6 +895,7 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		}
 		cmd = m.broadcastContextState()
 	case protocol.TurnCompleted:
+		m.completeAssistantCells()
 		var notify tea.Cmd
 		if !m.focused && !m.turnStartedAt.IsZero() && time.Since(m.turnStartedAt) >= notifyAfterTurn {
 			notify = notifyUnfocusedCmd("strike: turn complete")
@@ -930,6 +936,8 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 	case protocol.EngineError:
 		// Mid-turn failures belong in the transcript; idle-state errors
 		// (no model selected, bad /provider, …) show in the notice line.
+		// Do not mark assistants complete here: non-terminal errors (e.g.
+		// "turn already running") must not freeze a live stream.
 		if m.turnRunning {
 			m.cells = append(m.cells, &errorCell{text: ev.Message})
 		} else {
@@ -1431,6 +1439,17 @@ func lastCell[T cell](cells []cell) (T, bool) {
 	}
 	last, ok := cells[len(cells)-1].(T)
 	return last, ok
+}
+
+// completeAssistantCells marks every assistant transcript cell complete so
+// markdown rendering runs for finished replies (including those no longer trailing).
+func (m *Model) completeAssistantCells() {
+	for _, c := range m.cells {
+		if a, ok := c.(*assistantCell); ok {
+			a.complete = true
+			a.mdCacheOK = false
+		}
+	}
 }
 
 func (m *Model) refreshViewport() {

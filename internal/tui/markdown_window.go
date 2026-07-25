@@ -5,7 +5,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -97,15 +96,4 @@ func (w markdownWindow) render() markdownWindow {
 	}
 	w.vp.SetContent(out)
 	return w
-}
-
-func glamourRender(source string, width int) (string, error) {
-	r, err := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
-		glamour.WithWordWrap(max(1, width)),
-	)
-	if err != nil {
-		return "", err
-	}
-	return r.Render(source)
 }
