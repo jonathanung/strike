@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -401,6 +402,32 @@ func TestNoOSCBackgroundJunkInComposerAfterSubmit(t *testing.T) {
 		}
 	}
 
+	// Byte-at-a-time leaked OSC reaches the composer as runes; strip there.
+	mChunk, _ := newAppTestModel(nil, nil)
+	mChunk = updateApp(t, mChunk, tea.WindowSizeMsg{Width: 80, Height: 24})
+	for _, r := range junk {
+		mChunk = updateApp(t, mChunk, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	if strings.Contains(mChunk.composer.Value(), "rgb:0000") || strings.Contains(mChunk.composer.Value(), "]11;") {
+		t.Errorf("composer after chunked OSC runes = %q", mChunk.composer.Value())
+	}
+	mChunk = updateApp(t, mChunk, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("ok")})
+	if mChunk.composer.Value() != "ok" {
+		t.Errorf("composer after chunked OSC + ok = %q, want ok", mChunk.composer.Value())
+	}
+
+	// Normal typing of "]11;notes" must not be eaten.
+	if got := stripComposerOSCLeak("]11;notes"); got != "]11;notes" {
+		t.Errorf("stripComposerOSCLeak(notes) = %q, want preserved", got)
+	}
+	got, err := io.ReadAll(WrapInput(strings.NewReader("]11;notes")))
+	if err != nil {
+		t.Fatalf("typing WrapInput: %v", err)
+	}
+	if string(got) != "]11;notes" {
+		t.Errorf("typing WrapInput = %q, want preserved", got)
+	}
+
 	m, ops := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.providerName = "echo"
@@ -439,5 +466,60 @@ func TestNoOSCBackgroundJunkInComposerAfterSubmit(t *testing.T) {
 	plain := ansi.Strip(view)
 	if strings.Contains(plain, "rgb:0000") || strings.Contains(plain, "]11;rgb") {
 		t.Errorf("rendered view has OSC junk: %q", plain)
+	}
+}
+
+// TestMarkdownRenderDoesNotUseAutoStyle pins #52: WithAutoStyle re-queries OSC 11
+// on every complete assistant cell and dumps the reply into the composer.
+func TestMarkdownRenderDoesNotUseAutoStyle(t *testing.T) {
+	savedMD := glamourStyleName
+	savedDetected := appearanceDetected
+	savedDetectedDark := appearanceDetectedDark
+	savedDark := lipgloss.HasDarkBackground()
+	t.Cleanup(func() {
+		glamourStyleName = savedMD
+		appearanceDetected = savedDetected
+		appearanceDetectedDark = savedDetectedDark
+		lipgloss.SetHasDarkBackground(savedDark)
+	})
+
+	PinAppearance()
+	if !appearanceDetected {
+		t.Fatal("PinAppearance did not mark appearance detected")
+	}
+	style := glamourStyle()
+	if style != "dark" && style != "light" {
+		t.Fatalf("glamourStyle = %q, want dark or light (never auto)", style)
+	}
+
+	// Rendering markdown must keep the pinned style (no "auto" path).
+	out, err := glamourRender("# hi\n\n**bold**", 40)
+	if err != nil {
+		t.Fatalf("glamourRender: %v", err)
+	}
+	if out == "" {
+		t.Fatal("glamourRender returned empty")
+	}
+	if glamourStyle() != style {
+		t.Errorf("style changed during render: before %q after %q", style, glamourStyle())
+	}
+	if glamourStyleName == "auto" || glamourStyleName == "" {
+		t.Errorf("glamourStyleName = %q after render, want pinned dark/light", glamourStyleName)
+	}
+
+	// Complete assistant cell after submit must not leave OSC junk in composer.
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.composer.SetValue("prompt")
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	_ = m.applyEvent(protocol.TextDelta{Text: "# Title\n\n- item"})
+	_ = m.applyEvent(protocol.TurnCompleted{})
+	_ = m.View() // forces markdown render on complete cell
+	if strings.Contains(m.composer.Value(), "rgb:0000") || strings.Contains(m.composer.Value(), "]11;") {
+		t.Errorf("composer after markdown view has OSC junk: %q", m.composer.Value())
+	}
+	plain := ansi.Strip(m.View())
+	if strings.Contains(plain, "rgb:0000") || strings.Contains(plain, "]11;rgb") {
+		t.Errorf("view after markdown has OSC junk: %q", plain)
 	}
 }
