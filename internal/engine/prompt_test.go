@@ -75,6 +75,10 @@ func TestPlanSystemPromptIsReadOnly(t *testing.T) {
 	for _, want := range []string{
 		"Plan mode (read-only)",
 		"MUST NOT edit",
+		"Interview first",
+		"Push back on vague scope",
+		"Ask before assuming",
+		"Prefer the `question` tool",
 		"Lead with the recommended path",
 	} {
 		if !strings.Contains(p, want) {

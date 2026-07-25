@@ -4,7 +4,7 @@
 // Used by internal/engine (dispatch), internal/permission (AskRequest, for the
 // Context.Ask signature), and cmd/strike (registry construction); internal/tui
 // never imports it — tool calls reach the frontend only as
-// protocol.ToolCallBegin/End events.
+// protocol.ToolCallBegin/Output/End events.
 package tool
 
 import (
@@ -78,6 +78,8 @@ type SessionPR struct {
 // SpawnTask, when non-nil, runs a blocking foreground child session.
 // AskUser, when non-nil, blocks until the user answers a question batch.
 // SwitchAgent, when non-nil, queues an agent switch applied when the turn ends.
+// ReportOutput, when non-nil, streams partial stdout/stderr to the UI while
+// Execute is still running (e.g. live bash output).
 // RecordSessionPR, when non-nil, persists a PR URL/number on the session
 // (used when bash captures gh pr create/view output).
 type Context struct {
@@ -86,6 +88,10 @@ type Context struct {
 	SpawnTask   func(ctx context.Context, req TaskRequest) (TaskResult, error)
 	AskUser     func(ctx context.Context, req QuestionRequest) (QuestionResponse, error)
 	SwitchAgent func(name string) error
+	// ReportOutput streams retained output chunks (already size-capped by the
+	// tool) for live UI. Nil disables streaming; tools must still return the
+	// full Result.Output at the end.
+	ReportOutput func(data string)
 	// RecordSessionPR stores PR linkage on the session when non-nil.
 	RecordSessionPR func(pr SessionPR) error
 	// Files optionally tracks read snapshots for stale-edit detection after

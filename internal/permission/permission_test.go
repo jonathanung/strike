@@ -43,6 +43,38 @@ func TestDefaultsIncludesTaskAllow(t *testing.T) {
 	}
 }
 
+func TestDenyOnly(t *testing.T) {
+	in := Ruleset{
+		{Permission: "bash", Pattern: "*", Action: Allow},
+		{Permission: "edit", Pattern: "*", Action: Deny},
+		{Permission: "write", Pattern: "*", Action: Ask},
+		{Permission: "read", Pattern: "secret/*", Action: Deny},
+	}
+	got := DenyOnly(in)
+	want := Ruleset{
+		{Permission: "edit", Pattern: "*", Action: Deny},
+		{Permission: "read", Pattern: "secret/*", Action: Deny},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("DenyOnly len = %d, want %d; got %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("DenyOnly[%d] = %#v, want %#v", i, got[i], want[i])
+		}
+	}
+	// Defensive copy: mutating result must not touch input.
+	if len(got) > 0 {
+		got[0].Action = Allow
+		if in[1].Action != Deny {
+			t.Errorf("input mutated to %q", in[1].Action)
+		}
+	}
+	if DenyOnly(nil) != nil && len(DenyOnly(nil)) != 0 {
+		t.Errorf("DenyOnly(nil) = %#v, want nil/empty", DenyOnly(nil))
+	}
+}
+
 func TestDeriveChildRules(t *testing.T) {
 	t.Run("parent deny beats childExtra allow", func(t *testing.T) {
 		parent := []Ruleset{{{Permission: "bash", Pattern: "*", Action: Deny}}}
