@@ -163,7 +163,7 @@ func TestVerticalFocusKeysSwapNotCycle(t *testing.T) {
 		t.Fatal("need vertical orientation")
 	}
 	startIdx := m.windows.index
-	// ctrl+j focuses top pane (left), does not cycle windows.
+	// Empty composer: ctrl+j focuses top, ctrl+k focuses bottom (no kill to claim).
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
 	if m.focus != focusLeft {
 		t.Errorf("vertical ctrl+j focus = %v, want left/top", m.focus)
@@ -174,6 +174,18 @@ func TestVerticalFocusKeysSwapNotCycle(t *testing.T) {
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
 	if m.focus != focusRight {
 		t.Errorf("vertical ctrl+k focus = %v, want right/bottom", m.focus)
+	}
+	// With text mid-line, left-focus ctrl+k kills instead of focusing bottom (#86).
+	m.focus = focusLeft
+	m.composer.Focus()
+	m.composer.SetValue("top bottom")
+	m.composer.SetCursor(3)
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+	if m.focus != focusLeft {
+		t.Errorf("vertical left ctrl+k with text focus = %v, want left", m.focus)
+	}
+	if got := m.composer.Value(); got != "top" {
+		t.Errorf("vertical left ctrl+k composer = %q, want top", got)
 	}
 	// ctrl+l cycles next window in vertical mode.
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
@@ -207,10 +219,12 @@ func TestThemeCommandAppearanceAndPicker(t *testing.T) {
 	savedDark := lipgloss.HasDarkBackground()
 	savedDetected := appearanceDetected
 	savedDetectedDark := appearanceDetectedDark
+	savedMDStyle := glamourStyleName
 	t.Cleanup(func() {
 		lipgloss.SetHasDarkBackground(savedDark)
 		appearanceDetected = savedDetected
 		appearanceDetectedDark = savedDetectedDark
+		glamourStyleName = savedMDStyle
 	})
 	appearanceDetected = false
 
@@ -337,10 +351,12 @@ func TestApplyAppearanceIsTestable(t *testing.T) {
 	savedDark := lipgloss.HasDarkBackground()
 	savedDetected := appearanceDetected
 	savedDetectedDark := appearanceDetectedDark
+	savedMDStyle := glamourStyleName
 	t.Cleanup(func() {
 		lipgloss.SetHasDarkBackground(savedDark)
 		appearanceDetected = savedDetected
 		appearanceDetectedDark = savedDetectedDark
+		glamourStyleName = savedMDStyle
 	})
 	// Seed detection cache as if the terminal reported dark, then force modes.
 	appearanceDetected = true
@@ -350,13 +366,22 @@ func TestApplyAppearanceIsTestable(t *testing.T) {
 	if lipgloss.HasDarkBackground() {
 		t.Error("applyAppearance(light) left dark background")
 	}
+	if glamourStyle() != "light" {
+		t.Errorf("glamour style after light = %q", glamourStyle())
+	}
 	applyAppearance(appearanceDark)
 	if !lipgloss.HasDarkBackground() {
 		t.Error("applyAppearance(dark) left light background")
 	}
+	if glamourStyle() != "dark" {
+		t.Errorf("glamour style after dark = %q", glamourStyle())
+	}
 	applyAppearance(appearanceAuto)
 	if !lipgloss.HasDarkBackground() {
 		t.Error("applyAppearance(auto) did not restore detected dark")
+	}
+	if glamourStyle() != "dark" {
+		t.Errorf("glamour style after auto = %q", glamourStyle())
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -144,6 +145,12 @@ type Model struct {
 	// selectedCell is the index into cells for tool/explore expand selection
 	// (-1 = none). Only collapsible tool/explore cells are targeted.
 	selectedCell int
+	// transcriptPlainLines mirrors viewport content without ANSI, used for
+	// path:line hit-testing (open-at-line).
+	transcriptPlainLines []string
+	// selectedFileRef is set when the user click-selects a path:line citation
+	// (-1 = none). Empty-composer enter opens it when no tool expand applies.
+	selectedFileRef int
 	// cellClip stages one-shot OSC52 for y-to-copy (pointer so value-receiver
 	// View can clear it). Never nil after New.
 	cellClip *cellClipboard
@@ -220,6 +227,9 @@ type Model struct {
 	// children tracks active/recent subagent sessions for the activity pane.
 	// Lifecycle never appends transcript cells.
 	children []childActivity
+
+	// killBuf holds the last composer kill (ctrl+w/u/k) for ctrl+y yank.
+	killBuf string
 }
 
 // childActivity is one foreground subagent row in the activity pane.
@@ -249,24 +259,25 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 	sp := newSpinner(th)
 
 	m := Model{
-		ops:          ops,
-		events:       events,
-		services:     services,
-		agents:       services.Agents,
-		skills:       services.Skills,
-		commands:     commandCatalog(services.Skills),
-		th:           th,
-		themeID:      themeID,
-		toolByID:     map[string]*toolCell{},
-		selectedCell: -1,
-		cellClip:     &cellClipboard{},
-		composer:     ta,
-		keyMap:       defaultKeyMap(),
-		windows:      newWindowRegistry(),
-		spin:         sp,
-		historyPos:   -1,
-		focused:      true,
-		appearance:   appearanceAuto,
+		ops:             ops,
+		events:          events,
+		services:        services,
+		agents:          services.Agents,
+		skills:          services.Skills,
+		commands:        commandCatalog(services.Skills),
+		th:              th,
+		themeID:         themeID,
+		toolByID:        map[string]*toolCell{},
+		selectedCell:    -1,
+		selectedFileRef: -1,
+		cellClip:        &cellClipboard{},
+		composer:        ta,
+		keyMap:          defaultKeyMap(),
+		windows:         newWindowRegistry(),
+		spin:            sp,
+		historyPos:      -1,
+		focused:         true,
+		appearance:      appearanceAuto,
 	}
 	for _, option := range options {
 		m.dangerouslySkipPermissions = option.DangerouslySkipPermissions
@@ -604,6 +615,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
+		// Composer readline before nav chords so ctrl+k kills in the input
+		// instead of cycling windows / focusing the right pane.
+		if m.focus == focusLeft {
+			if next, cmd, ok := m.applyComposerReadline(msg); ok {
+				return next, cmd
+			}
+		}
 		if key.Matches(msg, m.keyMap.FocusLeft) {
 			m.completion = nil
 			cmd := m.focusPane(focusLeft)
@@ -700,8 +718,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Expand paste chips before send so the model sees full content.
 			text := strings.TrimSpace(m.composerTextExpanded())
 			if text == "" {
-				// Empty enter is tool expand (handleToolCellKeys); if nothing
-				// collapsible was available, stay put.
+				// Empty enter is tool expand / open-at-line (handleToolCellKeys).
 				return m, nil
 			}
 			if strings.HasPrefix(text, "/") {
@@ -751,6 +768,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.MouseButtonWheelDown:
 			m.viewport.ScrollDown(m.viewport.MouseWheelDelta)
 			return m, nil
+		case tea.MouseButtonLeft:
+			if ref, ok := m.fileRefAtMouse(msg); ok {
+				return m.openFileRef(ref)
+			}
 		}
 	}
 
@@ -765,6 +786,9 @@ func (m Model) updateComposer(msg tea.Msg) (tea.Model, tea.Cmd) {
 	before := m.composer.Value()
 	var cmd tea.Cmd
 	m.composer, cmd = m.composer.Update(msg)
+	if cleaned := stripComposerOSCLeak(m.composer.Value()); cleaned != m.composer.Value() {
+		m.composer.SetValue(cleaned)
+	}
 	if m.historyPos >= 0 && m.composer.Value() != before {
 		m.resetHistoryBrowsing()
 	}
@@ -774,6 +798,75 @@ func (m Model) updateComposer(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.recomputeCompletion()
 	m.reflow()
 	return m, cmd
+}
+
+// applyComposerReadline handles focusLeft readline chords so they are not
+// stolen by window-cycle / focus bindings (notably ctrl+k). Palette and other
+// global chords are matched earlier and remain global.
+//
+// ctrl+k only claims the event when it deletes text; at EOL / empty composer it
+// falls through so vertical FocusRight and horizontal CycleWindowPrev still work.
+func (m Model) applyComposerReadline(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	switch {
+	case key.Matches(msg, m.keyMap.Yank):
+		if m.killBuf == "" {
+			return m, nil, true
+		}
+		m.resetHistoryBrowsing()
+		m.composer.InsertString(m.killBuf)
+		m.recomputeCompletion()
+		m.reflow()
+		return m, nil, true
+	case key.Matches(msg, m.keyMap.WordBackward), key.Matches(msg, m.keyMap.WordForward):
+		next, cmd := m.updateComposer(msg)
+		return next.(Model), cmd, true
+	case key.Matches(msg, m.keyMap.KillWord), key.Matches(msg, m.keyMap.KillLineStart):
+		before := m.composer.Value()
+		next, cmd := m.updateComposer(msg)
+		nm := next.(Model)
+		if killed, ok := contiguousDeletion(before, nm.composer.Value()); ok {
+			nm.killBuf = killed
+		}
+		return nm, cmd, true
+	case key.Matches(msg, m.keyMap.KillLineEnd):
+		before := m.composer.Value()
+		next, cmd := m.updateComposer(msg)
+		nm := next.(Model)
+		killed, ok := contiguousDeletion(before, nm.composer.Value())
+		if !ok {
+			// No deletion — leave the key for nav (cycle prev / focus bottom).
+			return m, nil, false
+		}
+		nm.killBuf = killed
+		return nm, cmd, true
+	default:
+		return m, nil, false
+	}
+}
+
+// contiguousDeletion returns the single deleted span when after is before with
+// one contiguous rune range removed (kill-word / kill-line style edits).
+func contiguousDeletion(before, after string) (string, bool) {
+	br, ar := []rune(before), []rune(after)
+	if len(ar) >= len(br) {
+		return "", false
+	}
+	i := 0
+	for i < len(ar) && br[i] == ar[i] {
+		i++
+	}
+	deleted := len(br) - len(ar)
+	if i+deleted > len(br) {
+		return "", false
+	}
+	if string(br[i+deleted:]) != string(ar[i:]) {
+		return "", false
+	}
+	killed := string(br[i : i+deleted])
+	if killed == "" {
+		return "", false
+	}
+	return killed, true
 }
 
 func (m *Model) recomputeCompletion() {
@@ -1503,6 +1596,8 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "/memory":
 		return m.handleMemoryCommand(fields[1:])
+	case "/issues":
+		return m.handleIssuesCommand(fields[1:])
 	default:
 		// Unknown commands fall through to skills: /name args renders the
 		// skill template and submits it as the user message.
@@ -1606,6 +1701,102 @@ func (m Model) handleMemoryCommand(args []string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.setNotice("memory: deleted "+args[1], false)
+		return m, nil
+	default:
+		m.setNotice(usage, true)
+		return m, nil
+	}
+}
+
+func (m Model) handleIssuesCommand(args []string) (tea.Model, tea.Cmd) {
+	m.resetComposer()
+	if m.services.Issues == nil {
+		m.setNotice("project issues are unavailable", true)
+		return m, nil
+	}
+	usage := "usage: /issues [list [open|closed]|add <title>|get <id>|close <id>]"
+	if len(args) == 0 {
+		args = []string{"list"}
+	}
+	switch args[0] {
+	case "list", "ls":
+		status := ""
+		if len(args) > 1 {
+			status = args[1]
+		}
+		items, err := m.services.Issues.List(status)
+		if err != nil {
+			m.setNotice("issues: "+err.Error(), true)
+			return m, nil
+		}
+		if len(items) == 0 {
+			if status != "" {
+				m.setNotice("issues: no "+status+" issues", false)
+			} else {
+				m.setNotice("issues: (empty)", false)
+			}
+			return m, nil
+		}
+		parts := make([]string, 0, len(items))
+		for _, iss := range items {
+			parts = append(parts, fmt.Sprintf("#%d [%s] %s", iss.ID, iss.Status, iss.Title))
+		}
+		m.setNotice("issues: "+dotJoin(m.th, parts...), false)
+		return m, nil
+	case "add", "create", "new":
+		if len(args) < 2 {
+			m.setNotice(usage, true)
+			return m, nil
+		}
+		title := strings.Join(args[1:], " ")
+		iss, err := m.services.Issues.Create(title, "")
+		if err != nil {
+			m.setNotice("issues: "+err.Error(), true)
+			return m, nil
+		}
+		m.setNotice(fmt.Sprintf("issues: opened #%d %s", iss.ID, iss.Title), false)
+		return m, nil
+	case "get", "show":
+		if len(args) < 2 {
+			m.setNotice(usage, true)
+			return m, nil
+		}
+		id, err := strconv.Atoi(args[1])
+		if err != nil || id < 1 {
+			m.setNotice("issues: id must be a positive integer", true)
+			return m, nil
+		}
+		iss, ok, err := m.services.Issues.Get(id)
+		if err != nil {
+			m.setNotice("issues: "+err.Error(), true)
+			return m, nil
+		}
+		if !ok {
+			m.setNotice(fmt.Sprintf("issues: no issue #%d", id), true)
+			return m, nil
+		}
+		msg := fmt.Sprintf("#%d [%s] %s", iss.ID, iss.Status, iss.Title)
+		if iss.Body != "" {
+			msg += ": " + iss.Body
+		}
+		m.setNotice("issues: "+msg, false)
+		return m, nil
+	case "close":
+		if len(args) < 2 {
+			m.setNotice(usage, true)
+			return m, nil
+		}
+		id, err := strconv.Atoi(args[1])
+		if err != nil || id < 1 {
+			m.setNotice("issues: id must be a positive integer", true)
+			return m, nil
+		}
+		iss, err := m.services.Issues.Close(id)
+		if err != nil {
+			m.setNotice("issues: "+err.Error(), true)
+			return m, nil
+		}
+		m.setNotice(fmt.Sprintf("issues: closed #%d %s", iss.ID, iss.Title), false)
 		return m, nil
 	default:
 		m.setNotice(usage, true)
@@ -1812,6 +2003,8 @@ func (m *Model) refreshViewport() {
 	if len(m.cells) == 0 {
 		m.viewport.SetContent("")
 		m.viewport.GotoTop()
+		m.transcriptPlainLines = nil
+		m.selectedFileRef = -1
 		return
 	}
 	m.syncToolSelectionFlags()
@@ -1823,7 +2016,13 @@ func (m *Model) refreshViewport() {
 	for _, c := range m.cells {
 		blocks = append(blocks, c.render(width, m.th))
 	}
-	m.viewport.SetContent(strings.Join(blocks, "\n\n"))
+	content := strings.Join(blocks, "\n\n")
+	m.transcriptPlainLines = strings.Split(ansi.Strip(content), "\n")
+	if m.selectedFileRef >= len(m.collectFileRefs()) {
+		m.selectedFileRef = -1
+	}
+	linked := postLinkifyRendered(content, m.th, m.workDir)
+	m.viewport.SetContent(linked)
 	if atBottom {
 		m.viewport.GotoBottom()
 	} else {
@@ -1832,8 +2031,8 @@ func (m *Model) refreshViewport() {
 }
 
 // handleToolCellKeys handles [, ], empty-composer enter, and y for tool
-// selection, expand/collapse, and clipboard copy. handled is true when the key
-// was consumed; cmd may clear a copied flash.
+// selection, expand/collapse, open-at-line, and clipboard copy. handled is true
+// when the key was consumed; cmd may launch the editor or clear a copied flash.
 func (m *Model) handleToolCellKeys(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
 	if m.focus != focusLeft || m.modal != nil || m.completion != nil {
 		return false, nil
@@ -1849,7 +2048,15 @@ func (m *Model) handleToolCellKeys(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
 		m.moveToolSelection(1)
 		return true, nil
 	case key.Matches(msg, m.keyMap.ToolExpand), key.Matches(msg, m.keyMap.Send):
-		return m.toggleSelectedTool(), nil
+		if m.toggleSelectedTool() {
+			return true, nil
+		}
+		if ref, ok := m.fileRefForEnter(); ok {
+			next, c := m.openFileRef(ref)
+			*m = next.(Model)
+			return true, c
+		}
+		return false, nil
 	case key.Matches(msg, m.keyMap.ToolCopy):
 		return m.copySelectedCell()
 	}
@@ -1943,6 +2150,134 @@ func (m *Model) syncToolSelectionFlags() {
 			tc.selected = sel
 		}
 	}
+}
+
+// collectFileRefs returns path:line citations in transcript order.
+func (m Model) collectFileRefs() []fileRef {
+	var refs []fileRef
+	for _, line := range m.transcriptPlainLines {
+		for _, sp := range findFileRefSpans(line) {
+			refs = append(refs, sp.fileRef)
+		}
+	}
+	return refs
+}
+
+// fileRefForEnter picks the click-selected citation, else the most recent one.
+func (m Model) fileRefForEnter() (fileRef, bool) {
+	refs := m.collectFileRefs()
+	if len(refs) == 0 {
+		return fileRef{}, false
+	}
+	if m.selectedFileRef >= 0 && m.selectedFileRef < len(refs) {
+		return refs[m.selectedFileRef], true
+	}
+	return refs[len(refs)-1], true
+}
+
+// openFileRef launches the configured editor at path:line via /vim plumbing.
+func (m Model) openFileRef(ref fileRef) (tea.Model, tea.Cmd) {
+	if strings.TrimSpace(ref.Path) == "" {
+		return m, nil
+	}
+	args := []string{ref.Path}
+	if ref.Line > 0 {
+		args = []string{ref.Path + ":" + itoa(ref.Line)}
+	}
+	// Remember selection so a subsequent empty enter re-opens the same ref.
+	refs := m.collectFileRefs()
+	m.selectedFileRef = -1
+	for i, r := range refs {
+		if r.Path == ref.Path && r.Line == ref.Line {
+			m.selectedFileRef = i
+			break
+		}
+	}
+	return m.handleVimCommand(args)
+}
+
+// fileRefAtMouse maps a left-click in the transcript viewport to a path:line.
+func (m Model) fileRefAtMouse(msg tea.MouseMsg) (fileRef, bool) {
+	if m.modal != nil || len(m.transcriptPlainLines) == 0 {
+		return fileRef{}, false
+	}
+	ox, oy, ok := m.transcriptContentOrigin()
+	if !ok {
+		return fileRef{}, false
+	}
+	relY := msg.Y - oy
+	relX := msg.X - ox
+	if relY < 0 || relX < 0 || relY >= m.viewport.Height {
+		return fileRef{}, false
+	}
+	lineIdx := m.viewport.YOffset + relY
+	if lineIdx < 0 || lineIdx >= len(m.transcriptPlainLines) {
+		return fileRef{}, false
+	}
+	return fileRefAtColumn(m.transcriptPlainLines[lineIdx], relX)
+}
+
+// transcriptContentOrigin is the top-left cell of the transcript viewport body
+// in screen coordinates (after header and panel chrome).
+func (m Model) transcriptContentOrigin() (x, y int, ok bool) {
+	if !m.ready || len(m.cells) == 0 || m.viewport.Height <= 0 {
+		return 0, 0, false
+	}
+	th := m.th.Resolve()
+	gutter := th.Spacing.XS
+	leftWidth := m.width
+	showLeft := true
+	if m.splitOrientation != orientVertical {
+		geo := computePaneGeometry(m.width, gutter, m.focus)
+		if geo.mode == paneSingle && m.focus == focusRight {
+			return 0, 0, false
+		}
+		leftWidth = geo.leftCandidateWidth(m.width)
+	} else {
+		l0 := computeLayout(m.width, m.height, m.composer.Height(), m.completionPopupHeightFor(m.width), m.dangerouslySkipPermissions, m.noticeRowsFor(m.width))
+		bodyHeight := l0.transcript + l0.notice + l0.popup + l0.composer
+		geo := computeVerticalPaneGeometry(m.width, bodyHeight, gutter, m.focus)
+		if geo.mode == paneSingle && m.focus == focusRight {
+			return 0, 0, false
+		}
+		leftWidth = m.width
+		showLeft = !(geo.mode == paneSingle && m.focus == focusRight)
+	}
+	if !showLeft {
+		return 0, 0, false
+	}
+	l := computeLayout(leftWidth, m.height, m.composer.Height(), m.completionPopupHeightFor(leftWidth), m.dangerouslySkipPermissions, m.noticeRowsFor(leftWidth))
+	if m.splitOrientation == orientVertical {
+		bodyHeight := l.transcript + l.notice + l.popup + l.composer
+		geo := computeVerticalPaneGeometry(m.width, bodyHeight, gutter, m.focus)
+		if geo.mode == paneSplit {
+			l = l.withBodyHeight(geo.leftHeight)
+		}
+	}
+	if l.transcript <= 0 {
+		return 0, 0, false
+	}
+	y = l.header
+	x = 0
+	compact := leftWidth < compactWidth || m.height < compactHeight
+	if !compact {
+		// Panel top border + left border + horizontal padding.
+		y++
+		if leftWidth >= 3 {
+			x = 1
+			if leftWidth >= 6 {
+				padX := th.Spacing.XS
+				if padX < 0 {
+					padX = 0
+				}
+				if maxPad := (leftWidth - 3) / 2; padX > maxPad {
+					padX = maxPad
+				}
+				x += padX
+			}
+		}
+	}
+	return x, y, true
 }
 
 // copySelectedCell stages OSC52 for the selected (or latest copyable) tool/
