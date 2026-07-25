@@ -166,18 +166,19 @@ branch in `internal/tui/view.go` for the pattern.
    file under `internal/tool/` — `internal/tool/glob.go` is a minimal
    example; `edit.go`/`write.go`/`bash.go` show the permission-ask pattern.
 2. Register it in the `tool.NewRegistry(...)` call in `cmd/strike/wire.go`.
-3. If it mutates state or has side effects, call
-    `tc.Ask(ctx, tool.AskRequest{Permission: "yourperm", Patterns: []string{...}})`
-    inside `Execute`, and add a default rule for `"yourperm"` to
-    `permission.Defaults()` in `internal/permission/permission.go` (Allow for
-    read-only, Ask for anything mutating — see the existing defaults; reuse
-    `edit`/`write`/`bash` when the new tool is the same class of action).
-4. No `internal/tui` change is needed: tool calls render generically from
-   `protocol.ToolCallBegin`/`ToolCallEnd` via `toolCell` in
-   `internal/tui/cells.go` (name, title, output preview, ok/err glyph).
-   `tool.Result.Metadata` exists for tool-specific rendering data but nothing
-   in the TUI consumes it yet — wiring that up is frontend work, not part of
-   adding the tool itself.
+  3. If it mutates state or has side effects, call
+     `tc.Ask(ctx, tool.AskRequest{Permission: "yourperm", Patterns: []string{...}})`
+     inside `Execute`, and add a default rule for `"yourperm"` to
+     `permission.Defaults()` in `internal/permission/permission.go` (Allow for
+     read-only, Ask for anything mutating — see the existing defaults; reuse
+     `edit`/`write`/`bash` when the new tool is the same class of action).
+  4. No `internal/tui` change is needed for a generic tool: tool calls render
+    from `protocol.ToolCallBegin`/`ToolCallEnd` via `toolCell` in
+    `internal/tui/cells.go` (name, title, output preview, ok/err glyph).
+    Edit-shaped `Metadata` (`oldString`/`newString`) is consumed by the TUI
+    via `ui.DiffPreview` in the permission modal and completed tool cells;
+    other tools can keep emitting metadata without a TUI change until a
+    frontend renderer is added for them.
 
 ### Add a slash command
 

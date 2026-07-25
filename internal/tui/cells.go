@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
+	"github.com/jonathanung/strike-cli/internal/tui/ui"
 )
 
 // cell is one transcript block. The transcript is an ordered list of cells,
@@ -50,13 +51,14 @@ func (c *assistantCell) render(width int, th theme.Theme) string {
 }
 
 type toolCell struct {
-	callID  string
-	name    string
-	args    json.RawMessage
-	title   string
-	output  string
-	done    bool
-	isError bool
+	callID   string
+	name     string
+	args     json.RawMessage
+	title    string
+	output   string
+	metadata json.RawMessage
+	done     bool
+	isError  bool
 }
 
 const toolPreviewLines = 6
@@ -82,11 +84,26 @@ func (c *toolCell) render(width int, th theme.Theme) string {
 		}
 	}
 	out := labelStyle.Render(ic.Tool+space+head) + space + status
-	if c.done && c.output != "" {
-		preview := previewLines(c.output, toolPreviewLines, ic.Ellipsis, space)
+	if c.done {
 		prefix := themedSpace(th.Spacing.SM) + st.BorderMuted.Render(ic.ToolGuide) + space
-		body := renderCellText(st.Muted, preview, max(1, width-lipgloss.Width(prefix)))
-		out += "\n" + indent(body, prefix)
+		bodyWidth := max(1, width-lipgloss.Width(prefix))
+		if meta, ok := parseEditMetadata(c.metadata); ok {
+			diff := ui.DiffPreview(th, ui.DiffPreviewOpts{
+				Path:      "",
+				Old:       meta.OldString,
+				New:       meta.NewString,
+				MaxLines:  diffPreviewMaxLinesCell,
+				Width:     bodyWidth,
+				ShowStats: true,
+			})
+			if diff != "" {
+				out += "\n" + indent(diff, prefix)
+			}
+		} else if c.output != "" {
+			preview := previewLines(c.output, toolPreviewLines, ic.Ellipsis, space)
+			body := renderCellText(st.Muted, preview, bodyWidth)
+			out += "\n" + indent(body, prefix)
+		}
 	}
 	return out
 }
