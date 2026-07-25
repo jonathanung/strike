@@ -366,7 +366,7 @@ func (m Model) welcomeKeys(size ...int) string {
 		m.keyMap.FocusLeft, m.keyMap.FocusRight,
 		m.keyMap.CycleWindowNext, m.keyMap.CycleWindowPrev,
 		m.keyMap.ToggleOrientation,
-		m.keyMap.Send, m.keyMap.Newline,
+		m.keyMap.Send, m.keyMap.Newline, m.keyMap.ExternalEditor,
 		m.keyMap.ScrollUp, m.keyMap.JumpBottom,
 		m.keyMap.Palette, m.keyMap.KeyHelp, m.keyMap.Interrupt,
 	}
