@@ -276,6 +276,26 @@ func TestSaveDefaultsWritesGlobalConfig(t *testing.T) {
 	}
 }
 
+func TestSaveThemeWritesGlobalConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	svc := New(nil, nil, nil, nil)
+	if err := svc.Settings.SaveTheme("dracula"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(config.GlobalPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got config.Config
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Theme != "dracula" {
+		t.Errorf("theme = %q", got.Theme)
+	}
+}
+
 func TestHistoryNilTolerated(t *testing.T) {
 	svc := New(nil, nil, nil, nil)
 	if svc.History != nil {

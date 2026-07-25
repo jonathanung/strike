@@ -36,6 +36,7 @@ func TestLoadMerge(t *testing.T) {
 	if err := os.WriteFile(global, []byte(`{
 		"provider": "openai",
 		"model": "gpt-test",
+		"theme": "nord",
 		"systemPrompt": "global",
 		"permissions": [{"permission":"bash","pattern":"*","action":"ask"}]
 	}`), 0o644); err != nil {
@@ -49,6 +50,7 @@ func TestLoadMerge(t *testing.T) {
 	if err := os.WriteFile(project, []byte(`{
 		"model": "project-model",
 		"defaultAgent": "plan",
+		"theme": "dracula",
 		"permissions": [{"permission":"bash","pattern":"git *","action":"allow"}]
 	}`), 0o644); err != nil {
 		t.Fatal(err)
@@ -63,6 +65,9 @@ func TestLoadMerge(t *testing.T) {
 	}
 	if cfg.Model != "project-model" {
 		t.Errorf("model = %q", cfg.Model)
+	}
+	if cfg.Theme != "dracula" {
+		t.Errorf("theme = %q", cfg.Theme)
 	}
 	if cfg.SystemPrompt != "global" {
 		t.Errorf("systemPrompt = %q", cfg.SystemPrompt)

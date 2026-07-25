@@ -40,17 +40,6 @@ func applyAppearance(mode appearanceMode) {
 	}
 }
 
-func cycleAppearance(cur appearanceMode) appearanceMode {
-	switch cur {
-	case appearanceAuto:
-		return appearanceDark
-	case appearanceDark:
-		return appearanceLight
-	default:
-		return appearanceAuto
-	}
-}
-
 func parseAppearance(s string) (appearanceMode, bool) {
 	switch s {
 	case "auto":

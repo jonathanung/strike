@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
 
 func TestIsEscapeMatchesKeyEscAndStringEsc(t *testing.T) {
@@ -201,7 +202,7 @@ func TestHorizontalC2GeometryStillHolds(t *testing.T) {
 	}
 }
 
-func TestThemeCommandDarkLightAutoAndCycle(t *testing.T) {
+func TestThemeCommandAppearanceAndPicker(t *testing.T) {
 	// Save/restore lipgloss background detection and package appearance cache.
 	savedDark := lipgloss.HasDarkBackground()
 	savedDetected := appearanceDetected
@@ -248,25 +249,88 @@ func TestThemeCommandDarkLightAutoAndCycle(t *testing.T) {
 		t.Errorf("auto appearance = %q", m.appearance)
 	}
 
-	// Bare /theme cycles auto → dark → light → auto.
-	m.appearance = appearanceAuto
-	m = runTheme("")
-	if m.appearance != appearanceDark {
-		t.Errorf("cycle from auto = %q, want dark", m.appearance)
-	}
-	m = runTheme("")
-	if m.appearance != appearanceLight {
-		t.Errorf("cycle from dark = %q, want light", m.appearance)
-	}
-	m = runTheme("")
-	if m.appearance != appearanceAuto {
-		t.Errorf("cycle from light = %q, want auto", m.appearance)
-	}
-
 	m = runTheme("nope")
-	if !strings.Contains(m.notice, "usage:") {
+	if !strings.Contains(m.notice, "unknown theme") {
 		t.Errorf("bad arg notice = %q", m.notice)
 	}
+
+	// Bare /theme opens the theme picker.
+	m = runTheme("")
+	if _, ok := m.modal.(*themeModal); !ok {
+		t.Fatalf("bare /theme modal type = %T, want *themeModal", m.modal)
+	}
+}
+
+func TestThemeCommandSelectsNamedTheme(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.composer.SetValue("/theme dracula")
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if m.themeID != "dracula" {
+		t.Fatalf("themeID = %q, want dracula", m.themeID)
+	}
+	if m.th.Accent.Dark == theme.Default().Accent.Dark {
+		t.Error("dracula theme did not change accent from default")
+	}
+	if !strings.Contains(m.notice, "dracula") {
+		t.Errorf("notice = %q", m.notice)
+	}
+}
+
+func TestThemePickerSelectAndSave(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
+	m.composer.SetValue("/theme")
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	picker, ok := m.modal.(*themeModal)
+	if !ok {
+		t.Fatalf("modal = %T", m.modal)
+	}
+	// Move cursor onto dracula if not already there.
+	for i, e := range picker.filtered {
+		if e.ID == "dracula" {
+			picker.cursor = i
+			break
+		}
+	}
+	// ctrl+d saves default without closing.
+	settings := m.services.Settings.(*fakeSettings)
+	next, saveCmd := picker.update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	if next == nil {
+		t.Fatal("ctrl+d closed picker")
+	}
+	if saveCmd == nil {
+		t.Fatal("ctrl+d produced no cmd")
+	}
+	msg := saveCmd()
+	saved, ok := msg.(themeSavedMsg)
+	if !ok || saved.err != nil || saved.id != "dracula" {
+		t.Fatalf("themeSavedMsg = %#v", msg)
+	}
+	if len(settings.savedThemes) != 1 || settings.savedThemes[0] != "dracula" {
+		t.Fatalf("savedThemes = %v", settings.savedThemes)
+	}
+
+	// enter selects and closes.
+	next, selCmd := picker.update(tea.KeyMsg{Type: tea.KeyEnter})
+	if next != nil {
+		t.Fatal("enter did not close picker")
+	}
+	if selCmd == nil {
+		t.Fatal("enter produced no cmd")
+	}
+	selMsg := selCmd()
+	entryMsg, ok := selMsg.(themeSelectedMsg)
+	if !ok || entryMsg.entry.ID != "dracula" {
+		t.Fatalf("themeSelectedMsg = %#v", selMsg)
+	}
+	m = updateApp(t, m, entryMsg)
+	if m.themeID != "dracula" {
+		t.Fatalf("after select themeID = %q", m.themeID)
+	}
+	_ = cmd
 }
 
 func TestApplyAppearanceIsTestable(t *testing.T) {

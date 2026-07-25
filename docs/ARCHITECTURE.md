@@ -122,9 +122,11 @@ viewport was already `AtBottom` before `SetContent`; otherwise it restores
 activity-pane state and never append transcript cells; other child-correlated
 events remain filtered except permissions and questions.
 
-Session-local appearance (`/theme [dark|light|auto]`) calls
-`lipgloss.SetHasDarkBackground` for forced modes and restores the initially
-detected background for auto.
+Color themes load from bundled JSON plus `~/.strike/themes` and
+`./.strike/themes`; `/theme` opens a picker (or `/theme <id>` applies one)
+and `config.theme` / ctrl+d persists the choice. Session-local appearance
+(`/theme dark|light|auto`) still calls `lipgloss.SetHasDarkBackground` for
+forced modes and restores the initially detected background for auto.
 
 ## Why a host-services seam
 
