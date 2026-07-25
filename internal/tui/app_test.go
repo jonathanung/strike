@@ -1588,21 +1588,22 @@ func TestRightPaneOwnsOrdinaryKeysAndGlobalKeysRemainGlobal(t *testing.T) {
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
 	completion := leadingSlashCompletion("/", 0, 1, m.commands)
 	m.completion = completion // stale completion must not take ownership on the right.
-	startOffset, startLine, startViewport := m.composer.LineInfo().ColumnOffset, m.composer.Line(), m.viewport.YOffset
+	startOffset, startLine := m.composer.LineInfo().ColumnOffset, m.composer.Line()
+	// Ordinary keys go to the right pane; pgup/pgdn scroll the transcript globally.
 	for _, msg := range []tea.KeyMsg{
 		{Type: tea.KeyRunes, Runes: []rune("x")}, {Type: tea.KeyEnter}, {Type: tea.KeyTab}, {Type: tea.KeyCtrlD},
-		{Type: tea.KeyUp}, {Type: tea.KeyDown}, {Type: tea.KeyPgUp}, {Type: tea.KeyPgDown},
+		{Type: tea.KeyUp}, {Type: tea.KeyDown},
 	} {
 		m = updateApp(t, m, msg)
 	}
-	if m.composer.Value() != "unchanged" || m.composer.Line() != startLine || m.composer.LineInfo().ColumnOffset != startOffset || m.historyPos != -1 || m.agentName != "" || m.viewport.YOffset != startViewport {
-		t.Errorf("right-pane keys changed left state: composer=%q line=%d offset=%d history=%d agent=%q viewport=%d", m.composer.Value(), m.composer.Line(), m.composer.LineInfo().ColumnOffset, m.historyPos, m.agentName, m.viewport.YOffset)
+	if m.composer.Value() != "unchanged" || m.composer.Line() != startLine || m.composer.LineInfo().ColumnOffset != startOffset || m.historyPos != -1 || m.agentName != "" {
+		t.Errorf("right-pane keys changed left state: composer=%q line=%d offset=%d history=%d agent=%q", m.composer.Value(), m.composer.Line(), m.composer.LineInfo().ColumnOffset, m.historyPos, m.agentName)
 	}
 	if m.completion != completion || m.completion.Selected != completion.Selected {
 		t.Error("right-pane keys changed stale completion")
 	}
-	if got := testWindow(t, m.windows.active()).updates; len(got) != 8 {
-		t.Errorf("right pane received %d keys, want 8: %q", len(got), got)
+	if got := testWindow(t, m.windows.active()).updates; len(got) != 6 {
+		t.Errorf("right pane received %d keys, want 6: %q", len(got), got)
 	}
 	assertNoAppOp(t, ops)
 

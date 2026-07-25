@@ -148,7 +148,7 @@ func (m Model) transcriptFooter() string {
 	if m.viewport.Height <= 0 || m.viewport.TotalLineCount() <= m.viewport.Height {
 		return ""
 	}
-	return dotJoin(m.th, strconv.Itoa(int(m.viewport.ScrollPercent()*100))+"%", "pgup/pgdn", "ctrl+end")
+	return dotJoin(m.th, strconv.Itoa(int(m.viewport.ScrollPercent()*100))+"%", "pgup/pgdn", keyHint(m.keyMap.JumpBottom).Key)
 }
 
 // maxNoticeRows caps how many layout rows a wrapped notice may occupy so the

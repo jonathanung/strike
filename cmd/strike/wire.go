@@ -333,7 +333,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 			WorkDir:                    workDir,
 			FirstRun:                   firstRun,
 			VimMode:                    vimMode,
-		}), tea.WithAltScreen(), tea.WithOutput(stdout), tea.WithInput(tui.WrapInput(os.Stdin)), tea.WithReportFocus())
+		}), tea.WithAltScreen(), tea.WithOutput(stdout), tea.WithInput(tui.WrapInput(os.Stdin)), tea.WithReportFocus(), tea.WithMouseCellMotion())
 		_, err := program.Run()
 		return err
 	}); err != nil {
