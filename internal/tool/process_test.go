@@ -74,12 +74,14 @@ func TestRunProcessCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	dir := t.TempDir()
 	ready := filepath.Join(dir, "ready")
-	// Write ready then sleep; cancel once ready appears.
+	// Background sleep + wait: bash stays parent so a direct-child-only kill
+	// leaves the grandchild holding stdout/stderr and hangs Wait. Process-group
+	// cancel must reap the whole tree.
 	done := make(chan ProcessResult, 1)
 	errc := make(chan error, 1)
 	go func() {
 		res, err := RunProcess(ctx, ProcessSpec{
-			Argv: []string{"bash", "-c", "echo $$ > '" + ready + "'; sleep 30"},
+			Argv: []string{"bash", "-c", "echo $$ > '" + ready + "'; sleep 30 & wait"},
 		}, ProcessObserver{})
 		done <- res
 		errc <- err
@@ -95,6 +97,8 @@ func TestRunProcessCancel(t *testing.T) {
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
+	// Let the background sleep start before cancel.
+	time.Sleep(50 * time.Millisecond)
 	cancel()
 	select {
 	case res := <-done:
