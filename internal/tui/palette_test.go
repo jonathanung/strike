@@ -32,7 +32,7 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		{ID: "command:model", Label: "/model", Description: "select a model for the current provider", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/model"}},
 		{ID: "command:effort", Label: "/effort", Description: "set how much reasoning the model spends", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/effort"}},
 		{ID: "command:auth", Label: "/auth", Description: "manage provider authentication", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/auth"}},
-		{ID: "command:vim", Label: "/vim", Description: "open a file in $VISUAL/$EDITOR (full-screen)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/vim"}},
+		{ID: "command:vim", Label: "/vim", Description: "open a file in the embedded editor (pane/overlay) or $EDITOR", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/vim"}},
 		{ID: "agent:build", Label: "/agent build", Description: "select an agent", Action: paletteAction{Kind: paletteActionAgent, Value: "build"}},
 		{ID: "command:help", Label: "/help", Description: "show available commands", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/help"}},
 		{ID: "skill:review", Label: "/review", Description: "review a change", Action: paletteAction{Kind: paletteActionSkill, Value: "review"}},

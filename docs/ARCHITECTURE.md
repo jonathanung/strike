@@ -195,6 +195,10 @@ Two different mechanisms, depending on whether it needs Go code:
   `host.Services.Skills`. Reserved names (`provider`, `model`, `auth`,
   `agent`, `fast`, `vim`, `md-read`, `help`, `keys`) are rejected by
   `config.ValidateSkillName` before they ever reach the frontend.
+  `/vim` embeds nvim/vim in the right-pane `editor` window by default
+  (PTY + vt10x via `internal/tui/term`). Config key `vimMode` selects
+  `pane` (default), `overlay`, or `takeover` (full-screen `tea.ExecProcess`).
+  GUI `$EDITOR` values always take over.
 - **Builtin command (code).** Add a `commandSpec` to `builtinCommandSpecs`
   in `internal/tui/commands.go`, a `case "/yourcmd":` arm in
   `Model.handleCommand` (`internal/tui/app.go`), and — if it's a primary

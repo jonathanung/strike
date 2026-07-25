@@ -158,10 +158,10 @@ func TestCompactRightPaneIsBorderlessAndUsesFullBodyDimensionsAtThresholds(t *te
 
 func TestDefaultWindowRegistryHasThreeUniqueWidthSafeWindows(t *testing.T) {
 	r := newWindowRegistry()
-	if len(r.windows) != 3 {
-		t.Fatalf("window count = %d, want 3", len(r.windows))
+	if len(r.windows) != 4 {
+		t.Fatalf("window count = %d, want 4", len(r.windows))
 	}
-	wantIDs := []string{"context", "activity", "markdown"}
+	wantIDs := []string{"context", "activity", "markdown", "editor"}
 	seenIDs, seenTitles := map[string]bool{}, map[string]bool{}
 	for i, w := range r.windows {
 		if w.id() != wantIDs[i] {
@@ -185,6 +185,20 @@ func TestDefaultWindowRegistryHasThreeUniqueWidthSafeWindows(t *testing.T) {
 					t.Errorf("resize(%d,%d) = %#v, want namedWindow %dx%d", size.w, size.h, resized, size.w, size.h)
 				}
 			}
+		case "editor":
+			tw, ok := w.(terminalWindow)
+			if !ok {
+				t.Fatalf("editor window = %T, want terminalWindow", w)
+			}
+			view := tw.resize(12, 3).view(theme.Default())
+			if !strings.Contains(view, "No editor") || !strings.Contains(view, "/vim") {
+				t.Errorf("editor empty state missing prompt: %q", view)
+			}
+			for _, line := range strings.Split(view, "\n") {
+				if got := lipgloss.Width(line); got > 12 {
+					t.Errorf("editor line width %d > 12: %q", got, line)
+				}
+			}
 		case "markdown":
 			mw, ok := w.(markdownWindow)
 			if !ok {
@@ -204,8 +218,8 @@ func TestDefaultWindowRegistryHasThreeUniqueWidthSafeWindows(t *testing.T) {
 			t.Errorf("unexpected window id %q", w.id())
 		}
 	}
-	if !seenIDs["context"] || !seenIDs["activity"] || !seenIDs["markdown"] {
-		t.Errorf("default registry ids = %v, want context, activity, and markdown", seenIDs)
+	if !seenIDs["context"] || !seenIDs["activity"] || !seenIDs["markdown"] || !seenIDs["editor"] {
+		t.Errorf("default registry ids = %v, want context, activity, markdown, and editor", seenIDs)
 	}
 
 	// Full Model.View at split size shows real context content, not a placeholder.
@@ -282,11 +296,11 @@ func TestWindowRegistryReplaceByID(t *testing.T) {
 func TestWindowRegistryCycleIncludesMarkdown(t *testing.T) {
 	r := newWindowRegistry()
 	var order []string
-	for range 4 {
+	for range 5 {
 		order = append(order, r.active().id())
 		r = r.cycle()
 	}
-	want := []string{"context", "activity", "markdown", "context"}
+	want := []string{"context", "activity", "markdown", "editor", "context"}
 	if !stringsEqual(order, want) {
 		t.Errorf("cycle order = %q, want %q", order, want)
 	}
@@ -316,8 +330,10 @@ func TestWindowRegistryPreservesMarkdownScrollAcrossCycle(t *testing.T) {
 		t.Fatal("setup did not scroll markdown content")
 	}
 
-	r = r.cycle() // activity
+	// Cycle through editor and back around to markdown.
+	r = r.cycle() // editor
 	r = r.cycle() // context
+	r = r.cycle() // activity
 	r = r.cycle() // markdown again
 	got := r.active().(markdownWindow)
 	if got.vp.YOffset != wantOffset {

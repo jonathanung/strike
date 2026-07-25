@@ -28,7 +28,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/auth":     {"manage provider authentication", "[provider]", commandSourceBuiltin},
 		"/agent":    {"select an agent", "[name]", commandSourceBuiltin},
 		"/fast":     {"toggle OpenAI priority tier (faster, ~2× cost)", "[on|off]", commandSourceBuiltin},
-		"/vim":      {"open a file in $VISUAL/$EDITOR (full-screen)", "[path[:line]]", commandSourceBuiltin},
+		"/vim":      {"open a file in the embedded editor (pane/overlay) or $EDITOR", "[path[:line]]", commandSourceBuiltin},
 		"/md-read":  {"open a markdown file in the right pane", "<path>", commandSourceBuiltin},
 		"/help":     {"show available commands", "", commandSourceBuiltin},
 		"/keys":     {"show keyboard shortcuts", "", commandSourceBuiltin},

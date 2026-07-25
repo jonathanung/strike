@@ -12,7 +12,34 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike-cli/internal/tui/term"
 )
+
+// VimMode selects how /vim presents the editor.
+type VimMode string
+
+const (
+	// VimModePane embeds the editor in the right-pane terminal window (default).
+	VimModePane VimMode = "pane"
+	// VimModeOverlay embeds the editor in a centered full-screen overlay.
+	VimModeOverlay VimMode = "overlay"
+	// VimModeTakeover hands the whole terminal to the editor via tea.ExecProcess.
+	VimModeTakeover VimMode = "takeover"
+)
+
+// ParseVimMode resolves a config/flag value. Empty yields pane (default).
+func ParseVimMode(value string) (VimMode, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", string(VimModePane):
+		return VimModePane, true
+	case string(VimModeOverlay):
+		return VimModeOverlay, true
+	case string(VimModeTakeover):
+		return VimModeTakeover, true
+	default:
+		return "", false
+	}
+}
 
 // editorReason is the FilesChanged reason stamped when /vim exits after a
 // real on-disk change.
@@ -80,7 +107,7 @@ func resolveEditor(getenv func(string) string, lookPath func(string) (string, er
 			return resolved, nil, nil
 		}
 	}
-	return "", nil, fmt.Errorf("no editor found — set $VISUAL or $EDITOR, or install nvim/vim")
+	return "", nil, fmt.Errorf("no editor found - set $VISUAL or $EDITOR, or install nvim/vim")
 }
 
 // parseVimArgs interprets `/vim` arguments: optional path, optional +line or
@@ -245,6 +272,15 @@ func launchEditorCmd(workDir, path string, line int) tea.Cmd {
 	})
 }
 
+// prefersTakeover reports editors that need a real GUI/TTY handoff rather
+// than a PTY grid (VS Code, Sublime, gedit, …).
+func prefersTakeover(bin string) bool {
+	base := strings.ToLower(filepath.Base(bin))
+	base = strings.TrimSuffix(base, ".exe")
+	_, ok := editorWaitFlags[base]
+	return ok
+}
+
 func (m Model) handleVimCommand(args []string) (tea.Model, tea.Cmd) {
 	path, line, err := parseVimArgs(args)
 	if err != nil {
@@ -253,7 +289,67 @@ func (m Model) handleVimCommand(args []string) (tea.Model, tea.Cmd) {
 	}
 	m.resetComposer()
 	m.clearNotice()
-	return m, launchEditorCmd(m.workDir, path, line)
+
+	mode := m.vimMode
+	if mode == "" {
+		mode = VimModePane
+	}
+	bin, baseArgs, resolveErr := resolveEditor(nil, nil)
+	if resolveErr != nil {
+		m.setNotice(resolveErr.Error(), true)
+		return m, nil
+	}
+	// GUI editors always take over; PTY embedding is for terminal editors.
+	if mode != VimModeTakeover && prefersTakeover(bin) {
+		mode = VimModeTakeover
+	}
+	if mode == VimModeTakeover {
+		return m, launchEditorCmd(m.workDir, path, line)
+	}
+	return m.launchEmbeddedEditor(bin, baseArgs, path, line, mode)
+}
+
+func (m Model) launchEmbeddedEditor(bin string, baseArgs []string, path string, line int, mode VimMode) (tea.Model, tea.Cmd) {
+	abs := absPathInWorkDir(m.workDir, path)
+	display := displayPath(m.workDir, abs)
+	before := snapshotFile(abs)
+	hadPath := abs != ""
+	cmd := buildEditorCmd(bin, baseArgs, abs, line)
+
+	cols, rows := 80, 24
+	if tw, _, ok := findTerminalWindow(m.windows); ok && tw.width > 0 && tw.height > 0 {
+		cols, rows = tw.width, tw.height
+	} else if m.width > 10 && m.height > 10 {
+		cols = max(20, m.width/2-4)
+		rows = max(8, m.height-6)
+	}
+
+	sess, err := term.Start(cmd, cols, rows)
+	if err != nil {
+		m.setNotice("embedded editor failed: "+err.Error()+" - try config vimMode=takeover", true)
+		return m, nil
+	}
+
+	switch mode {
+	case VimModeOverlay:
+		modal := newTerminalModal(sess, abs, display, before, hadPath)
+		modal.setHostSize(m.width, m.height)
+		m.modal = modal
+		m.setNotice("embedded vim (overlay) - ctrl+g closes", false)
+		return m, modal.listenCmd()
+	default: // pane
+		tw, _, ok := findTerminalWindow(m.windows)
+		if !ok {
+			tw = newTerminalWindow()
+		}
+		var cmd tea.Cmd
+		tw, cmd = tw.attach(sess, abs, display, before, hadPath)
+		m.windows = replaceTerminalWindow(m.windows, tw, true)
+		focusCmd := m.setPaneFocus(focusRight)
+		m.reflow()
+		m.setNotice("embedded vim - keys pass through; ctrl+g leaves pane", false)
+		return m, tea.Batch(cmd, focusCmd)
+	}
 }
 
 func (m Model) applyEditorFinished(msg editorFinishedMsg) (tea.Model, tea.Cmd) {
@@ -269,25 +365,80 @@ func (m Model) applyEditorFinished(msg editorFinishedMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
-	if !msg.hadPath {
-		m.setNotice("editor closed", false)
+	return m.finishEditorSession(msg.path, msg.display, msg.before, msg.hadPath, msg.err)
+}
+
+func (m Model) applyTerminalExit(msg terminalExitMsg) (tea.Model, tea.Cmd) {
+	// Clear overlay or idle the pane window.
+	if _, ok := m.modal.(*terminalModal); ok {
+		m.modal = nil
+	}
+	if tw, _, ok := findTerminalWindow(m.windows); ok {
+		m.windows = replaceTerminalWindow(m.windows, tw.markIdle(), false)
+	}
+	m.reflow()
+	return m.finishEditorSession(msg.path, msg.display, msg.before, msg.hadPath, msg.err)
+}
+
+func (m Model) finishEditorSession(path, display string, before fileMeta, hadPath bool, runErr error) (tea.Model, tea.Cmd) {
+	if !hadPath {
+		if runErr != nil {
+			m.setNotice("editor closed: "+runErr.Error(), true)
+		} else {
+			m.setNotice("editor closed", false)
+		}
 		return m, nil
 	}
-	if !fileChangedSince(msg.path, msg.before) {
-		m.setNotice("editor closed — "+msg.display+" unchanged", false)
+	if !fileChangedSince(path, before) {
+		m.setNotice("editor closed - "+display+" unchanged", false)
 		return m, nil
 	}
-	display := msg.display
 	if display == "" {
-		display = msg.path
+		display = path
 	}
 	ops := m.ops
-	path := display
 	return m, func() tea.Msg {
 		ops <- protocol.FilesChanged{
-			Paths:  []string{path},
+			Paths:  []string{display},
 			Reason: editorReasonExternal,
 		}
 		return nil
+	}
+}
+
+func (m Model) applyTerminalOutput() (tea.Model, tea.Cmd) {
+	// Re-arm listen on whichever host owns the session.
+	if tm, ok := m.modal.(*terminalModal); ok {
+		return m, tm.listenCmd()
+	}
+	if tw, _, ok := findTerminalWindow(m.windows); ok && tw.isRunning() {
+		// Refresh the window value (no state change) and re-listen.
+		m.windows = replaceTerminalWindow(m.windows, tw, false)
+		return m, tw.listenCmd()
+	}
+	return m, nil
+}
+
+// leaveEmbeddedEditor focuses the composer without killing a running pane
+// editor (ctrl+g). Overlay mode closes via the modal handler.
+func (m Model) leaveEmbeddedEditor() (tea.Model, tea.Cmd) {
+	if terminalCapturesKeys(m.windows, m.focus) {
+		m.completion = nil
+		cmd := m.focusPane(focusLeft)
+		m.reflow()
+		m.setNotice("left editor pane - ctrl+l returns", false)
+		return m, cmd
+	}
+	return m, nil
+}
+
+// closeEmbeddedSessions tears down any running PTY editor (app quit path).
+func (m *Model) closeEmbeddedSessions() {
+	if tm, ok := m.modal.(*terminalModal); ok && tm.sess != nil {
+		_ = tm.sess.Close()
+		m.modal = nil
+	}
+	if tw, _, ok := findTerminalWindow(m.windows); ok && tw.isRunning() {
+		m.windows = replaceTerminalWindow(m.windows, tw.closeSession(), false)
 	}
 }

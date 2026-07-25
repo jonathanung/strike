@@ -19,12 +19,16 @@ import (
 )
 
 type Config struct {
-	Provider     string             `json:"provider,omitempty"`
-	Model        string             `json:"model,omitempty"`
-	Effort       protocol.Effort    `json:"effort,omitempty"`
-	SystemPrompt string             `json:"systemPrompt,omitempty"`
-	DefaultAgent string             `json:"defaultAgent,omitempty"`
-	Permissions  permission.Ruleset `json:"permissions,omitempty"`
+	Provider     string          `json:"provider,omitempty"`
+	Model        string          `json:"model,omitempty"`
+	Effort       protocol.Effort `json:"effort,omitempty"`
+	SystemPrompt string          `json:"systemPrompt,omitempty"`
+	DefaultAgent string          `json:"defaultAgent,omitempty"`
+	// VimMode is how /vim presents the editor: "pane" (default, embedded
+	// right-pane PTY), "overlay" (embedded modal), or "takeover" (full-screen
+	// tea.ExecProcess handoff). Unknown values are ignored at load time.
+	VimMode     string             `json:"vimMode,omitempty"`
+	Permissions permission.Ruleset `json:"permissions,omitempty"`
 }
 
 func Default() Config {
@@ -114,6 +118,9 @@ func merge(base, layer Config) Config {
 	}
 	if layer.DefaultAgent != "" {
 		base.DefaultAgent = layer.DefaultAgent
+	}
+	if layer.VimMode != "" {
+		base.VimMode = layer.VimMode
 	}
 	base.Permissions = append(base.Permissions, layer.Permissions...)
 	return base

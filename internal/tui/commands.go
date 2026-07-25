@@ -45,7 +45,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandAuth, Name: "/auth", Description: "manage provider authentication", ArgsHint: "[provider]", Source: commandSourceBuiltin},
 	{ID: commandAgent, Name: "/agent", Description: "select an agent", ArgsHint: "[name]", Source: commandSourceBuiltin},
 	{ID: commandFast, Name: "/fast", Description: "toggle OpenAI priority tier (faster, ~2× cost)", ArgsHint: "[on|off]", Source: commandSourceBuiltin},
-	{ID: commandVim, Name: "/vim", Description: "open a file in $VISUAL/$EDITOR (full-screen)", ArgsHint: "[path[:line]]", Source: commandSourceBuiltin},
+	{ID: commandVim, Name: "/vim", Description: "open a file in the embedded editor (pane/overlay) or $EDITOR", ArgsHint: "[path[:line]]", Source: commandSourceBuiltin},
 	{ID: commandMDRead, Name: "/md-read", Description: "open a markdown file in the right pane", ArgsHint: "<path>", Source: commandSourceBuiltin},
 	{ID: commandHelp, Name: "/help", Description: "show available commands", Source: commandSourceBuiltin},
 	{ID: commandKeys, Name: "/keys", Description: "show keyboard shortcuts", Source: commandSourceBuiltin},
