@@ -165,9 +165,12 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 		return fmt.Errorf("opening auth store: %w", err)
 	}
 
+	customStore := config.NewCustomStore(cfg.Providers)
+
 	// selectProvider constructs a provider by name, probing credentials so
 	// a bad /provider selection fails at select time with a clear message
-	// instead of on the first prompt.
+	// instead of on the first prompt. Custom names resolve through
+	// customStore (live; includes mid-session /settings adds).
 	selectProvider := func(name string) (provider.Provider, string, error) {
 		switch name {
 		case "echo":
@@ -206,7 +209,11 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 			}
 			return openaicompat.NewXAI(source), config.DefaultModel(name), nil
 		default:
-			return nil, "", fmt.Errorf("unknown provider %q (want anthropic, openai, xai, or echo)", name)
+			cp, ok := customStore.Get(name)
+			if !ok {
+				return nil, "", fmt.Errorf("unknown provider %q (want anthropic, openai, xai, echo, or a custom name from /settings)", name)
+			}
+			return buildCustomProvider(cp, authStore)
 		}
 	}
 
@@ -315,7 +322,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 	}
 	// local.New wraps the real backend stores in the host.Services contract;
 	// the TUI never sees auth/config/models/history directly.
-	services := local.New(authStore, historyStore, agentNames, skills)
+	services := local.New(authStore, historyStore, agentNames, skills, customStore)
 	services.Files = local.NewFiles(workDir)
 	firstRun := isFreshStrikeHome(authStore)
 
@@ -366,4 +373,35 @@ func indexAgent(agents []engine.Agent, name string) int {
 		}
 	}
 	return -1
+}
+
+// buildCustomProvider maps a config custom provider onto the openaicompat or
+// anthropic adapter with the declared base URL and auth-store credentials.
+func buildCustomProvider(cp config.CustomProvider, store *auth.Store) (provider.Provider, string, error) {
+	defaultModel := config.DefaultModelCustom(cp)
+	switch cp.API {
+	case config.WireOpenAI:
+		// Empty key is allowed (local gateways like ollama); the adapter sends
+		// Authorization only when a token is present.
+		source := optionalBearer(cp.Name, store, cp.APIKeyEnv)
+		return openaicompat.NewWithHeaders(cp.Name, cp.BaseURL, source, cp.Headers), defaultModel, nil
+	case config.WireAnthropic:
+		key, _ := auth.APIKeyEnv(cp.Name, store, cp.APIKeyEnv)
+		p, err := anthropic.NewCustom(cp.Name, cp.BaseURL, key, cp.Headers)
+		if err != nil {
+			return nil, "", err
+		}
+		return p, defaultModel, nil
+	default:
+		return nil, "", fmt.Errorf("custom provider %s: unknown api %q", cp.Name, cp.API)
+	}
+}
+
+func optionalBearer(name string, store *auth.Store, envName string) openaicompat.BearerSource {
+	return func(ctx context.Context) (string, error) {
+		if key, ok := auth.APIKeyEnv(name, store, envName); ok {
+			return key, nil
+		}
+		return "", nil
+	}
 }

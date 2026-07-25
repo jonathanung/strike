@@ -40,6 +40,39 @@ func New(apiKey string) (*Provider, error) {
 	}}, nil
 }
 
+// NewCustom builds an Anthropic-messages adapter for a named custom/self-hosted
+// endpoint. baseURL is the origin (e.g. https://api.anthropic.com); the client
+// appends /v1/messages. Extra headers are merged after the auth headers.
+// apiKey may be empty for open proxies; x-api-key is omitted when blank.
+func NewCustom(name, baseURL, apiKey string, headers map[string]string) (*Provider, error) {
+	if name == "" {
+		return nil, fmt.Errorf("custom provider name is required")
+	}
+	if baseURL == "" {
+		return nil, fmt.Errorf("custom provider %s: baseURL is required", name)
+	}
+	h := map[string]string{
+		"anthropic-version": apiVersion,
+	}
+	if apiKey != "" {
+		h["x-api-key"] = apiKey
+	}
+	for k, v := range headers {
+		if k == "" {
+			continue
+		}
+		h[k] = v
+	}
+	return &Provider{
+		Client: base.Client{
+			ProviderName: name,
+			HTTP:         &http.Client{Timeout: 5 * time.Minute},
+			Headers:      h,
+		},
+		baseURL: baseURL,
+	}, nil
+}
+
 func (p *Provider) endpoint() string {
 	if p.baseURL != "" {
 		return p.baseURL + "/v1/messages"

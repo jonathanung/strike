@@ -334,6 +334,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spin, cmd = m.spin.Update(msg)
 		return m, cmd
 
+	case customProviderSavedMsg:
+		if msg.err != nil {
+			if form, ok := m.modal.(*customProviderFormModal); ok {
+				form.err = msg.err.Error()
+				return m, nil
+			}
+			m.setNotice("provider save failed: "+msg.err.Error(), true)
+			return m, nil
+		}
+		m.setNotice("saved provider "+msg.name, false)
+		if msg.returnTo != nil {
+			m.modal = msg.returnTo
+			if sm, ok := m.modal.(*settingsModal); ok {
+				sm.reload()
+			}
+		} else {
+			m.modal = nil
+		}
+		return m, nil
+	case customProviderRemovedMsg:
+		if msg.err != nil {
+			m.setNotice("remove failed: "+msg.err.Error(), true)
+			return m, nil
+		}
+		m.setNotice("removed provider "+msg.name, false)
+		if sm, ok := m.modal.(*settingsModal); ok {
+			sm.reload()
+		}
+		return m, nil
 	case authStartedMsg, authDeviceMsg, authPasteErrMsg, authDoneMsg:
 		cmd, _ := m.applyAuthMsg(msg)
 		m.reflow()
@@ -1226,6 +1255,11 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 	case "/auth":
 		m.resetComposer()
 		return m.handleAuth(fields[1:])
+	case "/settings":
+		m.resetComposer()
+		m.clearNotice()
+		m.modal = newSettingsModal(m.services, m.ops, m.th)
+		return m, nil
 	case "/agent":
 		if len(fields) < 2 {
 			m.setNotice("agents: "+dotJoin(m.th, m.agents...)+" (tab cycles)", false)
@@ -1265,6 +1299,7 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 			"/fast [on|off]",
 			"/agent [name]",
 			"/auth",
+			"/settings",
 			"/vim [path[:line]]",
 			"/md-read <path>",
 			"/theme [dark|light|auto]",

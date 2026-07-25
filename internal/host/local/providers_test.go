@@ -1,0 +1,199 @@
+package local
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/jonathanung/strike-cli/internal/auth"
+	"github.com/jonathanung/strike-cli/internal/config"
+	"github.com/jonathanung/strike-cli/internal/host"
+	"github.com/jonathanung/strike-cli/internal/provider"
+	"github.com/jonathanung/strike-cli/internal/provider/anthropic"
+	"github.com/jonathanung/strike-cli/internal/provider/openaicompat"
+)
+
+func TestCustomProviderHostRoundTrip(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("XAI_API_KEY", "")
+	t.Setenv("KIMI_API_KEY", "")
+
+	store, err := auth.OpenStore(filepath.Join(home, ".strike", "auth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	customs := config.NewCustomStore(nil)
+	svc := New(store, nil, nil, nil, customs)
+
+	if svc.Providers == nil {
+		t.Fatal("Providers is nil")
+	}
+	p := host.CustomProvider{
+		Name:      "kimi",
+		BaseURL:   "https://api.moonshot.cn/v1",
+		API:       "openai",
+		APIKeyEnv: "KIMI_API_KEY",
+		Models:    []string{"moonshot-v1"},
+	}
+	if err := svc.Providers.Upsert(p); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := svc.Providers.Get("kimi")
+	if !ok || got.BaseURL != p.BaseURL || got.API != "openai" {
+		t.Fatalf("Get = %+v ok=%v", got, ok)
+	}
+
+	// Key via auth store, never config.
+	if err := svc.Auth.SetAPIKey("kimi", "sk-test-kimi"); err != nil {
+		t.Fatal(err)
+	}
+	cfgData, _ := os.ReadFile(config.GlobalPath())
+	if contains(string(cfgData), "sk-test-kimi") {
+		t.Fatal("api key leaked into config")
+	}
+	authData, _ := os.ReadFile(filepath.Join(home, ".strike", "auth.json"))
+	if !contains(string(authData), "sk-test-kimi") {
+		t.Fatal("api key missing from auth store")
+	}
+
+	// Statuses include custom row beside builtins.
+	by := statusByName(svc.Auth.Statuses())
+	kimi, ok := by["kimi"]
+	if !ok || !kimi.Custom || !kimi.APIKey || !kimi.Authed {
+		t.Fatalf("kimi status = %+v ok=%v", kimi, ok)
+	}
+	if kimi.WireAPI != "openai" {
+		t.Errorf("WireAPI = %q", kimi.WireAPI)
+	}
+
+	// Catalog prefers configured models.
+	ids, err := svc.Catalog.ModelIDs(context.Background(), "kimi")
+	if err != nil || len(ids) != 1 || ids[0] != "moonshot-v1" {
+		t.Fatalf("ModelIDs = %v err=%v", ids, err)
+	}
+
+	// Env fallback.
+	_ = store.Delete("kimi")
+	t.Setenv("KIMI_API_KEY", "env-kimi")
+	if d := svc.Auth.Describe("kimi"); d != "env" {
+		t.Errorf("Describe after env = %q, want env", d)
+	}
+
+	if err := svc.Providers.Remove("kimi"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := svc.Providers.Get("kimi"); ok {
+		t.Fatal("expected removed")
+	}
+}
+
+func TestCustomOpenAICompatWire(t *testing.T) {
+	var sawAuth string
+	var sawPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawPath = r.URL.Path
+		sawAuth = r.Header.Get("Authorization")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]any{"role": "assistant", "content": "hi"}, "finish_reason": "stop"},
+			},
+			"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+		})
+	}))
+	defer srv.Close()
+
+	p := openaicompat.New("kimi", srv.URL+"/v1", func(context.Context) (string, error) {
+		return "secret", nil
+	})
+	ch, err := p.Stream(context.Background(), provider.Request{Model: "m", Messages: []provider.Message{{Role: provider.RoleUser, Text: "hi"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var text string
+	for ev := range ch {
+		if ev.Type == provider.EventTextDelta {
+			text += ev.Text
+		}
+		if ev.Type == provider.EventError {
+			t.Fatal(ev.Err)
+		}
+	}
+	if text != "hi" {
+		t.Errorf("text = %q", text)
+	}
+	if sawPath != "/v1/chat/completions" {
+		t.Errorf("path = %q", sawPath)
+	}
+	if sawAuth != "Bearer secret" {
+		t.Errorf("auth = %q", sawAuth)
+	}
+	if p.Name() != "kimi" {
+		t.Errorf("Name = %q", p.Name())
+	}
+}
+
+func TestCustomAnthropicWire(t *testing.T) {
+	var sawPath string
+	var sawKey string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawPath = r.URL.Path
+		sawKey = r.Header.Get("x-api-key")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"stop_reason":"end_turn","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer srv.Close()
+
+	p, err := anthropic.NewCustom("my-claude-proxy", srv.URL, "proxy-key", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch, err := p.Stream(context.Background(), provider.Request{
+		Model:     "claude-test",
+		MaxTokens: 16,
+		Messages:  []provider.Message{{Role: provider.RoleUser, Text: "hi"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var text string
+	for ev := range ch {
+		if ev.Type == provider.EventTextDelta {
+			text += ev.Text
+		}
+		if ev.Type == provider.EventError {
+			t.Fatal(ev.Err)
+		}
+	}
+	if text != "ok" {
+		t.Errorf("text = %q", text)
+	}
+	if sawPath != "/v1/messages" {
+		t.Errorf("path = %q", sawPath)
+	}
+	if sawKey != "proxy-key" {
+		t.Errorf("key = %q", sawKey)
+	}
+	if p.Name() != "my-claude-proxy" {
+		t.Errorf("Name = %q", p.Name())
+	}
+}
+
+func contains(s, sub string) bool {
+	return len(sub) == 0 || (len(s) >= len(sub) && indexOf(s, sub) >= 0)
+}
+
+func indexOf(s, sub string) int {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
+}
