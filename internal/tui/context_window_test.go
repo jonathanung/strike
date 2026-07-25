@@ -107,7 +107,7 @@ func TestUsageReportedUpdatesModelAndContextView(t *testing.T) {
 	m = updateApp(t, m, contextLimitsMsg{
 		provider: "echo", model: "echo",
 		contextTokens: 200_000, contextOK: true,
-		outputTokens:  8_192, outputOK: true,
+		outputTokens: 8_192, outputOK: true,
 	})
 	if !m.contextLimitKnown || m.contextLimit != 200_000 {
 		t.Errorf("contextLimit = %d known=%v", m.contextLimit, m.contextLimitKnown)
