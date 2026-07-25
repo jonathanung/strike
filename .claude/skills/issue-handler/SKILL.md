@@ -161,7 +161,7 @@ EOF
 ```
 If an inline `line` is not part of the diff hunk, the API 422s — put that finding in the top-level review body instead (do not invent lines).
 
-**Fallback — top-level PR comment** when inline mapping is impractical:
+**Fallback — top-level PR comment** when inline mapping is impractical (preferred for long verbatim bodies; avoids JSON escaping issues):
 ```sh
 gh pr comment "$PR" --body "$(cat <<EOF
 ## Review pass N (head \`$HEAD_SHA\`)
@@ -176,6 +176,20 @@ gh pr comment "$PR" --body "$(cat <<EOF
 EOF
 )"
 ```
+
+**Clean pass (0 blocking, 0 should-fix) — still required on the PR:**
+A chat-only “LGTM” does **not** count. Always record the clean pass against `$HEAD_SHA`:
+```sh
+HEAD_SHA=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
+gh pr comment "$PR" --body "$(cat <<EOF
+## Review pass N (head \`$HEAD_SHA\`) — clean
+0 blocking, 0 should-fix. Merge checklist may proceed for this SHA only.
+EOF
+)"
+# Or: gh api reviews with event COMMENT, commit_id=$HEAD_SHA, empty comments array.
+```
+
+When building `gh api` JSON for inline reviews, encode bodies with `jq -n --arg body "$text"` (or similar) so quotes/newlines in verbatim findings do not break the payload. If encoding is painful, use the `gh pr comment` path above.
 
 Rules for posted comments:
 - Include severity tag and failure scenario for blocking/should-fix.
