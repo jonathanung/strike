@@ -80,6 +80,8 @@ type SessionPR struct {
 // SwitchAgent, when non-nil, queues an agent switch applied when the turn ends.
 // ReportOutput, when non-nil, streams partial stdout/stderr to the UI while
 // Execute is still running (e.g. live bash output).
+// Process, when set, receives subprocess lifecycle from RunProcess (engine
+// maps these to protocol process.* events for hooks and session logs).
 // RecordSessionPR, when non-nil, persists a PR URL/number on the session
 // (used when bash captures gh pr create/view output).
 type Context struct {
@@ -92,6 +94,8 @@ type Context struct {
 	// tool) for live UI. Nil disables streaming; tools must still return the
 	// full Result.Output at the end.
 	ReportOutput func(data string)
+	// Process observes RunProcess lifecycle when non-nil.
+	Process ProcessObserver
 	// RecordSessionPR stores PR linkage on the session when non-nil.
 	RecordSessionPR func(pr SessionPR) error
 	// Files optionally tracks read snapshots for stale-edit detection after

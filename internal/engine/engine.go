@@ -1183,6 +1183,36 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 					Data:        data,
 				})
 			},
+			Process: tool.ProcessObserver{
+				Started: func(id string, argv []string) {
+					e.emit(protocol.ProcessStarted{
+						Correlation: corr,
+						ProcessID:   id,
+						CallID:      callID,
+						Argv:        argv,
+						Cwd:         e.opts.WorkDir,
+					})
+				},
+				Output: func(id, stream, data string) {
+					if data == "" {
+						return
+					}
+					e.emit(protocol.ProcessOutput{
+						Correlation: corr,
+						ProcessID:   id,
+						Stream:      stream,
+						Data:        data,
+					})
+				},
+				Exited: func(id string, exitCode int, status tool.ProcessStatus) {
+					e.emit(protocol.ProcessExited{
+						Correlation: corr,
+						ProcessID:   id,
+						ExitCode:    exitCode,
+						Status:      protocol.ProcessStatus(status),
+					})
+				},
+			},
 			RecordSessionPR: e.recordSessionPR(corr),
 		}
 		if e.opts.Depth < e.opts.MaxChildDepth {

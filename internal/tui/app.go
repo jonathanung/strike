@@ -1154,6 +1154,12 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 		return e.Correlation, true
 	case protocol.ToolCallOutput:
 		return e.Correlation, true
+	case protocol.ProcessStarted:
+		return e.Correlation, true
+	case protocol.ProcessOutput:
+		return e.Correlation, true
+	case protocol.ProcessExited:
+		return e.Correlation, true
 	case protocol.PermissionAsked:
 		return e.Correlation, true
 	case protocol.PermissionResolved:
