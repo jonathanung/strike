@@ -1,11 +1,13 @@
 package tool
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -49,6 +51,46 @@ type bashArgs struct {
 	TimeoutMs int    `json:"timeoutMs"`
 }
 
+// bashStreamWriter captures combined stdout/stderr, caps retained bytes, and
+// reports each retained chunk for live UI streaming.
+type bashStreamWriter struct {
+	mu     sync.Mutex
+	buf    bytes.Buffer
+	total  int // retained bytes
+	seen   int // bytes observed from the process
+	max    int
+	report func(string)
+}
+
+func (w *bashStreamWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n := len(p)
+	w.seen += n
+	if w.total >= w.max {
+		return n, nil
+	}
+	chunk := p
+	if w.total+len(chunk) > w.max {
+		chunk = p[:w.max-w.total]
+	}
+	if len(chunk) == 0 {
+		return n, nil
+	}
+	w.buf.Write(chunk)
+	w.total += len(chunk)
+	if w.report != nil {
+		w.report(string(chunk))
+	}
+	return n, nil
+}
+
+func (w *bashStreamWriter) output() (string, int, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String(), w.seen, w.seen > w.total
+}
+
 func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
 	var a bashArgs
 	if err := json.Unmarshal(args, &a); err != nil {
@@ -76,15 +118,24 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 
 	cmd := exec.CommandContext(runCtx, "bash", "-c", a.Command)
 	cmd.Dir = tc.WorkDir
-	out, err := cmd.CombinedOutput()
+	sw := &bashStreamWriter{max: bashMaxOutput}
+	if tc.ReportOutput != nil {
+		sw.report = tc.ReportOutput
+	}
+	cmd.Stdout = sw
+	cmd.Stderr = sw
+	err := cmd.Run()
 
-	output := string(out)
-	if len(output) > bashMaxOutput {
-		output = output[:bashMaxOutput] + fmt.Sprintf("\n… (output truncated, %d bytes total)", len(out))
+	output, seen, truncated := sw.output()
+	if truncated {
+		output += fmt.Sprintf("\n… (output truncated, %d bytes total)", seen)
 	}
 	exitCode := 0
 	if err != nil {
-		exitCode = cmd.ProcessState.ExitCode()
+		exitCode = -1
+		if cmd.ProcessState != nil {
+			exitCode = cmd.ProcessState.ExitCode()
+		}
 		if runCtx.Err() == context.DeadlineExceeded {
 			output += fmt.Sprintf("\n(command timed out after %s)", timeout)
 		} else if exitCode < 0 {

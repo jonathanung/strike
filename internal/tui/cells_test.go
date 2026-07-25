@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
 
@@ -91,26 +92,95 @@ func TestToolCellWithoutMetadataShowsOutputPreview(t *testing.T) {
 	}
 }
 
-func TestToolCellNotDoneHasNoBody(t *testing.T) {
+func TestToolCellNotDoneHasNoBodyWithoutOutput(t *testing.T) {
 	th := theme.Default()
 	meta := json.RawMessage(`{"oldString":"foo","newString":"bar"}`)
 	cell := &toolCell{
 		name:     "edit",
-		output:   "should not show",
 		metadata: meta,
 		done:     false,
 	}
 	plain := ansi.Strip(cell.render(80, th))
-	if strings.Contains(plain, "foo") || strings.Contains(plain, "bar") || strings.Contains(plain, "should not show") {
-		t.Errorf("in-progress tool cell should not render body:\n%s", plain)
+	if strings.Contains(plain, "foo") || strings.Contains(plain, "bar") {
+		t.Errorf("in-progress tool cell without output should not render body:\n%s", plain)
 	}
-	// single status line only
-	if strings.Count(plain, "\n") > 0 && strings.TrimSpace(strings.SplitN(plain, "\n", 2)[1]) != "" {
-		// allow trailing empty; reject multi-line body content
-		lines := strings.Split(strings.TrimRight(plain, "\n"), "\n")
-		if len(lines) > 1 {
-			t.Errorf("in-progress cell has body lines: %q", plain)
+	lines := strings.Split(strings.TrimRight(plain, "\n"), "\n")
+	if len(lines) > 1 {
+		t.Errorf("in-progress cell without output has body lines: %q", plain)
+	}
+}
+
+func TestToolCellLiveTailShowsLastLinesWhileRunning(t *testing.T) {
+	th := theme.Default()
+	var b strings.Builder
+	for i := 1; i <= 8; i++ {
+		b.WriteString("line")
+		b.WriteByte(byte('0' + i))
+		b.WriteByte('\n')
+	}
+	cell := &toolCell{
+		name:   "bash",
+		title:  "long-run",
+		output: b.String(),
+		done:   false,
+	}
+	plain := ansi.Strip(cell.render(80, th))
+	// Last toolLiveTailLines (5): line4..line8
+	for _, want := range []string{"line4", "line5", "line6", "line7", "line8"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("live tail missing %q:\n%s", want, plain)
 		}
+	}
+	for _, hide := range []string{"line1", "line2", "line3"} {
+		if strings.Contains(plain, hide) {
+			t.Errorf("live tail should not show early line %q:\n%s", hide, plain)
+		}
+	}
+}
+
+func TestTailLines(t *testing.T) {
+	got := tailLines("a\nb\nc\nd\n", 2)
+	if got != "c\nd" {
+		t.Errorf("tailLines = %q, want c\\nd", got)
+	}
+	if got := tailLines("only", 5); got != "only" {
+		t.Errorf("short = %q", got)
+	}
+	if got := tailLines("", 3); got != "" {
+		t.Errorf("empty = %q", got)
+	}
+}
+
+func TestToolCallOutputAppendsUntilEnd(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m.applyEvent(protocol.ToolCallBegin{CallID: "c1", Name: "bash", Args: json.RawMessage(`{"command":"echo"}`)})
+	m.applyEvent(protocol.ToolCallOutput{CallID: "c1", Data: "hello "})
+	m.applyEvent(protocol.ToolCallOutput{CallID: "c1", Data: "world\n"})
+	tc := m.toolByID["c1"]
+	if tc == nil {
+		t.Fatal("missing tool cell")
+	}
+	if tc.done {
+		t.Fatal("tool should still be running")
+	}
+	if tc.output != "hello world\n" {
+		t.Fatalf("live output = %q, want %q", tc.output, "hello world\n")
+	}
+	plain := ansi.Strip(tc.render(80, theme.Default()))
+	if !strings.Contains(plain, "hello world") {
+		t.Fatalf("live render missing stream:\n%s", plain)
+	}
+	m.applyEvent(protocol.ToolCallEnd{CallID: "c1", Title: "echo", Output: "hello world\n(final)"})
+	if !tc.done {
+		t.Fatal("tool should be done")
+	}
+	if tc.output != "hello world\n(final)" {
+		t.Fatalf("final output = %q", tc.output)
+	}
+	// Further stream chunks after end are ignored.
+	m.applyEvent(protocol.ToolCallOutput{CallID: "c1", Data: "late"})
+	if tc.output != "hello world\n(final)" {
+		t.Fatalf("post-end output mutated: %q", tc.output)
 	}
 }
 

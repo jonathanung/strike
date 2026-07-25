@@ -42,6 +42,7 @@ selection, and layout). Keep this catalog synchronized with `internal/tui/ui`.
 | KeyHints | `KeyHints(th theme.Theme, width int, hints []KeyHint) string` | Width-safe footer hints. `KeyHint` has `Key`, `Label`. |
 | StatusBar | `StatusBar(th theme.Theme, width int, left, right string) string` | One exactly-width row with left/right content. |
 | List | `List(th theme.Theme, opts ListOpts) string` | Unframed picker body. `ListOpts`: `Items []ListItem`, `Cursor`, `Width`, `Visible`, `ShowFilter`, `Filter`, `Total`, `Empty`; `ListItem`: `Label`, `Detail`, `Current`, `Disabled`. |
+| Tree | `Tree(th theme.Theme, opts TreeOpts) string` | Unframed expand/collapse tree body. `TreeOpts`: `Nodes []TreeNode`, `Cursor`, `Width`, `Visible`, `Empty`; `TreeNode`: `ID`, `Label`, `Detail`, `Children`, `Expanded`, `Lazy`, `Leaf`, `Disabled`, `Current`, `Tone`. Helpers: `FlattenTree`, `TreeNodeAt`, `TreeToggleExpanded`. Indent uses `Spacing.SM`; expand glyphs are `Icons.TreeExpanded` / `TreeCollapsed`. |
 | Notice | `Notice(th theme.Theme, level Level, text string, width int) string` | One-line, level-colored feedback. |
 | Bento | `Bento(th theme.Theme, width int, cards []Card) string` | Card packer. `Card` has `Title`, `Footer`, `Body`, `Width`, `Tone`; its body wraps to `PanelInnerWidth(th, Width)`. Bento derives its inter-card gap from resolved `th.Spacing.SM`. |
 | Overlay | `OverlayCenter(bg, fg string, width, height int) string`; `ModalWidth(screenWidth int) int` | ANSI-aware centered overlay and standard dialog width (`min(72, screenWidth-4)`). |
@@ -76,8 +77,9 @@ otherwise `Background` resolves to a solid `lipgloss.TerminalColor`.
 
 `Icons` fields are `Prompt`, `Assistant`, `Tool`, `OK`, `Err`, `Info`,
 `Agent`, `Bolt`, `Dot`, `Cursor`, `InputCursor`, `FilterCursor`, `ToolGuide`,
-`BadgeLeft`, `BadgeRight`, `DetailSeparator`, `Ellipsis`, `LogoTopRule`, and
-`LogoBottomRule`. Use `th.Icons`, never the literal glyph.
+`BadgeLeft`, `BadgeRight`, `DetailSeparator`, `Ellipsis`, `LogoTopRule`,
+`LogoBottomRule`, `MeterFill`, `MeterEmpty`, `TreeExpanded`, and
+`TreeCollapsed`. Use `th.Icons`, never the literal glyph.
 
 `theme.AgentState` is the live session/agent status vocabulary for dynamic
 coloring: `Ready` → `Success`, `Working` → `AccentAlt`, `Attention` →

@@ -11,9 +11,11 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 	childCorr := Correlation{SessionID: "child-1", ParentSessionID: "session-1", Depth: 1}
 	events := []Event{
 		UserMessage{Correlation: corr, Text: "hi"},
+		SessionTitled{Correlation: Correlation{SessionID: "session-1"}, Title: "hi"},
 		TurnStarted{Correlation: corr},
 		TextDelta{Correlation: corr, Text: "chunk"},
 		ToolCallBegin{Correlation: corr, CallID: "c1", Name: "bash", Args: json.RawMessage(`{"command":"echo"}`)},
+		ToolCallOutput{Correlation: corr, CallID: "c1", Data: "ok\n"},
 		ToolCallEnd{Correlation: corr, CallID: "c1", Title: "echo", Output: "ok", IsError: false, Metadata: json.RawMessage(`{"exitCode":0}`)},
 		PermissionAsked{Correlation: corr, RequestID: "p1", Permission: "bash", Patterns: []string{"echo hi"}},
 		PermissionResolved{Correlation: corr, RequestID: "p1", Decision: DecisionOnce},
@@ -323,6 +325,7 @@ func TestEventTypeCoverage(t *testing.T) {
 		"text.delta":          TextDelta{},
 		"tool.begin":          ToolCallBegin{},
 		"tool.end":            ToolCallEnd{},
+		"tool.output":         ToolCallOutput{},
 		"permission.asked":    PermissionAsked{},
 		"permission.resolved": PermissionResolved{},
 		"question.asked":      QuestionAsked{},

@@ -18,6 +18,8 @@ func eventType(ev Event) string {
 	switch ev.(type) {
 	case UserMessage:
 		return "user.message"
+	case SessionTitled:
+		return "session.titled"
 	case TurnStarted:
 		return "turn.started"
 	case TextDelta:
@@ -26,6 +28,8 @@ func eventType(ev Event) string {
 		return "tool.begin"
 	case ToolCallEnd:
 		return "tool.end"
+	case ToolCallOutput:
+		return "tool.output"
 	case PermissionAsked:
 		return "permission.asked"
 	case PermissionResolved:
@@ -78,6 +82,8 @@ func (e Envelope) Decode() (Event, error) {
 	switch e.Type {
 	case "user.message":
 		ev = &UserMessage{}
+	case "session.titled":
+		ev = &SessionTitled{}
 	case "turn.started":
 		ev = &TurnStarted{}
 	case "text.delta":
@@ -86,6 +92,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &ToolCallBegin{}
 	case "tool.end":
 		ev = &ToolCallEnd{}
+	case "tool.output":
+		ev = &ToolCallOutput{}
 	case "permission.asked":
 		ev = &PermissionAsked{}
 	case "permission.resolved":
@@ -127,6 +135,8 @@ func deref(ev Event) Event {
 	switch v := ev.(type) {
 	case *UserMessage:
 		return *v
+	case *SessionTitled:
+		return *v
 	case *TurnStarted:
 		return *v
 	case *TextDelta:
@@ -134,6 +144,8 @@ func deref(ev Event) Event {
 	case *ToolCallBegin:
 		return *v
 	case *ToolCallEnd:
+		return *v
+	case *ToolCallOutput:
 		return *v
 	case *PermissionAsked:
 		return *v

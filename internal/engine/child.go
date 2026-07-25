@@ -31,7 +31,8 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 	if agentName == "" {
 		agentName = e.agent.Name
 	}
-	if _, ok := e.findAgent(agentName); !ok {
+	childAgent, ok := e.findAgent(agentName)
+	if !ok {
 		return tool.TaskResult{}, fmt.Errorf("unknown agent %q", agentName)
 	}
 
@@ -49,6 +50,14 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		childReg = e.opts.Registry.CloneWithout()
 	}
 
+	// Parent effective ceiling: configured layers plus the active parent
+	// agent profile. Session always-grants are intentionally omitted so the
+	// child starts with an empty granted set. Child agent Allows are dropped
+	// in handleSelectAgent (Depth > 0) so a child profile cannot widen.
+	parentLayers := append([]permission.Ruleset(nil), e.opts.Rules...)
+	if len(e.agent.Permissions) > 0 {
+		parentLayers = append(parentLayers, append(permission.Ruleset(nil), e.agent.Permissions...))
+	}
 	child := New(Options{
 		SessionID:       childID,
 		ParentSessionID: e.opts.SessionID,
@@ -66,7 +75,7 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		InitialModel:    e.model,
 		InitialEffort:   e.effort,
 		MaxTokens:       e.opts.MaxTokens,
-		Rules:           permission.DeriveChildRules(e.opts.Rules),
+		Rules:           permission.DeriveChildRules(parentLayers, childAgent.Permissions),
 	})
 
 	// Inherit the parent's live provider/model/priority. Clearing InitialProvider

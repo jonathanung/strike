@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -148,6 +150,9 @@ type Engine struct {
 	// files tracks tool read snapshots so external edits (FilesChanged / /vim)
 	// force the model to re-read before edit/write.
 	files *tool.FileState
+
+	// titled is set after the first SessionTitled emit so auto-titling runs once.
+	titled bool
 }
 
 func New(opts Options) *Engine {
@@ -731,7 +736,14 @@ func (e *Engine) handleSelectAgent(op protocol.SelectAgent) {
 		return
 	}
 	e.agent = agent
-	e.perms.SetAgentRules(agent.Permissions)
+	// Child sessions may only apply Deny rules from an agent profile so a
+	// subagent cannot widen parent Deny/Ask via Allow (AG3). Root keeps the
+	// full profile (AG1/AG2).
+	agentRules := agent.Permissions
+	if e.opts.Depth > 0 {
+		agentRules = permission.DenyOnly(agentRules)
+	}
+	e.perms.SetAgentRules(agentRules)
 	e.emit(protocol.AgentSelected{
 		Correlation: e.sessionCorr(),
 		Name:        agent.Name,
@@ -819,6 +831,55 @@ func (e *Engine) startTurn(ctx context.Context, text string) {
 	}()
 }
 
+// maybeTitleSession emits SessionTitled once from the first non-empty user text.
+func (e *Engine) maybeTitleSession(text string) {
+	if e.titled {
+		return
+	}
+	title := sessionTitleFromText(text)
+	if title == "" {
+		return
+	}
+	e.titled = true
+	e.emit(protocol.SessionTitled{Correlation: e.sessionCorr(), Title: title})
+}
+
+// sessionTitleFromText collapses whitespace, drops controls, and truncates.
+// Kept local so engine does not import internal/session (cmd/strike only).
+// Logic mirrors session.TitleFromText.
+func sessionTitleFromText(text string) string {
+	var b strings.Builder
+	b.Grow(len(text))
+	prevSpace := false
+	for _, r := range text {
+		switch {
+		case r == '\u00a0':
+			r = ' '
+			fallthrough
+		case unicode.IsSpace(r):
+			if b.Len() == 0 || prevSpace {
+				continue
+			}
+			b.WriteByte(' ')
+			prevSpace = true
+		case r < 0x20 || r == 0x7f:
+			continue
+		default:
+			b.WriteRune(r)
+			prevSpace = false
+		}
+	}
+	s := strings.TrimSpace(b.String())
+	if s == "" {
+		return ""
+	}
+	const maxRunes = 60
+	if utf8.RuneCountInString(s) <= maxRunes {
+		return s
+	}
+	return string([]rune(s)[:maxRunes])
+}
+
 // runTurn is the core agent loop: stream a model response; if it requested
 // tool calls, execute them and feed results back; otherwise the turn is done.
 // turnID is immutable for the turn; each Provider.Stream call gets its own
@@ -829,6 +890,7 @@ func (e *Engine) runTurn(ctx context.Context, text string, turnID string, finish
 	turnCorr := e.baseCorr()
 	turnCorr.TurnID = turnID
 	e.emit(protocol.UserMessage{Correlation: turnCorr, Text: text})
+	e.maybeTitleSession(text)
 	e.emit(protocol.TurnStarted{Correlation: turnCorr})
 	e.messages = append(e.messages, provider.Message{Role: provider.RoleUser, Text: text})
 
@@ -962,6 +1024,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 	if !ok {
 		err = fmt.Errorf("unknown tool %q; available tools: %s", call.Name, e.toolNames())
 	} else {
+		callID := call.ID
 		tc := &tool.Context{
 			WorkDir: e.opts.WorkDir,
 			Files:   e.files,
@@ -989,6 +1052,16 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 				return tool.QuestionResponse{Answers: answers}, nil
 			},
 			SwitchAgent: e.queueSwitchAgent,
+			ReportOutput: func(data string) {
+				if data == "" {
+					return
+				}
+				e.emit(protocol.ToolCallOutput{
+					Correlation: corr,
+					CallID:      callID,
+					Data:        data,
+				})
+			},
 		}
 		if e.opts.Depth < e.opts.MaxChildDepth {
 			tc.SpawnTask = e.spawnChild
