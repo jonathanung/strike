@@ -425,6 +425,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case editorFinishedMsg:
 		return m.applyEditorFinished(msg)
 
+	case composerEditorFinishedMsg:
+		return m.applyComposerEditorFinished(msg)
+
 	case terminalOutputMsg:
 		return m.applyTerminalOutput()
 
@@ -617,6 +620,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.recomputeCompletion()
 			m.reflow()
 			return m, nil
+		case key.Matches(msg, m.keyMap.ExternalEditor):
+			return m.openComposerExternalEditor()
 		case key.Matches(msg, m.keyMap.Send):
 			text := strings.TrimSpace(m.composer.Value())
 			if text == "" {
