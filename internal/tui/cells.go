@@ -87,6 +87,8 @@ type toolCell struct {
 	metadata json.RawMessage
 	done     bool
 	isError  bool
+	expanded bool
+	selected bool // highlight while transcript selection is on this cell
 }
 
 const (
@@ -94,12 +96,51 @@ const (
 	toolLiveTailLines = 5
 )
 
+// isExploreTool reports tools that group into an "exploring…" cell when
+// consecutive (codex ExecCell reads/searches pattern).
+func isExploreTool(name string) bool {
+	switch name {
+	case "read", "glob", "grep":
+		return true
+	default:
+		return false
+	}
+}
+
+// collapsible reports whether this finished tool has body content that can
+// grow beyond the collapsed preview.
+func (c *toolCell) collapsible() bool {
+	if c == nil || !c.done {
+		return false
+	}
+	if meta, ok := parseEditMetadata(c.metadata); ok {
+		// Diff body can always expand past the cell MaxLines window when large.
+		lines := strings.Count(meta.OldString, "\n") + strings.Count(meta.NewString, "\n") + 2
+		return lines > diffPreviewMaxLinesCell || c.expanded
+	}
+	if c.output == "" {
+		return false
+	}
+	return countLines(c.output) > toolPreviewLines || c.expanded
+}
+
+func (c *toolCell) toggleExpanded() bool {
+	if c == nil || !c.collapsible() {
+		return false
+	}
+	c.expanded = !c.expanded
+	return true
+}
+
 func (c *toolCell) render(width int, th theme.Theme) string {
 	th = th.Resolve()
 	ic := iconsFor(th)
 	st := th.S()
 	space := themedSpace(th.Spacing.XS)
 	labelStyle := st.ToolLabel
+	if c.selected {
+		labelStyle = st.Selected
+	}
 	head := c.name
 	if c.title != "" {
 		head = displayJoin(th, ic.Dot, head, c.title)
@@ -114,16 +155,28 @@ func (c *toolCell) render(width int, th theme.Theme) string {
 			status = st.Success.Render(ic.OK)
 		}
 	}
-	out := labelStyle.Render(ic.Tool+space+head) + space + status
+	marker := ""
+	if c.collapsible() {
+		glyph := ic.TreeCollapsed
+		if c.expanded {
+			glyph = ic.TreeExpanded
+		}
+		marker = labelStyle.Render(glyph) + space
+	}
+	out := marker + labelStyle.Render(ic.Tool+space+head) + space + status
 	if c.done {
 		prefix := themedSpace(th.Spacing.SM) + st.BorderMuted.Render(ic.ToolGuide) + space
 		bodyWidth := max(1, width-lipgloss.Width(prefix))
 		if meta, ok := parseEditMetadata(c.metadata); ok {
+			maxLines := diffPreviewMaxLinesCell
+			if c.expanded {
+				maxLines = diffExpandedMaxLines(meta)
+			}
 			diff := ui.DiffPreview(th, ui.DiffPreviewOpts{
 				Path:      "",
 				Old:       meta.OldString,
 				New:       meta.NewString,
-				MaxLines:  diffPreviewMaxLinesCell,
+				MaxLines:  maxLines,
 				Width:     bodyWidth,
 				ShowStats: true,
 			})
@@ -131,8 +184,13 @@ func (c *toolCell) render(width int, th theme.Theme) string {
 				out += "\n" + indent(diff, prefix)
 			}
 		} else if c.output != "" {
-			preview := previewLines(c.output, toolPreviewLines, ic.Ellipsis, space)
-			body := renderCellText(st.Muted, preview, bodyWidth)
+			text := c.output
+			if !c.expanded {
+				text = previewLines(c.output, toolPreviewLines, ic.Ellipsis, space)
+			} else {
+				text = strings.TrimRight(c.output, "\n")
+			}
+			body := renderCellText(st.Muted, text, bodyWidth)
 			out += "\n" + indent(body, prefix)
 		}
 	} else if c.output != "" {
@@ -143,6 +201,129 @@ func (c *toolCell) render(width int, th theme.Theme) string {
 		out += "\n" + indent(body, prefix)
 	}
 	return out
+}
+
+// exploreCell groups consecutive read/glob/grep tool calls into one transcript
+// block ("exploring…" / "explored · N") that expands to list each call.
+type exploreCell struct {
+	calls     []*toolCell
+	accepting bool // still absorbing consecutive explore tools
+	expanded  bool
+	selected  bool
+}
+
+func (c *exploreCell) collapsible() bool {
+	return c != nil && len(c.calls) > 0
+}
+
+func (c *exploreCell) toggleExpanded() bool {
+	if !c.collapsible() {
+		return false
+	}
+	c.expanded = !c.expanded
+	return true
+}
+
+func (c *exploreCell) allDone() bool {
+	if len(c.calls) == 0 {
+		return false
+	}
+	for _, tc := range c.calls {
+		if tc == nil || !tc.done {
+			return false
+		}
+	}
+	return true
+}
+
+func (c *exploreCell) anyError() bool {
+	for _, tc := range c.calls {
+		if tc != nil && tc.done && tc.isError {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *exploreCell) render(width int, th theme.Theme) string {
+	th = th.Resolve()
+	ic := iconsFor(th)
+	st := th.S()
+	space := themedSpace(th.Spacing.XS)
+	labelStyle := st.ToolLabel
+	if c.selected {
+		labelStyle = st.Selected
+	}
+	n := len(c.calls)
+	label := "exploring"
+	if c.allDone() {
+		label = "explored"
+	}
+	head := label
+	if n > 0 {
+		head = displayJoin(th, ic.Dot, label, itoa(n)+space+"tools")
+	}
+	status := st.Muted.Render(ic.Ellipsis)
+	if c.allDone() {
+		if c.anyError() {
+			status = st.Error.Render(ic.Err)
+		} else {
+			status = st.Success.Render(ic.OK)
+		}
+	}
+	glyph := ic.TreeCollapsed
+	if c.expanded {
+		glyph = ic.TreeExpanded
+	}
+	out := labelStyle.Render(glyph) + space + labelStyle.Render(ic.Tool+space+head) + space + status
+	if !c.expanded {
+		return out
+	}
+	prefix := themedSpace(th.Spacing.SM) + st.BorderMuted.Render(ic.ToolGuide) + space
+	bodyWidth := max(1, width-lipgloss.Width(prefix))
+	var lines []string
+	for _, tc := range c.calls {
+		if tc == nil {
+			continue
+		}
+		row := tc.name
+		if tc.title != "" {
+			row = displayJoin(th, ic.Dot, tc.name, tc.title)
+		} else if len(tc.args) > 0 {
+			row += space + compactJSON(tc.args, 40, ic.Ellipsis)
+		}
+		mark := st.Muted.Render(ic.Ellipsis)
+		if tc.done {
+			if tc.isError {
+				mark = st.Error.Render(ic.Err)
+			} else {
+				mark = st.Success.Render(ic.OK)
+			}
+		}
+		line := st.Muted.Render(ansi.Hardwrap(row, max(1, bodyWidth-lipgloss.Width(space+mark)), false)) + space + mark
+		lines = append(lines, line)
+	}
+	if len(lines) > 0 {
+		out += "\n" + indent(strings.Join(lines, "\n"), prefix)
+	}
+	return out
+}
+
+func diffExpandedMaxLines(meta editDiffMeta) int {
+	// Enough for every old/new line as a change row, plus headroom.
+	n := strings.Count(meta.OldString, "\n") + strings.Count(meta.NewString, "\n") + 4
+	if n < diffPreviewMaxLinesCell {
+		return diffPreviewMaxLinesCell
+	}
+	return n
+}
+
+func countLines(s string) int {
+	s = strings.TrimRight(s, "\n")
+	if s == "" {
+		return 0
+	}
+	return strings.Count(s, "\n") + 1
 }
 
 // infoCell is host feedback in the transcript (login URLs, device codes) —
