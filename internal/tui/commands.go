@@ -15,6 +15,7 @@ const (
 	commandModel    commandID = "model"
 	commandEffort   commandID = "effort"
 	commandAuth     commandID = "auth"
+	commandSettings commandID = "settings"
 	commandAgent    commandID = "agent"
 	commandFast     commandID = "fast"
 	commandVim      commandID = "vim"
@@ -47,6 +48,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandModel, Name: "/model", Description: "select a model for the current provider", ArgsHint: "[model]", Source: commandSourceBuiltin},
 	{ID: commandEffort, Name: "/effort", Description: "set how much reasoning the model spends", ArgsHint: "[level]", Source: commandSourceBuiltin},
 	{ID: commandAuth, Name: "/auth", Description: "manage provider authentication", ArgsHint: "[provider]", Source: commandSourceBuiltin},
+	{ID: commandSettings, Name: "/settings", Description: "manage custom providers and settings", Source: commandSourceBuiltin},
 	{ID: commandAgent, Name: "/agent", Description: "select an agent", ArgsHint: "[name]", Source: commandSourceBuiltin},
 	{ID: commandFast, Name: "/fast", Description: "toggle OpenAI priority tier (faster, ~2× cost)", ArgsHint: "[on|off]", Source: commandSourceBuiltin},
 	{ID: commandVim, Name: "/vim", Description: "open a file in the embedded editor (pane/overlay) or $EDITOR", ArgsHint: "[path[:line]]", Source: commandSourceBuiltin},
@@ -111,6 +113,7 @@ var reservedCommandNames = map[string]struct{}{
 	"model":    {},
 	"effort":   {},
 	"auth":     {},
+	"settings": {},
 	"agent":    {},
 	"fast":     {},
 	"vim":      {},

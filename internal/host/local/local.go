@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/jonathanung/strike-cli/internal/auth"
@@ -25,13 +26,18 @@ import (
 // nil Services.History (history is optional). A nil mem yields a nil
 // Services.Memory. Agents pass through unchanged; skills whose names fail
 // config.ValidateSkillName are dropped here, since they cannot be invoked as
-// slash commands (the frontend no longer filters).
-func New(store *auth.Store, hist *history.Store, mem *memory.Store, agents []string, skills []config.Skill) host.Services {
+// slash commands (the frontend no longer filters). customs may be nil (no
+// custom provider support).
+func New(store *auth.Store, hist *history.Store, mem *memory.Store, agents []string, skills []config.Skill, customs *config.CustomStore) host.Services {
+	if customs == nil {
+		customs = config.NewCustomStore(nil)
+	}
 	services := host.Services{
-		Auth:     authAdapter{store: store},
-		Catalog:  catalogAdapter{},
-		Settings: settingsAdapter{},
-		Agents:   agents,
+		Auth:      authAdapter{store: store, customs: customs},
+		Catalog:   catalogAdapter{customs: customs},
+		Settings:  settingsAdapter{},
+		Providers: providersAdapter{store: customs},
+		Agents:    agents,
 	}
 	// A typed nil *history.Store would satisfy the interface but panic on
 	// use, so only wire history when it is really present.
@@ -55,9 +61,9 @@ func New(store *auth.Store, hist *history.Store, mem *memory.Store, agents []str
 	return services
 }
 
-// credentialProviders are the providers backed by the auth store, in display
-// order, each carrying the login methods it supports. echo is appended by
-// Statuses as a builtin needing no credentials.
+// credentialProviders are the built-in providers backed by the auth store, in
+// display order, each carrying the login methods it supports. Custom providers
+// and echo are appended by Statuses.
 var credentialProviders = []host.ProviderStatus{
 	{Name: "anthropic", APIKey: true},
 	{Name: "openai", OAuth: true, APIKey: true},
@@ -66,11 +72,13 @@ var credentialProviders = []host.ProviderStatus{
 
 // authAdapter adapts *auth.Store to host.Auth.
 type authAdapter struct {
-	store *auth.Store
+	store   *auth.Store
+	customs *config.CustomStore
 }
 
 func (a authAdapter) Statuses() []host.ProviderStatus {
-	out := make([]host.ProviderStatus, 0, len(credentialProviders)+1)
+	customs := a.customs.List()
+	out := make([]host.ProviderStatus, 0, len(credentialProviders)+len(customs)+1)
 	for _, p := range credentialProviders {
 		p.Detail = auth.Describe(p.Name, a.store)
 		p.Authed = p.Detail != "none"
@@ -78,6 +86,40 @@ func (a authAdapter) Statuses() []host.ProviderStatus {
 			p.ExpiresAt = cred.ExpiresAt
 		}
 		out = append(out, p)
+	}
+	for _, cp := range customs {
+		key, hasKey := auth.APIKeyEnv(cp.Name, a.store, cp.APIKeyEnv)
+		credDetail := "none"
+		if hasKey {
+			if d := auth.Describe(cp.Name, a.store); d != "none" {
+				credDetail = d
+			} else if key != "" {
+				credDetail = "env"
+			}
+		}
+		hostName := ""
+		if u, err := url.Parse(cp.BaseURL); err == nil {
+			hostName = u.Host
+		}
+		meta := string(cp.API)
+		if hostName != "" {
+			meta = string(cp.API) + " · " + hostName
+		}
+		detail := meta
+		if credDetail != "none" {
+			detail = credDetail + " · " + meta
+		}
+		// Customs are always selectable once defined; local gateways (ollama)
+		// often need no key. Missing keys still surface in Detail as "none".
+		out = append(out, host.ProviderStatus{
+			Name:    cp.Name,
+			Detail:  detail,
+			Authed:  true,
+			Custom:  true,
+			APIKey:  true,
+			WireAPI: string(cp.API),
+			BaseURL: cp.BaseURL,
+		})
 	}
 	out = append(out, host.ProviderStatus{
 		Name:    "echo",
@@ -89,6 +131,15 @@ func (a authAdapter) Statuses() []host.ProviderStatus {
 }
 
 func (a authAdapter) Describe(provider string) string {
+	if cp, ok := a.customs.Get(provider); ok {
+		if key, ok := auth.APIKeyEnv(provider, a.store, cp.APIKeyEnv); ok && key != "" {
+			if d := auth.Describe(provider, a.store); d != "none" {
+				return d
+			}
+			return "env"
+		}
+		return "none"
+	}
 	return auth.Describe(provider, a.store)
 }
 
@@ -99,7 +150,7 @@ func (a authAdapter) SetAPIKey(provider, key string) error {
 	if key == "" {
 		return errors.New("api key is empty")
 	}
-	if !acceptsAPIKey(provider) {
+	if !a.acceptsAPIKey(provider) {
 		return fmt.Errorf("provider %q does not accept an API key", provider)
 	}
 	return a.store.Set(provider, auth.Credential{Type: auth.TypeAPIKey, APIKey: key})
@@ -159,21 +210,33 @@ func (a authAdapter) BeginDevice(ctx context.Context, provider string) (*host.De
 	return host.NewDeviceLogin(code.UserCode, code.VerificationURI, poll), nil
 }
 
-// acceptsAPIKey reports whether a provider stores a pasted API key. echo and
-// unknown names do not.
-func acceptsAPIKey(provider string) bool {
+// acceptsAPIKey reports whether a provider stores a pasted API key. echo does
+// not; customs and credential builtins do.
+func (a authAdapter) acceptsAPIKey(provider string) bool {
 	for _, p := range credentialProviders {
 		if p.Name == provider {
 			return p.APIKey
 		}
 	}
+	if _, ok := a.customs.Get(provider); ok {
+		return true
+	}
 	return false
 }
 
-// catalogAdapter adapts the models.dev catalog to host.Catalog.
-type catalogAdapter struct{}
+// catalogAdapter adapts the models.dev catalog to host.Catalog, with custom
+// provider model lists taking precedence over the remote catalog.
+type catalogAdapter struct {
+	customs *config.CustomStore
+}
 
-func (catalogAdapter) ModelIDs(ctx context.Context, provider string) ([]string, error) {
+func (c catalogAdapter) ModelIDs(ctx context.Context, provider string) ([]string, error) {
+	if cp, ok := c.customs.Get(provider); ok {
+		if len(cp.Models) > 0 {
+			return append([]string(nil), cp.Models...), nil
+		}
+		return nil, fmt.Errorf("no models configured for %s — add model ids in /settings or use /model <id>", provider)
+	}
 	catalog, err := models.Load(ctx)
 	if err != nil {
 		return nil, err
@@ -185,7 +248,10 @@ func (catalogAdapter) ModelIDs(ctx context.Context, provider string) ([]string, 
 	return ids, nil
 }
 
-func (catalogAdapter) ContextWindow(ctx context.Context, provider, model string) (int, bool, error) {
+func (c catalogAdapter) ContextWindow(ctx context.Context, provider, model string) (int, bool, error) {
+	if _, ok := c.customs.Get(provider); ok {
+		return 0, false, nil
+	}
 	catalog, err := models.Load(ctx)
 	if err != nil {
 		return 0, false, err
@@ -194,7 +260,10 @@ func (catalogAdapter) ContextWindow(ctx context.Context, provider, model string)
 	return tokens, ok, nil
 }
 
-func (catalogAdapter) OutputLimit(ctx context.Context, provider, model string) (int, bool, error) {
+func (c catalogAdapter) OutputLimit(ctx context.Context, provider, model string) (int, bool, error) {
+	if _, ok := c.customs.Get(provider); ok {
+		return 0, false, nil
+	}
 	catalog, err := models.Load(ctx)
 	if err != nil {
 		return 0, false, err
@@ -249,4 +318,72 @@ func (m memoryAdapter) Put(key, value string, tags []string) error {
 
 func (m memoryAdapter) Delete(key string) error {
 	return m.store.Delete(key)
+}
+
+// providersAdapter exposes custom provider CRUD through the host contract.
+type providersAdapter struct {
+	store *config.CustomStore
+}
+
+func (p providersAdapter) List() []host.CustomProvider {
+	items := p.store.List()
+	out := make([]host.CustomProvider, len(items))
+	for i, cp := range items {
+		out[i] = toHostCustom(cp)
+	}
+	return out
+}
+
+func (p providersAdapter) Get(name string) (host.CustomProvider, bool) {
+	cp, ok := p.store.Get(name)
+	if !ok {
+		return host.CustomProvider{}, false
+	}
+	return toHostCustom(cp), true
+}
+
+func (p providersAdapter) Upsert(hp host.CustomProvider) error {
+	return p.store.Upsert(fromHostCustom(hp))
+}
+
+func (p providersAdapter) Remove(name string) error {
+	return p.store.Remove(name)
+}
+
+func toHostCustom(cp config.CustomProvider) host.CustomProvider {
+	h := host.CustomProvider{
+		Name:      cp.Name,
+		BaseURL:   cp.BaseURL,
+		API:       string(cp.API),
+		APIKeyEnv: cp.APIKeyEnv,
+	}
+	if len(cp.Headers) > 0 {
+		h.Headers = make(map[string]string, len(cp.Headers))
+		for k, v := range cp.Headers {
+			h.Headers[k] = v
+		}
+	}
+	if len(cp.Models) > 0 {
+		h.Models = append([]string(nil), cp.Models...)
+	}
+	return h
+}
+
+func fromHostCustom(hp host.CustomProvider) config.CustomProvider {
+	cp := config.CustomProvider{
+		Name:      hp.Name,
+		BaseURL:   hp.BaseURL,
+		API:       config.WireAPI(hp.API),
+		APIKeyEnv: hp.APIKeyEnv,
+	}
+	if len(hp.Headers) > 0 {
+		cp.Headers = make(map[string]string, len(hp.Headers))
+		for k, v := range hp.Headers {
+			cp.Headers[k] = v
+		}
+	}
+	if len(hp.Models) > 0 {
+		cp.Models = append([]string(nil), hp.Models...)
+	}
+	return cp
 }

@@ -20,14 +20,16 @@ import (
 type AuthFunc func(ctx context.Context, req *http.Request) error
 
 // BearerAuth adapts a bearer-token source (API key or OAuth access token)
-// into an AuthFunc.
+// into an AuthFunc. An empty token leaves Authorization unset (local gateways).
 func BearerAuth(source func(ctx context.Context) (string, error)) AuthFunc {
 	return func(ctx context.Context, req *http.Request) error {
 		token, err := source(ctx)
 		if err != nil {
 			return err
 		}
-		req.Header.Set("Authorization", "Bearer "+token)
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
 		return nil
 	}
 }

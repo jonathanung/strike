@@ -28,8 +28,15 @@ const refreshSkew = 2 * time.Minute
 
 // APIKey resolves a plain API key (env or stored) for a provider.
 func APIKey(provider string, store *Store) (string, bool) {
-	if env := envVars[provider]; env != "" {
-		if key := os.Getenv(env); key != "" {
+	return APIKeyEnv(provider, store, envVars[provider])
+}
+
+// APIKeyEnv resolves a plain API key using an explicit environment variable
+// name (for custom providers' apiKeyEnv), then the stored credential.
+// Empty envName skips the environment lookup.
+func APIKeyEnv(provider string, store *Store, envName string) (string, bool) {
+	if envName != "" {
+		if key := os.Getenv(envName); key != "" {
 			return key, true
 		}
 	}
@@ -37,6 +44,25 @@ func APIKey(provider string, store *Store) (string, bool) {
 		return cred.APIKey, true
 	}
 	return "", false
+}
+
+// BearerSourceEnv is BearerSource with a custom environment variable name
+// checked before the auth store (used by custom/self-hosted providers).
+func BearerSourceEnv(provider string, store *Store, envName string) func(ctx context.Context) (string, error) {
+	return func(ctx context.Context) (string, error) {
+		if key, ok := APIKeyEnv(provider, store, envName); ok {
+			return key, nil
+		}
+		cred, err := freshOAuth(ctx, store, provider)
+		if err != nil {
+			hint := "run `/auth " + provider + " key` or set an API key in /settings"
+			if envName != "" {
+				hint = "set " + envName + " or " + hint
+			}
+			return "", fmt.Errorf("no credentials for %s: %s", provider, hint)
+		}
+		return cred.Access, nil
+	}
 }
 
 // freshOAuth returns the stored OAuth credential for a provider, refreshed
