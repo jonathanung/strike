@@ -116,8 +116,11 @@ type Model struct {
 	selectedCell int
 	modal        modal
 
-	viewport                   viewport.Model
-	composer                   textarea.Model
+	viewport viewport.Model
+	composer textarea.Model
+	// pendingPastes holds full text for collapsed large-paste chips in the
+	// composer. Expanded on send; pruned when the chip leaves the value.
+	pendingPastes              []pasteChip
 	completion                 *completionState
 	keyMap                     keyMap
 	focus                      paneFocus
@@ -382,6 +385,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reflow()
 		return m, cmd
 
+	case providerLogoutMsg:
+		if pm, ok := m.modal.(*providerModal); ok {
+			pm.reloadStatuses()
+		}
+		switch {
+		case msg.err != nil:
+			m.setNotice("logout failed: "+msg.err.Error(), true)
+		default:
+			m.setNotice("logged out of "+msg.provider, false)
+		}
+		m.reflow()
+		return m, nil
+
 	case modelsLoadedMsg:
 		if mm, ok := m.modal.(*modelModal); ok && mm.provider == msg.provider {
 			mm.loading = false
@@ -424,6 +440,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case editorFinishedMsg:
 		return m.applyEditorFinished(msg)
+
+	case composerEditorFinishedMsg:
+		return m.applyComposerEditorFinished(msg)
 
 	case terminalOutputMsg:
 		return m.applyTerminalOutput()
@@ -608,6 +627,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reflow()
 			return m, nil
 		}
+		// Bracketed paste: collapse large multi-line blobs to a chip.
+		if msg.Paste {
+			m.handleComposerPaste(string(msg.Runes))
+			m.recomputeCompletion()
+			m.reflow()
+			return m, nil
+		}
 		switch {
 		case key.Matches(msg, m.keyMap.Newline):
 			// Left-focus only (right pane returned above). Distinct from Send
@@ -617,8 +643,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.recomputeCompletion()
 			m.reflow()
 			return m, nil
+		case key.Matches(msg, m.keyMap.ExternalEditor):
+			return m.openComposerExternalEditor()
 		case key.Matches(msg, m.keyMap.Send):
-			text := strings.TrimSpace(m.composer.Value())
+			// Expand paste chips before send so the model sees full content.
+			text := strings.TrimSpace(m.composerTextExpanded())
 			if text == "" {
 				// Empty enter is tool expand (handleToolCellKeys); if nothing
 				// collapsible was available, stay put.
@@ -685,6 +714,9 @@ func (m Model) updateComposer(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.historyPos >= 0 && m.composer.Value() != before {
 		m.resetHistoryBrowsing()
 	}
+	if m.composer.Value() != before {
+		m.pendingPastes = prunePendingPastes(m.composer.Value(), m.pendingPastes)
+	}
 	m.recomputeCompletion()
 	m.reflow()
 	return m, cmd
@@ -741,6 +773,9 @@ func (m *Model) setComposerValueAt(value string, offset int) {
 		}
 	}
 	m.composer.SetValue(value)
+	// History/completion replacements are plain text; drop chips that no
+	// longer appear (or clear all when the value is wholly replaced).
+	m.pendingPastes = prunePendingPastes(value, m.pendingPastes)
 	for steps := 0; m.composer.Line() > targetRow && steps <= len(runes)+1; steps++ {
 		m.composer.CursorUp()
 	}
@@ -749,6 +784,7 @@ func (m *Model) setComposerValueAt(value string, offset int) {
 
 func (m *Model) resetComposer() {
 	m.composer.Reset()
+	m.pendingPastes = nil
 	m.completion = nil
 	m.resetHistoryBrowsing()
 	m.reflow()
@@ -1370,6 +1406,7 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 			"/settings",
 			"/vim [path[:line]]",
 			"/md-read <path>",
+			"/memory [list|get|set|rm]",
 			"/theme [name|dark|light|auto]",
 			"/layout",
 			"/keys",
@@ -1384,6 +1421,8 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		m.modal = newKeysModal(m.keyMap)
 		m.reflow()
 		return m, nil
+	case "/memory":
+		return m.handleMemoryCommand(fields[1:])
 	default:
 		// Unknown commands fall through to skills: /name args renders the
 		// skill template and submits it as the user message.
@@ -1401,6 +1440,95 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 			return m.submit(protocol.UserInput{Text: prompt}, text)
 		}
 		m.setNotice("unknown command "+fields[0]+" — try /help", true)
+		return m, nil
+	}
+}
+
+func (m Model) handleMemoryCommand(args []string) (tea.Model, tea.Cmd) {
+	m.resetComposer()
+	if m.services.Memory == nil {
+		m.setNotice("project memory is unavailable", true)
+		return m, nil
+	}
+	usage := "usage: /memory [list [tag]|get <key>|set <key> <value>|rm <key>]"
+	if len(args) == 0 {
+		args = []string{"list"}
+	}
+	switch args[0] {
+	case "list", "ls":
+		tag := ""
+		if len(args) > 1 {
+			tag = args[1]
+		}
+		entries, err := m.services.Memory.List(tag)
+		if err != nil {
+			m.setNotice("memory: "+err.Error(), true)
+			return m, nil
+		}
+		if len(entries) == 0 {
+			if tag != "" {
+				m.setNotice("memory: no entries with tag "+tag, false)
+			} else {
+				m.setNotice("memory: (empty)", false)
+			}
+			return m, nil
+		}
+		parts := make([]string, 0, len(entries))
+		for _, e := range entries {
+			line := e.Key + "=" + e.Value
+			if len(e.Tags) > 0 {
+				line += " [" + strings.Join(e.Tags, ", ") + "]"
+			}
+			parts = append(parts, line)
+		}
+		m.setNotice("memory: "+dotJoin(m.th, parts...), false)
+		return m, nil
+	case "get":
+		if len(args) < 2 {
+			m.setNotice(usage, true)
+			return m, nil
+		}
+		entry, ok, err := m.services.Memory.Get(args[1])
+		if err != nil {
+			m.setNotice("memory: "+err.Error(), true)
+			return m, nil
+		}
+		if !ok {
+			m.setNotice("memory: no entry for "+args[1], true)
+			return m, nil
+		}
+		msg := entry.Key + "=" + entry.Value
+		if len(entry.Tags) > 0 {
+			msg += " [" + strings.Join(entry.Tags, ", ") + "]"
+		}
+		m.setNotice("memory: "+msg, false)
+		return m, nil
+	case "set", "add", "put":
+		if len(args) < 3 {
+			m.setNotice(usage, true)
+			return m, nil
+		}
+		key := args[1]
+		value := strings.Join(args[2:], " ")
+		if err := m.services.Memory.Put(key, value, nil); err != nil {
+			m.setNotice("memory: "+err.Error(), true)
+			return m, nil
+		}
+		m.setNotice("memory: set "+key, false)
+		return m, nil
+	case "rm", "delete", "del", "remove":
+		if len(args) < 2 {
+			m.setNotice(usage, true)
+			return m, nil
+		}
+		if err := m.services.Memory.Delete(args[1]); err != nil {
+			m.setNotice("memory: "+err.Error(), true)
+			return m, nil
+		}
+		m.setNotice("memory: deleted "+args[1], false)
+		return m, nil
+	default:
+		m.setNotice(usage, true)
 		return m, nil
 	}
 }
