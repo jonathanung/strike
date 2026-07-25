@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"sync"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/host/local"
 	"github.com/jonathanung/strike-cli/internal/issue"
 	"github.com/jonathanung/strike-cli/internal/memory"
+	"github.com/jonathanung/strike-cli/internal/models"
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/project"
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -308,6 +310,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tool.NewQuestion(),
 		tool.NewEnterPlanMode(),
 		tool.NewExitPlanMode(),
+		tool.NewPhaseDone(),
 	)
 	registry.Register(tool.NewToolSearch(registry))
 
@@ -334,6 +337,12 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		agents = append(agents, engine.Agent(a))
 	}
 	instructions := config.LoadInstructions(workDir, projectIdentity.Root)
+	workflows, err := config.LoadWorkflows(workDir)
+	if err != nil {
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, fmt.Errorf("loading workflows: %w", err)
+	}
 
 	// Concurrent session manager owns durable JSONL logs. One root session is
 	// created here; child/agent sessions can open alongside it later.
@@ -355,8 +364,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	}
 	sessionID := info.ID
 	sessionDir := sessions.Dir()
-	hookDefs := make([]tool.HookDef, 0, len(cfg.Hooks))
-	for _, h := range cfg.Hooks {
+	shellHooks := cfg.ShellHooks()
+	hookDefs := make([]tool.HookDef, 0, len(shellHooks))
+	for _, h := range shellHooks {
 		hookDefs = append(hookDefs, tool.HookDef{
 			Event:     h.Event,
 			Command:   h.Command,
@@ -377,8 +387,25 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		InitialEffort:   cfg.Effort,
 		Agents:          agents,
 		InitialAgent:    cfg.DefaultAgent,
+		Workflows:       workflows,
 		Rules:           permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),
 		Hooks:           hookDefs,
+		HookRules:       cfg.HookRules(),
+		LookupContextWindow: func(providerName, model string) int {
+			// Best-effort catalog lookup for threshold compaction. Failures
+			// leave the window unknown; overflow recovery still works.
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			cat, err := models.Load(ctx)
+			if err != nil {
+				return 0
+			}
+			n, ok := cat.ContextWindow(providerName, model)
+			if !ok {
+				return 0
+			}
+			return n
+		},
 		PersistProjectRule: func(rule permission.Rule) error {
 			return config.AppendProjectPermission(workDir, rule)
 		},

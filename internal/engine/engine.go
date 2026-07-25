@@ -16,6 +16,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
@@ -79,6 +80,24 @@ type Options struct {
 	// (1-based, >=2). nil uses a small exponential default. Tests may return
 	// 0 for instant retries.
 	StreamRetryBackoff func(nextAttempt int) time.Duration
+	// ContextWindow is the selected model's context limit in tokens. Zero
+	// means unknown; threshold compaction stays off until LookupContextWindow
+	// or a later assignment provides a positive value. Overflow recovery does
+	// not require a known window.
+	ContextWindow int
+	// LookupContextWindow resolves context limits when the provider/model
+	// changes. nil skips catalog lookups.
+	LookupContextWindow func(provider, model string) int
+	// CompactionThreshold is the occupancy fraction (0–1) that triggers
+	// automatic compaction before a Stream. Zero defaults to 0.80; >=1
+	// disables threshold compaction.
+	CompactionThreshold float64
+	// CompactionBuffer is extra token headroom reserved with MaxTokens when
+	// computing the threshold budget. Zero defaults to 4096.
+	CompactionBuffer int
+	// KeepUserTurns is how many trailing real user turns to preserve when
+	// compacting. Zero defaults to 2.
+	KeepUserTurns int
 	// ProjectRoot is the workspace root (often the git toplevel). Shown in
 	// the environment system-prompt layer; empty falls back to WorkDir.
 	ProjectRoot string
@@ -92,6 +111,9 @@ type Options struct {
 	Rules []permission.Ruleset
 	// Hooks are shell-command lifecycle hooks (pre/post tool use). Empty disables.
 	Hooks []tool.HookDef
+	// HookRules are declarative config rules (event matcher → log/block/notify).
+	// Evaluated before shell hooks on pre_tool_use; block skips Execute.
+	HookRules permission.HookRuleset
 	// PersistProjectRule, when set, is invoked after a DecisionProject grant
 	// so the rule can be written to project config. Optional.
 	PersistProjectRule func(permission.Rule) error
@@ -105,6 +127,12 @@ type Options struct {
 	// PersistSessionMeta, when set, writes durable session metadata (sidecar).
 	// The engine emits protocol.SessionMeta after a successful persist.
 	PersistSessionMeta func(meta protocol.SessionMeta) error
+	// Workflows are named phase sequences (built-in plan-implement plus any
+	// loaded from .strike/workflows). Empty falls back to the built-in only.
+	Workflows []config.Workflow
+	// DefaultWorkflow is entered by enter_plan_mode when set; empty means
+	// "plan-implement".
+	DefaultWorkflow string
 	// OpenChildSession, when set, opens a durable log for a spawned child.
 	// parentID and a suggested childID/title are provided; the returned id is
 	// used as the child SessionID when non-empty.
@@ -175,12 +203,23 @@ type Engine struct {
 	pendingAgentMu sync.Mutex
 	pendingAgent   string
 
+	// workflow/phaseIndex track the active workflow phase (-1 = none).
+	workflow   config.Workflow
+	phaseIndex int
+
 	// files tracks tool read snapshots so external edits (FilesChanged / /vim)
 	// force the model to re-read before edit/write.
 	files *tool.FileState
 
 	// titled is set after the first SessionTitled emit so auto-titling runs once.
 	titled bool
+
+	// lastUsed/lastUsedKnown track the latest provider-reported context
+	// occupancy for threshold compaction.
+	lastUsed      int
+	lastUsedKnown bool
+	// contextWindowTokens is the live model limit (from opts or lookup).
+	contextWindowTokens int
 }
 
 func New(opts Options) *Engine {
@@ -199,13 +238,18 @@ func New(opts Options) *Engine {
 	if opts.MaxChildDepth == 0 {
 		opts.MaxChildDepth = 1
 	}
+	if len(opts.Workflows) == 0 {
+		opts.Workflows = []config.Workflow{config.BuiltinPlanImplement()}
+	}
 	e := &Engine{
-		opts:      opts,
-		ops:       make(chan protocol.Op, 16),
-		events:    make(chan protocol.Event, 256),
-		beginReqs: make(chan beginReq),
-		files:     &tool.FileState{},
-		children:  make(map[string]*childHandle),
+		opts:                opts,
+		ops:                 make(chan protocol.Op, 16),
+		events:              make(chan protocol.Event, 256),
+		beginReqs:           make(chan beginReq),
+		files:               &tool.FileState{},
+		children:            make(map[string]*childHandle),
+		contextWindowTokens: opts.ContextWindow,
+		phaseIndex:          -1,
 	}
 	e.perms = permission.New(e.emit, opts.Rules...)
 	if opts.PersistProjectRule != nil {
@@ -351,6 +395,8 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 		}
 	case protocol.FilesChanged:
 		e.handleFilesChanged(op)
+	case protocol.Compact:
+		e.handleCompact()
 	}
 }
 
@@ -653,6 +699,7 @@ func (e *Engine) setProvider(name string, p provider.Provider, model string) {
 	// active model string. Callers may still pass already-prefixed ids.
 	model = stripMatchingProviderPrefixes(name, model)
 	e.prov, e.provName, e.model = p, name, model
+	e.refreshContextWindow()
 	e.emit(protocol.ModelSelected{
 		Correlation: e.sessionCorr(),
 		Provider:    name,
@@ -667,6 +714,7 @@ func (e *Engine) setModel(model string) {
 		model = stripMatchingProviderPrefixes(e.provName, model)
 	}
 	e.model = model
+	e.refreshContextWindow()
 	e.emit(protocol.ModelSelected{
 		Correlation: e.sessionCorr(),
 		Provider:    e.provName,
@@ -739,16 +787,28 @@ func (e *Engine) findAgent(name string) (Agent, bool) {
 	return Agent{}, false
 }
 
-// handleSelectAgent switches the active persona and applies its
-// provider/model pins and permission profile when set.
+// handleSelectAgent switches the active persona and syncs workflow phase
+// when the user picks build/plan (tab, /agent, tools via SwitchAgent).
 func (e *Engine) handleSelectAgent(op protocol.SelectAgent) {
-	agent, ok := e.findAgent(op.Name)
+	if !e.applyAgent(op.Name) {
+		return
+	}
+	// Root only: child sessions do not drive parent workflow phases.
+	if e.opts.Depth == 0 {
+		e.syncPhaseWithAgent(op.Name)
+	}
+}
+
+// applyAgent switches persona, agent permission profile, and optional
+// provider/model pins without touching workflow phase state.
+func (e *Engine) applyAgent(name string) bool {
+	agent, ok := e.findAgent(name)
 	if !ok {
 		e.emit(protocol.EngineError{
 			Correlation: e.sessionCorr(),
-			Message:     fmt.Sprintf("unknown agent %q", op.Name),
+			Message:     fmt.Sprintf("unknown agent %q", name),
 		})
-		return
+		return false
 	}
 	e.agent = agent
 	// Child sessions may only apply Deny rules from an agent profile so a
@@ -785,13 +845,14 @@ func (e *Engine) handleSelectAgent(op protocol.SelectAgent) {
 				Correlation: e.sessionCorr(),
 				Message:     fmt.Sprintf("agent %s: %v", agent.Name, err),
 			})
-			return
+			return true
 		}
 		model := resolveSelectModel(agentProvider, agentModel, defaultModel)
 		e.setProvider(agentProvider, p, model)
 	case agentModel != "" && e.prov != nil:
 		e.setModel(agentModel)
 	}
+	return true
 }
 
 // queueSwitchAgent validates name and queues it for application after the
@@ -907,9 +968,11 @@ func (e *Engine) runTurn(ctx context.Context, text string, turnID string, finish
 	e.emit(protocol.UserMessage{Correlation: turnCorr, Text: text})
 	e.maybeTitleSession(text)
 	e.emit(protocol.TurnStarted{Correlation: turnCorr})
+	e.fireHookRules(turnCorr, permission.HookEventTurnStart, "", "")
 	e.messages = append(e.messages, provider.Message{Role: provider.RoleUser, Text: text})
 
 	for {
+		e.maybeThresholdCompact(turnID)
 		outcome, reqCorr, err := e.streamModel(ctx, turnID)
 		if err != nil {
 			e.failTurn(err, reqCorr, finishing)
@@ -957,8 +1020,35 @@ type streamOutcome struct {
 
 // streamModel performs one logical model request, retrying transient stream
 // failures with a fresh attempt identity. Tools are never executed here, so a
-// retry cannot duplicate completed tool side effects.
+// retry cannot duplicate completed tool side effects. A classified context
+// overflow triggers at most one compaction + model-only retry.
 func (e *Engine) streamModel(ctx context.Context, turnID string) (streamOutcome, protocol.Correlation, error) {
+	outcome, corr, err := e.streamModelAttempts(ctx, turnID)
+	if err == nil {
+		return outcome, corr, nil
+	}
+	if ctx.Err() != nil {
+		return streamOutcome{}, corr, ctx.Err()
+	}
+	if !provider.IsContextOverflow(err) {
+		return streamOutcome{}, corr, err
+	}
+	overflowCorr := e.baseCorr()
+	overflowCorr.TurnID = turnID
+	if !e.applyCompaction(protocol.CompactionReasonOverflow, overflowCorr) {
+		return streamOutcome{}, corr, fmt.Errorf("context window exceeded; compaction could not reduce history: %w", err)
+	}
+	// Single recovery pass: model-only, no tool replay (tools run after success).
+	outcome, corr, err = e.streamModelAttempts(ctx, turnID)
+	if err != nil && provider.IsContextOverflow(err) {
+		return streamOutcome{}, corr, fmt.Errorf("context window exceeded after compaction: %w", err)
+	}
+	return outcome, corr, err
+}
+
+// streamModelAttempts retries transient provider failures for one logical
+// model request. Overflow is not retried here (see streamModel).
+func (e *Engine) streamModelAttempts(ctx context.Context, turnID string) (streamOutcome, protocol.Correlation, error) {
 	maxAttempts := e.opts.MaxStreamAttempts
 	if maxAttempts < 1 {
 		maxAttempts = 1
@@ -1194,6 +1284,17 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 		return e.canceledToolResult(call.ID, corr)
 	}
 
+	// Declarative rules first (cheap, no process). Block skips shell + Execute.
+	if d := e.fireHookRules(corr, permission.HookEventPreToolUse, call.Name, call.ID); d.Block {
+		return e.settleToolFeedback(toolFeedback{
+			Corr:    corr,
+			CallID:  call.ID,
+			Output:  protocol.ToolFeedbackBlocked(d.BlockMessage()),
+			IsError: true,
+			EmitEnd: true,
+		})
+	}
+
 	pre, err := e.runToolHooks(ctx, tool.HookEventPreToolUse, call, corr, "", false)
 	if err != nil {
 		if ctx.Err() != nil || errors.Is(err, context.Canceled) {
@@ -1249,7 +1350,9 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 				}
 				return tool.QuestionResponse{Answers: answers}, nil
 			},
-			SwitchAgent: e.queueSwitchAgent,
+			SwitchAgent:    e.queueSwitchAgent,
+			EnterPlanPhase: e.enterPlanPhase,
+			AdvancePhase:   e.advancePhase,
 			ReportOutput: func(data string) {
 				if data == "" {
 					return
@@ -1332,6 +1435,9 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			output = output + "\n" + post.Inject
 		}
 	}
+
+	// Declarative post rules observe the completed call (log/notify only).
+	e.fireHookRules(corr, permission.HookEventPostToolUse, call.Name, call.ID)
 
 	return e.settleToolFeedback(toolFeedback{
 		Corr:     corr,
@@ -1417,8 +1523,40 @@ func (e *Engine) failTurn(err error, corr protocol.Correlation, finishing chan s
 // post-tool-batch apply in runTurn).
 func (e *Engine) completeTurn(finishing chan struct{}, corr protocol.Correlation, stopReason string) {
 	close(finishing)
+	e.fireHookRules(corr, permission.HookEventTurnEnd, "", "")
 	e.emit(protocol.TurnCompleted{Correlation: corr, StopReason: stopReason})
 	e.applyPendingAgent()
+}
+
+// fireHookRules evaluates declarative config rules and emits HookMatched for
+// each log/notify/block hit. Returns the decision so pre_tool_use can block
+// before shell hooks and Execute. callID is optional tool correlation.
+func (e *Engine) fireHookRules(corr protocol.Correlation, event, subject, callID string) permission.HookDecision {
+	d := permission.EvaluateHooks(e.opts.HookRules, event, subject)
+	if d.Block && strings.TrimSpace(d.BlockHit.Message) == "" {
+		d.BlockHit.Message = permission.DefaultBlockMessage(event, d.BlockHit.Matcher, subject)
+	}
+	emitHit := func(hit permission.HookHit) {
+		e.emit(protocol.HookMatched{
+			Correlation: corr,
+			Event:       hit.Event,
+			Action:      hit.Action,
+			Matcher:     hit.Matcher,
+			Tool:        hit.Tool,
+			Message:     hit.Message,
+			CallID:      callID,
+		})
+	}
+	for _, hit := range d.Log {
+		emitHit(hit)
+	}
+	for _, hit := range d.Notify {
+		emitHit(hit)
+	}
+	if d.Block {
+		emitHit(d.BlockHit)
+	}
+	return d
 }
 
 // emitUsage translates provider.Usage into a protocol.UsageReported event.
@@ -1443,6 +1581,8 @@ func (e *Engine) emitUsage(corr protocol.Correlation, u *provider.Usage) {
 	if u.Estimated {
 		source = protocol.UsageSourceEstimated
 	}
+	e.lastUsed = used
+	e.lastUsedKnown = true
 	e.emit(protocol.UsageReported{
 		Correlation: corr,
 		Input:       input,

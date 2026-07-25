@@ -20,7 +20,7 @@ func TestSharedBaselineHasADHDAndTools(t *testing.T) {
 		"You are strike",
 		"Response contract (ADHD-shaped, always on)",
 		"Lead with the next action",
-		"Available: `read`, `glob`, `grep`, `edit`, `write`, `apply_patch`, `bash`, `task`, `webfetch`, `todowrite`, `todoread`, `memory_write`, `memory_read`, `issue_write`, `issue_read`, `notebook_edit`, `sleep`, `skill`, `question`, `enter_plan_mode`, `exit_plan_mode`, `toolsearch`",
+		"Available: `read`, `glob`, `grep`, `edit`, `write`, `apply_patch`, `bash`, `task`, `webfetch`, `todowrite`, `todoread`, `memory_write`, `memory_read`, `issue_write`, `issue_read`, `notebook_edit`, `sleep`, `skill`, `question`, `enter_plan_mode`, `exit_plan_mode`, `phase_done`, `toolsearch`",
 		"NEVER commit unless the user explicitly asks",
 		"/help",
 	} {
@@ -74,7 +74,8 @@ func TestPlanSystemPromptIsReadOnly(t *testing.T) {
 	p := engine.PlanSystemPrompt
 	for _, want := range []string{
 		"Plan mode (read-only)",
-		"MUST NOT edit",
+		"hard-denied",
+		"MUST NOT run non-readonly",
 		"Interview first",
 		"Push back on vague scope",
 		"Ask before assuming",
@@ -132,7 +133,8 @@ func TestSystemPromptPlanAgentAddsOverlay(t *testing.T) {
 		"Response contract (ADHD-shaped, always on)",
 		"Provider notes (OpenAI / GPT)",
 		"Plan mode (read-only)",
-		"MUST NOT edit",
+		"hard-denied",
+		"MUST NOT run non-readonly",
 	} {
 		if !strings.Contains(sys, want) {
 			t.Errorf("plan system missing %q\n---\n%s", want, sys)
