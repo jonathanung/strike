@@ -8,8 +8,8 @@ folders of markdown files; project files override same-named global ones.
 **Agents** (`agents/*.md`) are personas — a system prompt with optional
 provider/model/effort pins. Built-ins: **build** (default coding agent) and
 **plan** (read-only planning). Define your own `build.md` / `plan.md` to
-replace them. **Tab cycles agents**; `/agent [name]` lists or selects; the
-active agent shows in the status bar.
+replace them. **Tab cycles agents**; bare `/agent` opens a picker; `/agent
+[name]` selects directly; the active agent shows in the status bar.
 
 Each model request composes the system prompt in layers (like opencode):
 
