@@ -962,6 +962,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 	if !ok {
 		err = fmt.Errorf("unknown tool %q; available tools: %s", call.Name, e.toolNames())
 	} else {
+		callID := call.ID
 		tc := &tool.Context{
 			WorkDir: e.opts.WorkDir,
 			Files:   e.files,
@@ -989,6 +990,16 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 				return tool.QuestionResponse{Answers: answers}, nil
 			},
 			SwitchAgent: e.queueSwitchAgent,
+			ReportOutput: func(data string) {
+				if data == "" {
+					return
+				}
+				e.emit(protocol.ToolCallOutput{
+					Correlation: corr,
+					CallID:      callID,
+					Data:        data,
+				})
+			},
 		}
 		if e.opts.Depth < e.opts.MaxChildDepth {
 			tc.SpawnTask = e.spawnChild
