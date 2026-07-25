@@ -168,6 +168,167 @@ func TestFilesWindowLazyLoadErrorKeepsTree(t *testing.T) {
 	}
 }
 
+func TestFilesWindowEnterOnLeafEmitsOpenMsg(t *testing.T) {
+	ff := &fakeFiles{dirs: map[string][]host.DirEntry{
+		"": {
+			{Name: "pkg", IsDir: true},
+			{Name: "README.md", IsDir: false},
+			{Name: "main.go", IsDir: false},
+		},
+		"pkg": {},
+	}}
+	w := newFilesWindow().bind("/tmp/proj", ff).resize(40, 10).(filesWindow)
+
+	// Cursor on pkg (dir) — enter expands, no open msg.
+	next, cmd := w.update(tea.KeyMsg{Type: tea.KeyEnter})
+	w = next.(filesWindow)
+	if cmd != nil {
+		t.Fatal("enter on dir should not return a cmd")
+	}
+
+	// Move to README.md (cursor 1 after collapse still shows pkg + files)
+	next, _ = w.update(tea.KeyMsg{Type: tea.KeyLeft}) // collapse pkg
+	w = next.(filesWindow)
+	next, _ = w.update(tea.KeyMsg{Type: tea.KeyDown})
+	w = next.(filesWindow)
+	if w.cursor != 1 {
+		t.Fatalf("cursor = %d, want 1 (README.md)", w.cursor)
+	}
+	next, cmd = w.update(tea.KeyMsg{Type: tea.KeyEnter})
+	w = next.(filesWindow)
+	if cmd == nil {
+		t.Fatal("enter on leaf should return open cmd")
+	}
+	msg := runAppCmd(t, cmd)
+	om, ok := msg.(filesOpenMsg)
+	if !ok || om.path != "README.md" {
+		t.Fatalf("open msg = %#v, want filesOpenMsg{path:README.md}", msg)
+	}
+
+	// main.go via right key
+	next, _ = w.update(tea.KeyMsg{Type: tea.KeyDown})
+	w = next.(filesWindow)
+	next, cmd = w.update(tea.KeyMsg{Type: tea.KeyRight})
+	_ = next
+	if cmd == nil {
+		t.Fatal("right on leaf should return open cmd")
+	}
+	msg = runAppCmd(t, cmd)
+	om, ok = msg.(filesOpenMsg)
+	if !ok || om.path != "main.go" {
+		t.Fatalf("open msg = %#v, want filesOpenMsg{path:main.go}", msg)
+	}
+}
+
+func TestFilesExplorerOpenMarkdownAndCode(t *testing.T) {
+	ff := &fakeFiles{
+		dirs: map[string][]host.DirEntry{
+			"": {
+				{Name: "README.md", IsDir: false},
+				{Name: "main.go", IsDir: false},
+			},
+		},
+		files: map[string][]byte{
+			"README.md": []byte("# Title\n\nbody"),
+		},
+	}
+	ops := make(chan protocol.Op, 8)
+	events := make(chan protocol.Event)
+	services := testServices(nil, nil)
+	services.Files = ff
+	m := New(ops, events, services, Options{WorkDir: "/workspace/proj", VimMode: VimModeTakeover})
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 93, Height: 40})
+
+	reg, ok := m.windows.activate(filesWindowID)
+	if !ok {
+		t.Fatal("activate files failed")
+	}
+	m.windows = reg
+	m.focus = focusRight
+
+	// Open markdown leaf → markdown window.
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if cmd != nil {
+		msg := runAppCmd(t, cmd)
+		if msg != nil {
+			updated, cmd = m.Update(msg)
+			m = updated.(Model)
+			if cmd != nil {
+				runAppCmd(t, cmd)
+			}
+		}
+	}
+	if m.windows.active().id() != markdownWindowID {
+		t.Fatalf("active = %q, want markdown after opening .md", m.windows.active().id())
+	}
+	mw := m.windows.active().(markdownWindow)
+	if mw.path != "README.md" {
+		t.Errorf("md path = %q, want README.md", mw.path)
+	}
+
+	// Re-activate files, move to main.go, open → vim path (missing editor notice).
+	reg, ok = m.windows.activate(filesWindowID)
+	if !ok {
+		t.Fatal("re-activate files failed")
+	}
+	m.windows = reg
+	m.focus = focusRight
+	// Cursor still on README.md; move to main.go.
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(Model)
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "")
+	t.Setenv("PATH", t.TempDir())
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if cmd != nil {
+		msg := runAppCmd(t, cmd)
+		if msg != nil {
+			updated, cmd = m.Update(msg)
+			m = updated.(Model)
+			if cmd != nil {
+				runAppCmd(t, cmd)
+			}
+		}
+	}
+	if !m.noticeErr || !strings.Contains(m.notice, "no editor found") {
+		t.Fatalf("want missing-editor notice for .go, got err=%v notice=%q", m.noticeErr, m.notice)
+	}
+}
+
+func TestOpenFilesExplorerPathRoutes(t *testing.T) {
+	m, _ := newAppTestModelWithOptions(Options{WorkDir: t.TempDir(), VimMode: VimModeTakeover})
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.services.Files = &fakeFiles{files: map[string][]byte{
+		"doc.MD": []byte("# Hi"),
+	}}
+
+	updated, cmd := m.openFilesExplorerPath("doc.MD")
+	mm := updated.(Model)
+	if cmd != nil {
+		runAppCmd(t, cmd)
+	}
+	if mm.windows.active().id() != markdownWindowID {
+		t.Fatalf("active = %q, want markdown for .MD", mm.windows.active().id())
+	}
+
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "")
+	t.Setenv("PATH", t.TempDir())
+	updated, _ = m.openFilesExplorerPath("lib/x.go")
+	mm = updated.(Model)
+	if !mm.noticeErr || !strings.Contains(mm.notice, "no editor found") {
+		t.Fatalf("want editor notice for code file, got err=%v notice=%q", mm.noticeErr, mm.notice)
+	}
+
+	updated, cmd = m.openFilesExplorerPath("  ")
+	if cmd != nil {
+		t.Fatal("blank path should not emit cmd")
+	}
+	_ = updated
+}
+
 type errBoom string
 
 func (e errBoom) Error() string { return string(e) }

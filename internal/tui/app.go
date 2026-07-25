@@ -830,6 +830,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reflow()
 		}
 		return m, nil
+
+	case filesOpenMsg:
+		return m.openFilesExplorerPath(msg.path)
 	}
 
 	var cmd tea.Cmd
@@ -1982,6 +1985,11 @@ func (m Model) handleMDRead(text string, fields []string) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) submit(op protocol.UserInput, displayPrompt string) (tea.Model, tea.Cmd) {
+	// Child transcript view is display-only; engine UserInput always targets root.
+	if m.viewingChild() {
+		m.setNotice("viewing subagent — return to parent to send (esc or ctrl+x up)", true)
+		return m, nil
+	}
 	if m.turnRunning {
 		m.setNotice("a turn is already running; interrupt it first", true)
 		return m, nil
