@@ -212,6 +212,14 @@ func TestSelectModelStripsMatchingPrefixUsesDefaultForForeignPrefix(t *testing.T
 			wantOnProv: "openai",
 			desc:       "openai/gpt-5.6-sol on openai → bare gpt-5.6-sol",
 		},
+		{
+			name:       "double_matching_prefix_stripped",
+			provider:   "openai",
+			model:      "openai/openai/gpt-5.6-sol",
+			wantModel:  "gpt-5.6-sol",
+			wantOnProv: "openai",
+			desc:       "openai/openai/gpt-5.6-sol on openai → bare gpt-5.6-sol",
+		},
 	}
 
 	for _, tt := range tests {
@@ -277,6 +285,63 @@ func TestSelectModelStripsMatchingPrefixUsesDefaultForForeignPrefix(t *testing.T
 			}
 			if req.Model == "openai/gpt-5.6-sol" {
 				t.Errorf("Stream still carries foreign prefixed id %q", req.Model)
+			}
+		})
+	}
+}
+
+// TestSelectModelStripsDoubleMatchingPrefix is the regression for UI/API
+// double-prefix: SelectModel with already-prefixed or double-prefixed ids
+// must emit and Stream a bare model id, never openai/openai/...
+func TestSelectModelStripsDoubleMatchingPrefix(t *testing.T) {
+	tests := []struct {
+		name  string
+		model string
+	}{
+		{name: "single_prefix", model: "openai/gpt-5.6-sol"},
+		{name: "double_prefix", model: "openai/openai/gpt-5.6-sol"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			openaiProv := newScriptedProvider(completedStep("ok"))
+			providers := map[string]*scriptedProvider{"openai": openaiProv}
+			defaults := map[string]string{"openai": "openai-default"}
+
+			eng := engine.New(engine.Options{
+				Select:   multiProviderSelect(providers, defaults),
+				Registry: tool.NewRegistry(),
+				WorkDir:  t.TempDir(),
+				Rules:    []permission.Ruleset{permission.Defaults()},
+			})
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			go eng.Run(ctx)
+
+			eng.Ops() <- protocol.SelectModel{Provider: "openai", Model: tt.model}
+			selected := waitForEvent(t, eng, func(ev protocol.Event) bool {
+				_, ok := ev.(protocol.ModelSelected)
+				return ok
+			}).(protocol.ModelSelected)
+
+			if selected.Provider != "openai" {
+				t.Fatalf("ModelSelected.Provider = %q, want openai", selected.Provider)
+			}
+			if selected.Model != "gpt-5.6-sol" {
+				t.Fatalf("ModelSelected.Model = %q, want gpt-5.6-sol (input %q)", selected.Model, tt.model)
+			}
+			if strings.HasPrefix(selected.Model, "openai/") || strings.Contains(selected.Model, "openai/openai") {
+				t.Fatalf("ModelSelected still prefixed: %+v", selected)
+			}
+
+			eng.Ops() <- protocol.UserInput{Text: "ping"}
+			waitForEvent(t, eng, func(ev protocol.Event) bool {
+				_, ok := ev.(protocol.TurnCompleted)
+				return ok
+			})
+
+			req := receiveRequest(t, openaiProv.requests)
+			if req.Model != "gpt-5.6-sol" {
+				t.Errorf("Stream Model = %q, want bare gpt-5.6-sol", req.Model)
 			}
 		})
 	}
