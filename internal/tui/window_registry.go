@@ -13,6 +13,7 @@ func newWindowRegistry() windowRegistry {
 	return windowRegistry{windows: []window{
 		newContextWindow(),
 		newNamedWindow("activity", "activity"),
+		newFilesWindow(),
 		newMarkdownWindow(),
 		newTerminalWindow(),
 	}}

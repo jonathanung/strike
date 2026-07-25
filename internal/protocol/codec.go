@@ -58,6 +58,8 @@ func eventType(ev Event) string {
 		return "child.completed"
 	case UsageReported:
 		return "usage.reported"
+	case ProviderRetrying:
+		return "provider.retrying"
 	case SessionMeta:
 		return "session.meta"
 	default:
@@ -124,6 +126,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &ChildCompleted{}
 	case "usage.reported":
 		ev = &UsageReported{}
+	case "provider.retrying":
+		ev = &ProviderRetrying{}
 	case "session.meta":
 		ev = &SessionMeta{}
 	default:
@@ -178,6 +182,8 @@ func deref(ev Event) Event {
 	case *ChildCompleted:
 		return *v
 	case *UsageReported:
+		return *v
+	case *ProviderRetrying:
 		return *v
 	case *SessionMeta:
 		return *v

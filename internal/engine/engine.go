@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -21,6 +22,10 @@ import (
 	"github.com/jonathanung/strike-cli/internal/question"
 	"github.com/jonathanung/strike-cli/internal/tool"
 )
+
+// defaultMaxStreamAttempts is how many times one logical model request may
+// call Provider.Stream on retryable failure before the turn fails.
+const defaultMaxStreamAttempts = 3
 
 // Model-facing tool-result outputs when a turn is interrupted mid-batch.
 const (
@@ -65,6 +70,15 @@ type Options struct {
 	Agents       []Agent
 	InitialAgent string
 	MaxTokens    int
+	// MaxStreamAttempts bounds provider Stream retries on transient failure
+	// for one logical model request (tool-loop iteration). Zero defaults to
+	// 3; set to 1 to disable retries. Retries mint a new attempt identity and
+	// never re-run tools already completed for a prior successful stream.
+	MaxStreamAttempts int
+	// StreamRetryBackoff returns the wait before starting nextAttempt
+	// (1-based, >=2). nil uses a small exponential default. Tests may return
+	// 0 for instant retries.
+	StreamRetryBackoff func(nextAttempt int) time.Duration
 	// ProjectRoot is the workspace root (often the git toplevel). Shown in
 	// the environment system-prompt layer; empty falls back to WorkDir.
 	ProjectRoot string
@@ -167,6 +181,9 @@ func New(opts Options) *Engine {
 	}
 	if opts.MaxTokens == 0 {
 		opts.MaxTokens = 8192
+	}
+	if opts.MaxStreamAttempts == 0 {
+		opts.MaxStreamAttempts = defaultMaxStreamAttempts
 	}
 	if opts.MaxChildDepth == 0 {
 		opts.MaxChildDepth = 1
@@ -886,9 +903,9 @@ func sessionTitleFromText(text string) string {
 // runTurn is the core agent loop: stream a model response; if it requested
 // tool calls, execute them and feed results back; otherwise the turn is done.
 // turnID is immutable for the turn; each Provider.Stream call gets its own
-// provider-request ID passed as local values (no engine-wide mutable state).
-// finishing is closed exactly once immediately before the terminal
-// TurnCompleted emission so Run can join the worker before the next op.
+// provider-request ID and attempt number (retries included). finishing is
+// closed exactly once immediately before the terminal TurnCompleted emission
+// so Run can join the worker before the next op.
 func (e *Engine) runTurn(ctx context.Context, text string, turnID string, finishing chan struct{}) {
 	turnCorr := e.baseCorr()
 	turnCorr.TurnID = turnID
@@ -898,74 +915,33 @@ func (e *Engine) runTurn(ctx context.Context, text string, turnID string, finish
 	e.messages = append(e.messages, provider.Message{Role: provider.RoleUser, Text: text})
 
 	for {
-		// Distinct provider-request ID immediately before every Stream call.
-		reqCorr := e.baseCorr()
-		reqCorr.TurnID = turnID
-		reqCorr.ProviderRequestID = rand.Text()
-		stream, err := e.prov.Stream(ctx, provider.Request{
-			Model:     e.model,
-			System:    e.system(),
-			Messages:  e.messages,
-			Tools:     e.opts.Registry.Schemas(),
-			MaxTokens: e.opts.MaxTokens,
-			Effort:    providerEffort(e.effort),
-			Priority:  e.priority,
-		})
+		outcome, reqCorr, err := e.streamModel(ctx, turnID)
 		if err != nil {
 			e.failTurn(err, reqCorr, finishing)
 			return
 		}
 
-		var textBuf strings.Builder
-		var calls []provider.ToolCall
-		var reasoning []json.RawMessage
-		stopReason := ""
-		for ev := range stream {
-			switch ev.Type {
-			case provider.EventTextDelta:
-				textBuf.WriteString(ev.Text)
-				e.emit(protocol.TextDelta{Correlation: reqCorr, Text: ev.Text})
-			case provider.EventToolCall:
-				calls = append(calls, *ev.ToolCall)
-			case provider.EventReasoning:
-				// Kept on the message but never emitted: reasoning artifacts
-				// exist so the next request can replay them, and current
-				// models do not return readable chain of thought anyway.
-				reasoning = append(reasoning, ev.Reasoning)
-			case provider.EventDone:
-				stopReason = ev.StopReason
-				e.emitUsage(reqCorr, ev.Usage)
-			case provider.EventError:
-				e.failTurn(ev.Err, reqCorr, finishing)
-				return
-			}
-		}
-		if ctx.Err() != nil {
-			e.failTurn(ctx.Err(), reqCorr, finishing)
-			return
-		}
-
 		e.messages = append(e.messages, provider.Message{
 			Role:      provider.RoleAssistant,
-			Text:      textBuf.String(),
-			ToolCalls: calls,
-			Reasoning: reasoning,
+			Text:      outcome.text,
+			ToolCalls: outcome.calls,
+			Reasoning: outcome.reasoning,
 		})
-		if len(calls) == 0 {
-			e.completeTurn(finishing, reqCorr, stopReason)
+		if len(outcome.calls) == 0 {
+			e.completeTurn(finishing, reqCorr, outcome.stopReason)
 			return
 		}
-		for i, call := range calls {
+		for i, call := range outcome.calls {
 			// Unstarted calls: history-only synthetic results, no begin/end/Execute.
 			if ctx.Err() != nil {
-				e.appendUnstartedToolResults(calls[i:])
+				e.appendUnstartedToolResults(outcome.calls[i:])
 				e.failTurn(ctx.Err(), reqCorr, finishing)
 				return
 			}
 			e.messages = append(e.messages, e.execToolCall(ctx, call, reqCorr))
 			if ctx.Err() != nil {
 				// Current call was started (and canceled); remaining are unstarted.
-				e.appendUnstartedToolResults(calls[i+1:])
+				e.appendUnstartedToolResults(outcome.calls[i+1:])
 				e.failTurn(ctx.Err(), reqCorr, finishing)
 				return
 			}
@@ -974,6 +950,148 @@ func (e *Engine) runTurn(ctx context.Context, text string, turnID string, finish
 		// agent system prompt (not only after TurnCompleted).
 		e.applyPendingAgent()
 	}
+}
+
+// streamOutcome is one successful provider stream (after any retries).
+type streamOutcome struct {
+	text       string
+	calls      []provider.ToolCall
+	reasoning  []json.RawMessage
+	stopReason string
+}
+
+// streamModel performs one logical model request, retrying transient stream
+// failures with a fresh attempt identity. Tools are never executed here, so a
+// retry cannot duplicate completed tool side effects.
+func (e *Engine) streamModel(ctx context.Context, turnID string) (streamOutcome, protocol.Correlation, error) {
+	maxAttempts := e.opts.MaxStreamAttempts
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
+	var lastCorr protocol.Correlation
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		reqCorr := e.baseCorr()
+		reqCorr.TurnID = turnID
+		reqCorr.ProviderRequestID = rand.Text()
+		reqCorr.Attempt = attempt
+		lastCorr = reqCorr
+
+		outcome, err := e.consumeStream(ctx, reqCorr)
+		if err == nil {
+			return outcome, reqCorr, nil
+		}
+		lastErr = err
+		if ctx.Err() != nil {
+			return streamOutcome{}, reqCorr, ctx.Err()
+		}
+		if attempt == maxAttempts || !provider.IsRetryable(err) {
+			return streamOutcome{}, reqCorr, err
+		}
+		delay := e.streamRetryDelay(attempt + 1)
+		e.emit(protocol.ProviderRetrying{
+			Correlation: reqCorr,
+			NextAttempt: attempt + 1,
+			DelayMs:     int(delay / time.Millisecond),
+			Message:     err.Error(),
+		})
+		if delay > 0 {
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return streamOutcome{}, reqCorr, ctx.Err()
+			case <-timer.C:
+			}
+		}
+	}
+	return streamOutcome{}, lastCorr, lastErr
+}
+
+func (e *Engine) streamRetryDelay(nextAttempt int) time.Duration {
+	if e.opts.StreamRetryBackoff != nil {
+		return e.opts.StreamRetryBackoff(nextAttempt)
+	}
+	// 200ms, 400ms, 800ms… capped at 2s.
+	shift := nextAttempt - 2
+	if shift < 0 {
+		shift = 0
+	}
+	d := 200 * time.Millisecond << shift
+	if d > 2*time.Second {
+		d = 2 * time.Second
+	}
+	return d
+}
+
+// consumeStream runs one Provider.Stream attempt and applies the terminal
+// contract. On success, history-ready text/tool/reasoning are returned and
+// usage is emitted; nothing is appended to e.messages here.
+func (e *Engine) consumeStream(ctx context.Context, reqCorr protocol.Correlation) (streamOutcome, error) {
+	stream, err := e.prov.Stream(ctx, provider.Request{
+		Model:     e.model,
+		System:    e.system(),
+		Messages:  e.messages,
+		Tools:     e.opts.Registry.Schemas(),
+		MaxTokens: e.opts.MaxTokens,
+		Effort:    providerEffort(e.effort),
+		Priority:  e.priority,
+	})
+	if err != nil {
+		return streamOutcome{}, err
+	}
+	stream = provider.NormalizeStream(stream)
+
+	var textBuf strings.Builder
+	var calls []provider.ToolCall
+	var reasoning []json.RawMessage
+	stopReason := ""
+	var streamErr error
+	terminated := false
+	for ev := range stream {
+		if terminated {
+			continue
+		}
+		switch ev.Type {
+		case provider.EventTextDelta:
+			textBuf.WriteString(ev.Text)
+			e.emit(protocol.TextDelta{Correlation: reqCorr, Text: ev.Text})
+		case provider.EventToolCall:
+			if ev.ToolCall != nil {
+				calls = append(calls, *ev.ToolCall)
+			}
+		case provider.EventReasoning:
+			// Kept on the message but never emitted: reasoning artifacts
+			// exist so the next request can replay them, and current
+			// models do not return readable chain of thought anyway.
+			reasoning = append(reasoning, ev.Reasoning)
+		case provider.EventDone:
+			terminated = true
+			stopReason = ev.StopReason
+			e.emitUsage(reqCorr, ev.Usage)
+		case provider.EventError:
+			terminated = true
+			streamErr = ev.Err
+			if streamErr == nil {
+				streamErr = errors.New("provider stream error")
+			}
+		}
+	}
+	if ctx.Err() != nil {
+		return streamOutcome{}, ctx.Err()
+	}
+	if !terminated {
+		return streamOutcome{}, provider.ErrIncompleteStream
+	}
+	if streamErr != nil {
+		return streamOutcome{}, streamErr
+	}
+	return streamOutcome{
+		text:       textBuf.String(),
+		calls:      calls,
+		reasoning:  reasoning,
+		stopReason: stopReason,
+	}, nil
 }
 
 // appendUnstartedToolResults adds synthetic RoleTool error results for calls

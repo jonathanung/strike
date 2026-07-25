@@ -161,10 +161,15 @@ type Event interface{ isEvent() }
 // keeps legacy envelopes without IDs decodable and re-encodable as `{}`.
 // ParentSessionID and Depth record immutable child-session lineage when a
 // foreground subagent is running (root sessions leave both zero-valued).
+//
+// ProviderRequestID is unique per Stream attempt (including retries).
+// Attempt is the 1-based try number within one logical model request of a
+// turn (tool-loop iteration); omitempty keeps legacy records without it.
 type Correlation struct {
 	SessionID         string `json:"sessionId,omitempty"`
 	TurnID            string `json:"turnId,omitempty"`
 	ProviderRequestID string `json:"providerRequestId,omitempty"`
+	Attempt           int    `json:"attempt,omitempty"`
 	ParentSessionID   string `json:"parentSessionId,omitempty"`
 	Depth             int    `json:"depth,omitempty"`
 }
@@ -365,6 +370,18 @@ type UsageReported struct {
 	Source string     `json:"source,omitempty"` // actual | estimated
 }
 
+// ProviderRetrying announces that a transient provider stream failure will be
+// retried with a new attempt identity. Correlation identifies the failed
+// attempt; NextAttempt is the 1-based number of the upcoming Stream call.
+// Retries only happen at the model boundary — never after tool side effects
+// from the failed attempt have committed.
+type ProviderRetrying struct {
+	Correlation
+	NextAttempt int    `json:"nextAttempt"`
+	DelayMs     int    `json:"delayMs,omitempty"`
+	Message     string `json:"message,omitempty"`
+}
+
 // SessionMeta records durable session-level metadata (e.g. a PR opened while
 // shipping). Also written to the session sidecar by the host; the event keeps
 // the JSONL transcript self-describing.
@@ -395,4 +412,5 @@ func (EngineError) isEvent()        {}
 func (ChildStarted) isEvent()       {}
 func (ChildCompleted) isEvent()     {}
 func (UsageReported) isEvent()      {}
+func (ProviderRetrying) isEvent()   {}
 func (SessionMeta) isEvent()        {}

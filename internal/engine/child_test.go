@@ -645,7 +645,7 @@ done:
 // not collapsed to the opaque "task failed" summary: both ToolCallEnd.Output
 // and ChildCompleted.Summary must carry the distinctive error text.
 func TestTaskSurfacesChildStreamError(t *testing.T) {
-	const errMsg = "child stream boom: rate limited"
+	const errMsg = "child stream boom: invalid_request_error: bad child payload"
 	taskCall := taskToolCall("task-stream-err", "child will fail")
 	prov := newScriptedProvider(
 		toolCallStep(taskCall),

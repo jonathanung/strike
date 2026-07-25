@@ -90,13 +90,25 @@ type History interface {
 	Enqueue(prompt string) <-chan error
 }
 
-// Files reads workspace files for frontend features (e.g. markdown reader).
-// Nil means the capability is absent; frontends must degrade gracefully.
+// DirEntry is one name from Files.ListDir.
+type DirEntry struct {
+	Name  string
+	IsDir bool
+}
+
+// Files reads workspace files for frontend features (markdown reader, file
+// explorer). Nil means the capability is absent; frontends must degrade
+// gracefully.
 type Files interface {
 	// ReadFile resolves path (relative to the host work directory, or absolute),
 	// then reads the file. Implementations enforce a size cap. Empty path,
 	// missing files, directories, oversize content, and I/O failures return errors.
 	ReadFile(path string) ([]byte, error)
+	// ListDir lists the directory at path (relative to the work directory, or
+	// absolute). Empty path lists the work directory root. Missing paths and
+	// non-directories return errors. Results are sorted directories-first,
+	// then by name (case-insensitive).
+	ListDir(path string) ([]DirEntry, error)
 }
 
 // MemoryEntry is one project-local key/value memory record.
