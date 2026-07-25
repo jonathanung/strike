@@ -748,7 +748,14 @@ func (e *Engine) handleSelectAgent(op protocol.SelectAgent) {
 		return
 	}
 	e.agent = agent
-	e.perms.SetAgentRules(agent.Permissions)
+	// Child sessions may only apply Deny rules from an agent profile so a
+	// subagent cannot widen parent Deny/Ask via Allow (AG3). Root keeps the
+	// full profile (AG1/AG2).
+	agentRules := agent.Permissions
+	if e.opts.Depth > 0 {
+		agentRules = permission.DenyOnly(agentRules)
+	}
+	e.perms.SetAgentRules(agentRules)
 	e.emit(protocol.AgentSelected{
 		Correlation: e.sessionCorr(),
 		Name:        agent.Name,
@@ -1080,6 +1087,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 	if !ok {
 		err = fmt.Errorf("unknown tool %q; available tools: %s", call.Name, e.toolNames())
 	} else {
+		callID := call.ID
 		tc := &tool.Context{
 			WorkDir: e.opts.WorkDir,
 			Files:   e.files,
@@ -1107,6 +1115,16 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 				return tool.QuestionResponse{Answers: answers}, nil
 			},
 			SwitchAgent: e.queueSwitchAgent,
+			ReportOutput: func(data string) {
+				if data == "" {
+					return
+				}
+				e.emit(protocol.ToolCallOutput{
+					Correlation: corr,
+					CallID:      callID,
+					Data:        data,
+				})
+			},
 		}
 		if e.opts.Depth < e.opts.MaxChildDepth {
 			tc.SpawnTask = e.spawnChild

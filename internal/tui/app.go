@@ -887,6 +887,10 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		tc := &toolCell{callID: ev.CallID, name: ev.Name, args: ev.Args}
 		m.toolByID[ev.CallID] = tc
 		m.cells = append(m.cells, tc)
+	case protocol.ToolCallOutput:
+		if tc, ok := m.toolByID[ev.CallID]; ok && !tc.done {
+			tc.output += ev.Data
+		}
 	case protocol.ToolCallEnd:
 		if tc, ok := m.toolByID[ev.CallID]; ok {
 			tc.title, tc.output, tc.metadata, tc.done, tc.isError = ev.Title, ev.Output, ev.Metadata, true, ev.IsError
@@ -1054,6 +1058,8 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	case protocol.ToolCallBegin:
 		return e.Correlation, true
 	case protocol.ToolCallEnd:
+		return e.Correlation, true
+	case protocol.ToolCallOutput:
 		return e.Correlation, true
 	case protocol.PermissionAsked:
 		return e.Correlation, true

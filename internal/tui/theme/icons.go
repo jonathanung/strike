@@ -25,6 +25,8 @@ type Icons struct {
 	LogoBottomRule  string // ▔ logo bottom rule
 	MeterFill       string // █ context-meter filled cell
 	MeterEmpty      string // ░ context-meter empty cell
+	TreeExpanded    string // ▾ expanded tree node marker
+	TreeCollapsed   string // ▸ collapsed tree node marker
 }
 
 // DefaultIcons returns the stock glyph set. A zero Icons value is treated as
@@ -48,6 +50,7 @@ func DefaultIcons() Icons {
 		BadgeLeft:    "[", BadgeRight: "]", DetailSeparator: "—", Ellipsis: "…",
 		LogoTopRule: "▁", LogoBottomRule: "▔",
 		MeterFill: "█", MeterEmpty: "░",
+		TreeExpanded: "▾", TreeCollapsed: "▸",
 	}
 }
 
@@ -114,6 +117,12 @@ func resolveIcons(i, d Icons) Icons {
 	}
 	if i.MeterEmpty == "" {
 		i.MeterEmpty = d.MeterEmpty
+	}
+	if i.TreeExpanded == "" {
+		i.TreeExpanded = d.TreeExpanded
+	}
+	if i.TreeCollapsed == "" {
+		i.TreeCollapsed = d.TreeCollapsed
 	}
 	return i
 }

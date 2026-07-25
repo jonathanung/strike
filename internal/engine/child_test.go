@@ -445,7 +445,9 @@ func TestChildCannotWidenPermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	taskCall := taskToolCall("task-perm", "try to edit")
+	// Child agent profile allows edit/write; parent base rules deny — AG3
+	// requires the child allow not to override the parent ceiling.
+	taskCall := taskToolCallWithAgent("task-perm", "try to edit", "writer")
 	editCall := editToolCall("edit-1", "protected.txt", "keep-me-safe", "pwned")
 	prov := newScriptedProvider(
 		toolCallStep(taskCall),
@@ -467,6 +469,16 @@ func TestChildCannotWidenPermissions(t *testing.T) {
 		Registry:        tool.NewRegistry(tool.NewTask(), tool.NewEdit(), tool.NewWrite()),
 		WorkDir:         dir,
 		Rules:           rules,
+		Agents: []engine.Agent{
+			{Name: "build"},
+			{
+				Name: "writer",
+				Permissions: permission.Ruleset{
+					{Permission: "edit", Pattern: "*", Action: permission.Allow},
+					{Permission: "write", Pattern: "*", Action: permission.Allow},
+				},
+			},
+		},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -492,6 +504,7 @@ func TestChildCannotWidenPermissions(t *testing.T) {
 
 	// Parent task may complete successfully with a summary that mentions the
 	// failed edit, or with an error tool result — either way the file is safe.
+	// Child ToolCallEnd is not forwarded on the parent event stream.
 	var taskEnd *protocol.ToolCallEnd
 	for _, ev := range events {
 		if end, ok := ev.(protocol.ToolCallEnd); ok && end.CallID == "task-perm" {
