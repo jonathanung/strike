@@ -26,6 +26,7 @@ const (
 	commandLayout   commandID = "layout"
 	commandSplit    commandID = "split"
 	commandMemory   commandID = "memory"
+	commandIssues   commandID = "issues"
 )
 
 type commandSource string
@@ -59,6 +60,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandHelp, Name: "/help", Description: "show available commands", Source: commandSourceBuiltin},
 	{ID: commandKeys, Name: "/keys", Description: "show keyboard shortcuts", Source: commandSourceBuiltin},
 	{ID: commandMemory, Name: "/memory", Description: "list, get, set, or delete project memory", ArgsHint: "[list|get|set|rm] ...", Source: commandSourceBuiltin},
+	{ID: commandIssues, Name: "/issues", Description: "list, add, get, or close project issues", ArgsHint: "[list|add|get|close] ...", Source: commandSourceBuiltin},
 }
 
 // commandCatalog builds the slash-command catalog from the builtins and the
@@ -124,6 +126,7 @@ var reservedCommandNames = map[string]struct{}{
 	"help":     {},
 	"keys":     {},
 	"memory":   {},
+	"issues":   {},
 }
 
 // validSkillName reports whether a skill name is safe to render and select as a

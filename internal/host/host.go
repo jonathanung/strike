@@ -1,6 +1,6 @@
 // Package host defines the services a strike frontend needs from its host
 // process, beyond the engine protocol: credentials, model catalog, saved
-// defaults, prompt history, project memory, and static agent/skill listings. Contract only:
+// defaults, prompt history, project memory/issues, and static agent/skill listings. Contract only:
 // this package imports nothing outside the standard library so frontends
 // can be developed and tested against fakes. Implementations live in
 // internal/host/local.
@@ -159,6 +159,29 @@ type Memory interface {
 	Delete(key string) error
 }
 
+// Issue is one project-local tracked issue.
+type Issue struct {
+	ID     int
+	Title  string
+	Body   string
+	Status string // "open" or "closed"
+}
+
+// Issues is project-scoped durable issue tracking for /issues and tools.
+// Nil means the capability is absent; frontends must degrade gracefully.
+type Issues interface {
+	// List returns issues sorted by id. Non-empty status filters to open|closed.
+	List(status string) ([]Issue, error)
+	// Get returns one issue by id.
+	Get(id int) (Issue, bool, error)
+	// Create inserts a new open issue.
+	Create(title, body string) (Issue, error)
+	// Update patches title, body, and/or status. Nil pointers leave fields unchanged.
+	Update(id int, title, body, status *string) (Issue, error)
+	// Close sets status to closed.
+	Close(id int) (Issue, error)
+}
+
 // Services bundles everything a frontend receives from its host. Any field
 // may be nil/empty when a capability is absent (tests, future frontends);
 // frontends must degrade gracefully.
@@ -169,6 +192,7 @@ type Services struct {
 	History   History
 	Files     Files
 	Memory    Memory
+	Issues    Issues
 	Providers Providers // custom/self-hosted provider CRUD; nil when unsupported
 	Agents    []string  // selectable agent names, default first
 	Skills    []Skill

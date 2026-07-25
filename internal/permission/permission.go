@@ -37,8 +37,8 @@ type Ruleset []Rule
 var knownPermissions = map[string]struct{}{
 	"*": {}, "read": {}, "glob": {}, "grep": {}, "edit": {}, "write": {},
 	"bash": {}, "task": {}, "webfetch": {}, "todowrite": {}, "todoread": {},
-	"memory_write": {}, "memory_read": {}, "sleep": {},
-	"skill": {}, "toolsearch": {},
+	"memory_write": {}, "memory_read": {}, "issue_write": {}, "issue_read": {},
+	"sleep": {}, "skill": {}, "toolsearch": {},
 }
 
 func ValidAction(a Action) bool {
@@ -83,6 +83,8 @@ func Defaults() Ruleset {
 		{Permission: "todoread", Pattern: "*", Action: Allow},
 		{Permission: "memory_write", Pattern: "*", Action: Allow},
 		{Permission: "memory_read", Pattern: "*", Action: Allow},
+		{Permission: "issue_write", Pattern: "*", Action: Allow},
+		{Permission: "issue_read", Pattern: "*", Action: Allow},
 		{Permission: "sleep", Pattern: "*", Action: Allow},
 		{Permission: "skill", Pattern: "*", Action: Allow},
 		{Permission: "question", Pattern: "*", Action: Allow},

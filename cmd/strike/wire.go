@@ -16,6 +16,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/history"
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/host/local"
+	"github.com/jonathanung/strike-cli/internal/issue"
 	"github.com/jonathanung/strike-cli/internal/memory"
 	"github.com/jonathanung/strike-cli/internal/project"
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -128,6 +129,7 @@ type assembled struct {
 	firstRun     bool
 	historyClose func() error
 	memoryClose  func() error
+	issuesClose  func() error
 }
 
 // assemble resolves project/config/auth, builds the engine and session store,
@@ -157,8 +159,15 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("opening project memory: %w", err)
 	}
+	issueStore, err := issue.Open(globalRoot, projectIdentity.Key)
+	if err != nil {
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, fmt.Errorf("opening project issues: %w", err)
+	}
 	cfg, err := config.Load(workDir)
 	if err != nil {
+		_ = issueStore.Close()
 		_ = memoryStore.Close()
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("loading config: %w", err)
@@ -174,6 +183,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	if opts.effort != "" {
 		level, ok := protocol.ParseEffort(opts.effort)
 		if !ok || level == protocol.EffortDefault {
+			_ = issueStore.Close()
 			_ = memoryStore.Close()
 			_ = historyStore.Close()
 			return nil, fmt.Errorf("unknown effort %q (want off, low, medium, high, xhigh, or max)", opts.effort)
@@ -183,6 +193,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 
 	authStore, err := auth.OpenStore(auth.DefaultPath())
 	if err != nil {
+		_ = issueStore.Close()
 		_ = memoryStore.Close()
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("opening auth store: %w", err)
@@ -245,11 +256,13 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// /provider otherwise). Headless exec always requires a usable provider.
 	if requireProvider || (opts.providerSet && opts.provider != "") {
 		if cfg.Provider == "" {
+			_ = issueStore.Close()
 			_ = memoryStore.Close()
 			_ = historyStore.Close()
 			return nil, fmt.Errorf("no provider configured (pass --provider or set provider in config)")
 		}
 		if _, _, err := selectProvider(cfg.Provider); err != nil {
+			_ = issueStore.Close()
 			_ = memoryStore.Close()
 			_ = historyStore.Close()
 			return nil, err
@@ -260,6 +273,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// available names in its description at construction time.
 	skills, err := config.LoadSkillsWithError(workDir)
 	if err != nil {
+		_ = issueStore.Close()
 		_ = memoryStore.Close()
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("loading skills: %w", err)
@@ -284,6 +298,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tool.NewTodoRead(todoStore),
 		tool.NewMemoryWrite(memoryStore),
 		tool.NewMemoryRead(memoryStore),
+		tool.NewIssueWrite(issueStore),
+		tool.NewIssueRead(issueStore),
 		tool.NewNotebookEdit(),
 		tool.NewSleep(),
 		tool.NewSkill(skillInfos),
@@ -303,6 +319,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	}
 	loadedAgents, err := config.LoadAgentsWithError(workDir)
 	if err != nil {
+		_ = issueStore.Close()
 		_ = memoryStore.Close()
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("loading agents: %w", err)
@@ -349,6 +366,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 
 	store, err := session.Open(sessionDir, sessionID)
 	if err != nil {
+		_ = issueStore.Close()
 		_ = memoryStore.Close()
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("opening session store: %w", err)
@@ -359,8 +377,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		agentNames[i] = a.Name
 	}
 	// local.New wraps the real backend stores in the host.Services contract;
-	// the TUI never sees auth/config/models/history/memory directly.
-	services := local.New(authStore, historyStore, memoryStore, agentNames, skills, customStore)
+	// the TUI never sees auth/config/models/history/memory/issues directly.
+	services := local.New(authStore, historyStore, memoryStore, issueStore, agentNames, skills, customStore)
 	services.Files = local.NewFiles(workDir)
 
 	return &assembled{
@@ -377,6 +395,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		memoryClose: func() error {
 			return memoryStore.Close()
 		},
+		issuesClose: func() error {
+			return issueStore.Close()
+		},
 	}, nil
 }
 
@@ -388,6 +409,9 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 		return err
 	}
 	defer func() {
+		if err := a.issuesClose(); err != nil && runErr == nil {
+			runErr = fmt.Errorf("closing project issues: %w", err)
+		}
 		if err := a.memoryClose(); err != nil && runErr == nil {
 			runErr = fmt.Errorf("closing project memory: %w", err)
 		}
@@ -452,6 +476,9 @@ func runExec(opts cliOptions, prompt string, stdout, stderr io.Writer) (runErr e
 		return err
 	}
 	defer func() {
+		if err := a.issuesClose(); err != nil && runErr == nil {
+			runErr = fmt.Errorf("closing project issues: %w", err)
+		}
 		if err := a.memoryClose(); err != nil && runErr == nil {
 			runErr = fmt.Errorf("closing project memory: %w", err)
 		}

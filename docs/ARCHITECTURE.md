@@ -22,10 +22,10 @@ cmd/strike/wire.go (run) — composition root
 │     store.Append persists one JSONL line per event (~/.strike/sessions/…)
 │
 ├── builds host.Services via internal/host/local.New(authStore, historyStore,
-│     memoryStore, agentNames, skills) — wraps internal/{auth,config,models,
-│     history,memory} into host.Services{Auth, Catalog, Settings, History,
-│     Memory, Agents, Skills}, then attaches host.Files (local.NewFiles(workDir))
-│     for frontend file reads
+│     memoryStore, issueStore, agentNames, skills) — wraps internal/{auth,config,
+│     models,history,memory,issue} into host.Services{Auth, Catalog, Settings,
+│     History, Memory, Issues, Agents, Skills}, then attaches host.Files
+│     (local.NewFiles(workDir)) for frontend file reads
 │
 └── tui.New(eng.Ops(), events, services, tui.Options{...})
       internal/tui's entire view of the world: two protocol channels plus
@@ -49,8 +49,9 @@ event stream the TUI rendered from (see `internal/protocol/codec.go`).
 | `internal/provider` | LLM provider abstraction: `Provider` interface, normalized `StreamEvent`s | stdlib |
 | `internal/provider/base` | Shared HTTP/JSON/SSE/auth client concrete adapters embed | `provider`, stdlib, net/http |
 | `internal/provider/{anthropic,openaicompat,chatgpt,echo}` | Concrete adapters (openaicompat covers both the OpenAI platform API and xAI; chatgpt is the ChatGPT-subscription backend; echo is the offline dev provider) | `provider`, `provider/base` (all but echo), stdlib |
-| `internal/tool` | Tool contract (`Tool`, `Context`, `Result`) + built-ins: read/glob/grep/edit/write/apply_patch/bash/task/webfetch/todowrite/todoread/memory_write/memory_read/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/toolsearch | `provider` (for `ToolSchema`), `memory`, stdlib |
+| `internal/tool` | Tool contract (`Tool`, `Context`, `Result`) + built-ins: read/glob/grep/edit/write/apply_patch/bash/task/webfetch/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/toolsearch | `provider` (for `ToolSchema`), `memory`, `issue`, stdlib |
 | `internal/memory` | Project-scoped durable key/value memory (JSON under `~/.strike/memory/`) | stdlib |
+| `internal/issue` | Project-scoped durable issues (JSON under `~/.strike/issues/`) | stdlib |
 | `internal/question` | User-question ask service: suspends a tool call until `QuestionReply` | `protocol`, stdlib |
 | `internal/permission` | Ordered allow/ask/deny rulesets, last-match-wins; the ask service that suspends a tool call for user input | `protocol`, `tool` (for `AskRequest`), stdlib |
 | `internal/session` | JSONL event-log persistence (append/replay) | `protocol`, stdlib |
@@ -60,7 +61,7 @@ event stream the TUI rendered from (see `internal/protocol/codec.go`).
 | `internal/history` | Project-scoped prompt history | stdlib |
 | `internal/project` | Stable filesystem identity for project-scoped state (git-aware) | stdlib, os/exec |
 | `internal/host` | **Frozen contract**: the services a frontend needs from its host process | stdlib only — enforced by the boundary test |
-| `internal/host/local` | Real `host.Services` implementation; wraps auth/config/models/history/memory/files for the frontend | `auth`, `config`, `history`, `host`, `memory`, `models` |
+| `internal/host/local` | Real `host.Services` implementation; wraps auth/config/models/history/memory/issue/files for the frontend | `auth`, `config`, `history`, `host`, `issue`, `memory`, `models` |
 | `internal/tui` | Bubble Tea frontend: app model, layout, transcript cells, modals, composer | `protocol`, `host`, `tui/...` only — enforced by the boundary test |
 | `internal/tui/theme` | Resolved design tokens: adaptive color roles, terminal background, glyphs, border/spacing tokens, and precomputed styles | lipgloss, stdlib |
 | `internal/tui/ui` | Reusable component library (Panel, Dialog, Badge, KeyHints, StatusBar, List, Notice, Card/Bento, OverlayCenter, Canvas, Logo) | stdlib, lipgloss, bubbles, charmbracelet/x/ansi, `tui/theme` |
@@ -218,7 +219,7 @@ Two different mechanisms, depending on whether it needs Go code:
   `/<name>` on the next launch automatically, through
    `host.Services.Skills`. Reserved names (`provider`, `model`, `auth`,
    `agent`, `fast`, `vim`, `md-read`, `theme`, `layout`, `split`, `help`,
-   `keys`, `memory`) are rejected by `config.ValidateSkillName` before they ever reach
+   `keys`, `memory`, `issues`) are rejected by `config.ValidateSkillName` before they ever reach
    the frontend. PR URLs from successful `gh pr` bash output are stored via
    `protocol.SessionMeta` and `session` sidecar metadata.
   `/vim` embeds nvim/vim in the right-pane `editor` window by default
@@ -254,7 +255,7 @@ Two different mechanisms, depending on whether it needs Go code:
    `internal/host/host.go`. This package is a stdlib-only contract — no
    importing `auth`, `config`, `models`, or `history` here, even for a type
    reference (the boundary test fails the build otherwise). Look at
-  `Auth`/`Catalog`/`Settings`/`History`/`Memory`/`Files` for the shape: small,
+  `Auth`/`Catalog`/`Settings`/`History`/`Memory`/`Issues`/`Files` for the shape: small,
   frontend-facing, `context`-aware when it may block.
 2. Implement it in `internal/host/local/` (e.g. `local.go`, `files.go`),
   wrapping the real backend package. This package is the seam that is allowed
