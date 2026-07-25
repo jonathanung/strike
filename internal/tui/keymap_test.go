@@ -48,6 +48,40 @@ func TestDefaultKeyMapBindingsMatchTheirRequiredKeysAndHaveHelp(t *testing.T) {
 	}
 }
 
+// TestShiftEnterKeyMsgDoesNotMatchCycleWindow pins that the post-WrapInput
+// KeyMsg for shift+enter (KeyEnter+Alt) matches Newline only — never
+// CycleWindow*/Send/Focus* — under both split orientations (#53).
+func TestShiftEnterKeyMsgDoesNotMatchCycleWindow(t *testing.T) {
+	msg := tea.KeyMsg{Type: tea.KeyEnter, Alt: true}
+	for _, tt := range []struct {
+		name   string
+		orient splitOrientation
+	}{
+		{"horizontal", orientHorizontal},
+		{"vertical", orientVertical},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			keys := defaultKeyMap()
+			keys.applyOrientationKeys(tt.orient)
+			if !key.Matches(msg, keys.Newline) {
+				t.Error("KeyEnter+Alt must match Newline")
+			}
+			if key.Matches(msg, keys.CycleWindowNext) {
+				t.Error("KeyEnter+Alt must not match CycleWindowNext")
+			}
+			if key.Matches(msg, keys.CycleWindowPrev) {
+				t.Error("KeyEnter+Alt must not match CycleWindowPrev")
+			}
+			if key.Matches(msg, keys.Send) {
+				t.Error("KeyEnter+Alt must not match Send")
+			}
+			if key.Matches(msg, keys.FocusLeft, keys.FocusRight) {
+				t.Error("KeyEnter+Alt must not match Focus*")
+			}
+		})
+	}
+}
+
 func TestKeybindCatalogCoversAppBindingsAndIsSearchable(t *testing.T) {
 	keys := defaultKeyMap()
 	catalog := keybindCatalog(keys)
