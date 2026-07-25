@@ -3,9 +3,11 @@ package engine_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -617,5 +619,214 @@ done:
 	}
 	if !strings.Contains(taskEnd.Output, "child after bash") {
 		t.Errorf("task output = %q, want child summary", taskEnd.Output)
+	}
+}
+
+// TestTaskSurfacesChildStreamError ensures a child provider/stream failure is
+// not collapsed to the opaque "task failed" summary: both ToolCallEnd.Output
+// and ChildCompleted.Summary must carry the distinctive error text.
+func TestTaskSurfacesChildStreamError(t *testing.T) {
+	const errMsg = "child stream boom: rate limited"
+	taskCall := taskToolCall("task-stream-err", "child will fail")
+	prov := newScriptedProvider(
+		toolCallStep(taskCall),
+		streamStep{err: errors.New(errMsg)},
+		completedStep("parent recovered"),
+	)
+	eng := engine.New(engine.Options{
+		SessionID:       "parent-stream-err",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(tool.NewTask()),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "spawn failing child"}
+	events := drainAndReply(t, eng, 10*time.Second)
+
+	var completed []protocol.ChildCompleted
+	var taskEnds []protocol.ToolCallEnd
+	for _, ev := range events {
+		switch ev := ev.(type) {
+		case protocol.ChildCompleted:
+			completed = append(completed, ev)
+		case protocol.ToolCallEnd:
+			if ev.CallID == "task-stream-err" {
+				taskEnds = append(taskEnds, ev)
+			}
+		}
+	}
+	if n := countEvents[protocol.ChildStarted](events); n != 1 {
+		t.Fatalf("ChildStarted = %d, want 1; events=%v", n, summarizeEvents(events))
+	}
+	if len(completed) != 1 {
+		t.Fatalf("ChildCompleted count = %d, want 1; events=%v", len(completed), summarizeEvents(events))
+	}
+	if completed[0].Status != protocol.ChildStatusFailed {
+		t.Errorf("ChildCompleted status = %q, want failed", completed[0].Status)
+	}
+	if !strings.Contains(completed[0].Summary, errMsg) {
+		t.Errorf("ChildCompleted summary = %q, want to contain %q", completed[0].Summary, errMsg)
+	}
+	if completed[0].Summary == "task failed" {
+		t.Errorf("ChildCompleted summary is opaque %q", completed[0].Summary)
+	}
+	if len(taskEnds) != 1 {
+		t.Fatalf("task ToolCallEnd count = %d, want 1", len(taskEnds))
+	}
+	if !taskEnds[0].IsError {
+		t.Errorf("task ToolCallEnd IsError = false, want true; output=%q", taskEnds[0].Output)
+	}
+	if !strings.Contains(taskEnds[0].Output, errMsg) {
+		t.Errorf("task ToolCallEnd output = %q, want to contain %q", taskEnds[0].Output, errMsg)
+	}
+	// Must not be only the bare fallback (with or without Error: prefix).
+	if strings.TrimSpace(strings.TrimPrefix(taskEnds[0].Output, "Error: ")) == "task failed" {
+		t.Errorf("task output is opaque %q", taskEnds[0].Output)
+	}
+}
+
+// TestTaskChildInheritsParentProvider checks that a child reuses the parent's
+// live provider instead of re-calling Select. A Select that only succeeds once
+// would leave the child with "no model selected" if inherit were broken.
+func TestTaskChildInheritsParentProvider(t *testing.T) {
+	var selectCalls atomic.Int32
+	taskCall := taskToolCall("task-inherit", "child work")
+	prov := newScriptedProvider(
+		toolCallStep(taskCall),
+		completedStep("child ok via inherit"),
+		completedStep("parent ok"),
+	)
+	selectFn := func(string) (provider.Provider, string, error) {
+		n := selectCalls.Add(1)
+		if n > 1 {
+			return nil, "", errors.New("Select must not be called again for child")
+		}
+		return prov, "model", nil
+	}
+	eng := engine.New(engine.Options{
+		SessionID:       "parent-inherit",
+		Select:          selectFn,
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(tool.NewTask()),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "spawn with inherited provider"}
+	events := drainAndReply(t, eng, 10*time.Second)
+
+	var completed []protocol.ChildCompleted
+	var taskEnds []protocol.ToolCallEnd
+	for _, ev := range events {
+		switch ev := ev.(type) {
+		case protocol.ChildCompleted:
+			completed = append(completed, ev)
+		case protocol.ToolCallEnd:
+			if ev.CallID == "task-inherit" {
+				taskEnds = append(taskEnds, ev)
+			}
+		case protocol.EngineError:
+			t.Fatalf("engine error: %s", ev.Message)
+		}
+	}
+	if n := countEvents[protocol.ChildStarted](events); n != 1 {
+		t.Fatalf("ChildStarted = %d, want 1; events=%v", n, summarizeEvents(events))
+	}
+	if len(completed) != 1 {
+		t.Fatalf("ChildCompleted count = %d, want 1", len(completed))
+	}
+	if completed[0].Status != protocol.ChildStatusCompleted {
+		t.Errorf("ChildCompleted status = %q, want completed; summary=%q", completed[0].Status, completed[0].Summary)
+	}
+	if !strings.Contains(completed[0].Summary, "child ok via inherit") {
+		t.Errorf("ChildCompleted summary = %q", completed[0].Summary)
+	}
+	if len(taskEnds) != 1 {
+		t.Fatalf("task ToolCallEnd count = %d, want 1", len(taskEnds))
+	}
+	if taskEnds[0].IsError {
+		t.Errorf("task failed without inherit: %s", taskEnds[0].Output)
+	}
+	if !strings.Contains(taskEnds[0].Output, "child ok via inherit") {
+		t.Errorf("task output = %q", taskEnds[0].Output)
+	}
+	if n := selectCalls.Load(); n != 1 {
+		t.Errorf("Select calls = %d, want 1 (child must inherit live provider)", n)
+	}
+	// Three Stream calls: parent tool-use, child final, parent final.
+	if prov.callCount() != 3 {
+		t.Fatalf("Stream calls = %d, want 3", prov.callCount())
+	}
+}
+
+// TestTaskSurfacesChildEngineErrorNoModel forces a pre-turn child EngineError
+// ("no model selected") by clearing the inherited provider via an agent that
+// pins a provider whose Select returns a nil provider without error — if the
+// implementation cannot hit that path, the streamed EventError path below
+// still pins failMsg surfacing for any EngineError text.
+func TestTaskSurfacesChildEngineErrorMessage(t *testing.T) {
+	const errMsg = "no model selected — use /provider <anthropic|openai|xai|echo> [model]"
+	// Use a streamed EventError so the child emits EngineError with this exact
+	// message (same text as the pre-turn no-provider path).
+	taskCall := taskToolCall("task-eng-err", "child engine error")
+	prov := newScriptedProvider(
+		toolCallStep(taskCall),
+		streamStep{events: []provider.StreamEvent{
+			{Type: provider.EventError, Err: errors.New(errMsg)},
+		}},
+		completedStep("parent after engine error"),
+	)
+	eng := engine.New(engine.Options{
+		SessionID:       "parent-eng-err",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(tool.NewTask()),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "spawn child engine error"}
+	events := drainAndReply(t, eng, 10*time.Second)
+
+	var completed []protocol.ChildCompleted
+	var taskEnds []protocol.ToolCallEnd
+	for _, ev := range events {
+		switch ev := ev.(type) {
+		case protocol.ChildCompleted:
+			completed = append(completed, ev)
+		case protocol.ToolCallEnd:
+			if ev.CallID == "task-eng-err" {
+				taskEnds = append(taskEnds, ev)
+			}
+		}
+	}
+	if len(completed) != 1 {
+		t.Fatalf("ChildCompleted count = %d, want 1; events=%v", len(completed), summarizeEvents(events))
+	}
+	if completed[0].Status != protocol.ChildStatusFailed {
+		t.Errorf("ChildCompleted status = %q, want failed", completed[0].Status)
+	}
+	if !strings.Contains(completed[0].Summary, "no model selected") {
+		t.Errorf("ChildCompleted summary = %q, want to contain no model selected", completed[0].Summary)
+	}
+	if len(taskEnds) != 1 {
+		t.Fatalf("task ToolCallEnd count = %d, want 1", len(taskEnds))
+	}
+	if !taskEnds[0].IsError {
+		t.Errorf("task ToolCallEnd IsError = false; output=%q", taskEnds[0].Output)
+	}
+	if !strings.Contains(taskEnds[0].Output, "no model selected") {
+		t.Errorf("task output = %q, want to contain no model selected", taskEnds[0].Output)
 	}
 }
