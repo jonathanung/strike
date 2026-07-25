@@ -38,7 +38,8 @@ func TestLoadMerge(t *testing.T) {
 		"model": "gpt-test",
 		"theme": "nord",
 		"systemPrompt": "global",
-		"permissions": [{"permission":"bash","pattern":"*","action":"ask"}]
+		"permissions": [{"permission":"bash","pattern":"*","action":"ask"}],
+		"hooks": [{"event":"pre_tool_use","command":"echo global"}]
 	}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +52,8 @@ func TestLoadMerge(t *testing.T) {
 		"model": "project-model",
 		"defaultAgent": "plan",
 		"theme": "dracula",
-		"permissions": [{"permission":"bash","pattern":"git *","action":"allow"}]
+		"permissions": [{"permission":"bash","pattern":"git *","action":"allow"}],
+		"hooks": [{"event":"post_tool_use","command":"echo project","matcher":"bash"}]
 	}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -80,6 +82,12 @@ func TestLoadMerge(t *testing.T) {
 	}
 	if cfg.Permissions[1].Action != permission.Allow {
 		t.Errorf("second rule = %#v", cfg.Permissions[1])
+	}
+	if len(cfg.Hooks) != 2 {
+		t.Fatalf("hooks = %#v", cfg.Hooks)
+	}
+	if cfg.Hooks[0].Command != "echo global" || cfg.Hooks[1].Matcher != "bash" {
+		t.Errorf("hooks = %#v", cfg.Hooks)
 	}
 }
 
@@ -168,5 +176,86 @@ func TestSetGlobalDefaultsCorrupt(t *testing.T) {
 	}
 	if err := SetGlobalDefaults("x", "y", "", ""); err == nil {
 		t.Fatal("expected corrupt config error")
+	}
+}
+
+func TestAppendProjectPermissionCreatesAndPreserves(t *testing.T) {
+	work := t.TempDir()
+	rule := permission.Rule{Permission: "bash", Pattern: "git *", Action: permission.Allow}
+	if err := AppendProjectPermission(work, rule); err != nil {
+		t.Fatal(err)
+	}
+	path := ProjectPath(work)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got Config
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Permissions) != 1 || got.Permissions[0] != rule {
+		t.Fatalf("permissions = %#v, want [%#v]", got.Permissions, rule)
+	}
+
+	// Preserve unrelated fields on second append.
+	initial := Config{
+		Provider:     "openai",
+		Model:        "keep-me",
+		SystemPrompt: "stay",
+		Permissions:  got.Permissions,
+	}
+	raw, _ := json.MarshalIndent(initial, "", "  ")
+	if err := os.WriteFile(path, append(raw, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second := permission.Rule{Permission: "edit", Pattern: "*.go", Action: permission.Allow}
+	if err := AppendProjectPermission(work, second); err != nil {
+		t.Fatal(err)
+	}
+	data, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Provider != "openai" || got.Model != "keep-me" || got.SystemPrompt != "stay" {
+		t.Errorf("did not preserve unrelated fields: %#v", got)
+	}
+	if len(got.Permissions) != 2 || got.Permissions[1] != second {
+		t.Fatalf("permissions after append = %#v", got.Permissions)
+	}
+
+	// Defaults for empty action/pattern.
+	if err := AppendProjectPermission(work, permission.Rule{Permission: "write"}); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = os.ReadFile(path)
+	_ = json.Unmarshal(data, &got)
+	last := got.Permissions[len(got.Permissions)-1]
+	if last.Action != permission.Allow || last.Pattern != "*" {
+		t.Errorf("defaults = %#v, want action=allow pattern=*", last)
+	}
+}
+
+func TestAppendProjectPermissionRejects(t *testing.T) {
+	if err := AppendProjectPermission("", permission.Rule{Permission: "bash"}); err == nil {
+		t.Fatal("empty workDir: want error")
+	}
+	if err := AppendProjectPermission(t.TempDir(), permission.Rule{}); err == nil {
+		t.Fatal("empty permission: want error")
+	}
+
+	work := t.TempDir()
+	path := ProjectPath(work)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`not-json`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendProjectPermission(work, permission.Rule{Permission: "bash"}); err == nil {
+		t.Fatal("corrupt config: want error")
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
 
@@ -78,6 +79,54 @@ func writeGlobal(cfg Config) error {
 	if path == "" {
 		return fmt.Errorf("cannot locate home directory")
 	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	out, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(out, '\n'), 0o644)
+}
+
+// ProjectPath is the project config file, <workDir>/.strike/config (JSON).
+func ProjectPath(workDir string) string {
+	if workDir == "" {
+		return ""
+	}
+	return filepath.Join(projectRoot(workDir), "config")
+}
+
+// AppendProjectPermission appends an allow rule to the project config at
+// <workDir>/.strike/config, creating the file (and .strike/) if needed.
+// Unrelated fields are preserved. Empty permission names are rejected.
+func AppendProjectPermission(workDir string, rule permission.Rule) error {
+	if workDir == "" {
+		return fmt.Errorf("empty work directory")
+	}
+	if rule.Permission == "" {
+		return fmt.Errorf("empty permission name")
+	}
+	if rule.Action == "" {
+		rule.Action = permission.Allow
+	}
+	if rule.Pattern == "" {
+		rule.Pattern = "*"
+	}
+	path := ProjectPath(workDir)
+	var cfg Config
+	data, err := os.ReadFile(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		// fresh project config
+	case err != nil:
+		return err
+	default:
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			return fmt.Errorf("existing %s is not valid JSON (%v) — fix it before saving permissions", path, err)
+		}
+	}
+	cfg.Permissions = append(cfg.Permissions, rule)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}

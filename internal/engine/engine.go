@@ -90,6 +90,11 @@ type Options struct {
 	SystemPrompt string
 	// Rules are permission ruleset layers, earliest first (later wins).
 	Rules []permission.Ruleset
+	// Hooks are shell-command lifecycle hooks (pre/post tool use). Empty disables.
+	Hooks []tool.HookDef
+	// PersistProjectRule, when set, is invoked after a DecisionProject grant
+	// so the rule can be written to project config. Optional.
+	PersistProjectRule func(permission.Rule) error
 	// MaxChildDepth bounds foreground task nesting. Zero defaults to 1 in New
 	// (root depth 0 may spawn one child; that child may not spawn further).
 	MaxChildDepth int
@@ -203,6 +208,9 @@ func New(opts Options) *Engine {
 		children:  make(map[string]*childHandle),
 	}
 	e.perms = permission.New(e.emit, opts.Rules...)
+	if opts.PersistProjectRule != nil {
+		e.perms.SetProjectPersister(opts.PersistProjectRule)
+	}
 	e.questions = question.New(e.emit)
 	return e
 }
@@ -1186,8 +1194,30 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 		return e.canceledToolResult(call.ID, corr)
 	}
 
+	pre, err := e.runToolHooks(ctx, tool.HookEventPreToolUse, call, corr, "", false)
+	if err != nil {
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+			return e.canceledToolResult(call.ID, corr)
+		}
+		return e.settleToolFeedback(toolFeedback{
+			Corr:    corr,
+			CallID:  call.ID,
+			Output:  protocol.ToolFeedbackError(err.Error()),
+			IsError: true,
+			EmitEnd: true,
+		})
+	}
+	if !pre.Allow {
+		return e.settleToolFeedback(toolFeedback{
+			Corr:    corr,
+			CallID:  call.ID,
+			Output:  protocol.ToolFeedbackBlocked(pre.Inject),
+			IsError: true,
+			EmitEnd: true,
+		})
+	}
+
 	var res tool.Result
-	var err error
 	t, ok := e.opts.Registry.Get(call.Name)
 	if !ok {
 		err = fmt.Errorf("unknown tool %q; available tools: %s", call.Name, e.toolNames())
@@ -1274,6 +1304,35 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 	}
 
 	output, isError := modelFacingToolOutput(res, err)
+	if pre.Inject != "" {
+		if output == "" {
+			output = pre.Inject
+		} else {
+			output = output + "\n" + pre.Inject
+		}
+	}
+
+	post, postErr := e.runToolHooks(ctx, tool.HookEventPostToolUse, call, corr, output, isError)
+	if postErr != nil {
+		if ctx.Err() != nil || errors.Is(postErr, context.Canceled) {
+			return e.canceledToolResult(call.ID, corr)
+		}
+		// Post-hook infrastructure errors do not discard a successful tool result.
+	} else if !post.Allow {
+		isError = true
+		if post.Inject != "" {
+			output = protocol.ToolFeedbackBlocked(post.Inject)
+		} else {
+			output = protocol.ToolFeedbackBlocked("")
+		}
+	} else if post.Inject != "" {
+		if output == "" {
+			output = post.Inject
+		} else {
+			output = output + "\n" + post.Inject
+		}
+	}
+
 	return e.settleToolFeedback(toolFeedback{
 		Corr:     corr,
 		CallID:   call.ID,
@@ -1282,6 +1341,31 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 		Title:    res.Title,
 		Metadata: res.Metadata,
 		EmitEnd:  true,
+	})
+}
+
+// runToolHooks runs configured shell hooks for a tool lifecycle event.
+// Trust is gated via permission "hook" (first-run ask by default).
+func (e *Engine) runToolHooks(ctx context.Context, event string, call provider.ToolCall, corr protocol.Correlation, toolOutput string, isError bool) (tool.HookOutcome, error) {
+	if len(e.opts.Hooks) == 0 {
+		return tool.HookOutcome{Allow: true}, nil
+	}
+	payload := tool.HookPayload{
+		Event:      event,
+		SessionID:  e.opts.SessionID,
+		CWD:        e.opts.WorkDir,
+		ToolName:   call.Name,
+		ToolCallID: call.ID,
+		ToolInput:  call.Args,
+		ToolOutput: toolOutput,
+		IsError:    isError,
+	}
+	return tool.RunHooks(ctx, e.opts.Hooks, event, payload, e.opts.WorkDir, func(ctx context.Context, command string) error {
+		return e.perms.AskWithCorrelation(ctx, tool.AskRequest{
+			Permission: "hook",
+			Patterns:   []string{command},
+			Always:     []string{command},
+		}, corr)
 	})
 }
 
