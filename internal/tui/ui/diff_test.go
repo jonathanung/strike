@@ -77,8 +77,8 @@ func TestDiffPreview(t *testing.T) {
 
 	t.Run("shared prefix and suffix with middle replace", func(t *testing.T) {
 		got := DiffPreview(th, DiffPreviewOpts{
-			Old: "head\nold mid\ntail",
-			New: "head\nnew mid\ntail",
+			Old:   "head\nold mid\ntail",
+			New:   "head\nnew mid\ntail",
 			Width: 40,
 		})
 		plain := ansi.Strip(got)
@@ -102,9 +102,9 @@ func TestDiffPreview(t *testing.T) {
 
 	t.Run("ShowStats includes +N and -M matching counts", func(t *testing.T) {
 		got := DiffPreview(th, DiffPreviewOpts{
-			Old: "a\nb\nc",
-			New: "a\nx\ny\nc",
-			Width: 40,
+			Old:       "a\nb\nc",
+			New:       "a\nx\ny\nc",
+			Width:     40,
 			ShowStats: true,
 		})
 		plain := ansi.Strip(got)
@@ -119,9 +119,9 @@ func TestDiffPreview(t *testing.T) {
 
 	t.Run("path header present when Path set", func(t *testing.T) {
 		got := DiffPreview(th, DiffPreviewOpts{
-			Path: "internal/foo.go",
-			Old:  "a",
-			New:  "b",
+			Path:  "internal/foo.go",
+			Old:   "a",
+			New:   "b",
 			Width: 40,
 		})
 		plain := ansi.Strip(got)
@@ -305,10 +305,10 @@ func TestDiffPreview(t *testing.T) {
 			fmt.Fprintf(&newB, "n%d\n", i)
 		}
 		got := DiffPreview(th, DiffPreviewOpts{
-			Old: strings.TrimSuffix(oldB.String(), "\n"),
-			New: strings.TrimSuffix(newB.String(), "\n"),
+			Old:      strings.TrimSuffix(oldB.String(), "\n"),
+			New:      strings.TrimSuffix(newB.String(), "\n"),
 			MaxLines: 0,
-			Width: 40,
+			Width:    40,
 		})
 		plain := ansi.Strip(got)
 		// 20 del + 20 ins = 40; default max 12 → overflow 28
@@ -329,7 +329,7 @@ func TestDiffPreview(t *testing.T) {
 		for _, width := range []int{4, 20, 40, 80} {
 			got := DiffPreview(th, DiffPreviewOpts{
 				Path: "very/long/path/to/some/file.go",
-				Old: longOld, New: longNew,
+				Old:  longOld, New: longNew,
 				MaxLines: 8, Width: width, ShowStats: true,
 			})
 			if got == "" && width > 0 {
@@ -355,8 +355,8 @@ func TestDiffPreview(t *testing.T) {
 
 	t.Run("multi-line replace with common prefix", func(t *testing.T) {
 		got := DiffPreview(th, DiffPreviewOpts{
-			Old: "package main\n\nfunc a() {}\nfunc old() {}",
-			New: "package main\n\nfunc a() {}\nfunc new() {}",
+			Old:   "package main\n\nfunc a() {}\nfunc old() {}",
+			New:   "package main\n\nfunc a() {}\nfunc new() {}",
 			Width: 60,
 		})
 		plain := ansi.Strip(got)
