@@ -12,6 +12,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/auth"
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/engine"
+	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
 	"github.com/jonathanung/strike-cli/internal/provider/echo"
@@ -431,6 +432,92 @@ func TestOpenResumeSession(t *testing.T) {
 	}
 	if _, err := openResumeSession(mgr, "missing"); err == nil {
 		t.Fatal("expected error for missing session")
+	}
+}
+
+// TestOpenResumeSessionRestoresPhaseAutonomyGrants is the --continue /
+// --session contract: openResumeSession loads the JSONL log and engine.Restore
+// recovers workflow phase, autonomy mode, and DecisionAlways grants that wire
+// feeds into engine.Options.
+func TestOpenResumeSessionRestoresPhaseAutonomyGrants(t *testing.T) {
+	dir := t.TempDir()
+	mgr := session.NewManager(dir)
+	root, err := mgr.Create(session.CreateOptions{ID: "root-resume"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	corr := protocol.Correlation{SessionID: root.ID}
+	for _, ev := range []protocol.Event{
+		protocol.ModelSelected{Correlation: corr, Provider: "echo", Model: "echo"},
+		protocol.AgentSelected{Correlation: corr, Name: "build"},
+		protocol.AutonomySelected{Correlation: corr, Mode: protocol.AutonomyAgent},
+		protocol.PhaseChanged{
+			Correlation: corr,
+			Workflow:    "plan-implement",
+			Phase:       "implement",
+			Index:       1,
+			Gate:        "agent",
+		},
+		protocol.UserMessage{Correlation: corr, Text: "keep going"},
+		protocol.PermissionAsked{
+			Correlation: corr,
+			RequestID:   root.ID + ":perm_1",
+			Permission:  "bash",
+			Patterns:    []string{"git status"},
+			Always:      []string{"git *"},
+		},
+		protocol.PermissionResolved{
+			Correlation: corr,
+			RequestID:   root.ID + ":perm_1",
+			Decision:    protocol.DecisionAlways,
+		},
+		// Incomplete turn at end of log must not block restore of selections.
+		protocol.TurnStarted{Correlation: corr},
+		protocol.PermissionAsked{
+			Correlation: corr,
+			RequestID:   root.ID + ":perm_open",
+			Permission:  "edit",
+			Patterns:    []string{"foo.go"},
+		},
+	} {
+		if err := mgr.Append(root.ID, ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = mgr.Close(root.ID)
+
+	opened, err := openResumeSession(mgr, root.ID)
+	if err != nil {
+		t.Fatalf("openResumeSession: %v", err)
+	}
+	defer opened.bound.Close()
+
+	// Mirror wire.go resume path: Restore(replay) → engine.Options seeds.
+	restored := engine.Restore(opened.replay)
+	if restored.Autonomy != protocol.AutonomyAgent {
+		t.Fatalf("Autonomy = %q, want agent", restored.Autonomy)
+	}
+	if restored.PhaseWorkflow != "plan-implement" || restored.PhaseName != "implement" || restored.PhaseIndex != 1 {
+		t.Fatalf("phase = %q/%q/%d", restored.PhaseWorkflow, restored.PhaseName, restored.PhaseIndex)
+	}
+	if restored.Provider != "echo" || restored.Model != "echo" || restored.Agent != "build" {
+		t.Fatalf("selections = %+v", restored)
+	}
+	if len(restored.Messages) != 1 || restored.Messages[0].Text != "keep going" {
+		t.Fatalf("Messages = %#v", restored.Messages)
+	}
+	if len(restored.AlwaysGrants) != 1 {
+		t.Fatalf("AlwaysGrants = %#v, want one bash grant", restored.AlwaysGrants)
+	}
+	g := restored.AlwaysGrants[0]
+	if g.Permission != "bash" || g.Pattern != "git *" || g.Action != permission.Allow {
+		t.Fatalf("grant = %#v", g)
+	}
+	// Unresolved PermissionAsked must not become a grant.
+	for _, g := range restored.AlwaysGrants {
+		if g.Permission == "edit" {
+			t.Fatalf("open PermissionAsked leaked into AlwaysGrants: %#v", restored.AlwaysGrants)
+		}
 	}
 }
 
