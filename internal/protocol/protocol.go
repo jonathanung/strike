@@ -139,26 +139,41 @@ func (SetFast) isOp()         {}
 // Event is an engine -> client notification.
 type Event interface{ isEvent() }
 
+// Correlation identifies the session, turn, and provider request that
+// produced an event. Embedded anonymously so JSON stays flat; omitempty
+// keeps legacy envelopes without IDs decodable and re-encodable as `{}`.
+type Correlation struct {
+	SessionID         string `json:"sessionId,omitempty"`
+	TurnID            string `json:"turnId,omitempty"`
+	ProviderRequestID string `json:"providerRequestId,omitempty"`
+}
+
 // UserMessage echoes accepted user input into the event stream so the
 // transcript is fully reconstructable from events alone.
 type UserMessage struct {
+	Correlation
 	Text string `json:"text"`
 }
 
-type TurnStarted struct{}
+type TurnStarted struct {
+	Correlation
+}
 
 // TextDelta is a chunk of streaming assistant text.
 type TextDelta struct {
+	Correlation
 	Text string `json:"text"`
 }
 
 type ToolCallBegin struct {
+	Correlation
 	CallID string          `json:"callId"`
 	Name   string          `json:"name"`
 	Args   json.RawMessage `json:"args"`
 }
 
 type ToolCallEnd struct {
+	Correlation
 	CallID  string `json:"callId"`
 	Title   string `json:"title"`
 	Output  string `json:"output"`
@@ -170,6 +185,7 @@ type ToolCallEnd struct {
 
 // PermissionAsked suspends a tool call until a PermissionReply arrives.
 type PermissionAsked struct {
+	Correlation
 	RequestID  string          `json:"requestId"`
 	Permission string          `json:"permission"`
 	Patterns   []string        `json:"patterns"`
@@ -177,38 +193,45 @@ type PermissionAsked struct {
 }
 
 type PermissionResolved struct {
+	Correlation
 	RequestID string   `json:"requestId"`
 	Decision  Decision `json:"decision"`
 }
 
 type TurnCompleted struct {
+	Correlation
 	StopReason string `json:"stopReason,omitempty"`
 }
 
 // ModelSelected confirms the active provider/model, at startup (if an
 // initial selection succeeded) and after each SelectModel.
 type ModelSelected struct {
+	Correlation
 	Provider string `json:"provider"`
 	Model    string `json:"model"`
 }
 
 // AgentSelected confirms the active agent.
 type AgentSelected struct {
+	Correlation
 	Name string `json:"name"`
 }
 
 // EffortSelected confirms the active reasoning level, at startup and after
 // each SetEffort.
 type EffortSelected struct {
+	Correlation
 	Level Effort `json:"level"`
 }
 
 // FastSelected confirms the session priority-tier preference after SetFast.
 type FastSelected struct {
+	Correlation
 	Enabled bool `json:"enabled"`
 }
 
 type EngineError struct {
+	Correlation
 	Message string `json:"message"`
 }
 

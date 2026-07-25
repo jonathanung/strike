@@ -78,14 +78,19 @@ func waitForEvent(t *testing.T, eng *engine.Engine, pred func(protocol.Event) bo
 }
 
 func TestSetEffortConfirmsAndReachesTheProvider(t *testing.T) {
-	eng, rec, cancel := newRecordingEngine(t, engine.Options{})
+	const sessionID = "session-effort"
+	eng, rec, cancel := newRecordingEngine(t, engine.Options{SessionID: sessionID})
 	defer cancel()
 
 	eng.Ops() <- protocol.SetEffort{Level: protocol.EffortXHigh}
-	waitForEvent(t, eng, func(ev protocol.Event) bool {
+	event := waitForEvent(t, eng, func(ev protocol.Event) bool {
 		sel, ok := ev.(protocol.EffortSelected)
 		return ok && sel.Level == protocol.EffortXHigh
 	})
+	selected := event.(protocol.EffortSelected)
+	if selected.Correlation != (protocol.Correlation{SessionID: sessionID}) {
+		t.Errorf("EffortSelected correlation = %#v, want session only", selected.Correlation)
+	}
 
 	eng.Ops() <- protocol.UserInput{Text: "hello"}
 	waitForEvent(t, eng, func(ev protocol.Event) bool {
@@ -150,10 +155,51 @@ func TestUnknownEffortIsRejectedWithoutChangingState(t *testing.T) {
 	}
 }
 
+func TestSetEffortDuringActiveTurnEmitsSessionOnlyCorrelatedError(t *testing.T) {
+	const sessionID = "session-active-effort"
+	prov := newScriptedProvider(streamStep{stream: func(ctx context.Context) <-chan provider.StreamEvent {
+		ch := make(chan provider.StreamEvent)
+		go func() {
+			defer close(ch)
+			<-ctx.Done()
+		}()
+		return ch
+	}})
+	eng := engine.New(engine.Options{
+		SessionID:       sessionID,
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(),
+		WorkDir:         t.TempDir(),
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "keep the turn active"}
+	select {
+	case <-prov.requests:
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for the active provider request")
+	}
+
+	eng.Ops() <- protocol.SetEffort{Level: protocol.EffortMax}
+	event := waitForEvent(t, eng, func(ev protocol.Event) bool {
+		err, ok := ev.(protocol.EngineError)
+		return ok && strings.Contains(err.Message, "cannot change effort")
+	})
+	engineErr := event.(protocol.EngineError)
+	if engineErr.Correlation != (protocol.Correlation{SessionID: sessionID}) {
+		t.Errorf("EngineError correlation = %#v, want session only", engineErr.Correlation)
+	}
+}
+
 // TestAgentEffortPinOverridesTheConfiguredDefault mirrors how an agent's
 // provider/model pins behave.
 func TestAgentEffortPinOverridesTheConfiguredDefault(t *testing.T) {
+	const sessionID = "session-agent-effort"
 	eng, rec, cancel := newRecordingEngine(t, engine.Options{
+		SessionID:     sessionID,
 		InitialEffort: protocol.EffortLow,
 		Agents: []engine.Agent{
 			{Name: "build", Prompt: "b"},
@@ -163,10 +209,14 @@ func TestAgentEffortPinOverridesTheConfiguredDefault(t *testing.T) {
 	defer cancel()
 
 	eng.Ops() <- protocol.SelectAgent{Name: "deep"}
-	waitForEvent(t, eng, func(ev protocol.Event) bool {
+	event := waitForEvent(t, eng, func(ev protocol.Event) bool {
 		sel, ok := ev.(protocol.EffortSelected)
 		return ok && sel.Level == protocol.EffortMax
 	})
+	selected := event.(protocol.EffortSelected)
+	if selected.Correlation != (protocol.Correlation{SessionID: sessionID}) {
+		t.Errorf("EffortSelected correlation = %#v, want session only", selected.Correlation)
+	}
 
 	eng.Ops() <- protocol.UserInput{Text: "hello"}
 	waitForEvent(t, eng, func(ev protocol.Event) bool {

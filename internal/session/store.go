@@ -7,10 +7,12 @@ package session
 
 import (
 	"bufio"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -31,9 +33,25 @@ func DefaultDir() string {
 	return filepath.Join(home, ".strike", "sessions")
 }
 
-// NewID returns a sortable session identifier.
+// newIDLast is advanced under newIDMu so rapid NewID calls stay strictly
+// increasing and therefore lexically sortable despite random suffixes.
+var (
+	newIDMu   sync.Mutex
+	newIDLast time.Time
+)
+
+// NewID returns a UTC timestamp-first, filename-safe, collision-resistant
+// session identifier. Lexical order matches creation order.
 func NewID() string {
-	return time.Now().UTC().Format("20060102-150405")
+	newIDMu.Lock()
+	defer newIDMu.Unlock()
+	now := time.Now().UTC()
+	if !now.After(newIDLast) {
+		now = newIDLast.Add(time.Nanosecond)
+	}
+	newIDLast = now
+	// Fixed-width fractional seconds so equal-length prefixes sort by time.
+	return now.Format("20060102T150405.000000000Z") + "-" + rand.Text()
 }
 
 func Open(dir, id string) (*Store, error) {
