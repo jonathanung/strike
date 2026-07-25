@@ -660,18 +660,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateComposer(msg)
 
 	case tea.MouseMsg:
-		// Wheel scrolls the transcript viewport even when a right pane is focused.
-		if msg.Action != tea.MouseActionPress {
-			break
+		// Wheel scrolls the transcript; left-click toggles tool cells / opens OSC8.
+		return m.handleMouse(msg)
+
+	case openURIMsg:
+		if msg.err != nil {
+			m.setNotice("open link: "+msg.err.Error(), true)
+			m.reflow()
 		}
-		switch msg.Button { //nolint:exhaustive
-		case tea.MouseButtonWheelUp:
-			m.viewport.ScrollUp(m.viewport.MouseWheelDelta)
-			return m, nil
-		case tea.MouseButtonWheelDown:
-			m.viewport.ScrollDown(m.viewport.MouseWheelDelta)
-			return m, nil
-		}
+		return m, nil
 	}
 
 	var cmd tea.Cmd
@@ -1616,13 +1613,26 @@ func (m *Model) refreshViewport() {
 	yOff := m.viewport.YOffset
 	blocks := make([]string, 0, len(m.cells))
 	for _, c := range m.cells {
-		blocks = append(blocks, c.render(width, m.th))
+		blocks = append(blocks, m.renderCell(c, width))
 	}
 	m.viewport.SetContent(strings.Join(blocks, "\n\n"))
 	if atBottom {
 		m.viewport.GotoBottom()
 	} else {
 		m.viewport.SetYOffset(yOff)
+	}
+}
+
+// renderCell paints one transcript cell, attaching OSC 8 file links using the
+// session work directory as the relative-path base.
+func (m *Model) renderCell(c cell, width int) string {
+	switch tc := c.(type) {
+	case *toolCell:
+		return tc.renderLinked(width, m.th, m.workDir)
+	case *exploreCell:
+		return tc.renderLinked(width, m.th, m.workDir)
+	default:
+		return c.render(width, m.th)
 	}
 }
 
