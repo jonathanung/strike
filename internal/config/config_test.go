@@ -178,3 +178,84 @@ func TestSetGlobalDefaultsCorrupt(t *testing.T) {
 		t.Fatal("expected corrupt config error")
 	}
 }
+
+func TestAppendProjectPermissionCreatesAndPreserves(t *testing.T) {
+	work := t.TempDir()
+	rule := permission.Rule{Permission: "bash", Pattern: "git *", Action: permission.Allow}
+	if err := AppendProjectPermission(work, rule); err != nil {
+		t.Fatal(err)
+	}
+	path := ProjectPath(work)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got Config
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Permissions) != 1 || got.Permissions[0] != rule {
+		t.Fatalf("permissions = %#v, want [%#v]", got.Permissions, rule)
+	}
+
+	// Preserve unrelated fields on second append.
+	initial := Config{
+		Provider:     "openai",
+		Model:        "keep-me",
+		SystemPrompt: "stay",
+		Permissions:  got.Permissions,
+	}
+	raw, _ := json.MarshalIndent(initial, "", "  ")
+	if err := os.WriteFile(path, append(raw, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second := permission.Rule{Permission: "edit", Pattern: "*.go", Action: permission.Allow}
+	if err := AppendProjectPermission(work, second); err != nil {
+		t.Fatal(err)
+	}
+	data, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Provider != "openai" || got.Model != "keep-me" || got.SystemPrompt != "stay" {
+		t.Errorf("did not preserve unrelated fields: %#v", got)
+	}
+	if len(got.Permissions) != 2 || got.Permissions[1] != second {
+		t.Fatalf("permissions after append = %#v", got.Permissions)
+	}
+
+	// Defaults for empty action/pattern.
+	if err := AppendProjectPermission(work, permission.Rule{Permission: "write"}); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = os.ReadFile(path)
+	_ = json.Unmarshal(data, &got)
+	last := got.Permissions[len(got.Permissions)-1]
+	if last.Action != permission.Allow || last.Pattern != "*" {
+		t.Errorf("defaults = %#v, want action=allow pattern=*", last)
+	}
+}
+
+func TestAppendProjectPermissionRejects(t *testing.T) {
+	if err := AppendProjectPermission("", permission.Rule{Permission: "bash"}); err == nil {
+		t.Fatal("empty workDir: want error")
+	}
+	if err := AppendProjectPermission(t.TempDir(), permission.Rule{}); err == nil {
+		t.Fatal("empty permission: want error")
+	}
+
+	work := t.TempDir()
+	path := ProjectPath(work)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`not-json`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendProjectPermission(work, permission.Rule{Permission: "bash"}); err == nil {
+		t.Fatal("corrupt config: want error")
+	}
+}
