@@ -131,7 +131,8 @@ func TestC3WelcomeColumnsAndNoOuterPanel(t *testing.T) {
 	assertNoWelcomeOuterPanel(t, m.View())
 	m.applyEvent(protocol.UserMessage{Text: "populated"})
 	m.refreshViewport()
-	if plain = ansi.Strip(m.View()); !strings.Contains(plain, "session") || strings.Contains(plain, "get started") {
+	// Panel title is the auto-title (first user text) once the transcript has cells.
+	if plain = ansi.Strip(m.View()); !strings.Contains(plain, "populated") || strings.Contains(plain, "get started") {
 		t.Errorf("populated transcript did not replace dashboard with session panel:\n%s", plain)
 	}
 }

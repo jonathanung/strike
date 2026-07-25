@@ -1,0 +1,37 @@
+{
+  "name": "Monokai",
+  "id": "monokai",
+  "defs": {
+    "bg": "#272822",
+    "fg": "#f8f8f2",
+    "comment": "#75715e",
+    "red": "#f92672",
+    "orange": "#fd971f",
+    "yellow": "#e6db74",
+    "green": "#a6e22e",
+    "blue": "#66d9ef",
+    "purple": "#ae81ff",
+    "lightBg": "#fafafa",
+    "lightFg": "#272822",
+    "lightMuted": "#75715e"
+  },
+  "colors": {
+    "text": { "light": "lightFg", "dark": "fg" },
+    "textMuted": { "light": "lightMuted", "dark": "comment" },
+    "accent": { "light": "red", "dark": "red" },
+    "accentAlt": { "light": "blue", "dark": "blue" },
+    "highlight": { "light": "orange", "dark": "fg" },
+    "success": { "light": "green", "dark": "green" },
+    "warning": { "light": "orange", "dark": "orange" },
+    "error": { "light": "red", "dark": "red" },
+    "danger": { "light": "red", "dark": "red" },
+    "background": { "light": "lightBg", "dark": "bg" },
+    "border": { "light": "lightMuted", "dark": "comment" },
+    "borderFocus": { "light": "red", "dark": "red" },
+    "borderMuted": { "light": "#e0e0e0", "dark": "#3e3d32" },
+    "userLabel": { "light": "blue", "dark": "blue" },
+    "toolLabel": { "light": "purple", "dark": "purple" },
+    "diffAdded": { "light": "green", "dark": "green" },
+    "diffRemoved": { "light": "red", "dark": "red" }
+  }
+}

@@ -133,13 +133,21 @@ func (m Model) transcriptView(compact bool, width, height int) string {
 		return body
 	}
 	return ui.Panel(m.th, ui.PanelOpts{
-		Title:   "session",
+		Title:   m.sessionPanelTitle(),
 		Footer:  m.transcriptFooter(),
 		Width:   width,
 		Height:  height,
 		Focused: m.focus == focusLeft && m.modal == nil,
 		Dim:     m.focus == focusRight || m.modal != nil,
 	}, body)
+}
+
+// sessionPanelTitle is the transcript chrome label: auto-title when set.
+func (m Model) sessionPanelTitle() string {
+	if topic := strings.TrimSpace(m.titleTopic); topic != "" {
+		return sanitizeTitleTopic(topic)
+	}
+	return "session"
 }
 
 // transcriptFooter shows a scroll indicator when the transcript overflows its
