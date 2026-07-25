@@ -40,7 +40,7 @@ func (e *Engine) clearPhase() {
 	e.workflow = config.Workflow{}
 	e.phaseIndex = -1
 	e.perms.SetPhaseRules(nil)
-	e.emit(protocol.PhaseChanged{
+	e.emitSelected(protocol.PhaseChanged{
 		Correlation: e.sessionCorr(),
 	})
 }
@@ -59,7 +59,7 @@ func (e *Engine) enterPhase(w config.Workflow, index int) error {
 	if gate == "" {
 		gate = string(config.GateAgent)
 	}
-	e.emit(protocol.PhaseChanged{
+	e.emitSelected(protocol.PhaseChanged{
 		Correlation: e.sessionCorr(),
 		Workflow:    w.Name,
 		Phase:       phase.Name,
