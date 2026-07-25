@@ -228,6 +228,87 @@ func TestSetGlobalDefaultsCorrupt(t *testing.T) {
 	}
 }
 
+func TestSetGlobalThemePersistsAndPreserves(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := GlobalPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	initial := Config{
+		Provider:     "anthropic",
+		Model:        "keep-model",
+		SystemPrompt: "keep me",
+		Theme:        "nord",
+	}
+	raw, _ := json.MarshalIndent(initial, "", "  ")
+	if err := os.WriteFile(path, append(raw, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SetGlobalTheme("  dracula  "); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got Config
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Theme != "dracula" {
+		t.Errorf("theme = %q, want dracula", got.Theme)
+	}
+	if got.Provider != "anthropic" || got.Model != "keep-model" || got.SystemPrompt != "keep me" {
+		t.Errorf("did not preserve unrelated fields: %#v", got)
+	}
+}
+
+func TestSetGlobalThemeRejectsEmpty(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for _, id := range []string{"", "   "} {
+		if err := SetGlobalTheme(id); err == nil {
+			t.Fatalf("SetGlobalTheme(%q) accepted empty id", id)
+		}
+	}
+}
+
+func TestSetGlobalThemeCorrupt(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := GlobalPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`not-json`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetGlobalTheme("dracula"); err == nil {
+		t.Fatal("expected corrupt config error")
+	}
+}
+
+func TestSetGlobalThemeCreatesConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := SetGlobalTheme("tokyo-night"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(GlobalPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got Config
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Theme != "tokyo-night" {
+		t.Errorf("theme = %q", got.Theme)
+	}
+}
+
 func TestAppendProjectPermissionCreatesAndPreserves(t *testing.T) {
 	work := t.TempDir()
 	rule := permission.Rule{Permission: "bash", Pattern: "git *", Action: permission.Allow}
