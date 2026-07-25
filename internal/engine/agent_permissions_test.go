@@ -386,3 +386,223 @@ done:
 		t.Errorf("nope.txt should not exist; err=%v", err)
 	}
 }
+
+// TestChildCannotWidenViaAgentProfile is the AG3 exit criterion: parent
+// read-only agent profile ⇒ child cannot gain write/edit via its own profile.
+func TestChildCannotWidenViaAgentProfile(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "protected.txt")
+	original := "keep-me-safe\n"
+	if err := os.WriteFile(target, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	taskCall := taskToolCallWithAgent("task-ag3", "try write", "writer")
+	writeCall := writeToolCall("w-child", "protected.txt", "pwned\n")
+	prov := newScriptedProvider(
+		toolCallStep(taskCall),
+		toolCallStep(writeCall),
+		completedStep("child after deny"),
+		completedStep("parent done"),
+	)
+
+	// Base allows write so a missing parent ceiling would let the child succeed.
+	baseAllow := permission.Ruleset{
+		{Permission: "write", Pattern: "*", Action: permission.Allow},
+		{Permission: "edit", Pattern: "*", Action: permission.Allow},
+		{Permission: "read", Pattern: "*", Action: permission.Allow},
+		{Permission: "task", Pattern: "*", Action: permission.Allow},
+	}
+	eng := engine.New(engine.Options{
+		SessionID:       "ag3-parent-readonly",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(tool.NewTask(), tool.NewWrite(), tool.NewEdit()),
+		WorkDir:         dir,
+		Rules:           []permission.Ruleset{permission.Defaults(), baseAllow},
+		Agents: []engine.Agent{
+			{Name: "build", Description: "general"},
+			{
+				Name:        "reviewer",
+				Description: "read-only",
+				Permissions: reviewerDenyWriteEdit(),
+			},
+			{
+				Name:        "writer",
+				Description: "tries to widen",
+				Permissions: permission.Ruleset{
+					{Permission: "write", Pattern: "*", Action: permission.Allow},
+					{Permission: "edit", Pattern: "*", Action: permission.Allow},
+				},
+			},
+		},
+		InitialAgent: "reviewer",
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	waitForEvent(t, eng, func(ev protocol.Event) bool {
+		sel, ok := ev.(protocol.AgentSelected)
+		return ok && sel.Name == "reviewer"
+	})
+
+	eng.Ops() <- protocol.UserInput{Text: "delegate write to writer child"}
+	var (
+		askedWrite bool
+		taskEnd    protocol.ToolCallEnd
+		sawTask    bool
+		childDone  bool
+	)
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for turn")
+		case ev := <-eng.Events():
+			switch ev := ev.(type) {
+			case protocol.PermissionAsked:
+				// Hard deny must not ask; if it does, reject so the turn ends.
+				if ev.Permission == "write" || ev.Permission == "edit" {
+					askedWrite = true
+				}
+				eng.Ops() <- protocol.PermissionReply{
+					RequestID: ev.RequestID,
+					Decision:  protocol.DecisionReject,
+				}
+			case protocol.ChildCompleted:
+				childDone = true
+			case protocol.ToolCallEnd:
+				if ev.CallID == "task-ag3" {
+					taskEnd = ev
+					sawTask = true
+				}
+			case protocol.TurnCompleted:
+				goto done
+			case protocol.EngineError:
+				t.Fatalf("engine error: %s", ev.Message)
+			}
+		}
+	}
+done:
+	if askedWrite {
+		t.Error("child write emitted PermissionAsked; parent deny must hard-reject")
+	}
+	if !childDone {
+		t.Error("missing ChildCompleted")
+	}
+	if !sawTask {
+		t.Fatal("missing task ToolCallEnd")
+	}
+	_ = taskEnd
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != original {
+		t.Errorf("file content = %q, want unchanged %q", data, original)
+	}
+}
+
+// TestChildAgentDenyFurtherRestricts checks a child profile can still tighten
+// permissions when the parent allows the same tool.
+func TestChildAgentDenyFurtherRestricts(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "open.txt")
+	original := "parent-allows\n"
+	if err := os.WriteFile(target, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	taskCall := taskToolCallWithAgent("task-restrict", "try write", "reviewer")
+	writeCall := writeToolCall("w-restrict", "open.txt", "child-pwn\n")
+	prov := newScriptedProvider(
+		toolCallStep(taskCall),
+		toolCallStep(writeCall),
+		completedStep("child after deny"),
+		completedStep("parent done"),
+	)
+
+	baseAllow := permission.Ruleset{
+		{Permission: "write", Pattern: "*", Action: permission.Allow},
+		{Permission: "task", Pattern: "*", Action: permission.Allow},
+	}
+	eng := engine.New(engine.Options{
+		SessionID:       "ag3-child-restrict",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(tool.NewTask(), tool.NewWrite()),
+		WorkDir:         dir,
+		Rules:           []permission.Ruleset{permission.Defaults(), baseAllow},
+		Agents: []engine.Agent{
+			{Name: "build", Description: "general"},
+			{
+				Name:        "reviewer",
+				Description: "read-only child",
+				Permissions: reviewerDenyWriteEdit(),
+			},
+		},
+		InitialAgent: "build",
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	waitForEvent(t, eng, func(ev protocol.Event) bool {
+		sel, ok := ev.(protocol.AgentSelected)
+		return ok && sel.Name == "build"
+	})
+
+	eng.Ops() <- protocol.UserInput{Text: "delegate to reviewer"}
+	var (
+		askedWrite bool
+		childDone  bool
+		sawTask    bool
+	)
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("timed out")
+		case ev := <-eng.Events():
+			switch ev := ev.(type) {
+			case protocol.PermissionAsked:
+				if ev.Permission == "write" || ev.Permission == "edit" {
+					askedWrite = true
+				}
+				// Approve other asks; write/edit must not ask under child deny.
+				eng.Ops() <- protocol.PermissionReply{
+					RequestID: ev.RequestID,
+					Decision:  protocol.DecisionOnce,
+				}
+			case protocol.ChildCompleted:
+				childDone = true
+			case protocol.ToolCallEnd:
+				if ev.CallID == "task-restrict" {
+					sawTask = true
+				}
+			case protocol.TurnCompleted:
+				goto done
+			case protocol.EngineError:
+				t.Fatalf("engine error: %s", ev.Message)
+			}
+		}
+	}
+done:
+	if askedWrite {
+		t.Error("child write emitted PermissionAsked; child deny must hard-reject")
+	}
+	if !childDone {
+		t.Error("missing ChildCompleted")
+	}
+	if !sawTask {
+		t.Fatal("missing task ToolCallEnd")
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != original {
+		t.Errorf("file content = %q, want unchanged %q", data, original)
+	}
+}
