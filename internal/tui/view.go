@@ -154,7 +154,7 @@ func (m Model) composerView(compact bool, width, height int) string {
 	}
 	var footer string
 	if !borderless {
-		footer = composerFooter(m.th, width)
+		footer = composerFooter(m.th, m.keyMap, width)
 	}
 	return ui.Panel(m.th, ui.PanelOpts{
 		Title:      "prompt" + themedSpace(m.th.Resolve().Spacing.XS) + m.themeIcons().Prompt,
@@ -168,9 +168,10 @@ func (m Model) composerView(compact bool, width, height int) string {
 }
 
 // composerFooter advertises send/newline when the panel has room for a footer.
-func composerFooter(th theme.Theme, width int) string {
+func composerFooter(th theme.Theme, keys keyMap, width int) string {
 	_ = width
-	return dotJoin(th, "enter send", "shift+enter newline")
+	send, nl := keyHint(keys.Send), keyHint(keys.Newline)
+	return dotJoin(th, send.Key+" "+send.Label, nl.Key+" "+nl.Label)
 }
 
 // rightPaneView frames the active window. Context and activity bodies are

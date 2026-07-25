@@ -127,16 +127,22 @@ func TestContextPaneBodyWidthSafe(t *testing.T) {
 func TestActivityPaneBodyIdleTips(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	body := ansi.Strip(m.activityPaneBody(40, 10))
-	for _, want := range []string{"/", "ctrl+k", "shift+enter"} {
+	for _, want := range []string{
+		"/",
+		keyHint(m.keyMap.Palette).Key,         // ctrl+p
+		keyHint(m.keyMap.Agent).Key,           // tab
+		keyHint(m.keyMap.CycleWindowNext).Key, // ctrl+j
+		keyHint(m.keyMap.Newline).Key,         // shift+enter
+	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("idle activity tips missing %q: %q", want, body)
 		}
 	}
-	// Descriptions for palette / newline should be present in some form.
-	if !strings.Contains(body, "palette") && !strings.Contains(body, "commands") {
+	// Descriptions derive from keyMap help (plus the literal "/" commands tip).
+	if !strings.Contains(body, keyHint(m.keyMap.Palette).Label) && !strings.Contains(body, "commands") {
 		t.Errorf("idle tips missing command/palette descriptions: %q", body)
 	}
-	if !strings.Contains(body, "newline") {
+	if !strings.Contains(body, keyHint(m.keyMap.Newline).Label) {
 		t.Errorf("idle tips missing newline description: %q", body)
 	}
 	if strings.Contains(strings.ToLower(body), "placeholder") {
@@ -154,7 +160,12 @@ func TestActivityPaneBodyShowsToolNameWithoutIdleTips(t *testing.T) {
 		t.Errorf("activity with tools missing tool name: %q", body)
 	}
 	// Idle tips should not appear once tools are present.
-	for _, tip := range []string{"ctrl+k", "shift+enter", "palette", "commands"} {
+	for _, tip := range []string{
+		keyHint(m.keyMap.Palette).Key,
+		keyHint(m.keyMap.Newline).Key,
+		keyHint(m.keyMap.Palette).Label,
+		"commands",
+	} {
 		if strings.Contains(body, tip) {
 			t.Errorf("activity with tools still shows idle tip %q: %q", tip, body)
 		}

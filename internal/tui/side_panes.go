@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike-cli/internal/tui/ui"
 )
 
 // contextPaneBody renders session setup for the right-pane context window:
@@ -180,14 +181,12 @@ func (m Model) activityPaneBody(width, height int) string {
 		return strings.Join(lines, "\n")
 	}
 
-	tips := []struct {
-		key, desc string
-	}{
-		{"/", "commands"},
-		{"ctrl+k", "palette"},
-		{"tab", "agent"},
-		{"ctrl+l", "cycle pane"},
-		{"shift+enter", "newline"},
+	tips := []ui.KeyHint{
+		{Key: "/", Label: "commands"},
+		keyHint(m.keyMap.Palette),
+		keyHint(m.keyMap.Agent),
+		keyHint(m.keyMap.CycleWindowNext),
+		keyHint(m.keyMap.Newline),
 	}
 	if len(tips) > height {
 		tips = tips[:height]
@@ -195,11 +194,11 @@ func (m Model) activityPaneBody(width, height int) string {
 	gap := themedSpace(th.Spacing.SM)
 	lines := make([]string, 0, len(tips))
 	for _, tip := range tips {
-		keyText := welcomeTruncate(tip.key, width, ellipsis)
+		keyText := welcomeTruncate(tip.Key, width, ellipsis)
 		budget := max(0, width-ansi.StringWidth(keyText)-ansi.StringWidth(gap))
 		line := st.Accent.Render(keyText)
 		if budget > 0 {
-			line += st.Muted.Render(gap + welcomeTruncate(tip.desc, budget, ellipsis))
+			line += st.Muted.Render(gap + welcomeTruncate(tip.Label, budget, ellipsis))
 		}
 		if pad := width - ansi.StringWidth(ansi.Strip(line)); pad > 0 {
 			line += themedSpace(pad)

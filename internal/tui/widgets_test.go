@@ -107,17 +107,19 @@ func TestComposerFooterAdvertisesEnterAndShiftEnter(t *testing.T) {
 	// surface send/newline help in the panel footer.
 	m, _ := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 93, Height: 40})
+	sendKey := keyHint(m.keyMap.Send).Key
+	nlKey := keyHint(m.keyMap.Newline).Key
 	plain := ansi.Strip(m.View())
-	if !strings.Contains(plain, "enter") {
-		t.Errorf("bordered view missing enter send help:\n%s", plain)
+	if !strings.Contains(plain, sendKey) {
+		t.Errorf("bordered view missing send key %q:\n%s", sendKey, plain)
 	}
-	if !strings.Contains(plain, "shift+enter") && !strings.Contains(plain, "newline") {
-		t.Errorf("bordered view missing shift+enter/newline help:\n%s", plain)
+	if !strings.Contains(plain, nlKey) && !strings.Contains(plain, keyHint(m.keyMap.Newline).Label) {
+		t.Errorf("bordered view missing newline key/label %q/%q:\n%s", nlKey, keyHint(m.keyMap.Newline).Label, plain)
 	}
-	// Direct footer helper also advertises both.
-	footer := ansi.Strip(composerFooter(m.th, 60))
-	if !strings.Contains(footer, "enter") || !strings.Contains(footer, "shift+enter") {
-		t.Errorf("composerFooter = %q, want enter and shift+enter", footer)
+	// Direct footer helper also advertises both from keyMap.
+	footer := ansi.Strip(composerFooter(m.th, m.keyMap, 60))
+	if !strings.Contains(footer, sendKey) || !strings.Contains(footer, nlKey) {
+		t.Errorf("composerFooter = %q, want %q and %q", footer, sendKey, nlKey)
 	}
 }
 
