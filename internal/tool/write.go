@@ -48,6 +48,11 @@ func (writeTool) Execute(ctx context.Context, args json.RawMessage, tc *Context)
 	}
 	path := absPath(tc.WorkDir, a.FilePath)
 	rel := relPath(tc.WorkDir, path)
+	if _, statErr := os.Stat(path); statErr == nil {
+		if err := tc.Files.CheckFresh(path, rel); err != nil {
+			return Result{}, err
+		}
+	}
 
 	existing, readErr := os.ReadFile(path)
 	meta, _ := json.Marshal(map[string]any{
@@ -63,6 +68,9 @@ func (writeTool) Execute(ctx context.Context, args json.RawMessage, tc *Context)
 	}
 	if err := os.WriteFile(path, []byte(a.Content), 0o644); err != nil {
 		return Result{}, err
+	}
+	if info, statErr := os.Stat(path); statErr == nil {
+		tc.Files.Record(path, info)
 	}
 	verb := "Created"
 	if readErr == nil {

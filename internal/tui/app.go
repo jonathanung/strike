@@ -67,6 +67,9 @@ type historyAddedMsg struct {
 type Options struct {
 	DangerouslySkipPermissions bool
 	Theme                      *theme.Theme
+	// WorkDir resolves relative paths for /vim. Empty falls back to os.Getwd
+	// at launch time.
+	WorkDir string
 }
 
 // Model is the root Bubble Tea model. It holds its host services, the
@@ -119,6 +122,7 @@ type Model struct {
 	width          int
 	height         int
 	ready          bool
+	workDir        string
 }
 
 // New builds the frontend model. services supplies every host capability; any
@@ -152,6 +156,9 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 	}
 	for _, option := range options {
 		m.dangerouslySkipPermissions = option.DangerouslySkipPermissions
+		if option.WorkDir != "" {
+			m.workDir = option.WorkDir
+		}
 	}
 	if services.History != nil {
 		m.entries = services.History.Entries()
@@ -234,6 +241,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.entries = m.services.History.Entries()
 		}
 		return m, nil
+
+	case editorFinishedMsg:
+		return m.applyEditorFinished(msg)
 
 	case paletteInvokeMsg:
 		priorNotice, priorNoticeErr := m.notice, m.noticeErr
@@ -658,6 +668,12 @@ func (m *Model) applyEvent(ev protocol.Event) {
 	case protocol.FastSelected:
 		m.fastEnabled = ev.Enabled
 		m.setNotice(m.fastNotice(ev.Enabled), false)
+	case protocol.FilesInvalidated:
+		if len(ev.Paths) == 0 {
+			break
+		}
+		label := strings.Join(ev.Paths, ", ")
+		m.setNotice("files changed — agent will re-read: "+label, false)
 	case protocol.EngineError:
 		// Mid-turn failures belong in the transcript; idle-state errors
 		// (no model selected, bad /provider, …) show in the notice line.
@@ -802,10 +818,12 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		}
 	case "/fast":
 		return m.handleFastCommand(fields[1:])
+	case "/vim":
+		return m.handleVimCommand(fields[1:])
 	case "/md-read":
 		return m.handleMDRead(text, fields)
 	case "/help":
-		m.setNotice("commands: "+dotJoin(m.th, "/provider [name [model]]", "/model <model>", "/effort <"+effortChoices()+">", "/fast [on|off]", "/agent [name]", "/auth", "/keys", "/md-read <path>", "skills as /<name>", "tab cycles agents"), false)
+		m.setNotice("commands: "+dotJoin(m.th, "/provider [name [model]]", "/model <model>", "/effort <"+effortChoices()+">", "/fast [on|off]", "/agent [name]", "/auth", "/vim [path[:line]]", "/md-read <path>", "/keys", "skills as /<name>", "tab cycles agents"), false)
 		m.resetComposer()
 		return m, nil
 	case "/keys":

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -133,6 +134,10 @@ type Engine struct {
 	childMu          sync.Mutex
 	activeChildReply func(protocol.PermissionReply)
 	activeChildOps   chan<- protocol.Op
+
+	// files tracks tool read snapshots so external edits (FilesChanged / /vim)
+	// force the model to re-read before edit/write.
+	files *tool.FileState
 }
 
 func New(opts Options) *Engine {
@@ -153,6 +158,7 @@ func New(opts Options) *Engine {
 		ops:       make(chan protocol.Op, 16),
 		events:    make(chan protocol.Event, 256),
 		beginReqs: make(chan beginReq),
+		files:     &tool.FileState{},
 	}
 	e.perms = permission.New(e.emit, opts.Rules...)
 	return e
@@ -302,7 +308,55 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 			default:
 			}
 		}
+	case protocol.FilesChanged:
+		e.handleFilesChanged(op)
 	}
+}
+
+// handleFilesChanged invalidates read snapshots for the reported paths and
+// emits FilesInvalidated so the session log and TUI observe the change.
+// Accepted while a turn is running: external edits can land mid-turn.
+func (e *Engine) handleFilesChanged(op protocol.FilesChanged) {
+	abs := make([]string, 0, len(op.Paths))
+	seen := make(map[string]struct{}, len(op.Paths))
+	for _, p := range op.Paths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(e.opts.WorkDir, p)
+		}
+		p = filepath.Clean(p)
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		abs = append(abs, p)
+	}
+	if len(abs) == 0 {
+		return
+	}
+	e.files.MarkDirty(abs...)
+	display := make([]string, len(abs))
+	for i, p := range abs {
+		display[i] = relDisplayPath(e.opts.WorkDir, p)
+	}
+	e.emit(protocol.FilesInvalidated{
+		Correlation: e.sessionCorr(),
+		Paths:       display,
+		Reason:      op.Reason,
+	})
+}
+
+func relDisplayPath(workDir, abs string) string {
+	if workDir == "" {
+		return abs
+	}
+	if rel, err := filepath.Rel(workDir, abs); err == nil && !strings.HasPrefix(rel, "..") {
+		return rel
+	}
+	return abs
 }
 
 // serveBeginReq emits ToolCallBegin from Run so ops (Interrupt) stay
@@ -790,6 +844,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 	} else {
 		tc := &tool.Context{
 			WorkDir: e.opts.WorkDir,
+			Files:   e.files,
 			Ask: func(ctx context.Context, req tool.AskRequest) error {
 				return e.perms.AskWithCorrelation(ctx, req, corr)
 			},

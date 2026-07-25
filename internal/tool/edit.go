@@ -56,6 +56,9 @@ func (editTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	}
 	path := absPath(tc.WorkDir, a.FilePath)
 	rel := relPath(tc.WorkDir, path)
+	if err := tc.Files.CheckFresh(path, rel); err != nil {
+		return Result{}, err
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Result{}, err
@@ -84,6 +87,9 @@ func (editTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	}
 	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
 		return Result{}, err
+	}
+	if info, statErr := os.Stat(path); statErr == nil {
+		tc.Files.Record(path, info)
 	}
 	return Result{
 		Title:    rel,

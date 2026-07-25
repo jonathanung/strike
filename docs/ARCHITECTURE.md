@@ -193,7 +193,7 @@ Two different mechanisms, depending on whether it needs Go code:
   format (`description:`) and `$ARGUMENTS` substitution. It becomes
   `/<name>` on the next launch automatically, through
   `host.Services.Skills`. Reserved names (`provider`, `model`, `auth`,
-  `agent`, `fast`, `md-read`, `help`) are rejected by
+  `agent`, `fast`, `vim`, `md-read`, `help`, `keys`) are rejected by
   `config.ValidateSkillName` before they ever reach the frontend.
 - **Builtin command (code).** Add a `commandSpec` to `builtinCommandSpecs`
   in `internal/tui/commands.go`, a `case "/yourcmd":` arm in
