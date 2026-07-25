@@ -382,10 +382,13 @@ type ProcessExited struct {
 // PermissionAsked suspends a tool call until a PermissionReply arrives.
 type PermissionAsked struct {
 	Correlation
-	RequestID  string          `json:"requestId"`
-	Permission string          `json:"permission"`
-	Patterns   []string        `json:"patterns"`
-	Metadata   json.RawMessage `json:"metadata,omitempty"`
+	RequestID  string   `json:"requestId"`
+	Permission string   `json:"permission"`
+	Patterns   []string `json:"patterns"`
+	// Always is the pattern set a DecisionAlways grant should persist.
+	// Empty means the grant uses Patterns. Recorded for session resume.
+	Always   []string        `json:"always,omitempty"`
+	Metadata json.RawMessage `json:"metadata,omitempty"`
 }
 
 type PermissionResolved struct {

@@ -282,6 +282,86 @@ func TestChildCompletedRefreshesViewingTranscript(t *testing.T) {
 	}
 }
 
+func TestSeedFromReplayNoLiveSideEffects(t *testing.T) {
+	events := []protocol.Event{
+		protocol.UserMessage{Text: "hello session title candidate"},
+		protocol.TurnStarted{},
+		protocol.TextDelta{Text: "partial"},
+		protocol.PermissionAsked{RequestID: "p1", Permission: "bash", Patterns: []string{"rm -rf /"}},
+		protocol.QuestionAsked{RequestID: "q1"},
+		protocol.PhaseChanged{Workflow: "plan-implement", Phase: "plan", Index: 0},
+		protocol.AutonomySelected{Mode: protocol.AutonomyAgent},
+		protocol.FastSelected{Enabled: true},
+		protocol.AgentSelected{Name: "plan"},
+		protocol.ModelSelected{Provider: "echo", Model: "echo"},
+		protocol.ChildStarted{
+			Correlation: protocol.Correlation{SessionID: "child-1", ParentSessionID: "root", Depth: 1},
+			Agent:       "build",
+			Prompt:      "do stuff",
+		},
+		// no ChildCompleted, no TurnCompleted, no PermissionResolved
+	}
+	m, _ := newAppTestModelWithOptions(Options{Replay: events, SessionID: "root"})
+	if m.turnRunning {
+		t.Fatal("turnRunning true after replay seed")
+	}
+	if m.awaitingPermission {
+		t.Fatal("awaitingPermission true after replay seed")
+	}
+	if m.modal != nil {
+		t.Fatalf("modal = %T, want nil", m.modal)
+	}
+	if m.phaseName != "plan" || m.phaseWorkflow != "plan-implement" {
+		t.Fatalf("phase = %q/%q", m.phaseWorkflow, m.phaseName)
+	}
+	if m.autonomy != protocol.AutonomyAgent {
+		t.Fatalf("autonomy = %q", m.autonomy)
+	}
+	if !m.fastEnabled {
+		t.Fatal("fastEnabled false")
+	}
+	if m.agentName != "plan" || m.providerName != "echo" {
+		t.Fatalf("agent/provider = %q/%q", m.agentName, m.providerName)
+	}
+	if m.titleTopic == "" {
+		t.Fatal("titleTopic empty")
+	}
+	if len(m.cells) < 2 {
+		t.Fatalf("cells = %d, want transcript", len(m.cells))
+	}
+	if len(m.children) != 1 {
+		t.Fatalf("children = %d, want 1", len(m.children))
+	}
+	if m.children[0].status != string(protocol.ChildStatusCanceled) {
+		t.Fatalf("incomplete child status = %q, want canceled", m.children[0].status)
+	}
+	if m.childIsRunning(m.children[0].sessionID) {
+		t.Fatal("childIsRunning true for incomplete ChildStarted on resume")
+	}
+}
+
+func TestChildrenFromEventsMarksIncompleteCanceled(t *testing.T) {
+	events := []protocol.Event{
+		protocol.ChildStarted{Correlation: protocol.Correlation{SessionID: "c1"}, Agent: "a", Prompt: "p"},
+		protocol.ChildStarted{Correlation: protocol.Correlation{SessionID: "c2"}, Agent: "b", Prompt: "q"},
+		protocol.ChildCompleted{Correlation: protocol.Correlation{SessionID: "c2"}, Status: protocol.ChildStatusCompleted},
+	}
+	got := childrenFromEvents(events)
+	if len(got) != 2 {
+		t.Fatalf("len = %d: %#v", len(got), got)
+	}
+	byID := map[string]string{}
+	for _, ch := range got {
+		byID[ch.sessionID] = ch.status
+	}
+	if byID["c1"] != string(protocol.ChildStatusCanceled) {
+		t.Errorf("c1 = %q, want canceled", byID["c1"])
+	}
+	if byID["c2"] != string(protocol.ChildStatusCompleted) {
+		t.Errorf("c2 = %q, want completed", byID["c2"])
+	}
+}
+
 func mustSessionJSONL(t *testing.T, events ...protocol.Event) []byte {
 	t.Helper()
 	var b strings.Builder

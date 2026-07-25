@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
 )
@@ -15,6 +16,17 @@ type Restored struct {
 	Effort   protocol.Effort
 	Priority bool
 	Titled   bool
+	// Autonomy is the last AutonomySelected mode; empty means unset (caller
+	// keeps the engine default of supervised).
+	Autonomy protocol.Autonomy
+	// Phase* capture the last PhaseChanged with a non-empty Phase. Empty
+	// PhaseName means no workflow phase was active at end of log.
+	PhaseWorkflow string
+	PhaseName     string
+	PhaseIndex    int
+	// AlwaysGrants are session DecisionAlways rules still in force after the
+	// last agent switch (SetAgentRules clears grants).
+	AlwaysGrants permission.Ruleset
 }
 
 // reqAccum collects one provider-request's stream into an assistant message
@@ -31,6 +43,13 @@ type toolEnd struct {
 	isError bool
 }
 
+// pendingAsk remembers PermissionAsked fields until PermissionResolved.
+type pendingAsk struct {
+	permission string
+	patterns   []string
+	always     []string
+}
+
 // Restore reduces root-session protocol events into engine history and
 // selections. Child-lineage events (ParentSessionID or Depth > 0) are skipped.
 // CompactionCompleted reapplies the recorded remove/keep boundary. Incomplete
@@ -40,6 +59,8 @@ func Restore(events []protocol.Event) Restored {
 	var r Restored
 	var msgs []provider.Message
 	var cur *reqAccum
+	asks := map[string]pendingAsk{}
+	var grants permission.Ruleset
 
 	flush := func() {
 		if cur == nil {
@@ -108,18 +129,58 @@ func Restore(events []protocol.Event) Restored {
 			r.Model = e.Model
 		case protocol.AgentSelected:
 			r.Agent = e.Name
+			// Matches permission.Service.SetAgentRules: agent switch clears
+			// session always-grants so prior role grants cannot widen.
+			grants = nil
 		case protocol.EffortSelected:
 			r.Effort = e.Level
 		case protocol.FastSelected:
 			r.Priority = e.Enabled
+		case protocol.AutonomySelected:
+			r.Autonomy = e.Mode.Normalize()
+		case protocol.PhaseChanged:
+			r.PhaseWorkflow = e.Workflow
+			r.PhaseName = e.Phase
+			r.PhaseIndex = e.Index
+			if e.Phase == "" {
+				r.PhaseWorkflow = ""
+				r.PhaseIndex = 0
+			}
 		case protocol.SessionTitled:
 			if e.Title != "" {
 				r.Titled = true
+			}
+		case protocol.PermissionAsked:
+			asks[e.RequestID] = pendingAsk{
+				permission: e.Permission,
+				patterns:   append([]string(nil), e.Patterns...),
+				always:     append([]string(nil), e.Always...),
+			}
+		case protocol.PermissionResolved:
+			ask, ok := asks[e.RequestID]
+			delete(asks, e.RequestID)
+			if !ok || e.Decision != protocol.DecisionAlways {
+				continue
+			}
+			patterns := ask.always
+			if len(patterns) == 0 {
+				patterns = ask.patterns
+			}
+			if len(patterns) == 0 {
+				patterns = []string{"*"}
+			}
+			for _, pat := range patterns {
+				grants = append(grants, permission.Rule{
+					Permission: ask.permission,
+					Pattern:    pat,
+					Action:     permission.Allow,
+				})
 			}
 		}
 	}
 	flush()
 	r.Messages = msgs
+	r.AlwaysGrants = grants
 	return r
 }
 
@@ -158,6 +219,10 @@ func restoreCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	case protocol.EffortSelected:
 		return e.Correlation, true
 	case protocol.FastSelected:
+		return e.Correlation, true
+	case protocol.AutonomySelected:
+		return e.Correlation, true
+	case protocol.PhaseChanged:
 		return e.Correlation, true
 	case protocol.SessionTitled:
 		return e.Correlation, true

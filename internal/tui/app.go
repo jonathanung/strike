@@ -112,6 +112,10 @@ type Options struct {
 	FirstRun bool
 	// VimMode selects pane/overlay/takeover for /vim. Empty defaults to pane.
 	VimMode VimMode
+	// Replay is a prior session event log for --continue / --session. Seeded
+	// via cellsFromEvents + silent selection/child state — never fed through
+	// applyEvent (avoids stuck turns, zombie permission modals, orphan children).
+	Replay []protocol.Event
 }
 
 // firstRunSetupMsg opens the provider picker once on a fresh install.
@@ -301,6 +305,7 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		appearance:      appearanceAuto,
 		autonomy:        protocol.AutonomySupervised,
 	}
+	var replay []protocol.Event
 	for _, option := range options {
 		m.dangerouslySkipPermissions = option.DangerouslySkipPermissions
 		if option.SessionID != "" {
@@ -315,6 +320,9 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		if option.VimMode != "" {
 			m.vimMode = option.VimMode
 		}
+		if len(option.Replay) > 0 {
+			replay = option.Replay
+		}
 	}
 	if m.vimMode == "" {
 		m.vimMode = VimModePane
@@ -323,6 +331,9 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		m.entries = services.History.Entries()
 	}
 	m.windows = configureFilesWindow(m.windows, m.workDir, m.services.Files)
+	if len(replay) > 0 {
+		seedFromReplay(&m, replay)
+	}
 	return m
 }
 

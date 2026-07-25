@@ -20,7 +20,7 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 		ProcessStarted{Correlation: corr, ProcessID: "p1", CallID: "c1", Argv: []string{"bash", "-c", "echo"}, Cwd: "/tmp"},
 		ProcessOutput{Correlation: corr, ProcessID: "p1", Stream: ProcessStreamStdout, Data: "ok\n"},
 		ProcessExited{Correlation: corr, ProcessID: "p1", ExitCode: 0, Status: ProcessStatusExited},
-		PermissionAsked{Correlation: corr, RequestID: "p1", Permission: "bash", Patterns: []string{"echo hi"}},
+		PermissionAsked{Correlation: corr, RequestID: "p1", Permission: "bash", Patterns: []string{"echo hi"}, Always: []string{"echo *"}},
 		PermissionResolved{Correlation: corr, RequestID: "p1", Decision: DecisionOnce},
 		QuestionAsked{Correlation: corr, RequestID: "q1", Questions: []QuestionPrompt{
 			{ID: "pref", Header: "Style", Question: "Which style?", Options: []QuestionOption{
