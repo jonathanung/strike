@@ -36,7 +36,8 @@ type Ruleset []Rule
 // Known permission names tools actually Ask with, plus "*".
 var knownPermissions = map[string]struct{}{
 	"*": {}, "read": {}, "glob": {}, "grep": {}, "edit": {}, "write": {},
-	"bash": {}, "task": {}, "webfetch": {}, "todowrite": {}, "sleep": {},
+	"bash": {}, "task": {}, "webfetch": {}, "todowrite": {}, "todoread": {},
+	"memory_write": {}, "memory_read": {}, "sleep": {},
 	"skill": {}, "toolsearch": {},
 }
 
@@ -80,6 +81,8 @@ func Defaults() Ruleset {
 		{Permission: "webfetch", Pattern: "*", Action: Ask},
 		{Permission: "todowrite", Pattern: "*", Action: Allow},
 		{Permission: "todoread", Pattern: "*", Action: Allow},
+		{Permission: "memory_write", Pattern: "*", Action: Allow},
+		{Permission: "memory_read", Pattern: "*", Action: Allow},
 		{Permission: "sleep", Pattern: "*", Action: Allow},
 		{Permission: "skill", Pattern: "*", Action: Allow},
 		{Permission: "question", Pattern: "*", Action: Allow},
@@ -150,17 +153,24 @@ func Evaluate(permission, pattern string, sets ...Ruleset) Action {
 	return action
 }
 
-// RejectedError is returned from an ask when the user rejects (or a rule
-// denies). Message carries optional user feedback for the model.
+// DeniedError is returned when a hard ruleset/profile deny blocks a tool
+// call without prompting. Reason is optional detail for the model.
+type DeniedError struct {
+	Reason string
+}
+
+func (e *DeniedError) Error() string {
+	return protocol.ToolFeedbackPermissionDenied(e.Reason)
+}
+
+// RejectedError is returned when the user rejects a permission ask.
+// Message carries optional user feedback for the model.
 type RejectedError struct {
 	Message string
 }
 
 func (e *RejectedError) Error() string {
-	if e.Message != "" {
-		return "The user rejected this tool call with feedback: " + e.Message
-	}
-	return "The user rejected this tool call."
+	return protocol.ToolFeedbackUserRejected(e.Message)
 }
 
 type pending struct {
@@ -288,7 +298,7 @@ func (s *Service) ask(ctx context.Context, req tool.AskRequest, corr protocol.Co
 		return nil
 	case Deny:
 		s.mu.Unlock()
-		return &RejectedError{Message: "denied by permission rule"}
+		return &DeniedError{Reason: "a permission rule matched"}
 	}
 	s.nextID++
 	id := fmt.Sprintf("perm_%d", s.nextID)

@@ -55,6 +55,14 @@ type editorFinishedMsg struct {
 	launchErr string // non-empty when the editor never launched
 }
 
+// composerEditorFinishedMsg is delivered after ctrl+e external-editor takeover.
+type composerEditorFinishedMsg struct {
+	text      string // buffer contents after the editor exits (may be empty)
+	err       error  // non-nil editor process error (text may still apply)
+	launchErr string // non-empty when the editor never launched
+	readErr   string // non-empty when the temp buffer could not be read back
+}
+
 // fileMeta is a pre-launch snapshot used to detect post-editor changes.
 type fileMeta struct {
 	exists  bool
@@ -288,6 +296,53 @@ func launchEditorCmd(workDir, path string, line int) tea.Cmd {
 	})
 }
 
+// launchComposerEditorCmd writes text to a temp file, hands the terminal to
+// $VISUAL/$EDITOR via tea.ExecProcess, then returns the saved buffer.
+func launchComposerEditorCmd(text string) tea.Cmd {
+	bin, baseArgs, err := resolveEditor(nil, nil)
+	if err != nil {
+		msg := err.Error()
+		return func() tea.Msg {
+			return composerEditorFinishedMsg{launchErr: msg}
+		}
+	}
+	f, err := os.CreateTemp("", "strike-composer-*.md")
+	if err != nil {
+		return func() tea.Msg {
+			return composerEditorFinishedMsg{launchErr: "temp file: " + err.Error()}
+		}
+	}
+	path := f.Name()
+	if _, err := f.WriteString(text); err != nil {
+		_ = f.Close()
+		_ = os.Remove(path)
+		return func() tea.Msg {
+			return composerEditorFinishedMsg{launchErr: "write temp: " + err.Error()}
+		}
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(path)
+		return func() tea.Msg {
+			return composerEditorFinishedMsg{launchErr: "close temp: " + err.Error()}
+		}
+	}
+	cmd := buildEditorCmd(bin, baseArgs, path, 0)
+	return tea.ExecProcess(cmd, func(runErr error) tea.Msg {
+		defer func() { _ = os.Remove(path) }()
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return composerEditorFinishedMsg{
+				err:     runErr,
+				readErr: "read temp: " + readErr.Error(),
+			}
+		}
+		content := string(data)
+		content = strings.ReplaceAll(content, "\r\n", "\n")
+		content = strings.ReplaceAll(content, "\r", "\n")
+		return composerEditorFinishedMsg{text: content, err: runErr}
+	})
+}
+
 // prefersTakeover reports editors that need a real GUI/TTY handoff rather
 // than a PTY grid (VS Code, Sublime, gedit, …).
 func prefersTakeover(bin string) bool {
@@ -382,6 +437,33 @@ func (m Model) applyEditorFinished(msg editorFinishedMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m.finishEditorSession(msg.path, msg.display, msg.before, msg.hadPath, msg.err)
+}
+
+func (m Model) applyComposerEditorFinished(msg composerEditorFinishedMsg) (tea.Model, tea.Cmd) {
+	if msg.launchErr != "" {
+		m.setNotice(msg.launchErr, true)
+		return m, nil
+	}
+	if msg.readErr != "" {
+		m.setNotice(msg.readErr, true)
+		return m, nil
+	}
+	m.completion = nil
+	m.resetHistoryBrowsing()
+	m.setComposerValueAt(msg.text, len([]rune(msg.text)))
+	m.recomputeCompletion()
+	m.reflow()
+	if msg.err != nil {
+		m.setNotice("editor exited: "+msg.err.Error(), true)
+	}
+	return m, nil
+}
+
+func (m Model) openComposerExternalEditor() (tea.Model, tea.Cmd) {
+	m.completion = nil
+	m.resetHistoryBrowsing()
+	m.clearNotice()
+	return m, launchComposerEditorCmd(m.composer.Value())
 }
 
 func (m Model) applyTerminalExit(msg terminalExitMsg) (tea.Model, tea.Cmd) {

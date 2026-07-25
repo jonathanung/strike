@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -15,22 +16,22 @@ import (
 // modelsLoadedMsg delivers the catalog result for a provider.
 type modelsLoadedMsg struct {
 	provider string
-	ids      []string
+	models   []host.ModelInfo
 	err      error
 }
 
-// loadModelsCmd fetches a provider's model ids from the host catalog. A nil
-// catalog degrades to a clear error rather than a panic.
+// loadModelsCmd fetches a provider's models (with metadata) from the host
+// catalog. A nil catalog degrades to a clear error rather than a panic.
 func loadModelsCmd(catalog host.Catalog, provider string) tea.Cmd {
 	return func() tea.Msg {
 		if catalog == nil {
 			return modelsLoadedMsg{provider: provider, err: errNoCatalog}
 		}
-		ids, err := catalog.ModelIDs(context.Background(), provider)
+		models, err := catalog.Models(context.Background(), provider)
 		if err != nil {
 			return modelsLoadedMsg{provider: provider, err: err}
 		}
-		return modelsLoadedMsg{provider: provider, ids: ids}
+		return modelsLoadedMsg{provider: provider, models: models}
 	}
 }
 
@@ -38,11 +39,12 @@ const modelModalVisible = 10
 
 // modelModal is the centered model picker for the current provider, backed by
 // the host model catalog. Type to filter, enter to switch, ctrl+d to save
-// provider+model as global defaults.
+// provider+model as global defaults. Rows show context window, cost, and
+// capability flags when the catalog provides them.
 type modelModal struct {
 	provider string
 	current  string
-	all      []string
+	all      []host.ModelInfo
 	filter   string
 	cursor   int
 	loading  bool
@@ -55,14 +57,15 @@ func newModelModal(provider, current string, ops chan<- protocol.Op, settings ho
 	return &modelModal{provider: provider, current: current, loading: true, ops: ops, settings: settings}
 }
 
-func (m *modelModal) filtered() []string {
+func (m *modelModal) filtered() []host.ModelInfo {
 	if m.filter == "" {
 		return m.all
 	}
-	var out []string
-	for _, id := range m.all {
-		if strings.Contains(strings.ToLower(id), strings.ToLower(m.filter)) {
-			out = append(out, id)
+	q := strings.ToLower(m.filter)
+	var out []host.ModelInfo
+	for _, info := range m.all {
+		if strings.Contains(strings.ToLower(info.ID), q) {
+			out = append(out, info)
 		}
 	}
 	return out
@@ -107,7 +110,7 @@ func (m *modelModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 		if m.cursor >= len(list) {
 			return m, nil
 		}
-		ops, provider, model := m.ops, m.provider, list[m.cursor]
+		ops, provider, model := m.ops, m.provider, list[m.cursor].ID
 		return nil, func() tea.Msg {
 			ops <- protocol.SelectModel{Provider: provider, Model: model}
 			return nil
@@ -116,7 +119,7 @@ func (m *modelModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 		if m.cursor >= len(list) {
 			return m, nil
 		}
-		provider, model := m.provider, list[m.cursor]
+		provider, model := m.provider, list[m.cursor].ID
 		return m, saveDefaultsThroughCmd(m.settings, provider, model, "", "", provider+"/"+model)
 	default:
 		if msg.Type == tea.KeyRunes {
@@ -147,8 +150,12 @@ func (m *modelModal) view(width int, th theme.Theme) string {
 			m.cursor = max(0, len(list)-1)
 		}
 		items := make([]ui.ListItem, len(list))
-		for i, id := range list {
-			items[i] = ui.ListItem{Label: id, Current: id == m.current}
+		for i, info := range list {
+			items[i] = ui.ListItem{
+				Label:   info.ID,
+				Detail:  formatModelDetail(th, info),
+				Current: info.ID == m.current,
+			}
 		}
 		body = ui.List(th, ui.ListOpts{
 			Items:      items,
@@ -166,4 +173,41 @@ func (m *modelModal) view(width int, th theme.Theme) string {
 		Hint:  dotJoin(th, "type to filter or freeform id", "↑/↓ move", "enter select", "ctrl+d set default", "esc close"),
 		Width: width,
 	}, body)
+}
+
+// formatModelDetail builds the muted trailing text for a picker row:
+// "128k · $2.5/$10 · tools · reason · vision". Missing fields are omitted.
+func formatModelDetail(th theme.Theme, info host.ModelInfo) string {
+	var parts []string
+	if info.Context > 0 {
+		parts = append(parts, ui.FormatTokens(info.Context))
+	}
+	if info.HasCost {
+		parts = append(parts, formatModelCost(info.InputCost, info.OutputCost))
+	}
+	if info.ToolCall {
+		parts = append(parts, "tools")
+	}
+	if info.Reasoning {
+		parts = append(parts, "reason")
+	}
+	if info.Attachment {
+		parts = append(parts, "vision")
+	}
+	return dotJoin(th, parts...)
+}
+
+// formatModelCost renders input/output USD-per-MTok as "$2.5/$10".
+func formatModelCost(input, output float64) string {
+	return formatUSD(input) + "/" + formatUSD(output)
+}
+
+func formatUSD(v float64) string {
+	s := strconv.FormatFloat(v, 'f', 2, 64)
+	s = strings.TrimRight(s, "0")
+	s = strings.TrimRight(s, ".")
+	if s == "" || s == "-" {
+		s = "0"
+	}
+	return "$" + s
 }

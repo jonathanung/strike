@@ -60,6 +60,34 @@ type defaultsSavedMsg struct {
 	err  error
 }
 
+// cellClipboard holds a one-shot OSC52 sequence staged by y-to-copy. Model.View
+// prepends and clears it after Canvas so ansi.Cut cannot strip the sequence.
+type cellClipboard struct {
+	osc string
+}
+
+func (c *cellClipboard) stage(text string) {
+	if c == nil || text == "" {
+		return
+	}
+	c.osc = ansi.SetSystemClipboard(text)
+}
+
+func (c *cellClipboard) take() string {
+	if c == nil || c.osc == "" {
+		return ""
+	}
+	osc := c.osc
+	c.osc = ""
+	return osc
+}
+
+// clearCellCopiedFlashMsg ends the brief "copied" flash on a tool/explore cell.
+type clearCellCopiedFlashMsg struct {
+	idx int
+	gen int
+}
+
 type historyAddedMsg struct {
 	err error
 }
@@ -121,10 +149,18 @@ type Model struct {
 	// selectedFileRef is set when the user click-selects a path:line citation
 	// (-1 = none). Empty-composer enter opens it when no tool expand applies.
 	selectedFileRef int
-	modal           modal
+	// cellClip stages one-shot OSC52 for y-to-copy (pointer so value-receiver
+	// View can clear it). Never nil after New.
+	cellClip *cellClipboard
+	// copyFlashGen invalidates in-flight clearCellCopiedFlashMsg timers.
+	copyFlashGen int
+	modal        modal
 
-	viewport                   viewport.Model
-	composer                   textarea.Model
+	viewport viewport.Model
+	composer textarea.Model
+	// pendingPastes holds full text for collapsed large-paste chips in the
+	// composer. Expanded on send; pruned when the chip leaves the value.
+	pendingPastes              []pasteChip
 	completion                 *completionState
 	keyMap                     keyMap
 	focus                      paneFocus
@@ -229,6 +265,7 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		toolByID:        map[string]*toolCell{},
 		selectedCell:    -1,
 		selectedFileRef: -1,
+		cellClip:        &cellClipboard{},
 		composer:        ta,
 		keyMap:          defaultKeyMap(),
 		windows:         newWindowRegistry(),
@@ -390,13 +427,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reflow()
 		return m, cmd
 
+	case providerLogoutMsg:
+		if pm, ok := m.modal.(*providerModal); ok {
+			pm.reloadStatuses()
+		}
+		switch {
+		case msg.err != nil:
+			m.setNotice("logout failed: "+msg.err.Error(), true)
+		default:
+			m.setNotice("logged out of "+msg.provider, false)
+		}
+		m.reflow()
+		return m, nil
+
 	case modelsLoadedMsg:
 		if mm, ok := m.modal.(*modelModal); ok && mm.provider == msg.provider {
 			mm.loading = false
 			if msg.err != nil {
 				mm.loadErr = msg.err.Error()
 			} else {
-				mm.all = msg.ids
+				mm.all = msg.models
 			}
 		}
 		return m, nil
@@ -433,6 +483,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case editorFinishedMsg:
 		return m.applyEditorFinished(msg)
 
+	case composerEditorFinishedMsg:
+		return m.applyComposerEditorFinished(msg)
+
 	case terminalOutputMsg:
 		return m.applyTerminalOutput()
 
@@ -453,6 +506,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.authExpiryNoticed = true
 		m.setNotice("auth expiring — run /auth", false)
+		return m, nil
+
+	case clearCellCopiedFlashMsg:
+		if msg.gen != m.copyFlashGen {
+			return m, nil
+		}
+		if msg.idx >= 0 && msg.idx < len(m.cells) {
+			switch c := m.cells[msg.idx].(type) {
+			case *toolCell:
+				c.copiedFlash = false
+			case *exploreCell:
+				c.copiedFlash = false
+			}
+			m.reflow()
+		}
 		return m, nil
 
 	case tea.FocusMsg:
@@ -616,6 +684,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reflow()
 			return m, cmd
 		}
+		// Bracketed paste: collapse large multi-line blobs to a chip.
+		if msg.Paste {
+			m.handleComposerPaste(string(msg.Runes))
+			m.recomputeCompletion()
+			m.reflow()
+			return m, nil
+		}
 		switch {
 		case key.Matches(msg, m.keyMap.Newline):
 			// Left-focus only (right pane returned above). Distinct from Send
@@ -625,8 +700,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.recomputeCompletion()
 			m.reflow()
 			return m, nil
+		case key.Matches(msg, m.keyMap.ExternalEditor):
+			return m.openComposerExternalEditor()
 		case key.Matches(msg, m.keyMap.Send):
-			text := strings.TrimSpace(m.composer.Value())
+			// Expand paste chips before send so the model sees full content.
+			text := strings.TrimSpace(m.composerTextExpanded())
 			if text == "" {
 				// Empty enter is tool expand / open-at-line (handleToolCellKeys).
 				return m, nil
@@ -699,6 +777,9 @@ func (m Model) updateComposer(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.historyPos >= 0 && m.composer.Value() != before {
 		m.resetHistoryBrowsing()
 	}
+	if m.composer.Value() != before {
+		m.pendingPastes = prunePendingPastes(m.composer.Value(), m.pendingPastes)
+	}
 	m.recomputeCompletion()
 	m.reflow()
 	return m, cmd
@@ -755,6 +836,9 @@ func (m *Model) setComposerValueAt(value string, offset int) {
 		}
 	}
 	m.composer.SetValue(value)
+	// History/completion replacements are plain text; drop chips that no
+	// longer appear (or clear all when the value is wholly replaced).
+	m.pendingPastes = prunePendingPastes(value, m.pendingPastes)
 	for steps := 0; m.composer.Line() > targetRow && steps <= len(runes)+1; steps++ {
 		m.composer.CursorUp()
 	}
@@ -763,6 +847,7 @@ func (m *Model) setComposerValueAt(value string, offset int) {
 
 func (m *Model) resetComposer() {
 	m.composer.Reset()
+	m.pendingPastes = nil
 	m.completion = nil
 	m.resetHistoryBrowsing()
 	m.reflow()
@@ -1165,6 +1250,12 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 		return e.Correlation, true
 	case protocol.ToolCallOutput:
 		return e.Correlation, true
+	case protocol.ProcessStarted:
+		return e.Correlation, true
+	case protocol.ProcessOutput:
+		return e.Correlation, true
+	case protocol.ProcessExited:
+		return e.Correlation, true
 	case protocol.PermissionAsked:
 		return e.Correlation, true
 	case protocol.PermissionResolved:
@@ -1384,6 +1475,7 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 			"/settings",
 			"/vim [path[:line]]",
 			"/md-read <path>",
+			"/memory [list|get|set|rm]",
 			"/theme [name|dark|light|auto]",
 			"/layout",
 			"/keys",
@@ -1398,6 +1490,8 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		m.modal = newKeysModal(m.keyMap)
 		m.reflow()
 		return m, nil
+	case "/memory":
+		return m.handleMemoryCommand(fields[1:])
 	default:
 		// Unknown commands fall through to skills: /name args renders the
 		// skill template and submits it as the user message.
@@ -1415,6 +1509,95 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 			return m.submit(protocol.UserInput{Text: prompt}, text)
 		}
 		m.setNotice("unknown command "+fields[0]+" — try /help", true)
+		return m, nil
+	}
+}
+
+func (m Model) handleMemoryCommand(args []string) (tea.Model, tea.Cmd) {
+	m.resetComposer()
+	if m.services.Memory == nil {
+		m.setNotice("project memory is unavailable", true)
+		return m, nil
+	}
+	usage := "usage: /memory [list [tag]|get <key>|set <key> <value>|rm <key>]"
+	if len(args) == 0 {
+		args = []string{"list"}
+	}
+	switch args[0] {
+	case "list", "ls":
+		tag := ""
+		if len(args) > 1 {
+			tag = args[1]
+		}
+		entries, err := m.services.Memory.List(tag)
+		if err != nil {
+			m.setNotice("memory: "+err.Error(), true)
+			return m, nil
+		}
+		if len(entries) == 0 {
+			if tag != "" {
+				m.setNotice("memory: no entries with tag "+tag, false)
+			} else {
+				m.setNotice("memory: (empty)", false)
+			}
+			return m, nil
+		}
+		parts := make([]string, 0, len(entries))
+		for _, e := range entries {
+			line := e.Key + "=" + e.Value
+			if len(e.Tags) > 0 {
+				line += " [" + strings.Join(e.Tags, ", ") + "]"
+			}
+			parts = append(parts, line)
+		}
+		m.setNotice("memory: "+dotJoin(m.th, parts...), false)
+		return m, nil
+	case "get":
+		if len(args) < 2 {
+			m.setNotice(usage, true)
+			return m, nil
+		}
+		entry, ok, err := m.services.Memory.Get(args[1])
+		if err != nil {
+			m.setNotice("memory: "+err.Error(), true)
+			return m, nil
+		}
+		if !ok {
+			m.setNotice("memory: no entry for "+args[1], true)
+			return m, nil
+		}
+		msg := entry.Key + "=" + entry.Value
+		if len(entry.Tags) > 0 {
+			msg += " [" + strings.Join(entry.Tags, ", ") + "]"
+		}
+		m.setNotice("memory: "+msg, false)
+		return m, nil
+	case "set", "add", "put":
+		if len(args) < 3 {
+			m.setNotice(usage, true)
+			return m, nil
+		}
+		key := args[1]
+		value := strings.Join(args[2:], " ")
+		if err := m.services.Memory.Put(key, value, nil); err != nil {
+			m.setNotice("memory: "+err.Error(), true)
+			return m, nil
+		}
+		m.setNotice("memory: set "+key, false)
+		return m, nil
+	case "rm", "delete", "del", "remove":
+		if len(args) < 2 {
+			m.setNotice(usage, true)
+			return m, nil
+		}
+		if err := m.services.Memory.Delete(args[1]); err != nil {
+			m.setNotice("memory: "+err.Error(), true)
+			return m, nil
+		}
+		m.setNotice("memory: deleted "+args[1], false)
+		return m, nil
+	default:
+		m.setNotice(usage, true)
 		return m, nil
 	}
 }
@@ -1645,9 +1828,9 @@ func (m *Model) refreshViewport() {
 	}
 }
 
-// handleToolCellKeys handles [, ], and empty-composer enter for tool selection
-// and expand/collapse, and opens a path:line citation when expand does not apply.
-// Returns handled=true when the key was consumed; cmd may launch the editor.
+// handleToolCellKeys handles [, ], empty-composer enter, and y for tool
+// selection, expand/collapse, open-at-line, and clipboard copy. handled is true
+// when the key was consumed; cmd may launch the editor or clear a copied flash.
 func (m *Model) handleToolCellKeys(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
 	if m.focus != focusLeft || m.modal != nil || m.completion != nil {
 		return false, nil
@@ -1672,6 +1855,8 @@ func (m *Model) handleToolCellKeys(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
 			return true, c
 		}
 		return false, nil
+	case key.Matches(msg, m.keyMap.ToolCopy):
+		return m.copySelectedCell()
 	}
 	return false, nil
 }
@@ -1893,6 +2078,81 @@ func (m Model) transcriptContentOrigin() (x, y int, ok bool) {
 	return x, y, true
 }
 
+// copySelectedCell stages OSC52 for the selected (or latest copyable) tool/
+// explore cell and starts a brief "copied" flash. Returns false when nothing
+// was copyable so bare y can fall through to the composer.
+func (m *Model) copySelectedCell() (bool, tea.Cmd) {
+	idx := m.resolveCopyCellIndex()
+	if idx < 0 {
+		return false, nil
+	}
+	var text string
+	switch c := m.cells[idx].(type) {
+	case *toolCell:
+		text = c.copyText()
+	case *exploreCell:
+		text = c.copyText()
+	}
+	if text == "" {
+		return false, nil
+	}
+	m.selectedCell = idx
+	m.cellClip.stage(text)
+	m.copyFlashGen++
+	gen := m.copyFlashGen
+	switch c := m.cells[idx].(type) {
+	case *toolCell:
+		c.copiedFlash = true
+	case *exploreCell:
+		c.copiedFlash = true
+	}
+	// Clear any other cell flashes so only the copied row shows feedback.
+	for i, c := range m.cells {
+		if i == idx {
+			continue
+		}
+		switch tc := c.(type) {
+		case *toolCell:
+			tc.copiedFlash = false
+		case *exploreCell:
+			tc.copiedFlash = false
+		}
+	}
+	return true, tea.Tick(cellCopiedFlash, func(time.Time) tea.Msg {
+		return clearCellCopiedFlashMsg{idx: idx, gen: gen}
+	})
+}
+
+// resolveCopyCellIndex prefers the current selection when it has copyable
+// content; otherwise the latest tool/explore cell with a non-empty payload.
+func (m *Model) resolveCopyCellIndex() int {
+	if m.selectedCell >= 0 && m.selectedCell < len(m.cells) {
+		switch c := m.cells[m.selectedCell].(type) {
+		case *toolCell:
+			if c.copyText() != "" {
+				return m.selectedCell
+			}
+		case *exploreCell:
+			if c.copyText() != "" {
+				return m.selectedCell
+			}
+		}
+	}
+	for i := len(m.cells) - 1; i >= 0; i-- {
+		switch c := m.cells[i].(type) {
+		case *toolCell:
+			if c.copyText() != "" {
+				return i
+			}
+		case *exploreCell:
+			if c.copyText() != "" {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
 func (m Model) View() string {
 	if !m.ready {
 		if warning := m.dangerView(0); warning != "" {
@@ -2025,6 +2285,9 @@ func (m Model) View() string {
 		if osc := wm.TakeCopyOSC(); osc != "" {
 			return osc + frame
 		}
+	}
+	if osc := m.cellClip.take(); osc != "" {
+		return osc + frame
 	}
 	return frame
 }

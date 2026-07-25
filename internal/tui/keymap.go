@@ -20,6 +20,7 @@ type keyMap struct {
 	CompletionNext    key.Binding
 	Send              key.Binding
 	Newline           key.Binding
+	ExternalEditor    key.Binding
 	HistoryPrev       key.Binding
 	HistoryNext       key.Binding
 	Agent             key.Binding
@@ -28,11 +29,12 @@ type keyMap struct {
 	ScrollDown        key.Binding
 	JumpBottom        key.Binding
 	ToggleOrientation key.Binding
-	// Tool cell selection/expand when the composer is empty (enter still sends
-	// when there is text).
+	// Tool cell selection/expand/copy when the composer is empty (enter still
+	// sends when there is text; y still types when the composer has content).
 	ToolPrev   key.Binding
 	ToolNext   key.Binding
 	ToolExpand key.Binding
+	ToolCopy   key.Binding
 }
 
 func defaultKeyMap() keyMap {
@@ -52,6 +54,7 @@ func defaultKeyMap() keyMap {
 		CompletionNext:    key.NewBinding(key.WithKeys("down", "ctrl+n"), key.WithHelp("down/ctrl+n", "next")),
 		Send:              key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "send")),
 		Newline:           key.NewBinding(key.WithKeys("alt+enter"), key.WithHelp("shift+enter", "newline")),
+		ExternalEditor:    key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("ctrl+e", "external editor")),
 		HistoryPrev:       key.NewBinding(key.WithKeys("up"), key.WithHelp("up", "history previous")),
 		HistoryNext:       key.NewBinding(key.WithKeys("down"), key.WithHelp("down", "history next")),
 		Agent:             key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "agent")),
@@ -70,6 +73,8 @@ func defaultKeyMap() keyMap {
 		ToolPrev:   key.NewBinding(key.WithKeys("alt+["), key.WithHelp("alt+[", "prev tool cell")),
 		ToolNext:   key.NewBinding(key.WithKeys("alt+]"), key.WithHelp("alt+]", "next tool cell")),
 		ToolExpand: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "expand tool / open file:line")),
+		// ToolCopy: bare y when composer is empty (yank selected/latest cell).
+		ToolCopy: key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy tool cell")),
 	}
 }
 
@@ -117,6 +122,7 @@ func keybindCatalog(keys keyMap) []keybindEntry {
 		from("nav.tool-prev", "Navigation", keys.ToolPrev),
 		from("nav.tool-next", "Navigation", keys.ToolNext),
 		from("nav.tool-expand", "Navigation", keys.ToolExpand),
+		from("nav.tool-copy", "Navigation", keys.ToolCopy),
 
 		from("global.palette", "Global", keys.Palette),
 		from("global.keyhelp", "Global", keys.KeyHelp),
@@ -127,6 +133,7 @@ func keybindCatalog(keys keyMap) []keybindEntry {
 
 		from("composer.send", "Composer", keys.Send),
 		from("composer.newline", "Composer", keys.Newline),
+		from("composer.external-editor", "Composer", keys.ExternalEditor),
 		from("composer.history-prev", "Composer", keys.HistoryPrev),
 		from("composer.history-next", "Composer", keys.HistoryNext),
 		from("composer.agent", "Composer", keys.Agent),
@@ -140,6 +147,7 @@ func keybindCatalog(keys keyMap) []keybindEntry {
 		{ID: "lists.move-jk", Category: "Lists", Keys: "j/k", Action: "move (pickers without filter)"},
 		{ID: "lists.select", Category: "Lists", Keys: "enter", Action: "confirm selection"},
 		{ID: "lists.filter", Category: "Lists", Keys: "type", Action: "filter (when available)"},
+		{ID: "lists.logout", Category: "Lists", Keys: `\\ \\`, Action: "log out provider (within 3s)"},
 		{ID: "lists.close", Category: "Lists", Keys: "esc", Action: "close"},
 		{ID: "lists.default", Category: "Lists", Keys: "ctrl+d", Action: "save highlighted default"},
 

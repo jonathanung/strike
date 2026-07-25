@@ -1,6 +1,6 @@
 // Package host defines the services a strike frontend needs from its host
 // process, beyond the engine protocol: credentials, model catalog, saved
-// defaults, prompt history, and static agent/skill listings. Contract only:
+// defaults, prompt history, project memory, and static agent/skill listings. Contract only:
 // this package imports nothing outside the standard library so frontends
 // can be developed and tested against fakes. Implementations live in
 // internal/host/local.
@@ -82,12 +82,28 @@ type Auth interface {
 	BeginDevice(ctx context.Context, provider string) (*DeviceLogin, error)
 }
 
+// ModelInfo is picker-facing metadata for one catalog model. Zero fields mean
+// unknown or unsupported; frontends must omit them from display.
+type ModelInfo struct {
+	ID         string
+	Context    int     // context window tokens; 0 = unknown
+	InputCost  float64 // USD per million input tokens
+	OutputCost float64 // USD per million output tokens
+	HasCost    bool
+	ToolCall   bool
+	Reasoning  bool
+	Attachment bool // multimodal / file attachments
+}
+
 // Catalog lists model ids and limits for a provider (may hit network/cache;
 // ctx-aware).
 type Catalog interface {
 	// ModelIDs returns the provider's available model ids, or an error when
 	// the catalog is unreachable or lists no models for the provider.
 	ModelIDs(ctx context.Context, provider string) ([]string, error)
+	// Models returns the provider's models with catalog metadata (context,
+	// cost, capabilities), sorted by id. Same empty/error contract as ModelIDs.
+	Models(ctx context.Context, provider string) ([]ModelInfo, error)
 	// ContextWindow returns the model's context window in tokens.
 	// ok is false when unknown (not the same as zero).
 	ContextWindow(ctx context.Context, provider, model string) (tokens int, ok bool, err error)
@@ -139,6 +155,26 @@ type Files interface {
 	ListDir(path string) ([]DirEntry, error)
 }
 
+// MemoryEntry is one project-local key/value memory record.
+type MemoryEntry struct {
+	Key   string
+	Value string
+	Tags  []string
+}
+
+// Memory is project-scoped durable key/value memory for /memory and tools.
+// Nil means the capability is absent; frontends must degrade gracefully.
+type Memory interface {
+	// List returns entries sorted by key. Non-empty tag filters to that tag.
+	List(tag string) ([]MemoryEntry, error)
+	// Get returns one entry by key.
+	Get(key string) (MemoryEntry, bool, error)
+	// Put inserts or replaces key with value and optional tags.
+	Put(key, value string, tags []string) error
+	// Delete removes key. Missing keys return an error.
+	Delete(key string) error
+}
+
 // Services bundles everything a frontend receives from its host. Any field
 // may be nil/empty when a capability is absent (tests, future frontends);
 // frontends must degrade gracefully.
@@ -148,6 +184,7 @@ type Services struct {
 	Settings  Settings
 	History   History
 	Files     Files
+	Memory    Memory
 	Providers Providers // custom/self-hosted provider CRUD; nil when unsupported
 	Agents    []string  // selectable agent names, default first
 	Skills    []Skill

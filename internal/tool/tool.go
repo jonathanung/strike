@@ -1,6 +1,7 @@
 // Package tool defines the tool contract and the built-in tool set
 // (read/glob/grep/edit/write/apply_patch/bash/task/webfetch/todowrite/todoread/
-// notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/toolsearch).
+// memory_write/memory_read/notebook_edit/sleep/skill/question/enter_plan_mode/
+// exit_plan_mode/toolsearch).
 // Used by internal/engine (dispatch), internal/permission (AskRequest, for the
 // Context.Ask signature), and cmd/strike (registry construction); internal/tui
 // never imports it — tool calls reach the frontend only as
@@ -80,6 +81,8 @@ type SessionPR struct {
 // SwitchAgent, when non-nil, queues an agent switch applied when the turn ends.
 // ReportOutput, when non-nil, streams partial stdout/stderr to the UI while
 // Execute is still running (e.g. live bash output).
+// Process, when set, receives subprocess lifecycle from RunProcess (engine
+// maps these to protocol process.* events for hooks and session logs).
 // RecordSessionPR, when non-nil, persists a PR URL/number on the session
 // (used when bash captures gh pr create/view output).
 type Context struct {
@@ -92,6 +95,8 @@ type Context struct {
 	// tool) for live UI. Nil disables streaming; tools must still return the
 	// full Result.Output at the end.
 	ReportOutput func(data string)
+	// Process observes RunProcess lifecycle when non-nil.
+	Process ProcessObserver
 	// RecordSessionPR stores PR linkage on the session when non-nil.
 	RecordSessionPR func(pr SessionPR) error
 	// Files optionally tracks read snapshots for stale-edit detection after

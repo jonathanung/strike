@@ -292,3 +292,101 @@ func TestHelpListsVim(t *testing.T) {
 		t.Errorf("help notice missing /vim: %q", m.notice)
 	}
 }
+
+func TestComposerExternalEditorMissingEditorKeepsDraft(t *testing.T) {
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "")
+	t.Setenv("PATH", filepath.Join(t.TempDir(), "empty-bin"))
+
+	m, ops := newAppTestModel(nil, nil)
+	m.composer.SetValue("keep this draft")
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlE})
+	m = updated.(Model)
+	msg := runAppCmd(t, cmd)
+	finished, ok := msg.(composerEditorFinishedMsg)
+	if !ok {
+		t.Fatalf("msg = %#v, want composerEditorFinishedMsg", msg)
+	}
+	if finished.launchErr == "" || !strings.Contains(finished.launchErr, "no editor found") {
+		t.Fatalf("launchErr = %q", finished.launchErr)
+	}
+	updated, _ = m.Update(finished)
+	m = updated.(Model)
+	if m.composer.Value() != "keep this draft" {
+		t.Errorf("composer = %q, want draft preserved", m.composer.Value())
+	}
+	if !m.noticeErr || !strings.Contains(m.notice, "no editor found") {
+		t.Errorf("notice = %q err=%v", m.notice, m.noticeErr)
+	}
+	assertNoAppOp(t, ops)
+}
+
+func TestApplyComposerEditorFinishedReplacesDraft(t *testing.T) {
+	m, ops := newAppTestModel(nil, nil)
+	m.composer.SetValue("before")
+	updated, cmd := m.applyComposerEditorFinished(composerEditorFinishedMsg{
+		text: "after\nmultiline",
+	})
+	m = updated.(Model)
+	if msg := runAppCmd(t, cmd); msg != nil {
+		t.Errorf("unexpected msg %#v", msg)
+	}
+	if m.composer.Value() != "after\nmultiline" {
+		t.Errorf("composer = %q", m.composer.Value())
+	}
+	assertNoAppOp(t, ops)
+}
+
+func TestApplyComposerEditorFinishedReadErrorKeepsDraft(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m.composer.SetValue("original")
+	updated, _ := m.applyComposerEditorFinished(composerEditorFinishedMsg{
+		readErr: "read temp: gone",
+	})
+	m = updated.(Model)
+	if m.composer.Value() != "original" {
+		t.Errorf("composer = %q, want original", m.composer.Value())
+	}
+	if !m.noticeErr || !strings.Contains(m.notice, "read temp") {
+		t.Errorf("notice = %q err=%v", m.notice, m.noticeErr)
+	}
+}
+
+func TestApplyComposerEditorFinishedAppliesTextDespiteProcessError(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m.composer.SetValue("before")
+	updated, _ := m.applyComposerEditorFinished(composerEditorFinishedMsg{
+		text: "saved anyway",
+		err:  errors.New("exit status 1"),
+	})
+	m = updated.(Model)
+	if m.composer.Value() != "saved anyway" {
+		t.Errorf("composer = %q", m.composer.Value())
+	}
+	if !m.noticeErr || !strings.Contains(m.notice, "exit status 1") {
+		t.Errorf("notice = %q err=%v", m.notice, m.noticeErr)
+	}
+}
+
+func TestComposerExternalEditorIgnoredWhenRightFocused(t *testing.T) {
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "")
+	t.Setenv("PATH", filepath.Join(t.TempDir(), "empty-bin"))
+
+	m, _ := newAppTestModel(nil, nil)
+	m.composer.SetValue("draft")
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
+	if m.focus != focusRight {
+		t.Fatalf("focus = %v, want right", m.focus)
+	}
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlE})
+	m = updated.(Model)
+	if msg := runAppCmd(t, cmd); msg != nil {
+		if _, ok := msg.(composerEditorFinishedMsg); ok {
+			t.Fatalf("right focus launched composer editor: %#v", msg)
+		}
+	}
+	if m.composer.Value() != "draft" {
+		t.Errorf("composer = %q", m.composer.Value())
+	}
+}
