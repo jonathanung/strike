@@ -71,11 +71,19 @@ otherwise `Background` resolves to a solid `lipgloss.TerminalColor`.
 | `BorderStyle` | panel border weight and six glyphs |
 | `Spacing` | `None`, `XS`, `SM`, `MD`, `LG` layout gaps; `Label` is the gap between a numbered permission-choice shortcut (for example, `1)`) and its label, defaulting to `1` when resolved |
 | `Icons` | glyph set below |
+| `AgentState` | runtime status coloring via `Theme.AgentStateColor` / `AgentStateStyle` (not a palette field) |
 
 `Icons` fields are `Prompt`, `Assistant`, `Tool`, `OK`, `Err`, `Info`,
 `Agent`, `Bolt`, `Dot`, `Cursor`, `InputCursor`, `FilterCursor`, `ToolGuide`,
 `BadgeLeft`, `BadgeRight`, `DetailSeparator`, `Ellipsis`, `LogoTopRule`, and
 `LogoBottomRule`. Use `th.Icons`, never the literal glyph.
+
+`theme.AgentState` is the live session/agent status vocabulary for dynamic
+coloring: `Ready` → `Success`, `Working` → `AccentAlt`, `Attention` →
+`Warning`, `Error` → `Error`, and reserved `Dead` → `TextMuted` (unmapped by
+reducers until dead-session lifecycle exists). Use
+`th.AgentStateColor`/`AgentStateStyle`/`AgentStateStrongStyle`; never hardcode
+state colors in views. `Spinner` uses the working token (`AccentAlt`).
 
 `th.S()` returns semantic styles: `Text`, `Muted`, `Accent`, `AccentAlt`,
 `Title`, `Success`, `Warning`, `Error`, `Danger`; their `*Strong` variants;

@@ -35,7 +35,7 @@ func (t Theme) S() Styles {
 		TextStrong: base.Foreground(t.Text).Bold(true), MutedStrong: base.Foreground(t.TextMuted).Bold(true), AccentStrong: base.Foreground(t.Accent).Bold(true), AccentAltStrong: base.Foreground(t.AccentAlt).Bold(true), SuccessStrong: base.Foreground(t.Success).Bold(true), WarningStrong: base.Foreground(t.Warning).Bold(true), ErrorStrong: base.Foreground(t.Error).Bold(true), DangerStrong: base.Foreground(t.Danger).Bold(true),
 		Selected: base.Foreground(t.Highlight).Bold(true), SelectedUnderline: base.Foreground(t.Highlight).Bold(true).Underline(true),
 		UserLabel: base.Foreground(t.UserLabel).Bold(true), AssistantLabel: base.Foreground(t.Accent).Bold(true), ToolLabel: base.Foreground(t.ToolLabel).Bold(true),
-		Input: base.Foreground(t.Text), InputPrompt: base.Foreground(t.Accent), InputPlaceholder: base.Foreground(t.TextMuted), InputCursor: base.Foreground(t.Accent), Spinner: base.Foreground(t.Warning),
+		Input: base.Foreground(t.Text), InputPrompt: base.Foreground(t.Accent), InputPlaceholder: base.Foreground(t.TextMuted), InputCursor: base.Foreground(t.Accent), Spinner: base.Foreground(t.AccentAlt),
 		Border: base.Foreground(t.Border), BorderFocus: base.Foreground(t.BorderFocus), BorderMuted: base.Foreground(t.BorderMuted),
 	}
 }
