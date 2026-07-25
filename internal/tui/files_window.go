@@ -14,6 +14,12 @@ import (
 
 const filesWindowID = "files"
 
+// filesOpenMsg requests opening a workspace-relative path from the files explorer.
+// .md paths route to /md-read; everything else uses /vim plumbing.
+type filesOpenMsg struct {
+	path string
+}
+
 // filesWindow is the right-pane file explorer: a lazy tree of the workspace
 // rooted at workDir, listed through host.Files.
 type filesWindow struct {
@@ -48,7 +54,7 @@ func (w filesWindow) init() tea.Cmd { return nil }
 func (w filesWindow) update(msg tea.Msg) (window, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		return w.handleKey(msg), nil
+		return w.handleKey(msg)
 	}
 	return w, nil
 }
@@ -135,10 +141,11 @@ func (w filesWindow) loadRoot() filesWindow {
 	return w
 }
 
-func (w filesWindow) handleKey(msg tea.KeyMsg) filesWindow {
+func (w filesWindow) handleKey(msg tea.KeyMsg) (filesWindow, tea.Cmd) {
 	if w.files == nil || w.root == "" {
-		return w
+		return w, nil
 	}
+	var cmd tea.Cmd
 	rows := ui.FlattenTree(w.nodes)
 	switch msg.String() {
 	case "up", "k":
@@ -150,9 +157,9 @@ func (w filesWindow) handleKey(msg tea.KeyMsg) filesWindow {
 			w.cursor++
 		}
 	case "enter", "right", "l":
-		w = w.expandOrToggle(true)
+		w, cmd = w.expandOrToggle(true)
 	case "left", "h":
-		w = w.expandOrToggle(false)
+		w, cmd = w.expandOrToggle(false)
 	}
 	// Clamp after structural changes.
 	rows = ui.FlattenTree(w.nodes)
@@ -163,49 +170,53 @@ func (w filesWindow) handleKey(msg tea.KeyMsg) filesWindow {
 	} else if w.cursor < 0 {
 		w.cursor = 0
 	}
-	return w
+	return w, cmd
 }
 
 // expandOrToggle expands (open=true) or collapses (open=false) the cursor row.
-// Enter/right always toggles expandable nodes; left only collapses.
-func (w filesWindow) expandOrToggle(open bool) filesWindow {
+// Enter/right toggles expandable nodes and opens leaf files; left only collapses.
+func (w filesWindow) expandOrToggle(open bool) (filesWindow, tea.Cmd) {
 	rows := ui.FlattenTree(w.nodes)
 	if w.cursor < 0 || w.cursor >= len(rows) {
-		return w
+		return w, nil
 	}
 	row := rows[w.cursor]
 	if !row.Expandable {
-		return w
+		if open && strings.TrimSpace(row.ID) != "" {
+			path := row.ID
+			return w, func() tea.Msg { return filesOpenMsg{path: path} }
+		}
+		return w, nil
 	}
 	if !open {
 		if !row.Expanded {
-			return w
+			return w, nil
 		}
 		ui.TreeToggleExpanded(w.nodes, row.Path)
-		return w
+		return w, nil
 	}
 	// open / toggle
 	if row.Expanded {
 		ui.TreeToggleExpanded(w.nodes, row.Path)
-		return w
+		return w, nil
 	}
 	n, ok := ui.TreeNodeAt(w.nodes, row.Path)
 	if !ok {
-		return w
+		return w, nil
 	}
 	if n.Lazy && len(n.Children) == 0 {
 		children, err := w.listNodes(n.ID)
 		if err != nil {
 			w.err = err.Error()
-			return w
+			return w, nil
 		}
 		if !filesSetChildren(w.nodes, row.Path, children) {
-			return w
+			return w, nil
 		}
 		w.err = ""
 	}
 	ui.TreeToggleExpanded(w.nodes, row.Path)
-	return w
+	return w, nil
 }
 
 func (w filesWindow) listNodes(rel string) ([]ui.TreeNode, error) {
@@ -274,4 +285,16 @@ func configureFilesWindow(r windowRegistry, root string, files host.Files) windo
 		return r
 	}
 	return r
+}
+
+// openFilesExplorerPath opens a tree leaf: markdown via /md-read, else /vim.
+func (m Model) openFilesExplorerPath(path string) (tea.Model, tea.Cmd) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return m, nil
+	}
+	if strings.EqualFold(filepath.Ext(path), ".md") {
+		return m.handleMDRead("/md-read "+path, []string{"/md-read"})
+	}
+	return m.openFileRef(fileRef{Path: path})
 }

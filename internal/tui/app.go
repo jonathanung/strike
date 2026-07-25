@@ -830,6 +830,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reflow()
 		}
 		return m, nil
+
+	case filesOpenMsg:
+		return m.openFilesExplorerPath(msg.path)
 	}
 
 	var cmd tea.Cmd
