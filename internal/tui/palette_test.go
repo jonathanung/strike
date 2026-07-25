@@ -31,6 +31,7 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		{ID: "command:provider", Label: "/provider", Description: "select a provider and model", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/provider"}},
 		{ID: "command:model", Label: "/model", Description: "select a model for the current provider", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/model"}},
 		{ID: "command:effort", Label: "/effort", Description: "set how much reasoning the model spends", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/effort"}},
+		{ID: "command:autonomy", Label: "/autonomy", Description: "set exit-gate policy (supervised/agent/checks)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/autonomy"}},
 		{ID: "command:auth", Label: "/auth", Description: "manage provider authentication", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/auth"}},
 		{ID: "command:settings", Label: "/settings", Description: "manage custom providers and settings", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/settings"}},
 		{ID: "command:vim", Label: "/vim", Description: "open a file in the embedded editor (pane/overlay) or $EDITOR", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/vim"}},
@@ -153,7 +154,8 @@ func TestPaletteFilteringResetsSelectionToFirstMatch(t *testing.T) {
 	for range 5 {
 		updatePalette(t, m, tea.KeyMsg{Type: tea.KeyDown})
 	}
-	typePalette(t, m, "a")
+	// Filter to a unique prefix so the first match is deterministic.
+	typePalette(t, m, "auth")
 	assertPaletteEnter(t, m, paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/auth"}})
 }
 

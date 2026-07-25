@@ -73,6 +73,9 @@ func (m Model) headerView(width int) string {
 	if m.effort != protocol.EffortDefault {
 		left += inlineGap + ui.Badge(th, ui.ToneMuted, "effort"+inlineGap+string(m.effort))
 	}
+	// Autonomy is always visible so mode is never only implicit in gates.
+	// Compact short label keeps the working status visible on narrow widths.
+	left += inlineGap + ui.Badge(th, ui.ToneMuted, "auto"+inlineGap+m.autonomy.Short())
 	if m.fastEnabled {
 		// Warning tone: priority tier is a cost-visible session preference.
 		left += inlineGap + ui.Badge(th, ui.ToneWarning, "fast")

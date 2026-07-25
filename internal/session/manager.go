@@ -444,6 +444,8 @@ func eventSessionID(ev protocol.Event) (string, bool) {
 		return e.SessionID, true
 	case protocol.EffortSelected:
 		return e.SessionID, true
+	case protocol.AutonomySelected:
+		return e.SessionID, true
 	case protocol.FastSelected:
 		return e.SessionID, true
 	case protocol.FilesInvalidated:

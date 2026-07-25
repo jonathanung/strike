@@ -39,7 +39,8 @@ func TestContextPaneBodyShowsConfiguredSessionValues(t *testing.T) {
 		"echo/echo-1",
 		"build",
 		"high",
-		"on", // fast
+		"supervised", // default autonomy
+		"on",         // fast
 		"skills",
 	} {
 		if !strings.Contains(body, want) {
