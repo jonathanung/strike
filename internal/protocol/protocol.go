@@ -77,9 +77,15 @@ func (e Effort) Describe() string {
 type Decision string
 
 const (
-	DecisionOnce   Decision = "once"
+	DecisionOnce Decision = "once"
+	// DecisionAlways remembers the grant for the rest of this session only.
+	// The TUI labels this "allow session"; the wire value stays "always" for
+	// JSONL compatibility.
 	DecisionAlways Decision = "always"
-	DecisionReject Decision = "reject"
+	// DecisionProject remembers the grant for this session and appends it to
+	// the project config so future sessions in the same workdir inherit it.
+	DecisionProject Decision = "project"
+	DecisionReject  Decision = "reject"
 )
 
 // Op is a client -> engine submission.

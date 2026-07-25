@@ -145,8 +145,9 @@ func keybindCatalog(keys keyMap) []keybindEntry {
 
 		{ID: "perm.choice", Category: "Permission", Keys: "left/right/h/l/tab", Action: "move choice"},
 		{ID: "perm.once", Category: "Permission", Keys: "1/y", Action: "allow once"},
-		{ID: "perm.always", Category: "Permission", Keys: "2/a", Action: "allow always"},
-		{ID: "perm.reject", Category: "Permission", Keys: "3/n/esc", Action: "reject"},
+		{ID: "perm.session", Category: "Permission", Keys: "2/s", Action: "allow session"},
+		{ID: "perm.project", Category: "Permission", Keys: "3/p", Action: "allow project"},
+		{ID: "perm.reject", Category: "Permission", Keys: "4/n/esc", Action: "reject"},
 	}
 	return entries
 }
