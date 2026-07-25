@@ -127,3 +127,73 @@ func TestReadFileRejectsNonRegular(t *testing.T) {
 		t.Errorf("ReadFile(fifo) error = %q, want substring %q", err, "not a regular file")
 	}
 }
+
+func TestListDir(t *testing.T) {
+	work := t.TempDir()
+	if err := os.Mkdir(filepath.Join(work, "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "Zed.txt"), []byte("z"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "alpha.go"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "pkg", "main.go"), []byte("m"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	absOther := t.TempDir()
+	if err := os.WriteFile(filepath.Join(absOther, "out.txt"), []byte("o"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	files := NewFiles(work)
+
+	root, err := files.ListDir("")
+	if err != nil {
+		t.Fatalf("ListDir(\"\") error = %v", err)
+	}
+	// dirs first, then files case-insensitive.
+	wantNames := []string{"pkg", "alpha.go", "Zed.txt"}
+	if len(root) != len(wantNames) {
+		t.Fatalf("ListDir root = %#v, want names %v", root, wantNames)
+	}
+	for i, name := range wantNames {
+		if root[i].Name != name {
+			t.Errorf("root[%d].Name = %q, want %q", i, root[i].Name, name)
+		}
+	}
+	if !root[0].IsDir || root[1].IsDir || root[2].IsDir {
+		t.Errorf("IsDir flags = %#v", root)
+	}
+
+	nested, err := files.ListDir("pkg")
+	if err != nil {
+		t.Fatalf("ListDir(pkg) error = %v", err)
+	}
+	if len(nested) != 1 || nested[0].Name != "main.go" || nested[0].IsDir {
+		t.Errorf("ListDir(pkg) = %#v", nested)
+	}
+
+	absEntries, err := files.ListDir(absOther)
+	if err != nil {
+		t.Fatalf("ListDir(abs) error = %v", err)
+	}
+	if len(absEntries) != 1 || absEntries[0].Name != "out.txt" {
+		t.Errorf("ListDir(abs) = %#v", absEntries)
+	}
+
+	if _, err := files.ListDir("missing"); err == nil || !strings.Contains(err.Error(), "directory not found") {
+		t.Errorf("ListDir(missing) err = %v, want directory not found", err)
+	}
+	if _, err := files.ListDir("alpha.go"); err == nil || !strings.Contains(err.Error(), "not a directory") {
+		t.Errorf("ListDir(file) err = %v, want not a directory", err)
+	}
+}
+
+func TestListDirEmptyWorkDirRequiresPath(t *testing.T) {
+	files := NewFiles("")
+	if _, err := files.ListDir(""); err == nil || !strings.Contains(err.Error(), "path is empty") {
+		t.Errorf("ListDir(\"\") err = %v, want path is empty", err)
+	}
+}

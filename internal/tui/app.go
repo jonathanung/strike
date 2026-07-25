@@ -237,6 +237,7 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 	if services.History != nil {
 		m.entries = services.History.Entries()
 	}
+	m.windows = configureFilesWindow(m.windows, m.workDir, m.services.Files)
 	return m
 }
 
