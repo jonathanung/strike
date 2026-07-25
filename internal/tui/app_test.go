@@ -498,7 +498,7 @@ func TestDangerousPermissionsIndicatorRemainsVisibleWithActiveModals(t *testing.
 			open: func(m *Model) {
 				picker := newModelModal("echo", "", m.ops, m.services.Settings)
 				picker.loading = false
-				picker.all = []string{"echo-regression-model"}
+				picker.all = []host.ModelInfo{{ID: "echo-regression-model"}}
 				m.modal = picker
 			},
 			content: []string{"Select model — echo", "echo-regression-model"},

@@ -29,11 +29,35 @@ type ModelLimit struct {
 	Output  int `json:"output"`
 }
 
+// ModelCost is models.dev pricing in USD per million tokens.
+type ModelCost struct {
+	Input      float64 `json:"input"`
+	Output     float64 `json:"output"`
+	CacheRead  float64 `json:"cache_read,omitempty"`
+	CacheWrite float64 `json:"cache_write,omitempty"`
+}
+
 type Model struct {
 	ID           string        `json:"id"`
 	Name         string        `json:"name"`
 	Limit        *ModelLimit   `json:"limit,omitempty"`
+	Cost         *ModelCost    `json:"cost,omitempty"`
+	Attachment   bool          `json:"attachment"`
+	Reasoning    bool          `json:"reasoning"`
+	ToolCall     bool          `json:"tool_call"`
 	Experimental *experimental `json:"experimental,omitempty"`
+}
+
+// Info is flat picker-facing metadata for one catalog model.
+type Info struct {
+	ID         string
+	Context    int     // tokens; 0 = unknown
+	InputCost  float64 // USD per million input tokens
+	OutputCost float64 // USD per million output tokens
+	HasCost    bool
+	ToolCall   bool
+	Reasoning  bool
+	Attachment bool
 }
 
 // experimental holds optional models.dev mode metadata. The "fast" mode
@@ -81,6 +105,19 @@ func Load(ctx context.Context) (Catalog, error) {
 
 // ModelIDs lists a provider's model ids, sorted.
 func (c Catalog) ModelIDs(provider string) []string {
+	infos := c.Infos(provider)
+	if infos == nil {
+		return nil
+	}
+	ids := make([]string, len(infos))
+	for i, info := range infos {
+		ids[i] = info.ID
+	}
+	return ids
+}
+
+// Infos lists a provider's models with catalog metadata, sorted by id.
+func (c Catalog) Infos(provider string) []Info {
 	p, ok := c[provider]
 	if !ok {
 		return nil
@@ -90,7 +127,29 @@ func (c Catalog) ModelIDs(provider string) []string {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	return ids
+	out := make([]Info, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, modelInfo(id, p.Models[id]))
+	}
+	return out
+}
+
+func modelInfo(id string, m Model) Info {
+	info := Info{
+		ID:         id,
+		ToolCall:   m.ToolCall,
+		Reasoning:  m.Reasoning,
+		Attachment: m.Attachment,
+	}
+	if m.Limit != nil {
+		info.Context = m.Limit.Context
+	}
+	if m.Cost != nil {
+		info.HasCost = true
+		info.InputCost = m.Cost.Input
+		info.OutputCost = m.Cost.Output
+	}
+	return info
 }
 
 // SupportsPriority reports whether models.dev lists a "fast" experimental

@@ -22,6 +22,13 @@ var (
 	appearanceDetectedDark bool
 )
 
+// PinAppearance detects the terminal background once and freezes lipgloss plus
+// glamour style selection. Call before tea.NewProgram so OSC 11 replies cannot
+// race the program's stdin reader into the composer (#52).
+func PinAppearance() {
+	applyAppearance(appearanceAuto)
+}
+
 // applyAppearance forces lipgloss adaptive colors for dark/light, or restores
 // the initially detected background for auto. Package-level so tests can drive
 // appearance without going through slash-command parsing.
@@ -30,14 +37,17 @@ func applyAppearance(mode appearanceMode) {
 		appearanceDetectedDark = lipgloss.HasDarkBackground()
 		appearanceDetected = true
 	}
+	var dark bool
 	switch mode {
 	case appearanceDark:
-		lipgloss.SetHasDarkBackground(true)
+		dark = true
 	case appearanceLight:
-		lipgloss.SetHasDarkBackground(false)
+		dark = false
 	default:
-		lipgloss.SetHasDarkBackground(appearanceDetectedDark)
+		dark = appearanceDetectedDark
 	}
+	lipgloss.SetHasDarkBackground(dark)
+	setGlamourStyle(dark)
 }
 
 func parseAppearance(s string) (appearanceMode, bool) {

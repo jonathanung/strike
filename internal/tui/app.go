@@ -11,6 +11,8 @@ package tui
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -21,6 +23,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -57,6 +60,34 @@ type engineClosedMsg struct{}
 type defaultsSavedMsg struct {
 	text string
 	err  error
+}
+
+// cellClipboard holds a one-shot OSC52 sequence staged by y-to-copy. Model.View
+// prepends and clears it after Canvas so ansi.Cut cannot strip the sequence.
+type cellClipboard struct {
+	osc string
+}
+
+func (c *cellClipboard) stage(text string) {
+	if c == nil || text == "" {
+		return
+	}
+	c.osc = ansi.SetSystemClipboard(text)
+}
+
+func (c *cellClipboard) take() string {
+	if c == nil || c.osc == "" {
+		return ""
+	}
+	osc := c.osc
+	c.osc = ""
+	return osc
+}
+
+// clearCellCopiedFlashMsg ends the brief "copied" flash on a tool/explore cell.
+type clearCellCopiedFlashMsg struct {
+	idx int
+	gen int
 }
 
 type historyAddedMsg struct {
@@ -114,6 +145,11 @@ type Model struct {
 	// selectedCell is the index into cells for tool/explore expand selection
 	// (-1 = none). Only collapsible tool/explore cells are targeted.
 	selectedCell int
+	// cellClip stages one-shot OSC52 for y-to-copy (pointer so value-receiver
+	// View can clear it). Never nil after New.
+	cellClip *cellClipboard
+	// copyFlashGen invalidates in-flight clearCellCopiedFlashMsg timers.
+	copyFlashGen int
 	modal        modal
 
 	viewport viewport.Model
@@ -224,6 +260,7 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		themeID:      themeID,
 		toolByID:     map[string]*toolCell{},
 		selectedCell: -1,
+		cellClip:     &cellClipboard{},
 		composer:     ta,
 		keyMap:       defaultKeyMap(),
 		windows:      newWindowRegistry(),
@@ -404,7 +441,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.err != nil {
 				mm.loadErr = msg.err.Error()
 			} else {
-				mm.all = msg.ids
+				mm.all = msg.models
 			}
 		}
 		return m, nil
@@ -464,6 +501,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.authExpiryNoticed = true
 		m.setNotice("auth expiring — run /auth", false)
+		return m, nil
+
+	case clearCellCopiedFlashMsg:
+		if msg.gen != m.copyFlashGen {
+			return m, nil
+		}
+		if msg.idx >= 0 && msg.idx < len(m.cells) {
+			switch c := m.cells[msg.idx].(type) {
+			case *toolCell:
+				c.copiedFlash = false
+			case *exploreCell:
+				c.copiedFlash = false
+			}
+			m.reflow()
+		}
 		return m, nil
 
 	case tea.FocusMsg:
@@ -623,9 +675,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.handleHistoryKey(msg) {
 			return m, nil
 		}
-		if m.handleToolCellKeys(msg) {
+		if handled, cmd := m.handleToolCellKeys(msg); handled {
 			m.reflow()
-			return m, nil
+			return m, cmd
 		}
 		// Bracketed paste: collapse large multi-line blobs to a chip.
 		if msg.Paste {
@@ -714,6 +766,9 @@ func (m Model) updateComposer(msg tea.Msg) (tea.Model, tea.Cmd) {
 	before := m.composer.Value()
 	var cmd tea.Cmd
 	m.composer, cmd = m.composer.Update(msg)
+	if cleaned := stripComposerOSCLeak(m.composer.Value()); cleaned != m.composer.Value() {
+		m.composer.SetValue(cleaned)
+	}
 	if m.historyPos >= 0 && m.composer.Value() != before {
 		m.resetHistoryBrowsing()
 	}
@@ -1190,6 +1245,12 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 		return e.Correlation, true
 	case protocol.ToolCallOutput:
 		return e.Correlation, true
+	case protocol.ProcessStarted:
+		return e.Correlation, true
+	case protocol.ProcessOutput:
+		return e.Correlation, true
+	case protocol.ProcessExited:
+		return e.Correlation, true
 	case protocol.PermissionAsked:
 		return e.Correlation, true
 	case protocol.PermissionResolved:
@@ -1426,6 +1487,8 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "/memory":
 		return m.handleMemoryCommand(fields[1:])
+	case "/issues":
+		return m.handleIssuesCommand(fields[1:])
 	default:
 		// Unknown commands fall through to skills: /name args renders the
 		// skill template and submits it as the user message.
@@ -1529,6 +1592,102 @@ func (m Model) handleMemoryCommand(args []string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.setNotice("memory: deleted "+args[1], false)
+		return m, nil
+	default:
+		m.setNotice(usage, true)
+		return m, nil
+	}
+}
+
+func (m Model) handleIssuesCommand(args []string) (tea.Model, tea.Cmd) {
+	m.resetComposer()
+	if m.services.Issues == nil {
+		m.setNotice("project issues are unavailable", true)
+		return m, nil
+	}
+	usage := "usage: /issues [list [open|closed]|add <title>|get <id>|close <id>]"
+	if len(args) == 0 {
+		args = []string{"list"}
+	}
+	switch args[0] {
+	case "list", "ls":
+		status := ""
+		if len(args) > 1 {
+			status = args[1]
+		}
+		items, err := m.services.Issues.List(status)
+		if err != nil {
+			m.setNotice("issues: "+err.Error(), true)
+			return m, nil
+		}
+		if len(items) == 0 {
+			if status != "" {
+				m.setNotice("issues: no "+status+" issues", false)
+			} else {
+				m.setNotice("issues: (empty)", false)
+			}
+			return m, nil
+		}
+		parts := make([]string, 0, len(items))
+		for _, iss := range items {
+			parts = append(parts, fmt.Sprintf("#%d [%s] %s", iss.ID, iss.Status, iss.Title))
+		}
+		m.setNotice("issues: "+dotJoin(m.th, parts...), false)
+		return m, nil
+	case "add", "create", "new":
+		if len(args) < 2 {
+			m.setNotice(usage, true)
+			return m, nil
+		}
+		title := strings.Join(args[1:], " ")
+		iss, err := m.services.Issues.Create(title, "")
+		if err != nil {
+			m.setNotice("issues: "+err.Error(), true)
+			return m, nil
+		}
+		m.setNotice(fmt.Sprintf("issues: opened #%d %s", iss.ID, iss.Title), false)
+		return m, nil
+	case "get", "show":
+		if len(args) < 2 {
+			m.setNotice(usage, true)
+			return m, nil
+		}
+		id, err := strconv.Atoi(args[1])
+		if err != nil || id < 1 {
+			m.setNotice("issues: id must be a positive integer", true)
+			return m, nil
+		}
+		iss, ok, err := m.services.Issues.Get(id)
+		if err != nil {
+			m.setNotice("issues: "+err.Error(), true)
+			return m, nil
+		}
+		if !ok {
+			m.setNotice(fmt.Sprintf("issues: no issue #%d", id), true)
+			return m, nil
+		}
+		msg := fmt.Sprintf("#%d [%s] %s", iss.ID, iss.Status, iss.Title)
+		if iss.Body != "" {
+			msg += ": " + iss.Body
+		}
+		m.setNotice("issues: "+msg, false)
+		return m, nil
+	case "close":
+		if len(args) < 2 {
+			m.setNotice(usage, true)
+			return m, nil
+		}
+		id, err := strconv.Atoi(args[1])
+		if err != nil || id < 1 {
+			m.setNotice("issues: id must be a positive integer", true)
+			return m, nil
+		}
+		iss, err := m.services.Issues.Close(id)
+		if err != nil {
+			m.setNotice("issues: "+err.Error(), true)
+			return m, nil
+		}
+		m.setNotice(fmt.Sprintf("issues: closed #%d %s", iss.ID, iss.Title), false)
 		return m, nil
 	default:
 		m.setNotice(usage, true)
@@ -1754,26 +1913,29 @@ func (m *Model) refreshViewport() {
 	}
 }
 
-// handleToolCellKeys handles [, ], and empty-composer enter for tool selection
-// and expand/collapse. Returns true when the key was consumed.
-func (m *Model) handleToolCellKeys(msg tea.KeyMsg) bool {
+// handleToolCellKeys handles [, ], empty-composer enter, and y for tool
+// selection, expand/collapse, and clipboard copy. handled is true when the key
+// was consumed; cmd may clear a copied flash.
+func (m *Model) handleToolCellKeys(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
 	if m.focus != focusLeft || m.modal != nil || m.completion != nil {
-		return false
+		return false, nil
 	}
 	if strings.TrimSpace(m.composer.Value()) != "" {
-		return false
+		return false, nil
 	}
 	switch {
 	case key.Matches(msg, m.keyMap.ToolPrev):
 		m.moveToolSelection(-1)
-		return true
+		return true, nil
 	case key.Matches(msg, m.keyMap.ToolNext):
 		m.moveToolSelection(1)
-		return true
+		return true, nil
 	case key.Matches(msg, m.keyMap.ToolExpand), key.Matches(msg, m.keyMap.Send):
-		return m.toggleSelectedTool()
+		return m.toggleSelectedTool(), nil
+	case key.Matches(msg, m.keyMap.ToolCopy):
+		return m.copySelectedCell()
 	}
-	return false
+	return false, nil
 }
 
 func (m *Model) collapsibleCellIndexes() []int {
@@ -1863,6 +2025,81 @@ func (m *Model) syncToolSelectionFlags() {
 			tc.selected = sel
 		}
 	}
+}
+
+// copySelectedCell stages OSC52 for the selected (or latest copyable) tool/
+// explore cell and starts a brief "copied" flash. Returns false when nothing
+// was copyable so bare y can fall through to the composer.
+func (m *Model) copySelectedCell() (bool, tea.Cmd) {
+	idx := m.resolveCopyCellIndex()
+	if idx < 0 {
+		return false, nil
+	}
+	var text string
+	switch c := m.cells[idx].(type) {
+	case *toolCell:
+		text = c.copyText()
+	case *exploreCell:
+		text = c.copyText()
+	}
+	if text == "" {
+		return false, nil
+	}
+	m.selectedCell = idx
+	m.cellClip.stage(text)
+	m.copyFlashGen++
+	gen := m.copyFlashGen
+	switch c := m.cells[idx].(type) {
+	case *toolCell:
+		c.copiedFlash = true
+	case *exploreCell:
+		c.copiedFlash = true
+	}
+	// Clear any other cell flashes so only the copied row shows feedback.
+	for i, c := range m.cells {
+		if i == idx {
+			continue
+		}
+		switch tc := c.(type) {
+		case *toolCell:
+			tc.copiedFlash = false
+		case *exploreCell:
+			tc.copiedFlash = false
+		}
+	}
+	return true, tea.Tick(cellCopiedFlash, func(time.Time) tea.Msg {
+		return clearCellCopiedFlashMsg{idx: idx, gen: gen}
+	})
+}
+
+// resolveCopyCellIndex prefers the current selection when it has copyable
+// content; otherwise the latest tool/explore cell with a non-empty payload.
+func (m *Model) resolveCopyCellIndex() int {
+	if m.selectedCell >= 0 && m.selectedCell < len(m.cells) {
+		switch c := m.cells[m.selectedCell].(type) {
+		case *toolCell:
+			if c.copyText() != "" {
+				return m.selectedCell
+			}
+		case *exploreCell:
+			if c.copyText() != "" {
+				return m.selectedCell
+			}
+		}
+	}
+	for i := len(m.cells) - 1; i >= 0; i-- {
+		switch c := m.cells[i].(type) {
+		case *toolCell:
+			if c.copyText() != "" {
+				return i
+			}
+		case *exploreCell:
+			if c.copyText() != "" {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 func (m Model) View() string {
@@ -1997,6 +2234,9 @@ func (m Model) View() string {
 		if osc := wm.TakeCopyOSC(); osc != "" {
 			return osc + frame
 		}
+	}
+	if osc := m.cellClip.take(); osc != "" {
+		return osc + frame
 	}
 	return frame
 }

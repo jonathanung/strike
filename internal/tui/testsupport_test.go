@@ -151,11 +151,24 @@ func (f *fakeAuth) BeginDevice(ctx context.Context, provider string) (*host.Devi
 // --- fakeCatalog: a scriptable host.Catalog ------------------------------
 
 type fakeCatalog struct {
-	ids map[string][]string
-	err error
+	ids  map[string][]string
+	meta map[string]host.ModelInfo // key: provider/model
+	err  error
 }
 
 func (c *fakeCatalog) ModelIDs(ctx context.Context, provider string) ([]string, error) {
+	infos, err := c.Models(ctx, provider)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(infos))
+	for i, info := range infos {
+		ids[i] = info.ID
+	}
+	return ids, nil
+}
+
+func (c *fakeCatalog) Models(_ context.Context, provider string) ([]host.ModelInfo, error) {
 	if c.err != nil {
 		return nil, c.err
 	}
@@ -163,7 +176,18 @@ func (c *fakeCatalog) ModelIDs(ctx context.Context, provider string) ([]string, 
 	if len(ids) == 0 {
 		return nil, fmt.Errorf("no models listed for %s", provider)
 	}
-	return append([]string(nil), ids...), nil
+	out := make([]host.ModelInfo, len(ids))
+	for i, id := range ids {
+		if c.meta != nil {
+			if info, ok := c.meta[provider+"/"+id]; ok {
+				info.ID = id
+				out[i] = info
+				continue
+			}
+		}
+		out[i] = host.ModelInfo{ID: id}
+	}
+	return out, nil
 }
 
 func (c *fakeCatalog) ContextWindow(context.Context, string, string) (int, bool, error) {
@@ -426,6 +450,102 @@ func (f *fakeMemory) Delete(key string) error {
 	}
 	delete(f.entries, key)
 	return nil
+}
+
+// --- fakeIssues: an in-memory host.Issues ---------------------------------
+
+type fakeIssues struct {
+	mu     sync.Mutex
+	nextID int
+	items  map[int]host.Issue
+	err    error
+}
+
+func newFakeIssues(items ...host.Issue) *fakeIssues {
+	f := &fakeIssues{nextID: 1, items: make(map[int]host.Issue)}
+	for _, iss := range items {
+		if iss.ID >= f.nextID {
+			f.nextID = iss.ID + 1
+		}
+		if iss.Status == "" {
+			iss.Status = "open"
+		}
+		f.items[iss.ID] = iss
+	}
+	return f
+}
+
+func (f *fakeIssues) List(status string) ([]host.Issue, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := make([]host.Issue, 0, len(f.items))
+	for _, iss := range f.items {
+		if status != "" && iss.Status != status {
+			continue
+		}
+		out = append(out, iss)
+	}
+	for i := 0; i < len(out); i++ {
+		for j := i + 1; j < len(out); j++ {
+			if out[j].ID < out[i].ID {
+				out[i], out[j] = out[j], out[i]
+			}
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeIssues) Get(id int) (host.Issue, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return host.Issue{}, false, f.err
+	}
+	iss, ok := f.items[id]
+	return iss, ok, nil
+}
+
+func (f *fakeIssues) Create(title, body string) (host.Issue, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return host.Issue{}, f.err
+	}
+	iss := host.Issue{ID: f.nextID, Title: title, Body: body, Status: "open"}
+	f.nextID++
+	f.items[iss.ID] = iss
+	return iss, nil
+}
+
+func (f *fakeIssues) Update(id int, title, body, status *string) (host.Issue, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return host.Issue{}, f.err
+	}
+	iss, ok := f.items[id]
+	if !ok {
+		return host.Issue{}, fmt.Errorf("issue: not found")
+	}
+	if title != nil {
+		iss.Title = *title
+	}
+	if body != nil {
+		iss.Body = *body
+	}
+	if status != nil {
+		iss.Status = *status
+	}
+	f.items[id] = iss
+	return iss, nil
+}
+
+func (f *fakeIssues) Close(id int) (host.Issue, error) {
+	st := "closed"
+	return f.Update(id, nil, nil, &st)
 }
 
 // --- construction helpers ------------------------------------------------
