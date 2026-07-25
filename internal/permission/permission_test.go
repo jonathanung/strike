@@ -1340,9 +1340,9 @@ func TestProjectGrantSurvivesAgentSwitch(t *testing.T) {
 		Permission: "bash",
 		Patterns:   []string{"ls"},
 	})
-	var rej *RejectedError
-	if !errors.As(err, &rej) {
-		t.Fatalf("Ask under agent deny = %v, want RejectedError", err)
+	var den *DeniedError
+	if !errors.As(err, &den) {
+		t.Fatalf("Ask under agent deny = %v, want DeniedError", err)
 	}
 }
 
