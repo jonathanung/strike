@@ -45,6 +45,11 @@ func Defaults() Ruleset {
 		{Permission: "write", Pattern: "*", Action: Ask},
 		{Permission: "bash", Pattern: "*", Action: Ask},
 		{Permission: "task", Pattern: "*", Action: Allow},
+		{Permission: "webfetch", Pattern: "*", Action: Ask},
+		{Permission: "todowrite", Pattern: "*", Action: Allow},
+		{Permission: "sleep", Pattern: "*", Action: Allow},
+		{Permission: "skill", Pattern: "*", Action: Allow},
+		{Permission: "toolsearch", Pattern: "*", Action: Allow},
 	}
 }
 
