@@ -1,6 +1,7 @@
 package protocol_test
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -55,13 +56,36 @@ func TestEffortsAreOrderedAndDescribed(t *testing.T) {
 // TestEffortSelectedRoundTripsThroughTheEnvelope keeps the event replayable
 // from a session log, like every other event in the stream.
 func TestEffortSelectedRoundTripsThroughTheEnvelope(t *testing.T) {
-	original := protocol.EffortSelected{Level: protocol.EffortXHigh}
+	original := protocol.EffortSelected{
+		Correlation: protocol.Correlation{
+			SessionID:         "session-1",
+			TurnID:            "turn-1",
+			ProviderRequestID: "provider-1",
+		},
+		Level: protocol.EffortXHigh,
+	}
 	envelope, err := protocol.Wrap(original)
 	if err != nil {
 		t.Fatalf("Wrap: %v", err)
 	}
 	if envelope.Type != "effort.selected" {
 		t.Errorf("envelope type = %q, want effort.selected", envelope.Type)
+	}
+	var data map[string]json.RawMessage
+	if err := json.Unmarshal(envelope.Data, &data); err != nil {
+		t.Fatalf("decode envelope data: %v", err)
+	}
+	for key, want := range map[string]string{
+		"sessionId":         `"session-1"`,
+		"turnId":            `"turn-1"`,
+		"providerRequestId": `"provider-1"`,
+	} {
+		if got := string(data[key]); got != want {
+			t.Errorf("%s = %s, want %s; data: %s", key, got, want, envelope.Data)
+		}
+	}
+	if _, ok := data["correlation"]; ok {
+		t.Errorf("correlation must be flat, not nested: %s", envelope.Data)
 	}
 	decoded, err := envelope.Decode()
 	if err != nil {

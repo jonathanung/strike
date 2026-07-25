@@ -1,9 +1,14 @@
 package session
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
+	"regexp"
+	"sort"
 	"testing"
+	"time"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
@@ -42,6 +47,79 @@ func TestAppendReplayRoundTrip(t *testing.T) {
 	}
 	if td, ok := got[2].(protocol.TextDelta); !ok || td.Text != "world" {
 		t.Errorf("third event = %#v", got[2])
+	}
+}
+
+func TestAppendReplayPreservesCorrelation(t *testing.T) {
+	dir := t.TempDir()
+	st, err := Open(dir, "correlated-session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := []protocol.Event{
+		protocol.UserMessage{Correlation: protocol.Correlation{SessionID: "session-1", TurnID: "turn-1"}, Text: "hello"},
+		protocol.TextDelta{Correlation: protocol.Correlation{SessionID: "session-1", TurnID: "turn-1", ProviderRequestID: "provider-1"}, Text: "world"},
+	}
+	for _, ev := range events {
+		if err := st.Append(ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	path := st.Path()
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := Replay(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, events) {
+		t.Errorf("Replay() = %#v, want %#v", got, events)
+	}
+}
+
+func TestReplayLiteralLegacyJSONLHasEmptyCorrelation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.jsonl")
+	contents := "" +
+		`{"type":"user.message","time":"2020-01-01T00:00:00Z","data":{"text":"hello"}}` + "\n" +
+		`{"type":"turn.completed","time":"2020-01-01T00:00:01Z","data":{"stopReason":"end_turn"}}` + "\n"
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	events, err := Replay(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("Replay() returned %d events, want 2", len(events))
+	}
+	for i, ev := range events {
+		var corr protocol.Correlation
+		switch ev := ev.(type) {
+		case protocol.UserMessage:
+			corr = ev.Correlation
+		case protocol.TurnCompleted:
+			corr = ev.Correlation
+		default:
+			t.Fatalf("legacy event %d = %T", i, ev)
+		}
+		if corr != (protocol.Correlation{}) {
+			t.Errorf("legacy event %d correlation = %#v, want empty", i, corr)
+		}
+		b, err := json.Marshal(ev)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(b, &fields); err != nil {
+			t.Fatal(err)
+		}
+		for _, key := range []string{"sessionId", "turnId", "providerRequestId"} {
+			if _, ok := fields[key]; ok {
+				t.Errorf("legacy event %d unexpectedly has %s: %s", i, key, b)
+			}
+		}
 	}
 }
 
@@ -89,8 +167,32 @@ func TestReplayMissingFile(t *testing.T) {
 }
 
 func TestNewIDFormat(t *testing.T) {
-	id := NewID()
-	if len(id) != len("20060102-150405") {
-		t.Errorf("NewID() = %q, unexpected length", id)
+	const calls = 256
+	ids := make([]string, 0, calls)
+	seen := make(map[string]bool, calls)
+	pattern := regexp.MustCompile(`^(\d{8}T\d{6}(?:\.\d{1,9})?Z)-([A-Za-z0-9_-]{8,})$`)
+	for i := 0; i < calls; i++ {
+		id := NewID()
+		match := pattern.FindStringSubmatch(id)
+		if match == nil {
+			t.Fatalf("NewID() = %q, want UTC timestamp-first and filename-safe random suffix", id)
+		}
+		stamp, err := time.Parse("20060102T150405.999999999Z", match[1])
+		if err != nil {
+			t.Fatalf("NewID() timestamp %q: %v", match[1], err)
+		}
+		if stamp.Location() != time.UTC {
+			t.Errorf("NewID() timestamp location = %v, want UTC", stamp.Location())
+		}
+		if seen[id] {
+			t.Fatalf("NewID() repeated %q after %d calls", id, i+1)
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	sorted := append([]string(nil), ids...)
+	sort.Strings(sorted)
+	if !reflect.DeepEqual(ids, sorted) {
+		t.Errorf("NewID() values are not lexically sortable in creation order")
 	}
 }

@@ -86,10 +86,25 @@ func (e *RejectedError) Error() string {
 }
 
 type pending struct {
-	permission string
-	patterns   []string
-	always     []string
-	ch         chan protocol.PermissionReply
+	permission  string
+	patterns    []string
+	always      []string
+	correlation protocol.Correlation
+	ch          chan protocol.PermissionReply
+
+	// announced is set after PermissionAsked emission returns. Reply queues
+	// terminal PermissionResolved onto deferredDecision until then so a
+	// blocked or reentrant emitter cannot publish Resolved first.
+	announced        bool
+	hasDeferred      bool
+	deferredDecision protocol.Decision
+}
+
+// resolvedEmission is a PermissionResolved to publish outside the mutex.
+type resolvedEmission struct {
+	id          string
+	correlation protocol.Correlation
+	decision    protocol.Decision
 }
 
 // Service resolves asks against the configured rulesets, suspending on a
@@ -112,6 +127,17 @@ func New(emit func(protocol.Event), base ...Ruleset) *Service {
 
 // Ask implements tool.Context.Ask. It blocks until the permission resolves.
 func (s *Service) Ask(ctx context.Context, req tool.AskRequest) error {
+	return s.ask(ctx, req, protocol.Correlation{})
+}
+
+// AskWithCorrelation is Ask with protocol correlation attached to the
+// PermissionAsked/PermissionResolved events for this pending request.
+func (s *Service) AskWithCorrelation(ctx context.Context, req tool.AskRequest, corr protocol.Correlation) error {
+	return s.ask(ctx, req, corr)
+}
+
+// ask is the shared implementation for Ask and AskWithCorrelation.
+func (s *Service) ask(ctx context.Context, req tool.AskRequest, corr protocol.Correlation) error {
 	s.mu.Lock()
 	action := s.evaluateLocked(req.Permission, req.Patterns)
 	switch action {
@@ -125,20 +151,44 @@ func (s *Service) Ask(ctx context.Context, req tool.AskRequest) error {
 	s.nextID++
 	id := fmt.Sprintf("perm_%d", s.nextID)
 	p := &pending{
-		permission: req.Permission,
-		patterns:   req.Patterns,
-		always:     req.Always,
-		ch:         make(chan protocol.PermissionReply, 1),
+		permission:  req.Permission,
+		patterns:    req.Patterns,
+		always:      req.Always,
+		correlation: corr,
+		ch:          make(chan protocol.PermissionReply, 1),
 	}
 	s.pending[id] = p
 	s.mu.Unlock()
 
 	s.emit(protocol.PermissionAsked{
-		RequestID:  id,
-		Permission: req.Permission,
-		Patterns:   req.Patterns,
-		Metadata:   req.Metadata,
+		Correlation: corr,
+		RequestID:   id,
+		Permission:  req.Permission,
+		Patterns:    req.Patterns,
+		Metadata:    req.Metadata,
 	})
+
+	// Mark announced only after PermissionAsked returns. Any Reply that ran
+	// while unannounced left a deferred resolution for us to emit now.
+	s.mu.Lock()
+	p.announced = true
+	var deferred *resolvedEmission
+	if p.hasDeferred {
+		deferred = &resolvedEmission{
+			id:          id,
+			correlation: p.correlation,
+			decision:    p.deferredDecision,
+		}
+		p.hasDeferred = false
+	}
+	s.mu.Unlock()
+	if deferred != nil {
+		s.emit(protocol.PermissionResolved{
+			Correlation: deferred.correlation,
+			RequestID:   deferred.id,
+			Decision:    deferred.decision,
+		})
+	}
 
 	select {
 	case <-ctx.Done():
@@ -158,6 +208,11 @@ func (s *Service) Ask(ctx context.Context, req tool.AskRequest) error {
 // retroactively resolves other pending asks that now evaluate to allow; a
 // reject cascades to all sibling pending asks so a batch of parallel calls
 // doesn't produce a prompt storm after one rejection.
+//
+// PermissionResolved is emitted immediately only for asks whose
+// PermissionAsked has already finished. Otherwise the resolution is queued on
+// the pending entry and emitted by ask after the opening event returns. All
+// emitter calls run outside the mutex; Reply never waits on announcement.
 func (s *Service) Reply(r protocol.PermissionReply) {
 	s.mu.Lock()
 	p, ok := s.pending[r.RequestID]
@@ -167,7 +222,11 @@ func (s *Service) Reply(r protocol.PermissionReply) {
 	}
 	delete(s.pending, r.RequestID)
 
-	var resolved []*pending
+	type cascaded struct {
+		id string
+		p  *pending
+	}
+	var resolved []cascaded
 	var resolvedReply protocol.PermissionReply
 	switch r.Decision {
 	case protocol.DecisionAlways:
@@ -181,24 +240,50 @@ func (s *Service) Reply(r protocol.PermissionReply) {
 		for id, other := range s.pending {
 			if s.evaluateLocked(other.permission, other.patterns) == Allow {
 				delete(s.pending, id)
-				resolved = append(resolved, other)
+				resolved = append(resolved, cascaded{id: id, p: other})
 			}
 		}
 		resolvedReply = protocol.PermissionReply{Decision: protocol.DecisionOnce}
 	case protocol.DecisionReject:
 		for id, other := range s.pending {
 			delete(s.pending, id)
-			resolved = append(resolved, other)
+			resolved = append(resolved, cascaded{id: id, p: other})
 		}
 		resolvedReply = protocol.PermissionReply{Decision: protocol.DecisionReject}
 	}
+
+	var emitNow []resolvedEmission
+	collect := func(id string, pend *pending, decision protocol.Decision) {
+		if pend.announced {
+			emitNow = append(emitNow, resolvedEmission{
+				id:          id,
+				correlation: pend.correlation,
+				decision:    decision,
+			})
+			return
+		}
+		pend.hasDeferred = true
+		pend.deferredDecision = decision
+	}
+	collect(r.RequestID, p, r.Decision)
+	for _, other := range resolved {
+		collect(other.id, other.p, resolvedReply.Decision)
+	}
 	s.mu.Unlock()
 
+	// Emit all announced resolutions before waking any waiter so consumers
+	// observe PermissionResolved before Ask returns.
+	for _, em := range emitNow {
+		s.emit(protocol.PermissionResolved{
+			Correlation: em.correlation,
+			RequestID:   em.id,
+			Decision:    em.decision,
+		})
+	}
 	p.ch <- r
 	for _, other := range resolved {
-		other.ch <- resolvedReply
+		other.p.ch <- resolvedReply
 	}
-	s.emit(protocol.PermissionResolved{RequestID: r.RequestID, Decision: r.Decision})
 }
 
 // evaluateLocked returns the worst-case action across the ask's patterns:

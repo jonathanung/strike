@@ -39,8 +39,9 @@ func TestToChatRequestPriorityTier(t *testing.T) {
 		wantTier     string
 	}{
 		{name: "openai fast on", priority: true, priorityTier: true, wantTier: "priority"},
-		{name: "openai fast off", priority: false, priorityTier: true, wantTier: ""},
-		{name: "xai ignores fast", priority: true, priorityTier: false, wantTier: ""},
+		{name: "openai fast off", priorityTier: true},
+		{name: "xai omits service tier", priority: true},
+		{name: "generic provider omits service tier", priority: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -64,5 +65,19 @@ func TestToChatRequestPriorityTier(t *testing.T) {
 				t.Fatalf("service_tier missing from JSON: %s", raw)
 			}
 		})
+	}
+}
+
+func TestToChatRequestCombinesReasoningEffortAndPriorityTier(t *testing.T) {
+	out := toChatRequest(provider.Request{
+		Model:    "gpt-5.6-sol",
+		Effort:   provider.EffortMax,
+		Priority: true,
+	}, true)
+	if out.ReasoningEffort != "high" {
+		t.Errorf("ReasoningEffort = %q, want high", out.ReasoningEffort)
+	}
+	if out.ServiceTier != "priority" {
+		t.Errorf("ServiceTier = %q, want priority", out.ServiceTier)
 	}
 }
