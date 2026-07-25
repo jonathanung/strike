@@ -38,7 +38,7 @@ func readNotebook(t *testing.T, path string) map[string]any {
 
 func sampleNotebook() map[string]any {
 	return map[string]any{
-		"nbformat":      4,
+		"nbformat":       4,
 		"nbformat_minor": 5,
 		"metadata": map[string]any{
 			"kernelspec": map[string]any{
@@ -48,10 +48,10 @@ func sampleNotebook() map[string]any {
 		},
 		"cells": []any{
 			map[string]any{
-				"id":       "cell-aaa",
+				"id":        "cell-aaa",
 				"cell_type": "markdown",
-				"metadata": map[string]any{},
-				"source":   "# Title",
+				"metadata":  map[string]any{},
+				"source":    "# Title",
 			},
 			map[string]any{
 				"id":              "cell-bbb",

@@ -207,8 +207,9 @@ func webfetchAccept(format string) string {
 }
 
 // Test seams (tests only; production leaves these nil/empty):
-//   webfetchTestAllowHost — accepted by assertPublicHTTPHost without SSRF checks
-//   webfetchTestTransport — used as http.Client.Transport when non-nil (TLS httptest)
+//
+//	webfetchTestAllowHost — accepted by assertPublicHTTPHost without SSRF checks
+//	webfetchTestTransport — used as http.Client.Transport when non-nil (TLS httptest)
 var (
 	webfetchTestAllowHost string
 	webfetchTestTransport http.RoundTripper
