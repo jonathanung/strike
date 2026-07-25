@@ -99,27 +99,42 @@ func countEvents[T protocol.Event](events []protocol.Event) int {
 	return n
 }
 
-// drainAndReply runs until TurnCompleted, auto-approving any PermissionAsked.
+// drainAndReply runs until the parent TurnCompleted and every started child
+// has emitted ChildCompleted, auto-approving any PermissionAsked.
 func drainAndReply(t *testing.T, eng *engine.Engine, timeout time.Duration) []protocol.Event {
 	t.Helper()
 	var collected []protocol.Event
+	var parentDone bool
+	var started, completed int
 	guard := time.NewTimer(timeout)
 	defer guard.Stop()
 	for {
 		select {
 		case ev, ok := <-eng.Events():
 			if !ok {
-				t.Fatal("Events closed before TurnCompleted")
+				t.Fatal("Events closed before drain finished")
 			}
 			collected = append(collected, ev)
-			if asked, ok := ev.(protocol.PermissionAsked); ok {
-				eng.Ops() <- protocol.PermissionReply{RequestID: asked.RequestID, Decision: protocol.DecisionOnce}
+			switch ev := ev.(type) {
+			case protocol.PermissionAsked:
+				eng.Ops() <- protocol.PermissionReply{RequestID: ev.RequestID, Decision: protocol.DecisionOnce}
+			case protocol.QuestionAsked:
+				// Auto-dismiss so question tests that only need lifecycle can finish.
+			case protocol.ChildStarted:
+				started++
+			case protocol.ChildCompleted:
+				completed++
+			case protocol.TurnCompleted:
+				// Child TurnCompleted is not re-emitted on the parent stream, so
+				// any TurnCompleted here is the invoking engine's turn.
+				parentDone = true
 			}
-			if _, ok := ev.(protocol.TurnCompleted); ok {
+			if parentDone && started == completed {
 				return collected
 			}
 		case <-guard.C:
-			t.Fatalf("timed out; events=%v", summarizeEvents(collected))
+			t.Fatalf("timed out; parentDone=%v started=%d completed=%d events=%v",
+				parentDone, started, completed, summarizeEvents(collected))
 		}
 	}
 }
@@ -133,8 +148,16 @@ func TestForegroundTaskIndependentHistory(t *testing.T) {
 	taskCall := taskToolCall("task-1", taskPrompt)
 	prov := newScriptedProvider(
 		toolCallStep(taskCall),
-		completedStep("child finished work"),
-		completedStep("parent finished"),
+		func() streamStep {
+			s := completedStep("child finished work")
+			s.match = matchUserText(taskPrompt)
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("parent finished")
+			s.match = matchToolResult("task-1")
+			return s
+		}(),
 	)
 	eng := engine.New(engine.Options{
 		SessionID:       parentSession,
@@ -192,17 +215,24 @@ func TestForegroundTaskIndependentHistory(t *testing.T) {
 	if started[0].Prompt != taskPrompt {
 		t.Errorf("ChildStarted prompt = %q, want %q", started[0].Prompt, taskPrompt)
 	}
+	if !strings.Contains(completed[0].Summary, "child finished work") {
+		t.Errorf("ChildCompleted summary = %q, want child work", completed[0].Summary)
+	}
 	if len(taskEnds) != 1 {
 		t.Fatalf("task ToolCallEnd count = %d, want 1", len(taskEnds))
 	}
 	if taskEnds[0].IsError {
 		t.Errorf("task ToolCallEnd is error: %s", taskEnds[0].Output)
 	}
-	if !strings.Contains(taskEnds[0].Output, "child finished work") {
-		t.Errorf("task output = %q, want child summary", taskEnds[0].Output)
+	if !strings.Contains(taskEnds[0].Output, "Started child session") {
+		t.Errorf("task output = %q, want started notice", taskEnds[0].Output)
+	}
+	if !strings.Contains(taskEnds[0].Output, started[0].SessionID) {
+		t.Errorf("task output = %q, want session id %q", taskEnds[0].Output, started[0].SessionID)
 	}
 
-	// Three Stream calls: parent tool-use, child final, parent final.
+	// Three Stream calls: parent tool-use, parent final, child final (order of
+	// the last two may race; collect all requests).
 	if prov.callCount() != 3 {
 		t.Fatalf("Stream calls = %d, want 3", prov.callCount())
 	}
@@ -210,9 +240,22 @@ func TestForegroundTaskIndependentHistory(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		reqs = append(reqs, receiveRequest(t, prov.requests))
 	}
-	childReq := reqs[1]
-	if len(childReq.Messages) < 1 || childReq.Messages[0].Role != provider.RoleUser {
-		t.Fatalf("child first message = %#v, want user", childReq.Messages)
+	var childReq, parentFinal *provider.Request
+	for i := range reqs {
+		r := &reqs[i]
+		if len(r.Messages) > 0 && r.Messages[0].Role == provider.RoleUser && r.Messages[0].Text == taskPrompt {
+			childReq = r
+			continue
+		}
+		// Parent final includes the original user turn plus a tool result.
+		for _, msg := range r.Messages {
+			if msg.Role == provider.RoleTool && msg.ToolResult != nil && msg.ToolResult.CallID == "task-1" {
+				parentFinal = r
+			}
+		}
+	}
+	if childReq == nil {
+		t.Fatalf("missing child stream request; reqs=%#v", reqs)
 	}
 	if childReq.Messages[0].Text != taskPrompt {
 		t.Errorf("child user text = %q, want task prompt %q", childReq.Messages[0].Text, taskPrompt)
@@ -223,10 +266,9 @@ func TestForegroundTaskIndependentHistory(t *testing.T) {
 			t.Errorf("child history contains parent user turn")
 		}
 	}
-
-	parentFinal := reqs[2]
-	// Parent final request must not contain the child's internal user message
-	// as a separate parent user turn beyond the tool result.
+	if parentFinal == nil {
+		t.Fatalf("missing parent final stream with task tool result; reqs=%#v", reqs)
+	}
 	userTurns := 0
 	for _, msg := range parentFinal.Messages {
 		if msg.Role == provider.RoleUser {
@@ -237,15 +279,14 @@ func TestForegroundTaskIndependentHistory(t *testing.T) {
 		}
 	}
 	if userTurns != 1 {
-		t.Errorf("parent final user turns = %d, want 1 (only original parent prompt); messages=%#v", userTurns, parentFinal.Messages)
+		t.Errorf("parent final user turns = %d, want 1; messages=%#v", userTurns, parentFinal.Messages)
 	}
-	// Tool result should carry the child summary.
 	var sawToolResult bool
 	for _, msg := range parentFinal.Messages {
 		if msg.Role == provider.RoleTool && msg.ToolResult != nil && msg.ToolResult.CallID == "task-1" {
 			sawToolResult = true
-			if !strings.Contains(msg.ToolResult.Output, "child finished work") {
-				t.Errorf("parent tool result = %q", msg.ToolResult.Output)
+			if !strings.Contains(msg.ToolResult.Output, "Started child session") {
+				t.Errorf("parent tool result = %q, want started notice", msg.ToolResult.Output)
 			}
 		}
 	}
@@ -303,19 +344,29 @@ func TestTaskDepthRejected(t *testing.T) {
 	}
 }
 
-func TestParentInterruptCancelsChild(t *testing.T) {
+func TestParentInterruptLeavesChildRunning(t *testing.T) {
+	// Parent finishes its turn while the child is still blocked on a tool.
+	// Interrupt after the parent is already idle must not cancel the child.
 	neverRelease := make(chan struct{})
 	ct := &channelTool{
 		executed: make(chan string, 1),
 		blocks:   map[string]<-chan struct{}{"block": neverRelease},
 	}
-	taskCall := taskToolCall("task-int", "run blocking child")
+	const childPrompt = "run blocking child"
+	taskCall := taskToolCall("task-int", childPrompt)
 	childCall := toolCall("block", "channel")
 	prov := newScriptedProvider(
 		toolCallStep(taskCall),
-		toolCallStep(childCall),
-		// Parent may attempt a follow-up stream after cancel; tolerate it.
-		completedStep("should not matter"),
+		func() streamStep {
+			s := toolCallStep(childCall)
+			s.match = matchUserText(childPrompt)
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("parent finished while child runs")
+			s.match = matchToolResult("task-int")
+			return s
+		}(),
 	)
 	eng := engine.New(engine.Options{
 		SessionID:       "parent-int",
@@ -331,109 +382,76 @@ func TestParentInterruptCancelsChild(t *testing.T) {
 
 	eng.Ops() <- protocol.UserInput{Text: "spawn then interrupt"}
 
-	// Wait until child has started executing the blocking tool.
-	guard := time.NewTimer(5 * time.Second)
+	// Wait until parent turn ends and child is blocked in its tool.
+	guard := time.NewTimer(10 * time.Second)
 	defer guard.Stop()
-	var sawStarted bool
-	var events []protocol.Event
-loop:
-	for {
+	var (
+		events                 []protocol.Event
+		sawStarted, parentDone bool
+		taskEnds               []protocol.ToolCallEnd
+		childToolRunning       bool
+	)
+	for !(sawStarted && parentDone && childToolRunning) {
 		select {
 		case ev, ok := <-eng.Events():
 			if !ok {
 				t.Fatal("Events closed early")
 			}
 			events = append(events, ev)
-			if _, ok := ev.(protocol.ChildStarted); ok {
+			switch ev := ev.(type) {
+			case protocol.ChildStarted:
 				sawStarted = true
-			}
-			if asked, ok := ev.(protocol.PermissionAsked); ok {
-				eng.Ops() <- protocol.PermissionReply{RequestID: asked.RequestID, Decision: protocol.DecisionOnce}
+			case protocol.PermissionAsked:
+				eng.Ops() <- protocol.PermissionReply{RequestID: ev.RequestID, Decision: protocol.DecisionOnce}
+			case protocol.TurnCompleted:
+				parentDone = true
+			case protocol.ToolCallEnd:
+				if ev.CallID == "task-int" {
+					taskEnds = append(taskEnds, ev)
+				}
+			case protocol.ChildCompleted:
+				t.Fatalf("child completed before interrupt; events=%v", summarizeEvents(events))
 			}
 		case id := <-ct.executed:
 			if id != "block" {
 				t.Fatalf("executed = %q, want block", id)
 			}
-			break loop
+			childToolRunning = true
 		case <-guard.C:
-			t.Fatalf("timed out waiting for child tool; started=%v events=%v", sawStarted, summarizeEvents(events))
-		}
-	}
-	if !sawStarted {
-		// ChildStarted is emitted before the child turn; drain any backlog.
-		// It may already be in events from the select race with executed.
-		for _, ev := range events {
-			if _, ok := ev.(protocol.ChildStarted); ok {
-				sawStarted = true
-			}
-		}
-	}
-	if !sawStarted {
-		// Poll briefly for ChildStarted that raced with executed signal.
-		deadline := time.After(2 * time.Second)
-		for !sawStarted {
-			select {
-			case ev := <-eng.Events():
-				events = append(events, ev)
-				if _, ok := ev.(protocol.ChildStarted); ok {
-					sawStarted = true
-				}
-			case <-deadline:
-				t.Fatal("never saw ChildStarted")
-			}
+			t.Fatalf("timed out; started=%v parentDone=%v childTool=%v events=%v",
+				sawStarted, parentDone, childToolRunning, summarizeEvents(events))
 		}
 	}
 
+	// Interrupt while parent is idle and child is still blocked.
 	eng.Ops() <- protocol.Interrupt{}
 
-	// Collect until parent TurnCompleted.
-	doneGuard := time.NewTimer(5 * time.Second)
-	defer doneGuard.Stop()
-	var completed bool
-	for !completed {
+	settle := time.NewTimer(150 * time.Millisecond)
+	defer settle.Stop()
+settleLoop:
+	for {
 		select {
 		case ev, ok := <-eng.Events():
 			if !ok {
-				t.Fatal("Events closed before TurnCompleted")
+				break settleLoop
 			}
 			events = append(events, ev)
-			if _, ok := ev.(protocol.TurnCompleted); ok {
-				completed = true
+			if _, ok := ev.(protocol.ChildCompleted); ok {
+				t.Fatalf("child completed after parent interrupt; events=%v", summarizeEvents(events))
 			}
-		case <-doneGuard.C:
-			t.Fatalf("timed out after interrupt; events=%v", summarizeEvents(events))
+		case <-settle.C:
+			break settleLoop
 		}
 	}
 
-	var childDone []protocol.ChildCompleted
-	var taskEnds []protocol.ToolCallEnd
-	var startedN int
-	for _, ev := range events {
-		switch ev := ev.(type) {
-		case protocol.ChildStarted:
-			startedN++
-		case protocol.ChildCompleted:
-			childDone = append(childDone, ev)
-		case protocol.ToolCallEnd:
-			if ev.CallID == "task-int" {
-				taskEnds = append(taskEnds, ev)
-			}
-		}
-	}
-	if startedN != 1 {
-		t.Errorf("ChildStarted count = %d, want 1", startedN)
-	}
-	if len(childDone) != 1 {
-		t.Fatalf("ChildCompleted count = %d, want 1; events=%v", len(childDone), summarizeEvents(events))
-	}
-	if childDone[0].Status != protocol.ChildStatusCanceled {
-		t.Errorf("ChildCompleted status = %q, want canceled", childDone[0].Status)
-	}
 	if len(taskEnds) != 1 {
-		t.Fatalf("task ToolCallEnd count = %d, want 1", len(taskEnds))
+		t.Fatalf("task ToolCallEnd count = %d, want 1; events=%v", len(taskEnds), summarizeEvents(events))
 	}
-	if !taskEnds[0].IsError {
-		t.Errorf("task ToolCallEnd should be error, got %q", taskEnds[0].Output)
+	if taskEnds[0].IsError {
+		t.Errorf("task ToolCallEnd should succeed (started); got %q", taskEnds[0].Output)
+	}
+	if !strings.Contains(taskEnds[0].Output, "Started child session") {
+		t.Errorf("task output = %q, want started notice", taskEnds[0].Output)
 	}
 }
 
@@ -447,13 +465,26 @@ func TestChildCannotWidenPermissions(t *testing.T) {
 
 	// Child agent profile allows edit/write; parent base rules deny — AG3
 	// requires the child allow not to override the parent ceiling.
-	taskCall := taskToolCallWithAgent("task-perm", "try to edit", "writer")
+	const childPrompt = "try to edit"
+	taskCall := taskToolCallWithAgent("task-perm", childPrompt, "writer")
 	editCall := editToolCall("edit-1", "protected.txt", "keep-me-safe", "pwned")
 	prov := newScriptedProvider(
 		toolCallStep(taskCall),
-		toolCallStep(editCall),
-		completedStep("child done after deny"),
-		completedStep("parent done"),
+		func() streamStep {
+			s := toolCallStep(editCall)
+			s.match = matchUserText(childPrompt)
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("child done after deny")
+			s.match = matchToolResult("edit-1")
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("parent done")
+			s.match = matchToolResult("task-perm")
+			return s
+		}(),
 	)
 	rules := []permission.Ruleset{
 		permission.Defaults(),
@@ -518,11 +549,20 @@ func TestChildCannotWidenPermissions(t *testing.T) {
 }
 
 func TestTaskExactlyOneTerminalResult(t *testing.T) {
-	taskCall := taskToolCall("task-once", "one shot")
+	const childPrompt = "one shot"
+	taskCall := taskToolCall("task-once", childPrompt)
 	prov := newScriptedProvider(
 		toolCallStep(taskCall),
-		completedStep("only once"),
-		completedStep("parent ok"),
+		func() streamStep {
+			s := completedStep("only once")
+			s.match = matchUserText(childPrompt)
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("parent ok")
+			s.match = matchToolResult("task-once")
+			return s
+		}(),
 	)
 	eng := engine.New(engine.Options{
 		SessionID:       "once-session",
@@ -560,13 +600,26 @@ func TestTaskExactlyOneTerminalResult(t *testing.T) {
 }
 
 func TestChildPermissionReplyRouting(t *testing.T) {
-	taskCall := taskToolCall("task-ask", "run bash in child")
+	const childPrompt = "run bash in child"
+	taskCall := taskToolCall("task-ask", childPrompt)
 	childBash := bashToolCall("bash-1", "printf child-bash-ok")
 	prov := newScriptedProvider(
 		toolCallStep(taskCall),
-		toolCallStep(childBash),
-		completedStep("child after bash"),
-		completedStep("parent after task"),
+		func() streamStep {
+			s := toolCallStep(childBash)
+			s.match = matchUserText(childPrompt)
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("child after bash")
+			s.match = matchToolResult("bash-1")
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("parent after task")
+			s.match = matchToolResult("task-ask")
+			return s
+		}(),
 	)
 	// Defaults: bash asks; task allows.
 	eng := engine.New(engine.Options{
@@ -582,38 +635,19 @@ func TestChildPermissionReplyRouting(t *testing.T) {
 	go eng.Run(ctx)
 
 	eng.Ops() <- protocol.UserInput{Text: "delegate bash"}
+	events := drainAndReply(t, eng, 10*time.Second)
 
-	var events []protocol.Event
 	var sawChildAsk bool
-	guard := time.NewTimer(10 * time.Second)
-	defer guard.Stop()
-	for {
-		select {
-		case ev, ok := <-eng.Events():
-			if !ok {
-				t.Fatal("Events closed early")
-			}
-			events = append(events, ev)
-			switch ev := ev.(type) {
-			case protocol.PermissionAsked:
-				// Child-forwarded ask should carry child lineage.
-				if ev.ParentSessionID == "parent-ask-route" || ev.Depth > 0 {
-					sawChildAsk = true
-					if ev.Permission != "bash" {
-						t.Errorf("permission = %q, want bash", ev.Permission)
-					}
+	for _, ev := range events {
+		if asked, ok := ev.(protocol.PermissionAsked); ok {
+			if asked.ParentSessionID == "parent-ask-route" || asked.Depth > 0 {
+				sawChildAsk = true
+				if asked.Permission != "bash" {
+					t.Errorf("permission = %q, want bash", asked.Permission)
 				}
-				eng.Ops() <- protocol.PermissionReply{RequestID: ev.RequestID, Decision: protocol.DecisionOnce}
-			case protocol.TurnCompleted:
-				goto done
-			case protocol.EngineError:
-				t.Fatalf("engine error: %s", ev.Message)
 			}
-		case <-guard.C:
-			t.Fatalf("timed out; events=%v", summarizeEvents(events))
 		}
 	}
-done:
 	if !sawChildAsk {
 		t.Fatalf("never saw child-correlated PermissionAsked; events=%v", summarizeEvents(events))
 	}
@@ -636,21 +670,39 @@ done:
 	if taskEnd.IsError {
 		t.Errorf("task failed after permission reply: %s", taskEnd.Output)
 	}
-	if !strings.Contains(taskEnd.Output, "child after bash") {
-		t.Errorf("task output = %q, want child summary", taskEnd.Output)
+	if !strings.Contains(taskEnd.Output, "Started child session") {
+		t.Errorf("task output = %q, want started notice", taskEnd.Output)
+	}
+	var childDone []protocol.ChildCompleted
+	for _, ev := range events {
+		if c, ok := ev.(protocol.ChildCompleted); ok {
+			childDone = append(childDone, c)
+		}
+	}
+	if len(childDone) != 1 {
+		t.Fatalf("ChildCompleted = %d, want 1", len(childDone))
+	}
+	if !strings.Contains(childDone[0].Summary, "child after bash") {
+		t.Errorf("ChildCompleted summary = %q, want child after bash", childDone[0].Summary)
 	}
 }
 
 // TestTaskSurfacesChildStreamError ensures a child provider/stream failure is
-// not collapsed to the opaque "task failed" summary: both ToolCallEnd.Output
-// and ChildCompleted.Summary must carry the distinctive error text.
+// not collapsed to the opaque "task failed" summary on ChildCompleted.
 func TestTaskSurfacesChildStreamError(t *testing.T) {
-	const errMsg = "child stream boom: invalid_request_error: bad child payload"
-	taskCall := taskToolCall("task-stream-err", "child will fail")
+	const (
+		errMsg      = "child stream boom: invalid_request_error: bad child payload"
+		childPrompt = "child will fail"
+	)
+	taskCall := taskToolCall("task-stream-err", childPrompt)
 	prov := newScriptedProvider(
 		toolCallStep(taskCall),
-		streamStep{err: errors.New(errMsg)},
-		completedStep("parent recovered"),
+		streamStep{err: errors.New(errMsg), match: matchUserText(childPrompt)},
+		func() streamStep {
+			s := completedStep("parent recovered")
+			s.match = matchToolResult("task-stream-err")
+			return s
+		}(),
 	)
 	eng := engine.New(engine.Options{
 		SessionID:       "parent-stream-err",
@@ -697,15 +749,12 @@ func TestTaskSurfacesChildStreamError(t *testing.T) {
 	if len(taskEnds) != 1 {
 		t.Fatalf("task ToolCallEnd count = %d, want 1", len(taskEnds))
 	}
-	if !taskEnds[0].IsError {
-		t.Errorf("task ToolCallEnd IsError = false, want true; output=%q", taskEnds[0].Output)
+	// Non-blocking: spawn succeeds; failure is reported via ChildCompleted.
+	if taskEnds[0].IsError {
+		t.Errorf("task ToolCallEnd IsError = true; output=%q", taskEnds[0].Output)
 	}
-	if !strings.Contains(taskEnds[0].Output, errMsg) {
-		t.Errorf("task ToolCallEnd output = %q, want to contain %q", taskEnds[0].Output, errMsg)
-	}
-	// Must not be only the bare fallback (with or without Error: prefix).
-	if strings.TrimSpace(strings.TrimPrefix(taskEnds[0].Output, "Error: ")) == "task failed" {
-		t.Errorf("task output is opaque %q", taskEnds[0].Output)
+	if !strings.Contains(taskEnds[0].Output, "Started child session") {
+		t.Errorf("task output = %q, want started notice", taskEnds[0].Output)
 	}
 }
 
@@ -714,11 +763,20 @@ func TestTaskSurfacesChildStreamError(t *testing.T) {
 // would leave the child with "no model selected" if inherit were broken.
 func TestTaskChildInheritsParentProvider(t *testing.T) {
 	var selectCalls atomic.Int32
-	taskCall := taskToolCall("task-inherit", "child work")
+	const childPrompt = "child work"
+	taskCall := taskToolCall("task-inherit", childPrompt)
 	prov := newScriptedProvider(
 		toolCallStep(taskCall),
-		completedStep("child ok via inherit"),
-		completedStep("parent ok"),
+		func() streamStep {
+			s := completedStep("child ok via inherit")
+			s.match = matchUserText(childPrompt)
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("parent ok")
+			s.match = matchToolResult("task-inherit")
+			return s
+		}(),
 	)
 	selectFn := func(string) (provider.Provider, string, error) {
 		n := selectCalls.Add(1)
@@ -774,13 +832,13 @@ func TestTaskChildInheritsParentProvider(t *testing.T) {
 	if taskEnds[0].IsError {
 		t.Errorf("task failed without inherit: %s", taskEnds[0].Output)
 	}
-	if !strings.Contains(taskEnds[0].Output, "child ok via inherit") {
-		t.Errorf("task output = %q", taskEnds[0].Output)
+	if !strings.Contains(taskEnds[0].Output, "Started child session") {
+		t.Errorf("task output = %q, want started notice", taskEnds[0].Output)
 	}
 	if n := selectCalls.Load(); n != 1 {
 		t.Errorf("Select calls = %d, want 1 (child must inherit live provider)", n)
 	}
-	// Three Stream calls: parent tool-use, child final, parent final.
+	// Three Stream calls: parent tool-use, parent final, child final.
 	if prov.callCount() != 3 {
 		t.Fatalf("Stream calls = %d, want 3", prov.callCount())
 	}
@@ -795,13 +853,21 @@ func TestTaskSurfacesChildEngineErrorMessage(t *testing.T) {
 	const errMsg = "no model selected — use /provider <anthropic|openai|xai|echo> [model]"
 	// Use a streamed EventError so the child emits EngineError with this exact
 	// message (same text as the pre-turn no-provider path).
-	taskCall := taskToolCall("task-eng-err", "child engine error")
+	const childPrompt = "child engine error"
+	taskCall := taskToolCall("task-eng-err", childPrompt)
 	prov := newScriptedProvider(
 		toolCallStep(taskCall),
-		streamStep{events: []provider.StreamEvent{
-			{Type: provider.EventError, Err: errors.New(errMsg)},
-		}},
-		completedStep("parent after engine error"),
+		streamStep{
+			match: matchUserText(childPrompt),
+			events: []provider.StreamEvent{
+				{Type: provider.EventError, Err: errors.New(errMsg)},
+			},
+		},
+		func() streamStep {
+			s := completedStep("parent after engine error")
+			s.match = matchToolResult("task-eng-err")
+			return s
+		}(),
 	)
 	eng := engine.New(engine.Options{
 		SessionID:       "parent-eng-err",
@@ -842,10 +908,116 @@ func TestTaskSurfacesChildEngineErrorMessage(t *testing.T) {
 	if len(taskEnds) != 1 {
 		t.Fatalf("task ToolCallEnd count = %d, want 1", len(taskEnds))
 	}
-	if !taskEnds[0].IsError {
-		t.Errorf("task ToolCallEnd IsError = false; output=%q", taskEnds[0].Output)
+	if taskEnds[0].IsError {
+		t.Errorf("task ToolCallEnd IsError = true; output=%q", taskEnds[0].Output)
 	}
-	if !strings.Contains(taskEnds[0].Output, "no model selected") {
-		t.Errorf("task output = %q, want to contain no model selected", taskEnds[0].Output)
+	if !strings.Contains(taskEnds[0].Output, "Started child session") {
+		t.Errorf("task output = %q, want started notice", taskEnds[0].Output)
+	}
+}
+
+func TestTaskNonBlockingParentContinuesWhileChildRuns(t *testing.T) {
+	// Child blocks on a tool; parent must finish its turn (ToolCallEnd + final
+	// stream) before the child unblocks.
+	release := make(chan struct{})
+	ct := &channelTool{
+		executed: make(chan string, 1),
+		blocks:   map[string]<-chan struct{}{"block": release},
+	}
+	const childPrompt = "slow child"
+	taskCall := taskToolCall("task-nb", childPrompt)
+	childCall := toolCall("block", "channel")
+	prov := newScriptedProvider(
+		toolCallStep(taskCall),
+		func() streamStep {
+			s := toolCallStep(childCall)
+			s.match = matchUserText(childPrompt)
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("child after release")
+			s.match = matchToolResult("block")
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("parent finished first")
+			s.match = matchToolResult("task-nb")
+			return s
+		}(),
+	)
+	eng := engine.New(engine.Options{
+		SessionID:       "parent-nb",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(tool.NewTask(), ct),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "spawn slow child"}
+
+	var events []protocol.Event
+	var parentDone, taskEnded, childRunning bool
+	guard := time.NewTimer(10 * time.Second)
+	defer guard.Stop()
+	for !(parentDone && taskEnded && childRunning) {
+		select {
+		case ev, ok := <-eng.Events():
+			if !ok {
+				t.Fatal("Events closed early")
+			}
+			events = append(events, ev)
+			switch ev := ev.(type) {
+			case protocol.PermissionAsked:
+				eng.Ops() <- protocol.PermissionReply{RequestID: ev.RequestID, Decision: protocol.DecisionOnce}
+			case protocol.ToolCallEnd:
+				if ev.CallID == "task-nb" {
+					taskEnded = true
+					if ev.IsError {
+						t.Fatalf("task error: %s", ev.Output)
+					}
+				}
+			case protocol.TurnCompleted:
+				if ev.ParentSessionID == "" && ev.Depth == 0 {
+					parentDone = true
+				}
+			case protocol.ChildCompleted:
+				t.Fatalf("child completed before release; events=%v", summarizeEvents(events))
+			}
+		case id := <-ct.executed:
+			if id != "block" {
+				t.Fatalf("executed = %q", id)
+			}
+			childRunning = true
+		case <-guard.C:
+			t.Fatalf("timed out; parentDone=%v taskEnded=%v childRunning=%v events=%v",
+				parentDone, taskEnded, childRunning, summarizeEvents(events))
+		}
+	}
+
+	close(release)
+	// Wait for child completion after release.
+	doneGuard := time.NewTimer(5 * time.Second)
+	defer doneGuard.Stop()
+	var childDone bool
+	for !childDone {
+		select {
+		case ev, ok := <-eng.Events():
+			if !ok {
+				t.Fatal("Events closed before ChildCompleted")
+			}
+			events = append(events, ev)
+			if c, ok := ev.(protocol.ChildCompleted); ok {
+				childDone = true
+				if c.Status != protocol.ChildStatusCompleted {
+					t.Errorf("ChildCompleted status = %q", c.Status)
+				}
+			}
+		case <-doneGuard.C:
+			t.Fatalf("timed out waiting for child; events=%v", summarizeEvents(events))
+		}
 	}
 }

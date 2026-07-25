@@ -24,11 +24,15 @@ type streamStep struct {
 	events []provider.StreamEvent
 	err    error
 	stream func(context.Context) <-chan provider.StreamEvent
+	// match, when set, claims this step only for matching requests. Concurrent
+	// parent/child streams use match so step order is not a race.
+	match func(provider.Request) bool
 }
 
 type scriptedProvider struct {
 	mu       sync.Mutex
 	steps    []streamStep
+	used     []bool
 	calls    int
 	requests chan provider.Request
 }
@@ -36,16 +40,43 @@ type scriptedProvider struct {
 func (p *scriptedProvider) Name() string { return "scripted" }
 
 func newScriptedProvider(steps ...streamStep) *scriptedProvider {
-	return &scriptedProvider{steps: steps, requests: make(chan provider.Request, len(steps)+8)}
+	return &scriptedProvider{
+		steps:    steps,
+		used:     make([]bool, len(steps)),
+		requests: make(chan provider.Request, len(steps)+8),
+	}
 }
 
 func (p *scriptedProvider) Stream(ctx context.Context, req provider.Request) (<-chan provider.StreamEvent, error) {
 	p.mu.Lock()
-	if p.calls >= len(p.steps) {
+	if len(p.used) != len(p.steps) {
+		p.used = make([]bool, len(p.steps))
+	}
+	idx := -1
+	// Prefer a matched unused step so concurrent child/parent streams do not
+	// steal each other's scripted responses.
+	for i, step := range p.steps {
+		if p.used[i] || step.match == nil || !step.match(req) {
+			continue
+		}
+		idx = i
+		break
+	}
+	if idx < 0 {
+		for i, step := range p.steps {
+			if p.used[i] || step.match != nil {
+				continue
+			}
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
 		p.mu.Unlock()
 		return nil, errors.New("unexpected Stream call")
 	}
-	step := p.steps[p.calls]
+	step := p.steps[idx]
+	p.used[idx] = true
 	p.calls++
 	requests := p.requests
 	p.mu.Unlock()
@@ -70,6 +101,30 @@ func (p *scriptedProvider) callCount() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.calls
+}
+
+// matchUserText claims streams whose history includes a user message with text.
+func matchUserText(text string) func(provider.Request) bool {
+	return func(req provider.Request) bool {
+		for _, m := range req.Messages {
+			if m.Role == provider.RoleUser && m.Text == text {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+// matchToolResult claims streams that already include a tool result for callID.
+func matchToolResult(callID string) func(provider.Request) bool {
+	return func(req provider.Request) bool {
+		for _, m := range req.Messages {
+			if m.Role == provider.RoleTool && m.ToolResult != nil && m.ToolResult.CallID == callID {
+				return true
+			}
+		}
+		return false
+	}
 }
 
 func cloneProviderRequest(req provider.Request) provider.Request {

@@ -13,12 +13,31 @@ import (
 	"github.com/jonathanung/strike-cli/internal/tool"
 )
 
-// spawnChild runs a blocking foreground child engine for the task tool.
-// It never calls child.Run on the parent turn worker: Run and event drain
-// each get their own goroutine. Parent emits ChildStarted/ChildCompleted;
-// only PermissionAsked/PermissionResolved and QuestionAsked/QuestionResolved
-// are re-emitted from the child.
+// childHandle tracks one non-blocking child engine while it runs.
+type childHandle struct {
+	id        string
+	ops       chan<- protocol.Op
+	cancel    context.CancelFunc
+	done      chan struct{}
+	permReply func(protocol.PermissionReply)
+	qReply    func(protocol.QuestionReply)
+	// eng is retained so the drain goroutine can read lastAssistantText.
+	eng *Engine
+}
+
+// spawnChild starts a non-blocking child engine for the task tool and returns
+// as soon as the child is running. The parent turn is not held open for the
+// child's lifetime. Child Run and event drain each get their own goroutine
+// under the parent engine's run context (not the parent turn context).
+//
+// Parent emits ChildStarted immediately and ChildCompleted when the child
+// finishes. Only PermissionAsked/PermissionResolved and
+// QuestionAsked/QuestionResolved are re-emitted from the child onto the
+// parent event stream; optional ChildSession hooks persist the full child log.
 func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.TaskResult, error) {
+	if err := ctx.Err(); err != nil {
+		return tool.TaskResult{}, err
+	}
 	maxDepth := e.opts.MaxChildDepth
 	if maxDepth == 0 {
 		maxDepth = 1
@@ -37,6 +56,17 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 	}
 
 	childID := rand.Text()
+	title := taskTitle(req.Prompt)
+	if e.opts.OpenChildSession != nil {
+		id, err := e.opts.OpenChildSession(e.opts.SessionID, childID, title)
+		if err != nil {
+			return tool.TaskResult{}, fmt.Errorf("open child session: %w", err)
+		}
+		if strings.TrimSpace(id) != "" {
+			childID = id
+		}
+	}
+
 	childDepth := e.opts.Depth + 1
 	// Strip task only when the child cannot nest further (depth >= max).
 	// Otherwise keep task so MaxChildDepth > 1 can actually nest; SpawnTask
@@ -92,44 +122,61 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		child.opts.InitialModel = ""
 	}
 
-	childCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	e.childMu.Lock()
-	e.activeChildReply = child.perms.Reply
-	e.activeChildQuestionReply = child.questions.Reply
-	e.activeChildOps = child.Ops()
-	e.childMu.Unlock()
-	defer func() {
-		e.childMu.Lock()
-		e.activeChildReply = nil
-		e.activeChildQuestionReply = nil
-		e.activeChildOps = nil
-		e.childMu.Unlock()
-	}()
+	// Child lifetime follows the parent engine, not the invoking turn.
+	parentLife := e.runCtx
+	if parentLife == nil {
+		parentLife = context.Background()
+	}
+	childCtx, cancel := context.WithCancel(parentLife)
 
 	childCorr := protocol.Correlation{
 		SessionID:       childID,
 		ParentSessionID: e.opts.SessionID,
 		Depth:           childDepth,
 	}
+
+	h := &childHandle{
+		id:        childID,
+		ops:       child.Ops(),
+		cancel:    cancel,
+		done:      make(chan struct{}),
+		permReply: child.perms.Reply,
+		qReply:    child.questions.Reply,
+		eng:       child,
+	}
+
+	e.childMu.Lock()
+	if e.children == nil {
+		e.children = make(map[string]*childHandle)
+	}
+	e.children[childID] = h
+	e.childMu.Unlock()
+
 	e.emit(protocol.ChildStarted{
+		Correlation: childCorr,
+		Agent:       agentName,
+		Prompt:      req.Prompt,
+	})
+	e.persistChildEvent(childID, protocol.ChildStarted{
 		Correlation: childCorr,
 		Agent:       agentName,
 		Prompt:      req.Prompt,
 	})
 
 	// stopReason is delivered once when the child turn ends. Buffer 1 so the
-	// drain goroutine never blocks on a late parent reader.
+	// drain goroutine never blocks on a late reader.
 	stopCh := make(chan string, 1)
-	drainDone := make(chan struct{})
 	var (
 		failMu  sync.Mutex
 		failMsg string
 	)
 	go func() {
-		defer close(drainDone)
+		defer close(h.done)
+		defer e.unregisterChild(childID)
+		defer e.closeChildSession(childID)
+
 		for ev := range child.Events() {
+			e.persistChildEvent(childID, ev)
 			switch ev := ev.(type) {
 			case protocol.PermissionAsked:
 				e.emit(ev)
@@ -140,10 +187,12 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 			case protocol.QuestionResolved:
 				e.emit(ev)
 			case protocol.TurnCompleted:
+				// One-shot task: shut down the child Run loop after its turn.
 				select {
 				case stopCh <- ev.StopReason:
 				default:
 				}
+				cancel()
 			case protocol.EngineError:
 				// Pre-turn failures (e.g. no provider) never emit TurnCompleted.
 				// Mid-turn errors are followed by TurnCompleted{"error"}; the
@@ -159,13 +208,61 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 				case stopCh <- "error":
 				default:
 				}
+				cancel()
 			}
 		}
+
+		// Ensure Run exits even if Events closed without a terminal signal.
+		cancel()
+
+		stopReason := ""
+		gotStop := false
+		select {
+		case stopReason = <-stopCh:
+			gotStop = true
+		default:
+		}
+
+		// If parent engine life ended without a child turn terminal, treat as cancel.
+		summary := lastAssistantText(child.messages)
+		var status protocol.ChildStatus
+		switch {
+		case (childCtx.Err() != nil && !gotStop) || (gotStop && stopReason == "interrupted"):
+			status = protocol.ChildStatusCanceled
+			if summary == "" {
+				summary = "task canceled"
+			}
+		case !gotStop || stopReason == "error":
+			status = protocol.ChildStatusFailed
+			failMu.Lock()
+			errText := failMsg
+			failMu.Unlock()
+			switch {
+			case errText != "" && summary != "":
+				summary = summary + "\n\nError: " + errText
+			case errText != "":
+				summary = errText
+			case summary == "":
+				summary = "task failed"
+			}
+		default:
+			status = protocol.ChildStatusCompleted
+			if summary == "" {
+				summary = "task completed"
+			}
+		}
+		completed := protocol.ChildCompleted{
+			Correlation: childCorr,
+			Status:      status,
+			Summary:     summary,
+		}
+		e.emit(completed)
+		e.persistChildEvent(childID, completed)
 	}()
 
 	go child.Run(childCtx)
 
-	// Deliver the subtask prompt unless the parent context is already done.
+	// Deliver the subtask prompt unless the parent turn context is already done.
 	select {
 	case <-ctx.Done():
 		cancel()
@@ -173,88 +270,106 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		case child.Ops() <- protocol.Interrupt{}:
 		default:
 		}
+		return tool.TaskResult{}, ctx.Err()
 	case child.Ops() <- protocol.UserInput{Text: req.Prompt}:
 	}
 
-	var stopReason string
-	var gotStop bool
-	collectStop := func() {
-		if gotStop {
-			return
-		}
-		select {
-		case stopReason = <-stopCh:
-			gotStop = true
-		case <-drainDone:
-			select {
-			case stopReason = <-stopCh:
-				gotStop = true
-			default:
-			}
-		}
-	}
+	out := fmt.Sprintf(
+		"Started child session %s (agent %s). It runs independently and does not block this turn. A child.completed event will report its terminal summary.",
+		childID, agentName,
+	)
+	return tool.TaskResult{
+		Output:    out,
+		Status:    "started",
+		SessionID: childID,
+	}, nil
+}
 
-	select {
-	case stopReason = <-stopCh:
-		gotStop = true
-	case <-ctx.Done():
-		cancel()
+func (e *Engine) unregisterChild(id string) {
+	e.childMu.Lock()
+	defer e.childMu.Unlock()
+	delete(e.children, id)
+}
+
+func (e *Engine) persistChildEvent(id string, ev protocol.Event) {
+	if e.opts.AppendChildEvent == nil {
+		return
+	}
+	_ = e.opts.AppendChildEvent(id, ev)
+}
+
+func (e *Engine) closeChildSession(id string) {
+	if e.opts.CloseChildSession == nil {
+		return
+	}
+	_ = e.opts.CloseChildSession(id)
+}
+
+// routePermissionReply delivers a reply to the parent service and every
+// active child. Request IDs are session-scoped so only one service matches.
+func (e *Engine) routePermissionReply(op protocol.PermissionReply) {
+	replies := e.childPermReplies()
+	e.perms.Reply(op)
+	for _, reply := range replies {
+		reply(op)
+	}
+}
+
+// routeQuestionReply delivers a reply to the parent service and every
+// active child. Request IDs are session-scoped so only one service matches.
+func (e *Engine) routeQuestionReply(op protocol.QuestionReply) {
+	replies := e.childQuestionReplies()
+	e.questions.Reply(op)
+	for _, reply := range replies {
+		reply(op)
+	}
+}
+
+func (e *Engine) childPermReplies() []func(protocol.PermissionReply) {
+	e.childMu.Lock()
+	defer e.childMu.Unlock()
+	out := make([]func(protocol.PermissionReply), 0, len(e.children))
+	for _, h := range e.children {
+		out = append(out, h.permReply)
+	}
+	return out
+}
+
+func (e *Engine) childQuestionReplies() []func(protocol.QuestionReply) {
+	e.childMu.Lock()
+	defer e.childMu.Unlock()
+	out := make([]func(protocol.QuestionReply), 0, len(e.children))
+	for _, h := range e.children {
+		out = append(out, h.qReply)
+	}
+	return out
+}
+
+// snapshotChildren returns active child handles for shutdown.
+func (e *Engine) snapshotChildren() []*childHandle {
+	e.childMu.Lock()
+	defer e.childMu.Unlock()
+	out := make([]*childHandle, 0, len(e.children))
+	for _, h := range e.children {
+		out = append(out, h)
+	}
+	return out
+}
+
+// shutdownChildren cancels every active child and waits for drain completion.
+// Called from Run exit so Events stays open until children finish emitting.
+func (e *Engine) shutdownChildren() {
+	handles := e.snapshotChildren()
+	for _, h := range handles {
+		h.cancel()
 		select {
-		case child.Ops() <- protocol.Interrupt{}:
+		case h.ops <- protocol.Interrupt{}:
 		default:
 		}
-		collectStop()
-	case <-drainDone:
-		collectStop()
 	}
-
-	// Shut down the child Run loop and join the drain goroutine.
-	cancel()
-	<-drainDone
-
-	var once sync.Once
-	var result tool.TaskResult
-	complete := func(status protocol.ChildStatus, summary string) {
-		once.Do(func() {
-			e.emit(protocol.ChildCompleted{
-				Correlation: childCorr,
-				Status:      status,
-				Summary:     summary,
-			})
-			result = tool.TaskResult{
-				Output: summary,
-				Status: string(status),
-			}
-		})
+	for _, h := range handles {
+		<-h.done
 	}
-
-	summary := lastAssistantText(child.messages)
-	switch {
-	case ctx.Err() != nil || (gotStop && stopReason == "interrupted"):
-		if summary == "" {
-			summary = "task canceled"
-		}
-		complete(protocol.ChildStatusCanceled, summary)
-	case !gotStop || stopReason == "error":
-		failMu.Lock()
-		errText := failMsg
-		failMu.Unlock()
-		switch {
-		case errText != "" && summary != "":
-			summary = summary + "\n\nError: " + errText
-		case errText != "":
-			summary = errText
-		case summary == "":
-			summary = "task failed"
-		}
-		complete(protocol.ChildStatusFailed, summary)
-	default:
-		if summary == "" {
-			summary = "task completed"
-		}
-		complete(protocol.ChildStatusCompleted, summary)
-	}
-	return result, nil
 }
 
 func lastAssistantText(messages []provider.Message) string {
@@ -266,4 +381,21 @@ func lastAssistantText(messages []provider.Message) string {
 		}
 	}
 	return ""
+}
+
+func taskTitle(prompt string) string {
+	s := strings.Join(strings.Fields(strings.TrimSpace(prompt)), " ")
+	if s == "" {
+		return "task"
+	}
+	const max = 48
+	if len(s) <= max {
+		return s
+	}
+	// Avoid mid-rune truncation.
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max-1]) + "…"
 }
