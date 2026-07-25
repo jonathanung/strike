@@ -82,11 +82,13 @@ re-run `make build` after pulling changes to refresh it.
 The screen has a full-width header, footer hints, and danger banner when
 needed. Its left pane is one aggregate stack: `session` transcript, reserved
 notice line, slash-command completion, and `prompt ❯` composer. The right slot
-hosts one active registered placeholder window. Vim-style pane keys: `ctrl+h` /
-`ctrl+l` focus the left or right pane; `ctrl+j` / `ctrl+k` cycle the active
-right-pane window next/previous. `ctrl+p` opens the command palette; `f1` (or
-`/keys`) opens a filterable keybind cheatsheet. Pickers, the command palette,
-and permission prompts render as centered dialogs in the same panel style.
+hosts one active session pane (`context` setup or `activity` tools/tips).
+Vim-style pane keys: `ctrl+h` / `ctrl+l` focus the left or right pane; `ctrl+j`
+/ `ctrl+k` cycle the active right-pane window next/previous. `ctrl+p` opens the
+command palette; `f1` (or `/keys`) opens a filterable keybind cheatsheet. Enter
+sends; Shift+Enter (or Alt+Enter) inserts a newline. Pickers, the command
+palette, and permission prompts render as centered dialogs in the same panel
+style.
 
 The default split appears at 93 columns and above, with a minimum 60-column
 left pane, one-column gutter, and 32-column right pane. At 92 columns and
@@ -141,9 +143,9 @@ before expiry, and rotated refresh tokens are persisted.
 Provider selection happens in-app with `/provider`; `--provider` on the
 command line just pre-selects (and validates credentials eagerly).
 
-Keys: `enter` send · `esc` interrupt turn / reject permission ·
-`1/2/3` or `←/→ + enter` answer permission prompts · `pgup/pgdn` scroll ·
-`ctrl+c` quit.
+Keys: `enter` send · `shift+enter` newline (alt+enter fallback) ·
+`esc` interrupt turn / reject permission · `1/2/3` or `←/→ + enter`
+answer permission prompts · `pgup/pgdn` scroll · `ctrl+c` quit.
 
 ## Architecture in one paragraph
 

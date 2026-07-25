@@ -42,7 +42,7 @@ func defaultKeyMap() keyMap {
 		CompletionPrev:    key.NewBinding(key.WithKeys("up"), key.WithHelp("up", "previous")),
 		CompletionNext:    key.NewBinding(key.WithKeys("down", "ctrl+n"), key.WithHelp("down/ctrl+n", "next")),
 		Send:              key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "send")),
-		Newline:           key.NewBinding(key.WithKeys("alt+enter"), key.WithHelp("alt+enter", "newline")),
+		Newline:           key.NewBinding(key.WithKeys("alt+enter"), key.WithHelp("shift+enter", "newline")),
 		HistoryPrev:       key.NewBinding(key.WithKeys("up"), key.WithHelp("up", "history previous")),
 		HistoryNext:       key.NewBinding(key.WithKeys("down"), key.WithHelp("down", "history next")),
 		Agent:             key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "agent")),

@@ -11,8 +11,8 @@ type windowRegistry struct {
 
 func newWindowRegistry() windowRegistry {
 	return windowRegistry{windows: []window{
-		newPlaceholderWindow("context", "context", "Context window placeholder."),
-		newPlaceholderWindow("activity", "activity", "Activity window placeholder."),
+		newNamedWindow("context", "context"),
+		newNamedWindow("activity", "activity"),
 	}}
 }
 

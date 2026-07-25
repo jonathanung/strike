@@ -13,7 +13,7 @@ func newComposer(th theme.Theme) textarea.Model {
 	th = th.Resolve()
 	st := th.S()
 	ta := textarea.New()
-	ta.Placeholder = "Ask strike anything… (/provider to pick a model, enter to send)"
+	ta.Placeholder = "Ask anything…  (/ for commands)"
 	ta.Prompt = th.Icons.Prompt + themedSpace(th.Spacing.XS)
 	ta.MaxHeight = composerMaxHeight
 	ta.SetHeight(composerMinHeight)

@@ -88,11 +88,13 @@ F2-style enum for separate transcript, composer, and modal focus.
 The right pane is TUI-local. Its private, value-oriented `window` interface
 has identity/title, initialization, update, resize, and view methods; updates
 and resizes return replacement values so model copies do not share mutable
-state. The registry contains exactly two placeholders (`context` and
-`activity`) and exposes only the active window. It has no close state, plugin
-mechanism, file content, editor, or markdown reader. Window input and resize
-updates stay inside `internal/tui`: no protocol Op or Event was added for this
-pane infrastructure.
+state. The registry contains exactly two named session panes (`context` for
+setup summary and `activity` for recent tools or idle tips) and exposes only
+the active window. It has no close state, plugin mechanism, file content,
+editor, or markdown reader. Window input and resize updates stay inside
+`internal/tui`: no protocol Op or Event was added for this pane infrastructure.
+Composer input treats Enter as send and Shift+Enter (normalized to Alt+Enter)
+as newline via a stdin wrapper and enhanced keyboard modes.
 
 `View()` composes the full-width header first; its body is a horizontal split
 of the left stack (transcript, notice, completion, composer, in that order)

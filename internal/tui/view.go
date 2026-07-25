@@ -152,8 +152,13 @@ func (m Model) composerView(compact bool, width, height int) string {
 	if !visualFocus {
 		composer.Blur()
 	}
+	var footer string
+	if !borderless {
+		footer = composerFooter(m.th, width)
+	}
 	return ui.Panel(m.th, ui.PanelOpts{
 		Title:      "prompt" + themedSpace(m.th.Resolve().Spacing.XS) + m.themeIcons().Prompt,
+		Footer:     footer,
 		Width:      width,
 		Height:     height,
 		Borderless: borderless,
@@ -162,12 +167,46 @@ func (m Model) composerView(compact bool, width, height int) string {
 	}, composer.View())
 }
 
-// rightPaneView frames the active window. Windows render only their content;
-// the app owns the shared pane chrome and focus state.
+// composerFooter advertises send/newline when the panel has room for a footer.
+func composerFooter(th theme.Theme, width int) string {
+	_ = width
+	return dotJoin(th, "enter send", "shift+enter newline")
+}
+
+// rightPaneView frames the active window. Context and activity bodies are
+// Model-driven; other windows render their own content. The app owns the
+// shared pane chrome and focus state.
 func (m Model) rightPaneView(width, height int, compact bool) string {
 	var title, body string
 	if active := m.windows.active(); active != nil {
-		title, body = active.title(), active.view(m.th)
+		title = active.title()
+		innerW, innerH := width, height
+		if nw, ok := active.(namedWindow); ok {
+			if nw.width > 0 {
+				innerW = nw.width
+			} else {
+				innerW = ui.PanelInnerWidth(m.th, width)
+			}
+			if nw.height > 0 {
+				innerH = nw.height
+			} else {
+				innerH = ui.PanelInnerHeight(width, height)
+			}
+		} else {
+			innerW = ui.PanelInnerWidth(m.th, width)
+			innerH = ui.PanelInnerHeight(width, height)
+		}
+		if compact {
+			innerW, innerH = width, height
+		}
+		switch active.id() {
+		case "context":
+			body = m.contextPaneBody(max(0, innerW), max(0, innerH))
+		case "activity":
+			body = m.activityPaneBody(max(0, innerW), max(0, innerH))
+		default:
+			body = active.view(m.th)
+		}
 	}
 	return ui.Panel(m.th, ui.PanelOpts{
 		Title:      title,

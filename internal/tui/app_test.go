@@ -329,7 +329,10 @@ func TestComposerEnterBindings(t *testing.T) {
 		assertNoAppOp(t, ops)
 	})
 
-	for _, name := range []string{"ordinary enter", "framework-indistinguishable shift enter"} {
+	// Plain KeyEnter always sends. Shift+Enter is only distinguishable after
+	// the input normalizer rewrites terminal CSI to Alt+Enter; without that
+	// rewrite Bubble Tea delivers an ordinary KeyEnter, which correctly sends.
+	for _, name := range []string{"ordinary enter", "plain KeyEnter still sends without normalizer"} {
 		t.Run(name, func(t *testing.T) {
 			m, ops := newAppTestModel(nil, nil)
 			m.providerName = "echo"

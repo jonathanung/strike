@@ -33,6 +33,11 @@ func TestWelcomeDashboardRendersBentoCardsForEmptyTranscript(t *testing.T) {
 			t.Errorf("welcome dashboard missing %q:\n%s", want, plain)
 		}
 	}
+	// Keys card includes newline help when height allows (default welcomeKeys rows).
+	keys := ansi.Strip(m.welcomeKeys())
+	if !strings.Contains(keys, "shift+enter") && !strings.Contains(keys, "newline") {
+		t.Errorf("welcome keys missing newline help: %q", keys)
+	}
 	if strings.Contains(plain, "S T R I K E") || strings.Contains(plain, "strike"+"┐") {
 		t.Errorf("welcome dashboard retained removed standalone logo card:\n%s", plain)
 	}
