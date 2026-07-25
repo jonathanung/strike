@@ -42,6 +42,12 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 			Used:        KnownTokens(150),
 			Source:      UsageSourceActual,
 		},
+		ProviderRetrying{
+			Correlation: Correlation{SessionID: "session-1", TurnID: "turn-1", ProviderRequestID: "provider-1", Attempt: 1},
+			NextAttempt: 2,
+			DelayMs:     200,
+			Message:     "rate limited",
+		},
 		SessionMeta{Correlation: corr, PRURL: "https://github.com/acme/repo/pull/7", PRNumber: 7},
 	}
 	for _, want := range events {

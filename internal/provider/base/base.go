@@ -93,11 +93,7 @@ func (c *Client) PostJSON(ctx context.Context, url string, in any, out any) erro
 		return err
 	}
 	if resp.StatusCode != http.StatusOK {
-		var apiErr apiError
-		if json.Unmarshal(data, &apiErr) == nil && apiErr.Error != nil {
-			return fmt.Errorf("%s: %s: %s", c.ProviderName, apiErr.Error.Type, apiErr.Error.Message)
-		}
-		return fmt.Errorf("%s: unexpected status %s: %.200s", c.ProviderName, resp.Status, data)
+		return statusError(c.ProviderName, resp.StatusCode, data)
 	}
 	if err := json.Unmarshal(data, out); err != nil {
 		return fmt.Errorf("%s: bad response (%s): %.200s", c.ProviderName, resp.Status, data)
@@ -124,29 +120,66 @@ func (c *Client) PostSSE(ctx context.Context, url string, in any) (io.ReadCloser
 	if resp.StatusCode != http.StatusOK {
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		resp.Body.Close()
-		var apiErr apiError
-		if json.Unmarshal(data, &apiErr) == nil && apiErr.Error != nil {
-			return nil, fmt.Errorf("%s: %s: %s", c.ProviderName, apiErr.Error.Type, apiErr.Error.Message)
-		}
-		return nil, fmt.Errorf("%s: unexpected status %s: %.300s", c.ProviderName, resp.Status, data)
+		return nil, statusError(c.ProviderName, resp.StatusCode, data)
 	}
 	return resp.Body, nil
 }
 
-// Stream runs fn in a goroutine against a fresh event channel, closing it
-// when fn returns — the shared emit pattern for all providers.
+// Stream runs fn in a goroutine against a fresh event channel and normalizes
+// the result to the provider terminal contract (exactly one Done/Error).
 func Stream(fn func(ch chan<- provider.StreamEvent)) <-chan provider.StreamEvent {
-	ch := make(chan provider.StreamEvent)
+	raw := make(chan provider.StreamEvent)
 	go func() {
-		defer close(ch)
-		fn(ch)
+		defer close(raw)
+		fn(raw)
 	}()
-	return ch
+	return provider.NormalizeStream(raw)
 }
 
 // Fail is a convenience for terminating a stream with an error.
 func Fail(ch chan<- provider.StreamEvent, err error) {
 	ch <- provider.StreamEvent{Type: provider.EventError, Err: err}
+}
+
+// StatusError is a non-OK HTTP response from a provider API.
+type StatusError struct {
+	Provider string
+	Status   int
+	Type     string // API error type when the body parsed
+	Message  string
+	Body     string // body snippet when unparsed
+}
+
+func (e *StatusError) Error() string {
+	if e.Type != "" {
+		return fmt.Sprintf("%s: %s: %s", e.Provider, e.Type, e.Message)
+	}
+	if e.Body != "" {
+		return fmt.Sprintf("%s: unexpected status %d: %s", e.Provider, e.Status, e.Body)
+	}
+	return fmt.Sprintf("%s: unexpected status %d", e.Provider, e.Status)
+}
+
+// Retryable reports transient overload/upstream failures safe to re-attempt.
+func (e *StatusError) Retryable() bool {
+	return e.Status == 408 || e.Status == 429 || e.Status >= 500
+}
+
+func statusError(provider string, status int, data []byte) error {
+	var apiErr apiError
+	if json.Unmarshal(data, &apiErr) == nil && apiErr.Error != nil {
+		return &StatusError{
+			Provider: provider,
+			Status:   status,
+			Type:     apiErr.Error.Type,
+			Message:  apiErr.Error.Message,
+		}
+	}
+	body := string(data)
+	if len(body) > 200 {
+		body = body[:200]
+	}
+	return &StatusError{Provider: provider, Status: status, Body: body}
 }
 
 // OpenAIEffort spells the normalized reasoning dial the way the OpenAI family
