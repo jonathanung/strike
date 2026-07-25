@@ -47,7 +47,7 @@ service/theme token).
 | `internal/protocol` | Ops/Events seam; JSONL envelopes |
 | `internal/engine` | Turn loop, tool dispatch, interrupts |
 | `internal/provider` | LLM adapters (+ `base`, `echo`, anthropic, openai, xai, chatgpt) |
-| `internal/tool` | read/glob/grep/edit/write/apply_patch/bash/task/webfetch/todowrite/todoread/memory_write/memory_read/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/toolsearch |
+| `internal/tool` | read/glob/grep/edit/write/apply_patch/bash/task/webfetch/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/toolsearch |
 | `internal/question` | user-question ask service (suspend tool until QuestionReply) |
 | `internal/permission` | last-match-wins allow/ask/deny + ask service |
 | `internal/auth` | credentials, OAuth/PKCE/device, env precedence |
@@ -55,8 +55,9 @@ service/theme token).
 | `internal/session` | JSONL event log append/replay + concurrent Manager |
 | `internal/history` | project-scoped prompt history |
 | `internal/memory` | project-scoped durable key/value memory |
-| `internal/host` | frozen stdlib-only contract: what a frontend needs from its host (auth, catalog, settings, history, memory, agents, skills) |
-| `internal/host/local` | real `host.Services` impl, wraps auth/config/models/history/memory |
+| `internal/issue` | project-scoped durable issue tracker |
+| `internal/host` | frozen stdlib-only contract: what a frontend needs from its host (auth, catalog, settings, history, memory, issues, agents, skills) |
+| `internal/host/local` | real `host.Services` impl, wraps auth/config/models/history/memory/issue |
 | `internal/tui` | Bubble Tea UI: app model, layout, cells, modals |
 | `internal/tui/theme` | design tokens: adaptive colors, `Icons`, precomputed `Styles` |
 | `internal/tui/ui` | reusable component library (Panel, Dialog, Badge, List, Bento, …) |
