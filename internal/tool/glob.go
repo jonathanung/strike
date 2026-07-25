@@ -20,7 +20,13 @@ func NewGlob() Tool { return globTool{} }
 func (globTool) Name() string { return "glob" }
 
 func (globTool) Description() string {
-	return "Find files by name pattern. Supports ** for recursive matching, e.g. \"**/*.go\" or \"internal/**/*_test.go\"."
+	return `Fast file pattern matching tool that works with any codebase size.
+
+- Supports glob patterns like "**/*.go" or "src/**/*.ts"
+- Returns matching file paths
+- Use this tool when you need to find files by name patterns
+- Prefer this tool over shell find/ls for ordinary file discovery
+- You can call multiple tools in one response; batch independent searches when useful`
 }
 
 func (globTool) Schema() json.RawMessage {

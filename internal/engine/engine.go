@@ -17,13 +17,6 @@ import (
 	"github.com/jonathanung/strike-cli/internal/tool"
 )
 
-const DefaultSystemPrompt = `You are strike, an agentic coding assistant running in a terminal.
-You help with software engineering tasks using the tools available to you.
-Be concise. Prefer reading and searching before editing. Use the edit tool
-for modifications to existing files and write only for new files. When a
-tool call is rejected by the user, adjust your approach based on any
-feedback instead of retrying the same call.`
-
 // Model-facing tool-result outputs when a turn is interrupted mid-batch.
 const (
 	canceledToolOutput  = "Tool call canceled because the turn was interrupted."
@@ -66,6 +59,12 @@ type Options struct {
 	Agents       []Agent
 	InitialAgent string
 	MaxTokens    int
+	// ProjectRoot is the workspace root (often the git toplevel). Shown in
+	// the environment system-prompt layer; empty falls back to WorkDir.
+	ProjectRoot string
+	// Instructions are preloaded AGENTS.md/CLAUDE.md blocks appended after
+	// the environment layer (see config.LoadInstructions).
+	Instructions []string
 	// Rules are permission ruleset layers, earliest first (later wins).
 	Rules []permission.Ruleset
 }
@@ -573,14 +572,6 @@ func (e *Engine) handleSelectAgent(op protocol.SelectAgent) {
 			Model:       e.model,
 		})
 	}
-}
-
-// system returns the active system prompt.
-func (e *Engine) system() string {
-	if e.agent.Prompt != "" {
-		return e.agent.Prompt
-	}
-	return DefaultSystemPrompt
 }
 
 func (e *Engine) turnActive() bool {

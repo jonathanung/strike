@@ -228,24 +228,29 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 		tool.NewBash(),
 	)
 
-	// The built-in build agent comes first (the default, like opencode);
-	// user agents from ~/.strike/agents and ./.strike/agents follow.
+	// Built-in agents first (build default, then plan), like opencode;
+	// user agents from ~/.strike/agents and ./.strike/agents follow and
+	// may override same-named built-ins.
 	buildPrompt := engine.DefaultSystemPrompt
 	if cfg.SystemPrompt != "" {
 		buildPrompt = cfg.SystemPrompt
 	}
-	agents := []engine.Agent{{Name: "build", Description: "general coding agent", Prompt: buildPrompt}}
+	agents := []engine.Agent{
+		{Name: "build", Description: "The default agent. Executes tools based on configured permissions.", Prompt: buildPrompt},
+		{Name: "plan", Description: "Plan mode. Read-only analysis and implementation plans.", Prompt: engine.PlanSystemPrompt},
+	}
 	loadedAgents, err := config.LoadAgentsWithError(workDir)
 	if err != nil {
 		return fmt.Errorf("loading agents: %w", err)
 	}
 	for _, a := range loadedAgents {
-		if a.Name == "build" {
-			agents[0] = engine.Agent(a) // user-defined build overrides the built-in
+		if i := indexAgent(agents, a.Name); i >= 0 {
+			agents[i] = engine.Agent(a)
 			continue
 		}
 		agents = append(agents, engine.Agent(a))
 	}
+	instructions := config.LoadInstructions(workDir, projectIdentity.Root)
 	skills, err := config.LoadSkillsWithError(workDir)
 	if err != nil {
 		return fmt.Errorf("loading skills: %w", err)
@@ -259,6 +264,8 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 		Select:          selectProvider,
 		Registry:        registry,
 		WorkDir:         workDir,
+		ProjectRoot:     projectIdentity.Root,
+		Instructions:    instructions,
 		InitialProvider: cfg.Provider,
 		InitialModel:    cfg.Model,
 		InitialEffort:   cfg.Effort,
@@ -304,4 +311,13 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 	}
 	fmt.Fprintln(stdout, "session log:", store.Path())
 	return nil
+}
+
+func indexAgent(agents []engine.Agent, name string) int {
+	for i, a := range agents {
+		if a.Name == name {
+			return i
+		}
+	}
+	return -1
 }

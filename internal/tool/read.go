@@ -21,7 +21,17 @@ func NewRead() Tool { return readTool{} }
 func (readTool) Name() string { return "read" }
 
 func (readTool) Description() string {
-	return "Read a file from the filesystem. Returns numbered lines. Use offset/limit for large files."
+	return `Read a file from the local filesystem. If the path does not exist, an error is returned.
+
+Usage:
+- filePath may be absolute or relative to the working directory.
+- By default, this tool returns up to 2000 lines from the start of the file.
+- offset is the 1-indexed line to start from; use a larger offset to continue.
+- Use the grep tool to find specific content in large files or files with long lines.
+- If you are unsure of the correct file path, use the glob tool to look up filenames by pattern.
+- Contents are returned with each line prefixed by its line number. Any line longer than 2000 characters is truncated.
+- Call this tool in parallel when you know there are multiple files you want to read.
+- Avoid tiny repeated slices (30 line chunks). If you need more context, read a larger window.`
 }
 
 func (readTool) Schema() json.RawMessage {

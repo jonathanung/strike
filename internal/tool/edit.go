@@ -15,7 +15,15 @@ func NewEdit() Tool { return editTool{} }
 func (editTool) Name() string { return "edit" }
 
 func (editTool) Description() string {
-	return "Perform an exact string replacement in a file. oldString must match the file content exactly and be unique unless replaceAll is true."
+	return `Performs exact string replacements in files.
+
+Usage:
+- Prefer reading the file with the read tool before editing so oldString matches current content.
+- When editing text from read tool output, preserve exact indentation. Match the file content only — never include the line-number prefix from read output in oldString or newString.
+- ALWAYS prefer editing existing files. NEVER write new files unless explicitly required.
+- Only use emojis if the user explicitly requests it.
+- Fails if oldString is not found, or if it matches multiple locations and replaceAll is false. Provide more surrounding context to make the match unique, or set replaceAll.
+- Use replaceAll when renaming a symbol or replacing every occurrence in the file.`
 }
 
 func (editTool) Schema() json.RawMessage {

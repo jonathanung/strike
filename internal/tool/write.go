@@ -15,7 +15,14 @@ func NewWrite() Tool { return writeTool{} }
 func (writeTool) Name() string { return "write" }
 
 func (writeTool) Description() string {
-	return "Write content to a file, creating it (and parent directories) if needed, overwriting if it exists. Prefer the edit tool for modifying existing files."
+	return `Writes a file to the local filesystem.
+
+Usage:
+- This tool will overwrite the existing file if there is one at the provided path.
+- If this is an existing file, you MUST use the read tool first. Prefer the edit tool for modifying existing files.
+- ALWAYS prefer editing existing files in the codebase. NEVER write new files unless explicitly required.
+- NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the user.
+- Only use emojis if the user explicitly requests it.`
 }
 
 func (writeTool) Schema() json.RawMessage {

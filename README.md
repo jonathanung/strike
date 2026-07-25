@@ -212,9 +212,15 @@ Both `.strike` roots (global and project) can hold `agents/` and `skills/`
 folders of markdown files; project files override same-named global ones.
 
 **Agents** (`agents/*.md`) are personas — a system prompt with optional
-provider/model/effort pins. The built-in **build** agent is the default (define
-your own `build.md` to replace it). **Tab cycles agents**; `/agent [name]`
-lists or selects; the active agent shows in the status bar.
+provider/model/effort pins. Built-ins: **build** (default coding agent) and
+**plan** (read-only planning). Define your own `build.md` / `plan.md` to
+replace them. **Tab cycles agents**; `/agent [name]` lists or selects; the
+active agent shows in the status bar.
+
+Each model request composes the system prompt in layers (like opencode):
+agent baseline → environment (workdir, workspace root, git, platform, date,
+model) → `AGENTS.md` / `CLAUDE.md` instructions from `~/.strike` and the
+project (walked up to the git root).
 
 ```markdown
 ---

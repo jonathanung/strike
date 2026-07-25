@@ -33,7 +33,14 @@ func NewGrep() Tool { return grepTool{} }
 func (grepTool) Name() string { return "grep" }
 
 func (grepTool) Description() string {
-	return "Search file contents with a regular expression. Returns matches as path:line: text. Use include to filter files by glob, e.g. \"*.go\"."
+	return `Fast content search tool that works with any codebase size.
+
+- Searches file contents using regular expressions
+- Supports full regex syntax (e.g. "log.*Error", "function\\s+\\w+")
+- Filter files by pattern with the include parameter (e.g. "*.go", "*.{ts,tsx}")
+- Returns file paths and line numbers with matching lines
+- Use this tool when you need to find files containing specific patterns
+- Prefer this tool over shell grep/rg for ordinary codebase search`
 }
 
 func (grepTool) Schema() json.RawMessage {

@@ -22,7 +22,15 @@ func NewBash() Tool { return bashTool{} }
 func (bashTool) Name() string { return "bash" }
 
 func (bashTool) Description() string {
-	return "Execute a shell command with bash in the working directory. Returns combined stdout/stderr. Long output is truncated."
+	return `Executes a shell command with bash in the working directory. Returns combined stdout/stderr.
+
+Usage notes:
+- Prefer dedicated tools over shell: use read, glob, grep, edit, and write instead of cat, find, grep, sed, awk, or echo when those tools can do the job.
+- Always quote file paths that contain spaces.
+- Explain non-trivial commands that change the user's system before running them.
+- Independent commands may be issued as parallel tool calls; chain dependent commands with && in one call.
+- Optional timeoutMs (default 120000, max 600000). Long output is truncated.
+- Do not use bash to communicate with the user; send a normal assistant message instead.`
 }
 
 func (bashTool) Schema() json.RawMessage {

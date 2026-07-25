@@ -26,16 +26,7 @@ write_if_absent "${STRIKE_DIR}/config" <<'EOF'
 }
 EOF
 
-write_if_absent "${STRIKE_DIR}/agents/plan.md" <<'EOF'
----
-description: read-only planning mode — analyze and propose, never modify
----
-You are in planning mode. Investigate the codebase using read, glob, and
-grep, then produce a clear implementation plan: the files to change, the
-order to change them in, and the risks. Do NOT edit or write files and do
-NOT run commands that modify state; if a change is needed, describe it
-instead of making it.
-EOF
+# plan is built into strike; a user plan.md here overrides the built-in.
 
 write_if_absent "${STRIKE_DIR}/skills/commit.md" <<'EOF'
 ---
