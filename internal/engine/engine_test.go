@@ -312,6 +312,12 @@ complete:
 			counts["user"]++
 			turnID = corr.TurnID
 			assertCorrelationFields(t, ev, corr, true, false)
+		case protocol.SessionTitled:
+			counts["titled"]++
+			assertCorrelationFields(t, ev, corr, false, false)
+			if ev.Title == "" {
+				t.Error("SessionTitled title is empty")
+			}
 		case protocol.TurnStarted:
 			counts["started"]++
 			assertCorrelationFields(t, ev, corr, true, false)
@@ -357,7 +363,7 @@ complete:
 			t.Errorf("%T turnId = %q, want stable %q", ev, corr.TurnID, turnID)
 		}
 	}
-	for _, name := range []string{"model", "agent", "user", "started", "begin", "asked", "resolved", "end", "text", "completed"} {
+	for _, name := range []string{"model", "agent", "user", "titled", "started", "begin", "asked", "resolved", "end", "text", "completed"} {
 		if counts[name] != 1 {
 			t.Errorf("%s event count = %d, want 1", name, counts[name])
 		}
@@ -912,7 +918,9 @@ func TestShutdownDropsBlockedBeginWithoutUnmatchedEnd(t *testing.T) {
 	for range 2 {
 		_ = receiveEvent(t, eng.Events(), func(protocol.Event) bool { return true })
 	}
-	for range 254 {
+	// Leave room for UserMessage + SessionTitled + TurnStarted so Stream runs;
+	// ToolCallBegin then blocks on the full 256-event buffer.
+	for range 253 {
 		eng.Ops() <- protocol.SelectModel{Provider: "scripted"}
 	}
 	eng.Ops() <- protocol.UserInput{Text: "shutdown with blocked begin"}
@@ -1088,6 +1096,8 @@ func eventCorrelation(t *testing.T, ev protocol.Event) protocol.Correlation {
 	switch ev := ev.(type) {
 	case protocol.UserMessage:
 		return ev.Correlation
+	case protocol.SessionTitled:
+		return ev.Correlation
 	case protocol.TurnStarted:
 		return ev.Correlation
 	case protocol.TextDelta:
@@ -1119,6 +1129,84 @@ func eventCorrelation(t *testing.T, ev protocol.Event) protocol.Correlation {
 	default:
 		t.Fatalf("event %T has no correlation assertion", ev)
 		return protocol.Correlation{}
+	}
+}
+
+func TestSessionAutoTitleOnceFromFirstUserMessage(t *testing.T) {
+	const sessionID = "session-title"
+	prov := newScriptedProvider(
+		streamStep{events: []provider.StreamEvent{
+			{Type: provider.EventTextDelta, Text: "one"},
+			{Type: provider.EventDone, StopReason: "end_turn"},
+		}},
+		streamStep{events: []provider.StreamEvent{
+			{Type: provider.EventTextDelta, Text: "two"},
+			{Type: provider.EventDone, StopReason: "end_turn"},
+		}},
+	)
+	eng := engine.New(engine.Options{
+		SessionID:       sessionID,
+		Select:          func(string) (provider.Provider, string, error) { return prov, "scripted-model", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "  fix   the\nauth flow  "}
+	_, first := collectThroughTurnCompleted(t, eng.Events())
+	var titles []protocol.SessionTitled
+	var sawUser bool
+	for _, ev := range first {
+		switch e := ev.(type) {
+		case protocol.UserMessage:
+			sawUser = true
+			if e.Text != "  fix   the\nauth flow  " {
+				t.Errorf("UserMessage text = %q", e.Text)
+			}
+		case protocol.SessionTitled:
+			titles = append(titles, e)
+		}
+	}
+	if !sawUser {
+		t.Fatal("missing UserMessage")
+	}
+	if len(titles) != 1 {
+		t.Fatalf("SessionTitled count = %d, want 1; events=%#v", len(titles), first)
+	}
+	if titles[0].Title != "fix the auth flow" {
+		t.Errorf("title = %q, want %q", titles[0].Title, "fix the auth flow")
+	}
+	if titles[0].SessionID != sessionID || titles[0].TurnID != "" || titles[0].ProviderRequestID != "" {
+		t.Errorf("SessionTitled correlation = %#v, want session-only", titles[0].Correlation)
+	}
+	// SessionTitled must follow UserMessage and precede TurnStarted.
+	var userIdx, titleIdx, startedIdx = -1, -1, -1
+	for i, ev := range first {
+		switch ev.(type) {
+		case protocol.UserMessage:
+			userIdx = i
+		case protocol.SessionTitled:
+			titleIdx = i
+		case protocol.TurnStarted:
+			if startedIdx < 0 {
+				startedIdx = i
+			}
+		}
+	}
+	if !(userIdx >= 0 && titleIdx == userIdx+1 && startedIdx == titleIdx+1) {
+		t.Errorf("order user=%d title=%d started=%d", userIdx, titleIdx, startedIdx)
+	}
+
+	eng.Ops() <- protocol.UserInput{Text: "second message should not retitle"}
+	_, second := collectThroughTurnCompleted(t, eng.Events())
+	for _, ev := range second {
+		if _, ok := ev.(protocol.SessionTitled); ok {
+			t.Fatalf("second turn re-emitted SessionTitled: %#v", second)
+		}
 	}
 }
 

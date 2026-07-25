@@ -186,8 +186,9 @@ func LoadSkills(workDir string) []Skill {
 	return skills
 }
 
-// LoadSkillsWithError reads skills/*.md from the global then project .strike
-// roots; a project skill overrides a global one with the same name.
+// LoadSkillsWithError merges built-in shipping skills with skills/*.md from
+// the global then project .strike roots. Later layers override earlier ones
+// with the same name (builtins < global < project).
 func LoadSkillsWithError(workDir string) ([]Skill, error) {
 	byName := map[string]Skill{}
 	var order []string
@@ -214,11 +215,11 @@ func LoadSkillsWithError(workDir string) ([]Skill, error) {
 			byName[name] = Skill{Name: name, Description: meta["description"], Template: body}
 		}
 	}
-	skills := make([]Skill, 0, len(order))
+	disk := make([]Skill, 0, len(order))
 	for _, name := range order {
-		skills = append(skills, byName[name])
+		disk = append(disk, byName[name])
 	}
-	return skills, nil
+	return mergeSkills(BuiltinSkills(), disk), nil
 }
 
 // Render substitutes the skill's arguments into its template.

@@ -69,7 +69,10 @@ type historyAddedMsg struct {
 type Options struct {
 	DangerouslySkipPermissions bool
 	Theme                      *theme.Theme
-	SessionID                  string
+	// ThemeID is the catalog id of Theme (e.g. "strike", "dracula"). Empty
+	// defaults to theme.BuiltinID when Theme is nil.
+	ThemeID   string
+	SessionID string
 	// WorkDir is display identity for the context pane and resolves relative
 	// paths for /vim. Empty falls back to os.Getwd at launch time.
 	WorkDir string
@@ -105,6 +108,7 @@ type Model struct {
 	services host.Services
 
 	th       theme.Theme
+	themeID  string // catalog id of th
 	cells    []cell
 	toolByID map[string]*toolCell
 	modal    modal
@@ -190,9 +194,13 @@ type childActivity struct {
 // variadic for backward-compatible call sites.
 func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Services, options ...Options) Model {
 	th := theme.Default()
+	themeID := theme.BuiltinID
 	for _, option := range options {
 		if option.Theme != nil {
 			th = *option.Theme
+		}
+		if option.ThemeID != "" {
+			themeID = option.ThemeID
 		}
 	}
 	th = th.Resolve()
@@ -207,6 +215,7 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		skills:     services.Skills,
 		commands:   commandCatalog(services.Skills),
 		th:         th,
+		themeID:    themeID,
 		toolByID:   map[string]*toolCell{},
 		composer:   ta,
 		keyMap:     defaultKeyMap(),
@@ -355,6 +364,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setNotice("saving defaults failed: "+msg.err.Error(), true)
 		} else {
 			m.setNotice("saved as default: "+msg.text, false)
+		}
+		return m, nil
+
+	case themeSelectedMsg:
+		m.applyThemeEntry(msg.entry)
+		m.setNotice("theme: "+msg.entry.ID, false)
+		return m, nil
+
+	case themeSavedMsg:
+		if msg.err != nil {
+			m.setNotice("saving theme failed: "+msg.err.Error(), true)
+		} else {
+			m.setNotice("saved theme default: "+msg.id, false)
 		}
 		return m, nil
 
@@ -861,11 +883,17 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 	case protocol.UserMessage:
 		m.completeAssistantCells()
 		m.cells = append(m.cells, &userCell{text: ev.Text})
+		// Fallback for logs without session.titled (pre-auto-title sessions).
 		if m.titleTopic == "" {
 			if topic := sanitizeTitleTopic(ev.Text); topic != "" {
 				m.titleTopic = topic
-				cmd = tea.SetWindowTitle(windowTitle(*m))
+				cmd = tea.Batch(tea.SetWindowTitle(windowTitle(*m)), m.broadcastContextState())
 			}
+		}
+	case protocol.SessionTitled:
+		if topic := sanitizeTitleTopic(ev.Title); topic != "" {
+			m.titleTopic = topic
+			cmd = tea.Batch(tea.SetWindowTitle(windowTitle(*m)), m.broadcastContextState())
 		}
 	case protocol.TurnStarted:
 		m.turnStartedAt = time.Now()
@@ -1051,6 +1079,8 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	switch e := ev.(type) {
 	case protocol.UserMessage:
 		return e.Correlation, true
+	case protocol.SessionTitled:
+		return e.Correlation, true
 	case protocol.TurnStarted:
 		return e.Correlation, true
 	case protocol.TextDelta:
@@ -1133,6 +1163,7 @@ func (m Model) contextStateSnapshot() contextStateMsg {
 	return contextStateMsg{
 		WorkDir:           m.workDir,
 		SessionID:         m.sessionID,
+		SessionTitle:      m.titleTopic,
 		Provider:          m.providerName,
 		Model:             m.modelName,
 		Agent:             m.agentName,
@@ -1274,7 +1305,7 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 			"/vim [path[:line]]",
 			"/md-read <path>",
 			"/memory [list|get|set|rm]",
-			"/theme [dark|light|auto]",
+			"/theme [name|dark|light|auto]",
 			"/layout",
 			"/keys",
 			"skills as /<name>",
@@ -1463,25 +1494,47 @@ func (m Model) sendSelect(op protocol.SelectModel) (tea.Model, tea.Cmd) {
 	}
 }
 
-// handleThemeCommand sets or cycles session-local appearance (auto|dark|light).
+// handleThemeCommand opens the theme picker, applies a named JSON theme, or
+// sets session-local appearance (dark|light|auto).
 func (m Model) handleThemeCommand(args []string) (tea.Model, tea.Cmd) {
-	next := m.appearance
+	m.resetComposer()
 	if len(args) == 0 {
-		next = cycleAppearance(m.appearance)
-	} else if mode, ok := parseAppearance(strings.ToLower(args[0])); ok {
-		next = mode
-	} else {
-		m.setNotice("usage: /theme [dark|light|auto]", true)
+		m.clearNotice()
+		m.modal = newThemeModal(theme.Catalog(m.workDir), m.themeID, m.services.Settings)
+		m.reflow()
 		return m, nil
 	}
-	m.appearance = next
-	applyAppearance(m.appearance)
+	arg := strings.ToLower(strings.TrimSpace(args[0]))
+	if mode, ok := parseAppearance(arg); ok {
+		m.appearance = mode
+		applyAppearance(m.appearance)
+		m.restyleWidgets()
+		m.setNotice("appearance: "+string(m.appearance), false)
+		m.reflow()
+		m.refreshViewport()
+		return m, nil
+	}
+	entry, ok := theme.Lookup(theme.Catalog(m.workDir), arg)
+	if !ok {
+		// Also try the raw (case-preserving) id from args[0].
+		entry, ok = theme.Lookup(theme.Catalog(m.workDir), strings.TrimSpace(args[0]))
+	}
+	if !ok {
+		m.setNotice("unknown theme "+args[0]+" — try /theme", true)
+		return m, nil
+	}
+	m.applyThemeEntry(entry)
+	m.setNotice("theme: "+entry.ID, false)
+	return m, nil
+}
+
+// applyThemeEntry swaps the active palette and restyles widgets/viewport.
+func (m *Model) applyThemeEntry(entry theme.Entry) {
+	m.th = entry.Theme.Resolve()
+	m.themeID = entry.ID
 	m.restyleWidgets()
-	m.resetComposer()
-	m.setNotice("theme: "+string(m.appearance), false)
 	m.reflow()
 	m.refreshViewport()
-	return m, nil
 }
 
 // handleFastCommand toggles or sets the session priority-tier preference.

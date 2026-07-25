@@ -275,9 +275,12 @@ permissions: [{"permission":"bash","pattern":"git *","action":"allow"}]
 Evaluation order: defaults → config → optional --dangerously-skip-permissions allow-all → active agent profile → session always grants (last-match-wins). Switching agents replaces the profile and clears session always-grants. Agent denies still apply under --dangerously-skip-permissions.
 
 **Skills** (`skills/*.md`) are prompt templates invoked as slash commands:
-`/commit fix the auth bug` runs the `commit.md` template with `$ARGUMENTS`
+`/commit fix the auth bug` runs the `commit` skill with `$ARGUMENTS`
 replaced by "fix the auth bug" (arguments are appended if the placeholder
-is absent).
+is absent). Strike ships built-in shipping skills — `/commit`, `/push`,
+`/pr`, `/ship` — overridden by same-named files under `~/.strike/skills` or
+`./.strike/skills`. Successful `gh pr …` output that prints a GitHub PR URL
+is recorded on the session (JSONL `session.meta` + sidecar `.meta.json`).
 
 ```markdown
 ---
