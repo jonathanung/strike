@@ -30,7 +30,7 @@ func TestCustomProviderHostRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	customs := config.NewCustomStore(nil)
-	svc := New(store, nil, nil, nil, nil, customs)
+	svc := New(store, nil, nil, nil, nil, nil, customs)
 
 	if svc.Providers == nil {
 		t.Fatal("Providers is nil")

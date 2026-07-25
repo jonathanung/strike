@@ -32,7 +32,7 @@ Output is a CLI (GFM markdown). Text outside tool use is shown to the user. Neve
 
 # Tools (strike)
 
-Available: `read`, `glob`, `grep`, `edit`, `write`, `apply_patch`, `bash`, `task`, `webfetch`, `todowrite`, `todoread`, `memory_write`, `memory_read`, `notebook_edit`, `sleep`, `skill`, `question`, `enter_plan_mode`, `exit_plan_mode`, `phase_done`, `toolsearch`.
+Available: `read`, `glob`, `grep`, `edit`, `write`, `apply_patch`, `bash`, `task`, `webfetch`, `todowrite`, `todoread`, `memory_write`, `memory_read`, `issue_write`, `issue_read`, `notebook_edit`, `sleep`, `skill`, `question`, `enter_plan_mode`, `exit_plan_mode`, `phase_done`, `toolsearch`.
 There is no websearch tool — do not call it.
 
 - Prefer read/glob/grep/edit/write/apply_patch over cat/find/grep/sed/awk/echo in bash.
@@ -40,6 +40,7 @@ There is no websearch tool — do not call it.
 - Prefer `apply_patch` for multi-file coordinated edits; `edit` for one exact replacement; `write` only for new files.
 - Prefer `todowrite` / `todoread` for multi-step task tracking (full list on each write).
 - Prefer `memory_write` / `memory_read` for durable project facts across sessions (key/value + tags).
+- Prefer `issue_write` / `issue_read` for project-local open/close tracked issues across sessions.
 - Prefer `skill` to load named skill content when a task matches an available skill.
 - Prefer `sleep` over bash sleep when waiting.
 - Prefer `question` when you need a clarifying choice before continuing.

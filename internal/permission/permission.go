@@ -37,8 +37,8 @@ type Ruleset []Rule
 var knownPermissions = map[string]struct{}{
 	"*": {}, "read": {}, "glob": {}, "grep": {}, "edit": {}, "write": {},
 	"bash": {}, "task": {}, "webfetch": {}, "todowrite": {}, "todoread": {},
-	"memory_write": {}, "memory_read": {}, "sleep": {},
-	"skill": {}, "question": {}, "toolsearch": {},
+	"memory_write": {}, "memory_read": {}, "issue_write": {}, "issue_read": {},
+	"sleep": {}, "skill": {}, "question": {}, "toolsearch": {}, "hook": {},
 	"enter_plan_mode": {}, "exit_plan_mode": {}, "phase_done": {},
 }
 
@@ -78,12 +78,16 @@ func Defaults() Ruleset {
 		{Permission: "edit", Pattern: "*", Action: Ask},
 		{Permission: "write", Pattern: "*", Action: Ask},
 		{Permission: "bash", Pattern: "*", Action: Ask},
+		// Project-local shell hooks execute arbitrary code — gate first run.
+		{Permission: "hook", Pattern: "*", Action: Ask},
 		{Permission: "task", Pattern: "*", Action: Allow},
 		{Permission: "webfetch", Pattern: "*", Action: Ask},
 		{Permission: "todowrite", Pattern: "*", Action: Allow},
 		{Permission: "todoread", Pattern: "*", Action: Allow},
 		{Permission: "memory_write", Pattern: "*", Action: Allow},
 		{Permission: "memory_read", Pattern: "*", Action: Allow},
+		{Permission: "issue_write", Pattern: "*", Action: Allow},
+		{Permission: "issue_read", Pattern: "*", Action: Allow},
 		{Permission: "sleep", Pattern: "*", Action: Allow},
 		{Permission: "skill", Pattern: "*", Action: Allow},
 		{Permission: "question", Pattern: "*", Action: Allow},
@@ -203,8 +207,10 @@ type resolvedEmission struct {
 // Evaluation order (last-match-wins):
 //
 //	base layers (defaults → config → optional dangerous allow-all)
+//	→ project runtime grants (DecisionProject; also persisted when a
+//	  ProjectPersister is set)
 //	→ active agent profile
-//	→ session always grants
+//	→ session always grants (DecisionAlways)
 //	→ active workflow phase profile
 //
 // Agent is evaluated after the optional dangerous allow-all, so role denies
@@ -216,22 +222,38 @@ type Service struct {
 
 	mu      sync.Mutex
 	base    []Ruleset
-	agent   Ruleset // active agent profile; evaluated after base, before granted
-	granted Ruleset // session-scoped "always" grants
+	project Ruleset // runtime project-scoped grants (DecisionProject)
+	agent   Ruleset // active agent profile; evaluated after project, before granted
+	granted Ruleset // session-scoped "always" grants (DecisionAlways)
 	phase   Ruleset // active workflow phase profile; last, hard ceiling
 	pending map[string]*pending
 	nextID  int
+
+	// persistProject, when set, is called outside the mutex after a project
+	// grant is recorded in memory. Failures are ignored so the in-session
+	// grant still applies; the caller may log them.
+	persistProject func(Rule) error
 }
 
 // New creates a Service. emit publishes events toward the frontend; base
-// rulesets are evaluated in order (later wins), then the active agent
-// profile, session always grants, then the workflow phase profile.
+// rulesets are evaluated in order (later wins), then project grants, the
+// active agent profile, session always grants, then the workflow phase profile.
 func New(emit func(protocol.Event), base ...Ruleset) *Service {
 	return &Service{emit: emit, base: base, pending: map[string]*pending{}}
 }
 
+// SetProjectPersister registers an optional hook invoked after a
+// DecisionProject grant is applied in memory. fn may be nil to clear.
+// Safe to call at any time; concurrent with Ask/Reply.
+func (s *Service) SetProjectPersister(fn func(Rule) error) {
+	s.mu.Lock()
+	s.persistProject = fn
+	s.mu.Unlock()
+}
+
 // SetAgentRules replaces the active agent profile and clears session
-// always-grants so prior role grants cannot widen the new role. An empty
+// always-grants so prior role grants cannot widen the new role. Project
+// grants are kept (they are workspace policy, not role-scoped). An empty
 // or nil ruleset clears the agent layer. Defensively copies rs.
 //
 // Also rejects any pending asks (API hygiene; production SelectAgent is
@@ -380,10 +402,10 @@ func (s *Service) ask(ctx context.Context, req tool.AskRequest, corr protocol.Co
 	}
 }
 
-// Reply resolves a pending ask. An "always" grant records session rules and
-// retroactively resolves other pending asks that now evaluate to allow; a
-// reject cascades to all sibling pending asks so a batch of parallel calls
-// doesn't produce a prompt storm after one rejection.
+// Reply resolves a pending ask. Session (always) and project grants record
+// rules and retroactively resolve other pending asks that now evaluate to
+// allow; a reject cascades to all sibling pending asks so a batch of parallel
+// calls doesn't produce a prompt storm after one rejection.
 //
 // PermissionResolved is emitted immediately only for asks whose
 // PermissionAsked has already finished. Otherwise the resolution is queued on
@@ -404,14 +426,22 @@ func (s *Service) Reply(r protocol.PermissionReply) {
 	}
 	var resolved []cascaded
 	var resolvedReply protocol.PermissionReply
+	var projectRules Ruleset
+	persist := s.persistProject
 	switch r.Decision {
-	case protocol.DecisionAlways:
+	case protocol.DecisionAlways, protocol.DecisionProject:
 		patterns := p.always
 		if len(patterns) == 0 {
 			patterns = p.patterns
 		}
 		for _, pat := range patterns {
-			s.granted = append(s.granted, Rule{Permission: p.permission, Pattern: pat, Action: Allow})
+			rule := Rule{Permission: p.permission, Pattern: pat, Action: Allow}
+			if r.Decision == protocol.DecisionProject {
+				s.project = append(s.project, rule)
+				projectRules = append(projectRules, rule)
+			} else {
+				s.granted = append(s.granted, rule)
+			}
 		}
 		for id, other := range s.pending {
 			if s.evaluateLocked(other.permission, other.patterns) == Allow {
@@ -456,6 +486,11 @@ func (s *Service) Reply(r protocol.PermissionReply) {
 			Decision:    em.decision,
 		})
 	}
+	if persist != nil {
+		for _, rule := range projectRules {
+			_ = persist(rule)
+		}
+	}
 	p.ch <- r
 	for _, other := range resolved {
 		other.p.ch <- resolvedReply
@@ -465,7 +500,7 @@ func (s *Service) Reply(r protocol.PermissionReply) {
 // evaluateLocked returns the worst-case action across the ask's patterns:
 // any deny denies, any ask asks, otherwise allow.
 func (s *Service) evaluateLocked(permission string, patterns []string) Action {
-	sets := append(append(append(append([]Ruleset{}, s.base...), s.agent), s.granted), s.phase)
+	sets := append(append(append(append(append([]Ruleset{}, s.base...), s.project), s.agent), s.granted), s.phase)
 	worst := Allow
 	if len(patterns) == 0 {
 		patterns = []string{"*"}
