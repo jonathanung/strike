@@ -13,12 +13,42 @@ type TodoItem struct {
 	Status  string `json:"status"`
 }
 
-type todoWriteTool struct {
+// TodoStore holds the session todo list shared by todowrite and todoread.
+type TodoStore struct {
 	mu    sync.Mutex
 	todos []TodoItem
 }
 
-func NewTodoWrite() Tool { return &todoWriteTool{} }
+func NewTodoStore() *TodoStore { return &TodoStore{} }
+
+// Get returns a copy of the current todo list.
+func (s *TodoStore) Get() []TodoItem {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]TodoItem, len(s.todos))
+	copy(out, s.todos)
+	return out
+}
+
+// Replace sets the todo list to a copy of items.
+func (s *TodoStore) Replace(items []TodoItem) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stored := make([]TodoItem, len(items))
+	copy(stored, items)
+	s.todos = stored
+}
+
+type todoWriteTool struct {
+	store *TodoStore
+}
+
+func NewTodoWrite(store *TodoStore) Tool {
+	if store == nil {
+		store = NewTodoStore()
+	}
+	return &todoWriteTool{store: store}
+}
 
 func (t *todoWriteTool) Name() string { return "todowrite" }
 
@@ -30,7 +60,7 @@ Use this tool to track progress during multi-step work and keep todo statuses cu
 Usage notes:
   - Provide the full todo list on every call; the list is replaced entirely (pass an empty array to clear).
   - Each item needs a unique id, non-empty content, and status: pending, in_progress, completed, or cancelled.
-  - There is no separate read tool — the full list is returned on every write.
+  - Use todoread to inspect the current list without changing it; this write also returns the full list.
   - Prefer this for multi-step tasks so progress stays visible across turns.`
 }
 
@@ -104,13 +134,8 @@ func (t *todoWriteTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 		return Result{}, err
 	}
 
-	// Store a copy so later callers cannot mutate internal state via the slice.
-	stored := make([]TodoItem, len(todos))
-	copy(stored, todos)
-
-	t.mu.Lock()
-	t.todos = stored
-	t.mu.Unlock()
+	t.store.Replace(todos)
+	stored := t.store.Get()
 
 	out, err := json.MarshalIndent(stored, "", "  ")
 	if err != nil {

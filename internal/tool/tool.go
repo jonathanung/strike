@@ -1,5 +1,6 @@
 // Package tool defines the tool contract and the built-in tool set
-// (read/glob/grep/edit/write/bash/task/webfetch/todowrite/notebook_edit/sleep/skill/toolsearch).
+// (read/glob/grep/edit/write/apply_patch/bash/task/webfetch/todowrite/todoread/
+// notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/toolsearch).
 // Used by internal/engine (dispatch), internal/permission (AskRequest, for the
 // Context.Ask signature), and cmd/strike (registry construction); internal/tui
 // never imports it — tool calls reach the frontend only as
@@ -42,13 +43,41 @@ type TaskResult struct {
 	Status string
 }
 
+// QuestionOption is one selectable choice on a QuestionItem.
+type QuestionOption struct {
+	Label       string
+	Description string
+}
+
+// QuestionItem is one prompt in a QuestionRequest batch.
+type QuestionItem struct {
+	ID       string
+	Header   string
+	Question string
+	Options  []QuestionOption
+}
+
+// QuestionRequest is a user-question batch raised by the question tool.
+type QuestionRequest struct {
+	Questions []QuestionItem
+}
+
+// QuestionResponse carries one answer string per question (same order).
+type QuestionResponse struct {
+	Answers []string
+}
+
 // Context carries per-call facilities into a tool. Ask blocks until the
 // permission is granted; it returns an error if rejected or denied.
 // SpawnTask, when non-nil, runs a blocking foreground child session.
+// AskUser, when non-nil, blocks until the user answers a question batch.
+// SwitchAgent, when non-nil, queues an agent switch applied when the turn ends.
 type Context struct {
-	WorkDir   string
-	Ask       func(ctx context.Context, req AskRequest) error
-	SpawnTask func(ctx context.Context, req TaskRequest) (TaskResult, error)
+	WorkDir     string
+	Ask         func(ctx context.Context, req AskRequest) error
+	SpawnTask   func(ctx context.Context, req TaskRequest) (TaskResult, error)
+	AskUser     func(ctx context.Context, req QuestionRequest) (QuestionResponse, error)
+	SwitchAgent func(name string) error
 	// Files optionally tracks read snapshots for stale-edit detection after
 	// external changes (FilesChanged / /vim). Nil disables the checks.
 	Files *FileState
