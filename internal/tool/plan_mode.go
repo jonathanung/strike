@@ -14,9 +14,9 @@ func NewEnterPlanMode() Tool { return enterPlanModeTool{} }
 func (enterPlanModeTool) Name() string { return "enter_plan_mode" }
 
 func (enterPlanModeTool) Description() string {
-	return `Switch the session into plan mode (the "plan" agent).
+	return `Switch the session into plan mode (the "plan" agent) and start the plan→implement workflow.
 
-Plan mode is prompt-enforced readonly: the model should analyze and propose a plan without editing files or running mutating commands. Call exit_plan_mode when ready to return to build mode after user approval.`
+Plan mode hard-denies write/edit tools via the plan phase permission profile. Analyze and propose a plan; call exit_plan_mode (or phase_done) when ready to implement after user approval.`
 }
 
 func (enterPlanModeTool) Schema() json.RawMessage {
@@ -35,15 +35,20 @@ func (enterPlanModeTool) Execute(ctx context.Context, args json.RawMessage, tc *
 	}); err != nil {
 		return Result{}, err
 	}
-	if tc.SwitchAgent == nil {
-		return Result{}, fmt.Errorf("enter_plan_mode: SwitchAgent is not configured")
-	}
-	if err := tc.SwitchAgent("plan"); err != nil {
-		return Result{}, err
+	if tc.EnterPlanPhase != nil {
+		if err := tc.EnterPlanPhase(); err != nil {
+			return Result{}, err
+		}
+	} else if tc.SwitchAgent != nil {
+		if err := tc.SwitchAgent("plan"); err != nil {
+			return Result{}, err
+		}
+	} else {
+		return Result{}, fmt.Errorf("enter_plan_mode: plan phase/agent switch is not configured")
 	}
 	return Result{
 		Title:  "plan mode",
-		Output: "Switched to plan mode. Plan mode is prompt-enforced readonly — analyze and plan; do not edit or run mutating tools. Call exit_plan_mode when ready to implement.",
+		Output: "Switched to plan mode. Write/edit tools are denied by the plan phase profile — analyze and plan; call exit_plan_mode when ready to implement.",
 	}, nil
 }
 
@@ -54,9 +59,9 @@ func NewExitPlanMode() Tool { return exitPlanModeTool{} }
 func (exitPlanModeTool) Name() string { return "exit_plan_mode" }
 
 func (exitPlanModeTool) Description() string {
-	return `Leave plan mode and return to the build agent after the user approves.
+	return `Leave plan mode and advance the plan→implement workflow after the user approves.
 
-When AskUser is available, asks a Yes/No confirmation. Yes switches to build; No stays in plan mode. If AskUser is unavailable, switches to build directly. Plan mode is prompt-enforced readonly until exit succeeds.`
+Runs the plan phase user exit gate, then loads the implement phase (build agent). If no workflow phase is active, falls back to a Yes/No confirmation and switches to build.`
 }
 
 func (exitPlanModeTool) Schema() json.RawMessage {
@@ -75,6 +80,27 @@ func (exitPlanModeTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 	}); err != nil {
 		return Result{}, err
 	}
+
+	if tc.AdvancePhase != nil {
+		err := tc.AdvancePhase(ctx)
+		switch {
+		case err == nil:
+			return Result{
+				Title:  "build mode",
+				Output: "Exited plan mode. Advanced to implement phase — you may implement the plan.",
+			}, nil
+		case strings.Contains(err.Error(), "declined"):
+			return Result{
+				Title:  "staying in plan mode",
+				Output: "User declined exiting plan mode. Remaining in plan phase (write/edit denied).",
+			}, nil
+		case strings.Contains(err.Error(), "no active workflow phase"):
+			// Fall through to agent-only exit path.
+		default:
+			return Result{}, err
+		}
+	}
+
 	if tc.SwitchAgent == nil {
 		return Result{}, fmt.Errorf("exit_plan_mode: SwitchAgent is not configured")
 	}
@@ -101,7 +127,7 @@ func (exitPlanModeTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 		if !isYesAnswer(answer) {
 			return Result{
 				Title:  "staying in plan mode",
-				Output: "User declined exiting plan mode. Remaining in plan mode (prompt-enforced readonly).",
+				Output: "User declined exiting plan mode. Remaining in plan mode.",
 			}, nil
 		}
 	}

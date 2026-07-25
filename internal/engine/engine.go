@@ -16,6 +16,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
@@ -123,6 +124,12 @@ type Options struct {
 	// PersistSessionMeta, when set, writes durable session metadata (sidecar).
 	// The engine emits protocol.SessionMeta after a successful persist.
 	PersistSessionMeta func(meta protocol.SessionMeta) error
+	// Workflows are named phase sequences (built-in plan-implement plus any
+	// loaded from .strike/workflows). Empty falls back to the built-in only.
+	Workflows []config.Workflow
+	// DefaultWorkflow is entered by enter_plan_mode when set; empty means
+	// "plan-implement".
+	DefaultWorkflow string
 	// OpenChildSession, when set, opens a durable log for a spawned child.
 	// parentID and a suggested childID/title are provided; the returned id is
 	// used as the child SessionID when non-empty.
@@ -193,6 +200,10 @@ type Engine struct {
 	pendingAgentMu sync.Mutex
 	pendingAgent   string
 
+	// workflow/phaseIndex track the active workflow phase (-1 = none).
+	workflow   config.Workflow
+	phaseIndex int
+
 	// files tracks tool read snapshots so external edits (FilesChanged / /vim)
 	// force the model to re-read before edit/write.
 	files *tool.FileState
@@ -224,6 +235,9 @@ func New(opts Options) *Engine {
 	if opts.MaxChildDepth == 0 {
 		opts.MaxChildDepth = 1
 	}
+	if len(opts.Workflows) == 0 {
+		opts.Workflows = []config.Workflow{config.BuiltinPlanImplement()}
+	}
 	e := &Engine{
 		opts:                opts,
 		ops:                 make(chan protocol.Op, 16),
@@ -232,6 +246,7 @@ func New(opts Options) *Engine {
 		files:               &tool.FileState{},
 		children:            make(map[string]*childHandle),
 		contextWindowTokens: opts.ContextWindow,
+		phaseIndex:          -1,
 	}
 	e.perms = permission.New(e.emit, opts.Rules...)
 	if opts.PersistProjectRule != nil {
@@ -769,16 +784,28 @@ func (e *Engine) findAgent(name string) (Agent, bool) {
 	return Agent{}, false
 }
 
-// handleSelectAgent switches the active persona and applies its
-// provider/model pins and permission profile when set.
+// handleSelectAgent switches the active persona and syncs workflow phase
+// when the user picks build/plan (tab, /agent, tools via SwitchAgent).
 func (e *Engine) handleSelectAgent(op protocol.SelectAgent) {
-	agent, ok := e.findAgent(op.Name)
+	if !e.applyAgent(op.Name) {
+		return
+	}
+	// Root only: child sessions do not drive parent workflow phases.
+	if e.opts.Depth == 0 {
+		e.syncPhaseWithAgent(op.Name)
+	}
+}
+
+// applyAgent switches persona, agent permission profile, and optional
+// provider/model pins without touching workflow phase state.
+func (e *Engine) applyAgent(name string) bool {
+	agent, ok := e.findAgent(name)
 	if !ok {
 		e.emit(protocol.EngineError{
 			Correlation: e.sessionCorr(),
-			Message:     fmt.Sprintf("unknown agent %q", op.Name),
+			Message:     fmt.Sprintf("unknown agent %q", name),
 		})
-		return
+		return false
 	}
 	e.agent = agent
 	// Child sessions may only apply Deny rules from an agent profile so a
@@ -815,13 +842,14 @@ func (e *Engine) handleSelectAgent(op protocol.SelectAgent) {
 				Correlation: e.sessionCorr(),
 				Message:     fmt.Sprintf("agent %s: %v", agent.Name, err),
 			})
-			return
+			return true
 		}
 		model := resolveSelectModel(agentProvider, agentModel, defaultModel)
 		e.setProvider(agentProvider, p, model)
 	case agentModel != "" && e.prov != nil:
 		e.setModel(agentModel)
 	}
+	return true
 }
 
 // queueSwitchAgent validates name and queues it for application after the
@@ -1307,7 +1335,9 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 				}
 				return tool.QuestionResponse{Answers: answers}, nil
 			},
-			SwitchAgent: e.queueSwitchAgent,
+			SwitchAgent:    e.queueSwitchAgent,
+			EnterPlanPhase: e.enterPlanPhase,
+			AdvancePhase:   e.advancePhase,
 			ReportOutput: func(data string) {
 				if data == "" {
 					return

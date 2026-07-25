@@ -1217,6 +1217,59 @@ func TestSetAgentRulesRejectsPending(t *testing.T) {
 	}
 }
 
+func TestSetPhaseRulesDenyBeatsBaseAllow(t *testing.T) {
+	svc := New(func(protocol.Event) {}, Ruleset{
+		{Permission: "write", Pattern: "*", Action: Allow},
+	})
+	svc.SetPhaseRules(Ruleset{{Permission: "write", Pattern: "*", Action: Deny}})
+	err := svc.Ask(context.Background(), tool.AskRequest{
+		Permission: "write",
+		Patterns:   []string{"a.go"},
+	})
+	var denied *DeniedError
+	if !errors.As(err, &denied) {
+		t.Fatalf("Ask = %v, want DeniedError", err)
+	}
+}
+
+func TestPhaseDenyBeatsGrantedAlways(t *testing.T) {
+	var asked protocol.PermissionAsked
+	var mu sync.Mutex
+	svc := New(func(ev protocol.Event) {
+		if a, ok := ev.(protocol.PermissionAsked); ok {
+			mu.Lock()
+			asked = a
+			mu.Unlock()
+		}
+	}, Ruleset{{Permission: "write", Pattern: "*", Action: Ask}})
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- svc.Ask(context.Background(), tool.AskRequest{
+			Permission: "write",
+			Patterns:   []string{"a.go"},
+			Always:     []string{"*"},
+		})
+	}()
+	waitAsked(t, &mu, &asked)
+	waitPendingAnnounced(t, svc, asked.RequestID)
+	svc.Reply(protocol.PermissionReply{RequestID: asked.RequestID, Decision: protocol.DecisionAlways})
+	if err := <-errCh; err != nil {
+		t.Fatalf("always grant: %v", err)
+	}
+
+	// Now phase deny must still block.
+	svc.SetPhaseRules(Ruleset{{Permission: "write", Pattern: "*", Action: Deny}})
+	err := svc.Ask(context.Background(), tool.AskRequest{
+		Permission: "write",
+		Patterns:   []string{"b.go"},
+	})
+	var denied *DeniedError
+	if !errors.As(err, &denied) {
+		t.Fatalf("after phase deny Ask = %v, want DeniedError", err)
+	}
+}
+
 func TestProjectGrantResolvesSiblingsAndPersists(t *testing.T) {
 	var mu sync.Mutex
 	var asked []protocol.PermissionAsked

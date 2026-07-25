@@ -310,6 +310,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tool.NewQuestion(),
 		tool.NewEnterPlanMode(),
 		tool.NewExitPlanMode(),
+		tool.NewPhaseDone(),
 	)
 	registry.Register(tool.NewToolSearch(registry))
 
@@ -336,6 +337,12 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		agents = append(agents, engine.Agent(a))
 	}
 	instructions := config.LoadInstructions(workDir, projectIdentity.Root)
+	workflows, err := config.LoadWorkflows(workDir)
+	if err != nil {
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, fmt.Errorf("loading workflows: %w", err)
+	}
 
 	// Concurrent session manager owns durable JSONL logs. One root session is
 	// created here; child/agent sessions can open alongside it later.
@@ -379,6 +386,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		InitialEffort:   cfg.Effort,
 		Agents:          agents,
 		InitialAgent:    cfg.DefaultAgent,
+		Workflows:       workflows,
 		Rules:           permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),
 		Hooks:           hookDefs,
 		LookupContextWindow: func(providerName, model string) int {

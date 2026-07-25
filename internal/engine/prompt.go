@@ -115,9 +115,13 @@ func (e *Engine) system() string {
 		parts = append(parts, ProviderSystemPrompt(e.provName, e.model))
 	}
 
-	// Built-in plan constraints always apply while the plan agent is active,
-	// even when a user plan.md supplies extra persona text.
-	if e.agent.Name == "plan" {
+	// Phase context (or built-in plan overlay while plan agent/phase is active).
+	// Prefer the active phase layer so workflow files can replace the default
+	// plan copy without corrupting conversation history.
+	if phaseCtx := e.phaseContextPrompt(); phaseCtx != "" {
+		parts = append(parts, phaseCtx)
+	} else if e.agent.Name == "plan" {
+		// Plan agent without an active phase still gets the read-only overlay.
 		parts = append(parts, PlanSystemPrompt)
 	}
 

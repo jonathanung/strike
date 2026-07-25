@@ -367,6 +367,16 @@ type AgentSelected struct {
 	Name string `json:"name"`
 }
 
+// PhaseChanged reports the active workflow phase (permission profile +
+// context). Empty Phase means no workflow phase is active.
+type PhaseChanged struct {
+	Correlation
+	Workflow string `json:"workflow,omitempty"`
+	Phase    string `json:"phase,omitempty"`
+	Index    int    `json:"index,omitempty"`
+	Gate     string `json:"gate,omitempty"` // agent | check | user
+}
+
 // EffortSelected confirms the active reasoning level, at startup and after
 // each SetEffort.
 type EffortSelected struct {
@@ -485,6 +495,7 @@ func (QuestionResolved) isEvent()    {}
 func (TurnCompleted) isEvent()       {}
 func (ModelSelected) isEvent()       {}
 func (AgentSelected) isEvent()       {}
+func (PhaseChanged) isEvent()        {}
 func (EffortSelected) isEvent()      {}
 func (FastSelected) isEvent()        {}
 func (FilesInvalidated) isEvent()    {}

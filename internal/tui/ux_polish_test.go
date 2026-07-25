@@ -228,3 +228,26 @@ func TestFirstRunOpensProviderModalOnce(t *testing.T) {
 		t.Fatalf("second firstRunSetupMsg reopened modal: %T", m.modal)
 	}
 }
+
+func TestHeaderShowsPhaseBadge(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 30})
+	m.providerName = "echo"
+	m.modelName = "echo"
+	m.agentName = "plan"
+	m.applyEvent(protocol.PhaseChanged{
+		Workflow: "plan-implement",
+		Phase:    "plan",
+		Index:    0,
+		Gate:     "user",
+	})
+	header := ansi.Strip(m.headerView(120))
+	if !strings.Contains(header, "phase") || !strings.Contains(header, "plan") {
+		t.Fatalf("header missing phase badge:\n%s", header)
+	}
+	m.applyEvent(protocol.PhaseChanged{}) // clear
+	header = ansi.Strip(m.headerView(120))
+	if strings.Contains(header, "phase ") {
+		t.Fatalf("phase badge persisted after clear:\n%s", header)
+	}
+}

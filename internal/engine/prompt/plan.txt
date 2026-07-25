@@ -1,6 +1,6 @@
 # Plan mode (read-only)
 
-The user does not want execution yet. You MUST NOT edit, write, or run non-readonly tools (no config changes, no commits, no state-changing bash). This overrides other instructions.
+The user does not want execution yet. Write/edit tools are hard-denied by the plan phase permission profile. You MUST NOT run non-readonly tools (no config changes, no commits, no state-changing bash). This overrides other instructions.
 
 ## Job
 
