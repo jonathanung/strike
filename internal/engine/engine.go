@@ -731,7 +731,14 @@ func (e *Engine) handleSelectAgent(op protocol.SelectAgent) {
 		return
 	}
 	e.agent = agent
-	e.perms.SetAgentRules(agent.Permissions)
+	// Child sessions may only apply Deny rules from an agent profile so a
+	// subagent cannot widen parent Deny/Ask via Allow (AG3). Root keeps the
+	// full profile (AG1/AG2).
+	agentRules := agent.Permissions
+	if e.opts.Depth > 0 {
+		agentRules = permission.DenyOnly(agentRules)
+	}
+	e.perms.SetAgentRules(agentRules)
 	e.emit(protocol.AgentSelected{
 		Correlation: e.sessionCorr(),
 		Name:        agent.Name,
