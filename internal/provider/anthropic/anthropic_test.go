@@ -207,6 +207,75 @@ func TestStreamEmitsReasoningTextAndToolCalls(t *testing.T) {
 	}
 }
 
+func TestStreamMapsUsageOntoEventDone(t *testing.T) {
+	const body = `{"stop_reason":"end_turn","content":[{"type":"text","text":"hi"}],` +
+		`"usage":{"input_tokens":12,"output_tokens":3,"cache_read_input_tokens":4,"cache_creation_input_tokens":5}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	p := &Provider{Client: baseClientForTest(), baseURL: srv.URL}
+	stream, err := p.Stream(context.Background(), provider.Request{Model: "claude-opus-5"})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var done *provider.StreamEvent
+	for ev := range stream {
+		if ev.Type == provider.EventError {
+			t.Fatalf("stream error: %v", ev.Err)
+		}
+		if ev.Type == provider.EventDone {
+			cp := ev
+			done = &cp
+		}
+	}
+	if done == nil {
+		t.Fatal("missing EventDone")
+	}
+	if done.Usage == nil {
+		t.Fatal("Usage is nil, want mapped fields")
+	}
+	u := done.Usage
+	if u.InputTokens != 12 || u.OutputTokens != 3 || u.CacheReadTokens != 4 || u.CacheCreationTokens != 5 {
+		t.Errorf("Usage = %+v, want input=12 output=3 cacheRead=4 cacheCreation=5", u)
+	}
+	if u.Estimated {
+		t.Error("Estimated must be false for real provider usage")
+	}
+}
+
+func TestStreamOmitsUsageWhenVendorOmits(t *testing.T) {
+	const body = `{"stop_reason":"end_turn","content":[{"type":"text","text":"hi"}]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	p := &Provider{Client: baseClientForTest(), baseURL: srv.URL}
+	stream, err := p.Stream(context.Background(), provider.Request{Model: "claude-opus-5"})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var sawDone bool
+	for ev := range stream {
+		if ev.Type == provider.EventError {
+			t.Fatalf("stream error: %v", ev.Err)
+		}
+		if ev.Type == provider.EventDone {
+			sawDone = true
+			if ev.Usage != nil {
+				t.Errorf("Usage = %+v, want nil when vendor omits usage", ev.Usage)
+			}
+		}
+	}
+	if !sawDone {
+		t.Fatal("missing EventDone")
+	}
+}
+
 // TestRequestEncodesReasoningFieldsOnTheWire asserts the JSON the API actually
 // receives, not just the struct — a wrong tag would pass the mapping test.
 func TestRequestEncodesReasoningFieldsOnTheWire(t *testing.T) {

@@ -52,6 +52,8 @@ func eventType(ev Event) string {
 		return "child.started"
 	case ChildCompleted:
 		return "child.completed"
+	case UsageReported:
+		return "usage.reported"
 	default:
 		return ""
 	}
@@ -110,6 +112,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &ChildStarted{}
 	case "child.completed":
 		ev = &ChildCompleted{}
+	case "usage.reported":
+		ev = &UsageReported{}
 	default:
 		return nil, fmt.Errorf("protocol: unknown envelope type %q", e.Type)
 	}
@@ -156,6 +160,8 @@ func deref(ev Event) Event {
 	case *ChildStarted:
 		return *v
 	case *ChildCompleted:
+		return *v
+	case *UsageReported:
 		return *v
 	default:
 		return ev

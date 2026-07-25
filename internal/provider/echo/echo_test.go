@@ -54,6 +54,45 @@ func TestEchoPlainText(t *testing.T) {
 	}
 }
 
+func TestEchoDoneUsageIsEstimatedAndDeterministic(t *testing.T) {
+	req := provider.Request{
+		Messages: []provider.Message{{Role: provider.RoleUser, Text: "hello"}},
+	}
+	var usages []*provider.Usage
+	for i := 0; i < 2; i++ {
+		ch, err := New().Stream(context.Background(), req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		evs := collect(t, ch)
+		var done *provider.StreamEvent
+		for i := range evs {
+			if evs[i].Type == provider.EventDone {
+				done = &evs[i]
+			}
+		}
+		if done == nil {
+			t.Fatal("missing EventDone")
+		}
+		if done.Usage == nil {
+			t.Fatal("Usage is nil on normal stream; want non-nil estimated usage")
+		}
+		if !done.Usage.Estimated {
+			t.Error("Estimated = false, want true for echo")
+		}
+		if done.Usage.InputTokens <= 0 {
+			t.Errorf("InputTokens = %d, want > 0", done.Usage.InputTokens)
+		}
+		if done.Usage.OutputTokens <= 0 {
+			t.Errorf("OutputTokens = %d, want > 0", done.Usage.OutputTokens)
+		}
+		usages = append(usages, done.Usage)
+	}
+	if usages[0].InputTokens != usages[1].InputTokens || usages[0].OutputTokens != usages[1].OutputTokens {
+		t.Errorf("usage not deterministic: first=%+v second=%+v", usages[0], usages[1])
+	}
+}
+
 func TestEchoRunToolCall(t *testing.T) {
 	ch, err := New().Stream(context.Background(), provider.Request{
 		Messages: []provider.Message{{Role: provider.RoleUser, Text: "run echo hi"}},
