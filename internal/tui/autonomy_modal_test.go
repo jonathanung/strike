@@ -197,7 +197,18 @@ func TestHelpListsTheAutonomyCommand(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m.composer.SetValue("/help")
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if !strings.Contains(m.notice, "/autonomy") {
-		t.Errorf("help notice omits /autonomy: %q", m.notice)
+	help, ok := m.modal.(*helpModal)
+	if !ok {
+		t.Fatalf("/help modal = %T, want helpModal", m.modal)
+	}
+	found := false
+	for _, entry := range help.entries {
+		if strings.HasPrefix(entry.Label, "/autonomy") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("help catalog omits /autonomy")
 	}
 }

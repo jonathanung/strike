@@ -214,8 +214,11 @@ func TestModelUpdateCompletionConsumesEscapeTabAndEnter(t *testing.T) {
 		}
 		assertNoAppOp(t, ops)
 		m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-		if m.composer.Value() != "" || !strings.Contains(m.notice, "commands:") {
-			t.Errorf("second enter did not execute /help: value=%q notice=%q", m.composer.Value(), m.notice)
+		if m.composer.Value() != "" {
+			t.Errorf("second enter did not clear composer: value=%q", m.composer.Value())
+		}
+		if _, ok := m.modal.(*helpModal); !ok {
+			t.Errorf("second enter modal = %T, want helpModal", m.modal)
 		}
 		assertNoAppOp(t, ops)
 	})
@@ -551,7 +554,7 @@ func TestDangerousPermissionsIndicatorRemainsVisibleWithActiveModals(t *testing.
 			open: func(m *Model) {
 				m.modal = newPaletteModal(m.commands, nil, m.currentPaletteAvailability())
 			},
-			content: []string{"Command palette", "Keyboard shortcuts", "/provider", "/help"},
+			content: []string{"Command palette", "Keyboard shortcuts", "/provider", "/settings"},
 		},
 	}
 
@@ -1118,8 +1121,8 @@ func TestPaletteInvokeUsesExistingCommandBehavior(t *testing.T) {
 	t.Run("help", func(t *testing.T) {
 		m, ops := newAppTestModel(nil, nil)
 		m = updateApp(t, m, paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/help"}})
-		if !strings.Contains(m.notice, "commands:") {
-			t.Errorf("help palette action notice = %q", m.notice)
+		if _, ok := m.modal.(*helpModal); !ok {
+			t.Errorf("help palette action modal = %T, want helpModal", m.modal)
 		}
 		assertNoAppOp(t, ops)
 	})
@@ -1699,18 +1702,32 @@ func TestPaletteSkillInvocationReturnsFocusToComposerFromRightPane(t *testing.T)
 	assertNoAppOp(t, ops)
 }
 
-func TestPaletteHelpInvocationReturnsFocusToComposerAndRendersNoticeFromRightPane(t *testing.T) {
+func TestPaletteHelpInvocationOpensHelpModal(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
 	m.modal = newPaletteModal(m.commands, m.agents, m.currentPaletteAvailability())
 
 	m = updateApp(t, m, paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/help"}})
-	if m.focus != focusLeft || !m.composer.Focused() {
-		t.Errorf("/help from palette focus/composer = %v/%v, want left/focused", m.focus, m.composer.Focused())
+	help, ok := m.modal.(*helpModal)
+	if !ok {
+		t.Fatalf("/help from palette modal = %T, want helpModal", m.modal)
 	}
-	if !strings.Contains(m.notice, "commands:") || !strings.Contains(ansi.Strip(m.View()), "commands:") {
-		t.Errorf("/help notice was not retained and rendered: notice=%q view=%q", m.notice, ansi.Strip(m.View()))
+	plain := ansi.Strip(m.View())
+	if !strings.Contains(plain, "Commands") {
+		t.Errorf("/help modal view missing title: %q", plain)
+	}
+	for _, want := range []string{"/session", "/theme", "/memory", "/issues", "/compact", "/fast", "/layout", "/md-read", "/keys", "/settings"} {
+		found := false
+		for _, entry := range help.entries {
+			if strings.HasPrefix(entry.Label, want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("/help modal omitted %s", want)
+		}
 	}
 	assertNoAppOp(t, ops)
 }

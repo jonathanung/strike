@@ -18,8 +18,6 @@ const paletteCmdTimeout = 2 * time.Second
 func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 	specs := append([]commandSpec{}, builtinCommandSpecs...)
 	specs = append(specs,
-		commandSpec{ID: "theme", Name: "/theme", Description: "change theme", Source: commandSourceBuiltin},
-		commandSpec{ID: "session", Name: "/session", Description: "change session", Source: commandSourceBuiltin},
 		commandSpec{ID: "copy", Name: "/copy", Description: "copy output", Source: commandSourceBuiltin},
 		commandSpec{ID: "future", Name: "/future", Description: "future action", Source: commandSourceBuiltin},
 		commandSpec{ID: "skill:review", Name: "/review", Description: "review a change", Source: commandSourceSkill},
@@ -34,13 +32,28 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		{ID: "command:autonomy", Label: "/autonomy", Description: "set exit-gate policy (supervised/agent/checks)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/autonomy"}},
 		{ID: "command:auth", Label: "/auth", Description: "manage provider authentication", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/auth"}},
 		{ID: "command:settings", Label: "/settings", Description: "manage custom providers and settings", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/settings"}},
-		{ID: "command:vim", Label: "/vim", Description: "open a file in the embedded editor (pane/overlay) or $EDITOR", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/vim"}},
 		{ID: "agent:build", Label: "/agent build", Description: "select an agent", Action: paletteAction{Kind: paletteActionAgent, Value: "build"}},
+		{ID: "command:fast", Label: "/fast", Description: "toggle OpenAI priority tier (faster, ~2× cost)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/fast"}},
+		{ID: "command:vim", Label: "/vim", Description: "open a file in the embedded editor (pane/overlay) or $EDITOR", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/vim"}},
+		{ID: "command:md-read", Label: "/md-read", Description: "open a markdown file in the right pane", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/md-read"}},
+		{ID: "command:theme", Label: "/theme", Description: "select a color theme or set appearance", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/theme"}},
+		{ID: "command:layout", Label: "/layout", Description: "toggle horizontal/vertical pane split", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/layout"}},
+		{ID: "command:split", Label: "/split", Description: "toggle horizontal/vertical pane split", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/split"}},
+		{ID: "command:compact", Label: "/compact", Description: "compact model history (keep recent turns)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/compact"}},
+		{ID: "command:session", Label: "/session", Description: "browse and resume a past session", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/session"}},
 		{ID: "command:help", Label: "/help", Description: "show available commands", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/help"}},
+		{ID: "command:keys", Label: "/keys", Description: "show keyboard shortcuts", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/keys"}},
+		{ID: "command:memory", Label: "/memory", Description: "list, get, set, or delete project memory", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/memory"}},
+		{ID: "command:issues", Label: "/issues", Description: "list, add, get, or close project issues", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/issues"}},
 		{ID: "skill:review", Label: "/review", Description: "review a change", Action: paletteAction{Kind: paletteActionSkill, Value: "review"}},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("palette entries =\n%#v\nwant\n%#v", got, want)
+	}
+	for _, entry := range got {
+		if entry.Label == "/copy" || entry.Label == "/future" {
+			t.Errorf("palette included unsupported builtin %q", entry.Label)
+		}
 	}
 }
 
@@ -55,15 +68,19 @@ func TestPaletteAvailabilityAndDisabledSelection(t *testing.T) {
 	})
 
 	t.Run("during running turn", func(t *testing.T) {
-		for _, command := range []string{"/provider", "/model", "/agent build", "/auth", "/review"} {
+		for _, command := range []string{"/provider", "/model", "/agent build", "/auth", "/session", "/theme", "/memory", "/issues", "/compact", "/fast", "/layout", "/review"} {
 			m := newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
 			assertPaletteDisabled(t, m, command, "unavailable while a turn is running")
 		}
 		m := newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
 		assertPaletteInvoke(t, m, "/help", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/help"}})
-		// /vim stays available mid-turn so users can inspect files without interrupting.
+		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
+		assertPaletteInvoke(t, m, "/keys", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/keys"}})
+		// /vim and /md-read stay available mid-turn so users can inspect files without interrupting.
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
 		assertPaletteInvoke(t, m, "/vim", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/vim"}})
+		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
+		assertPaletteInvoke(t, m, "/md-read", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/md-read"}})
 	})
 }
 
@@ -114,7 +131,8 @@ func TestPaletteFilteringRanksExactPrefixAndSubsequenceStablyAndIgnoresCase(t *t
 
 func TestPaletteBackspaceRestoresResultsAndZeroResultsDoNotSelect(t *testing.T) {
 	m := newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true})
-	typePalette(t, m, "z")
+	// "q" is not an ordered subsequence of any shipped label/description.
+	typePalette(t, m, "q")
 	if view := m.view(80, theme.Default()); !strings.Contains(view, "no matching actions") {
 		t.Errorf("zero-result view did not explain its empty state:\n%s", view)
 	}
