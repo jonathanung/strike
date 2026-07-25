@@ -10,18 +10,18 @@ import (
 
 // KeyHint is one keybinding hint: the key (accented) and what it does (muted).
 type KeyHint struct {
-	Key   string // e.g. "enter", "ctrl+k"
+	Key   string // e.g. "enter", "ctrl+p"
 	Label string // e.g. "send", "palette"
 }
 
 // KeyHints renders a single footer row of keybinding hints joined by dots:
-// "enter send · ctrl+k palette · tab agent". Keys are accented, labels muted.
+// "enter send · ctrl+p palette · tab agent". Keys are accented, labels muted.
 // It truncates cleanly to width by dropping whole hints that do not fit
 // rather than cutting mid-hint (falling back to truncating the first hint
 // only when even one will not fit).
 //
 //	ui.KeyHints(th, width, []ui.KeyHint{
-//	    {"enter", "send"}, {"ctrl+k", "palette"}, {"esc", "interrupt"},
+//	    {"enter", "send"}, {"ctrl+p", "palette"}, {"esc", "interrupt"},
 //	})
 func KeyHints(th theme.Theme, width int, hints []KeyHint) string {
 	if width <= 0 || len(hints) == 0 {
