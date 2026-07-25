@@ -33,7 +33,7 @@ const (
 type SelectFunc func(name string) (provider.Provider, string, error)
 
 // Agent is a named persona: a system prompt plus optional provider/model/
-// effort pins applied when the agent is selected.
+// effort pins and a permission profile applied when the agent is selected.
 type Agent struct {
 	Name        string
 	Description string
@@ -41,6 +41,7 @@ type Agent struct {
 	Model       string
 	Effort      protocol.Effort
 	Prompt      string
+	Permissions permission.Ruleset
 }
 
 type Options struct {
@@ -651,7 +652,7 @@ func (e *Engine) findAgent(name string) (Agent, bool) {
 }
 
 // handleSelectAgent switches the active persona and applies its
-// provider/model pins when set.
+// provider/model pins and permission profile when set.
 func (e *Engine) handleSelectAgent(op protocol.SelectAgent) {
 	agent, ok := e.findAgent(op.Name)
 	if !ok {
@@ -662,6 +663,7 @@ func (e *Engine) handleSelectAgent(op protocol.SelectAgent) {
 		return
 	}
 	e.agent = agent
+	e.perms.SetAgentRules(agent.Permissions)
 	e.emit(protocol.AgentSelected{
 		Correlation: e.sessionCorr(),
 		Name:        agent.Name,

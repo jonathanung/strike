@@ -247,6 +247,24 @@ effort: xhigh
 You are a meticulous code reviewer. Focus on correctness…
 ```
 
+Agents may declare permission rules in frontmatter. Compact form denies (or allows/asks) whole tool categories:
+
+```markdown
+---
+permission.write: deny
+permission.edit: deny
+permission.bash: deny
+---
+```
+
+Or a single-line JSON array (same shape as config `permissions`), appended after compact rules:
+
+```markdown
+permissions: [{"permission":"bash","pattern":"git *","action":"allow"}]
+```
+
+Evaluation order: defaults → config → optional --dangerously-skip-permissions allow-all → active agent profile → session always grants (last-match-wins). Switching agents replaces the profile and clears session always-grants. Agent denies still apply under --dangerously-skip-permissions.
+
 **Skills** (`skills/*.md`) are prompt templates invoked as slash commands:
 `/commit fix the auth bug` runs the `commit.md` template with `$ARGUMENTS`
 replaced by "fix the auth bug" (arguments are appended if the placeholder
