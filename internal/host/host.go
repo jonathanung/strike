@@ -13,19 +13,23 @@
 // credentials, or disk.
 package host
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // ProviderStatus describes one selectable provider and its credential
 // state, with capability flags so frontends stay data-driven (adding a
 // provider must not require frontend edits).
 type ProviderStatus struct {
-	Name    string // e.g. "anthropic"
-	Detail  string // human-readable credential state: "none", "oauth+key", "offline dev provider"
-	Authed  bool   // usable right now
-	Builtin bool   // no credentials needed (echo)
-	OAuth   bool   // supports browser OAuth login
-	Device  bool   // supports RFC 8628 device flow
-	APIKey  bool   // supports pasted API key
+	Name      string    // e.g. "anthropic"
+	Detail    string    // human-readable credential state: "none", "oauth+key", "offline dev provider"
+	Authed    bool      // usable right now
+	Builtin   bool      // no credentials needed (echo)
+	OAuth     bool      // supports browser OAuth login
+	Device    bool      // supports RFC 8628 device flow
+	APIKey    bool      // supports pasted API key
+	ExpiresAt time.Time // OAuth token expiry; zero = unknown/N/A
 }
 
 // Auth manages provider credentials. All methods are safe to call from
@@ -50,11 +54,18 @@ type Auth interface {
 	BeginDevice(ctx context.Context, provider string) (*DeviceLogin, error)
 }
 
-// Catalog lists model ids for a provider (may hit network/cache; ctx-aware).
+// Catalog lists model ids and limits for a provider (may hit network/cache;
+// ctx-aware).
 type Catalog interface {
 	// ModelIDs returns the provider's available model ids, or an error when
 	// the catalog is unreachable or lists no models for the provider.
 	ModelIDs(ctx context.Context, provider string) ([]string, error)
+	// ContextWindow returns the model's context window in tokens.
+	// ok is false when unknown (not the same as zero).
+	ContextWindow(ctx context.Context, provider, model string) (tokens int, ok bool, err error)
+	// OutputLimit returns the model's max output tokens.
+	// ok is false when unknown (not the same as zero).
+	OutputLimit(ctx context.Context, provider, model string) (tokens int, ok bool, err error)
 }
 
 // Settings persists user-chosen defaults. Empty fields mean "leave as is".

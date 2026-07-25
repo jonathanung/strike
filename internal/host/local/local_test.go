@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/jonathanung/strike-cli/internal/auth"
 	"github.com/jonathanung/strike-cli/internal/config"
@@ -88,6 +89,42 @@ func TestSetAPIKeyReflectedInDescribeAndStatuses(t *testing.T) {
 	s := statusByName(svc.Auth.Statuses())["anthropic"]
 	if !s.Authed || s.Detail != "api key" {
 		t.Errorf("anthropic status after SetAPIKey = %+v", s)
+	}
+}
+
+func TestStatusesExpiresAtFromOAuthOnly(t *testing.T) {
+	svc, store := newTestServices(t)
+	exp := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
+	if err := store.Set("openai", auth.Credential{
+		Type:      auth.TypeOAuth,
+		Access:    "access-token",
+		Refresh:   "refresh-token",
+		ExpiresAt: exp,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Auth.SetAPIKey("anthropic", "sk-ant-key"); err != nil {
+		t.Fatal(err)
+	}
+
+	by := statusByName(svc.Auth.Statuses())
+	oauth := by["openai"]
+	if !oauth.Authed {
+		t.Fatalf("openai should be authed after OAuth cred: %+v", oauth)
+	}
+	if oauth.ExpiresAt.IsZero() {
+		t.Fatal("OAuth credential ExpiresAt missing from Statuses()")
+	}
+	if got, want := oauth.ExpiresAt.UTC(), exp; !got.Equal(want) {
+		t.Errorf("openai ExpiresAt = %v, want %v", got, want)
+	}
+
+	api := by["anthropic"]
+	if !api.Authed || api.Detail != "api key" {
+		t.Fatalf("anthropic status = %+v", api)
+	}
+	if !api.ExpiresAt.IsZero() {
+		t.Errorf("API key provider ExpiresAt = %v, want zero", api.ExpiresAt)
 	}
 }
 
@@ -294,5 +331,53 @@ func TestCatalogFromCache(t *testing.T) {
 	_, err = svc.Catalog.ModelIDs(context.Background(), "xai")
 	if err == nil || err.Error() != "no models listed for xai on models.dev" {
 		t.Errorf("empty-list error = %v, want \"no models listed for xai on models.dev\"", err)
+	}
+}
+
+func TestCatalogContextWindowAndOutputLimitFromCache(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cacheDir := filepath.Join(home, ".strike", "cache")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	catalog := `{"openai":{"id":"openai","name":"OpenAI","models":{` +
+		`"gpt-big":{"id":"gpt-big","name":"Big","limit":{"context":200000,"output":8192}},` +
+		`"gpt-bare":{"id":"gpt-bare","name":"Bare"}` +
+		`}}}`
+	if err := os.WriteFile(filepath.Join(cacheDir, "models.json"), []byte(catalog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svc := New(nil, nil, nil, nil)
+	ctx := context.Background()
+
+	tokens, ok, err := svc.Catalog.ContextWindow(ctx, "openai", "gpt-big")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || tokens != 200_000 {
+		t.Errorf("ContextWindow(gpt-big) = %d,%v want 200000,true", tokens, ok)
+	}
+	tokens, ok, err = svc.Catalog.OutputLimit(ctx, "openai", "gpt-big")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || tokens != 8192 {
+		t.Errorf("OutputLimit(gpt-big) = %d,%v want 8192,true", tokens, ok)
+	}
+
+	tokens, ok, err = svc.Catalog.ContextWindow(ctx, "openai", "gpt-bare")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok || tokens != 0 {
+		t.Errorf("ContextWindow(gpt-bare) = %d,%v want 0,false", tokens, ok)
+	}
+	tokens, ok, err = svc.Catalog.OutputLimit(ctx, "openai", "gpt-bare")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok || tokens != 0 {
+		t.Errorf("OutputLimit(gpt-bare) = %d,%v want 0,false", tokens, ok)
 	}
 }
