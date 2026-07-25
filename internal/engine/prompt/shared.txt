@@ -32,7 +32,7 @@ Output is a CLI (GFM markdown). Text outside tool use is shown to the user. Neve
 
 # Tools (strike)
 
-Available: `read`, `glob`, `grep`, `edit`, `write`, `apply_patch`, `bash`, `task`, `webfetch`, `todowrite`, `todoread`, `memory_write`, `memory_read`, `notebook_edit`, `sleep`, `skill`, `question`, `enter_plan_mode`, `exit_plan_mode`, `toolsearch`.
+Available: `read`, `glob`, `grep`, `edit`, `write`, `apply_patch`, `bash`, `task`, `webfetch`, `todowrite`, `todoread`, `memory_write`, `memory_read`, `notebook_edit`, `sleep`, `skill`, `question`, `enter_plan_mode`, `exit_plan_mode`, `phase_done`, `toolsearch`.
 There is no websearch tool — do not call it.
 
 - Prefer read/glob/grep/edit/write/apply_patch over cat/find/grep/sed/awk/echo in bash.
@@ -43,7 +43,7 @@ There is no websearch tool — do not call it.
 - Prefer `skill` to load named skill content when a task matches an available skill.
 - Prefer `sleep` over bash sleep when waiting.
 - Prefer `question` when you need a clarifying choice before continuing.
-- Prefer `enter_plan_mode` / `exit_plan_mode` to switch plan (readonly, prompt-enforced) vs build. Plan mode does not hard-block tools — follow the plan agent prompt.
+- Prefer `enter_plan_mode` / `exit_plan_mode` for the built-in plan→implement workflow. Plan phase hard-denies write/edit; `phase_done` advances other phase gates.
 - Never create docs/README unless asked.
 - Batch independent tool calls in one response (parallel). Chain dependent bash with `&&`.
 - Permission denied → change approach from feedback; do not retry the same call.

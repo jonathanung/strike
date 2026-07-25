@@ -169,7 +169,10 @@ type Model struct {
 	providerName string
 	modelName    string
 	agentName    string
-	effort       protocol.Effort
+	// phaseName is the active workflow phase (empty = none); shown in header.
+	phaseName     string
+	phaseWorkflow string
+	effort        protocol.Effort
 	// fastEnabled is the session priority-tier preference from /fast.
 	fastEnabled bool
 	agents      []string     // cycled with tab
@@ -1115,6 +1118,10 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 	case protocol.AgentSelected:
 		m.agentName = ev.Name
 		cmd = m.broadcastContextState()
+	case protocol.PhaseChanged:
+		m.phaseName = ev.Phase
+		m.phaseWorkflow = ev.Workflow
+		cmd = m.broadcastContextState()
 	case protocol.EffortSelected:
 		m.effort = ev.Level
 		m.setNotice("effort: "+detailJoin(m.th, string(ev.Level), ev.Level.Describe()), false)
@@ -1259,6 +1266,8 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	case protocol.ModelSelected:
 		return e.Correlation, true
 	case protocol.AgentSelected:
+		return e.Correlation, true
+	case protocol.PhaseChanged:
 		return e.Correlation, true
 	case protocol.EffortSelected:
 		return e.Correlation, true

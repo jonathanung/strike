@@ -332,9 +332,10 @@ func TestToolNames(t *testing.T) {
 		"apply_patch":     NewApplyPatch(),
 		"enter_plan_mode": NewEnterPlanMode(),
 		"exit_plan_mode":  NewExitPlanMode(),
+		"phase_done":      NewPhaseDone(),
 	}
-	if len(want) != 19 {
-		t.Fatalf("expected 19 tools, got %d", len(want))
+	if len(want) != 20 {
+		t.Fatalf("expected 20 tools, got %d", len(want))
 	}
 	for name, tool := range want {
 		if tool.Name() != name {

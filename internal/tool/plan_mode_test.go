@@ -7,7 +7,33 @@ import (
 	"testing"
 )
 
-func TestEnterPlanModeCallsSwitchAgent(t *testing.T) {
+func TestEnterPlanModeCallsEnterPlanPhase(t *testing.T) {
+	var entered bool
+	tc := allowAll(t.TempDir())
+	tc.EnterPlanPhase = func() error {
+		entered = true
+		return nil
+	}
+	tc.SwitchAgent = func(name string) error {
+		t.Fatalf("SwitchAgent should not run when EnterPlanPhase is set; got %q", name)
+		return nil
+	}
+	res, err := NewEnterPlanMode().Execute(context.Background(), mustJSON(t, map[string]any{}), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !entered {
+		t.Error("EnterPlanPhase not called")
+	}
+	if res.Title != "plan mode" {
+		t.Errorf("title = %q", res.Title)
+	}
+	if !strings.Contains(res.Output, "plan mode") {
+		t.Errorf("output = %q", res.Output)
+	}
+}
+
+func TestEnterPlanModeFallsBackToSwitchAgent(t *testing.T) {
 	var switched string
 	tc := allowAll(t.TempDir())
 	tc.SwitchAgent = func(name string) error {
@@ -24,8 +50,38 @@ func TestEnterPlanModeCallsSwitchAgent(t *testing.T) {
 	if res.Title != "plan mode" {
 		t.Errorf("title = %q", res.Title)
 	}
-	if !strings.Contains(res.Output, "plan mode") {
-		t.Errorf("output = %q", res.Output)
+}
+
+func TestExitPlanModeAdvancePhase(t *testing.T) {
+	var advanced bool
+	tc := allowAll(t.TempDir())
+	tc.AdvancePhase = func(context.Context) error {
+		advanced = true
+		return nil
+	}
+	res, err := NewExitPlanMode().Execute(context.Background(), mustJSON(t, map[string]any{}), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !advanced {
+		t.Error("AdvancePhase not called")
+	}
+	if res.Title != "build mode" {
+		t.Errorf("title = %q", res.Title)
+	}
+}
+
+func TestExitPlanModeAdvanceDeclined(t *testing.T) {
+	tc := allowAll(t.TempDir())
+	tc.AdvancePhase = func(context.Context) error {
+		return errors.New("user declined leaving phase \"plan\"")
+	}
+	res, err := NewExitPlanMode().Execute(context.Background(), mustJSON(t, map[string]any{}), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Title != "staying in plan mode" {
+		t.Errorf("title = %q", res.Title)
 	}
 }
 
@@ -85,7 +141,7 @@ func TestEnterPlanModeNilSwitchAgent(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), "SwitchAgent") {
+	if !strings.Contains(err.Error(), "not configured") {
 		t.Errorf("err = %v", err)
 	}
 }
@@ -105,13 +161,40 @@ func TestEnterPlanModePermissionDenied(t *testing.T) {
 	tc := &Context{
 		WorkDir: t.TempDir(),
 		Ask:     func(context.Context, AskRequest) error { return errors.New("denied") },
-		SwitchAgent: func(string) error {
-			t.Fatal("SwitchAgent must not run")
+		EnterPlanPhase: func() error {
+			t.Fatal("EnterPlanPhase must not run")
 			return nil
 		},
 	}
 	_, err := NewEnterPlanMode().Execute(context.Background(), mustJSON(t, map[string]any{}), tc)
 	if err == nil {
 		t.Fatal("expected deny")
+	}
+}
+
+func TestPhaseDoneAdvances(t *testing.T) {
+	var advanced bool
+	tc := allowAll(t.TempDir())
+	tc.AdvancePhase = func(context.Context) error {
+		advanced = true
+		return nil
+	}
+	res, err := NewPhaseDone().Execute(context.Background(), mustJSON(t, map[string]any{}), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !advanced {
+		t.Error("AdvancePhase not called")
+	}
+	if res.Title != "phase advanced" {
+		t.Errorf("title = %q", res.Title)
+	}
+}
+
+func TestPhaseDoneNilAdvance(t *testing.T) {
+	tc := allowAll(t.TempDir())
+	_, err := NewPhaseDone().Execute(context.Background(), mustJSON(t, map[string]any{}), tc)
+	if err == nil || !strings.Contains(err.Error(), "AdvancePhase") {
+		t.Fatalf("err = %v", err)
 	}
 }
