@@ -32,10 +32,14 @@ Output is a CLI (GFM markdown). Text outside tool use is shown to the user. Neve
 
 # Tools (strike)
 
-Available: `read`, `glob`, `grep`, `edit`, `write`, `bash`, `task`.
-There is no TodoWrite, WebFetch, or apply_patch tool — do not call them.
+Available: `read`, `glob`, `grep`, `edit`, `write`, `bash`, `task`, `webfetch`, `todowrite`, `notebook_edit`, `sleep`, `skill`, `toolsearch`.
+There is no apply_patch or websearch tool — do not call them.
 
 - Prefer read/glob/grep/edit/write over cat/find/grep/sed/awk/echo in bash.
+- Prefer `webfetch` over curl/wget in bash for ordinary page fetches.
+- Prefer `todowrite` for multi-step task tracking (full list on each write; no separate read).
+- Prefer `skill` to load named skill content when a task matches an available skill.
+- Prefer `sleep` over bash sleep when waiting.
 - Prefer `edit` for existing files; `write` only for new files. Never create docs/README unless asked.
 - Batch independent tool calls in one response (parallel). Chain dependent bash with `&&`.
 - Permission denied → change approach from feedback; do not retry the same call.
