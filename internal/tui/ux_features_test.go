@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
@@ -466,32 +467,48 @@ func TestChildPermissionAskedStillOpensModalFromActivityPath(t *testing.T) {
 	}
 }
 
-func TestNoticeRowsForWrapsLongHelp(t *testing.T) {
-	m, _ := newAppTestModel(nil, nil)
+func TestHelpCommandOpensFilterableCatalogModal(t *testing.T) {
+	m, _ := newAppTestModel(nil, []host.Skill{fakeSkill("review", "review a change", "")})
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.composer.SetValue("/help")
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(Model)
-	if m.notice == "" {
-		t.Fatal("/help left empty notice")
+	help, ok := m.modal.(*helpModal)
+	if !ok {
+		t.Fatalf("/help modal = %T, want helpModal", m.modal)
 	}
-	rows := m.noticeRowsFor(40)
-	if rows <= 1 {
-		t.Errorf("noticeRowsFor(40) = %d, want > 1 for long /help text", rows)
+	if m.notice != "" {
+		t.Errorf("/help set notice %q, want empty (modal is unclipped)", m.notice)
 	}
-	// Visible notice keeps leading commands (later ones may ellipsize at maxNoticeRows).
-	plain := ansi.Strip(m.noticeView(40, maxNoticeRows))
-	for _, want := range []string{"/provider", "/model", "/agent"} {
-		if !strings.Contains(plain, want) {
-			t.Errorf("/help notice missing %q:\n%s", want, plain)
+	wantLabels := []string{
+		"/provider", "/model", "/settings", "/session", "/theme", "/memory",
+		"/issues", "/compact", "/fast", "/layout", "/md-read", "/keys", "/review", "tab",
+	}
+	for _, want := range wantLabels {
+		found := false
+		for _, entry := range help.entries {
+			if entry.Label == want || strings.HasPrefix(entry.Label, want+" ") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("/help catalog omitted %q", want)
 		}
 	}
-	// Full notice text (before row cap) includes the new theme/layout commands.
-	if !strings.Contains(m.notice, "/theme") || !strings.Contains(m.notice, "/layout") {
-		t.Errorf("/help notice text missing theme/layout: %q", m.notice)
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("session")})
+	help = m.modal.(*helpModal)
+	filtered := help.filtered()
+	if len(filtered) == 0 || !strings.HasPrefix(filtered[0].Label, "/session") {
+		t.Fatalf("filter session = %#v, want /session first", filtered)
 	}
-	if strings.Count(plain, "\n")+1 < 2 {
-		t.Errorf("wrapped notice still single line: %q", plain)
+	plain := ansi.Strip(m.View())
+	if !strings.Contains(plain, "/session") {
+		t.Errorf("help modal view missing filtered command:\n%s", plain)
+	}
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.modal != nil {
+		t.Errorf("esc left help modal open: %T", m.modal)
 	}
 }
 

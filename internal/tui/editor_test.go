@@ -288,8 +288,19 @@ func TestHelpListsVim(t *testing.T) {
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(Model)
 	runAppCmd(t, cmd)
-	if !strings.Contains(m.notice, "/vim") {
-		t.Errorf("help notice missing /vim: %q", m.notice)
+	help, ok := m.modal.(*helpModal)
+	if !ok {
+		t.Fatalf("/help modal = %T, want helpModal", m.modal)
+	}
+	found := false
+	for _, entry := range help.entries {
+		if strings.HasPrefix(entry.Label, "/vim") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("help catalog missing /vim")
 	}
 }
 
