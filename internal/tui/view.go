@@ -148,18 +148,39 @@ func (m Model) transcriptFooter() string {
 	if m.viewport.Height <= 0 || m.viewport.TotalLineCount() <= m.viewport.Height {
 		return ""
 	}
-	return dotJoin(m.th, strconv.Itoa(int(m.viewport.ScrollPercent()*100))+"%", "pgup/pgdn")
+	return dotJoin(m.th, strconv.Itoa(int(m.viewport.ScrollPercent()*100))+"%", "pgup/pgdn", "ctrl+end")
 }
 
-// noticeView renders the reserved feedback row: errors in the error tone,
-// everything else as an informational line. An empty notice yields a blank
-// row, keeping the layout budget stable.
-func (m Model) noticeView(width int) string {
+// maxNoticeRows caps how many layout rows a wrapped notice may occupy so the
+// transcript keeps a usable share of the screen.
+const maxNoticeRows = 5
+
+// noticeView renders the reserved feedback region: errors in the error tone,
+// everything else as informational. Text wraps up to maxRows lines. An empty
+// notice yields "" (the layout still reserves a blank row when budgeted).
+func (m Model) noticeView(width, maxRows int) string {
 	level := ui.LevelInfo
 	if m.noticeErr {
 		level = ui.LevelError
 	}
-	return ui.Notice(m.th, level, m.notice, max(1, width))
+	if maxRows < 1 {
+		maxRows = 1
+	}
+	return ui.NoticeLines(m.th, level, m.notice, max(1, width), maxRows)
+}
+
+// noticeRowsFor returns the layout height for the current notice at width:
+// 0 when empty (blank reservation), else the wrapped line count capped at
+// maxNoticeRows.
+func (m Model) noticeRowsFor(width int) int {
+	if m.notice == "" {
+		return 0
+	}
+	out := m.noticeView(width, maxNoticeRows)
+	if out == "" {
+		return 0
+	}
+	return strings.Count(out, "\n") + 1
 }
 
 // composerView renders the focused composer: the textarea inside a titled
@@ -262,9 +283,14 @@ func paneGutter(th theme.Theme, width, height int) string {
 // hintsView is the keybinding footer. ui.KeyHints drops whole hints that do
 // not fit rather than cutting mid-hint.
 func (m Model) hintsView(width int) string {
+	paneLabel := "panes"
+	if m.splitOrientation == orientVertical {
+		paneLabel = "stack"
+	}
 	hints := []ui.KeyHint{
-		{Key: keyHint(m.keyMap.FocusLeft).Key + "/" + keyHint(m.keyMap.FocusRight).Key, Label: "panes"},
+		{Key: keyHint(m.keyMap.FocusLeft).Key + "/" + keyHint(m.keyMap.FocusRight).Key, Label: paneLabel},
 		{Key: keyHint(m.keyMap.CycleWindowNext).Key + "/" + keyHint(m.keyMap.CycleWindowPrev).Key, Label: "windows"},
+		keyHint(m.keyMap.ToggleOrientation),
 		keyHint(m.keyMap.Palette),
 		keyHint(m.keyMap.KeyHelp),
 		keyHint(m.keyMap.Interrupt),
@@ -276,6 +302,7 @@ func (m Model) hintsView(width int) string {
 			keyHint(m.keyMap.Agent),
 			keyHint(m.keyMap.SaveDefaults),
 			ui.KeyHint{Key: keyHint(m.keyMap.ScrollUp).Key + "/" + keyHint(m.keyMap.ScrollDown).Key, Label: "scroll"},
+			keyHint(m.keyMap.JumpBottom),
 		)
 	}
 	return ui.KeyHints(m.th, max(1, width), hints)

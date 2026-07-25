@@ -19,13 +19,20 @@ func Logo(th theme.Theme) string {
 	ic := resolveIcons(th)
 	st := th.S()
 	space := strings.Repeat(" ", th.Spacing.XS)
-	word := ic.Bolt + space + "S" + space + "T" + space + "R" + space + "I" + space + "K" + space + "E"
-	w := lipgloss.Width(word)
-
-	top := st.AccentAlt.Render(strings.Repeat(ic.LogoTopRule, w))
+	// Build mid first so rule width matches the styled wordmark (bold/title
+	// glyphs can differ from the plain-string width used previously).
 	mid := st.Warning.Render(ic.Bolt) + space + st.Title.Render("S"+space+"T"+space+"R"+space+"I"+space+"K"+space+"E")
+	w := max(1, lipgloss.Width(mid))
+	top := st.AccentAlt.Render(strings.Repeat(ic.LogoTopRule, w))
 	bot := st.Accent.Render(strings.Repeat(ic.LogoBottomRule, w))
-	return top + "\n" + mid + "\n" + bot
+	// Pad any line that still disagrees so JoinHorizontal gutters stay blank.
+	pad := func(line string) string {
+		if d := w - lipgloss.Width(line); d > 0 {
+			return line + strings.Repeat(" ", d)
+		}
+		return line
+	}
+	return pad(top) + "\n" + pad(mid) + "\n" + pad(bot)
 }
 
 // LogoCompact is the one-line fallback wordmark: "⚡ strike", bolt warm and

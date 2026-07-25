@@ -26,6 +26,8 @@ type keyMap struct {
 	SaveDefaults      key.Binding
 	ScrollUp          key.Binding
 	ScrollDown        key.Binding
+	JumpBottom        key.Binding
+	ToggleOrientation key.Binding
 }
 
 func defaultKeyMap() keyMap {
@@ -49,9 +51,27 @@ func defaultKeyMap() keyMap {
 		HistoryNext:       key.NewBinding(key.WithKeys("down"), key.WithHelp("down", "history next")),
 		Agent:             key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "agent")),
 		SaveDefaults:      key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "save defaults")),
-		ScrollUp:          key.NewBinding(key.WithKeys("pgup"), key.WithHelp("pgup", "scroll up")),
-		ScrollDown:        key.NewBinding(key.WithKeys("pgdown"), key.WithHelp("pgdown", "scroll down")),
+		ScrollUp:          key.NewBinding(key.WithKeys("pgup", "ctrl+up"), key.WithHelp("pgup/ctrl+up", "scroll up")),
+		ScrollDown:        key.NewBinding(key.WithKeys("pgdown", "ctrl+down"), key.WithHelp("pgdn/ctrl+down", "scroll down")),
+		JumpBottom:        key.NewBinding(key.WithKeys("ctrl+end"), key.WithHelp("ctrl+end", "jump to bottom")),
+		ToggleOrientation: key.NewBinding(key.WithKeys("ctrl+;"), key.WithHelp("ctrl+;", "toggle split")),
 	}
+}
+
+// applyOrientationKeys swaps focus vs cycle chords for vertical splits:
+// horizontal uses ctrl+h/l focus and ctrl+j/k cycle; vertical swaps those pairs.
+func (k *keyMap) applyOrientationKeys(orient splitOrientation) {
+	if orient == orientVertical {
+		k.FocusLeft = key.NewBinding(key.WithKeys("ctrl+j"), key.WithHelp("ctrl+j", "focus top"))
+		k.FocusRight = key.NewBinding(key.WithKeys("ctrl+k"), key.WithHelp("ctrl+k", "focus bottom"))
+		k.CycleWindowNext = key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("ctrl+l", "next window"))
+		k.CycleWindowPrev = key.NewBinding(key.WithKeys("ctrl+h"), key.WithHelp("ctrl+h", "prev window"))
+		return
+	}
+	k.FocusLeft = key.NewBinding(key.WithKeys("ctrl+h"), key.WithHelp("ctrl+h", "focus left"))
+	k.FocusRight = key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("ctrl+l", "focus right"))
+	k.CycleWindowNext = key.NewBinding(key.WithKeys("ctrl+j"), key.WithHelp("ctrl+j", "next window"))
+	k.CycleWindowPrev = key.NewBinding(key.WithKeys("ctrl+k"), key.WithHelp("ctrl+k", "prev window"))
 }
 
 // keybindEntry is one row in the filterable keybind cheatsheet.
@@ -77,6 +97,8 @@ func keybindCatalog(keys keyMap) []keybindEntry {
 		from("nav.window-prev", "Navigation", keys.CycleWindowPrev),
 		from("nav.scroll-up", "Navigation", keys.ScrollUp),
 		from("nav.scroll-down", "Navigation", keys.ScrollDown),
+		from("nav.jump-bottom", "Navigation", keys.JumpBottom),
+		from("nav.toggle-orient", "Navigation", keys.ToggleOrientation),
 
 		from("global.palette", "Global", keys.Palette),
 		from("global.keyhelp", "Global", keys.KeyHelp),

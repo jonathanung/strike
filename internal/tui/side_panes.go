@@ -129,8 +129,8 @@ func (m Model) contextPaneBody(width, height int) string {
 	return strings.Join(lines, "\n")
 }
 
-// activityPaneBody shows recent tool activity when present; otherwise idle tips
-// for common actions. Never renders placeholder copy.
+// activityPaneBody shows active/recent subagents first, then parent tool
+// activity, then idle tips. Never renders placeholder copy or child transcript.
 func (m Model) activityPaneBody(width, height int) string {
 	if width <= 0 || height <= 0 {
 		return ""
@@ -141,17 +141,35 @@ func (m Model) activityPaneBody(width, height int) string {
 	space := themedSpace(th.Spacing.XS)
 	ellipsis := th.Icons.Ellipsis
 
-	var tools []*toolCell
-	for i := len(m.cells) - 1; i >= 0; i-- {
-		if tc, ok := m.cells[i].(*toolCell); ok {
-			tools = append(tools, tc)
-			if len(tools) >= height {
-				break
+	lines := make([]string, 0, height)
+
+	// Subagents: running first (newest last in slice → show newest running at top).
+	for i := len(m.children) - 1; i >= 0 && len(lines) < height; i-- {
+		ch := m.children[i]
+		if ch.status != "running" {
+			continue
+		}
+		lines = append(lines, m.formatChildActivityLine(ch, width))
+	}
+	for i := len(m.children) - 1; i >= 0 && len(lines) < height; i-- {
+		ch := m.children[i]
+		if ch.status == "running" {
+			continue
+		}
+		lines = append(lines, m.formatChildActivityLine(ch, width))
+	}
+
+	// Parent tools (most recent first).
+	if len(lines) < height {
+		var tools []*toolCell
+		for i := len(m.cells) - 1; i >= 0; i-- {
+			if tc, ok := m.cells[i].(*toolCell); ok {
+				tools = append(tools, tc)
+				if len(tools)+len(lines) >= height {
+					break
+				}
 			}
 		}
-	}
-	if len(tools) > 0 {
-		lines := make([]string, 0, len(tools))
 		for _, tc := range tools {
 			if len(lines) >= height {
 				break
@@ -178,6 +196,9 @@ func (m Model) activityPaneBody(width, height int) string {
 				statusStyle.Render(suffix)
 			lines = append(lines, line)
 		}
+	}
+
+	if len(lines) > 0 {
 		return strings.Join(lines, "\n")
 	}
 
@@ -186,13 +207,14 @@ func (m Model) activityPaneBody(width, height int) string {
 		keyHint(m.keyMap.Palette),
 		keyHint(m.keyMap.Agent),
 		keyHint(m.keyMap.CycleWindowNext),
+		keyHint(m.keyMap.ToggleOrientation),
 		keyHint(m.keyMap.Newline),
 	}
 	if len(tips) > height {
 		tips = tips[:height]
 	}
 	gap := themedSpace(th.Spacing.SM)
-	lines := make([]string, 0, len(tips))
+	out := make([]string, 0, len(tips))
 	for _, tip := range tips {
 		keyText := welcomeTruncate(tip.Key, width, ellipsis)
 		budget := max(0, width-ansi.StringWidth(keyText)-ansi.StringWidth(gap))
@@ -203,7 +225,43 @@ func (m Model) activityPaneBody(width, height int) string {
 		if pad := width - ansi.StringWidth(ansi.Strip(line)); pad > 0 {
 			line += themedSpace(pad)
 		}
-		lines = append(lines, line)
+		out = append(out, line)
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(out, "\n")
+}
+
+func (m Model) formatChildActivityLine(ch childActivity, width int) string {
+	th := m.th.Resolve()
+	st := th.S()
+	ic := iconsFor(th)
+	space := themedSpace(th.Spacing.XS)
+	ellipsis := th.Icons.Ellipsis
+
+	statusGlyph, statusStyle := ic.Ellipsis, st.Muted
+	switch ch.status {
+	case "running":
+		statusGlyph, statusStyle = ic.Ellipsis, st.AccentAlt
+	case string(protocol.ChildStatusCompleted):
+		statusGlyph, statusStyle = ic.OK, st.Success
+	case string(protocol.ChildStatusFailed):
+		statusGlyph, statusStyle = ic.Err, st.Error
+	case string(protocol.ChildStatusCanceled):
+		statusGlyph, statusStyle = ic.Info, st.Muted
+	}
+
+	agent := sanitizeDisplayData(ch.agent)
+	if agent == "" {
+		agent = "subagent"
+	}
+	detail := sanitizeDisplayData(ch.prompt)
+	prefix := ic.Agent + space
+	suffix := space + statusGlyph
+	mid := agent
+	if detail != "" {
+		mid = agent + space + detail
+	}
+	budget := max(0, width-ansi.StringWidth(prefix)-ansi.StringWidth(suffix))
+	return st.AccentAlt.Render(prefix) +
+		st.Text.Render(welcomeTruncate(mid, budget, ellipsis)) +
+		statusStyle.Render(suffix)
 }

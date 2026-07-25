@@ -27,14 +27,28 @@ const (
 	paneSplit
 )
 
+// splitOrientation is how the left stack and right pane share the body region.
+type splitOrientation uint8
+
+const (
+	// orientHorizontal is left|right (default).
+	orientHorizontal splitOrientation = iota
+	// orientVertical is top/bottom.
+	orientVertical
+)
+
 // paneGeometry is the horizontal allocation before vertical regions are
 // budgeted. In single-pane mode, only the focused pane receives the terminal
-// width.
+// width. When Orientation is vertical, LeftHeight/RightHeight describe the
+// body split (full width each); width fields still report full terminal width.
 type paneGeometry struct {
-	mode       paneMode
-	leftWidth  int
-	gutter     int
-	rightWidth int
+	mode        paneMode
+	orientation splitOrientation
+	leftWidth   int
+	gutter      int
+	rightWidth  int
+	leftHeight  int // body rows for left/top when vertical split; 0 if unused
+	rightHeight int // body rows for right/bottom when vertical split; 0 if unused
 }
 
 // computePaneGeometry allocates the two panes without depending on composer or
@@ -58,6 +72,42 @@ func computePaneGeometry(width, gutter int, focus paneFocus) paneGeometry {
 	}
 }
 
+// computeVerticalPaneGeometry splits the body region top/bottom at full width.
+// minTop/minBot keep the composer stack and side pane usable; below that only
+// the focused pane is shown (same single-pane idea as the horizontal path).
+func computeVerticalPaneGeometry(width, bodyHeight, gutter int, focus paneFocus) paneGeometry {
+	width, bodyHeight, gutter = max(0, width), max(0, bodyHeight), max(0, gutter)
+	const minTop, minBot = 6, 5
+	if bodyHeight < minTop+gutter+minBot {
+		if focus == focusRight {
+			return paneGeometry{
+				mode:        paneSingle,
+				orientation: orientVertical,
+				rightWidth:  width,
+				rightHeight: bodyHeight,
+			}
+		}
+		return paneGeometry{
+			mode:        paneSingle,
+			orientation: orientVertical,
+			leftWidth:   width,
+			leftHeight:  bodyHeight,
+		}
+	}
+	available := max(0, bodyHeight-gutter)
+	bottom := max(minBot, available/3)
+	top := available - bottom
+	return paneGeometry{
+		mode:        paneSplit,
+		orientation: orientVertical,
+		leftWidth:   width,
+		rightWidth:  width,
+		gutter:      gutter,
+		leftHeight:  top,
+		rightHeight: bottom,
+	}
+}
+
 // leftCandidateWidth is the width used to retain composer and transcript
 // state while the right pane is alone on screen.
 func (g paneGeometry) leftCandidateWidth(width int) int {
@@ -69,16 +119,23 @@ func (g paneGeometry) leftCandidateWidth(width int) int {
 
 // computeLayout budgets the screen. composerRows is the textarea's row count,
 // popupHeight the completion popup's reserved height, danger whether the
-// permissions-bypassed banner is shown, and noticeActive whether the reserved
-// notice row contains a live notice. noticeActive is optional for compatibility
-// with callers that do not distinguish a blank reservation.
-func computeLayout(width, height, composerRows, popupHeight int, danger bool, noticeActive ...bool) layout {
+// permissions-bypassed banner is shown, and noticeRows the desired height of a
+// live notice (wrapped content). Omit noticeRows or pass 0 for the default blank
+// reservation (1 row, droppable under shortfall). A positive noticeRows reserves
+// that many rows (multi-line help, etc.) and keeps at least one row under
+// pressure until last resort.
+func computeLayout(width, height, composerRows, popupHeight int, danger bool, noticeRows ...int) layout {
 	height = max(0, height)
-	activeNotice := len(noticeActive) > 0 && noticeActive[0]
+	noticeH := 1
+	activeNotice := false
+	if len(noticeRows) > 0 && noticeRows[0] > 0 {
+		noticeH = noticeRows[0]
+		activeNotice = true
+	}
 	l := layout{
 		compact: width < compactWidth || height < compactHeight,
 		header:  1,
-		notice:  1,
+		notice:  noticeH,
 		hints:   1,
 		popup:   max(0, popupHeight),
 	}
@@ -104,16 +161,46 @@ func computeLayout(width, height, composerRows, popupHeight int, danger bool, no
 
 	// The transcript has already absorbed all available remainder. Preserve the
 	// active notice and danger banner as long as possible when space is scarce.
+	// Multi-line notices may shrink toward one row before other chrome yields.
 	reduce(&l.popup, 0)
 	reduce(&l.composer, 1)
 	reduce(&l.hints, 0)
-	if !activeNotice {
+	if activeNotice {
+		reduce(&l.notice, 1)
+	} else {
 		reduce(&l.notice, 0)
 	}
 	reduce(&l.composer, 0)
 	reduce(&l.header, 0)
 	reduce(&l.notice, 0)
 	reduce(&l.danger, 0)
+	return l
+}
+
+// withBodyHeight returns a copy of l whose transcript/notice/popup/composer
+// sum to bodyHeight by shrinking transcript first (used when the left stack
+// shares vertical space with the right pane).
+func (l layout) withBodyHeight(bodyHeight int) layout {
+	bodyHeight = max(0, bodyHeight)
+	cur := l.transcript + l.notice + l.popup + l.composer
+	if cur <= bodyHeight {
+		l.transcript += bodyHeight - cur
+		return l
+	}
+	shortfall := cur - bodyHeight
+	reduce := func(region *int, floor int) {
+		if shortfall == 0 {
+			return
+		}
+		delta := min(shortfall, max(0, *region-floor))
+		*region -= delta
+		shortfall -= delta
+	}
+	reduce(&l.transcript, 0)
+	reduce(&l.popup, 0)
+	reduce(&l.composer, 1)
+	reduce(&l.notice, 0)
+	reduce(&l.composer, 0)
 	return l
 }
 

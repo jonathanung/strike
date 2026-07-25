@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
+	"github.com/jonathanung/strike-cli/internal/tui/theme"
 	"github.com/jonathanung/strike-cli/internal/tui/ui"
 )
 
@@ -15,6 +16,7 @@ const welcomeCardMinWidth = 26
 
 // welcomeView renders the empty-transcript dashboard directly into its allotted
 // rectangle. Its cards are fixed-height so their borders survive short views.
+// When space allows, a Logo/LogoCompact band sits above the card grid.
 func (m Model) welcomeView(width, height int) string {
 	th := m.th.Resolve()
 	if width <= 0 || height <= 0 {
@@ -24,25 +26,46 @@ func (m Model) welcomeView(width, height int) string {
 		return ui.Panel(th, ui.PanelOpts{Width: width, Height: height, Borderless: true}, m.welcomeKeys(width, height))
 	}
 
+	gap := th.Spacing.SM
 	statuses := []host.ProviderStatus(nil)
 	if m.services.Auth != nil {
 		statuses = m.services.Auth.Statuses()
 	}
 	cards := m.welcomeCards(statuses)
-	gap := th.Spacing.SM
 	columns := 1
 	if width >= 2*welcomeCardMinWidth+gap {
 		columns = 2
 	}
-	for len(cards) > 1 && !welcomeFits(height, len(cards), columns, gap) {
+
+	// Logo band only when it does not force dropping cards the no-logo layout
+	// would keep (content hierarchy wins over chrome). Use XS under the band so
+	// large SM themes still keep card body rows.
+	logoGap := th.Spacing.XS
+	logoBand, logoRows := "", 0
+	if cand, rows := welcomeLogoBand(th, width, height, logoGap); rows > 0 {
+		withLogo := append([]welcomeCard(nil), cards...)
+		for len(withLogo) > 1 && !welcomeFits(height-rows, len(withLogo), columns, gap) {
+			withLogo = welcomeDropCard(withLogo)
+		}
+		without := append([]welcomeCard(nil), cards...)
+		for len(without) > 1 && !welcomeFits(height, len(without), columns, gap) {
+			without = welcomeDropCard(without)
+		}
+		if len(withLogo) >= len(without) && welcomeFits(height-rows, len(withLogo), columns, gap) {
+			logoBand, logoRows = cand, rows
+			cards = withLogo
+		}
+	}
+	cardHeight := height - logoRows
+	for len(cards) > 1 && !welcomeFits(cardHeight, len(cards), columns, gap) {
 		cards = welcomeDropCard(cards)
 	}
 	rows := (len(cards) + columns - 1) / columns
-	if !welcomeFits(height, len(cards), columns, gap) {
+	if !welcomeFits(cardHeight, len(cards), columns, gap) {
 		return ui.Panel(th, ui.PanelOpts{Width: width, Height: height, Borderless: true}, m.welcomeKeys(width, height))
 	}
 
-	rowHeights := welcomeRowHeights(cards, rows, columns, height-gap*(rows-1))
+	rowHeights := welcomeRowHeights(cards, rows, columns, cardHeight-gap*(rows-1))
 	rowWidth := width
 	cardWidth := width
 	if columns == 2 {
@@ -71,7 +94,37 @@ func (m Model) welcomeView(width, height int) string {
 		block := lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 		blocks = append(blocks, welcomePadBlock(block, rowWidth))
 	}
-	return welcomePadBlock(lipgloss.JoinVertical(lipgloss.Left, joinWelcomeRows(blocks, gap)...), width)
+	grid := welcomePadBlock(lipgloss.JoinVertical(lipgloss.Left, joinWelcomeRows(blocks, gap)...), width)
+	if logoBand == "" {
+		return grid
+	}
+	// Join logo, gap rows, and grid as separate vertical parts so each line is
+	// padded to width (embedded trailing newlines on the band broke split gutters).
+	parts := []string{logoBand}
+	if logoGap > 0 {
+		parts = append(parts, make([]string, logoGap)...)
+	}
+	parts = append(parts, grid)
+	return welcomePadBlock(lipgloss.JoinVertical(lipgloss.Left, parts...), width)
+}
+
+// welcomeLogoBand returns a themed wordmark and the rows it consumes (including
+// following gap). Reserved for tall empty sessions so normal 80×24 / 100×30
+// dashboards keep full card bodies; callers also skip the band when it would
+// force dropping cards. The returned string is a single block without trailing
+// gap newlines — callers insert gap rows when composing.
+func welcomeLogoBand(th theme.Theme, width, height, gap int) (string, int) {
+	const fullLogoH = 3
+	const compactLogoH = 1
+	// Two full desired-height card rows (~10 each) plus gaps — tall viewport.
+	minBelow := 10 + gap + 10
+	if height >= fullLogoH+gap+minBelow && width >= 18 {
+		return welcomePadBlock(ui.Logo(th), width), fullLogoH + gap
+	}
+	if height >= compactLogoH+gap+minBelow && width >= 12 {
+		return welcomePadBlock(ui.LogoCompact(th), width), compactLogoH + gap
+	}
+	return "", 0
 }
 
 type welcomeCard struct {
@@ -201,17 +254,36 @@ func welcomePadBlock(block string, width int) string {
 func (m Model) welcomeFirstRun(width, rows int) string {
 	th := m.th.Resolve()
 	st := th.S()
-	steps := []string{
-		detailJoin(th, "1. Sign in", "/auth or pick a provider"),
-		detailJoin(th, "2. Choose a model", "/model"),
-		"3. Send a message",
+	type step struct {
+		head, detail string
+	}
+	steps := []step{
+		{"1. Sign in", "/auth or pick a provider"},
+		{"2. Choose a model", "/model"},
+		{"3. Send a message", "type below, enter to send"},
 	}
 	lines := make([]string, 0, min(len(steps), rows))
-	for _, step := range steps {
+	for _, s := range steps {
 		if len(lines) >= rows {
 			break
 		}
-		lines = append(lines, st.Text.Render(welcomeTruncate(step, width, th.Icons.Ellipsis)))
+		head := st.Accent.Render(welcomeTruncate(s.head, width, th.Icons.Ellipsis))
+		if s.detail == "" {
+			lines = append(lines, head)
+			continue
+		}
+		// Hierarchy: numbered step accented, detail muted on the same or next row.
+		gap := themedSpace(th.Spacing.SM)
+		headW := ansi.StringWidth(ansi.Strip(head))
+		budget := max(0, width-headW-ansi.StringWidth(gap))
+		if budget >= 8 {
+			lines = append(lines, head+st.Muted.Render(gap+welcomeTruncate(s.detail, budget, th.Icons.Ellipsis)))
+		} else {
+			lines = append(lines, head)
+			if len(lines) < rows {
+				lines = append(lines, st.Muted.Render(welcomeTruncate(s.detail, width, th.Icons.Ellipsis)))
+			}
+		}
 	}
 	return strings.Join(lines, "\n")
 }
@@ -227,30 +299,46 @@ func (m Model) welcomeProviders(statuses []host.ProviderStatus, width, rows int)
 			break
 		}
 	}
-	lines := make([]string, 0, min(5, rows))
+	lines := make([]string, 0, min(6, rows))
+	// Lead-in only when the card is tall enough for 4 providers + action + tip.
+	providerBudget := 4
+	if rows >= 9 {
+		lines = append(lines, st.Text.Render(welcomeTruncate("Connect a provider to start", width, th.Icons.Ellipsis)))
+	}
+	providers := 0
 	for _, status := range ordered {
-		if len(lines) == 4 || len(lines) >= rows {
+		if providers >= providerBudget || len(lines) >= rows {
 			break
 		}
-		glyph, style := th.Icons.Info, st.Muted
+		glyph := th.Icons.Info
+		nameStyle, detailStyle := st.Muted, st.Muted
 		if status.Authed {
-			glyph, style = th.Icons.OK, st.Success
+			glyph, nameStyle, detailStyle = th.Icons.OK, st.Success, st.Muted
 		}
 		name := welcomeDisplay(status.Name, width)
 		detail := welcomeDisplay(status.Detail, width)
-		text := glyph + space + name
+		prefix := glyph + space
+		budget := max(0, width-ansi.StringWidth(prefix))
+		namePart := nameStyle.Render(welcomeTruncate(name, budget, th.Icons.Ellipsis))
+		line := st.Muted.Render(prefix) + namePart
 		if detail != "" {
-			text += themedSpace(th.Spacing.SM) + detail
+			used := ansi.StringWidth(ansi.Strip(line))
+			gap := themedSpace(th.Spacing.SM)
+			rest := max(0, width-used-ansi.StringWidth(gap))
+			if rest > 2 {
+				line += detailStyle.Render(gap + welcomeTruncate(detail, rest, th.Icons.Ellipsis))
+			}
 		}
-		lines = append(lines, style.Render(welcomeTruncate(text, width, th.Icons.Ellipsis)))
+		lines = append(lines, line)
+		providers++
 	}
-	if len(lines) == 0 && rows > 1 {
+	if providers == 0 && len(lines) == 0 && rows > 1 {
 		lines = append(lines, st.Muted.Render(welcomeTruncate("no providers configured", width, th.Icons.Ellipsis)))
 	}
 	if len(lines) < rows {
 		action := welcomeTruncate("/provider"+space+"to choose one", width, th.Icons.Ellipsis)
 		command, detail, hasDetail := strings.Cut(action, space)
-		line := st.AccentAlt.Render(command)
+		line := st.Accent.Render(command)
 		if hasDetail {
 			line += st.Muted.Render(space + detail)
 		}
@@ -274,7 +362,14 @@ func (m Model) welcomeKeys(size ...int) string {
 	th := m.th.Resolve()
 	st := th.S()
 	gap := themedSpace(th.Spacing.SM)
-	bindings := []key.Binding{m.keyMap.FocusLeft, m.keyMap.FocusRight, m.keyMap.CycleWindowNext, m.keyMap.CycleWindowPrev, m.keyMap.Send, m.keyMap.Newline, m.keyMap.Palette, m.keyMap.KeyHelp, m.keyMap.Interrupt}
+	bindings := []key.Binding{
+		m.keyMap.FocusLeft, m.keyMap.FocusRight,
+		m.keyMap.CycleWindowNext, m.keyMap.CycleWindowPrev,
+		m.keyMap.ToggleOrientation,
+		m.keyMap.Send, m.keyMap.Newline,
+		m.keyMap.ScrollUp, m.keyMap.JumpBottom,
+		m.keyMap.Palette, m.keyMap.KeyHelp, m.keyMap.Interrupt,
+	}
 	lines := make([]string, 0, min(rows, len(bindings)))
 	for _, binding := range bindings {
 		if len(lines) >= rows {

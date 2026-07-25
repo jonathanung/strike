@@ -48,8 +48,10 @@ type Theme struct {
 // chosen to stay legible on its background.
 func Default() Theme {
 	return Theme{
-		Text:        lipgloss.AdaptiveColor{Light: "#1c1b22", Dark: "#dcdae6"},
-		TextMuted:   lipgloss.AdaptiveColor{Light: "#6c6a7a", Dark: "#8b899c"},
+		// Dark Text/Muted lean brighter for contrast on #1c1b22; borders sit
+		// a step clearer against both light and dark chrome.
+		Text:        lipgloss.AdaptiveColor{Light: "#1a1820", Dark: "#eceaf4"},
+		TextMuted:   lipgloss.AdaptiveColor{Light: "#5a5868", Dark: "#a09eb0"},
 		Accent:      lipgloss.AdaptiveColor{Light: "#6d43d6", Dark: "#b39dff"},
 		AccentAlt:   lipgloss.AdaptiveColor{Light: "#0b7285", Dark: "#5cd0e8"},
 		Highlight:   lipgloss.AdaptiveColor{Light: "#4c1d95", Dark: "#f4f1ff"},
@@ -58,9 +60,9 @@ func Default() Theme {
 		Error:       lipgloss.AdaptiveColor{Light: "#c23b3b", Dark: "#ff8087"},
 		Danger:      lipgloss.AdaptiveColor{Light: "#c23b3b", Dark: "#ff8087"},
 		Background:  lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#1c1b22"},
-		Border:      lipgloss.AdaptiveColor{Light: "#cfcdda", Dark: "#3a3846"},
-		BorderFocus: lipgloss.AdaptiveColor{Light: "#6d43d6", Dark: "#a78bff"},
-		BorderMuted: lipgloss.AdaptiveColor{Light: "#e4e2ec", Dark: "#2a2833"},
+		Border:      lipgloss.AdaptiveColor{Light: "#b8b6c6", Dark: "#4a4858"},
+		BorderFocus: lipgloss.AdaptiveColor{Light: "#6d43d6", Dark: "#b39dff"},
+		BorderMuted: lipgloss.AdaptiveColor{Light: "#d8d6e2", Dark: "#323040"},
 		UserLabel:   lipgloss.AdaptiveColor{Light: "#0b7285", Dark: "#5cd0e8"},
 		ToolLabel:   lipgloss.AdaptiveColor{Light: "#3f51b5", Dark: "#9db2ff"},
 		DiffAdded:   lipgloss.AdaptiveColor{Light: "#1f8a4c", Dark: "#5edb92"},
