@@ -214,3 +214,35 @@ func TestNoticeCollapsesNewlinesToOneRow(t *testing.T) {
 		}
 	}
 }
+
+func TestNoticeLinesWrapsToMultipleRows(t *testing.T) {
+	th := theme.Default()
+	text := "commands: /provider [name] · /model <model> · /theme [dark|light|auto] · /layout · /help"
+	out := NoticeLines(th, LevelInfo, text, 32, 5)
+	if out == "" {
+		t.Fatal("NoticeLines returned empty")
+	}
+	lines := strings.Split(out, "\n")
+	if len(lines) < 2 {
+		t.Fatalf("NoticeLines did not wrap: %q", out)
+	}
+	if len(lines) > 5 {
+		t.Errorf("NoticeLines exceeded maxLines: %d lines", len(lines))
+	}
+	joined := strings.Join(lines, " ")
+	for _, want := range []string{"/provider", "/theme", "/layout"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("wrapped notice missing %q: %q", want, out)
+		}
+	}
+	for i, line := range lines {
+		if w := lipgloss.Width(line); w > 32 {
+			t.Errorf("line %d width = %d, want <= 32: %q", i, w, line)
+		}
+	}
+	// maxLines=1 collapses to single-line Notice behavior.
+	one := NoticeLines(th, LevelInfo, text, 32, 1)
+	if strings.Contains(one, "\n") {
+		t.Errorf("maxLines=1 still multi-line: %q", one)
+	}
+}

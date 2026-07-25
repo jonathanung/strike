@@ -46,6 +46,45 @@ func TestDialogToneOverridesBorderColor(t *testing.T) {
 	}
 }
 
+func TestDialogHintWrapsWhenLongerThanWidth(t *testing.T) {
+	// Long hint word-wraps, but is capped at two lines with an ellipsis on the
+	// last visible line so short terminals do not clip the overlay.
+	hint := "enter select · esc close · type to filter · ctrl+d save default · tab cycles"
+	out := Dialog(theme.Default(), DialogOpts{
+		Title: "Select model",
+		Hint:  hint,
+		Width: 36,
+	}, "body line")
+	plain := out
+	if !strings.Contains(plain, "enter select") {
+		t.Errorf("wrapped dialog dropped hint start:\n%s", plain)
+	}
+	if !strings.Contains(plain, "…") && !strings.Contains(plain, "...") {
+		t.Errorf("expected ellipsis on capped hint, got:\n%s", plain)
+	}
+	// Multi-line: more than title + body + single hint row.
+	if strings.Count(plain, "\n") < 4 {
+		t.Errorf("expected multi-line dialog with wrapped hint, got %d newlines:\n%s", strings.Count(plain, "\n"), plain)
+	}
+	// At most two muted hint body lines (plus title/body/spacing/borders).
+	hintBody := 0
+	for _, line := range strings.Split(plain, "\n") {
+		if strings.Contains(line, "enter select") || strings.Contains(line, "filter") || strings.Contains(line, "…") || strings.Contains(line, "...") {
+			if strings.Contains(line, "│") {
+				hintBody++
+			}
+		}
+	}
+	if hintBody > 2 {
+		t.Errorf("hint exceeded 2 lines (%d):\n%s", hintBody, plain)
+	}
+	for i, line := range strings.Split(plain, "\n") {
+		if w := lipgloss.Width(line); w > 36 {
+			t.Errorf("line %d width = %d, want <= 36: %q", i, w, line)
+		}
+	}
+}
+
 func TestDialogPlacesHintUsingThemeSpacing(t *testing.T) {
 	for _, tt := range []struct {
 		name         string

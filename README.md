@@ -82,29 +82,37 @@ re-run `make build` after pulling changes to refresh it.
 The screen has a full-width header, footer hints, and danger banner when
 needed. Its left pane is one aggregate stack: `session` transcript, reserved
 notice line, slash-command completion, and `prompt ❯` composer. The right slot
-hosts one active session pane (`context` setup or `activity` tools/tips).
-Vim-style pane keys: `ctrl+h` / `ctrl+l` focus the left or right pane; `ctrl+j`
-/ `ctrl+k` cycle the active right-pane window next/previous. `ctrl+p` opens the
-command palette; `f1` (or `/keys`) opens a filterable keybind cheatsheet. Enter
-sends; Shift+Enter (or Alt+Enter) inserts a newline. Pickers, the command
-palette, and permission prompts render as centered dialogs in the same panel
-style.
+hosts one active session pane (`context` setup or `activity` tools/tips /
+subagent status). Vim-style pane keys (horizontal split): `ctrl+h` / `ctrl+l`
+focus the left or right pane; `ctrl+j` / `ctrl+k` cycle the active right-pane
+window next/previous. `ctrl+;` (or `/layout` / `/split`) toggles a vertical
+top/bottom split and swaps those chords (focus becomes `ctrl+j`/`ctrl+k`,
+cycle becomes `ctrl+h`/`ctrl+l`). `ctrl+p` opens the command palette; `f1`
+(or `/keys`) opens a filterable keybind cheatsheet. Enter sends; Shift+Enter
+(or Alt+Enter) inserts a newline. `pgup`/`pgdn` (and `ctrl+up`/`ctrl+down`)
+scroll the transcript; `end` jumps to the latest output. The transcript sticks
+to the bottom while you are already anchored, and keeps your scroll offset
+when you have scrolled up. Pickers, the command palette, and permission
+prompts render as centered dialogs in the same panel style. `/theme
+[dark|light|auto]` sets session appearance (bare `/theme` cycles).
 
-The default split appears at 93 columns and above, with a minimum 60-column
-left pane, one-column gutter, and 32-column right pane. At 92 columns and
-below, only the active pane fills the full width. For a custom gutter of width
-`g`, the split threshold is `60 + g + 32`. Below 60 columns or 20 rows panels
-drop their borders ("compact mode") instead of clipping or garbling. This is
-only pane infrastructure: it has no file, editor, or markdown content, and no
-window close state or plugins.
+The default horizontal split appears at 93 columns and above, with a minimum
+60-column left pane, one-column gutter, and 32-column right pane. At 92
+columns and below, only the active pane fills the full width. For a custom
+gutter of width `g`, the split threshold is `60 + g + 32`. Vertical split uses
+the full width and divides body height when there is room. Below 60 columns or
+20 rows panels drop their borders ("compact mode") instead of clipping or
+garbling. This is only pane infrastructure: it has no file, editor, or
+markdown content, and no window close state or plugins.
 
 A fresh session with an empty transcript shows a dashboard of fixed-height
-cards in place of a blank viewport; the header owns the Strike brand. The
-dashboard always shows keybindings. It shows get-started provider rows only
-when no provider is selected or the selected provider needs authentication,
-with provider rows bounded to fit; agents and skills only when valid configured
-entries exist; and recent prompts only when prompt history exists. It repacks
-to fit the terminal on resize and collapses to a single column when narrow.
+cards in place of a blank viewport; when space allows, a Logo band sits above
+the cards and the header still owns the compact brand. The dashboard always
+shows keybindings. It shows get-started provider rows only when no provider is
+selected or the selected provider needs authentication, with provider rows
+bounded to fit; agents and skills only when valid configured entries exist;
+and recent prompts only when prompt history exists. It repacks to fit the
+terminal on resize and collapses to a single column when narrow.
 
 ## Auth
 
@@ -145,7 +153,8 @@ command line just pre-selects (and validates credentials eagerly).
 
 Keys: `enter` send · `shift+enter` newline (alt+enter fallback) ·
 `esc` interrupt turn / reject permission · `1/2/3` or `←/→ + enter`
-answer permission prompts · `pgup/pgdn` scroll · `ctrl+c` quit.
+answer permission prompts · `pgup/pgdn` / `ctrl+up`/`ctrl+down` scroll ·
+`end` jump to bottom · `ctrl+;` toggle split orientation · `ctrl+c` quit.
 
 ## Architecture in one paragraph
 

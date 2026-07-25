@@ -3,6 +3,9 @@ package ui
 import (
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
 
@@ -23,11 +26,21 @@ const (
 //	ui.Notice(th, ui.LevelError, "no model selected — use /provider", width)
 //	ui.Notice(th, ui.LevelSuccess, "saved as default: echo/echo-1", width)
 //
-// The whole line is truncated to width; empty text yields "". Newlines in
-// text are collapsed to spaces so the output is always exactly one row —
-// callers budget a single line for it.
+// Equivalent to NoticeLines with maxLines=1. Empty text yields "". Newlines in
+// text are collapsed to spaces.
 func Notice(th theme.Theme, level Level, text string, width int) string {
-	if width <= 0 || text == "" {
+	return NoticeLines(th, level, text, width, 1)
+}
+
+// NoticeLines renders a level-colored notice wrapped to width, at most maxLines
+// rows. The level glyph prefixes the first line; continuation lines use a hanging
+// indent so text columns align. When the wrapped text exceeds maxLines, the last
+// kept line ends with an ellipsis. Empty text, non-positive width, or maxLines < 1
+// yields "".
+//
+//	ui.NoticeLines(th, ui.LevelInfo, helpText, width, 5)
+func NoticeLines(th theme.Theme, level Level, text string, width, maxLines int) string {
+	if width <= 0 || maxLines < 1 || text == "" {
 		return ""
 	}
 	th = th.Resolve()
@@ -44,7 +57,47 @@ func Notice(th theme.Theme, level Level, text string, width int) string {
 	case LevelError:
 		glyph, style = ic.Err, st.Error
 	}
-	return truncate(th, style.Render(glyph+strings.Repeat(" ", th.Spacing.XS)+text), width)
+
+	gap := strings.Repeat(" ", th.Spacing.XS)
+	prefix := glyph + gap
+	prefixW := lipgloss.Width(prefix)
+	if prefixW >= width {
+		return truncate(th, style.Render(prefix+text), width)
+	}
+	bodyWidth := width - prefixW
+
+	wrapped := wrapText(text, bodyWidth)
+	lines := strings.Split(wrapped, "\n")
+	overflow := len(lines) > maxLines
+	if overflow {
+		lines = lines[:maxLines]
+		lines[maxLines-1] = fitEllipsis(th, lines[maxLines-1], bodyWidth)
+	}
+
+	indent := strings.Repeat(" ", prefixW)
+	out := make([]string, len(lines))
+	for i, line := range lines {
+		if i == 0 {
+			out[i] = truncate(th, style.Render(prefix+line), width)
+		} else {
+			out[i] = truncate(th, style.Render(indent+line), width)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// fitEllipsis forces s to end with an ellipsis within width cells.
+func fitEllipsis(th theme.Theme, s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	ell := resolveIcons(th).Ellipsis
+	if lipgloss.Width(s) < width {
+		if lipgloss.Width(s+ell) <= width {
+			return s + ell
+		}
+	}
+	return ansi.Truncate(s, width, ell)
 }
 
 // collapseNewlines flattens multi-line text into one row: CRLF, LF, and CR

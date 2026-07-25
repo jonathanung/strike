@@ -42,14 +42,15 @@ func newProviderModal(services host.Services, current string, ops chan<- protoco
 
 func (m *providerModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 	if len(m.statuses) == 0 {
-		if msg.String() == "esc" || msg.String() == "q" {
+		if isEscape(msg) || msg.String() == "q" {
 			return nil, nil
 		}
 		return m, nil
 	}
-	switch msg.String() {
-	case "esc", "q":
+	if isEscape(msg) || msg.String() == "q" {
 		return nil, nil
+	}
+	switch msg.String() {
 	case "up", "k":
 		m.cursor = (m.cursor + len(m.statuses) - 1) % len(m.statuses)
 	case "down", "j", "tab":

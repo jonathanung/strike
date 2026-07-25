@@ -124,8 +124,9 @@ func TestC3WelcomeColumnsAndNoOuterPanel(t *testing.T) {
 	m, _ = newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	plain := ansi.Strip(m.View())
-	if !strings.Contains(plain, "⚡ strike") || strings.Contains(plain, "S T R I K E") {
-		t.Errorf("header brand/dashboard framing is wrong:\n%s", plain)
+	// Header always uses the compact wordmark; full logo band needs more height.
+	if !strings.Contains(plain, "⚡ strike") {
+		t.Errorf("header brand missing compact wordmark:\n%s", plain)
 	}
 	assertNoWelcomeOuterPanel(t, m.View())
 	m.applyEvent(protocol.UserMessage{Text: "populated"})
@@ -321,7 +322,7 @@ func TestC3DangerNoticeHintsAndWorkingRows(t *testing.T) {
 	m.setNotice("separate notice", false)
 	m.applyEvent(protocol.TurnStarted{})
 	lines := strings.Split(ansi.Strip(m.View()), "\n")
-	l := computeLayout(80, 24, m.composer.Height(), 0, false)
+	l := computeLayout(80, 24, m.composer.Height(), 0, false, m.noticeRowsFor(80))
 	noticeRow := l.header + l.transcript
 	if !strings.Contains(lines[0], "working") || !strings.Contains(lines[noticeRow], "separate notice") || !strings.Contains(lines[len(lines)-1], "ctrl+h") {
 		t.Errorf("working header, notice, and hints do not retain separate rows:\n%s", strings.Join(lines, "\n"))
@@ -348,8 +349,10 @@ func TestC3CanonicalLayoutCanvas(t *testing.T) {
 			m = updateApp(t, m, tea.WindowSizeMsg{Width: tt.width, Height: tt.height})
 			view, plain := m.View(), ansi.Strip(m.View())
 			assertCanvas(t, view, tt.width, tt.height)
-			if strings.Contains(plain, "S T R I K E") {
-				t.Errorf("legacy welcome chrome in canonical view:\n%s", plain)
+			// Full logo band is intentional chrome when the dashboard has room;
+			// compact header brand is always present on left-focused layouts.
+			if tt.focus != focusRight && !strings.Contains(plain, "⚡ strike") && !strings.Contains(plain, "S T R I K E") {
+				t.Errorf("welcome missing logo/header brand:\n%s", plain)
 			}
 			assertNoWelcomeOuterPanel(t, m.View())
 			if tt.focus == focusRight && strings.Contains(plain, "get started") {
@@ -389,18 +392,30 @@ func TestC3LongDashboardHistoryAndSelectedModelEvidence(t *testing.T) {
 	if !strings.Contains(strings.Split(plain, "\n")[0], "working") {
 		t.Errorf("working status missing from header:\n%s", plain)
 	}
-	l := computeLayout(160, 45, m.composer.Height(), m.completionPopupHeight(), true, true)
-	if notice := strings.Split(plain, "\n")[l.header+l.transcript]; !strings.Contains(notice, "long status") {
-		t.Errorf("notice moved out of its allocated row: %q", notice)
+	// Split layout budgets the left stack at the left pane width; multi-line
+	// notices (wide CJK status) reserve noticeRowsFor rows, not a hard-coded 1.
+	leftW := computePaneGeometry(160, m.th.Resolve().Spacing.XS, focusLeft).leftWidth
+	noticeRows := m.noticeRowsFor(leftW)
+	if noticeRows < 2 {
+		t.Fatalf("long CJK notice should wrap to multiple rows, got %d", noticeRows)
+	}
+	l := computeLayout(leftW, 45, m.composer.Height(), m.completionPopupHeight(), true, noticeRows)
+	lines := strings.Split(plain, "\n")
+	noticeStart := l.header + l.transcript
+	if noticeStart >= len(lines) || !strings.Contains(lines[noticeStart], "long status") {
+		got := ""
+		if noticeStart < len(lines) {
+			got = lines[noticeStart]
+		}
+		t.Errorf("notice moved out of its allocated row (start=%d rows=%d): %q", noticeStart, noticeRows, got)
 	}
 	if strings.Count(plain, "DANGER: permissions bypassed") != 1 {
 		t.Errorf("danger uniqueness failed:\n%s", plain)
 	}
 
 	recent := welcomeCardBounds(t, dashboardLines(t, plain, l), "recent prompts")
-	// Keys card now includes the newline binding, shifting recent prompts one
-	// row down versus the pre-onboarding layout.
-	if want := (welcomeBounds{top: 22, bottom: 36, left: 0, right: 51}); recent != want {
+	// Logo band + keys card height shift the recent card versus older layouts.
+	if want := (welcomeBounds{top: 23, bottom: 34, left: 0, right: 51}); recent != want {
 		t.Errorf("recent prompts geometry = %+v, want %+v", recent, want)
 	}
 	rows := welcomeCardPromptRows(dashboardLines(t, plain, l), recent)
@@ -512,7 +527,7 @@ func assertVisibleWelcomeCardsClosed(t *testing.T, m Model, view string) {
 	if m.focus == focusRight {
 		return
 	}
-	l := computeLayout(m.width, m.height, m.composer.Height(), m.completionPopupHeight(), m.dangerouslySkipPermissions, m.notice != "")
+	l := computeLayout(m.width, m.height, m.composer.Height(), m.completionPopupHeight(), m.dangerouslySkipPermissions, m.noticeRowsFor(m.width))
 	lines := dashboardLines(t, ansi.Strip(view), l)
 	for _, card := range m.welcomeCards(m.services.Auth.Statuses()) {
 		welcomeCardBounds(t, lines, card.title)

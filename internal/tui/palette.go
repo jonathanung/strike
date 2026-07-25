@@ -206,9 +206,10 @@ func paletteMatchRank(entry paletteEntry, query string) int {
 
 func (m *paletteModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 	list := m.filtered()
-	switch msg.String() {
-	case "esc":
+	if isEscape(msg) {
 		return nil, nil
+	}
+	switch msg.String() {
 	case "up", "ctrl+p":
 		if len(list) > 0 {
 			m.cursor = (m.cursor + len(list) - 1) % len(list)

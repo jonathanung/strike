@@ -38,7 +38,9 @@ func TestWelcomeDashboardRendersBentoCardsForEmptyTranscript(t *testing.T) {
 	if !strings.Contains(keys, "shift+enter") && !strings.Contains(keys, "newline") {
 		t.Errorf("welcome keys missing newline help: %q", keys)
 	}
-	if strings.Contains(plain, "S T R I K E") || strings.Contains(plain, "strike"+"┐") {
+	// Standalone titled "logo" card is gone; a Logo band (S T R I K E) may still
+	// appear above the card grid when height allows — that is intentional chrome.
+	if strings.Contains(plain, "strike"+"┐") || strings.Contains(plain, "╭─ logo") {
 		t.Errorf("welcome dashboard retained removed standalone logo card:\n%s", plain)
 	}
 }

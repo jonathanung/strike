@@ -166,6 +166,23 @@ type Model struct {
 	authExpiryNoticed bool
 	focused           bool // terminal focus; default true (WithReportFocus)
 	titleTopic        string
+
+	// splitOrientation is horizontal (left|right) by default; vertical stacks
+	// the left body above the right pane (top/bottom).
+	splitOrientation splitOrientation
+	// appearance is session-local auto|dark|light (lipgloss adaptive bg).
+	appearance appearanceMode
+	// children tracks active/recent subagent sessions for the activity pane.
+	// Lifecycle never appends transcript cells.
+	children []childActivity
+}
+
+// childActivity is one foreground subagent row in the activity pane.
+type childActivity struct {
+	sessionID string
+	agent     string
+	prompt    string
+	status    string // running | completed | failed | canceled
 }
 
 // New builds the frontend model. services supplies every host capability; any
@@ -197,6 +214,7 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		spin:       sp,
 		historyPos: -1,
 		focused:    true,
+		appearance: appearanceAuto,
 	}
 	for _, option := range options {
 		m.dangerouslySkipPermissions = option.DangerouslySkipPermissions
@@ -496,6 +514,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reflow()
 			return m, nil
 		}
+		if key.Matches(msg, m.keyMap.ToggleOrientation) {
+			m.completion = nil
+			m.toggleOrientation()
+			return m, nil
+		}
 		if m.turnRunning && key.Matches(msg, m.keyMap.Interrupt) {
 			ops := m.ops
 			return m, func() tea.Msg {
@@ -513,6 +536,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch {
 		case key.Matches(msg, m.keyMap.Newline):
+			// Left-focus only (right pane returned above). Distinct from Send
+			// (enter) and from scroll chords (pgup/ctrl+up).
 			m.resetHistoryBrowsing()
 			m.composer.InsertString("\n")
 			m.recomputeCompletion()
@@ -560,6 +585,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case key.Matches(msg, m.keyMap.ScrollDown):
 			m.viewport.HalfViewDown()
+			return m, nil
+		case key.Matches(msg, m.keyMap.JumpBottom):
+			m.viewport.GotoBottom()
 			return m, nil
 		}
 		return m.updateComposer(msg)
@@ -692,8 +720,12 @@ func (m *Model) resetHistoryBrowsing() {
 }
 
 func (m *Model) reflow() {
-	geometry := computePaneGeometry(m.width, m.th.Resolve().Spacing.XS, m.focus)
-	leftWidth := geometry.leftCandidateWidth(m.width)
+	gutter := m.th.Resolve().Spacing.XS
+	leftWidth := m.width
+	if m.splitOrientation != orientVertical {
+		geometry := computePaneGeometry(m.width, gutter, m.focus)
+		leftWidth = geometry.leftCandidateWidth(m.width)
+	}
 	compact := leftWidth < compactWidth || m.height < compactHeight
 	composerWidth := leftWidth
 	if !compact {
@@ -733,31 +765,71 @@ func (m *Model) reflow() {
 	}
 
 	if m.ready {
-		l := computeLayout(leftWidth, m.height, composerRows, popupHeight, m.dangerouslySkipPermissions, m.notice != "")
+		l := computeLayout(leftWidth, m.height, composerRows, popupHeight, m.dangerouslySkipPermissions, m.noticeRowsFor(leftWidth))
+		bodyHeight := l.transcript + l.notice + l.popup + l.composer
+		rightWidth, rightHeight := m.width, bodyHeight
+		rightCompact := m.width < compactWidth || m.height < compactHeight
+
+		if m.splitOrientation == orientVertical {
+			geo := computeVerticalPaneGeometry(m.width, bodyHeight, gutter, m.focus)
+			if geo.mode == paneSplit {
+				l = l.withBodyHeight(geo.leftHeight)
+				rightWidth = geo.rightWidth
+				rightHeight = geo.rightHeight
+				rightCompact = false
+			} else if m.focus == focusRight {
+				rightWidth = geo.rightWidth
+				rightHeight = geo.rightHeight
+				if rightHeight == 0 {
+					rightHeight = bodyHeight
+				}
+			} else {
+				// Left-only single: keep full body on the left stack.
+				rightWidth, rightHeight = 0, 0
+			}
+		} else {
+			geometry := computePaneGeometry(m.width, gutter, m.focus)
+			rightWidth = geometry.rightWidth
+			if rightWidth == 0 {
+				rightWidth = m.width
+			}
+			rightCompact = geometry.mode == paneSingle && (m.width < compactWidth || m.height < compactHeight)
+			rightHeight = bodyHeight
+		}
+
 		m.viewport.Width = max(1, l.transcriptInnerWidthFor(m.th, leftWidth))
 		m.viewport.Height = max(0, l.transcriptInnerHeight())
-		bodyHeight := l.transcript + l.notice + l.popup + l.composer
-		rightWidth := geometry.rightWidth
-		if rightWidth == 0 {
-			rightWidth = m.width
-		}
-		rightCompact := geometry.mode == paneSingle && (m.width < compactWidth || m.height < compactHeight)
-		if rightCompact {
-			m.windows = m.windows.resize(rightWidth, bodyHeight)
-		} else {
-			m.windows = m.windows.resize(max(0, ui.PanelInnerWidth(m.th, rightWidth)), ui.PanelInnerHeight(rightWidth, bodyHeight))
+		if rightWidth > 0 && rightHeight > 0 {
+			if rightCompact {
+				m.windows = m.windows.resize(rightWidth, rightHeight)
+			} else {
+				m.windows = m.windows.resize(max(0, ui.PanelInnerWidth(m.th, rightWidth)), ui.PanelInnerHeight(rightWidth, rightHeight))
+			}
 		}
 	}
 }
 
+// toggleOrientation flips horizontal/vertical body split and refreshes layout.
+func (m *Model) toggleOrientation() {
+	if m.splitOrientation == orientVertical {
+		m.splitOrientation = orientHorizontal
+	} else {
+		m.splitOrientation = orientVertical
+	}
+	m.keyMap.applyOrientationKeys(m.splitOrientation)
+	m.reflow()
+	m.refreshViewport()
+}
+
 func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
-	// Defense-in-depth: child-session events should only surface permissions
-	// and questions. Primary filtering is in the engine (only Permission* and
-	// Question* are forwarded).
+	// Defense-in-depth: child-session events should only surface permissions,
+	// questions, and child lifecycle (activity pane). Primary filtering is in
+	// the engine; ChildStarted/Completed must reach the TUI for subagent UI.
 	if corr, ok := eventCorrelation(ev); ok && (corr.ParentSessionID != "" || corr.Depth > 0) {
 		switch ev.(type) {
 		case protocol.PermissionAsked, protocol.PermissionResolved,
-			protocol.QuestionAsked, protocol.QuestionResolved:
+			protocol.QuestionAsked, protocol.QuestionResolved,
+			protocol.ChildStarted, protocol.ChildCompleted:
 		default:
 			return nil
 		}
@@ -869,11 +941,78 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		}
 		cmd = m.broadcastContextState()
 	case protocol.ChildStarted:
-		// Foreground child lifecycle is engine-owned; no tree UI yet.
+		m.onChildStarted(ev)
 	case protocol.ChildCompleted:
-		// no-op
+		m.onChildCompleted(ev)
 	}
 	return cmd
+}
+
+const maxChildActivity = 12
+
+func (m *Model) onChildStarted(ev protocol.ChildStarted) {
+	id := ev.SessionID
+	if id == "" {
+		id = "child"
+	}
+	for i := range m.children {
+		if m.children[i].sessionID == id {
+			m.children[i].agent = ev.Agent
+			m.children[i].prompt = ev.Prompt
+			m.children[i].status = "running"
+			return
+		}
+	}
+	m.children = append(m.children, childActivity{
+		sessionID: id,
+		agent:     ev.Agent,
+		prompt:    ev.Prompt,
+		status:    "running",
+	})
+	m.trimChildren()
+}
+
+func (m *Model) onChildCompleted(ev protocol.ChildCompleted) {
+	id := ev.SessionID
+	status := string(ev.Status)
+	if status == "" {
+		status = string(protocol.ChildStatusCompleted)
+	}
+	for i := range m.children {
+		if m.children[i].sessionID == id || (id == "" && i == len(m.children)-1) {
+			m.children[i].status = status
+			return
+		}
+	}
+	// Completed without a matching start still surfaces briefly.
+	if id == "" {
+		id = "child"
+	}
+	m.children = append(m.children, childActivity{
+		sessionID: id,
+		status:    status,
+	})
+	m.trimChildren()
+}
+
+func (m *Model) trimChildren() {
+	if len(m.children) <= maxChildActivity {
+		return
+	}
+	// Drop oldest non-running first; if still over, drop oldest overall.
+	for len(m.children) > maxChildActivity {
+		drop := -1
+		for i, ch := range m.children {
+			if ch.status != "running" {
+				drop = i
+				break
+			}
+		}
+		if drop < 0 {
+			drop = 0
+		}
+		m.children = append(m.children[:drop], m.children[drop+1:]...)
+	}
 }
 
 // eventCorrelation extracts lineage fields when the event embeds Correlation.
@@ -1079,8 +1218,34 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		return m.handleVimCommand(fields[1:])
 	case "/md-read":
 		return m.handleMDRead(text, fields)
+	case "/theme":
+		return m.handleThemeCommand(fields[1:])
+	case "/layout", "/split":
+		m.resetComposer()
+		m.clearNotice()
+		m.toggleOrientation()
+		label := "horizontal"
+		if m.splitOrientation == orientVertical {
+			label = "vertical"
+		}
+		m.setNotice("layout: "+label+" (ctrl+; or /layout toggles)", false)
+		return m, nil
 	case "/help":
-		m.setNotice("commands: "+dotJoin(m.th, "/provider [name [model]]", "/model <model>", "/effort <"+effortChoices()+">", "/fast [on|off]", "/agent [name]", "/auth", "/vim [path[:line]]", "/md-read <path>", "/keys", "skills as /<name>", "tab cycles agents"), false)
+		m.setNotice("commands: "+dotJoin(m.th,
+			"/provider [name [model]]",
+			"/model <model>",
+			"/effort <"+effortChoices()+">",
+			"/fast [on|off]",
+			"/agent [name]",
+			"/auth",
+			"/vim [path[:line]]",
+			"/md-read <path>",
+			"/theme [dark|light|auto]",
+			"/layout",
+			"/keys",
+			"skills as /<name>",
+			"tab cycles agents",
+		), false)
 		m.resetComposer()
 		return m, nil
 	case "/keys":
@@ -1173,6 +1338,27 @@ func (m Model) sendSelect(op protocol.SelectModel) (tea.Model, tea.Cmd) {
 	}
 }
 
+// handleThemeCommand sets or cycles session-local appearance (auto|dark|light).
+func (m Model) handleThemeCommand(args []string) (tea.Model, tea.Cmd) {
+	next := m.appearance
+	if len(args) == 0 {
+		next = cycleAppearance(m.appearance)
+	} else if mode, ok := parseAppearance(strings.ToLower(args[0])); ok {
+		next = mode
+	} else {
+		m.setNotice("usage: /theme [dark|light|auto]", true)
+		return m, nil
+	}
+	m.appearance = next
+	applyAppearance(m.appearance)
+	m.restyleWidgets()
+	m.resetComposer()
+	m.setNotice("theme: "+string(m.appearance), false)
+	m.reflow()
+	m.refreshViewport()
+	return m, nil
+}
+
 // handleFastCommand toggles or sets the session priority-tier preference.
 // Bare /fast flips the current value; on/off/true/false/1/0 set it explicitly.
 func (m Model) handleFastCommand(args []string) (tea.Model, tea.Cmd) {
@@ -1257,12 +1443,20 @@ func (m *Model) refreshViewport() {
 		m.viewport.GotoTop()
 		return
 	}
+	// Stick to bottom only when already anchored; otherwise preserve scroll
+	// so users reading history are not yanked down on each event.
+	atBottom := m.viewport.AtBottom()
+	yOff := m.viewport.YOffset
 	blocks := make([]string, 0, len(m.cells))
 	for _, c := range m.cells {
 		blocks = append(blocks, c.render(width, m.th))
 	}
 	m.viewport.SetContent(strings.Join(blocks, "\n\n"))
-	m.viewport.GotoBottom()
+	if atBottom {
+		m.viewport.GotoBottom()
+	} else {
+		m.viewport.SetYOffset(yOff)
+	}
 }
 
 func (m Model) View() string {
@@ -1273,44 +1467,97 @@ func (m Model) View() string {
 		return "starting…"
 	}
 
-	geometry := computePaneGeometry(m.width, m.th.Resolve().Spacing.XS, m.focus)
-	leftWidth := geometry.leftCandidateWidth(m.width)
-	l := computeLayout(leftWidth, m.height, m.composer.Height(), m.completionPopupHeightFor(leftWidth), m.dangerouslySkipPermissions, m.notice != "")
+	gutter := m.th.Resolve().Spacing.XS
+	leftWidth := m.width
+	var hGeometry paneGeometry
+	if m.splitOrientation != orientVertical {
+		hGeometry = computePaneGeometry(m.width, gutter, m.focus)
+		leftWidth = hGeometry.leftCandidateWidth(m.width)
+	}
+	l := computeLayout(leftWidth, m.height, m.composer.Height(), m.completionPopupHeightFor(leftWidth), m.dangerouslySkipPermissions, m.noticeRowsFor(leftWidth))
 	bodyHeight := l.transcript + l.notice + l.popup + l.composer
-	compact := leftWidth < compactWidth || m.height < compactHeight
-	left := make([]string, 0, 4)
-	if l.transcript > 0 {
-		left = append(left, m.transcriptView(compact, leftWidth, l.transcript))
-	}
-	if l.notice > 0 {
-		left = append(left, m.noticeView(leftWidth))
-	}
-	if m.modal == nil && l.popup > 0 {
-		if popup := m.completion.view(leftWidth, l.popup, m.th); popup != "" {
-			left = append(left, popup)
+	rightWidth, rightHeight := 0, bodyHeight
+	showLeft, showRight := true, false
+	vGutter := 0
+	splitVertical := false
+
+	if m.splitOrientation == orientVertical {
+		geo := computeVerticalPaneGeometry(m.width, bodyHeight, gutter, m.focus)
+		if geo.mode == paneSplit {
+			splitVertical = true
+			l = l.withBodyHeight(geo.leftHeight)
+			bodyHeight = l.transcript + l.notice + l.popup + l.composer
+			rightWidth, rightHeight = geo.rightWidth, geo.rightHeight
+			vGutter = geo.gutter
+			showLeft, showRight = true, true
+		} else if m.focus == focusRight {
+			showLeft, showRight = false, true
+			rightWidth = m.width
+			if geo.rightHeight > 0 {
+				rightHeight = geo.rightHeight
+			}
+		} else {
+			showLeft, showRight = true, false
 		}
-	}
-	if l.composer > 0 {
-		left = append(left, m.composerView(compact, leftWidth, l.composer))
-	}
-	leftBody := lipgloss.JoinVertical(lipgloss.Left, left...)
-	body := leftBody
-	if geometry.mode == paneSplit {
-		body = lipgloss.JoinHorizontal(lipgloss.Top, leftBody, paneGutter(m.th, geometry.gutter, bodyHeight), m.rightPaneView(geometry.rightWidth, bodyHeight, false))
+	} else if hGeometry.mode == paneSplit {
+		showLeft, showRight = true, true
+		rightWidth, rightHeight = hGeometry.rightWidth, bodyHeight
 	} else if m.focus == focusRight {
+		showLeft, showRight = false, true
+		rightWidth = m.width
+	}
+
+	compact := leftWidth < compactWidth || m.height < compactHeight
+	var leftBody string
+	if showLeft {
+		left := make([]string, 0, 4)
+		if l.transcript > 0 {
+			left = append(left, m.transcriptView(compact, leftWidth, l.transcript))
+		}
+		if l.notice > 0 {
+			left = append(left, m.noticeView(leftWidth, l.notice))
+		}
+		if m.modal == nil && l.popup > 0 {
+			if popup := m.completion.view(leftWidth, l.popup, m.th); popup != "" {
+				left = append(left, popup)
+			}
+		}
+		if l.composer > 0 {
+			left = append(left, m.composerView(compact, leftWidth, l.composer))
+		}
+		leftBody = lipgloss.JoinVertical(lipgloss.Left, left...)
+	}
+
+	var body string
+	switch {
+	case showLeft && showRight && splitVertical:
 		rightCompact := m.width < compactWidth || m.height < compactHeight
-		body = m.rightPaneView(m.width, bodyHeight, rightCompact)
+		right := m.rightPaneView(rightWidth, rightHeight, rightCompact)
+		body = lipgloss.JoinVertical(lipgloss.Left, leftBody, paneGutter(m.th, m.width, vGutter), right)
+	case showLeft && showRight:
+		body = lipgloss.JoinHorizontal(lipgloss.Top, leftBody, paneGutter(m.th, hGeometry.gutter, bodyHeight), m.rightPaneView(rightWidth, rightHeight, false))
+	case showRight:
+		rightCompact := m.width < compactWidth || m.height < compactHeight
+		body = m.rightPaneView(rightWidth, rightHeight, rightCompact)
+	default:
+		body = leftBody
+	}
+
+	// Full body band height for overlay centering (left stack and/or right).
+	bandHeight := bodyHeight
+	if splitVertical && showLeft && showRight {
+		bandHeight = bodyHeight + vGutter + rightHeight
 	}
 
 	contentParts := make([]string, 0, 2)
 	if l.header > 0 {
 		contentParts = append(contentParts, m.headerView(m.width))
 	}
-	if bodyHeight > 0 {
+	if bandHeight > 0 && body != "" {
 		contentParts = append(contentParts, body)
 	}
 	content := strings.Join(contentParts, "\n")
-	contentHeight := l.header + bodyHeight
+	contentHeight := l.header + bandHeight
 
 	footer := make([]string, 0, 2)
 	if l.hints > 0 {
@@ -1352,9 +1599,18 @@ func (m Model) View() string {
 // pane is the only visible pane. Existing notices do not move focus: only the
 // result of the selected palette action does.
 func (m Model) paletteResultFocus(priorNotice string, priorNoticeErr bool, cmd tea.Cmd) (tea.Model, tea.Cmd) {
-	geometry := computePaneGeometry(m.width, m.th.Resolve().Spacing.XS, m.focus)
+	gutter := m.th.Resolve().Spacing.XS
+	singleRight := m.focus == focusRight
+	if m.splitOrientation == orientVertical {
+		bodyGuess := max(0, m.height-2)
+		geo := computeVerticalPaneGeometry(m.width, bodyGuess, gutter, m.focus)
+		singleRight = singleRight && geo.mode == paneSingle
+	} else {
+		geometry := computePaneGeometry(m.width, gutter, m.focus)
+		singleRight = singleRight && geometry.mode == paneSingle
+	}
 	producedNotice := m.modal == nil && m.notice != "" && (m.notice != priorNotice || m.noticeErr != priorNoticeErr)
-	if m.focus != focusRight || geometry.mode != paneSingle || !producedNotice {
+	if !singleRight || !producedNotice {
 		return m, cmd
 	}
 	focusCmd := m.setPaneFocus(focusLeft)
@@ -1365,8 +1621,12 @@ func (m Model) paletteResultFocus(priorNotice string, priorNoticeErr bool, cmd t
 // completionPopupHeight returns the reserved height of the completion popup
 // for the current View, mirroring what reflow computed.
 func (m Model) completionPopupHeight() int {
-	geometry := computePaneGeometry(m.width, m.th.Resolve().Spacing.XS, m.focus)
-	return m.completionPopupHeightFor(geometry.leftCandidateWidth(m.width))
+	leftWidth := m.width
+	if m.splitOrientation != orientVertical {
+		geometry := computePaneGeometry(m.width, m.th.Resolve().Spacing.XS, m.focus)
+		leftWidth = geometry.leftCandidateWidth(m.width)
+	}
+	return m.completionPopupHeightFor(leftWidth)
 }
 
 func (m Model) completionPopupHeightFor(width int) int {
@@ -1383,6 +1643,10 @@ func (m Model) completionPopupHeightFor(width int) int {
 // compact reports whether the screen is below the breakpoints for bordered
 // chrome; below it, panels degrade to plain viewport+composer.
 func (m Model) compact() bool {
-	geometry := computePaneGeometry(m.width, m.th.Resolve().Spacing.XS, m.focus)
-	return geometry.leftCandidateWidth(m.width) < compactWidth || m.height < compactHeight
+	leftWidth := m.width
+	if m.splitOrientation != orientVertical {
+		geometry := computePaneGeometry(m.width, m.th.Resolve().Spacing.XS, m.focus)
+		leftWidth = geometry.leftCandidateWidth(m.width)
+	}
+	return leftWidth < compactWidth || m.height < compactHeight
 }
