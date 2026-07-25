@@ -47,6 +47,7 @@ selection, and layout). Keep this catalog synchronized with `internal/tui/ui`.
 | Overlay | `OverlayCenter(bg, fg string, width, height int) string`; `ModalWidth(screenWidth int) int` | ANSI-aware centered overlay and standard dialog width (`min(72, screenWidth-4)`). |
 | Canvas | `Canvas(th theme.Theme, width, height int, body string) string` | Final full-screen fit operation and owner of the application background. |
 | Logo | `Logo(th theme.Theme) string`; `LogoCompact(th theme.Theme) string` | Full and compact Strike wordmarks. |
+| DiffPreview | `DiffPreview(th theme.Theme, opts DiffPreviewOpts) string` | Unified +/-/context diff block. `DiffPreviewOpts`: `Path`, `Old`, `New`, `MaxLines` (hunk body; ≤0 → 12), mandatory `Width` (≤0 → ""), `ShowStats`. Header (path and/or +N/−M) does not consume `MaxLines`; overflow ends with a muted ellipsis more-lines row. |
 
 Panel and Dialog truncate long body lines; pre-wrap them to
 `ui.PanelInnerWidth(th, width)`. `Card` is the exception: it wraps its own
@@ -88,8 +89,9 @@ state colors in views. `Spinner` uses the working token (`AccentAlt`).
 `th.S()` returns semantic styles: `Text`, `Muted`, `Accent`, `AccentAlt`,
 `Title`, `Success`, `Warning`, `Error`, `Danger`; their `*Strong` variants;
 `Selected`, `SelectedUnderline`; `UserLabel`, `AssistantLabel`, `ToolLabel`;
-`Input`, `InputPrompt`, `InputPlaceholder`, `InputCursor`, `Spinner`; and
-`Border`, `BorderFocus`, `BorderMuted`. Call it once per render and reuse it.
+`Input`, `InputPrompt`, `InputPlaceholder`, `InputCursor`, `Spinner`;
+`Border`, `BorderFocus`, `BorderMuted`; and `DiffAdded`, `DiffRemoved`. Call
+it once per render and reuse it.
 
 `BorderStyle` selects `BorderWeightUnset`, `BorderWeightLight`, or
 `BorderWeightHeavy`; resolving selects the matching preset and fills invalid

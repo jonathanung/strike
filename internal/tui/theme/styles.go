@@ -22,6 +22,7 @@ type Styles struct {
 	UserLabel, AssistantLabel, ToolLabel                       lipgloss.Style
 	Input, InputPrompt, InputPlaceholder, InputCursor, Spinner lipgloss.Style
 	Border, BorderFocus, BorderMuted                           lipgloss.Style
+	DiffAdded, DiffRemoved                                     lipgloss.Style
 }
 
 // S returns the common styles for this theme. It allocates fresh styles on
@@ -37,5 +38,6 @@ func (t Theme) S() Styles {
 		UserLabel: base.Foreground(t.UserLabel).Bold(true), AssistantLabel: base.Foreground(t.Accent).Bold(true), ToolLabel: base.Foreground(t.ToolLabel).Bold(true),
 		Input: base.Foreground(t.Text), InputPrompt: base.Foreground(t.Accent), InputPlaceholder: base.Foreground(t.TextMuted), InputCursor: base.Foreground(t.Accent), Spinner: base.Foreground(t.AccentAlt),
 		Border: base.Foreground(t.Border), BorderFocus: base.Foreground(t.BorderFocus), BorderMuted: base.Foreground(t.BorderMuted),
+		DiffAdded: base.Foreground(t.DiffAdded), DiffRemoved: base.Foreground(t.DiffRemoved),
 	}
 }

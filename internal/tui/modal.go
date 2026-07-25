@@ -115,11 +115,28 @@ func (m *permissionModal) view(width int, th theme.Theme) string {
 	heading := wrapToWidth(st.WarningStrong.Render("Permission required: "+m.req.Permission), inner)
 	detail := wrapToWidth(st.Text.Render(strings.Join(m.req.Patterns, "\n")), inner)
 
+	// Shared edit diff preview for choice and feedback states. Patterns already
+	// show the path, so Path is left empty to avoid duplication.
+	var diffSection string
+	if meta, ok := parseEditMetadata(m.req.Metadata); ok {
+		diffBlock := ui.DiffPreview(th, ui.DiffPreviewOpts{
+			Path:      "",
+			Old:       meta.OldString,
+			New:       meta.NewString,
+			MaxLines:  diffPreviewMaxLinesModal,
+			Width:     inner,
+			ShowStats: true,
+		})
+		if diffBlock != "" {
+			diffSection = "\n" + diffBlock
+		}
+	}
+
 	if m.state == permissionModalFeedback {
 		prompt := st.Text.Render("Optional feedback for the rejection:")
 		m.feedback.Width = max(1, inner-ansi.StringWidth(m.feedback.Prompt)-cursorWidth)
 		m.feedback.SetValue(m.feedback.Value())
-		body := heading + "\n" + detail + strings.Repeat("\n", max(1, th.Spacing.SM)) + prompt + "\n" + m.feedback.View()
+		body := heading + "\n" + detail + diffSection + strings.Repeat("\n", max(1, th.Spacing.SM)) + prompt + "\n" + m.feedback.View()
 		return ui.Dialog(th, ui.DialogOpts{
 			Title: "permission",
 			Hint:  dotJoin(th, "enter reject with feedback", "esc reject without feedback"),
@@ -143,7 +160,7 @@ func (m *permissionModal) view(width int, th theme.Theme) string {
 	if plain > inner {
 		sep = "\n" // stack choices when the row would overflow a narrow dialog
 	}
-	body := heading + "\n" + detail + strings.Repeat("\n", max(1, th.Spacing.SM)) + strings.Join(choices, sep)
+	body := heading + "\n" + detail + diffSection + strings.Repeat("\n", max(1, th.Spacing.SM)) + strings.Join(choices, sep)
 	return ui.Dialog(th, ui.DialogOpts{
 		Title: "permission",
 		Hint:  dotJoin(th, "←/→ select", "enter confirm", "esc reject"),

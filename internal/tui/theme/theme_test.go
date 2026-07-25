@@ -503,4 +503,10 @@ func TestStylesDrawFromThemeRoles(t *testing.T) {
 	if s.Input.GetForeground() != th.Text || s.InputPlaceholder.GetForeground() != th.TextMuted || s.InputPrompt.GetForeground() != th.Accent {
 		t.Errorf("input widget styles do not use theme roles: %+v", s)
 	}
+	if got := s.DiffAdded.GetForeground(); got != th.DiffAdded {
+		t.Errorf("DiffAdded style foreground = %v, want %v", got, th.DiffAdded)
+	}
+	if got := s.DiffRemoved.GetForeground(); got != th.DiffRemoved {
+		t.Errorf("DiffRemoved style foreground = %v, want %v", got, th.DiffRemoved)
+	}
 }

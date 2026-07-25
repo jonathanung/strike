@@ -602,7 +602,7 @@ func (m *Model) applyEvent(ev protocol.Event) {
 		m.cells = append(m.cells, tc)
 	case protocol.ToolCallEnd:
 		if tc, ok := m.toolByID[ev.CallID]; ok {
-			tc.title, tc.output, tc.done, tc.isError = ev.Title, ev.Output, true, ev.IsError
+			tc.title, tc.output, tc.metadata, tc.done, tc.isError = ev.Title, ev.Output, ev.Metadata, true, ev.IsError
 		}
 	case protocol.PermissionAsked:
 		m.modal = newPermissionModal(ev, m.ops, m.th)

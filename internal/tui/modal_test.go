@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -224,13 +225,136 @@ func TestPermissionModalFeedbackGeometryHonorsThemeSpacingAndInputCursor(t *test
 	}
 }
 
+func TestPermissionModalEditMetadataShowsDiffInChoiceAndFeedback(t *testing.T) {
+	meta := json.RawMessage(`{"oldString":"foo","newString":"bar","count":1}`)
+	req := protocol.PermissionAsked{
+		RequestID:  "edit-diff-req",
+		Permission: "edit",
+		Patterns:   []string{"file.go"},
+		Metadata:   meta,
+	}
+	m, _ := newTestPermissionModalFrom(req)
+
+	const width = 70
+	th := theme.Default()
+	choiceView := ansi.Strip(m.view(width, th))
+	for _, want := range []string{"-foo", "+bar", "permission", "file.go", "+1", "-1"} {
+		if !strings.Contains(choiceView, want) {
+			t.Errorf("choice view missing %q:\n%s", want, choiceView)
+		}
+	}
+	// geometry: every dialog row exact outer width
+	for i, row := range strings.Split(m.view(width, th), "\n") {
+		if got := lipgloss.Width(row); got != width {
+			t.Errorf("choice row %d width = %d, want %d: %q", i, got, width, ansi.Strip(row))
+		}
+	}
+
+	enterPermissionFeedback(t, m)
+	feedbackView := ansi.Strip(m.view(width, th))
+	for _, want := range []string{"-foo", "+bar", "optional feedback", "+1", "-1"} {
+		if !strings.Contains(feedbackView, want) {
+			t.Errorf("feedback view missing %q:\n%s", want, feedbackView)
+		}
+	}
+	for i, row := range strings.Split(m.view(width, th), "\n") {
+		if got := lipgloss.Width(row); got != width {
+			t.Errorf("feedback row %d width = %d, want %d: %q", i, got, width, ansi.Strip(row))
+		}
+	}
+}
+
+func TestPermissionModalWithoutEditMetadataHasNoFalseDiff(t *testing.T) {
+	// bash-like ask: no metadata → permission chrome only, no +/- hunk body
+	m, _ := newTestPermissionModal("bash-no-meta")
+	plain := ansi.Strip(m.view(70, theme.Default()))
+	if !strings.Contains(strings.ToLower(plain), "permission") {
+		t.Errorf("missing permission chrome:\n%s", plain)
+	}
+	if !strings.Contains(plain, "rm important.txt") {
+		t.Errorf("missing pattern:\n%s", plain)
+	}
+	// write-shaped or absent meta must not invent a unified diff body
+	for _, line := range strings.Split(plain, "\n") {
+		trimmed := strings.TrimSpace(line)
+		// skip choice labels like "1) allow once"
+		if strings.HasPrefix(trimmed, "-") && !strings.HasPrefix(trimmed, "─") &&
+			!strings.Contains(trimmed, "select") && len(trimmed) > 1 {
+			// a real diff delete line would look like "-content"; dialog borders use box chars
+			if isLikelyDiffMarkerLine(trimmed) {
+				t.Errorf("unexpected diff-like line without edit metadata: %q\nfull:\n%s", trimmed, plain)
+			}
+		}
+	}
+}
+
+func TestPermissionModalTallEditDiffKeepsExactWidth(t *testing.T) {
+	var oldB, newB strings.Builder
+	for i := 0; i < 20; i++ {
+		oldB.WriteString("old line content that is fairly long ")
+		oldB.WriteByte(byte('a' + i%26))
+		oldB.WriteByte('\n')
+		newB.WriteString("new line content that is fairly long ")
+		newB.WriteByte(byte('A' + i%26))
+		newB.WriteByte('\n')
+	}
+	meta, err := json.Marshal(map[string]any{
+		"oldString": strings.TrimSuffix(oldB.String(), "\n"),
+		"newString": strings.TrimSuffix(newB.String(), "\n"),
+		"count":     1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := protocol.PermissionAsked{
+		RequestID:  "tall-edit",
+		Permission: "edit",
+		Patterns:   []string{"big.go"},
+		Metadata:   meta,
+	}
+	m, _ := newTestPermissionModalFrom(req)
+	const width = 46
+	th := theme.Default()
+	view := m.view(width, th)
+	plain := ansi.Strip(view)
+	if !strings.Contains(plain, "more lines") && !strings.Contains(plain, "-old") {
+		t.Errorf("expected tall edit diff content:\n%s", plain)
+	}
+	for i, row := range strings.Split(view, "\n") {
+		if got := lipgloss.Width(row); got != width {
+			t.Errorf("row %d width = %d, want %d: %q", i, got, width, ansi.Strip(row))
+		}
+	}
+}
+
+// isLikelyDiffMarkerLine reports whether s looks like a unified-diff body line
+// (leading +/- followed by content), as opposed to UI chrome.
+func isLikelyDiffMarkerLine(s string) bool {
+	if len(s) < 2 {
+		return false
+	}
+	if s[0] != '+' && s[0] != '-' {
+		return false
+	}
+	// stats like "+0" / choice chrome shouldn't appear without edit meta either,
+	// but "+1)" style choice numbers are not diff lines.
+	if s[1] >= '0' && s[1] <= '9' {
+		return false
+	}
+	return true
+}
+
 func newTestPermissionModal(requestID string) (*permissionModal, chan protocol.Op) {
-	ops := make(chan protocol.Op, 4)
 	req := protocol.PermissionAsked{
 		RequestID:  requestID,
 		Permission: "bash",
 		Patterns:   []string{"rm important.txt"},
 	}
+	return newTestPermissionModalFrom(req)
+}
+
+func newTestPermissionModalFrom(req protocol.PermissionAsked) (*permissionModal, chan protocol.Op) {
+	ops := make(chan protocol.Op, 4)
 	return newPermissionModal(req, ops), ops
 }
 
