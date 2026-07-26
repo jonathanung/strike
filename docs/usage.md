@@ -71,6 +71,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 /upgrade                       # install latest GitHub Release and restart
 /init                          # create or update project AGENTS.md (confirm
                                # before replacing an existing file)
+/mcp                           # list MCP servers (up/down) and tool names
 ```
 
 ### Session, memory, issues
@@ -87,6 +88,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/context` | context doctor modal: layer sizes, history msg count, oversized warnings (previews redacted) |
 | `/cost` | session input/output/cache totals from usage events; est. USD when catalog rates known; unknown stays explicit |
 | `/init` | light local scan → write `AGENTS.md`; confirms before overwrite |
+| `/mcp` | list configured MCP servers, status, and namespaced tool ids (see [config.md](config.md#mcp-servers-stdio-tools)) |
 
 ### Autonomy & workflows
 

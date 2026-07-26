@@ -68,6 +68,23 @@ type Config struct {
 	Keybinds map[string]KeybindChords `json:"keybinds,omitempty"`
 	// Session holds per-session runtime preferences (worktree isolation).
 	Session SessionConfig `json:"session,omitempty"`
+	// MCP configures external Model Context Protocol servers (stdio tools).
+	// Project layer replaces global when mcp.servers is present (including {}).
+	MCP MCPConfig `json:"mcp,omitempty"`
+}
+
+// MCPConfig is the JSON "mcp" object.
+type MCPConfig struct {
+	// Servers maps a short name to a stdio server command. Names become the
+	// mcp_<name>_* tool namespace.
+	Servers map[string]MCPServer `json:"servers,omitempty"`
+}
+
+// MCPServer is one stdio MCP server entry.
+type MCPServer struct {
+	Command string            `json:"command"`
+	Args    []string          `json:"args,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
 }
 
 // SessionConfig is the JSON "session" object in config.
@@ -403,5 +420,39 @@ func merge(base, layer Config) Config {
 	base.Hooks = append(base.Hooks, layer.Hooks...)
 	base.Providers = mergeProviders(base.Providers, layer.Providers)
 	base.Keybinds = MergeKeybinds(base.Keybinds, layer.Keybinds)
+	base.MCP = mergeMCP(base.MCP, layer.MCP)
 	return base
+}
+
+// mergeMCP: when layer sets Servers (including empty map), it replaces base.
+// Omitted mcp / nil servers leaves base unchanged.
+func mergeMCP(base, layer MCPConfig) MCPConfig {
+	if layer.Servers != nil {
+		return MCPConfig{Servers: cloneMCPServers(layer.Servers)}
+	}
+	if base.Servers != nil {
+		return MCPConfig{Servers: cloneMCPServers(base.Servers)}
+	}
+	return MCPConfig{}
+}
+
+func cloneMCPServers(in map[string]MCPServer) map[string]MCPServer {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]MCPServer, len(in))
+	for k, v := range in {
+		s := MCPServer{
+			Command: strings.TrimSpace(v.Command),
+			Args:    append([]string(nil), v.Args...),
+		}
+		if len(v.Env) > 0 {
+			s.Env = make(map[string]string, len(v.Env))
+			for ek, ev := range v.Env {
+				s.Env[ek] = ev
+			}
+		}
+		out[k] = s
+	}
+	return out
 }

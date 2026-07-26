@@ -5,7 +5,7 @@ import (
 )
 
 // Registry holds the tools visible to the model. It is the primary
-// extension surface: MCP servers and plugin tools register here later.
+// extension surface: MCP servers (internal/mcp) and plugin tools register here.
 type Registry struct {
 	order []string
 	tools map[string]Tool
