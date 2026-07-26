@@ -82,7 +82,7 @@ var editorWaitFlags = map[string][]string{
 	"gnome-text-editor": {"-w"},
 }
 
-// resolveEditor picks VISUAL, then EDITOR, then nvim/vim/vi on PATH.
+// resolveEditor picks VISUAL, then EDITOR, then nvim/vim/vi/nano on PATH.
 // value may be a multi-word command (e.g. "code -w"); the first token is the
 // binary and the rest are base args. lookPath defaults to exec.LookPath when nil.
 func resolveEditor(getenv func(string) string, lookPath func(string) (string, error)) (bin string, baseArgs []string, err error) {
@@ -109,13 +109,13 @@ func resolveEditor(getenv func(string) string, lookPath func(string) (string, er
 		}
 		return resolved, append([]string(nil), fields[1:]...), nil
 	}
-	for _, candidate := range []string{"nvim", "vim", "vi"} {
+	for _, candidate := range []string{"nvim", "vim", "vi", "nano"} {
 		resolved, lookErr := lookPath(candidate)
 		if lookErr == nil {
 			return resolved, nil, nil
 		}
 	}
-	return "", nil, fmt.Errorf("no editor found - set $VISUAL or $EDITOR, or install nvim/vim")
+	return "", nil, fmt.Errorf("no editor found - set $VISUAL or $EDITOR, or install nvim/vim/nano")
 }
 
 // parseVimArgs interprets `/vim` arguments: optional path, optional +line or
@@ -178,7 +178,8 @@ func buildEditorCmd(bin string, baseArgs []string, absPath string, line int) *ex
 	}
 	if absPath != "" {
 		switch {
-		case line > 0 && isViFamily(base):
+		case line > 0 && (isViFamily(base) || base == "nano"):
+			// vi-family and nano accept +LINE before the path.
 			args = append(args, fmt.Sprintf("+%d", line), absPath)
 		case line > 0 && isCodeFamily(base):
 			// code -g file:line (path is not a separate argv after -g).

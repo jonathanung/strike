@@ -61,8 +61,8 @@ func TestLeftFocusKeymapRoutingMatrix(t *testing.T) {
 	}{
 		{"send enter", tea.KeyMsg{Type: tea.KeyEnter}, kindSend},
 		{"newline alt+enter", tea.KeyMsg{Type: tea.KeyEnter, Alt: true}, kindNewline},
-		// Bare LF is newline on left focus; enhanced ctrl+j (alt+j) cycles (#240).
-		{"newline bare LF", tea.KeyMsg{Type: tea.KeyCtrlJ}, kindNewline},
+		// Bare LF (Ubuntu ctrl+j) and enhanced alt+j both cycle (#324).
+		{"cycle bare LF ctrl+j", tea.KeyMsg{Type: tea.KeyCtrlJ}, kindCycleNext},
 		{"cycle enhanced ctrl+j", keyMsgAltJ(), kindCycleNext},
 		{"scroll pgup", tea.KeyMsg{Type: tea.KeyPgUp}, kindScrollUp},
 		{"scroll ctrl+up", tea.KeyMsg{Type: tea.KeyCtrlUp}, kindScrollUp},
@@ -203,23 +203,19 @@ func TestLeftFocusKeymapRoutingMatrix(t *testing.T) {
 // TestShiftEnterNewlineWithoutPaneCycle covers the full WrapInput CSI → KeyMsg
 // → Model.Update path for shift/alt+enter (#53, #187). Composer must gain a real
 // newline, no UserInput op is sent, and CycleWindow* must not fire under either
-// split orientation. Also pins bare LF (KeyCtrlJ) — the actual sequence many
-// terminals still emit for shift+enter when enhanced keys are unavailable.
+// split orientation.
 func TestShiftEnterNewlineWithoutPaneCycle(t *testing.T) {
 	wires := []struct {
 		name string
 		wire string
-		// bareLF skips WrapInput and injects KeyCtrlJ directly (legacy shift+enter).
-		bareLF bool
 	}{
-		{"kitty shift+enter", "\x1b[13;2u", false},
-		{"xterm shift+enter", "\x1b[27;2;13~", false},
-		{"kitty alt+enter", "\x1b[13;3u", false},
-		{"xterm alt+enter", "\x1b[27;3;13~", false},
+		{"kitty shift+enter", "\x1b[13;2u"},
+		{"xterm shift+enter", "\x1b[27;2;13~"},
+		{"kitty alt+enter", "\x1b[13;3u"},
+		{"xterm alt+enter", "\x1b[27;3;13~"},
 		// Shift+Alt+Enter (mods=4 → bits shift|alt) also rewrites to alt+enter.
-		{"kitty shift+alt+enter", "\x1b[13;4u", false},
-		{"xterm shift+alt+enter", "\x1b[27;4;13~", false},
-		{"bare LF shift+enter", "\n", true},
+		{"kitty shift+alt+enter", "\x1b[13;4u"},
+		{"xterm shift+alt+enter", "\x1b[27;4;13~"},
 	}
 	orients := []struct {
 		name   string
@@ -232,13 +228,7 @@ func TestShiftEnterNewlineWithoutPaneCycle(t *testing.T) {
 	for _, o := range orients {
 		for _, tt := range wires {
 			t.Run(o.name+"/"+tt.name, func(t *testing.T) {
-				var msg tea.KeyMsg
-				if tt.bareLF {
-					// Bubble Tea maps bare LF to KeyCtrlJ — the regression wire.
-					msg = tea.KeyMsg{Type: tea.KeyCtrlJ}
-				} else {
-					msg = keyMsgFromWrapInput(t, tt.wire)
-				}
+				msg := keyMsgFromWrapInput(t, tt.wire)
 
 				m, ops := newAppTestModel(nil, nil)
 				m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
@@ -263,17 +253,11 @@ func TestShiftEnterNewlineWithoutPaneCycle(t *testing.T) {
 				if key.Matches(msg, m.keyMap.Send) {
 					t.Fatalf("msg %v matched Send", msg)
 				}
-				// CSI path must not collide with cycle/focus bindings. Bare LF
-				// (KeyCtrlJ) is Newline only; enhanced ctrl+j is alt+j (#240).
-				if !tt.bareLF {
-					if key.Matches(msg, m.keyMap.CycleWindowNext, m.keyMap.CycleWindowPrev) {
-						t.Fatalf("post-WrapInput msg %v matched CycleWindow*", msg)
-					}
-					if key.Matches(msg, m.keyMap.FocusLeft, m.keyMap.FocusRight) {
-						t.Fatalf("post-WrapInput msg %v matched Focus*", msg)
-					}
-				} else if key.Matches(msg, m.keyMap.CycleWindowNext) {
-					t.Fatalf("bare LF KeyCtrlJ must not match CycleWindowNext")
+				if key.Matches(msg, m.keyMap.CycleWindowNext, m.keyMap.CycleWindowPrev) {
+					t.Fatalf("post-WrapInput msg %v matched CycleWindow*", msg)
+				}
+				if key.Matches(msg, m.keyMap.FocusLeft, m.keyMap.FocusRight) {
+					t.Fatalf("post-WrapInput msg %v matched Focus*", msg)
 				}
 
 				updated, cmd := m.Update(msg)
@@ -313,9 +297,80 @@ func TestShiftEnterNewlineWithoutPaneCycle(t *testing.T) {
 	}
 }
 
-// TestCtrlJCyclesWindowsDistinctFromBareLF pins that enhanced ctrl+j (alt+j)
-// cycles panes from either focus, while bare LF (KeyCtrlJ) only newlines (#240).
-func TestCtrlJCyclesWindowsDistinctFromBareLF(t *testing.T) {
+// TestUbuntuBareLFCtrlJCyclesNotNewline pins the Ubuntu case: terminals send
+// bare LF for ctrl+j (Bubble Tea KeyCtrlJ). That must cycle panes, never
+// insert newline; Enter still sends; shift+enter CSI still newlines (#324).
+func TestUbuntuBareLFCtrlJCyclesNotNewline(t *testing.T) {
+	m, ops := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	m.providerName = "echo"
+	m.modelName = "echo-1"
+	m.windows = windowRegistry{windows: []window{
+		statefulTestWindow{windowID: "a", windowTitle: "A"},
+		statefulTestWindow{windowID: "b", windowTitle: "B"},
+	}}
+	m.composer.SetValue("keep")
+	m.composer.SetCursor(len("keep"))
+
+	// Left-focus bare LF → cycle, no newline.
+	if !key.Matches(tea.KeyMsg{Type: tea.KeyCtrlJ}, m.keyMap.CycleWindowNext) {
+		t.Fatal("KeyCtrlJ must match CycleWindowNext")
+	}
+	if key.Matches(tea.KeyMsg{Type: tea.KeyCtrlJ}, m.keyMap.Newline) {
+		t.Fatal("KeyCtrlJ must not match Newline")
+	}
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	if got := m.composer.Value(); got != "keep" {
+		t.Fatalf("bare LF composer = %q, want keep", got)
+	}
+	if m.windows.index != 1 || m.windows.active().id() != "b" {
+		t.Fatalf("bare LF window = %d/%s, want 1/b", m.windows.index, m.windows.active().id())
+	}
+
+	// Right-focus bare LF → cycle again.
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
+	if m.focus != focusRight {
+		t.Fatalf("focus = %v, want right", m.focus)
+	}
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	if m.windows.index != 0 || m.windows.active().id() != "a" {
+		t.Errorf("right bare LF window = %d/%s, want 0/a", m.windows.index, m.windows.active().id())
+	}
+	if got := m.composer.Value(); got != "keep" {
+		t.Errorf("right bare LF changed composer to %q", got)
+	}
+
+	// Enter still sends.
+	m.focus = focusLeft
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if m.composer.Value() != "" {
+		t.Errorf("enter left composer = %q, want empty", m.composer.Value())
+	}
+	if cmd != nil {
+		_ = runAppCmd(t, cmd)
+	}
+	select {
+	case op := <-ops:
+		if _, ok := op.(protocol.UserInput); !ok {
+			t.Errorf("enter op = %T, want UserInput", op)
+		}
+	default:
+	}
+
+	// Shift+enter CSI still newlines.
+	m.composer.SetValue("line")
+	m.composer.SetCursor(len("line"))
+	m = updateApp(t, m, keyMsgFromWrapInput(t, "\x1b[13;2u"))
+	if got := m.composer.Value(); got != "line\n" {
+		t.Errorf("shift+enter composer = %q, want line\\n", got)
+	}
+	assertNoAppOp(t, ops)
+}
+
+// TestCtrlJCyclesWindowsBareLFAndEnhanced pins that both bare LF (KeyCtrlJ)
+// and enhanced ctrl+j (alt+j) cycle panes from either focus without newline (#324).
+func TestCtrlJCyclesWindowsBareLFAndEnhanced(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
 	m.windows = windowRegistry{windows: []window{
@@ -323,33 +378,33 @@ func TestCtrlJCyclesWindowsDistinctFromBareLF(t *testing.T) {
 		statefulTestWindow{windowID: "b", windowTitle: "B"},
 	}}
 	m.composer.SetValue("keep")
-	// Left bare LF → newline, window stays.
+	// Left bare LF → cycle (no newline).
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
-	if got := m.composer.Value(); got != "keep\n" {
-		t.Fatalf("bare LF composer = %q, want keep\\n", got)
+	if got := m.composer.Value(); got != "keep" {
+		t.Fatalf("bare LF composer = %q, want keep", got)
 	}
-	if m.windows.index != 0 {
-		t.Fatalf("bare LF window = %d, want 0", m.windows.index)
-	}
-	// Left enhanced ctrl+j → cycle (no newline).
-	m = updateApp(t, m, keyMsgAltJ())
 	if m.windows.index != 1 || m.windows.active().id() != "b" {
-		t.Fatalf("left enhanced ctrl+j window = %d/%s, want 1/b", m.windows.index, m.windows.active().id())
+		t.Fatalf("bare LF window = %d/%s, want 1/b", m.windows.index, m.windows.active().id())
 	}
-	if got := m.composer.Value(); got != "keep\n" {
+	// Left enhanced ctrl+j → cycle again.
+	m = updateApp(t, m, keyMsgAltJ())
+	if m.windows.index != 0 || m.windows.active().id() != "a" {
+		t.Fatalf("left enhanced ctrl+j window = %d/%s, want 0/a", m.windows.index, m.windows.active().id())
+	}
+	if got := m.composer.Value(); got != "keep" {
 		t.Fatalf("left enhanced ctrl+j changed composer to %q", got)
 	}
-	// Right enhanced ctrl+j → cycle again.
+	// Right bare LF → cycle.
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
 	if m.focus != focusRight {
 		t.Fatalf("focus = %v, want right", m.focus)
 	}
-	m = updateApp(t, m, keyMsgAltJ())
-	if m.windows.index != 0 || m.windows.active().id() != "a" {
-		t.Errorf("right ctrl+j window = %d/%s, want 0/a", m.windows.index, m.windows.active().id())
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	if m.windows.index != 1 || m.windows.active().id() != "b" {
+		t.Errorf("right bare LF window = %d/%s, want 1/b", m.windows.index, m.windows.active().id())
 	}
-	if got := m.composer.Value(); got != "keep\n" {
-		t.Errorf("right ctrl+j changed composer to %q", got)
+	if got := m.composer.Value(); got != "keep" {
+		t.Errorf("right bare LF changed composer to %q", got)
 	}
 	assertNoAppOp(t, ops)
 }
@@ -478,15 +533,18 @@ func TestCtrlSemicolonToggleOrientationViaKeyMsg(t *testing.T) {
 	if m.splitOrientation != orientVertical {
 		t.Fatalf("after ctrl+; orientation = %v, want vertical", m.splitOrientation)
 	}
-	// Focus/cycle keys swap under vertical (enhanced ctrl+j wire is alt+j).
+	// Focus/cycle keys swap under vertical (ctrl+j bare LF and alt+j both focus).
 	if !key.Matches(keyMsgAltJ(), m.keyMap.FocusLeft) {
 		t.Error("vertical: ctrl+j (alt+j) should focus top")
+	}
+	if !key.Matches(tea.KeyMsg{Type: tea.KeyCtrlJ}, m.keyMap.FocusLeft) {
+		t.Error("vertical: bare KeyCtrlJ should focus top (#324)")
 	}
 	if key.Matches(keyMsgAltJ(), m.keyMap.CycleWindowNext) {
 		t.Error("vertical: ctrl+j (alt+j) should not cycle")
 	}
-	if key.Matches(tea.KeyMsg{Type: tea.KeyCtrlJ}, m.keyMap.FocusLeft) {
-		t.Error("vertical: bare KeyCtrlJ must not match FocusLeft")
+	if key.Matches(tea.KeyMsg{Type: tea.KeyCtrlJ}, m.keyMap.CycleWindowNext) {
+		t.Error("vertical: bare KeyCtrlJ should not cycle")
 	}
 	m = updateApp(t, m, msg)
 	if m.splitOrientation != orientHorizontal {

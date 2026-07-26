@@ -190,7 +190,7 @@ slot hosts one active window from the registry:
 | `memory` | project memory browser |
 | `issues` | project issue browser |
 | `markdown` | markdown reader (`/md-read <path>`) |
-| `editor` | embedded nvim/vim PTY for `/vim` |
+| `editor` | embedded nvim/vim/nano PTY for `/vim` |
 
 Related right-pane windows stack as **groups** when the pane is tall/wide
 enough: session (`context`+`activity`), agents (`agents`+`visualizer`), and
@@ -225,12 +225,12 @@ Worktree isolation for second+ roots is configured via `worktree` in
 
 Vim-style pane keys (horizontal split): `ctrl+h` / `ctrl+l` focus the left
 or right pane; `ctrl+j` / `ctrl+k` move focus within the active stack group
-then to the next group (enhanced terminals distinguish `ctrl+j` from bare LF
-newline). `ctrl+;` (or `/layout` / `/split`) toggles a vertical
+then to the next group (including bare LF from terminals that cannot
+disambiguate `ctrl+j`). `ctrl+;` (or `/layout` / `/split`) toggles a vertical
 top/bottom split and swaps those chords (focus becomes `ctrl+j`/`ctrl+k`,
 cycle becomes `ctrl+h`/`ctrl+l`). `ctrl+p` opens the command palette; `f1`
 (or `/keys`) opens a filterable keybind cheatsheet. Enter sends; Shift+Enter
-(or Alt+Enter) inserts a newline. `pgup`/`pgdn` (and `ctrl+up`/`ctrl+down`)
+(or Alt+Enter after enhanced CSI) inserts a newline. `pgup`/`pgdn` (and `ctrl+up`/`ctrl+down`)
 scroll the transcript; `ctrl+t` jumps to the latest output. The transcript
 sticks to the bottom while you are already anchored, and keeps your scroll
 offset when you have scrolled up. Pickers, the command palette, and

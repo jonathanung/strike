@@ -17,9 +17,9 @@ var altEnter = []byte("\x1b\r")
 // CSI is rewritten (Bubble Tea has no native "ctrl+;" KeyType).
 var altSemicolon = []byte("\x1b;")
 
-// altJ is Alt+j — the wire form for intentional ctrl+j after enhanced CSI.
-// Bare LF is also KeyCtrlJ (0x0a); rewriting ctrl+j CSI to Alt+j keeps pane
-// cycle distinct from newline / legacy shift+enter (#240).
+// altJ is Alt+j — the wire form for enhanced ctrl+j CSI. Bare LF is also
+// KeyCtrlJ (0x0a); CycleWindowNext binds both so Ubuntu bare LF cycles panes
+// while enhanced terminals still arrive as alt+j (#324).
 var altJ = []byte("\x1bj")
 
 // Enhanced-keyboard enable/disable sequences written at program start/exit
@@ -544,8 +544,9 @@ func classifyEnhanced(seq []byte) (out []byte, drop bool, handled bool) {
 	if ctrl && !shift && !alt && code == int(';') {
 		return altSemicolon, false, true
 	}
-	// Ctrl+j → Alt+j for CycleWindowNext / vertical FocusLeft. Must not collapse
-	// to 0x0a (KeyCtrlJ): bare LF and legacy shift+enter share that byte (#240).
+	// Ctrl+j → Alt+j for CycleWindowNext / vertical FocusLeft. Bare LF is also
+	// KeyCtrlJ and cycles via the same binding; keep CSI distinct from 0x0a
+	// so enhanced terminals do not depend on bare-control decoding (#324).
 	if ctrl && !shift && !alt && (code == 'j' || code == 'J') {
 		return altJ, false, true
 	}

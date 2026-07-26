@@ -99,7 +99,7 @@ func TestWrapInputEnhancedRewrite(t *testing.T) {
 			in:   "\x1b[104;5u",
 			want: "\x08",
 		},
-		// Ctrl+J → Alt+j (not 0x0a) so pane cycle ≠ bare LF newline (#240).
+		// Ctrl+J → Alt+j (not 0x0a); bare LF is also cycle via KeyCtrlJ (#324).
 		{
 			name: "Ctrl+J Kitty",
 			in:   "\x1b[106;5u",
