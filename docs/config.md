@@ -240,7 +240,7 @@ endpoints via the `providers` array (global and project layers merge; same
 
 | Field | Required | Notes |
 |---|---|---|
-| `name` | yes | lowercase slug (`[a-z][a-z0-9_-]{0,63}`); not `anthropic`/`openai`/`xai`/`echo` |
+| `name` | yes | lowercase slug (`[a-z][a-z0-9_-]{0,63}`); not `anthropic`/`openai`/`xai`/`kimi`/`deepseek`/`echo` |
 | `baseURL` | yes | absolute `http`/`https` URL |
 | `api` | yes | wire dialect: `openai` or `anthropic` |
 | `apiKeyEnv` | no | env var name checked before the auth store |

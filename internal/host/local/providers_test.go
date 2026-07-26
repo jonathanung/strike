@@ -24,6 +24,7 @@ func TestCustomProviderHostRoundTrip(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "")
 	t.Setenv("XAI_API_KEY", "")
 	t.Setenv("KIMI_API_KEY", "")
+	t.Setenv("DEEPSEEK_API_KEY", "")
 
 	store, err := auth.OpenStore(filepath.Join(home, ".strike", "auth.json"))
 	if err != nil {

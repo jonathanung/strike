@@ -1,7 +1,7 @@
 # Auth & providers
 
 Credentials live in `~/.strike/auth.json` (0600). Environment
-variables (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `XAI_API_KEY`) always
+variables (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `XAI_API_KEY` / `KIMI_API_KEY` / `DEEPSEEK_API_KEY`) always
 take precedence over stored credentials.
 
 ## OpenAI billing routing
@@ -25,6 +25,8 @@ strike auth login openai            # OAuth "Sign in with ChatGPT" (browser);
                                     # API key usable on api.openai.com
 strike auth login xai               # xAI Grok OAuth (browser, PKCE)
 strike auth login xai --device      # RFC 8628 device flow for headless/SSH
+strike auth login kimi --api-key    # Kimi (paste API key)
+strike auth login deepseek --api-key # DeepSeek (paste API key)
 strike auth login <provider> --api-key   # paste a key instead (any provider)
 strike auth status
 strike auth logout <provider>
@@ -38,5 +40,5 @@ before expiry, and rotated refresh tokens are persisted.
 
 Provider selection happens in-app with `/provider`; `--provider` on the
 command line just pre-selects (and validates credentials eagerly). Defaults
-when a provider is chosen without a model: `claude-sonnet-5`, `gpt-5.5`,
-`grok-4.5`.
+when a provider is chosen without a model: `claude-sonnet-5` (Anthropic),
+`gpt-5.5` (OpenAI), `grok-4.5` (xAI), `moonshot-v1` (Kimi), `deepseek-chat` (DeepSeek).

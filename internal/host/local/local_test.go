@@ -27,6 +27,8 @@ func newTestServices(t *testing.T) (host.Services, *auth.Store) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("OPENAI_API_KEY", "")
 	t.Setenv("XAI_API_KEY", "")
+	t.Setenv("KIMI_API_KEY", "")
+	t.Setenv("DEEPSEEK_API_KEY", "")
 	store, err := auth.OpenStore(filepath.Join(home, ".strike", "auth.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +48,7 @@ func TestStatusesOrderFlagsAndEcho(t *testing.T) {
 	svc, _ := newTestServices(t)
 	got := svc.Auth.Statuses()
 
-	wantOrder := []string{"anthropic", "openai", "xai", "echo"}
+	wantOrder := []string{"anthropic", "openai", "xai", "kimi", "deepseek", "echo"}
 	if len(got) != len(wantOrder) {
 		t.Fatalf("got %d statuses, want %d: %+v", len(got), len(wantOrder), got)
 	}
@@ -66,6 +68,12 @@ func TestStatusesOrderFlagsAndEcho(t *testing.T) {
 	if s := by["xai"]; !s.APIKey || !s.OAuth || !s.Device || s.Builtin {
 		t.Errorf("xai flags = %+v, want OAuth+Device+APIKey", s)
 	}
+	if s := by["kimi"]; !s.APIKey || s.OAuth || s.Device || s.Builtin {
+		t.Errorf("kimi flags = %+v, want APIKey-only", s)
+	}
+	if s := by["deepseek"]; !s.APIKey || s.OAuth || s.Device || s.Builtin {
+		t.Errorf("deepseek flags = %+v, want APIKey-only", s)
+	}
 
 	echo := by["echo"]
 	if !echo.Builtin || !echo.Authed || echo.Detail != "offline dev provider" {
@@ -73,7 +81,7 @@ func TestStatusesOrderFlagsAndEcho(t *testing.T) {
 	}
 
 	// With an empty store and no env keys, credential providers are unauthed.
-	for _, name := range []string{"anthropic", "openai", "xai"} {
+	for _, name := range []string{"anthropic", "openai", "xai", "kimi", "deepseek"} {
 		if s := by[name]; s.Authed || s.Detail != "none" {
 			t.Errorf("%s should be unauthenticated, got %+v", name, s)
 		}
