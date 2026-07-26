@@ -247,8 +247,14 @@ Same package `internal/tui`; split for reviewability only (no subpackages).
 
 | File | Responsibility |
 |---|---|
-| `app.go` | `Model`, `New`/`Init`/`Update`/`View`, composer, layout glue |
+| `app.go` | `Model`, `New`/`Init`/`Update` switchboard |
 | `apply_event.go` | protocol event → transcript cells / child activity / notices |
+| `update_keys.go` | `handleKeyMsg` focus-aware key routing |
+| `composer.go` | composer input, completion, history browse |
+| `transcript_keys.go` | tool/file selection, cell copy, viewport refresh |
+| `layout_app.go` | reflow, orientation, permission auto-approve arming |
+| `app_state.go` | usage/context/agents/visualizer snapshots and notices |
+| `render.go` | `View` / `renderFrame` / compact helpers |
 | `commands.go` | slash command specs + completion metadata |
 | `command_dispatch.go` | `handleCommand` and slash handler implementations |
 | `cells.go` | transcript cell types and rendering helpers |
