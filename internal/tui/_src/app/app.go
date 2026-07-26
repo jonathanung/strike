@@ -404,6 +404,7 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 	m.windows = configureFilesWindow(m.windows, m.workDir, m.services.Files)
 	m.windows = configureMemoryWindow(m.windows, m.services.Memory)
 	m.windows = configureIssuesWindow(m.windows, m.services.Issues)
+	m.windows = configureTelemetryWindow(m.windows, m.workDir, m.services.Telemetry)
 	if len(replay) > 0 {
 		seedFromReplay(&m, replay)
 	}
@@ -699,6 +700,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case filesRefreshMsg:
 		m.windows = refreshFilesWindows(m.windows)
 		return m, filesRefreshCmd()
+
+	case telemetryTickMsg, telemetrySampleMsg:
+		var cmd tea.Cmd
+		m.windows, cmd = applyTelemetryMsg(m.windows, msg)
+		return m, cmd
 
 	case paletteInvokeMsg:
 		priorNotice, priorNoticeErr := m.notice, m.noticeErr

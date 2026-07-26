@@ -900,6 +900,19 @@ func fakeSkill(name, description, template string) host.Skill {
 	})
 }
 
+// fakeTelemetry is a scriptable host.Telemetry for TUI tests.
+type fakeTelemetry struct {
+	sample host.TelemetrySample
+	err    error
+}
+
+func (f *fakeTelemetry) Sample(context.Context, string) (host.TelemetrySample, error) {
+	if f == nil {
+		return host.TelemetrySample{}, nil
+	}
+	return f.sample, f.err
+}
+
 // testServices bundles the default fakes with the given agents and skills.
 func testServices(agents []string, skills []host.Skill) host.Services {
 	return host.Services{
@@ -908,8 +921,14 @@ func testServices(agents []string, skills []host.Skill) host.Services {
 		Settings:  &fakeSettings{},
 		Memory:    newFakeMemory(),
 		Providers: &fakeProviders{},
-		Agents:    agents,
-		Skills:    skills,
+		Telemetry: &fakeTelemetry{sample: host.TelemetrySample{
+			CPUHostOK: true, CPUHostPct: 10,
+			MemOK: true, MemUsedBytes: 1024 * 1024 * 1024, MemTotalBytes: 8 * 1024 * 1024 * 1024,
+			DiskOK: true, DiskUsedBytes: 50 * 1024 * 1024 * 1024, DiskTotalBytes: 100 * 1024 * 1024 * 1024,
+			DiskFreeBytes: 50 * 1024 * 1024 * 1024,
+		}},
+		Agents: agents,
+		Skills: skills,
 	}
 }
 

@@ -162,10 +162,10 @@ func TestCompactRightPaneIsBorderlessAndUsesFullBodyDimensionsAtThresholds(t *te
 
 func TestDefaultWindowRegistryHasUniqueWidthSafeWindows(t *testing.T) {
 	r := newWindowRegistry()
-	if len(r.windows) != 9 {
-		t.Fatalf("window count = %d, want 9", len(r.windows))
+	if len(r.windows) != 10 {
+		t.Fatalf("window count = %d, want 10", len(r.windows))
 	}
-	wantIDs := []string{"context", "activity", "agents", "visualizer", "files", "memory", "issues", "markdown", "editor"}
+	wantIDs := []string{"context", "activity", "telemetry", "agents", "visualizer", "files", "memory", "issues", "markdown", "editor"}
 	seenIDs, seenTitles := map[string]bool{}, map[string]bool{}
 	for i, w := range r.windows {
 		if w.id() != wantIDs[i] {
@@ -234,6 +234,19 @@ func TestDefaultWindowRegistryHasUniqueWidthSafeWindows(t *testing.T) {
 				nw, ok := resized.(namedWindow)
 				if !ok || nw.width != size.w || nw.height != size.h {
 					t.Errorf("resize(%d,%d) = %#v, want namedWindow %dx%d", size.w, size.h, resized, size.w, size.h)
+				}
+			}
+		case "telemetry":
+			if _, ok := w.(telemetryWindow); !ok {
+				t.Errorf("window = %#v, want a telemetryWindow", w)
+			}
+			view := w.resize(32, 4).view(theme.Default())
+			if !strings.Contains(ansi.Strip(view), "unavailable") {
+				t.Errorf("unbound telemetry window = %q", view)
+			}
+			for _, line := range strings.Split(view, "\n") {
+				if got := lipgloss.Width(line); got > 32 {
+					t.Errorf("telemetry line width = %d, want <= 32: %q", got, line)
 				}
 			}
 		case "agents":
@@ -309,8 +322,8 @@ func TestDefaultWindowRegistryHasUniqueWidthSafeWindows(t *testing.T) {
 			t.Errorf("unexpected window id %q", w.id())
 		}
 	}
-	if !seenIDs["context"] || !seenIDs["activity"] || !seenIDs["agents"] || !seenIDs["visualizer"] || !seenIDs["files"] || !seenIDs["memory"] || !seenIDs["issues"] || !seenIDs["markdown"] || !seenIDs["editor"] {
-		t.Errorf("default registry ids = %v, want context, activity, agents, visualizer, files, memory, issues, markdown, and editor", seenIDs)
+	if !seenIDs["context"] || !seenIDs["activity"] || !seenIDs["telemetry"] || !seenIDs["agents"] || !seenIDs["visualizer"] || !seenIDs["files"] || !seenIDs["memory"] || !seenIDs["issues"] || !seenIDs["markdown"] || !seenIDs["editor"] {
+		t.Errorf("default registry ids = %v, want context, activity, telemetry, agents, visualizer, files, memory, issues, markdown, and editor", seenIDs)
 	}
 
 	// Full Model.View at split size shows real context content, not a placeholder.
@@ -387,11 +400,11 @@ func TestWindowRegistryReplaceByID(t *testing.T) {
 func TestWindowRegistryCycleIncludesFilesAndMarkdown(t *testing.T) {
 	r := newWindowRegistry()
 	var order []string
-	for range 10 {
+	for range 11 {
 		order = append(order, r.active().id())
 		r = r.cycle()
 	}
-	want := []string{"context", "activity", "agents", "visualizer", "files", "memory", "issues", "markdown", "editor", "context"}
+	want := []string{"context", "activity", "telemetry", "agents", "visualizer", "files", "memory", "issues", "markdown", "editor", "context"}
 	if !stringsEqual(order, want) {
 		t.Errorf("cycle order = %q, want %q", order, want)
 	}
@@ -425,6 +438,7 @@ func TestWindowRegistryPreservesMarkdownScrollAcrossCycle(t *testing.T) {
 	r = r.cycle() // editor
 	r = r.cycle() // context
 	r = r.cycle() // activity
+	r = r.cycle() // telemetry
 	r = r.cycle() // agents
 	r = r.cycle() // visualizer
 	r = r.cycle() // files
@@ -455,7 +469,7 @@ func TestDefaultWindowGroupsPairRelatedPanes(t *testing.T) {
 		id      string
 		members []string
 	}{
-		{"session", []string{"context", "activity"}},
+		{"session", []string{"context", "activity", "telemetry"}},
 		{"agents", []string{"agents", "visualizer"}},
 		{"files", []string{"files"}},
 		{"project", []string{"memory", "issues"}},
@@ -485,13 +499,13 @@ func TestDefaultWindowGroupsPairRelatedPanes(t *testing.T) {
 func TestWindowRegistryFocusCycleIsDeterministicAcrossGroups(t *testing.T) {
 	r := newWindowRegistry()
 	var order []string
-	for range 12 {
+	for range 13 {
 		order = append(order, r.active().id())
 		r = r.cycleBy(1)
 	}
 	want := []string{
-		"context", "activity", "agents", "visualizer", "files", "memory",
-		"issues", "markdown", "editor", "context", "activity", "agents",
+		"context", "activity", "telemetry", "agents", "visualizer", "files", "memory",
+		"issues", "markdown", "editor", "context", "activity", "telemetry",
 	}
 	if !stringsEqual(order, want) {
 		t.Errorf("cycle order = %q, want %q", order, want)
@@ -591,7 +605,7 @@ func TestStackedRightPaneShowsPairedGroupTitles(t *testing.T) {
 		activate string
 		want     []string
 	}{
-		{"session", "context", []string{"context", "activity"}},
+		{"session", "context", []string{"context", "activity", "system"}},
 		{"agents", "agents", []string{"agents", "visualizer"}},
 		{"project", "memory", []string{"memory", "issues"}},
 	} {
