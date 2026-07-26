@@ -763,6 +763,7 @@ type HookMatched struct {
 // Prompt layer kind / mode labels used on EffectivePrompt.Layers.
 const (
 	PromptLayerShared      = "shared"
+	PromptLayerTools       = "tools"
 	PromptLayerProvider    = "provider"
 	PromptLayerConfig      = "config_system"
 	PromptLayerPersona     = "persona"

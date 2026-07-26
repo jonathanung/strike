@@ -21,15 +21,17 @@ func TestSharedBaselineHasADHDAndTools(t *testing.T) {
 		"You are strike",
 		"Response contract (ADHD-shaped, always on)",
 		"Lead with the next action",
-		"Available: `read`, `glob`, `grep`, `edit`, `write`, `apply_patch`, `bash`, `task`, `webfetch`, `todowrite`, `todoread`, `memory_write`, `memory_read`, `issue_write`, `issue_read`, `notebook_edit`, `sleep`, `skill`, `question`, `enter_plan_mode`, `exit_plan_mode`, `phase_done`, `toolsearch`",
 		"NEVER commit unless the user explicitly asks",
 		"/help",
-		"instruction`, `preference`, or `project-convention` are auto-loaded",
-		"Issues are never auto-injected",
+		"# Doing tasks",
 	} {
 		if !strings.Contains(p, want) {
 			t.Errorf("SharedSystemPrompt missing %q", want)
 		}
+	}
+	// Static tool inventory moved to the effective registry tools layer.
+	if strings.Contains(p, "Available: `read`") || strings.Contains(p, "# Available tools") {
+		t.Error("SharedSystemPrompt must not embed static tool inventory")
 	}
 	if strings.Contains(p, "stop adhd mode") {
 		t.Error("SharedSystemPrompt must not offer stop-adhd toggle")
