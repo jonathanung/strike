@@ -70,6 +70,7 @@ var reservedSkillNames = map[string]struct{}{
 	"session":          {},
 	"context":          {},
 	"effective-prompt": {},
+	"upgrade":          {},
 }
 
 // ValidateSkillName rejects names that cannot be represented safely as slash commands.

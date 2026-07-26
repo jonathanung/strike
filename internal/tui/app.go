@@ -224,6 +224,9 @@ type Model struct {
 	// pendingResume is set when /session picks another root session; the
 	// composition root reads PendingResume after tea.Quit and reopens it.
 	pendingResume string
+	// pendingUpgrade is set by /upgrade; the composition root runs self-update
+	// after tea.Quit (alt screen torn down) and re-execs the new binary.
+	pendingUpgrade bool
 	// vimMode selects pane/overlay/takeover for /vim.
 	vimMode VimMode
 	// usage* hold the latest UsageReported figures; Known=false means unknown
@@ -1971,6 +1974,16 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 			ops <- protocol.InspectEffectivePrompt{}
 			return nil
 		}
+	case "/upgrade":
+		m.resetComposer()
+		m.clearNotice()
+		if m.turnRunning {
+			m.setNotice("wait for the current turn to finish before upgrading", true)
+			return m, nil
+		}
+		m.pendingUpgrade = true
+		m.modal = nil
+		return m, tea.Quit
 	default:
 		// Unknown commands fall through to skills: /name args renders the
 		// skill template and submits it as the user message.
@@ -1996,6 +2009,11 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 // resume. Empty when the user quit without switching.
 func (m Model) PendingResume() string {
 	return strings.TrimSpace(m.pendingResume)
+}
+
+// PendingUpgrade reports whether /upgrade requested a self-update after quit.
+func (m Model) PendingUpgrade() bool {
+	return m.pendingUpgrade
 }
 
 func (m Model) handleForkCommand() (tea.Model, tea.Cmd) {
