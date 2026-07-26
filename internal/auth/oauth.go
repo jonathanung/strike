@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"testing"
 	"time"
 )
 
@@ -356,7 +357,14 @@ func writeCallbackPage(w http.ResponseWriter, message string) {
 	fmt.Fprintf(w, "<html><body style=\"font-family: sans-serif; padding: 2rem\"><h2>strike</h2><p>%s</p></body></html>", message)
 }
 
-func openBrowser(target string) {
+// openBrowser launches the platform URL opener. Overridable in tests.
+var openBrowser = openBrowserDefault
+
+func openBrowserDefault(target string) {
+	// Never invoke the system opener under go test (any importing package).
+	if testing.Testing() {
+		return
+	}
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":

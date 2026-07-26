@@ -27,6 +27,19 @@ func freeLoopbackPort(t *testing.T) int {
 	return port
 }
 
+// stubOpenBrowser replaces openBrowser with a recorder. The default opener
+// already no-ops under go test; this is for asserting the URL was requested.
+func stubOpenBrowser(t *testing.T) *[]string {
+	t.Helper()
+	var opened []string
+	prev := openBrowser
+	openBrowser = func(target string) {
+		opened = append(opened, target)
+	}
+	t.Cleanup(func() { openBrowser = prev })
+	return &opened
+}
+
 func testOAuthFlow(tokenURL string, port int) FlowConfig {
 	return FlowConfig{
 		AuthorizeURL: "http://issuer.test/oauth/authorize",
@@ -41,6 +54,7 @@ func testOAuthFlow(tokenURL string, port int) FlowConfig {
 
 func beginTestPending(t *testing.T, tokenURL string) *PendingLogin {
 	t.Helper()
+	stubOpenBrowser(t)
 	p, err := testOAuthFlow(tokenURL, freeLoopbackPort(t)).Begin()
 	if err != nil {
 		t.Fatal(err)
@@ -51,6 +65,28 @@ func beginTestPending(t *testing.T, tokenURL string) *PendingLogin {
 		}
 	})
 	return p
+}
+
+func TestBeginRequestsBrowserOpenWithoutInvokingOpener(t *testing.T) {
+	opened := stubOpenBrowser(t)
+	p, err := testOAuthFlow("http://127.0.0.1:1/unused-token", freeLoopbackPort(t)).Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if p.server != nil {
+			_ = p.server.Close()
+		}
+	})
+	if len(*opened) != 1 {
+		t.Fatalf("openBrowser calls = %d, want 1", len(*opened))
+	}
+	if (*opened)[0] != p.URL {
+		t.Errorf("opened %q, want authorize URL %q", (*opened)[0], p.URL)
+	}
+	if !strings.Contains(p.URL, "http://issuer.test/oauth/authorize?") {
+		t.Errorf("authorize URL = %q", p.URL)
+	}
 }
 
 func pendingState(t *testing.T, p *PendingLogin) string {
@@ -248,6 +284,7 @@ func TestCompleteWithPasteSecondAfterSuccess(t *testing.T) {
 }
 
 func TestBeginReturnsPendingWhenBindFails(t *testing.T) {
+	stubOpenBrowser(t)
 	// Hold a port so Begin cannot bind the redirect listener.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -274,6 +311,7 @@ func TestBeginReturnsPendingWhenBindFails(t *testing.T) {
 }
 
 func TestLoginErrorsImmediatelyWhenBindFails(t *testing.T) {
+	stubOpenBrowser(t)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
