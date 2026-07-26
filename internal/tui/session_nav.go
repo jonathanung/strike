@@ -621,6 +621,8 @@ func cellsFromEvents(events []protocol.Event) ([]cell, map[string]*toolCell) {
 			if exp, ok := lastCell[*exploreCell](cells); ok {
 				exp.accepting = false
 			}
+		case protocol.SessionRewound:
+			cells, toolByID = dropLastUserTurnCells(cells, toolByID)
 		case protocol.EngineError:
 			cells = append(cells, &errorCell{text: ev.Message})
 		}
@@ -630,6 +632,37 @@ func cellsFromEvents(events []protocol.Event) ([]cell, map[string]*toolCell) {
 		exp.accepting = false
 	}
 	return cells, toolByID
+}
+
+// dropLastUserTurnCells removes transcript cells from the last user message
+// through the end (matching engine dropLastUserTurn for the UI).
+func dropLastUserTurnCells(cells []cell, toolByID map[string]*toolCell) ([]cell, map[string]*toolCell) {
+	if toolByID == nil {
+		toolByID = map[string]*toolCell{}
+	}
+	lastUser := -1
+	for i := len(cells) - 1; i >= 0; i-- {
+		if _, ok := cells[i].(*userCell); ok {
+			lastUser = i
+			break
+		}
+	}
+	if lastUser < 0 {
+		return cells, toolByID
+	}
+	for _, c := range cells[lastUser:] {
+		switch cell := c.(type) {
+		case *toolCell:
+			delete(toolByID, cell.callID)
+		case *exploreCell:
+			for _, tc := range cell.calls {
+				if tc != nil {
+					delete(toolByID, tc.callID)
+				}
+			}
+		}
+	}
+	return cells[:lastUser], toolByID
 }
 
 // sessionTreeNodes builds a ui.Tree of the root session and its children for

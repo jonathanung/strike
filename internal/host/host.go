@@ -221,6 +221,10 @@ type Sessions interface {
 	Children(parentID string) ([]Session, error)
 	// ReplayJSONL returns the raw JSONL event log for id (one envelope per line).
 	ReplayJSONL(id string) ([]byte, error)
+	// Fork copies id's event log into a new root session ("fork of …") and
+	// returns the child. Parent stays intact. Implementations may reject
+	// subagent (parented) transcripts.
+	Fork(id string) (Session, error)
 }
 
 // Services bundles everything a frontend receives from its host. Any field

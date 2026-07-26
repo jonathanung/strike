@@ -40,6 +40,8 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		{ID: "command:layout", Label: "/layout", Description: "toggle horizontal/vertical pane split", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/layout"}},
 		{ID: "command:split", Label: "/split", Description: "toggle horizontal/vertical pane split", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/split"}},
 		{ID: "command:compact", Label: "/compact", Description: "compact model history (keep recent turns)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/compact"}},
+		{ID: "command:fork", Label: "/fork", Description: "duplicate the conversation into a new id", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/fork"}},
+		{ID: "command:undo", Label: "/undo", Description: "drop the last completed user/assistant turn", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/undo"}},
 		{ID: "command:session", Label: "/session", Description: "browse and resume a past session", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/session"}},
 		{ID: "command:help", Label: "/help", Description: "show available commands", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/help"}},
 		{ID: "command:keys", Label: "/keys", Description: "show keyboard shortcuts", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/keys"}},

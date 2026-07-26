@@ -348,6 +348,86 @@ func (m *Manager) Replay(id string) ([]protocol.Event, error) {
 	return Replay(LogPath(m.dir, id))
 }
 
+// Fork copies sourceID's event log into a new root session. The parent stays
+// intact. Title is "fork of …"; meta.ForkedFrom records lineage. ParentSessionID
+// stays empty so the fork remains eligible for --continue and the session picker.
+func (m *Manager) Fork(sourceID string) (Info, error) {
+	sourceID = strings.TrimSpace(sourceID)
+	if err := validateID(sourceID); err != nil {
+		return Info{}, err
+	}
+
+	src, err := m.Get(sourceID)
+	if err != nil {
+		return Info{}, err
+	}
+	if src.ParentSessionID != "" {
+		return Info{}, fmt.Errorf("session %q is a subagent transcript; fork a root session", sourceID)
+	}
+
+	// Flush an open source so Replay sees the latest appends.
+	m.mu.Lock()
+	if e, ok := m.sessions[sourceID]; ok && e.store != nil {
+		_ = e.store.Sync()
+	}
+	m.mu.Unlock()
+
+	events, err := m.Replay(sourceID)
+	if err != nil {
+		return Info{}, fmt.Errorf("fork: replaying: %w", err)
+	}
+
+	baseTitle := strings.TrimSpace(src.Title)
+	if baseTitle == "" {
+		baseTitle = TitleFromEvents(events)
+	}
+	if baseTitle == "" {
+		baseTitle = sourceID
+	}
+	forkTitle := forkTitleOf(baseTitle)
+
+	info, err := m.Create(CreateOptions{Title: forkTitle})
+	if err != nil {
+		return Info{}, fmt.Errorf("fork: creating: %w", err)
+	}
+	if _, err := UpdateMeta(m.dir, info.ID, func(meta *Meta) {
+		meta.Title = forkTitle
+		meta.ForkedFrom = sourceID
+	}); err != nil {
+		_ = m.Close(info.ID)
+		_ = os.Remove(LogPath(m.dir, info.ID))
+		_ = os.Remove(MetaPath(m.dir, info.ID))
+		return Info{}, fmt.Errorf("fork: meta: %w", err)
+	}
+	// Refresh in-memory title (Create already set it; ForkedFrom is sidecar-only).
+	m.mu.Lock()
+	if e, ok := m.sessions[info.ID]; ok {
+		e.info.Title = forkTitle
+	}
+	m.mu.Unlock()
+
+	for _, ev := range events {
+		if err := m.Append(info.ID, ev); err != nil {
+			_ = m.Close(info.ID)
+			return Info{}, fmt.Errorf("fork: copying events: %w", err)
+		}
+	}
+	return m.Get(info.ID)
+}
+
+// forkTitleOf builds a display title for a forked session.
+func forkTitleOf(base string) string {
+	base = strings.TrimSpace(base)
+	if base == "" {
+		return "fork"
+	}
+	const prefix = "fork of "
+	if strings.HasPrefix(strings.ToLower(base), prefix) {
+		return base
+	}
+	return prefix + base
+}
+
 // Path returns the JSONL path for an open session, or the canonical path if known.
 func (m *Manager) Path(id string) string {
 	id = strings.TrimSpace(id)
@@ -496,6 +576,8 @@ func eventSessionID(ev protocol.Event) (string, bool) {
 	case protocol.CompactionCompleted:
 		return e.SessionID, true
 	case protocol.SessionMeta:
+		return e.SessionID, true
+	case protocol.SessionRewound:
 		return e.SessionID, true
 	default:
 		return "", false

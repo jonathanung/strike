@@ -561,3 +561,170 @@ func TestRestorePlanPhaseDeniesWriteOnRun(t *testing.T) {
 		}
 	}
 }
+
+func TestRestoreSessionRewoundThenStream(t *testing.T) {
+	// Fixture JSONL-shaped events → Restore after SessionRewound → one more Stream
+	// must not include the undone turn.
+	t1 := protocol.Correlation{SessionID: "s1", TurnID: "t1", ProviderRequestID: "r1"}
+	t2 := protocol.Correlation{SessionID: "s1", TurnID: "t2", ProviderRequestID: "r2"}
+	events := []protocol.Event{
+		protocol.ModelSelected{Correlation: protocol.Correlation{SessionID: "s1"}, Provider: "echo", Model: "echo"},
+		protocol.UserMessage{Correlation: t1, Text: "first"},
+		protocol.TurnStarted{Correlation: t1},
+		protocol.TextDelta{Correlation: t1, Text: "one"},
+		protocol.TurnCompleted{Correlation: t1, StopReason: "end_turn"},
+		protocol.UserMessage{Correlation: t2, Text: "second"},
+		protocol.TurnStarted{Correlation: t2},
+		protocol.TextDelta{Correlation: t2, Text: "two"},
+		protocol.TurnCompleted{Correlation: t2, StopReason: "end_turn"},
+		protocol.SessionRewound{Correlation: protocol.Correlation{SessionID: "s1"}, Removed: 2},
+	}
+	restored := engine.Restore(events)
+	want := []provider.Message{
+		{Role: provider.RoleUser, Text: "first"},
+		{Role: provider.RoleAssistant, Text: "one"},
+	}
+	if !reflect.DeepEqual(restored.Messages, want) {
+		t.Fatalf("Messages after rewind = %#v, want %#v", restored.Messages, want)
+	}
+
+	var seen []provider.Message
+	stub := &captureProvider{inner: echo.New(), onRequest: func(req provider.Request) {
+		seen = append([]provider.Message(nil), req.Messages...)
+	}}
+	eng := engine.New(engine.Options{
+		SessionID:       "s1",
+		Select:          func(string) (provider.Provider, string, error) { return stub, "echo", nil },
+		Registry:        tool.NewRegistry(),
+		InitialProvider: "echo",
+		InitialModel:    "echo",
+		InitialMessages: restored.Messages,
+		QuietStartup:    true,
+		Agents:          []engine.Agent{{Name: "build"}},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+	select {
+	case ev := <-eng.Events():
+		switch ev.(type) {
+		case protocol.ModelSelected, protocol.AgentSelected:
+			t.Fatalf("quiet resume emitted startup selection %T", ev)
+		}
+	case <-time.After(50 * time.Millisecond):
+	}
+	eng.Ops() <- protocol.UserInput{Text: "third"}
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case ev := <-eng.Events():
+			if _, ok := ev.(protocol.TurnCompleted); ok {
+				goto check
+			}
+		case <-deadline:
+			t.Fatal("timeout waiting for turn")
+		}
+	}
+check:
+	if len(seen) == 0 {
+		t.Fatal("provider saw no request")
+	}
+	// History should be first turn + new user "third" (not "second").
+	var users []string
+	for _, m := range seen {
+		if m.Role == provider.RoleUser {
+			users = append(users, m.Text)
+		}
+	}
+	if len(users) < 2 || users[0] != "first" || users[len(users)-1] != "third" {
+		t.Fatalf("user texts = %v, want first…third without second", users)
+	}
+	for _, u := range users {
+		if u == "second" {
+			t.Fatalf("undone turn still in provider history: %v", users)
+		}
+	}
+}
+
+func TestRewindOpDropsLastTurn(t *testing.T) {
+	reg := tool.NewRegistry()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	eng := engine.New(engine.Options{
+		SessionID:       "sess-rewind",
+		Select:          func(string) (provider.Provider, string, error) { return echo.New(), "echo", nil },
+		Registry:        reg,
+		InitialProvider: "echo",
+		InitialModel:    "echo",
+		Agents:          []engine.Agent{{Name: "build"}},
+	})
+	go eng.Run(ctx)
+	// Drain startup.
+	deadline := time.After(2 * time.Second)
+drain:
+	for {
+		select {
+		case ev := <-eng.Events():
+			if _, ok := ev.(protocol.AgentSelected); ok {
+				break drain
+			}
+		case <-deadline:
+			t.Fatal("timeout startup")
+		}
+	}
+	eng.Ops() <- protocol.UserInput{Text: "hello"}
+	for {
+		select {
+		case ev := <-eng.Events():
+			if _, ok := ev.(protocol.TurnCompleted); ok {
+				goto rewound
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout turn")
+		}
+	}
+rewound:
+	before := len(eng.Messages())
+	if before < 2 {
+		t.Fatalf("messages before rewind = %#v", eng.Messages())
+	}
+	eng.Ops() <- protocol.Rewind{}
+	var rewound protocol.SessionRewound
+	deadline = time.After(2 * time.Second)
+	for rewound.Removed == 0 {
+		select {
+		case ev := <-eng.Events():
+			switch e := ev.(type) {
+			case protocol.SessionRewound:
+				rewound = e
+			case protocol.EngineError:
+				t.Fatalf("EngineError: %s", e.Message)
+			}
+		case <-deadline:
+			t.Fatal("timeout rewind")
+		}
+	}
+	if len(eng.Messages()) != 0 {
+		t.Fatalf("messages after rewind = %#v", eng.Messages())
+	}
+	if rewound.Removed != before {
+		t.Fatalf("Removed = %d, want %d", rewound.Removed, before)
+	}
+
+	// Nothing left → clear notice, not crash.
+	eng.Ops() <- protocol.Rewind{}
+	deadline = time.After(2 * time.Second)
+	for {
+		select {
+		case ev := <-eng.Events():
+			if errEv, ok := ev.(protocol.EngineError); ok {
+				if !strings.Contains(errEv.Message, "nothing to rewind") {
+					t.Fatalf("error = %q", errEv.Message)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("timeout empty rewind")
+		}
+	}
+}

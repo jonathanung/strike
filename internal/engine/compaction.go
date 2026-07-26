@@ -182,6 +182,60 @@ func (e *Engine) handleCompact() {
 	}
 }
 
+// dropLastUserTurn removes the last real user turn and everything after it
+// from model-facing history. Compact markers are not treated as real turns.
+// ok is false when there is nothing to drop or the remainder would be invalid.
+func dropLastUserTurn(msgs []provider.Message) (out []provider.Message, ok bool) {
+	lastUser := -1
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role != provider.RoleUser {
+			continue
+		}
+		if strings.HasPrefix(msgs[i].Text, compactMarkerPrefix) {
+			continue
+		}
+		lastUser = i
+		break
+	}
+	if lastUser < 0 {
+		return msgs, false
+	}
+	out = msgs[:lastUser]
+	if !historyToolPairsValid(out) {
+		return msgs, false
+	}
+	// Copy so callers can retain the original slice header safely.
+	kept := make([]provider.Message, len(out))
+	copy(kept, out)
+	return kept, true
+}
+
+func (e *Engine) handleRewind() {
+	if e.turnActive() {
+		e.emit(protocol.EngineError{
+			Correlation: e.sessionCorr(),
+			Message:     "cannot rewind while a turn is running",
+		})
+		return
+	}
+	next, ok := dropLastUserTurn(e.messages)
+	if !ok {
+		e.emit(protocol.EngineError{
+			Correlation: e.sessionCorr(),
+			Message:     "nothing to rewind",
+		})
+		return
+	}
+	removed := len(e.messages) - len(next)
+	e.messages = next
+	e.lastUsed = 0
+	e.lastUsedKnown = false
+	e.emit(protocol.SessionRewound{
+		Correlation: e.sessionCorr(),
+		Removed:     removed,
+	})
+}
+
 // maybeThresholdCompact drops older history when occupancy approaches the
 // model context window. No-ops when the window is unknown and the estimate
 // cannot be compared, or when nothing can be removed.

@@ -52,6 +52,50 @@ func TestCompactMessagesKeepsRecentUserTurnsAndValidToolPairs(t *testing.T) {
 	}
 }
 
+func TestDropLastUserTurn(t *testing.T) {
+	call := provider.ToolCall{ID: "c1", Name: "bash", Args: []byte(`{}`)}
+	msgs := []provider.Message{
+		{Role: provider.RoleUser, Text: "first"},
+		{Role: provider.RoleAssistant, Text: "a1"},
+		{Role: provider.RoleUser, Text: "second"},
+		{Role: provider.RoleAssistant, Text: "a2", ToolCalls: []provider.ToolCall{call}},
+		{Role: provider.RoleTool, ToolResult: &provider.ToolResult{CallID: "c1", Output: "ok"}},
+	}
+	got, ok := dropLastUserTurn(msgs)
+	if !ok {
+		t.Fatal("expected drop")
+	}
+	want := []provider.Message{
+		{Role: provider.RoleUser, Text: "first"},
+		{Role: provider.RoleAssistant, Text: "a1"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i].Role != want[i].Role || got[i].Text != want[i].Text {
+			t.Fatalf("got[%d] = %#v, want %#v", i, got[i], want[i])
+		}
+	}
+	// Second drop removes the remaining turn.
+	got, ok = dropLastUserTurn(got)
+	if !ok || len(got) != 0 {
+		t.Fatalf("second drop = %#v ok=%v", got, ok)
+	}
+	_, ok = dropLastUserTurn(nil)
+	if ok {
+		t.Fatal("empty should not drop")
+	}
+	// Compact marker alone is not a real turn.
+	markerOnly := []provider.Message{
+		{Role: provider.RoleUser, Text: compactMarker(3)},
+		{Role: provider.RoleAssistant, Text: "tail"},
+	}
+	if _, ok := dropLastUserTurn(markerOnly); ok {
+		t.Fatal("should not drop compact-marker-only history without a real user turn")
+	}
+}
+
 func TestCompactMessagesNothingToDrop(t *testing.T) {
 	msgs := []provider.Message{
 		{Role: provider.RoleUser, Text: "only"},

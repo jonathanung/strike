@@ -15,9 +15,13 @@ import (
 type Meta struct {
 	Title           string `json:"title,omitempty"`
 	ParentSessionID string `json:"parentSessionId,omitempty"`
-	CreatedAt       string `json:"createdAt,omitempty"` // RFC3339 UTC
-	PRURL           string `json:"prUrl,omitempty"`
-	PRNumber        int    `json:"prNumber,omitempty"`
+	// ForkedFrom is the source session id when this session was created via
+	// Fork. Empty for ordinary roots and subagent children. Forks remain root
+	// sessions (ParentSessionID empty) so --continue / pickers still work.
+	ForkedFrom string `json:"forkedFrom,omitempty"`
+	CreatedAt  string `json:"createdAt,omitempty"` // RFC3339 UTC
+	PRURL      string `json:"prUrl,omitempty"`
+	PRNumber   int    `json:"prNumber,omitempty"`
 }
 
 // MetaPath is the sidecar JSON path for a session id under dir.

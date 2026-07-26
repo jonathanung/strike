@@ -377,3 +377,91 @@ func TestAppendClosedSessionErrors(t *testing.T) {
 		t.Fatal("expected bind error")
 	}
 }
+
+func TestManagerForkCopiesPrefixAndMeta(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager(dir)
+	root, err := m.Create(CreateOptions{Title: "original work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	corr := protocol.Correlation{SessionID: root.ID, TurnID: "t1"}
+	for _, ev := range []protocol.Event{
+		protocol.ModelSelected{Correlation: protocol.Correlation{SessionID: root.ID}, Provider: "echo", Model: "echo"},
+		protocol.UserMessage{Correlation: corr, Text: "hello"},
+		protocol.TurnStarted{Correlation: corr},
+		protocol.TextDelta{Correlation: corr, Text: "hi"},
+		protocol.TurnCompleted{Correlation: corr, StopReason: "end_turn"},
+	} {
+		if err := m.Append(root.ID, ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	fork, err := m.Fork(root.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fork.ID == root.ID {
+		t.Fatal("fork id must differ from parent")
+	}
+	if fork.ParentSessionID != "" {
+		t.Fatalf("fork ParentSessionID = %q, want empty root", fork.ParentSessionID)
+	}
+	if fork.Title != "fork of original work" {
+		t.Fatalf("title = %q", fork.Title)
+	}
+	meta, err := ReadMeta(dir, fork.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.ForkedFrom != root.ID {
+		t.Fatalf("ForkedFrom = %q, want %q", meta.ForkedFrom, root.ID)
+	}
+	if meta.Title != "fork of original work" {
+		t.Fatalf("meta title = %q", meta.Title)
+	}
+
+	parentEvents, err := m.Replay(root.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forkEvents, err := m.Replay(fork.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(forkEvents) != len(parentEvents) {
+		t.Fatalf("fork events = %d, parent = %d", len(forkEvents), len(parentEvents))
+	}
+
+	// Parent still listed as root; fork is also a root for --continue / picker.
+	latest, err := m.LatestRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if latest.ID != fork.ID && latest.ID != root.ID {
+		t.Fatalf("LatestRoot = %q, want parent or fork", latest.ID)
+	}
+	list, err := m.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var roots int
+	for _, info := range list {
+		if info.ParentSessionID == "" {
+			roots++
+		}
+	}
+	if roots < 2 {
+		t.Fatalf("root sessions = %d, want >= 2", roots)
+	}
+
+	// Reject forking a subagent child.
+	child, err := m.Create(CreateOptions{ParentSessionID: root.ID, Title: "sub"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Fork(child.ID); err == nil {
+		t.Fatal("expected error forking subagent session")
+	}
+}
