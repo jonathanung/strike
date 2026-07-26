@@ -53,7 +53,7 @@ func readProcessCPUTime(pid int) (ns int64, ok bool) {
 	}
 	sec := usage.Utime.Sec + usage.Stime.Sec
 	usec := usage.Utime.Usec + usage.Stime.Usec
-	return sec*1e9 + usec*1e3, true
+	return sec*1e9 + int64(usec)*1e3, true
 }
 
 func readMemory() (used, total uint64, ok bool) {
