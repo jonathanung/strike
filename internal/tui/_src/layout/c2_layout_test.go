@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
@@ -320,5 +321,41 @@ func TestC2HintsAndWelcomeKeysDeriveFromBindings(t *testing.T) {
 	rightHints := ansi.Strip(m.hintsView(160))
 	if strings.Contains(rightHints, keyHint(m.keyMap.Send).Label) {
 		t.Errorf("right/global hints retained left-only send binding: %q", rightHints)
+	}
+}
+
+func TestAgentsPaneFooterOnlyWhenAgentsWindow(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 160, Height: 40})
+	m.focus = focusRight
+
+	// Context (default) must not advertise agents-pane open/interrupt chrome.
+	ak := defaultAgentsKeyMap()
+	openHint := ak.Open.Help().Key + " " + ak.Open.Help().Desc
+	contextPane := ansi.Strip(m.rightPaneView(40, 20, false))
+	if strings.Contains(contextPane, openHint) {
+		t.Errorf("context pane leaked agents footer: %q", contextPane)
+	}
+
+	reg, ok := m.windows.activate(agentsWindowID)
+	if !ok {
+		t.Fatal("activate agents")
+	}
+	m.windows = reg
+	// Wide enough that Panel footer chrome can fit the full agents hint row.
+	agentsPane := ansi.Strip(m.rightPaneSingle(90, 12, false, m.windows.active()))
+	for _, b := range []key.Binding{ak.Spawn, ak.Open, ak.Interrupt, ak.Move, ak.Filter} {
+		h := b.Help()
+		if !strings.Contains(agentsPane, h.Key) {
+			t.Errorf("agents pane missing key %q: %q", h.Key, agentsPane)
+		}
+		if h.Desc != "" && !strings.Contains(agentsPane, h.Desc) {
+			t.Errorf("agents pane missing desc %q: %q", h.Desc, agentsPane)
+		}
+	}
+	// Compact/borderless drops panel chrome footer (open/interrupt not in empty body).
+	compact := ansi.Strip(m.rightPaneSingle(90, 12, true, m.windows.active()))
+	if strings.Contains(compact, openHint) {
+		t.Errorf("compact agents pane still shows chrome footer: %q", compact)
 	}
 }

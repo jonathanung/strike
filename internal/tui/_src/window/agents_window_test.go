@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -21,9 +22,27 @@ func TestAgentsWindowEmptyState(t *testing.T) {
 	if !strings.Contains(plain, "no subagents") {
 		t.Fatalf("empty view = %q", plain)
 	}
+	spawn := defaultAgentsKeyMap().Spawn.Help()
+	if !strings.Contains(plain, spawn.Key) || !strings.Contains(plain, spawn.Desc) {
+		t.Fatalf("empty view missing spawn help %q %q: %q", spawn.Key, spawn.Desc, plain)
+	}
 	for _, line := range strings.Split(plain, "\n") {
 		if got := lipgloss.Width(line); got > 32 {
 			t.Errorf("line width %d > 32: %q", got, line)
+		}
+	}
+}
+
+func TestAgentsPaneFooterDerivesFromKeyMap(t *testing.T) {
+	footer := ansi.Strip(agentsPaneFooter(theme.Default()))
+	ak := defaultAgentsKeyMap()
+	for _, b := range []key.Binding{ak.Spawn, ak.Open, ak.Interrupt, ak.Move, ak.Filter} {
+		h := b.Help()
+		if !strings.Contains(footer, h.Key) {
+			t.Errorf("footer missing key %q: %q", h.Key, footer)
+		}
+		if h.Desc != "" && !strings.Contains(footer, h.Desc) {
+			t.Errorf("footer missing desc %q: %q", h.Desc, footer)
 		}
 	}
 }
