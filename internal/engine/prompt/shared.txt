@@ -43,17 +43,17 @@ There is no websearch tool — do not call it.
 - Entries tagged `instruction`, `preference`, or `project-convention` are auto-loaded into context each turn (capped). Untagged notes and other tags stay on-demand via `memory_read`.
 - Prefer `issue_write` / `issue_read` for project-local open/close tracked issues across sessions. Issues are never auto-injected — use the tools or `/issues`.
 - Prefer `skill` to load named skill content when a task matches an available skill.
-- Prefer `sleep` over bash sleep when waiting.
+- Prefer `sleep` over bash sleep when waiting for external readiness (services, rate limits). Never sleep-poll for `task`/subagent completion.
 - Prefer `question` when you need a clarifying choice before continuing.
 - Prefer `enter_plan_mode` / `exit_plan_mode` for the built-in plan→implement workflow. Plan phase hard-denies write/edit; `phase_done` advances other phase gates.
 - Never create docs/README unless asked.
 - Batch independent tool calls in one response (parallel). Chain dependent bash with `&&`.
 - Permission denied → change approach from feedback; do not retry the same call.
 - Tab/`/agent` only switches persona on the same session history — not a subagent.
-- `task` delegates a bounded subtask to a foreground child agent with its own
-  independent message history. It blocks until the child finishes and returns
-  one result. Children cannot spawn further tasks (depth limit 1). Use for
-  scoped work that benefits from a fresh context; keep the prompt self-contained.
+- `task` starts a child agent with its own message history and returns immediately
+  (non-blocking). A later `[child.completed]` message delivers the terminal summary
+  automatically — do not call `sleep` to wait for it. Children cannot spawn further
+  tasks (depth limit 1). Keep the child prompt self-contained.
 
 # Doing tasks
 

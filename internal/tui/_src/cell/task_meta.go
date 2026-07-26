@@ -7,10 +7,35 @@ import (
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
 
+// isChildCompletedNotice reports an engine-injected [child.completed] user
+// message (model-visible notice, not a human prompt).
+func isChildCompletedNotice(text string) bool {
+	return strings.Contains(text, "[child.completed")
+}
+
 // taskMetadata is the JSON payload on task tool ToolCallEnd / cell metadata.
 type taskMetadata struct {
 	SessionID string `json:"sessionId"`
 	Status    string `json:"status"`
+}
+
+// beginSleepToolCell registers a sleep tool call, coalescing consecutive sleep
+// ticks into a single transcript row that updates in place.
+func beginSleepToolCell(cells []cell, toolByID map[string]*toolCell, callID, name string, args json.RawMessage) []cell {
+	tc := &toolCell{callID: callID, name: name, args: args}
+	toolByID[callID] = tc
+	if prev, ok := lastCell[*toolCell](cells); ok && prev.name == "sleep" {
+		prev.callID = callID
+		prev.args = args
+		prev.done = false
+		prev.isError = false
+		prev.title = ""
+		prev.output = ""
+		prev.metadata = nil
+		toolByID[callID] = prev
+		return cells
+	}
+	return append(cells, tc)
 }
 
 func parseTaskMetadata(raw json.RawMessage) (taskMetadata, bool) {

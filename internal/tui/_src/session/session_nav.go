@@ -594,6 +594,10 @@ func cellsFromEvents(events []protocol.Event) ([]cell, map[string]*toolCell) {
 		switch ev := ev.(type) {
 		case protocol.UserMessage:
 			complete()
+			if isChildCompletedNotice(ev.Text) {
+				cells = append(cells, &infoCell{text: ev.Text})
+				break
+			}
 			cells = append(cells, &userCell{text: userMessageDisplayText(ev.Text, ev.Images)})
 		case protocol.TextDelta:
 			if last, ok := lastCell[*assistantCell](cells); ok {
@@ -614,6 +618,10 @@ func cellsFromEvents(events []protocol.Event) ([]cell, map[string]*toolCell) {
 			if last, ok := lastCell[*assistantCell](cells); ok {
 				last.complete = true
 				last.mdCacheOK = false
+			}
+			if ev.Name == "sleep" {
+				cells = beginSleepToolCell(cells, toolByID, ev.CallID, ev.Name, ev.Args)
+				break
 			}
 			tc := &toolCell{callID: ev.CallID, name: ev.Name, args: ev.Args}
 			toolByID[ev.CallID] = tc

@@ -17,7 +17,8 @@ func (taskTool) Description() string {
 	return `Delegate a bounded subtask to a child agent with its own context.
 
 - Returns immediately after the child starts (does not block this turn).
-- Result includes the child session id; a later child.completed event carries the terminal summary.
+- Result includes the child session id; a later [child.completed] message carries the terminal summary automatically.
+- Do not sleep-poll waiting for the child — continue other work or end the turn; completion is event-driven.
 - Optional agent selects a persona (defaults to the current agent). Built-in names include:
   explore (read-only search), general (multi-step), commit (git commits only),
   reviewer (read-only review), tester (run make test/vet/build), debugger (root-cause),
