@@ -670,10 +670,7 @@ func TestSlashCommandExecutionAndSkillRenderingRemainIntact(t *testing.T) {
 		m = updated.(Model)
 		runAppCmd(t, cmd)
 		op := receiveAppOp(t, ops)
-		want := protocol.UserInput{Text: "Review: this diff"}
-		if op != want {
-			t.Errorf("operation = %#v, want %#v", op, want)
-		}
+		assertUserInputText(t, op, "Review: this diff")
 	})
 }
 
@@ -865,9 +862,7 @@ func TestOptionalHistoryIsBackwardCompatibleWhenOmitted(t *testing.T) {
 	m = updated.(Model)
 	runAppCmd(t, cmd)
 
-	if got := receiveAppOp(t, ops); got != (protocol.UserInput{Text: "no history configured"}) {
-		t.Errorf("operation = %#v, want ordinary UserInput", got)
-	}
+	assertUserInputText(t, receiveAppOp(t, ops), "no history configured")
 	if m.composer.Value() != "" || m.historyPos != -1 {
 		t.Errorf("submission did not reset composer state: value=%q historyPos=%d", m.composer.Value(), m.historyPos)
 	}
@@ -1002,9 +997,7 @@ func TestSubmissionsPersistDisplayPromptAndStillEmitUserInput(t *testing.T) {
 			for _, msg := range runAllAppCmds(t, cmd) {
 				m = updateApp(t, m, msg)
 			}
-			if got := receiveAppOp(t, ops); got != (protocol.UserInput{Text: tt.wantInput}) {
-				t.Errorf("operation = %#v, want UserInput %q", got, tt.wantInput)
-			}
+			assertUserInputText(t, receiveAppOp(t, ops), tt.wantInput)
 			if got := store.Entries(); !slices.Equal(got, []string{tt.wantHistory}) {
 				t.Errorf("history = %q, want exact display prompt %q", got, tt.wantHistory)
 			}
@@ -1039,10 +1032,8 @@ func TestRapidSubmissionsEnqueueHistoryInSubmissionOrderBeforeCommandCompletion(
 			t.Errorf("engine send %d returned unexpected message %#v", i, msg)
 		}
 	}
-	for i, want := range []string{"first prompt", "second prompt"} {
-		if got := receiveAppOp(t, ops); got != (protocol.UserInput{Text: want}) {
-			t.Errorf("engine operation %d = %#v, want UserInput %q", i, got, want)
-		}
+	for _, want := range []string{"first prompt", "second prompt"} {
+		assertUserInputText(t, receiveAppOp(t, ops), want)
 	}
 
 	// Await persistence in the opposite order from submission. Acceptance order
@@ -1070,9 +1061,7 @@ func TestHistoryFailureShowsNoticeWithoutSuppressingSubmission(t *testing.T) {
 	for _, msg := range runAllAppCmds(t, cmd) {
 		m = updateApp(t, m, msg)
 	}
-	if got := receiveAppOp(t, ops); got != (protocol.UserInput{Text: "send despite persistence failure"}) {
-		t.Errorf("operation = %#v, want submission despite history failure", got)
-	}
+	assertUserInputText(t, receiveAppOp(t, ops), "send despite persistence failure")
 	if !m.noticeErr || !strings.Contains(m.notice, "saving prompt history failed") {
 		t.Errorf("history failure notice = %q (error=%v)", m.notice, m.noticeErr)
 	}
@@ -1092,9 +1081,7 @@ func TestSubmittingRecalledHistoryResetsBrowsingState(t *testing.T) {
 	for _, msg := range runAllAppCmds(t, cmd) {
 		m = updateApp(t, m, msg)
 	}
-	if got := receiveAppOp(t, ops); got != (protocol.UserInput{Text: "recalled prompt"}) {
-		t.Errorf("operation = %#v, want recalled prompt submission", got)
-	}
+	assertUserInputText(t, receiveAppOp(t, ops), "recalled prompt")
 	if m.historyPos != -1 || m.historyDraft != "" || m.composer.Value() != "" {
 		t.Errorf("recalled submission retained browsing state: pos=%d draft=%q value=%q", m.historyPos, m.historyDraft, m.composer.Value())
 	}
@@ -1289,9 +1276,7 @@ func TestPaletteSkillInsertionUsesOneCommandArgumentSeparatorAcrossThemes(t *tes
 					for _, msg := range runAllAppCmds(t, cmd) {
 						m = updateApp(t, m, msg)
 					}
-					if got := receiveAppOp(t, ops); got != (protocol.UserInput{Text: "executed main.go"}) {
-						t.Errorf("operation = %#v, want rendered skill input", got)
-					}
+					assertUserInputText(t, receiveAppOp(t, ops), "executed main.go")
 					if got := store.Entries(); !slices.Equal(got, []string{"/" + skillName + " main.go"}) {
 						t.Errorf("history = %q, want inserted command", got)
 					}
@@ -1560,6 +1545,20 @@ func assertNoAppOp(t *testing.T, ops <-chan protocol.Op) {
 	}
 }
 
+// assertUserInputText checks a received op is UserInput with the given text
+// (Images are ignored so text-only cases stay comparable after multimodal).
+func assertUserInputText(t *testing.T, got protocol.Op, wantText string) protocol.UserInput {
+	t.Helper()
+	in, ok := got.(protocol.UserInput)
+	if !ok {
+		t.Fatalf("op = %T %#v, want UserInput", got, got)
+	}
+	if in.Text != wantText {
+		t.Fatalf("UserInput.Text = %q, want %q", in.Text, wantText)
+	}
+	return in
+}
+
 func TestHeaderAgentBadgeGuardsDisplaySafety(t *testing.T) {
 	// Agents are not host-filtered; every render site must gate the name.
 	m, _ := newAppTestModel([]string{"build"}, nil)
@@ -1612,7 +1611,7 @@ func TestFocusAndPaletteClearCompletionBeforeChangingInputOwner(t *testing.T) {
 				t.Errorf("focus = %v, want right", m.focus)
 			}
 		}},
-		{"cycle next", tea.KeyMsg{Type: tea.KeyCtrlJ}, func(t *testing.T, m Model) {
+		{"cycle next", keyMsgAltJ(), func(t *testing.T, m Model) {
 			if m.windows.index != 1 {
 				t.Errorf("window index = %d, want 1", m.windows.index)
 			}
@@ -1634,10 +1633,7 @@ func TestFocusAndPaletteClearCompletionBeforeChangingInputOwner(t *testing.T) {
 				statefulTestWindow{windowID: "a", windowTitle: "A"},
 				statefulTestWindow{windowID: "b", windowTitle: "B"},
 			}}
-			// ctrl+j cycles only when right-focused; left treats it as newline (#187).
-			if tt.name == "cycle next" {
-				m.focus = focusRight
-			}
+			// Enhanced ctrl+j (alt+j) cycles from left focus (#240).
 			m.completion = leadingSlashCompletion("/", 0, 1, m.commands)
 			m = updateApp(t, m, tt.key)
 			if m.completion != nil {
@@ -1653,8 +1649,8 @@ func TestCycleWindowKeysClearOpenCompletionAndCycleOnce(t *testing.T) {
 		name string
 		key  tea.KeyMsg
 	}{
-		// Right-focus ctrl+j cycles; left-focus ctrl+j is newline (#187).
-		{name: "ctrl+j", key: tea.KeyMsg{Type: tea.KeyCtrlJ}},
+		// Enhanced ctrl+j (alt+j) cycles from either focus (#240).
+		{name: "ctrl+j", key: keyMsgAltJ()},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			m, ops := newAppTestModel(nil, nil)
@@ -1721,7 +1717,7 @@ func TestCompletionEscapeDismissesBeforeInterruptAndFocusChange(t *testing.T) {
 
 func TestModalOwnsGlobalKeysExceptQuit(t *testing.T) {
 	for _, msg := range []tea.KeyMsg{
-		{Type: tea.KeyCtrlJ}, {Type: tea.KeyCtrlL}, {Type: tea.KeyCtrlH}, {Type: tea.KeyCtrlK}, {Type: tea.KeyCtrlP}, {Type: tea.KeyF1},
+		keyMsgAltJ(), {Type: tea.KeyCtrlL}, {Type: tea.KeyCtrlH}, {Type: tea.KeyCtrlK}, {Type: tea.KeyCtrlP}, {Type: tea.KeyF1},
 	} {
 		t.Run(msg.String(), func(t *testing.T) {
 			m, ops := newAppTestModel(nil, nil)
@@ -1768,7 +1764,7 @@ func TestRightPaneOwnsOrdinaryKeysAndGlobalKeysRemainGlobal(t *testing.T) {
 	}
 	assertNoAppOp(t, ops)
 
-	for _, msg := range []tea.KeyMsg{{Type: tea.KeyCtrlJ}, {Type: tea.KeyCtrlK}} {
+	for _, msg := range []tea.KeyMsg{keyMsgAltJ(), {Type: tea.KeyCtrlK}} {
 		before := totalWindowUpdates(t, m.windows)
 		index := m.windows.index
 		m = updateApp(t, m, msg)

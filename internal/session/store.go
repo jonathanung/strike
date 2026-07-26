@@ -129,7 +129,8 @@ func Replay(path string) ([]protocol.Event, error) {
 	defer f.Close()
 	var events []protocol.Event
 	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4<<20)
+	// Multimodal user.message lines can carry multi-MiB base64 images.
+	scanner.Buffer(make([]byte, 0, 64*1024), 32<<20)
 	line := 0
 	for scanner.Scan() {
 		line++

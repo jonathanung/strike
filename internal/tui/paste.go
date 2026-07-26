@@ -115,9 +115,14 @@ func (m *Model) nextPastePlaceholder(lines int) string {
 	}
 }
 
-// handleComposerPaste inserts a bracketed paste. Large pastes become a chip;
-// small pastes insert verbatim.
+// handleComposerPaste inserts a bracketed paste. Images become an [image N]
+// chip; large text pastes become a line chip; small pastes insert verbatim.
 func (m *Model) handleComposerPaste(raw string) {
+	if m.tryAttachImagePaste(raw) {
+		m.pendingPastes = prunePendingPastes(m.composer.Value(), m.pendingPastes)
+		m.pendingImages = prunePendingImages(m.composer.Value(), m.pendingImages)
+		return
+	}
 	text := normalizePaste(raw)
 	if text == "" {
 		return
@@ -126,6 +131,7 @@ func (m *Model) handleComposerPaste(raw string) {
 	if !isLargePaste(text) {
 		m.composer.InsertString(text)
 		m.pendingPastes = prunePendingPastes(m.composer.Value(), m.pendingPastes)
+		m.pendingImages = prunePendingImages(m.composer.Value(), m.pendingImages)
 		return
 	}
 	lines := pasteLineCount(text)

@@ -39,6 +39,7 @@ const (
 	commandCost            commandID = "cost"
 	commandUpgrade         commandID = "upgrade"
 	commandInit            commandID = "init"
+	commandMCP             commandID = "mcp"
 )
 
 type commandSource string
@@ -85,6 +86,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandCost, Name: "/cost", Description: "session token and cost totals", Source: commandSourceBuiltin},
 	{ID: commandUpgrade, Name: "/upgrade", Description: "install the latest release and restart", Source: commandSourceBuiltin},
 	{ID: commandInit, Name: "/init", Description: "create or update project AGENTS.md", Source: commandSourceBuiltin},
+	{ID: commandMCP, Name: "/mcp", Description: "list MCP servers and tool status", Source: commandSourceBuiltin},
 }
 
 // commandCatalog builds the slash-command catalog from the builtins and the
@@ -164,6 +166,7 @@ var reservedCommandNames = map[string]struct{}{
 	"cost":             {},
 	"upgrade":          {},
 	"init":             {},
+	"mcp":              {},
 }
 
 // validSkillName reports whether a skill name is safe to render and select as a

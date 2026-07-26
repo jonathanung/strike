@@ -74,6 +74,7 @@ var reservedSkillNames = map[string]struct{}{
 	"cost":             {},
 	"upgrade":          {},
 	"init":             {},
+	"mcp":              {},
 }
 
 // ValidateSkillName rejects names that cannot be represented safely as slash commands.

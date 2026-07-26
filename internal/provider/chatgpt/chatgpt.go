@@ -10,6 +10,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -95,7 +96,9 @@ type inputItem struct {
 
 type contentBlock struct {
 	Type string `json:"type"`
-	Text string `json:"text"`
+	Text string `json:"text,omitempty"`
+	// input_image (Responses API): data URI or remote URL
+	ImageURL string `json:"image_url,omitempty"`
 }
 
 type responseTool struct {
@@ -236,7 +239,7 @@ func toResponsesRequest(req provider.Request) responsesRequest {
 			out.Input = append(out.Input, inputItem{
 				Type:    "message",
 				Role:    "user",
-				Content: []contentBlock{{Type: "input_text", Text: m.Text}},
+				Content: userContentBlocks(m),
 			})
 		case provider.RoleAssistant:
 			if m.Text != "" {
@@ -263,6 +266,25 @@ func toResponsesRequest(req provider.Request) responsesRequest {
 		}
 	}
 	return out
+}
+
+func userContentBlocks(m provider.Message) []contentBlock {
+	blocks := make([]contentBlock, 0, 1+len(m.Images))
+	if m.Text != "" || len(m.Images) == 0 {
+		blocks = append(blocks, contentBlock{Type: "input_text", Text: m.Text})
+	}
+	for _, img := range m.Images {
+		if len(img.Data) == 0 {
+			continue
+		}
+		mime := img.MIME
+		if mime == "" {
+			mime = "image/png"
+		}
+		url := "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(img.Data)
+		blocks = append(blocks, contentBlock{Type: "input_image", ImageURL: url})
+	}
+	return blocks
 }
 
 func newUUID() string {

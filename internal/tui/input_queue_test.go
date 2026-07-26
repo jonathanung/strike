@@ -43,23 +43,17 @@ func TestInputQueueDrainsFIFOOnTurnCompleted(t *testing.T) {
 	if len(m.inputQueue) != 2 {
 		t.Fatalf("after first drain queue len = %d, want 2", len(m.inputQueue))
 	}
-	if got := receiveAppOp(t, ops); got != (protocol.UserInput{Text: "first queued"}) {
-		t.Fatalf("drained op = %#v, want first queued", got)
-	}
+	assertUserInputText(t, receiveAppOp(t, ops), "first queued")
 
 	m.turnRunning = true
 	_ = m.applyEvent(protocol.TurnStarted{})
 	m = runEvent(t, m, protocol.TurnCompleted{StopReason: "end_turn"})
-	if got := receiveAppOp(t, ops); got != (protocol.UserInput{Text: "second queued"}) {
-		t.Fatalf("second drain = %#v", got)
-	}
+	assertUserInputText(t, receiveAppOp(t, ops), "second queued")
 
 	m.turnRunning = true
 	_ = m.applyEvent(protocol.TurnStarted{})
 	m = runEvent(t, m, protocol.TurnCompleted{StopReason: "end_turn"})
-	if got := receiveAppOp(t, ops); got != (protocol.UserInput{Text: "third queued"}) {
-		t.Fatalf("third drain = %#v", got)
-	}
+	assertUserInputText(t, receiveAppOp(t, ops), "third queued")
 	if len(m.inputQueue) != 0 {
 		t.Fatalf("queue not empty after full drain: %#v", m.inputQueue)
 	}
@@ -94,9 +88,7 @@ func TestInputQueueSurvivesInterruptThenDrains(t *testing.T) {
 	}
 
 	m = runEvent(t, m, protocol.TurnCompleted{StopReason: "interrupted"})
-	if got := receiveAppOp(t, ops); got != (protocol.UserInput{Text: "after interrupt"}) {
-		t.Fatalf("post-interrupt drain = %#v", got)
-	}
+	assertUserInputText(t, receiveAppOp(t, ops), "after interrupt")
 }
 
 func TestInputQueuePopLastToComposerAndClearWhenIdle(t *testing.T) {

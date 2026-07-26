@@ -8,6 +8,7 @@ package openaicompat
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -73,13 +74,25 @@ type chatRequest struct {
 }
 
 type chatMessage struct {
+	// Content is a string for plain turns, or []chatContentPart when images
+	// are attached (OpenAI multimodal chat-completions shape).
 	Role    string `json:"role"`
-	Content string `json:"content"`
+	Content any    `json:"content,omitempty"`
 	// ReasoningContent is optional CoT some OpenAI-compatible hosts return
 	// alongside the final answer (not standard chat-completions).
 	ReasoningContent string         `json:"reasoning_content,omitempty"`
 	ToolCalls        []chatToolCall `json:"tool_calls,omitempty"`
 	ToolCallID       string         `json:"tool_call_id,omitempty"`
+}
+
+type chatContentPart struct {
+	Type     string        `json:"type"`
+	Text     string        `json:"text,omitempty"`
+	ImageURL *chatImageURL `json:"image_url,omitempty"`
+}
+
+type chatImageURL struct {
+	URL string `json:"url"`
 }
 
 type chatToolCall struct {
@@ -134,8 +147,8 @@ func (p *Provider) Stream(ctx context.Context, req provider.Request) (<-chan pro
 		if choice.Message.ReasoningContent != "" {
 			ch <- provider.StreamEvent{Type: provider.EventReasoning, Text: choice.Message.ReasoningContent}
 		}
-		if choice.Message.Content != "" {
-			ch <- provider.StreamEvent{Type: provider.EventTextDelta, Text: choice.Message.Content}
+		if text := chatContentText(choice.Message.Content); text != "" {
+			ch <- provider.StreamEvent{Type: provider.EventTextDelta, Text: text}
 		}
 		for _, call := range choice.Message.ToolCalls {
 			args := json.RawMessage(call.Function.Arguments)
@@ -181,7 +194,7 @@ func toChatRequest(req provider.Request, priorityTier bool) chatRequest {
 	for _, m := range req.Messages {
 		switch m.Role {
 		case provider.RoleUser:
-			out.Messages = append(out.Messages, chatMessage{Role: "user", Content: m.Text})
+			out.Messages = append(out.Messages, chatMessage{Role: "user", Content: userContent(m)})
 		case provider.RoleAssistant:
 			msg := chatMessage{Role: "assistant", Content: m.Text}
 			for _, call := range m.ToolCalls {
@@ -204,4 +217,64 @@ func toChatRequest(req provider.Request, priorityTier bool) chatRequest {
 		}
 	}
 	return out
+}
+
+// userContent is plain text when there are no images; otherwise a multimodal
+// parts array (text + image_url data URIs).
+func userContent(m provider.Message) any {
+	if len(m.Images) == 0 {
+		return m.Text
+	}
+	parts := make([]chatContentPart, 0, 1+len(m.Images))
+	if m.Text != "" {
+		parts = append(parts, chatContentPart{Type: "text", Text: m.Text})
+	}
+	for _, img := range m.Images {
+		if len(img.Data) == 0 {
+			continue
+		}
+		mime := img.MIME
+		if mime == "" {
+			mime = "image/png"
+		}
+		url := "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(img.Data)
+		parts = append(parts, chatContentPart{
+			Type:     "image_url",
+			ImageURL: &chatImageURL{URL: url},
+		})
+	}
+	if len(parts) == 0 {
+		return m.Text
+	}
+	return parts
+}
+
+// chatContentText extracts assistant prose from a string or multimodal content value.
+func chatContentText(content any) string {
+	switch v := content.(type) {
+	case string:
+		return v
+	case nil:
+		return ""
+	default:
+		raw, err := json.Marshal(v)
+		if err != nil {
+			return ""
+		}
+		var s string
+		if err := json.Unmarshal(raw, &s); err == nil {
+			return s
+		}
+		var parts []chatContentPart
+		if err := json.Unmarshal(raw, &parts); err != nil {
+			return ""
+		}
+		var b string
+		for _, p := range parts {
+			if p.Type == "text" || p.Type == "" {
+				b += p.Text
+			}
+		}
+		return b
+	}
 }

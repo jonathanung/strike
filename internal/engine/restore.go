@@ -107,7 +107,11 @@ func Restore(events []protocol.Event) Restored {
 		switch e := ev.(type) {
 		case protocol.UserMessage:
 			flush()
-			msgs = append(msgs, provider.Message{Role: provider.RoleUser, Text: e.Text})
+			msgs = append(msgs, provider.Message{
+				Role:   provider.RoleUser,
+				Text:   e.Text,
+				Images: protocolImagesToProvider(e.Images),
+			})
 		case protocol.TextDelta:
 			ensure(e.ProviderRequestID)
 			cur.text += e.Text

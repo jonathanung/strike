@@ -511,3 +511,35 @@ func TestStreamOmitsUsageWhenVendorOmits(t *testing.T) {
 		t.Fatal("missing EventDone")
 	}
 }
+
+func TestToChatRequestIncludesImageParts(t *testing.T) {
+	png := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a}
+	req := provider.Request{
+		Model: "gpt-4o",
+		Messages: []provider.Message{{
+			Role:   provider.RoleUser,
+			Text:   "describe",
+			Images: []provider.Image{{MIME: "image/png", Data: png}},
+		}},
+	}
+	out := toChatRequest(req, false)
+	if len(out.Messages) != 1 {
+		t.Fatalf("messages = %d", len(out.Messages))
+	}
+	parts, ok := out.Messages[0].Content.([]chatContentPart)
+	if !ok {
+		t.Fatalf("content type %T, want []chatContentPart", out.Messages[0].Content)
+	}
+	if len(parts) != 2 {
+		t.Fatalf("parts = %d, want 2", len(parts))
+	}
+	if parts[0].Type != "text" || parts[0].Text != "describe" {
+		t.Errorf("text part = %+v", parts[0])
+	}
+	if parts[1].Type != "image_url" || parts[1].ImageURL == nil {
+		t.Fatalf("image part = %+v", parts[1])
+	}
+	if !strings.HasPrefix(parts[1].ImageURL.URL, "data:image/png;base64,") {
+		t.Errorf("image url = %q", parts[1].ImageURL.URL)
+	}
+}
