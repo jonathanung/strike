@@ -3,7 +3,6 @@ package tui
 import (
 	"errors"
 	"strings"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -15,47 +14,45 @@ import (
 
 const providerModalVisible = 8
 
-// logoutConfirmWindow is how long the first "\" arms a logout confirmation.
-const logoutConfirmWindow = 3 * time.Second
-
 var (
 	errBuiltinLogout = errors.New("builtin providers have no credentials to clear")
 	errNoAuth        = errors.New("authentication is unavailable")
 )
 
-// providerLogoutMsg reports the outcome of "\\ \\" logout from the provider modal.
+// providerLogoutMsg reports the outcome of a confirmed logout from the provider modal.
 type providerLogoutMsg struct {
 	provider string
 	err      error
 }
 
+type providerModalPhase int
+
+const (
+	providerPhaseBrowse providerModalPhase = iota
+	providerPhaseConfirmLogout
+)
+
 // providerModal is the centered picker opened by bare /provider: every
 // provider with its credential state, sourced from host.Auth.Statuses(),
 // plus a fixed trailing "Add custom provider…" action that is never filtered
-// away. Type to filter; "\\" twice within 3s logs out the highlighted
+// away. Type to filter; ctrl+x opens a logout confirmation for the highlighted
 // provider. Selecting an authenticated provider switches to it; selecting an
 // unauthenticated one starts its login (multi-method providers open the
 // method chooser) and switches once it succeeds.
 type providerModal struct {
-	statuses      []host.ProviderStatus
-	filter        string
-	cursor        int
-	current       string
-	auth          host.Auth
-	settings      host.Settings
-	services      host.Services
-	ops           chan<- protocol.Op
-	th            theme.Theme
-	logoutArmedAt time.Time
-	// now is time.Now in production; tests may override for the logout arm window.
-	now func() time.Time
-}
-
-func (m *providerModal) clock() time.Time {
-	if m.now != nil {
-		return m.now()
-	}
-	return time.Now()
+	statuses     []host.ProviderStatus
+	filter       string
+	cursor       int
+	current      string
+	auth         host.Auth
+	settings     host.Settings
+	services     host.Services
+	ops          chan<- protocol.Op
+	th           theme.Theme
+	phase        providerModalPhase
+	logoutName   string
+	logoutDetail string // credential state shown on confirm (never a secret)
+	logoutMulti  bool   // true when logout clears more than one stored method
 }
 
 // filtered returns statuses matching the type-to-filter query (case-insensitive
@@ -123,11 +120,17 @@ func newProviderModal(services host.Services, current string, ops chan<- protoco
 	return m
 }
 
-func (m *providerModal) clearLogoutArm() {
-	m.logoutArmedAt = time.Time{}
+func (m *providerModal) clearLogoutConfirm() {
+	m.phase = providerPhaseBrowse
+	m.logoutName = ""
+	m.logoutDetail = ""
+	m.logoutMulti = false
 }
 
 func (m *providerModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
+	if m.phase == providerPhaseConfirmLogout {
+		return m.updateConfirmLogout(msg)
+	}
 	list := m.filtered()
 	n := len(list) + 1
 	if isEscape(msg) || msg.String() == "q" {
@@ -135,19 +138,16 @@ func (m *providerModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 	}
 	switch msg.String() {
 	case "up", "ctrl+p":
-		m.clearLogoutArm()
 		if m.cursor > 0 {
 			m.cursor--
 		}
 		return m, nil
 	case "down", "ctrl+n", "tab":
-		m.clearLogoutArm()
 		if m.cursor < n-1 {
 			m.cursor++
 		}
 		return m, nil
 	case "backspace":
-		m.clearLogoutArm()
 		if m.filter != "" {
 			// Rune-safe trim (provider names / filter may be non-ASCII).
 			runes := []rune(m.filter)
@@ -156,20 +156,17 @@ func (m *providerModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 		}
 		return m, nil
 	case "ctrl+d":
-		m.clearLogoutArm()
 		if m.cursor < len(list) {
 			name := list[m.cursor].Name
 			return m, saveDefaultsThroughCmd(m.settings, name, "", "", "", "provider "+name)
 		}
 		return m, nil
+	case "ctrl+x":
+		return m.beginLogoutConfirm()
 	case "enter":
-		m.clearLogoutArm()
 		return m.selectCurrent()
-	case "\\":
-		return m.handleLogoutKey()
 	default:
 		if msg.Type == tea.KeyRunes {
-			m.clearLogoutArm()
 			m.filter += string(msg.Runes)
 			m.cursor = 0
 		}
@@ -177,17 +174,22 @@ func (m *providerModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 	}
 }
 
-// handleLogoutKey implements "\\" twice within logoutConfirmWindow to deauth
-// the highlighted provider. The first press arms; the second commits.
-func (m *providerModal) handleLogoutKey() (modal, tea.Cmd) {
-	list := m.filtered()
-	now := m.clock()
-	armed := !m.logoutArmedAt.IsZero() && now.Sub(m.logoutArmedAt) <= logoutConfirmWindow
-	if !armed {
-		m.logoutArmedAt = now
+func (m *providerModal) updateConfirmLogout(msg tea.KeyMsg) (modal, tea.Cmd) {
+	if isEscape(msg) || msg.String() == "n" {
+		m.clearLogoutConfirm()
 		return m, nil
 	}
-	m.clearLogoutArm()
+	switch msg.String() {
+	case "y", "enter":
+		return m.confirmLogout()
+	default:
+		return m, nil
+	}
+}
+
+// beginLogoutConfirm arms the y/n dialog for the highlighted provider.
+func (m *providerModal) beginLogoutConfirm() (modal, tea.Cmd) {
+	list := m.filtered()
 	if m.cursor >= len(list) {
 		// Add-custom row — nothing to log out of.
 		return m, nil
@@ -203,10 +205,48 @@ func (m *providerModal) handleLogoutKey() (modal, tea.Cmd) {
 			return providerLogoutMsg{provider: s.Name, err: errNoAuth}
 		}
 	}
-	// Multi-method unauthenticated providers open the method chooser on enter;
-	// logout only applies when there is something to clear. Always call Logout
-	// so host state and env-only rows stay consistent with /auth logout.
-	name, authsvc := s.Name, m.auth
+	m.phase = providerPhaseConfirmLogout
+	m.logoutName = s.Name
+	m.logoutDetail = strings.TrimSpace(s.Detail)
+	m.logoutMulti = logoutClearsMultipleMethods(s)
+	return m, nil
+}
+
+// logoutClearsMultipleMethods is true when the store entry may hold more than
+// one login path (oauth+key style, or multi-capability providers that are
+// currently authed). Host Logout always clears the whole entry.
+func logoutClearsMultipleMethods(s host.ProviderStatus) bool {
+	d := strings.ToLower(strings.TrimSpace(s.Detail))
+	if strings.Contains(d, "+") || strings.Contains(d, "oauth+key") {
+		return true
+	}
+	methods := 0
+	if s.OAuth {
+		methods++
+	}
+	if s.Device {
+		methods++
+	}
+	if s.APIKey {
+		methods++
+	}
+	return s.Authed && methods > 1
+}
+
+func (m *providerModal) confirmLogout() (modal, tea.Cmd) {
+	name := m.logoutName
+	authsvc := m.auth
+	m.clearLogoutConfirm()
+	if name == "" {
+		return m, nil
+	}
+	if authsvc == nil {
+		return m, func() tea.Msg {
+			return providerLogoutMsg{provider: name, err: errNoAuth}
+		}
+	}
+	// Always call Logout so host state and env-only rows stay consistent with
+	// /auth logout. Notices never include secrets — only the provider name.
 	return m, func() tea.Msg {
 		err := authsvc.Logout(name)
 		return providerLogoutMsg{provider: name, err: err}
@@ -233,6 +273,9 @@ func (m *providerModal) selectCurrent() (modal, tea.Cmd) {
 }
 
 func (m *providerModal) view(width int, th theme.Theme) string {
+	if m.phase == providerPhaseConfirmLogout {
+		return m.viewConfirmLogout(width, th)
+	}
 	list := m.filtered()
 	m.clampCursor()
 	items := make([]ui.ListItem, 0, len(list)+1)
@@ -258,13 +301,39 @@ func (m *providerModal) view(width int, th theme.Theme) string {
 		Total:      len(m.statuses) + 1, // + add-custom, always listed
 		Empty:      "no matches for \"" + m.filter + "\"",
 	})
-	hints := []string{"type to filter", "↑/↓ move", "enter select or log in", `\\ \\ logout`, "ctrl+d set default", "esc close"}
-	if !m.logoutArmedAt.IsZero() && m.clock().Sub(m.logoutArmedAt) <= logoutConfirmWindow {
-		hints = []string{`\\ again to log out`, "esc close"}
-	}
+	hints := []string{"type to filter", "↑/↓ move", "enter select or log in", "ctrl+x logout", "ctrl+d set default", "esc close"}
 	return ui.Dialog(th, ui.DialogOpts{
 		Title: "Select provider",
 		Hint:  dotJoin(th, hints...),
 		Width: width,
+	}, body)
+}
+
+func (m *providerModal) viewConfirmLogout(width int, th theme.Theme) string {
+	th = th.Resolve()
+	st := th.S()
+	inner := max(1, ui.PanelInnerWidth(th, width))
+	name := m.logoutName
+	if name == "" {
+		name = "provider"
+	}
+	lines := []string{
+		st.WarningStrong.Render("Log out of " + name + "?"),
+	}
+	if m.logoutMulti {
+		lines = append(lines, st.Text.Render("Clears all stored credentials for this provider."))
+	} else {
+		lines = append(lines, st.Text.Render("Clears stored credentials for this provider."))
+	}
+	if d := m.logoutDetail; d != "" && d != "none" {
+		// Detail is a credential kind label (api key, oauth, env var name) — never a secret.
+		lines = append(lines, st.Muted.Render("Current: "+d))
+	}
+	body := wrapToWidth(strings.Join(lines, "\n"), inner)
+	return ui.Dialog(th, ui.DialogOpts{
+		Title: "Log out",
+		Hint:  dotJoin(th, "y/enter confirm", "n/esc cancel"),
+		Width: width,
+		Tone:  ui.ToneWarning,
 	}, body)
 }

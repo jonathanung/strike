@@ -112,7 +112,7 @@ to a single pane and cycle the same order one at a time. See [usage.md](usage.md
 | `j`/`k` | move (pickers without filter) |
 | `enter` | confirm |
 | type | filter (when available) |
-| `\` `\` | log out highlighted provider (twice within 3s; provider picker) |
+| `ctrl+x` | log out highlighted provider (confirm y/n; provider picker) |
 | `esc` | close |
 | `ctrl+d` | save highlighted default |
 
