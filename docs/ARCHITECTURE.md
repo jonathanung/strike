@@ -238,7 +238,7 @@ Two different mechanisms, depending on whether it needs Go code:
    `tea.ExecProcess`). GUI `$EDITOR` values always take over.
 - **Builtin command (code).** Add a `commandSpec` to `builtinCommandSpecs`
   in `internal/tui/commands.go`, a `case "/yourcmd":` arm in
-  `Model.handleCommand` (`internal/tui/app.go`), and — if it's a primary
+  `Model.handleCommand` (`internal/tui/command_dispatch.go`), and — if it's a primary
   action — a hint in `hintsView` (`internal/tui/view.go`).
 
 ## TUI source map (selected)
@@ -250,6 +250,7 @@ Same package `internal/tui`; split for reviewability only (no subpackages).
 | `app.go` | `Model`, `New`/`Init`/`Update`/`View`, composer, layout glue |
 | `apply_event.go` | protocol event → transcript cells / child activity / notices |
 | `commands.go` | slash command specs + completion metadata |
+| `command_dispatch.go` | `handleCommand` and slash handler implementations |
 | `cells.go` | transcript cell types and rendering helpers |
 | `keymap.go` / `keys.go` | keybind table and binding ids |
 | `session_nav.go` | session list / child transcript projection |
