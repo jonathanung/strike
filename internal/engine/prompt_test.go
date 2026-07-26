@@ -223,6 +223,267 @@ func TestSystemPromptComposesEnvironmentAndInstructions(t *testing.T) {
 	}
 }
 
+func TestAgentSwitchReplacesPersonaLayer(t *testing.T) {
+	prov := newScriptedProvider(
+		streamStep{
+			events: []provider.StreamEvent{
+				{Type: provider.EventTextDelta, Text: "one"},
+				{Type: provider.EventDone, StopReason: "end_turn"},
+			},
+		},
+		streamStep{
+			events: []provider.StreamEvent{
+				{Type: provider.EventTextDelta, Text: "two"},
+				{Type: provider.EventDone, StopReason: "end_turn"},
+			},
+		},
+	)
+	eng := engine.New(engine.Options{
+		SessionID: "s-persona-switch",
+		WorkDir:   t.TempDir(),
+		Agents: []engine.Agent{
+			{Name: "build"},
+			{Name: "reviewer", Prompt: "PERSONA_REVIEWER_ONLY"},
+			{Name: "tester", Prompt: "PERSONA_TESTER_ONLY"},
+		},
+		InitialAgent:    "reviewer",
+		InitialProvider: "echo",
+		InitialModel:    "echo",
+		Registry:        tool.NewRegistry(),
+		Select: func(string) (provider.Provider, string, error) {
+			return prov, "echo", nil
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "first"}
+	req1 := waitStreamRequest(t, eng, prov)
+	if !strings.Contains(req1.System, "PERSONA_REVIEWER_ONLY") {
+		t.Fatalf("first stream missing reviewer persona:\n%s", req1.System)
+	}
+	if strings.Contains(req1.System, "PERSONA_TESTER_ONLY") {
+		t.Fatal("tester persona leaked into reviewer stream")
+	}
+	waitTurnCompleted(t, eng)
+
+	eng.Ops() <- protocol.SelectAgent{Name: "tester"}
+	waitAgentSelected(t, eng, "tester")
+
+	eng.Ops() <- protocol.UserInput{Text: "second"}
+	req2 := waitStreamRequest(t, eng, prov)
+	if !strings.Contains(req2.System, "PERSONA_TESTER_ONLY") {
+		t.Fatalf("second stream missing tester persona:\n%s", req2.System)
+	}
+	if strings.Contains(req2.System, "PERSONA_REVIEWER_ONLY") {
+		t.Fatal("prior reviewer persona duplicated after agent switch")
+	}
+	if strings.Contains(req2.System, "Provider notes") {
+		t.Fatal("provider overlay should yield to persona")
+	}
+}
+
+func TestInspectEffectivePromptMatchesStream(t *testing.T) {
+	prov := newScriptedProvider(streamStep{
+		events: []provider.StreamEvent{
+			{Type: provider.EventTextDelta, Text: "ok"},
+			{Type: provider.EventDone, StopReason: "end_turn"},
+		},
+	})
+	secret := "sk-ant-api03-SUPERSECRETKEYVALUE99"
+	eng := engine.New(engine.Options{
+		SessionID: "s-inspect",
+		WorkDir:   t.TempDir(),
+		Agents: []engine.Agent{
+			{Name: "build"},
+			{Name: "reviewer", Prompt: "PERSONA_WITH_KEY " + secret},
+		},
+		InitialAgent:    "reviewer",
+		InitialProvider: "anthropic",
+		InitialModel:    "claude-sonnet-5",
+		Instructions:    []string{"Instructions from: /tmp/AGENTS.md\nUse make test. key=" + secret},
+		Registry:        tool.NewRegistry(),
+		Select: func(string) (provider.Provider, string, error) {
+			return prov, "claude-sonnet-5", nil
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "hi"}
+	req := waitStreamRequest(t, eng, prov)
+	waitTurnCompleted(t, eng)
+
+	eng.Ops() <- protocol.InspectEffectivePrompt{}
+	ev := waitEffectivePrompt(t, eng)
+	if !ev.FromLastStream {
+		t.Fatal("expected FromLastStream after a completed Stream")
+	}
+	if ev.SystemChars == 0 {
+		t.Fatal("SystemChars = 0")
+	}
+	if ev.MessageCount < 1 {
+		t.Fatalf("MessageCount = %d, want >= 1", ev.MessageCount)
+	}
+
+	kinds := make([]string, len(ev.Layers))
+	for i, layer := range ev.Layers {
+		kinds[i] = layer.Kind
+		if layer.Source == "" || layer.Mode == "" {
+			t.Fatalf("layer %d missing source/mode: %+v", i, layer)
+		}
+		if strings.Contains(layer.Source, secret) || strings.Contains(layer.Preview, secret) {
+			t.Fatalf("secret leaked in layer %d: %+v", i, layer)
+		}
+		if strings.Contains(layer.Preview, "sk-ant-") {
+			t.Fatalf("api key prefix leaked in preview: %q", layer.Preview)
+		}
+	}
+	wantOrder := []string{
+		protocol.PromptLayerShared,
+		protocol.PromptLayerPersona,
+		protocol.PromptLayerEnvironment,
+		protocol.PromptLayerInstruction,
+	}
+	if len(kinds) < len(wantOrder) {
+		t.Fatalf("kinds = %v, want prefix %v", kinds, wantOrder)
+	}
+	for i, want := range wantOrder {
+		if kinds[i] != want {
+			t.Fatalf("kinds[%d] = %q, want %q (full %v)", i, kinds[i], want, kinds)
+		}
+	}
+	if kinds[1] != protocol.PromptLayerPersona {
+		t.Fatal("persona layer missing")
+	}
+	// Inspect sizes must describe the same system string Stream received.
+	if got := len([]rune(strings.TrimSpace(req.System))); got != ev.SystemChars {
+		t.Fatalf("SystemChars = %d, stream system runes = %d", ev.SystemChars, got)
+	}
+	if !strings.Contains(req.System, "PERSONA_WITH_KEY") {
+		t.Fatal("stream system missing persona marker")
+	}
+	if !strings.Contains(req.System, secret) {
+		// Stream may still carry secrets (real request); inspect must not.
+		t.Fatal("stream system should still contain the raw persona key for this fixture")
+	}
+}
+
+func TestInspectEffectivePromptBeforeStreamUsesCurrent(t *testing.T) {
+	eng := engine.New(engine.Options{
+		SessionID: "s-inspect-current",
+		WorkDir:   t.TempDir(),
+		Agents:    []engine.Agent{{Name: "build", Prompt: "BUILD_PERSONA"}},
+		Registry:  tool.NewRegistry(),
+		Select: func(string) (provider.Provider, string, error) {
+			return newScriptedProvider(), "m", nil
+		},
+		InitialProvider: "echo",
+		InitialModel:    "echo",
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	// Drain startup selection events.
+	deadline := time.After(2 * time.Second)
+drain:
+	for {
+		select {
+		case ev := <-eng.Events():
+			if _, ok := ev.(protocol.EngineError); ok {
+				t.Fatalf("engine error: %#v", ev)
+			}
+		case <-time.After(50 * time.Millisecond):
+			break drain
+		case <-deadline:
+			break drain
+		}
+	}
+
+	eng.Ops() <- protocol.InspectEffectivePrompt{}
+	ev := waitEffectivePrompt(t, eng)
+	if ev.FromLastStream {
+		t.Fatal("expected current composition before any Stream")
+	}
+	foundPersona := false
+	for _, layer := range ev.Layers {
+		if layer.Kind == protocol.PromptLayerPersona && strings.Contains(layer.Source, "build") {
+			foundPersona = true
+		}
+	}
+	if !foundPersona {
+		t.Fatalf("persona layer missing: %+v", ev.Layers)
+	}
+}
+
+func TestPhaseContextDoesNotEnterHistory(t *testing.T) {
+	prov := newScriptedProvider(streamStep{
+		events: []provider.StreamEvent{
+			{Type: provider.EventTextDelta, Text: "ok"},
+			{Type: provider.EventDone, StopReason: "end_turn"},
+		},
+	})
+	eng := engine.New(engine.Options{
+		SessionID: "s-phase-hist",
+		WorkDir:   t.TempDir(),
+		Agents: []engine.Agent{
+			{Name: "build"},
+			{Name: "plan"},
+		},
+		InitialAgent:    "plan",
+		InitialProvider: "echo",
+		InitialModel:    "echo",
+		Registry:        tool.NewRegistry(),
+		Select: func(string) (provider.Provider, string, error) {
+			return prov, "echo", nil
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "plan something"}
+	req := waitStreamRequest(t, eng, prov)
+	waitTurnCompleted(t, eng)
+
+	if !strings.Contains(req.System, "Plan mode (read-only)") {
+		t.Fatalf("plan overlay missing from system:\n%s", req.System)
+	}
+	for _, msg := range eng.Messages() {
+		blob := msg.Text
+		if msg.ToolResult != nil {
+			blob += msg.ToolResult.Output
+		}
+		if strings.Contains(blob, "Plan mode (read-only)") {
+			t.Fatalf("phase/plan overlay leaked into history role=%s: %q", msg.Role, blob)
+		}
+	}
+}
+
+func TestRedactSecrets(t *testing.T) {
+	cases := []struct {
+		in, banned string
+	}{
+		{"key sk-ant-api03-ABCDEFGHIJKLMNOP secret", "sk-ant-api03-ABCDEFGHIJKLMNOP"},
+		{"Authorization: Bearer tok_abc1234567890", "tok_abc1234567890"},
+		{"OPENAI_API_KEY=sk-proj-hello-world-99", "sk-proj-hello-world-99"},
+		{"api_key: super-secret-value-here", "super-secret-value-here"},
+		{"ghp_abcdefghijklmnopqrstuvwx", "ghp_abcdefghijklmnopqrstuvwx"},
+	}
+	for _, tt := range cases {
+		got := engine.RedactSecrets(tt.in)
+		if strings.Contains(got, tt.banned) {
+			t.Errorf("RedactSecrets(%q) still contains %q → %q", tt.in, tt.banned, got)
+		}
+		if !strings.Contains(got, "[REDACTED]") {
+			t.Errorf("RedactSecrets(%q) = %q, want [REDACTED]", tt.in, got)
+		}
+	}
+}
+
 // captureSystemPrompt starts an engine, selects provider/model, sends one
 // user turn, and returns the System string from the first Stream request.
 func captureSystemPrompt(t *testing.T, opts engine.Options, providerName, model string) string {
@@ -249,7 +510,11 @@ func captureSystemPrompt(t *testing.T, opts engine.Options, providerName, model 
 	go eng.Run(ctx)
 
 	eng.Ops() <- protocol.UserInput{Text: "hi"}
+	return waitStreamRequest(t, eng, prov).System
+}
 
+func waitStreamRequest(t *testing.T, eng *engine.Engine, prov *scriptedProvider) provider.Request {
+	t.Helper()
 	var req provider.Request
 	deadline := time.After(5 * time.Second)
 	for req.System == "" {
@@ -263,5 +528,59 @@ func captureSystemPrompt(t *testing.T, opts engine.Options, providerName, model 
 			t.Fatal("timeout waiting for Stream request")
 		}
 	}
-	return req.System
+	return req
+}
+
+func waitTurnCompleted(t *testing.T, eng *engine.Engine) {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case ev := <-eng.Events():
+			if _, ok := ev.(protocol.TurnCompleted); ok {
+				return
+			}
+			if err, ok := ev.(protocol.EngineError); ok {
+				t.Fatalf("engine error: %s", err.Message)
+			}
+		case <-deadline:
+			t.Fatal("timeout waiting for TurnCompleted")
+		}
+	}
+}
+
+func waitAgentSelected(t *testing.T, eng *engine.Engine, name string) {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case ev := <-eng.Events():
+			if a, ok := ev.(protocol.AgentSelected); ok && a.Name == name {
+				return
+			}
+			if err, ok := ev.(protocol.EngineError); ok {
+				t.Fatalf("engine error: %s", err.Message)
+			}
+		case <-deadline:
+			t.Fatalf("timeout waiting for AgentSelected %q", name)
+		}
+	}
+}
+
+func waitEffectivePrompt(t *testing.T, eng *engine.Engine) protocol.EffectivePrompt {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case ev := <-eng.Events():
+			if p, ok := ev.(protocol.EffectivePrompt); ok {
+				return p
+			}
+			if err, ok := ev.(protocol.EngineError); ok {
+				t.Fatalf("engine error: %s", err.Message)
+			}
+		case <-deadline:
+			t.Fatal("timeout waiting for EffectivePrompt")
+		}
+	}
 }

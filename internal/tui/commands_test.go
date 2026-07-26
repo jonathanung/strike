@@ -22,29 +22,31 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		argsHint    string
 		source      commandSource
 	}{
-		"/provider": {"select a provider and model", "[name [model]]", commandSourceBuiltin},
-		"/model":    {"select a model for the current provider", "[model]", commandSourceBuiltin},
-		"/settings": {"manage custom providers and settings", "", commandSourceBuiltin},
-		"/effort":   {"set how much reasoning the model spends", "[level]", commandSourceBuiltin},
-		"/autonomy": {"set exit-gate policy (supervised/agent/checks)", "[mode]", commandSourceBuiltin},
-		"/auth":     {"manage provider authentication", "[provider]", commandSourceBuiltin},
-		"/agent":    {"select an agent", "[name]", commandSourceBuiltin},
-		"/fast":     {"toggle OpenAI priority tier (faster, ~2× cost)", "[on|off]", commandSourceBuiltin},
-		"/vim":      {"open a file in the embedded editor (pane/overlay) or $EDITOR", "[path[:line]]", commandSourceBuiltin},
-		"/md-read":  {"open a markdown file in the right pane", "<path>", commandSourceBuiltin},
-		"/theme":    {"select a color theme or set appearance", "[name|dark|light|auto]", commandSourceBuiltin},
-		"/layout":   {"toggle horizontal/vertical pane split", "", commandSourceBuiltin},
-		"/split":    {"toggle horizontal/vertical pane split", "", commandSourceBuiltin},
-		"/compact":  {"compact model history (keep recent turns)", "", commandSourceBuiltin},
-		"/fork":     {"duplicate the conversation into a new id", "", commandSourceBuiltin},
-		"/undo":     {"drop the last completed user/assistant turn", "", commandSourceBuiltin},
-		"/session":  {"browse and resume a past session", "[id]", commandSourceBuiltin},
-		"/help":     {"show available commands", "", commandSourceBuiltin},
-		"/keys":     {"show keyboard shortcuts", "", commandSourceBuiltin},
-		"/memory":   {"list, get, set, or delete project memory", "[list|get|set|rm] ...", commandSourceBuiltin},
-		"/issues":   {"list, add, get, or close project issues", "[list|add|get|close] ...", commandSourceBuiltin},
-		"/review":   {"review a change", "$ARGUMENTS", commandSourceSkill},
-		"/explain":  {"explain code", "", commandSourceSkill},
+		"/provider":         {"select a provider and model", "[name [model]]", commandSourceBuiltin},
+		"/model":            {"select a model for the current provider", "[model]", commandSourceBuiltin},
+		"/settings":         {"manage custom providers and settings", "", commandSourceBuiltin},
+		"/effort":           {"set how much reasoning the model spends", "[level]", commandSourceBuiltin},
+		"/autonomy":         {"set exit-gate policy (supervised/agent/checks)", "[mode]", commandSourceBuiltin},
+		"/auth":             {"manage provider authentication", "[provider]", commandSourceBuiltin},
+		"/agent":            {"select an agent", "[name]", commandSourceBuiltin},
+		"/fast":             {"toggle OpenAI priority tier (faster, ~2× cost)", "[on|off]", commandSourceBuiltin},
+		"/vim":              {"open a file in the embedded editor (pane/overlay) or $EDITOR", "[path[:line]]", commandSourceBuiltin},
+		"/md-read":          {"open a markdown file in the right pane", "<path>", commandSourceBuiltin},
+		"/theme":            {"select a color theme or set appearance", "[name|dark|light|auto]", commandSourceBuiltin},
+		"/layout":           {"toggle horizontal/vertical pane split", "", commandSourceBuiltin},
+		"/split":            {"toggle horizontal/vertical pane split", "", commandSourceBuiltin},
+		"/compact":          {"compact model history (keep recent turns)", "", commandSourceBuiltin},
+		"/fork":             {"duplicate the conversation into a new id", "", commandSourceBuiltin},
+		"/undo":             {"drop the last completed user/assistant turn", "", commandSourceBuiltin},
+		"/session":          {"browse and resume a past session", "[id]", commandSourceBuiltin},
+		"/help":             {"show available commands", "", commandSourceBuiltin},
+		"/keys":             {"show keyboard shortcuts", "", commandSourceBuiltin},
+		"/memory":           {"list, get, set, or delete project memory", "[list|get|set|rm] ...", commandSourceBuiltin},
+		"/issues":           {"list, add, get, or close project issues", "[list|add|get|close] ...", commandSourceBuiltin},
+		"/context":          {"inspect effective system-prompt layers", "", commandSourceBuiltin},
+		"/effective-prompt": {"inspect effective system-prompt layers", "", commandSourceBuiltin},
+		"/review":           {"review a change", "$ARGUMENTS", commandSourceSkill},
+		"/explain":          {"explain code", "", commandSourceSkill},
 	}
 	counts := make(map[string]int)
 	for _, spec := range catalog {
@@ -69,7 +71,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 }
 
 func TestValidSkillNameRejectsReservedBuiltinsIncludingMDRead(t *testing.T) {
-	for _, name := range []string{"provider", "model", "effort", "autonomy", "auth", "agent", "fast", "vim", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "help", "keys", "memory", "issues"} {
+	for _, name := range []string{"provider", "model", "effort", "autonomy", "auth", "agent", "fast", "vim", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "help", "keys", "memory", "issues", "context", "effective-prompt"} {
 		if validSkillName(name) {
 			t.Errorf("validSkillName(%q) = true, want false for reserved builtin", name)
 		}

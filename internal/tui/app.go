@@ -1385,6 +1385,8 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		m.usageUsed = ev.Used
 		m.usageSource = ev.Source
 		cmd = m.broadcastContextState()
+	case protocol.EffectivePrompt:
+		m.cells = append(m.cells, &infoCell{text: formatEffectivePrompt(ev)})
 	case protocol.CompactionCompleted:
 		msg := fmt.Sprintf("history compacted (%s): removed %d, kept %d", ev.Reason, ev.Removed, ev.Kept)
 		if m.turnRunning {
@@ -1550,6 +1552,8 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 		return e.Correlation, true
 	case protocol.CompactionCompleted:
 		return e.Correlation, true
+	case protocol.EffectivePrompt:
+		return e.Correlation, true
 	case protocol.EngineError:
 		return e.Correlation, true
 	case protocol.ChildStarted:
@@ -1559,6 +1563,29 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	default:
 		return protocol.Correlation{}, false
 	}
+}
+
+// formatEffectivePrompt renders a compact layer map for the transcript.
+func formatEffectivePrompt(ev protocol.EffectivePrompt) string {
+	var b strings.Builder
+	scope := "current composition"
+	if ev.FromLastStream {
+		scope = "last request"
+	}
+	fmt.Fprintf(&b, "effective prompt (%s) - system %d chars - history %d msgs",
+		scope, ev.SystemChars, ev.MessageCount)
+	if len(ev.Layers) == 0 {
+		b.WriteString("\n  (no layers)")
+		return b.String()
+	}
+	for i, layer := range ev.Layers {
+		kind := sanitizeDisplayData(layer.Kind)
+		source := sanitizeDisplayData(layer.Source)
+		mode := sanitizeDisplayData(layer.Mode)
+		fmt.Fprintf(&b, "\n  %d. %s [%s] %s - %d chars",
+			i+1, kind, mode, source, layer.Chars)
+	}
+	return b.String()
 }
 
 // clearUsage drops prior token figures and catalog limits so a model switch
@@ -1797,6 +1824,14 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		return m.handleMemoryCommand(fields[1:])
 	case "/issues":
 		return m.handleIssuesCommand(fields[1:])
+	case "/context", "/effective-prompt":
+		m.resetComposer()
+		m.clearNotice()
+		ops := m.ops
+		return m, func() tea.Msg {
+			ops <- protocol.InspectEffectivePrompt{}
+			return nil
+		}
 	default:
 		// Unknown commands fall through to skills: /name args renders the
 		// skill template and submits it as the user message.

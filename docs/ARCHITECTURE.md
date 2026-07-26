@@ -220,7 +220,8 @@ Two different mechanisms, depending on whether it needs Go code:
    `host.Services.Skills`. Reserved names (`provider`, `model`, `effort`,
    `autonomy`, `auth`, `settings`, `agent`, `fast`, `vim`, `md-read`,
    `theme`, `layout`, `split`, `compact`, `fork`, `undo`, `rewind`,
-   `session`, `help`, `keys`, `memory`, `issues`) are rejected by
+   `session`, `help`, `keys`, `memory`, `issues`, `context`,
+   `effective-prompt`) are rejected by
    `config.ValidateSkillName` before
    they ever reach the frontend. PR URLs from successful `gh pr` bash
    output are stored via `protocol.SessionMeta` and `session` sidecar

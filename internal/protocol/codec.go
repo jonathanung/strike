@@ -80,6 +80,8 @@ func eventType(ev Event) string {
 		return "session.rewound"
 	case HookMatched:
 		return "hook.matched"
+	case EffectivePrompt:
+		return "prompt.effective"
 	default:
 		return ""
 	}
@@ -166,6 +168,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &SessionRewound{}
 	case "hook.matched":
 		ev = &HookMatched{}
+	case "prompt.effective":
+		ev = &EffectivePrompt{}
 	default:
 		return nil, fmt.Errorf("protocol: unknown envelope type %q", e.Type)
 	}
@@ -240,6 +244,8 @@ func deref(ev Event) Event {
 	case *SessionRewound:
 		return *v
 	case *HookMatched:
+		return *v
+	case *EffectivePrompt:
 		return *v
 	default:
 		return ev
