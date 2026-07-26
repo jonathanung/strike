@@ -1,11 +1,14 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
+	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
 
@@ -105,7 +108,7 @@ func TestAtFileCompletionActivation(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c := atFileCompletion(tt.value, tt.row, tt.col, paths)
+			c := atFileCompletion(tt.value, tt.row, tt.col, paths, "")
 			if (c != nil) != tt.wantOpen {
 				t.Fatalf("open = %v, want %v", c != nil, tt.wantOpen)
 			}
@@ -222,4 +225,59 @@ func TestFileMentionWorksWithMultiline(t *testing.T) {
 	if !strings.Contains(in.Text, "Z") || !strings.Contains(in.Text, "line one") {
 		t.Fatalf("multiline submit = %q", in.Text)
 	}
+}
+
+func TestAtFileCompletionEmptyStateExplains(t *testing.T) {
+	ff := &fakeFiles{files: map[string][]byte{}}
+	m, _ := newAppTestModel(nil, nil)
+	m.services.Files = ff
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	m.setComposerValueAt("@nope", len([]rune("@nope")))
+	m.recomputeCompletion()
+	if m.completion == nil || !m.completion.fileMention {
+		t.Fatalf("completion = %#v, want empty file-mention popup", m.completion)
+	}
+	if len(m.completion.Candidates) != 0 {
+		t.Fatalf("candidates = %#v, want empty", m.completion.Candidates)
+	}
+	if !strings.Contains(m.completion.emptyHint, "no files match") {
+		t.Fatalf("emptyHint = %q", m.completion.emptyHint)
+	}
+	plain := ansi.Strip(m.completion.view(80, 4, m.th))
+	if !strings.Contains(plain, "no files match") {
+		t.Fatalf("empty view = %q", plain)
+	}
+}
+
+func TestExpandFileMentionsFolder(t *testing.T) {
+	ff := &folderFiles{listing: "directory listing (immediate children only):\nmain.go\nsub/\n"}
+	expanded, notices := expandFileMentions("see @pkg/", ff)
+	if len(notices) != 0 {
+		t.Fatalf("notices = %v", notices)
+	}
+	if !strings.Contains(expanded, "--- folder: pkg/ ---") {
+		t.Fatalf("expanded missing folder fence: %q", expanded)
+	}
+	if !strings.Contains(expanded, "main.go") {
+		t.Fatalf("expanded missing listing: %q", expanded)
+	}
+}
+
+// folderFiles implements host.Files with a single directory ReadScoped.
+type folderFiles struct {
+	listing string
+}
+
+func (f *folderFiles) ReadFile(string) ([]byte, error) { return nil, fmt.Errorf("unused") }
+func (f *folderFiles) ListDir(string) ([]host.DirEntry, error) {
+	return nil, fmt.Errorf("unused")
+}
+func (f *folderFiles) SearchFiles(string, int) ([]string, error) { return nil, nil }
+func (f *folderFiles) ReadScoped(path string) (host.FileContent, error) {
+	path = strings.TrimSpace(path)
+	path = strings.ReplaceAll(path, "\\", "/")
+	if !strings.HasSuffix(path, "/") {
+		path += "/"
+	}
+	return host.FileContent{Path: path, Content: f.listing}, nil
 }

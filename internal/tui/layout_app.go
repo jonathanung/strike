@@ -47,7 +47,11 @@ func (m *Model) reflow() {
 				borderRows = 2
 			}
 			available := max(0, m.height-2-composerRows-borderRows)
-			m.completion.rows = min(completionMaxRows, min(len(m.completion.Candidates), available))
+			n := len(m.completion.Candidates)
+			if n == 0 && m.completion.emptyHint != "" {
+				n = 1 // reserve one row for the empty-state explanation
+			}
+			m.completion.rows = min(completionMaxRows, min(n, available))
 			if m.completion.rows > 0 {
 				popupHeight = m.completion.rows + borderRows
 			}

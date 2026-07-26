@@ -32,6 +32,8 @@ type completionState struct {
 	rows       int
 	// fileMention is true when candidates are @file paths.
 	fileMention bool
+	// emptyHint explains a zero-result @file popup (ignored trees, no match).
+	emptyHint string
 }
 
 func commandMatches(catalog []commandSpec, query string) []completionCandidate {
@@ -105,11 +107,9 @@ func leadingSlashCompletion(value string, cursorRow, cursorCol int, catalog []co
 }
 
 // atFileCompletion opens @path fuzzy completion when the cursor sits inside an
-// @-token that begins after whitespace or at the start of a line.
-func atFileCompletion(value string, cursorRow, cursorCol int, paths []string) *completionState {
-	if len(paths) == 0 {
-		return nil
-	}
+// @-token that begins after whitespace or at the start of a line. emptyHint is
+// shown when paths is empty (still opens the popup so the user knows why).
+func atFileCompletion(value string, cursorRow, cursorCol int, paths []string, emptyHint string) *completionState {
 	lines := strings.Split(value, "\n")
 	if cursorRow < 0 || cursorRow >= len(lines) {
 		return nil
@@ -155,7 +155,7 @@ func atFileCompletion(value string, cursorRow, cursorCol int, paths []string) *c
 	for _, p := range paths {
 		matches = append(matches, completionCandidate{Path: p})
 	}
-	if len(matches) == 0 {
+	if len(matches) == 0 && emptyHint == "" {
 		return nil
 	}
 	// Extend replace end through any remaining path runes after the cursor so
@@ -168,6 +168,7 @@ func atFileCompletion(value string, cursorRow, cursorCol int, paths []string) *c
 		Candidates:  matches,
 		Replace:     runeRange{Start: runeOffset(value, cursorRow, start), End: runeOffset(value, cursorRow, tokenEnd)},
 		fileMention: true,
+		emptyHint:   emptyHint,
 	}
 }
 
@@ -218,7 +219,10 @@ func (c *completionState) view(width, height int, th theme.Theme) string {
 	if c == nil {
 		return ""
 	}
-	if height <= 0 || len(c.Candidates) == 0 || width <= 0 {
+	if height <= 0 || width <= 0 {
+		return ""
+	}
+	if len(c.Candidates) == 0 && c.emptyHint == "" {
 		return ""
 	}
 	popupWidth := width
@@ -230,6 +234,9 @@ func (c *completionState) view(width, height int, th theme.Theme) string {
 		if candidate.Path != "" {
 			name = "@" + candidate.Path
 			detail = "file"
+			if strings.HasSuffix(candidate.Path, "/") {
+				detail = "folder"
+			}
 		} else if candidate.Spec.ArgsHint != "" {
 			name += themedSpace(th.Spacing.XS) + candidate.Spec.ArgsHint
 		}
@@ -242,11 +249,20 @@ func (c *completionState) view(width, height int, th theme.Theme) string {
 		bodyWidth = max(1, popupWidth)
 		bodyHeight = height
 	}
+	empty := c.emptyHint
+	if empty == "" {
+		empty = "no matches"
+	}
+	visible := bodyHeight
+	if len(c.Candidates) > 0 {
+		visible = min(bodyHeight, len(c.Candidates))
+	}
 	body := ui.List(th, ui.ListOpts{
 		Items:   items,
 		Cursor:  c.Selected,
 		Width:   bodyWidth,
-		Visible: min(bodyHeight, len(c.Candidates)),
+		Visible: visible,
+		Empty:   empty,
 	})
 	return ui.Panel(th, ui.PanelOpts{Width: popupWidth, Height: height, Borderless: borderless, Focused: true}, body)
 }
