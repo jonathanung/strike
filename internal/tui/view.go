@@ -90,7 +90,7 @@ func (m Model) headerView(width int) string {
 		badges += inlineGap + ui.Badge(th, ui.ToneWarning, "fast")
 	}
 	if m.showThinking {
-		left += inlineGap + ui.Badge(th, ui.ToneMuted, "think")
+		badges += inlineGap + ui.Badge(th, ui.ToneMuted, "think")
 	}
 
 	statusStyle := th.AgentStateStyle(state)
