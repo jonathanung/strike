@@ -41,20 +41,20 @@ export ANTHROPIC_API_KEY=sk-ant-…   # or: ./strike auth login anthropic
 ./strike exec "summarize this repo" # headless one-shot → stdout
 ```
 
-In the TUI: `/provider`, `/model`, `/auth`, `/theme`, `/help`, `/upgrade`. Enter
-sends; Shift+Enter newline; `esc` interrupts; `ctrl+t` jumps to latest output;
-`ctrl+c` quits. See [docs/keybinds.md](docs/keybinds.md) and
-[docs/usage.md](docs/usage.md).
+In the TUI: `/provider`, `/model`, `/auth`, `/theme`, `/session`, `/help`,
+`/upgrade`. Enter sends; Shift+Enter newline; `esc` interrupts; `ctrl+t` jumps
+to latest output; `ctrl+c` quits. `@path` attaches project files. See
+[docs/keybinds.md](docs/keybinds.md) and [docs/usage.md](docs/usage.md).
 
 ## Docs
 
 | Topic | |
 |---|---|
 | [Install & build](docs/install.md) | curl install, releases, upgrade, make targets |
-| [Usage](docs/usage.md) | slash commands, UI layout, dashboard |
-| [Keybinds](docs/keybinds.md) | keyboard reference |
+| [Usage](docs/usage.md) | slash commands, `@file`, resume/fork, panes |
+| [Keybinds](docs/keybinds.md) | keyboard reference (`f1` / `/keys` in-app) |
 | [Auth & providers](docs/auth.md) | credentials, OAuth, billing routing |
-| [Config](docs/config.md) | layered JSON, permissions, effort |
-| [Agents & skills](docs/agents-skills.md) | personas, prompt layers, skills |
+| [Config](docs/config.md) | JSON, permissions, custom providers, `vimMode` |
+| [Agents & skills](docs/agents-skills.md) | personas, skills, workflows / autonomy |
 | [Architecture](docs/ARCHITECTURE.md) | packages, seams, recipes |
-| [Contributing](docs/contributing.md) | layout, verification, conventions |
+| [Contributing](docs/contributing.md) | layout, verification, doc check |

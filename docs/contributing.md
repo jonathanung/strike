@@ -12,12 +12,15 @@ internal/provider/     provider interface; base/ (embeddable client: HTTP,
                        auth, JSON/SSE, error shaping) embedded by anthropic,
                        openaicompat (openai platform + xai), chatgpt
                        (subscription backend); echo dev adapter
-internal/tool/         tool contract, registry, read/glob/grep/edit/write/bash
+internal/tool/         tool contract + registry (read/glob/grep/edit/write/
+                       apply_patch/bash/task/webfetch/todo*/memory_*/issue_*/
+                       notebook_edit/sleep/skill/question/plan_mode/phase_done/
+                       toolsearch — full list: ARCHITECTURE.md)
 internal/permission/   rulesets + suspend/resume ask service
 internal/session/      JSONL event-log persistence
-internal/config/       layered config
+internal/config/       layered config + agents/skills/workflows
 internal/host/         frontend-facing host-service contract (stdlib-only);
-                       local/ wraps auth/config/models/history for the TUI
+                       local/ wraps auth/config/models/history/memory/issue/files
 internal/tui/          BubbleTea app: transcript cells, modals, composer
 internal/tui/theme/    design tokens: adaptive colors, icons, precomputed styles
 internal/tui/ui/       reusable components: Panel, Dialog, Badge, List, Bento, …
@@ -83,3 +86,22 @@ providers, term, wire, etc.).
 Offline smoke (no API keys): `make run-echo`.
 
 See `AGENTS.md` at the repo root for testing conventions and scope rules.
+
+## Doc check (when shipping UX)
+
+User-facing docs must match code. When you add or rename a slash command,
+keybind, right-pane window, CLI flag, or shipped skill/workflow, update the
+matching paths (and keep relative links valid):
+
+| Surface | Source of truth | Docs |
+|---|---|---|
+| Slash commands | `internal/tui/commands.go` (`builtinCommandSpecs`) | [usage.md](usage.md) |
+| Keybinds | `internal/tui/keymap.go` (`defaultKeyMap`, `keybindCatalog`) | [keybinds.md](keybinds.md) |
+| CLI flags / `exec` | `cmd/strike` + `strike --help` | [install.md](install.md), [usage.md](usage.md) |
+| Config / custom providers / `vimMode` | `internal/config` | [config.md](config.md) |
+| Agents, skills, workflows | `internal/config` builtins + loaders | [agents-skills.md](agents-skills.md) |
+| Tool inventory | `internal/tool` + `cmd/strike/wire.go` | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| Index | — | [README.md](../README.md) |
+
+No heavy doc framework — a PR that changes the surface should touch the table
+row above in the same change.
