@@ -196,6 +196,14 @@ type Memory interface {
 	Put(key, value string, tags []string) error
 	// Delete removes key. Missing keys return an error.
 	Delete(key string) error
+	// Export writes a versioned portable JSON snapshot to path.
+	// Relative paths resolve under the project work directory and must not
+	// escape it; absolute paths are allowed as intentional targets.
+	Export(path string) error
+	// Import loads a portable snapshot. When replace is true the store is
+	// cleared first; otherwise entries merge by key (imported wins). Returns
+	// the number of entries applied from the file.
+	Import(path string, replace bool) (int, error)
 }
 
 // Issue is one project-local tracked issue.
@@ -219,6 +227,14 @@ type Issues interface {
 	Update(id int, title, body, status *string) (Issue, error)
 	// Close sets status to closed.
 	Close(id int) (Issue, error)
+	// Export writes a versioned portable JSON snapshot to path.
+	// Relative paths resolve under the project work directory and must not
+	// escape it; absolute paths are allowed as intentional targets.
+	Export(path string) error
+	// Import loads a portable snapshot. When replace is true the store is
+	// cleared first; otherwise issues merge by id (imported wins). IDs are
+	// preserved. Returns the number of issues applied from the file.
+	Import(path string, replace bool) (int, error)
 }
 
 // Session is one durable agent session the frontend can list or open.

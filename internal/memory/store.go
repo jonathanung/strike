@@ -18,12 +18,14 @@ import (
 )
 
 const (
-	fileVersion = 1
-	maxKeyLen   = 256
-	maxValueLen = 64 * 1024
-	maxTagLen   = 64
-	maxTags     = 16
-	maxEntries  = 1000
+	fileVersion   = 1
+	exportFormat  = "strike.memory"
+	exportVersion = 1
+	maxKeyLen     = 256
+	maxValueLen   = 64 * 1024
+	maxTagLen     = 64
+	maxTags       = 16
+	maxEntries    = 1000
 )
 
 var (
@@ -177,6 +179,183 @@ func (s *Store) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.closed = true
+	return nil
+}
+
+// exportDoc is the portable backup format for project memory (git/handoff).
+// It is distinct from the on-disk store fileDoc.
+type exportDoc struct {
+	Format  string  `json:"format"`
+	Version int     `json:"version"`
+	Entries []Entry `json:"entries"`
+}
+
+// Export writes a versioned portable JSON snapshot to path.
+// path must already be cleaned/resolved by the caller.
+func (s *Store) Export(path string) error {
+	data, err := s.ExportBytes()
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(path, data)
+}
+
+// ExportBytes returns the portable JSON snapshot without touching the filesystem.
+func (s *Store) ExportBytes() ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil, errClosed
+	}
+	entries := make([]Entry, 0, len(s.entries))
+	for _, e := range s.entries {
+		entries = append(entries, cloneEntry(e))
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Key < entries[j].Key })
+	data, err := json.MarshalIndent(exportDoc{
+		Format:  exportFormat,
+		Version: exportVersion,
+		Entries: entries,
+	}, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("encode memory export: %w", err)
+	}
+	return append(data, '\n'), nil
+}
+
+// Import reads a portable JSON snapshot from path and merges or replaces entries.
+// When replace is true the store is cleared first; otherwise keys from the file
+// overwrite matching keys and new keys are added. Returns the number of entries
+// applied from the file.
+func (s *Store) Import(path string, replace bool) (int, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, fmt.Errorf("read memory import: %w", err)
+	}
+	return s.ImportBytes(data, replace)
+}
+
+// ImportBytes applies a portable JSON snapshot. See Import.
+func (s *Store) ImportBytes(data []byte, replace bool) (int, error) {
+	doc, err := decodeExport(data)
+	if err != nil {
+		return 0, err
+	}
+	clean := make([]Entry, 0, len(doc.Entries))
+	seen := make(map[string]struct{}, len(doc.Entries))
+	for _, e := range doc.Entries {
+		key := strings.TrimSpace(e.Key)
+		if err := validateKey(key); err != nil {
+			return 0, fmt.Errorf("memory import: invalid key %q: %w", e.Key, err)
+		}
+		if len(e.Value) > maxValueLen {
+			return 0, fmt.Errorf("memory import: key %q: %w", key, errValueTooLong)
+		}
+		tags, err := normalizeTags(e.Tags)
+		if err != nil {
+			return 0, fmt.Errorf("memory import: key %q: %w", key, err)
+		}
+		if _, dup := seen[key]; dup {
+			return 0, fmt.Errorf("memory import: duplicate key %q", key)
+		}
+		seen[key] = struct{}{}
+		updated := e.UpdatedAt
+		if updated.IsZero() {
+			updated = time.Now().UTC()
+		}
+		clean = append(clean, Entry{
+			Key:       key,
+			Value:     e.Value,
+			Tags:      tags,
+			UpdatedAt: updated.UTC(),
+		})
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return 0, errClosed
+	}
+	if replace {
+		s.entries = make(map[string]Entry, len(clean))
+	}
+	if !replace && len(s.entries)+countNewKeys(s.entries, clean) > maxEntries {
+		return 0, errFull
+	}
+	if replace && len(clean) > maxEntries {
+		return 0, errFull
+	}
+	for _, e := range clean {
+		s.entries[e.Key] = e
+	}
+	if err := s.persistLocked(); err != nil {
+		return 0, err
+	}
+	return len(clean), nil
+}
+
+func decodeExport(data []byte) (exportDoc, error) {
+	if len(strings.TrimSpace(string(data))) == 0 {
+		return exportDoc{}, fmt.Errorf("memory import: empty file")
+	}
+	var doc exportDoc
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return exportDoc{}, fmt.Errorf("memory import: bad JSON: %w", err)
+	}
+	if doc.Format != exportFormat {
+		return exportDoc{}, fmt.Errorf("memory import: unsupported format %q", doc.Format)
+	}
+	if doc.Version != exportVersion {
+		return exportDoc{}, fmt.Errorf("memory import: unsupported version %d", doc.Version)
+	}
+	return doc, nil
+}
+
+func countNewKeys(existing map[string]Entry, incoming []Entry) int {
+	n := 0
+	for _, e := range incoming {
+		if _, ok := existing[e.Key]; !ok {
+			n++
+		}
+	}
+	return n
+}
+
+func writeFileAtomic(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create export directory: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, ".memory-export-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create export temp: %w", err)
+	}
+	tmpName := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("chmod export temp: %w", err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write export temp: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("sync export temp: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close export temp: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("replace export file: %w", err)
+	}
+	cleanup = false
 	return nil
 }
 

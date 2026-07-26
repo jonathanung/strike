@@ -105,6 +105,12 @@ type Options struct {
 	// KeepUserTurns is how many trailing real user turns to preserve when
 	// compacting. Zero defaults to 2.
 	KeepUserTurns int
+	// CompactionStrategy is "trim" (default) or "summarize". Unknown values
+	// fall back to trim.
+	CompactionStrategy string
+	// CompactionModel optionally pins the model id for summarize compaction.
+	// Empty uses the session model (same provider).
+	CompactionModel string
 	// ProjectRoot is the workspace root (often the git toplevel). Shown in
 	// the environment system-prompt layer; empty falls back to WorkDir.
 	ProjectRoot string
@@ -542,7 +548,7 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 	case protocol.FilesChanged:
 		e.handleFilesChanged(op)
 	case protocol.Compact:
-		e.handleCompact()
+		e.handleCompact(ctx, op)
 	case protocol.InspectEffectivePrompt:
 		e.handleInspectEffectivePrompt()
 	case protocol.Rewind:
@@ -1177,7 +1183,7 @@ func (e *Engine) runTurn(ctx context.Context, text string, turnID string, finish
 	e.messages = append(e.messages, provider.Message{Role: provider.RoleUser, Text: text})
 
 	for {
-		e.maybeThresholdCompact(turnID)
+		e.maybeThresholdCompact(ctx, turnID)
 		outcome, reqCorr, err := e.streamModel(ctx, turnID)
 		if err != nil {
 			e.failTurn(err, reqCorr, finishing)
@@ -1240,7 +1246,7 @@ func (e *Engine) streamModel(ctx context.Context, turnID string) (streamOutcome,
 	}
 	overflowCorr := e.baseCorr()
 	overflowCorr.TurnID = turnID
-	if !e.applyCompaction(protocol.CompactionReasonOverflow, overflowCorr) {
+	if !e.applyCompaction(ctx, protocol.CompactionReasonOverflow, overflowCorr, "") {
 		return streamOutcome{}, corr, fmt.Errorf("context window exceeded; compaction could not reduce history: %w", err)
 	}
 	// Single recovery pass: model-only, no tool replay (tools run after success).
