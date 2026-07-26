@@ -582,11 +582,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.FocusMsg:
 		m.focused = true
+		m.windows = refreshFilesWindows(m.windows)
 		return m, nil
 
 	case tea.BlurMsg:
 		m.focused = false
 		return m, nil
+
+	case filesRefreshMsg:
+		m.windows = refreshFilesWindows(m.windows)
+		return m, filesRefreshCmd()
 
 	case paletteInvokeMsg:
 		priorNotice, priorNoticeErr := m.notice, m.noticeErr
@@ -1327,6 +1332,9 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 			if isProjectDataTool(tc.name) {
 				m.windows = refreshProjectDataWindows(m.windows)
 			}
+			if isWorkspaceFSTool(tc.name) {
+				m.windows = refreshFilesWindows(m.windows)
+			}
 		}
 	case protocol.PermissionAsked:
 		m.modal = newPermissionModal(ev, m.ops, m.th)
@@ -1388,6 +1396,7 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		m.fastEnabled = ev.Enabled
 		m.setNotice(m.fastNotice(ev.Enabled), false)
 	case protocol.FilesInvalidated:
+		m.windows = refreshFilesWindows(m.windows)
 		if len(ev.Paths) == 0 {
 			break
 		}
