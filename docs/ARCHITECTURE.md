@@ -44,6 +44,8 @@ event stream the TUI rendered from (see `internal/protocol/codec.go`).
 | Package | Role | May import |
 |---|---|---|
 | `cmd/strike` | CLI entry (`main.go`: flags, usage, `strike auth` subcommand) + composition root (`wire.go`: assembles engine, host/local, session store, tui) | anything — the only package that wires the whole tree |
+| `internal/version` | Build-time Version/Commit stamped via `-ldflags` | stdlib |
+| `internal/update` | GitHub Releases self-update (check, download, sha256, atomic replace, re-exec) | `version`, stdlib, net/http |
 | `internal/protocol` | Op/Event seam between engine and frontends; the JSONL envelope (`codec.go`) is the session persistence format | stdlib only |
 | `internal/engine` | Headless agent runtime: turn loop, tool dispatch, permission/question integration, deferred agent switch | `protocol`, `provider`, `tool`, `permission`, `question`, `memory`, `config` |
 | `internal/provider` | LLM provider abstraction: `Provider` interface, normalized `StreamEvent`s | stdlib |
@@ -221,7 +223,7 @@ Two different mechanisms, depending on whether it needs Go code:
    `autonomy`, `auth`, `settings`, `agent`, `fast`, `vim`, `md-read`,
    `theme`, `layout`, `split`, `compact`, `fork`, `undo`, `rewind`,
    `session`, `help`, `keys`, `memory`, `issues`, `context`,
-   `effective-prompt`) are rejected by
+   `effective-prompt`, `upgrade`) are rejected by
    `config.ValidateSkillName` before
    they ever reach the frontend. PR URLs from successful `gh pr` bash
    output are stored via `protocol.SessionMeta` and `session` sidecar

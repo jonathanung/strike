@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -11,6 +12,8 @@ import (
 	"strings"
 
 	"github.com/jonathanung/strike-cli/internal/permission"
+	"github.com/jonathanung/strike-cli/internal/update"
+	"github.com/jonathanung/strike-cli/internal/version"
 )
 
 type cliOptions struct {
@@ -22,6 +25,8 @@ type cliOptions struct {
 	continueSession            bool
 	sessionID                  string // --session: resume a specific root session
 	worktree                   bool   // --worktree: force a git worktree for this session
+	upgrade                    bool
+	version                    bool
 }
 
 type optionSpec struct {
@@ -86,6 +91,20 @@ var optionSpecs = []optionSpec{
 		},
 	},
 	{
+		names:       []string{"upgrade"},
+		description: "download and install the latest GitHub Release, then restart",
+		register: func(fs *flag.FlagSet, opts *cliOptions) {
+			fs.BoolVar(&opts.upgrade, "upgrade", false, "")
+		},
+	},
+	{
+		names:       []string{"version"},
+		description: "print version and exit",
+		register: func(fs *flag.FlagSet, opts *cliOptions) {
+			fs.BoolVar(&opts.version, "version", false, "")
+		},
+	},
+	{
 		names:       []string{"h", "help"},
 		description: "show help",
 	},
@@ -108,6 +127,13 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "exec" {
 		return runExecCLI(args[1:], stdout, stderr)
 	}
+	if len(args) > 0 && (args[0] == "version" || args[0] == "--version" || args[0] == "-version") {
+		fmt.Fprintln(stdout, version.String())
+		return 0
+	}
+	if len(args) > 0 && args[0] == "upgrade" {
+		return runUpgradeCLI(stdout, stderr)
+	}
 
 	opts, err := parseCLIOptions(args)
 	if err != nil {
@@ -119,7 +145,25 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 		writeUsage(stderr)
 		return 2
 	}
+	if opts.version {
+		fmt.Fprintln(stdout, version.String())
+		return 0
+	}
+	if opts.upgrade {
+		return runUpgradeCLI(stdout, stderr)
+	}
 	if err := run(opts, stdout, stderr); err != nil {
+		fmt.Fprintln(stderr, "strike:", err)
+		return 1
+	}
+	return 0
+}
+
+func runUpgradeCLI(stdout, stderr io.Writer) int {
+	_, err := update.Upgrade(context.Background(), update.Options{
+		Stdout: stdout,
+	})
+	if err != nil {
 		fmt.Fprintln(stderr, "strike:", err)
 		return 1
 	}
@@ -198,6 +242,8 @@ func writeUsage(w io.Writer) {
 	fmt.Fprintln(w, "  strike [options]")
 	fmt.Fprintln(w, "  strike exec [options] <prompt>")
 	fmt.Fprintln(w, "  strike auth <command> [arguments]")
+	fmt.Fprintln(w, "  strike version")
+	fmt.Fprintln(w, "  strike upgrade")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Options:")
 	for _, spec := range optionSpecs {

@@ -63,6 +63,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 /effective-prompt              # alias of /context
 /keys                          # filterable keybind cheatsheet (also f1)
 /help                          # list commands
+/upgrade                       # install latest GitHub Release and restart
 ```
 
 ### Session, memory, issues

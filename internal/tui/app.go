@@ -112,6 +112,11 @@ type Options struct {
 	FirstRun bool
 	// VimMode selects pane/overlay/takeover for /vim. Empty defaults to pane.
 	VimMode VimMode
+	// PermissionAutoApproveSeconds arms permission-modal auto-allow once after
+	// N seconds. Zero disables (default). Clamped by the host before wiring.
+	PermissionAutoApproveSeconds int
+	// PermissionAutoApproveExclude lists permission names that never auto-allow.
+	PermissionAutoApproveExclude []string
 	// Replay is a prior session event log for --continue / --session. Seeded
 	// via cellsFromEvents + silent selection/child state — never fed through
 	// applyEvent (avoids stuck turns, zombie permission modals, orphan children).
@@ -178,6 +183,9 @@ type Model struct {
 	historyPos                 int
 	historyDraft               string
 	dangerouslySkipPermissions bool
+	// permissionAutoApproveSeconds > 0 arms countdown auto-allow on asks.
+	permissionAutoApproveSeconds int
+	permissionAutoApproveExclude []string
 
 	providerName string
 	modelName    string
@@ -196,6 +204,9 @@ type Model struct {
 	noticeErr   bool
 	noticeCause noticeCause
 	turnRunning bool
+	// inputQueue holds prompts typed while turnRunning. Drained FIFO on
+	// TurnCompleted; survives Interrupt until the user pops/clears it.
+	inputQueue []queuedInput
 	// awaitingPermission is true between PermissionAsked/QuestionAsked and
 	// the matching Resolved / TurnCompleted. It drives AgentStateAttention.
 	awaitingPermission bool
@@ -213,6 +224,9 @@ type Model struct {
 	// pendingResume is set when /session picks another root session; the
 	// composition root reads PendingResume after tea.Quit and reopens it.
 	pendingResume string
+	// pendingUpgrade is set by /upgrade; the composition root runs self-update
+	// after tea.Quit (alt screen torn down) and re-execs the new binary.
+	pendingUpgrade bool
 	// vimMode selects pane/overlay/takeover for /vim.
 	vimMode VimMode
 	// usage* hold the latest UsageReported figures; Known=false means unknown
@@ -322,6 +336,12 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		}
 		if option.VimMode != "" {
 			m.vimMode = option.VimMode
+		}
+		if option.PermissionAutoApproveSeconds != 0 {
+			m.permissionAutoApproveSeconds = option.PermissionAutoApproveSeconds
+		}
+		if option.PermissionAutoApproveExclude != nil {
+			m.permissionAutoApproveExclude = option.PermissionAutoApproveExclude
 		}
 		if len(option.Replay) > 0 {
 			replay = option.Replay
@@ -436,6 +456,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reflow()
 		m.refreshViewport()
 		return m, tea.Batch(m.listen(), cmd)
+
+	case permissionCountdownMsg:
+		pm, ok := m.modal.(*permissionModal)
+		if !ok {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.modal, cmd = pm.onCountdown(msg)
+		m.reflow()
+		return m, cmd
 
 	case contextLimitsMsg:
 		if msg.provider != m.providerName || msg.model != m.modelName {
@@ -777,11 +807,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.GotoBottom()
 			return m, nil
 		}
-		if m.turnRunning && key.Matches(msg, m.keyMap.Interrupt) {
-			ops := m.ops
-			return m, func() tea.Msg {
-				ops <- protocol.Interrupt{}
-				return nil
+		if key.Matches(msg, m.keyMap.Interrupt) {
+			if m.turnRunning {
+				ops := m.ops
+				return m, func() tea.Msg {
+					ops <- protocol.Interrupt{}
+					return nil
+				}
+			}
+			// Idle: esc clears a leftover input queue (rare once auto-drain runs).
+			if m.clearInputQueue() {
+				m.reflow()
+				return m, nil
 			}
 		}
 		if m.focus == focusRight {
@@ -796,6 +833,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reflow()
 			m.refreshViewport()
 			return m, cmd
+		}
+		// Empty composer + queued prompts: backspace pops last item for edit.
+		if m.focus == focusLeft && m.composer.Value() == "" && len(m.inputQueue) > 0 {
+			if msg.Type == tea.KeyBackspace || msg.Type == tea.KeyCtrlH {
+				if m.popInputQueueToComposer() {
+					return m, nil
+				}
+			}
 		}
 		// Bracketed paste: collapse large multi-line blobs to a chip.
 		if msg.Paste {
@@ -1258,6 +1303,31 @@ func (m *Model) toggleOrientation() {
 	m.refreshViewport()
 }
 
+// armPermissionAutoApprove starts the modal countdown when mode is armed and
+// the permission name is not excluded.
+func (m *Model) armPermissionAutoApprove(pm *permissionModal, permission string) tea.Cmd {
+	if pm == nil || m.permissionAutoApproveSeconds <= 0 {
+		return nil
+	}
+	if permissionAutoApproveExcluded(permission, m.permissionAutoApproveExclude) {
+		return nil
+	}
+	return pm.armAutoApprove(m.permissionAutoApproveSeconds)
+}
+
+func permissionAutoApproveExcluded(permission string, exclude []string) bool {
+	if len(exclude) == 0 {
+		return false
+	}
+	want := strings.ToLower(strings.TrimSpace(permission))
+	for _, name := range exclude {
+		if strings.EqualFold(strings.TrimSpace(name), want) {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 	// Defense-in-depth: child-session events should only surface permissions,
 	// questions, and child lifecycle (activity pane). Primary filtering is in
@@ -1346,8 +1416,12 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 			}
 		}
 	case protocol.PermissionAsked:
-		m.modal = newPermissionModal(ev, m.ops, m.th)
+		pm := newPermissionModal(ev, m.ops, m.th)
+		m.modal = pm
 		cmd = m.broadcastContextState()
+		if auto := m.armPermissionAutoApprove(pm, ev.Permission); auto != nil {
+			cmd = tea.Batch(cmd, auto)
+		}
 		if !m.focused {
 			cmd = tea.Batch(cmd, notifyUnfocusedCmd("strike: permission required"))
 		}
@@ -1379,7 +1453,8 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		m.turnStartedAt = time.Time{}
 		m.toolCallsThisTurn = 0
 		m.refreshOpenPalette()
-		cmd = tea.Batch(m.broadcastContextState(), notify)
+		// turnRunning is already false via applyAgentStateEvent; drain next prompt.
+		cmd = tea.Batch(m.broadcastContextState(), notify, m.tryDrainInputQueue())
 	case protocol.ModelSelected:
 		if m.noticeCause == noticeNeedsModel {
 			m.clearNotice()
@@ -1899,6 +1974,16 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 			ops <- protocol.InspectEffectivePrompt{}
 			return nil
 		}
+	case "/upgrade":
+		m.resetComposer()
+		m.clearNotice()
+		if m.turnRunning {
+			m.setNotice("wait for the current turn to finish before upgrading", true)
+			return m, nil
+		}
+		m.pendingUpgrade = true
+		m.modal = nil
+		return m, tea.Quit
 	default:
 		// Unknown commands fall through to skills: /name args renders the
 		// skill template and submits it as the user message.
@@ -1924,6 +2009,11 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 // resume. Empty when the user quit without switching.
 func (m Model) PendingResume() string {
 	return strings.TrimSpace(m.pendingResume)
+}
+
+// PendingUpgrade reports whether /upgrade requested a self-update after quit.
+func (m Model) PendingUpgrade() bool {
+	return m.pendingUpgrade
 }
 
 func (m Model) handleForkCommand() (tea.Model, tea.Cmd) {
@@ -2279,26 +2369,12 @@ func (m Model) submit(op protocol.UserInput, displayPrompt string) (tea.Model, t
 		m.setNotice("viewing subagent — return to parent to send (esc or ctrl+x up)", true)
 		return m, nil
 	}
+	// Policy: enqueue while a turn runs (do not reject/wipe). Drain FIFO on
+	// TurnCompleted. Queue survives Interrupt until pop/clear.
 	if m.turnRunning {
-		m.setNotice("a turn is already running; interrupt it first", true)
-		return m, nil
+		return m.enqueueUserInput(op, displayPrompt)
 	}
-	m.resetComposer()
-	m.clearNotice()
-	ops := m.ops
-	send := func() tea.Msg {
-		ops <- op
-		return nil
-	}
-	if m.services.History == nil {
-		return m, send
-	}
-	done := m.services.History.Enqueue(displayPrompt)
-	persist := func() tea.Msg {
-		err := <-done
-		return historyAddedMsg{err: err}
-	}
-	return m, tea.Batch(send, persist)
+	return m.dispatchUserInput(op, displayPrompt)
 }
 
 func (m Model) sendSelect(op protocol.SelectModel) (tea.Model, tea.Cmd) {

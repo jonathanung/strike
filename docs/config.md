@@ -11,6 +11,8 @@ JSON:
   "defaultAgent": "build",
   "theme": "strike",
   "vimMode": "pane",
+  "permissionAutoApproveSeconds": 10,
+  "permissionAutoApproveExclude": ["bash"],
   "compactionStrategy": "trim",
   "compactionModel": "",
   "session": {
@@ -26,6 +28,12 @@ JSON:
 
 Rules concatenate across layers; the last matching rule wins, so project
 config overrides global, and session "always" grants override both.
+
+**Permission auto-approve (yolo-lite):** when `permissionAutoApproveSeconds`
+is a positive integer (clamped to 1–60), the permission modal counts down and
+submits **allow once** at zero. Esc, reject, or any explicit choice cancels
+the timer. Disabled by default (`0` / omitted). Names in
+`permissionAutoApproveExclude` (case-insensitive) never auto-approve.
 
 ## Session worktrees
 

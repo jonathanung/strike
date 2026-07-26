@@ -21,6 +21,8 @@ const expectedUsage = `Usage:
   strike [options]
   strike exec [options] <prompt>
   strike auth <command> [arguments]
+  strike version
+  strike upgrade
 
 Options:
   --provider <provider>              provider to use (anthropic|openai|xai|echo); overrides config
@@ -30,6 +32,8 @@ Options:
   --continue                         resume the most recent root session (model history + selections)
   --session <id>                     resume a specific session by id (model history + selections)
   --worktree                         run this session in an isolated git worktree under .strike/worktrees/
+  --upgrade                          download and install the latest GitHub Release, then restart
+  --version                          print version and exit
   -h, --help                         show help
 `
 
@@ -468,5 +472,22 @@ func askWithin(t *testing.T, service *permission.Service, req tool.AskRequest) e
 	case <-time.After(time.Second):
 		t.Fatalf("Ask(%q, %q) did not return synchronously", req.Permission, req.Patterns)
 		return nil
+	}
+}
+
+func TestRunCLIVersion(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	for _, args := range [][]string{{"version"}, {"--version"}} {
+		stdout.Reset()
+		stderr.Reset()
+		if code := runCLI(args, &stdout, &stderr); code != 0 {
+			t.Fatalf("args=%v exit=%d stderr=%q", args, code, stderr.String())
+		}
+		if stdout.Len() == 0 {
+			t.Fatalf("args=%v: empty version stdout", args)
+		}
+		if stderr.Len() != 0 {
+			t.Fatalf("args=%v stderr=%q", args, stderr.String())
+		}
 	}
 }
