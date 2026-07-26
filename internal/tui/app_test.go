@@ -902,14 +902,16 @@ func TestHistoryRecallReflowsMultilineUnicodeAndEditingExitsBrowsing(t *testing.
 	}
 }
 
-func TestSubmitDuringRunningTurnKeepsComposerDraft(t *testing.T) {
+func TestSubmitDuringRunningTurnEnqueuesInsteadOfRejecting(t *testing.T) {
 	tests := []struct {
-		name     string
-		skills   []host.Skill
-		composer string
+		name        string
+		skills      []host.Skill
+		composer    string
+		wantModel   string
+		wantHistory string
 	}{
-		{name: "ordinary", composer: "draft while busy"},
-		{name: "skill", skills: []host.Skill{fakeSkill("review", "", "Rendered: $ARGUMENTS")}, composer: "/review keep me"},
+		{name: "ordinary", composer: "draft while busy", wantModel: "draft while busy", wantHistory: "draft while busy"},
+		{name: "skill", skills: []host.Skill{fakeSkill("review", "", "Rendered: $ARGUMENTS")}, composer: "/review keep me", wantModel: "Rendered: keep me", wantHistory: "/review keep me"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -927,14 +929,17 @@ func TestSubmitDuringRunningTurnKeepsComposerDraft(t *testing.T) {
 				}
 			}
 			assertNoAppOp(t, ops)
-			if got := m.composer.Value(); got != tt.composer {
-				t.Errorf("composer = %q, want draft kept %q", got, tt.composer)
+			if got := m.composer.Value(); got != "" {
+				t.Errorf("composer = %q, want cleared after enqueue", got)
 			}
-			if len(store.Entries()) != 0 {
-				t.Errorf("history = %q, want empty (no submit)", store.Entries())
+			if len(m.inputQueue) != 1 || m.inputQueue[0].modelText != tt.wantModel {
+				t.Errorf("inputQueue = %#v, want one item %q", m.inputQueue, tt.wantModel)
 			}
-			if !m.noticeErr || !strings.Contains(m.notice, "turn is already running") {
-				t.Errorf("notice = %q (error=%v), want busy-turn error", m.notice, m.noticeErr)
+			if got := store.Entries(); !slices.Equal(got, []string{tt.wantHistory}) {
+				t.Errorf("history = %q, want %q", got, []string{tt.wantHistory})
+			}
+			if m.noticeErr || !strings.Contains(m.notice, "queued (1)") {
+				t.Errorf("notice = %q (error=%v), want queued notice", m.notice, m.noticeErr)
 			}
 		})
 	}

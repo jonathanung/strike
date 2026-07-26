@@ -117,7 +117,7 @@ func TestComposerFooterAdvertisesEnterAndShiftEnter(t *testing.T) {
 		t.Errorf("bordered view missing newline key/label %q/%q:\n%s", nlKey, keyHint(m.keyMap.Newline).Label, plain)
 	}
 	// Direct footer helper also advertises both from keyMap.
-	footer := ansi.Strip(composerFooter(m.th, m.keyMap, 60))
+	footer := ansi.Strip(composerFooter(m.th, m.keyMap, 60, false))
 	if !strings.Contains(footer, sendKey) || !strings.Contains(footer, nlKey) {
 		t.Errorf("composerFooter = %q, want %q and %q", footer, sendKey, nlKey)
 	}

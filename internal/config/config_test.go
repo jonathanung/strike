@@ -149,6 +149,74 @@ func TestLoadMissingIsOK(t *testing.T) {
 	if cfg.Provider != "anthropic" {
 		t.Errorf("default provider = %q", cfg.Provider)
 	}
+	if cfg.PermissionAutoApproveSeconds != 0 {
+		t.Errorf("auto-approve default = %d, want 0", cfg.PermissionAutoApproveSeconds)
+	}
+}
+
+func TestClampPermissionAutoApproveSeconds(t *testing.T) {
+	cases := []struct {
+		in, want int
+	}{
+		{0, 0},
+		{-3, 0},
+		{1, 1},
+		{15, 15},
+		{60, 60},
+		{61, 60},
+		{999, 60},
+	}
+	for _, tt := range cases {
+		if got := ClampPermissionAutoApproveSeconds(tt.in); got != tt.want {
+			t.Errorf("Clamp(%d) = %d, want %d", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestLoadPermissionAutoApprove(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(global, []byte(`{
+		"permissionAutoApproveSeconds": 99,
+		"permissionAutoApproveExclude": [" Bash ", "bash", "", "write"]
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(work, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(project), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(project, []byte(`{
+		"permissionAutoApproveSeconds": 8
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PermissionAutoApproveSeconds != 8 {
+		t.Errorf("seconds = %d, want 8 (project override, clamped)", cfg.PermissionAutoApproveSeconds)
+	}
+	if len(cfg.PermissionAutoApproveExclude) != 2 {
+		t.Fatalf("exclude = %#v, want bash+write", cfg.PermissionAutoApproveExclude)
+	}
+	if cfg.PermissionAutoApproveExclude[0] != "bash" || cfg.PermissionAutoApproveExclude[1] != "write" {
+		t.Errorf("exclude = %#v", cfg.PermissionAutoApproveExclude)
+	}
+	if !PermissionAutoApproveExcluded("BASH", cfg.PermissionAutoApproveExclude) {
+		t.Error("BASH should be excluded")
+	}
+	if PermissionAutoApproveExcluded("edit", cfg.PermissionAutoApproveExclude) {
+		t.Error("edit should not be excluded")
+	}
 }
 
 func TestLoadMalformed(t *testing.T) {
