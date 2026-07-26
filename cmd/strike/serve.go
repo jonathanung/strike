@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -26,6 +27,10 @@ Usage:
 
 Options:
   --addr <host:port>     bind address (default 127.0.0.1:8787)
+  --expose               bind on all interfaces (0.0.0.0) for LAN access;
+                         requires a token; prints LAN URLs + loud WARNING
+  --allow-cidr <cidr>    with --expose, only accept clients in these CIDRs
+                         (repeatable or comma-separated; optional)
   --token <token>        bearer token for /v1/* (required; auto-minted if omitted)
   --session-dir <path>   sessions directory (default ~/.strike/sessions)
   --provider <name>      live engine provider (default echo)
@@ -48,19 +53,35 @@ Endpoints:
 
 Auth: Authorization: Bearer <token> or ?token= on /v1/* routes.
 
-DANGER: binding outside localhost exposes session transcripts and the live
-engine control plane to the network. Keep --addr on loopback unless you
-understand the risk. There is no TLS in this experimental server.
-See docs/web.md. LAN expose flag is tracked separately (--expose).`
+DANGER: --expose (or any non-loopback bind) puts session transcripts and the
+live control plane on the network. There is no TLS. Prefer loopback + SSH -L
+when possible. See docs/web.md.`
 
 type serveOptions struct {
 	addr                       string
+	expose                     bool
+	allowCIDR                  cidrFlag
 	token                      string
 	sessionDir                 string
 	provider                   string
 	model                      string
 	attachOnly                 bool
 	dangerouslySkipPermissions bool
+}
+
+// cidrFlag accumulates repeated --allow-cidr values (and comma-separated lists).
+type cidrFlag []string
+
+func (c *cidrFlag) String() string { return strings.Join(*c, ",") }
+
+func (c *cidrFlag) Set(v string) error {
+	for _, part := range strings.Split(v, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			*c = append(*c, part)
+		}
+	}
+	return nil
 }
 
 func runServeCLI(args []string, stdout, stderr io.Writer) int {
@@ -89,6 +110,8 @@ func parseServeArgs(args []string) (serveOptions, error) {
 	fs := flag.NewFlagSet("strike serve", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&opts.addr, "addr", "127.0.0.1:8787", "")
+	fs.BoolVar(&opts.expose, "expose", false, "")
+	fs.Var(&opts.allowCIDR, "allow-cidr", "")
 	fs.StringVar(&opts.token, "token", "", "")
 	fs.StringVar(&opts.sessionDir, "session-dir", "", "")
 	fs.StringVar(&opts.provider, "provider", "echo", "")
@@ -115,10 +138,19 @@ func parseServeArgs(args []string) (serveOptions, error) {
 	if opts.provider == "" {
 		opts.provider = "echo"
 	}
+	if len(opts.allowCIDR) > 0 && !opts.expose {
+		return serveOptions{}, fmt.Errorf("--allow-cidr requires --expose")
+	}
 	return opts, nil
 }
 
 func runServe(opts serveOptions, stdout, stderr io.Writer) error {
+	bindAddr, err := server.ResolveBindAddr(opts.addr, opts.expose)
+	if err != nil {
+		return err
+	}
+	opts.addr = bindAddr
+
 	token := opts.token
 	minted := false
 	if token == "" {
@@ -128,6 +160,18 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		}
 		token = t
 		minted = true
+	}
+	// Token is mandatory for all binds; refuse empty (defense in depth for --expose).
+	if strings.TrimSpace(token) == "" {
+		return errors.New("auth token is required (pass --token or allow auto-mint)")
+	}
+
+	var allowCIDRs []*net.IPNet
+	if len(opts.allowCIDR) > 0 {
+		allowCIDRs, err = server.ParseCIDRs([]string(opts.allowCIDR))
+		if err != nil {
+			return err
+		}
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -222,6 +266,8 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		Token:      token,
 		SessionDir: sessionDir,
 		Live:       live,
+		Expose:     opts.expose || !server.IsLocalhostBind(opts.addr),
+		AllowCIDRs: allowCIDRs,
 	})
 	if err != nil {
 		return err
@@ -232,29 +278,28 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		return fmt.Errorf("listen %s: %w", opts.addr, err)
 	}
 
-	if !server.IsLocalhostBind(opts.addr) {
-		fmt.Fprintln(stderr, "WARNING: strike serve is bound outside localhost.")
-		fmt.Fprintln(stderr, "Session streams and live ops are reachable with the token; there is no TLS.")
-		fmt.Fprintln(stderr, "Prefer --addr 127.0.0.1:8787 for local attach only. See docs/web.md.")
+	actual := ln.Addr().String()
+	_, port, _ := net.SplitHostPort(actual)
+	if port == "" {
+		port = "8787"
 	}
 
-	actual := ln.Addr().String()
-	fmt.Fprintf(stdout, "strike serve listening on http://%s\n", actual)
-	fmt.Fprintf(stdout, "  health:  http://%s/health\n", actual)
-	fmt.Fprintf(stdout, "  cockpit: http://%s/attach?token=<token>\n", actual)
-	if live != nil {
-		fmt.Fprintf(stdout, "  live:    session %s  provider %s\n", live.SessionID(), opts.provider)
-		fmt.Fprintf(stdout, "  ws:      ws://%s/v1/ws?token=<token>\n", actual)
-	} else {
-		fmt.Fprintln(stdout, "  mode:    attach-only (read-only JSONL)")
+	exposed := opts.expose || !server.IsLocalhostBind(opts.addr)
+	if exposed {
+		writeExposeWarning(stderr)
 	}
-	if minted {
-		fmt.Fprintf(stdout, "  token:   %s  (auto-minted; pass --token to set)\n", token)
-	} else {
-		fmt.Fprintln(stdout, "  token:   (from --token)")
-	}
-	fmt.Fprintf(stdout, "  sessions dir: %s\n", sessionDir)
-	fmt.Fprintln(stdout, "experimental web cockpit — TUI remains primary")
+
+	printServeBanner(stdout, serveBanner{
+		listenAddr: actual,
+		port:       port,
+		token:      token,
+		minted:     minted,
+		exposed:    exposed,
+		live:       live,
+		provider:   opts.provider,
+		sessionDir: sessionDir,
+		allowCIDR:  []string(opts.allowCIDR),
+	})
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -274,4 +319,91 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	case err := <-errCh:
 		return err
 	}
+}
+
+func writeExposeWarning(stderr io.Writer) {
+	fmt.Fprintln(stderr, "")
+	fmt.Fprintln(stderr, "╔══════════════════════════════════════════════════════════════╗")
+	fmt.Fprintln(stderr, "║  WARNING: strike serve --expose is bound off localhost       ║")
+	fmt.Fprintln(stderr, "║                                                              ║")
+	fmt.Fprintln(stderr, "║  Anyone on the network who has the token can:                ║")
+	fmt.Fprintln(stderr, "║    • read session transcripts                                ║")
+	fmt.Fprintln(stderr, "║    • submit ops / run tools via the live engine              ║")
+	fmt.Fprintln(stderr, "║  There is NO TLS. Treat the token like a password.           ║")
+	fmt.Fprintln(stderr, "║  Prefer loopback + SSH -L when possible. See docs/web.md.    ║")
+	fmt.Fprintln(stderr, "╚══════════════════════════════════════════════════════════════╝")
+	fmt.Fprintln(stderr, "")
+}
+
+type serveBanner struct {
+	listenAddr string
+	port       string
+	token      string
+	minted     bool
+	exposed    bool
+	live       *server.Live
+	provider   string
+	sessionDir string
+	allowCIDR  []string
+}
+
+func printServeBanner(w io.Writer, b serveBanner) {
+	fmt.Fprintf(w, "strike serve listening on http://%s\n", b.listenAddr)
+	if b.exposed {
+		fmt.Fprintln(w, "  mode:    EXPOSE (LAN)")
+		if ips := server.LANIPs(); len(ips) > 0 {
+			fmt.Fprintln(w, "  LAN IPs:")
+			for _, ip := range ips {
+				hostport := net.JoinHostPort(ip, b.port)
+				fmt.Fprintf(w, "    http://%s/health\n", hostport)
+			}
+		} else {
+			fmt.Fprintln(w, "  LAN IPs: (none detected)")
+		}
+		// Print full cockpit URL with token once (stdout) for phone open.
+		if ips := server.LANIPs(); len(ips) > 0 {
+			u := cockpitURL(ips[0], b.port, b.token)
+			fmt.Fprintf(w, "  cockpit: %s\n", u)
+			fmt.Fprintln(w, "           (full URL with token printed once — do not share)")
+		} else {
+			fmt.Fprintf(w, "  cockpit: http://<lan-ip>:%s/attach?token=%s\n", b.port, url.QueryEscape(b.token))
+		}
+	} else {
+		fmt.Fprintf(w, "  health:  http://%s/health\n", b.listenAddr)
+		fmt.Fprintf(w, "  cockpit: http://%s/attach?token=%s\n", b.listenAddr, url.QueryEscape(b.token))
+	}
+	if b.live != nil {
+		fmt.Fprintf(w, "  live:    session %s  provider %s\n", b.live.SessionID(), b.provider)
+		if b.exposed {
+			if ips := server.LANIPs(); len(ips) > 0 {
+				fmt.Fprintf(w, "  ws:      ws://%s/v1/ws?token=<token>\n", net.JoinHostPort(ips[0], b.port))
+			} else {
+				fmt.Fprintf(w, "  ws:      ws://<lan-ip>:%s/v1/ws?token=<token>\n", b.port)
+			}
+		} else {
+			fmt.Fprintf(w, "  ws:      ws://%s/v1/ws?token=<token>\n", b.listenAddr)
+		}
+	} else {
+		fmt.Fprintln(w, "  mode:    attach-only (read-only JSONL)")
+	}
+	if b.minted {
+		fmt.Fprintf(w, "  token:   %s  (auto-minted; pass --token to set)\n", b.token)
+	} else {
+		fmt.Fprintln(w, "  token:   (from --token)")
+	}
+	if len(b.allowCIDR) > 0 {
+		fmt.Fprintf(w, "  allow:   %s\n", strings.Join(b.allowCIDR, ", "))
+	}
+	fmt.Fprintf(w, "  sessions dir: %s\n", b.sessionDir)
+	fmt.Fprintln(w, "experimental web cockpit — TUI remains primary")
+}
+
+func cockpitURL(host, port, token string) string {
+	u := url.URL{
+		Scheme:   "http",
+		Host:     net.JoinHostPort(host, port),
+		Path:     "/attach",
+		RawQuery: "token=" + url.QueryEscape(token),
+	}
+	return u.String()
 }

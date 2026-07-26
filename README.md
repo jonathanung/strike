@@ -60,6 +60,10 @@ make serve
 # or: ./strike serve --addr 127.0.0.1:8787 --token <secret> --provider echo
 curl -s http://127.0.0.1:8787/health
 # open http://127.0.0.1:8787/attach?token=<secret>
+
+# LAN (phone/laptop on same network) — loud WARNING, no TLS:
+./strike serve --expose --token <secret>
+# optional: --allow-cidr 192.168.0.0/16
 ```
 
 - `GET /health` — JSON `{ok, version, commit}` (no auth)
@@ -69,9 +73,9 @@ curl -s http://127.0.0.1:8787/health
 - `GET /v1/live/events`, `/v1/status`, `/v1/agents`, `/v1/sessions`
 - `GET /v1/sessions/{id}/events` — SSE JSONL tail
 
-CORS allows localhost origins only. **Do not bind outside loopback** unless you
-accept that anyone with the token can read transcripts and submit ops (no TLS).
-Details: [docs/web.md](docs/web.md).
+Default bind is loopback-only. Non-loopback requires `--expose` (token + WARNING).
+Optional Vite dev proxy lives in `web/`. Details and threat model:
+[docs/web.md](docs/web.md).
 
 ## Docs
 

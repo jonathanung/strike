@@ -4,3 +4,5 @@
 .plan
 coverage.out
 */worktrees
+web/node_modules/
+web/dist/
