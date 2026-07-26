@@ -44,7 +44,7 @@ func loadEmbeddedAgents() []Agent {
 		if err != nil {
 			continue
 		}
-		meta, body := parseFrontmatter(string(data))
+		meta, body, nestedPerms := parseFrontmatter(string(data))
 		if strings.TrimSpace(body) == "" {
 			continue
 		}
@@ -63,15 +63,16 @@ func loadEmbeddedAgents() []Agent {
 		if !ok {
 			continue
 		}
-		perms, err := parseAgentPermissions(meta)
+		perms, err := parseAgentPermissions(meta, nestedPerms)
 		if err != nil {
 			continue
 		}
+		provider, model := resolveAgentModel(meta["provider"], meta["model"])
 		agents = append(agents, Agent{
 			Name:        name,
 			Description: meta["description"],
-			Provider:    meta["provider"],
-			Model:       meta["model"],
+			Provider:    provider,
+			Model:       model,
 			Effort:      effort,
 			Prompt:      body,
 			Permissions: perms,
