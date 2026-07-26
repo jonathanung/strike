@@ -1,5 +1,7 @@
 # strike-cli
 
+Website: https://strike.jonathanung.ca/
+
 An agentic coding TUI in Go/Bubble Tea. The engine emits protocol events; the
 TUI consumes them. Sessions are JSONL event logs.
 
