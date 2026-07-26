@@ -636,6 +636,104 @@ func TestInfoFromDiskIncludesPRMeta(t *testing.T) {
 	}
 }
 
+func TestManagerRenamePersists(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager(dir)
+	root, err := m.Create(CreateOptions{ID: "root-ren", Title: "old title"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Close(root.ID); err != nil {
+		t.Fatal(err)
+	}
+	// Rename while closed.
+	got, err := m.Rename(root.ID, "new title")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Title != "new title" {
+		t.Fatalf("Rename = %+v", got)
+	}
+	meta, err := ReadMeta(dir, root.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Title != "new title" {
+		t.Fatalf("meta title = %q", meta.Title)
+	}
+	// Reopen manager path via Get after "restart".
+	m2 := NewManager(dir)
+	info, err := m2.Get(root.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Title != "new title" {
+		t.Fatalf("after restart title = %q", info.Title)
+	}
+	// Rename while open updates live info.
+	if _, err := m2.Open(root.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err = m2.Rename(root.ID, "live")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Title != "live" || !got.Open {
+		t.Fatalf("open rename = %+v", got)
+	}
+	if open := m2.ListOpen(); len(open) != 1 || open[0].Title != "live" {
+		t.Fatalf("ListOpen after rename = %+v", open)
+	}
+}
+
+func TestManagerDeleteRemovesFilesAndRespectsForce(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager(dir)
+	closed, err := m.Create(CreateOptions{ID: "closed-del", Title: "bye"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Close(closed.ID); err != nil {
+		t.Fatal(err)
+	}
+	openSess, err := m.Create(CreateOptions{ID: "open-del", Title: "open"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := m.Delete(closed.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(LogPath(dir, closed.ID)); !os.IsNotExist(err) {
+		t.Fatalf("closed log still present: %v", err)
+	}
+	if _, err := os.Stat(MetaPath(dir, closed.ID)); !os.IsNotExist(err) {
+		t.Fatalf("closed meta still present: %v", err)
+	}
+	if _, err := m.Get(closed.ID); err == nil {
+		t.Fatal("Get closed after delete should fail")
+	}
+
+	if err := m.Delete(openSess.ID, false); err == nil {
+		t.Fatal("delete open without force should fail")
+	}
+	if _, err := os.Stat(LogPath(dir, openSess.ID)); err != nil {
+		t.Fatalf("open log removed without force: %v", err)
+	}
+	if err := m.Delete(openSess.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(LogPath(dir, openSess.ID)); !os.IsNotExist(err) {
+		t.Fatalf("forced open log still present: %v", err)
+	}
+	if n := m.CountOpenRoots(); n != 0 {
+		t.Fatalf("CountOpenRoots after force delete = %d", n)
+	}
+	if err := m.Delete("missing-id", false); err == nil {
+		t.Fatal("delete missing should error")
+	}
+}
+
 func TestCountOpenRootsSetWorktreeDestroy(t *testing.T) {
 	dir := t.TempDir()
 	m := NewManager(dir)

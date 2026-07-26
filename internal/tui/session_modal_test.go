@@ -285,6 +285,140 @@ func TestSessionModalShowsPRBadge(t *testing.T) {
 	}
 }
 
+func TestSessionModalFilterLive(t *testing.T) {
+	fs := newFakeSessions()
+	fs.put(host.Session{ID: "a", Title: "alpha work"}, nil)
+	fs.put(host.Session{ID: "b", Title: "beta task"}, nil)
+	m := newSessionModal(fs, "")
+	next, _ := m.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("bet")})
+	sm := next.(*sessionModal)
+	list := sm.filtered()
+	if len(list) != 1 || list[0].ID != "b" {
+		t.Fatalf("filter bet = %+v", list)
+	}
+	view := sm.view(72, theme.Default().Resolve())
+	if !strings.Contains(view, "beta task") {
+		t.Errorf("missing beta:\n%s", view)
+	}
+	if strings.Contains(view, "alpha work") {
+		t.Errorf("alpha should be filtered out:\n%s", view)
+	}
+}
+
+func TestSessionModalRenamePersistsViaHost(t *testing.T) {
+	fs := newFakeSessions()
+	fs.put(host.Session{ID: "s1", Title: "old name"}, nil)
+	m := newSessionModal(fs, "")
+	next, _ := m.update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	sm := next.(*sessionModal)
+	if sm.phase != sessionPhaseRename {
+		t.Fatalf("phase = %v, want rename", sm.phase)
+	}
+	// Clear prefilled title then type new.
+	for range sm.renameBuf {
+		next, _ = sm.update(tea.KeyMsg{Type: tea.KeyBackspace})
+		sm = next.(*sessionModal)
+	}
+	next, _ = sm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("fresh title")})
+	sm = next.(*sessionModal)
+	next, _ = sm.update(tea.KeyMsg{Type: tea.KeyEnter})
+	sm = next.(*sessionModal)
+	if sm.phase != sessionPhaseBrowse {
+		t.Fatalf("phase after save = %v", sm.phase)
+	}
+	got, ok, err := fs.Get("s1")
+	if err != nil || !ok || got.Title != "fresh title" {
+		t.Fatalf("host title = %+v ok=%v err=%v", got, ok, err)
+	}
+	view := sm.view(72, theme.Default().Resolve())
+	if !strings.Contains(view, "fresh title") {
+		t.Errorf("view missing renamed title:\n%s", view)
+	}
+}
+
+func TestSessionModalDeleteRemovesFromList(t *testing.T) {
+	fs := newFakeSessions()
+	fs.put(host.Session{ID: "keep", Title: "keep me"}, nil)
+	fs.put(host.Session{ID: "gone", Title: "delete me"}, nil)
+	m := newSessionModal(fs, "keep")
+	// Select "gone".
+	list := m.filtered()
+	for i, s := range list {
+		if s.ID == "gone" {
+			m.cursor = i
+			break
+		}
+	}
+	next, _ := m.update(tea.KeyMsg{Type: tea.KeyCtrlX})
+	sm := next.(*sessionModal)
+	if sm.phase != sessionPhaseConfirmDelete || sm.deleteID != "gone" {
+		t.Fatalf("confirm: phase=%v id=%q", sm.phase, sm.deleteID)
+	}
+	next, _ = sm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	sm = next.(*sessionModal)
+	if sm.phase != sessionPhaseBrowse {
+		t.Fatalf("phase after delete = %v", sm.phase)
+	}
+	if _, ok, _ := fs.Get("gone"); ok {
+		t.Fatal("gone still in host")
+	}
+	if len(sm.all) != 1 || sm.all[0].ID != "keep" {
+		t.Fatalf("list after delete = %+v", sm.all)
+	}
+}
+
+func TestSessionModalDeleteOpenRequiresForce(t *testing.T) {
+	fs := newFakeSessions()
+	fs.put(host.Session{ID: "open-one", Title: "busy", Open: true}, nil)
+	m := newSessionModal(fs, "other")
+	next, _ := m.update(tea.KeyMsg{Type: tea.KeyCtrlX})
+	sm := next.(*sessionModal)
+	// y without force should stay in confirm.
+	next, _ = sm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	sm = next.(*sessionModal)
+	if sm.phase != sessionPhaseConfirmDelete {
+		t.Fatalf("phase = %v, want still confirm", sm.phase)
+	}
+	if _, ok, _ := fs.Get("open-one"); !ok {
+		t.Fatal("open session deleted without force")
+	}
+	next, _ = sm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
+	sm = next.(*sessionModal)
+	if !sm.deleteForce {
+		t.Fatal("force not armed")
+	}
+	next, _ = sm.update(tea.KeyMsg{Type: tea.KeyEnter})
+	sm = next.(*sessionModal)
+	if sm.phase != sessionPhaseBrowse {
+		t.Fatalf("phase = %v after force delete", sm.phase)
+	}
+	if _, ok, _ := fs.Get("open-one"); ok {
+		t.Fatal("open session still present after force")
+	}
+}
+
+func TestSessionModalDeleteCurrentRequiresForce(t *testing.T) {
+	fs := newFakeSessions()
+	fs.put(host.Session{ID: "cur", Title: "current"}, nil)
+	m := newSessionModal(fs, "cur")
+	next, _ := m.update(tea.KeyMsg{Type: tea.KeyCtrlX})
+	sm := next.(*sessionModal)
+	next, _ = sm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	sm = next.(*sessionModal)
+	if sm.phase != sessionPhaseConfirmDelete {
+		t.Fatalf("current delete without force left confirm: phase=%v", sm.phase)
+	}
+	if _, ok, _ := fs.Get("cur"); !ok {
+		t.Fatal("current deleted without force")
+	}
+	sm.deleteForce = true
+	next, _ = sm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	sm = next.(*sessionModal)
+	if _, ok, _ := fs.Get("cur"); ok {
+		t.Fatal("current still present after force")
+	}
+}
+
 func TestSessionPRBadgeEmptyWithoutPR(t *testing.T) {
 	th := theme.Default().Resolve()
 	if got := sessionPRBadge(th, host.Session{Title: "x"}); got != "" {

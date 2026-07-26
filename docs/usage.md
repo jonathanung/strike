@@ -68,6 +68,8 @@ strike launches without any provider configured. Pick one inside the TUI:
 /keys                          # filterable keybind cheatsheet (also f1)
 /help                          # list commands
 /upgrade                       # install latest GitHub Release and restart
+/init                          # create or update project AGENTS.md (confirm
+                               # before replacing an existing file)
 ```
 
 ### Session, memory, issues
@@ -82,6 +84,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/memory` | bare = list browser; `list [tag]`, `get <key>`, `set <key> <value>`, `rm <key>`, `export [path]`, `import <path> [--replace]` (portable JSON; relative paths stay under project root) |
 | `/issues` | bare = list browser; `list [open\|closed]`, `add <title>`, `get <id>`, `close <id>`, `export [path]`, `import <path> [--replace]` (same portable rules as memory) |
 | `/context` | dump effective system-prompt layers into the transcript |
+| `/init` | light local scan → write `AGENTS.md`; confirms before overwrite |
 
 ### Autonomy & workflows
 
@@ -172,8 +175,10 @@ cards in place of a blank viewport; when space allows, a Logo band sits above
 the cards and the header still owns the compact brand. The dashboard always
 shows keybindings. It shows get-started provider rows only when no provider is
 selected or the selected provider needs authentication, with provider rows
-bounded to fit; agents and skills only when valid configured entries exist;
-and recent prompts only when prompt history exists. It repacks to fit the
-terminal on resize and collapses to a single column when narrow.
+bounded to fit (and a `/init` CTA when `AGENTS.md` is missing); first-run
+onboarding also mentions `/init`. Agents and skills appear only when valid
+configured entries exist; recent prompts only when prompt history exists. It
+repacks to fit the terminal on resize and collapses to a single column when
+narrow.
 
 Full keyboard reference: [keybinds.md](keybinds.md).

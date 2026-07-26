@@ -26,7 +26,7 @@ func BuiltinSkills() []Skill {
 		if err != nil {
 			continue
 		}
-		meta, body := parseFrontmatter(string(data))
+		meta, body, _ := parseFrontmatter(string(data))
 		if strings.TrimSpace(body) == "" {
 			continue
 		}

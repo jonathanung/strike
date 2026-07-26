@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -624,6 +625,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reflow()
 		}
 		return m, nil
+
+	case initResultMsg:
+		return m.applyInitResult(msg)
 
 	case authExpiryNoticeMsg:
 		if m.authExpiryNoticed {
@@ -2112,6 +2116,8 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		m.pendingUpgrade = true
 		m.modal = nil
 		return m, tea.Quit
+	case "/init":
+		return m.handleInitCommand()
 	default:
 		// Unknown commands fall through to skills: /name args renders the
 		// skill template and submits it as the user message.
@@ -2201,6 +2207,61 @@ func formatSessionRewound(ev protocol.SessionRewound) string {
 		}
 	}
 	return msg
+}
+
+func (m Model) handleInitCommand() (tea.Model, tea.Cmd) {
+	m.resetComposer()
+	m.clearNotice()
+	if m.services.Init == nil {
+		m.setNotice("project init is unavailable", true)
+		return m, nil
+	}
+	exists, path, err := m.services.Init.Exists()
+	if err != nil {
+		m.setNotice("init failed: "+err.Error(), true)
+		return m, nil
+	}
+	if exists {
+		m.modal = newInitConfirmModal(path, m.services.Init)
+		m.reflow()
+		return m, nil
+	}
+	init := m.services.Init
+	return m, func() tea.Msg {
+		path, created, err := init.Write(false)
+		if err != nil {
+			return initResultMsg{err: err.Error()}
+		}
+		return initResultMsg{path: path, created: created}
+	}
+}
+
+func (m Model) applyInitResult(msg initResultMsg) (tea.Model, tea.Cmd) {
+	m.modal = nil
+	if msg.canceled {
+		m.setNotice("init canceled", false)
+		m.reflow()
+		return m, nil
+	}
+	if msg.err != "" {
+		m.setNotice("init failed: "+msg.err, true)
+		m.reflow()
+		return m, nil
+	}
+	display := msg.path
+	if base := filepath.Base(display); base != "" && base != "." {
+		display = base
+	}
+	switch {
+	case msg.replaced:
+		m.setNotice("updated "+display, false)
+	case msg.created:
+		m.setNotice("created "+display, false)
+	default:
+		m.setNotice("wrote "+display, false)
+	}
+	m.reflow()
+	return m, nil
 }
 
 func (m Model) handleForkCommand() (tea.Model, tea.Cmd) {
@@ -3322,7 +3383,7 @@ func (m Model) View() string {
 		} else {
 			overlay = m.modal.view(max(8, ui.ModalWidth(m.width)), m.th)
 		}
-		content = ui.OverlayCenter(content, overlay, m.width, contentHeight)
+		content = ui.OverlayCenter(m.th, content, overlay, m.width, contentHeight)
 	}
 	parts := make([]string, 0, 1+len(footer))
 	if content != "" {
