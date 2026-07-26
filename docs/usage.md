@@ -45,8 +45,17 @@ strike launches without any provider configured. Pick one inside the TUI:
 /vim [path[:line]]             # open file in embedded editor (pane/overlay)
                                # or $EDITOR (see vimMode in config.md)
 /md-read <path>                # open a markdown file in the right markdown pane
-/memory [list|get|set|rm] …    # project-scoped durable key/value memory
-/issues [list|add|get|close] … # project-scoped issue tracker
+/memory [list|get|set|rm|export|import] …
+                               # project-scoped durable key/value memory;
+                               # export/import portable JSON (default path
+                               # strike-memory.json). import merges by key;
+                               # add --replace to wipe first
+/issues [list|add|get|close|export|import] …
+                               # project-scoped issue tracker; export/import
+                               # portable JSON (default strike-issues.json).
+                               # import merges by id; --replace wipes first.
+                               # Relative export/import paths stay under the
+                               # project root (no path escape).
 /keys                          # filterable keybind cheatsheet (also f1)
 /help                          # list commands
 ```

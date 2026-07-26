@@ -527,7 +527,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	}
 	// local.New wraps the real backend stores in the host.Services contract;
 	// the TUI never sees auth/config/models/history/memory/issues directly.
-	services := local.New(authStore, historyStore, memoryStore, issueStore, agentNames, skills, customStore)
+	services := local.New(authStore, historyStore, memoryStore, issueStore, agentNames, skills, customStore, workDir)
 	services.Files = local.NewFiles(workDir)
 	services.Sessions = local.NewSessions(sessions, projectIdentity.Key)
 
