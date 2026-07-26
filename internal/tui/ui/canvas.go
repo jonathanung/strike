@@ -47,8 +47,10 @@ func Canvas(th theme.Theme, width, height int, body string) string {
 	return strings.Join(out, "\n")
 }
 
-// restoreBackground reapplies Canvas's solid background after any top-level
-// SGR that can change it. Extended-color payloads are consumed as a group, so
+// restoreBackground reapplies Canvas's solid background after SGR that clears
+// the background (full reset or default-background). Explicit nested surface
+// fills (48 / 40–47 / 100–107) are preserved so solid panel chrome survives
+// the final canvas pass. Extended-color payloads are consumed as a group, so
 // an RGB component is never mistaken for a later SGR code.
 func restoreBackground(s, background string) string {
 	if background == "" {
@@ -64,7 +66,7 @@ func restoreBackground(s, background string) string {
 		}
 		if end, params, ok := csiSequence(s, i); ok {
 			b.WriteString(s[i:end])
-			if s[end-1] == 'm' && sgrAffectsBackground(params) {
+			if s[end-1] == 'm' && sgrClearsBackground(params) {
 				b.WriteString(background)
 			}
 			i = end
@@ -270,7 +272,10 @@ func sgrReset(code int) bool {
 	return code == 22 || code == 23 || code == 24 || code == 25 || code == 27 || code == 28 || code == 29 || code == 39 || code == 49 || code == 59
 }
 
-func sgrAffectsBackground(params string) bool {
+// sgrClearsBackground reports whether params reset the background back to the
+// terminal default (full reset or SGR 49). Explicit background sets are not
+// clears — panel surfaces must survive the canvas pass.
+func sgrClearsBackground(params string) bool {
 	if params == "" {
 		return true
 	}
@@ -284,7 +289,7 @@ func sgrAffectsBackground(params string) bool {
 		if !ok {
 			continue
 		}
-		if code == 0 || code == 49 || (code >= 40 && code <= 47) || (code >= 100 && code <= 107) || code == 48 {
+		if code == 0 || code == 49 {
 			return true
 		}
 		if (code == 38 || code == 48 || code == 58) && !strings.Contains(part, ":") {

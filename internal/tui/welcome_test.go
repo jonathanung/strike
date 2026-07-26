@@ -103,10 +103,9 @@ func TestWelcomeDashboardUsesCustomThemeWithoutChangingContent(t *testing.T) {
 
 	th := theme.Default()
 	th.Accent = fixedColor("#010203")
-	th.Border = fixedColor("#040506")
-	th.BorderMuted = fixedColor("#040506")
+	th.Surface = fixedColor("#040506")
+	th.SurfaceMuted = fixedColor("#040506")
 	th.Spacing = theme.NewSpacing(1, 4, 3, 4)
-	th.BorderStyle = theme.BorderStyle{Weight: theme.BorderWeightHeavy}
 	th.Icons.Agent = "A"
 	th.Icons.Bolt = "B"
 	customModel, _ := newAppTestModelWithOptions(Options{Theme: &th})
@@ -120,10 +119,10 @@ func TestWelcomeDashboardUsesCustomThemeWithoutChangingContent(t *testing.T) {
 		}
 	}
 	plainCustom := ansi.Strip(custom)
-	if !strings.Contains(plainCustom, "┏") || !strings.Contains(plainCustom, "A build") || !strings.Contains(plainCustom, "B") {
-		t.Errorf("custom border or glyph tokens are not observable:\n%s", custom)
+	if !strings.Contains(plainCustom, "A build") || !strings.Contains(plainCustom, "B") {
+		t.Errorf("custom glyph tokens are not observable:\n%s", custom)
 	}
-	if !strings.Contains(custom, rgbSGR("#010203")) || !strings.Contains(custom, rgbSGR("#040506")) {
+	if !strings.Contains(custom, rgbSGR("#010203")) || !strings.Contains(custom, rgbBGSGR("#040506")) {
 		t.Errorf("custom color tokens are not observable: %q", custom)
 	}
 	if defaultModel.View() == custom || lipgloss.Width(custom) != 100 {

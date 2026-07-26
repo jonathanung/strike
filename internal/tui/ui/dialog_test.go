@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -17,8 +18,11 @@ func TestDialogEmbedsTitleAndPlacesHintAtFoot(t *testing.T) {
 		Width: 50,
 	}, "choose a provider")
 
-	if top := firstLine(out); !strings.Contains(top, "─ Select provider ") {
-		t.Errorf("title not embedded in top border: %q", top)
+	if top := ansi.Strip(firstLine(out)); !strings.Contains(top, "Select provider") {
+		t.Errorf("title not embedded in top chrome: %q", top)
+	}
+	if strings.ContainsAny(ansi.Strip(firstLine(out)), "╭╮│") {
+		t.Errorf("default dialog used box-drawing chrome: %q", firstLine(out))
 	}
 	if !strings.Contains(out, "choose a provider") {
 		t.Error("dialog body missing")
@@ -33,7 +37,7 @@ func TestDialogEmbedsTitleAndPlacesHintAtFoot(t *testing.T) {
 	}
 }
 
-func TestDialogToneOverridesBorderColor(t *testing.T) {
+func TestDialogToneOverridesChromeEmphasis(t *testing.T) {
 	saved := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	t.Cleanup(func() { lipgloss.SetColorProfile(saved) })
@@ -42,18 +46,18 @@ func TestDialogToneOverridesBorderColor(t *testing.T) {
 	warn := Dialog(th, DialogOpts{Title: "Permission required", Width: 40, Tone: ToneWarning}, "rm -rf")
 	normal := Dialog(th, DialogOpts{Title: "Permission required", Width: 40}, "rm -rf")
 	if warn == normal {
-		t.Error("ToneWarning did not change the dialog border color")
+		t.Error("ToneWarning did not change the dialog chrome emphasis")
 	}
 }
 
 func TestDialogHintWrapsWhenLongerThanWidth(t *testing.T) {
 	// Long hint word-wraps, but is capped at two lines with an ellipsis on the
 	// last visible line so short terminals do not clip the overlay.
-	hint := "enter select · esc close · type to filter · ctrl+d save default · tab cycles"
+	hint := "enter select · esc close · type to filter · ctrl+d save default · tab cycles · more keys · even more"
 	out := Dialog(theme.Default(), DialogOpts{
 		Title: "Select model",
 		Hint:  hint,
-		Width: 36,
+		Width: 28,
 	}, "body line")
 	plain := out
 	if !strings.Contains(plain, "enter select") {
@@ -66,21 +70,19 @@ func TestDialogHintWrapsWhenLongerThanWidth(t *testing.T) {
 	if strings.Count(plain, "\n") < 4 {
 		t.Errorf("expected multi-line dialog with wrapped hint, got %d newlines:\n%s", strings.Count(plain, "\n"), plain)
 	}
-	// At most two muted hint body lines (plus title/body/spacing/borders).
+	// At most two muted hint body lines (plus title/body/spacing/chrome).
 	hintBody := 0
-	for _, line := range strings.Split(plain, "\n") {
+	for _, line := range strings.Split(ansi.Strip(plain), "\n") {
 		if strings.Contains(line, "enter select") || strings.Contains(line, "filter") || strings.Contains(line, "…") || strings.Contains(line, "...") {
-			if strings.Contains(line, "│") {
-				hintBody++
-			}
+			hintBody++
 		}
 	}
 	if hintBody > 2 {
 		t.Errorf("hint exceeded 2 lines (%d):\n%s", hintBody, plain)
 	}
 	for i, line := range strings.Split(plain, "\n") {
-		if w := lipgloss.Width(line); w > 36 {
-			t.Errorf("line %d width = %d, want <= 36: %q", i, w, line)
+		if w := lipgloss.Width(line); w > 28 {
+			t.Errorf("line %d width = %d, want <= 28: %q", i, w, line)
 		}
 	}
 }

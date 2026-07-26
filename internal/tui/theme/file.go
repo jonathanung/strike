@@ -15,7 +15,8 @@ type fileDoc struct {
 	ID     string                     `json:"id"`
 	Defs   map[string]string          `json:"defs"`
 	Colors map[string]json.RawMessage `json:"colors"`
-	Border string                     `json:"border"`
+	Chrome string                     `json:"chrome"` // solid | bordered
+	Border string                     `json:"border"` // light | heavy (bordered chrome glyphs)
 	Icons  *fileIcons                 `json:"icons"`
 }
 
@@ -58,6 +59,16 @@ func Parse(data []byte, idHint string) (Entry, error) {
 		if err := applyColor(&th, role, raw, defs); err != nil {
 			return Entry{}, fmt.Errorf("colors.%s: %w", role, err)
 		}
+	}
+	switch strings.ToLower(strings.TrimSpace(doc.Chrome)) {
+	case "", "solid":
+		if doc.Chrome != "" {
+			th.Chrome = ChromeSolid
+		}
+	case "bordered":
+		th.Chrome = ChromeBordered
+	default:
+		return Entry{}, fmt.Errorf("unknown chrome %q (want solid or bordered)", doc.Chrome)
 	}
 	switch strings.ToLower(strings.TrimSpace(doc.Border)) {
 	case "", "light":
@@ -110,6 +121,12 @@ func applyColor(th *Theme, role string, raw json.RawMessage, defs map[string]str
 		th.Danger = c
 	case "background":
 		th.Background = c
+	case "surface":
+		th.Surface = c
+	case "surfaceFocus":
+		th.SurfaceFocus = c
+	case "surfaceMuted":
+		th.SurfaceMuted = c
 	case "border":
 		th.Border = c
 	case "borderFocus":

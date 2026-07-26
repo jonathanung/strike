@@ -35,7 +35,7 @@ selection, and layout). Keep this catalog synchronized with `internal/tui/ui`.
 
 | Component | Exact signature | Use |
 |---|---|---|
-| Panel | `Panel(th theme.Theme, opts PanelOpts, body string) string` | Width-safe framed tile. `PanelOpts` has `Title`, `Footer`, mandatory `Width`, optional `Height`, `Focused`, `Dim`, `Tone`, and `Borderless`. Border precedence is `Tone > Focused > Dim > Border`. `Borderless` omits title, footer, padding, and all focus/tone chrome while structurally fitting the body to exact Width and optional Height. A fixed Height below two uses the same structural rendering, regardless of `Borderless`; Height two renders only the top and bottom border. |
+| Panel | `Panel(th theme.Theme, opts PanelOpts, body string) string` | Width-safe framed tile. `PanelOpts` has `Title`, `Footer`, mandatory `Width`, optional `Height`, `Focused`, `Dim`, `Tone`, and `Borderless`. Default theme chrome is **solid** (surface fills via `Surface`/`SurfaceFocus`/`SurfaceMuted`; no box-drawing frame). `chrome: bordered` uses box-drawing borders. Chrome/surface precedence is `Tone > Focused > Dim > default`. `Borderless` omits title, footer, padding, and all focus/tone chrome while structurally fitting the body to exact Width and optional Height. A fixed Height below two uses the same structural rendering, regardless of `Borderless`; Height two renders only the top and bottom chrome bars. |
 | Panel geometry | `InnerWidth(width int) int`; `PanelInnerWidth(th theme.Theme, width int) int`; `PanelInnerHeight(width, height int) int` | Panel body dimensions. Themed callers must use `PanelInnerWidth`; `InnerWidth` is default-theme compatibility only. `PanelInnerHeight` clamps nonpositive dimensions and removes two rows only when a border fits at the supplied width and height; narrow panels and fixed heights below two retain their full height. |
 | Dialog | `Dialog(th theme.Theme, opts DialogOpts, body string) string` | Focused Panel with a muted final hint. `DialogOpts`: `Title`, `Hint`, `Width`, `Height`, `Tone`. |
 | Badge | `Badge(th theme.Theme, tone Tone, text string) string` | Token-sized bracketed status chip. |
@@ -72,9 +72,11 @@ otherwise `Background` resolves to a solid `lipgloss.TerminalColor`.
 | `Accent`, `AccentAlt`, `Highlight` | primary, secondary, and selected emphasis |
 | `Success`, `Warning`, `Error`, `Danger` | semantic state colors |
 | `Background` | application background (`lipgloss.TerminalColor`) |
-| `Border`, `BorderFocus`, `BorderMuted` | normal, active, and calm chrome |
+| `Surface`, `SurfaceFocus`, `SurfaceMuted` | solid panel fills (default / focused / dim) |
+| `Border`, `BorderFocus`, `BorderMuted` | bordered-chrome frame colors |
 | `UserLabel`, `ToolLabel`, `DiffAdded`, `DiffRemoved` | transcript and diff roles |
-| `BorderStyle` | panel border weight and six glyphs |
+| `Chrome` | `ChromeSolid` (default) or `ChromeBordered` |
+| `BorderStyle` | bordered-chrome panel border weight and six glyphs |
 | `Spacing` | `None`, `XS`, `SM`, `MD`, `LG` layout gaps; `Label` is the gap between a numbered permission-choice shortcut (for example, `1)`) and its label, defaulting to `1` when resolved |
 | `Icons` | glyph set below |
 | `AgentState` | runtime status coloring via `Theme.AgentStateColor` / `AgentStateStyle` (not a palette field) |

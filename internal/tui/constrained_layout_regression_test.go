@@ -213,9 +213,9 @@ func TestConstrainedCompletionAndComposerViewsUseExactlyAllocatedRows(t *testing
 	}
 	candidate := m.completion.Candidates[0].Spec.Name
 	for _, tt := range []struct {
-		height   int
-		bordered bool
-	}{{height: 0}, {height: 1}, {height: 2}, {height: 3, bordered: true}} {
+		height int
+		chrome bool
+	}{{height: 0}, {height: 1}, {height: 2}, {height: 3, chrome: true}} {
 		t.Run("height "+itoa(tt.height), func(t *testing.T) {
 			assertAllocation := func(name, out, content string) {
 				plain := ansi.Strip(out)
@@ -228,9 +228,16 @@ func TestConstrainedCompletionAndComposerViewsUseExactlyAllocatedRows(t *testing
 				if rows := strings.Count(out, "\n") + 1; rows != tt.height {
 					t.Errorf("%s rows = %d, want allocated %d", name, rows, tt.height)
 				}
-				bordered := strings.Contains(plain, "╭") || strings.Contains(plain, "╰")
-				if bordered != tt.bordered {
-					t.Errorf("%s bordered=%v, want %v: %q", name, bordered, tt.bordered, plain)
+				// Height ≥ 3 uses solid chrome (title/footer bars, no box-drawing).
+				hasBox := strings.ContainsAny(plain, "╭╰│")
+				if hasBox {
+					t.Errorf("%s used box-drawing chrome: %q", name, plain)
+				}
+				if tt.chrome {
+					// Composer title is "prompt ❯"; completion shows a candidate line.
+					if name == "composer" && !strings.Contains(plain, "prompt") {
+						t.Errorf("%s chrome missing title: %q", name, plain)
+					}
 				}
 				if !strings.Contains(plain, content) {
 					t.Errorf("%s height %d omitted useful content %q: %q", name, tt.height, content, plain)

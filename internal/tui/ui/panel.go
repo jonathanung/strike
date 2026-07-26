@@ -10,16 +10,15 @@ import (
 
 // PanelOpts configures Panel.
 type PanelOpts struct {
-	// Title is embedded in the top border: ╭─ Title ─────╮. Empty draws a
-	// plain top border.
+	// Title is drawn in the top chrome row. Empty draws a plain top bar
+	// (solid) or plain top border (bordered).
 	Title string
-	// Footer is a short hint embedded in the bottom border, muted:
-	// ╰─ esc close ─╯. Long hints are better placed inside the body (see
-	// Dialog); the border truncates.
+	// Footer is a short muted hint in the bottom chrome row. Long hints are
+	// better placed inside the body (see Dialog); chrome truncates.
 	Footer string
 	// Width is the mandatory outer width. Output is exactly this many cells
-	// wide (borders included) when Width >= 3; narrower panels drop the
-	// border and degrade to plain, truncated text.
+	// wide when Width >= 1; narrower panels drop chrome and degrade to plain,
+	// truncated text.
 	Width int
 	// Height, when > 0, fixes the outer height: content is truncated or
 	// blank-padded to fit. Heights below two render structurally without panel
@@ -28,27 +27,24 @@ type PanelOpts struct {
 	// Borderless omits panel chrome and padding. The body is structurally fit
 	// to Width and Height; Title, Footer, Focused, Dim, and Tone are ignored.
 	Borderless bool
-	// Focused selects BorderFocus instead of Border. When Tone is default,
+	// Focused selects the focus surface/border token. When Tone is default,
 	// Focused wins over Dim (full precedence: Tone > Focused > Dim > default).
 	Focused bool
-	// Dim selects BorderMuted for calm, inactive chrome (e.g. bento tiles).
-	// Ignored when Focused or Tone is set.
+	// Dim selects the muted surface/border for calm, inactive chrome (e.g.
+	// bento tiles). Ignored when Focused or Tone is set.
 	Dim bool
-	// Tone overrides the border color entirely (e.g. ToneWarning for a
+	// Tone overrides chrome emphasis entirely (e.g. ToneWarning for a
 	// permission dialog). Non-default Tone wins over Focused and Dim.
 	Tone Tone
 }
 
-// Panel is the framed tile primitive: a rounded border with its title woven
-// into the top edge and an optional hint woven into the bottom edge. It is
-// the building block for Dialog and Card and for the app's transcript and
-// composer regions.
+// Panel is the framed tile primitive: a solid surface (default) or optional
+// box-drawing border, with its title in the top chrome and an optional hint
+// in the bottom chrome. It is the building block for Dialog and Card and for
+// the app's transcript and composer regions.
 //
 //	body := "streaming transcript…"
 //	out := ui.Panel(th, ui.PanelOpts{Title: "session", Width: 60, Focused: true}, body)
-//	// ╭─ session ───────────────────────────────────────────────╮
-//	// │ streaming transcript…                                    │
-//	// ╰──────────────────────────────────────────────────────────╯
 //
 // Output never exceeds Width. Themed callers wrap body to
 // PanelInnerWidth(th, Width) for the nicest result; Panel truncates any line
@@ -69,7 +65,7 @@ func Panel(th theme.Theme, opts PanelOpts, body string) string {
 		}
 		return strings.Join(rows, "\n")
 	}
-	bordered, padX, inner := panelMetrics(th, width)
+	chrome, padX, inner := panelMetrics(th, width)
 
 	rows := strings.Split(body, "\n")
 	for i, r := range rows {
@@ -77,17 +73,39 @@ func Panel(th theme.Theme, opts PanelOpts, body string) string {
 	}
 	if opts.Height > 0 {
 		contentRows := opts.Height
-		if bordered {
+		if chrome {
 			contentRows = max(0, opts.Height-2)
 		}
 		rows = fitRows(th, rows, contentRows, inner)
 	}
 
-	if !bordered {
-		// Too narrow for a border: plain, width-clamped text.
+	if !chrome {
+		// Too narrow for chrome: plain, width-clamped text.
 		return strings.Join(rows, "\n")
 	}
 
+	if th.Chrome == theme.ChromeBordered {
+		return renderBorderedPanel(th, opts, width, padX, rows)
+	}
+	return renderSolidPanel(th, opts, width, padX, rows)
+}
+
+func renderSolidPanel(th theme.Theme, opts PanelOpts, width, padX int, rows []string) string {
+	bg := panelSurfaceColor(th, opts)
+	titleStyle := panelTitleStyle(th, opts)
+	var b strings.Builder
+	b.WriteString(solidEdge(th, opts.Title, width, padX, bg, titleStyle))
+	pad := strings.Repeat(" ", padX)
+	for _, row := range rows {
+		b.WriteByte('\n')
+		b.WriteString(paintSurface(pad+row+pad, width, bg))
+	}
+	b.WriteByte('\n')
+	b.WriteString(solidEdge(th, opts.Footer, width, padX, bg, th.S().Muted))
+	return b.String()
+}
+
+func renderBorderedPanel(th theme.Theme, opts PanelOpts, width, padX int, rows []string) string {
 	color := panelBorderColor(th, opts)
 	bs := lipgloss.NewStyle().Foreground(color)
 	border := th.BorderStyle
@@ -114,14 +132,14 @@ func Panel(th theme.Theme, opts PanelOpts, body string) string {
 
 // InnerWidth is the default-theme compatibility helper for the content width
 // inside a Panel of the given outer width. Themed callers must use
-// PanelInnerWidth. It returns width itself when too narrow for a border, and
+// PanelInnerWidth. It returns width itself when too narrow for chrome, and
 // 0 when width <= 0.
 func InnerWidth(width int) int {
 	return PanelInnerWidth(theme.Default(), width)
 }
 
-// PanelInnerWidth reports the content width using th's resolved panel spacing.
-// Themed callers must use this instead of InnerWidth.
+// PanelInnerWidth reports the content width using th's resolved panel spacing
+// and chrome mode. Themed callers must use this instead of InnerWidth.
 func PanelInnerWidth(th theme.Theme, width int) int {
 	_, _, inner := panelMetrics(th.Resolve(), width)
 	return inner
@@ -129,7 +147,7 @@ func PanelInnerWidth(th theme.Theme, width int) int {
 
 // PanelInnerHeight reports the body height available inside a Panel with the
 // supplied outer dimensions. It clamps nonpositive dimensions to zero and
-// subtracts border rows only when a border fits at width and height.
+// subtracts chrome rows only when chrome fits at width and height.
 func PanelInnerHeight(width, height int) int {
 	if width <= 0 || height <= 0 {
 		return 0
@@ -140,20 +158,26 @@ func PanelInnerHeight(width, height int) int {
 	return max(0, height-2)
 }
 
-// panelMetrics reports, for an outer width: whether a border fits, the
+// panelMetrics reports, for an outer width: whether chrome fits, the
 // horizontal padding inside it, and the resulting content width.
-func panelMetrics(th theme.Theme, width int) (bordered bool, padX, inner int) {
+func panelMetrics(th theme.Theme, width int) (chrome bool, padX, inner int) {
 	switch {
 	case width < 1:
 		return false, 0, 0
 	case width < 3:
 		return false, 0, width
-	case width < 6:
-		return true, 0, width - 2
-	default:
+	}
+	chrome = true
+	padX = clamp(th.Spacing.XS, 0, (width-1)/2)
+	if th.Chrome == theme.ChromeBordered {
+		if width < 6 {
+			return true, 0, width - 2
+		}
 		padX = clamp(th.Spacing.XS, 0, (width-3)/2)
 		return true, padX, width - 2 - 2*padX
 	}
+	// Solid: no vertical frame columns — padding only.
+	return true, padX, width - 2*padX
 }
 
 func panelBorderColor(th theme.Theme, opts PanelOpts) lipgloss.AdaptiveColor {
@@ -168,6 +192,65 @@ func panelBorderColor(th theme.Theme, opts PanelOpts) lipgloss.AdaptiveColor {
 	default:
 		return th.Border
 	}
+}
+
+func panelSurfaceColor(th theme.Theme, opts PanelOpts) lipgloss.TerminalColor {
+	th = th.Resolve()
+	switch {
+	case opts.Tone != ToneDefault:
+		// Tone panels still use the focus surface; title/edge carry the tone.
+		return th.SurfaceFocus
+	case opts.Focused:
+		return th.SurfaceFocus
+	case opts.Dim:
+		return th.SurfaceMuted
+	default:
+		return th.Surface
+	}
+}
+
+func panelTitleStyle(th theme.Theme, opts PanelOpts) lipgloss.Style {
+	th = th.Resolve()
+	s := th.S()
+	switch {
+	case opts.Tone != ToneDefault:
+		return toneStrongStyle(th, opts.Tone)
+	case opts.Focused:
+		return s.Title
+	case opts.Dim:
+		return s.MutedStrong
+	default:
+		return s.Title
+	}
+}
+
+// solidEdge builds one full-width surface bar with an optional label.
+func solidEdge(th theme.Theme, label string, width, padX int, bg lipgloss.TerminalColor, labelStyle lipgloss.Style) string {
+	if label == "" {
+		return paintSurface(strings.Repeat(" ", width), width, bg)
+	}
+	inner := max(0, width-2*padX)
+	label = truncate(th, label, inner)
+	seg := strings.Repeat(" ", padX) + labelStyle.Render(label)
+	// Trailing pad keeps the bar rectangular under the surface background.
+	if gap := width - lipgloss.Width(seg); gap > 0 {
+		seg += strings.Repeat(" ", gap)
+	}
+	return paintSurface(seg, width, bg)
+}
+
+// paintSurface applies a solid background across exactly width cells. Nested
+// styles that clear the background (SGR 0 / 49) are patched so the surface
+// fill stays continuous across the row.
+func paintSurface(content string, width int, bg lipgloss.TerminalColor) string {
+	if width < 1 {
+		return ""
+	}
+	rendered := lipgloss.NewStyle().Background(bg).Width(width).MaxWidth(width).Render(content)
+	if prefix := theme.BackgroundPrefix(bg); prefix != "" {
+		return restoreBackground(rendered, prefix)
+	}
+	return rendered
 }
 
 // edgeBorder builds one horizontal border run of exactly horiz cells, with an

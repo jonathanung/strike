@@ -111,45 +111,52 @@ func TestCanvasRestoresBackgroundAfterResets(t *testing.T) {
 	assertSolidBackground(t, out, "48;2;17;34;51")
 }
 
-func TestCanvasSolidBackgroundWinsOverNestedBackgroundsAndPayloadValues(t *testing.T) {
+func TestCanvasPreservesNestedSurfacesAndRestoresAfterBackgroundClear(t *testing.T) {
 	setTrueColor(t)
 	th := theme.Default()
 	th.Background = lipgloss.Color("#112233")
 	canvas := "48;2;17;34;51"
-	for _, tt := range []struct {
-		name string
-		body string
-	}{
-		{"standard", "\x1b[41mred"},
-		{"bright", "\x1b[101mbright"},
-		{"indexed payload 49", "\x1b[48;5;49mindexed"},
-		{"rgb payload 49", "\x1b[48;2;49;0;49mrgb"},
-		{"colon rgb", "\x1b[48:2::49:0:49mcolon"},
-		{"combined foreground background", "\x1b[38;5;49;48;5;49mboth"},
-		{"resets", "before\x1b[0mafter-zero\x1b[49mafter-49"},
-		{"C1 reset", "before\x9b0mafter-zero\x9b49mafter-49"},
-		{"OSC8 UTF8", "\x1b]8;;https://example.test\x1b\\界\x1b]8;;\x1b\\"},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			out := Canvas(th, 40, 1, tt.body)
-			if got := effectiveBackgroundCells(out); len(got) == 0 {
-				t.Fatal("canvas emitted no printable cells")
-			} else {
-				for i, background := range got {
-					if background != canvas {
-						t.Fatalf("printable cell %d effective background = %q, want canvas %q: %q", i, background, canvas, out)
+
+	t.Run("nested surface fill is preserved", func(t *testing.T) {
+		out := Canvas(th, 12, 1, "\x1b[48;5;49msurface")
+		got := effectiveBackgroundCells(out)
+		if len(got) == 0 {
+			t.Fatal("canvas emitted no printable cells")
+		}
+		if got[0] != "48;5;49" {
+			t.Fatalf("nested surface cell 0 background = %q, want 48;5;49: %q", got[0], out)
+		}
+	})
+
+	t.Run("reset restores canvas background", func(t *testing.T) {
+		for _, tt := range []struct {
+			name string
+			body string
+		}{
+			{"resets", "before\x1b[0mafter-zero\x1b[49mafter-49"},
+			{"C1 reset", "before\x9b0mafter-zero\x9b49mafter-49"},
+			{"OSC8 UTF8", "\x1b]8;;https://example.test\x1b\\界\x1b]8;;\x1b\\"},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				out := Canvas(th, 40, 1, tt.body)
+				if got := effectiveBackgroundCells(out); len(got) == 0 {
+					t.Fatal("canvas emitted no printable cells")
+				} else {
+					for i, background := range got {
+						if background != canvas {
+							t.Fatalf("printable cell %d effective background = %q, want canvas %q: %q", i, background, canvas, out)
+						}
 					}
 				}
-			}
-		})
-	}
+			})
+		}
+	})
 
-	t.Run("cropped inherited nested background", func(t *testing.T) {
+	t.Run("cropped open surface SGR is inherited like other active styles", func(t *testing.T) {
 		out := Canvas(th, 30, 1, "\x1b[48;5;49mdiscarded\nretained")
-		for i, background := range effectiveBackgroundCells(out) {
-			if background != canvas {
-				t.Fatalf("cropped cell %d effective background = %q, want canvas %q: %q", i, background, canvas, out)
-			}
+		got := effectiveBackgroundCells(out)
+		if len(got) == 0 || got[0] != "48;5;49" {
+			t.Fatalf("cropped open surface was not inherited onto retained row: %q (%v)", out, got)
 		}
 	})
 }

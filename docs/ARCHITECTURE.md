@@ -67,8 +67,8 @@ event stream the TUI rendered from (see `internal/protocol/codec.go`).
 | `internal/host` | **Frozen contract**: the services a frontend needs from its host process | stdlib only — enforced by the boundary test |
 | `internal/host/local` | Real `host.Services` implementation; wraps auth/config/models/history/memory/issue/files/mcp for the frontend | `auth`, `config`, `history`, `host`, `issue`, `mcp`, `memory`, `models` |
 | `internal/tui` | Bubble Tea frontend: app model, layout, transcript cells, modals, composer | `protocol`, `host`, `tui/...` only — enforced by the boundary test |
-| `internal/tui/theme` | Resolved design tokens: adaptive color roles, terminal background, glyphs, border/spacing tokens, and precomputed styles | lipgloss, stdlib |
-| `internal/tui/ui` | Reusable component library (Panel, Dialog, Badge, KeyHints, StatusBar, List, Notice, Card/Bento, OverlayCenter, Canvas, Logo) | stdlib, lipgloss, bubbles, charmbracelet/x/ansi, `tui/theme` |
+| `internal/tui/theme` | Resolved design tokens: adaptive color roles, surfaces, chrome mode (solid\|bordered), terminal background, glyphs, border/spacing tokens, and precomputed styles | lipgloss, stdlib |
+| `internal/tui/ui` | Reusable component library (Panel, Dialog, Badge, KeyHints, StatusBar, List, Notice, Card/Bento, OverlayCenter/Scrim, Canvas, Logo) | stdlib, lipgloss, bubbles, charmbracelet/x/ansi, `tui/theme` |
 
 ## Dependency rules
 
@@ -144,6 +144,8 @@ Color themes load from bundled JSON plus `~/.strike/themes` and
 and `config.theme` / ctrl+d persists the choice. Session-local appearance
 (`/theme dark|light|auto`) still calls `lipgloss.SetHasDarkBackground` for
 forced modes and restores the initially detected background for auto.
+Default chrome is **solid** (surface fills, no box-drawing primary frame);
+themes may opt into `chrome: "bordered"`. See [theme.md](theme.md).
 
 ## Why a host-services seam
 
@@ -368,10 +370,12 @@ Same package `internal/engine`; split for reviewability only.
 ## TUI theme and style boundary
 
 `theme.Theme.Resolve` is the runtime normalization point for partial themes.
-It fills unset colors, icons, border style, and spacing from the stock theme;
-`Background` is a `lipgloss.TerminalColor`, with `theme.NoBackground()` the
-only explicit transparent value. `(Theme).S()` derives the shared semantic
-styles from those resolved roles.
+It fills unset colors (including surfaces), chrome mode, icons, border style,
+and spacing from the stock theme; `Background` is a `lipgloss.TerminalColor`,
+with `theme.NoBackground()` the only explicit transparent value.
+`(Theme).S()` derives the shared semantic styles from those resolved roles.
+`ui.Canvas` preserves nested surface backgrounds and restores the application
+background only after SGR clears.
 
 Root TUI views compose completed `theme.Styles` and `ui` components, then do
 only structural work such as concatenation, joining, line selection, and

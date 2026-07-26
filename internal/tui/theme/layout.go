@@ -7,7 +7,20 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// BorderWeight selects a stock border glyph preset.
+// ChromeMode selects how panels paint primary chrome.
+type ChromeMode uint8
+
+const (
+	// ChromeUnset resolves to ChromeSolid.
+	ChromeUnset ChromeMode = iota
+	// ChromeSolid paints panels as filled surfaces with title/footer bars
+	// (no box-drawing frame). Default for the stock theme.
+	ChromeSolid
+	// ChromeBordered paints classic box-drawing panel borders.
+	ChromeBordered
+)
+
+// BorderWeight selects a stock border glyph preset (ChromeBordered only).
 type BorderWeight uint8
 
 const (
@@ -16,11 +29,18 @@ const (
 	BorderWeightHeavy
 )
 
-// BorderStyle controls the six glyphs used to render panels.
+// BorderStyle controls the six glyphs used to render bordered panels.
 type BorderStyle struct {
 	Weight                                     BorderWeight
 	TopLeft, TopRight, BottomLeft, BottomRight string
 	Horizontal, Vertical                       string
+}
+
+func resolveChrome(c ChromeMode) ChromeMode {
+	if c == ChromeBordered {
+		return ChromeBordered
+	}
+	return ChromeSolid
 }
 
 func lightBorderStyle() BorderStyle {
