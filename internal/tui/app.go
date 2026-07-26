@@ -647,6 +647,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case composerEditorFinishedMsg:
 		return m.applyComposerEditorFinished(msg)
 
+	case exportFinishedMsg:
+		return m.applyExportFinished(msg)
+
 	case terminalOutputMsg:
 		return m.applyTerminalOutput()
 
@@ -2151,6 +2154,8 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		return m.handleUndoCommand(fields[1:])
 	case "/session":
 		return m.handleSessionCommand(fields[1:])
+	case "/export":
+		return m.handleExportCommand(fields[1:])
 	case "/help":
 		m.resetComposer()
 		m.clearNotice()

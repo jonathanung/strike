@@ -49,6 +49,9 @@ strike launches without any provider configured. Pick one inside the TUI:
 /undo chat                     # drop last turn from history only
 /undo files                    # drop last turn and restore files edited then
 /rewind                        # alias of /undo
+/export [path] [--open]        # write the transcript to markdown (default
+                               # .strike/exports/… or $TMPDIR); --open hands
+                               # the file to $EDITOR / $VISUAL
 /vim [path[:line]]             # open file in embedded editor (pane/overlay)
                                # or $EDITOR (see vimMode in config.md)
 /md-read <path>                # open a markdown file in the right markdown pane
@@ -82,6 +85,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/session <id>` | resume that root session by id |
 | `/fork` | copy the current session JSONL into a new id (idle only) |
 | `/undo` / `/rewind` | undo last turn (idle only); bare opens picker; `chat` keeps disk; `files` restores per-file checkpoints from that turn (never `git reset --hard`) |
+| `/export` | dump the visible transcript to markdown (user/assistant/tool summaries); redacts common API-key shapes; default path under `.strike/exports/` or tmp; `--open` launches `$EDITOR` |
 | `/compact` | ask the engine to compact model history |
 | `/memory` | bare = list browser; `list [tag]`, `get <key>`, `set <key> <value>`, `rm <key>`, `export [path]`, `import <path> [--replace]` (portable JSON; relative paths stay under project root) |
 | `/issues` | bare = list browser; `list [open\|closed]`, `add <title>`, `get <id>`, `close <id>`, `export [path]`, `import <path> [--replace]` (same portable rules as memory) |
