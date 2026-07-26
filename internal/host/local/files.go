@@ -761,7 +761,7 @@ func resolveUnderRoot(root, path string) (resolved, rel string, err error) {
 		if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
 			return "", "", fmt.Errorf("path escapes project root")
 		}
-		candidate = filepath.Join(rootAbs, cleaned)
+		candidate = filepath.Join(rootReal, cleaned)
 	}
 	// Resolve existing path (follows final symlink).
 	real, err := filepath.EvalSymlinks(candidate)

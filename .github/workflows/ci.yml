@@ -47,9 +47,9 @@ jobs:
           fi
 
 
-      - name: Build web assets
+      - name: Build and test web UI
         if: hashFiles('web/package.json') != ''
-        run: make web-build
+        run: make web-check
 
       - name: Build
         run: go build ./...
