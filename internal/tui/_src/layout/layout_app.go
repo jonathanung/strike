@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/ui"
 )
 
@@ -153,16 +154,30 @@ func cloneKeybindMap(in map[string][]string) map[string][]string {
 	return out
 }
 
+// effectivePermissionAutoApproveSeconds is the visible countdown duration.
+// Config permissionAutoApproveSeconds wins when set; otherwise soft-approve
+// mode defaults to protocol.SoftApproveSeconds (15). Zero means disabled.
+func (m *Model) effectivePermissionAutoApproveSeconds() int {
+	if m.permissionAutoApproveSeconds > 0 {
+		return m.permissionAutoApproveSeconds
+	}
+	if m.permMode.Normalize() == protocol.PermissionModeSoftApprove {
+		return protocol.SoftApproveSeconds
+	}
+	return 0
+}
+
 // armPermissionAutoApprove starts the modal countdown when mode is armed and
-// the permission name is not excluded.
+// the permission name is not excluded. Only call for a visible top-slot modal.
 func (m *Model) armPermissionAutoApprove(pm *permissionModal, permission string) tea.Cmd {
-	if pm == nil || m.permissionAutoApproveSeconds <= 0 {
+	seconds := m.effectivePermissionAutoApproveSeconds()
+	if pm == nil || seconds <= 0 {
 		return nil
 	}
 	if permissionAutoApproveExcluded(permission, m.permissionAutoApproveExclude) {
 		return nil
 	}
-	return pm.armAutoApprove(m.permissionAutoApproveSeconds)
+	return pm.armAutoApprove(seconds)
 }
 
 func permissionAutoApproveExcluded(permission string, exclude []string) bool {

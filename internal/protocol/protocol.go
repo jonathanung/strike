@@ -150,10 +150,18 @@ const (
 	// PermissionModePlan is hard read-only (deny write/edit) and aligns with
 	// the plan agent / plan-implement workflow.
 	PermissionModePlan PermissionMode = "plan"
+	// PermissionModeSoftApprove shows permission asks with a visible countdown
+	// that auto-allows once if the user does nothing (TUI soft-approve). Engine
+	// evaluation matches default; hard denies still win.
+	PermissionModeSoftApprove PermissionMode = "soft-approve"
 	// PermissionModeAcceptEdits auto-allows edit/write; bash/network still ask.
 	PermissionModeAcceptEdits PermissionMode = "accept-edits"
 	// PermissionModeYolo skips asks that are not hard-denied (agent/phase/config deny).
 	PermissionModeYolo PermissionMode = "yolo"
+
+	// SoftApproveSeconds is the default visible countdown for soft-approve mode
+	// when permissionAutoApproveSeconds is unset (0).
+	SoftApproveSeconds = 15
 )
 
 // PermissionModes lists postures from safest to most permissive for cycling.
@@ -161,6 +169,7 @@ func PermissionModes() []PermissionMode {
 	return []PermissionMode{
 		PermissionModeDefault,
 		PermissionModePlan,
+		PermissionModeSoftApprove,
 		PermissionModeAcceptEdits,
 		PermissionModeYolo,
 	}
@@ -168,16 +177,19 @@ func PermissionModes() []PermissionMode {
 
 // ParsePermissionMode resolves a user-typed mode, case- and space-insensitively.
 // Empty input yields PermissionModeDefault; unrecognized values report false.
-// Accepts "accept_edits" and "acceptedits" as aliases for accept-edits.
+// Accepts "accept_edits"/"acceptedits" for accept-edits and "soft"/"softapprove"
+// for soft-approve.
 func ParsePermissionMode(value string) (PermissionMode, bool) {
 	normalized := PermissionMode(strings.ToLower(strings.TrimSpace(value)))
 	normalized = PermissionMode(strings.ReplaceAll(string(normalized), "_", "-"))
 	normalized = PermissionMode(strings.ReplaceAll(string(normalized), " ", ""))
-	if normalized == "" || normalized == "acceptedits" {
-		if normalized == "acceptedits" {
-			return PermissionModeAcceptEdits, true
-		}
+	switch normalized {
+	case "":
 		return PermissionModeDefault, true
+	case "acceptedits":
+		return PermissionModeAcceptEdits, true
+	case "soft", "softapprove":
+		return PermissionModeSoftApprove, true
 	}
 	for _, mode := range PermissionModes() {
 		if normalized == mode {
@@ -200,6 +212,8 @@ func (m PermissionMode) Describe() string {
 	switch m.Normalize() {
 	case PermissionModePlan:
 		return "read-only plan posture — write/edit denied"
+	case PermissionModeSoftApprove:
+		return "count down 15s then allow once — veto anytime"
 	case PermissionModeAcceptEdits:
 		return "auto-allow edit/write — still ask on bash/network"
 	case PermissionModeYolo:
@@ -214,6 +228,8 @@ func (m PermissionMode) Short() string {
 	switch m.Normalize() {
 	case PermissionModePlan:
 		return "plan"
+	case PermissionModeSoftApprove:
+		return "soft"
 	case PermissionModeAcceptEdits:
 		return "edits"
 	case PermissionModeYolo:
