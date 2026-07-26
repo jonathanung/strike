@@ -99,13 +99,17 @@ func countEvents[T protocol.Event](events []protocol.Event) int {
 	return n
 }
 
-// drainAndReply runs until the parent TurnCompleted and every started child
-// has emitted ChildCompleted, auto-approving any PermissionAsked.
+// drainAndReply runs until the parent has finished its work turn(s), every
+// started child has emitted ChildCompleted, and any auto-nudge turn that
+// injects child.completed into the parent model has completed. Auto-approves
+// PermissionAsked.
 func drainAndReply(t *testing.T, eng *engine.Engine, timeout time.Duration) []protocol.Event {
 	t.Helper()
 	var collected []protocol.Event
 	var parentDone bool
 	var started, completed int
+	var noticeSeen bool
+	var turnsAfterNotice int
 	guard := time.NewTimer(timeout)
 	defer guard.Stop()
 	for {
@@ -124,19 +128,59 @@ func drainAndReply(t *testing.T, eng *engine.Engine, timeout time.Duration) []pr
 				started++
 			case protocol.ChildCompleted:
 				completed++
+			case protocol.UserMessage:
+				if strings.Contains(ev.Text, "[child.completed") {
+					noticeSeen = true
+				}
 			case protocol.TurnCompleted:
 				// Child TurnCompleted is not re-emitted on the parent stream, so
 				// any TurnCompleted here is the invoking engine's turn.
 				parentDone = true
+				if noticeSeen {
+					turnsAfterNotice++
+				}
 			}
-			if parentDone && started == completed {
+			// With children: wait for auto-nudge turn(s) covering every
+			// child.completed. Without children: first parent turn is enough.
+			if !parentDone || started != completed {
+				continue
+			}
+			if started == 0 {
+				return collected
+			}
+			if turnsAfterNotice >= 1 && childCompletionNotices(collected) >= completed {
 				return collected
 			}
 		case <-guard.C:
-			t.Fatalf("timed out; parentDone=%v started=%d completed=%d events=%v",
-				parentDone, started, completed, summarizeEvents(collected))
+			t.Fatalf("timed out; parentDone=%v started=%d completed=%d notice=%v turnsAfterNotice=%d notices=%d events=%v",
+				parentDone, started, completed, noticeSeen, turnsAfterNotice, childCompletionNotices(collected), summarizeEvents(collected))
 		}
 	}
+}
+
+func childCompletionNotices(events []protocol.Event) int {
+	n := 0
+	for _, ev := range events {
+		if um, ok := ev.(protocol.UserMessage); ok {
+			n += strings.Count(um.Text, "[child.completed")
+		}
+	}
+	return n
+}
+
+// childCompletedNudgeStep matches the parent auto-nudge UserInput that carries
+// a child.completed summary after a non-blocking task finishes.
+func childCompletedNudgeStep(reply string) streamStep {
+	s := completedStep(reply)
+	s.match = func(req provider.Request) bool {
+		for _, m := range req.Messages {
+			if m.Role == provider.RoleUser && strings.Contains(m.Text, "[child.completed") {
+				return true
+			}
+		}
+		return false
+	}
+	return s
 }
 
 func TestForegroundTaskIndependentHistory(t *testing.T) {
@@ -158,6 +202,7 @@ func TestForegroundTaskIndependentHistory(t *testing.T) {
 			s.match = matchToolResult("task-1")
 			return s
 		}(),
+		childCompletedNudgeStep("parent ack child"),
 	)
 	eng := engine.New(engine.Options{
 		SessionID:       parentSession,
@@ -231,18 +276,43 @@ func TestForegroundTaskIndependentHistory(t *testing.T) {
 		t.Errorf("task output = %q, want session id %q", taskEnds[0].Output, started[0].SessionID)
 	}
 
-	// Three Stream calls: parent tool-use, parent final, child final (order of
-	// the last two may race; collect all requests).
-	if prov.callCount() != 3 {
-		t.Fatalf("Stream calls = %d, want 3", prov.callCount())
+	// Four Stream calls: parent tool-use, parent final, child final, parent
+	// child.completed nudge (order of middle calls may race).
+	if prov.callCount() != 4 {
+		t.Fatalf("Stream calls = %d, want 4", prov.callCount())
 	}
 	var reqs []provider.Request
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 4; i++ {
 		reqs = append(reqs, receiveRequest(t, prov.requests))
+	}
+	var sawNudge bool
+	for _, r := range reqs {
+		for _, msg := range r.Messages {
+			if msg.Role == provider.RoleUser && strings.Contains(msg.Text, "[child.completed") {
+				sawNudge = true
+				if !strings.Contains(msg.Text, "child finished work") {
+					t.Errorf("nudge missing child summary: %q", msg.Text)
+				}
+			}
+		}
+	}
+	if !sawNudge {
+		t.Fatal("missing parent auto-nudge with child.completed")
 	}
 	var childReq, parentFinal *provider.Request
 	for i := range reqs {
 		r := &reqs[i]
+		// Skip auto-nudge streams (they also contain prior tool results).
+		isNudge := false
+		for _, msg := range r.Messages {
+			if msg.Role == provider.RoleUser && strings.Contains(msg.Text, "[child.completed") {
+				isNudge = true
+				break
+			}
+		}
+		if isNudge {
+			continue
+		}
 		if len(r.Messages) > 0 && r.Messages[0].Role == provider.RoleUser && r.Messages[0].Text == taskPrompt {
 			childReq = r
 			continue
@@ -367,6 +437,8 @@ func TestParentInterruptLeavesChildRunning(t *testing.T) {
 			s.match = matchToolResult("task-int")
 			return s
 		}(),
+		// Child stays blocked; nudge unused unless test is extended.
+		childCompletedNudgeStep("unused nudge"),
 	)
 	eng := engine.New(engine.Options{
 		SessionID:       "parent-int",
@@ -485,6 +557,7 @@ func TestChildCannotWidenPermissions(t *testing.T) {
 			s.match = matchToolResult("task-perm")
 			return s
 		}(),
+		childCompletedNudgeStep("parent ack perm child"),
 	)
 	rules := []permission.Ruleset{
 		permission.Defaults(),
@@ -563,6 +636,7 @@ func TestTaskExactlyOneTerminalResult(t *testing.T) {
 			s.match = matchToolResult("task-once")
 			return s
 		}(),
+		childCompletedNudgeStep("parent ack once"),
 	)
 	eng := engine.New(engine.Options{
 		SessionID:       "once-session",
@@ -620,6 +694,7 @@ func TestChildPermissionReplyRouting(t *testing.T) {
 			s.match = matchToolResult("task-ask")
 			return s
 		}(),
+		childCompletedNudgeStep("parent ack bash child"),
 	)
 	// Defaults: bash asks; task allows.
 	eng := engine.New(engine.Options{
@@ -703,6 +778,7 @@ func TestTaskSurfacesChildStreamError(t *testing.T) {
 			s.match = matchToolResult("task-stream-err")
 			return s
 		}(),
+		childCompletedNudgeStep("parent ack stream err"),
 	)
 	eng := engine.New(engine.Options{
 		SessionID:       "parent-stream-err",
@@ -777,6 +853,7 @@ func TestTaskChildInheritsParentProvider(t *testing.T) {
 			s.match = matchToolResult("task-inherit")
 			return s
 		}(),
+		childCompletedNudgeStep("parent ack inherit"),
 	)
 	selectFn := func(string) (provider.Provider, string, error) {
 		n := selectCalls.Add(1)
@@ -838,9 +915,9 @@ func TestTaskChildInheritsParentProvider(t *testing.T) {
 	if n := selectCalls.Load(); n != 1 {
 		t.Errorf("Select calls = %d, want 1 (child must inherit live provider)", n)
 	}
-	// Three Stream calls: parent tool-use, parent final, child final.
-	if prov.callCount() != 3 {
-		t.Fatalf("Stream calls = %d, want 3", prov.callCount())
+	// Four Stream calls: parent tool-use, parent final, child final, nudge.
+	if prov.callCount() != 4 {
+		t.Fatalf("Stream calls = %d, want 4", prov.callCount())
 	}
 }
 
@@ -868,6 +945,7 @@ func TestTaskSurfacesChildEngineErrorMessage(t *testing.T) {
 			s.match = matchToolResult("task-eng-err")
 			return s
 		}(),
+		childCompletedNudgeStep("parent ack eng err"),
 	)
 	eng := engine.New(engine.Options{
 		SessionID:       "parent-eng-err",
@@ -944,6 +1022,7 @@ func TestTaskNonBlockingParentContinuesWhileChildRuns(t *testing.T) {
 			s.match = matchToolResult("task-nb")
 			return s
 		}(),
+		childCompletedNudgeStep("parent ack slow child"),
 	)
 	eng := engine.New(engine.Options{
 		SessionID:       "parent-nb",
@@ -999,25 +1078,365 @@ func TestTaskNonBlockingParentContinuesWhileChildRuns(t *testing.T) {
 	}
 
 	close(release)
-	// Wait for child completion after release.
+	// Wait for child completion and the idle-parent auto-nudge that injects
+	// the summary into model-visible history.
 	doneGuard := time.NewTimer(5 * time.Second)
 	defer doneGuard.Stop()
-	var childDone bool
-	for !childDone {
+	var childDone, nudgeDone bool
+	for !(childDone && nudgeDone) {
 		select {
 		case ev, ok := <-eng.Events():
 			if !ok {
-				t.Fatal("Events closed before ChildCompleted")
+				t.Fatal("Events closed before ChildCompleted/nudge")
 			}
 			events = append(events, ev)
-			if c, ok := ev.(protocol.ChildCompleted); ok {
+			switch ev := ev.(type) {
+			case protocol.ChildCompleted:
 				childDone = true
-				if c.Status != protocol.ChildStatusCompleted {
-					t.Errorf("ChildCompleted status = %q", c.Status)
+				if ev.Status != protocol.ChildStatusCompleted {
+					t.Errorf("ChildCompleted status = %q", ev.Status)
 				}
+			case protocol.UserMessage:
+				if strings.Contains(ev.Text, "[child.completed") {
+					nudgeDone = true
+					if !strings.Contains(ev.Text, "child after release") {
+						t.Errorf("nudge missing summary: %q", ev.Text)
+					}
+				}
+			case protocol.EngineError:
+				t.Fatalf("engine error: %s", ev.Message)
 			}
 		case <-doneGuard.C:
-			t.Fatalf("timed out waiting for child; events=%v", summarizeEvents(events))
+			t.Fatalf("timed out; childDone=%v nudgeDone=%v events=%v",
+				childDone, nudgeDone, summarizeEvents(events))
 		}
 	}
+}
+
+// TestChildCompletedNudgeWhileIdle: child finishes after the parent turn has
+// already ended; parent must auto-start a turn with a model-visible summary.
+func TestChildCompletedNudgeWhileIdle(t *testing.T) {
+	release := make(chan struct{})
+	ct := &channelTool{
+		executed: make(chan string, 1),
+		blocks:   map[string]<-chan struct{}{"block": release},
+	}
+	const childPrompt = "idle-nudge-child"
+	taskCall := taskToolCall("task-idle", childPrompt)
+	childCall := toolCall("block", "channel")
+	prov := newScriptedProvider(
+		toolCallStep(taskCall),
+		func() streamStep {
+			s := toolCallStep(childCall)
+			s.match = matchUserText(childPrompt)
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("child summary for idle parent")
+			s.match = matchToolResult("block")
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("parent finished before child")
+			s.match = matchToolResult("task-idle")
+			return s
+		}(),
+		childCompletedNudgeStep("acked idle completion"),
+	)
+	eng := engine.New(engine.Options{
+		SessionID:       "parent-idle-nudge",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(tool.NewTask(), ct),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "spawn then wait idle"}
+
+	var events []protocol.Event
+	var parentDone, childRunning bool
+	guard := time.NewTimer(10 * time.Second)
+	defer guard.Stop()
+	for !(parentDone && childRunning) {
+		select {
+		case ev, ok := <-eng.Events():
+			if !ok {
+				t.Fatal("Events closed early")
+			}
+			events = append(events, ev)
+			switch ev := ev.(type) {
+			case protocol.PermissionAsked:
+				eng.Ops() <- protocol.PermissionReply{RequestID: ev.RequestID, Decision: protocol.DecisionOnce}
+			case protocol.TurnCompleted:
+				if ev.ParentSessionID == "" && ev.Depth == 0 {
+					parentDone = true
+				}
+			case protocol.ChildCompleted:
+				t.Fatalf("child completed before release; events=%v", summarizeEvents(events))
+			}
+		case id := <-ct.executed:
+			if id != "block" {
+				t.Fatalf("executed = %q", id)
+			}
+			childRunning = true
+		case <-guard.C:
+			t.Fatalf("timed out; parentDone=%v childRunning=%v events=%v",
+				parentDone, childRunning, summarizeEvents(events))
+		}
+	}
+
+	close(release)
+
+	var sawCompleted, sawNudge, nudgeTurnDone bool
+	doneGuard := time.NewTimer(5 * time.Second)
+	defer doneGuard.Stop()
+	for !(sawCompleted && sawNudge && nudgeTurnDone) {
+		select {
+		case ev, ok := <-eng.Events():
+			if !ok {
+				t.Fatal("Events closed early")
+			}
+			events = append(events, ev)
+			switch ev := ev.(type) {
+			case protocol.ChildCompleted:
+				sawCompleted = true
+				if !strings.Contains(ev.Summary, "child summary for idle parent") {
+					t.Errorf("summary = %q", ev.Summary)
+				}
+			case protocol.UserMessage:
+				if strings.Contains(ev.Text, "[child.completed") {
+					sawNudge = true
+					if !strings.Contains(ev.Text, "child summary for idle parent") {
+						t.Errorf("nudge text = %q", ev.Text)
+					}
+					if !strings.Contains(ev.Text, "status=completed") {
+						t.Errorf("nudge missing status: %q", ev.Text)
+					}
+				}
+			case protocol.TurnCompleted:
+				if sawNudge {
+					nudgeTurnDone = true
+				}
+			case protocol.EngineError:
+				t.Fatalf("engine error: %s", ev.Message)
+			}
+		case <-doneGuard.C:
+			t.Fatalf("timed out; completed=%v nudge=%v nudgeTurn=%v events=%v",
+				sawCompleted, sawNudge, nudgeTurnDone, summarizeEvents(events))
+		}
+	}
+
+	// Shut down so Messages is safe to read without racing the turn worker.
+	cancel()
+	for range eng.Events() {
+	}
+	var found bool
+	for _, msg := range eng.Messages() {
+		if msg.Role == provider.RoleUser && strings.Contains(msg.Text, "[child.completed") {
+			found = true
+			if !strings.Contains(msg.Text, "child summary for idle parent") {
+				t.Errorf("messages nudge = %q", msg.Text)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("Messages missing child.completed; got %#v", eng.Messages())
+	}
+}
+
+// TestChildCompletedQueuedDuringParentTurn: completion arrives mid-turn and is
+// delivered as a follow-up turn after the parent finishes (not dropped).
+func TestChildCompletedQueuedDuringParentTurn(t *testing.T) {
+	const childPrompt = "fast-child-during-turn"
+	taskCall := taskToolCall("task-mid", childPrompt)
+	release := make(chan struct{})
+	ct := &channelTool{
+		executed: make(chan string, 1),
+		blocks:   map[string]<-chan struct{}{"hold": release},
+	}
+	holdCall := toolCall("hold", "channel")
+	prov := newScriptedProvider(
+		toolCallStep(taskCall, holdCall),
+		func() streamStep {
+			s := completedStep("fast child done mid-parent-turn")
+			s.match = matchUserText(childPrompt)
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("parent after tools")
+			s.match = matchToolResult("hold")
+			return s
+		}(),
+		childCompletedNudgeStep("acked mid-turn completion"),
+	)
+	eng := engine.New(engine.Options{
+		SessionID:       "parent-mid-turn",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(tool.NewTask(), ct),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "task then hold"}
+
+	var events []protocol.Event
+	var sawChildCompleted, holdStarted, workTurnDone, sawNudge bool
+	guard := time.NewTimer(10 * time.Second)
+	defer guard.Stop()
+	for !(sawChildCompleted && workTurnDone && sawNudge) {
+		select {
+		case ev, ok := <-eng.Events():
+			if !ok {
+				t.Fatal("Events closed early")
+			}
+			events = append(events, ev)
+			switch ev := ev.(type) {
+			case protocol.PermissionAsked:
+				eng.Ops() <- protocol.PermissionReply{RequestID: ev.RequestID, Decision: protocol.DecisionOnce}
+			case protocol.ChildCompleted:
+				sawChildCompleted = true
+				if workTurnDone {
+					// Still acceptable: race where hold finished first.
+					break
+				}
+				if !holdStarted {
+					t.Log("child finished before parent hold started")
+				}
+				// Unblock parent hold so the work turn can finish and flush the queue.
+				select {
+				case <-release:
+				default:
+					close(release)
+				}
+			case protocol.UserMessage:
+				if strings.Contains(ev.Text, "[child.completed") {
+					sawNudge = true
+					if !strings.Contains(ev.Text, "fast child done mid-parent-turn") {
+						t.Errorf("nudge = %q", ev.Text)
+					}
+				}
+			case protocol.TurnCompleted:
+				if ev.ParentSessionID == "" && ev.Depth == 0 {
+					if !sawNudge {
+						workTurnDone = true
+						// Ensure hold is released even if child is slow.
+						select {
+						case <-release:
+						default:
+							close(release)
+						}
+					}
+				}
+			case protocol.EngineError:
+				t.Fatalf("engine error: %s", ev.Message)
+			}
+		case id := <-ct.executed:
+			if id == "hold" {
+				holdStarted = true
+			}
+		case <-guard.C:
+			t.Fatalf("timed out; child=%v hold=%v workDone=%v nudge=%v events=%v",
+				sawChildCompleted, holdStarted, workTurnDone, sawNudge, summarizeEvents(events))
+		}
+	}
+	if !sawChildCompleted {
+		t.Fatal("missing ChildCompleted")
+	}
+	if !sawNudge {
+		t.Fatal("missing model-visible child.completed nudge")
+	}
+	// Prefer the queued path: child completed before the work turn finished.
+	if !holdStarted {
+		t.Log("hold never started; mid-turn queue path not exercised")
+	}
+}
+
+// TestTwoConcurrentTasksBothReachParent ensures two task children both emit
+// ChildCompleted and both summaries are model-visible on the parent.
+func TestTwoConcurrentTasksBothReachParent(t *testing.T) {
+	const (
+		promptA = "child-a-work"
+		promptB = "child-b-work"
+	)
+	taskA := taskToolCall("task-a", promptA)
+	taskB := taskToolCall("task-b", promptB)
+	prov := newScriptedProvider(
+		toolCallStep(taskA, taskB),
+		func() streamStep {
+			s := completedStep("summary-alpha")
+			s.match = matchUserText(promptA)
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("summary-beta")
+			s.match = matchUserText(promptB)
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("parent after both tasks")
+			s.match = func(req provider.Request) bool {
+				var sawA, sawB bool
+				for _, m := range req.Messages {
+					if m.Role == provider.RoleTool && m.ToolResult != nil {
+						if m.ToolResult.CallID == "task-a" {
+							sawA = true
+						}
+						if m.ToolResult.CallID == "task-b" {
+							sawB = true
+						}
+					}
+				}
+				return sawA && sawB
+			}
+			return s
+		}(),
+		// One or two nudge turns depending on scheduling; allow two.
+		childCompletedNudgeStep("ack concurrent 1"),
+		childCompletedNudgeStep("ack concurrent 2"),
+	)
+	eng := engine.New(engine.Options{
+		SessionID:       "parent-two-tasks",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(tool.NewTask()),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "spawn two"}
+	events := drainAndReply(t, eng, 15*time.Second)
+
+	if n := countEvents[protocol.ChildStarted](events); n != 2 {
+		t.Fatalf("ChildStarted = %d, want 2; events=%v", n, summarizeEvents(events))
+	}
+	if n := countEvents[protocol.ChildCompleted](events); n != 2 {
+		t.Fatalf("ChildCompleted = %d, want 2; events=%v", n, summarizeEvents(events))
+	}
+
+	var notices []string
+	for _, ev := range events {
+		if um, ok := ev.(protocol.UserMessage); ok && strings.Contains(um.Text, "[child.completed") {
+			notices = append(notices, um.Text)
+		}
+	}
+	joined := strings.Join(notices, "\n")
+	if !strings.Contains(joined, "summary-alpha") {
+		t.Errorf("missing summary-alpha in notices: %q", joined)
+	}
+	if !strings.Contains(joined, "summary-beta") {
+		t.Errorf("missing summary-beta in notices: %q", joined)
+	}
+	// Durable path: UserMessage events are session-logged and restored into
+	// model history (engine.Restore), so both summaries are model-visible.
 }

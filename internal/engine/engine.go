@@ -222,6 +222,14 @@ type Engine struct {
 	childMu  sync.Mutex
 	children map[string]*childHandle
 
+	// childDone delivers ChildCompleted from drain goroutines to Run so the
+	// parent can inject a model-visible summary and auto-nudge when idle.
+	// Buffered; non-blocking send on the drain side if Run is shutting down.
+	childDone chan protocol.ChildCompleted
+	// pendingChildNotices holds formatted child.completed texts queued while
+	// a parent turn is active; flushed into a follow-up turn when idle.
+	pendingChildNotices []string
+
 	// pendingAgent is set by tools via SwitchAgent and applied after each tool
 	// batch (so the next Stream sees the new agent/prompt) and again in
 	// completeTurn if anything remains when the turn ends.
@@ -282,6 +290,7 @@ func New(opts Options) *Engine {
 		beginReqs:           make(chan beginReq),
 		files:               &tool.FileState{},
 		children:            make(map[string]*childHandle),
+		childDone:           make(chan protocol.ChildCompleted, 32),
 		contextWindowTokens: opts.ContextWindow,
 		priority:            opts.InitialPriority,
 		titled:              opts.InitialTitled,
@@ -388,6 +397,11 @@ func (e *Engine) Run(ctx context.Context) {
 	e.quietStartup = false
 	for {
 		e.reapTurn()
+		e.flushPendingChildNotices(ctx)
+		var turnDone <-chan struct{}
+		if e.turnDone != nil {
+			turnDone = e.turnDone
+		}
 		select {
 		case <-ctx.Done():
 			e.cancelAndJoinTurn()
@@ -403,6 +417,12 @@ func (e *Engine) Run(ctx context.Context) {
 				e.cancelAndJoinTurn()
 				return
 			}
+		case completed := <-e.childDone:
+			e.queueChildCompleted(completed)
+			e.flushPendingChildNotices(ctx)
+		case <-turnDone:
+			e.reapTurn()
+			e.flushPendingChildNotices(ctx)
 		}
 	}
 }

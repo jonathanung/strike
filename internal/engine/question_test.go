@@ -132,6 +132,7 @@ func TestChildQuestionReplyRouting(t *testing.T) {
 			s.match = matchToolResult("task-q")
 			return s
 		}(),
+		childCompletedNudgeStep("parent ack question child"),
 	)
 	eng := engine.New(engine.Options{
 		SessionID:       "parent-q-route",

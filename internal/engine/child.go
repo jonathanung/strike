@@ -267,6 +267,12 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		}
 		e.emit(completed)
 		e.persistChildEvent(childID, completed)
+		// Wake Run so the parent can inject a model-visible summary (and
+		// auto-nudge when idle). Non-blocking: drop if Run is shutting down.
+		select {
+		case e.childDone <- completed:
+		default:
+		}
 	}()
 
 	go child.Run(childCtx)
@@ -298,6 +304,55 @@ func (e *Engine) unregisterChild(id string) {
 	e.childMu.Lock()
 	defer e.childMu.Unlock()
 	delete(e.children, id)
+}
+
+// queueChildCompleted records a durable model-facing notice for a finished
+// child. Flushed by flushPendingChildNotices when the parent is idle.
+func (e *Engine) queueChildCompleted(c protocol.ChildCompleted) {
+	e.pendingChildNotices = append(e.pendingChildNotices, formatChildCompletedNotice(c))
+}
+
+// flushPendingChildNotices starts a short parent turn with queued child
+// completion summaries when the parent is idle and a provider is selected.
+// Notices stay queued while a turn is active or no model is available so the
+// next successful flush (or user turn after provider select) can deliver them.
+func (e *Engine) flushPendingChildNotices(ctx context.Context) {
+	if len(e.pendingChildNotices) == 0 {
+		return
+	}
+	e.joinFinishingTurn()
+	if e.turnActive() {
+		return
+	}
+	if e.prov == nil || ctx.Err() != nil {
+		return
+	}
+	text := strings.Join(e.pendingChildNotices, "\n\n")
+	e.pendingChildNotices = nil
+	e.startTurn(ctx, text)
+}
+
+func formatChildCompletedNotice(c protocol.ChildCompleted) string {
+	status := string(c.Status)
+	if status == "" {
+		status = string(protocol.ChildStatusCompleted)
+	}
+	id := strings.TrimSpace(c.SessionID)
+	short := id
+	if len(short) > 8 {
+		short = short[:8]
+	}
+	var b strings.Builder
+	if short != "" {
+		fmt.Fprintf(&b, "[child.completed session=%s status=%s]", short, status)
+	} else {
+		fmt.Fprintf(&b, "[child.completed status=%s]", status)
+	}
+	if summary := strings.TrimSpace(c.Summary); summary != "" {
+		b.WriteByte('\n')
+		b.WriteString(summary)
+	}
+	return b.String()
 }
 
 func (e *Engine) persistChildEvent(id string, ev protocol.Event) {
