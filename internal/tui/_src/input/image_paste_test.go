@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bytes"
 	"encoding/base64"
 	"os"
 	"path/filepath"
@@ -121,16 +122,35 @@ func TestComposerImagePasteChipAndSend(t *testing.T) {
 }
 
 func TestComposerCtrlVAttachesClipboardImage(t *testing.T) {
-	m, _ := newAppTestModel(nil, nil)
+	m, ops := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.providerName = "openai"
+	m.modelName = "gpt-test"
+	m.modelAttachment = true
+	m.modelAttachmentKnown = true
 	m.clipboardImage = func() ([]byte, error) { return tinyPNG, nil }
 
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlV})
 	if got := m.composer.Value(); got != "[image 1]" {
 		t.Fatalf("composer = %q, want image chip", got)
 	}
-	if len(m.pendingImages) != 1 || m.pendingImages[0].Attachment.MIME != "image/png" {
-		t.Fatalf("pendingImages = %#v", m.pendingImages)
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	_ = runAllAppCmds(t, cmd)
+
+	op := receiveAppOp(t, ops)
+	in, ok := op.(protocol.UserInput)
+	if !ok {
+		t.Fatalf("op type %T", op)
+	}
+	if len(in.Images) != 1 || in.Images[0].MIME != "image/png" {
+		t.Fatalf("images = %#v", in.Images)
+	}
+	if got, err := base64.StdEncoding.DecodeString(in.Images[0].Data); err != nil || !bytes.Equal(got, tinyPNG) {
+		t.Fatalf("image data = %x, err = %v", got, err)
+	}
+	if m.composer.Value() != "" || len(m.pendingImages) != 0 {
+		t.Fatalf("composer not cleared: value=%q images=%d", m.composer.Value(), len(m.pendingImages))
 	}
 }
 
