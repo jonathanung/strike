@@ -26,6 +26,23 @@ func (r *Registry) Register(t Tool) {
 	r.tools[t.Name()] = t
 }
 
+// Unregister removes tools by name. Missing names are ignored.
+func (r *Registry) Unregister(names ...string) {
+	if r == nil || len(names) == 0 {
+		return
+	}
+	for _, name := range names {
+		delete(r.tools, name)
+	}
+	order := make([]string, 0, len(r.order))
+	for _, name := range r.order {
+		if _, ok := r.tools[name]; ok {
+			order = append(order, name)
+		}
+	}
+	r.order = order
+}
+
 func (r *Registry) Get(name string) (Tool, bool) {
 	t, ok := r.tools[name]
 	return t, ok

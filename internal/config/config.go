@@ -75,23 +75,30 @@ type Config struct {
 	Keybinds map[string]KeybindChords `json:"keybinds,omitempty"`
 	// Session holds per-session runtime preferences (worktree isolation).
 	Session SessionConfig `json:"session,omitempty"`
-	// MCP configures external Model Context Protocol servers (stdio tools).
+	// MCP configures external Model Context Protocol servers (stdio or HTTP).
 	// Project layer replaces global when mcp.servers is present (including {}).
 	MCP MCPConfig `json:"mcp,omitempty"`
 }
 
 // MCPConfig is the JSON "mcp" object.
 type MCPConfig struct {
-	// Servers maps a short name to a stdio server command. Names become the
+	// Servers maps a short name to a server entry. Names become the
 	// mcp_<name>_* tool namespace.
 	Servers map[string]MCPServer `json:"servers,omitempty"`
 }
 
-// MCPServer is one stdio MCP server entry.
+// MCPServer is one MCP server entry (stdio command or streamable HTTP URL).
 type MCPServer struct {
-	Command string            `json:"command"`
+	// Type is "stdio" (default) or "http". Empty with url set implies http.
+	Type string `json:"type,omitempty"`
+	// Stdio
+	Command string            `json:"command,omitempty"`
 	Args    []string          `json:"args,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
+	// HTTP (streamable HTTP endpoint)
+	URL string `json:"url,omitempty"`
+	// Headers are sent on every HTTP request; never logged (e.g. Authorization).
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 // SessionConfig is the JSON "session" object in config.
@@ -486,13 +493,21 @@ func cloneMCPServers(in map[string]MCPServer) map[string]MCPServer {
 	out := make(map[string]MCPServer, len(in))
 	for k, v := range in {
 		s := MCPServer{
+			Type:    strings.TrimSpace(v.Type),
 			Command: strings.TrimSpace(v.Command),
 			Args:    append([]string(nil), v.Args...),
+			URL:     strings.TrimSpace(v.URL),
 		}
 		if len(v.Env) > 0 {
 			s.Env = make(map[string]string, len(v.Env))
 			for ek, ev := range v.Env {
 				s.Env[ek] = ev
+			}
+		}
+		if len(v.Headers) > 0 {
+			s.Headers = make(map[string]string, len(v.Headers))
+			for hk, hv := range v.Headers {
+				s.Headers[hk] = hv
 			}
 		}
 		out[k] = s

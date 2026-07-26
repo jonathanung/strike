@@ -47,7 +47,7 @@ type assembled struct {
 	issuesClose  func() error
 	// worktreeClose removes a strike-managed worktree when cleanup=delete.
 	worktreeClose func() error
-	// mcpClose stops stdio MCP server subprocesses (process-scoped).
+	// mcpClose stops MCP server sessions (stdio/HTTP; process-scoped).
 	mcpClose func() error
 	// spawnRoot creates additional concurrent root engines (interactive multi-root).
 	// resumeID empty = new session; non-empty opens that durable root.
@@ -480,14 +480,21 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	}
 	workDir = first.workDir
 
-	// External MCP servers (stdio): process-scoped, shared by all root engines
-	// via the common registry. CWD is the launch tree (not a session worktree).
-	// Per-server failures are recorded on the manager and do not abort assemble.
+	// External MCP servers (stdio/HTTP): process-scoped, shared by all root
+	// engines via the common registry. Stdio CWD is the launch tree (not a
+	// session worktree). Per-server failures are recorded and do not abort assemble.
 	mcpMgr := mcp.NewManager()
 	if len(cfg.MCP.Servers) > 0 {
 		fields := make(map[string]mcp.ServerConfigFields, len(cfg.MCP.Servers))
 		for name, s := range cfg.MCP.Servers {
-			fields[name] = mcp.ServerConfigFields{Command: s.Command, Args: s.Args, Env: s.Env}
+			fields[name] = mcp.ServerConfigFields{
+				Type:    s.Type,
+				Command: s.Command,
+				Args:    s.Args,
+				Env:     s.Env,
+				URL:     s.URL,
+				Headers: s.Headers,
+			}
 		}
 		mcpCtx, mcpCancel := context.WithTimeout(context.Background(), 45*time.Second)
 		mcpMgr.StartAll(mcpCtx, mcp.ConfigsFromMap(fields, launchDir), registry)

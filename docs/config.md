@@ -129,11 +129,14 @@ restores built-in defaults for the current session only — delete the
 
 List/permission modal conventions (`lists.*`, `perm.*`) are not remappable.
 
-## MCP servers (stdio tools)
+## MCP servers (stdio + HTTP)
 
 Connect external [Model Context Protocol](https://modelcontextprotocol.io)
 servers so their tools appear in the model registry as `mcp_<server>_<tool>`.
-v1 is **stdio only** (command + args). SSE/HTTP transports are out of scope.
+Supported transports: **stdio** (local subprocess) and **streamable HTTP**
+(remote endpoint; JSON or SSE responses).
+
+### Stdio (local)
 
 ```json
 {
@@ -149,19 +152,45 @@ v1 is **stdio only** (command + args). SSE/HTTP transports are out of scope.
 }
 ```
 
+### Streamable HTTP (remote)
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "remote": {
+        "type": "http",
+        "url": "https://mcp.example.com/mcp",
+        "headers": { "Authorization": "Bearer …" }
+      }
+    }
+  }
+}
+```
+
 | Field | Required | Notes |
 |---|---|---|
 | `servers.<name>` | yes | short letter-led slug (`[A-Za-z][A-Za-z0-9_-]*`) |
-| `command` | yes | executable on `PATH` or absolute path |
+| `type` | no | `stdio` (default) or `http` (`sse` is accepted as an alias for `http`) |
+| `command` | stdio | executable on `PATH` or absolute path |
 | `args` | no | argv after the command |
-| `env` | no | explicit env overlay (merged onto the process environment); never logged |
+| `env` | no | stdio env overlay; **never logged** |
+| `url` | http | MCP endpoint URL (if set without `type`, transport is `http`) |
+| `headers` | no | HTTP request headers (e.g. `Authorization`); **never logged or shown in `/mcp`** |
 
 Layers: when a layer sets `mcp.servers` (including `{}`), it **replaces** the
 previous layer's server map. Omitted `mcp` leaves the lower layer unchanged.
 
 Lifecycle: servers start with the session (after the tool worktree is bound),
-list tools once, and shut down on exit. A crashed server does not take down
-strike — its tools error cleanly; `/mcp` shows `down`/`error`.
+list tools once, and shut down on exit. A crashed or unreachable server does
+not take down strike — its tools error cleanly; `/mcp` shows `up` / `down` /
+`error` / `disabled`.
+
+Control from the TUI:
+
+- `/mcp` — status (transport, endpoint label, tools, errors)
+- `/mcp retry [name]` — reconnect one server, or every non-up server
+- `/mcp disable <name>` — stop a server and unregister its tools
 
 Permissions: every MCP tool call asks with permission name `mcp` and pattern
 `<server>/<tool>` (default action **ask**). Allow a server or tool in config:
@@ -175,11 +204,10 @@ Permissions: every MCP tool call asks with permission name `mcp` and pattern
 }
 ```
 
-In the TUI, `/mcp` lists configured servers, up/down status, and tool names.
-
-Treat project-local MCP config like shell hooks: it runs local commands. Prefer
-global `~/.strike/config` for shared servers; review `command`/`args`/`env`
-before trusting a project's `.strike/config`.
+Treat project-local MCP config like shell hooks: stdio runs local commands;
+HTTP may send secrets via `headers`. Prefer global `~/.strike/config` for shared
+servers; review `command`/`args`/`env`/`url`/`headers` before trusting a
+project's `.strike/config`.
 
 ## Custom providers
 

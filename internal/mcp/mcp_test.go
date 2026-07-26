@@ -318,12 +318,90 @@ func TestNamespaceTool(t *testing.T) {
 
 func TestConfigsFromMap(t *testing.T) {
 	got := ConfigsFromMap(map[string]ServerConfigFields{
-		"good": {Command: "npx", Args: []string{"-y", "x"}, Env: map[string]string{"A": "1"}},
-		"bad":  {Command: ""},
-		"1no":  {Command: "echo"},
+		"good":   {Command: "npx", Args: []string{"-y", "x"}, Env: map[string]string{"A": "1"}},
+		"bad":    {Command: ""},
+		"1no":    {Command: "echo"},
+		"remote": {Type: "http", URL: "https://example.com/mcp", Headers: map[string]string{"Authorization": "Bearer secret"}},
+		"infer":  {URL: "http://127.0.0.1:9/mcp"},
 	}, "/tmp/work")
-	if len(got) != 1 || got[0].Name != "good" || got[0].WorkDir != "/tmp/work" {
+	if len(got) != 3 {
 		t.Fatalf("got = %+v", got)
+	}
+	byName := map[string]ServerConfig{}
+	for _, c := range got {
+		byName[c.Name] = c
+	}
+	if byName["good"].WorkDir != "/tmp/work" || byName["good"].Transport != TransportStdio {
+		t.Fatalf("good = %+v", byName["good"])
+	}
+	if byName["remote"].Transport != TransportHTTP || byName["remote"].URL == "" {
+		t.Fatalf("remote = %+v", byName["remote"])
+	}
+	if byName["remote"].Headers["Authorization"] != "Bearer secret" {
+		t.Fatalf("headers not preserved")
+	}
+	if byName["infer"].Transport != TransportHTTP {
+		t.Fatalf("infer = %+v", byName["infer"])
+	}
+}
+
+func TestManagerDisableAndRetry(t *testing.T) {
+	cmd, args, env := helperCommand(t, "")
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	reg := tool.NewRegistry()
+	m := NewManager()
+	defer m.Close()
+
+	cfg := ServerConfig{Name: "fake", Command: cmd, Args: args, Env: env}
+	m.StartAll(ctx, []ServerConfig{cfg}, reg)
+	if st := m.Statuses(); len(st) != 1 || st[0].State != "up" {
+		t.Fatalf("status = %+v", m.Statuses())
+	}
+	if _, ok := reg.Get("mcp_fake_echo"); !ok {
+		t.Fatal("echo tool missing")
+	}
+
+	if err := m.Disable("fake"); err != nil {
+		t.Fatalf("Disable: %v", err)
+	}
+	if _, ok := reg.Get("mcp_fake_echo"); ok {
+		t.Fatal("tool should be unregistered")
+	}
+	st := m.Statuses()
+	if len(st) != 1 || st[0].State != "disabled" {
+		t.Fatalf("status after disable = %+v", st)
+	}
+
+	if err := m.Retry(ctx, "fake"); err != nil {
+		t.Fatalf("Retry: %v", err)
+	}
+	st = m.Statuses()
+	if len(st) != 1 || st[0].State != "up" || st[0].ToolCount != 2 {
+		t.Fatalf("status after retry = %+v", st)
+	}
+	if _, ok := reg.Get("mcp_fake_echo"); !ok {
+		t.Fatal("echo tool not re-registered")
+	}
+}
+
+func TestRedactErrSecrets(t *testing.T) {
+	if got := redactErr(fmt.Errorf("Authorization: Bearer super-secret-token")); got != "start failed" {
+		t.Fatalf("got %q", got)
+	}
+	if got := redactErr(fmt.Errorf("TOKEN=abc123")); got != "start failed" {
+		t.Fatalf("got %q", got)
+	}
+	if got := redactErr(fmt.Errorf("connection refused")); got != "connection refused" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestFormatStatusesHint(t *testing.T) {
+	s := FormatStatuses([]Status{{Name: "a", State: "up", Transport: "stdio", ToolCount: 1}})
+	if !strings.Contains(s, "/mcp retry") || !strings.Contains(s, "disable") {
+		t.Fatalf("summary = %q", s)
 	}
 }
 
