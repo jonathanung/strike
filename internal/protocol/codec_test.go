@@ -56,6 +56,7 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 		CompactionStarted{Correlation: corr, Reason: CompactionReasonManual},
 		CompactionCompleted{Correlation: corr, Reason: CompactionReasonThreshold, Removed: 4, Kept: 3},
 		SessionMeta{Correlation: corr, PRURL: "https://github.com/acme/repo/pull/7", PRNumber: 7, PRState: "open"},
+		SessionRewound{Correlation: corr, Removed: 2},
 		EffectivePrompt{
 			Correlation: corr,
 			Layers: []PromptLayerInfo{
@@ -372,6 +373,7 @@ func TestEventTypeCoverage(t *testing.T) {
 		"compaction.started":   CompactionStarted{},
 		"compaction.completed": CompactionCompleted{},
 		"session.meta":         SessionMeta{},
+		"session.rewound":      SessionRewound{},
 		"hook.matched":         HookMatched{},
 		"prompt.effective":     EffectivePrompt{},
 	}

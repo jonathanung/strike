@@ -124,6 +124,9 @@ func Restore(events []protocol.Event) Restored {
 		case protocol.CompactionCompleted:
 			flush()
 			msgs = applyRecordedCompaction(msgs, e.Removed, e.Kept)
+		case protocol.SessionRewound:
+			flush()
+			msgs, _ = dropLastUserTurn(msgs)
 		case protocol.ModelSelected:
 			r.Provider = e.Provider
 			r.Model = e.Model
@@ -247,6 +250,8 @@ func restoreCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	case protocol.FilesInvalidated:
 		return e.Correlation, true
 	case protocol.SessionMeta:
+		return e.Correlation, true
+	case protocol.SessionRewound:
 		return e.Correlation, true
 	default:
 		return protocol.Correlation{}, false

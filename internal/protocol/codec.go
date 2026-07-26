@@ -76,6 +76,8 @@ func eventType(ev Event) string {
 		return "compaction.completed"
 	case SessionMeta:
 		return "session.meta"
+	case SessionRewound:
+		return "session.rewound"
 	case HookMatched:
 		return "hook.matched"
 	case EffectivePrompt:
@@ -162,6 +164,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &CompactionCompleted{}
 	case "session.meta":
 		ev = &SessionMeta{}
+	case "session.rewound":
+		ev = &SessionRewound{}
 	case "hook.matched":
 		ev = &HookMatched{}
 	case "prompt.effective":
@@ -236,6 +240,8 @@ func deref(ev Event) Event {
 	case *CompactionCompleted:
 		return *v
 	case *SessionMeta:
+		return *v
+	case *SessionRewound:
 		return *v
 	case *HookMatched:
 		return *v

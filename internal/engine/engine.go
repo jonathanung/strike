@@ -482,6 +482,8 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 		e.handleCompact()
 	case protocol.InspectEffectivePrompt:
 		e.handleInspectEffectivePrompt()
+	case protocol.Rewind:
+		e.handleRewind()
 	}
 }
 

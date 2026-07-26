@@ -807,7 +807,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.setNeedsModelNotice("No model selected — use /provider <anthropic|openai|xai|echo> [model]", true)
 				return m, nil // keep the typed prompt in the composer
 			}
-			return m.submit(protocol.UserInput{Text: text}, text)
+			// @file mentions: history/display keep tokens; model text gets contents.
+			modelText, notices := expandFileMentions(text, m.services.Files)
+			next, cmd := m.submit(protocol.UserInput{Text: modelText}, text)
+			if len(notices) > 0 {
+				mm := next.(Model)
+				mm.setNotice(strings.Join(notices, "; "), false)
+				mm.reflow()
+				return mm, cmd
+			}
+			return next, cmd
 		case key.Matches(msg, m.keyMap.SaveDefaults):
 			// Persist the current provider/model/agent as global defaults.
 			if m.providerName == "" {
@@ -952,7 +961,63 @@ func (m *Model) recomputeCompletion() {
 	line := m.composer.Line()
 	info := m.composer.LineInfo()
 	col := info.StartColumn + info.ColumnOffset
-	m.completion = leadingSlashCompletion(m.composer.Value(), line, col, m.commands)
+	value := m.composer.Value()
+	m.completion = leadingSlashCompletion(value, line, col, m.commands)
+	if m.completion != nil {
+		return
+	}
+	m.completion = m.atFileCompletionAt(value, line, col)
+}
+
+// atFileCompletionAt runs @file fuzzy search when Files is available.
+func (m *Model) atFileCompletionAt(value string, line, col int) *completionState {
+	if m.services.Files == nil {
+		return nil
+	}
+	query, ok := activeAtQueryParts(value, line, col)
+	if !ok {
+		return nil
+	}
+	paths, err := m.services.Files.SearchFiles(query, 30)
+	if err != nil || len(paths) == 0 {
+		return nil
+	}
+	return atFileCompletion(value, line, col, paths)
+}
+
+func activeAtQueryParts(value string, row, col int) (string, bool) {
+	lines := strings.Split(value, "\n")
+	if row < 0 || row >= len(lines) {
+		return "", false
+	}
+	line := []rune(lines[row])
+	if col < 0 || col > len(line) {
+		return "", false
+	}
+	end := col
+	start := end
+	for start > 0 {
+		r := line[start-1]
+		if isFileMentionPathRune(r) {
+			start--
+			continue
+		}
+		if r == '@' {
+			start--
+			break
+		}
+		return "", false
+	}
+	if start >= end || start >= len(line) || line[start] != '@' {
+		return "", false
+	}
+	if start > 0 && !unicode.IsSpace(line[start-1]) {
+		return "", false
+	}
+	if col <= start {
+		return "", false
+	}
+	return string(line[start+1 : end]), true
 }
 
 func (m *Model) applyCompletion() {
@@ -967,10 +1032,18 @@ func (m *Model) applyCompletion() {
 		m.reflow()
 		return
 	}
-	name := []rune(candidate.Spec.Name)
+	var name []rune
 	delimiter := []rune(nil)
-	if candidate.Source == commandSourceSkill && (replacement.End == len(value) || !unicode.IsSpace(value[replacement.End])) {
-		delimiter = []rune(" ")
+	if candidate.Path != "" {
+		name = []rune("@" + candidate.Path)
+		if replacement.End == len(value) || !unicode.IsSpace(value[replacement.End]) {
+			delimiter = []rune(" ")
+		}
+	} else {
+		name = []rune(candidate.Spec.Name)
+		if candidate.Source == commandSourceSkill && (replacement.End == len(value) || !unicode.IsSpace(value[replacement.End])) {
+			delimiter = []rune(" ")
+		}
 	}
 	next := make([]rune, 0, len(value)-(replacement.End-replacement.Start)+len(name)+len(delimiter))
 	next = append(next, value[:replacement.Start]...)
@@ -1321,6 +1394,17 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		} else {
 			m.setNotice(msg, false)
 		}
+		cmd = m.broadcastContextState()
+	case protocol.SessionRewound:
+		m.cells, m.toolByID = dropLastUserTurnCells(m.cells, m.toolByID)
+		m.selectedCell = -1
+		m.selectedFileRef = -1
+		removed := ev.Removed
+		msg := "rewound last turn"
+		if removed > 0 {
+			msg = fmt.Sprintf("rewound last turn (%d messages)", removed)
+		}
+		m.setNotice(msg, false)
 		cmd = m.broadcastContextState()
 	case protocol.EngineError:
 		// Mid-turn failures belong in the transcript; idle-state errors
@@ -1708,6 +1792,20 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 			ops <- protocol.Compact{}
 			return nil
 		}
+	case "/fork":
+		return m.handleForkCommand()
+	case "/undo", "/rewind":
+		m.resetComposer()
+		m.clearNotice()
+		if m.turnRunning {
+			m.setNotice("cannot rewind while a turn is running", true)
+			return m, nil
+		}
+		ops := m.ops
+		return m, func() tea.Msg {
+			ops <- protocol.Rewind{}
+			return nil
+		}
 	case "/session":
 		return m.handleSessionCommand(fields[1:])
 	case "/help":
@@ -1759,6 +1857,36 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 // resume. Empty when the user quit without switching.
 func (m Model) PendingResume() string {
 	return strings.TrimSpace(m.pendingResume)
+}
+
+func (m Model) handleForkCommand() (tea.Model, tea.Cmd) {
+	m.resetComposer()
+	m.clearNotice()
+	if m.turnRunning {
+		m.setNotice("wait for the current turn to finish before forking", true)
+		return m, nil
+	}
+	if m.sessionID == "" {
+		m.setNotice("no session to fork", true)
+		return m, nil
+	}
+	if m.services.Sessions == nil {
+		m.setNotice("session fork is unavailable", true)
+		return m, nil
+	}
+	child, err := m.services.Sessions.Fork(m.sessionID)
+	if err != nil {
+		m.setNotice("fork failed: "+err.Error(), true)
+		return m, nil
+	}
+	id := strings.TrimSpace(child.ID)
+	if id == "" || id == m.sessionID {
+		m.setNotice("fork failed: empty child session", true)
+		return m, nil
+	}
+	m.pendingResume = id
+	m.setNotice("forked → "+shortSessionID(id)+" (switching…)", false)
+	return m, tea.Quit
 }
 
 func (m Model) handleSessionCommand(args []string) (tea.Model, tea.Cmd) {

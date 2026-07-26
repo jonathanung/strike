@@ -232,6 +232,10 @@ type Compact struct{}
 // carries raw API keys — previews are redacted by the engine.
 type InspectEffectivePrompt struct{}
 
+// Rewind removes the last completed user↔assistant turn from model-facing
+// history only (not filesystem side effects). Rejected while a turn is running.
+type Rewind struct{}
+
 func (UserInput) isOp()              {}
 func (PermissionReply) isOp()        {}
 func (QuestionReply) isOp()          {}
@@ -244,6 +248,7 @@ func (SetFast) isOp()                {}
 func (FilesChanged) isOp()           {}
 func (Compact) isOp()                {}
 func (InspectEffectivePrompt) isOp() {}
+func (Rewind) isOp()                 {}
 
 // Event is an engine -> client notification.
 type Event interface{ isEvent() }
@@ -571,6 +576,15 @@ type SessionMeta struct {
 	PRState  string `json:"prState,omitempty"`
 }
 
+// SessionRewound records that the last completed user↔assistant turn was
+// dropped from model-facing history. Restore applies the same drop so
+// --continue stays consistent. Does not reverse tool filesystem side effects.
+type SessionRewound struct {
+	Correlation
+	// Removed is how many provider messages were dropped (0 when unknown).
+	Removed int `json:"removed,omitempty"`
+}
+
 // HookMatched records that a declarative config hook rule fired (log/block/
 // notify). Persisted in the session JSONL for review and notify sinks.
 type HookMatched struct {
@@ -650,5 +664,6 @@ func (ProviderRetrying) isEvent()    {}
 func (CompactionStarted) isEvent()   {}
 func (CompactionCompleted) isEvent() {}
 func (SessionMeta) isEvent()         {}
+func (SessionRewound) isEvent()      {}
 func (HookMatched) isEvent()         {}
 func (EffectivePrompt) isEvent()     {}

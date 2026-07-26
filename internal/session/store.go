@@ -89,6 +89,17 @@ func (s *Store) Append(ev protocol.Event) error {
 	return s.enc.Encode(env)
 }
 
+// Sync flushes the underlying JSONL file so concurrent readers see all
+// appended events (e.g. Fork copying an open session).
+func (s *Store) Sync() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.f == nil {
+		return nil
+	}
+	return s.f.Sync()
+}
+
 func (s *Store) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

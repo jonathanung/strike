@@ -23,11 +23,15 @@ const (
 type Meta struct {
 	Title           string `json:"title,omitempty"`
 	ParentSessionID string `json:"parentSessionId,omitempty"`
-	CreatedAt       string `json:"createdAt,omitempty"` // RFC3339 UTC
-	PRURL           string `json:"prUrl,omitempty"`
-	PRNumber        int    `json:"prNumber,omitempty"`
-	PRState         string `json:"prState,omitempty"`     // open|merged|closed
-	PRUpdatedAt     string `json:"prUpdatedAt,omitempty"` // RFC3339 UTC when PR fields last written
+	// ForkedFrom is the source session id when this session was created via
+	// Fork. Empty for ordinary roots and subagent children. Forks remain root
+	// sessions (ParentSessionID empty) so --continue / pickers still work.
+	ForkedFrom  string `json:"forkedFrom,omitempty"`
+	CreatedAt   string `json:"createdAt,omitempty"` // RFC3339 UTC
+	PRURL       string `json:"prUrl,omitempty"`
+	PRNumber    int    `json:"prNumber,omitempty"`
+	PRState     string `json:"prState,omitempty"`     // open|merged|closed
+	PRUpdatedAt string `json:"prUpdatedAt,omitempty"` // RFC3339 UTC when PR fields last written
 }
 
 // NormalizePRState maps forge state strings to open|merged|closed, or "".

@@ -1,12 +1,14 @@
 package tui
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -322,7 +324,9 @@ func (f *fakeProviders) Remove(name string) error {
 type fakeFiles struct {
 	files map[string][]byte
 	dirs  map[string][]host.DirEntry
-	err   error
+	// search optionally overrides SearchFiles results (nil → keys of files).
+	search []string
+	err    error
 }
 
 func (f *fakeFiles) ReadFile(path string) ([]byte, error) {
@@ -350,6 +354,61 @@ func (f *fakeFiles) ListDir(path string) ([]host.DirEntry, error) {
 	out := make([]host.DirEntry, len(entries))
 	copy(out, entries)
 	return out, nil
+}
+
+func (f *fakeFiles) SearchFiles(query string, limit int) ([]string, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if limit <= 0 {
+		limit = 30
+	}
+	var all []string
+	if f.search != nil {
+		all = append([]string(nil), f.search...)
+	} else {
+		for p := range f.files {
+			all = append(all, p)
+		}
+		sort.Strings(all)
+	}
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" {
+		if len(all) > limit {
+			return all[:limit], nil
+		}
+		return all, nil
+	}
+	var out []string
+	for _, p := range all {
+		lower := strings.ToLower(p)
+		if strings.Contains(lower, query) || orderedSubsequence(lower, query) {
+			out = append(out, p)
+			if len(out) >= limit {
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeFiles) ReadScoped(path string) (host.FileContent, error) {
+	if f.err != nil {
+		return host.FileContent{}, f.err
+	}
+	path = strings.TrimSpace(path)
+	path = strings.ReplaceAll(path, "\\", "/")
+	if path == "" || path == ".." || strings.HasPrefix(path, "../") || strings.HasPrefix(path, "/") {
+		return host.FileContent{Path: path, Skip: true, Notice: "path escapes project root"}, nil
+	}
+	data, ok := f.files[path]
+	if !ok {
+		return host.FileContent{Path: path, Skip: true, Notice: "file not found"}, nil
+	}
+	if bytes.IndexByte(data, 0) >= 0 {
+		return host.FileContent{Path: path, Skip: true, Notice: "binary file skipped"}, nil
+	}
+	return host.FileContent{Path: path, Content: string(data)}, nil
 }
 
 // --- fakeMemory: an in-memory host.Memory --------------------------------
@@ -625,6 +684,36 @@ func (f *fakeSessions) ReplayJSONL(id string) ([]byte, error) {
 		return nil, fmt.Errorf("session %q not found", id)
 	}
 	return data, nil
+}
+
+func (f *fakeSessions) Fork(id string) (host.Session, error) {
+	id = strings.TrimSpace(id)
+	src, ok := f.byID[id]
+	if !ok {
+		return host.Session{}, fmt.Errorf("session %q not found", id)
+	}
+	if src.ParentID != "" {
+		return host.Session{}, fmt.Errorf("session %q is a subagent transcript; fork a root session", id)
+	}
+	childID := id + "-fork"
+	if _, exists := f.byID[childID]; exists {
+		childID = fmt.Sprintf("%s-fork-%d", id, len(f.byID))
+	}
+	title := strings.TrimSpace(src.Title)
+	if title == "" {
+		title = id
+	}
+	if !strings.HasPrefix(strings.ToLower(title), "fork of ") {
+		title = "fork of " + title
+	}
+	child := host.Session{
+		ID:        childID,
+		Title:     title,
+		UpdatedAt: time.Now().UTC(),
+	}
+	f.byID[child.ID] = child
+	f.logs[child.ID] = append([]byte(nil), f.logs[id]...)
+	return child, nil
 }
 
 func (f *fakeSessions) RefreshPRStates(in []host.Session) []host.Session {

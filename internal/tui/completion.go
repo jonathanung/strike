@@ -20,6 +20,8 @@ type runeRange struct {
 type completionCandidate struct {
 	Spec   commandSpec
 	Source commandSource
+	// Path is set for @file mention candidates (project-relative, slash form).
+	Path string
 }
 
 type completionState struct {
@@ -28,6 +30,8 @@ type completionState struct {
 	Source     commandSource
 	Replace    runeRange
 	rows       int
+	// fileMention is true when candidates are @file paths.
+	fileMention bool
 }
 
 func commandMatches(catalog []commandSpec, query string) []completionCandidate {
@@ -100,6 +104,105 @@ func leadingSlashCompletion(value string, cursorRow, cursorCol int, catalog []co
 	}
 }
 
+// atFileCompletion opens @path fuzzy completion when the cursor sits inside an
+// @-token that begins after whitespace or at the start of a line.
+func atFileCompletion(value string, cursorRow, cursorCol int, paths []string) *completionState {
+	if len(paths) == 0 {
+		return nil
+	}
+	lines := strings.Split(value, "\n")
+	if cursorRow < 0 || cursorRow >= len(lines) {
+		return nil
+	}
+	line := []rune(lines[cursorRow])
+	if cursorCol < 0 || cursorCol > len(line) {
+		return nil
+	}
+	// Token end is the cursor; walk left for path chars then require '@'.
+	end := cursorCol
+	start := end
+	for start > 0 {
+		r := line[start-1]
+		if isFileMentionPathRune(r) {
+			start--
+			continue
+		}
+		if r == '@' {
+			start--
+			break
+		}
+		return nil
+	}
+	if start >= end || start >= len(line) || line[start] != '@' {
+		return nil
+	}
+	// '@' must be at line start or after whitespace (avoid emails).
+	if start > 0 && !unicode.IsSpace(line[start-1]) {
+		return nil
+	}
+	// Cursor must be inside the token (after '@').
+	if cursorCol <= start {
+		return nil
+	}
+	query := string(line[start+1 : end])
+	// Reject queries with characters we would never insert from the picker.
+	for _, r := range query {
+		if !isFileMentionPathRune(r) {
+			return nil
+		}
+	}
+	matches := make([]completionCandidate, 0, len(paths))
+	for _, p := range paths {
+		matches = append(matches, completionCandidate{Path: p})
+	}
+	if len(matches) == 0 {
+		return nil
+	}
+	// Extend replace end through any remaining path runes after the cursor so
+	// accepting mid-token rewrites the whole mention.
+	tokenEnd := end
+	for tokenEnd < len(line) && isFileMentionPathRune(line[tokenEnd]) {
+		tokenEnd++
+	}
+	return &completionState{
+		Candidates:  matches,
+		Replace:     runeRange{Start: runeOffset(value, cursorRow, start), End: runeOffset(value, cursorRow, tokenEnd)},
+		fileMention: true,
+	}
+}
+
+func isFileMentionPathRune(r rune) bool {
+	switch r {
+	case '/', '\\', '.', '-', '_', '+', '~':
+		return true
+	default:
+		return unicode.IsLetter(r) || unicode.IsDigit(r)
+	}
+}
+
+// runeOffset returns the rune index into value for (row, col) in its lines.
+func runeOffset(value string, row, col int) int {
+	if row < 0 {
+		return 0
+	}
+	off := 0
+	lines := strings.Split(value, "\n")
+	for i := 0; i < len(lines) && i < row; i++ {
+		off += len([]rune(lines[i])) + 1
+	}
+	if row >= len(lines) {
+		return off
+	}
+	line := []rune(lines[row])
+	if col > len(line) {
+		col = len(line)
+	}
+	if col < 0 {
+		col = 0
+	}
+	return off + col
+}
+
 func (c *completionState) move(delta int) {
 	if len(c.Candidates) == 0 {
 		return
@@ -108,9 +211,9 @@ func (c *completionState) move(delta int) {
 	c.Source = c.Candidates[c.Selected].Source
 }
 
-// view renders the inline slash-command completion popup as a bordered panel of
-// candidate rows above the composer. c.rows (set by reflow) bounds the visible
-// window; keyboard handling stays in the app model.
+// view renders the inline completion popup as a bordered panel of candidate
+// rows above the composer. c.rows (set by reflow) bounds the visible window;
+// keyboard handling stays in the app model.
 func (c *completionState) view(width, height int, th theme.Theme) string {
 	if c == nil {
 		return ""
@@ -123,10 +226,14 @@ func (c *completionState) view(width, height int, th theme.Theme) string {
 	items := make([]ui.ListItem, len(c.Candidates))
 	for i, candidate := range c.Candidates {
 		name := candidate.Spec.Name
-		if candidate.Spec.ArgsHint != "" {
+		detail := candidate.Spec.Description
+		if candidate.Path != "" {
+			name = "@" + candidate.Path
+			detail = "file"
+		} else if candidate.Spec.ArgsHint != "" {
 			name += themedSpace(th.Spacing.XS) + candidate.Spec.ArgsHint
 		}
-		items[i] = ui.ListItem{Label: name, Detail: candidate.Spec.Description}
+		items[i] = ui.ListItem{Label: name, Detail: detail}
 	}
 	borderless := height < 3 || popupWidth < 4
 	bodyWidth := max(1, ui.PanelInnerWidth(th, popupWidth))
