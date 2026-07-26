@@ -174,6 +174,40 @@ func TestActivityPaneRendersSessionTree(t *testing.T) {
 	}
 }
 
+func TestSessionTreeShowsNestedGrandchildren(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m.sessionID = "root"
+	m.titleTopic = "root work"
+	m.children = []childActivity{
+		{sessionID: "c1", parentID: "root", agent: "general", prompt: "mid task", status: "running"},
+		{sessionID: "c1a", parentID: "c1", agent: "explore", prompt: "leaf task", status: "running"},
+	}
+	nodes := m.sessionTreeNodes()
+	if len(nodes) != 1 {
+		t.Fatalf("roots = %d, want 1", len(nodes))
+	}
+	if len(nodes[0].Children) != 1 {
+		t.Fatalf("root children = %d, want 1 (grandchild not flattened)", len(nodes[0].Children))
+	}
+	mid := nodes[0].Children[0]
+	if mid.ID != "c1" {
+		t.Errorf("mid id = %q, want c1", mid.ID)
+	}
+	if mid.Leaf || len(mid.Children) != 1 {
+		t.Fatalf("mid children = %d leaf=%v, want 1 grandchild", len(mid.Children), mid.Leaf)
+	}
+	if mid.Children[0].ID != "c1a" {
+		t.Errorf("grandchild id = %q, want c1a", mid.Children[0].ID)
+	}
+	body := ansi.Strip(m.activityPaneBody(48, 10))
+	if !strings.Contains(body, "mid task") && !strings.Contains(body, "general") {
+		t.Errorf("missing mid node in body: %q", body)
+	}
+	if !strings.Contains(body, "leaf task") && !strings.Contains(body, "explore") {
+		t.Errorf("missing grandchild in body: %q", body)
+	}
+}
+
 func TestSubmitBlockedWhileViewingChild(t *testing.T) {
 	fs := newFakeSessions()
 	fs.put(host.Session{ID: "child-1", ParentID: "root", Title: "explore"}, mustSessionJSONL(t,

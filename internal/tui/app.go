@@ -204,12 +204,15 @@ type Model struct {
 	autonomy protocol.Autonomy
 	// fastEnabled is the session priority-tier preference from /fast.
 	fastEnabled bool
-	agents      []string     // cycled with tab
-	skills      []host.Skill // slash-command templates, pre-filtered by the host
-	notice      string
-	noticeErr   bool
-	noticeCause noticeCause
-	turnRunning bool
+	// showThinking shows reasoning/CoT cells in the transcript (/think).
+	// Default false keeps the transcript clean (answer + tools only).
+	showThinking bool
+	agents       []string     // cycled with tab
+	skills       []host.Skill // slash-command templates, pre-filtered by the host
+	notice       string
+	noticeErr    bool
+	noticeCause  noticeCause
+	turnRunning  bool
 	// inputQueue holds prompts typed while turnRunning. Drained FIFO on
 	// TurnCompleted; survives Interrupt until the user pops/clears it.
 	inputQueue []queuedInput
@@ -281,6 +284,7 @@ type Model struct {
 // childActivity is one foreground subagent row in the activity/agents panes.
 type childActivity struct {
 	sessionID string
+	parentID  string // spawning session; empty means direct root child
 	agent     string
 	prompt    string
 	status    string // running | completed | failed | canceled
@@ -1393,6 +1397,15 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		} else {
 			m.cells = append(m.cells, &assistantCell{text: ev.Text})
 		}
+	case protocol.ReasoningDelta:
+		if ev.Text == "" {
+			break
+		}
+		if last, ok := lastCell[*reasoningCell](m.cells); ok {
+			last.text += ev.Text
+		} else {
+			m.cells = append(m.cells, &reasoningCell{text: ev.Text})
+		}
 	case protocol.ToolCallBegin:
 		if last, ok := lastCell[*assistantCell](m.cells); ok {
 			last.complete = true
@@ -1575,12 +1588,16 @@ func (m *Model) onChildStarted(ev protocol.ChildStarted) {
 	if id == "" {
 		id = "child"
 	}
+	parentID := ev.ParentSessionID
 	now := time.Now()
 	for i := range m.children {
 		if m.children[i].sessionID == id {
 			m.children[i].agent = ev.Agent
 			m.children[i].prompt = ev.Prompt
 			m.children[i].status = "running"
+			if parentID != "" {
+				m.children[i].parentID = parentID
+			}
 			if m.children[i].startedAt.IsZero() {
 				m.children[i].startedAt = now
 			}
@@ -1590,6 +1607,7 @@ func (m *Model) onChildStarted(ev protocol.ChildStarted) {
 	}
 	m.children = append(m.children, childActivity{
 		sessionID: id,
+		parentID:  parentID,
 		agent:     ev.Agent,
 		prompt:    ev.Prompt,
 		status:    "running",
@@ -1609,6 +1627,9 @@ func (m *Model) onChildCompleted(ev protocol.ChildCompleted) {
 	for i := range m.children {
 		if m.children[i].sessionID == id || (id == "" && i == len(m.children)-1) {
 			m.children[i].status = status
+			if ev.ParentSessionID != "" && m.children[i].parentID == "" {
+				m.children[i].parentID = ev.ParentSessionID
+			}
 			m.children[i].endedAt = now
 			return
 		}
@@ -1619,6 +1640,7 @@ func (m *Model) onChildCompleted(ev protocol.ChildCompleted) {
 	}
 	m.children = append(m.children, childActivity{
 		sessionID: id,
+		parentID:  ev.ParentSessionID,
 		status:    status,
 		startedAt: now,
 		endedAt:   now,
@@ -1656,6 +1678,8 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	case protocol.TurnStarted:
 		return e.Correlation, true
 	case protocol.TextDelta:
+		return e.Correlation, true
+	case protocol.ReasoningDelta:
 		return e.Correlation, true
 	case protocol.ToolCallBegin:
 		return e.Correlation, true
@@ -1931,6 +1955,8 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		}
 	case "/fast":
 		return m.handleFastCommand(fields[1:])
+	case "/think":
+		return m.handleThinkCommand(fields[1:])
 	case "/vim":
 		return m.handleVimCommand(fields[1:])
 	case "/md-read":
@@ -2483,6 +2509,32 @@ func (m Model) handleFastCommand(args []string) (tea.Model, tea.Cmd) {
 	}
 }
 
+// handleThinkCommand toggles reasoning/CoT visibility in the transcript.
+// Pure UI preference — no engine op. Bare /think flips; on/off set explicitly.
+func (m Model) handleThinkCommand(args []string) (tea.Model, tea.Cmd) {
+	enabled := !m.showThinking
+	if len(args) > 0 {
+		switch strings.ToLower(args[0]) {
+		case "on", "true", "1", "yes":
+			enabled = true
+		case "off", "false", "0", "no":
+			enabled = false
+		default:
+			m.setNotice("usage: /think [on|off]", true)
+			return m, nil
+		}
+	}
+	m.resetComposer()
+	m.showThinking = enabled
+	if enabled {
+		m.setNotice("thinking visible", false)
+	} else {
+		m.setNotice("thinking hidden", false)
+	}
+	m.refreshViewport()
+	return m, nil
+}
+
 // fastNotice explains what the toggle means. Kept free of host I/O so it is
 // safe to call from the Bubble Tea update path (no catalog/network).
 func (m Model) fastNotice(enabled bool) string {
@@ -2572,7 +2624,17 @@ func (m *Model) refreshViewport() {
 	yOff := m.viewport.YOffset
 	blocks := make([]string, 0, len(cells))
 	for _, c := range cells {
+		if _, ok := c.(*reasoningCell); ok && !m.showThinking {
+			continue
+		}
 		blocks = append(blocks, m.renderCell(c, width))
+	}
+	// Live working chrome in the transcript when a turn is running and no
+	// assistant/tool content has arrived yet (providers with no CoT stream).
+	if m.turnRunning && !m.viewingChild() {
+		if thinkingPlaceholderVisible(cells, m.showThinking) {
+			blocks = append(blocks, renderThinkingPlaceholder(width, m.th, m.turnStartedAt))
+		}
 	}
 	content := strings.Join(blocks, "\n\n")
 	m.transcriptPlainLines = strings.Split(ansi.Strip(content), "\n")
@@ -2937,6 +2999,8 @@ func cellCopyText(c cell) string {
 	case *exploreCell:
 		return tc.copyText()
 	case *assistantCell:
+		return tc.copyText()
+	case *reasoningCell:
 		return tc.copyText()
 	case *userCell:
 		return tc.copyText()

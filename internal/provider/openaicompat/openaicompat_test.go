@@ -117,6 +117,53 @@ func TestStreamAuthError(t *testing.T) {
 	}
 }
 
+func TestStreamEmitsReasoningContentBeforeAnswer(t *testing.T) {
+	const body = `{
+		"choices":[{
+			"message":{
+				"role":"assistant",
+				"reasoning_content":"internal plan",
+				"content":"answer"
+			},
+			"finish_reason":"stop"
+		}]
+	}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, body)
+	}))
+	defer srv.Close()
+
+	p := NewOpenAI(func(context.Context) (string, error) { return "k", nil })
+	p.baseURL = srv.URL
+	stream, err := p.Stream(context.Background(), provider.Request{
+		Model:    "gpt-5.5",
+		Messages: []provider.Message{{Role: provider.RoleUser, Text: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var reasoning, text string
+	var order []provider.StreamEventType
+	for ev := range stream {
+		order = append(order, ev.Type)
+		switch ev.Type {
+		case provider.EventReasoning:
+			reasoning += ev.Text
+		case provider.EventTextDelta:
+			text += ev.Text
+		case provider.EventError:
+			t.Fatalf("stream error: %v", ev.Err)
+		}
+	}
+	if reasoning != "internal plan" || text != "answer" {
+		t.Errorf("reasoning=%q text=%q", reasoning, text)
+	}
+	if len(order) < 2 || order[0] != provider.EventReasoning || order[1] != provider.EventTextDelta {
+		t.Errorf("event order = %v, want reasoning then text", order)
+	}
+}
+
 func TestStreamEmitsTextToolCallsAndDone(t *testing.T) {
 	const body = `{
 		"choices":[{

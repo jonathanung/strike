@@ -478,6 +478,74 @@ func countLines(s string) int {
 	return strings.Count(s, "\n") + 1
 }
 
+// reasoningCell is model chain-of-thought. Visually muted and distinct from
+// assistantCell so it is never mistaken for the final answer. Visibility is
+// controlled by Model.showThinking; the cell is always retained for toggle-on.
+type reasoningCell struct {
+	text string
+}
+
+// thinkingPlaceholderVisible reports whether the live "thinking…" chrome
+// should appear after the last user message: turn in flight, no assistant
+// answer text, no tools, and (when CoT is shown) no reasoning cell yet.
+func thinkingPlaceholderVisible(cells []cell, showThinking bool) bool {
+	for i := len(cells) - 1; i >= 0; i-- {
+		switch c := cells[i].(type) {
+		case *userCell:
+			return true
+		case *assistantCell:
+			if strings.TrimSpace(c.text) != "" {
+				return false
+			}
+		case *reasoningCell:
+			if showThinking && strings.TrimSpace(c.text) != "" {
+				return false
+			}
+		case *toolCell, *exploreCell:
+			return false
+		case *errorCell:
+			return false
+		}
+	}
+	return true
+}
+
+// renderThinkingPlaceholder is muted transcript chrome while the model has not
+// produced answer text yet. Complements the header working spinner.
+func renderThinkingPlaceholder(width int, th theme.Theme, started time.Time) string {
+	th = th.Resolve()
+	ic := iconsFor(th)
+	st := th.S()
+	space := themedSpace(th.Spacing.XS)
+	label := "thinking"
+	if !started.IsZero() {
+		label = detailJoin(th, "thinking", formatCompactDuration(time.Since(started)))
+	}
+	return st.Muted.Width(max(1, width)).Render(ic.Info + space + label)
+}
+
+func (c *reasoningCell) copyText() string {
+	if c == nil {
+		return ""
+	}
+	return strings.TrimRight(c.text, "\n")
+}
+
+func (c *reasoningCell) render(width int, th theme.Theme) string {
+	th = th.Resolve()
+	ic := iconsFor(th)
+	st := th.S()
+	space := themedSpace(th.Spacing.XS)
+	indentation := themedSpace(th.Spacing.SM)
+	label := st.Muted.Render(ic.Info + space + "thinking")
+	src := strings.TrimSpace(c.text)
+	if src == "" {
+		return label
+	}
+	body := renderCellText(st.Muted, src, max(1, width-lipgloss.Width(indentation)))
+	return label + "\n" + indent(body, indentation)
+}
+
 // infoCell is host feedback in the transcript (login URLs, device codes) —
 // kept there rather than the one-line notice so it stays visible/copyable.
 type infoCell struct {

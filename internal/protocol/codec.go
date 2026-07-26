@@ -24,6 +24,8 @@ func eventType(ev Event) string {
 		return "turn.started"
 	case TextDelta:
 		return "text.delta"
+	case ReasoningDelta:
+		return "reasoning.delta"
 	case ToolCallBegin:
 		return "tool.begin"
 	case ToolCallEnd:
@@ -112,6 +114,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &TurnStarted{}
 	case "text.delta":
 		ev = &TextDelta{}
+	case "reasoning.delta":
+		ev = &ReasoningDelta{}
 	case "tool.begin":
 		ev = &ToolCallBegin{}
 	case "tool.end":
@@ -188,6 +192,8 @@ func deref(ev Event) Event {
 	case *TurnStarted:
 		return *v
 	case *TextDelta:
+		return *v
+	case *ReasoningDelta:
 		return *v
 	case *ToolCallBegin:
 		return *v

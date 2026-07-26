@@ -55,6 +55,9 @@ type Config struct {
 	// CompactionModel optionally pins the model id used for summarize
 	// compaction (same provider as the session). Empty uses the session model.
 	CompactionModel string `json:"compactionModel,omitempty"`
+	// MaxChildDepth bounds nested task tool spawns (root depth 0). Zero means
+	// engine default (1: children cannot spawn further tasks).
+	MaxChildDepth int `json:"maxChildDepth,omitempty"`
 	// Keybinds remaps app-level binding ids to key sequence(s). Ids match the
 	// TUI keybind catalog (e.g. "nav.jump-bottom"). Merged last-wins per id
 	// across global then project layers. Unknown ids fail Load.
@@ -346,6 +349,9 @@ func merge(base, layer Config) Config {
 	}
 	if layer.CompactionModel != "" {
 		base.CompactionModel = layer.CompactionModel
+	}
+	if layer.MaxChildDepth != 0 {
+		base.MaxChildDepth = layer.MaxChildDepth
 	}
 	base.Permissions = append(base.Permissions, layer.Permissions...)
 	base.Hooks = append(base.Hooks, layer.Hooks...)

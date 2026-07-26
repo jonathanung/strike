@@ -73,10 +73,13 @@ type chatRequest struct {
 }
 
 type chatMessage struct {
-	Role       string         `json:"role"`
-	Content    string         `json:"content"`
-	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
+	Role    string `json:"role"`
+	Content string `json:"content"`
+	// ReasoningContent is optional CoT some OpenAI-compatible hosts return
+	// alongside the final answer (not standard chat-completions).
+	ReasoningContent string         `json:"reasoning_content,omitempty"`
+	ToolCalls        []chatToolCall `json:"tool_calls,omitempty"`
+	ToolCallID       string         `json:"tool_call_id,omitempty"`
 }
 
 type chatToolCall struct {
@@ -128,6 +131,9 @@ func (p *Provider) Stream(ctx context.Context, req provider.Request) (<-chan pro
 			return
 		}
 		choice := resp.Choices[0]
+		if choice.Message.ReasoningContent != "" {
+			ch <- provider.StreamEvent{Type: provider.EventReasoning, Text: choice.Message.ReasoningContent}
+		}
 		if choice.Message.Content != "" {
 			ch <- provider.StreamEvent{Type: provider.EventTextDelta, Text: choice.Message.Content}
 		}

@@ -451,6 +451,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		Instructions:         instructions,
 		Memory:               memoryStore,
 		SystemPrompt:         cfg.SystemPrompt,
+		MaxChildDepth:        cfg.MaxChildDepth,
 		InitialProvider:      initialProvider,
 		InitialModel:         initialModel,
 		InitialEffort:        initialEffort,
