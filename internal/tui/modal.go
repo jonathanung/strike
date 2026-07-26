@@ -32,16 +32,18 @@ type permissionCountdownMsg struct {
 // permissionModal renders a pending permission ask with once/session/project/
 // reject choices. Esc always means reject — dismissal never silently continues.
 // When auto-approve is armed, remaining counts down to a single DecisionOnce.
+// Large edit diffs collapse by default; d toggles full hunk visibility.
 type permissionModal struct {
-	req       protocol.PermissionAsked
-	ops       chan<- protocol.Op
-	choice    int
-	state     permissionModalState
-	feedback  textinput.Model
-	th        theme.Theme
-	remaining int  // seconds left; 0 = no active countdown
-	autoGen   int  // bumps to cancel in-flight ticks
-	decided   bool // true after a reply is queued (no double-submit)
+	req          protocol.PermissionAsked
+	ops          chan<- protocol.Op
+	choice       int
+	state        permissionModalState
+	feedback     textinput.Model
+	th           theme.Theme
+	remaining    int  // seconds left; 0 = no active countdown
+	autoGen      int  // bumps to cancel in-flight ticks
+	decided      bool // true after a reply is queued (no double-submit)
+	diffExpanded bool // full edit diff vs collapsed MaxLines preview
 }
 
 type permissionModalState int
@@ -137,6 +139,10 @@ func (m *permissionModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 		m.choice = (m.choice + len(permChoices) - 1) % len(permChoices)
 	case "right", "l", "tab":
 		m.choice = (m.choice + 1) % len(permChoices)
+	case "d":
+		if m.diffCollapsible() {
+			m.diffExpanded = !m.diffExpanded
+		}
 	case "1", "y":
 		return nil, m.reply(protocol.DecisionOnce)
 	case "2", "s":
@@ -156,6 +162,19 @@ func (m *permissionModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 		return nil, m.reply(permChoices[m.choice].decision)
 	}
 	return m, nil
+}
+
+// diffCollapsible reports whether the permission ask carries an edit diff that
+// exceeds the collapsed modal preview window.
+func (m *permissionModal) diffCollapsible() bool {
+	if m == nil {
+		return false
+	}
+	meta, ok := parseEditMetadata(m.req.Metadata)
+	if !ok {
+		return false
+	}
+	return ui.DiffExceeds(meta.OldString, meta.NewString, diffPreviewMaxLinesModal) || m.diffExpanded
 }
 
 func (m *permissionModal) reply(d protocol.Decision) tea.Cmd {
@@ -185,16 +204,25 @@ func (m *permissionModal) view(width int, th theme.Theme) string {
 	detail := wrapToWidth(st.Text.Render(strings.Join(m.req.Patterns, "\n")), inner)
 
 	// Shared edit diff preview for choice and feedback states. Patterns already
-	// show the path, so Path is left empty to avoid duplication.
+	// show the path, so Path is left empty to avoid duplication. Large hunks
+	// collapse by default; d toggles the full body.
 	var diffSection string
 	if meta, ok := parseEditMetadata(m.req.Metadata); ok {
+		maxLines := diffPreviewMaxLinesModal
+		moreHint := ""
+		if m.diffExpanded {
+			maxLines = diffExpandedMaxLines(meta)
+		} else if ui.DiffExceeds(meta.OldString, meta.NewString, diffPreviewMaxLinesModal) {
+			moreHint = "d to expand"
+		}
 		diffBlock := ui.DiffPreview(th, ui.DiffPreviewOpts{
 			Path:      "",
 			Old:       meta.OldString,
 			New:       meta.NewString,
-			MaxLines:  diffPreviewMaxLinesModal,
+			MaxLines:  maxLines,
 			Width:     inner,
 			ShowStats: true,
+			MoreHint:  moreHint,
 		})
 		if diffBlock != "" {
 			diffSection = "\n" + diffBlock
@@ -236,6 +264,13 @@ func (m *permissionModal) view(width int, th theme.Theme) string {
 	}
 	body := heading + "\n" + detail + diffSection + countdownLine + strings.Repeat("\n", max(1, th.Spacing.SM)) + strings.Join(choices, sep)
 	hints := []string{"←/→ select", "enter confirm", "esc reject"}
+	if m.diffCollapsible() {
+		if m.diffExpanded {
+			hints = append(hints, "d collapse diff")
+		} else {
+			hints = append(hints, "d expand diff")
+		}
+	}
 	if m.remaining > 0 {
 		hints = append(hints, "auto-allow "+itoa(m.remaining)+"s")
 	}

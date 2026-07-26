@@ -47,6 +47,7 @@ See [usage.md](usage.md).
 | `4` / `n` | reject (optional feedback) |
 | `←`/`→` or `h`/`l` / tab | move choice |
 | `enter` | confirm highlighted choice |
+| `d` | expand / collapse large edit diff |
 | `esc` | reject |
 
 ## Tool cells (composer empty)
@@ -54,7 +55,7 @@ See [usage.md](usage.md).
 | Key | Action |
 |---|---|
 | `alt+[` / `alt+]` | previous / next tool cell |
-| `enter` | expand tool / open `file:line` |
+| `enter` | expand / collapse tool output or large edit diff; else open `file:line` |
 | `y` | copy cell (tool/explore, else latest assistant/user) |
 | `v` | review edit in editor |
 

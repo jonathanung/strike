@@ -25,6 +25,24 @@ type DiffPreviewOpts struct {
 	// LinkBase resolves relative Path values for OSC 8 file:// hyperlinks.
 	// Empty skips relative path links; absolute paths and empty Path are fine.
 	LinkBase string
+	// MoreHint, when non-empty and the body is truncated, is appended after the
+	// more-lines count (for example "enter to expand").
+	MoreHint string
+}
+
+// DiffBodyLen returns the number of unified hunk body lines for Old→New
+// (equal + delete + insert rows from the prefix/suffix line diff).
+func DiffBodyLen(oldStr, newStr string) int {
+	return len(lineDiff(oldStr, newStr))
+}
+
+// DiffExceeds reports whether the unified body has more than maxLines rows.
+// maxLines <= 0 uses defaultDiffMaxLines.
+func DiffExceeds(oldStr, newStr string, maxLines int) bool {
+	if maxLines <= 0 {
+		maxLines = defaultDiffMaxLines
+	}
+	return DiffBodyLen(oldStr, newStr) > maxLines
 }
 
 type diffOp int
@@ -104,7 +122,11 @@ func DiffPreview(th theme.Theme, opts DiffPreviewOpts) string {
 		parts = append(parts, truncate(th, formatDiffLine(st, dl), opts.Width))
 	}
 	if overflow > 0 {
-		more := ic.Ellipsis + space + "(" + strconv.Itoa(overflow) + space + "more lines)"
+		more := ic.Ellipsis + space + "(" + strconv.Itoa(overflow) + space + "more lines"
+		if hint := strings.TrimSpace(opts.MoreHint); hint != "" {
+			more += space + ic.Dot + space + hint
+		}
+		more += ")"
 		parts = append(parts, truncate(th, st.Muted.Render(more), opts.Width))
 	}
 

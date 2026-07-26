@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
+	"github.com/jonathanung/strike-cli/internal/tui/ui"
 )
 
 func TestToolCellUsesToolGuideIconRatherThanBorderVertical(t *testing.T) {
@@ -328,10 +330,75 @@ func TestDiffExpandedMaxLines(t *testing.T) {
 	}
 	long := editDiffMeta{OldString: oldB.String(), NewString: "x\n"}
 	got := diffExpandedMaxLines(long)
-	// Count old newlines + new newlines + 4
-	want := strings.Count(long.OldString, "\n") + strings.Count(long.NewString, "\n") + 4
+	want := ui.DiffBodyLen(long.OldString, long.NewString)
 	if got != want {
 		t.Errorf("long = %d, want %d", got, want)
+	}
+}
+
+func TestToolCellLargeEditDiffExpandCollapse(t *testing.T) {
+	th := theme.Default().Resolve()
+	var oldB, newB strings.Builder
+	for i := 0; i < 12; i++ {
+		fmt.Fprintf(&oldB, "old-line-%d\n", i)
+		fmt.Fprintf(&newB, "new-line-%d\n", i)
+	}
+	meta, err := json.Marshal(map[string]string{
+		"oldString": strings.TrimSuffix(oldB.String(), "\n"),
+		"newString": strings.TrimSuffix(newB.String(), "\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cell := &toolCell{
+		name:     "edit",
+		title:    "big.go",
+		metadata: meta,
+		done:     true,
+	}
+	if !cell.collapsible() {
+		t.Fatal("large edit diff should be collapsible")
+	}
+	plain := ansi.Strip(cell.render(80, th))
+	if !strings.Contains(plain, th.Icons.TreeCollapsed) {
+		t.Errorf("collapsed missing expand marker:\n%s", plain)
+	}
+	if !strings.Contains(plain, "more lines") {
+		t.Errorf("collapsed missing truncation:\n%s", plain)
+	}
+	if !strings.Contains(plain, "enter to expand") {
+		t.Errorf("collapsed missing expand hint:\n%s", plain)
+	}
+	// Collapsed window is 8 hunk lines; later inserts should be hidden.
+	if strings.Contains(plain, "+new-line-11") {
+		t.Errorf("collapsed should hide late insert:\n%s", plain)
+	}
+
+	if !cell.toggleExpanded() || !cell.expanded {
+		t.Fatal("toggle should expand")
+	}
+	plain = ansi.Strip(cell.render(80, th))
+	if !strings.Contains(plain, th.Icons.TreeExpanded) {
+		t.Errorf("expanded missing collapse marker:\n%s", plain)
+	}
+	if strings.Contains(plain, "more lines") {
+		t.Errorf("expanded still truncated:\n%s", plain)
+	}
+	if strings.Contains(plain, "enter to expand") {
+		t.Errorf("expanded still shows expand hint:\n%s", plain)
+	}
+	for _, want := range []string{"-old-line-0", "-old-line-11", "+new-line-0", "+new-line-11"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("expanded missing %q:\n%s", want, plain)
+		}
+	}
+
+	if !cell.toggleExpanded() || cell.expanded {
+		t.Fatal("toggle should collapse")
+	}
+	plain = ansi.Strip(cell.render(80, th))
+	if !strings.Contains(plain, "more lines") || !strings.Contains(plain, "enter to expand") {
+		t.Errorf("re-collapsed missing truncation affordance:\n%s", plain)
 	}
 }
 
