@@ -29,12 +29,17 @@ type Meta struct {
 	ForkedFrom string `json:"forkedFrom,omitempty"`
 	// ProjectKey is the launch project identity (same key as history/memory),
 	// typically the canonical git root or cwd. Empty on legacy sidecars.
-	ProjectKey  string `json:"projectKey,omitempty"`
-	CreatedAt   string `json:"createdAt,omitempty"` // RFC3339 UTC
-	PRURL       string `json:"prUrl,omitempty"`
-	PRNumber    int    `json:"prNumber,omitempty"`
-	PRState     string `json:"prState,omitempty"`     // open|merged|closed
-	PRUpdatedAt string `json:"prUpdatedAt,omitempty"` // RFC3339 UTC when PR fields last written
+	ProjectKey string `json:"projectKey,omitempty"`
+	// WorktreePath is the absolute path of a strike-managed git worktree bound
+	// to this session (tool CWD). Empty when the session uses the launch cwd.
+	WorktreePath string `json:"worktreePath,omitempty"`
+	// WorktreeBranch is the local branch checked out in WorktreePath.
+	WorktreeBranch string `json:"worktreeBranch,omitempty"`
+	CreatedAt      string `json:"createdAt,omitempty"` // RFC3339 UTC
+	PRURL          string `json:"prUrl,omitempty"`
+	PRNumber       int    `json:"prNumber,omitempty"`
+	PRState        string `json:"prState,omitempty"`     // open|merged|closed
+	PRUpdatedAt    string `json:"prUpdatedAt,omitempty"` // RFC3339 UTC when PR fields last written
 }
 
 // NormalizePRState maps forge state strings to open|merged|closed, or "".

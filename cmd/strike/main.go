@@ -21,6 +21,7 @@ type cliOptions struct {
 	providerSet                bool
 	continueSession            bool
 	sessionID                  string // --session: resume a specific root session
+	worktree                   bool   // --worktree: force a git worktree for this session
 }
 
 type optionSpec struct {
@@ -75,6 +76,13 @@ var optionSpecs = []optionSpec{
 		description: "resume a specific session by id (model history + selections)",
 		register: func(fs *flag.FlagSet, opts *cliOptions) {
 			fs.StringVar(&opts.sessionID, "session", "", "")
+		},
+	},
+	{
+		names:       []string{"worktree"},
+		description: "run this session in an isolated git worktree under .strike/worktrees/",
+		register: func(fs *flag.FlagSet, opts *cliOptions) {
+			fs.BoolVar(&opts.worktree, "worktree", false, "")
 		},
 	},
 	{

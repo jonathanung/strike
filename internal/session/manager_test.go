@@ -635,3 +635,66 @@ func TestInfoFromDiskIncludesPRMeta(t *testing.T) {
 		t.Fatalf("disk info = %+v", got)
 	}
 }
+
+func TestCountOpenRootsSetWorktreeDestroy(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager(dir)
+
+	if n := m.CountOpenRoots(); n != 0 {
+		t.Fatalf("empty CountOpenRoots = %d", n)
+	}
+	root, err := m.Create(CreateOptions{Title: "r1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := m.CountOpenRoots(); n != 1 {
+		t.Fatalf("CountOpenRoots = %d, want 1", n)
+	}
+	child, err := m.Create(CreateOptions{ParentSessionID: root.ID, Title: "c"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := m.CountOpenRoots(); n != 1 {
+		t.Fatalf("with child CountOpenRoots = %d, want 1", n)
+	}
+	root2, err := m.Create(CreateOptions{Title: "r2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := m.CountOpenRoots(); n != 2 {
+		t.Fatalf("two roots = %d", n)
+	}
+	_ = child
+	_ = root2
+
+	if err := m.SetWorktree(root.ID, "/tmp/wt-a", "strike/a"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := m.Get(root.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.WorktreePath != "/tmp/wt-a" || got.WorktreeBranch != "strike/a" {
+		t.Fatalf("Get worktree = %+v", got)
+	}
+	meta, err := ReadMeta(dir, root.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.WorktreePath != "/tmp/wt-a" || meta.WorktreeBranch != "strike/a" {
+		t.Fatalf("meta worktree = %+v", meta)
+	}
+
+	if err := m.Destroy(root.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(LogPath(dir, root.ID)); !os.IsNotExist(err) {
+		t.Fatalf("log still present: %v", err)
+	}
+	if _, err := os.Stat(MetaPath(dir, root.ID)); !os.IsNotExist(err) {
+		t.Fatalf("meta still present: %v", err)
+	}
+	if n := m.CountOpenRoots(); n != 1 {
+		t.Fatalf("after destroy CountOpenRoots = %d, want 1", n)
+	}
+}

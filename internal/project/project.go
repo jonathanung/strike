@@ -1,6 +1,7 @@
 // Package project resolves the stable filesystem identity used for
-// project-scoped state. cmd/strike is the only importer, resolving the
-// identity once at startup for history and config scoping.
+// project-scoped state and manages optional per-session git worktrees.
+// cmd/strike is the only importer: it resolves identity once at startup for
+// history/config scoping and may bind a session tool CWD via Add/Remove.
 package project
 
 import (

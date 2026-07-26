@@ -11,6 +11,10 @@ JSON:
   "defaultAgent": "build",
   "theme": "strike",
   "vimMode": "pane",
+  "session": {
+    "worktree": "off",
+    "worktreeCleanup": "keep"
+  },
   "permissions": [
     { "permission": "bash", "pattern": "go *", "action": "allow" },
     { "permission": "write", "pattern": "**/*.env", "action": "deny" }
@@ -20,6 +24,29 @@ JSON:
 
 Rules concatenate across layers; the last matching rule wins, so project
 config overrides global, and session "always" grants override both.
+
+## Session worktrees
+
+When concurrent root sessions would otherwise share one working tree, strike
+can bind each session's tool CWD to its own `git worktree` under
+`<repo>/.strike/worktrees/<session-id>/` (gitignored via `*/worktrees`).
+
+| `session.worktree` | Behavior |
+|---|---|
+| `off` (default) | launch cwd; single-session default |
+| `auto` | worktree when a second root session starts in-process |
+| `always` | every new root session gets a worktree (git repos only) |
+
+| `session.worktreeCleanup` | Behavior |
+|---|---|
+| `keep` (default) | leave the worktree and branch after session close |
+| `delete` | `git worktree remove` + delete the branch on close |
+
+CLI: `strike --worktree` forces a worktree for that invocation (same as always
+for one session). Non-git directories and `git worktree add` failures return a
+clear error and do not leave a half-bound session. Project-scoped state
+(history, memory, issues) stays keyed to the main repo, not the worktree path.
+Tools (`bash`, `read`, `write`, …) resolve paths inside the session worktree.
 
 **ctrl+d saves defaults**: on the main screen it persists the current
 provider/model/agent/effort/theme to `~/.strike/config`; in the provider
