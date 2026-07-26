@@ -21,7 +21,7 @@ func TestBuiltinAgentsCatalog(t *testing.T) {
 	for _, a := range agents {
 		byName[a.Name] = a
 	}
-	for _, want := range []string{"explore", "general", "commit", "reviewer", "tester", "debugger", "validator"} {
+	for _, want := range []string{"explore", "general", "commit", "reviewer", "tester", "debugger", "validator", "orchestrator"} {
 		a, ok := byName[want]
 		if !ok {
 			t.Fatalf("missing builtin agent %q among %+v", want, agentNames(agents))
@@ -52,6 +52,19 @@ func TestBuiltinAgentsCatalog(t *testing.T) {
 	}
 	if !strings.Contains(v.Prompt, "PASS") || !strings.Contains(v.Prompt, "FAIL") {
 		t.Errorf("validator prompt missing PASS/FAIL duties: %q", v.Prompt)
+	}
+	o := byName["orchestrator"]
+	if rulesetHas(o.Permissions, "task", permission.Deny) {
+		t.Errorf("orchestrator must not deny task: %+v", o.Permissions)
+	}
+	if !rulesetHas(o.Permissions, "task", permission.Allow) {
+		t.Errorf("orchestrator missing task allow: %+v", o.Permissions)
+	}
+	if !strings.Contains(strings.ToLower(o.Description), "subagent") && !strings.Contains(strings.ToLower(o.Description), "coordinate") {
+		t.Errorf("orchestrator description should mention coordinate/subagents: %q", o.Description)
+	}
+	if !strings.Contains(o.Prompt, "task") || !strings.Contains(o.Prompt, "MaxChildDepth") {
+		t.Errorf("orchestrator prompt missing delegate/MaxChildDepth duties: %q", o.Prompt)
 	}
 }
 

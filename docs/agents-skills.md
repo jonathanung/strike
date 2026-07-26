@@ -40,6 +40,7 @@ files under any later discovery root):
 | **tester** | run `make test` / vet / build; report only |
 | **debugger** | root-cause investigation |
 | **validator** | goal-backward requirements check; PASS/FAIL/UNVERIFIED only |
+| **orchestrator** | plan → delegate via `task` to specialists → synthesize (not solo bulk impl) |
 
 **Tab cycles agents**; bare `/agent` opens a picker; `/agent [name]` selects
 directly; the active agent shows in the status bar. The `task` tool’s optional
