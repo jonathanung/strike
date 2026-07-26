@@ -1420,7 +1420,11 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 	case protocol.EffectivePrompt:
 		m.cells = append(m.cells, &infoCell{text: formatEffectivePrompt(ev)})
 	case protocol.CompactionCompleted:
-		msg := fmt.Sprintf("history compacted (%s): removed %d, kept %d", ev.Reason, ev.Removed, ev.Kept)
+		strategy := ev.Strategy
+		if strategy == "" {
+			strategy = protocol.CompactionStrategyTrim
+		}
+		msg := fmt.Sprintf("history compacted (%s/%s): removed %d, kept %d", ev.Reason, strategy, ev.Removed, ev.Kept)
 		if m.turnRunning {
 			m.cells = append(m.cells, &errorCell{text: msg})
 		} else {

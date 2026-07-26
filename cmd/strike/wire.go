@@ -467,6 +467,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		Rules:                permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),
 		Hooks:                hookDefs,
 		HookRules:            cfg.HookRules(),
+		CompactionStrategy:   cfg.CompactionStrategy,
+		CompactionModel:      cfg.CompactionModel,
 		LookupContextWindow: func(providerName, model string) int {
 			// Best-effort catalog lookup for threshold compaction. Failures
 			// leave the window unknown; overflow recovery still works.

@@ -41,7 +41,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 /theme dark|light|auto         # session appearance (forced / restore detect)
 /layout                        # toggle horizontal/vertical pane split
 /split                         # alias of /layout
-/compact                       # compact model history (keep recent turns)
+/compact                       # compact model history (trim or summarize per config)
 /fork                          # duplicate this conversation into a new session id
 /undo                          # drop the last completed user/assistant turn
 /rewind                        # alias of /undo
