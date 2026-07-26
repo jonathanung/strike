@@ -23,6 +23,9 @@ type Info struct {
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	Open            bool
+	PRURL           string
+	PRNumber        int
+	PRState         string // open|merged|closed when known
 }
 
 // CreateOptions configures Manager.Create. Empty ID mints via NewID.
@@ -104,6 +107,9 @@ func (m *Manager) Create(opts CreateOptions) (Info, error) {
 		CreatedAt:       now,
 		UpdatedAt:       now,
 		Open:            true,
+		PRURL:           meta.PRURL,
+		PRNumber:        meta.PRNumber,
+		PRState:         NormalizePRState(meta.PRState),
 	}
 	m.sessions[id] = &managed{store: store, info: info}
 	return info, nil
@@ -167,6 +173,10 @@ func (m *Manager) Append(id string, ev protocol.Event) error {
 	if t, ok := ev.(protocol.SessionTitled); ok {
 		title = strings.TrimSpace(t.Title)
 	}
+	var prMeta *protocol.SessionMeta
+	if sm, ok := ev.(protocol.SessionMeta); ok {
+		prMeta = &sm
+	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -180,6 +190,19 @@ func (m *Manager) Append(id string, ev protocol.Event) error {
 		_, _ = UpdateMeta(m.dir, id, func(meta *Meta) {
 			meta.Title = title
 		})
+	}
+	if prMeta != nil {
+		if prMeta.PRURL != "" {
+			e.info.PRURL = prMeta.PRURL
+		}
+		if prMeta.PRNumber != 0 {
+			e.info.PRNumber = prMeta.PRNumber
+		}
+		if st := NormalizePRState(prMeta.PRState); st != "" {
+			e.info.PRState = st
+		} else if e.info.PRState == "" && e.info.PRURL != "" {
+			e.info.PRState = PRStateOpen
+		}
 	}
 	return nil
 }
@@ -530,6 +553,9 @@ func (m *Manager) infoFromDiskLocked(id string, st os.FileInfo) (Info, error) {
 		CreatedAt:       created,
 		UpdatedAt:       st.ModTime().UTC(),
 		Open:            false,
+		PRURL:           meta.PRURL,
+		PRNumber:        meta.PRNumber,
+		PRState:         NormalizePRState(meta.PRState),
 	}, nil
 }
 

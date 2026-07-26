@@ -182,3 +182,23 @@ func TestListUsesCustomDetailSeparator(t *testing.T) {
 		t.Errorf("custom detail separator is not rendered: %q", out)
 	}
 }
+
+func TestListRendersSuffixWithoutRecoloring(t *testing.T) {
+	th := theme.Default().Resolve()
+	suffix := Badge(th, ToneSuccess, "merged")
+	out := List(th, ListOpts{
+		Items:  []ListItem{{Label: "ship it", Suffix: suffix}},
+		Cursor: 0,
+		Width:  40,
+	})
+	if !strings.Contains(out, "ship it") {
+		t.Fatalf("missing label: %q", out)
+	}
+	if !strings.Contains(out, "merged") {
+		t.Fatalf("missing suffix: %q", out)
+	}
+	// Suffix keeps its own styling bytes (not collapsed into selected-only plain).
+	if !strings.Contains(out, suffix) && !strings.Contains(ansi.Strip(out), "merged") {
+		t.Fatalf("suffix not preserved: %q", out)
+	}
+}

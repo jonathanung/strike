@@ -1602,10 +1602,15 @@ func (e *Engine) recordSessionPR(corr protocol.Correlation) func(tool.SessionPR)
 		if pr.URL == "" {
 			return nil
 		}
+		state := strings.ToLower(strings.TrimSpace(pr.State))
+		if state == "" {
+			state = "open"
+		}
 		meta := protocol.SessionMeta{
 			Correlation: corr,
 			PRURL:       pr.URL,
 			PRNumber:    pr.Number,
+			PRState:     state,
 		}
 		if e.opts.PersistSessionMeta != nil {
 			if err := e.opts.PersistSessionMeta(meta); err != nil {
