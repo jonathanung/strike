@@ -20,6 +20,8 @@ type Info struct {
 	ParentSessionID string
 	Title           string
 	ProjectKey      string // launch project identity; empty on legacy sessions
+	WorktreePath    string // strike-managed git worktree; empty = launch cwd
+	WorktreeBranch  string
 	Path            string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
@@ -107,6 +109,8 @@ func (m *Manager) Create(opts CreateOptions) (Info, error) {
 		ParentSessionID: meta.ParentSessionID,
 		Title:           meta.Title,
 		ProjectKey:      meta.ProjectKey,
+		WorktreePath:    meta.WorktreePath,
+		WorktreeBranch:  meta.WorktreeBranch,
 		Path:            store.Path(),
 		CreatedAt:       now,
 		UpdatedAt:       now,
@@ -117,6 +121,63 @@ func (m *Manager) Create(opts CreateOptions) (Info, error) {
 	}
 	m.sessions[id] = &managed{store: store, info: info}
 	return info, nil
+}
+
+// CountOpenRoots returns how many open sessions have no parent (root sessions).
+func (m *Manager) CountOpenRoots() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for _, e := range m.sessions {
+		if e.info.ParentSessionID == "" {
+			n++
+		}
+	}
+	return n
+}
+
+// SetWorktree records a bound worktree on an open session and durable meta.
+// Empty path clears the binding.
+func (m *Manager) SetWorktree(id, path, branch string) error {
+	id = strings.TrimSpace(id)
+	if err := validateID(id); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	e, ok := m.sessions[id]
+	if !ok {
+		return fmt.Errorf("session %q is not open", id)
+	}
+	path = strings.TrimSpace(path)
+	branch = strings.TrimSpace(branch)
+	meta, err := UpdateMeta(m.dir, id, func(meta *Meta) {
+		meta.WorktreePath = path
+		meta.WorktreeBranch = branch
+	})
+	if err != nil {
+		return err
+	}
+	e.info.WorktreePath = meta.WorktreePath
+	e.info.WorktreeBranch = meta.WorktreeBranch
+	return nil
+}
+
+// Destroy closes an open session (if any) and removes its durable log + meta.
+// Used to roll back a half-created session when worktree bind fails.
+func (m *Manager) Destroy(id string) error {
+	id = strings.TrimSpace(id)
+	if err := validateID(id); err != nil {
+		return err
+	}
+	_ = m.Close(id)
+	var first error
+	for _, p := range []string{LogPath(m.dir, id), MetaPath(m.dir, id)} {
+		if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) && first == nil {
+			first = err
+		}
+	}
+	return first
 }
 
 // Open opens an existing session log for append. Creates the log file only if
@@ -653,6 +714,8 @@ func (m *Manager) infoFromDiskLocked(id string, st os.FileInfo) (Info, error) {
 		ParentSessionID: meta.ParentSessionID,
 		Title:           title,
 		ProjectKey:      meta.ProjectKey,
+		WorktreePath:    meta.WorktreePath,
+		WorktreeBranch:  meta.WorktreeBranch,
 		Path:            LogPath(m.dir, id),
 		CreatedAt:       created,
 		UpdatedAt:       st.ModTime().UTC(),

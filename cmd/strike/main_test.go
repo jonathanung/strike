@@ -31,6 +31,7 @@ Options:
   --dangerously-skip-permissions     skip configured permission prompts (agent profile denies still apply)
   --continue                         resume the most recent root session (model history + selections)
   --session <id>                     resume a specific session by id (model history + selections)
+  --worktree                         run this session in an isolated git worktree under .strike/worktrees/
   --upgrade                          download and install the latest GitHub Release, then restart
   --version                          print version and exit
   -h, --help                         show help
@@ -91,6 +92,11 @@ func TestParseCLIOptionsValueFormsAndProviderExplicitness(t *testing.T) {
 			name: "session equals",
 			args: []string{"--session=abc-123"},
 			want: cliOptions{sessionID: "abc-123"},
+		},
+		{
+			name: "worktree flag",
+			args: []string{"--worktree"},
+			want: cliOptions{worktree: true},
 		},
 	}
 	for _, tt := range tests {

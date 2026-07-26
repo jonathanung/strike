@@ -61,7 +61,7 @@ event stream the TUI rendered from (see `internal/protocol/codec.go`).
 | `internal/config` | Layered JSON config (defaults → global → project) + agents/skills markdown loading | `permission` (Ruleset is a config field), stdlib |
 | `internal/models` | models.dev catalog client, 24h cache with stale fallback | stdlib, net/http |
 | `internal/history` | Project-scoped prompt history | stdlib |
-| `internal/project` | Stable filesystem identity for project-scoped state (git-aware) | stdlib, os/exec |
+| `internal/project` | Stable filesystem identity + optional per-session git worktrees under `.strike/worktrees/` | stdlib, os/exec |
 | `internal/host` | **Frozen contract**: the services a frontend needs from its host process | stdlib only — enforced by the boundary test |
 | `internal/host/local` | Real `host.Services` implementation; wraps auth/config/models/history/memory/issue/files for the frontend | `auth`, `config`, `history`, `host`, `issue`, `memory`, `models` |
 | `internal/tui` | Bubble Tea frontend: app model, layout, transcript cells, modals, composer | `protocol`, `host`, `tui/...` only — enforced by the boundary test |

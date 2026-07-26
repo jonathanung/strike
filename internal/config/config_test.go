@@ -105,6 +105,41 @@ func TestLoadMerge(t *testing.T) {
 	}
 }
 
+func TestLoadSessionWorktreeMerge(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(global, []byte(`{
+		"session": {"worktree": "auto", "worktreeCleanup": "keep"}
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(work, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(project), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(project, []byte(`{
+		"session": {"worktree": "always", "worktreeCleanup": "delete"}
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Session.Worktree != "always" {
+		t.Errorf("worktree = %q", cfg.Session.Worktree)
+	}
+	if cfg.Session.WorktreeCleanup != "delete" {
+		t.Errorf("cleanup = %q", cfg.Session.WorktreeCleanup)
+	}
+}
+
 func TestLoadDropsInvalidHooks(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

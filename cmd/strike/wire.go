@@ -131,13 +131,15 @@ type assembled struct {
 	sessionID string
 	// replay is prior transcript events for --continue (UI only; not re-appended).
 	replay       []protocol.Event
-	workDir      string
+	workDir      string // tool CWD (session worktree when bound, else launch cwd)
 	cfg          config.Config
 	services     host.Services
 	firstRun     bool
 	historyClose func() error
 	memoryClose  func() error
 	issuesClose  func() error
+	// worktreeClose removes a strike-managed worktree when cleanup=delete.
+	worktreeClose func() error
 }
 
 // assemble resolves project/config/auth, builds the engine and session store,
@@ -146,11 +148,14 @@ type assembled struct {
 // The caller must invoke historyClose and, if it never hands store to
 // runSession, store.Close.
 func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
-	workDir, err := os.Getwd()
+	launchDir, err := os.Getwd()
 	if err != nil {
 		return nil, err
 	}
-	projectIdentity, err := project.Resolve(context.Background(), workDir)
+	// workDir is the launch cwd until a session worktree is bound (tools +
+	// host.Files). Config/agents/skills always load from the launch tree.
+	workDir := launchDir
+	projectIdentity, err := project.Resolve(context.Background(), launchDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolving project identity: %w", err)
 	}
@@ -366,7 +371,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		initialAlways     permission.Ruleset
 		// quietStartup: resume re-applies selections without re-teeing them
 		// into JSONL (TUI seeds from replay). Fresh sessions still announce.
-		quietStartup bool
+		quietStartup    bool
+		resuming        bool
+		openRootsBefore int
 	)
 	resumeID := strings.TrimSpace(opts.sessionID)
 	if opts.continueSession {
@@ -380,6 +387,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		resumeID = info.ID
 	}
 	if resumeID != "" {
+		resuming = true
 		opened, err := openResumeSession(sessions, resumeID)
 		if err != nil {
 			_ = issueStore.Close()
@@ -414,6 +422,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		// so the next Restore sees the switch; keep startup noisy then.
 		quietStartup = !opts.providerSet && opts.model == "" && opts.effort == ""
 	} else {
+		openRootsBefore = sessions.CountOpenRoots()
 		info, err := sessions.Create(session.CreateOptions{ProjectKey: projectIdentity.Key})
 		if err != nil {
 			_ = issueStore.Close()
@@ -431,6 +440,24 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		}
 		sessionID = info.ID
 	}
+
+	// Bind tool CWD to a per-session git worktree when configured / forced.
+	// Project-scoped state (history/memory/issues) stays on projectIdentity.Key
+	// (launch repo), not the worktree path. Failure rolls back a fresh session.
+	toolDir, wtClose, err := bindSessionWorktree(sessions, sessionID, launchDir, cfg, opts.worktree, resuming, openRootsBefore)
+	if err != nil {
+		if !resuming {
+			_ = sessions.Destroy(sessionID)
+		} else {
+			_ = sessions.CloseAll()
+		}
+		_ = issueStore.Close()
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, err
+	}
+	workDir = toolDir
+
 	sessionDir := sessions.Dir()
 	shellHooks := cfg.ShellHooks()
 	hookDefs := make([]tool.HookDef, 0, len(shellHooks))
@@ -487,7 +514,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			return n
 		},
 		PersistProjectRule: func(rule permission.Rule) error {
-			return config.AppendProjectPermission(workDir, rule)
+			return config.AppendProjectPermission(launchDir, rule)
 		},
 		PersistSessionMeta: func(m protocol.SessionMeta) error {
 			_, err := session.UpdateMeta(sessionDir, sessionID, func(meta *session.Meta) {
@@ -555,7 +582,64 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		issuesClose: func() error {
 			return issueStore.Close()
 		},
+		worktreeClose: wtClose,
 	}, nil
+}
+
+// bindSessionWorktree resolves the tool CWD for a root session. On resume it
+// reuses a durable worktree path when still present. On create it may add a
+// git worktree under <main>/.strike/worktrees/<id>/ when mode/force says so.
+// Returns a cleanup func (possibly nil) for worktreeCleanup=delete.
+func bindSessionWorktree(
+	sessions *session.Manager,
+	sessionID, launchDir string,
+	cfg config.Config,
+	force bool,
+	resuming bool,
+	openRootsBefore int,
+) (toolDir string, cleanup func() error, err error) {
+	toolDir = launchDir
+	info, err := sessions.Get(sessionID)
+	if err != nil {
+		return launchDir, nil, fmt.Errorf("session worktree: %w", err)
+	}
+
+	if resuming {
+		if info.WorktreePath != "" {
+			st, statErr := os.Stat(info.WorktreePath)
+			if statErr == nil && st.IsDir() {
+				toolDir = info.WorktreePath
+				cleanup = worktreeCleanupFunc(cfg, info.WorktreePath, info.WorktreeBranch, launchDir)
+				return toolDir, cleanup, nil
+			}
+		}
+		// Missing worktree on resume: stay on launch cwd (no half-bind).
+		return launchDir, nil, nil
+	}
+
+	if !project.WantWorktree(cfg.Session.Worktree, force, openRootsBefore) {
+		return launchDir, nil, nil
+	}
+
+	wt, err := project.Add(context.Background(), launchDir, sessionID)
+	if err != nil {
+		return launchDir, nil, fmt.Errorf("session worktree: %w", err)
+	}
+	if err := sessions.SetWorktree(sessionID, wt.Path, wt.Branch); err != nil {
+		_ = project.Remove(context.Background(), wt.RepoRoot, wt.Path, wt.Branch)
+		return launchDir, nil, fmt.Errorf("session worktree: binding meta: %w", err)
+	}
+	cleanup = worktreeCleanupFunc(cfg, wt.Path, wt.Branch, wt.RepoRoot)
+	return wt.Path, cleanup, nil
+}
+
+func worktreeCleanupFunc(cfg config.Config, path, branch, repoRoot string) func() error {
+	if project.NormalizeCleanup(cfg.Session.WorktreeCleanup) != project.CleanupDelete {
+		return nil
+	}
+	return func() error {
+		return project.Remove(context.Background(), repoRoot, path, branch)
+	}
 }
 
 // resumeOpened is the product of openResumeSession.
@@ -625,6 +709,11 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 			}
 			if a.sessions != nil {
 				_ = a.sessions.CloseAll()
+			}
+			if a.worktreeClose != nil {
+				if err := a.worktreeClose(); err != nil && runErr == nil {
+					runErr = fmt.Errorf("removing session worktree: %w", err)
+				}
 			}
 			if err := a.issuesClose(); err != nil && runErr == nil {
 				runErr = fmt.Errorf("closing project issues: %w", err)
@@ -716,6 +805,11 @@ func runExec(opts cliOptions, prompt string, stdout, stderr io.Writer) (runErr e
 		return err
 	}
 	defer func() {
+		if a.worktreeClose != nil {
+			if err := a.worktreeClose(); err != nil && runErr == nil {
+				runErr = fmt.Errorf("removing session worktree: %w", err)
+			}
+		}
 		if err := a.issuesClose(); err != nil && runErr == nil {
 			runErr = fmt.Errorf("closing project issues: %w", err)
 		}

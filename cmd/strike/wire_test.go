@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -13,6 +15,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/engine"
 	"github.com/jonathanung/strike-cli/internal/permission"
+	"github.com/jonathanung/strike-cli/internal/project"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
 	"github.com/jonathanung/strike-cli/internal/provider/echo"
@@ -662,4 +665,146 @@ func TestOptionalBearer(t *testing.T) {
 	if tok != "env-wins" {
 		t.Errorf("env precedence = %q", tok)
 	}
+}
+
+func TestBindSessionWorktreeCreatesAndCleans(t *testing.T) {
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git unavailable")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command(git, args...)
+		cmd.Dir = repo
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "--quiet")
+	run("config", "user.email", "t@t")
+	run("config", "user.name", "t")
+	run("commit", "--quiet", "--allow-empty", "-m", "init")
+
+	mgr := session.NewManager(filepath.Join(home, ".strike", "sessions"))
+	info, err := mgr.Create(session.CreateOptions{ID: "wt-bind-1", ProjectKey: repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{Session: config.SessionConfig{Worktree: "always", WorktreeCleanup: "delete"}}
+	toolDir, cleanup, err := bindSessionWorktree(mgr, info.ID, repo, cfg, false, false, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if toolDir == repo {
+		t.Fatal("expected worktree path, got launch dir")
+	}
+	if _, err := os.Stat(toolDir); err != nil {
+		t.Fatalf("worktree missing: %v", err)
+	}
+	got, err := mgr.Get(info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.WorktreePath != toolDir {
+		t.Fatalf("meta path = %q, tool = %q", got.WorktreePath, toolDir)
+	}
+	// Write inside worktree only.
+	marker := filepath.Join(toolDir, "only-here.txt")
+	if err := os.WriteFile(marker, []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "only-here.txt")); !os.IsNotExist(err) {
+		t.Fatal("file leaked to primary")
+	}
+	if cleanup == nil {
+		t.Fatal("want cleanup when delete")
+	}
+	if err := cleanup(); err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+	if _, err := os.Stat(toolDir); !os.IsNotExist(err) {
+		t.Fatalf("worktree still present: %v", err)
+	}
+	if _, err := os.Stat(repo); err != nil {
+		t.Fatalf("primary checkout removed: %v", err)
+	}
+}
+
+func TestBindSessionWorktreeOffStaysOnLaunch(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := t.TempDir()
+	mgr := session.NewManager(filepath.Join(home, ".strike", "sessions"))
+	info, err := mgr.Create(session.CreateOptions{ID: "no-wt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	toolDir, cleanup, err := bindSessionWorktree(mgr, info.ID, dir, config.Config{}, false, false, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if toolDir != dir {
+		t.Fatalf("toolDir = %q, want %q", toolDir, dir)
+	}
+	if cleanup != nil {
+		t.Fatal("unexpected cleanup")
+	}
+}
+
+func TestBindSessionWorktreeAutoSecondRoot(t *testing.T) {
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git unavailable")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := t.TempDir()
+	cmd := exec.Command(git, "init", "--quiet", repo)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("init: %v\n%s", err, out)
+	}
+	for _, args := range [][]string{
+		{"-C", repo, "config", "user.email", "t@t"},
+		{"-C", repo, "config", "user.name", "t"},
+		{"-C", repo, "commit", "--quiet", "--allow-empty", "-m", "i"},
+	} {
+		if out, err := exec.Command(git, args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	mgr := session.NewManager(filepath.Join(home, ".strike", "sessions"))
+	first, err := mgr.Create(session.CreateOptions{ID: "root-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{Session: config.SessionConfig{Worktree: "auto"}}
+	// First root (openRootsBefore=0): no worktree.
+	tool1, _, err := bindSessionWorktree(mgr, first.ID, repo, cfg, false, false, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tool1 != repo {
+		t.Fatalf("first root toolDir = %q", tool1)
+	}
+	second, err := mgr.Create(session.CreateOptions{ID: "root-2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool2, cleanup, err := bindSessionWorktree(mgr, second.ID, repo, cfg, false, false, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tool2 == repo {
+		t.Fatal("second root should get worktree")
+	}
+	if cleanup != nil {
+		t.Fatal("default cleanup is keep")
+	}
+	t.Cleanup(func() {
+		info, _ := mgr.Get(second.ID)
+		_ = project.Remove(context.Background(), repo, info.WorktreePath, info.WorktreeBranch)
+	})
 }

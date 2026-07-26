@@ -62,6 +62,16 @@ type Config struct {
 	// TUI keybind catalog (e.g. "nav.jump-bottom"). Merged last-wins per id
 	// across global then project layers. Unknown ids fail Load.
 	Keybinds map[string]KeybindChords `json:"keybinds,omitempty"`
+	// Session holds per-session runtime preferences (worktree isolation).
+	Session SessionConfig `json:"session,omitempty"`
+}
+
+// SessionConfig is the JSON "session" object in config.
+type SessionConfig struct {
+	// Worktree is off (default), auto (second+ concurrent root), or always.
+	Worktree string `json:"worktree,omitempty"`
+	// WorktreeCleanup is keep (default) or delete on session close.
+	WorktreeCleanup string `json:"worktreeCleanup,omitempty"`
 }
 
 // Hook is one lifecycle hook entry. Exactly one of Action or Command should
@@ -352,6 +362,12 @@ func merge(base, layer Config) Config {
 	}
 	if layer.MaxChildDepth != 0 {
 		base.MaxChildDepth = layer.MaxChildDepth
+	}
+	if layer.Session.Worktree != "" {
+		base.Session.Worktree = layer.Session.Worktree
+	}
+	if layer.Session.WorktreeCleanup != "" {
+		base.Session.WorktreeCleanup = layer.Session.WorktreeCleanup
 	}
 	base.Permissions = append(base.Permissions, layer.Permissions...)
 	base.Hooks = append(base.Hooks, layer.Hooks...)
