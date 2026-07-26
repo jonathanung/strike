@@ -41,6 +41,62 @@ func TestBuiltinPlanImplement(t *testing.T) {
 	}
 }
 
+func TestBuiltinReviewFix(t *testing.T) {
+	w := BuiltinReviewFix()
+	if err := ValidateWorkflow(w); err != nil {
+		t.Fatal(err)
+	}
+	if w.Name != "review-fix" {
+		t.Fatalf("name = %q", w.Name)
+	}
+	if len(w.Phases) != 2 {
+		t.Fatalf("phases = %d", len(w.Phases))
+	}
+	review := w.Phases[0]
+	if review.Name != "review" || review.Agent != "reviewer" || review.Exit.Type != GateUser {
+		t.Fatalf("review phase = %#v", review)
+	}
+	var sawWriteDeny, sawEditDeny bool
+	for _, r := range review.Permissions {
+		if r.Permission == "write" && r.Action == permission.Deny {
+			sawWriteDeny = true
+		}
+		if r.Permission == "edit" && r.Action == permission.Deny {
+			sawEditDeny = true
+		}
+	}
+	if !sawWriteDeny || !sawEditDeny {
+		t.Fatalf("review permissions missing write/edit deny: %#v", review.Permissions)
+	}
+	fix := w.Phases[1]
+	if fix.Name != "fix" || fix.Agent != "build" || fix.Exit.Type != GateCheck || fix.Exit.Command != "make test" {
+		t.Fatalf("fix phase = %#v", fix)
+	}
+}
+
+func TestBuiltinWorkflows(t *testing.T) {
+	ws := BuiltinWorkflows()
+	if len(ws) < 2 {
+		t.Fatalf("builtins = %#v", ws)
+	}
+	byName := map[string]Workflow{}
+	for _, w := range ws {
+		if err := ValidateWorkflow(w); err != nil {
+			t.Fatalf("%s: %v", w.Name, err)
+		}
+		if _, dup := byName[w.Name]; dup {
+			t.Fatalf("duplicate builtin %q", w.Name)
+		}
+		byName[w.Name] = w
+	}
+	if _, ok := byName["plan-implement"]; !ok {
+		t.Fatal("missing plan-implement")
+	}
+	if _, ok := byName["review-fix"]; !ok {
+		t.Fatal("missing review-fix")
+	}
+}
+
 func TestParseWorkflow(t *testing.T) {
 	raw := `{
 	  "name": "review",
@@ -148,5 +204,8 @@ func TestLoadWorkflowsIncludesBuiltinAndOverride(t *testing.T) {
 	}
 	if _, ok := byName["ship"]; !ok {
 		t.Fatalf("missing ship: %#v", byName)
+	}
+	if got := byName["review-fix"]; got.Name != "review-fix" || len(got.Phases) != 2 {
+		t.Fatalf("builtin review-fix missing: %#v", got)
 	}
 }

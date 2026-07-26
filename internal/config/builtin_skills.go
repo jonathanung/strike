@@ -11,7 +11,8 @@ import (
 var builtinSkillFS embed.FS
 
 // BuiltinSkills returns the shipping skills embedded in the binary
-// (/commit, /push, /pr, /ship). User global/project skills override same names.
+// (/commit, /push, /pr, /ship, /review, /learn, /deslop, /verify).
+// User global/project skills override same names.
 func BuiltinSkills() []Skill {
 	entries, err := fs.ReadDir(builtinSkillFS, "skills")
 	if err != nil {

@@ -21,13 +21,16 @@ func TestParseServeArgs(t *testing.T) {
 	if opts.sessionDir != session.DefaultDir() {
 		t.Fatalf("sessionDir = %q, want default", opts.sessionDir)
 	}
+	if opts.provider != "echo" || opts.attachOnly {
+		t.Fatalf("defaults provider/attach = %+v", opts)
+	}
 
-	opts, err = parseServeArgs([]string{"--session-dir", "/tmp/sessions"})
+	opts, err = parseServeArgs([]string{"--session-dir", "/tmp/sessions", "--provider", "anthropic", "--attach-only"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if opts.sessionDir != "/tmp/sessions" {
-		t.Fatalf("sessionDir = %q", opts.sessionDir)
+	if opts.sessionDir != "/tmp/sessions" || opts.provider != "anthropic" || !opts.attachOnly {
+		t.Fatalf("opts = %+v", opts)
 	}
 
 	_, err = parseServeArgs([]string{"--help"})
@@ -52,6 +55,9 @@ func TestRunCLIServeHelp(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "/health") {
 		t.Fatalf("usage missing /health: %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "/v1/ws") {
+		t.Fatalf("usage missing /v1/ws: %q", stdout.String())
 	}
 }
 

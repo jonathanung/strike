@@ -14,7 +14,7 @@ import (
 const Permission = "mcp"
 
 type bridgeTool struct {
-	client  *Client
+	client  session
 	mcpName string // name on the wire (tools/call)
 	strike  string // namespaced name exposed to the model
 	desc    string
@@ -22,7 +22,7 @@ type bridgeTool struct {
 	server  string
 }
 
-func newBridge(client *Client, info toolInfo) tool.Tool {
+func newBridge(client session, info toolInfo) tool.Tool {
 	schema := info.InputSchema
 	if len(schema) == 0 {
 		schema = json.RawMessage(`{"type":"object","properties":{}}`)

@@ -129,11 +129,14 @@ restores built-in defaults for the current session only — delete the
 
 List/permission modal conventions (`lists.*`, `perm.*`) are not remappable.
 
-## MCP servers (stdio tools)
+## MCP servers (stdio + HTTP)
 
 Connect external [Model Context Protocol](https://modelcontextprotocol.io)
 servers so their tools appear in the model registry as `mcp_<server>_<tool>`.
-v1 is **stdio only** (command + args). SSE/HTTP transports are out of scope.
+Supported transports: **stdio** (local subprocess) and **streamable HTTP**
+(remote endpoint; JSON or SSE responses).
+
+### Stdio (local)
 
 ```json
 {
@@ -149,19 +152,45 @@ v1 is **stdio only** (command + args). SSE/HTTP transports are out of scope.
 }
 ```
 
+### Streamable HTTP (remote)
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "remote": {
+        "type": "http",
+        "url": "https://mcp.example.com/mcp",
+        "headers": { "Authorization": "Bearer …" }
+      }
+    }
+  }
+}
+```
+
 | Field | Required | Notes |
 |---|---|---|
 | `servers.<name>` | yes | short letter-led slug (`[A-Za-z][A-Za-z0-9_-]*`) |
-| `command` | yes | executable on `PATH` or absolute path |
+| `type` | no | `stdio` (default) or `http` (`sse` is accepted as an alias for `http`) |
+| `command` | stdio | executable on `PATH` or absolute path |
 | `args` | no | argv after the command |
-| `env` | no | explicit env overlay (merged onto the process environment); never logged |
+| `env` | no | stdio env overlay; **never logged** |
+| `url` | http | MCP endpoint URL (if set without `type`, transport is `http`) |
+| `headers` | no | HTTP request headers (e.g. `Authorization`); **never logged or shown in `/mcp`** |
 
 Layers: when a layer sets `mcp.servers` (including `{}`), it **replaces** the
 previous layer's server map. Omitted `mcp` leaves the lower layer unchanged.
 
 Lifecycle: servers start with the session (after the tool worktree is bound),
-list tools once, and shut down on exit. A crashed server does not take down
-strike — its tools error cleanly; `/mcp` shows `down`/`error`.
+list tools once, and shut down on exit. A crashed or unreachable server does
+not take down strike — its tools error cleanly; `/mcp` shows `up` / `down` /
+`error` / `disabled`.
+
+Control from the TUI:
+
+- `/mcp` — status (transport, endpoint label, tools, errors)
+- `/mcp retry [name]` — reconnect one server, or every non-up server
+- `/mcp disable <name>` — stop a server and unregister its tools
 
 Permissions: every MCP tool call asks with permission name `mcp` and pattern
 `<server>/<tool>` (default action **ask**). Allow a server or tool in config:
@@ -175,11 +204,10 @@ Permissions: every MCP tool call asks with permission name `mcp` and pattern
 }
 ```
 
-In the TUI, `/mcp` lists configured servers, up/down status, and tool names.
-
-Treat project-local MCP config like shell hooks: it runs local commands. Prefer
-global `~/.strike/config` for shared servers; review `command`/`args`/`env`
-before trusting a project's `.strike/config`.
+Treat project-local MCP config like shell hooks: stdio runs local commands;
+HTTP may send secrets via `headers`. Prefer global `~/.strike/config` for shared
+servers; review `command`/`args`/`env`/`url`/`headers` before trusting a
+project's `.strike/config`.
 
 ## Custom providers
 
@@ -229,6 +257,48 @@ Unknown values are ignored at load time. GUI `$EDITOR` values always take
 over the terminal regardless of `vimMode`. Leave the embedded editor with
 `ctrl+g`.
 
+## Hooks
+
+Lifecycle hooks live in the same JSON config under `hooks` (global then
+project **concatenate**). Each entry is either a **declarative rule**
+(`action`) or a **shell command** (`command`) — not both.
+
+```json
+{
+  "hooks": [
+    {
+      "event": "pre_tool_use",
+      "matcher": "bash",
+      "action": "log"
+    },
+    {
+      "event": "pre_tool_use",
+      "matcher": "write",
+      "action": "block",
+      "message": "writes blocked by policy"
+    },
+    {
+      "event": "post_tool_use",
+      "matcher": "edit",
+      "command": "echo ok",
+      "timeoutMs": 10000
+    }
+  ]
+}
+```
+
+| Field | Notes |
+|---|---|
+| `event` | `pre_tool_use`, `post_tool_use`, `turn_start`, `turn_end` |
+| `matcher` | doublestar on tool name; empty/`*` = all (turn events: empty/`*` only) |
+| `action` | `log`, `block`, or `notify` (block only on `pre_tool_use`) |
+| `message` | optional block/notify text |
+| `command` | `bash -c` with event JSON on stdin (shell hooks: tool events) |
+| `timeoutMs` | shell bound; default 30000, max 120000 |
+
+Invalid rows are dropped at load. Peer event-name mapping (CC/OpenCode/Crush):
+[peer-ecosystem.md](peer-ecosystem.md#hooks-alignment).
+
 ## History compaction
 
 `/compact` and automatic threshold/overflow compaction shrink model-facing
@@ -265,4 +335,5 @@ floors at `minimal` on the OpenAI family (which has no zero setting), and
 | `max` | maximum reasoning when correctness beats cost |
 
 Agents, skills, and workflows (including `.claude` / `.opencode` discovery
-roots and merge order): [agents-skills.md](agents-skills.md).
+roots and merge order): [agents-skills.md](agents-skills.md). Peer import
+inventory: [peer-ecosystem.md](peer-ecosystem.md).
