@@ -18,14 +18,14 @@ func TestDefaultKeyMapBindingsMatchTheirRequiredKeysAndHaveHelp(t *testing.T) {
 		{"quit", keys.Quit, tea.KeyMsg{Type: tea.KeyCtrlC}},
 		{"focus left", keys.FocusLeft, tea.KeyMsg{Type: tea.KeyCtrlH}},
 		{"focus right", keys.FocusRight, tea.KeyMsg{Type: tea.KeyCtrlL}},
-		{"window next", keys.CycleWindowNext, keyMsgAltJ()},
+		{"window next alt+j", keys.CycleWindowNext, keyMsgAltJ()},
+		{"window next bare LF", keys.CycleWindowNext, tea.KeyMsg{Type: tea.KeyCtrlJ}},
 		{"window prev", keys.CycleWindowPrev, tea.KeyMsg{Type: tea.KeyCtrlK}},
 		{"palette", keys.Palette, tea.KeyMsg{Type: tea.KeyCtrlP}},
 		{"keyhelp", keys.KeyHelp, tea.KeyMsg{Type: tea.KeyF1}},
 		{"interrupt", keys.Interrupt, tea.KeyMsg{Type: tea.KeyEsc}},
 		{"send", keys.Send, tea.KeyMsg{Type: tea.KeyEnter}},
 		{"newline alt+enter", keys.Newline, tea.KeyMsg{Type: tea.KeyEnter, Alt: true}},
-		{"newline bare LF KeyCtrlJ", keys.Newline, tea.KeyMsg{Type: tea.KeyCtrlJ}},
 		{"external editor", keys.ExternalEditor, tea.KeyMsg{Type: tea.KeyCtrlE}},
 	}
 	for _, tt := range tests {
@@ -39,18 +39,17 @@ func TestDefaultKeyMapBindingsMatchTheirRequiredKeysAndHaveHelp(t *testing.T) {
 			}
 		})
 	}
-	// CycleWindowNext help stays ctrl+j; wire form is alt+j after CSI rewrite.
+	// CycleWindowNext help stays ctrl+j; bare LF and enhanced alt+j both match.
 	if keys.CycleWindowNext.Help().Key != "ctrl+j" {
 		t.Errorf("CycleWindowNext help key = %q, want ctrl+j", keys.CycleWindowNext.Help().Key)
 	}
-	if key.Matches(tea.KeyMsg{Type: tea.KeyCtrlJ}, keys.CycleWindowNext) {
-		t.Error("bare KeyCtrlJ must not match CycleWindowNext (#240)")
+	if key.Matches(tea.KeyMsg{Type: tea.KeyCtrlJ}, keys.Newline) {
+		t.Error("bare KeyCtrlJ must not match Newline (#324)")
 	}
 	if key.Matches(keyMsgAltJ(), keys.Newline) {
-		t.Error("alt+j (enhanced ctrl+j) must not match Newline (#240)")
+		t.Error("alt+j (enhanced ctrl+j) must not match Newline (#324)")
 	}
-	// Newline help advertises shift+enter (the user-facing chord); the binding
-	// matches alt+enter (CSI rewrite) and ctrl+j (bare LF from many terminals).
+	// Newline help advertises shift+enter; binding is alt+enter after CSI rewrite.
 	newlineHelp := keys.Newline.Help()
 	if newlineHelp.Key != "shift+enter" {
 		t.Errorf("Newline help key = %q, want shift+enter", newlineHelp.Key)
@@ -189,21 +188,21 @@ func TestVimPaneAndWindowKeys(t *testing.T) {
 		t.Fatalf("ctrl+h focus = %v/composer=%v, want left/focused", m.focus, m.composer.Focused())
 	}
 
-	// Bare LF (KeyCtrlJ) is newline on left focus; enhanced ctrl+j (alt+j) cycles (#240).
+	// Bare LF (KeyCtrlJ) and enhanced ctrl+j (alt+j) both cycle from left (#324).
 	m.composer.SetValue("draft")
 	m.composer.SetCursor(len("draft"))
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
-	if got := m.composer.Value(); got != "draft\n" {
-		t.Fatalf("bare LF composer = %q, want draft\\n", got)
+	if got := m.composer.Value(); got != "draft" {
+		t.Fatalf("bare LF composer = %q, want draft (no newline)", got)
 	}
-	if m.windows.index != 0 {
-		t.Fatalf("bare LF cycled window to %d", m.windows.index)
+	if m.windows.index != 1 || m.windows.active().id() != "b" {
+		t.Fatalf("left bare LF window = %d/%s, want 1/b", m.windows.index, m.windows.active().id())
 	}
 	m = updateApp(t, m, keyMsgAltJ())
-	if m.windows.index != 1 || m.windows.active().id() != "b" {
-		t.Fatalf("left enhanced ctrl+j window = %d/%s, want 1/b", m.windows.index, m.windows.active().id())
+	if m.windows.index != 2 || m.windows.active().id() != "c" {
+		t.Fatalf("left enhanced ctrl+j window = %d/%s, want 2/c", m.windows.index, m.windows.active().id())
 	}
-	if got := m.composer.Value(); got != "draft\n" {
+	if got := m.composer.Value(); got != "draft" {
 		t.Fatalf("left enhanced ctrl+j changed composer to %q", got)
 	}
 
@@ -212,23 +211,24 @@ func TestVimPaneAndWindowKeys(t *testing.T) {
 	if m.focus != focusRight {
 		t.Fatalf("ctrl+l focus = %v, want right", m.focus)
 	}
-	m = updateApp(t, m, keyMsgAltJ())
-	if m.windows.index != 2 || m.windows.active().id() != "c" {
-		t.Errorf("right ctrl+j window = %d/%s, want 2/c", m.windows.index, m.windows.active().id())
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	if m.windows.index != 0 || m.windows.active().id() != "a" {
+		t.Errorf("right bare LF window = %d/%s, want 0/a", m.windows.index, m.windows.active().id())
 	}
 	m = updateApp(t, m, keyMsgAltJ())
-	if m.windows.active().id() != "a" {
-		t.Errorf("second right ctrl+j window = %s, want a", m.windows.active().id())
+	if m.windows.active().id() != "b" {
+		t.Errorf("second right ctrl+j window = %s, want b", m.windows.active().id())
 	}
 	// Empty composer: ctrl+k still cycles prev (kill only claims when it deletes).
-	// Active is a; prev → c, then b.
+	// Active is b; prev → a, then c.
+	m.composer.SetValue("")
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
-	if m.windows.active().id() != "c" {
-		t.Errorf("ctrl+k window = %s, want c", m.windows.active().id())
+	if m.windows.active().id() != "a" {
+		t.Errorf("ctrl+k window = %s, want a", m.windows.active().id())
 	}
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
-	if m.windows.active().id() != "b" {
-		t.Errorf("second ctrl+k window = %s, want b", m.windows.active().id())
+	if m.windows.active().id() != "c" {
+		t.Errorf("second ctrl+k window = %s, want c", m.windows.active().id())
 	}
 }
 

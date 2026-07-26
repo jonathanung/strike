@@ -117,8 +117,9 @@ directory listings reach the markdown and files windows through `host.Files`,
 not direct disk I/O from the TUI. Window input and resize updates stay inside
 `internal/tui`: no protocol Op or Event was added for this pane infrastructure.
 Composer input treats Enter as send and Shift+Enter (normalized to Alt+Enter)
-as newline via a stdin wrapper and enhanced keyboard modes; bare Escape from
-CSI-u is normalized to `0x1b`.
+as newline via a stdin wrapper and enhanced keyboard modes. Bare LF
+(`KeyCtrlJ`) is `ctrl+j` pane cycle, not newline. Bare Escape from CSI-u is
+normalized to `0x1b`.
 
 `View()` composes the full-width header first; its body is a horizontal
 left|right split by default, or a vertical top/bottom split when

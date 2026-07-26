@@ -65,10 +65,10 @@ func defaultKeyMap() keyMap {
 		Quit:       key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
 		FocusLeft:  key.NewBinding(key.WithKeys("ctrl+h"), key.WithHelp("ctrl+h", "focus left")),
 		FocusRight: key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("ctrl+l", "focus right")),
-		// CycleWindowNext: user chord is ctrl+j. WrapInput rewrites enhanced
-		// ctrl+j CSI to alt+j so it never collides with bare LF (KeyCtrlJ) used
-		// by Newline for legacy shift+enter (#240).
-		CycleWindowNext:   key.NewBinding(key.WithKeys("alt+j"), key.WithHelp("ctrl+j", "next window")),
+		// CycleWindowNext: user chord is ctrl+j. Enhanced CSI rewrites to alt+j;
+		// bare LF is also KeyCtrlJ (Ubuntu/legacy terminals). Both cycle panes —
+		// never newline (#324). Newline is shift+enter → alt+enter only.
+		CycleWindowNext:   key.NewBinding(key.WithKeys("alt+j", "ctrl+j"), key.WithHelp("ctrl+j", "next window")),
 		CycleWindowPrev:   key.NewBinding(key.WithKeys("ctrl+k"), key.WithHelp("ctrl+k", "prev window")),
 		Palette:           key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "palette")),
 		KeyHelp:           key.NewBinding(key.WithKeys("f1"), key.WithHelp("f1", "keybinds")),
@@ -80,9 +80,8 @@ func defaultKeyMap() keyMap {
 		CompletionNext:    key.NewBinding(key.WithKeys("down", "ctrl+n"), key.WithHelp("down/ctrl+n", "next")),
 		Send:              key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "send")),
 		// Newline: alt+enter is the post-WrapInput form of enhanced shift+enter
-		// CSI. ctrl+j matches bare LF only (legacy shift+enter without enhanced
-		// keys). Intentional ctrl+j is alt+j after CSI rewrite and cycles panes (#240).
-		Newline:        key.NewBinding(key.WithKeys("alt+enter", "ctrl+j"), key.WithHelp("shift+enter", "newline")),
+		// CSI. Bare LF (KeyCtrlJ) is ctrl+j pane cycle, not newline (#324).
+		Newline:        key.NewBinding(key.WithKeys("alt+enter"), key.WithHelp("shift+enter", "newline")),
 		ExternalEditor: key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("ctrl+e", "external editor")),
 		HistoryPrev:    key.NewBinding(key.WithKeys("up"), key.WithHelp("up", "history previous")),
 		HistoryNext:    key.NewBinding(key.WithKeys("down"), key.WithHelp("down", "history next")),
