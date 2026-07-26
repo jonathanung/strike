@@ -643,3 +643,37 @@ func TestLoadMCPMergeReplace(t *testing.T) {
 		t.Fatalf("project server = %#v", cfg.MCP.Servers["project"])
 	}
 }
+
+func TestLoadMCPHTTPFields(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(global, []byte(`{
+		"mcp": {"servers": {
+			"remote": {
+				"type": "http",
+				"url": "https://mcp.example.com/mcp",
+				"headers": {"Authorization": "Bearer secret"}
+			}
+		}}
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := cfg.MCP.Servers["remote"]
+	if s.Type != "http" || s.URL != "https://mcp.example.com/mcp" {
+		t.Fatalf("remote = %#v", s)
+	}
+	if s.Headers["Authorization"] != "Bearer secret" {
+		t.Fatalf("headers = %#v", s.Headers)
+	}
+}

@@ -1,6 +1,9 @@
 package local
 
 import (
+	"context"
+	"time"
+
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/mcp"
 )
@@ -24,6 +27,7 @@ func (a mcpAdapter) Statuses() []host.MCPServerStatus {
 		out[i] = host.MCPServerStatus{
 			Name:      s.Name,
 			Command:   s.Command,
+			Transport: s.Transport,
 			State:     s.State,
 			ToolCount: s.ToolCount,
 			Error:     s.Error,
@@ -31,4 +35,14 @@ func (a mcpAdapter) Statuses() []host.MCPServerStatus {
 		}
 	}
 	return out
+}
+
+func (a mcpAdapter) Retry(name string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	return a.mgr.Retry(ctx, name)
+}
+
+func (a mcpAdapter) Disable(name string) error {
+	return a.mgr.Disable(name)
 }

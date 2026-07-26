@@ -212,7 +212,7 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 	case "/init":
 		return m.handleInitCommand()
 	case "/mcp":
-		return m.handleMCPCommand()
+		return m.handleMCPCommand(fields[1:])
 	default:
 		// Unknown commands fall through to skills: /name args renders the
 		// skill template and submits it as the user message.
