@@ -41,7 +41,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 /theme dark|light|auto         # session appearance (forced / restore detect)
 /layout                        # toggle horizontal/vertical pane split
 /split                         # alias of /layout
-/compact                       # compact model history (keep recent turns)
+/compact                       # compact model history (trim or summarize per config)
 /vim [path[:line]]             # open file in embedded editor (pane/overlay)
                                # or $EDITOR (see vimMode in config.md)
 /md-read <path>                # open a markdown file in the right markdown pane

@@ -221,10 +221,12 @@ type FilesChanged struct {
 	Reason string   `json:"reason,omitempty"`
 }
 
-// Compact requests deterministic model-history compaction. Rejected while a
-// turn is running. Does not summarize via the model — older turns are replaced
-// with a compact marker while a recent tail is preserved.
-type Compact struct{}
+// Compact requests model-history compaction. Rejected while a turn is running.
+// Strategy selects trim (drop older turns, default) or summarize (model-authored
+// summary). Empty uses the engine/config default.
+type Compact struct {
+	Strategy string `json:"strategy,omitempty"` // trim | summarize
+}
 
 // InspectEffectivePrompt requests a snapshot of the composed system-prompt
 // layers (provenance + sizes). Prefer the last Stream composition when one
@@ -548,20 +550,31 @@ const (
 	CompactionReasonOverflow  = "overflow"
 )
 
+// Compaction strategy labels on CompactionStarted / CompactionCompleted.
+const (
+	CompactionStrategyTrim      = "trim"
+	CompactionStrategySummarize = "summarize"
+)
+
 // CompactionStarted announces that model-facing history compaction is about
 // to replace older messages. Emitted before the history mutation.
 type CompactionStarted struct {
 	Correlation
-	Reason string `json:"reason"` // manual | threshold | overflow
+	Reason   string `json:"reason"`             // manual | threshold | overflow
+	Strategy string `json:"strategy,omitempty"` // trim | summarize (requested)
 }
 
 // CompactionCompleted records that model-facing history was replaced.
 // Removed/Kept count provider messages (not transcript events).
+// Strategy is the strategy actually applied (may fall back from summarize to trim).
+// Summary is the model-authored text when Strategy is summarize (for restore).
 type CompactionCompleted struct {
 	Correlation
-	Reason  string `json:"reason"`
-	Removed int    `json:"removed"`
-	Kept    int    `json:"kept"`
+	Reason   string `json:"reason"`
+	Strategy string `json:"strategy,omitempty"` // trim | summarize (applied)
+	Removed  int    `json:"removed"`
+	Kept     int    `json:"kept"`
+	Summary  string `json:"summary,omitempty"`
 }
 
 // SessionMeta records durable session-level metadata (e.g. a PR opened while
