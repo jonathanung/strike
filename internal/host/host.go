@@ -273,6 +273,13 @@ type Sessions interface {
 	// returns the child. Parent stays intact. Implementations may reject
 	// subagent (parented) transcripts.
 	Fork(id string) (Session, error)
+	// Rename sets the durable display title for id. Empty title clears it.
+	// Survives restart via session metadata.
+	Rename(id, title string) (Session, error)
+	// Delete removes id's durable log and metadata. When the session is open
+	// (or is the active session), force must be true; otherwise Delete fails
+	// and leaves files intact.
+	Delete(id string, force bool) error
 }
 
 // AllProjectsSessions is an optional Sessions capability: list transcripts

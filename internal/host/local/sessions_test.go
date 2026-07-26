@@ -243,6 +243,66 @@ func TestSessionsListFiltersByProject(t *testing.T) {
 	}
 }
 
+func TestSessionsAdapterRenameAndDelete(t *testing.T) {
+	dir := t.TempDir()
+	mgr := session.NewManager(dir)
+	root, err := mgr.Create(session.CreateOptions{ID: "root-rd", Title: "before", ProjectKey: "/proj"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.Close(root.ID); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewSessions(mgr, "/proj")
+
+	renamed, err := svc.Rename(root.ID, "after")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renamed.Title != "after" {
+		t.Fatalf("Rename = %+v", renamed)
+	}
+	// Survives new manager (restart).
+	mgr2 := session.NewManager(dir)
+	svc2 := NewSessions(mgr2, "/proj")
+	got, ok, err := svc2.Get(root.ID)
+	if err != nil || !ok || got.Title != "after" {
+		t.Fatalf("Get after restart: ok=%v err=%v got=%+v", ok, err, got)
+	}
+
+	other, err := mgr2.Create(session.CreateOptions{ID: "root-other", Title: "x", ProjectKey: "/proj"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr2.Close(other.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc2.Delete(other.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	list, err := svc2.List(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].ID != root.ID {
+		t.Fatalf("List after delete = %+v", list)
+	}
+
+	// Open session requires force.
+	if _, err := mgr2.Open(root.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc2.Delete(root.ID, false); err == nil {
+		t.Fatal("expected force required")
+	}
+	if err := svc2.Delete(root.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := svc2.Get(root.ID); err != nil || ok {
+		t.Fatalf("Get after force delete: ok=%v err=%v", ok, err)
+	}
+}
+
 func TestRefreshPRStatesLeavesCacheOnFailure(t *testing.T) {
 	dir := t.TempDir()
 	mgr := session.NewManager(dir)
