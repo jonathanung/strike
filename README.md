@@ -1,5 +1,7 @@
 # strike-cli
 
+Website: https://strike.jonathanung.ca/
+
 An agentic coding TUI in Go/Bubble Tea. The engine emits protocol events; the
 TUI consumes them. Sessions are JSONL event logs.
 
@@ -79,3 +81,10 @@ scaffold). Details: [docs/web.md](docs/web.md).
 | [Web attach](docs/web.md) | experimental `strike serve` (read-only) |
 | [Architecture](docs/ARCHITECTURE.md) | packages, seams, recipes |
 | [Contributing](docs/contributing.md) | layout, verification, doc check |
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE).
+
+Free to use, modify, and distribute. You must retain the copyright notice and
+attribution (see `LICENSE` and `NOTICE`). Copyright 2026 Jonathan Ung.

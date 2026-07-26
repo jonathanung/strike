@@ -68,6 +68,7 @@ service/theme token).
 ## Scope
 
 - Smallest correct change. Match surrounding style and comment density.
+- Must implement as many tests as possible for all new chunks of code.
 - No new test frameworks or dependencies without an explicit ask.
 - Do not commit secrets or write real credentials into fixtures.
 - UI work goes through `internal/tui/ui` components and `internal/tui/theme`
