@@ -49,25 +49,29 @@ overwrite). Enter sends; Shift+Enter newline; `esc` interrupts; `ctrl+t` jumps
 to latest output; `ctrl+c` quits. `@path` attaches project files. See
 [docs/keybinds.md](docs/keybinds.md) and [docs/usage.md](docs/usage.md).
 
-## Experimental web attach (`strike serve`)
+## Experimental web cockpit (`strike serve`)
 
-Opt-in, **read-only** scaffold so a browser can tail a session JSONL log.
-The TUI remains primary; there is no composer or ops over HTTP yet.
+Opt-in browser cockpit: live composer/ops over WebSocket, permissions and
+questions, status chrome, plus read-only SSE attach to any session JSONL.
+Defaults to the offline `echo` provider. The TUI remains primary.
 
 ```sh
 make serve
-# or: ./strike serve --addr 127.0.0.1:8787 --token <secret>
+# or: ./strike serve --addr 127.0.0.1:8787 --token <secret> --provider echo
 curl -s http://127.0.0.1:8787/health
-# open http://127.0.0.1:8787/attach?session=<id>&token=<secret>
+# open http://127.0.0.1:8787/attach?token=<secret>
 ```
 
 - `GET /health` — JSON `{ok, version, commit}` (no auth)
-- `GET /attach` — minimal live transcript page
-- `GET /v1/sessions/{id}/events` — SSE of protocol envelopes (`Authorization: Bearer` or `?token=`)
+- `GET /attach` — cockpit page (composer, transcript, permission modal)
+- `GET /v1/ws` — WebSocket ops in / events out (`?token=` or Bearer)
+- `POST /v1/ops` — submit one op envelope
+- `GET /v1/live/events`, `/v1/status`, `/v1/agents`, `/v1/sessions`
+- `GET /v1/sessions/{id}/events` — SSE JSONL tail
 
 CORS allows localhost origins only. **Do not bind outside loopback** unless you
-accept that anyone with the token can read session transcripts (no TLS in this
-scaffold). Details: [docs/web.md](docs/web.md).
+accept that anyone with the token can read transcripts and submit ops (no TLS).
+Details: [docs/web.md](docs/web.md).
 
 ## Docs
 
@@ -79,7 +83,7 @@ scaffold). Details: [docs/web.md](docs/web.md).
 | [Auth & providers](docs/auth.md) | credentials, OAuth, billing routing |
 | [Config](docs/config.md) | JSON, permissions, custom providers, `vimMode` |
 | [Agents & skills](docs/agents-skills.md) | personas, skills, workflows / autonomy |
-| [Web attach](docs/web.md) | experimental `strike serve` (read-only) |
+| [Web cockpit](docs/web.md) | experimental `strike serve` (live + RO) |
 | [Architecture](docs/ARCHITECTURE.md) | packages, seams, recipes |
 | [Contributing](docs/contributing.md) | layout, verification, doc check |
 

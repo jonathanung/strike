@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>strike attach (experimental)</title>
+  <title>strike web</title>
   <style>
     :root {
       color-scheme: dark light;
@@ -12,196 +12,577 @@
       --muted: #9aa0a6;
       --line: #2a2f3a;
       --accent: #7cb7ff;
+      --ok: #81c995;
       --danger: #f28b82;
+      --warn: #fdd663;
+      --panel: #161a22;
+      --user: #aecbfa;
+      --assistant: #e8eaed;
+      --tool: #c58af9;
       font-family: ui-sans-serif, system-ui, sans-serif;
     }
     @media (prefers-color-scheme: light) {
       :root {
-        --bg: #fafafa;
-        --fg: #202124;
-        --muted: #5f6368;
-        --line: #dadce0;
-        --accent: #1a73e8;
-        --danger: #d93025;
+        --bg: #fafafa; --fg: #202124; --muted: #5f6368; --line: #dadce0;
+        --accent: #1a73e8; --ok: #188038; --danger: #d93025; --warn: #f9ab00;
+        --panel: #fff; --user: #174ea6; --assistant: #202124; --tool: #7627bb;
       }
     }
     * { box-sizing: border-box; }
-    body {
-      margin: 0 auto;
-      max-width: 56rem;
-      padding: 1.25rem;
-      background: var(--bg);
-      color: var(--fg);
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--fg); }
+    body { display: flex; flex-direction: column; min-height: 100vh; }
+    header {
+      display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: center;
+      padding: 0.65rem 1rem; border-bottom: 1px solid var(--line); background: var(--panel);
     }
-    header h1 { margin: 0 0 0.25rem; font-size: 1.25rem; font-weight: 600; }
-    .muted { color: var(--muted); font-weight: 400; }
-    .banner {
-      margin: 0 0 1rem;
-      padding: 0.5rem 0.75rem;
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      color: var(--muted);
-      font-size: 0.875rem;
+    header h1 { margin: 0; font-size: 1rem; font-weight: 600; }
+    .muted { color: var(--muted); }
+    .pill {
+      font-size: 0.75rem; color: var(--muted); border: 1px solid var(--line);
+      border-radius: 999px; padding: 0.15rem 0.55rem; white-space: nowrap;
     }
-    form {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.75rem;
-      align-items: end;
-      margin-bottom: 1rem;
-    }
-    label {
-      display: flex;
-      flex-direction: column;
-      gap: 0.25rem;
-      font-size: 0.75rem;
-      color: var(--muted);
-      flex: 1 1 12rem;
-    }
-    input {
-      font: inherit;
-      color: var(--fg);
-      background: transparent;
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      padding: 0.45rem 0.6rem;
-    }
-    button {
-      font: inherit;
-      cursor: pointer;
-      border: 1px solid var(--accent);
-      background: transparent;
-      color: var(--accent);
-      border-radius: 6px;
-      padding: 0.45rem 0.9rem;
-    }
-    #status.error { color: var(--danger); }
+    .pill strong { color: var(--fg); font-weight: 500; }
+    .pill.busy { border-color: var(--accent); color: var(--accent); }
+    main { flex: 1; display: flex; flex-direction: column; min-height: 0; max-width: 56rem; width: 100%; margin: 0 auto; }
     #log {
-      margin: 0;
-      padding: 0.75rem;
-      min-height: 20rem;
-      max-height: 70vh;
-      overflow: auto;
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: 0.8rem;
-      line-height: 1.45;
-      white-space: pre-wrap;
-      word-break: break-word;
+      flex: 1; overflow: auto; padding: 1rem; min-height: 12rem;
+      font-size: 0.9rem; line-height: 1.5;
     }
-    .ev-type { color: var(--accent); }
+    .msg { margin: 0 0 0.85rem; padding-bottom: 0.85rem; border-bottom: 1px solid var(--line); }
+    .msg .role { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin-bottom: 0.25rem; }
+    .msg.user .body { color: var(--user); white-space: pre-wrap; word-break: break-word; }
+    .msg.assistant .body { color: var(--assistant); white-space: pre-wrap; word-break: break-word; }
+    .msg.thinking .body { color: var(--muted); font-style: italic; white-space: pre-wrap; }
+    .msg.tool .body { color: var(--tool); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; white-space: pre-wrap; word-break: break-word; }
+    .msg.system .body { color: var(--muted); font-size: 0.8rem; }
+    .msg.error .body { color: var(--danger); }
+    .composer-wrap {
+      border-top: 1px solid var(--line); padding: 0.75rem 1rem 1rem; background: var(--panel);
+    }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem; align-items: center; }
+    .toolbar label { font-size: 0.75rem; color: var(--muted); display: flex; gap: 0.35rem; align-items: center; }
+    select, input[type="password"], input[type="text"] {
+      font: inherit; color: var(--fg); background: var(--bg);
+      border: 1px solid var(--line); border-radius: 6px; padding: 0.35rem 0.5rem;
+    }
+    textarea {
+      width: 100%; min-height: 4.5rem; resize: vertical; font: inherit;
+      color: var(--fg); background: var(--bg); border: 1px solid var(--line);
+      border-radius: 8px; padding: 0.6rem 0.75rem;
+    }
+    .actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; align-items: center; }
+    button {
+      font: inherit; cursor: pointer; border: 1px solid var(--accent);
+      background: transparent; color: var(--accent); border-radius: 6px;
+      padding: 0.4rem 0.85rem;
+    }
+    button.primary { background: var(--accent); color: var(--bg); }
+    button.danger { border-color: var(--danger); color: var(--danger); }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    #conn-status.error { color: var(--danger); }
+    #conn-status.ok { color: var(--ok); }
+    .auth-bar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: end; padding: 0.75rem 1rem; border-bottom: 1px solid var(--line); }
+    .auth-bar label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.75rem; color: var(--muted); flex: 1 1 10rem; }
+    dialog {
+      border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+      color: var(--fg); padding: 0; max-width: 28rem; width: calc(100% - 2rem);
+    }
+    dialog::backdrop { background: rgba(0,0,0,0.55); }
+    .dlg { padding: 1rem 1.1rem; }
+    .dlg h2 { margin: 0 0 0.5rem; font-size: 1rem; }
+    .dlg p, .dlg pre { margin: 0 0 0.75rem; font-size: 0.875rem; white-space: pre-wrap; word-break: break-word; }
+    .dlg .row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.75rem; }
+    .q-block { margin-bottom: 0.75rem; }
+    .q-block label { display: block; font-size: 0.8rem; margin-bottom: 0.25rem; }
+    .banner {
+      margin: 0; padding: 0.4rem 1rem; font-size: 0.8rem; color: var(--muted);
+      border-bottom: 1px solid var(--line);
+    }
   </style>
 </head>
 <body>
   <header>
-    <h1>strike <span class="muted">attach</span></h1>
-    <p class="banner">Experimental read-only web scaffold. TUI remains primary. No composer.</p>
+    <h1>strike <span class="muted">web</span></h1>
+    <span id="st-session" class="pill">session <strong>—</strong></span>
+    <span id="st-model" class="pill">model <strong>—</strong></span>
+    <span id="st-agent" class="pill">agent <strong>—</strong></span>
+    <span id="st-mode" class="pill">perm <strong>—</strong></span>
+    <span id="st-auto" class="pill">auto <strong>—</strong></span>
+    <span id="st-ctx" class="pill">ctx <strong>—</strong></span>
+    <span id="st-cwd" class="pill">cwd <strong>—</strong></span>
+    <span id="st-busy" class="pill">idle</span>
+    <span id="conn-status" class="muted" style="margin-left:auto;font-size:0.8rem">offline</span>
   </header>
-  <form id="connect" autocomplete="off">
-    <label>session id <input id="session" name="session" required spellcheck="false" /></label>
-    <label>token <input id="token" name="token" type="password" required spellcheck="false" /></label>
-    <button type="submit">attach</button>
-    <span id="status" class="muted">idle</span>
-  </form>
-  <pre id="log" aria-live="polite"></pre>
+  <p class="banner">Experimental cockpit. Token required for API. Default bind is localhost — LAN bind exposes transcripts (see docs/web.md).</p>
+  <div class="auth-bar" id="auth-bar">
+    <label>token <input id="token" type="password" autocomplete="off" spellcheck="false" /></label>
+    <label>session (RO attach) <input id="session-ro" type="text" placeholder="optional jsonl id" spellcheck="false" /></label>
+    <button type="button" id="btn-connect" class="primary">connect</button>
+    <button type="button" id="btn-ro">read-only SSE</button>
+  </div>
+  <main>
+    <div id="log" aria-live="polite"></div>
+    <div class="composer-wrap">
+      <div class="toolbar">
+        <label>agent
+          <select id="agent-select"><option value="">—</option></select>
+        </label>
+        <label>permission
+          <select id="perm-select">
+            <option value="default">default</option>
+            <option value="plan">plan</option>
+            <option value="accept-edits">accept-edits</option>
+            <option value="yolo">yolo</option>
+          </select>
+        </label>
+        <label>session
+          <select id="session-select"><option value="">live</option></select>
+        </label>
+      </div>
+      <textarea id="composer" rows="3" placeholder="Message… (Enter send, Shift+Enter newline)" disabled></textarea>
+      <div class="actions">
+        <button type="button" id="btn-send" class="primary" disabled>send</button>
+        <button type="button" id="btn-interrupt" class="danger" disabled>interrupt</button>
+        <span id="hint" class="muted" style="font-size:0.75rem"></span>
+      </div>
+    </div>
+  </main>
+
+  <dialog id="perm-dlg">
+    <div class="dlg">
+      <h2>Permission</h2>
+      <p id="perm-text"></p>
+      <pre id="perm-patterns" class="muted"></pre>
+      <div class="row">
+        <button type="button" data-dec="once" class="primary">allow once</button>
+        <button type="button" data-dec="always">always</button>
+        <button type="button" data-dec="project">project</button>
+        <button type="button" data-dec="reject" class="danger">reject</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="q-dlg">
+    <div class="dlg">
+      <h2>Question</h2>
+      <div id="q-body"></div>
+      <div class="row">
+        <button type="button" id="q-submit" class="primary">submit</button>
+        <button type="button" id="q-cancel" class="danger">cancel</button>
+      </div>
+    </div>
+  </dialog>
+
   <script>
 (function () {
   const params = new URLSearchParams(location.search);
-  const sessionInput = document.getElementById("session");
-  const tokenInput = document.getElementById("token");
-  const statusEl = document.getElementById("status");
-  const logEl = document.getElementById("log");
-  const form = document.getElementById("connect");
+  const els = {
+    token: document.getElementById("token"),
+    sessionRo: document.getElementById("session-ro"),
+    log: document.getElementById("log"),
+    composer: document.getElementById("composer"),
+    conn: document.getElementById("conn-status"),
+    agent: document.getElementById("agent-select"),
+    perm: document.getElementById("perm-select"),
+    sessionSel: document.getElementById("session-select"),
+    btnSend: document.getElementById("btn-send"),
+    btnInt: document.getElementById("btn-interrupt"),
+    btnConnect: document.getElementById("btn-connect"),
+    btnRo: document.getElementById("btn-ro"),
+    hint: document.getElementById("hint"),
+    permDlg: document.getElementById("perm-dlg"),
+    permText: document.getElementById("perm-text"),
+    permPatterns: document.getElementById("perm-patterns"),
+    qDlg: document.getElementById("q-dlg"),
+    qBody: document.getElementById("q-body"),
+  };
+  if (params.get("token")) els.token.value = params.get("token");
+  if (params.get("session")) els.sessionRo.value = params.get("session");
+
+  let token = "";
+  let ws = null;
   let es = null;
+  let live = false;
+  let pendingPerm = null;
+  let pendingQ = null;
+  let assistantBuf = null;
+  let thinkingBuf = null;
 
-  if (params.get("session")) sessionInput.value = params.get("session");
-  if (params.get("token")) tokenInput.value = params.get("token");
-
-  function setStatus(text, isError) {
-    statusEl.textContent = text;
-    statusEl.classList.toggle("error", !!isError);
+  function setConn(text, cls) {
+    els.conn.textContent = text;
+    els.conn.className = cls || "muted";
   }
-
-  function appendLine(html) {
-    const div = document.createElement("div");
-    div.innerHTML = html;
-    logEl.appendChild(div);
-    logEl.scrollTop = logEl.scrollHeight;
+  function setLiveUI(on) {
+    live = on;
+    els.composer.disabled = !on;
+    els.btnSend.disabled = !on;
+    els.btnInt.disabled = !on;
+    els.agent.disabled = !on;
+    els.perm.disabled = !on;
   }
-
   function escapeHtml(s) {
     return String(s)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
-
-  function formatEvent(env) {
-    const t = env && env.type ? env.type : "unknown";
-    let body = "";
-    const d = env && env.data ? env.data : {};
-    if (t === "user.message" && d.text != null) body = d.text;
-    else if (t === "text.delta" && d.text != null) body = d.text;
-    else if (t === "reasoning.delta" && d.text != null) body = d.text;
-    else if (t === "tool.begin") body = (d.name || "tool") + " " + (d.args || "");
-    else if (t === "tool.end") body = (d.name || "tool") + (d.is_error ? " error" : " ok");
-    else if (t === "tool.output" && d.output != null) body = d.output;
-    else if (t === "engine.error" && d.message != null) body = d.message;
-    else if (t === "turn.started") body = "turn started";
-    else if (t === "turn.completed") body = "turn completed";
-    else body = JSON.stringify(d);
-    return (
-      '<span class="ev-type">' +
-      escapeHtml(t) +
-      "</span> " +
-      '<span class="ev-text">' +
-      escapeHtml(body) +
-      "</span>"
-    );
+  function authHeaders() {
+    return { Authorization: "Bearer " + token, "Content-Type": "application/json" };
   }
-
-  function connect(session, token) {
-    if (es) {
-      es.close();
-      es = null;
+  function setStatus(st) {
+    if (!st) return;
+    const set = (id, label, val) => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = label + " <strong>" + escapeHtml(val || "—") + "</strong>";
+    };
+    set("st-session", "session", st.sessionId);
+    set("st-model", "model", st.provider ? (st.provider + "/" + (st.model || "")) : st.model);
+    set("st-agent", "agent", st.agent);
+    set("st-mode", "perm", st.permissionMode);
+    set("st-auto", "auto", st.autonomy);
+    let ctx = "—";
+    if (st.contextUsed) ctx = String(st.contextUsed) + (st.contextLimit ? "/" + st.contextLimit : "");
+    set("st-ctx", "ctx", ctx);
+    set("st-cwd", "cwd", st.cwd);
+    const busy = document.getElementById("st-busy");
+    if (busy) {
+      busy.textContent = st.busy ? "busy" : "idle";
+      busy.classList.toggle("busy", !!st.busy);
     }
-    logEl.textContent = "";
-    const url =
-      "/v1/sessions/" +
-      encodeURIComponent(session) +
-      "/events?token=" +
-      encodeURIComponent(token);
-    setStatus("connecting…");
-    es = new EventSource(url);
-    es.onopen = function () {
-      setStatus("live");
-    };
-    es.onerror = function () {
-      setStatus("disconnected", true);
-    };
-    es.onmessage = function (ev) {
-      try {
-        const env = JSON.parse(ev.data);
-        appendLine(formatEvent(env));
-      } catch (e) {
-        appendLine(escapeHtml(ev.data));
+    if (st.agent && els.agent.value !== st.agent) {
+      for (const o of els.agent.options) {
+        if (o.value === st.agent) { els.agent.value = st.agent; break; }
       }
+    }
+    if (st.permissionMode) els.perm.value = st.permissionMode;
+  }
+
+  function ensureMsg(kind, roleLabel) {
+    const div = document.createElement("div");
+    div.className = "msg " + kind;
+    div.innerHTML = '<div class="role">' + escapeHtml(roleLabel) + '</div><div class="body"></div>';
+    els.log.appendChild(div);
+    els.log.scrollTop = els.log.scrollHeight;
+    return div.querySelector(".body");
+  }
+  function appendSystem(text, kind) {
+    const body = ensureMsg(kind || "system", kind === "error" ? "error" : "system");
+    body.textContent = text;
+  }
+  function flushAssistant() {
+    assistantBuf = null;
+    thinkingBuf = null;
+  }
+
+  function handleEvent(env) {
+    if (!env || !env.type) return;
+    if (env.type === "status") {
+      setStatus(env.data || {});
+      return;
+    }
+    if (env.type === "error") {
+      appendSystem((env.data && env.data.message) || "error", "error");
+      return;
+    }
+    const d = env.data || {};
+    switch (env.type) {
+      case "user.message":
+        flushAssistant();
+        ensureMsg("user", "you").textContent = d.text || "";
+        break;
+      case "text.delta":
+        if (!assistantBuf) assistantBuf = ensureMsg("assistant", "assistant");
+        assistantBuf.textContent += d.text || "";
+        els.log.scrollTop = els.log.scrollHeight;
+        break;
+      case "reasoning.delta":
+        if (!thinkingBuf) thinkingBuf = ensureMsg("thinking", "thinking");
+        thinkingBuf.textContent += d.text || "";
+        els.log.scrollTop = els.log.scrollHeight;
+        break;
+      case "tool.begin": {
+        flushAssistant();
+        let args = d.args;
+        if (typeof args === "object") args = JSON.stringify(args);
+        ensureMsg("tool", "tool " + (d.name || "")).textContent = args || "";
+        break;
+      }
+      case "tool.output":
+        ensureMsg("tool", "tool out").textContent = d.data || d.output || "";
+        break;
+      case "tool.end":
+        ensureMsg("tool", "tool end").textContent =
+          (d.name || d.title || "tool") + (d.isError || d.is_error ? " error" : " ok") +
+          (d.output ? "\n" + d.output : "");
+        break;
+      case "permission.asked":
+        openPermission(d);
+        break;
+      case "permission.resolved":
+        if (els.permDlg.open) els.permDlg.close();
+        pendingPerm = null;
+        appendSystem("permission " + (d.decision || "resolved"), "system");
+        break;
+      case "question.asked":
+        openQuestion(d);
+        break;
+      case "question.resolved":
+        if (els.qDlg.open) els.qDlg.close();
+        pendingQ = null;
+        appendSystem("question resolved", "system");
+        break;
+      case "turn.started":
+        flushAssistant();
+        setStatus(Object.assign({}, lastStatus(), { busy: true }));
+        break;
+      case "turn.completed":
+        flushAssistant();
+        setStatus(Object.assign({}, lastStatus(), { busy: false }));
+        break;
+      case "model.selected":
+        setStatus(Object.assign({}, lastStatus(), { provider: d.provider, model: d.model }));
+        break;
+      case "agent.selected":
+        setStatus(Object.assign({}, lastStatus(), { agent: d.name }));
+        break;
+      case "permission.mode":
+        setStatus(Object.assign({}, lastStatus(), { permissionMode: d.mode }));
+        break;
+      case "autonomy.selected":
+        setStatus(Object.assign({}, lastStatus(), { autonomy: d.mode }));
+        break;
+      case "effort.selected":
+        setStatus(Object.assign({}, lastStatus(), { effort: d.level }));
+        break;
+      case "usage.reported":
+        if (d.used && d.used.known) {
+          setStatus(Object.assign({}, lastStatus(), { contextUsed: d.used.n }));
+        }
+        break;
+      case "engine.error":
+        appendSystem(d.message || "engine error", "error");
+        break;
+      case "session.titled":
+        appendSystem("titled: " + (d.title || ""), "system");
+        break;
+      default:
+        break;
+    }
+  }
+
+  let _status = {};
+  function lastStatus() { return _status; }
+  const _setStatus = setStatus;
+  setStatus = function (st) {
+    _status = Object.assign({}, _status, st || {});
+    _setStatus(_status);
+  };
+
+  function openPermission(d) {
+    pendingPerm = d;
+    els.permText.textContent = (d.permission || "permission") + " requested";
+    els.permPatterns.textContent = (d.patterns || []).join("\n");
+    if (!els.permDlg.open) els.permDlg.showModal();
+  }
+  els.permDlg.querySelectorAll("button[data-dec]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      if (!pendingPerm) return;
+      sendOp({
+        type: "permission.reply",
+        data: { requestId: pendingPerm.requestId, decision: btn.getAttribute("data-dec") }
+      });
+      els.permDlg.close();
+    });
+  });
+
+  function openQuestion(d) {
+    pendingQ = d;
+    els.qBody.innerHTML = "";
+    (d.questions || []).forEach(function (q, i) {
+      const block = document.createElement("div");
+      block.className = "q-block";
+      const label = document.createElement("label");
+      label.textContent = q.question || q.header || ("Q" + (i + 1));
+      block.appendChild(label);
+      if (q.options && q.options.length) {
+        const sel = document.createElement("select");
+        sel.dataset.idx = String(i);
+        q.options.forEach(function (opt) {
+          const o = document.createElement("option");
+          o.value = opt.label;
+          o.textContent = opt.label + (opt.description ? " — " + opt.description : "");
+          sel.appendChild(o);
+        });
+        block.appendChild(sel);
+      } else {
+        const inp = document.createElement("input");
+        inp.type = "text";
+        inp.dataset.idx = String(i);
+        inp.style.width = "100%";
+        block.appendChild(inp);
+      }
+      els.qBody.appendChild(block);
+    });
+    if (!els.qDlg.open) els.qDlg.showModal();
+  }
+  document.getElementById("q-submit").addEventListener("click", function () {
+    if (!pendingQ) return;
+    const answers = [];
+    els.qBody.querySelectorAll("select, input").forEach(function (el) {
+      answers[Number(el.dataset.idx) || 0] = el.value;
+    });
+    sendOp({ type: "question.reply", data: { requestId: pendingQ.requestId, answers: answers } });
+    els.qDlg.close();
+  });
+  document.getElementById("q-cancel").addEventListener("click", function () {
+    if (!pendingQ) return;
+    sendOp({ type: "question.reply", data: { requestId: pendingQ.requestId, answers: [] } });
+    els.qDlg.close();
+  });
+
+  function sendOp(env) {
+    if (ws && ws.readyState === 1) {
+      ws.send(JSON.stringify(env));
+      return;
+    }
+    fetch("/v1/ops", { method: "POST", headers: authHeaders(), body: JSON.stringify(env) })
+      .then(function (r) {
+        if (!r.ok) return r.json().then(function (j) { throw new Error(j.error || r.statusText); });
+      })
+      .catch(function (e) { appendSystem(String(e.message || e), "error"); });
+  }
+
+  function closeStreams() {
+    if (ws) { try { ws.close(); } catch (e) {} ws = null; }
+    if (es) { try { es.close(); } catch (e) {} es = null; }
+  }
+
+  function connectLive() {
+    token = els.token.value.trim();
+    if (!token) { setConn("token required", "error"); return; }
+    closeStreams();
+    els.log.innerHTML = "";
+    flushAssistant();
+    setLiveUI(false);
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    const url = proto + "//" + location.host + "/v1/ws?token=" + encodeURIComponent(token);
+    setConn("connecting…");
+    ws = new WebSocket(url);
+    ws.onopen = function () {
+      setConn("live", "ok");
+      setLiveUI(true);
+      loadMeta();
+    };
+    ws.onclose = function () {
+      setConn("disconnected", "error");
+      setLiveUI(false);
+    };
+    ws.onerror = function () { setConn("error", "error"); };
+    ws.onmessage = function (ev) {
+      try { handleEvent(JSON.parse(ev.data)); }
+      catch (e) { appendSystem(ev.data, "system"); }
     };
     const next = new URL(location.href);
-    next.searchParams.set("session", session);
-    if (params.get("token")) next.searchParams.set("token", token);
+    next.searchParams.set("token", token);
     history.replaceState(null, "", next.pathname + next.search);
   }
 
-  form.addEventListener("submit", function (e) {
-    e.preventDefault();
-    connect(sessionInput.value.trim(), tokenInput.value.trim());
+  function connectRO() {
+    token = els.token.value.trim();
+    const sid = els.sessionRo.value.trim() || els.sessionSel.value.trim();
+    if (!token || !sid) { setConn("token + session required", "error"); return; }
+    closeStreams();
+    els.log.innerHTML = "";
+    flushAssistant();
+    setLiveUI(false);
+    const url = "/v1/sessions/" + encodeURIComponent(sid) + "/events?token=" + encodeURIComponent(token);
+    setConn("SSE…");
+    es = new EventSource(url);
+    es.onopen = function () { setConn("read-only", "ok"); };
+    es.onerror = function () { setConn("SSE error", "error"); };
+    es.onmessage = function (ev) {
+      try { handleEvent(JSON.parse(ev.data)); }
+      catch (e) { appendSystem(ev.data, "system"); }
+    };
+  }
+
+  function loadMeta() {
+    fetch("/v1/status", { headers: authHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (st) { if (st) setStatus(st); })
+      .catch(function () {});
+    fetch("/v1/agents", { headers: authHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        if (!j || !j.agents) return;
+        const cur = els.agent.value;
+        els.agent.innerHTML = "";
+        j.agents.forEach(function (a) {
+          const o = document.createElement("option");
+          o.value = a.name;
+          o.textContent = a.name + (a.description ? " — " + a.description : "");
+          els.agent.appendChild(o);
+        });
+        if (cur) els.agent.value = cur;
+      })
+      .catch(function () {});
+    fetch("/v1/sessions", { headers: authHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        if (!j) return;
+        els.sessionSel.innerHTML = "";
+        const liveOpt = document.createElement("option");
+        liveOpt.value = j.liveId || "";
+        liveOpt.textContent = "live" + (j.liveId ? " (" + j.liveId.slice(0, 8) + "…)" : "");
+        els.sessionSel.appendChild(liveOpt);
+        (j.sessions || []).forEach(function (s) {
+          const o = document.createElement("option");
+          o.value = s.id;
+          o.textContent = (s.title || s.id).slice(0, 48);
+          els.sessionSel.appendChild(o);
+        });
+      })
+      .catch(function () {});
+  }
+
+  els.btnConnect.addEventListener("click", connectLive);
+  els.btnRo.addEventListener("click", connectRO);
+  els.btnSend.addEventListener("click", function () {
+    const text = els.composer.value.trim();
+    if (!text) return;
+    sendOp({ type: "user.input", data: { text: text } });
+    els.composer.value = "";
+  });
+  els.btnInt.addEventListener("click", function () {
+    sendOp({ type: "interrupt" });
+  });
+  els.composer.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      els.btnSend.click();
+    }
+  });
+  els.agent.addEventListener("change", function () {
+    if (els.agent.value) sendOp({ type: "select.agent", data: { name: els.agent.value } });
+  });
+  els.perm.addEventListener("change", function () {
+    sendOp({ type: "set.permission_mode", data: { mode: els.perm.value } });
+  });
+  els.sessionSel.addEventListener("change", function () {
+    const id = els.sessionSel.value;
+    if (!id) return;
+    els.sessionRo.value = id;
+    // Switching away from live uses RO SSE for historical sessions.
+    const st = lastStatus();
+    if (st.sessionId && id === st.sessionId) {
+      connectLive();
+      return;
+    }
+    connectRO();
   });
 
-  if (sessionInput.value && tokenInput.value) {
-    connect(sessionInput.value.trim(), tokenInput.value.trim());
+  if (els.token.value) {
+    if (els.sessionRo.value) connectRO();
+    else connectLive();
   }
 })();
   </script>
