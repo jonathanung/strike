@@ -49,7 +49,7 @@ event stream the TUI rendered from (see `internal/protocol/codec.go`).
 | `internal/provider` | LLM provider abstraction: `Provider` interface, normalized `StreamEvent`s | stdlib |
 | `internal/provider/base` | Shared HTTP/JSON/SSE/auth client concrete adapters embed | `provider`, stdlib, net/http |
 | `internal/provider/{anthropic,openaicompat,chatgpt,echo}` | Concrete adapters (openaicompat covers both the OpenAI platform API and xAI; chatgpt is the ChatGPT-subscription backend; echo is the offline dev provider) | `provider`, `provider/base` (all but echo), stdlib |
-| `internal/tool` | Tool contract (`Tool`, `Context`, `Result`) + built-ins: read/glob/grep/edit/write/apply_patch/bash/task/webfetch/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/toolsearch | `provider` (for `ToolSchema`), `memory`, `issue`, stdlib |
+| `internal/tool` | Tool contract (`Tool`, `Context`, `Result`) + built-ins: read/glob/grep/edit/write/apply_patch/bash/task/webfetch/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/phase_done/toolsearch | `provider` (for `ToolSchema`), `memory`, `issue`, stdlib |
 | `internal/memory` | Project-scoped durable key/value memory (JSON under `~/.strike/memory/`) | stdlib |
 | `internal/issue` | Project-scoped durable issues (JSON under `~/.strike/issues/`) | stdlib |
 | `internal/question` | User-question ask service: suspends a tool call until `QuestionReply` | `protocol`, stdlib |

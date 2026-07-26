@@ -81,6 +81,15 @@ Right-pane windows (cycle with the chords above): `context`, `activity`,
 |---|---|
 | `ctrl+g` | leave editor pane / overlay focus |
 
+## Completion (slash / `@file`)
+
+| Key | Action |
+|---|---|
+| `↑` | previous candidate |
+| `↓` / `ctrl+n` | next candidate |
+| `tab` / `enter` | accept |
+| `esc` | dismiss |
+
 ## Lists & pickers
 
 | Key | Action |
@@ -89,7 +98,9 @@ Right-pane windows (cycle with the chords above): `context`, `activity`,
 | `j`/`k` | move (pickers without filter) |
 | `enter` | confirm |
 | type | filter (when available) |
+| `\` `\` | log out highlighted provider (twice within 3s; provider picker) |
 | `esc` | close |
 | `ctrl+d` | save highlighted default |
 
-UI layout and slash commands: [usage.md](usage.md).
+UI layout and slash commands: [usage.md](usage.md). Source of truth in code:
+`keybindCatalog` / `defaultKeyMap` in `internal/tui/keymap.go`.
