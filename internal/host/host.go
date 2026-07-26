@@ -289,6 +289,31 @@ type PRStateRefresher interface {
 	RefreshPRStates(sessions []Session) []Session
 }
 
+// Roots controls concurrent in-process parent (root) sessions. Nil means the
+// host is single-root: switching sessions uses the composition-root resume
+// loop (engine restart, no OS process exit). When non-nil, Spawn/Activate keep
+// multiple root engines live so ≥2 parents can run without tearing down the
+// TUI program.
+type Roots interface {
+	// ActiveID is the root currently receiving composer ops.
+	ActiveID() string
+	// LiveIDs lists in-process root session ids (stable order: active first,
+	// then remaining by id).
+	LiveIDs() []string
+	// Activate switches the ops target to an already-live root id.
+	Activate(id string) error
+	// Spawn creates a new empty root session+engine, activates it, and returns
+	// its id. The prior active root keeps running in the background.
+	Spawn() (string, error)
+	// Open starts (or activates) a durable root session in-process. Already-live
+	// ids only Activate. Unknown or subagent ids return an error.
+	Open(id string) error
+	// Interrupt cancels the turn on id; empty id targets the active root.
+	Interrupt(id string) error
+	// WorkDir returns the tool CWD bound to a live root (worktree or launch).
+	WorkDir(id string) string
+}
+
 // Services bundles everything a frontend receives from its host. Any field
 // may be nil/empty when a capability is absent (tests, future frontends);
 // frontends must degrade gracefully.
@@ -301,6 +326,7 @@ type Services struct {
 	Memory    Memory
 	Issues    Issues
 	Sessions  Sessions  // durable session list/replay; nil when unsupported
+	Roots     Roots     // concurrent parent sessions; nil when single-root only
 	Providers Providers // custom/self-hosted provider CRUD; nil when unsupported
 	Agents    []string  // selectable agent names, default first
 	Skills    []Skill

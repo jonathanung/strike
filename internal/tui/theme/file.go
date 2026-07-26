@@ -123,6 +123,8 @@ func applyColor(th *Theme, role string, raw json.RawMessage, defs map[string]str
 		th.DiffAdded = c
 	case "diffRemoved":
 		th.DiffRemoved = c
+	case "overlayScrim":
+		th.OverlayScrim = c
 	default:
 		return fmt.Errorf("unknown color role %q", role)
 	}

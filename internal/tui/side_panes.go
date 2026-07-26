@@ -159,18 +159,20 @@ func (m Model) activityPaneBody(width, height int) string {
 
 	lines := make([]string, 0, height)
 
-	// Session tree (root + children) when any subagent is known.
-	if len(m.listChildren(m.sessionID)) > 0 {
+	// Session tree when multiple roots or any subagent is known.
+	treeNodes := m.sessionTreeNodes()
+	showTree := len(m.liveRootIDs()) > 1 || len(m.listChildren(m.sessionID)) > 0
+	if showTree && len(treeNodes) > 0 {
 		treeH := height
 		// Reserve at least one row for tools/tips when space allows.
 		if height > 4 {
-			treeH = min(height, max(2, len(ui.FlattenTree(m.sessionTreeNodes()))+1))
+			treeH = min(height, max(2, len(ui.FlattenTree(treeNodes))+1))
 			if treeH > height-1 {
 				treeH = height - 1
 			}
 		}
 		tree := ui.Tree(th, ui.TreeOpts{
-			Nodes:   m.sessionTreeNodes(),
+			Nodes:   treeNodes,
 			Cursor:  -1, // no interactive cursor in the activity summary
 			Width:   width,
 			Visible: treeH,
