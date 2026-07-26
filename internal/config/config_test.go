@@ -457,3 +457,43 @@ func TestAppendProjectPermissionRejects(t *testing.T) {
 		t.Fatal("corrupt config: want error")
 	}
 }
+
+func TestLoadCompactionStrategy(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(global, []byte(`{
+		"compactionStrategy": "trim",
+		"compactionModel": "global-cheap"
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(work, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(project), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(project, []byte(`{
+		"compactionStrategy": "summary",
+		"compactionModel": " project-sum "
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CompactionStrategy != "summarize" {
+		t.Fatalf("strategy = %q, want summarize", cfg.CompactionStrategy)
+	}
+	if cfg.CompactionModel != "project-sum" {
+		t.Fatalf("model = %q", cfg.CompactionModel)
+	}
+	if got := NormalizeCompactionStrategy("nope"); got != "" {
+		t.Fatalf("unknown normalize = %q", got)
+	}
+}

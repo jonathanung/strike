@@ -204,6 +204,9 @@ type Model struct {
 	noticeErr   bool
 	noticeCause noticeCause
 	turnRunning bool
+	// inputQueue holds prompts typed while turnRunning. Drained FIFO on
+	// TurnCompleted; survives Interrupt until the user pops/clears it.
+	inputQueue []queuedInput
 	// awaitingPermission is true between PermissionAsked/QuestionAsked and
 	// the matching Resolved / TurnCompleted. It drives AgentStateAttention.
 	awaitingPermission bool
@@ -801,11 +804,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.GotoBottom()
 			return m, nil
 		}
-		if m.turnRunning && key.Matches(msg, m.keyMap.Interrupt) {
-			ops := m.ops
-			return m, func() tea.Msg {
-				ops <- protocol.Interrupt{}
-				return nil
+		if key.Matches(msg, m.keyMap.Interrupt) {
+			if m.turnRunning {
+				ops := m.ops
+				return m, func() tea.Msg {
+					ops <- protocol.Interrupt{}
+					return nil
+				}
+			}
+			// Idle: esc clears a leftover input queue (rare once auto-drain runs).
+			if m.clearInputQueue() {
+				m.reflow()
+				return m, nil
 			}
 		}
 		if m.focus == focusRight {
@@ -820,6 +830,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reflow()
 			m.refreshViewport()
 			return m, cmd
+		}
+		// Empty composer + queued prompts: backspace pops last item for edit.
+		if m.focus == focusLeft && m.composer.Value() == "" && len(m.inputQueue) > 0 {
+			if msg.Type == tea.KeyBackspace || msg.Type == tea.KeyCtrlH {
+				if m.popInputQueueToComposer() {
+					return m, nil
+				}
+			}
 		}
 		// Bracketed paste: collapse large multi-line blobs to a chip.
 		if msg.Paste {
@@ -1432,7 +1450,8 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		m.turnStartedAt = time.Time{}
 		m.toolCallsThisTurn = 0
 		m.refreshOpenPalette()
-		cmd = tea.Batch(m.broadcastContextState(), notify)
+		// turnRunning is already false via applyAgentStateEvent; drain next prompt.
+		cmd = tea.Batch(m.broadcastContextState(), notify, m.tryDrainInputQueue())
 	case protocol.ModelSelected:
 		if m.noticeCause == noticeNeedsModel {
 			m.clearNotice()
@@ -1473,7 +1492,11 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 	case protocol.EffectivePrompt:
 		m.cells = append(m.cells, &infoCell{text: formatEffectivePrompt(ev)})
 	case protocol.CompactionCompleted:
-		msg := fmt.Sprintf("history compacted (%s): removed %d, kept %d", ev.Reason, ev.Removed, ev.Kept)
+		strategy := ev.Strategy
+		if strategy == "" {
+			strategy = protocol.CompactionStrategyTrim
+		}
+		msg := fmt.Sprintf("history compacted (%s/%s): removed %d, kept %d", ev.Reason, strategy, ev.Removed, ev.Kept)
 		if m.turnRunning {
 			m.cells = append(m.cells, &errorCell{text: msg})
 		} else {
@@ -2053,7 +2076,7 @@ func (m Model) handleMemoryCommand(args []string) (tea.Model, tea.Cmd) {
 		m.setNotice("project memory is unavailable", true)
 		return m, nil
 	}
-	usage := "usage: /memory [list [tag]|get <key>|set <key> <value>|rm <key>]"
+	usage := "usage: /memory [list [tag]|get <key>|set <key> <value>|rm <key>|export [path]|import <path> [--replace]]"
 	if len(args) == 0 {
 		args = []string{"list"}
 	}
@@ -2114,6 +2137,35 @@ func (m Model) handleMemoryCommand(args []string) (tea.Model, tea.Cmd) {
 		m.windows = refreshProjectDataWindows(m.windows)
 		m.setNotice("memory: deleted "+args[1], false)
 		return m, nil
+	case "export":
+		path := "strike-memory.json"
+		if len(args) > 1 {
+			path = args[1]
+		}
+		if err := m.services.Memory.Export(path); err != nil {
+			m.setNotice("memory: "+err.Error(), true)
+			return m, nil
+		}
+		m.setNotice("memory: exported to "+path, false)
+		return m, nil
+	case "import":
+		path, replace, ok := parseImportArgs(args[1:])
+		if !ok {
+			m.setNotice(usage, true)
+			return m, nil
+		}
+		n, err := m.services.Memory.Import(path, replace)
+		if err != nil {
+			m.setNotice("memory: "+err.Error(), true)
+			return m, nil
+		}
+		m.windows = refreshProjectDataWindows(m.windows)
+		mode := "merged"
+		if replace {
+			mode = "replaced"
+		}
+		m.setNotice(fmt.Sprintf("memory: imported %d entries (%s)", n, mode), false)
+		return m, nil
 	default:
 		m.setNotice(usage, true)
 		return m, nil
@@ -2126,7 +2178,7 @@ func (m Model) handleIssuesCommand(args []string) (tea.Model, tea.Cmd) {
 		m.setNotice("project issues are unavailable", true)
 		return m, nil
 	}
-	usage := "usage: /issues [list [open|closed]|add <title>|get <id>|close <id>]"
+	usage := "usage: /issues [list [open|closed]|add <title>|get <id>|close <id>|export [path]|import <path> [--replace]]"
 	if len(args) == 0 {
 		args = []string{"list"}
 	}
@@ -2198,10 +2250,65 @@ func (m Model) handleIssuesCommand(args []string) (tea.Model, tea.Cmd) {
 		m.windows = refreshProjectDataWindows(m.windows)
 		m.setNotice(fmt.Sprintf("issues: closed #%d %s", iss.ID, iss.Title), false)
 		return m, nil
+	case "export":
+		path := "strike-issues.json"
+		if len(args) > 1 {
+			path = args[1]
+		}
+		if err := m.services.Issues.Export(path); err != nil {
+			m.setNotice("issues: "+err.Error(), true)
+			return m, nil
+		}
+		m.setNotice("issues: exported to "+path, false)
+		return m, nil
+	case "import":
+		path, replace, ok := parseImportArgs(args[1:])
+		if !ok {
+			m.setNotice(usage, true)
+			return m, nil
+		}
+		n, err := m.services.Issues.Import(path, replace)
+		if err != nil {
+			m.setNotice("issues: "+err.Error(), true)
+			return m, nil
+		}
+		m.windows = refreshProjectDataWindows(m.windows)
+		mode := "merged"
+		if replace {
+			mode = "replaced"
+		}
+		m.setNotice(fmt.Sprintf("issues: imported %d issues (%s)", n, mode), false)
+		return m, nil
 	default:
 		m.setNotice(usage, true)
 		return m, nil
 	}
+}
+
+// parseImportArgs accepts: <path> | <path> --replace|--merge | --replace|--merge <path>
+func parseImportArgs(args []string) (path string, replace bool, ok bool) {
+	if len(args) == 0 || len(args) > 2 {
+		return "", false, false
+	}
+	replace = false
+	var paths []string
+	for _, a := range args {
+		switch a {
+		case "--replace", "replace":
+			replace = true
+		case "--merge", "merge":
+			replace = false
+		default:
+			if strings.HasPrefix(a, "-") {
+				return "", false, false
+			}
+			paths = append(paths, a)
+		}
+	}
+	if len(paths) != 1 || paths[0] == "" {
+		return "", false, false
+	}
+	return paths[0], replace, true
 }
 
 func (m Model) handleMDRead(text string, fields []string) (tea.Model, tea.Cmd) {
@@ -2244,26 +2351,12 @@ func (m Model) submit(op protocol.UserInput, displayPrompt string) (tea.Model, t
 		m.setNotice("viewing subagent — return to parent to send (esc or ctrl+x up)", true)
 		return m, nil
 	}
+	// Policy: enqueue while a turn runs (do not reject/wipe). Drain FIFO on
+	// TurnCompleted. Queue survives Interrupt until pop/clear.
 	if m.turnRunning {
-		m.setNotice("a turn is already running; interrupt it first", true)
-		return m, nil
+		return m.enqueueUserInput(op, displayPrompt)
 	}
-	m.resetComposer()
-	m.clearNotice()
-	ops := m.ops
-	send := func() tea.Msg {
-		ops <- op
-		return nil
-	}
-	if m.services.History == nil {
-		return m, send
-	}
-	done := m.services.History.Enqueue(displayPrompt)
-	persist := func() tea.Msg {
-		err := <-done
-		return historyAddedMsg{err: err}
-	}
-	return m, tea.Batch(send, persist)
+	return m.dispatchUserInput(op, displayPrompt)
 }
 
 func (m Model) sendSelect(op protocol.SelectModel) (tea.Model, tea.Cmd) {

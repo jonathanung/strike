@@ -414,9 +414,12 @@ func (f *fakeFiles) ReadScoped(path string) (host.FileContent, error) {
 // --- fakeMemory: an in-memory host.Memory --------------------------------
 
 type fakeMemory struct {
-	mu      sync.Mutex
-	entries map[string]host.MemoryEntry
-	err     error
+	mu            sync.Mutex
+	entries       map[string]host.MemoryEntry
+	err           error
+	exportPath    string
+	importEntries []host.MemoryEntry
+	importFn      func(path string, replace bool) (int, error)
 }
 
 func newFakeMemory(entries ...host.MemoryEntry) *fakeMemory {
@@ -512,13 +515,63 @@ func (f *fakeMemory) Delete(key string) error {
 	return nil
 }
 
+func (f *fakeMemory) Export(path string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return f.err
+	}
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("path is empty")
+	}
+	if strings.Contains(path, "..") {
+		return fmt.Errorf("path escapes project root")
+	}
+	f.exportPath = path
+	return nil
+}
+
+func (f *fakeMemory) Import(path string, replace bool) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return 0, f.err
+	}
+	if strings.TrimSpace(path) == "" {
+		return 0, fmt.Errorf("path is empty")
+	}
+	if strings.Contains(path, "..") {
+		return 0, fmt.Errorf("path escapes project root")
+	}
+	if f.importFn != nil {
+		return f.importFn(path, replace)
+	}
+	if replace {
+		f.entries = make(map[string]host.MemoryEntry)
+	}
+	// Default: no-op import of zero entries unless importEntries seeded.
+	n := 0
+	for _, e := range f.importEntries {
+		f.entries[e.Key] = host.MemoryEntry{
+			Key:   e.Key,
+			Value: e.Value,
+			Tags:  append([]string(nil), e.Tags...),
+		}
+		n++
+	}
+	return n, nil
+}
+
 // --- fakeIssues: an in-memory host.Issues ---------------------------------
 
 type fakeIssues struct {
-	mu     sync.Mutex
-	nextID int
-	items  map[int]host.Issue
-	err    error
+	mu          sync.Mutex
+	nextID      int
+	items       map[int]host.Issue
+	err         error
+	exportPath  string
+	importItems []host.Issue
+	importFn    func(path string, replace bool) (int, error)
 }
 
 func newFakeIssues(items ...host.Issue) *fakeIssues {
@@ -606,6 +659,55 @@ func (f *fakeIssues) Update(id int, title, body, status *string) (host.Issue, er
 func (f *fakeIssues) Close(id int) (host.Issue, error) {
 	st := "closed"
 	return f.Update(id, nil, nil, &st)
+}
+
+func (f *fakeIssues) Export(path string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return f.err
+	}
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("path is empty")
+	}
+	if strings.Contains(path, "..") {
+		return fmt.Errorf("path escapes project root")
+	}
+	f.exportPath = path
+	return nil
+}
+
+func (f *fakeIssues) Import(path string, replace bool) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return 0, f.err
+	}
+	if strings.TrimSpace(path) == "" {
+		return 0, fmt.Errorf("path is empty")
+	}
+	if strings.Contains(path, "..") {
+		return 0, fmt.Errorf("path escapes project root")
+	}
+	if f.importFn != nil {
+		return f.importFn(path, replace)
+	}
+	if replace {
+		f.items = make(map[int]host.Issue)
+		f.nextID = 1
+	}
+	n := 0
+	for _, iss := range f.importItems {
+		if iss.Status == "" {
+			iss.Status = "open"
+		}
+		f.items[iss.ID] = iss
+		if iss.ID >= f.nextID {
+			f.nextID = iss.ID + 1
+		}
+		n++
+	}
+	return n, nil
 }
 
 // --- fakeSessions: scriptable host.Sessions ------------------------------

@@ -13,6 +13,8 @@ JSON:
   "vimMode": "pane",
   "permissionAutoApproveSeconds": 10,
   "permissionAutoApproveExclude": ["bash"],
+  "compactionStrategy": "trim",
+  "compactionModel": "",
   "permissions": [
     { "permission": "bash", "pattern": "go *", "action": "allow" },
     { "permission": "write", "pattern": "**/*.env", "action": "deny" }
@@ -90,6 +92,19 @@ In the TUI, `/settings` manages the same list (CRUD persists to
 Unknown values are ignored at load time. GUI `$EDITOR` values always take
 over the terminal regardless of `vimMode`. Leave the embedded editor with
 `ctrl+g`.
+
+## History compaction
+
+`/compact` and automatic threshold/overflow compaction shrink model-facing
+history while keeping a recent tail.
+
+| Field | Values | Default |
+|---|---|---|
+| `compactionStrategy` | `trim` (drop older turns) or `summarize` (model-authored summary of dropped turns) | `trim` |
+| `compactionModel` | optional model id for the summarize call (same provider as the session) | session model |
+
+On summarize failure the engine falls back to trim and emits a notice. The
+summary path never re-runs tools.
 
 ## Reasoning effort
 

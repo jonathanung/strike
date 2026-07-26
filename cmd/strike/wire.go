@@ -467,6 +467,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		Rules:                permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),
 		Hooks:                hookDefs,
 		HookRules:            cfg.HookRules(),
+		CompactionStrategy:   cfg.CompactionStrategy,
+		CompactionModel:      cfg.CompactionModel,
 		LookupContextWindow: func(providerName, model string) int {
 			// Best-effort catalog lookup for threshold compaction. Failures
 			// leave the window unknown; overflow recovery still works.
@@ -528,7 +530,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	}
 	// local.New wraps the real backend stores in the host.Services contract;
 	// the TUI never sees auth/config/models/history/memory/issues directly.
-	services := local.New(authStore, historyStore, memoryStore, issueStore, agentNames, skills, customStore)
+	services := local.New(authStore, historyStore, memoryStore, issueStore, agentNames, skills, customStore, workDir)
 	services.Files = local.NewFiles(workDir)
 	services.Sessions = local.NewSessions(sessions, projectIdentity.Key)
 

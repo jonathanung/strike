@@ -53,8 +53,8 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 			DelayMs:     200,
 			Message:     "rate limited",
 		},
-		CompactionStarted{Correlation: corr, Reason: CompactionReasonManual},
-		CompactionCompleted{Correlation: corr, Reason: CompactionReasonThreshold, Removed: 4, Kept: 3},
+		CompactionStarted{Correlation: corr, Reason: CompactionReasonManual, Strategy: CompactionStrategySummarize},
+		CompactionCompleted{Correlation: corr, Reason: CompactionReasonThreshold, Strategy: CompactionStrategyTrim, Removed: 4, Kept: 3, Summary: "prior work on foo"},
 		SessionMeta{Correlation: corr, PRURL: "https://github.com/acme/repo/pull/7", PRNumber: 7, PRState: "open"},
 		SessionRewound{Correlation: corr, Removed: 2},
 		EffectivePrompt{

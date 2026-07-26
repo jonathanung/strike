@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"strings"
 
 	"github.com/jonathanung/strike-cli/internal/auth"
@@ -29,7 +30,9 @@ import (
 // through unchanged; skills whose names fail config.ValidateSkillName are
 // dropped here, since they cannot be invoked as slash commands (the frontend
 // no longer filters). customs may be nil (no custom provider support).
-func New(store *auth.Store, hist *history.Store, mem *memory.Store, issues *issue.Store, agents []string, skills []config.Skill, customs *config.CustomStore) host.Services {
+// workDir scopes relative memory/issue export-import paths (empty allows only
+// absolute paths, or relative paths resolved via filepath.Abs without a root).
+func New(store *auth.Store, hist *history.Store, mem *memory.Store, issues *issue.Store, agents []string, skills []config.Skill, customs *config.CustomStore, workDir string) host.Services {
 	if customs == nil {
 		customs = config.NewCustomStore(nil)
 	}
@@ -46,10 +49,10 @@ func New(store *auth.Store, hist *history.Store, mem *memory.Store, issues *issu
 		services.History = hist
 	}
 	if mem != nil {
-		services.Memory = memoryAdapter{store: mem}
+		services.Memory = memoryAdapter{store: mem, workDir: workDir}
 	}
 	if issues != nil {
-		services.Issues = issuesAdapter{store: issues}
+		services.Issues = issuesAdapter{store: issues, workDir: workDir}
 	}
 	for _, s := range skills {
 		if err := config.ValidateSkillName(s.Name); err != nil {
@@ -322,7 +325,8 @@ func (settingsAdapter) SaveTheme(id string) error {
 
 // memoryAdapter adapts *memory.Store to host.Memory.
 type memoryAdapter struct {
-	store *memory.Store
+	store   *memory.Store
+	workDir string
 }
 
 func (m memoryAdapter) List(tag string) ([]host.MemoryEntry, error) {
@@ -353,9 +357,26 @@ func (m memoryAdapter) Delete(key string) error {
 	return m.store.Delete(key)
 }
 
+func (m memoryAdapter) Export(path string) error {
+	resolved, err := resolveDataPath(m.workDir, path)
+	if err != nil {
+		return err
+	}
+	return m.store.Export(resolved)
+}
+
+func (m memoryAdapter) Import(path string, replace bool) (int, error) {
+	resolved, err := resolveDataPath(m.workDir, path)
+	if err != nil {
+		return 0, err
+	}
+	return m.store.Import(resolved, replace)
+}
+
 // issuesAdapter adapts *issue.Store to host.Issues.
 type issuesAdapter struct {
-	store *issue.Store
+	store   *issue.Store
+	workDir string
 }
 
 func (a issuesAdapter) List(status string) ([]host.Issue, error) {
@@ -400,6 +421,51 @@ func (a issuesAdapter) Close(id int) (host.Issue, error) {
 		return host.Issue{}, err
 	}
 	return toHostIssue(iss), nil
+}
+
+func (a issuesAdapter) Export(path string) error {
+	resolved, err := resolveDataPath(a.workDir, path)
+	if err != nil {
+		return err
+	}
+	return a.store.Export(resolved)
+}
+
+func (a issuesAdapter) Import(path string, replace bool) (int, error) {
+	resolved, err := resolveDataPath(a.workDir, path)
+	if err != nil {
+		return 0, err
+	}
+	return a.store.Import(resolved, replace)
+}
+
+// resolveDataPath resolves export/import paths. Relative paths must stay under
+// workDir when set (no ".." or symlink escape). Absolute paths are intentional
+// targets and are only cleaned.
+func resolveDataPath(workDir, path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", fmt.Errorf("path is empty")
+	}
+	if strings.IndexByte(path, 0) >= 0 {
+		return "", fmt.Errorf("path contains invalid character")
+	}
+	if filepath.IsAbs(path) {
+		return filepath.Clean(path), nil
+	}
+	workDir = strings.TrimSpace(workDir)
+	if workDir == "" {
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			return "", fmt.Errorf("resolve path: %w", err)
+		}
+		return abs, nil
+	}
+	resolved, _, err := resolveUnderRoot(workDir, path)
+	if err != nil {
+		return "", err
+	}
+	return resolved, nil
 }
 
 func toHostIssue(iss issue.Issue) host.Issue {
