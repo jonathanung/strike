@@ -260,6 +260,7 @@ type Model struct {
 // childActivity is one foreground subagent row in the activity pane.
 type childActivity struct {
 	sessionID string
+	parentID  string // spawning session; empty means direct root child
 	agent     string
 	prompt    string
 	status    string // running | completed | failed | canceled
@@ -1464,16 +1465,21 @@ func (m *Model) onChildStarted(ev protocol.ChildStarted) {
 	if id == "" {
 		id = "child"
 	}
+	parentID := ev.ParentSessionID
 	for i := range m.children {
 		if m.children[i].sessionID == id {
 			m.children[i].agent = ev.Agent
 			m.children[i].prompt = ev.Prompt
 			m.children[i].status = "running"
+			if parentID != "" {
+				m.children[i].parentID = parentID
+			}
 			return
 		}
 	}
 	m.children = append(m.children, childActivity{
 		sessionID: id,
+		parentID:  parentID,
 		agent:     ev.Agent,
 		prompt:    ev.Prompt,
 		status:    "running",
@@ -1491,6 +1497,9 @@ func (m *Model) onChildCompleted(ev protocol.ChildCompleted) {
 	for i := range m.children {
 		if m.children[i].sessionID == id || (id == "" && i == len(m.children)-1) {
 			m.children[i].status = status
+			if ev.ParentSessionID != "" && m.children[i].parentID == "" {
+				m.children[i].parentID = ev.ParentSessionID
+			}
 			return
 		}
 	}
@@ -1500,6 +1509,7 @@ func (m *Model) onChildCompleted(ev protocol.ChildCompleted) {
 	}
 	m.children = append(m.children, childActivity{
 		sessionID: id,
+		parentID:  ev.ParentSessionID,
 		status:    status,
 	})
 	m.trimChildren()

@@ -449,6 +449,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		ProjectRoot:          projectIdentity.Root,
 		Instructions:         instructions,
 		SystemPrompt:         cfg.SystemPrompt,
+		MaxChildDepth:        cfg.MaxChildDepth,
 		InitialProvider:      initialProvider,
 		InitialModel:         initialModel,
 		InitialEffort:        initialEffort,

@@ -40,6 +40,9 @@ type Config struct {
 	// Providers are user-declared custom/self-hosted endpoints (name, base
 	// URL, wire api). API keys are never stored here — only in auth.json.
 	Providers []CustomProvider `json:"providers,omitempty"`
+	// MaxChildDepth bounds nested task tool spawns (root depth 0). Zero means
+	// engine default (1: children cannot spawn further tasks).
+	MaxChildDepth int `json:"maxChildDepth,omitempty"`
 }
 
 // Hook is one lifecycle hook entry. Exactly one of Action or Command should
@@ -246,6 +249,9 @@ func merge(base, layer Config) Config {
 	}
 	if layer.VimMode != "" {
 		base.VimMode = layer.VimMode
+	}
+	if layer.MaxChildDepth != 0 {
+		base.MaxChildDepth = layer.MaxChildDepth
 	}
 	base.Permissions = append(base.Permissions, layer.Permissions...)
 	base.Hooks = append(base.Hooks, layer.Hooks...)

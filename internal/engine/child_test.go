@@ -414,6 +414,319 @@ func TestTaskDepthRejected(t *testing.T) {
 	}
 }
 
+// drainNested waits until at least wantStarted ChildStarted and matching
+// ChildCompleted events have been seen, the root is idle after notices for
+// direct (depth-1) children, and auto-approves permissions.
+func drainNested(t *testing.T, eng *engine.Engine, wantStarted int, timeout time.Duration) []protocol.Event {
+	t.Helper()
+	var collected []protocol.Event
+	var started, completed, depth1Completed int
+	var rootIdle, noticeSeen bool
+	var turnsAfterNotice int
+	guard := time.NewTimer(timeout)
+	defer guard.Stop()
+	for {
+		select {
+		case ev, ok := <-eng.Events():
+			if !ok {
+				t.Fatal("Events closed before drain finished")
+			}
+			collected = append(collected, ev)
+			switch ev := ev.(type) {
+			case protocol.PermissionAsked:
+				eng.Ops() <- protocol.PermissionReply{RequestID: ev.RequestID, Decision: protocol.DecisionOnce}
+			case protocol.ChildStarted:
+				started++
+			case protocol.ChildCompleted:
+				completed++
+				if ev.Depth == 1 {
+					depth1Completed++
+				}
+			case protocol.UserMessage:
+				if strings.Contains(ev.Text, "[child.completed") {
+					noticeSeen = true
+				}
+			case protocol.TurnCompleted:
+				if ev.ParentSessionID == "" && ev.Depth == 0 {
+					rootIdle = true
+					if noticeSeen {
+						turnsAfterNotice++
+					}
+				}
+			case protocol.EngineError:
+				t.Fatalf("engine error: %s; events=%v", ev.Message, summarizeEvents(collected))
+			}
+			if started < wantStarted || completed < wantStarted {
+				continue
+			}
+			if !rootIdle {
+				continue
+			}
+			// Direct children must surface model-visible notices on the root.
+			if depth1Completed > 0 && (!noticeSeen || turnsAfterNotice < 1) {
+				continue
+			}
+			if childCompletionNotices(collected) < depth1Completed {
+				continue
+			}
+			return collected
+		case <-guard.C:
+			t.Fatalf("timed out; started=%d completed=%d depth1=%d rootIdle=%v notice=%v turnsAfter=%d events=%v",
+				started, completed, depth1Completed, rootIdle, noticeSeen, turnsAfterNotice, summarizeEvents(collected))
+		}
+	}
+}
+
+func TestNestedTaskDepthTwoCompletes(t *testing.T) {
+	// MaxChildDepth=2: root → child (d1) → grandchild (d2) all complete.
+	const (
+		childPrompt = "child-level-1-nest"
+		gcPrompt    = "grandchild-level-2-nest"
+	)
+	taskL1 := taskToolCall("task-l1", childPrompt)
+	taskL2 := taskToolCall("task-l2", gcPrompt)
+	prov := newScriptedProvider(
+		toolCallStep(taskL1),
+		func() streamStep {
+			s := toolCallStep(taskL2)
+			s.match = matchUserText(childPrompt)
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("grandchild finished work")
+			s.match = matchUserText(gcPrompt)
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("child finished after spawn")
+			s.match = matchToolResult("task-l2")
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("parent finished after spawn")
+			s.match = matchToolResult("task-l1")
+			return s
+		}(),
+		// Child and/or parent may idle-nudge on nested completions.
+		childCompletedNudgeStep("ack nested 1"),
+		childCompletedNudgeStep("ack nested 2"),
+		childCompletedNudgeStep("ack nested 3"),
+	)
+	eng := engine.New(engine.Options{
+		SessionID:       "root-nest-2",
+		MaxChildDepth:   2,
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(tool.NewTask()),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "nest two deep"}
+	events := drainNested(t, eng, 2, 15*time.Second)
+
+	var started []protocol.ChildStarted
+	var completed []protocol.ChildCompleted
+	for _, ev := range events {
+		switch ev := ev.(type) {
+		case protocol.ChildStarted:
+			started = append(started, ev)
+		case protocol.ChildCompleted:
+			completed = append(completed, ev)
+		}
+	}
+	if len(started) != 2 {
+		t.Fatalf("ChildStarted = %d, want 2; events=%v", len(started), summarizeEvents(events))
+	}
+	if len(completed) != 2 {
+		t.Fatalf("ChildCompleted = %d, want 2; events=%v", len(completed), summarizeEvents(events))
+	}
+	depths := map[int]int{}
+	for _, s := range started {
+		depths[s.Depth]++
+		if s.Depth < 1 || s.Depth > 2 {
+			t.Errorf("unexpected ChildStarted depth %d session=%s", s.Depth, s.SessionID)
+		}
+	}
+	if depths[1] != 1 || depths[2] != 1 {
+		t.Errorf("started depths = %v, want one each at 1 and 2", depths)
+	}
+	for _, c := range completed {
+		if c.Status != protocol.ChildStatusCompleted {
+			t.Errorf("ChildCompleted depth=%d status=%q summary=%q", c.Depth, c.Status, c.Summary)
+		}
+	}
+	// Lineage: depth-2 parent is the depth-1 session.
+	var d1ID, d2Parent string
+	for _, s := range started {
+		if s.Depth == 1 {
+			d1ID = s.SessionID
+			if s.ParentSessionID != "root-nest-2" {
+				t.Errorf("d1 ParentSessionID = %q, want root-nest-2", s.ParentSessionID)
+			}
+		}
+		if s.Depth == 2 {
+			d2Parent = s.ParentSessionID
+		}
+	}
+	if d1ID == "" || d2Parent != d1ID {
+		t.Errorf("grandchild parent = %q, want child %q", d2Parent, d1ID)
+	}
+}
+
+func TestNestedTaskDepthThreeDenied(t *testing.T) {
+	// MaxChildDepth=2: grandchild (depth 2) cannot spawn a great-grandchild.
+	const (
+		childPrompt = "child-d1-deny3"
+		gcPrompt    = "grandchild-d2-deny3"
+	)
+	taskL1 := taskToolCall("task-d1", childPrompt)
+	taskL2 := taskToolCall("task-d2", gcPrompt)
+	taskL3 := taskToolCall("task-d3", "should-not-spawn")
+	prov := newScriptedProvider(
+		toolCallStep(taskL1),
+		func() streamStep {
+			s := toolCallStep(taskL2)
+			s.match = matchUserText(childPrompt)
+			return s
+		}(),
+		func() streamStep {
+			s := toolCallStep(taskL3)
+			s.match = matchUserText(gcPrompt)
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("grandchild recovered without great-grandchild")
+			s.match = matchToolResult("task-d3")
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("child after grandchild")
+			s.match = matchToolResult("task-d2")
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("parent after child")
+			s.match = matchToolResult("task-d1")
+			return s
+		}(),
+		childCompletedNudgeStep("ack deny3 1"),
+		childCompletedNudgeStep("ack deny3 2"),
+		childCompletedNudgeStep("ack deny3 3"),
+	)
+	eng := engine.New(engine.Options{
+		SessionID:       "root-deny-3",
+		MaxChildDepth:   2,
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(tool.NewTask()),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "try depth three"}
+	events := drainNested(t, eng, 2, 15*time.Second)
+
+	var started []protocol.ChildStarted
+	for _, ev := range events {
+		if s, ok := ev.(protocol.ChildStarted); ok {
+			started = append(started, s)
+		}
+	}
+	if len(started) != 2 {
+		t.Fatalf("ChildStarted = %d, want 2 (no depth-3); events=%v", len(started), summarizeEvents(events))
+	}
+	for _, s := range started {
+		if s.Depth >= 3 {
+			t.Errorf("unexpected depth %d ChildStarted", s.Depth)
+		}
+	}
+	// task-d3 is on the grandchild engine; ToolCallEnd is not re-emitted on the
+	// root stream. Assert via absence of depth-3 ChildStarted only.
+}
+
+func TestNestedTaskDepthTwoAG3StillHolds(t *testing.T) {
+	// Child at depth 1 with MaxChildDepth=2 still cannot widen parent deny.
+	dir := t.TempDir()
+	target := filepath.Join(dir, "protected.txt")
+	original := "keep-nested-safe"
+	if err := os.WriteFile(target, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const childPrompt = "try edit while nestable"
+	taskCall := taskToolCallWithAgent("task-ag3-nest", childPrompt, "writer")
+	editCall := editToolCall("edit-nest", "protected.txt", "keep-nested-safe", "pwned-nested")
+	prov := newScriptedProvider(
+		toolCallStep(taskCall),
+		func() streamStep {
+			s := toolCallStep(editCall)
+			s.match = matchUserText(childPrompt)
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("child done after deny")
+			s.match = matchToolResult("edit-nest")
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("parent done")
+			s.match = matchToolResult("task-ag3-nest")
+			return s
+		}(),
+		childCompletedNudgeStep("parent ack ag3 nest"),
+	)
+	rules := []permission.Ruleset{
+		permission.Defaults(),
+		{
+			{Permission: "edit", Pattern: "*", Action: permission.Deny},
+			{Permission: "write", Pattern: "*", Action: permission.Deny},
+		},
+	}
+	eng := engine.New(engine.Options{
+		SessionID:       "parent-ag3-nest",
+		MaxChildDepth:   2,
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(tool.NewTask(), tool.NewEdit(), tool.NewWrite()),
+		WorkDir:         dir,
+		Rules:           rules,
+		Agents: []engine.Agent{
+			{Name: "build"},
+			{
+				Name: "writer",
+				Permissions: permission.Ruleset{
+					{Permission: "edit", Pattern: "*", Action: permission.Allow},
+					{Permission: "write", Pattern: "*", Action: permission.Allow},
+					{Permission: "task", Pattern: "*", Action: permission.Allow},
+				},
+			},
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "delegate edit under nestable depth"}
+	events := drainAndReply(t, eng, 10*time.Second)
+
+	if n := countEvents[protocol.ChildStarted](events); n != 1 {
+		t.Errorf("ChildStarted = %d, want 1; events=%v", n, summarizeEvents(events))
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != original {
+		t.Errorf("file content = %q, want unchanged %q", data, original)
+	}
+}
+
 func TestParentInterruptLeavesChildRunning(t *testing.T) {
 	// Parent finishes its turn while the child is still blocked on a tool.
 	// Interrupt after the parent is already idle must not cancel the child.

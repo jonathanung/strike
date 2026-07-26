@@ -26,7 +26,11 @@ import (
 
 // defaultMaxStreamAttempts is how many times one logical model request may
 // call Provider.Stream on retryable failure before the turn fails.
-const defaultMaxStreamAttempts = 3
+const (
+	defaultMaxStreamAttempts = 3
+	// absoluteMaxChildDepth is a hard ceiling against runaway nested task swarms.
+	absoluteMaxChildDepth = 8
+)
 
 // Model-facing interrupt texts (aliases of protocol.ToolFeedback* helpers).
 var (
@@ -122,7 +126,12 @@ type Options struct {
 	PersistProjectRule func(permission.Rule) error
 	// MaxChildDepth bounds foreground task nesting. Zero defaults to 1 in New
 	// (root depth 0 may spawn one child; that child may not spawn further).
+	// Values above absoluteMaxChildDepth are clamped.
 	MaxChildDepth int
+	// TaskOneShot marks engines spawned by the task tool: Run exits once the
+	// first turn finishes, nested children complete, and idle nudges drain.
+	// Root engines leave this false.
+	TaskOneShot bool
 	// Depth is this engine's lineage depth (0 = root).
 	Depth int
 	// ParentSessionID is the spawning session's ID; empty on root engines.
@@ -279,6 +288,8 @@ func New(opts Options) *Engine {
 	}
 	if opts.MaxChildDepth == 0 {
 		opts.MaxChildDepth = 1
+	} else if opts.MaxChildDepth > absoluteMaxChildDepth {
+		opts.MaxChildDepth = absoluteMaxChildDepth
 	}
 	if len(opts.Workflows) == 0 {
 		opts.Workflows = []config.Workflow{config.BuiltinPlanImplement()}
@@ -395,9 +406,13 @@ func (e *Engine) Run(ctx context.Context) {
 		e.perms.SeedAlwaysGrants(e.opts.InitialAlwaysGrants)
 	}
 	e.quietStartup = false
+	oneshotTurnSeen := false
 	for {
 		e.reapTurn()
 		e.flushPendingChildNotices(ctx)
+		if e.taskOneShotIdle(oneshotTurnSeen) {
+			return
+		}
 		var turnDone <-chan struct{}
 		if e.turnDone != nil {
 			turnDone = e.turnDone
@@ -420,11 +435,34 @@ func (e *Engine) Run(ctx context.Context) {
 		case completed := <-e.childDone:
 			e.queueChildCompleted(completed)
 			e.flushPendingChildNotices(ctx)
+			if e.taskOneShotIdle(oneshotTurnSeen) {
+				return
+			}
 		case <-turnDone:
+			oneshotTurnSeen = true
 			e.reapTurn()
 			e.flushPendingChildNotices(ctx)
+			if e.taskOneShotIdle(oneshotTurnSeen) {
+				return
+			}
 		}
 	}
+}
+
+// taskOneShotIdle reports whether a task-spawned engine should exit Run:
+// at least one turn finished, no nested children, no active turn, no queued
+// child-completion notices waiting to flush.
+func (e *Engine) taskOneShotIdle(turnSeen bool) bool {
+	if !e.opts.TaskOneShot || !turnSeen {
+		return false
+	}
+	if e.turnActive() || len(e.pendingChildNotices) > 0 {
+		return false
+	}
+	e.childMu.Lock()
+	n := len(e.children)
+	e.childMu.Unlock()
+	return n == 0
 }
 
 func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {

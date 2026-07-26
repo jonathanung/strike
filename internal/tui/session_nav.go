@@ -200,11 +200,19 @@ func (m *Model) listChildren(parentID string) []navChild {
 	if parentID == "" {
 		return nil
 	}
-	// Runtime children (root only) preserve spawn order and live status.
-	if parentID == m.sessionID && len(m.children) > 0 {
+	// Runtime activity rows preserve spawn order and live status. Filter by
+	// parent so nested grandchildren are not listed under the root.
+	if len(m.children) > 0 {
 		out := make([]navChild, 0, len(m.children))
 		for _, ch := range m.children {
 			if ch.sessionID == "" || ch.sessionID == "child" {
+				continue
+			}
+			chParent := ch.parentID
+			if chParent == "" {
+				chParent = m.sessionID
+			}
+			if chParent != parentID {
 				continue
 			}
 			out = append(out, navChild{
@@ -516,11 +524,15 @@ func childrenFromEvents(events []protocol.Event) []childActivity {
 				out[i].agent = e.Agent
 				out[i].prompt = e.Prompt
 				out[i].status = "running"
+				if e.ParentSessionID != "" {
+					out[i].parentID = e.ParentSessionID
+				}
 				continue
 			}
 			index[id] = len(out)
 			out = append(out, childActivity{
 				sessionID: id,
+				parentID:  e.ParentSessionID,
 				agent:     e.Agent,
 				prompt:    e.Prompt,
 				status:    "running",
@@ -534,6 +546,9 @@ func childrenFromEvents(events []protocol.Event) []childActivity {
 			if id != "" {
 				if i, ok := index[id]; ok {
 					out[i].status = status
+					if e.ParentSessionID != "" && out[i].parentID == "" {
+						out[i].parentID = e.ParentSessionID
+					}
 					continue
 				}
 			} else if len(out) > 0 {
@@ -544,7 +559,11 @@ func childrenFromEvents(events []protocol.Event) []childActivity {
 				id = "child"
 			}
 			index[id] = len(out)
-			out = append(out, childActivity{sessionID: id, status: status})
+			out = append(out, childActivity{
+				sessionID: id,
+				parentID:  e.ParentSessionID,
+				status:    status,
+			})
 		}
 	}
 	for i := range out {
@@ -667,8 +686,8 @@ func dropLastUserTurnCells(cells []cell, toolByID map[string]*toolCell) ([]cell,
 	return cells[:lastUser], toolByID
 }
 
-// sessionTreeNodes builds a ui.Tree of the root session and its children for
-// the activity pane.
+// sessionTreeNodes builds a ui.Tree of the root session and nested task
+// children for the activity pane.
 func (m Model) sessionTreeNodes() []ui.TreeNode {
 	rootID := m.sessionID
 	if rootID == "" {
@@ -695,7 +714,12 @@ func (m Model) sessionTreeNodes() []ui.TreeNode {
 		return []ui.TreeNode{root}
 	}
 	root.Expanded = true
-	root.Children = make([]ui.TreeNode, 0, len(kids))
+	root.Children = m.navChildrenToTree(kids)
+	return []ui.TreeNode{root}
+}
+
+func (m Model) navChildrenToTree(kids []navChild) []ui.TreeNode {
+	out := make([]ui.TreeNode, 0, len(kids))
 	for _, ch := range kids {
 		label := ch.title
 		if label == "" {
@@ -716,14 +740,21 @@ func (m Model) sessionTreeNodes() []ui.TreeNode {
 		case string(protocol.ChildStatusCanceled):
 			tone = ui.ToneMuted
 		}
-		root.Children = append(root.Children, ui.TreeNode{
+		node := ui.TreeNode{
 			ID:      ch.id,
 			Label:   label,
 			Detail:  detail,
-			Leaf:    true,
 			Current: m.viewingID == ch.id,
 			Tone:    tone,
-		})
+		}
+		grand := m.listChildren(ch.id)
+		if len(grand) == 0 {
+			node.Leaf = true
+		} else {
+			node.Expanded = true
+			node.Children = m.navChildrenToTree(grand)
+		}
+		out = append(out, node)
 	}
-	return []ui.TreeNode{root}
+	return out
 }
