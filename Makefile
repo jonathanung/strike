@@ -6,8 +6,12 @@
 COVER_MIN ?= 75
 COVER_PROFILE ?= coverage.out
 
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+LDFLAGS ?= -X github.com/jonathanung/strike-cli/internal/version.Version=$(VERSION) -X github.com/jonathanung/strike-cli/internal/version.Commit=$(COMMIT)
+
 build:
-	go build -o strike ./cmd/strike
+	go build -ldflags "$(LDFLAGS)" -o strike ./cmd/strike
 
 # Creates ~/.strike (config, example agent + skill); never overwrites.
 setup:

@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup Go
+        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Build multi-arch archives
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          COMMIT="$(git rev-parse --short HEAD)"
+          LDFLAGS="-X github.com/jonathanung/strike-cli/internal/version.Version=${VERSION} -X github.com/jonathanung/strike-cli/internal/version.Commit=${COMMIT}"
+          mkdir -p dist
+          targets=(
+            "linux amd64"
+            "linux arm64"
+            "darwin amd64"
+            "darwin arm64"
+          )
+          for pair in "${targets[@]}"; do
+            set -- $pair
+            goos=$1
+            goarch=$2
+            out="dist/strike_${VERSION}_${goos}_${goarch}"
+            mkdir -p "${out}"
+            echo "building ${goos}/${goarch}"
+            GOOS="${goos}" GOARCH="${goarch}" CGO_ENABLED=0 \
+              go build -trimpath -ldflags "${LDFLAGS}" -o "${out}/strike" ./cmd/strike
+            tar -C "${out}" -czf "dist/strike_${VERSION}_${goos}_${goarch}.tar.gz" strike
+            rm -rf "${out}"
+          done
+          (
+            cd dist
+            sha256sum strike_*.tar.gz > checksums.txt
+          )
+          ls -la dist
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.ref_name }}"
+          NOTES="strike ${TAG}
+
+          Install:
+          \`\`\`sh
+          curl -fsSL https://strike.jonathanung.ca/install | bash
+          \`\`\`
+
+          Or download an archive below, verify \`checksums.txt\`, and place \`strike\` on your PATH.
+          "
+          gh release create "${TAG}" \
+            --title "strike ${TAG}" \
+            --notes "${NOTES}" \
+            dist/strike_*.tar.gz \
+            dist/checksums.txt

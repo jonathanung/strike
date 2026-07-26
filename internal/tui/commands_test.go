@@ -46,6 +46,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/issues":           {"list, add, get, close, export, or import project issues", "[list|add|get|close|export|import] ...", commandSourceBuiltin},
 		"/context":          {"inspect effective system-prompt layers", "", commandSourceBuiltin},
 		"/effective-prompt": {"inspect effective system-prompt layers", "", commandSourceBuiltin},
+		"/upgrade":          {"install the latest release and restart", "", commandSourceBuiltin},
 		"/review":           {"review a change", "$ARGUMENTS", commandSourceSkill},
 		"/explain":          {"explain code", "", commandSourceSkill},
 	}
@@ -72,7 +73,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 }
 
 func TestValidSkillNameRejectsReservedBuiltinsIncludingMDRead(t *testing.T) {
-	for _, name := range []string{"provider", "model", "effort", "autonomy", "auth", "agent", "fast", "vim", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "help", "keys", "memory", "issues", "context", "effective-prompt"} {
+	for _, name := range []string{"provider", "model", "effort", "autonomy", "auth", "agent", "fast", "vim", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "help", "keys", "memory", "issues", "context", "effective-prompt", "upgrade"} {
 		if validSkillName(name) {
 			t.Errorf("validSkillName(%q) = true, want false for reserved builtin", name)
 		}

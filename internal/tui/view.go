@@ -310,10 +310,14 @@ func (m Model) composerView(compact bool, width, height int) string {
 	}
 	var footer string
 	if !borderless {
-		footer = composerFooter(m.th, m.keyMap, width)
+		footer = composerFooter(m.th, m.keyMap, width, len(m.inputQueue) > 0 && m.composer.Value() == "")
+	}
+	title := "prompt" + themedSpace(m.th.Resolve().Spacing.XS) + m.themeIcons().Prompt
+	if badge := m.inputQueueBadge(); badge != "" {
+		title += themedSpace(m.th.Resolve().Spacing.SM) + badge
 	}
 	return ui.Panel(m.th, ui.PanelOpts{
-		Title:      "prompt" + themedSpace(m.th.Resolve().Spacing.XS) + m.themeIcons().Prompt,
+		Title:      title,
 		Footer:     footer,
 		Width:      width,
 		Height:     height,
@@ -324,10 +328,15 @@ func (m Model) composerView(compact bool, width, height int) string {
 }
 
 // composerFooter advertises send/newline when the panel has room for a footer.
-func composerFooter(th theme.Theme, keys keyMap, width int) string {
+// When queueEdit is set, also advertise backspace to pop the last queued prompt.
+func composerFooter(th theme.Theme, keys keyMap, width int, queueEdit bool) string {
 	_ = width
 	send, nl := keyHint(keys.Send), keyHint(keys.Newline)
-	return dotJoin(th, send.Key+" "+send.Label, nl.Key+" "+nl.Label)
+	parts := []string{send.Key + " " + send.Label, nl.Key + " " + nl.Label}
+	if queueEdit {
+		parts = append(parts, "bksp edit queue")
+	}
+	return dotJoin(th, parts...)
 }
 
 // rightPaneView frames the active window. Context and activity bodies are

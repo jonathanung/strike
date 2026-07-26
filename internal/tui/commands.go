@@ -35,6 +35,7 @@ const (
 	commandIssues          commandID = "issues"
 	commandContext         commandID = "context"
 	commandEffectivePrompt commandID = "effective-prompt"
+	commandUpgrade         commandID = "upgrade"
 )
 
 type commandSource string
@@ -77,6 +78,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandIssues, Name: "/issues", Description: "list, add, get, close, export, or import project issues", ArgsHint: "[list|add|get|close|export|import] ...", Source: commandSourceBuiltin},
 	{ID: commandContext, Name: "/context", Description: "inspect effective system-prompt layers", Source: commandSourceBuiltin},
 	{ID: commandEffectivePrompt, Name: "/effective-prompt", Description: "inspect effective system-prompt layers", Source: commandSourceBuiltin},
+	{ID: commandUpgrade, Name: "/upgrade", Description: "install the latest release and restart", Source: commandSourceBuiltin},
 }
 
 // commandCatalog builds the slash-command catalog from the builtins and the
@@ -152,6 +154,7 @@ var reservedCommandNames = map[string]struct{}{
 	"issues":           {},
 	"context":          {},
 	"effective-prompt": {},
+	"upgrade":          {},
 }
 
 // validSkillName reports whether a skill name is safe to render and select as a
