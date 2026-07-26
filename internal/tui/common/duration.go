@@ -1,13 +1,13 @@
-package tui
+package common
 
 import (
 	"fmt"
 	"time"
 )
 
-// formatCompactDuration renders a short elapsed-time label for the header:
+// FormatCompactDuration renders a short elapsed-time label for the header:
 // under a minute as "12s", otherwise "1m 5s".
-func formatCompactDuration(d time.Duration) string {
+func FormatCompactDuration(d time.Duration) string {
 	if d < 0 {
 		d = 0
 	}

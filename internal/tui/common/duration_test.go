@@ -1,4 +1,4 @@
-package tui
+package common
 
 import (
 	"testing"
@@ -20,8 +20,8 @@ func TestFormatCompactDuration(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := formatCompactDuration(tt.d); got != tt.want {
-				t.Errorf("formatCompactDuration(%v) = %q, want %q", tt.d, got, tt.want)
+			if got := FormatCompactDuration(tt.d); got != tt.want {
+				t.Errorf("FormatCompactDuration(%v) = %q, want %q", tt.d, got, tt.want)
 			}
 		})
 	}
