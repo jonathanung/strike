@@ -1328,7 +1328,7 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		}
 	case protocol.ToolCallEnd:
 		if tc, ok := m.toolByID[ev.CallID]; ok {
-			tc.title, tc.output, tc.metadata, tc.done, tc.isError = ev.Title, ev.Output, ev.Metadata, true, ev.IsError
+			applyToolCallEnd(tc, ev.Title, ev.Output, ev.Metadata, ev.IsError)
 			if isProjectDataTool(tc.name) {
 				m.windows = refreshProjectDataWindows(m.windows)
 			}
@@ -1487,6 +1487,7 @@ func (m *Model) onChildCompleted(ev protocol.ChildCompleted) {
 	if status == "" {
 		status = string(protocol.ChildStatusCompleted)
 	}
+	applyChildCompletedToTaskCells(m.toolByID, ev)
 	for i := range m.children {
 		if m.children[i].sessionID == id || (id == "" && i == len(m.children)-1) {
 			m.children[i].status = status

@@ -540,6 +540,7 @@ func TestTaskChildPrefixedAgentModelPinDoesNotStreamForeignIdOnParentProvider(t 
 			s.match = matchToolResult("task-route")
 			return s
 		}(),
+		childCompletedNudgeStep("parent ack route child"),
 	)
 	openaiProv := newScriptedProvider(
 		func() streamStep {

@@ -417,6 +417,7 @@ func TestChildCannotWidenViaAgentProfile(t *testing.T) {
 			s.match = matchToolResult("task-ag3")
 			return s
 		}(),
+		childCompletedNudgeStep("parent ack ag3 child"),
 	)
 
 	// Base allows write so a missing parent ceiling would let the child succeed.
@@ -547,6 +548,7 @@ func TestChildAgentDenyFurtherRestricts(t *testing.T) {
 			s.match = matchToolResult("task-restrict")
 			return s
 		}(),
+		childCompletedNudgeStep("parent ack restrict child"),
 	)
 
 	baseAllow := permission.Ruleset{

@@ -614,8 +614,10 @@ func cellsFromEvents(events []protocol.Event) ([]cell, map[string]*toolCell) {
 			}
 		case protocol.ToolCallEnd:
 			if tc, ok := toolByID[ev.CallID]; ok {
-				tc.title, tc.output, tc.metadata, tc.done, tc.isError = ev.Title, ev.Output, ev.Metadata, true, ev.IsError
+				applyToolCallEnd(tc, ev.Title, ev.Output, ev.Metadata, ev.IsError)
 			}
+		case protocol.ChildCompleted:
+			applyChildCompletedToTaskCells(toolByID, ev)
 		case protocol.TurnCompleted:
 			complete()
 			if exp, ok := lastCell[*exploreCell](cells); ok {
