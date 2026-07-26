@@ -54,6 +54,9 @@ type Config struct {
 	// CompactionModel optionally pins the model id used for summarize
 	// compaction (same provider as the session). Empty uses the session model.
 	CompactionModel string `json:"compactionModel,omitempty"`
+	// MaxChildDepth bounds nested task tool spawns (root depth 0). Zero means
+	// engine default (1: children cannot spawn further tasks).
+	MaxChildDepth int `json:"maxChildDepth,omitempty"`
 }
 
 // Hook is one lifecycle hook entry. Exactly one of Action or Command should
@@ -337,6 +340,9 @@ func merge(base, layer Config) Config {
 	}
 	if layer.CompactionModel != "" {
 		base.CompactionModel = layer.CompactionModel
+	}
+	if layer.MaxChildDepth != 0 {
+		base.MaxChildDepth = layer.MaxChildDepth
 	}
 	base.Permissions = append(base.Permissions, layer.Permissions...)
 	base.Hooks = append(base.Hooks, layer.Hooks...)

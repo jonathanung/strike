@@ -22,7 +22,7 @@ func (taskTool) Description() string {
   explore (read-only search), general (multi-step), commit (git commits only),
   reviewer (read-only review), tester (run make test/vet/build), debugger (root-cause),
   build (default coding), plan (read-only planning).
-- Children cannot spawn further tasks (depth limit 1).
+- Nested task depth is bounded by MaxChildDepth (default 1: children cannot nest).
 - Use for scoped work that benefits from a fresh message history.`
 }
 

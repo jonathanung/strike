@@ -31,8 +31,8 @@ type childHandle struct {
 // under the parent engine's run context (not the parent turn context).
 //
 // Parent emits ChildStarted immediately and ChildCompleted when the child
-// finishes. Only PermissionAsked/PermissionResolved and
-// QuestionAsked/QuestionResolved are re-emitted from the child onto the
+// finishes. PermissionAsked/PermissionResolved, QuestionAsked/QuestionResolved,
+// and nested ChildStarted/ChildCompleted are re-emitted from the child onto the
 // parent event stream; optional ChildSession hooks persist the full child log.
 func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.TaskResult, error) {
 	if err := ctx.Err(); err != nil {
@@ -93,6 +93,7 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		ParentSessionID:     e.opts.SessionID,
 		Depth:               childDepth,
 		MaxChildDepth:       maxDepth,
+		TaskOneShot:         true,
 		Select:              e.opts.Select,
 		Registry:            childReg,
 		WorkDir:             e.opts.WorkDir,
@@ -115,7 +116,7 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		KeepUserTurns:       e.opts.KeepUserTurns,
 		CompactionStrategy:  e.opts.CompactionStrategy,
 		CompactionModel:     e.opts.CompactionModel,
-		Rules:               permission.DeriveChildRules(parentLayers, childAgent.Permissions),
+		Rules:               permission.DeriveChildRules(parentLayers, childDepth >= maxDepth, childAgent.Permissions),
 		Hooks:               e.opts.Hooks,
 		HookRules:           e.opts.HookRules,
 		PersistProjectRule:  e.opts.PersistProjectRule,
@@ -186,6 +187,8 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		defer close(h.done)
 		defer e.unregisterChild(childID)
 		defer e.closeChildSession(childID)
+		// Run returns on TaskOneShot idle (or cancel); release childCtx after.
+		defer cancel()
 
 		for ev := range child.Events() {
 			e.persistChildEvent(childID, ev)
@@ -198,13 +201,19 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 				e.emit(ev)
 			case protocol.QuestionResolved:
 				e.emit(ev)
+			case protocol.ChildStarted:
+				// Nested grandchildren: re-emit so root TUI/tree sees lineage.
+				e.emit(ev)
+			case protocol.ChildCompleted:
+				e.emit(ev)
 			case protocol.TurnCompleted:
-				// One-shot task: shut down the child Run loop after its turn.
+				// One-shot task: record stop reason. Do not cancel here —
+				// TaskOneShot Run exits when idle so nested grandchildren
+				// (MaxChildDepth > 1) can finish under this engine.
 				select {
 				case stopCh <- ev.StopReason:
 				default:
 				}
-				cancel()
 			case protocol.EngineError:
 				// Pre-turn failures (e.g. no provider) never emit TurnCompleted.
 				// Mid-turn errors are followed by TurnCompleted{"error"}; the

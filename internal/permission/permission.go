@@ -69,8 +69,9 @@ func ValidateRuleset(rs Ruleset) error {
 }
 
 // Defaults: searching and reading are free; anything that mutates or
-// executes asks. task is allowed so the root agent can spawn children;
-// DeriveChildRules denies task on child sessions.
+// executes asks. task is allowed so agents can spawn children while
+// depth remains below MaxChildDepth; DeriveChildRules denies task only
+// when the child cannot nest further.
 func Defaults() Ruleset {
 	return Ruleset{
 		{Permission: "read", Pattern: "*", Action: Allow},
@@ -112,15 +113,16 @@ func DenyOnly(rs Ruleset) Ruleset {
 	return out
 }
 
-// DeriveChildRules deep-copies parentLayers, appends only Deny rules from
-// childExtra, then appends Deny task *. Does NOT copy parent session grants
-// (caller passes opts.Rules plus the parent's active agent profile).
-// Child Service.granted starts empty.
+// DeriveChildRules deep-copies parentLayers and appends only Deny rules from
+// childExtra. When denyTask is true (child depth has reached MaxChildDepth),
+// appends Deny task * so the child cannot spawn further. Does NOT copy parent
+// session grants (caller passes opts.Rules plus the parent's active agent
+// profile). Child Service.granted starts empty.
 //
 // Only Deny entries from childExtra are kept so a child cannot widen a
 // parent Deny/Ask via Allow. Parent last-match-wins order is preserved,
 // including parent allow-after-deny patterns.
-func DeriveChildRules(parentLayers []Ruleset, childExtra ...Ruleset) []Ruleset {
+func DeriveChildRules(parentLayers []Ruleset, denyTask bool, childExtra ...Ruleset) []Ruleset {
 	out := make([]Ruleset, 0, len(parentLayers)+len(childExtra)+1)
 	for _, layer := range parentLayers {
 		out = append(out, append(Ruleset(nil), layer...))
@@ -130,7 +132,9 @@ func DeriveChildRules(parentLayers []Ruleset, childExtra ...Ruleset) []Ruleset {
 			out = append(out, denies)
 		}
 	}
-	out = append(out, Ruleset{{Permission: "task", Pattern: "*", Action: Deny}})
+	if denyTask {
+		out = append(out, Ruleset{{Permission: "task", Pattern: "*", Action: Deny}})
+	}
 	return out
 }
 
