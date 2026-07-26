@@ -19,7 +19,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 /autonomy                      # exit-gate policy picker
 /autonomy supervised           # supervised | agent | checks
 /agent                         # centered agent picker
-/agent plan                    # direct switch (built-ins: build, plan)
+/agent plan                    # direct switch (build, plan, explore, …)
 /session                       # browse past root sessions (auto-titles) and
                                # resume one with full model history
 /session <id>                  # resume a specific session by id
@@ -42,25 +42,63 @@ strike launches without any provider configured. Pick one inside the TUI:
 /layout                        # toggle horizontal/vertical pane split
 /split                         # alias of /layout
 /compact                       # compact model history (trim or summarize per config)
+/fork                          # duplicate this conversation into a new session id
+/undo                          # drop the last completed user/assistant turn
+/rewind                        # alias of /undo
 /vim [path[:line]]             # open file in embedded editor (pane/overlay)
                                # or $EDITOR (see vimMode in config.md)
 /md-read <path>                # open a markdown file in the right markdown pane
 /memory [list|get|set|rm] …    # project-scoped durable key/value memory
 /issues [list|add|get|close] … # project-scoped issue tracker
+/context                       # inspect effective system-prompt layers
+/effective-prompt              # alias of /context
 /keys                          # filterable keybind cheatsheet (also f1)
 /help                          # list commands
 ```
 
+### Session, memory, issues
+
+| Command | Notes |
+|---|---|
+| `/session` | picker of past **root** sessions (auto-titles); resume reloads model history |
+| `/session <id>` | resume that root session by id |
+| `/fork` | copy the current session JSONL into a new id (idle only) |
+| `/undo` / `/rewind` | drop the last completed turn (idle only) |
+| `/compact` | ask the engine to compact model history |
+| `/memory` | bare = list browser; `list [tag]`, `get <key>`, `set <key> <value>`, `rm <key>` |
+| `/issues` | bare = list browser; `list [open\|closed]`, `add <title>`, `get <id>`, `close <id>` |
+| `/context` | dump effective system-prompt layers into the transcript |
+
+### Autonomy & workflows
+
+`/autonomy` sets the session exit-gate policy for multi-phase workflows
+(see [agents-skills.md](agents-skills.md)):
+
+| Mode | Behavior |
+|---|---|
+| `supervised` (default) | you approve phase gates |
+| `agent` | model clears gates via `phase_done` |
+| `checks` | configured check commands must exit 0 |
+
 Built-in skills also appear as slash commands: `/commit`, `/push`, `/pr`,
 `/ship` (and any custom skills under `~/.strike/skills` or `./.strike/skills`).
 See [agents-skills.md](agents-skills.md).
+
+### Composer: `@file` mentions
+
+Type `@` then a path fragment for fuzzy project-file completion (needs
+`host.Files`). On send, `@path` tokens expand to file contents for the model;
+the transcript/history keep the `@path` tokens. Emails (`user@host`) are not
+treated as mentions.
 
 Submitting a prompt before selecting shows "No model selected" in the
 notice line above the composer (your prompt stays in the input). Talking to
 a real provider needs credentials — see [auth.md](auth.md).
 
 Provider selection happens in-app with `/provider`; `--provider` on the
-command line just pre-selects (and validates credentials eagerly).
+command line just pre-selects (and validates credentials eagerly). Custom
+OpenAI-/Anthropic-compatible endpoints: `/settings` or config
+`providers` — see [config.md](config.md).
 
 ## CLI session resume & headless exec
 

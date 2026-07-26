@@ -448,6 +448,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		WorkDir:              workDir,
 		ProjectRoot:          projectIdentity.Root,
 		Instructions:         instructions,
+		Memory:               memoryStore,
 		SystemPrompt:         cfg.SystemPrompt,
 		InitialProvider:      initialProvider,
 		InitialModel:         initialModel,

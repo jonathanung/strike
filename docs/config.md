@@ -37,6 +37,40 @@ palette. In the TUI, bare `/theme` opens a picker; `/theme <id>` applies one;
 `/theme dark|light|auto` only adjusts session appearance (forced background
 detect), not the color-theme id.
 
+## Custom providers
+
+Add OpenAI-compatible (chat completions) or Anthropic-compatible (messages)
+endpoints via the `providers` array (global and project layers merge; same
+`name` in project replaces global). Credentials never live here — use
+`apiKeyEnv` and/or `/auth` / the auth store.
+
+```json
+{
+  "providers": [
+    {
+      "name": "kimi",
+      "baseURL": "https://api.example.com/v1",
+      "api": "openai",
+      "apiKeyEnv": "KIMI_API_KEY",
+      "models": ["kimi-latest"],
+      "headers": { "X-Custom": "optional" }
+    }
+  ]
+}
+```
+
+| Field | Required | Notes |
+|---|---|---|
+| `name` | yes | lowercase slug (`[a-z][a-z0-9_-]{0,63}`); not `anthropic`/`openai`/`xai`/`echo` |
+| `baseURL` | yes | absolute `http`/`https` URL |
+| `api` | yes | wire dialect: `openai` or `anthropic` |
+| `apiKeyEnv` | no | env var name checked before the auth store |
+| `models` | no | listed in `/model`; first is the default when unset |
+| `headers` | no | extra HTTP headers on every request |
+
+In the TUI, `/settings` manages the same list (CRUD persists to
+`~/.strike/config`). Custom names appear in `/provider` like built-ins.
+
 ## Embedded editor (`vimMode`)
 
 `/vim [path[:line]]` opens a file in an editor. `vimMode` selects how:
