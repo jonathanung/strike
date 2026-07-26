@@ -241,6 +241,21 @@ Two different mechanisms, depending on whether it needs Go code:
   `Model.handleCommand` (`internal/tui/app.go`), and — if it's a primary
   action — a hint in `hintsView` (`internal/tui/view.go`).
 
+## TUI source map (selected)
+
+Same package `internal/tui`; split for reviewability only (no subpackages).
+
+| File | Responsibility |
+|---|---|
+| `app.go` | `Model`, `New`/`Init`/`Update`/`View`, composer, layout glue |
+| `apply_event.go` | protocol event → transcript cells / child activity / notices |
+| `commands.go` | slash command specs + completion metadata |
+| `cells.go` | transcript cell types and rendering helpers |
+| `keymap.go` / `keys.go` | keybind table and binding ids |
+| `session_nav.go` | session list / child transcript projection |
+| `root_switch.go` | multi-root apply helpers |
+| `view.go` | header/hints and non-root view fragments |
+
 ### Add a UI component
 
 1. Add `internal/tui/ui/yourname.go`. Imports are limited to stdlib,
