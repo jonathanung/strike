@@ -289,6 +289,13 @@ type Model struct {
 	// children tracks active/recent subagent sessions for the activity pane.
 	// Lifecycle never appends transcript cells.
 	children []childActivity
+	// activityCursor / activityAnchorID navigate the newest-first activity feed.
+	// activityStickNewest keeps the cursor on the newest row as events arrive.
+	// activityDetail expands one entry's chronological body.
+	activityCursor      int
+	activityAnchorID    string
+	activityStickNewest bool
+	activityDetail      bool
 
 	// roots holds frozen UI state for concurrent parent sessions (multi-root).
 	// The active root's fields live on Model; others sit here until activated.
@@ -340,28 +347,29 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 	sp := newSpinner(th)
 
 	m := Model{
-		ops:             ops,
-		events:          events,
-		services:        services,
-		agents:          services.Agents,
-		skills:          services.Skills,
-		commands:        commandCatalog(services.Skills),
-		th:              th,
-		themeID:         themeID,
-		toolByID:        map[string]*toolCell{},
-		selectedCell:    -1,
-		selectedFileRef: -1,
-		cellClip:        &cellClipboard{},
-		composer:        ta,
-		keyMap:          defaultKeyMap(),
-		windows:         newWindowRegistry(),
-		spin:            sp,
-		historyPos:      -1,
-		focused:         true,
-		notifyMode:      NotifyUnfocusedOnly,
-		appearance:      appearanceAuto,
-		autonomy:        protocol.AutonomySupervised,
-		permMode:        protocol.PermissionModeDefault,
+		ops:                 ops,
+		events:              events,
+		services:            services,
+		agents:              services.Agents,
+		skills:              services.Skills,
+		commands:            commandCatalog(services.Skills),
+		th:                  th,
+		themeID:             themeID,
+		toolByID:            map[string]*toolCell{},
+		selectedCell:        -1,
+		selectedFileRef:     -1,
+		cellClip:            &cellClipboard{},
+		composer:            ta,
+		keyMap:              defaultKeyMap(),
+		windows:             newWindowRegistry(),
+		spin:                sp,
+		historyPos:          -1,
+		activityStickNewest: true,
+		focused:             true,
+		notifyMode:          NotifyUnfocusedOnly,
+		appearance:          appearanceAuto,
+		autonomy:            protocol.AutonomySupervised,
+		permMode:            protocol.PermissionModeDefault,
 	}
 	var replay []protocol.Event
 	for _, option := range options {

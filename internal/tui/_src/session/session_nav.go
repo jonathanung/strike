@@ -778,7 +778,8 @@ func (m Model) sessionTreeNodes() []ui.TreeNode {
 			root.Leaf = true
 		} else {
 			root.Expanded = true
-			root.Children = m.navChildrenToTree(kids)
+			// Newest child first in the activity tree.
+			root.Children = m.navChildrenToTree(reverseNavChildren(kids))
 		}
 		out = append(out, root)
 	}
@@ -814,7 +815,7 @@ func (m Model) navChildrenToTree(kids []navChild) []ui.TreeNode {
 			Current: m.viewingID == ch.id,
 			Tone:    tone,
 		}
-		grand := m.listChildren(ch.id)
+		grand := reverseNavChildren(m.listChildren(ch.id))
 		if len(grand) == 0 {
 			node.Leaf = true
 		} else {
