@@ -49,6 +49,9 @@ selection, and layout). Keep this catalog synchronized with `internal/tui/ui`.
 | Canvas | `Canvas(th theme.Theme, width, height int, body string) string` | Final full-screen fit operation and owner of the application background. |
 | Logo | `Logo(th theme.Theme) string`; `LogoCompact(th theme.Theme) string` | Full and compact Strike wordmarks. |
 | DiffPreview | `DiffPreview(th theme.Theme, opts DiffPreviewOpts) string` | Unified +/-/context diff block. `DiffPreviewOpts`: `Path`, `Old`, `New`, `MaxLines` (hunk body; ≤0 → 12), mandatory `Width` (≤0 → ""), `ShowStats`. Header (path and/or +N/−M) does not consume `MaxLines`; overflow ends with a muted ellipsis more-lines row. |
+| Meter | `Meter(th theme.Theme, width int, ratio float64) string` | Fixed-width ratio bar. Negative ratio = unknown hollow (MeterEmpty). |
+| Sparkline | `Sparkline(th theme.Theme, width int, samples []float64) string` | Fixed-width activity chart from non-negative samples. Empty/unknown series draws hollow MeterEmpty row; glyphs from `Icons.Sparkline`. |
+| FormatTokens | `FormatTokens(n int) string` | Compact token count for chrome (`1.5k`, `2M`). |
 
 Panel and Dialog truncate long body lines; pre-wrap them to
 `ui.PanelInnerWidth(th, width)`. `Card` is the exception: it wraps its own
@@ -79,8 +82,9 @@ otherwise `Background` resolves to a solid `lipgloss.TerminalColor`.
 `Icons` fields are `Prompt`, `Assistant`, `Tool`, `OK`, `Err`, `Info`,
 `Agent`, `Bolt`, `Dot`, `Cursor`, `InputCursor`, `FilterCursor`, `ToolGuide`,
 `BadgeLeft`, `BadgeRight`, `DetailSeparator`, `Ellipsis`, `LogoTopRule`,
-`LogoBottomRule`, `MeterFill`, `MeterEmpty`, `TreeExpanded`, and
-`TreeCollapsed`. Use `th.Icons`, never the literal glyph.
+`LogoBottomRule`, `MeterFill`, `MeterEmpty`, `TreeExpanded`,
+`TreeCollapsed`, and `Sparkline` (low→high bar runes). Use `th.Icons`, never
+the literal glyph.
 
 `theme.AgentState` is the live session/agent status vocabulary for dynamic
 coloring: `Ready` → `Success`, `Working` → `AccentAlt`, `Attention` →

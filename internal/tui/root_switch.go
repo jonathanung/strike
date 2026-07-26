@@ -38,6 +38,7 @@ type rootPane struct {
 
 	usageInput, usageOutput, usageUsed protocol.TokenCount
 	usageSource                        string
+	usageSession                       usageTotals
 	contextLimit                       int
 	contextLimitKnown                  bool
 	outputLimit                        int
@@ -91,6 +92,7 @@ func (m *Model) stashActiveRoot() {
 		usageOutput:        m.usageOutput,
 		usageUsed:          m.usageUsed,
 		usageSource:        m.usageSource,
+		usageSession:       m.usageSession,
 		contextLimit:       m.contextLimit,
 		contextLimitKnown:  m.contextLimitKnown,
 		outputLimit:        m.outputLimit,
@@ -134,6 +136,7 @@ func (m *Model) loadRootPane(p *rootPane) {
 	m.usageOutput = p.usageOutput
 	m.usageUsed = p.usageUsed
 	m.usageSource = p.usageSource
+	m.usageSession = p.usageSession
 	m.contextLimit = p.contextLimit
 	m.contextLimitKnown = p.contextLimitKnown
 	m.outputLimit = p.outputLimit
@@ -389,6 +392,7 @@ func applyEventToPane(p *rootPane, ev protocol.Event) {
 		p.usageOutput = e.Output
 		p.usageUsed = e.Used
 		p.usageSource = e.Source
+		p.usageSession.add(e)
 	case protocol.ChildStarted:
 		id := e.SessionID
 		if id == "" {
@@ -584,6 +588,7 @@ func seedPaneFromReplay(p *rootPane, events []protocol.Event) {
 	p.usageOutput = tmp.usageOutput
 	p.usageUsed = tmp.usageUsed
 	p.usageSource = tmp.usageSource
+	p.usageSession = tmp.usageSession
 	p.turnRunning = false
 	p.awaitingPermission = false
 }

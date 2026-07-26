@@ -76,6 +76,12 @@ type agentsInterruptMsg struct {
 	sessionID string
 }
 
+// agentsHighlightMsg announces the agents-tree cursor target so the visualizer
+// can follow selection without requiring Enter.
+type agentsHighlightMsg struct {
+	sessionID string
+}
+
 // agentsWindow is a multi-root session tree: top-level = parent agents, nested
 // = that parent's subagents. Keys: j/k move, enter select, n spawn, x interrupt,
 // space/h/l toggle expand, f cycle view filter, / text filter.
@@ -243,15 +249,18 @@ func (w agentsWindow) handleKey(msg tea.KeyMsg) (agentsWindow, tea.Cmd) {
 		if w.cursor > 0 {
 			w.cursor--
 		}
+		return w, w.highlightCmd()
 	case "down", "j":
 		if w.cursor < len(rows)-1 {
 			w.cursor++
 		}
+		return w, w.highlightCmd()
 	case "f":
 		w.viewFilter = w.viewFilter.next()
 		w.nodes = w.buildNodes()
 		rows = ui.FlattenTree(w.nodes)
 		w.cursor = clampAgentsCursor(w.cursor, len(rows))
+		return w, w.highlightCmd()
 	case "/":
 		w.filterEdit = true
 		return w, nil
@@ -280,6 +289,7 @@ func (w agentsWindow) handleKey(msg tea.KeyMsg) (agentsWindow, tea.Cmd) {
 			w.nodes = w.buildNodes()
 			rows = ui.FlattenTree(w.nodes)
 			w.cursor = clampAgentsCursor(w.cursor, len(rows))
+			return w, w.highlightCmd()
 		} else if msg.String() == "l" || msg.String() == "right" || msg.String() == " " {
 			id := row.ID
 			return w, func() tea.Msg { return agentsOpenMsg{sessionID: id} }
@@ -292,6 +302,15 @@ func (w agentsWindow) handleKey(msg tea.KeyMsg) (agentsWindow, tea.Cmd) {
 		return w, func() tea.Msg { return agentsOpenMsg{sessionID: id} }
 	}
 	return w, nil
+}
+
+// highlightCmd emits the current cursor session id for the visualizer.
+func (w agentsWindow) highlightCmd() tea.Cmd {
+	if len(w.nodes) == 0 {
+		w.nodes = w.buildNodes()
+	}
+	id := w.selectedID(ui.FlattenTree(w.nodes))
+	return func() tea.Msg { return agentsHighlightMsg{sessionID: id} }
 }
 
 func (w agentsWindow) handleFilterEditKey(msg tea.KeyMsg) (agentsWindow, tea.Cmd) {

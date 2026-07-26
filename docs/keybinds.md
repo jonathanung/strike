@@ -33,7 +33,8 @@ In a vertical split, focus and cycle chords swap: focus is `ctrl+j`/`ctrl+k`,
 cycle is `ctrl+h`/`ctrl+l`.
 
 Right-pane windows (cycle with the chords above): `context`, `activity`,
-`files`, `markdown`, `editor`. See [usage.md](usage.md).
+`agents`, `visualizer`, `files`, `memory`, `issues`, `markdown`, `editor`.
+See [usage.md](usage.md).
 
 ## Permission prompts
 

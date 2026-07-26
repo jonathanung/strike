@@ -98,10 +98,12 @@ composer, and modal focus.
 The right pane is TUI-local. Its private, value-oriented `window` interface
 has identity/title, initialization, update, resize, and view methods; updates
 and resizes return replacement values so model copies do not share mutable
-state. The registry holds five windows: named session panes (`context` for
+state. The registry holds right-pane windows: named session panes (`context` for
 setup summary and `activity` for subagent status, recent parent tools, or idle
-tips), a `files` explorer (lazy tree via `host.Files.ListDir`), a `markdown`
-reader opened via `/md-read`, and an `editor` PTY window for `/vim`. It exposes
+tips), an `agents` multi-root tree, a `visualizer` for the selected node's
+status/tokens/cost/activity sparkline, a `files` explorer (lazy tree via
+`host.Files.ListDir`), `memory` and `issues` browsers, a `markdown` reader
+opened via `/md-read`, and an `editor` PTY window for `/vim`. It exposes
 only the active window and has no close state or plugin mechanism. File bytes
 and directory listings reach the markdown and files windows through
 `host.Files`, not direct disk I/O from the TUI. Window input and resize updates

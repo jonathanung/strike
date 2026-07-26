@@ -24,6 +24,7 @@ type fileIcons struct {
 	Cursor, InputCursor, FilterCursor, ToolGuide             *string
 	BadgeLeft, BadgeRight, DetailSeparator, Ellipsis         *string
 	LogoTopRule, LogoBottomRule, MeterFill, MeterEmpty       *string
+	TreeExpanded, TreeCollapsed, Sparkline                   *string
 }
 
 // Parse decodes a JSON theme document into an Entry. idHint is used when the
@@ -277,6 +278,9 @@ func applyIcons(doc fileIcons) Icons {
 	set(&i.LogoBottomRule, doc.LogoBottomRule)
 	set(&i.MeterFill, doc.MeterFill)
 	set(&i.MeterEmpty, doc.MeterEmpty)
+	set(&i.TreeExpanded, doc.TreeExpanded)
+	set(&i.TreeCollapsed, doc.TreeCollapsed)
+	set(&i.Sparkline, doc.Sparkline)
 	return i
 }
 
