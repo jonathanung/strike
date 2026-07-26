@@ -5,5 +5,5 @@ package tui
 import "errors"
 
 func readClipboardImage() ([]byte, error) {
-	return nil, errors.New("clipboard image attachments are only available on macOS")
+	return nil, errors.New("clipboard image attachments require macOS with cgo enabled")
 }

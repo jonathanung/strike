@@ -49,6 +49,8 @@ import (
 	"unsafe"
 )
 
+const maxCInt = int64(^uint32(0) >> 1)
+
 func readClipboardImage() ([]byte, error) {
 	var bytes unsafe.Pointer
 	var length C.size_t
@@ -57,5 +59,8 @@ func readClipboardImage() ([]byte, error) {
 		return nil, errors.New("clipboard does not contain an image")
 	}
 	defer C.free(bytes)
+	if length > C.size_t(maxCInt) {
+		return nil, errors.New("clipboard image is too large")
+	}
 	return C.GoBytes(bytes, C.int(length)), nil
 }
