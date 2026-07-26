@@ -165,6 +165,7 @@ func TestDefaultPaletteRolesArePopulatedAndReadable(t *testing.T) {
 		"BorderFocus": th.BorderFocus, "BorderMuted": th.BorderMuted,
 		"UserLabel": th.UserLabel, "ToolLabel": th.ToolLabel,
 		"DiffAdded": th.DiffAdded, "DiffRemoved": th.DiffRemoved,
+		"OverlayScrim": th.OverlayScrim,
 	}
 	for name, c := range roles {
 		if c.Light == "" || c.Dark == "" {
@@ -316,6 +317,7 @@ func TestThemeResolveCompletesZeroAndPartialThemes(t *testing.T) {
 		"BorderFocus": resolved.BorderFocus, "BorderMuted": resolved.BorderMuted,
 		"UserLabel": resolved.UserLabel, "ToolLabel": resolved.ToolLabel,
 		"DiffAdded": resolved.DiffAdded, "DiffRemoved": resolved.DiffRemoved,
+		"OverlayScrim": resolved.OverlayScrim,
 	}
 	for name, role := range roles {
 		if role.Light == "" || role.Dark == "" {
