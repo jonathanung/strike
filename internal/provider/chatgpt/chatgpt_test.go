@@ -460,3 +460,29 @@ func TestNewUUIDFormat(t *testing.T) {
 		t.Errorf("version nibble = %c, want 4", parts[2][0])
 	}
 }
+
+func TestUserMessageIncludesInputImage(t *testing.T) {
+	png := []byte{0x89, 0x50, 0x4e, 0x47}
+	req := provider.Request{
+		Model: "gpt",
+		Messages: []provider.Message{{
+			Role:   provider.RoleUser,
+			Text:   "hi",
+			Images: []provider.Image{{MIME: "image/png", Data: png}},
+		}},
+	}
+	out := toResponsesRequest(req)
+	if len(out.Input) != 1 {
+		t.Fatalf("input = %d", len(out.Input))
+	}
+	blocks := out.Input[0].Content
+	if len(blocks) != 2 {
+		t.Fatalf("blocks = %d", len(blocks))
+	}
+	if blocks[0].Type != "input_text" || blocks[0].Text != "hi" {
+		t.Errorf("text = %+v", blocks[0])
+	}
+	if blocks[1].Type != "input_image" || !strings.HasPrefix(blocks[1].ImageURL, "data:image/png;base64,") {
+		t.Errorf("image = %+v", blocks[1])
+	}
+}

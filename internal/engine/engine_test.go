@@ -1549,3 +1549,46 @@ func TestUsageReportedEstimatedSource(t *testing.T) {
 		t.Errorf("source = %q, want %q", usage.Source, protocol.UsageSourceEstimated)
 	}
 }
+
+func TestUserInputImagesReachProviderAndUserMessage(t *testing.T) {
+	prov := newScriptedProvider(completedStep("saw it"))
+	eng := newTestEngine(t, prov)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	img := protocol.ImageAttachment{
+		MIME: "image/png",
+		Data: "iVBORw0KGgo=",
+	}
+	eng.Ops() <- protocol.UserInput{Text: "look", Images: []protocol.ImageAttachment{img}}
+
+	var sawUserMsg bool
+	deadline := time.After(2 * time.Second)
+	for !sawUserMsg {
+		select {
+		case ev := <-eng.Events():
+			if um, ok := ev.(protocol.UserMessage); ok {
+				if um.Text != "look" || len(um.Images) != 1 || um.Images[0].MIME != "image/png" {
+					t.Fatalf("UserMessage = %#v", um)
+				}
+				sawUserMsg = true
+			}
+		case <-deadline:
+			t.Fatal("timeout waiting for UserMessage")
+		}
+	}
+
+	req := receiveRequest(t, prov.requests)
+	if len(req.Messages) == 0 {
+		t.Fatal("no messages")
+	}
+	last := req.Messages[len(req.Messages)-1]
+	if last.Role != provider.RoleUser || last.Text != "look" {
+		t.Fatalf("last msg = %#v", last)
+	}
+	if len(last.Images) != 1 || last.Images[0].MIME != "image/png" || len(last.Images[0].Data) == 0 {
+		t.Fatalf("images = %#v", last.Images)
+	}
+	_ = waitForTurnCompleted(t, eng.Events())
+}

@@ -157,9 +157,18 @@ const (
 // Op is a client -> engine submission.
 type Op interface{ isOp() }
 
+// ImageAttachment is one image attached to a user message (paste/drop).
+// Data is standard base64 (no data: URI prefix). MIME is a full media type
+// such as image/png.
+type ImageAttachment struct {
+	MIME string `json:"mime"`
+	Data string `json:"data"`
+}
+
 // UserInput submits a user message, starting a turn.
 type UserInput struct {
-	Text string `json:"text"`
+	Text   string            `json:"text"`
+	Images []ImageAttachment `json:"images,omitempty"`
 }
 
 // PermissionReply resolves a pending PermissionAsked event.
@@ -303,7 +312,8 @@ type ChildCompleted struct {
 // transcript is fully reconstructable from events alone.
 type UserMessage struct {
 	Correlation
-	Text string `json:"text"`
+	Text   string            `json:"text"`
+	Images []ImageAttachment `json:"images,omitempty"`
 }
 
 // SessionTitled records the human-readable session title. Emitted once when

@@ -389,3 +389,25 @@ func TestEventTypeCoverage(t *testing.T) {
 		}
 	}
 }
+
+func TestUserMessageImagesRoundTrip(t *testing.T) {
+	ev := UserMessage{
+		Text:   "hi",
+		Images: []ImageAttachment{{MIME: "image/png", Data: "abc"}},
+	}
+	env, err := Wrap(ev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := env.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	um, ok := got.(UserMessage)
+	if !ok {
+		t.Fatalf("type %T", got)
+	}
+	if um.Text != "hi" || len(um.Images) != 1 || um.Images[0].MIME != "image/png" || um.Images[0].Data != "abc" {
+		t.Fatalf("got %#v", um)
+	}
+}

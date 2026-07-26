@@ -409,7 +409,8 @@ func loadSessionTranscript(sessions host.Sessions, id string) (cells []cell, too
 func decodeSessionJSONL(data []byte) ([]protocol.Event, error) {
 	var events []protocol.Event
 	sc := bufio.NewScanner(bytes.NewReader(data))
-	sc.Buffer(make([]byte, 0, 64*1024), 4<<20)
+	// Multimodal user.message lines can carry multi-MiB base64 images.
+	sc.Buffer(make([]byte, 0, 64*1024), 32<<20)
 	line := 0
 	for sc.Scan() {
 		raw := bytes.TrimSpace(sc.Bytes())
@@ -596,7 +597,7 @@ func cellsFromEvents(events []protocol.Event) ([]cell, map[string]*toolCell) {
 		switch ev := ev.(type) {
 		case protocol.UserMessage:
 			complete()
-			cells = append(cells, &userCell{text: ev.Text})
+			cells = append(cells, &userCell{text: userMessageDisplayText(ev.Text, ev.Images)})
 		case protocol.TextDelta:
 			if last, ok := lastCell[*assistantCell](cells); ok {
 				last.text += ev.Text

@@ -664,10 +664,7 @@ func TestSlashCommandExecutionAndSkillRenderingRemainIntact(t *testing.T) {
 		m = updated.(Model)
 		runAppCmd(t, cmd)
 		op := receiveAppOp(t, ops)
-		want := protocol.UserInput{Text: "Review: this diff"}
-		if op != want {
-			t.Errorf("operation = %#v, want %#v", op, want)
-		}
+		assertUserInputText(t, op, "Review: this diff")
 	})
 }
 
@@ -831,9 +828,7 @@ func TestOptionalHistoryIsBackwardCompatibleWhenOmitted(t *testing.T) {
 	m = updated.(Model)
 	runAppCmd(t, cmd)
 
-	if got := receiveAppOp(t, ops); got != (protocol.UserInput{Text: "no history configured"}) {
-		t.Errorf("operation = %#v, want ordinary UserInput", got)
-	}
+	assertUserInputText(t, receiveAppOp(t, ops), "no history configured")
 	if m.composer.Value() != "" || m.historyPos != -1 {
 		t.Errorf("submission did not reset composer state: value=%q historyPos=%d", m.composer.Value(), m.historyPos)
 	}
@@ -968,9 +963,7 @@ func TestSubmissionsPersistDisplayPromptAndStillEmitUserInput(t *testing.T) {
 			for _, msg := range runAllAppCmds(t, cmd) {
 				m = updateApp(t, m, msg)
 			}
-			if got := receiveAppOp(t, ops); got != (protocol.UserInput{Text: tt.wantInput}) {
-				t.Errorf("operation = %#v, want UserInput %q", got, tt.wantInput)
-			}
+			assertUserInputText(t, receiveAppOp(t, ops), tt.wantInput)
 			if got := store.Entries(); !slices.Equal(got, []string{tt.wantHistory}) {
 				t.Errorf("history = %q, want exact display prompt %q", got, tt.wantHistory)
 			}
@@ -1005,10 +998,8 @@ func TestRapidSubmissionsEnqueueHistoryInSubmissionOrderBeforeCommandCompletion(
 			t.Errorf("engine send %d returned unexpected message %#v", i, msg)
 		}
 	}
-	for i, want := range []string{"first prompt", "second prompt"} {
-		if got := receiveAppOp(t, ops); got != (protocol.UserInput{Text: want}) {
-			t.Errorf("engine operation %d = %#v, want UserInput %q", i, got, want)
-		}
+	for _, want := range []string{"first prompt", "second prompt"} {
+		assertUserInputText(t, receiveAppOp(t, ops), want)
 	}
 
 	// Await persistence in the opposite order from submission. Acceptance order
@@ -1036,9 +1027,7 @@ func TestHistoryFailureShowsNoticeWithoutSuppressingSubmission(t *testing.T) {
 	for _, msg := range runAllAppCmds(t, cmd) {
 		m = updateApp(t, m, msg)
 	}
-	if got := receiveAppOp(t, ops); got != (protocol.UserInput{Text: "send despite persistence failure"}) {
-		t.Errorf("operation = %#v, want submission despite history failure", got)
-	}
+	assertUserInputText(t, receiveAppOp(t, ops), "send despite persistence failure")
 	if !m.noticeErr || !strings.Contains(m.notice, "saving prompt history failed") {
 		t.Errorf("history failure notice = %q (error=%v)", m.notice, m.noticeErr)
 	}
@@ -1058,9 +1047,7 @@ func TestSubmittingRecalledHistoryResetsBrowsingState(t *testing.T) {
 	for _, msg := range runAllAppCmds(t, cmd) {
 		m = updateApp(t, m, msg)
 	}
-	if got := receiveAppOp(t, ops); got != (protocol.UserInput{Text: "recalled prompt"}) {
-		t.Errorf("operation = %#v, want recalled prompt submission", got)
-	}
+	assertUserInputText(t, receiveAppOp(t, ops), "recalled prompt")
 	if m.historyPos != -1 || m.historyDraft != "" || m.composer.Value() != "" {
 		t.Errorf("recalled submission retained browsing state: pos=%d draft=%q value=%q", m.historyPos, m.historyDraft, m.composer.Value())
 	}
@@ -1255,9 +1242,7 @@ func TestPaletteSkillInsertionUsesOneCommandArgumentSeparatorAcrossThemes(t *tes
 					for _, msg := range runAllAppCmds(t, cmd) {
 						m = updateApp(t, m, msg)
 					}
-					if got := receiveAppOp(t, ops); got != (protocol.UserInput{Text: "executed main.go"}) {
-						t.Errorf("operation = %#v, want rendered skill input", got)
-					}
+					assertUserInputText(t, receiveAppOp(t, ops), "executed main.go")
 					if got := store.Entries(); !slices.Equal(got, []string{"/" + skillName + " main.go"}) {
 						t.Errorf("history = %q, want inserted command", got)
 					}
@@ -1524,6 +1509,20 @@ func assertNoAppOp(t *testing.T, ops <-chan protocol.Op) {
 		t.Fatalf("unexpected engine operation: %#v", op)
 	default:
 	}
+}
+
+// assertUserInputText checks a received op is UserInput with the given text
+// (Images are ignored so text-only cases stay comparable after multimodal).
+func assertUserInputText(t *testing.T, got protocol.Op, wantText string) protocol.UserInput {
+	t.Helper()
+	in, ok := got.(protocol.UserInput)
+	if !ok {
+		t.Fatalf("op = %T %#v, want UserInput", got, got)
+	}
+	if in.Text != wantText {
+		t.Fatalf("UserInput.Text = %q, want %q", in.Text, wantText)
+	}
+	return in
 }
 
 func TestHeaderAgentBadgeGuardsDisplaySafety(t *testing.T) {

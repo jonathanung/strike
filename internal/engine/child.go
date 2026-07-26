@@ -341,7 +341,7 @@ func (e *Engine) flushPendingChildNotices(ctx context.Context) {
 	}
 	text := strings.Join(e.pendingChildNotices, "\n\n")
 	e.pendingChildNotices = nil
-	e.startTurn(ctx, text)
+	e.startTurn(ctx, text, nil)
 }
 
 func formatChildCompletedNotice(c protocol.ChildCompleted) string {
