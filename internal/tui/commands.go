@@ -35,6 +35,7 @@ const (
 	commandIssues          commandID = "issues"
 	commandContext         commandID = "context"
 	commandEffectivePrompt commandID = "effective-prompt"
+	commandCost            commandID = "cost"
 	commandUpgrade         commandID = "upgrade"
 )
 
@@ -76,8 +77,9 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandKeys, Name: "/keys", Description: "show keyboard shortcuts", ArgsHint: "[reset]", Source: commandSourceBuiltin},
 	{ID: commandMemory, Name: "/memory", Description: "list, get, set, delete, export, or import project memory", ArgsHint: "[list|get|set|rm|export|import] ...", Source: commandSourceBuiltin},
 	{ID: commandIssues, Name: "/issues", Description: "list, add, get, close, export, or import project issues", ArgsHint: "[list|add|get|close|export|import] ...", Source: commandSourceBuiltin},
-	{ID: commandContext, Name: "/context", Description: "inspect effective system-prompt layers", Source: commandSourceBuiltin},
-	{ID: commandEffectivePrompt, Name: "/effective-prompt", Description: "inspect effective system-prompt layers", Source: commandSourceBuiltin},
+	{ID: commandContext, Name: "/context", Description: "context doctor: system-prompt layer breakdown", Source: commandSourceBuiltin},
+	{ID: commandEffectivePrompt, Name: "/effective-prompt", Description: "context doctor: system-prompt layer breakdown", Source: commandSourceBuiltin},
+	{ID: commandCost, Name: "/cost", Description: "session token and cost totals", Source: commandSourceBuiltin},
 	{ID: commandUpgrade, Name: "/upgrade", Description: "install the latest release and restart", Source: commandSourceBuiltin},
 }
 
@@ -154,6 +156,7 @@ var reservedCommandNames = map[string]struct{}{
 	"issues":           {},
 	"context":          {},
 	"effective-prompt": {},
+	"cost":             {},
 	"upgrade":          {},
 }
 

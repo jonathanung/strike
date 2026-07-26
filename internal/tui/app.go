@@ -129,14 +129,18 @@ type Options struct {
 // firstRunSetupMsg opens the provider picker once on a fresh install.
 type firstRunSetupMsg struct{}
 
-// contextLimitsMsg delivers catalog context-window and output-limit lookups
-// for a provider/model pair. Applied only when that pair is still selected.
+// contextLimitsMsg delivers catalog context-window, output-limit, and optional
+// pricing lookups for a provider/model pair. Applied only when that pair is
+// still selected.
 type contextLimitsMsg struct {
 	provider, model string
 	contextTokens   int
 	contextOK       bool
 	outputTokens    int
 	outputOK        bool
+	inputCost       float64
+	outputCost      float64
+	hasCost         bool
 }
 
 // Model is the root Bubble Tea model. It holds its host services, the
@@ -240,12 +244,18 @@ type Model struct {
 	vimMode VimMode
 	// usage* hold the latest UsageReported figures; Known=false means unknown
 	// (never treat as measured zero). Limits come from the host catalog.
-	usageInput, usageOutput, usageUsed protocol.TokenCount
-	usageSource                        string
-	contextLimit                       int
-	contextLimitKnown                  bool
-	outputLimit                        int
-	outputLimitKnown                   bool
+	// usageSession accumulates session totals for /cost (including resume).
+	usageInput, usageOutput, usageCacheRead, usageCacheCreation, usageUsed protocol.TokenCount
+	usageSource                                                            string
+	usageSession                                                           usageTotals
+	modelInputCost, modelOutputCost                                        float64
+	modelHasCost                                                           bool
+	contextLimit                                                           int
+	contextLimitKnown                                                      bool
+	outputLimit                                                            int
+	outputLimitKnown                                                       bool
+	// pendingContextDoctor opens the doctor modal on the next EffectivePrompt.
+	pendingContextDoctor bool
 
 	// firstRun drives the empty-transcript onboarding card and auto provider modal.
 	firstRun, firstRunModalOpened bool
@@ -489,6 +499,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.contextLimitKnown = msg.contextOK
 		m.outputLimit = msg.outputTokens
 		m.outputLimitKnown = msg.outputOK
+		m.modelInputCost = msg.inputCost
+		m.modelOutputCost = msg.outputCost
+		m.modelHasCost = msg.hasCost
 		return m, m.broadcastContextState()
 
 	case spinner.TickMsg:
@@ -1521,13 +1534,16 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		label := strings.Join(ev.Paths, ", ")
 		m.setNotice("files changed — agent will re-read: "+label, false)
 	case protocol.UsageReported:
-		m.usageInput = ev.Input
-		m.usageOutput = ev.Output
-		m.usageUsed = ev.Used
-		m.usageSource = ev.Source
+		m.recordUsage(ev)
 		cmd = m.broadcastContextState()
 	case protocol.EffectivePrompt:
-		m.cells = append(m.cells, &infoCell{text: formatEffectivePrompt(ev)})
+		if m.pendingContextDoctor {
+			m.pendingContextDoctor = false
+			m.modal = newDoctorModal(ev, m.contextLimit, m.contextLimitKnown)
+			m.reflow()
+		} else {
+			m.cells = append(m.cells, &infoCell{text: formatEffectivePrompt(ev)})
+		}
 	case protocol.CompactionCompleted:
 		strategy := ev.Strategy
 		if strategy == "" {
@@ -1757,21 +1773,38 @@ func formatEffectivePrompt(ev protocol.EffectivePrompt) string {
 	return b.String()
 }
 
-// clearUsage drops prior token figures and catalog limits so a model switch
-// never shows stale occupancy against a new window size.
+// clearUsage drops last-request token figures and catalog limits so a model
+// switch never shows stale occupancy against a new window size. Session totals
+// for /cost are kept — they span the whole session log.
 func (m *Model) clearUsage() {
 	m.usageInput = protocol.TokenCount{}
 	m.usageOutput = protocol.TokenCount{}
+	m.usageCacheRead = protocol.TokenCount{}
+	m.usageCacheCreation = protocol.TokenCount{}
 	m.usageUsed = protocol.TokenCount{}
 	m.usageSource = ""
+	m.modelInputCost = 0
+	m.modelOutputCost = 0
+	m.modelHasCost = false
 	m.contextLimit = 0
 	m.contextLimitKnown = false
 	m.outputLimit = 0
 	m.outputLimitKnown = false
 }
 
-// fetchContextLimitsCmd looks up context window and output limit for the
-// current provider/model via the host catalog (may hit network/cache).
+// recordUsage updates last-request figures and session totals.
+func (m *Model) recordUsage(ev protocol.UsageReported) {
+	m.usageInput = ev.Input
+	m.usageOutput = ev.Output
+	m.usageCacheRead = ev.CacheRead
+	m.usageCacheCreation = ev.CacheCreation
+	m.usageUsed = ev.Used
+	m.usageSource = ev.Source
+	m.usageSession.add(ev)
+}
+
+// fetchContextLimitsCmd looks up context window, output limit, and pricing for
+// the current provider/model via the host catalog (may hit network/cache).
 func (m Model) fetchContextLimitsCmd() tea.Cmd {
 	catalog := m.services.Catalog
 	provider, model := m.providerName, m.modelName
@@ -1782,7 +1815,7 @@ func (m Model) fetchContextLimitsCmd() tea.Cmd {
 		ctx := context.Background()
 		ct, cok, _ := catalog.ContextWindow(ctx, provider, model)
 		ot, ook, _ := catalog.OutputLimit(ctx, provider, model)
-		return contextLimitsMsg{
+		msg := contextLimitsMsg{
 			provider:      provider,
 			model:         model,
 			contextTokens: ct,
@@ -1790,6 +1823,17 @@ func (m Model) fetchContextLimitsCmd() tea.Cmd {
 			outputTokens:  ot,
 			outputOK:      ook,
 		}
+		if infos, err := catalog.Models(ctx, provider); err == nil {
+			for _, info := range infos {
+				if info.ID == model {
+					msg.inputCost = info.InputCost
+					msg.outputCost = info.OutputCost
+					msg.hasCost = info.HasCost
+					break
+				}
+			}
+		}
+		return msg
 	}
 }
 
@@ -2024,11 +2068,25 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 	case "/context", "/effective-prompt":
 		m.resetComposer()
 		m.clearNotice()
+		m.pendingContextDoctor = true
 		ops := m.ops
 		return m, func() tea.Msg {
 			ops <- protocol.InspectEffectivePrompt{}
 			return nil
 		}
+	case "/cost":
+		m.resetComposer()
+		m.clearNotice()
+		m.modal = newCostModal(
+			m.usageSession,
+			m.usageInput, m.usageOutput, m.usageCacheRead, m.usageCacheCreation, m.usageUsed,
+			m.usageSource,
+			m.providerName, m.modelName,
+			m.modelInputCost, m.modelOutputCost, m.modelHasCost,
+			m.contextLimit, m.contextLimitKnown,
+		)
+		m.reflow()
+		return m, nil
 	case "/upgrade":
 		m.resetComposer()
 		m.clearNotice()

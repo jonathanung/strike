@@ -223,7 +223,7 @@ Two different mechanisms, depending on whether it needs Go code:
    `autonomy`, `auth`, `settings`, `agent`, `fast`, `vim`, `md-read`,
    `theme`, `layout`, `split`, `compact`, `fork`, `undo`, `rewind`,
    `session`, `help`, `keys`, `memory`, `issues`, `context`,
-   `effective-prompt`, `upgrade`) are rejected by
+   `effective-prompt`, `cost`, `upgrade`) are rejected by
    `config.ValidateSkillName` before
    they ever reach the frontend. PR URLs from successful `gh pr` bash
    output are stored via `protocol.SessionMeta` and `session` sidecar

@@ -70,6 +70,7 @@ var reservedSkillNames = map[string]struct{}{
 	"session":          {},
 	"context":          {},
 	"effective-prompt": {},
+	"cost":             {},
 	"upgrade":          {},
 }
 
