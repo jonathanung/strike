@@ -488,9 +488,11 @@ func (m *Model) applyAuthMsg(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 
 	case authDoneMsg:
+		var promote tea.Cmd
 		if wm, ok := m.modal.(*authWaitModal); ok && wm.provider == msg.provider {
 			wm.cancel()
 			m.modal = nil
+			promote = m.afterModalClosed()
 		}
 		switch {
 		case errors.Is(msg.err, context.Canceled):
@@ -501,14 +503,14 @@ func (m *Model) applyAuthMsg(msg tea.Msg) (tea.Cmd, bool) {
 			m.setNotice(msg.message, false)
 			if msg.selectAfter {
 				ops, name := m.ops, msg.provider
-				return func() tea.Msg {
+				return tea.Batch(promote, func() tea.Msg {
 					ops <- protocol.SelectModel{Provider: name}
 					return nil
-				}, true
+				}), true
 			}
 			m.setNotice(msg.message+" — /provider "+msg.provider+" to use it", false)
 		}
-		return nil, true
+		return promote, true
 	}
 	return nil, false
 }

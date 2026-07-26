@@ -468,14 +468,17 @@ func (m Model) openComposerExternalEditor() (tea.Model, tea.Cmd) {
 
 func (m Model) applyTerminalExit(msg terminalExitMsg) (tea.Model, tea.Cmd) {
 	// Clear overlay or idle the pane window.
+	var promote tea.Cmd
 	if _, ok := m.modal.(*terminalModal); ok {
 		m.modal = nil
+		promote = m.afterModalClosed()
 	}
 	if tw, _, ok := findTerminalWindow(m.windows); ok {
 		m.windows = replaceTerminalWindow(m.windows, tw.markIdle(), false)
 	}
 	m.reflow()
-	return m.finishEditorSession(msg.path, msg.display, msg.before, msg.hadPath, msg.err)
+	next, cmd := m.finishEditorSession(msg.path, msg.display, msg.before, msg.hadPath, msg.err)
+	return next, tea.Batch(promote, cmd)
 }
 
 func (m Model) finishEditorSession(path, display string, before fileMeta, hadPath bool, runErr error) (tea.Model, tea.Cmd) {

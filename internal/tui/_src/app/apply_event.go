@@ -108,27 +108,35 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		}
 	case protocol.PermissionAsked:
 		pm := newPermissionModal(ev, m.ops, m.th)
-		m.modal = pm
+		showCmd := m.presentBlockingModal(pm)
+		m.refreshAwaitingPermission()
 		cmd = m.broadcastContextState()
-		if auto := m.armPermissionAutoApprove(pm, ev.Permission); auto != nil {
-			cmd = tea.Batch(cmd, auto)
+		if showCmd != nil {
+			cmd = tea.Batch(cmd, showCmd)
 		}
 		// Static message only — never include paths, args, or secrets.
 		cmd = tea.Batch(cmd, m.desktopNotifyCmd("strike: permission required", true))
 	case protocol.PermissionResolved:
-		if modal, ok := m.modal.(*permissionModal); ok && modal.req.RequestID == ev.RequestID {
-			m.modal = nil
+		if promote := m.resolveBlockingRequest(ev.RequestID); promote != nil {
+			cmd = promote
 		}
-		cmd = m.broadcastContextState()
+		m.refreshAwaitingPermission()
+		cmd = tea.Batch(cmd, m.broadcastContextState())
 	case protocol.QuestionAsked:
-		m.modal = newQuestionModal(ev, m.ops, m.th)
+		qm := newQuestionModal(ev, m.ops, m.th)
+		showCmd := m.presentBlockingModal(qm)
+		m.refreshAwaitingPermission()
 		cmd = m.broadcastContextState()
+		if showCmd != nil {
+			cmd = tea.Batch(cmd, showCmd)
+		}
 		cmd = tea.Batch(cmd, m.desktopNotifyCmd("strike: question required", true))
 	case protocol.QuestionResolved:
-		if modal, ok := m.modal.(*questionModal); ok && modal.req.RequestID == ev.RequestID {
-			m.modal = nil
+		if promote := m.resolveBlockingRequest(ev.RequestID); promote != nil {
+			cmd = promote
 		}
-		cmd = m.broadcastContextState()
+		m.refreshAwaitingPermission()
+		cmd = tea.Batch(cmd, m.broadcastContextState())
 	case protocol.TurnCompleted:
 		m.completeAssistantCells()
 		if exp, ok := lastCell[*exploreCell](m.cells); ok {

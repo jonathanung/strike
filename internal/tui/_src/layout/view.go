@@ -91,6 +91,10 @@ func (m Model) headerView(width int) string {
 		// Warning tone: armed auto-allow is a cost/safety-visible preference.
 		badges += inlineGap + ui.Badge(th, ui.ToneWarning, "auto-allow"+inlineGap+itoa(m.permissionAutoApproveSeconds)+"s")
 	}
+	if label := m.pendingBlockingLabel(); label != "" {
+		// Queued permission/question asks while a user modal is open.
+		badges += inlineGap + ui.Badge(th, ui.ToneWarning, label)
+	}
 	if m.fastEnabled {
 		// Warning tone: priority tier is a cost-visible session preference.
 		badges += inlineGap + ui.Badge(th, ui.ToneWarning, "fast")

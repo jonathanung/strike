@@ -472,7 +472,7 @@ func seedFromReplay(m *Model, events []protocol.Event) {
 	m.awaitingPermission = false
 	m.turnStartedAt = time.Time{}
 	m.toolCallsThisTurn = 0
-	m.modal = nil
+	m.clearModalStack()
 	m.children = childrenFromEvents(events)
 	for _, ev := range events {
 		if corr, ok := eventCorrelation(ev); ok && (corr.ParentSessionID != "" || corr.Depth > 0) {

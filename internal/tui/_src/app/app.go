@@ -172,7 +172,10 @@ type Model struct {
 	textSel textSel
 	// copyFlashGen invalidates in-flight clearCellCopiedFlashMsg timers.
 	copyFlashGen int
-	modal        modal
+	// modal is the visible top overlay. modalQueue holds blocking asks that
+	// arrived while a user modal was open (or behind a higher-priority peer).
+	modal      modal
+	modalQueue []modal
 
 	viewport viewport.Model
 	composer textarea.Model
@@ -495,7 +498,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Prefer in-process multi-root open when the host supports it.
 		if m.services.Roots != nil {
 			cmd := m.openRootInProcess(id)
-			m.modal = nil
+			// openRootInProcess stashes/restores per-root overlay state.
 			m.reflow()
 			return m, cmd
 		}
@@ -504,7 +507,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.pendingResume = id
-		m.modal = nil
+		m.clearModalStack()
 		return m, tea.Quit
 
 	case engineEventMsg:
@@ -522,10 +525,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case permissionCountdownMsg:
 		pm, ok := m.modal.(*permissionModal)
 		if !ok {
+			// Hidden/queued asks must not auto-approve from stale ticks.
 			return m, nil
 		}
 		var cmd tea.Cmd
 		m.modal, cmd = pm.onCountdown(msg)
+		if m.modal == nil {
+			cmd = tea.Batch(cmd, m.afterModalClosed())
+			m.refreshAwaitingPermission()
+		}
 		m.reflow()
 		return m, cmd
 
@@ -569,10 +577,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if sm, ok := m.modal.(*settingsModal); ok {
 				sm.reload()
 			}
-		} else {
-			m.modal = nil
+			return m, nil
 		}
-		return m, nil
+		m.modal = nil
+		return m, m.afterModalClosed()
 	case customProviderRemovedMsg:
 		if msg.err != nil {
 			m.setNotice("remove failed: "+msg.err.Error(), true)
@@ -729,7 +737,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.Action.Kind {
 		case paletteActionBuiltin:
 			next, cmd := m.handleCommand(msg.Action.Value)
-			return next.(Model).paletteResultFocus(priorNotice, priorNoticeErr, cmd)
+			nm := next.(Model)
+			// Promote queued asks only when the command did not open another modal.
+			if nm.modal == nil {
+				if promote := nm.afterModalClosed(); promote != nil {
+					cmd = tea.Batch(cmd, promote)
+				}
+			}
+			return nm.paletteResultFocus(priorNotice, priorNoticeErr, cmd)
 		case paletteActionAgent:
 			m.resetComposer()
 			ops, name := m.ops, msg.Action.Value
