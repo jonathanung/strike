@@ -27,15 +27,24 @@ session defaults.
 | `ctrl+up` / `ctrl+down` | scroll transcript |
 | `ctrl+t` | jump to latest output |
 | `ctrl+h` / `ctrl+l` | focus left / right pane (horizontal split) |
-| `ctrl+j` / `ctrl+k` | cycle right-pane window next / previous (enhanced `ctrl+j` is distinct from bare LF newline) |
+| `ctrl+j` / `ctrl+k` | cycle right-pane focus next / previous within the active stack group, then to the next group (enhanced `ctrl+j` is distinct from bare LF newline) |
 | `ctrl+;` | toggle split orientation (`/layout`, `/split`) |
 
 In a vertical split, focus and cycle chords swap: focus is `ctrl+j`/`ctrl+k`,
 cycle is `ctrl+h`/`ctrl+l`.
 
-Right-pane windows (cycle with the chords above): `context`, `activity`,
-`agents`, `visualizer`, `files`, `memory`, `issues`, `markdown`, `editor`.
-See [usage.md](usage.md).
+Right-pane **stack groups** (related panes shown together when space allows):
+
+| Group | Panes (split) |
+|---|---|
+| Session | `context` + `activity` |
+| Agents | `agents` + `visualizer` |
+| Project | `memory` + `issues` |
+| Singles | `files`, `markdown`, `editor` (full height each) |
+
+Focus cycle order is deterministic: top→bottom (or left→right in a bottom-bar
+split) inside the group, then the next group. Narrow/compact terminals collapse
+to a single pane and cycle the same order one at a time. See [usage.md](usage.md).
 
 ## Permission prompts
 

@@ -345,12 +345,58 @@ func composerFooter(th theme.Theme, keys keyMap, width int, queueEdit bool) stri
 	return dotJoin(th, parts...)
 }
 
-// rightPaneView frames the active window. Context and activity bodies are
-// Model-driven; other windows render their own content. The app owns the
-// shared pane chrome and focus state.
+// rightPaneView frames the active window, or a stacked group of related panes
+// when space allows. Context and activity bodies are Model-driven; other
+// windows render their own content. The app owns shared chrome and focus.
 func (m Model) rightPaneView(width, height int, compact bool) string {
+	if width <= 0 || height <= 0 {
+		return ""
+	}
+	g := m.windows.activeGroup()
+	pairHorizontal := m.splitOrientation == orientVertical
+	stackGutter := m.th.Resolve().Spacing.XS
+	slots := computeMemberSlots(width, height, stackGutter, len(g.members), pairHorizontal)
+	if compact || len(slots) == 0 || len(g.members) < 2 {
+		return m.rightPaneSingle(width, height, compact, m.windows.active())
+	}
+	parts := make([]string, 0, len(g.members)*2-1)
+	activeIdx := 0
+	if len(m.windows.windows) > 0 {
+		activeIdx = m.windows.index % len(m.windows.windows)
+	}
+	for i, wi := range g.members {
+		if i > 0 {
+			if pairHorizontal {
+				parts = append(parts, paneGutter(m.th, stackGutter, height))
+			} else {
+				parts = append(parts, paneGutter(m.th, width, stackGutter))
+			}
+		}
+		var w window
+		if wi >= 0 && wi < len(m.windows.windows) {
+			w = m.windows.windows[wi]
+		}
+		slot := slots[i]
+		focused := m.focus == focusRight && m.modal == nil && wi == activeIdx
+		dim := !focused
+		parts = append(parts, m.rightPaneSingle(slot.width, slot.height, compact, w, focused, dim))
+	}
+	if pairHorizontal {
+		return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+}
+
+// rightPaneSingle frames one window. optionalFocus overrides (focused, dim);
+// when omitted, focus follows the right pane aggregate.
+func (m Model) rightPaneSingle(width, height int, compact bool, active window, focusOverride ...bool) string {
 	var title, body string
-	if active := m.windows.active(); active != nil {
+	focused := m.focus == focusRight && m.modal == nil
+	dim := m.focus == focusLeft || m.modal != nil
+	if len(focusOverride) >= 2 {
+		focused, dim = focusOverride[0], focusOverride[1]
+	}
+	if active != nil {
 		title = active.title()
 		innerW, innerH := width, height
 		if nw, ok := active.(namedWindow); ok {
@@ -371,6 +417,7 @@ func (m Model) rightPaneView(width, height int, compact bool) string {
 		if compact {
 			innerW, innerH = width, height
 		}
+		// Prefer dimensions last applied by resize so stacked members match slots.
 		switch active.id() {
 		case "context":
 			body = m.contextPaneBody(max(0, innerW), max(0, innerH))
@@ -385,8 +432,8 @@ func (m Model) rightPaneView(width, height int, compact bool) string {
 		Width:      max(0, width),
 		Height:     max(0, height),
 		Borderless: compact,
-		Focused:    m.focus == focusRight && m.modal == nil,
-		Dim:        m.focus == focusLeft || m.modal != nil,
+		Focused:    focused,
+		Dim:        dim,
 	}, body)
 }
 
