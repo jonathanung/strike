@@ -142,6 +142,8 @@ type contextLimitsMsg struct {
 	contextOK       bool
 	outputTokens    int
 	outputOK        bool
+	attachment      bool
+	attachmentOK    bool
 	inputCost       float64
 	outputCost      float64
 	hasCost         bool
@@ -184,6 +186,9 @@ type Model struct {
 	// pendingPastes holds full text for collapsed large-paste chips in the
 	// composer. Expanded on send; pruned when the chip leaves the value.
 	pendingPastes []pasteChip
+	// pendingImages holds image attachments for [image N] chips in the
+	// composer. Sent as multimodal UserInput; pruned when the chip leaves.
+	pendingImages []imageChip
 	completion    *completionState
 	keyMap        keyMap
 	// keyOverrides are config keybind remaps (id → chords); used to rebuild
@@ -258,6 +263,9 @@ type Model struct {
 	contextLimitKnown                                                      bool
 	outputLimit                                                            int
 	outputLimitKnown                                                       bool
+	// modelAttachment caches catalog multimodal support for the selection.
+	modelAttachment      bool
+	modelAttachmentKnown bool
 	// pendingContextDoctor opens the doctor modal on the next EffectivePrompt.
 	pendingContextDoctor bool
 
@@ -529,6 +537,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.contextLimitKnown = msg.contextOK
 		m.outputLimit = msg.outputTokens
 		m.outputLimitKnown = msg.outputOK
+		m.modelAttachment = msg.attachment
+		m.modelAttachmentKnown = msg.attachmentOK
 		m.modelInputCost = msg.inputCost
 		m.modelOutputCost = msg.outputCost
 		m.modelHasCost = msg.hasCost
@@ -904,7 +914,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		// Bracketed paste: collapse large multi-line blobs to a chip.
+		// Bracketed paste: images → chip; large multi-line text → chip.
 		if msg.Paste {
 			m.handleComposerPaste(string(msg.Runes))
 			m.recomputeCompletion()
@@ -925,20 +935,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keyMap.Send):
 			// Expand paste chips before send so the model sees full content.
 			text := strings.TrimSpace(m.composerTextExpanded())
-			if text == "" {
+			images := pendingImageAttachments(m.pendingImages)
+			if text == "" && len(images) == 0 {
 				// Empty enter is tool expand / open-at-line (handleToolCellKeys).
 				return m, nil
 			}
-			if strings.HasPrefix(text, "/") {
+			if text != "" && strings.HasPrefix(text, "/") && len(images) == 0 {
 				return m.handleCommand(text)
 			}
 			if m.providerName == "" {
 				m.setNeedsModelNotice("No model selected — use /provider <anthropic|openai|xai|echo> [model]", true)
 				return m, nil // keep the typed prompt in the composer
 			}
+			if len(images) > 0 {
+				if ok, known := m.modelSupportsImages(); known && !ok {
+					m.setNotice(imageUnsupportedMsg, true)
+					return m, nil // keep text + chips
+				}
+			}
 			// @file mentions: history/display keep tokens; model text gets contents.
 			modelText, notices := expandFileMentions(text, m.services.Files)
-			next, cmd := m.submit(protocol.UserInput{Text: modelText}, text)
+			display := displayPromptWithImages(text, m.pendingImages)
+			next, cmd := m.submit(protocol.UserInput{Text: modelText, Images: images}, display)
 			if len(notices) > 0 {
 				mm := next.(Model)
 				mm.setNotice(strings.Join(notices, "; "), false)
@@ -1022,6 +1040,7 @@ func (m Model) updateComposer(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if m.composer.Value() != before {
 		m.pendingPastes = prunePendingPastes(m.composer.Value(), m.pendingPastes)
+		m.pendingImages = prunePendingImages(m.composer.Value(), m.pendingImages)
 	}
 	m.recomputeCompletion()
 	m.reflow()
@@ -1215,6 +1234,7 @@ func (m *Model) setComposerValueAt(value string, offset int) {
 	// History/completion replacements are plain text; drop chips that no
 	// longer appear (or clear all when the value is wholly replaced).
 	m.pendingPastes = prunePendingPastes(value, m.pendingPastes)
+	m.pendingImages = prunePendingImages(value, m.pendingImages)
 	for steps := 0; m.composer.Line() > targetRow && steps <= len(runes)+1; steps++ {
 		m.composer.CursorUp()
 	}
@@ -1224,6 +1244,7 @@ func (m *Model) setComposerValueAt(value string, offset int) {
 func (m *Model) resetComposer() {
 	m.composer.Reset()
 	m.pendingPastes = nil
+	m.pendingImages = nil
 	m.completion = nil
 	m.resetHistoryBrowsing()
 	m.reflow()
@@ -1430,7 +1451,7 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 	switch ev := ev.(type) {
 	case protocol.UserMessage:
 		m.completeAssistantCells()
-		m.cells = append(m.cells, &userCell{text: ev.Text})
+		m.cells = append(m.cells, &userCell{text: userMessageDisplayText(ev.Text, ev.Images)})
 		// Fallback for logs without session.titled (pre-auto-title sessions).
 		if m.titleTopic == "" {
 			if topic := sanitizeTitleTopic(ev.Text); topic != "" {
@@ -1823,6 +1844,8 @@ func (m *Model) clearUsage() {
 	m.contextLimitKnown = false
 	m.outputLimit = 0
 	m.outputLimitKnown = false
+	m.modelAttachment = false
+	m.modelAttachmentKnown = false
 }
 
 // recordUsage updates last-request figures and session totals.
@@ -1859,6 +1882,8 @@ func (m Model) fetchContextLimitsCmd() tea.Cmd {
 		if infos, err := catalog.Models(ctx, provider); err == nil {
 			for _, info := range infos {
 				if info.ID == model {
+					msg.attachment = info.Attachment
+					msg.attachmentOK = true
 					msg.inputCost = info.InputCost
 					msg.outputCost = info.OutputCost
 					msg.hasCost = info.HasCost
