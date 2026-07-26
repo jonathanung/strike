@@ -10,6 +10,7 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -57,6 +58,10 @@ type Config struct {
 	// MaxChildDepth bounds nested task tool spawns (root depth 0). Zero means
 	// engine default (1: children cannot spawn further tasks).
 	MaxChildDepth int `json:"maxChildDepth,omitempty"`
+	// Keybinds remaps app-level binding ids to key sequence(s). Ids match the
+	// TUI keybind catalog (e.g. "nav.jump-bottom"). Merged last-wins per id
+	// across global then project layers. Unknown ids fail Load.
+	Keybinds map[string]KeybindChords `json:"keybinds,omitempty"`
 }
 
 // Hook is one lifecycle hook entry. Exactly one of Action or Command should
@@ -243,6 +248,10 @@ func read(path string) (Config, error) {
 	c.PermissionAutoApproveExclude = normalizePermissionAutoApproveExclude(c.PermissionAutoApproveExclude)
 	c.CompactionStrategy = NormalizeCompactionStrategy(c.CompactionStrategy)
 	c.CompactionModel = strings.TrimSpace(c.CompactionModel)
+	// Keybinds: unknown ids / invalid chords fail the layer (and thus Load).
+	if err := ValidateKeybinds(c.Keybinds); err != nil {
+		return Config{}, fmt.Errorf("%s: %w", path, err)
+	}
 	return c, nil
 }
 
@@ -347,5 +356,6 @@ func merge(base, layer Config) Config {
 	base.Permissions = append(base.Permissions, layer.Permissions...)
 	base.Hooks = append(base.Hooks, layer.Hooks...)
 	base.Providers = mergeProviders(base.Providers, layer.Providers)
+	base.Keybinds = MergeKeybinds(base.Keybinds, layer.Keybinds)
 	return base
 }

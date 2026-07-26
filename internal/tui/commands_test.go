@@ -41,7 +41,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/undo":             {"drop the last completed user/assistant turn", "", commandSourceBuiltin},
 		"/session":          {"browse and resume a past session", "[id]", commandSourceBuiltin},
 		"/help":             {"show available commands", "", commandSourceBuiltin},
-		"/keys":             {"show keyboard shortcuts", "", commandSourceBuiltin},
+		"/keys":             {"show keyboard shortcuts", "[reset]", commandSourceBuiltin},
 		"/memory":           {"list, get, set, delete, export, or import project memory", "[list|get|set|rm|export|import] ...", commandSourceBuiltin},
 		"/issues":           {"list, add, get, close, export, or import project issues", "[list|add|get|close|export|import] ...", commandSourceBuiltin},
 		"/context":          {"inspect effective system-prompt layers", "", commandSourceBuiltin},

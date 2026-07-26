@@ -1,6 +1,10 @@
 package tui
 
-import "github.com/charmbracelet/bubbles/key"
+import (
+	"strings"
+
+	"github.com/charmbracelet/bubbles/key"
+)
 
 // keyMap collects the app-level bindings so routing remains independent of
 // Bubble Tea's rendered key strings.
@@ -115,20 +119,116 @@ func defaultKeyMap() keyMap {
 	}
 }
 
-// applyOrientationKeys swaps focus vs cycle chords for vertical splits:
-// horizontal uses ctrl+h/l focus and ctrl+j/k cycle; vertical swaps those pairs.
+// applyOrientationKeys swaps focus vs cycle chords for vertical splits.
+// Caller must start from a horizontal baseline (defaultKeyMap + overrides);
+// horizontal is a no-op. Vertical swaps the pairs and updates help text.
 func (k *keyMap) applyOrientationKeys(orient splitOrientation) {
-	if orient == orientVertical {
-		k.FocusLeft = key.NewBinding(key.WithKeys("ctrl+j"), key.WithHelp("ctrl+j", "focus top"))
-		k.FocusRight = key.NewBinding(key.WithKeys("ctrl+k"), key.WithHelp("ctrl+k", "focus bottom"))
-		k.CycleWindowNext = key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("ctrl+l", "next window"))
-		k.CycleWindowPrev = key.NewBinding(key.WithKeys("ctrl+h"), key.WithHelp("ctrl+h", "prev window"))
+	if orient != orientVertical {
 		return
 	}
-	k.FocusLeft = key.NewBinding(key.WithKeys("ctrl+h"), key.WithHelp("ctrl+h", "focus left"))
-	k.FocusRight = key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("ctrl+l", "focus right"))
-	k.CycleWindowNext = key.NewBinding(key.WithKeys("ctrl+j"), key.WithHelp("ctrl+j", "next window"))
-	k.CycleWindowPrev = key.NewBinding(key.WithKeys("ctrl+k"), key.WithHelp("ctrl+k", "prev window"))
+	fl, fr := k.FocusLeft, k.FocusRight
+	cn, cp := k.CycleWindowNext, k.CycleWindowPrev
+	k.FocusLeft = rebindFrom(cn, "focus top")
+	k.FocusRight = rebindFrom(cp, "focus bottom")
+	k.CycleWindowNext = rebindFrom(fr, "next window")
+	k.CycleWindowPrev = rebindFrom(fl, "prev window")
+}
+
+func rebindFrom(src key.Binding, desc string) key.Binding {
+	keys := src.Keys()
+	if len(keys) == 0 {
+		return key.NewBinding(key.WithHelp("", desc))
+	}
+	return key.NewBinding(key.WithKeys(keys...), key.WithHelp(joinChordHelp(keys), desc))
+}
+
+func joinChordHelp(keys []string) string {
+	if len(keys) == 0 {
+		return ""
+	}
+	return strings.Join(keys, "/")
+}
+
+// applyKeybindOverrides replaces binding keys (and help key text) for known ids.
+// Unknown ids are ignored (config validation rejects them at load).
+// Curated help labels (shift+enter, ctrl+;, leader chords) stay only when the
+// override matches the stock key list for that binding.
+func applyKeybindOverrides(k *keyMap, overrides map[string][]string) {
+	if len(overrides) == 0 || k == nil {
+		return
+	}
+	set := func(b *key.Binding, id string, curatedHelp string) {
+		chords, ok := overrides[id]
+		if !ok || len(chords) == 0 {
+			return
+		}
+		desc := b.Help().Desc
+		helpKey := joinChordHelp(chords)
+		if curatedHelp != "" && sameKeys(chords, b.Keys()) {
+			helpKey = curatedHelp
+		}
+		*b = key.NewBinding(key.WithKeys(chords...), key.WithHelp(helpKey, desc))
+	}
+	set(&k.FocusLeft, "nav.focus-left", "")
+	set(&k.FocusRight, "nav.focus-right", "")
+	set(&k.CycleWindowNext, "nav.window-next", "")
+	set(&k.CycleWindowPrev, "nav.window-prev", "")
+	set(&k.ScrollUp, "nav.scroll-up", "")
+	set(&k.ScrollDown, "nav.scroll-down", "")
+	set(&k.JumpBottom, "nav.jump-bottom", "")
+	set(&k.ToggleOrientation, "nav.toggle-orient", "ctrl+;")
+	set(&k.ToolPrev, "nav.tool-prev", "")
+	set(&k.ToolNext, "nav.tool-next", "")
+	set(&k.ToolExpand, "nav.tool-expand", "")
+	set(&k.ToolCopy, "nav.tool-copy", "")
+	set(&k.ToolReview, "nav.tool-review", "")
+	set(&k.Leader, "nav.leader", "")
+	set(&k.SessionChildFirst, "nav.session-child", "ctrl+x down")
+	set(&k.SessionParent, "nav.session-parent", "ctrl+x up")
+	set(&k.SessionChildNext, "nav.session-next", "ctrl+x right")
+	set(&k.SessionChildPrev, "nav.session-prev", "ctrl+x left")
+	set(&k.Palette, "global.palette", "")
+	set(&k.KeyHelp, "global.keyhelp", "")
+	set(&k.Interrupt, "global.interrupt", "")
+	set(&k.Quit, "global.quit", "")
+	set(&k.SaveDefaults, "global.save-defaults", "")
+	set(&k.TerminalLeave, "editor.leave", "")
+	set(&k.Send, "composer.send", "")
+	set(&k.Newline, "composer.newline", "shift+enter")
+	set(&k.ExternalEditor, "composer.external-editor", "")
+	set(&k.HistoryPrev, "composer.history-prev", "")
+	set(&k.HistoryNext, "composer.history-next", "")
+	set(&k.Agent, "composer.agent", "")
+	set(&k.KillWord, "composer.kill-word", "")
+	set(&k.WordBackward, "composer.word-back", "")
+	set(&k.WordForward, "composer.word-fwd", "")
+	set(&k.KillLineStart, "composer.kill-line-start", "")
+	set(&k.KillLineEnd, "composer.kill-line-end", "")
+	set(&k.Yank, "composer.yank", "")
+	set(&k.CompletionPrev, "completion.prev", "")
+	set(&k.CompletionNext, "completion.next", "")
+	set(&k.CompletionAccept, "completion.accept", "")
+	set(&k.CompletionDismiss, "completion.dismiss", "")
+}
+
+func sameKeys(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// buildKeyMap returns defaults with config overrides applied, then orientation.
+func buildKeyMap(overrides map[string][]string, orient splitOrientation) keyMap {
+	km := defaultKeyMap()
+	applyKeybindOverrides(&km, overrides)
+	km.applyOrientationKeys(orient)
+	return km
 }
 
 // keybindEntry is one row in the filterable keybind cheatsheet.
