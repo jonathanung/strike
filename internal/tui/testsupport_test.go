@@ -612,14 +612,17 @@ func (f *fakeIssues) Close(id int) (host.Issue, error) {
 
 // fakeSessions is an in-memory host.Sessions for transcript navigation tests.
 // Optional refresh implements host.PRStateRefresher when non-nil.
+// When projectKey is set, List scopes to that key (legacy empty-key omitted);
+// ListAllProjects always returns every root matching rootsOnly.
 type fakeSessions struct {
-	byID      map[string]host.Session
-	children  map[string][]host.Session // parentID → kids
-	logs      map[string][]byte         // id → JSONL
-	getErr    error
-	listErr   error
-	replayErr error
-	refresh   func([]host.Session) []host.Session
+	byID       map[string]host.Session
+	children   map[string][]host.Session // parentID → kids
+	logs       map[string][]byte         // id → JSONL
+	projectKey string                    // empty = no List filter
+	getErr     error
+	listErr    error
+	replayErr  error
+	refresh    func([]host.Session) []host.Session
 }
 
 func newFakeSessions() *fakeSessions {
@@ -628,6 +631,12 @@ func newFakeSessions() *fakeSessions {
 		children: map[string][]host.Session{},
 		logs:     map[string][]byte{},
 	}
+}
+
+func newFakeSessionsForProject(projectKey string) *fakeSessions {
+	f := newFakeSessions()
+	f.projectKey = projectKey
+	return f
 }
 
 func (f *fakeSessions) put(s host.Session, jsonl []byte) {
@@ -647,12 +656,23 @@ func (f *fakeSessions) Get(id string) (host.Session, bool, error) {
 }
 
 func (f *fakeSessions) List(rootsOnly bool) ([]host.Session, error) {
+	return f.list(rootsOnly, false)
+}
+
+func (f *fakeSessions) ListAllProjects(rootsOnly bool) ([]host.Session, error) {
+	return f.list(rootsOnly, true)
+}
+
+func (f *fakeSessions) list(rootsOnly, allProjects bool) ([]host.Session, error) {
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
 	out := make([]host.Session, 0, len(f.byID))
 	for _, s := range f.byID {
 		if rootsOnly && s.ParentID != "" {
+			continue
+		}
+		if !allProjects && f.projectKey != "" && s.ProjectKey != f.projectKey {
 			continue
 		}
 		out = append(out, s)
@@ -707,9 +727,10 @@ func (f *fakeSessions) Fork(id string) (host.Session, error) {
 		title = "fork of " + title
 	}
 	child := host.Session{
-		ID:        childID,
-		Title:     title,
-		UpdatedAt: time.Now().UTC(),
+		ID:         childID,
+		Title:      title,
+		ProjectKey: src.ProjectKey,
+		UpdatedAt:  time.Now().UTC(),
 	}
 	f.byID[child.ID] = child
 	f.logs[child.ID] = append([]byte(nil), f.logs[id]...)

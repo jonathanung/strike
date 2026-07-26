@@ -14,18 +14,26 @@ import (
 	"github.com/jonathanung/strike-cli/internal/session"
 )
 
-// NewSessions wraps a session.Manager as host.Sessions.
-func NewSessions(m *session.Manager) host.Sessions {
+// NewSessions wraps a session.Manager as host.Sessions. projectKey scopes
+// List to the current launch project (same identity as history/memory). Empty
+// projectKey disables filtering (tests).
+func NewSessions(m *session.Manager, projectKey string) host.Sessions {
 	if m == nil {
 		return nil
 	}
-	return sessionsAdapter{m: m, viewPR: defaultViewGitHubPR}
+	return sessionsAdapter{
+		m:          m,
+		projectKey: strings.TrimSpace(projectKey),
+		viewPR:     defaultViewGitHubPR,
+	}
 }
 
-// sessionsAdapter implements host.Sessions and host.PRStateRefresher.
+// sessionsAdapter implements host.Sessions, host.AllProjectsSessions, and
+// host.PRStateRefresher.
 type sessionsAdapter struct {
-	m      *session.Manager
-	viewPR func(ctx context.Context, number int, url string) (state string, err error)
+	m          *session.Manager
+	projectKey string
+	viewPR     func(ctx context.Context, number int, url string) (state string, err error)
 }
 
 func (s sessionsAdapter) Get(id string) (host.Session, bool, error) {
@@ -44,6 +52,15 @@ func (s sessionsAdapter) Get(id string) (host.Session, bool, error) {
 }
 
 func (s sessionsAdapter) List(rootsOnly bool) ([]host.Session, error) {
+	return s.list(rootsOnly, false)
+}
+
+// ListAllProjects implements host.AllProjectsSessions.
+func (s sessionsAdapter) ListAllProjects(rootsOnly bool) ([]host.Session, error) {
+	return s.list(rootsOnly, true)
+}
+
+func (s sessionsAdapter) list(rootsOnly, allProjects bool) ([]host.Session, error) {
 	all, err := s.m.List()
 	if err != nil {
 		return nil, err
@@ -51,6 +68,9 @@ func (s sessionsAdapter) List(rootsOnly bool) ([]host.Session, error) {
 	out := make([]host.Session, 0, len(all))
 	for _, info := range all {
 		if rootsOnly && info.ParentSessionID != "" {
+			continue
+		}
+		if !allProjects && !session.BelongsToProject(info, s.projectKey) {
 			continue
 		}
 		out = append(out, toHostSession(info))
@@ -106,14 +126,15 @@ func (s sessionsAdapter) Fork(id string) (host.Session, error) {
 
 func toHostSession(info session.Info) host.Session {
 	return host.Session{
-		ID:        info.ID,
-		ParentID:  info.ParentSessionID,
-		Title:     info.Title,
-		Open:      info.Open,
-		UpdatedAt: info.UpdatedAt,
-		PRURL:     info.PRURL,
-		PRNumber:  info.PRNumber,
-		PRState:   session.NormalizePRState(info.PRState),
+		ID:         info.ID,
+		ParentID:   info.ParentSessionID,
+		Title:      info.Title,
+		Open:       info.Open,
+		UpdatedAt:  info.UpdatedAt,
+		ProjectKey: info.ProjectKey,
+		PRURL:      info.PRURL,
+		PRNumber:   info.PRNumber,
+		PRState:    session.NormalizePRState(info.PRState),
 	}
 }
 

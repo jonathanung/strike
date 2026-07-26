@@ -11,6 +11,63 @@ import (
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
 
+func TestSessionModalFiltersByProject(t *testing.T) {
+	fs := newFakeSessionsForProject("/repos/a")
+	fs.put(host.Session{ID: "a1", Title: "repo A work", ProjectKey: "/repos/a"}, nil)
+	fs.put(host.Session{ID: "b1", Title: "repo B work", ProjectKey: "/repos/b"}, nil)
+	fs.put(host.Session{ID: "legacy", Title: "no project"}, nil)
+
+	m := newSessionModal(fs, "")
+	if m.loadErr != "" {
+		t.Fatalf("loadErr = %q", m.loadErr)
+	}
+	if len(m.all) != 1 || m.all[0].ID != "a1" {
+		t.Fatalf("default list = %+v, want only a1", m.all)
+	}
+	view := m.view(72, theme.Default().Resolve())
+	if !strings.Contains(view, "repo A work") {
+		t.Errorf("missing A title:\n%s", view)
+	}
+	if strings.Contains(view, "repo B work") {
+		t.Errorf("should not list other project:\n%s", view)
+	}
+	if !strings.Contains(view, "ctrl+a all projects") {
+		t.Errorf("missing all-projects hint:\n%s", view)
+	}
+
+	next, _ := m.update(tea.KeyMsg{Type: tea.KeyCtrlA})
+	sm := next.(*sessionModal)
+	if !sm.allProjects || len(sm.all) != 3 {
+		t.Fatalf("all projects: allProjects=%v list=%+v", sm.allProjects, sm.all)
+	}
+	view = sm.view(80, theme.Default().Resolve())
+	if !strings.Contains(view, "all projects") {
+		t.Errorf("title should note all projects:\n%s", view)
+	}
+	if !strings.Contains(view, "repo B work") {
+		t.Errorf("all mode missing B:\n%s", view)
+	}
+	next, _ = sm.update(tea.KeyMsg{Type: tea.KeyCtrlA})
+	sm = next.(*sessionModal)
+	if sm.allProjects || len(sm.all) != 1 {
+		t.Fatalf("toggle back: allProjects=%v list=%+v", sm.allProjects, sm.all)
+	}
+}
+
+func TestSessionProjectLabel(t *testing.T) {
+	cases := map[string]string{
+		"":              "unknown project",
+		"/repos/strike": "strike",
+		`C:\work\app`:   "app",
+		"simple":        "simple",
+	}
+	for in, want := range cases {
+		if got := sessionProjectLabel(in); got != want {
+			t.Errorf("sessionProjectLabel(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestSessionModalListsRootsWithTitles(t *testing.T) {
 	fs := newFakeSessions()
 	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)

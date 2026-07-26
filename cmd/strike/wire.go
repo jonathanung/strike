@@ -369,7 +369,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	)
 	resumeID := strings.TrimSpace(opts.sessionID)
 	if opts.continueSession {
-		info, err := sessions.LatestRoot()
+		info, err := sessions.LatestRoot(projectIdentity.Key)
 		if err != nil {
 			_ = issueStore.Close()
 			_ = memoryStore.Close()
@@ -413,7 +413,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		// so the next Restore sees the switch; keep startup noisy then.
 		quietStartup = !opts.providerSet && opts.model == "" && opts.effort == ""
 	} else {
-		info, err := sessions.Create(session.CreateOptions{})
+		info, err := sessions.Create(session.CreateOptions{ProjectKey: projectIdentity.Key})
 		if err != nil {
 			_ = issueStore.Close()
 			_ = memoryStore.Close()
@@ -506,6 +506,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 				ID:              childID,
 				ParentSessionID: parentID,
 				Title:           title,
+				ProjectKey:      projectIdentity.Key,
 			})
 			if err != nil {
 				return "", err
@@ -528,7 +529,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// the TUI never sees auth/config/models/history/memory/issues directly.
 	services := local.New(authStore, historyStore, memoryStore, issueStore, agentNames, skills, customStore)
 	services.Files = local.NewFiles(workDir)
-	services.Sessions = local.NewSessions(sessions)
+	services.Sessions = local.NewSessions(sessions, projectIdentity.Key)
 
 	return &assembled{
 		eng:       eng,

@@ -32,7 +32,7 @@ func TestSessionsAdapterChildrenAndReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc := NewSessions(mgr)
+	svc := NewSessions(mgr, "")
 	if svc == nil {
 		t.Fatal("NewSessions nil")
 	}
@@ -77,7 +77,7 @@ func TestSessionsAdapterChildrenAndReplay(t *testing.T) {
 }
 
 func TestNewSessionsNil(t *testing.T) {
-	if NewSessions(nil) != nil {
+	if NewSessions(nil, "") != nil {
 		t.Error("want nil adapter for nil manager")
 	}
 }
@@ -95,7 +95,7 @@ func TestSessionsAdapterFork(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	svc := NewSessions(mgr)
+	svc := NewSessions(mgr, "")
 	child, err := svc.Fork(root.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -142,7 +142,7 @@ func TestSessionsAdapterExposesPRMetadata(t *testing.T) {
 	if err := mgr.Close(root.ID); err != nil {
 		t.Fatal(err)
 	}
-	svc := NewSessions(mgr)
+	svc := NewSessions(mgr, "")
 	got, ok, err := svc.Get(root.ID)
 	if err != nil || !ok {
 		t.Fatalf("Get: ok=%v err=%v", ok, err)
@@ -198,6 +198,48 @@ func TestRefreshPRStatesUpdatesSidecar(t *testing.T) {
 	}
 	if meta.PRState != session.PRStateMerged || meta.PRUpdatedAt == "" {
 		t.Fatalf("sidecar after refresh = %+v", meta)
+	}
+}
+
+func TestSessionsListFiltersByProject(t *testing.T) {
+	dir := t.TempDir()
+	mgr := session.NewManager(dir)
+	projA := "/tmp/proj-a"
+	projB := "/tmp/proj-b"
+	a, err := mgr.Create(session.CreateOptions{ID: "root-a", Title: "work in A", ProjectKey: projA})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.Create(session.CreateOptions{ID: "root-b", Title: "work in B", ProjectKey: projB}); err != nil {
+		t.Fatal(err)
+	}
+	// Legacy session without project key.
+	if _, err := mgr.Create(session.CreateOptions{ID: "root-legacy", Title: "old"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.CloseAll(); err != nil {
+		t.Fatal(err)
+	}
+
+	scoped := NewSessions(mgr, projA)
+	list, err := scoped.List(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].ID != a.ID || list[0].ProjectKey != projA {
+		t.Fatalf("List(project A) = %+v, want only root-a", list)
+	}
+
+	allLister, ok := scoped.(host.AllProjectsSessions)
+	if !ok {
+		t.Fatal("adapter should implement AllProjectsSessions")
+	}
+	all, err := allLister.ListAllProjects(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("ListAllProjects = %+v, want 3 roots", all)
 	}
 }
 

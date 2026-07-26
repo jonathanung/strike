@@ -19,6 +19,7 @@ type Info struct {
 	ID              string
 	ParentSessionID string
 	Title           string
+	ProjectKey      string // launch project identity; empty on legacy sessions
 	Path            string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
@@ -33,6 +34,7 @@ type CreateOptions struct {
 	ID              string
 	ParentSessionID string
 	Title           string
+	ProjectKey      string // same key as history/memory (canonical project root)
 }
 
 // Manager coordinates concurrent open session stores under a directory and
@@ -93,6 +95,7 @@ func (m *Manager) Create(opts CreateOptions) (Info, error) {
 	meta := Meta{
 		Title:           strings.TrimSpace(opts.Title),
 		ParentSessionID: strings.TrimSpace(opts.ParentSessionID),
+		ProjectKey:      strings.TrimSpace(opts.ProjectKey),
 		CreatedAt:       now.Format(time.RFC3339Nano),
 	}
 	if err := WriteMeta(m.dir, id, meta); err != nil {
@@ -103,6 +106,7 @@ func (m *Manager) Create(opts CreateOptions) (Info, error) {
 		ID:              id,
 		ParentSessionID: meta.ParentSessionID,
 		Title:           meta.Title,
+		ProjectKey:      meta.ProjectKey,
 		Path:            store.Path(),
 		CreatedAt:       now,
 		UpdatedAt:       now,
@@ -279,9 +283,12 @@ func (m *Manager) ListOpen() []Info {
 }
 
 // LatestRoot returns the most recent root session (no parent) for --continue.
-// Preference: newest UpdatedAt, then newest CreatedAt, then lexical ID
-// (NewID is timestamp-first so lexical order matches creation).
-func (m *Manager) LatestRoot() (Info, error) {
+// When projectKey is non-empty, only sessions with that ProjectKey qualify
+// (legacy empty-key sessions are skipped). Preference: newest UpdatedAt, then
+// newest CreatedAt, then lexical ID (NewID is timestamp-first so lexical order
+// matches creation).
+func (m *Manager) LatestRoot(projectKey string) (Info, error) {
+	projectKey = strings.TrimSpace(projectKey)
 	list, err := m.List()
 	if err != nil {
 		return Info{}, err
@@ -290,6 +297,9 @@ func (m *Manager) LatestRoot() (Info, error) {
 	found := false
 	for _, info := range list {
 		if info.ParentSessionID != "" {
+			continue
+		}
+		if projectKey != "" && info.ProjectKey != projectKey {
 			continue
 		}
 		if !found || rootMoreRecent(info, best) {
@@ -301,6 +311,16 @@ func (m *Manager) LatestRoot() (Info, error) {
 		return Info{}, fmt.Errorf("no session to continue")
 	}
 	return best, nil
+}
+
+// BelongsToProject reports whether info is scoped to projectKey. A non-empty
+// filter never matches legacy sessions with an empty ProjectKey.
+func BelongsToProject(info Info, projectKey string) bool {
+	projectKey = strings.TrimSpace(projectKey)
+	if projectKey == "" {
+		return true
+	}
+	return info.ProjectKey == projectKey
 }
 
 func rootMoreRecent(a, b Info) bool {
@@ -409,13 +429,14 @@ func (m *Manager) Fork(sourceID string) (Info, error) {
 	}
 	forkTitle := forkTitleOf(baseTitle)
 
-	info, err := m.Create(CreateOptions{Title: forkTitle})
+	info, err := m.Create(CreateOptions{Title: forkTitle, ProjectKey: src.ProjectKey})
 	if err != nil {
 		return Info{}, fmt.Errorf("fork: creating: %w", err)
 	}
 	if _, err := UpdateMeta(m.dir, info.ID, func(meta *Meta) {
 		meta.Title = forkTitle
 		meta.ForkedFrom = sourceID
+		meta.ProjectKey = src.ProjectKey
 	}); err != nil {
 		_ = m.Close(info.ID)
 		_ = os.Remove(LogPath(m.dir, info.ID))
@@ -631,6 +652,7 @@ func (m *Manager) infoFromDiskLocked(id string, st os.FileInfo) (Info, error) {
 		ID:              id,
 		ParentSessionID: meta.ParentSessionID,
 		Title:           title,
+		ProjectKey:      meta.ProjectKey,
 		Path:            LogPath(m.dir, id),
 		CreatedAt:       created,
 		UpdatedAt:       st.ModTime().UTC(),

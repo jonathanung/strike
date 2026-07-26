@@ -228,6 +228,9 @@ type Session struct {
 	Title     string
 	Open      bool
 	UpdatedAt time.Time // zero when unknown
+	// ProjectKey is the launch project identity (history/memory key). Empty on
+	// legacy sessions created before project scoping.
+	ProjectKey string
 	// Optional PR linkage from shipping (sidecar / session.meta). Empty when none.
 	PRURL    string
 	PRNumber int
@@ -243,6 +246,8 @@ type Sessions interface {
 	Get(id string) (Session, bool, error)
 	// List returns durable sessions newest-UpdatedAt first. When rootsOnly is
 	// true, only sessions without a parent are included (picker / resume).
+	// Implementations scope to the current launch project by default; legacy
+	// sessions without a project key are omitted from the default list.
 	List(rootsOnly bool) ([]Session, error)
 	// Children returns direct child sessions of parentID (newest first).
 	Children(parentID string) ([]Session, error)
@@ -252,6 +257,12 @@ type Sessions interface {
 	// returns the child. Parent stays intact. Implementations may reject
 	// subagent (parented) transcripts.
 	Fork(id string) (Session, error)
+}
+
+// AllProjectsSessions is an optional Sessions capability: list transcripts
+// across every project (power-user picker toggle).
+type AllProjectsSessions interface {
+	ListAllProjects(rootsOnly bool) ([]Session, error)
 }
 
 // PRStateRefresher is an optional Sessions capability: best-effort remote

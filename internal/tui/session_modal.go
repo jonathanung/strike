@@ -24,38 +24,72 @@ type sessionResumeMsg struct {
 // sessionModal is the centered picker for past root sessions (/session).
 // Titles come from durable auto-title metadata. Enter resumes via
 // sessionResumeMsg so the composition root reopens with model history.
+// Default list is scoped to the current launch project; ctrl+a toggles
+// all-projects mode when the host supports it.
 type sessionModal struct {
-	current string
-	all     []host.Session
-	filter  string
-	cursor  int
-	loadErr string
-	now     time.Time
+	sessions    host.Sessions
+	current     string
+	all         []host.Session
+	filter      string
+	cursor      int
+	loadErr     string
+	now         time.Time
+	allProjects bool
+	canAll      bool
 }
 
 func newSessionModal(sessions host.Sessions, current string) *sessionModal {
-	m := &sessionModal{current: strings.TrimSpace(current), now: time.Now()}
+	m := &sessionModal{
+		sessions: sessions,
+		current:  strings.TrimSpace(current),
+		now:      time.Now(),
+	}
 	if sessions == nil {
 		m.loadErr = "session list unavailable"
 		return m
 	}
-	list, err := sessions.List(true)
+	_, m.canAll = sessions.(host.AllProjectsSessions)
+	m.reload()
+	return m
+}
+
+func (m *sessionModal) reload() {
+	m.loadErr = ""
+	if m.sessions == nil {
+		m.loadErr = "session list unavailable"
+		m.all = nil
+		return
+	}
+	var (
+		list []host.Session
+		err  error
+	)
+	if m.allProjects {
+		if all, ok := m.sessions.(host.AllProjectsSessions); ok {
+			list, err = all.ListAllProjects(true)
+		} else {
+			list, err = m.sessions.List(true)
+		}
+	} else {
+		list, err = m.sessions.List(true)
+	}
 	if err != nil {
 		m.loadErr = err.Error()
-		return m
+		m.all = nil
+		return
 	}
 	// Optional cheap PR state refresh; cache stays on disk when offline/fails.
-	if r, ok := sessions.(host.PRStateRefresher); ok {
+	if r, ok := m.sessions.(host.PRStateRefresher); ok {
 		list = r.RefreshPRStates(list)
 	}
 	m.all = list
+	m.cursor = 0
 	for i, s := range m.all {
 		if s.ID == m.current {
 			m.cursor = i
 			break
 		}
 	}
-	return m
 }
 
 func (m *sessionModal) filtered() []host.Session {
@@ -67,7 +101,8 @@ func (m *sessionModal) filtered() []host.Session {
 	for _, s := range m.all {
 		title := strings.ToLower(sessionPickerLabel(s))
 		id := strings.ToLower(s.ID)
-		if strings.Contains(title, q) || strings.Contains(id, q) {
+		proj := strings.ToLower(s.ProjectKey)
+		if strings.Contains(title, q) || strings.Contains(id, q) || strings.Contains(proj, q) {
 			out = append(out, s)
 		}
 	}
@@ -89,6 +124,14 @@ func (m *sessionModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 		if m.cursor < len(list)-1 {
 			m.cursor++
 		}
+		return m, nil
+	case "ctrl+a":
+		if !m.canAll {
+			return m, nil
+		}
+		m.allProjects = !m.allProjects
+		m.filter = ""
+		m.reload()
 		return m, nil
 	case "backspace":
 		if m.filter != "" {
@@ -128,7 +171,11 @@ func (m *sessionModal) view(width int, th theme.Theme) string {
 	case m.loadErr != "":
 		body = wrapToWidth(st.Error.Render(m.loadErr), inner)
 	case len(m.all) == 0:
-		body = st.Muted.Render("no past sessions")
+		if m.allProjects {
+			body = st.Muted.Render("no past sessions")
+		} else {
+			body = st.Muted.Render("no sessions for this project")
+		}
 	default:
 		list := m.filtered()
 		if m.cursor >= len(list) {
@@ -138,7 +185,7 @@ func (m *sessionModal) view(width int, th theme.Theme) string {
 		for i, s := range list {
 			items[i] = ui.ListItem{
 				Label:   sessionPickerLabel(s),
-				Detail:  sessionPickerDetail(th, s, m.now),
+				Detail:  sessionPickerDetail(th, s, m.now, m.allProjects),
 				Suffix:  sessionPRBadge(th, s),
 				Current: s.ID == m.current,
 			}
@@ -154,9 +201,21 @@ func (m *sessionModal) view(width int, th theme.Theme) string {
 			Empty:      "no matches for \"" + m.filter + "\"",
 		})
 	}
+	title := "Resume session"
+	if m.allProjects {
+		title = "Resume session (all projects)"
+	}
+	hints := []string{"type to filter", "↑/↓ move", "enter resume", "esc close"}
+	if m.canAll {
+		if m.allProjects {
+			hints = append([]string{"ctrl+a this project"}, hints...)
+		} else {
+			hints = append([]string{"ctrl+a all projects"}, hints...)
+		}
+	}
 	return ui.Dialog(th, ui.DialogOpts{
-		Title: "Resume session",
-		Hint:  dotJoin(th, "type to filter", "↑/↓ move", "enter resume", "esc close"),
+		Title: title,
+		Hint:  dotJoin(th, hints...),
 		Width: width,
 	}, body)
 }
@@ -168,7 +227,7 @@ func sessionPickerLabel(s host.Session) string {
 	return "untitled"
 }
 
-func sessionPickerDetail(th theme.Theme, s host.Session, now time.Time) string {
+func sessionPickerDetail(th theme.Theme, s host.Session, now time.Time, showProject bool) string {
 	parts := []string{shortSessionID(s.ID)}
 	if !s.UpdatedAt.IsZero() {
 		parts = append(parts, formatRelativeTime(now, s.UpdatedAt))
@@ -176,7 +235,26 @@ func sessionPickerDetail(th theme.Theme, s host.Session, now time.Time) string {
 	if s.Open {
 		parts = append(parts, "open")
 	}
+	if showProject {
+		if p := sessionProjectLabel(s.ProjectKey); p != "" {
+			parts = append(parts, p)
+		}
+	}
 	return dotJoin(th, parts...)
+}
+
+// sessionProjectLabel shortens a project key (usually an absolute path) for the
+// picker detail column.
+func sessionProjectLabel(key string) string {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return "unknown project"
+	}
+	// Prefer the final path segment when the key looks like a filesystem path.
+	if i := strings.LastIndexAny(key, `/\`); i >= 0 && i+1 < len(key) {
+		return key[i+1:]
+	}
+	return key
 }
 
 // sessionPRBadge returns a compact theme-token badge for a linked PR, with an
