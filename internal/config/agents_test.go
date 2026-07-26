@@ -45,7 +45,7 @@ func TestLoadAgentsAndSkills(t *testing.T) {
 		byName[a.Name] = a
 	}
 	// Built-ins always present.
-	for _, want := range []string{"build", "plan", "explore", "general", "commit", "reviewer", "tester", "debugger"} {
+	for _, want := range []string{"build", "plan", "explore", "general", "commit", "reviewer", "tester", "debugger", "validator"} {
 		if _, ok := byName[want]; !ok {
 			t.Errorf("missing builtin/project agent %q among %+v", want, agents)
 		}

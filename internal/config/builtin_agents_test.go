@@ -21,7 +21,7 @@ func TestBuiltinAgentsCatalog(t *testing.T) {
 	for _, a := range agents {
 		byName[a.Name] = a
 	}
-	for _, want := range []string{"explore", "general", "commit", "reviewer", "tester", "debugger"} {
+	for _, want := range []string{"explore", "general", "commit", "reviewer", "tester", "debugger", "validator"} {
 		a, ok := byName[want]
 		if !ok {
 			t.Fatalf("missing builtin agent %q among %+v", want, agentNames(agents))
@@ -39,6 +39,19 @@ func TestBuiltinAgentsCatalog(t *testing.T) {
 	}
 	if !rulesetHas(byName["commit"].Permissions, "edit", permission.Deny) {
 		t.Errorf("commit missing edit deny: %+v", byName["commit"].Permissions)
+	}
+	v := byName["validator"]
+	if !rulesetHas(v.Permissions, "write", permission.Deny) || !rulesetHas(v.Permissions, "edit", permission.Deny) {
+		t.Errorf("validator missing write/edit deny: %+v", v.Permissions)
+	}
+	if !rulesetHas(v.Permissions, "task", permission.Deny) {
+		t.Errorf("validator missing task deny: %+v", v.Permissions)
+	}
+	if !rulesetHas(v.Permissions, "bash", permission.Allow) {
+		t.Errorf("validator missing bash allow: %+v", v.Permissions)
+	}
+	if !strings.Contains(v.Prompt, "PASS") || !strings.Contains(v.Prompt, "FAIL") {
+		t.Errorf("validator prompt missing PASS/FAIL duties: %q", v.Prompt)
 	}
 }
 
