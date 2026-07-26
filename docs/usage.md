@@ -20,7 +20,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 /autonomy                      # exit-gate policy picker
 /autonomy supervised           # supervised | agent | checks
 /mode                          # permission posture picker (Shift+Tab cycles)
-/mode yolo                     # default | plan | accept-edits | yolo
+/mode soft-approve             # default | plan | soft-approve | accept-edits | yolo
 /agent                         # centered agent picker
 /agent plan                    # direct switch (build, plan, explore, …)
 /session                       # browse past root sessions (auto-titles) and
@@ -118,6 +118,7 @@ yolo also paints a danger banner.
 |---|---|
 | `default` | normal ask rules (config + agent + phase) |
 | `plan` | hard read-only write/edit deny; enters plan workflow |
+| `soft-approve` | visible 15s countdown then allow once; veto anytime |
 | `accept-edits` | auto-allow edit/write; bash/network still ask |
 | `yolo` | skip permission asks; explicit deny rules still apply |
 

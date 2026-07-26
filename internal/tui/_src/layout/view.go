@@ -87,9 +87,9 @@ func (m Model) headerView(width int) string {
 	badges += inlineGap + ui.Badge(th, ui.ToneMuted, "auto"+inlineGap+m.autonomy.Short())
 	// Permission posture dial — always shown (short label + tone); yolo is danger.
 	badges += inlineGap + ui.Badge(th, permissionModeBadgeTone(m.permMode), m.permMode.Short())
-	if m.permissionAutoApproveSeconds > 0 {
-		// Warning tone: armed auto-allow is a cost/safety-visible preference.
-		badges += inlineGap + ui.Badge(th, ui.ToneWarning, "auto-allow"+inlineGap+itoa(m.permissionAutoApproveSeconds)+"s")
+	if secs := m.effectivePermissionAutoApproveSeconds(); secs > 0 {
+		// Warning tone: soft-approve / config auto-allow is safety-visible.
+		badges += inlineGap + ui.Badge(th, ui.ToneWarning, "auto-allow"+inlineGap+itoa(secs)+"s")
 	}
 	if label := m.pendingBlockingLabel(); label != "" {
 		// Queued permission/question asks while a user modal is open.
@@ -517,6 +517,8 @@ func permissionModeBadgeTone(mode protocol.PermissionMode) ui.Tone {
 	switch mode.Normalize() {
 	case protocol.PermissionModePlan:
 		return ui.ToneAccentAlt
+	case protocol.PermissionModeSoftApprove:
+		return ui.ToneWarning
 	case protocol.PermissionModeAcceptEdits:
 		return ui.ToneWarning
 	case protocol.PermissionModeYolo:

@@ -582,6 +582,7 @@ func childrenFromEvents(events []protocol.Event) []childActivity {
 func cellsFromEvents(events []protocol.Event) ([]cell, map[string]*toolCell) {
 	var cells []cell
 	toolByID := map[string]*toolCell{}
+	childAgent := map[string]string{}
 	complete := func() {
 		for _, c := range cells {
 			if a, ok := c.(*assistantCell); ok {
@@ -594,8 +595,8 @@ func cellsFromEvents(events []protocol.Event) ([]cell, map[string]*toolCell) {
 		switch ev := ev.(type) {
 		case protocol.UserMessage:
 			complete()
+			// Notices are model-facing only; UI uses ChildCompleted cells.
 			if isChildCompletedNotice(ev.Text) {
-				cells = append(cells, &infoCell{text: ev.Text})
 				break
 			}
 			cells = append(cells, &userCell{text: userMessageDisplayText(ev.Text, ev.Images)})
@@ -652,8 +653,22 @@ func cellsFromEvents(events []protocol.Event) ([]cell, map[string]*toolCell) {
 			if tc, ok := toolByID[ev.CallID]; ok {
 				applyToolCallEnd(tc, ev.Title, ev.Output, ev.Metadata, ev.IsError)
 			}
+		case protocol.ChildStarted:
+			id := strings.TrimSpace(ev.SessionID)
+			if id == "" {
+				id = "child"
+			}
+			if a := strings.TrimSpace(ev.Agent); a != "" {
+				childAgent[id] = a
+			}
 		case protocol.ChildCompleted:
 			applyChildCompletedToTaskCells(toolByID, ev)
+			id := strings.TrimSpace(ev.SessionID)
+			agent := ""
+			if id != "" {
+				agent = childAgent[id]
+			}
+			cells = appendSubagentResultCell(cells, ev, agent, 0)
 		case protocol.TurnCompleted:
 			complete()
 			if exp, ok := lastCell[*exploreCell](cells); ok {
@@ -763,7 +778,8 @@ func (m Model) sessionTreeNodes() []ui.TreeNode {
 			root.Leaf = true
 		} else {
 			root.Expanded = true
-			root.Children = m.navChildrenToTree(kids)
+			// Newest child first in the activity tree.
+			root.Children = m.navChildrenToTree(reverseNavChildren(kids))
 		}
 		out = append(out, root)
 	}
@@ -799,7 +815,7 @@ func (m Model) navChildrenToTree(kids []navChild) []ui.TreeNode {
 			Current: m.viewingID == ch.id,
 			Tone:    tone,
 		}
-		grand := m.listChildren(ch.id)
+		grand := reverseNavChildren(m.listChildren(ch.id))
 		if len(grand) == 0 {
 			node.Leaf = true
 		} else {

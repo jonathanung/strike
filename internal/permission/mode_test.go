@@ -31,6 +31,13 @@ func TestModeEvaluateMatrix(t *testing.T) {
 		{protocol.PermissionModePlan, "bash", Ask},
 		{protocol.PermissionModePlan, "webfetch", Ask},
 
+		// soft-approve is TUI countdown only — engine matches default.
+		{protocol.PermissionModeSoftApprove, "read", Allow},
+		{protocol.PermissionModeSoftApprove, "edit", Ask},
+		{protocol.PermissionModeSoftApprove, "write", Ask},
+		{protocol.PermissionModeSoftApprove, "bash", Ask},
+		{protocol.PermissionModeSoftApprove, "webfetch", Ask},
+
 		{protocol.PermissionModeAcceptEdits, "read", Allow},
 		{protocol.PermissionModeAcceptEdits, "edit", Allow},
 		{protocol.PermissionModeAcceptEdits, "write", Allow},

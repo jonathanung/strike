@@ -17,6 +17,11 @@ func TestParsePermissionModeAcceptsEveryMode(t *testing.T) {
 		{"accept_edits", PermissionModeAcceptEdits},
 		{"AcceptEdits", PermissionModeAcceptEdits},
 		{"acceptedits", PermissionModeAcceptEdits},
+		{"soft-approve", PermissionModeSoftApprove},
+		{"soft_approve", PermissionModeSoftApprove},
+		{"softapprove", PermissionModeSoftApprove},
+		{"soft", PermissionModeSoftApprove},
+		{" SOFT ", PermissionModeSoftApprove},
 		{"yolo", PermissionModeYolo},
 		{" YOLO ", PermissionModeYolo},
 	}
@@ -42,7 +47,8 @@ func TestParsePermissionModeRejectsUnknown(t *testing.T) {
 
 func TestPermissionModesOrderAndCycle(t *testing.T) {
 	want := []PermissionMode{
-		PermissionModeDefault, PermissionModePlan, PermissionModeAcceptEdits, PermissionModeYolo,
+		PermissionModeDefault, PermissionModePlan, PermissionModeSoftApprove,
+		PermissionModeAcceptEdits, PermissionModeYolo,
 	}
 	got := PermissionModes()
 	if len(got) != len(want) {
@@ -82,6 +88,7 @@ func TestPermissionModeShortAndDescribe(t *testing.T) {
 	}{
 		{PermissionModeDefault, "def", "normal permission prompts"},
 		{PermissionModePlan, "plan", "read-only plan posture — write/edit denied"},
+		{PermissionModeSoftApprove, "soft", "count down 15s then allow once — veto anytime"},
 		{PermissionModeAcceptEdits, "edits", "auto-allow edit/write — still ask on bash/network"},
 		{PermissionModeYolo, "yolo", "skip permission asks — explicit denies still apply"},
 	}

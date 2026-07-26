@@ -88,10 +88,29 @@ func TestPermissionModeCommandOpensModal(t *testing.T) {
 		t.Errorf("cursor on %q, want accept-edits", picker.modes[picker.cursor])
 	}
 	plain := ansi.Strip(m.View())
-	for _, want := range []string{"default", "plan", "accept-edits", "yolo"} {
+	for _, want := range []string{"default", "plan", "soft-approve", "accept-edits", "yolo"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("modal missing %q:\n%s", want, plain)
 		}
+	}
+}
+
+func TestSoftApproveModeSelectedShowsArmedChrome(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	m.applyEvent(protocol.PermissionModeSelected{Mode: protocol.PermissionModeSoftApprove})
+	if m.permMode != protocol.PermissionModeSoftApprove {
+		t.Fatalf("permMode = %q", m.permMode)
+	}
+	if got := m.effectivePermissionAutoApproveSeconds(); got != protocol.SoftApproveSeconds {
+		t.Fatalf("effective seconds = %d, want %d", got, protocol.SoftApproveSeconds)
+	}
+	plain := ansi.Strip(m.View())
+	if !strings.Contains(plain, "soft") {
+		t.Fatalf("missing soft badge:\n%s", plain)
+	}
+	if !strings.Contains(plain, "auto-allow") || !strings.Contains(plain, "15s") {
+		t.Fatalf("missing auto-allow 15s badge:\n%s", plain)
 	}
 }
 
@@ -131,6 +150,7 @@ func TestPermissionModeModalSelectSendsOp(t *testing.T) {
 	ops := make(chan protocol.Op, 1)
 	picker := newPermissionModeModal(protocol.PermissionModeDefault, ops)
 	picker.update(tea.KeyMsg{Type: tea.KeyDown}) // plan
+	picker.update(tea.KeyMsg{Type: tea.KeyDown}) // soft-approve
 	picker.update(tea.KeyMsg{Type: tea.KeyDown}) // accept-edits
 	next, cmd := picker.update(tea.KeyMsg{Type: tea.KeyEnter})
 	if next != nil {

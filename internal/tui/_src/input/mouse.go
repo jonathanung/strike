@@ -136,6 +136,14 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		c.toggleExpanded()
 		m.reflow()
 		return m, nil
+	case *subagentResultCell:
+		if !c.collapsible() {
+			return m, nil
+		}
+		m.selectedCell = idx
+		c.toggleExpanded()
+		m.reflow()
+		return m, nil
 	}
 	return m, nil
 }

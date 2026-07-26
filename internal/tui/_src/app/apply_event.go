@@ -30,9 +30,9 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 	switch ev := ev.(type) {
 	case protocol.UserMessage:
 		m.completeAssistantCells()
-		// Auto-injected child completion is host feedback, not a user prompt.
+		// Model-facing [child.completed] notices stay off the transcript UI;
+		// subagentResultCell from ChildCompleted is the parent-facing row.
 		if isChildCompletedNotice(ev.Text) {
-			m.cells = append(m.cells, &infoCell{text: ev.Text})
 			break
 		}
 		m.cells = append(m.cells, &userCell{text: userMessageDisplayText(ev.Text, ev.Images)})
@@ -303,6 +303,7 @@ func (m *Model) onChildCompleted(ev protocol.ChildCompleted) {
 	}
 	now := time.Now()
 	applyChildCompletedToTaskCells(m.toolByID, ev)
+	matched := false
 	for i := range m.children {
 		if m.children[i].sessionID == id || (id == "" && i == len(m.children)-1) {
 			m.children[i].status = status
@@ -310,21 +311,26 @@ func (m *Model) onChildCompleted(ev protocol.ChildCompleted) {
 				m.children[i].parentID = ev.ParentSessionID
 			}
 			m.children[i].endedAt = now
-			return
+			matched = true
+			break
 		}
 	}
-	// Completed without a matching start still surfaces briefly.
-	if id == "" {
-		id = "child"
+	if !matched {
+		// Completed without a matching start still surfaces briefly.
+		if id == "" {
+			id = "child"
+		}
+		m.children = append(m.children, childActivity{
+			sessionID: id,
+			parentID:  ev.ParentSessionID,
+			status:    status,
+			startedAt: now,
+			endedAt:   now,
+		})
+		m.trimChildren()
 	}
-	m.children = append(m.children, childActivity{
-		sessionID: id,
-		parentID:  ev.ParentSessionID,
-		status:    status,
-		startedAt: now,
-		endedAt:   now,
-	})
-	m.trimChildren()
+	agent, elapsed := lookupChildMeta(m.children, ev.SessionID)
+	m.cells = appendSubagentResultCell(m.cells, ev, agent, elapsed)
 }
 
 func (m *Model) trimChildren() {

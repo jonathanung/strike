@@ -463,8 +463,19 @@ func TestChildActivityPaneUpdatesWithoutTranscriptCells(t *testing.T) {
 	if !strings.Contains(body, "explore-agent") {
 		t.Errorf("completed child missing from activity: %q", body)
 	}
-	if len(m.cells) != cellsBefore {
-		t.Error("ChildCompleted appended transcript cells")
+	// ChildCompleted adds exactly one collapsed subagent result row.
+	if len(m.cells) != cellsBefore+1 {
+		t.Errorf("ChildCompleted cells = %d, want %d", len(m.cells), cellsBefore+1)
+	}
+	sc, ok := m.cells[len(m.cells)-1].(*subagentResultCell)
+	if !ok {
+		t.Fatalf("last cell = %T, want *subagentResultCell", m.cells[len(m.cells)-1])
+	}
+	if sc.expanded {
+		t.Error("subagent result should default collapsed")
+	}
+	if sc.agent != "explore-agent" || sc.summary != "found three" {
+		t.Errorf("subagent cell = %+v", sc)
 	}
 }
 

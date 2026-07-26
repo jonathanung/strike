@@ -444,8 +444,8 @@ func TestPermissionModalAutoApproveFiresAllowOnce(t *testing.T) {
 	if cmd := m.armAutoApprove(3); cmd == nil {
 		t.Fatal("armAutoApprove returned nil cmd")
 	}
-	view := strings.ToLower(ansi.Strip(m.view(70, theme.Default())))
-	if !strings.Contains(view, "auto-allow in 3s") {
+	view := ansi.Strip(m.view(70, theme.Default()))
+	if !strings.Contains(view, "Auto-approving once in 3s…") {
 		t.Fatalf("view missing countdown:\n%s", view)
 	}
 
@@ -639,6 +639,158 @@ func TestPermissionAutoApproveArmsFromOptions(t *testing.T) {
 	}
 	reply := receiveSinglePermissionReply(t, ops, cmd)
 	assertPermissionReply(t, reply, "ok", protocol.DecisionOnce, "")
+}
+
+func TestSoftApproveModeArmsFifteenSecondCountdown(t *testing.T) {
+	m, ops := newAppTestModel(nil, nil)
+	m.permMode = protocol.PermissionModeSoftApprove
+	header := ansi.Strip(m.headerView(120))
+	if !strings.Contains(header, "soft") {
+		t.Fatalf("header missing soft mode badge:\n%s", header)
+	}
+	if !strings.Contains(header, "auto-allow") || !strings.Contains(header, "15s") {
+		t.Fatalf("header missing soft-approve armed badge:\n%s", header)
+	}
+
+	_ = m.applyEvent(protocol.PermissionAsked{RequestID: "soft15", Permission: "edit", Patterns: []string{"a.go"}})
+	pm, ok := m.modal.(*permissionModal)
+	if !ok {
+		t.Fatalf("modal = %T", m.modal)
+	}
+	if pm.remaining != protocol.SoftApproveSeconds {
+		t.Fatalf("remaining = %d, want %d", pm.remaining, protocol.SoftApproveSeconds)
+	}
+	view := ansi.Strip(pm.view(70, theme.Default()))
+	if !strings.Contains(view, "Auto-approving once in 15s…") {
+		t.Fatalf("view missing product copy:\n%s", view)
+	}
+
+	// Fake-clock: inject SoftApproveSeconds ticks → exactly one allow-once.
+	for i := 0; i < protocol.SoftApproveSeconds-1; i++ {
+		gen := pm.autoGen
+		updated, _ := m.Update(permissionCountdownMsg{requestID: "soft15", gen: gen})
+		m = updated.(Model)
+		pm, ok = m.modal.(*permissionModal)
+		if !ok {
+			t.Fatalf("closed early on tick %d", i+1)
+		}
+	}
+	gen := pm.autoGen
+	updated, cmd := m.Update(permissionCountdownMsg{requestID: "soft15", gen: gen})
+	m = updated.(Model)
+	if m.modal != nil {
+		t.Fatalf("modal still open: %T", m.modal)
+	}
+	reply := receiveSinglePermissionReply(t, ops, cmd)
+	assertPermissionReply(t, reply, "soft15", protocol.DecisionOnce, "")
+	assertNoPermissionReply(t, ops)
+}
+
+func TestSoftApproveConfigSecondsOverride(t *testing.T) {
+	m, _ := newAppTestModelWithOptions(Options{PermissionAutoApproveSeconds: 7})
+	m.permMode = protocol.PermissionModeSoftApprove
+	if got := m.effectivePermissionAutoApproveSeconds(); got != 7 {
+		t.Fatalf("effective = %d, want config 7", got)
+	}
+	_ = m.applyEvent(protocol.PermissionAsked{RequestID: "ov", Permission: "edit", Patterns: []string{"a.go"}})
+	pm := m.modal.(*permissionModal)
+	if pm.remaining != 7 {
+		t.Fatalf("remaining = %d, want 7", pm.remaining)
+	}
+}
+
+func TestPermissionModalRaceTimerVsUserEsc(t *testing.T) {
+	// Shrink tick interval so tea.Tick commands complete quickly under -race.
+	prev := permissionCountdownInterval
+	permissionCountdownInterval = time.Millisecond
+	t.Cleanup(func() { permissionCountdownInterval = prev })
+
+	m, ops := newTestPermissionModal("race-esc")
+	tickCmd := m.armAutoApprove(protocol.SoftApproveSeconds)
+	if tickCmd == nil {
+		t.Fatal("arm returned nil")
+	}
+	// Fire the real tick cmd concurrently with an Esc decision.
+	done := make(chan tea.Msg, 1)
+	go func() { done <- tickCmd() }()
+
+	next, replyCmd := m.update(permissionKey("esc"))
+	if next != nil {
+		t.Fatal("esc did not close")
+	}
+	reply := receiveSinglePermissionReply(t, ops, replyCmd)
+	assertPermissionReply(t, reply, "race-esc", protocol.DecisionReject, "")
+
+	// Stale tick after Esc must not allow (decided + gen bump).
+	tickMsg := <-done
+	if msg, ok := tickMsg.(permissionCountdownMsg); ok {
+		if _, c := m.onCountdown(msg); c != nil {
+			runPermissionCmd(t, c)
+		}
+	}
+	assertNoPermissionReply(t, ops)
+}
+
+func TestPermissionModalRaceTimerVsUserAllow(t *testing.T) {
+	prev := permissionCountdownInterval
+	permissionCountdownInterval = time.Millisecond
+	t.Cleanup(func() { permissionCountdownInterval = prev })
+
+	m, ops := newTestPermissionModal("race-y")
+	tickCmd := m.armAutoApprove(5)
+	done := make(chan tea.Msg, 1)
+	go func() { done <- tickCmd() }()
+
+	// Concurrent-ish: user allow-once wins; timer must not double-submit.
+	next, replyCmd := m.update(permissionKey("y"))
+	if next != nil {
+		t.Fatal("y did not close")
+	}
+	reply := receiveSinglePermissionReply(t, ops, replyCmd)
+	assertPermissionReply(t, reply, "race-y", protocol.DecisionOnce, "")
+
+	tickMsg := <-done
+	if msg, ok := tickMsg.(permissionCountdownMsg); ok {
+		if _, c := m.onCountdown(msg); c != nil {
+			runPermissionCmd(t, c)
+		}
+	}
+	// Final zero tick also ignored.
+	if _, c := m.onCountdown(permissionCountdownMsg{requestID: "race-y", gen: m.autoGen}); c != nil {
+		runPermissionCmd(t, c)
+	}
+	assertNoPermissionReply(t, ops)
+}
+
+func TestPermissionModalSoftApproveFakeClockFullCountdown(t *testing.T) {
+	m, ops := newTestPermissionModal("fake-15")
+	if cmd := m.armAutoApprove(protocol.SoftApproveSeconds); cmd == nil {
+		t.Fatal("arm nil")
+	}
+	// Drive all seconds via injected ticks (no wall clock).
+	for i := protocol.SoftApproveSeconds; i > 1; i-- {
+		if m.remaining != i {
+			t.Fatalf("remaining = %d, want %d", m.remaining, i)
+		}
+		view := ansi.Strip(m.view(70, theme.Default()))
+		want := "Auto-approving once in " + itoa(i) + "s…"
+		if !strings.Contains(view, want) {
+			t.Fatalf("tick view missing %q:\n%s", want, view)
+		}
+		next, cmd := m.onCountdown(permissionCountdownMsg{requestID: "fake-15", gen: m.autoGen})
+		if next == nil {
+			t.Fatalf("closed early at remaining=%d", i)
+		}
+		m = next.(*permissionModal)
+		runPermissionCmd(t, cmd)
+		assertNoPermissionReply(t, ops)
+	}
+	next, cmd := m.onCountdown(permissionCountdownMsg{requestID: "fake-15", gen: m.autoGen})
+	if next != nil {
+		t.Fatal("final tick did not close")
+	}
+	reply := receiveSinglePermissionReply(t, ops, cmd)
+	assertPermissionReply(t, reply, "fake-15", protocol.DecisionOnce, "")
 }
 
 func newTestPermissionModal(requestID string) (*permissionModal, chan protocol.Op) {

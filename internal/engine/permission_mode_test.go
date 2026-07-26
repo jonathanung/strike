@@ -80,7 +80,7 @@ func TestSetPermissionModeRejectsUnknown(t *testing.T) {
 		return ok
 	})
 	msg := event.(protocol.EngineError).Message
-	for _, want := range []string{"supervised", "default", "plan", "accept-edits", "yolo"} {
+	for _, want := range []string{"supervised", "default", "plan", "soft-approve", "accept-edits", "yolo"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error = %q, want it to mention %q", msg, want)
 		}

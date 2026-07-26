@@ -339,8 +339,8 @@ func applyEventToPane(p *rootPane, ev protocol.Event) {
 		}
 	case protocol.UserMessage:
 		p.sessionErrored = false
+		// Model-facing notice only; subagentResultCell comes from ChildCompleted.
 		if isChildCompletedNotice(e.Text) {
-			p.cells = append(p.cells, &infoCell{text: e.Text})
 			break
 		}
 		p.cells = append(p.cells, &userCell{text: e.Text})
@@ -458,6 +458,8 @@ func applyEventToPane(p *rootPane, ev protocol.Event) {
 			}
 		}
 		applyChildCompletedToTaskCells(p.toolByID, e)
+		agent, elapsed := lookupChildMeta(p.children, e.SessionID)
+		p.cells = appendSubagentResultCell(p.cells, e, agent, elapsed)
 	}
 }
 

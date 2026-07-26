@@ -197,7 +197,7 @@ func TestExplicitSleepAloneStillVisible(t *testing.T) {
 	}
 }
 
-func TestChildCompletedNoticeIsInfoNotUser(t *testing.T) {
+func TestChildCompletedNoticeIsHiddenNotUser(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m.applyEvent(protocol.UserMessage{Text: "real user prompt"})
 	m.applyEvent(protocol.UserMessage{Text: "[child.completed session=abcd1234 status=completed]\nok\nDo not sleep-poll for subagents; this is the terminal result."})
@@ -213,8 +213,8 @@ func TestChildCompletedNoticeIsInfoNotUser(t *testing.T) {
 	if users != 1 {
 		t.Fatalf("user cells = %d, want 1", users)
 	}
-	if infos != 1 {
-		t.Fatalf("info cells = %d, want 1 for child.completed", infos)
+	if infos != 0 {
+		t.Fatalf("info cells = %d, want 0 (notice is model-facing only)", infos)
 	}
 }
 
