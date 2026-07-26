@@ -47,6 +47,9 @@ strike launches without any provider configured. Pick one inside the TUI:
 /fork                          # duplicate this conversation into a new session id
 /undo                          # drop the last completed user/assistant turn
 /rewind                        # alias of /undo
+/export [path] [--open]        # write the transcript to markdown (default
+                               # .strike/exports/… or $TMPDIR); --open hands
+                               # the file to $EDITOR / $VISUAL
 /vim [path[:line]]             # open file in embedded editor (pane/overlay)
                                # or $EDITOR (see vimMode in config.md)
 /md-read <path>                # open a markdown file in the right markdown pane
@@ -76,6 +79,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/session <id>` | resume that root session by id |
 | `/fork` | copy the current session JSONL into a new id (idle only) |
 | `/undo` / `/rewind` | drop the last completed turn (idle only) |
+| `/export` | dump the visible transcript to markdown (user/assistant/tool summaries); redacts common API-key shapes; default path under `.strike/exports/` or tmp; `--open` launches `$EDITOR` |
 | `/compact` | ask the engine to compact model history |
 | `/memory` | bare = list browser; `list [tag]`, `get <key>`, `set <key> <value>`, `rm <key>`, `export [path]`, `import <path> [--replace]` (portable JSON; relative paths stay under project root) |
 | `/issues` | bare = list browser; `list [open\|closed]`, `add <title>`, `get <id>`, `close <id>`, `export [path]`, `import <path> [--replace]` (same portable rules as memory) |
