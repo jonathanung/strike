@@ -15,8 +15,13 @@ package host
 
 import (
 	"context"
+	"errors"
 	"time"
 )
+
+// ErrInitExists is returned by ProjectInit.Write when AGENTS.md already exists
+// and force is false.
+var ErrInitExists = errors.New("AGENTS.md already exists")
 
 // ProviderStatus describes one selectable provider and its credential
 // state, with capability flags so frontends stay data-driven (adding a
@@ -289,6 +294,18 @@ type PRStateRefresher interface {
 	RefreshPRStates(sessions []Session) []Session
 }
 
+// ProjectInit bootstraps project agent instructions (AGENTS.md) from a light
+// local scan. Nil means the capability is absent; frontends must degrade.
+type ProjectInit interface {
+	// Exists reports whether a non-empty AGENTS.md is already present under
+	// the work root. path is the absolute target path when known.
+	Exists() (exists bool, path string, err error)
+	// Write creates or replaces AGENTS.md. When force is false and the file
+	// already exists, returns ErrInitExists without writing. created is true
+	// when the file did not previously exist (or was empty).
+	Write(force bool) (path string, created bool, err error)
+}
+
 // Services bundles everything a frontend receives from its host. Any field
 // may be nil/empty when a capability is absent (tests, future frontends);
 // frontends must degrade gracefully.
@@ -302,6 +319,7 @@ type Services struct {
 	Issues    Issues
 	Sessions  Sessions  // durable session list/replay; nil when unsupported
 	Providers Providers // custom/self-hosted provider CRUD; nil when unsupported
-	Agents    []string  // selectable agent names, default first
+	Init      ProjectInit
+	Agents    []string // selectable agent names, default first
 	Skills    []Skill
 }

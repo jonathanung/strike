@@ -259,8 +259,9 @@ func (m Model) welcomeFirstRun(width, rows int) string {
 	}
 	steps := []step{
 		{"1. Sign in", "/auth or pick a provider"},
-		{"2. Choose a model", "/model"},
-		{"3. Send a message", "type below, enter to send"},
+		{"2. Project setup", "/init writes AGENTS.md"},
+		{"3. Choose a model", "/model"},
+		{"4. Send a message", "type below, enter to send"},
 	}
 	lines := make([]string, 0, min(len(steps), rows))
 	for _, s := range steps {
@@ -344,11 +345,30 @@ func (m Model) welcomeProviders(statuses []host.ProviderStatus, width, rows int)
 		}
 		lines = append(lines, line)
 	}
+	if len(lines) < rows && m.agentsMDMissing() {
+		action := welcomeTruncate("/init"+space+"project AGENTS.md", width, th.Icons.Ellipsis)
+		command, detail, hasDetail := strings.Cut(action, space)
+		line := st.Accent.Render(command)
+		if hasDetail {
+			line += st.Muted.Render(space + detail)
+		}
+		lines = append(lines, line)
+	}
 	if len(lines) < rows {
 		tip := welcomeTruncate(dotJoin(th, "type below", "enter to send"), width, th.Icons.Ellipsis)
 		lines = append(lines, st.Muted.Render(tip))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// agentsMDMissing reports whether /init would create AGENTS.md. Unknown or
+// unavailable init services are treated as not missing (no CTA).
+func (m Model) agentsMDMissing() bool {
+	if m.services.Init == nil {
+		return false
+	}
+	exists, _, err := m.services.Init.Exists()
+	return err == nil && !exists
 }
 
 func (m Model) welcomeKeys(size ...int) string {

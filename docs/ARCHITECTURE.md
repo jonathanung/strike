@@ -223,9 +223,10 @@ Two different mechanisms, depending on whether it needs Go code:
    `autonomy`, `auth`, `settings`, `agent`, `fast`, `vim`, `md-read`,
    `theme`, `layout`, `split`, `compact`, `fork`, `undo`, `rewind`,
    `session`, `help`, `keys`, `memory`, `issues`, `context`,
-   `effective-prompt`, `upgrade`) are rejected by
+   `effective-prompt`, `upgrade`, `init`) are rejected by
    `config.ValidateSkillName` before
-   they ever reach the frontend. PR URLs from successful `gh pr` bash
+   they ever reach the frontend. `/init` is a builtin that writes project
+   `AGENTS.md` via `host.ProjectInit` (confirm before overwrite). PR URLs from successful `gh pr` bash
    output are stored via `protocol.SessionMeta` and `session` sidecar
    metadata. `/vim` embeds nvim/vim in the right-pane `editor` window by
    default (PTY + vt10x via `internal/tui/term`). Config key `vimMode`
