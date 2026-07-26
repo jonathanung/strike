@@ -521,31 +521,6 @@ func TestOpenResumeSessionRestoresPhaseAutonomyGrants(t *testing.T) {
 	}
 }
 
-func TestIndexAgent(t *testing.T) {
-	agents := []engine.Agent{
-		{Name: "build"},
-		{Name: "plan"},
-		{Name: "explore"},
-	}
-	cases := []struct {
-		name string
-		want int
-	}{
-		{"plan", 1},
-		{"build", 0},
-		{"missing", -1},
-		{"", -1},
-	}
-	for _, tc := range cases {
-		if got := indexAgent(agents, tc.name); got != tc.want {
-			t.Errorf("indexAgent(%q) = %d, want %d", tc.name, got, tc.want)
-		}
-	}
-	if got := indexAgent(nil, "plan"); got != -1 {
-		t.Errorf("indexAgent(nil) = %d, want -1", got)
-	}
-}
-
 func TestBuildCustomProvider(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

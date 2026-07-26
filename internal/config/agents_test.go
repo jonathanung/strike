@@ -37,8 +37,23 @@ func TestLoadAgentsAndSkills(t *testing.T) {
 	os.WriteFile(filepath.Join(skillDir, "commit.md"), []byte("---\ndescription: write a commit\n---\nCommit the changes: $ARGUMENTS"), 0o644)
 
 	agents := LoadAgents(work)
-	if len(agents) != 1 || agents[0].Name != "reviewer" || agents[0].Provider != "openai" || agents[0].Prompt != "Review carefully." {
-		t.Errorf("agents = %+v", agents)
+	byName := map[string]Agent{}
+	for _, a := range agents {
+		byName[a.Name] = a
+	}
+	// Built-ins always present.
+	for _, want := range []string{"build", "plan", "explore", "general", "commit", "reviewer", "tester", "debugger"} {
+		if _, ok := byName[want]; !ok {
+			t.Errorf("missing builtin/project agent %q among %+v", want, agents)
+		}
+	}
+	// Project reviewer overrides the builtin (openai pin + custom body).
+	rev := byName["reviewer"]
+	if rev.Provider != "openai" || rev.Prompt != "Review carefully." {
+		t.Errorf("project reviewer override = %+v", rev)
+	}
+	if byName["build"].Name != "build" || byName["explore"].Prompt == "" {
+		t.Errorf("builtins malformed: build=%+v explore=%+v", byName["build"], byName["explore"])
 	}
 
 	skills := LoadSkills(work)
@@ -144,12 +159,13 @@ func TestLoadAgentsWithErrorAcceptsMultiWordUnicodeAndProjectOverride(t *testing
 	if err != nil {
 		t.Fatalf("LoadAgentsWithError() error = %v", err)
 	}
-	if len(agents) != 1 {
-		t.Fatalf("agents = %+v, want one overridden agent", agents)
+	got, ok := lookupAgent(agents, name)
+	if !ok {
+		t.Fatalf("agents = %v, missing %q", agentNames(agents), name)
 	}
 	want := Agent{Name: name, Description: "project override", Provider: "openai", Model: "secure", Prompt: "project prompt"}
-	if !reflect.DeepEqual(agents[0], want) {
-		t.Errorf("overridden agent = %+v, want %+v", agents[0], want)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("overridden agent = %+v, want %+v", got, want)
 	}
 }
 
@@ -176,8 +192,9 @@ Review carefully.
 	if err != nil {
 		t.Fatalf("LoadAgentsWithError: %v", err)
 	}
-	if len(agents) != 1 {
-		t.Fatalf("agents = %+v, want 1", agents)
+	got, ok := lookupAgent(agents, "reviewer")
+	if !ok {
+		t.Fatalf("missing reviewer among %v", agentNames(agents))
 	}
 	// Compact keys are sorted by permission name: bash, edit, write.
 	want := permission.Ruleset{
@@ -185,11 +202,11 @@ Review carefully.
 		{Permission: "edit", Pattern: "*", Action: permission.Deny},
 		{Permission: "write", Pattern: "*", Action: permission.Deny},
 	}
-	if !reflect.DeepEqual(agents[0].Permissions, want) {
-		t.Errorf("Permissions = %#v, want %#v", agents[0].Permissions, want)
+	if !reflect.DeepEqual(got.Permissions, want) {
+		t.Errorf("Permissions = %#v, want %#v", got.Permissions, want)
 	}
-	if agents[0].Description != "code review" || agents[0].Prompt != "Review carefully." {
-		t.Errorf("agent meta/prompt = %+v", agents[0])
+	if got.Description != "code review" || got.Prompt != "Review carefully." {
+		t.Errorf("agent meta/prompt = %+v", got)
 	}
 }
 
@@ -214,15 +231,16 @@ JSON perms.
 	if err != nil {
 		t.Fatalf("LoadAgentsWithError: %v", err)
 	}
-	if len(agents) != 1 {
-		t.Fatalf("agents = %+v, want 1", agents)
+	got, ok := lookupAgent(agents, "patterned")
+	if !ok {
+		t.Fatalf("missing patterned among %v", agentNames(agents))
 	}
 	want := permission.Ruleset{
 		{Permission: "bash", Pattern: "git *", Action: permission.Allow},
 		{Permission: "write", Pattern: "*", Action: permission.Deny},
 	}
-	if !reflect.DeepEqual(agents[0].Permissions, want) {
-		t.Errorf("Permissions = %#v, want %#v", agents[0].Permissions, want)
+	if !reflect.DeepEqual(got.Permissions, want) {
+		t.Errorf("Permissions = %#v, want %#v", got.Permissions, want)
 	}
 }
 
@@ -325,21 +343,31 @@ Merged.
 	if err != nil {
 		t.Fatalf("LoadAgentsWithError: %v", err)
 	}
-	if len(agents) != 1 {
-		t.Fatalf("agents = %+v, want 1", agents)
+	got, ok := lookupAgent(agents, "merge")
+	if !ok {
+		t.Fatalf("missing merge among %v", agentNames(agents))
 	}
 	want := permission.Ruleset{
 		{Permission: "edit", Pattern: "*", Action: permission.Deny},
 		{Permission: "write", Pattern: "*", Action: permission.Deny},
 		{Permission: "write", Pattern: "*", Action: permission.Allow},
 	}
-	if !reflect.DeepEqual(agents[0].Permissions, want) {
-		t.Errorf("Permissions = %#v, want %#v", agents[0].Permissions, want)
+	if !reflect.DeepEqual(got.Permissions, want) {
+		t.Errorf("Permissions = %#v, want %#v", got.Permissions, want)
 	}
 	// Sanity: last-match-wins on the agent ruleset alone allows write.
-	if got := permission.Evaluate("write", "x.go", agents[0].Permissions); got != permission.Allow {
-		t.Errorf("Evaluate write on merged rules = %q, want allow", got)
+	if ev := permission.Evaluate("write", "x.go", got.Permissions); ev != permission.Allow {
+		t.Errorf("Evaluate write on merged rules = %q, want allow", ev)
 	}
+}
+
+func lookupAgent(agents []Agent, name string) (Agent, bool) {
+	for _, a := range agents {
+		if a.Name == name {
+			return a, true
+		}
+	}
+	return Agent{}, false
 }
 
 func TestLoadSkillsWithErrorRejectsUnsafeAndReservedNamesClearly(t *testing.T) {

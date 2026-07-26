@@ -317,14 +317,10 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	)
 	registry.Register(tool.NewToolSearch(registry))
 
-	// Built-in agents first (build default, then plan). Empty Prompt means
-	// "compose shared baseline + provider overlay at request time". User
-	// agents from ~/.strike/agents and ./.strike/agents follow and may
-	// override same-named built-ins (their body becomes the persona layer).
-	agents := []engine.Agent{
-		{Name: "build", Description: "The default agent. Executes tools based on configured permissions."},
-		{Name: "plan", Description: "Plan mode. Read-only analysis and implementation plans."},
-	}
+	// Built-ins (build, plan, explore, general, commit, …) plus user agents
+	// from ~/.strike/agents and ./.strike/agents. Empty Prompt on build/plan
+	// means "compose shared baseline + provider/plan overlay at request time";
+	// other personas supply a body that becomes the persona layer.
 	loadedAgents, err := config.LoadAgentsWithError(workDir)
 	if err != nil {
 		_ = issueStore.Close()
@@ -332,12 +328,14 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("loading agents: %w", err)
 	}
+	agents := make([]engine.Agent, 0, len(loadedAgents))
 	for _, a := range loadedAgents {
-		if i := indexAgent(agents, a.Name); i >= 0 {
-			agents[i] = engine.Agent(a)
-			continue
-		}
 		agents = append(agents, engine.Agent(a))
+	}
+	if len(agents) == 0 {
+		agents = []engine.Agent{
+			{Name: "build", Description: "Default coding agent. Full tools subject to permission rules."},
+		}
 	}
 	instructions := config.LoadInstructions(workDir, projectIdentity.Root)
 	workflows, err := config.LoadWorkflows(workDir)
@@ -732,15 +730,6 @@ func isFreshStrikeHome(store *auth.Store) bool {
 		}
 	}
 	return true
-}
-
-func indexAgent(agents []engine.Agent, name string) int {
-	for i, a := range agents {
-		if a.Name == name {
-			return i
-		}
-	}
-	return -1
 }
 
 // buildCustomProvider maps a config custom provider onto the openaicompat or

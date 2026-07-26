@@ -30,11 +30,12 @@ func TestAgentFrontmatterEffortIsParsed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadAgentsWithError: %v", err)
 	}
-	if len(agents) != 1 {
-		t.Fatalf("agents = %d, want 1", len(agents))
+	got, ok := lookupAgent(agents, "deep")
+	if !ok {
+		t.Fatalf("missing deep among %v", agentNames(agents))
 	}
-	if agents[0].Effort != protocol.EffortMax {
-		t.Errorf("effort = %q, want max", agents[0].Effort)
+	if got.Effort != protocol.EffortMax {
+		t.Errorf("effort = %q, want max", got.Effort)
 	}
 }
 
@@ -49,8 +50,12 @@ func TestAgentWithoutEffortIsUnset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadAgentsWithError: %v", err)
 	}
-	if agents[0].Effort != protocol.EffortDefault {
-		t.Errorf("effort = %q, want unset", agents[0].Effort)
+	got, ok := lookupAgent(agents, "plain")
+	if !ok {
+		t.Fatalf("missing plain among %v", agentNames(agents))
+	}
+	if got.Effort != protocol.EffortDefault {
+		t.Errorf("effort = %q, want unset", got.Effort)
 	}
 }
 

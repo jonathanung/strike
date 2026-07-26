@@ -891,6 +891,22 @@ func (e *Engine) findAgent(name string) (Agent, bool) {
 	return Agent{}, false
 }
 
+func agentNamesList(agents []Agent) string {
+	if len(agents) == 0 {
+		return "(none)"
+	}
+	names := make([]string, 0, len(agents))
+	for _, a := range agents {
+		if a.Name != "" {
+			names = append(names, a.Name)
+		}
+	}
+	if len(names) == 0 {
+		return "(none)"
+	}
+	return strings.Join(names, ", ")
+}
+
 // handleSelectAgent switches the active persona and syncs workflow phase
 // when the user picks build/plan (tab, /agent, tools via SwitchAgent).
 func (e *Engine) handleSelectAgent(op protocol.SelectAgent) {
@@ -910,7 +926,7 @@ func (e *Engine) applyAgent(name string) bool {
 	if !ok {
 		e.emit(protocol.EngineError{
 			Correlation: e.sessionCorr(),
-			Message:     fmt.Sprintf("unknown agent %q", name),
+			Message:     fmt.Sprintf("unknown agent %q (available: %s)", name, agentNamesList(e.opts.Agents)),
 		})
 		return false
 	}
@@ -963,7 +979,7 @@ func (e *Engine) applyAgent(name string) bool {
 // current tool batch (before the next provider Stream) or at turn end.
 func (e *Engine) queueSwitchAgent(name string) error {
 	if _, ok := e.findAgent(name); !ok {
-		return fmt.Errorf("unknown agent %q", name)
+		return fmt.Errorf("unknown agent %q (available: %s)", name, agentNamesList(e.opts.Agents))
 	}
 	e.pendingAgentMu.Lock()
 	e.pendingAgent = name
