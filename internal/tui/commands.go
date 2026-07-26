@@ -88,7 +88,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandCost, Name: "/cost", Description: "session token and cost totals", Source: commandSourceBuiltin},
 	{ID: commandUpgrade, Name: "/upgrade", Description: "install the latest release and restart", Source: commandSourceBuiltin},
 	{ID: commandInit, Name: "/init", Description: "create or update project AGENTS.md", Source: commandSourceBuiltin},
-	{ID: commandMCP, Name: "/mcp", Description: "list MCP servers and tool status", Source: commandSourceBuiltin},
+	{ID: commandMCP, Name: "/mcp", Description: "MCP servers: status, retry, disable", ArgsHint: "[retry [name]|disable <name>]", Source: commandSourceBuiltin},
 }
 
 // commandCatalog builds the slash-command catalog from the builtins and the

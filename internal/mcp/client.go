@@ -19,18 +19,6 @@ const (
 	maxLineBytes       = 16 << 20 // 16 MiB per JSON-RPC message
 )
 
-// ServerConfig is one stdio MCP server (command + args + optional env).
-type ServerConfig struct {
-	// Name is the config key (used in tool namespaces and status).
-	Name    string
-	Command string
-	Args    []string
-	// Env overlays process environment; values are never logged.
-	Env map[string]string
-	// WorkDir is the subprocess working directory (empty = inherit).
-	WorkDir string
-}
-
 // Client is a connected stdio MCP server process.
 type Client struct {
 	cfg ServerConfig
@@ -53,8 +41,8 @@ type Client struct {
 	exitErr error
 }
 
-// Start launches the server subprocess and completes the MCP initialize handshake.
-func Start(ctx context.Context, cfg ServerConfig) (*Client, error) {
+// startStdio launches the server subprocess and completes the MCP initialize handshake.
+func startStdio(ctx context.Context, cfg ServerConfig) (*Client, error) {
 	if err := validateServerConfig(cfg); err != nil {
 		return nil, err
 	}
@@ -110,16 +98,6 @@ func Start(ctx context.Context, cfg ServerConfig) (*Client, error) {
 		return nil, err
 	}
 	return c, nil
-}
-
-func validateServerConfig(cfg ServerConfig) error {
-	if cfg.Name == "" {
-		return fmt.Errorf("mcp: empty server name")
-	}
-	if cfg.Command == "" {
-		return fmt.Errorf("mcp %s: empty command", cfg.Name)
-	}
-	return nil
 }
 
 func buildEnv(overlay map[string]string) []string {

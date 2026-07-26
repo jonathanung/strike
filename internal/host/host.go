@@ -344,18 +344,23 @@ type Roots interface {
 // MCPServerStatus is one configured external MCP server for /mcp.
 type MCPServerStatus struct {
 	Name      string
-	Command   string
-	State     string // "up", "down", "error"
+	Command   string // non-secret endpoint label (command or URL)
+	Transport string // stdio|http
+	State     string // "up", "down", "error", "disabled"
 	ToolCount int
 	Error     string
 	Tools     []string
 }
 
-// MCP reports external Model Context Protocol server status. Nil means the
-// capability is absent; frontends must degrade gracefully.
+// MCP reports external Model Context Protocol server status and control.
+// Nil means the capability is absent; frontends must degrade gracefully.
 type MCP interface {
 	// Statuses returns configured servers in stable order.
 	Statuses() []MCPServerStatus
+	// Retry reconnects name (or every non-up server when name is empty).
+	Retry(name string) error
+	// Disable stops name and unregisters its tools.
+	Disable(name string) error
 }
 
 // Services bundles everything a frontend receives from its host. Any field
