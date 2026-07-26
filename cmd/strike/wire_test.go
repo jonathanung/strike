@@ -616,6 +616,23 @@ func TestBuildCustomProvider(t *testing.T) {
 			t.Fatal("expected error for empty name")
 		}
 	})
+
+	t.Run("env baseURL and apiKeyEnv", func(t *testing.T) {
+		t.Setenv("CUSTOM_BASE", "https://env.example/v1")
+		t.Setenv("CUSTOM_KEY", "from-env")
+		p, _, err := buildCustomProvider(config.CustomProvider{
+			Name:      "envproxy",
+			BaseURL:   "{env:CUSTOM_BASE}",
+			API:       config.WireOpenAI,
+			APIKeyEnv: "{env:CUSTOM_KEY}",
+		}, store)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p == nil || p.Name() != "envproxy" {
+			t.Fatalf("provider = %v", p)
+		}
+	})
 }
 
 func TestOptionalBearer(t *testing.T) {

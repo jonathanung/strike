@@ -48,7 +48,7 @@ func TestCustomStoreRoundTrip(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	store := NewCustomStore(nil)
+	store := NewCustomStore(nil, "")
 	p := CustomProvider{
 		Name:    "kimi",
 		BaseURL: "https://api.moonshot.cn/v1",
@@ -137,7 +137,7 @@ func TestCustomStoreList(t *testing.T) {
 		{Name: "kimi", BaseURL: "https://a.example/v1", API: WireOpenAI},
 		{Name: "ollama", BaseURL: "http://localhost:11434/v1", API: WireOpenAI},
 	}
-	store := NewCustomStore(items)
+	store := NewCustomStore(items, "")
 	got := store.List()
 	if len(got) != 2 || got[0].Name != "kimi" || got[1].Name != "ollama" {
 		t.Fatalf("List = %+v", got)
@@ -147,7 +147,7 @@ func TestCustomStoreList(t *testing.T) {
 	if again[0].Name != "kimi" {
 		t.Errorf("List snapshot mutated store: %+v", again)
 	}
-	empty := NewCustomStore(nil).List()
+	empty := NewCustomStore(nil, "").List()
 	if empty == nil {
 		t.Fatal("List on empty store returned nil slice")
 	}
