@@ -10,6 +10,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"strings"
 )
 
 type Role string
@@ -110,8 +111,11 @@ type Usage struct {
 //   - Closing without a terminal event is normalized to EventError with
 //     ErrIncompleteStream so consumers never hang on an open-ended stream.
 type StreamEvent struct {
-	Type     StreamEventType
-	Text     string    // EventTextDelta
+	Type StreamEventType
+	// Text is streaming prose: EventTextDelta (final answer) or optional
+	// displayable chain-of-thought on EventReasoning. When EventReasoning
+	// leaves Text empty, consumers may try ReasoningText(Reasoning).
+	Text     string
 	ToolCall *ToolCall // EventToolCall (complete call)
 	// Reasoning is the opaque reasoning artifact for EventReasoning, to be
 	// stored on the assistant message and replayed unmodified.
@@ -121,6 +125,43 @@ type StreamEvent struct {
 	// nil means unknown (vendor omitted usage); never fabricate for real providers.
 	Usage *Usage
 	Err   error // EventError
+}
+
+// ReasoningText extracts human-readable chain-of-thought from an opaque
+// EventReasoning payload when the vendor embeds plain prose (Anthropic
+// thinking blocks, summary objects). Empty for redacted or binary-only
+// artifacts.
+func ReasoningText(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	// Plain JSON string.
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return strings.TrimSpace(s)
+	}
+	var block struct {
+		Type     string `json:"type"`
+		Thinking string `json:"thinking"`
+		Text     string `json:"text"`
+		Summary  string `json:"summary"`
+		Content  string `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &block); err != nil {
+		return ""
+	}
+	switch {
+	case strings.TrimSpace(block.Thinking) != "":
+		return strings.TrimSpace(block.Thinking)
+	case strings.TrimSpace(block.Text) != "":
+		return strings.TrimSpace(block.Text)
+	case strings.TrimSpace(block.Summary) != "":
+		return strings.TrimSpace(block.Summary)
+	case strings.TrimSpace(block.Content) != "":
+		return strings.TrimSpace(block.Content)
+	default:
+		return ""
+	}
 }
 
 // Provider streams one model response. Stream returns a channel that obeys

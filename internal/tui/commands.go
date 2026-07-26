@@ -19,6 +19,7 @@ const (
 	commandSettings        commandID = "settings"
 	commandAgent           commandID = "agent"
 	commandFast            commandID = "fast"
+	commandThink           commandID = "think"
 	commandVim             commandID = "vim"
 	commandHelp            commandID = "help"
 	commandKeys            commandID = "keys"
@@ -61,6 +62,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandSettings, Name: "/settings", Description: "manage custom providers and settings", Source: commandSourceBuiltin},
 	{ID: commandAgent, Name: "/agent", Description: "select an agent", ArgsHint: "[name]", Source: commandSourceBuiltin},
 	{ID: commandFast, Name: "/fast", Description: "toggle OpenAI priority tier (faster, ~2× cost)", ArgsHint: "[on|off]", Source: commandSourceBuiltin},
+	{ID: commandThink, Name: "/think", Description: "show or hide model chain-of-thought", ArgsHint: "[on|off]", Source: commandSourceBuiltin},
 	{ID: commandVim, Name: "/vim", Description: "open a file in the embedded editor (pane/overlay) or $EDITOR", ArgsHint: "[path[:line]]", Source: commandSourceBuiltin},
 	{ID: commandMDRead, Name: "/md-read", Description: "open a markdown file in the right pane", ArgsHint: "<path>", Source: commandSourceBuiltin},
 	{ID: commandTheme, Name: "/theme", Description: "select a color theme or set appearance", ArgsHint: "[name|dark|light|auto]", Source: commandSourceBuiltin},
@@ -135,6 +137,7 @@ var reservedCommandNames = map[string]struct{}{
 	"settings":         {},
 	"agent":            {},
 	"fast":             {},
+	"think":            {},
 	"vim":              {},
 	"md-read":          {},
 	"theme":            {},

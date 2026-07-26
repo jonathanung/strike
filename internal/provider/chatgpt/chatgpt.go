@@ -165,6 +165,10 @@ func (p *Provider) readStream(body io.Reader, ch chan<- provider.StreamEvent) er
 		switch ev.Type {
 		case "response.output_text.delta":
 			ch <- provider.StreamEvent{Type: provider.EventTextDelta, Text: ev.Delta}
+		case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
+			if ev.Delta != "" {
+				ch <- provider.StreamEvent{Type: provider.EventReasoning, Text: ev.Delta}
+			}
 		case "response.output_item.done":
 			if ev.Item != nil && ev.Item.Type == "function_call" {
 				args := json.RawMessage(ev.Item.Arguments)
