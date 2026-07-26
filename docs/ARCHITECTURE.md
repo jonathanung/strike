@@ -7,7 +7,7 @@ drift.
 ## Dataflow
 
 ```
-cmd/strike/wire.go (run) — composition root
+cmd/strike session_lifecycle.go (`run`) — composition root
 │
 ├── builds internal/engine, then reads/writes it on two channels:
 │     Ops()    chan<- protocol.Op     ◄── internal/tui submits UserInput,
@@ -43,7 +43,7 @@ event stream the TUI rendered from (see `internal/protocol/codec.go`).
 
 | Package | Role | May import |
 |---|---|---|
-| `cmd/strike` | CLI entry (`main.go`: flags, usage, `strike auth`/`exec`/`serve` subcommands) + composition root (`wire.go`: assembles engine, host/local, session store, tui) | anything — the only package that wires the whole tree |
+| `cmd/strike` | CLI entry (`main.go`) + composition root (`wire.go` stub; `assemble_tools.go`, `session_lifecycle.go`, `exec.go`, `serve.go`, `multiroot.go`) | anything — the only package that wires the whole tree |
 | `internal/server` | Experimental read-only HTTP attach: `/health`, SSE session event tail, minimal attach page (`strike serve`) | `session`, `version`, `protocol` (via session JSONL), stdlib |
 | `internal/version` | Build-time Version/Commit stamped via `-ldflags` | stdlib |
 | `internal/update` | GitHub Releases self-update (check, download, sha256, atomic replace, re-exec) | `version`, stdlib, net/http |
@@ -177,7 +177,7 @@ branch in `internal/tui/view.go` for the pattern.
    `provider/base.Client` for transport/auth/JSON-SSE/error-shaping (see
    `internal/provider/anthropic/anthropic.go` or `openaicompat/openaicompat.go`);
    for something synthetic, see `internal/provider/echo/echo.go`.
-2. Wire construction into the `selectProvider` closure in `cmd/strike/wire.go`
+2. Wire construction into the `selectProvider` closure in `cmd/strike/assemble_tools.go`
    (the `switch name { case "anthropic": ... }` block) — it returns the
    `provider.Provider`, its default model, and an error for missing
    credentials or an unknown name.
@@ -197,7 +197,7 @@ branch in `internal/tui/view.go` for the pattern.
 1. Implement `tool.Tool` (`Name`, `Description`, `Schema`, `Execute`) in a new
    file under `internal/tool/` — `internal/tool/glob.go` is a minimal
    example; `edit.go`/`write.go`/`bash.go` show the permission-ask pattern.
-2. Register it in the `tool.NewRegistry(...)` call in `cmd/strike/wire.go`.
+2. Register it in the `tool.NewRegistry(...)` call in `cmd/strike/assemble_tools.go`.
   3. If it mutates state or has side effects, call
      `tc.Ask(ctx, tool.AskRequest{Permission: "yourperm", Patterns: []string{...}})`
      inside `Execute`, and add a default rule for `"yourperm"` to
@@ -347,6 +347,17 @@ Same package `internal/engine`; split for reviewability only.
 | `restore.go` | session restore |
 | `phase.go` | multi-phase workflows |
 | `prompt.go` | system prompt assembly |
+
+
+## Composition root source map (`cmd/strike`)
+
+| File | Responsibility |
+|---|---|
+| `wire.go` | package doc only (composition root entrypoint names) |
+| `assemble_tools.go` | `assemble`: providers, tools, MCP, hooks, host services |
+| `session_lifecycle.go` | `run` / `runSession` / resume / worktree bind / `runExec` |
+| `main.go` | flags, usage, subcommand dispatch |
+| `exec.go` / `serve.go` / `multiroot.go` / `auth.go` | already-split surfaces |
 
 ## TUI theme and style boundary
 
