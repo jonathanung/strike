@@ -39,6 +39,7 @@ files under any later discovery root):
 | **reviewer** | read-only diff/PR review |
 | **tester** | run `make test` / vet / build; report only |
 | **debugger** | root-cause investigation |
+| **validator** | goal-backward requirements check; PASS/FAIL/UNVERIFIED only |
 
 **Tab cycles agents**; bare `/agent` opens a picker; `/agent [name]` selects
 directly; the active agent shows in the status bar. The `task` tool’s optional
