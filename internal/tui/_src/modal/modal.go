@@ -72,6 +72,10 @@ func newPermissionModal(req protocol.PermissionAsked, ops chan<- protocol.Op, th
 	return &permissionModal{req: req, ops: ops, feedback: in, th: th.Resolve()}
 }
 
+// permissionCountdownInterval is the delay between soft-approve ticks.
+// Production is 1s; tests may shrink it for race coverage without sleeping 15s.
+var permissionCountdownInterval = time.Second
+
 // armAutoApprove starts a visible N-second countdown that submits allow-once.
 // seconds ≤ 0 is a no-op. Returns the first tick command.
 func (m *permissionModal) armAutoApprove(seconds int) tea.Cmd {
@@ -97,7 +101,11 @@ func (m *permissionModal) countdownTick() tea.Cmd {
 	}
 	gen := m.autoGen
 	id := m.req.RequestID
-	return tea.Tick(time.Second, func(time.Time) tea.Msg {
+	interval := permissionCountdownInterval
+	if interval <= 0 {
+		interval = time.Second
+	}
+	return tea.Tick(interval, func(time.Time) tea.Msg {
 		return permissionCountdownMsg{requestID: id, gen: gen}
 	})
 }
@@ -231,7 +239,9 @@ func (m *permissionModal) view(width int, th theme.Theme) string {
 
 	var countdownLine string
 	if m.remaining > 0 && m.state == permissionModalChoice {
-		countdownLine = "\n" + wrapToWidth(st.Warning.Render("auto-allow in "+itoa(m.remaining)+"s"), inner)
+		// Product copy for soft-approve / config auto-allow (updates once/sec).
+		line := "Auto-approving once in " + itoa(m.remaining) + "s…"
+		countdownLine = "\n" + wrapToWidth(st.Warning.Render(line), inner)
 	}
 
 	if m.state == permissionModalFeedback {
@@ -272,7 +282,7 @@ func (m *permissionModal) view(width int, th theme.Theme) string {
 		}
 	}
 	if m.remaining > 0 {
-		hints = append(hints, "auto-allow "+itoa(m.remaining)+"s")
+		hints = append(hints, "auto-approve "+itoa(m.remaining)+"s")
 	}
 	return ui.Dialog(th, ui.DialogOpts{
 		Title: "permission",

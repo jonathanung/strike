@@ -14,7 +14,7 @@ JSON:
   "vimMode": "pane",
   "notify": "unfocused-only",
   "permissionMode": "default",
-  "permissionAutoApproveSeconds": 10,
+  "permissionAutoApproveSeconds": 0,
   "permissionAutoApproveExclude": ["bash"],
   "compactionStrategy": "trim",
   "compactionModel": "",
@@ -33,10 +33,10 @@ Rules concatenate across layers; the last matching rule wins, so project
 config overrides global, and session "always" grants override both.
 
 **Permission mode dial:** `permissionMode` sets the default tool-permission
-posture for **new** sessions: `default` | `plan` | `accept-edits` | `yolo`
-(see [usage.md](usage.md)). Session changes via Shift+Tab or `/mode` persist
-in the session JSONL, not back into this file. Distinct from `/autonomy`
-(workflow exit gates).
+posture for **new** sessions: `default` | `plan` | `soft-approve` |
+`accept-edits` | `yolo` (see [usage.md](usage.md)). Session changes via
+Shift+Tab or `/mode` persist in the session JSONL, not back into this file.
+Distinct from `/autonomy` (workflow exit gates).
 
 **Lean code:** `leanCode` is `off` | `lite` (default) | `full`. Injects
 agent-scoped efficiency guidance into the system prompt (strict ladder for
@@ -45,10 +45,16 @@ none for explore/reviewer/tester/validator/commit). Inspired by
 [ponytail](https://github.com/DietrichGebert/ponytail) (clean-room wording).
 Details: [agents-skills.md](agents-skills.md#lean-code-ponytail-lite).
 
-**Permission auto-approve (yolo-lite):** when `permissionAutoApproveSeconds`
-is a positive integer (clamped to 1–60), the permission modal counts down and
-submits **allow once** at zero. Esc, reject, or any explicit choice cancels
-the timer. Disabled by default (`0` / omitted). Names in
+**Permission soft-approve / auto-approve:** session mode `soft-approve`
+(`permissionMode`, `/mode`, Shift+Tab) arms a **visible** 15s countdown on
+permission asks and submits **allow once** at zero if the user does nothing.
+Esc, reject, or any explicit once/session/project choice cancels the timer.
+Hard deny rules always win. Queued/hidden asks (behind another modal) do not
+count down or auto-approve. Disabled by default (mode `default`, seconds `0`).
+
+`permissionAutoApproveSeconds` (1–60) optionally sets/overrides the countdown
+duration without selecting soft-approve mode; when soft-approve is active and
+seconds is unset/`0`, the default is **15**. Names in
 `permissionAutoApproveExclude` (case-insensitive) never auto-approve.
 
 ## Desktop notifications (`notify`)
