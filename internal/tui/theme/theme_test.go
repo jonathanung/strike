@@ -485,10 +485,14 @@ func TestDefaultThemeCarriesDefaultIcons(t *testing.T) {
 		"Prompt": ic.Prompt, "Assistant": ic.Assistant, "Tool": ic.Tool,
 		"OK": ic.OK, "Err": ic.Err, "Info": ic.Info, "Agent": ic.Agent,
 		"Bolt": ic.Bolt, "Dot": ic.Dot, "Cursor": ic.Cursor,
+		"FocusBar": ic.FocusBar, "FilterCursor": ic.FilterCursor, "ToolGuide": ic.ToolGuide,
 	} {
 		if glyph == "" {
 			t.Errorf("DefaultIcons().%s is empty", name)
 		}
+	}
+	if lipgloss.Width(ic.FocusBar) != 1 {
+		t.Errorf("DefaultIcons().FocusBar width = %d, want 1 cell", lipgloss.Width(ic.FocusBar))
 	}
 }
 

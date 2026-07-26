@@ -17,6 +17,7 @@ type Icons struct {
 	InputCursor     string // > composer/text-input cursor
 	FilterCursor    string // ▏ active filter cursor
 	ToolGuide       string // │ tool transcript guide
+	FocusBar        string // ▏ solid-chrome focused pane edge marker (one cell)
 	BadgeLeft       string // [ badge opening delimiter
 	BadgeRight      string // ] badge closing delimiter
 	DetailSeparator string // — list detail separator
@@ -50,6 +51,7 @@ func DefaultIcons() Icons {
 		InputCursor:  ">",
 		FilterCursor: "▏",
 		ToolGuide:    "│",
+		FocusBar:     "▏",
 		BadgeLeft:    "[", BadgeRight: "]", DetailSeparator: "—", Ellipsis: "…",
 		LogoTopRule: "▁", LogoBottomRule: "▔",
 		MeterFill: "█", MeterEmpty: "░",
@@ -97,6 +99,9 @@ func resolveIcons(i, d Icons) Icons {
 	}
 	if i.ToolGuide == "" {
 		i.ToolGuide = d.ToolGuide
+	}
+	if i.FocusBar == "" {
+		i.FocusBar = d.FocusBar
 	}
 	if i.BadgeLeft == "" {
 		i.BadgeLeft = d.BadgeLeft

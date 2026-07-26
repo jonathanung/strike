@@ -52,7 +52,8 @@ type PanelOpts struct {
 // that is still too long.
 //
 // Focus chrome (solid): title edge uses SurfaceFocus and body keeps Surface,
-// with a one-cell BorderFocus leading bar — never a full-panel highlight wash.
+// with a one-cell thin FocusBar glyph (BorderFocus foreground on Surface) —
+// never a solid fill block or full-panel highlight wash.
 // Selection highlight is a separate theme role (TextSelection).
 func Panel(th theme.Theme, opts PanelOpts, body string) string {
 	th = th.Resolve()
@@ -102,13 +103,13 @@ func renderSolidPanel(th theme.Theme, opts PanelOpts, width, padX int, rows []st
 	var b strings.Builder
 	b.WriteString(solidEdge(th, opts.Title, width, padX, edgeBg, titleStyle))
 	pad := strings.Repeat(" ", padX)
-	// Leading bar reuses the left padding column so content width is stable.
+	// Leading thin rule reuses the left padding column so content width is stable.
 	focusBar := opts.Focused && opts.Tone == ToneDefault && width >= 2 && padX > 0
 	for _, row := range rows {
 		b.WriteByte('\n')
 		content := pad + row + pad
 		if focusBar {
-			b.WriteString(paintFocusBarRow(content, width, bodyBg, th.BorderFocus))
+			b.WriteString(paintFocusBarRow(th, content, width, bodyBg, th.BorderFocus))
 		} else {
 			b.WriteString(paintSurface(content, width, bodyBg))
 		}
@@ -118,18 +119,30 @@ func renderSolidPanel(th theme.Theme, opts PanelOpts, width, padX int, rows []st
 	return b.String()
 }
 
-// paintFocusBarRow paints a one-cell leading focus bar, then the body surface.
-// Layout width is unchanged: the bar reuses the left padding column.
-func paintFocusBarRow(content string, width int, bg, bar lipgloss.TerminalColor) string {
+// paintFocusBarRow paints a one-cell thin focus rule, then the body surface.
+// The rule is Icons.FocusBar in BorderFocus foreground on the body fill — not a
+// solid background block — so the edge reads as a quiet marker. Layout width is
+// unchanged: the glyph reuses the left padding column.
+func paintFocusBarRow(th theme.Theme, content string, width int, bg, bar lipgloss.TerminalColor) string {
 	if width < 2 {
 		return paintSurface(content, width, bg)
 	}
 	rest := content
-	if ansiWidth := lipgloss.Width(content); ansiWidth > 0 {
-		// Drop the first display cell (padding space); bar replaces it.
+	if lipgloss.Width(content) > 0 {
+		// Drop the first display cell (padding space); rule replaces it.
 		rest = cutFirstCell(content)
 	}
-	return paintSurface(" ", 1, bar) + paintSurface(rest, width-1, bg)
+	glyph := focusBarGlyph(th)
+	marker := lipgloss.NewStyle().Foreground(bar).Render(glyph)
+	return paintSurface(marker, 1, bg) + paintSurface(rest, width-1, bg)
+}
+
+func focusBarGlyph(th theme.Theme) string {
+	g := th.Resolve().Icons.FocusBar
+	if lipgloss.Width(g) == 1 {
+		return g
+	}
+	return theme.DefaultIcons().FocusBar
 }
 
 func cutFirstCell(s string) string {

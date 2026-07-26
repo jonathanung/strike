@@ -249,7 +249,7 @@ func TestPanelFocusStateChangesRenderedChrome(t *testing.T) {
 	if unfocused == dim {
 		t.Error("dim and normal panels render identically; SurfaceMuted not applied")
 	}
-	// Focused body must not flood SurfaceFocus; title edge + bar carry focus.
+	// Focused body must not flood SurfaceFocus; title edge + thin rule carry focus.
 	bodyLine := strings.Split(focused, "\n")[1]
 	if strings.Count(bodyLine, "48;2;34;34;34") > 2 {
 		// SurfaceFocus RGB 34,34,34 — body should not be washed with it.
@@ -258,13 +258,69 @@ func TestPanelFocusStateChangesRenderedChrome(t *testing.T) {
 	if !strings.Contains(firstLine(focused), "48;2;34;34;34") {
 		t.Errorf("focused title edge missing SurfaceFocus: %q", firstLine(focused))
 	}
-	if !strings.Contains(bodyLine, "48;2;51;51;51") {
-		t.Errorf("focused body missing BorderFocus leading bar: %q", bodyLine)
+	// Thin rule: BorderFocus as foreground (38;2), not a solid background block (48;2).
+	if !strings.Contains(bodyLine, "38;2;51;51;51") {
+		t.Errorf("focused body missing BorderFocus thin rule fg: %q", bodyLine)
+	}
+	if strings.Contains(bodyLine, "48;2;51;51;51") {
+		t.Errorf("focused body still paints solid BorderFocus fill bar: %q", bodyLine)
+	}
+	if !strings.Contains(ansi.Strip(bodyLine), th.Resolve().Icons.FocusBar) {
+		t.Errorf("focused body missing FocusBar glyph: %q", ansi.Strip(bodyLine))
+	}
+	// Body surface fill remains under the rule cell (quiet chrome, not a wash).
+	if !strings.Contains(bodyLine, "48;2;17;17;17") {
+		t.Errorf("focused body missing Surface under thin rule: %q", bodyLine)
 	}
 	for name, out := range map[string]string{"focused": focused, "unfocused": unfocused, "dim": dim} {
 		if w := lipgloss.Width(out); w != 24 {
 			t.Errorf("%s panel width = %d with color enabled, want 24", name, w)
 		}
+	}
+}
+
+func TestPanelFocusedThinBarWidthSafeAt80AndNarrow(t *testing.T) {
+	saved := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(saved) })
+
+	th := theme.Default()
+	th.BorderFocus = lipgloss.AdaptiveColor{Light: "#abcdef", Dark: "#abcdef"}
+	body := strings.Join([]string{
+		"the quick brown fox jumps over the lazy dog and keeps going",
+		"second line with 界 wide runes and more text to wrap pressure",
+		"third",
+	}, "\n")
+	for _, width := range []int{3, 4, 8, 24, 40, 80} {
+		for _, height := range []int{0, 4, 24} {
+			out := Panel(th, PanelOpts{Title: "session", Footer: "hint", Width: width, Height: height, Focused: true}, body)
+			lines := strings.Split(out, "\n")
+			if height > 0 && len(lines) != height {
+				t.Errorf("width=%d height=%d: rows=%d, want %d", width, height, len(lines), height)
+			}
+			for i, line := range lines {
+				if w := lipgloss.Width(line); w != width {
+					t.Errorf("width=%d height=%d line %d: got %d cells", width, height, i, w)
+				}
+			}
+			if width >= 3 {
+				plain := ansi.Strip(out)
+				if !strings.Contains(plain, th.Resolve().Icons.FocusBar) {
+					t.Errorf("width=%d focused panel missing FocusBar glyph: %q", width, plain)
+				}
+			}
+		}
+	}
+	// Custom multi-cell FocusBar must fall back so width stays exact.
+	th.Icons.FocusBar = ">>"
+	out := Panel(th, PanelOpts{Title: "t", Width: 20, Focused: true}, "body")
+	for i, line := range strings.Split(out, "\n") {
+		if w := lipgloss.Width(line); w != 20 {
+			t.Errorf("fallback FocusBar line %d width=%d, want 20", i, w)
+		}
+	}
+	if !strings.Contains(ansi.Strip(out), theme.DefaultIcons().FocusBar) {
+		t.Errorf("invalid FocusBar did not fall back to default: %q", ansi.Strip(out))
 	}
 }
 

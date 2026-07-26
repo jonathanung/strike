@@ -83,6 +83,7 @@ otherwise `Background` resolves to a solid `lipgloss.TerminalColor`.
 
 `Icons` fields are `Prompt`, `Assistant`, `Tool`, `OK`, `Err`, `Info`,
 `Agent`, `Bolt`, `Dot`, `Cursor`, `InputCursor`, `FilterCursor`, `ToolGuide`,
+`FocusBar`,
 `BadgeLeft`, `BadgeRight`, `DetailSeparator`, `Ellipsis`, `LogoTopRule`,
 `LogoBottomRule`, `MeterFill`, `MeterEmpty`, `TreeExpanded`,
 `TreeCollapsed`, and `Sparkline` (low→high bar runes). Use `th.Icons`, never

@@ -569,7 +569,7 @@ func welcomeCardBounds(t *testing.T, lines []string, title string) welcomeBounds
 		}
 		bottom := top
 		for r := top + 1; r < len(lines); r++ {
-			span := strings.TrimSpace(sliceDisplayCols(lines[r], left, right+1))
+			span := stripWelcomeChromePrefix(sliceDisplayCols(lines[r], left, right+1))
 			if r > top+1 && span != "" && !strings.HasPrefix(span, "·") && !strings.HasPrefix(span, "◦") && !strings.HasPrefix(span, "✓") {
 				isTitle := false
 				for _, other := range []string{"get started", "keys", "agents & skills", "recent prompts"} {
@@ -590,6 +590,16 @@ func welcomeCardBounds(t *testing.T, lines []string, title string) welcomeBounds
 	return welcomeBounds{}
 }
 
+// stripWelcomeChromePrefix drops outer-pane pad/focus-bar cells so card body
+// detection sees content glyphs (· ◦ ✓) rather than the thin FocusBar rule.
+func stripWelcomeChromePrefix(s string) string {
+	s = strings.TrimSpace(s)
+	if fb := theme.DefaultIcons().FocusBar; fb != "" && strings.HasPrefix(s, fb) {
+		s = strings.TrimSpace(strings.TrimPrefix(s, fb))
+	}
+	return s
+}
+
 func assertVisibleWelcomeCardsClosed(t *testing.T, m Model, view string) {
 	t.Helper()
 	if m.focus == focusRight {
@@ -605,7 +615,7 @@ func assertVisibleWelcomeCardsClosed(t *testing.T, m Model, view string) {
 func welcomeCardPromptRows(lines []string, card welcomeBounds) []string {
 	var rows []string
 	for _, line := range lines[card.top+1 : card.bottom] {
-		body := strings.TrimSpace(sliceDisplayCols(line, card.left, card.right+1))
+		body := stripWelcomeChromePrefix(sliceDisplayCols(line, card.left, card.right+1))
 		if strings.HasPrefix(body, "· ") {
 			rows = append(rows, body)
 		}
