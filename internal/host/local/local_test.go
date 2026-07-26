@@ -31,7 +31,7 @@ func newTestServices(t *testing.T) (host.Services, *auth.Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return New(store, nil, nil, nil, []string{"build", "plan"}, nil, nil), store
+	return New(store, nil, nil, nil, []string{"build", "plan"}, nil, nil, ""), store
 }
 
 func statusByName(statuses []host.ProviderStatus) map[string]host.ProviderStatus {
@@ -139,7 +139,7 @@ func TestSetAPIKeyTrimsAndPersists0600(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := New(store, nil, nil, nil, nil, nil, nil)
+	svc := New(store, nil, nil, nil, nil, nil, nil, "")
 
 	if err := svc.Auth.SetAPIKey("anthropic", "  sk-trim  "); err != nil {
 		t.Fatal(err)
@@ -223,7 +223,7 @@ func TestSkillMappingAndFiltering(t *testing.T) {
 		{Name: "auth", Description: "reserved", Template: "x"},      // reserved name -> filtered
 		{Name: "bad name", Description: "has space", Template: "y"}, // invalid name -> filtered
 	}
-	svc := New(nil, nil, nil, nil, nil, skills, nil)
+	svc := New(nil, nil, nil, nil, nil, skills, nil, "")
 
 	if len(svc.Skills) != 2 {
 		t.Fatalf("got %d skills, want 2: %+v", len(svc.Skills), svc.Skills)
@@ -260,7 +260,7 @@ func TestSkillMappingAndFiltering(t *testing.T) {
 func TestSaveDefaultsWritesGlobalConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	svc := New(nil, nil, nil, nil, nil, nil, nil)
+	svc := New(nil, nil, nil, nil, nil, nil, nil, "")
 
 	if err := svc.Settings.SaveDefaults("openai", "gpt-5.5", "build", "high"); err != nil {
 		t.Fatal(err)
@@ -281,7 +281,7 @@ func TestSaveDefaultsWritesGlobalConfig(t *testing.T) {
 func TestSaveThemeWritesGlobalConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	svc := New(nil, nil, nil, nil, nil, nil, nil)
+	svc := New(nil, nil, nil, nil, nil, nil, nil, "")
 	if err := svc.Settings.SaveTheme("dracula"); err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +299,7 @@ func TestSaveThemeWritesGlobalConfig(t *testing.T) {
 }
 
 func TestHistoryNilTolerated(t *testing.T) {
-	svc := New(nil, nil, nil, nil, nil, nil, nil)
+	svc := New(nil, nil, nil, nil, nil, nil, nil, "")
 	if svc.History != nil {
 		t.Errorf("nil hist should yield nil Services.History, got %#v", svc.History)
 	}
@@ -318,7 +318,7 @@ func TestHistoryWiredThrough(t *testing.T) {
 	}
 	defer hist.Close()
 
-	svc := New(nil, hist, nil, nil, nil, nil, nil)
+	svc := New(nil, hist, nil, nil, nil, nil, nil, "")
 	if svc.History == nil {
 		t.Fatal("Services.History should be non-nil when hist is provided")
 	}
@@ -337,7 +337,7 @@ func TestMemoryWiredThrough(t *testing.T) {
 	}
 	defer mem.Close()
 
-	svc := New(nil, nil, mem, nil, nil, nil, nil)
+	svc := New(nil, nil, mem, nil, nil, nil, nil, "")
 	if svc.Memory == nil {
 		t.Fatal("Services.Memory should be non-nil when mem is provided")
 	}
@@ -366,7 +366,7 @@ func TestMemoryListFilterAndAll(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer mem.Close()
-	svc := New(nil, nil, mem, nil, nil, nil, nil)
+	svc := New(nil, nil, mem, nil, nil, nil, nil, "")
 
 	empty, err := svc.Memory.List("")
 	if err != nil || len(empty) != 0 {
@@ -405,6 +405,48 @@ func TestMemoryListFilterAndAll(t *testing.T) {
 	}
 }
 
+func TestMemoryExportImportPathSafe(t *testing.T) {
+	work := t.TempDir()
+	mem, err := memory.Open(t.TempDir(), "project-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mem.Close()
+	svc := New(nil, nil, mem, nil, nil, nil, nil, work)
+	if err := svc.Memory.Put("k", "v", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.Memory.Export("../escape.json"); err == nil {
+		t.Fatal("expected path escape error for relative ..")
+	}
+	if err := svc.Memory.Export("backup/memory.json"); err != nil {
+		t.Fatal(err)
+	}
+	wantPath := filepath.Join(work, "backup", "memory.json")
+	if _, err := os.Stat(wantPath); err != nil {
+		t.Fatalf("export file missing: %v", err)
+	}
+
+	// Absolute path outside work dir is intentional and allowed.
+	abs := filepath.Join(t.TempDir(), "out.json")
+	if err := svc.Memory.Export(abs); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wipe and re-import from relative path.
+	if _, err := svc.Memory.Import("backup/memory.json", true); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := svc.Memory.Get("k")
+	if err != nil || !ok || got.Value != "v" {
+		t.Fatalf("after import = %+v ok=%v err=%v", got, ok, err)
+	}
+	if _, err := svc.Memory.Import("../escape.json", true); err == nil {
+		t.Fatal("expected import path escape error")
+	}
+}
+
 func TestIssuesWiredThrough(t *testing.T) {
 	issStore, err := issue.Open(t.TempDir(), "project-key")
 	if err != nil {
@@ -412,7 +454,7 @@ func TestIssuesWiredThrough(t *testing.T) {
 	}
 	defer issStore.Close()
 
-	svc := New(nil, nil, nil, issStore, nil, nil, nil)
+	svc := New(nil, nil, nil, issStore, nil, nil, nil, "")
 	if svc.Issues == nil {
 		t.Fatal("Services.Issues should be non-nil when issues is provided")
 	}
@@ -437,13 +479,39 @@ func TestIssuesWiredThrough(t *testing.T) {
 	}
 }
 
+func TestIssuesExportImportPathSafe(t *testing.T) {
+	work := t.TempDir()
+	issStore, err := issue.Open(t.TempDir(), "project-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer issStore.Close()
+	svc := New(nil, nil, nil, issStore, nil, nil, nil, work)
+	if _, err := svc.Issues.Create("fix", "body"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Issues.Export("../escape.json"); err == nil {
+		t.Fatal("expected path escape error")
+	}
+	if err := svc.Issues.Export("backup/issues.json"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(work, "backup", "issues.json")); err != nil {
+		t.Fatal(err)
+	}
+	n, err := svc.Issues.Import("backup/issues.json", true)
+	if err != nil || n != 1 {
+		t.Fatalf("import = %d err=%v", n, err)
+	}
+}
+
 func TestIssuesUpdateAndList(t *testing.T) {
 	issStore, err := issue.Open(t.TempDir(), "project-key")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer issStore.Close()
-	svc := New(nil, nil, nil, issStore, nil, nil, nil)
+	svc := New(nil, nil, nil, issStore, nil, nil, nil, "")
 
 	a, err := svc.Issues.Create("one", "body-a")
 	if err != nil {
@@ -508,7 +576,7 @@ func TestCatalogFromCache(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cacheDir, "models.json"), []byte(catalog), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	svc := New(nil, nil, nil, nil, nil, nil, nil)
+	svc := New(nil, nil, nil, nil, nil, nil, nil, "")
 
 	ids, err := svc.Catalog.ModelIDs(context.Background(), "anthropic")
 	if err != nil {
@@ -539,7 +607,7 @@ func TestCatalogContextWindowAndOutputLimitFromCache(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cacheDir, "models.json"), []byte(catalog), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	svc := New(nil, nil, nil, nil, nil, nil, nil)
+	svc := New(nil, nil, nil, nil, nil, nil, nil, "")
 	ctx := context.Background()
 
 	tokens, ok, err := svc.Catalog.ContextWindow(ctx, "openai", "gpt-big")
@@ -588,7 +656,7 @@ func TestCatalogModelsMetadataFromCache(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cacheDir, "models.json"), []byte(catalog), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	svc := New(nil, nil, nil, nil, nil, nil, nil)
+	svc := New(nil, nil, nil, nil, nil, nil, nil, "")
 	infos, err := svc.Catalog.Models(context.Background(), "openai")
 	if err != nil {
 		t.Fatal(err)

@@ -71,8 +71,8 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandSession, Name: "/session", Description: "browse and resume a past session", ArgsHint: "[id]", Source: commandSourceBuiltin},
 	{ID: commandHelp, Name: "/help", Description: "show available commands", Source: commandSourceBuiltin},
 	{ID: commandKeys, Name: "/keys", Description: "show keyboard shortcuts", ArgsHint: "[reset]", Source: commandSourceBuiltin},
-	{ID: commandMemory, Name: "/memory", Description: "list, get, set, or delete project memory", ArgsHint: "[list|get|set|rm] ...", Source: commandSourceBuiltin},
-	{ID: commandIssues, Name: "/issues", Description: "list, add, get, or close project issues", ArgsHint: "[list|add|get|close] ...", Source: commandSourceBuiltin},
+	{ID: commandMemory, Name: "/memory", Description: "list, get, set, delete, export, or import project memory", ArgsHint: "[list|get|set|rm|export|import] ...", Source: commandSourceBuiltin},
+	{ID: commandIssues, Name: "/issues", Description: "list, add, get, close, export, or import project issues", ArgsHint: "[list|add|get|close|export|import] ...", Source: commandSourceBuiltin},
 	{ID: commandContext, Name: "/context", Description: "inspect effective system-prompt layers", Source: commandSourceBuiltin},
 	{ID: commandEffectivePrompt, Name: "/effective-prompt", Description: "inspect effective system-prompt layers", Source: commandSourceBuiltin},
 }

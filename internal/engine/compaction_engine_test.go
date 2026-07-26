@@ -104,6 +104,334 @@ func TestManualCompactReplacesOlderHistory(t *testing.T) {
 	}
 }
 
+func TestSummarizeCompactReplacesOlderHistory(t *testing.T) {
+	matchSummarize := func(req provider.Request) bool {
+		if len(req.Tools) != 0 {
+			return false
+		}
+		for _, m := range req.Messages {
+			if m.Role == provider.RoleUser && strings.Contains(m.Text, "Summarize this conversation history") {
+				return true
+			}
+		}
+		return false
+	}
+	prov := newScriptedProvider(
+		streamStep{events: []provider.StreamEvent{
+			{Type: provider.EventTextDelta, Text: "r1"},
+			{Type: provider.EventDone, StopReason: "end_turn"},
+		}},
+		streamStep{events: []provider.StreamEvent{
+			{Type: provider.EventTextDelta, Text: "r2"},
+			{Type: provider.EventDone, StopReason: "end_turn"},
+		}},
+		streamStep{
+			match: matchSummarize,
+			events: []provider.StreamEvent{
+				{Type: provider.EventTextDelta, Text: "SUMMARY: first turn about foo"},
+				{Type: provider.EventDone, StopReason: "end_turn"},
+			},
+		},
+		streamStep{events: []provider.StreamEvent{
+			{Type: provider.EventTextDelta, Text: "r3"},
+			{Type: provider.EventDone, StopReason: "end_turn"},
+		}},
+	)
+	eng := engine.New(engine.Options{
+		SessionID:          "session-summarize-compact",
+		Select:             func(string) (provider.Provider, string, error) { return prov, "cheap-model", nil },
+		InitialProvider:    "scripted",
+		Registry:           tool.NewRegistry(),
+		WorkDir:            t.TempDir(),
+		Rules:              []permission.Ruleset{permission.Defaults()},
+		KeepUserTurns:      1,
+		CompactionStrategy: protocol.CompactionStrategySummarize,
+		CompactionModel:    "summary-model",
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "first about foo"}
+	waitCompactTurn(t, eng)
+	eng.Ops() <- protocol.UserInput{Text: "second"}
+	waitCompactTurn(t, eng)
+
+	eng.Ops() <- protocol.Compact{}
+	var started protocol.CompactionStarted
+	var completed protocol.CompactionCompleted
+	var sumReq provider.Request
+	gotSumReq := false
+	deadline := time.After(5 * time.Second)
+	for completed.Reason == "" {
+		select {
+		case r := <-prov.requests:
+			if matchSummarize(r) {
+				sumReq = r
+				gotSumReq = true
+			}
+		case ev := <-eng.Events():
+			switch ev := ev.(type) {
+			case protocol.CompactionStarted:
+				started = ev
+			case protocol.CompactionCompleted:
+				completed = ev
+			case protocol.EngineError:
+				t.Fatalf("unexpected EngineError: %s", ev.Message)
+			case protocol.TextDelta:
+				t.Fatalf("summarize must not emit TextDelta into transcript: %q", ev.Text)
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for summarize compaction")
+		}
+	}
+	if started.Strategy != protocol.CompactionStrategySummarize {
+		t.Fatalf("started strategy = %q", started.Strategy)
+	}
+	if completed.Strategy != protocol.CompactionStrategySummarize {
+		t.Fatalf("completed strategy = %q", completed.Strategy)
+	}
+	if completed.Summary != "SUMMARY: first turn about foo" {
+		t.Fatalf("summary = %q", completed.Summary)
+	}
+	if completed.Removed < 1 {
+		t.Fatalf("removed = %d", completed.Removed)
+	}
+	// Drain any request that raced past CompactionCompleted in the select.
+	for !gotSumReq {
+		select {
+		case r := <-prov.requests:
+			if matchSummarize(r) {
+				sumReq = r
+				gotSumReq = true
+			}
+		default:
+			goto afterSumReq
+		}
+	}
+afterSumReq:
+	if !gotSumReq {
+		t.Fatal("summarize Stream request not observed")
+	}
+	if sumReq.Model != "summary-model" {
+		t.Fatalf("summarize model = %q, want summary-model", sumReq.Model)
+	}
+	if len(sumReq.Tools) != 0 {
+		t.Fatalf("summarize must not send tools: %#v", sumReq.Tools)
+	}
+
+	eng.Ops() <- protocol.UserInput{Text: "third"}
+	req := waitCompactTurnRequest(t, eng, prov)
+	foundSummary := false
+	foundFirst := false
+	foundThird := false
+	for _, m := range req.Messages {
+		if m.Role == provider.RoleUser && strings.Contains(m.Text, "SUMMARY: first turn about foo") {
+			foundSummary = true
+		}
+		if m.Role == provider.RoleUser && m.Text == "first about foo" {
+			foundFirst = true
+		}
+		if m.Role == provider.RoleUser && m.Text == "third" {
+			foundThird = true
+		}
+	}
+	if !foundSummary {
+		t.Fatalf("summary missing in next Stream history: %#v", req.Messages)
+	}
+	if foundFirst {
+		t.Fatalf("old first turn should not appear: %#v", req.Messages)
+	}
+	if !foundThird {
+		t.Fatalf("third intent missing: %#v", req.Messages)
+	}
+	if !historyToolPairsOK(req.Messages) {
+		t.Fatalf("invalid tool pairs after summarize: %#v", req.Messages)
+	}
+}
+
+func historyToolPairsOK(msgs []provider.Message) bool {
+	pending := map[string]struct{}{}
+	for _, m := range msgs {
+		switch m.Role {
+		case provider.RoleAssistant:
+			for _, c := range m.ToolCalls {
+				if c.ID == "" {
+					return false
+				}
+				pending[c.ID] = struct{}{}
+			}
+		case provider.RoleTool:
+			if m.ToolResult == nil || m.ToolResult.CallID == "" {
+				return false
+			}
+			if _, ok := pending[m.ToolResult.CallID]; !ok {
+				return false
+			}
+			delete(pending, m.ToolResult.CallID)
+		}
+	}
+	return len(pending) == 0
+}
+
+func TestSummarizeCompactFallsBackToTrim(t *testing.T) {
+	matchSummarize := func(req provider.Request) bool {
+		for _, m := range req.Messages {
+			if m.Role == provider.RoleUser && strings.Contains(m.Text, "Summarize this conversation history") {
+				return true
+			}
+		}
+		return false
+	}
+	prov := newScriptedProvider(
+		streamStep{events: []provider.StreamEvent{
+			{Type: provider.EventTextDelta, Text: "r1"},
+			{Type: provider.EventDone, StopReason: "end_turn"},
+		}},
+		streamStep{events: []provider.StreamEvent{
+			{Type: provider.EventTextDelta, Text: "r2"},
+			{Type: provider.EventDone, StopReason: "end_turn"},
+		}},
+		streamStep{match: matchSummarize, err: errors.New("summarizer unavailable")},
+		streamStep{events: []provider.StreamEvent{
+			{Type: provider.EventTextDelta, Text: "r3"},
+			{Type: provider.EventDone, StopReason: "end_turn"},
+		}},
+	)
+	eng := engine.New(engine.Options{
+		SessionID:          "session-summarize-fallback",
+		Select:             func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider:    "scripted",
+		Registry:           tool.NewRegistry(),
+		WorkDir:            t.TempDir(),
+		Rules:              []permission.Ruleset{permission.Defaults()},
+		KeepUserTurns:      1,
+		CompactionStrategy: protocol.CompactionStrategySummarize,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "first"}
+	waitCompactTurn(t, eng)
+	eng.Ops() <- protocol.UserInput{Text: "second"}
+	waitCompactTurn(t, eng)
+
+	eng.Ops() <- protocol.Compact{}
+	var completed protocol.CompactionCompleted
+	var sawFallback bool
+	deadline := time.After(5 * time.Second)
+	for completed.Reason == "" {
+		select {
+		case ev := <-eng.Events():
+			switch ev := ev.(type) {
+			case protocol.CompactionCompleted:
+				completed = ev
+			case protocol.EngineError:
+				if strings.Contains(ev.Message, "fell back to trim") {
+					sawFallback = true
+				}
+			}
+		case <-deadline:
+			t.Fatal("timed out")
+		}
+	}
+	if !sawFallback {
+		t.Fatal("expected fallback EngineError notice")
+	}
+	if completed.Strategy != protocol.CompactionStrategyTrim {
+		t.Fatalf("applied strategy = %q, want trim", completed.Strategy)
+	}
+	if completed.Summary != "" {
+		t.Fatalf("summary should be empty on trim fallback: %q", completed.Summary)
+	}
+
+	eng.Ops() <- protocol.UserInput{Text: "third"}
+	req := waitCompactTurnRequest(t, eng, prov)
+	foundMarker := false
+	foundSummaryWord := false
+	for _, m := range req.Messages {
+		if m.Role == provider.RoleUser && strings.HasPrefix(m.Text, "[Prior conversation compacted") {
+			foundMarker = true
+			if strings.Contains(m.Text, "summary of") {
+				foundSummaryWord = true
+			}
+		}
+	}
+	if !foundMarker {
+		t.Fatalf("trim marker missing: %#v", req.Messages)
+	}
+	if foundSummaryWord {
+		t.Fatalf("should not use summary marker after fallback: %#v", req.Messages)
+	}
+}
+
+func TestSummarizeOpOverride(t *testing.T) {
+	matchSummarize := func(req provider.Request) bool {
+		for _, m := range req.Messages {
+			if m.Role == provider.RoleUser && strings.Contains(m.Text, "Summarize this conversation history") {
+				return true
+			}
+		}
+		return false
+	}
+	prov := newScriptedProvider(
+		streamStep{events: []provider.StreamEvent{
+			{Type: provider.EventTextDelta, Text: "r1"},
+			{Type: provider.EventDone, StopReason: "end_turn"},
+		}},
+		streamStep{events: []provider.StreamEvent{
+			{Type: provider.EventTextDelta, Text: "r2"},
+			{Type: provider.EventDone, StopReason: "end_turn"},
+		}},
+		streamStep{
+			match: matchSummarize,
+			events: []provider.StreamEvent{
+				{Type: provider.EventTextDelta, Text: "op-override-summary"},
+				{Type: provider.EventDone, StopReason: "end_turn"},
+			},
+		},
+	)
+	// Default strategy is trim; op requests summarize.
+	eng := engine.New(engine.Options{
+		SessionID:       "session-op-override",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+		KeepUserTurns:   1,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "first"}
+	waitCompactTurn(t, eng)
+	eng.Ops() <- protocol.UserInput{Text: "second"}
+	waitCompactTurn(t, eng)
+
+	eng.Ops() <- protocol.Compact{Strategy: protocol.CompactionStrategySummarize}
+	var completed protocol.CompactionCompleted
+	deadline := time.After(5 * time.Second)
+	for completed.Reason == "" {
+		select {
+		case ev := <-eng.Events():
+			switch ev := ev.(type) {
+			case protocol.CompactionCompleted:
+				completed = ev
+			case protocol.EngineError:
+				t.Fatalf("EngineError: %s", ev.Message)
+			}
+		case <-deadline:
+			t.Fatal("timed out")
+		}
+	}
+	if completed.Strategy != protocol.CompactionStrategySummarize || completed.Summary != "op-override-summary" {
+		t.Fatalf("completed = %#v", completed)
+	}
+}
+
 func TestThresholdCompactionBeforeStream(t *testing.T) {
 	// Three scripted responses: seed-a, seed-b (reports high usage), then
 	// third turn auto-compacts before Stream.
@@ -154,10 +482,95 @@ func TestThresholdCompactionBeforeStream(t *testing.T) {
 				if ev.Reason != protocol.CompactionReasonThreshold {
 					t.Fatalf("reason = %q, want threshold", ev.Reason)
 				}
+				if ev.Strategy != protocol.CompactionStrategyTrim && ev.Strategy != "" {
+					t.Fatalf("default strategy = %q, want trim", ev.Strategy)
+				}
 				sawThreshold = true
 			case protocol.TurnCompleted:
 				if !sawThreshold {
 					t.Fatal("expected threshold compaction before third turn stream")
+				}
+				return
+			case protocol.EngineError:
+				t.Fatalf("EngineError: %s", ev.Message)
+			}
+		case <-deadline:
+			t.Fatal("timed out")
+		}
+	}
+}
+
+func TestThresholdCompactionSummarize(t *testing.T) {
+	matchSummarize := func(req provider.Request) bool {
+		for _, m := range req.Messages {
+			if m.Role == provider.RoleUser && strings.Contains(m.Text, "Summarize this conversation history") {
+				return true
+			}
+		}
+		return false
+	}
+	prov := newScriptedProvider(
+		streamStep{events: []provider.StreamEvent{
+			{Type: provider.EventTextDelta, Text: "a"},
+			{Type: provider.EventDone, StopReason: "end_turn", Usage: &provider.Usage{InputTokens: 100, OutputTokens: 10}},
+		}},
+		streamStep{events: []provider.StreamEvent{
+			{Type: provider.EventTextDelta, Text: "b"},
+			{Type: provider.EventDone, StopReason: "end_turn", Usage: &provider.Usage{InputTokens: 900, OutputTokens: 50}},
+		}},
+		streamStep{
+			match: matchSummarize,
+			events: []provider.StreamEvent{
+				{Type: provider.EventTextDelta, Text: "threshold-summary"},
+				{Type: provider.EventDone, StopReason: "end_turn"},
+			},
+		},
+		streamStep{events: []provider.StreamEvent{
+			{Type: provider.EventTextDelta, Text: "c"},
+			{Type: provider.EventDone, StopReason: "end_turn"},
+		}},
+	)
+	eng := engine.New(engine.Options{
+		SessionID:           "session-threshold-summarize",
+		Select:              func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider:     "scripted",
+		Registry:            tool.NewRegistry(),
+		WorkDir:             t.TempDir(),
+		Rules:               []permission.Ruleset{permission.Defaults()},
+		ContextWindow:       1000,
+		CompactionThreshold: 0.80,
+		CompactionBuffer:    1,
+		MaxTokens:           10,
+		KeepUserTurns:       1,
+		CompactionStrategy:  protocol.CompactionStrategySummarize,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "seed-a"}
+	waitCompactTurn(t, eng)
+	eng.Ops() <- protocol.UserInput{Text: "seed-b"}
+	waitCompactTurn(t, eng)
+
+	eng.Ops() <- protocol.UserInput{Text: "seed-c"}
+	var completed protocol.CompactionCompleted
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case ev := <-eng.Events():
+			switch ev := ev.(type) {
+			case protocol.CompactionCompleted:
+				completed = ev
+			case protocol.TurnCompleted:
+				if completed.Reason != protocol.CompactionReasonThreshold {
+					t.Fatalf("expected threshold compaction, got %#v", completed)
+				}
+				if completed.Strategy != protocol.CompactionStrategySummarize {
+					t.Fatalf("strategy = %q", completed.Strategy)
+				}
+				if completed.Summary != "threshold-summary" {
+					t.Fatalf("summary = %q", completed.Summary)
 				}
 				return
 			case protocol.EngineError:

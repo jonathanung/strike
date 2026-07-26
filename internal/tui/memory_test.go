@@ -114,6 +114,57 @@ func TestMemoryCommandUsage(t *testing.T) {
 	}
 }
 
+func TestMemoryCommandExportImport(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	mem := newFakeMemory(host.MemoryEntry{Key: "a", Value: "1"})
+	mem.importEntries = []host.MemoryEntry{{Key: "b", Value: "2"}}
+	m.services.Memory = mem
+	m.windows = configureMemoryWindow(m.windows, mem)
+
+	m = runMemory(t, m, "/memory export")
+	if m.noticeErr || !strings.Contains(m.notice, "exported to strike-memory.json") {
+		t.Fatalf("export notice = %q", m.notice)
+	}
+	if mem.exportPath != "strike-memory.json" {
+		t.Fatalf("export path = %q", mem.exportPath)
+	}
+
+	m = runMemory(t, m, "/memory export custom.json")
+	if mem.exportPath != "custom.json" {
+		t.Fatalf("custom export path = %q", mem.exportPath)
+	}
+
+	m = runMemory(t, m, "/memory import dump.json")
+	if m.noticeErr || !strings.Contains(m.notice, "imported 1 entries (merged)") {
+		t.Fatalf("import notice = %q", m.notice)
+	}
+	if _, ok, _ := mem.Get("b"); !ok {
+		t.Fatal("expected imported key b")
+	}
+
+	mem.importEntries = []host.MemoryEntry{{Key: "only", Value: "x"}}
+	m = runMemory(t, m, "/memory import dump.json --replace")
+	if m.noticeErr || !strings.Contains(m.notice, "replaced") {
+		t.Fatalf("replace notice = %q", m.notice)
+	}
+	if _, ok, _ := mem.Get("a"); ok {
+		t.Fatal("replace should drop prior keys")
+	}
+	if _, ok, _ := mem.Get("only"); !ok {
+		t.Fatal("replace missing only")
+	}
+
+	m = runMemory(t, m, "/memory import ../escape.json")
+	if !m.noticeErr || !strings.Contains(m.notice, "escapes") {
+		t.Fatalf("escape notice = %q", m.notice)
+	}
+
+	m = runMemory(t, m, "/memory import")
+	if !m.noticeErr || !strings.Contains(m.notice, "usage:") {
+		t.Fatalf("missing path notice = %q", m.notice)
+	}
+}
+
 func TestMemoryCommandListTag(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m.services.Memory = newFakeMemory(

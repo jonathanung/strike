@@ -115,6 +115,47 @@ func TestIssuesCommandUsage(t *testing.T) {
 	}
 }
 
+func TestIssuesCommandExportImport(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	store := newFakeIssues(host.Issue{ID: 1, Title: "a", Status: "open"})
+	store.importItems = []host.Issue{{ID: 2, Title: "b", Status: "open"}}
+	m.services.Issues = store
+	m.windows = configureIssuesWindow(m.windows, store)
+
+	m = runIssues(t, m, "/issues export")
+	if m.noticeErr || !strings.Contains(m.notice, "exported to strike-issues.json") {
+		t.Fatalf("export notice = %q", m.notice)
+	}
+	if store.exportPath != "strike-issues.json" {
+		t.Fatalf("export path = %q", store.exportPath)
+	}
+
+	m = runIssues(t, m, "/issues import dump.json")
+	if m.noticeErr || !strings.Contains(m.notice, "imported 1 issues (merged)") {
+		t.Fatalf("import notice = %q", m.notice)
+	}
+	if _, ok, _ := store.Get(2); !ok {
+		t.Fatal("expected imported #2")
+	}
+
+	store.importItems = []host.Issue{{ID: 9, Title: "only", Status: "closed"}}
+	m = runIssues(t, m, "/issues import --replace dump.json")
+	if m.noticeErr || !strings.Contains(m.notice, "replaced") {
+		t.Fatalf("replace notice = %q", m.notice)
+	}
+	if _, ok, _ := store.Get(1); ok {
+		t.Fatal("replace should drop #1")
+	}
+	if got, ok, _ := store.Get(9); !ok || got.Title != "only" {
+		t.Fatalf("replace #9 = %+v ok=%v", got, ok)
+	}
+
+	m = runIssues(t, m, "/issues import ../x.json")
+	if !m.noticeErr || !strings.Contains(m.notice, "escapes") {
+		t.Fatalf("escape notice = %q", m.notice)
+	}
+}
+
 func TestIssuesCommandGetMiss(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m.services.Issues = newFakeIssues(host.Issue{ID: 1, Title: "x", Status: "open"})
