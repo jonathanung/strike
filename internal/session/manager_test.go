@@ -327,10 +327,130 @@ func TestManagerListEmptyDir(t *testing.T) {
 	}
 }
 
+func TestManagerCreateStoresProjectKey(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager(dir)
+	info, err := m.Create(CreateOptions{Title: "a work", ProjectKey: "/repos/a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.ProjectKey != "/repos/a" {
+		t.Fatalf("Create Info.ProjectKey = %q", info.ProjectKey)
+	}
+	meta, err := ReadMeta(dir, info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.ProjectKey != "/repos/a" {
+		t.Fatalf("meta.ProjectKey = %q", meta.ProjectKey)
+	}
+	if err := m.Close(info.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := m.Get(info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ProjectKey != "/repos/a" {
+		t.Fatalf("Get ProjectKey = %q", got.ProjectKey)
+	}
+}
+
+func TestManagerLatestRootFiltersByProject(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager(dir)
+	writeClosed := func(id, project string, mtime time.Time) {
+		t.Helper()
+		st, err := Open(dir, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := st.Close(); err != nil {
+			t.Fatal(err)
+		}
+		meta := Meta{
+			ProjectKey: project,
+			CreatedAt:  mtime.UTC().Format(time.RFC3339Nano),
+		}
+		if err := WriteMeta(dir, id, meta); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(LogPath(dir, id), mtime, mtime); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oldT := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	newT := time.Date(2020, 1, 2, 0, 0, 0, 0, time.UTC)
+	writeClosed("root-a", "/proj/a", oldT)
+	writeClosed("root-b", "/proj/b", newT) // newer overall
+	writeClosed("legacy", "", newT)
+
+	got, err := m.LatestRoot("/proj/a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != "root-a" {
+		t.Fatalf("LatestRoot(/proj/a) = %q, want root-a", got.ID)
+	}
+	gotB, err := m.LatestRoot("/proj/b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotB.ID != "root-b" {
+		t.Fatalf("LatestRoot(/proj/b) = %q", gotB.ID)
+	}
+	// Unfiltered prefers newest root (B over A); legacy is also a root.
+	any, err := m.LatestRoot("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if any.ID != "root-b" && any.ID != "legacy" {
+		t.Fatalf("LatestRoot(\"\") = %q", any.ID)
+	}
+	if _, err := m.LatestRoot("/proj/missing"); err == nil {
+		t.Fatal("expected error for unknown project")
+	}
+	if !BelongsToProject(Info{ProjectKey: "/proj/a"}, "/proj/a") {
+		t.Error("BelongsToProject same key")
+	}
+	if BelongsToProject(Info{ProjectKey: ""}, "/proj/a") {
+		t.Error("legacy empty key must not match filter")
+	}
+	if !BelongsToProject(Info{ProjectKey: "x"}, "") {
+		t.Error("empty filter matches all")
+	}
+}
+
+func TestManagerForkPreservesProjectKey(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager(dir)
+	root, err := m.Create(CreateOptions{Title: "src", ProjectKey: "/repos/x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Append(root.ID, protocol.UserMessage{Text: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	fork, err := m.Fork(root.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fork.ProjectKey != "/repos/x" {
+		t.Fatalf("fork ProjectKey = %q", fork.ProjectKey)
+	}
+	meta, err := ReadMeta(dir, fork.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.ProjectKey != "/repos/x" {
+		t.Fatalf("fork meta ProjectKey = %q", meta.ProjectKey)
+	}
+}
+
 func TestManagerLatestRoot(t *testing.T) {
 	dir := t.TempDir()
 	m := NewManager(dir)
-	if _, err := m.LatestRoot(); err == nil {
+	if _, err := m.LatestRoot(""); err == nil {
 		t.Fatal("expected error when empty")
 	}
 
@@ -359,7 +479,7 @@ func TestManagerLatestRoot(t *testing.T) {
 	writeClosed("20200102T000000.000000000Z-new", "", newT)
 	writeClosed("20200103T000000.000000000Z-child", "20200102T000000.000000000Z-new", childT)
 
-	got, err := m.LatestRoot()
+	got, err := m.LatestRoot("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -435,7 +555,7 @@ func TestManagerForkCopiesPrefixAndMeta(t *testing.T) {
 	}
 
 	// Parent still listed as root; fork is also a root for --continue / picker.
-	latest, err := m.LatestRoot()
+	latest, err := m.LatestRoot("")
 	if err != nil {
 		t.Fatal(err)
 	}

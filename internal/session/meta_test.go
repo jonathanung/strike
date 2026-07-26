@@ -9,6 +9,7 @@ import (
 func TestMetaRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	want := Meta{
+		ProjectKey:  "/repos/acme",
 		PRURL:       "https://github.com/acme/repo/pull/42",
 		PRNumber:    42,
 		PRState:     PRStateMerged,
