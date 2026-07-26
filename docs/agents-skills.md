@@ -41,6 +41,7 @@ files under any later discovery root):
 | **debugger** | root-cause investigation |
 | **validator** | goal-backward requirements check; PASS/FAIL/UNVERIFIED only |
 | **orchestrator** | plan → delegate via `task` to specialists → synthesize (not solo bulk impl) |
+| **pr-babysitter** | own an open PR through CI/review (watch, fix branch failures, push); overlap with issue-handler skill (skill = full issue→merge; agent = in-session PR watch) |
 
 **Tab cycles agents**; bare `/agent` opens a picker; `/agent [name]` selects
 directly; the active agent shows in the status bar. The `task` tool’s optional
