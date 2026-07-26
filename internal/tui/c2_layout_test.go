@@ -264,6 +264,7 @@ func TestC2PaneFocusAndModalUseFocusAndMutedThemeTokens(t *testing.T) {
 	th := theme.Default()
 	th.BorderFocus = fixedColor("#010203")
 	th.BorderMuted = fixedColor("#040506")
+	th.OverlayScrim = fixedColor("#070809")
 	m, _ := newAppTestModelWithOptions(Options{Theme: &th})
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 80})
 	leftRows, rightRows := rowsContaining(m.View(), "get started"), rowsContaining(m.View(), "context")
@@ -278,8 +279,8 @@ func TestC2PaneFocusAndModalUseFocusAndMutedThemeTokens(t *testing.T) {
 	m.modal = &appProbeModal{}
 	m.reflow()
 	view := m.View()
-	if strings.Contains(view, rgbSGR("#010203")) || !strings.Contains(view, rgbSGR("#040506")) {
-		t.Error("modal did not dim both panes")
+	if strings.Contains(view, rgbSGR("#010203")) || strings.Contains(view, rgbSGR("#040506")) || !strings.Contains(view, rgbSGR("#070809")) {
+		t.Error("modal did not scrim both panes with OverlayScrim")
 	}
 	if rows := strings.Split(view, "\n"); len(rows) != 80 {
 		t.Errorf("modal overlay line count = %d, want 80", len(rows))
