@@ -366,6 +366,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		initialPriority   bool
 		initialTitled     bool
 		initialAutonomy   protocol.Autonomy
+		initialPermMode   = cfg.PermissionMode
 		initialPhaseWF    string
 		initialPhaseIndex int
 		initialAlways     permission.Ruleset
@@ -403,6 +404,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		initialPriority = restored.Priority
 		initialTitled = restored.Titled
 		initialAutonomy = restored.Autonomy
+		initialPermMode = restored.PermissionMode
 		initialPhaseWF = restored.PhaseWorkflow
 		initialPhaseIndex = restored.PhaseIndex
 		initialAlways = restored.AlwaysGrants
@@ -470,34 +472,35 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		})
 	}
 	eng := engine.New(engine.Options{
-		SessionID:            sessionID,
-		Select:               selectProvider,
-		Registry:             registry,
-		WorkDir:              workDir,
-		ProjectRoot:          projectIdentity.Root,
-		Instructions:         instructions,
-		Memory:               memoryStore,
-		SystemPrompt:         cfg.SystemPrompt,
-		MaxChildDepth:        cfg.MaxChildDepth,
-		InitialProvider:      initialProvider,
-		InitialModel:         initialModel,
-		InitialEffort:        initialEffort,
-		InitialAutonomy:      initialAutonomy,
-		Agents:               agents,
-		InitialAgent:         initialAgent,
-		InitialMessages:      initialMessages,
-		InitialPriority:      initialPriority,
-		InitialTitled:        initialTitled,
-		InitialPhaseWorkflow: initialPhaseWF,
-		InitialPhaseIndex:    initialPhaseIndex,
-		InitialAlwaysGrants:  initialAlways,
-		QuietStartup:         quietStartup,
-		Workflows:            workflows,
-		Rules:                permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),
-		Hooks:                hookDefs,
-		HookRules:            cfg.HookRules(),
-		CompactionStrategy:   cfg.CompactionStrategy,
-		CompactionModel:      cfg.CompactionModel,
+		SessionID:             sessionID,
+		Select:                selectProvider,
+		Registry:              registry,
+		WorkDir:               workDir,
+		ProjectRoot:           projectIdentity.Root,
+		Instructions:          instructions,
+		Memory:                memoryStore,
+		SystemPrompt:          cfg.SystemPrompt,
+		MaxChildDepth:         cfg.MaxChildDepth,
+		InitialProvider:       initialProvider,
+		InitialModel:          initialModel,
+		InitialEffort:         initialEffort,
+		InitialAutonomy:       initialAutonomy,
+		InitialPermissionMode: initialPermMode,
+		Agents:                agents,
+		InitialAgent:          initialAgent,
+		InitialMessages:       initialMessages,
+		InitialPriority:       initialPriority,
+		InitialTitled:         initialTitled,
+		InitialPhaseWorkflow:  initialPhaseWF,
+		InitialPhaseIndex:     initialPhaseIndex,
+		InitialAlwaysGrants:   initialAlways,
+		QuietStartup:          quietStartup,
+		Workflows:             workflows,
+		Rules:                 permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),
+		Hooks:                 hookDefs,
+		HookRules:             cfg.HookRules(),
+		CompactionStrategy:    cfg.CompactionStrategy,
+		CompactionModel:       cfg.CompactionModel,
 		LookupContextWindow: func(providerName, model string) int {
 			// Best-effort catalog lookup for threshold compaction. Failures
 			// leave the window unknown; overflow recovery still works.

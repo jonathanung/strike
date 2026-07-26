@@ -337,7 +337,8 @@ restored:
 	select {
 	case ev := <-eng2.Events():
 		switch ev.(type) {
-		case protocol.ModelSelected, protocol.AgentSelected, protocol.AutonomySelected, protocol.EffortSelected:
+		case protocol.ModelSelected, protocol.AgentSelected, protocol.AutonomySelected,
+			protocol.PermissionModeSelected, protocol.EffortSelected:
 			t.Fatalf("quiet resume emitted startup selection %T", ev)
 		}
 	case <-time.After(50 * time.Millisecond):
@@ -398,7 +399,7 @@ func TestQuietStartupSuppressesSelectionEvents(t *testing.T) {
 		case ev := <-eng.Events():
 			switch ev.(type) {
 			case protocol.ModelSelected, protocol.AgentSelected, protocol.AutonomySelected,
-				protocol.EffortSelected, protocol.PhaseChanged, protocol.FastSelected:
+				protocol.PermissionModeSelected, protocol.EffortSelected, protocol.PhaseChanged, protocol.FastSelected:
 				t.Fatalf("QuietStartup emitted %T: %#v", ev, ev)
 			default:
 				t.Fatalf("unexpected event during quiet startup: %T", ev)

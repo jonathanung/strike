@@ -11,6 +11,7 @@ JSON:
   "defaultAgent": "build",
   "theme": "strike",
   "vimMode": "pane",
+  "permissionMode": "default",
   "permissionAutoApproveSeconds": 10,
   "permissionAutoApproveExclude": ["bash"],
   "compactionStrategy": "trim",
@@ -28,6 +29,12 @@ JSON:
 
 Rules concatenate across layers; the last matching rule wins, so project
 config overrides global, and session "always" grants override both.
+
+**Permission mode dial:** `permissionMode` sets the default tool-permission
+posture for **new** sessions: `default` | `plan` | `accept-edits` | `yolo`
+(see [usage.md](usage.md)). Session changes via Shift+Tab or `/mode` persist
+in the session JSONL, not back into this file. Distinct from `/autonomy`
+(workflow exit gates).
 
 **Permission auto-approve (yolo-lite):** when `permissionAutoApproveSeconds`
 is a positive integer (clamped to 1–60), the permission modal counts down and

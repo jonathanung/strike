@@ -76,6 +76,7 @@ func (e Effort) Describe() string {
 // Autonomy is the per-session exit-gate policy dial: who clears phase
 // progression. Unlike Effort, the zero value is not "unset" — Normalize maps
 // it to AutonomySupervised so the mode is always explicit in the status line.
+// Distinct from PermissionMode (tool-permission posture).
 type Autonomy string
 
 const (
@@ -137,6 +138,101 @@ func (a Autonomy) Short() string {
 	default:
 		return "sup"
 	}
+}
+
+// PermissionMode is the per-session tool-permission posture dial (distinct from
+// Autonomy exit gates). Zero value normalizes to PermissionModeDefault.
+type PermissionMode string
+
+const (
+	// PermissionModeDefault uses normal ask rules (config + agent + phase).
+	PermissionModeDefault PermissionMode = "default"
+	// PermissionModePlan is hard read-only (deny write/edit) and aligns with
+	// the plan agent / plan-implement workflow.
+	PermissionModePlan PermissionMode = "plan"
+	// PermissionModeAcceptEdits auto-allows edit/write; bash/network still ask.
+	PermissionModeAcceptEdits PermissionMode = "accept-edits"
+	// PermissionModeYolo skips asks that are not hard-denied (agent/phase/config deny).
+	PermissionModeYolo PermissionMode = "yolo"
+)
+
+// PermissionModes lists postures from safest to most permissive for cycling.
+func PermissionModes() []PermissionMode {
+	return []PermissionMode{
+		PermissionModeDefault,
+		PermissionModePlan,
+		PermissionModeAcceptEdits,
+		PermissionModeYolo,
+	}
+}
+
+// ParsePermissionMode resolves a user-typed mode, case- and space-insensitively.
+// Empty input yields PermissionModeDefault; unrecognized values report false.
+// Accepts "accept_edits" and "acceptedits" as aliases for accept-edits.
+func ParsePermissionMode(value string) (PermissionMode, bool) {
+	normalized := PermissionMode(strings.ToLower(strings.TrimSpace(value)))
+	normalized = PermissionMode(strings.ReplaceAll(string(normalized), "_", "-"))
+	normalized = PermissionMode(strings.ReplaceAll(string(normalized), " ", ""))
+	if normalized == "" || normalized == "acceptedits" {
+		if normalized == "acceptedits" {
+			return PermissionModeAcceptEdits, true
+		}
+		return PermissionModeDefault, true
+	}
+	for _, mode := range PermissionModes() {
+		if normalized == mode {
+			return mode, true
+		}
+	}
+	return "", false
+}
+
+// Normalize returns a concrete mode: empty becomes PermissionModeDefault.
+func (m PermissionMode) Normalize() PermissionMode {
+	if m == "" {
+		return PermissionModeDefault
+	}
+	return m
+}
+
+// Describe returns the one-line rationale for pickers and notices.
+func (m PermissionMode) Describe() string {
+	switch m.Normalize() {
+	case PermissionModePlan:
+		return "read-only plan posture — write/edit denied"
+	case PermissionModeAcceptEdits:
+		return "auto-allow edit/write — still ask on bash/network"
+	case PermissionModeYolo:
+		return "skip permission asks — explicit denies still apply"
+	default:
+		return "normal permission prompts"
+	}
+}
+
+// Short is the compact status-line label.
+func (m PermissionMode) Short() string {
+	switch m.Normalize() {
+	case PermissionModePlan:
+		return "plan"
+	case PermissionModeAcceptEdits:
+		return "edits"
+	case PermissionModeYolo:
+		return "yolo"
+	default:
+		return "def"
+	}
+}
+
+// Next returns the following mode in the cycle dial (wraps).
+func (m PermissionMode) Next() PermissionMode {
+	modes := PermissionModes()
+	cur := m.Normalize()
+	for i, mode := range modes {
+		if mode == cur {
+			return modes[(i+1)%len(modes)]
+		}
+	}
+	return PermissionModeDefault
 }
 
 // Decision is a user's answer to a permission ask.
@@ -206,6 +302,12 @@ type SetAutonomy struct {
 	Mode Autonomy `json:"mode"`
 }
 
+// SetPermissionMode changes the session tool-permission posture. Rejected
+// while a turn is running, like the other selection ops.
+type SetPermissionMode struct {
+	Mode PermissionMode `json:"mode"`
+}
+
 // SetFast toggles OpenAI priority (fast) service tier for subsequent turns.
 // Rejected while a turn is running. Providers and models that do not support
 // priority tier ignore the flag silently.
@@ -246,6 +348,7 @@ func (SelectModel) isOp()            {}
 func (SelectAgent) isOp()            {}
 func (SetEffort) isOp()              {}
 func (SetAutonomy) isOp()            {}
+func (SetPermissionMode) isOp()      {}
 func (SetFast) isOp()                {}
 func (FilesChanged) isOp()           {}
 func (Compact) isOp()                {}
@@ -489,6 +592,13 @@ type AutonomySelected struct {
 	Mode Autonomy `json:"mode"`
 }
 
+// PermissionModeSelected confirms the session tool-permission posture, at
+// startup and after each SetPermissionMode.
+type PermissionModeSelected struct {
+	Correlation
+	Mode PermissionMode `json:"mode"`
+}
+
 // FastSelected confirms the session priority-tier preference after SetFast.
 type FastSelected struct {
 	Correlation
@@ -656,37 +766,38 @@ type EffectivePrompt struct {
 	FromLastStream bool              `json:"fromLastStream,omitempty"`
 }
 
-func (UserMessage) isEvent()         {}
-func (SessionTitled) isEvent()       {}
-func (TurnStarted) isEvent()         {}
-func (TextDelta) isEvent()           {}
-func (ReasoningDelta) isEvent()      {}
-func (ToolCallBegin) isEvent()       {}
-func (ToolCallEnd) isEvent()         {}
-func (ToolCallOutput) isEvent()      {}
-func (ProcessStarted) isEvent()      {}
-func (ProcessOutput) isEvent()       {}
-func (ProcessExited) isEvent()       {}
-func (PermissionAsked) isEvent()     {}
-func (PermissionResolved) isEvent()  {}
-func (QuestionAsked) isEvent()       {}
-func (QuestionResolved) isEvent()    {}
-func (TurnCompleted) isEvent()       {}
-func (ModelSelected) isEvent()       {}
-func (AgentSelected) isEvent()       {}
-func (PhaseChanged) isEvent()        {}
-func (EffortSelected) isEvent()      {}
-func (AutonomySelected) isEvent()    {}
-func (FastSelected) isEvent()        {}
-func (FilesInvalidated) isEvent()    {}
-func (EngineError) isEvent()         {}
-func (ChildStarted) isEvent()        {}
-func (ChildCompleted) isEvent()      {}
-func (UsageReported) isEvent()       {}
-func (ProviderRetrying) isEvent()    {}
-func (CompactionStarted) isEvent()   {}
-func (CompactionCompleted) isEvent() {}
-func (SessionMeta) isEvent()         {}
-func (SessionRewound) isEvent()      {}
-func (HookMatched) isEvent()         {}
-func (EffectivePrompt) isEvent()     {}
+func (UserMessage) isEvent()            {}
+func (SessionTitled) isEvent()          {}
+func (TurnStarted) isEvent()            {}
+func (TextDelta) isEvent()              {}
+func (ReasoningDelta) isEvent()         {}
+func (ToolCallBegin) isEvent()          {}
+func (ToolCallEnd) isEvent()            {}
+func (ToolCallOutput) isEvent()         {}
+func (ProcessStarted) isEvent()         {}
+func (ProcessOutput) isEvent()          {}
+func (ProcessExited) isEvent()          {}
+func (PermissionAsked) isEvent()        {}
+func (PermissionResolved) isEvent()     {}
+func (QuestionAsked) isEvent()          {}
+func (QuestionResolved) isEvent()       {}
+func (TurnCompleted) isEvent()          {}
+func (ModelSelected) isEvent()          {}
+func (AgentSelected) isEvent()          {}
+func (PhaseChanged) isEvent()           {}
+func (EffortSelected) isEvent()         {}
+func (AutonomySelected) isEvent()       {}
+func (PermissionModeSelected) isEvent() {}
+func (FastSelected) isEvent()           {}
+func (FilesInvalidated) isEvent()       {}
+func (EngineError) isEvent()            {}
+func (ChildStarted) isEvent()           {}
+func (ChildCompleted) isEvent()         {}
+func (UsageReported) isEvent()          {}
+func (ProviderRetrying) isEvent()       {}
+func (CompactionStarted) isEvent()      {}
+func (CompactionCompleted) isEvent()    {}
+func (SessionMeta) isEvent()            {}
+func (SessionRewound) isEvent()         {}
+func (HookMatched) isEvent()            {}
+func (EffectivePrompt) isEvent()        {}

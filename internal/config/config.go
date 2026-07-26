@@ -40,8 +40,12 @@ type Config struct {
 	PermissionAutoApproveSeconds int `json:"permissionAutoApproveSeconds,omitempty"`
 	// PermissionAutoApproveExclude lists permission names (e.g. "bash") that
 	// never auto-approve even when seconds > 0. Compared case-insensitively.
-	PermissionAutoApproveExclude []string           `json:"permissionAutoApproveExclude,omitempty"`
-	Permissions                  permission.Ruleset `json:"permissions,omitempty"`
+	PermissionAutoApproveExclude []string `json:"permissionAutoApproveExclude,omitempty"`
+	// PermissionMode is the default tool-permission posture dial for new
+	// sessions (default|plan|accept-edits|yolo). Empty means default. Session
+	// changes via Shift+Tab or /mode persist in the JSONL log, not here.
+	PermissionMode protocol.PermissionMode `json:"permissionMode,omitempty"`
+	Permissions    permission.Ruleset      `json:"permissions,omitempty"`
 	// Hooks mixes declarative rules (action) and shell commands (command).
 	// Global then project layers concatenate. Invalid entries are dropped.
 	Hooks []Hook `json:"hooks,omitempty"`
@@ -256,6 +260,13 @@ func read(path string) (Config, error) {
 	}
 	c.PermissionAutoApproveSeconds = ClampPermissionAutoApproveSeconds(c.PermissionAutoApproveSeconds)
 	c.PermissionAutoApproveExclude = normalizePermissionAutoApproveExclude(c.PermissionAutoApproveExclude)
+	if c.PermissionMode != "" {
+		mode, ok := protocol.ParsePermissionMode(string(c.PermissionMode))
+		if !ok {
+			return Config{}, fmt.Errorf("%s: unknown permissionMode %q (want default|plan|accept-edits|yolo)", path, c.PermissionMode)
+		}
+		c.PermissionMode = mode
+	}
 	c.CompactionStrategy = NormalizeCompactionStrategy(c.CompactionStrategy)
 	c.CompactionModel = strings.TrimSpace(c.CompactionModel)
 	// Keybinds: unknown ids / invalid chords fail the layer (and thus Load).
@@ -353,6 +364,9 @@ func merge(base, layer Config) Config {
 	}
 	if layer.PermissionAutoApproveExclude != nil {
 		base.PermissionAutoApproveExclude = layer.PermissionAutoApproveExclude
+	}
+	if layer.PermissionMode != "" {
+		base.PermissionMode = layer.PermissionMode
 	}
 	if layer.CompactionStrategy != "" {
 		base.CompactionStrategy = layer.CompactionStrategy

@@ -15,6 +15,7 @@ session defaults.
 | `ctrl+p` | command palette |
 | `f1` | keybind cheatsheet (`/keys`) |
 | `tab` | cycle agents (composer empty of `/` completion) |
+| `shift+tab` | cycle permission mode (default → plan → accept-edits → yolo) |
 | `ctrl+d` | save defaults (see [config.md](config.md)) |
 | `ctrl+e` | open prompt in external `$EDITOR` |
 

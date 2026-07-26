@@ -43,11 +43,18 @@ func TestHeaderShowsWorkDirAt80Cols(t *testing.T) {
 	if !strings.Contains(plain, "strike-cli") {
 		t.Errorf("80-col header missing workdir leaf:\n%s", plain)
 	}
-	if !strings.Contains(plain, "~/Projects/strike-cli") {
+	// Permission-mode badge shares the row; path may middle-ellipsis but must
+	// keep the home-shortened ~/ prefix and the leaf segment.
+	if !strings.Contains(plain, "~/") {
 		t.Errorf("80-col header missing home-shortened path:\n%s", plain)
 	}
 	if got := lipgloss.Width(header); got != 80 {
 		t.Errorf("header width = %d, want 80\n%s", got, plain)
+	}
+	// Wider row still shows the full shortened path.
+	wide := ansi.Strip(m.headerView(120))
+	if !strings.Contains(wide, "~/Projects/strike-cli") {
+		t.Errorf("120-col header missing full home path:\n%s", wide)
 	}
 }
 

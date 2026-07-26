@@ -216,23 +216,29 @@ type resolvedEmission struct {
 //	  ProjectPersister is set)
 //	→ active agent profile
 //	→ session always grants (DecisionAlways)
+//	→ mode late (plan hard-denies)
 //	→ active workflow phase profile
+//	→ mode ask-upgrade (yolo / accept-edits): Ask→Allow only; never widens Deny
 //
 // Agent is evaluated after the optional dangerous allow-all, so role denies
 // still apply under --dangerously-skip-permissions (hard ceiling for personas).
-// Phase is last so workflow hard-denies (e.g. plan mode write/edit) cannot be
-// widened by session always-grants.
+// Mode late and phase are last among rulesets so plan / workflow hard-denies
+// (e.g. write/edit) cannot be widened by session always-grants. Yolo and
+// accept-edits only upgrade remaining Ask results to Allow so explicit Deny
+// rules always hold.
 type Service struct {
 	emit func(protocol.Event)
 
-	mu      sync.Mutex
-	base    []Ruleset
-	project Ruleset // runtime project-scoped grants (DecisionProject)
-	agent   Ruleset // active agent profile; evaluated after project, before granted
-	granted Ruleset // session-scoped "always" grants (DecisionAlways)
-	phase   Ruleset // active workflow phase profile; last, hard ceiling
-	pending map[string]*pending
-	nextID  int
+	mu       sync.Mutex
+	base     []Ruleset
+	project  Ruleset // runtime project-scoped grants (DecisionProject)
+	agent    Ruleset // active agent profile; evaluated after project, before granted
+	granted  Ruleset // session-scoped "always" grants (DecisionAlways)
+	modeLate Ruleset // permission-mode hard-denies (plan); after granted, before phase
+	phase    Ruleset // active workflow phase profile; last ruleset, hard ceiling
+	permMode protocol.PermissionMode
+	pending  map[string]*pending
+	nextID   int
 
 	// persistProject, when set, is called outside the mutex after a project
 	// grant is recorded in memory. Failures are ignored so the in-session
@@ -279,6 +285,48 @@ func (s *Service) SetPhaseRules(rs Ruleset) {
 	s.replaceProfileLocked(func() {
 		s.phase = append(Ruleset(nil), rs...)
 	}, "phase changed")
+}
+
+// SetPermissionMode installs the tool-permission posture for mode.
+// Plan places write/edit denies after session always-grants so they cannot be
+// widened. Yolo and accept-edits upgrade Ask→Allow after full evaluation
+// without overriding Deny. Default clears mode effects. Rejects pending asks
+// (same hygiene as SetAgentRules).
+func (s *Service) SetPermissionMode(mode protocol.PermissionMode) {
+	mode = mode.Normalize()
+	late := ModeLateRules(mode)
+	s.replaceProfileLocked(func() {
+		s.permMode = mode
+		s.modeLate = late
+	}, "permission mode changed")
+}
+
+// ModeLateRules returns post-grant hard-deny rules for a posture (plan only).
+func ModeLateRules(mode protocol.PermissionMode) Ruleset {
+	if mode.Normalize() == protocol.PermissionModePlan {
+		return Ruleset{
+			{Permission: "write", Pattern: "*", Action: Deny},
+			{Permission: "edit", Pattern: "*", Action: Deny},
+		}
+	}
+	return nil
+}
+
+// ApplyMode upgrades an evaluated action for yolo / accept-edits. Deny and
+// Allow are unchanged; only Ask may become Allow.
+func ApplyMode(mode protocol.PermissionMode, permission string, action Action) Action {
+	if action != Ask {
+		return action
+	}
+	switch mode.Normalize() {
+	case protocol.PermissionModeYolo:
+		return Allow
+	case protocol.PermissionModeAcceptEdits:
+		if permission == "edit" || permission == "write" {
+			return Allow
+		}
+	}
+	return action
 }
 
 // SeedAlwaysGrants replaces session-scoped DecisionAlways grants (resume).
@@ -517,9 +565,11 @@ func (s *Service) Reply(r protocol.PermissionReply) {
 }
 
 // evaluateLocked returns the worst-case action across the ask's patterns:
-// any deny denies, any ask asks, otherwise allow.
+// any deny denies, any ask asks, otherwise allow. Permission mode may then
+// upgrade Ask→Allow (yolo / accept-edits) without widening Deny.
 func (s *Service) evaluateLocked(permission string, patterns []string) Action {
-	sets := append(append(append(append(append([]Ruleset{}, s.base...), s.project), s.agent), s.granted), s.phase)
+	sets := append([]Ruleset{}, s.base...)
+	sets = append(sets, s.project, s.agent, s.granted, s.modeLate, s.phase)
 	worst := Allow
 	if len(patterns) == 0 {
 		patterns = []string{"*"}
@@ -532,5 +582,5 @@ func (s *Service) evaluateLocked(permission string, patterns []string) Action {
 			worst = Ask
 		}
 	}
-	return worst
+	return ApplyMode(s.permMode, permission, worst)
 }

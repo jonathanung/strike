@@ -27,6 +27,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/settings":         {"manage custom providers and settings", "", commandSourceBuiltin},
 		"/effort":           {"set how much reasoning the model spends", "[level]", commandSourceBuiltin},
 		"/autonomy":         {"set exit-gate policy (supervised/agent/checks)", "[mode]", commandSourceBuiltin},
+		"/mode":             {"set permission posture (default/plan/accept-edits/yolo)", "[mode]", commandSourceBuiltin},
 		"/auth":             {"manage provider authentication", "[provider]", commandSourceBuiltin},
 		"/agent":            {"select an agent", "[name]", commandSourceBuiltin},
 		"/fast":             {"toggle OpenAI priority tier (faster, ~2× cost)", "[on|off]", commandSourceBuiltin},
@@ -73,7 +74,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 }
 
 func TestValidSkillNameRejectsReservedBuiltinsIncludingMDRead(t *testing.T) {
-	for _, name := range []string{"provider", "model", "effort", "autonomy", "auth", "agent", "fast", "vim", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "help", "keys", "memory", "issues", "context", "effective-prompt", "upgrade"} {
+	for _, name := range []string{"provider", "model", "effort", "autonomy", "mode", "auth", "agent", "fast", "vim", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "help", "keys", "memory", "issues", "context", "effective-prompt", "upgrade"} {
 		if validSkillName(name) {
 			t.Errorf("validSkillName(%q) = true, want false for reserved builtin", name)
 		}

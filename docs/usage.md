@@ -18,6 +18,8 @@ strike launches without any provider configured. Pick one inside the TUI:
 /effort xhigh                  # off | low | medium | high | xhigh | max
 /autonomy                      # exit-gate policy picker
 /autonomy supervised           # supervised | agent | checks
+/mode                          # permission posture picker (Shift+Tab cycles)
+/mode yolo                     # default | plan | accept-edits | yolo
 /agent                         # centered agent picker
 /agent plan                    # direct switch (build, plan, explore, …)
 /session                       # browse past root sessions (auto-titles) and
@@ -91,6 +93,22 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `supervised` (default) | you approve phase gates |
 | `agent` | model clears gates via `phase_done` |
 | `checks` | configured check commands must exit 0 |
+
+### Permission mode dial
+
+`/mode` (or **Shift+Tab**) cycles the session **tool-permission posture**. This
+is distinct from `/autonomy` (exit gates). The header always shows `mode …`;
+yolo also paints a danger banner.
+
+| Mode | Behavior |
+|---|---|
+| `default` | normal ask rules (config + agent + phase) |
+| `plan` | hard read-only write/edit deny; enters plan workflow |
+| `accept-edits` | auto-allow edit/write; bash/network still ask |
+| `yolo` | skip permission asks; explicit deny rules still apply |
+
+Persists per session in the JSONL log. Optional default for new sessions:
+`permissionMode` in [config.md](config.md).
 
 Built-in skills also appear as slash commands: `/commit`, `/push`, `/pr`,
 `/ship` (and any custom skills under `~/.strike/skills` or `./.strike/skills`).

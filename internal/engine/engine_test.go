@@ -428,6 +428,9 @@ complete:
 		case protocol.AutonomySelected:
 			counts["autonomy"]++
 			assertCorrelationFields(t, ev, corr, false, false)
+		case protocol.PermissionModeSelected:
+			counts["perm_mode"]++
+			assertCorrelationFields(t, ev, corr, false, false)
 		case protocol.AgentSelected:
 			counts["agent"]++
 			assertCorrelationFields(t, ev, corr, false, false)
@@ -510,7 +513,7 @@ complete:
 			t.Errorf("%T turnId = %q, want stable %q", ev, corr.TurnID, turnID)
 		}
 	}
-	for _, name := range []string{"model", "autonomy", "agent", "user", "titled", "started", "begin", "asked", "resolved", "end", "text", "completed", "proc_start", "proc_exit"} {
+	for _, name := range []string{"model", "autonomy", "perm_mode", "agent", "user", "titled", "started", "begin", "asked", "resolved", "end", "text", "completed", "proc_start", "proc_exit"} {
 		if counts[name] != 1 {
 			t.Errorf("%s event count = %d, want 1", name, counts[name])
 		}
@@ -1067,8 +1070,8 @@ func TestShutdownDropsBlockedBeginWithoutUnmatchedEnd(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go eng.Run(ctx)
-	// Drain startup: ModelSelected, AutonomySelected, AgentSelected.
-	for range 3 {
+	// Drain startup: ModelSelected, AutonomySelected, AgentSelected, PermissionModeSelected.
+	for range 4 {
 		_ = receiveEvent(t, eng.Events(), func(protocol.Event) bool { return true })
 	}
 	// Leave room for UserMessage + SessionTitled + TurnStarted so Stream runs;
@@ -1286,6 +1289,8 @@ func eventCorrelation(t *testing.T, ev protocol.Event) protocol.Correlation {
 	case protocol.EffortSelected:
 		return ev.Correlation
 	case protocol.AutonomySelected:
+		return ev.Correlation
+	case protocol.PermissionModeSelected:
 		return ev.Correlation
 	case protocol.FastSelected:
 		return ev.Correlation

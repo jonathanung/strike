@@ -202,6 +202,8 @@ type Model struct {
 	effort        protocol.Effort
 	// autonomy is the session exit-gate policy; default supervised.
 	autonomy protocol.Autonomy
+	// permMode is the session tool-permission posture dial; default default.
+	permMode protocol.PermissionMode
 	// fastEnabled is the session priority-tier preference from /fast.
 	fastEnabled bool
 	// showThinking shows reasoning/CoT cells in the transcript (/think).
@@ -331,6 +333,7 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		focused:         true,
 		appearance:      appearanceAuto,
 		autonomy:        protocol.AutonomySupervised,
+		permMode:        protocol.PermissionModeDefault,
 	}
 	var replay []protocol.Event
 	for _, option := range options {
@@ -922,6 +925,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, nil
+		case key.Matches(msg, m.keyMap.PermissionMode):
+			// Shift+Tab cycles tool-permission posture (not a newline).
+			if m.turnRunning {
+				return m, nil
+			}
+			next := m.permMode.Next()
+			ops := m.ops
+			return m, func() tea.Msg {
+				ops <- protocol.SetPermissionMode{Mode: next}
+				return nil
+			}
 		}
 		return m.updateComposer(msg)
 
@@ -1261,7 +1275,7 @@ func (m *Model) reflow() {
 	}
 
 	if m.ready {
-		l := computeLayout(leftWidth, m.height, composerRows, popupHeight, m.dangerouslySkipPermissions, m.noticeRowsFor(leftWidth))
+		l := computeLayout(leftWidth, m.height, composerRows, popupHeight, m.showDangerBanner(), m.noticeRowsFor(leftWidth))
 		bodyHeight := l.transcript + l.notice + l.popup + l.composer
 		rightWidth, rightHeight := m.width, bodyHeight
 		rightCompact := m.width < compactWidth || m.height < compactHeight
@@ -1510,6 +1524,10 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 	case protocol.AutonomySelected:
 		m.autonomy = ev.Mode.Normalize()
 		m.setNotice("autonomy: "+detailJoin(m.th, string(m.autonomy), m.autonomy.Describe()), false)
+	case protocol.PermissionModeSelected:
+		m.permMode = ev.Mode.Normalize()
+		m.setNotice("mode: "+detailJoin(m.th, string(m.permMode), m.permMode.Describe()), false)
+		cmd = m.broadcastContextState()
 	case protocol.FastSelected:
 		m.fastEnabled = ev.Enabled
 		m.setNotice(m.fastNotice(ev.Enabled), false)
@@ -1929,6 +1947,24 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		ops := m.ops
 		return m, func() tea.Msg {
 			ops <- protocol.SetAutonomy{Mode: mode}
+			return nil
+		}
+	case "/mode":
+		if len(fields) < 2 {
+			m.resetComposer()
+			m.modal = newPermissionModeModal(m.permMode, m.ops)
+			return m, nil
+		}
+		mode, ok := protocol.ParsePermissionMode(fields[1])
+		if !ok {
+			m.setNotice("unknown mode "+fields[1]+" — want "+permissionModeChoices(), true)
+			return m, nil
+		}
+		m.resetComposer()
+		m.clearNotice()
+		ops := m.ops
+		return m, func() tea.Msg {
+			ops <- protocol.SetPermissionMode{Mode: mode}
 			return nil
 		}
 	case "/auth":
@@ -2567,6 +2603,14 @@ func autonomyChoices() string {
 	return strings.Join(names, "|")
 }
 
+func permissionModeChoices() string {
+	names := make([]string, 0, len(protocol.PermissionModes()))
+	for _, mode := range protocol.PermissionModes() {
+		names = append(names, string(mode))
+	}
+	return strings.Join(names, "|")
+}
+
 func (m *Model) setNotice(text string, isErr bool) {
 	m.notice, m.noticeErr = text, isErr
 	m.noticeCause = noticeGeneral
@@ -2910,7 +2954,7 @@ func (m Model) transcriptContentOrigin() (x, y int, ok bool) {
 		}
 		leftWidth = geo.leftCandidateWidth(m.width)
 	} else {
-		l0 := computeLayout(m.width, m.height, m.composer.Height(), m.completionPopupHeightFor(m.width), m.dangerouslySkipPermissions, m.noticeRowsFor(m.width))
+		l0 := computeLayout(m.width, m.height, m.composer.Height(), m.completionPopupHeightFor(m.width), m.showDangerBanner(), m.noticeRowsFor(m.width))
 		bodyHeight := l0.transcript + l0.notice + l0.popup + l0.composer
 		geo := computeVerticalPaneGeometry(m.width, bodyHeight, gutter, m.focus)
 		if geo.mode == paneSingle && m.focus == focusRight {
@@ -2922,7 +2966,7 @@ func (m Model) transcriptContentOrigin() (x, y int, ok bool) {
 	if !showLeft {
 		return 0, 0, false
 	}
-	l := computeLayout(leftWidth, m.height, m.composer.Height(), m.completionPopupHeightFor(leftWidth), m.dangerouslySkipPermissions, m.noticeRowsFor(leftWidth))
+	l := computeLayout(leftWidth, m.height, m.composer.Height(), m.completionPopupHeightFor(leftWidth), m.showDangerBanner(), m.noticeRowsFor(leftWidth))
 	if m.splitOrientation == orientVertical {
 		bodyHeight := l.transcript + l.notice + l.popup + l.composer
 		geo := computeVerticalPaneGeometry(m.width, bodyHeight, gutter, m.focus)
@@ -3086,7 +3130,7 @@ func (m Model) View() string {
 		hGeometry = computePaneGeometry(m.width, gutter, m.focus)
 		leftWidth = hGeometry.leftCandidateWidth(m.width)
 	}
-	l := computeLayout(leftWidth, m.height, m.composer.Height(), m.completionPopupHeightFor(leftWidth), m.dangerouslySkipPermissions, m.noticeRowsFor(leftWidth))
+	l := computeLayout(leftWidth, m.height, m.composer.Height(), m.completionPopupHeightFor(leftWidth), m.showDangerBanner(), m.noticeRowsFor(leftWidth))
 	bodyHeight := l.transcript + l.notice + l.popup + l.composer
 	rightWidth, rightHeight := 0, bodyHeight
 	showLeft, showRight := true, false

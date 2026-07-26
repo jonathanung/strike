@@ -58,6 +58,8 @@ func eventType(ev Event) string {
 		return "effort.selected"
 	case AutonomySelected:
 		return "autonomy.selected"
+	case PermissionModeSelected:
+		return "permission.mode"
 	case FastSelected:
 		return "fast.selected"
 	case FilesInvalidated:
@@ -148,6 +150,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &EffortSelected{}
 	case "autonomy.selected":
 		ev = &AutonomySelected{}
+	case "permission.mode":
+		ev = &PermissionModeSelected{}
 	case "fast.selected":
 		ev = &FastSelected{}
 	case "files.invalidated":
@@ -226,6 +230,8 @@ func deref(ev Event) Event {
 	case *EffortSelected:
 		return *v
 	case *AutonomySelected:
+		return *v
+	case *PermissionModeSelected:
 		return *v
 	case *FastSelected:
 		return *v
