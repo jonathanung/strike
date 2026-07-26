@@ -14,6 +14,37 @@ import (
 
 const agentsWindowID = "agents"
 
+// agentsViewFilter selects which nodes the agents tree shows.
+type agentsViewFilter int
+
+const (
+	agentsFilterAll agentsViewFilter = iota
+	agentsFilterAttention
+	agentsFilterWorking
+	agentsFilterReady
+	agentsFilterRoots
+	agentsFilterCount
+)
+
+func (f agentsViewFilter) next() agentsViewFilter {
+	return (f + 1) % agentsFilterCount
+}
+
+func (f agentsViewFilter) label() string {
+	switch f {
+	case agentsFilterAttention:
+		return "attention"
+	case agentsFilterWorking:
+		return "working"
+	case agentsFilterReady:
+		return "ready"
+	case agentsFilterRoots:
+		return "roots"
+	default:
+		return "all"
+	}
+}
+
 // agentsRootSnap is one parent row plus its subagent children for the tree.
 type agentsRootSnap struct {
 	ID       string
@@ -47,7 +78,7 @@ type agentsInterruptMsg struct {
 
 // agentsWindow is a multi-root session tree: top-level = parent agents, nested
 // = that parent's subagents. Keys: j/k move, enter select, n spawn, x interrupt,
-// space/h/l toggle expand.
+// space/h/l toggle expand, f cycle view filter, / text filter.
 type agentsWindow struct {
 	activeID  string
 	viewingID string
@@ -55,9 +86,14 @@ type agentsWindow struct {
 	nodes     []ui.TreeNode
 	// collapsed records user-collapsed node ids; missing means expanded.
 	collapsed map[string]bool
-	cursor    int
-	width     int
-	height    int
+	// viewFilter is the active state/structure filter (f cycles).
+	viewFilter agentsViewFilter
+	// textFilter is an optional name/id substring filter (/ to edit).
+	textFilter string
+	filterEdit bool
+	cursor     int
+	width      int
+	height     int
 }
 
 func newAgentsWindow() agentsWindow {
@@ -66,7 +102,29 @@ func newAgentsWindow() agentsWindow {
 
 func (w agentsWindow) id() string { return agentsWindowID }
 
-func (w agentsWindow) title() string { return "agents" }
+func (w agentsWindow) title() string {
+	// title() has no theme arg; default tokens keep the panel chrome consistent.
+	th := theme.Default().Resolve()
+	base := "agents"
+	switch w.viewFilter {
+	case agentsFilterAttention:
+		if n := w.countState(theme.AgentStateAttention); n > 0 {
+			return dotJoin(th, base, itoa(n)+" need you")
+		}
+		return dotJoin(th, base, "attention")
+	case agentsFilterWorking:
+		return dotJoin(th, base, "working")
+	case agentsFilterReady:
+		return dotJoin(th, base, "ready")
+	case agentsFilterRoots:
+		return dotJoin(th, base, "roots")
+	default:
+		if n := w.countState(theme.AgentStateAttention); n > 0 {
+			return dotJoin(th, base, itoa(n)+" need you")
+		}
+		return base
+	}
+}
 
 func (w agentsWindow) init() tea.Cmd { return nil }
 
@@ -106,37 +164,75 @@ func (w agentsWindow) view(th theme.Theme) string {
 	}
 	th = th.Resolve()
 	st := th.S()
+	ic := iconsFor(th)
 	visible := w.height
 	if visible < 1 {
 		visible = 0
 	}
-	if len(w.nodes) == 0 {
-		w.nodes = w.buildNodes()
-	}
+	// Rebuild so viewFilter/textFilter always match the rendered tree.
+	w.nodes = w.buildNodes()
 	rows := ui.FlattenTree(w.nodes)
-	empty := agentsEmptyLabel(th)
+	empty := agentsEmptyLabel(w.viewFilter, w.textFilter)
+	showFilter := w.filterEdit || w.textFilter != ""
+	bodyH := visible
+	var header string
+	if showFilter {
+		cursor := ""
+		if w.filterEdit {
+			cursor = ic.FilterCursor
+		}
+		header = st.Muted.Render("filter: ") + st.Input.Render(sanitizeDisplayData(w.textFilter)+cursor)
+		if bodyH > 0 {
+			bodyH--
+		}
+	}
+	var body string
 	if len(rows) == 0 {
-		return lipgloss.NewStyle().Width(max(1, w.width)).Render(
+		body = lipgloss.NewStyle().Width(max(1, w.width)).Render(
 			st.Muted.Render(empty),
 		)
+	} else {
+		body = ui.Tree(th, ui.TreeOpts{
+			Nodes:   w.nodes,
+			Cursor:  clampAgentsCursor(w.cursor, len(rows)),
+			Width:   w.width,
+			Visible: bodyH,
+			Empty:   empty,
+		})
 	}
-	return ui.Tree(th, ui.TreeOpts{
-		Nodes:   w.nodes,
-		Cursor:  clampAgentsCursor(w.cursor, len(rows)),
-		Width:   w.width,
-		Visible: visible,
-		Empty:   empty,
-	})
+	if header == "" {
+		return body
+	}
+	if bodyH <= 0 || body == "" {
+		return lipgloss.NewStyle().Width(max(1, w.width)).Render(header)
+	}
+	return header + "\n" + body
 }
 
-func agentsEmptyLabel(th theme.Theme) string {
-	th = th.Resolve()
-	// Match prior empty copy so registry/width tests stay stable; multi-root
-	// spawn is advertised via the n keybind in the keys pane.
-	return "no subagents this session"
+func agentsEmptyLabel(filter agentsViewFilter, text string) string {
+	if q := strings.TrimSpace(text); q != "" {
+		return "no matches for \"" + sanitizeDisplayData(q) + "\""
+	}
+	switch filter {
+	case agentsFilterAttention:
+		return "no agents need attention"
+	case agentsFilterWorking:
+		return "no agents working"
+	case agentsFilterReady:
+		return "no agents ready"
+	case agentsFilterRoots:
+		return "no parent agents"
+	default:
+		// Match prior empty copy so registry/width tests stay stable; multi-root
+		// spawn is advertised via the n keybind in the keys pane.
+		return "no subagents this session"
+	}
 }
 
 func (w agentsWindow) handleKey(msg tea.KeyMsg) (agentsWindow, tea.Cmd) {
+	if w.filterEdit {
+		return w.handleFilterEditKey(msg)
+	}
 	if len(w.nodes) == 0 {
 		w.nodes = w.buildNodes()
 	}
@@ -151,6 +247,14 @@ func (w agentsWindow) handleKey(msg tea.KeyMsg) (agentsWindow, tea.Cmd) {
 		if w.cursor < len(rows)-1 {
 			w.cursor++
 		}
+	case "f":
+		w.viewFilter = w.viewFilter.next()
+		w.nodes = w.buildNodes()
+		rows = ui.FlattenTree(w.nodes)
+		w.cursor = clampAgentsCursor(w.cursor, len(rows))
+	case "/":
+		w.filterEdit = true
+		return w, nil
 	case "n":
 		return w, func() tea.Msg { return agentsSpawnMsg{} }
 	case "x", "ctrl+c":
@@ -190,6 +294,36 @@ func (w agentsWindow) handleKey(msg tea.KeyMsg) (agentsWindow, tea.Cmd) {
 	return w, nil
 }
 
+func (w agentsWindow) handleFilterEditKey(msg tea.KeyMsg) (agentsWindow, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		w.filterEdit = false
+		w.textFilter = ""
+		w.nodes = w.buildNodes()
+		w.cursor = clampAgentsCursor(w.cursor, len(ui.FlattenTree(w.nodes)))
+	case "enter":
+		w.filterEdit = false
+	case "backspace":
+		if w.textFilter != "" {
+			runes := []rune(w.textFilter)
+			w.textFilter = string(runes[:len(runes)-1])
+			w.nodes = w.buildNodes()
+			w.cursor = clampAgentsCursor(w.cursor, len(ui.FlattenTree(w.nodes)))
+		}
+	case "ctrl+u":
+		w.textFilter = ""
+		w.nodes = w.buildNodes()
+		w.cursor = clampAgentsCursor(w.cursor, len(ui.FlattenTree(w.nodes)))
+	default:
+		if msg.Type == tea.KeyRunes {
+			w.textFilter += string(msg.Runes)
+			w.nodes = w.buildNodes()
+			w.cursor = clampAgentsCursor(w.cursor, len(ui.FlattenTree(w.nodes)))
+		}
+	}
+	return w, nil
+}
+
 func (w agentsWindow) selectedID(rows []ui.TreeRow) string {
 	if len(rows) == 0 {
 		return ""
@@ -202,6 +336,7 @@ func (w agentsWindow) buildNodes() []ui.TreeNode {
 	if len(w.roots) == 0 {
 		return nil
 	}
+	q := strings.ToLower(strings.TrimSpace(w.textFilter))
 	out := make([]ui.TreeNode, 0, len(w.roots))
 	for _, root := range w.roots {
 		id := strings.TrimSpace(root.ID)
@@ -222,34 +357,55 @@ func (w agentsWindow) buildNodes() []ui.TreeNode {
 			Tone:    agentStateTone(root.State),
 			Detail:  agentsRootDetail(root.State),
 		}
+		if w.viewFilter == agentsFilterRoots {
+			// Structure filter: parents only; still honor text filter.
+			if !agentsTextMatches(q, id, label) {
+				continue
+			}
+			node.Leaf = true
+			out = append(out, node)
+			continue
+		}
+
 		kids := listableChildActivities(root.Children)
-		if len(kids) == 0 {
+		var childNodes []ui.TreeNode
+		if len(kids) > 0 {
+			childNodes = w.filterChildTree(kids, q)
+		}
+		includeRoot := false
+		switch {
+		case w.viewFilter == agentsFilterAll:
+			includeRoot = q == "" || agentsTextMatches(q, id, label) || len(childNodes) > 0
+			if q != "" && !agentsTextMatches(q, id, label) {
+				// Keep root only as container for matching descendants.
+				if len(childNodes) == 0 {
+					includeRoot = false
+				}
+			}
+		default:
+			// State filters: root if it matches, or it has matching descendants.
+			stateOK := agentsStateMatches(root.State, w.viewFilter)
+			textOK := q == "" || agentsTextMatches(q, id, label)
+			includeRoot = (stateOK && textOK) || len(childNodes) > 0
+			if stateOK && !textOK && len(childNodes) == 0 {
+				includeRoot = false
+			}
+		}
+		if !includeRoot {
+			continue
+		}
+		if len(childNodes) == 0 {
 			node.Leaf = true
 		} else {
 			node.Expanded = !w.collapsed[id]
-			node.Children = childActivitiesToTree(kids, w.viewingID, w.collapsed)
+			node.Children = childNodes
 		}
 		out = append(out, node)
 	}
 	return out
 }
 
-func listableChildActivities(children []childActivity) []childActivity {
-	if len(children) == 0 {
-		return nil
-	}
-	out := make([]childActivity, 0, len(children))
-	for _, ch := range children {
-		if ch.sessionID == "" || ch.sessionID == "child" {
-			continue
-		}
-		out = append(out, ch)
-	}
-	return out
-}
-
-func childActivitiesToTree(kids []childActivity, viewingID string, collapsed map[string]bool) []ui.TreeNode {
-	// Index by parent for nesting; kids may be a flat list with parentIDs.
+func (w agentsWindow) filterChildTree(kids []childActivity, q string) []ui.TreeNode {
 	byParent := map[string][]childActivity{}
 	ids := map[string]bool{}
 	for _, ch := range kids {
@@ -264,34 +420,115 @@ func childActivitiesToTree(kids []childActivity, viewingID string, collapsed map
 		}
 		byParent[p] = append(byParent[p], ch)
 	}
-	var build func(ch childActivity) ui.TreeNode
-	build = func(ch childActivity) ui.TreeNode {
+	var build func(ch childActivity) (ui.TreeNode, bool)
+	build = func(ch childActivity) (ui.TreeNode, bool) {
 		label := childViewTitle(ch.agent, ch.prompt)
 		if label == "" {
 			label = shortSessionID(ch.sessionID)
 		}
+		state := childAgentState(ch.status)
 		node := ui.TreeNode{
 			ID:      ch.sessionID,
 			Label:   label,
 			Detail:  ch.status,
-			Current: viewingID == ch.sessionID,
+			Current: w.viewingID == ch.sessionID,
 			Tone:    childStatusTone(ch.status),
 		}
-		grand := byParent[ch.sessionID]
-		if len(grand) == 0 {
-			node.Leaf = true
-		} else {
-			node.Expanded = !collapsed[ch.sessionID]
-			node.Children = make([]ui.TreeNode, 0, len(grand))
-			for _, g := range grand {
-				node.Children = append(node.Children, build(g))
+		var children []ui.TreeNode
+		for _, g := range byParent[ch.sessionID] {
+			if gn, ok := build(g); ok {
+				children = append(children, gn)
 			}
 		}
-		return node
+		selfOK := agentsStateMatches(state, w.viewFilter) && agentsTextMatches(q, ch.sessionID, label, ch.agent, ch.prompt)
+		if !selfOK && len(children) == 0 {
+			return ui.TreeNode{}, false
+		}
+		if len(children) == 0 {
+			node.Leaf = true
+		} else {
+			node.Expanded = !w.collapsed[ch.sessionID]
+			node.Children = children
+		}
+		return node, true
 	}
 	out := make([]ui.TreeNode, 0, len(tops))
 	for _, ch := range tops {
-		out = append(out, build(ch))
+		if n, ok := build(ch); ok {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+func agentsStateMatches(state theme.AgentState, filter agentsViewFilter) bool {
+	switch filter {
+	case agentsFilterAttention:
+		return state == theme.AgentStateAttention
+	case agentsFilterWorking:
+		return state == theme.AgentStateWorking
+	case agentsFilterReady:
+		return state == theme.AgentStateReady
+	default:
+		// all, roots: state not used as exclusion
+		return true
+	}
+}
+
+func agentsTextMatches(q string, parts ...string) bool {
+	if q == "" {
+		return true
+	}
+	for _, p := range parts {
+		if strings.Contains(strings.ToLower(p), q) {
+			return true
+		}
+	}
+	return false
+}
+
+func childAgentState(status string) theme.AgentState {
+	switch status {
+	case "running":
+		return theme.AgentStateWorking
+	case string(protocol.ChildStatusFailed):
+		return theme.AgentStateError
+	case string(protocol.ChildStatusCanceled):
+		return theme.AgentStateDead
+	default:
+		// completed / unknown → idle green (ready)
+		return theme.AgentStateReady
+	}
+}
+
+func (w agentsWindow) countState(want theme.AgentState) int {
+	n := 0
+	for _, root := range w.roots {
+		if strings.TrimSpace(root.ID) == "" {
+			continue
+		}
+		if root.State == want {
+			n++
+		}
+		for _, ch := range listableChildActivities(root.Children) {
+			if childAgentState(ch.status) == want {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+func listableChildActivities(children []childActivity) []childActivity {
+	if len(children) == 0 {
+		return nil
+	}
+	out := make([]childActivity, 0, len(children))
+	for _, ch := range children {
+		if ch.sessionID == "" || ch.sessionID == "child" {
+			continue
+		}
+		out = append(out, ch)
 	}
 	return out
 }
