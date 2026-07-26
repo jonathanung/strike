@@ -1,0 +1,313 @@
+package tool
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+	"unicode"
+	"unicode/utf8"
+)
+
+// MaxMCPGuidanceListed is how many MCP tools are named individually in the
+// system-prompt guidance section before the remainder is summarized.
+const MaxMCPGuidanceListed = 16
+
+// shortPurposes is the single source of truth for built-in tool one-liners in
+// prompt guidance. Tests fail if a built-in name drifts from this map.
+var shortPurposes = map[string]string{
+	"read":            "read file contents",
+	"glob":            "find files by name pattern",
+	"grep":            "search file contents by regex",
+	"edit":            "exact string replacement in a file",
+	"write":           "create or overwrite a file",
+	"apply_patch":     "coordinated multi-file patch",
+	"bash":            "run a shell command",
+	"task":            "delegate a bounded subtask to a child agent",
+	"task_status":     "check status of a delegated child task",
+	"task_read":       "read output from a delegated child task",
+	"webfetch":        "fetch a URL",
+	"todowrite":       "write the multi-step todo list",
+	"todoread":        "read the current todo list",
+	"memory_write":    "store durable project memory",
+	"memory_read":     "read durable project memory",
+	"issue_write":     "create or update a project issue",
+	"issue_read":      "read project issues",
+	"notebook_edit":   "edit a Jupyter notebook cell",
+	"sleep":           "pause for a number of seconds",
+	"skill":           "load a named skill into context",
+	"question":        "ask the user a clarifying question",
+	"enter_plan_mode": "start the plan→implement workflow",
+	"exit_plan_mode":  "leave plan mode for build",
+	"phase_done":      "advance the active workflow phase gate",
+	"toolsearch":      "search registered tool names/descriptions",
+}
+
+// BuiltinShortPurposes returns a copy of the built-in name→purpose map.
+func BuiltinShortPurposes() map[string]string {
+	out := make(map[string]string, len(shortPurposes))
+	for k, v := range shortPurposes {
+		out[k] = v
+	}
+	return out
+}
+
+// PermissionName maps a tool name to the permission.Ruleset key used at Ask.
+func PermissionName(toolName string) string {
+	switch toolName {
+	case "apply_patch", "notebook_edit":
+		return "edit"
+	default:
+		if strings.HasPrefix(toolName, "mcp_") {
+			return "mcp"
+		}
+		return toolName
+	}
+}
+
+// ShortPurpose returns a compact one-line purpose for prompt guidance.
+// Built-ins use shortPurposes; others fall back to a truncated description.
+func ShortPurpose(name, description string) string {
+	if p, ok := shortPurposes[name]; ok {
+		return p
+	}
+	return truncatePurpose(description, 72)
+}
+
+// GuidanceEntry is one effective tool for prompt composition.
+type GuidanceEntry struct {
+	Name    string
+	Purpose string
+}
+
+// BuildGuidance renders the model-visible Available tools / guidance section
+// from the effective tool list (already filtered for hard denies / depth).
+// Output is compact and deterministic.
+func BuildGuidance(entries []GuidanceEntry) string {
+	if len(entries) == 0 {
+		return ""
+	}
+	var builtins, mcp []GuidanceEntry
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name, "mcp_") {
+			mcp = append(mcp, e)
+		} else {
+			builtins = append(builtins, e)
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString("# Available tools\n\n")
+	b.WriteString("Only these tools are registered for this turn. Prefer purpose-built tools over improvising with bash. There is no websearch tool.\n")
+
+	if len(builtins) > 0 {
+		b.WriteString("\n")
+		for _, e := range builtins {
+			purpose := strings.TrimSpace(e.Purpose)
+			if purpose == "" {
+				fmt.Fprintf(&b, "- `%s`\n", e.Name)
+			} else {
+				fmt.Fprintf(&b, "- `%s` — %s\n", e.Name, purpose)
+			}
+		}
+	}
+	if len(mcp) > 0 {
+		b.WriteString("\n")
+		b.WriteString(formatMCPGuidance(mcp))
+	}
+
+	if g := recommendedGuidance(entries); g != "" {
+		b.WriteString("\n")
+		b.WriteString(g)
+	}
+	return strings.TrimSpace(b.String()) + "\n"
+}
+
+func formatMCPGuidance(mcp []GuidanceEntry) string {
+	var b strings.Builder
+	if len(mcp) <= MaxMCPGuidanceListed {
+		b.WriteString("MCP tools (call by registered name):\n")
+		for _, e := range mcp {
+			purpose := strings.TrimSpace(e.Purpose)
+			if purpose == "" {
+				fmt.Fprintf(&b, "- `%s`\n", e.Name)
+			} else {
+				fmt.Fprintf(&b, "- `%s` — %s\n", e.Name, purpose)
+			}
+		}
+		return b.String()
+	}
+
+	// Summarize by server when the list would bloat context.
+	type serverInfo struct {
+		name  string
+		count int
+	}
+	byServer := map[string]int{}
+	order := make([]string, 0)
+	for _, e := range mcp {
+		srv := mcpServerOf(e.Name)
+		if _, ok := byServer[srv]; !ok {
+			order = append(order, srv)
+		}
+		byServer[srv]++
+	}
+	sort.Strings(order)
+	fmt.Fprintf(&b, "MCP tools (%d from %d servers) — call as `mcp_<server>_<tool>`; use `toolsearch` when unsure:\n",
+		len(mcp), len(order))
+	for _, srv := range order {
+		fmt.Fprintf(&b, "- `%s` (%d tools)\n", srv, byServer[srv])
+	}
+	return b.String()
+}
+
+func mcpServerOf(name string) string {
+	// mcp_<server>_<tool…>
+	rest := strings.TrimPrefix(name, "mcp_")
+	if rest == name || rest == "" {
+		return "mcp"
+	}
+	server, _, ok := strings.Cut(rest, "_")
+	if !ok || server == "" {
+		return "mcp"
+	}
+	return server
+}
+
+func recommendedGuidance(entries []GuidanceEntry) string {
+	have := make(map[string]struct{}, len(entries))
+	for _, e := range entries {
+		have[e.Name] = struct{}{}
+	}
+	has := func(names ...string) bool {
+		for _, n := range names {
+			if _, ok := have[n]; ok {
+				return true
+			}
+		}
+		return false
+	}
+	hasAll := func(names ...string) bool {
+		for _, n := range names {
+			if _, ok := have[n]; !ok {
+				return false
+			}
+		}
+		return true
+	}
+
+	var lines []string
+	add := func(cond bool, line string) {
+		if cond {
+			lines = append(lines, "- "+line)
+		}
+	}
+
+	add(has("read", "glob", "grep") && has("bash"),
+		"Prefer `read`/`glob`/`grep` over shelling out (`cat`/`find`/`grep`) for ordinary code exploration.")
+	add(has("read", "glob", "grep") && !has("bash"),
+		"Use `read`/`glob`/`grep` for ordinary code exploration.")
+	add(has("apply_patch") && has("edit") && has("write"),
+		"Prefer `apply_patch` for multi-file coordinated edits; `edit` for one exact replacement; `write` only for new files.")
+	add(has("apply_patch") && has("edit") && !has("write"),
+		"Prefer `apply_patch` for multi-file coordinated edits; `edit` for one exact replacement.")
+	add(has("edit") && has("write") && !has("apply_patch"),
+		"Prefer `edit` for one exact replacement; `write` only for new files.")
+	add(has("edit") && !has("write") && !has("apply_patch"),
+		"Use `edit` for exact in-place replacements.")
+	add(has("write") && !has("edit") && !has("apply_patch"),
+		"Use `write` only when creating or fully replacing a file.")
+	add(has("webfetch") && has("bash"),
+		"Prefer `webfetch` over curl/wget in bash for ordinary page fetches.")
+	add(has("webfetch") && !has("bash"),
+		"Use `webfetch` for ordinary page fetches.")
+	add(has("question"),
+		"Use `question` when a decision genuinely belongs to the user.")
+	add(has("task") && has("task_status", "task_read"),
+		"Use `task` for bounded non-blocking delegation; prefer `task_status`/`task_read` over repeated `sleep` while waiting on children. Completion also arrives as `[child.completed]`.")
+	add(has("task") && !has("task_status", "task_read"),
+		"Use `task` for bounded non-blocking delegation (self-contained prompt). A later `[child.completed]` delivers the summary — never sleep-poll for task completion.")
+	add(has("sleep") && has("bash") && has("task"),
+		"Prefer `sleep` over bash sleep for external readiness (services, rate limits). Never sleep-poll for `task`/subagent completion.")
+	add(has("sleep") && has("bash") && !has("task"),
+		"Prefer `sleep` over bash sleep when waiting for external readiness.")
+	add(hasAll("memory_write", "memory_read"),
+		"Use `memory_write`/`memory_read` for durable project guidance. Tags `instruction`/`preference`/`project-convention` auto-load (capped); other tags stay on-demand.")
+	add(has("memory_read") && !has("memory_write"),
+		"Use `memory_read` for durable project memory. Auto-loaded tags are already in context when present.")
+	add(hasAll("issue_write", "issue_read"),
+		"Use `issue_write`/`issue_read` for project-local tracked issues on demand (never auto-injected).")
+	add(has("issue_read") && !has("issue_write"),
+		"Use `issue_read` for project-local tracked issues on demand.")
+	add(has("todowrite", "todoread"),
+		"Use `todowrite`/`todoread` for multi-step task tracking (full list on each write).")
+	add(has("skill"),
+		"Use `skill` to load named skill content when a task matches.")
+	switch {
+	case has("enter_plan_mode", "exit_plan_mode") && has("phase_done"):
+		add(true, "Use `enter_plan_mode`/`exit_plan_mode` and `phase_done` only in applicable workflows; plan phase hard-denies write/edit.")
+	case has("enter_plan_mode", "exit_plan_mode"):
+		add(true, "Use `enter_plan_mode`/`exit_plan_mode` only in applicable workflows; plan phase hard-denies write/edit.")
+	case has("phase_done"):
+		add(true, "Use `phase_done` to advance the active workflow phase gate.")
+	}
+	add(has("toolsearch"),
+		"Use `toolsearch` to discover tools by name or description when the list is large.")
+	add(hasMCP(entries),
+		"Call MCP tools by their registered `mcp_*` names when present.")
+
+	// Always-on operational notes when any tools exist.
+	lines = append(lines,
+		"- Never create docs/README unless asked.",
+		"- Batch independent tool calls in one response. Chain dependent bash with `&&` when using bash.",
+		"- Permission denied → change approach from feedback; do not retry the same call.",
+		"- Tab/`/agent` only switches persona on the same session history — not a subagent.",
+	)
+
+	if len(lines) == 0 {
+		return ""
+	}
+	return "## Recommended use\n\n" + strings.Join(lines, "\n") + "\n"
+}
+
+func hasMCP(entries []GuidanceEntry) bool {
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name, "mcp_") {
+			return true
+		}
+	}
+	return false
+}
+
+func truncatePurpose(desc string, maxRunes int) string {
+	s := strings.TrimSpace(desc)
+	if s == "" {
+		return ""
+	}
+	// Strip leading [mcp:server] prefix from bridge descriptions.
+	if strings.HasPrefix(s, "[mcp:") {
+		if i := strings.Index(s, "]"); i >= 0 && i+1 < len(s) {
+			s = strings.TrimSpace(s[i+1:])
+		}
+	}
+	// First sentence / line only.
+	if i := strings.IndexAny(s, ".\n"); i >= 0 {
+		part := strings.TrimSpace(s[:i])
+		if part != "" {
+			s = part
+		}
+	}
+	s = strings.Join(strings.Fields(s), " ")
+	if s == "" {
+		return ""
+	}
+	// Lowercase first rune for list consistency when it looks like a sentence.
+	r, size := utf8.DecodeRuneInString(s)
+	if unicode.IsUpper(r) && !strings.HasPrefix(s, "MCP") {
+		s = string(unicode.ToLower(r)) + s[size:]
+	}
+	if maxRunes <= 0 || utf8.RuneCountInString(s) <= maxRunes {
+		return s
+	}
+	runes := []rune(s)
+	return string(runes[:maxRunes-1]) + "…"
+}

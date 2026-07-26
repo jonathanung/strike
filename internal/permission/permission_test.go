@@ -1481,3 +1481,31 @@ func TestSeedAlwaysGrants(t *testing.T) {
 		t.Fatalf("PermissionAsked count = %d, want 0", n)
 	}
 }
+
+func TestPeekReflectsHardDeny(t *testing.T) {
+	svc := New(func(protocol.Event) {}, Defaults())
+	if got := svc.Peek("read"); got != Allow {
+		t.Fatalf("Peek(read) = %q, want allow", got)
+	}
+	if got := svc.Peek("write"); got != Ask {
+		t.Fatalf("Peek(write) = %q, want ask", got)
+	}
+	svc.SetAgentRules(Ruleset{{Permission: "write", Pattern: "*", Action: Deny}})
+	if got := svc.Peek("write"); got != Deny {
+		t.Fatalf("Peek(write) after agent deny = %q, want deny", got)
+	}
+	svc.SetPermissionMode(protocol.PermissionModePlan)
+	if got := svc.Peek("edit"); got != Deny {
+		t.Fatalf("Peek(edit) in plan mode = %q, want deny", got)
+	}
+	if got := svc.Peek("read"); got != Allow {
+		t.Fatalf("Peek(read) in plan mode = %q, want allow", got)
+	}
+}
+
+func TestPeekNilService(t *testing.T) {
+	var svc *Service
+	if got := svc.Peek("read"); got != Ask {
+		t.Fatalf("nil Peek = %q, want ask", got)
+	}
+}

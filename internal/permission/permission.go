@@ -387,6 +387,18 @@ func (s *Service) replaceProfileLocked(mut func(), message string) {
 	}
 }
 
+// Peek returns the effective action for permission against patterns without
+// prompting or recording grants. Empty patterns default to "*". Used for
+// prompt guidance so hard-denied tools are not recommended.
+func (s *Service) Peek(permission string, patterns ...string) Action {
+	if s == nil {
+		return Ask
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.evaluateLocked(permission, patterns)
+}
+
 // Ask implements tool.Context.Ask. It blocks until the permission resolves.
 func (s *Service) Ask(ctx context.Context, req tool.AskRequest) error {
 	return s.ask(ctx, req, protocol.Correlation{})
