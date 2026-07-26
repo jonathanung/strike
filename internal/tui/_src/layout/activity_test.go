@@ -143,7 +143,7 @@ func TestActivityPaneBodyNewEventAtTop(t *testing.T) {
 	body := ansi.Strip(m.activityPaneBody(48, 8))
 	lines := nonEmptyLines(body)
 	if len(lines) == 0 || !strings.Contains(lines[0], "Delta") {
-		t.Errorf("first line = %q, want Delta on top\n%s", firstLine(lines), body)
+		t.Errorf("first line = %q, want Delta on top\n%s", firstSliceLine(lines), body)
 	}
 }
 
@@ -348,7 +348,7 @@ func TestActivityReplayMatchesLiveOrdering(t *testing.T) {
 	}
 }
 
-func firstLine(lines []string) string {
+func firstSliceLine(lines []string) string {
 	if len(lines) == 0 {
 		return ""
 	}
