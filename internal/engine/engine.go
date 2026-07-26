@@ -74,6 +74,9 @@ type Options struct {
 	// InitialAutonomy is the exit-gate policy at startup. Empty becomes
 	// AutonomySupervised so the dial is always explicit.
 	InitialAutonomy protocol.Autonomy
+	// InitialPermissionMode is the tool-permission posture at startup. Empty
+	// becomes PermissionModeDefault so the dial is always explicit.
+	InitialPermissionMode protocol.PermissionMode
 	// Agents are the selectable personas; the first is the default unless
 	// InitialAgent names another.
 	Agents       []Agent
@@ -180,10 +183,11 @@ type Options struct {
 	// InitialAlwaysGrants restores session DecisionAlways rules after the
 	// initial agent profile is applied (SetAgentRules clears grants).
 	InitialAlwaysGrants permission.Ruleset
-	// QuietStartup applies Initial* provider/model/effort/autonomy/agent/phase
-	// without emitting *Selected or PhaseChanged. Durable resume sets this:
-	// the JSONL already has those events and the TUI seeds from Replay.
-	// Cleared before the op loop so user-driven changes still emit.
+	// QuietStartup applies Initial* provider/model/effort/autonomy/
+	// permission-mode/agent/phase without emitting *Selected or PhaseChanged.
+	// Durable resume sets this: the JSONL already has those events and the TUI
+	// seeds from Replay. Cleared before the op loop so user-driven changes
+	// still emit.
 	QuietStartup bool
 }
 
@@ -219,6 +223,8 @@ type Engine struct {
 	effort   protocol.Effort
 	// autonomy is the session exit-gate policy (supervised|agent|checks).
 	autonomy protocol.Autonomy
+	// permMode is the session tool-permission posture dial.
+	permMode protocol.PermissionMode
 	agent    Agent
 	// priority requests OpenAI service_tier=priority on subsequent turns.
 	// Sticky across model switches; adapters that do not support it no-op.
@@ -408,6 +414,10 @@ func (e *Engine) Run(ctx context.Context) {
 	// Autonomy is always applied so the exit gate matches config/restore.
 	// Fresh sessions announce it; QuietStartup (resume) skips the emit.
 	e.setAutonomy(e.opts.InitialAutonomy)
+	// Permission mode rules + emit before AgentSelected so unbuffered event
+	// consumers that wait on AgentSelected as "startup ready" do not deadlock.
+	// Plan workflow alignment runs after agent select (see below).
+	e.applyPermissionMode(e.opts.InitialPermissionMode, false)
 	initialAgent := e.opts.Agents[0].Name
 	if e.opts.InitialAgent != "" {
 		if _, ok := e.findAgent(e.opts.InitialAgent); ok {
@@ -415,9 +425,14 @@ func (e *Engine) Run(ctx context.Context) {
 		}
 	}
 	e.handleSelectAgent(protocol.SelectAgent{Name: initialAgent})
-	// Resume: re-enter the recorded workflow phase after agent select so
-	// syncPhaseWithAgent cannot leave implement/custom phases dropped, then
-	// re-seed session always-grants (SetAgentRules cleared them).
+	// Plan posture enters the plan workflow after the default agent is applied
+	// so agent select cannot clobber it; resume phase restore may still override.
+	if e.permMode == protocol.PermissionModePlan {
+		_ = e.enterPlanPhase()
+	}
+	// Resume: re-enter the recorded workflow phase after mode so a restored
+	// implement/custom phase is not clobbered by plan-mode enterPlanPhase,
+	// then re-seed session always-grants (SetAgentRules cleared them).
 	if wf := e.opts.InitialPhaseWorkflow; wf != "" {
 		if w, ok := e.findWorkflow(wf); ok {
 			_ = e.enterPhase(w, e.opts.InitialPhaseIndex)
@@ -533,6 +548,15 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 			return
 		}
 		e.setAutonomy(op.Mode)
+	case protocol.SetPermissionMode:
+		if e.turnActive() {
+			e.emit(protocol.EngineError{
+				Correlation: e.sessionCorr(),
+				Message:     "cannot change permission mode while a turn is running",
+			})
+			return
+		}
+		e.setPermissionMode(op.Mode)
 	case protocol.SetFast:
 		if e.turnActive() {
 			e.emit(protocol.EngineError{
@@ -946,6 +970,60 @@ func (e *Engine) setAutonomy(mode protocol.Autonomy) {
 func autonomyNames() string {
 	names := make([]string, 0, len(protocol.Autonomies()))
 	for _, mode := range protocol.Autonomies() {
+		names = append(names, string(mode))
+	}
+	return strings.Join(names, "|")
+}
+
+// setPermissionMode records tool-permission posture, updates the permission
+// service, and aligns plan posture with the plan-implement workflow. Empty
+// normalizes to default; unrecognized values are rejected.
+func (e *Engine) setPermissionMode(mode protocol.PermissionMode) {
+	e.applyPermissionMode(mode, true)
+}
+
+// applyPermissionMode is the shared implementation for startup and SetPermissionMode.
+// When alignPlan is false (startup), only rules + confirm are applied; the caller
+// enters the plan workflow after agent select. When true (user dial), plan is
+// entered or left immediately.
+func (e *Engine) applyPermissionMode(mode protocol.PermissionMode, alignPlan bool) {
+	parsed, ok := protocol.ParsePermissionMode(string(mode))
+	if !ok {
+		e.emit(protocol.EngineError{
+			Correlation: e.sessionCorr(),
+			Message:     fmt.Sprintf("unknown permission mode %q (want %s)", mode, permissionModeNames()),
+		})
+		return
+	}
+	prev := e.permMode
+	e.permMode = parsed
+	e.perms.SetPermissionMode(parsed)
+	if alignPlan {
+		switch {
+		case parsed == protocol.PermissionModePlan:
+			_ = e.enterPlanPhase()
+		case prev == protocol.PermissionModePlan && parsed != protocol.PermissionModePlan:
+			// Leaving plan posture via the dial: drop plan phase hard-denies and
+			// return to build when still on the plan agent.
+			if phase, ok := e.currentPhase(); ok && phase.Name == "plan" {
+				e.clearPhase()
+				if e.agent.Name == "plan" {
+					if _, ok := e.findAgent("build"); ok {
+						e.handleSelectAgent(protocol.SelectAgent{Name: "build"})
+					}
+				}
+			}
+		}
+	}
+	e.emitSelected(protocol.PermissionModeSelected{
+		Correlation: e.sessionCorr(),
+		Mode:        parsed,
+	})
+}
+
+func permissionModeNames() string {
+	names := make([]string, 0, len(protocol.PermissionModes()))
+	for _, mode := range protocol.PermissionModes() {
 		names = append(names, string(mode))
 	}
 	return strings.Join(names, "|")

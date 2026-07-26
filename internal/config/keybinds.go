@@ -71,6 +71,7 @@ var KnownKeybindIDs = map[string]struct{}{
 	"composer.history-prev":    {},
 	"composer.history-next":    {},
 	"composer.agent":           {},
+	"composer.permission-mode": {},
 	"composer.kill-word":       {},
 	"composer.word-back":       {},
 	"composer.word-fwd":        {},

@@ -21,6 +21,9 @@ type Restored struct {
 	// Autonomy is the last AutonomySelected mode; empty means unset (caller
 	// keeps the engine default of supervised).
 	Autonomy protocol.Autonomy
+	// PermissionMode is the last PermissionModeSelected posture; empty means
+	// unset (caller keeps default).
+	PermissionMode protocol.PermissionMode
 	// Phase* capture the last PhaseChanged with a non-empty Phase. Empty
 	// PhaseName means no workflow phase was active at end of log.
 	PhaseWorkflow string
@@ -147,6 +150,8 @@ func Restore(events []protocol.Event) Restored {
 			r.Priority = e.Enabled
 		case protocol.AutonomySelected:
 			r.Autonomy = e.Mode.Normalize()
+		case protocol.PermissionModeSelected:
+			r.PermissionMode = e.Mode.Normalize()
 		case protocol.PhaseChanged:
 			r.PhaseWorkflow = e.Workflow
 			r.PhaseName = e.Phase
@@ -230,6 +235,8 @@ func restoreCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	case protocol.FastSelected:
 		return e.Correlation, true
 	case protocol.AutonomySelected:
+		return e.Correlation, true
+	case protocol.PermissionModeSelected:
 		return e.Correlation, true
 	case protocol.PhaseChanged:
 		return e.Correlation, true

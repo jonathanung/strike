@@ -30,6 +30,7 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		{ID: "command:model", Label: "/model", Description: "select a model for the current provider", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/model"}},
 		{ID: "command:effort", Label: "/effort", Description: "set how much reasoning the model spends", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/effort"}},
 		{ID: "command:autonomy", Label: "/autonomy", Description: "set exit-gate policy (supervised/agent/checks)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/autonomy"}},
+		{ID: "command:mode", Label: "/mode", Description: "set permission posture (default/plan/accept-edits/yolo)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/mode"}},
 		{ID: "command:auth", Label: "/auth", Description: "manage provider authentication", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/auth"}},
 		{ID: "command:settings", Label: "/settings", Description: "manage custom providers and settings", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/settings"}},
 		{ID: "agent:build", Label: "/agent build", Description: "select an agent", Action: paletteAction{Kind: paletteActionAgent, Value: "build"}},

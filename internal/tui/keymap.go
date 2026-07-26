@@ -28,6 +28,7 @@ type keyMap struct {
 	HistoryPrev       key.Binding
 	HistoryNext       key.Binding
 	Agent             key.Binding
+	PermissionMode    key.Binding
 	SaveDefaults      key.Binding
 	ScrollUp          key.Binding
 	ScrollDown        key.Binding
@@ -86,6 +87,8 @@ func defaultKeyMap() keyMap {
 		HistoryPrev:    key.NewBinding(key.WithKeys("up"), key.WithHelp("up", "history previous")),
 		HistoryNext:    key.NewBinding(key.WithKeys("down"), key.WithHelp("down", "history next")),
 		Agent:          key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "agent")),
+		// PermissionMode: shift+tab cycles tool-permission posture (not newline).
+		PermissionMode: key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "permission mode")),
 		SaveDefaults:   key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "save defaults")),
 		ScrollUp:       key.NewBinding(key.WithKeys("pgup", "ctrl+up"), key.WithHelp("pgup/ctrl+up", "scroll up")),
 		ScrollDown:     key.NewBinding(key.WithKeys("pgdown", "ctrl+down"), key.WithHelp("pgdn/ctrl+down", "scroll down")),
@@ -201,6 +204,7 @@ func applyKeybindOverrides(k *keyMap, overrides map[string][]string) {
 	set(&k.HistoryPrev, "composer.history-prev", "")
 	set(&k.HistoryNext, "composer.history-next", "")
 	set(&k.Agent, "composer.agent", "")
+	set(&k.PermissionMode, "composer.permission-mode", "shift+tab")
 	set(&k.KillWord, "composer.kill-word", "")
 	set(&k.WordBackward, "composer.word-back", "")
 	set(&k.WordForward, "composer.word-fwd", "")
@@ -282,6 +286,7 @@ func keybindCatalog(keys keyMap) []keybindEntry {
 		from("composer.history-prev", "Composer", keys.HistoryPrev),
 		from("composer.history-next", "Composer", keys.HistoryNext),
 		from("composer.agent", "Composer", keys.Agent),
+		from("composer.permission-mode", "Composer", keys.PermissionMode),
 		from("composer.kill-word", "Composer", keys.KillWord),
 		from("composer.word-back", "Composer", keys.WordBackward),
 		from("composer.word-fwd", "Composer", keys.WordForward),

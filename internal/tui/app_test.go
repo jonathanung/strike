@@ -623,8 +623,9 @@ func TestDangerousPermissionsIndicatorRemainsVisibleWithActiveModals(t *testing.
 func TestDangerousPermissionsIndicatorAndModalPersistAcrossRunningStateAndNotice(t *testing.T) {
 	const indicator = "DANGER: permissions bypassed"
 	m, _ := newAppTestModelWithOptions(Options{DangerouslySkipPermissions: true})
-	// Tall enough that the palette overlay does not clip the reserved notice row.
-	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 28})
+	// Wide/tall enough that the palette overlay does not clip the notice row
+	// and the permission-mode badge still leaves room for the working status.
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 28})
 	m.modal = newPaletteModal(m.commands, nil, m.currentPaletteAvailability())
 
 	m.applyEvent(protocol.TurnStarted{})

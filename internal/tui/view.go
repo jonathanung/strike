@@ -85,6 +85,8 @@ func (m Model) headerView(width int) string {
 	// Autonomy is always visible so mode is never only implicit in gates.
 	// Compact short label keeps the working status visible on narrow widths.
 	badges += inlineGap + ui.Badge(th, ui.ToneMuted, "auto"+inlineGap+m.autonomy.Short())
+	// Permission posture dial — always shown (short label + tone); yolo is danger.
+	badges += inlineGap + ui.Badge(th, permissionModeBadgeTone(m.permMode), m.permMode.Short())
 	if m.permissionAutoApproveSeconds > 0 {
 		// Warning tone: armed auto-allow is a cost/safety-visible preference.
 		badges += inlineGap + ui.Badge(th, ui.ToneWarning, "auto-allow"+inlineGap+itoa(m.permissionAutoApproveSeconds)+"s")
@@ -429,18 +431,43 @@ func keyHint(binding key.Binding) ui.KeyHint {
 	return ui.KeyHint{Key: help.Key, Label: help.Desc}
 }
 
-// dangerView is the permissions-bypassed banner, shown only under
-// --dangerously-skip-permissions. A non-positive width (pre-ready) renders the
-// full text unclamped so the warning is never lost at startup.
+// showDangerBanner reports whether the bottom danger row should be reserved.
+func (m Model) showDangerBanner() bool {
+	return m.dangerouslySkipPermissions || m.permMode.Normalize() == protocol.PermissionModeYolo
+}
+
+// dangerView is the permissions-bypassed banner for --dangerously-skip-permissions
+// or session yolo mode. A non-positive width (pre-ready) renders the full text
+// unclamped so the warning is never lost at startup.
 func (m Model) dangerView(width int) string {
-	if !m.dangerouslySkipPermissions {
+	var text string
+	switch {
+	case m.dangerouslySkipPermissions:
+		text = "DANGER: permissions bypassed"
+	case m.permMode.Normalize() == protocol.PermissionModeYolo:
+		text = "DANGER: yolo mode — permission asks skipped"
+	default:
 		return ""
 	}
 	style := m.th.S().DangerStrong
 	if width > 0 {
 		style = style.MaxWidth(width)
 	}
-	return style.Render("DANGER: permissions bypassed")
+	return style.Render(text)
+}
+
+// permissionModeBadgeTone maps posture to a status badge tone.
+func permissionModeBadgeTone(mode protocol.PermissionMode) ui.Tone {
+	switch mode.Normalize() {
+	case protocol.PermissionModePlan:
+		return ui.ToneAccentAlt
+	case protocol.PermissionModeAcceptEdits:
+		return ui.ToneWarning
+	case protocol.PermissionModeYolo:
+		return ui.ToneError
+	default:
+		return ui.ToneMuted
+	}
 }
 
 // headerContextMeter is the compact usage chip for the status bar: a short

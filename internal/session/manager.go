@@ -730,6 +730,8 @@ func eventSessionID(ev protocol.Event) (string, bool) {
 		return e.SessionID, true
 	case protocol.AutonomySelected:
 		return e.SessionID, true
+	case protocol.PermissionModeSelected:
+		return e.SessionID, true
 	case protocol.PhaseChanged:
 		return e.SessionID, true
 	case protocol.FastSelected:

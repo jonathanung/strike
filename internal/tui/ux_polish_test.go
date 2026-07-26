@@ -71,9 +71,9 @@ func TestHeaderKeepsWorkingWithMeterAtNarrowWidth(t *testing.T) {
 	m.applyEvent(protocol.TurnStarted{})
 	m.turnStartedAt = time.Now().Add(-3 * time.Second)
 
-	// Compact autonomy badge needs a few more columns than the pre-dial 48
-	// floor; meter still shrinks first so working stays on the right.
-	header := ansi.Strip(m.headerView(56))
+	// Autonomy + permission-mode badges need a few more columns than the
+	// pre-dial floor; meter still shrinks first so working stays on the right.
+	header := ansi.Strip(m.headerView(64))
 	if !strings.Contains(header, "working") {
 		t.Errorf("narrow header dropped working status despite budget-aware meter:\n%s", header)
 	}

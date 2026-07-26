@@ -337,17 +337,18 @@ func TestRunSessionQuietStartupDoesNotReAppendSelections(t *testing.T) {
 
 	restored := engine.Restore(opened.replay)
 	eng := engine.New(engine.Options{
-		SessionID:       info.ID,
-		Select:          func(string) (provider.Provider, string, error) { return echo.New(), "echo", nil },
-		Registry:        tool.NewRegistry(),
-		WorkDir:         t.TempDir(),
-		InitialProvider: "echo",
-		InitialModel:    "echo",
-		InitialAgent:    restored.Agent,
-		InitialAutonomy: restored.Autonomy,
-		InitialMessages: restored.Messages,
-		QuietStartup:    true,
-		Agents:          []engine.Agent{{Name: "build"}},
+		SessionID:             info.ID,
+		Select:                func(string) (provider.Provider, string, error) { return echo.New(), "echo", nil },
+		Registry:              tool.NewRegistry(),
+		WorkDir:               t.TempDir(),
+		InitialProvider:       "echo",
+		InitialModel:          "echo",
+		InitialAgent:          restored.Agent,
+		InitialAutonomy:       restored.Autonomy,
+		InitialPermissionMode: restored.PermissionMode,
+		InitialMessages:       restored.Messages,
+		QuietStartup:          true,
+		Agents:                []engine.Agent{{Name: "build"}},
 	})
 
 	err = runSession(context.Background(), eng.Run, eng.Events(), opened.bound, func(live <-chan protocol.Event) error {
@@ -361,7 +362,7 @@ func TestRunSessionQuietStartupDoesNotReAppendSelections(t *testing.T) {
 				}
 				switch ev.(type) {
 				case protocol.ModelSelected, protocol.AgentSelected, protocol.AutonomySelected,
-					protocol.EffortSelected, protocol.PhaseChanged:
+					protocol.PermissionModeSelected, protocol.EffortSelected, protocol.PhaseChanged:
 					t.Errorf("live stream saw startup selection %T", ev)
 				}
 			case <-deadline:
