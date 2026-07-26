@@ -297,6 +297,164 @@ func TestFilesExplorerOpenMarkdownAndCode(t *testing.T) {
 	}
 }
 
+func TestFilesWindowRefreshPreservesExpansionAndCursor(t *testing.T) {
+	ff := &fakeFiles{dirs: map[string][]host.DirEntry{
+		"": {
+			{Name: "pkg", IsDir: true},
+			{Name: "README.md", IsDir: false},
+		},
+		"pkg": {
+			{Name: "main.go", IsDir: false},
+		},
+	}}
+	w := newFilesWindow().bind("/tmp/proj", ff).resize(40, 10).(filesWindow)
+	next, _ := w.update(tea.KeyMsg{Type: tea.KeyEnter})
+	w = next.(filesWindow)
+	next, _ = w.update(tea.KeyMsg{Type: tea.KeyDown})
+	w = next.(filesWindow)
+	if w.cursor != 1 {
+		t.Fatalf("cursor = %d, want 1 (main.go)", w.cursor)
+	}
+
+	// External create under root + pkg.
+	ff.dirs[""] = []host.DirEntry{
+		{Name: "pkg", IsDir: true},
+		{Name: "README.md", IsDir: false},
+		{Name: "new.txt", IsDir: false},
+	}
+	ff.dirs["pkg"] = []host.DirEntry{
+		{Name: "main.go", IsDir: false},
+		{Name: "util.go", IsDir: false},
+	}
+	w = w.refresh()
+	plain := ansi.Strip(w.view(theme.Default()))
+	if !strings.Contains(plain, "new.txt") || !strings.Contains(plain, "util.go") {
+		t.Fatalf("refresh missing new entries:\n%s", plain)
+	}
+	rows := ui.FlattenTree(w.nodes)
+	// pkg expanded: pkg, main.go, util.go, README.md, new.txt
+	if len(rows) != 5 {
+		t.Fatalf("rows = %d, want 5 after refresh", len(rows))
+	}
+	if w.cursor != 1 {
+		t.Errorf("cursor = %d, want 1 (still on main.go)", w.cursor)
+	}
+	if got := rows[w.cursor].ID; got != "pkg/main.go" {
+		t.Errorf("cursor id = %q, want pkg/main.go", got)
+	}
+	// pkg still expanded
+	if n, ok := ui.TreeNodeAt(w.nodes, []int{0}); !ok || !n.Expanded {
+		t.Fatalf("pkg expanded = %+v ok=%v, want expanded", n, ok)
+	}
+}
+
+func TestFilesWindowRefreshDropsMissingCursorPath(t *testing.T) {
+	ff := &fakeFiles{dirs: map[string][]host.DirEntry{
+		"": {
+			{Name: "a.go", IsDir: false},
+			{Name: "b.go", IsDir: false},
+		},
+	}}
+	w := newFilesWindow().bind("/tmp", ff).resize(30, 6).(filesWindow)
+	next, _ := w.update(tea.KeyMsg{Type: tea.KeyDown})
+	w = next.(filesWindow)
+	if w.cursor != 1 {
+		t.Fatalf("cursor = %d, want 1", w.cursor)
+	}
+	ff.dirs[""] = []host.DirEntry{{Name: "a.go", IsDir: false}}
+	w = w.refresh()
+	if w.cursor != 0 {
+		t.Errorf("cursor = %d, want 0 after deleted selection", w.cursor)
+	}
+	plain := ansi.Strip(w.view(theme.Default()))
+	if strings.Contains(plain, "b.go") {
+		t.Fatalf("deleted file still visible:\n%s", plain)
+	}
+}
+
+func TestFilesWindowRefreshOnToolEndAndFocusAndTick(t *testing.T) {
+	ff := &fakeFiles{dirs: map[string][]host.DirEntry{
+		"": {{Name: "old.go", IsDir: false}},
+	}}
+	m, _ := newAppTestModelWithOptions(Options{WorkDir: "/workspace/proj"})
+	m.services.Files = ff
+	m.windows = configureFilesWindow(m.windows, m.workDir, ff)
+
+	filesWin := func(m Model) filesWindow {
+		t.Helper()
+		for _, w := range m.windows.windows {
+			if fw, ok := w.(filesWindow); ok {
+				return fw
+			}
+		}
+		t.Fatal("files window missing")
+		return filesWindow{}
+	}
+	hasID := func(m Model, id string) bool {
+		t.Helper()
+		for _, row := range ui.FlattenTree(filesWin(m).nodes) {
+			if row.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Tool end (write) should refresh.
+	ff.dirs[""] = []host.DirEntry{
+		{Name: "old.go", IsDir: false},
+		{Name: "written.go", IsDir: false},
+	}
+	m.applyEvent(protocol.ToolCallBegin{CallID: "w1", Name: "write", Args: []byte(`{}`)})
+	m.applyEvent(protocol.ToolCallEnd{CallID: "w1", Output: "ok"})
+	if !hasID(m, "written.go") {
+		t.Fatalf("tool end did not refresh tree: %+v", filesWin(m).nodes)
+	}
+
+	// Focus regain.
+	ff.dirs[""] = append(ff.dirs[""], host.DirEntry{Name: "focus.txt", IsDir: false})
+	m = updateApp(t, m, tea.FocusMsg{})
+	if !hasID(m, "focus.txt") {
+		t.Fatalf("FocusMsg did not refresh tree: %+v", filesWin(m).nodes)
+	}
+
+	// Idle poll tick.
+	ff.dirs[""] = append(ff.dirs[""], host.DirEntry{Name: "tick.txt", IsDir: false})
+	updated, cmd := m.Update(filesRefreshMsg{})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("filesRefreshMsg should re-arm poll tick")
+	}
+	if !hasID(m, "tick.txt") {
+		t.Fatalf("poll tick did not refresh tree: %+v", filesWin(m).nodes)
+	}
+
+	// FilesInvalidated (external editor signal).
+	ff.dirs[""] = append(ff.dirs[""], host.DirEntry{Name: "ext.go", IsDir: false})
+	m.applyEvent(protocol.FilesInvalidated{Paths: []string{"ext.go"}, Reason: "external_editor"})
+	if !hasID(m, "ext.go") {
+		t.Fatalf("FilesInvalidated did not refresh tree: %+v", filesWin(m).nodes)
+	}
+}
+
+func TestIsWorkspaceFSTool(t *testing.T) {
+	for _, name := range []string{"write", "edit", "bash", "apply_patch", "notebook_edit"} {
+		if !isWorkspaceFSTool(name) {
+			t.Errorf("%s should be workspace FS tool", name)
+		}
+	}
+	if isWorkspaceFSTool("read") || isWorkspaceFSTool("issue_write") {
+		t.Error("read/issue_write must not force files refresh")
+	}
+}
+
+func TestFilesWindowInitArmsRefreshTick(t *testing.T) {
+	cmd := newFilesWindow().init()
+	if cmd == nil {
+		t.Fatal("init should arm files refresh tick")
+	}
+}
+
 func TestOpenFilesExplorerPathRoutes(t *testing.T) {
 	m, _ := newAppTestModelWithOptions(Options{WorkDir: t.TempDir(), VimMode: VimModeTakeover})
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
