@@ -64,7 +64,8 @@ func (p CustomProvider) Validate() error {
 		return err
 	}
 	if p.APIKeyEnv != "" {
-		if strings.TrimSpace(p.APIKeyEnv) != p.APIKeyEnv || strings.ContainsAny(p.APIKeyEnv, " \t\n=") {
+		envName := NormalizeAPIKeyEnv(p.APIKeyEnv)
+		if envName == "" || strings.ContainsAny(envName, " \t\n=") || !isEnvIdent(envName) {
 			return fmt.Errorf("apiKeyEnv %q is not a valid environment variable name", p.APIKeyEnv)
 		}
 	}
@@ -88,11 +89,15 @@ func ValidateWireAPI(api WireAPI) error {
 	}
 }
 
-// ValidateBaseURL requires an absolute http(s) URL with a host.
+// ValidateBaseURL requires an absolute http(s) URL with a host, or a string
+// that contains env placeholders ({env:NAME}, $NAME, ${NAME}) resolved later.
 func ValidateBaseURL(raw string) error {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return errors.New("baseURL is required")
+	}
+	if ContainsEnvRef(raw) {
+		return nil
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -107,12 +112,34 @@ func ValidateBaseURL(raw string) error {
 	return nil
 }
 
+// ResolveCustom expands env placeholders in BaseURL and Headers for runtime use.
+// APIKeyEnv is normalized to a bare variable name. The returned value is a copy.
+func ResolveCustom(p CustomProvider) CustomProvider {
+	p = NormalizeCustomProvider(p)
+	p.BaseURL = strings.TrimRight(strings.TrimSpace(ExpandEnv(p.BaseURL)), "/")
+	p.APIKeyEnv = NormalizeAPIKeyEnv(p.APIKeyEnv)
+	if len(p.Headers) > 0 {
+		out := make(map[string]string, len(p.Headers))
+		for k, v := range p.Headers {
+			out[k] = ExpandEnv(v)
+		}
+		p.Headers = out
+	}
+	return p
+}
+
 // NormalizeCustomProvider trims fields and lowercases the name/api.
+// BaseURL is not env-expanded here (kept as template until ResolveCustom).
 func NormalizeCustomProvider(p CustomProvider) CustomProvider {
 	p.Name = strings.ToLower(strings.TrimSpace(p.Name))
-	p.BaseURL = strings.TrimRight(strings.TrimSpace(p.BaseURL), "/")
+	// Only strip trailing slash on concrete URLs; keep templates intact.
+	base := strings.TrimSpace(p.BaseURL)
+	if !ContainsEnvRef(base) {
+		base = strings.TrimRight(base, "/")
+	}
+	p.BaseURL = base
 	p.API = WireAPI(strings.ToLower(strings.TrimSpace(string(p.API))))
-	p.APIKeyEnv = strings.TrimSpace(p.APIKeyEnv)
+	p.APIKeyEnv = NormalizeAPIKeyEnv(p.APIKeyEnv)
 	if len(p.Headers) > 0 {
 		out := make(map[string]string, len(p.Headers))
 		for k, v := range p.Headers {
@@ -180,19 +207,22 @@ func mergeProviders(base, layer []CustomProvider) []CustomProvider {
 	return out
 }
 
-// CustomStore is a thread-safe view of custom providers persisted in the
-// global config file. Project-layer customs are merged in at Load time for the
-// engine; CRUD from the TUI writes the global layer only.
+// CustomStore is a thread-safe view of custom providers persisted across
+// ~/.strike/config, optional providers.jsonc layers, and project overrides.
+// Upsert writes the global config providers array; Remove drops the name from
+// memory and from every known persistence layer (config + providers.jsonc).
 type CustomStore struct {
-	mu    sync.Mutex
-	items []CustomProvider
+	mu      sync.Mutex
+	items   []CustomProvider
+	workDir string
 }
 
 // NewCustomStore seeds a store from a merged provider list (e.g. config.Load).
-func NewCustomStore(items []CustomProvider) *CustomStore {
+// workDir scopes project-layer removals (./.strike/…); empty skips project files.
+func NewCustomStore(items []CustomProvider, workDir string) *CustomStore {
 	out := make([]CustomProvider, len(items))
 	copy(out, items)
-	return &CustomStore{items: out}
+	return &CustomStore{items: out, workDir: workDir}
 }
 
 // List returns a snapshot of custom providers in stable order.
@@ -234,7 +264,9 @@ func (s *CustomStore) Upsert(p CustomProvider) error {
 	return saveGlobalProviders(s.items)
 }
 
-// Remove deletes a custom provider by name and persists. Missing names are OK.
+// Remove deletes a custom provider by name from memory and every persistence
+// layer (global/project config providers arrays and providers.jsonc files).
+// Missing names are OK.
 func (s *CustomStore) Remove(name string) error {
 	name = strings.ToLower(strings.TrimSpace(name))
 	if name == "" {
@@ -248,11 +280,31 @@ func (s *CustomStore) Remove(name string) error {
 			out = append(out, p)
 		}
 	}
-	// Keep capacity when nothing removed; still rewrite so project-only entries
-	// that were merged into the in-memory view are not re-saved incorrectly.
-	// Only global customs are persisted — filter to names we own globally.
 	s.items = slices.Clone(out)
-	return saveGlobalProviders(s.items)
+	workDir := s.workDir
+	// Drop from each layer independently so a providers.jsonc-only entry does
+	// not reappear on next Load, and config-only entries stay off disk too.
+	if err := removeProviderFromConfigFile(GlobalPath(), name); err != nil {
+		return err
+	}
+	if root := GlobalRoot(); root != "" {
+		for _, path := range providersFileCandidates(root) {
+			if err := removeProviderFromProvidersFile(path, name); err != nil {
+				return err
+			}
+		}
+	}
+	if workDir != "" {
+		if err := removeProviderFromConfigFile(ProjectPath(workDir), name); err != nil {
+			return err
+		}
+		for _, path := range providersFileCandidates(projectRoot(workDir)) {
+			if err := removeProviderFromProvidersFile(path, name); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // saveGlobalProviders rewrites the providers array in ~/.strike/config while
