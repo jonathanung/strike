@@ -53,7 +53,7 @@ func normPrompt(s string) string {
 }
 
 // SharedSystemPrompt is the always-on baseline (identity, ADHD response
-// contract, tools, safety). Provider and agent layers stack on top.
+// contract, doing-tasks). Effective tool guidance is a separate layer.
 var SharedSystemPrompt = normPrompt(sharedPrompt)
 
 // DefaultSystemPrompt is shared + generic provider notes — used when no
@@ -77,14 +77,16 @@ var LeanStrategicSystemPrompt = normPrompt(leanStrategicPrompt)
 // separate and inspected as message counts):
 //
 //  1. shared            append   builtin baseline
-//  2. overlay slot      replace  exactly one of: provider | config systemPrompt
+//  2. tools             append   effective registry guidance (name + purpose;
+//                                agent/permission/depth/MCP aware)
+//  3. overlay slot      replace  exactly one of: provider | config systemPrompt
 //                                (build only) | agent persona
-//  3. phase slot        replace  phase context, else plan overlay when agent
+//  4. phase slot        replace  phase context, else plan overlay when agent
 //                                is plan; neither when inactive
-//  4. lean code         append   agent-scoped lean guidance when leanCode≠off
-//  5. environment       append   cwd / model / date
-//  6. instructions      append   each AGENTS.md/CLAUDE.md block
-//  7. project memory    append   tagged entries (instruction|preference|
+//  5. lean code         append   agent-scoped lean guidance when leanCode≠off
+//  6. environment       append   cwd / model / date
+//  7. instructions      append   each AGENTS.md/CLAUDE.md block
+//  8. project memory    append   tagged entries (instruction|preference|
 //                                project-convention), capped; untrusted
 //
 // Skills are user-turn content (slash render → UserInput), not system layers.
@@ -210,13 +212,14 @@ type promptLayer struct {
 
 // systemLayers returns the ordered composition for the next provider request.
 func (e *Engine) systemLayers() []promptLayer {
-	layers := make([]promptLayer, 0, 6)
+	layers := make([]promptLayer, 0, 8)
 	layers = append(layers, promptLayer{
 		Kind:   protocol.PromptLayerShared,
 		Source: "builtin:shared",
 		Mode:   protocol.PromptLayerAppend,
 		Text:   SharedSystemPrompt,
 	})
+	layers = appendToolGuidanceLayer(e, layers)
 
 	switch {
 	case e.agent.Name == "build" && strings.TrimSpace(e.opts.SystemPrompt) != "":

@@ -50,14 +50,15 @@ unknown names fail with `unknown agent "…" (available: …)`.
 
 Each model request composes the system prompt in layers (like opencode):
 
-1. **Shared baseline** — identity, ADHD-shaped response contract, tool/safety rules
-2. **Provider overlay** — anthropic / openai (incl. chatgpt) / xai / default, chosen from the active provider and model id
-3. **Agent persona** — empty for built-in build/plan (provider overlay used); custom `agents/*.md` body replaces the provider overlay; config `systemPrompt` replaces it for build only
-4. **Plan overlay** — always added while the plan agent is active
-5. **Lean code** — agent-scoped efficiency guidance (see below); off via config `leanCode`
-6. **Environment** — workdir, workspace root, git, platform, date, model id
-7. **Instructions** — `AGENTS.md` / `CLAUDE.md` from `~/.strike` and the project (walked up to the git root). Create or refresh the project file with `/init` (confirms before replacing an existing `AGENTS.md`; light local scan only — no secrets).
-8. **Project memory** — entries tagged `instruction`, `preference`, or `project-convention` (capped; untrusted). Untagged notes and issues stay on-demand via tools.
+1. **Shared baseline** — identity, ADHD-shaped response contract, doing-tasks
+2. **Tools** — effective registry guidance (name + short purpose, recommended use). Reflects agent/permission/depth/MCP; hard-denied tools omitted. Own `/context` provenance layer (`tools` / `registry:effective`).
+3. **Provider overlay** — anthropic / openai (incl. chatgpt) / xai / default, chosen from the active provider and model id
+4. **Agent persona** — empty for built-in build/plan (provider overlay used); custom `agents/*.md` body replaces the provider overlay; config `systemPrompt` replaces it for build only
+5. **Plan overlay** — always added while the plan agent is active
+6. **Lean code** — agent-scoped efficiency guidance (see below); off via config `leanCode`
+7. **Environment** — workdir, workspace root, git, platform, date, model id
+8. **Instructions** — `AGENTS.md` / `CLAUDE.md` from `~/.strike` and the project (walked up to the git root). Create or refresh the project file with `/init` (confirms before replacing an existing `AGENTS.md`; light local scan only — no secrets).
+9. **Project memory** — entries tagged `instruction`, `preference`, or `project-convention` (capped; untrusted). Untagged notes and issues stay on-demand via tools.
 
 ### Lean code (ponytail-lite)
 

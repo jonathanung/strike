@@ -48,8 +48,21 @@ func (r *Registry) Get(name string) (Tool, bool) {
 	return t, ok
 }
 
+// Names returns registered tool names in registration order.
+func (r *Registry) Names() []string {
+	if r == nil || len(r.order) == 0 {
+		return nil
+	}
+	out := make([]string, len(r.order))
+	copy(out, r.order)
+	return out
+}
+
 // Schemas returns the model-facing declarations in registration order.
 func (r *Registry) Schemas() []provider.ToolSchema {
+	if r == nil {
+		return nil
+	}
 	out := make([]provider.ToolSchema, 0, len(r.order))
 	for _, name := range r.order {
 		t := r.tools[name]
