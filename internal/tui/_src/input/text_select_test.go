@@ -320,8 +320,12 @@ func TestFocusedPaneHasChromeNotBodyWash(t *testing.T) {
 	if !strings.Contains(view, rgbBGSGR("#445566")) {
 		t.Fatal("focused title edge missing SurfaceFocus")
 	}
-	if !strings.Contains(view, rgbBGSGR("#778899")) {
-		t.Fatal("focused leading bar missing BorderFocus")
+	// Thin edge rule: BorderFocus as foreground, not a solid fill column.
+	if !strings.Contains(view, rgbSGR("#778899")) {
+		t.Fatal("focused leading thin bar missing BorderFocus fg")
+	}
+	if strings.Contains(view, rgbBGSGR("#778899")) {
+		t.Fatal("focused leading bar still uses solid BorderFocus fill")
 	}
 	if !strings.Contains(view, rgbBGSGR("#112233")) {
 		t.Fatal("focused body missing normal Surface")
@@ -329,5 +333,14 @@ func TestFocusedPaneHasChromeNotBodyWash(t *testing.T) {
 	// Dim right pane still tokenized.
 	if !strings.Contains(view, rgbBGSGR("#aabbcc")) {
 		t.Fatal("dim pane missing SurfaceMuted")
+	}
+	// Focus switch moves the thin rule to the right pane only.
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
+	rightView := m.View()
+	if !strings.Contains(rightView, rgbSGR("#778899")) {
+		t.Fatal("right-focused view missing BorderFocus thin rule")
+	}
+	if !strings.Contains(rightView, rgbBGSGR("#445566")) {
+		t.Fatal("right-focused title edge missing SurfaceFocus")
 	}
 }

@@ -22,7 +22,7 @@ type fileDoc struct {
 
 type fileIcons struct {
 	Prompt, Assistant, Tool, OK, Err, Info, Agent, Bolt, Dot *string
-	Cursor, InputCursor, FilterCursor, ToolGuide             *string
+	Cursor, InputCursor, FilterCursor, ToolGuide, FocusBar   *string
 	BadgeLeft, BadgeRight, DetailSeparator, Ellipsis         *string
 	LogoTopRule, LogoBottomRule, MeterFill, MeterEmpty       *string
 	TreeExpanded, TreeCollapsed, Sparkline                   *string
@@ -287,6 +287,7 @@ func applyIcons(doc fileIcons) Icons {
 	set(&i.InputCursor, doc.InputCursor)
 	set(&i.FilterCursor, doc.FilterCursor)
 	set(&i.ToolGuide, doc.ToolGuide)
+	set(&i.FocusBar, doc.FocusBar)
 	set(&i.BadgeLeft, doc.BadgeLeft)
 	set(&i.BadgeRight, doc.BadgeRight)
 	set(&i.DetailSeparator, doc.DetailSeparator)
