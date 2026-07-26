@@ -27,6 +27,9 @@ type Icons struct {
 	MeterEmpty      string // ░ context-meter empty cell
 	TreeExpanded    string // ▾ expanded tree node marker
 	TreeCollapsed   string // ▸ collapsed tree node marker
+	// Sparkline is low→high bar glyphs for activity charts (one cell each).
+	// Empty falls back to DefaultIcons; ui.Sparkline indexes into runes.
+	Sparkline string
 }
 
 // DefaultIcons returns the stock glyph set. A zero Icons value is treated as
@@ -51,6 +54,7 @@ func DefaultIcons() Icons {
 		LogoTopRule: "▁", LogoBottomRule: "▔",
 		MeterFill: "█", MeterEmpty: "░",
 		TreeExpanded: "▾", TreeCollapsed: "▸",
+		Sparkline: "▁▂▃▄▅▆▇█",
 	}
 }
 
@@ -123,6 +127,9 @@ func resolveIcons(i, d Icons) Icons {
 	}
 	if i.TreeCollapsed == "" {
 		i.TreeCollapsed = d.TreeCollapsed
+	}
+	if i.Sparkline == "" {
+		i.Sparkline = d.Sparkline
 	}
 	return i
 }

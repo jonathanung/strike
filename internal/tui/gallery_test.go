@@ -50,6 +50,25 @@ func TestGallery(t *testing.T) {
 	}
 	render("80x24 left dashboard", 80, 24, func(m *Model) {})
 	render("80x24 right context", 80, 24, func(m *Model) { m.focus = focusRight })
+	render("80x24 right visualizer", 80, 24, func(m *Model) {
+		m.focus = focusRight
+		m.sessionID = "gallery-root"
+		m.applyEvent(protocol.ModelSelected{Provider: "echo", Model: "echo-1"})
+		m.applyEvent(protocol.AgentSelected{Name: "build"})
+		m.applyEvent(protocol.UsageReported{
+			Input:  protocol.KnownTokens(1200),
+			Output: protocol.KnownTokens(400),
+			Used:   protocol.KnownTokens(1600),
+			Source: protocol.UsageSourceActual,
+		})
+		m.applyEvent(protocol.ToolCallBegin{CallID: "g1", Name: "read"})
+		m.applyEvent(protocol.ToolCallEnd{CallID: "g1", Title: "main.go", Output: "ok"})
+		m.vizFocusID = "gallery-root"
+		if reg, ok := m.windows.activate(visualizerWindowID); ok {
+			m.windows = reg
+		}
+		m.windows, _ = m.windows.broadcast(m.visualizerStateSnapshot())
+	})
 	render("93x40 split canonical (left=60 gutter=1 right=32)", 93, 40, func(m *Model) {})
 	render("92 left single (left=92 right=0)", 92, 60, func(m *Model) {})
 	render("120x40 split (left=80 gutter=1 right=39)", 120, 40, func(m *Model) {})

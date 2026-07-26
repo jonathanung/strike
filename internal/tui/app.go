@@ -260,6 +260,9 @@ type Model struct {
 	outputLimitKnown                                                       bool
 	// pendingContextDoctor opens the doctor modal on the next EffectivePrompt.
 	pendingContextDoctor bool
+	// vizFocusID is the agents-tree node the visualizer follows (cursor or
+	// last open). Empty falls back to viewingID / sessionID.
+	vizFocusID string
 
 	// firstRun drives the empty-transcript onboarding card and auto provider modal.
 	firstRun, firstRunModalOpened bool
@@ -988,10 +991,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.openFilesExplorerPath(msg.path)
 
 	case agentsOpenMsg:
+		if id := strings.TrimSpace(msg.sessionID); id != "" {
+			m.vizFocusID = id
+		}
 		cmd := m.handleAgentsOpen(msg)
 		m.reflow()
 		m.refreshViewport()
-		return m, tea.Batch(cmd, m.broadcastAgentsState())
+		return m, tea.Batch(cmd, m.broadcastAgentsState(), m.broadcastVisualizerState())
+
+	case agentsHighlightMsg:
+		m.vizFocusID = strings.TrimSpace(msg.sessionID)
+		return m, m.broadcastVisualizerState()
 
 	case agentsSpawnMsg:
 		cmd := m.spawnRoot()
@@ -1895,7 +1905,175 @@ func (m Model) contextStateSnapshot() contextStateMsg {
 func (m *Model) broadcastContextState() tea.Cmd {
 	var cmd tea.Cmd
 	m.windows, cmd = m.windows.broadcast(m.contextStateSnapshot())
+	return tea.Batch(cmd, m.broadcastVisualizerState())
+}
+
+// broadcastVisualizerState pushes selected-node stats to the visualizer window.
+func (m *Model) broadcastVisualizerState() tea.Cmd {
+	var cmd tea.Cmd
+	m.windows, cmd = m.windows.broadcast(m.visualizerStateSnapshot())
 	return cmd
+}
+
+// visualizerStateSnapshot builds live stats for vizFocusID / viewing / session.
+func (m Model) visualizerStateSnapshot() visualizerStateMsg {
+	id := strings.TrimSpace(m.vizFocusID)
+	if id == "" {
+		id = strings.TrimSpace(m.viewingID)
+	}
+	if id == "" {
+		id = strings.TrimSpace(m.sessionID)
+	}
+	if id == "" {
+		return visualizerStateMsg{}
+	}
+
+	msg := visualizerStateMsg{SessionID: id}
+
+	// Child node?
+	if ch, ok := m.findChildActivity(id); ok {
+		msg.Kind = "child"
+		msg.Label = childViewTitle(ch.agent, ch.prompt)
+		if msg.Label == "" {
+			msg.Label = shortSessionID(id)
+		}
+		msg.StatusLabel = ch.status
+		if msg.StatusLabel == "" {
+			msg.StatusLabel = "unknown"
+		}
+		msg.State = childAgentState(ch.status)
+		// Child token/cost stay unknown unless we later track per-child usage.
+		// Never fabricate zeros from absence.
+		return msg
+	}
+
+	// Root (active or stashed).
+	msg.Kind = "root"
+	msg.Label = m.rootTitleLabel(id)
+	msg.State = m.rootAgentState(id)
+	msg.StatusLabel = msg.State.Label()
+
+	if id == m.sessionID {
+		msg.Input = m.usageInput
+		msg.Output = m.usageOutput
+		msg.Used = m.usageUsed
+		msg.Source = m.usageSource
+		msg.ContextLimit = m.contextLimit
+		msg.ContextLimitKnown = m.contextLimitKnown
+		msg.Activity = usageActivitySamples(m.usageSession)
+		msg.Tools = recentVisualizerTools(m.cells, 6)
+		if usd, ok, partial := estimateUSD(m.usageSession, m.modelInputCost, m.modelOutputCost, m.modelHasCost); ok {
+			msg.CostUSD, msg.CostOK, msg.CostPartial = usd, true, partial
+		}
+		return msg
+	}
+
+	if m.roots != nil {
+		if p, ok := m.roots[id]; ok && p != nil {
+			msg.Input = p.usageInput
+			msg.Output = p.usageOutput
+			msg.Used = p.usageUsed
+			msg.Source = p.usageSource
+			msg.ContextLimit = p.contextLimit
+			msg.ContextLimitKnown = p.contextLimitKnown
+			msg.Activity = usageActivitySamples(p.usageSession)
+			msg.Tools = recentVisualizerTools(p.cells, 6)
+			// Background roots share the active catalog rates when provider/model match.
+			if p.providerName == m.providerName && p.modelName == m.modelName {
+				if usd, ok, partial := estimateUSD(p.usageSession, m.modelInputCost, m.modelOutputCost, m.modelHasCost); ok {
+					msg.CostUSD, msg.CostOK, msg.CostPartial = usd, true, partial
+				}
+			}
+		}
+	}
+	return msg
+}
+
+// findChildActivity looks up a subagent row across the active root and stashes.
+func (m Model) findChildActivity(id string) (childActivity, bool) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return childActivity{}, false
+	}
+	for _, ch := range m.children {
+		if ch.sessionID == id {
+			return ch, true
+		}
+	}
+	if m.roots != nil {
+		for _, p := range m.roots {
+			if p == nil {
+				continue
+			}
+			for _, ch := range p.children {
+				if ch.sessionID == id {
+					return ch, true
+				}
+			}
+		}
+	}
+	return childActivity{}, false
+}
+
+// usageActivitySamples extracts known turn magnitudes for the sparkline.
+// Turns with no known token parts are skipped — never plotted as zero.
+func usageActivitySamples(t usageTotals) []float64 {
+	if len(t.Turns) == 0 {
+		return nil
+	}
+	out := make([]float64, 0, len(t.Turns))
+	for _, turn := range t.Turns {
+		var v float64
+		known := false
+		if turn.Used.Known {
+			v = float64(turn.Used.N)
+			known = true
+		} else {
+			if turn.Input.Known {
+				v += float64(turn.Input.N)
+				known = true
+			}
+			if turn.Output.Known {
+				v += float64(turn.Output.N)
+				known = true
+			}
+		}
+		if known {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// recentVisualizerTools collects the newest tool cells (parent transcript).
+func recentVisualizerTools(cells []cell, limit int) []visualizerTool {
+	if limit <= 0 || len(cells) == 0 {
+		return nil
+	}
+	var tools []visualizerTool
+	for i := len(cells) - 1; i >= 0 && len(tools) < limit; i-- {
+		switch c := cells[i].(type) {
+		case *toolCell:
+			name := c.name
+			if c.title != "" {
+				name = c.title
+			}
+			tools = append(tools, visualizerTool{Name: name, Done: c.done, IsError: c.isError})
+		case *exploreCell:
+			for j := len(c.calls) - 1; j >= 0 && len(tools) < limit; j-- {
+				tc := c.calls[j]
+				if tc == nil {
+					continue
+				}
+				name := tc.name
+				if tc.title != "" {
+					name = tc.title
+				}
+				tools = append(tools, visualizerTool{Name: name, Done: tc.done, IsError: tc.isError})
+			}
+		}
+	}
+	return tools
 }
 
 // agentsStateSnapshot pushes multi-root tree data into the agents window.
@@ -1975,7 +2153,7 @@ func (m *Model) handleAgentsOpen(msg agentsOpenMsg) tea.Cmd {
 func (m *Model) broadcastAgentsState() tea.Cmd {
 	var cmd tea.Cmd
 	m.windows, cmd = m.windows.broadcast(m.agentsStateSnapshot())
-	return cmd
+	return tea.Batch(cmd, m.broadcastVisualizerState())
 }
 
 // hasContextMeter reports whether the header should show a compact usage chip.

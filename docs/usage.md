@@ -146,7 +146,11 @@ slot hosts one active window from the registry:
 |---|---|
 | `context` | setup summary (provider, model, agent, …) |
 | `activity` | tools/tips / subagent status |
+| `agents` | multi-root session/agent tree |
+| `visualizer` | selected-node status, tokens/cost, activity sparkline |
 | `files` | workspace file tree (`host.Files`) |
+| `memory` | project memory browser |
+| `issues` | project issue browser |
 | `markdown` | markdown reader (`/md-read <path>`) |
 | `editor` | embedded nvim/vim PTY for `/vim` |
 
