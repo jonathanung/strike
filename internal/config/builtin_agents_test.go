@@ -21,7 +21,7 @@ func TestBuiltinAgentsCatalog(t *testing.T) {
 	for _, a := range agents {
 		byName[a.Name] = a
 	}
-	for _, want := range []string{"explore", "general", "commit", "reviewer", "tester", "debugger", "validator", "orchestrator"} {
+	for _, want := range []string{"explore", "general", "commit", "reviewer", "tester", "debugger", "validator", "orchestrator", "pr-babysitter"} {
 		a, ok := byName[want]
 		if !ok {
 			t.Fatalf("missing builtin agent %q among %+v", want, agentNames(agents))
@@ -65,6 +65,28 @@ func TestBuiltinAgentsCatalog(t *testing.T) {
 	}
 	if !strings.Contains(o.Prompt, "task") || !strings.Contains(o.Prompt, "MaxChildDepth") {
 		t.Errorf("orchestrator prompt missing delegate/MaxChildDepth duties: %q", o.Prompt)
+	}
+	if err := ValidateAgentName("pr-babysitter"); err != nil {
+		t.Fatalf("ValidateAgentName(pr-babysitter) = %v", err)
+	}
+	pb := byName["pr-babysitter"]
+	if !rulesetHas(pb.Permissions, "task", permission.Deny) {
+		t.Errorf("pr-babysitter missing task deny: %+v", pb.Permissions)
+	}
+	if !rulesetHas(pb.Permissions, "bash", permission.Allow) {
+		t.Errorf("pr-babysitter missing bash allow: %+v", pb.Permissions)
+	}
+	if !rulesetHas(pb.Permissions, "write", permission.Allow) || !rulesetHas(pb.Permissions, "edit", permission.Allow) {
+		t.Errorf("pr-babysitter missing write/edit allow: %+v", pb.Permissions)
+	}
+	if !strings.Contains(pb.Prompt, "gh pr checks") || !strings.Contains(pb.Prompt, "--no-verify") {
+		t.Errorf("pr-babysitter prompt missing CI watch / hard forbids: %q", pb.Prompt)
+	}
+	if !strings.Contains(pb.Prompt, "issue-handler") {
+		t.Errorf("pr-babysitter prompt should note issue-handler skill overlap: %q", pb.Prompt)
+	}
+	if !strings.Contains(strings.ToLower(pb.Description), "pr") && !strings.Contains(strings.ToLower(pb.Description), "ci") {
+		t.Errorf("pr-babysitter description should mention PR/CI: %q", pb.Description)
 	}
 }
 
