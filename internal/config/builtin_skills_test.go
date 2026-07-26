@@ -13,7 +13,7 @@ func TestBuiltinSkillsShippingCommands(t *testing.T) {
 	for _, s := range skills {
 		byName[s.Name] = s
 	}
-	for _, name := range []string{"commit", "push", "pr", "ship"} {
+	for _, name := range []string{"commit", "push", "pr", "ship", "review", "learn", "deslop", "verify"} {
 		s, ok := byName[name]
 		if !ok {
 			t.Fatalf("missing builtin skill %q among %+v", name, skills)
@@ -44,7 +44,7 @@ func TestLoadSkillsMergesBuiltinsAndProjectOverride(t *testing.T) {
 	for _, s := range skills {
 		names[s.Name] = true
 	}
-	for _, want := range []string{"commit", "push", "pr", "ship"} {
+	for _, want := range []string{"commit", "push", "pr", "ship", "review", "learn", "deslop", "verify"} {
 		if !names[want] {
 			t.Errorf("missing %s in %+v", want, skills)
 		}

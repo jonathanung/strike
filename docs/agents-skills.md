@@ -112,12 +112,22 @@ Layered JSON config: [config.md](config.md).
 **Skills** (`skills/*.md` or `skills/<name>/SKILL.md`) are prompt templates
 invoked as slash commands: `/commit fix the auth bug` runs the `commit`
 skill with `$ARGUMENTS` replaced by "fix the auth bug" (arguments are
-appended if the placeholder is absent). Strike ships built-in shipping
-skills — `/commit`, `/push`, `/pr`, `/ship` — overridden by same-named
-files in any later discovery root (including `.claude` / `.opencode`).
-Project `.claude/commands/*.md` are loaded as skills when the markdown is
-compatible. Successful `gh pr …` output that prints a GitHub PR URL is
-recorded on the session (JSONL `session.meta` + sidecar `.meta.json`).
+appended if the placeholder is absent). Strike ships built-in skills —
+overridden by same-named files in any later discovery root (including
+`.claude` / `.opencode`). Project `.claude/commands/*.md` are loaded as
+skills when the markdown is compatible. Successful `gh pr …` output that
+prints a GitHub PR URL is recorded on the session (JSONL `session.meta` +
+sidecar `.meta.json`).
+
+| Skill | Role |
+|-------|------|
+| `/commit` `/push` `/pr` `/ship` | git shipping chain |
+| `/review` | branch/PR correctness review (no edits) |
+| `/learn` | extract non-obvious learnings into AGENTS.md |
+| `/deslop` | remove AI style slop from the branch diff |
+| `/verify` | run project gates; fix branch-related failures |
+
+Peer import inventory and hooks mapping: [peer-ecosystem.md](peer-ecosystem.md).
 
 ```markdown
 ---
@@ -130,8 +140,8 @@ Look at the uncommitted changes and commit them: $ARGUMENTS
 
 **Workflows** are ordered phase sequences loaded from
 `~/.strike/workflows/*.json` and `./.strike/workflows/*.json` (project
-overrides global by name). Strike always ships a built-in
-`plan-implement` workflow that may be overridden by the same name.
+overrides global by name). Strike ships built-in workflows that may be
+overridden by the same name.
 
 Each phase may pin an agent, extra prompt context, a permission ruleset, and
 an exit gate:
@@ -147,8 +157,14 @@ Built-in `plan-implement`:
 1. **plan** — `plan` agent, hard-deny `write`/`edit`, user exit gate
 2. **implement** — `build` agent, agent exit gate
 
-Tools `enter_plan_mode` / `exit_plan_mode` start and advance that workflow.
-The active phase shows as a badge in the TUI header. Example custom file:
+Built-in `review-fix`:
+
+1. **review** — `reviewer` agent, hard-deny `write`/`edit`, user exit gate
+2. **fix** — `build` agent, check gate (`make test`)
+
+Tools `enter_plan_mode` / `exit_plan_mode` start and advance the default plan
+workflow. The active phase shows as a badge in the TUI header. Example custom
+file:
 
 ```json
 {

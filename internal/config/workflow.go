@@ -74,6 +74,40 @@ func BuiltinPlanImplement() Workflow {
 	}
 }
 
+// BuiltinReviewFix is review→fix: read-only reviewer phase (user gate),
+// then build fixes with a check gate (make test when present in the project).
+func BuiltinReviewFix() Workflow {
+	return Workflow{
+		Name:        "review-fix",
+		Description: "Read-only review, then fix until tests pass",
+		Phases: []Phase{
+			{
+				Name:        "review",
+				Description: "Read-only correctness review of the change",
+				Agent:       "reviewer",
+				Permissions: permission.Ruleset{
+					{Permission: "write", Pattern: "*", Action: permission.Deny},
+					{Permission: "edit", Pattern: "*", Action: permission.Deny},
+				},
+				Context: "Review the current branch or named PR. Rank findings; do not edit.",
+				Exit:    ExitGate{Type: GateUser},
+			},
+			{
+				Name:        "fix",
+				Description: "Address review findings and verify",
+				Agent:       "build",
+				Context:     "Fix blocking and should-fix review findings. Prefer /verify gates before calling phase_done.",
+				Exit:        ExitGate{Type: GateCheck, Command: "make test"},
+			},
+		},
+	}
+}
+
+// BuiltinWorkflows returns shipped workflows in stable order.
+func BuiltinWorkflows() []Workflow {
+	return []Workflow{BuiltinPlanImplement(), BuiltinReviewFix()}
+}
+
 // ValidateWorkflow checks name, phases, permissions, and exit gates.
 func ValidateWorkflow(w Workflow) error {
 	if strings.TrimSpace(w.Name) == "" {
@@ -150,13 +184,15 @@ func LoadWorkflowFile(path string) (Workflow, error) {
 }
 
 // LoadWorkflows reads workflows/*.json from global then project .strike roots.
-// Project entries override global ones with the same name. The built-in
-// plan-implement workflow is always present and may be overridden by name.
+// Project entries override global ones with the same name. Built-in workflows
+// (plan-implement, review-fix) are always present and may be overridden by name.
 func LoadWorkflows(workDir string) ([]Workflow, error) {
-	byName := map[string]Workflow{
-		"plan-implement": BuiltinPlanImplement(),
+	byName := map[string]Workflow{}
+	order := make([]string, 0, 4)
+	for _, w := range BuiltinWorkflows() {
+		byName[w.Name] = w
+		order = append(order, w.Name)
 	}
-	order := []string{"plan-implement"}
 	for _, dir := range []string{
 		filepath.Join(GlobalRoot(), "workflows"),
 		filepath.Join(projectRoot(workDir), "workflows"),
