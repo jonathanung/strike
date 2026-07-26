@@ -44,6 +44,10 @@ func newSessionModal(sessions host.Sessions, current string) *sessionModal {
 		m.loadErr = err.Error()
 		return m
 	}
+	// Optional cheap PR state refresh; cache stays on disk when offline/fails.
+	if r, ok := sessions.(host.PRStateRefresher); ok {
+		list = r.RefreshPRStates(list)
+	}
 	m.all = list
 	for i, s := range m.all {
 		if s.ID == m.current {
@@ -135,6 +139,7 @@ func (m *sessionModal) view(width int, th theme.Theme) string {
 			items[i] = ui.ListItem{
 				Label:   sessionPickerLabel(s),
 				Detail:  sessionPickerDetail(th, s, m.now),
+				Suffix:  sessionPRBadge(th, s),
 				Current: s.ID == m.current,
 			}
 		}
@@ -172,6 +177,37 @@ func sessionPickerDetail(th theme.Theme, s host.Session, now time.Time) string {
 		parts = append(parts, "open")
 	}
 	return dotJoin(th, parts...)
+}
+
+// sessionPRBadge returns a compact theme-token badge for a linked PR, with an
+// OSC 8 hyperlink when pr_url is set. Empty when the session has no PR.
+func sessionPRBadge(th theme.Theme, s host.Session) string {
+	if s.PRURL == "" && s.PRNumber == 0 {
+		return ""
+	}
+	th = th.Resolve()
+	state := strings.ToLower(strings.TrimSpace(s.PRState))
+	tone := ui.ToneAccent
+	label := "pr"
+	switch state {
+	case "open":
+		tone = ui.ToneAccent
+		label = "open"
+	case "merged":
+		tone = ui.ToneSuccess
+		label = "merged"
+	case "closed":
+		tone = ui.ToneMuted
+		label = "closed"
+	}
+	if s.PRNumber > 0 {
+		label = "#" + strconv.Itoa(s.PRNumber) + " " + label
+	}
+	badge := ui.Badge(th, tone, label)
+	if s.PRURL != "" {
+		return withHyperlink(s.PRURL, badge)
+	}
+	return badge
 }
 
 // formatRelativeTime is a short "5m ago" / "3h ago" / "2d ago" label for pickers.

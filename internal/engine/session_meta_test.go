@@ -43,6 +43,10 @@ func TestBashGHPRRecordsSessionMeta(t *testing.T) {
 			_, err := session.UpdateMeta(sessionDir, sessionID, func(meta *session.Meta) {
 				meta.PRURL = m.PRURL
 				meta.PRNumber = m.PRNumber
+				meta.PRState = session.NormalizePRState(m.PRState)
+				if meta.PRState == "" {
+					meta.PRState = session.PRStateOpen
+				}
 			})
 			return err
 		},
@@ -80,17 +84,17 @@ func TestBashGHPRRecordsSessionMeta(t *testing.T) {
 		}
 	}
 done:
-	if sawMeta.PRURL != "https://github.com/acme/repo/pull/123" || sawMeta.PRNumber != 123 {
+	if sawMeta.PRURL != "https://github.com/acme/repo/pull/123" || sawMeta.PRNumber != 123 || sawMeta.PRState != "open" {
 		t.Fatalf("SessionMeta event = %+v", sawMeta)
 	}
-	if persisted.PRURL != sawMeta.PRURL || persisted.PRNumber != sawMeta.PRNumber {
+	if persisted.PRURL != sawMeta.PRURL || persisted.PRNumber != sawMeta.PRNumber || persisted.PRState != sawMeta.PRState {
 		t.Fatalf("persisted = %+v, event = %+v", persisted, sawMeta)
 	}
 	got, err := session.ReadMeta(sessionDir, sessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.PRURL != sawMeta.PRURL || got.PRNumber != 123 {
+	if got.PRURL != sawMeta.PRURL || got.PRNumber != 123 || got.PRState != session.PRStateOpen {
 		t.Fatalf("sidecar = %+v", got)
 	}
 	if sawMeta.SessionID != sessionID {

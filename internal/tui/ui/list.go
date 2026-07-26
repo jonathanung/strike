@@ -11,10 +11,13 @@ import (
 
 // ListItem is one selectable row.
 type ListItem struct {
-	Label    string // primary text
-	Detail   string // muted trailing text after " — "
-	Current  bool   // tag the row "(current)" (the active selection)
-	Disabled bool   // render muted; callers still decide it cannot be chosen
+	Label  string // primary text
+	Detail string // muted trailing text after " — "
+	// Suffix is optional pre-styled trailing content (e.g. a Badge). It is not
+	// recolored; width is measured with lipgloss.Width (ANSI-aware).
+	Suffix   string
+	Current  bool // tag the row "(current)" (the active selection)
+	Disabled bool // render muted; callers still decide it cannot be chosen
 }
 
 // ListOpts configures List.
@@ -111,6 +114,20 @@ func listRow(th theme.Theme, st theme.Styles, ic theme.Icons, item ListItem, isC
 	if item.Current {
 		label += " (current)"
 	}
+	suffix := item.Suffix
+	suffixW := lipgloss.Width(suffix)
+	suffixGap := ""
+	if suffix != "" {
+		suffixGap = strings.Repeat(" ", th.Spacing.XS)
+		suffixW += th.Spacing.XS
+	}
+	budget := width - suffixW
+	if budget < 1 {
+		suffix = ""
+		suffixGap = ""
+		suffixW = 0
+		budget = width
+	}
 	plain := marker + label
 	line := marker + labelStyle.Render(label)
 	if item.Detail != "" {
@@ -118,9 +135,13 @@ func listRow(th theme.Theme, st theme.Styles, ic theme.Icons, item ListItem, isC
 		plain += separator + item.Detail
 		line += st.Muted.Render(separator + item.Detail)
 	}
-	if lipgloss.Width(plain) > width {
+	if lipgloss.Width(plain) > budget {
 		// Restyle the whole truncated row in one style to keep it width-safe.
+		// Drop pre-styled suffix when the body alone overflows the budget.
 		return labelStyle.Render(truncate(th, plain, width))
 	}
-	return line
+	if suffix == "" {
+		return line
+	}
+	return line + suffixGap + suffix
 }

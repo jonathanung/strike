@@ -492,6 +492,12 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 				if m.PRNumber != 0 {
 					meta.PRNumber = m.PRNumber
 				}
+				if st := session.NormalizePRState(m.PRState); st != "" {
+					meta.PRState = st
+				} else if meta.PRState == "" && meta.PRURL != "" {
+					meta.PRState = session.PRStateOpen
+				}
+				meta.PRUpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 			})
 			return err
 		},

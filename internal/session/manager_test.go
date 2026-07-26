@@ -465,3 +465,53 @@ func TestManagerForkCopiesPrefixAndMeta(t *testing.T) {
 		t.Fatal("expected error forking subagent session")
 	}
 }
+
+func TestAppendSessionMetaUpdatesPRInfo(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager(dir)
+	root, err := m.Create(CreateOptions{ID: "sess-pr", Title: "work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Append(root.ID, protocol.SessionMeta{
+		Correlation: protocol.Correlation{SessionID: root.ID},
+		PRURL:       "https://github.com/acme/repo/pull/21",
+		PRNumber:    21,
+		PRState:     "OPEN",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := m.Get(root.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PRURL != "https://github.com/acme/repo/pull/21" || got.PRNumber != 21 || got.PRState != PRStateOpen {
+		t.Fatalf("Get after SessionMeta = %+v", got)
+	}
+}
+
+func TestInfoFromDiskIncludesPRMeta(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager(dir)
+	root, err := m.Create(CreateOptions{ID: "disk-pr", Title: "t"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UpdateMeta(dir, root.ID, func(meta *Meta) {
+		meta.PRURL = "https://github.com/a/b/pull/4"
+		meta.PRNumber = 4
+		meta.PRState = PRStateClosed
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Close(root.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := m.Get(root.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PRNumber != 4 || got.PRState != PRStateClosed || got.PRURL == "" {
+		t.Fatalf("disk info = %+v", got)
+	}
+}

@@ -14,6 +14,8 @@ func newWindowRegistry() windowRegistry {
 		newContextWindow(),
 		newNamedWindow("activity", "activity"),
 		newFilesWindow(),
+		newMemoryWindow(),
+		newIssuesWindow(),
 		newMarkdownWindow(),
 		newTerminalWindow(),
 	}}

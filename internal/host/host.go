@@ -205,6 +205,10 @@ type Session struct {
 	Title     string
 	Open      bool
 	UpdatedAt time.Time // zero when unknown
+	// Optional PR linkage from shipping (sidecar / session.meta). Empty when none.
+	PRURL    string
+	PRNumber int
+	PRState  string // open|merged|closed when known
 }
 
 // Sessions reads durable session logs for transcript navigation and resume.
@@ -225,6 +229,14 @@ type Sessions interface {
 	// returns the child. Parent stays intact. Implementations may reject
 	// subagent (parented) transcripts.
 	Fork(id string) (Session, error)
+}
+
+// PRStateRefresher is an optional Sessions capability: best-effort remote
+// refresh of PR open/merged/closed, caching results on disk. Implementations
+// must leave last-known metadata unchanged on network/tool failure and must
+// never surface forge tokens in errors returned to the UI.
+type PRStateRefresher interface {
+	RefreshPRStates(sessions []Session) []Session
 }
 
 // Services bundles everything a frontend receives from its host. Any field

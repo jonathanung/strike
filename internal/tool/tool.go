@@ -72,9 +72,11 @@ type QuestionResponse struct {
 }
 
 // SessionPR is a pull request linked to the active session (from gh output).
+// State is open, merged, or closed when known (empty when unset).
 type SessionPR struct {
 	URL    string
 	Number int
+	State  string
 }
 
 // Context carries per-call facilities into a tool. Ask blocks until the
