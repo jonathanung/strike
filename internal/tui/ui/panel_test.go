@@ -199,21 +199,31 @@ func TestPanelBorderColorSelectionPrecedence(t *testing.T) {
 func TestPanelSurfaceColorSelectionPrecedence(t *testing.T) {
 	th := theme.Default()
 	tests := []struct {
-		name string
-		opts PanelOpts
-		want lipgloss.AdaptiveColor
+		name     string
+		opts     PanelOpts
+		wantBody lipgloss.AdaptiveColor
+		wantEdge lipgloss.AdaptiveColor
 	}{
-		{"default", PanelOpts{}, th.Surface},
-		{"focused", PanelOpts{Focused: true}, th.SurfaceFocus},
-		{"dim", PanelOpts{Dim: true}, th.SurfaceMuted},
-		{"tone uses focus surface", PanelOpts{Tone: ToneWarning}, th.SurfaceFocus},
+		{"default", PanelOpts{}, th.Surface, th.Surface},
+		// Focus: body stays Surface; edge alone uses SurfaceFocus (no full wash).
+		{"focused", PanelOpts{Focused: true}, th.Surface, th.SurfaceFocus},
+		{"dim", PanelOpts{Dim: true}, th.SurfaceMuted, th.SurfaceMuted},
+		{"tone uses focus surface", PanelOpts{Tone: ToneWarning}, th.SurfaceFocus, th.SurfaceFocus},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := panelSurfaceColor(th, tt.opts)
-			ac, ok := got.(lipgloss.AdaptiveColor)
-			if !ok || ac != tt.want {
-				t.Errorf("panelSurfaceColor = %v, want %v", got, tt.want)
+			gotBody := panelBodySurface(th, tt.opts)
+			ac, ok := gotBody.(lipgloss.AdaptiveColor)
+			if !ok || ac != tt.wantBody {
+				t.Errorf("panelBodySurface = %v, want %v", gotBody, tt.wantBody)
+			}
+			gotEdge := panelEdgeSurface(th, tt.opts)
+			ac, ok = gotEdge.(lipgloss.AdaptiveColor)
+			if !ok || ac != tt.wantEdge {
+				t.Errorf("panelEdgeSurface = %v, want %v", gotEdge, tt.wantEdge)
+			}
+			if got := panelSurfaceColor(th, tt.opts); got != gotBody {
+				t.Errorf("panelSurfaceColor = %v, want body %v", got, gotBody)
 			}
 		})
 	}
@@ -225,20 +235,52 @@ func TestPanelFocusStateChangesRenderedChrome(t *testing.T) {
 	t.Cleanup(func() { lipgloss.SetColorProfile(saved) })
 
 	th := theme.Default()
+	th.Surface = lipgloss.AdaptiveColor{Light: "#111111", Dark: "#111111"}
+	th.SurfaceFocus = lipgloss.AdaptiveColor{Light: "#222222", Dark: "#222222"}
+	th.BorderFocus = lipgloss.AdaptiveColor{Light: "#333333", Dark: "#333333"}
+	th.SurfaceMuted = lipgloss.AdaptiveColor{Light: "#444444", Dark: "#444444"}
 	focused := Panel(th, PanelOpts{Title: "x", Width: 24, Focused: true}, "body")
 	unfocused := Panel(th, PanelOpts{Title: "x", Width: 24}, "body")
 	dim := Panel(th, PanelOpts{Title: "x", Width: 24, Dim: true}, "body")
 
 	if focused == unfocused {
-		t.Error("focused and unfocused panels render identically; surface not applied")
+		t.Error("focused and unfocused panels render identically; focus chrome not applied")
 	}
 	if unfocused == dim {
 		t.Error("dim and normal panels render identically; SurfaceMuted not applied")
+	}
+	// Focused body must not flood SurfaceFocus; title edge + bar carry focus.
+	bodyLine := strings.Split(focused, "\n")[1]
+	if strings.Count(bodyLine, "48;2;34;34;34") > 2 {
+		// SurfaceFocus RGB 34,34,34 — body should not be washed with it.
+		t.Errorf("focused body still floods SurfaceFocus: %q", bodyLine)
+	}
+	if !strings.Contains(firstLine(focused), "48;2;34;34;34") {
+		t.Errorf("focused title edge missing SurfaceFocus: %q", firstLine(focused))
+	}
+	if !strings.Contains(bodyLine, "48;2;51;51;51") {
+		t.Errorf("focused body missing BorderFocus leading bar: %q", bodyLine)
 	}
 	for name, out := range map[string]string{"focused": focused, "unfocused": unfocused, "dim": dim} {
 		if w := lipgloss.Width(out); w != 24 {
 			t.Errorf("%s panel width = %d with color enabled, want 24", name, w)
 		}
+	}
+}
+
+func TestPanelContentOriginMatchesChrome(t *testing.T) {
+	solid := theme.Default()
+	// Solid padX=1 → content at (1, 1).
+	if x, y := PanelContentOrigin(solid, 40); x != 1 || y != 1 {
+		t.Errorf("solid origin = (%d,%d), want (1,1)", x, y)
+	}
+	bt := borderedTheme()
+	// Bordered: left border + padX=1 → (2, 1).
+	if x, y := PanelContentOrigin(bt, 40); x != 2 || y != 1 {
+		t.Errorf("bordered origin = (%d,%d), want (2,1)", x, y)
+	}
+	if x, y := PanelContentOrigin(solid, 2); x != 0 || y != 0 {
+		t.Errorf("narrow origin = (%d,%d), want (0,0)", x, y)
 	}
 }
 

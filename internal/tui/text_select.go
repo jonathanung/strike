@@ -189,33 +189,18 @@ func (m Model) leftStackGeom() (leftWidth int, l layout, showLeft bool, ok bool)
 }
 
 // panelContentOrigin is the top-left content cell of a left-stack panel whose
-// outer top row is outerY (screen coordinates).
+// outer top row is outerY (screen coordinates). Matches ui.Panel chrome.
 func (m Model) panelContentOrigin(leftWidth, outerY int, compact bool) (x, y int) {
-	y = outerY
-	x = 0
 	if compact {
-		return x, y
+		return 0, outerY
 	}
-	th := m.th.Resolve()
-	// Panel top border + left border + horizontal padding (matches transcript).
-	y++
-	if leftWidth >= 3 {
-		x = 1
-		if leftWidth >= 6 {
-			padX := th.Spacing.XS
-			if padX < 0 {
-				padX = 0
-			}
-			if maxPad := (leftWidth - 3) / 2; padX > maxPad {
-				padX = maxPad
-			}
-			x += padX
-		}
-	}
-	return x, y
+	dx, dy := ui.PanelContentOrigin(m.th.Resolve(), leftWidth)
+	return dx, outerY + dy
 }
 
 // applyTextSelection paints the linear selection range onto a full frame.
+// Columns are always clipped to sel.region so multi-line drags cannot paint
+// side panes, header, or footer chrome.
 func applyTextSelection(frame string, sel textSel, style lipgloss.Style) string {
 	if !sel.active() {
 		return frame
@@ -223,26 +208,11 @@ func applyTextSelection(frame string, sel textSel, style lipgloss.Style) string 
 	start, end := sel.bounds()
 	lines := strings.Split(frame, "\n")
 	for y := start.Y; y <= end.Y && y < len(lines); y++ {
-		line := lines[y]
-		w := ansi.StringWidth(line)
-		colStart := 0
-		colEnd := w
-		if y == start.Y {
-			colStart = start.X
-		}
-		if y == end.Y {
-			colEnd = end.X + 1
-		}
-		if colStart < 0 {
-			colStart = 0
-		}
-		if colEnd > w {
-			colEnd = w
-		}
+		colStart, colEnd := selectionCols(sel, y, start, end, ansi.StringWidth(lines[y]))
 		if colEnd <= colStart {
 			continue
 		}
-		lines[y] = styleColumns(line, colStart, colEnd, style)
+		lines[y] = styleColumns(lines[y], colStart, colEnd, style)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -256,29 +226,47 @@ func extractTextSelection(frame string, sel textSel) string {
 	lines := strings.Split(frame, "\n")
 	var parts []string
 	for y := start.Y; y <= end.Y && y < len(lines); y++ {
-		line := lines[y]
-		w := ansi.StringWidth(line)
-		colStart := 0
-		colEnd := w
-		if y == start.Y {
-			colStart = start.X
-		}
-		if y == end.Y {
-			colEnd = end.X + 1
-		}
-		if colStart < 0 {
-			colStart = 0
-		}
-		if colEnd > w {
-			colEnd = w
-		}
+		colStart, colEnd := selectionCols(sel, y, start, end, ansi.StringWidth(lines[y]))
 		if colEnd <= colStart {
 			parts = append(parts, "")
 			continue
 		}
-		parts = append(parts, ansi.Strip(ansi.Cut(line, colStart, colEnd)))
+		parts = append(parts, ansi.Strip(ansi.Cut(lines[y], colStart, colEnd)))
 	}
 	return strings.Join(parts, "\n")
+}
+
+// selectionCols is the inclusive-start exclusive-end column range for row y,
+// clipped to the selection region when one is set.
+func selectionCols(sel textSel, y int, start, end screenPos, lineW int) (colStart, colEnd int) {
+	colStart = 0
+	colEnd = lineW
+	if y == start.Y {
+		colStart = start.X
+	}
+	if y == end.Y {
+		colEnd = end.X + 1
+	}
+	if sel.region.valid() {
+		// Also require the row to intersect the region vertically.
+		if y < sel.region.Y || y >= sel.region.Y+sel.region.H {
+			return 0, 0
+		}
+		r0, r1 := sel.region.X, sel.region.X+sel.region.W
+		if colStart < r0 {
+			colStart = r0
+		}
+		if colEnd > r1 {
+			colEnd = r1
+		}
+	}
+	if colStart < 0 {
+		colStart = 0
+	}
+	if colEnd > lineW {
+		colEnd = lineW
+	}
+	return colStart, colEnd
 }
 
 func styleColumns(line string, start, end int, style lipgloss.Style) string {
