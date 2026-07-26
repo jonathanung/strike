@@ -332,6 +332,22 @@ reduces protocol events into that state in `applyAgentStateEvent` /
 tree nodes should reuse the same mapping when M5 lands; do not add a second
 palette.
 
+
+## Engine source map (selected)
+
+Same package `internal/engine`; split for reviewability only.
+
+| File | Responsibility |
+|---|---|
+| `engine.go` | `Engine`/`Options`, `New`, `Run`, begin/turn lifecycle glue |
+| `ops.go` | `handleOp` and select/agent/effort/autonomy/permission-mode setters |
+| `turn.go` | turn queue, `runTurn`, provider stream, tool exec, hooks, usage |
+| `child.go` | subagent child sessions |
+| `compaction.go` | history compaction |
+| `restore.go` | session restore |
+| `phase.go` | multi-phase workflows |
+| `prompt.go` | system prompt assembly |
+
 ## TUI theme and style boundary
 
 `theme.Theme.Resolve` is the runtime normalization point for partial themes.
