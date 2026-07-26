@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -219,6 +220,11 @@ func agentsEmptyLabel(filter agentsViewFilter, text string) string {
 	if q := strings.TrimSpace(text); q != "" {
 		return "no matches for \"" + sanitizeDisplayData(q) + "\""
 	}
+	ak := defaultAgentsKeyMap()
+	spawn := ak.Spawn.Help()
+	spawnHint := spawn.Key + " " + spawn.Desc
+	// title()/empty labels have no theme arg; default tokens keep separators themed.
+	th := theme.Default().Resolve()
 	switch filter {
 	case agentsFilterAttention:
 		return "no agents need attention"
@@ -227,12 +233,33 @@ func agentsEmptyLabel(filter agentsViewFilter, text string) string {
 	case agentsFilterReady:
 		return "no agents ready"
 	case agentsFilterRoots:
-		return "no parent agents"
+		return dotJoin(th, "no parent agents", spawnHint)
 	default:
-		// Match prior empty copy so registry/width tests stay stable; multi-root
-		// spawn is advertised via the n keybind in the keys pane.
-		return "no subagents this session"
+		// Advertise concurrent-root spawn from the keymap (not a duplicated literal).
+		return dotJoin(th, "no subagents", spawnHint)
 	}
+}
+
+// agentsPaneFooter is the agents-window chrome hint row (n/enter/x/j/k/f).
+// Derived from defaultAgentsKeyMap so /keys and the pane stay aligned.
+func agentsPaneFooter(th theme.Theme) string {
+	ak := defaultAgentsKeyMap()
+	parts := make([]string, 0, 5)
+	for _, b := range []key.Binding{ak.Spawn, ak.Open, ak.Interrupt, ak.Move, ak.Filter} {
+		h := b.Help()
+		if h.Key == "" {
+			continue
+		}
+		if h.Desc != "" {
+			parts = append(parts, h.Key+" "+h.Desc)
+		} else {
+			parts = append(parts, h.Key)
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return dotJoin(th, parts...)
 }
 
 func (w agentsWindow) handleKey(msg tea.KeyMsg) (agentsWindow, tea.Cmd) {

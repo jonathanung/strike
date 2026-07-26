@@ -14,7 +14,7 @@ session defaults.
 | `ctrl+c` | quit |
 | `ctrl+p` | command palette |
 | `f1` | keybind cheatsheet (`/keys`) |
-| `tab` | cycle agents (composer empty of `/` completion) |
+| `tab` | cycle agent personas (composer empty of `/` completion; not concurrent roots) |
 | `shift+tab` | cycle permission mode (default → plan → accept-edits → yolo) |
 | `ctrl+d` | save defaults (see [config.md](config.md)) |
 | `ctrl+e` | open prompt in external `$EDITOR` |
@@ -79,7 +79,26 @@ to a single pane and cycle the same order one at a time. See [usage.md](usage.md
 | `ctrl+y` | yank |
 | `↑` / `↓` | prompt history (when composer has no multiline cursor motion) |
 
+## Agents pane (concurrent roots)
+
+When the `agents` right pane is focused (or shown in the agents stack group),
+these controls manage **concurrent root sessions**:
+
+| Key | Action |
+|---|---|
+| `n` | new concurrent root session |
+| `enter` | activate selected root (or open a child transcript) |
+| `x` | interrupt the selected root or child |
+| `j` / `k` | move cursor |
+| `f` | cycle view filter (all → attention → working → ready → roots) |
+
+`Tab` switches **agent personas** (build/plan/explore/…), not root sessions.
+`ctrl+x` leader chords navigate **child/subagent** transcripts only — use the
+agents pane (`n` / `enter` / `x`) for concurrent roots.
+
 ## Subagent navigation
+
+Child sessions spawned by tools (not concurrent roots):
 
 | Key | Action |
 |---|---|

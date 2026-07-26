@@ -120,10 +120,44 @@ func TestKeybindCatalogCoversAppBindingsAndIsSearchable(t *testing.T) {
 		"global.palette", "global.keyhelp", "composer.external-editor",
 		"composer.kill-word", "composer.word-back", "composer.word-fwd",
 		"composer.kill-line-start", "composer.kill-line-end", "composer.yank",
+		"agents.move", "agents.open", "agents.spawn", "agents.interrupt", "agents.filter",
 	} {
 		if !seen[id] {
 			t.Errorf("catalog missing %q", id)
 		}
+	}
+	ak := defaultAgentsKeyMap()
+	for _, tt := range []struct {
+		id string
+		b  key.Binding
+	}{
+		{"agents.spawn", ak.Spawn},
+		{"agents.open", ak.Open},
+		{"agents.interrupt", ak.Interrupt},
+		{"agents.move", ak.Move},
+		{"agents.filter", ak.Filter},
+	} {
+		help := tt.b.Help()
+		found := false
+		for _, e := range catalog {
+			if e.ID != tt.id {
+				continue
+			}
+			found = true
+			if e.Keys != help.Key || e.Action != help.Desc {
+				t.Errorf("%s = keys=%q action=%q, want keys=%q action=%q from agentsKeyMap",
+					tt.id, e.Keys, e.Action, help.Key, help.Desc)
+			}
+		}
+		if !found {
+			t.Errorf("catalog missing %q", tt.id)
+		}
+	}
+	if keys.Agent.Help().Desc != "cycle agent persona" {
+		t.Errorf("Agent help desc = %q, want cycle agent persona", keys.Agent.Help().Desc)
+	}
+	if keys.Leader.Help().Desc != "subagent leader" {
+		t.Errorf("Leader help desc = %q, want subagent leader", keys.Leader.Help().Desc)
 	}
 	m := newKeysModal(keys)
 	m.filter = "ctrl+h"

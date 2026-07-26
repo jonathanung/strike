@@ -127,7 +127,8 @@ in the TUI decides the winner). `/keys` shows the effective map; `/keys reset`
 restores built-in defaults for the current session only — delete the
 `keybinds` object from config to persist defaults.
 
-List/permission modal conventions (`lists.*`, `perm.*`) are not remappable.
+List/permission modal conventions (`lists.*`, `perm.*`) and agents-pane local
+controls (`agents.*`) are not remappable.
 
 ## MCP servers (stdio + HTTP)
 
