@@ -182,6 +182,12 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.reflow()
 		return m, nil
 	}
+	if msg.Type == tea.KeyCtrlV {
+		m.attachClipboardImage()
+		m.recomputeCompletion()
+		m.reflow()
+		return m, nil
+	}
 	switch {
 	case key.Matches(msg, m.keyMap.Newline):
 		// Left-focus only (right pane returned above). Distinct from Send
