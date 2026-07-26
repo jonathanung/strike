@@ -113,6 +113,18 @@ type Context struct {
 	// Files optionally tracks read snapshots for stale-edit detection after
 	// external changes (FilesChanged / /vim). Nil disables the checks.
 	Files *FileState
+	// Checkpoint, when non-nil, records pre-mutation file state for undo
+	// restore (first touch per turn). Absolute path. Nil disables checkpoints.
+	Checkpoint func(absPath string)
+}
+
+// SnapshotPath records the pre-mutation state of absPath when Checkpoint is set.
+// Safe on a nil receiver or nil Checkpoint.
+func (tc *Context) SnapshotPath(absPath string) {
+	if tc == nil || tc.Checkpoint == nil || absPath == "" {
+		return
+	}
+	tc.Checkpoint(absPath)
 }
 
 type Tool interface {

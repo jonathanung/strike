@@ -38,7 +38,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/split":            {"toggle horizontal/vertical pane split", "", commandSourceBuiltin},
 		"/compact":          {"compact model history (keep recent turns)", "", commandSourceBuiltin},
 		"/fork":             {"duplicate the conversation into a new id", "", commandSourceBuiltin},
-		"/undo":             {"drop the last completed user/assistant turn", "", commandSourceBuiltin},
+		"/undo":             {"undo last turn (chat only, or chat + restore files)", "[chat|files]", commandSourceBuiltin},
 		"/session":          {"browse and resume a past session", "[id]", commandSourceBuiltin},
 		"/export":           {"export the conversation to markdown", "[path] [--open]", commandSourceBuiltin},
 		"/help":             {"show available commands", "", commandSourceBuiltin},

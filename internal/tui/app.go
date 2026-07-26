@@ -1601,12 +1601,7 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		m.cells, m.toolByID = dropLastUserTurnCells(m.cells, m.toolByID)
 		m.selectedCell = -1
 		m.selectedFileRef = -1
-		removed := ev.Removed
-		msg := "rewound last turn"
-		if removed > 0 {
-			msg = fmt.Sprintf("rewound last turn (%d messages)", removed)
-		}
-		m.setNotice(msg, false)
+		m.setNotice(formatSessionRewound(ev), false)
 		cmd = m.broadcastContextState()
 	case protocol.EngineError:
 		// Mid-turn failures belong in the transcript; idle-state errors
@@ -2131,17 +2126,7 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 	case "/fork":
 		return m.handleForkCommand()
 	case "/undo", "/rewind":
-		m.resetComposer()
-		m.clearNotice()
-		if m.turnRunning {
-			m.setNotice("cannot rewind while a turn is running", true)
-			return m, nil
-		}
-		ops := m.ops
-		return m, func() tea.Msg {
-			ops <- protocol.Rewind{}
-			return nil
-		}
+		return m.handleUndoCommand(fields[1:])
 	case "/session":
 		return m.handleSessionCommand(fields[1:])
 	case "/export":
@@ -2234,6 +2219,65 @@ func (m Model) PendingResume() string {
 // PendingUpgrade reports whether /upgrade requested a self-update after quit.
 func (m Model) PendingUpgrade() bool {
 	return m.pendingUpgrade
+}
+
+func (m Model) handleUndoCommand(args []string) (tea.Model, tea.Cmd) {
+	m.resetComposer()
+	m.clearNotice()
+	if m.turnRunning {
+		m.setNotice("cannot rewind while a turn is running", true)
+		return m, nil
+	}
+	mode := ""
+	if len(args) > 0 {
+		mode = strings.ToLower(strings.TrimSpace(args[0]))
+	}
+	switch mode {
+	case "", "help", "?":
+		if mode == "help" || mode == "?" {
+			m.setNotice("usage: /undo [chat|files]", false)
+			return m, nil
+		}
+		// Bare /undo opens the choice modal.
+		m.modal = newUndoModal(m.ops)
+		m.reflow()
+		return m, nil
+	case "chat", "history":
+		ops := m.ops
+		return m, func() tea.Msg {
+			ops <- protocol.Rewind{RestoreFiles: false}
+			return nil
+		}
+	case "files", "disk", "all":
+		ops := m.ops
+		return m, func() tea.Msg {
+			ops <- protocol.Rewind{RestoreFiles: true}
+			return nil
+		}
+	default:
+		m.setNotice("usage: /undo [chat|files]", true)
+		return m, nil
+	}
+}
+
+func formatSessionRewound(ev protocol.SessionRewound) string {
+	msg := "rewound last turn"
+	if ev.Removed > 0 {
+		msg = fmt.Sprintf("rewound last turn (%d messages)", ev.Removed)
+	}
+	if ev.RestoreFiles {
+		switch {
+		case ev.FilesRestored > 0 && ev.FilesSkipped > 0:
+			msg = fmt.Sprintf("%s; restored %d file(s), skipped %d", msg, ev.FilesRestored, ev.FilesSkipped)
+		case ev.FilesRestored > 0:
+			msg = fmt.Sprintf("%s; restored %d file(s)", msg, ev.FilesRestored)
+		case ev.FilesSkipped > 0:
+			msg = fmt.Sprintf("%s; no files restored (%d skipped)", msg, ev.FilesSkipped)
+		default:
+			msg += "; no file changes to restore"
+		}
+	}
+	return msg
 }
 
 func (m Model) handleInitCommand() (tea.Model, tea.Cmd) {

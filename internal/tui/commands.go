@@ -73,7 +73,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandSplit, Name: "/split", Description: "toggle horizontal/vertical pane split", Source: commandSourceBuiltin},
 	{ID: commandCompact, Name: "/compact", Description: "compact model history (keep recent turns)", Source: commandSourceBuiltin},
 	{ID: commandFork, Name: "/fork", Description: "duplicate the conversation into a new id", Source: commandSourceBuiltin},
-	{ID: commandUndo, Name: "/undo", Description: "drop the last completed user/assistant turn", Source: commandSourceBuiltin},
+	{ID: commandUndo, Name: "/undo", Description: "undo last turn (chat only, or chat + restore files)", ArgsHint: "[chat|files]", Source: commandSourceBuiltin},
 	{ID: commandSession, Name: "/session", Description: "browse and resume a past session", ArgsHint: "[id]", Source: commandSourceBuiltin},
 	{ID: commandExport, Name: "/export", Description: "export the conversation to markdown", ArgsHint: "[path] [--open]", Source: commandSourceBuiltin},
 	{ID: commandHelp, Name: "/help", Description: "show available commands", Source: commandSourceBuiltin},

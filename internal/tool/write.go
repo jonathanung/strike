@@ -66,6 +66,7 @@ func (writeTool) Execute(ctx context.Context, args json.RawMessage, tc *Context)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return Result{}, err
 	}
+	tc.SnapshotPath(path)
 	if err := os.WriteFile(path, []byte(a.Content), 0o644); err != nil {
 		return Result{}, err
 	}

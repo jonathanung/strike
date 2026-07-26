@@ -85,6 +85,7 @@ func (editTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	} else {
 		updated = strings.Replace(content, a.OldString, a.NewString, 1)
 	}
+	tc.SnapshotPath(path)
 	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
 		return Result{}, err
 	}
