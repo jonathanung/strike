@@ -41,6 +41,12 @@ type Options struct {
 	// Live is an optional engine bridge for composer/ops/status. Nil keeps
 	// read-only attach (JSONL SSE only).
 	Live *Live
+	// Expose enables LAN-oriented CORS (private-network browser origins) in
+	// addition to localhost. Set when strike serve --expose is used.
+	Expose bool
+	// AllowCIDRs, when non-empty, rejects requests whose client IP falls
+	// outside the list (all routes including /health).
+	AllowCIDRs []*net.IPNet
 }
 
 // Server is an HTTP server for session attach and optional live cockpit.
@@ -147,6 +153,13 @@ func (s *Server) routes() {
 
 func (s *Server) withMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if len(s.opts.AllowCIDRs) > 0 {
+			ip := ClientIP(r.RemoteAddr)
+			if !IPAllowed(ip, s.opts.AllowCIDRs) {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+		}
 		s.applyCORS(w, r)
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -179,7 +192,7 @@ func (s *Server) authorized(r *http.Request) bool {
 
 func (s *Server) applyCORS(w http.ResponseWriter, r *http.Request) {
 	origin := r.Header.Get("Origin")
-	if originAllowed(origin) {
+	if originAllowed(origin, s.opts.Expose) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Vary", "Origin")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
@@ -187,32 +200,34 @@ func (s *Server) applyCORS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func originAllowed(origin string) bool {
+func originAllowed(origin string, expose bool) bool {
 	if origin == "" {
 		return false
 	}
-	// Strict localhost / 127.0.0.1 / [::1] with any port.
 	o := strings.ToLower(origin)
-	switch {
-	case strings.HasPrefix(o, "http://localhost"):
-		return originHostIsLocal(o)
-	case strings.HasPrefix(o, "http://127.0.0.1"):
-		return originHostIsLocal(o)
-	case strings.HasPrefix(o, "http://[::1]"):
-		return originHostIsLocal(o)
-	case strings.HasPrefix(o, "https://localhost"):
-		return originHostIsLocal(o)
-	case strings.HasPrefix(o, "https://127.0.0.1"):
-		return originHostIsLocal(o)
-	case strings.HasPrefix(o, "https://[::1]"):
-		return originHostIsLocal(o)
-	default:
+	if !strings.HasPrefix(o, "http://") && !strings.HasPrefix(o, "https://") {
 		return false
 	}
+	host := originHost(o)
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	if ip.IsLoopback() {
+		return true
+	}
+	// With --expose, allow private/LAN browser origins (e.g. Vite on another
+	// device). Public internet origins stay denied.
+	return expose && IsPrivateOrLoopbackIP(ip)
 }
 
-func originHostIsLocal(origin string) bool {
-	// Strip scheme.
+func originHost(origin string) string {
 	rest := origin
 	if i := strings.Index(rest, "://"); i >= 0 {
 		rest = rest[i+3:]
@@ -225,12 +240,7 @@ func originHostIsLocal(origin string) bool {
 	if err != nil {
 		h = host
 	}
-	h = strings.Trim(h, "[]")
-	if strings.EqualFold(h, "localhost") {
-		return true
-	}
-	ip := net.ParseIP(h)
-	return ip != nil && ip.IsLoopback()
+	return strings.Trim(h, "[]")
 }
 
 type healthResponse struct {

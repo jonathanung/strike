@@ -236,6 +236,66 @@ func TestCORSLocalhostOnly(t *testing.T) {
 	}
 }
 
+func TestCORSExposePrivateOrigins(t *testing.T) {
+	srv, err := New(Options{Token: "secret", SessionDir: t.TempDir(), Expose: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		origin string
+		allow  bool
+	}{
+		{"http://192.168.1.20:5173", true},
+		{"http://10.0.0.5:3000", true},
+		{"http://localhost:5173", true},
+		{"https://evil.example", false},
+		{"http://8.8.8.8:80", false},
+	}
+	for _, tc := range cases {
+		res := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/health", nil)
+		req.Header.Set("Origin", tc.origin)
+		srv.Handler().ServeHTTP(res, req)
+		got := res.Header().Get("Access-Control-Allow-Origin")
+		if tc.allow && got != tc.origin {
+			t.Errorf("origin %q: Allow-Origin = %q, want %q", tc.origin, got, tc.origin)
+		}
+		if !tc.allow && got != "" {
+			t.Errorf("origin %q: Allow-Origin = %q, want empty", tc.origin, got)
+		}
+	}
+}
+
+func TestAllowCIDRMiddleware(t *testing.T) {
+	nets, err := ParseCIDRs([]string{"127.0.0.0/8"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(Options{
+		Token:      "secret",
+		SessionDir: t.TempDir(),
+		AllowCIDRs: nets,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// httptest uses 192.0.2.1 by default — should be forbidden.
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	srv.Handler().ServeHTTP(res, req)
+	if res.Code != http.StatusForbidden {
+		t.Fatalf("default remote status = %d, want 403", res.Code)
+	}
+
+	res = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/health", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	srv.Handler().ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("loopback status = %d, want 200", res.Code)
+	}
+}
+
 func TestIsLocalhostBind(t *testing.T) {
 	cases := map[string]bool{
 		"127.0.0.1:8787": true,

@@ -1,4 +1,4 @@
-.PHONY: build run run-echo serve test vet cover cover-check clean setup
+.PHONY: build run run-echo serve serve-expose web-build test vet cover cover-check clean setup
 
 # Overall statement-coverage floor for `make cover-check` (local / optional CI).
 # Soft baseline ~77%; keep below measured total so the gate does not flake.
@@ -28,9 +28,18 @@ run: build
 run-echo: build
 	./strike --provider echo
 
-# Experimental read-only web attach (auto-mints token; see README).
+# Experimental web cockpit (auto-mints token; loopback only — see docs/web.md).
 serve: build
 	./strike serve --addr 127.0.0.1:8787
+
+# LAN expose (WARNING: no TLS; token required — see docs/web.md).
+serve-expose: build
+	./strike serve --expose
+
+# Optional Vite workspace: production asset check / dist copy of embedded cockpit.
+web-build:
+	@if [ ! -f web/package.json ]; then echo "web-build: no web/package.json"; exit 0; fi
+	cd web && npm ci && npm run build
 
 test:
 	go test ./...
@@ -55,3 +64,4 @@ cover-check: cover
 
 clean:
 	rm -f strike $(COVER_PROFILE)
+	rm -rf web/dist web/node_modules
