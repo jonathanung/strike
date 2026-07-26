@@ -103,14 +103,20 @@ setup summary and `activity` for subagent status, recent parent tools, or idle
 tips), an `agents` multi-root tree, a `visualizer` for the selected node's
 status/tokens/cost/activity sparkline, a `files` explorer (lazy tree via
 `host.Files.ListDir`), `memory` and `issues` browsers, a `markdown` reader
-opened via `/md-read`, and an `editor` PTY window for `/vim`. It exposes
-only the active window and has no close state or plugin mechanism. File bytes
-and directory listings reach the markdown and files windows through
-`host.Files`, not direct disk I/O from the TUI. Window input and resize updates
-stay inside `internal/tui`: no protocol Op or Event was added for this pane
-infrastructure. Composer input treats Enter as send and
-Shift+Enter (normalized to Alt+Enter) as newline via a stdin wrapper and
-enhanced keyboard modes; bare Escape from CSI-u is normalized to `0x1b`.
+opened via `/md-read`, and an `editor` PTY window for `/vim`. Windows are
+organized into stack **groups** (session: context+activity; agents:
+agents+visualizer; project: memory+issues; singles: files/markdown/editor).
+When the right pane is large enough, multi-member groups render as a paired
+split (vertical in a side column, horizontal when the body split is a bottom
+bar); otherwise only the focused member is shown. Focus cycle walks members
+within the active group, then the next group. The registry exposes the active
+window index and has no close state or plugin mechanism. File bytes and
+directory listings reach the markdown and files windows through `host.Files`,
+not direct disk I/O from the TUI. Window input and resize updates stay inside
+`internal/tui`: no protocol Op or Event was added for this pane infrastructure.
+Composer input treats Enter as send and Shift+Enter (normalized to Alt+Enter)
+as newline via a stdin wrapper and enhanced keyboard modes; bare Escape from
+CSI-u is normalized to `0x1b`.
 
 `View()` composes the full-width header first; its body is a horizontal
 left|right split by default, or a vertical top/bottom split when

@@ -447,3 +447,240 @@ func stringsEqual(a, b []string) bool {
 	}
 	return true
 }
+
+func TestDefaultWindowGroupsPairRelatedPanes(t *testing.T) {
+	r := newWindowRegistry()
+	want := []struct {
+		id      string
+		members []string
+	}{
+		{"session", []string{"context", "activity"}},
+		{"agents", []string{"agents", "visualizer"}},
+		{"files", []string{"files"}},
+		{"project", []string{"memory", "issues"}},
+		{"markdown", []string{"markdown"}},
+		{"editor", []string{"editor"}},
+	}
+	if len(r.groups) != len(want) {
+		t.Fatalf("groups = %d, want %d", len(r.groups), len(want))
+	}
+	for i, g := range r.groups {
+		if g.id != want[i].id {
+			t.Errorf("group[%d] id = %q, want %q", i, g.id, want[i].id)
+		}
+		got := make([]string, len(g.members))
+		for j, mi := range g.members {
+			got[j] = r.windows[mi].id()
+		}
+		if !stringsEqual(got, want[i].members) {
+			t.Errorf("group %q members = %q, want %q", g.id, got, want[i].members)
+		}
+	}
+	if g := r.activeGroup(); g.id != "session" {
+		t.Errorf("initial active group = %q, want session", g.id)
+	}
+}
+
+func TestWindowRegistryFocusCycleIsDeterministicAcrossGroups(t *testing.T) {
+	r := newWindowRegistry()
+	var order []string
+	for range 12 {
+		order = append(order, r.active().id())
+		r = r.cycleBy(1)
+	}
+	want := []string{
+		"context", "activity", "agents", "visualizer", "files", "memory",
+		"issues", "markdown", "editor", "context", "activity", "agents",
+	}
+	if !stringsEqual(order, want) {
+		t.Errorf("cycle order = %q, want %q", order, want)
+	}
+	// Reverse stays on the same ring.
+	r = newWindowRegistry()
+	r, _ = r.activate("editor")
+	var back []string
+	for range 3 {
+		back = append(back, r.active().id())
+		r = r.cycleBy(-1)
+	}
+	if !stringsEqual(back, []string{"editor", "markdown", "issues"}) {
+		t.Errorf("reverse cycle = %q", back)
+	}
+}
+
+func TestComputeMemberSlotsStableUnderResizeStorm(t *testing.T) {
+	for _, tt := range []struct {
+		name           string
+		w, h, g, n     int
+		pairHorizontal bool
+		wantNil        bool
+		wantSumW       int
+		wantSumH       int
+	}{
+		{"too short vertical", 32, 5, 1, 2, false, true, 0, 0},
+		{"too narrow horizontal", 5, 20, 1, 2, true, true, 0, 0},
+		{"vertical pair 40", 32, 40, 1, 2, false, false, 32 * 2, 40},
+		{"horizontal pair 40", 40, 20, 1, 2, true, false, 40, 20 * 2},
+		{"odd height remainder", 28, 25, 1, 2, false, false, 28 * 2, 25},
+		{"odd width remainder", 25, 18, 1, 2, true, false, 25, 18 * 2},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			// Storm: repeat geometry for stability.
+			var first []memberSlot
+			for i := 0; i < 50; i++ {
+				got := computeMemberSlots(tt.w, tt.h, tt.g, tt.n, tt.pairHorizontal)
+				if tt.wantNil {
+					if got != nil {
+						t.Fatalf("slots = %+v, want nil", got)
+					}
+					return
+				}
+				if got == nil || len(got) != tt.n {
+					t.Fatalf("slots len = %d, want %d (%+v)", len(got), tt.n, got)
+				}
+				if i == 0 {
+					first = append([]memberSlot(nil), got...)
+				} else if !memberSlotsEqual(first, got) {
+					t.Fatalf("slot storm diverged at iter %d: %+v vs %+v", i, first, got)
+				}
+			}
+			sumW, sumH := 0, 0
+			for _, s := range first {
+				if s.width < minStackMemberOuter || s.height < minStackMemberOuter {
+					t.Errorf("slot too small: %+v", s)
+				}
+				sumW += s.width
+				sumH += s.height
+			}
+			if tt.pairHorizontal {
+				// widths + gutters == total width; heights identical
+				if sumW+tt.g*(tt.n-1) != tt.w {
+					t.Errorf("width sum+gutter = %d, want %d", sumW+tt.g*(tt.n-1), tt.w)
+				}
+				if first[0].height != tt.h || first[1].height != tt.h {
+					t.Errorf("horizontal pair heights = %d/%d, want %d", first[0].height, first[1].height, tt.h)
+				}
+			} else {
+				if sumH+tt.g*(tt.n-1) != tt.h {
+					t.Errorf("height sum+gutter = %d, want %d", sumH+tt.g*(tt.n-1), tt.h)
+				}
+				if first[0].width != tt.w || first[1].width != tt.w {
+					t.Errorf("vertical pair widths = %d/%d, want %d", first[0].width, first[1].width, tt.w)
+				}
+			}
+		})
+	}
+}
+
+func memberSlotsEqual(a, b []memberSlot) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func TestStackedRightPaneShowsPairedGroupTitles(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		activate string
+		want     []string
+	}{
+		{"session", "context", []string{"context", "activity"}},
+		{"agents", "agents", []string{"agents", "visualizer"}},
+		{"project", "memory", []string{"memory", "issues"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m, _ := newAppTestModel(nil, nil)
+			m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+			var ok bool
+			m.windows, ok = m.windows.activate(tt.activate)
+			if !ok {
+				t.Fatalf("activate(%s) failed", tt.activate)
+			}
+			m.reflow()
+			plain := ansi.Strip(m.View())
+			for _, title := range tt.want {
+				if !strings.Contains(plain, title) {
+					t.Errorf("split view missing %q title:\n%s", title, plain)
+				}
+			}
+		})
+	}
+}
+
+func TestStackedRightPaneCollapsesWhenCompact(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m.focus = focusRight
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 50, Height: 18})
+	// Session group active (context); compact must not paint the pair partner title chrome.
+	plain := ansi.Strip(m.View())
+	if strings.Contains(plain, "╭") {
+		t.Errorf("compact view retained panel chrome:\n%s", plain)
+	}
+	// Cycle still walks full focus order one pane at a time.
+	start := m.windows.active().id()
+	m = updateApp(t, m, keyMsgAltJ())
+	if m.windows.active().id() == start {
+		t.Error("compact cycle did not advance focus")
+	}
+}
+
+func TestStackedAgentsGroupResizesBothMembers(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	var ok bool
+	m.windows, ok = m.windows.activate(agentsWindowID)
+	if !ok {
+		t.Fatal("activate agents")
+	}
+	m.reflow()
+	g := m.windows.activeGroup()
+	if g.id != "agents" || len(g.members) != 2 {
+		t.Fatalf("active group = %+v", g)
+	}
+	var agentsH, vizH, fullH int
+	for i, w := range m.windows.windows {
+		switch tw := w.(type) {
+		case agentsWindow:
+			if containsInt(g.members, i) {
+				agentsH = tw.height
+			}
+		case visualizerWindow:
+			if containsInt(g.members, i) {
+				vizH = tw.height
+			}
+		case filesWindow:
+			fullH = tw.height // singleton keeps full pane height
+		}
+	}
+	if agentsH <= 0 || vizH <= 0 {
+		t.Fatalf("stacked member heights agents=%d visualizer=%d", agentsH, vizH)
+	}
+	if absInt(agentsH-vizH) > 1 {
+		t.Errorf("uneven stack heights agents=%d visualizer=%d", agentsH, vizH)
+	}
+	if fullH > 0 && agentsH+vizH >= fullH {
+		t.Errorf("stacked heights %d+%d should each be under full pane %d", agentsH, vizH, fullH)
+	}
+}
+
+func containsInt(xs []int, v int) bool {
+	for _, x := range xs {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+func absInt(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
+}

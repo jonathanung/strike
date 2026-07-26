@@ -189,9 +189,15 @@ slot hosts one active window from the registry:
 | `markdown` | markdown reader (`/md-read <path>`) |
 | `editor` | embedded nvim/vim PTY for `/vim` |
 
+Related right-pane windows stack as **groups** when the pane is tall/wide
+enough: session (`context`+`activity`), agents (`agents`+`visualizer`), and
+project (`memory`+`issues`) share a 50/50 split (vertical in a side column,
+horizontal in a bottom bar). `files`, `markdown`, and `editor` stay full-height
+singles. Compact or narrow terminals collapse each group to one pane.
+
 Vim-style pane keys (horizontal split): `ctrl+h` / `ctrl+l` focus the left
-or right pane; `ctrl+j` / `ctrl+k` cycle the active right-pane window
-next/previous (enhanced terminals distinguish `ctrl+j` from bare LF
+or right pane; `ctrl+j` / `ctrl+k` move focus within the active stack group
+then to the next group (enhanced terminals distinguish `ctrl+j` from bare LF
 newline). `ctrl+;` (or `/layout` / `/split`) toggles a vertical
 top/bottom split and swaps those chords (focus becomes `ctrl+j`/`ctrl+k`,
 cycle becomes `ctrl+h`/`ctrl+l`). `ctrl+p` opens the command palette; `f1`

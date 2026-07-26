@@ -94,13 +94,40 @@ func (m *Model) reflow() {
 		m.viewport.Width = max(1, l.transcriptInnerWidthFor(m.th, leftWidth))
 		m.viewport.Height = max(0, l.transcriptInnerHeight())
 		if rightWidth > 0 && rightHeight > 0 {
-			if rightCompact {
-				m.windows = m.windows.resize(rightWidth, rightHeight)
-			} else {
-				m.windows = m.windows.resize(max(0, ui.PanelInnerWidth(m.th, rightWidth)), ui.PanelInnerHeight(rightWidth, rightHeight))
-			}
+			m.windows = m.resizeRightWindows(rightWidth, rightHeight, rightCompact)
 		}
 	}
+}
+
+// resizeRightWindows sizes every right-pane window. Stack groups that fit get
+// per-member slots; otherwise all windows share the full pane inner box.
+func (m Model) resizeRightWindows(rightWidth, rightHeight int, compact bool) windowRegistry {
+	r := m.windows
+	fullInnerW, fullInnerH := rightWidth, rightHeight
+	if !compact {
+		fullInnerW = max(0, ui.PanelInnerWidth(m.th, rightWidth))
+		fullInnerH = ui.PanelInnerHeight(rightWidth, rightHeight)
+	}
+	r = r.resize(fullInnerW, fullInnerH)
+
+	g := r.activeGroup()
+	pairHorizontal := m.splitOrientation == orientVertical
+	stackGutter := m.th.Resolve().Spacing.XS
+	slots := computeMemberSlots(rightWidth, rightHeight, stackGutter, len(g.members), pairHorizontal)
+	if compact || len(slots) == 0 {
+		return r
+	}
+	dims := make(map[int]memberSlot, len(g.members))
+	for i, wi := range g.members {
+		outer := slots[i]
+		innerW, innerH := outer.width, outer.height
+		if !compact {
+			innerW = max(0, ui.PanelInnerWidth(m.th, outer.width))
+			innerH = ui.PanelInnerHeight(outer.width, outer.height)
+		}
+		dims[wi] = memberSlot{width: innerW, height: innerH}
+	}
+	return r.resizeMembers(dims)
 }
 
 // toggleOrientation flips horizontal/vertical body split and refreshes layout.
