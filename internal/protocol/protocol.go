@@ -235,8 +235,13 @@ type Compact struct {
 type InspectEffectivePrompt struct{}
 
 // Rewind removes the last completed user↔assistant turn from model-facing
-// history only (not filesystem side effects). Rejected while a turn is running.
-type Rewind struct{}
+// history. When RestoreFiles is true, also restores per-file checkpoints
+// captured before mutating tools in that turn (never git reset --hard).
+// Rejected while a turn is running.
+type Rewind struct {
+	// RestoreFiles reverts disk changes from the last turn's file checkpoints.
+	RestoreFiles bool `json:"restoreFiles,omitempty"`
+}
 
 func (UserInput) isOp()              {}
 func (PermissionReply) isOp()        {}
@@ -599,11 +604,21 @@ type SessionMeta struct {
 
 // SessionRewound records that the last completed user↔assistant turn was
 // dropped from model-facing history. Restore applies the same drop so
-// --continue stays consistent. Does not reverse tool filesystem side effects.
+// --continue stays consistent. File restore is best-effort per path and is
+// recorded here; it is not re-applied on JSONL resume (disk already changed).
 type SessionRewound struct {
 	Correlation
 	// Removed is how many provider messages were dropped (0 when unknown).
 	Removed int `json:"removed,omitempty"`
+	// TurnID is the checkpoint turn id when known (matches the undone turn).
+	TurnID string `json:"turnId,omitempty"`
+	// RestoreFiles echoes whether the Rewind op requested disk restore.
+	RestoreFiles bool `json:"restoreFiles,omitempty"`
+	// FilesRestored is how many paths were written back or deleted.
+	FilesRestored int `json:"filesRestored,omitempty"`
+	// FilesSkipped is how many checkpointed paths could not be restored
+	// (oversized/unreadable originals).
+	FilesSkipped int `json:"filesSkipped,omitempty"`
 }
 
 // HookMatched records that a declarative config hook rule fired (log/block/

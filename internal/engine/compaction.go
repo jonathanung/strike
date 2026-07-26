@@ -408,7 +408,7 @@ func dropLastUserTurn(msgs []provider.Message) (out []provider.Message, ok bool)
 	return kept, true
 }
 
-func (e *Engine) handleRewind() {
+func (e *Engine) handleRewind(op protocol.Rewind) {
 	if e.turnActive() {
 		e.emit(protocol.EngineError{
 			Correlation: e.sessionCorr(),
@@ -428,9 +428,33 @@ func (e *Engine) handleRewind() {
 	e.messages = next
 	e.lastUsed = 0
 	e.lastUsedKnown = false
+
+	pop, popErr := e.checkpoints.Pop(op.RestoreFiles)
+	if popErr != nil {
+		e.emit(protocol.EngineError{
+			Correlation: e.sessionCorr(),
+			Message:     "rewind file restore: " + popErr.Error(),
+		})
+	}
+	if op.RestoreFiles && len(pop.Restored) > 0 {
+		e.files.MarkDirty(pop.Restored...)
+		display := make([]string, len(pop.Restored))
+		for i, p := range pop.Restored {
+			display[i] = relDisplayPath(e.opts.WorkDir, p)
+		}
+		e.emit(protocol.FilesInvalidated{
+			Correlation: e.sessionCorr(),
+			Paths:       display,
+			Reason:      "undo_restore",
+		})
+	}
 	e.emit(protocol.SessionRewound{
-		Correlation: e.sessionCorr(),
-		Removed:     removed,
+		Correlation:   e.sessionCorr(),
+		Removed:       removed,
+		TurnID:        pop.TurnID,
+		RestoreFiles:  op.RestoreFiles,
+		FilesRestored: pop.RestoredN,
+		FilesSkipped:  pop.Skipped,
 	})
 }
 
