@@ -270,6 +270,9 @@ type Engine struct {
 	// force the model to re-read before edit/write.
 	files *tool.FileState
 
+	// checkpoints snapshot pre-mutation file bytes per turn for /undo restore.
+	checkpoints *tool.CheckpointStore
+
 	// titled is set after the first SessionTitled emit so auto-titling runs once.
 	titled bool
 
@@ -317,6 +320,7 @@ func New(opts Options) *Engine {
 		events:              make(chan protocol.Event, 256),
 		beginReqs:           make(chan beginReq),
 		files:               &tool.FileState{},
+		checkpoints:         tool.NewCheckpointStore(),
 		children:            make(map[string]*childHandle),
 		childDone:           make(chan protocol.ChildCompleted, 32),
 		contextWindowTokens: opts.ContextWindow,
@@ -555,7 +559,7 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 	case protocol.InspectEffectivePrompt:
 		e.handleInspectEffectivePrompt()
 	case protocol.Rewind:
-		e.handleRewind()
+		e.handleRewind(op)
 	}
 }
 
@@ -1267,6 +1271,7 @@ func sessionTitleFromText(text string) string {
 func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.ImageAttachment, turnID string, finishing chan struct{}) {
 	turnCorr := e.baseCorr()
 	turnCorr.TurnID = turnID
+	e.checkpoints.BeginTurn(turnID)
 	e.emit(protocol.UserMessage{Correlation: turnCorr, Text: text, Images: images})
 	e.maybeTitleSession(text)
 	e.emit(protocol.TurnStarted{Correlation: turnCorr})
@@ -1643,8 +1648,9 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 	} else {
 		callID := call.ID
 		tc := &tool.Context{
-			WorkDir: e.opts.WorkDir,
-			Files:   e.files,
+			WorkDir:    e.opts.WorkDir,
+			Files:      e.files,
+			Checkpoint: e.checkpoints.Snapshot,
 			Ask: func(ctx context.Context, req tool.AskRequest) error {
 				return e.perms.AskWithCorrelation(ctx, req, corr)
 			},
@@ -1846,6 +1852,7 @@ func (e *Engine) failTurn(err error, corr protocol.Correlation, finishing chan s
 // post-tool-batch apply in runTurn).
 func (e *Engine) completeTurn(finishing chan struct{}, corr protocol.Correlation, stopReason string) {
 	close(finishing)
+	e.checkpoints.CommitTurn()
 	e.fireHookRules(corr, permission.HookEventTurnEnd, "", "")
 	e.emit(protocol.TurnCompleted{Correlation: corr, StopReason: stopReason})
 	e.applyPendingAgent()
@@ -1886,8 +1893,8 @@ func (e *Engine) fireHookRules(corr protocol.Correlation, event, subject, callID
 // A nil usage means the vendor did not report counts — emit nothing (unknown).
 //
 // used = InputTokens + CacheReadTokens + CacheCreationTokens + OutputTokens;
-// if all those are 0 but TotalTokens > 0, used = TotalTokens and input/output
-// stay unknown (a total alone is not a measured zero on the parts).
+// if all those are 0 but TotalTokens > 0, used = TotalTokens and input/output/
+// cache stay unknown (a total alone is not a measured zero on the parts).
 func (e *Engine) emitUsage(corr protocol.Correlation, u *provider.Usage) {
 	if u == nil {
 		return
@@ -1895,10 +1902,14 @@ func (e *Engine) emitUsage(corr protocol.Correlation, u *provider.Usage) {
 	used := u.InputTokens + u.CacheReadTokens + u.CacheCreationTokens + u.OutputTokens
 	input := protocol.KnownTokens(u.InputTokens)
 	output := protocol.KnownTokens(u.OutputTokens)
+	cacheRead := protocol.KnownTokens(u.CacheReadTokens)
+	cacheCreation := protocol.KnownTokens(u.CacheCreationTokens)
 	if used == 0 && u.TotalTokens > 0 {
 		used = u.TotalTokens
 		input = protocol.UnknownTokens()
 		output = protocol.UnknownTokens()
+		cacheRead = protocol.UnknownTokens()
+		cacheCreation = protocol.UnknownTokens()
 	}
 	source := protocol.UsageSourceActual
 	if u.Estimated {
@@ -1907,11 +1918,13 @@ func (e *Engine) emitUsage(corr protocol.Correlation, u *provider.Usage) {
 	e.lastUsed = used
 	e.lastUsedKnown = true
 	e.emit(protocol.UsageReported{
-		Correlation: corr,
-		Input:       input,
-		Output:      output,
-		Used:        protocol.KnownTokens(used),
-		Source:      source,
+		Correlation:   corr,
+		Input:         input,
+		Output:        output,
+		CacheRead:     cacheRead,
+		CacheCreation: cacheCreation,
+		Used:          protocol.KnownTokens(used),
+		Source:        source,
 	})
 }
 

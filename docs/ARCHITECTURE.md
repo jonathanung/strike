@@ -224,7 +224,7 @@ Two different mechanisms, depending on whether it needs Go code:
    `autonomy`, `auth`, `settings`, `agent`, `fast`, `vim`, `md-read`,
    `theme`, `layout`, `split`, `compact`, `fork`, `undo`, `rewind`,
    `session`, `help`, `keys`, `memory`, `issues`, `context`,
-   `effective-prompt`, `upgrade`, `init`) are rejected by
+   `effective-prompt`, `cost`, `upgrade`, `init`) are rejected by
    `config.ValidateSkillName` before
    they ever reach the frontend. `/init` is a builtin that writes project
    `AGENTS.md` via `host.ProjectInit` (confirm before overwrite). PR URLs from successful `gh pr` bash

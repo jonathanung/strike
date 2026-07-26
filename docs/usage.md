@@ -45,7 +45,9 @@ strike launches without any provider configured. Pick one inside the TUI:
 /split                         # alias of /layout
 /compact                       # compact model history (trim or summarize per config)
 /fork                          # duplicate this conversation into a new session id
-/undo                          # drop the last completed user/assistant turn
+/undo                          # undo last turn (picker: chat only vs + files)
+/undo chat                     # drop last turn from history only
+/undo files                    # drop last turn and restore files edited then
 /rewind                        # alias of /undo
 /vim [path[:line]]             # open file in embedded editor (pane/overlay)
                                # or $EDITOR (see vimMode in config.md)
@@ -61,8 +63,9 @@ strike launches without any provider configured. Pick one inside the TUI:
                                # import merges by id; --replace wipes first.
                                # Relative export/import paths stay under the
                                # project root (no path escape).
-/context                       # inspect effective system-prompt layers
+/context                       # context doctor modal (prompt layer breakdown)
 /effective-prompt              # alias of /context
+/cost                          # session token totals and estimated USD cost
 /keys                          # filterable keybind cheatsheet (also f1)
 /help                          # list commands
 /upgrade                       # install latest GitHub Release and restart
@@ -77,11 +80,12 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/session` | picker of past **root** sessions (auto-titles); resume reloads model history |
 | `/session <id>` | resume that root session by id |
 | `/fork` | copy the current session JSONL into a new id (idle only) |
-| `/undo` / `/rewind` | drop the last completed turn (idle only) |
+| `/undo` / `/rewind` | undo last turn (idle only); bare opens picker; `chat` keeps disk; `files` restores per-file checkpoints from that turn (never `git reset --hard`) |
 | `/compact` | ask the engine to compact model history |
 | `/memory` | bare = list browser; `list [tag]`, `get <key>`, `set <key> <value>`, `rm <key>`, `export [path]`, `import <path> [--replace]` (portable JSON; relative paths stay under project root) |
 | `/issues` | bare = list browser; `list [open\|closed]`, `add <title>`, `get <id>`, `close <id>`, `export [path]`, `import <path> [--replace]` (same portable rules as memory) |
-| `/context` | dump effective system-prompt layers into the transcript |
+| `/context` | context doctor modal: layer sizes, history msg count, oversized warnings (previews redacted) |
+| `/cost` | session input/output/cache totals from usage events; est. USD when catalog rates known; unknown stays explicit |
 | `/init` | light local scan → write `AGENTS.md`; confirms before overwrite |
 
 ### Autonomy & workflows

@@ -118,6 +118,9 @@ type Options struct {
 	PermissionAutoApproveSeconds int
 	// PermissionAutoApproveExclude lists permission names that never auto-allow.
 	PermissionAutoApproveExclude []string
+	// NotifyMode selects desktop notifications: on, off, or unfocused-only
+	// (default). Wired from config.notify.
+	NotifyMode NotifyMode
 	// Replay is a prior session event log for --continue / --session. Seeded
 	// via cellsFromEvents + silent selection/child state — never fed through
 	// applyEvent (avoids stuck turns, zombie permission modals, orphan children).
@@ -130,8 +133,9 @@ type Options struct {
 // firstRunSetupMsg opens the provider picker once on a fresh install.
 type firstRunSetupMsg struct{}
 
-// contextLimitsMsg delivers catalog context-window and output-limit lookups
-// for a provider/model pair. Applied only when that pair is still selected.
+// contextLimitsMsg delivers catalog context-window, output-limit, and optional
+// pricing lookups for a provider/model pair. Applied only when that pair is
+// still selected.
 type contextLimitsMsg struct {
 	provider, model string
 	contextTokens   int
@@ -140,6 +144,9 @@ type contextLimitsMsg struct {
 	outputOK        bool
 	attachment      bool
 	attachmentOK    bool
+	inputCost       float64
+	outputCost      float64
+	hasCost         bool
 }
 
 // Model is the root Bubble Tea model. It holds its host services, the
@@ -246,15 +253,21 @@ type Model struct {
 	vimMode VimMode
 	// usage* hold the latest UsageReported figures; Known=false means unknown
 	// (never treat as measured zero). Limits come from the host catalog.
-	usageInput, usageOutput, usageUsed protocol.TokenCount
-	usageSource                        string
-	contextLimit                       int
-	contextLimitKnown                  bool
-	outputLimit                        int
-	outputLimitKnown                   bool
+	// usageSession accumulates session totals for /cost (including resume).
+	usageInput, usageOutput, usageCacheRead, usageCacheCreation, usageUsed protocol.TokenCount
+	usageSource                                                            string
+	usageSession                                                           usageTotals
+	modelInputCost, modelOutputCost                                        float64
+	modelHasCost                                                           bool
+	contextLimit                                                           int
+	contextLimitKnown                                                      bool
+	outputLimit                                                            int
+	outputLimitKnown                                                       bool
 	// modelAttachment caches catalog multimodal support for the selection.
 	modelAttachment      bool
 	modelAttachmentKnown bool
+	// pendingContextDoctor opens the doctor modal on the next EffectivePrompt.
+	pendingContextDoctor bool
 
 	// firstRun drives the empty-transcript onboarding card and auto provider modal.
 	firstRun, firstRunModalOpened bool
@@ -262,7 +275,9 @@ type Model struct {
 	turnStartedAt     time.Time
 	toolCallsThisTurn int
 	authExpiryNoticed bool
-	focused           bool // terminal focus; default true (WithReportFocus)
+	focused           bool // terminal focus; default true until BlurMsg
+	focusKnown        bool // true after first FocusMsg/BlurMsg from the terminal
+	notifyMode        NotifyMode
 	titleTopic        string
 
 	// splitOrientation is horizontal (left|right) by default; vertical stacks
@@ -342,6 +357,7 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		spin:            sp,
 		historyPos:      -1,
 		focused:         true,
+		notifyMode:      NotifyUnfocusedOnly,
 		appearance:      appearanceAuto,
 		autonomy:        protocol.AutonomySupervised,
 	}
@@ -360,6 +376,9 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		if option.VimMode != "" {
 			m.vimMode = option.VimMode
 		}
+		if option.NotifyMode != "" {
+			m.notifyMode = option.NotifyMode
+		}
 		if option.PermissionAutoApproveSeconds != 0 {
 			m.permissionAutoApproveSeconds = option.PermissionAutoApproveSeconds
 		}
@@ -376,6 +395,9 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 	m.keyMap = buildKeyMap(m.keyOverrides, m.splitOrientation)
 	if m.vimMode == "" {
 		m.vimMode = VimModePane
+	}
+	if m.notifyMode == "" {
+		m.notifyMode = NotifyUnfocusedOnly
 	}
 	if services.History != nil {
 		m.entries = services.History.Entries()
@@ -517,6 +539,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.outputLimitKnown = msg.outputOK
 		m.modelAttachment = msg.attachment
 		m.modelAttachmentKnown = msg.attachmentOK
+		m.modelInputCost = msg.inputCost
+		m.modelOutputCost = msg.outputCost
+		m.modelHasCost = msg.hasCost
 		return m, m.broadcastContextState()
 
 	case spinner.TickMsg:
@@ -660,11 +685,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.FocusMsg:
 		m.focused = true
+		m.focusKnown = true
 		m.windows = refreshFilesWindows(m.windows)
 		return m, nil
 
 	case tea.BlurMsg:
 		m.focused = false
+		m.focusKnown = true
 		return m, nil
 
 	case filesRefreshMsg:
@@ -1507,9 +1534,8 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		if auto := m.armPermissionAutoApprove(pm, ev.Permission); auto != nil {
 			cmd = tea.Batch(cmd, auto)
 		}
-		if !m.focused {
-			cmd = tea.Batch(cmd, notifyUnfocusedCmd("strike: permission required"))
-		}
+		// Static message only — never include paths, args, or secrets.
+		cmd = tea.Batch(cmd, m.desktopNotifyCmd("strike: permission required", true))
 	case protocol.PermissionResolved:
 		if modal, ok := m.modal.(*permissionModal); ok && modal.req.RequestID == ev.RequestID {
 			m.modal = nil
@@ -1518,9 +1544,7 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 	case protocol.QuestionAsked:
 		m.modal = newQuestionModal(ev, m.ops, m.th)
 		cmd = m.broadcastContextState()
-		if !m.focused {
-			cmd = tea.Batch(cmd, notifyUnfocusedCmd("strike: question required"))
-		}
+		cmd = tea.Batch(cmd, m.desktopNotifyCmd("strike: question required", true))
 	case protocol.QuestionResolved:
 		if modal, ok := m.modal.(*questionModal); ok && modal.req.RequestID == ev.RequestID {
 			m.modal = nil
@@ -1531,10 +1555,7 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		if exp, ok := lastCell[*exploreCell](m.cells); ok {
 			exp.accepting = false
 		}
-		var notify tea.Cmd
-		if !m.focused && !m.turnStartedAt.IsZero() && time.Since(m.turnStartedAt) >= notifyAfterTurn {
-			notify = notifyUnfocusedCmd("strike: turn complete")
-		}
+		notify := m.desktopNotifyCmd("strike: turn complete", false)
 		m.turnStartedAt = time.Time{}
 		m.toolCallsThisTurn = 0
 		m.refreshOpenPalette()
@@ -1572,13 +1593,16 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		label := strings.Join(ev.Paths, ", ")
 		m.setNotice("files changed — agent will re-read: "+label, false)
 	case protocol.UsageReported:
-		m.usageInput = ev.Input
-		m.usageOutput = ev.Output
-		m.usageUsed = ev.Used
-		m.usageSource = ev.Source
+		m.recordUsage(ev)
 		cmd = m.broadcastContextState()
 	case protocol.EffectivePrompt:
-		m.cells = append(m.cells, &infoCell{text: formatEffectivePrompt(ev)})
+		if m.pendingContextDoctor {
+			m.pendingContextDoctor = false
+			m.modal = newDoctorModal(ev, m.contextLimit, m.contextLimitKnown)
+			m.reflow()
+		} else {
+			m.cells = append(m.cells, &infoCell{text: formatEffectivePrompt(ev)})
+		}
 	case protocol.CompactionCompleted:
 		strategy := ev.Strategy
 		if strategy == "" {
@@ -1595,12 +1619,7 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		m.cells, m.toolByID = dropLastUserTurnCells(m.cells, m.toolByID)
 		m.selectedCell = -1
 		m.selectedFileRef = -1
-		removed := ev.Removed
-		msg := "rewound last turn"
-		if removed > 0 {
-			msg = fmt.Sprintf("rewound last turn (%d messages)", removed)
-		}
-		m.setNotice(msg, false)
+		m.setNotice(formatSessionRewound(ev), false)
 		cmd = m.broadcastContextState()
 	case protocol.EngineError:
 		// Mid-turn failures belong in the transcript; idle-state errors
@@ -1808,13 +1827,19 @@ func formatEffectivePrompt(ev protocol.EffectivePrompt) string {
 	return b.String()
 }
 
-// clearUsage drops prior token figures and catalog limits so a model switch
-// never shows stale occupancy against a new window size.
+// clearUsage drops last-request token figures and catalog limits so a model
+// switch never shows stale occupancy against a new window size. Session totals
+// for /cost are kept — they span the whole session log.
 func (m *Model) clearUsage() {
 	m.usageInput = protocol.TokenCount{}
 	m.usageOutput = protocol.TokenCount{}
+	m.usageCacheRead = protocol.TokenCount{}
+	m.usageCacheCreation = protocol.TokenCount{}
 	m.usageUsed = protocol.TokenCount{}
 	m.usageSource = ""
+	m.modelInputCost = 0
+	m.modelOutputCost = 0
+	m.modelHasCost = false
 	m.contextLimit = 0
 	m.contextLimitKnown = false
 	m.outputLimit = 0
@@ -1823,8 +1848,19 @@ func (m *Model) clearUsage() {
 	m.modelAttachmentKnown = false
 }
 
-// fetchContextLimitsCmd looks up context window and output limit for the
-// current provider/model via the host catalog (may hit network/cache).
+// recordUsage updates last-request figures and session totals.
+func (m *Model) recordUsage(ev protocol.UsageReported) {
+	m.usageInput = ev.Input
+	m.usageOutput = ev.Output
+	m.usageCacheRead = ev.CacheRead
+	m.usageCacheCreation = ev.CacheCreation
+	m.usageUsed = ev.Used
+	m.usageSource = ev.Source
+	m.usageSession.add(ev)
+}
+
+// fetchContextLimitsCmd looks up context window, output limit, and pricing for
+// the current provider/model via the host catalog (may hit network/cache).
 func (m Model) fetchContextLimitsCmd() tea.Cmd {
 	catalog := m.services.Catalog
 	provider, model := m.providerName, m.modelName
@@ -1835,25 +1871,27 @@ func (m Model) fetchContextLimitsCmd() tea.Cmd {
 		ctx := context.Background()
 		ct, cok, _ := catalog.ContextWindow(ctx, provider, model)
 		ot, ook, _ := catalog.OutputLimit(ctx, provider, model)
-		att, attOK := false, false
-		if infos, err := catalog.Models(ctx, provider); err == nil {
-			for _, info := range infos {
-				if info.ID == model {
-					att, attOK = info.Attachment, true
-					break
-				}
-			}
-		}
-		return contextLimitsMsg{
+		msg := contextLimitsMsg{
 			provider:      provider,
 			model:         model,
 			contextTokens: ct,
 			contextOK:     cok,
 			outputTokens:  ot,
 			outputOK:      ook,
-			attachment:    att,
-			attachmentOK:  attOK,
 		}
+		if infos, err := catalog.Models(ctx, provider); err == nil {
+			for _, info := range infos {
+				if info.ID == model {
+					msg.attachment = info.Attachment
+					msg.attachmentOK = true
+					msg.inputCost = info.InputCost
+					msg.outputCost = info.OutputCost
+					msg.hasCost = info.HasCost
+					break
+				}
+			}
+		}
+		return msg
 	}
 }
 
@@ -2110,17 +2148,7 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 	case "/fork":
 		return m.handleForkCommand()
 	case "/undo", "/rewind":
-		m.resetComposer()
-		m.clearNotice()
-		if m.turnRunning {
-			m.setNotice("cannot rewind while a turn is running", true)
-			return m, nil
-		}
-		ops := m.ops
-		return m, func() tea.Msg {
-			ops <- protocol.Rewind{}
-			return nil
-		}
+		return m.handleUndoCommand(fields[1:])
 	case "/session":
 		return m.handleSessionCommand(fields[1:])
 	case "/help":
@@ -2150,11 +2178,25 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 	case "/context", "/effective-prompt":
 		m.resetComposer()
 		m.clearNotice()
+		m.pendingContextDoctor = true
 		ops := m.ops
 		return m, func() tea.Msg {
 			ops <- protocol.InspectEffectivePrompt{}
 			return nil
 		}
+	case "/cost":
+		m.resetComposer()
+		m.clearNotice()
+		m.modal = newCostModal(
+			m.usageSession,
+			m.usageInput, m.usageOutput, m.usageCacheRead, m.usageCacheCreation, m.usageUsed,
+			m.usageSource,
+			m.providerName, m.modelName,
+			m.modelInputCost, m.modelOutputCost, m.modelHasCost,
+			m.contextLimit, m.contextLimitKnown,
+		)
+		m.reflow()
+		return m, nil
 	case "/upgrade":
 		m.resetComposer()
 		m.clearNotice()
@@ -2197,6 +2239,65 @@ func (m Model) PendingResume() string {
 // PendingUpgrade reports whether /upgrade requested a self-update after quit.
 func (m Model) PendingUpgrade() bool {
 	return m.pendingUpgrade
+}
+
+func (m Model) handleUndoCommand(args []string) (tea.Model, tea.Cmd) {
+	m.resetComposer()
+	m.clearNotice()
+	if m.turnRunning {
+		m.setNotice("cannot rewind while a turn is running", true)
+		return m, nil
+	}
+	mode := ""
+	if len(args) > 0 {
+		mode = strings.ToLower(strings.TrimSpace(args[0]))
+	}
+	switch mode {
+	case "", "help", "?":
+		if mode == "help" || mode == "?" {
+			m.setNotice("usage: /undo [chat|files]", false)
+			return m, nil
+		}
+		// Bare /undo opens the choice modal.
+		m.modal = newUndoModal(m.ops)
+		m.reflow()
+		return m, nil
+	case "chat", "history":
+		ops := m.ops
+		return m, func() tea.Msg {
+			ops <- protocol.Rewind{RestoreFiles: false}
+			return nil
+		}
+	case "files", "disk", "all":
+		ops := m.ops
+		return m, func() tea.Msg {
+			ops <- protocol.Rewind{RestoreFiles: true}
+			return nil
+		}
+	default:
+		m.setNotice("usage: /undo [chat|files]", true)
+		return m, nil
+	}
+}
+
+func formatSessionRewound(ev protocol.SessionRewound) string {
+	msg := "rewound last turn"
+	if ev.Removed > 0 {
+		msg = fmt.Sprintf("rewound last turn (%d messages)", ev.Removed)
+	}
+	if ev.RestoreFiles {
+		switch {
+		case ev.FilesRestored > 0 && ev.FilesSkipped > 0:
+			msg = fmt.Sprintf("%s; restored %d file(s), skipped %d", msg, ev.FilesRestored, ev.FilesSkipped)
+		case ev.FilesRestored > 0:
+			msg = fmt.Sprintf("%s; restored %d file(s)", msg, ev.FilesRestored)
+		case ev.FilesSkipped > 0:
+			msg = fmt.Sprintf("%s; no files restored (%d skipped)", msg, ev.FilesSkipped)
+		default:
+			msg += "; no file changes to restore"
+		}
+	}
+	return msg
 }
 
 func (m Model) handleInitCommand() (tea.Model, tea.Cmd) {
