@@ -45,6 +45,8 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		{ID: "command:keys", Label: "/keys", Description: "show keyboard shortcuts", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/keys"}},
 		{ID: "command:memory", Label: "/memory", Description: "list, get, set, or delete project memory", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/memory"}},
 		{ID: "command:issues", Label: "/issues", Description: "list, add, get, or close project issues", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/issues"}},
+		{ID: "command:context", Label: "/context", Description: "inspect effective system-prompt layers", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/context"}},
+		{ID: "command:effective-prompt", Label: "/effective-prompt", Description: "inspect effective system-prompt layers", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/effective-prompt"}},
 		{ID: "skill:review", Label: "/review", Description: "review a change", Action: paletteAction{Kind: paletteActionSkill, Value: "review"}},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -76,11 +78,15 @@ func TestPaletteAvailabilityAndDisabledSelection(t *testing.T) {
 		assertPaletteInvoke(t, m, "/help", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/help"}})
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
 		assertPaletteInvoke(t, m, "/keys", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/keys"}})
-		// /vim and /md-read stay available mid-turn so users can inspect files without interrupting.
+		// /vim, /md-read, and prompt inspect stay available mid-turn.
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
 		assertPaletteInvoke(t, m, "/vim", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/vim"}})
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
 		assertPaletteInvoke(t, m, "/md-read", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/md-read"}})
+		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
+		assertPaletteInvoke(t, m, "/context", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/context"}})
+		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
+		assertPaletteInvoke(t, m, "/effective-prompt", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/effective-prompt"}})
 	})
 }
 

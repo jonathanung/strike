@@ -78,6 +78,8 @@ func eventType(ev Event) string {
 		return "session.meta"
 	case HookMatched:
 		return "hook.matched"
+	case EffectivePrompt:
+		return "prompt.effective"
 	default:
 		return ""
 	}
@@ -162,6 +164,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &SessionMeta{}
 	case "hook.matched":
 		ev = &HookMatched{}
+	case "prompt.effective":
+		ev = &EffectivePrompt{}
 	default:
 		return nil, fmt.Errorf("protocol: unknown envelope type %q", e.Type)
 	}
@@ -234,6 +238,8 @@ func deref(ev Event) Event {
 	case *SessionMeta:
 		return *v
 	case *HookMatched:
+		return *v
+	case *EffectivePrompt:
 		return *v
 	default:
 		return ev

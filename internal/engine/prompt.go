@@ -5,9 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"github.com/jonathanung/strike-cli/internal/protocol"
 )
 
 //go:embed prompt/shared.txt
@@ -43,6 +47,21 @@ var DefaultSystemPrompt = joinPromptLayers(SharedSystemPrompt, normPrompt(defaul
 // PlanSystemPrompt is the read-only plan overlay (composed with shared +
 // provider at request time for the plan agent).
 var PlanSystemPrompt = normPrompt(planPrompt)
+
+// Prompt composition layer model (system string only; conversation history is
+// separate and inspected as message counts):
+//
+//  1. shared            append   builtin baseline
+//  2. overlay slot      replace  exactly one of: provider | config systemPrompt
+//                                (build only) | agent persona
+//  3. phase slot        replace  phase context, else plan overlay when agent
+//                                is plan; neither when inactive
+//  4. environment       append   cwd / model / date
+//  5. instructions      append   each AGENTS.md/CLAUDE.md block
+//
+// Skills are user-turn content (slash render → UserInput), not system layers.
+// Memory and @file attachments are tool/turn-local, not auto-stacked here.
+// Tool results live in provider message history.
 
 // ProviderSystemPrompt returns the provider-specific overlay for a strike
 // provider name and/or model id (opencode-style selection).
@@ -98,42 +117,145 @@ func joinPromptLayers(layers ...string) string {
 	return strings.Join(parts, "\n\n") + "\n"
 }
 
-// system returns the composed system prompt for the next provider request:
-// shared baseline → provider overlay (or agent/config override) → plan overlay
-// → environment → instruction files.
-func (e *Engine) system() string {
-	parts := []string{SharedSystemPrompt}
+// promptLayer is one ordered system-prompt segment with provenance.
+type promptLayer struct {
+	Kind   string
+	Source string
+	Mode   string // append | replace
+	Text   string
+}
+
+// systemLayers returns the ordered composition for the next provider request.
+func (e *Engine) systemLayers() []promptLayer {
+	layers := make([]promptLayer, 0, 6)
+	layers = append(layers, promptLayer{
+		Kind:   protocol.PromptLayerShared,
+		Source: "builtin:shared",
+		Mode:   protocol.PromptLayerAppend,
+		Text:   SharedSystemPrompt,
+	})
 
 	switch {
 	case e.agent.Name == "build" && strings.TrimSpace(e.opts.SystemPrompt) != "":
 		// Config systemPrompt replaces the provider overlay for build only.
-		parts = append(parts, e.opts.SystemPrompt)
+		layers = append(layers, promptLayer{
+			Kind:   protocol.PromptLayerConfig,
+			Source: "config:systemPrompt",
+			Mode:   protocol.PromptLayerReplace,
+			Text:   e.opts.SystemPrompt,
+		})
 	case strings.TrimSpace(e.agent.Prompt) != "":
 		// Custom agent (or user-defined build/plan.md) supplies the persona layer.
-		parts = append(parts, e.agent.Prompt)
+		name := strings.TrimSpace(e.agent.Name)
+		if name == "" {
+			name = "agent"
+		}
+		layers = append(layers, promptLayer{
+			Kind:   protocol.PromptLayerPersona,
+			Source: "agent:" + name,
+			Mode:   protocol.PromptLayerReplace,
+			Text:   e.agent.Prompt,
+		})
 	default:
-		parts = append(parts, ProviderSystemPrompt(e.provName, e.model))
+		kind := providerPromptKind(e.provName, e.model)
+		layers = append(layers, promptLayer{
+			Kind:   protocol.PromptLayerProvider,
+			Source: "provider:" + kind,
+			Mode:   protocol.PromptLayerReplace,
+			Text:   ProviderSystemPrompt(e.provName, e.model),
+		})
 	}
 
 	// Phase context (or built-in plan overlay while plan agent/phase is active).
 	// Prefer the active phase layer so workflow files can replace the default
 	// plan copy without corrupting conversation history.
 	if phaseCtx := e.phaseContextPrompt(); phaseCtx != "" {
-		parts = append(parts, phaseCtx)
+		source := "phase"
+		if phase, ok := e.currentPhase(); ok {
+			wf := strings.TrimSpace(e.workflow.Name)
+			ph := strings.TrimSpace(phase.Name)
+			switch {
+			case wf != "" && ph != "":
+				source = "phase:" + wf + "/" + ph
+			case ph != "":
+				source = "phase:" + ph
+			case wf != "":
+				source = "phase:" + wf
+			}
+		}
+		layers = append(layers, promptLayer{
+			Kind:   protocol.PromptLayerPhase,
+			Source: source,
+			Mode:   protocol.PromptLayerReplace,
+			Text:   phaseCtx,
+		})
 	} else if e.agent.Name == "plan" {
 		// Plan agent without an active phase still gets the read-only overlay.
-		parts = append(parts, PlanSystemPrompt)
+		layers = append(layers, promptLayer{
+			Kind:   protocol.PromptLayerPlan,
+			Source: "builtin:plan",
+			Mode:   protocol.PromptLayerReplace,
+			Text:   PlanSystemPrompt,
+		})
 	}
 
 	if env := e.environmentPrompt(); env != "" {
-		parts = append(parts, env)
+		layers = append(layers, promptLayer{
+			Kind:   protocol.PromptLayerEnvironment,
+			Source: "env",
+			Mode:   protocol.PromptLayerAppend,
+			Text:   env,
+		})
 	}
 	for _, inst := range e.opts.Instructions {
-		if s := strings.TrimSpace(inst); s != "" {
+		if s := strings.TrimSpace(inst); s == "" {
+			continue
+		}
+		source, _ := instructionProvenance(inst)
+		layers = append(layers, promptLayer{
+			Kind:   protocol.PromptLayerInstruction,
+			Source: source,
+			Mode:   protocol.PromptLayerAppend,
+			Text:   inst,
+		})
+	}
+	return layers
+}
+
+// system returns the composed system prompt for the next provider request.
+func (e *Engine) system() string {
+	return joinPromptLayerTexts(e.systemLayers())
+}
+
+func joinPromptLayerTexts(layers []promptLayer) string {
+	parts := make([]string, 0, len(layers))
+	for _, layer := range layers {
+		if s := strings.TrimSpace(layer.Text); s != "" {
 			parts = append(parts, s)
 		}
 	}
-	return joinPromptLayers(parts...)
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "\n\n") + "\n"
+}
+
+func instructionProvenance(block string) (source, body string) {
+	const prefix = "Instructions from: "
+	s := strings.TrimSpace(block)
+	if !strings.HasPrefix(s, prefix) {
+		return "instruction", s
+	}
+	rest := strings.TrimPrefix(s, prefix)
+	path, body, ok := strings.Cut(rest, "\n")
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "instruction", s
+	}
+	if !ok {
+		return "file:" + path, ""
+	}
+	return "file:" + path, strings.TrimSpace(body)
 }
 
 func (e *Engine) environmentPrompt() string {
@@ -172,4 +294,113 @@ Here is some useful information about the environment you are running in:
   Platform: %s
   Today's date: %s
 </env>`, modelLine, workDir, root, isGit, runtime.GOOS, time.Now().Format("Mon Jan 2 2006")))
+}
+
+// effectiveSnapshot is a redacted inspect view of system composition.
+type effectiveSnapshot struct {
+	Layers         []protocol.PromptLayerInfo
+	System         string // exact joined system text last sent (or current)
+	SystemChars    int
+	MessageCount   int
+	FromLastStream bool
+}
+
+func (e *Engine) recordStreamEffective(layers []promptLayer, system string) {
+	snap := buildEffectiveSnapshot(layers, system, len(e.messages), true)
+	e.effectiveMu.Lock()
+	e.lastEffective = snap
+	e.effectiveMu.Unlock()
+}
+
+func (e *Engine) currentEffectiveSnapshot() effectiveSnapshot {
+	layers := e.systemLayers()
+	system := joinPromptLayerTexts(layers)
+	return buildEffectiveSnapshot(layers, system, len(e.messages), false)
+}
+
+func (e *Engine) lastOrCurrentEffective() effectiveSnapshot {
+	e.effectiveMu.Lock()
+	snap := e.lastEffective
+	e.effectiveMu.Unlock()
+	if snap.SystemChars > 0 || len(snap.Layers) > 0 {
+		return snap
+	}
+	return e.currentEffectiveSnapshot()
+}
+
+func buildEffectiveSnapshot(layers []promptLayer, system string, messageCount int, fromStream bool) effectiveSnapshot {
+	infos := make([]protocol.PromptLayerInfo, 0, len(layers))
+	for _, layer := range layers {
+		text := strings.TrimSpace(layer.Text)
+		infos = append(infos, protocol.PromptLayerInfo{
+			Kind:    layer.Kind,
+			Source:  redactSecrets(layer.Source),
+			Mode:    layer.Mode,
+			Chars:   utf8.RuneCountInString(text),
+			Preview: layerPreview(text),
+		})
+	}
+	return effectiveSnapshot{
+		Layers:         infos,
+		System:         system,
+		SystemChars:    utf8.RuneCountInString(strings.TrimSpace(system)),
+		MessageCount:   messageCount,
+		FromLastStream: fromStream,
+	}
+}
+
+const layerPreviewRunes = 120
+
+func layerPreview(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	// Single-line preview for inspect UI.
+	text = strings.ReplaceAll(text, "\n", " ")
+	text = strings.Join(strings.Fields(text), " ")
+	text = redactSecrets(text)
+	if utf8.RuneCountInString(text) <= layerPreviewRunes {
+		return text
+	}
+	runes := []rune(text)
+	return string(runes[:layerPreviewRunes]) + "…"
+}
+
+// secretPatterns scrub credential-shaped spans from inspect output.
+var secretPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\b(sk-[a-z0-9_-]{8,})\b`),
+	regexp.MustCompile(`(?i)\b(sk-ant-[a-z0-9_-]{8,})\b`),
+	regexp.MustCompile(`(?i)\b(xai-[a-z0-9_-]{8,})\b`),
+	regexp.MustCompile(`(?i)\b(ghp_[a-z0-9_]{20,})\b`),
+	regexp.MustCompile(`(?i)\b(gho_[a-z0-9_]{20,})\b`),
+	regexp.MustCompile(`(?i)\b(github_pat_[a-z0-9_]{20,})\b`),
+	regexp.MustCompile(`(?i)\b(xox[baprs]-[a-z0-9-]{10,})\b`),
+	regexp.MustCompile(`(?i)\b(Bearer\s+)([a-z0-9._\-+/=]{12,})`),
+	regexp.MustCompile(`(?i)\b((?:api[_-]?key|access[_-]?token|secret[_-]?key|password)\s*[=:]\s*)(\S+)`),
+	regexp.MustCompile(`(?i)\b((?:ANTHROPIC|OPENAI|XAI|OPENROUTER)_(?:API_)?KEY\s*[=:]\s*)(\S+)`),
+}
+
+// RedactSecrets replaces credential-shaped substrings with a placeholder.
+// Exported for tests.
+func RedactSecrets(s string) string {
+	return redactSecrets(s)
+}
+
+func redactSecrets(s string) string {
+	if s == "" {
+		return s
+	}
+	out := s
+	for _, re := range secretPatterns {
+		out = re.ReplaceAllStringFunc(out, func(match string) string {
+			sub := re.FindStringSubmatch(match)
+			if len(sub) >= 3 {
+				// Keep label/prefix groups; redact the secret group.
+				return sub[1] + "[REDACTED]"
+			}
+			return "[REDACTED]"
+		})
+	}
+	return out
 }

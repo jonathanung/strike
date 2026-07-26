@@ -671,6 +671,51 @@ func TestSlashCommandExecutionAndSkillRenderingRemainIntact(t *testing.T) {
 	})
 }
 
+func TestContextSlashCommandInspectsEffectivePrompt(t *testing.T) {
+	for _, cmdName := range []string{"/context", "/effective-prompt"} {
+		t.Run(cmdName, func(t *testing.T) {
+			m, ops := newAppTestModel(nil, nil)
+			m.composer.SetValue(cmdName)
+			updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			m = updated.(Model)
+			runAppCmd(t, cmd)
+			if got := receiveAppOp(t, ops); got != (protocol.InspectEffectivePrompt{}) {
+				t.Errorf("operation = %#v, want InspectEffectivePrompt", got)
+			}
+			if m.composer.Value() != "" {
+				t.Errorf("composer value = %q, want reset", m.composer.Value())
+			}
+			assertNoAppOp(t, ops)
+		})
+	}
+
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, engineEventMsg{ev: protocol.EffectivePrompt{
+		Layers: []protocol.PromptLayerInfo{
+			{Kind: protocol.PromptLayerShared, Source: "builtin:shared", Mode: protocol.PromptLayerAppend, Chars: 100},
+			{Kind: protocol.PromptLayerPersona, Source: "agent:build", Mode: protocol.PromptLayerReplace, Chars: 40},
+		},
+		SystemChars:    200,
+		MessageCount:   3,
+		FromLastStream: true,
+	}})
+	found := false
+	for _, c := range m.cells {
+		if info, ok := c.(*infoCell); ok && strings.Contains(info.text, "effective prompt (last request)") {
+			found = true
+			if !strings.Contains(info.text, "shared") || !strings.Contains(info.text, "persona") {
+				t.Errorf("info cell missing layer kinds:\n%s", info.text)
+			}
+			if !strings.Contains(info.text, "200 chars") {
+				t.Errorf("info cell missing system chars:\n%s", info.text)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("EffectivePrompt did not append info cell")
+	}
+}
+
 func TestModelAndAgentSlashCommandsEmitSelections(t *testing.T) {
 	t.Run("model selects id for current provider", func(t *testing.T) {
 		m, ops := newAppTestModel(nil, nil)

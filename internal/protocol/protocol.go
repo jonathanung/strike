@@ -226,17 +226,24 @@ type FilesChanged struct {
 // with a compact marker while a recent tail is preserved.
 type Compact struct{}
 
-func (UserInput) isOp()       {}
-func (PermissionReply) isOp() {}
-func (QuestionReply) isOp()   {}
-func (Interrupt) isOp()       {}
-func (SelectModel) isOp()     {}
-func (SelectAgent) isOp()     {}
-func (SetEffort) isOp()       {}
-func (SetAutonomy) isOp()     {}
-func (SetFast) isOp()         {}
-func (FilesChanged) isOp()    {}
-func (Compact) isOp()         {}
+// InspectEffectivePrompt requests a snapshot of the composed system-prompt
+// layers (provenance + sizes). Prefer the last Stream composition when one
+// exists; otherwise the current composition for the next request. Never
+// carries raw API keys — previews are redacted by the engine.
+type InspectEffectivePrompt struct{}
+
+func (UserInput) isOp()              {}
+func (PermissionReply) isOp()        {}
+func (QuestionReply) isOp()          {}
+func (Interrupt) isOp()              {}
+func (SelectModel) isOp()            {}
+func (SelectAgent) isOp()            {}
+func (SetEffort) isOp()              {}
+func (SetAutonomy) isOp()            {}
+func (SetFast) isOp()                {}
+func (FilesChanged) isOp()           {}
+func (Compact) isOp()                {}
+func (InspectEffectivePrompt) isOp() {}
 
 // Event is an engine -> client notification.
 type Event interface{ isEvent() }
@@ -574,6 +581,42 @@ type HookMatched struct {
 	CallID string `json:"callId,omitempty"`
 }
 
+// Prompt layer kind / mode labels used on EffectivePrompt.Layers.
+const (
+	PromptLayerShared      = "shared"
+	PromptLayerProvider    = "provider"
+	PromptLayerConfig      = "config_system"
+	PromptLayerPersona     = "persona"
+	PromptLayerPhase       = "phase"
+	PromptLayerPlan        = "plan"
+	PromptLayerEnvironment = "environment"
+	PromptLayerInstruction = "instruction"
+
+	PromptLayerAppend  = "append"
+	PromptLayerReplace = "replace"
+)
+
+// PromptLayerInfo is one ordered system-prompt segment with provenance.
+// Text content is not included — only kind/source/mode/size and an optional
+// redacted preview suitable for logs and the TUI.
+type PromptLayerInfo struct {
+	Kind    string `json:"kind"`
+	Source  string `json:"source"`
+	Mode    string `json:"mode"` // append | replace
+	Chars   int    `json:"chars"`
+	Preview string `json:"preview,omitempty"`
+}
+
+// EffectivePrompt is the inspectable composition of the system prompt for the
+// last Stream (or the current composition when no stream has run yet).
+type EffectivePrompt struct {
+	Correlation
+	Layers         []PromptLayerInfo `json:"layers"`
+	SystemChars    int               `json:"systemChars"`
+	MessageCount   int               `json:"messageCount"`
+	FromLastStream bool              `json:"fromLastStream,omitempty"`
+}
+
 func (UserMessage) isEvent()         {}
 func (SessionTitled) isEvent()       {}
 func (TurnStarted) isEvent()         {}
@@ -605,3 +648,4 @@ func (CompactionStarted) isEvent()   {}
 func (CompactionCompleted) isEvent() {}
 func (SessionMeta) isEvent()         {}
 func (HookMatched) isEvent()         {}
+func (EffectivePrompt) isEvent()     {}

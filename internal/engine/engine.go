@@ -249,6 +249,11 @@ type Engine struct {
 	// quietStartup suppresses selection/phase confirms during Run's initial
 	// apply (see Options.QuietStartup). Owned by Run only.
 	quietStartup bool
+
+	// lastEffective is the redacted layer snapshot from the most recent
+	// Stream composition. Written by the turn worker; read by inspect on Run.
+	effectiveMu   sync.Mutex
+	lastEffective effectiveSnapshot
 }
 
 func New(opts Options) *Engine {
@@ -475,7 +480,22 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 		e.handleFilesChanged(op)
 	case protocol.Compact:
 		e.handleCompact()
+	case protocol.InspectEffectivePrompt:
+		e.handleInspectEffectivePrompt()
 	}
+}
+
+// handleInspectEffectivePrompt emits the last Stream layer map when available,
+// otherwise the current composition for the next request.
+func (e *Engine) handleInspectEffectivePrompt() {
+	snap := e.lastOrCurrentEffective()
+	e.emit(protocol.EffectivePrompt{
+		Correlation:    e.sessionCorr(),
+		Layers:         snap.Layers,
+		SystemChars:    snap.SystemChars,
+		MessageCount:   snap.MessageCount,
+		FromLastStream: snap.FromLastStream,
+	})
 }
 
 // handleFilesChanged invalidates read snapshots for the reported paths and
@@ -1233,9 +1253,12 @@ func (e *Engine) streamRetryDelay(nextAttempt int) time.Duration {
 // contract. On success, history-ready text/tool/reasoning are returned and
 // usage is emitted; nothing is appended to e.messages here.
 func (e *Engine) consumeStream(ctx context.Context, reqCorr protocol.Correlation) (streamOutcome, error) {
+	layers := e.systemLayers()
+	system := joinPromptLayerTexts(layers)
+	e.recordStreamEffective(layers, system)
 	stream, err := e.prov.Stream(ctx, provider.Request{
 		Model:     e.model,
-		System:    e.system(),
+		System:    system,
 		Messages:  e.messages,
 		Tools:     e.opts.Registry.Schemas(),
 		MaxTokens: e.opts.MaxTokens,

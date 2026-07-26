@@ -11,25 +11,27 @@ import (
 type commandID string
 
 const (
-	commandProvider commandID = "provider"
-	commandModel    commandID = "model"
-	commandEffort   commandID = "effort"
-	commandAutonomy commandID = "autonomy"
-	commandAuth     commandID = "auth"
-	commandSettings commandID = "settings"
-	commandAgent    commandID = "agent"
-	commandFast     commandID = "fast"
-	commandVim      commandID = "vim"
-	commandHelp     commandID = "help"
-	commandKeys     commandID = "keys"
-	commandMDRead   commandID = "md-read"
-	commandTheme    commandID = "theme"
-	commandLayout   commandID = "layout"
-	commandSplit    commandID = "split"
-	commandCompact  commandID = "compact"
-	commandSession  commandID = "session"
-	commandMemory   commandID = "memory"
-	commandIssues   commandID = "issues"
+	commandProvider        commandID = "provider"
+	commandModel           commandID = "model"
+	commandEffort          commandID = "effort"
+	commandAutonomy        commandID = "autonomy"
+	commandAuth            commandID = "auth"
+	commandSettings        commandID = "settings"
+	commandAgent           commandID = "agent"
+	commandFast            commandID = "fast"
+	commandVim             commandID = "vim"
+	commandHelp            commandID = "help"
+	commandKeys            commandID = "keys"
+	commandMDRead          commandID = "md-read"
+	commandTheme           commandID = "theme"
+	commandLayout          commandID = "layout"
+	commandSplit           commandID = "split"
+	commandCompact         commandID = "compact"
+	commandSession         commandID = "session"
+	commandMemory          commandID = "memory"
+	commandIssues          commandID = "issues"
+	commandContext         commandID = "context"
+	commandEffectivePrompt commandID = "effective-prompt"
 )
 
 type commandSource string
@@ -67,6 +69,8 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandKeys, Name: "/keys", Description: "show keyboard shortcuts", Source: commandSourceBuiltin},
 	{ID: commandMemory, Name: "/memory", Description: "list, get, set, or delete project memory", ArgsHint: "[list|get|set|rm] ...", Source: commandSourceBuiltin},
 	{ID: commandIssues, Name: "/issues", Description: "list, add, get, or close project issues", ArgsHint: "[list|add|get|close] ...", Source: commandSourceBuiltin},
+	{ID: commandContext, Name: "/context", Description: "inspect effective system-prompt layers", Source: commandSourceBuiltin},
+	{ID: commandEffectivePrompt, Name: "/effective-prompt", Description: "inspect effective system-prompt layers", Source: commandSourceBuiltin},
 }
 
 // commandCatalog builds the slash-command catalog from the builtins and the
@@ -117,25 +121,27 @@ func sanitizeDisplayData(value string) string {
 // reservedCommandNames are slash-command names owned by builtins; a skill may
 // not shadow one.
 var reservedCommandNames = map[string]struct{}{
-	"provider": {},
-	"model":    {},
-	"effort":   {},
-	"autonomy": {},
-	"auth":     {},
-	"settings": {},
-	"agent":    {},
-	"fast":     {},
-	"vim":      {},
-	"md-read":  {},
-	"theme":    {},
-	"layout":   {},
-	"split":    {},
-	"compact":  {},
-	"session":  {},
-	"help":     {},
-	"keys":     {},
-	"memory":   {},
-	"issues":   {},
+	"provider":         {},
+	"model":            {},
+	"effort":           {},
+	"autonomy":         {},
+	"auth":             {},
+	"settings":         {},
+	"agent":            {},
+	"fast":             {},
+	"vim":              {},
+	"md-read":          {},
+	"theme":            {},
+	"layout":           {},
+	"split":            {},
+	"compact":          {},
+	"session":          {},
+	"help":             {},
+	"keys":             {},
+	"memory":           {},
+	"issues":           {},
+	"context":          {},
+	"effective-prompt": {},
 }
 
 // validSkillName reports whether a skill name is safe to render and select as a
