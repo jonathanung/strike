@@ -1311,10 +1311,19 @@ func (e *Engine) consumeStream(ctx context.Context, reqCorr protocol.Correlation
 				calls = append(calls, *ev.ToolCall)
 			}
 		case provider.EventReasoning:
-			// Kept on the message but never emitted: reasoning artifacts
-			// exist so the next request can replay them, and current
-			// models do not return readable chain of thought anyway.
-			reasoning = append(reasoning, ev.Reasoning)
+			// Opaque bytes stay on the assistant message for vendor replay
+			// (Anthropic requires thinking blocks verbatim). Displayable
+			// prose, when present, streams to the frontend as ReasoningDelta.
+			if len(ev.Reasoning) > 0 {
+				reasoning = append(reasoning, ev.Reasoning)
+			}
+			text := ev.Text
+			if text == "" {
+				text = provider.ReasoningText(ev.Reasoning)
+			}
+			if text != "" {
+				e.emit(protocol.ReasoningDelta{Correlation: reqCorr, Text: text})
+			}
 		case provider.EventDone:
 			terminated = true
 			stopReason = ev.StopReason

@@ -256,6 +256,46 @@ func TestAgentWithoutEffortPinLeavesTheDialAlone(t *testing.T) {
 	}
 }
 
+// TestReasoningDeltaEmittedWhenProviderSendsDisplayableCoT covers the
+// frontend path: opaque replay bytes still land on the message, and readable
+// prose streams as protocol.ReasoningDelta (not TextDelta).
+func TestReasoningDeltaEmittedWhenProviderSendsDisplayableCoT(t *testing.T) {
+	block := `{"type":"thinking","thinking":"consider the edge cases","signature":"sig=="}`
+	rec := &reasoningProvider{block: block}
+	eng := engine.New(engine.Options{
+		Select:          func(string) (provider.Provider, string, error) { return rec, "m", nil },
+		InitialProvider: "reasoning",
+		Registry:        tool.NewRegistry(),
+		WorkDir:         t.TempDir(),
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "turn"}
+	var deltas []protocol.ReasoningDelta
+	var sawText bool
+	waitForEvent(t, eng, func(ev protocol.Event) bool {
+		switch e := ev.(type) {
+		case protocol.ReasoningDelta:
+			deltas = append(deltas, e)
+		case protocol.TextDelta:
+			if e.Text == "ok" {
+				sawText = true
+			}
+		case protocol.TurnCompleted:
+			return true
+		}
+		return false
+	})
+	if !sawText {
+		t.Fatal("missing TextDelta for the final answer")
+	}
+	if len(deltas) != 1 || deltas[0].Text != "consider the edge cases" {
+		t.Fatalf("ReasoningDelta = %#v, want one with thinking prose", deltas)
+	}
+}
+
 // TestReasoningBlocksAreCarriedIntoTheNextRequest proves the replay path end
 // to end through the engine: what a provider emits as EventReasoning must come
 // back on the assistant message of the following request, byte-identical.

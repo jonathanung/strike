@@ -85,6 +85,15 @@ func (m Model) contextPaneBody(width, height int) string {
 			},
 		})
 	}
+	if m.showThinking {
+		rows = append(rows, row{
+			label: "thinking",
+			value: "visible",
+			valueStyle: func(s string) string {
+				return st.Muted.Render(s)
+			},
+		})
+	}
 	if m.services.Auth != nil && m.providerName != "" {
 		detail := strings.TrimSpace(m.services.Auth.Describe(m.providerName))
 		if detail != "" {

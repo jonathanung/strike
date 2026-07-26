@@ -27,6 +27,8 @@ strike launches without any provider configured. Pick one inside the TUI:
                                # latency). Sticky session preference; no-op
                                # on Anthropic, xAI, ChatGPT subscription, or
                                # models without a fast mode. /fast on|off
+/think                         # show or hide model chain-of-thought when the
+                               # provider streams it. Default hidden. /think on|off
 /auth                          # same picker as /provider
 /auth openai                   # OAuth login in the browser (async — the TUI
                                # keeps working; result shows in the notice line)

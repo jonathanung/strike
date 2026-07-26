@@ -85,6 +85,9 @@ func (m Model) headerView(width int) string {
 		// Warning tone: priority tier is a cost-visible session preference.
 		left += inlineGap + ui.Badge(th, ui.ToneWarning, "fast")
 	}
+	if m.showThinking {
+		left += inlineGap + ui.Badge(th, ui.ToneMuted, "think")
+	}
 
 	statusStyle := th.AgentStateStyle(state)
 	var right string
@@ -109,7 +112,8 @@ func (m Model) headerView(width int) string {
 }
 
 // workingStatusLabel is the header right-side text while a turn runs, e.g.
-// "working (12s · 3 tool calls) — esc".
+// "working (12s · 3 tool calls) — esc". Elapsed time is always included so
+// long silent waits stay obvious even before tools or answer text arrive.
 func (m Model) workingStatusLabel(th theme.Theme) string {
 	th = th.Resolve()
 	elapsed := time.Duration(0)

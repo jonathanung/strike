@@ -34,6 +34,7 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		{ID: "command:settings", Label: "/settings", Description: "manage custom providers and settings", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/settings"}},
 		{ID: "agent:build", Label: "/agent build", Description: "select an agent", Action: paletteAction{Kind: paletteActionAgent, Value: "build"}},
 		{ID: "command:fast", Label: "/fast", Description: "toggle OpenAI priority tier (faster, ~2× cost)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/fast"}},
+		{ID: "command:think", Label: "/think", Description: "show or hide model chain-of-thought", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/think"}},
 		{ID: "command:vim", Label: "/vim", Description: "open a file in the embedded editor (pane/overlay) or $EDITOR", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/vim"}},
 		{ID: "command:md-read", Label: "/md-read", Description: "open a markdown file in the right pane", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/md-read"}},
 		{ID: "command:theme", Label: "/theme", Description: "select a color theme or set appearance", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/theme"}},
@@ -80,7 +81,9 @@ func TestPaletteAvailabilityAndDisabledSelection(t *testing.T) {
 		assertPaletteInvoke(t, m, "/help", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/help"}})
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
 		assertPaletteInvoke(t, m, "/keys", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/keys"}})
-		// /vim, /md-read, and prompt inspect stay available mid-turn.
+		// /vim, /md-read, /think, and prompt inspect stay available mid-turn.
+		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
+		assertPaletteInvoke(t, m, "/think", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/think"}})
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
 		assertPaletteInvoke(t, m, "/vim", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/vim"}})
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})

@@ -582,6 +582,15 @@ func cellsFromEvents(events []protocol.Event) ([]cell, map[string]*toolCell) {
 			} else {
 				cells = append(cells, &assistantCell{text: ev.Text})
 			}
+		case protocol.ReasoningDelta:
+			if ev.Text == "" {
+				break
+			}
+			if last, ok := lastCell[*reasoningCell](cells); ok {
+				last.text += ev.Text
+			} else {
+				cells = append(cells, &reasoningCell{text: ev.Text})
+			}
 		case protocol.ToolCallBegin:
 			if last, ok := lastCell[*assistantCell](cells); ok {
 				last.complete = true

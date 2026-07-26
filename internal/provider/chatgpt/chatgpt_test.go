@@ -72,6 +72,46 @@ func TestStreamAuthError(t *testing.T) {
 	}
 }
 
+func TestStreamEmitsReasoningSummaryDeltas(t *testing.T) {
+	const sse = "" +
+		`data: {"type":"response.reasoning_summary_text.delta","delta":"plan "}` + "\n" +
+		`data: {"type":"response.reasoning_text.delta","delta":"detail"}` + "\n" +
+		`data: {"type":"response.output_text.delta","delta":"done"}` + "\n" +
+		`data: {"type":"response.completed","response":{"status":"completed"}}` + "\n"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, sse)
+	}))
+	defer srv.Close()
+
+	p := New(func(context.Context) (string, string, error) { return "t", "a", nil })
+	p.endpoint = srv.URL
+	stream, err := p.Stream(context.Background(), provider.Request{Model: "gpt-5.5", Messages: []provider.Message{
+		{Role: provider.RoleUser, Text: "hi"},
+	}})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var reasoning, text string
+	for ev := range stream {
+		switch ev.Type {
+		case provider.EventReasoning:
+			reasoning += ev.Text
+		case provider.EventTextDelta:
+			text += ev.Text
+		case provider.EventError:
+			t.Fatalf("stream error: %v", ev.Err)
+		}
+	}
+	if reasoning != "plan detail" {
+		t.Errorf("reasoning = %q, want %q", reasoning, "plan detail")
+	}
+	if text != "done" {
+		t.Errorf("text = %q, want done", text)
+	}
+}
+
 func TestStreamEmitsTextToolCallAndDone(t *testing.T) {
 	const sse = "" +
 		`data: {"type":"response.output_text.delta","delta":"hi "}` + "\n" +

@@ -495,7 +495,7 @@ func TestHelpCommandOpensFilterableCatalogModal(t *testing.T) {
 	}
 	wantLabels := []string{
 		"/provider", "/model", "/settings", "/session", "/theme", "/memory",
-		"/issues", "/compact", "/fork", "/undo", "/fast", "/layout", "/md-read", "/keys", "/review", "tab",
+		"/issues", "/compact", "/fork", "/undo", "/fast", "/think", "/layout", "/md-read", "/keys", "/review", "tab",
 	}
 	for _, want := range wantLabels {
 		found := false
