@@ -242,9 +242,9 @@ func TestModalReceivesKeysBeforeCompletionAndComposer(t *testing.T) {
 func TestModalVisuallyUnfocusesComposerAndSuppressesCompletionUntilClosed(t *testing.T) {
 	setTUITrueColor(t)
 	th := theme.Default()
-	th.Border = fixedColor("#112233")
-	th.BorderFocus = fixedColor("#445566")
-	th.BorderMuted = fixedColor("#778899")
+	th.Surface = fixedColor("#112233")
+	th.SurfaceFocus = fixedColor("#445566")
+	th.SurfaceMuted = fixedColor("#778899")
 	th.OverlayScrim = fixedColor("#99aabb")
 	m, ops := newAppTestModelWithOptions(Options{Theme: &th})
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -275,8 +275,8 @@ func TestModalVisuallyUnfocusesComposerAndSuppressesCompletionUntilClosed(t *tes
 	if !strings.Contains(withModal, rgbSGR("#99aabb")) {
 		t.Errorf("modal did not scrim background with OverlayScrim:\n%s", withModal)
 	}
-	if strings.Contains(withModal, rgbSGR("#445566")) {
-		t.Errorf("modal left focused border color in scrimmed background:\n%s", withModal)
+	if strings.Contains(withModal, rgbBGSGR("#445566")) {
+		t.Errorf("modal left focused surface color in scrimmed background:\n%s", withModal)
 	}
 	if hasReverseVideo(withModal) {
 		t.Errorf("modal view rendered the composer's reverse-video cursor: %q", withModal)
@@ -291,8 +291,8 @@ func TestModalVisuallyUnfocusesComposerAndSuppressesCompletionUntilClosed(t *tes
 	if strings.Contains(afterClose, rgbSGR("#99aabb")) {
 		t.Errorf("closed modal left OverlayScrim on the frame:\n%s", afterClose)
 	}
-	if !strings.Contains(afterClose, rgbSGR("#445566")) {
-		t.Errorf("closed modal did not restore focused composer border:\n%s", afterClose)
+	if !strings.Contains(afterClose, rgbBGSGR("#445566")) {
+		t.Errorf("closed modal did not restore focused composer surface:\n%s", afterClose)
 	}
 	if !hasReverseVideo(afterClose) {
 		t.Errorf("closed modal did not restore static composer cursor: %q", afterClose)

@@ -135,13 +135,19 @@ func TestC2ViewGeometryAndActivePanes(t *testing.T) {
 				}
 				l := computeLayout(tt.left, tt.height, m.composer.Height(), m.completionPopupHeightFor(tt.left), false)
 				bodyHeight := l.transcript + l.notice + l.popup + l.composer
-				// Right panel top is on the first body row (under the header).
-				// Use display columns: logo bolt is double-width so rune index ≠ column.
+				// Right panel top chrome is on the first body row (under the header).
+				// Solid chrome carries the window title; bottom chrome is a surface bar.
 				rightStart := tt.left + tt.gutter
-				topCh := displayColRune(ansi.Strip(rows[1]), rightStart)
-				bottomCh := displayColRune(ansi.Strip(rows[bodyHeight]), rightStart)
-				if topCh != '╭' || bottomCh != '╰' {
-					t.Errorf("right panel does not span left stack body height %d: top=%q bottom=%q", bodyHeight, string(topCh), string(bottomCh))
+				topPlain := ansi.Strip(rows[1])
+				bottomPlain := ansi.Strip(rows[bodyHeight])
+				titleIdx := strings.Index(topPlain, "context")
+				if titleIdx < 0 {
+					t.Errorf("right panel top chrome missing title on body start row: %q", topPlain)
+				} else if titleCol := ansi.StringWidth(topPlain[:titleIdx]); titleCol < rightStart-1 || titleCol > rightStart+2 {
+					t.Errorf("right panel title at col %d, want near rightStart %d: %q", titleCol, rightStart, topPlain)
+				}
+				if bottomCh := displayColRune(bottomPlain, rightStart); bottomCh == 0 {
+					t.Errorf("right panel does not span left stack body height %d: bottom empty at col %d", bodyHeight, rightStart)
 				}
 			}
 		})
@@ -262,24 +268,24 @@ func displayColRune(s string, col int) rune {
 func TestC2PaneFocusAndModalUseFocusAndMutedThemeTokens(t *testing.T) {
 	setTUITrueColor(t)
 	th := theme.Default()
-	th.BorderFocus = fixedColor("#010203")
-	th.BorderMuted = fixedColor("#040506")
+	th.SurfaceFocus = fixedColor("#010203")
+	th.SurfaceMuted = fixedColor("#040506")
 	th.OverlayScrim = fixedColor("#070809")
 	m, _ := newAppTestModelWithOptions(Options{Theme: &th})
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 80})
 	leftRows, rightRows := rowsContaining(m.View(), "get started"), rowsContaining(m.View(), "context")
-	if !strings.Contains(strings.Join(leftRows, "\n"), rgbSGR("#010203")) || !strings.Contains(strings.Join(rightRows, "\n"), rgbSGR("#040506")) {
-		t.Fatal("left focus/right dim tokens are not visible on their respective panes")
+	if !strings.Contains(strings.Join(leftRows, "\n"), rgbBGSGR("#010203")) || !strings.Contains(strings.Join(rightRows, "\n"), rgbBGSGR("#040506")) {
+		t.Fatal("left focus/right dim surface tokens are not visible on their respective panes")
 	}
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
 	leftRows, rightRows = rowsContaining(m.View(), "get started"), rowsContaining(m.View(), "context")
-	if !strings.Contains(strings.Join(leftRows, "\n"), rgbSGR("#040506")) || !strings.Contains(strings.Join(rightRows, "\n"), rgbSGR("#010203")) {
-		t.Fatal("focus toggle did not swap pane focus/dim tokens")
+	if !strings.Contains(strings.Join(leftRows, "\n"), rgbBGSGR("#040506")) || !strings.Contains(strings.Join(rightRows, "\n"), rgbBGSGR("#010203")) {
+		t.Fatal("focus toggle did not swap pane focus/dim surface tokens")
 	}
 	m.modal = &appProbeModal{}
 	m.reflow()
 	view := m.View()
-	if strings.Contains(view, rgbSGR("#010203")) || strings.Contains(view, rgbSGR("#040506")) || !strings.Contains(view, rgbSGR("#070809")) {
+	if strings.Contains(view, rgbBGSGR("#010203")) || strings.Contains(view, rgbBGSGR("#040506")) || !strings.Contains(view, rgbSGR("#070809")) {
 		t.Error("modal did not scrim both panes with OverlayScrim")
 	}
 	if rows := strings.Split(view, "\n"); len(rows) != 80 {

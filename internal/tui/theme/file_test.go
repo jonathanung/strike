@@ -40,6 +40,9 @@ func TestParseFullTheme(t *testing.T) {
 	if e.Theme.BorderStyle.Weight != BorderWeightHeavy {
 		t.Errorf("border weight = %v", e.Theme.BorderStyle.Weight)
 	}
+	if e.Theme.Chrome != ChromeSolid {
+		t.Errorf("default chrome = %v, want solid", e.Theme.Chrome)
+	}
 	// Unset roles inherit Default via Resolve inside Parse.
 	if e.Theme.Success.Dark == "" {
 		t.Error("success should resolve from default")
@@ -65,6 +68,34 @@ func TestParseUsesIDHint(t *testing.T) {
 	}
 	if e.ID != "from-file" || e.Name != "Hinted" {
 		t.Fatalf("entry = %+v", e)
+	}
+}
+
+func TestParseChromeAndSurfaceRoles(t *testing.T) {
+	raw := `{
+	  "id": "surf",
+	  "chrome": "bordered",
+	  "colors": {
+	    "surface": {"light": "#f0f0f0", "dark": "#222222"},
+	    "surfaceFocus": "#abcdef",
+	    "surfaceMuted": "#111111"
+	  }
+	}`
+	e, err := Parse([]byte(raw), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Theme.Chrome != ChromeBordered {
+		t.Errorf("chrome = %v, want bordered", e.Theme.Chrome)
+	}
+	if e.Theme.Surface.Light != "#f0f0f0" || e.Theme.Surface.Dark != "#222222" {
+		t.Errorf("surface = %+v", e.Theme.Surface)
+	}
+	if e.Theme.SurfaceFocus.Light != "#abcdef" {
+		t.Errorf("surfaceFocus = %+v", e.Theme.SurfaceFocus)
+	}
+	if _, err := Parse([]byte(`{"id":"x","chrome":"neon"}`), ""); err == nil {
+		t.Error("expected unknown chrome error")
 	}
 }
 

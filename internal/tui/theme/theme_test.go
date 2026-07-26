@@ -166,6 +166,7 @@ func TestDefaultPaletteRolesArePopulatedAndReadable(t *testing.T) {
 		"UserLabel": th.UserLabel, "ToolLabel": th.ToolLabel,
 		"DiffAdded": th.DiffAdded, "DiffRemoved": th.DiffRemoved,
 		"OverlayScrim": th.OverlayScrim,
+		"Surface":      th.Surface, "SurfaceFocus": th.SurfaceFocus, "SurfaceMuted": th.SurfaceMuted,
 	}
 	for name, c := range roles {
 		if c.Light == "" || c.Dark == "" {
@@ -174,6 +175,9 @@ func TestDefaultPaletteRolesArePopulatedAndReadable(t *testing.T) {
 		if c.Light == c.Dark {
 			t.Errorf("%s uses the same color for light and dark (%q); adaptive pairs should differ", name, c.Light)
 		}
+	}
+	if th.Chrome != ChromeSolid {
+		t.Errorf("default chrome = %v, want solid", th.Chrome)
 	}
 }
 
@@ -318,11 +322,15 @@ func TestThemeResolveCompletesZeroAndPartialThemes(t *testing.T) {
 		"UserLabel": resolved.UserLabel, "ToolLabel": resolved.ToolLabel,
 		"DiffAdded": resolved.DiffAdded, "DiffRemoved": resolved.DiffRemoved,
 		"OverlayScrim": resolved.OverlayScrim,
+		"Surface":      resolved.Surface, "SurfaceFocus": resolved.SurfaceFocus, "SurfaceMuted": resolved.SurfaceMuted,
 	}
 	for name, role := range roles {
 		if role.Light == "" || role.Dark == "" {
 			t.Errorf("zero Theme Resolve left %s incomplete: %+v", name, role)
 		}
+	}
+	if resolved.Chrome != ChromeSolid {
+		t.Errorf("zero Theme Resolve chrome = %v, want solid", resolved.Chrome)
 	}
 	if resolved.Background == nil {
 		t.Fatal("zero Theme Resolve left Background unset")
@@ -385,6 +393,18 @@ func TestThemeResolveBackgroundPreservesOnlyExplicitTransparency(t *testing.T) {
 				t.Errorf("solid Background = %v, want preserved %v", got, tt.background)
 			}
 		})
+	}
+}
+
+func TestThemeResolveChromeModes(t *testing.T) {
+	if got := (Theme{}).Resolve().Chrome; got != ChromeSolid {
+		t.Errorf("unset chrome = %v, want solid", got)
+	}
+	if got := (Theme{Chrome: ChromeSolid}).Resolve().Chrome; got != ChromeSolid {
+		t.Errorf("solid chrome = %v", got)
+	}
+	if got := (Theme{Chrome: ChromeBordered}).Resolve().Chrome; got != ChromeBordered {
+		t.Errorf("bordered chrome = %v", got)
 	}
 }
 

@@ -205,10 +205,29 @@ func TestModelViewCanvasCoversModalGuttersAndFooter(t *testing.T) {
 			t.Errorf("modal view row %d width = %d, want 80", i, got)
 		}
 	}
-	for i, background := range tuiBackgroundCells(out) {
-		if background != "48;2;17;34;51" {
-			t.Fatalf("modal view cell %d background = %q, want canvas background", i, background)
+	// Canvas owns gutters/scrim; solid dialog surfaces may paint nested fills.
+	// Every printable cell must still have some explicit background.
+	cells := tuiBackgroundCells(out)
+	if len(cells) == 0 {
+		t.Fatal("modal view emitted no printable cells")
+	}
+	canvasBG := "48;2;17;34;51"
+	hasCanvas, hasOther := false, false
+	for _, background := range cells {
+		if background == "" {
+			t.Fatal("modal view cell missing background fill")
 		}
+		if background == canvasBG {
+			hasCanvas = true
+		} else {
+			hasOther = true
+		}
+	}
+	if !hasCanvas {
+		t.Fatal("modal view missing canvas background on gutters/scrim")
+	}
+	if !hasOther {
+		t.Fatal("modal dialog missing nested surface background")
 	}
 }
 
@@ -228,6 +247,14 @@ func rgbSGR(hex string) string {
 	g, _ := strconv.ParseInt(hex[3:5], 16, 0)
 	b, _ := strconv.ParseInt(hex[5:7], 16, 0)
 	return "38;2;" + strconv.FormatInt(r, 10) + ";" + strconv.FormatInt(g, 10) + ";" + strconv.FormatInt(b, 10)
+}
+
+// rgbBGSGR is the truecolor background SGR payload for a #RRGGBB hex color.
+func rgbBGSGR(hex string) string {
+	r, _ := strconv.ParseInt(hex[1:3], 16, 0)
+	g, _ := strconv.ParseInt(hex[3:5], 16, 0)
+	b, _ := strconv.ParseInt(hex[5:7], 16, 0)
+	return "48;2;" + strconv.FormatInt(r, 10) + ";" + strconv.FormatInt(g, 10) + ";" + strconv.FormatInt(b, 10)
 }
 
 func hasTUIBackgroundSGR(s string) bool {

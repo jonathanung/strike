@@ -125,8 +125,9 @@ func TestCompactRightPaneIsBorderlessAndUsesFullBodyDimensionsAtThresholds(t *te
 	}{
 		{"59x30 compact width", 59, 30, 59, 28, true},
 		{"80x19 compact height", 80, 19, 80, 17, true},
-		{"60x20 bordered threshold", 60, 20, 56, 16, false},
-		{"93x60 canonical split", 93, 60, 28, 56, false},
+		// Solid chrome: PanelInnerWidth drops only horizontal pad (XS=1 each side).
+		{"60x20 solid threshold", 60, 20, 58, 16, false},
+		{"93x60 canonical split", 93, 60, 30, 56, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			m, _ := newAppTestModel(nil, nil)
@@ -149,11 +150,11 @@ func TestCompactRightPaneIsBorderlessAndUsesFullBodyDimensionsAtThresholds(t *te
 				}
 			}
 			plain := strings.Join(rows, "\n")
-			if tt.borderless && (strings.Contains(plain, "╭") || strings.Contains(plain, "╰") || strings.Contains(plain, "context")) {
+			if tt.borderless && (strings.ContainsAny(plain, "╭╰") || strings.Contains(plain, "context")) {
 				t.Errorf("compact right pane retained panel chrome: %q", plain)
 			}
 			if !tt.borderless && !strings.Contains(plain, "context") {
-				t.Errorf("bordered right pane omitted its title: %q", plain)
+				t.Errorf("solid right pane omitted its title: %q", plain)
 			}
 		})
 	}

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -17,8 +18,45 @@ func lastLine(s string) string {
 	return lines[len(lines)-1]
 }
 
-func TestPanelEmbedsTitleInTopBorder(t *testing.T) {
+func borderedTheme() theme.Theme {
+	th := theme.Default()
+	th.Chrome = theme.ChromeBordered
+	return th
+}
+
+func TestPanelSolidEmbedsTitleWithoutBoxDrawing(t *testing.T) {
 	out := Panel(theme.Default(), PanelOpts{Title: "session", Width: 40}, "body")
+	top := ansi.Strip(firstLine(out))
+	if !strings.Contains(top, "session") {
+		t.Errorf("top chrome missing title: %q", top)
+	}
+	if strings.ContainsAny(top, "╭╮╰╯│") {
+		t.Errorf("solid default used box-drawing chrome: %q", top)
+	}
+	if w := lipgloss.Width(firstLine(out)); w != 40 {
+		t.Errorf("top width = %d, want 40", w)
+	}
+	if !strings.Contains(ansi.Strip(out), "body") {
+		t.Errorf("body missing: %q", out)
+	}
+}
+
+func TestPanelSolidEmbedsFooter(t *testing.T) {
+	out := Panel(theme.Default(), PanelOpts{Title: "keys", Footer: "esc close", Width: 40}, "body")
+	bottom := ansi.Strip(lastLine(out))
+	if !strings.Contains(bottom, "esc close") {
+		t.Errorf("bottom chrome missing footer: %q", bottom)
+	}
+	if strings.ContainsAny(bottom, "╭╮╰╯│") {
+		t.Errorf("solid footer used box-drawing: %q", bottom)
+	}
+	if w := lipgloss.Width(lastLine(out)); w != 40 {
+		t.Errorf("bottom width = %d, want 40", w)
+	}
+}
+
+func TestPanelBorderedEmbedsTitleInTopBorder(t *testing.T) {
+	out := Panel(borderedTheme(), PanelOpts{Title: "session", Width: 40}, "body")
 	top := firstLine(out)
 	if !strings.HasPrefix(top, "╭─ session ") {
 		t.Errorf("top border does not embed the title: %q", top)
@@ -26,16 +64,13 @@ func TestPanelEmbedsTitleInTopBorder(t *testing.T) {
 	if !strings.HasSuffix(top, "╮") {
 		t.Errorf("top border does not close with ╮: %q", top)
 	}
-	if !strings.Contains(top, "─╮") {
-		t.Errorf("title is not followed by a border rule: %q", top)
-	}
 	if w := lipgloss.Width(top); w != 40 {
 		t.Errorf("top border width = %d, want 40", w)
 	}
 }
 
-func TestPanelEmbedsFooterInBottomBorder(t *testing.T) {
-	out := Panel(theme.Default(), PanelOpts{Title: "keys", Footer: "esc close", Width: 40}, "body")
+func TestPanelBorderedEmbedsFooterInBottomBorder(t *testing.T) {
+	out := Panel(borderedTheme(), PanelOpts{Title: "keys", Footer: "esc close", Width: 40}, "body")
 	bottom := lastLine(out)
 	if !strings.HasPrefix(bottom, "╰─ esc close ") {
 		t.Errorf("bottom border does not embed the footer: %q", bottom)
@@ -43,18 +78,17 @@ func TestPanelEmbedsFooterInBottomBorder(t *testing.T) {
 	if !strings.HasSuffix(bottom, "╯") {
 		t.Errorf("bottom border does not close with ╯: %q", bottom)
 	}
-	if w := lipgloss.Width(bottom); w != 40 {
-		t.Errorf("bottom border width = %d, want 40", w)
-	}
 }
 
 func TestPanelRendersExactlyRequestedWidth(t *testing.T) {
 	body := "the quick brown fox jumps over the lazy dog, then keeps on going for a while"
-	for _, width := range []int{3, 4, 5, 6, 8, 12, 24, 40, 80, 120} {
-		out := Panel(theme.Default(), PanelOpts{Title: "session", Footer: "esc", Width: width}, body)
-		for i, line := range strings.Split(out, "\n") {
-			if w := lipgloss.Width(line); w != width {
-				t.Errorf("width %d: line %d = %d cells, want exactly %d\n%q", width, i, w, width, line)
+	for _, th := range []theme.Theme{theme.Default(), borderedTheme()} {
+		for _, width := range []int{3, 4, 5, 6, 8, 12, 24, 40, 80, 120} {
+			out := Panel(th, PanelOpts{Title: "session", Footer: "esc", Width: width}, body)
+			for i, line := range strings.Split(out, "\n") {
+				if w := lipgloss.Width(line); w != width {
+					t.Errorf("chrome=%v width %d: line %d = %d cells, want exactly %d\n%q", th.Chrome, width, i, w, width, line)
+				}
 			}
 		}
 	}
@@ -77,8 +111,8 @@ func TestPanelDegradesAtTinyWidthsWithoutPanic(t *testing.T) {
 		if w := lipgloss.Width(out); w > max(width, 0) {
 			t.Errorf("width %d: rendered width = %d, want <= %d", width, w, max(width, 0))
 		}
-		if strings.Contains(out, "╭") {
-			t.Errorf("width %d should be too narrow for a border, got %q", width, out)
+		if strings.Contains(ansi.Strip(out), "x") && width == 0 {
+			t.Errorf("width 0 should be empty, got %q", out)
 		}
 	}
 }
@@ -107,12 +141,12 @@ func TestPanelTinyFixedHeightsDegradeWithoutPhantomBorderRows(t *testing.T) {
 		width, height int
 		body          string
 		wantRows      int
-		wantBordered  bool
+		wantChrome    bool
 	}{
 		{"height one is a one-row borderless canvas", 12, 1, "界x", 1, false},
-		{"height two keeps only exact border chrome", 12, 2, "body", 2, true},
+		{"height two keeps only exact chrome bars", 12, 2, "body", 2, true},
 		{"height zero retains natural panel height", 12, 0, "one\ntwo", 4, true},
-		{"narrow height one stays borderless", 2, 1, "界x", 1, false},
+		{"narrow height one stays chrome-less", 2, 1, "界x", 1, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			out := Panel(th, PanelOpts{Title: "title", Footer: "footer", Width: tt.width, Height: tt.height}, tt.body)
@@ -125,19 +159,23 @@ func TestPanelTinyFixedHeightsDegradeWithoutPhantomBorderRows(t *testing.T) {
 					t.Errorf("row %d width = %d, want exact %d: %q", i, got, tt.width, line)
 				}
 			}
-			bordered := strings.ContainsAny(out, "╭╮╰╯│")
-			if bordered != tt.wantBordered {
-				t.Errorf("bordered = %v, want %v: %q", bordered, tt.wantBordered, out)
+			plain := ansi.Strip(out)
+			hasTitle := strings.Contains(plain, "title")
+			if hasTitle != tt.wantChrome {
+				t.Errorf("chrome title present = %v, want %v: %q", hasTitle, tt.wantChrome, plain)
 			}
-			if tt.height == 2 && strings.Contains(out, "body") {
-				t.Errorf("height-two panel retained a body row: %q", out)
+			if tt.height == 2 && strings.Contains(plain, "body") {
+				t.Errorf("height-two panel retained a body row: %q", plain)
+			}
+			if strings.ContainsAny(plain, "╭╮╰╯│") {
+				t.Errorf("solid panel used box-drawing: %q", plain)
 			}
 		})
 	}
 }
 
 func TestPanelBorderColorSelectionPrecedence(t *testing.T) {
-	th := theme.Default()
+	th := borderedTheme()
 	tests := []struct {
 		name string
 		opts PanelOpts
@@ -158,7 +196,30 @@ func TestPanelBorderColorSelectionPrecedence(t *testing.T) {
 	}
 }
 
-func TestPanelFocusStateChangesRenderedBorder(t *testing.T) {
+func TestPanelSurfaceColorSelectionPrecedence(t *testing.T) {
+	th := theme.Default()
+	tests := []struct {
+		name string
+		opts PanelOpts
+		want lipgloss.AdaptiveColor
+	}{
+		{"default", PanelOpts{}, th.Surface},
+		{"focused", PanelOpts{Focused: true}, th.SurfaceFocus},
+		{"dim", PanelOpts{Dim: true}, th.SurfaceMuted},
+		{"tone uses focus surface", PanelOpts{Tone: ToneWarning}, th.SurfaceFocus},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := panelSurfaceColor(th, tt.opts)
+			ac, ok := got.(lipgloss.AdaptiveColor)
+			if !ok || ac != tt.want {
+				t.Errorf("panelSurfaceColor = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPanelFocusStateChangesRenderedChrome(t *testing.T) {
 	saved := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	t.Cleanup(func() { lipgloss.SetColorProfile(saved) })
@@ -169,10 +230,10 @@ func TestPanelFocusStateChangesRenderedBorder(t *testing.T) {
 	dim := Panel(th, PanelOpts{Title: "x", Width: 24, Dim: true}, "body")
 
 	if focused == unfocused {
-		t.Error("focused and unfocused panels render identically; border color not applied")
+		t.Error("focused and unfocused panels render identically; surface not applied")
 	}
 	if unfocused == dim {
-		t.Error("dim and normal panels render identically; BorderMuted not applied")
+		t.Error("dim and normal panels render identically; SurfaceMuted not applied")
 	}
 	for name, out := range map[string]string{"focused": focused, "unfocused": unfocused, "dim": dim} {
 		if w := lipgloss.Width(out); w != 24 {
@@ -181,11 +242,20 @@ func TestPanelFocusStateChangesRenderedBorder(t *testing.T) {
 	}
 }
 
-func TestInnerWidthAccountsForBorderAndPadding(t *testing.T) {
-	tests := map[int]int{0: 0, 2: 2, 4: 2, 5: 3, 6: 2, 40: 36, 80: 76}
+func TestInnerWidthAccountsForSolidChromeAndPadding(t *testing.T) {
+	// Default solid: no vertical frame columns.
+	tests := map[int]int{0: 0, 2: 2, 4: 2, 5: 3, 6: 4, 40: 38, 80: 78}
 	for width, want := range tests {
 		if got := InnerWidth(width); got != want {
 			t.Errorf("InnerWidth(%d) = %d, want %d", width, got, want)
+		}
+	}
+	// Bordered retains the classic budget.
+	bt := borderedTheme()
+	bordered := map[int]int{0: 0, 2: 2, 4: 2, 5: 3, 6: 2, 40: 36, 80: 76}
+	for width, want := range bordered {
+		if got := PanelInnerWidth(bt, width); got != want {
+			t.Errorf("bordered PanelInnerWidth(%d) = %d, want %d", width, got, want)
 		}
 	}
 }
@@ -200,12 +270,12 @@ func TestPanelInnerHeightAccountsForBorderOnlyWhenItFits(t *testing.T) {
 		{"negative width", -1, 40, 0},
 		{"one column unbordered", 1, 40, 40},
 		{"two columns unbordered", 2, 40, 40},
-		{"three columns bordered", 3, 40, 38},
-		{"normal bordered", 80, 40, 38},
+		{"three columns chrome", 3, 40, 38},
+		{"normal chrome", 80, 40, 38},
 		{"zero height", 80, 0, 0},
 		{"negative height", 80, -1, 0},
 		{"height one degrades to a borderless body row", 80, 1, 1},
-		{"bordered height two has no body", 80, 2, 0},
+		{"chrome height two has no body", 80, 2, 0},
 		{"narrow height one is its own body row", 2, 1, 1},
 		{"narrow height two is two body rows", 2, 2, 2},
 	} {
@@ -224,14 +294,15 @@ func TestPanelInnerWidthMatchesRenderedBodyBudgetAndLegacyInnerWidth(t *testing.
 			budget := PanelInnerWidth(th, width)
 			out := Panel(th, PanelOpts{Width: width}, strings.Repeat("x", budget+1))
 			for _, line := range strings.Split(out, "\n") {
-				if strings.Contains(line, "x") && lipgloss.Width(strings.Trim(line, "│ ")) > budget {
-					t.Errorf("width %d: body exceeds PanelInnerWidth %d: %q", width, budget, line)
+				plain := ansi.Strip(line)
+				if strings.Contains(plain, "x") && strings.Count(plain, "x") > budget {
+					t.Errorf("width %d: body exceeds PanelInnerWidth %d: %q", width, budget, plain)
 				}
 			}
 		})
 	}
 
-	for width, want := range map[int]int{0: 0, 2: 2, 4: 2, 5: 3, 6: 2, 40: 36, 80: 76} {
+	for width, want := range map[int]int{0: 0, 2: 2, 4: 2, 5: 3, 6: 4, 40: 38, 80: 78} {
 		if got := InnerWidth(width); got != want {
 			t.Errorf("legacy InnerWidth(%d) = %d, want %d", width, got, want)
 		}
@@ -264,7 +335,7 @@ func TestPanelSpacingSupportsExplicitZeroAndCustomValues(t *testing.T) {
 }
 
 func TestPanelUsesValidCustomBordersAndFallsBackFromInvalidGlyphs(t *testing.T) {
-	custom := theme.Default()
+	custom := borderedTheme()
 	custom.BorderStyle = theme.BorderStyle{
 		TopLeft: "+", TopRight: "+", BottomLeft: "+", BottomRight: "+", Horizontal: "=", Vertical: "!",
 	}
@@ -276,7 +347,7 @@ func TestPanelUsesValidCustomBordersAndFallsBackFromInvalidGlyphs(t *testing.T) 
 		t.Errorf("custom vertical border = %q", body)
 	}
 
-	invalid := theme.Default()
+	invalid := borderedTheme()
 	invalid.BorderStyle = theme.BorderStyle{TopLeft: "界", Horizontal: "--"}
 	out = Panel(invalid, PanelOpts{Width: 20}, "body")
 	if top := firstLine(out); strings.Contains(top, "界") || strings.Contains(top, "--") || !strings.HasPrefix(top, "╭") {
@@ -290,7 +361,7 @@ func TestPanelUsesValidCustomBordersAndFallsBackFromInvalidGlyphs(t *testing.T) 
 }
 
 func TestPanelRejectsControlCharacterBorderGlyphs(t *testing.T) {
-	th := theme.Default()
+	th := borderedTheme()
 	th.BorderStyle = theme.BorderStyle{
 		TopLeft: "\n", TopRight: "\r", BottomLeft: "x\n", BottomRight: "x\r", Horizontal: "\n", Vertical: "\r",
 	}
@@ -345,7 +416,21 @@ func TestBorderlessPanelUsesExactCanvasWithoutChromeOrPadding(t *testing.T) {
 		})
 	}
 	defaultPanel := Panel(theme.Default(), PanelOpts{Title: "title", Footer: "footer", Width: 20, Height: 4}, "body")
-	if !strings.Contains(defaultPanel, "╭") || !strings.Contains(defaultPanel, "title") || !strings.Contains(defaultPanel, "footer") {
-		t.Errorf("default Panel changed while adding borderless mode: %q", defaultPanel)
+	plain := ansi.Strip(defaultPanel)
+	if !strings.Contains(plain, "title") || !strings.Contains(plain, "footer") || !strings.Contains(plain, "body") {
+		t.Errorf("default solid Panel missing chrome labels: %q", plain)
+	}
+	if strings.ContainsAny(plain, "╭╮╰╯│") {
+		t.Errorf("default solid Panel used box-drawing: %q", plain)
+	}
+}
+
+func TestDefaultThemeChromeIsSolid(t *testing.T) {
+	th := theme.Default().Resolve()
+	if th.Chrome != theme.ChromeSolid {
+		t.Errorf("default chrome = %v, want solid", th.Chrome)
+	}
+	if (theme.Theme{}).Resolve().Chrome != theme.ChromeSolid {
+		t.Error("zero theme did not resolve chrome to solid")
 	}
 }

@@ -23,6 +23,7 @@ type Styles struct {
 	UserLabel, AssistantLabel, ToolLabel                       lipgloss.Style
 	Input, InputPrompt, InputPlaceholder, InputCursor, Spinner lipgloss.Style
 	Border, BorderFocus, BorderMuted                           lipgloss.Style
+	Surface, SurfaceFocus, SurfaceMuted                        lipgloss.Style
 	DiffAdded, DiffRemoved                                     lipgloss.Style
 }
 
@@ -40,6 +41,7 @@ func (t Theme) S() Styles {
 		UserLabel:     base.Foreground(t.UserLabel).Bold(true), AssistantLabel: base.Foreground(t.Accent).Bold(true), ToolLabel: base.Foreground(t.ToolLabel).Bold(true),
 		Input: base.Foreground(t.Text), InputPrompt: base.Foreground(t.Accent), InputPlaceholder: base.Foreground(t.TextMuted), InputCursor: base.Foreground(t.Accent), Spinner: base.Foreground(t.AccentAlt),
 		Border: base.Foreground(t.Border), BorderFocus: base.Foreground(t.BorderFocus), BorderMuted: base.Foreground(t.BorderMuted),
+		Surface: base.Foreground(t.Text).Background(t.Surface), SurfaceFocus: base.Foreground(t.Text).Background(t.SurfaceFocus), SurfaceMuted: base.Foreground(t.TextMuted).Background(t.SurfaceMuted),
 		DiffAdded: base.Foreground(t.DiffAdded), DiffRemoved: base.Foreground(t.DiffRemoved),
 	}
 }
