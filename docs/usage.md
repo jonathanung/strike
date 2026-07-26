@@ -183,7 +183,7 @@ slot hosts one active window from the registry:
 |---|---|
 | `context` | setup summary (provider, model, agent, …) |
 | `activity` | tools/tips / subagent status |
-| `agents` | multi-root session/agent tree |
+| `agents` | multi-root session/agent tree (concurrent roots + children) |
 | `visualizer` | selected-node status, tokens/cost, activity sparkline |
 | `files` | workspace file tree (`host.Files`) |
 | `memory` | project memory browser |
@@ -196,6 +196,30 @@ enough: session (`context`+`activity`), agents (`agents`+`visualizer`), and
 project (`memory`+`issues`) share a 50/50 split (vertical in a side column,
 horizontal in a bottom bar). `files`, `markdown`, and `editor` stay full-height
 singles. Compact or narrow terminals collapse each group to one pane.
+
+### Concurrent root sessions
+
+Focus the `agents` pane to run several parent sessions side by side. The pane
+footer (and empty state) list the controls; `/keys` / `f1` includes the same
+rows under **Agents**:
+
+| Key | Action |
+|---|---|
+| `n` | spawn a new concurrent root |
+| `enter` | activate the selected root (or open a child transcript) |
+| `x` | interrupt the selected root or child |
+| `j` / `k` | move |
+| `f` | cycle filters (all / attention / working / ready / roots) |
+
+Do not confuse these with:
+
+- **`Tab`** — cycles **agent personas** (build, plan, explore, …) for the
+  active composer, not root sessions.
+- **`ctrl+x` leader chords** — navigate **child/subagent** transcripts nested
+  under a parent; they do not create or switch concurrent roots.
+
+Worktree isolation for second+ roots is configured via `worktree` in
+[config.md](config.md). Full chord table: [keybinds.md](keybinds.md).
 
 Vim-style pane keys (horizontal split): `ctrl+h` / `ctrl+l` focus the left
 or right pane; `ctrl+j` / `ctrl+k` move focus within the active stack group

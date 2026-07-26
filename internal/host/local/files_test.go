@@ -16,6 +16,25 @@ func mustSymlink(t *testing.T, oldname, newname string) {
 	}
 }
 
+func TestResolveUnderRootUsesPhysicalRootForRelativePath(t *testing.T) {
+	realRoot := t.TempDir()
+	linkRoot := filepath.Join(t.TempDir(), "work")
+	mustSymlink(t, realRoot, linkRoot)
+
+	resolved, rel, err := resolveUnderRoot(linkRoot, "backup/data.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	physicalRoot, err := filepath.EvalSymlinks(realRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(physicalRoot, "backup", "data.json")
+	if resolved != want || rel != "backup/data.json" {
+		t.Fatalf("resolveUnderRoot() = (%q, %q), want (%q, %q)", resolved, rel, want, "backup/data.json")
+	}
+}
+
 func TestNewFilesReadFile(t *testing.T) {
 	work := t.TempDir()
 	relContent := []byte("relative hello")

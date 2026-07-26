@@ -91,6 +91,10 @@ func (m Model) headerView(width int) string {
 		// Warning tone: armed auto-allow is a cost/safety-visible preference.
 		badges += inlineGap + ui.Badge(th, ui.ToneWarning, "auto-allow"+inlineGap+itoa(m.permissionAutoApproveSeconds)+"s")
 	}
+	if label := m.pendingBlockingLabel(); label != "" {
+		// Queued permission/question asks while a user modal is open.
+		badges += inlineGap + ui.Badge(th, ui.ToneWarning, label)
+	}
 	if m.fastEnabled {
 		// Warning tone: priority tier is a cost-visible session preference.
 		badges += inlineGap + ui.Badge(th, ui.ToneWarning, "fast")
@@ -390,7 +394,7 @@ func (m Model) rightPaneView(width, height int, compact bool) string {
 // rightPaneSingle frames one window. optionalFocus overrides (focused, dim);
 // when omitted, focus follows the right pane aggregate.
 func (m Model) rightPaneSingle(width, height int, compact bool, active window, focusOverride ...bool) string {
-	var title, body string
+	var title, body, footer string
 	focused := m.focus == focusRight && m.modal == nil
 	dim := m.focus == focusLeft || m.modal != nil
 	if len(focusOverride) >= 2 {
@@ -398,6 +402,10 @@ func (m Model) rightPaneSingle(width, height int, compact bool, active window, f
 	}
 	if active != nil {
 		title = active.title()
+		// Agents concurrent-root controls only when this pane is the agents tree.
+		if !compact && active.id() == agentsWindowID {
+			footer = agentsPaneFooter(m.th)
+		}
 		innerW, innerH := width, height
 		if nw, ok := active.(namedWindow); ok {
 			if nw.width > 0 {
@@ -429,6 +437,7 @@ func (m Model) rightPaneSingle(width, height int, compact bool, active window, f
 	}
 	return ui.Panel(m.th, ui.PanelOpts{
 		Title:      title,
+		Footer:     footer,
 		Width:      max(0, width),
 		Height:     max(0, height),
 		Borderless: compact,

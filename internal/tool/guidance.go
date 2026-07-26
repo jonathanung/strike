@@ -223,11 +223,13 @@ func recommendedGuidance(entries []GuidanceEntry) string {
 	add(has("question"),
 		"Use `question` when a decision genuinely belongs to the user.")
 	add(has("task") && has("task_status", "task_read"),
-		"Use `task` for bounded delegation; prefer `task_status`/`task_read` over repeated `sleep` while waiting on children.")
+		"Use `task` for bounded non-blocking delegation; prefer `task_status`/`task_read` over repeated `sleep` while waiting on children. Completion also arrives as `[child.completed]`.")
 	add(has("task") && !has("task_status", "task_read"),
-		"Use `task` for bounded delegation to a child agent with a self-contained prompt.")
-	add(has("sleep") && has("bash"),
-		"Prefer `sleep` over bash sleep when waiting.")
+		"Use `task` for bounded non-blocking delegation (self-contained prompt). A later `[child.completed]` delivers the summary — never sleep-poll for task completion.")
+	add(has("sleep") && has("bash") && has("task"),
+		"Prefer `sleep` over bash sleep for external readiness (services, rate limits). Never sleep-poll for `task`/subagent completion.")
+	add(has("sleep") && has("bash") && !has("task"),
+		"Prefer `sleep` over bash sleep when waiting for external readiness.")
 	add(hasAll("memory_write", "memory_read"),
 		"Use `memory_write`/`memory_read` for durable project guidance. Tags `instruction`/`preference`/`project-convention` auto-load (capped); other tags stay on-demand.")
 	add(has("memory_read") && !has("memory_write"),

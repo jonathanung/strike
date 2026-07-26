@@ -1,4 +1,4 @@
-.PHONY: build run run-echo serve serve-expose web-build test vet cover cover-check clean setup tui-gen
+.PHONY: build run run-echo serve serve-expose web-build web-test web-check test vet cover cover-check clean setup tui-gen
 
 # Overall statement-coverage floor for `make cover-check` (local / optional CI).
 # Soft baseline ~77%; keep below measured total so the gate does not flake.
@@ -44,6 +44,14 @@ serve-expose: build
 web-build:
 	@if [ ! -f web/package.json ]; then echo "web-build: no web/package.json"; exit 0; fi
 	cd web && npm ci && npm run build
+
+web-test:
+	@if [ ! -f web/package.json ]; then echo "web-test: no web/package.json"; exit 0; fi
+	cd web && npm ci && npm test
+
+web-check:
+	@if [ ! -f web/package.json ]; then echo "web-check: no web/package.json"; exit 0; fi
+	cd web && npm ci && npm run build && npm test
 
 test: tui-gen
 	go test ./...

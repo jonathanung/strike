@@ -35,9 +35,10 @@ func newHelpModal(specs []commandSpec) *helpModal {
 			Description: sanitizeDisplayData(spec.Description),
 		})
 	}
+	agentHelp := defaultKeyMap().Agent.Help()
 	entries = append(entries, helpEntry{
-		Label:       "tab",
-		Description: "cycle agents",
+		Label:       agentHelp.Key,
+		Description: agentHelp.Desc,
 	})
 	return &helpModal{entries: entries}
 }

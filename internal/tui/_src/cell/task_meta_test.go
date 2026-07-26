@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -149,5 +150,93 @@ func TestActivityAndToolCellAlignOnTaskLifecycle(t *testing.T) {
 	m.applyEvent(protocol.ChildCompleted{Correlation: corr, Status: protocol.ChildStatusCompleted, Summary: "ok"})
 	if !m.toolByID["t1"].done || m.children[0].status != "completed" {
 		t.Fatalf("tool done=%v child status=%q", m.toolByID["t1"].done, m.children[0].status)
+	}
+}
+
+func TestSleepToolCallsCoalesceToOneRow(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	for i, id := range []string{"s1", "s2", "s3", "s4"} {
+		m.applyEvent(protocol.ToolCallBegin{CallID: id, Name: "sleep", Args: json.RawMessage(`{"seconds":1}`)})
+		m.applyEvent(protocol.ToolCallEnd{
+			CallID: id,
+			Title:  "slept 1s",
+			Output: "Slept for 1 seconds",
+		})
+		_ = i
+	}
+	var sleepCells int
+	for _, c := range m.cells {
+		if tc, ok := c.(*toolCell); ok && tc.name == "sleep" {
+			sleepCells++
+		}
+	}
+	if sleepCells != 1 {
+		t.Fatalf("sleep transcript rows = %d, want 1 (coalesced)", sleepCells)
+	}
+	tc := m.toolByID["s4"]
+	if tc == nil || !tc.done {
+		t.Fatalf("final sleep cell missing/done=%v", tc)
+	}
+	if tc.title != "slept 1s" {
+		t.Errorf("title = %q", tc.title)
+	}
+}
+
+func TestExplicitSleepAloneStillVisible(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m.applyEvent(protocol.ToolCallBegin{CallID: "s1", Name: "sleep", Args: json.RawMessage(`{"seconds":2}`)})
+	m.applyEvent(protocol.ToolCallEnd{CallID: "s1", Title: "slept 2s", Output: "Slept for 2 seconds"})
+	var sleepCells int
+	for _, c := range m.cells {
+		if tc, ok := c.(*toolCell); ok && tc.name == "sleep" {
+			sleepCells++
+		}
+	}
+	if sleepCells != 1 {
+		t.Fatalf("sleep rows = %d, want 1", sleepCells)
+	}
+}
+
+func TestChildCompletedNoticeIsInfoNotUser(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m.applyEvent(protocol.UserMessage{Text: "real user prompt"})
+	m.applyEvent(protocol.UserMessage{Text: "[child.completed session=abcd1234 status=completed]\nok\nDo not sleep-poll for subagents; this is the terminal result."})
+	var users, infos int
+	for _, c := range m.cells {
+		switch c.(type) {
+		case *userCell:
+			users++
+		case *infoCell:
+			infos++
+		}
+	}
+	if users != 1 {
+		t.Fatalf("user cells = %d, want 1", users)
+	}
+	if infos != 1 {
+		t.Fatalf("info cells = %d, want 1 for child.completed", infos)
+	}
+}
+
+func TestChildCompletedDesktopNotifyTransition(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m.notifyMode = NotifyOn
+	m.turnStartedAt = time.Now().Add(-time.Hour)
+	cmd := m.applyEvent(protocol.ChildCompleted{
+		Correlation: protocol.Correlation{SessionID: "c1"},
+		Status:      protocol.ChildStatusCompleted,
+		Summary:     "done",
+	})
+	if cmd == nil {
+		t.Fatal("ChildCompleted should batch a desktop notify cmd when notify=on")
+	}
+}
+
+func TestIsChildCompletedNotice(t *testing.T) {
+	if !isChildCompletedNotice("[child.completed session=x status=completed]\nhi") {
+		t.Fatal("expected true")
+	}
+	if isChildCompletedNotice("please complete the child task") {
+		t.Fatal("expected false for ordinary text")
 	}
 }

@@ -207,7 +207,7 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.pendingUpgrade = true
-		m.modal = nil
+		m.clearModalStack()
 		return m, tea.Quit
 	case "/init":
 		return m.handleInitCommand()
@@ -333,15 +333,16 @@ func (m Model) handleInitCommand() (tea.Model, tea.Cmd) {
 
 func (m Model) applyInitResult(msg initResultMsg) (tea.Model, tea.Cmd) {
 	m.modal = nil
+	promote := m.afterModalClosed()
 	if msg.canceled {
 		m.setNotice("init canceled", false)
 		m.reflow()
-		return m, nil
+		return m, promote
 	}
 	if msg.err != "" {
 		m.setNotice("init failed: "+msg.err, true)
 		m.reflow()
-		return m, nil
+		return m, promote
 	}
 	display := msg.path
 	if base := filepath.Base(display); base != "" && base != "." {
@@ -356,7 +357,7 @@ func (m Model) applyInitResult(msg initResultMsg) (tea.Model, tea.Cmd) {
 		m.setNotice("wrote "+display, false)
 	}
 	m.reflow()
-	return m, nil
+	return m, promote
 }
 
 func (m Model) handleForkCommand() (tea.Model, tea.Cmd) {

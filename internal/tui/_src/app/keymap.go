@@ -86,7 +86,8 @@ func defaultKeyMap() keyMap {
 		ExternalEditor: key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("ctrl+e", "external editor")),
 		HistoryPrev:    key.NewBinding(key.WithKeys("up"), key.WithHelp("up", "history previous")),
 		HistoryNext:    key.NewBinding(key.WithKeys("down"), key.WithHelp("down", "history next")),
-		Agent:          key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "agent")),
+		// Agent cycles personas (build/plan/…), not concurrent root sessions.
+		Agent: key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "cycle agent persona")),
 		// PermissionMode: shift+tab cycles tool-permission posture (not newline).
 		PermissionMode: key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "permission mode")),
 		SaveDefaults:   key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "save defaults")),
@@ -116,11 +117,33 @@ func defaultKeyMap() keyMap {
 		KillLineEnd:   key.NewBinding(key.WithKeys("ctrl+k"), key.WithHelp("ctrl+k", "kill to line end")),
 		Yank:          key.NewBinding(key.WithKeys("ctrl+y"), key.WithHelp("ctrl+y", "yank")),
 
-		Leader:            key.NewBinding(key.WithKeys("ctrl+x"), key.WithHelp("ctrl+x", "leader")),
+		// Leader chords navigate child/subagent transcripts, not concurrent roots
+		// (use the agents pane n/enter/x for multi-root).
+		Leader:            key.NewBinding(key.WithKeys("ctrl+x"), key.WithHelp("ctrl+x", "subagent leader")),
 		SessionChildFirst: key.NewBinding(key.WithKeys("down"), key.WithHelp("ctrl+x down", "enter subagent")),
 		SessionParent:     key.NewBinding(key.WithKeys("up"), key.WithHelp("ctrl+x up", "parent session")),
 		SessionChildNext:  key.NewBinding(key.WithKeys("right"), key.WithHelp("ctrl+x right", "next subagent")),
 		SessionChildPrev:  key.NewBinding(key.WithKeys("left"), key.WithHelp("ctrl+x left", "prev subagent")),
+	}
+}
+
+// agentsKeyMap is the agents-pane local bindings (not remappable). Help text is
+// the source for /keys, the pane footer, and empty-state copy.
+type agentsKeyMap struct {
+	Move      key.Binding
+	Open      key.Binding
+	Spawn     key.Binding
+	Interrupt key.Binding
+	Filter    key.Binding
+}
+
+func defaultAgentsKeyMap() agentsKeyMap {
+	return agentsKeyMap{
+		Move:      key.NewBinding(key.WithKeys("up", "down", "k", "j"), key.WithHelp("j/k", "move")),
+		Open:      key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "activate root")),
+		Spawn:     key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new root")),
+		Interrupt: key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "interrupt root")),
+		Filter:    key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "cycle filter")),
 	}
 }
 
@@ -298,20 +321,27 @@ func keybindCatalog(keys keyMap) []keybindEntry {
 		from("completion.next", "Completion", keys.CompletionNext),
 		from("completion.accept", "Completion", keys.CompletionAccept),
 		from("completion.dismiss", "Completion", keys.CompletionDismiss),
-
-		{ID: "lists.move", Category: "Lists", Keys: "up/down/ctrl+p/ctrl+n", Action: "move selection"},
-		{ID: "lists.move-jk", Category: "Lists", Keys: "j/k", Action: "move (pickers without filter)"},
-		{ID: "lists.select", Category: "Lists", Keys: "enter", Action: "confirm selection"},
-		{ID: "lists.filter", Category: "Lists", Keys: "type", Action: "filter (when available)"},
-		{ID: "lists.logout", Category: "Lists", Keys: "ctrl+x", Action: "log out provider (confirm y/n)"},
-		{ID: "lists.close", Category: "Lists", Keys: "esc", Action: "close"},
-		{ID: "lists.default", Category: "Lists", Keys: "ctrl+d", Action: "save highlighted default"},
-
-		{ID: "perm.choice", Category: "Permission", Keys: "left/right/h/l/tab", Action: "move choice"},
-		{ID: "perm.once", Category: "Permission", Keys: "1/y", Action: "allow once"},
-		{ID: "perm.session", Category: "Permission", Keys: "2/s", Action: "allow session"},
-		{ID: "perm.project", Category: "Permission", Keys: "3/p", Action: "allow project"},
-		{ID: "perm.reject", Category: "Permission", Keys: "4/n/esc", Action: "reject"},
 	}
+	// Agents pane (concurrent roots). Not remappable; help from agentsKeyMap.
+	ak := defaultAgentsKeyMap()
+	entries = append(entries,
+		from("agents.move", "Agents", ak.Move),
+		from("agents.open", "Agents", ak.Open),
+		from("agents.spawn", "Agents", ak.Spawn),
+		from("agents.interrupt", "Agents", ak.Interrupt),
+		from("agents.filter", "Agents", ak.Filter),
+		keybindEntry{ID: "lists.move", Category: "Lists", Keys: "up/down/ctrl+p/ctrl+n", Action: "move selection"},
+		keybindEntry{ID: "lists.move-jk", Category: "Lists", Keys: "j/k", Action: "move (pickers without filter)"},
+		keybindEntry{ID: "lists.select", Category: "Lists", Keys: "enter", Action: "confirm selection"},
+		keybindEntry{ID: "lists.filter", Category: "Lists", Keys: "type", Action: "filter (when available)"},
+		keybindEntry{ID: "lists.logout", Category: "Lists", Keys: "ctrl+x", Action: "log out provider (confirm y/n)"},
+		keybindEntry{ID: "lists.close", Category: "Lists", Keys: "esc", Action: "close"},
+		keybindEntry{ID: "lists.default", Category: "Lists", Keys: "ctrl+d", Action: "save highlighted default"},
+		keybindEntry{ID: "perm.choice", Category: "Permission", Keys: "left/right/h/l/tab", Action: "move choice"},
+		keybindEntry{ID: "perm.once", Category: "Permission", Keys: "1/y", Action: "allow once"},
+		keybindEntry{ID: "perm.session", Category: "Permission", Keys: "2/s", Action: "allow session"},
+		keybindEntry{ID: "perm.project", Category: "Permission", Keys: "3/p", Action: "allow project"},
+		keybindEntry{ID: "perm.reject", Category: "Permission", Keys: "4/n/esc", Action: "reject"},
+	)
 	return entries
 }

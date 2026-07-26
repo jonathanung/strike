@@ -49,6 +49,10 @@ type rootPane struct {
 	viewTitle    string
 	viewCells    []cell
 	viewToolByID map[string]*toolCell
+
+	// Overlay stack for this root (visible top + queued blocking asks).
+	modal      modal
+	modalQueue []modal
 }
 
 // stashActiveRoot copies live Model fields into the roots map under sessionID.
@@ -102,6 +106,8 @@ func (m *Model) stashActiveRoot() {
 		viewTitle:          m.viewTitle,
 		viewCells:          append([]cell(nil), m.viewCells...),
 		viewToolByID:       viewTools,
+		modal:              m.modal,
+		modalQueue:         cloneModalQueue(m.modalQueue),
 	}
 }
 
@@ -151,7 +157,8 @@ func (m *Model) loadRootPane(p *rootPane) {
 	}
 	m.selectedCell = -1
 	m.selectedFileRef = -1
-	m.modal = nil
+	m.modal = p.modal
+	m.modalQueue = cloneModalQueue(p.modalQueue)
 	m.viewGen++
 }
 
@@ -332,6 +339,10 @@ func applyEventToPane(p *rootPane, ev protocol.Event) {
 		}
 	case protocol.UserMessage:
 		p.sessionErrored = false
+		if isChildCompletedNotice(e.Text) {
+			p.cells = append(p.cells, &infoCell{text: e.Text})
+			break
+		}
 		p.cells = append(p.cells, &userCell{text: e.Text})
 		if p.titleTopic == "" {
 			if topic := sanitizeTitleTopic(e.Text); topic != "" {
@@ -362,9 +373,13 @@ func applyEventToPane(p *rootPane, ev protocol.Event) {
 			last.complete = true
 			last.mdCacheOK = false
 		}
+		p.toolCallsThisTurn++
+		if e.Name == "sleep" {
+			p.cells = beginSleepToolCell(p.cells, p.toolByID, e.CallID, e.Name, e.Args)
+			break
+		}
 		tc := &toolCell{callID: e.CallID, name: e.Name, args: e.Args}
 		p.toolByID[e.CallID] = tc
-		p.toolCallsThisTurn++
 		p.cells = append(p.cells, tc)
 	case protocol.ToolCallOutput:
 		if tc, ok := p.toolByID[e.CallID]; ok && !tc.done {
