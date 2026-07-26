@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/engine"
+	"github.com/jonathanung/strike-cli/internal/memory"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
 	"github.com/jonathanung/strike-cli/internal/tool"
@@ -23,6 +24,8 @@ func TestSharedBaselineHasADHDAndTools(t *testing.T) {
 		"Available: `read`, `glob`, `grep`, `edit`, `write`, `apply_patch`, `bash`, `task`, `webfetch`, `todowrite`, `todoread`, `memory_write`, `memory_read`, `issue_write`, `issue_read`, `notebook_edit`, `sleep`, `skill`, `question`, `enter_plan_mode`, `exit_plan_mode`, `phase_done`, `toolsearch`",
 		"NEVER commit unless the user explicitly asks",
 		"/help",
+		"instruction`, `preference`, or `project-convention` are auto-loaded",
+		"Issues are never auto-injected",
 	} {
 		if !strings.Contains(p, want) {
 			t.Errorf("SharedSystemPrompt missing %q", want)
@@ -220,6 +223,127 @@ func TestSystemPromptComposesEnvironmentAndInstructions(t *testing.T) {
 	instIdx := strings.Index(sys, "Instructions from:")
 	if !(baseIdx >= 0 && personaIdx > baseIdx && envIdx > personaIdx && instIdx > envIdx) {
 		t.Fatalf("layer order wrong: shared=%d persona=%d env=%d inst=%d", baseIdx, personaIdx, envIdx, instIdx)
+	}
+}
+
+func openTestMemory(t *testing.T) *memory.Store {
+	t.Helper()
+	s, err := memory.Open(t.TempDir(), "engine-prompt-mem")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	return s
+}
+
+func TestSystemPromptAutoLoadsTaggedMemory(t *testing.T) {
+	store := openTestMemory(t)
+	if err := store.Put("test.priority", "Always run make test first.", []string{"preference"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Put("scratch", "do not inject me", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Put("api.url", "https://example.invalid", []string{"config"}); err != nil {
+		t.Fatal(err)
+	}
+
+	sys := captureSystemPrompt(t, engine.Options{
+		WorkDir: t.TempDir(),
+		Memory:  store,
+		Agents:  []engine.Agent{{Name: "build"}},
+	}, "scripted", "model-a")
+
+	for _, want := range []string{
+		"# Project memory (untrusted)",
+		"## test.priority",
+		"Always run make test first.",
+		"tags: preference",
+	} {
+		if !strings.Contains(sys, want) {
+			t.Errorf("system missing %q\n---\n%s", want, sys)
+		}
+	}
+	if strings.Contains(sys, "do not inject me") {
+		t.Fatal("untagged memory must not auto-load")
+	}
+	if strings.Contains(sys, "https://example.invalid") {
+		t.Fatal("non-autoload tag must not inject")
+	}
+	// Issues must never appear via memory path (no issue store wired).
+	if strings.Contains(sys, "issue #") || strings.Contains(strings.ToLower(sys), "open issues") {
+		t.Fatal("issues must not be auto-injected")
+	}
+
+	instIdx := strings.Index(sys, "You are powered by")
+	memIdx := strings.Index(sys, "# Project memory (untrusted)")
+	if !(instIdx >= 0 && memIdx > instIdx) {
+		t.Fatalf("memory layer should follow env/instructions: env=%d mem=%d", instIdx, memIdx)
+	}
+}
+
+func TestSystemPromptMemoryWriteVisibleSameSession(t *testing.T) {
+	store := openTestMemory(t)
+	prov := newScriptedProvider(
+		streamStep{
+			events: []provider.StreamEvent{
+				{Type: provider.EventTextDelta, Text: "one"},
+				{Type: provider.EventDone, StopReason: "end_turn"},
+			},
+		},
+		streamStep{
+			events: []provider.StreamEvent{
+				{Type: provider.EventTextDelta, Text: "two"},
+				{Type: provider.EventDone, StopReason: "end_turn"},
+			},
+		},
+	)
+	eng := engine.New(engine.Options{
+		SessionID: "s-mem-refresh",
+		WorkDir:   t.TempDir(),
+		Memory:    store,
+		Agents:    []engine.Agent{{Name: "build"}},
+		Registry:  tool.NewRegistry(),
+		Select: func(string) (provider.Provider, string, error) {
+			return prov, "model-a", nil
+		},
+		InitialProvider: "scripted",
+		InitialModel:    "model-a",
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "first"}
+	req1 := waitStreamRequest(t, eng, prov)
+	if strings.Contains(req1.System, "SAME_SESSION_PREF") {
+		t.Fatal("preference should not exist before write")
+	}
+	waitTurnCompleted(t, eng)
+
+	if err := store.Put("live.pref", "SAME_SESSION_PREF", []string{"instruction"}); err != nil {
+		t.Fatal(err)
+	}
+
+	eng.Ops() <- protocol.UserInput{Text: "second"}
+	req2 := waitStreamRequest(t, eng, prov)
+	if !strings.Contains(req2.System, "SAME_SESSION_PREF") {
+		t.Fatalf("tagged memory_write should appear on next turn:\n%s", req2.System)
+	}
+}
+
+func TestSystemPromptNoMemoryLayerWhenEmpty(t *testing.T) {
+	store := openTestMemory(t)
+	if err := store.Put("note-only", "scratch", nil); err != nil {
+		t.Fatal(err)
+	}
+	sys := captureSystemPrompt(t, engine.Options{
+		WorkDir: t.TempDir(),
+		Memory:  store,
+		Agents:  []engine.Agent{{Name: "build"}},
+	}, "scripted", "model-a")
+	if strings.Contains(sys, "# Project memory (untrusted)") {
+		t.Fatal("empty auto-load set must omit project memory layer")
 	}
 }
 

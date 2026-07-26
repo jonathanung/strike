@@ -616,6 +616,7 @@ const (
 	PromptLayerPlan        = "plan"
 	PromptLayerEnvironment = "environment"
 	PromptLayerInstruction = "instruction"
+	PromptLayerMemory      = "project_memory"
 
 	PromptLayerAppend  = "append"
 	PromptLayerReplace = "replace"

@@ -3,6 +3,8 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -38,9 +40,10 @@ func saveDefaultsThroughCmd(settings host.Settings, provider, model, agent, effo
 	}
 }
 
-// headerView is the one-line header strip: the compact wordmark, the current
-// provider/model and agent badges on the left, and dynamic agent-state status
-// on the right. Status chrome tints from theme tokens via agentState.
+// headerView is the one-line header strip: the compact wordmark, a shortened
+// workdir path, provider/model and agent badges on the left, and dynamic
+// agent-state status on the right. Status chrome tints from theme tokens via
+// agentState.
 func (m Model) headerView(width int) string {
 	th := m.th.Resolve()
 	ic := iconsFor(th)
@@ -49,41 +52,42 @@ func (m Model) headerView(width int) string {
 	state := m.agentState()
 	stateTone := agentStateTone(state)
 
-	left := ui.LogoCompact(th)
+	brand := ui.LogoCompact(th)
+	var badges string
 	if m.providerName == "" {
-		left += badgeGap + ui.Badge(th, ui.ToneMuted, "no model")
+		badges += badgeGap + ui.Badge(th, ui.ToneMuted, "no model")
 	} else {
 		model := m.modelName
 		if model == "" {
 			model = "default"
 		}
-		left += badgeGap + ui.Badge(th, ui.ToneAccent, m.providerName+"/"+model)
+		badges += badgeGap + ui.Badge(th, ui.ToneAccent, m.providerName+"/"+model)
 		if tone, ok := providerHealthTone(m); ok {
-			left += inlineGap + ui.Badge(th, tone, ic.Dot)
+			badges += inlineGap + ui.Badge(th, tone, ic.Dot)
 		}
 	}
 	// Same display-safety gate as the palette and welcome card: agents are
 	// not host-filtered, so every render site guards the name itself.
 	// Agent badge tone follows live runtime state (tokenized coloring).
 	if m.agentName != "" && validAgentName(m.agentName) {
-		left += inlineGap + ui.Badge(th, stateTone, ic.Agent+inlineGap+sanitizeDisplayData(m.agentName))
+		badges += inlineGap + ui.Badge(th, stateTone, ic.Agent+inlineGap+sanitizeDisplayData(m.agentName))
 	}
 	// Workflow phase badge (plan→implement, custom workflows).
 	if m.phaseName != "" {
 		label := "phase" + inlineGap + sanitizeDisplayData(m.phaseName)
-		left += inlineGap + ui.Badge(th, ui.ToneAccentAlt, label)
+		badges += inlineGap + ui.Badge(th, ui.ToneAccentAlt, label)
 	}
 	// Only shown once a level is set — an unset dial means "whatever the
 	// provider does by default", which is not worth a badge.
 	if m.effort != protocol.EffortDefault {
-		left += inlineGap + ui.Badge(th, ui.ToneMuted, "effort"+inlineGap+string(m.effort))
+		badges += inlineGap + ui.Badge(th, ui.ToneMuted, "effort"+inlineGap+string(m.effort))
 	}
 	// Autonomy is always visible so mode is never only implicit in gates.
 	// Compact short label keeps the working status visible on narrow widths.
-	left += inlineGap + ui.Badge(th, ui.ToneMuted, "auto"+inlineGap+m.autonomy.Short())
+	badges += inlineGap + ui.Badge(th, ui.ToneMuted, "auto"+inlineGap+m.autonomy.Short())
 	if m.fastEnabled {
 		// Warning tone: priority tier is a cost-visible session preference.
-		left += inlineGap + ui.Badge(th, ui.ToneWarning, "fast")
+		badges += inlineGap + ui.Badge(th, ui.ToneWarning, "fast")
 	}
 	if m.showThinking {
 		left += inlineGap + ui.Badge(th, ui.ToneMuted, "think")
@@ -102,13 +106,69 @@ func (m Model) headerView(width int) string {
 		right = statusStyle.Render(state.Label())
 	}
 
-	// Meter only when left badges + right status leave room. Reserve StatusBar's
+	// Path sits between brand and badges when free cells remain after StatusBar's
+	// mid gap. Budgeted before the meter so the cwd stays visible longer.
+	left := brand
+	pathBudget := width - lipgloss.Width(brand) - lipgloss.Width(badges) - lipgloss.Width(right) - 1 - th.Spacing.XS
+	if path := m.headerWorkDirLabel(th, pathBudget); path != "" {
+		left += inlineGap + path
+	}
+	left += badges
+
+	// Meter only when left chrome + right status leave room. Reserve StatusBar's
 	// minimum mid gap (1) and the inline gap that prefixes the meter.
 	meterBudget := width - lipgloss.Width(left) - lipgloss.Width(right) - 1 - th.Spacing.XS
 	if meter := m.headerContextMeter(th, meterBudget); meter != "" {
 		left += inlineGap + meter
 	}
 	return ui.StatusBar(m.th, max(1, width), left, right)
+}
+
+// headerWorkDirLabel is the muted, home-shortened cwd for the header brand row.
+// budget is free display cells; below minBudget the path is omitted so badges
+// and status stay intact. Long paths middle-ellipsis to keep the leaf segment.
+func (m Model) headerWorkDirLabel(th theme.Theme, budget int) string {
+	const minBudget = 6
+	if budget < minBudget {
+		return ""
+	}
+	raw := strings.TrimSpace(m.workDir)
+	if raw == "" {
+		return ""
+	}
+	th = th.Resolve()
+	label := shortenHomePath(sanitizeDisplayData(raw))
+	if label == "" {
+		return ""
+	}
+	label = truncateMiddle(label, budget, th.Icons.Ellipsis)
+	if label == "" {
+		return ""
+	}
+	return th.S().Muted.Render(label)
+}
+
+// shortenHomePath replaces a leading home directory with ~ for compact display.
+// Non-home absolute paths and relative paths are cleaned and returned as-is.
+func shortenHomePath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	clean := filepath.Clean(path)
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return clean
+	}
+	home = filepath.Clean(home)
+	if clean == home {
+		return "~"
+	}
+	prefix := home + string(os.PathSeparator)
+	if strings.HasPrefix(clean, prefix) {
+		return "~" + clean[len(home):]
+	}
+	return clean
 }
 
 // workingStatusLabel is the header right-side text while a turn runs, e.g.

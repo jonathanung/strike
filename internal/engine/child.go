@@ -98,6 +98,7 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		WorkDir:             e.opts.WorkDir,
 		ProjectRoot:         e.opts.ProjectRoot,
 		Instructions:        e.opts.Instructions,
+		Memory:              e.opts.Memory,
 		SystemPrompt:        e.opts.SystemPrompt,
 		Agents:              e.opts.Agents,
 		InitialAgent:        agentName,
