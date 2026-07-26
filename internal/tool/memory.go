@@ -39,6 +39,8 @@ Usage notes:
   - key is required and identifies the entry (upsert on repeat writes).
   - value is the stored text; pass delete=true to remove an entry instead.
   - tags are optional labels for later filtered reads via memory_read.
+  - Tags instruction, preference, or project-convention auto-load into context
+    each turn (capped). Other tags and untagged notes stay on-demand only.
   - Memory is project-scoped only — never global across repos.`
 }
 

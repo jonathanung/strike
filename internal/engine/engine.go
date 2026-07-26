@@ -111,6 +111,11 @@ type Options struct {
 	// Instructions are preloaded AGENTS.md/CLAUDE.md blocks appended after
 	// the environment layer (see config.LoadInstructions).
 	Instructions []string
+	// Memory, when set, supplies project memory for the auto-loaded
+	// project_memory system layer each composition (tagged entries only).
+	// nil disables auto-load. Refreshed every turn so memory_write is visible
+	// in the same session.
+	Memory MemorySource
 	// SystemPrompt, when set, replaces the provider overlay for the build
 	// agent only (shared baseline still applies). From config systemPrompt.
 	SystemPrompt string

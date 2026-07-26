@@ -149,10 +149,10 @@ func (m *Model) navParent() tea.Cmd {
 		parent = m.sessionID
 	}
 	if parent == m.sessionID {
-		m.closeSessionView()
+		cmd := m.closeSessionView()
 		m.reflow()
 		m.refreshViewport()
-		return nil
+		return cmd
 	}
 	return m.openSessionView(parent)
 }
@@ -254,10 +254,10 @@ func (m *Model) listChildren(parentID string) []navChild {
 func (m *Model) openSessionView(id string) tea.Cmd {
 	id = strings.TrimSpace(id)
 	if id == "" || id == m.sessionID {
-		m.closeSessionView()
+		cmd := m.closeSessionView()
 		m.reflow()
 		m.refreshViewport()
-		return nil
+		return cmd
 	}
 	if m.services.Sessions == nil {
 		m.setNotice("session navigation unavailable", true)
@@ -295,17 +295,18 @@ func (m *Model) openSessionView(id string) tea.Cmd {
 	m.reflow()
 	m.refreshViewport()
 	m.viewport.GotoBottom()
+	agentsCmd := m.broadcastAgentsState()
 	// Live refresh while the child is still running.
 	if m.childIsRunning(id) {
 		gen := m.viewGen
-		return tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg {
+		return tea.Batch(agentsCmd, tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg {
 			return childTranscriptRefreshMsg{id: id, gen: gen}
-		})
+		}))
 	}
-	return nil
+	return agentsCmd
 }
 
-func (m *Model) closeSessionView() {
+func (m *Model) closeSessionView() tea.Cmd {
 	m.viewingID = ""
 	m.viewParentID = ""
 	m.viewTitle = ""
@@ -314,6 +315,7 @@ func (m *Model) closeSessionView() {
 	m.viewGen++
 	m.selectedCell = -1
 	m.selectedFileRef = -1
+	return m.broadcastAgentsState()
 }
 
 func (m *Model) childIsRunning(id string) bool {
