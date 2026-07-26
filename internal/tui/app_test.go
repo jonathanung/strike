@@ -1591,6 +1591,14 @@ func TestFocusAndPaletteClearCompletionBeforeChangingInputOwner(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			m, _ := newAppTestModel(nil, nil)
+			m.windows = windowRegistry{windows: []window{
+				statefulTestWindow{windowID: "a", windowTitle: "A"},
+				statefulTestWindow{windowID: "b", windowTitle: "B"},
+			}}
+			// ctrl+j cycles only when right-focused; left treats it as newline (#187).
+			if tt.name == "cycle next" {
+				m.focus = focusRight
+			}
 			m.completion = leadingSlashCompletion("/", 0, 1, m.commands)
 			m = updateApp(t, m, tt.key)
 			if m.completion != nil {
@@ -1606,6 +1614,7 @@ func TestCycleWindowKeysClearOpenCompletionAndCycleOnce(t *testing.T) {
 		name string
 		key  tea.KeyMsg
 	}{
+		// Right-focus ctrl+j cycles; left-focus ctrl+j is newline (#187).
 		{name: "ctrl+j", key: tea.KeyMsg{Type: tea.KeyCtrlJ}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1623,6 +1632,8 @@ func TestCycleWindowKeysClearOpenCompletionAndCycleOnce(t *testing.T) {
 			}
 			m.completion.Selected = 1
 			draft, cursor := m.composer.Value(), m.composer.LineInfo().ColumnOffset
+			// Stale left completion + right focus: cycle still clears completion.
+			m.focus = focusRight
 
 			updated, cmd := m.Update(tt.key)
 			m = updated.(Model)

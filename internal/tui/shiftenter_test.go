@@ -588,6 +588,9 @@ func TestEnableEnhancedKeys(t *testing.T) {
 	if !strings.Contains(written, string(enableKittyKeyboard)) {
 		t.Errorf("enable missing Kitty keyboard: %q", written)
 	}
+	if !strings.Contains(written, string(enableKittyKeyboardSet)) {
+		t.Errorf("enable missing Kitty set-mode: %q", written)
+	}
 
 	buf.Reset()
 	restore()

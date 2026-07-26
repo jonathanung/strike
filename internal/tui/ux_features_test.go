@@ -164,14 +164,27 @@ func TestVerticalFocusKeysSwapNotCycle(t *testing.T) {
 		t.Fatal("need vertical orientation")
 	}
 	startIdx := m.windows.index
-	// Empty composer: ctrl+j focuses top, ctrl+k focuses bottom (no kill to claim).
+	// Left-focus ctrl+j is newline (bare LF / shift+enter), not focus (#187).
+	m.composer.SetValue("v")
+	m.composer.SetCursor(1)
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	if got := m.composer.Value(); got != "v\n" {
+		t.Errorf("vertical left ctrl+j composer = %q, want v\\n", got)
+	}
 	if m.focus != focusLeft {
-		t.Errorf("vertical ctrl+j focus = %v, want left/top", m.focus)
+		t.Errorf("vertical left ctrl+j focus = %v, want left", m.focus)
 	}
 	if m.windows.index != startIdx {
-		t.Errorf("vertical ctrl+j cycled window index %d → %d", startIdx, m.windows.index)
+		t.Errorf("vertical left ctrl+j cycled window index %d → %d", startIdx, m.windows.index)
 	}
+	// From right pane, vertical ctrl+j focuses top/left; empty-EOL ctrl+k focuses bottom.
+	m.focus = focusRight
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	if m.focus != focusLeft {
+		t.Errorf("vertical right ctrl+j focus = %v, want left/top", m.focus)
+	}
+	// Empty composer so ctrl+k is focus-bottom, not kill-line.
+	m.composer.SetValue("")
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
 	if m.focus != focusRight {
 		t.Errorf("vertical ctrl+k focus = %v, want right/bottom", m.focus)
