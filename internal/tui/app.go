@@ -84,7 +84,7 @@ func (c *cellClipboard) take() string {
 	return osc
 }
 
-// clearCellCopiedFlashMsg ends the brief "copied" flash on a tool/explore cell.
+// clearCellCopiedFlashMsg ends the brief "copied" flash on a transcript cell.
 type clearCellCopiedFlashMsg struct {
 	idx int
 	gen int
@@ -565,12 +565,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cells := m.displayCells()
 		if msg.idx >= 0 && msg.idx < len(cells) {
-			switch c := cells[msg.idx].(type) {
-			case *toolCell:
-				c.copiedFlash = false
-			case *exploreCell:
-				c.copiedFlash = false
-			}
+			clearCellCopiedFlash(cells[msg.idx])
 			m.reflow()
 		}
 		return m, nil
@@ -2486,81 +2481,117 @@ func (m Model) transcriptContentOrigin() (x, y int, ok bool) {
 	return x, y, true
 }
 
-// copySelectedCell stages OSC52 for the selected (or latest copyable) tool/
-// explore cell and starts a brief "copied" flash. Returns false when nothing
-// was copyable so bare y can fall through to the composer.
+// copySelectedCell stages OSC52 for the selected (or latest copyable)
+// transcript cell and starts a brief "copied" flash. Returns false when
+// nothing was copyable so bare y can fall through to the composer.
 func (m *Model) copySelectedCell() (bool, tea.Cmd) {
 	cells := m.displayCells()
 	idx := m.resolveCopyCellIndex()
 	if idx < 0 {
 		return false, nil
 	}
-	var text string
-	switch c := cells[idx].(type) {
-	case *toolCell:
-		text = c.copyText()
-	case *exploreCell:
-		text = c.copyText()
-	}
+	text := cellCopyText(cells[idx])
 	if text == "" {
 		return false, nil
 	}
-	m.selectedCell = idx
+	// Only collapsible/reviewable tool rows keep a sticky selection; chat
+	// cells are copy targets without changing tool-nav selection.
+	switch cells[idx].(type) {
+	case *toolCell, *exploreCell:
+		m.selectedCell = idx
+	}
 	m.cellClip.stage(text)
 	m.copyFlashGen++
 	gen := m.copyFlashGen
-	switch c := cells[idx].(type) {
-	case *toolCell:
-		c.copiedFlash = true
-	case *exploreCell:
-		c.copiedFlash = true
-	}
+	setCellCopiedFlash(cells[idx], true)
 	// Clear any other cell flashes so only the copied row shows feedback.
 	for i, c := range cells {
 		if i == idx {
 			continue
 		}
-		switch tc := c.(type) {
-		case *toolCell:
-			tc.copiedFlash = false
-		case *exploreCell:
-			tc.copiedFlash = false
-		}
+		clearCellCopiedFlash(c)
 	}
 	return true, tea.Tick(cellCopiedFlash, func(time.Time) tea.Msg {
 		return clearCellCopiedFlashMsg{idx: idx, gen: gen}
 	})
 }
 
-// resolveCopyCellIndex prefers the current selection when it has copyable
-// content; otherwise the latest tool/explore cell with a non-empty payload.
+// cellCopyText returns the y-to-copy payload for a transcript cell, or empty.
+func cellCopyText(c cell) string {
+	switch tc := c.(type) {
+	case *toolCell:
+		return tc.copyText()
+	case *exploreCell:
+		return tc.copyText()
+	case *assistantCell:
+		return tc.copyText()
+	case *userCell:
+		return tc.copyText()
+	default:
+		return ""
+	}
+}
+
+func setCellCopiedFlash(c cell, on bool) {
+	switch tc := c.(type) {
+	case *toolCell:
+		tc.copiedFlash = on
+	case *exploreCell:
+		tc.copiedFlash = on
+	case *assistantCell:
+		tc.copiedFlash = on
+	case *userCell:
+		tc.copiedFlash = on
+	}
+}
+
+func clearCellCopiedFlash(c cell) {
+	setCellCopiedFlash(c, false)
+}
+
+// resolveCopyCellIndex prefers the current tool/explore selection when it has
+// copyable content; otherwise the latest tool/explore, then assistant, then
+// user cell with a non-empty payload.
 func (m *Model) resolveCopyCellIndex() int {
 	cells := m.displayCells()
 	if m.selectedCell >= 0 && m.selectedCell < len(cells) {
-		switch c := cells[m.selectedCell].(type) {
-		case *toolCell:
-			if c.copyText() != "" {
-				return m.selectedCell
-			}
-		case *exploreCell:
-			if c.copyText() != "" {
+		if cellCopyText(cells[m.selectedCell]) != "" {
+			switch cells[m.selectedCell].(type) {
+			case *toolCell, *exploreCell:
 				return m.selectedCell
 			}
 		}
 	}
+	latestTool, latestAsst, latestUser := -1, -1, -1
 	for i := len(cells) - 1; i >= 0; i-- {
-		switch c := cells[i].(type) {
-		case *toolCell:
-			if c.copyText() != "" {
-				return i
+		if cellCopyText(cells[i]) == "" {
+			continue
+		}
+		switch cells[i].(type) {
+		case *toolCell, *exploreCell:
+			if latestTool < 0 {
+				latestTool = i
 			}
-		case *exploreCell:
-			if c.copyText() != "" {
-				return i
+		case *assistantCell:
+			if latestAsst < 0 {
+				latestAsst = i
+			}
+		case *userCell:
+			if latestUser < 0 {
+				latestUser = i
 			}
 		}
+		if latestTool >= 0 && latestAsst >= 0 && latestUser >= 0 {
+			break
+		}
 	}
-	return -1
+	if latestTool >= 0 {
+		return latestTool
+	}
+	if latestAsst >= 0 {
+		return latestAsst
+	}
+	return latestUser
 }
 
 func (m Model) View() string {

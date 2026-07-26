@@ -647,6 +647,11 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 					themeID = entry.ID
 				}
 			}
+			// No WithMouseCellMotion: mouse tracking steals drag events and
+			// blocks native terminal text selection/copy in the chat pane.
+			// Wheel/click handlers remain in the TUI for tests and any future
+			// opt-in mouse mode; keyboard scroll and y-to-copy cover navigation
+			// and clipboard. Shift+drag still selects if mouse is re-enabled.
 			program := tea.NewProgram(tui.New(a.eng.Ops(), live, a.services, tui.Options{
 				DangerouslySkipPermissions: opts.dangerouslySkipPermissions,
 				Theme:                      themePtr,
@@ -656,7 +661,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 				FirstRun:                   a.firstRun,
 				VimMode:                    vimMode,
 				Replay:                     a.replay,
-			}), tea.WithAltScreen(), tea.WithOutput(stdout), tea.WithInput(tui.WrapInput(os.Stdin)), tea.WithReportFocus(), tea.WithMouseCellMotion())
+			}), tea.WithAltScreen(), tea.WithOutput(stdout), tea.WithInput(tui.WrapInput(os.Stdin)), tea.WithReportFocus())
 			final, runProgErr := program.Run()
 			if m, ok := final.(tui.Model); ok {
 				pendingResume = m.PendingResume()

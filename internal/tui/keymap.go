@@ -91,8 +91,9 @@ func defaultKeyMap() keyMap {
 		ToolPrev:   key.NewBinding(key.WithKeys("alt+["), key.WithHelp("alt+[", "prev tool cell")),
 		ToolNext:   key.NewBinding(key.WithKeys("alt+]"), key.WithHelp("alt+]", "next tool cell")),
 		ToolExpand: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "expand tool / open file:line")),
-		// ToolCopy: bare y when composer is empty (yank selected/latest cell).
-		ToolCopy:   key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy tool cell")),
+		// ToolCopy: bare y when composer is empty (yank selected/latest cell,
+		// including assistant/user chat text via OSC52).
+		ToolCopy:   key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy cell")),
 		ToolReview: key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "review edit in editor")),
 
 		KillWord:      key.NewBinding(key.WithKeys("ctrl+w"), key.WithHelp("ctrl+w", "kill word backward")),

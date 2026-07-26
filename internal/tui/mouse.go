@@ -23,6 +23,10 @@ type openURIMsg struct {
 // handleMouse routes wheel scrolling and left-click hit testing for the
 // transcript: path:line refs and OSC 8 links open first; otherwise collapsible
 // tool/explore cells toggle under the click.
+//
+// The program does not enable mouse cell motion by default so the terminal can
+// perform native text selection/copy in the chat pane. These handlers still run
+// when MouseMsg arrives (tests, or if mouse tracking is enabled externally).
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if msg.Action != tea.MouseActionPress {
 		return m, nil

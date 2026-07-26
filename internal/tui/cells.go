@@ -23,6 +23,15 @@ type cell interface {
 
 type userCell struct {
 	text string
+	// copiedFlash is set after y-to-copy until clearCellCopiedFlashMsg.
+	copiedFlash bool
+}
+
+func (c *userCell) copyText() string {
+	if c == nil {
+		return ""
+	}
+	return strings.TrimRight(c.text, "\n")
 }
 
 func (c *userCell) render(width int, th theme.Theme) string {
@@ -32,6 +41,9 @@ func (c *userCell) render(width int, th theme.Theme) string {
 	space := themedSpace(th.Spacing.XS)
 	indentation := themedSpace(th.Spacing.SM)
 	label := st.UserLabel.Render(ic.Prompt + space + "you")
+	if c.copiedFlash {
+		label += space + st.Success.Render("copied")
+	}
 	body := renderCellText(st.Text, c.text, max(1, width-lipgloss.Width(indentation)))
 	return label + "\n" + indent(body, indentation)
 }
@@ -44,6 +56,15 @@ type assistantCell struct {
 	mdCacheKey string
 	mdCacheW   int
 	mdCacheOK  bool
+	// copiedFlash is set after y-to-copy until clearCellCopiedFlashMsg.
+	copiedFlash bool
+}
+
+func (c *assistantCell) copyText() string {
+	if c == nil {
+		return ""
+	}
+	return strings.TrimRight(c.text, "\n")
 }
 
 func (c *assistantCell) render(width int, th theme.Theme) string {
@@ -53,6 +74,9 @@ func (c *assistantCell) render(width int, th theme.Theme) string {
 	space := themedSpace(th.Spacing.XS)
 	indentation := themedSpace(th.Spacing.SM)
 	label := st.AssistantLabel.Render(ic.Assistant + space + "strike")
+	if c.copiedFlash {
+		label += space + st.Success.Render("copied")
+	}
 	bodyWidth := max(1, width-lipgloss.Width(indentation))
 	src := strings.TrimSpace(c.text)
 	var body string
