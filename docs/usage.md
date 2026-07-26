@@ -48,8 +48,17 @@ strike launches without any provider configured. Pick one inside the TUI:
 /vim [path[:line]]             # open file in embedded editor (pane/overlay)
                                # or $EDITOR (see vimMode in config.md)
 /md-read <path>                # open a markdown file in the right markdown pane
-/memory [list|get|set|rm] …    # project-scoped durable key/value memory
-/issues [list|add|get|close] … # project-scoped issue tracker
+/memory [list|get|set|rm|export|import] …
+                               # project-scoped durable key/value memory;
+                               # export/import portable JSON (default path
+                               # strike-memory.json). import merges by key;
+                               # add --replace to wipe first
+/issues [list|add|get|close|export|import] …
+                               # project-scoped issue tracker; export/import
+                               # portable JSON (default strike-issues.json).
+                               # import merges by id; --replace wipes first.
+                               # Relative export/import paths stay under the
+                               # project root (no path escape).
 /context                       # inspect effective system-prompt layers
 /effective-prompt              # alias of /context
 /keys                          # filterable keybind cheatsheet (also f1)
@@ -65,8 +74,8 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/fork` | copy the current session JSONL into a new id (idle only) |
 | `/undo` / `/rewind` | drop the last completed turn (idle only) |
 | `/compact` | ask the engine to compact model history |
-| `/memory` | bare = list browser; `list [tag]`, `get <key>`, `set <key> <value>`, `rm <key>` |
-| `/issues` | bare = list browser; `list [open\|closed]`, `add <title>`, `get <id>`, `close <id>` |
+| `/memory` | bare = list browser; `list [tag]`, `get <key>`, `set <key> <value>`, `rm <key>`, `export [path]`, `import <path> [--replace]` (portable JSON; relative paths stay under project root) |
+| `/issues` | bare = list browser; `list [open\|closed]`, `add <title>`, `get <id>`, `close <id>`, `export [path]`, `import <path> [--replace]` (same portable rules as memory) |
 | `/context` | dump effective system-prompt layers into the transcript |
 
 ### Autonomy & workflows
