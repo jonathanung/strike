@@ -49,6 +49,7 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		{ID: "command:issues", Label: "/issues", Description: "list, add, get, close, export, or import project issues", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/issues"}},
 		{ID: "command:context", Label: "/context", Description: "inspect effective system-prompt layers", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/context"}},
 		{ID: "command:effective-prompt", Label: "/effective-prompt", Description: "inspect effective system-prompt layers", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/effective-prompt"}},
+		{ID: "command:upgrade", Label: "/upgrade", Description: "install the latest release and restart", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/upgrade"}},
 		{ID: "skill:review", Label: "/review", Description: "review a change", Action: paletteAction{Kind: paletteActionSkill, Value: "review"}},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -72,7 +73,7 @@ func TestPaletteAvailabilityAndDisabledSelection(t *testing.T) {
 	})
 
 	t.Run("during running turn", func(t *testing.T) {
-		for _, command := range []string{"/provider", "/model", "/agent build", "/auth", "/session", "/theme", "/memory", "/issues", "/compact", "/fast", "/layout", "/review"} {
+		for _, command := range []string{"/provider", "/model", "/agent build", "/auth", "/session", "/theme", "/memory", "/issues", "/compact", "/fast", "/layout", "/upgrade", "/review"} {
 			m := newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
 			assertPaletteDisabled(t, m, command, "unavailable while a turn is running")
 		}
