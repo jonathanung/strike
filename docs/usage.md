@@ -127,12 +127,23 @@ Built-in skills also appear as slash commands: `/commit`, `/push`, `/pr`,
 `/ship` (and any custom skills under `~/.strike/skills` or `./.strike/skills`).
 See [agents-skills.md](agents-skills.md).
 
-### Composer: `@file` mentions
+### Composer: `@file` / `@folder` mentions
 
 Type `@` then a path fragment for fuzzy project-file completion (needs
-`host.Files`). On send, `@path` tokens expand to file contents for the model;
-the transcript/history keep the `@path` tokens. Emails (`user@host`) are not
-treated as mentions.
+`host.Files`). Matching uses basename and full relative path. Directories
+appear as `@path/`. An exact typed path is always offered when it exists under
+the project root, even if it was outside the fuzzy top results.
+
+**Index:** prefers `git ls-files` (honors `.gitignore`); otherwise walks the
+project root. Default skips include `.plan`, `node_modules`, `.git`, `vendor`,
+build outputs, and similar noise. Add more basename skips (one per line) in
+`.strike/file-index-skip`.
+
+**Expand on send:** `@file` attaches file contents (capped; binary/oversize
+skipped with a notice). `@folder/` attaches an **immediate child listing
+only** (not a recursive multi-file dump). Transcript/history keep the `@path`
+tokens. Emails (`user@host`) are not treated as mentions. Paths cannot escape
+the project root (symlink-safe).
 
 Submitting a prompt before selecting shows "No model selected" in the
 notice line above the composer (your prompt stays in the input). Talking to

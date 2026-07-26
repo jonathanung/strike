@@ -122,10 +122,17 @@ func (m *Model) atFileCompletionAt(value string, line, col int) *completionState
 		return nil
 	}
 	paths, err := m.services.Files.SearchFiles(query, 30)
-	if err != nil || len(paths) == 0 {
-		return nil
+	emptyHint := ""
+	switch {
+	case err != nil:
+		emptyHint = "file search unavailable"
+		paths = nil
+	case len(paths) == 0 && query == "":
+		emptyHint = "no project files indexed (empty workdir or all ignored)"
+	case len(paths) == 0:
+		emptyHint = "no files match — try a fuller path; .plan/node_modules/… are hidden unless queried"
 	}
-	return atFileCompletion(value, line, col, paths)
+	return atFileCompletion(value, line, col, paths, emptyHint)
 }
 
 func activeAtQueryParts(value string, row, col int) (string, bool) {

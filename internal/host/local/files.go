@@ -1,11 +1,14 @@
 package local
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -17,17 +20,28 @@ import (
 )
 
 const (
-	maxFileBytes      = 1 << 20 // 1 MiB
-	maxListEntries    = 2000
-	maxSearchIndex    = 8000
-	maxSearchResults  = 50
-	searchCacheTTL    = 2 * time.Second
-	scopedTruncateCap = 1 << 20 // same as max; notice when truncated at cap
+	maxFileBytes         = 1 << 20 // 1 MiB
+	maxListEntries       = 2000
+	maxSearchIndex       = 8000
+	maxSearchResults     = 50
+	maxDirListingEntries = 200
+	searchCacheTTL       = 2 * time.Second
+	scopedTruncateCap    = 1 << 20 // same as max; notice when truncated at cap
+	gitLsTimeout         = 3 * time.Second
 )
+
+// defaultSkipDirNames are never walked/indexed for @file completion unless the
+// query explicitly targets them (exact-path resolve still works via ReadScoped).
+var defaultSkipDirNames = []string{
+	".git", "node_modules", ".strike", "vendor", ".hg", ".svn", ".jj",
+	".plan", "dist", "build", "target", ".next", ".cache", "__pycache__",
+	".venv", "venv", "coverage", "out", ".idea", ".vscode",
+}
 
 // filesService reads workspace files for host.Files frontends.
 type filesService struct {
-	workDir string
+	workDir  string
+	skipDirs map[string]struct{} // basename → skip during index walk
 
 	mu        sync.Mutex
 	cache     []string
@@ -38,13 +52,20 @@ type filesService struct {
 // NewFiles returns a host.Files that resolves paths relative to workDir
 // (absolute paths are cleaned as-is for ReadFile/ListDir). SearchFiles and
 // ReadScoped reject paths that escape workDir via ".." or symlinks.
+//
+// Indexing prefers `git ls-files` (honors .gitignore) and falls back to a
+// walk that skips heavy/noise directories. Extra skip basenames may be listed
+// one-per-line in `.strike/file-index-skip` under the work directory.
 func NewFiles(workDir string) host.Files {
-	return &filesService{workDir: workDir}
+	return &filesService{
+		workDir:  workDir,
+		skipDirs: loadSkipDirs(workDir),
+	}
 }
 
-// SetWorkDir updates the workspace root used for relative paths. Used when the
-// active multi-root session switches to another worktree. Safe for concurrent
-// use with readers.
+// SetFilesWorkDir updates the workspace root used for relative paths. Used when
+// the active multi-root session switches to another worktree. Safe for
+// concurrent use with readers.
 func SetFilesWorkDir(f host.Files, workDir string) {
 	fs, ok := f.(*filesService)
 	if !ok || fs == nil {
@@ -53,6 +74,7 @@ func SetFilesWorkDir(f host.Files, workDir string) {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 	fs.workDir = workDir
+	fs.skipDirs = loadSkipDirs(workDir)
 	fs.cache = nil
 	fs.cacheAt = time.Time{}
 	fs.cacheRoot = ""
@@ -62,6 +84,15 @@ func (f *filesService) workRoot() string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.workDir
+}
+
+func (f *filesService) skipSet() map[string]struct{} {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.skipDirs == nil {
+		return defaultSkipSet()
+	}
+	return f.skipDirs
 }
 
 func (f *filesService) ReadFile(path string) ([]byte, error) {
@@ -165,37 +196,58 @@ func (f *filesService) SearchFiles(query string, limit int) ([]string, error) {
 	}
 	query = strings.ToLower(strings.TrimSpace(query))
 	query = strings.ReplaceAll(query, "\\", "/")
+	query = strings.TrimPrefix(query, "./")
 	if query == "" {
-		if len(index) > limit {
-			return append([]string(nil), index[:limit]...), nil
-		}
-		return append([]string(nil), index...), nil
+		out := stableIndexPrefix(index, limit)
+		return out, nil
 	}
-	buckets := [3][]string{}
+	wantNoise := queryTargetsNoise(query)
+	type hit struct {
+		path string
+		rank int
+	}
+	var hits []hit
 	for _, p := range index {
-		lower := strings.ToLower(p)
-		base := strings.ToLower(filepath.Base(p))
-		rank := -1
-		switch {
-		case lower == query || base == query:
-			rank = 0
-		case strings.HasPrefix(lower, query) || strings.HasPrefix(base, query):
-			rank = 1
-		case orderedSubsequence(lower, query) || orderedSubsequence(base, query):
-			rank = 2
+		if !wantNoise && pathHasSkippedComponent(p, f.skipSet()) {
+			// Index should already exclude these; belt-and-suspenders.
+			continue
 		}
-		if rank >= 0 {
-			buckets[rank] = append(buckets[rank], p)
+		rank := matchRank(p, query)
+		if rank < 0 {
+			continue
+		}
+		// Demote noise paths unless the query explicitly targets them.
+		if !wantNoise && isNoisePath(p) {
+			rank += 10
+		}
+		hits = append(hits, hit{path: p, rank: rank})
+	}
+	sort.SliceStable(hits, func(i, j int) bool {
+		if hits[i].rank != hits[j].rank {
+			return hits[i].rank < hits[j].rank
+		}
+		// Prefer shorter / shallower paths within a rank.
+		si, sj := pathScore(hits[i].path), pathScore(hits[j].path)
+		if si != sj {
+			return si < sj
+		}
+		return hits[i].path < hits[j].path
+	})
+	out := make([]string, 0, limit)
+	seen := make(map[string]struct{}, limit)
+	for _, h := range hits {
+		if _, ok := seen[h.path]; ok {
+			continue
+		}
+		seen[h.path] = struct{}{}
+		out = append(out, h.path)
+		if len(out) >= limit {
+			break
 		}
 	}
-	out := make([]string, 0, limit)
-	for _, b := range buckets {
-		for _, p := range b {
-			out = append(out, p)
-			if len(out) >= limit {
-				return out, nil
-			}
-		}
+	// Exact typed path must attach even when absent from fuzzy top-k / index.
+	if exact, ok := f.exactPathHit(query); ok {
+		out = prependUnique(out, exact, limit)
 	}
 	return out, nil
 }
@@ -207,7 +259,12 @@ func (f *filesService) ReadScoped(path string) (host.FileContent, error) {
 	if display == "" {
 		return host.FileContent{Path: path, Skip: true, Notice: "empty path"}, nil
 	}
-	resolved, rel, err := resolveUnderRoot(f.workRoot(), display)
+	// Allow trailing slash for folder mentions.
+	trimmed := strings.TrimSuffix(display, "/")
+	if trimmed == "" {
+		return host.FileContent{Path: display, Skip: true, Notice: "empty path"}, nil
+	}
+	resolved, rel, err := resolveUnderRoot(f.workRoot(), trimmed)
 	if err != nil {
 		return host.FileContent{Path: display, Skip: true, Notice: err.Error()}, nil
 	}
@@ -218,10 +275,11 @@ func (f *filesService) ReadScoped(path string) (host.FileContent, error) {
 		}
 		return host.FileContent{Path: rel, Skip: true, Notice: err.Error()}, nil
 	}
-	// Reject symlink final targets that somehow slipped; resolveUnderRoot already
-	// EvalSymlinks, so Lstat should be a regular file.
 	if info.Mode()&os.ModeSymlink != 0 {
 		return host.FileContent{Path: rel, Skip: true, Notice: "symlink not allowed"}, nil
+	}
+	if info.IsDir() {
+		return f.readScopedDir(resolved, rel)
 	}
 	if !info.Mode().IsRegular() {
 		return host.FileContent{Path: rel, Skip: true, Notice: "not a regular file"}, nil
@@ -261,6 +319,60 @@ func (f *filesService) ReadScoped(path string) (host.FileContent, error) {
 	return fc, nil
 }
 
+// readScopedDir expands a folder mention to an immediate child listing only
+// (not recursive multi-file contents). Caps entry count for safety.
+func (f *filesService) readScopedDir(resolved, rel string) (host.FileContent, error) {
+	display := rel
+	if display != "" && !strings.HasSuffix(display, "/") {
+		display += "/"
+	}
+	entries, err := os.ReadDir(resolved)
+	if err != nil {
+		return host.FileContent{Path: display, Skip: true, Notice: err.Error()}, nil
+	}
+	type row struct {
+		name  string
+		isDir bool
+	}
+	rows := make([]row, 0, len(entries))
+	for _, e := range entries {
+		name := e.Name()
+		if name == "." || name == ".." {
+			continue
+		}
+		rows = append(rows, row{name: name, isDir: e.IsDir()})
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].isDir != rows[j].isDir {
+			return rows[i].isDir
+		}
+		return strings.ToLower(rows[i].name) < strings.ToLower(rows[j].name)
+	})
+	var b strings.Builder
+	b.WriteString("directory listing (immediate children only):\n")
+	n := 0
+	for _, r := range rows {
+		if n >= maxDirListingEntries {
+			fmt.Fprintf(&b, "… truncated after %d entries\n", maxDirListingEntries)
+			break
+		}
+		if r.isDir {
+			fmt.Fprintf(&b, "%s/\n", r.name)
+		} else {
+			fmt.Fprintf(&b, "%s\n", r.name)
+		}
+		n++
+	}
+	if n == 0 {
+		b.WriteString("(empty)\n")
+	}
+	fc := host.FileContent{Path: display, Content: b.String()}
+	if len(rows) > maxDirListingEntries {
+		fc.Notice = fmt.Sprintf("listing truncated to %d entries", maxDirListingEntries)
+	}
+	return fc, nil
+}
+
 func (f *filesService) fileIndex() ([]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -272,8 +384,144 @@ func (f *filesService) fileIndex() ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve work directory: %w", err)
 	}
+	skip := f.skipDirs
+	if skip == nil {
+		skip = defaultSkipSet()
+	}
 	var out []string
-	err = filepath.WalkDir(rootReal, func(path string, d fs.DirEntry, walkErr error) error {
+	if gitOut, ok := gitLsFilesIndex(rootReal, skip); ok {
+		out = gitOut
+	} else {
+		var walkErr error
+		out, walkErr = walkFileIndex(rootReal, skip)
+		if walkErr != nil {
+			return nil, walkErr
+		}
+	}
+	sort.Strings(out)
+	f.cache = out
+	f.cacheAt = time.Now()
+	f.cacheRoot = root
+	return out, nil
+}
+
+// exactPathHit returns a project-relative path when query names an existing
+// file or directory under the work root (symlink-safe).
+func (f *filesService) exactPathHit(query string) (string, bool) {
+	q := strings.TrimSpace(query)
+	q = strings.ReplaceAll(q, "\\", "/")
+	q = strings.TrimPrefix(q, "./")
+	if q == "" || q == "." || q == ".." || strings.HasPrefix(q, "../") {
+		return "", false
+	}
+	wantDir := strings.HasSuffix(q, "/")
+	trimmed := strings.TrimSuffix(q, "/")
+	if trimmed == "" {
+		return "", false
+	}
+	resolved, rel, err := resolveUnderRoot(f.workRoot(), trimmed)
+	if err != nil {
+		return "", false
+	}
+	info, err := os.Lstat(resolved)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 {
+		return "", false
+	}
+	if info.IsDir() {
+		if !strings.HasSuffix(rel, "/") {
+			rel += "/"
+		}
+		return rel, true
+	}
+	if wantDir {
+		// Queried as dir but is a file.
+		return "", false
+	}
+	if info.Mode().IsRegular() {
+		return rel, true
+	}
+	return "", false
+}
+
+func gitLsFilesIndex(rootReal string, skip map[string]struct{}) ([]string, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), gitLsTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "-C", rootReal, "ls-files", "-z",
+		"--cached", "--others", "--exclude-standard")
+	// Avoid inheriting noisy git UI.
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0")
+	raw, err := cmd.Output()
+	if err != nil {
+		return nil, false
+	}
+	parts := bytes.Split(raw, []byte{0})
+	seen := make(map[string]struct{}, len(parts))
+	var out []string
+	add := func(p string) {
+		if p == "" {
+			return
+		}
+		if _, ok := seen[p]; ok {
+			return
+		}
+		if len(out) >= maxSearchIndex {
+			return
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	for _, part := range parts {
+		if len(part) == 0 {
+			continue
+		}
+		rel := filepath.ToSlash(string(part))
+		if rel == "." || strings.HasPrefix(rel, "../") {
+			continue
+		}
+		if pathHasSkippedComponent(rel, skip) {
+			continue
+		}
+		// Only regular files that still exist and are not symlink escapes.
+		abs := filepath.Join(rootReal, filepath.FromSlash(rel))
+		info, err := os.Lstat(abs)
+		if err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		// Ensure path stays under root (reject weird git paths).
+		if _, err := filepath.Rel(rootReal, abs); err != nil {
+			continue
+		}
+		add(rel)
+		// Parent directories as @path/ candidates.
+		dir := pathDirSlash(rel)
+		for dir != "" && dir != "." {
+			if pathHasSkippedComponent(dir, skip) {
+				break
+			}
+			add(dir + "/")
+			parent := pathDirSlash(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+		if len(out) >= maxSearchIndex {
+			break
+		}
+	}
+	if len(out) == 0 {
+		// Empty git repo / no files — still a successful git probe; walk may
+		// find nothing either, but prefer walk when git returned empty so
+		// untracked-only trees still index? git ls-files --others includes
+		// untracked, so empty really means empty. OK.
+		return out, true
+	}
+	return out, true
+}
+
+func walkFileIndex(rootReal string, skip map[string]struct{}) ([]string, error) {
+	var out []string
+	err := filepath.WalkDir(rootReal, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			// Skip unreadable entries; keep indexing the rest.
 			if d != nil && d.IsDir() {
@@ -283,53 +531,204 @@ func (f *filesService) fileIndex() ([]string, error) {
 		}
 		name := d.Name()
 		if d.IsDir() {
-			if path != rootReal && shouldSkipDir(name) {
-				return fs.SkipDir
-			}
-			// Do not descend through directory symlinks (escape risk).
 			if path != rootReal {
+				if shouldSkipDirName(name, skip) {
+					return fs.SkipDir
+				}
+				// Do not descend through directory symlinks (escape risk).
 				if info, err := d.Info(); err == nil && info.Mode()&os.ModeSymlink != 0 {
 					return fs.SkipDir
+				}
+				rel, err := filepath.Rel(rootReal, path)
+				if err == nil && isRelInside(rel) {
+					out = append(out, filepath.ToSlash(rel)+"/")
+					if len(out) >= maxSearchIndex {
+						return fs.SkipAll
+					}
 				}
 			}
 			return nil
 		}
 		if !d.Type().IsRegular() {
-			// Skip symlink files in the index; ReadScoped would also reject
-			// escapes, but listing only real files keeps the picker honest.
-			if d.Type()&os.ModeSymlink != 0 {
-				return nil
-			}
 			return nil
 		}
 		rel, err := filepath.Rel(rootReal, path)
 		if err != nil || !isRelInside(rel) {
 			return nil
 		}
-		out = append(out, filepath.ToSlash(rel))
+		slash := filepath.ToSlash(rel)
+		if pathHasSkippedComponent(slash, skip) {
+			return nil
+		}
+		out = append(out, slash)
 		if len(out) >= maxSearchIndex {
 			return fs.SkipAll
 		}
 		return nil
 	})
-	if err != nil {
-		return nil, err
-	}
-	sort.Strings(out)
-	f.cache = out
-	f.cacheAt = time.Now()
-	f.cacheRoot = root
-	return out, nil
+	return out, err
 }
 
-func shouldSkipDir(name string) bool {
-	switch name {
-	case ".git", "node_modules", ".strike", "vendor", ".hg", ".svn",
-		"dist", "build", "target", ".next", ".cache", "__pycache__":
-		return true
+func matchRank(path, query string) int {
+	lower := strings.ToLower(path)
+	base := strings.ToLower(filepath.Base(strings.TrimSuffix(path, "/")))
+	q := strings.TrimSuffix(query, "/")
+	lowerTrim := strings.TrimSuffix(lower, "/")
+	switch {
+	case lower == query || lowerTrim == q || base == q:
+		return 0
+	case strings.HasPrefix(lower, query) || strings.HasPrefix(lowerTrim, q) || strings.HasPrefix(base, q):
+		return 1
+	case strings.Contains(lower, q) || strings.Contains(base, q):
+		return 2
+	case orderedSubsequence(lower, query) || orderedSubsequence(base, q):
+		return 3
 	default:
+		return -1
+	}
+}
+
+func pathScore(p string) int {
+	// Lower is better: prefer shallow short paths.
+	n := strings.Count(p, "/")
+	return n*1000 + len(p)
+}
+
+func stableIndexPrefix(index []string, limit int) []string {
+	// Prefer non-noise, then shallow paths, then alpha (index already sorted).
+	type item struct {
+		p     string
+		noise bool
+		score int
+	}
+	items := make([]item, 0, len(index))
+	for _, p := range index {
+		items = append(items, item{p: p, noise: isNoisePath(p), score: pathScore(p)})
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].noise != items[j].noise {
+			return !items[i].noise
+		}
+		if items[i].score != items[j].score {
+			return items[i].score < items[j].score
+		}
+		return items[i].p < items[j].p
+	})
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	out := make([]string, len(items))
+	for i := range items {
+		out[i] = items[i].p
+	}
+	return out
+}
+
+func prependUnique(out []string, exact string, limit int) []string {
+	for i, p := range out {
+		if p == exact || strings.TrimSuffix(p, "/") == strings.TrimSuffix(exact, "/") {
+			if i == 0 {
+				out[0] = exact
+				return out
+			}
+			// Move to front.
+			copy(out[1:i+1], out[0:i])
+			out[0] = exact
+			return out
+		}
+	}
+	if len(out) >= limit {
+		out = out[:limit-1]
+	}
+	return append([]string{exact}, out...)
+}
+
+func queryTargetsNoise(query string) bool {
+	q := strings.ToLower(query)
+	// Explicit path into a noise tree, or basename that is the noise dir.
+	for _, name := range defaultSkipDirNames {
+		n := strings.ToLower(name)
+		if q == n || q == n+"/" || strings.HasPrefix(q, n+"/") || strings.Contains(q, "/"+n+"/") || strings.HasSuffix(q, "/"+n) {
+			return true
+		}
+	}
+	return false
+}
+
+func isNoisePath(p string) bool {
+	return pathHasSkippedComponent(p, defaultSkipSet())
+}
+
+func pathHasSkippedComponent(p string, skip map[string]struct{}) bool {
+	p = strings.TrimSuffix(p, "/")
+	if p == "" {
 		return false
 	}
+	for _, part := range strings.Split(p, "/") {
+		if part == "" || part == "." {
+			continue
+		}
+		if shouldSkipDirName(part, skip) {
+			return true
+		}
+	}
+	return false
+}
+
+func shouldSkipDirName(name string, skip map[string]struct{}) bool {
+	if name == "" {
+		return false
+	}
+	if skip != nil {
+		if _, ok := skip[name]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func defaultSkipSet() map[string]struct{} {
+	m := make(map[string]struct{}, len(defaultSkipDirNames))
+	for _, n := range defaultSkipDirNames {
+		m[n] = struct{}{}
+	}
+	return m
+}
+
+func loadSkipDirs(workDir string) map[string]struct{} {
+	m := defaultSkipSet()
+	if workDir == "" {
+		return m
+	}
+	// Optional project overrides: one directory basename per line.
+	path := filepath.Join(workDir, ".strike", "file-index-skip")
+	file, err := os.Open(path)
+	if err != nil {
+		return m
+	}
+	defer file.Close()
+	sc := bufio.NewScanner(file)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = strings.TrimSuffix(line, "/")
+		if line == "" || strings.ContainsAny(line, `/\`) {
+			continue
+		}
+		m[line] = struct{}{}
+	}
+	return m
+}
+
+func pathDirSlash(p string) string {
+	p = strings.TrimSuffix(p, "/")
+	i := strings.LastIndexByte(p, '/')
+	if i <= 0 {
+		return ""
+	}
+	return p[:i]
 }
 
 // resolveUnderRoot joins path under root and requires the final EvalSymlinks

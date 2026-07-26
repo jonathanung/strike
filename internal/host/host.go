@@ -170,16 +170,19 @@ type Files interface {
 	// non-directories return errors. Results are sorted directories-first,
 	// then by name (case-insensitive).
 	ListDir(path string) ([]DirEntry, error)
-	// SearchFiles returns workspace-relative regular file paths under the work
-	// directory matching query (case-insensitive prefix, then ordered
-	// subsequence). Empty query returns a stable prefix of the index. Results
-	// never escape the work root via ".." or directory symlinks. limit caps
-	// the result count (implementations enforce a maximum).
+	// SearchFiles returns workspace-relative paths under the work directory
+	// matching query (basename + full path; exact, prefix, contains, then
+	// ordered subsequence). Directories end with a trailing "/". Empty query
+	// returns a stable non-noise prefix of the index. An exact existing path
+	// is always included even when outside the fuzzy top-k. Results never
+	// escape the work root via ".." or directory symlinks. limit caps the
+	// result count (implementations enforce a maximum).
 	SearchFiles(query string, limit int) ([]string, error)
 	// ReadScoped reads path only when the final resolved path (after cleaning
 	// and symlink evaluation) stays under the work directory. Binary files and
 	// oversize content are skipped or truncated with Notice set; missing paths
-	// and escapes set Skip.
+	// and escapes set Skip. Directories expand to an immediate-child listing
+	// only (not recursive file contents); Path is returned with a trailing "/".
 	ReadScoped(path string) (FileContent, error)
 }
 

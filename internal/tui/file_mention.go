@@ -101,11 +101,15 @@ func expandFileMentions(text string, files host.Files) (expanded string, notices
 		if fc.Notice != "" {
 			notices = append(notices, fmt.Sprintf("@%s: %s", displayPath, fc.Notice))
 		}
-		fmt.Fprintf(&blocks, "\n\n--- file: %s ---\n%s", displayPath, fc.Content)
+		kind := "file"
+		if strings.HasSuffix(displayPath, "/") {
+			kind = "folder"
+		}
+		fmt.Fprintf(&blocks, "\n\n--- %s: %s ---\n%s", kind, displayPath, fc.Content)
 		if !strings.HasSuffix(fc.Content, "\n") {
 			blocks.WriteByte('\n')
 		}
-		fmt.Fprintf(&blocks, "--- end file: %s ---", displayPath)
+		fmt.Fprintf(&blocks, "--- end %s: %s ---", kind, displayPath)
 	}
 	if blocks.Len() == 0 {
 		return text, notices

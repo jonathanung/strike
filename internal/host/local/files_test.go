@@ -1,6 +1,7 @@
 package local
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -222,6 +223,7 @@ func TestSearchFilesRanksAndSkipsHeavyDirs(t *testing.T) {
 	write("internal/tui/completion.go", "c")
 	write("node_modules/pkg/index.js", "skip")
 	write(".git/config", "skip")
+	write(".plan/features.md", "noise")
 
 	files := NewFiles(work)
 	got, err := files.SearchFiles("app", 10)
@@ -232,7 +234,7 @@ func TestSearchFilesRanksAndSkipsHeavyDirs(t *testing.T) {
 		t.Fatalf("SearchFiles(app) = %v, want internal/tui/app.go first", got)
 	}
 	for _, p := range got {
-		if strings.Contains(p, "node_modules") || strings.HasPrefix(p, ".git/") {
+		if strings.Contains(p, "node_modules") || strings.HasPrefix(p, ".git/") || strings.HasPrefix(p, ".plan/") {
 			t.Fatalf("SearchFiles leaked skipped path %q in %v", p, got)
 		}
 	}
@@ -242,12 +244,148 @@ func TestSearchFilesRanksAndSkipsHeavyDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, p := range all {
-		if strings.Contains(p, "node_modules") || strings.Contains(p, ".git") {
+		if strings.Contains(p, "node_modules") || strings.Contains(p, ".git") || strings.Contains(p, ".plan") {
 			t.Fatalf("index includes skipped %q: %v", p, all)
 		}
 	}
-	if len(all) != 3 {
-		t.Fatalf("index = %v, want 3 project files", all)
+	// Files + parent dirs (internal/, internal/tui/).
+	wantFiles := map[string]bool{
+		"alpha.go": true, "internal/": true, "internal/tui/": true,
+		"internal/tui/app.go": true, "internal/tui/completion.go": true,
+	}
+	if len(all) != len(wantFiles) {
+		t.Fatalf("index = %v, want %d entries %v", all, len(wantFiles), wantFiles)
+	}
+	for _, p := range all {
+		if !wantFiles[p] {
+			t.Fatalf("unexpected index entry %q in %v", p, all)
+		}
+	}
+}
+
+func TestSearchFilesSkipsPlanUnlessQueried(t *testing.T) {
+	work := t.TempDir()
+	write := func(rel, body string) {
+		t.Helper()
+		p := filepath.Join(work, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("internal/tui/app.go", "app")
+	write(".plan/features.md", "plan")
+	write(".plan/notes.txt", "n")
+
+	files := NewFiles(work)
+	got, err := files.SearchFiles("fea", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range got {
+		if strings.Contains(p, ".plan") {
+			t.Fatalf("SearchFiles(fea) included .plan noise: %v", got)
+		}
+	}
+
+	// Exact path still resolves even when outside the fuzzy index.
+	got, err = files.SearchFiles(".plan/features.md", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) == 0 || got[0] != ".plan/features.md" {
+		t.Fatalf("exact .plan path = %v, want [.plan/features.md]", got)
+	}
+}
+
+func TestSearchFilesExactPathHitNested(t *testing.T) {
+	work := t.TempDir()
+	p := filepath.Join(work, "internal", "tui", "app.go")
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte("package tui"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Flood index with other matches so exact path would miss top-k without boost.
+	for i := 0; i < 40; i++ {
+		name := filepath.Join(work, "noise", fmt.Sprintf("app_extra_%02d.go", i))
+		if err := os.MkdirAll(filepath.Dir(name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(name, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files := NewFiles(work)
+	got, err := files.SearchFiles("internal/tui/app.go", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) == 0 || got[0] != "internal/tui/app.go" {
+		t.Fatalf("exact nested path = %v, want internal/tui/app.go first", got)
+	}
+}
+
+func TestSearchFilesDirectories(t *testing.T) {
+	work := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(work, "pkg", "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "pkg", "main.go"), []byte("m"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files := NewFiles(work)
+	got, err := files.SearchFiles("pkg", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawDir, sawFile bool
+	for _, p := range got {
+		if p == "pkg/" {
+			sawDir = true
+		}
+		if p == "pkg/main.go" {
+			sawFile = true
+		}
+	}
+	if !sawDir || !sawFile {
+		t.Fatalf("SearchFiles(pkg) = %v, want pkg/ and pkg/main.go", got)
+	}
+}
+
+func TestReadScopedDirectoryListing(t *testing.T) {
+	work := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(work, "pkg", "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "pkg", "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "pkg", "nested", "deep.go"), []byte("deep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files := NewFiles(work)
+	fc, err := files.ReadScoped("pkg/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fc.Skip {
+		t.Fatalf("ReadScoped(pkg/) skip: %+v", fc)
+	}
+	if fc.Path != "pkg/" {
+		t.Fatalf("Path = %q, want pkg/", fc.Path)
+	}
+	if !strings.Contains(fc.Content, "main.go") || !strings.Contains(fc.Content, "nested/") {
+		t.Fatalf("listing missing children: %q", fc.Content)
+	}
+	if strings.Contains(fc.Content, "deep.go") {
+		t.Fatalf("listing must be immediate children only: %q", fc.Content)
+	}
+	if !strings.Contains(fc.Content, "directory listing") {
+		t.Fatalf("listing missing policy header: %q", fc.Content)
 	}
 }
 
