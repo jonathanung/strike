@@ -69,6 +69,10 @@ service/theme token).
 ## Scope
 
 - Smallest correct change. Match surrounding style and comment density.
+- Lean-code guidance (config `leanCode`: off|lite|full, default lite) biases
+  build/general/debugger toward a YAGNI ladder and plan/orchestrator toward
+  efficient designs that still scale — never at the cost of tests, security,
+  a11y, or trust-boundary errors. See docs/agents-skills.md (ponytail-inspired).
 - Must implement as many tests as possible for all new chunks of code.
 - No new test frameworks or dependencies without an explicit ask.
 - Do not commit secrets or write real credentials into fixtures.

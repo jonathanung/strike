@@ -483,6 +483,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			Instructions:          instructions,
 			Memory:                memoryStore,
 			SystemPrompt:          cfg.SystemPrompt,
+			LeanCode:              cfg.LeanCode,
 			MaxChildDepth:         cfg.MaxChildDepth,
 			InitialProvider:       initialProvider,
 			InitialModel:          initialModel,

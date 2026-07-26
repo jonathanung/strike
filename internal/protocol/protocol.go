@@ -768,6 +768,7 @@ const (
 	PromptLayerPersona     = "persona"
 	PromptLayerPhase       = "phase"
 	PromptLayerPlan        = "plan"
+	PromptLayerLean        = "lean_code"
 	PromptLayerEnvironment = "environment"
 	PromptLayerInstruction = "instruction"
 	PromptLayerMemory      = "project_memory"

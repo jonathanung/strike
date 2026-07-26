@@ -9,6 +9,7 @@ JSON:
   "model": "claude-sonnet-5",
   "effort": "high",
   "defaultAgent": "build",
+  "leanCode": "lite",
   "theme": "strike",
   "vimMode": "pane",
   "notify": "unfocused-only",
@@ -36,6 +37,13 @@ posture for **new** sessions: `default` | `plan` | `accept-edits` | `yolo`
 (see [usage.md](usage.md)). Session changes via Shift+Tab or `/mode` persist
 in the session JSONL, not back into this file. Distinct from `/autonomy`
 (workflow exit gates).
+
+**Lean code:** `leanCode` is `off` | `lite` (default) | `full`. Injects
+agent-scoped efficiency guidance into the system prompt (strict ladder for
+build/general/debugger; softer scaling-aware lean for plan/orchestrator;
+none for explore/reviewer/tester/validator/commit). Inspired by
+[ponytail](https://github.com/DietrichGebert/ponytail) (clean-room wording).
+Details: [agents-skills.md](agents-skills.md#lean-code-ponytail-lite).
 
 **Permission auto-approve (yolo-lite):** when `permissionAutoApproveSeconds`
 is a positive integer (clamped to 1–60), the permission modal counts down and

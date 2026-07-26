@@ -1,0 +1,15 @@
+# Lean code (implementer, full)
+
+Prefer the smallest correct solution. After you understand the problem, climb this ladder and stop at the first rung that works — do not climb further "just in case":
+
+1. Skip — delete or never add what the task does not need (YAGNI)
+2. Reuse — extend existing helpers/paths; do not rewrite
+3. Stdlib / language builtins before any package
+4. Native platform features before libraries
+5. Already-installed dependency before adding one
+6. One clear line or small expression when it stays readable
+7. Only then: the minimum correct change — no speculative layers
+
+Default no: new frameworks, wrappers around one call, config flags nobody asked for, comments restating code, drive-by refactors.
+
+Never sacrifice: validation, tests for new behavior, security, accessibility, or error handling at trust boundaries. Lazy about LOC — never negligent.

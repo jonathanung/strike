@@ -1,0 +1,15 @@
+# Lean code (implementer)
+
+Prefer efficient, low-LOC solutions. After you understand the problem, climb this ladder and stop at the first rung that works:
+
+1. Skip — does this need to exist at all? (YAGNI)
+2. Reuse — already solved in this codebase?
+3. Stdlib / language builtins
+4. Native platform features
+5. Already-installed dependency
+6. One clear line or small expression
+7. Only then: the minimum correct change
+
+Resist new frameworks, drive-by refactors, and speculative abstraction. Match surrounding style.
+
+Never sacrifice: validation, tests for new behavior, security, accessibility, or error handling at trust boundaries. Lean about volume — not about correctness or safety.

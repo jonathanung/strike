@@ -121,6 +121,9 @@ type Options struct {
 	// SystemPrompt, when set, replaces the provider overlay for the build
 	// agent only (shared baseline still applies). From config systemPrompt.
 	SystemPrompt string
+	// LeanCode controls agent-scoped lean-code guidance: off|lite|full.
+	// Empty defaults to lite. From config leanCode.
+	LeanCode string
 	// Rules are permission ruleset layers, earliest first (later wins).
 	Rules []permission.Ruleset
 	// Hooks are shell-command lifecycle hooks (pre/post tool use). Empty disables.
