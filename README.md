@@ -58,3 +58,10 @@ to latest output; `ctrl+c` quits. `@path` attaches project files. See
 | [Agents & skills](docs/agents-skills.md) | personas, skills, workflows / autonomy |
 | [Architecture](docs/ARCHITECTURE.md) | packages, seams, recipes |
 | [Contributing](docs/contributing.md) | layout, verification, doc check |
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE).
+
+Free to use, modify, and distribute. You must retain the copyright notice and
+attribution (see `LICENSE` and `NOTICE`). Copyright 2026 Jonathan Ung.
