@@ -4,7 +4,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
@@ -69,9 +68,12 @@ func TestProviderModalFilterAndNoJKMove(t *testing.T) {
 	if strings.Contains(view, "j/k") {
 		t.Fatalf("hint still advertises j/k: %q", view)
 	}
+	if !strings.Contains(view, "ctrl+x logout") {
+		t.Fatalf("view missing logout hint: %q", view)
+	}
 }
 
-func TestProviderModalDoubleBackslashLogout(t *testing.T) {
+func TestProviderModalLogoutConfirmAccept(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	fake := m.services.Auth.(*fakeAuth)
 	fake.statuses = []host.ProviderStatus{
@@ -79,33 +81,42 @@ func TestProviderModalDoubleBackslashLogout(t *testing.T) {
 		{Name: "echo", Detail: "offline dev provider", Authed: true, Builtin: true},
 	}
 
-	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
 	pm := newProviderModal(m.services, "openai", m.ops, m.th)
-	pm.now = func() time.Time { return now }
 	pm.cursor = 0
 
-	// First "\" arms; no logout yet.
-	next, cmd := pm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\\'}})
+	// ctrl+x opens confirm; no logout yet.
+	next, cmd := pm.update(tea.KeyMsg{Type: tea.KeyCtrlX})
 	pm = next.(*providerModal)
 	if cmd != nil {
-		t.Fatal("first \\ should arm without a command")
+		t.Fatal("ctrl+x should open confirm without a command")
+	}
+	if pm.phase != providerPhaseConfirmLogout {
+		t.Fatalf("phase = %v, want confirm", pm.phase)
 	}
 	if len(fake.logoutCalls) != 0 {
 		t.Fatalf("logoutCalls after arm = %v", fake.logoutCalls)
 	}
 	view := ansi.Strip(pm.view(80, m.th))
-	if !strings.Contains(view, "again to log out") {
-		t.Fatalf("armed hint missing: %q", view)
+	if !strings.Contains(view, "Log out of openai?") {
+		t.Fatalf("confirm missing title line: %q", view)
+	}
+	if !strings.Contains(view, "all stored credentials") {
+		t.Fatalf("multi-method confirm missing all-credentials line: %q", view)
+	}
+	if !strings.Contains(view, "y/enter confirm") {
+		t.Fatalf("confirm missing y hint: %q", view)
 	}
 
-	// Second "\" within window commits logout.
-	now = now.Add(2 * time.Second)
-	next, cmd = pm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\\'}})
+	// y commits logout.
+	next, cmd = pm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
 	if next != pm {
 		t.Fatalf("logout kept modal open, got %T", next)
 	}
+	if pm.phase != providerPhaseBrowse {
+		t.Fatalf("phase after y = %v, want browse", pm.phase)
+	}
 	if cmd == nil {
-		t.Fatal("second \\ expected logout command")
+		t.Fatal("y expected logout command")
 	}
 	msg := cmd()
 	got, ok := msg.(providerLogoutMsg)
@@ -116,56 +127,104 @@ func TestProviderModalDoubleBackslashLogout(t *testing.T) {
 		t.Fatalf("logoutCalls = %v, want [openai]", fake.logoutCalls)
 	}
 
-	// App applies the message: notice + refreshed statuses.
+	// App applies the message: notice + refreshed statuses (no secrets).
 	m.modal = pm
 	updated, _ := m.Update(got)
 	m = updated.(Model)
 	if !strings.Contains(m.notice, "logged out of openai") {
 		t.Fatalf("notice = %q", m.notice)
 	}
+	if strings.Contains(strings.ToLower(m.notice), "token") || strings.Contains(m.notice, "sk-") {
+		t.Fatalf("notice leaked secret material: %q", m.notice)
+	}
 	if pm.statuses[0].Authed {
 		t.Fatal("status not refreshed after logout")
 	}
+	if pm.statuses[0].Detail != "none" {
+		t.Fatalf("detail after logout = %q, want none", pm.statuses[0].Detail)
+	}
 }
 
-func TestProviderModalLogoutArmExpires(t *testing.T) {
+func TestProviderModalLogoutConfirmCancel(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	fake := m.services.Auth.(*fakeAuth)
 	fake.statuses = []host.ProviderStatus{
 		{Name: "anthropic", Detail: "api key", Authed: true, APIKey: true},
 	}
-	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
 	pm := newProviderModal(m.services, "", m.ops, m.th)
-	pm.now = func() time.Time { return now }
 	pm.cursor = 0
 
-	next, _ := pm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\\'}})
+	next, _ := pm.update(tea.KeyMsg{Type: tea.KeyCtrlX})
 	pm = next.(*providerModal)
-	now = now.Add(logoutConfirmWindow + time.Millisecond)
-	next, cmd := pm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\\'}})
+	if pm.phase != providerPhaseConfirmLogout {
+		t.Fatalf("phase = %v", pm.phase)
+	}
+	view := ansi.Strip(pm.view(80, m.th))
+	if !strings.Contains(view, "Log out of anthropic?") {
+		t.Fatalf("confirm view = %q", view)
+	}
+	if strings.Contains(view, "all stored credentials") {
+		t.Fatalf("single-method should not claim all methods: %q", view)
+	}
+	if !strings.Contains(view, "Current: api key") {
+		t.Fatalf("confirm missing current detail: %q", view)
+	}
+
+	// n cancels — credentials intact.
+	next, cmd := pm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
 	pm = next.(*providerModal)
 	if cmd != nil {
-		t.Fatal("expired arm should re-arm, not logout")
+		t.Fatal("cancel should not run logout")
+	}
+	if pm.phase != providerPhaseBrowse {
+		t.Fatalf("phase after n = %v, want browse", pm.phase)
 	}
 	if len(fake.logoutCalls) != 0 {
-		t.Fatalf("logoutCalls = %v", fake.logoutCalls)
+		t.Fatalf("logoutCalls after cancel = %v", fake.logoutCalls)
 	}
-	// Immediate second after re-arm works.
-	now = now.Add(time.Second)
-	_, cmd = pm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\\'}})
+	if !fake.statuses[0].Authed || fake.statuses[0].Detail != "api key" {
+		t.Fatalf("credentials changed on cancel: %+v", fake.statuses[0])
+	}
+
+	// esc also cancels.
+	next, _ = pm.update(tea.KeyMsg{Type: tea.KeyCtrlX})
+	pm = next.(*providerModal)
+	next, cmd = pm.update(tea.KeyMsg{Type: tea.KeyEscape})
+	pm = next.(*providerModal)
+	if cmd != nil || pm.phase != providerPhaseBrowse {
+		t.Fatalf("esc cancel: phase=%v cmd=%v", pm.phase, cmd != nil)
+	}
+	if len(fake.logoutCalls) != 0 {
+		t.Fatalf("logoutCalls after esc = %v", fake.logoutCalls)
+	}
+}
+
+func TestProviderModalLogoutConfirmEnterAccept(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	fake := m.services.Auth.(*fakeAuth)
+	fake.statuses = []host.ProviderStatus{
+		{Name: "xai", Detail: "oauth+key", Authed: true, OAuth: true, Device: true, APIKey: true},
+	}
+	pm := newProviderModal(m.services, "", m.ops, m.th)
+	pm.cursor = 0
+	next, _ := pm.update(tea.KeyMsg{Type: tea.KeyCtrlX})
+	pm = next.(*providerModal)
+	_, cmd := pm.update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
-		t.Fatal("expected logout after re-arm")
+		t.Fatal("enter should confirm logout")
 	}
-	if _, ok := cmd().(providerLogoutMsg); !ok {
-		t.Fatal("want providerLogoutMsg")
+	msg := cmd().(providerLogoutMsg)
+	if msg.provider != "xai" || msg.err != nil {
+		t.Fatalf("msg = %#v", msg)
+	}
+	if len(fake.logoutCalls) != 1 || fake.logoutCalls[0] != "xai" {
+		t.Fatalf("logoutCalls = %v", fake.logoutCalls)
 	}
 }
 
 func TestProviderModalLogoutBuiltinAndAddRow(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	pm := newProviderModal(m.services, "echo", m.ops, m.th)
-	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
-	pm.now = func() time.Time { return now }
 
 	// Builtin echo.
 	for i, s := range pm.statuses {
@@ -174,19 +233,20 @@ func TestProviderModalLogoutBuiltinAndAddRow(t *testing.T) {
 			break
 		}
 	}
-	pm.logoutArmedAt = now
-	_, cmd := pm.handleLogoutKey()
+	_, cmd := pm.beginLogoutConfirm()
 	msg := cmd().(providerLogoutMsg)
 	if !errors.Is(msg.err, errBuiltinLogout) {
 		t.Fatalf("builtin logout err = %v", msg.err)
 	}
 
-	// Add-custom trailing row: armed double-\ is a no-op.
+	// Add-custom trailing row: ctrl+x is a no-op.
 	pm.cursor = pm.rowCount() - 1
-	pm.logoutArmedAt = now
-	_, cmd = pm.handleLogoutKey()
+	next, cmd := pm.beginLogoutConfirm()
 	if cmd != nil {
 		t.Fatalf("add-row logout cmd = %v", cmd)
+	}
+	if next.(*providerModal).phase != providerPhaseBrowse {
+		t.Fatal("add-row should stay in browse")
 	}
 }
 
@@ -232,5 +292,23 @@ func TestProviderModalNavigationWithFilter(t *testing.T) {
 	pm = next.(*providerModal)
 	if pm.cursor != 0 {
 		t.Fatalf("ctrl+p cursor = %d, want 0", pm.cursor)
+	}
+}
+
+func TestLogoutClearsMultipleMethods(t *testing.T) {
+	cases := []struct {
+		name string
+		s    host.ProviderStatus
+		want bool
+	}{
+		{name: "oauth+key detail", s: host.ProviderStatus{Detail: "oauth+key", Authed: true, OAuth: true, APIKey: true}, want: true},
+		{name: "single api key", s: host.ProviderStatus{Detail: "api key", Authed: true, APIKey: true}, want: false},
+		{name: "multi capability authed", s: host.ProviderStatus{Detail: "oauth", Authed: true, OAuth: true, APIKey: true}, want: true},
+		{name: "multi capability unauthed", s: host.ProviderStatus{Detail: "none", OAuth: true, APIKey: true}, want: false},
+	}
+	for _, tc := range cases {
+		if got := logoutClearsMultipleMethods(tc.s); got != tc.want {
+			t.Errorf("%s: got %v want %v", tc.name, got, tc.want)
+		}
 	}
 }

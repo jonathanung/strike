@@ -303,7 +303,7 @@ func keybindCatalog(keys keyMap) []keybindEntry {
 		{ID: "lists.move-jk", Category: "Lists", Keys: "j/k", Action: "move (pickers without filter)"},
 		{ID: "lists.select", Category: "Lists", Keys: "enter", Action: "confirm selection"},
 		{ID: "lists.filter", Category: "Lists", Keys: "type", Action: "filter (when available)"},
-		{ID: "lists.logout", Category: "Lists", Keys: `\\ \\`, Action: "log out provider (within 3s)"},
+		{ID: "lists.logout", Category: "Lists", Keys: "ctrl+x", Action: "log out provider (confirm y/n)"},
 		{ID: "lists.close", Category: "Lists", Keys: "esc", Action: "close"},
 		{ID: "lists.default", Category: "Lists", Keys: "ctrl+d", Action: "save highlighted default"},
 
