@@ -126,7 +126,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		return nil, fmt.Errorf("opening auth store: %w", err)
 	}
 
-	customStore := config.NewCustomStore(cfg.Providers)
+	customStore := config.NewCustomStore(cfg.Providers, workDir)
 
 	// selectProvider constructs a provider by name, probing credentials so
 	// a bad /provider selection fails at select time with a clear message
@@ -553,7 +553,12 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 
 // buildCustomProvider maps a config custom provider onto the openaicompat or
 // anthropic adapter with the declared base URL and auth-store credentials.
+// Env placeholders in baseURL/headers/apiKeyEnv are expanded from the process env.
 func buildCustomProvider(cp config.CustomProvider, store *auth.Store) (provider.Provider, string, error) {
+	cp = config.ResolveCustom(cp)
+	if err := config.ValidateBaseURL(cp.BaseURL); err != nil {
+		return nil, "", fmt.Errorf("custom provider %s: %w", cp.Name, err)
+	}
 	defaultModel := config.DefaultModelCustom(cp)
 	switch cp.API {
 	case config.WireOpenAI:

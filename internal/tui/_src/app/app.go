@@ -612,6 +612,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case msg.err != nil:
 			m.setNotice("logout failed: "+msg.err.Error(), true)
+		case msg.removed:
+			m.setNotice("removed custom provider "+msg.provider, false)
 		default:
 			m.setNotice("logged out of "+msg.provider, false)
 		}

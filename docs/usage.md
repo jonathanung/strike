@@ -154,8 +154,8 @@ a real provider needs credentials — see [auth.md](auth.md).
 
 Provider selection happens in-app with `/provider`; `--provider` on the
 command line just pre-selects (and validates credentials eagerly). Custom
-OpenAI-/Anthropic-compatible endpoints: `/settings` or config
-`providers` — see [config.md](config.md).
+OpenAI-/Anthropic-compatible endpoints: `/settings`, `.strike/providers.jsonc`,
+or config `providers` — see [config.md](config.md).
 
 ## CLI session resume & headless exec
 

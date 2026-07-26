@@ -40,3 +40,8 @@ Provider selection happens in-app with `/provider`; `--provider` on the
 command line just pre-selects (and validates credentials eagerly). Defaults
 when a provider is chosen without a model: `claude-sonnet-5`, `gpt-5.5`,
 `grok-4.5`.
+
+Custom/self-hosted providers (`.strike/providers.jsonc` or `/settings`) use
+env refs (`{env:NAME}`, `$NAME`) and/or a stored API key. Logging out of a
+**custom** provider deletes its definition and credentials; built-in logout
+only clears credentials. Details: [config.md](config.md#custom-providers).

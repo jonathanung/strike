@@ -186,6 +186,11 @@ func (m *customProviderFormModal) save() (modal, tea.Cmd) {
 		Models:  splitModelIDs(m.models.Value()),
 	}
 	key := strings.TrimSpace(m.key.Value())
+	// Env-only key refs ({env:NAME}, $NAME) go into apiKeyEnv — never the auth store.
+	if envName, ok := parseSoleEnvRef(key); ok {
+		p.APIKeyEnv = envName
+		key = ""
+	}
 	providers, authsvc, selectAfter, ops, name := m.providers, m.auth, m.selectAfter, m.ops, p.Name
 	returnTo := m.returnTo
 	// Stay on the form until the cmd reports success so validation errors
@@ -204,6 +209,33 @@ func (m *customProviderFormModal) save() (modal, tea.Cmd) {
 		}
 		return customProviderSavedMsg{name: name, selectAfter: selectAfter, returnTo: returnTo}
 	}
+}
+
+// parseSoleEnvRef detects a key field that is only an env reference.
+func parseSoleEnvRef(s string) (name string, ok bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", false
+	}
+	if strings.HasPrefix(s, "{env:") && strings.HasSuffix(s, "}") {
+		inner := s[len("{env:") : len(s)-1]
+		if inner != "" && !strings.ContainsAny(inner, " \t\n{}=") {
+			return inner, true
+		}
+	}
+	if strings.HasPrefix(s, "${") && strings.HasSuffix(s, "}") {
+		inner := s[2 : len(s)-1]
+		if inner != "" && !strings.ContainsAny(inner, " \t\n{}=") {
+			return inner, true
+		}
+	}
+	if strings.HasPrefix(s, "$") && !strings.HasPrefix(s, "${") {
+		inner := s[1:]
+		if inner != "" && !strings.ContainsAny(inner, " \t\n{}=$/") {
+			return inner, true
+		}
+	}
+	return "", false
 }
 
 func splitModelIDs(raw string) []string {
@@ -240,7 +272,7 @@ func (m *customProviderFormModal) view(width int, th theme.Theme) string {
 		body.WriteString(m.name.View())
 	case 1:
 		sizeInput(&m.url, inner)
-		body.WriteString(st.Text.Render("Base URL"))
+		body.WriteString(st.Text.Render("Base URL (or {env:VAR} / $VAR)"))
 		body.WriteString("\n")
 		body.WriteString(m.url.View())
 		body.WriteString("\n")
@@ -261,7 +293,7 @@ func (m *customProviderFormModal) view(width int, th theme.Theme) string {
 		}))
 	case 3:
 		sizeInput(&m.key, inner)
-		body.WriteString(st.Text.Render("API key (optional — stored in auth, not config)"))
+		body.WriteString(st.Text.Render("API key (optional — or {env:VAR} / $VAR)"))
 		body.WriteString("\n")
 		body.WriteString(m.key.View())
 	case 4:

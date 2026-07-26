@@ -312,3 +312,78 @@ func TestLogoutClearsMultipleMethods(t *testing.T) {
 		}
 	}
 }
+
+func TestProviderModalLogoutDeletesCustom(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	fake := m.services.Auth.(*fakeAuth)
+	fp := m.services.Providers.(*fakeProviders)
+	fp.items = []host.CustomProvider{{
+		Name: "kimi", BaseURL: "https://api.moonshot.cn/v1", API: "openai",
+	}}
+	fake.statuses = []host.ProviderStatus{
+		{Name: "kimi", Detail: "api key · openai · api.moonshot.cn", Authed: true, Custom: true, APIKey: true},
+		{Name: "echo", Detail: "offline", Authed: true, Builtin: true},
+	}
+	pm := newProviderModal(m.services, "kimi", m.ops, m.th)
+	pm.cursor = 0
+
+	next, _ := pm.update(tea.KeyMsg{Type: tea.KeyCtrlX})
+	pm = next.(*providerModal)
+	view := ansi.Strip(pm.view(80, m.th))
+	if !strings.Contains(view, "Deletes this custom provider") {
+		t.Fatalf("confirm should say delete custom: %q", view)
+	}
+
+	_, cmd := pm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	if cmd == nil {
+		t.Fatal("expected logout cmd")
+	}
+	msg := cmd()
+	got, ok := msg.(providerLogoutMsg)
+	if !ok || got.err != nil || !got.removed || got.provider != "kimi" {
+		t.Fatalf("msg = %#v", msg)
+	}
+	if len(fp.items) != 0 {
+		t.Fatalf("custom not removed: %+v", fp.items)
+	}
+	if len(fake.logoutCalls) != 1 || fake.logoutCalls[0] != "kimi" {
+		t.Fatalf("logoutCalls = %v", fake.logoutCalls)
+	}
+
+	m.modal = pm
+	updated, _ := m.Update(got)
+	m = updated.(Model)
+	if !strings.Contains(m.notice, "removed custom provider kimi") {
+		t.Fatalf("notice = %q", m.notice)
+	}
+}
+
+func TestCustomProviderFormEnvKeyRef(t *testing.T) {
+	m, ops := newAppTestModel(nil, nil)
+	fp := m.services.Providers.(*fakeProviders)
+	fa := m.services.Auth.(*fakeAuth)
+
+	form := newCustomProviderFormModal(m.services, ops, m.th, nil, false, nil)
+	form.name.SetValue("proxy")
+	form.url.SetValue("{env:PROXY_BASE}")
+	form.apiCursor = 0
+	form.key.SetValue("{env:PROXY_API_KEY}")
+	form.models.SetValue("m1")
+	form.step = 4
+
+	_, cmd := form.save()
+	msg := cmd()
+	saved, ok := msg.(customProviderSavedMsg)
+	if !ok || saved.err != nil {
+		t.Fatalf("msg = %#v", msg)
+	}
+	if len(fp.items) != 1 || fp.items[0].APIKeyEnv != "PROXY_API_KEY" {
+		t.Fatalf("providers = %+v", fp.items)
+	}
+	if fp.items[0].BaseURL != "{env:PROXY_BASE}" {
+		t.Errorf("BaseURL = %q", fp.items[0].BaseURL)
+	}
+	if len(fa.setCalls) != 0 {
+		t.Fatalf("env ref must not SetAPIKey: %+v", fa.setCalls)
+	}
+}

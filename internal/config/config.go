@@ -221,21 +221,46 @@ func projectRoot(workDir string) string {
 	return filepath.Join(workDir, ".strike")
 }
 
-// Load merges default <- global <- project config.
+// Load merges default <- global config <- global providers.jsonc <- project
+// config <- project providers.jsonc. providers.jsonc is OpenCode-compatible
+// (see ReadProvidersFile); the legacy providers array in config still works.
 func Load(workDir string) (Config, error) {
 	cfg := Default()
-	for _, path := range []string{GlobalPath(), filepath.Join(projectRoot(workDir), "config")} {
-		if path == "" {
-			continue
-		}
+	// Global config JSON (optional).
+	if path := GlobalPath(); path != "" {
 		layer, err := read(path)
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-		if err != nil {
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			// ok
+		case err != nil:
 			return cfg, err
+		default:
+			cfg = merge(cfg, layer)
 		}
-		cfg = merge(cfg, layer)
+	}
+	// Global providers.jsonc/json (optional; loads even when config is absent).
+	if items, err := loadProvidersFileLayer(GlobalRoot()); err != nil {
+		return cfg, err
+	} else if len(items) > 0 {
+		cfg.Providers = mergeProviders(cfg.Providers, items)
+	}
+	// Project config JSON (optional).
+	if workDir != "" {
+		path := filepath.Join(projectRoot(workDir), "config")
+		layer, err := read(path)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			// ok
+		case err != nil:
+			return cfg, err
+		default:
+			cfg = merge(cfg, layer)
+		}
+		if items, err := loadProvidersFileLayer(projectRoot(workDir)); err != nil {
+			return cfg, err
+		} else if len(items) > 0 {
+			cfg.Providers = mergeProviders(cfg.Providers, items)
+		}
 	}
 	return cfg, nil
 }
