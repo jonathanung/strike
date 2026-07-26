@@ -206,7 +206,8 @@ type Model struct {
 	height         int
 	ready          bool
 
-	// sessionID and workDir are display-only identity for the context pane.
+	// sessionID and workDir are display identity for the header cwd label and
+	// the context pane. workDir also resolves relative paths for /vim.
 	sessionID string
 	workDir   string
 	// pendingResume is set when /session picks another root session; the
