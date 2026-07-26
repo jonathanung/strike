@@ -62,10 +62,13 @@ type keyMap struct {
 
 func defaultKeyMap() keyMap {
 	return keyMap{
-		Quit:              key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
-		FocusLeft:         key.NewBinding(key.WithKeys("ctrl+h"), key.WithHelp("ctrl+h", "focus left")),
-		FocusRight:        key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("ctrl+l", "focus right")),
-		CycleWindowNext:   key.NewBinding(key.WithKeys("ctrl+j"), key.WithHelp("ctrl+j", "next window")),
+		Quit:       key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
+		FocusLeft:  key.NewBinding(key.WithKeys("ctrl+h"), key.WithHelp("ctrl+h", "focus left")),
+		FocusRight: key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("ctrl+l", "focus right")),
+		// CycleWindowNext: user chord is ctrl+j. WrapInput rewrites enhanced
+		// ctrl+j CSI to alt+j so it never collides with bare LF (KeyCtrlJ) used
+		// by Newline for legacy shift+enter (#240).
+		CycleWindowNext:   key.NewBinding(key.WithKeys("alt+j"), key.WithHelp("ctrl+j", "next window")),
 		CycleWindowPrev:   key.NewBinding(key.WithKeys("ctrl+k"), key.WithHelp("ctrl+k", "prev window")),
 		Palette:           key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "palette")),
 		KeyHelp:           key.NewBinding(key.WithKeys("f1"), key.WithHelp("f1", "keybinds")),
@@ -77,9 +80,8 @@ func defaultKeyMap() keyMap {
 		CompletionNext:    key.NewBinding(key.WithKeys("down", "ctrl+n"), key.WithHelp("down/ctrl+n", "next")),
 		Send:              key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "send")),
 		// Newline: alt+enter is the post-WrapInput form of enhanced shift+enter
-		// CSI. ctrl+j is bare LF — many terminals (and shift+enter without
-		// modifyOtherKeys/Kitty) deliver KeyCtrlJ, which must not cycle panes
-		// while the composer is focused (#187).
+		// CSI. ctrl+j matches bare LF only (legacy shift+enter without enhanced
+		// keys). Intentional ctrl+j is alt+j after CSI rewrite and cycles panes (#240).
 		Newline:        key.NewBinding(key.WithKeys("alt+enter", "ctrl+j"), key.WithHelp("shift+enter", "newline")),
 		ExternalEditor: key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("ctrl+e", "external editor")),
 		HistoryPrev:    key.NewBinding(key.WithKeys("up"), key.WithHelp("up", "history previous")),
@@ -174,7 +176,7 @@ func applyKeybindOverrides(k *keyMap, overrides map[string][]string) {
 	}
 	set(&k.FocusLeft, "nav.focus-left", "")
 	set(&k.FocusRight, "nav.focus-right", "")
-	set(&k.CycleWindowNext, "nav.window-next", "")
+	set(&k.CycleWindowNext, "nav.window-next", "ctrl+j")
 	set(&k.CycleWindowPrev, "nav.window-prev", "")
 	set(&k.ScrollUp, "nav.scroll-up", "")
 	set(&k.ScrollDown, "nav.scroll-down", "")

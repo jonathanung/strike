@@ -1447,6 +1447,12 @@ func TestUsageReportedBeforeTurnCompletedWithCorrelation(t *testing.T) {
 	if !usage.Output.Known || usage.Output.N != 5 {
 		t.Errorf("output = %+v, want known 5", usage.Output)
 	}
+	if !usage.CacheRead.Known || usage.CacheRead.N != 2 {
+		t.Errorf("cacheRead = %+v, want known 2", usage.CacheRead)
+	}
+	if !usage.CacheCreation.Known || usage.CacheCreation.N != 1 {
+		t.Errorf("cacheCreation = %+v, want known 1", usage.CacheCreation)
+	}
 	// used = input + cacheRead + cacheCreation + output = 10+2+1+5 = 18
 	if !usage.Used.Known || usage.Used.N != 18 {
 		t.Errorf("used = %+v, want known 18", usage.Used)
@@ -1509,12 +1515,18 @@ func TestUsageReportedUsesTotalTokensWhenPartsZero(t *testing.T) {
 		t.Fatal("missing UsageReported")
 	}
 	// Parts were not broken out by the vendor — only TotalTokens. Do not
-	// fabricate Known zero for input/output; Used carries the total.
+	// fabricate Known zero for input/output/cache; Used carries the total.
 	if usage.Input.Known {
 		t.Errorf("input = %+v, want Known=false when only TotalTokens is set", usage.Input)
 	}
 	if usage.Output.Known {
 		t.Errorf("output = %+v, want Known=false when only TotalTokens is set", usage.Output)
+	}
+	if usage.CacheRead.Known {
+		t.Errorf("cacheRead = %+v, want Known=false when only TotalTokens is set", usage.CacheRead)
+	}
+	if usage.CacheCreation.Known {
+		t.Errorf("cacheCreation = %+v, want Known=false when only TotalTokens is set", usage.CacheCreation)
 	}
 	if !usage.Used.Known || usage.Used.N != 77 {
 		t.Errorf("used = %+v, want known 77 from TotalTokens fallback", usage.Used)
@@ -1553,4 +1565,47 @@ func TestUsageReportedEstimatedSource(t *testing.T) {
 	if usage.Source != protocol.UsageSourceEstimated {
 		t.Errorf("source = %q, want %q", usage.Source, protocol.UsageSourceEstimated)
 	}
+}
+
+func TestUserInputImagesReachProviderAndUserMessage(t *testing.T) {
+	prov := newScriptedProvider(completedStep("saw it"))
+	eng := newTestEngine(t, prov)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	img := protocol.ImageAttachment{
+		MIME: "image/png",
+		Data: "iVBORw0KGgo=",
+	}
+	eng.Ops() <- protocol.UserInput{Text: "look", Images: []protocol.ImageAttachment{img}}
+
+	var sawUserMsg bool
+	deadline := time.After(2 * time.Second)
+	for !sawUserMsg {
+		select {
+		case ev := <-eng.Events():
+			if um, ok := ev.(protocol.UserMessage); ok {
+				if um.Text != "look" || len(um.Images) != 1 || um.Images[0].MIME != "image/png" {
+					t.Fatalf("UserMessage = %#v", um)
+				}
+				sawUserMsg = true
+			}
+		case <-deadline:
+			t.Fatal("timeout waiting for UserMessage")
+		}
+	}
+
+	req := receiveRequest(t, prov.requests)
+	if len(req.Messages) == 0 {
+		t.Fatal("no messages")
+	}
+	last := req.Messages[len(req.Messages)-1]
+	if last.Role != provider.RoleUser || last.Text != "look" {
+		t.Fatalf("last msg = %#v", last)
+	}
+	if len(last.Images) != 1 || last.Images[0].MIME != "image/png" || len(last.Images[0].Data) == 0 {
+		t.Fatalf("images = %#v", last.Images)
+	}
+	_ = waitForTurnCompleted(t, eng.Events())
 }

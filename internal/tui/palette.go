@@ -152,14 +152,14 @@ func buildPaletteEntries(specs []commandSpec, agents []string, availability pale
 }
 
 // paletteBuiltinDisabled returns why a shipped builtin is unavailable, or "".
-// Help/keys stay available always. Vim/md-read, think, and effective-prompt
-// inspect stay available mid-turn so users can inspect without interrupting
-// the engine.
+// Help/keys stay available always. Vim/md-read, think, effective-prompt
+// inspect, and /mcp stay available mid-turn so users can inspect without
+// interrupting the engine.
 func paletteBuiltinDisabled(id commandID, availability paletteAvailability) string {
 	switch id {
 	case commandHelp, commandKeys:
 		return ""
-	case commandVim, commandMDRead, commandThink, commandContext, commandEffectivePrompt:
+	case commandVim, commandMDRead, commandThink, commandContext, commandEffectivePrompt, commandCost, commandMCP:
 		return ""
 	case commandModel:
 		if availability.TurnRunning {

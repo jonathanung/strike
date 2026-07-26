@@ -19,26 +19,27 @@ import (
 // Roles carry meaning, not appearance: Accent is "the primary emphasis
 // color", not "violet", so swapping the palette keeps views correct.
 type Theme struct {
-	Text        lipgloss.AdaptiveColor // primary foreground
-	TextMuted   lipgloss.AdaptiveColor // secondary/de-emphasized foreground
-	Accent      lipgloss.AdaptiveColor // primary emphasis (titles, assistant)
-	AccentAlt   lipgloss.AdaptiveColor // secondary emphasis (user label, info)
-	Highlight   lipgloss.AdaptiveColor // foreground of the selected/active item
-	Success     lipgloss.AdaptiveColor // positive state (ok, added)
-	Warning     lipgloss.AdaptiveColor // caution state (permission prompts)
-	Error       lipgloss.AdaptiveColor // failure state (errors, removed)
-	Danger      lipgloss.AdaptiveColor // destructive actions
-	Background  lipgloss.TerminalColor // application background; NoColor is transparent
-	Border      lipgloss.AdaptiveColor // standard panel border
-	BorderFocus lipgloss.AdaptiveColor // border of the focused/active panel
-	BorderMuted lipgloss.AdaptiveColor // dim chrome (inactive tiles, gutters)
-	UserLabel   lipgloss.AdaptiveColor // "you" transcript label
-	ToolLabel   lipgloss.AdaptiveColor // tool-call transcript label
-	DiffAdded   lipgloss.AdaptiveColor // added lines in diffs
-	DiffRemoved lipgloss.AdaptiveColor // removed lines in diffs
-	BorderStyle BorderStyle            // panel border weight and glyphs
-	Spacing     Spacing                // named layout spacing
-	Icons       Icons                  // glyph set (see DefaultIcons)
+	Text         lipgloss.AdaptiveColor // primary foreground
+	TextMuted    lipgloss.AdaptiveColor // secondary/de-emphasized foreground
+	Accent       lipgloss.AdaptiveColor // primary emphasis (titles, assistant)
+	AccentAlt    lipgloss.AdaptiveColor // secondary emphasis (user label, info)
+	Highlight    lipgloss.AdaptiveColor // foreground of the selected/active item
+	Success      lipgloss.AdaptiveColor // positive state (ok, added)
+	Warning      lipgloss.AdaptiveColor // caution state (permission prompts)
+	Error        lipgloss.AdaptiveColor // failure state (errors, removed)
+	Danger       lipgloss.AdaptiveColor // destructive actions
+	Background   lipgloss.TerminalColor // application background; NoColor is transparent
+	Border       lipgloss.AdaptiveColor // standard panel border
+	BorderFocus  lipgloss.AdaptiveColor // border of the focused/active panel
+	BorderMuted  lipgloss.AdaptiveColor // dim chrome (inactive tiles, gutters)
+	UserLabel    lipgloss.AdaptiveColor // "you" transcript label
+	ToolLabel    lipgloss.AdaptiveColor // tool-call transcript label
+	DiffAdded    lipgloss.AdaptiveColor // added lines in diffs
+	DiffRemoved  lipgloss.AdaptiveColor // removed lines in diffs
+	OverlayScrim lipgloss.AdaptiveColor // de-emphasized modal background fill
+	BorderStyle  BorderStyle            // panel border weight and glyphs
+	Spacing      Spacing                // named layout spacing
+	Icons        Icons                  // glyph set (see DefaultIcons)
 }
 
 // Default returns strike's stock theme: a Posting-inspired palette with a
@@ -50,26 +51,27 @@ func Default() Theme {
 	return Theme{
 		// Dark Text/Muted lean brighter for contrast on #1c1b22; borders sit
 		// a step clearer against both light and dark chrome.
-		Text:        lipgloss.AdaptiveColor{Light: "#1a1820", Dark: "#eceaf4"},
-		TextMuted:   lipgloss.AdaptiveColor{Light: "#5a5868", Dark: "#a09eb0"},
-		Accent:      lipgloss.AdaptiveColor{Light: "#6d43d6", Dark: "#b39dff"},
-		AccentAlt:   lipgloss.AdaptiveColor{Light: "#0b7285", Dark: "#5cd0e8"},
-		Highlight:   lipgloss.AdaptiveColor{Light: "#4c1d95", Dark: "#f4f1ff"},
-		Success:     lipgloss.AdaptiveColor{Light: "#1f8a4c", Dark: "#5edb92"},
-		Warning:     lipgloss.AdaptiveColor{Light: "#b7791f", Dark: "#f5c451"},
-		Error:       lipgloss.AdaptiveColor{Light: "#c23b3b", Dark: "#ff8087"},
-		Danger:      lipgloss.AdaptiveColor{Light: "#c23b3b", Dark: "#ff8087"},
-		Background:  lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#1c1b22"},
-		Border:      lipgloss.AdaptiveColor{Light: "#b8b6c6", Dark: "#4a4858"},
-		BorderFocus: lipgloss.AdaptiveColor{Light: "#6d43d6", Dark: "#b39dff"},
-		BorderMuted: lipgloss.AdaptiveColor{Light: "#d8d6e2", Dark: "#323040"},
-		UserLabel:   lipgloss.AdaptiveColor{Light: "#0b7285", Dark: "#5cd0e8"},
-		ToolLabel:   lipgloss.AdaptiveColor{Light: "#3f51b5", Dark: "#9db2ff"},
-		DiffAdded:   lipgloss.AdaptiveColor{Light: "#1f8a4c", Dark: "#5edb92"},
-		DiffRemoved: lipgloss.AdaptiveColor{Light: "#c23b3b", Dark: "#ff8087"},
-		BorderStyle: lightBorderStyle(),
-		Spacing:     NewSpacing(1, 2, 3, 4).WithLabel(1),
-		Icons:       DefaultIcons(),
+		Text:         lipgloss.AdaptiveColor{Light: "#1a1820", Dark: "#eceaf4"},
+		TextMuted:    lipgloss.AdaptiveColor{Light: "#5a5868", Dark: "#a09eb0"},
+		Accent:       lipgloss.AdaptiveColor{Light: "#6d43d6", Dark: "#b39dff"},
+		AccentAlt:    lipgloss.AdaptiveColor{Light: "#0b7285", Dark: "#5cd0e8"},
+		Highlight:    lipgloss.AdaptiveColor{Light: "#4c1d95", Dark: "#f4f1ff"},
+		Success:      lipgloss.AdaptiveColor{Light: "#1f8a4c", Dark: "#5edb92"},
+		Warning:      lipgloss.AdaptiveColor{Light: "#b7791f", Dark: "#f5c451"},
+		Error:        lipgloss.AdaptiveColor{Light: "#c23b3b", Dark: "#ff8087"},
+		Danger:       lipgloss.AdaptiveColor{Light: "#c23b3b", Dark: "#ff8087"},
+		Background:   lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#1c1b22"},
+		Border:       lipgloss.AdaptiveColor{Light: "#b8b6c6", Dark: "#4a4858"},
+		BorderFocus:  lipgloss.AdaptiveColor{Light: "#6d43d6", Dark: "#b39dff"},
+		BorderMuted:  lipgloss.AdaptiveColor{Light: "#d8d6e2", Dark: "#323040"},
+		UserLabel:    lipgloss.AdaptiveColor{Light: "#0b7285", Dark: "#5cd0e8"},
+		ToolLabel:    lipgloss.AdaptiveColor{Light: "#3f51b5", Dark: "#9db2ff"},
+		DiffAdded:    lipgloss.AdaptiveColor{Light: "#1f8a4c", Dark: "#5edb92"},
+		DiffRemoved:  lipgloss.AdaptiveColor{Light: "#c23b3b", Dark: "#ff8087"},
+		OverlayScrim: lipgloss.AdaptiveColor{Light: "#a8a6b4", Dark: "#6a6878"},
+		BorderStyle:  lightBorderStyle(),
+		Spacing:      NewSpacing(1, 2, 3, 4).WithLabel(1),
+		Icons:        DefaultIcons(),
 	}
 }
 
@@ -114,6 +116,7 @@ func (t Theme) Resolve() Theme {
 	t.ToolLabel = resolveAdaptive(t.ToolLabel, d.ToolLabel)
 	t.DiffAdded = resolveAdaptive(t.DiffAdded, d.DiffAdded)
 	t.DiffRemoved = resolveAdaptive(t.DiffRemoved, d.DiffRemoved)
+	t.OverlayScrim = resolveAdaptive(t.OverlayScrim, d.OverlayScrim)
 	t.Background = resolveBackground(t.Background, d.Background)
 	t.BorderStyle = resolveBorderStyle(t.BorderStyle)
 	t.Spacing = resolveSpacing(t.Spacing, d.Spacing)

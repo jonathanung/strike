@@ -58,7 +58,7 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 		CompactionStarted{Correlation: corr, Reason: CompactionReasonManual, Strategy: CompactionStrategySummarize},
 		CompactionCompleted{Correlation: corr, Reason: CompactionReasonThreshold, Strategy: CompactionStrategyTrim, Removed: 4, Kept: 3, Summary: "prior work on foo"},
 		SessionMeta{Correlation: corr, PRURL: "https://github.com/acme/repo/pull/7", PRNumber: 7, PRState: "open"},
-		SessionRewound{Correlation: corr, Removed: 2},
+		SessionRewound{Correlation: corr, Removed: 2, TurnID: "turn-9", RestoreFiles: true, FilesRestored: 3, FilesSkipped: 1},
 		EffectivePrompt{
 			Correlation: corr,
 			Layers: []PromptLayerInfo{
@@ -317,10 +317,12 @@ func TestTokenCountKnownVsUnknown(t *testing.T) {
 
 	// JSON: known zero keeps "known":true; unknown omits n and known is false.
 	b, err := json.Marshal(UsageReported{
-		Input:  KnownTokens(0),
-		Output: UnknownTokens(),
-		Used:   KnownTokens(10),
-		Source: UsageSourceEstimated,
+		Input:         KnownTokens(0),
+		Output:        UnknownTokens(),
+		CacheRead:     KnownTokens(3),
+		CacheCreation: UnknownTokens(),
+		Used:          KnownTokens(10),
+		Source:        UsageSourceEstimated,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -334,6 +336,12 @@ func TestTokenCountKnownVsUnknown(t *testing.T) {
 	}
 	if got.Output.Known {
 		t.Errorf("output after round-trip = %+v, want unknown", got.Output)
+	}
+	if !got.CacheRead.Known || got.CacheRead.N != 3 {
+		t.Errorf("cacheRead after round-trip = %+v, want known 3", got.CacheRead)
+	}
+	if got.CacheCreation.Known {
+		t.Errorf("cacheCreation after round-trip = %+v, want unknown", got.CacheCreation)
 	}
 	if !got.Used.Known || got.Used.N != 10 {
 		t.Errorf("used after round-trip = %+v, want known 10", got.Used)
@@ -389,5 +397,27 @@ func TestEventTypeCoverage(t *testing.T) {
 		if env.Type != typ {
 			t.Errorf("type = %q, want %q", env.Type, typ)
 		}
+	}
+}
+
+func TestUserMessageImagesRoundTrip(t *testing.T) {
+	ev := UserMessage{
+		Text:   "hi",
+		Images: []ImageAttachment{{MIME: "image/png", Data: "abc"}},
+	}
+	env, err := Wrap(ev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := env.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	um, ok := got.(UserMessage)
+	if !ok {
+		t.Fatalf("type %T", got)
+	}
+	if um.Text != "hi" || len(um.Images) != 1 || um.Images[0].MIME != "image/png" || um.Images[0].Data != "abc" {
+		t.Fatalf("got %#v", um)
 	}
 }

@@ -34,6 +34,10 @@ type Config struct {
 	// right-pane PTY), "overlay" (embedded modal), or "takeover" (full-screen
 	// tea.ExecProcess handoff). Unknown values are ignored at load time.
 	VimMode string `json:"vimMode,omitempty"`
+	// Notify controls desktop notifications (OSC 9 + bell) for permission/
+	// question asks and long turn completion: "on", "off", or
+	// "unfocused-only" (default). Unknown values are ignored at load time.
+	Notify string `json:"notify,omitempty"`
 	// PermissionAutoApproveSeconds enables permission-modal auto-allow once
 	// after N seconds (yolo-lite). Zero disables (default). Clamped to 1–60
 	// when positive.
@@ -68,6 +72,23 @@ type Config struct {
 	Keybinds map[string]KeybindChords `json:"keybinds,omitempty"`
 	// Session holds per-session runtime preferences (worktree isolation).
 	Session SessionConfig `json:"session,omitempty"`
+	// MCP configures external Model Context Protocol servers (stdio tools).
+	// Project layer replaces global when mcp.servers is present (including {}).
+	MCP MCPConfig `json:"mcp,omitempty"`
+}
+
+// MCPConfig is the JSON "mcp" object.
+type MCPConfig struct {
+	// Servers maps a short name to a stdio server command. Names become the
+	// mcp_<name>_* tool namespace.
+	Servers map[string]MCPServer `json:"servers,omitempty"`
+}
+
+// MCPServer is one stdio MCP server entry.
+type MCPServer struct {
+	Command string            `json:"command"`
+	Args    []string          `json:"args,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
 }
 
 // SessionConfig is the JSON "session" object in config.
@@ -269,6 +290,7 @@ func read(path string) (Config, error) {
 	}
 	c.CompactionStrategy = NormalizeCompactionStrategy(c.CompactionStrategy)
 	c.CompactionModel = strings.TrimSpace(c.CompactionModel)
+	c.Notify = NormalizeNotify(c.Notify)
 	// Keybinds: unknown ids / invalid chords fail the layer (and thus Load).
 	if err := ValidateKeybinds(c.Keybinds); err != nil {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
@@ -337,6 +359,28 @@ func NormalizeCompactionStrategy(s string) string {
 	}
 }
 
+// Notify mode values for Config.Notify / desktop notifications.
+const (
+	NotifyOn            = "on"
+	NotifyOff           = "off"
+	NotifyUnfocusedOnly = "unfocused-only"
+)
+
+// NormalizeNotify maps config aliases to on|off|unfocused-only.
+// Empty and unknown values become "" (TUI default = unfocused-only).
+func NormalizeNotify(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "on", "true", "1", "yes", "always":
+		return NotifyOn
+	case "off", "false", "0", "no", "never":
+		return NotifyOff
+	case "unfocused-only", "unfocused", "blur":
+		return NotifyUnfocusedOnly
+	default:
+		return ""
+	}
+}
+
 func merge(base, layer Config) Config {
 	if layer.Provider != "" {
 		base.Provider = layer.Provider
@@ -358,6 +402,9 @@ func merge(base, layer Config) Config {
 	}
 	if layer.VimMode != "" {
 		base.VimMode = layer.VimMode
+	}
+	if layer.Notify != "" {
+		base.Notify = layer.Notify
 	}
 	if layer.PermissionAutoApproveSeconds != 0 {
 		base.PermissionAutoApproveSeconds = layer.PermissionAutoApproveSeconds
@@ -387,5 +434,39 @@ func merge(base, layer Config) Config {
 	base.Hooks = append(base.Hooks, layer.Hooks...)
 	base.Providers = mergeProviders(base.Providers, layer.Providers)
 	base.Keybinds = MergeKeybinds(base.Keybinds, layer.Keybinds)
+	base.MCP = mergeMCP(base.MCP, layer.MCP)
 	return base
+}
+
+// mergeMCP: when layer sets Servers (including empty map), it replaces base.
+// Omitted mcp / nil servers leaves base unchanged.
+func mergeMCP(base, layer MCPConfig) MCPConfig {
+	if layer.Servers != nil {
+		return MCPConfig{Servers: cloneMCPServers(layer.Servers)}
+	}
+	if base.Servers != nil {
+		return MCPConfig{Servers: cloneMCPServers(base.Servers)}
+	}
+	return MCPConfig{}
+}
+
+func cloneMCPServers(in map[string]MCPServer) map[string]MCPServer {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]MCPServer, len(in))
+	for k, v := range in {
+		s := MCPServer{
+			Command: strings.TrimSpace(v.Command),
+			Args:    append([]string(nil), v.Args...),
+		}
+		if len(v.Env) > 0 {
+			s.Env = make(map[string]string, len(v.Env))
+			for ek, ev := range v.Env {
+				s.Env[ek] = ev
+			}
+		}
+		out[k] = s
+	}
+	return out
 }

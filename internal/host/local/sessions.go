@@ -124,6 +124,26 @@ func (s sessionsAdapter) Fork(id string) (host.Session, error) {
 	return toHostSession(info), nil
 }
 
+func (s sessionsAdapter) Rename(id, title string) (host.Session, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return host.Session{}, fmt.Errorf("session id is empty")
+	}
+	info, err := s.m.Rename(id, title)
+	if err != nil {
+		return host.Session{}, err
+	}
+	return toHostSession(info), nil
+}
+
+func (s sessionsAdapter) Delete(id string, force bool) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return fmt.Errorf("session id is empty")
+	}
+	return s.m.Delete(id, force)
+}
+
 func toHostSession(info session.Info) host.Session {
 	return host.Session{
 		ID:         info.ID,

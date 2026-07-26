@@ -245,6 +245,7 @@ func TestModalVisuallyUnfocusesComposerAndSuppressesCompletionUntilClosed(t *tes
 	th.Border = fixedColor("#112233")
 	th.BorderFocus = fixedColor("#445566")
 	th.BorderMuted = fixedColor("#778899")
+	th.OverlayScrim = fixedColor("#99aabb")
 	m, ops := newAppTestModelWithOptions(Options{Theme: &th})
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.setComposerValueAt("/fa", 3)
@@ -271,9 +272,11 @@ func TestModalVisuallyUnfocusesComposerAndSuppressesCompletionUntilClosed(t *tes
 	if m.completionPopupHeight() != 0 {
 		t.Errorf("modal reserved completion height %d, want 0", m.completionPopupHeight())
 	}
-	composerRows := rowsContaining(withModal, "prompt")
-	if len(composerRows) == 0 || !strings.Contains(strings.Join(composerRows, "\n"), rgbSGR("#778899")) || strings.Contains(strings.Join(composerRows, "\n"), rgbSGR("#445566")) {
-		t.Errorf("modal composer border was not muted/dimmed:\n%s", withModal)
+	if !strings.Contains(withModal, rgbSGR("#99aabb")) {
+		t.Errorf("modal did not scrim background with OverlayScrim:\n%s", withModal)
+	}
+	if strings.Contains(withModal, rgbSGR("#445566")) {
+		t.Errorf("modal left focused border color in scrimmed background:\n%s", withModal)
 	}
 	if hasReverseVideo(withModal) {
 		t.Errorf("modal view rendered the composer's reverse-video cursor: %q", withModal)
@@ -285,6 +288,9 @@ func TestModalVisuallyUnfocusesComposerAndSuppressesCompletionUntilClosed(t *tes
 	m.modal = nil
 	m.reflow()
 	afterClose := m.View()
+	if strings.Contains(afterClose, rgbSGR("#99aabb")) {
+		t.Errorf("closed modal left OverlayScrim on the frame:\n%s", afterClose)
+	}
 	if !strings.Contains(afterClose, rgbSGR("#445566")) {
 		t.Errorf("closed modal did not restore focused composer border:\n%s", afterClose)
 	}
@@ -665,10 +671,7 @@ func TestSlashCommandExecutionAndSkillRenderingRemainIntact(t *testing.T) {
 		m = updated.(Model)
 		runAppCmd(t, cmd)
 		op := receiveAppOp(t, ops)
-		want := protocol.UserInput{Text: "Review: this diff"}
-		if op != want {
-			t.Errorf("operation = %#v, want %#v", op, want)
-		}
+		assertUserInputText(t, op, "Review: this diff")
 	})
 }
 
@@ -683,6 +686,9 @@ func TestContextSlashCommandInspectsEffectivePrompt(t *testing.T) {
 			if got := receiveAppOp(t, ops); got != (protocol.InspectEffectivePrompt{}) {
 				t.Errorf("operation = %#v, want InspectEffectivePrompt", got)
 			}
+			if !m.pendingContextDoctor {
+				t.Error("pendingContextDoctor = false, want true after /context")
+			}
 			if m.composer.Value() != "" {
 				t.Errorf("composer value = %q, want reset", m.composer.Value())
 			}
@@ -690,30 +696,55 @@ func TestContextSlashCommandInspectsEffectivePrompt(t *testing.T) {
 		})
 	}
 
+	// Pending doctor opens a modal (not a transcript dump).
 	m, _ := newAppTestModel(nil, nil)
+	m.pendingContextDoctor = true
+	m.contextLimit = 100_000
+	m.contextLimitKnown = true
 	m = updateApp(t, m, engineEventMsg{ev: protocol.EffectivePrompt{
 		Layers: []protocol.PromptLayerInfo{
-			{Kind: protocol.PromptLayerShared, Source: "builtin:shared", Mode: protocol.PromptLayerAppend, Chars: 100},
+			{Kind: protocol.PromptLayerShared, Source: "builtin:shared", Mode: protocol.PromptLayerAppend, Chars: 100, Preview: "You are strike"},
 			{Kind: protocol.PromptLayerPersona, Source: "agent:build", Mode: protocol.PromptLayerReplace, Chars: 40},
+			{Kind: protocol.PromptLayerMemory, Source: "memory:prefs", Mode: protocol.PromptLayerAppend, Chars: 20, Preview: "api_key=sk-ant-secretvaluehere"},
 		},
 		SystemChars:    200,
 		MessageCount:   3,
 		FromLastStream: true,
 	}})
+	if m.pendingContextDoctor {
+		t.Error("pendingContextDoctor still set after EffectivePrompt")
+	}
+	doc, ok := m.modal.(*doctorModal)
+	if !ok {
+		t.Fatalf("modal type = %T, want *doctorModal", m.modal)
+	}
+	plain := ansi.Strip(doc.view(60, theme.Default()))
+	if !strings.Contains(plain, "shared") || !strings.Contains(plain, "persona") {
+		t.Errorf("doctor missing layer kinds:\n%s", plain)
+	}
+	if !strings.Contains(plain, "200 chars") {
+		t.Errorf("doctor missing system chars:\n%s", plain)
+	}
+	if !strings.Contains(plain, "3 msgs") {
+		t.Errorf("doctor missing history count:\n%s", plain)
+	}
+	// Unsolicited EffectivePrompt still dumps to the transcript.
+	m2, _ := newAppTestModel(nil, nil)
+	m2 = updateApp(t, m2, engineEventMsg{ev: protocol.EffectivePrompt{
+		Layers:      []protocol.PromptLayerInfo{{Kind: protocol.PromptLayerShared, Source: "builtin:shared", Mode: protocol.PromptLayerAppend, Chars: 10}},
+		SystemChars: 10,
+	}})
+	if m2.modal != nil {
+		t.Fatal("unsolicited EffectivePrompt opened a modal")
+	}
 	found := false
-	for _, c := range m.cells {
-		if info, ok := c.(*infoCell); ok && strings.Contains(info.text, "effective prompt (last request)") {
+	for _, c := range m2.cells {
+		if info, ok := c.(*infoCell); ok && strings.Contains(info.text, "effective prompt") {
 			found = true
-			if !strings.Contains(info.text, "shared") || !strings.Contains(info.text, "persona") {
-				t.Errorf("info cell missing layer kinds:\n%s", info.text)
-			}
-			if !strings.Contains(info.text, "200 chars") {
-				t.Errorf("info cell missing system chars:\n%s", info.text)
-			}
 		}
 	}
 	if !found {
-		t.Fatal("EffectivePrompt did not append info cell")
+		t.Fatal("unsolicited EffectivePrompt did not append info cell")
 	}
 }
 
@@ -832,9 +863,7 @@ func TestOptionalHistoryIsBackwardCompatibleWhenOmitted(t *testing.T) {
 	m = updated.(Model)
 	runAppCmd(t, cmd)
 
-	if got := receiveAppOp(t, ops); got != (protocol.UserInput{Text: "no history configured"}) {
-		t.Errorf("operation = %#v, want ordinary UserInput", got)
-	}
+	assertUserInputText(t, receiveAppOp(t, ops), "no history configured")
 	if m.composer.Value() != "" || m.historyPos != -1 {
 		t.Errorf("submission did not reset composer state: value=%q historyPos=%d", m.composer.Value(), m.historyPos)
 	}
@@ -969,9 +998,7 @@ func TestSubmissionsPersistDisplayPromptAndStillEmitUserInput(t *testing.T) {
 			for _, msg := range runAllAppCmds(t, cmd) {
 				m = updateApp(t, m, msg)
 			}
-			if got := receiveAppOp(t, ops); got != (protocol.UserInput{Text: tt.wantInput}) {
-				t.Errorf("operation = %#v, want UserInput %q", got, tt.wantInput)
-			}
+			assertUserInputText(t, receiveAppOp(t, ops), tt.wantInput)
 			if got := store.Entries(); !slices.Equal(got, []string{tt.wantHistory}) {
 				t.Errorf("history = %q, want exact display prompt %q", got, tt.wantHistory)
 			}
@@ -1006,10 +1033,8 @@ func TestRapidSubmissionsEnqueueHistoryInSubmissionOrderBeforeCommandCompletion(
 			t.Errorf("engine send %d returned unexpected message %#v", i, msg)
 		}
 	}
-	for i, want := range []string{"first prompt", "second prompt"} {
-		if got := receiveAppOp(t, ops); got != (protocol.UserInput{Text: want}) {
-			t.Errorf("engine operation %d = %#v, want UserInput %q", i, got, want)
-		}
+	for _, want := range []string{"first prompt", "second prompt"} {
+		assertUserInputText(t, receiveAppOp(t, ops), want)
 	}
 
 	// Await persistence in the opposite order from submission. Acceptance order
@@ -1037,9 +1062,7 @@ func TestHistoryFailureShowsNoticeWithoutSuppressingSubmission(t *testing.T) {
 	for _, msg := range runAllAppCmds(t, cmd) {
 		m = updateApp(t, m, msg)
 	}
-	if got := receiveAppOp(t, ops); got != (protocol.UserInput{Text: "send despite persistence failure"}) {
-		t.Errorf("operation = %#v, want submission despite history failure", got)
-	}
+	assertUserInputText(t, receiveAppOp(t, ops), "send despite persistence failure")
 	if !m.noticeErr || !strings.Contains(m.notice, "saving prompt history failed") {
 		t.Errorf("history failure notice = %q (error=%v)", m.notice, m.noticeErr)
 	}
@@ -1059,9 +1082,7 @@ func TestSubmittingRecalledHistoryResetsBrowsingState(t *testing.T) {
 	for _, msg := range runAllAppCmds(t, cmd) {
 		m = updateApp(t, m, msg)
 	}
-	if got := receiveAppOp(t, ops); got != (protocol.UserInput{Text: "recalled prompt"}) {
-		t.Errorf("operation = %#v, want recalled prompt submission", got)
-	}
+	assertUserInputText(t, receiveAppOp(t, ops), "recalled prompt")
 	if m.historyPos != -1 || m.historyDraft != "" || m.composer.Value() != "" {
 		t.Errorf("recalled submission retained browsing state: pos=%d draft=%q value=%q", m.historyPos, m.historyDraft, m.composer.Value())
 	}
@@ -1256,9 +1277,7 @@ func TestPaletteSkillInsertionUsesOneCommandArgumentSeparatorAcrossThemes(t *tes
 					for _, msg := range runAllAppCmds(t, cmd) {
 						m = updateApp(t, m, msg)
 					}
-					if got := receiveAppOp(t, ops); got != (protocol.UserInput{Text: "executed main.go"}) {
-						t.Errorf("operation = %#v, want rendered skill input", got)
-					}
+					assertUserInputText(t, receiveAppOp(t, ops), "executed main.go")
 					if got := store.Entries(); !slices.Equal(got, []string{"/" + skillName + " main.go"}) {
 						t.Errorf("history = %q, want inserted command", got)
 					}
@@ -1527,6 +1546,20 @@ func assertNoAppOp(t *testing.T, ops <-chan protocol.Op) {
 	}
 }
 
+// assertUserInputText checks a received op is UserInput with the given text
+// (Images are ignored so text-only cases stay comparable after multimodal).
+func assertUserInputText(t *testing.T, got protocol.Op, wantText string) protocol.UserInput {
+	t.Helper()
+	in, ok := got.(protocol.UserInput)
+	if !ok {
+		t.Fatalf("op = %T %#v, want UserInput", got, got)
+	}
+	if in.Text != wantText {
+		t.Fatalf("UserInput.Text = %q, want %q", in.Text, wantText)
+	}
+	return in
+}
+
 func TestHeaderAgentBadgeGuardsDisplaySafety(t *testing.T) {
 	// Agents are not host-filtered; every render site must gate the name.
 	m, _ := newAppTestModel([]string{"build"}, nil)
@@ -1579,7 +1612,7 @@ func TestFocusAndPaletteClearCompletionBeforeChangingInputOwner(t *testing.T) {
 				t.Errorf("focus = %v, want right", m.focus)
 			}
 		}},
-		{"cycle next", tea.KeyMsg{Type: tea.KeyCtrlJ}, func(t *testing.T, m Model) {
+		{"cycle next", keyMsgAltJ(), func(t *testing.T, m Model) {
 			if m.windows.index != 1 {
 				t.Errorf("window index = %d, want 1", m.windows.index)
 			}
@@ -1601,10 +1634,7 @@ func TestFocusAndPaletteClearCompletionBeforeChangingInputOwner(t *testing.T) {
 				statefulTestWindow{windowID: "a", windowTitle: "A"},
 				statefulTestWindow{windowID: "b", windowTitle: "B"},
 			}}
-			// ctrl+j cycles only when right-focused; left treats it as newline (#187).
-			if tt.name == "cycle next" {
-				m.focus = focusRight
-			}
+			// Enhanced ctrl+j (alt+j) cycles from left focus (#240).
 			m.completion = leadingSlashCompletion("/", 0, 1, m.commands)
 			m = updateApp(t, m, tt.key)
 			if m.completion != nil {
@@ -1620,8 +1650,8 @@ func TestCycleWindowKeysClearOpenCompletionAndCycleOnce(t *testing.T) {
 		name string
 		key  tea.KeyMsg
 	}{
-		// Right-focus ctrl+j cycles; left-focus ctrl+j is newline (#187).
-		{name: "ctrl+j", key: tea.KeyMsg{Type: tea.KeyCtrlJ}},
+		// Enhanced ctrl+j (alt+j) cycles from either focus (#240).
+		{name: "ctrl+j", key: keyMsgAltJ()},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			m, ops := newAppTestModel(nil, nil)
@@ -1688,7 +1718,7 @@ func TestCompletionEscapeDismissesBeforeInterruptAndFocusChange(t *testing.T) {
 
 func TestModalOwnsGlobalKeysExceptQuit(t *testing.T) {
 	for _, msg := range []tea.KeyMsg{
-		{Type: tea.KeyCtrlJ}, {Type: tea.KeyCtrlL}, {Type: tea.KeyCtrlH}, {Type: tea.KeyCtrlK}, {Type: tea.KeyCtrlP}, {Type: tea.KeyF1},
+		keyMsgAltJ(), {Type: tea.KeyCtrlL}, {Type: tea.KeyCtrlH}, {Type: tea.KeyCtrlK}, {Type: tea.KeyCtrlP}, {Type: tea.KeyF1},
 	} {
 		t.Run(msg.String(), func(t *testing.T) {
 			m, ops := newAppTestModel(nil, nil)
@@ -1735,7 +1765,7 @@ func TestRightPaneOwnsOrdinaryKeysAndGlobalKeysRemainGlobal(t *testing.T) {
 	}
 	assertNoAppOp(t, ops)
 
-	for _, msg := range []tea.KeyMsg{{Type: tea.KeyCtrlJ}, {Type: tea.KeyCtrlK}} {
+	for _, msg := range []tea.KeyMsg{keyMsgAltJ(), {Type: tea.KeyCtrlK}} {
 		before := totalWindowUpdates(t, m.windows)
 		index := m.windows.index
 		m = updateApp(t, m, msg)

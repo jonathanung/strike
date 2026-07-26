@@ -36,7 +36,10 @@ const (
 	commandIssues          commandID = "issues"
 	commandContext         commandID = "context"
 	commandEffectivePrompt commandID = "effective-prompt"
+	commandCost            commandID = "cost"
 	commandUpgrade         commandID = "upgrade"
+	commandInit            commandID = "init"
+	commandMCP             commandID = "mcp"
 )
 
 type commandSource string
@@ -72,15 +75,18 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandSplit, Name: "/split", Description: "toggle horizontal/vertical pane split", Source: commandSourceBuiltin},
 	{ID: commandCompact, Name: "/compact", Description: "compact model history (keep recent turns)", Source: commandSourceBuiltin},
 	{ID: commandFork, Name: "/fork", Description: "duplicate the conversation into a new id", Source: commandSourceBuiltin},
-	{ID: commandUndo, Name: "/undo", Description: "drop the last completed user/assistant turn", Source: commandSourceBuiltin},
+	{ID: commandUndo, Name: "/undo", Description: "undo last turn (chat only, or chat + restore files)", ArgsHint: "[chat|files]", Source: commandSourceBuiltin},
 	{ID: commandSession, Name: "/session", Description: "browse and resume a past session", ArgsHint: "[id]", Source: commandSourceBuiltin},
 	{ID: commandHelp, Name: "/help", Description: "show available commands", Source: commandSourceBuiltin},
 	{ID: commandKeys, Name: "/keys", Description: "show keyboard shortcuts", ArgsHint: "[reset]", Source: commandSourceBuiltin},
 	{ID: commandMemory, Name: "/memory", Description: "list, get, set, delete, export, or import project memory", ArgsHint: "[list|get|set|rm|export|import] ...", Source: commandSourceBuiltin},
 	{ID: commandIssues, Name: "/issues", Description: "list, add, get, close, export, or import project issues", ArgsHint: "[list|add|get|close|export|import] ...", Source: commandSourceBuiltin},
-	{ID: commandContext, Name: "/context", Description: "inspect effective system-prompt layers", Source: commandSourceBuiltin},
-	{ID: commandEffectivePrompt, Name: "/effective-prompt", Description: "inspect effective system-prompt layers", Source: commandSourceBuiltin},
+	{ID: commandContext, Name: "/context", Description: "context doctor: system-prompt layer breakdown", Source: commandSourceBuiltin},
+	{ID: commandEffectivePrompt, Name: "/effective-prompt", Description: "context doctor: system-prompt layer breakdown", Source: commandSourceBuiltin},
+	{ID: commandCost, Name: "/cost", Description: "session token and cost totals", Source: commandSourceBuiltin},
 	{ID: commandUpgrade, Name: "/upgrade", Description: "install the latest release and restart", Source: commandSourceBuiltin},
+	{ID: commandInit, Name: "/init", Description: "create or update project AGENTS.md", Source: commandSourceBuiltin},
+	{ID: commandMCP, Name: "/mcp", Description: "list MCP servers and tool status", Source: commandSourceBuiltin},
 }
 
 // commandCatalog builds the slash-command catalog from the builtins and the
@@ -157,7 +163,10 @@ var reservedCommandNames = map[string]struct{}{
 	"issues":           {},
 	"context":          {},
 	"effective-prompt": {},
+	"cost":             {},
 	"upgrade":          {},
+	"init":             {},
+	"mcp":              {},
 }
 
 // validSkillName reports whether a skill name is safe to render and select as a

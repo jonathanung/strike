@@ -409,7 +409,8 @@ func loadSessionTranscript(sessions host.Sessions, id string) (cells []cell, too
 func decodeSessionJSONL(data []byte) ([]protocol.Event, error) {
 	var events []protocol.Event
 	sc := bufio.NewScanner(bytes.NewReader(data))
-	sc.Buffer(make([]byte, 0, 64*1024), 4<<20)
+	// Multimodal user.message lines can carry multi-MiB base64 images.
+	sc.Buffer(make([]byte, 0, 64*1024), 32<<20)
 	line := 0
 	for sc.Scan() {
 		raw := bytes.TrimSpace(sc.Bytes())
@@ -502,10 +503,7 @@ func seedFromReplay(m *Model, events []protocol.Event) {
 		case protocol.FastSelected:
 			m.fastEnabled = e.Enabled
 		case protocol.UsageReported:
-			m.usageInput = e.Input
-			m.usageOutput = e.Output
-			m.usageUsed = e.Used
-			m.usageSource = e.Source
+			m.recordUsage(e)
 		}
 	}
 }
@@ -596,7 +594,7 @@ func cellsFromEvents(events []protocol.Event) ([]cell, map[string]*toolCell) {
 		switch ev := ev.(type) {
 		case protocol.UserMessage:
 			complete()
-			cells = append(cells, &userCell{text: ev.Text})
+			cells = append(cells, &userCell{text: userMessageDisplayText(ev.Text, ev.Images)})
 		case protocol.TextDelta:
 			if last, ok := lastCell[*assistantCell](cells); ok {
 				last.text += ev.Text
@@ -697,36 +695,71 @@ func dropLastUserTurnCells(cells []cell, toolByID map[string]*toolCell) ([]cell,
 	return cells[:lastUser], toolByID
 }
 
-// sessionTreeNodes builds a ui.Tree of the root session and nested task
-// children for the activity pane.
+// sessionTreeNodes builds a ui.Tree of live parent sessions and nested task
+// children for the activity pane (multi-root when Roots is wired).
 func (m Model) sessionTreeNodes() []ui.TreeNode {
-	rootID := m.sessionID
-	if rootID == "" {
-		rootID = "session"
-	}
-	rootLabel := "session"
-	if topic := strings.TrimSpace(m.titleTopic); topic != "" {
-		rootLabel = sanitizeTitleTopic(topic)
-	}
-	root := ui.TreeNode{
-		ID:      rootID,
-		Label:   rootLabel,
-		Current: !m.viewingChild(),
-		Tone:    ui.ToneAccent,
-	}
-	if m.services.Sessions != nil && m.sessionID != "" {
-		if s, ok, err := m.services.Sessions.Get(m.sessionID); err == nil && ok {
-			root.Suffix = sessionPRBadge(m.th, s)
+	ids := m.liveRootIDs()
+	if len(ids) == 0 {
+		rootID := m.sessionID
+		if rootID == "" {
+			rootID = "session"
 		}
+		ids = []string{rootID}
 	}
-	kids := m.listChildren(m.sessionID)
-	if len(kids) == 0 {
-		root.Leaf = true
-		return []ui.TreeNode{root}
+	out := make([]ui.TreeNode, 0, len(ids))
+	for _, rootID := range ids {
+		rootLabel := m.rootTitleLabel(rootID)
+		if rootLabel == "" {
+			rootLabel = "session"
+		}
+		current := rootID == m.sessionID && !m.viewingChild()
+		root := ui.TreeNode{
+			ID:      rootID,
+			Label:   rootLabel,
+			Current: current,
+			Tone:    agentStateTone(m.rootAgentState(rootID)),
+			Detail:  agentsRootDetail(m.rootAgentState(rootID)),
+		}
+		if m.services.Sessions != nil && rootID != "" {
+			if s, ok, err := m.services.Sessions.Get(rootID); err == nil && ok {
+				root.Suffix = sessionPRBadge(m.th, s)
+			}
+		}
+		var kids []navChild
+		if rootID == m.sessionID {
+			kids = m.listChildren(rootID)
+		} else if m.roots != nil {
+			if p, ok := m.roots[rootID]; ok && p != nil {
+				// Rebuild nav children from stashed activity for background roots.
+				for _, ch := range p.children {
+					if ch.sessionID == "" || ch.sessionID == "child" {
+						continue
+					}
+					chParent := ch.parentID
+					if chParent == "" {
+						chParent = rootID
+					}
+					if chParent != rootID {
+						continue
+					}
+					kids = append(kids, navChild{
+						id:     ch.sessionID,
+						agent:  ch.agent,
+						prompt: ch.prompt,
+						status: ch.status,
+					})
+				}
+			}
+		}
+		if len(kids) == 0 {
+			root.Leaf = true
+		} else {
+			root.Expanded = true
+			root.Children = m.navChildrenToTree(kids)
+		}
+		out = append(out, root)
 	}
-	root.Expanded = true
-	root.Children = m.navChildrenToTree(kids)
-	return []ui.TreeNode{root}
+	return out
 }
 
 func (m Model) navChildrenToTree(kids []navChild) []ui.TreeNode {

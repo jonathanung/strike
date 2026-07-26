@@ -45,11 +45,13 @@ service/theme token).
 
 | Package | Role |
 |---|---|
-| `cmd/strike` | CLI flags + auth subcommands (`main.go`), composition root wiring (`wire.go`) |
+| `cmd/strike` | CLI flags + auth/exec/serve subcommands (`main.go`), composition root wiring (`wire.go`) |
+| `internal/server` | Experimental read-only HTTP attach (`strike serve`: /health, SSE events, attach page) |
 | `internal/protocol` | Ops/Events seam; JSONL envelopes |
 | `internal/engine` | Turn loop, tool dispatch, interrupts |
 | `internal/provider` | LLM adapters (+ `base`, `echo`, anthropic, openai, xai, chatgpt) |
 | `internal/tool` | read/glob/grep/edit/write/apply_patch/bash/task/webfetch/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/toolsearch |
+| `internal/mcp` | stdio MCP client; bridges external tools onto the registry |
 | `internal/question` | user-question ask service (suspend tool until QuestionReply) |
 | `internal/permission` | last-match-wins allow/ask/deny + ask service |
 | `internal/auth` | credentials, OAuth/PKCE/device, env precedence |

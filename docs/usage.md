@@ -47,7 +47,9 @@ strike launches without any provider configured. Pick one inside the TUI:
 /split                         # alias of /layout
 /compact                       # compact model history (trim or summarize per config)
 /fork                          # duplicate this conversation into a new session id
-/undo                          # drop the last completed user/assistant turn
+/undo                          # undo last turn (picker: chat only vs + files)
+/undo chat                     # drop last turn from history only
+/undo files                    # drop last turn and restore files edited then
 /rewind                        # alias of /undo
 /vim [path[:line]]             # open file in embedded editor (pane/overlay)
                                # or $EDITOR (see vimMode in config.md)
@@ -63,11 +65,15 @@ strike launches without any provider configured. Pick one inside the TUI:
                                # import merges by id; --replace wipes first.
                                # Relative export/import paths stay under the
                                # project root (no path escape).
-/context                       # inspect effective system-prompt layers
+/context                       # context doctor modal (prompt layer breakdown)
 /effective-prompt              # alias of /context
+/cost                          # session token totals and estimated USD cost
 /keys                          # filterable keybind cheatsheet (also f1)
 /help                          # list commands
 /upgrade                       # install latest GitHub Release and restart
+/init                          # create or update project AGENTS.md (confirm
+                               # before replacing an existing file)
+/mcp                           # list MCP servers (up/down) and tool names
 ```
 
 ### Session, memory, issues
@@ -77,11 +83,14 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/session` | picker of past **root** sessions (auto-titles); resume reloads model history |
 | `/session <id>` | resume that root session by id |
 | `/fork` | copy the current session JSONL into a new id (idle only) |
-| `/undo` / `/rewind` | drop the last completed turn (idle only) |
+| `/undo` / `/rewind` | undo last turn (idle only); bare opens picker; `chat` keeps disk; `files` restores per-file checkpoints from that turn (never `git reset --hard`) |
 | `/compact` | ask the engine to compact model history |
 | `/memory` | bare = list browser; `list [tag]`, `get <key>`, `set <key> <value>`, `rm <key>`, `export [path]`, `import <path> [--replace]` (portable JSON; relative paths stay under project root) |
 | `/issues` | bare = list browser; `list [open\|closed]`, `add <title>`, `get <id>`, `close <id>`, `export [path]`, `import <path> [--replace]` (same portable rules as memory) |
-| `/context` | dump effective system-prompt layers into the transcript |
+| `/context` | context doctor modal: layer sizes, history msg count, oversized warnings (previews redacted) |
+| `/cost` | session input/output/cache totals from usage events; est. USD when catalog rates known; unknown stays explicit |
+| `/init` | light local scan → write `AGENTS.md`; confirms before overwrite |
+| `/mcp` | list configured MCP servers, status, and namespaced tool ids (see [config.md](config.md#mcp-servers-stdio-tools)) |
 
 ### Autonomy & workflows
 
@@ -163,7 +172,8 @@ slot hosts one active window from the registry:
 
 Vim-style pane keys (horizontal split): `ctrl+h` / `ctrl+l` focus the left
 or right pane; `ctrl+j` / `ctrl+k` cycle the active right-pane window
-next/previous. `ctrl+;` (or `/layout` / `/split`) toggles a vertical
+next/previous (enhanced terminals distinguish `ctrl+j` from bare LF
+newline). `ctrl+;` (or `/layout` / `/split`) toggles a vertical
 top/bottom split and swaps those chords (focus becomes `ctrl+j`/`ctrl+k`,
 cycle becomes `ctrl+h`/`ctrl+l`). `ctrl+p` opens the command palette; `f1`
 (or `/keys`) opens a filterable keybind cheatsheet. Enter sends; Shift+Enter
@@ -188,8 +198,10 @@ cards in place of a blank viewport; when space allows, a Logo band sits above
 the cards and the header still owns the compact brand. The dashboard always
 shows keybindings. It shows get-started provider rows only when no provider is
 selected or the selected provider needs authentication, with provider rows
-bounded to fit; agents and skills only when valid configured entries exist;
-and recent prompts only when prompt history exists. It repacks to fit the
-terminal on resize and collapses to a single column when narrow.
+bounded to fit (and a `/init` CTA when `AGENTS.md` is missing); first-run
+onboarding also mentions `/init`. Agents and skills appear only when valid
+configured entries exist; recent prompts only when prompt history exists. It
+repacks to fit the terminal on resize and collapses to a single column when
+narrow.
 
 Full keyboard reference: [keybinds.md](keybinds.md).

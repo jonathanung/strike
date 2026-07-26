@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -21,11 +22,20 @@ type sessionResumeMsg struct {
 	id string
 }
 
+type sessionModalPhase int
+
+const (
+	sessionPhaseBrowse sessionModalPhase = iota
+	sessionPhaseRename
+	sessionPhaseConfirmDelete
+)
+
 // sessionModal is the centered picker for past root sessions (/session).
 // Titles come from durable auto-title metadata. Enter resumes via
 // sessionResumeMsg so the composition root reopens with model history.
 // Default list is scoped to the current launch project; ctrl+a toggles
-// all-projects mode when the host supports it.
+// all-projects mode when the host supports it. Type filters live; ctrl+r
+// renames; ctrl+x deletes with confirm (force required for open/active).
 type sessionModal struct {
 	sessions    host.Sessions
 	current     string
@@ -36,6 +46,11 @@ type sessionModal struct {
 	now         time.Time
 	allProjects bool
 	canAll      bool
+	phase       sessionModalPhase
+	renameBuf   string
+	deleteID    string
+	deleteForce bool
+	statusErr   string // transient action error (rename/delete)
 }
 
 func newSessionModal(sessions host.Sessions, current string) *sessionModal {
@@ -50,6 +65,7 @@ func newSessionModal(sessions host.Sessions, current string) *sessionModal {
 	}
 	_, m.canAll = sessions.(host.AllProjectsSessions)
 	m.reload()
+	m.selectCurrentOnOpen()
 	return m
 }
 
@@ -83,11 +99,16 @@ func (m *sessionModal) reload() {
 		list = r.RefreshPRStates(list)
 	}
 	m.all = list
-	m.cursor = 0
+	if m.cursor >= len(m.all) {
+		m.cursor = max(0, len(m.all)-1)
+	}
+}
+
+func (m *sessionModal) selectCurrentOnOpen() {
 	for i, s := range m.all {
 		if s.ID == m.current {
 			m.cursor = i
-			break
+			return
 		}
 	}
 }
@@ -109,18 +130,39 @@ func (m *sessionModal) filtered() []host.Session {
 	return out
 }
 
+func (m *sessionModal) selected() (host.Session, bool) {
+	list := m.filtered()
+	if len(list) == 0 || m.cursor < 0 || m.cursor >= len(list) {
+		return host.Session{}, false
+	}
+	return list[m.cursor], true
+}
+
 func (m *sessionModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
+	switch m.phase {
+	case sessionPhaseRename:
+		return m.updateRename(msg)
+	case sessionPhaseConfirmDelete:
+		return m.updateConfirmDelete(msg)
+	default:
+		return m.updateBrowse(msg)
+	}
+}
+
+func (m *sessionModal) updateBrowse(msg tea.KeyMsg) (modal, tea.Cmd) {
 	list := m.filtered()
 	if isEscape(msg) {
 		return nil, nil
 	}
 	switch msg.String() {
 	case "up", "ctrl+p":
+		m.statusErr = ""
 		if m.cursor > 0 {
 			m.cursor--
 		}
 		return m, nil
 	case "down", "ctrl+n":
+		m.statusErr = ""
 		if m.cursor < len(list)-1 {
 			m.cursor++
 		}
@@ -131,9 +173,31 @@ func (m *sessionModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 		}
 		m.allProjects = !m.allProjects
 		m.filter = ""
+		m.statusErr = ""
 		m.reload()
+		m.selectCurrentOnOpen()
+		return m, nil
+	case "ctrl+r":
+		s, ok := m.selected()
+		if !ok || m.loadErr != "" {
+			return m, nil
+		}
+		m.phase = sessionPhaseRename
+		m.renameBuf = strings.TrimSpace(s.Title)
+		m.statusErr = ""
+		return m, nil
+	case "ctrl+x":
+		s, ok := m.selected()
+		if !ok || m.loadErr != "" {
+			return m, nil
+		}
+		m.phase = sessionPhaseConfirmDelete
+		m.deleteID = s.ID
+		m.deleteForce = false
+		m.statusErr = ""
 		return m, nil
 	case "backspace":
+		m.statusErr = ""
 		if m.filter != "" {
 			m.filter = m.filter[:len(m.filter)-1]
 			m.cursor = 0
@@ -155,6 +219,7 @@ func (m *sessionModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 		}
 	default:
 		if msg.Type == tea.KeyRunes {
+			m.statusErr = ""
 			m.filter += string(msg.Runes)
 			m.cursor = 0
 		}
@@ -162,9 +227,138 @@ func (m *sessionModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 	}
 }
 
+func (m *sessionModal) updateRename(msg tea.KeyMsg) (modal, tea.Cmd) {
+	if isEscape(msg) {
+		m.phase = sessionPhaseBrowse
+		m.renameBuf = ""
+		m.statusErr = ""
+		return m, nil
+	}
+	switch msg.String() {
+	case "enter":
+		s, ok := m.selected()
+		if !ok {
+			m.phase = sessionPhaseBrowse
+			return m, nil
+		}
+		if m.sessions == nil {
+			m.statusErr = "session list unavailable"
+			m.phase = sessionPhaseBrowse
+			return m, nil
+		}
+		title := strings.TrimSpace(m.renameBuf)
+		got, err := m.sessions.Rename(s.ID, title)
+		if err != nil {
+			m.statusErr = err.Error()
+			m.phase = sessionPhaseBrowse
+			m.renameBuf = ""
+			return m, nil
+		}
+		// Update list in place so view reflects rename without full PR refresh churn.
+		keepID := got.ID
+		m.phase = sessionPhaseBrowse
+		m.renameBuf = ""
+		m.statusErr = ""
+		m.reload()
+		m.cursorOn(keepID)
+		return m, nil
+	case "backspace":
+		if m.renameBuf != "" {
+			// rune-safe trim
+			r := []rune(m.renameBuf)
+			m.renameBuf = string(r[:len(r)-1])
+		}
+		return m, nil
+	default:
+		if msg.Type == tea.KeyRunes {
+			m.renameBuf += string(msg.Runes)
+		}
+		return m, nil
+	}
+}
+
+func (m *sessionModal) updateConfirmDelete(msg tea.KeyMsg) (modal, tea.Cmd) {
+	if isEscape(msg) || msg.String() == "n" {
+		m.phase = sessionPhaseBrowse
+		m.deleteID = ""
+		m.deleteForce = false
+		m.statusErr = ""
+		return m, nil
+	}
+	switch msg.String() {
+	case "f":
+		m.deleteForce = true
+		return m, nil
+	case "y", "enter":
+		return m.doDelete()
+	default:
+		return m, nil
+	}
+}
+
+func (m *sessionModal) doDelete() (modal, tea.Cmd) {
+	id := m.deleteID
+	force := m.deleteForce
+	if id == "" || m.sessions == nil {
+		m.phase = sessionPhaseBrowse
+		m.deleteID = ""
+		m.deleteForce = false
+		return m, nil
+	}
+	// Active (current) or open sessions require an explicit force arm.
+	needsForce := id == m.current
+	if !needsForce {
+		if s, ok, _ := m.sessions.Get(id); ok && s.Open {
+			needsForce = true
+		}
+	}
+	if needsForce && !force {
+		// Stay in confirm so the user can press f then y.
+		return m, nil
+	}
+	if err := m.sessions.Delete(id, force || needsForce); err != nil {
+		if strings.Contains(err.Error(), "force required") {
+			// Manager still considers it open; keep confirm open for force.
+			return m, nil
+		}
+		m.statusErr = err.Error()
+		m.phase = sessionPhaseBrowse
+		m.deleteID = ""
+		m.deleteForce = false
+		return m, nil
+	}
+	m.phase = sessionPhaseBrowse
+	m.deleteID = ""
+	m.deleteForce = false
+	m.statusErr = ""
+	m.reload()
+	list := m.filtered()
+	if m.cursor >= len(list) {
+		m.cursor = max(0, len(list)-1)
+	}
+	return m, nil
+}
+
+func (m *sessionModal) cursorOn(id string) {
+	list := m.filtered()
+	for i, s := range list {
+		if s.ID == id {
+			m.cursor = i
+			return
+		}
+	}
+}
+
 func (m *sessionModal) view(width int, th theme.Theme) string {
 	st := th.S()
 	inner := max(1, ui.PanelInnerWidth(th, width))
+
+	if m.phase == sessionPhaseRename {
+		return m.viewRename(width, th, inner)
+	}
+	if m.phase == sessionPhaseConfirmDelete {
+		return m.viewConfirmDelete(width, th, inner)
+	}
 
 	var body string
 	switch {
@@ -200,12 +394,15 @@ func (m *sessionModal) view(width int, th theme.Theme) string {
 			Total:      len(m.all),
 			Empty:      "no matches for \"" + m.filter + "\"",
 		})
+		if m.statusErr != "" {
+			body = body + "\n" + wrapToWidth(st.Error.Render(m.statusErr), inner)
+		}
 	}
 	title := "Resume session"
 	if m.allProjects {
 		title = "Resume session (all projects)"
 	}
-	hints := []string{"type to filter", "↑/↓ move", "enter resume", "esc close"}
+	hints := []string{"type to filter", "↑/↓ move", "enter resume", "ctrl+r rename", "ctrl+x delete", "esc close"}
 	if m.canAll {
 		if m.allProjects {
 			hints = append([]string{"ctrl+a this project"}, hints...)
@@ -218,6 +415,69 @@ func (m *sessionModal) view(width int, th theme.Theme) string {
 		Hint:  dotJoin(th, hints...),
 		Width: width,
 	}, body)
+}
+
+func (m *sessionModal) viewRename(width int, th theme.Theme, inner int) string {
+	st := th.S()
+	s, ok := m.selected()
+	label := "session"
+	if ok {
+		label = shortSessionID(s.ID)
+	}
+	lines := []string{
+		st.Muted.Render("Rename " + label),
+		st.Input.Render(m.renameBuf) + st.InputCursor.Render(th.Icons.InputCursor),
+	}
+	body := wrapToWidth(strings.Join(lines, "\n"), inner)
+	return ui.Dialog(th, ui.DialogOpts{
+		Title: "Rename session",
+		Hint:  dotJoin(th, "type title", "enter save", "esc cancel"),
+		Width: width,
+	}, body)
+}
+
+func (m *sessionModal) viewConfirmDelete(width int, th theme.Theme, inner int) string {
+	st := th.S()
+	title := m.deleteID
+	openHint := ""
+	if s, ok, _ := m.lookup(m.deleteID); ok {
+		title = sessionPickerLabel(s)
+		needsForce := s.Open || s.ID == m.current
+		if needsForce {
+			if m.deleteForce {
+				openHint = st.Warning.Render("force armed — enter/y deletes open session")
+			} else {
+				openHint = st.Warning.Render("open/active — press f to arm force, then y")
+			}
+		}
+	}
+	lines := []string{
+		st.Error.Render("Delete session?"),
+		st.Text.Render(sanitizeDisplayData(title)),
+		st.Muted.Render(shortSessionID(m.deleteID)),
+	}
+	if openHint != "" {
+		lines = append(lines, openHint)
+	}
+	body := wrapToWidth(strings.Join(lines, "\n"), inner)
+	return ui.Dialog(th, ui.DialogOpts{
+		Title: "Delete session",
+		Hint:  dotJoin(th, "y/enter confirm", "f force", "n/esc cancel"),
+		Width: width,
+		Tone:  ui.ToneError,
+	}, body)
+}
+
+func (m *sessionModal) lookup(id string) (host.Session, bool, error) {
+	for _, s := range m.all {
+		if s.ID == id {
+			return s, true, nil
+		}
+	}
+	if m.sessions != nil {
+		return m.sessions.Get(id)
+	}
+	return host.Session{}, false, fmt.Errorf("unavailable")
 }
 
 func sessionPickerLabel(s host.Session) string {

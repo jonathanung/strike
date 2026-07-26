@@ -253,9 +253,18 @@ const (
 // Op is a client -> engine submission.
 type Op interface{ isOp() }
 
+// ImageAttachment is one image attached to a user message (paste/drop).
+// Data is standard base64 (no data: URI prefix). MIME is a full media type
+// such as image/png.
+type ImageAttachment struct {
+	MIME string `json:"mime"`
+	Data string `json:"data"`
+}
+
 // UserInput submits a user message, starting a turn.
 type UserInput struct {
-	Text string `json:"text"`
+	Text   string            `json:"text"`
+	Images []ImageAttachment `json:"images,omitempty"`
 }
 
 // PermissionReply resolves a pending PermissionAsked event.
@@ -337,8 +346,13 @@ type Compact struct {
 type InspectEffectivePrompt struct{}
 
 // Rewind removes the last completed user↔assistant turn from model-facing
-// history only (not filesystem side effects). Rejected while a turn is running.
-type Rewind struct{}
+// history. When RestoreFiles is true, also restores per-file checkpoints
+// captured before mutating tools in that turn (never git reset --hard).
+// Rejected while a turn is running.
+type Rewind struct {
+	// RestoreFiles reverts disk changes from the last turn's file checkpoints.
+	RestoreFiles bool `json:"restoreFiles,omitempty"`
+}
 
 func (UserInput) isOp()              {}
 func (PermissionReply) isOp()        {}
@@ -406,7 +420,8 @@ type ChildCompleted struct {
 // transcript is fully reconstructable from events alone.
 type UserMessage struct {
 	Correlation
-	Text string `json:"text"`
+	Text   string            `json:"text"`
+	Images []ImageAttachment `json:"images,omitempty"`
 }
 
 // SessionTitled records the human-readable session title. Emitted once when
@@ -640,10 +655,16 @@ func UnknownTokens() TokenCount { return TokenCount{} }
 // UsageReported carries token accounting for one completed provider stream.
 // Emitted on every EventDone that has usage (including tool-loop intermediate
 // streams), correlated to the provider request.
+//
+// CacheRead/CacheCreation are Known only when the vendor broke out those
+// parts (including zero). When only a total is available, Input/Output/cache
+// stay unknown and Used carries the total — never fabricate measured zeros.
 type UsageReported struct {
 	Correlation
-	Input  TokenCount `json:"input"`
-	Output TokenCount `json:"output"`
+	Input         TokenCount `json:"input"`
+	Output        TokenCount `json:"output"`
+	CacheRead     TokenCount `json:"cacheRead"`
+	CacheCreation TokenCount `json:"cacheCreation"`
 	// Used is context-window numerator (last request occupancy).
 	Used   TokenCount `json:"used"`
 	Source string     `json:"source,omitempty"` // actual | estimated
@@ -709,11 +730,21 @@ type SessionMeta struct {
 
 // SessionRewound records that the last completed user↔assistant turn was
 // dropped from model-facing history. Restore applies the same drop so
-// --continue stays consistent. Does not reverse tool filesystem side effects.
+// --continue stays consistent. File restore is best-effort per path and is
+// recorded here; it is not re-applied on JSONL resume (disk already changed).
 type SessionRewound struct {
 	Correlation
 	// Removed is how many provider messages were dropped (0 when unknown).
 	Removed int `json:"removed,omitempty"`
+	// TurnID is the checkpoint turn id when known (matches the undone turn).
+	TurnID string `json:"turnId,omitempty"`
+	// RestoreFiles echoes whether the Rewind op requested disk restore.
+	RestoreFiles bool `json:"restoreFiles,omitempty"`
+	// FilesRestored is how many paths were written back or deleted.
+	FilesRestored int `json:"filesRestored,omitempty"`
+	// FilesSkipped is how many checkpointed paths could not be restored
+	// (oversized/unreadable originals).
+	FilesSkipped int `json:"filesSkipped,omitempty"`
 }
 
 // HookMatched records that a declarative config hook rule fired (log/block/

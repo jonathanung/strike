@@ -9,7 +9,7 @@ session defaults.
 | Key | Action |
 |---|---|
 | `enter` | send prompt |
-| `shift+enter` | newline (`ctrl+j` / bare LF; `alt+enter` after enhanced CSI) |
+| `shift+enter` | newline (`alt+enter` after enhanced CSI; bare LF fallback) |
 | `esc` | interrupt turn / reject permission / close modal |
 | `ctrl+c` | quit |
 | `ctrl+p` | command palette |
@@ -27,7 +27,7 @@ session defaults.
 | `ctrl+up` / `ctrl+down` | scroll transcript |
 | `ctrl+t` | jump to latest output |
 | `ctrl+h` / `ctrl+l` | focus left / right pane (horizontal split) |
-| `ctrl+j` / `ctrl+k` | cycle right-pane window next / previous (when right pane focused; left-focus `ctrl+j` is newline) |
+| `ctrl+j` / `ctrl+k` | cycle right-pane window next / previous (enhanced `ctrl+j` is distinct from bare LF newline) |
 | `ctrl+;` | toggle split orientation (`/layout`, `/split`) |
 
 In a vertical split, focus and cycle chords swap: focus is `ctrl+j`/`ctrl+k`,

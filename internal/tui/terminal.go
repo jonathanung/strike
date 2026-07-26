@@ -13,12 +13,41 @@ import (
 const (
 	// authExpiryWarn is how soon before OAuth expiry the header/notice warn.
 	authExpiryWarn = 24 * time.Hour
-	// notifyAfterTurn is the minimum turn duration before an unfocused
-	// completion notification is sent.
+	// notifyAfterTurn is the minimum turn duration before a completion
+	// notification is sent (avoids spam on short turns).
 	notifyAfterTurn = 30 * time.Second
 	// titleTopicMaxRunes caps the window-title topic length.
 	titleTopicMaxRunes = 40
+	// notifyMessageMaxRunes caps OSC 9 desktop notification body length.
+	notifyMessageMaxRunes = 120
 )
+
+// NotifyMode selects when desktop notifications (OSC 9 + bell) fire.
+type NotifyMode string
+
+const (
+	// NotifyUnfocusedOnly fires when the terminal is unfocused, or when focus
+	// reporting never arrived (heuristic: treat as may-be-unfocused). Default.
+	NotifyUnfocusedOnly NotifyMode = "unfocused-only"
+	// NotifyOn always fires for attention events and long turn completion.
+	NotifyOn NotifyMode = "on"
+	// NotifyOff disables desktop notifications.
+	NotifyOff NotifyMode = "off"
+)
+
+// ParseNotifyMode resolves a config value. Empty yields unfocused-only.
+func ParseNotifyMode(value string) (NotifyMode, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", string(NotifyUnfocusedOnly), "unfocused", "blur":
+		return NotifyUnfocusedOnly, true
+	case string(NotifyOn), "true", "1", "yes", "always":
+		return NotifyOn, true
+	case string(NotifyOff), "false", "0", "no", "never":
+		return NotifyOff, true
+	default:
+		return "", false
+	}
+}
 
 // windowTitle builds the terminal title: "strike", or "strike — {topic}"
 // when a topic (first user message, else short session id) is available.
@@ -69,6 +98,55 @@ func truncateRunes(s string, n int) string {
 	return string(runes[:n])
 }
 
+// shouldDesktopNotify reports whether a desktop notification should fire.
+// attention is true for permission/question (always eligible when mode allows);
+// false for turn-complete (also requires a long turn).
+func (m Model) shouldDesktopNotify(attention bool) bool {
+	mode := m.notifyMode
+	if mode == "" {
+		mode = NotifyUnfocusedOnly
+	}
+	switch mode {
+	case NotifyOff:
+		return false
+	case NotifyOn:
+		if attention {
+			return true
+		}
+		return m.longTurnElapsed()
+	default: // unfocused-only
+		if !m.notifyFocusAllows() {
+			return false
+		}
+		if attention {
+			return true
+		}
+		return m.longTurnElapsed()
+	}
+}
+
+// notifyFocusAllows is true when the terminal is unfocused, or when focus
+// reporting has never been observed (heuristic fallback).
+func (m Model) notifyFocusAllows() bool {
+	if !m.focusKnown {
+		return true
+	}
+	return !m.focused
+}
+
+func (m Model) longTurnElapsed() bool {
+	return !m.turnStartedAt.IsZero() && time.Since(m.turnStartedAt) >= notifyAfterTurn
+}
+
+// desktopNotifyCmd returns a bell+OSC9 cmd when gating allows, else nil.
+// Messages must be static/safe — never include secrets or user content.
+func (m Model) desktopNotifyCmd(message string, attention bool) tea.Cmd {
+	if !m.shouldDesktopNotify(attention) {
+		return nil
+	}
+	return notifyUnfocusedCmd(message)
+}
+
 // notifyUnfocusedCmd rings the terminal bell and emits OSC 9 (desktop
 // notification) on stderr so altscreen stdout is undisturbed.
 func notifyUnfocusedCmd(message string) tea.Cmd {
@@ -83,7 +161,8 @@ func notifyUnfocusedCmd(message string) tea.Cmd {
 	}
 }
 
-// sanitizeNotifyMessage drops control characters that would break OSC payloads.
+// sanitizeNotifyMessage drops control characters that would break OSC payloads
+// and caps length so notification text cannot carry large/secret blobs.
 func sanitizeNotifyMessage(s string) string {
 	s = strings.Map(func(r rune) rune {
 		if r == '\a' || isControlRune(r) {
@@ -91,5 +170,6 @@ func sanitizeNotifyMessage(s string) string {
 		}
 		return r
 	}, s)
-	return strings.TrimSpace(s)
+	s = strings.Join(strings.Fields(s), " ")
+	return truncateRunes(s, notifyMessageMaxRunes)
 }

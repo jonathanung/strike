@@ -14,28 +14,86 @@ import (
 
 const agentsWindowID = "agents"
 
-// agentsStateMsg is a snapshot of the live parent's subagents for the agents
-// right-pane window. Model owns child lifecycle; the window only renders.
-type agentsStateMsg struct {
-	parentID  string
-	viewingID string
-	children  []childActivity
+// agentsViewFilter selects which nodes the agents tree shows.
+type agentsViewFilter int
+
+const (
+	agentsFilterAll agentsViewFilter = iota
+	agentsFilterAttention
+	agentsFilterWorking
+	agentsFilterReady
+	agentsFilterRoots
+	agentsFilterCount
+)
+
+func (f agentsViewFilter) next() agentsViewFilter {
+	return (f + 1) % agentsFilterCount
 }
 
-// agentsOpenMsg requests opening a child transcript from the agents window.
+func (f agentsViewFilter) label() string {
+	switch f {
+	case agentsFilterAttention:
+		return "attention"
+	case agentsFilterWorking:
+		return "working"
+	case agentsFilterReady:
+		return "ready"
+	case agentsFilterRoots:
+		return "roots"
+	default:
+		return "all"
+	}
+}
+
+// agentsRootSnap is one parent row plus its subagent children for the tree.
+type agentsRootSnap struct {
+	ID       string
+	Title    string
+	State    theme.AgentState
+	Children []childActivity
+}
+
+// agentsStateMsg is a snapshot of concurrent roots + subagents for the agents
+// right-pane window. Model owns lifecycle; the window only renders and emits
+// selection/spawn/interrupt intents.
+type agentsStateMsg struct {
+	activeID  string
+	viewingID string
+	roots     []agentsRootSnap
+}
+
+// agentsOpenMsg requests focusing a tree node (root activate or child transcript).
 type agentsOpenMsg struct {
+	sessionID string
+	interrupt bool
+}
+
+// agentsSpawnMsg requests a new concurrent parent session.
+type agentsSpawnMsg struct{}
+
+// agentsInterruptMsg requests interrupt of the selected session.
+type agentsInterruptMsg struct {
 	sessionID string
 }
 
-// agentsWindow lists subagents of the current parent session only — running,
-// done, or failed — with select-to-open via the existing session_nav path.
+// agentsWindow is a multi-root session tree: top-level = parent agents, nested
+// = that parent's subagents. Keys: j/k move, enter select, n spawn, x interrupt,
+// space/h/l toggle expand, f cycle view filter, / text filter.
 type agentsWindow struct {
-	parentID  string
+	activeID  string
 	viewingID string
-	children  []childActivity
-	cursor    int
-	width     int
-	height    int
+	roots     []agentsRootSnap
+	nodes     []ui.TreeNode
+	// collapsed records user-collapsed node ids; missing means expanded.
+	collapsed map[string]bool
+	// viewFilter is the active state/structure filter (f cycles).
+	viewFilter agentsViewFilter
+	// textFilter is an optional name/id substring filter (/ to edit).
+	textFilter string
+	filterEdit bool
+	cursor     int
+	width      int
+	height     int
 }
 
 func newAgentsWindow() agentsWindow {
@@ -44,17 +102,50 @@ func newAgentsWindow() agentsWindow {
 
 func (w agentsWindow) id() string { return agentsWindowID }
 
-func (w agentsWindow) title() string { return "agents" }
+func (w agentsWindow) title() string {
+	// title() has no theme arg; default tokens keep the panel chrome consistent.
+	th := theme.Default().Resolve()
+	base := "agents"
+	switch w.viewFilter {
+	case agentsFilterAttention:
+		if n := w.countState(theme.AgentStateAttention); n > 0 {
+			return dotJoin(th, base, itoa(n)+" need you")
+		}
+		return dotJoin(th, base, "attention")
+	case agentsFilterWorking:
+		return dotJoin(th, base, "working")
+	case agentsFilterReady:
+		return dotJoin(th, base, "ready")
+	case agentsFilterRoots:
+		return dotJoin(th, base, "roots")
+	default:
+		if n := w.countState(theme.AgentStateAttention); n > 0 {
+			return dotJoin(th, base, itoa(n)+" need you")
+		}
+		return base
+	}
+}
 
 func (w agentsWindow) init() tea.Cmd { return nil }
 
 func (w agentsWindow) update(msg tea.Msg) (window, tea.Cmd) {
 	switch msg := msg.(type) {
 	case agentsStateMsg:
-		w.parentID = msg.parentID
+		w.activeID = msg.activeID
 		w.viewingID = msg.viewingID
-		w.children = append([]childActivity(nil), msg.children...)
-		w.cursor = clampAgentsCursor(w.cursor, len(w.children))
+		w.roots = append([]agentsRootSnap(nil), msg.roots...)
+		w.nodes = w.buildNodes()
+		// Keep cursor on the same id when possible.
+		rows := ui.FlattenTree(w.nodes)
+		if id := w.selectedID(rows); id != "" {
+			for i, r := range rows {
+				if r.ID == id {
+					w.cursor = i
+					break
+				}
+			}
+		}
+		w.cursor = clampAgentsCursor(w.cursor, len(rows))
 		return w, nil
 	case tea.KeyMsg:
 		return w.handleKey(msg)
@@ -73,34 +164,79 @@ func (w agentsWindow) view(th theme.Theme) string {
 	}
 	th = th.Resolve()
 	st := th.S()
+	ic := iconsFor(th)
 	visible := w.height
 	if visible < 1 {
 		visible = 0
 	}
-	rows := w.listableChildren()
+	// Rebuild so viewFilter/textFilter always match the rendered tree.
+	w.nodes = w.buildNodes()
+	rows := ui.FlattenTree(w.nodes)
+	empty := agentsEmptyLabel(w.viewFilter, w.textFilter)
+	showFilter := w.filterEdit || w.textFilter != ""
+	bodyH := visible
+	var header string
+	if showFilter {
+		cursor := ""
+		if w.filterEdit {
+			cursor = ic.FilterCursor
+		}
+		header = st.Muted.Render("filter: ") + st.Input.Render(sanitizeDisplayData(w.textFilter)+cursor)
+		if bodyH > 0 {
+			bodyH--
+		}
+	}
+	var body string
 	if len(rows) == 0 {
-		return lipgloss.NewStyle().Width(max(1, w.width)).Render(
-			st.Muted.Render("no subagents this session"),
+		body = lipgloss.NewStyle().Width(max(1, w.width)).Render(
+			st.Muted.Render(empty),
 		)
+	} else {
+		body = ui.Tree(th, ui.TreeOpts{
+			Nodes:   w.nodes,
+			Cursor:  clampAgentsCursor(w.cursor, len(rows)),
+			Width:   w.width,
+			Visible: bodyH,
+			Empty:   empty,
+		})
 	}
-	items := make([]ui.ListItem, len(rows))
-	for i, ch := range rows {
-		items[i] = agentsListItem(th, ch, w.viewingID == ch.sessionID)
+	if header == "" {
+		return body
 	}
-	return ui.List(th, ui.ListOpts{
-		Items:   items,
-		Cursor:  clampAgentsCursor(w.cursor, len(rows)),
-		Width:   w.width,
-		Visible: visible,
-		Empty:   "no subagents this session",
-	})
+	if bodyH <= 0 || body == "" {
+		return lipgloss.NewStyle().Width(max(1, w.width)).Render(header)
+	}
+	return header + "\n" + body
+}
+
+func agentsEmptyLabel(filter agentsViewFilter, text string) string {
+	if q := strings.TrimSpace(text); q != "" {
+		return "no matches for \"" + sanitizeDisplayData(q) + "\""
+	}
+	switch filter {
+	case agentsFilterAttention:
+		return "no agents need attention"
+	case agentsFilterWorking:
+		return "no agents working"
+	case agentsFilterReady:
+		return "no agents ready"
+	case agentsFilterRoots:
+		return "no parent agents"
+	default:
+		// Match prior empty copy so registry/width tests stay stable; multi-root
+		// spawn is advertised via the n keybind in the keys pane.
+		return "no subagents this session"
+	}
 }
 
 func (w agentsWindow) handleKey(msg tea.KeyMsg) (agentsWindow, tea.Cmd) {
-	rows := w.listableChildren()
-	if len(rows) == 0 {
-		return w, nil
+	if w.filterEdit {
+		return w.handleFilterEditKey(msg)
 	}
+	if len(w.nodes) == 0 {
+		w.nodes = w.buildNodes()
+	}
+	rows := ui.FlattenTree(w.nodes)
 	w.cursor = clampAgentsCursor(w.cursor, len(rows))
 	switch msg.String() {
 	case "up", "k":
@@ -111,30 +247,320 @@ func (w agentsWindow) handleKey(msg tea.KeyMsg) (agentsWindow, tea.Cmd) {
 		if w.cursor < len(rows)-1 {
 			w.cursor++
 		}
-	case "enter", "right", "l":
-		ch := rows[w.cursor]
-		id := strings.TrimSpace(ch.sessionID)
-		if id == "" || id == "child" {
+	case "f":
+		w.viewFilter = w.viewFilter.next()
+		w.nodes = w.buildNodes()
+		rows = ui.FlattenTree(w.nodes)
+		w.cursor = clampAgentsCursor(w.cursor, len(rows))
+	case "/":
+		w.filterEdit = true
+		return w, nil
+	case "n":
+		return w, func() tea.Msg { return agentsSpawnMsg{} }
+	case "x", "ctrl+c":
+		if len(rows) == 0 {
 			return w, nil
 		}
+		id := rows[w.cursor].ID
+		return w, func() tea.Msg { return agentsInterruptMsg{sessionID: id} }
+	case " ", "h", "left", "l", "right":
+		if len(rows) == 0 {
+			return w, nil
+		}
+		row := rows[w.cursor]
+		if row.Expandable {
+			if w.collapsed == nil {
+				w.collapsed = map[string]bool{}
+			}
+			if w.collapsed[row.ID] {
+				delete(w.collapsed, row.ID)
+			} else {
+				w.collapsed[row.ID] = true
+			}
+			w.nodes = w.buildNodes()
+			rows = ui.FlattenTree(w.nodes)
+			w.cursor = clampAgentsCursor(w.cursor, len(rows))
+		} else if msg.String() == "l" || msg.String() == "right" || msg.String() == " " {
+			id := row.ID
+			return w, func() tea.Msg { return agentsOpenMsg{sessionID: id} }
+		}
+	case "enter":
+		if len(rows) == 0 {
+			return w, nil
+		}
+		id := rows[w.cursor].ID
 		return w, func() tea.Msg { return agentsOpenMsg{sessionID: id} }
 	}
 	return w, nil
 }
 
-// listableChildren drops placeholder spawn rows without a real session id.
-func (w agentsWindow) listableChildren() []childActivity {
-	if len(w.children) == 0 {
+func (w agentsWindow) handleFilterEditKey(msg tea.KeyMsg) (agentsWindow, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		w.filterEdit = false
+		w.textFilter = ""
+		w.nodes = w.buildNodes()
+		w.cursor = clampAgentsCursor(w.cursor, len(ui.FlattenTree(w.nodes)))
+	case "enter":
+		w.filterEdit = false
+	case "backspace":
+		if w.textFilter != "" {
+			runes := []rune(w.textFilter)
+			w.textFilter = string(runes[:len(runes)-1])
+			w.nodes = w.buildNodes()
+			w.cursor = clampAgentsCursor(w.cursor, len(ui.FlattenTree(w.nodes)))
+		}
+	case "ctrl+u":
+		w.textFilter = ""
+		w.nodes = w.buildNodes()
+		w.cursor = clampAgentsCursor(w.cursor, len(ui.FlattenTree(w.nodes)))
+	default:
+		if msg.Type == tea.KeyRunes {
+			w.textFilter += string(msg.Runes)
+			w.nodes = w.buildNodes()
+			w.cursor = clampAgentsCursor(w.cursor, len(ui.FlattenTree(w.nodes)))
+		}
+	}
+	return w, nil
+}
+
+func (w agentsWindow) selectedID(rows []ui.TreeRow) string {
+	if len(rows) == 0 {
+		return ""
+	}
+	i := clampAgentsCursor(w.cursor, len(rows))
+	return rows[i].ID
+}
+
+func (w agentsWindow) buildNodes() []ui.TreeNode {
+	if len(w.roots) == 0 {
 		return nil
 	}
-	out := make([]childActivity, 0, len(w.children))
-	for _, ch := range w.children {
+	q := strings.ToLower(strings.TrimSpace(w.textFilter))
+	out := make([]ui.TreeNode, 0, len(w.roots))
+	for _, root := range w.roots {
+		id := strings.TrimSpace(root.ID)
+		if id == "" {
+			continue
+		}
+		label := strings.TrimSpace(root.Title)
+		if label == "" {
+			label = shortSessionID(id)
+		}
+		if label == "" {
+			label = "session"
+		}
+		node := ui.TreeNode{
+			ID:      id,
+			Label:   label,
+			Current: w.viewingID == id || (w.viewingID == "" && w.activeID == id),
+			Tone:    agentStateTone(root.State),
+			Detail:  agentsRootDetail(root.State),
+		}
+		if w.viewFilter == agentsFilterRoots {
+			// Structure filter: parents only; still honor text filter.
+			if !agentsTextMatches(q, id, label) {
+				continue
+			}
+			node.Leaf = true
+			out = append(out, node)
+			continue
+		}
+
+		kids := listableChildActivities(root.Children)
+		var childNodes []ui.TreeNode
+		if len(kids) > 0 {
+			childNodes = w.filterChildTree(kids, q)
+		}
+		includeRoot := false
+		switch {
+		case w.viewFilter == agentsFilterAll:
+			includeRoot = q == "" || agentsTextMatches(q, id, label) || len(childNodes) > 0
+			if q != "" && !agentsTextMatches(q, id, label) {
+				// Keep root only as container for matching descendants.
+				if len(childNodes) == 0 {
+					includeRoot = false
+				}
+			}
+		default:
+			// State filters: root if it matches, or it has matching descendants.
+			stateOK := agentsStateMatches(root.State, w.viewFilter)
+			textOK := q == "" || agentsTextMatches(q, id, label)
+			includeRoot = (stateOK && textOK) || len(childNodes) > 0
+			if stateOK && !textOK && len(childNodes) == 0 {
+				includeRoot = false
+			}
+		}
+		if !includeRoot {
+			continue
+		}
+		if len(childNodes) == 0 {
+			node.Leaf = true
+		} else {
+			node.Expanded = !w.collapsed[id]
+			node.Children = childNodes
+		}
+		out = append(out, node)
+	}
+	return out
+}
+
+func (w agentsWindow) filterChildTree(kids []childActivity, q string) []ui.TreeNode {
+	byParent := map[string][]childActivity{}
+	ids := map[string]bool{}
+	for _, ch := range kids {
+		ids[ch.sessionID] = true
+	}
+	var tops []childActivity
+	for _, ch := range kids {
+		p := strings.TrimSpace(ch.parentID)
+		if p == "" || !ids[p] {
+			tops = append(tops, ch)
+			continue
+		}
+		byParent[p] = append(byParent[p], ch)
+	}
+	var build func(ch childActivity) (ui.TreeNode, bool)
+	build = func(ch childActivity) (ui.TreeNode, bool) {
+		label := childViewTitle(ch.agent, ch.prompt)
+		if label == "" {
+			label = shortSessionID(ch.sessionID)
+		}
+		state := childAgentState(ch.status)
+		node := ui.TreeNode{
+			ID:      ch.sessionID,
+			Label:   label,
+			Detail:  ch.status,
+			Current: w.viewingID == ch.sessionID,
+			Tone:    childStatusTone(ch.status),
+		}
+		var children []ui.TreeNode
+		for _, g := range byParent[ch.sessionID] {
+			if gn, ok := build(g); ok {
+				children = append(children, gn)
+			}
+		}
+		selfOK := agentsStateMatches(state, w.viewFilter) && agentsTextMatches(q, ch.sessionID, label, ch.agent, ch.prompt)
+		if !selfOK && len(children) == 0 {
+			return ui.TreeNode{}, false
+		}
+		if len(children) == 0 {
+			node.Leaf = true
+		} else {
+			node.Expanded = !w.collapsed[ch.sessionID]
+			node.Children = children
+		}
+		return node, true
+	}
+	out := make([]ui.TreeNode, 0, len(tops))
+	for _, ch := range tops {
+		if n, ok := build(ch); ok {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+func agentsStateMatches(state theme.AgentState, filter agentsViewFilter) bool {
+	switch filter {
+	case agentsFilterAttention:
+		return state == theme.AgentStateAttention
+	case agentsFilterWorking:
+		return state == theme.AgentStateWorking
+	case agentsFilterReady:
+		return state == theme.AgentStateReady
+	default:
+		// all, roots: state not used as exclusion
+		return true
+	}
+}
+
+func agentsTextMatches(q string, parts ...string) bool {
+	if q == "" {
+		return true
+	}
+	for _, p := range parts {
+		if strings.Contains(strings.ToLower(p), q) {
+			return true
+		}
+	}
+	return false
+}
+
+func childAgentState(status string) theme.AgentState {
+	switch status {
+	case "running":
+		return theme.AgentStateWorking
+	case string(protocol.ChildStatusFailed):
+		return theme.AgentStateError
+	case string(protocol.ChildStatusCanceled):
+		return theme.AgentStateDead
+	default:
+		// completed / unknown → idle green (ready)
+		return theme.AgentStateReady
+	}
+}
+
+func (w agentsWindow) countState(want theme.AgentState) int {
+	n := 0
+	for _, root := range w.roots {
+		if strings.TrimSpace(root.ID) == "" {
+			continue
+		}
+		if root.State == want {
+			n++
+		}
+		for _, ch := range listableChildActivities(root.Children) {
+			if childAgentState(ch.status) == want {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+func listableChildActivities(children []childActivity) []childActivity {
+	if len(children) == 0 {
+		return nil
+	}
+	out := make([]childActivity, 0, len(children))
+	for _, ch := range children {
 		if ch.sessionID == "" || ch.sessionID == "child" {
 			continue
 		}
 		out = append(out, ch)
 	}
 	return out
+}
+
+func childStatusTone(status string) ui.Tone {
+	switch status {
+	case "running":
+		return ui.ToneAccentAlt
+	case string(protocol.ChildStatusCompleted):
+		return ui.ToneSuccess
+	case string(protocol.ChildStatusFailed):
+		return ui.ToneError
+	case string(protocol.ChildStatusCanceled):
+		return ui.ToneMuted
+	default:
+		return ui.ToneDefault
+	}
+}
+
+func agentsRootDetail(state theme.AgentState) string {
+	switch state {
+	case theme.AgentStateWorking:
+		return "working"
+	case theme.AgentStateAttention:
+		return "attention"
+	case theme.AgentStateError:
+		return "error"
+	case theme.AgentStateDead:
+		return "dead"
+	default:
+		return "ready"
+	}
 }
 
 func clampAgentsCursor(cursor, n int) int {
@@ -150,6 +576,7 @@ func clampAgentsCursor(cursor, n int) int {
 	return cursor
 }
 
+// agentsListItem retained for tests that still build status chips.
 func agentsListItem(th theme.Theme, ch childActivity, current bool) ui.ListItem {
 	th = th.Resolve()
 
@@ -167,7 +594,6 @@ func agentsListItem(th theme.Theme, ch childActivity, current bool) ui.ListItem 
 	if age := agentsAgeLabel(ch, time.Now()); age != "" {
 		detail = statusLabel + themedSpace(th.Spacing.XS) + age
 	}
-	// Pre-style glyph so running keeps the in-progress accent (pairs with #190).
 	suffix := statusStyle.Render(themedSpace(th.Spacing.XS) + glyph)
 	return ui.ListItem{
 		Label:   label,

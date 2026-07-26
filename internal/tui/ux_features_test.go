@@ -111,11 +111,11 @@ func TestToggleOrientationAndLayoutCommand(t *testing.T) {
 	if m.splitOrientation != orientVertical {
 		t.Fatalf("after toggle orientation = %v, want vertical", m.splitOrientation)
 	}
-	if !key.Matches(tea.KeyMsg{Type: tea.KeyCtrlJ}, m.keyMap.FocusLeft) {
-		t.Error("vertical: ctrl+j should focus top/left")
+	if !key.Matches(keyMsgAltJ(), m.keyMap.FocusLeft) {
+		t.Error("vertical: ctrl+j (alt+j) should focus top/left")
 	}
-	if key.Matches(tea.KeyMsg{Type: tea.KeyCtrlJ}, m.keyMap.CycleWindowNext) {
-		t.Error("vertical: ctrl+j should not cycle windows")
+	if key.Matches(keyMsgAltJ(), m.keyMap.CycleWindowNext) {
+		t.Error("vertical: ctrl+j (alt+j) should not cycle windows")
 	}
 
 	// /layout flips back to horizontal and restores default chords.
@@ -125,8 +125,8 @@ func TestToggleOrientationAndLayoutCommand(t *testing.T) {
 	if m.splitOrientation != orientHorizontal {
 		t.Fatalf("/layout orientation = %v, want horizontal", m.splitOrientation)
 	}
-	if !key.Matches(tea.KeyMsg{Type: tea.KeyCtrlJ}, m.keyMap.CycleWindowNext) {
-		t.Error("horizontal: ctrl+j should cycle windows")
+	if !key.Matches(keyMsgAltJ(), m.keyMap.CycleWindowNext) {
+		t.Error("horizontal: ctrl+j (alt+j) should cycle windows")
 	}
 	if !strings.Contains(m.notice, "horizontal") {
 		t.Errorf("layout notice = %q, want horizontal", m.notice)
@@ -164,22 +164,30 @@ func TestVerticalFocusKeysSwapNotCycle(t *testing.T) {
 		t.Fatal("need vertical orientation")
 	}
 	startIdx := m.windows.index
-	// Left-focus ctrl+j is newline (bare LF / shift+enter), not focus (#187).
+	// Bare LF is newline on left; enhanced ctrl+j (alt+j) is focus-top (#240).
 	m.composer.SetValue("v")
 	m.composer.SetCursor(1)
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
 	if got := m.composer.Value(); got != "v\n" {
-		t.Errorf("vertical left ctrl+j composer = %q, want v\\n", got)
+		t.Errorf("vertical left bare LF composer = %q, want v\\n", got)
 	}
 	if m.focus != focusLeft {
-		t.Errorf("vertical left ctrl+j focus = %v, want left", m.focus)
+		t.Errorf("vertical left bare LF focus = %v, want left", m.focus)
 	}
 	if m.windows.index != startIdx {
-		t.Errorf("vertical left ctrl+j cycled window index %d → %d", startIdx, m.windows.index)
+		t.Errorf("vertical left bare LF cycled window index %d → %d", startIdx, m.windows.index)
+	}
+	// Enhanced ctrl+j while left-focused is focus-top (no-op focus, no newline).
+	m = updateApp(t, m, keyMsgAltJ())
+	if got := m.composer.Value(); got != "v\n" {
+		t.Errorf("vertical left enhanced ctrl+j composer = %q, want v\\n", got)
+	}
+	if m.focus != focusLeft {
+		t.Errorf("vertical left enhanced ctrl+j focus = %v, want left", m.focus)
 	}
 	// From right pane, vertical ctrl+j focuses top/left; empty-EOL ctrl+k focuses bottom.
 	m.focus = focusRight
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	m = updateApp(t, m, keyMsgAltJ())
 	if m.focus != focusLeft {
 		t.Errorf("vertical right ctrl+j focus = %v, want left/top", m.focus)
 	}

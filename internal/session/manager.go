@@ -166,9 +166,73 @@ func (m *Manager) SetWorktree(id, path, branch string) error {
 // Destroy closes an open session (if any) and removes its durable log + meta.
 // Used to roll back a half-created session when worktree bind fails.
 func (m *Manager) Destroy(id string) error {
+	return m.delete(id, true)
+}
+
+// Rename sets the durable display title for id (open or closed). Empty title
+// clears to untitled. Survives restart via the meta sidecar.
+func (m *Manager) Rename(id, title string) (Info, error) {
+	id = strings.TrimSpace(id)
+	if err := validateID(id); err != nil {
+		return Info{}, err
+	}
+	title = strings.TrimSpace(title)
+
+	// Ensure the session exists on disk or is open.
+	if _, err := m.Get(id); err != nil {
+		return Info{}, err
+	}
+	meta, err := UpdateMeta(m.dir, id, func(meta *Meta) {
+		meta.Title = title
+	})
+	if err != nil {
+		return Info{}, err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if e, ok := m.sessions[id]; ok {
+		e.info.Title = meta.Title
+		return e.info, nil
+	}
+	// Closed: re-read so callers get a full Info snapshot.
+	path := LogPath(m.dir, id)
+	st, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return Info{}, fmt.Errorf("session %q not found", id)
+		}
+		return Info{}, err
+	}
+	return m.infoFromDiskLocked(id, st)
+}
+
+// Delete removes a session's JSONL log and meta sidecar. When the session is
+// currently open in this manager, force must be true; otherwise Delete returns
+// an error and leaves files intact.
+func (m *Manager) Delete(id string, force bool) error {
+	return m.delete(id, force)
+}
+
+func (m *Manager) delete(id string, force bool) error {
 	id = strings.TrimSpace(id)
 	if err := validateID(id); err != nil {
 		return err
+	}
+	m.mu.Lock()
+	_, open := m.sessions[id]
+	m.mu.Unlock()
+	if open && !force {
+		return fmt.Errorf("session %q is open; force required to delete", id)
+	}
+	// Existence check for closed sessions (open ones are known).
+	if !open {
+		if _, err := os.Stat(LogPath(m.dir, id)); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("session %q not found", id)
+			}
+			return err
+		}
 	}
 	_ = m.Close(id)
 	var first error

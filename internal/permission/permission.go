@@ -41,6 +41,7 @@ var knownPermissions = map[string]struct{}{
 	"memory_write": {}, "memory_read": {}, "issue_write": {}, "issue_read": {},
 	"sleep": {}, "skill": {}, "question": {}, "toolsearch": {}, "hook": {},
 	"enter_plan_mode": {}, "exit_plan_mode": {}, "phase_done": {},
+	"mcp": {},
 }
 
 func ValidAction(a Action) bool {
@@ -97,6 +98,8 @@ func Defaults() Ruleset {
 		{Permission: "exit_plan_mode", Pattern: "*", Action: Allow},
 		{Permission: "phase_done", Pattern: "*", Action: Allow},
 		{Permission: "toolsearch", Pattern: "*", Action: Allow},
+		// External MCP tools can run arbitrary server-side code — always ask.
+		{Permission: "mcp", Pattern: "*", Action: Ask},
 	}
 }
 

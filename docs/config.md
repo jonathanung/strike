@@ -11,6 +11,7 @@ JSON:
   "defaultAgent": "build",
   "theme": "strike",
   "vimMode": "pane",
+  "notify": "unfocused-only",
   "permissionMode": "default",
   "permissionAutoApproveSeconds": 10,
   "permissionAutoApproveExclude": ["bash"],
@@ -41,6 +42,21 @@ is a positive integer (clamped to 1–60), the permission modal counts down and
 submits **allow once** at zero. Esc, reject, or any explicit choice cancels
 the timer. Disabled by default (`0` / omitted). Names in
 `permissionAutoApproveExclude` (case-insensitive) never auto-approve.
+
+## Desktop notifications (`notify`)
+
+When the terminal is unfocused, strike can ring the bell and emit OSC 9
+desktop notifications for **needs attention** (permission / question) and
+**long turn complete** (≥30s). Notification text is fixed labels only — never
+paths, prompts, or secrets.
+
+| Value | Behavior |
+|---|---|
+| `unfocused-only` (default) | notify when unfocused; if the terminal never reports focus, use the same path for attention + long turns |
+| `on` | always notify (attention + long turns), even when focused |
+| `off` | never notify |
+
+Unknown values are ignored at load time.
 
 ## Session worktrees
 
@@ -104,6 +120,58 @@ restores built-in defaults for the current session only — delete the
 `keybinds` object from config to persist defaults.
 
 List/permission modal conventions (`lists.*`, `perm.*`) are not remappable.
+
+## MCP servers (stdio tools)
+
+Connect external [Model Context Protocol](https://modelcontextprotocol.io)
+servers so their tools appear in the model registry as `mcp_<server>_<tool>`.
+v1 is **stdio only** (command + args). SSE/HTTP transports are out of scope.
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "github": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-github"],
+        "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "…" }
+      }
+    }
+  }
+}
+```
+
+| Field | Required | Notes |
+|---|---|---|
+| `servers.<name>` | yes | short letter-led slug (`[A-Za-z][A-Za-z0-9_-]*`) |
+| `command` | yes | executable on `PATH` or absolute path |
+| `args` | no | argv after the command |
+| `env` | no | explicit env overlay (merged onto the process environment); never logged |
+
+Layers: when a layer sets `mcp.servers` (including `{}`), it **replaces** the
+previous layer's server map. Omitted `mcp` leaves the lower layer unchanged.
+
+Lifecycle: servers start with the session (after the tool worktree is bound),
+list tools once, and shut down on exit. A crashed server does not take down
+strike — its tools error cleanly; `/mcp` shows `down`/`error`.
+
+Permissions: every MCP tool call asks with permission name `mcp` and pattern
+`<server>/<tool>` (default action **ask**). Allow a server or tool in config:
+
+```json
+{
+  "permissions": [
+    { "permission": "mcp", "pattern": "github/*", "action": "allow" },
+    { "permission": "mcp", "pattern": "github/delete_*", "action": "deny" }
+  ]
+}
+```
+
+In the TUI, `/mcp` lists configured servers, up/down status, and tool names.
+
+Treat project-local MCP config like shell hooks: it runs local commands. Prefer
+global `~/.strike/config` for shared servers; review `command`/`args`/`env`
+before trusting a project's `.strike/config`.
 
 ## Custom providers
 
@@ -188,4 +256,5 @@ floors at `minimal` on the OpenAI family (which has no zero setting), and
 | `xhigh` | deeper reasoning, best for coding and agentic work |
 | `max` | maximum reasoning when correctness beats cost |
 
-Agents, skills, and workflows: [agents-skills.md](agents-skills.md).
+Agents, skills, and workflows (including `.claude` / `.opencode` discovery
+roots and merge order): [agents-skills.md](agents-skills.md).

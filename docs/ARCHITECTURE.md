@@ -43,7 +43,8 @@ event stream the TUI rendered from (see `internal/protocol/codec.go`).
 
 | Package | Role | May import |
 |---|---|---|
-| `cmd/strike` | CLI entry (`main.go`: flags, usage, `strike auth` subcommand) + composition root (`wire.go`: assembles engine, host/local, session store, tui) | anything — the only package that wires the whole tree |
+| `cmd/strike` | CLI entry (`main.go`: flags, usage, `strike auth`/`exec`/`serve` subcommands) + composition root (`wire.go`: assembles engine, host/local, session store, tui) | anything — the only package that wires the whole tree |
+| `internal/server` | Experimental read-only HTTP attach: `/health`, SSE session event tail, minimal attach page (`strike serve`) | `session`, `version`, `protocol` (via session JSONL), stdlib |
 | `internal/version` | Build-time Version/Commit stamped via `-ldflags` | stdlib |
 | `internal/update` | GitHub Releases self-update (check, download, sha256, atomic replace, re-exec) | `version`, stdlib, net/http |
 | `internal/protocol` | Op/Event seam between engine and frontends; the JSONL envelope (`codec.go`) is the session persistence format | stdlib only |
@@ -52,6 +53,7 @@ event stream the TUI rendered from (see `internal/protocol/codec.go`).
 | `internal/provider/base` | Shared HTTP/JSON/SSE/auth client concrete adapters embed | `provider`, stdlib, net/http |
 | `internal/provider/{anthropic,openaicompat,chatgpt,echo}` | Concrete adapters (openaicompat covers both the OpenAI platform API and xAI; chatgpt is the ChatGPT-subscription backend; echo is the offline dev provider) | `provider`, `provider/base` (all but echo), stdlib |
 | `internal/tool` | Tool contract (`Tool`, `Context`, `Result`) + built-ins: read/glob/grep/edit/write/apply_patch/bash/task/webfetch/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/phase_done/toolsearch | `provider` (for `ToolSchema`), `memory`, `issue`, stdlib |
+| `internal/mcp` | stdio MCP client + session manager; bridges remote tools onto `tool.Registry` as `mcp_<server>_<tool>` | `tool`, stdlib |
 | `internal/memory` | Project-scoped durable key/value memory (JSON under `~/.strike/memory/`) | stdlib |
 | `internal/issue` | Project-scoped durable issues (JSON under `~/.strike/issues/`) | stdlib |
 | `internal/question` | User-question ask service: suspends a tool call until `QuestionReply` | `protocol`, stdlib |
@@ -63,7 +65,7 @@ event stream the TUI rendered from (see `internal/protocol/codec.go`).
 | `internal/history` | Project-scoped prompt history | stdlib |
 | `internal/project` | Stable filesystem identity + optional per-session git worktrees under `.strike/worktrees/` | stdlib, os/exec |
 | `internal/host` | **Frozen contract**: the services a frontend needs from its host process | stdlib only — enforced by the boundary test |
-| `internal/host/local` | Real `host.Services` implementation; wraps auth/config/models/history/memory/issue/files for the frontend | `auth`, `config`, `history`, `host`, `issue`, `memory`, `models` |
+| `internal/host/local` | Real `host.Services` implementation; wraps auth/config/models/history/memory/issue/files/mcp for the frontend | `auth`, `config`, `history`, `host`, `issue`, `mcp`, `memory`, `models` |
 | `internal/tui` | Bubble Tea frontend: app model, layout, transcript cells, modals, composer | `protocol`, `host`, `tui/...` only — enforced by the boundary test |
 | `internal/tui/theme` | Resolved design tokens: adaptive color roles, terminal background, glyphs, border/spacing tokens, and precomputed styles | lipgloss, stdlib |
 | `internal/tui/ui` | Reusable component library (Panel, Dialog, Badge, KeyHints, StatusBar, List, Notice, Card/Bento, OverlayCenter, Canvas, Logo) | stdlib, lipgloss, bubbles, charmbracelet/x/ansi, `tui/theme` |
@@ -223,9 +225,10 @@ Two different mechanisms, depending on whether it needs Go code:
    `autonomy`, `auth`, `settings`, `agent`, `fast`, `vim`, `md-read`,
    `theme`, `layout`, `split`, `compact`, `fork`, `undo`, `rewind`,
    `session`, `help`, `keys`, `memory`, `issues`, `context`,
-   `effective-prompt`, `upgrade`) are rejected by
+   `effective-prompt`, `cost`, `upgrade`, `init`, `mcp`) are rejected by
    `config.ValidateSkillName` before
-   they ever reach the frontend. PR URLs from successful `gh pr` bash
+   they ever reach the frontend. `/init` is a builtin that writes project
+   `AGENTS.md` via `host.ProjectInit` (confirm before overwrite). PR URLs from successful `gh pr` bash
    output are stored via `protocol.SessionMeta` and `session` sidecar
    metadata. `/vim` embeds nvim/vim in the right-pane `editor` window by
    default (PTY + vt10x via `internal/tui/term`). Config key `vimMode`

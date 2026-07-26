@@ -39,15 +39,18 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/split":            {"toggle horizontal/vertical pane split", "", commandSourceBuiltin},
 		"/compact":          {"compact model history (keep recent turns)", "", commandSourceBuiltin},
 		"/fork":             {"duplicate the conversation into a new id", "", commandSourceBuiltin},
-		"/undo":             {"drop the last completed user/assistant turn", "", commandSourceBuiltin},
+		"/undo":             {"undo last turn (chat only, or chat + restore files)", "[chat|files]", commandSourceBuiltin},
 		"/session":          {"browse and resume a past session", "[id]", commandSourceBuiltin},
 		"/help":             {"show available commands", "", commandSourceBuiltin},
 		"/keys":             {"show keyboard shortcuts", "[reset]", commandSourceBuiltin},
 		"/memory":           {"list, get, set, delete, export, or import project memory", "[list|get|set|rm|export|import] ...", commandSourceBuiltin},
 		"/issues":           {"list, add, get, close, export, or import project issues", "[list|add|get|close|export|import] ...", commandSourceBuiltin},
-		"/context":          {"inspect effective system-prompt layers", "", commandSourceBuiltin},
-		"/effective-prompt": {"inspect effective system-prompt layers", "", commandSourceBuiltin},
+		"/context":          {"context doctor: system-prompt layer breakdown", "", commandSourceBuiltin},
+		"/effective-prompt": {"context doctor: system-prompt layer breakdown", "", commandSourceBuiltin},
+		"/cost":             {"session token and cost totals", "", commandSourceBuiltin},
 		"/upgrade":          {"install the latest release and restart", "", commandSourceBuiltin},
+		"/init":             {"create or update project AGENTS.md", "", commandSourceBuiltin},
+		"/mcp":              {"list MCP servers and tool status", "", commandSourceBuiltin},
 		"/review":           {"review a change", "$ARGUMENTS", commandSourceSkill},
 		"/explain":          {"explain code", "", commandSourceSkill},
 	}
@@ -74,7 +77,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 }
 
 func TestValidSkillNameRejectsReservedBuiltinsIncludingMDRead(t *testing.T) {
-	for _, name := range []string{"provider", "model", "effort", "autonomy", "mode", "auth", "agent", "fast", "vim", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "help", "keys", "memory", "issues", "context", "effective-prompt", "upgrade"} {
+	for _, name := range []string{"provider", "model", "effort", "autonomy", "mode", "auth", "agent", "fast", "vim", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "help", "keys", "memory", "issues", "context", "effective-prompt", "cost", "upgrade", "init", "mcp"} {
 		if validSkillName(name) {
 			t.Errorf("validSkillName(%q) = true, want false for reserved builtin", name)
 		}

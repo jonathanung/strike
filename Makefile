@@ -1,4 +1,4 @@
-.PHONY: build run run-echo test vet cover cover-check clean setup
+.PHONY: build run run-echo serve test vet cover cover-check clean setup
 
 # Overall statement-coverage floor for `make cover-check` (local / optional CI).
 # Soft baseline ~77%; keep below measured total so the gate does not flake.
@@ -8,10 +8,13 @@ COVER_PROFILE ?= coverage.out
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
-LDFLAGS ?= -X github.com/jonathanung/strike-cli/internal/version.Version=$(VERSION) -X github.com/jonathanung/strike-cli/internal/version.Commit=$(COMMIT)
+# GO_LDFLAGS is intentionally not named LDFLAGS: many macOS/Homebrew shells
+# export LDFLAGS for the C toolchain, and Make's "?=" would inherit that and
+# break `go build -ldflags`.
+GO_LDFLAGS ?= -X github.com/jonathanung/strike-cli/internal/version.Version=$(VERSION) -X github.com/jonathanung/strike-cli/internal/version.Commit=$(COMMIT)
 
 build:
-	go build -ldflags "$(LDFLAGS)" -o strike ./cmd/strike
+	go build -ldflags "$(GO_LDFLAGS)" -o strike ./cmd/strike
 
 # Creates ~/.strike (config, example agent + skill); never overwrites.
 setup:
@@ -24,6 +27,10 @@ run: build
 # Offline dev loop — no API key needed.
 run-echo: build
 	./strike --provider echo
+
+# Experimental read-only web attach (auto-mints token; see README).
+serve: build
+	./strike serve --addr 127.0.0.1:8787
 
 test:
 	go test ./...

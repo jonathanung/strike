@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -117,6 +118,9 @@ type Options struct {
 	PermissionAutoApproveSeconds int
 	// PermissionAutoApproveExclude lists permission names that never auto-allow.
 	PermissionAutoApproveExclude []string
+	// NotifyMode selects desktop notifications: on, off, or unfocused-only
+	// (default). Wired from config.notify.
+	NotifyMode NotifyMode
 	// Replay is a prior session event log for --continue / --session. Seeded
 	// via cellsFromEvents + silent selection/child state — never fed through
 	// applyEvent (avoids stuck turns, zombie permission modals, orphan children).
@@ -129,14 +133,20 @@ type Options struct {
 // firstRunSetupMsg opens the provider picker once on a fresh install.
 type firstRunSetupMsg struct{}
 
-// contextLimitsMsg delivers catalog context-window and output-limit lookups
-// for a provider/model pair. Applied only when that pair is still selected.
+// contextLimitsMsg delivers catalog context-window, output-limit, and optional
+// pricing lookups for a provider/model pair. Applied only when that pair is
+// still selected.
 type contextLimitsMsg struct {
 	provider, model string
 	contextTokens   int
 	contextOK       bool
 	outputTokens    int
 	outputOK        bool
+	attachment      bool
+	attachmentOK    bool
+	inputCost       float64
+	outputCost      float64
+	hasCost         bool
 }
 
 // Model is the root Bubble Tea model. It holds its host services, the
@@ -176,6 +186,9 @@ type Model struct {
 	// pendingPastes holds full text for collapsed large-paste chips in the
 	// composer. Expanded on send; pruned when the chip leaves the value.
 	pendingPastes []pasteChip
+	// pendingImages holds image attachments for [image N] chips in the
+	// composer. Sent as multimodal UserInput; pruned when the chip leaves.
+	pendingImages []imageChip
 	completion    *completionState
 	keyMap        keyMap
 	// keyOverrides are config keybind remaps (id → chords); used to rebuild
@@ -242,12 +255,21 @@ type Model struct {
 	vimMode VimMode
 	// usage* hold the latest UsageReported figures; Known=false means unknown
 	// (never treat as measured zero). Limits come from the host catalog.
-	usageInput, usageOutput, usageUsed protocol.TokenCount
-	usageSource                        string
-	contextLimit                       int
-	contextLimitKnown                  bool
-	outputLimit                        int
-	outputLimitKnown                   bool
+	// usageSession accumulates session totals for /cost (including resume).
+	usageInput, usageOutput, usageCacheRead, usageCacheCreation, usageUsed protocol.TokenCount
+	usageSource                                                            string
+	usageSession                                                           usageTotals
+	modelInputCost, modelOutputCost                                        float64
+	modelHasCost                                                           bool
+	contextLimit                                                           int
+	contextLimitKnown                                                      bool
+	outputLimit                                                            int
+	outputLimitKnown                                                       bool
+	// modelAttachment caches catalog multimodal support for the selection.
+	modelAttachment      bool
+	modelAttachmentKnown bool
+	// pendingContextDoctor opens the doctor modal on the next EffectivePrompt.
+	pendingContextDoctor bool
 
 	// firstRun drives the empty-transcript onboarding card and auto provider modal.
 	firstRun, firstRunModalOpened bool
@@ -255,7 +277,9 @@ type Model struct {
 	turnStartedAt     time.Time
 	toolCallsThisTurn int
 	authExpiryNoticed bool
-	focused           bool // terminal focus; default true (WithReportFocus)
+	focused           bool // terminal focus; default true until BlurMsg
+	focusKnown        bool // true after first FocusMsg/BlurMsg from the terminal
+	notifyMode        NotifyMode
 	titleTopic        string
 
 	// splitOrientation is horizontal (left|right) by default; vertical stacks
@@ -266,6 +290,10 @@ type Model struct {
 	// children tracks active/recent subagent sessions for the activity pane.
 	// Lifecycle never appends transcript cells.
 	children []childActivity
+
+	// roots holds frozen UI state for concurrent parent sessions (multi-root).
+	// The active root's fields live on Model; others sit here until activated.
+	roots map[string]*rootPane
 
 	// Subagent transcript navigation (ctrl+x leader chords). Root live
 	// cells stay in cells/toolByID; viewingID non-empty and != sessionID
@@ -331,6 +359,7 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		spin:            sp,
 		historyPos:      -1,
 		focused:         true,
+		notifyMode:      NotifyUnfocusedOnly,
 		appearance:      appearanceAuto,
 		autonomy:        protocol.AutonomySupervised,
 		permMode:        protocol.PermissionModeDefault,
@@ -350,6 +379,9 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		if option.VimMode != "" {
 			m.vimMode = option.VimMode
 		}
+		if option.NotifyMode != "" {
+			m.notifyMode = option.NotifyMode
+		}
 		if option.PermissionAutoApproveSeconds != 0 {
 			m.permissionAutoApproveSeconds = option.PermissionAutoApproveSeconds
 		}
@@ -366,6 +398,9 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 	m.keyMap = buildKeyMap(m.keyOverrides, m.splitOrientation)
 	if m.vimMode == "" {
 		m.vimMode = VimModePane
+	}
+	if m.notifyMode == "" {
+		m.notifyMode = NotifyUnfocusedOnly
 	}
 	if services.History != nil {
 		m.entries = services.History.Entries()
@@ -460,6 +495,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if id == "" || id == m.sessionID {
 			return m, nil
 		}
+		// Prefer in-process multi-root open when the host supports it.
+		if m.services.Roots != nil {
+			cmd := m.openRootInProcess(id)
+			m.modal = nil
+			m.reflow()
+			return m, cmd
+		}
 		if m.turnRunning {
 			m.setNotice("wait for the current turn to finish before switching sessions", true)
 			return m, nil
@@ -469,7 +511,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case engineEventMsg:
-		cmd := m.applyEvent(msg.ev)
+		rootID := m.rootForEvent(msg.ev)
+		var cmd tea.Cmd
+		if rootID != "" && rootID != m.sessionID {
+			cmd = m.applyEventToRoot(rootID, msg.ev)
+		} else {
+			cmd = m.applyEvent(msg.ev)
+		}
 		m.reflow()
 		m.refreshViewport()
 		return m, tea.Batch(m.listen(), cmd)
@@ -492,6 +540,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.contextLimitKnown = msg.contextOK
 		m.outputLimit = msg.outputTokens
 		m.outputLimitKnown = msg.outputOK
+		m.modelAttachment = msg.attachment
+		m.modelAttachmentKnown = msg.attachmentOK
+		m.modelInputCost = msg.inputCost
+		m.modelOutputCost = msg.outputCost
+		m.modelHasCost = msg.hasCost
 		return m, m.broadcastContextState()
 
 	case spinner.TickMsg:
@@ -611,6 +664,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case initResultMsg:
+		return m.applyInitResult(msg)
+
 	case authExpiryNoticeMsg:
 		if m.authExpiryNoticed {
 			return m, nil
@@ -632,11 +688,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.FocusMsg:
 		m.focused = true
+		m.focusKnown = true
 		m.windows = refreshFilesWindows(m.windows)
 		return m, nil
 
 	case tea.BlurMsg:
 		m.focused = false
+		m.focusKnown = true
 		return m, nil
 
 	case filesRefreshMsg:
@@ -756,9 +814,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return next, cmd
 			}
 			// Composer newline before focus/cycle: bare LF (KeyCtrlJ) is how
-			// many terminals deliver shift+enter. It must insert "\n", never
-			// cycle windows or steal focus (#187). ctrl+j still cycles when
-			// the right pane is focused (bindings checked below).
+			// many terminals deliver shift+enter without enhanced keys. It must
+			// insert "\n", never cycle. Intentional ctrl+j is rewritten to
+			// alt+j and matches CycleWindowNext / Focus* below (#240).
 			if key.Matches(msg, m.keyMap.Newline) {
 				m.resetHistoryBrowsing()
 				m.composer.InsertString("\n")
@@ -859,7 +917,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		// Bracketed paste: collapse large multi-line blobs to a chip.
+		// Bracketed paste: images → chip; large multi-line text → chip.
 		if msg.Paste {
 			m.handleComposerPaste(string(msg.Runes))
 			m.recomputeCompletion()
@@ -880,20 +938,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keyMap.Send):
 			// Expand paste chips before send so the model sees full content.
 			text := strings.TrimSpace(m.composerTextExpanded())
-			if text == "" {
+			images := pendingImageAttachments(m.pendingImages)
+			if text == "" && len(images) == 0 {
 				// Empty enter is tool expand / open-at-line (handleToolCellKeys).
 				return m, nil
 			}
-			if strings.HasPrefix(text, "/") {
+			if text != "" && strings.HasPrefix(text, "/") && len(images) == 0 {
 				return m.handleCommand(text)
 			}
 			if m.providerName == "" {
 				m.setNeedsModelNotice("No model selected — use /provider <anthropic|openai|xai|echo> [model]", true)
 				return m, nil // keep the typed prompt in the composer
 			}
+			if len(images) > 0 {
+				if ok, known := m.modelSupportsImages(); known && !ok {
+					m.setNotice(imageUnsupportedMsg, true)
+					return m, nil // keep text + chips
+				}
+			}
 			// @file mentions: history/display keep tokens; model text gets contents.
 			modelText, notices := expandFileMentions(text, m.services.Files)
-			next, cmd := m.submit(protocol.UserInput{Text: modelText}, text)
+			display := displayPromptWithImages(text, m.pendingImages)
+			next, cmd := m.submit(protocol.UserInput{Text: modelText, Images: images}, display)
 			if len(notices) > 0 {
 				mm := next.(Model)
 				mm.setNotice(strings.Join(notices, "; "), false)
@@ -954,10 +1020,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.openFilesExplorerPath(msg.path)
 
 	case agentsOpenMsg:
-		cmd := m.openSessionView(msg.sessionID)
+		cmd := m.handleAgentsOpen(msg)
 		m.reflow()
 		m.refreshViewport()
 		return m, tea.Batch(cmd, m.broadcastAgentsState())
+
+	case agentsSpawnMsg:
+		cmd := m.spawnRoot()
+		m.reflow()
+		return m, cmd
+
+	case agentsInterruptMsg:
+		cmd := m.interruptRoot(msg.sessionID)
+		return m, cmd
 	}
 
 	var cmd tea.Cmd
@@ -979,6 +1054,7 @@ func (m Model) updateComposer(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if m.composer.Value() != before {
 		m.pendingPastes = prunePendingPastes(m.composer.Value(), m.pendingPastes)
+		m.pendingImages = prunePendingImages(m.composer.Value(), m.pendingImages)
 	}
 	m.recomputeCompletion()
 	m.reflow()
@@ -1172,6 +1248,7 @@ func (m *Model) setComposerValueAt(value string, offset int) {
 	// History/completion replacements are plain text; drop chips that no
 	// longer appear (or clear all when the value is wholly replaced).
 	m.pendingPastes = prunePendingPastes(value, m.pendingPastes)
+	m.pendingImages = prunePendingImages(value, m.pendingImages)
 	for steps := 0; m.composer.Line() > targetRow && steps <= len(runes)+1; steps++ {
 		m.composer.CursorUp()
 	}
@@ -1181,6 +1258,7 @@ func (m *Model) setComposerValueAt(value string, offset int) {
 func (m *Model) resetComposer() {
 	m.composer.Reset()
 	m.pendingPastes = nil
+	m.pendingImages = nil
 	m.completion = nil
 	m.resetHistoryBrowsing()
 	m.reflow()
@@ -1387,7 +1465,7 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 	switch ev := ev.(type) {
 	case protocol.UserMessage:
 		m.completeAssistantCells()
-		m.cells = append(m.cells, &userCell{text: ev.Text})
+		m.cells = append(m.cells, &userCell{text: userMessageDisplayText(ev.Text, ev.Images)})
 		// Fallback for logs without session.titled (pre-auto-title sessions).
 		if m.titleTopic == "" {
 			if topic := sanitizeTitleTopic(ev.Text); topic != "" {
@@ -1470,9 +1548,8 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		if auto := m.armPermissionAutoApprove(pm, ev.Permission); auto != nil {
 			cmd = tea.Batch(cmd, auto)
 		}
-		if !m.focused {
-			cmd = tea.Batch(cmd, notifyUnfocusedCmd("strike: permission required"))
-		}
+		// Static message only — never include paths, args, or secrets.
+		cmd = tea.Batch(cmd, m.desktopNotifyCmd("strike: permission required", true))
 	case protocol.PermissionResolved:
 		if modal, ok := m.modal.(*permissionModal); ok && modal.req.RequestID == ev.RequestID {
 			m.modal = nil
@@ -1481,9 +1558,7 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 	case protocol.QuestionAsked:
 		m.modal = newQuestionModal(ev, m.ops, m.th)
 		cmd = m.broadcastContextState()
-		if !m.focused {
-			cmd = tea.Batch(cmd, notifyUnfocusedCmd("strike: question required"))
-		}
+		cmd = tea.Batch(cmd, m.desktopNotifyCmd("strike: question required", true))
 	case protocol.QuestionResolved:
 		if modal, ok := m.modal.(*questionModal); ok && modal.req.RequestID == ev.RequestID {
 			m.modal = nil
@@ -1494,10 +1569,7 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		if exp, ok := lastCell[*exploreCell](m.cells); ok {
 			exp.accepting = false
 		}
-		var notify tea.Cmd
-		if !m.focused && !m.turnStartedAt.IsZero() && time.Since(m.turnStartedAt) >= notifyAfterTurn {
-			notify = notifyUnfocusedCmd("strike: turn complete")
-		}
+		notify := m.desktopNotifyCmd("strike: turn complete", false)
 		m.turnStartedAt = time.Time{}
 		m.toolCallsThisTurn = 0
 		m.refreshOpenPalette()
@@ -1539,13 +1611,16 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		label := strings.Join(ev.Paths, ", ")
 		m.setNotice("files changed — agent will re-read: "+label, false)
 	case protocol.UsageReported:
-		m.usageInput = ev.Input
-		m.usageOutput = ev.Output
-		m.usageUsed = ev.Used
-		m.usageSource = ev.Source
+		m.recordUsage(ev)
 		cmd = m.broadcastContextState()
 	case protocol.EffectivePrompt:
-		m.cells = append(m.cells, &infoCell{text: formatEffectivePrompt(ev)})
+		if m.pendingContextDoctor {
+			m.pendingContextDoctor = false
+			m.modal = newDoctorModal(ev, m.contextLimit, m.contextLimitKnown)
+			m.reflow()
+		} else {
+			m.cells = append(m.cells, &infoCell{text: formatEffectivePrompt(ev)})
+		}
 	case protocol.CompactionCompleted:
 		strategy := ev.Strategy
 		if strategy == "" {
@@ -1562,12 +1637,7 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		m.cells, m.toolByID = dropLastUserTurnCells(m.cells, m.toolByID)
 		m.selectedCell = -1
 		m.selectedFileRef = -1
-		removed := ev.Removed
-		msg := "rewound last turn"
-		if removed > 0 {
-			msg = fmt.Sprintf("rewound last turn (%d messages)", removed)
-		}
-		m.setNotice(msg, false)
+		m.setNotice(formatSessionRewound(ev), false)
 		cmd = m.broadcastContextState()
 	case protocol.EngineError:
 		// Mid-turn failures belong in the transcript; idle-state errors
@@ -1775,21 +1845,40 @@ func formatEffectivePrompt(ev protocol.EffectivePrompt) string {
 	return b.String()
 }
 
-// clearUsage drops prior token figures and catalog limits so a model switch
-// never shows stale occupancy against a new window size.
+// clearUsage drops last-request token figures and catalog limits so a model
+// switch never shows stale occupancy against a new window size. Session totals
+// for /cost are kept — they span the whole session log.
 func (m *Model) clearUsage() {
 	m.usageInput = protocol.TokenCount{}
 	m.usageOutput = protocol.TokenCount{}
+	m.usageCacheRead = protocol.TokenCount{}
+	m.usageCacheCreation = protocol.TokenCount{}
 	m.usageUsed = protocol.TokenCount{}
 	m.usageSource = ""
+	m.modelInputCost = 0
+	m.modelOutputCost = 0
+	m.modelHasCost = false
 	m.contextLimit = 0
 	m.contextLimitKnown = false
 	m.outputLimit = 0
 	m.outputLimitKnown = false
+	m.modelAttachment = false
+	m.modelAttachmentKnown = false
 }
 
-// fetchContextLimitsCmd looks up context window and output limit for the
-// current provider/model via the host catalog (may hit network/cache).
+// recordUsage updates last-request figures and session totals.
+func (m *Model) recordUsage(ev protocol.UsageReported) {
+	m.usageInput = ev.Input
+	m.usageOutput = ev.Output
+	m.usageCacheRead = ev.CacheRead
+	m.usageCacheCreation = ev.CacheCreation
+	m.usageUsed = ev.Used
+	m.usageSource = ev.Source
+	m.usageSession.add(ev)
+}
+
+// fetchContextLimitsCmd looks up context window, output limit, and pricing for
+// the current provider/model via the host catalog (may hit network/cache).
 func (m Model) fetchContextLimitsCmd() tea.Cmd {
 	catalog := m.services.Catalog
 	provider, model := m.providerName, m.modelName
@@ -1800,7 +1889,7 @@ func (m Model) fetchContextLimitsCmd() tea.Cmd {
 		ctx := context.Background()
 		ct, cok, _ := catalog.ContextWindow(ctx, provider, model)
 		ot, ook, _ := catalog.OutputLimit(ctx, provider, model)
-		return contextLimitsMsg{
+		msg := contextLimitsMsg{
 			provider:      provider,
 			model:         model,
 			contextTokens: ct,
@@ -1808,6 +1897,19 @@ func (m Model) fetchContextLimitsCmd() tea.Cmd {
 			outputTokens:  ot,
 			outputOK:      ook,
 		}
+		if infos, err := catalog.Models(ctx, provider); err == nil {
+			for _, info := range infos {
+				if info.ID == model {
+					msg.attachment = info.Attachment
+					msg.attachmentOK = true
+					msg.inputCost = info.InputCost
+					msg.outputCost = info.OutputCost
+					msg.hasCost = info.HasCost
+					break
+				}
+			}
+		}
+		return msg
 	}
 }
 
@@ -1839,15 +1941,77 @@ func (m *Model) broadcastContextState() tea.Cmd {
 	return cmd
 }
 
-// agentsStateSnapshot copies live-parent subagent rows for the agents window.
+// agentsStateSnapshot pushes multi-root tree data into the agents window.
 func (m Model) agentsStateSnapshot() agentsStateMsg {
-	children := make([]childActivity, len(m.children))
-	copy(children, m.children)
-	return agentsStateMsg{
-		parentID:  m.sessionID,
-		viewingID: m.viewingID,
-		children:  children,
+	// Ensure active root is visible to the tree builder.
+	roots := m.liveRootIDs()
+	type rootSnap struct {
+		id       string
+		title    string
+		state    theme.AgentState
+		children []childActivity
 	}
+	snaps := make([]agentsRootSnap, 0, len(roots))
+	for _, id := range roots {
+		var kids []childActivity
+		if id == m.sessionID {
+			kids = append([]childActivity(nil), m.children...)
+		} else if m.roots != nil {
+			if p, ok := m.roots[id]; ok && p != nil {
+				kids = append([]childActivity(nil), p.children...)
+			}
+		}
+		snaps = append(snaps, agentsRootSnap{
+			ID:       id,
+			Title:    m.rootTitleLabel(id),
+			State:    m.rootAgentState(id),
+			Children: kids,
+		})
+	}
+	viewing := m.viewingID
+	if viewing == "" {
+		viewing = m.sessionID
+	}
+	return agentsStateMsg{
+		activeID:  m.sessionID,
+		viewingID: viewing,
+		roots:     snaps,
+	}
+}
+
+// handleAgentsOpen activates a root or opens a child transcript from the tree.
+func (m *Model) handleAgentsOpen(msg agentsOpenMsg) tea.Cmd {
+	id := strings.TrimSpace(msg.sessionID)
+	if id == "" {
+		return nil
+	}
+	// Root selection.
+	for _, live := range m.liveRootIDs() {
+		if live == id {
+			if msg.interrupt {
+				return m.interruptRoot(id)
+			}
+			cmd := m.activateRoot(id)
+			// Close child view when focusing the root itself.
+			if m.viewingChild() {
+				_ = m.closeSessionView()
+			}
+			return cmd
+		}
+	}
+	// Child (or nested) transcript.
+	if msg.interrupt {
+		return m.interruptRoot(id)
+	}
+	// Ensure parent root is active when opening a child of another root.
+	if parent := m.parentOfChild(id); parent != "" && parent != m.sessionID {
+		if root := m.findLiveRootAncestor(parent); root != "" && root != m.sessionID {
+			if cmd := m.activateRoot(root); cmd != nil {
+				return tea.Batch(cmd, m.openSessionView(id))
+			}
+		}
+	}
+	return m.openSessionView(id)
 }
 
 // broadcastAgentsState pushes current subagent rows to every right-pane window.
@@ -2020,17 +2184,7 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 	case "/fork":
 		return m.handleForkCommand()
 	case "/undo", "/rewind":
-		m.resetComposer()
-		m.clearNotice()
-		if m.turnRunning {
-			m.setNotice("cannot rewind while a turn is running", true)
-			return m, nil
-		}
-		ops := m.ops
-		return m, func() tea.Msg {
-			ops <- protocol.Rewind{}
-			return nil
-		}
+		return m.handleUndoCommand(fields[1:])
 	case "/session":
 		return m.handleSessionCommand(fields[1:])
 	case "/help":
@@ -2060,11 +2214,25 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 	case "/context", "/effective-prompt":
 		m.resetComposer()
 		m.clearNotice()
+		m.pendingContextDoctor = true
 		ops := m.ops
 		return m, func() tea.Msg {
 			ops <- protocol.InspectEffectivePrompt{}
 			return nil
 		}
+	case "/cost":
+		m.resetComposer()
+		m.clearNotice()
+		m.modal = newCostModal(
+			m.usageSession,
+			m.usageInput, m.usageOutput, m.usageCacheRead, m.usageCacheCreation, m.usageUsed,
+			m.usageSource,
+			m.providerName, m.modelName,
+			m.modelInputCost, m.modelOutputCost, m.modelHasCost,
+			m.contextLimit, m.contextLimitKnown,
+		)
+		m.reflow()
+		return m, nil
 	case "/upgrade":
 		m.resetComposer()
 		m.clearNotice()
@@ -2075,6 +2243,10 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		m.pendingUpgrade = true
 		m.modal = nil
 		return m, tea.Quit
+	case "/init":
+		return m.handleInitCommand()
+	case "/mcp":
+		return m.handleMCPCommand()
 	default:
 		// Unknown commands fall through to skills: /name args renders the
 		// skill template and submits it as the user message.
@@ -2105,6 +2277,120 @@ func (m Model) PendingResume() string {
 // PendingUpgrade reports whether /upgrade requested a self-update after quit.
 func (m Model) PendingUpgrade() bool {
 	return m.pendingUpgrade
+}
+
+func (m Model) handleUndoCommand(args []string) (tea.Model, tea.Cmd) {
+	m.resetComposer()
+	m.clearNotice()
+	if m.turnRunning {
+		m.setNotice("cannot rewind while a turn is running", true)
+		return m, nil
+	}
+	mode := ""
+	if len(args) > 0 {
+		mode = strings.ToLower(strings.TrimSpace(args[0]))
+	}
+	switch mode {
+	case "", "help", "?":
+		if mode == "help" || mode == "?" {
+			m.setNotice("usage: /undo [chat|files]", false)
+			return m, nil
+		}
+		// Bare /undo opens the choice modal.
+		m.modal = newUndoModal(m.ops)
+		m.reflow()
+		return m, nil
+	case "chat", "history":
+		ops := m.ops
+		return m, func() tea.Msg {
+			ops <- protocol.Rewind{RestoreFiles: false}
+			return nil
+		}
+	case "files", "disk", "all":
+		ops := m.ops
+		return m, func() tea.Msg {
+			ops <- protocol.Rewind{RestoreFiles: true}
+			return nil
+		}
+	default:
+		m.setNotice("usage: /undo [chat|files]", true)
+		return m, nil
+	}
+}
+
+func formatSessionRewound(ev protocol.SessionRewound) string {
+	msg := "rewound last turn"
+	if ev.Removed > 0 {
+		msg = fmt.Sprintf("rewound last turn (%d messages)", ev.Removed)
+	}
+	if ev.RestoreFiles {
+		switch {
+		case ev.FilesRestored > 0 && ev.FilesSkipped > 0:
+			msg = fmt.Sprintf("%s; restored %d file(s), skipped %d", msg, ev.FilesRestored, ev.FilesSkipped)
+		case ev.FilesRestored > 0:
+			msg = fmt.Sprintf("%s; restored %d file(s)", msg, ev.FilesRestored)
+		case ev.FilesSkipped > 0:
+			msg = fmt.Sprintf("%s; no files restored (%d skipped)", msg, ev.FilesSkipped)
+		default:
+			msg += "; no file changes to restore"
+		}
+	}
+	return msg
+}
+
+func (m Model) handleInitCommand() (tea.Model, tea.Cmd) {
+	m.resetComposer()
+	m.clearNotice()
+	if m.services.Init == nil {
+		m.setNotice("project init is unavailable", true)
+		return m, nil
+	}
+	exists, path, err := m.services.Init.Exists()
+	if err != nil {
+		m.setNotice("init failed: "+err.Error(), true)
+		return m, nil
+	}
+	if exists {
+		m.modal = newInitConfirmModal(path, m.services.Init)
+		m.reflow()
+		return m, nil
+	}
+	init := m.services.Init
+	return m, func() tea.Msg {
+		path, created, err := init.Write(false)
+		if err != nil {
+			return initResultMsg{err: err.Error()}
+		}
+		return initResultMsg{path: path, created: created}
+	}
+}
+
+func (m Model) applyInitResult(msg initResultMsg) (tea.Model, tea.Cmd) {
+	m.modal = nil
+	if msg.canceled {
+		m.setNotice("init canceled", false)
+		m.reflow()
+		return m, nil
+	}
+	if msg.err != "" {
+		m.setNotice("init failed: "+msg.err, true)
+		m.reflow()
+		return m, nil
+	}
+	display := msg.path
+	if base := filepath.Base(display); base != "" && base != "." {
+		display = base
+	}
+	switch {
+	case msg.replaced:
+		m.setNotice("updated "+display, false)
+	case msg.created:
+		m.setNotice("created "+display, false)
+	default:
+		m.setNotice("wrote "+display, false)
+	}
+	m.reflow()
+	return m, nil
 }
 
 func (m Model) handleForkCommand() (tea.Model, tea.Cmd) {
@@ -3234,7 +3520,7 @@ func (m Model) View() string {
 		} else {
 			overlay = m.modal.view(max(8, ui.ModalWidth(m.width)), m.th)
 		}
-		content = ui.OverlayCenter(content, overlay, m.width, contentHeight)
+		content = ui.OverlayCenter(m.th, content, overlay, m.width, contentHeight)
 	}
 	parts := make([]string, 0, 1+len(footer))
 	if content != "" {

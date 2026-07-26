@@ -52,30 +52,75 @@ func TestForkCommandRejectsWhileTurnRunning(t *testing.T) {
 	}
 }
 
-func TestUndoCommandSendsRewindOp(t *testing.T) {
-	m, ops := newAppTestModel(nil, nil)
+func TestUndoCommandOpensModal(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
 	next, cmd := m.handleCommand("/undo")
-	_ = next
-	if cmd == nil {
-		t.Fatal("expected op cmd")
+	if cmd != nil {
+		t.Fatal("bare /undo should open modal, not send op")
 	}
-	runAppCmd(t, cmd)
-	op := receiveAppOp(t, ops)
-	if _, ok := op.(protocol.Rewind); !ok {
-		t.Fatalf("op = %#v, want Rewind", op)
+	nm := next.(Model)
+	if _, ok := nm.modal.(*undoModal); !ok {
+		t.Fatalf("modal = %T, want *undoModal", nm.modal)
 	}
 }
 
-func TestRewindAliasSendsRewindOp(t *testing.T) {
+func TestUndoChatSendsRewindOp(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)
-	_, cmd := m.handleCommand("/rewind")
+	_, cmd := m.handleCommand("/undo chat")
 	if cmd == nil {
 		t.Fatal("expected op cmd")
 	}
 	runAppCmd(t, cmd)
 	op := receiveAppOp(t, ops)
-	if _, ok := op.(protocol.Rewind); !ok {
-		t.Fatalf("op = %#v, want Rewind", op)
+	rw, ok := op.(protocol.Rewind)
+	if !ok || rw.RestoreFiles {
+		t.Fatalf("op = %#v, want Rewind chat-only", op)
+	}
+}
+
+func TestUndoFilesSendsRewindOp(t *testing.T) {
+	m, ops := newAppTestModel(nil, nil)
+	_, cmd := m.handleCommand("/undo files")
+	if cmd == nil {
+		t.Fatal("expected op cmd")
+	}
+	runAppCmd(t, cmd)
+	op := receiveAppOp(t, ops)
+	rw, ok := op.(protocol.Rewind)
+	if !ok || !rw.RestoreFiles {
+		t.Fatalf("op = %#v, want Rewind restore files", op)
+	}
+}
+
+func TestRewindAliasOpensModal(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	next, cmd := m.handleCommand("/rewind")
+	if cmd != nil {
+		t.Fatal("bare /rewind should open modal")
+	}
+	if _, ok := next.(Model).modal.(*undoModal); !ok {
+		t.Fatalf("modal = %T", next.(Model).modal)
+	}
+}
+
+func TestUndoModalEnterSendsRestore(t *testing.T) {
+	m, ops := newAppTestModel(nil, nil)
+	next, _ := m.handleCommand("/undo")
+	nm := next.(Model)
+	modal := nm.modal.(*undoModal)
+	// Default cursor is "chat and files".
+	updated, cmd := modal.update(tea.KeyMsg{Type: tea.KeyEnter})
+	if updated != nil {
+		t.Fatal("enter should close modal")
+	}
+	if cmd == nil {
+		t.Fatal("expected op cmd")
+	}
+	runAppCmd(t, cmd)
+	op := receiveAppOp(t, ops)
+	rw, ok := op.(protocol.Rewind)
+	if !ok || !rw.RestoreFiles {
+		t.Fatalf("op = %#v", op)
 	}
 }
 
@@ -91,7 +136,7 @@ func TestSessionRewoundDropsTranscriptCells(t *testing.T) {
 	if len(m.cells) < 4 {
 		t.Fatalf("cells before = %d", len(m.cells))
 	}
-	m.applyEvent(protocol.SessionRewound{Removed: 2})
+	m.applyEvent(protocol.SessionRewound{Removed: 2, RestoreFiles: true, FilesRestored: 1})
 	// Should keep first user + assistant only.
 	if len(m.cells) != 2 {
 		t.Fatalf("cells after rewind = %d, want 2", len(m.cells))
@@ -100,7 +145,7 @@ func TestSessionRewoundDropsTranscriptCells(t *testing.T) {
 	if !ok || uc.text != "first" {
 		t.Fatalf("cell0 = %#v", m.cells[0])
 	}
-	if !strings.Contains(m.notice, "rewound") {
+	if !strings.Contains(m.notice, "rewound") || !strings.Contains(m.notice, "restored") {
 		t.Fatalf("notice = %q", m.notice)
 	}
 }

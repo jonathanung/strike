@@ -137,6 +137,9 @@ func (applyPatchTool) Execute(ctx context.Context, args json.RawMessage, tc *Con
 		return Result{}, err
 	}
 
+	for abs := range originals {
+		tc.SnapshotPath(abs)
+	}
 	if err := commitPatchOps(planned, originals); err != nil {
 		return Result{}, err
 	}

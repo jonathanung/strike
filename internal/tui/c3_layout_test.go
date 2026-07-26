@@ -197,6 +197,7 @@ func TestC3WelcomeCapacityAndFocusTokens(t *testing.T) {
 	th := theme.Default()
 	th.BorderFocus = fixedColor("#010203")
 	th.BorderMuted = fixedColor("#040506")
+	th.OverlayScrim = fixedColor("#070809")
 	m, _ := newAppTestModelWithOptions(Options{Theme: &th})
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
 	if !strings.Contains(m.View(), rgbSGR("#010203")) || !strings.Contains(m.View(), rgbSGR("#040506")) {
@@ -209,8 +210,9 @@ func TestC3WelcomeCapacityAndFocusTokens(t *testing.T) {
 	}
 	m.modal = &appProbeModal{}
 	m.reflow()
-	if strings.Contains(m.View(), rgbSGR("#010203")) {
-		t.Fatal("modal did not dim dashboard borders")
+	view := m.View()
+	if strings.Contains(view, rgbSGR("#010203")) || !strings.Contains(view, rgbSGR("#070809")) {
+		t.Fatal("modal did not scrim dashboard background")
 	}
 }
 
