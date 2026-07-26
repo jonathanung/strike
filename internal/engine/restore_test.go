@@ -109,6 +109,7 @@ func TestRestoreCompactionRecord(t *testing.T) {
 	events = append(events, protocol.CompactionCompleted{
 		Correlation: protocol.Correlation{SessionID: "s"},
 		Reason:      protocol.CompactionReasonManual,
+		Strategy:    protocol.CompactionStrategyTrim,
 		Removed:     2,
 		Kept:        5,
 	})
@@ -120,6 +121,36 @@ func TestRestoreCompactionRecord(t *testing.T) {
 		t.Fatalf("marker = %#v", got.Messages[0])
 	}
 	if got.Messages[1].Text != "two" || got.Messages[3].Text != "three" {
+		t.Fatalf("tail = %#v", got.Messages)
+	}
+}
+
+func TestRestoreCompactionSummaryRecord(t *testing.T) {
+	var events []protocol.Event
+	for i, text := range []string{"one", "two", "three"} {
+		corr := protocol.Correlation{SessionID: "s", TurnID: "t" + string(rune('1'+i)), ProviderRequestID: "r" + string(rune('1'+i))}
+		events = append(events,
+			protocol.UserMessage{Correlation: corr, Text: text},
+			protocol.TextDelta{Correlation: corr, Text: "a" + text},
+			protocol.TurnCompleted{Correlation: corr, StopReason: "end_turn"},
+		)
+	}
+	events = append(events, protocol.CompactionCompleted{
+		Correlation: protocol.Correlation{SessionID: "s"},
+		Reason:      protocol.CompactionReasonManual,
+		Strategy:    protocol.CompactionStrategySummarize,
+		Removed:     2,
+		Kept:        5,
+		Summary:     "User asked about one; assistant replied.",
+	})
+	got := engine.Restore(events)
+	if len(got.Messages) != 5 {
+		t.Fatalf("len = %d, want 5: %#v", len(got.Messages), got.Messages)
+	}
+	if !strings.Contains(got.Messages[0].Text, "User asked about one") {
+		t.Fatalf("summary marker = %#v", got.Messages[0])
+	}
+	if got.Messages[1].Text != "two" {
 		t.Fatalf("tail = %#v", got.Messages)
 	}
 }

@@ -138,3 +138,56 @@ func TestEstimateTokensPositive(t *testing.T) {
 		t.Fatalf("estimate = %d, want > 0", n)
 	}
 }
+
+func TestSummaryCompactMarkerSharesPrefix(t *testing.T) {
+	m := summaryCompactMarker(3, "did X then Y")
+	if !strings.HasPrefix(m, compactMarkerPrefix) {
+		t.Fatalf("marker missing compact prefix: %q", m)
+	}
+	if !strings.Contains(m, "did X then Y") {
+		t.Fatalf("summary missing: %q", m)
+	}
+	// findCompactSplit must skip summary markers as non-real user turns.
+	msgs := []provider.Message{
+		{Role: provider.RoleUser, Text: m},
+		{Role: provider.RoleAssistant, Text: "ok"},
+		{Role: provider.RoleUser, Text: "new"},
+		{Role: provider.RoleAssistant, Text: "reply"},
+	}
+	// With keep=1, only "new" is a real turn — split drops marker+ok.
+	split := findCompactSplit(msgs, 1)
+	if split != 2 {
+		t.Fatalf("split = %d, want 2", split)
+	}
+}
+
+func TestFormatDroppedForSummaryBounded(t *testing.T) {
+	call := provider.ToolCall{ID: "c1", Name: "bash", Args: []byte(`{"command":"echo hi"}`)}
+	msgs := []provider.Message{
+		{Role: provider.RoleUser, Text: "old"},
+		{Role: provider.RoleAssistant, Text: "a", ToolCalls: []provider.ToolCall{call}},
+		{Role: provider.RoleTool, ToolResult: &provider.ToolResult{CallID: "c1", Output: "hi"}},
+	}
+	got := formatDroppedForSummary(msgs)
+	if !strings.Contains(got, "User: old") {
+		t.Fatalf("missing user: %q", got)
+	}
+	if !strings.Contains(got, "tool bash") {
+		t.Fatalf("missing tool: %q", got)
+	}
+	if !strings.Contains(got, "Tool(c1)") {
+		t.Fatalf("missing tool result: %q", got)
+	}
+}
+
+func TestResolveCompactionStrategy(t *testing.T) {
+	if got := resolveCompactionStrategy(""); got != "trim" {
+		t.Fatalf("empty = %q", got)
+	}
+	if got := resolveCompactionStrategy("SUMMARIZE"); got != "summarize" {
+		t.Fatalf("summarize = %q", got)
+	}
+	if got := resolveCompactionStrategy("nope"); got != "trim" {
+		t.Fatalf("unknown = %q", got)
+	}
+}

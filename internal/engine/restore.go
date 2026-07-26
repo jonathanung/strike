@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"strings"
+
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
@@ -123,7 +125,7 @@ func Restore(events []protocol.Event) Restored {
 			flush()
 		case protocol.CompactionCompleted:
 			flush()
-			msgs = applyRecordedCompaction(msgs, e.Removed, e.Kept)
+			msgs = applyRecordedCompaction(msgs, e.Removed, e.Kept, e.Summary)
 		case protocol.SessionRewound:
 			flush()
 			msgs, _ = dropLastUserTurn(msgs)
@@ -259,8 +261,9 @@ func restoreCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 }
 
 // applyRecordedCompaction drops the prefix Removed messages and prepends the
-// standard compact marker, matching applyCompaction's on-disk record.
-func applyRecordedCompaction(msgs []provider.Message, removed, kept int) []provider.Message {
+// compact marker (or model-authored summary when recorded), matching
+// applyCompaction's on-disk record.
+func applyRecordedCompaction(msgs []provider.Message, removed, kept int, summary string) []provider.Message {
 	if removed <= 0 || kept < 1 {
 		return msgs
 	}
@@ -278,8 +281,12 @@ func applyRecordedCompaction(msgs []provider.Message, removed, kept int) []provi
 	default:
 		return msgs
 	}
+	marker := compactMarker(removed)
+	if s := strings.TrimSpace(summary); s != "" {
+		marker = summaryCompactMarker(removed, s)
+	}
 	out := make([]provider.Message, 0, 1+len(tail))
-	out = append(out, provider.Message{Role: provider.RoleUser, Text: compactMarker(removed)})
+	out = append(out, provider.Message{Role: provider.RoleUser, Text: marker})
 	out = append(out, tail...)
 	return out
 }

@@ -19,12 +19,14 @@ import (
 )
 
 const (
-	fileVersion  = 1
-	maxTitleLen  = 512
-	maxBodyLen   = 64 * 1024
-	maxIssues    = 1000
-	StatusOpen   = "open"
-	StatusClosed = "closed"
+	fileVersion   = 1
+	exportFormat  = "strike.issues"
+	exportVersion = 1
+	maxTitleLen   = 512
+	maxBodyLen    = 64 * 1024
+	maxIssues     = 1000
+	StatusOpen    = "open"
+	StatusClosed  = "closed"
 )
 
 var (
@@ -222,6 +224,215 @@ func (s *Store) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.closed = true
+	return nil
+}
+
+// exportDoc is the portable backup format for project issues (git/handoff).
+// It is distinct from the on-disk store fileDoc.
+type exportDoc struct {
+	Format  string  `json:"format"`
+	Version int     `json:"version"`
+	NextID  int     `json:"next_id"`
+	Issues  []Issue `json:"issues"`
+}
+
+// Export writes a versioned portable JSON snapshot to path.
+// path must already be cleaned/resolved by the caller.
+func (s *Store) Export(path string) error {
+	data, err := s.ExportBytes()
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(path, data)
+}
+
+// ExportBytes returns the portable JSON snapshot without touching the filesystem.
+func (s *Store) ExportBytes() ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil, errClosed
+	}
+	issues := make([]Issue, 0, len(s.issues))
+	for _, iss := range s.issues {
+		issues = append(issues, cloneIssue(iss))
+	}
+	sort.Slice(issues, func(i, j int) bool { return issues[i].ID < issues[j].ID })
+	data, err := json.MarshalIndent(exportDoc{
+		Format:  exportFormat,
+		Version: exportVersion,
+		NextID:  s.nextID,
+		Issues:  issues,
+	}, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("encode issues export: %w", err)
+	}
+	return append(data, '\n'), nil
+}
+
+// Import reads a portable JSON snapshot from path and merges or replaces issues.
+// When replace is true the store is cleared first; otherwise issues merge by id
+// (imported wins on conflict). IDs are preserved. Returns the number of issues
+// applied from the file.
+func (s *Store) Import(path string, replace bool) (int, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, fmt.Errorf("read issues import: %w", err)
+	}
+	return s.ImportBytes(data, replace)
+}
+
+// ImportBytes applies a portable JSON snapshot. See Import.
+func (s *Store) ImportBytes(data []byte, replace bool) (int, error) {
+	doc, err := decodeExport(data)
+	if err != nil {
+		return 0, err
+	}
+	clean := make([]Issue, 0, len(doc.Issues))
+	seen := make(map[int]struct{}, len(doc.Issues))
+	maxID := 0
+	for _, iss := range doc.Issues {
+		if iss.ID < 1 {
+			return 0, fmt.Errorf("issue import: invalid id %d", iss.ID)
+		}
+		if _, dup := seen[iss.ID]; dup {
+			return 0, fmt.Errorf("issue import: duplicate id %d", iss.ID)
+		}
+		seen[iss.ID] = struct{}{}
+		title := strings.TrimSpace(iss.Title)
+		if err := validateTitle(title); err != nil {
+			return 0, fmt.Errorf("issue import: id %d: %w", iss.ID, err)
+		}
+		if len(iss.Body) > maxBodyLen {
+			return 0, fmt.Errorf("issue import: id %d: %w", iss.ID, errBodyTooLong)
+		}
+		status := strings.TrimSpace(iss.Status)
+		if status == "" {
+			status = StatusOpen
+		}
+		if status != StatusOpen && status != StatusClosed {
+			return 0, fmt.Errorf("issue import: id %d: %w", iss.ID, errInvalidStatus)
+		}
+		created := iss.CreatedAt
+		updated := iss.UpdatedAt
+		if created.IsZero() {
+			created = time.Now().UTC()
+		}
+		if updated.IsZero() {
+			updated = created
+		}
+		clean = append(clean, Issue{
+			ID:        iss.ID,
+			Title:     title,
+			Body:      iss.Body,
+			Status:    status,
+			CreatedAt: created.UTC(),
+			UpdatedAt: updated.UTC(),
+		})
+		if iss.ID > maxID {
+			maxID = iss.ID
+		}
+	}
+	nextID := doc.NextID
+	if nextID < 1 {
+		nextID = 1
+	}
+	if maxID >= nextID {
+		nextID = maxID + 1
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return 0, errClosed
+	}
+	if replace {
+		s.issues = make(map[int]Issue, len(clean))
+		s.nextID = nextID
+	} else {
+		newCount := 0
+		for _, iss := range clean {
+			if _, ok := s.issues[iss.ID]; !ok {
+				newCount++
+			}
+		}
+		if len(s.issues)+newCount > maxIssues {
+			return 0, errFull
+		}
+		if nextID > s.nextID {
+			s.nextID = nextID
+		}
+	}
+	if replace && len(clean) > maxIssues {
+		return 0, errFull
+	}
+	for _, iss := range clean {
+		s.issues[iss.ID] = iss
+	}
+	// Keep nextID ahead of any retained id after merge.
+	for id := range s.issues {
+		if id >= s.nextID {
+			s.nextID = id + 1
+		}
+	}
+	if err := s.persistLocked(); err != nil {
+		return 0, err
+	}
+	return len(clean), nil
+}
+
+func decodeExport(data []byte) (exportDoc, error) {
+	if len(strings.TrimSpace(string(data))) == 0 {
+		return exportDoc{}, fmt.Errorf("issue import: empty file")
+	}
+	var doc exportDoc
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return exportDoc{}, fmt.Errorf("issue import: bad JSON: %w", err)
+	}
+	if doc.Format != exportFormat {
+		return exportDoc{}, fmt.Errorf("issue import: unsupported format %q", doc.Format)
+	}
+	if doc.Version != exportVersion {
+		return exportDoc{}, fmt.Errorf("issue import: unsupported version %d", doc.Version)
+	}
+	return doc, nil
+}
+
+func writeFileAtomic(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create export directory: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, ".issues-export-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create export temp: %w", err)
+	}
+	tmpName := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("chmod export temp: %w", err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write export temp: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("sync export temp: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close export temp: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("replace export file: %w", err)
+	}
+	cleanup = false
 	return nil
 }
 

@@ -40,6 +40,13 @@ type Config struct {
 	// Providers are user-declared custom/self-hosted endpoints (name, base
 	// URL, wire api). API keys are never stored here — only in auth.json.
 	Providers []CustomProvider `json:"providers,omitempty"`
+	// CompactionStrategy is "trim" (default: drop older turns) or "summarize"
+	// (replace dropped turns with a model-authored summary). Unknown values
+	// are ignored at load time.
+	CompactionStrategy string `json:"compactionStrategy,omitempty"`
+	// CompactionModel optionally pins the model id used for summarize
+	// compaction (same provider as the session). Empty uses the session model.
+	CompactionModel string `json:"compactionModel,omitempty"`
 }
 
 // Hook is one lifecycle hook entry. Exactly one of Action or Command should
@@ -222,7 +229,22 @@ func read(path string) (Config, error) {
 		}
 		c.Hooks = valid
 	}
+	c.CompactionStrategy = NormalizeCompactionStrategy(c.CompactionStrategy)
+	c.CompactionModel = strings.TrimSpace(c.CompactionModel)
 	return c, nil
+}
+
+// NormalizeCompactionStrategy maps config aliases to trim|summarize.
+// Empty and unknown values become "" (engine default = trim).
+func NormalizeCompactionStrategy(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "trim":
+		return "trim"
+	case "summarize", "summary":
+		return "summarize"
+	default:
+		return ""
+	}
 }
 
 func merge(base, layer Config) Config {
@@ -246,6 +268,12 @@ func merge(base, layer Config) Config {
 	}
 	if layer.VimMode != "" {
 		base.VimMode = layer.VimMode
+	}
+	if layer.CompactionStrategy != "" {
+		base.CompactionStrategy = layer.CompactionStrategy
+	}
+	if layer.CompactionModel != "" {
+		base.CompactionModel = layer.CompactionModel
 	}
 	base.Permissions = append(base.Permissions, layer.Permissions...)
 	base.Hooks = append(base.Hooks, layer.Hooks...)

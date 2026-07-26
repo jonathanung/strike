@@ -1,8 +1,12 @@
 package engine
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
+	"unicode/utf8"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
@@ -20,11 +24,27 @@ const (
 	defaultCompactionBuffer = 4096
 
 	compactMarkerPrefix = "[Prior conversation compacted —"
+
+	// Bounds for the model-authored summarize path (cost + latency).
+	maxSummarizeInputChars = 120_000
+	summarizeMaxTokens     = 1024
+	summarizeTimeout       = 90 * time.Second
+
+	summarizeSystemPrompt = "You summarize prior conversation history for an AI coding agent. " +
+		"Be concise. Preserve decisions, file paths, commands, errors, and unfinished tasks. " +
+		"Do not invent details. Output only the summary, no preamble."
 )
 
-// compactMarker builds the model-facing replacement for dropped history.
+// compactMarker builds the model-facing replacement for dropped history (trim).
 func compactMarker(removed int) string {
 	return fmt.Sprintf("%s %d earlier messages omitted. Continue from the recent context below.]", compactMarkerPrefix, removed)
+}
+
+// summaryCompactMarker builds the model-facing replacement when summarize succeeds.
+func summaryCompactMarker(removed int, summary string) string {
+	summary = strings.TrimSpace(summary)
+	return fmt.Sprintf("%s summary of %d earlier messages:\n%s\nContinue from the recent context below.]",
+		compactMarkerPrefix, removed, summary)
 }
 
 // compactMessages replaces older history with a single user marker while
@@ -142,31 +162,85 @@ func estimateTokens(system string, msgs []provider.Message) int {
 	return (n + 3) / 4
 }
 
+func resolveCompactionStrategy(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case protocol.CompactionStrategySummarize, "summary":
+		return protocol.CompactionStrategySummarize
+	default:
+		return protocol.CompactionStrategyTrim
+	}
+}
+
 // applyCompaction mutates model-facing history when older turns can be dropped.
 // Emits CompactionStarted then CompactionCompleted on success.
-func (e *Engine) applyCompaction(reason string, corr protocol.Correlation) bool {
+// strategyOverride, when non-empty, selects trim|summarize for this call only.
+func (e *Engine) applyCompaction(ctx context.Context, reason string, corr protocol.Correlation, strategyOverride string) bool {
 	keep := e.opts.KeepUserTurns
 	if keep < 1 {
 		keep = defaultKeepUserTurns
 	}
-	next, removed, kept, ok := compactMessages(e.messages, keep)
-	if !ok {
+	split := findCompactSplit(e.messages, keep)
+	if split <= 0 {
 		return false
 	}
-	e.emit(protocol.CompactionStarted{Correlation: corr, Reason: reason})
-	e.messages = next
+	tail := e.messages[split:]
+	if !historyToolPairsValid(tail) {
+		return false
+	}
+	dropped := append([]provider.Message(nil), e.messages[:split]...)
+	removed := split
+	keptTail := len(tail)
+
+	requested := resolveCompactionStrategy(strategyOverride)
+	if strategyOverride == "" {
+		requested = resolveCompactionStrategy(e.opts.CompactionStrategy)
+	}
+
+	e.emit(protocol.CompactionStarted{
+		Correlation: corr,
+		Reason:      reason,
+		Strategy:    requested,
+	})
+
+	marker := compactMarker(removed)
+	applied := protocol.CompactionStrategyTrim
+	summary := ""
+
+	if requested == protocol.CompactionStrategySummarize {
+		s, err := e.summarizeHistory(ctx, dropped)
+		if err != nil || strings.TrimSpace(s) == "" {
+			msg := "summarize compaction failed, fell back to trim"
+			if err != nil {
+				msg = msg + ": " + err.Error()
+			} else {
+				msg = msg + ": empty summary"
+			}
+			e.emit(protocol.EngineError{Correlation: corr, Message: msg})
+		} else {
+			summary = strings.TrimSpace(s)
+			marker = summaryCompactMarker(removed, summary)
+			applied = protocol.CompactionStrategySummarize
+		}
+	}
+
+	out := make([]provider.Message, 0, 1+keptTail)
+	out = append(out, provider.Message{Role: provider.RoleUser, Text: marker})
+	out = append(out, tail...)
+	e.messages = out
 	e.lastUsed = 0
 	e.lastUsedKnown = false
 	e.emit(protocol.CompactionCompleted{
 		Correlation: corr,
 		Reason:      reason,
+		Strategy:    applied,
 		Removed:     removed,
-		Kept:        kept,
+		Kept:        keptTail + 1,
+		Summary:     summary,
 	})
 	return true
 }
 
-func (e *Engine) handleCompact() {
+func (e *Engine) handleCompact(ctx context.Context, op protocol.Compact) {
 	if e.turnActive() {
 		e.emit(protocol.EngineError{
 			Correlation: e.sessionCorr(),
@@ -174,12 +248,136 @@ func (e *Engine) handleCompact() {
 		})
 		return
 	}
-	if !e.applyCompaction(protocol.CompactionReasonManual, e.sessionCorr()) {
+	if !e.applyCompaction(ctx, protocol.CompactionReasonManual, e.sessionCorr(), op.Strategy) {
 		e.emit(protocol.EngineError{
 			Correlation: e.sessionCorr(),
 			Message:     "nothing to compact",
 		})
 	}
+}
+
+// summarizeHistory runs a tools-free model call over dropped turns and returns
+// the assistant text. Does not emit TextDelta (not part of the user transcript).
+// Never executes tools; completed mutating tools are not replayed.
+func (e *Engine) summarizeHistory(ctx context.Context, dropped []provider.Message) (string, error) {
+	if e.prov == nil {
+		return "", errors.New("no provider")
+	}
+	body := formatDroppedForSummary(dropped)
+	if strings.TrimSpace(body) == "" {
+		return "", errors.New("nothing to summarize")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, summarizeTimeout)
+		defer cancel()
+	}
+	model := e.model
+	if m := strings.TrimSpace(e.opts.CompactionModel); m != "" {
+		model = m
+	}
+	stream, err := e.prov.Stream(ctx, provider.Request{
+		Model:  model,
+		System: summarizeSystemPrompt,
+		Messages: []provider.Message{{
+			Role: provider.RoleUser,
+			Text: "Summarize this conversation history:\n\n" + body,
+		}},
+		MaxTokens: summarizeMaxTokens,
+	})
+	if err != nil {
+		return "", err
+	}
+	stream = provider.NormalizeStream(stream)
+	var text strings.Builder
+	var streamErr error
+	terminated := false
+	for ev := range stream {
+		if terminated {
+			continue
+		}
+		switch ev.Type {
+		case provider.EventTextDelta:
+			text.WriteString(ev.Text)
+		case provider.EventDone:
+			terminated = true
+		case provider.EventError:
+			terminated = true
+			streamErr = ev.Err
+			if streamErr == nil {
+				streamErr = errors.New("provider stream error")
+			}
+		}
+	}
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+	if !terminated {
+		return "", provider.ErrIncompleteStream
+	}
+	if streamErr != nil {
+		return "", streamErr
+	}
+	s := strings.TrimSpace(text.String())
+	if s == "" {
+		return "", errors.New("empty summary")
+	}
+	return s, nil
+}
+
+// formatDroppedForSummary flattens dropped messages into a bounded plain-text
+// block for the summarizer. Tool args/outputs are truncated.
+func formatDroppedForSummary(msgs []provider.Message) string {
+	var b strings.Builder
+	for _, m := range msgs {
+		if b.Len() >= maxSummarizeInputChars {
+			break
+		}
+		switch m.Role {
+		case provider.RoleUser:
+			fmt.Fprintf(&b, "User: %s\n\n", m.Text)
+		case provider.RoleAssistant:
+			if m.Text != "" {
+				fmt.Fprintf(&b, "Assistant: %s\n", m.Text)
+			} else {
+				b.WriteString("Assistant:\n")
+			}
+			for _, tc := range m.ToolCalls {
+				fmt.Fprintf(&b, "  [tool %s id=%s args=%s]\n",
+					tc.Name, tc.ID, truncateRunes(string(tc.Args), 400))
+			}
+			b.WriteByte('\n')
+		case provider.RoleTool:
+			if m.ToolResult == nil {
+				continue
+			}
+			out := m.ToolResult.Output
+			if m.ToolResult.IsError {
+				out = "ERROR: " + out
+			}
+			fmt.Fprintf(&b, "Tool(%s): %s\n\n", m.ToolResult.CallID, truncateRunes(out, 1500))
+		}
+	}
+	s := b.String()
+	if len(s) > maxSummarizeInputChars {
+		// Byte-safe cut at rune boundary.
+		s = truncateRunes(s, maxSummarizeInputChars)
+		return s + "\n…[truncated]"
+	}
+	return s
+}
+
+func truncateRunes(s string, max int) string {
+	if max <= 0 || s == "" {
+		return ""
+	}
+	if utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	return string([]rune(s)[:max]) + "…"
 }
 
 // dropLastUserTurn removes the last real user turn and everything after it
@@ -239,13 +437,13 @@ func (e *Engine) handleRewind() {
 // maybeThresholdCompact drops older history when occupancy approaches the
 // model context window. No-ops when the window is unknown and the estimate
 // cannot be compared, or when nothing can be removed.
-func (e *Engine) maybeThresholdCompact(turnID string) {
+func (e *Engine) maybeThresholdCompact(ctx context.Context, turnID string) {
 	if !e.overCompactionThreshold() {
 		return
 	}
 	corr := e.baseCorr()
 	corr.TurnID = turnID
-	e.applyCompaction(protocol.CompactionReasonThreshold, corr)
+	e.applyCompaction(ctx, protocol.CompactionReasonThreshold, corr, "")
 }
 
 func (e *Engine) overCompactionThreshold() bool {
