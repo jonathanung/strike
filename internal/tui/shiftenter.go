@@ -17,6 +17,11 @@ var altEnter = []byte("\x1b\r")
 // CSI is rewritten (Bubble Tea has no native "ctrl+;" KeyType).
 var altSemicolon = []byte("\x1b;")
 
+// altJ is Alt+j — the wire form for intentional ctrl+j after enhanced CSI.
+// Bare LF is also KeyCtrlJ (0x0a); rewriting ctrl+j CSI to Alt+j keeps pane
+// cycle distinct from newline / legacy shift+enter (#240).
+var altJ = []byte("\x1bj")
+
 // Enhanced-keyboard enable/disable sequences written at program start/exit
 // and again from Model.Init after the alt screen is entered (Kitty keeps
 // independent keyboard-mode stacks for main vs alternate screens):
@@ -538,6 +543,11 @@ func classifyEnhanced(seq []byte) (out []byte, drop bool, handled bool) {
 	// Ctrl+; → Alt+; for ToggleOrientation (no native ctrl+; KeyType).
 	if ctrl && !shift && !alt && code == int(';') {
 		return altSemicolon, false, true
+	}
+	// Ctrl+j → Alt+j for CycleWindowNext / vertical FocusLeft. Must not collapse
+	// to 0x0a (KeyCtrlJ): bare LF and legacy shift+enter share that byte (#240).
+	if ctrl && !shift && !alt && (code == 'j' || code == 'J') {
+		return altJ, false, true
 	}
 	// Ctrl+letter → legacy control byte (code & 0x1f).
 	if ctrl && isLetterCode(code) {

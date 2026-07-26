@@ -770,9 +770,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return next, cmd
 			}
 			// Composer newline before focus/cycle: bare LF (KeyCtrlJ) is how
-			// many terminals deliver shift+enter. It must insert "\n", never
-			// cycle windows or steal focus (#187). ctrl+j still cycles when
-			// the right pane is focused (bindings checked below).
+			// many terminals deliver shift+enter without enhanced keys. It must
+			// insert "\n", never cycle. Intentional ctrl+j is rewritten to
+			// alt+j and matches CycleWindowNext / Focus* below (#240).
 			if key.Matches(msg, m.keyMap.Newline) {
 				m.resetHistoryBrowsing()
 				m.composer.InsertString("\n")

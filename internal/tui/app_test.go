@@ -1584,7 +1584,7 @@ func TestFocusAndPaletteClearCompletionBeforeChangingInputOwner(t *testing.T) {
 				t.Errorf("focus = %v, want right", m.focus)
 			}
 		}},
-		{"cycle next", tea.KeyMsg{Type: tea.KeyCtrlJ}, func(t *testing.T, m Model) {
+		{"cycle next", keyMsgAltJ(), func(t *testing.T, m Model) {
 			if m.windows.index != 1 {
 				t.Errorf("window index = %d, want 1", m.windows.index)
 			}
@@ -1606,10 +1606,7 @@ func TestFocusAndPaletteClearCompletionBeforeChangingInputOwner(t *testing.T) {
 				statefulTestWindow{windowID: "a", windowTitle: "A"},
 				statefulTestWindow{windowID: "b", windowTitle: "B"},
 			}}
-			// ctrl+j cycles only when right-focused; left treats it as newline (#187).
-			if tt.name == "cycle next" {
-				m.focus = focusRight
-			}
+			// Enhanced ctrl+j (alt+j) cycles from left focus (#240).
 			m.completion = leadingSlashCompletion("/", 0, 1, m.commands)
 			m = updateApp(t, m, tt.key)
 			if m.completion != nil {
@@ -1625,8 +1622,8 @@ func TestCycleWindowKeysClearOpenCompletionAndCycleOnce(t *testing.T) {
 		name string
 		key  tea.KeyMsg
 	}{
-		// Right-focus ctrl+j cycles; left-focus ctrl+j is newline (#187).
-		{name: "ctrl+j", key: tea.KeyMsg{Type: tea.KeyCtrlJ}},
+		// Enhanced ctrl+j (alt+j) cycles from either focus (#240).
+		{name: "ctrl+j", key: keyMsgAltJ()},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			m, ops := newAppTestModel(nil, nil)
@@ -1693,7 +1690,7 @@ func TestCompletionEscapeDismissesBeforeInterruptAndFocusChange(t *testing.T) {
 
 func TestModalOwnsGlobalKeysExceptQuit(t *testing.T) {
 	for _, msg := range []tea.KeyMsg{
-		{Type: tea.KeyCtrlJ}, {Type: tea.KeyCtrlL}, {Type: tea.KeyCtrlH}, {Type: tea.KeyCtrlK}, {Type: tea.KeyCtrlP}, {Type: tea.KeyF1},
+		keyMsgAltJ(), {Type: tea.KeyCtrlL}, {Type: tea.KeyCtrlH}, {Type: tea.KeyCtrlK}, {Type: tea.KeyCtrlP}, {Type: tea.KeyF1},
 	} {
 		t.Run(msg.String(), func(t *testing.T) {
 			m, ops := newAppTestModel(nil, nil)
@@ -1740,7 +1737,7 @@ func TestRightPaneOwnsOrdinaryKeysAndGlobalKeysRemainGlobal(t *testing.T) {
 	}
 	assertNoAppOp(t, ops)
 
-	for _, msg := range []tea.KeyMsg{{Type: tea.KeyCtrlJ}, {Type: tea.KeyCtrlK}} {
+	for _, msg := range []tea.KeyMsg{keyMsgAltJ(), {Type: tea.KeyCtrlK}} {
 		before := totalWindowUpdates(t, m.windows)
 		index := m.windows.index
 		m = updateApp(t, m, msg)
