@@ -533,6 +533,26 @@ func TestLoadCompactionStrategy(t *testing.T) {
 	}
 }
 
+func TestNormalizeLeanCode(t *testing.T) {
+	cases := map[string]string{
+		"":        "",
+		"off":     LeanCodeOff,
+		"none":    LeanCodeOff,
+		"lite":    LeanCodeLite,
+		"light":   LeanCodeLite,
+		"full":    LeanCodeFull,
+		"on":      LeanCodeFull,
+		"FULL":    LeanCodeFull,
+		"nope":    "",
+		"  lite ": LeanCodeLite,
+	}
+	for in, want := range cases {
+		if got := NormalizeLeanCode(in); got != want {
+			t.Errorf("NormalizeLeanCode(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestNormalizeNotify(t *testing.T) {
 	cases := map[string]string{
 		"":               "",
@@ -548,6 +568,41 @@ func TestNormalizeNotify(t *testing.T) {
 		if got := NormalizeNotify(in); got != want {
 			t.Errorf("NormalizeNotify(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestLoadLeanCodeMerge(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(global, []byte(`{"leanCode": "full"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.LeanCode != LeanCodeFull {
+		t.Fatalf("LeanCode = %q, want full", cfg.LeanCode)
+	}
+	project := filepath.Join(work, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(project), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(project, []byte(`{"leanCode": "off"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.LeanCode != LeanCodeOff {
+		t.Fatalf("project LeanCode = %q, want off", cfg.LeanCode)
 	}
 }
 

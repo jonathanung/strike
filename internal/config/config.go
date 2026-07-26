@@ -25,7 +25,10 @@ type Config struct {
 	Model        string          `json:"model,omitempty"`
 	Effort       protocol.Effort `json:"effort,omitempty"`
 	SystemPrompt string          `json:"systemPrompt,omitempty"`
-	DefaultAgent string          `json:"defaultAgent,omitempty"`
+	// LeanCode is agent-scoped lean-code guidance intensity: off|lite|full.
+	// Empty means lite (default). Unknown values are ignored at load time.
+	LeanCode     string `json:"leanCode,omitempty"`
+	DefaultAgent string `json:"defaultAgent,omitempty"`
 	// Theme is the preferred TUI color theme id (bundled or JSON under
 	// ~/.strike/themes or ./.strike/themes). Empty means the stock "strike"
 	// palette.
@@ -291,6 +294,7 @@ func read(path string) (Config, error) {
 	c.CompactionStrategy = NormalizeCompactionStrategy(c.CompactionStrategy)
 	c.CompactionModel = strings.TrimSpace(c.CompactionModel)
 	c.Notify = NormalizeNotify(c.Notify)
+	c.LeanCode = NormalizeLeanCode(c.LeanCode)
 	// Keybinds: unknown ids / invalid chords fail the layer (and thus Load).
 	if err := ValidateKeybinds(c.Keybinds); err != nil {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
@@ -381,6 +385,28 @@ func NormalizeNotify(s string) string {
 	}
 }
 
+// LeanCode intensity values for Config.LeanCode / engine lean-code overlays.
+const (
+	LeanCodeOff  = "off"
+	LeanCodeLite = "lite"
+	LeanCodeFull = "full"
+)
+
+// NormalizeLeanCode maps config aliases to off|lite|full.
+// Empty and unknown values become "" (engine default = lite).
+func NormalizeLeanCode(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "off", "false", "0", "no", "never", "none":
+		return LeanCodeOff
+	case "lite", "light", "default":
+		return LeanCodeLite
+	case "full", "on", "true", "1", "yes":
+		return LeanCodeFull
+	default:
+		return ""
+	}
+}
+
 func merge(base, layer Config) Config {
 	if layer.Provider != "" {
 		base.Provider = layer.Provider
@@ -393,6 +419,9 @@ func merge(base, layer Config) Config {
 	}
 	if layer.SystemPrompt != "" {
 		base.SystemPrompt = layer.SystemPrompt
+	}
+	if layer.LeanCode != "" {
+		base.LeanCode = layer.LeanCode
 	}
 	if layer.DefaultAgent != "" {
 		base.DefaultAgent = layer.DefaultAgent

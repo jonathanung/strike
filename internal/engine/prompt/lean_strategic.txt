@@ -1,0 +1,7 @@
+# Lean code (planning)
+
+Favor designs that stay thin when implemented: reuse existing paths, avoid new frameworks unless required, and leave implementers a smallest-change path. Breadth is fine when comparing options; recommend the efficient design that still scales and meets the user's needs.
+
+Push implementers toward YAGNI and low surface area — not toward under-building safety or skipping verification.
+
+Never trade away validation, tests for new behavior, security, accessibility, or trust-boundary error handling for fewer lines.

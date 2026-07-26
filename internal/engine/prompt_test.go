@@ -91,6 +91,81 @@ func TestPlanSystemPromptIsReadOnly(t *testing.T) {
 	}
 }
 
+func TestLeanCodePromptSelection(t *testing.T) {
+	strict := engine.LeanCodePrompt("lite", "build")
+	for _, want := range []string{
+		"Lean code (implementer)",
+		"YAGNI",
+		"Skip — does this need to exist",
+		"Reuse — already solved",
+		"Stdlib",
+		"Native platform",
+		"Already-installed dependency",
+		"One clear line",
+		"minimum correct change",
+		"Never sacrifice",
+		"validation",
+		"trust boundaries",
+	} {
+		if !strings.Contains(strict, want) {
+			t.Errorf("strict lean missing %q\n%s", want, strict)
+		}
+	}
+	full := engine.LeanCodePrompt("full", "general")
+	if !strings.Contains(full, "Lean code (implementer, full)") {
+		t.Fatalf("full mode should use full strict text:\n%s", full)
+	}
+	if !strings.Contains(full, "speculative layers") {
+		t.Fatal("full strict missing stronger guidance")
+	}
+	strategic := engine.LeanCodePrompt("lite", "plan")
+	for _, want := range []string{
+		"Lean code (planning)",
+		"still scales",
+		"smallest-change",
+		"Never trade away",
+	} {
+		if !strings.Contains(strategic, want) {
+			t.Errorf("strategic lean missing %q\n%s", want, strategic)
+		}
+	}
+	orch := engine.LeanCodePrompt("lite", "orchestrator")
+	if !strings.Contains(orch, "Lean code (planning)") {
+		t.Fatal("orchestrator should get strategic lean")
+	}
+	for _, agent := range []string{"explore", "reviewer", "tester", "validator", "commit", "pr-babysitter"} {
+		if got := engine.LeanCodePrompt("lite", agent); got != "" {
+			t.Errorf("agent %q must not get lean overlay, got:\n%s", agent, got)
+		}
+	}
+	if got := engine.LeanCodePrompt("off", "build"); got != "" {
+		t.Fatalf("leanCode=off must disable overlay, got:\n%s", got)
+	}
+}
+
+func TestLeanCodeStrength(t *testing.T) {
+	cases := []struct {
+		agent, want string
+	}{
+		{"build", "strict"},
+		{"general", "strict"},
+		{"debugger", "strict"},
+		{"plan", "strategic"},
+		{"orchestrator", "strategic"},
+		{"explore", ""},
+		{"reviewer", ""},
+		{"tester", ""},
+		{"validator", ""},
+		{"commit", ""},
+		{"custom", ""},
+	}
+	for _, tt := range cases {
+		if got := engine.LeanCodeStrength(tt.agent); got != tt.want {
+			t.Errorf("LeanCodeStrength(%q) = %q, want %q", tt.agent, got, tt.want)
+		}
+	}
+}
+
 func TestSystemPromptComposesProviderForBuild(t *testing.T) {
 	sys := captureSystemPrompt(t, engine.Options{
 		WorkDir: t.TempDir(),
@@ -100,6 +175,8 @@ func TestSystemPromptComposesProviderForBuild(t *testing.T) {
 	for _, want := range []string{
 		"Response contract (ADHD-shaped, always on)",
 		"Provider notes (Anthropic / Claude)",
+		"Lean code (implementer)",
+		"YAGNI",
 		"You are powered by the model named claude-sonnet-5",
 		"anthropic/claude-sonnet-5",
 	} {
@@ -109,6 +186,82 @@ func TestSystemPromptComposesProviderForBuild(t *testing.T) {
 	}
 	if strings.Contains(sys, "Plan mode (read-only)") {
 		t.Error("build agent must not include plan overlay")
+	}
+	provIdx := strings.Index(sys, "Provider notes (Anthropic / Claude)")
+	leanIdx := strings.Index(sys, "Lean code (implementer)")
+	envIdx := strings.Index(sys, "<env>")
+	if !(provIdx >= 0 && leanIdx > provIdx && envIdx > leanIdx) {
+		t.Fatalf("lean layer order wrong: provider=%d lean=%d env=%d", provIdx, leanIdx, envIdx)
+	}
+}
+
+func TestSystemPromptLeanCodeAgentScoped(t *testing.T) {
+	dir := t.TempDir()
+	buildSys := captureSystemPrompt(t, engine.Options{
+		WorkDir: dir,
+		Agents:  []engine.Agent{{Name: "build"}},
+	}, "echo", "echo")
+	if !strings.Contains(buildSys, "Lean code (implementer)") || !strings.Contains(buildSys, "YAGNI") {
+		t.Fatalf("build missing strict lean ladder:\n%s", buildSys)
+	}
+
+	planSys := captureSystemPrompt(t, engine.Options{
+		WorkDir:      dir,
+		Agents:       []engine.Agent{{Name: "plan"}},
+		InitialAgent: "plan",
+	}, "echo", "echo")
+	if !strings.Contains(planSys, "Lean code (planning)") {
+		t.Fatalf("plan missing strategic lean:\n%s", planSys)
+	}
+	if strings.Contains(planSys, "Lean code (implementer)") {
+		t.Fatal("plan must not get implementer lean block")
+	}
+
+	orchSys := captureSystemPrompt(t, engine.Options{
+		WorkDir: dir,
+		Agents: []engine.Agent{
+			{Name: "build"},
+			{Name: "orchestrator", Prompt: "ORCH_PERSONA"},
+		},
+		InitialAgent: "orchestrator",
+	}, "echo", "echo")
+	if !strings.Contains(orchSys, "Lean code (planning)") {
+		t.Fatalf("orchestrator missing strategic lean:\n%s", orchSys)
+	}
+
+	for _, agent := range []string{"explore", "reviewer"} {
+		sys := captureSystemPrompt(t, engine.Options{
+			WorkDir: dir,
+			Agents: []engine.Agent{
+				{Name: "build"},
+				{Name: agent, Prompt: "PERSONA_" + strings.ToUpper(agent)},
+			},
+			InitialAgent: agent,
+		}, "echo", "echo")
+		if strings.Contains(sys, "Lean code (implementer)") || strings.Contains(sys, "YAGNI") {
+			t.Fatalf("%s must not get strict implementer lean:\n%s", agent, sys)
+		}
+		if strings.Contains(sys, "Lean code (planning)") {
+			t.Fatalf("%s must not get strategic lean:\n%s", agent, sys)
+		}
+	}
+
+	offSys := captureSystemPrompt(t, engine.Options{
+		WorkDir:  dir,
+		LeanCode: "off",
+		Agents:   []engine.Agent{{Name: "build"}},
+	}, "echo", "echo")
+	if strings.Contains(offSys, "Lean code") {
+		t.Fatalf("leanCode=off must omit lean layer:\n%s", offSys)
+	}
+
+	fullSys := captureSystemPrompt(t, engine.Options{
+		WorkDir:  dir,
+		LeanCode: "full",
+		Agents:   []engine.Agent{{Name: "build"}},
+	}, "echo", "echo")
+	if !strings.Contains(fullSys, "Lean code (implementer, full)") {
+		t.Fatalf("leanCode=full should use full strict text:\n%s", fullSys)
 	}
 }
 
@@ -219,10 +372,11 @@ func TestSystemPromptComposesEnvironmentAndInstructions(t *testing.T) {
 	}
 	baseIdx := strings.Index(sys, "You are strike")
 	personaIdx := strings.Index(sys, "BASE_PROMPT_MARKER")
+	leanIdx := strings.Index(sys, "Lean code (implementer)")
 	envIdx := strings.Index(sys, "<env>")
 	instIdx := strings.Index(sys, "Instructions from:")
-	if !(baseIdx >= 0 && personaIdx > baseIdx && envIdx > personaIdx && instIdx > envIdx) {
-		t.Fatalf("layer order wrong: shared=%d persona=%d env=%d inst=%d", baseIdx, personaIdx, envIdx, instIdx)
+	if !(baseIdx >= 0 && personaIdx > baseIdx && leanIdx > personaIdx && envIdx > leanIdx && instIdx > envIdx) {
+		t.Fatalf("layer order wrong: shared=%d persona=%d lean=%d env=%d inst=%d", baseIdx, personaIdx, leanIdx, envIdx, instIdx)
 	}
 }
 

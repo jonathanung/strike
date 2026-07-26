@@ -39,6 +39,15 @@ var xaiProviderPrompt string
 //go:embed prompt/plan.txt
 var planPrompt string
 
+//go:embed prompt/lean_strict.txt
+var leanStrictPrompt string
+
+//go:embed prompt/lean_strict_full.txt
+var leanStrictFullPrompt string
+
+//go:embed prompt/lean_strategic.txt
+var leanStrategicPrompt string
+
 func normPrompt(s string) string {
 	return strings.TrimSpace(s) + "\n"
 }
@@ -55,6 +64,15 @@ var DefaultSystemPrompt = joinPromptLayers(SharedSystemPrompt, normPrompt(defaul
 // provider at request time for the plan agent).
 var PlanSystemPrompt = normPrompt(planPrompt)
 
+// LeanStrictSystemPrompt is the implementer YAGNI ladder (build/general/debugger).
+var LeanStrictSystemPrompt = normPrompt(leanStrictPrompt)
+
+// LeanStrictFullSystemPrompt is the stronger implementer ladder (leanCode=full).
+var LeanStrictFullSystemPrompt = normPrompt(leanStrictFullPrompt)
+
+// LeanStrategicSystemPrompt is scaling-aware lean guidance (plan/orchestrator).
+var LeanStrategicSystemPrompt = normPrompt(leanStrategicPrompt)
+
 // Prompt composition layer model (system string only; conversation history is
 // separate and inspected as message counts):
 //
@@ -63,9 +81,10 @@ var PlanSystemPrompt = normPrompt(planPrompt)
 //                                (build only) | agent persona
 //  3. phase slot        replace  phase context, else plan overlay when agent
 //                                is plan; neither when inactive
-//  4. environment       append   cwd / model / date
-//  5. instructions      append   each AGENTS.md/CLAUDE.md block
-//  6. project memory    append   tagged entries (instruction|preference|
+//  4. lean code         append   agent-scoped lean guidance when leanCode≠off
+//  5. environment       append   cwd / model / date
+//  6. instructions      append   each AGENTS.md/CLAUDE.md block
+//  7. project memory    append   tagged entries (instruction|preference|
 //                                project-convention), capped; untrusted
 //
 // Skills are user-turn content (slash render → UserInput), not system layers.
@@ -125,6 +144,60 @@ func joinPromptLayers(layers ...string) string {
 		return ""
 	}
 	return strings.Join(parts, "\n\n") + "\n"
+}
+
+// ResolveLeanCode maps config/engine LeanCode to off|lite|full.
+// Empty and unknown values default to lite.
+func ResolveLeanCode(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "off", "false", "0", "no", "never", "none":
+		return "off"
+	case "full", "on", "true", "1", "yes":
+		return "full"
+	case "lite", "light", "default", "":
+		return "lite"
+	default:
+		return "lite"
+	}
+}
+
+// LeanCodeStrength is the agent-scoped lean guidance tier, or empty when none.
+// Exported for tests.
+func LeanCodeStrength(agent string) string {
+	switch strings.ToLower(strings.TrimSpace(agent)) {
+	case "", "build", "general", "debugger":
+		return "strict"
+	case "plan", "orchestrator":
+		return "strategic"
+	default:
+		return ""
+	}
+}
+
+// LeanCodePrompt returns the lean-code overlay text for a mode and agent.
+// Empty when disabled or the agent is out of scope (explore/reviewer/…).
+func LeanCodePrompt(mode, agent string) string {
+	text, _ := leanCodeLayer(mode, agent)
+	return text
+}
+
+func leanCodeLayer(mode, agent string) (text, source string) {
+	resolved := ResolveLeanCode(mode)
+	if resolved == "off" {
+		return "", ""
+	}
+	strength := LeanCodeStrength(agent)
+	switch strength {
+	case "strict":
+		if resolved == "full" {
+			return LeanStrictFullSystemPrompt, "builtin:lean/strict+full"
+		}
+		return LeanStrictSystemPrompt, "builtin:lean/strict"
+	case "strategic":
+		return LeanStrategicSystemPrompt, "builtin:lean/strategic"
+	default:
+		return "", ""
+	}
 }
 
 // promptLayer is one ordered system-prompt segment with provenance.
@@ -206,6 +279,15 @@ func (e *Engine) systemLayers() []promptLayer {
 			Source: "builtin:plan",
 			Mode:   protocol.PromptLayerReplace,
 			Text:   PlanSystemPrompt,
+		})
+	}
+
+	if text, source := leanCodeLayer(e.opts.LeanCode, e.agent.Name); text != "" {
+		layers = append(layers, promptLayer{
+			Kind:   protocol.PromptLayerLean,
+			Source: source,
+			Mode:   protocol.PromptLayerAppend,
+			Text:   text,
 		})
 	}
 

@@ -54,9 +54,28 @@ Each model request composes the system prompt in layers (like opencode):
 2. **Provider overlay** — anthropic / openai (incl. chatgpt) / xai / default, chosen from the active provider and model id
 3. **Agent persona** — empty for built-in build/plan (provider overlay used); custom `agents/*.md` body replaces the provider overlay; config `systemPrompt` replaces it for build only
 4. **Plan overlay** — always added while the plan agent is active
-5. **Environment** — workdir, workspace root, git, platform, date, model id
-6. **Instructions** — `AGENTS.md` / `CLAUDE.md` from `~/.strike` and the project (walked up to the git root). Create or refresh the project file with `/init` (confirms before replacing an existing `AGENTS.md`; light local scan only — no secrets).
-7. **Project memory** — entries tagged `instruction`, `preference`, or `project-convention` (capped; untrusted). Untagged notes and issues stay on-demand via tools.
+5. **Lean code** — agent-scoped efficiency guidance (see below); off via config `leanCode`
+6. **Environment** — workdir, workspace root, git, platform, date, model id
+7. **Instructions** — `AGENTS.md` / `CLAUDE.md` from `~/.strike` and the project (walked up to the git root). Create or refresh the project file with `/init` (confirms before replacing an existing `AGENTS.md`; light local scan only — no secrets).
+8. **Project memory** — entries tagged `instruction`, `preference`, or `project-convention` (capped; untrusted). Untagged notes and issues stay on-demand via tools.
+
+### Lean code (ponytail-lite)
+
+Strike injects a short **lean-code** bias toward efficient, low-LOC solutions
+(YAGNI ladder: skip → reuse → stdlib → native → installed dep → one line →
+minimum). Clean-room wording inspired by
+[ponytail](https://github.com/DietrichGebert/ponytail) — not a full copy of that
+skill. Never sacrifices validation, tests for new behavior, security,
+accessibility, or trust-boundary error handling.
+
+| Agents | Strength |
+|--------|----------|
+| **build**, **general**, **debugger** | **Strict** — implementer ladder; smallest correct change |
+| **plan**, **orchestrator** | **Strategic** — efficient designs that still scale; thin implement path |
+| **explore**, **reviewer**, **tester**, **validator**, **commit**, others | **None** — specialized prompts stay undiluted |
+
+Config: `"leanCode": "off" | "lite" | "full"` (global or project JSON). Default
+`lite`. `full` strengthens the implementer ladder only. See [config.md](config.md).
 
 ```markdown
 ---
