@@ -34,6 +34,10 @@ type Config struct {
 	// right-pane PTY), "overlay" (embedded modal), or "takeover" (full-screen
 	// tea.ExecProcess handoff). Unknown values are ignored at load time.
 	VimMode string `json:"vimMode,omitempty"`
+	// Notify controls desktop notifications (OSC 9 + bell) for permission/
+	// question asks and long turn completion: "on", "off", or
+	// "unfocused-only" (default). Unknown values are ignored at load time.
+	Notify string `json:"notify,omitempty"`
 	// PermissionAutoApproveSeconds enables permission-modal auto-allow once
 	// after N seconds (yolo-lite). Zero disables (default). Clamped to 1–60
 	// when positive.
@@ -258,6 +262,7 @@ func read(path string) (Config, error) {
 	c.PermissionAutoApproveExclude = normalizePermissionAutoApproveExclude(c.PermissionAutoApproveExclude)
 	c.CompactionStrategy = NormalizeCompactionStrategy(c.CompactionStrategy)
 	c.CompactionModel = strings.TrimSpace(c.CompactionModel)
+	c.Notify = NormalizeNotify(c.Notify)
 	// Keybinds: unknown ids / invalid chords fail the layer (and thus Load).
 	if err := ValidateKeybinds(c.Keybinds); err != nil {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
@@ -326,6 +331,28 @@ func NormalizeCompactionStrategy(s string) string {
 	}
 }
 
+// Notify mode values for Config.Notify / desktop notifications.
+const (
+	NotifyOn            = "on"
+	NotifyOff           = "off"
+	NotifyUnfocusedOnly = "unfocused-only"
+)
+
+// NormalizeNotify maps config aliases to on|off|unfocused-only.
+// Empty and unknown values become "" (TUI default = unfocused-only).
+func NormalizeNotify(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "on", "true", "1", "yes", "always":
+		return NotifyOn
+	case "off", "false", "0", "no", "never":
+		return NotifyOff
+	case "unfocused-only", "unfocused", "blur":
+		return NotifyUnfocusedOnly
+	default:
+		return ""
+	}
+}
+
 func merge(base, layer Config) Config {
 	if layer.Provider != "" {
 		base.Provider = layer.Provider
@@ -347,6 +374,9 @@ func merge(base, layer Config) Config {
 	}
 	if layer.VimMode != "" {
 		base.VimMode = layer.VimMode
+	}
+	if layer.Notify != "" {
+		base.Notify = layer.Notify
 	}
 	if layer.PermissionAutoApproveSeconds != 0 {
 		base.PermissionAutoApproveSeconds = layer.PermissionAutoApproveSeconds

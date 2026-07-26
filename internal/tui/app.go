@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -117,6 +118,9 @@ type Options struct {
 	PermissionAutoApproveSeconds int
 	// PermissionAutoApproveExclude lists permission names that never auto-allow.
 	PermissionAutoApproveExclude []string
+	// NotifyMode selects desktop notifications: on, off, or unfocused-only
+	// (default). Wired from config.notify.
+	NotifyMode NotifyMode
 	// Replay is a prior session event log for --continue / --session. Seeded
 	// via cellsFromEvents + silent selection/child state — never fed through
 	// applyEvent (avoids stuck turns, zombie permission modals, orphan children).
@@ -253,7 +257,9 @@ type Model struct {
 	turnStartedAt     time.Time
 	toolCallsThisTurn int
 	authExpiryNoticed bool
-	focused           bool // terminal focus; default true (WithReportFocus)
+	focused           bool // terminal focus; default true until BlurMsg
+	focusKnown        bool // true after first FocusMsg/BlurMsg from the terminal
+	notifyMode        NotifyMode
 	titleTopic        string
 
 	// splitOrientation is horizontal (left|right) by default; vertical stacks
@@ -333,6 +339,7 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		spin:            sp,
 		historyPos:      -1,
 		focused:         true,
+		notifyMode:      NotifyUnfocusedOnly,
 		appearance:      appearanceAuto,
 		autonomy:        protocol.AutonomySupervised,
 	}
@@ -351,6 +358,9 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		if option.VimMode != "" {
 			m.vimMode = option.VimMode
 		}
+		if option.NotifyMode != "" {
+			m.notifyMode = option.NotifyMode
+		}
 		if option.PermissionAutoApproveSeconds != 0 {
 			m.permissionAutoApproveSeconds = option.PermissionAutoApproveSeconds
 		}
@@ -367,6 +377,9 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 	m.keyMap = buildKeyMap(m.keyOverrides, m.splitOrientation)
 	if m.vimMode == "" {
 		m.vimMode = VimModePane
+	}
+	if m.notifyMode == "" {
+		m.notifyMode = NotifyUnfocusedOnly
 	}
 	if services.History != nil {
 		m.entries = services.History.Entries()
@@ -625,6 +638,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case initResultMsg:
+		return m.applyInitResult(msg)
+
 	case authExpiryNoticeMsg:
 		if m.authExpiryNoticed {
 			return m, nil
@@ -646,11 +662,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.FocusMsg:
 		m.focused = true
+		m.focusKnown = true
 		m.windows = refreshFilesWindows(m.windows)
 		return m, nil
 
 	case tea.BlurMsg:
 		m.focused = false
+		m.focusKnown = true
 		return m, nil
 
 	case filesRefreshMsg:
@@ -1482,9 +1500,8 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		if auto := m.armPermissionAutoApprove(pm, ev.Permission); auto != nil {
 			cmd = tea.Batch(cmd, auto)
 		}
-		if !m.focused {
-			cmd = tea.Batch(cmd, notifyUnfocusedCmd("strike: permission required"))
-		}
+		// Static message only — never include paths, args, or secrets.
+		cmd = tea.Batch(cmd, m.desktopNotifyCmd("strike: permission required", true))
 	case protocol.PermissionResolved:
 		if modal, ok := m.modal.(*permissionModal); ok && modal.req.RequestID == ev.RequestID {
 			m.modal = nil
@@ -1493,9 +1510,7 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 	case protocol.QuestionAsked:
 		m.modal = newQuestionModal(ev, m.ops, m.th)
 		cmd = m.broadcastContextState()
-		if !m.focused {
-			cmd = tea.Batch(cmd, notifyUnfocusedCmd("strike: question required"))
-		}
+		cmd = tea.Batch(cmd, m.desktopNotifyCmd("strike: question required", true))
 	case protocol.QuestionResolved:
 		if modal, ok := m.modal.(*questionModal); ok && modal.req.RequestID == ev.RequestID {
 			m.modal = nil
@@ -1506,10 +1521,7 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		if exp, ok := lastCell[*exploreCell](m.cells); ok {
 			exp.accepting = false
 		}
-		var notify tea.Cmd
-		if !m.focused && !m.turnStartedAt.IsZero() && time.Since(m.turnStartedAt) >= notifyAfterTurn {
-			notify = notifyUnfocusedCmd("strike: turn complete")
-		}
+		notify := m.desktopNotifyCmd("strike: turn complete", false)
 		m.turnStartedAt = time.Time{}
 		m.toolCallsThisTurn = 0
 		m.refreshOpenPalette()
@@ -2127,6 +2139,8 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		m.pendingUpgrade = true
 		m.modal = nil
 		return m, tea.Quit
+	case "/init":
+		return m.handleInitCommand()
 	default:
 		// Unknown commands fall through to skills: /name args renders the
 		// skill template and submits it as the user message.
@@ -2157,6 +2171,61 @@ func (m Model) PendingResume() string {
 // PendingUpgrade reports whether /upgrade requested a self-update after quit.
 func (m Model) PendingUpgrade() bool {
 	return m.pendingUpgrade
+}
+
+func (m Model) handleInitCommand() (tea.Model, tea.Cmd) {
+	m.resetComposer()
+	m.clearNotice()
+	if m.services.Init == nil {
+		m.setNotice("project init is unavailable", true)
+		return m, nil
+	}
+	exists, path, err := m.services.Init.Exists()
+	if err != nil {
+		m.setNotice("init failed: "+err.Error(), true)
+		return m, nil
+	}
+	if exists {
+		m.modal = newInitConfirmModal(path, m.services.Init)
+		m.reflow()
+		return m, nil
+	}
+	init := m.services.Init
+	return m, func() tea.Msg {
+		path, created, err := init.Write(false)
+		if err != nil {
+			return initResultMsg{err: err.Error()}
+		}
+		return initResultMsg{path: path, created: created}
+	}
+}
+
+func (m Model) applyInitResult(msg initResultMsg) (tea.Model, tea.Cmd) {
+	m.modal = nil
+	if msg.canceled {
+		m.setNotice("init canceled", false)
+		m.reflow()
+		return m, nil
+	}
+	if msg.err != "" {
+		m.setNotice("init failed: "+msg.err, true)
+		m.reflow()
+		return m, nil
+	}
+	display := msg.path
+	if base := filepath.Base(display); base != "" && base != "." {
+		display = base
+	}
+	switch {
+	case msg.replaced:
+		m.setNotice("updated "+display, false)
+	case msg.created:
+		m.setNotice("created "+display, false)
+	default:
+		m.setNotice("wrote "+display, false)
+	}
+	m.reflow()
+	return m, nil
 }
 
 func (m Model) handleForkCommand() (tea.Model, tea.Cmd) {

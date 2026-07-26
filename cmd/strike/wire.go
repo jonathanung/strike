@@ -576,6 +576,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	services := local.New(authStore, historyStore, memoryStore, issueStore, agentNames, skills, customStore, workDir)
 	services.Files = local.NewFiles(workDir)
 	services.Sessions = local.NewSessions(sessions, projectIdentity.Key)
+	services.Init = local.NewProjectInit(workDir)
 
 	spawn := rootSpawner(func(id string) (*rootSlot, error) {
 		slot, _, err := openRoot(id, false)
@@ -763,6 +764,10 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 		if mode, ok := tui.ParseVimMode(a.cfg.VimMode); ok {
 			vimMode = mode
 		}
+		notifyMode := tui.NotifyUnfocusedOnly
+		if mode, ok := tui.ParseNotifyMode(a.cfg.Notify); ok {
+			notifyMode = mode
+		}
 		themeID := theme.BuiltinID
 		var themePtr *theme.Theme
 		if a.cfg.Theme != "" {
@@ -782,6 +787,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 			WorkDir:                      a.workDir,
 			FirstRun:                     a.firstRun,
 			VimMode:                      vimMode,
+			NotifyMode:                   notifyMode,
 			PermissionAutoApproveSeconds: a.cfg.PermissionAutoApproveSeconds,
 			PermissionAutoApproveExclude: a.cfg.PermissionAutoApproveExclude,
 			Replay:                       a.replay,

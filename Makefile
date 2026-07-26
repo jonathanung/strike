@@ -1,4 +1,4 @@
-.PHONY: build run run-echo test vet cover cover-check clean setup
+.PHONY: build run run-echo serve test vet cover cover-check clean setup
 
 # Overall statement-coverage floor for `make cover-check` (local / optional CI).
 # Soft baseline ~77%; keep below measured total so the gate does not flake.
@@ -27,6 +27,10 @@ run: build
 # Offline dev loop — no API key needed.
 run-echo: build
 	./strike --provider echo
+
+# Experimental read-only web attach (auto-mints token; see README).
+serve: build
+	./strike serve --addr 127.0.0.1:8787
 
 test:
 	go test ./...
