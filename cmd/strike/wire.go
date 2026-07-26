@@ -576,6 +576,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	services := local.New(authStore, historyStore, memoryStore, issueStore, agentNames, skills, customStore, workDir)
 	services.Files = local.NewFiles(workDir)
 	services.Sessions = local.NewSessions(sessions, projectIdentity.Key)
+	services.Init = local.NewProjectInit(workDir)
 
 	spawn := rootSpawner(func(id string) (*rootSlot, error) {
 		slot, _, err := openRoot(id, false)
