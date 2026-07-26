@@ -42,12 +42,34 @@ func NewFiles(workDir string) host.Files {
 	return &filesService{workDir: workDir}
 }
 
+// SetWorkDir updates the workspace root used for relative paths. Used when the
+// active multi-root session switches to another worktree. Safe for concurrent
+// use with readers.
+func SetFilesWorkDir(f host.Files, workDir string) {
+	fs, ok := f.(*filesService)
+	if !ok || fs == nil {
+		return
+	}
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	fs.workDir = workDir
+	fs.cache = nil
+	fs.cacheAt = time.Time{}
+	fs.cacheRoot = ""
+}
+
+func (f *filesService) workRoot() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.workDir
+}
+
 func (f *filesService) ReadFile(path string) ([]byte, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return nil, fmt.Errorf("path is empty")
 	}
-	resolved := absPath(f.workDir, path)
+	resolved := absPath(f.workRoot(), path)
 	info, err := os.Stat(resolved)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -79,14 +101,15 @@ func (f *filesService) ReadFile(path string) ([]byte, error) {
 
 func (f *filesService) ListDir(path string) ([]host.DirEntry, error) {
 	path = strings.TrimSpace(path)
+	workDir := f.workRoot()
 	var resolved string
 	if path == "" {
-		if f.workDir == "" {
+		if workDir == "" {
 			return nil, fmt.Errorf("path is empty")
 		}
-		resolved = filepath.Clean(f.workDir)
+		resolved = filepath.Clean(workDir)
 	} else {
-		resolved = absPath(f.workDir, path)
+		resolved = absPath(workDir, path)
 	}
 	info, err := os.Stat(resolved)
 	if err != nil {
@@ -130,7 +153,7 @@ func (f *filesService) ListDir(path string) ([]host.DirEntry, error) {
 }
 
 func (f *filesService) SearchFiles(query string, limit int) ([]string, error) {
-	if f.workDir == "" {
+	if f.workRoot() == "" {
 		return nil, fmt.Errorf("work directory is empty")
 	}
 	if limit <= 0 || limit > maxSearchResults {
@@ -184,7 +207,7 @@ func (f *filesService) ReadScoped(path string) (host.FileContent, error) {
 	if display == "" {
 		return host.FileContent{Path: path, Skip: true, Notice: "empty path"}, nil
 	}
-	resolved, rel, err := resolveUnderRoot(f.workDir, display)
+	resolved, rel, err := resolveUnderRoot(f.workRoot(), display)
 	if err != nil {
 		return host.FileContent{Path: display, Skip: true, Notice: err.Error()}, nil
 	}
