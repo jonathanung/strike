@@ -20,6 +20,7 @@ import (
 const expectedUsage = `Usage:
   strike [options]
   strike exec [options] <prompt>
+  strike serve [options]
   strike auth <command> [arguments]
   strike version
   strike upgrade

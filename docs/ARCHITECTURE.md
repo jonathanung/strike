@@ -43,7 +43,8 @@ event stream the TUI rendered from (see `internal/protocol/codec.go`).
 
 | Package | Role | May import |
 |---|---|---|
-| `cmd/strike` | CLI entry (`main.go`: flags, usage, `strike auth` subcommand) + composition root (`wire.go`: assembles engine, host/local, session store, tui) | anything — the only package that wires the whole tree |
+| `cmd/strike` | CLI entry (`main.go`: flags, usage, `strike auth`/`exec`/`serve` subcommands) + composition root (`wire.go`: assembles engine, host/local, session store, tui) | anything — the only package that wires the whole tree |
+| `internal/server` | Experimental read-only HTTP attach: `/health`, SSE session event tail, minimal attach page (`strike serve`) | `session`, `version`, `protocol` (via session JSONL), stdlib |
 | `internal/version` | Build-time Version/Commit stamped via `-ldflags` | stdlib |
 | `internal/update` | GitHub Releases self-update (check, download, sha256, atomic replace, re-exec) | `version`, stdlib, net/http |
 | `internal/protocol` | Op/Event seam between engine and frontends; the JSONL envelope (`codec.go`) is the session persistence format | stdlib only |

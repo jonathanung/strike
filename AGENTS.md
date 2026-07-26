@@ -45,7 +45,8 @@ service/theme token).
 
 | Package | Role |
 |---|---|
-| `cmd/strike` | CLI flags + auth subcommands (`main.go`), composition root wiring (`wire.go`) |
+| `cmd/strike` | CLI flags + auth/exec/serve subcommands (`main.go`), composition root wiring (`wire.go`) |
+| `internal/server` | Experimental read-only HTTP attach (`strike serve`: /health, SSE events, attach page) |
 | `internal/protocol` | Ops/Events seam; JSONL envelopes |
 | `internal/engine` | Turn loop, tool dispatch, interrupts |
 | `internal/provider` | LLM adapters (+ `base`, `echo`, anthropic, openai, xai, chatgpt) |
