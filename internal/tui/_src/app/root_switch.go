@@ -49,6 +49,10 @@ type rootPane struct {
 	viewTitle    string
 	viewCells    []cell
 	viewToolByID map[string]*toolCell
+
+	// Overlay stack for this root (visible top + queued blocking asks).
+	modal      modal
+	modalQueue []modal
 }
 
 // stashActiveRoot copies live Model fields into the roots map under sessionID.
@@ -102,6 +106,8 @@ func (m *Model) stashActiveRoot() {
 		viewTitle:          m.viewTitle,
 		viewCells:          append([]cell(nil), m.viewCells...),
 		viewToolByID:       viewTools,
+		modal:              m.modal,
+		modalQueue:         cloneModalQueue(m.modalQueue),
 	}
 }
 
@@ -151,7 +157,8 @@ func (m *Model) loadRootPane(p *rootPane) {
 	}
 	m.selectedCell = -1
 	m.selectedFileRef = -1
-	m.modal = nil
+	m.modal = p.modal
+	m.modalQueue = cloneModalQueue(p.modalQueue)
 	m.viewGen++
 }
 

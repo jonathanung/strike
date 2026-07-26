@@ -16,6 +16,10 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.modal != nil {
 		var cmd tea.Cmd
 		m.modal, cmd = m.modal.update(msg)
+		if m.modal == nil {
+			cmd = tea.Batch(cmd, m.afterModalClosed())
+			m.refreshAwaitingPermission()
+		}
 		m.reflow()
 		return m, cmd
 	}
