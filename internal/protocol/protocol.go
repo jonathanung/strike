@@ -555,10 +555,13 @@ type CompactionCompleted struct {
 // SessionMeta records durable session-level metadata (e.g. a PR opened while
 // shipping). Also written to the session sidecar by the host; the event keeps
 // the JSONL transcript self-describing.
+//
+// PRState is open, merged, or closed when known (empty when unset).
 type SessionMeta struct {
 	Correlation
 	PRURL    string `json:"prUrl,omitempty"`
 	PRNumber int    `json:"prNumber,omitempty"`
+	PRState  string `json:"prState,omitempty"`
 }
 
 // HookMatched records that a declarative config hook rule fired (log/block/

@@ -55,7 +55,7 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 		},
 		CompactionStarted{Correlation: corr, Reason: CompactionReasonManual},
 		CompactionCompleted{Correlation: corr, Reason: CompactionReasonThreshold, Removed: 4, Kept: 3},
-		SessionMeta{Correlation: corr, PRURL: "https://github.com/acme/repo/pull/7", PRNumber: 7},
+		SessionMeta{Correlation: corr, PRURL: "https://github.com/acme/repo/pull/7", PRNumber: 7, PRState: "open"},
 	}
 	for _, want := range events {
 		env, err := Wrap(want)

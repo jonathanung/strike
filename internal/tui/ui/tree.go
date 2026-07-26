@@ -13,9 +13,11 @@ import (
 // control when Children is empty. Leaf forces a non-expandable row even if
 // Children is non-empty (callers should leave Children nil for leaves).
 type TreeNode struct {
-	ID       string // optional stable identity for callers
-	Label    string
-	Detail   string // muted trailing text after DetailSeparator
+	ID     string // optional stable identity for callers
+	Label  string
+	Detail string // muted trailing text after DetailSeparator
+	// Suffix is optional pre-styled trailing content (e.g. a Badge). Not recolored.
+	Suffix   string
 	Children []TreeNode
 	Expanded bool
 	Lazy     bool // expandable with no Children yet (lazy-load placeholder)
@@ -42,6 +44,7 @@ type TreeRow struct {
 	ID         string
 	Label      string
 	Detail     string
+	Suffix     string
 	Expanded   bool
 	Expandable bool
 	Disabled   bool
@@ -67,6 +70,7 @@ func FlattenTree(nodes []TreeNode) []TreeRow {
 				ID:         n.ID,
 				Label:      n.Label,
 				Detail:     n.Detail,
+				Suffix:     n.Suffix,
 				Expanded:   n.Expanded,
 				Expandable: exp,
 				Disabled:   n.Disabled,
@@ -205,6 +209,20 @@ func treeRow(th theme.Theme, st theme.Styles, ic theme.Icons, row TreeRow, isCur
 	if row.Current {
 		label += " (current)"
 	}
+	suffix := row.Suffix
+	suffixW := lipgloss.Width(suffix)
+	suffixGap := ""
+	if suffix != "" {
+		suffixGap = strings.Repeat(" ", th.Spacing.XS)
+		suffixW += th.Spacing.XS
+	}
+	budget := width - suffixW
+	if budget < 1 {
+		suffix = ""
+		suffixGap = ""
+		suffixW = 0
+		budget = width
+	}
 	plain := prefix + label
 	line := prefix + labelStyle.Render(label)
 	if row.Detail != "" {
@@ -212,8 +230,11 @@ func treeRow(th theme.Theme, st theme.Styles, ic theme.Icons, row TreeRow, isCur
 		plain += separator + row.Detail
 		line += st.Muted.Render(separator + row.Detail)
 	}
-	if lipgloss.Width(plain) > width {
+	if lipgloss.Width(plain) > budget {
 		return labelStyle.Render(truncate(th, plain, width))
 	}
-	return line
+	if suffix == "" {
+		return line
+	}
+	return line + suffixGap + suffix
 }

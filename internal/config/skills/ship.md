@@ -30,4 +30,4 @@ $ARGUMENTS
 1. **Commit** — stage intended files and create one commit with a HEREDOC message matching repo style (skip if the tree is already clean and HEAD has unpushed commits to ship).
 2. **Push** — `git push -u origin HEAD` when no upstream, else `git push`.
 3. **PR** — create with `gh pr create` or update with `gh pr edit` if one exists. Short title; body with Summary + Test plan.
-4. Print the PR URL when finished so it is stored on this session.
+4. Print the PR URL when finished (`gh pr create` does this; or `gh pr view --json url,number,state`). Strike stores URL/number/state on the session for picker badges.

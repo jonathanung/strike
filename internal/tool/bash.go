@@ -124,6 +124,9 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 			if pr.Number > 0 {
 				metaFields["prNumber"] = pr.Number
 			}
+			if pr.State != "" {
+				metaFields["prState"] = pr.State
+			}
 			if tc.RecordSessionPR != nil {
 				_ = tc.RecordSessionPR(pr)
 			}
@@ -136,7 +139,10 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 // githubPRURLRe matches common GitHub pull request URLs in gh CLI output.
 var githubPRURLRe = regexp.MustCompile(`https://github\.com/[\w.-]+/[\w.-]+/pull/(\d+)`)
 
-// extractSessionPR pulls a PR URL/number from successful gh pr command output.
+// githubPRStateRe matches "state":"OPEN" style JSON from gh pr view --json.
+var githubPRStateRe = regexp.MustCompile(`(?i)"state"\s*:\s*"(open|merged|closed)"`)
+
+// extractSessionPR pulls a PR URL/number/state from successful gh pr command output.
 func extractSessionPR(command, output string) (SessionPR, bool) {
 	if !looksLikeGHPRCommand(command) {
 		return SessionPR{}, false
@@ -146,7 +152,11 @@ func extractSessionPR(command, output string) (SessionPR, bool) {
 		return SessionPR{}, false
 	}
 	n, _ := strconv.Atoi(m[1])
-	return SessionPR{URL: m[0], Number: n}, true
+	state := "open"
+	if sm := githubPRStateRe.FindStringSubmatch(output); sm != nil {
+		state = strings.ToLower(sm[1])
+	}
+	return SessionPR{URL: m[0], Number: n, State: state}, true
 }
 
 func looksLikeGHPRCommand(command string) bool {

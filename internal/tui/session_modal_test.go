@@ -191,3 +191,66 @@ func TestFormatRelativeTime(t *testing.T) {
 		}
 	}
 }
+
+func TestSessionModalShowsPRBadge(t *testing.T) {
+	fs := newFakeSessions()
+	fs.put(host.Session{
+		ID:       "with-pr",
+		Title:    "ship feature",
+		PRURL:    "https://github.com/acme/repo/pull/42",
+		PRNumber: 42,
+		PRState:  "open",
+	}, nil)
+	fs.put(host.Session{
+		ID:       "merged-pr",
+		Title:    "done work",
+		PRURL:    "https://github.com/acme/repo/pull/9",
+		PRNumber: 9,
+		PRState:  "merged",
+	}, nil)
+	fs.put(host.Session{ID: "no-pr", Title: "local only"}, nil)
+
+	m := newSessionModal(fs, "with-pr")
+	view := m.view(80, theme.Default().Resolve())
+	if !strings.Contains(view, "#42") {
+		t.Errorf("missing open PR badge:\n%s", view)
+	}
+	if !strings.Contains(view, "#9") {
+		t.Errorf("missing merged PR badge:\n%s", view)
+	}
+	// OSC 8 hyperlink to pr_url
+	if !strings.Contains(view, "https://github.com/acme/repo/pull/42") {
+		t.Errorf("missing OSC8 pr url:\n%s", view)
+	}
+	// Sessions without PR still listed by title only.
+	if !strings.Contains(view, "local only") {
+		t.Errorf("missing no-pr session:\n%s", view)
+	}
+}
+
+func TestSessionPRBadgeEmptyWithoutPR(t *testing.T) {
+	th := theme.Default().Resolve()
+	if got := sessionPRBadge(th, host.Session{Title: "x"}); got != "" {
+		t.Fatalf("got %q, want empty", got)
+	}
+}
+
+func TestSessionModalRefreshUsesFakePRState(t *testing.T) {
+	fs := newFakeSessions()
+	fs.put(host.Session{
+		ID: "r1", Title: "t", PRURL: "https://github.com/a/b/pull/1", PRNumber: 1, PRState: "open",
+	}, nil)
+	fs.refresh = func(in []host.Session) []host.Session {
+		out := append([]host.Session(nil), in...)
+		out[0].PRState = "closed"
+		return out
+	}
+	m := newSessionModal(fs, "")
+	if len(m.all) != 1 || m.all[0].PRState != "closed" {
+		t.Fatalf("refresh not applied: %+v", m.all)
+	}
+	view := m.view(72, theme.Default().Resolve())
+	if !strings.Contains(view, "closed") {
+		t.Errorf("view missing closed state:\n%s", view)
+	}
+}
