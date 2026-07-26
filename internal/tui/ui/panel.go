@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
@@ -49,6 +50,10 @@ type PanelOpts struct {
 // Output never exceeds Width. Themed callers wrap body to
 // PanelInnerWidth(th, Width) for the nicest result; Panel truncates any line
 // that is still too long.
+//
+// Focus chrome (solid): title edge uses SurfaceFocus and body keeps Surface,
+// with a one-cell BorderFocus leading bar — never a full-panel highlight wash.
+// Selection highlight is a separate theme role (TextSelection).
 func Panel(th theme.Theme, opts PanelOpts, body string) string {
 	th = th.Resolve()
 	if opts.Width < 1 {
@@ -91,18 +96,49 @@ func Panel(th theme.Theme, opts PanelOpts, body string) string {
 }
 
 func renderSolidPanel(th theme.Theme, opts PanelOpts, width, padX int, rows []string) string {
-	bg := panelSurfaceColor(th, opts)
+	bodyBg := panelBodySurface(th, opts)
+	edgeBg := panelEdgeSurface(th, opts)
 	titleStyle := panelTitleStyle(th, opts)
 	var b strings.Builder
-	b.WriteString(solidEdge(th, opts.Title, width, padX, bg, titleStyle))
+	b.WriteString(solidEdge(th, opts.Title, width, padX, edgeBg, titleStyle))
 	pad := strings.Repeat(" ", padX)
+	// Leading bar reuses the left padding column so content width is stable.
+	focusBar := opts.Focused && opts.Tone == ToneDefault && width >= 2 && padX > 0
 	for _, row := range rows {
 		b.WriteByte('\n')
-		b.WriteString(paintSurface(pad+row+pad, width, bg))
+		content := pad + row + pad
+		if focusBar {
+			b.WriteString(paintFocusBarRow(content, width, bodyBg, th.BorderFocus))
+		} else {
+			b.WriteString(paintSurface(content, width, bodyBg))
+		}
 	}
 	b.WriteByte('\n')
-	b.WriteString(solidEdge(th, opts.Footer, width, padX, bg, th.S().Muted))
+	b.WriteString(solidEdge(th, opts.Footer, width, padX, bodyBg, th.S().Muted))
 	return b.String()
+}
+
+// paintFocusBarRow paints a one-cell leading focus bar, then the body surface.
+// Layout width is unchanged: the bar reuses the left padding column.
+func paintFocusBarRow(content string, width int, bg, bar lipgloss.TerminalColor) string {
+	if width < 2 {
+		return paintSurface(content, width, bg)
+	}
+	rest := content
+	if ansiWidth := lipgloss.Width(content); ansiWidth > 0 {
+		// Drop the first display cell (padding space); bar replaces it.
+		rest = cutFirstCell(content)
+	}
+	return paintSurface(" ", 1, bar) + paintSurface(rest, width-1, bg)
+}
+
+func cutFirstCell(s string) string {
+	// ansi.Cut is [start, end) in display cells.
+	w := lipgloss.Width(s)
+	if w <= 1 {
+		return ""
+	}
+	return ansi.Cut(s, 1, w)
 }
 
 func renderBorderedPanel(th theme.Theme, opts PanelOpts, width, padX int, rows []string) string {
@@ -194,11 +230,28 @@ func panelBorderColor(th theme.Theme, opts PanelOpts) lipgloss.AdaptiveColor {
 	}
 }
 
-func panelSurfaceColor(th theme.Theme, opts PanelOpts) lipgloss.TerminalColor {
+// panelBodySurface is the fill for panel body rows. Focused panes keep the
+// normal Surface so text stays readable and selectable; focus is title chrome
+// and the leading bar, not a full-panel wash.
+func panelBodySurface(th theme.Theme, opts PanelOpts) lipgloss.TerminalColor {
 	th = th.Resolve()
 	switch {
 	case opts.Tone != ToneDefault:
-		// Tone panels still use the focus surface; title/edge carry the tone.
+		// Tone dialogs stay slightly elevated so they pop over a scrim.
+		return th.SurfaceFocus
+	case opts.Dim:
+		return th.SurfaceMuted
+	default:
+		return th.Surface
+	}
+}
+
+// panelEdgeSurface is the fill for the solid title edge. Focused panes use
+// SurfaceFocus here only — a non-copyable chrome affordance.
+func panelEdgeSurface(th theme.Theme, opts PanelOpts) lipgloss.TerminalColor {
+	th = th.Resolve()
+	switch {
+	case opts.Tone != ToneDefault:
 		return th.SurfaceFocus
 	case opts.Focused:
 		return th.SurfaceFocus
@@ -207,6 +260,28 @@ func panelSurfaceColor(th theme.Theme, opts PanelOpts) lipgloss.TerminalColor {
 	default:
 		return th.Surface
 	}
+}
+
+// panelSurfaceColor is the body surface (tests and callers that need the
+// primary fill token). Focus no longer maps to SurfaceFocus.
+func panelSurfaceColor(th theme.Theme, opts PanelOpts) lipgloss.TerminalColor {
+	return panelBodySurface(th, opts)
+}
+
+// PanelContentOrigin is the (x, y) offset of the first body content cell
+// relative to the panel's top-left outer corner. Compact/borderless panels
+// and panels too narrow for chrome report (0, 0).
+func PanelContentOrigin(th theme.Theme, width int) (x, y int) {
+	th = th.Resolve()
+	chrome, padX, _ := panelMetrics(th, width)
+	if !chrome {
+		return 0, 0
+	}
+	y = 1
+	if th.Chrome == theme.ChromeBordered {
+		return 1 + padX, y
+	}
+	return padX, y
 }
 
 func panelTitleStyle(th theme.Theme, opts PanelOpts) lipgloss.Style {

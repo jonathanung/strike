@@ -132,3 +132,31 @@ func TestModalWidthCapsAndMargins(t *testing.T) {
 		t.Errorf("ModalWidth(40) = %d, want 36 (screen-4)", got)
 	}
 }
+
+func TestOverlayCenterPadsScrimToFullWidth(t *testing.T) {
+	// Short bg lines must not leave an un-scrimmed spill strip on the right.
+	saved := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(saved) })
+
+	th := theme.Default()
+	th.OverlayScrim = lipgloss.AdaptiveColor{Light: "#112233", Dark: "#112233"}
+	bg := "short\nnarrow"
+	out := OverlayCenter(th, bg, "X", 20, 4)
+	lines := strings.Split(out, "\n")
+	if len(lines) != 4 {
+		t.Fatalf("height = %d, want 4", len(lines))
+	}
+	scrim := "38;2;17;34;51"
+	for i, l := range lines {
+		if w := lipgloss.Width(l); w != 20 {
+			t.Errorf("row %d width = %d, want full-bleed 20", i, w)
+		}
+		if strings.Contains(ansi.Strip(l), "X") {
+			continue
+		}
+		if !strings.Contains(l, scrim) {
+			t.Errorf("row %d missing OverlayScrim pad: %q", i, l)
+		}
+	}
+}

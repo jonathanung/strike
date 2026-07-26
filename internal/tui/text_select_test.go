@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
 
 func TestStyleColumnsAndExtractSelection(t *testing.T) {
@@ -204,5 +205,129 @@ func TestPromptRegionAcceptsSelection(t *testing.T) {
 	})
 	if !m.textSel.has {
 		t.Fatal("prompt drag should yield a selection")
+	}
+}
+
+func TestApplyTextSelectionClipsToRegion(t *testing.T) {
+	// Multi-line selection must not paint columns outside the hit region.
+	style := lipgloss.NewStyle().Reverse(true)
+	frame := "AAAAAAAAAA\nBBBBBBBBBB\nCCCCCCCCCC"
+	region := contentRect{X: 2, Y: 0, W: 4, H: 3}
+	sel := textSel{
+		has:    true,
+		a:      screenPos{X: 2, Y: 0},
+		b:      screenPos{X: 5, Y: 2},
+		region: region,
+	}
+	out := applyTextSelection(frame, sel, style)
+	for y, line := range strings.Split(out, "\n") {
+		if plain := ansi.Strip(line); plain != strings.Split(frame, "\n")[y] {
+			t.Fatalf("row %d plain text changed: %q", y, plain)
+		}
+	}
+	if text := extractTextSelection(frame, sel); text != "AAAA\nBBBB\nCCCC" {
+		t.Fatalf("extract = %q, want region-clipped AAAA/BBBB/CCCC", text)
+	}
+	// Outside-region columns stay unstyled: restyle only region and compare.
+	manual := frame
+	for y := 0; y < 3; y++ {
+		lines := strings.Split(manual, "\n")
+		lines[y] = styleColumns(lines[y], 2, 6, style)
+		manual = strings.Join(lines, "\n")
+	}
+	if out != manual {
+		t.Fatalf("highlight escaped region\ngot:\n%s\nwant:\n%s", out, manual)
+	}
+
+	// Without region, middle rows still span the full line.
+	open := textSel{has: true, a: screenPos{X: 1, Y: 0}, b: screenPos{X: 2, Y: 1}}
+	if got := extractTextSelection(frame, open); got != "AAAAAAAAA\nBBB" {
+		t.Fatalf("open extract = %q, want AAAAAAAAA\\nBBB", got)
+	}
+}
+
+func TestSelectionDoesNotPaintRightPaneColumns(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	m.applyEvent(protocol.UserMessage{Text: "left pane only selection line alpha"})
+	m.applyEvent(protocol.TextDelta{Text: "left pane only selection line bravo"})
+	m.refreshViewport()
+	m.viewport.GotoTop()
+
+	tr, ok := m.transcriptContentRect()
+	if !ok || tr.W < 4 {
+		t.Fatalf("transcript rect=%+v", tr)
+	}
+	// Right pane starts after the left stack; pick a column past the region.
+	rightX := tr.X + tr.W + 4
+	if rightX >= m.width {
+		t.Skip("no columns past transcript region at this width")
+	}
+	sel := textSel{
+		has:    true,
+		a:      screenPos{X: tr.X, Y: tr.Y},
+		b:      screenPos{X: tr.X + tr.W - 1, Y: tr.Y + min(1, tr.H-1)},
+		region: tr,
+	}
+	base := m.renderFrame()
+	styled := applyTextSelection(base, sel, lipgloss.NewStyle().Reverse(true))
+	baseLines := strings.Split(base, "\n")
+	styledLines := strings.Split(styled, "\n")
+	for y := sel.a.Y; y <= sel.b.Y && y < len(styledLines); y++ {
+		// Cells outside the region must match the unstyled base exactly.
+		baseCell := ansi.Cut(baseLines[y], rightX, rightX+1)
+		gotCell := ansi.Cut(styledLines[y], rightX, rightX+1)
+		if baseCell != gotCell {
+			t.Fatalf("row %d col %d changed outside region\nbase=%q\ngot=%q", y, rightX, baseCell, gotCell)
+		}
+	}
+}
+
+func TestModalOverlayFullBleedNoSpillAt80x24And120x40(t *testing.T) {
+	for _, size := range []struct{ w, h int }{{80, 24}, {120, 40}} {
+		m, _ := newAppTestModel(nil, nil)
+		m = updateApp(t, m, tea.WindowSizeMsg{Width: size.w, Height: size.h})
+		m.modal = &appProbeModal{}
+		m.reflow()
+		view := m.View()
+		lines := strings.Split(view, "\n")
+		if len(lines) != size.h {
+			t.Errorf("%dx%d: lines=%d", size.w, size.h, len(lines))
+		}
+		for i, line := range lines {
+			if w := ansi.StringWidth(line); w != size.w {
+				t.Errorf("%dx%d row %d width=%d", size.w, size.h, i, w)
+				break
+			}
+		}
+		if !strings.Contains(ansi.Strip(view), "probe") {
+			t.Errorf("%dx%d missing modal content", size.w, size.h)
+		}
+	}
+}
+
+func TestFocusedPaneHasChromeNotBodyWash(t *testing.T) {
+	setTUITrueColor(t)
+	th := theme.Default()
+	th.Surface = fixedColor("#112233")
+	th.SurfaceFocus = fixedColor("#445566")
+	th.BorderFocus = fixedColor("#778899")
+	th.SurfaceMuted = fixedColor("#aabbcc")
+	m, _ := newAppTestModelWithOptions(Options{Theme: &th})
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	view := m.View()
+	// Title edge focus token present; body uses Surface not a full SurfaceFocus flood.
+	if !strings.Contains(view, rgbBGSGR("#445566")) {
+		t.Fatal("focused title edge missing SurfaceFocus")
+	}
+	if !strings.Contains(view, rgbBGSGR("#778899")) {
+		t.Fatal("focused leading bar missing BorderFocus")
+	}
+	if !strings.Contains(view, rgbBGSGR("#112233")) {
+		t.Fatal("focused body missing normal Surface")
+	}
+	// Dim right pane still tokenized.
+	if !strings.Contains(view, rgbBGSGR("#aabbcc")) {
+		t.Fatal("dim pane missing SurfaceMuted")
 	}
 }

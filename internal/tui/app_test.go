@@ -291,8 +291,12 @@ func TestModalVisuallyUnfocusesComposerAndSuppressesCompletionUntilClosed(t *tes
 	if strings.Contains(afterClose, rgbSGR("#99aabb")) {
 		t.Errorf("closed modal left OverlayScrim on the frame:\n%s", afterClose)
 	}
+	// Focus chrome is title SurfaceFocus + body Surface (no full-panel wash).
 	if !strings.Contains(afterClose, rgbBGSGR("#445566")) {
-		t.Errorf("closed modal did not restore focused composer surface:\n%s", afterClose)
+		t.Errorf("closed modal did not restore focused title SurfaceFocus:\n%s", afterClose)
+	}
+	if !strings.Contains(afterClose, rgbBGSGR("#112233")) {
+		t.Errorf("closed modal did not restore body Surface:\n%s", afterClose)
 	}
 	if !hasReverseVideo(afterClose) {
 		t.Errorf("closed modal did not restore static composer cursor: %q", afterClose)
