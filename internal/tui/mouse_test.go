@@ -47,12 +47,7 @@ func TestMouseClickExpandsToolCell(t *testing.T) {
 		t.Fatal("transcript origin not available")
 	}
 	// Click the first content line of the only cell (header row).
-	m = updateApp(t, m, tea.MouseMsg{
-		Action: tea.MouseActionPress,
-		Button: tea.MouseButtonLeft,
-		X:      ox + 2,
-		Y:      oy,
-	})
+	m = mouseClick(t, m, ox+2, oy)
 	tc := m.toolByID["c1"]
 	if tc == nil || !tc.expanded {
 		t.Fatalf("click should expand collapsible tool: tc=%v expanded=%v", tc != nil, tc != nil && tc.expanded)
@@ -61,12 +56,7 @@ func TestMouseClickExpandsToolCell(t *testing.T) {
 		t.Fatal("click should select the tool cell")
 	}
 	// Second click collapses.
-	m = updateApp(t, m, tea.MouseMsg{
-		Action: tea.MouseActionPress,
-		Button: tea.MouseButtonLeft,
-		X:      ox + 2,
-		Y:      oy,
-	})
+	m = mouseClick(t, m, ox+2, oy)
 	if tc.expanded {
 		t.Fatal("second click should collapse")
 	}
@@ -109,8 +99,14 @@ func TestMouseClickOpensOSC8HTTPLink(t *testing.T) {
 	if !ok {
 		t.Fatal("transcript origin not available")
 	}
-	updated, cmd := m.Update(tea.MouseMsg{
+	m = updateApp(t, m, tea.MouseMsg{
 		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+		X:      ox + col,
+		Y:      oy,
+	})
+	updated, cmd := m.Update(tea.MouseMsg{
+		Action: tea.MouseActionRelease,
 		Button: tea.MouseButtonLeft,
 		X:      ox + col,
 		Y:      oy,
@@ -159,12 +155,7 @@ func TestMouseClickFileTitleOpensEditor(t *testing.T) {
 	if !ok {
 		t.Fatal("no origin")
 	}
-	m = updateApp(t, m, tea.MouseMsg{
-		Action: tea.MouseActionPress,
-		Button: tea.MouseButtonLeft,
-		X:      ox + col,
-		Y:      oy,
-	})
+	m = mouseClick(t, m, ox+col, oy)
 	// File OSC8 routes through openFileRef → /vim pane, not expand.
 	if tc := m.toolByID["r1"]; tc != nil && tc.expanded {
 		t.Fatal("file title click should not expand tool")
@@ -285,15 +276,27 @@ func TestMouseClickIgnoresModal(t *testing.T) {
 		// origin may still compute; click must no-op due to modal
 		ox, oy = 2, 2
 	}
-	m = updateApp(t, m, tea.MouseMsg{
-		Action: tea.MouseActionPress,
-		Button: tea.MouseButtonLeft,
-		X:      ox + 2,
-		Y:      oy,
-	})
+	m = mouseClick(t, m, ox+2, oy)
 	if m.toolByID["c1"].expanded {
 		t.Fatal("click with modal open should not expand tool")
 	}
+}
+
+// mouseClick sends left press+release at the same cell (no drag).
+func mouseClick(t *testing.T, m Model, x, y int) Model {
+	t.Helper()
+	m = updateApp(t, m, tea.MouseMsg{
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+		X:      x,
+		Y:      y,
+	})
+	return updateApp(t, m, tea.MouseMsg{
+		Action: tea.MouseActionRelease,
+		Button: tea.MouseButtonLeft,
+		X:      x,
+		Y:      y,
+	})
 }
 
 func TestExploreCellTitleLinksWhenExpanded(t *testing.T) {

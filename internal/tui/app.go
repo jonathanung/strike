@@ -177,6 +177,8 @@ type Model struct {
 	// cellClip stages one-shot OSC52 for y-to-copy (pointer so value-receiver
 	// View can clear it). Never nil after New.
 	cellClip *cellClipboard
+	// textSel is app-owned mouse highlight (transcript + prompt only).
+	textSel textSel
 	// copyFlashGen invalidates in-flight clearCellCopiedFlashMsg timers.
 	copyFlashGen int
 	modal        modal
@@ -3409,64 +3411,14 @@ func (m Model) fileRefAtMouse(msg tea.MouseMsg) (fileRef, bool) {
 // transcriptContentOrigin is the top-left cell of the transcript viewport body
 // in screen coordinates (after header and panel chrome).
 func (m Model) transcriptContentOrigin() (x, y int, ok bool) {
-	if !m.ready || len(m.displayCells()) == 0 || m.viewport.Height <= 0 {
+	if len(m.displayCells()) == 0 {
 		return 0, 0, false
 	}
-	th := m.th.Resolve()
-	gutter := th.Spacing.XS
-	leftWidth := m.width
-	showLeft := true
-	if m.splitOrientation != orientVertical {
-		geo := computePaneGeometry(m.width, gutter, m.focus)
-		if geo.mode == paneSingle && m.focus == focusRight {
-			return 0, 0, false
-		}
-		leftWidth = geo.leftCandidateWidth(m.width)
-	} else {
-		l0 := computeLayout(m.width, m.height, m.composer.Height(), m.completionPopupHeightFor(m.width), m.showDangerBanner(), m.noticeRowsFor(m.width))
-		bodyHeight := l0.transcript + l0.notice + l0.popup + l0.composer
-		geo := computeVerticalPaneGeometry(m.width, bodyHeight, gutter, m.focus)
-		if geo.mode == paneSingle && m.focus == focusRight {
-			return 0, 0, false
-		}
-		leftWidth = m.width
-		showLeft = !(geo.mode == paneSingle && m.focus == focusRight)
-	}
-	if !showLeft {
+	r, ok := m.transcriptContentRect()
+	if !ok {
 		return 0, 0, false
 	}
-	l := computeLayout(leftWidth, m.height, m.composer.Height(), m.completionPopupHeightFor(leftWidth), m.showDangerBanner(), m.noticeRowsFor(leftWidth))
-	if m.splitOrientation == orientVertical {
-		bodyHeight := l.transcript + l.notice + l.popup + l.composer
-		geo := computeVerticalPaneGeometry(m.width, bodyHeight, gutter, m.focus)
-		if geo.mode == paneSplit {
-			l = l.withBodyHeight(geo.leftHeight)
-		}
-	}
-	if l.transcript <= 0 {
-		return 0, 0, false
-	}
-	y = l.header
-	x = 0
-	compact := leftWidth < compactWidth || m.height < compactHeight
-	if !compact {
-		// Panel top border + left border + horizontal padding.
-		y++
-		if leftWidth >= 3 {
-			x = 1
-			if leftWidth >= 6 {
-				padX := th.Spacing.XS
-				if padX < 0 {
-					padX = 0
-				}
-				if maxPad := (leftWidth - 3) / 2; padX > maxPad {
-					padX = maxPad
-				}
-				x += padX
-			}
-		}
-	}
-	return x, y, true
+	return r.X, r.Y, true
 }
 
 // copySelectedCell stages OSC52 for the selected (or latest copyable)
@@ -3585,6 +3537,25 @@ func (m *Model) resolveCopyCellIndex() int {
 }
 
 func (m Model) View() string {
+	frame := m.renderFrame()
+	if m.textSel.active() {
+		frame = applyTextSelection(frame, m.textSel, m.th.S().TextSelection)
+	}
+	// Prepend OSC52 after Canvas so overlay/ansi.Cut cannot strip it.
+	if wm, ok := m.modal.(*authWaitModal); ok {
+		if osc := wm.TakeCopyOSC(); osc != "" {
+			return osc + frame
+		}
+	}
+	if osc := m.cellClip.take(); osc != "" {
+		return osc + frame
+	}
+	return frame
+}
+
+// renderFrame builds the full-screen UI without OSC52 side effects or the
+// active text-selection overlay (callers apply those separately).
+func (m Model) renderFrame() string {
 	if !m.ready {
 		if warning := m.dangerView(0); warning != "" {
 			return warning + "\nstarting…"
@@ -3710,17 +3681,7 @@ func (m Model) View() string {
 		parts = append(parts, content)
 	}
 	parts = append(parts, footer...)
-	frame := ui.Canvas(m.th, m.width, m.height, strings.Join(parts, "\n"))
-	// Prepend OSC52 after Canvas so overlay/ansi.Cut cannot strip it.
-	if wm, ok := m.modal.(*authWaitModal); ok {
-		if osc := wm.TakeCopyOSC(); osc != "" {
-			return osc + frame
-		}
-	}
-	if osc := m.cellClip.take(); osc != "" {
-		return osc + frame
-	}
-	return frame
+	return ui.Canvas(m.th, m.width, m.height, strings.Join(parts, "\n"))
 }
 
 // paletteResultFocus reveals a newly produced left-side notice when the right

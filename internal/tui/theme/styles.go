@@ -19,6 +19,7 @@ type Styles struct {
 	TextStrong, MutedStrong, AccentStrong, AccentAltStrong     lipgloss.Style
 	SuccessStrong, WarningStrong, ErrorStrong, DangerStrong    lipgloss.Style
 	Selected, SelectedUnderline                                lipgloss.Style
+	TextSelection                                              lipgloss.Style // mouse drag highlight
 	UserLabel, AssistantLabel, ToolLabel                       lipgloss.Style
 	Input, InputPrompt, InputPlaceholder, InputCursor, Spinner lipgloss.Style
 	Border, BorderFocus, BorderMuted                           lipgloss.Style
@@ -35,7 +36,8 @@ func (t Theme) S() Styles {
 		Text: base.Foreground(t.Text), Muted: base.Foreground(t.TextMuted), Accent: base.Foreground(t.Accent), AccentAlt: base.Foreground(t.AccentAlt), Title: base.Foreground(t.Accent).Bold(true), Success: base.Foreground(t.Success), Warning: base.Foreground(t.Warning), Error: base.Foreground(t.Error), Danger: base.Foreground(t.Danger),
 		TextStrong: base.Foreground(t.Text).Bold(true), MutedStrong: base.Foreground(t.TextMuted).Bold(true), AccentStrong: base.Foreground(t.Accent).Bold(true), AccentAltStrong: base.Foreground(t.AccentAlt).Bold(true), SuccessStrong: base.Foreground(t.Success).Bold(true), WarningStrong: base.Foreground(t.Warning).Bold(true), ErrorStrong: base.Foreground(t.Error).Bold(true), DangerStrong: base.Foreground(t.Danger).Bold(true),
 		Selected: base.Foreground(t.Highlight).Bold(true), SelectedUnderline: base.Foreground(t.Highlight).Bold(true).Underline(true),
-		UserLabel: base.Foreground(t.UserLabel).Bold(true), AssistantLabel: base.Foreground(t.Accent).Bold(true), ToolLabel: base.Foreground(t.ToolLabel).Bold(true),
+		TextSelection: base.Foreground(t.Background).Background(t.Highlight).Reverse(true),
+		UserLabel:     base.Foreground(t.UserLabel).Bold(true), AssistantLabel: base.Foreground(t.Accent).Bold(true), ToolLabel: base.Foreground(t.ToolLabel).Bold(true),
 		Input: base.Foreground(t.Text), InputPrompt: base.Foreground(t.Accent), InputPlaceholder: base.Foreground(t.TextMuted), InputCursor: base.Foreground(t.Accent), Spinner: base.Foreground(t.AccentAlt),
 		Border: base.Foreground(t.Border), BorderFocus: base.Foreground(t.BorderFocus), BorderMuted: base.Foreground(t.BorderMuted),
 		DiffAdded: base.Foreground(t.DiffAdded), DiffRemoved: base.Foreground(t.DiffRemoved),

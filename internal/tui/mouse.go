@@ -20,78 +20,124 @@ type openURIMsg struct {
 	err error
 }
 
-// handleMouse routes wheel scrolling and left-click hit testing for the
-// transcript: path:line refs and OSC 8 links open first; otherwise collapsible
-// tool/explore cells toggle under the click.
+// handleMouse routes wheel scrolling, region-limited text selection, and
+// left-click hit testing for the transcript (path:line refs, OSC 8 links,
+// collapsible tool/explore cells).
 //
-// The program does not enable mouse cell motion by default so the terminal can
-// perform native text selection/copy in the chat pane. These handlers still run
-// when MouseMsg arrives (tests, or if mouse tracking is enabled externally).
+// Mouse cell motion is enabled so the terminal cannot natively highlight UI
+// chrome. App-owned drag selection only starts inside the transcript and
+// prompt content regions; chrome presses clear any active selection.
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if msg.Action != tea.MouseActionPress {
-		return m, nil
-	}
 	switch msg.Button { //nolint:exhaustive
 	case tea.MouseButtonWheelUp:
+		if msg.Action != tea.MouseActionPress {
+			return m, nil
+		}
 		m.viewport.ScrollUp(m.viewport.MouseWheelDelta)
 		return m, nil
 	case tea.MouseButtonWheelDown:
+		if msg.Action != tea.MouseActionPress {
+			return m, nil
+		}
 		m.viewport.ScrollDown(m.viewport.MouseWheelDelta)
 		return m, nil
 	case tea.MouseButtonLeft:
-		if m.modal != nil || len(m.cells) == 0 {
-			return m, nil
-		}
-		// Prefer path:line citations (open in editor) — same as Enter.
-		if ref, ok := m.fileRefAtMouse(msg); ok {
-			return m.openFileRef(ref)
-		}
-		originX, originY, ok := m.transcriptContentOrigin()
-		if !ok {
-			return m, nil
-		}
-		relX := msg.X - originX
-		relY := msg.Y - originY
-		if relX < 0 || relY < 0 || relX >= m.viewport.Width || relY >= m.viewport.Height {
-			return m, nil
-		}
-		// OSC 8 targets under the cursor (http(s) / bare file:// titles).
-		if uri := m.osc8AtViewport(relX, relY); uri != "" {
-			// file:// with #L fragment is handled via fileRefAtMouse above when
-			// plain text has path:line; remaining file:// opens via OS helper.
-			if ref, ok := fileRefFromURI(uri); ok {
-				return m.openFileRef(ref)
-			}
-			return m, openURICmd(uri)
-		}
-		// Toggle collapsible tool/explore cell under the click.
-		contentLine := m.viewport.YOffset + relY
-		idx := m.cellIndexAtContentLine(contentLine)
-		if idx < 0 {
-			return m, nil
-		}
-		switch c := m.cells[idx].(type) {
-		case *toolCell:
-			if !c.collapsible() {
-				return m, nil
-			}
-			m.selectedCell = idx
-			c.toggleExpanded()
-			m.reflow()
-			return m, nil
-		case *exploreCell:
-			if !c.collapsible() {
-				return m, nil
-			}
-			m.selectedCell = idx
-			c.toggleExpanded()
-			m.reflow()
-			return m, nil
-		}
-		return m, nil
+		return m.handleMouseLeft(msg)
 	default:
 		return m, nil
 	}
+}
+
+func (m Model) handleMouseLeft(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	switch msg.Action {
+	case tea.MouseActionPress:
+		if region, ok := m.textSelectRegionAt(msg.X, msg.Y); ok {
+			m.textSel.start(screenPos{X: msg.X, Y: msg.Y}, region)
+			return m, nil
+		}
+		// Chrome / right pane / modal: no selection highlight.
+		m.textSel.clear()
+		return m, nil
+
+	case tea.MouseActionMotion:
+		if m.textSel.dragging {
+			m.textSel.drag(screenPos{X: msg.X, Y: msg.Y})
+		}
+		return m, nil
+
+	case tea.MouseActionRelease:
+		if !m.textSel.dragging {
+			return m, nil
+		}
+		m.textSel.drag(screenPos{X: msg.X, Y: msg.Y})
+		if m.textSel.finish() {
+			frame := m.renderFrame()
+			if text := extractTextSelection(frame, m.textSel); text != "" {
+				m.cellClip.stage(text)
+			}
+			return m, nil
+		}
+		// Bare click inside a select region → existing hit testing.
+		return m.handleMouseClick(msg)
+
+	default:
+		return m, nil
+	}
+}
+
+// handleMouseClick runs path/link/expand actions for a left click that did not
+// become a drag selection.
+func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.modal != nil || len(m.cells) == 0 {
+		return m, nil
+	}
+	// Prefer path:line citations (open in editor) — same as Enter.
+	if ref, ok := m.fileRefAtMouse(msg); ok {
+		return m.openFileRef(ref)
+	}
+	originX, originY, ok := m.transcriptContentOrigin()
+	if !ok {
+		return m, nil
+	}
+	relX := msg.X - originX
+	relY := msg.Y - originY
+	if relX < 0 || relY < 0 || relX >= m.viewport.Width || relY >= m.viewport.Height {
+		return m, nil
+	}
+	// OSC 8 targets under the cursor (http(s) / bare file:// titles).
+	if uri := m.osc8AtViewport(relX, relY); uri != "" {
+		// file:// with #L fragment is handled via fileRefAtMouse above when
+		// plain text has path:line; remaining file:// opens via OS helper.
+		if ref, ok := fileRefFromURI(uri); ok {
+			return m.openFileRef(ref)
+		}
+		return m, openURICmd(uri)
+	}
+	// Toggle collapsible tool/explore cell under the click.
+	contentLine := m.viewport.YOffset + relY
+	idx := m.cellIndexAtContentLine(contentLine)
+	if idx < 0 {
+		return m, nil
+	}
+	switch c := m.cells[idx].(type) {
+	case *toolCell:
+		if !c.collapsible() {
+			return m, nil
+		}
+		m.selectedCell = idx
+		c.toggleExpanded()
+		m.reflow()
+		return m, nil
+	case *exploreCell:
+		if !c.collapsible() {
+			return m, nil
+		}
+		m.selectedCell = idx
+		c.toggleExpanded()
+		m.reflow()
+		return m, nil
+	}
+	return m, nil
 }
 
 // fileRefFromURI parses file:///abs/path#L12 into a fileRef when possible.
