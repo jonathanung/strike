@@ -8,6 +8,13 @@ import (
 	"testing"
 )
 
+func mustSymlink(t *testing.T, oldname, newname string) {
+	t.Helper()
+	if err := os.Symlink(oldname, newname); err != nil {
+		t.Skipf("symlink creation is unsupported: %v", err)
+	}
+}
+
 func TestNewFilesReadFile(t *testing.T) {
 	work := t.TempDir()
 	relContent := []byte("relative hello")
@@ -196,4 +203,195 @@ func TestListDirEmptyWorkDirRequiresPath(t *testing.T) {
 	if _, err := files.ListDir(""); err == nil || !strings.Contains(err.Error(), "path is empty") {
 		t.Errorf("ListDir(\"\") err = %v, want path is empty", err)
 	}
+}
+
+func TestSearchFilesRanksAndSkipsHeavyDirs(t *testing.T) {
+	work := t.TempDir()
+	write := func(rel, body string) {
+		t.Helper()
+		p := filepath.Join(work, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("alpha.go", "a")
+	write("internal/tui/app.go", "app")
+	write("internal/tui/completion.go", "c")
+	write("node_modules/pkg/index.js", "skip")
+	write(".git/config", "skip")
+
+	files := NewFiles(work)
+	got, err := files.SearchFiles("app", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) == 0 || got[0] != "internal/tui/app.go" {
+		t.Fatalf("SearchFiles(app) = %v, want internal/tui/app.go first", got)
+	}
+	for _, p := range got {
+		if strings.Contains(p, "node_modules") || strings.HasPrefix(p, ".git/") {
+			t.Fatalf("SearchFiles leaked skipped path %q in %v", p, got)
+		}
+	}
+
+	all, err := files.SearchFiles("", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range all {
+		if strings.Contains(p, "node_modules") || strings.Contains(p, ".git") {
+			t.Fatalf("index includes skipped %q: %v", p, all)
+		}
+	}
+	if len(all) != 3 {
+		t.Fatalf("index = %v, want 3 project files", all)
+	}
+}
+
+func TestSearchFilesSkipsDirectorySymlinkEscape(t *testing.T) {
+	work := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("nope"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "ok.go"), []byte("ok"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustSymlink(t, outside, filepath.Join(work, "leak"))
+
+	files := NewFiles(work)
+	got, err := files.SearchFiles("", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range got {
+		if strings.Contains(p, "secret") || strings.HasPrefix(p, "leak/") {
+			t.Fatalf("SearchFiles followed dir symlink: %v", got)
+		}
+	}
+	if len(got) != 1 || got[0] != "ok.go" {
+		t.Fatalf("SearchFiles = %v, want [ok.go]", got)
+	}
+}
+
+func TestReadScopedHappyPath(t *testing.T) {
+	work := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(work, "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "pkg", "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files := NewFiles(work)
+	fc, err := files.ReadScoped("pkg/main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fc.Skip || fc.Path != "pkg/main.go" || fc.Content != "package main\n" {
+		t.Fatalf("ReadScoped = %+v", fc)
+	}
+}
+
+func TestReadScopedRejectsDotDotEscape(t *testing.T) {
+	work := t.TempDir()
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(secret, []byte("classified"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Nested dir so ../.. leaves work.
+	if err := os.Mkdir(filepath.Join(work, "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := NewFiles(work)
+
+	// Relative escape toward a sibling temp dir is hard to express portably;
+	// ".." from work root must fail.
+	fc, err := files.ReadScoped("../" + filepath.Base(outside) + "/secret.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fc.Skip || !strings.Contains(fc.Notice, "escapes") {
+		// Also accept when the cleaned path simply does not exist under root.
+		if !fc.Skip {
+			t.Fatalf("ReadScoped(.. escape) = %+v, want Skip", fc)
+		}
+	}
+	if strings.Contains(fc.Content, "classified") {
+		t.Fatalf("leaked outside content: %+v", fc)
+	}
+
+	// Absolute path outside work.
+	fc, err = files.ReadScoped(secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fc.Skip || strings.Contains(fc.Content, "classified") {
+		t.Fatalf("ReadScoped(abs outside) = %+v, want skip without content", fc)
+	}
+}
+
+func TestReadScopedRejectsSymlinkEscape(t *testing.T) {
+	work := t.TempDir()
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(secret, []byte("classified"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustSymlink(t, secret, filepath.Join(work, "link.txt"))
+	// Directory symlink that points outside.
+	mustSymlink(t, outside, filepath.Join(work, "outlink"))
+
+	files := NewFiles(work)
+	for _, p := range []string{"link.txt", "outlink/secret.txt"} {
+		fc, err := files.ReadScoped(p)
+		if err != nil {
+			t.Fatalf("ReadScoped(%q) err = %v", p, err)
+		}
+		if !fc.Skip {
+			t.Fatalf("ReadScoped(%q) = %+v, want Skip", p, fc)
+		}
+		if strings.Contains(fc.Content, "classified") {
+			t.Fatalf("ReadScoped(%q) leaked content: %+v", p, fc)
+		}
+	}
+}
+
+func TestReadScopedSkipsBinaryAndTruncatesHuge(t *testing.T) {
+	work := t.TempDir()
+	if err := os.WriteFile(filepath.Join(work, "bin.dat"), []byte("a\x00b"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	huge := bytesRepeat('x', maxFileBytes+64)
+	if err := os.WriteFile(filepath.Join(work, "huge.txt"), huge, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files := NewFiles(work)
+
+	fc, err := files.ReadScoped("bin.dat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fc.Skip || !strings.Contains(fc.Notice, "binary") {
+		t.Fatalf("binary = %+v", fc)
+	}
+
+	fc, err = files.ReadScoped("huge.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fc.Skip || len(fc.Content) != maxFileBytes || !strings.Contains(fc.Notice, "truncated") {
+		t.Fatalf("huge = path=%s skip=%v len=%d notice=%q", fc.Path, fc.Skip, len(fc.Content), fc.Notice)
+	}
+}
+
+func bytesRepeat(b byte, n int) []byte {
+	out := make([]byte, n)
+	for i := range out {
+		out[i] = b
+	}
+	return out
 }

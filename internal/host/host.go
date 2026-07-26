@@ -140,19 +140,42 @@ type DirEntry struct {
 	IsDir bool
 }
 
+// FileContent is a project-scoped read for composer @file mentions.
+// Path is workspace-relative (slash-separated). When Skip is true, Content is
+// empty and Notice explains why (binary, oversize, missing, escape, …).
+type FileContent struct {
+	Path    string
+	Content string
+	Notice  string
+	Skip    bool
+}
+
 // Files reads workspace files for frontend features (markdown reader, file
-// explorer). Nil means the capability is absent; frontends must degrade
-// gracefully.
+// explorer, @file mentions). Nil means the capability is absent; frontends
+// must degrade gracefully.
 type Files interface {
 	// ReadFile resolves path (relative to the host work directory, or absolute),
 	// then reads the file. Implementations enforce a size cap. Empty path,
 	// missing files, directories, oversize content, and I/O failures return errors.
+	// Unlike ReadScoped, absolute paths and ".." may leave the work directory
+	// (user-initiated reads such as /md-read).
 	ReadFile(path string) ([]byte, error)
 	// ListDir lists the directory at path (relative to the work directory, or
 	// absolute). Empty path lists the work directory root. Missing paths and
 	// non-directories return errors. Results are sorted directories-first,
 	// then by name (case-insensitive).
 	ListDir(path string) ([]DirEntry, error)
+	// SearchFiles returns workspace-relative regular file paths under the work
+	// directory matching query (case-insensitive prefix, then ordered
+	// subsequence). Empty query returns a stable prefix of the index. Results
+	// never escape the work root via ".." or directory symlinks. limit caps
+	// the result count (implementations enforce a maximum).
+	SearchFiles(query string, limit int) ([]string, error)
+	// ReadScoped reads path only when the final resolved path (after cleaning
+	// and symlink evaluation) stays under the work directory. Binary files and
+	// oversize content are skipped or truncated with Notice set; missing paths
+	// and escapes set Skip.
+	ReadScoped(path string) (FileContent, error)
 }
 
 // MemoryEntry is one project-local key/value memory record.
