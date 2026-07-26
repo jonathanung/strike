@@ -118,6 +118,10 @@ func (m *Model) selectableCellIndexes() []int {
 			if tc.collapsible() {
 				idx = append(idx, i)
 			}
+		case *subagentResultCell:
+			if tc.collapsible() {
+				idx = append(idx, i)
+			}
 		}
 	}
 	return idx
@@ -168,6 +172,10 @@ func (m *Model) toggleSelectedTool() bool {
 			if tc.collapsible() {
 				idxs = append(idxs, i)
 			}
+		case *subagentResultCell:
+			if tc.collapsible() {
+				idxs = append(idxs, i)
+			}
 		}
 	}
 	if len(idxs) == 0 {
@@ -192,6 +200,8 @@ func (m *Model) toggleSelectedTool() bool {
 	case *toolCell:
 		return c.toggleExpanded()
 	case *exploreCell:
+		return c.toggleExpanded()
+	case *subagentResultCell:
 		return c.toggleExpanded()
 	}
 	return false
@@ -230,6 +240,8 @@ func (m *Model) syncToolSelectionFlags() {
 		case *toolCell:
 			tc.selected = sel
 		case *exploreCell:
+			tc.selected = sel
+		case *subagentResultCell:
 			tc.selected = sel
 		}
 	}
@@ -329,7 +341,7 @@ func (m *Model) copySelectedCell() (bool, tea.Cmd) {
 	// Only collapsible/reviewable tool rows keep a sticky selection; chat
 	// cells are copy targets without changing tool-nav selection.
 	switch cells[idx].(type) {
-	case *toolCell, *exploreCell:
+	case *toolCell, *exploreCell, *subagentResultCell:
 		m.selectedCell = idx
 	}
 	m.cellClip.stage(text)
@@ -355,6 +367,8 @@ func cellCopyText(c cell) string {
 		return tc.copyText()
 	case *exploreCell:
 		return tc.copyText()
+	case *subagentResultCell:
+		return tc.copyText()
 	case *assistantCell:
 		return tc.copyText()
 	case *reasoningCell:
@@ -371,6 +385,8 @@ func setCellCopiedFlash(c cell, on bool) {
 	case *toolCell:
 		tc.copiedFlash = on
 	case *exploreCell:
+		tc.copiedFlash = on
+	case *subagentResultCell:
 		tc.copiedFlash = on
 	case *assistantCell:
 		tc.copiedFlash = on
@@ -391,7 +407,7 @@ func (m *Model) resolveCopyCellIndex() int {
 	if m.selectedCell >= 0 && m.selectedCell < len(cells) {
 		if cellCopyText(cells[m.selectedCell]) != "" {
 			switch cells[m.selectedCell].(type) {
-			case *toolCell, *exploreCell:
+			case *toolCell, *exploreCell, *subagentResultCell:
 				return m.selectedCell
 			}
 		}
@@ -402,7 +418,7 @@ func (m *Model) resolveCopyCellIndex() int {
 			continue
 		}
 		switch cells[i].(type) {
-		case *toolCell, *exploreCell:
+		case *toolCell, *exploreCell, *subagentResultCell:
 			if latestTool < 0 {
 				latestTool = i
 			}

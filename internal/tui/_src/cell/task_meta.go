@@ -109,8 +109,10 @@ func applyChildCompletedToTaskCells(toolByID map[string]*toolCell, ev protocol.C
 		tc.isError = status == string(protocol.ChildStatusFailed) ||
 			status == string(protocol.ChildStatusCanceled)
 		tc.metadata = taskMetadataJSON(id, status)
+		// One-line tool status only; full multi-line result lives on the
+		// dedicated subagentResultCell so the transcript stays collapsed.
 		if summary != "" {
-			tc.output = summary
+			tc.output = firstLine(summary)
 		} else if tc.output == "" {
 			tc.output = "task " + status
 		}

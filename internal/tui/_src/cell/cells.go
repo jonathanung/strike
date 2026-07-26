@@ -504,7 +504,7 @@ func thinkingPlaceholderVisible(cells []cell, showThinking bool) bool {
 			if showThinking && strings.TrimSpace(c.text) != "" {
 				return false
 			}
-		case *toolCell, *exploreCell:
+		case *toolCell, *exploreCell, *subagentResultCell:
 			return false
 		case *errorCell:
 			return false
