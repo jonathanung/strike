@@ -806,8 +806,8 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 				themeID = entry.ID
 			}
 		}
-		// No WithMouseCellMotion: mouse tracking steals drag events and
-		// blocks native terminal text selection/copy in the chat pane.
+		// WithMouseCellMotion so chrome cannot be natively selected; the TUI
+		// owns drag-highlight only inside transcript and prompt regions.
 		program := tea.NewProgram(tui.New(hub.Ops(), hub.Events(), a.services, tui.Options{
 			DangerouslySkipPermissions:   opts.dangerouslySkipPermissions,
 			Theme:                        themePtr,
@@ -821,7 +821,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 			PermissionAutoApproveExclude: a.cfg.PermissionAutoApproveExclude,
 			Replay:                       a.replay,
 			Keybinds:                     config.KeybindsMap(a.cfg.Keybinds),
-		}), tea.WithAltScreen(), tea.WithOutput(stdout), tea.WithInput(tui.WrapInput(os.Stdin)), tea.WithReportFocus())
+		}), tea.WithAltScreen(), tea.WithOutput(stdout), tea.WithInput(tui.WrapInput(os.Stdin)), tea.WithReportFocus(), tea.WithMouseCellMotion())
 		final, runProgErr := program.Run()
 		restore()
 		if m, ok := final.(tui.Model); ok {
