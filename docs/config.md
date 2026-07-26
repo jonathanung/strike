@@ -302,13 +302,14 @@ Built-in logout only clears credentials.
 
 | Value | Behavior |
 |---|---|
-| `pane` (default) | embed nvim/vim in the right-pane `editor` window (PTY) |
+| `pane` (default) | embed nvim/vim/nano in the right-pane `editor` window (PTY) |
 | `overlay` | embed in a centered modal overlay |
 | `takeover` | full-screen handoff via `tea.ExecProcess` |
 
-Unknown values are ignored at load time. GUI `$EDITOR` values always take
-over the terminal regardless of `vimMode`. Leave the embedded editor with
-`ctrl+g`.
+Unknown values are ignored at load time. Resolution order: `$VISUAL`, then
+`$EDITOR`, then the first of `nvim`/`vim`/`vi`/`nano` on `PATH`. GUI `$EDITOR`
+values always take over the terminal regardless of `vimMode`. Leave the
+embedded editor with `ctrl+g`.
 
 ## Hooks
 

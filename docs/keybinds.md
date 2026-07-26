@@ -17,7 +17,7 @@ session defaults.
 | `tab` | cycle agent personas (composer empty of `/` completion; not concurrent roots) |
 | `shift+tab` | cycle permission mode (default → plan → soft-approve → accept-edits → yolo) |
 | `ctrl+d` | save defaults (see [config.md](config.md)) |
-| `ctrl+e` | open prompt in external `$EDITOR` |
+| `ctrl+e` | open prompt in external editor (`$VISUAL`/`$EDITOR`, else nvim/vim/vi/nano) |
 
 ## Transcript & panes
 

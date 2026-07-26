@@ -22,6 +22,8 @@ func TestResolveEditorPrefersVisualThenEditorThenFallback(t *testing.T) {
 			return "/bin/custom-editor", nil
 		case "nvim":
 			return "/usr/bin/nvim", nil
+		case "nano":
+			return "/usr/bin/nano", nil
 		default:
 			return "", errors.New("not found")
 		}
@@ -64,11 +66,43 @@ func TestResolveEditorPrefersVisualThenEditorThenFallback(t *testing.T) {
 		t.Fatalf("fallback = %q %v", bin, args)
 	}
 
+	// nano is a PATH fallback after nvim/vim/vi.
+	lookNanoOnly := func(name string) (string, error) {
+		if name == "nano" {
+			return "/bin/nano", nil
+		}
+		return "", errors.New("not found")
+	}
+	bin, args, err = resolveEditor(func(string) string { return "" }, lookNanoOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bin != "/bin/nano" || args != nil {
+		t.Fatalf("nano fallback = %q %v", bin, args)
+	}
+
+	// Explicit EDITOR=nano wins even when other candidates exist.
+	bin, args, err = resolveEditor(func(key string) string {
+		if key == "EDITOR" {
+			return "nano"
+		}
+		return ""
+	}, look)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bin != "/usr/bin/nano" || args != nil {
+		t.Fatalf("EDITOR=nano = %q %v", bin, args)
+	}
+
 	_, _, err = resolveEditor(func(string) string { return "" }, func(string) (string, error) {
 		return "", errors.New("missing")
 	})
 	if err == nil || !strings.Contains(err.Error(), "no editor found") {
 		t.Fatalf("want missing-editor error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "nano") {
+		t.Fatalf("missing-editor error should mention nano, got %v", err)
 	}
 }
 
@@ -133,6 +167,18 @@ func TestBuildEditorCmdAddsWaitAndLine(t *testing.T) {
 		}
 	}
 
+	cmd = buildEditorCmd("/usr/bin/nano", nil, "/tmp/x.go", 9)
+	got = cmd.Args
+	wantNano := []string{"/usr/bin/nano", "+9", "/tmp/x.go"}
+	if len(got) != len(wantNano) {
+		t.Fatalf("nano args = %v, want %v", got, wantNano)
+	}
+	for i := range wantNano {
+		if got[i] != wantNano[i] {
+			t.Fatalf("nano args = %v, want %v", got, wantNano)
+		}
+	}
+
 	cmd = buildEditorCmd("code", []string{"-w"}, "/tmp/x.go", 0)
 	if strings.Count(strings.Join(cmd.Args, " "), "-w") != 1 {
 		t.Fatalf("duplicate wait flag: %v", cmd.Args)
@@ -194,7 +240,7 @@ func TestVimCommandUsageError(t *testing.T) {
 func TestVimCommandMissingEditor(t *testing.T) {
 	t.Setenv("VISUAL", "")
 	t.Setenv("EDITOR", "")
-	// Force empty PATH so LookPath cannot find nvim/vim/vi.
+	// Force empty PATH so LookPath cannot find nvim/vim/vi/nano.
 	t.Setenv("PATH", filepath.Join(t.TempDir(), "empty-bin"))
 
 	m, ops := newAppTestModel(nil, nil)
