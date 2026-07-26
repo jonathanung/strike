@@ -1,5 +1,6 @@
 // Package tool defines the tool contract and the built-in tool set
-// (read/glob/grep/edit/write/apply_patch/bash/task/webfetch/todowrite/todoread/
+// (read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/
+// task_message/task_interrupt/webfetch/todowrite/todoread/
 // memory_write/memory_read/issue_write/issue_read/notebook_edit/sleep/skill/question/enter_plan_mode/
 // exit_plan_mode/phase_done/toolsearch).
 // Used by internal/engine (dispatch), internal/permission (AskRequest, for the
@@ -47,6 +48,80 @@ type TaskResult struct {
 	SessionID string
 }
 
+// Task control request/result types for parent inspection of owned children.
+
+// TaskStatusRequest queries live or terminal state of one child session.
+type TaskStatusRequest struct {
+	SessionID     string
+	IncludeRecent bool
+}
+
+// TaskStatusResult is a model-facing snapshot of a child session.
+// State is one of starting|working|needs_attention|completed|failed|canceled|unknown.
+type TaskStatusResult struct {
+	State           string
+	Elapsed         string
+	CurrentTool     string
+	LatestActivity  []string
+	TerminalSummary string
+	SessionID       string
+}
+
+// TaskReadRequest loads a bounded transcript slice from a child session.
+type TaskReadRequest struct {
+	SessionID        string
+	Offset           int  // 0-based absolute index into retained events
+	Limit            int  // max entries (default 20, max 100); 0 = default
+	Last             int  // when > 0, ignore Offset and return the last N entries
+	IncludeTools     bool // include tool begin/end rows (default true when unset via pointer elsewhere)
+	IncludeReasoning bool
+}
+
+// TaskTranscriptEntry is one bounded transcript row for task_read.
+type TaskTranscriptEntry struct {
+	Index   int    `json:"index"`
+	Kind    string `json:"kind"`
+	Summary string `json:"summary"`
+}
+
+// TaskReadResult is a bounded ordered transcript slice.
+type TaskReadResult struct {
+	SessionID  string                `json:"session_id"`
+	Entries    []TaskTranscriptEntry `json:"entries"`
+	Offset     int                   `json:"offset"`
+	Limit      int                   `json:"limit"`
+	Total      int                   `json:"total"`
+	Truncated  bool                  `json:"truncated"`
+	NextOffset int                   `json:"next_offset"` // == Offset+len(Entries); -1 when at end
+}
+
+// TaskMessageRequest steers a running child with additional guidance.
+type TaskMessageRequest struct {
+	SessionID string
+	Text      string
+}
+
+// TaskMessageResult acknowledges delivery semantics.
+// Status is queued|accepted|rejected.
+type TaskMessageResult struct {
+	Status    string
+	State     string
+	SessionID string
+	Detail    string
+}
+
+// TaskInterruptRequest cancels a running child by session id.
+type TaskInterruptRequest struct {
+	SessionID string
+}
+
+// TaskInterruptResult reports post-interrupt state (idempotent).
+type TaskInterruptResult struct {
+	State     string
+	SessionID string
+	Detail    string
+}
+
 // QuestionOption is one selectable choice on a QuestionItem.
 type QuestionOption struct {
 	Label       string
@@ -82,6 +157,8 @@ type SessionPR struct {
 // Context carries per-call facilities into a tool. Ask blocks until the
 // permission is granted; it returns an error if rejected or denied.
 // SpawnTask, when non-nil, starts a child session (non-blocking for the parent).
+// TaskStatus/TaskRead/TaskMessage/TaskInterrupt, when non-nil, inspect or
+// control owned descendant sessions (never arbitrary sessions).
 // AskUser, when non-nil, blocks until the user answers a question batch.
 // SwitchAgent, when non-nil, queues an agent switch applied when the turn ends.
 // EnterPlanPhase starts the built-in plan→implement workflow at plan.
@@ -96,8 +173,13 @@ type Context struct {
 	WorkDir     string
 	Ask         func(ctx context.Context, req AskRequest) error
 	SpawnTask   func(ctx context.Context, req TaskRequest) (TaskResult, error)
-	AskUser     func(ctx context.Context, req QuestionRequest) (QuestionResponse, error)
-	SwitchAgent func(name string) error
+	TaskStatus  func(ctx context.Context, req TaskStatusRequest) (TaskStatusResult, error)
+	TaskRead    func(ctx context.Context, req TaskReadRequest) (TaskReadResult, error)
+	TaskMessage func(ctx context.Context, req TaskMessageRequest) (TaskMessageResult, error)
+	// TaskInterrupt cancels an owned running child by session id.
+	TaskInterrupt func(ctx context.Context, req TaskInterruptRequest) (TaskInterruptResult, error)
+	AskUser       func(ctx context.Context, req QuestionRequest) (QuestionResponse, error)
+	SwitchAgent   func(name string) error
 	// EnterPlanPhase starts the default plan-implement workflow at the plan phase.
 	EnterPlanPhase func() error
 	// AdvancePhase clears the current phase exit gate and advances (or ends).

@@ -37,7 +37,8 @@ type Ruleset []Rule
 // Known permission names tools actually Ask with, plus "*".
 var knownPermissions = map[string]struct{}{
 	"*": {}, "read": {}, "glob": {}, "grep": {}, "edit": {}, "write": {},
-	"bash": {}, "task": {}, "webfetch": {}, "todowrite": {}, "todoread": {},
+	"bash": {}, "task": {}, "task_status": {}, "task_read": {}, "task_message": {},
+	"task_interrupt": {}, "webfetch": {}, "todowrite": {}, "todoread": {},
 	"memory_write": {}, "memory_read": {}, "issue_write": {}, "issue_read": {},
 	"sleep": {}, "skill": {}, "question": {}, "toolsearch": {}, "hook": {},
 	"enter_plan_mode": {}, "exit_plan_mode": {}, "phase_done": {},
@@ -84,6 +85,10 @@ func Defaults() Ruleset {
 		// Project-local shell hooks execute arbitrary code — gate first run.
 		{Permission: "hook", Pattern: "*", Action: Ask},
 		{Permission: "task", Pattern: "*", Action: Allow},
+		{Permission: "task_status", Pattern: "*", Action: Allow},
+		{Permission: "task_read", Pattern: "*", Action: Allow},
+		{Permission: "task_message", Pattern: "*", Action: Allow},
+		{Permission: "task_interrupt", Pattern: "*", Action: Allow},
 		{Permission: "webfetch", Pattern: "*", Action: Ask},
 		{Permission: "todowrite", Pattern: "*", Action: Allow},
 		{Permission: "todoread", Pattern: "*", Action: Allow},

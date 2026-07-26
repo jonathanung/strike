@@ -642,6 +642,10 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 		}
 		if e.opts.Depth < e.opts.MaxChildDepth {
 			tc.SpawnTask = e.spawnChild
+			tc.TaskStatus = e.childStatus
+			tc.TaskRead = e.childRead
+			tc.TaskMessage = e.childMessage
+			tc.TaskInterrupt = e.childInterrupt
 		}
 		tc.ChildWake = e.childWakeCh()
 		tc.HasChildNotice = e.hasPendingChildNotices

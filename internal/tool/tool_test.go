@@ -336,9 +336,13 @@ func TestToolNames(t *testing.T) {
 		"enter_plan_mode": NewEnterPlanMode(),
 		"exit_plan_mode":  NewExitPlanMode(),
 		"phase_done":      NewPhaseDone(),
+		"task_status":     NewTaskStatus(),
+		"task_read":       NewTaskRead(),
+		"task_message":    NewTaskMessage(),
+		"task_interrupt":  NewTaskInterrupt(),
 	}
-	if len(want) != 22 {
-		t.Fatalf("expected 22 tools, got %d", len(want))
+	if len(want) != 26 {
+		t.Fatalf("expected 26 tools, got %d", len(want))
 	}
 	for name, tool := range want {
 		if tool.Name() != name {

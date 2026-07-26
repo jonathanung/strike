@@ -24,7 +24,9 @@ var shortPurposes = map[string]string{
 	"bash":            "run a shell command",
 	"task":            "delegate a bounded subtask to a child agent",
 	"task_status":     "check status of a delegated child task",
-	"task_read":       "read output from a delegated child task",
+	"task_read":       "read a bounded child transcript slice",
+	"task_message":    "send guidance to a running child task",
+	"task_interrupt":  "cancel a running child task",
 	"webfetch":        "fetch a URL",
 	"todowrite":       "write the multi-step todo list",
 	"todoread":        "read the current todo list",
@@ -223,7 +225,7 @@ func recommendedGuidance(entries []GuidanceEntry) string {
 	add(has("question"),
 		"Use `question` when a decision genuinely belongs to the user.")
 	add(has("task") && has("task_status", "task_read"),
-		"Use `task` for bounded non-blocking delegation; prefer `task_status`/`task_read` over repeated `sleep` while waiting on children. Completion also arrives as `[child.completed]`.")
+		"Use `task` for bounded non-blocking delegation; use `task_status`/`task_read` only when an intermediate check is needed (not every second). Prefer `task_message` to steer and `task_interrupt` to cancel. Completion still arrives once as `[child.completed]` — never sleep-poll.")
 	add(has("task") && !has("task_status", "task_read"),
 		"Use `task` for bounded non-blocking delegation (self-contained prompt). A later `[child.completed]` delivers the summary — never sleep-poll for task completion.")
 	add(has("sleep") && has("bash") && has("task"),

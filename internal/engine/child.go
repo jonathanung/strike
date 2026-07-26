@@ -6,12 +6,24 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
 	"github.com/jonathanung/strike-cli/internal/tool"
 )
+
+// childEventCap bounds in-memory transcript rows retained per child for task_read.
+const childEventCap = 256
+
+// childActivityCap bounds latest_activity lines for task_status.
+const childActivityCap = 12
+
+// leafTaskTools are stripped from registries that cannot nest further.
+var leafTaskTools = []string{
+	"task", "task_status", "task_read", "task_message", "task_interrupt",
+}
 
 // childHandle tracks one non-blocking child engine while it runs.
 type childHandle struct {
@@ -22,7 +34,33 @@ type childHandle struct {
 	permReply func(protocol.PermissionReply)
 	qReply    func(protocol.QuestionReply)
 	// eng is retained so the drain goroutine can read lastAssistantText.
-	eng *Engine
+	eng       *Engine
+	startedAt time.Time
+	agent     string
+	prompt    string
+
+	mu             sync.Mutex
+	currentTool    string
+	awaitingPerm   bool
+	awaitingQ      bool
+	turnRunning    bool
+	activity       []string
+	events         []tool.TaskTranscriptEntry // absolute index preserved in entry.Index
+	nextEventIndex int
+}
+
+// childRecord retains terminal state + bounded transcript after a child exits
+// so task_status/task_read still work without spawning a new child.
+type childRecord struct {
+	id        string
+	startedAt time.Time
+	endedAt   time.Time
+	agent     string
+	prompt    string
+	status    protocol.ChildStatus
+	summary   string
+	activity  []string
+	events    []tool.TaskTranscriptEntry
 }
 
 // spawnChild starts a non-blocking child engine for the task tool and returns
@@ -75,7 +113,7 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 	if e.opts.Registry == nil {
 		childReg = tool.NewRegistry()
 	} else if childDepth >= maxDepth {
-		childReg = e.opts.Registry.CloneWithout("task")
+		childReg = e.opts.Registry.CloneWithout(leafTaskTools...)
 	} else {
 		childReg = e.opts.Registry.CloneWithout()
 	}
@@ -157,6 +195,9 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		permReply: child.perms.Reply,
 		qReply:    child.questions.Reply,
 		eng:       child,
+		startedAt: time.Now(),
+		agent:     agentName,
+		prompt:    req.Prompt,
 	}
 
 	e.childMu.Lock()
@@ -166,16 +207,14 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 	e.children[childID] = h
 	e.childMu.Unlock()
 
-	e.emit(protocol.ChildStarted{
+	startedEv := protocol.ChildStarted{
 		Correlation: childCorr,
 		Agent:       agentName,
 		Prompt:      req.Prompt,
-	})
-	e.persistChildEvent(childID, protocol.ChildStarted{
-		Correlation: childCorr,
-		Agent:       agentName,
-		Prompt:      req.Prompt,
-	})
+	}
+	e.emit(startedEv)
+	e.persistChildEvent(childID, startedEv)
+	h.noteEvent(startedEv)
 
 	// stopReason is delivered once when the child turn ends. Buffer 1 so the
 	// drain goroutine never blocks on a late reader.
@@ -186,13 +225,13 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 	)
 	go func() {
 		defer close(h.done)
-		defer e.unregisterChild(childID)
 		defer e.closeChildSession(childID)
 		// Run returns on TaskOneShot idle (or cancel); release childCtx after.
 		defer cancel()
 
 		for ev := range child.Events() {
 			e.persistChildEvent(childID, ev)
+			h.noteEvent(ev)
 			switch ev := ev.(type) {
 			case protocol.PermissionAsked:
 				e.emit(ev)
@@ -280,6 +319,8 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		}
 		e.emit(completed)
 		e.persistChildEvent(childID, completed)
+		h.noteEvent(completed)
+		e.finishChild(h, completed)
 		// Wake Run so the parent can inject a model-visible summary (and
 		// auto-nudge when idle). Non-blocking: drop if Run is shutting down.
 		select {
@@ -313,10 +354,467 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 	}, nil
 }
 
-func (e *Engine) unregisterChild(id string) {
+// finishChild moves a live handle into childHistory with terminal state.
+func (e *Engine) finishChild(h *childHandle, completed protocol.ChildCompleted) {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	rec := &childRecord{
+		id:        h.id,
+		startedAt: h.startedAt,
+		endedAt:   time.Now(),
+		agent:     h.agent,
+		prompt:    h.prompt,
+		status:    completed.Status,
+		summary:   completed.Summary,
+		activity:  append([]string(nil), h.activity...),
+		events:    append([]tool.TaskTranscriptEntry(nil), h.events...),
+	}
+	h.mu.Unlock()
+
 	e.childMu.Lock()
 	defer e.childMu.Unlock()
-	delete(e.children, id)
+	delete(e.children, h.id)
+	if e.childHistory == nil {
+		e.childHistory = make(map[string]*childRecord)
+	}
+	e.childHistory[h.id] = rec
+}
+
+func (h *childHandle) noteEvent(ev protocol.Event) {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	switch ev := ev.(type) {
+	case protocol.TurnStarted:
+		h.turnRunning = true
+		h.awaitingPerm = false
+		h.awaitingQ = false
+		h.currentTool = ""
+		h.pushActivityLocked("turn started")
+	case protocol.TurnCompleted:
+		h.turnRunning = false
+		h.awaitingPerm = false
+		h.awaitingQ = false
+		h.currentTool = ""
+		h.pushActivityLocked("turn completed (" + ev.StopReason + ")")
+	case protocol.ToolCallBegin:
+		h.currentTool = ev.Name
+		h.pushActivityLocked("tool " + ev.Name)
+	case protocol.ToolCallEnd:
+		prev := h.currentTool
+		h.currentTool = ""
+		label := "tool end"
+		if prev != "" {
+			label = "tool end " + prev
+		} else if t := strings.TrimSpace(ev.Title); t != "" {
+			label = "tool end " + t
+		}
+		if ev.IsError {
+			label += " (error)"
+		}
+		h.pushActivityLocked(label)
+	case protocol.PermissionAsked:
+		h.awaitingPerm = true
+		h.pushActivityLocked("needs permission: " + ev.Permission)
+	case protocol.PermissionResolved:
+		h.awaitingPerm = false
+		h.pushActivityLocked("permission resolved")
+	case protocol.QuestionAsked:
+		h.awaitingQ = true
+		h.pushActivityLocked("needs user question")
+	case protocol.QuestionResolved:
+		h.awaitingQ = false
+		h.pushActivityLocked("question resolved")
+	case protocol.ChildStarted:
+		h.pushActivityLocked("started")
+	case protocol.ChildCompleted:
+		h.pushActivityLocked("completed (" + string(ev.Status) + ")")
+	case protocol.UserMessage:
+		if t := strings.TrimSpace(ev.Text); t != "" {
+			h.pushActivityLocked(truncateRunes(t, 80))
+		}
+	case protocol.TextDelta:
+		// skip high-frequency deltas in activity
+	case protocol.EngineError:
+		if msg := strings.TrimSpace(ev.Message); msg != "" {
+			h.pushActivityLocked("error: " + truncateRunes(msg, 80))
+		}
+	}
+
+	if entry, ok := summarizeChildEvent(h.nextEventIndex, ev); ok {
+		h.events = append(h.events, entry)
+		if len(h.events) > childEventCap {
+			h.events = h.events[len(h.events)-childEventCap:]
+		}
+		h.nextEventIndex++
+	}
+}
+
+func (h *childHandle) pushActivityLocked(line string) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return
+	}
+	h.activity = append(h.activity, line)
+	if len(h.activity) > childActivityCap {
+		h.activity = h.activity[len(h.activity)-childActivityCap:]
+	}
+}
+
+func summarizeChildEvent(index int, ev protocol.Event) (tool.TaskTranscriptEntry, bool) {
+	switch ev := ev.(type) {
+	case protocol.ChildStarted:
+		return tool.TaskTranscriptEntry{Index: index, Kind: "child.started", Summary: "agent=" + ev.Agent}, true
+	case protocol.ChildCompleted:
+		return tool.TaskTranscriptEntry{Index: index, Kind: "child.completed", Summary: string(ev.Status) + ": " + truncateRunes(ev.Summary, 200)}, true
+	case protocol.UserMessage:
+		return tool.TaskTranscriptEntry{Index: index, Kind: "user", Summary: truncateRunes(ev.Text, 240)}, true
+	case protocol.TurnStarted:
+		return tool.TaskTranscriptEntry{Index: index, Kind: "turn.started", Summary: ev.TurnID}, true
+	case protocol.TurnCompleted:
+		return tool.TaskTranscriptEntry{Index: index, Kind: "turn.completed", Summary: ev.StopReason}, true
+	case protocol.ToolCallBegin:
+		return tool.TaskTranscriptEntry{Index: index, Kind: "tool.begin", Summary: ev.Name}, true
+	case protocol.ToolCallEnd:
+		s := strings.TrimSpace(ev.Title)
+		if s == "" {
+			s = ev.CallID
+		}
+		if ev.IsError {
+			s += " error"
+		}
+		if out := strings.TrimSpace(ev.Output); out != "" {
+			s += ": " + truncateRunes(out, 160)
+		}
+		return tool.TaskTranscriptEntry{Index: index, Kind: "tool.end", Summary: s}, true
+	case protocol.PermissionAsked:
+		return tool.TaskTranscriptEntry{Index: index, Kind: "permission.asked", Summary: ev.Permission}, true
+	case protocol.PermissionResolved:
+		return tool.TaskTranscriptEntry{Index: index, Kind: "permission.resolved", Summary: string(ev.Decision)}, true
+	case protocol.QuestionAsked:
+		return tool.TaskTranscriptEntry{Index: index, Kind: "question.asked", Summary: ev.RequestID}, true
+	case protocol.QuestionResolved:
+		return tool.TaskTranscriptEntry{Index: index, Kind: "question.resolved", Summary: ev.RequestID}, true
+	case protocol.ReasoningDelta:
+		if t := strings.TrimSpace(ev.Text); t != "" {
+			return tool.TaskTranscriptEntry{Index: index, Kind: "reasoning", Summary: truncateRunes(t, 160)}, true
+		}
+	case protocol.EngineError:
+		return tool.TaskTranscriptEntry{Index: index, Kind: "error", Summary: truncateRunes(ev.Message, 200)}, true
+	}
+	return tool.TaskTranscriptEntry{}, false
+}
+
+func (e *Engine) childStatus(ctx context.Context, req tool.TaskStatusRequest) (tool.TaskStatusResult, error) {
+	if err := ctx.Err(); err != nil {
+		return tool.TaskStatusResult{}, err
+	}
+	id := strings.TrimSpace(req.SessionID)
+	if id == "" {
+		return tool.TaskStatusResult{}, fmt.Errorf("session_id is required")
+	}
+
+	e.childMu.Lock()
+	h := e.children[id]
+	rec := e.childHistory[id]
+	e.childMu.Unlock()
+
+	if h != nil {
+		return h.statusSnapshot(req.IncludeRecent), nil
+	}
+	if rec != nil {
+		return rec.statusSnapshot(req.IncludeRecent), nil
+	}
+	return tool.TaskStatusResult{}, fmt.Errorf("unknown or inaccessible child session %q", id)
+}
+
+func (h *childHandle) statusSnapshot(includeRecent bool) tool.TaskStatusResult {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	state := "starting"
+	switch {
+	case h.awaitingPerm || h.awaitingQ:
+		state = "needs_attention"
+	case h.turnRunning || h.currentTool != "":
+		state = "working"
+	case h.nextEventIndex > 1:
+		state = "working"
+	}
+	out := tool.TaskStatusResult{
+		SessionID:   h.id,
+		State:       state,
+		Elapsed:     formatElapsed(time.Since(h.startedAt)),
+		CurrentTool: h.currentTool,
+	}
+	if includeRecent && len(h.activity) > 0 {
+		out.LatestActivity = append([]string(nil), h.activity...)
+	}
+	return out
+}
+
+func (r *childRecord) statusSnapshot(includeRecent bool) tool.TaskStatusResult {
+	state := string(r.status)
+	if state == "" {
+		state = string(protocol.ChildStatusCompleted)
+	}
+	elapsed := r.endedAt.Sub(r.startedAt)
+	if r.endedAt.IsZero() {
+		elapsed = time.Since(r.startedAt)
+	}
+	out := tool.TaskStatusResult{
+		SessionID:       r.id,
+		State:           state,
+		Elapsed:         formatElapsed(elapsed),
+		TerminalSummary: r.summary,
+	}
+	if includeRecent && len(r.activity) > 0 {
+		out.LatestActivity = append([]string(nil), r.activity...)
+	}
+	return out
+}
+
+func (e *Engine) childRead(ctx context.Context, req tool.TaskReadRequest) (tool.TaskReadResult, error) {
+	if err := ctx.Err(); err != nil {
+		return tool.TaskReadResult{}, err
+	}
+	id := strings.TrimSpace(req.SessionID)
+	if id == "" {
+		return tool.TaskReadResult{}, fmt.Errorf("session_id is required")
+	}
+	limit := tool.ClampTaskReadLimit(req.Limit)
+	if req.Last > 0 {
+		limit = tool.ClampTaskReadLimit(req.Last)
+	}
+
+	e.childMu.Lock()
+	h := e.children[id]
+	rec := e.childHistory[id]
+	e.childMu.Unlock()
+
+	var all []tool.TaskTranscriptEntry
+	switch {
+	case h != nil:
+		h.mu.Lock()
+		all = append([]tool.TaskTranscriptEntry(nil), h.events...)
+		h.mu.Unlock()
+	case rec != nil:
+		all = append([]tool.TaskTranscriptEntry(nil), rec.events...)
+	default:
+		return tool.TaskReadResult{}, fmt.Errorf("unknown or inaccessible child session %q", id)
+	}
+
+	filtered := make([]tool.TaskTranscriptEntry, 0, len(all))
+	for _, ent := range all {
+		if !req.IncludeTools && (ent.Kind == "tool.begin" || ent.Kind == "tool.end") {
+			continue
+		}
+		if !req.IncludeReasoning && ent.Kind == "reasoning" {
+			continue
+		}
+		// Text deltas are high-volume; only include when tools are included
+		// (treat as content) — always keep user/turn/child/error rows.
+		if ent.Kind == "text" && !req.IncludeReasoning && !req.IncludeTools {
+			// keep text as content by default
+		}
+		filtered = append(filtered, ent)
+	}
+	total := len(filtered)
+
+	offset := req.Offset
+	if req.Last > 0 {
+		if total > limit {
+			offset = total - limit
+		} else {
+			offset = 0
+		}
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > total {
+		offset = total
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	slice := filtered[offset:end]
+	next := end
+	if end >= total {
+		next = -1
+	}
+	return tool.TaskReadResult{
+		SessionID:  id,
+		Entries:    slice,
+		Offset:     offset,
+		Limit:      limit,
+		Total:      total,
+		Truncated:  total > len(slice) || (req.Last == 0 && end < total),
+		NextOffset: next,
+	}, nil
+}
+
+func (e *Engine) childMessage(ctx context.Context, req tool.TaskMessageRequest) (tool.TaskMessageResult, error) {
+	if err := ctx.Err(); err != nil {
+		return tool.TaskMessageResult{}, err
+	}
+	id := strings.TrimSpace(req.SessionID)
+	text := strings.TrimSpace(req.Text)
+	if id == "" {
+		return tool.TaskMessageResult{}, fmt.Errorf("session_id is required")
+	}
+	if text == "" {
+		return tool.TaskMessageResult{}, fmt.Errorf("text is required")
+	}
+
+	e.childMu.Lock()
+	h := e.children[id]
+	rec := e.childHistory[id]
+	e.childMu.Unlock()
+
+	if rec != nil && h == nil {
+		st := string(rec.status)
+		if st == "" {
+			st = string(protocol.ChildStatusCompleted)
+		}
+		return tool.TaskMessageResult{
+			SessionID: id,
+			Status:    "rejected",
+			State:     st,
+			Detail:    "child session is closed (" + st + ")",
+		}, nil
+	}
+	if h == nil {
+		return tool.TaskMessageResult{}, fmt.Errorf("unknown or inaccessible child session %q", id)
+	}
+
+	// Snapshot activity state before send.
+	live := h.statusSnapshot(false)
+	queued := h.eng != nil && h.eng.turnActive()
+
+	select {
+	case <-ctx.Done():
+		return tool.TaskMessageResult{}, ctx.Err()
+	case h.ops <- protocol.UserInput{Text: text}:
+	case <-time.After(2 * time.Second):
+		return tool.TaskMessageResult{
+			SessionID: id,
+			Status:    "rejected",
+			State:     live.State,
+			Detail:    "child ops channel blocked",
+		}, nil
+	}
+
+	status := "accepted"
+	detail := "delivered to child"
+	if queued {
+		status = "queued"
+		detail = "queued until active child turn finishes"
+	}
+	// Re-read after send (still running).
+	live = h.statusSnapshot(false)
+	return tool.TaskMessageResult{
+		SessionID: id,
+		Status:    status,
+		State:     live.State,
+		Detail:    detail,
+	}, nil
+}
+
+func (e *Engine) childInterrupt(ctx context.Context, req tool.TaskInterruptRequest) (tool.TaskInterruptResult, error) {
+	if err := ctx.Err(); err != nil {
+		return tool.TaskInterruptResult{}, err
+	}
+	id := strings.TrimSpace(req.SessionID)
+	if id == "" {
+		return tool.TaskInterruptResult{}, fmt.Errorf("session_id is required")
+	}
+
+	e.childMu.Lock()
+	h := e.children[id]
+	rec := e.childHistory[id]
+	e.childMu.Unlock()
+
+	if rec != nil && h == nil {
+		st := string(rec.status)
+		if st == "" {
+			st = string(protocol.ChildStatusCompleted)
+		}
+		return tool.TaskInterruptResult{
+			SessionID: id,
+			State:     st,
+			Detail:    "child already finished",
+		}, nil
+	}
+	if h == nil {
+		return tool.TaskInterruptResult{}, fmt.Errorf("unknown or inaccessible child session %q", id)
+	}
+
+	h.cancel()
+	select {
+	case h.ops <- protocol.Interrupt{}:
+	default:
+	}
+
+	// Wait briefly for terminal record so callers see canceled without racing.
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return tool.TaskInterruptResult{}, ctx.Err()
+		case <-h.done:
+			e.childMu.Lock()
+			rec = e.childHistory[id]
+			e.childMu.Unlock()
+			if rec != nil {
+				st := string(rec.status)
+				if st == "" {
+					st = string(protocol.ChildStatusCanceled)
+				}
+				return tool.TaskInterruptResult{
+					SessionID: id,
+					State:     st,
+					Detail:    "child interrupted",
+				}, nil
+			}
+			return tool.TaskInterruptResult{
+				SessionID: id,
+				State:     string(protocol.ChildStatusCanceled),
+				Detail:    "child interrupted",
+			}, nil
+		case <-timer.C:
+			live := h.statusSnapshot(false)
+			return tool.TaskInterruptResult{
+				SessionID: id,
+				State:     live.State,
+				Detail:    "interrupt sent; child still shutting down",
+			}, nil
+		}
+	}
+}
+
+func formatElapsed(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	d = d.Round(time.Second)
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		m := int(d.Minutes())
+		s := int(d.Seconds()) % 60
+		return fmt.Sprintf("%dm%ds", m, s)
+	}
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	return fmt.Sprintf("%dh%dm", h, m)
 }
 
 // queueChildCompleted records a durable model-facing notice for a finished
