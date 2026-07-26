@@ -120,6 +120,38 @@ func TestComposerImagePasteChipAndSend(t *testing.T) {
 	}
 }
 
+func TestComposerCtrlVAttachesClipboardImage(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.clipboardImage = func() ([]byte, error) { return tinyPNG, nil }
+
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlV})
+	if got := m.composer.Value(); got != "[image 1]" {
+		t.Fatalf("composer = %q, want image chip", got)
+	}
+	if len(m.pendingImages) != 1 || m.pendingImages[0].Attachment.MIME != "image/png" {
+		t.Fatalf("pendingImages = %#v", m.pendingImages)
+	}
+}
+
+func TestComposerCtrlVWithoutImageKeepsDraft(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.setComposerValueAt("keep me", len("keep me"))
+	m.clipboardImage = func() ([]byte, error) { return nil, nil }
+
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlV})
+	if got := m.composer.Value(); got != "keep me" {
+		t.Fatalf("composer = %q, want draft retained", got)
+	}
+	if len(m.pendingImages) != 0 {
+		t.Fatalf("pendingImages = %#v, want none", m.pendingImages)
+	}
+	if !strings.Contains(m.notice, "supported image") || !m.noticeErr {
+		t.Fatalf("notice = %q err=%v", m.notice, m.noticeErr)
+	}
+}
+
 func TestComposerImageUnsupportedKeepsDraft(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})

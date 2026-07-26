@@ -142,6 +142,28 @@ func userMessageDisplayText(text string, images []protocol.ImageAttachment) stri
 // Returns true when the paste was handled as an image (including refuse notices).
 func (m *Model) tryAttachImagePaste(raw string) bool {
 	att, notice, ok := parseImagePaste(raw)
+	return m.attachImage(att, notice, ok)
+}
+
+func (m *Model) attachClipboardImage() {
+	read := m.clipboardImage
+	if read == nil {
+		read = readClipboardImage
+	}
+	raw, err := read()
+	if err != nil {
+		m.setNotice(err.Error(), true)
+		return
+	}
+	att, notice, ok := parseRawImageBytes(raw)
+	if !ok {
+		m.setNotice("clipboard does not contain a supported image", true)
+		return
+	}
+	m.attachImage(att, notice, ok)
+}
+
+func (m *Model) attachImage(att protocol.ImageAttachment, notice string, ok bool) bool {
 	if !ok {
 		return false
 	}

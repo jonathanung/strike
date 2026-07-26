@@ -184,9 +184,10 @@ type Model struct {
 	pendingPastes []pasteChip
 	// pendingImages holds image attachments for [image N] chips in the
 	// composer. Sent as multimodal UserInput; pruned when the chip leaves.
-	pendingImages []imageChip
-	completion    *completionState
-	keyMap        keyMap
+	pendingImages  []imageChip
+	clipboardImage func() ([]byte, error)
+	completion     *completionState
+	keyMap         keyMap
 	// keyOverrides are config keybind remaps (id → chords); used to rebuild
 	// keyMap on orientation toggle and /keys reset.
 	keyOverrides               map[string][]string
