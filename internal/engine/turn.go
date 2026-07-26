@@ -200,6 +200,10 @@ func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.Ima
 	})
 
 	for {
+		// Deliver child.completed into model history before each Stream so a
+		// parent that is still in-turn (e.g. sleep-polling) sees the result
+		// without waiting for idle auto-nudge.
+		e.injectPendingChildNotices()
 		e.maybeThresholdCompact(ctx, turnID)
 		outcome, reqCorr, err := e.streamModel(ctx, turnID)
 		if err != nil {
@@ -639,6 +643,8 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 		if e.opts.Depth < e.opts.MaxChildDepth {
 			tc.SpawnTask = e.spawnChild
 		}
+		tc.ChildWake = e.childWakeCh()
+		tc.HasChildNotice = e.hasPendingChildNotices
 		res, err = t.Execute(ctx, call.Args, tc)
 	}
 

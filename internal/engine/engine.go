@@ -248,9 +248,14 @@ type Engine struct {
 	// parent can inject a model-visible summary and auto-nudge when idle.
 	// Buffered; non-blocking send on the drain side if Run is shutting down.
 	childDone chan protocol.ChildCompleted
-	// pendingChildNotices holds formatted child.completed texts queued while
-	// a parent turn is active; flushed into a follow-up turn when idle.
+	// noticeMu guards pendingChildNotices and childWake. Notices are queued
+	// from Run and consumed either mid-turn (before the next Stream) or via
+	// an idle auto-nudge turn.
+	noticeMu            sync.Mutex
 	pendingChildNotices []string
+	// childWake is closed (and replaced) whenever a child completes so an
+	// in-flight sleep can return early instead of poll-looping.
+	childWake chan struct{}
 
 	// pendingUserInputs holds UserInput accepted while a turn was active.
 	// Drained FIFO one-at-a-time after each turn ends. Survives Interrupt so
@@ -324,6 +329,7 @@ func New(opts Options) *Engine {
 		checkpoints:         tool.NewCheckpointStore(),
 		children:            make(map[string]*childHandle),
 		childDone:           make(chan protocol.ChildCompleted, 32),
+		childWake:           make(chan struct{}),
 		contextWindowTokens: opts.ContextWindow,
 		priority:            opts.InitialPriority,
 		titled:              opts.InitialTitled,
@@ -487,7 +493,7 @@ func (e *Engine) taskOneShotIdle(turnSeen bool) bool {
 	if !e.opts.TaskOneShot || !turnSeen {
 		return false
 	}
-	if e.turnActive() || len(e.pendingChildNotices) > 0 || len(e.pendingUserInputs) > 0 {
+	if e.turnActive() || e.hasPendingChildNotices() || len(e.pendingUserInputs) > 0 {
 		return false
 	}
 	e.childMu.Lock()

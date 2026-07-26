@@ -30,6 +30,11 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 	switch ev := ev.(type) {
 	case protocol.UserMessage:
 		m.completeAssistantCells()
+		// Auto-injected child completion is host feedback, not a user prompt.
+		if isChildCompletedNotice(ev.Text) {
+			m.cells = append(m.cells, &infoCell{text: ev.Text})
+			break
+		}
 		m.cells = append(m.cells, &userCell{text: userMessageDisplayText(ev.Text, ev.Images)})
 		// Fallback for logs without session.titled (pre-auto-title sessions).
 		if m.titleTopic == "" {
@@ -69,6 +74,11 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 			last.mdCacheOK = false
 		}
 		m.toolCallsThisTurn++
+		// Coalesce consecutive sleep ticks into one in-place row (no spam).
+		if ev.Name == "sleep" {
+			m.cells = beginSleepToolCell(m.cells, m.toolByID, ev.CallID, ev.Name, ev.Args)
+			break
+		}
 		tc := &toolCell{callID: ev.CallID, name: ev.Name, args: ev.Args}
 		m.toolByID[ev.CallID] = tc
 		if isExploreTool(ev.Name) {
@@ -233,6 +243,14 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 	case protocol.ChildCompleted:
 		m.onChildCompleted(ev)
 		cmd = m.broadcastAgentsState()
+		// Meaningful lifecycle transition only (not sleep/poll ticks).
+		status := string(ev.Status)
+		if status == "" {
+			status = string(protocol.ChildStatusCompleted)
+		}
+		attention := status == string(protocol.ChildStatusFailed) ||
+			status == string(protocol.ChildStatusCanceled)
+		cmd = tea.Batch(cmd, m.desktopNotifyCmd("strike: subagent "+status, attention))
 		if m.viewingChild() && (ev.SessionID == m.viewingID || ev.SessionID == "") {
 			if refresh := m.refreshViewingTranscript(); refresh != nil {
 				cmd = tea.Batch(cmd, refresh)

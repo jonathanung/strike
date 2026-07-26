@@ -1562,7 +1562,8 @@ func TestChildCompletedNudgeWhileIdle(t *testing.T) {
 }
 
 // TestChildCompletedQueuedDuringParentTurn: completion arrives mid-turn and is
-// delivered as a follow-up turn after the parent finishes (not dropped).
+// delivered model-visibly — either injected before the next Stream in the same
+// turn, or as an idle auto-nudge after the parent finishes (not dropped).
 func TestChildCompletedQueuedDuringParentTurn(t *testing.T) {
 	const childPrompt = "fast-child-during-turn"
 	taskCall := taskToolCall("task-mid", childPrompt)
@@ -1579,11 +1580,13 @@ func TestChildCompletedQueuedDuringParentTurn(t *testing.T) {
 			s.match = matchUserText(childPrompt)
 			return s
 		}(),
+		// Parent continues after tools; may already include mid-turn inject.
 		func() streamStep {
 			s := completedStep("parent after tools")
 			s.match = matchToolResult("hold")
 			return s
 		}(),
+		// Idle nudge path if inject did not consume the notice mid-turn.
 		childCompletedNudgeStep("acked mid-turn completion"),
 	)
 	eng := engine.New(engine.Options{
@@ -1601,10 +1604,10 @@ func TestChildCompletedQueuedDuringParentTurn(t *testing.T) {
 	eng.Ops() <- protocol.UserInput{Text: "task then hold"}
 
 	var events []protocol.Event
-	var sawChildCompleted, holdStarted, workTurnDone, sawNudge bool
+	var sawChildCompleted, holdStarted, parentTurnDone, sawNudge bool
 	guard := time.NewTimer(10 * time.Second)
 	defer guard.Stop()
-	for !(sawChildCompleted && workTurnDone && sawNudge) {
+	for !(sawChildCompleted && parentTurnDone && sawNudge) {
 		select {
 		case ev, ok := <-eng.Events():
 			if !ok {
@@ -1616,14 +1619,10 @@ func TestChildCompletedQueuedDuringParentTurn(t *testing.T) {
 				eng.Ops() <- protocol.PermissionReply{RequestID: ev.RequestID, Decision: protocol.DecisionOnce}
 			case protocol.ChildCompleted:
 				sawChildCompleted = true
-				if workTurnDone {
-					// Still acceptable: race where hold finished first.
-					break
-				}
 				if !holdStarted {
 					t.Log("child finished before parent hold started")
 				}
-				// Unblock parent hold so the work turn can finish and flush the queue.
+				// Unblock parent hold so the work turn can finish.
 				select {
 				case <-release:
 				default:
@@ -1638,14 +1637,11 @@ func TestChildCompletedQueuedDuringParentTurn(t *testing.T) {
 				}
 			case protocol.TurnCompleted:
 				if ev.ParentSessionID == "" && ev.Depth == 0 {
-					if !sawNudge {
-						workTurnDone = true
-						// Ensure hold is released even if child is slow.
-						select {
-						case <-release:
-						default:
-							close(release)
-						}
+					parentTurnDone = true
+					select {
+					case <-release:
+					default:
+						close(release)
 					}
 				}
 			case protocol.EngineError:
@@ -1656,19 +1652,18 @@ func TestChildCompletedQueuedDuringParentTurn(t *testing.T) {
 				holdStarted = true
 			}
 		case <-guard.C:
-			t.Fatalf("timed out; child=%v hold=%v workDone=%v nudge=%v events=%v",
-				sawChildCompleted, holdStarted, workTurnDone, sawNudge, summarizeEvents(events))
+			t.Fatalf("timed out; child=%v hold=%v parentDone=%v nudge=%v events=%v",
+				sawChildCompleted, holdStarted, parentTurnDone, sawNudge, summarizeEvents(events))
 		}
 	}
 	if !sawChildCompleted {
 		t.Fatal("missing ChildCompleted")
 	}
 	if !sawNudge {
-		t.Fatal("missing model-visible child.completed nudge")
+		t.Fatal("missing model-visible child.completed notice")
 	}
-	// Prefer the queued path: child completed before the work turn finished.
 	if !holdStarted {
-		t.Log("hold never started; mid-turn queue path not exercised")
+		t.Log("hold never started; mid-turn path not exercised")
 	}
 }
 
@@ -1752,4 +1747,211 @@ func TestTwoConcurrentTasksBothReachParent(t *testing.T) {
 	}
 	// Durable path: UserMessage events are session-logged and restored into
 	// model history (engine.Restore), so both summaries are model-visible.
+}
+
+// TestChildCompletedInjectedDuringSleepPoll: parent sleep-polls after task spawn;
+// child finishes mid-sleep; parent must see [child.completed] on the next Stream
+// without requiring idle auto-nudge only, and without unbounded sleep loops.
+func TestChildCompletedInjectedDuringSleepPoll(t *testing.T) {
+	const childPrompt = "sleep-poll-child"
+	taskCall := taskToolCall("task-poll", childPrompt)
+	sleepCall := provider.ToolCall{
+		ID:   "sleep-1",
+		Name: "sleep",
+		Args: json.RawMessage(`{"seconds":30}`),
+	}
+	release := make(chan struct{})
+	ct := &channelTool{
+		executed: make(chan string, 1),
+		blocks:   map[string]<-chan struct{}{"hold": release},
+	}
+	holdCall := toolCall("hold", "channel")
+
+	var sawCompletionInStream atomic.Bool
+	prov := newScriptedProvider(
+		// Parent: spawn task then sleep-poll.
+		toolCallStep(taskCall, sleepCall),
+		// Child: block then finish quickly after release.
+		func() streamStep {
+			s := toolCallStep(holdCall)
+			s.match = matchUserText(childPrompt)
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("child result for sleep poll parent")
+			s.match = matchToolResult("hold")
+			return s
+		}(),
+		// After sleep wakes + inject: parent must see child.completed and finish
+		// without further sleep.
+		func() streamStep {
+			s := completedStep("parent summarized child without more sleep")
+			s.match = func(req provider.Request) bool {
+				for _, m := range req.Messages {
+					if m.Role == provider.RoleUser && strings.Contains(m.Text, "[child.completed") &&
+						strings.Contains(m.Text, "child result for sleep poll parent") {
+						sawCompletionInStream.Store(true)
+						return true
+					}
+				}
+				return false
+			}
+			return s
+		}(),
+	)
+	eng := engine.New(engine.Options{
+		SessionID:       "parent-sleep-poll",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(tool.NewTask(), tool.NewSleep(), ct),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "spawn and poll"}
+
+	var events []protocol.Event
+	var sleepBegan, childDone, parentDone bool
+	guard := time.NewTimer(15 * time.Second)
+	defer guard.Stop()
+	for !(childDone && parentDone && sawCompletionInStream.Load()) {
+		select {
+		case ev, ok := <-eng.Events():
+			if !ok {
+				t.Fatal("Events closed early")
+			}
+			events = append(events, ev)
+			switch ev := ev.(type) {
+			case protocol.PermissionAsked:
+				eng.Ops() <- protocol.PermissionReply{RequestID: ev.RequestID, Decision: protocol.DecisionOnce}
+			case protocol.ToolCallBegin:
+				if ev.Name == "sleep" {
+					sleepBegan = true
+					// Release child once parent is sleeping so completion races sleep.
+					select {
+					case <-release:
+					default:
+						close(release)
+					}
+				}
+			case protocol.ToolCallEnd:
+				if ev.CallID == "sleep-1" {
+					if !strings.Contains(ev.Output, "child") && !strings.Contains(strings.ToLower(ev.Title), "woke") {
+						// Full 30s sleep would fail the timeout; allow either wake or full.
+						t.Logf("sleep end title=%q output=%q", ev.Title, ev.Output)
+					}
+				}
+				if strings.HasPrefix(ev.CallID, "sleep-") && ev.CallID != "sleep-1" {
+					t.Fatalf("extra sleep tool call %q — poll loop not broken", ev.CallID)
+				}
+			case protocol.ChildCompleted:
+				childDone = true
+				if !strings.Contains(ev.Summary, "child result for sleep poll parent") {
+					t.Errorf("ChildCompleted summary = %q", ev.Summary)
+				}
+			case protocol.TurnCompleted:
+				if ev.ParentSessionID == "" && ev.Depth == 0 && sawCompletionInStream.Load() {
+					parentDone = true
+				}
+			case protocol.EngineError:
+				t.Fatalf("engine error: %s", ev.Message)
+			}
+		case <-guard.C:
+			t.Fatalf("timed out; sleepBegan=%v childDone=%v parentDone=%v sawInject=%v events=%v",
+				sleepBegan, childDone, parentDone, sawCompletionInStream.Load(), summarizeEvents(events))
+		}
+	}
+
+	// Exactly one child.completed UserMessage (model-visible once).
+	if n := childCompletionNotices(events); n != 1 {
+		t.Fatalf("child.completed UserMessage count = %d, want 1; events=%v", n, summarizeEvents(events))
+	}
+	// Task cell path: ToolCallEnd started + ChildCompleted present.
+	if n := countEvents[protocol.ChildCompleted](events); n != 1 {
+		t.Fatalf("ChildCompleted = %d, want 1", n)
+	}
+	if !sleepBegan {
+		t.Fatal("expected parent to enter sleep before child finished")
+	}
+}
+
+// TestTwoConcurrentChildrenEachReportOnce: two children each inject exactly once.
+func TestTwoConcurrentChildrenEachReportOnce(t *testing.T) {
+	const (
+		promptA = "concurrent-a"
+		promptB = "concurrent-b"
+	)
+	taskA := taskToolCall("task-ca", promptA)
+	taskB := taskToolCall("task-cb", promptB)
+	prov := newScriptedProvider(
+		toolCallStep(taskA, taskB),
+		func() streamStep {
+			s := completedStep("result-a-once")
+			s.match = matchUserText(promptA)
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("result-b-once")
+			s.match = matchUserText(promptB)
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("parent after spawn")
+			s.match = func(req provider.Request) bool {
+				var sawA, sawB bool
+				for _, m := range req.Messages {
+					if m.Role == provider.RoleTool && m.ToolResult != nil {
+						if m.ToolResult.CallID == "task-ca" {
+							sawA = true
+						}
+						if m.ToolResult.CallID == "task-cb" {
+							sawB = true
+						}
+					}
+				}
+				return sawA && sawB
+			}
+			return s
+		}(),
+		childCompletedNudgeStep("ack both"),
+		// Allow a second nudge turn if completions arrive separately.
+		childCompletedNudgeStep("ack both 2"),
+	)
+	eng := engine.New(engine.Options{
+		SessionID:       "parent-two-once",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(tool.NewTask()),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "two children"}
+	events := drainAndReply(t, eng, 15*time.Second)
+
+	if n := countEvents[protocol.ChildCompleted](events); n != 2 {
+		t.Fatalf("ChildCompleted = %d, want 2", n)
+	}
+	// Count [child.completed markers across all UserMessages (may be batched).
+	markers := 0
+	var joined strings.Builder
+	for _, ev := range events {
+		if um, ok := ev.(protocol.UserMessage); ok {
+			markers += strings.Count(um.Text, "[child.completed")
+			joined.WriteString(um.Text)
+			joined.WriteByte('\n')
+		}
+	}
+	if markers != 2 {
+		t.Fatalf("[child.completed] markers = %d, want 2; text=%q", markers, joined.String())
+	}
+	if !strings.Contains(joined.String(), "result-a-once") || !strings.Contains(joined.String(), "result-b-once") {
+		t.Fatalf("missing child summaries in notices: %q", joined.String())
+	}
 }

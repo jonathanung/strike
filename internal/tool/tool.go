@@ -116,6 +116,13 @@ type Context struct {
 	// Checkpoint, when non-nil, records pre-mutation file state for undo
 	// restore (first touch per turn). Absolute path. Nil disables checkpoints.
 	Checkpoint func(absPath string)
+	// ChildWake is closed when a background child completes. Sleep selects on
+	// it so poll-loops return promptly. Nil disables early wake.
+	ChildWake <-chan struct{}
+	// HasChildNotice reports a queued child.completed ready for the model.
+	// Sleep checks this before waiting so a completion that arrived just
+	// before Execute is not missed. Nil means never pending.
+	HasChildNotice func() bool
 }
 
 // SnapshotPath records the pre-mutation state of absPath when Checkpoint is set.

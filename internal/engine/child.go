@@ -303,7 +303,7 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 	}
 
 	out := fmt.Sprintf(
-		"Started child session %s (agent %s). It runs independently and does not block this turn. A child.completed event will report its terminal summary.",
+		"Started child session %s (agent %s). It runs independently and does not block this turn. Continue other work if useful; a [child.completed] message will deliver the terminal summary automatically — do not sleep-poll for it.",
 		childID, agentName,
 	)
 	return tool.TaskResult{
@@ -320,17 +320,83 @@ func (e *Engine) unregisterChild(id string) {
 }
 
 // queueChildCompleted records a durable model-facing notice for a finished
-// child. Flushed by flushPendingChildNotices when the parent is idle.
+// child and wakes any in-flight sleep. Consumed mid-turn by
+// injectPendingChildNotices or as an idle auto-nudge via flushPendingChildNotices.
 func (e *Engine) queueChildCompleted(c protocol.ChildCompleted) {
+	e.noticeMu.Lock()
+	defer e.noticeMu.Unlock()
 	e.pendingChildNotices = append(e.pendingChildNotices, formatChildCompletedNotice(c))
+	e.signalChildWakeLocked()
+}
+
+// hasPendingChildNotices reports whether any child.completed texts are queued.
+func (e *Engine) hasPendingChildNotices() bool {
+	e.noticeMu.Lock()
+	defer e.noticeMu.Unlock()
+	return len(e.pendingChildNotices) > 0
+}
+
+// takePendingChildNotices removes and returns all queued notices (may be nil).
+func (e *Engine) takePendingChildNotices() []string {
+	e.noticeMu.Lock()
+	defer e.noticeMu.Unlock()
+	if len(e.pendingChildNotices) == 0 {
+		return nil
+	}
+	out := e.pendingChildNotices
+	e.pendingChildNotices = nil
+	return out
+}
+
+// childWakeCh returns the channel closed on the next child completion.
+func (e *Engine) childWakeCh() <-chan struct{} {
+	e.noticeMu.Lock()
+	defer e.noticeMu.Unlock()
+	if e.childWake == nil {
+		e.childWake = make(chan struct{})
+	}
+	return e.childWake
+}
+
+// signalChildWakeLocked closes the current wake channel and installs a fresh
+// one. Caller must hold noticeMu.
+func (e *Engine) signalChildWakeLocked() {
+	if e.childWake == nil {
+		e.childWake = make(chan struct{})
+	}
+	select {
+	case <-e.childWake:
+		// already closed
+	default:
+		close(e.childWake)
+	}
+	e.childWake = make(chan struct{})
+}
+
+// injectPendingChildNotices appends queued child.completed texts into the
+// live model history so the next Stream sees them without waiting for the
+// parent turn to end. Safe to call only from the turn worker (sole writer of
+// e.messages during a turn). Emits UserMessage for session restore.
+func (e *Engine) injectPendingChildNotices() {
+	notices := e.takePendingChildNotices()
+	if len(notices) == 0 {
+		return
+	}
+	text := strings.Join(notices, "\n\n")
+	e.emit(protocol.UserMessage{Correlation: e.sessionCorr(), Text: text})
+	e.messages = append(e.messages, provider.Message{
+		Role: provider.RoleUser,
+		Text: text,
+	})
 }
 
 // flushPendingChildNotices starts a short parent turn with queued child
 // completion summaries when the parent is idle and a provider is selected.
 // Notices stay queued while a turn is active or no model is available so the
 // next successful flush (or user turn after provider select) can deliver them.
+// Mid-turn injectPendingChildNotices may already have drained the queue.
 func (e *Engine) flushPendingChildNotices(ctx context.Context) {
-	if len(e.pendingChildNotices) == 0 {
+	if !e.hasPendingChildNotices() {
 		return
 	}
 	e.joinFinishingTurn()
@@ -340,9 +406,11 @@ func (e *Engine) flushPendingChildNotices(ctx context.Context) {
 	if e.prov == nil || ctx.Err() != nil {
 		return
 	}
-	text := strings.Join(e.pendingChildNotices, "\n\n")
-	e.pendingChildNotices = nil
-	e.startTurn(ctx, text, nil)
+	notices := e.takePendingChildNotices()
+	if len(notices) == 0 {
+		return
+	}
+	e.startTurn(ctx, strings.Join(notices, "\n\n"), nil)
 }
 
 func formatChildCompletedNotice(c protocol.ChildCompleted) string {
@@ -365,6 +433,7 @@ func formatChildCompletedNotice(c protocol.ChildCompleted) string {
 		b.WriteByte('\n')
 		b.WriteString(summary)
 	}
+	b.WriteString("\nDo not sleep-poll for subagents; this is the terminal result.")
 	return b.String()
 }
 

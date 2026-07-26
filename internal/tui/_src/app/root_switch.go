@@ -339,6 +339,10 @@ func applyEventToPane(p *rootPane, ev protocol.Event) {
 		}
 	case protocol.UserMessage:
 		p.sessionErrored = false
+		if isChildCompletedNotice(e.Text) {
+			p.cells = append(p.cells, &infoCell{text: e.Text})
+			break
+		}
 		p.cells = append(p.cells, &userCell{text: e.Text})
 		if p.titleTopic == "" {
 			if topic := sanitizeTitleTopic(e.Text); topic != "" {
@@ -369,9 +373,13 @@ func applyEventToPane(p *rootPane, ev protocol.Event) {
 			last.complete = true
 			last.mdCacheOK = false
 		}
+		p.toolCallsThisTurn++
+		if e.Name == "sleep" {
+			p.cells = beginSleepToolCell(p.cells, p.toolByID, e.CallID, e.Name, e.Args)
+			break
+		}
 		tc := &toolCell{callID: e.CallID, name: e.Name, args: e.Args}
 		p.toolByID[e.CallID] = tc
-		p.toolCallsThisTurn++
 		p.cells = append(p.cells, tc)
 	case protocol.ToolCallOutput:
 		if tc, ok := p.toolByID[e.CallID]; ok && !tc.done {

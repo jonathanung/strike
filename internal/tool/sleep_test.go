@@ -106,3 +106,67 @@ func TestSleepPermissionDenied(t *testing.T) {
 		t.Fatal("expected deny")
 	}
 }
+
+func TestSleepWakesOnChildChannel(t *testing.T) {
+	wake := make(chan struct{})
+	tc := allowAll(t.TempDir())
+	tc.ChildWake = wake
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		close(wake)
+	}()
+	start := time.Now()
+	res, err := NewSleep().Execute(context.Background(), mustJSON(t, map[string]any{
+		"seconds": 30,
+	}), tc)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("wake took too long: %v", elapsed)
+	}
+	if !strings.Contains(res.Output, "child") {
+		t.Errorf("output = %q, want child wake message", res.Output)
+	}
+	if !strings.Contains(res.Title, "woke") {
+		t.Errorf("title = %q", res.Title)
+	}
+}
+
+func TestSleepSkipsWhenChildNoticePending(t *testing.T) {
+	tc := allowAll(t.TempDir())
+	tc.HasChildNotice = func() bool { return true }
+	start := time.Now()
+	res, err := NewSleep().Execute(context.Background(), mustJSON(t, map[string]any{
+		"seconds": 30,
+	}), tc)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("should not sleep when notice pending: %v", elapsed)
+	}
+	if !strings.Contains(res.Output, "child") {
+		t.Errorf("output = %q", res.Output)
+	}
+}
+
+func TestSleepExplicitWithoutWakeStillSleeps(t *testing.T) {
+	// No ChildWake / HasChildNotice: normal short sleep still works.
+	start := time.Now()
+	res, err := NewSleep().Execute(context.Background(), mustJSON(t, map[string]any{
+		"seconds": 0.05,
+	}), allowAll(t.TempDir()))
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed < 40*time.Millisecond {
+		t.Errorf("returned too fast: %v", elapsed)
+	}
+	if !strings.Contains(res.Output, "Slept") {
+		t.Errorf("output = %q", res.Output)
+	}
+}
