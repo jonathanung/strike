@@ -196,6 +196,9 @@ type Model struct {
 	noticeErr   bool
 	noticeCause noticeCause
 	turnRunning bool
+	// inputQueue holds prompts typed while turnRunning. Drained FIFO on
+	// TurnCompleted; survives Interrupt until the user pops/clears it.
+	inputQueue []queuedInput
 	// awaitingPermission is true between PermissionAsked/QuestionAsked and
 	// the matching Resolved / TurnCompleted. It drives AgentStateAttention.
 	awaitingPermission bool
@@ -777,11 +780,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.GotoBottom()
 			return m, nil
 		}
-		if m.turnRunning && key.Matches(msg, m.keyMap.Interrupt) {
-			ops := m.ops
-			return m, func() tea.Msg {
-				ops <- protocol.Interrupt{}
-				return nil
+		if key.Matches(msg, m.keyMap.Interrupt) {
+			if m.turnRunning {
+				ops := m.ops
+				return m, func() tea.Msg {
+					ops <- protocol.Interrupt{}
+					return nil
+				}
+			}
+			// Idle: esc clears a leftover input queue (rare once auto-drain runs).
+			if m.clearInputQueue() {
+				m.reflow()
+				return m, nil
 			}
 		}
 		if m.focus == focusRight {
@@ -796,6 +806,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reflow()
 			m.refreshViewport()
 			return m, cmd
+		}
+		// Empty composer + queued prompts: backspace pops last item for edit.
+		if m.focus == focusLeft && m.composer.Value() == "" && len(m.inputQueue) > 0 {
+			if msg.Type == tea.KeyBackspace || msg.Type == tea.KeyCtrlH {
+				if m.popInputQueueToComposer() {
+					return m, nil
+				}
+			}
 		}
 		// Bracketed paste: collapse large multi-line blobs to a chip.
 		if msg.Paste {
@@ -1379,7 +1397,8 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		m.turnStartedAt = time.Time{}
 		m.toolCallsThisTurn = 0
 		m.refreshOpenPalette()
-		cmd = tea.Batch(m.broadcastContextState(), notify)
+		// turnRunning is already false via applyAgentStateEvent; drain next prompt.
+		cmd = tea.Batch(m.broadcastContextState(), notify, m.tryDrainInputQueue())
 	case protocol.ModelSelected:
 		if m.noticeCause == noticeNeedsModel {
 			m.clearNotice()
@@ -2279,26 +2298,12 @@ func (m Model) submit(op protocol.UserInput, displayPrompt string) (tea.Model, t
 		m.setNotice("viewing subagent — return to parent to send (esc or ctrl+x up)", true)
 		return m, nil
 	}
+	// Policy: enqueue while a turn runs (do not reject/wipe). Drain FIFO on
+	// TurnCompleted. Queue survives Interrupt until pop/clear.
 	if m.turnRunning {
-		m.setNotice("a turn is already running; interrupt it first", true)
-		return m, nil
+		return m.enqueueUserInput(op, displayPrompt)
 	}
-	m.resetComposer()
-	m.clearNotice()
-	ops := m.ops
-	send := func() tea.Msg {
-		ops <- op
-		return nil
-	}
-	if m.services.History == nil {
-		return m, send
-	}
-	done := m.services.History.Enqueue(displayPrompt)
-	persist := func() tea.Msg {
-		err := <-done
-		return historyAddedMsg{err: err}
-	}
-	return m, tea.Batch(send, persist)
+	return m.dispatchUserInput(op, displayPrompt)
 }
 
 func (m Model) sendSelect(op protocol.SelectModel) (tea.Model, tea.Cmd) {
