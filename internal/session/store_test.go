@@ -225,3 +225,55 @@ func TestAppendReplaySessionTitled(t *testing.T) {
 		t.Errorf("TitleFromEvents = %q", TitleFromEvents(got))
 	}
 }
+
+func TestReplaySliceAndLastBounded(t *testing.T) {
+	dir := t.TempDir()
+	st, err := Open(dir, "slice-session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 10; i++ {
+		if err := st.Append(protocol.UserMessage{Text: "m" + string(rune('0'+i))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	path := st.Path()
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	events, total, err := ReplaySlice(path, 3, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 10 {
+		t.Fatalf("total = %d, want 10", total)
+	}
+	if len(events) != 4 {
+		t.Fatalf("len = %d, want 4", len(events))
+	}
+	if um, ok := events[0].(protocol.UserMessage); !ok || um.Text != "m3" {
+		t.Fatalf("first = %#v", events[0])
+	}
+
+	tail, total, err := ReplayLast(path, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 10 || len(tail) != 3 {
+		t.Fatalf("tail total=%d len=%d", total, len(tail))
+	}
+	if um, ok := tail[0].(protocol.UserMessage); !ok || um.Text != "m7" {
+		t.Fatalf("tail first = %#v", tail[0])
+	}
+	if um, ok := tail[2].(protocol.UserMessage); !ok || um.Text != "m9" {
+		t.Fatalf("tail last = %#v", tail[2])
+	}
+
+	if _, _, err := ReplaySlice(path, -1, 2); err == nil {
+		t.Fatal("expected negative offset error")
+	}
+	if _, _, err := ReplayLast(path, 0); err == nil {
+		t.Fatal("expected n<=0 error")
+	}
+}

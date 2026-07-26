@@ -516,6 +516,35 @@ func (m *Manager) Replay(id string) ([]protocol.Event, error) {
 	return Replay(LogPath(m.dir, id))
 }
 
+// ReplaySlice loads a bounded event window for a session id.
+func (m *Manager) ReplaySlice(id string, offset, limit int) ([]protocol.Event, int, error) {
+	id = strings.TrimSpace(id)
+	if err := validateID(id); err != nil {
+		return nil, 0, err
+	}
+	// Flush open store so concurrent readers see recent appends.
+	m.mu.Lock()
+	if e, ok := m.sessions[id]; ok && e.store != nil {
+		_ = e.store.Sync()
+	}
+	m.mu.Unlock()
+	return ReplaySlice(LogPath(m.dir, id), offset, limit)
+}
+
+// ReplayLast loads up to n trailing events for a session id.
+func (m *Manager) ReplayLast(id string, n int) ([]protocol.Event, int, error) {
+	id = strings.TrimSpace(id)
+	if err := validateID(id); err != nil {
+		return nil, 0, err
+	}
+	m.mu.Lock()
+	if e, ok := m.sessions[id]; ok && e.store != nil {
+		_ = e.store.Sync()
+	}
+	m.mu.Unlock()
+	return ReplayLast(LogPath(m.dir, id), n)
+}
+
 // Fork copies sourceID's event log into a new root session. The parent stays
 // intact. Title is "fork of …"; meta.ForkedFrom records lineage. ParentSessionID
 // stays empty so the fork remains eligible for --continue and the session picker.

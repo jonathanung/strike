@@ -146,3 +146,83 @@ func Replay(path string) ([]protocol.Event, error) {
 	}
 	return events, scanner.Err()
 }
+
+// ReplaySlice returns a bounded ordered slice of events from a session log.
+// offset is 0-based; limit caps the number of events returned (must be > 0).
+// total is the full event count. Never loads more than needed into the result
+// slice, though the file is still scanned to compute total and reach offset.
+func ReplaySlice(path string, offset, limit int) (events []protocol.Event, total int, err error) {
+	if offset < 0 {
+		return nil, 0, fmt.Errorf("offset must be >= 0")
+	}
+	if limit <= 0 {
+		return nil, 0, fmt.Errorf("limit must be > 0")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 32<<20)
+	line := 0
+	for scanner.Scan() {
+		line++
+		if total >= offset && len(events) < limit {
+			var env protocol.Envelope
+			if err := json.Unmarshal(scanner.Bytes(), &env); err != nil {
+				return nil, 0, fmt.Errorf("line %d: %w", line, err)
+			}
+			ev, err := env.Decode()
+			if err != nil {
+				return nil, 0, fmt.Errorf("line %d: %w", line, err)
+			}
+			events = append(events, ev)
+		}
+		total++
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, 0, err
+	}
+	return events, total, nil
+}
+
+// ReplayLast returns up to n trailing events from a session log (bounded).
+// n must be > 0. Order is chronological (oldest of the tail first).
+func ReplayLast(path string, n int) (events []protocol.Event, total int, err error) {
+	if n <= 0 {
+		return nil, 0, fmt.Errorf("n must be > 0")
+	}
+	// Ring of the last n events while counting total.
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer f.Close()
+	ring := make([]protocol.Event, 0, n)
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 32<<20)
+	line := 0
+	for scanner.Scan() {
+		line++
+		var env protocol.Envelope
+		if err := json.Unmarshal(scanner.Bytes(), &env); err != nil {
+			return nil, 0, fmt.Errorf("line %d: %w", line, err)
+		}
+		ev, err := env.Decode()
+		if err != nil {
+			return nil, 0, fmt.Errorf("line %d: %w", line, err)
+		}
+		if len(ring) < n {
+			ring = append(ring, ev)
+		} else {
+			copy(ring, ring[1:])
+			ring[n-1] = ev
+		}
+		total++
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, 0, err
+	}
+	return ring, total, nil
+}

@@ -243,6 +243,10 @@ type Engine struct {
 	// so only one service matches.
 	childMu  sync.Mutex
 	children map[string]*childHandle
+	// childHistory retains terminal snapshots for owned children after they
+	// finish so task_status/task_read can return completed state without a
+	// new spawn. Only sessions this engine started are present.
+	childHistory map[string]*childRecord
 
 	// childDone delivers ChildCompleted from drain goroutines to Run so the
 	// parent can inject a model-visible summary and auto-nudge when idle.
@@ -328,6 +332,7 @@ func New(opts Options) *Engine {
 		files:               &tool.FileState{},
 		checkpoints:         tool.NewCheckpointStore(),
 		children:            make(map[string]*childHandle),
+		childHistory:        make(map[string]*childRecord),
 		childDone:           make(chan protocol.ChildCompleted, 32),
 		childWake:           make(chan struct{}),
 		contextWindowTokens: opts.ContextWindow,

@@ -24,6 +24,8 @@ func (taskTool) Description() string {
   reviewer (read-only review), tester (run make test/vet/build), debugger (root-cause),
   build (default coding), plan (read-only planning).
 - Nested task depth is bounded by MaxChildDepth (default 1: children cannot nest).
+- Use task_status/task_read/task_message/task_interrupt with the session id for
+  intermediate control — do not sleep-poll for completion.
 - Use for scoped work that benefits from a fresh message history.`
 }
 
