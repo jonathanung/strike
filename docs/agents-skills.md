@@ -52,7 +52,7 @@ Each model request composes the system prompt in layers (like opencode):
 3. **Agent persona** — empty for built-in build/plan (provider overlay used); custom `agents/*.md` body replaces the provider overlay; config `systemPrompt` replaces it for build only
 4. **Plan overlay** — always added while the plan agent is active
 5. **Environment** — workdir, workspace root, git, platform, date, model id
-6. **Instructions** — `AGENTS.md` / `CLAUDE.md` from `~/.strike` and the project (walked up to the git root)
+6. **Instructions** — `AGENTS.md` / `CLAUDE.md` from `~/.strike` and the project (walked up to the git root). Create or refresh the project file with `/init` (confirms before replacing an existing `AGENTS.md`; light local scan only — no secrets).
 7. **Project memory** — entries tagged `instruction`, `preference`, or `project-convention` (capped; untrusted). Untagged notes and issues stay on-demand via tools.
 
 ```markdown

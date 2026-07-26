@@ -43,8 +43,9 @@ export ANTHROPIC_API_KEY=sk-ant-…   # or: ./strike auth login anthropic
 ./strike exec "summarize this repo" # headless one-shot → stdout
 ```
 
-In the TUI: `/provider`, `/model`, `/auth`, `/theme`, `/session`, `/help`,
-`/upgrade`. Enter sends; Shift+Enter newline; `esc` interrupts; `ctrl+t` jumps
+In the TUI: `/provider`, `/model`, `/auth`, `/theme`, `/session`, `/init`,
+`/help`, `/upgrade`. `/init` bootstraps project `AGENTS.md` (confirms before
+overwrite). Enter sends; Shift+Enter newline; `esc` interrupts; `ctrl+t` jumps
 to latest output; `ctrl+c` quits. `@path` attaches project files. See
 [docs/keybinds.md](docs/keybinds.md) and [docs/usage.md](docs/usage.md).
 
