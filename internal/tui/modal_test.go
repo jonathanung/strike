@@ -351,6 +351,208 @@ func isLikelyDiffMarkerLine(s string) bool {
 	return true
 }
 
+func TestPermissionModalAutoApproveFiresAllowOnce(t *testing.T) {
+	m, ops := newTestPermissionModal("auto-fire")
+	if cmd := m.armAutoApprove(3); cmd == nil {
+		t.Fatal("armAutoApprove returned nil cmd")
+	}
+	view := strings.ToLower(ansi.Strip(m.view(70, theme.Default())))
+	if !strings.Contains(view, "auto-allow in 3s") {
+		t.Fatalf("view missing countdown:\n%s", view)
+	}
+
+	// Two ticks leave remaining=1; third fires allow-once.
+	for i := 0; i < 2; i++ {
+		next, cmd := m.onCountdown(permissionCountdownMsg{requestID: "auto-fire", gen: m.autoGen})
+		if next == nil {
+			t.Fatalf("countdown closed early on tick %d", i+1)
+		}
+		pm, ok := next.(*permissionModal)
+		if !ok {
+			t.Fatalf("modal type = %T", next)
+		}
+		m = pm
+		runPermissionCmd(t, cmd)
+		assertNoPermissionReply(t, ops)
+	}
+	if m.remaining != 1 {
+		t.Fatalf("remaining = %d, want 1", m.remaining)
+	}
+
+	next, cmd := m.onCountdown(permissionCountdownMsg{requestID: "auto-fire", gen: m.autoGen})
+	if next != nil {
+		t.Fatal("final tick did not close modal")
+	}
+	reply := receiveSinglePermissionReply(t, ops, cmd)
+	assertPermissionReply(t, reply, "auto-fire", protocol.DecisionOnce, "")
+
+	// Stale post-decision tick must not double-submit.
+	if _, cmd := m.onCountdown(permissionCountdownMsg{requestID: "auto-fire", gen: m.autoGen}); cmd != nil {
+		runPermissionCmd(t, cmd)
+	}
+	assertNoPermissionReply(t, ops)
+}
+
+func TestPermissionModalEscCancelsAutoApprove(t *testing.T) {
+	m, ops := newTestPermissionModal("auto-esc")
+	_ = m.armAutoApprove(5)
+	gen := m.autoGen
+
+	next, cmd := m.update(permissionKey("esc"))
+	if next != nil {
+		t.Fatal("esc did not close modal")
+	}
+	reply := receiveSinglePermissionReply(t, ops, cmd)
+	assertPermissionReply(t, reply, "auto-esc", protocol.DecisionReject, "")
+
+	// In-flight tick after cancel must not allow.
+	if _, tickCmd := m.onCountdown(permissionCountdownMsg{requestID: "auto-esc", gen: gen}); tickCmd != nil {
+		runPermissionCmd(t, tickCmd)
+	}
+	assertNoPermissionReply(t, ops)
+}
+
+func TestPermissionModalExplicitAllowCancelsCountdown(t *testing.T) {
+	m, ops := newTestPermissionModal("auto-y")
+	_ = m.armAutoApprove(10)
+	gen := m.autoGen
+
+	next, cmd := m.update(permissionKey("y"))
+	if next != nil {
+		t.Fatal("y did not close modal")
+	}
+	reply := receiveSinglePermissionReply(t, ops, cmd)
+	assertPermissionReply(t, reply, "auto-y", protocol.DecisionOnce, "")
+
+	if _, tickCmd := m.onCountdown(permissionCountdownMsg{requestID: "auto-y", gen: gen}); tickCmd != nil {
+		runPermissionCmd(t, tickCmd)
+	}
+	assertNoPermissionReply(t, ops)
+}
+
+func TestPermissionModalRejectPathCancelsCountdown(t *testing.T) {
+	m, ops := newTestPermissionModal("auto-n")
+	_ = m.armAutoApprove(8)
+	genBefore := m.autoGen
+
+	next, cmd := m.update(permissionKey("n"))
+	if next == nil {
+		t.Fatal("n closed modal instead of feedback")
+	}
+	runPermissionCmd(t, cmd)
+	if m.remaining != 0 {
+		t.Fatalf("remaining = %d after reject path, want 0", m.remaining)
+	}
+	if m.autoGen == genBefore {
+		t.Fatal("reject path did not bump autoGen")
+	}
+	assertNoPermissionReply(t, ops)
+
+	if _, tickCmd := m.onCountdown(permissionCountdownMsg{requestID: "auto-n", gen: genBefore}); tickCmd != nil {
+		runPermissionCmd(t, tickCmd)
+	}
+	assertNoPermissionReply(t, ops)
+}
+
+func TestPermissionModalStaleCountdownIgnored(t *testing.T) {
+	m, ops := newTestPermissionModal("stale")
+	_ = m.armAutoApprove(2)
+	gen := m.autoGen
+
+	next, cmd := m.onCountdown(permissionCountdownMsg{requestID: "other", gen: gen})
+	if next == nil {
+		t.Fatal("wrong requestID closed modal")
+	}
+	runPermissionCmd(t, cmd)
+	if m.remaining != 2 {
+		t.Fatalf("remaining = %d after wrong id, want 2", m.remaining)
+	}
+
+	next, cmd = m.onCountdown(permissionCountdownMsg{requestID: "stale", gen: gen + 1})
+	if next == nil {
+		t.Fatal("wrong gen closed modal")
+	}
+	runPermissionCmd(t, cmd)
+	if m.remaining != 2 {
+		t.Fatalf("remaining = %d after wrong gen, want 2", m.remaining)
+	}
+	assertNoPermissionReply(t, ops)
+}
+
+func TestPermissionModalArmZeroIsNoop(t *testing.T) {
+	m, _ := newTestPermissionModal("noop")
+	if cmd := m.armAutoApprove(0); cmd != nil {
+		t.Fatal("armAutoApprove(0) returned cmd")
+	}
+	if m.remaining != 0 {
+		t.Fatalf("remaining = %d", m.remaining)
+	}
+}
+
+func TestPermissionAutoApproveDisabledByDefault(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	cmd := m.applyEvent(protocol.PermissionAsked{RequestID: "d", Permission: "edit", Patterns: []string{"a.go"}})
+	runPermissionCmd(t, cmd)
+	pm, ok := m.modal.(*permissionModal)
+	if !ok {
+		t.Fatalf("modal = %T", m.modal)
+	}
+	if pm.remaining != 0 {
+		t.Fatalf("remaining = %d, want 0 (disabled)", pm.remaining)
+	}
+}
+
+func TestPermissionAutoApproveArmsFromOptions(t *testing.T) {
+	m, ops := newAppTestModelWithOptions(Options{
+		PermissionAutoApproveSeconds: 4,
+		PermissionAutoApproveExclude: []string{"bash"},
+	})
+	header := ansi.Strip(m.headerView(120))
+	if !strings.Contains(header, "auto-allow") || !strings.Contains(header, "4s") {
+		t.Fatalf("header missing armed badge:\n%s", header)
+	}
+
+	// Excluded permission: no countdown.
+	_ = m.applyEvent(protocol.PermissionAsked{RequestID: "ex", Permission: "bash", Patterns: []string{"rm"}})
+	pm, ok := m.modal.(*permissionModal)
+	if !ok {
+		t.Fatalf("modal = %T", m.modal)
+	}
+	if pm.remaining != 0 {
+		t.Fatalf("excluded bash remaining = %d, want 0", pm.remaining)
+	}
+	m.modal = nil
+
+	// Non-excluded: armed. Do not run the returned tick cmd (tea.Tick blocks 1s).
+	_ = m.applyEvent(protocol.PermissionAsked{RequestID: "ok", Permission: "edit", Patterns: []string{"a.go"}})
+	pm, ok = m.modal.(*permissionModal)
+	if !ok {
+		t.Fatalf("modal = %T", m.modal)
+	}
+	if pm.remaining != 4 {
+		t.Fatalf("remaining = %d, want 4", pm.remaining)
+	}
+
+	// Drive countdown to fire via Update path (inject ticks; ignore next Tick cmds).
+	for range 3 {
+		gen := pm.autoGen
+		updated, _ := m.Update(permissionCountdownMsg{requestID: "ok", gen: gen})
+		m = updated.(Model)
+		pm, ok = m.modal.(*permissionModal)
+		if !ok {
+			t.Fatal("modal closed early")
+		}
+	}
+	gen := pm.autoGen
+	updated, cmd := m.Update(permissionCountdownMsg{requestID: "ok", gen: gen})
+	m = updated.(Model)
+	if m.modal != nil {
+		t.Fatalf("modal still open after fire: %T", m.modal)
+	}
+	reply := receiveSinglePermissionReply(t, ops, cmd)
+	assertPermissionReply(t, reply, "ok", protocol.DecisionOnce, "")
+}
+
 func newTestPermissionModal(requestID string) (*permissionModal, chan protocol.Op) {
 	req := protocol.PermissionAsked{
 		RequestID:  requestID,

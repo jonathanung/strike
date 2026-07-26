@@ -32,8 +32,15 @@ type Config struct {
 	// VimMode is how /vim presents the editor: "pane" (default, embedded
 	// right-pane PTY), "overlay" (embedded modal), or "takeover" (full-screen
 	// tea.ExecProcess handoff). Unknown values are ignored at load time.
-	VimMode     string             `json:"vimMode,omitempty"`
-	Permissions permission.Ruleset `json:"permissions,omitempty"`
+	VimMode string `json:"vimMode,omitempty"`
+	// PermissionAutoApproveSeconds enables permission-modal auto-allow once
+	// after N seconds (yolo-lite). Zero disables (default). Clamped to 1–60
+	// when positive.
+	PermissionAutoApproveSeconds int `json:"permissionAutoApproveSeconds,omitempty"`
+	// PermissionAutoApproveExclude lists permission names (e.g. "bash") that
+	// never auto-approve even when seconds > 0. Compared case-insensitively.
+	PermissionAutoApproveExclude []string           `json:"permissionAutoApproveExclude,omitempty"`
+	Permissions                  permission.Ruleset `json:"permissions,omitempty"`
 	// Hooks mixes declarative rules (action) and shell commands (command).
 	// Global then project layers concatenate. Invalid entries are dropped.
 	Hooks []Hook `json:"hooks,omitempty"`
@@ -229,9 +236,59 @@ func read(path string) (Config, error) {
 		}
 		c.Hooks = valid
 	}
+	c.PermissionAutoApproveSeconds = ClampPermissionAutoApproveSeconds(c.PermissionAutoApproveSeconds)
+	c.PermissionAutoApproveExclude = normalizePermissionAutoApproveExclude(c.PermissionAutoApproveExclude)
 	c.CompactionStrategy = NormalizeCompactionStrategy(c.CompactionStrategy)
 	c.CompactionModel = strings.TrimSpace(c.CompactionModel)
 	return c, nil
+}
+
+// ClampPermissionAutoApproveSeconds maps config values: ≤0 → 0 (off), >60 → 60.
+func ClampPermissionAutoApproveSeconds(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	if n > 60 {
+		return 60
+	}
+	return n
+}
+
+func normalizePermissionAutoApproveExclude(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	seen := make(map[string]struct{}, len(in))
+	for _, raw := range in {
+		name := strings.ToLower(strings.TrimSpace(raw))
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// PermissionAutoApproveExcluded reports whether permission is on the exclude list.
+func PermissionAutoApproveExcluded(permission string, exclude []string) bool {
+	if len(exclude) == 0 {
+		return false
+	}
+	want := strings.ToLower(strings.TrimSpace(permission))
+	for _, name := range exclude {
+		if name == want {
+			return true
+		}
+	}
+	return false
 }
 
 // NormalizeCompactionStrategy maps config aliases to trim|summarize.
@@ -268,6 +325,12 @@ func merge(base, layer Config) Config {
 	}
 	if layer.VimMode != "" {
 		base.VimMode = layer.VimMode
+	}
+	if layer.PermissionAutoApproveSeconds != 0 {
+		base.PermissionAutoApproveSeconds = layer.PermissionAutoApproveSeconds
+	}
+	if layer.PermissionAutoApproveExclude != nil {
+		base.PermissionAutoApproveExclude = layer.PermissionAutoApproveExclude
 	}
 	if layer.CompactionStrategy != "" {
 		base.CompactionStrategy = layer.CompactionStrategy
