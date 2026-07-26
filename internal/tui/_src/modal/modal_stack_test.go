@@ -135,7 +135,7 @@ func TestResolvedWhileQueuedNeverAppears(t *testing.T) {
 
 func TestDedupeQueuedPermissionByRequestID(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
-	m.modal = newKeysModal(m.keyMap)
+	m.modal = m.newKeysModal()
 	_ = m.applyEvent(protocol.PermissionAsked{RequestID: "dup", Permission: "bash", Patterns: []string{"old"}})
 	_ = m.applyEvent(protocol.PermissionAsked{RequestID: "dup", Permission: "bash", Patterns: []string{"new"}})
 

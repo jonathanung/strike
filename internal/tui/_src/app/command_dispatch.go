@@ -170,7 +170,7 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		}
 		m.resetComposer()
 		m.clearNotice()
-		m.modal = newKeysModal(m.keyMap)
+		m.modal = m.newKeysModal()
 		m.reflow()
 		return m, nil
 	case "/memory":

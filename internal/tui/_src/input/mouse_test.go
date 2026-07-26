@@ -269,7 +269,7 @@ func TestMouseClickIgnoresModal(t *testing.T) {
 	}
 	m.applyEvent(protocol.ToolCallBegin{CallID: "c1", Name: "bash"})
 	m.applyEvent(protocol.ToolCallEnd{CallID: "c1", Title: "run", Output: b.String()})
-	m.modal = newKeysModal(m.keyMap)
+	m.modal = m.newKeysModal()
 	m.refreshViewport()
 	ox, oy, ok := m.transcriptContentOrigin()
 	if !ok {

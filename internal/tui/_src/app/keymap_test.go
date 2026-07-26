@@ -159,7 +159,7 @@ func TestKeybindCatalogCoversAppBindingsAndIsSearchable(t *testing.T) {
 	if keys.Leader.Help().Desc != "subagent leader" {
 		t.Errorf("Leader help desc = %q, want subagent leader", keys.Leader.Help().Desc)
 	}
-	m := newKeysModal(keys)
+	m := newKeysModal(keys, keysModalContext{})
 	m.filter = "ctrl+h"
 	got := m.filtered()
 	if len(got) == 0 || got[0].ID != "nav.focus-left" {
@@ -169,6 +169,223 @@ func TestKeybindCatalogCoversAppBindingsAndIsSearchable(t *testing.T) {
 	if len(m.filtered()) < 2 {
 		t.Errorf("filter window matched %d rows, want at least next/prev", len(m.filtered()))
 	}
+}
+
+func TestKeysModalContextForFocus(t *testing.T) {
+	tests := []struct {
+		name     string
+		focus    paneFocus
+		windowID string
+		label    string
+		wantCat  string
+		wantPref string
+	}{
+		{"composer", focusLeft, "", "composer", "Composer", "nav.tool-"},
+		{"agents", focusRight, agentsWindowID, "agents", "Agents", ""},
+		{"editor", focusRight, terminalWindowID, "editor", "Editor", ""},
+		{"files", focusRight, filesWindowID, "files", "Lists", ""},
+		{"activity", focusRight, "activity", "activity", "Navigation", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := keysModalContextFor(tt.focus, tt.windowID)
+			if ctx.Label != tt.label {
+				t.Errorf("label = %q, want %q", ctx.Label, tt.label)
+			}
+			if tt.wantCat != "" {
+				found := false
+				for _, c := range ctx.Categories {
+					if c == tt.wantCat {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("categories = %#v, want %q", ctx.Categories, tt.wantCat)
+				}
+			}
+			if tt.wantPref != "" {
+				found := false
+				for _, p := range ctx.IDPrefixes {
+					if p == tt.wantPref {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("prefixes = %#v, want %q", ctx.IDPrefixes, tt.wantPref)
+				}
+			}
+		})
+	}
+}
+
+func TestOrderKeybindEntriesPromotesFocusContext(t *testing.T) {
+	keys := defaultKeyMap()
+	catalog := keybindCatalog(keys)
+	if len(catalog) < 10 {
+		t.Fatalf("catalog too small: %d", len(catalog))
+	}
+
+	agents := orderKeybindEntries(catalog, keysModalContextFor(focusRight, agentsWindowID))
+	if len(agents) != len(catalog) {
+		t.Fatalf("agents order length = %d, want %d (must not drop binds)", len(agents), len(catalog))
+	}
+	agentIDs := []string{"agents.move", "agents.open", "agents.spawn", "agents.interrupt", "agents.filter"}
+	for i, id := range agentIDs {
+		if agents[i].ID != id {
+			t.Fatalf("agents[%d] = %q, want %q", i, agents[i].ID, id)
+		}
+		if !agents[i].Context {
+			t.Errorf("%s Context = false, want true", id)
+		}
+	}
+	for i := len(agentIDs); i < len(agents); i++ {
+		if agents[i].Context {
+			t.Errorf("non-focus row %q unexpectedly Context", agents[i].ID)
+		}
+		if strings.HasPrefix(agents[i].ID, "agents.") {
+			t.Errorf("agent bind %q after focus section", agents[i].ID)
+		}
+	}
+
+	composer := orderKeybindEntries(catalog, keysModalContextFor(focusLeft, ""))
+	if len(composer) != len(catalog) {
+		t.Fatalf("composer order length = %d, want %d", len(composer), len(catalog))
+	}
+	if !composer[0].Context || composer[0].Category != "Composer" {
+		t.Fatalf("composer[0] = %#v, want first Composer context row", composer[0])
+	}
+	if composer[0].ID != "composer.send" {
+		t.Fatalf("composer[0].ID = %q, want composer.send", composer[0].ID)
+	}
+	sawComposer := false
+	sawPref := false
+	sawNonContext := false
+	for _, e := range composer {
+		if e.Context {
+			if sawNonContext {
+				t.Fatalf("context row %q after non-context section", e.ID)
+			}
+			switch {
+			case e.Category == "Composer":
+				if sawPref {
+					t.Errorf("Composer row %q after prefix rows", e.ID)
+				}
+				sawComposer = true
+			case strings.HasPrefix(e.ID, "nav.scroll-"),
+				strings.HasPrefix(e.ID, "nav.jump-"),
+				strings.HasPrefix(e.ID, "nav.tool-"):
+				sawPref = true
+			default:
+				t.Errorf("unexpected context row %q cat=%q", e.ID, e.Category)
+			}
+		} else {
+			sawNonContext = true
+			if e.Category == "Composer" {
+				t.Errorf("composer bind %q not promoted", e.ID)
+			}
+		}
+	}
+	if !sawComposer {
+		t.Fatal("no Composer category rows in focus section")
+	}
+	if !sawPref {
+		t.Fatal("no transcript scroll/tool prefix rows in focus section")
+	}
+
+	// Empty context is a no-op.
+	plain := orderKeybindEntries(catalog, keysModalContext{})
+	for i := range plain {
+		if plain[i].ID != catalog[i].ID || plain[i].Context {
+			t.Fatalf("empty context changed catalog at %d: got %#v want %#v", i, plain[i], catalog[i])
+		}
+	}
+}
+
+func TestKeysModalOpensWithFocusContext(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+
+	// Default left/composer focus → composer binds first.
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyF1})
+	modal, ok := m.modal.(*keysModal)
+	if !ok {
+		t.Fatalf("f1 modal = %T, want keysModal", m.modal)
+	}
+	if modal.contextLabel != "composer" {
+		t.Fatalf("contextLabel = %q, want composer", modal.contextLabel)
+	}
+	list := modal.filtered()
+	if len(list) == 0 || !list[0].Context || list[0].Category != "Composer" {
+		t.Fatalf("composer focus first row = %#v, want Composer context", firstEntry(list))
+	}
+	view := modal.view(60, m.th)
+	if !strings.Contains(view, "Current focus") {
+		t.Errorf("composer view missing Current focus section: %q", view)
+	}
+	if !strings.Contains(view, "composer") {
+		t.Errorf("composer view missing title context: %q", view)
+	}
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+
+	// Agents pane focused → agent root controls first.
+	reg, ok := m.windows.activate(agentsWindowID)
+	if !ok {
+		t.Fatal("activate agents")
+	}
+	m.windows = reg
+	m.focus = focusRight
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyF1})
+	modal, ok = m.modal.(*keysModal)
+	if !ok {
+		t.Fatalf("agents f1 modal = %T", m.modal)
+	}
+	if modal.contextLabel != "agents" {
+		t.Fatalf("contextLabel = %q, want agents", modal.contextLabel)
+	}
+	list = modal.filtered()
+	wantAgents := []string{"agents.move", "agents.open", "agents.spawn", "agents.interrupt", "agents.filter"}
+	for i, id := range wantAgents {
+		if i >= len(list) || list[i].ID != id || !list[i].Context {
+			t.Fatalf("agents focus list[%d] = %#v, want %s context", i, firstEntry(list[i:]), id)
+		}
+	}
+	view = modal.view(60, m.th)
+	if !strings.Contains(view, "Current focus") {
+		t.Errorf("agents view missing Current focus: %q", view)
+	}
+	// Agent actions appear in the leading section (spawn help text).
+	if !strings.Contains(view, "new root") {
+		t.Errorf("agents view missing spawn action: %q", view)
+	}
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+
+	// Switching focus and reopening updates the context section.
+	m.focus = focusLeft
+	_ = m.composer.Focus()
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyF1})
+	modal, ok = m.modal.(*keysModal)
+	if !ok {
+		t.Fatalf("reopen modal = %T", m.modal)
+	}
+	if modal.contextLabel != "composer" {
+		t.Fatalf("after switch contextLabel = %q, want composer", modal.contextLabel)
+	}
+	list = modal.filtered()
+	if len(list) == 0 || list[0].ID == "agents.move" {
+		t.Fatalf("after switch first row still agents: %#v", firstEntry(list))
+	}
+	if !list[0].Context || list[0].Category != "Composer" {
+		t.Fatalf("after switch first = %#v, want Composer context", firstEntry(list))
+	}
+}
+
+func firstEntry(list []keybindEntry) any {
+	if len(list) == 0 {
+		return nil
+	}
+	return list[0]
 }
 
 func TestVimPaneAndWindowKeys(t *testing.T) {
