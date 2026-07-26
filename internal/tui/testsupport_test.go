@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -683,6 +684,36 @@ func (f *fakeSessions) ReplayJSONL(id string) ([]byte, error) {
 		return nil, fmt.Errorf("session %q not found", id)
 	}
 	return data, nil
+}
+
+func (f *fakeSessions) Fork(id string) (host.Session, error) {
+	id = strings.TrimSpace(id)
+	src, ok := f.byID[id]
+	if !ok {
+		return host.Session{}, fmt.Errorf("session %q not found", id)
+	}
+	if src.ParentID != "" {
+		return host.Session{}, fmt.Errorf("session %q is a subagent transcript; fork a root session", id)
+	}
+	childID := id + "-fork"
+	if _, exists := f.byID[childID]; exists {
+		childID = fmt.Sprintf("%s-fork-%d", id, len(f.byID))
+	}
+	title := strings.TrimSpace(src.Title)
+	if title == "" {
+		title = id
+	}
+	if !strings.HasPrefix(strings.ToLower(title), "fork of ") {
+		title = "fork of " + title
+	}
+	child := host.Session{
+		ID:        childID,
+		Title:     title,
+		UpdatedAt: time.Now().UTC(),
+	}
+	f.byID[child.ID] = child
+	f.logs[child.ID] = append([]byte(nil), f.logs[id]...)
+	return child, nil
 }
 
 func (f *fakeSessions) RefreshPRStates(in []host.Session) []host.Session {

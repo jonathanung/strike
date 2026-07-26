@@ -82,6 +82,47 @@ func TestNewSessionsNil(t *testing.T) {
 	}
 }
 
+func TestSessionsAdapterFork(t *testing.T) {
+	dir := t.TempDir()
+	mgr := session.NewManager(dir)
+	root, err := mgr.Create(session.CreateOptions{ID: "root-f", Title: "work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.Append(root.ID, protocol.UserMessage{
+		Correlation: protocol.Correlation{SessionID: root.ID},
+		Text:        "hi",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewSessions(mgr)
+	child, err := svc.Fork(root.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.ID == root.ID || child.ParentID != "" {
+		t.Fatalf("child = %+v", child)
+	}
+	if child.Title != "fork of work" {
+		t.Fatalf("title = %q", child.Title)
+	}
+	data, err := svc.ReplayJSONL(child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "hi") {
+		t.Errorf("fork log missing prefix: %s", data)
+	}
+	// Both roots listed.
+	roots, err := svc.List(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(roots) != 2 {
+		t.Fatalf("roots = %+v", roots)
+	}
+}
+
 func TestSessionsAdapterExposesPRMetadata(t *testing.T) {
 	dir := t.TempDir()
 	mgr := session.NewManager(dir)

@@ -27,6 +27,8 @@ const (
 	commandLayout   commandID = "layout"
 	commandSplit    commandID = "split"
 	commandCompact  commandID = "compact"
+	commandFork     commandID = "fork"
+	commandUndo     commandID = "undo"
 	commandSession  commandID = "session"
 	commandMemory   commandID = "memory"
 	commandIssues   commandID = "issues"
@@ -62,6 +64,8 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandLayout, Name: "/layout", Description: "toggle horizontal/vertical pane split", Source: commandSourceBuiltin},
 	{ID: commandSplit, Name: "/split", Description: "toggle horizontal/vertical pane split", Source: commandSourceBuiltin},
 	{ID: commandCompact, Name: "/compact", Description: "compact model history (keep recent turns)", Source: commandSourceBuiltin},
+	{ID: commandFork, Name: "/fork", Description: "duplicate the conversation into a new id", Source: commandSourceBuiltin},
+	{ID: commandUndo, Name: "/undo", Description: "drop the last completed user/assistant turn", Source: commandSourceBuiltin},
 	{ID: commandSession, Name: "/session", Description: "browse and resume a past session", ArgsHint: "[id]", Source: commandSourceBuiltin},
 	{ID: commandHelp, Name: "/help", Description: "show available commands", Source: commandSourceBuiltin},
 	{ID: commandKeys, Name: "/keys", Description: "show keyboard shortcuts", Source: commandSourceBuiltin},
@@ -131,6 +135,9 @@ var reservedCommandNames = map[string]struct{}{
 	"layout":   {},
 	"split":    {},
 	"compact":  {},
+	"fork":     {},
+	"undo":     {},
+	"rewind":   {},
 	"session":  {},
 	"help":     {},
 	"keys":     {},

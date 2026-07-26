@@ -1393,6 +1393,17 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 			m.setNotice(msg, false)
 		}
 		cmd = m.broadcastContextState()
+	case protocol.SessionRewound:
+		m.cells, m.toolByID = dropLastUserTurnCells(m.cells, m.toolByID)
+		m.selectedCell = -1
+		m.selectedFileRef = -1
+		removed := ev.Removed
+		msg := "rewound last turn"
+		if removed > 0 {
+			msg = fmt.Sprintf("rewound last turn (%d messages)", removed)
+		}
+		m.setNotice(msg, false)
+		cmd = m.broadcastContextState()
 	case protocol.EngineError:
 		// Mid-turn failures belong in the transcript; idle-state errors
 		// (no model selected, bad /provider, …) show in the notice line.
@@ -1754,6 +1765,20 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 			ops <- protocol.Compact{}
 			return nil
 		}
+	case "/fork":
+		return m.handleForkCommand()
+	case "/undo", "/rewind":
+		m.resetComposer()
+		m.clearNotice()
+		if m.turnRunning {
+			m.setNotice("cannot rewind while a turn is running", true)
+			return m, nil
+		}
+		ops := m.ops
+		return m, func() tea.Msg {
+			ops <- protocol.Rewind{}
+			return nil
+		}
 	case "/session":
 		return m.handleSessionCommand(fields[1:])
 	case "/help":
@@ -1797,6 +1822,36 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 // resume. Empty when the user quit without switching.
 func (m Model) PendingResume() string {
 	return strings.TrimSpace(m.pendingResume)
+}
+
+func (m Model) handleForkCommand() (tea.Model, tea.Cmd) {
+	m.resetComposer()
+	m.clearNotice()
+	if m.turnRunning {
+		m.setNotice("wait for the current turn to finish before forking", true)
+		return m, nil
+	}
+	if m.sessionID == "" {
+		m.setNotice("no session to fork", true)
+		return m, nil
+	}
+	if m.services.Sessions == nil {
+		m.setNotice("session fork is unavailable", true)
+		return m, nil
+	}
+	child, err := m.services.Sessions.Fork(m.sessionID)
+	if err != nil {
+		m.setNotice("fork failed: "+err.Error(), true)
+		return m, nil
+	}
+	id := strings.TrimSpace(child.ID)
+	if id == "" || id == m.sessionID {
+		m.setNotice("fork failed: empty child session", true)
+		return m, nil
+	}
+	m.pendingResume = id
+	m.setNotice("forked → "+shortSessionID(id)+" (switching…)", false)
+	return m, tea.Quit
 }
 
 func (m Model) handleSessionCommand(args []string) (tea.Model, tea.Cmd) {

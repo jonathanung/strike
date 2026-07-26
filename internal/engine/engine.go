@@ -475,6 +475,8 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 		e.handleFilesChanged(op)
 	case protocol.Compact:
 		e.handleCompact()
+	case protocol.Rewind:
+		e.handleRewind()
 	}
 }
 
