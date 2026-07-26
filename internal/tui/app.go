@@ -3278,7 +3278,7 @@ func (m Model) View() string {
 		} else {
 			overlay = m.modal.view(max(8, ui.ModalWidth(m.width)), m.th)
 		}
-		content = ui.OverlayCenter(content, overlay, m.width, contentHeight)
+		content = ui.OverlayCenter(m.th, content, overlay, m.width, contentHeight)
 	}
 	parts := make([]string, 0, 1+len(footer))
 	if content != "" {
