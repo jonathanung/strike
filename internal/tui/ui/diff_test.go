@@ -353,6 +353,68 @@ func TestDiffPreview(t *testing.T) {
 		}
 	})
 
+	t.Run("MoreHint appears only when truncated", func(t *testing.T) {
+		var oldB, newB strings.Builder
+		for i := 0; i < 10; i++ {
+			fmt.Fprintf(&oldB, "old-%d\n", i)
+			fmt.Fprintf(&newB, "new-%d\n", i)
+		}
+		oldS := strings.TrimSuffix(oldB.String(), "\n")
+		newS := strings.TrimSuffix(newB.String(), "\n")
+		got := DiffPreview(th, DiffPreviewOpts{
+			Old: oldS, New: newS, MaxLines: 4, Width: 60, MoreHint: "enter to expand",
+		})
+		plain := ansi.Strip(got)
+		if !strings.Contains(plain, "more lines") || !strings.Contains(plain, "enter to expand") {
+			t.Errorf("truncated missing hint: %q", plain)
+		}
+		// Full body: no overflow → no hint.
+		full := DiffPreview(th, DiffPreviewOpts{
+			Old: oldS, New: newS, MaxLines: DiffBodyLen(oldS, newS), Width: 60, MoreHint: "enter to expand",
+		})
+		fullPlain := ansi.Strip(full)
+		if strings.Contains(fullPlain, "more lines") || strings.Contains(fullPlain, "enter to expand") {
+			t.Errorf("full body should not show hint: %q", fullPlain)
+		}
+		// Short replace with MaxLines room: no hint.
+		short := DiffPreview(th, DiffPreviewOpts{
+			Old: "a", New: "b", MaxLines: 8, Width: 40, MoreHint: "enter to expand",
+		})
+		if strings.Contains(ansi.Strip(short), "enter to expand") {
+			t.Errorf("short diff should not show hint: %q", short)
+		}
+	})
+
+	t.Run("DiffBodyLen and DiffExceeds", func(t *testing.T) {
+		if got := DiffBodyLen("a", "b"); got != 2 {
+			t.Errorf("single replace body len = %d, want 2", got)
+		}
+		if DiffExceeds("a", "b", 8) {
+			t.Error("short replace should not exceed 8")
+		}
+		var oldB, newB strings.Builder
+		for i := 0; i < 10; i++ {
+			fmt.Fprintf(&oldB, "o%d\n", i)
+			fmt.Fprintf(&newB, "n%d\n", i)
+		}
+		oldS := strings.TrimSuffix(oldB.String(), "\n")
+		newS := strings.TrimSuffix(newB.String(), "\n")
+		// 10 deletes + 10 inserts
+		if got := DiffBodyLen(oldS, newS); got != 20 {
+			t.Errorf("body len = %d, want 20", got)
+		}
+		if !DiffExceeds(oldS, newS, 8) {
+			t.Error("20-line body should exceed 8")
+		}
+		if DiffExceeds(oldS, newS, 20) {
+			t.Error("exact MaxLines should not exceed")
+		}
+		if !DiffExceeds(oldS, newS, 0) {
+			// default max is 12
+			t.Error("20-line body should exceed default max")
+		}
+	})
+
 	t.Run("multi-line replace with common prefix", func(t *testing.T) {
 		got := DiffPreview(th, DiffPreviewOpts{
 			Old:   "package main\n\nfunc a() {}\nfunc old() {}",

@@ -143,9 +143,8 @@ func (c *toolCell) collapsible() bool {
 		return false
 	}
 	if meta, ok := parseEditMetadata(c.metadata); ok {
-		// Diff body can always expand past the cell MaxLines window when large.
-		lines := strings.Count(meta.OldString, "\n") + strings.Count(meta.NewString, "\n") + 2
-		return lines > diffPreviewMaxLinesCell || c.expanded
+		// Expand when the unified hunk exceeds the collapsed MaxLines window.
+		return ui.DiffExceeds(meta.OldString, meta.NewString, diffPreviewMaxLinesCell) || c.expanded
 	}
 	if c.output == "" {
 		return false
@@ -243,8 +242,11 @@ func (c *toolCell) renderLinked(width int, th theme.Theme, linkBase string) stri
 		bodyWidth := max(1, width-lipgloss.Width(prefix))
 		if meta, ok := parseEditMetadata(c.metadata); ok {
 			maxLines := diffPreviewMaxLinesCell
+			moreHint := ""
 			if c.expanded {
 				maxLines = diffExpandedMaxLines(meta)
+			} else if ui.DiffExceeds(meta.OldString, meta.NewString, diffPreviewMaxLinesCell) {
+				moreHint = "enter to expand"
 			}
 			path := c.title
 			diff := ui.DiffPreview(th, ui.DiffPreviewOpts{
@@ -255,6 +257,7 @@ func (c *toolCell) renderLinked(width int, th theme.Theme, linkBase string) stri
 				Width:     bodyWidth,
 				ShowStats: true,
 				LinkBase:  linkBase,
+				MoreHint:  moreHint,
 			})
 			if diff != "" {
 				out += "\n" + indent(diff, prefix)
@@ -427,8 +430,8 @@ func (c *exploreCell) renderLinked(width int, th theme.Theme, linkBase string) s
 }
 
 func diffExpandedMaxLines(meta editDiffMeta) int {
-	// Enough for every old/new line as a change row, plus headroom.
-	n := strings.Count(meta.OldString, "\n") + strings.Count(meta.NewString, "\n") + 4
+	// Full unified body (equal + delete + insert), floored at the collapsed window.
+	n := ui.DiffBodyLen(meta.OldString, meta.NewString)
 	if n < diffPreviewMaxLinesCell {
 		return diffPreviewMaxLinesCell
 	}

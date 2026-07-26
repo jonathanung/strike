@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -331,6 +332,93 @@ func TestPermissionModalTallEditDiffKeepsExactWidth(t *testing.T) {
 		if got := lipgloss.Width(row); got != width {
 			t.Errorf("row %d width = %d, want %d: %q", i, got, width, ansi.Strip(row))
 		}
+	}
+}
+
+func TestPermissionModalLargeDiffExpandCollapse(t *testing.T) {
+	var oldB, newB strings.Builder
+	for i := 0; i < 12; i++ {
+		fmt.Fprintf(&oldB, "old-perm-%d\n", i)
+		fmt.Fprintf(&newB, "new-perm-%d\n", i)
+	}
+	meta, err := json.Marshal(map[string]any{
+		"oldString": strings.TrimSuffix(oldB.String(), "\n"),
+		"newString": strings.TrimSuffix(newB.String(), "\n"),
+		"count":     1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := protocol.PermissionAsked{
+		RequestID:  "expand-diff",
+		Permission: "edit",
+		Patterns:   []string{"big.go"},
+		Metadata:   meta,
+	}
+	m, _ := newTestPermissionModalFrom(req)
+	if !m.diffCollapsible() {
+		t.Fatal("large edit permission diff should be collapsible")
+	}
+	const width = 70
+	th := theme.Default()
+	plain := ansi.Strip(m.view(width, th))
+	if !strings.Contains(plain, "more lines") {
+		t.Errorf("collapsed missing truncation:\n%s", plain)
+	}
+	if !strings.Contains(plain, "d to expand") {
+		t.Errorf("collapsed missing expand hint:\n%s", plain)
+	}
+	if !strings.Contains(plain, "d expand diff") {
+		t.Errorf("choice hint missing expand affordance:\n%s", plain)
+	}
+	if strings.Contains(plain, "+new-perm-11") {
+		t.Errorf("collapsed should hide late insert:\n%s", plain)
+	}
+
+	// d expands
+	next, _ := m.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	pm, ok := next.(*permissionModal)
+	if !ok || pm == nil || !pm.diffExpanded {
+		t.Fatalf("d should expand diff: next=%T expanded=%v", next, pm != nil && pm.diffExpanded)
+	}
+	plain = ansi.Strip(pm.view(width, th))
+	if strings.Contains(plain, "more lines") {
+		t.Errorf("expanded still truncated:\n%s", plain)
+	}
+	if !strings.Contains(plain, "d collapse diff") {
+		t.Errorf("expanded missing collapse hint:\n%s", plain)
+	}
+	for _, want := range []string{"-old-perm-0", "-old-perm-11", "+new-perm-0", "+new-perm-11"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("expanded missing %q:\n%s", want, plain)
+		}
+	}
+
+	// d collapses again
+	next, _ = pm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	pm, ok = next.(*permissionModal)
+	if !ok || pm == nil || pm.diffExpanded {
+		t.Fatalf("d should collapse diff: expanded=%v", pm != nil && pm.diffExpanded)
+	}
+	plain = ansi.Strip(pm.view(width, th))
+	if !strings.Contains(plain, "more lines") || !strings.Contains(plain, "d to expand") {
+		t.Errorf("re-collapsed missing affordance:\n%s", plain)
+	}
+
+	// Short edit: d is a no-op
+	short, _ := newTestPermissionModalFrom(protocol.PermissionAsked{
+		RequestID:  "short-diff",
+		Permission: "edit",
+		Patterns:   []string{"s.go"},
+		Metadata:   json.RawMessage(`{"oldString":"a","newString":"b"}`),
+	})
+	if short.diffCollapsible() {
+		t.Fatal("short edit should not be collapsible")
+	}
+	next, _ = short.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	sm, ok := next.(*permissionModal)
+	if !ok || sm.diffExpanded {
+		t.Fatalf("d on short diff should not expand: expanded=%v", sm != nil && sm.diffExpanded)
 	}
 }
 
