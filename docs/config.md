@@ -11,6 +11,7 @@ JSON:
   "defaultAgent": "build",
   "theme": "strike",
   "vimMode": "pane",
+  "notify": "unfocused-only",
   "permissionAutoApproveSeconds": 10,
   "permissionAutoApproveExclude": ["bash"],
   "compactionStrategy": "trim",
@@ -34,6 +35,21 @@ is a positive integer (clamped to 1–60), the permission modal counts down and
 submits **allow once** at zero. Esc, reject, or any explicit choice cancels
 the timer. Disabled by default (`0` / omitted). Names in
 `permissionAutoApproveExclude` (case-insensitive) never auto-approve.
+
+## Desktop notifications (`notify`)
+
+When the terminal is unfocused, strike can ring the bell and emit OSC 9
+desktop notifications for **needs attention** (permission / question) and
+**long turn complete** (≥30s). Notification text is fixed labels only — never
+paths, prompts, or secrets.
+
+| Value | Behavior |
+|---|---|
+| `unfocused-only` (default) | notify when unfocused; if the terminal never reports focus, use the same path for attention + long turns |
+| `on` | always notify (attention + long turns), even when focused |
+| `off` | never notify |
+
+Unknown values are ignored at load time.
 
 ## Session worktrees
 
