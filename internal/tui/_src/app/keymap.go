@@ -265,6 +265,95 @@ type keybindEntry struct {
 	Category string
 	Keys     string
 	Action   string
+	// Context marks rows promoted into the "Current focus" section for the
+	// pane/window that was focused when the cheatsheet opened.
+	Context bool
+}
+
+// keysModalContext selects which catalog rows lead the /keys cheatsheet.
+// Zero value leaves catalog order unchanged (no Current focus section).
+type keysModalContext struct {
+	Label      string   // short title suffix: "composer", "agents", …
+	Categories []string // catalog Category values to promote
+	IDPrefixes []string // catalog ID prefixes to promote (e.g. "nav.tool-")
+}
+
+// keysModalContextFor maps pane focus + active right-pane window to cheatsheet
+// priority. Left focus → composer/transcript; right focus → that window's binds.
+func keysModalContextFor(focus paneFocus, windowID string) keysModalContext {
+	if focus == focusRight {
+		switch windowID {
+		case agentsWindowID:
+			return keysModalContext{Label: "agents", Categories: []string{"Agents"}}
+		case terminalWindowID:
+			return keysModalContext{Label: "editor", Categories: []string{"Editor"}}
+		case filesWindowID:
+			return keysModalContext{Label: "files", Categories: []string{"Lists"}}
+		case memoryWindowID:
+			return keysModalContext{Label: "memory", Categories: []string{"Lists"}}
+		case issuesWindowID:
+			return keysModalContext{Label: "issues", Categories: []string{"Lists"}}
+		case "":
+			return keysModalContext{Label: "right pane", Categories: []string{"Navigation"}}
+		default:
+			return keysModalContext{Label: windowID, Categories: []string{"Navigation"}}
+		}
+	}
+	// Left pane: composer editing plus transcript scroll/tool-cell chords.
+	return keysModalContext{
+		Label:      "composer",
+		Categories: []string{"Composer"},
+		IDPrefixes: []string{"nav.scroll-", "nav.jump-", "nav.tool-"},
+	}
+}
+
+// orderKeybindEntries puts current-focus rows first (catalog-relative order
+// preserved within each group). Category matches lead, then ID-prefix matches,
+// then the remaining catalog. Does not drop any binds.
+func orderKeybindEntries(entries []keybindEntry, ctx keysModalContext) []keybindEntry {
+	if len(entries) == 0 {
+		return entries
+	}
+	if ctx.Label == "" && len(ctx.Categories) == 0 && len(ctx.IDPrefixes) == 0 {
+		return entries
+	}
+	cats := make(map[string]struct{}, len(ctx.Categories))
+	for _, c := range ctx.Categories {
+		if c != "" {
+			cats[c] = struct{}{}
+		}
+	}
+	byCat := make([]keybindEntry, 0, len(entries))
+	byPref := make([]keybindEntry, 0, len(entries))
+	rest := make([]keybindEntry, 0, len(entries))
+	for _, e := range entries {
+		if _, ok := cats[e.Category]; ok {
+			e.Context = true
+			byCat = append(byCat, e)
+			continue
+		}
+		pref := false
+		for _, p := range ctx.IDPrefixes {
+			if p != "" && strings.HasPrefix(e.ID, p) {
+				pref = true
+				break
+			}
+		}
+		if pref {
+			e.Context = true
+			byPref = append(byPref, e)
+			continue
+		}
+		rest = append(rest, e)
+	}
+	if len(byCat)+len(byPref) == 0 {
+		return entries
+	}
+	out := make([]keybindEntry, 0, len(entries))
+	out = append(out, byCat...)
+	out = append(out, byPref...)
+	out = append(out, rest...)
+	return out
 }
 
 // keybindCatalog is the single source of truth for cheatsheet rows. App-level

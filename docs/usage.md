@@ -201,8 +201,9 @@ singles. Compact or narrow terminals collapse each group to one pane.
 ### Concurrent root sessions
 
 Focus the `agents` pane to run several parent sessions side by side. The pane
-footer (and empty state) list the controls; `/keys` / `f1` includes the same
-rows under **Agents**:
+footer (and empty state) list the controls; `/keys` / `f1` with the agents
+pane focused leads with those rows under **Current focus**, then the full
+cheatsheet (including **Agents** when not focused):
 
 | Key | Action |
 |---|---|

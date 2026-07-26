@@ -115,7 +115,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if key.Matches(msg, m.keyMap.KeyHelp) {
 		m.completion = nil
-		m.modal = newKeysModal(m.keyMap)
+		m.modal = m.newKeysModal()
 		m.reflow()
 		return m, nil
 	}

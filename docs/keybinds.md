@@ -1,8 +1,10 @@
 # Keybinds
 
-In-app cheatsheet: `f1` or `/keys` (filterable). Remap chords in config
-(`keybinds` object) — see [config.md](config.md). `/keys reset` restores
-session defaults.
+In-app cheatsheet: `f1` or `/keys` (filterable). The list leads with a
+**Current focus** section for the focused pane (composer/transcript on the
+left; the active right-pane window such as `agents`, `files`, or `editor`),
+then the remaining binds. Remap chords in config (`keybinds` object) — see
+[config.md](config.md). `/keys reset` restores session defaults.
 
 ## Global
 
