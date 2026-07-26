@@ -338,6 +338,23 @@ type Roots interface {
 	WorkDir(id string) string
 }
 
+// MCPServerStatus is one configured external MCP server for /mcp.
+type MCPServerStatus struct {
+	Name      string
+	Command   string
+	State     string // "up", "down", "error"
+	ToolCount int
+	Error     string
+	Tools     []string
+}
+
+// MCP reports external Model Context Protocol server status. Nil means the
+// capability is absent; frontends must degrade gracefully.
+type MCP interface {
+	// Statuses returns configured servers in stable order.
+	Statuses() []MCPServerStatus
+}
+
 // Services bundles everything a frontend receives from its host. Any field
 // may be nil/empty when a capability is absent (tests, future frontends);
 // frontends must degrade gracefully.
@@ -353,6 +370,7 @@ type Services struct {
 	Roots     Roots     // concurrent parent sessions; nil when single-root only
 	Providers Providers // custom/self-hosted provider CRUD; nil when unsupported
 	Init      ProjectInit
+	MCP       MCP      // external MCP server status; nil when unsupported
 	Agents    []string // selectable agent names, default first
 	Skills    []Skill
 }

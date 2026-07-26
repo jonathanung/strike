@@ -19,6 +19,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/host/local"
 	"github.com/jonathanung/strike-cli/internal/issue"
+	"github.com/jonathanung/strike-cli/internal/mcp"
 	"github.com/jonathanung/strike-cli/internal/memory"
 	"github.com/jonathanung/strike-cli/internal/models"
 	"github.com/jonathanung/strike-cli/internal/permission"
@@ -140,6 +141,8 @@ type assembled struct {
 	issuesClose  func() error
 	// worktreeClose removes a strike-managed worktree when cleanup=delete.
 	worktreeClose func() error
+	// mcpClose stops stdio MCP server subprocesses (process-scoped).
+	mcpClose func() error
 	// spawnRoot creates additional concurrent root engines (interactive multi-root).
 	// resumeID empty = new session; non-empty opens that durable root.
 	spawnRoot rootSpawner
@@ -567,6 +570,20 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	}
 	workDir = first.workDir
 
+	// External MCP servers (stdio): process-scoped, shared by all root engines
+	// via the common registry. CWD is the launch tree (not a session worktree).
+	// Per-server failures are recorded on the manager and do not abort assemble.
+	mcpMgr := mcp.NewManager()
+	if len(cfg.MCP.Servers) > 0 {
+		fields := make(map[string]mcp.ServerConfigFields, len(cfg.MCP.Servers))
+		for name, s := range cfg.MCP.Servers {
+			fields[name] = mcp.ServerConfigFields{Command: s.Command, Args: s.Args, Env: s.Env}
+		}
+		mcpCtx, mcpCancel := context.WithTimeout(context.Background(), 45*time.Second)
+		mcpMgr.StartAll(mcpCtx, mcp.ConfigsFromMap(fields, launchDir), registry)
+		mcpCancel()
+	}
+
 	agentNames := make([]string, len(agents))
 	for i, a := range agents {
 		agentNames[i] = a.Name
@@ -577,6 +594,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	services.Files = local.NewFiles(workDir)
 	services.Sessions = local.NewSessions(sessions, projectIdentity.Key)
 	services.Init = local.NewProjectInit(workDir)
+	services.MCP = local.NewMCP(mcpMgr)
 
 	spawn := rootSpawner(func(id string) (*rootSlot, error) {
 		slot, _, err := openRoot(id, false)
@@ -603,8 +621,11 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			return issueStore.Close()
 		},
 		worktreeClose: first.wtClose,
-		spawnRoot:     spawn,
-		firstSlot:     first,
+		mcpClose: func() error {
+			return mcpMgr.Close()
+		},
+		spawnRoot: spawn,
+		firstSlot: first,
 	}, nil
 }
 
@@ -741,6 +762,11 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 			if a.sessions != nil {
 				_ = a.sessions.CloseAll()
 			}
+			if a.mcpClose != nil {
+				if err := a.mcpClose(); err != nil && runErr == nil {
+					runErr = fmt.Errorf("closing mcp servers: %w", err)
+				}
+			}
 			if err := a.issuesClose(); err != nil && runErr == nil {
 				runErr = fmt.Errorf("closing project issues: %w", err)
 			}
@@ -831,6 +857,11 @@ func runExec(opts cliOptions, prompt string, stdout, stderr io.Writer) (runErr e
 		return err
 	}
 	defer func() {
+		if a.mcpClose != nil {
+			if err := a.mcpClose(); err != nil && runErr == nil {
+				runErr = fmt.Errorf("closing mcp servers: %w", err)
+			}
+		}
 		if a.worktreeClose != nil {
 			if err := a.worktreeClose(); err != nil && runErr == nil {
 				runErr = fmt.Errorf("removing session worktree: %w", err)
