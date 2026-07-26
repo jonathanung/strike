@@ -69,7 +69,11 @@ func OverlayCenter(th theme.Theme, bg, fg string, width, height int) string {
 		right := ansi.TruncateLeft(line, x+fgWidth, "")
 		linePad := max(0, fgWidth-ansi.StringWidth(fgLine))
 		// Keep left/right scrim pads styled; plain spaces only fill the cut gap.
-		composited := left + strings.Repeat(" ", leftPad) + fgLine + strings.Repeat(" ", linePad) + right
+		// paintSurface leaves background SGR open so nested fills stay continuous
+		// inside a panel row — close it before the right scrim so the modal
+		// surface cannot bleed to the terminal edge (see #284).
+		composited := left + strings.Repeat(" ", leftPad) + fgLine +
+			strings.Repeat(" ", linePad) + "\x1b[0m" + right
 		bgLines[row] = fitScrimLine(composited, width, scrimPad)
 	}
 	return strings.Join(bgLines, "\n")

@@ -160,3 +160,78 @@ func TestOverlayCenterPadsScrimToFullWidth(t *testing.T) {
 		}
 	}
 }
+
+func TestOverlayCenterDoesNotBleedModalSurfaceRight(t *testing.T) {
+	// Solid Dialog rows end with an open surface background (paintSurface).
+	// The right scrim must not inherit that fill out to the terminal edge.
+	saved := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(saved) })
+
+	th := theme.Default().Resolve()
+	th.Surface = lipgloss.AdaptiveColor{Light: "#112233", Dark: "#112233"}
+	th.SurfaceFocus = lipgloss.AdaptiveColor{Light: "#445566", Dark: "#445566"}
+	th.OverlayScrim = lipgloss.AdaptiveColor{Light: "#99aabb", Dark: "#99aabb"}
+
+	const screenW, screenH = 40, 7
+	mw := ModalWidth(screenW)
+	fg := Dialog(th, DialogOpts{Title: "Select model", Hint: "esc", Width: mw}, "item")
+	bg := strings.Repeat(strings.Repeat(".", screenW)+"\n", screenH)
+	out := OverlayCenter(th, bg, fg, screenW, screenH)
+
+	surfaceBG := "48;2;17;34;51"
+	focusBG := "48;2;68;85;102"
+	fgW := lipgloss.Width(fg)
+	x := (screenW - fgW) / 2
+
+	for i, line := range strings.Split(out, "\n") {
+		// Surface fills belong only inside the centered dialog columns.
+		// paintSurface leaves bg SGR open; without a reset the right scrim
+		// inherits it all the way to the terminal edge (#284).
+		right := ansi.TruncateLeft(line, x+fgW, "")
+		if sgrMarkerPaintsGlyph(right, surfaceBG, focusBG) {
+			t.Errorf("row %d: modal surface bled past col %d:\nplain=%q\nraw=%q",
+				i, x+fgW, ansi.Strip(line), line)
+		}
+		// Left gutter must also stay free of modal surface wash.
+		left := ansi.Truncate(line, x, "")
+		if sgrMarkerPaintsGlyph(left, surfaceBG, focusBG) {
+			t.Errorf("row %d: modal surface bled into left gutter:\nplain=%q\nraw=%q",
+				i, ansi.Strip(line), line)
+		}
+	}
+}
+
+// sgrMarkerPaintsGlyph reports whether any marker SGR is open when a glyph is drawn.
+func sgrMarkerPaintsGlyph(s string, markers ...string) bool {
+	open := false
+	for i := 0; i < len(s); {
+		if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '[' {
+			j := i + 2
+			for j < len(s) && (s[j] < '@' || s[j] > '~') {
+				j++
+			}
+			if j < len(s) && s[j] == 'm' {
+				params := s[i+2 : j]
+				seq := s[i : j+1]
+				if params == "" || params == "0" {
+					open = false
+				} else {
+					for _, m := range markers {
+						if strings.Contains(seq, m) {
+							open = true
+							break
+						}
+					}
+				}
+				i = j + 1
+				continue
+			}
+		}
+		if open {
+			return true
+		}
+		i++
+	}
+	return false
+}
