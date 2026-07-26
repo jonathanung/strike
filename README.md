@@ -48,6 +48,26 @@ In the TUI: `/provider`, `/model`, `/auth`, `/theme`, `/session`, `/help`,
 to latest output; `ctrl+c` quits. `@path` attaches project files. See
 [docs/keybinds.md](docs/keybinds.md) and [docs/usage.md](docs/usage.md).
 
+## Experimental web attach (`strike serve`)
+
+Opt-in, **read-only** scaffold so a browser can tail a session JSONL log.
+The TUI remains primary; there is no composer or ops over HTTP yet.
+
+```sh
+make serve
+# or: ./strike serve --addr 127.0.0.1:8787 --token <secret>
+curl -s http://127.0.0.1:8787/health
+# open http://127.0.0.1:8787/attach?session=<id>&token=<secret>
+```
+
+- `GET /health` — JSON `{ok, version, commit}` (no auth)
+- `GET /attach` — minimal live transcript page
+- `GET /v1/sessions/{id}/events` — SSE of protocol envelopes (`Authorization: Bearer` or `?token=`)
+
+CORS allows localhost origins only. **Do not bind outside loopback** unless you
+accept that anyone with the token can read session transcripts (no TLS in this
+scaffold). Details: [docs/web.md](docs/web.md).
+
 ## Docs
 
 | Topic | |
@@ -58,6 +78,7 @@ to latest output; `ctrl+c` quits. `@path` attaches project files. See
 | [Auth & providers](docs/auth.md) | credentials, OAuth, billing routing |
 | [Config](docs/config.md) | JSON, permissions, custom providers, `vimMode` |
 | [Agents & skills](docs/agents-skills.md) | personas, skills, workflows / autonomy |
+| [Web attach](docs/web.md) | experimental `strike serve` (read-only) |
 | [Architecture](docs/ARCHITECTURE.md) | packages, seams, recipes |
 | [Contributing](docs/contributing.md) | layout, verification, doc check |
 
