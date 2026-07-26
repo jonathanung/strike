@@ -49,6 +49,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 /issues [list|add|get|close] … # project-scoped issue tracker
 /keys                          # filterable keybind cheatsheet (also f1)
 /help                          # list commands
+/upgrade                       # install latest GitHub Release and restart
 ```
 
 Built-in skills also appear as slash commands: `/commit`, `/push`, `/pr`,

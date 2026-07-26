@@ -33,6 +33,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/tool"
 	"github.com/jonathanung/strike-cli/internal/tui"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
+	"github.com/jonathanung/strike-cli/internal/update"
 )
 
 // sessionStore is the narrow persistence surface runSession needs from a
@@ -633,6 +634,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 		}
 
 		var pendingResume string
+		var pendingUpgrade bool
 		storeOwned = true
 		sessionPath := a.store.Path()
 		err = runSession(context.Background(), a.eng.Run, a.eng.Events(), a.store, func(live <-chan protocol.Event) error {
@@ -672,6 +674,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 			final, runProgErr := program.Run()
 			if m, ok := final.(tui.Model); ok {
 				pendingResume = m.PendingResume()
+				pendingUpgrade = m.PendingUpgrade()
 			}
 			return runProgErr
 		})
@@ -681,6 +684,12 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 		}
 		if runErr != nil {
 			return runErr
+		}
+		if pendingUpgrade {
+			// Alt screen is gone; run self-update and re-exec. Session JSONL under
+			// ~/.strike is never touched.
+			_, uerr := update.Upgrade(context.Background(), update.Options{Stdout: stdout})
+			return uerr
 		}
 		if pendingResume == "" {
 			fmt.Fprintln(stdout, "session log:", sessionPath)
