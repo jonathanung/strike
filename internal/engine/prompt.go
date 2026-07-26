@@ -11,8 +11,15 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/jonathanung/strike-cli/internal/memory"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
+
+// MemorySource is the engine-facing surface for auto-loading tagged project
+// memory into the system prompt. *memory.Store satisfies this via List.
+type MemorySource interface {
+	List(tag string) ([]memory.Entry, error)
+}
 
 //go:embed prompt/shared.txt
 var sharedPrompt string
@@ -58,10 +65,13 @@ var PlanSystemPrompt = normPrompt(planPrompt)
 //                                is plan; neither when inactive
 //  4. environment       append   cwd / model / date
 //  5. instructions      append   each AGENTS.md/CLAUDE.md block
+//  6. project memory    append   tagged entries (instruction|preference|
+//                                project-convention), capped; untrusted
 //
 // Skills are user-turn content (slash render → UserInput), not system layers.
-// Memory and @file attachments are tool/turn-local, not auto-stacked here.
-// Tool results live in provider message history.
+// Untagged memory, other tags, and issues stay tool/turn-local (memory_read /
+// issue_read). @file attachments remain turn-local. Tool results live in
+// provider message history.
 
 // ProviderSystemPrompt returns the provider-specific overlay for a strike
 // provider name and/or model id (opencode-style selection).
@@ -219,7 +229,32 @@ func (e *Engine) systemLayers() []promptLayer {
 			Text:   inst,
 		})
 	}
+	if text, source := e.projectMemoryLayer(); text != "" {
+		layers = append(layers, promptLayer{
+			Kind:   protocol.PromptLayerMemory,
+			Source: source,
+			Mode:   protocol.PromptLayerAppend,
+			Text:   text,
+		})
+	}
 	return layers
+}
+
+// projectMemoryLayer builds the auto-loaded tagged memory segment. Empty when
+// Memory is nil, list fails, or no eligible entries fit the cap.
+func (e *Engine) projectMemoryLayer() (text, source string) {
+	if e.opts.Memory == nil {
+		return "", ""
+	}
+	text, omitted, err := memory.AutoLoadLayer(e.opts.Memory)
+	if err != nil || strings.TrimSpace(text) == "" {
+		return "", ""
+	}
+	source = "memory:autoload"
+	if omitted > 0 {
+		source = fmt.Sprintf("memory:autoload+omitted:%d", omitted)
+	}
+	return text, source
 }
 
 // system returns the composed system prompt for the next provider request.
