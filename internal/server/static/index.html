@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>strike attach (experimental)</title>
+  <style>
+    :root {
+      color-scheme: dark light;
+      --bg: #0f1115;
+      --fg: #e8eaed;
+      --muted: #9aa0a6;
+      --line: #2a2f3a;
+      --accent: #7cb7ff;
+      --danger: #f28b82;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #fafafa;
+        --fg: #202124;
+        --muted: #5f6368;
+        --line: #dadce0;
+        --accent: #1a73e8;
+        --danger: #d93025;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0 auto;
+      max-width: 56rem;
+      padding: 1.25rem;
+      background: var(--bg);
+      color: var(--fg);
+    }
+    header h1 { margin: 0 0 0.25rem; font-size: 1.25rem; font-weight: 600; }
+    .muted { color: var(--muted); font-weight: 400; }
+    .banner {
+      margin: 0 0 1rem;
+      padding: 0.5rem 0.75rem;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--muted);
+      font-size: 0.875rem;
+    }
+    form {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: end;
+      margin-bottom: 1rem;
+    }
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      font-size: 0.75rem;
+      color: var(--muted);
+      flex: 1 1 12rem;
+    }
+    input {
+      font: inherit;
+      color: var(--fg);
+      background: transparent;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 0.45rem 0.6rem;
+    }
+    button {
+      font: inherit;
+      cursor: pointer;
+      border: 1px solid var(--accent);
+      background: transparent;
+      color: var(--accent);
+      border-radius: 6px;
+      padding: 0.45rem 0.9rem;
+    }
+    #status.error { color: var(--danger); }
+    #log {
+      margin: 0;
+      padding: 0.75rem;
+      min-height: 20rem;
+      max-height: 70vh;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.8rem;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .ev-type { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>strike <span class="muted">attach</span></h1>
+    <p class="banner">Experimental read-only web scaffold. TUI remains primary. No composer.</p>
+  </header>
+  <form id="connect" autocomplete="off">
+    <label>session id <input id="session" name="session" required spellcheck="false" /></label>
+    <label>token <input id="token" name="token" type="password" required spellcheck="false" /></label>
+    <button type="submit">attach</button>
+    <span id="status" class="muted">idle</span>
+  </form>
+  <pre id="log" aria-live="polite"></pre>
+  <script>
+(function () {
+  const params = new URLSearchParams(location.search);
+  const sessionInput = document.getElementById("session");
+  const tokenInput = document.getElementById("token");
+  const statusEl = document.getElementById("status");
+  const logEl = document.getElementById("log");
+  const form = document.getElementById("connect");
+  let es = null;
+
+  if (params.get("session")) sessionInput.value = params.get("session");
+  if (params.get("token")) tokenInput.value = params.get("token");
+
+  function setStatus(text, isError) {
+    statusEl.textContent = text;
+    statusEl.classList.toggle("error", !!isError);
+  }
+
+  function appendLine(html) {
+    const div = document.createElement("div");
+    div.innerHTML = html;
+    logEl.appendChild(div);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function formatEvent(env) {
+    const t = env && env.type ? env.type : "unknown";
+    let body = "";
+    const d = env && env.data ? env.data : {};
+    if (t === "user.message" && d.text != null) body = d.text;
+    else if (t === "text.delta" && d.text != null) body = d.text;
+    else if (t === "reasoning.delta" && d.text != null) body = d.text;
+    else if (t === "tool.begin") body = (d.name || "tool") + " " + (d.args || "");
+    else if (t === "tool.end") body = (d.name || "tool") + (d.is_error ? " error" : " ok");
+    else if (t === "tool.output" && d.output != null) body = d.output;
+    else if (t === "engine.error" && d.message != null) body = d.message;
+    else if (t === "turn.started") body = "turn started";
+    else if (t === "turn.completed") body = "turn completed";
+    else body = JSON.stringify(d);
+    return (
+      '<span class="ev-type">' +
+      escapeHtml(t) +
+      "</span> " +
+      '<span class="ev-text">' +
+      escapeHtml(body) +
+      "</span>"
+    );
+  }
+
+  function connect(session, token) {
+    if (es) {
+      es.close();
+      es = null;
+    }
+    logEl.textContent = "";
+    const url =
+      "/v1/sessions/" +
+      encodeURIComponent(session) +
+      "/events?token=" +
+      encodeURIComponent(token);
+    setStatus("connecting…");
+    es = new EventSource(url);
+    es.onopen = function () {
+      setStatus("live");
+    };
+    es.onerror = function () {
+      setStatus("disconnected", true);
+    };
+    es.onmessage = function (ev) {
+      try {
+        const env = JSON.parse(ev.data);
+        appendLine(formatEvent(env));
+      } catch (e) {
+        appendLine(escapeHtml(ev.data));
+      }
+    };
+    const next = new URL(location.href);
+    next.searchParams.set("session", session);
+    if (params.get("token")) next.searchParams.set("token", token);
+    history.replaceState(null, "", next.pathname + next.search);
+  }
+
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    connect(sessionInput.value.trim(), tokenInput.value.trim());
+  });
+
+  if (sessionInput.value && tokenInput.value) {
+    connect(sessionInput.value.trim(), tokenInput.value.trim());
+  }
+})();
+  </script>
+</body>
+</html>

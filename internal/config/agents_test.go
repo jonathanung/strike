@@ -11,17 +11,20 @@ import (
 )
 
 func TestParseFrontmatter(t *testing.T) {
-	meta, body := parseFrontmatter("---\ndescription: reviews code\nmodel: gpt-5.5\n---\nYou are a reviewer.")
+	meta, body, nested := parseFrontmatter("---\ndescription: reviews code\nmodel: gpt-5.5\n---\nYou are a reviewer.")
 	if meta["description"] != "reviews code" || meta["model"] != "gpt-5.5" {
 		t.Errorf("meta = %v", meta)
 	}
 	if body != "You are a reviewer." {
 		t.Errorf("body = %q", body)
 	}
+	if nested != nil {
+		t.Errorf("nested = %v, want nil", nested)
+	}
 
-	meta, body = parseFrontmatter("no frontmatter here")
-	if meta != nil || body != "no frontmatter here" {
-		t.Errorf("plain doc: meta=%v body=%q", meta, body)
+	meta, body, nested = parseFrontmatter("no frontmatter here")
+	if meta != nil || body != "no frontmatter here" || nested != nil {
+		t.Errorf("plain doc: meta=%v body=%q nested=%v", meta, body, nested)
 	}
 }
 

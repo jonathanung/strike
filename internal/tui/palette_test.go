@@ -52,6 +52,7 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		{ID: "command:effective-prompt", Label: "/effective-prompt", Description: "context doctor: system-prompt layer breakdown", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/effective-prompt"}},
 		{ID: "command:cost", Label: "/cost", Description: "session token and cost totals", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/cost"}},
 		{ID: "command:upgrade", Label: "/upgrade", Description: "install the latest release and restart", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/upgrade"}},
+		{ID: "command:init", Label: "/init", Description: "create or update project AGENTS.md", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/init"}},
 		{ID: "skill:review", Label: "/review", Description: "review a change", Action: paletteAction{Kind: paletteActionSkill, Value: "review"}},
 	}
 	if !reflect.DeepEqual(got, want) {

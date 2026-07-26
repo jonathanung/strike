@@ -181,4 +181,5 @@ floors at `minimal` on the OpenAI family (which has no zero setting), and
 | `xhigh` | deeper reasoning, best for coding and agentic work |
 | `max` | maximum reasoning when correctness beats cost |
 
-Agents, skills, and workflows: [agents-skills.md](agents-skills.md).
+Agents, skills, and workflows (including `.claude` / `.opencode` discovery
+roots and merge order): [agents-skills.md](agents-skills.md).

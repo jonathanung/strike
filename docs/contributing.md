@@ -3,7 +3,7 @@
 ## Package layout
 
 ```
-cmd/strike/            main.go: flags/usage/auth subcommand;
+cmd/strike/            main.go: flags/usage/auth/exec/serve subcommands;
                        wire.go: composition root (engine + host + tui wiring)
 internal/protocol/     Op/Event types — the seam between engine and frontends
 internal/engine/       turn loop & tool dispatch
@@ -18,6 +18,7 @@ internal/tool/         tool contract + registry (read/glob/grep/edit/write/
                        toolsearch — full list: ARCHITECTURE.md)
 internal/permission/   rulesets + suspend/resume ask service
 internal/session/      JSONL event-log persistence
+internal/server/       experimental read-only HTTP attach (strike serve)
 internal/config/       layered config + agents/skills/workflows
 internal/host/         frontend-facing host-service contract (stdlib-only);
                        local/ wraps auth/config/models/history/memory/issue/files

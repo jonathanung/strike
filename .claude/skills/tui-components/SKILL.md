@@ -45,7 +45,7 @@ selection, and layout). Keep this catalog synchronized with `internal/tui/ui`.
 | Tree | `Tree(th theme.Theme, opts TreeOpts) string` | Unframed expand/collapse tree body. `TreeOpts`: `Nodes []TreeNode`, `Cursor`, `Width`, `Visible`, `Empty`; `TreeNode`: `ID`, `Label`, `Detail`, `Children`, `Expanded`, `Lazy`, `Leaf`, `Disabled`, `Current`, `Tone`. Helpers: `FlattenTree`, `TreeNodeAt`, `TreeToggleExpanded`. Indent uses `Spacing.SM`; expand glyphs are `Icons.TreeExpanded` / `TreeCollapsed`. |
 | Notice | `Notice(th theme.Theme, level Level, text string, width int) string` | One-line, level-colored feedback. |
 | Bento | `Bento(th theme.Theme, width int, cards []Card) string` | Card packer. `Card` has `Title`, `Footer`, `Body`, `Width`, `Tone`; its body wraps to `PanelInnerWidth(th, Width)`. Bento derives its inter-card gap from resolved `th.Spacing.SM`. |
-| Overlay | `OverlayCenter(bg, fg string, width, height int) string`; `ModalWidth(screenWidth int) int` | ANSI-aware centered overlay and standard dialog width (`min(72, screenWidth-4)`). |
+| Overlay | `OverlayCenter(th theme.Theme, bg, fg string, width, height int) string`; `Scrim(th theme.Theme, s string) string`; `ModalWidth(screenWidth int) int` | ANSI-aware centered overlay (scrims bg via `OverlayScrim`), standalone scrim, and standard dialog width (`min(72, screenWidth-4)`). |
 | Canvas | `Canvas(th theme.Theme, width, height int, body string) string` | Final full-screen fit operation and owner of the application background. |
 | Logo | `Logo(th theme.Theme) string`; `LogoCompact(th theme.Theme) string` | Full and compact Strike wordmarks. |
 | DiffPreview | `DiffPreview(th theme.Theme, opts DiffPreviewOpts) string` | Unified +/-/context diff block. `DiffPreviewOpts`: `Path`, `Old`, `New`, `MaxLines` (hunk body; ≤0 → 12), mandatory `Width` (≤0 → ""), `ShowStats`. Header (path and/or +N/−M) does not consume `MaxLines`; overflow ends with a muted ellipsis more-lines row. |
@@ -65,6 +65,7 @@ otherwise `Background` resolves to a solid `lipgloss.TerminalColor`.
 | Token | Role |
 |---|---|
 | `Text`, `TextMuted` | primary and secondary foreground |
+| `OverlayScrim` | de-emphasized modal background (scrim) fill |
 | `Accent`, `AccentAlt`, `Highlight` | primary, secondary, and selected emphasis |
 | `Success`, `Warning`, `Error`, `Danger` | semantic state colors |
 | `Background` | application background (`lipgloss.TerminalColor`) |
