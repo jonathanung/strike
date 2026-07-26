@@ -209,7 +209,8 @@ type Model struct {
 	height         int
 	ready          bool
 
-	// sessionID and workDir are display-only identity for the context pane.
+	// sessionID and workDir are display identity for the header cwd label and
+	// the context pane. workDir also resolves relative paths for /vim.
 	sessionID string
 	workDir   string
 	// pendingResume is set when /session picks another root session; the
@@ -260,12 +261,14 @@ type Model struct {
 	killBuf string
 }
 
-// childActivity is one foreground subagent row in the activity pane.
+// childActivity is one foreground subagent row in the activity/agents panes.
 type childActivity struct {
 	sessionID string
 	agent     string
 	prompt    string
 	status    string // running | completed | failed | canceled
+	startedAt time.Time
+	endedAt   time.Time
 }
 
 // New builds the frontend model. services supplies every host capability; any
@@ -411,7 +414,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 		var cmd tea.Cmd
 		if firstReady {
-			cmd = m.broadcastContextState()
+			cmd = tea.Batch(m.broadcastContextState(), m.broadcastAgentsState())
 		}
 		return m, cmd
 
@@ -894,6 +897,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case filesOpenMsg:
 		return m.openFilesExplorerPath(msg.path)
+
+	case agentsOpenMsg:
+		cmd := m.openSessionView(msg.sessionID)
+		m.reflow()
+		m.refreshViewport()
+		return m, tea.Batch(cmd, m.broadcastAgentsState())
 	}
 
 	var cmd tea.Cmd
@@ -1465,8 +1474,10 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		cmd = m.broadcastContextState()
 	case protocol.ChildStarted:
 		m.onChildStarted(ev)
+		cmd = m.broadcastAgentsState()
 	case protocol.ChildCompleted:
 		m.onChildCompleted(ev)
+		cmd = m.broadcastAgentsState()
 		if m.viewingChild() && (ev.SessionID == m.viewingID || ev.SessionID == "") {
 			if refresh := m.refreshViewingTranscript(); refresh != nil {
 				cmd = tea.Batch(cmd, refresh)
@@ -1483,11 +1494,16 @@ func (m *Model) onChildStarted(ev protocol.ChildStarted) {
 	if id == "" {
 		id = "child"
 	}
+	now := time.Now()
 	for i := range m.children {
 		if m.children[i].sessionID == id {
 			m.children[i].agent = ev.Agent
 			m.children[i].prompt = ev.Prompt
 			m.children[i].status = "running"
+			if m.children[i].startedAt.IsZero() {
+				m.children[i].startedAt = now
+			}
+			m.children[i].endedAt = time.Time{}
 			return
 		}
 	}
@@ -1496,6 +1512,7 @@ func (m *Model) onChildStarted(ev protocol.ChildStarted) {
 		agent:     ev.Agent,
 		prompt:    ev.Prompt,
 		status:    "running",
+		startedAt: now,
 	})
 	m.trimChildren()
 }
@@ -1506,10 +1523,12 @@ func (m *Model) onChildCompleted(ev protocol.ChildCompleted) {
 	if status == "" {
 		status = string(protocol.ChildStatusCompleted)
 	}
+	now := time.Now()
 	applyChildCompletedToTaskCells(m.toolByID, ev)
 	for i := range m.children {
 		if m.children[i].sessionID == id || (id == "" && i == len(m.children)-1) {
 			m.children[i].status = status
+			m.children[i].endedAt = now
 			return
 		}
 	}
@@ -1520,6 +1539,8 @@ func (m *Model) onChildCompleted(ev protocol.ChildCompleted) {
 	m.children = append(m.children, childActivity{
 		sessionID: id,
 		status:    status,
+		startedAt: now,
+		endedAt:   now,
 	})
 	m.trimChildren()
 }
@@ -1692,6 +1713,24 @@ func (m Model) contextStateSnapshot() contextStateMsg {
 func (m *Model) broadcastContextState() tea.Cmd {
 	var cmd tea.Cmd
 	m.windows, cmd = m.windows.broadcast(m.contextStateSnapshot())
+	return cmd
+}
+
+// agentsStateSnapshot copies live-parent subagent rows for the agents window.
+func (m Model) agentsStateSnapshot() agentsStateMsg {
+	children := make([]childActivity, len(m.children))
+	copy(children, m.children)
+	return agentsStateMsg{
+		parentID:  m.sessionID,
+		viewingID: m.viewingID,
+		children:  children,
+	}
+}
+
+// broadcastAgentsState pushes current subagent rows to every right-pane window.
+func (m *Model) broadcastAgentsState() tea.Cmd {
+	var cmd tea.Cmd
+	m.windows, cmd = m.windows.broadcast(m.agentsStateSnapshot())
 	return cmd
 }
 
