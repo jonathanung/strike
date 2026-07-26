@@ -700,6 +700,121 @@ func TestYWithComposerTextInsertsY(t *testing.T) {
 	}
 }
 
+func TestYCopiesAssistantChatTextViaOSC52(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	const reply = "copy-me assistant reply\nline two\n"
+	m.applyEvent(protocol.UserMessage{Text: "prompt"})
+	m.applyEvent(protocol.TextDelta{Text: reply})
+	m.applyEvent(protocol.TurnCompleted{})
+	m.composer.SetValue("")
+	m.selectedCell = -1
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = updated.(Model)
+	if m.composer.Value() != "" {
+		t.Fatalf("y with chat text mutated composer: %q", m.composer.Value())
+	}
+	var asst *assistantCell
+	for _, c := range m.cells {
+		if a, ok := c.(*assistantCell); ok {
+			asst = a
+		}
+	}
+	if asst == nil || !asst.copiedFlash {
+		t.Fatal("y did not flash assistant cell")
+	}
+	if m.cellClip == nil || m.cellClip.osc == "" {
+		t.Fatal("y did not stage OSC52 for assistant text")
+	}
+	frame := m.View()
+	reqs := osc52Payloads(frame)
+	if len(reqs) != 1 {
+		t.Fatalf("View OSC52 count = %d, want 1", len(reqs))
+	}
+	payload, err := decodeOSC52Payload(reqs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.TrimRight(reply, "\n")
+	if payload != want {
+		t.Errorf("OSC52 payload = %q, want %q", payload, want)
+	}
+	if cmd == nil {
+		t.Fatal("y returned nil cmd, want flash clear tick")
+	}
+	// Prefer latest tool over assistant when both exist.
+	m.applyEvent(protocol.ToolCallBegin{CallID: "t1", Name: "bash"})
+	m.applyEvent(protocol.ToolCallEnd{CallID: "t1", Title: "run", Output: "tool-out\n"})
+	m.composer.SetValue("")
+	m.selectedCell = -1
+	m.cellClip = &cellClipboard{}
+	asst.copiedFlash = false
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = updated.(Model)
+	tc := m.toolByID["t1"]
+	if tc == nil || !tc.copiedFlash {
+		t.Fatal("y should prefer latest tool cell over assistant")
+	}
+	if asst.copiedFlash {
+		t.Error("assistant flash should clear when copying tool")
+	}
+	frame = m.View()
+	reqs = osc52Payloads(frame)
+	if len(reqs) != 1 {
+		t.Fatalf("tool OSC52 count = %d, want 1", len(reqs))
+	}
+	payload, err = decodeOSC52Payload(reqs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if payload != "tool-out" {
+		t.Errorf("tool payload = %q, want tool-out", payload)
+	}
+}
+
+func TestYCopiesUserMessageWhenNoAssistantOrTool(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.applyEvent(protocol.UserMessage{Text: "solo user prompt\n"})
+	m.composer.SetValue("")
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = updated.(Model)
+	var uc *userCell
+	for _, c := range m.cells {
+		if u, ok := c.(*userCell); ok {
+			uc = u
+		}
+	}
+	if uc == nil || !uc.copiedFlash {
+		t.Fatal("y should copy user cell when it is the only copyable content")
+	}
+	frame := m.View()
+	reqs := osc52Payloads(frame)
+	if len(reqs) != 1 {
+		t.Fatalf("OSC52 count = %d, want 1", len(reqs))
+	}
+	payload, err := decodeOSC52Payload(reqs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if payload != "solo user prompt" {
+		t.Errorf("payload = %q, want solo user prompt", payload)
+	}
+}
+
+func TestChatCellCopyText(t *testing.T) {
+	if got := (&assistantCell{text: "hi\n"}).copyText(); got != "hi" {
+		t.Errorf("assistant copyText = %q", got)
+	}
+	if got := (&userCell{text: "yo\n"}).copyText(); got != "yo" {
+		t.Errorf("user copyText = %q", got)
+	}
+	if got := (&assistantCell{}).copyText(); got != "" {
+		t.Errorf("empty assistant copyText = %q", got)
+	}
+}
+
 func TestToolCallOutputAppendsUntilEnd(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m.applyEvent(protocol.ToolCallBegin{CallID: "c1", Name: "bash", Args: json.RawMessage(`{"command":"echo"}`)})

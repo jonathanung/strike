@@ -51,7 +51,7 @@ Right-pane windows (cycle with the chords above): `context`, `activity`,
 |---|---|
 | `alt+[` / `alt+]` | previous / next tool cell |
 | `enter` | expand tool / open `file:line` |
-| `y` | copy tool cell |
+| `y` | copy cell (tool/explore, else latest assistant/user) |
 | `v` | review edit in editor |
 
 ## Composer editing
