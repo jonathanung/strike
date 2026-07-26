@@ -48,8 +48,9 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		{ID: "command:keys", Label: "/keys", Description: "show keyboard shortcuts", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/keys"}},
 		{ID: "command:memory", Label: "/memory", Description: "list, get, set, delete, export, or import project memory", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/memory"}},
 		{ID: "command:issues", Label: "/issues", Description: "list, add, get, close, export, or import project issues", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/issues"}},
-		{ID: "command:context", Label: "/context", Description: "inspect effective system-prompt layers", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/context"}},
-		{ID: "command:effective-prompt", Label: "/effective-prompt", Description: "inspect effective system-prompt layers", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/effective-prompt"}},
+		{ID: "command:context", Label: "/context", Description: "context doctor: system-prompt layer breakdown", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/context"}},
+		{ID: "command:effective-prompt", Label: "/effective-prompt", Description: "context doctor: system-prompt layer breakdown", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/effective-prompt"}},
+		{ID: "command:cost", Label: "/cost", Description: "session token and cost totals", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/cost"}},
 		{ID: "command:upgrade", Label: "/upgrade", Description: "install the latest release and restart", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/upgrade"}},
 		{ID: "command:init", Label: "/init", Description: "create or update project AGENTS.md", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/init"}},
 		{ID: "skill:review", Label: "/review", Description: "review a change", Action: paletteAction{Kind: paletteActionSkill, Value: "review"}},
@@ -83,7 +84,7 @@ func TestPaletteAvailabilityAndDisabledSelection(t *testing.T) {
 		assertPaletteInvoke(t, m, "/help", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/help"}})
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
 		assertPaletteInvoke(t, m, "/keys", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/keys"}})
-		// /vim, /md-read, /think, and prompt inspect stay available mid-turn.
+		// /vim, /md-read, /think, /cost, and prompt inspect stay available mid-turn.
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
 		assertPaletteInvoke(t, m, "/think", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/think"}})
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
@@ -94,6 +95,8 @@ func TestPaletteAvailabilityAndDisabledSelection(t *testing.T) {
 		assertPaletteInvoke(t, m, "/context", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/context"}})
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
 		assertPaletteInvoke(t, m, "/effective-prompt", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/effective-prompt"}})
+		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
+		assertPaletteInvoke(t, m, "/cost", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/cost"}})
 	})
 }
 

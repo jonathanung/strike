@@ -316,10 +316,12 @@ func TestTokenCountKnownVsUnknown(t *testing.T) {
 
 	// JSON: known zero keeps "known":true; unknown omits n and known is false.
 	b, err := json.Marshal(UsageReported{
-		Input:  KnownTokens(0),
-		Output: UnknownTokens(),
-		Used:   KnownTokens(10),
-		Source: UsageSourceEstimated,
+		Input:         KnownTokens(0),
+		Output:        UnknownTokens(),
+		CacheRead:     KnownTokens(3),
+		CacheCreation: UnknownTokens(),
+		Used:          KnownTokens(10),
+		Source:        UsageSourceEstimated,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -333,6 +335,12 @@ func TestTokenCountKnownVsUnknown(t *testing.T) {
 	}
 	if got.Output.Known {
 		t.Errorf("output after round-trip = %+v, want unknown", got.Output)
+	}
+	if !got.CacheRead.Known || got.CacheRead.N != 3 {
+		t.Errorf("cacheRead after round-trip = %+v, want known 3", got.CacheRead)
+	}
+	if got.CacheCreation.Known {
+		t.Errorf("cacheCreation after round-trip = %+v, want unknown", got.CacheCreation)
 	}
 	if !got.Used.Known || got.Used.N != 10 {
 		t.Errorf("used after round-trip = %+v, want known 10", got.Used)

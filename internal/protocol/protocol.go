@@ -530,10 +530,16 @@ func UnknownTokens() TokenCount { return TokenCount{} }
 // UsageReported carries token accounting for one completed provider stream.
 // Emitted on every EventDone that has usage (including tool-loop intermediate
 // streams), correlated to the provider request.
+//
+// CacheRead/CacheCreation are Known only when the vendor broke out those
+// parts (including zero). When only a total is available, Input/Output/cache
+// stay unknown and Used carries the total — never fabricate measured zeros.
 type UsageReported struct {
 	Correlation
-	Input  TokenCount `json:"input"`
-	Output TokenCount `json:"output"`
+	Input         TokenCount `json:"input"`
+	Output        TokenCount `json:"output"`
+	CacheRead     TokenCount `json:"cacheRead"`
+	CacheCreation TokenCount `json:"cacheCreation"`
 	// Used is context-window numerator (last request occupancy).
 	Used   TokenCount `json:"used"`
 	Source string     `json:"source,omitempty"` // actual | estimated

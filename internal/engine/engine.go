@@ -1842,8 +1842,8 @@ func (e *Engine) fireHookRules(corr protocol.Correlation, event, subject, callID
 // A nil usage means the vendor did not report counts — emit nothing (unknown).
 //
 // used = InputTokens + CacheReadTokens + CacheCreationTokens + OutputTokens;
-// if all those are 0 but TotalTokens > 0, used = TotalTokens and input/output
-// stay unknown (a total alone is not a measured zero on the parts).
+// if all those are 0 but TotalTokens > 0, used = TotalTokens and input/output/
+// cache stay unknown (a total alone is not a measured zero on the parts).
 func (e *Engine) emitUsage(corr protocol.Correlation, u *provider.Usage) {
 	if u == nil {
 		return
@@ -1851,10 +1851,14 @@ func (e *Engine) emitUsage(corr protocol.Correlation, u *provider.Usage) {
 	used := u.InputTokens + u.CacheReadTokens + u.CacheCreationTokens + u.OutputTokens
 	input := protocol.KnownTokens(u.InputTokens)
 	output := protocol.KnownTokens(u.OutputTokens)
+	cacheRead := protocol.KnownTokens(u.CacheReadTokens)
+	cacheCreation := protocol.KnownTokens(u.CacheCreationTokens)
 	if used == 0 && u.TotalTokens > 0 {
 		used = u.TotalTokens
 		input = protocol.UnknownTokens()
 		output = protocol.UnknownTokens()
+		cacheRead = protocol.UnknownTokens()
+		cacheCreation = protocol.UnknownTokens()
 	}
 	source := protocol.UsageSourceActual
 	if u.Estimated {
@@ -1863,11 +1867,13 @@ func (e *Engine) emitUsage(corr protocol.Correlation, u *provider.Usage) {
 	e.lastUsed = used
 	e.lastUsedKnown = true
 	e.emit(protocol.UsageReported{
-		Correlation: corr,
-		Input:       input,
-		Output:      output,
-		Used:        protocol.KnownTokens(used),
-		Source:      source,
+		Correlation:   corr,
+		Input:         input,
+		Output:        output,
+		CacheRead:     cacheRead,
+		CacheCreation: cacheCreation,
+		Used:          protocol.KnownTokens(used),
+		Source:        source,
 	})
 }
 
