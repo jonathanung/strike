@@ -161,10 +161,10 @@ func TestCompactRightPaneIsBorderlessAndUsesFullBodyDimensionsAtThresholds(t *te
 
 func TestDefaultWindowRegistryHasUniqueWidthSafeWindows(t *testing.T) {
 	r := newWindowRegistry()
-	if len(r.windows) != 5 {
-		t.Fatalf("window count = %d, want 5", len(r.windows))
+	if len(r.windows) != 7 {
+		t.Fatalf("window count = %d, want 7", len(r.windows))
 	}
-	wantIDs := []string{"context", "activity", "files", "markdown", "editor"}
+	wantIDs := []string{"context", "activity", "files", "memory", "issues", "markdown", "editor"}
 	seenIDs, seenTitles := map[string]bool{}, map[string]bool{}
 	for i, w := range r.windows {
 		if w.id() != wantIDs[i] {
@@ -195,6 +195,32 @@ func TestDefaultWindowRegistryHasUniqueWidthSafeWindows(t *testing.T) {
 			for _, line := range strings.Split(view, "\n") {
 				if got := lipgloss.Width(line); got > 8 {
 					t.Errorf("context line width = %d, want <= 8: %q", got, line)
+				}
+			}
+		case "memory":
+			if _, ok := w.(memoryWindow); !ok {
+				t.Errorf("window = %#v, want a memoryWindow", w)
+			}
+			view := w.resize(24, 6).view(theme.Default())
+			if !strings.Contains(ansi.Strip(view), "unavailable") {
+				t.Errorf("unbound memory window = %q", view)
+			}
+			for _, line := range strings.Split(view, "\n") {
+				if got := lipgloss.Width(line); got > 24 {
+					t.Errorf("memory line width = %d, want <= 24: %q", got, line)
+				}
+			}
+		case "issues":
+			if _, ok := w.(issuesWindow); !ok {
+				t.Errorf("window = %#v, want an issuesWindow", w)
+			}
+			view := w.resize(24, 6).view(theme.Default())
+			if !strings.Contains(ansi.Strip(view), "unavailable") {
+				t.Errorf("unbound issues window = %q", view)
+			}
+			for _, line := range strings.Split(view, "\n") {
+				if got := lipgloss.Width(line); got > 24 {
+					t.Errorf("issues line width = %d, want <= 24: %q", got, line)
 				}
 			}
 		case "activity":
@@ -256,8 +282,8 @@ func TestDefaultWindowRegistryHasUniqueWidthSafeWindows(t *testing.T) {
 			t.Errorf("unexpected window id %q", w.id())
 		}
 	}
-	if !seenIDs["context"] || !seenIDs["activity"] || !seenIDs["files"] || !seenIDs["markdown"] || !seenIDs["editor"] {
-		t.Errorf("default registry ids = %v, want context, activity, files, markdown, and editor", seenIDs)
+	if !seenIDs["context"] || !seenIDs["activity"] || !seenIDs["files"] || !seenIDs["memory"] || !seenIDs["issues"] || !seenIDs["markdown"] || !seenIDs["editor"] {
+		t.Errorf("default registry ids = %v, want context, activity, files, memory, issues, markdown, and editor", seenIDs)
 	}
 
 	// Full Model.View at split size shows real context content, not a placeholder.
@@ -334,11 +360,11 @@ func TestWindowRegistryReplaceByID(t *testing.T) {
 func TestWindowRegistryCycleIncludesFilesAndMarkdown(t *testing.T) {
 	r := newWindowRegistry()
 	var order []string
-	for range 6 {
+	for range 8 {
 		order = append(order, r.active().id())
 		r = r.cycle()
 	}
-	want := []string{"context", "activity", "files", "markdown", "editor", "context"}
+	want := []string{"context", "activity", "files", "memory", "issues", "markdown", "editor", "context"}
 	if !stringsEqual(order, want) {
 		t.Errorf("cycle order = %q, want %q", order, want)
 	}
@@ -368,11 +394,13 @@ func TestWindowRegistryPreservesMarkdownScrollAcrossCycle(t *testing.T) {
 		t.Fatal("setup did not scroll markdown content")
 	}
 
-	// Cycle through editor and back around to markdown.
+	// Cycle through remaining windows and back around to markdown.
 	r = r.cycle() // editor
 	r = r.cycle() // context
 	r = r.cycle() // activity
 	r = r.cycle() // files
+	r = r.cycle() // memory
+	r = r.cycle() // issues
 	r = r.cycle() // markdown again
 	got := r.active().(markdownWindow)
 	if got.vp.YOffset != wantOffset {
