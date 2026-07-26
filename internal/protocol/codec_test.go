@@ -57,7 +57,7 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 		CompactionStarted{Correlation: corr, Reason: CompactionReasonManual, Strategy: CompactionStrategySummarize},
 		CompactionCompleted{Correlation: corr, Reason: CompactionReasonThreshold, Strategy: CompactionStrategyTrim, Removed: 4, Kept: 3, Summary: "prior work on foo"},
 		SessionMeta{Correlation: corr, PRURL: "https://github.com/acme/repo/pull/7", PRNumber: 7, PRState: "open"},
-		SessionRewound{Correlation: corr, Removed: 2},
+		SessionRewound{Correlation: corr, Removed: 2, TurnID: "turn-9", RestoreFiles: true, FilesRestored: 3, FilesSkipped: 1},
 		EffectivePrompt{
 			Correlation: corr,
 			Layers: []PromptLayerInfo{

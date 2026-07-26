@@ -166,6 +166,7 @@ func (notebookEditTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 		return Result{}, err
 	}
 	out = append(out, '\n')
+	tc.SnapshotPath(path)
 	if err := os.WriteFile(path, out, 0o644); err != nil {
 		return Result{}, err
 	}
