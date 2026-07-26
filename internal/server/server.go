@@ -1,6 +1,5 @@
-// Package server is the experimental read-only HTTP attach surface for strike
-// sessions. Phase A: health/version, SSE event stream from a session JSONL
-// log, and a minimal browser attach page. No composer or ops yet.
+// Package server is the experimental HTTP/WebSocket attach surface for strike
+// sessions: health/version, SSE JSONL tails, live ops bridge, and cockpit page.
 package server
 
 import (
@@ -26,7 +25,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/version"
 )
 
-// Options configures the read-only attach server.
+// Options configures the attach server.
 type Options struct {
 	// Addr is the bind address (host:port). Default "127.0.0.1:8787".
 	Addr string
@@ -39,9 +38,12 @@ type Options struct {
 	// PollInterval is how often the SSE tail checks for new JSONL bytes.
 	// Default 200ms. Tests may lower it.
 	PollInterval time.Duration
+	// Live is an optional engine bridge for composer/ops/status. Nil keeps
+	// read-only attach (JSONL SSE only).
+	Live *Live
 }
 
-// Server is a read-only HTTP server for session attach.
+// Server is an HTTP server for session attach and optional live cockpit.
 type Server struct {
 	opts   Options
 	mux    *http.ServeMux
@@ -133,6 +135,12 @@ func IsLocalhostBind(addr string) bool {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /health", s.handleHealth)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/events", s.handleSessionEvents)
+	s.mux.HandleFunc("GET /v1/sessions", s.handleSessions)
+	s.mux.HandleFunc("GET /v1/status", s.handleStatus)
+	s.mux.HandleFunc("GET /v1/agents", s.handleAgents)
+	s.mux.HandleFunc("POST /v1/ops", s.handleOps)
+	s.mux.HandleFunc("GET /v1/live/events", s.handleLiveEvents)
+	s.mux.HandleFunc("GET /v1/ws", s.handleWS)
 	s.mux.HandleFunc("GET /{$}", s.handleAttach)
 	s.mux.HandleFunc("GET /attach", s.handleAttach)
 }
@@ -174,7 +182,7 @@ func (s *Server) applyCORS(w http.ResponseWriter, r *http.Request) {
 	if originAllowed(origin) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Vary", "Origin")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 	}
 }
