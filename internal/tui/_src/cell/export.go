@@ -268,6 +268,8 @@ func cellMarkdown(c cell) string {
 		return toolCellMarkdown(cell)
 	case *exploreCell:
 		return exploreCellMarkdown(cell)
+	case *subagentResultCell:
+		return subagentResultCellMarkdown(cell)
 	case *infoCell:
 		body := strings.TrimSpace(redactSecrets(cell.text))
 		if body == "" {
@@ -312,6 +314,34 @@ func toolCellMarkdown(c *toolCell) string {
 		b.WriteByte('\n')
 	} else if b.Len() > 0 && !strings.HasSuffix(b.String(), "\n\n") {
 		// ensure trailing newline after bullet-only tools
+	}
+	return b.String()
+}
+
+func subagentResultCellMarkdown(c *subagentResultCell) string {
+	if c == nil {
+		return ""
+	}
+	agent := strings.TrimSpace(c.agent)
+	if agent == "" {
+		agent = "subagent"
+	}
+	status := strings.TrimSpace(c.status)
+	if status == "" {
+		status = "completed"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "### Subagent: `%s` (%s)\n\n", sanitizeMDIdent(agent), status)
+	if short := shortSessionID(c.sessionID); short != "" {
+		fmt.Fprintf(&b, "- **Session:** `%s`\n", sanitizeMDIdent(short))
+	}
+	if c.elapsed > 0 {
+		fmt.Fprintf(&b, "- **Elapsed:** %s\n", formatCompactDuration(c.elapsed))
+	}
+	if out := summarizeToolOutput(c.summary); out != "" {
+		b.WriteString("\n")
+		b.WriteString(fencedBlock(out))
+		b.WriteByte('\n')
 	}
 	return b.String()
 }
