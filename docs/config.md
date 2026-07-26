@@ -219,9 +219,49 @@ project's `.strike/config`.
 ## Custom providers
 
 Add OpenAI-compatible (chat completions) or Anthropic-compatible (messages)
-endpoints via the `providers` array (global and project layers merge; same
-`name` in project replaces global). Credentials never live here — use
-`apiKeyEnv` and/or `/auth` / the auth store.
+endpoints via **`providers.jsonc`** (preferred) or the `providers` array in
+config. Layers merge last-wins by name:
+
+`defaults → ~/.strike/config → ~/.strike/providers.jsonc → ./.strike/config → ./.strike/providers.jsonc`
+
+(`.json` is accepted as well as `.jsonc`.) Credentials never live in these
+files — use env refs and/or `/auth` / the auth store.
+
+### `providers.jsonc` (OpenCode-style)
+
+```jsonc
+// ~/.strike/providers.jsonc or ./.strike/providers.jsonc
+{
+  "kimi": {
+    "npm": "@ai-sdk/openai-compatible", // optional; hints wire dialect only (not loaded)
+    "name": "Kimi",
+    "options": {
+      "baseURL": "https://api.example.com/v1",
+      "apiKey": "{env:KIMI_API_KEY}"
+    },
+    "models": ["kimi-latest"]
+  },
+  "claude-proxy": {
+    "npm": "@ai-sdk/anthropic",
+    "options": {
+      "baseURL": "$ANTHROPIC_BASE_URL",
+      "apiKey": "${ANTHROPIC_AUTH_TOKEN}"
+    }
+  }
+}
+```
+
+| Field | Required | Notes |
+|---|---|---|
+| map key | yes | provider id (lowercased slug); not `anthropic`/`openai`/`xai`/`echo` |
+| `options.baseURL` | yes | absolute `http`/`https` URL, or `{env:VAR}` / `$VAR` / `${VAR}` |
+| `options.apiKey` | no | env ref only (`{env:NAME}`, `$NAME`, `${NAME}`) → checked before auth store |
+| `npm` | no | ignored at runtime; `anthropic` in the name → anthropic wire, else openai |
+| `api` | no | strike override: `openai` or `anthropic` (wins over npm hint) |
+| `models` | no | listed in `/model`; first is the default when unset |
+| `options.headers` | no | extra HTTP headers (values may use env refs) |
+
+### Config `providers` array (legacy)
 
 ```json
 {
@@ -240,15 +280,21 @@ endpoints via the `providers` array (global and project layers merge; same
 
 | Field | Required | Notes |
 |---|---|---|
-| `name` | yes | lowercase slug (`[a-z][a-z0-9_-]{0,63}`); not `anthropic`/`openai`/`xai`/`echo` |
-| `baseURL` | yes | absolute `http`/`https` URL |
+| `name` | yes | lowercase slug (`[a-z][a-z0-9_-]{0,63}`); not builtins |
+| `baseURL` | yes | absolute URL or env ref template |
 | `api` | yes | wire dialect: `openai` or `anthropic` |
-| `apiKeyEnv` | no | env var name checked before the auth store |
+| `apiKeyEnv` | no | env var name (or `{env:NAME}` / `$NAME`) checked before the auth store |
 | `models` | no | listed in `/model`; first is the default when unset |
-| `headers` | no | extra HTTP headers on every request |
+| `headers` | no | extra HTTP headers on every request (values may use env refs) |
 
-In the TUI, `/settings` manages the same list (CRUD persists to
-`~/.strike/config`). Custom names appear in `/provider` like built-ins.
+**Env interpolation:** `{env:NAME}`, `$NAME`, and `${NAME}` expand from the
+process environment (vars exported to the strike process, e.g. via bashrc).
+
+**TUI:** `/settings` CRUD and `/provider` → “Add custom provider…”. Custom
+names appear in `/provider` like built-ins. **Logout** (`ctrl+x` or
+`/auth logout <name>`) of a custom provider **deletes** its definition from
+config/providers.jsonc and clears credentials; `/settings` `d` does the same.
+Built-in logout only clears credentials.
 
 ## Embedded editor (`vimMode`)
 
