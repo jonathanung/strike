@@ -53,9 +53,11 @@ type Options struct {
 	Executable string
 	// Stdout receives progress lines (default io.Discard).
 	Stdout io.Writer
-	// NoExec skips syscall.Exec after a successful replace (tests).
+	// NoExec skips syscall.Exec after a successful replace.
+	// Used by CLI `strike upgrade` (return to shell) and by tests.
 	NoExec bool
 	// ReexecArgs are argv for re-exec after upgrade (default: bare binary name).
+	// Only used when NoExec is false (e.g. TUI /upgrade restart).
 	ReexecArgs []string
 }
 
