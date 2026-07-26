@@ -190,7 +190,7 @@ slot hosts one active window from the registry:
 | `memory` | project memory browser |
 | `issues` | project issue browser |
 | `markdown` | markdown reader (`/md-read <path>`) |
-| `editor` | embedded nvim/vim PTY for `/vim` |
+| `editor` | embedded nvim/vim/nano PTY for `/vim` |
 
 Related right-pane windows stack as **groups** when the pane is tall/wide
 enough: session (`context`+`activity`), agents (`agents`+`visualizer`), and

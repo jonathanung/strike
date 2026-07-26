@@ -267,10 +267,11 @@ Two different mechanisms, depending on whether it needs Go code:
    they ever reach the frontend. `/init` is a builtin that writes project
    `AGENTS.md` via `host.ProjectInit` (confirm before overwrite). PR URLs from successful `gh pr` bash
    output are stored via `protocol.SessionMeta` and `session` sidecar
-   metadata. `/vim` embeds nvim/vim in the right-pane `editor` window by
+   metadata. `/vim` embeds nvim/vim/nano in the right-pane `editor` window by
    default (PTY + vt10x via `internal/tui/term`). Config key `vimMode`
    selects `pane` (default), `overlay`, or `takeover` (full-screen
-   `tea.ExecProcess`). GUI `$EDITOR` values always take over.
+   `tea.ExecProcess`). Editor resolution: `$VISUAL` → `$EDITOR` →
+   nvim/vim/vi/nano on PATH. GUI `$EDITOR` values always take over.
 - **Builtin command (code).** Add a `commandSpec` to `builtinCommandSpecs`
   in `internal/tui/commands.go`, a `case "/yourcmd":` arm in
   `Model.handleCommand` (`internal/tui/command_dispatch.go`), and — if it's a primary
