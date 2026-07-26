@@ -250,6 +250,11 @@ type Engine struct {
 	// a parent turn is active; flushed into a follow-up turn when idle.
 	pendingChildNotices []string
 
+	// pendingUserInputs holds UserInput texts accepted while a turn was
+	// active. Drained FIFO one-at-a-time after each turn ends. Survives
+	// Interrupt so follow-up prompts typed mid-turn are not lost.
+	pendingUserInputs []string
+
 	// pendingAgent is set by tools via SwitchAgent and applied after each tool
 	// batch (so the next Stream sees the new agent/prompt) and again in
 	// completeTurn if anything remains when the turn ends.
@@ -420,7 +425,7 @@ func (e *Engine) Run(ctx context.Context) {
 	oneshotTurnSeen := false
 	for {
 		e.reapTurn()
-		e.flushPendingChildNotices(ctx)
+		e.drainIdleFollowups(ctx)
 		if e.taskOneShotIdle(oneshotTurnSeen) {
 			return
 		}
@@ -445,14 +450,14 @@ func (e *Engine) Run(ctx context.Context) {
 			}
 		case completed := <-e.childDone:
 			e.queueChildCompleted(completed)
-			e.flushPendingChildNotices(ctx)
+			e.drainIdleFollowups(ctx)
 			if e.taskOneShotIdle(oneshotTurnSeen) {
 				return
 			}
 		case <-turnDone:
 			oneshotTurnSeen = true
 			e.reapTurn()
-			e.flushPendingChildNotices(ctx)
+			e.drainIdleFollowups(ctx)
 			if e.taskOneShotIdle(oneshotTurnSeen) {
 				return
 			}
@@ -461,13 +466,13 @@ func (e *Engine) Run(ctx context.Context) {
 }
 
 // taskOneShotIdle reports whether a task-spawned engine should exit Run:
-// at least one turn finished, no nested children, no active turn, no queued
-// child-completion notices waiting to flush.
+// at least one turn finished, no nested children, no active turn, and no
+// queued follow-ups (child notices or pending user inputs).
 func (e *Engine) taskOneShotIdle(turnSeen bool) bool {
 	if !e.opts.TaskOneShot || !turnSeen {
 		return false
 	}
-	if e.turnActive() || len(e.pendingChildNotices) > 0 {
+	if e.turnActive() || len(e.pendingChildNotices) > 0 || len(e.pendingUserInputs) > 0 {
 		return false
 	}
 	e.childMu.Lock()
@@ -483,10 +488,7 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 	switch op := op.(type) {
 	case protocol.UserInput:
 		if e.turnActive() {
-			e.emit(protocol.EngineError{
-				Correlation: e.sessionCorr(),
-				Message:     "a turn is already running; interrupt it first",
-			})
+			e.enqueueUserInput(op.Text)
 			return
 		}
 		if e.prov == nil {
@@ -1100,6 +1102,55 @@ func (e *Engine) turnActive() bool {
 	default:
 		return true
 	}
+}
+
+// maxPendingUserInputs caps mid-turn UserInput buffering so a runaway sender
+// cannot grow memory without bound. Overflow emits EngineError and drops the
+// new item (callers such as the TUI keep the draft on failure).
+const maxPendingUserInputs = 32
+
+// enqueueUserInput buffers text for FIFO start after the active turn ends.
+// Empty/whitespace-only input is ignored. Queue survives Interrupt.
+func (e *Engine) enqueueUserInput(text string) {
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	if len(e.pendingUserInputs) >= maxPendingUserInputs {
+		e.emit(protocol.EngineError{
+			Correlation: e.sessionCorr(),
+			Message:     "input queue full; wait for the current turn to finish",
+		})
+		return
+	}
+	e.pendingUserInputs = append(e.pendingUserInputs, text)
+}
+
+// drainIdleFollowups starts at most one follow-up turn when idle: preferred
+// user-queued input, otherwise pending child-completion notices.
+func (e *Engine) drainIdleFollowups(ctx context.Context) {
+	if e.startNextPendingUserInput(ctx) {
+		return
+	}
+	e.flushPendingChildNotices(ctx)
+}
+
+// startNextPendingUserInput pops and starts the next queued UserInput when
+// idle with a provider. Returns true when a turn was started.
+func (e *Engine) startNextPendingUserInput(ctx context.Context) bool {
+	if len(e.pendingUserInputs) == 0 {
+		return false
+	}
+	e.joinFinishingTurn()
+	if e.turnActive() || e.prov == nil || ctx.Err() != nil {
+		return false
+	}
+	text := e.pendingUserInputs[0]
+	e.pendingUserInputs = e.pendingUserInputs[1:]
+	if len(e.pendingUserInputs) == 0 {
+		e.pendingUserInputs = nil
+	}
+	e.startTurn(ctx, text)
+	return true
 }
 
 func (e *Engine) startTurn(ctx context.Context, text string) {
