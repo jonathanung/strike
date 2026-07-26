@@ -265,6 +265,10 @@ type Model struct {
 	// Lifecycle never appends transcript cells.
 	children []childActivity
 
+	// roots holds frozen UI state for concurrent parent sessions (multi-root).
+	// The active root's fields live on Model; others sit here until activated.
+	roots map[string]*rootPane
+
 	// Subagent transcript navigation (ctrl+x leader chords). Root live
 	// cells stay in cells/toolByID; viewingID non-empty and != sessionID
 	// shows viewCells loaded from host.Sessions.
@@ -457,6 +461,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if id == "" || id == m.sessionID {
 			return m, nil
 		}
+		// Prefer in-process multi-root open when the host supports it.
+		if m.services.Roots != nil {
+			cmd := m.openRootInProcess(id)
+			m.modal = nil
+			m.reflow()
+			return m, cmd
+		}
 		if m.turnRunning {
 			m.setNotice("wait for the current turn to finish before switching sessions", true)
 			return m, nil
@@ -466,7 +477,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case engineEventMsg:
-		cmd := m.applyEvent(msg.ev)
+		rootID := m.rootForEvent(msg.ev)
+		var cmd tea.Cmd
+		if rootID != "" && rootID != m.sessionID {
+			cmd = m.applyEventToRoot(rootID, msg.ev)
+		} else {
+			cmd = m.applyEvent(msg.ev)
+		}
 		m.reflow()
 		m.refreshViewport()
 		return m, tea.Batch(m.listen(), cmd)
@@ -940,10 +957,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.openFilesExplorerPath(msg.path)
 
 	case agentsOpenMsg:
-		cmd := m.openSessionView(msg.sessionID)
+		cmd := m.handleAgentsOpen(msg)
 		m.reflow()
 		m.refreshViewport()
 		return m, tea.Batch(cmd, m.broadcastAgentsState())
+
+	case agentsSpawnMsg:
+		cmd := m.spawnRoot()
+		m.reflow()
+		return m, cmd
+
+	case agentsInterruptMsg:
+		cmd := m.interruptRoot(msg.sessionID)
+		return m, cmd
 	}
 
 	var cmd tea.Cmd
@@ -1821,15 +1847,77 @@ func (m *Model) broadcastContextState() tea.Cmd {
 	return cmd
 }
 
-// agentsStateSnapshot copies live-parent subagent rows for the agents window.
+// agentsStateSnapshot pushes multi-root tree data into the agents window.
 func (m Model) agentsStateSnapshot() agentsStateMsg {
-	children := make([]childActivity, len(m.children))
-	copy(children, m.children)
-	return agentsStateMsg{
-		parentID:  m.sessionID,
-		viewingID: m.viewingID,
-		children:  children,
+	// Ensure active root is visible to the tree builder.
+	roots := m.liveRootIDs()
+	type rootSnap struct {
+		id       string
+		title    string
+		state    theme.AgentState
+		children []childActivity
 	}
+	snaps := make([]agentsRootSnap, 0, len(roots))
+	for _, id := range roots {
+		var kids []childActivity
+		if id == m.sessionID {
+			kids = append([]childActivity(nil), m.children...)
+		} else if m.roots != nil {
+			if p, ok := m.roots[id]; ok && p != nil {
+				kids = append([]childActivity(nil), p.children...)
+			}
+		}
+		snaps = append(snaps, agentsRootSnap{
+			ID:       id,
+			Title:    m.rootTitleLabel(id),
+			State:    m.rootAgentState(id),
+			Children: kids,
+		})
+	}
+	viewing := m.viewingID
+	if viewing == "" {
+		viewing = m.sessionID
+	}
+	return agentsStateMsg{
+		activeID:  m.sessionID,
+		viewingID: viewing,
+		roots:     snaps,
+	}
+}
+
+// handleAgentsOpen activates a root or opens a child transcript from the tree.
+func (m *Model) handleAgentsOpen(msg agentsOpenMsg) tea.Cmd {
+	id := strings.TrimSpace(msg.sessionID)
+	if id == "" {
+		return nil
+	}
+	// Root selection.
+	for _, live := range m.liveRootIDs() {
+		if live == id {
+			if msg.interrupt {
+				return m.interruptRoot(id)
+			}
+			cmd := m.activateRoot(id)
+			// Close child view when focusing the root itself.
+			if m.viewingChild() {
+				_ = m.closeSessionView()
+			}
+			return cmd
+		}
+	}
+	// Child (or nested) transcript.
+	if msg.interrupt {
+		return m.interruptRoot(id)
+	}
+	// Ensure parent root is active when opening a child of another root.
+	if parent := m.parentOfChild(id); parent != "" && parent != m.sessionID {
+		if root := m.findLiveRootAncestor(parent); root != "" && root != m.sessionID {
+			if cmd := m.activateRoot(root); cmd != nil {
+				return tea.Batch(cmd, m.openSessionView(id))
+			}
+		}
+	}
+	return m.openSessionView(id)
 }
 
 // broadcastAgentsState pushes current subagent rows to every right-pane window.

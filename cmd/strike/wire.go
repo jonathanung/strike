@@ -140,6 +140,11 @@ type assembled struct {
 	issuesClose  func() error
 	// worktreeClose removes a strike-managed worktree when cleanup=delete.
 	worktreeClose func() error
+	// spawnRoot creates additional concurrent root engines (interactive multi-root).
+	// resumeID empty = new session; non-empty opens that durable root.
+	spawnRoot rootSpawner
+	// firstSlot is the initial live root for multiRootHub (same as eng/store).
+	firstSlot *rootSlot
 }
 
 // assemble resolves project/config/auth, builds the engine and session store,
@@ -354,110 +359,6 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// Concurrent session manager owns durable JSONL logs. --continue /
 	// --session reopen a root session and restore model history; otherwise Create.
 	sessions := session.NewManager(session.DefaultDir())
-	var (
-		sessionID         string
-		bound             session.Bound
-		replay            []protocol.Event
-		initialProvider   = cfg.Provider
-		initialModel      = cfg.Model
-		initialEffort     = cfg.Effort
-		initialAgent      = cfg.DefaultAgent
-		initialMessages   []provider.Message
-		initialPriority   bool
-		initialTitled     bool
-		initialAutonomy   protocol.Autonomy
-		initialPhaseWF    string
-		initialPhaseIndex int
-		initialAlways     permission.Ruleset
-		// quietStartup: resume re-applies selections without re-teeing them
-		// into JSONL (TUI seeds from replay). Fresh sessions still announce.
-		quietStartup    bool
-		resuming        bool
-		openRootsBefore int
-	)
-	resumeID := strings.TrimSpace(opts.sessionID)
-	if opts.continueSession {
-		info, err := sessions.LatestRoot(projectIdentity.Key)
-		if err != nil {
-			_ = issueStore.Close()
-			_ = memoryStore.Close()
-			_ = historyStore.Close()
-			return nil, fmt.Errorf("continue: %w", err)
-		}
-		resumeID = info.ID
-	}
-	if resumeID != "" {
-		resuming = true
-		opened, err := openResumeSession(sessions, resumeID)
-		if err != nil {
-			_ = issueStore.Close()
-			_ = memoryStore.Close()
-			_ = historyStore.Close()
-			return nil, err
-		}
-		bound = opened.bound
-		sessionID = opened.id
-		replay = opened.replay
-		restored := engine.Restore(replay)
-		initialMessages = restored.Messages
-		initialPriority = restored.Priority
-		initialTitled = restored.Titled
-		initialAutonomy = restored.Autonomy
-		initialPhaseWF = restored.PhaseWorkflow
-		initialPhaseIndex = restored.PhaseIndex
-		initialAlways = restored.AlwaysGrants
-		if !opts.providerSet && restored.Provider != "" {
-			initialProvider = restored.Provider
-		}
-		if opts.model == "" && restored.Model != "" {
-			initialModel = restored.Model
-		}
-		if opts.effort == "" && restored.Effort != protocol.EffortDefault {
-			initialEffort = restored.Effort
-		}
-		if restored.Agent != "" {
-			initialAgent = restored.Agent
-		}
-		// CLI provider/model/effort overrides on resume must still be logged
-		// so the next Restore sees the switch; keep startup noisy then.
-		quietStartup = !opts.providerSet && opts.model == "" && opts.effort == ""
-	} else {
-		openRootsBefore = sessions.CountOpenRoots()
-		info, err := sessions.Create(session.CreateOptions{ProjectKey: projectIdentity.Key})
-		if err != nil {
-			_ = issueStore.Close()
-			_ = memoryStore.Close()
-			_ = historyStore.Close()
-			return nil, fmt.Errorf("creating session: %w", err)
-		}
-		bound, err = sessions.Bind(info.ID)
-		if err != nil {
-			_ = sessions.CloseAll()
-			_ = issueStore.Close()
-			_ = memoryStore.Close()
-			_ = historyStore.Close()
-			return nil, fmt.Errorf("binding session: %w", err)
-		}
-		sessionID = info.ID
-	}
-
-	// Bind tool CWD to a per-session git worktree when configured / forced.
-	// Project-scoped state (history/memory/issues) stays on projectIdentity.Key
-	// (launch repo), not the worktree path. Failure rolls back a fresh session.
-	toolDir, wtClose, err := bindSessionWorktree(sessions, sessionID, launchDir, cfg, opts.worktree, resuming, openRootsBefore)
-	if err != nil {
-		if !resuming {
-			_ = sessions.Destroy(sessionID)
-		} else {
-			_ = sessions.CloseAll()
-		}
-		_ = issueStore.Close()
-		_ = memoryStore.Close()
-		_ = historyStore.Close()
-		return nil, err
-	}
-	workDir = toolDir
-
 	sessionDir := sessions.Dir()
 	shellHooks := cfg.ShellHooks()
 	hookDefs := make([]tool.HookDef, 0, len(shellHooks))
@@ -469,89 +370,202 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			Matcher:   h.Matcher,
 		})
 	}
-	eng := engine.New(engine.Options{
-		SessionID:            sessionID,
-		Select:               selectProvider,
-		Registry:             registry,
-		WorkDir:              workDir,
-		ProjectRoot:          projectIdentity.Root,
-		Instructions:         instructions,
-		Memory:               memoryStore,
-		SystemPrompt:         cfg.SystemPrompt,
-		MaxChildDepth:        cfg.MaxChildDepth,
-		InitialProvider:      initialProvider,
-		InitialModel:         initialModel,
-		InitialEffort:        initialEffort,
-		InitialAutonomy:      initialAutonomy,
-		Agents:               agents,
-		InitialAgent:         initialAgent,
-		InitialMessages:      initialMessages,
-		InitialPriority:      initialPriority,
-		InitialTitled:        initialTitled,
-		InitialPhaseWorkflow: initialPhaseWF,
-		InitialPhaseIndex:    initialPhaseIndex,
-		InitialAlwaysGrants:  initialAlways,
-		QuietStartup:         quietStartup,
-		Workflows:            workflows,
-		Rules:                permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),
-		Hooks:                hookDefs,
-		HookRules:            cfg.HookRules(),
-		CompactionStrategy:   cfg.CompactionStrategy,
-		CompactionModel:      cfg.CompactionModel,
-		LookupContextWindow: func(providerName, model string) int {
-			// Best-effort catalog lookup for threshold compaction. Failures
-			// leave the window unknown; overflow recovery still works.
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-			cat, err := models.Load(ctx)
+	lookupContextWindow := func(providerName, model string) int {
+		// Best-effort catalog lookup for threshold compaction. Failures
+		// leave the window unknown; overflow recovery still works.
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		cat, err := models.Load(ctx)
+		if err != nil {
+			return 0
+		}
+		n, ok := cat.ContextWindow(providerName, model)
+		if !ok {
+			return 0
+		}
+		return n
+	}
+
+	// openRoot builds one live root engine. resumeID empty creates a fresh
+	// session; non-empty opens that durable root (subagents rejected).
+	// applyCLI pins: only the process's first root applies --provider/--model/--effort.
+	openRoot := func(resumeID string, applyCLI bool) (*rootSlot, []protocol.Event, error) {
+		resumeID = strings.TrimSpace(resumeID)
+		var (
+			sessionID         string
+			bound             session.Bound
+			replay            []protocol.Event
+			initialProvider   = cfg.Provider
+			initialModel      = cfg.Model
+			initialEffort     = cfg.Effort
+			initialAgent      = cfg.DefaultAgent
+			initialMessages   []provider.Message
+			initialPriority   bool
+			initialTitled     bool
+			initialAutonomy   protocol.Autonomy
+			initialPhaseWF    string
+			initialPhaseIndex int
+			initialAlways     permission.Ruleset
+			quietStartup      bool
+			resuming          bool
+			openRootsBefore   int
+		)
+		if resumeID != "" {
+			resuming = true
+			opened, err := openResumeSession(sessions, resumeID)
 			if err != nil {
-				return 0
+				return nil, nil, err
 			}
-			n, ok := cat.ContextWindow(providerName, model)
-			if !ok {
-				return 0
+			bound = opened.bound
+			sessionID = opened.id
+			replay = opened.replay
+			restored := engine.Restore(replay)
+			initialMessages = restored.Messages
+			initialPriority = restored.Priority
+			initialTitled = restored.Titled
+			initialAutonomy = restored.Autonomy
+			initialPhaseWF = restored.PhaseWorkflow
+			initialPhaseIndex = restored.PhaseIndex
+			initialAlways = restored.AlwaysGrants
+			if !(applyCLI && opts.providerSet) && restored.Provider != "" {
+				initialProvider = restored.Provider
 			}
-			return n
-		},
-		PersistProjectRule: func(rule permission.Rule) error {
-			return config.AppendProjectPermission(launchDir, rule)
-		},
-		PersistSessionMeta: func(m protocol.SessionMeta) error {
-			_, err := session.UpdateMeta(sessionDir, sessionID, func(meta *session.Meta) {
-				if m.PRURL != "" {
-					meta.PRURL = m.PRURL
-				}
-				if m.PRNumber != 0 {
-					meta.PRNumber = m.PRNumber
-				}
-				if st := session.NormalizePRState(m.PRState); st != "" {
-					meta.PRState = st
-				} else if meta.PRState == "" && meta.PRURL != "" {
-					meta.PRState = session.PRStateOpen
-				}
-				meta.PRUpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-			})
-			return err
-		},
-		OpenChildSession: func(parentID, childID, title string) (string, error) {
-			info, err := sessions.Create(session.CreateOptions{
-				ID:              childID,
-				ParentSessionID: parentID,
-				Title:           title,
-				ProjectKey:      projectIdentity.Key,
-			})
+			if !(applyCLI && opts.model != "") && restored.Model != "" {
+				initialModel = restored.Model
+			}
+			if !(applyCLI && opts.effort != "") && restored.Effort != protocol.EffortDefault {
+				initialEffort = restored.Effort
+			}
+			if restored.Agent != "" {
+				initialAgent = restored.Agent
+			}
+			// CLI provider/model/effort overrides on resume must still be logged
+			// so the next Restore sees the switch; keep startup noisy then.
+			quietStartup = !(applyCLI && (opts.providerSet || opts.model != "" || opts.effort != ""))
+		} else {
+			openRootsBefore = sessions.CountOpenRoots()
+			info, err := sessions.Create(session.CreateOptions{ProjectKey: projectIdentity.Key})
 			if err != nil {
-				return "", err
+				return nil, nil, fmt.Errorf("creating session: %w", err)
 			}
-			return info.ID, nil
-		},
-		AppendChildEvent: func(childID string, ev protocol.Event) error {
-			return sessions.Append(childID, ev)
-		},
-		CloseChildSession: func(childID string) error {
-			return sessions.Close(childID)
-		},
-	})
+			bound, err = sessions.Bind(info.ID)
+			if err != nil {
+				_ = sessions.Close(info.ID)
+				return nil, nil, fmt.Errorf("binding session: %w", err)
+			}
+			sessionID = info.ID
+		}
+
+		// Bind tool CWD to a per-session git worktree when configured / forced.
+		// Project-scoped state stays on projectIdentity.Key (launch repo).
+		toolDir, wtClose, err := bindSessionWorktree(sessions, sessionID, launchDir, cfg, opts.worktree, resuming, openRootsBefore)
+		if err != nil {
+			if !resuming {
+				_ = sessions.Destroy(sessionID)
+			} else {
+				_ = bound.Close()
+			}
+			return nil, nil, err
+		}
+
+		sid := sessionID
+		eng := engine.New(engine.Options{
+			SessionID:            sid,
+			Select:               selectProvider,
+			Registry:             registry,
+			WorkDir:              toolDir,
+			ProjectRoot:          projectIdentity.Root,
+			Instructions:         instructions,
+			Memory:               memoryStore,
+			SystemPrompt:         cfg.SystemPrompt,
+			MaxChildDepth:        cfg.MaxChildDepth,
+			InitialProvider:      initialProvider,
+			InitialModel:         initialModel,
+			InitialEffort:        initialEffort,
+			InitialAutonomy:      initialAutonomy,
+			Agents:               agents,
+			InitialAgent:         initialAgent,
+			InitialMessages:      initialMessages,
+			InitialPriority:      initialPriority,
+			InitialTitled:        initialTitled,
+			InitialPhaseWorkflow: initialPhaseWF,
+			InitialPhaseIndex:    initialPhaseIndex,
+			InitialAlwaysGrants:  initialAlways,
+			QuietStartup:         quietStartup,
+			Workflows:            workflows,
+			Rules:                permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),
+			Hooks:                hookDefs,
+			HookRules:            cfg.HookRules(),
+			CompactionStrategy:   cfg.CompactionStrategy,
+			CompactionModel:      cfg.CompactionModel,
+			LookupContextWindow:  lookupContextWindow,
+			PersistProjectRule: func(rule permission.Rule) error {
+				return config.AppendProjectPermission(launchDir, rule)
+			},
+			PersistSessionMeta: func(m protocol.SessionMeta) error {
+				_, err := session.UpdateMeta(sessionDir, sid, func(meta *session.Meta) {
+					if m.PRURL != "" {
+						meta.PRURL = m.PRURL
+					}
+					if m.PRNumber != 0 {
+						meta.PRNumber = m.PRNumber
+					}
+					if st := session.NormalizePRState(m.PRState); st != "" {
+						meta.PRState = st
+					} else if meta.PRState == "" && meta.PRURL != "" {
+						meta.PRState = session.PRStateOpen
+					}
+					meta.PRUpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+				})
+				return err
+			},
+			OpenChildSession: func(parentID, childID, title string) (string, error) {
+				info, err := sessions.Create(session.CreateOptions{
+					ID:              childID,
+					ParentSessionID: parentID,
+					Title:           title,
+					ProjectKey:      projectIdentity.Key,
+				})
+				if err != nil {
+					return "", err
+				}
+				return info.ID, nil
+			},
+			AppendChildEvent: func(childID string, ev protocol.Event) error {
+				return sessions.Append(childID, ev)
+			},
+			CloseChildSession: func(childID string) error {
+				return sessions.Close(childID)
+			},
+		})
+		return &rootSlot{
+			id:      sid,
+			eng:     eng,
+			bound:   bound,
+			workDir: toolDir,
+			wtClose: wtClose,
+		}, replay, nil
+	}
+
+	resumeID := strings.TrimSpace(opts.sessionID)
+	if opts.continueSession {
+		info, err := sessions.LatestRoot(projectIdentity.Key)
+		if err != nil {
+			_ = issueStore.Close()
+			_ = memoryStore.Close()
+			_ = historyStore.Close()
+			return nil, fmt.Errorf("continue: %w", err)
+		}
+		resumeID = info.ID
+	}
+	first, replay, err := openRoot(resumeID, true)
+	if err != nil {
+		_ = issueStore.Close()
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, err
+	}
+	workDir = first.workDir
 
 	agentNames := make([]string, len(agents))
 	for i, a := range agents {
@@ -563,11 +577,16 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	services.Files = local.NewFiles(workDir)
 	services.Sessions = local.NewSessions(sessions, projectIdentity.Key)
 
+	spawn := rootSpawner(func(id string) (*rootSlot, error) {
+		slot, _, err := openRoot(id, false)
+		return slot, err
+	})
+
 	return &assembled{
-		eng:       eng,
+		eng:       first.eng,
 		sessions:  sessions,
-		store:     bound,
-		sessionID: sessionID,
+		store:     first.bound,
+		sessionID: first.id,
 		replay:    replay,
 		workDir:   workDir,
 		cfg:       cfg,
@@ -582,7 +601,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		issuesClose: func() error {
 			return issueStore.Close()
 		},
-		worktreeClose: wtClose,
+		worktreeClose: first.wtClose,
+		spawnRoot:     spawn,
+		firstSlot:     first,
 	}, nil
 }
 
@@ -669,7 +690,7 @@ func openResumeSession(sessions *session.Manager, id string) (resumeOpened, erro
 	}
 	bound, err := sessions.Bind(id)
 	if err != nil {
-		_ = sessions.CloseAll()
+		_ = sessions.Close(id)
 		return resumeOpened{}, fmt.Errorf("session: binding: %w", err)
 	}
 	replay, err := sessions.Replay(id)
@@ -680,12 +701,10 @@ func openResumeSession(sessions *session.Manager, id string) (resumeOpened, erro
 	return resumeOpened{id: id, bound: bound, replay: replay}, nil
 }
 
-// run is the interactive composition root: assemble backend, then hand the
-// host.Services bundle to the TUI frontend. When the user picks another
-// session in /session, the TUI quits with PendingResume set and this loop
-// reopens that session with full engine.Restore (not transcript-only view).
-// Historical events are seeded into the TUI via Options.Replay (side-effect
-// free); only the live engine stream is consumed for applyEvent.
+// run is the interactive composition root: assemble backend, start a multi-root
+// hub (concurrent parent engines), and hand host.Services to the TUI. Spawn /
+// Activate keep additional roots live in-process. PendingResume remains a
+// fallback when Roots cannot open a past session (should be rare).
 func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 	warnedDangerous := false
 	for {
@@ -698,22 +717,28 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 			warnedDangerous = true
 		}
 
-		// runSession takes ownership of store (closes it). If setup fails before
-		// that handoff, close here without double-closing.
-		storeOwned := false
+		hub := newMultiRootHub(a.firstSlot, a.spawnRoot, a.services.Files)
+		a.services.Roots = hub
+		// Hub owns firstSlot bind + worktree cleanup and engine Run/tee.
+		hubOwned := true
 		closeAssembled := func() {
-			if !storeOwned {
+			if hubOwned {
+				if cerr := hub.Close(); cerr != nil && runErr == nil {
+					runErr = fmt.Errorf("closing session hub: %w", cerr)
+				}
+				hubOwned = false
+			} else {
 				if cerr := a.store.Close(); cerr != nil && runErr == nil {
 					runErr = fmt.Errorf("closing session store: %w", cerr)
+				}
+				if a.worktreeClose != nil {
+					if err := a.worktreeClose(); err != nil && runErr == nil {
+						runErr = fmt.Errorf("removing session worktree: %w", err)
+					}
 				}
 			}
 			if a.sessions != nil {
 				_ = a.sessions.CloseAll()
-			}
-			if a.worktreeClose != nil {
-				if err := a.worktreeClose(); err != nil && runErr == nil {
-					runErr = fmt.Errorf("removing session worktree: %w", err)
-				}
 			}
 			if err := a.issuesClose(); err != nil && runErr == nil {
 				runErr = fmt.Errorf("closing project issues: %w", err)
@@ -728,52 +753,47 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 
 		var pendingResume string
 		var pendingUpgrade bool
-		storeOwned = true
 		sessionPath := a.store.Path()
-		err = runSession(context.Background(), a.eng.Run, a.eng.Events(), a.store, func(live <-chan protocol.Event) error {
-			restore := tui.EnableEnhancedKeys(stdout)
-			defer restore()
-			// Detect bg once before the program owns stdin — glamour/lipgloss OSC 11
-			// replies must not race into the composer (#52).
-			tui.PinAppearance()
-			vimMode := tui.VimModePane
-			if mode, ok := tui.ParseVimMode(a.cfg.VimMode); ok {
-				vimMode = mode
+
+		restore := tui.EnableEnhancedKeys(stdout)
+		// Detect bg once before the program owns stdin — glamour/lipgloss OSC 11
+		// replies must not race into the composer (#52).
+		tui.PinAppearance()
+		vimMode := tui.VimModePane
+		if mode, ok := tui.ParseVimMode(a.cfg.VimMode); ok {
+			vimMode = mode
+		}
+		themeID := theme.BuiltinID
+		var themePtr *theme.Theme
+		if a.cfg.Theme != "" {
+			if entry, ok := theme.Lookup(theme.Catalog(a.workDir), a.cfg.Theme); ok {
+				th := entry.Theme
+				themePtr = &th
+				themeID = entry.ID
 			}
-			themeID := theme.BuiltinID
-			var themePtr *theme.Theme
-			if a.cfg.Theme != "" {
-				if entry, ok := theme.Lookup(theme.Catalog(a.workDir), a.cfg.Theme); ok {
-					th := entry.Theme
-					themePtr = &th
-					themeID = entry.ID
-				}
-			}
-			// No WithMouseCellMotion: mouse tracking steals drag events and
-			// blocks native terminal text selection/copy in the chat pane.
-			// Wheel/click handlers remain in the TUI for tests and any future
-			// opt-in mouse mode; keyboard scroll and y-to-copy cover navigation
-			// and clipboard. Shift+drag still selects if mouse is re-enabled.
-			program := tea.NewProgram(tui.New(a.eng.Ops(), live, a.services, tui.Options{
-				DangerouslySkipPermissions:   opts.dangerouslySkipPermissions,
-				Theme:                        themePtr,
-				ThemeID:                      themeID,
-				SessionID:                    a.sessionID,
-				WorkDir:                      a.workDir,
-				FirstRun:                     a.firstRun,
-				VimMode:                      vimMode,
-				PermissionAutoApproveSeconds: a.cfg.PermissionAutoApproveSeconds,
-				PermissionAutoApproveExclude: a.cfg.PermissionAutoApproveExclude,
-				Replay:                       a.replay,
-				Keybinds:                     config.KeybindsMap(a.cfg.Keybinds),
-			}), tea.WithAltScreen(), tea.WithOutput(stdout), tea.WithInput(tui.WrapInput(os.Stdin)), tea.WithReportFocus())
-			final, runProgErr := program.Run()
-			if m, ok := final.(tui.Model); ok {
-				pendingResume = m.PendingResume()
-				pendingUpgrade = m.PendingUpgrade()
-			}
-			return runProgErr
-		})
+		}
+		// No WithMouseCellMotion: mouse tracking steals drag events and
+		// blocks native terminal text selection/copy in the chat pane.
+		program := tea.NewProgram(tui.New(hub.Ops(), hub.Events(), a.services, tui.Options{
+			DangerouslySkipPermissions:   opts.dangerouslySkipPermissions,
+			Theme:                        themePtr,
+			ThemeID:                      themeID,
+			SessionID:                    a.sessionID,
+			WorkDir:                      a.workDir,
+			FirstRun:                     a.firstRun,
+			VimMode:                      vimMode,
+			PermissionAutoApproveSeconds: a.cfg.PermissionAutoApproveSeconds,
+			PermissionAutoApproveExclude: a.cfg.PermissionAutoApproveExclude,
+			Replay:                       a.replay,
+			Keybinds:                     config.KeybindsMap(a.cfg.Keybinds),
+		}), tea.WithAltScreen(), tea.WithOutput(stdout), tea.WithInput(tui.WrapInput(os.Stdin)), tea.WithReportFocus())
+		final, runProgErr := program.Run()
+		restore()
+		if m, ok := final.(tui.Model); ok {
+			pendingResume = m.PendingResume()
+			pendingUpgrade = m.PendingUpgrade()
+		}
+		err = runProgErr
 		closeAssembled()
 		if err != nil {
 			return err
@@ -791,7 +811,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 			fmt.Fprintln(stdout, "session log:", sessionPath)
 			return nil
 		}
-		// Restart with the chosen session: durable resume, not transcript-only.
+		// Fallback restart when in-process Open was not used.
 		opts.continueSession = false
 		opts.sessionID = pendingResume
 	}
