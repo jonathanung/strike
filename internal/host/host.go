@@ -1,6 +1,7 @@
 // Package host defines the services a strike frontend needs from its host
 // process, beyond the engine protocol: credentials, model catalog, saved
-// defaults, prompt history, project memory/issues, and static agent/skill listings. Contract only:
+// defaults, prompt history, project memory/issues, local telemetry, and static
+// agent/skill listings. Contract only:
 // this package imports nothing outside the standard library so frontends
 // can be developed and tested against fakes. Implementations live in
 // internal/host/local.
@@ -363,6 +364,37 @@ type MCP interface {
 	Disable(name string) error
 }
 
+// TelemetrySample is one local host resource snapshot for the system pane.
+// OK flags distinguish measured zeros from unavailable values — frontends
+// must never render missing metrics as zero.
+type TelemetrySample struct {
+	CPUHostPct float64 // host-wide CPU utilization 0–100
+	CPUHostOK  bool
+	CPUProcPct float64 // this process CPU 0–100+
+	CPUProcOK  bool
+
+	MemUsedBytes  uint64
+	MemTotalBytes uint64
+	MemOK         bool
+
+	DiskUsedBytes  uint64
+	DiskTotalBytes uint64
+	DiskFreeBytes  uint64
+	DiskOK         bool
+	DiskRoot       string // path whose filesystem was measured
+
+	At time.Time
+}
+
+// Telemetry samples local CPU/RAM/disk. Nil means the capability is absent;
+// frontends must degrade gracefully. Implementations are local-only and must
+// never upload samples or attach them to provider requests.
+type Telemetry interface {
+	// Sample collects one snapshot. root is the project/worktree path used for
+	// disk (empty skips disk). Respects ctx cancellation.
+	Sample(ctx context.Context, root string) (TelemetrySample, error)
+}
+
 // Services bundles everything a frontend receives from its host. Any field
 // may be nil/empty when a capability is absent (tests, future frontends);
 // frontends must degrade gracefully.
@@ -378,7 +410,8 @@ type Services struct {
 	Roots     Roots     // concurrent parent sessions; nil when single-root only
 	Providers Providers // custom/self-hosted provider CRUD; nil when unsupported
 	Init      ProjectInit
-	MCP       MCP      // external MCP server status; nil when unsupported
-	Agents    []string // selectable agent names, default first
+	MCP       MCP       // external MCP server status; nil when unsupported
+	Telemetry Telemetry // local CPU/RAM/disk; nil when unsupported
+	Agents    []string  // selectable agent names, default first
 	Skills    []Skill
 }

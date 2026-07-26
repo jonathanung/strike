@@ -22,6 +22,7 @@ func newWindowRegistry() windowRegistry {
 	windows := []window{
 		newContextWindow(),
 		newNamedWindow("activity", "activity"),
+		newTelemetryWindow(),
 		newAgentsWindow(),
 		newVisualizerWindow(),
 		newFilesWindow(),
@@ -55,7 +56,7 @@ func defaultWindowGroups(windows []window) []windowGroup {
 		return out
 	}
 	groups := []windowGroup{
-		{id: "session", members: must("context", "activity")},
+		{id: "session", members: must("context", "activity", "telemetry")},
 		{id: "agents", members: must("agents", "visualizer")},
 		{id: "files", members: must("files")},
 		{id: "project", members: must("memory", "issues")},

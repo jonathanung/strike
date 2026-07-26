@@ -72,6 +72,32 @@ func TestGallery(t *testing.T) {
 	render("93x40 split canonical (left=60 gutter=1 right=32)", 93, 40, func(m *Model) {})
 	render("92 left single (left=92 right=0)", 92, 60, func(m *Model) {})
 	render("120x40 split (left=80 gutter=1 right=39)", 120, 40, func(m *Model) {})
+	render("120x48 session stack with telemetry", 120, 48, func(m *Model) {
+		m.focus = focusRight
+		m.workDir = "/gallery/proj"
+		if reg, ok := m.windows.activate("context"); ok {
+			m.windows = reg
+		}
+		// Seed a rich sample so gallery shows bars (normal pressure).
+		for i, w := range m.windows.windows {
+			tw, ok := w.(telemetryWindow)
+			if !ok {
+				continue
+			}
+			tw.has = true
+			tw.sample = host.TelemetrySample{
+				CPUHostOK: true, CPUHostPct: 42.3, CPUProcOK: true, CPUProcPct: 2.1,
+				MemOK: true, MemUsedBytes: 10 * 1024 * 1024 * 1024, MemTotalBytes: 32 * 1024 * 1024 * 1024,
+				DiskOK: true, DiskUsedBytes: 287 * 1024 * 1024 * 1024, DiskTotalBytes: 494 * 1024 * 1024 * 1024,
+				DiskFreeBytes: 207 * 1024 * 1024 * 1024, DiskRoot: m.workDir,
+			}
+			windows := append([]window(nil), m.windows.windows...)
+			windows[i] = tw
+			m.windows.windows = windows
+			break
+		}
+		m.windows, _ = m.windows.broadcast(m.contextStateSnapshot())
+	})
 	render("120 cycle (left=80 gutter=1 right=39)", 120, 80, func(m *Model) { m.focus = focusRight; m.windows = m.windows.cycle() })
 	render("120 modal (left=80 gutter=1 right=39)", 120, 80, func(m *Model) {
 		m.applyEvent(protocol.TurnStarted{})
