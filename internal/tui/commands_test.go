@@ -45,8 +45,9 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/keys":             {"show keyboard shortcuts", "[reset]", commandSourceBuiltin},
 		"/memory":           {"list, get, set, delete, export, or import project memory", "[list|get|set|rm|export|import] ...", commandSourceBuiltin},
 		"/issues":           {"list, add, get, close, export, or import project issues", "[list|add|get|close|export|import] ...", commandSourceBuiltin},
-		"/context":          {"inspect effective system-prompt layers", "", commandSourceBuiltin},
-		"/effective-prompt": {"inspect effective system-prompt layers", "", commandSourceBuiltin},
+		"/context":          {"context doctor: system-prompt layer breakdown", "", commandSourceBuiltin},
+		"/effective-prompt": {"context doctor: system-prompt layer breakdown", "", commandSourceBuiltin},
+		"/cost":             {"session token and cost totals", "", commandSourceBuiltin},
 		"/upgrade":          {"install the latest release and restart", "", commandSourceBuiltin},
 		"/init":             {"create or update project AGENTS.md", "", commandSourceBuiltin},
 		"/review":           {"review a change", "$ARGUMENTS", commandSourceSkill},
@@ -75,7 +76,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 }
 
 func TestValidSkillNameRejectsReservedBuiltinsIncludingMDRead(t *testing.T) {
-	for _, name := range []string{"provider", "model", "effort", "autonomy", "auth", "agent", "fast", "vim", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "export", "help", "keys", "memory", "issues", "context", "effective-prompt", "upgrade", "init"} {
+	for _, name := range []string{"provider", "model", "effort", "autonomy", "auth", "agent", "fast", "vim", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "export", "help", "keys", "memory", "issues", "context", "effective-prompt", "cost", "upgrade", "init"} {
 		if validSkillName(name) {
 			t.Errorf("validSkillName(%q) = true, want false for reserved builtin", name)
 		}

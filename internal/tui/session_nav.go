@@ -502,10 +502,7 @@ func seedFromReplay(m *Model, events []protocol.Event) {
 		case protocol.FastSelected:
 			m.fastEnabled = e.Enabled
 		case protocol.UsageReported:
-			m.usageInput = e.Input
-			m.usageOutput = e.Output
-			m.usageUsed = e.Used
-			m.usageSource = e.Source
+			m.recordUsage(e)
 		}
 	}
 }

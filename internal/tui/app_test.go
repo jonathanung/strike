@@ -688,6 +688,9 @@ func TestContextSlashCommandInspectsEffectivePrompt(t *testing.T) {
 			if got := receiveAppOp(t, ops); got != (protocol.InspectEffectivePrompt{}) {
 				t.Errorf("operation = %#v, want InspectEffectivePrompt", got)
 			}
+			if !m.pendingContextDoctor {
+				t.Error("pendingContextDoctor = false, want true after /context")
+			}
 			if m.composer.Value() != "" {
 				t.Errorf("composer value = %q, want reset", m.composer.Value())
 			}
@@ -695,30 +698,55 @@ func TestContextSlashCommandInspectsEffectivePrompt(t *testing.T) {
 		})
 	}
 
+	// Pending doctor opens a modal (not a transcript dump).
 	m, _ := newAppTestModel(nil, nil)
+	m.pendingContextDoctor = true
+	m.contextLimit = 100_000
+	m.contextLimitKnown = true
 	m = updateApp(t, m, engineEventMsg{ev: protocol.EffectivePrompt{
 		Layers: []protocol.PromptLayerInfo{
-			{Kind: protocol.PromptLayerShared, Source: "builtin:shared", Mode: protocol.PromptLayerAppend, Chars: 100},
+			{Kind: protocol.PromptLayerShared, Source: "builtin:shared", Mode: protocol.PromptLayerAppend, Chars: 100, Preview: "You are strike"},
 			{Kind: protocol.PromptLayerPersona, Source: "agent:build", Mode: protocol.PromptLayerReplace, Chars: 40},
+			{Kind: protocol.PromptLayerMemory, Source: "memory:prefs", Mode: protocol.PromptLayerAppend, Chars: 20, Preview: "api_key=sk-ant-secretvaluehere"},
 		},
 		SystemChars:    200,
 		MessageCount:   3,
 		FromLastStream: true,
 	}})
+	if m.pendingContextDoctor {
+		t.Error("pendingContextDoctor still set after EffectivePrompt")
+	}
+	doc, ok := m.modal.(*doctorModal)
+	if !ok {
+		t.Fatalf("modal type = %T, want *doctorModal", m.modal)
+	}
+	plain := ansi.Strip(doc.view(60, theme.Default()))
+	if !strings.Contains(plain, "shared") || !strings.Contains(plain, "persona") {
+		t.Errorf("doctor missing layer kinds:\n%s", plain)
+	}
+	if !strings.Contains(plain, "200 chars") {
+		t.Errorf("doctor missing system chars:\n%s", plain)
+	}
+	if !strings.Contains(plain, "3 msgs") {
+		t.Errorf("doctor missing history count:\n%s", plain)
+	}
+	// Unsolicited EffectivePrompt still dumps to the transcript.
+	m2, _ := newAppTestModel(nil, nil)
+	m2 = updateApp(t, m2, engineEventMsg{ev: protocol.EffectivePrompt{
+		Layers:      []protocol.PromptLayerInfo{{Kind: protocol.PromptLayerShared, Source: "builtin:shared", Mode: protocol.PromptLayerAppend, Chars: 10}},
+		SystemChars: 10,
+	}})
+	if m2.modal != nil {
+		t.Fatal("unsolicited EffectivePrompt opened a modal")
+	}
 	found := false
-	for _, c := range m.cells {
-		if info, ok := c.(*infoCell); ok && strings.Contains(info.text, "effective prompt (last request)") {
+	for _, c := range m2.cells {
+		if info, ok := c.(*infoCell); ok && strings.Contains(info.text, "effective prompt") {
 			found = true
-			if !strings.Contains(info.text, "shared") || !strings.Contains(info.text, "persona") {
-				t.Errorf("info cell missing layer kinds:\n%s", info.text)
-			}
-			if !strings.Contains(info.text, "200 chars") {
-				t.Errorf("info cell missing system chars:\n%s", info.text)
-			}
 		}
 	}
 	if !found {
-		t.Fatal("EffectivePrompt did not append info cell")
+		t.Fatal("unsolicited EffectivePrompt did not append info cell")
 	}
 }
 

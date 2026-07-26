@@ -64,8 +64,9 @@ strike launches without any provider configured. Pick one inside the TUI:
                                # import merges by id; --replace wipes first.
                                # Relative export/import paths stay under the
                                # project root (no path escape).
-/context                       # inspect effective system-prompt layers
+/context                       # context doctor modal (prompt layer breakdown)
 /effective-prompt              # alias of /context
+/cost                          # session token totals and estimated USD cost
 /keys                          # filterable keybind cheatsheet (also f1)
 /help                          # list commands
 /upgrade                       # install latest GitHub Release and restart
@@ -85,7 +86,8 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/compact` | ask the engine to compact model history |
 | `/memory` | bare = list browser; `list [tag]`, `get <key>`, `set <key> <value>`, `rm <key>`, `export [path]`, `import <path> [--replace]` (portable JSON; relative paths stay under project root) |
 | `/issues` | bare = list browser; `list [open\|closed]`, `add <title>`, `get <id>`, `close <id>`, `export [path]`, `import <path> [--replace]` (same portable rules as memory) |
-| `/context` | dump effective system-prompt layers into the transcript |
+| `/context` | context doctor modal: layer sizes, history msg count, oversized warnings (previews redacted) |
+| `/cost` | session input/output/cache totals from usage events; est. USD when catalog rates known; unknown stays explicit |
 | `/init` | light local scan → write `AGENTS.md`; confirms before overwrite |
 
 ### Autonomy & workflows

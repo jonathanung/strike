@@ -71,6 +71,7 @@ var reservedSkillNames = map[string]struct{}{
 	"export":           {},
 	"context":          {},
 	"effective-prompt": {},
+	"cost":             {},
 	"upgrade":          {},
 	"init":             {},
 }
