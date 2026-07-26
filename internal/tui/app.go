@@ -1420,7 +1420,11 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 	case protocol.EffectivePrompt:
 		m.cells = append(m.cells, &infoCell{text: formatEffectivePrompt(ev)})
 	case protocol.CompactionCompleted:
-		msg := fmt.Sprintf("history compacted (%s): removed %d, kept %d", ev.Reason, ev.Removed, ev.Kept)
+		strategy := ev.Strategy
+		if strategy == "" {
+			strategy = protocol.CompactionStrategyTrim
+		}
+		msg := fmt.Sprintf("history compacted (%s/%s): removed %d, kept %d", ev.Reason, strategy, ev.Removed, ev.Kept)
 		if m.turnRunning {
 			m.cells = append(m.cells, &errorCell{text: msg})
 		} else {
@@ -2000,7 +2004,7 @@ func (m Model) handleMemoryCommand(args []string) (tea.Model, tea.Cmd) {
 		m.setNotice("project memory is unavailable", true)
 		return m, nil
 	}
-	usage := "usage: /memory [list [tag]|get <key>|set <key> <value>|rm <key>]"
+	usage := "usage: /memory [list [tag]|get <key>|set <key> <value>|rm <key>|export [path]|import <path> [--replace]]"
 	if len(args) == 0 {
 		args = []string{"list"}
 	}
@@ -2061,6 +2065,35 @@ func (m Model) handleMemoryCommand(args []string) (tea.Model, tea.Cmd) {
 		m.windows = refreshProjectDataWindows(m.windows)
 		m.setNotice("memory: deleted "+args[1], false)
 		return m, nil
+	case "export":
+		path := "strike-memory.json"
+		if len(args) > 1 {
+			path = args[1]
+		}
+		if err := m.services.Memory.Export(path); err != nil {
+			m.setNotice("memory: "+err.Error(), true)
+			return m, nil
+		}
+		m.setNotice("memory: exported to "+path, false)
+		return m, nil
+	case "import":
+		path, replace, ok := parseImportArgs(args[1:])
+		if !ok {
+			m.setNotice(usage, true)
+			return m, nil
+		}
+		n, err := m.services.Memory.Import(path, replace)
+		if err != nil {
+			m.setNotice("memory: "+err.Error(), true)
+			return m, nil
+		}
+		m.windows = refreshProjectDataWindows(m.windows)
+		mode := "merged"
+		if replace {
+			mode = "replaced"
+		}
+		m.setNotice(fmt.Sprintf("memory: imported %d entries (%s)", n, mode), false)
+		return m, nil
 	default:
 		m.setNotice(usage, true)
 		return m, nil
@@ -2073,7 +2106,7 @@ func (m Model) handleIssuesCommand(args []string) (tea.Model, tea.Cmd) {
 		m.setNotice("project issues are unavailable", true)
 		return m, nil
 	}
-	usage := "usage: /issues [list [open|closed]|add <title>|get <id>|close <id>]"
+	usage := "usage: /issues [list [open|closed]|add <title>|get <id>|close <id>|export [path]|import <path> [--replace]]"
 	if len(args) == 0 {
 		args = []string{"list"}
 	}
@@ -2145,10 +2178,65 @@ func (m Model) handleIssuesCommand(args []string) (tea.Model, tea.Cmd) {
 		m.windows = refreshProjectDataWindows(m.windows)
 		m.setNotice(fmt.Sprintf("issues: closed #%d %s", iss.ID, iss.Title), false)
 		return m, nil
+	case "export":
+		path := "strike-issues.json"
+		if len(args) > 1 {
+			path = args[1]
+		}
+		if err := m.services.Issues.Export(path); err != nil {
+			m.setNotice("issues: "+err.Error(), true)
+			return m, nil
+		}
+		m.setNotice("issues: exported to "+path, false)
+		return m, nil
+	case "import":
+		path, replace, ok := parseImportArgs(args[1:])
+		if !ok {
+			m.setNotice(usage, true)
+			return m, nil
+		}
+		n, err := m.services.Issues.Import(path, replace)
+		if err != nil {
+			m.setNotice("issues: "+err.Error(), true)
+			return m, nil
+		}
+		m.windows = refreshProjectDataWindows(m.windows)
+		mode := "merged"
+		if replace {
+			mode = "replaced"
+		}
+		m.setNotice(fmt.Sprintf("issues: imported %d issues (%s)", n, mode), false)
+		return m, nil
 	default:
 		m.setNotice(usage, true)
 		return m, nil
 	}
+}
+
+// parseImportArgs accepts: <path> | <path> --replace|--merge | --replace|--merge <path>
+func parseImportArgs(args []string) (path string, replace bool, ok bool) {
+	if len(args) == 0 || len(args) > 2 {
+		return "", false, false
+	}
+	replace = false
+	var paths []string
+	for _, a := range args {
+		switch a {
+		case "--replace", "replace":
+			replace = true
+		case "--merge", "merge":
+			replace = false
+		default:
+			if strings.HasPrefix(a, "-") {
+				return "", false, false
+			}
+			paths = append(paths, a)
+		}
+	}
+	if len(paths) != 1 || paths[0] == "" {
+		return "", false, false
+	}
+	return paths[0], replace, true
 }
 
 func (m Model) handleMDRead(text string, fields []string) (tea.Model, tea.Cmd) {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -218,5 +219,158 @@ func TestFileMode(t *testing.T) {
 	}
 	if mode := dirInfo.Mode().Perm(); mode != 0o700 {
 		t.Errorf("dir mode = %o, want 700", mode)
+	}
+}
+
+func TestExportImportRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	src, err := Open(root, "src")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = src.Close() })
+	if err := src.Put("api.base", "https://example.com", []string{"config"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := src.Put("note", "hello", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	exportPath := filepath.Join(t.TempDir(), "memory.json")
+	if err := src.Export(exportPath); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wipe source via replace import of empty snapshot is not enough — clear by replace with empty entries file.
+	empty := []byte(`{"format":"strike.memory","version":1,"entries":[]}` + "\n")
+	if _, err := src.ImportBytes(empty, true); err != nil {
+		t.Fatal(err)
+	}
+	if all, err := src.List(""); err != nil || len(all) != 0 {
+		t.Fatalf("after wipe list = %+v err=%v", all, err)
+	}
+
+	n, err := src.Import(exportPath, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("imported = %d, want 2", n)
+	}
+	got, ok, err := src.Get("api.base")
+	if err != nil || !ok || got.Value != "https://example.com" {
+		t.Fatalf("restored api.base = %+v ok=%v err=%v", got, ok, err)
+	}
+	note, ok, err := src.Get("note")
+	if err != nil || !ok || note.Value != "hello" {
+		t.Fatalf("restored note = %+v ok=%v err=%v", note, ok, err)
+	}
+}
+
+func TestImportIntoOtherProject(t *testing.T) {
+	root := t.TempDir()
+	a, err := Open(root, "/proj/a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Put("shared", "from-a", []string{"t"}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "handoff.json")
+	if err := a.Export(path); err != nil {
+		t.Fatal(err)
+	}
+	_ = a.Close()
+
+	b, err := Open(root, "/proj/b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = b.Close() })
+	if _, ok, err := b.Get("shared"); err != nil || ok {
+		t.Fatalf("b should start empty: ok=%v err=%v", ok, err)
+	}
+	n, err := b.Import(path, false)
+	if err != nil || n != 1 {
+		t.Fatalf("import = %d err=%v", n, err)
+	}
+	got, ok, err := b.Get("shared")
+	if err != nil || !ok || got.Value != "from-a" {
+		t.Fatalf("b got = %+v ok=%v err=%v", got, ok, err)
+	}
+}
+
+func TestImportMergeAndReplace(t *testing.T) {
+	s, err := Open(t.TempDir(), "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if err := s.Put("keep", "old", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Put("gone", "x", nil); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte(`{
+  "format": "strike.memory",
+  "version": 1,
+  "entries": [
+    {"key": "keep", "value": "new", "tags": ["t"]},
+    {"key": "added", "value": "y"}
+  ]
+}`)
+	n, err := s.ImportBytes(data, false)
+	if err != nil || n != 2 {
+		t.Fatalf("merge = %d err=%v", n, err)
+	}
+	if got, ok, _ := s.Get("keep"); !ok || got.Value != "new" {
+		t.Fatalf("merge keep = %+v", got)
+	}
+	if _, ok, _ := s.Get("gone"); !ok {
+		t.Fatal("merge should retain gone")
+	}
+	if _, ok, _ := s.Get("added"); !ok {
+		t.Fatal("merge missing added")
+	}
+
+	n, err = s.ImportBytes(data, true)
+	if err != nil || n != 2 {
+		t.Fatalf("replace = %d err=%v", n, err)
+	}
+	if _, ok, _ := s.Get("gone"); ok {
+		t.Fatal("replace should drop gone")
+	}
+	all, err := s.List("")
+	if err != nil || len(all) != 2 {
+		t.Fatalf("after replace list = %+v err=%v", all, err)
+	}
+}
+
+func TestImportBadJSONAndVersion(t *testing.T) {
+	s, err := Open(t.TempDir(), "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+
+	cases := []struct {
+		name string
+		data string
+		want string
+	}{
+		{name: "bad json", data: "{not json", want: "bad JSON"},
+		{name: "wrong format", data: `{"format":"other","version":1,"entries":[]}`, want: "unsupported format"},
+		{name: "wrong version", data: `{"format":"strike.memory","version":99,"entries":[]}`, want: "unsupported version"},
+		{name: "empty", data: "   ", want: "empty file"},
+		{name: "duplicate key", data: `{"format":"strike.memory","version":1,"entries":[{"key":"a","value":"1"},{"key":"a","value":"2"}]}`, want: "duplicate key"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := s.ImportBytes([]byte(tc.data), true)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want containing %q", err, tc.want)
+			}
+		})
 	}
 }
