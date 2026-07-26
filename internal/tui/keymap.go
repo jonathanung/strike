@@ -71,14 +71,18 @@ func defaultKeyMap() keyMap {
 		CompletionPrev:    key.NewBinding(key.WithKeys("up"), key.WithHelp("up", "previous")),
 		CompletionNext:    key.NewBinding(key.WithKeys("down", "ctrl+n"), key.WithHelp("down/ctrl+n", "next")),
 		Send:              key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "send")),
-		Newline:           key.NewBinding(key.WithKeys("alt+enter"), key.WithHelp("shift+enter", "newline")),
-		ExternalEditor:    key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("ctrl+e", "external editor")),
-		HistoryPrev:       key.NewBinding(key.WithKeys("up"), key.WithHelp("up", "history previous")),
-		HistoryNext:       key.NewBinding(key.WithKeys("down"), key.WithHelp("down", "history next")),
-		Agent:             key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "agent")),
-		SaveDefaults:      key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "save defaults")),
-		ScrollUp:          key.NewBinding(key.WithKeys("pgup", "ctrl+up"), key.WithHelp("pgup/ctrl+up", "scroll up")),
-		ScrollDown:        key.NewBinding(key.WithKeys("pgdown", "ctrl+down"), key.WithHelp("pgdn/ctrl+down", "scroll down")),
+		// Newline: alt+enter is the post-WrapInput form of enhanced shift+enter
+		// CSI. ctrl+j is bare LF — many terminals (and shift+enter without
+		// modifyOtherKeys/Kitty) deliver KeyCtrlJ, which must not cycle panes
+		// while the composer is focused (#187).
+		Newline:        key.NewBinding(key.WithKeys("alt+enter", "ctrl+j"), key.WithHelp("shift+enter", "newline")),
+		ExternalEditor: key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("ctrl+e", "external editor")),
+		HistoryPrev:    key.NewBinding(key.WithKeys("up"), key.WithHelp("up", "history previous")),
+		HistoryNext:    key.NewBinding(key.WithKeys("down"), key.WithHelp("down", "history next")),
+		Agent:          key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "agent")),
+		SaveDefaults:   key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "save defaults")),
+		ScrollUp:       key.NewBinding(key.WithKeys("pgup", "ctrl+up"), key.WithHelp("pgup/ctrl+up", "scroll up")),
+		ScrollDown:     key.NewBinding(key.WithKeys("pgdown", "ctrl+down"), key.WithHelp("pgdn/ctrl+down", "scroll down")),
 		// JumpBottom: ctrl+t is the user chord. Bubble Tea names the legacy
 		// control byte KeyCtrlT ("ctrl+t").
 		JumpBottom: key.NewBinding(key.WithKeys("ctrl+t"), key.WithHelp("ctrl+t", "jump to bottom")),

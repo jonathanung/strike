@@ -346,6 +346,9 @@ func (m Model) Init() tea.Cmd {
 		m.spin.Tick,
 		m.windows.init(),
 		tea.SetWindowTitle(windowTitle(m)),
+		// Kitty/Ghostty keep separate keyboard stacks per screen; re-enable
+		// after WithAltScreen so shift+enter CSI is actually delivered (#187).
+		enableEnhancedKeysCmd(),
 	}
 	if m.firstRun {
 		cmds = append(cmds, func() tea.Msg { return firstRunSetupMsg{} })
@@ -696,6 +699,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.focus == focusLeft {
 			if next, cmd, ok := m.applyComposerReadline(msg); ok {
 				return next, cmd
+			}
+			// Composer newline before focus/cycle: bare LF (KeyCtrlJ) is how
+			// many terminals deliver shift+enter. It must insert "\n", never
+			// cycle windows or steal focus (#187). ctrl+j still cycles when
+			// the right pane is focused (bindings checked below).
+			if key.Matches(msg, m.keyMap.Newline) {
+				m.resetHistoryBrowsing()
+				m.composer.InsertString("\n")
+				m.recomputeCompletion()
+				m.reflow()
+				return m, nil
 			}
 		}
 		if key.Matches(msg, m.keyMap.FocusLeft) {

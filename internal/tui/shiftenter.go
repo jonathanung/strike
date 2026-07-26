@@ -3,8 +3,11 @@ package tui
 import (
 	"bytes"
 	"io"
+	"os"
 	"strconv"
 	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // altEnter is Alt+Enter as delivered to Bubble Tea after rewrite (KeyEnter+Alt).
@@ -14,16 +17,20 @@ var altEnter = []byte("\x1b\r")
 // CSI is rewritten (Bubble Tea has no native "ctrl+;" KeyType).
 var altSemicolon = []byte("\x1b;")
 
-// Enhanced-keyboard enable/disable sequences written at program start/exit:
+// Enhanced-keyboard enable/disable sequences written at program start/exit
+// and again from Model.Init after the alt screen is entered (Kitty keeps
+// independent keyboard-mode stacks for main vs alternate screens):
 //
 //	enable  modifyOtherKeys level 2: ESC [ > 4 ; 2 m
 //	disable modifyOtherKeys:         ESC [ > 4 ; 0 m
 //	enable  Kitty keyboard (flags=1, disambiguate): ESC [ > 1 u
+//	  (push form; also CSI = 1 ; 1 u set-mode for terminals that only honor that)
 //	disable Kitty keyboard:          ESC [ < u
 var (
 	enableModifyOtherKeys  = []byte("\x1b[>4;2m")
 	disableModifyOtherKeys = []byte("\x1b[>4;0m")
 	enableKittyKeyboard    = []byte("\x1b[>1u")
+	enableKittyKeyboardSet = []byte("\x1b[=1;1u")
 	disableKittyKeyboard   = []byte("\x1b[<u")
 )
 
@@ -88,15 +95,15 @@ func (s *shiftEnterFile) Name() string {
 // from bare keys. The returned function restores the prior modes; it is safe to
 // call multiple times. A nil writer is a no-op.
 //
-// Note: these sequences are typically written before the alt screen is entered.
-// Bubble Tea has no clean post-altscreen hook; terminals still accept the modes.
+// Call once before tea.NewProgram (covers terminals that share mode across
+// screens) and again from Model.Init after WithAltScreen so Kitty/Ghostty apply
+// the mode on the alternate-screen keyboard stack.
 func EnableEnhancedKeys(w io.Writer) (restore func()) {
 	noop := func() {}
 	if w == nil {
 		return noop
 	}
-	_, _ = w.Write(enableModifyOtherKeys)
-	_, _ = w.Write(enableKittyKeyboard)
+	writeEnhancedKeyEnable(w)
 	var done bool
 	return func() {
 		if done {
@@ -105,6 +112,24 @@ func EnableEnhancedKeys(w io.Writer) (restore func()) {
 		done = true
 		_, _ = w.Write(disableModifyOtherKeys)
 		_, _ = w.Write(disableKittyKeyboard)
+	}
+}
+
+func writeEnhancedKeyEnable(w io.Writer) {
+	if w == nil {
+		return
+	}
+	_, _ = w.Write(enableModifyOtherKeys)
+	_, _ = w.Write(enableKittyKeyboard)
+	_, _ = w.Write(enableKittyKeyboardSet)
+}
+
+// enableEnhancedKeysCmd re-enables enhanced keyboard modes after the alt screen
+// is active. Safe no-op when stdout is not a terminal.
+func enableEnhancedKeysCmd() tea.Cmd {
+	return func() tea.Msg {
+		writeEnhancedKeyEnable(os.Stdout)
+		return nil
 	}
 }
 
