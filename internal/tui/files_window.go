@@ -3,6 +3,7 @@ package tui
 import (
 	"path/filepath"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -14,10 +15,32 @@ import (
 
 const filesWindowID = "files"
 
+// filesRefreshInterval caps idle directory rescans (~1 Hz).
+const filesRefreshInterval = time.Second
+
 // filesOpenMsg requests opening a workspace-relative path from the files explorer.
 // .md paths route to /md-read; everything else uses /vim plumbing.
 type filesOpenMsg struct {
 	path string
+}
+
+// filesRefreshMsg triggers a cheap re-list of expanded directories.
+type filesRefreshMsg struct{}
+
+func filesRefreshCmd() tea.Cmd {
+	return tea.Tick(filesRefreshInterval, func(time.Time) tea.Msg {
+		return filesRefreshMsg{}
+	})
+}
+
+// isWorkspaceFSTool reports tools that may create/delete/rename workspace files.
+func isWorkspaceFSTool(name string) bool {
+	switch name {
+	case "write", "edit", "bash", "apply_patch", "notebook_edit":
+		return true
+	default:
+		return false
+	}
 }
 
 // filesWindow is the right-pane file explorer: a lazy tree of the workspace
@@ -49,7 +72,7 @@ func (w filesWindow) title() string {
 	return "files"
 }
 
-func (w filesWindow) init() tea.Cmd { return nil }
+func (w filesWindow) init() tea.Cmd { return filesRefreshCmd() }
 
 func (w filesWindow) update(msg tea.Msg) (window, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -139,6 +162,108 @@ func (w filesWindow) loadRoot() filesWindow {
 	w.nodes = nodes
 	w.cursor = 0
 	return w
+}
+
+// refresh re-lists the root and currently expanded directories, preserving
+// expansion and cursor when those paths still exist.
+func (w filesWindow) refresh() filesWindow {
+	if w.files == nil || w.root == "" {
+		return w
+	}
+	expanded := map[string]struct{}{}
+	filesCollectExpanded(w.nodes, expanded)
+	var cursorID string
+	rows := ui.FlattenTree(w.nodes)
+	if w.cursor >= 0 && w.cursor < len(rows) {
+		cursorID = rows[w.cursor].ID
+	}
+	prevCursor := w.cursor
+
+	nodes, err := w.listNodes("")
+	if err != nil {
+		w.err = err.Error()
+		// Keep the prior tree so a transient list error does not blank the pane.
+		return w
+	}
+	w.err = ""
+	w.nodes = w.restoreExpanded(nodes, expanded)
+
+	rows = ui.FlattenTree(w.nodes)
+	w.cursor = 0
+	if cursorID != "" {
+		for i, row := range rows {
+			if row.ID == cursorID {
+				w.cursor = i
+				return w
+			}
+		}
+	}
+	if len(rows) == 0 {
+		w.cursor = 0
+	} else if prevCursor >= len(rows) {
+		w.cursor = len(rows) - 1
+	} else if prevCursor > 0 {
+		w.cursor = prevCursor
+	}
+	return w
+}
+
+func filesCollectExpanded(nodes []ui.TreeNode, out map[string]struct{}) {
+	for _, n := range nodes {
+		if n.Expanded && !n.Leaf && n.ID != "" {
+			out[n.ID] = struct{}{}
+		}
+		if len(n.Children) > 0 {
+			filesCollectExpanded(n.Children, out)
+		}
+	}
+}
+
+// restoreExpanded loads children for IDs in expanded and marks those nodes open.
+func (w filesWindow) restoreExpanded(nodes []ui.TreeNode, expanded map[string]struct{}) []ui.TreeNode {
+	if len(expanded) == 0 {
+		return nodes
+	}
+	for i := range nodes {
+		n := &nodes[i]
+		if n.Leaf || n.ID == "" {
+			continue
+		}
+		if _, ok := expanded[n.ID]; !ok {
+			continue
+		}
+		children, err := w.listNodes(n.ID)
+		if err != nil {
+			// Leave collapsed on transient/child list errors.
+			continue
+		}
+		n.Children = w.restoreExpanded(children, expanded)
+		n.Lazy = true
+		n.Expanded = true
+	}
+	return nodes
+}
+
+// refreshFilesWindows reloads the files explorer tree from host.Files.
+func refreshFilesWindows(r windowRegistry) windowRegistry {
+	if len(r.windows) == 0 {
+		return r
+	}
+	windows := append([]window(nil), r.windows...)
+	changed := false
+	for i, w := range windows {
+		fw, ok := w.(filesWindow)
+		if !ok {
+			continue
+		}
+		windows[i] = fw.refresh()
+		changed = true
+	}
+	if !changed {
+		return r
+	}
+	r.windows = windows
+	return r
 }
 
 func (w filesWindow) handleKey(msg tea.KeyMsg) (filesWindow, tea.Cmd) {
