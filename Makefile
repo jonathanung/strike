@@ -1,4 +1,4 @@
-.PHONY: build run run-echo serve serve-expose web-build test vet cover cover-check clean setup
+.PHONY: build run run-echo serve serve-expose web-build test vet cover cover-check clean setup tui-gen
 
 # Overall statement-coverage floor for `make cover-check` (local / optional CI).
 # Soft baseline ~77%; keep below measured total so the gate does not flake.
@@ -13,7 +13,11 @@ COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 # break `go build -ldflags`.
 GO_LDFLAGS ?= -X github.com/jonathanung/strike-cli/internal/version.Version=$(VERSION) -X github.com/jonathanung/strike-cli/internal/version.Commit=$(COMMIT)
 
-build:
+# Flatten internal/tui/_src/* into package tui (Go one-directory packages).
+tui-gen:
+	go generate ./internal/tui
+
+build: tui-gen
 	go build -ldflags "$(GO_LDFLAGS)" -o strike ./cmd/strike
 
 # Creates ~/.strike (config, example agent + skill); never overwrites.
@@ -41,14 +45,14 @@ web-build:
 	@if [ ! -f web/package.json ]; then echo "web-build: no web/package.json"; exit 0; fi
 	cd web && npm ci && npm run build
 
-test:
+test: tui-gen
 	go test ./...
 
-vet:
+vet: tui-gen
 	go vet ./...
 
 # Per-package + total statement coverage. Writes $(COVER_PROFILE).
-cover:
+cover: tui-gen
 	go test ./... -count=1 -coverprofile=$(COVER_PROFILE)
 	@go tool cover -func=$(COVER_PROFILE) | awk '/^total:/{print}'
 	@echo "per-package: go tool cover -func=$(COVER_PROFILE)"

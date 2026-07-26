@@ -34,6 +34,9 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
+      - name: Generate TUI flatten
+        run: go generate ./internal/tui
+
       - name: Format
         run: |
           unformatted=$(gofmt -l .)
@@ -42,6 +45,7 @@ jobs:
             echo "$unformatted"
             exit 1
           fi
+
 
       - name: Build web assets
         if: hashFiles('web/package.json') != ''

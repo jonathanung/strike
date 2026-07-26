@@ -66,8 +66,10 @@ event stream the TUI rendered from (see `internal/protocol/codec.go`).
 | `internal/project` | Stable filesystem identity + optional per-session git worktrees under `.strike/worktrees/` | stdlib, os/exec |
 | `internal/host` | **Frozen contract**: the services a frontend needs from its host process | stdlib only — enforced by the boundary test |
 | `internal/host/local` | Real `host.Services` implementation; wraps auth/config/models/history/memory/issue/files/mcp for the frontend | `auth`, `config`, `history`, `host`, `issue`, `mcp`, `memory`, `models` |
-| `internal/tui` | Bubble Tea frontend: app model, layout, transcript cells, modals, composer | `protocol`, `host`, `tui/...` only — enforced by the boundary test |
+| `internal/tui` | Bubble Tea frontend: app model, layout, cells, modals, composer. Sources under `_src/<group>/`, flattened by `go generate` | `protocol`, `host`, `tui/...` only — enforced by the boundary test |
 | `internal/tui/theme` | Resolved design tokens: adaptive color roles, surfaces, chrome mode (solid\|bordered), terminal background, glyphs, border/spacing tokens, and precomputed styles | lipgloss, stdlib |
+| `internal/tui/common` | Pure formatting helpers (ThemedSpace, DotJoin, compact durations) | `tui/theme`, stdlib |
+| `internal/tui/term` | PTY + vt10x for embedded editors | stdlib + pty/vt10x |
 | `internal/tui/ui` | Reusable component library (Panel, Dialog, Badge, KeyHints, StatusBar, List, Notice, Card/Bento, OverlayCenter/Scrim, Canvas, Logo) | stdlib, lipgloss, bubbles, charmbracelet/x/ansi, `tui/theme` |
 
 ## Dependency rules
@@ -146,6 +148,31 @@ and `config.theme` / ctrl+d persists the choice. Session-local appearance
 forced modes and restores the initially detected background for auto.
 Default chrome is **solid** (surface fills, no box-drawing primary frame);
 themes may opt into `chrome: "bordered"`. See [theme.md](theme.md).
+
+
+## TUI file map
+
+`internal/tui` is one Go package (shared unexported `Model` / `modal` / `window` /
+`cell`). Go cannot split a package across directories, so sources are grouped
+under `_src/<group>/` for traversability and flattened into `internal/tui/*.go`
+by `go generate ./internal/tui` (`make test` / `make build` run this first).
+
+| `_src` group | Concern |
+|---|---|
+| `app/` | Model, event apply, key routing, slash commands |
+| `layout/` | View composition, splits, welcome, chrome |
+| `modal/` | Overlay dialogs and pickers |
+| `window/` | Right-pane windows and registry |
+| `cell/` | Transcript cells and export |
+| `input/` | Composer, completion, mouse, editor launch |
+| `session/` | Session navigation |
+| `hostui/` | MCP, project data, terminal notify, links |
+| `util/` | Shims to `common/` |
+| `test/` | Cross-cutting tests |
+
+**Edit `_src/` only**, then `go generate ./internal/tui`. Independent real
+packages: `theme/`, `ui/`, `term/`, `common/`.
+
 
 ## Why a host-services seam
 

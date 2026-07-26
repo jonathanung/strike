@@ -6,3 +6,10 @@ coverage.out
 */worktrees
 web/node_modules/
 web/dist/
+
+# Generated flatten of internal/tui/_src/ (go generate ./internal/tui).
+# Source of truth is _src/<group>/; make build/test and CI run generate first.
+/internal/tui/*.go
+!/internal/tui/doc.go
+!/internal/tui/gen_src.go
+!/internal/tui/gen_sync_test.go
