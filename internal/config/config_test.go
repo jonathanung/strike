@@ -532,3 +532,66 @@ func TestLoadCompactionStrategy(t *testing.T) {
 		t.Fatalf("unknown normalize = %q", got)
 	}
 }
+
+func TestNormalizeNotify(t *testing.T) {
+	cases := map[string]string{
+		"":               "",
+		"on":             NotifyOn,
+		"ALWAYS":         NotifyOn,
+		"off":            NotifyOff,
+		"never":          NotifyOff,
+		"unfocused-only": NotifyUnfocusedOnly,
+		"unfocused":      NotifyUnfocusedOnly,
+		"nope":           "",
+	}
+	for in, want := range cases {
+		if got := NormalizeNotify(in); got != want {
+			t.Errorf("NormalizeNotify(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestLoadNotifyMerge(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(global, []byte(`{"notify": "on"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(work, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(project), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(project, []byte(`{"notify": "OFF"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Notify != NotifyOff {
+		t.Fatalf("notify = %q, want off", cfg.Notify)
+	}
+
+	// Unknown values dropped (empty = TUI default unfocused-only).
+	if err := os.WriteFile(project, []byte(`{"notify": "maybe"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Global "on" remains because project unknown normalizes to empty and
+	// merge only applies non-empty layer values — but read() normalizes
+	// before merge, so empty layer field does not clear base.
+	// Wait: merge is layer-by-layer. project layer after normalize has
+	// Notify="". merge skips empty. So global "on" stays.
+	if cfg.Notify != NotifyOn {
+		t.Fatalf("notify after unknown project = %q, want on (global)", cfg.Notify)
+	}
+}
