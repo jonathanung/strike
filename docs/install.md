@@ -56,9 +56,11 @@ strike --upgrade
 ```
 
 Self-update fetches the latest GitHub Release, verifies the archive checksum,
-atomically replaces the running binary, and re-execs. Config and sessions under
-`~/.strike` are never deleted. If the binary is not writable (e.g. installed
-system-wide), re-run the install script or use your package manager.
+and atomically replaces the running binary. `strike upgrade` / `strike --upgrade`
+exits back to the shell when done; `/upgrade` in the TUI restarts the app.
+Config and sessions under `~/.strike` are never deleted. If the binary is not
+writable (e.g. installed system-wide), re-run the install script or use your
+package manager.
 
 Windows self-update is unsupported in v1; re-download from Releases.
 

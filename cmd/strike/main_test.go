@@ -33,7 +33,7 @@ Options:
   --continue                         resume the most recent root session (model history + selections)
   --session <id>                     resume a specific session by id (model history + selections)
   --worktree                         run this session in an isolated git worktree under .strike/worktrees/
-  --upgrade                          download and install the latest GitHub Release, then restart
+  --upgrade                          download and install the latest GitHub Release
   --version                          print version and exit
   -h, --help                         show help
 `
@@ -490,5 +490,16 @@ func TestRunCLIVersion(t *testing.T) {
 		if stderr.Len() != 0 {
 			t.Fatalf("args=%v stderr=%q", args, stderr.String())
 		}
+	}
+}
+
+func TestUpgradeCLIOptionsDoesNotReexec(t *testing.T) {
+	var stdout bytes.Buffer
+	opts := upgradeCLIOptions(&stdout)
+	if !opts.NoExec {
+		t.Fatal("CLI upgrade must set NoExec so strike does not relaunch after upgrade")
+	}
+	if opts.Stdout != &stdout {
+		t.Fatal("CLI upgrade must forward stdout for progress messages")
 	}
 }
