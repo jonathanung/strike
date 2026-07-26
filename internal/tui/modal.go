@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -21,15 +22,26 @@ type modal interface {
 	view(width int, th theme.Theme) string
 }
 
+// permissionCountdownMsg advances an armed permission auto-approve timer.
+// Stale ticks (wrong request or generation) are ignored.
+type permissionCountdownMsg struct {
+	requestID string
+	gen       int
+}
+
 // permissionModal renders a pending permission ask with once/session/project/
 // reject choices. Esc always means reject — dismissal never silently continues.
+// When auto-approve is armed, remaining counts down to a single DecisionOnce.
 type permissionModal struct {
-	req      protocol.PermissionAsked
-	ops      chan<- protocol.Op
-	choice   int
-	state    permissionModalState
-	feedback textinput.Model
-	th       theme.Theme
+	req       protocol.PermissionAsked
+	ops       chan<- protocol.Op
+	choice    int
+	state     permissionModalState
+	feedback  textinput.Model
+	th        theme.Theme
+	remaining int  // seconds left; 0 = no active countdown
+	autoGen   int  // bumps to cancel in-flight ticks
+	decided   bool // true after a reply is queued (no double-submit)
 }
 
 type permissionModalState int
@@ -56,6 +68,51 @@ func newPermissionModal(req protocol.PermissionAsked, ops chan<- protocol.Op, th
 	}
 	in := newTextInput(th, "optional feedback")
 	return &permissionModal{req: req, ops: ops, feedback: in, th: th.Resolve()}
+}
+
+// armAutoApprove starts a visible N-second countdown that submits allow-once.
+// seconds ≤ 0 is a no-op. Returns the first tick command.
+func (m *permissionModal) armAutoApprove(seconds int) tea.Cmd {
+	if m == nil || seconds <= 0 || m.decided {
+		return nil
+	}
+	m.remaining = seconds
+	m.autoGen++
+	return m.countdownTick()
+}
+
+func (m *permissionModal) cancelCountdown() {
+	if m == nil {
+		return
+	}
+	m.remaining = 0
+	m.autoGen++
+}
+
+func (m *permissionModal) countdownTick() tea.Cmd {
+	if m == nil || m.remaining <= 0 || m.decided {
+		return nil
+	}
+	gen := m.autoGen
+	id := m.req.RequestID
+	return tea.Tick(time.Second, func(time.Time) tea.Msg {
+		return permissionCountdownMsg{requestID: id, gen: gen}
+	})
+}
+
+// onCountdown handles a tick. At zero remaining it submits allow-once once.
+func (m *permissionModal) onCountdown(msg permissionCountdownMsg) (modal, tea.Cmd) {
+	if m == nil || m.decided {
+		return m, nil
+	}
+	if msg.requestID != m.req.RequestID || msg.gen != m.autoGen || m.remaining <= 0 {
+		return m, nil
+	}
+	m.remaining--
+	if m.remaining > 0 {
+		return m, m.countdownTick()
+	}
+	return nil, m.reply(protocol.DecisionOnce)
 }
 
 func (m *permissionModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
@@ -87,10 +144,12 @@ func (m *permissionModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 	case "3", "p":
 		return nil, m.reply(protocol.DecisionProject)
 	case "4", "n":
+		m.cancelCountdown()
 		m.state = permissionModalFeedback
 		return m, m.feedback.Focus()
 	case "enter":
 		if permChoices[m.choice].decision == protocol.DecisionReject {
+			m.cancelCountdown()
 			m.state = permissionModalFeedback
 			return m, m.feedback.Focus()
 		}
@@ -104,6 +163,11 @@ func (m *permissionModal) reply(d protocol.Decision) tea.Cmd {
 }
 
 func (m *permissionModal) replyWithMessage(d protocol.Decision, message string) tea.Cmd {
+	if m.decided {
+		return nil
+	}
+	m.decided = true
+	m.cancelCountdown()
 	req := m.req
 	ops := m.ops
 	return func() tea.Msg {
@@ -137,6 +201,11 @@ func (m *permissionModal) view(width int, th theme.Theme) string {
 		}
 	}
 
+	var countdownLine string
+	if m.remaining > 0 && m.state == permissionModalChoice {
+		countdownLine = "\n" + wrapToWidth(st.Warning.Render("auto-allow in "+itoa(m.remaining)+"s"), inner)
+	}
+
 	if m.state == permissionModalFeedback {
 		prompt := st.Text.Render("Optional feedback for the rejection:")
 		m.feedback.Width = max(1, inner-ansi.StringWidth(m.feedback.Prompt)-cursorWidth)
@@ -165,10 +234,14 @@ func (m *permissionModal) view(width int, th theme.Theme) string {
 	if plain > inner {
 		sep = "\n" // stack choices when the row would overflow a narrow dialog
 	}
-	body := heading + "\n" + detail + diffSection + strings.Repeat("\n", max(1, th.Spacing.SM)) + strings.Join(choices, sep)
+	body := heading + "\n" + detail + diffSection + countdownLine + strings.Repeat("\n", max(1, th.Spacing.SM)) + strings.Join(choices, sep)
+	hints := []string{"←/→ select", "enter confirm", "esc reject"}
+	if m.remaining > 0 {
+		hints = append(hints, "auto-allow "+itoa(m.remaining)+"s")
+	}
 	return ui.Dialog(th, ui.DialogOpts{
 		Title: "permission",
-		Hint:  dotJoin(th, "←/→ select", "enter confirm", "esc reject"),
+		Hint:  dotJoin(th, hints...),
 		Width: width,
 		Tone:  ui.ToneWarning,
 	}, body)

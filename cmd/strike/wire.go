@@ -660,14 +660,16 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 			// opt-in mouse mode; keyboard scroll and y-to-copy cover navigation
 			// and clipboard. Shift+drag still selects if mouse is re-enabled.
 			program := tea.NewProgram(tui.New(a.eng.Ops(), live, a.services, tui.Options{
-				DangerouslySkipPermissions: opts.dangerouslySkipPermissions,
-				Theme:                      themePtr,
-				ThemeID:                    themeID,
-				SessionID:                  a.sessionID,
-				WorkDir:                    a.workDir,
-				FirstRun:                   a.firstRun,
-				VimMode:                    vimMode,
-				Replay:                     a.replay,
+				DangerouslySkipPermissions:   opts.dangerouslySkipPermissions,
+				Theme:                        themePtr,
+				ThemeID:                      themeID,
+				SessionID:                    a.sessionID,
+				WorkDir:                      a.workDir,
+				FirstRun:                     a.firstRun,
+				VimMode:                      vimMode,
+				PermissionAutoApproveSeconds: a.cfg.PermissionAutoApproveSeconds,
+				PermissionAutoApproveExclude: a.cfg.PermissionAutoApproveExclude,
+				Replay:                       a.replay,
 			}), tea.WithAltScreen(), tea.WithOutput(stdout), tea.WithInput(tui.WrapInput(os.Stdin)), tea.WithReportFocus())
 			final, runProgErr := program.Run()
 			if m, ok := final.(tui.Model); ok {

@@ -112,6 +112,11 @@ type Options struct {
 	FirstRun bool
 	// VimMode selects pane/overlay/takeover for /vim. Empty defaults to pane.
 	VimMode VimMode
+	// PermissionAutoApproveSeconds arms permission-modal auto-allow once after
+	// N seconds. Zero disables (default). Clamped by the host before wiring.
+	PermissionAutoApproveSeconds int
+	// PermissionAutoApproveExclude lists permission names that never auto-allow.
+	PermissionAutoApproveExclude []string
 	// Replay is a prior session event log for --continue / --session. Seeded
 	// via cellsFromEvents + silent selection/child state — never fed through
 	// applyEvent (avoids stuck turns, zombie permission modals, orphan children).
@@ -178,6 +183,9 @@ type Model struct {
 	historyPos                 int
 	historyDraft               string
 	dangerouslySkipPermissions bool
+	// permissionAutoApproveSeconds > 0 arms countdown auto-allow on asks.
+	permissionAutoApproveSeconds int
+	permissionAutoApproveExclude []string
 
 	providerName string
 	modelName    string
@@ -320,6 +328,12 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		if option.VimMode != "" {
 			m.vimMode = option.VimMode
 		}
+		if option.PermissionAutoApproveSeconds != 0 {
+			m.permissionAutoApproveSeconds = option.PermissionAutoApproveSeconds
+		}
+		if option.PermissionAutoApproveExclude != nil {
+			m.permissionAutoApproveExclude = option.PermissionAutoApproveExclude
+		}
 		if len(option.Replay) > 0 {
 			replay = option.Replay
 		}
@@ -433,6 +447,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reflow()
 		m.refreshViewport()
 		return m, tea.Batch(m.listen(), cmd)
+
+	case permissionCountdownMsg:
+		pm, ok := m.modal.(*permissionModal)
+		if !ok {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.modal, cmd = pm.onCountdown(msg)
+		m.reflow()
+		return m, cmd
 
 	case contextLimitsMsg:
 		if msg.provider != m.providerName || msg.model != m.modelName {
@@ -1249,6 +1273,31 @@ func (m *Model) toggleOrientation() {
 	m.refreshViewport()
 }
 
+// armPermissionAutoApprove starts the modal countdown when mode is armed and
+// the permission name is not excluded.
+func (m *Model) armPermissionAutoApprove(pm *permissionModal, permission string) tea.Cmd {
+	if pm == nil || m.permissionAutoApproveSeconds <= 0 {
+		return nil
+	}
+	if permissionAutoApproveExcluded(permission, m.permissionAutoApproveExclude) {
+		return nil
+	}
+	return pm.armAutoApprove(m.permissionAutoApproveSeconds)
+}
+
+func permissionAutoApproveExcluded(permission string, exclude []string) bool {
+	if len(exclude) == 0 {
+		return false
+	}
+	want := strings.ToLower(strings.TrimSpace(permission))
+	for _, name := range exclude {
+		if strings.EqualFold(strings.TrimSpace(name), want) {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 	// Defense-in-depth: child-session events should only surface permissions,
 	// questions, and child lifecycle (activity pane). Primary filtering is in
@@ -1337,8 +1386,12 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 			}
 		}
 	case protocol.PermissionAsked:
-		m.modal = newPermissionModal(ev, m.ops, m.th)
+		pm := newPermissionModal(ev, m.ops, m.th)
+		m.modal = pm
 		cmd = m.broadcastContextState()
+		if auto := m.armPermissionAutoApprove(pm, ev.Permission); auto != nil {
+			cmd = tea.Batch(cmd, auto)
+		}
 		if !m.focused {
 			cmd = tea.Batch(cmd, notifyUnfocusedCmd("strike: permission required"))
 		}

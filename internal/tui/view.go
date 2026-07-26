@@ -81,6 +81,10 @@ func (m Model) headerView(width int) string {
 	// Autonomy is always visible so mode is never only implicit in gates.
 	// Compact short label keeps the working status visible on narrow widths.
 	left += inlineGap + ui.Badge(th, ui.ToneMuted, "auto"+inlineGap+m.autonomy.Short())
+	if m.permissionAutoApproveSeconds > 0 {
+		// Warning tone: armed auto-allow is a cost/safety-visible preference.
+		left += inlineGap + ui.Badge(th, ui.ToneWarning, "auto-allow"+inlineGap+itoa(m.permissionAutoApproveSeconds)+"s")
+	}
 	if m.fastEnabled {
 		// Warning tone: priority tier is a cost-visible session preference.
 		left += inlineGap + ui.Badge(th, ui.ToneWarning, "fast")
