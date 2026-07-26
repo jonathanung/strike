@@ -6,6 +6,7 @@ package engine
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -250,10 +251,10 @@ type Engine struct {
 	// a parent turn is active; flushed into a follow-up turn when idle.
 	pendingChildNotices []string
 
-	// pendingUserInputs holds UserInput texts accepted while a turn was
-	// active. Drained FIFO one-at-a-time after each turn ends. Survives
-	// Interrupt so follow-up prompts typed mid-turn are not lost.
-	pendingUserInputs []string
+	// pendingUserInputs holds UserInput accepted while a turn was active.
+	// Drained FIFO one-at-a-time after each turn ends. Survives Interrupt so
+	// follow-up prompts typed mid-turn are not lost.
+	pendingUserInputs []pendingUserInput
 
 	// pendingAgent is set by tools via SwitchAgent and applied after each tool
 	// batch (so the next Stream sees the new agent/prompt) and again in
@@ -492,7 +493,7 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 	switch op := op.(type) {
 	case protocol.UserInput:
 		if e.turnActive() {
-			e.enqueueUserInput(op.Text)
+			e.enqueueUserInput(op)
 			return
 		}
 		if e.prov == nil {
@@ -502,7 +503,7 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 			})
 			return
 		}
-		e.startTurn(ctx, op.Text)
+		e.startTurn(ctx, op.Text, op.Images)
 	case protocol.SelectModel:
 		e.handleSelect(op)
 	case protocol.SelectAgent:
@@ -1113,10 +1114,46 @@ func (e *Engine) turnActive() bool {
 // new item (callers such as the TUI keep the draft on failure).
 const maxPendingUserInputs = 32
 
-// enqueueUserInput buffers text for FIFO start after the active turn ends.
-// Empty/whitespace-only input is ignored. Queue survives Interrupt.
-func (e *Engine) enqueueUserInput(text string) {
-	if strings.TrimSpace(text) == "" {
+// pendingUserInput is one mid-turn buffered prompt (text + optional images).
+type pendingUserInput struct {
+	text   string
+	images []protocol.ImageAttachment
+}
+
+// protocolImagesToProvider decodes base64 session attachments into provider images.
+// Invalid entries are skipped so a corrupt log line does not block restore/send.
+func protocolImagesToProvider(images []protocol.ImageAttachment) []provider.Image {
+	if len(images) == 0 {
+		return nil
+	}
+	out := make([]provider.Image, 0, len(images))
+	for _, img := range images {
+		mime := strings.TrimSpace(img.MIME)
+		if mime == "" || img.Data == "" {
+			continue
+		}
+		raw, err := base64.StdEncoding.DecodeString(img.Data)
+		if err != nil {
+			raw, err = base64.RawStdEncoding.DecodeString(img.Data)
+			if err != nil {
+				continue
+			}
+		}
+		if len(raw) == 0 {
+			continue
+		}
+		out = append(out, provider.Image{MIME: mime, Data: raw})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// enqueueUserInput buffers input for FIFO start after the active turn ends.
+// Empty/whitespace-only text with no images is ignored. Queue survives Interrupt.
+func (e *Engine) enqueueUserInput(op protocol.UserInput) {
+	if strings.TrimSpace(op.Text) == "" && len(op.Images) == 0 {
 		return
 	}
 	if len(e.pendingUserInputs) >= maxPendingUserInputs {
@@ -1126,7 +1163,10 @@ func (e *Engine) enqueueUserInput(text string) {
 		})
 		return
 	}
-	e.pendingUserInputs = append(e.pendingUserInputs, text)
+	e.pendingUserInputs = append(e.pendingUserInputs, pendingUserInput{
+		text:   op.Text,
+		images: append([]protocol.ImageAttachment(nil), op.Images...),
+	})
 }
 
 // drainIdleFollowups starts at most one follow-up turn when idle: preferred
@@ -1148,16 +1188,16 @@ func (e *Engine) startNextPendingUserInput(ctx context.Context) bool {
 	if e.turnActive() || e.prov == nil || ctx.Err() != nil {
 		return false
 	}
-	text := e.pendingUserInputs[0]
+	item := e.pendingUserInputs[0]
 	e.pendingUserInputs = e.pendingUserInputs[1:]
 	if len(e.pendingUserInputs) == 0 {
 		e.pendingUserInputs = nil
 	}
-	e.startTurn(ctx, text)
+	e.startTurn(ctx, item.text, item.images)
 	return true
 }
 
-func (e *Engine) startTurn(ctx context.Context, text string) {
+func (e *Engine) startTurn(ctx context.Context, text string, images []protocol.ImageAttachment) {
 	// Mint turn ID only after input acceptance (provider present, no active turn).
 	turnID := rand.Text()
 	turnCtx, cancel := context.WithCancel(ctx)
@@ -1169,7 +1209,7 @@ func (e *Engine) startTurn(ctx context.Context, text string) {
 	go func() {
 		defer close(done)
 		defer cancel()
-		e.runTurn(turnCtx, text, turnID, finishing)
+		e.runTurn(turnCtx, text, images, turnID, finishing)
 	}()
 }
 
@@ -1228,15 +1268,19 @@ func sessionTitleFromText(text string) string {
 // provider-request ID and attempt number (retries included). finishing is
 // closed exactly once immediately before the terminal TurnCompleted emission
 // so Run can join the worker before the next op.
-func (e *Engine) runTurn(ctx context.Context, text string, turnID string, finishing chan struct{}) {
+func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.ImageAttachment, turnID string, finishing chan struct{}) {
 	turnCorr := e.baseCorr()
 	turnCorr.TurnID = turnID
 	e.checkpoints.BeginTurn(turnID)
-	e.emit(protocol.UserMessage{Correlation: turnCorr, Text: text})
+	e.emit(protocol.UserMessage{Correlation: turnCorr, Text: text, Images: images})
 	e.maybeTitleSession(text)
 	e.emit(protocol.TurnStarted{Correlation: turnCorr})
 	e.fireHookRules(turnCorr, permission.HookEventTurnStart, "", "")
-	e.messages = append(e.messages, provider.Message{Role: provider.RoleUser, Text: text})
+	e.messages = append(e.messages, provider.Message{
+		Role:   provider.RoleUser,
+		Text:   text,
+		Images: protocolImagesToProvider(images),
+	})
 
 	for {
 		e.maybeThresholdCompact(ctx, turnID)

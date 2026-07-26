@@ -114,6 +114,58 @@ restores built-in defaults for the current session only — delete the
 
 List/permission modal conventions (`lists.*`, `perm.*`) are not remappable.
 
+## MCP servers (stdio tools)
+
+Connect external [Model Context Protocol](https://modelcontextprotocol.io)
+servers so their tools appear in the model registry as `mcp_<server>_<tool>`.
+v1 is **stdio only** (command + args). SSE/HTTP transports are out of scope.
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "github": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-github"],
+        "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "…" }
+      }
+    }
+  }
+}
+```
+
+| Field | Required | Notes |
+|---|---|---|
+| `servers.<name>` | yes | short letter-led slug (`[A-Za-z][A-Za-z0-9_-]*`) |
+| `command` | yes | executable on `PATH` or absolute path |
+| `args` | no | argv after the command |
+| `env` | no | explicit env overlay (merged onto the process environment); never logged |
+
+Layers: when a layer sets `mcp.servers` (including `{}`), it **replaces** the
+previous layer's server map. Omitted `mcp` leaves the lower layer unchanged.
+
+Lifecycle: servers start with the session (after the tool worktree is bound),
+list tools once, and shut down on exit. A crashed server does not take down
+strike — its tools error cleanly; `/mcp` shows `down`/`error`.
+
+Permissions: every MCP tool call asks with permission name `mcp` and pattern
+`<server>/<tool>` (default action **ask**). Allow a server or tool in config:
+
+```json
+{
+  "permissions": [
+    { "permission": "mcp", "pattern": "github/*", "action": "allow" },
+    { "permission": "mcp", "pattern": "github/delete_*", "action": "deny" }
+  ]
+}
+```
+
+In the TUI, `/mcp` lists configured servers, up/down status, and tool names.
+
+Treat project-local MCP config like shell hooks: it runs local commands. Prefer
+global `~/.strike/config` for shared servers; review `command`/`args`/`env`
+before trusting a project's `.strike/config`.
+
 ## Custom providers
 
 Add OpenAI-compatible (chat completions) or Anthropic-compatible (messages)

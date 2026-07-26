@@ -15,16 +15,17 @@ import (
 const maxInputQueue = 32
 
 // queuedInput is one user prompt waiting for the active turn to finish.
-// modelText is what the engine receives; displayPrompt is history/chip text.
+// modelText/images is what the engine receives; displayPrompt is history text.
 type queuedInput struct {
 	modelText     string
+	images        []protocol.ImageAttachment
 	displayPrompt string
 }
 
 // enqueueUserInput buffers a prompt while turnRunning. Clears the composer on
 // success; keeps the draft when the queue is full or text is empty.
 func (m Model) enqueueUserInput(op protocol.UserInput, displayPrompt string) (tea.Model, tea.Cmd) {
-	if strings.TrimSpace(op.Text) == "" {
+	if strings.TrimSpace(op.Text) == "" && len(op.Images) == 0 {
 		return m, nil
 	}
 	if len(m.inputQueue) >= maxInputQueue {
@@ -33,6 +34,7 @@ func (m Model) enqueueUserInput(op protocol.UserInput, displayPrompt string) (te
 	}
 	m.inputQueue = append(m.inputQueue, queuedInput{
 		modelText:     op.Text,
+		images:        append([]protocol.ImageAttachment(nil), op.Images...),
 		displayPrompt: displayPrompt,
 	})
 	m.resetComposer()
@@ -91,7 +93,7 @@ func (m *Model) tryDrainInputQueue() tea.Cmd {
 		m.setInputQueueNotice()
 	}
 	ops := m.ops
-	op := protocol.UserInput{Text: item.modelText}
+	op := protocol.UserInput{Text: item.modelText, Images: item.images}
 	return func() tea.Msg {
 		ops <- op
 		return nil

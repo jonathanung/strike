@@ -21,10 +21,18 @@ const (
 	RoleTool      Role = "tool"
 )
 
+// Image is one user-attached image for multimodal requests.
+type Image struct {
+	MIME string // e.g. image/png
+	Data []byte // raw bytes (adapters base64-encode for the wire)
+}
+
 // Message is one entry in the conversation history sent to the model.
 type Message struct {
 	Role Role
 	Text string
+	// Images are optional multimodal parts on RoleUser messages.
+	Images []Image
 	// ToolCalls is set on assistant messages that requested tool use.
 	ToolCalls []ToolCall
 	// ToolResult is set on RoleTool messages.

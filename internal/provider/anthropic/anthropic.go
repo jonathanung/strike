@@ -5,6 +5,7 @@ package anthropic
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -114,6 +115,8 @@ type apiBlock struct {
 	Type string `json:"type"`
 	// text
 	Text string `json:"text,omitempty"`
+	// image
+	Source *apiImageSource `json:"source,omitempty"`
 	// tool_use
 	ID    string          `json:"id,omitempty"`
 	Name  string          `json:"name,omitempty"`
@@ -122,6 +125,12 @@ type apiBlock struct {
 	ToolUseID string `json:"tool_use_id,omitempty"`
 	Content   string `json:"content,omitempty"`
 	IsError   bool   `json:"is_error,omitempty"`
+}
+
+type apiImageSource struct {
+	Type      string `json:"type"` // base64
+	MediaType string `json:"media_type"`
+	Data      string `json:"data"`
 }
 
 type apiTool struct {
@@ -208,7 +217,7 @@ func toAPIRequest(req provider.Request) (apiRequest, error) {
 	for _, m := range req.Messages {
 		switch m.Role {
 		case provider.RoleUser:
-			blocks, err := rawBlocks(apiBlock{Type: "text", Text: m.Text})
+			blocks, err := rawBlocks(userBlocks(m)...)
 			if err != nil {
 				return apiRequest{}, err
 			}
@@ -267,6 +276,32 @@ func applyEffort(out *apiRequest, effort provider.Effort) {
 		out.Thinking = &apiThinking{Type: "adaptive"}
 		out.OutputConfig = &apiOutputConfig{Effort: string(effort)}
 	}
+}
+
+// userBlocks builds Anthropic content blocks for a user turn (text + images).
+func userBlocks(m provider.Message) []apiBlock {
+	var blocks []apiBlock
+	for _, img := range m.Images {
+		if len(img.Data) == 0 {
+			continue
+		}
+		mime := img.MIME
+		if mime == "" {
+			mime = "image/png"
+		}
+		blocks = append(blocks, apiBlock{
+			Type: "image",
+			Source: &apiImageSource{
+				Type:      "base64",
+				MediaType: mime,
+				Data:      base64.StdEncoding.EncodeToString(img.Data),
+			},
+		})
+	}
+	if m.Text != "" || len(blocks) == 0 {
+		blocks = append(blocks, apiBlock{Type: "text", Text: m.Text})
+	}
+	return blocks
 }
 
 func rawBlocks(blocks ...apiBlock) ([]json.RawMessage, error) {

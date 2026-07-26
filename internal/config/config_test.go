@@ -595,3 +595,51 @@ func TestLoadNotifyMerge(t *testing.T) {
 		t.Fatalf("notify after unknown project = %q, want on (global)", cfg.Notify)
 	}
 }
+
+func TestLoadMCPMergeReplace(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(global, []byte(`{
+		"mcp": {"servers": {
+			"global_only": {"command": "echo", "args": ["g"]},
+			"shared": {"command": "npx", "args": ["-y", "old"]}
+		}}
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(work, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(project), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(project, []byte(`{
+		"mcp": {"servers": {
+			"shared": {"command": "npx", "args": ["-y", "new"], "env": {"TOKEN": "x"}},
+			"project": {"command": "uvx", "args": ["mcp-server"]}
+		}}
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := cfg.MCP.Servers["global_only"]; ok {
+		t.Fatal("project mcp.servers should replace global map entirely")
+	}
+	if cfg.MCP.Servers["shared"].Args[1] != "new" {
+		t.Fatalf("shared = %#v", cfg.MCP.Servers["shared"])
+	}
+	if cfg.MCP.Servers["shared"].Env["TOKEN"] != "x" {
+		t.Fatalf("env = %#v", cfg.MCP.Servers["shared"].Env)
+	}
+	if cfg.MCP.Servers["project"].Command != "uvx" {
+		t.Fatalf("project server = %#v", cfg.MCP.Servers["project"])
+	}
+}

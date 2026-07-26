@@ -71,6 +71,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 /upgrade                       # install latest GitHub Release and restart
 /init                          # create or update project AGENTS.md (confirm
                                # before replacing an existing file)
+/mcp                           # list MCP servers (up/down) and tool names
 ```
 
 ### Session, memory, issues
@@ -87,6 +88,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/context` | context doctor modal: layer sizes, history msg count, oversized warnings (previews redacted) |
 | `/cost` | session input/output/cache totals from usage events; est. USD when catalog rates known; unknown stays explicit |
 | `/init` | light local scan → write `AGENTS.md`; confirms before overwrite |
+| `/mcp` | list configured MCP servers, status, and namespaced tool ids (see [config.md](config.md#mcp-servers-stdio-tools)) |
 
 ### Autonomy & workflows
 
@@ -156,7 +158,8 @@ slot hosts one active window from the registry:
 
 Vim-style pane keys (horizontal split): `ctrl+h` / `ctrl+l` focus the left
 or right pane; `ctrl+j` / `ctrl+k` cycle the active right-pane window
-next/previous. `ctrl+;` (or `/layout` / `/split`) toggles a vertical
+next/previous (enhanced terminals distinguish `ctrl+j` from bare LF
+newline). `ctrl+;` (or `/layout` / `/split`) toggles a vertical
 top/bottom split and swaps those chords (focus becomes `ctrl+j`/`ctrl+k`,
 cycle becomes `ctrl+h`/`ctrl+l`). `ctrl+p` opens the command palette; `f1`
 (or `/keys`) opens a filterable keybind cheatsheet. Enter sends; Shift+Enter

@@ -320,3 +320,39 @@ func TestRequestEncodesReasoningFieldsOnTheWire(t *testing.T) {
 		}
 	}
 }
+
+func TestUserMessageIncludesImageBlocks(t *testing.T) {
+	png := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a}
+	req := provider.Request{
+		Model: "claude",
+		Messages: []provider.Message{{
+			Role:   provider.RoleUser,
+			Text:   "what is this",
+			Images: []provider.Image{{MIME: "image/png", Data: png}},
+		}},
+	}
+	out, err := toAPIRequest(req)
+	if err != nil {
+		t.Fatalf("toAPIRequest: %v", err)
+	}
+	if len(out.Messages) != 1 {
+		t.Fatalf("messages = %d", len(out.Messages))
+	}
+	if len(out.Messages[0].Content) != 2 {
+		t.Fatalf("blocks = %d, want 2", len(out.Messages[0].Content))
+	}
+	var img apiBlock
+	if err := json.Unmarshal(out.Messages[0].Content[0], &img); err != nil {
+		t.Fatal(err)
+	}
+	if img.Type != "image" || img.Source == nil || img.Source.MediaType != "image/png" || img.Source.Data == "" {
+		t.Fatalf("image block = %+v", img)
+	}
+	var text apiBlock
+	if err := json.Unmarshal(out.Messages[0].Content[1], &text); err != nil {
+		t.Fatal(err)
+	}
+	if text.Type != "text" || text.Text != "what is this" {
+		t.Fatalf("text block = %+v", text)
+	}
+}
