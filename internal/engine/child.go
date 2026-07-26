@@ -52,7 +52,7 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 	}
 	childAgent, ok := e.findAgent(agentName)
 	if !ok {
-		return tool.TaskResult{}, fmt.Errorf("unknown agent %q", agentName)
+		return tool.TaskResult{}, fmt.Errorf("unknown agent %q (available: %s)", agentName, agentNamesList(e.opts.Agents))
 	}
 
 	childID := rand.Text()

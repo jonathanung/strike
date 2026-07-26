@@ -126,9 +126,18 @@ func LoadAgents(workDir string) []Agent {
 	return agents
 }
 
-// LoadAgentsWithError reads agents/*.md from the global then project .strike
-// roots; a project agent overrides a global one with the same name.
+// LoadAgentsWithError merges built-in agents with agents/*.md from the global
+// then project .strike roots. Later layers override earlier ones with the same
+// name (builtins < global < project). build remains first when present.
 func LoadAgentsWithError(workDir string) ([]Agent, error) {
+	disk, err := loadDiskAgents(workDir)
+	if err != nil {
+		return nil, err
+	}
+	return mergeAgents(BuiltinAgents(), disk), nil
+}
+
+func loadDiskAgents(workDir string) ([]Agent, error) {
 	byName := map[string]Agent{}
 	var order []string
 	for _, dir := range []string{filepath.Join(GlobalRoot(), "agents"), filepath.Join(projectRoot(workDir), "agents")} {

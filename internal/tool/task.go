@@ -18,7 +18,10 @@ func (taskTool) Description() string {
 
 - Returns immediately after the child starts (does not block this turn).
 - Result includes the child session id; a later child.completed event carries the terminal summary.
-- Optional agent selects a persona (defaults to the current agent).
+- Optional agent selects a persona (defaults to the current agent). Built-in names include:
+  explore (read-only search), general (multi-step), commit (git commits only),
+  reviewer (read-only review), tester (run make test/vet/build), debugger (root-cause),
+  build (default coding), plan (read-only planning).
 - Children cannot spawn further tasks (depth limit 1).
 - Use for scoped work that benefits from a fresh message history.`
 }
@@ -28,7 +31,7 @@ func (taskTool) Schema() json.RawMessage {
 		"type": "object",
 		"properties": {
 			"prompt": {"type": "string", "description": "The subtask instructions for the child agent"},
-			"agent": {"type": "string", "description": "Optional agent persona name (default: current agent)"}
+			"agent": {"type": "string", "description": "Optional agent persona: explore, general, commit, reviewer, tester, debugger, build, plan, or a user-defined name (default: current agent)"}
 		},
 		"required": ["prompt"]
 	}`)

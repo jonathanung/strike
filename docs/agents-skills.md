@@ -6,10 +6,24 @@ folders of markdown files; project files override same-named global ones.
 ## Agents
 
 **Agents** (`agents/*.md`) are personas — a system prompt with optional
-provider/model/effort pins. Built-ins: **build** (default coding agent) and
-**plan** (read-only planning). Define your own `build.md` / `plan.md` to
-replace them. **Tab cycles agents**; bare `/agent` opens a picker; `/agent
-[name]` selects directly; the active agent shows in the status bar.
+provider/model/effort pins. Shipping built-ins (override with same-named
+files under `~/.strike/agents` or `./.strike/agents`):
+
+| Name | Role |
+|------|------|
+| **build** | default coding agent (empty persona → provider overlay) |
+| **plan** | read-only planning (+ plan overlay) |
+| **explore** | fast read-only codebase search (good `task` target) |
+| **general** | multi-step research/execution subagent |
+| **commit** | git commits only (no source edits, no push) |
+| **reviewer** | read-only diff/PR review |
+| **tester** | run `make test` / vet / build; report only |
+| **debugger** | root-cause investigation |
+
+**Tab cycles agents**; bare `/agent` opens a picker; `/agent [name]` selects
+directly; the active agent shows in the status bar. The `task` tool’s optional
+`agent` field must match one of these names (or a user-defined agent) —
+unknown names fail with `unknown agent "…" (available: …)`.
 
 Each model request composes the system prompt in layers (like opencode):
 
