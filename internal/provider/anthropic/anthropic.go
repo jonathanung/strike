@@ -172,10 +172,14 @@ func (p *Provider) Stream(ctx context.Context, req provider.Request) (<-chan pro
 				}}
 			case "thinking", "redacted_thinking":
 				// Carried verbatim, not decoded: the next request must echo
-				// these back unchanged or the API rejects the turn. The text
-				// is empty under the default display setting, which is fine —
-				// an empty block still has to be replayed.
-				ch <- provider.StreamEvent{Type: provider.EventReasoning, Reasoning: raw}
+				// these back unchanged or the API rejects the turn. Display
+				// text is often empty under the default setting; empty prose
+				// still replays the opaque block.
+				ch <- provider.StreamEvent{
+					Type:      provider.EventReasoning,
+					Reasoning: raw,
+					Text:      provider.ReasoningText(raw),
+				}
 			}
 		}
 		done := provider.StreamEvent{Type: provider.EventDone, StopReason: resp.StopReason}

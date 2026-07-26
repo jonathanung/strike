@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -208,6 +209,85 @@ func TestKeysCommandAndPaletteOpenCheatsheet(t *testing.T) {
 	m = updateApp(t, m, paletteInvokeMsg{Action: paletteAction{Kind: paletteActionKeybinds}})
 	if _, ok := m.modal.(*keysModal); !ok {
 		t.Fatalf("palette keybinds modal = %T, want keysModal", m.modal)
+	}
+}
+
+func TestKeybindOverridesChangeJumpBottomAndCheatsheet(t *testing.T) {
+	overrides := map[string][]string{"nav.jump-bottom": {"ctrl+b"}}
+	m, _ := newAppTestModelWithOptions(Options{Keybinds: overrides})
+	if !key.Matches(tea.KeyMsg{Type: tea.KeyCtrlB}, m.keyMap.JumpBottom) {
+		t.Fatal("ctrl+b should match JumpBottom after override")
+	}
+	if key.Matches(tea.KeyMsg{Type: tea.KeyCtrlT}, m.keyMap.JumpBottom) {
+		t.Fatal("ctrl+t should no longer match JumpBottom")
+	}
+	help := m.keyMap.JumpBottom.Help()
+	if help.Key != "ctrl+b" {
+		t.Fatalf("JumpBottom help key = %q, want ctrl+b", help.Key)
+	}
+	catalog := keybindCatalog(m.keyMap)
+	found := false
+	for _, e := range catalog {
+		if e.ID == "nav.jump-bottom" {
+			found = true
+			if e.Keys != "ctrl+b" {
+				t.Fatalf("catalog jump-bottom keys = %q, want ctrl+b", e.Keys)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("catalog missing nav.jump-bottom")
+	}
+	// /keys modal shows effective chords.
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyF1})
+	modal, ok := m.modal.(*keysModal)
+	if !ok {
+		t.Fatalf("modal = %T", m.modal)
+	}
+	for _, e := range modal.entries {
+		if e.ID == "nav.jump-bottom" && e.Keys != "ctrl+b" {
+			t.Fatalf("modal keys = %q", e.Keys)
+		}
+	}
+}
+
+func TestKeysResetRestoresDefaults(t *testing.T) {
+	m, _ := newAppTestModelWithOptions(Options{
+		Keybinds: map[string][]string{"nav.jump-bottom": {"ctrl+b"}},
+	})
+	if !key.Matches(tea.KeyMsg{Type: tea.KeyCtrlB}, m.keyMap.JumpBottom) {
+		t.Fatal("precondition: override active")
+	}
+	m.composer.SetValue("/keys reset")
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if !key.Matches(tea.KeyMsg{Type: tea.KeyCtrlT}, m.keyMap.JumpBottom) {
+		t.Fatal("after reset, ctrl+t should match JumpBottom")
+	}
+	if key.Matches(tea.KeyMsg{Type: tea.KeyCtrlB}, m.keyMap.JumpBottom) {
+		t.Fatal("after reset, ctrl+b should not match JumpBottom")
+	}
+	if m.notice == "" || !strings.Contains(m.notice, "reset") {
+		t.Fatalf("notice = %q", m.notice)
+	}
+}
+
+func TestBuildKeyMapOrientationPreservesOverrides(t *testing.T) {
+	overrides := map[string][]string{
+		"nav.focus-left":  {"alt+h"},
+		"nav.window-next": {"alt+j"},
+	}
+	horiz := buildKeyMap(overrides, orientHorizontal)
+	if !key.Matches(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}, Alt: true}, horiz.FocusLeft) {
+		t.Fatal("horizontal focus-left override")
+	}
+	vert := buildKeyMap(overrides, orientVertical)
+	// Vertical swaps: focus-left gets window-next chords (alt+j).
+	if !key.Matches(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}, Alt: true}, vert.FocusLeft) {
+		t.Fatal("vertical focus-left should use former window-next override")
+	}
+	if !key.Matches(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}, Alt: true}, vert.CycleWindowPrev) {
+		t.Fatal("vertical window-prev should use former focus-left override")
 	}
 }
 

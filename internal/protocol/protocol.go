@@ -324,6 +324,14 @@ type TextDelta struct {
 	Text string `json:"text"`
 }
 
+// ReasoningDelta is a chunk of model chain-of-thought / reasoning text.
+// Distinct from TextDelta (the final answer). Frontends may hide it behind a
+// toggle; it must never be treated as assistant reply content.
+type ReasoningDelta struct {
+	Correlation
+	Text string `json:"text"`
+}
+
 type ToolCallBegin struct {
 	Correlation
 	CallID string          `json:"callId"`
@@ -652,6 +660,7 @@ func (UserMessage) isEvent()         {}
 func (SessionTitled) isEvent()       {}
 func (TurnStarted) isEvent()         {}
 func (TextDelta) isEvent()           {}
+func (ReasoningDelta) isEvent()      {}
 func (ToolCallBegin) isEvent()       {}
 func (ToolCallEnd) isEvent()         {}
 func (ToolCallOutput) isEvent()      {}

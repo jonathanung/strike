@@ -478,6 +478,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		Instructions:         instructions,
 		Memory:               memoryStore,
 		SystemPrompt:         cfg.SystemPrompt,
+		MaxChildDepth:        cfg.MaxChildDepth,
 		InitialProvider:      initialProvider,
 		InitialModel:         initialModel,
 		InitialEffort:        initialEffort,
@@ -764,6 +765,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 				PermissionAutoApproveSeconds: a.cfg.PermissionAutoApproveSeconds,
 				PermissionAutoApproveExclude: a.cfg.PermissionAutoApproveExclude,
 				Replay:                       a.replay,
+				Keybinds:                     config.KeybindsMap(a.cfg.Keybinds),
 			}), tea.WithAltScreen(), tea.WithOutput(stdout), tea.WithInput(tui.WrapInput(os.Stdin)), tea.WithReportFocus())
 			final, runProgErr := program.Run()
 			if m, ok := final.(tui.Model); ok {
