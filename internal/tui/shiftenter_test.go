@@ -99,10 +99,21 @@ func TestWrapInputEnhancedRewrite(t *testing.T) {
 			in:   "\x1b[104;5u",
 			want: "\x08",
 		},
+		// Ctrl+J → Alt+j (not 0x0a) so pane cycle ≠ bare LF newline (#240).
 		{
 			name: "Ctrl+J Kitty",
 			in:   "\x1b[106;5u",
-			want: "\x0a",
+			want: "\x1bj",
+		},
+		{
+			name: "Ctrl+J uppercase Kitty",
+			in:   "\x1b[74;5u",
+			want: "\x1bj",
+		},
+		{
+			name: "Ctrl+J xterm modifyOtherKeys",
+			in:   "\x1b[27;5;106~",
+			want: "\x1bj",
 		},
 		{
 			name: "Ctrl+K Kitty",

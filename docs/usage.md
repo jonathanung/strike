@@ -152,7 +152,8 @@ slot hosts one active window from the registry:
 
 Vim-style pane keys (horizontal split): `ctrl+h` / `ctrl+l` focus the left
 or right pane; `ctrl+j` / `ctrl+k` cycle the active right-pane window
-next/previous. `ctrl+;` (or `/layout` / `/split`) toggles a vertical
+next/previous (enhanced terminals distinguish `ctrl+j` from bare LF
+newline). `ctrl+;` (or `/layout` / `/split`) toggles a vertical
 top/bottom split and swaps those chords (focus becomes `ctrl+j`/`ctrl+k`,
 cycle becomes `ctrl+h`/`ctrl+l`). `ctrl+p` opens the command palette; `f1`
 (or `/keys`) opens a filterable keybind cheatsheet. Enter sends; Shift+Enter
