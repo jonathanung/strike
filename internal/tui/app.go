@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -273,6 +274,10 @@ type Model struct {
 	// Lifecycle never appends transcript cells.
 	children []childActivity
 
+	// roots holds frozen UI state for concurrent parent sessions (multi-root).
+	// The active root's fields live on Model; others sit here until activated.
+	roots map[string]*rootPane
+
 	// Subagent transcript navigation (ctrl+x leader chords). Root live
 	// cells stay in cells/toolByID; viewingID non-empty and != sessionID
 	// shows viewCells loaded from host.Sessions.
@@ -465,6 +470,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if id == "" || id == m.sessionID {
 			return m, nil
 		}
+		// Prefer in-process multi-root open when the host supports it.
+		if m.services.Roots != nil {
+			cmd := m.openRootInProcess(id)
+			m.modal = nil
+			m.reflow()
+			return m, cmd
+		}
 		if m.turnRunning {
 			m.setNotice("wait for the current turn to finish before switching sessions", true)
 			return m, nil
@@ -474,7 +486,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case engineEventMsg:
-		cmd := m.applyEvent(msg.ev)
+		rootID := m.rootForEvent(msg.ev)
+		var cmd tea.Cmd
+		if rootID != "" && rootID != m.sessionID {
+			cmd = m.applyEventToRoot(rootID, msg.ev)
+		} else {
+			cmd = m.applyEvent(msg.ev)
+		}
 		m.reflow()
 		m.refreshViewport()
 		return m, tea.Batch(m.listen(), cmd)
@@ -617,6 +635,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reflow()
 		}
 		return m, nil
+
+	case initResultMsg:
+		return m.applyInitResult(msg)
 
 	case authExpiryNoticeMsg:
 		if m.authExpiryNoticed {
@@ -958,10 +979,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.openFilesExplorerPath(msg.path)
 
 	case agentsOpenMsg:
-		cmd := m.openSessionView(msg.sessionID)
+		cmd := m.handleAgentsOpen(msg)
 		m.reflow()
 		m.refreshViewport()
 		return m, tea.Batch(cmd, m.broadcastAgentsState())
+
+	case agentsSpawnMsg:
+		cmd := m.spawnRoot()
+		m.reflow()
+		return m, cmd
+
+	case agentsInterruptMsg:
+		cmd := m.interruptRoot(msg.sessionID)
+		return m, cmd
 	}
 
 	var cmd tea.Cmd
@@ -1855,15 +1885,77 @@ func (m *Model) broadcastContextState() tea.Cmd {
 	return cmd
 }
 
-// agentsStateSnapshot copies live-parent subagent rows for the agents window.
+// agentsStateSnapshot pushes multi-root tree data into the agents window.
 func (m Model) agentsStateSnapshot() agentsStateMsg {
-	children := make([]childActivity, len(m.children))
-	copy(children, m.children)
-	return agentsStateMsg{
-		parentID:  m.sessionID,
-		viewingID: m.viewingID,
-		children:  children,
+	// Ensure active root is visible to the tree builder.
+	roots := m.liveRootIDs()
+	type rootSnap struct {
+		id       string
+		title    string
+		state    theme.AgentState
+		children []childActivity
 	}
+	snaps := make([]agentsRootSnap, 0, len(roots))
+	for _, id := range roots {
+		var kids []childActivity
+		if id == m.sessionID {
+			kids = append([]childActivity(nil), m.children...)
+		} else if m.roots != nil {
+			if p, ok := m.roots[id]; ok && p != nil {
+				kids = append([]childActivity(nil), p.children...)
+			}
+		}
+		snaps = append(snaps, agentsRootSnap{
+			ID:       id,
+			Title:    m.rootTitleLabel(id),
+			State:    m.rootAgentState(id),
+			Children: kids,
+		})
+	}
+	viewing := m.viewingID
+	if viewing == "" {
+		viewing = m.sessionID
+	}
+	return agentsStateMsg{
+		activeID:  m.sessionID,
+		viewingID: viewing,
+		roots:     snaps,
+	}
+}
+
+// handleAgentsOpen activates a root or opens a child transcript from the tree.
+func (m *Model) handleAgentsOpen(msg agentsOpenMsg) tea.Cmd {
+	id := strings.TrimSpace(msg.sessionID)
+	if id == "" {
+		return nil
+	}
+	// Root selection.
+	for _, live := range m.liveRootIDs() {
+		if live == id {
+			if msg.interrupt {
+				return m.interruptRoot(id)
+			}
+			cmd := m.activateRoot(id)
+			// Close child view when focusing the root itself.
+			if m.viewingChild() {
+				_ = m.closeSessionView()
+			}
+			return cmd
+		}
+	}
+	// Child (or nested) transcript.
+	if msg.interrupt {
+		return m.interruptRoot(id)
+	}
+	// Ensure parent root is active when opening a child of another root.
+	if parent := m.parentOfChild(id); parent != "" && parent != m.sessionID {
+		if root := m.findLiveRootAncestor(parent); root != "" && root != m.sessionID {
+			if cmd := m.activateRoot(root); cmd != nil {
+				return tea.Batch(cmd, m.openSessionView(id))
+			}
+		}
+	}
+	return m.openSessionView(id)
 }
 
 // broadcastAgentsState pushes current subagent rows to every right-pane window.
@@ -2073,6 +2165,8 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		m.pendingUpgrade = true
 		m.modal = nil
 		return m, tea.Quit
+	case "/init":
+		return m.handleInitCommand()
 	default:
 		// Unknown commands fall through to skills: /name args renders the
 		// skill template and submits it as the user message.
@@ -2103,6 +2197,61 @@ func (m Model) PendingResume() string {
 // PendingUpgrade reports whether /upgrade requested a self-update after quit.
 func (m Model) PendingUpgrade() bool {
 	return m.pendingUpgrade
+}
+
+func (m Model) handleInitCommand() (tea.Model, tea.Cmd) {
+	m.resetComposer()
+	m.clearNotice()
+	if m.services.Init == nil {
+		m.setNotice("project init is unavailable", true)
+		return m, nil
+	}
+	exists, path, err := m.services.Init.Exists()
+	if err != nil {
+		m.setNotice("init failed: "+err.Error(), true)
+		return m, nil
+	}
+	if exists {
+		m.modal = newInitConfirmModal(path, m.services.Init)
+		m.reflow()
+		return m, nil
+	}
+	init := m.services.Init
+	return m, func() tea.Msg {
+		path, created, err := init.Write(false)
+		if err != nil {
+			return initResultMsg{err: err.Error()}
+		}
+		return initResultMsg{path: path, created: created}
+	}
+}
+
+func (m Model) applyInitResult(msg initResultMsg) (tea.Model, tea.Cmd) {
+	m.modal = nil
+	if msg.canceled {
+		m.setNotice("init canceled", false)
+		m.reflow()
+		return m, nil
+	}
+	if msg.err != "" {
+		m.setNotice("init failed: "+msg.err, true)
+		m.reflow()
+		return m, nil
+	}
+	display := msg.path
+	if base := filepath.Base(display); base != "" && base != "." {
+		display = base
+	}
+	switch {
+	case msg.replaced:
+		m.setNotice("updated "+display, false)
+	case msg.created:
+		m.setNotice("created "+display, false)
+	default:
+		m.setNotice("wrote "+display, false)
+	}
+	m.reflow()
+	return m, nil
 }
 
 func (m Model) handleForkCommand() (tea.Model, tea.Cmd) {
@@ -3224,7 +3373,7 @@ func (m Model) View() string {
 		} else {
 			overlay = m.modal.view(max(8, ui.ModalWidth(m.width)), m.th)
 		}
-		content = ui.OverlayCenter(content, overlay, m.width, contentHeight)
+		content = ui.OverlayCenter(m.th, content, overlay, m.width, contentHeight)
 	}
 	parts := make([]string, 0, 1+len(footer))
 	if content != "" {

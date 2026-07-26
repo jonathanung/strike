@@ -839,6 +839,42 @@ func (f *fakeSessions) Fork(id string) (host.Session, error) {
 	return child, nil
 }
 
+func (f *fakeSessions) Rename(id, title string) (host.Session, error) {
+	id = strings.TrimSpace(id)
+	s, ok := f.byID[id]
+	if !ok {
+		return host.Session{}, fmt.Errorf("session %q not found", id)
+	}
+	s.Title = strings.TrimSpace(title)
+	f.byID[id] = s
+	return s, nil
+}
+
+func (f *fakeSessions) Delete(id string, force bool) error {
+	id = strings.TrimSpace(id)
+	s, ok := f.byID[id]
+	if !ok {
+		return fmt.Errorf("session %q not found", id)
+	}
+	if s.Open && !force {
+		return fmt.Errorf("session %q is open; force required to delete", id)
+	}
+	delete(f.byID, id)
+	delete(f.logs, id)
+	if s.ParentID != "" {
+		kids := f.children[s.ParentID]
+		out := kids[:0]
+		for _, c := range kids {
+			if c.ID != id {
+				out = append(out, c)
+			}
+		}
+		f.children[s.ParentID] = out
+	}
+	delete(f.children, id)
+	return nil
+}
+
 func (f *fakeSessions) RefreshPRStates(in []host.Session) []host.Session {
 	if f.refresh == nil {
 		return in

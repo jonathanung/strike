@@ -1,13 +1,33 @@
 # Agents & skills
 
-Both `.strike` roots (global and project) can hold `agents/` and `skills/`
-folders of markdown files; project files override same-named global ones.
+Agents and skills are markdown (frontmatter + body). Strike discovers them
+from several trees; **later roots override earlier ones by name**.
+
+### Discovery order (merge)
+
+| Order | Agents | Skills |
+|------:|--------|--------|
+| 0 | built-in embed | built-in embed |
+| 1 | `~/.strike/agents` | `~/.strike/skills` |
+| 2 | `~/.claude/agents` | `~/.claude/skills` |
+| 3 | `~/.config/opencode/agents` (`$XDG_CONFIG_HOME/opencode/…`) | same `…/skills` |
+| 4 | `~/.opencode/agents` | `~/.opencode/skills` |
+| 5 | `<project>/.strike/agents` | `<project>/.strike/skills` |
+| 6 | `<project>/.claude/agents` | `<project>/.claude/skills` |
+| 7 | `<project>/.opencode/agent` then `…/agents` | `<project>/.claude/commands` then `…/.opencode/skills` |
+
+- **Strike-native** roots (`.strike`) fail load on invalid names/effort/permissions.
+- **External** roots (`.claude`, `.opencode`, XDG opencode) **warn on stderr and skip** bad files; load continues.
+- Skills accept flat `name.md` **or** Claude/OpenCode `name/SKILL.md` directories.
+- Markdown only — no OpenCode plugin JS/TS execution.
+- OpenCode-style `model: provider/id` splits into provider + model when `provider` is unset.
+- Nested Claude/OpenCode `permission:` maps map to strike permission rules (best-effort).
 
 ## Agents
 
 **Agents** (`agents/*.md`) are personas — a system prompt with optional
 provider/model/effort pins. Shipping built-ins (override with same-named
-files under `~/.strike/agents` or `./.strike/agents`):
+files under any later discovery root):
 
 | Name | Role |
 |------|------|
@@ -32,7 +52,7 @@ Each model request composes the system prompt in layers (like opencode):
 3. **Agent persona** — empty for built-in build/plan (provider overlay used); custom `agents/*.md` body replaces the provider overlay; config `systemPrompt` replaces it for build only
 4. **Plan overlay** — always added while the plan agent is active
 5. **Environment** — workdir, workspace root, git, platform, date, model id
-6. **Instructions** — `AGENTS.md` / `CLAUDE.md` from `~/.strike` and the project (walked up to the git root)
+6. **Instructions** — `AGENTS.md` / `CLAUDE.md` from `~/.strike` and the project (walked up to the git root). Create or refresh the project file with `/init` (confirms before replacing an existing `AGENTS.md`; light local scan only — no secrets).
 7. **Project memory** — entries tagged `instruction`, `preference`, or `project-convention` (capped; untrusted). Untagged notes and issues stay on-demand via tools.
 
 ```markdown
@@ -67,13 +87,15 @@ Layered JSON config: [config.md](config.md).
 
 ## Skills
 
-**Skills** (`skills/*.md`) are prompt templates invoked as slash commands:
-`/commit fix the auth bug` runs the `commit` skill with `$ARGUMENTS`
-replaced by "fix the auth bug" (arguments are appended if the placeholder
-is absent). Strike ships built-in shipping skills — `/commit`, `/push`,
-`/pr`, `/ship` — overridden by same-named files under `~/.strike/skills` or
-`./.strike/skills`. Successful `gh pr …` output that prints a GitHub PR URL
-is recorded on the session (JSONL `session.meta` + sidecar `.meta.json`).
+**Skills** (`skills/*.md` or `skills/<name>/SKILL.md`) are prompt templates
+invoked as slash commands: `/commit fix the auth bug` runs the `commit`
+skill with `$ARGUMENTS` replaced by "fix the auth bug" (arguments are
+appended if the placeholder is absent). Strike ships built-in shipping
+skills — `/commit`, `/push`, `/pr`, `/ship` — overridden by same-named
+files in any later discovery root (including `.claude` / `.opencode`).
+Project `.claude/commands/*.md` are loaded as skills when the markdown is
+compatible. Successful `gh pr …` output that prints a GitHub PR URL is
+recorded on the session (JSONL `session.meta` + sidecar `.meta.json`).
 
 ```markdown
 ---

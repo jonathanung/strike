@@ -45,7 +45,8 @@ service/theme token).
 
 | Package | Role |
 |---|---|
-| `cmd/strike` | CLI flags + auth subcommands (`main.go`), composition root wiring (`wire.go`) |
+| `cmd/strike` | CLI flags + auth/exec/serve subcommands (`main.go`), composition root wiring (`wire.go`) |
+| `internal/server` | Experimental read-only HTTP attach (`strike serve`: /health, SSE events, attach page) |
 | `internal/protocol` | Ops/Events seam; JSONL envelopes |
 | `internal/engine` | Turn loop, tool dispatch, interrupts |
 | `internal/provider` | LLM adapters (+ `base`, `echo`, anthropic, openai, xai, chatgpt) |
@@ -67,6 +68,7 @@ service/theme token).
 ## Scope
 
 - Smallest correct change. Match surrounding style and comment density.
+- Must implement as many tests as possible for all new chunks of code.
 - No new test frameworks or dependencies without an explicit ask.
 - Do not commit secrets or write real credentials into fixtures.
 - UI work goes through `internal/tui/ui` components and `internal/tui/theme`
