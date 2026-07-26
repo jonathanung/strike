@@ -331,6 +331,8 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		m.entries = services.History.Entries()
 	}
 	m.windows = configureFilesWindow(m.windows, m.workDir, m.services.Files)
+	m.windows = configureMemoryWindow(m.windows, m.services.Memory)
+	m.windows = configureIssuesWindow(m.windows, m.services.Issues)
 	if len(replay) > 0 {
 		seedFromReplay(&m, replay)
 	}
@@ -442,6 +444,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spin, cmd = m.spin.Update(msg)
+		return m, cmd
+
+	case projectDataMutatedMsg:
+		cmd := m.applyProjectDataMutation(msg)
+		m.reflow()
 		return m, cmd
 
 	case customProviderSavedMsg:
@@ -706,12 +713,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key.Matches(msg, m.keyMap.CycleWindowNext) {
 			m.completion = nil
 			m.windows = m.windows.cycleBy(1)
+			m.windows = refreshProjectDataWindows(m.windows)
 			m.reflow()
 			return m, nil
 		}
 		if key.Matches(msg, m.keyMap.CycleWindowPrev) {
 			m.completion = nil
 			m.windows = m.windows.cycleBy(-1)
+			m.windows = refreshProjectDataWindows(m.windows)
 			m.reflow()
 			return m, nil
 		}
@@ -1228,6 +1237,9 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 	case protocol.ToolCallEnd:
 		if tc, ok := m.toolByID[ev.CallID]; ok {
 			tc.title, tc.output, tc.metadata, tc.done, tc.isError = ev.Title, ev.Output, ev.Metadata, true, ev.IsError
+			if isProjectDataTool(tc.name) {
+				m.windows = refreshProjectDataWindows(m.windows)
+			}
 		}
 	case protocol.PermissionAsked:
 		m.modal = newPermissionModal(ev, m.ops, m.th)
@@ -1807,22 +1819,11 @@ func (m Model) handleMemoryCommand(args []string) (tea.Model, tea.Cmd) {
 		if len(args) > 1 {
 			tag = args[1]
 		}
-		entries, err := m.services.Memory.List(tag)
-		if err != nil {
+		if _, err := m.services.Memory.List(tag); err != nil {
 			m.setNotice("memory: "+err.Error(), true)
 			return m, nil
 		}
-		if len(entries) == 0 {
-			if tag != "" {
-				m.setNotice("memory: no entries with tag "+tag, false)
-			} else {
-				m.setNotice("memory: (empty)", false)
-			}
-			return m, nil
-		}
-		m.clearNotice()
-		m.modal = newMemoryModal(entries, tag)
-		return m, nil
+		return m.openMemoryBrowser(tag)
 	case "get":
 		if len(args) < 2 {
 			m.setNotice(usage, true)
@@ -1854,6 +1855,7 @@ func (m Model) handleMemoryCommand(args []string) (tea.Model, tea.Cmd) {
 			m.setNotice("memory: "+err.Error(), true)
 			return m, nil
 		}
+		m.windows = refreshProjectDataWindows(m.windows)
 		m.setNotice("memory: set "+key, false)
 		return m, nil
 	case "rm", "delete", "del", "remove":
@@ -1865,6 +1867,7 @@ func (m Model) handleMemoryCommand(args []string) (tea.Model, tea.Cmd) {
 			m.setNotice("memory: "+err.Error(), true)
 			return m, nil
 		}
+		m.windows = refreshProjectDataWindows(m.windows)
 		m.setNotice("memory: deleted "+args[1], false)
 		return m, nil
 	default:
@@ -1889,22 +1892,11 @@ func (m Model) handleIssuesCommand(args []string) (tea.Model, tea.Cmd) {
 		if len(args) > 1 {
 			status = args[1]
 		}
-		items, err := m.services.Issues.List(status)
-		if err != nil {
+		if _, err := m.services.Issues.List(status); err != nil {
 			m.setNotice("issues: "+err.Error(), true)
 			return m, nil
 		}
-		if len(items) == 0 {
-			if status != "" {
-				m.setNotice("issues: no "+status+" issues", false)
-			} else {
-				m.setNotice("issues: (empty)", false)
-			}
-			return m, nil
-		}
-		m.clearNotice()
-		m.modal = newIssuesModal(items, status)
-		return m, nil
+		return m.openIssuesBrowser(status)
 	case "add", "create", "new":
 		if len(args) < 2 {
 			m.setNotice(usage, true)
@@ -1916,6 +1908,7 @@ func (m Model) handleIssuesCommand(args []string) (tea.Model, tea.Cmd) {
 			m.setNotice("issues: "+err.Error(), true)
 			return m, nil
 		}
+		m.windows = refreshProjectDataWindows(m.windows)
 		m.setNotice(fmt.Sprintf("issues: opened #%d %s", iss.ID, iss.Title), false)
 		return m, nil
 	case "get", "show":
@@ -1958,6 +1951,7 @@ func (m Model) handleIssuesCommand(args []string) (tea.Model, tea.Cmd) {
 			m.setNotice("issues: "+err.Error(), true)
 			return m, nil
 		}
+		m.windows = refreshProjectDataWindows(m.windows)
 		m.setNotice(fmt.Sprintf("issues: closed #%d %s", iss.ID, iss.Title), false)
 		return m, nil
 	default:

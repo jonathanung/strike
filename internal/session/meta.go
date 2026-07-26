@@ -6,7 +6,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+)
+
+// PR state values stored on Meta.PRState (GitHub-style, lowercase).
+const (
+	PRStateOpen   = "open"
+	PRStateMerged = "merged"
+	PRStateClosed = "closed"
 )
 
 // Meta is durable session-level metadata stored beside the JSONL event log
@@ -18,6 +26,22 @@ type Meta struct {
 	CreatedAt       string `json:"createdAt,omitempty"` // RFC3339 UTC
 	PRURL           string `json:"prUrl,omitempty"`
 	PRNumber        int    `json:"prNumber,omitempty"`
+	PRState         string `json:"prState,omitempty"`     // open|merged|closed
+	PRUpdatedAt     string `json:"prUpdatedAt,omitempty"` // RFC3339 UTC when PR fields last written
+}
+
+// NormalizePRState maps forge state strings to open|merged|closed, or "".
+func NormalizePRState(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case PRStateOpen:
+		return PRStateOpen
+	case PRStateMerged:
+		return PRStateMerged
+	case PRStateClosed:
+		return PRStateClosed
+	default:
+		return ""
+	}
 }
 
 // MetaPath is the sidecar JSON path for a session id under dir.

@@ -552,6 +552,7 @@ func (f *fakeIssues) Close(id int) (host.Issue, error) {
 // --- fakeSessions: scriptable host.Sessions ------------------------------
 
 // fakeSessions is an in-memory host.Sessions for transcript navigation tests.
+// Optional refresh implements host.PRStateRefresher when non-nil.
 type fakeSessions struct {
 	byID      map[string]host.Session
 	children  map[string][]host.Session // parentID → kids
@@ -559,6 +560,7 @@ type fakeSessions struct {
 	getErr    error
 	listErr   error
 	replayErr error
+	refresh   func([]host.Session) []host.Session
 }
 
 func newFakeSessions() *fakeSessions {
@@ -623,6 +625,13 @@ func (f *fakeSessions) ReplayJSONL(id string) ([]byte, error) {
 		return nil, fmt.Errorf("session %q not found", id)
 	}
 	return data, nil
+}
+
+func (f *fakeSessions) RefreshPRStates(in []host.Session) []host.Session {
+	if f.refresh == nil {
+		return in
+	}
+	return f.refresh(in)
 }
 
 // --- construction helpers ------------------------------------------------

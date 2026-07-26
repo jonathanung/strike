@@ -8,7 +8,12 @@ import (
 
 func TestMetaRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	want := Meta{PRURL: "https://github.com/acme/repo/pull/42", PRNumber: 42}
+	want := Meta{
+		PRURL:       "https://github.com/acme/repo/pull/42",
+		PRNumber:    42,
+		PRState:     PRStateMerged,
+		PRUpdatedAt: "2026-07-25T12:00:00Z",
+	}
 	if err := WriteMeta(dir, "sess-1", want); err != nil {
 		t.Fatal(err)
 	}
@@ -21,6 +26,22 @@ func TestMetaRoundTrip(t *testing.T) {
 	}
 	if _, err := os.Stat(MetaPath(dir, "sess-1")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestNormalizePRState(t *testing.T) {
+	cases := map[string]string{
+		"":         "",
+		"open":     PRStateOpen,
+		"OPEN":     PRStateOpen,
+		" merged ": PRStateMerged,
+		"CLOSED":   PRStateClosed,
+		"draft":    "",
+	}
+	for in, want := range cases {
+		if got := NormalizePRState(in); got != want {
+			t.Errorf("NormalizePRState(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 
@@ -47,11 +68,13 @@ func TestUpdateMetaMerges(t *testing.T) {
 	got, err := UpdateMeta(dir, "s", func(m *Meta) {
 		m.PRURL = "https://github.com/acme/repo/pull/9"
 		m.PRNumber = 9
+		m.PRState = PRStateOpen
+		m.PRUpdatedAt = "2026-07-25T15:00:00Z"
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.PRURL != "https://github.com/acme/repo/pull/9" || got.PRNumber != 9 {
+	if got.PRURL != "https://github.com/acme/repo/pull/9" || got.PRNumber != 9 || got.PRState != PRStateOpen {
 		t.Fatalf("UpdateMeta = %+v", got)
 	}
 	if got.Title != "ship it" || got.ParentSessionID != "parent-1" {

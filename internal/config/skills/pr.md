@@ -43,4 +43,4 @@ EOF
 ```
 
 Keep the title under ~70 characters. Put detail in the body.
-4. When done, ensure the PR URL is printed (gh does this on create; otherwise `gh pr view --json url -q .url`). Strike records GitHub PR URLs from bash output onto the session automatically.
+4. When done, ensure the PR URL is printed (gh does this on create; otherwise `gh pr view --json url,number,state`). Strike records GitHub PR URL/number/state from successful `gh pr` bash output onto the session automatically (sidecar + session picker badge).

@@ -12,36 +12,49 @@ import (
 
 func TestExtractSessionPR(t *testing.T) {
 	tests := []struct {
-		name    string
-		command string
-		output  string
-		wantURL string
-		wantNum int
-		wantOK  bool
+		name      string
+		command   string
+		output    string
+		wantURL   string
+		wantNum   int
+		wantState string
+		wantOK    bool
 	}{
 		{
-			name:    "gh pr create url",
-			command: "gh pr create --title t --body b",
-			output:  "https://github.com/acme/repo/pull/42\n",
-			wantURL: "https://github.com/acme/repo/pull/42",
-			wantNum: 42,
-			wantOK:  true,
+			name:      "gh pr create url",
+			command:   "gh pr create --title t --body b",
+			output:    "https://github.com/acme/repo/pull/42\n",
+			wantURL:   "https://github.com/acme/repo/pull/42",
+			wantNum:   42,
+			wantState: "open",
+			wantOK:    true,
 		},
 		{
-			name:    "gh pr view with noise",
-			command: "gh pr view --json url -q .url",
-			output:  "Opening...\nhttps://github.com/foo/bar/pull/7\n",
-			wantURL: "https://github.com/foo/bar/pull/7",
-			wantNum: 7,
-			wantOK:  true,
+			name:      "gh pr view with noise",
+			command:   "gh pr view --json url -q .url",
+			output:    "Opening...\nhttps://github.com/foo/bar/pull/7\n",
+			wantURL:   "https://github.com/foo/bar/pull/7",
+			wantNum:   7,
+			wantState: "open",
+			wantOK:    true,
 		},
 		{
-			name:    "env prefix still matches",
-			command: "GH_TOKEN=x gh pr create",
-			output:  "https://github.com/a/b/pull/1",
-			wantURL: "https://github.com/a/b/pull/1",
-			wantNum: 1,
-			wantOK:  true,
+			name:      "json state merged",
+			command:   "gh pr view --json url,number,state",
+			output:    `{"url":"https://github.com/a/b/pull/3","number":3,"state":"MERGED"}` + "\nhttps://github.com/a/b/pull/3\n",
+			wantURL:   "https://github.com/a/b/pull/3",
+			wantNum:   3,
+			wantState: "merged",
+			wantOK:    true,
+		},
+		{
+			name:      "env prefix still matches",
+			command:   "GH_TOKEN=x gh pr create",
+			output:    "https://github.com/a/b/pull/1",
+			wantURL:   "https://github.com/a/b/pull/1",
+			wantNum:   1,
+			wantState: "open",
+			wantOK:    true,
 		},
 		{
 			name:    "non-gh command ignored",
@@ -71,8 +84,8 @@ func TestExtractSessionPR(t *testing.T) {
 			if !tt.wantOK {
 				return
 			}
-			if pr.URL != tt.wantURL || pr.Number != tt.wantNum {
-				t.Fatalf("pr = %+v, want url=%q num=%d", pr, tt.wantURL, tt.wantNum)
+			if pr.URL != tt.wantURL || pr.Number != tt.wantNum || pr.State != tt.wantState {
+				t.Fatalf("pr = %+v, want url=%q num=%d state=%q", pr, tt.wantURL, tt.wantNum, tt.wantState)
 			}
 		})
 	}
@@ -106,7 +119,7 @@ func TestBashRecordsSessionPRFromGH(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.URL != "https://github.com/acme/repo/pull/99" || got.Number != 99 {
+	if got.URL != "https://github.com/acme/repo/pull/99" || got.Number != 99 || got.State != "open" {
 		t.Fatalf("RecordSessionPR got %+v", got)
 	}
 	var meta map[string]any

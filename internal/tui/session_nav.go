@@ -649,6 +649,11 @@ func (m Model) sessionTreeNodes() []ui.TreeNode {
 		Current: !m.viewingChild(),
 		Tone:    ui.ToneAccent,
 	}
+	if m.services.Sessions != nil && m.sessionID != "" {
+		if s, ok, err := m.services.Sessions.Get(m.sessionID); err == nil && ok {
+			root.Suffix = sessionPRBadge(m.th, s)
+		}
+	}
 	kids := m.listChildren(m.sessionID)
 	if len(kids) == 0 {
 		root.Leaf = true
