@@ -86,11 +86,11 @@ fi
 
 asset="strike_${tag}_${os}_${arch}.tar.gz"
 # Prefer browser_download_url from the JSON; fall back to releases/download path.
-asset_url="$(printf '%s' "$json" | tr '{' '\n' | grep -F "\"name\": \"${asset}\"" -A6 | sed -n 's/.*"browser_download_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+asset_url="$(printf '%s' "$json" | tr '{' '\n' | grep -F -A6 "\"name\": \"${asset}\"" | sed -n 's/.*"browser_download_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1 || true)"
 if [ -z "$asset_url" ]; then
   asset_url="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${tag}/${asset}"
 fi
-sums_url="$(printf '%s' "$json" | tr '{' '\n' | grep -F '"name": "checksums.txt"' -A6 | sed -n 's/.*"browser_download_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+sums_url="$(printf '%s' "$json" | tr '{' '\n' | grep -F -A6 '"name": "checksums.txt"' | sed -n 's/.*"browser_download_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1 || true)"
 if [ -z "$sums_url" ]; then
   sums_url="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${tag}/checksums.txt"
 fi
