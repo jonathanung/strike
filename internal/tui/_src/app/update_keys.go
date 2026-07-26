@@ -68,10 +68,9 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if next, cmd, ok := m.applyComposerReadline(msg); ok {
 			return next, cmd
 		}
-		// Composer newline before focus/cycle: bare LF (KeyCtrlJ) is how
-		// many terminals deliver shift+enter without enhanced keys. It must
-		// insert "\n", never cycle. Intentional ctrl+j is rewritten to
-		// alt+j and matches CycleWindowNext / Focus* below (#240).
+		// Composer newline (shift+enter → alt+enter) before focus/cycle.
+		// Bare LF / KeyCtrlJ is ctrl+j and matches CycleWindowNext / Focus*
+		// below — never newline (#324 Ubuntu).
 		if key.Matches(msg, m.keyMap.Newline) {
 			m.resetHistoryBrowsing()
 			m.composer.InsertString("\n")
@@ -80,6 +79,8 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
+	// Focus/cycle before other left-composer handling so bare LF ctrl+j
+	// cycles panes even when the composer is focused (#324).
 	if key.Matches(msg, m.keyMap.FocusLeft) {
 		m.completion = nil
 		cmd := m.focusPane(focusLeft)
