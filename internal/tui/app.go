@@ -116,6 +116,9 @@ type Options struct {
 	// via cellsFromEvents + silent selection/child state — never fed through
 	// applyEvent (avoids stuck turns, zombie permission modals, orphan children).
 	Replay []protocol.Event
+	// Keybinds are config overrides (binding id → key sequences). Applied on
+	// top of defaultKeyMap at startup; /keys and footer hints show the result.
+	Keybinds map[string][]string
 }
 
 // firstRunSetupMsg opens the provider picker once on a fresh install.
@@ -167,9 +170,12 @@ type Model struct {
 	composer textarea.Model
 	// pendingPastes holds full text for collapsed large-paste chips in the
 	// composer. Expanded on send; pruned when the chip leaves the value.
-	pendingPastes              []pasteChip
-	completion                 *completionState
-	keyMap                     keyMap
+	pendingPastes []pasteChip
+	completion    *completionState
+	keyMap        keyMap
+	// keyOverrides are config keybind remaps (id → chords); used to rebuild
+	// keyMap on orientation toggle and /keys reset.
+	keyOverrides               map[string][]string
 	focus                      paneFocus
 	windows                    windowRegistry
 	commands                   []commandSpec
@@ -323,7 +329,11 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		if len(option.Replay) > 0 {
 			replay = option.Replay
 		}
+		if len(option.Keybinds) > 0 {
+			m.keyOverrides = cloneKeybindMap(option.Keybinds)
+		}
 	}
+	m.keyMap = buildKeyMap(m.keyOverrides, m.splitOrientation)
 	if m.vimMode == "" {
 		m.vimMode = VimModePane
 	}
@@ -1244,9 +1254,20 @@ func (m *Model) toggleOrientation() {
 	} else {
 		m.splitOrientation = orientVertical
 	}
-	m.keyMap.applyOrientationKeys(m.splitOrientation)
+	m.keyMap = buildKeyMap(m.keyOverrides, m.splitOrientation)
 	m.reflow()
 	m.refreshViewport()
+}
+
+func cloneKeybindMap(in map[string][]string) map[string][]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string][]string, len(in))
+	for id, chords := range in {
+		out[id] = append([]string(nil), chords...)
+	}
+	return out
 }
 
 func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
@@ -1839,6 +1860,14 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		m.reflow()
 		return m, nil
 	case "/keys":
+		if len(fields) >= 2 && fields[1] == "reset" {
+			m.resetComposer()
+			m.clearNotice()
+			m.keyOverrides = nil
+			m.keyMap = buildKeyMap(nil, m.splitOrientation)
+			m.setNotice("keybinds reset to defaults (session only; remove keybinds from config to persist)", false)
+			return m, nil
+		}
 		m.resetComposer()
 		m.clearNotice()
 		m.modal = newKeysModal(m.keyMap)

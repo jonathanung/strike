@@ -1,6 +1,8 @@
 # Keybinds
 
-In-app cheatsheet: `f1` or `/keys` (filterable).
+In-app cheatsheet: `f1` or `/keys` (filterable). Remap chords in config
+(`keybinds` object) — see [config.md](config.md). `/keys reset` restores
+session defaults.
 
 ## Global
 

@@ -10,6 +10,7 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -40,6 +41,10 @@ type Config struct {
 	// Providers are user-declared custom/self-hosted endpoints (name, base
 	// URL, wire api). API keys are never stored here — only in auth.json.
 	Providers []CustomProvider `json:"providers,omitempty"`
+	// Keybinds remaps app-level binding ids to key sequence(s). Ids match the
+	// TUI keybind catalog (e.g. "nav.jump-bottom"). Merged last-wins per id
+	// across global then project layers. Unknown ids fail Load.
+	Keybinds map[string]KeybindChords `json:"keybinds,omitempty"`
 }
 
 // Hook is one lifecycle hook entry. Exactly one of Action or Command should
@@ -222,6 +227,10 @@ func read(path string) (Config, error) {
 		}
 		c.Hooks = valid
 	}
+	// Keybinds: unknown ids / invalid chords fail the layer (and thus Load).
+	if err := ValidateKeybinds(c.Keybinds); err != nil {
+		return Config{}, fmt.Errorf("%s: %w", path, err)
+	}
 	return c, nil
 }
 
@@ -250,5 +259,6 @@ func merge(base, layer Config) Config {
 	base.Permissions = append(base.Permissions, layer.Permissions...)
 	base.Hooks = append(base.Hooks, layer.Hooks...)
 	base.Providers = mergeProviders(base.Providers, layer.Providers)
+	base.Keybinds = MergeKeybinds(base.Keybinds, layer.Keybinds)
 	return base
 }

@@ -668,6 +668,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 				FirstRun:                   a.firstRun,
 				VimMode:                    vimMode,
 				Replay:                     a.replay,
+				Keybinds:                   config.KeybindsMap(a.cfg.Keybinds),
 			}), tea.WithAltScreen(), tea.WithOutput(stdout), tea.WithInput(tui.WrapInput(os.Stdin)), tea.WithReportFocus())
 			final, runProgErr := program.Run()
 			if m, ok := final.(tui.Model); ok {
