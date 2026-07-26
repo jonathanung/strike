@@ -124,8 +124,9 @@ Persists per session in the JSONL log. Optional default for new sessions:
 `permissionMode` in [config.md](config.md).
 
 Built-in skills also appear as slash commands: `/commit`, `/push`, `/pr`,
-`/ship` (and any custom skills under `~/.strike/skills` or `./.strike/skills`).
-See [agents-skills.md](agents-skills.md).
+`/ship`, `/review`, `/learn`, `/deslop`, `/verify` (plus custom skills under
+discovery roots). See [agents-skills.md](agents-skills.md) and
+[peer-ecosystem.md](peer-ecosystem.md).
 
 ### Composer: `@file` / `@folder` mentions
 

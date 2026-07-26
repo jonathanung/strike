@@ -229,6 +229,48 @@ Unknown values are ignored at load time. GUI `$EDITOR` values always take
 over the terminal regardless of `vimMode`. Leave the embedded editor with
 `ctrl+g`.
 
+## Hooks
+
+Lifecycle hooks live in the same JSON config under `hooks` (global then
+project **concatenate**). Each entry is either a **declarative rule**
+(`action`) or a **shell command** (`command`) — not both.
+
+```json
+{
+  "hooks": [
+    {
+      "event": "pre_tool_use",
+      "matcher": "bash",
+      "action": "log"
+    },
+    {
+      "event": "pre_tool_use",
+      "matcher": "write",
+      "action": "block",
+      "message": "writes blocked by policy"
+    },
+    {
+      "event": "post_tool_use",
+      "matcher": "edit",
+      "command": "echo ok",
+      "timeoutMs": 10000
+    }
+  ]
+}
+```
+
+| Field | Notes |
+|---|---|
+| `event` | `pre_tool_use`, `post_tool_use`, `turn_start`, `turn_end` |
+| `matcher` | doublestar on tool name; empty/`*` = all (turn events: empty/`*` only) |
+| `action` | `log`, `block`, or `notify` (block only on `pre_tool_use`) |
+| `message` | optional block/notify text |
+| `command` | `bash -c` with event JSON on stdin (shell hooks: tool events) |
+| `timeoutMs` | shell bound; default 30000, max 120000 |
+
+Invalid rows are dropped at load. Peer event-name mapping (CC/OpenCode/Crush):
+[peer-ecosystem.md](peer-ecosystem.md#hooks-alignment).
+
 ## History compaction
 
 `/compact` and automatic threshold/overflow compaction shrink model-facing
@@ -265,4 +307,5 @@ floors at `minimal` on the OpenAI family (which has no zero setting), and
 | `max` | maximum reasoning when correctness beats cost |
 
 Agents, skills, and workflows (including `.claude` / `.opencode` discovery
-roots and merge order): [agents-skills.md](agents-skills.md).
+roots and merge order): [agents-skills.md](agents-skills.md). Peer import
+inventory: [peer-ecosystem.md](peer-ecosystem.md).
