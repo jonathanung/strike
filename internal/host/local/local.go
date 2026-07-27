@@ -75,7 +75,7 @@ var credentialProviders = []host.ProviderStatus{
 	{Name: "anthropic", APIKey: true},
 	{Name: "openai", OAuth: true, APIKey: true},
 	{Name: "xai", OAuth: true, Device: true, APIKey: true},
-	{Name: "gemini", APIKey: true},
+	{Name: "gemini", OAuth: true, APIKey: true},
 	{Name: "kimi", APIKey: true},
 	{Name: "deepseek", APIKey: true},
 }
@@ -223,6 +223,8 @@ func (a authAdapter) BeginOAuth(ctx context.Context, provider string) (*host.OAu
 		flow = auth.OpenAIFlow()
 	case "xai":
 		flow = auth.XAIFlow()
+	case "gemini":
+		flow = auth.GoogleFlow()
 	default:
 		return nil, fmt.Errorf("provider %q does not support OAuth login", provider)
 	}

@@ -179,3 +179,55 @@ func TestStreamNoCandidates(t *testing.T) {
 		t.Fatalf("error = %q", got)
 	}
 }
+
+func TestStreamOAuthBearerToken(t *testing.T) {
+	var gotKey, gotBearer string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotKey = r.Header.Get("x-goog-api-key")
+		gotBearer = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"candidates":[{"content":{"parts":[{"text":"hi"}]},"finishReason":"STOP"}]}`)
+	}))
+	defer srv.Close()
+
+	// Google OAuth access tokens start with "ya29." and are > 50 chars.
+	p := New(func(context.Context) (string, error) {
+		return "ya29.a0AfH6S...very-long-oauth-token-value-over-50-chars", nil
+	})
+	p.baseURL = srv.URL
+	stream, err := p.Stream(context.Background(), provider.Request{Model: "gemini-2.5-pro"})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	for ev := range stream {
+		if ev.Type == provider.EventError {
+			t.Fatalf("stream error: %v", ev.Err)
+		}
+	}
+	if gotKey != "" {
+		t.Errorf("x-goog-api-key = %q, want empty (OAuth token should use Bearer)", gotKey)
+	}
+	wantBearer := "Bearer ya29.a0AfH6S...very-long-oauth-token-value-over-50-chars"
+	if gotBearer != wantBearer {
+		t.Errorf("Authorization = %q, want %q", gotBearer, wantBearer)
+	}
+}
+
+func TestIsOAuthAccessToken(t *testing.T) {
+	cases := []struct {
+		token string
+		want  bool
+	}{
+		{"ya29.a0AfH6S...very-long-oauth-token-with-more-than-50-chars", true},
+		{"ya29.short", false},
+		{"AIzaSy...api-key", false},
+		{"sk-ant-...not-google", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		got := isOAuthAccessToken(tc.token)
+		if got != tc.want {
+			t.Errorf("isOAuthAccessToken(%q) = %v, want %v", tc.token, got, tc.want)
+		}
+	}
+}

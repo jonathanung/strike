@@ -18,7 +18,7 @@ import (
 const authUsage = `Manage provider credentials.
 
 Usage:
-  strike auth login <anthropic|openai|xai|gemini|kimi|deepseek> [--api-key] [--device]
+  strike auth login <anthropic|openai|xai|gemini|kimi|deepseek> [--api-key] [--device] [--oauth]
   strike auth status
   strike auth logout <provider>
 
@@ -27,7 +27,7 @@ Login methods:
   xai         OAuth browser flow (default), --device for headless machines,
               or --api-key to paste a key
   anthropic   --api-key (paste a key; OAuth not wired yet)
-  gemini      --api-key (paste a key; OAuth not wired yet)
+  gemini      OAuth browser flow (default), or --api-key to paste a key
   kimi        --api-key (paste a key; OAuth not supported)
   deepseek    --api-key (paste a key; OAuth not supported)
 
@@ -87,7 +87,10 @@ func runAuthLogin(store *auth.Store, args []string, output io.Writer) error {
 		}
 		return loginXAIOAuth(ctx, store, useDevice, output)
 	case "gemini":
-		return loginAPIKey(store, prov, output)
+		if useAPIKey {
+			return loginAPIKey(store, prov, output)
+		}
+		return loginGoogleOAuth(ctx, store, output)
 	case "kimi", "deepseek":
 		return loginAPIKey(store, prov, output)
 	default:
@@ -145,6 +148,23 @@ func loginXAIOAuth(ctx context.Context, store *auth.Store, device bool, output i
 		return err
 	}
 	outcome, err := auth.CompleteLogin(ctx, store, "xai", tokens)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(output, outcome)
+	return nil
+}
+
+func loginGoogleOAuth(ctx context.Context, store *auth.Store, output io.Writer) error {
+	flow := auth.GoogleFlow()
+	if flow.ClientID == "" {
+		return fmt.Errorf("GOOGLE_CLIENT_ID is not set — create an OAuth 2.0 Client ID (Desktop app) in the Google Cloud Console")
+	}
+	tokens, err := flow.Login(ctx)
+	if err != nil {
+		return err
+	}
+	outcome, err := auth.CompleteLogin(ctx, store, "gemini", tokens)
 	if err != nil {
 		return err
 	}

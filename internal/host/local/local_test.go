@@ -70,8 +70,8 @@ func TestStatusesOrderFlagsAndEcho(t *testing.T) {
 	if s := by["xai"]; !s.APIKey || !s.OAuth || !s.Device || s.Builtin {
 		t.Errorf("xai flags = %+v, want OAuth+Device+APIKey", s)
 	}
-	if s := by["gemini"]; !s.APIKey || s.OAuth || s.Device || s.Builtin {
-		t.Errorf("gemini flags = %+v, want APIKey-only", s)
+	if s := by["gemini"]; !s.APIKey || !s.OAuth || s.Device || s.Builtin {
+		t.Errorf("gemini flags = %+v, want OAuth+APIKey", s)
 	}
 	if s := by["kimi"]; !s.APIKey || s.OAuth || s.Device || s.Builtin {
 		t.Errorf("kimi flags = %+v, want APIKey-only", s)
