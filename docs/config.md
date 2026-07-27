@@ -406,7 +406,7 @@ background scrim). Prefer those names for new config; legacy aliases remain.
 
 ### Embedded editor (`vimMode`)
 
-`/vim [path[:line]]` opens a file in an editor resolved from `$VISUAL` →
+`/vim [path|@path[:line]]` opens a file in an editor resolved from `$VISUAL` →
 `$EDITOR` → nvim/vim/vi/nano on `PATH`. `vimMode` selects how:
 
 | Value | Aliases | Behavior |
@@ -421,14 +421,14 @@ with `ctrl+g`.
 
 ### Nano (`nanoMode`)
 
-`/nano [path[:line]]` opens **nano** specifically (does not use `$VISUAL`/
+`/nano [path|@path[:line]]` opens **nano** specifically (does not use `$VISUAL`/
 `$EDITOR`). `nanoMode` uses the same values and aliases as `vimMode`
 (default `pane`/`embedded`). Missing `nano` on `PATH` shows a clear error.
 Leave the embedded/modal editor with `ctrl+g`.
 
 ### Markdown reader (`mdReadMode`)
 
-`/md-read <path>` opens a markdown file. `mdReadMode` selects how:
+`/md-read <path|@path>` opens a markdown file. `mdReadMode` selects how:
 
 | Value | Aliases | Behavior |
 |---|---|---|
