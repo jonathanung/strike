@@ -34,11 +34,9 @@ config overrides global, and session "always" grants override both.
 
 **Permission mode dial:** `permissionMode` sets the default tool-permission
 posture for **new** sessions: `default` | `plan` | `soft-approve` |
-`accept-edits` | `yolo` (see [usage.md](usage.md)). Set it here, or via
-**ctrl+d** in the `/mode` picker / global save-defaults. Session changes via
-Shift+Tab or `/mode` persist in the session JSONL, not back into this file
-unless you save defaults. Resume uses the JSONL posture. Distinct from
-`/autonomy` (workflow exit gates). Invalid values fail config load.
+`accept-edits` | `yolo` (see [usage.md](usage.md)). Session changes via
+Shift+Tab or `/mode` persist in the session JSONL, not back into this file.
+Distinct from `/autonomy` (workflow exit gates).
 
 **Lean code:** `leanCode` is `off` | `lite` (default) | `full`. Injects
 agent-scoped efficiency guidance into the system prompt (strict ladder for
@@ -121,7 +119,7 @@ Remap app-level chords without recompiling. Ids match the in-app cheatsheet
   "keybinds": {
     "nav.jump-bottom": "ctrl+b",
     "global.palette": ["ctrl+p", "ctrl+k"],
-    "composer.newline": "alt+enter"
+    "composer.newline": ["alt+enter", "ctrl+j"]
   }
 }
 ```
@@ -221,59 +219,19 @@ project's `.strike/config`.
 ## Custom providers
 
 Add OpenAI-compatible (chat completions) or Anthropic-compatible (messages)
-endpoints via **`providers.jsonc`** (preferred) or the `providers` array in
-config. Layers merge last-wins by name:
-
-`defaults → ~/.strike/config → ~/.strike/providers.jsonc → ./.strike/config → ./.strike/providers.jsonc`
-
-(`.json` is accepted as well as `.jsonc`.) Credentials never live in these
-files — use env refs and/or `/auth` / the auth store.
-
-### `providers.jsonc` (OpenCode-style)
-
-```jsonc
-// ~/.strike/providers.jsonc or ./.strike/providers.jsonc
-{
-  "kimi": {
-    "npm": "@ai-sdk/openai-compatible", // optional; hints wire dialect only (not loaded)
-    "name": "Kimi",
-    "options": {
-      "baseURL": "https://api.example.com/v1",
-      "apiKey": "{env:KIMI_API_KEY}"
-    },
-    "models": ["kimi-latest"]
-  },
-  "claude-proxy": {
-    "npm": "@ai-sdk/anthropic",
-    "options": {
-      "baseURL": "$ANTHROPIC_BASE_URL",
-      "apiKey": "${ANTHROPIC_AUTH_TOKEN}"
-    }
-  }
-}
-```
-
-| Field | Required | Notes |
-|---|---|---|
-| map key | yes | provider id (lowercased slug); not `anthropic`/`openai`/`xai`/`echo` |
-| `options.baseURL` | yes | absolute `http`/`https` URL, or `{env:VAR}` / `$VAR` / `${VAR}` |
-| `options.apiKey` | no | env ref only (`{env:NAME}`, `$NAME`, `${NAME}`) → checked before auth store |
-| `npm` | no | ignored at runtime; `anthropic` in the name → anthropic wire, else openai |
-| `api` | no | strike override: `openai` or `anthropic` (wins over npm hint) |
-| `models` | no | listed in `/model`; first is the default when unset |
-| `options.headers` | no | extra HTTP headers (values may use env refs) |
-
-### Config `providers` array (legacy)
+endpoints via the `providers` array (global and project layers merge; same
+`name` in project replaces global). Credentials never live here — use
+`apiKeyEnv` and/or `/auth` / the auth store.
 
 ```json
 {
   "providers": [
     {
-      "name": "kimi",
+      "name": "acme",
       "baseURL": "https://api.example.com/v1",
       "api": "openai",
-      "apiKeyEnv": "KIMI_API_KEY",
-      "models": ["kimi-latest"],
+      "apiKeyEnv": "ACME_API_KEY",
+      "models": ["acme-latest"],
       "headers": { "X-Custom": "optional" }
     }
   ]
@@ -282,21 +240,15 @@ files — use env refs and/or `/auth` / the auth store.
 
 | Field | Required | Notes |
 |---|---|---|
-| `name` | yes | lowercase slug (`[a-z][a-z0-9_-]{0,63}`); not builtins |
+| `name` | yes | lowercase slug (`[a-z][a-z0-9_-]{0,63}`); not `anthropic`/`openai`/`xai`/`kimi`/`deepseek`/`echo` |
 | `baseURL` | yes | absolute URL or env ref template |
 | `api` | yes | wire dialect: `openai` or `anthropic` |
 | `apiKeyEnv` | no | env var name (or `{env:NAME}` / `$NAME`) checked before the auth store |
 | `models` | no | listed in `/model`; first is the default when unset |
 | `headers` | no | extra HTTP headers on every request (values may use env refs) |
 
-**Env interpolation:** `{env:NAME}`, `$NAME`, and `${NAME}` expand from the
-process environment (vars exported to the strike process, e.g. via bashrc).
-
-**TUI:** `/settings` CRUD and `/provider` → “Add custom provider…”. Custom
-names appear in `/provider` like built-ins. **Logout** (`ctrl+x` or
-`/auth logout <name>`) of a custom provider **deletes** its definition from
-config/providers.jsonc and clears credentials; `/settings` `d` does the same.
-Built-in logout only clears credentials.
+In the TUI, `/settings` manages the same list (CRUD persists to
+`~/.strike/config`). Custom names appear in `/provider` like built-ins.
 
 ## Embedded editor (`vimMode`)
 
@@ -304,14 +256,13 @@ Built-in logout only clears credentials.
 
 | Value | Behavior |
 |---|---|
-| `pane` (default) | embed nvim/vim/nano in the right-pane `editor` window (PTY) |
+| `pane` (default) | embed nvim/vim in the right-pane `editor` window (PTY) |
 | `overlay` | embed in a centered modal overlay |
 | `takeover` | full-screen handoff via `tea.ExecProcess` |
 
-Unknown values are ignored at load time. Resolution order: `$VISUAL`, then
-`$EDITOR`, then the first of `nvim`/`vim`/`vi`/`nano` on `PATH`. GUI `$EDITOR`
-values always take over the terminal regardless of `vimMode`. Leave the
-embedded editor with `ctrl+g`.
+Unknown values are ignored at load time. GUI `$EDITOR` values always take
+over the terminal regardless of `vimMode`. Leave the embedded editor with
+`ctrl+g`.
 
 ## Hooks
 

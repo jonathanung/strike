@@ -40,7 +40,7 @@ var optionSpecs = []optionSpec{
 	{
 		names:       []string{"provider"},
 		valueName:   "provider",
-		description: "provider to use (anthropic|openai|xai|echo); overrides config",
+		description: "provider to use (anthropic|openai|xai|gemini|kimi|deepseek|echo); overrides config",
 		register: func(fs *flag.FlagSet, opts *cliOptions) {
 			fs.StringVar(&opts.provider, "provider", "", "")
 		},
