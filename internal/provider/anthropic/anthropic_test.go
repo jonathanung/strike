@@ -356,3 +356,50 @@ func TestUserMessageIncludesImageBlocks(t *testing.T) {
 		t.Fatalf("text block = %+v", text)
 	}
 }
+
+func TestMessagesURLOpenCodeParity(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"", "https://api.anthropic.com/v1/messages"},
+		{"https://api.anthropic.com", "https://api.anthropic.com/v1/messages"},
+		{"https://api.anthropic.com/", "https://api.anthropic.com/v1/messages"},
+		{"https://api.anthropic.com/v1", "https://api.anthropic.com/v1/messages"},
+		{"https://api.anthropic.com/v1/", "https://api.anthropic.com/v1/messages"},
+		{"https://proxy.example/anthropic/v1", "https://proxy.example/anthropic/v1/messages"},
+		{"https://proxy.example/v1/messages", "https://proxy.example/v1/messages"},
+		{"https://proxy.example/anthropic", "https://proxy.example/anthropic/v1/messages"},
+	}
+	for _, tc := range cases {
+		if got := MessagesURL(tc.in); got != tc.want {
+			t.Errorf("MessagesURL(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestStreamOpenCodeBaseURLWithV1(t *testing.T) {
+	var sawPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"stop_reason":"end_turn","content":[{"type":"text","text":"ok"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	p, err := NewCustom("proxy", srv.URL+"/v1", "k", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch, err := p.Stream(context.Background(), provider.Request{
+		Model: "claude-test", MaxTokens: 8,
+		Messages: []provider.Message{{Role: provider.RoleUser, Text: "hi"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range ch {
+	}
+	if sawPath != "/v1/messages" {
+		t.Errorf("path = %q, want /v1/messages (not /v1/v1/messages)", sawPath)
+	}
+}

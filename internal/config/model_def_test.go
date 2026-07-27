@@ -177,8 +177,8 @@ func TestParseCustomNestedModelIDIsMapKey(t *testing.T) {
 	if cp.Name != "qgenie_oai" {
 		t.Errorf("provider id = %q, want qgenie_oai (map key, lowercased)", cp.Name)
 	}
-	if cp.API != WireOpenAI || cp.APIKeyEnv != "QGENIE_KEY" {
-		t.Fatalf("api/key = api=%q env=%q", cp.API, cp.APIKeyEnv)
+	if cp.API != WireResponses || cp.APIKeyEnv != "QGENIE_KEY" {
+		t.Fatalf("api/key = api=%q env=%q (want responses for @ai-sdk/openai)", cp.API, cp.APIKeyEnv)
 	}
 	def, ok := FindModelDef(cp.ModelDefs, "gpt-5.5")
 	if !ok {

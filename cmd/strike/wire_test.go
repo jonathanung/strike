@@ -661,8 +661,9 @@ func TestBuildBuiltinWithEndpointAnthropic(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
+	// OpenCode-style baseURL includes /v1 — must not double to /v1/v1/messages.
 	p, model, err, handled := buildBuiltinWithEndpoint("anthropic", config.ProviderEndpoint{
-		BaseURL:   srv.URL,
+		BaseURL:   srv.URL + "/v1",
 		APIKeyEnv: "PROXY_ANTHROPIC_KEY",
 	}, store)
 	if err != nil || !handled || p == nil {
@@ -682,13 +683,50 @@ func TestBuildBuiltinWithEndpointAnthropic(t *testing.T) {
 	for range ch {
 	}
 	if sawPath != "/v1/messages" {
-		t.Errorf("path = %q", sawPath)
+		t.Errorf("path = %q (OpenCode baseURL …/v1 must join /messages only)", sawPath)
 	}
 	if sawKey != "proxy-secret" {
 		t.Errorf("key = %q", sawKey)
 	}
 	if sawModel != "claude-sonnet-test" {
 		t.Errorf("wire model = %q", sawModel)
+	}
+}
+
+func TestBuildBuiltinWithEndpointAnthropicOriginOnly(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PROXY_ANTHROPIC_KEY", "proxy-secret")
+	store, err := auth.OpenStore(filepath.Join(home, ".strike", "auth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"stop_reason":"end_turn","content":[{"type":"text","text":"ok"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	p, _, err, handled := buildBuiltinWithEndpoint("anthropic", config.ProviderEndpoint{
+		BaseURL:   srv.URL, // origin only (legacy strike)
+		APIKeyEnv: "PROXY_ANTHROPIC_KEY",
+	}, store)
+	if err != nil || !handled || p == nil {
+		t.Fatalf("err=%v handled=%v p=%v", err, handled, p)
+	}
+	ch, err := p.Stream(context.Background(), provider.Request{
+		Model: "m", MaxTokens: 8,
+		Messages: []provider.Message{{Role: provider.RoleUser, Text: "hi"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range ch {
+	}
+	if sawPath != "/v1/messages" {
+		t.Errorf("origin-only path = %q", sawPath)
 	}
 }
 
@@ -721,16 +759,26 @@ func TestBuildCustomProviderNestedModelWireID(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var gotModel string
+	var gotModel, gotPath, gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		if m, ok := body["model"].(string); ok {
 			gotModel = m
 		}
+		// @ai-sdk/openai → Responses API (not chat/completions).
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"choices": []map[string]any{
-				{"message": map[string]any{"role": "assistant", "content": "hi"}, "finish_reason": "stop"},
+			"status": "completed",
+			"output": []map[string]any{
+				{
+					"type": "message",
+					"role": "assistant",
+					"content": []map[string]any{
+						{"type": "output_text", "text": "hi"},
+					},
+				},
 			},
 		})
 	}))
@@ -760,6 +808,9 @@ func TestBuildCustomProviderNestedModelWireID(t *testing.T) {
 		t.Fatal(err)
 	}
 	cp := pf.Customs[0]
+	if cp.API != config.WireResponses {
+		t.Fatalf("API = %q, want responses (@ai-sdk/openai)", cp.API)
+	}
 	p, defaultModel, err := buildCustomProvider(cp, store)
 	if err != nil {
 		t.Fatal(err)
@@ -774,10 +825,87 @@ func TestBuildCustomProviderNestedModelWireID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for range ch {
+	var gotText string
+	for ev := range ch {
+		if ev.Type == provider.EventTextDelta {
+			gotText += ev.Text
+		}
+		if ev.Type == provider.EventError {
+			t.Fatalf("stream error: %v", ev.Err)
+		}
+	}
+	if gotPath != "/v1/responses" {
+		t.Errorf("path = %q, want /v1/responses (not chat/completions)", gotPath)
+	}
+	if gotAuth != "Bearer sk-test" {
+		t.Errorf("Authorization = %q", gotAuth)
 	}
 	if gotModel != "gpt-5.5" {
 		t.Errorf("wire model = %q, want map key gpt-5.5 (not display name)", gotModel)
+	}
+	if gotText != "hi" {
+		t.Errorf("text = %q", gotText)
+	}
+}
+
+func TestBuildCustomProviderOpenAICompatibleStillChat(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("COMPAT_KEY", "sk-compat")
+	store, err := auth.OpenStore(filepath.Join(home, ".strike", "auth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gotPath, gotModel string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if m, ok := body["model"].(string); ok {
+			gotModel = m
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]any{"role": "assistant", "content": "ok"}, "finish_reason": "stop"},
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	raw := []byte(`{
+  "my_oai": {
+    "npm": "@ai-sdk/openai-compatible",
+    "options": {
+      "baseURL": "` + srv.URL + `/v1",
+      "apiKey": "{env:COMPAT_KEY}"
+    },
+    "models": { "gpt-local": { "name": "Local GPT" } }
+  }
+}`)
+	pf, err := config.ParseProvidersFile(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pf.Customs[0].API != config.WireOpenAI {
+		t.Fatalf("API = %q", pf.Customs[0].API)
+	}
+	p, model, err := buildCustomProvider(pf.Customs[0], store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch, err := p.Stream(context.Background(), provider.Request{
+		Model: model, Messages: []provider.Message{{Role: provider.RoleUser, Text: "hi"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range ch {
+	}
+	if gotPath != "/v1/chat/completions" {
+		t.Errorf("path = %q", gotPath)
+	}
+	if gotModel != "gpt-local" {
+		t.Errorf("model = %q", gotModel)
 	}
 }
 
