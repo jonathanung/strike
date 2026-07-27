@@ -39,7 +39,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 /auth anthropic                # masked API-key input (also: /auth <p> key)
 /auth status                   # anthropic: none · openai: oauth+key · …
 /auth logout <provider>
-/settings                      # manage custom providers and settings
+/settings                      # defaults (theme, editor, mode) + custom providers
 /theme                         # centered color-theme picker (bundled +
                                # ~/.strike/themes + ./.strike/themes)
 /theme <id>                    # apply a theme by id

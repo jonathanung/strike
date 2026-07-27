@@ -111,7 +111,7 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 	case "/settings":
 		m.resetComposer()
 		m.clearNotice()
-		m.modal = newSettingsModal(m.services, m.ops, m.th)
+		m.modal = newSettingsModal(m.services, m.ops, m.th, m.workDir)
 		return m, nil
 	case "/agent":
 		if len(fields) < 2 {

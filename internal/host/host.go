@@ -133,8 +133,25 @@ type Catalog interface {
 	ResolveVariant(ctx context.Context, provider, model, variant string) (effort string, ok bool, err error)
 }
 
+// UserDefaults is a snapshot of persisted global defaults (empty = unset).
+// Field vocabulary matches ~/.strike/config JSON keys.
+type UserDefaults struct {
+	Provider       string
+	Model          string
+	Agent          string
+	Effort         string
+	PermissionMode string
+	Theme          string
+	VimMode        string
+	NanoMode       string
+	MdReadMode     string
+}
+
 // Settings persists user-chosen defaults. Empty fields mean "leave as is".
 type Settings interface {
+	// Defaults returns the current global defaults snapshot. Missing config
+	// yields a zero value; implementations should not error on absence.
+	Defaults() UserDefaults
 	// SaveDefaults persists the chosen provider, model, agent, reasoning
 	// effort, and permission mode; each empty string leaves the corresponding
 	// stored value unchanged. Effort and mode are plain strings so this
@@ -144,6 +161,10 @@ type Settings interface {
 	// SaveTheme persists the preferred TUI theme id (JSON theme file stem).
 	// Empty id is rejected.
 	SaveTheme(id string) error
+	// SavePresentation persists non-empty vimMode, nanoMode, and mdReadMode
+	// (pane|embedded|overlay|modal|takeover vocabulary). Empty leaves the
+	// stored value unchanged; unknown values are rejected.
+	SavePresentation(vimMode, nanoMode, mdReadMode string) error
 }
 
 // History is project-scoped prompt history. Enqueue is async; the channel

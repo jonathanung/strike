@@ -219,15 +219,42 @@ type savedDefaults struct {
 	mode     string
 }
 
+type savedPresentation struct {
+	vimMode    string
+	nanoMode   string
+	mdReadMode string
+}
+
 type fakeSettings struct {
+	defaults    host.UserDefaults
 	saved       []savedDefaults
 	savedThemes []string
+	savedPres   []savedPresentation
 	err         error
 	themeErr    error
 }
 
+func (s *fakeSettings) Defaults() host.UserDefaults {
+	return s.defaults
+}
+
 func (s *fakeSettings) SaveDefaults(provider, model, agent, effort, mode string) error {
 	s.saved = append(s.saved, savedDefaults{provider: provider, model: model, agent: agent, effort: effort, mode: mode})
+	if provider != "" {
+		s.defaults.Provider = provider
+	}
+	if model != "" {
+		s.defaults.Model = model
+	}
+	if agent != "" {
+		s.defaults.Agent = agent
+	}
+	if effort != "" {
+		s.defaults.Effort = effort
+	}
+	if mode != "" {
+		s.defaults.PermissionMode = mode
+	}
 	return s.err
 }
 
@@ -236,6 +263,21 @@ func (s *fakeSettings) SaveTheme(id string) error {
 		return s.themeErr
 	}
 	s.savedThemes = append(s.savedThemes, id)
+	s.defaults.Theme = id
+	return s.err
+}
+
+func (s *fakeSettings) SavePresentation(vimMode, nanoMode, mdReadMode string) error {
+	s.savedPres = append(s.savedPres, savedPresentation{vimMode: vimMode, nanoMode: nanoMode, mdReadMode: mdReadMode})
+	if vimMode != "" {
+		s.defaults.VimMode = vimMode
+	}
+	if nanoMode != "" {
+		s.defaults.NanoMode = nanoMode
+	}
+	if mdReadMode != "" {
+		s.defaults.MdReadMode = mdReadMode
+	}
 	return s.err
 }
 

@@ -103,6 +103,11 @@ picker it saves the highlighted provider; in the model picker it saves
 provider + model; in the effort picker it saves the highlighted level; in
 the theme picker it saves the highlighted theme id.
 
+**/settings Defaults**: interactive editor for theme, vimMode, nanoMode,
+mdReadMode, and permissionMode (plus a read-only view of provider/model/
+agent/effort). Changes write `~/.strike/config` and apply theme/editor
+presentation to the current session immediately.
+
 ## Theme
 
 `theme` is a color-theme id: bundled JSON themes plus files under

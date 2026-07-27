@@ -98,6 +98,13 @@ func TestSettingsModalCRUD(t *testing.T) {
 	if !ok {
 		t.Fatalf("modal = %T", m.modal)
 	}
+	// Menu → Custom providers.
+	sm.cursor = int(settingsMenuProviders)
+	next, _ := sm.update(tea.KeyMsg{Type: tea.KeyEnter})
+	sm, ok = next.(*settingsModal)
+	if !ok {
+		t.Fatalf("after enter providers = %T", next)
+	}
 	sm.reload()
 	view := sm.view(80, m.th)
 	if !strings.Contains(view, "ollama") || !strings.Contains(view, "Add custom provider") {
