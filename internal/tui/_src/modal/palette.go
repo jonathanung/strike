@@ -160,7 +160,7 @@ func paletteBuiltinDisabled(id commandID, availability paletteAvailability) stri
 	switch id {
 	case commandHelp, commandKeys, commandExit, commandQuit:
 		return ""
-	case commandVim, commandNano, commandMDRead, commandThink, commandExport, commandContext, commandEffectivePrompt, commandCost, commandMCP,
+	case commandVim, commandNano, commandMDRead, commandThink, commandExport, commandContext, commandEffectivePrompt, commandCost, commandMCP, commandRename,
 		commandAgents, commandActivity, commandFiles, commandVisualizer, commandSystem:
 		return ""
 	case commandModel:

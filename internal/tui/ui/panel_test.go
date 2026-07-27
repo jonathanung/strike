@@ -59,7 +59,7 @@ func TestPanelKeyHintsFooterStaysSingleLine(t *testing.T) {
 	th := theme.Default()
 	hints := []KeyHint{
 		{"n", "new root"}, {"enter", "activate root"}, {"x", "interrupt root"},
-		{"d", "hide from pane"}, {"j/k", "move"}, {"f", "cycle filter"},
+		{"r", "rename"}, {"d", "hide from pane"}, {"j/k", "move"}, {"f", "cycle filter"},
 	}
 	for _, width := range []int{80, 60, 40, 32, 24} {
 		footer := KeyHints(th, PanelInnerWidth(th, width), hints)

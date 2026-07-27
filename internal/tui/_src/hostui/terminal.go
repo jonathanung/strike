@@ -16,8 +16,8 @@ const (
 	// notifyAfterTurn is the minimum turn duration before a completion
 	// notification is sent (avoids spam on short turns).
 	notifyAfterTurn = 30 * time.Second
-	// titleTopicMaxRunes caps the window-title topic length.
-	titleTopicMaxRunes = 40
+	// titleTopicMaxRunes caps the window-title topic length (brief labels).
+	titleTopicMaxRunes = 32
 	// notifyMessageMaxRunes caps OSC 9 desktop notification body length.
 	notifyMessageMaxRunes = 120
 )

@@ -1832,7 +1832,7 @@ func TestPaletteHelpInvocationOpensHelpModal(t *testing.T) {
 	if !strings.Contains(plain, "Commands") {
 		t.Errorf("/help modal view missing title: %q", plain)
 	}
-	for _, want := range []string{"/session", "/export", "/theme", "/memory", "/issues", "/compact", "/fast", "/think", "/layout", "/md-read", "/keys", "/settings", "/exit", "/quit"} {
+	for _, want := range []string{"/session", "/rename", "/export", "/theme", "/memory", "/issues", "/compact", "/fast", "/think", "/layout", "/md-read", "/keys", "/settings", "/exit", "/quit"} {
 		found := false
 		for _, entry := range help.entries {
 			if strings.HasPrefix(entry.Label, want) {

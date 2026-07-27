@@ -173,6 +173,8 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		return m.handleUndoCommand(fields[1:])
 	case "/session":
 		return m.handleSessionCommand(fields[1:])
+	case "/rename":
+		return m.handleRenameCommand(fields[1:], text)
 	case "/export":
 		return m.handleExportCommand(fields[1:])
 	case "/help":
@@ -417,6 +419,39 @@ func (m Model) handleForkCommand() (tea.Model, tea.Cmd) {
 	m.pendingResume = id
 	m.setNotice("forked → "+shortSessionID(id)+" (switching…)", false)
 	return m, tea.Quit
+}
+
+func (m Model) handleRenameCommand(args []string, raw string) (tea.Model, tea.Cmd) {
+	m.resetComposer()
+	m.clearNotice()
+	id := strings.TrimSpace(m.sessionID)
+	if id == "" {
+		m.setNotice("no session to rename", true)
+		return m, nil
+	}
+	if m.services.Sessions == nil {
+		m.setNotice("session rename unavailable", true)
+		return m, nil
+	}
+	// /rename with no args opens the editor; with args applies immediately.
+	if len(args) == 0 {
+		cmd := m.openRenameModal(id)
+		return m, cmd
+	}
+	title := strings.TrimSpace(raw)
+	if rest, ok := strings.CutPrefix(title, "/rename"); ok {
+		title = strings.TrimSpace(rest)
+	}
+	got, err := m.services.Sessions.Rename(id, title)
+	if err != nil {
+		m.setNotice("rename: "+err.Error(), true)
+		return m, nil
+	}
+	rid := strings.TrimSpace(got.ID)
+	if rid == "" {
+		rid = id
+	}
+	return m, m.applySessionRename(rid, strings.TrimSpace(got.Title))
 }
 
 func (m Model) handleSessionCommand(args []string) (tea.Model, tea.Cmd) {
