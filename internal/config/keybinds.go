@@ -54,6 +54,7 @@ var KnownKeybindIDs = map[string]struct{}{
 	"nav.tool-expand":          {},
 	"nav.tool-copy":            {},
 	"nav.tool-review":          {},
+	"nav.tool-apply":           {},
 	"nav.leader":               {},
 	"nav.session-child":        {},
 	"nav.session-parent":       {},

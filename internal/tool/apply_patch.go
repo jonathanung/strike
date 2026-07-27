@@ -96,15 +96,7 @@ func (applyPatchTool) Execute(ctx context.Context, args json.RawMessage, tc *Con
 		return Result{}, fmt.Errorf("patch is required")
 	}
 
-	hunks, err := parsePatch(a.Patch)
-	if err != nil {
-		return Result{}, err
-	}
-	if len(hunks) == 0 {
-		return Result{}, fmt.Errorf("apply_patch: no file operations in patch")
-	}
-
-	planned, originals, err := planPatchOps(tc.WorkDir, hunks)
+	planned, originals, err := preparePatch(tc.WorkDir, a.Patch)
 	if err != nil {
 		return Result{}, err
 	}
@@ -144,6 +136,43 @@ func (applyPatchTool) Execute(ctx context.Context, args json.RawMessage, tc *Con
 		return Result{}, err
 	}
 
+	out := patchSuccessSummary(planned)
+	return Result{
+		Title:    fmt.Sprintf("%d file(s)", len(planned)),
+		Output:   out,
+		Metadata: meta,
+	}, nil
+}
+
+// ApplyPatchToWorkDir validates and commits a multi-file patch under workDir
+// without permission prompts. Used by host-side diff-viewer apply. On commit
+// failure, rolls back so partial state is avoided when possible.
+func ApplyPatchToWorkDir(workDir, patch string) (summary string, err error) {
+	planned, originals, err := preparePatch(workDir, patch)
+	if err != nil {
+		return "", err
+	}
+	if err := commitPatchOps(planned, originals); err != nil {
+		return "", err
+	}
+	return patchSuccessSummary(planned), nil
+}
+
+func preparePatch(workDir, patch string) ([]plannedOp, map[string]pathOriginal, error) {
+	if strings.TrimSpace(patch) == "" {
+		return nil, nil, fmt.Errorf("patch is required")
+	}
+	hunks, err := parsePatch(patch)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(hunks) == 0 {
+		return nil, nil, fmt.Errorf("apply_patch: no file operations in patch")
+	}
+	return planPatchOps(workDir, hunks)
+}
+
+func patchSuccessSummary(planned []plannedOp) string {
 	var summary []string
 	for _, op := range planned {
 		switch op.Type {
@@ -157,12 +186,7 @@ func (applyPatchTool) Execute(ctx context.Context, args json.RawMessage, tc *Con
 			summary = append(summary, "M "+op.RelPath)
 		}
 	}
-	out := "Success. Updated the following files:\n" + strings.Join(summary, "\n")
-	return Result{
-		Title:    fmt.Sprintf("%d file(s)", len(planned)),
-		Output:   out,
-		Metadata: meta,
-	}, nil
+	return "Success. Updated the following files:\n" + strings.Join(summary, "\n")
 }
 
 func plannedOpsMeta(ops []plannedOp) []map[string]any {
