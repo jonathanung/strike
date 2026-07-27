@@ -82,9 +82,10 @@ func defaultKeyMap() keyMap {
 		CompletionPrev:    key.NewBinding(key.WithKeys("up"), key.WithHelp("up", "previous")),
 		CompletionNext:    key.NewBinding(key.WithKeys("down", "ctrl+n"), key.WithHelp("down/ctrl+n", "next")),
 		Send:              key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "send")),
-		// Newline: shift+enter → alt+enter after WrapInput CSI rewrite; ctrl+j is
-		// bare LF / KeyCtrlJ (Ubuntu) and enhanced CSI → alt+j (#414; was cycle in #324).
-		Newline:        key.NewBinding(key.WithKeys("alt+enter", "ctrl+j", "alt+j"), key.WithHelp("ctrl+j/shift+enter", "newline")),
+		// Newline (#414): alt+enter is first-class; shift+enter CSI rewrites to
+		// the same KeyEnter+Alt; ctrl+j is bare LF / KeyCtrlJ (Ubuntu) and
+		// enhanced CSI → alt+j (was cycle in #324).
+		Newline:        key.NewBinding(key.WithKeys("alt+enter", "ctrl+j", "alt+j"), key.WithHelp("ctrl+j/shift+enter/alt+enter", "newline")),
 		ExternalEditor: key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("ctrl+e", "external editor")),
 		HistoryPrev:    key.NewBinding(key.WithKeys("up"), key.WithHelp("up", "history previous")),
 		HistoryNext:    key.NewBinding(key.WithKeys("down"), key.WithHelp("down", "history next")),
@@ -224,7 +225,7 @@ func applyKeybindOverrides(k *keyMap, overrides map[string][]string) {
 	set(&k.SaveDefaults, "global.save-defaults", "")
 	set(&k.TerminalLeave, "editor.leave", "")
 	set(&k.Send, "composer.send", "")
-	set(&k.Newline, "composer.newline", "ctrl+j/shift+enter")
+	set(&k.Newline, "composer.newline", "ctrl+j/shift+enter/alt+enter")
 	set(&k.ExternalEditor, "composer.external-editor", "")
 	set(&k.HistoryPrev, "composer.history-prev", "")
 	set(&k.HistoryNext, "composer.history-next", "")
