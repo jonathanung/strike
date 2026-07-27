@@ -33,6 +33,7 @@ Options:
   --continue                         resume the most recent root session (model history + selections)
   --session <id>                     resume a specific session by id (model history + selections)
   --worktree                         run this session in an isolated git worktree under .strike/worktrees/
+  --telemetry                        show local system metrics pane (CPU/RAM/disk); off by default
   --upgrade                          download and install the latest GitHub Release
   --version                          print version and exit
   -h, --help                         show help
@@ -98,6 +99,11 @@ func TestParseCLIOptionsValueFormsAndProviderExplicitness(t *testing.T) {
 			name: "worktree flag",
 			args: []string{"--worktree"},
 			want: cliOptions{worktree: true},
+		},
+		{
+			name: "telemetry flag",
+			args: []string{"--telemetry"},
+			want: cliOptions{telemetry: true},
 		},
 	}
 	for _, tt := range tests {

@@ -136,7 +136,14 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 	case "/visualizer":
 		return m.focusRightWindow(visualizerWindowID)
 	case "/system":
+		if !telemetryEnabled(m.windows) {
+			m.resetComposer()
+			m.setNotice("system telemetry off — /telemetry on to enable", true)
+			return m, nil
+		}
 		return m.focusRightWindow(telemetryWindowID)
+	case "/telemetry":
+		return m.handleTelemetryCommand(fields[1:])
 	case "/fast":
 		return m.handleFastCommand(fields[1:])
 	case "/think":
@@ -1241,6 +1248,51 @@ func (m *Model) applyThemeEntry(entry theme.Entry) {
 	m.restyleWidgets()
 	m.reflow()
 	m.refreshViewport()
+}
+
+// handleTelemetryCommand opts the local system metrics pane in or out.
+// Bare /telemetry toggles; on/off set explicitly; status reports without change.
+func (m Model) handleTelemetryCommand(args []string) (tea.Model, tea.Cmd) {
+	cur := telemetryEnabled(m.windows)
+	if len(args) > 0 {
+		switch strings.ToLower(args[0]) {
+		case "status":
+			m.resetComposer()
+			if cur {
+				m.setNotice("system telemetry on", false)
+			} else {
+				m.setNotice("system telemetry off", false)
+			}
+			return m, nil
+		case "on", "true", "1", "yes":
+			// handled below
+		case "off", "false", "0", "no":
+			// handled below
+		default:
+			m.setNotice("usage: /telemetry [on|off|status]", true)
+			return m, nil
+		}
+	}
+	enabled := !cur
+	if len(args) > 0 {
+		switch strings.ToLower(args[0]) {
+		case "on", "true", "1", "yes":
+			enabled = true
+		case "off", "false", "0", "no":
+			enabled = false
+		}
+	}
+	m.resetComposer()
+	m.clearNotice()
+	var cmd tea.Cmd
+	m.windows, cmd = setTelemetryEnabled(m.windows, enabled)
+	m.reflow()
+	if enabled {
+		m.setNotice("system telemetry on", false)
+	} else {
+		m.setNotice("system telemetry off", false)
+	}
+	return m, cmd
 }
 
 // handleFastCommand toggles or sets the session priority-tier preference.

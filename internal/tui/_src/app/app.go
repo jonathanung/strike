@@ -132,6 +132,9 @@ type Options struct {
 	// Keybinds are config overrides (binding id → key sequences). Applied on
 	// top of defaultKeyMap at startup; /keys and footer hints show the result.
 	Keybinds map[string][]string
+	// Telemetry enables the local system metrics pane (CPU/RAM/disk) and its
+	// ~1 Hz sampler. Off by default; also toggled via /telemetry on|off.
+	Telemetry bool
 }
 
 // firstRunSetupMsg opens the provider picker once on a fresh install.
@@ -456,6 +459,16 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 	m.windows = configureMemoryWindow(m.windows, m.services.Memory)
 	m.windows = configureIssuesWindow(m.windows, m.services.Issues)
 	m.windows = configureTelemetryWindow(m.windows, m.workDir, m.services.Telemetry)
+	var telemetryOn bool
+	for _, option := range options {
+		if option.Telemetry {
+			telemetryOn = true
+		}
+	}
+	if telemetryOn {
+		// Init() arms the sampler via windows.init(); discard the enable cmd here.
+		m.windows, _ = setTelemetryEnabled(m.windows, true)
+	}
 	if len(replay) > 0 {
 		seedFromReplay(&m, replay)
 	}
