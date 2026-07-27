@@ -9,6 +9,9 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike-cli/internal/tui/term"
 )
 
 func TestParseVimMode(t *testing.T) {
@@ -273,6 +276,91 @@ func TestVimPaneModeEmbedsNvim(t *testing.T) {
 		if tw, _, ok := findTerminalWindow(m.windows); ok && !tw.isRunning() {
 			break
 		}
+	}
+}
+
+func TestEmbeddedEditorCapturesGlobalKeysBeforeAppRouting(t *testing.T) {
+	editorCmd := exec.Command("sh", "-c", "IFS= read -r line; if [ \"$line\" = \"$(printf '\\f')\" ]; then printf CTRL_L; else printf WRONG; fi; IFS= read -r _")
+	sess, err := term.Start(editorCmd, 40, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m, _ := newAppTestModel(nil, nil)
+	tw, _ := newTerminalWindow().attach(sess, "", "", fileMeta{}, false, "vim")
+	m.windows = windowRegistry{windows: []window{tw}}
+	m.focus = focusRight
+	t.Cleanup(func() { m.closeEmbeddedSessions() })
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlL})
+	m = updated.(Model)
+	if msg := runAppCmd(t, cmd); msg != nil {
+		t.Errorf("typing returned %T, want nil", msg)
+	}
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if msg := runAppCmd(t, cmd); msg != nil {
+		t.Errorf("enter returned %T, want nil", msg)
+	}
+
+	received := false
+	deadline := time.After(3 * time.Second)
+	for !received {
+		select {
+		case <-deadline:
+			t.Fatalf("embedded editor did not receive ctrl+l; screen=%q", sess.Terminal().String())
+		case <-sess.Notify():
+			received = strings.Contains(sess.Terminal().String(), "CTRL_L")
+		case <-sess.Done():
+			t.Fatalf("embedded editor exited early: %v", sess.WaitErr())
+		}
+	}
+
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
+	m = updated.(Model)
+	if msg := runAppCmd(t, cmd); msg != nil {
+		t.Errorf("ctrl+g returned %T, want nil", msg)
+	}
+	if m.focus != focusLeft {
+		t.Errorf("focus after ctrl+g = %v, want left", m.focus)
+	}
+	if tw, _, ok := findTerminalWindow(m.windows); !ok || !tw.isRunning() {
+		t.Error("ctrl+g stopped the embedded editor")
+	}
+	if _, err := sess.Write([]byte("\r")); err != nil {
+		t.Fatalf("stop embedded editor: %v", err)
+	}
+	select {
+	case <-sess.Done():
+	case <-time.After(3 * time.Second):
+		t.Fatal("embedded editor did not exit after final input")
+	}
+}
+
+func TestEmbeddedEditorDefersToActiveModal(t *testing.T) {
+	editorCmd := exec.Command("sh", "-c", "IFS= read -r _")
+	sess, err := term.Start(editorCmd, 40, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m, ops := newAppTestModel(nil, nil)
+	tw, _ := newTerminalWindow().attach(sess, "", "", fileMeta{}, false, "vim")
+	m.windows = windowRegistry{windows: []window{tw}}
+	m.focus = focusRight
+	m.modal = newPermissionModal(protocol.PermissionAsked{RequestID: "permission", Permission: "bash"}, ops, m.th)
+	t.Cleanup(func() { m.closeEmbeddedSessions() })
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = updated.(Model)
+	if msg := runAppCmd(t, cmd); msg != nil {
+		t.Errorf("permission reply returned %T, want nil", msg)
+	}
+	if m.modal != nil {
+		t.Fatalf("modal = %T after allow once, want nil", m.modal)
+	}
+	if got := receiveAppOp(t, ops); got != (protocol.PermissionReply{RequestID: "permission", Decision: protocol.DecisionOnce}) {
+		t.Errorf("operation = %#v, want allow-once reply", got)
 	}
 }
 

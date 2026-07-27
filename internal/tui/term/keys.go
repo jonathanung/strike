@@ -29,6 +29,8 @@ func EncodeKey(msg tea.KeyMsg) []byte {
 		return []byte{'\r'}
 	case tea.KeyTab:
 		return []byte{'\t'}
+	case tea.KeyShiftTab:
+		return []byte("\x1b[Z")
 	case tea.KeySpace:
 		return []byte{' '}
 	case tea.KeyBackspace:
@@ -41,6 +43,10 @@ func EncodeKey(msg tea.KeyMsg) []byte {
 		return []byte("\x1b[A")
 	case tea.KeyDown:
 		return []byte("\x1b[B")
+	case tea.KeyCtrlUp:
+		return []byte("\x1b[1;5A")
+	case tea.KeyCtrlDown:
+		return []byte("\x1b[1;5B")
 	case tea.KeyRight:
 		return []byte("\x1b[C")
 	case tea.KeyLeft:

@@ -23,6 +23,14 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.reflow()
 		return m, cmd
 	}
+	if terminalCapturesKeys(m.windows, m.focus) {
+		if key.Matches(msg, m.keyMap.TerminalLeave) {
+			return m.leaveEmbeddedEditor()
+		}
+		var cmd tea.Cmd
+		m.windows, cmd = m.windows.update(msg)
+		return m, cmd
+	}
 	// Completion dismiss before interrupt so first esc closes the popup and a
 	// second esc cancels the turn (docs/keybinds.md; modal already returned).
 	if m.focus == focusLeft && m.completion != nil {
