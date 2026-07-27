@@ -20,6 +20,9 @@ JSON:
   "permissionAutoApproveExclude": ["bash"],
   "compactionStrategy": "trim",
   "compactionModel": "",
+  "compactionThreshold": 0.70,
+  "compactionBuffer": 4096,
+  "keepUserTurns": 2,
   "session": {
     "worktree": "off",
     "worktreeCleanup": "keep"
@@ -530,12 +533,22 @@ Invalid rows are dropped at load. Peer event-name mapping (CC/OpenCode/Crush):
 ## History compaction
 
 `/compact` and automatic threshold/overflow compaction shrink model-facing
-history while keeping a recent tail.
+history while keeping a recent tail. Continuous tool-result prune
+(`internal/engine/prune.go`) blanks older tool bodies under that ceiling;
+threshold compaction is the coarser whole-history rewrite.
 
 | Field | Values | Default |
 |---|---|---|
 | `compactionStrategy` | `trim` (drop older turns) or `summarize` (model-authored summary of dropped turns) | `trim` |
 | `compactionModel` | optional model id for the summarize call (same provider as the session) | session model |
+| `compactionThreshold` | occupancy fraction of the known context window that triggers auto-compact before a Stream; `>=1` disables threshold compaction; omit/`0` uses the engine default | `0.70` |
+| `compactionBuffer` | extra token headroom reserved with `MaxTokens` so threshold compaction fires before hard exhaustion; omit/`0` uses the engine default | `4096` |
+| `keepUserTurns` | trailing real user turns preserved when compacting (compact markers do not count); omit/`0` uses the engine default | `2` |
+
+Recommended ranges: threshold `0.60`–`0.85` (lower = earlier pressure response;
+too low thrash-compacts short sessions), buffer `1024`–`8192`, keep turns
+`1`–`4`. Overflow recovery still compacts on context-length provider errors
+regardless of threshold.
 
 On summarize failure the engine falls back to trim and emits a notice. The
 summary path never re-runs tools.
