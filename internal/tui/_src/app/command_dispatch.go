@@ -159,8 +159,10 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		}
 	case "/fork":
 		return m.handleForkCommand()
-	case "/undo", "/rewind":
+	case "/undo":
 		return m.handleUndoCommand(fields[1:])
+	case "/rewind":
+		return m.handleRewindCommand(fields[1:])
 	case "/session":
 		return m.handleSessionCommand(fields[1:])
 	case "/export":
@@ -268,7 +270,7 @@ func (m Model) handleUndoCommand(args []string) (tea.Model, tea.Cmd) {
 	m.resetComposer()
 	m.clearNotice()
 	if m.turnRunning {
-		m.setNotice("cannot rewind while a turn is running", true)
+		m.setNotice("cannot undo while a turn is running", true)
 		return m, nil
 	}
 	mode := ""
@@ -301,6 +303,96 @@ func (m Model) handleUndoCommand(args []string) (tea.Model, tea.Cmd) {
 		m.setNotice("usage: /undo [chat|files]", true)
 		return m, nil
 	}
+}
+
+func (m Model) handleRewindCommand(args []string) (tea.Model, tea.Cmd) {
+	m.resetComposer()
+	m.clearNotice()
+	if m.turnRunning {
+		m.setNotice("wait for the current turn to finish before rewinding", true)
+		return m, nil
+	}
+	if m.sessionID == "" {
+		m.setNotice("no session to rewind", true)
+		return m, nil
+	}
+	if m.services.Sessions == nil {
+		m.setNotice("session rewind is unavailable", true)
+		return m, nil
+	}
+	if len(args) > 0 {
+		arg := strings.ToLower(strings.TrimSpace(args[0]))
+		if arg == "help" || arg == "?" {
+			m.setNotice("usage: /rewind [turn] — fork a new session from a completed turn", false)
+			return m, nil
+		}
+		turn, err := strconv.Atoi(arg)
+		if err != nil || turn < 1 {
+			m.setNotice("usage: /rewind [turn] — turn is a 1-based completed turn number", true)
+			return m, nil
+		}
+		return m.forkRewindAtTurn(turn)
+	}
+	// Bare /rewind opens the turn picker.
+	m.modal = newRewindModal(m.services.Sessions, m.sessionID, m.rewindForkCmd)
+	m.reflow()
+	return m, nil
+}
+
+// rewindForkCmd returns a tea.Cmd that forks at keepEvents and quits for resume.
+func (m Model) rewindForkCmd(keepEvents int) tea.Cmd {
+	return func() tea.Msg {
+		return rewindForkMsg{keepEvents: keepEvents}
+	}
+}
+
+type rewindForkMsg struct {
+	keepEvents int
+}
+
+func (m Model) forkRewindAtTurn(turn int) (tea.Model, tea.Cmd) {
+	raw, err := m.services.Sessions.ReplayJSONL(m.sessionID)
+	if err != nil {
+		m.setNotice("rewind failed: "+err.Error(), true)
+		return m, nil
+	}
+	events, err := decodeSessionJSONL(raw)
+	if err != nil {
+		m.setNotice("rewind failed: "+err.Error(), true)
+		return m, nil
+	}
+	points := protocol.RewindPoints(events)
+	var keep int
+	found := false
+	for _, p := range points {
+		if p.Turn == turn {
+			keep = p.KeepEvents
+			found = true
+			break
+		}
+	}
+	if !found {
+		m.setNotice(fmt.Sprintf("no completed turn %d", turn), true)
+		return m, nil
+	}
+	return m.applyRewindFork(keep)
+}
+
+func (m Model) applyRewindFork(keepEvents int) (tea.Model, tea.Cmd) {
+	child, err := m.services.Sessions.ForkAt(m.sessionID, keepEvents)
+	if err != nil {
+		m.setNotice("rewind failed: "+err.Error(), true)
+		return m, nil
+	}
+	id := strings.TrimSpace(child.ID)
+	if id == "" || id == m.sessionID {
+		m.setNotice("rewind failed: empty child session", true)
+		return m, nil
+	}
+	m.pendingResume = id
+	m.clearModalStack()
+	m.setNotice("rewound → "+shortSessionID(id)+" (switching…)", false)
+	return m, tea.Quit
 }
 
 func formatSessionRewound(ev protocol.SessionRewound) string {

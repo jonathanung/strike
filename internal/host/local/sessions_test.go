@@ -123,6 +123,51 @@ func TestSessionsAdapterFork(t *testing.T) {
 	}
 }
 
+func TestSessionsAdapterForkAt(t *testing.T) {
+	dir := t.TempDir()
+	mgr := session.NewManager(dir)
+	root, err := mgr.Create(session.CreateOptions{ID: "root-at", Title: "work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{"one", "two"} {
+		if err := mgr.Append(root.ID, protocol.UserMessage{
+			Correlation: protocol.Correlation{SessionID: root.ID},
+			Text:        text,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := mgr.Append(root.ID, protocol.TurnCompleted{
+			Correlation: protocol.Correlation{SessionID: root.ID},
+			StopReason:  "end_turn",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc := NewSessions(mgr, "")
+	child, err := svc.ForkAt(root.ID, 2) // first user + turn.completed
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := svc.ReplayJSONL(child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "one") {
+		t.Fatalf("missing one: %s", data)
+	}
+	if strings.Contains(string(data), "two") {
+		t.Fatalf("should not include two: %s", data)
+	}
+	src, err := svc.ReplayJSONL(root.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), "two") {
+		t.Fatal("source should still have two")
+	}
+}
+
 func TestSessionsAdapterExposesPRMetadata(t *testing.T) {
 	dir := t.TempDir()
 	mgr := session.NewManager(dir)
