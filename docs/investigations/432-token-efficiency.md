@@ -73,10 +73,11 @@ These caps prevent a single call from being unbounded. They do **not** shrink re
 
 ### Tool schemas and guidance every request
 
-- `effectiveToolSchemas()` (`internal/engine/prompt_tools.go`) sends `Registry.Schemas()` minus hard-denied tools on **every** stream (including turn 1).
-- The same effective set is also rendered into the system prompt via `tool.BuildGuidance` (`internal/tool/guidance.go` / `prompt_tools.go`) — mild **schema + natural-language guidance duplication**.
+- `effectiveToolSchemas()` (`internal/engine/prompt_tools.go`) sends registry tools minus hard-denied tools on **every** stream (including turn 1), with **compacted descriptions** (`tool.CompactSchemaDescription`: short purposes; skill keeps available-skills list). Full InputSchema is unchanged; `Registry.Schemas()` keeps full prose for `toolsearch`.
+- Subsetting by agent/phase hard deny (explore/reviewer/plan posture) still drops tools the model cannot call.
+- The same effective set is also rendered into the system prompt via `tool.BuildGuidance` (`internal/tool/guidance.go` / `prompt_tools.go`) — mild **schema + natural-language guidance duplication** (see follow-up #437).
 - Built-in surface is on the order of ~27 tools (read/glob/grep/edit/write/apply_patch/bash/task family/webfetch/todo/memory/issue/notebook/sleep/skill/question/plan mode/toolsearch/…).
-- `toolsearch` (`internal/tool/toolsearch.go`) searches schemas; it does **not** defer loading schemas from the provider Tools array the way Claude Code’s `defer_loading` path does.
+- `toolsearch` (`internal/tool/toolsearch.go`) searches full registry schemas; it does **not** defer loading schemas from the provider Tools array the way Claude Code’s `defer_loading` path does (#438).
 
 ### Prompt cache: response parsing only (Anthropic)
 
@@ -230,7 +231,10 @@ Pointers for follow-up issues/PRs; this document does not schedule or implement 
    Continuous prune under the 80% ceiling so threshold compact is rare and cheaper when it runs.
 
 4. **Deferred schemas**  
-   Only if MCP / registry growth warrants it (`defer_loading` + toolsearch). Built-in ~27 tools are secondary to tool-result replay today.
+   Only if MCP / registry growth warrants it (`defer_loading` + toolsearch, #438). Built-in always-on description compaction shipped under #436; omit-until-discover remains separate.
+
+4b. **Always-on schema payload (#436 — shipped)**  
+   Compact wire descriptions + hard-deny subset in `effectiveToolSchemas`.
 
 5. **Telemetry**  
    Attribute input tokens to system / tools / user / assistant / tool_result slices so regressions are visible in-session (ties to prior usage/context visibility work in the core runtime audit).
