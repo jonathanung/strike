@@ -21,21 +21,31 @@ import (
 //	    "baseURL": "https://…",
 //	    "apiKey": "{env:PROVIDER_API_KEY}"
 //	  },
-//	  "models": ["model-a"]
+//	  "models": ["model-a"]              // legacy flat ids
+//	  // or nested:
+//	  // "models": { "model-a": { "name": "A", "limit": { "context": 128000 } } }
 //	}
 //
 // The map key is the provider id (slug). npm is optional and never executed —
 // strike has no npm SDK loader; it only hints openai vs anthropic wire shape.
+// Built-in keys (openai, anthropic, …) are model overlays only — they refine
+// models.dev without becoming custom providers.
 type providersFileEntry struct {
 	NPM     string             `json:"npm,omitempty"`
 	Name    string             `json:"name,omitempty"`
 	API     string             `json:"api,omitempty"`
-	Models  []string           `json:"models,omitempty"`
+	Models  modelsJSON         `json:"models,omitempty"`
 	Options *providersFileOpts `json:"options,omitempty"`
 	// Flat strike-native fields (also accepted without options{}).
 	BaseURL   string            `json:"baseURL,omitempty"`
 	APIKeyEnv string            `json:"apiKeyEnv,omitempty"`
 	Headers   map[string]string `json:"headers,omitempty"`
+}
+
+// ProvidersFile is the result of parsing providers.jsonc/json.
+type ProvidersFile struct {
+	Customs  []CustomProvider
+	Overlays map[string][]ModelDef // builtin (catalog) provider model overlays
 }
 
 type providersFileOpts struct {
@@ -98,55 +108,59 @@ func firstExisting(paths ...string) string {
 }
 
 // loadProvidersFileLayer loads the first existing providers.jsonc/json in dir.
-// Missing dir/files yield (nil, nil).
-func loadProvidersFileLayer(dir string) ([]CustomProvider, error) {
+// Missing dir/files yield a zero ProvidersFile and nil error.
+func loadProvidersFileLayer(dir string) (ProvidersFile, error) {
 	for _, path := range providersFileCandidates(dir) {
-		items, err := ReadProvidersFile(path)
+		pf, err := ReadProvidersFile(path)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", path, err)
+			return ProvidersFile{}, fmt.Errorf("%s: %w", path, err)
 		}
-		return items, nil
+		return pf, nil
 	}
-	return nil, nil
+	return ProvidersFile{}, nil
 }
 
 // ReadProvidersFile parses an OpenCode-style providers map or a JSON array of
 // CustomProvider objects. Supports JSONC (// and /* */ comments).
-func ReadProvidersFile(path string) ([]CustomProvider, error) {
+func ReadProvidersFile(path string) (ProvidersFile, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return ProvidersFile{}, err
 	}
 	return ParseProvidersFile(data)
 }
 
 // ParseProvidersFile decodes providers.jsonc/json bytes.
-func ParseProvidersFile(data []byte) ([]CustomProvider, error) {
+func ParseProvidersFile(data []byte) (ProvidersFile, error) {
 	stripped, err := stripJSONC(data)
 	if err != nil {
-		return nil, err
+		return ProvidersFile{}, err
 	}
 	stripped = bytesTrimSpace(stripped)
 	if len(stripped) == 0 {
-		return nil, nil
+		return ProvidersFile{}, nil
 	}
 	switch stripped[0] {
 	case '{':
 		return parseProvidersMap(stripped)
 	case '[':
-		return parseProvidersArray(stripped)
+		customs, err := parseProvidersArray(stripped)
+		if err != nil {
+			return ProvidersFile{}, err
+		}
+		return ProvidersFile{Customs: customs}, nil
 	default:
-		return nil, fmt.Errorf("providers file must be a JSON object or array")
+		return ProvidersFile{}, fmt.Errorf("providers file must be a JSON object or array")
 	}
 }
 
-func parseProvidersMap(data []byte) ([]CustomProvider, error) {
+func parseProvidersMap(data []byte) (ProvidersFile, error) {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, err
+		return ProvidersFile{}, err
 	}
 	// Stable order: sort keys for deterministic merge/tests.
 	keys := make([]string, 0, len(raw))
@@ -154,31 +168,40 @@ func parseProvidersMap(data []byte) ([]CustomProvider, error) {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	out := make([]CustomProvider, 0, len(keys))
+	var out ProvidersFile
 	for _, key := range keys {
 		// Nested "providers" key with array — rare wrap form.
 		if key == "providers" {
-			var arr []CustomProvider
-			if err := json.Unmarshal(raw[key], &arr); err == nil {
-				for _, p := range arr {
-					p = NormalizeCustomProvider(p)
-					if err := p.Validate(); err != nil {
-						continue
-					}
-					out = append(out, p)
-				}
-				continue
+			arr, err := parseProvidersArray(raw[key])
+			if err != nil {
+				return ProvidersFile{}, fmt.Errorf("providers: %w", err)
 			}
+			out.Customs = append(out.Customs, arr...)
+			continue
 		}
 		var entry providersFileEntry
 		if err := json.Unmarshal(raw[key], &entry); err != nil {
+			return ProvidersFile{}, fmt.Errorf("provider %q: %w", key, err)
+		}
+		id := strings.ToLower(strings.TrimSpace(key))
+		if id == "" {
+			return ProvidersFile{}, errors.New("empty provider id")
+		}
+		if _, builtin := BuiltinProviderNames[id]; builtin {
+			if len(entry.Models.defs) == 0 {
+				continue
+			}
+			if out.Overlays == nil {
+				out.Overlays = make(map[string][]ModelDef)
+			}
+			out.Overlays[id] = mergeModelDefs(out.Overlays[id], entry.Models.defs)
 			continue
 		}
 		p, err := entry.toCustom(key)
 		if err != nil {
-			continue
+			return ProvidersFile{}, fmt.Errorf("provider %q: %w", key, err)
 		}
-		out = append(out, p)
+		out.Customs = append(out.Customs, p)
 	}
 	return out, nil
 }
@@ -189,7 +212,7 @@ func parseProvidersArray(data []byte) ([]CustomProvider, error) {
 		return nil, err
 	}
 	out := make([]CustomProvider, 0, len(arr))
-	for _, p := range arr {
+	for i, p := range arr {
 		p = NormalizeCustomProvider(p)
 		if name, ok := EnvRefName(p.APIKeyEnv); ok {
 			p.APIKeyEnv = name
@@ -197,7 +220,7 @@ func parseProvidersArray(data []byte) ([]CustomProvider, error) {
 			p.APIKeyEnv = NormalizeAPIKeyEnv(p.APIKeyEnv)
 		}
 		if err := p.Validate(); err != nil {
-			continue
+			return nil, fmt.Errorf("providers[%d] %q: %w", i, p.Name, err)
 		}
 		out = append(out, p)
 	}
@@ -238,7 +261,7 @@ func (e providersFileEntry) toCustom(key string) (CustomProvider, error) {
 		API:       api,
 		Headers:   headers,
 		APIKeyEnv: apiKeyEnv,
-		Models:    e.Models,
+		ModelDefs: e.Models.defs,
 	})
 	if err := p.Validate(); err != nil {
 		return CustomProvider{}, err

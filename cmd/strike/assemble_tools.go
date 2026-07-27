@@ -127,7 +127,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		return nil, fmt.Errorf("opening auth store: %w", err)
 	}
 
-	customStore := config.NewCustomStore(cfg.Providers, workDir)
+	customStore := config.NewCustomStoreWithOverlays(cfg.Providers, cfg.ModelOverlays, workDir)
 
 	// selectProvider constructs a provider by name, probing credentials so
 	// a bad /provider selection fails at select time with a clear message
@@ -303,6 +303,12 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		})
 	}
 	lookupContextWindow := func(providerName, model string) int {
+		// Config limit overlays win over models.dev when set.
+		if defs := customStore.ModelOverlay(providerName); len(defs) > 0 {
+			if n, ok := config.ModelDefsContext(defs, model); ok {
+				return n
+			}
+		}
 		// Best-effort catalog lookup for threshold compaction. Failures
 		// leave the window unknown; overflow recovery still works.
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

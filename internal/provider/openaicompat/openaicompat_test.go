@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/provider"
 )
 
@@ -340,6 +341,43 @@ func TestChatRequestCarriesReasoningEffort(t *testing.T) {
 	out := toChatRequest(provider.Request{Model: "gpt-5.5", Effort: provider.EffortMax}, true)
 	if out.ReasoningEffort != "high" {
 		t.Errorf("reasoning_effort = %q, want high (max clamps down)", out.ReasoningEffort)
+	}
+}
+
+// TestVariantOptionsPassthrough maps a providers.jsonc variant bag onto the
+// chat-completions reasoning_effort wire field (httptest).
+func TestVariantOptionsPassthrough(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	// Simulate config variant resolution (providers.jsonc variants.high).
+	variant := map[string]any{"reasoningEffort": "high", "textVerbosity": "low"}
+	level, ok := config.VariantEffort(variant)
+	if !ok {
+		t.Fatal("VariantEffort failed")
+	}
+	p := NewWithHeaders("openai", srv.URL, func(context.Context) (string, error) { return "sk-test", nil }, nil)
+	ch, err := p.Stream(context.Background(), provider.Request{
+		Model:    "gpt-5.5",
+		Messages: []provider.Message{{Role: provider.RoleUser, Text: "hi"}},
+		Effort:   provider.Effort(string(level)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range ch {
+	}
+	if gotBody["model"] != "gpt-5.5" {
+		t.Errorf("model = %v", gotBody["model"])
+	}
+	if gotBody["reasoning_effort"] != "high" {
+		t.Errorf("reasoning_effort = %v, want high from variant", gotBody["reasoning_effort"])
 	}
 }
 

@@ -631,6 +631,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case effortChoicesLoadedMsg:
+		if msg.modal != nil {
+			m.modal = msg.modal
+		}
+		return m, nil
+
 	case defaultsSavedMsg:
 		if msg.err != nil {
 			m.setNotice("saving defaults failed: "+msg.err.Error(), true)

@@ -88,17 +88,28 @@ type Auth interface {
 	BeginDevice(ctx context.Context, provider string) (*DeviceLogin, error)
 }
 
+// Model source labels for ModelInfo.Source.
+const (
+	ModelSourceCatalog = "catalog" // models.dev (or equivalent) only
+	ModelSourceConfig  = "config"  // providers.jsonc / custom list only
+	ModelSourceMerge   = "merge"   // catalog entry refined by config
+)
+
 // ModelInfo is picker-facing metadata for one catalog model. Zero fields mean
 // unknown or unsupported; frontends must omit them from display.
 type ModelInfo struct {
 	ID         string
+	Name       string  // display label; empty means use ID
 	Context    int     // context window tokens; 0 = unknown
+	Output     int     // max output tokens; 0 = unknown
 	InputCost  float64 // USD per million input tokens
 	OutputCost float64 // USD per million output tokens
 	HasCost    bool
 	ToolCall   bool
 	Reasoning  bool
-	Attachment bool // multimodal / file attachments
+	Attachment bool     // multimodal / file attachments
+	VariantIDs []string // config effort/reasoning variant ids
+	Source     string   // ModelSourceCatalog | ModelSourceConfig | ModelSourceMerge
 }
 
 // Catalog lists model ids and limits for a provider (may hit network/cache;
@@ -116,6 +127,10 @@ type Catalog interface {
 	// OutputLimit returns the model's max output tokens.
 	// ok is false when unknown (not the same as zero).
 	OutputLimit(ctx context.Context, provider, model string) (tokens int, ok bool, err error)
+	// ResolveVariant maps a config model variant id to a reasoning effort
+	// level (protocol effort string). ok is false when the variant is unknown
+	// or carries no effort field.
+	ResolveVariant(ctx context.Context, provider, model, variant string) (effort string, ok bool, err error)
 }
 
 // Settings persists user-chosen defaults. Empty fields mean "leave as is".

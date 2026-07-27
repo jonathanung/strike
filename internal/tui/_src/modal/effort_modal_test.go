@@ -101,8 +101,8 @@ func TestBareEffortOpensPickerOnTheActiveLevel(t *testing.T) {
 	if !ok {
 		t.Fatalf("modal = %T, want *effortModal", m.modal)
 	}
-	if picker.levels[picker.cursor] != protocol.EffortMedium {
-		t.Errorf("cursor on %q, want the active level medium", picker.levels[picker.cursor])
+	if picker.choices[picker.cursor].Effort != protocol.EffortMedium {
+		t.Errorf("cursor on %q, want the active level medium", picker.choices[picker.cursor].Effort)
 	}
 	if m.composer.Value() != "" {
 		t.Error("bare effort command did not reset composer")
@@ -145,8 +145,8 @@ func TestEffortPickerCursorStaysInRange(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		picker.update(tea.KeyMsg{Type: tea.KeyDown})
 	}
-	if picker.cursor != len(picker.levels)-1 {
-		t.Errorf("cursor = %d, want %d", picker.cursor, len(picker.levels)-1)
+	if picker.cursor != len(picker.choices)-1 {
+		t.Errorf("cursor = %d, want %d", picker.cursor, len(picker.choices)-1)
 	}
 	for i := 0; i < 20; i++ {
 		picker.update(tea.KeyMsg{Type: tea.KeyUp})

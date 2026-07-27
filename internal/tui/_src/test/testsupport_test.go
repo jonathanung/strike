@@ -205,6 +205,10 @@ func (c *fakeCatalog) OutputLimit(context.Context, string, string) (int, bool, e
 	return 0, false, nil
 }
 
+func (c *fakeCatalog) ResolveVariant(context.Context, string, string, string) (string, bool, error) {
+	return "", false, nil
+}
+
 // --- fakeSettings: a recording host.Settings -----------------------------
 
 type savedDefaults struct {
