@@ -36,15 +36,29 @@ func newWindowRegistry() windowRegistry {
 	return r
 }
 
+// windowCycleable reports whether w participates in the right-pane cycle and
+// stack groups. Disabled system telemetry stays registered but is hidden.
+func windowCycleable(w window) bool {
+	if tw, ok := w.(telemetryWindow); ok {
+		return tw.enabled
+	}
+	return true
+}
+
 // defaultWindowGroups pairs related panes for simultaneous split display.
 // Focus cycle order is the concatenation of group members (same as the former
-// flat window list).
+// flat window list). Disabled telemetry is omitted from the session stack.
 func defaultWindowGroups(windows []window) []windowGroup {
 	indexOf := map[string]int{}
 	for i, w := range windows {
+		if !windowCycleable(w) {
+			continue
+		}
 		indexOf[w.id()] = i
 	}
-	must := func(ids ...string) []int {
+	// required fails the whole group if any id is missing; optional skips
+	// absent ids (e.g. telemetry when opted out) but keeps the rest.
+	required := func(ids ...string) []int {
 		out := make([]int, len(ids))
 		for i, id := range ids {
 			idx, ok := indexOf[id]
@@ -55,13 +69,27 @@ func defaultWindowGroups(windows []window) []windowGroup {
 		}
 		return out
 	}
+	optional := func(ids ...string) []int {
+		out := make([]int, 0, len(ids))
+		for _, id := range ids {
+			idx, ok := indexOf[id]
+			if !ok {
+				continue
+			}
+			out = append(out, idx)
+		}
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	}
 	groups := []windowGroup{
-		{id: "session", members: must("context", "activity", "telemetry")},
-		{id: "agents", members: must("agents", "visualizer")},
-		{id: "files", members: must("files")},
-		{id: "project", members: must("memory", "issues")},
-		{id: "markdown", members: must("markdown")},
-		{id: "editor", members: must("editor")},
+		{id: "session", members: optional("context", "activity", "telemetry")},
+		{id: "agents", members: required("agents", "visualizer")},
+		{id: "files", members: required("files")},
+		{id: "project", members: required("memory", "issues")},
+		{id: "markdown", members: required("markdown")},
+		{id: "editor", members: required("editor")},
 	}
 	out := make([]windowGroup, 0, len(groups))
 	for _, g := range groups {
@@ -152,6 +180,9 @@ func (r windowRegistry) focusOrder() []int {
 	}
 	for i := range r.windows {
 		if !seen[i] {
+			if !windowCycleable(r.windows[i]) {
+				continue
+			}
 			out = append(out, i)
 		}
 	}
@@ -287,13 +318,17 @@ func (r windowRegistry) resizeMembers(dims map[int]memberSlot) windowRegistry {
 }
 
 // activate sets the active window to the one with the given id (copy-on-write).
-// ok is false when no window matches.
+// ok is false when no window matches or the window is hidden (e.g. telemetry off).
 func (r windowRegistry) activate(id string) (windowRegistry, bool) {
 	for i, w := range r.windows {
-		if w.id() == id {
-			r.index = i
-			return r, true
+		if w.id() != id {
+			continue
 		}
+		if !windowCycleable(w) {
+			return r, false
+		}
+		r.index = i
+		return r, true
 	}
 	return r, false
 }

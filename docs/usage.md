@@ -28,7 +28,9 @@ strike launches without any provider configured. Pick one inside the TUI:
 /activity                      # focus the activity right pane
 /files                         # focus the files right pane
 /visualizer                    # focus the visualizer right pane
-/system                        # focus the system right pane
+/system                        # focus the system right pane (needs /telemetry on)
+/telemetry                     # toggle local system metrics pane (CPU/RAM/disk)
+/telemetry on|off|status       # opt in/out or report; off by default (also --telemetry)
 /session                       # browse past root sessions for this workspace
                                # (auto-titles); ctrl+a shows all workspaces
 /session <id>                  # resume a specific session by id (any workspace)
@@ -135,7 +137,8 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/compact` | ask the engine to compact model history |
 | `/memory` | bare = list browser (focuses memory pane); `list [tag]`, `get <key>`, `set <key> <value>`, `rm <key>`, `export [path]`, `import <path> [--replace]` (portable JSON; relative paths stay under project root) |
 | `/issues` | bare = list browser (focuses issues pane); `list [open\|closed]`, `add <title>`, `get <id>`, `close <id>`, `export [path]`, `import <path> [--replace]` (same portable rules as memory) |
-| `/agents` `/activity` `/files` `/visualizer` `/system` | jump focus to the named right pane (`/agent` remains persona select) |
+| `/agents` `/activity` `/files` `/visualizer` `/system` | jump focus to the named right pane (`/agent` remains persona select; `/system` needs telemetry on) |
+| `/telemetry [on\|off\|status]` | local system metrics pane (CPU/RAM/disk); **off by default** (no 1 Hz sampler). Launch with `--telemetry` or `/telemetry on` |
 | `/loop` | schedule a recurring prompt (`15m`, `2h`, …); session-only; `/loop list`, `/loop stop [id]` — see [loop.md](loop.md). Distinct from [`/goal`](goal.md) |
 | `/context` | context doctor modal: layer sizes, history msg count, oversized warnings (previews redacted) |
 | `/cost` | session input/output/cache totals from usage events; est. USD when catalog rates known; unknown stays explicit |
@@ -221,9 +224,14 @@ or config `providers` — see [config.md](config.md).
 ```sh
 ./strike --continue              # resume most recent root session
 ./strike --session <id>          # resume a specific root session by id
+./strike --telemetry             # show local system metrics pane (CPU/RAM/disk)
 ./strike exec "fix the flaky test"   # one-shot headless turn → stdout
 ./strike exec -                  # read prompt from stdin
 ```
+
+System telemetry (local host CPU/RAM/disk only — not cloud analytics) is **off
+by default** so no 1 Hz sampler runs. Enable with `--telemetry` or
+`/telemetry on`; disable with `/telemetry off`.
 
 `--continue` and `--session` cannot be combined. `strike exec` accepts the
 same `--provider` / `--model` / `--effort` /

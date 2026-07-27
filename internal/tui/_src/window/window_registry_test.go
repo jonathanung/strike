@@ -400,13 +400,24 @@ func TestWindowRegistryReplaceByID(t *testing.T) {
 func TestWindowRegistryCycleIncludesFilesAndMarkdown(t *testing.T) {
 	r := newWindowRegistry()
 	var order []string
+	// Telemetry off by default — 9 cycleable windows + wrap.
+	for range 10 {
+		order = append(order, r.active().id())
+		r = r.cycle()
+	}
+	want := []string{"context", "activity", "agents", "visualizer", "files", "memory", "issues", "markdown", "editor", "context"}
+	if !stringsEqual(order, want) {
+		t.Errorf("cycle order = %q, want %q", order, want)
+	}
+	r, _ = setTelemetryEnabled(newWindowRegistry(), true)
+	order = nil
 	for range 11 {
 		order = append(order, r.active().id())
 		r = r.cycle()
 	}
-	want := []string{"context", "activity", "telemetry", "agents", "visualizer", "files", "memory", "issues", "markdown", "editor", "context"}
-	if !stringsEqual(order, want) {
-		t.Errorf("cycle order = %q, want %q", order, want)
+	wantOn := []string{"context", "activity", "telemetry", "agents", "visualizer", "files", "memory", "issues", "markdown", "editor", "context"}
+	if !stringsEqual(order, wantOn) {
+		t.Errorf("cycle with telemetry = %q, want %q", order, wantOn)
 	}
 }
 
@@ -434,11 +445,10 @@ func TestWindowRegistryPreservesMarkdownScrollAcrossCycle(t *testing.T) {
 		t.Fatal("setup did not scroll markdown content")
 	}
 
-	// Cycle through remaining windows and back around to markdown.
+	// Cycle through remaining windows and back around to markdown (telemetry off).
 	r = r.cycle() // editor
 	r = r.cycle() // context
 	r = r.cycle() // activity
-	r = r.cycle() // telemetry
 	r = r.cycle() // agents
 	r = r.cycle() // visualizer
 	r = r.cycle() // files
@@ -469,7 +479,7 @@ func TestDefaultWindowGroupsPairRelatedPanes(t *testing.T) {
 		id      string
 		members []string
 	}{
-		{"session", []string{"context", "activity", "telemetry"}},
+		{"session", []string{"context", "activity"}}, // telemetry opt-in
 		{"agents", []string{"agents", "visualizer"}},
 		{"files", []string{"files"}},
 		{"project", []string{"memory", "issues"}},
@@ -494,18 +504,31 @@ func TestDefaultWindowGroupsPairRelatedPanes(t *testing.T) {
 	if g := r.activeGroup(); g.id != "session" {
 		t.Errorf("initial active group = %q, want session", g.id)
 	}
+	r, _ = setTelemetryEnabled(r, true)
+	got := make([]string, 0, 3)
+	for _, g := range r.groups {
+		if g.id != "session" {
+			continue
+		}
+		for _, mi := range g.members {
+			got = append(got, r.windows[mi].id())
+		}
+	}
+	if !stringsEqual(got, []string{"context", "activity", "telemetry"}) {
+		t.Errorf("session with telemetry = %q", got)
+	}
 }
 
 func TestWindowRegistryFocusCycleIsDeterministicAcrossGroups(t *testing.T) {
 	r := newWindowRegistry()
 	var order []string
-	for range 13 {
+	for range 12 {
 		order = append(order, r.active().id())
 		r = r.cycleBy(1)
 	}
 	want := []string{
-		"context", "activity", "telemetry", "agents", "visualizer", "files", "memory",
-		"issues", "markdown", "editor", "context", "activity", "telemetry",
+		"context", "activity", "agents", "visualizer", "files", "memory",
+		"issues", "markdown", "editor", "context", "activity", "agents",
 	}
 	if !stringsEqual(order, want) {
 		t.Errorf("cycle order = %q, want %q", order, want)
@@ -601,17 +624,23 @@ func memberSlotsEqual(a, b []memberSlot) bool {
 
 func TestStackedRightPaneShowsPairedGroupTitles(t *testing.T) {
 	for _, tt := range []struct {
-		name     string
-		activate string
-		want     []string
+		name       string
+		activate   string
+		telemetry  bool
+		want       []string
+		wantAbsent []string
 	}{
-		{"session", "context", []string{"context", "activity", "system"}},
-		{"agents", "agents", []string{"agents", "visualizer"}},
-		{"project", "memory", []string{"memory", "issues"}},
+		{"session", "context", false, []string{"context", "activity"}, []string{"system"}},
+		{"session+telemetry", "context", true, []string{"context", "activity", "system"}, nil},
+		{"agents", "agents", false, []string{"agents", "visualizer"}, nil},
+		{"project", "memory", false, []string{"memory", "issues"}, nil},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			m, _ := newAppTestModel(nil, nil)
 			m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+			if tt.telemetry {
+				m.windows, _ = setTelemetryEnabled(m.windows, true)
+			}
 			var ok bool
 			m.windows, ok = m.windows.activate(tt.activate)
 			if !ok {
@@ -622,6 +651,11 @@ func TestStackedRightPaneShowsPairedGroupTitles(t *testing.T) {
 			for _, title := range tt.want {
 				if !strings.Contains(plain, title) {
 					t.Errorf("split view missing %q title:\n%s", title, plain)
+				}
+			}
+			for _, title := range tt.wantAbsent {
+				if strings.Contains(plain, title) {
+					t.Errorf("split view unexpectedly has %q:\n%s", title, plain)
 				}
 			}
 		})

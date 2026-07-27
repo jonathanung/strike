@@ -25,6 +25,7 @@ type cliOptions struct {
 	continueSession            bool
 	sessionID                  string // --session: resume a specific root session
 	worktree                   bool   // --worktree: force a git worktree for this session
+	telemetry                  bool   // --telemetry: show local system metrics pane
 	upgrade                    bool
 	version                    bool
 }
@@ -89,6 +90,13 @@ var optionSpecs = []optionSpec{
 		description: "run this session in an isolated git worktree under .strike/worktrees/",
 		register: func(fs *flag.FlagSet, opts *cliOptions) {
 			fs.BoolVar(&opts.worktree, "worktree", false, "")
+		},
+	},
+	{
+		names:       []string{"telemetry"},
+		description: "show local system metrics pane (CPU/RAM/disk); off by default",
+		register: func(fs *flag.FlagSet, opts *cliOptions) {
+			fs.BoolVar(&opts.telemetry, "telemetry", false, "")
 		},
 	},
 	{

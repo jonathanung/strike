@@ -266,8 +266,8 @@ Two different mechanisms, depending on whether it needs Go code:
   `/<name>` on the next launch automatically, through
    `host.Services.Skills`. Reserved names (`provider`, `model`, `effort`,
    `autonomy`, `auth`, `settings`, `agent`, `agents`, `activity`, `files`,
-   `visualizer`, `system`, `fast`, `vim`, `nano`, `md-read`, `theme`,
-   `layout`, `split`, `compact`, `fork`, `undo`, `rewind`, `session`,
+   `visualizer`, `system`, `telemetry`, `fast`, `vim`, `nano`, `md-read`,
+   `theme`, `layout`, `split`, `compact`, `fork`, `undo`, `rewind`, `session`,
    `export`, `copy`, `help`, `keys`, `memory`, `issues`, `goal`, `loop`, `context`,
    `effective-prompt`, `cost`, `upgrade`, `init`, `mcp`, `exit`, `quit`, and
    keybind-backed action mirrors such as `focus-left`, `palette`,

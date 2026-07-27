@@ -135,7 +135,7 @@ func TestTelemetrySampleAndRootSwitch(t *testing.T) {
 		MemOK: true, MemUsedBytes: 1, MemTotalBytes: 2,
 		DiskOK: true, DiskUsedBytes: 1, DiskTotalBytes: 4, DiskFreeBytes: 3,
 	}}
-	w := telemetryWindow{tel: ft, root: "/a"}
+	w := telemetryWindow{tel: ft, root: "/a", enabled: true}
 	next, cmd := w.update(telemetryTickMsg{gen: w.gen})
 	w = asTelemetryWindow(t, next)
 	if cmd == nil {
@@ -184,7 +184,7 @@ func TestTelemetrySampleAndRootSwitch(t *testing.T) {
 
 func TestTelemetrySampleError(t *testing.T) {
 	ft := &scriptedTelemetry{err: errors.New("collect failed")}
-	w := telemetryWindow{tel: ft}
+	w := telemetryWindow{tel: ft, enabled: true}
 	w, cmd := w.startSample()
 	msg := cmd().(telemetrySampleMsg)
 	next, _ := w.update(msg)
@@ -203,6 +203,7 @@ func TestApplyTelemetryMsgRoutesToWindow(t *testing.T) {
 	ft := &scriptedTelemetry{sample: host.TelemetrySample{CPUHostOK: true, CPUHostPct: 5}}
 	r := newWindowRegistry()
 	r = configureTelemetryWindow(r, "/proj", ft)
+	r, _ = setTelemetryEnabled(r, true)
 	var gen int
 	for _, w := range r.windows {
 		if tw, ok := w.(telemetryWindow); ok {
@@ -227,6 +228,56 @@ func TestApplyTelemetryMsgRoutesToWindow(t *testing.T) {
 	t.Fatal("telemetry window missing")
 }
 
+func TestTelemetryDefaultOffNoSampler(t *testing.T) {
+	ft := &scriptedTelemetry{sample: host.TelemetrySample{CPUHostOK: true, CPUHostPct: 1}}
+	r := newWindowRegistry()
+	r = configureTelemetryWindow(r, "/proj", ft)
+	if telemetryEnabled(r) {
+		t.Fatal("telemetry enabled by default")
+	}
+	// Session stack omits system pane.
+	for _, g := range r.groups {
+		if g.id != "session" {
+			continue
+		}
+		for _, mi := range g.members {
+			if r.windows[mi].id() == telemetryWindowID {
+				t.Fatal("session group includes telemetry when off")
+			}
+		}
+	}
+	// Tick against disabled telemetry must not sample.
+	r, cmd := applyTelemetryMsg(r, telemetryTickMsg{gen: 0})
+	if cmd != nil {
+		t.Fatal("disabled telemetry armed a sample cmd")
+	}
+	if ft.calls.Load() != 0 {
+		t.Fatalf("Sample called %d times while off", ft.calls.Load())
+	}
+	// Enable starts sampling; disable stops and drops in-flight gen.
+	r, cmd = setTelemetryEnabled(r, true)
+	if !telemetryEnabled(r) {
+		t.Fatal("enable failed")
+	}
+	if cmd == nil {
+		t.Fatal("enable should return init tick")
+	}
+	tick := cmd().(telemetryTickMsg)
+	r, cmd = applyTelemetryMsg(r, tick)
+	if cmd == nil {
+		t.Fatal("expected sample after enable")
+	}
+	_ = cmd() // run sample
+	r, _ = setTelemetryEnabled(r, false)
+	if telemetryEnabled(r) {
+		t.Fatal("disable failed")
+	}
+	r, cmd = applyTelemetryMsg(r, telemetryTickMsg{gen: tick.gen})
+	if cmd != nil {
+		t.Fatal("stale tick after disable should not sample")
+	}
+}
+
 func TestTelemetryInSessionStack(t *testing.T) {
 	ft := &scriptedTelemetry{sample: host.TelemetrySample{
 		CPUHostOK: true, CPUHostPct: 12.5,
@@ -238,6 +289,7 @@ func TestTelemetryInSessionStack(t *testing.T) {
 	m.services.Telemetry = ft
 	m.workDir = "/workspace"
 	m.windows = configureTelemetryWindow(m.windows, m.workDir, ft)
+	m.windows, _ = setTelemetryEnabled(m.windows, true)
 	// Inject a completed sample.
 	var tw telemetryWindow
 	for _, w := range m.windows.windows {
@@ -248,7 +300,10 @@ func TestTelemetryInSessionStack(t *testing.T) {
 	}
 	tw.sample = ft.sample
 	tw.has = true
+	tw.enabled = true
 	m.windows, _ = m.windows.replace(telemetryWindowID, tw, false)
+	// replace does not rebuild groups; ensure session stack still has telemetry.
+	m.windows.groups = defaultWindowGroups(m.windows.windows)
 
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 48})
 	m.focus = focusRight
@@ -259,6 +314,13 @@ func TestTelemetryInSessionStack(t *testing.T) {
 		if !strings.Contains(plain, want) {
 			t.Errorf("stack missing %q:\n%s", want, plain)
 		}
+	}
+	// Off removes the pane.
+	m.windows, _ = setTelemetryEnabled(m.windows, false)
+	m.reflow()
+	plain = ansi.Strip(m.View())
+	if strings.Contains(plain, "system") && strings.Contains(plain, "RAM") {
+		t.Errorf("system pane still visible after off:\n%s", plain)
 	}
 }
 

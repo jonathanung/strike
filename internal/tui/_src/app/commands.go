@@ -24,6 +24,7 @@ const (
 	commandFiles           commandID = "files"
 	commandVisualizer      commandID = "visualizer"
 	commandSystem          commandID = "system"
+	commandTelemetry       commandID = "telemetry"
 	commandFast            commandID = "fast"
 	commandThink           commandID = "think"
 	commandVim             commandID = "vim"
@@ -115,7 +116,8 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandActivity, Name: "/activity", Description: "focus the activity right pane", Source: commandSourceBuiltin},
 	{ID: commandFiles, Name: "/files", Description: "focus the files right pane", Source: commandSourceBuiltin},
 	{ID: commandVisualizer, Name: "/visualizer", Description: "focus the visualizer right pane", Source: commandSourceBuiltin},
-	{ID: commandSystem, Name: "/system", Description: "focus the system right pane", Source: commandSourceBuiltin},
+	{ID: commandSystem, Name: "/system", Description: "focus the system right pane (requires telemetry on)", Source: commandSourceBuiltin},
+	{ID: commandTelemetry, Name: "/telemetry", Description: "show or hide local system metrics (CPU/RAM/disk)", ArgsHint: "[on|off|status]", Source: commandSourceBuiltin},
 	{ID: commandFast, Name: "/fast", Description: "toggle OpenAI priority tier (faster, ~2× cost)", ArgsHint: "[on|off]", Source: commandSourceBuiltin},
 	{ID: commandThink, Name: "/think", Description: "show or hide model chain-of-thought", ArgsHint: "[on|off]", Source: commandSourceBuiltin},
 	{ID: commandVim, Name: "/vim", Description: "open a file in the editor (embedded/modal/takeover; see vimMode)", ArgsHint: "[path|@path[:line]]", Source: commandSourceBuiltin},
@@ -215,6 +217,7 @@ var reservedCommandNames = map[string]struct{}{
 	"files":            {},
 	"visualizer":       {},
 	"system":           {},
+	"telemetry":        {},
 	"fast":             {},
 	"think":            {},
 	"vim":              {},

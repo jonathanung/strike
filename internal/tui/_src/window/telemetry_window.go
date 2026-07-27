@@ -44,15 +44,18 @@ type telemetrySampleMsg struct {
 }
 
 // telemetryWindow is the right-pane system resource panel (CPU/RAM/disk).
+// Off by default: enabled is set via --telemetry or /telemetry on so the pane
+// is absent from the session stack and no 1 Hz sampler runs until opted in.
 type telemetryWindow struct {
-	tel    host.Telemetry
-	root   string
-	sample host.TelemetrySample
-	has    bool // true after at least one sample attempt
-	err    string
-	gen    int // bumps on root change / rebind to drop stale msgs
-	width  int
-	height int
+	tel     host.Telemetry
+	root    string
+	sample  host.TelemetrySample
+	has     bool // true after at least one sample attempt
+	err     string
+	gen     int // bumps on root change / rebind / disable to drop stale msgs
+	width   int
+	height  int
+	enabled bool // false → hidden from stack/cycle and not sampling
 	// sampling is true while a Collect cmd is in flight (no overlap).
 	sampling bool
 }
@@ -66,10 +69,16 @@ func (w telemetryWindow) id() string { return telemetryWindowID }
 func (w telemetryWindow) title() string { return "system" }
 
 func (w telemetryWindow) init() tea.Cmd {
+	if !w.enabled {
+		return nil
+	}
 	return w.armTick(0)
 }
 
 func (w telemetryWindow) update(msg tea.Msg) (window, tea.Cmd) {
+	if !w.enabled {
+		return w, nil
+	}
 	switch msg := msg.(type) {
 	case contextStateMsg:
 		root := strings.TrimSpace(msg.WorkDir)
@@ -153,6 +162,10 @@ func (w telemetryWindow) armTick(d time.Duration) tea.Cmd {
 
 // startSample marks in-flight collection and returns a non-blocking sample cmd.
 func (w telemetryWindow) startSample() (telemetryWindow, tea.Cmd) {
+	if !w.enabled {
+		w.sampling = false
+		return w, nil
+	}
 	if w.tel == nil {
 		w.has = true
 		w.sampling = false
@@ -173,12 +186,15 @@ func (w telemetryWindow) startSample() (telemetryWindow, tea.Cmd) {
 
 // applyTelemetryMsg routes sample/tick msgs onto the telemetry window and
 // returns any follow-up cmd. Used from Model.Update so sampling works even
-// when another right-pane window is focused.
+// when another right-pane window is focused. No-op when telemetry is off.
 func applyTelemetryMsg(r windowRegistry, msg tea.Msg) (windowRegistry, tea.Cmd) {
 	for i, w := range r.windows {
 		tw, ok := w.(telemetryWindow)
 		if !ok {
 			continue
+		}
+		if !tw.enabled {
+			return r, nil
 		}
 		next, cmd := tw.update(msg)
 		windows := append([]window(nil), r.windows...)
@@ -190,6 +206,7 @@ func applyTelemetryMsg(r windowRegistry, msg tea.Msg) (windowRegistry, tea.Cmd) 
 }
 
 // configureTelemetryWindow binds host.Telemetry + workDir onto the system pane.
+// Does not enable sampling; use setTelemetryEnabled for opt-in.
 func configureTelemetryWindow(r windowRegistry, root string, tel host.Telemetry) windowRegistry {
 	for i, w := range r.windows {
 		tw, ok := w.(telemetryWindow)
@@ -206,6 +223,55 @@ func configureTelemetryWindow(r windowRegistry, root string, tel host.Telemetry)
 		return r
 	}
 	return r
+}
+
+// telemetryEnabled reports whether the system telemetry pane is opted in.
+func telemetryEnabled(r windowRegistry) bool {
+	for _, w := range r.windows {
+		if tw, ok := w.(telemetryWindow); ok {
+			return tw.enabled
+		}
+	}
+	return false
+}
+
+// setTelemetryEnabled shows or hides the system pane and starts/stops the
+// sampler. Disabling bumps gen so in-flight sample msgs are dropped and no
+// further ticks are armed. Enabling returns an init cmd that starts sampling.
+func setTelemetryEnabled(r windowRegistry, enabled bool) (windowRegistry, tea.Cmd) {
+	for i, w := range r.windows {
+		tw, ok := w.(telemetryWindow)
+		if !ok {
+			continue
+		}
+		if tw.enabled == enabled {
+			return r, nil
+		}
+		tw.enabled = enabled
+		tw.gen++
+		tw.sampling = false
+		if !enabled {
+			tw.has = false
+			tw.err = ""
+			tw.sample = host.TelemetrySample{}
+		}
+		windows := append([]window(nil), r.windows...)
+		windows[i] = tw
+		r.windows = windows
+		r.groups = defaultWindowGroups(r.windows)
+		if !enabled && len(r.windows) > 0 {
+			cur := r.windows[r.index%len(r.windows)]
+			if cur.id() == telemetryWindowID {
+				r, _ = r.activate("context")
+			}
+		}
+		var cmd tea.Cmd
+		if enabled {
+			cmd = tw.init()
+		}
+		return r, cmd
+	}
+	return r, nil
 }
 
 func telemetryMemRatio(s host.TelemetrySample) (float64, bool) {

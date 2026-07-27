@@ -75,6 +75,7 @@ func TestGallery(t *testing.T) {
 	render("120x48 session stack with telemetry", 120, 48, func(m *Model) {
 		m.focus = focusRight
 		m.workDir = "/gallery/proj"
+		m.windows, _ = setTelemetryEnabled(m.windows, true)
 		if reg, ok := m.windows.activate("context"); ok {
 			m.windows = reg
 		}
@@ -84,6 +85,7 @@ func TestGallery(t *testing.T) {
 			if !ok {
 				continue
 			}
+			tw.enabled = true
 			tw.has = true
 			tw.sample = host.TelemetrySample{
 				CPUHostOK: true, CPUHostPct: 42.3, CPUProcOK: true, CPUProcPct: 2.1,

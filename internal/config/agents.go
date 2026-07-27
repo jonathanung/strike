@@ -62,6 +62,7 @@ var reservedSkillNames = map[string]struct{}{
 	"files":            {},
 	"visualizer":       {},
 	"system":           {},
+	"telemetry":        {},
 	"fast":             {},
 	"vim":              {},
 	"nano":             {},

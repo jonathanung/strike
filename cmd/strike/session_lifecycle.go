@@ -311,6 +311,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 			PermissionAutoApproveExclude: a.cfg.PermissionAutoApproveExclude,
 			Replay:                       a.replay,
 			Keybinds:                     config.KeybindsMap(a.cfg.Keybinds),
+			Telemetry:                    opts.telemetry,
 		}), tea.WithAltScreen(), tea.WithOutput(stdout), tea.WithInput(tui.WrapInput(os.Stdin)), tea.WithReportFocus(), tea.WithMouseCellMotion())
 		final, runProgErr := program.Run()
 		restore()
