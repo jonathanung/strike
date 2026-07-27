@@ -74,6 +74,111 @@ func SetGlobalTheme(id string) error {
 	return writeGlobal(cfg, unlock)
 }
 
+// SetGlobalPresentation persists non-empty editor/reader presentation modes
+// into ~/.strike/config. Empty fields are left unchanged. Values match config
+// keys vimMode/nanoMode/mdReadMode (pane|embedded|overlay|modal|takeover).
+func SetGlobalPresentation(vimMode, nanoMode, mdReadMode string) error {
+	globalMu.Lock()
+	defer globalMu.Unlock()
+
+	cfg, unlock, err := readGlobalForWrite()
+	if err != nil {
+		return err
+	}
+	if vimMode != "" {
+		if !validEditorMode(vimMode) {
+			unlock()
+			return fmt.Errorf("unknown vimMode %q (want pane|embedded|overlay|modal|takeover)", vimMode)
+		}
+		cfg.VimMode = normalizeEditorMode(vimMode)
+	}
+	if nanoMode != "" {
+		if !validEditorMode(nanoMode) {
+			unlock()
+			return fmt.Errorf("unknown nanoMode %q (want pane|embedded|overlay|modal|takeover)", nanoMode)
+		}
+		cfg.NanoMode = normalizeEditorMode(nanoMode)
+	}
+	if mdReadMode != "" {
+		if !validMdReadMode(mdReadMode) {
+			unlock()
+			return fmt.Errorf("unknown mdReadMode %q (want embedded|pane|modal|overlay)", mdReadMode)
+		}
+		cfg.MdReadMode = normalizeMdReadMode(mdReadMode)
+	}
+	return writeGlobal(cfg, unlock)
+}
+
+// ReadGlobalDefaults returns the global config file contents used as user
+// defaults. Missing file yields a zero Config and nil error.
+func ReadGlobalDefaults() (Config, error) {
+	globalMu.Lock()
+	defer globalMu.Unlock()
+
+	path := GlobalPath()
+	if path == "" {
+		return Config{}, fmt.Errorf("cannot locate home directory")
+	}
+	data, err := os.ReadFile(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return Config{}, nil
+	case err != nil:
+		return Config{}, err
+	case len(data) == 0:
+		return Config{}, nil
+	default:
+		var cfg Config
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			return Config{}, fmt.Errorf("%s is not valid JSON: %w", path, err)
+		}
+		return cfg, nil
+	}
+}
+
+func validEditorMode(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "pane", "embedded", "overlay", "modal", "takeover":
+		return true
+	default:
+		return false
+	}
+}
+
+// normalizeEditorMode stores canonical pane|overlay|takeover (aliases collapse).
+func normalizeEditorMode(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "embedded", "pane":
+		return "pane"
+	case "modal", "overlay":
+		return "overlay"
+	case "takeover":
+		return "takeover"
+	default:
+		return strings.ToLower(strings.TrimSpace(v))
+	}
+}
+
+func validMdReadMode(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "embedded", "pane", "modal", "overlay":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeMdReadMode(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "pane", "embedded":
+		return "embedded"
+	case "overlay", "modal":
+		return "modal"
+	default:
+		return strings.ToLower(strings.TrimSpace(v))
+	}
+}
+
 func readGlobalForWrite() (Config, func() error, error) {
 	path := GlobalPath()
 	if path == "" {

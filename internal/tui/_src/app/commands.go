@@ -37,6 +37,7 @@ const (
 	commandMemory          commandID = "memory"
 	commandIssues          commandID = "issues"
 	commandGoal            commandID = "goal"
+	commandLoop            commandID = "loop"
 	commandContext         commandID = "context"
 	commandEffectivePrompt commandID = "effective-prompt"
 	commandCost            commandID = "cost"
@@ -100,13 +101,13 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandAutonomy, Name: "/autonomy", Description: "set exit-gate policy (supervised/agent/checks)", ArgsHint: "[mode]", Source: commandSourceBuiltin},
 	{ID: commandMode, Name: "/mode", Description: "set permission posture (default/plan/accept-edits/yolo)", ArgsHint: "[mode]", Source: commandSourceBuiltin},
 	{ID: commandAuth, Name: "/auth", Description: "manage provider authentication", ArgsHint: "[provider]", Source: commandSourceBuiltin},
-	{ID: commandSettings, Name: "/settings", Description: "manage custom providers and settings", Source: commandSourceBuiltin},
+	{ID: commandSettings, Name: "/settings", Description: "defaults (theme, editor, mode) and custom providers", Source: commandSourceBuiltin},
 	{ID: commandAgent, Name: "/agent", Description: "select an agent", ArgsHint: "[name]", Source: commandSourceBuiltin},
 	{ID: commandFast, Name: "/fast", Description: "toggle OpenAI priority tier (faster, ~2× cost)", ArgsHint: "[on|off]", Source: commandSourceBuiltin},
 	{ID: commandThink, Name: "/think", Description: "show or hide model chain-of-thought", ArgsHint: "[on|off]", Source: commandSourceBuiltin},
-	{ID: commandVim, Name: "/vim", Description: "open a file in the editor (embedded/modal/takeover; see vimMode)", ArgsHint: "[path[:line]]", Source: commandSourceBuiltin},
-	{ID: commandNano, Name: "/nano", Description: "open a file in nano (embedded/modal/takeover; see nanoMode)", ArgsHint: "[path[:line]]", Source: commandSourceBuiltin},
-	{ID: commandMDRead, Name: "/md-read", Description: "open a markdown file (embedded right pane or modal; see mdReadMode)", ArgsHint: "<path>", Source: commandSourceBuiltin},
+	{ID: commandVim, Name: "/vim", Description: "open a file in the editor (embedded/modal/takeover; see vimMode)", ArgsHint: "[path|@path[:line]]", Source: commandSourceBuiltin},
+	{ID: commandNano, Name: "/nano", Description: "open a file in nano (embedded/modal/takeover; see nanoMode)", ArgsHint: "[path|@path[:line]]", Source: commandSourceBuiltin},
+	{ID: commandMDRead, Name: "/md-read", Description: "open a markdown file (embedded right pane or modal; see mdReadMode)", ArgsHint: "<path|@path>", Source: commandSourceBuiltin},
 	{ID: commandTheme, Name: "/theme", Description: "select a color theme or set appearance", ArgsHint: "[name|dark|light|auto]", Source: commandSourceBuiltin},
 	{ID: commandLayout, Name: "/layout", Description: "toggle horizontal/vertical pane split", Source: commandSourceBuiltin},
 	{ID: commandSplit, Name: "/split", Description: "toggle horizontal/vertical pane split", Source: commandSourceBuiltin},
@@ -120,6 +121,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandMemory, Name: "/memory", Description: "list, get, set, delete, export, or import project memory", ArgsHint: "[list|get|set|rm|export|import] ...", Source: commandSourceBuiltin},
 	{ID: commandIssues, Name: "/issues", Description: "list, add, get, close, export, or import project issues", ArgsHint: "[list|add|get|close|export|import] ...", Source: commandSourceBuiltin},
 	{ID: commandGoal, Name: "/goal", Description: "loop harness: set, run, status, pause, resume, abort, log, list", ArgsHint: "[set|run|status|pause|resume|abort|log|list] ...", Source: commandSourceBuiltin},
+	{ID: commandLoop, Name: "/loop", Description: "schedule a recurring LLM job (session-only)", ArgsHint: "[interval job|list|stop [id]]", Source: commandSourceBuiltin},
 	{ID: commandContext, Name: "/context", Description: "context doctor: system-prompt layer breakdown", Source: commandSourceBuiltin},
 	{ID: commandEffectivePrompt, Name: "/effective-prompt", Description: "context doctor: system-prompt layer breakdown", Source: commandSourceBuiltin},
 	{ID: commandCost, Name: "/cost", Description: "session token and cost totals", Source: commandSourceBuiltin},
@@ -211,6 +213,7 @@ var reservedCommandNames = map[string]struct{}{
 	"memory":           {},
 	"issues":           {},
 	"goal":             {},
+	"loop":             {},
 	"context":          {},
 	"effective-prompt": {},
 	"cost":             {},

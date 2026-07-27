@@ -266,13 +266,13 @@ Two different mechanisms, depending on whether it needs Go code:
    `host.Services.Skills`. Reserved names (`provider`, `model`, `effort`,
    `autonomy`, `auth`, `settings`, `agent`, `fast`, `vim`, `nano`, `md-read`,
    `theme`, `layout`, `split`, `compact`, `fork`, `undo`, `rewind`,
-   `session`, `export`, `help`, `keys`, `memory`, `issues`, `goal`, `context`,
-   `effective-prompt`, `cost`, `upgrade`, `init`, `mcp`, `exit`, `quit`, and
-   keybind-backed action mirrors such as `focus-left`, `palette`,
+   `session`, `export`, `help`, `keys`, `memory`, `issues`, `goal`, `loop`,
+   `context`, `effective-prompt`, `cost`, `upgrade`, `init`, `mcp`, `exit`,
+   `quit`, and keybind-backed action mirrors such as `focus-left`, `palette`,
    `interrupt`, `agent-next`, `tool-copy`, `subagent`, `root-new`, …) are
-   rejected by `config.ValidateSkillName` before
-   they ever reach the frontend. See `keybindSlashPrimary` in
-   `internal/tui/keybind_slash.go` for the full keybind→slash map. `/init` is a builtin that writes project
+   rejected by `config.ValidateSkillName` before they ever reach the frontend.
+   See `keybindSlashPrimary` in `internal/tui/keybind_slash.go` for the full
+   keybind→slash map. `/init` is a builtin that writes project
    `AGENTS.md` via `host.ProjectInit` (confirm before overwrite). PR URLs from successful `gh pr` bash
    output are stored via `protocol.SessionMeta` and `session` sidecar
    metadata. `/vim` embeds nvim/vim/nano in the right-pane `editor` window by

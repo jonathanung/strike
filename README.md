@@ -99,6 +99,7 @@ Optional Vite dev proxy lives in `web/`. Details and threat model:
 |---|---|
 | [Install & build](docs/install.md) | curl install, releases, upgrade, make targets |
 | [Usage](docs/usage.md) | slash commands, `@file`, resume/fork, panes |
+| [Loop](docs/loop.md) | `/loop` recurring session jobs (vs `/goal`) |
 | [Nix dev env](docs/nix.md) | Nix philosophy, best practices, reference projects |
 | [Keybinds](docs/keybinds.md) | keyboard reference (`f1` / `/keys` in-app) |
 | [Auth & providers](docs/auth.md) | credentials, OAuth, billing routing |

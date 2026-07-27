@@ -96,12 +96,21 @@ for one session). Non-git directories and `git worktree add` failures return a
 clear error and do not leave a half-bound session. Project-scoped state
 (history, memory, issues) stays keyed to the main repo, not the worktree path.
 Tools (`bash`, `read`, `write`, …) resolve paths inside the session worktree.
+Each `bash` invocation is a fresh process whose cwd is that session workdir
+(workspace root, or the bound git worktree root). A `cd` inside one command
+does not affect later bash calls or other tools; chain with `&&` or
+`(cd subdir && …)` when a single command needs a subdirectory.
 
 **ctrl+d saves defaults**: on the main screen it persists the current
 provider/model/agent/effort/theme to `~/.strike/config`; in the provider
 picker it saves the highlighted provider; in the model picker it saves
 provider + model; in the effort picker it saves the highlighted level; in
 the theme picker it saves the highlighted theme id.
+
+**/settings Defaults**: interactive editor for theme, vimMode, nanoMode,
+mdReadMode, and permissionMode (plus a read-only view of provider/model/
+agent/effort). Changes write `~/.strike/config` and apply theme/editor
+presentation to the current session immediately.
 
 ## Theme
 
@@ -228,6 +237,39 @@ config. Layers merge last-wins by name:
 
 (`.json` is accepted as well as `.jsonc`.) Credentials never live in these
 files — use env refs and/or `/auth` / the auth store.
+
+### Disable default (builtin) providers
+
+Hide stock catalog providers (`anthropic`, `openai`, `xai`, `gemini`, `kimi`,
+`deepseek`, `echo`) so only custom endpoints appear in `/provider`, `/auth`,
+and model pickers. Same keys work in **`providers.jsonc`** or config JSON;
+later layers win (project overrides global; providers.jsonc overrides the
+config file in the same root).
+
+```jsonc
+// ~/.strike/providers.jsonc — custom-only setup, keep openai available
+{
+  "disable-default-providers": true,
+  "disable-default-openai": false, // per-provider override re-enables
+  "disable-default-anthropic": true, // redundant when all are disabled
+  "acme": {
+    "options": {
+      "baseURL": "https://api.example.com/v1",
+      "apiKey": "{env:ACME_API_KEY}"
+    },
+    "models": ["acme-latest"]
+  }
+}
+```
+
+| Key | Effect |
+|---|---|
+| `disable-default-providers` | `true` hides **all** builtins unless a per-provider flag says otherwise |
+| `disable-default-<name>` | `true` disables that builtin; `false` **re-enables** it when the bulk flag is on |
+
+Customs are never affected. Selecting a disabled builtin (`--provider`,
+`/provider`, config default) fails with a clear error. Overlays/endpoints for
+a disabled builtin are ignored for selection until it is re-enabled.
 
 ### `providers.jsonc` (OpenCode-style)
 
@@ -406,7 +448,7 @@ background scrim). Prefer those names for new config; legacy aliases remain.
 
 ### Embedded editor (`vimMode`)
 
-`/vim [path[:line]]` opens a file in an editor resolved from `$VISUAL` →
+`/vim [path|@path[:line]]` opens a file in an editor resolved from `$VISUAL` →
 `$EDITOR` → nvim/vim/vi/nano on `PATH`. `vimMode` selects how:
 
 | Value | Aliases | Behavior |
@@ -421,14 +463,14 @@ with `ctrl+g`.
 
 ### Nano (`nanoMode`)
 
-`/nano [path[:line]]` opens **nano** specifically (does not use `$VISUAL`/
+`/nano [path|@path[:line]]` opens **nano** specifically (does not use `$VISUAL`/
 `$EDITOR`). `nanoMode` uses the same values and aliases as `vimMode`
 (default `pane`/`embedded`). Missing `nano` on `PATH` shows a clear error.
 Leave the embedded/modal editor with `ctrl+g`.
 
 ### Markdown reader (`mdReadMode`)
 
-`/md-read <path>` opens a markdown file. `mdReadMode` selects how:
+`/md-read <path|@path>` opens a markdown file. `mdReadMode` selects how:
 
 | Value | Aliases | Behavior |
 |---|---|---|

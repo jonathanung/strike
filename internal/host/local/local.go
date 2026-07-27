@@ -90,6 +90,9 @@ func (a authAdapter) Statuses() []host.ProviderStatus {
 	customs := a.customs.List()
 	out := make([]host.ProviderStatus, 0, len(credentialProviders)+len(customs)+1)
 	for _, p := range credentialProviders {
+		if a.customs != nil && a.customs.IsBuiltinDisabled(p.Name) {
+			continue
+		}
 		p.Detail = a.describeProvider(p.Name)
 		p.Authed = p.Detail != "none"
 		if cred, ok := a.store.Get(p.Name); ok && cred.Type == auth.TypeOAuth && !cred.ExpiresAt.IsZero() {
@@ -143,12 +146,14 @@ func (a authAdapter) Statuses() []host.ProviderStatus {
 			BaseURL: resolved.BaseURL,
 		})
 	}
-	out = append(out, host.ProviderStatus{
-		Name:    "echo",
-		Detail:  "offline dev provider",
-		Authed:  true,
-		Builtin: true,
-	})
+	if a.customs == nil || !a.customs.IsBuiltinDisabled("echo") {
+		out = append(out, host.ProviderStatus{
+			Name:    "echo",
+			Detail:  "offline dev provider",
+			Authed:  true,
+			Builtin: true,
+		})
+	}
 	return out
 }
 
@@ -466,6 +471,24 @@ func modelDefToInfo(def config.ModelDef, source string) host.ModelInfo {
 // settingsAdapter adapts global config persistence to host.Settings.
 type settingsAdapter struct{}
 
+func (settingsAdapter) Defaults() host.UserDefaults {
+	cfg, err := config.ReadGlobalDefaults()
+	if err != nil {
+		return host.UserDefaults{}
+	}
+	return host.UserDefaults{
+		Provider:       cfg.Provider,
+		Model:          cfg.Model,
+		Agent:          cfg.DefaultAgent,
+		Effort:         string(cfg.Effort),
+		PermissionMode: string(cfg.PermissionMode),
+		Theme:          cfg.Theme,
+		VimMode:        cfg.VimMode,
+		NanoMode:       cfg.NanoMode,
+		MdReadMode:     cfg.MdReadMode,
+	}
+}
+
 func (settingsAdapter) SaveDefaults(provider, model, agent, effort, mode string) error {
 	level, ok := protocol.ParseEffort(effort)
 	if !ok {
@@ -476,6 +499,10 @@ func (settingsAdapter) SaveDefaults(provider, model, agent, effort, mode string)
 
 func (settingsAdapter) SaveTheme(id string) error {
 	return config.SetGlobalTheme(id)
+}
+
+func (settingsAdapter) SavePresentation(vimMode, nanoMode, mdReadMode string) error {
+	return config.SetGlobalPresentation(vimMode, nanoMode, mdReadMode)
 }
 
 // memoryAdapter adapts *memory.Store to host.Memory.

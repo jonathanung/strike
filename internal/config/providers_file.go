@@ -48,6 +48,11 @@ type ProvidersFile struct {
 	Customs   []CustomProvider
 	Overlays  map[string][]ModelDef       // builtin (catalog) provider model overlays
 	Endpoints map[string]ProviderEndpoint // builtin endpoint overlays (baseURL/apiKey)
+	// DisableDefaultAll is set when "disable-default-providers" is present.
+	DisableDefaultAll *bool
+	// DisableDefaultPer maps builtin id → disabled for "disable-default-<id>" keys.
+	// Explicit false re-enables a provider when DisableDefaultAll is true.
+	DisableDefaultPer map[string]bool
 }
 
 // ProviderEndpoint customizes a built-in provider's HTTP origin and/or API key
@@ -212,6 +217,12 @@ func parseProvidersMap(data []byte) (ProvidersFile, error) {
 	sort.Strings(keys)
 	var out ProvidersFile
 	for _, key := range keys {
+		// Top-level disable-default-* flags (not provider objects).
+		if handled, err := applyDisableDefaultKey(&out.DisableDefaultAll, &out.DisableDefaultPer, key, raw[key]); err != nil {
+			return ProvidersFile{}, err
+		} else if handled {
+			continue
+		}
 		// Nested "providers" key with array — rare wrap form.
 		if key == "providers" {
 			arr, err := parseProvidersArray(raw[key])
@@ -256,6 +267,39 @@ func parseProvidersMap(data []byte) (ProvidersFile, error) {
 		out.Customs = append(out.Customs, p)
 	}
 	return out, nil
+}
+
+// applyDisableDefaultKey handles "disable-default-providers" and
+// "disable-default-<name>" boolean top-level keys. Returns handled=true when
+// key is a disable-default flag (even if value parse fails).
+func applyDisableDefaultKey(all **bool, per *map[string]bool, key string, raw json.RawMessage) (bool, error) {
+	k := strings.ToLower(strings.TrimSpace(key))
+	if k == "disable-default-providers" {
+		var b bool
+		if err := json.Unmarshal(raw, &b); err != nil {
+			return true, fmt.Errorf("%s: want boolean: %w", key, err)
+		}
+		v := b
+		*all = &v
+		return true, nil
+	}
+	const prefix = "disable-default-"
+	if !strings.HasPrefix(k, prefix) {
+		return false, nil
+	}
+	name := strings.TrimSpace(k[len(prefix):])
+	if name == "" || name == "providers" {
+		return false, nil
+	}
+	var b bool
+	if err := json.Unmarshal(raw, &b); err != nil {
+		return true, fmt.Errorf("%s: want boolean: %w", key, err)
+	}
+	if *per == nil {
+		*per = make(map[string]bool)
+	}
+	(*per)[name] = b
+	return true, nil
 }
 
 func parseProvidersArray(data []byte) ([]CustomProvider, error) {
