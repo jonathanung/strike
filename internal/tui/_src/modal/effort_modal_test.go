@@ -250,7 +250,7 @@ func TestSaveDefaultsIncludesTheActiveEffort(t *testing.T) {
 	if len(settings.saved) != 1 {
 		t.Fatalf("ctrl+d saved %d defaults, want 1", len(settings.saved))
 	}
-	want := savedDefaults{provider: "anthropic", model: "claude-opus-5", agent: "build", effort: "max"}
+	want := savedDefaults{provider: "anthropic", model: "claude-opus-5", agent: "build", effort: "max", mode: "default"}
 	if settings.saved[0] != want {
 		t.Errorf("saved = %#v, want %#v", settings.saved[0], want)
 	}

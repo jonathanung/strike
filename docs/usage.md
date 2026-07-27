@@ -122,8 +122,10 @@ yolo also paints a danger banner.
 | `accept-edits` | auto-allow edit/write; bash/network still ask |
 | `yolo` | skip permission asks; explicit deny rules still apply |
 
-Persists per session in the JSONL log. Optional default for new sessions:
-`permissionMode` in [config.md](config.md).
+Persists per session in the JSONL log. Optional default for **new** sessions:
+`permissionMode` in [config.md](config.md), or **ctrl+d** in the `/mode`
+picker (and global ctrl+d) to save the current posture as that default.
+Resume restores the session log, not the config default.
 
 Built-in skills also appear as slash commands: `/commit`, `/push`, `/pr`,
 `/ship`, `/review`, `/learn`, `/deslop`, `/verify` (plus custom skills under

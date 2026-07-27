@@ -27,16 +27,16 @@ var errNoSettings = errors.New("saving defaults is unavailable")
 // wired (a degraded frontend built without host.Services.Catalog).
 var errNoCatalog = errors.New("model catalog is unavailable")
 
-// saveDefaultsThroughCmd persists provider/model/agent/effort defaults through
-// the given settings service and reports the outcome as a defaultsSavedMsg. A
-// nil service degrades to a graceful failure rather than a panic. Both the
-// model's ctrl+d path and the picker modals share it.
-func saveDefaultsThroughCmd(settings host.Settings, provider, model, agent, effort, text string) tea.Cmd {
+// saveDefaultsThroughCmd persists provider/model/agent/effort/mode defaults
+// through the given settings service and reports the outcome as a
+// defaultsSavedMsg. A nil service degrades to a graceful failure rather than a
+// panic. Both the model's ctrl+d path and the picker modals share it.
+func saveDefaultsThroughCmd(settings host.Settings, provider, model, agent, effort, mode, text string) tea.Cmd {
 	return func() tea.Msg {
 		if settings == nil {
 			return defaultsSavedMsg{text: text, err: errNoSettings}
 		}
-		return defaultsSavedMsg{text: text, err: settings.SaveDefaults(provider, model, agent, effort)}
+		return defaultsSavedMsg{text: text, err: settings.SaveDefaults(provider, model, agent, effort, mode)}
 	}
 }
 

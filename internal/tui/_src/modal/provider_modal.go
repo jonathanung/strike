@@ -161,7 +161,7 @@ func (m *providerModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 	case "ctrl+d":
 		if m.cursor < len(list) {
 			name := list[m.cursor].Name
-			return m, saveDefaultsThroughCmd(m.settings, name, "", "", "", "provider "+name)
+			return m, saveDefaultsThroughCmd(m.settings, name, "", "", "", "", "provider "+name)
 		}
 		return m, nil
 	case "ctrl+x":

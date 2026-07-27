@@ -63,7 +63,7 @@ func (m *effortModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 			return m, nil
 		}
 		level := m.levels[m.cursor]
-		return m, saveDefaultsThroughCmd(m.settings, "", "", "", string(level), "effort "+string(level))
+		return m, saveDefaultsThroughCmd(m.settings, "", "", "", string(level), "", "effort "+string(level))
 	default:
 		return m, nil
 	}
