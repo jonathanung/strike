@@ -8,12 +8,15 @@ import (
 	"unicode/utf8"
 )
 
-// MaxMCPGuidanceListed is how many MCP tools are named individually in the
-// system-prompt guidance section before the remainder is summarized.
+// MaxMCPGuidanceListed is how many MCP tools may appear before the guidance
+// layer switches from silence (schemas already list them) to a compact
+// per-server summary. Below this count, MCP tools are not restated in the
+// system prompt.
 const MaxMCPGuidanceListed = 16
 
-// shortPurposes is the single source of truth for built-in tool one-liners in
-// prompt guidance. Tests fail if a built-in name drifts from this map.
+// shortPurposes is the single source of truth for built-in tool one-liners on
+// the provider Tools wire (CompactSchemaDescription). Tests fail if a built-in
+// name drifts from this map.
 var shortPurposes = map[string]string{
 	"read":            "read file contents",
 	"glob":            "find files by name pattern",
@@ -66,7 +69,7 @@ func PermissionName(toolName string) string {
 	}
 }
 
-// ShortPurpose returns a compact one-line purpose for prompt guidance.
+// ShortPurpose returns a compact one-line purpose for a tool name.
 // Built-ins use shortPurposes; others fall back to a truncated description.
 func ShortPurpose(name, description string) string {
 	if p, ok := shortPurposes[name]; ok {
@@ -114,46 +117,43 @@ func compactSkillSchemaDescription(description string) string {
 	return base
 }
 
-// GuidanceEntry is one effective tool for prompt composition.
+// GuidanceEntry is one effective tool name for additive prompt composition.
+// Names/descriptions/schemas live in the provider Tools array; guidance only
+// needs the effective name set to select when-to-use tips.
 type GuidanceEntry struct {
-	Name    string
-	Purpose string
+	Name string
 }
 
-// BuildGuidance renders the model-visible Available tools / guidance section
-// from the effective tool list (already filtered for hard denies / depth).
+// BuildGuidance renders the model-visible tools guidance layer from the
+// effective tool list (already filtered for hard denies / depth).
+//
+// Split of responsibility:
+//   - Provider Tools schemas carry name, compact description, and parameter
+//     JSON for every callable tool on this turn (#436).
+//   - This system-prompt layer is additive only: a short policy preamble,
+//     optional MCP server summary when the MCP surface is large, and
+//     recommended-use tips conditioned on which tools are present (#437).
+//
+// It does not restate the full name/purpose catalog (that duplicated schemas).
 // Output is compact and deterministic.
 func BuildGuidance(entries []GuidanceEntry) string {
 	if len(entries) == 0 {
 		return ""
 	}
-	var builtins, mcp []GuidanceEntry
+	var mcp []GuidanceEntry
 	for _, e := range entries {
 		if strings.HasPrefix(e.Name, "mcp_") {
 			mcp = append(mcp, e)
-		} else {
-			builtins = append(builtins, e)
 		}
 	}
 
 	var b strings.Builder
 	b.WriteString("# Available tools\n\n")
-	b.WriteString("Only these tools are registered for this turn. Prefer purpose-built tools over improvising with bash. There is no websearch tool.\n")
+	b.WriteString("Names, descriptions, and parameter schemas are in the provider Tools array for this turn (hard-denied tools omitted). This section is additive only: usage policy and when-to-use tips. Prefer purpose-built tools over improvising with bash. There is no websearch tool.\n")
 
-	if len(builtins) > 0 {
+	if len(mcp) > MaxMCPGuidanceListed {
 		b.WriteString("\n")
-		for _, e := range builtins {
-			purpose := strings.TrimSpace(e.Purpose)
-			if purpose == "" {
-				fmt.Fprintf(&b, "- `%s`\n", e.Name)
-			} else {
-				fmt.Fprintf(&b, "- `%s` — %s\n", e.Name, purpose)
-			}
-		}
-	}
-	if len(mcp) > 0 {
-		b.WriteString("\n")
-		b.WriteString(formatMCPGuidance(mcp))
+		b.WriteString(formatMCPGuidanceSummary(mcp))
 	}
 
 	if g := recommendedGuidance(entries); g != "" {
@@ -163,26 +163,9 @@ func BuildGuidance(entries []GuidanceEntry) string {
 	return strings.TrimSpace(b.String()) + "\n"
 }
 
-func formatMCPGuidance(mcp []GuidanceEntry) string {
-	var b strings.Builder
-	if len(mcp) <= MaxMCPGuidanceListed {
-		b.WriteString("MCP tools (call by registered name):\n")
-		for _, e := range mcp {
-			purpose := strings.TrimSpace(e.Purpose)
-			if purpose == "" {
-				fmt.Fprintf(&b, "- `%s`\n", e.Name)
-			} else {
-				fmt.Fprintf(&b, "- `%s` — %s\n", e.Name, purpose)
-			}
-		}
-		return b.String()
-	}
-
-	// Summarize by server when the list would bloat context.
-	type serverInfo struct {
-		name  string
-		count int
-	}
+// formatMCPGuidanceSummary groups a large MCP surface by server so guidance
+// stays small while schemas still list every tool.
+func formatMCPGuidanceSummary(mcp []GuidanceEntry) string {
 	byServer := map[string]int{}
 	order := make([]string, 0)
 	for _, e := range mcp {
@@ -193,6 +176,7 @@ func formatMCPGuidance(mcp []GuidanceEntry) string {
 		byServer[srv]++
 	}
 	sort.Strings(order)
+	var b strings.Builder
 	fmt.Fprintf(&b, "MCP tools (%d from %d servers) — call as `mcp_<server>_<tool>`; use `toolsearch` when unsure:\n",
 		len(mcp), len(order))
 	for _, srv := range order {

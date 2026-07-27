@@ -11,18 +11,21 @@ import (
 )
 
 // effectiveToolSchemas returns registry tool schemas with hard-denied tools
-// removed and descriptions compacted for the wire. Used for both the provider
-// Tools array (every stream, including turn 1) and the Available tools prompt
-// layer so the model never sees tools it cannot call under the active
-// agent/phase/permission profile.
+// removed and descriptions compacted for the wire. Used for the provider
+// Tools array (every stream, including turn 1) so the model never sees tools
+// it cannot call under the active agent/phase/permission profile. The additive
+// tools prompt layer uses the same effective name set (see toolGuidanceLayer)
+// without restating schemas.
 //
-// Always-on payload strategy (#436):
+// Always-on payload strategy (#436 + #437):
 //  1. Subset by hard deny — agent permissions and plan-mode posture drop tools
 //     the model must not call (Peek == Deny). Ask/Allow tools stay listed.
 //  2. Compact descriptions — tool.CompactSchemaDescription replaces long usage
 //     prose with short purposes (skill keeps its available-skills list). Full
 //     InputSchema is unchanged; Registry.Schemas keeps full descriptions for
 //     toolsearch.
+//  3. System guidance is additive only — usage policy / when-to-use tips, not
+//     a second name/purpose catalog (#437).
 //
 // Optional defer_loading (#438): when registry.SetDeferLoading is on
 // (config deferTools), non-core tools are also omitted from SchemasForProvider
@@ -74,9 +77,10 @@ func (e *Engine) discoverToolsFromHistory() {
 	}
 }
 
-// toolGuidanceLayer builds the effective Available tools section from the
-// live registry after hard permission denies (and defer filtering). Empty
-// when no tools remain.
+// toolGuidanceLayer builds the additive Available tools prompt section from
+// the live registry after hard permission denies (and defer filtering).
+// Schemas carry names and descriptions; this layer is usage policy /
+// when-to-use only. Empty when no tools remain.
 func (e *Engine) toolGuidanceLayer() (text, source string) {
 	schemas, omitted := e.effectiveToolSchemas()
 	if len(schemas) == 0 {
@@ -84,10 +88,7 @@ func (e *Engine) toolGuidanceLayer() (text, source string) {
 	}
 	entries := make([]tool.GuidanceEntry, 0, len(schemas))
 	for _, s := range schemas {
-		entries = append(entries, tool.GuidanceEntry{
-			Name:    s.Name,
-			Purpose: tool.ShortPurpose(s.Name, s.Description),
-		})
+		entries = append(entries, tool.GuidanceEntry{Name: s.Name})
 	}
 	text = tool.BuildGuidance(entries)
 	if pending := e.opts.Registry.DeferredPendingCount(); pending > 0 {

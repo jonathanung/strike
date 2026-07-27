@@ -80,7 +80,7 @@ These caps prevent a single call from being unbounded. They do **not** shrink re
 
 - `effectiveToolSchemas()` (`internal/engine/prompt_tools.go`) sends registry tools minus hard-denied tools on **every** stream (including turn 1), with **compacted descriptions** (`tool.CompactSchemaDescription`: short purposes; skill keeps available-skills list). Full InputSchema is unchanged; `Registry.Schemas()` keeps full prose for `toolsearch`.
 - Subsetting by agent/phase hard deny (explore/reviewer/plan posture) still drops tools the model cannot call.
-- The same effective set is also rendered into the system prompt via `tool.BuildGuidance` (`internal/tool/guidance.go` / `prompt_tools.go`) — mild **schema + natural-language guidance duplication** (see follow-up #437).
+- The same effective set feeds additive system-prompt guidance via `tool.BuildGuidance` (`internal/tool/guidance.go` / `prompt_tools.go`) — **usage policy / when-to-use only** (schemas own names/descriptions; catalog restatement removed in #437).
 - Built-in surface is on the order of ~27 tools (read/glob/grep/edit/write/apply_patch/bash/task family/webfetch/todo/memory/issue/notebook/sleep/skill/question/plan mode/toolsearch/…).
 - `toolsearch` (`internal/tool/toolsearch.go`) searches full registry schemas. With config `deferTools: on` (issue #438), non-core/MCP tools are omitted from provider Tools until toolsearch discovers them (core coding tools stay always-on).
 
@@ -111,24 +111,24 @@ Paths below are relative to the strike monorepo research checkout (`.plan/`), as
 
 **Pre-API pipeline** in `src/query.ts` (order matters):
 
-1. `applyToolResultBudget` — bound oversized individual results  
-2. snip (optional feature) — history snip before microcompact  
-3. **microcompact** — clear old compactable tool results  
-4. **autocompact** — full compaction when still over threshold  
+1. `applyToolResultBudget` — bound oversized individual results
+2. snip (optional feature) — history snip before microcompact
+3. **microcompact** — clear old compactable tool results
+4. **autocompact** — full compaction when still over threshold
 
 **Microcompact** (`src/services/compact/microCompact.ts`):
 
-- `COMPACTABLE_TOOLS`: read, shell family, grep, glob, web_search/web_fetch, edit, write  
-- Clears older results to `[Old tool result content cleared]` (see `TIME_BASED_MC_CLEARED_MESSAGE`)  
-- Keeps a recent tail; time-based and cached-microcompact variants also exist  
+- `COMPACTABLE_TOOLS`: read, shell family, grep, glob, web_search/web_fetch, edit, write
+- Clears older results to `[Old tool result content cleared]` (see `TIME_BASED_MC_CLEARED_MESSAGE`)
+- Keeps a recent tail; time-based and cached-microcompact variants also exist
 
 **Prompt cache** (`src/services/api/claude.ts`):
 
-- Heavy use of `cache_control` / `getCacheControl` on system, tools, and message breakpoints so the stable prefix is reusable  
+- Heavy use of `cache_control` / `getCacheControl` on system, tools, and message breakpoints so the stable prefix is reusable
 
 **Deferred tools** (`src/utils/toolSearch.ts`, `src/Tool.ts`):
 
-- MCP / searchable tools can be sent with `defer_loading: true` and discovered via tool search rather than full schema payload every turn  
+- MCP / searchable tools can be sent with `defer_loading: true` and discovered via tool search rather than full schema payload every turn
 
 ### OpenCode (`.plan/opencode/`)
 
@@ -143,24 +143,24 @@ Older tool parts are marked `time.compacted`; protected tools (e.g. `skill`) can
 
 **Render path** (`packages/opencode/src/session/message-v2.ts`):
 
-- Compacted tool outputs render as `[Old tool result content cleared]` for the model projection  
+- Compacted tool outputs render as `[Old tool result content cleared]` for the model projection
 
 **Caching** (`packages/opencode/src/provider/transform.ts` — `applyCaching`):
 
-- Ephemeral cache control on first system messages + last non-system messages (Anthropic, OpenRouter, Bedrock, OpenAI-compatible, Copilot, Alibaba variants)  
+- Ephemeral cache control on first system messages + last non-system messages (Anthropic, OpenRouter, Bedrock, OpenAI-compatible, Copilot, Alibaba variants)
 
 **Context model** (`CONTEXT.md`):
 
-- **Context Epoch** — stable system-context baseline for provider cache until compaction or incompatible transition  
-- **Model Tool Output** — bounded projection of tool results into session history (registry-enforced size), distinct from full host-side retention  
+- **Context Epoch** — stable system-context baseline for provider cache until compaction or incompatible transition
+- **Model Tool Output** — bounded projection of tool results into session history (registry-enforced size), distinct from full host-side retention
 
 ### Prior Strike audit
 
 `.plan/CORE_AGENT_RUNTIME_DISCREPANCIES.md` already flagged:
 
-- Unbounded (until compact) model history growth  
-- Tool output caps ≠ compaction / history hygiene  
-- OpenCode-style prune as a reference bar for context pressure  
+- Unbounded (until compact) model history growth
+- Tool output caps ≠ compaction / history hygiene
+- OpenCode-style prune as a reference bar for context pressure
 
 **Note:** Coarse compaction (trim/summarize + threshold) has been **partially delivered** in Strike since that audit. The remaining gap versus peers is **continuous microcompact/prune + request-side cache breakpoints**, not “no compaction at all.”
 
@@ -203,9 +203,9 @@ Cumulative tool-result input billed across the 10 streams:
 
 **With OpenCode-shaped prune** (protect ~40k tokens ≈ rough order of ~160KB of recent tool text, blank older):
 
-- Early rounds similar  
-- Once protect budget is full, older results become a short placeholder  
-- Curve flattens; cumulative re-billing of ancient tool I/O stops  
+- Early rounds similar
+- Once protect budget is full, older results become a short placeholder
+- Curve flattens; cumulative re-billing of ancient tool I/O stops
 
 Claude Code’s microcompact is the same economic idea with a tool-allowlist and keep-N / time-based variants.
 
@@ -215,10 +215,10 @@ Real billing also depends on tokenizer, cache hits, and whether the provider cha
 
 ## What is NOT broken
 
-- **Tool loop correctness** — assistant tool_use + tool_result pairing in `turn.go` is sound.  
-- **Per-tool output caps** — exist at produce time (bash/read/grep/glob/webfetch/…).  
-- **Coarse compaction** — trim/summarize + threshold/overflow paths exist and work when the context window is known.  
-- **Child agents** — start fresh sessions; they do not duplicate parent history.  
+- **Tool loop correctness** — assistant tool_use + tool_result pairing in `turn.go` is sound.
+- **Per-tool output caps** — exist at produce time (bash/read/grep/glob/webfetch/…).
+- **Coarse compaction** — trim/summarize + threshold/overflow paths exist and work when the context window is known.
+- **Child agents** — start fresh sessions; they do not duplicate parent history.
 - **Issue framing** — “unnecessary input of every single tool call” correctly points at **replay of tool I/O in history**, not a spurious extra tool invocation bug.
 
 ---
@@ -229,19 +229,19 @@ Pointers for follow-up issues/PRs; this document does not schedule or implement 
 
 1. **Microcompact / prune (OpenCode-shaped)** — **shipped** in this PR (`internal/engine/prune.go`).
 
-2. **Request-side prompt cache breakpoints**  
+2. **Request-side prompt cache breakpoints**
    Especially Anthropic: `cache_control` on system + tools + stable tail (CC / OpenCode `applyCaching` patterns). Measure `cache_read` vs `cache_creation` in existing usage fields.
 
-3. **Earlier auto-compact / prune-before-threshold**  
+3. **Earlier auto-compact / prune-before-threshold**
    Continuous prune under the 80% ceiling so threshold compact is rare and cheaper when it runs.
 
-4. **Deferred schemas**  
+4. **Deferred schemas**
    Only if MCP / registry growth warrants it (`defer_loading` + toolsearch, #438). Built-in always-on description compaction shipped under #436; omit-until-discover remains separate.
 
-4b. **Always-on schema payload (#436 — shipped)**  
+4b. **Always-on schema payload (#436 — shipped)**
    Compact wire descriptions + hard-deny subset in `effectiveToolSchemas`.
 
-5. **Telemetry**  
+5. **Telemetry**
    Attribute input tokens to system / tools / user / assistant / tool_result slices so regressions are visible in-session (ties to prior usage/context visibility work in the core runtime audit).
 
 ---

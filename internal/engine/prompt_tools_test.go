@@ -40,7 +40,7 @@ func fullToolRegistry(t *testing.T) *tool.Registry {
 	return reg
 }
 
-func TestToolGuidanceRootBuildListsEffectiveTools(t *testing.T) {
+func TestToolGuidanceRootBuildAdditiveLayer(t *testing.T) {
 	reg := fullToolRegistry(t)
 	sys := captureSystemPrompt(t, engine.Options{
 		WorkDir:  t.TempDir(),
@@ -52,16 +52,23 @@ func TestToolGuidanceRootBuildListsEffectiveTools(t *testing.T) {
 	if !strings.Contains(sys, "# Available tools") {
 		t.Fatalf("missing tools section:\n%s", sys)
 	}
-	for _, name := range reg.Names() {
-		if !strings.Contains(sys, "`"+name+"`") {
-			t.Errorf("effective tool %q missing from prompt", name)
-		}
+	if !strings.Contains(sys, "provider Tools array") {
+		t.Fatal("missing schemas-vs-guidance split note")
+	}
+	if !strings.Contains(sys, "## Recommended use") {
+		t.Fatal("missing recommended-use section")
 	}
 	if !strings.Contains(sys, "Prefer `read`/`glob`/`grep`") {
 		t.Fatal("missing explore guidance")
 	}
 	if !strings.Contains(sys, "`task`") {
 		t.Fatal("root build should include task guidance")
+	}
+	// Additive only: no name — purpose catalog lines.
+	for _, name := range reg.Names() {
+		if strings.Contains(sys, "`"+name+"` —") {
+			t.Errorf("guidance restates catalog line for %q", name)
+		}
 	}
 }
 
@@ -86,17 +93,15 @@ func TestToolGuidanceReadOnlyAgentOmitsMutation(t *testing.T) {
 	}, "echo", "echo")
 
 	for _, banned := range []string{
-		"`write` —", "`edit` —", "`apply_patch` —", "`bash` —",
+		"`write`", "`edit`", "`apply_patch`", "`bash`",
 		"multi-file coordinated", "Prefer `apply_patch`",
 	} {
 		if strings.Contains(sys, banned) {
 			t.Errorf("read-only agent prompt contains %q", banned)
 		}
 	}
-	for _, want := range []string{"`read` —", "`glob` —", "`grep` —"} {
-		if !strings.Contains(sys, want) {
-			t.Errorf("read-only agent missing %q", want)
-		}
+	if !strings.Contains(sys, "Use `read`/`glob`/`grep` for ordinary code exploration") {
+		t.Fatal("read-only agent missing explore tip")
 	}
 }
 
@@ -113,8 +118,8 @@ func TestToolGuidanceChildDepthOmitsTask(t *testing.T) {
 	if strings.Contains(sys, "`task`") {
 		t.Fatalf("child-depth prompt still mentions task:\n%s", sys)
 	}
-	if !strings.Contains(sys, "`read` —") {
-		t.Fatal("child prompt missing other tools")
+	if !strings.Contains(sys, "# Available tools") {
+		t.Fatal("child prompt missing tools layer")
 	}
 }
 
@@ -126,8 +131,8 @@ func TestToolGuidanceMCPDynamic(t *testing.T) {
 		Agents:   []engine.Agent{{Name: "build"}},
 		Rules:    []permission.Ruleset{permission.Defaults()},
 	}, "echo", "echo")
-	if strings.Contains(sys1, "mcp_demo_ping") {
-		t.Fatal("stale MCP name before register")
+	if strings.Contains(sys1, "registered `mcp_*` names") {
+		t.Fatal("MCP tip before any MCP tool registered")
 	}
 
 	reg.Register(stubMCPTool{name: "mcp_demo_ping", desc: "ping the demo server"})
@@ -137,8 +142,12 @@ func TestToolGuidanceMCPDynamic(t *testing.T) {
 		Agents:   []engine.Agent{{Name: "build"}},
 		Rules:    []permission.Ruleset{permission.Defaults()},
 	}, "echo", "echo")
-	if !strings.Contains(sys2, "`mcp_demo_ping`") {
-		t.Fatalf("MCP add not reflected:\n%s", sys2)
+	if !strings.Contains(sys2, "registered `mcp_*` names") {
+		t.Fatalf("MCP add not reflected in tips:\n%s", sys2)
+	}
+	// Few MCP tools: no per-tool catalog restatement.
+	if strings.Contains(sys2, "`mcp_demo_ping`") {
+		t.Fatalf("small MCP set should not list tool name in guidance:\n%s", sys2)
 	}
 
 	reg.Unregister("mcp_demo_ping")
@@ -148,7 +157,7 @@ func TestToolGuidanceMCPDynamic(t *testing.T) {
 		Agents:   []engine.Agent{{Name: "build"}},
 		Rules:    []permission.Ruleset{permission.Defaults()},
 	}, "echo", "echo")
-	if strings.Contains(sys3, "mcp_demo_ping") {
+	if strings.Contains(sys3, "registered `mcp_*` names") {
 		t.Fatalf("MCP remove not reflected:\n%s", sys3)
 	}
 }
@@ -166,13 +175,16 @@ func TestToolGuidancePermissionModePlan(t *testing.T) {
 		InitialPermissionMode: protocol.PermissionModePlan,
 	}, "echo", "echo")
 
-	for _, banned := range []string{"`write` —", "`edit` —", "`apply_patch` —"} {
+	for _, banned := range []string{"Prefer `apply_patch`", "`write` only", "multi-file coordinated"} {
 		if strings.Contains(sys, banned) {
-			t.Errorf("plan permission mode still lists %q", banned)
+			t.Errorf("plan permission mode still has mutation tip %q", banned)
 		}
 	}
-	if !strings.Contains(sys, "`read` —") {
-		t.Fatal("plan mode should still list read")
+	if !strings.Contains(sys, "# Available tools") {
+		t.Fatal("plan mode should still include tools layer")
+	}
+	if !strings.Contains(sys, "Prefer `read`/`glob`/`grep`") {
+		t.Fatal("plan mode should still include explore tip")
 	}
 }
 
@@ -229,7 +241,7 @@ func TestToolGuidanceProvenanceLayer(t *testing.T) {
 	}
 }
 
-func TestToolGuidanceSingleSourceNoDrift(t *testing.T) {
+func TestToolGuidanceNoCatalogDrift(t *testing.T) {
 	reg := fullToolRegistry(t)
 	sys := captureSystemPrompt(t, engine.Options{
 		WorkDir:  t.TempDir(),
@@ -238,13 +250,14 @@ func TestToolGuidanceSingleSourceNoDrift(t *testing.T) {
 		Rules:    []permission.Ruleset{permission.Defaults()},
 	}, "echo", "echo")
 
-	for _, name := range reg.Names() {
-		if !strings.Contains(sys, "`"+name+"`") {
-			t.Errorf("registry tool %q missing from guidance", name)
-		}
+	// Guidance is tip-based; unregistered control tools must not appear.
+	if strings.Contains(sys, "task_status") {
+		t.Fatal("unregistered task_status mentioned in guidance")
 	}
-	if strings.Contains(sys, "`task_status` —") {
-		t.Fatal("unregistered task_status listed as available")
+	for _, name := range reg.Names() {
+		if strings.Contains(sys, "`"+name+"` —") {
+			t.Errorf("catalog line for %q should not appear in additive guidance", name)
+		}
 	}
 }
 
@@ -264,7 +277,7 @@ func TestToolGuidanceMCPSizeCap(t *testing.T) {
 		Rules:    []permission.Ruleset{permission.Defaults()},
 	}, "echo", "echo")
 
-	if strings.Contains(sys, "`mcp_bulk_t0` —") {
+	if strings.Contains(sys, "`mcp_bulk_t0`") {
 		t.Fatal("expected MCP summary, found per-tool listing")
 	}
 	if !strings.Contains(sys, "MCP tools (") {
@@ -284,8 +297,7 @@ func TestToolGuidanceMCPSizeCap(t *testing.T) {
 }
 
 // TestFirstTurnPreloadsEffectiveTools proves turn 1 binds the full effective
-// tool set as provider schemas and includes the Available tools prompt layer
-// (no discovery lag; guidance names match Tools).
+// tool set as provider schemas and includes the additive tools prompt layer.
 func TestFirstTurnPreloadsEffectiveTools(t *testing.T) {
 	reg := fullToolRegistry(t)
 	req := captureStreamRequest(t, engine.Options{
@@ -329,12 +341,21 @@ func TestFirstTurnPreloadsEffectiveTools(t *testing.T) {
 		if !gotNames[name] {
 			t.Errorf("registry tool %q missing from first-turn Tools", name)
 		}
-		if !strings.Contains(req.System, "`"+name+"`") {
-			t.Errorf("registry tool %q missing from first-turn system guidance", name)
-		}
 	}
 	if !strings.Contains(req.System, "# Available tools") {
 		t.Fatalf("first-turn system missing tools guidance:\n%s", req.System)
+	}
+	if !strings.Contains(req.System, "provider Tools array") {
+		t.Fatal("first-turn guidance missing schemas-vs-guidance split")
+	}
+	if !strings.Contains(req.System, "## Recommended use") {
+		t.Fatal("first-turn guidance missing recommended-use layer")
+	}
+	// Schemas own the catalog; guidance must not restate name — purpose lines.
+	for _, name := range want {
+		if strings.Contains(req.System, "`"+name+"` —") {
+			t.Errorf("first-turn guidance catalog line for %q", name)
+		}
 	}
 }
 
@@ -432,7 +453,7 @@ func TestEffectiveToolSchemasReducePayload(t *testing.T) {
 }
 
 // TestFirstTurnToolsRespectPermissionDenies ensures hard-denied tools are
-// omitted from both the provider Tools array and prompt guidance on turn 1.
+// omitted from the provider Tools array and from guidance tips on turn 1.
 func TestFirstTurnToolsRespectPermissionDenies(t *testing.T) {
 	reg := fullToolRegistry(t)
 	req := captureStreamRequest(t, engine.Options{
@@ -460,8 +481,12 @@ func TestFirstTurnToolsRespectPermissionDenies(t *testing.T) {
 				t.Errorf("denied tool %q still in first-turn Tools", name)
 			}
 		}
-		if strings.Contains(req.System, "`"+name+"` —") {
-			t.Errorf("denied tool %q still listed in first-turn guidance", name)
+	}
+	for _, bannedTip := range []string{
+		"`write`", "`edit`", "`apply_patch`", "`bash`", "Prefer `apply_patch`",
+	} {
+		if strings.Contains(req.System, bannedTip) {
+			t.Errorf("denied-tool tip %q still in first-turn guidance", bannedTip)
 		}
 	}
 	for _, want := range []string{"read", "glob", "grep"} {
@@ -476,15 +501,8 @@ func TestFirstTurnToolsRespectPermissionDenies(t *testing.T) {
 			t.Errorf("allowed tool %q missing from first-turn Tools", want)
 		}
 	}
-	// Guidance and Tools must agree (no schema/prompt drift on denied set).
-	toolSet := make(map[string]struct{}, len(req.Tools))
-	for _, s := range req.Tools {
-		toolSet[s.Name] = struct{}{}
-	}
-	for name := range toolSet {
-		if !strings.Contains(req.System, "`"+name+"`") {
-			t.Errorf("Tools has %q but guidance does not", name)
-		}
+	if !strings.Contains(req.System, "Use `read`/`glob`/`grep`") {
+		t.Error("allowed explore tip missing from guidance")
 	}
 }
 
