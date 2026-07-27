@@ -158,17 +158,17 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		m.refreshOpenPalette()
 		// turnRunning is already false via applyAgentStateEvent; drain next prompt.
 		cmd = tea.Batch(m.broadcastContextState(), notify, m.tryDrainInputQueue())
-		case protocol.HarnessProgress:
-			// Surface harness progress as an info cell in the transcript.
-			if m.turnRunning {
-				payload := string(ev.Payload)
-				if payload == "" || payload == "null" {
-					payload = ev.Name
-				} else {
-					payload = ev.Name + ": " + payload
-				}
-				m.cells = append(m.cells, &infoCell{text: payload})
+	case protocol.HarnessProgress:
+		// Surface harness progress as an info cell in the transcript.
+		if m.turnRunning {
+			payload := string(ev.Payload)
+			if payload == "" || payload == "null" {
+				payload = ev.Name
+			} else {
+				payload = ev.Name + ": " + payload
 			}
+			m.cells = append(m.cells, &infoCell{text: payload})
+		}
 	case protocol.ModelSelected:
 		if m.noticeCause == noticeNeedsModel {
 			m.clearNotice()
