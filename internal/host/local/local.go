@@ -319,7 +319,7 @@ func (c catalogAdapter) Models(ctx context.Context, provider string) ([]host.Mod
 		if len(defs) == 0 {
 			return nil, fmt.Errorf("no models configured for %s — add model ids in /settings or use /model <id>", provider)
 		}
-		return modelDefsToInfo(defs, host.ModelSourceConfig), nil
+		return tagProvider(provider, modelDefsToInfo(defs, host.ModelSourceConfig)), nil
 	}
 	catalog, err := models.Load(ctx)
 	if err != nil {
@@ -329,7 +329,40 @@ func (c catalogAdapter) Models(ctx context.Context, provider string) ([]host.Mod
 	if len(infos) == 0 && len(overlay) == 0 {
 		return nil, fmt.Errorf("no models listed for %s on models.dev", provider)
 	}
-	return mergeCatalogAndOverlay(infos, overlay), nil
+	return tagProvider(provider, mergeCatalogAndOverlay(infos, overlay)), nil
+}
+
+func (c catalogAdapter) ModelsForProviders(ctx context.Context, providers []string) ([]host.ModelInfo, error) {
+	var (
+		out     []host.ModelInfo
+		lastErr error
+		tried   int
+	)
+	for _, name := range providers {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		tried++
+		infos, err := c.Models(ctx, name)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		out = append(out, infos...)
+	}
+	if len(out) == 0 && tried > 0 && lastErr != nil {
+		return nil, lastErr
+	}
+	return out, nil
+}
+
+// tagProvider stamps ModelInfo.Provider on every entry.
+func tagProvider(provider string, infos []host.ModelInfo) []host.ModelInfo {
+	for i := range infos {
+		infos[i].Provider = provider
+	}
+	return infos
 }
 
 func (c catalogAdapter) ContextWindow(ctx context.Context, provider, model string) (int, bool, error) {

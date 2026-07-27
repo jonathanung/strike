@@ -188,11 +188,37 @@ func (c *fakeCatalog) Models(_ context.Context, provider string) ([]host.ModelIn
 		if c.meta != nil {
 			if info, ok := c.meta[provider+"/"+id]; ok {
 				info.ID = id
+				info.Provider = provider
 				out[i] = info
 				continue
 			}
 		}
-		out[i] = host.ModelInfo{ID: id}
+		out[i] = host.ModelInfo{ID: id, Provider: provider}
+	}
+	return out, nil
+}
+
+func (c *fakeCatalog) ModelsForProviders(ctx context.Context, providers []string) ([]host.ModelInfo, error) {
+	var (
+		out     []host.ModelInfo
+		lastErr error
+		tried   int
+	)
+	for _, name := range providers {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		tried++
+		infos, err := c.Models(ctx, name)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		out = append(out, infos...)
+	}
+	if len(out) == 0 && tried > 0 && lastErr != nil {
+		return nil, lastErr
 	}
 	return out, nil
 }

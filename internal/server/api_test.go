@@ -109,6 +109,126 @@ func TestAuthServiceAPIs(t *testing.T) {
 	}
 }
 
+type testCatalog struct {
+	ids map[string][]string
+}
+
+func (c testCatalog) ModelIDs(ctx context.Context, provider string) ([]string, error) {
+	infos, err := c.Models(ctx, provider)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, len(infos))
+	for i, info := range infos {
+		out[i] = info.ID
+	}
+	return out, nil
+}
+
+func (c testCatalog) Models(_ context.Context, provider string) ([]host.ModelInfo, error) {
+	ids := c.ids[provider]
+	if len(ids) == 0 {
+		return nil, errNoModels(provider)
+	}
+	out := make([]host.ModelInfo, len(ids))
+	for i, id := range ids {
+		out[i] = host.ModelInfo{ID: id, Provider: provider}
+	}
+	return out, nil
+}
+
+func (c testCatalog) ModelsForProviders(ctx context.Context, providers []string) ([]host.ModelInfo, error) {
+	var out []host.ModelInfo
+	var lastErr error
+	tried := 0
+	for _, p := range providers {
+		if p == "" {
+			continue
+		}
+		tried++
+		infos, err := c.Models(ctx, p)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		out = append(out, infos...)
+	}
+	if len(out) == 0 && tried > 0 && lastErr != nil {
+		return nil, lastErr
+	}
+	return out, nil
+}
+
+func (testCatalog) ContextWindow(context.Context, string, string) (int, bool, error) {
+	return 0, false, nil
+}
+func (testCatalog) OutputLimit(context.Context, string, string) (int, bool, error) {
+	return 0, false, nil
+}
+func (testCatalog) ResolveVariant(context.Context, string, string, string) (string, bool, error) {
+	return "", false, nil
+}
+
+type catalogErr string
+
+func (e catalogErr) Error() string { return string(e) }
+
+func errNoModels(provider string) error {
+	return catalogErr("no models listed for " + provider)
+}
+
+func TestModelsServiceAPI(t *testing.T) {
+	cat := testCatalog{ids: map[string][]string{
+		"openai": {"gpt-a"},
+		"xai":    {"grok-b"},
+		"echo":   {"echo"},
+	}}
+	auth := &testAuthMulti{statuses: []host.ProviderStatus{
+		{Name: "openai", Authed: true},
+		{Name: "xai", Authed: true},
+		{Name: "echo", Authed: true, Builtin: true},
+		{Name: "anthropic", Authed: false},
+	}}
+	services := &host.Services{Auth: auth, Catalog: cat}
+	srv, err := New(Options{SessionDir: t.TempDir(), Services: services})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Filtered by provider.
+	one := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(one, httptest.NewRequest(http.MethodGet, "/v1/models?provider=openai", nil))
+	if one.Code != http.StatusOK || !strings.Contains(one.Body.String(), "gpt-a") {
+		t.Fatalf("provider filter = %d %s", one.Code, one.Body.String())
+	}
+	if strings.Contains(one.Body.String(), "grok-b") {
+		t.Fatalf("provider filter leaked other models: %s", one.Body.String())
+	}
+
+	// No provider: all authenticated.
+	all := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(all, httptest.NewRequest(http.MethodGet, "/v1/models", nil))
+	if all.Code != http.StatusOK {
+		t.Fatalf("all models = %d %s", all.Code, all.Body.String())
+	}
+	body := all.Body.String()
+	for _, want := range []string{"gpt-a", "grok-b", "echo", `"Provider":"openai"`, `"Provider":"xai"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("all models missing %q: %s", want, body)
+		}
+	}
+	if strings.Contains(body, "anthropic") {
+		t.Errorf("unauthenticated provider leaked: %s", body)
+	}
+}
+
+type testAuthMulti struct {
+	testAuth
+	statuses []host.ProviderStatus
+}
+
+func (a *testAuthMulti) Statuses() []host.ProviderStatus { return a.statuses }
+
 func TestHistoryAndSettingsServiceAPIs(t *testing.T) {
 	saved := make(chan [5]string, 1)
 	services := &host.Services{History: testHistory{entries: []string{"first", "second"}}, Settings: testSettings{saved: saved}}

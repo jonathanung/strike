@@ -675,7 +675,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case modelsLoadedMsg:
-		if mm, ok := m.modal.(*modelModal); ok && mm.provider == msg.provider {
+		if mm, ok := m.modal.(*modelModal); ok && mm.provider == msg.fallback {
 			mm.loading = false
 			if msg.err != nil {
 				mm.loadErr = msg.err.Error()

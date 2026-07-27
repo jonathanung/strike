@@ -114,9 +114,21 @@ func (c *fastCatalogProbe) ModelIDs(_ context.Context, _ string) ([]string, erro
 	return []string{"unused"}, nil
 }
 
-func (c *fastCatalogProbe) Models(_ context.Context, _ string) ([]host.ModelInfo, error) {
+func (c *fastCatalogProbe) Models(_ context.Context, provider string) ([]host.ModelInfo, error) {
 	c.calls++
-	return []host.ModelInfo{{ID: "unused"}}, nil
+	return []host.ModelInfo{{ID: "unused", Provider: provider}}, nil
+}
+
+func (c *fastCatalogProbe) ModelsForProviders(ctx context.Context, providers []string) ([]host.ModelInfo, error) {
+	var out []host.ModelInfo
+	for _, p := range providers {
+		infos, err := c.Models(ctx, p)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, infos...)
+	}
+	return out, nil
 }
 
 func (c *fastCatalogProbe) ContextWindow(context.Context, string, string) (int, bool, error) {

@@ -36,12 +36,14 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if len(fields) < 2 {
-			// Bare /model opens the centered picker (models.dev catalog).
+			// Bare /model opens the centered picker (all authenticated providers).
 			m.resetComposer()
 			m.modal = newModelModal(m.providerName, m.modelName, m.ops, m.services.Settings)
-			return m, loadModelsCmd(m.services.Catalog, m.providerName)
+			providers := authenticatedModelProviders(m.services.Auth, m.providerName)
+			return m, loadModelsCmd(m.services.Catalog, providers, m.providerName)
 		}
-		return m.sendSelect(protocol.SelectModel{Provider: m.providerName, Model: fields[1]})
+		provider, model := parseModelArg(fields[1], m.providerName)
+		return m.sendSelect(protocol.SelectModel{Provider: provider, Model: model})
 	case "/effort":
 		if len(fields) < 2 {
 			// Bare /effort opens the centered picker (variants + ladder).

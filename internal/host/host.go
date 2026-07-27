@@ -99,6 +99,7 @@ const (
 // unknown or unsupported; frontends must omit them from display.
 type ModelInfo struct {
 	ID         string
+	Provider   string  // owning provider id (set by Catalog.Models / ModelsForProviders)
 	Name       string  // display label; empty means use ID
 	Context    int     // context window tokens; 0 = unknown
 	Output     int     // max output tokens; 0 = unknown
@@ -119,8 +120,15 @@ type Catalog interface {
 	// the catalog is unreachable or lists no models for the provider.
 	ModelIDs(ctx context.Context, provider string) ([]string, error)
 	// Models returns the provider's models with catalog metadata (context,
-	// cost, capabilities), sorted by id. Same empty/error contract as ModelIDs.
+	// cost, capabilities), sorted by id. Each ModelInfo.Provider is set.
+	// Same empty/error contract as ModelIDs.
 	Models(ctx context.Context, provider string) ([]ModelInfo, error)
+	// ModelsForProviders returns models across providers in the given order
+	// (provider order, then model id within each). Each ModelInfo.Provider is
+	// set. Empty names are skipped. Individual provider failures are omitted
+	// (partial success). Returns an error only when every non-empty provider
+	// fails and none yielded models.
+	ModelsForProviders(ctx context.Context, providers []string) ([]ModelInfo, error)
 	// ContextWindow returns the model's context window in tokens.
 	// ok is false when unknown (not the same as zero).
 	ContextWindow(ctx context.Context, provider, model string) (tokens int, ok bool, err error)

@@ -734,6 +734,60 @@ func TestCatalogModelsMetadataFromCache(t *testing.T) {
 	if full.Name != "Full" || full.Source != host.ModelSourceCatalog {
 		t.Errorf("gpt-full name/source = %q/%q", full.Name, full.Source)
 	}
+	if full.Provider != "openai" || infos[0].Provider != "openai" {
+		t.Errorf("Provider not stamped: bare=%q full=%q", infos[0].Provider, full.Provider)
+	}
+}
+
+func TestCatalogModelsForProviders(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cacheDir := filepath.Join(home, ".strike", "cache")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	catalog := `{
+		"openai":{"id":"openai","name":"OpenAI","models":{"gpt-a":{"id":"gpt-a","name":"A"}}},
+		"xai":{"id":"xai","name":"xAI","models":{"grok-b":{"id":"grok-b","name":"B"}}}
+	}`
+	if err := os.WriteFile(filepath.Join(cacheDir, "models.json"), []byte(catalog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svc := New(nil, nil, nil, nil, nil, nil, nil, "")
+	ctx := context.Background()
+
+	// Multi-provider: both authenticated catalogs merge; missing provider skipped.
+	infos, err := svc.Catalog.ModelsForProviders(ctx, []string{"openai", "missing", "xai", ""})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 2 {
+		t.Fatalf("ModelsForProviders = %#v", infos)
+	}
+	if infos[0].Provider != "openai" || infos[0].ID != "gpt-a" {
+		t.Errorf("first = %+v", infos[0])
+	}
+	if infos[1].Provider != "xai" || infos[1].ID != "grok-b" {
+		t.Errorf("second = %+v", infos[1])
+	}
+
+	// All fail → error.
+	_, err = svc.Catalog.ModelsForProviders(ctx, []string{"missing", "also-missing"})
+	if err == nil {
+		t.Fatal("expected error when every provider fails")
+	}
+
+	// Empty list → empty, no error.
+	infos, err = svc.Catalog.ModelsForProviders(ctx, nil)
+	if err != nil || len(infos) != 0 {
+		t.Fatalf("empty providers = %v, %v", infos, err)
+	}
+
+	// Single provider still works (parity with Models).
+	infos, err = svc.Catalog.ModelsForProviders(ctx, []string{"openai"})
+	if err != nil || len(infos) != 1 || infos[0].ID != "gpt-a" || infos[0].Provider != "openai" {
+		t.Fatalf("single = %#v err=%v", infos, err)
+	}
 }
 
 func TestCatalogOverlayMergesWithoutDroppingCatalog(t *testing.T) {
