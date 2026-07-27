@@ -43,6 +43,17 @@ export ANTHROPIC_API_KEY=sk-ant-…   # or: ./strike auth login anthropic
 ./strike exec "summarize this repo" # headless one-shot → stdout
 ```
 
+### Nix dev shell
+
+Requires Nix with flakes enabled. Pins the exact Go 1.26, gopls, make, and git.
+
+```sh
+nix develop
+make build
+```
+
+Details: [docs/nix.md](docs/nix.md).
+
 In the TUI: `/provider`, `/model`, `/auth`, `/theme`, `/session`, `/init`,
 `/help`, `/upgrade`. `/init` bootstraps project `AGENTS.md` (confirms before
 overwrite). Enter sends; Shift+Enter newline; `esc` interrupts; `ctrl+t` jumps
@@ -83,6 +94,7 @@ Optional Vite dev proxy lives in `web/`. Details and threat model:
 |---|---|
 | [Install & build](docs/install.md) | curl install, releases, upgrade, make targets |
 | [Usage](docs/usage.md) | slash commands, `@file`, resume/fork, panes |
+| [Nix dev env](docs/nix.md) | Nix philosophy, best practices, reference projects |
 | [Keybinds](docs/keybinds.md) | keyboard reference (`f1` / `/keys` in-app) |
 | [Auth & providers](docs/auth.md) | credentials, OAuth, billing routing |
 | [Config](docs/config.md) | JSON, permissions, custom providers, `vimMode` |
