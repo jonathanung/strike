@@ -369,6 +369,7 @@ func TestEventTypeCoverage(t *testing.T) {
 		"question.asked":       QuestionAsked{},
 		"question.resolved":    QuestionResolved{},
 		"turn.completed":       TurnCompleted{},
+		"harness.progress":     HarnessProgress{Name: "test", Payload: json.RawMessage(`{}`)},
 		"model.selected":       ModelSelected{},
 		"agent.selected":       AgentSelected{},
 		"phase.changed":        PhaseChanged{},

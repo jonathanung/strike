@@ -22,6 +22,7 @@ import (
 //	model: gpt-5.5
 //	provider: openai
 //	effort: high
+//	harness: default
 //	permission.write: deny
 //	permission.edit: deny
 //	---
@@ -35,6 +36,9 @@ type Agent struct {
 	Model       string
 	Effort      protocol.Effort
 	Prompt      string
+	// Harness selects a custom turn-loop controller (default, bestofn, …).
+	// Empty and "default" use the built-in loop.
+	Harness     string
 	Permissions permission.Ruleset
 }
 
@@ -201,6 +205,12 @@ func parseAgentFile(path string) (*Agent, error) {
 	if !ok {
 		return nil, fmt.Errorf("load agent %s: unknown effort %q", path, meta["effort"])
 	}
+	harness := meta["harness"]
+	if harness != "" {
+		if err := validateAgentHarness(harness); err != nil {
+			return nil, fmt.Errorf("load agent %s: %w", path, err)
+		}
+	}
 	perms, err := parseAgentPermissions(meta, nestedPerms)
 	if err != nil {
 		return nil, fmt.Errorf("load agent %s: %w", path, err)
@@ -212,6 +222,7 @@ func parseAgentFile(path string) (*Agent, error) {
 		Provider:    provider,
 		Model:       model,
 		Effort:      effort,
+		Harness:     harness,
 		Prompt:      body,
 		Permissions: perms,
 	}, nil
@@ -507,4 +518,19 @@ func countLeadingSpaces(s string) int {
 		break
 	}
 	return n
+}
+
+// validAgentHarnessNames is the allowlist of harness names accepted in agent
+// frontmatter. The engine resolves names through its HarnessRegistry; config
+// validates against this list at parse time so bad harness names fail loudly.
+var validAgentHarnessNames = map[string]struct{}{
+	"":        {},
+	"default": {},
+}
+
+func validateAgentHarness(name string) error {
+	if _, ok := validAgentHarnessNames[name]; ok {
+		return nil
+	}
+	return fmt.Errorf("unknown harness %q (want default)", name)
 }

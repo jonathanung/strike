@@ -11,6 +11,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/engine"
 	"github.com/jonathanung/strike-cli/internal/goal"
+	"github.com/jonathanung/strike-cli/internal/harness"
 	"github.com/jonathanung/strike-cli/internal/history"
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/host/local"
@@ -451,6 +452,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			Memory:                memoryStore,
 			SystemPrompt:          cfg.SystemPrompt,
 			LeanCode:              cfg.LeanCode,
+			HarnessRegistry:       harness.NewRegistry(),
 			MaxChildDepth:         cfg.MaxChildDepth,
 			InitialProvider:       initialProvider,
 			InitialModel:          initialModel,

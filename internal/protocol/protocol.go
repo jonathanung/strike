@@ -585,6 +585,15 @@ type TurnCompleted struct {
 	StopReason string `json:"stopReason,omitempty"`
 }
 
+// HarnessProgress is emitted by a custom harness to report intermediate state
+// (search tree, scores, iteration count, etc.) during a turn. The Name
+// identifies the harness; Payload is harness-specific JSON.
+type HarnessProgress struct {
+	Correlation
+	Name    string          `json:"name"`
+	Payload json.RawMessage `json:"payload"`
+}
+
 // ModelSelected confirms the active provider/model, at startup (if an
 // initial selection succeeded) and after each SelectModel.
 type ModelSelected struct {
@@ -831,6 +840,7 @@ func (PermissionResolved) isEvent()     {}
 func (QuestionAsked) isEvent()          {}
 func (QuestionResolved) isEvent()       {}
 func (TurnCompleted) isEvent()          {}
+func (HarnessProgress) isEvent()        {}
 func (ModelSelected) isEvent()          {}
 func (AgentSelected) isEvent()          {}
 func (PhaseChanged) isEvent()           {}

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/config"
+	"github.com/jonathanung/strike-cli/internal/harness"
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
@@ -46,6 +47,10 @@ type Agent struct {
 	Model       string
 	Effort      protocol.Effort
 	Prompt      string
+	// Harness selects a custom turn-loop controller. Empty and "default" use
+	// the built-in loop; registered names dispatch to a harness from Options.
+	// An unknown name falls back to default with a startup error.
+	Harness     string
 	Permissions permission.Ruleset
 }
 
@@ -191,6 +196,9 @@ type Options struct {
 	// seeds from Replay. Cleared before the op loop so user-driven changes
 	// still emit.
 	QuietStartup bool
+	// HarnessRegistry resolves named harnesses from agent frontmatter.
+	// nil means no custom harnesses (all agents use the default loop).
+	HarnessRegistry *harness.Registry
 }
 
 // beginAck reports whether ToolCallBegin was actually written to Events.
