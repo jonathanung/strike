@@ -320,7 +320,8 @@ func (m Model) composerView(compact bool, width, height int) string {
 	}
 	var footer string
 	if !borderless {
-		footer = composerFooter(m.th, m.keyMap, width, len(m.inputQueue) > 0 && m.composer.Value() == "")
+		// Always show composer keybinds in chrome (focused or dim); width-safe.
+		footer = composerFooter(m.th, m.keyMap, ui.PanelInnerWidth(m.th, width), len(m.inputQueue) > 0 && m.composer.Value() == "")
 	}
 	title := "prompt" + themedSpace(m.th.Resolve().Spacing.XS) + m.themeIcons().Prompt
 	if badge := m.inputQueueBadge(); badge != "" {
@@ -339,14 +340,14 @@ func (m Model) composerView(compact bool, width, height int) string {
 
 // composerFooter advertises send/newline when the panel has room for a footer.
 // When queueEdit is set, also advertise backspace to pop the last queued prompt.
+// width is the panel footer budget (PanelInnerWidth); always a single line.
 func composerFooter(th theme.Theme, keys keyMap, width int, queueEdit bool) string {
-	_ = width
 	send, nl := keyHint(keys.Send), keyHint(keys.Newline)
-	parts := []string{send.Key + " " + send.Label, nl.Key + " " + nl.Label}
+	hints := []ui.KeyHint{send, nl}
 	if queueEdit {
-		parts = append(parts, "bksp edit queue")
+		hints = append(hints, ui.KeyHint{Key: "bksp", Label: "edit queue"})
 	}
-	return dotJoin(th, parts...)
+	return ui.KeyHints(th, max(1, width), hints)
 }
 
 // rightPaneView frames the active window, or a stacked group of related panes
@@ -403,8 +404,10 @@ func (m Model) rightPaneSingle(width, height int, compact bool, active window, f
 	if active != nil {
 		title = active.title()
 		// Agents concurrent-root controls only when this pane is the agents tree.
+		// Always paint the footer (focused or dim) so pane keybinds stay visible
+		// out of focus; KeyHints keeps the chrome row single-line.
 		if !compact && active.id() == agentsWindowID {
-			footer = agentsPaneFooter(m.th)
+			footer = agentsPaneFooter(m.th, ui.PanelInnerWidth(m.th, width))
 		}
 		innerW, innerH := width, height
 		if nw, ok := active.(namedWindow); ok {

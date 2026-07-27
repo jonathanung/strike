@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -358,5 +359,63 @@ func TestAgentsPaneFooterOnlyWhenAgentsWindow(t *testing.T) {
 	compact := ansi.Strip(m.rightPaneSingle(120, 12, true, m.windows.active()))
 	if strings.Contains(compact, openHint) {
 		t.Errorf("compact agents pane still shows chrome footer: %q", compact)
+	}
+}
+
+func TestPaneKeybindFootersSingleLineAndVisibleUnfocused(t *testing.T) {
+	// #316: pane keybind chrome stays one line and remains visible when dim.
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	reg, ok := m.windows.activate(agentsWindowID)
+	if !ok {
+		t.Fatal("activate agents")
+	}
+	m.windows = reg
+
+	ak := defaultAgentsKeyMap()
+	spawnKey := ak.Spawn.Help().Key
+	sendKey := keyHint(m.keyMap.Send).Key
+
+	for _, width := range []int{80, 60, 40, 32} {
+		// Agents pane dim (left focus / unfocused right chrome).
+		agentsDim := m.rightPaneSingle(width, 10, false, m.windows.active(), false, true)
+		agentsFocus := m.rightPaneSingle(width, 10, false, m.windows.active(), true, false)
+		for name, out := range map[string]string{"dim": agentsDim, "focused": agentsFocus} {
+			plain := ansi.Strip(out)
+			if !strings.Contains(plain, spawnKey) {
+				t.Errorf("width %d agents %s missing %q: %q", width, name, spawnKey, plain)
+			}
+			lines := strings.Split(out, "\n")
+			if len(lines) != 10 {
+				t.Errorf("width %d agents %s lines=%d, want 10 (no footer wrap)", width, name, len(lines))
+			}
+			for i, ln := range lines {
+				if w := lipgloss.Width(ln); w > width {
+					t.Errorf("width %d agents %s line %d ww=%d: %q", width, name, i, w, ansi.Strip(ln))
+				}
+			}
+			footer := ansi.Strip(lines[len(lines)-1])
+			if strings.TrimSpace(footer) == "" {
+				t.Errorf("width %d agents %s empty footer row", width, name)
+			}
+		}
+
+		// Composer footer always present when unfocused (right focus dims left).
+		m.focus = focusRight
+		comp := m.composerView(false, width, 5)
+		compPlain := ansi.Strip(comp)
+		if !strings.Contains(compPlain, sendKey) {
+			t.Errorf("width %d unfocused composer missing send %q: %q", width, sendKey, compPlain)
+		}
+		compLines := strings.Split(comp, "\n")
+		if len(compLines) != 5 {
+			t.Errorf("width %d composer lines=%d, want 5", width, len(compLines))
+		}
+		for i, ln := range compLines {
+			if w := lipgloss.Width(ln); w > width {
+				t.Errorf("width %d composer line %d ww=%d: %q", width, i, w, ansi.Strip(ln))
+			}
+		}
+		m.focus = focusLeft
 	}
 }

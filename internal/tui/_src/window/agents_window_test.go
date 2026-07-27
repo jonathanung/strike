@@ -34,7 +34,7 @@ func TestAgentsWindowEmptyState(t *testing.T) {
 }
 
 func TestAgentsPaneFooterDerivesFromKeyMap(t *testing.T) {
-	footer := ansi.Strip(agentsPaneFooter(theme.Default()))
+	footer := ansi.Strip(agentsPaneFooter(theme.Default(), 120))
 	ak := defaultAgentsKeyMap()
 	for _, b := range []key.Binding{ak.Spawn, ak.Open, ak.Interrupt, ak.Hide, ak.Move, ak.Filter} {
 		h := b.Help()
@@ -49,6 +49,30 @@ func TestAgentsPaneFooterDerivesFromKeyMap(t *testing.T) {
 	hide := ak.Hide.Help()
 	if !strings.Contains(hide.Desc, "hide") || strings.Contains(hide.Desc, "delete") {
 		t.Errorf("Hide help = %q, want non-destructive hide wording", hide.Desc)
+	}
+}
+
+func TestAgentsPaneFooterSingleLineAtNarrowWidths(t *testing.T) {
+	th := theme.Default()
+	for _, width := range []int{80, 60, 40, 32, 24, 16} {
+		footer := agentsPaneFooter(th, width)
+		if footer == "" && width >= 8 {
+			t.Errorf("width %d: empty footer", width)
+			continue
+		}
+		if strings.Contains(footer, "\n") {
+			t.Errorf("width %d: footer wrapped: %q", width, ansi.Strip(footer))
+		}
+		if w := lipgloss.Width(footer); w > width {
+			t.Errorf("width %d: footer display width %d exceeds budget: %q", width, w, ansi.Strip(footer))
+		}
+		// At least the first binding should survive when there is room.
+		if width >= 8 {
+			spawn := defaultAgentsKeyMap().Spawn.Help().Key
+			if !strings.Contains(ansi.Strip(footer), spawn) {
+				t.Errorf("width %d: missing lead key %q in %q", width, spawn, ansi.Strip(footer))
+			}
+		}
 	}
 }
 

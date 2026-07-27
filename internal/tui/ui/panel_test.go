@@ -55,6 +55,30 @@ func TestPanelSolidEmbedsFooter(t *testing.T) {
 	}
 }
 
+func TestPanelKeyHintsFooterStaysSingleLine(t *testing.T) {
+	th := theme.Default()
+	hints := []KeyHint{
+		{"n", "new root"}, {"enter", "activate root"}, {"x", "interrupt root"},
+		{"d", "hide from pane"}, {"j/k", "move"}, {"f", "cycle filter"},
+	}
+	for _, width := range []int{80, 60, 40, 32, 24} {
+		footer := KeyHints(th, PanelInnerWidth(th, width), hints)
+		out := Panel(th, PanelOpts{Title: "agents", Footer: footer, Width: width, Height: 6, Dim: true}, "body")
+		lines := strings.Split(out, "\n")
+		if len(lines) != 6 {
+			t.Errorf("width %d: lines=%d, want 6 (footer must not wrap)", width, len(lines))
+		}
+		for i, ln := range lines {
+			if w := lipgloss.Width(ln); w != width {
+				t.Errorf("width %d line %d ww=%d: %q", width, i, w, ansi.Strip(ln))
+			}
+		}
+		if !strings.Contains(ansi.Strip(lastLine(out)), "n") {
+			t.Errorf("width %d: dim footer missing lead key: %q", width, ansi.Strip(lastLine(out)))
+		}
+	}
+}
+
 func TestPanelBorderedEmbedsTitleInTopBorder(t *testing.T) {
 	out := Panel(borderedTheme(), PanelOpts{Title: "session", Width: 40}, "body")
 	top := firstLine(out)
