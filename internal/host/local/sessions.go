@@ -113,11 +113,15 @@ func (s sessionsAdapter) ReplayJSONL(id string) ([]byte, error) {
 }
 
 func (s sessionsAdapter) Fork(id string) (host.Session, error) {
+	return s.ForkAt(id, -1)
+}
+
+func (s sessionsAdapter) ForkAt(id string, keepEvents int) (host.Session, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return host.Session{}, fmt.Errorf("session id is empty")
 	}
-	info, err := s.m.Fork(id)
+	info, err := s.m.ForkAt(id, keepEvents)
 	if err != nil {
 		return host.Session{}, err
 	}

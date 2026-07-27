@@ -156,6 +156,9 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		m.turnStartedAt = time.Time{}
 		m.toolCallsThisTurn = 0
 		m.refreshOpenPalette()
+		if ev.StopReason == "interrupted" {
+			m.setNotice("interrupted", false)
+		}
 		// turnRunning is already false via applyAgentStateEvent; drain next prompt.
 		cmd = tea.Batch(m.broadcastContextState(), notify, m.tryDrainInputQueue())
 	case protocol.HarnessProgress:

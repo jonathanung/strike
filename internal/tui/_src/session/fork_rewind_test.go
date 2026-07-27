@@ -92,14 +92,131 @@ func TestUndoFilesSendsRewindOp(t *testing.T) {
 	}
 }
 
-func TestRewindAliasOpensModal(t *testing.T) {
+func TestRewindOpensTurnPicker(t *testing.T) {
+	fs := newFakeSessions()
+	fs.put(host.Session{ID: "cur", Title: "main"}, mustSessionJSONL(t,
+		protocol.UserMessage{Text: "first"},
+		protocol.TurnCompleted{StopReason: "end_turn"},
+		protocol.UserMessage{Text: "second"},
+		protocol.TurnCompleted{StopReason: "end_turn"},
+	))
 	m, _ := newAppTestModel(nil, nil)
+	m.sessionID = "cur"
+	m.services.Sessions = fs
 	next, cmd := m.handleCommand("/rewind")
 	if cmd != nil {
 		t.Fatal("bare /rewind should open modal")
 	}
-	if _, ok := next.(Model).modal.(*undoModal); !ok {
+	rm, ok := next.(Model).modal.(*rewindModal)
+	if !ok {
 		t.Fatalf("modal = %T", next.(Model).modal)
+	}
+	if len(rm.choices) != 2 {
+		t.Fatalf("choices = %d, want 2", len(rm.choices))
+	}
+	// Default cursor on previous turn (one step back).
+	if rm.cursor != 0 {
+		t.Fatalf("cursor = %d, want 0 (turn 1)", rm.cursor)
+	}
+}
+
+func TestRewindTurnArgForksPrefix(t *testing.T) {
+	fs := newFakeSessions()
+	fs.put(host.Session{ID: "cur", Title: "main"}, mustSessionJSONL(t,
+		protocol.UserMessage{Text: "first"},
+		protocol.TextDelta{Text: "one"},
+		protocol.TurnCompleted{StopReason: "end_turn"},
+		protocol.UserMessage{Text: "second"},
+		protocol.TextDelta{Text: "two"},
+		protocol.TurnCompleted{StopReason: "end_turn"},
+	))
+	m, _ := newAppTestModel(nil, nil)
+	m.sessionID = "cur"
+	m.services.Sessions = fs
+
+	next, cmd := m.handleCommand("/rewind 1")
+	if cmd == nil {
+		t.Fatal("expected quit cmd after rewind fork")
+	}
+	nm := next.(Model)
+	if !strings.HasPrefix(nm.PendingResume(), "cur-fork") {
+		t.Fatalf("PendingResume = %q", nm.PendingResume())
+	}
+	// Original intact.
+	src, err := fs.ReplayJSONL("cur")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), "second") {
+		t.Fatal("original session lost later turn")
+	}
+	// Fork has only first turn.
+	childID := nm.PendingResume()
+	got, err := fs.ReplayJSONL(childID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(got), "second") {
+		t.Fatalf("fork should not include turn 2: %s", got)
+	}
+	if !strings.Contains(string(got), "first") {
+		t.Fatalf("fork missing turn 1: %s", got)
+	}
+	// Both listable as roots.
+	roots, err := fs.List(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(roots) < 2 {
+		t.Fatalf("roots = %d, want >= 2", len(roots))
+	}
+}
+
+func TestRewindModalEnterForks(t *testing.T) {
+	fs := newFakeSessions()
+	fs.put(host.Session{ID: "cur", Title: "main"}, mustSessionJSONL(t,
+		protocol.UserMessage{Text: "a"},
+		protocol.TurnCompleted{},
+		protocol.UserMessage{Text: "b"},
+		protocol.TurnCompleted{},
+	))
+	m, _ := newAppTestModel(nil, nil)
+	m.sessionID = "cur"
+	m.services.Sessions = fs
+	next, _ := m.handleCommand("/rewind")
+	nm := next.(Model)
+	modal := nm.modal.(*rewindModal)
+	updated, cmd := modal.update(tea.KeyMsg{Type: tea.KeyEnter})
+	if updated != nil {
+		t.Fatal("enter should close modal")
+	}
+	if cmd == nil {
+		t.Fatal("expected fork msg cmd")
+	}
+	msg := runAppCmd(t, cmd)
+	rf, ok := msg.(rewindForkMsg)
+	if !ok {
+		t.Fatalf("msg = %T", msg)
+	}
+	next2, cmd2 := nm.Update(rf)
+	if cmd2 == nil {
+		t.Fatal("expected quit after apply")
+	}
+	if !strings.HasPrefix(next2.(Model).PendingResume(), "cur-fork") {
+		t.Fatalf("PendingResume = %q", next2.(Model).PendingResume())
+	}
+}
+
+func TestRewindRejectsWhileTurnRunning(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m.sessionID = "cur"
+	m.turnRunning = true
+	next, cmd := m.handleCommand("/rewind")
+	if cmd != nil {
+		t.Fatal("should not quit while turn running")
+	}
+	if !strings.Contains(next.(Model).notice, "wait") {
+		t.Fatalf("notice = %q", next.(Model).notice)
 	}
 }
 
@@ -169,13 +286,13 @@ func TestCellsFromEventsAppliesSessionRewound(t *testing.T) {
 	}
 }
 
-func TestHelpListsForkAndUndo(t *testing.T) {
+func TestHelpListsForkUndoRewind(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	names := map[string]bool{}
 	for _, c := range m.commands {
 		names[c.Name] = true
 	}
-	for _, want := range []string{"/fork", "/undo"} {
+	for _, want := range []string{"/fork", "/undo", "/rewind"} {
 		if !names[want] {
 			t.Errorf("missing command %s", want)
 		}

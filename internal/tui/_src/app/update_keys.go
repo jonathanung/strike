@@ -23,24 +23,11 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.reflow()
 		return m, cmd
 	}
-	// Leader chords before other routing so ctrl+x down is not eaten.
-	if m.leaderArmed {
-		if handled, cmd := m.handleLeaderKey(msg); handled {
-			m.reflow()
-			return m, cmd
-		}
-	}
-	if key.Matches(msg, m.keyMap.Leader) {
-		m.completion = nil
-		return m, m.armLeader()
-	}
-	if handled, cmd := m.handleSessionNavKeys(msg); handled {
-		m.reflow()
-		return m, cmd
-	}
+	// Completion dismiss before interrupt so first esc closes the popup and a
+	// second esc cancels the turn (docs/keybinds.md; modal already returned).
 	if m.focus == focusLeft && m.completion != nil {
 		switch {
-		case key.Matches(msg, m.keyMap.CompletionDismiss):
+		case key.Matches(msg, m.keyMap.CompletionDismiss) || isEscape(msg):
 			m.completion = nil
 			m.reflow()
 			return m, nil
@@ -61,6 +48,27 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.reflow()
 			return m, nil
 		}
+	}
+	// Interrupt before leader/session-nav/composer so mid-turn esc is never
+	// dropped by an armed leader chord or child-view nav.
+	if m.matchesInterrupt(msg) {
+		if handled, cmd := m.handleInterruptKey(); handled {
+			return m, cmd
+		}
+	}
+	if m.leaderArmed {
+		if handled, cmd := m.handleLeaderKey(msg); handled {
+			m.reflow()
+			return m, cmd
+		}
+	}
+	if key.Matches(msg, m.keyMap.Leader) {
+		m.completion = nil
+		return m, m.armLeader()
+	}
+	if handled, cmd := m.handleSessionNavKeys(msg); handled {
+		m.reflow()
+		return m, cmd
 	}
 	// Composer readline before nav chords so ctrl+k kills in the input
 	// instead of cycling windows / focusing the right pane.
@@ -138,20 +146,6 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.viewport.GotoBottom()
 		return m, nil
 	}
-	if key.Matches(msg, m.keyMap.Interrupt) {
-		if m.turnRunning {
-			ops := m.ops
-			return m, func() tea.Msg {
-				ops <- protocol.Interrupt{}
-				return nil
-			}
-		}
-		// Idle: esc clears a leftover input queue (rare once auto-drain runs).
-		if m.clearInputQueue() {
-			m.reflow()
-			return m, nil
-		}
-	}
 	if m.focus == focusRight {
 		if m.handleActivityKeys(msg) {
 			return m, nil
@@ -211,6 +205,10 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if text != "" && strings.HasPrefix(text, "/") && len(images) == 0 {
 			return m.handleCommand(text)
 		}
+		// Bang escape: !cmd runs local bash (no LLM turn).
+		if text != "" && strings.HasPrefix(text, "!") && len(images) == 0 {
+			return m.handleBang(text)
+		}
 		if m.providerName == "" {
 			m.setNeedsModelNotice("No model selected — use /provider <anthropic|openai|xai|echo> [model]", true)
 			return m, nil // keep the typed prompt in the composer
@@ -240,33 +238,17 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.saveDefaultsCmd(m.providerName, m.modelName, m.agentName, string(m.effort), string(m.permMode.Normalize()), dotJoin(m.th, m.providerName+"/"+m.modelName, m.agentName))
 	case key.Matches(msg, m.keyMap.Agent):
-		// Tab cycles agents (opencode-style build/plan switching).
+		// Tab cycles agents (opencode-style build/plan switching); /agent-next.
 		if len(m.agents) > 1 && !m.turnRunning {
-			next := m.agents[0]
-			for i, name := range m.agents {
-				if name == m.agentName {
-					next = m.agents[(i+1)%len(m.agents)]
-					break
-				}
-			}
-			ops := m.ops
-			return m, func() tea.Msg {
-				ops <- protocol.SelectAgent{Name: next}
-				return nil
-			}
+			return m.cycleAgentPersona()
 		}
 		return m, nil
 	case key.Matches(msg, m.keyMap.PermissionMode):
-		// Shift+Tab cycles tool-permission posture (not a newline).
+		// Shift+Tab cycles tool-permission posture; /mode-next.
 		if m.turnRunning {
 			return m, nil
 		}
-		next := m.permMode.Next()
-		ops := m.ops
-		return m, func() tea.Msg {
-			ops <- protocol.SetPermissionMode{Mode: next}
-			return nil
-		}
+		return m.cyclePermissionMode()
 	}
 	return m.updateComposer(msg)
 }

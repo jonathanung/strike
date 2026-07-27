@@ -55,7 +55,7 @@ func (m *keysModal) filtered() []keybindEntry {
 }
 
 func keysMatchRank(entry keybindEntry, query string) int {
-	fields := []string{entry.Keys, entry.Action, entry.Category, entry.ID}
+	fields := []string{entry.Keys, entry.Action, entry.Category, entry.ID, entry.Slash}
 	if entry.Context {
 		fields = append(fields, "current focus")
 	}
@@ -123,9 +123,13 @@ func (m *keysModal) view(width int, th theme.Theme) string {
 		if entry.Context {
 			category = "Current focus"
 		}
+		detail := detailJoin(th, category, entry.Action)
+		if slash := strings.TrimSpace(entry.Slash); slash != "" {
+			detail = detailJoin(th, detail, slash)
+		}
 		items[i] = ui.ListItem{
 			Label:  sanitizeDisplayData(entry.Keys),
-			Detail: sanitizeDisplayData(detailJoin(th, category, entry.Action)),
+			Detail: sanitizeDisplayData(detail),
 		}
 	}
 

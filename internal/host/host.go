@@ -345,6 +345,9 @@ type Sessions interface {
 	// returns the child. Parent stays intact. Implementations may reject
 	// subagent (parented) transcripts.
 	Fork(id string) (Session, error)
+	// ForkAt copies the first keepEvents of id's log into a new root session.
+	// keepEvents < 0 means the full log (same as Fork). Parent stays intact.
+	ForkAt(id string, keepEvents int) (Session, error)
 	// Rename sets the durable display title for id. Empty title clears it.
 	// Survives restart via session metadata.
 	Rename(id, title string) (Session, error)
@@ -521,6 +524,24 @@ type Goals interface {
 	Log(id string, iter int) ([]GoalIteration, error)
 }
 
+// ShellResult is the outcome of a user-initiated local shell run (composer !).
+type ShellResult struct {
+	Command  string
+	Output   string
+	ExitCode int
+}
+
+// Shell runs local bash commands for frontend bang-escape (!cmd). Nil means
+// the capability is absent; frontends must degrade gracefully. Implementations
+// must apply the same workspace destructive-path sandbox as the bash tool.
+// Permission prompts are omitted — the user typed the command — but sandbox
+// blocks still apply even under yolo / skip-permissions.
+type Shell interface {
+	// Run executes command with bash in the session work directory. Empty
+	// command returns an error. Respects ctx cancellation/timeout.
+	Run(ctx context.Context, command string) (ShellResult, error)
+}
+
 // Services bundles everything a frontend receives from its host. Any field
 // may be nil/empty when a capability is absent (tests, future frontends);
 // frontends must degrade gracefully.
@@ -530,6 +551,7 @@ type Services struct {
 	Settings  Settings
 	History   History
 	Files     Files
+	Shell     Shell // composer ! bang; nil when unsupported
 	Memory    Memory
 	Issues    Issues
 	Goals     Goals     // loop harness; nil when unsupported

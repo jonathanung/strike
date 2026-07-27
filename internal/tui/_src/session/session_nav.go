@@ -113,8 +113,9 @@ func (m *Model) handleSessionNavKeys(msg tea.KeyMsg) (handled bool, cmd tea.Cmd)
 		return true, m.navSibling(-1)
 	case key.Matches(msg, m.keyMap.SessionChildNext), msg.String() == "l", msg.String() == "right":
 		return true, m.navSibling(1)
-	case key.Matches(msg, m.keyMap.Interrupt):
-		// esc returns to parent when not interrupting a live root turn.
+	case m.matchesInterrupt(msg):
+		// Idle child view: esc returns to parent (interrupt already handled
+		// mid-turn before session nav is reached).
 		if !m.turnRunning {
 			return true, m.navParent()
 		}

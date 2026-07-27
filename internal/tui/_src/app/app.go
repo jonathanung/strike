@@ -538,6 +538,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case engineClosedMsg:
 		return m, tea.Quit
 
+	case rewindForkMsg:
+		return m.applyRewindFork(msg.keepEvents)
 	case sessionResumeMsg:
 		id := strings.TrimSpace(msg.id)
 		if id == "" || id == m.sessionID {
@@ -769,6 +771,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case initResultMsg:
 		return m.applyInitResult(msg)
+
+	case bangResultMsg:
+		return m.applyBangResult(msg)
 
 	case applyDiffResultMsg:
 		cmd := m.applyApplyDiffResult(msg)

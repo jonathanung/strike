@@ -46,6 +46,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/compact":          {"compact model history (keep recent turns)", "", commandSourceBuiltin},
 		"/fork":             {"duplicate the conversation into a new id", "", commandSourceBuiltin},
 		"/undo":             {"undo last turn (chat only, or chat + restore files)", "[chat|files]", commandSourceBuiltin},
+		"/rewind":           {"fork a new id from a previous turn (keeps original)", "[turn]", commandSourceBuiltin},
 		"/session":          {"browse and resume a past session", "[id]", commandSourceBuiltin},
 		"/rename":           {"rename the current session", "[title]", commandSourceBuiltin},
 		"/export":           {"export the conversation to markdown", "[path] [--open]", commandSourceBuiltin},
@@ -63,6 +64,35 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/mcp":              {"MCP servers: status, retry, disable", "[retry [name]|disable <name>]", commandSourceBuiltin},
 		"/exit":             {"quit strike", "", commandSourceBuiltin},
 		"/quit":             {"quit strike", "", commandSourceBuiltin},
+		"/focus-left":       {"focus left pane", "", commandSourceBuiltin},
+		"/focus-right":      {"focus right pane", "", commandSourceBuiltin},
+		"/window-next":      {"cycle to next right-pane window", "", commandSourceBuiltin},
+		"/window-prev":      {"cycle to previous right-pane window", "", commandSourceBuiltin},
+		"/scroll-up":        {"scroll transcript up", "", commandSourceBuiltin},
+		"/scroll-down":      {"scroll transcript down", "", commandSourceBuiltin},
+		"/jump-bottom":      {"jump transcript to latest output", "", commandSourceBuiltin},
+		"/palette":          {"open command palette", "", commandSourceBuiltin},
+		"/interrupt":        {"interrupt the running turn", "", commandSourceBuiltin},
+		"/save-defaults":    {"save provider/model/agent/effort/mode defaults", "", commandSourceBuiltin},
+		"/leave-editor":     {"leave embedded editor pane", "", commandSourceBuiltin},
+		"/edit-prompt":      {"edit prompt in external editor", "", commandSourceBuiltin},
+		"/agent-next":       {"cycle agent persona", "", commandSourceBuiltin},
+		"/mode-next":        {"cycle permission mode", "", commandSourceBuiltin},
+		"/tool-prev":        {"select previous tool cell", "", commandSourceBuiltin},
+		"/tool-next":        {"select next tool cell", "", commandSourceBuiltin},
+		"/tool-expand":      {"expand tool cell or open file:line", "", commandSourceBuiltin},
+		"/tool-copy":        {"copy selected transcript cell", "", commandSourceBuiltin},
+		"/tool-review":      {"review selected edit in editor", "", commandSourceBuiltin},
+		"/tool-apply":       {"apply selected patch to worktree", "", commandSourceBuiltin},
+		"/subagent":         {"enter first subagent transcript", "", commandSourceBuiltin},
+		"/parent":           {"return to parent session transcript", "", commandSourceBuiltin},
+		"/subagent-next":    {"next sibling subagent", "", commandSourceBuiltin},
+		"/subagent-prev":    {"previous sibling subagent", "", commandSourceBuiltin},
+		"/root-new":         {"spawn a new concurrent root session", "", commandSourceBuiltin},
+		"/root-open":        {"activate selected agents-pane root", "", commandSourceBuiltin},
+		"/root-interrupt":   {"interrupt selected agents-pane root", "", commandSourceBuiltin},
+		"/root-hide":        {"hide selected root from agents pane", "", commandSourceBuiltin},
+		"/root-filter":      {"cycle agents pane view filter", "", commandSourceBuiltin},
 		"/review":           {"review a change", "$ARGUMENTS", commandSourceSkill},
 		"/explain":          {"explain code", "", commandSourceSkill},
 	}
@@ -89,7 +119,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 }
 
 func TestValidSkillNameRejectsReservedBuiltinsIncludingMDRead(t *testing.T) {
-	for _, name := range []string{"provider", "model", "effort", "autonomy", "mode", "auth", "agent", "agents", "activity", "files", "visualizer", "system", "fast", "vim", "nano", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "export", "help", "keys", "memory", "issues", "goal", "loop", "context", "effective-prompt", "cost", "upgrade", "init", "mcp", "exit", "quit"} {
+	for _, name := range []string{"provider", "model", "effort", "autonomy", "mode", "auth", "agent", "agents", "activity", "files", "visualizer", "system", "fast", "vim", "nano", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "rename", "export", "help", "keys", "memory", "issues", "goal", "loop", "context", "effective-prompt", "cost", "upgrade", "init", "mcp", "exit", "quit", "focus-left", "focus-right", "window-next", "window-prev", "scroll-up", "scroll-down", "jump-bottom", "palette", "interrupt", "save-defaults", "leave-editor", "edit-prompt", "agent-next", "mode-next", "tool-prev", "tool-next", "tool-expand", "tool-copy", "tool-review", "tool-apply", "subagent", "parent", "subagent-next", "subagent-prev", "root-new", "root-open", "root-interrupt", "root-hide", "root-filter"} {
 		if validSkillName(name) {
 			t.Errorf("validSkillName(%q) = true, want false for reserved builtin", name)
 		}

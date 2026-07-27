@@ -870,6 +870,51 @@ func collectUntilEventsClose(t *testing.T, events <-chan protocol.Event) []proto
 	}
 }
 
+func TestInterruptCancelsSlowProviderStreamWithoutWaitingForClose(t *testing.T) {
+	// Provider ignores ctx and never closes until a late signal — consumeStream
+	// must still return on Interrupt via ctx select, not block on range.
+	unblock := make(chan struct{})
+	prov := newScriptedProvider(
+		streamStep{stream: func(ctx context.Context) <-chan provider.StreamEvent {
+			ch := make(chan provider.StreamEvent)
+			go func() {
+				ch <- provider.StreamEvent{Type: provider.EventTextDelta, Text: "partial"}
+				// Block until test ends; do not observe ctx (uncooperative).
+				<-unblock
+				close(ch)
+			}()
+			return ch
+		}},
+	)
+	eng := newTestEngine(t, prov)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+	eng.Ops() <- protocol.UserInput{Text: "slow stream"}
+	_ = receiveRequest(t, prov.requests)
+	// Wait until first delta is consumed so we are inside the stream loop.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for text delta")
+		}
+		select {
+		case ev := <-eng.Events():
+			if _, ok := ev.(protocol.TextDelta); ok {
+				goto interrupted
+			}
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+interrupted:
+	eng.Ops() <- protocol.Interrupt{}
+	completed := waitForTurnCompleted(t, eng.Events())
+	if completed.StopReason != "interrupted" {
+		t.Fatalf("stop reason = %q, want interrupted", completed.StopReason)
+	}
+	close(unblock)
+}
+
 func TestInterruptDuringProviderStreamDoesNotRetainToolCalls(t *testing.T) {
 	call := toolCall("streamed", "channel")
 	delivered := make(chan struct{})

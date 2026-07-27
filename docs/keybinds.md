@@ -3,34 +3,41 @@
 In-app cheatsheet: `f1` or `/keys` (filterable). The list leads with a
 **Current focus** section for the focused pane (composer/transcript on the
 left; the active right-pane window such as `agents`, `files`, or `editor`),
-then the remaining binds. Remap chords in config (`keybinds` object) — see
+then the remaining binds. Each command action also shows its slash mirror
+(when one exists). Remap chords in config (`keybinds` object) — see
 [config.md](config.md). `/keys reset` restores session defaults.
+
+Command actions (focus, panes, modals, interrupt, tool cells, roots, …) are
+also invocable as slash commands for discoverability and scriptability. Pure
+input editing (readline kill/yank, completion, enter/send) stays key-only.
+Registry: `keybindSlashPrimary` / `keybindNoSlashReason` in
+`internal/tui/keybind_slash.go`.
 
 ## Global
 
-| Key | Action |
-|---|---|
-| `enter` | send prompt |
-| `shift+enter` | newline (`alt+enter` after enhanced CSI) |
-| `esc` | interrupt turn / reject permission / close modal |
-| `ctrl+c` | quit |
-| `ctrl+p` | command palette |
-| `f1` | keybind cheatsheet (`/keys`) |
-| `tab` | cycle agent personas (composer empty of `/` completion; not concurrent roots) |
-| `shift+tab` | cycle permission mode (default → plan → soft-approve → accept-edits → yolo) |
-| `ctrl+d` | save defaults (see [config.md](config.md)) |
-| `ctrl+e` | open prompt in external editor (`$VISUAL`/`$EDITOR`, else nvim/vim/vi/nano) |
+| Key | Action | Slash |
+|---|---|---|
+| `enter` | send prompt | — |
+| `shift+enter` | newline (`alt+enter` after enhanced CSI) | — |
+| `esc` | interrupt turn (cancels tools/LLM; shows “interrupted”) / reject permission / close modal | `/interrupt` |
+| `ctrl+c` | quit | `/exit`, `/quit` |
+| `ctrl+p` | command palette | `/palette` |
+| `f1` | keybind cheatsheet | `/keys` |
+| `tab` | cycle agent personas (composer empty of `/` completion; not concurrent roots) | `/agent-next` |
+| `shift+tab` | cycle permission mode (default → plan → soft-approve → accept-edits → yolo) | `/mode-next` |
+| `ctrl+d` | save defaults (see [config.md](config.md)) | `/save-defaults` |
+| `ctrl+e` | open prompt in external editor (`$VISUAL`/`$EDITOR`, else nvim/vim/vi/nano) | `/edit-prompt` |
 
 ## Transcript & panes
 
-| Key | Action |
-|---|---|
-| `pgup` / `pgdn` | scroll transcript |
-| `ctrl+up` / `ctrl+down` | scroll transcript |
-| `ctrl+t` | jump to latest output |
-| `ctrl+h` / `ctrl+l` | focus left / right pane (horizontal split) |
-| `ctrl+j` / `ctrl+k` | cycle right-pane focus next / previous within the active stack group, then to the next group (bare LF / `KeyCtrlJ` is also `ctrl+j`, not newline) |
-| `ctrl+;` | toggle split orientation (`/layout`, `/split`) |
+| Key | Action | Slash |
+|---|---|---|
+| `pgup` / `pgdn` | scroll transcript | `/scroll-up`, `/scroll-down` |
+| `ctrl+up` / `ctrl+down` | scroll transcript | `/scroll-up`, `/scroll-down` |
+| `ctrl+t` | jump to latest output | `/jump-bottom` |
+| `ctrl+h` / `ctrl+l` | focus left / right pane (horizontal split) | `/focus-left`, `/focus-right` |
+| `ctrl+j` / `ctrl+k` | cycle right-pane focus next / previous within the active stack group, then to the next group (bare LF / `KeyCtrlJ` is also `ctrl+j`, not newline) | `/window-next`, `/window-prev` |
+| `ctrl+;` | toggle split orientation | `/layout`, `/split` |
 
 In a vertical split, focus and cycle chords swap: focus is `ctrl+j`/`ctrl+k`,
 cycle is `ctrl+h`/`ctrl+l`.
@@ -63,13 +70,13 @@ to a single pane and cycle the same order one at a time. See [usage.md](usage.md
 
 ## Tool cells (composer empty)
 
-| Key | Action |
-|---|---|
-| `alt+[` / `alt+]` | previous / next tool cell |
-| `enter` | expand / collapse tool output or large edit diff; else open `file:line` |
-| `y` | copy cell (tool/explore, else latest assistant/user) |
-| `v` | review edit in editor |
-| `a` | apply shown edit/patch into the active worktree (confirm) |
+| Key | Action | Slash |
+|---|---|---|
+| `alt+[` / `alt+]` | previous / next tool cell | `/tool-prev`, `/tool-next` |
+| `enter` | expand / collapse tool output or large edit diff; else open `file:line` | `/tool-expand` |
+| `y` | copy cell (tool/explore, else latest assistant/user) | `/tool-copy` |
+| `v` | review edit in editor | `/tool-review` |
+| `a` | apply shown edit/patch into the active worktree (confirm) | `/tool-apply` |
 
 ## Composer editing
 
@@ -87,14 +94,15 @@ to a single pane and cycle the same order one at a time. See [usage.md](usage.md
 When the `agents` right pane is focused (or shown in the agents stack group),
 these controls manage **concurrent root sessions**:
 
-| Key | Action |
-|---|---|
-| `n` | new concurrent root session |
-| `enter` | activate selected root (or open a child transcript) |
-| `x` | interrupt the selected root or child |
-| `r` | rename the selected root or child (persists across resume) |
-| `j` / `k` | move cursor |
-| `f` | cycle view filter (all → attention → working → ready → roots) |
+| Key | Action | Slash |
+|---|---|---|
+| `n` | new concurrent root session | `/root-new` |
+| `enter` | activate selected root (or open a child transcript) | `/root-open` |
+| `x` | interrupt the selected root or child | `/root-interrupt` |
+| `r` | rename the selected root or child (persists across resume) | `/rename` |
+| `j` / `k` | move cursor | — |
+| `f` | cycle view filter (all → attention → working → ready → roots) | `/root-filter` |
+| `d` | hide selected root from pane | `/root-hide` |
 
 `Tab` switches **agent personas** (build/plan/explore/…), not root sessions.
 `ctrl+x` leader chords navigate **child/subagent** transcripts only — use the
@@ -104,19 +112,19 @@ agents pane (`n` / `enter` / `x`) for concurrent roots.
 
 Child sessions spawned by tools (not concurrent roots):
 
-| Key | Action |
-|---|---|
-| `ctrl+x` then `↓` | enter first subagent transcript |
-| `ctrl+x` then `↑` | return to parent session |
-| `ctrl+x` then `←`/`→` | cycle sibling subagents |
-| `↑`/`↓`/`←`/`→` | parent / child / siblings while viewing a subagent (composer empty) |
-| `esc` | leave subagent view (when idle) / interrupt turn |
+| Key | Action | Slash |
+|---|---|---|
+| `ctrl+x` then `↓` | enter first subagent transcript | `/subagent` |
+| `ctrl+x` then `↑` | return to parent session | `/parent` |
+| `ctrl+x` then `←`/`→` | cycle sibling subagents | `/subagent-prev`, `/subagent-next` |
+| `↑`/`↓`/`←`/`→` | parent / child / siblings while viewing a subagent (composer empty) | same as above |
+| `esc` | leave subagent view (when idle) / interrupt turn | `/interrupt` |
 
 ## Embedded editor (`/vim`, `/nano`)
 
-| Key | Action |
-|---|---|
-| `ctrl+g` | leave editor pane / close modal overlay |
+| Key | Action | Slash |
+|---|---|---|
+| `ctrl+g` | leave editor pane / close modal overlay | `/leave-editor` |
 
 ## Markdown reader modal (`/md-read` when `mdReadMode=modal`)
 
@@ -147,4 +155,5 @@ Child sessions spawned by tools (not concurrent roots):
 | `ctrl+d` | save highlighted default |
 
 UI layout and slash commands: [usage.md](usage.md). Source of truth in code:
-`keybindCatalog` / `defaultKeyMap` in `internal/tui/keymap.go`.
+`keybindCatalog` / `defaultKeyMap` in `internal/tui/keymap.go`; slash mapping
+in `internal/tui/keybind_slash.go`.

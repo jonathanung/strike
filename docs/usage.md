@@ -28,9 +28,9 @@ strike launches without any provider configured. Pick one inside the TUI:
 /files                         # focus the files right pane
 /visualizer                    # focus the visualizer right pane
 /system                        # focus the system right pane
-/session                       # browse past root sessions (auto-titles) and
-                               # resume one with full model history
-/session <id>                  # resume a specific session by id
+/session                       # browse past root sessions for this workspace
+                               # (auto-titles); ctrl+a shows all workspaces
+/session <id>                  # resume a specific session by id (any workspace)
 /rename                        # rename the current session (editor)
 /rename <title>                # rename the current session immediately
 /fast                          # toggle OpenAI priority tier (~2×, lower
@@ -58,7 +58,8 @@ strike launches without any provider configured. Pick one inside the TUI:
 /undo                          # undo last turn (picker: chat only vs + files)
 /undo chat                     # drop last turn from history only
 /undo files                    # drop last turn and restore files edited then
-/rewind                        # alias of /undo
+/rewind                        # fork from a previous turn (picker; keeps original)
+/rewind <n>                    # fork keeping completed turns 1..n
 /export [path] [--open]        # write the transcript to markdown (default
                                # .strike/exports/… or $TMPDIR); --open hands
                                # the file to $EDITOR / $VISUAL
@@ -94,17 +95,38 @@ strike launches without any provider configured. Pick one inside the TUI:
  /mcp                           # MCP status; retry/disable servers
 /exit                          # quit strike (same as ctrl+c)
 /quit                          # alias of /exit
+# Keybind mirrors (same actions as chords; see keybinds.md and /keys):
+/focus-left /focus-right       # focus panes (ctrl+h / ctrl+l)
+/window-next /window-prev      # cycle right-pane windows (ctrl+j / ctrl+k)
+/scroll-up /scroll-down        # transcript scroll
+/jump-bottom                   # jump to latest output (ctrl+t)
+/palette                       # command palette (ctrl+p)
+/interrupt                     # interrupt running turn (esc)
+/save-defaults                 # save defaults (ctrl+d)
+/leave-editor                  # leave embedded editor (ctrl+g)
+/edit-prompt                   # external editor for prompt (ctrl+e)
+/agent-next                    # cycle agent persona (tab)
+/mode-next                     # cycle permission mode (shift+tab)
+/tool-prev /tool-next          # select tool cells (alt+[ / alt+])
+/tool-expand /tool-copy        # expand or copy selected cell
+/tool-review /tool-apply       # review/apply selected edit
+/subagent /parent              # enter first child / return to parent
+/subagent-next /subagent-prev  # sibling subagent cycle
+/root-new /root-open           # concurrent roots (agents pane n / enter)
+/root-interrupt /root-hide     # interrupt or hide selected root
+/root-filter                   # cycle agents pane filter (f)
 ```
 
 ### Session, memory, issues
 
 | Command | Notes |
 |---|---|
-| `/session` | picker of past **root** sessions (auto-titles); resume reloads model history |
-| `/session <id>` | resume that root session by id |
+| `/session` | picker of past **root** sessions for the **current workspace** only (auto-titles; resume reloads model history). `ctrl+a` toggles all workspaces. Legacy sessions without a stored folder path appear only in all-workspaces mode |
+| `/session <id>` | resume that root session by id (works across workspaces; list filter does not apply) |
 | `/rename [title]` | rename the current session (brief auto-titles; agents pane `r` too) |
 | `/fork` | copy the current session JSONL into a new id (idle only) |
-| `/undo` / `/rewind` | undo last turn (idle only); bare opens picker; `chat` keeps disk; `files` restores per-file checkpoints from that turn (never `git reset --hard`) |
+| `/undo` | undo last turn in place (idle only); bare opens picker; `chat` keeps disk; `files` restores per-file checkpoints from that turn (never `git reset --hard`) |
+| `/rewind` | fork a **new** session from a completed turn (idle only); original session stays listable; bare opens turn picker; `/rewind n` keeps turns 1..n. Workspace file revert is not part of rewind (use `/undo files` on the live session) |
 | `/export` | dump the visible transcript to markdown (user/assistant/tool summaries); redacts common API-key shapes; default path under `.strike/exports/` or tmp; `--open` launches `$EDITOR` |
 | `/compact` | ask the engine to compact model history |
 | `/memory` | bare = list browser (focuses memory pane); `list [tag]`, `get <key>`, `set <key> <value>`, `rm <key>`, `export [path]`, `import <path> [--replace]` (portable JSON; relative paths stay under project root) |
@@ -150,6 +172,14 @@ Built-in skills also appear as slash commands: `/commit`, `/push`, `/pr`,
 `/ship`, `/review`, `/learn`, `/deslop`, `/verify` (plus custom skills under
 discovery roots). See [agents-skills.md](agents-skills.md) and
 [peer-ecosystem.md](peer-ecosystem.md).
+
+### Composer: `!` shell escape
+
+Prefix a line with `!` to run a local bash command in the session work
+directory without starting a model turn (for example `!pwd`, `!git status`).
+Output appears in the transcript as a bash tool cell. Empty `!` is ignored
+with a notice. Destructive commands that target paths outside the workspace
+are blocked by the same sandbox as the bash tool.
 
 ### Composer: `@file` / `@folder` mentions
 
