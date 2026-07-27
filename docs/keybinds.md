@@ -94,6 +94,7 @@ these controls manage **concurrent root sessions**:
 | `n` | new concurrent root session |
 | `enter` | activate selected root (or open a child transcript) |
 | `x` | interrupt the selected root or child |
+| `r` | rename the selected root or child (persists across resume) |
 | `j` / `k` | move cursor |
 | `f` | cycle view filter (all → attention → working → ready → roots) |
 

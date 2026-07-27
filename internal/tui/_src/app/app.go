@@ -350,6 +350,7 @@ type childActivity struct {
 	parentID  string // spawning session; empty means direct root child
 	agent     string
 	prompt    string
+	title     string // durable display title when known (user rename / create)
 	status    string // running | completed | failed | canceled
 	startedAt time.Time
 	endedAt   time.Time
@@ -917,6 +918,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case agentsHideMsg:
 		cmd := m.handleAgentsHide(msg.sessionID)
+		m.reflow()
+		return m, cmd
+
+	case agentsRenameMsg:
+		cmd := m.openRenameModal(msg.sessionID)
+		return m, cmd
+
+	case sessionRenamedMsg:
+		cmd := m.applySessionRename(msg.id, msg.title)
 		m.reflow()
 		return m, cmd
 	}

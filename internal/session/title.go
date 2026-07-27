@@ -9,7 +9,8 @@ import (
 )
 
 // titleMaxRunes caps auto-derived session titles for pickers and panel chrome.
-const titleMaxRunes = 60
+// Kept brief so agents-pane and session lists stay scannable.
+const titleMaxRunes = 32
 
 // TitleFromText derives a display title from free-form user text: trim,
 // collapse whitespace, drop controls, truncate. Empty when nothing usable remains.

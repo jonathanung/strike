@@ -46,6 +46,7 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		{ID: "command:fork", Label: "/fork", Description: "duplicate the conversation into a new id", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/fork"}},
 		{ID: "command:undo", Label: "/undo", Description: "undo last turn (chat only, or chat + restore files)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/undo"}},
 		{ID: "command:session", Label: "/session", Description: "browse and resume a past session", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/session"}},
+		{ID: "command:rename", Label: "/rename", Description: "rename the current session", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/rename"}},
 		{ID: "command:export", Label: "/export", Description: "export the conversation to markdown", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/export"}},
 		{ID: "command:copy", Label: "/copy", Description: "copy the last assistant response to the clipboard", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/copy"}},
 		{ID: "command:help", Label: "/help", Description: "show available commands", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/help"}},
