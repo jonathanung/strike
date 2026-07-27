@@ -264,9 +264,10 @@ Two different mechanisms, depending on whether it needs Go code:
   format (`description:`) and `$ARGUMENTS` substitution. It becomes
   `/<name>` on the next launch automatically, through
    `host.Services.Skills`. Reserved names (`provider`, `model`, `effort`,
-   `autonomy`, `auth`, `settings`, `agent`, `fast`, `vim`, `nano`, `md-read`,
-   `theme`, `layout`, `split`, `compact`, `fork`, `undo`, `rewind`,
-   `session`, `export`, `help`, `keys`, `memory`, `issues`, `goal`, `context`,
+   `autonomy`, `auth`, `settings`, `agent`, `agents`, `activity`, `files`,
+   `visualizer`, `system`, `fast`, `vim`, `nano`, `md-read`, `theme`,
+   `layout`, `split`, `compact`, `fork`, `undo`, `rewind`, `session`,
+   `export`, `help`, `keys`, `memory`, `issues`, `goal`, `context`,
    `effective-prompt`, `cost`, `upgrade`, `init`, `mcp`, `exit`, `quit`) are
    rejected by `config.ValidateSkillName` before
    they ever reach the frontend. `/init` is a builtin that writes project

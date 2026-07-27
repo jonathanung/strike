@@ -23,6 +23,11 @@ strike launches without any provider configured. Pick one inside the TUI:
 /mode soft-approve             # default | plan | soft-approve | accept-edits | yolo
 /agent                         # centered agent picker
 /agent plan                    # direct switch (build, plan, explore, …)
+/agents                        # focus the agents right pane
+/activity                      # focus the activity right pane
+/files                         # focus the files right pane
+/visualizer                    # focus the visualizer right pane
+/system                        # focus the system right pane
 /session                       # browse past root sessions (auto-titles) and
                                # resume one with full model history
 /session <id>                  # resume a specific session by id
@@ -95,8 +100,9 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/undo` / `/rewind` | undo last turn (idle only); bare opens picker; `chat` keeps disk; `files` restores per-file checkpoints from that turn (never `git reset --hard`) |
 | `/export` | dump the visible transcript to markdown (user/assistant/tool summaries); redacts common API-key shapes; default path under `.strike/exports/` or tmp; `--open` launches `$EDITOR` |
 | `/compact` | ask the engine to compact model history |
-| `/memory` | bare = list browser; `list [tag]`, `get <key>`, `set <key> <value>`, `rm <key>`, `export [path]`, `import <path> [--replace]` (portable JSON; relative paths stay under project root) |
-| `/issues` | bare = list browser; `list [open\|closed]`, `add <title>`, `get <id>`, `close <id>`, `export [path]`, `import <path> [--replace]` (same portable rules as memory) |
+| `/memory` | bare = list browser (focuses memory pane); `list [tag]`, `get <key>`, `set <key> <value>`, `rm <key>`, `export [path]`, `import <path> [--replace]` (portable JSON; relative paths stay under project root) |
+| `/issues` | bare = list browser (focuses issues pane); `list [open\|closed]`, `add <title>`, `get <id>`, `close <id>`, `export [path]`, `import <path> [--replace]` (same portable rules as memory) |
+| `/agents` `/activity` `/files` `/visualizer` `/system` | jump focus to the named right pane (`/agent` remains persona select) |
 | `/context` | context doctor modal: layer sizes, history msg count, oversized warnings (previews redacted) |
 | `/cost` | session input/output/cache totals from usage events; est. USD when catalog rates known; unknown stays explicit |
 | `/init` | light local scan → write `AGENTS.md`; confirms before overwrite |

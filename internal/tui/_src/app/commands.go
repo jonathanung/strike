@@ -19,6 +19,11 @@ const (
 	commandAuth            commandID = "auth"
 	commandSettings        commandID = "settings"
 	commandAgent           commandID = "agent"
+	commandAgents          commandID = "agents"
+	commandActivity        commandID = "activity"
+	commandFiles           commandID = "files"
+	commandVisualizer      commandID = "visualizer"
+	commandSystem          commandID = "system"
 	commandFast            commandID = "fast"
 	commandThink           commandID = "think"
 	commandVim             commandID = "vim"
@@ -71,6 +76,11 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandAuth, Name: "/auth", Description: "manage provider authentication", ArgsHint: "[provider]", Source: commandSourceBuiltin},
 	{ID: commandSettings, Name: "/settings", Description: "manage custom providers and settings", Source: commandSourceBuiltin},
 	{ID: commandAgent, Name: "/agent", Description: "select an agent", ArgsHint: "[name]", Source: commandSourceBuiltin},
+	{ID: commandAgents, Name: "/agents", Description: "focus the agents right pane", Source: commandSourceBuiltin},
+	{ID: commandActivity, Name: "/activity", Description: "focus the activity right pane", Source: commandSourceBuiltin},
+	{ID: commandFiles, Name: "/files", Description: "focus the files right pane", Source: commandSourceBuiltin},
+	{ID: commandVisualizer, Name: "/visualizer", Description: "focus the visualizer right pane", Source: commandSourceBuiltin},
+	{ID: commandSystem, Name: "/system", Description: "focus the system right pane", Source: commandSourceBuiltin},
 	{ID: commandFast, Name: "/fast", Description: "toggle OpenAI priority tier (faster, ~2× cost)", ArgsHint: "[on|off]", Source: commandSourceBuiltin},
 	{ID: commandThink, Name: "/think", Description: "show or hide model chain-of-thought", ArgsHint: "[on|off]", Source: commandSourceBuiltin},
 	{ID: commandVim, Name: "/vim", Description: "open a file in the editor (embedded/modal/takeover; see vimMode)", ArgsHint: "[path[:line]]", Source: commandSourceBuiltin},
@@ -155,6 +165,11 @@ var reservedCommandNames = map[string]struct{}{
 	"auth":             {},
 	"settings":         {},
 	"agent":            {},
+	"agents":           {},
+	"activity":         {},
+	"files":            {},
+	"visualizer":       {},
+	"system":           {},
 	"fast":             {},
 	"think":            {},
 	"vim":              {},
