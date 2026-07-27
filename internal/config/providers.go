@@ -28,6 +28,9 @@ var BuiltinProviderNames = map[string]struct{}{
 	"anthropic": {},
 	"openai":    {},
 	"xai":       {},
+	"gemini":    {},
+	"kimi":      {},
+	"deepseek":  {},
 	"echo":      {},
 }
 

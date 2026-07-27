@@ -374,14 +374,15 @@ func runExec(opts cliOptions, prompt string, stdout, stderr io.Writer) (runErr e
 }
 
 // isFreshStrikeHome reports a first-run install: no global config file and no
-// real credentials for anthropic/openai/xai. echo does not count as configured.
+// real credentials for anthropic/openai/xai/kimi/deepseek. echo does not
+// count as configured.
 func isFreshStrikeHome(store *auth.Store) bool {
 	if path := config.GlobalPath(); path != "" {
 		if _, err := os.Stat(path); err == nil {
 			return false
 		}
 	}
-	for _, provider := range []string{"anthropic", "openai", "xai"} {
+	for _, provider := range []string{"anthropic", "openai", "xai", "kimi", "deepseek"} {
 		if auth.Describe(provider, store) != "none" {
 			return false
 		}

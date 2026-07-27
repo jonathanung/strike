@@ -34,11 +34,9 @@ config overrides global, and session "always" grants override both.
 
 **Permission mode dial:** `permissionMode` sets the default tool-permission
 posture for **new** sessions: `default` | `plan` | `soft-approve` |
-`accept-edits` | `yolo` (see [usage.md](usage.md)). Set it here, or via
-**ctrl+d** in the `/mode` picker / global save-defaults. Session changes via
-Shift+Tab or `/mode` persist in the session JSONL, not back into this file
-unless you save defaults. Resume uses the JSONL posture. Distinct from
-`/autonomy` (workflow exit gates). Invalid values fail config load.
+`accept-edits` | `yolo` (see [usage.md](usage.md)). Session changes via
+Shift+Tab or `/mode` persist in the session JSONL, not back into this file.
+Distinct from `/autonomy` (workflow exit gates).
 
 **Lean code:** `leanCode` is `off` | `lite` (default) | `full`. Injects
 agent-scoped efficiency guidance into the system prompt (strict ladder for
@@ -121,7 +119,7 @@ Remap app-level chords without recompiling. Ids match the in-app cheatsheet
   "keybinds": {
     "nav.jump-bottom": "ctrl+b",
     "global.palette": ["ctrl+p", "ctrl+k"],
-    "composer.newline": "alt+enter"
+    "composer.newline": ["alt+enter", "ctrl+j"]
   }
 }
 ```
@@ -235,19 +233,19 @@ files — use env refs and/or `/auth` / the auth store.
 // ~/.strike/providers.jsonc or ./.strike/providers.jsonc
 {
   // Custom / self-hosted endpoint
-  "kimi": {
+  "acme": {
     "npm": "@ai-sdk/openai-compatible", // optional; hints wire dialect only (not loaded)
-    "name": "Kimi",
+    "name": "Acme",
     "options": {
       "baseURL": "https://api.example.com/v1",
-      "apiKey": "{env:KIMI_API_KEY}"
+      "apiKey": "{env:ACME_API_KEY}"
     },
     // Legacy flat ids still work:
-    // "models": ["kimi-latest"]
+    // "models": ["acme-latest"]
     // Nested rich objects (display name, limits, variants):
     "models": {
-      "kimi-latest": {
-        "name": "Kimi Latest",
+      "acme-latest": {
+        "name": "Acme Latest",
         "limit": { "context": 128000, "output": 8192 },
         "options": { "forcedReasoning": true },
         "variants": {
@@ -284,7 +282,7 @@ files — use env refs and/or `/auth` / the auth store.
 
 | Field | Required | Notes |
 |---|---|---|
-| map key | yes | provider id (lowercased slug). Built-ins (`anthropic`/`openai`/`xai`/`echo`) are **model overlays only** (not custom endpoints). Other keys are custom providers. |
+| map key | yes | provider id (lowercased slug). Built-ins (`anthropic`/`openai`/`xai`/`gemini`/`kimi`/`deepseek`/`echo`) are **model overlays only** (not custom endpoints). Other keys are custom providers. |
 | `options.baseURL` | custom yes | absolute `http`/`https` URL, or `{env:VAR}` / `$VAR` / `${VAR}` (not required on builtin overlays) |
 | `options.apiKey` | no | env ref only (`{env:NAME}`, `$NAME`, `${NAME}`) → checked before auth store |
 | `npm` | no | **advisory only** — never installed or executed; `anthropic` in the name → anthropic wire, else openai |
@@ -325,11 +323,11 @@ Variant bags may include `reasoningEffort` or `effort` (`off`\|`low`\|`medium`\|
 {
   "providers": [
     {
-      "name": "kimi",
+      "name": "acme",
       "baseURL": "https://api.example.com/v1",
       "api": "openai",
-      "apiKeyEnv": "KIMI_API_KEY",
-      "models": ["kimi-latest"],
+      "apiKeyEnv": "ACME_API_KEY",
+      "models": ["acme-latest"],
       "headers": { "X-Custom": "optional" }
     }
   ]
@@ -338,7 +336,7 @@ Variant bags may include `reasoningEffort` or `effort` (`off`\|`low`\|`medium`\|
 
 | Field | Required | Notes |
 |---|---|---|
-| `name` | yes | lowercase slug (`[a-z][a-z0-9_-]{0,63}`); not builtins |
+| `name` | yes | lowercase slug (`[a-z][a-z0-9_-]{0,63}`); not `anthropic`/`openai`/`xai`/`gemini`/`kimi`/`deepseek`/`echo` |
 | `baseURL` | yes | absolute URL or env ref template |
 | `api` | yes | wire dialect: `openai` or `anthropic` |
 | `apiKeyEnv` | no | env var name (or `{env:NAME}` / `$NAME`) checked before the auth store |
@@ -365,14 +363,13 @@ Built-in logout only clears credentials.
 
 | Value | Behavior |
 |---|---|
-| `pane` (default) | embed nvim/vim/nano in the right-pane `editor` window (PTY) |
+| `pane` (default) | embed nvim/vim in the right-pane `editor` window (PTY) |
 | `overlay` | embed in a centered modal overlay |
 | `takeover` | full-screen handoff via `tea.ExecProcess` |
 
-Unknown values are ignored at load time. Resolution order: `$VISUAL`, then
-`$EDITOR`, then the first of `nvim`/`vim`/`vi`/`nano` on `PATH`. GUI `$EDITOR`
-values always take over the terminal regardless of `vimMode`. Leave the
-embedded editor with `ctrl+g`.
+Unknown values are ignored at load time. GUI `$EDITOR` values always take
+over the terminal regardless of `vimMode`. Leave the embedded editor with
+`ctrl+g`.
 
 ## Hooks
 

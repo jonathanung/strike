@@ -11,11 +11,11 @@ import (
 
 func TestParseNestedModels(t *testing.T) {
 	raw := []byte(`{
-  "kimi": {
-    "options": { "baseURL": "https://k.example/v1", "apiKey": "{env:KIMI_KEY}" },
+  "acme": {
+    "options": { "baseURL": "https://a.example/v1", "apiKey": "{env:ACME_KEY}" },
     "models": {
       "k2": {
-        "name": "Kimi K2",
+        "name": "Acme K2",
         "limit": { "context": 128000, "output": 8192 },
         "options": { "forcedReasoning": true },
         "variants": {
@@ -23,7 +23,7 @@ func TestParseNestedModels(t *testing.T) {
           "low": { "reasoningEffort": "low" }
         }
       },
-      "k1": { "name": "Kimi K1" }
+      "k1": { "name": "Acme K1" }
     }
   }
 }`)
@@ -34,16 +34,16 @@ func TestParseNestedModels(t *testing.T) {
 	if len(pf.Customs) != 1 {
 		t.Fatalf("customs = %+v", pf.Customs)
 	}
-	kimi := pf.Customs[0]
-	if kimi.APIKeyEnv != "KIMI_KEY" || len(kimi.ModelDefs) != 2 {
-		t.Fatalf("kimi = %+v", kimi)
+	acme := pf.Customs[0]
+	if acme.APIKeyEnv != "ACME_KEY" || len(acme.ModelDefs) != 2 {
+		t.Fatalf("acme = %+v", acme)
 	}
 	// Sorted keys: k1, k2
-	if kimi.Models[0] != "k1" || kimi.Models[1] != "k2" {
-		t.Fatalf("models order = %v", kimi.Models)
+	if acme.Models[0] != "k1" || acme.Models[1] != "k2" {
+		t.Fatalf("models order = %v", acme.Models)
 	}
-	k2, ok := FindModelDef(kimi.ModelDefs, "k2")
-	if !ok || k2.Name != "Kimi K2" || k2.Limit == nil || k2.Limit.Context != 128000 {
+	k2, ok := FindModelDef(acme.ModelDefs, "k2")
+	if !ok || k2.Name != "Acme K2" || k2.Limit == nil || k2.Limit.Context != 128000 {
 		t.Fatalf("k2 = %+v", k2)
 	}
 	if len(k2.VariantIDs()) != 2 {
@@ -196,8 +196,8 @@ func TestLoadMergesBuiltinOverlay(t *testing.T) {
       "gpt-overlay": { "name": "Overlay", "limit": { "context": 99 } }
     }
   },
-  "kimi": {
-    "options": { "baseURL": "https://k.example/v1" },
+  "acme": {
+    "options": { "baseURL": "https://a.example/v1" },
     "models": ["k1"]
   }
 }`
@@ -214,8 +214,8 @@ func TestLoadMergesBuiltinOverlay(t *testing.T) {
 	if len(cfg.ModelOverlays["openai"]) != 1 {
 		t.Fatalf("overlays = %+v", cfg.ModelOverlays)
 	}
-	kimi, ok := FindCustom(cfg.Providers, "kimi")
-	if !ok || len(kimi.Models) != 1 {
-		t.Fatalf("kimi = %+v ok=%v", kimi, ok)
+	acme, ok := FindCustom(cfg.Providers, "acme")
+	if !ok || len(acme.Models) != 1 {
+		t.Fatalf("acme = %+v ok=%v", acme, ok)
 	}
 }

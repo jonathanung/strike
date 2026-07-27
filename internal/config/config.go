@@ -193,6 +193,12 @@ func DefaultModel(provider string) string {
 		return "gpt-5.5"
 	case "xai":
 		return "grok-4.5"
+	case "gemini":
+		return "gemini-2.5-pro"
+	case "kimi":
+		return "moonshot-v1"
+	case "deepseek":
+		return "deepseek-chat"
 	case "echo":
 		return "echo"
 	default:

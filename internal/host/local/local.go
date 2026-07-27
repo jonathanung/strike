@@ -75,6 +75,9 @@ var credentialProviders = []host.ProviderStatus{
 	{Name: "anthropic", APIKey: true},
 	{Name: "openai", OAuth: true, APIKey: true},
 	{Name: "xai", OAuth: true, Device: true, APIKey: true},
+	{Name: "gemini", APIKey: true},
+	{Name: "kimi", APIKey: true},
+	{Name: "deepseek", APIKey: true},
 }
 
 // authAdapter adapts *auth.Store to host.Auth.

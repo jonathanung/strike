@@ -24,6 +24,8 @@ func TestCustomProviderHostRoundTrip(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "")
 	t.Setenv("XAI_API_KEY", "")
 	t.Setenv("KIMI_API_KEY", "")
+	t.Setenv("DEEPSEEK_API_KEY", "")
+	t.Setenv("ACME_API_KEY", "")
 
 	store, err := auth.OpenStore(filepath.Join(home, ".strike", "auth.json"))
 	if err != nil {
@@ -36,60 +38,60 @@ func TestCustomProviderHostRoundTrip(t *testing.T) {
 		t.Fatal("Providers is nil")
 	}
 	p := host.CustomProvider{
-		Name:      "kimi",
-		BaseURL:   "https://api.moonshot.cn/v1",
+		Name:      "acme",
+		BaseURL:   "https://api.acme.example/v1",
 		API:       "openai",
-		APIKeyEnv: "KIMI_API_KEY",
-		Models:    []string{"moonshot-v1"},
+		APIKeyEnv: "ACME_API_KEY",
+		Models:    []string{"acme-v1"},
 	}
 	if err := svc.Providers.Upsert(p); err != nil {
 		t.Fatal(err)
 	}
-	got, ok := svc.Providers.Get("kimi")
+	got, ok := svc.Providers.Get("acme")
 	if !ok || got.BaseURL != p.BaseURL || got.API != "openai" {
 		t.Fatalf("Get = %+v ok=%v", got, ok)
 	}
 
 	// Key via auth store, never config.
-	if err := svc.Auth.SetAPIKey("kimi", "sk-test-kimi"); err != nil {
+	if err := svc.Auth.SetAPIKey("acme", "sk-test-acme"); err != nil {
 		t.Fatal(err)
 	}
 	cfgData, _ := os.ReadFile(config.GlobalPath())
-	if contains(string(cfgData), "sk-test-kimi") {
+	if contains(string(cfgData), "sk-test-acme") {
 		t.Fatal("api key leaked into config")
 	}
 	authData, _ := os.ReadFile(filepath.Join(home, ".strike", "auth.json"))
-	if !contains(string(authData), "sk-test-kimi") {
+	if !contains(string(authData), "sk-test-acme") {
 		t.Fatal("api key missing from auth store")
 	}
 
 	// Statuses include custom row beside builtins.
 	by := statusByName(svc.Auth.Statuses())
-	kimi, ok := by["kimi"]
-	if !ok || !kimi.Custom || !kimi.APIKey || !kimi.Authed {
-		t.Fatalf("kimi status = %+v ok=%v", kimi, ok)
+	acme, ok := by["acme"]
+	if !ok || !acme.Custom || !acme.APIKey || !acme.Authed {
+		t.Fatalf("acme status = %+v ok=%v", acme, ok)
 	}
-	if kimi.WireAPI != "openai" {
-		t.Errorf("WireAPI = %q", kimi.WireAPI)
+	if acme.WireAPI != "openai" {
+		t.Errorf("WireAPI = %q", acme.WireAPI)
 	}
 
 	// Catalog prefers configured models.
-	ids, err := svc.Catalog.ModelIDs(context.Background(), "kimi")
-	if err != nil || len(ids) != 1 || ids[0] != "moonshot-v1" {
+	ids, err := svc.Catalog.ModelIDs(context.Background(), "acme")
+	if err != nil || len(ids) != 1 || ids[0] != "acme-v1" {
 		t.Fatalf("ModelIDs = %v err=%v", ids, err)
 	}
 
 	// Env fallback.
-	_ = store.Delete("kimi")
-	t.Setenv("KIMI_API_KEY", "env-kimi")
-	if d := svc.Auth.Describe("kimi"); d != "env" {
+	_ = store.Delete("acme")
+	t.Setenv("ACME_API_KEY", "env-acme")
+	if d := svc.Auth.Describe("acme"); d != "env" {
 		t.Errorf("Describe after env = %q, want env", d)
 	}
 
-	if err := svc.Providers.Remove("kimi"); err != nil {
+	if err := svc.Providers.Remove("acme"); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := svc.Providers.Get("kimi"); ok {
+	if _, ok := svc.Providers.Get("acme"); ok {
 		t.Fatal("expected removed")
 	}
 }
@@ -199,25 +201,25 @@ func TestLogoutDeletesCustomProvider(t *testing.T) {
 	customs := config.NewCustomStore(nil, "")
 	svc := New(store, nil, nil, nil, nil, nil, customs, "")
 	if err := svc.Providers.Upsert(host.CustomProvider{
-		Name: "kimi", BaseURL: "https://api.moonshot.cn/v1", API: "openai",
+		Name: "acme", BaseURL: "https://api.moonshot.cn/v1", API: "openai",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.Auth.SetAPIKey("kimi", "sk-test"); err != nil {
+	if err := svc.Auth.SetAPIKey("acme", "sk-test"); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.Auth.Logout("kimi"); err != nil {
+	if err := svc.Auth.Logout("acme"); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := svc.Providers.Get("kimi"); ok {
+	if _, ok := svc.Providers.Get("acme"); ok {
 		t.Fatal("custom provider should be deleted on logout")
 	}
-	if _, ok := store.Get("kimi"); ok {
+	if _, ok := store.Get("acme"); ok {
 		t.Fatal("credential should be cleared")
 	}
 	by := statusByName(svc.Auth.Statuses())
-	if _, ok := by["kimi"]; ok {
-		t.Fatal("kimi still listed in Statuses")
+	if _, ok := by["acme"]; ok {
+		t.Fatal("acme still listed in Statuses")
 	}
 }
 

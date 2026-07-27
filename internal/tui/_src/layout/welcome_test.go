@@ -21,7 +21,7 @@ func TestWelcomeDashboardRendersBentoCardsForEmptyTranscript(t *testing.T) {
 	for _, want := range []string{
 		"get started",     // provider-status card title
 		"anthropic",       // provider status drawn from host.Auth
-		"echo",            // builtin provider
+		"deepseek",        // built-in provider (5-slot preview budget)
 		"/provider",       // get-started hint
 		"keys",            // keybinding card
 		"agents & skills", // agents/skills card
@@ -113,7 +113,7 @@ func TestWelcomeDashboardUsesCustomThemeWithoutChangingContent(t *testing.T) {
 	customModel = updateApp(t, customModel, tea.WindowSizeMsg{Width: 100, Height: 30})
 
 	custom := customModel.View()
-	for _, want := range []string{"get started", "anthropic", "echo", "/provider", "keys", "agents & skills", "build", "plan", "/review"} {
+	for _, want := range []string{"get started", "anthropic", "deepseek", "/provider", "keys", "agents & skills", "build", "plan", "/review"} {
 		if !strings.Contains(ansi.Strip(defaultModel.View()), want) || !strings.Contains(ansi.Strip(custom), want) {
 			t.Errorf("theme changed semantic welcome content %q", want)
 		}

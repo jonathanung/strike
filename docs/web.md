@@ -29,7 +29,7 @@ yourself when scripting.
 | `--model` | Optional model id |
 | `--session-dir` | Sessions directory for RO listing/tails |
 | `--attach-only` | No live engine — JSONL SSE attach only |
-| `--dangerously-skip-permissions` | Auto-allow permission asks in the live engine |
+| `--auto`, `--dangerously-skip-permissions` | Auto-allow permission asks in the live engine (equivalent) |
 
 Open the cockpit:
 

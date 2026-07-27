@@ -27,6 +27,9 @@ func newTestServices(t *testing.T) (host.Services, *auth.Store) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("OPENAI_API_KEY", "")
 	t.Setenv("XAI_API_KEY", "")
+	t.Setenv("KIMI_API_KEY", "")
+	t.Setenv("DEEPSEEK_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
 	store, err := auth.OpenStore(filepath.Join(home, ".strike", "auth.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +49,7 @@ func TestStatusesOrderFlagsAndEcho(t *testing.T) {
 	svc, _ := newTestServices(t)
 	got := svc.Auth.Statuses()
 
-	wantOrder := []string{"anthropic", "openai", "xai", "echo"}
+	wantOrder := []string{"anthropic", "openai", "xai", "gemini", "kimi", "deepseek", "echo"}
 	if len(got) != len(wantOrder) {
 		t.Fatalf("got %d statuses, want %d: %+v", len(got), len(wantOrder), got)
 	}
@@ -66,6 +69,15 @@ func TestStatusesOrderFlagsAndEcho(t *testing.T) {
 	if s := by["xai"]; !s.APIKey || !s.OAuth || !s.Device || s.Builtin {
 		t.Errorf("xai flags = %+v, want OAuth+Device+APIKey", s)
 	}
+	if s := by["gemini"]; !s.APIKey || s.OAuth || s.Device || s.Builtin {
+		t.Errorf("gemini flags = %+v, want APIKey-only", s)
+	}
+	if s := by["kimi"]; !s.APIKey || s.OAuth || s.Device || s.Builtin {
+		t.Errorf("kimi flags = %+v, want APIKey-only", s)
+	}
+	if s := by["deepseek"]; !s.APIKey || s.OAuth || s.Device || s.Builtin {
+		t.Errorf("deepseek flags = %+v, want APIKey-only", s)
+	}
 
 	echo := by["echo"]
 	if !echo.Builtin || !echo.Authed || echo.Detail != "offline dev provider" {
@@ -73,7 +85,7 @@ func TestStatusesOrderFlagsAndEcho(t *testing.T) {
 	}
 
 	// With an empty store and no env keys, credential providers are unauthed.
-	for _, name := range []string{"anthropic", "openai", "xai"} {
+	for _, name := range []string{"anthropic", "openai", "xai", "gemini", "kimi", "deepseek"} {
 		if s := by[name]; s.Authed || s.Detail != "none" {
 			t.Errorf("%s should be unauthenticated, got %+v", name, s)
 		}
@@ -765,13 +777,13 @@ func TestCatalogOverlayMergesWithoutDroppingCatalog(t *testing.T) {
 
 func TestCatalogCustomNestedModelsDTO(t *testing.T) {
 	cp := config.NormalizeCustomProvider(config.CustomProvider{
-		Name:    "kimi",
-		BaseURL: "https://k.example/v1",
+		Name:    "acme",
+		BaseURL: "https://a.example/v1",
 		API:     config.WireOpenAI,
 		ModelDefs: []config.ModelDef{
 			{
-				ID:    "k2",
-				Name:  "Kimi K2",
+				ID:   "k2",
+				Name: "Acme K2",
 				Limit: &config.ModelLimit{Context: 128000, Output: 8192},
 				Variants: map[string]map[string]any{
 					"medium": {"reasoningEffort": "medium"},
@@ -781,7 +793,7 @@ func TestCatalogCustomNestedModelsDTO(t *testing.T) {
 	})
 	customs := config.NewCustomStore([]config.CustomProvider{cp}, "")
 	svc := New(nil, nil, nil, nil, nil, nil, customs, "")
-	infos, err := svc.Catalog.Models(context.Background(), "kimi")
+	infos, err := svc.Catalog.Models(context.Background(), "acme")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -789,7 +801,7 @@ func TestCatalogCustomNestedModelsDTO(t *testing.T) {
 		t.Fatalf("infos = %#v", infos)
 	}
 	got := infos[0]
-	if got.ID != "k2" || got.Name != "Kimi K2" || got.Context != 128000 || got.Output != 8192 {
+	if got.ID != "k2" || got.Name != "Acme K2" || got.Context != 128000 || got.Output != 8192 {
 		t.Errorf("dto = %+v", got)
 	}
 	if got.Source != host.ModelSourceConfig || len(got.VariantIDs) != 1 {

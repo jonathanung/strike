@@ -125,8 +125,8 @@ export ANTHROPIC_API_KEY=sk-ant-…   # or: strike auth login anthropic
 ```
 
 `--provider <provider>`, `--model <model>`, and `--effort <level>` may be
-combined. To bypass permission checks for one invocation, use
-`--dangerously-skip-permissions`.
+combined. To bypass permission checks for one invocation, use `--auto` or
+`--dangerously-skip-permissions` (equivalent aliases).
 **Warning:** this allows all tool calls without asks or denies. It applies
 only to that process invocation, does not persist config or permission rules,
 and is visibly marked as dangerous mode in the TUI. Run `strike --help` for
