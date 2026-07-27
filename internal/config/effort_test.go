@@ -76,11 +76,11 @@ func TestSetGlobalDefaultsPersistsEffortAndPreservesTheRest(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	if err := SetGlobalDefaults("anthropic", "claude-opus-5", "build", protocol.EffortXHigh); err != nil {
+	if err := SetGlobalDefaults("anthropic", "claude-opus-5", "build", protocol.EffortXHigh, ""); err != nil {
 		t.Fatalf("SetGlobalDefaults: %v", err)
 	}
 	// A later save that touches only the model must leave effort alone.
-	if err := SetGlobalDefaults("", "claude-sonnet-5", "", ""); err != nil {
+	if err := SetGlobalDefaults("", "claude-sonnet-5", "", "", ""); err != nil {
 		t.Fatalf("SetGlobalDefaults: %v", err)
 	}
 
@@ -105,7 +105,7 @@ func TestSetGlobalDefaultsPersistsEffortAndPreservesTheRest(t *testing.T) {
 
 func TestSetGlobalDefaultsRejectsUnknownEffort(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	if err := SetGlobalDefaults("", "", "", protocol.Effort("turbo")); err == nil {
+	if err := SetGlobalDefaults("", "", "", protocol.Effort("turbo"), ""); err == nil {
 		t.Fatal("SetGlobalDefaults accepted effort \"turbo\", want an error")
 	}
 }

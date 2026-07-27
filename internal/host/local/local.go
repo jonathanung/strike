@@ -34,7 +34,7 @@ import (
 // absolute paths, or relative paths resolved via filepath.Abs without a root).
 func New(store *auth.Store, hist *history.Store, mem *memory.Store, issues *issue.Store, agents []string, skills []config.Skill, customs *config.CustomStore, workDir string) host.Services {
 	if customs == nil {
-		customs = config.NewCustomStore(nil)
+		customs = config.NewCustomStore(nil, workDir)
 	}
 	services := host.Services{
 		Auth:      authAdapter{store: store, customs: customs},
@@ -98,22 +98,23 @@ func (a authAdapter) Statuses() []host.ProviderStatus {
 		out = append(out, p)
 	}
 	for _, cp := range customs {
-		key, hasKey := auth.APIKeyEnv(cp.Name, a.store, cp.APIKeyEnv)
+		resolved := config.ResolveCustom(cp)
+		key, hasKey := auth.APIKeyEnv(resolved.Name, a.store, resolved.APIKeyEnv)
 		credDetail := "none"
 		if hasKey {
-			if d := auth.Describe(cp.Name, a.store); d != "none" {
+			if d := auth.Describe(resolved.Name, a.store); d != "none" {
 				credDetail = d
 			} else if key != "" {
 				credDetail = "env"
 			}
 		}
 		hostName := ""
-		if u, err := url.Parse(cp.BaseURL); err == nil {
+		if u, err := url.Parse(resolved.BaseURL); err == nil {
 			hostName = u.Host
 		}
-		meta := string(cp.API)
+		meta := string(resolved.API)
 		if hostName != "" {
-			meta = string(cp.API) + " · " + hostName
+			meta = string(resolved.API) + " · " + hostName
 		}
 		detail := meta
 		if credDetail != "none" {
@@ -122,13 +123,13 @@ func (a authAdapter) Statuses() []host.ProviderStatus {
 		// Customs are always selectable once defined; local gateways (ollama)
 		// often need no key. Missing keys still surface in Detail as "none".
 		out = append(out, host.ProviderStatus{
-			Name:    cp.Name,
+			Name:    resolved.Name,
 			Detail:  detail,
 			Authed:  true,
 			Custom:  true,
 			APIKey:  true,
-			WireAPI: string(cp.API),
-			BaseURL: cp.BaseURL,
+			WireAPI: string(resolved.API),
+			BaseURL: resolved.BaseURL,
 		})
 	}
 	out = append(out, host.ProviderStatus{
@@ -142,7 +143,8 @@ func (a authAdapter) Statuses() []host.ProviderStatus {
 
 func (a authAdapter) Describe(provider string) string {
 	if cp, ok := a.customs.Get(provider); ok {
-		if key, ok := auth.APIKeyEnv(provider, a.store, cp.APIKeyEnv); ok && key != "" {
+		resolved := config.ResolveCustom(cp)
+		if key, ok := auth.APIKeyEnv(provider, a.store, resolved.APIKeyEnv); ok && key != "" {
 			if d := auth.Describe(provider, a.store); d != "none" {
 				return d
 			}
@@ -167,7 +169,17 @@ func (a authAdapter) SetAPIKey(provider, key string) error {
 }
 
 func (a authAdapter) Logout(provider string) error {
-	return a.store.Delete(provider)
+	err := a.store.Delete(provider)
+	// Logging out of a custom provider also deletes its definition (config +
+	// providers.jsonc layers). Built-ins only clear credentials.
+	if a.customs != nil {
+		if _, ok := a.customs.Get(provider); ok {
+			if rerr := a.customs.Remove(provider); rerr != nil && err == nil {
+				err = rerr
+			}
+		}
+	}
+	return err
 }
 
 func (a authAdapter) BeginOAuth(ctx context.Context, provider string) (*host.OAuthLogin, error) {
@@ -314,12 +326,12 @@ func (c catalogAdapter) OutputLimit(ctx context.Context, provider, model string)
 // settingsAdapter adapts global config persistence to host.Settings.
 type settingsAdapter struct{}
 
-func (settingsAdapter) SaveDefaults(provider, model, agent, effort string) error {
+func (settingsAdapter) SaveDefaults(provider, model, agent, effort, mode string) error {
 	level, ok := protocol.ParseEffort(effort)
 	if !ok {
 		return fmt.Errorf("unknown effort %q", effort)
 	}
-	return config.SetGlobalDefaults(provider, model, agent, level)
+	return config.SetGlobalDefaults(provider, model, agent, level, mode)
 }
 
 func (settingsAdapter) SaveTheme(id string) error {
@@ -511,6 +523,8 @@ func (p providersAdapter) Remove(name string) error {
 }
 
 func toHostCustom(cp config.CustomProvider) host.CustomProvider {
+	// Surface unresolved templates in the form so edits preserve {env:…};
+	// runtime resolution happens in the engine/auth paths.
 	h := host.CustomProvider{
 		Name:      cp.Name,
 		BaseURL:   cp.BaseURL,

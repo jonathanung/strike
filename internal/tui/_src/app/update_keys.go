@@ -68,10 +68,9 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if next, cmd, ok := m.applyComposerReadline(msg); ok {
 			return next, cmd
 		}
-		// Composer newline before focus/cycle: bare LF (KeyCtrlJ) is how
-		// many terminals deliver shift+enter without enhanced keys. It must
-		// insert "\n", never cycle. Intentional ctrl+j is rewritten to
-		// alt+j and matches CycleWindowNext / Focus* below (#240).
+		// Composer newline (shift+enter → alt+enter) before focus/cycle.
+		// Bare LF / KeyCtrlJ is ctrl+j and matches CycleWindowNext / Focus*
+		// below — never newline (#324 Ubuntu).
 		if key.Matches(msg, m.keyMap.Newline) {
 			m.resetHistoryBrowsing()
 			m.composer.InsertString("\n")
@@ -80,6 +79,8 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
+	// Focus/cycle before other left-composer handling so bare LF ctrl+j
+	// cycles panes even when the composer is focused (#324).
 	if key.Matches(msg, m.keyMap.FocusLeft) {
 		m.completion = nil
 		cmd := m.focusPane(focusLeft)
@@ -114,7 +115,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if key.Matches(msg, m.keyMap.KeyHelp) {
 		m.completion = nil
-		m.modal = newKeysModal(m.keyMap)
+		m.modal = m.newKeysModal()
 		m.reflow()
 		return m, nil
 	}
@@ -182,6 +183,12 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.reflow()
 		return m, nil
 	}
+	if msg.Type == tea.KeyCtrlV {
+		m.attachClipboardImage()
+		m.recomputeCompletion()
+		m.reflow()
+		return m, nil
+	}
 	switch {
 	case key.Matches(msg, m.keyMap.Newline):
 		// Left-focus only (right pane returned above). Distinct from Send
@@ -226,12 +233,12 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return next, cmd
 	case key.Matches(msg, m.keyMap.SaveDefaults):
-		// Persist the current provider/model/agent as global defaults.
+		// Persist the current provider/model/agent/effort/mode as global defaults.
 		if m.providerName == "" {
 			m.setNeedsModelNotice("nothing to save — select a provider first", true)
 			return m, nil
 		}
-		return m, m.saveDefaultsCmd(m.providerName, m.modelName, m.agentName, string(m.effort), dotJoin(m.th, m.providerName+"/"+m.modelName, m.agentName))
+		return m, m.saveDefaultsCmd(m.providerName, m.modelName, m.agentName, string(m.effort), string(m.permMode.Normalize()), dotJoin(m.th, m.providerName+"/"+m.modelName, m.agentName))
 	case key.Matches(msg, m.keyMap.Agent):
 		// Tab cycles agents (opencode-style build/plan switching).
 		if len(m.agents) > 1 && !m.turnRunning {

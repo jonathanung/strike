@@ -212,6 +212,7 @@ type savedDefaults struct {
 	model    string
 	agent    string
 	effort   string
+	mode     string
 }
 
 type fakeSettings struct {
@@ -221,8 +222,8 @@ type fakeSettings struct {
 	themeErr    error
 }
 
-func (s *fakeSettings) SaveDefaults(provider, model, agent, effort string) error {
-	s.saved = append(s.saved, savedDefaults{provider: provider, model: model, agent: agent, effort: effort})
+func (s *fakeSettings) SaveDefaults(provider, model, agent, effort, mode string) error {
+	s.saved = append(s.saved, savedDefaults{provider: provider, model: model, agent: agent, effort: effort, mode: mode})
 	return s.err
 }
 

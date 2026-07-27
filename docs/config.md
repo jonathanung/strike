@@ -241,11 +241,11 @@ endpoints via the `providers` array (global and project layers merge; same
 | Field | Required | Notes |
 |---|---|---|
 | `name` | yes | lowercase slug (`[a-z][a-z0-9_-]{0,63}`); not `anthropic`/`openai`/`xai`/`kimi`/`deepseek`/`echo` |
-| `baseURL` | yes | absolute `http`/`https` URL |
+| `baseURL` | yes | absolute URL or env ref template |
 | `api` | yes | wire dialect: `openai` or `anthropic` |
-| `apiKeyEnv` | no | env var name checked before the auth store |
+| `apiKeyEnv` | no | env var name (or `{env:NAME}` / `$NAME`) checked before the auth store |
 | `models` | no | listed in `/model`; first is the default when unset |
-| `headers` | no | extra HTTP headers on every request |
+| `headers` | no | extra HTTP headers on every request (values may use env refs) |
 
 In the TUI, `/settings` manages the same list (CRUD persists to
 `~/.strike/config`). Custom names appear in `/provider` like built-ins.

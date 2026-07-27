@@ -274,7 +274,7 @@ func TestSaveDefaultsWritesGlobalConfig(t *testing.T) {
 	t.Setenv("HOME", home)
 	svc := New(nil, nil, nil, nil, nil, nil, nil, "")
 
-	if err := svc.Settings.SaveDefaults("openai", "gpt-5.5", "build", "high"); err != nil {
+	if err := svc.Settings.SaveDefaults("openai", "gpt-5.5", "build", "high", "accept-edits"); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(config.GlobalPath())
@@ -287,6 +287,9 @@ func TestSaveDefaultsWritesGlobalConfig(t *testing.T) {
 	}
 	if got.Provider != "openai" || got.Model != "gpt-5.5" || got.DefaultAgent != "build" {
 		t.Errorf("saved config = %+v", got)
+	}
+	if got.PermissionMode != "accept-edits" {
+		t.Errorf("permissionMode = %q, want accept-edits", got.PermissionMode)
 	}
 }
 

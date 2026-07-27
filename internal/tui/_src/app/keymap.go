@@ -65,10 +65,10 @@ func defaultKeyMap() keyMap {
 		Quit:       key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
 		FocusLeft:  key.NewBinding(key.WithKeys("ctrl+h"), key.WithHelp("ctrl+h", "focus left")),
 		FocusRight: key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("ctrl+l", "focus right")),
-		// CycleWindowNext: user chord is ctrl+j. WrapInput rewrites enhanced
-		// ctrl+j CSI to alt+j so it never collides with bare LF (KeyCtrlJ) used
-		// by Newline for legacy shift+enter (#240).
-		CycleWindowNext:   key.NewBinding(key.WithKeys("alt+j"), key.WithHelp("ctrl+j", "next window")),
+		// CycleWindowNext: user chord is ctrl+j. Enhanced CSI rewrites to alt+j;
+		// bare LF is also KeyCtrlJ (Ubuntu/legacy terminals). Both cycle panes —
+		// never newline (#324). Newline is shift+enter → alt+enter only.
+		CycleWindowNext:   key.NewBinding(key.WithKeys("alt+j", "ctrl+j"), key.WithHelp("ctrl+j", "next window")),
 		CycleWindowPrev:   key.NewBinding(key.WithKeys("ctrl+k"), key.WithHelp("ctrl+k", "prev window")),
 		Palette:           key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "palette")),
 		KeyHelp:           key.NewBinding(key.WithKeys("f1"), key.WithHelp("f1", "keybinds")),
@@ -80,9 +80,8 @@ func defaultKeyMap() keyMap {
 		CompletionNext:    key.NewBinding(key.WithKeys("down", "ctrl+n"), key.WithHelp("down/ctrl+n", "next")),
 		Send:              key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "send")),
 		// Newline: alt+enter is the post-WrapInput form of enhanced shift+enter
-		// CSI. ctrl+j matches bare LF only (legacy shift+enter without enhanced
-		// keys). Intentional ctrl+j is alt+j after CSI rewrite and cycles panes (#240).
-		Newline:        key.NewBinding(key.WithKeys("alt+enter", "ctrl+j"), key.WithHelp("shift+enter", "newline")),
+		// CSI. Bare LF (KeyCtrlJ) is ctrl+j pane cycle, not newline (#324).
+		Newline:        key.NewBinding(key.WithKeys("alt+enter"), key.WithHelp("shift+enter", "newline")),
 		ExternalEditor: key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("ctrl+e", "external editor")),
 		HistoryPrev:    key.NewBinding(key.WithKeys("up"), key.WithHelp("up", "history previous")),
 		HistoryNext:    key.NewBinding(key.WithKeys("down"), key.WithHelp("down", "history next")),
@@ -266,6 +265,95 @@ type keybindEntry struct {
 	Category string
 	Keys     string
 	Action   string
+	// Context marks rows promoted into the "Current focus" section for the
+	// pane/window that was focused when the cheatsheet opened.
+	Context bool
+}
+
+// keysModalContext selects which catalog rows lead the /keys cheatsheet.
+// Zero value leaves catalog order unchanged (no Current focus section).
+type keysModalContext struct {
+	Label      string   // short title suffix: "composer", "agents", …
+	Categories []string // catalog Category values to promote
+	IDPrefixes []string // catalog ID prefixes to promote (e.g. "nav.tool-")
+}
+
+// keysModalContextFor maps pane focus + active right-pane window to cheatsheet
+// priority. Left focus → composer/transcript; right focus → that window's binds.
+func keysModalContextFor(focus paneFocus, windowID string) keysModalContext {
+	if focus == focusRight {
+		switch windowID {
+		case agentsWindowID:
+			return keysModalContext{Label: "agents", Categories: []string{"Agents"}}
+		case terminalWindowID:
+			return keysModalContext{Label: "editor", Categories: []string{"Editor"}}
+		case filesWindowID:
+			return keysModalContext{Label: "files", Categories: []string{"Lists"}}
+		case memoryWindowID:
+			return keysModalContext{Label: "memory", Categories: []string{"Lists"}}
+		case issuesWindowID:
+			return keysModalContext{Label: "issues", Categories: []string{"Lists"}}
+		case "":
+			return keysModalContext{Label: "right pane", Categories: []string{"Navigation"}}
+		default:
+			return keysModalContext{Label: windowID, Categories: []string{"Navigation"}}
+		}
+	}
+	// Left pane: composer editing plus transcript scroll/tool-cell chords.
+	return keysModalContext{
+		Label:      "composer",
+		Categories: []string{"Composer"},
+		IDPrefixes: []string{"nav.scroll-", "nav.jump-", "nav.tool-"},
+	}
+}
+
+// orderKeybindEntries puts current-focus rows first (catalog-relative order
+// preserved within each group). Category matches lead, then ID-prefix matches,
+// then the remaining catalog. Does not drop any binds.
+func orderKeybindEntries(entries []keybindEntry, ctx keysModalContext) []keybindEntry {
+	if len(entries) == 0 {
+		return entries
+	}
+	if ctx.Label == "" && len(ctx.Categories) == 0 && len(ctx.IDPrefixes) == 0 {
+		return entries
+	}
+	cats := make(map[string]struct{}, len(ctx.Categories))
+	for _, c := range ctx.Categories {
+		if c != "" {
+			cats[c] = struct{}{}
+		}
+	}
+	byCat := make([]keybindEntry, 0, len(entries))
+	byPref := make([]keybindEntry, 0, len(entries))
+	rest := make([]keybindEntry, 0, len(entries))
+	for _, e := range entries {
+		if _, ok := cats[e.Category]; ok {
+			e.Context = true
+			byCat = append(byCat, e)
+			continue
+		}
+		pref := false
+		for _, p := range ctx.IDPrefixes {
+			if p != "" && strings.HasPrefix(e.ID, p) {
+				pref = true
+				break
+			}
+		}
+		if pref {
+			e.Context = true
+			byPref = append(byPref, e)
+			continue
+		}
+		rest = append(rest, e)
+	}
+	if len(byCat)+len(byPref) == 0 {
+		return entries
+	}
+	out := make([]keybindEntry, 0, len(entries))
+	out = append(out, byCat...)
+	out = append(out, byPref...)
+	out = append(out, rest...)
+	return out
 }
 
 // keybindCatalog is the single source of truth for cheatsheet rows. App-level

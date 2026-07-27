@@ -184,9 +184,10 @@ type Model struct {
 	pendingPastes []pasteChip
 	// pendingImages holds image attachments for [image N] chips in the
 	// composer. Sent as multimodal UserInput; pruned when the chip leaves.
-	pendingImages []imageChip
-	completion    *completionState
-	keyMap        keyMap
+	pendingImages  []imageChip
+	clipboardImage func() ([]byte, error)
+	completion     *completionState
+	keyMap         keyMap
 	// keyOverrides are config keybind remaps (id → chords); used to rebuild
 	// keyMap on orientation toggle and /keys reset.
 	keyOverrides               map[string][]string
@@ -611,6 +612,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case msg.err != nil:
 			m.setNotice("logout failed: "+msg.err.Error(), true)
+		case msg.removed:
+			m.setNotice("removed custom provider "+msg.provider, false)
 		default:
 			m.setNotice("logged out of "+msg.provider, false)
 		}
@@ -768,7 +771,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reflow()
 			return m, m.setPaneFocus(focusLeft)
 		case paletteActionKeybinds:
-			m.modal = newKeysModal(m.keyMap)
+			m.modal = m.newKeysModal()
 			m.reflow()
 			return m, nil
 		}

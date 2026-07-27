@@ -1,15 +1,17 @@
 # Keybinds
 
-In-app cheatsheet: `f1` or `/keys` (filterable). Remap chords in config
-(`keybinds` object) — see [config.md](config.md). `/keys reset` restores
-session defaults.
+In-app cheatsheet: `f1` or `/keys` (filterable). The list leads with a
+**Current focus** section for the focused pane (composer/transcript on the
+left; the active right-pane window such as `agents`, `files`, or `editor`),
+then the remaining binds. Remap chords in config (`keybinds` object) — see
+[config.md](config.md). `/keys reset` restores session defaults.
 
 ## Global
 
 | Key | Action |
 |---|---|
 | `enter` | send prompt |
-| `shift+enter` | newline (`alt+enter` after enhanced CSI; bare LF fallback) |
+| `shift+enter` | newline (`alt+enter` after enhanced CSI) |
 | `esc` | interrupt turn / reject permission / close modal |
 | `ctrl+c` | quit |
 | `ctrl+p` | command palette |
@@ -17,7 +19,7 @@ session defaults.
 | `tab` | cycle agent personas (composer empty of `/` completion; not concurrent roots) |
 | `shift+tab` | cycle permission mode (default → plan → soft-approve → accept-edits → yolo) |
 | `ctrl+d` | save defaults (see [config.md](config.md)) |
-| `ctrl+e` | open prompt in external `$EDITOR` |
+| `ctrl+e` | open prompt in external editor (`$VISUAL`/`$EDITOR`, else nvim/vim/vi/nano) |
 
 ## Transcript & panes
 
@@ -27,7 +29,7 @@ session defaults.
 | `ctrl+up` / `ctrl+down` | scroll transcript |
 | `ctrl+t` | jump to latest output |
 | `ctrl+h` / `ctrl+l` | focus left / right pane (horizontal split) |
-| `ctrl+j` / `ctrl+k` | cycle right-pane focus next / previous within the active stack group, then to the next group (enhanced `ctrl+j` is distinct from bare LF newline) |
+| `ctrl+j` / `ctrl+k` | cycle right-pane focus next / previous within the active stack group, then to the next group (bare LF / `KeyCtrlJ` is also `ctrl+j`, not newline) |
 | `ctrl+;` | toggle split orientation (`/layout`, `/split`) |
 
 In a vertical split, focus and cycle chords swap: focus is `ctrl+j`/`ctrl+k`,

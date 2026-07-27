@@ -287,7 +287,7 @@ func TestSetGlobalDefaultsPreserves(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := SetGlobalDefaults("openai", "new-model", "build", protocol.EffortHigh); err != nil {
+	if err := SetGlobalDefaults("openai", "new-model", "build", protocol.EffortHigh, ""); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(path)
@@ -306,7 +306,7 @@ func TestSetGlobalDefaultsPreserves(t *testing.T) {
 	}
 
 	// empty fields leave existing values
-	if err := SetGlobalDefaults("", "", "", ""); err != nil {
+	if err := SetGlobalDefaults("", "", "", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	data, _ = os.ReadFile(path)
@@ -326,7 +326,7 @@ func TestSetGlobalDefaultsCorrupt(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`not-json`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := SetGlobalDefaults("x", "y", "", ""); err == nil {
+	if err := SetGlobalDefaults("x", "y", "", "", ""); err == nil {
 		t.Fatal("expected corrupt config error")
 	}
 }
@@ -375,6 +375,115 @@ func TestSetGlobalThemeRejectsEmpty(t *testing.T) {
 		if err := SetGlobalTheme(id); err == nil {
 			t.Fatalf("SetGlobalTheme(%q) accepted empty id", id)
 		}
+	}
+}
+
+func TestSetGlobalDefaultsPersistsPermissionModeAndPreserves(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := GlobalPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	initial := Config{
+		Provider:       "anthropic",
+		Model:          "keep-model",
+		SystemPrompt:   "keep me",
+		PermissionMode: protocol.PermissionModeDefault,
+	}
+	raw, _ := json.MarshalIndent(initial, "", "  ")
+	if err := os.WriteFile(path, append(raw, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SetGlobalDefaults("", "", "", "", "yolo"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got Config
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.PermissionMode != protocol.PermissionModeYolo {
+		t.Errorf("permissionMode = %q, want yolo", got.PermissionMode)
+	}
+	if got.Provider != "anthropic" || got.Model != "keep-model" || got.SystemPrompt != "keep me" {
+		t.Errorf("did not preserve unrelated fields: %#v", got)
+	}
+
+	// Empty mode leaves the stored value alone.
+	if err := SetGlobalDefaults("", "new-model", "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = os.ReadFile(path)
+	_ = json.Unmarshal(data, &got)
+	if got.PermissionMode != protocol.PermissionModeYolo {
+		t.Errorf("empty mode cleared permissionMode: %q", got.PermissionMode)
+	}
+	if got.Model != "new-model" {
+		t.Errorf("model = %q, want new-model", got.Model)
+	}
+}
+
+func TestSetGlobalDefaultsRejectsUnknownPermissionMode(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := SetGlobalDefaults("", "", "", "", "turbo"); err == nil {
+		t.Fatal("SetGlobalDefaults accepted mode \"turbo\", want an error")
+	}
+}
+
+func TestLoadPermissionMode(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(global, []byte(`{"permissionMode":"plan"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PermissionMode != protocol.PermissionModePlan {
+		t.Errorf("permissionMode = %q, want plan", cfg.PermissionMode)
+	}
+
+	project := filepath.Join(work, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(project), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(project, []byte(`{"permissionMode":"accept-edits"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PermissionMode != protocol.PermissionModeAcceptEdits {
+		t.Errorf("project permissionMode = %q, want accept-edits", cfg.PermissionMode)
+	}
+}
+
+func TestLoadRejectsUnknownPermissionMode(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(global, []byte(`{"permissionMode":"nope"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(work); err == nil {
+		t.Fatal("Load accepted unknown permissionMode")
 	}
 }
 

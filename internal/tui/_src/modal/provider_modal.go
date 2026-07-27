@@ -23,6 +23,7 @@ var (
 type providerLogoutMsg struct {
 	provider string
 	err      error
+	removed  bool // custom provider definition deleted
 }
 
 type providerModalPhase int
@@ -53,6 +54,7 @@ type providerModal struct {
 	logoutName   string
 	logoutDetail string // credential state shown on confirm (never a secret)
 	logoutMulti  bool   // true when logout clears more than one stored method
+	logoutCustom bool   // custom providers are deleted on logout
 }
 
 // filtered returns statuses matching the type-to-filter query (case-insensitive
@@ -125,6 +127,7 @@ func (m *providerModal) clearLogoutConfirm() {
 	m.logoutName = ""
 	m.logoutDetail = ""
 	m.logoutMulti = false
+	m.logoutCustom = false
 }
 
 func (m *providerModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
@@ -158,7 +161,7 @@ func (m *providerModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 	case "ctrl+d":
 		if m.cursor < len(list) {
 			name := list[m.cursor].Name
-			return m, saveDefaultsThroughCmd(m.settings, name, "", "", "", "provider "+name)
+			return m, saveDefaultsThroughCmd(m.settings, name, "", "", "", "", "provider "+name)
 		}
 		return m, nil
 	case "ctrl+x":
@@ -209,6 +212,7 @@ func (m *providerModal) beginLogoutConfirm() (modal, tea.Cmd) {
 	m.logoutName = s.Name
 	m.logoutDetail = strings.TrimSpace(s.Detail)
 	m.logoutMulti = logoutClearsMultipleMethods(s)
+	m.logoutCustom = s.Custom
 	return m, nil
 }
 
@@ -235,21 +239,32 @@ func logoutClearsMultipleMethods(s host.ProviderStatus) bool {
 
 func (m *providerModal) confirmLogout() (modal, tea.Cmd) {
 	name := m.logoutName
+	isCustom := m.logoutCustom
 	authsvc := m.auth
+	providers := m.services.Providers
 	m.clearLogoutConfirm()
 	if name == "" {
 		return m, nil
 	}
-	if authsvc == nil {
+	if authsvc == nil && !(isCustom && providers != nil) {
 		return m, func() tea.Msg {
 			return providerLogoutMsg{provider: name, err: errNoAuth}
 		}
 	}
-	// Always call Logout so host state and env-only rows stay consistent with
-	// /auth logout. Notices never include secrets — only the provider name.
+	// Logout clears credentials. For custom providers, also Remove the
+	// definition (host Auth.Logout does the same for /auth logout).
+	// Notices never include secrets — only the provider name.
 	return m, func() tea.Msg {
-		err := authsvc.Logout(name)
-		return providerLogoutMsg{provider: name, err: err}
+		var err error
+		if isCustom && providers != nil {
+			err = providers.Remove(name)
+		}
+		if authsvc != nil {
+			if e := authsvc.Logout(name); e != nil && err == nil {
+				err = e
+			}
+		}
+		return providerLogoutMsg{provider: name, err: err, removed: isCustom}
 	}
 }
 
@@ -320,9 +335,12 @@ func (m *providerModal) viewConfirmLogout(width int, th theme.Theme) string {
 	lines := []string{
 		st.WarningStrong.Render("Log out of " + name + "?"),
 	}
-	if m.logoutMulti {
+	switch {
+	case m.logoutCustom:
+		lines = append(lines, st.Text.Render("Deletes this custom provider and clears its credentials."))
+	case m.logoutMulti:
 		lines = append(lines, st.Text.Render("Clears all stored credentials for this provider."))
-	} else {
+	default:
 		lines = append(lines, st.Text.Render("Clears stored credentials for this provider."))
 	}
 	if d := m.logoutDetail; d != "" && d != "none" {

@@ -122,8 +122,10 @@ yolo also paints a danger banner.
 | `accept-edits` | auto-allow edit/write; bash/network still ask |
 | `yolo` | skip permission asks; explicit deny rules still apply |
 
-Persists per session in the JSONL log. Optional default for new sessions:
-`permissionMode` in [config.md](config.md).
+Persists per session in the JSONL log. Optional default for **new** sessions:
+`permissionMode` in [config.md](config.md), or **ctrl+d** in the `/mode`
+picker (and global ctrl+d) to save the current posture as that default.
+Resume restores the session log, not the config default.
 
 Built-in skills also appear as slash commands: `/commit`, `/push`, `/pr`,
 `/ship`, `/review`, `/learn`, `/deslop`, `/verify` (plus custom skills under
@@ -154,8 +156,8 @@ a real provider needs credentials — see [auth.md](auth.md).
 
 Provider selection happens in-app with `/provider`; `--provider` on the
 command line just pre-selects (and validates credentials eagerly). Custom
-OpenAI-/Anthropic-compatible endpoints: `/settings` or config
-`providers` — see [config.md](config.md).
+OpenAI-/Anthropic-compatible endpoints: `/settings`, `.strike/providers.jsonc`,
+or config `providers` — see [config.md](config.md).
 
 ## CLI session resume & headless exec
 
@@ -190,7 +192,7 @@ slot hosts one active window from the registry:
 | `memory` | project memory browser |
 | `issues` | project issue browser |
 | `markdown` | markdown reader (`/md-read <path>`) |
-| `editor` | embedded nvim/vim PTY for `/vim` |
+| `editor` | embedded nvim/vim/nano PTY for `/vim` |
 
 Related right-pane windows stack as **groups** when the pane is tall/wide
 enough: session (`context`+`activity`), agents (`agents`+`visualizer`), and
@@ -201,8 +203,9 @@ singles. Compact or narrow terminals collapse each group to one pane.
 ### Concurrent root sessions
 
 Focus the `agents` pane to run several parent sessions side by side. The pane
-footer (and empty state) list the controls; `/keys` / `f1` includes the same
-rows under **Agents**:
+footer (and empty state) list the controls; `/keys` / `f1` with the agents
+pane focused leads with those rows under **Current focus**, then the full
+cheatsheet (including **Agents** when not focused):
 
 | Key | Action |
 |---|---|
@@ -224,12 +227,12 @@ Worktree isolation for second+ roots is configured via `worktree` in
 
 Vim-style pane keys (horizontal split): `ctrl+h` / `ctrl+l` focus the left
 or right pane; `ctrl+j` / `ctrl+k` move focus within the active stack group
-then to the next group (enhanced terminals distinguish `ctrl+j` from bare LF
-newline). `ctrl+;` (or `/layout` / `/split`) toggles a vertical
+then to the next group (including bare LF from terminals that cannot
+disambiguate `ctrl+j`). `ctrl+;` (or `/layout` / `/split`) toggles a vertical
 top/bottom split and swaps those chords (focus becomes `ctrl+j`/`ctrl+k`,
 cycle becomes `ctrl+h`/`ctrl+l`). `ctrl+p` opens the command palette; `f1`
 (or `/keys`) opens a filterable keybind cheatsheet. Enter sends; Shift+Enter
-(or Alt+Enter) inserts a newline. `pgup`/`pgdn` (and `ctrl+up`/`ctrl+down`)
+(or Alt+Enter after enhanced CSI) inserts a newline. `pgup`/`pgdn` (and `ctrl+up`/`ctrl+down`)
 scroll the transcript; `ctrl+t` jumps to the latest output. The transcript
 sticks to the bottom while you are already anchored, and keeps your scroll
 offset when you have scrolled up. Pickers, the command palette, and

@@ -13,13 +13,26 @@ const keysModalMaxRows = 10
 
 // keysModal is a filterable keybind cheatsheet.
 type keysModal struct {
-	entries []keybindEntry
-	filter  string
-	cursor  int
+	entries      []keybindEntry
+	contextLabel string
+	filter       string
+	cursor       int
 }
 
-func newKeysModal(keys keyMap) *keysModal {
-	return &keysModal{entries: keybindCatalog(keys)}
+func newKeysModal(keys keyMap, ctx keysModalContext) *keysModal {
+	entries := orderKeybindEntries(keybindCatalog(keys), ctx)
+	return &keysModal{entries: entries, contextLabel: ctx.Label}
+}
+
+// newKeysModal opens the cheatsheet ordered for the currently focused pane/window.
+func (m *Model) newKeysModal() *keysModal {
+	windowID := ""
+	if m.focus == focusRight {
+		if w := m.windows.active(); w != nil {
+			windowID = w.id()
+		}
+	}
+	return newKeysModal(m.keyMap, keysModalContextFor(m.focus, windowID))
 }
 
 func (m *keysModal) filtered() []keybindEntry {
@@ -43,6 +56,9 @@ func (m *keysModal) filtered() []keybindEntry {
 
 func keysMatchRank(entry keybindEntry, query string) int {
 	fields := []string{entry.Keys, entry.Action, entry.Category, entry.ID}
+	if entry.Context {
+		fields = append(fields, "current focus")
+	}
 	best := -1
 	for _, field := range fields {
 		field = strings.ToLower(field)
@@ -103,9 +119,13 @@ func (m *keysModal) view(width int, th theme.Theme) string {
 	}
 	items := make([]ui.ListItem, len(list))
 	for i, entry := range list {
+		category := entry.Category
+		if entry.Context {
+			category = "Current focus"
+		}
 		items[i] = ui.ListItem{
 			Label:  sanitizeDisplayData(entry.Keys),
-			Detail: sanitizeDisplayData(detailJoin(th, entry.Category, entry.Action)),
+			Detail: sanitizeDisplayData(detailJoin(th, category, entry.Action)),
 		}
 	}
 
@@ -126,8 +146,12 @@ func (m *keysModal) view(width int, th theme.Theme) string {
 	if width < 4 {
 		return body
 	}
+	title := "Keyboard shortcuts"
+	if m.contextLabel != "" {
+		title = detailJoin(th, title, m.contextLabel)
+	}
 	return ui.Dialog(th, ui.DialogOpts{
-		Title: "Keyboard shortcuts",
+		Title: title,
 		Hint:  dotJoin(th, "type to filter", "up/down move", "esc close"),
 		Width: width,
 	}, body)

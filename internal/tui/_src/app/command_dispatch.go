@@ -80,7 +80,7 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 	case "/mode":
 		if len(fields) < 2 {
 			m.resetComposer()
-			m.modal = newPermissionModeModal(m.permMode, m.ops)
+			m.modal = newPermissionModeModal(m.permMode, m.ops, m.services.Settings)
 			return m, nil
 		}
 		mode, ok := protocol.ParsePermissionMode(fields[1])
@@ -170,7 +170,7 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		}
 		m.resetComposer()
 		m.clearNotice()
-		m.modal = newKeysModal(m.keyMap)
+		m.modal = m.newKeysModal()
 		m.reflow()
 		return m, nil
 	case "/memory":
@@ -833,10 +833,10 @@ func (m Model) fastNotice(enabled bool) string {
 	return "fast on — OpenAI platform priority tier (~2×); ignored by other providers and ChatGPT subscription"
 }
 
-// saveDefaultsCmd persists provider/model/agent/effort defaults through the
-// host settings service, reporting the outcome as a defaultsSavedMsg.
-func (m Model) saveDefaultsCmd(provider, model, agent, effort, text string) tea.Cmd {
-	return saveDefaultsThroughCmd(m.services.Settings, provider, model, agent, effort, text)
+// saveDefaultsCmd persists provider/model/agent/effort/mode defaults through
+// the host settings service, reporting the outcome as a defaultsSavedMsg.
+func (m Model) saveDefaultsCmd(provider, model, agent, effort, mode, text string) tea.Cmd {
+	return saveDefaultsThroughCmd(m.services.Settings, provider, model, agent, effort, mode, text)
 }
 
 // effortChoices renders the selectable levels for error and help text.

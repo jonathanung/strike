@@ -92,7 +92,7 @@ var optionSpecs = []optionSpec{
 	},
 	{
 		names:       []string{"upgrade"},
-		description: "download and install the latest GitHub Release, then restart",
+		description: "download and install the latest GitHub Release",
 		register: func(fs *flag.FlagSet, opts *cliOptions) {
 			fs.BoolVar(&opts.upgrade, "upgrade", false, "")
 		},
@@ -162,10 +162,17 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func runUpgradeCLI(stdout, stderr io.Writer) int {
-	_, err := update.Upgrade(context.Background(), update.Options{
+// upgradeCLIOptions configures self-update for the CLI path: install only,
+// never re-exec (return to the shell). TUI /upgrade keeps default re-exec.
+func upgradeCLIOptions(stdout io.Writer) update.Options {
+	return update.Options{
 		Stdout: stdout,
-	})
+		NoExec: true,
+	}
+}
+
+func runUpgradeCLI(stdout, stderr io.Writer) int {
+	_, err := update.Upgrade(context.Background(), upgradeCLIOptions(stdout))
 	if err != nil {
 		fmt.Fprintln(stderr, "strike:", err)
 		return 1

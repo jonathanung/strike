@@ -120,7 +120,7 @@ func (m *modelModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 			return m, nil
 		}
 		provider, model := m.provider, list[m.cursor].ID
-		return m, saveDefaultsThroughCmd(m.settings, provider, model, "", "", provider+"/"+model)
+		return m, saveDefaultsThroughCmd(m.settings, provider, model, "", "", "", provider+"/"+model)
 	default:
 		if msg.Type == tea.KeyRunes {
 			m.filter += string(msg.Runes)

@@ -31,7 +31,7 @@ func TestCustomProviderHostRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	customs := config.NewCustomStore(nil)
+	customs := config.NewCustomStore(nil, "")
 	svc := New(store, nil, nil, nil, nil, nil, customs, "")
 
 	if svc.Providers == nil {
@@ -184,6 +184,66 @@ func TestCustomAnthropicWire(t *testing.T) {
 	}
 	if p.Name() != "my-claude-proxy" {
 		t.Errorf("Name = %q", p.Name())
+	}
+}
+
+func TestLogoutDeletesCustomProvider(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("XAI_API_KEY", "")
+
+	store, err := auth.OpenStore(filepath.Join(home, ".strike", "auth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	customs := config.NewCustomStore(nil, "")
+	svc := New(store, nil, nil, nil, nil, nil, customs, "")
+	if err := svc.Providers.Upsert(host.CustomProvider{
+		Name: "kimi", BaseURL: "https://api.moonshot.cn/v1", API: "openai",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Auth.SetAPIKey("kimi", "sk-test"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Auth.Logout("kimi"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := svc.Providers.Get("kimi"); ok {
+		t.Fatal("custom provider should be deleted on logout")
+	}
+	if _, ok := store.Get("kimi"); ok {
+		t.Fatal("credential should be cleared")
+	}
+	by := statusByName(svc.Auth.Statuses())
+	if _, ok := by["kimi"]; ok {
+		t.Fatal("kimi still listed in Statuses")
+	}
+}
+
+func TestLogoutBuiltinKeepsProvider(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "")
+	store, err := auth.OpenStore(filepath.Join(home, ".strike", "auth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Set("openai", auth.Credential{Type: auth.TypeAPIKey, APIKey: "sk"}); err != nil {
+		t.Fatal(err)
+	}
+	svc := New(store, nil, nil, nil, nil, nil, config.NewCustomStore(nil, ""), "")
+	if err := svc.Auth.Logout("openai"); err != nil {
+		t.Fatal(err)
+	}
+	by := statusByName(svc.Auth.Statuses())
+	if _, ok := by["openai"]; !ok {
+		t.Fatal("builtin openai row must remain")
+	}
+	if by["openai"].Detail != "none" {
+		t.Errorf("detail = %q", by["openai"].Detail)
 	}
 }
 

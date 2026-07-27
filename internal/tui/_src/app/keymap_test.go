@@ -18,14 +18,14 @@ func TestDefaultKeyMapBindingsMatchTheirRequiredKeysAndHaveHelp(t *testing.T) {
 		{"quit", keys.Quit, tea.KeyMsg{Type: tea.KeyCtrlC}},
 		{"focus left", keys.FocusLeft, tea.KeyMsg{Type: tea.KeyCtrlH}},
 		{"focus right", keys.FocusRight, tea.KeyMsg{Type: tea.KeyCtrlL}},
-		{"window next", keys.CycleWindowNext, keyMsgAltJ()},
+		{"window next alt+j", keys.CycleWindowNext, keyMsgAltJ()},
+		{"window next bare LF", keys.CycleWindowNext, tea.KeyMsg{Type: tea.KeyCtrlJ}},
 		{"window prev", keys.CycleWindowPrev, tea.KeyMsg{Type: tea.KeyCtrlK}},
 		{"palette", keys.Palette, tea.KeyMsg{Type: tea.KeyCtrlP}},
 		{"keyhelp", keys.KeyHelp, tea.KeyMsg{Type: tea.KeyF1}},
 		{"interrupt", keys.Interrupt, tea.KeyMsg{Type: tea.KeyEsc}},
 		{"send", keys.Send, tea.KeyMsg{Type: tea.KeyEnter}},
 		{"newline alt+enter", keys.Newline, tea.KeyMsg{Type: tea.KeyEnter, Alt: true}},
-		{"newline bare LF KeyCtrlJ", keys.Newline, tea.KeyMsg{Type: tea.KeyCtrlJ}},
 		{"external editor", keys.ExternalEditor, tea.KeyMsg{Type: tea.KeyCtrlE}},
 	}
 	for _, tt := range tests {
@@ -39,18 +39,17 @@ func TestDefaultKeyMapBindingsMatchTheirRequiredKeysAndHaveHelp(t *testing.T) {
 			}
 		})
 	}
-	// CycleWindowNext help stays ctrl+j; wire form is alt+j after CSI rewrite.
+	// CycleWindowNext help stays ctrl+j; bare LF and enhanced alt+j both match.
 	if keys.CycleWindowNext.Help().Key != "ctrl+j" {
 		t.Errorf("CycleWindowNext help key = %q, want ctrl+j", keys.CycleWindowNext.Help().Key)
 	}
-	if key.Matches(tea.KeyMsg{Type: tea.KeyCtrlJ}, keys.CycleWindowNext) {
-		t.Error("bare KeyCtrlJ must not match CycleWindowNext (#240)")
+	if key.Matches(tea.KeyMsg{Type: tea.KeyCtrlJ}, keys.Newline) {
+		t.Error("bare KeyCtrlJ must not match Newline (#324)")
 	}
 	if key.Matches(keyMsgAltJ(), keys.Newline) {
-		t.Error("alt+j (enhanced ctrl+j) must not match Newline (#240)")
+		t.Error("alt+j (enhanced ctrl+j) must not match Newline (#324)")
 	}
-	// Newline help advertises shift+enter (the user-facing chord); the binding
-	// matches alt+enter (CSI rewrite) and ctrl+j (bare LF from many terminals).
+	// Newline help advertises shift+enter; binding is alt+enter after CSI rewrite.
 	newlineHelp := keys.Newline.Help()
 	if newlineHelp.Key != "shift+enter" {
 		t.Errorf("Newline help key = %q, want shift+enter", newlineHelp.Key)
@@ -159,7 +158,7 @@ func TestKeybindCatalogCoversAppBindingsAndIsSearchable(t *testing.T) {
 	if keys.Leader.Help().Desc != "subagent leader" {
 		t.Errorf("Leader help desc = %q, want subagent leader", keys.Leader.Help().Desc)
 	}
-	m := newKeysModal(keys)
+	m := newKeysModal(keys, keysModalContext{})
 	m.filter = "ctrl+h"
 	got := m.filtered()
 	if len(got) == 0 || got[0].ID != "nav.focus-left" {
@@ -169,6 +168,223 @@ func TestKeybindCatalogCoversAppBindingsAndIsSearchable(t *testing.T) {
 	if len(m.filtered()) < 2 {
 		t.Errorf("filter window matched %d rows, want at least next/prev", len(m.filtered()))
 	}
+}
+
+func TestKeysModalContextForFocus(t *testing.T) {
+	tests := []struct {
+		name     string
+		focus    paneFocus
+		windowID string
+		label    string
+		wantCat  string
+		wantPref string
+	}{
+		{"composer", focusLeft, "", "composer", "Composer", "nav.tool-"},
+		{"agents", focusRight, agentsWindowID, "agents", "Agents", ""},
+		{"editor", focusRight, terminalWindowID, "editor", "Editor", ""},
+		{"files", focusRight, filesWindowID, "files", "Lists", ""},
+		{"activity", focusRight, "activity", "activity", "Navigation", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := keysModalContextFor(tt.focus, tt.windowID)
+			if ctx.Label != tt.label {
+				t.Errorf("label = %q, want %q", ctx.Label, tt.label)
+			}
+			if tt.wantCat != "" {
+				found := false
+				for _, c := range ctx.Categories {
+					if c == tt.wantCat {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("categories = %#v, want %q", ctx.Categories, tt.wantCat)
+				}
+			}
+			if tt.wantPref != "" {
+				found := false
+				for _, p := range ctx.IDPrefixes {
+					if p == tt.wantPref {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("prefixes = %#v, want %q", ctx.IDPrefixes, tt.wantPref)
+				}
+			}
+		})
+	}
+}
+
+func TestOrderKeybindEntriesPromotesFocusContext(t *testing.T) {
+	keys := defaultKeyMap()
+	catalog := keybindCatalog(keys)
+	if len(catalog) < 10 {
+		t.Fatalf("catalog too small: %d", len(catalog))
+	}
+
+	agents := orderKeybindEntries(catalog, keysModalContextFor(focusRight, agentsWindowID))
+	if len(agents) != len(catalog) {
+		t.Fatalf("agents order length = %d, want %d (must not drop binds)", len(agents), len(catalog))
+	}
+	agentIDs := []string{"agents.move", "agents.open", "agents.spawn", "agents.interrupt", "agents.filter"}
+	for i, id := range agentIDs {
+		if agents[i].ID != id {
+			t.Fatalf("agents[%d] = %q, want %q", i, agents[i].ID, id)
+		}
+		if !agents[i].Context {
+			t.Errorf("%s Context = false, want true", id)
+		}
+	}
+	for i := len(agentIDs); i < len(agents); i++ {
+		if agents[i].Context {
+			t.Errorf("non-focus row %q unexpectedly Context", agents[i].ID)
+		}
+		if strings.HasPrefix(agents[i].ID, "agents.") {
+			t.Errorf("agent bind %q after focus section", agents[i].ID)
+		}
+	}
+
+	composer := orderKeybindEntries(catalog, keysModalContextFor(focusLeft, ""))
+	if len(composer) != len(catalog) {
+		t.Fatalf("composer order length = %d, want %d", len(composer), len(catalog))
+	}
+	if !composer[0].Context || composer[0].Category != "Composer" {
+		t.Fatalf("composer[0] = %#v, want first Composer context row", composer[0])
+	}
+	if composer[0].ID != "composer.send" {
+		t.Fatalf("composer[0].ID = %q, want composer.send", composer[0].ID)
+	}
+	sawComposer := false
+	sawPref := false
+	sawNonContext := false
+	for _, e := range composer {
+		if e.Context {
+			if sawNonContext {
+				t.Fatalf("context row %q after non-context section", e.ID)
+			}
+			switch {
+			case e.Category == "Composer":
+				if sawPref {
+					t.Errorf("Composer row %q after prefix rows", e.ID)
+				}
+				sawComposer = true
+			case strings.HasPrefix(e.ID, "nav.scroll-"),
+				strings.HasPrefix(e.ID, "nav.jump-"),
+				strings.HasPrefix(e.ID, "nav.tool-"):
+				sawPref = true
+			default:
+				t.Errorf("unexpected context row %q cat=%q", e.ID, e.Category)
+			}
+		} else {
+			sawNonContext = true
+			if e.Category == "Composer" {
+				t.Errorf("composer bind %q not promoted", e.ID)
+			}
+		}
+	}
+	if !sawComposer {
+		t.Fatal("no Composer category rows in focus section")
+	}
+	if !sawPref {
+		t.Fatal("no transcript scroll/tool prefix rows in focus section")
+	}
+
+	// Empty context is a no-op.
+	plain := orderKeybindEntries(catalog, keysModalContext{})
+	for i := range plain {
+		if plain[i].ID != catalog[i].ID || plain[i].Context {
+			t.Fatalf("empty context changed catalog at %d: got %#v want %#v", i, plain[i], catalog[i])
+		}
+	}
+}
+
+func TestKeysModalOpensWithFocusContext(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+
+	// Default left/composer focus → composer binds first.
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyF1})
+	modal, ok := m.modal.(*keysModal)
+	if !ok {
+		t.Fatalf("f1 modal = %T, want keysModal", m.modal)
+	}
+	if modal.contextLabel != "composer" {
+		t.Fatalf("contextLabel = %q, want composer", modal.contextLabel)
+	}
+	list := modal.filtered()
+	if len(list) == 0 || !list[0].Context || list[0].Category != "Composer" {
+		t.Fatalf("composer focus first row = %#v, want Composer context", firstEntry(list))
+	}
+	view := modal.view(60, m.th)
+	if !strings.Contains(view, "Current focus") {
+		t.Errorf("composer view missing Current focus section: %q", view)
+	}
+	if !strings.Contains(view, "composer") {
+		t.Errorf("composer view missing title context: %q", view)
+	}
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+
+	// Agents pane focused → agent root controls first.
+	reg, ok := m.windows.activate(agentsWindowID)
+	if !ok {
+		t.Fatal("activate agents")
+	}
+	m.windows = reg
+	m.focus = focusRight
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyF1})
+	modal, ok = m.modal.(*keysModal)
+	if !ok {
+		t.Fatalf("agents f1 modal = %T", m.modal)
+	}
+	if modal.contextLabel != "agents" {
+		t.Fatalf("contextLabel = %q, want agents", modal.contextLabel)
+	}
+	list = modal.filtered()
+	wantAgents := []string{"agents.move", "agents.open", "agents.spawn", "agents.interrupt", "agents.filter"}
+	for i, id := range wantAgents {
+		if i >= len(list) || list[i].ID != id || !list[i].Context {
+			t.Fatalf("agents focus list[%d] = %#v, want %s context", i, firstEntry(list[i:]), id)
+		}
+	}
+	view = modal.view(60, m.th)
+	if !strings.Contains(view, "Current focus") {
+		t.Errorf("agents view missing Current focus: %q", view)
+	}
+	// Agent actions appear in the leading section (spawn help text).
+	if !strings.Contains(view, "new root") {
+		t.Errorf("agents view missing spawn action: %q", view)
+	}
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+
+	// Switching focus and reopening updates the context section.
+	m.focus = focusLeft
+	_ = m.composer.Focus()
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyF1})
+	modal, ok = m.modal.(*keysModal)
+	if !ok {
+		t.Fatalf("reopen modal = %T", m.modal)
+	}
+	if modal.contextLabel != "composer" {
+		t.Fatalf("after switch contextLabel = %q, want composer", modal.contextLabel)
+	}
+	list = modal.filtered()
+	if len(list) == 0 || list[0].ID == "agents.move" {
+		t.Fatalf("after switch first row still agents: %#v", firstEntry(list))
+	}
+	if !list[0].Context || list[0].Category != "Composer" {
+		t.Fatalf("after switch first = %#v, want Composer context", firstEntry(list))
+	}
+}
+
+func firstEntry(list []keybindEntry) any {
+	if len(list) == 0 {
+		return nil
+	}
+	return list[0]
 }
 
 func TestVimPaneAndWindowKeys(t *testing.T) {
@@ -189,21 +405,21 @@ func TestVimPaneAndWindowKeys(t *testing.T) {
 		t.Fatalf("ctrl+h focus = %v/composer=%v, want left/focused", m.focus, m.composer.Focused())
 	}
 
-	// Bare LF (KeyCtrlJ) is newline on left focus; enhanced ctrl+j (alt+j) cycles (#240).
+	// Bare LF (KeyCtrlJ) and enhanced ctrl+j (alt+j) both cycle from left (#324).
 	m.composer.SetValue("draft")
 	m.composer.SetCursor(len("draft"))
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
-	if got := m.composer.Value(); got != "draft\n" {
-		t.Fatalf("bare LF composer = %q, want draft\\n", got)
+	if got := m.composer.Value(); got != "draft" {
+		t.Fatalf("bare LF composer = %q, want draft (no newline)", got)
 	}
-	if m.windows.index != 0 {
-		t.Fatalf("bare LF cycled window to %d", m.windows.index)
+	if m.windows.index != 1 || m.windows.active().id() != "b" {
+		t.Fatalf("left bare LF window = %d/%s, want 1/b", m.windows.index, m.windows.active().id())
 	}
 	m = updateApp(t, m, keyMsgAltJ())
-	if m.windows.index != 1 || m.windows.active().id() != "b" {
-		t.Fatalf("left enhanced ctrl+j window = %d/%s, want 1/b", m.windows.index, m.windows.active().id())
+	if m.windows.index != 2 || m.windows.active().id() != "c" {
+		t.Fatalf("left enhanced ctrl+j window = %d/%s, want 2/c", m.windows.index, m.windows.active().id())
 	}
-	if got := m.composer.Value(); got != "draft\n" {
+	if got := m.composer.Value(); got != "draft" {
 		t.Fatalf("left enhanced ctrl+j changed composer to %q", got)
 	}
 
@@ -212,23 +428,24 @@ func TestVimPaneAndWindowKeys(t *testing.T) {
 	if m.focus != focusRight {
 		t.Fatalf("ctrl+l focus = %v, want right", m.focus)
 	}
-	m = updateApp(t, m, keyMsgAltJ())
-	if m.windows.index != 2 || m.windows.active().id() != "c" {
-		t.Errorf("right ctrl+j window = %d/%s, want 2/c", m.windows.index, m.windows.active().id())
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	if m.windows.index != 0 || m.windows.active().id() != "a" {
+		t.Errorf("right bare LF window = %d/%s, want 0/a", m.windows.index, m.windows.active().id())
 	}
 	m = updateApp(t, m, keyMsgAltJ())
-	if m.windows.active().id() != "a" {
-		t.Errorf("second right ctrl+j window = %s, want a", m.windows.active().id())
+	if m.windows.active().id() != "b" {
+		t.Errorf("second right ctrl+j window = %s, want b", m.windows.active().id())
 	}
 	// Empty composer: ctrl+k still cycles prev (kill only claims when it deletes).
-	// Active is a; prev → c, then b.
+	// Active is b; prev → a, then c.
+	m.composer.SetValue("")
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
-	if m.windows.active().id() != "c" {
-		t.Errorf("ctrl+k window = %s, want c", m.windows.active().id())
+	if m.windows.active().id() != "a" {
+		t.Errorf("ctrl+k window = %s, want a", m.windows.active().id())
 	}
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
-	if m.windows.active().id() != "b" {
-		t.Errorf("second ctrl+k window = %s, want b", m.windows.active().id())
+	if m.windows.active().id() != "c" {
+		t.Errorf("second ctrl+k window = %s, want c", m.windows.active().id())
 	}
 }
 

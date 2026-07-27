@@ -66,7 +66,7 @@ func (m *agentModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 			return m, nil
 		}
 		name := m.agents[m.cursor]
-		return m, saveDefaultsThroughCmd(m.settings, "", "", name, "", "agent "+name)
+		return m, saveDefaultsThroughCmd(m.settings, "", "", name, "", "", "agent "+name)
 	default:
 		return m, nil
 	}
