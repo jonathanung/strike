@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
@@ -874,7 +875,82 @@ func TestEscapeInterruptsRunningTurnExactlyOnceWithoutInputOwner(t *testing.T) {
 	if got := receiveAppOp(t, ops); got != (protocol.Interrupt{}) {
 		t.Errorf("operation = %#v, want protocol.Interrupt", got)
 	}
+	if !strings.Contains(m.notice, "interrupt") {
+		t.Errorf("notice = %q, want interrupting feedback", m.notice)
+	}
 	assertNoAppOp(t, ops)
+}
+
+func TestEscapeInterruptsImmediatelyAfterSubmitBeforeTurnStarted(t *testing.T) {
+	// Optimistic turnRunning on dispatch closes the gap where esc was a no-op.
+	m, ops := newAppTestModel(nil, nil)
+	m.providerName = "echo"
+	m.composer.SetValue("go")
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	runAppCmd(t, cmd)
+	if !m.turnRunning {
+		t.Fatal("turnRunning false after submit; esc would miss the turn")
+	}
+	if got := receiveAppOp(t, ops); got.(protocol.UserInput).Text != "go" {
+		t.Fatalf("submit op = %#v", got)
+	}
+
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(Model)
+	runAppCmd(t, cmd)
+	if got := receiveAppOp(t, ops); got != (protocol.Interrupt{}) {
+		t.Errorf("esc after submit = %#v, want Interrupt", got)
+	}
+	assertNoAppOp(t, ops)
+}
+
+func TestEscapeInterruptsDespiteArmedLeader(t *testing.T) {
+	m, ops := newAppTestModel(nil, nil)
+	m.turnRunning = true
+	m.leaderArmed = true
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(Model)
+	runAppCmd(t, cmd)
+
+	if m.leaderArmed {
+		t.Error("leader still armed after interrupt esc")
+	}
+	if got := receiveAppOp(t, ops); got != (protocol.Interrupt{}) {
+		t.Errorf("operation = %#v, want Interrupt (leader must not swallow esc)", got)
+	}
+	assertNoAppOp(t, ops)
+}
+
+func TestMatchesInterruptAcceptsKeyEscAndBinding(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	if !m.matchesInterrupt(tea.KeyMsg{Type: tea.KeyEsc}) {
+		t.Error("matchesInterrupt(KeyEsc) = false")
+	}
+	if m.matchesInterrupt(tea.KeyMsg{Type: tea.KeyEnter}) {
+		t.Error("matchesInterrupt(Enter) = true")
+	}
+	// Remap interrupt away from esc: bare esc must not match.
+	m.keyMap.Interrupt = key.NewBinding(key.WithKeys("ctrl+x"), key.WithHelp("ctrl+x", "interrupt"))
+	if m.matchesInterrupt(tea.KeyMsg{Type: tea.KeyEsc}) {
+		t.Error("matchesInterrupt(KeyEsc) = true after remap away from esc")
+	}
+	if !m.matchesInterrupt(tea.KeyMsg{Type: tea.KeyCtrlX}) {
+		t.Error("matchesInterrupt(ctrl+x) = false after remap")
+	}
+}
+
+func TestTurnCompletedInterruptedSetsNotice(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m.turnRunning = true
+	m = runEvent(t, m, protocol.TurnCompleted{StopReason: "interrupted"})
+	if m.turnRunning {
+		t.Fatal("turnRunning still true")
+	}
+	if !strings.Contains(m.notice, "interrupted") {
+		t.Errorf("notice = %q, want interrupted", m.notice)
+	}
 }
 
 func TestOptionalHistoryIsBackwardCompatibleWhenOmitted(t *testing.T) {
@@ -1033,39 +1109,52 @@ func TestSubmissionsPersistDisplayPromptAndStillEmitUserInput(t *testing.T) {
 }
 
 func TestRapidSubmissionsEnqueueHistoryInSubmissionOrderBeforeCommandCompletion(t *testing.T) {
+	// First enter dispatches immediately (optimistic turnRunning). A second enter
+	// while busy goes to the TUI input queue + history; both history writes are
+	// ordered by submission time even if completions arrive out of order.
 	store := newFakeHistory()
 	m, ops := newAppTestModelWithHistory(nil, nil, store)
 	m.providerName = "echo"
 
-	var batches []tea.BatchMsg
-	for _, prompt := range []string{"first prompt", "second prompt"} {
-		m.composer.SetValue(prompt)
-		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-		m = updated.(Model)
-		msg := runAppCmd(t, cmd)
-		batch, ok := msg.(tea.BatchMsg)
-		if !ok || len(batch) != 2 {
-			t.Fatalf("submission command = %T with %#v, want send and persistence batch", msg, msg)
-		}
-		batches = append(batches, batch)
+	m.composer.SetValue("first prompt")
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	firstMsg := runAppCmd(t, cmd)
+	firstBatch, ok := firstMsg.(tea.BatchMsg)
+	if !ok || len(firstBatch) != 2 {
+		t.Fatalf("first submission = %T %#v, want send+history batch", firstMsg, firstMsg)
+	}
+	if !m.turnRunning {
+		t.Fatal("first submit did not set optimistic turnRunning")
 	}
 
-	// Engine sends do not wait for either persistence completion.
-	for i, batch := range batches {
-		if msg := runAppCmd(t, batch[0]); msg != nil {
-			t.Errorf("engine send %d returned unexpected message %#v", i, msg)
-		}
+	m.composer.SetValue("second prompt")
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if len(m.inputQueue) != 1 || m.inputQueue[0].modelText != "second prompt" {
+		t.Fatalf("second submit queue = %#v, want one queued prompt", m.inputQueue)
 	}
-	for _, want := range []string{"first prompt", "second prompt"} {
-		assertUserInputText(t, receiveAppOp(t, ops), want)
+	secondPersist := cmd
+	if secondPersist == nil {
+		t.Fatal("second submit produced no history cmd")
 	}
 
-	// Await persistence in the opposite order from submission. Acceptance order
-	// must still determine durable and in-memory history order.
-	for i := len(batches) - 1; i >= 0; i-- {
-		msg := runAppCmd(t, batches[i][1])
+	if msg := runAppCmd(t, firstBatch[0]); msg != nil {
+		t.Errorf("engine send returned unexpected message %#v", msg)
+	}
+	assertUserInputText(t, receiveAppOp(t, ops), "first prompt")
+	assertNoAppOp(t, ops)
+
+	// Await persistence in reverse completion order; durable order stays submission order.
+	if msg := runAppCmd(t, secondPersist); msg != nil {
 		if added, ok := msg.(historyAddedMsg); !ok || added.err != nil {
-			t.Fatalf("persistence completion %d = %#v, want successful historyAddedMsg", i, msg)
+			// enqueue returns a single persist cmd (not a batch).
+			t.Fatalf("second persistence = %#v", msg)
+		}
+	}
+	if msg := runAppCmd(t, firstBatch[1]); msg != nil {
+		if added, ok := msg.(historyAddedMsg); !ok || added.err != nil {
+			t.Fatalf("first persistence = %#v", msg)
 		}
 	}
 	if got, want := store.Entries(), []string{"first prompt", "second prompt"}; !slices.Equal(got, want) {

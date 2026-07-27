@@ -19,7 +19,7 @@ Registry: `keybindSlashPrimary` / `keybindNoSlashReason` in
 |---|---|---|
 | `enter` | send prompt | — |
 | `shift+enter` | newline (`alt+enter` after enhanced CSI) | — |
-| `esc` | interrupt turn / reject permission / close modal | `/interrupt` |
+| `esc` | interrupt turn (cancels tools/LLM; shows “interrupted”) / reject permission / close modal | `/interrupt` |
 | `ctrl+c` | quit | `/exit`, `/quit` |
 | `ctrl+p` | command palette | `/palette` |
 | `f1` | keybind cheatsheet | `/keys` |
