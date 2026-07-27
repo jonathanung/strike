@@ -5,7 +5,7 @@
 | Issue | [jonathanung/strike#432](https://github.com/jonathanung/strike/issues/432) |
 | Title | investigate token inefficiencies compared to other harnesses such as claude code and open code |
 | Issue hypothesis | "unnecessary input of every single tool call" |
-| Status | **Investigation only** — no production code changes in this work |
+| Status | Investigation + mitigation shipped: tool-result prune (`internal/engine/prune.go`) |
 | Date | 2026-07-27 |
 
 ## Verdict (primary root cause)
@@ -279,6 +279,17 @@ Pointers for follow-up issues/PRs; this document does not schedule or implement 
 
 ---
 
+## Mitigation shipped
+
+**Tool-result prune / microcompact** (`internal/engine/prune.go`), wired before each provider stream in `internal/engine/turn.go` (default + harness loops):
+
+- OpenCode-shaped constants: `PRUNE_PROTECT=40_000`, `PRUNE_MINIMUM=20_000`
+- Walk backward; skip tool results inside the last 2 real user turns; protect ~40k tokens of newer eligible tool output; blank older bodies to `[Old tool result content cleared]` when savings exceed 20k tokens
+- Preserves tool_use/tool_result pairing; protects `skill` tool output; skips already-cleared results
+- In-memory model-facing history only (JSONL restore still has full outputs; prune re-applies on subsequent streams)
+
+**Deferred follow-ups:** Anthropic `cache_control` breakpoints; deferred tool schemas / toolsearch rewrite; compaction threshold tuning.
+
 ## Conclusion
 
-Token inefficiency vs Claude Code / OpenCode is dominated by **full retransmission of historical tool results on every model stream**, with **late-only compaction** and **no engineered prompt-cache breakpoints**. The issue’s intuition (“unnecessary input of every single tool call”) matches that mechanism. Fixes should prioritize continuous tool-result hygiene and cache-stable request prefixes; schema deferral and subagent history are secondary or already fine.
+Token inefficiency vs Claude Code / OpenCode is dominated by **full retransmission of historical tool results on every model stream**, with **late-only compaction** and **no engineered prompt-cache breakpoints**. The issue’s intuition (“unnecessary input of every single tool call”) matches that mechanism. **Tool-result prune** addresses the primary cause; cache-stable request prefixes and schema deferral remain secondary follow-ups.
