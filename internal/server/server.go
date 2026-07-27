@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/session"
 	"github.com/jonathanung/strike-cli/internal/version"
 )
@@ -29,7 +30,9 @@ import (
 type Options struct {
 	// Addr is the bind address (host:port). Default "127.0.0.1:8787".
 	Addr string
-	// Token is required on all routes except /health. Empty rejects New.
+	// Auth enables bearer authentication for API routes.
+	Auth bool
+	// Token is required when Auth is true.
 	Token string
 	// SessionDir is the JSONL sessions directory. Default session.DefaultDir().
 	SessionDir string
@@ -47,6 +50,8 @@ type Options struct {
 	// AllowCIDRs, when non-empty, rejects requests whose client IP falls
 	// outside the list (all routes including /health).
 	AllowCIDRs []*net.IPNet
+	// Services exposes optional frontend host capabilities.
+	Services *host.Services
 }
 
 // Server is an HTTP server for session attach and optional live cockpit.
@@ -60,8 +65,11 @@ type Server struct {
 // New validates options and builds a Server. Does not listen.
 func New(opts Options) (*Server, error) {
 	opts.Token = strings.TrimSpace(opts.Token)
-	if opts.Token == "" {
-		return nil, errors.New("server: token is required")
+	if opts.Auth && opts.Token == "" {
+		return nil, errors.New("server: token is required when auth is enabled")
+	}
+	if !opts.Auth && opts.Token != "" {
+		return nil, errors.New("server: token requires auth")
 	}
 	if strings.TrimSpace(opts.Addr) == "" {
 		opts.Addr = "127.0.0.1:8787"
@@ -82,6 +90,8 @@ func New(opts Options) (*Server, error) {
 		Addr:              opts.Addr,
 		Handler:           s.withMiddleware(s.mux),
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 	return s, nil
 }
@@ -140,6 +150,21 @@ func IsLocalhostBind(addr string) bool {
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /health", s.handleHealth)
+	s.mux.HandleFunc("GET /v1/bootstrap", s.handleBootstrap)
+	s.mux.HandleFunc("GET /v1/providers", s.handleProviders)
+	s.mux.HandleFunc("POST /v1/auth/key", s.handleAuthKey)
+	s.mux.HandleFunc("DELETE /v1/auth/{provider}", s.handleAuthLogout)
+	s.mux.HandleFunc("GET /v1/models", s.handleModels)
+	s.mux.HandleFunc("GET /v1/history", s.handleHistory)
+	s.mux.HandleFunc("PATCH /v1/settings", s.handleSettings)
+	s.mux.HandleFunc("GET /v1/sessions/{id}/children", s.handleSessionChildren)
+	s.mux.HandleFunc("POST /v1/sessions/{id}/fork", s.handleSessionFork)
+	s.mux.HandleFunc("PATCH /v1/sessions/{id}", s.handleSessionRename)
+	s.mux.HandleFunc("DELETE /v1/sessions/{id}", s.handleSessionDelete)
+	s.mux.HandleFunc("GET /v1/files", s.handleFiles)
+	s.mux.HandleFunc("GET /v1/file", s.handleFile)
+	s.mux.HandleFunc("GET /v1/memory", s.handleMemory)
+	s.mux.HandleFunc("GET /v1/issues", s.handleIssues)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/events", s.handleSessionEvents)
 	s.mux.HandleFunc("GET /v1/sessions", s.handleSessions)
 	s.mux.HandleFunc("GET /v1/status", s.handleStatus)
@@ -149,10 +174,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/ws", s.handleWS)
 	s.mux.HandleFunc("GET /{$}", s.handleAttach)
 	s.mux.HandleFunc("GET /attach", s.handleAttach)
+	s.mux.HandleFunc("GET /assets/{path...}", s.handleAsset)
 }
 
 func (s *Server) withMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.applySecurityHeaders(w)
 		if len(s.opts.AllowCIDRs) > 0 {
 			ip := ClientIP(r.RemoteAddr)
 			if !IPAllowed(ip, s.opts.AllowCIDRs) {
@@ -166,12 +193,20 @@ func (s *Server) withMiddleware(next http.Handler) http.Handler {
 			return
 		}
 		// Public: health + attach shell. Session event streams require a token.
-		if requiresToken(r.URL.Path) && !s.authorized(r) {
+		if s.opts.Auth && requiresToken(r.URL.Path) && !s.authorized(r) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) applySecurityHeaders(w http.ResponseWriter) {
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Frame-Options", "DENY")
+	w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 }
 
 func requiresToken(path string) bool {
@@ -195,7 +230,7 @@ func (s *Server) applyCORS(w http.ResponseWriter, r *http.Request) {
 	if originAllowed(origin, s.opts.Expose) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Vary", "Origin")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 	}
 }
@@ -265,6 +300,25 @@ func (s *Server) handleAttach(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(data)
+}
+
+func (s *Server) handleAsset(w http.ResponseWriter, r *http.Request) {
+	path := "assets/" + strings.TrimPrefix(r.PathValue("path"), "/")
+	data, err := fs.ReadFile(s.static, path)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	switch filepath.Ext(path) {
+	case ".js":
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	case ".css":
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	case ".svg":
+		w.Header().Set("Content-Type", "image/svg+xml")
+	}
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	_, _ = w.Write(data)
 }
 
@@ -341,11 +395,24 @@ func (s *Server) writeEventsFrom(ctx context.Context, w http.ResponseWriter, flu
 		// Truncated/rewound log — restart from beginning.
 		offset = 0
 	}
+	return s.writeEventsRangeFile(ctx, w, flusher, f, offset, st.Size())
+}
+
+func (s *Server) writeEventsRange(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, path string, offset, boundary int64) (int64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return offset, err
+	}
+	defer f.Close()
+	return s.writeEventsRangeFile(ctx, w, flusher, f, offset, boundary)
+}
+
+func (s *Server) writeEventsRangeFile(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, f *os.File, offset, boundary int64) (int64, error) {
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
 		return offset, err
 	}
 
-	reader := bufio.NewReaderSize(f, 64*1024)
+	reader := bufio.NewReaderSize(io.LimitReader(f, boundary-offset), 64*1024)
 	for {
 		if err := ctx.Err(); err != nil {
 			return offset, err

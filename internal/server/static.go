@@ -5,7 +5,7 @@ import (
 	"io/fs"
 )
 
-//go:embed static/*
+//go:embed static
 var embeddedStatic embed.FS
 
 // staticFS is the default attach-page filesystem rooted at static/.

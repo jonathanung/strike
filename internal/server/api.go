@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"sort"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/session"
+	"github.com/jonathanung/strike-cli/internal/version"
 )
 
 type sessionsResponse struct {
@@ -34,6 +37,168 @@ type opErrorResponse struct {
 
 type opOKResponse struct {
 	OK bool `json:"ok"`
+}
+
+const maxHTTPPayload = 8 << 20
+
+type capabilities struct {
+	Live        bool `json:"live"`
+	Auth        bool `json:"auth"`
+	Catalog     bool `json:"catalog"`
+	Settings    bool `json:"settings"`
+	History     bool `json:"history"`
+	Files       bool `json:"files"`
+	Memory      bool `json:"memory"`
+	Issues      bool `json:"issues"`
+	Sessions    bool `json:"sessions"`
+	Roots       bool `json:"roots"`
+	Providers   bool `json:"providers"`
+	ProjectInit bool `json:"projectInit"`
+	MCP         bool `json:"mcp"`
+	Telemetry   bool `json:"telemetry"`
+}
+
+type bootstrapResponse struct {
+	Version      string           `json:"version"`
+	AuthRequired bool             `json:"authRequired"`
+	AttachOnly   bool             `json:"attachOnly"`
+	Capabilities capabilities     `json:"capabilities"`
+	Status       *StatusSnapshot  `json:"status,omitempty"`
+	Agents       []AgentInfo      `json:"agents"`
+	Skills       []map[string]any `json:"skills"`
+	ProtocolOps  []string         `json:"protocolOps"`
+}
+
+var browserProtocolOps = []string{
+	"compact", "inspect.prompt", "interrupt", "permission.reply", "question.reply",
+	"rewind", "select.agent", "select.model", "set.autonomy", "set.effort",
+	"set.fast", "set.permission_mode", "user.input",
+}
+
+func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
+	c := capabilities{Live: s.opts.Live != nil}
+	var skills []map[string]any
+	if h := s.opts.Services; h != nil {
+		c.Auth, c.Catalog, c.Settings, c.History = h.Auth != nil, h.Catalog != nil, h.Settings != nil, h.History != nil
+		c.Files, c.Memory, c.Issues, c.Sessions = h.Files != nil, h.Memory != nil, h.Issues != nil, h.Sessions != nil
+		// Capabilities describe browser workflows, not merely host interfaces.
+		// Roots, custom providers, project init, MCP, and telemetry remain false
+		// until this server exposes their service operations.
+		for _, skill := range h.Skills {
+			skills = append(skills, map[string]any{"name": skill.Name, "description": skill.Description})
+		}
+	}
+	var status *StatusSnapshot
+	var agents []AgentInfo
+	if s.opts.Live != nil {
+		v := s.opts.Live.Status()
+		status, agents = &v, s.opts.Live.Agents()
+	}
+	var protocolOps []string
+	if s.opts.Live != nil {
+		protocolOps = browserProtocolOps
+	}
+	writeJSON(w, http.StatusOK, bootstrapResponse{Version: version.Version, AuthRequired: s.opts.Auth, AttachOnly: s.opts.Live == nil, Capabilities: c, Status: status, Agents: agents, Skills: skills, ProtocolOps: protocolOps})
+}
+
+func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Services == nil || s.opts.Services.Auth == nil {
+		capabilityUnavailable(w, "auth")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"providers": s.opts.Services.Auth.Statuses()})
+}
+
+func (s *Server) handleAuthKey(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Services == nil || s.opts.Services.Auth == nil {
+		capabilityUnavailable(w, "auth")
+		return
+	}
+	var body struct {
+		Provider string `json:"provider"`
+		Key      string `json:"key"`
+	}
+	if err := decodeBody(w, r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	if strings.TrimSpace(body.Provider) == "" || strings.TrimSpace(body.Key) == "" {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "provider and key are required"})
+		return
+	}
+	if err := s.opts.Services.Auth.SetAPIKey(body.Provider, body.Key); err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, opOKResponse{OK: true})
+}
+
+func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Services == nil || s.opts.Services.Auth == nil {
+		capabilityUnavailable(w, "auth")
+		return
+	}
+	provider := strings.TrimSpace(r.PathValue("provider"))
+	if provider == "" {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "provider is required"})
+		return
+	}
+	if err := s.opts.Services.Auth.Logout(provider); err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Services == nil || s.opts.Services.Catalog == nil {
+		capabilityUnavailable(w, "catalog")
+		return
+	}
+	provider := strings.TrimSpace(r.URL.Query().Get("provider"))
+	if provider == "" {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "provider is required"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	models, err := s.opts.Services.Catalog.Models(ctx, provider)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, opErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"models": models})
+}
+
+func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Services == nil || s.opts.Services.History == nil {
+		capabilityUnavailable(w, "history")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"entries": s.opts.Services.History.Entries()})
+}
+
+func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Services == nil || s.opts.Services.Settings == nil {
+		capabilityUnavailable(w, "settings")
+		return
+	}
+	var body struct {
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+		Agent    string `json:"agent"`
+		Effort   string `json:"effort"`
+		Mode     string `json:"mode"`
+	}
+	if err := decodeBody(w, r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	if err := s.opts.Services.Settings.SaveDefaults(body.Provider, body.Model, body.Agent, body.Effort, body.Mode); err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, opOKResponse{OK: true})
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -94,16 +259,146 @@ func listSessionFiles(dir string) ([]sessionListItem, error) {
 	return out, nil
 }
 
+func (s *Server) handleSessionChildren(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Services == nil || s.opts.Services.Sessions == nil {
+		capabilityUnavailable(w, "sessions")
+		return
+	}
+	items, err := s.opts.Services.Sessions.Children(r.PathValue("id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sessions": items})
+}
+
+func (s *Server) handleSessionFork(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Services == nil || s.opts.Services.Sessions == nil {
+		capabilityUnavailable(w, "sessions")
+		return
+	}
+	item, err := s.opts.Services.Sessions.Fork(r.PathValue("id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusCreated, item)
+}
+
+func (s *Server) handleSessionRename(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Services == nil || s.opts.Services.Sessions == nil {
+		capabilityUnavailable(w, "sessions")
+		return
+	}
+	var body struct {
+		Title string `json:"title"`
+	}
+	if err := decodeBody(w, r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	item, err := s.opts.Services.Sessions.Rename(r.PathValue("id"), body.Title)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (s *Server) handleSessionDelete(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Services == nil || s.opts.Services.Sessions == nil {
+		capabilityUnavailable(w, "sessions")
+		return
+	}
+	force := r.URL.Query().Get("force") == "true"
+	if err := s.opts.Services.Sessions.Delete(r.PathValue("id"), force); err != nil {
+		writeJSON(w, http.StatusConflict, opErrorResponse{Error: err.Error()})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Services == nil || s.opts.Services.Files == nil {
+		capabilityUnavailable(w, "files")
+		return
+	}
+	items, err := s.opts.Services.Files.ListDir(r.URL.Query().Get("path"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"entries": items})
+}
+
+func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Services == nil || s.opts.Services.Files == nil {
+		capabilityUnavailable(w, "files")
+		return
+	}
+	item, err := s.opts.Services.Files.ReadScoped(r.URL.Query().Get("path"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Services == nil || s.opts.Services.Memory == nil {
+		capabilityUnavailable(w, "memory")
+		return
+	}
+	items, err := s.opts.Services.Memory.List(r.URL.Query().Get("tag"))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, opErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"entries": items})
+}
+
+func (s *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Services == nil || s.opts.Services.Issues == nil {
+		capabilityUnavailable(w, "issues")
+		return
+	}
+	items, err := s.opts.Services.Issues.List(r.URL.Query().Get("status"))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, opErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"issues": items})
+}
+
+func capabilityUnavailable(w http.ResponseWriter, name string) {
+	writeJSON(w, http.StatusNotImplemented, opErrorResponse{Error: name + " capability unavailable on this host"})
+}
+
+func decodeBody(w http.ResponseWriter, r *http.Request, dst any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxHTTPPayload)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		return err
+	}
+	return ensureEOF(dec)
+}
+
 func (s *Server) handleOps(w http.ResponseWriter, r *http.Request) {
 	if s.opts.Live == nil {
 		http.Error(w, "live session unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	var env protocol.OpEnvelope
+	r.Body = http.MaxBytesReader(w, r.Body, maxHTTPPayload)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&env); err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "invalid op envelope: " + err.Error()})
+		return
+	}
+	if err := ensureEOF(dec); err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
 	op, err := env.Decode()
@@ -118,6 +413,17 @@ func (s *Server) handleOps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, opOKResponse{OK: true})
+}
+
+func ensureEOF(dec *json.Decoder) error {
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("request body must contain one JSON value")
+		}
+		return fmt.Errorf("invalid trailing data: %w", err)
+	}
+	return nil
 }
 
 func (s *Server) handleLiveEvents(w http.ResponseWriter, r *http.Request) {
@@ -138,43 +444,29 @@ func (s *Server) handleLiveEvents(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	ctx := r.Context()
-	// Subscribe before backlog so concurrent publishes are not dropped.
-	ch := s.opts.Live.Subscribe(ctx)
-	// Replay durable backlog for the live session id when the log exists.
 	id := s.opts.Live.SessionID()
 	path := session.LogPath(s.opts.SessionDir, id)
-	if _, err := os.Stat(path); err == nil {
-		if _, err := s.writeEventsFrom(ctx, w, flusher, path, 0); err != nil {
+	var offset int64
+	if st, err := os.Stat(path); err == nil {
+		boundary := st.Size()
+		var err error
+		offset, err = s.writeEventsRange(ctx, w, flusher, path, 0, boundary)
+		if err != nil {
 			return
 		}
 	}
 
+	ticker := time.NewTicker(s.opts.PollInterval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case ev, ok := <-ch:
-			if !ok {
-				return
+		case <-ticker.C:
+			n, err := s.writeEventsFrom(ctx, w, flusher, path, offset)
+			if err == nil && n > offset {
+				offset = n
 			}
-			env, err := protocol.Wrap(ev)
-			if err != nil {
-				continue
-			}
-			payload, err := json.Marshal(env)
-			if err != nil {
-				continue
-			}
-			if _, err := w.Write([]byte("data: ")); err != nil {
-				return
-			}
-			if _, err := w.Write(payload); err != nil {
-				return
-			}
-			if _, err := w.Write([]byte("\n\n")); err != nil {
-				return
-			}
-			flusher.Flush()
 		}
 	}
 }
@@ -182,6 +474,10 @@ func (s *Server) handleLiveEvents(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	if s.opts.Live == nil {
 		http.Error(w, "live session unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if origin := r.Header.Get("Origin"); origin != "" && !originAllowed(origin, s.opts.Expose) {
+		http.Error(w, "websocket origin not allowed", http.StatusForbidden)
 		return
 	}
 	ws, err := upgradeWebSocket(w, r)
@@ -192,11 +488,6 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	defer ws.Close()
 
 	ctx := r.Context()
-	// Subscribe before backlog/status so live publishes during replay are not lost.
-	subCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	ch := s.opts.Live.Subscribe(subCtx)
-
 	// Hello: push current status as a synthetic control message.
 	statusEnv := map[string]any{
 		"type": "status",
@@ -206,11 +497,17 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		_ = ws.WriteText(string(b))
 	}
 
-	// Replay backlog then stream live.
+	// Replay to a fixed byte boundary, then tail strictly after that boundary.
 	id := s.opts.Live.SessionID()
 	path := session.LogPath(s.opts.SessionDir, id)
-	if _, err := os.Stat(path); err == nil {
-		_ = s.writeWSBacklog(ctx, ws, path)
+	var offset int64
+	if st, err := os.Stat(path); err == nil {
+		boundary := st.Size()
+		var err error
+		offset, err = s.writeWSRange(ctx, ws, path, 0, boundary)
+		if err != nil {
+			return
+		}
 	}
 
 	errCh := make(chan error, 1)
@@ -248,55 +545,59 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	ticker := time.NewTicker(s.opts.PollInterval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-errCh:
 			return
-		case ev, ok := <-ch:
-			if !ok {
-				return
-			}
-			env, err := protocol.Wrap(ev)
-			if err != nil {
+		case <-ticker.C:
+			st, err := os.Stat(path)
+			if err != nil || st.Size() <= offset {
 				continue
 			}
-			payload, err := json.Marshal(env)
+			boundary := st.Size()
+			n, err := s.writeWSRange(ctx, ws, path, offset, boundary)
 			if err != nil {
-				continue
-			}
-			if err := ws.WriteText(string(payload)); err != nil {
 				return
 			}
+			offset = n
 		}
 	}
 }
 
-func (s *Server) writeWSBacklog(ctx context.Context, ws *wsConn, path string) error {
+func (s *Server) writeWSRange(ctx context.Context, ws *wsConn, path string, offset, boundary int64) (int64, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return err
+		return offset, err
 	}
 	defer f.Close()
-	// Reuse line reader via writeEventsFrom pattern — simple scan.
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return offset, err
 	}
-	_ = f
-	lines := strings.Split(string(data), "\n")
-	for _, line := range lines {
-		if err := ctx.Err(); err != nil {
-			return err
+	data, err := io.ReadAll(io.LimitReader(f, boundary-offset))
+	if err != nil {
+		return offset, err
+	}
+	for {
+		i := strings.IndexByte(string(data), '\n')
+		if i < 0 {
+			break
 		}
-		line = strings.TrimSpace(line)
+		line := strings.TrimSpace(string(data[:i]))
+		offset += int64(i + 1)
+		data = data[i+1:]
+		if err := ctx.Err(); err != nil {
+			return offset, err
+		}
 		if line == "" || !json.Valid([]byte(line)) {
 			continue
 		}
 		if err := ws.WriteText(line); err != nil {
-			return err
+			return offset, err
 		}
 	}
-	return nil
+	return offset, nil
 }

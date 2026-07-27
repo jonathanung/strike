@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -30,7 +31,7 @@ func TestLiveOpsPOSTAndStatus(t *testing.T) {
 	live.Publish(protocol.AutonomySelected{Mode: protocol.AutonomySupervised})
 
 	dir := t.TempDir()
-	srv, err := New(Options{Token: "secret", SessionDir: dir, Live: live})
+	srv, err := New(Options{Auth: true, Token: "secret", SessionDir: dir, Live: live})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +118,7 @@ func TestLiveAgentsAndSessions(t *testing.T) {
 	defer live.Close()
 	dir := t.TempDir()
 	writeFixtureSession(t, dir, "other", protocol.UserMessage{Text: "x"})
-	srv := mustServer(t, Options{Token: "t", SessionDir: dir, Live: live})
+	srv := mustServer(t, Options{Auth: true, Token: "t", SessionDir: dir, Live: live})
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
@@ -161,6 +162,41 @@ func TestLiveAgentsAndSessions(t *testing.T) {
 	}
 }
 
+func TestLivePublishDisconnectsLaggardWithoutBlockingOthers(t *testing.T) {
+	live := NewLive("live", "/cwd", nil, make(chan protocol.Op))
+	defer live.Close()
+	lagCtx, lagCancel := context.WithCancel(context.Background())
+	defer lagCancel()
+	laggard := live.Subscribe(lagCtx)
+	for range 256 {
+		live.Publish(protocol.TextDelta{Text: "fill"})
+	}
+	healthyCtx, healthyCancel := context.WithCancel(context.Background())
+	defer healthyCancel()
+	healthy := live.Subscribe(healthyCtx)
+
+	done := make(chan struct{})
+	go func() {
+		live.Publish(protocol.TextDelta{Text: "next"})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Publish blocked on lagging subscriber")
+	}
+	select {
+	case ev := <-healthy:
+		if ev.(protocol.TextDelta).Text != "next" {
+			t.Fatalf("healthy event = %#v", ev)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("healthy subscriber did not receive event")
+	}
+	for range laggard {
+	}
+}
+
 func TestLiveEventsSSE(t *testing.T) {
 	ops := make(chan protocol.Op, 1)
 	live := NewLive("live1", "/cwd", nil, ops)
@@ -174,9 +210,9 @@ func TestLiveEventsSSE(t *testing.T) {
 	if err := store.Append(protocol.UserMessage{Text: "backlog"}); err != nil {
 		t.Fatal(err)
 	}
-	_ = store.Close()
+	defer store.Close()
 
-	srv := mustServer(t, Options{Token: "t", SessionDir: dir, Live: live, PollInterval: 20 * time.Millisecond})
+	srv := mustServer(t, Options{Auth: true, Token: "t", SessionDir: dir, Live: live, PollInterval: 20 * time.Millisecond})
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
@@ -200,6 +236,9 @@ func TestLiveEventsSSE(t *testing.T) {
 		t.Fatalf("backlog = %v", got[0])
 	}
 
+	if err := store.Append(protocol.TextDelta{Text: "hi"}); err != nil {
+		t.Fatal(err)
+	}
 	live.Publish(protocol.TextDelta{Text: "hi"})
 	got2 := readSSEData(t, res.Body, 1, 2*time.Second)
 	if got2[0]["type"] != "text.delta" {
@@ -208,13 +247,56 @@ func TestLiveEventsSSE(t *testing.T) {
 	cancel()
 }
 
+func TestLiveReplayBoundaryDeliversEachEventOnce(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Open(dir, "boundary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.Append(protocol.UserMessage{Text: "before"}); err != nil {
+		t.Fatal(err)
+	}
+	path := session.LogPath(dir, "boundary")
+	st, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	boundary := st.Size()
+	if err := store.Append(protocol.UserMessage{Text: "after"}); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := mustServer(t, Options{SessionDir: dir})
+	res := httptest.NewRecorder()
+	offset, err := srv.writeEventsRange(context.Background(), res, res, path, 0, boundary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if offset != boundary {
+		t.Fatalf("replay offset = %d, want boundary %d", offset, boundary)
+	}
+	if _, err := srv.writeEventsFrom(context.Background(), res, res, path, offset); err != nil {
+		t.Fatal(err)
+	}
+	body := res.Body.String()
+	if strings.Count(body, `"text":"before"`) != 1 || strings.Count(body, `"text":"after"`) != 1 {
+		t.Fatalf("boundary replay duplicated or lost events: %s", body)
+	}
+}
+
 func TestWebSocketOpsAndEvents(t *testing.T) {
 	ops := make(chan protocol.Op, 4)
 	live := NewLive("ws1", "/cwd", []AgentInfo{{Name: "build"}}, ops)
 	defer live.Close()
 
 	dir := t.TempDir()
-	srv := mustServer(t, Options{Token: "secret", SessionDir: dir, Live: live})
+	store, err := session.Open(dir, "ws1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	srv := mustServer(t, Options{Auth: true, Token: "secret", SessionDir: dir, Live: live})
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
@@ -273,6 +355,9 @@ func TestWebSocketOpsAndEvents(t *testing.T) {
 	}
 
 	// Event fan-out: publish after client is connected; read until text.delta.
+	if err := store.Append(protocol.TextDelta{Text: "stream"}); err != nil {
+		t.Fatal(err)
+	}
 	live.Publish(protocol.TextDelta{Text: "stream"})
 	deadline = time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -307,13 +392,13 @@ func TestOpsUnavailableWithoutLive(t *testing.T) {
 	}
 }
 
-func TestAttachPageHasComposer(t *testing.T) {
+func TestAttachPageLoadsViteAssets(t *testing.T) {
 	srv := testServer(t, t.TempDir(), "secret")
 	res := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	srv.Handler().ServeHTTP(res, req)
 	body := res.Body.String()
-	for _, want := range []string{"composer", "WebSocket", "permission", "btn-send"} {
+	for _, want := range []string{"id=\"root\"", "type=\"module\"", "/assets/"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("page missing %q", want)
 		}

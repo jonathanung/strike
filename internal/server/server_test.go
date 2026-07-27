@@ -18,9 +18,15 @@ import (
 	"github.com/jonathanung/strike-cli/internal/version"
 )
 
-func TestNewRequiresToken(t *testing.T) {
-	if _, err := New(Options{}); err == nil {
-		t.Fatal("New() with empty token: want error")
+func TestNewAuthValidation(t *testing.T) {
+	if _, err := New(Options{}); err != nil {
+		t.Fatalf("New() without auth: %v", err)
+	}
+	if _, err := New(Options{Auth: true}); err == nil {
+		t.Fatal("New() with auth and empty token: want error")
+	}
+	if _, err := New(Options{Token: "secret"}); err == nil {
+		t.Fatal("New() with token and no auth: want error")
 	}
 }
 
@@ -125,6 +131,7 @@ func TestEventsSSETailsNewAppends(t *testing.T) {
 	}
 
 	srv, err := New(Options{
+		Auth:         true,
 		Token:        "secret",
 		SessionDir:   dir,
 		PollInterval: 20 * time.Millisecond,
@@ -200,8 +207,46 @@ func TestAttachPage(t *testing.T) {
 		t.Fatalf("status = %d", res.Code)
 	}
 	body := res.Body.String()
-	if !strings.Contains(body, "strike") || !strings.Contains(body, "EventSource") {
+	if !strings.Contains(body, "Strike Workspace") || !strings.Contains(body, "/assets/") {
 		t.Fatalf("attach page missing expected content")
+	}
+}
+
+func TestEmbeddedAssetAndSecurityHeaders(t *testing.T) {
+	srv := testServer(t, t.TempDir(), "")
+	index := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(index, httptest.NewRequest(http.MethodGet, "/", nil))
+	if got := index.Header().Get("Content-Security-Policy"); !strings.Contains(got, "default-src 'self'") {
+		t.Fatalf("Content-Security-Policy = %q", got)
+	}
+	body := index.Body.String()
+	start := strings.Index(body, "/assets/")
+	if start < 0 {
+		t.Fatalf("asset path missing from %q", body)
+	}
+	end := strings.Index(body[start:], "\"")
+	if end < 0 {
+		t.Fatalf("asset path unterminated in %q", body)
+	}
+	assetPath := body[start : start+end]
+	asset := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(asset, httptest.NewRequest(http.MethodGet, assetPath, nil))
+	if asset.Code != http.StatusOK || asset.Body.Len() == 0 {
+		t.Fatalf("GET %s = %d, %d bytes", assetPath, asset.Code, asset.Body.Len())
+	}
+	if got := asset.Header().Get("Cache-Control"); !strings.Contains(got, "immutable") {
+		t.Fatalf("Cache-Control = %q", got)
+	}
+}
+
+func TestUnauthenticatedLoopbackAPIRoutes(t *testing.T) {
+	srv := testServer(t, t.TempDir(), "")
+	for _, path := range []string{"/v1/bootstrap", "/v1/sessions"} {
+		res := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodGet, path, nil))
+		if res.Code != http.StatusOK {
+			t.Errorf("GET %s = %d, want 200", path, res.Code)
+		}
 	}
 }
 
@@ -236,8 +281,25 @@ func TestCORSLocalhostOnly(t *testing.T) {
 	}
 }
 
+func TestCORSPreflightAllowsMutationMethods(t *testing.T) {
+	srv := testServer(t, t.TempDir(), "secret")
+	for _, method := range []string{http.MethodPatch, http.MethodDelete} {
+		res := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodOptions, "/v1/settings", nil)
+		req.Header.Set("Origin", "http://localhost:5173")
+		req.Header.Set("Access-Control-Request-Method", method)
+		srv.Handler().ServeHTTP(res, req)
+		if res.Code != http.StatusNoContent {
+			t.Errorf("%s preflight status = %d", method, res.Code)
+		}
+		if methods := res.Header().Get("Access-Control-Allow-Methods"); !strings.Contains(methods, method) {
+			t.Errorf("%s preflight methods = %q", method, methods)
+		}
+	}
+}
+
 func TestCORSExposePrivateOrigins(t *testing.T) {
-	srv, err := New(Options{Token: "secret", SessionDir: t.TempDir(), Expose: true})
+	srv, err := New(Options{Auth: true, Token: "secret", SessionDir: t.TempDir(), Expose: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,12 +328,29 @@ func TestCORSExposePrivateOrigins(t *testing.T) {
 	}
 }
 
+func TestWebSocketRejectsUntrustedOriginBeforeUpgrade(t *testing.T) {
+	ops := make(chan protocol.Op, 1)
+	live := NewLive("live", t.TempDir(), nil, ops)
+	srv, err := New(Options{SessionDir: t.TempDir(), Live: live})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/ws", nil)
+	req.Header.Set("Origin", "https://evil.example")
+	srv.Handler().ServeHTTP(res, req)
+	if res.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", res.Code)
+	}
+}
+
 func TestAllowCIDRMiddleware(t *testing.T) {
 	nets, err := ParseCIDRs([]string{"127.0.0.0/8"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	srv, err := New(Options{
+		Auth:       true,
 		Token:      "secret",
 		SessionDir: t.TempDir(),
 		AllowCIDRs: nets,
@@ -329,6 +408,7 @@ func TestMintToken(t *testing.T) {
 func testServer(t *testing.T, sessionDir, token string) *Server {
 	t.Helper()
 	srv, err := New(Options{
+		Auth:         token != "",
 		Token:        token,
 		SessionDir:   sessionDir,
 		PollInterval: 20 * time.Millisecond,

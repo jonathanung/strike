@@ -14,7 +14,7 @@ import (
 )
 
 func TestParseServeArgs(t *testing.T) {
-	opts, err := parseServeArgs([]string{"--addr", "127.0.0.1:0", "--token", "abc"})
+	opts, err := parseServeArgs([]string{"--addr", "127.0.0.1:0", "--auth", "--token", "abc"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,8 +35,12 @@ func TestParseServeArgs(t *testing.T) {
 	if opts.sessionDir != "/tmp/sessions" || opts.provider != "anthropic" || !opts.attachOnly {
 		t.Fatalf("opts = %+v", opts)
 	}
+	_, err = parseServeArgs([]string{"--session-dir", session.DefaultDir()})
+	if err == nil || !strings.Contains(err.Error(), "--attach-only") {
+		t.Fatalf("explicit live --session-dir err = %v", err)
+	}
 
-	opts, err = parseServeArgs([]string{"--expose", "--allow-cidr", "192.168.0.0/16", "--allow-cidr", "10.0.0.0/8"})
+	opts, err = parseServeArgs([]string{"--auth", "--expose", "--allow-cidr", "192.168.0.0/16", "--allow-cidr", "10.0.0.0/8"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +48,7 @@ func TestParseServeArgs(t *testing.T) {
 		t.Fatalf("expose/cidr opts = %+v", opts)
 	}
 
-	opts, err = parseServeArgs([]string{"--expose", "--allow-cidr", "10.0.0.0/8,172.16.0.0/12"})
+	opts, err = parseServeArgs([]string{"--auth", "--expose", "--allow-cidr", "10.0.0.0/8,172.16.0.0/12"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,14 +92,13 @@ func TestRunCLIServeHelp(t *testing.T) {
 	}
 }
 
-func TestRunCLIServeMissingTokenStillStartsWithMint(t *testing.T) {
-	// parse only — mint happens in runServe; ensure empty token is allowed at parse.
+func TestRunCLIServeDefaultsToLocalNoAuth(t *testing.T) {
 	opts, err := parseServeArgs(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if opts.token != "" {
-		t.Fatalf("token = %q, want empty (mint later)", opts.token)
+		t.Fatalf("token = %q, want empty", opts.token)
 	}
 	if opts.addr != "127.0.0.1:8787" {
 		t.Fatalf("addr = %q", opts.addr)
@@ -103,7 +106,7 @@ func TestRunCLIServeMissingTokenStillStartsWithMint(t *testing.T) {
 }
 
 func TestServeResolveExposeGuard(t *testing.T) {
-	opts, err := parseServeArgs([]string{"--addr", "0.0.0.0:8787", "--token", "t", "--attach-only"})
+	opts, err := parseServeArgs([]string{"--addr", "0.0.0.0:8787", "--auth", "--token", "t", "--attach-only"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +115,7 @@ func TestServeResolveExposeGuard(t *testing.T) {
 		t.Fatal("want resolve error without --expose")
 	}
 
-	opts, err = parseServeArgs([]string{"--expose", "--token", "t", "--attach-only"})
+	opts, err = parseServeArgs([]string{"--auth", "--expose", "--token", "t", "--attach-only"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,6 +144,7 @@ func TestPrintServeBannerExpose(t *testing.T) {
 		listenAddr: "0.0.0.0:8787",
 		port:       "8787",
 		token:      "tok123",
+		auth:       true,
 		minted:     true,
 		exposed:    true,
 		sessionDir: "/tmp/s",
@@ -170,6 +174,7 @@ func TestRunServeRejectsNonLocalWithoutExpose(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	err := runServe(serveOptions{
 		addr:       "0.0.0.0:0",
+		auth:       true,
 		token:      "test-token",
 		attachOnly: true,
 		sessionDir: t.TempDir(),

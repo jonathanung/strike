@@ -15,24 +15,27 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/server"
 	"github.com/jonathanung/strike-cli/internal/session"
 )
 
-const serveUsage = `Experimental web cockpit server (composer + live ops + RO attach).
+const serveUsage = `Web agent workspace (live engine + durable session attach).
 
 Usage:
   strike serve [options]
 
 Options:
   --addr <host:port>     bind address (default 127.0.0.1:8787)
+  --auth                 require bearer authentication; auto-mints a token
   --expose               bind on all interfaces (0.0.0.0) for LAN access;
-                         requires a token; prints LAN URLs + loud WARNING
+                         requires --auth; prints LAN URLs + loud WARNING
   --allow-cidr <cidr>    with --expose, only accept clients in these CIDRs
                          (repeatable or comma-separated; optional)
-  --token <token>        bearer token for /v1/* (required; auto-minted if omitted)
-  --session-dir <path>   sessions directory (default ~/.strike/sessions)
+  --token <token>        bearer token for /v1/*; requires --auth
+  --session-dir <path>   sessions directory for --attach-only
+                         (default ~/.strike/sessions; rejected in live mode)
   --provider <name>      live engine provider (default echo)
   --model <id>           model id for the live provider
   --attach-only          read-only JSONL attach (no live engine)
@@ -51,7 +54,8 @@ Endpoints:
   GET  /v1/sessions                 session list (+ liveId)
   GET  /v1/sessions/{id}/events     SSE tail of a session JSONL log
 
-Auth: Authorization: Bearer <token> or ?token= on /v1/* routes.
+Auth: loopback is unauthenticated by default. Under --auth, use
+Authorization: Bearer <token> or ?token= on /v1/* routes.
 
 DANGER: --expose (or any non-loopback bind) puts session transcripts and the
 live control plane on the network. There is no TLS. Prefer loopback + SSH -L
@@ -59,10 +63,12 @@ when possible. See docs/web.md.`
 
 type serveOptions struct {
 	addr                       string
+	auth                       bool
 	expose                     bool
 	allowCIDR                  cidrFlag
 	token                      string
 	sessionDir                 string
+	sessionDirSet              bool
 	provider                   string
 	model                      string
 	attachOnly                 bool
@@ -110,6 +116,7 @@ func parseServeArgs(args []string) (serveOptions, error) {
 	fs := flag.NewFlagSet("strike serve", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&opts.addr, "addr", "127.0.0.1:8787", "")
+	fs.BoolVar(&opts.auth, "auth", false, "")
 	fs.BoolVar(&opts.expose, "expose", false, "")
 	fs.Var(&opts.allowCIDR, "allow-cidr", "")
 	fs.StringVar(&opts.token, "token", "", "")
@@ -124,6 +131,11 @@ func parseServeArgs(args []string) (serveOptions, error) {
 	if fs.NArg() != 0 {
 		return serveOptions{}, fmt.Errorf("unexpected argument %q", fs.Arg(0))
 	}
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "session-dir" {
+			opts.sessionDirSet = true
+		}
+	})
 	opts.addr = strings.TrimSpace(opts.addr)
 	opts.token = strings.TrimSpace(opts.token)
 	opts.sessionDir = strings.TrimSpace(opts.sessionDir)
@@ -141,6 +153,15 @@ func parseServeArgs(args []string) (serveOptions, error) {
 	if len(opts.allowCIDR) > 0 && !opts.expose {
 		return serveOptions{}, fmt.Errorf("--allow-cidr requires --expose")
 	}
+	if opts.token != "" && !opts.auth {
+		return serveOptions{}, fmt.Errorf("--token requires --auth")
+	}
+	if opts.expose && !opts.auth {
+		return serveOptions{}, fmt.Errorf("--expose requires --auth")
+	}
+	if opts.sessionDirSet && !opts.attachOnly {
+		return serveOptions{}, fmt.Errorf("--session-dir requires --attach-only; live sessions use %s", session.DefaultDir())
+	}
 	return opts, nil
 }
 
@@ -150,20 +171,19 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		return err
 	}
 	opts.addr = bindAddr
+	if !server.IsLocalhostBind(opts.addr) && !opts.auth {
+		return errors.New("non-loopback --addr requires --auth (and --expose for network binds)")
+	}
 
 	token := opts.token
 	minted := false
-	if token == "" {
+	if opts.auth && token == "" {
 		t, err := server.MintToken()
 		if err != nil {
 			return fmt.Errorf("minting token: %w", err)
 		}
 		token = t
 		minted = true
-	}
-	// Token is mandatory for all binds; refuse empty (defense in depth for --expose).
-	if strings.TrimSpace(token) == "" {
-		return errors.New("auth token is required (pass --token or allow auto-mint)")
 	}
 
 	var allowCIDRs []*net.IPNet
@@ -178,6 +198,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	defer stop()
 
 	var live *server.Live
+	var services *host.Services
 	var cleanup func() error
 	sessionDir := opts.sessionDir
 
@@ -193,17 +214,13 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 			return err
 		}
 		sessionDir = a.sessions.Dir()
-		if opts.sessionDir != "" && opts.sessionDir != session.DefaultDir() {
-			// assemble always uses DefaultDir; honor explicit --session-dir only
-			// for RO listing when attach-only. Live sessions stay in default dir.
-			_ = opts.sessionDir
-		}
 
 		agents := make([]server.AgentInfo, 0, len(a.services.Agents))
 		for _, name := range a.services.Agents {
 			agents = append(agents, server.AgentInfo{Name: name})
 		}
 		live = server.NewLive(a.sessionID, a.workDir, agents, a.eng.Ops())
+		services = &a.services
 
 		engineDone := make(chan error, 1)
 		go func() {
@@ -263,11 +280,13 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 
 	srv, err := server.New(server.Options{
 		Addr:       opts.addr,
+		Auth:       opts.auth,
 		Token:      token,
 		SessionDir: sessionDir,
 		Live:       live,
 		Expose:     opts.expose || !server.IsLocalhostBind(opts.addr),
 		AllowCIDRs: allowCIDRs,
+		Services:   services,
 	})
 	if err != nil {
 		return err
@@ -293,6 +312,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		listenAddr: actual,
 		port:       port,
 		token:      token,
+		auth:       opts.auth,
 		minted:     minted,
 		exposed:    exposed,
 		live:       live,
@@ -339,6 +359,7 @@ type serveBanner struct {
 	listenAddr string
 	port       string
 	token      string
+	auth       bool
 	minted     bool
 	exposed    bool
 	live       *server.Live
@@ -370,7 +391,11 @@ func printServeBanner(w io.Writer, b serveBanner) {
 		}
 	} else {
 		fmt.Fprintf(w, "  health:  http://%s/health\n", b.listenAddr)
-		fmt.Fprintf(w, "  cockpit: http://%s/attach?token=%s\n", b.listenAddr, url.QueryEscape(b.token))
+		if b.auth {
+			fmt.Fprintf(w, "  cockpit: http://%s/attach?token=%s\n", b.listenAddr, url.QueryEscape(b.token))
+		} else {
+			fmt.Fprintf(w, "  cockpit: http://%s/attach\n", b.listenAddr)
+		}
 	}
 	if b.live != nil {
 		fmt.Fprintf(w, "  live:    session %s  provider %s\n", b.live.SessionID(), b.provider)
@@ -386,7 +411,9 @@ func printServeBanner(w io.Writer, b serveBanner) {
 	} else {
 		fmt.Fprintln(w, "  mode:    attach-only (read-only JSONL)")
 	}
-	if b.minted {
+	if !b.auth {
+		fmt.Fprintln(w, "  auth:    off (loopback only)")
+	} else if b.minted {
 		fmt.Fprintf(w, "  token:   %s  (auto-minted; pass --token to set)\n", b.token)
 	} else {
 		fmt.Fprintln(w, "  token:   (from --token)")

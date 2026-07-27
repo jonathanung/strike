@@ -105,31 +105,28 @@ func (l *Live) Submit(ctx context.Context, op protocol.Op) error {
 	}
 }
 
-// Publish fans an engine event out to subscribers and updates status.
+// Publish fans an engine event out to subscribers and updates status. A
+// subscriber that cannot keep up is disconnected rather than blocking the
+// engine event drain or other subscribers.
 func (l *Live) Publish(ev protocol.Event) {
 	if l == nil {
 		return
 	}
 	l.applyStatus(ev)
-	l.mu.RLock()
+	l.mu.Lock()
 	if l.closed {
-		l.mu.RUnlock()
+		l.mu.Unlock()
 		return
 	}
-	subs := make([]chan protocol.Event, 0, len(l.subs))
 	for ch := range l.subs {
-		subs = append(subs, ch)
-	}
-	l.mu.RUnlock()
-	for _, ch := range subs {
 		select {
 		case ch <- ev:
-		case <-l.closeCh:
-			return
-		case <-time.After(2 * time.Second):
-			// Slow subscriber: skip this event for them.
+		default:
+			delete(l.subs, ch)
+			close(ch)
 		}
 	}
+	l.mu.Unlock()
 }
 
 // Subscribe receives live events until ctx is done or Live is closed.
