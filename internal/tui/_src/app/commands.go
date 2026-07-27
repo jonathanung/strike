@@ -48,6 +48,37 @@ const (
 	commandMCP             commandID = "mcp"
 	commandExit            commandID = "exit"
 	commandQuit            commandID = "quit"
+
+	// Keybind-backed action mirrors (see keybind_slash.go).
+	commandFocusLeft     commandID = "focus-left"
+	commandFocusRight    commandID = "focus-right"
+	commandWindowNext    commandID = "window-next"
+	commandWindowPrev    commandID = "window-prev"
+	commandScrollUp      commandID = "scroll-up"
+	commandScrollDown    commandID = "scroll-down"
+	commandJumpBottom    commandID = "jump-bottom"
+	commandPalette       commandID = "palette"
+	commandInterrupt     commandID = "interrupt"
+	commandSaveDefaults  commandID = "save-defaults"
+	commandLeaveEditor   commandID = "leave-editor"
+	commandEditPrompt    commandID = "edit-prompt"
+	commandAgentNext     commandID = "agent-next"
+	commandModeNext      commandID = "mode-next"
+	commandToolPrev      commandID = "tool-prev"
+	commandToolNext      commandID = "tool-next"
+	commandToolExpand    commandID = "tool-expand"
+	commandToolCopy      commandID = "tool-copy"
+	commandToolReview    commandID = "tool-review"
+	commandToolApply     commandID = "tool-apply"
+	commandSubagent      commandID = "subagent"
+	commandParent        commandID = "parent"
+	commandSubagentNext  commandID = "subagent-next"
+	commandSubagentPrev  commandID = "subagent-prev"
+	commandRootNew       commandID = "root-new"
+	commandRootOpen      commandID = "root-open"
+	commandRootInterrupt commandID = "root-interrupt"
+	commandRootHide      commandID = "root-hide"
+	commandRootFilter    commandID = "root-filter"
 )
 
 type commandSource string
@@ -103,6 +134,12 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandMCP, Name: "/mcp", Description: "MCP servers: status, retry, disable", ArgsHint: "[retry [name]|disable <name>]", Source: commandSourceBuiltin},
 	{ID: commandExit, Name: "/exit", Description: "quit strike", Source: commandSourceBuiltin},
 	{ID: commandQuit, Name: "/quit", Description: "quit strike", Source: commandSourceBuiltin},
+}
+
+func init() {
+	// Append keybind-backed mirrors so builtinCommandSpecs stays the single
+	// ordered catalog used by completion, palette, and /help.
+	builtinCommandSpecs = append(builtinCommandSpecs, keybindBackedCommandSpecs...)
 }
 
 // commandCatalog builds the slash-command catalog from the builtins and the
@@ -174,6 +211,7 @@ var reservedCommandNames = map[string]struct{}{
 	"undo":             {},
 	"rewind":           {},
 	"session":          {},
+	"rename":           {},
 	"export":           {},
 	"help":             {},
 	"keys":             {},
@@ -189,6 +227,36 @@ var reservedCommandNames = map[string]struct{}{
 	"mcp":              {},
 	"exit":             {},
 	"quit":             {},
+	// Keybind-backed action mirrors.
+	"focus-left":     {},
+	"focus-right":    {},
+	"window-next":    {},
+	"window-prev":    {},
+	"scroll-up":      {},
+	"scroll-down":    {},
+	"jump-bottom":    {},
+	"palette":        {},
+	"interrupt":      {},
+	"save-defaults":  {},
+	"leave-editor":   {},
+	"edit-prompt":    {},
+	"agent-next":     {},
+	"mode-next":      {},
+	"tool-prev":      {},
+	"tool-next":      {},
+	"tool-expand":    {},
+	"tool-copy":      {},
+	"tool-review":    {},
+	"tool-apply":     {},
+	"subagent":       {},
+	"parent":         {},
+	"subagent-next":  {},
+	"subagent-prev":  {},
+	"root-new":       {},
+	"root-open":      {},
+	"root-interrupt": {},
+	"root-hide":      {},
+	"root-filter":    {},
 }
 
 // validSkillName reports whether a skill name is safe to render and select as a

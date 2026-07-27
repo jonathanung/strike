@@ -23,9 +23,9 @@ strike launches without any provider configured. Pick one inside the TUI:
 /mode soft-approve             # default | plan | soft-approve | accept-edits | yolo
 /agent                         # centered agent picker
 /agent plan                    # direct switch (build, plan, explore, …)
-/session                       # browse past root sessions (auto-titles) and
-                               # resume one with full model history
-/session <id>                  # resume a specific session by id
+/session                       # browse past root sessions for this workspace
+                               # (auto-titles); ctrl+a shows all workspaces
+/session <id>                  # resume a specific session by id (any workspace)
 /rename                        # rename the current session (editor)
 /rename <title>                # rename the current session immediately
 /fast                          # toggle OpenAI priority tier (~2×, lower
@@ -90,14 +90,34 @@ strike launches without any provider configured. Pick one inside the TUI:
  /mcp                           # MCP status; retry/disable servers
 /exit                          # quit strike (same as ctrl+c)
 /quit                          # alias of /exit
+# Keybind mirrors (same actions as chords; see keybinds.md and /keys):
+/focus-left /focus-right       # focus panes (ctrl+h / ctrl+l)
+/window-next /window-prev      # cycle right-pane windows (ctrl+j / ctrl+k)
+/scroll-up /scroll-down        # transcript scroll
+/jump-bottom                   # jump to latest output (ctrl+t)
+/palette                       # command palette (ctrl+p)
+/interrupt                     # interrupt running turn (esc)
+/save-defaults                 # save defaults (ctrl+d)
+/leave-editor                  # leave embedded editor (ctrl+g)
+/edit-prompt                   # external editor for prompt (ctrl+e)
+/agent-next                    # cycle agent persona (tab)
+/mode-next                     # cycle permission mode (shift+tab)
+/tool-prev /tool-next          # select tool cells (alt+[ / alt+])
+/tool-expand /tool-copy        # expand or copy selected cell
+/tool-review /tool-apply       # review/apply selected edit
+/subagent /parent              # enter first child / return to parent
+/subagent-next /subagent-prev  # sibling subagent cycle
+/root-new /root-open           # concurrent roots (agents pane n / enter)
+/root-interrupt /root-hide     # interrupt or hide selected root
+/root-filter                   # cycle agents pane filter (f)
 ```
 
 ### Session, memory, issues
 
 | Command | Notes |
 |---|---|
-| `/session` | picker of past **root** sessions (auto-titles); resume reloads model history |
-| `/session <id>` | resume that root session by id |
+| `/session` | picker of past **root** sessions for the **current workspace** only (auto-titles; resume reloads model history). `ctrl+a` toggles all workspaces. Legacy sessions without a stored folder path appear only in all-workspaces mode |
+| `/session <id>` | resume that root session by id (works across workspaces; list filter does not apply) |
 | `/rename [title]` | rename the current session (brief auto-titles; agents pane `r` too) |
 | `/fork` | copy the current session JSONL into a new id (idle only) |
 | `/undo` | undo last turn in place (idle only); bare opens picker; `chat` keeps disk; `files` restores per-file checkpoints from that turn (never `git reset --hard`) |

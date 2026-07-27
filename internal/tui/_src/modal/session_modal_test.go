@@ -198,6 +198,39 @@ func TestSessionCommandIDQueuesResume(t *testing.T) {
 	}
 }
 
+func TestSessionCommandIDCrossWorkspace(t *testing.T) {
+	// Default picker is workspace-scoped, but /session <id> must still open a
+	// root from another project via Get (unfiltered).
+	fs := newFakeSessionsForProject("/repos/a")
+	fs.put(host.Session{ID: "a-cur", Title: "here", ProjectKey: "/repos/a"}, nil)
+	fs.put(host.Session{ID: "b-other", Title: "elsewhere", ProjectKey: "/repos/b"}, nil)
+
+	m, _ := newAppTestModel(nil, nil)
+	m.sessionID = "a-cur"
+	m.services.Sessions = fs
+
+	// Picker only lists this workspace.
+	next, _ := m.handleCommand("/session")
+	sm, ok := next.(Model).modal.(*sessionModal)
+	if !ok || sm == nil {
+		t.Fatalf("modal = %T", next.(Model).modal)
+	}
+	if len(sm.all) != 1 || sm.all[0].ID != "a-cur" {
+		t.Fatalf("picker = %+v, want only a-cur", sm.all)
+	}
+
+	// Explicit id from another workspace still resumes.
+	_, cmd := m.handleCommand("/session b-other")
+	if cmd == nil {
+		t.Fatal("expected resume cmd for cross-workspace id")
+	}
+	msg := cmd()
+	rm, ok := msg.(sessionResumeMsg)
+	if !ok || rm.id != "b-other" {
+		t.Fatalf("msg = %#v, want sessionResumeMsg{b-other}", msg)
+	}
+}
+
 func TestSessionCommandRejectsChild(t *testing.T) {
 	fs := newFakeSessions()
 	fs.put(host.Session{ID: "child", ParentID: "root", Title: "sub"}, nil)

@@ -275,6 +275,12 @@ func TestSessionsListFiltersByProject(t *testing.T) {
 		t.Fatalf("List(project A) = %+v, want only root-a", list)
 	}
 
+	// Get is unfiltered so /session <id> can open another workspace's root.
+	other, ok, err := scoped.Get("root-b")
+	if err != nil || !ok || other.ID != "root-b" || other.ProjectKey != projB {
+		t.Fatalf("Get(cross-workspace) ok=%v err=%v got=%+v", ok, err, other)
+	}
+
 	allLister, ok := scoped.(host.AllProjectsSessions)
 	if !ok {
 		t.Fatal("adapter should implement AllProjectsSessions")
