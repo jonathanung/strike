@@ -45,12 +45,13 @@ type multiRootHub struct {
 
 	spawn  rootSpawner
 	files  host.Files // optional; workdir updated on Activate
+	shell  host.Shell // optional; workdir updated on Activate
 	closed bool
 }
 
 // newMultiRootHub owns the first root slot and starts op routing. Caller must
 // Close the hub (stops engines, closes binds, runs worktree cleanup).
-func newMultiRootHub(first *rootSlot, spawn rootSpawner, files host.Files) *multiRootHub {
+func newMultiRootHub(first *rootSlot, spawn rootSpawner, files host.Files, shell host.Shell) *multiRootHub {
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &multiRootHub{
 		active: first.id,
@@ -61,6 +62,7 @@ func newMultiRootHub(first *rootSlot, spawn rootSpawner, files host.Files) *mult
 		cancel: cancel,
 		spawn:  spawn,
 		files:  files,
+		shell:  shell,
 	}
 	h.startSlot(first)
 	h.wg.Add(1)
@@ -131,10 +133,17 @@ func (h *multiRootHub) Activate(id string) error {
 		return fmt.Errorf("session %q is not live", id)
 	}
 	h.active = id
-	if h.files != nil {
-		local.SetFilesWorkDir(h.files, slot.workDir)
-	}
+	h.syncWorkDir(slot.workDir)
 	return nil
+}
+
+func (h *multiRootHub) syncWorkDir(workDir string) {
+	if h.files != nil {
+		local.SetFilesWorkDir(h.files, workDir)
+	}
+	if h.shell != nil {
+		local.SetShellWorkDir(h.shell, workDir)
+	}
 }
 
 func (h *multiRootHub) Spawn() (string, error) {
@@ -158,9 +167,7 @@ func (h *multiRootHub) Spawn() (string, error) {
 	}
 	h.startSlotLocked(slot)
 	h.active = slot.id
-	if h.files != nil {
-		local.SetFilesWorkDir(h.files, slot.workDir)
-	}
+	h.syncWorkDir(slot.workDir)
 	h.mu.Unlock()
 	return slot.id, nil
 }
@@ -177,9 +184,7 @@ func (h *multiRootHub) Open(id string) error {
 	}
 	if slot, ok := h.slots[id]; ok {
 		h.active = id
-		if h.files != nil {
-			local.SetFilesWorkDir(h.files, slot.workDir)
-		}
+		h.syncWorkDir(slot.workDir)
 		h.mu.Unlock()
 		return nil
 	}
@@ -206,9 +211,7 @@ func (h *multiRootHub) Open(id string) error {
 	}
 	h.startSlotLocked(slot)
 	h.active = slot.id
-	if h.files != nil {
-		local.SetFilesWorkDir(h.files, slot.workDir)
-	}
+	h.syncWorkDir(slot.workDir)
 	h.mu.Unlock()
 	return nil
 }

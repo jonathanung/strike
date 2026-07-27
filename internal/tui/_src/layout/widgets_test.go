@@ -100,6 +100,9 @@ func TestComposerPlaceholderMentionsAskAnythingAndSlash(t *testing.T) {
 	if !strings.Contains(ta.Placeholder, "/") {
 		t.Errorf("composer placeholder = %q, want it to mention / for commands", ta.Placeholder)
 	}
+	if !strings.Contains(ta.Placeholder, "!") {
+		t.Errorf("composer placeholder = %q, want it to mention ! for shell", ta.Placeholder)
+	}
 }
 
 func TestComposerFooterAdvertisesEnterAndShiftEnter(t *testing.T) {
