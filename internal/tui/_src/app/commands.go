@@ -37,6 +37,7 @@ const (
 	commandMemory          commandID = "memory"
 	commandIssues          commandID = "issues"
 	commandGoal            commandID = "goal"
+	commandLoop            commandID = "loop"
 	commandContext         commandID = "context"
 	commandEffectivePrompt commandID = "effective-prompt"
 	commandCost            commandID = "cost"
@@ -89,6 +90,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandMemory, Name: "/memory", Description: "list, get, set, delete, export, or import project memory", ArgsHint: "[list|get|set|rm|export|import] ...", Source: commandSourceBuiltin},
 	{ID: commandIssues, Name: "/issues", Description: "list, add, get, close, export, or import project issues", ArgsHint: "[list|add|get|close|export|import] ...", Source: commandSourceBuiltin},
 	{ID: commandGoal, Name: "/goal", Description: "loop harness: set, run, status, pause, resume, abort, log, list", ArgsHint: "[set|run|status|pause|resume|abort|log|list] ...", Source: commandSourceBuiltin},
+	{ID: commandLoop, Name: "/loop", Description: "schedule a recurring LLM job (session-only)", ArgsHint: "[interval job|list|stop [id]]", Source: commandSourceBuiltin},
 	{ID: commandContext, Name: "/context", Description: "context doctor: system-prompt layer breakdown", Source: commandSourceBuiltin},
 	{ID: commandEffectivePrompt, Name: "/effective-prompt", Description: "context doctor: system-prompt layer breakdown", Source: commandSourceBuiltin},
 	{ID: commandCost, Name: "/cost", Description: "session token and cost totals", Source: commandSourceBuiltin},
@@ -174,6 +176,7 @@ var reservedCommandNames = map[string]struct{}{
 	"memory":           {},
 	"issues":           {},
 	"goal":             {},
+	"loop":             {},
 	"context":          {},
 	"effective-prompt": {},
 	"cost":             {},

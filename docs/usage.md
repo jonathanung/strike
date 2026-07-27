@@ -66,12 +66,15 @@ strike launches without any provider configured. Pick one inside the TUI:
                                # export/import portable JSON (default path
                                # strike-memory.json). import merges by key;
                                # add --replace to wipe first
-/issues [list|add|get|close|export|import] …
+ /issues [list|add|get|close|export|import] …
                                # project-scoped issue tracker; export/import
                                # portable JSON (default strike-issues.json).
                                # import merges by id; --replace wipes first.
                                # Relative export/import paths stay under the
                                # project root (no path escape).
+/loop <interval> <job>         # recurring LLM job (session-only; see loop.md)
+/loop list                     # list active loops
+/loop stop [id]                # stop one loop or all
 /context                       # context doctor modal (prompt layer breakdown)
 /effective-prompt              # alias of /context
 /cost                          # session token totals and estimated USD cost
@@ -97,6 +100,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/compact` | ask the engine to compact model history |
 | `/memory` | bare = list browser; `list [tag]`, `get <key>`, `set <key> <value>`, `rm <key>`, `export [path]`, `import <path> [--replace]` (portable JSON; relative paths stay under project root) |
 | `/issues` | bare = list browser; `list [open\|closed]`, `add <title>`, `get <id>`, `close <id>`, `export [path]`, `import <path> [--replace]` (same portable rules as memory) |
+| `/loop` | schedule a recurring prompt (`15m`, `2h`, …); session-only; `/loop list`, `/loop stop [id]` — see [loop.md](loop.md). Distinct from [`/goal`](goal.md) |
 | `/context` | context doctor modal: layer sizes, history msg count, oversized warnings (previews redacted) |
 | `/cost` | session input/output/cache totals from usage events; est. USD when catalog rates known; unknown stays explicit |
 | `/init` | light local scan → write `AGENTS.md`; confirms before overwrite |

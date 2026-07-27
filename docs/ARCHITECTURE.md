@@ -266,9 +266,9 @@ Two different mechanisms, depending on whether it needs Go code:
    `host.Services.Skills`. Reserved names (`provider`, `model`, `effort`,
    `autonomy`, `auth`, `settings`, `agent`, `fast`, `vim`, `nano`, `md-read`,
    `theme`, `layout`, `split`, `compact`, `fork`, `undo`, `rewind`,
-   `session`, `export`, `help`, `keys`, `memory`, `issues`, `goal`, `context`,
-   `effective-prompt`, `cost`, `upgrade`, `init`, `mcp`, `exit`, `quit`) are
-   rejected by `config.ValidateSkillName` before
+   `session`, `export`, `help`, `keys`, `memory`, `issues`, `goal`, `loop`,
+   `context`, `effective-prompt`, `cost`, `upgrade`, `init`, `mcp`, `exit`,
+   `quit`) are rejected by `config.ValidateSkillName` before
    they ever reach the frontend. `/init` is a builtin that writes project
    `AGENTS.md` via `host.ProjectInit` (confirm before overwrite). PR URLs from successful `gh pr` bash
    output are stored via `protocol.SessionMeta` and `session` sidecar
