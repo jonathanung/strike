@@ -15,10 +15,14 @@ import (
 	"github.com/jonathanung/strike-cli/internal/tui/term"
 )
 
-// VimMode selects how /vim (and future first-class editors) present.
+// VimMode selects how /vim and /nano present the editor.
 // Canonical values: pane|overlay|takeover. Config also accepts SurfacePresentation
 // aliases embedded→pane and modal→overlay so editor and md-reader share vocabulary.
+// NanoMode reuses the same type (config key nanoMode).
 type VimMode string
+
+// NanoMode is an alias of VimMode for /nano presentation (same pane|overlay|takeover).
+type NanoMode = VimMode
 
 const (
 	// VimModePane embeds the editor in the right-pane terminal window (default).
@@ -31,6 +35,7 @@ const (
 
 // ParseVimMode resolves a config/flag value. Empty yields pane (default).
 // Accepts pane|overlay|takeover and aliases embedded|modal.
+// ParseNanoMode is the same parser (shared presentation vocabulary).
 func ParseVimMode(value string) (VimMode, bool) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "", string(VimModePane), string(PresentationEmbedded):
@@ -42,6 +47,11 @@ func ParseVimMode(value string) (VimMode, bool) {
 	default:
 		return "", false
 	}
+}
+
+// ParseNanoMode resolves nanoMode config. Same values as ParseVimMode.
+func ParseNanoMode(value string) (NanoMode, bool) {
+	return ParseVimMode(value)
 }
 
 // Presentation maps editor mode onto the shared SurfacePresentation vocabulary.
@@ -134,31 +144,50 @@ func resolveEditor(getenv func(string) string, lookPath func(string) (string, er
 	return "", nil, fmt.Errorf("no editor found - set $VISUAL or $EDITOR, or install nvim/vim/nano")
 }
 
+// resolveNano picks the nano binary on PATH only (first-class /nano command).
+// Does not consult $VISUAL/$EDITOR — users who want that use /vim or ctrl+e.
+func resolveNano(lookPath func(string) (string, error)) (bin string, err error) {
+	if lookPath == nil {
+		lookPath = exec.LookPath
+	}
+	resolved, lookErr := lookPath("nano")
+	if lookErr != nil {
+		return "", fmt.Errorf("nano not found on PATH - install nano or use /vim")
+	}
+	return resolved, nil
+}
+
 // parseVimArgs interprets `/vim` arguments: optional path, optional +line or
 // path:line form. Returns display path (as typed / cleaned relative) and line.
 func parseVimArgs(args []string) (path string, line int, err error) {
+	return parseEditorPathArgs("vim", args)
+}
+
+// parseEditorPathArgs interprets `/name` path arguments shared by /vim and /nano.
+func parseEditorPathArgs(name string, args []string) (path string, line int, err error) {
+	usage := fmt.Sprintf("usage: /%s [path[:line]]", name)
 	if len(args) == 0 {
 		return "", 0, nil
 	}
 	if len(args) > 2 {
-		return "", 0, fmt.Errorf("usage: /vim [path[:line]]")
+		return "", 0, fmt.Errorf("%s", usage)
 	}
 	if len(args) == 2 {
 		path = args[0]
 		lineArg := args[1]
 		if !strings.HasPrefix(lineArg, "+") {
-			return "", 0, fmt.Errorf("usage: /vim [path[:line]]")
+			return "", 0, fmt.Errorf("%s", usage)
 		}
 		n, convErr := strconv.Atoi(strings.TrimPrefix(lineArg, "+"))
 		if convErr != nil || n < 1 {
-			return "", 0, fmt.Errorf("usage: /vim [path[:line]]")
+			return "", 0, fmt.Errorf("%s", usage)
 		}
 		return path, n, nil
 	}
 	raw := args[0]
 	if strings.HasPrefix(raw, "+") && !strings.Contains(raw, string(filepath.Separator)) {
 		// Bare +line without a path is not useful for project files.
-		return "", 0, fmt.Errorf("usage: /vim [path[:line]]")
+		return "", 0, fmt.Errorf("%s", usage)
 	}
 	// path:line — only split on the last colon when the suffix is a positive int
 	// and the path is not a Windows drive letter alone.
@@ -287,8 +316,9 @@ func displayPath(workDir, abs string) string {
 }
 
 // launchEditorCmd returns a tea.Cmd that full-screen takes over with the
-// resolved editor. path may be empty (bare editor). workDir resolves relative
-// paths; line is a 1-indexed jump for vi-family editors (0 = none).
+// resolved $VISUAL/$EDITOR chain. path may be empty (bare editor). workDir
+// resolves relative paths; line is a 1-indexed jump for vi-family editors
+// (0 = none).
 func launchEditorCmd(workDir, path string, line int) tea.Cmd {
 	bin, baseArgs, err := resolveEditor(nil, nil)
 	if err != nil {
@@ -297,6 +327,11 @@ func launchEditorCmd(workDir, path string, line int) tea.Cmd {
 			return editorFinishedMsg{launchErr: msg}
 		}
 	}
+	return launchEditorBinCmd(workDir, path, line, bin, baseArgs)
+}
+
+// launchEditorBinCmd full-screen takes over with an already-resolved binary.
+func launchEditorBinCmd(workDir, path string, line int, bin string, baseArgs []string) tea.Cmd {
 	abs := absPathInWorkDir(workDir, path)
 	display := displayPath(workDir, abs)
 	before := snapshotFile(abs)
@@ -370,7 +405,7 @@ func prefersTakeover(bin string) bool {
 }
 
 func (m Model) handleVimCommand(args []string) (tea.Model, tea.Cmd) {
-	path, line, err := parseVimArgs(args)
+	path, line, err := parseEditorPathArgs("vim", args)
 	if err != nil {
 		m.setNotice(err.Error(), true)
 		return m, nil
@@ -391,13 +426,57 @@ func (m Model) handleVimCommand(args []string) (tea.Model, tea.Cmd) {
 	if mode != VimModeTakeover && prefersTakeover(bin) {
 		mode = VimModeTakeover
 	}
+	label := editorLabel(bin, "vim")
 	if mode == VimModeTakeover {
-		return m, launchEditorCmd(m.workDir, path, line)
+		return m, launchEditorBinCmd(m.workDir, path, line, bin, baseArgs)
 	}
-	return m.launchEmbeddedEditor(bin, baseArgs, path, line, mode)
+	return m.launchEmbeddedEditor(bin, baseArgs, path, line, mode, label, "vimMode")
 }
 
-func (m Model) launchEmbeddedEditor(bin string, baseArgs []string, path string, line int, mode VimMode) (tea.Model, tea.Cmd) {
+func (m Model) handleNanoCommand(args []string) (tea.Model, tea.Cmd) {
+	path, line, err := parseEditorPathArgs("nano", args)
+	if err != nil {
+		m.setNotice(err.Error(), true)
+		return m, nil
+	}
+	m.resetComposer()
+	m.clearNotice()
+
+	mode := m.nanoMode
+	if mode == "" {
+		mode = VimModePane
+	}
+	bin, resolveErr := resolveNano(nil)
+	if resolveErr != nil {
+		m.setNotice(resolveErr.Error(), true)
+		return m, nil
+	}
+	if mode == VimModeTakeover {
+		return m, launchEditorBinCmd(m.workDir, path, line, bin, nil)
+	}
+	return m.launchEmbeddedEditor(bin, nil, path, line, mode, "nano", "nanoMode")
+}
+
+// editorLabel picks a short title for the embedded editor chrome.
+func editorLabel(bin, fallback string) string {
+	if bin == "" {
+		return fallback
+	}
+	base := strings.ToLower(filepath.Base(bin))
+	base = strings.TrimSuffix(base, ".exe")
+	if base == "" {
+		return fallback
+	}
+	return base
+}
+
+func (m Model) launchEmbeddedEditor(bin string, baseArgs []string, path string, line int, mode VimMode, label, modeKey string) (tea.Model, tea.Cmd) {
+	if label == "" {
+		label = "editor"
+	}
+	if modeKey == "" {
+		modeKey = "vimMode"
+	}
 	abs := absPathInWorkDir(m.workDir, path)
 	display := displayPath(m.workDir, abs)
 	before := snapshotFile(abs)
@@ -414,16 +493,16 @@ func (m Model) launchEmbeddedEditor(bin string, baseArgs []string, path string, 
 
 	sess, err := term.Start(cmd, cols, rows)
 	if err != nil {
-		m.setNotice("embedded editor failed: "+err.Error()+" - try config vimMode=takeover", true)
+		m.setNotice("embedded editor failed: "+err.Error()+" - try config "+modeKey+"=takeover", true)
 		return m, nil
 	}
 
 	switch mode {
 	case VimModeOverlay:
-		modal := newTerminalModal(sess, abs, display, before, hadPath)
+		modal := newTerminalModal(sess, abs, display, before, hadPath, label)
 		modal.setHostSize(m.width, m.height)
 		m.modal = modal
-		m.setNotice("embedded vim (overlay) - ctrl+g closes", false)
+		m.setNotice("embedded "+label+" (overlay) - ctrl+g closes", false)
 		return m, modal.listenCmd()
 	default: // pane
 		tw, _, ok := findTerminalWindow(m.windows)
@@ -431,11 +510,11 @@ func (m Model) launchEmbeddedEditor(bin string, baseArgs []string, path string, 
 			tw = newTerminalWindow()
 		}
 		var cmd tea.Cmd
-		tw, cmd = tw.attach(sess, abs, display, before, hadPath)
+		tw, cmd = tw.attach(sess, abs, display, before, hadPath, label)
 		m.windows = replaceTerminalWindow(m.windows, tw, true)
 		focusCmd := m.setPaneFocus(focusRight)
 		m.reflow()
-		m.setNotice("embedded vim - keys pass through; ctrl+g leaves pane", false)
+		m.setNotice("embedded "+label+" - keys pass through; ctrl+g leaves pane", false)
 		return m, tea.Batch(cmd, focusCmd)
 	}
 }

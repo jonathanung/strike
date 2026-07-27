@@ -15,7 +15,7 @@ import (
 )
 
 func TestTerminalModalNilSession(t *testing.T) {
-	m := newTerminalModal(nil, "/tmp/x", "x.txt", fileMeta{}, false)
+	m := newTerminalModal(nil, "/tmp/x", "x.txt", fileMeta{}, false, "vim")
 	if cmd := m.listenCmd(); cmd != nil {
 		t.Fatal("listenCmd with nil session should be nil")
 	}
@@ -52,7 +52,7 @@ func TestTerminalModalNilSession(t *testing.T) {
 }
 
 func TestTerminalModalSetHostSizeAndDefaultTitle(t *testing.T) {
-	m := newTerminalModal(nil, "", "", fileMeta{}, false)
+	m := newTerminalModal(nil, "", "", fileMeta{}, false, "vim")
 	m.setHostSize(100, 40)
 	if m.hostW != 100 || m.hostH != 40 {
 		t.Fatalf("host size = %dx%d", m.hostW, m.hostH)
@@ -70,11 +70,11 @@ func TestTerminalModalSetHostSizeAndDefaultTitle(t *testing.T) {
 }
 
 func TestTerminalModalViewFallbackDimensions(t *testing.T) {
-	m := newTerminalModal(nil, "", "note", fileMeta{}, true)
+	m := newTerminalModal(nil, "", "note", fileMeta{}, true, "nano")
 	// No host size: falls back to width and default height 20.
 	view := m.view(50, theme.Default())
 	plain := ansi.Strip(view)
-	if !strings.Contains(plain, "vim note") {
+	if !strings.Contains(plain, "nano note") {
 		t.Fatalf("view = %q", plain)
 	}
 	lines := strings.Split(strings.TrimRight(plain, "\n"), "\n")
@@ -105,7 +105,7 @@ sleep 30
 	waitTermContains(t, sess, "READY", 3*time.Second)
 
 	before := fileMeta{exists: true, size: 1}
-	m := newTerminalModal(sess, path, "echo.sh", before, true)
+	m := newTerminalModal(sess, path, "echo.sh", before, true, "vim")
 	m.setHostSize(80, 24)
 
 	// Forward printable keys + enter.
@@ -167,7 +167,7 @@ sleep 30
 	}
 	defer func() { _ = sess.Close() }()
 
-	m := newTerminalModal(sess, path, "listen.sh", fileMeta{}, true)
+	m := newTerminalModal(sess, path, "listen.sh", fileMeta{}, true, "vim")
 	listen := m.listenCmd()
 	if listen == nil {
 		t.Fatal("listenCmd nil with live session")
@@ -211,7 +211,7 @@ func TestTerminalModalListenCmdDoneDirect(t *testing.T) {
 	}
 	defer func() { _ = sess.Close() }()
 
-	m := newTerminalModal(sess, "/done", "done", fileMeta{}, false)
+	m := newTerminalModal(sess, "/done", "done", fileMeta{}, false, "vim")
 	deadline := time.After(3 * time.Second)
 	var last tea.Msg
 	for {

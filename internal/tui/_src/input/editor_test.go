@@ -237,6 +237,44 @@ func TestVimCommandUsageError(t *testing.T) {
 	}
 }
 
+func TestNanoCommandUsageError(t *testing.T) {
+	m, ops := newAppTestModel(nil, nil)
+	m.composer.SetValue("/nano a b c")
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if msg := runAppCmd(t, cmd); msg != nil {
+		t.Errorf("unexpected msg %#v", msg)
+	}
+	assertNoAppOp(t, ops)
+	if !m.noticeErr || !strings.Contains(m.notice, "usage: /nano") {
+		t.Errorf("notice = %q err=%v", m.notice, m.noticeErr)
+	}
+}
+
+func TestResolveNano(t *testing.T) {
+	bin, err := resolveNano(func(name string) (string, error) {
+		if name == "nano" {
+			return "/usr/bin/nano", nil
+		}
+		return "", errors.New("not found")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bin != "/usr/bin/nano" {
+		t.Fatalf("bin = %q", bin)
+	}
+	_, err = resolveNano(func(string) (string, error) {
+		return "", errors.New("missing")
+	})
+	if err == nil || !strings.Contains(err.Error(), "nano not found") {
+		t.Fatalf("want nano-not-found error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "/vim") {
+		t.Fatalf("error should mention /vim fallback, got %v", err)
+	}
+}
+
 func TestVimCommandMissingEditor(t *testing.T) {
 	t.Setenv("VISUAL", "")
 	t.Setenv("EDITOR", "")
@@ -256,6 +294,29 @@ func TestVimCommandMissingEditor(t *testing.T) {
 	}
 	assertNoAppOp(t, ops)
 	if !m.noticeErr || !strings.Contains(m.notice, "no editor found") {
+		t.Errorf("notice = %q err=%v", m.notice, m.noticeErr)
+	}
+}
+
+func TestNanoCommandMissingNano(t *testing.T) {
+	// Even if EDITOR is set, /nano requires nano on PATH.
+	t.Setenv("VISUAL", "nvim")
+	t.Setenv("EDITOR", "nvim")
+	t.Setenv("PATH", filepath.Join(t.TempDir(), "empty-bin"))
+
+	m, ops := newAppTestModel(nil, nil)
+	m.workDir = t.TempDir()
+	m.composer.SetValue("/nano note.txt")
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if m.composer.Value() != "" {
+		t.Errorf("composer = %q, want reset", m.composer.Value())
+	}
+	if msg := runAppCmd(t, cmd); msg != nil {
+		t.Errorf("unexpected msg %#v", msg)
+	}
+	assertNoAppOp(t, ops)
+	if !m.noticeErr || !strings.Contains(m.notice, "nano not found") {
 		t.Errorf("notice = %q err=%v", m.notice, m.noticeErr)
 	}
 }
@@ -328,7 +389,7 @@ func TestFilesInvalidatedNotice(t *testing.T) {
 	}
 }
 
-func TestHelpListsVim(t *testing.T) {
+func TestHelpListsVimAndNano(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m.composer.SetValue("/help")
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -338,15 +399,20 @@ func TestHelpListsVim(t *testing.T) {
 	if !ok {
 		t.Fatalf("/help modal = %T, want helpModal", m.modal)
 	}
-	found := false
+	foundVim, foundNano := false, false
 	for _, entry := range help.entries {
 		if strings.HasPrefix(entry.Label, "/vim") {
-			found = true
-			break
+			foundVim = true
+		}
+		if strings.HasPrefix(entry.Label, "/nano") {
+			foundNano = true
 		}
 	}
-	if !found {
+	if !foundVim {
 		t.Error("help catalog missing /vim")
+	}
+	if !foundNano {
+		t.Error("help catalog missing /nano")
 	}
 }
 

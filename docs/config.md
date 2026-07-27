@@ -12,6 +12,7 @@ JSON:
   "leanCode": "lite",
   "theme": "strike",
   "vimMode": "pane",
+  "nanoMode": "pane",
   "mdReadMode": "embedded",
   "notify": "unfocused-only",
   "permissionMode": "default",
@@ -397,7 +398,7 @@ names appear in `/provider` like built-ins. **Logout** (`ctrl+x` or
 config/providers.jsonc and clears credentials; `/settings` `d` does the same.
 Built-in logout only clears credentials.
 
-## Surface presentation (`vimMode`, `mdReadMode`)
+## Surface presentation (`vimMode`, `nanoMode`, `mdReadMode`)
 
 Editor and markdown-reader surfaces share a presentation vocabulary:
 **embedded** (right-pane chrome) vs **modal** (large centered overlay with
@@ -405,17 +406,25 @@ background scrim). Prefer those names for new config; legacy aliases remain.
 
 ### Embedded editor (`vimMode`)
 
-`/vim [path[:line]]` opens a file in an editor. `vimMode` selects how:
+`/vim [path[:line]]` opens a file in an editor resolved from `$VISUAL` →
+`$EDITOR` → nvim/vim/vi/nano on `PATH`. `vimMode` selects how:
 
 | Value | Aliases | Behavior |
 |---|---|---|
-| `pane` (default) | `embedded` | embed nvim/vim/nano in the right-pane `editor` window (PTY) |
+| `pane` (default) | `embedded` | embed the editor in the right-pane `editor` window (PTY) |
 | `overlay` | `modal` | large modal popout with background scrim |
 | `takeover` | — | full-screen handoff via `tea.ExecProcess` |
 
 Unknown values are ignored at load time. GUI `$EDITOR` values always take
 over the terminal regardless of `vimMode`. Leave the embedded/modal editor
 with `ctrl+g`.
+
+### Nano (`nanoMode`)
+
+`/nano [path[:line]]` opens **nano** specifically (does not use `$VISUAL`/
+`$EDITOR`). `nanoMode` uses the same values and aliases as `vimMode`
+(default `pane`/`embedded`). Missing `nano` on `PATH` shows a clear error.
+Leave the embedded/modal editor with `ctrl+g`.
 
 ### Markdown reader (`mdReadMode`)
 

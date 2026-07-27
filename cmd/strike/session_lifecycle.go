@@ -273,6 +273,10 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 		if mode, ok := tui.ParseVimMode(a.cfg.VimMode); ok {
 			vimMode = mode
 		}
+		nanoMode := tui.VimModePane
+		if mode, ok := tui.ParseNanoMode(a.cfg.NanoMode); ok {
+			nanoMode = mode
+		}
 		mdReadMode := tui.PresentationEmbedded
 		if mode, ok := tui.ParseSurfacePresentation(a.cfg.MdReadMode); ok {
 			mdReadMode = mode
@@ -300,6 +304,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 			WorkDir:                      a.workDir,
 			FirstRun:                     a.firstRun,
 			VimMode:                      vimMode,
+			NanoMode:                     nanoMode,
 			MdReadMode:                   mdReadMode,
 			NotifyMode:                   notifyMode,
 			PermissionAutoApproveSeconds: a.cfg.PermissionAutoApproveSeconds,

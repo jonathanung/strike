@@ -107,6 +107,90 @@ func TestVimTakeoverModeUsesExecProcess(t *testing.T) {
 	}
 }
 
+func TestNanoTakeoverModeMissingBinary(t *testing.T) {
+	t.Setenv("PATH", filepath.Join(t.TempDir(), "empty-bin"))
+
+	m, ops := newAppTestModel(nil, nil)
+	m.nanoMode = VimModeTakeover
+	m.workDir = t.TempDir()
+	m.composer.SetValue("/nano")
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if msg := runAppCmd(t, cmd); msg != nil {
+		t.Errorf("unexpected msg %#v", msg)
+	}
+	assertNoAppOp(t, ops)
+	if !m.noticeErr || !strings.Contains(m.notice, "nano not found") {
+		t.Errorf("notice = %q err=%v", m.notice, m.noticeErr)
+	}
+	if tw, _, ok := findTerminalWindow(m.windows); ok && tw.isRunning() {
+		t.Error("takeover mode started an embedded session")
+	}
+}
+
+func TestNanoPaneModeEmbedsNano(t *testing.T) {
+	if _, err := exec.LookPath("nano"); err != nil {
+		t.Skip("nano not installed")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "note.txt")
+	if err := os.WriteFile(path, []byte("nano-embed-marker\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// /nano must ignore $VISUAL/$EDITOR and launch nano.
+	t.Setenv("VISUAL", "nvim")
+	t.Setenv("EDITOR", "nvim")
+
+	m, ops := newAppTestModel(nil, nil)
+	m.nanoMode = VimModePane
+	m.workDir = dir
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	m.composer.SetValue("/nano note.txt")
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+
+	deadline := time.After(5 * time.Second)
+	for {
+		tw, _, ok := findTerminalWindow(m.windows)
+		if ok && tw.isRunning() && m.focus == focusRight {
+			if tw.label != "nano" {
+				t.Fatalf("editor label = %q, want nano", tw.label)
+			}
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("embedded nano did not start; focus=%v notice=%q", m.focus, m.notice)
+		default:
+		}
+		if cmd == nil {
+			time.Sleep(20 * time.Millisecond)
+			continue
+		}
+		msg := runAppCmd(t, cmd)
+		if msg == nil {
+			cmd = nil
+			continue
+		}
+		updated, cmd = m.Update(msg)
+		m = updated.(Model)
+	}
+	assertNoAppOp(t, ops)
+	if !strings.Contains(m.notice, "nano") {
+		t.Errorf("notice should mention nano: %q", m.notice)
+	}
+	m.closeEmbeddedSessions()
+}
+
+func TestEditorLabel(t *testing.T) {
+	if got := editorLabel("/usr/bin/nvim", "vim"); got != "nvim" {
+		t.Errorf("editorLabel nvim = %q", got)
+	}
+	if got := editorLabel("", "vim"); got != "vim" {
+		t.Errorf("editorLabel empty = %q", got)
+	}
+}
+
 func TestVimPaneModeEmbedsNvim(t *testing.T) {
 	if _, err := exec.LookPath("nvim"); err != nil {
 		t.Skip("nvim not installed")

@@ -57,6 +57,8 @@ strike launches without any provider configured. Pick one inside the TUI:
                                # the file to $EDITOR / $VISUAL
 /vim [path[:line]]             # open file in editor (embedded/modal/takeover)
                                # or $EDITOR (see vimMode in config.md)
+/nano [path[:line]]            # open file in nano (embedded/modal/takeover;
+                               # see nanoMode in config.md)
 /md-read <path>                # open markdown (embedded right pane or modal;
                                # see mdReadMode in config.md)
 /memory [list|get|set|rm|export|import] …
@@ -194,7 +196,7 @@ slot hosts one active window from the registry:
 | `memory` | project memory browser |
 | `issues` | project issue browser |
 | `markdown` | markdown reader (`/md-read <path>`; or modal via `mdReadMode`) |
-| `editor` | embedded nvim/vim/nano PTY for `/vim` (or modal via `vimMode`) |
+| `editor` | embedded nvim/vim/nano PTY for `/vim` or `/nano` (modal via `vimMode`/`nanoMode`) |
 
 Related right-pane windows stack as **groups** when the pane is tall/wide
 enough: session (`context`+`activity`), agents (`agents`+`visualizer`), and
