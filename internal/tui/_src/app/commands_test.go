@@ -30,6 +30,11 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/mode":             {"set permission posture (default/plan/accept-edits/yolo)", "[mode]", commandSourceBuiltin},
 		"/auth":             {"manage provider authentication", "[provider]", commandSourceBuiltin},
 		"/agent":            {"select an agent", "[name]", commandSourceBuiltin},
+		"/agents":           {"focus the agents right pane", "", commandSourceBuiltin},
+		"/activity":         {"focus the activity right pane", "", commandSourceBuiltin},
+		"/files":            {"focus the files right pane", "", commandSourceBuiltin},
+		"/visualizer":       {"focus the visualizer right pane", "", commandSourceBuiltin},
+		"/system":           {"focus the system right pane", "", commandSourceBuiltin},
 		"/fast":             {"toggle OpenAI priority tier (faster, ~2× cost)", "[on|off]", commandSourceBuiltin},
 		"/think":            {"show or hide model chain-of-thought", "[on|off]", commandSourceBuiltin},
 		"/vim":              {"open a file in the editor (embedded/modal/takeover; see vimMode)", "[path|@path[:line]]", commandSourceBuiltin},
@@ -114,7 +119,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 }
 
 func TestValidSkillNameRejectsReservedBuiltinsIncludingMDRead(t *testing.T) {
-	for _, name := range []string{"provider", "model", "effort", "autonomy", "mode", "auth", "agent", "fast", "vim", "nano", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "rename", "export", "help", "keys", "memory", "issues", "goal", "loop", "context", "effective-prompt", "cost", "upgrade", "init", "mcp", "exit", "quit", "focus-left", "focus-right", "window-next", "window-prev", "scroll-up", "scroll-down", "jump-bottom", "palette", "interrupt", "save-defaults", "leave-editor", "edit-prompt", "agent-next", "mode-next", "tool-prev", "tool-next", "tool-expand", "tool-copy", "tool-review", "tool-apply", "subagent", "parent", "subagent-next", "subagent-prev", "root-new", "root-open", "root-interrupt", "root-hide", "root-filter"} {
+	for _, name := range []string{"provider", "model", "effort", "autonomy", "mode", "auth", "agent", "agents", "activity", "files", "visualizer", "system", "fast", "vim", "nano", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "rename", "export", "help", "keys", "memory", "issues", "goal", "loop", "context", "effective-prompt", "cost", "upgrade", "init", "mcp", "exit", "quit", "focus-left", "focus-right", "window-next", "window-prev", "scroll-up", "scroll-down", "jump-bottom", "palette", "interrupt", "save-defaults", "leave-editor", "edit-prompt", "agent-next", "mode-next", "tool-prev", "tool-next", "tool-expand", "tool-copy", "tool-review", "tool-apply", "subagent", "parent", "subagent-next", "subagent-prev", "root-new", "root-open", "root-interrupt", "root-hide", "root-filter"} {
 		if validSkillName(name) {
 			t.Errorf("validSkillName(%q) = true, want false for reserved builtin", name)
 		}

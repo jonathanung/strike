@@ -23,6 +23,11 @@ strike launches without any provider configured. Pick one inside the TUI:
 /mode soft-approve             # default | plan | soft-approve | accept-edits | yolo
 /agent                         # centered agent picker
 /agent plan                    # direct switch (build, plan, explore, …)
+/agents                        # focus the agents right pane
+/activity                      # focus the activity right pane
+/files                         # focus the files right pane
+/visualizer                    # focus the visualizer right pane
+/system                        # focus the system right pane
 /session                       # browse past root sessions for this workspace
                                # (auto-titles); ctrl+a shows all workspaces
 /session <id>                  # resume a specific session by id (any workspace)
@@ -124,8 +129,9 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/rewind` | fork a **new** session from a completed turn (idle only); original session stays listable; bare opens turn picker; `/rewind n` keeps turns 1..n. Workspace file revert is not part of rewind (use `/undo files` on the live session) |
 | `/export` | dump the visible transcript to markdown (user/assistant/tool summaries); redacts common API-key shapes; default path under `.strike/exports/` or tmp; `--open` launches `$EDITOR` |
 | `/compact` | ask the engine to compact model history |
-| `/memory` | bare = list browser; `list [tag]`, `get <key>`, `set <key> <value>`, `rm <key>`, `export [path]`, `import <path> [--replace]` (portable JSON; relative paths stay under project root) |
-| `/issues` | bare = list browser; `list [open\|closed]`, `add <title>`, `get <id>`, `close <id>`, `export [path]`, `import <path> [--replace]` (same portable rules as memory) |
+| `/memory` | bare = list browser (focuses memory pane); `list [tag]`, `get <key>`, `set <key> <value>`, `rm <key>`, `export [path]`, `import <path> [--replace]` (portable JSON; relative paths stay under project root) |
+| `/issues` | bare = list browser (focuses issues pane); `list [open\|closed]`, `add <title>`, `get <id>`, `close <id>`, `export [path]`, `import <path> [--replace]` (same portable rules as memory) |
+| `/agents` `/activity` `/files` `/visualizer` `/system` | jump focus to the named right pane (`/agent` remains persona select) |
 | `/loop` | schedule a recurring prompt (`15m`, `2h`, …); session-only; `/loop list`, `/loop stop [id]` — see [loop.md](loop.md). Distinct from [`/goal`](goal.md) |
 | `/context` | context doctor modal: layer sizes, history msg count, oversized warnings (previews redacted) |
 | `/cost` | session input/output/cache totals from usage events; est. USD when catalog rates known; unknown stays explicit |
