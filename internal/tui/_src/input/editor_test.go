@@ -113,14 +113,20 @@ func TestParseVimArgs(t *testing.T) {
 		path    string
 		line    int
 		wantErr bool
+		errSub  string
 	}{
 		{name: "bare", args: nil},
 		{name: "path", args: []string{"internal/tui/app.go"}, path: "internal/tui/app.go"},
+		{name: "at path", args: []string{"@internal/foo.go"}, path: "internal/foo.go"},
+		{name: "at path colon line", args: []string{"@app.go:42"}, path: "app.go", line: 42},
+		{name: "at path plus line", args: []string{"@app.go", "+7"}, path: "app.go", line: 7},
 		{name: "path colon line", args: []string{"app.go:42"}, path: "app.go", line: 42},
 		{name: "path plus line", args: []string{"app.go", "+7"}, path: "app.go", line: 7},
 		{name: "bad plus", args: []string{"app.go", "7"}, wantErr: true},
 		{name: "too many", args: []string{"a", "b", "c"}, wantErr: true},
 		{name: "bare plus", args: []string{"+3"}, wantErr: true},
+		{name: "bare at", args: []string{"@"}, wantErr: true, errSub: "unresolved"},
+		{name: "at escape", args: []string{"@../secret"}, wantErr: true, errSub: "unresolved"},
 		{name: "zero line", args: []string{"app.go:0"}, path: "app.go:0"},
 	}
 	for _, tt := range tests {
@@ -129,6 +135,9 @@ func TestParseVimArgs(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error")
+				}
+				if tt.errSub != "" && !strings.Contains(err.Error(), tt.errSub) {
+					t.Fatalf("err = %v, want substring %q", err, tt.errSub)
 				}
 				return
 			}
@@ -248,6 +257,20 @@ func TestNanoCommandUsageError(t *testing.T) {
 	assertNoAppOp(t, ops)
 	if !m.noticeErr || !strings.Contains(m.notice, "usage: /nano") {
 		t.Errorf("notice = %q err=%v", m.notice, m.noticeErr)
+	}
+}
+
+func TestVimCommandUnresolvedAtMention(t *testing.T) {
+	m, ops := newAppTestModel(nil, nil)
+	m.composer.SetValue("/vim @")
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if msg := runAppCmd(t, cmd); msg != nil {
+		t.Errorf("unexpected msg %#v", msg)
+	}
+	assertNoAppOp(t, ops)
+	if !m.noticeErr || !strings.Contains(m.notice, "unresolved") {
+		t.Errorf("notice = %q err=%v, want unresolved mention", m.notice, m.noticeErr)
 	}
 }
 

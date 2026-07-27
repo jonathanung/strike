@@ -24,7 +24,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 	}{
 		"/provider":         {"select a provider and model", "[name [model]]", commandSourceBuiltin},
 		"/model":            {"select a model for the current provider", "[model]", commandSourceBuiltin},
-		"/settings":         {"manage custom providers and settings", "", commandSourceBuiltin},
+		"/settings":         {"defaults (theme, editor, mode) and custom providers", "", commandSourceBuiltin},
 		"/effort":           {"set how much reasoning the model spends", "[level]", commandSourceBuiltin},
 		"/autonomy":         {"set exit-gate policy (supervised/agent/checks)", "[mode]", commandSourceBuiltin},
 		"/mode":             {"set permission posture (default/plan/accept-edits/yolo)", "[mode]", commandSourceBuiltin},
@@ -37,9 +37,9 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/system":           {"focus the system right pane", "", commandSourceBuiltin},
 		"/fast":             {"toggle OpenAI priority tier (faster, ~2× cost)", "[on|off]", commandSourceBuiltin},
 		"/think":            {"show or hide model chain-of-thought", "[on|off]", commandSourceBuiltin},
-		"/vim":              {"open a file in the editor (embedded/modal/takeover; see vimMode)", "[path[:line]]", commandSourceBuiltin},
-		"/nano":             {"open a file in nano (embedded/modal/takeover; see nanoMode)", "[path[:line]]", commandSourceBuiltin},
-		"/md-read":          {"open a markdown file (embedded right pane or modal; see mdReadMode)", "<path>", commandSourceBuiltin},
+		"/vim":              {"open a file in the editor (embedded/modal/takeover; see vimMode)", "[path|@path[:line]]", commandSourceBuiltin},
+		"/nano":             {"open a file in nano (embedded/modal/takeover; see nanoMode)", "[path|@path[:line]]", commandSourceBuiltin},
+		"/md-read":          {"open a markdown file (embedded right pane or modal; see mdReadMode)", "<path|@path>", commandSourceBuiltin},
 		"/theme":            {"select a color theme or set appearance", "[name|dark|light|auto]", commandSourceBuiltin},
 		"/layout":           {"toggle horizontal/vertical pane split", "", commandSourceBuiltin},
 		"/split":            {"toggle horizontal/vertical pane split", "", commandSourceBuiltin},
@@ -53,6 +53,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/memory":           {"list, get, set, delete, export, or import project memory", "[list|get|set|rm|export|import] ...", commandSourceBuiltin},
 		"/issues":           {"list, add, get, close, export, or import project issues", "[list|add|get|close|export|import] ...", commandSourceBuiltin},
 		"/goal":             {"loop harness: set, run, status, pause, resume, abort, log, list", "[set|run|status|pause|resume|abort|log|list] ...", commandSourceBuiltin},
+		"/loop":             {"schedule a recurring LLM job (session-only)", "[interval job|list|stop [id]]", commandSourceBuiltin},
 		"/context":          {"context doctor: system-prompt layer breakdown", "", commandSourceBuiltin},
 		"/effective-prompt": {"context doctor: system-prompt layer breakdown", "", commandSourceBuiltin},
 		"/cost":             {"session token and cost totals", "", commandSourceBuiltin},
@@ -87,7 +88,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 }
 
 func TestValidSkillNameRejectsReservedBuiltinsIncludingMDRead(t *testing.T) {
-	for _, name := range []string{"provider", "model", "effort", "autonomy", "mode", "auth", "agent", "agents", "activity", "files", "visualizer", "system", "fast", "vim", "nano", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "export", "help", "keys", "memory", "issues", "goal", "context", "effective-prompt", "cost", "upgrade", "init", "mcp", "exit", "quit"} {
+	for _, name := range []string{"provider", "model", "effort", "autonomy", "mode", "auth", "agent", "agents", "activity", "files", "visualizer", "system", "fast", "vim", "nano", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "export", "help", "keys", "memory", "issues", "goal", "loop", "context", "effective-prompt", "cost", "upgrade", "init", "mcp", "exit", "quit"} {
 		if validSkillName(name) {
 			t.Errorf("validSkillName(%q) = true, want false for reserved builtin", name)
 		}

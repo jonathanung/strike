@@ -113,6 +113,38 @@ func TestMDReadPathWithSpaces(t *testing.T) {
 	}
 }
 
+func TestMDReadAtMentionPath(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	m.services.Files = &fakeFiles{files: map[string][]byte{
+		"notes.md": []byte("# AtMentionDoc\n"),
+	}}
+	m = runMDRead(t, m, "/md-read @notes.md")
+	if m.windows.active().id() != markdownWindowID {
+		t.Fatalf("active id = %q, want markdown", m.windows.active().id())
+	}
+	mw := m.windows.active().(markdownWindow)
+	if mw.path != "notes.md" {
+		t.Errorf("path = %q, want notes.md", mw.path)
+	}
+	if !strings.Contains(ansi.Strip(m.View()), "AtMentionDoc") {
+		t.Errorf("view missing content: %q", ansi.Strip(m.View()))
+	}
+}
+
+func TestMDReadUnresolvedAtMention(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	m.services.Files = &fakeFiles{files: map[string][]byte{}}
+	m = runMDRead(t, m, "/md-read @")
+	if !m.noticeErr || !strings.Contains(m.notice, "unresolved") {
+		t.Errorf("notice = %q (err=%v), want unresolved mention", m.notice, m.noticeErr)
+	}
+	if m.focus == focusRight {
+		t.Error("unresolved mention forced right focus")
+	}
+}
+
 func TestHelpNoticeIncludesMDRead(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m = runMDRead(t, m, "/help")

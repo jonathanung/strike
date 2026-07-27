@@ -44,7 +44,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 /auth anthropic                # masked API-key input (also: /auth <p> key)
 /auth status                   # anthropic: none · openai: oauth+key · …
 /auth logout <provider>
-/settings                      # manage custom providers and settings
+/settings                      # defaults (theme, editor, mode) + custom providers
 /theme                         # centered color-theme picker (bundled +
                                # ~/.strike/themes + ./.strike/themes)
 /theme <id>                    # apply a theme by id
@@ -60,23 +60,27 @@ strike launches without any provider configured. Pick one inside the TUI:
 /export [path] [--open]        # write the transcript to markdown (default
                                # .strike/exports/… or $TMPDIR); --open hands
                                # the file to $EDITOR / $VISUAL
-/vim [path[:line]]             # open file in editor (embedded/modal/takeover)
-                               # or $EDITOR (see vimMode in config.md)
-/nano [path[:line]]            # open file in nano (embedded/modal/takeover;
-                               # see nanoMode in config.md)
-/md-read <path>                # open markdown (embedded right pane or modal;
-                               # see mdReadMode in config.md)
+/vim [path|@path[:line]]       # open file in editor (embedded/modal/takeover)
+                               # or $EDITOR; @path like composer mentions
+                               # (e.g. /vim @internal/foo.go)
+/nano [path|@path[:line]]      # open file in nano (embedded/modal/takeover;
+                               # @path ok; see nanoMode in config.md)
+/md-read <path|@path>          # open markdown (embedded right pane or modal;
+                               # @path ok; see mdReadMode in config.md)
 /memory [list|get|set|rm|export|import] …
                                # project-scoped durable key/value memory;
                                # export/import portable JSON (default path
                                # strike-memory.json). import merges by key;
                                # add --replace to wipe first
-/issues [list|add|get|close|export|import] …
+ /issues [list|add|get|close|export|import] …
                                # project-scoped issue tracker; export/import
                                # portable JSON (default strike-issues.json).
                                # import merges by id; --replace wipes first.
                                # Relative export/import paths stay under the
                                # project root (no path escape).
+/loop <interval> <job>         # recurring LLM job (session-only; see loop.md)
+/loop list                     # list active loops
+/loop stop [id]                # stop one loop or all
 /context                       # context doctor modal (prompt layer breakdown)
 /effective-prompt              # alias of /context
 /cost                          # session token totals and estimated USD cost
@@ -103,6 +107,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/memory` | bare = list browser (focuses memory pane); `list [tag]`, `get <key>`, `set <key> <value>`, `rm <key>`, `export [path]`, `import <path> [--replace]` (portable JSON; relative paths stay under project root) |
 | `/issues` | bare = list browser (focuses issues pane); `list [open\|closed]`, `add <title>`, `get <id>`, `close <id>`, `export [path]`, `import <path> [--replace]` (same portable rules as memory) |
 | `/agents` `/activity` `/files` `/visualizer` `/system` | jump focus to the named right pane (`/agent` remains persona select) |
+| `/loop` | schedule a recurring prompt (`15m`, `2h`, …); session-only; `/loop list`, `/loop stop [id]` — see [loop.md](loop.md). Distinct from [`/goal`](goal.md) |
 | `/context` | context doctor modal: layer sizes, history msg count, oversized warnings (previews redacted) |
 | `/cost` | session input/output/cache totals from usage events; est. USD when catalog rates known; unknown stays explicit |
 | `/init` | light local scan → write `AGENTS.md`; confirms before overwrite |
@@ -149,6 +154,10 @@ Type `@` then a path fragment for fuzzy project-file completion (needs
 `host.Files`). Matching uses basename and full relative path. Directories
 appear as `@path/`. An exact typed path is always offered when it exists under
 the project root, even if it was outside the fuzzy top results.
+
+File-taking slash commands accept the same `@path` form: `/vim @internal/foo.go`,
+`/nano @notes.txt`, `/md-read @README.md`. Plain paths still work without `@`.
+Bare or invalid mentions (for example `/vim @` or `/vim @../secret`) error.
 
 **Index:** prefers `git ls-files` (honors `.gitignore`); otherwise walks the
 project root. Default skips include `.plan`, `node_modules`, `.git`, `vendor`,
@@ -203,7 +212,7 @@ slot hosts one active window from the registry:
 | `files` | workspace file tree (`host.Files`) |
 | `memory` | project memory browser |
 | `issues` | project issue browser |
-| `markdown` | markdown reader (`/md-read <path>`; or modal via `mdReadMode`) |
+| `markdown` | markdown reader (`/md-read <path|@path>`; or modal via `mdReadMode`) |
 | `editor` | embedded nvim/vim/nano PTY for `/vim` or `/nano` (modal via `vimMode`/`nanoMode`) |
 
 Related right-pane windows stack as **groups** when the pane is tall/wide

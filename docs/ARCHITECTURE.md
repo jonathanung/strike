@@ -267,7 +267,7 @@ Two different mechanisms, depending on whether it needs Go code:
    `autonomy`, `auth`, `settings`, `agent`, `agents`, `activity`, `files`,
    `visualizer`, `system`, `fast`, `vim`, `nano`, `md-read`, `theme`,
    `layout`, `split`, `compact`, `fork`, `undo`, `rewind`, `session`,
-   `export`, `help`, `keys`, `memory`, `issues`, `goal`, `context`,
+   `export`, `help`, `keys`, `memory`, `issues`, `goal`, `loop`, `context`,
    `effective-prompt`, `cost`, `upgrade`, `init`, `mcp`, `exit`, `quit`) are
    rejected by `config.ValidateSkillName` before
    they ever reach the frontend. `/init` is a builtin that writes project

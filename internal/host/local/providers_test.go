@@ -17,6 +17,44 @@ import (
 	"github.com/jonathanung/strike-cli/internal/provider/openaicompat"
 )
 
+func TestStatusesHonorsDisableDefaultProviders(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("XAI_API_KEY", "")
+	t.Setenv("KIMI_API_KEY", "")
+	t.Setenv("DEEPSEEK_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
+
+	store, err := auth.OpenStore(filepath.Join(home, ".strike", "auth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	customs := config.NewCustomStore([]config.CustomProvider{{
+		Name:    "acme",
+		BaseURL: "https://api.acme.example/v1",
+		API:     config.WireOpenAI,
+		Models:  []string{"m1"},
+	}}, "")
+	customs.SetDisableDefault(true, map[string]bool{"openai": false})
+	svc := New(store, nil, nil, nil, nil, nil, customs, "")
+
+	by := statusByName(svc.Auth.Statuses())
+	if _, ok := by["anthropic"]; ok {
+		t.Fatal("anthropic should be hidden")
+	}
+	if _, ok := by["echo"]; ok {
+		t.Fatal("echo should be hidden when bulk-disabled")
+	}
+	if s, ok := by["openai"]; !ok || s.Name != "openai" {
+		t.Fatalf("openai should remain via override: %+v ok=%v", s, ok)
+	}
+	if s, ok := by["acme"]; !ok || !s.Custom {
+		t.Fatalf("custom acme must remain: %+v ok=%v", s, ok)
+	}
+}
+
 func TestCustomProviderHostRoundTrip(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

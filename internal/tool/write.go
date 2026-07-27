@@ -46,8 +46,10 @@ func (writeTool) Execute(ctx context.Context, args json.RawMessage, tc *Context)
 	if err := json.Unmarshal(args, &a); err != nil {
 		return Result{}, fmt.Errorf("invalid arguments: %w", err)
 	}
-	path := absPath(tc.WorkDir, a.FilePath)
-	rel := relPath(tc.WorkDir, path)
+	path, rel, err := resolveInWorkspace(tc.WorkDir, a.FilePath)
+	if err != nil {
+		return Result{}, err
+	}
 	if _, statErr := os.Stat(path); statErr == nil {
 		if err := tc.Files.CheckFresh(path, rel); err != nil {
 			return Result{}, err
