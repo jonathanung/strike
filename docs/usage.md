@@ -81,6 +81,8 @@ strike launches without any provider configured. Pick one inside the TUI:
 /init                          # create or update project AGENTS.md (confirm
                                # before replacing an existing file)
  /mcp                           # MCP status; retry/disable servers
+/exit                          # quit strike (same as ctrl+c)
+/quit                          # alias of /exit
 ```
 
 ### Session, memory, issues

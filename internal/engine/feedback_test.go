@@ -44,6 +44,12 @@ func TestModelFacingToolOutput(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:    "tool user rejected",
+			err:     &tool.UserRejectedError{Message: "stay in plan"},
+			wantOut: protocol.ToolFeedbackUserRejected("stay in plan"),
+			wantErr: true,
+		},
+		{
 			name:    "generic error",
 			err:     errors.New("boom"),
 			wantOut: protocol.ToolFeedbackError("boom"),
@@ -55,6 +61,28 @@ func TestModelFacingToolOutput(t *testing.T) {
 			out, isErr := modelFacingToolOutput(tc.res, tc.err)
 			if out != tc.wantOut || isErr != tc.wantErr {
 				t.Errorf("got (%q, %v), want (%q, %v)", out, isErr, tc.wantOut, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestIsUserTurnInterrupt(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", want: false},
+		{name: "generic", err: errors.New("boom"), want: false},
+		{name: "hard deny", err: &permission.DeniedError{Reason: "no"}, want: false},
+		{name: "perm reject", err: &permission.RejectedError{Message: "nope"}, want: true},
+		{name: "question reject", err: &question.RejectedError{Message: "dismissed"}, want: true},
+		{name: "tool reject", err: &tool.UserRejectedError{Message: "no"}, want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isUserTurnInterrupt(tc.err); got != tc.want {
+				t.Errorf("isUserTurnInterrupt(%v) = %v, want %v", tc.err, got, tc.want)
 			}
 		})
 	}
