@@ -235,6 +235,9 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		// Same graceful shutdown as the global quit keybinding (ctrl+c).
 		return m, tea.Quit
 	default:
+		if isKeybindBackedSlash(fields[0]) {
+			return m.handleKeybindSlashCommand(fields[0])
+		}
 		// Unknown commands fall through to skills: /name args renders the
 		// skill template and submits it as the user message.
 		name := strings.TrimPrefix(fields[0], "/")
