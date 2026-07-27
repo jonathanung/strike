@@ -71,25 +71,28 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	// Composer readline before nav chords so ctrl+k kills in the input
-	// instead of cycling windows / focusing the right pane.
+	// instead of opening the palette (same chord when kill deletes nothing).
 	if m.focus == focusLeft {
 		if next, cmd, ok := m.applyComposerReadline(msg); ok {
 			return next, cmd
 		}
-		// Composer newline (shift+enter → alt+enter) before focus/cycle when
-		// there is text. Empty composer leaves alt+enter for tool expand
-		// (handleToolCellKeys); bare LF / KeyCtrlJ is ctrl+j pane cycle, never
-		// newline (#324 Ubuntu; #421).
-		if key.Matches(msg, m.keyMap.Newline) && strings.TrimSpace(m.composer.Value()) != "" {
-			m.resetHistoryBrowsing()
-			m.composer.InsertString("\n")
-			m.recomputeCompletion()
-			m.reflow()
-			return m, nil
+		// Composer newline (shift+enter → alt+enter; ctrl+j / bare LF / alt+j)
+		// before focus/cycle so it never pane-cycles (#414). Empty-composer
+		// alt+enter is shared with tool expand — defer to handleToolCellKeys
+		// when the chord also matches ToolExpand (#421).
+		if key.Matches(msg, m.keyMap.Newline) {
+			if strings.TrimSpace(m.composer.Value()) == "" && key.Matches(msg, m.keyMap.ToolExpand) {
+				// fall through
+			} else {
+				m.resetHistoryBrowsing()
+				m.composer.InsertString("\n")
+				m.recomputeCompletion()
+				m.reflow()
+				return m, nil
+			}
 		}
 	}
-	// Focus/cycle before other left-composer handling so bare LF ctrl+j
-	// cycles panes even when the composer is focused (#324).
+	// Focus (ctrl+h/l) and cycle (ctrl+o/p) — orientation-independent (#414).
 	if key.Matches(msg, m.keyMap.FocusLeft) {
 		m.completion = nil
 		cmd := m.focusPane(focusLeft)
