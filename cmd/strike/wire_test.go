@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -633,6 +636,171 @@ func TestBuildCustomProvider(t *testing.T) {
 			t.Fatalf("provider = %v", p)
 		}
 	})
+}
+
+func TestBuildBuiltinWithEndpointAnthropic(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PROXY_ANTHROPIC_KEY", "proxy-secret")
+	store, err := auth.OpenStore(filepath.Join(home, ".strike", "auth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var sawPath, sawKey, sawModel string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawPath = r.URL.Path
+		sawKey = r.Header.Get("x-api-key")
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if m, ok := body["model"].(string); ok {
+			sawModel = m
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"stop_reason":"end_turn","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	p, model, err, handled := buildBuiltinWithEndpoint("anthropic", config.ProviderEndpoint{
+		BaseURL:   srv.URL,
+		APIKeyEnv: "PROXY_ANTHROPIC_KEY",
+	}, store)
+	if err != nil || !handled || p == nil {
+		t.Fatalf("err=%v handled=%v p=%v", err, handled, p)
+	}
+	if model == "" {
+		t.Error("expected default anthropic model")
+	}
+	ch, err := p.Stream(context.Background(), provider.Request{
+		Model:     "claude-sonnet-test",
+		MaxTokens: 16,
+		Messages:  []provider.Message{{Role: provider.RoleUser, Text: "hi"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range ch {
+	}
+	if sawPath != "/v1/messages" {
+		t.Errorf("path = %q", sawPath)
+	}
+	if sawKey != "proxy-secret" {
+		t.Errorf("key = %q", sawKey)
+	}
+	if sawModel != "claude-sonnet-test" {
+		t.Errorf("wire model = %q", sawModel)
+	}
+}
+
+func TestBuildBuiltinWithEndpointMissingEnv(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("MISSING_PROXY_KEY", "")
+	store, err := auth.OpenStore(filepath.Join(home, ".strike", "auth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err, handled := buildBuiltinWithEndpoint("anthropic", config.ProviderEndpoint{
+		BaseURL:   "https://proxy.example",
+		APIKeyEnv: "MISSING_PROXY_KEY",
+	}, store)
+	if !handled || err == nil {
+		t.Fatalf("want clear missing-env error, got err=%v handled=%v", err, handled)
+	}
+	if !strings.Contains(err.Error(), "MISSING_PROXY_KEY") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestBuildCustomProviderNestedModelWireID(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("QGENIE_KEY", "sk-test")
+	store, err := auth.OpenStore(filepath.Join(home, ".strike", "auth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var gotModel string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if m, ok := body["model"].(string); ok {
+			gotModel = m
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]any{"role": "assistant", "content": "hi"}, "finish_reason": "stop"},
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	raw := []byte(`{
+  "QGenie_oai": {
+    "npm": "@ai-sdk/openai",
+    "name": "QGenie OAI",
+    "options": {
+      "baseURL": "` + srv.URL + `/v1",
+      "apiKey": "{env:QGENIE_KEY}"
+    },
+    "models": {
+      "gpt-5.5": {
+        "name": "GPT-5.5",
+        "limit": { "context": 272000, "output": 128000 },
+        "variants": {
+          "high": { "reasoningEffort": "high", "textVerbosity": "low" }
+        }
+      }
+    }
+  }
+}`)
+	pf, err := config.ParseProvidersFile(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cp := pf.Customs[0]
+	p, defaultModel, err := buildCustomProvider(cp, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaultModel != "gpt-5.5" {
+		t.Fatalf("defaultModel = %q (must be map key, not display name)", defaultModel)
+	}
+	ch, err := p.Stream(context.Background(), provider.Request{
+		Model:    defaultModel,
+		Messages: []provider.Message{{Role: provider.RoleUser, Text: "hi"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range ch {
+	}
+	if gotModel != "gpt-5.5" {
+		t.Errorf("wire model = %q, want map key gpt-5.5 (not display name)", gotModel)
+	}
+}
+
+func TestBuildCustomProviderMissingAPIKeyEnv(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("ABSENT_KEY", "")
+	store, err := auth.OpenStore(filepath.Join(home, ".strike", "auth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = buildCustomProvider(config.CustomProvider{
+		Name:      "proxy",
+		BaseURL:   "https://proxy.example/v1",
+		API:       config.WireOpenAI,
+		APIKeyEnv: "ABSENT_KEY",
+	}, store)
+	if err == nil {
+		t.Fatal("expected missing env error")
+	}
+	if !strings.Contains(err.Error(), "ABSENT_KEY") {
+		t.Errorf("err = %v", err)
+	}
 }
 
 func TestOptionalBearer(t *testing.T) {
