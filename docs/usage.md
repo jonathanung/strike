@@ -55,9 +55,10 @@ strike launches without any provider configured. Pick one inside the TUI:
 /export [path] [--open]        # write the transcript to markdown (default
                                # .strike/exports/… or $TMPDIR); --open hands
                                # the file to $EDITOR / $VISUAL
-/vim [path[:line]]             # open file in embedded editor (pane/overlay)
+/vim [path[:line]]             # open file in editor (embedded/modal/takeover)
                                # or $EDITOR (see vimMode in config.md)
-/md-read <path>                # open a markdown file in the right markdown pane
+/md-read <path>                # open markdown (embedded right pane or modal;
+                               # see mdReadMode in config.md)
 /memory [list|get|set|rm|export|import] …
                                # project-scoped durable key/value memory;
                                # export/import portable JSON (default path
@@ -192,8 +193,8 @@ slot hosts one active window from the registry:
 | `files` | workspace file tree (`host.Files`) |
 | `memory` | project memory browser |
 | `issues` | project issue browser |
-| `markdown` | markdown reader (`/md-read <path>`) |
-| `editor` | embedded nvim/vim/nano PTY for `/vim` |
+| `markdown` | markdown reader (`/md-read <path>`; or modal via `mdReadMode`) |
+| `editor` | embedded nvim/vim/nano PTY for `/vim` (or modal via `vimMode`) |
 
 Related right-pane windows stack as **groups** when the pane is tall/wide
 enough: session (`context`+`activity`), agents (`agents`+`visualizer`), and

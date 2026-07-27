@@ -33,10 +33,16 @@ type Config struct {
 	// ~/.strike/themes or ./.strike/themes). Empty means the stock "strike"
 	// palette.
 	Theme string `json:"theme,omitempty"`
-	// VimMode is how /vim presents the editor: "pane" (default, embedded
-	// right-pane PTY), "overlay" (embedded modal), or "takeover" (full-screen
-	// tea.ExecProcess handoff). Unknown values are ignored at load time.
+	// VimMode is how /vim presents the editor: "pane"/"embedded" (default,
+	// right-pane PTY), "overlay"/"modal" (large scrim modal), or "takeover"
+	// (full-screen tea.ExecProcess handoff). Unknown values are ignored at
+	// load time. Aliases share vocabulary with mdReadMode for nano and other
+	// future surfaces.
 	VimMode string `json:"vimMode,omitempty"`
+	// MdReadMode is how /md-read presents markdown: "embedded"/"pane" (default,
+	// right-pane markdown window) or "modal"/"overlay" (large scrim modal).
+	// Unknown values are ignored at load time.
+	MdReadMode string `json:"mdReadMode,omitempty"`
 	// Notify controls desktop notifications (OSC 9 + bell) for permission/
 	// question asks and long turn completion: "on", "off", or
 	// "unfocused-only" (default). Unknown values are ignored at load time.
@@ -505,6 +511,9 @@ func merge(base, layer Config) Config {
 	}
 	if layer.VimMode != "" {
 		base.VimMode = layer.VimMode
+	}
+	if layer.MdReadMode != "" {
+		base.MdReadMode = layer.MdReadMode
 	}
 	if layer.Notify != "" {
 		base.Notify = layer.Notify

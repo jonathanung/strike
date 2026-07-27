@@ -274,8 +274,10 @@ Two different mechanisms, depending on whether it needs Go code:
    output are stored via `protocol.SessionMeta` and `session` sidecar
    metadata. `/vim` embeds nvim/vim/nano in the right-pane `editor` window by
    default (PTY + vt10x via `internal/tui/term`). Config key `vimMode`
-   selects `pane` (default), `overlay`, or `takeover` (full-screen
-   `tea.ExecProcess`). Editor resolution: `$VISUAL` → `$EDITOR` →
+   selects `pane`/`embedded` (default), `overlay`/`modal` (large scrim
+   popout), or `takeover` (full-screen `tea.ExecProcess`). `/md-read` uses
+   the same presentation vocabulary via `mdReadMode` (`embedded` default,
+   or `modal`). Editor resolution: `$VISUAL` → `$EDITOR` →
    nvim/vim/vi/nano on PATH. GUI `$EDITOR` values always take over.
 - **Builtin command (code).** Add a `commandSpec` to `builtinCommandSpecs`
   in `internal/tui/commands.go`, a `case "/yourcmd":` arm in

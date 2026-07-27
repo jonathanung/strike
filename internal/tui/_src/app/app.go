@@ -109,8 +109,11 @@ type Options struct {
 	// FirstRun is true when the host detected a fresh strike home (no global
 	// config and no real provider credentials). The TUI shows onboarding.
 	FirstRun bool
-	// VimMode selects pane/overlay/takeover for /vim. Empty defaults to pane.
+	// VimMode selects pane/overlay/takeover for /vim (aliases embedded/modal).
+	// Empty defaults to pane.
 	VimMode VimMode
+	// MdReadMode selects embedded|modal for /md-read. Empty defaults to embedded.
+	MdReadMode SurfacePresentation
 	// PermissionAutoApproveSeconds arms permission-modal auto-allow once after
 	// N seconds. Zero disables (default). Clamped by the host before wiring.
 	PermissionAutoApproveSeconds int
@@ -257,6 +260,8 @@ type Model struct {
 	pendingUpgrade bool
 	// vimMode selects pane/overlay/takeover for /vim.
 	vimMode VimMode
+	// mdReadMode selects embedded|modal for /md-read.
+	mdReadMode SurfacePresentation
 	// usage* hold the latest UsageReported figures; Known=false means unknown
 	// (never treat as measured zero). Limits come from the host catalog.
 	// usageSession accumulates session totals for /cost (including resume).
@@ -399,6 +404,9 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		if option.VimMode != "" {
 			m.vimMode = option.VimMode
 		}
+		if option.MdReadMode != "" {
+			m.mdReadMode = option.MdReadMode
+		}
 		if option.NotifyMode != "" {
 			m.notifyMode = option.NotifyMode
 		}
@@ -418,6 +426,9 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 	m.keyMap = buildKeyMap(m.keyOverrides, m.splitOrientation)
 	if m.vimMode == "" {
 		m.vimMode = VimModePane
+	}
+	if m.mdReadMode == "" {
+		m.mdReadMode = PresentationEmbedded
 	}
 	if m.notifyMode == "" {
 		m.notifyMode = NotifyUnfocusedOnly
