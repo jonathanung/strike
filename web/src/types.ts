@@ -23,3 +23,10 @@ export type WorkspaceState = {
   children: Record<string, { agent?: string; status: string; summary?: string }>;
   changedFiles: string[];
 };
+export type ActiveRoot = {
+  id: string; title?: string; agent?: string; busy: boolean;
+  activeAt?: number; createdAt?: number; hasRecentEvent?: boolean;
+};
+export type RootsResponse = { roots: ActiveRoot[]; activeId?: string };
+export type RootCreateResult = { id: string; sessionId: string };
+export type RootResumeResult = { id: string; sessionId: string; resumedId: string; wasActive: boolean };

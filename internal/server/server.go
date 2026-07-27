@@ -42,8 +42,13 @@ type Options struct {
 	// Default 200ms. Tests may lower it.
 	PollInterval time.Duration
 	// Live is an optional engine bridge for composer/ops/status. Nil keeps
-	// read-only attach (JSONL SSE only).
+	// read-only attach (JSONL SSE only). When LiveHub is set, it takes
+	// precedence and Live is ignored.
 	Live *Live
+	// LiveHub is the multi-root active-agent bridge. When set, ops, status,
+	// events, and WebSocket are scoped to ?root=<id>. Nil means single-root
+	// via Live (or attach-only when both are nil).
+	LiveHub *LiveHub
 	// Expose enables LAN-oriented CORS (private-network browser origins) in
 	// addition to localhost. Set when strike serve --expose is used.
 	Expose bool
@@ -167,6 +172,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/issues", s.handleIssues)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/events", s.handleSessionEvents)
 	s.mux.HandleFunc("GET /v1/sessions", s.handleSessions)
+	s.mux.HandleFunc("GET /v1/roots", s.handleRoots)
+	s.mux.HandleFunc("POST /v1/roots", s.handleRootCreate)
+	s.mux.HandleFunc("POST /v1/roots/{id}/activate", s.handleRootActivate)
+	s.mux.HandleFunc("POST /v1/roots/{id}/resume", s.handleRootResume)
 	s.mux.HandleFunc("GET /v1/status", s.handleStatus)
 	s.mux.HandleFunc("GET /v1/agents", s.handleAgents)
 	s.mux.HandleFunc("POST /v1/ops", s.handleOps)
@@ -205,6 +214,33 @@ func (s *Server) withMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// rootParam extracts ?root= from the request. Empty means use active.
+func rootParam(r *http.Request) string {
+	return strings.TrimSpace(r.URL.Query().Get("root"))
+}
+
+// resolveLive returns the Live bridge for the request: LiveHub-scoped when hub is
+// set, otherwise the single Live. Returns nil + writes error response when no
+// live bridge is available.
+func (s *Server) resolveLive(w http.ResponseWriter, r *http.Request) *Live {
+	if s.opts.LiveHub != nil {
+		rootID := rootParam(r)
+		live := s.opts.LiveHub.LiveFor(rootID)
+		if live != nil {
+			s.opts.LiveHub.MarkActive(live.SessionID())
+		}
+		return live
+	}
+	return s.opts.Live
+}
+
+func (s *Server) hasLive() bool {
+	if s.opts.LiveHub != nil {
+		return s.opts.LiveHub.Active() != nil
+	}
+	return s.opts.Live != nil
 }
 
 func stateChanging(method string) bool {

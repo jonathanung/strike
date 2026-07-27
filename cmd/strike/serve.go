@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -198,7 +199,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	var live *server.Live
+	var liveHub *server.LiveHub
 	var services *host.Services
 	var cleanup func() error
 	sessionDir := opts.sessionDir
@@ -220,43 +221,160 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		for _, name := range a.services.Agents {
 			agents = append(agents, server.AgentInfo{Name: name})
 		}
-		live = server.NewLive(a.sessionID, a.workDir, agents, a.eng.Ops())
+
+		// serveRoot tracks one live root engine for cleanup.
+		type serveRoot struct {
+			live    *server.Live
+			bound   session.Bound
+			wtClose func() error
+			cancel  context.CancelFunc
+			done    chan struct{}
+		}
+		var mu sync.Mutex
+		roots := make(map[string]*serveRoot)
+
+		// startServeRoot runs the engine and tees events to its Live bridge.
+		startServeRoot := func(ctx context.Context, slot *rootSlot, live *server.Live) *serveRoot {
+			rctx, rcancel := context.WithCancel(ctx)
+			done := make(chan struct{})
+			if slot.cancel == nil {
+				slot.cancel = rcancel
+			}
+			if slot.done == nil {
+				slot.done = done
+			}
+			sr := &serveRoot{
+				live:    live,
+				bound:   slot.bound,
+				wtClose: slot.wtClose,
+				cancel:  rcancel,
+				done:    done,
+			}
+			go func() {
+				defer close(done)
+				runSession(rctx, slot.eng.Run, slot.eng.Events(), slot.bound, func(events <-chan protocol.Event) error {
+					for {
+						select {
+						case <-rctx.Done():
+							return nil
+						case ev, ok := <-events:
+							if !ok {
+								return nil
+							}
+							live.Publish(ev)
+						}
+					}
+				})
+			}()
+			return sr
+		}
+
+		// Build LiveHub with spawn and resume callbacks.
+		liveHub = server.NewLiveHub(
+			func(ctx context.Context) (string, error) {
+				slot, err := a.spawnRoot("")
+				if err != nil {
+					return "", err
+				}
+				live := server.NewLive(slot.id, slot.workDir, agents, slot.eng.Ops())
+				sr := startServeRoot(ctx, slot, live)
+				mu.Lock()
+				roots[slot.id] = sr
+				mu.Unlock()
+				liveHub.Add(slot.id, live)
+				if info, err := a.sessions.Get(slot.id); err == nil && info.Title != "" {
+					liveHub.SetTitle(slot.id, info.Title)
+				}
+				return slot.id, nil
+			},
+			func(ctx context.Context, sessionID string) (string, bool, error) {
+				// Validate: session must exist and be a root.
+				sessionID = strings.TrimSpace(sessionID)
+				if sessionID == "" {
+					return "", false, fmt.Errorf("session id is empty")
+				}
+				info, err := a.sessions.Get(sessionID)
+				if err != nil {
+					return "", false, fmt.Errorf("session %q not found", sessionID)
+				}
+				if info.ParentSessionID != "" {
+					return "", false, fmt.Errorf("cannot resume child session %q; resume a root session", sessionID)
+				}
+				// Already live: just activate.
+				mu.Lock()
+				_, exists := roots[sessionID]
+				mu.Unlock()
+				if exists {
+					if err := liveHub.Activate(sessionID); err != nil {
+						return "", false, err
+					}
+					return sessionID, true, nil
+				}
+				// Open the durable session.
+				slot, err := a.spawnRoot(sessionID)
+				if err != nil {
+					return "", false, err
+				}
+				live := server.NewLive(slot.id, slot.workDir, agents, slot.eng.Ops())
+				sr := startServeRoot(ctx, slot, live)
+				mu.Lock()
+				roots[slot.id] = sr
+				mu.Unlock()
+				liveHub.Add(slot.id, live)
+				if info, err := a.sessions.Get(slot.id); err == nil && info.Title != "" {
+					liveHub.SetTitle(slot.id, info.Title)
+				}
+				return slot.id, false, nil
+			},
+		)
+
+		// Add initial root from the first assembly slot.
+		initialSlot := a.firstSlot
+		initialLive := server.NewLive(initialSlot.id, initialSlot.workDir, agents, initialSlot.eng.Ops())
+		liveHub.Add(initialSlot.id, initialLive)
+		if info, err := a.sessions.Get(initialSlot.id); err == nil && info.Title != "" {
+			liveHub.SetTitle(initialSlot.id, info.Title)
+		}
+		initialSR := startServeRoot(ctx, initialSlot, initialLive)
+		roots[initialSlot.id] = initialSR
+
 		services = &a.services
 
-		engineDone := make(chan error, 1)
-		go func() {
-			engineDone <- runSession(ctx, a.eng.Run, a.eng.Events(), a.store, func(events <-chan protocol.Event) error {
-				for {
-					select {
-					case <-ctx.Done():
-						return nil
-					case ev, ok := <-events:
-						if !ok {
-							return nil
-						}
-						live.Publish(ev)
+		cleanup = func() error {
+			if liveHub != nil {
+				liveHub.Close()
+			}
+			stop()
+			mu.Lock()
+			refs := make([]*serveRoot, 0, len(roots))
+			for _, r := range roots {
+				refs = append(refs, r)
+			}
+			mu.Unlock()
+			var out error
+			// Cancel all engines.
+			for _, sr := range refs {
+				if sr.cancel != nil {
+					sr.cancel()
+				}
+			}
+			// Wait for all engines to finish.
+			for _, sr := range refs {
+				<-sr.done
+			}
+			// Close all binds, worktrees, and shared services.
+			for _, sr := range refs {
+				if err := sr.bound.Close(); err != nil && out == nil {
+					out = err
+				}
+				if sr.wtClose != nil {
+					if err := sr.wtClose(); err != nil && out == nil {
+						out = err
 					}
 				}
-			})
-		}()
-
-		cleanup = func() error {
-			live.Close()
-			stop()
-			var out error
-			select {
-			case err := <-engineDone:
-				out = err
-			case <-time.After(8 * time.Second):
-				out = errors.New("engine shutdown timeout")
 			}
 			if a.mcpClose != nil {
 				if err := a.mcpClose(); err != nil && out == nil {
-					out = err
-				}
-			}
-			if a.worktreeClose != nil {
-				if err := a.worktreeClose(); err != nil && out == nil {
 					out = err
 				}
 			}
@@ -289,7 +407,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		Auth:       opts.auth,
 		Token:      token,
 		SessionDir: sessionDir,
-		Live:       live,
+		LiveHub:    liveHub,
 		Expose:     opts.expose || !server.IsLocalhostBind(opts.addr),
 		AllowCIDRs: allowCIDRs,
 		Services:   services,
@@ -321,7 +439,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		auth:       opts.auth,
 		minted:     minted,
 		exposed:    exposed,
-		live:       live,
+		liveHub:    liveHub,
 		provider:   opts.provider,
 		sessionDir: sessionDir,
 		allowCIDR:  []string(opts.allowCIDR),
@@ -368,7 +486,7 @@ type serveBanner struct {
 	auth       bool
 	minted     bool
 	exposed    bool
-	live       *server.Live
+	liveHub    *server.LiveHub
 	provider   string
 	sessionDir string
 	allowCIDR  []string
@@ -403,8 +521,11 @@ func printServeBanner(w io.Writer, b serveBanner) {
 			fmt.Fprintf(w, "  cockpit: http://%s/attach\n", b.listenAddr)
 		}
 	}
-	if b.live != nil {
-		fmt.Fprintf(w, "  live:    session %s  provider %s\n", b.live.SessionID(), b.provider)
+	if b.liveHub != nil {
+		active := b.liveHub.Active()
+		if active != nil {
+			fmt.Fprintf(w, "  live:    session %s  provider %s\n", active.SessionID(), b.provider)
+		}
 		if b.exposed {
 			if ips := server.LANIPs(); len(ips) > 0 {
 				fmt.Fprintf(w, "  ws:      ws://%s/v1/ws?token=<token>\n", net.JoinHostPort(ips[0], b.port))

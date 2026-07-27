@@ -1,4 +1,4 @@
-import type { Bootstrap, Envelope, Session } from "./types";
+import type { Bootstrap, Envelope, RootsResponse, RootCreateResult, RootResumeResult, Session } from "./types";
 
 const queryToken = new URLSearchParams(location.search).get("token") || "";
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -12,16 +12,26 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
 }
 export const bootstrap = () => request<Bootstrap>("/v1/bootstrap");
 export const sessions = () => request<{ sessions: Session[]; liveId?: string }>("/v1/sessions");
-export const sendOp = (type: string, data?: unknown) => request<{ ok: boolean }>("/v1/ops", { method: "POST", body: JSON.stringify({ type, ...(data === undefined ? {} : { data }) }) });
+export const sendOp = (type: string, data?: unknown, rootID?: string) => {
+  const qs = rootID ? `?root=${encodeURIComponent(rootID)}` : "";
+  return request<{ ok: boolean }>(`/v1/ops${qs}`, { method: "POST", body: JSON.stringify({ type, ...(data === undefined ? {} : { data }) }) });
+};
 
-export function liveConnection(onEvent: (event: Envelope) => void, onState: (state: string) => void) {
+// --- root API ---
+export const roots = () => request<RootsResponse>("/v1/roots");
+export const createRoot = () => request<RootCreateResult>("/v1/roots", { method: "POST" });
+export const activateRoot = (id: string) => request<{ ok: boolean }>(`/v1/roots/${encodeURIComponent(id)}/activate`, { method: "POST" });
+export const resumeRoot = (sessionID: string) => request<RootResumeResult>(`/v1/roots/${encodeURIComponent(sessionID)}/resume`, { method: "POST" });
+
+export function liveConnection(rootID: string, onEvent: (event: Envelope) => void, onState: (state: string) => void) {
   let socket: WebSocket | undefined;
   let retry = 0;
   let closed = false;
   const connect = () => {
     const scheme = location.protocol === "https:" ? "wss:" : "ws:";
     const token = queryToken ? `?token=${encodeURIComponent(queryToken)}` : "";
-    socket = new WebSocket(`${scheme}//${location.host}/v1/ws${token}`);
+    const rootParam = rootID ? `${token ? "&" : "?"}root=${encodeURIComponent(rootID)}` : "";
+    socket = new WebSocket(`${scheme}//${location.host}/v1/ws${token}${rootParam}`);
     socket.onopen = () => { retry = 0; onState("connected"); };
     socket.onmessage = (message) => { try { onEvent(JSON.parse(message.data)); } catch { onState("invalid event"); } };
     socket.onerror = () => onState("transport error");

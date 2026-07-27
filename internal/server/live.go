@@ -3,11 +3,266 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
+
+// RootSummary is a public response payload for one active root.
+type RootSummary struct {
+	ID             string `json:"id"`
+	Title          string `json:"title,omitempty"`
+	Agent          string `json:"agent,omitempty"`
+	Busy           bool   `json:"busy"`
+	ActiveAt       int64  `json:"activeAt,omitempty"` // unix millis of last activity
+	CreatedAt      int64  `json:"createdAt,omitempty"`
+	HasRecentEvent bool   `json:"hasRecentEvent"`
+}
+
+// RootCreateResult is returned after creating a new root.
+type RootCreateResult struct {
+	ID        string `json:"id"`
+	SessionID string `json:"sessionId"`
+}
+
+// RootResumeResult is returned after resuming a durable session.
+type RootResumeResult struct {
+	ID        string `json:"id"`
+	SessionID string `json:"sessionId"`
+	ResumedID string `json:"resumedId"` // the durable id that was resumed
+	WasActive bool   `json:"wasActive"` // true when already live (just activated)
+}
+
+// RootSpawnFunc creates a new engine+session, returns its id. Called by LiveHub.Create.
+type RootSpawnFunc func(ctx context.Context) (rootID string, err error)
+
+// RootResumeFunc opens or activates a durable session. Called by LiveHub.Resume.
+// sessionID is the durable session id to resume. Returns the Live id and a flag
+// indicating whether it was already live (activate-only).
+type RootResumeFunc func(ctx context.Context, sessionID string) (rootID string, wasActive bool, err error)
+
+// rootEntry tracks one live root inside LiveHub.
+type rootEntry struct {
+	live     *Live
+	title    string
+	activeAt time.Time
+	created  time.Time
+}
+
+// LiveHub owns multiple Live bridges, one per active root session, and scopes
+// HTTP ops/status/events/ws to the root id in ?root=<id>.
+type LiveHub struct {
+	mu      sync.RWMutex
+	active  string
+	entries map[string]*rootEntry
+	closeCh chan struct{}
+
+	spawn  RootSpawnFunc
+	resume RootResumeFunc
+}
+
+// NewLiveHub creates an empty hub. Callers wire lifecycle functions.
+func NewLiveHub(spawn RootSpawnFunc, resume RootResumeFunc) *LiveHub {
+	return &LiveHub{
+		entries: make(map[string]*rootEntry),
+		closeCh: make(chan struct{}),
+		spawn:   spawn,
+		resume:  resume,
+	}
+}
+
+// Add registers a live bridge for id and sets it as active when it's the first.
+func (h *LiveHub) Add(id string, live *Live) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	now := time.Now()
+	h.entries[id] = &rootEntry{live: live, activeAt: now, created: now}
+	if h.active == "" {
+		h.active = id
+	}
+}
+
+// Remove stops and removes id from the hub. If it was active, the first remaining
+// entry becomes active.
+func (h *LiveHub) Remove(id string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	entry, ok := h.entries[id]
+	if !ok {
+		return
+	}
+	entry.live.Close()
+	delete(h.entries, id)
+	if h.active == id {
+		h.active = ""
+		for rid := range h.entries {
+			h.active = rid
+			break
+		}
+	}
+}
+
+// Active returns the currently active live bridge, or nil.
+func (h *LiveHub) Active() *Live {
+	if h == nil {
+		return nil
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if entry, ok := h.entries[h.active]; ok {
+		return entry.live
+	}
+	return nil
+}
+
+// LiveFor returns the live bridge for a given root id, or nil.
+func (h *LiveHub) LiveFor(rootID string) *Live {
+	if h == nil {
+		return nil
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if rootID == "" {
+		rootID = h.active
+	}
+	if entry, ok := h.entries[rootID]; ok {
+		return entry.live
+	}
+	return nil
+}
+
+// ActiveID returns the active root id.
+func (h *LiveHub) ActiveID() string {
+	if h == nil {
+		return ""
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.active
+}
+
+// List returns a snapshot of all active root sessions.
+func (h *LiveHub) List() []RootSummary {
+	if h == nil {
+		return nil
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	out := make([]RootSummary, 0, len(h.entries))
+	for id, e := range h.entries {
+		s := e.live.Status()
+		out = append(out, RootSummary{
+			ID:             id,
+			Title:          e.title,
+			Agent:          s.Agent,
+			Busy:           s.Busy,
+			ActiveAt:       e.activeAt.UnixMilli(),
+			CreatedAt:      e.created.UnixMilli(),
+			HasRecentEvent: time.Since(e.activeAt) < 5*time.Minute,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].ActiveAt != out[j].ActiveAt {
+			return out[i].ActiveAt > out[j].ActiveAt
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out
+}
+
+// Create spawns a new empty root engine via the spawn callback and activates it.
+func (h *LiveHub) Create(ctx context.Context) (RootCreateResult, error) {
+	if h.spawn == nil {
+		return RootCreateResult{}, errors.New("root creation unavailable")
+	}
+	rootID, err := h.spawn(ctx)
+	if err != nil {
+		return RootCreateResult{}, err
+	}
+	h.mu.Lock()
+	if h.entries[rootID] != nil {
+		h.active = rootID
+	}
+	h.mu.Unlock()
+	return RootCreateResult{ID: rootID, SessionID: rootID}, nil
+}
+
+// Activate switches the active root to id. Returns an error when id is not live.
+func (h *LiveHub) Activate(id string) error {
+	id = trimRootID(id)
+	if id == "" {
+		return fmt.Errorf("root id is empty")
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if _, ok := h.entries[id]; !ok {
+		return fmt.Errorf("root %q is not active", id)
+	}
+	h.active = id
+	h.entries[id].activeAt = time.Now()
+	return nil
+}
+
+// Resume restores a durable session as an active root via the resume callback.
+// Rejects missing and child-session IDs.
+func (h *LiveHub) Resume(ctx context.Context, sessionID string) (RootResumeResult, error) {
+	sessionID = trimRootID(sessionID)
+	if sessionID == "" {
+		return RootResumeResult{}, fmt.Errorf("session id is empty")
+	}
+	if h.resume == nil {
+		return RootResumeResult{}, errors.New("resume unavailable")
+	}
+	rootID, wasActive, err := h.resume(ctx, sessionID)
+	if err != nil {
+		return RootResumeResult{}, err
+	}
+	return RootResumeResult{
+		ID:        rootID,
+		SessionID: rootID,
+		ResumedID: sessionID,
+		WasActive: wasActive,
+	}, nil
+}
+
+// Close stops every live bridge and unblocks subscribers.
+func (h *LiveHub) Close() {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, e := range h.entries {
+		e.live.Close()
+	}
+	h.entries = nil
+}
+
+// MarkActive refreshes the activeAt timestamp for a root.
+func (h *LiveHub) MarkActive(id string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if entry, ok := h.entries[id]; ok {
+		entry.activeAt = time.Now()
+	}
+}
+
+// SetTitle records a display title for a root.
+func (h *LiveHub) SetTitle(id, title string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if entry, ok := h.entries[id]; ok {
+		entry.title = title
+	}
+}
+
+func trimRootID(id string) string {
+	return strings.TrimSpace(id)
+}
 
 // AgentInfo is a selectable agent exposed to the web UI.
 type AgentInfo struct {

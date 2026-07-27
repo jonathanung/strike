@@ -1,8 +1,8 @@
 import { FormEvent, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { bootstrap, historicalConnection, liveConnection, request, sendOp, sessions as loadSessions } from "./api";
+import { activateRoot, bootstrap, createRoot, historicalConnection, liveConnection, request, resumeRoot, roots as loadRoots, sendOp, sessions as loadSessions } from "./api";
 import { initialState, reduceEvent } from "./reducer";
 import { Transcript } from "./Transcript";
-import type { Bootstrap, ImageAttachment, Session, Status } from "./types";
+import type { ActiveRoot, Bootstrap, ImageAttachment, Session, Status } from "./types";
 import "./styles.css";
 
 type InspectorTab = "context" | "activity" | "files" | "project" | "capabilities";
@@ -15,7 +15,7 @@ const slashCommands: Completion[] = [
   { label: "/rewind-files", detail: "Rewind turn and file checkpoints", insert: "/rewind-files" },
 ];
 
-const op = (type: string, data?: unknown) => sendOp(type, data).catch((error) => window.alert(error.message));
+const op = (type: string, data?: unknown, rootID?: string) => sendOp(type, data, rootID).catch((error) => window.alert(error.message));
 
 function Field({ label, value, values, disabled, onChange }: { label: string; value?: string; values: string[]; disabled?: boolean; onChange: (value: string) => void }) {
   return <label className="runtime-field"><span>{label}</span><select aria-label={label} value={value || ""} disabled={disabled} onChange={(event) => onChange(event.target.value)}><option value="">—</option>{values.map((item) => <option key={item}>{item}</option>)}</select></label>;
@@ -38,8 +38,13 @@ const readAttachment = (file: File) => new Promise<ImageAttachment>((resolve, re
 export default function App() {
   const [boot, setBoot] = useState<Bootstrap>();
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [activeRoots, setActiveRoots] = useState<ActiveRoot[]>([]);
   const [liveID, setLiveID] = useState("");
+  const [activeRootID, setActiveRootID] = useState("");
   const [selectedID, setSelectedID] = useState("");
+  const [selectedIsLive, setSelectedIsLive] = useState(false);
+  const [navTab, setNavTab] = useState<"active" | "history">("active");
+  const [historySearch, setHistorySearch] = useState("");
   const [state, dispatch] = useReducer(reduceEvent, undefined, initialState);
   const [transport, setTransport] = useState("connecting");
   const [draft, setDraft] = useState("");
@@ -58,11 +63,22 @@ export default function App() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const refreshSessions = () => loadSessions().then((list) => { setSessions(list.sessions || []); setLiveID(list.liveId || ""); return list; });
+  const refreshRoots = () => loadRoots().then((r) => { setActiveRoots(r.roots || []); setActiveRootID(r.activeId || ""); return r; }).catch(() => {});
   useEffect(() => {
-    Promise.all([bootstrap(), loadSessions()]).then(([nextBoot, list]) => {
+    Promise.all([bootstrap(), loadSessions(), loadRoots()]).then(([nextBoot, list, r]) => {
       setBoot(nextBoot);
       if (nextBoot.status) dispatch({ type: "status", data: nextBoot.status });
-      setSessions(list.sessions || []); setLiveID(list.liveId || nextBoot.status?.sessionId || ""); setSelectedID(list.liveId || nextBoot.status?.sessionId || list.sessions?.[0]?.id || "");
+      setSessions(list.sessions || []);
+      const hasRoots = Boolean(nextBoot.capabilities.roots && r.roots?.length);
+      setLiveID(list.liveId || nextBoot.status?.sessionId || "");
+      const rootsArr = hasRoots ? (r.roots || []) : [];
+      setActiveRoots(rootsArr);
+      setActiveRootID(r.activeId || list.liveId || nextBoot.status?.sessionId || "");
+      const firstLive = rootsArr[0]?.id || (nextBoot.capabilities.roots ? "" : list.liveId) || "";
+      const firstID = firstLive || list.sessions?.[0]?.id || "";
+      setSelectedID(firstID);
+      setSelectedIsLive(Boolean(firstLive && firstID === firstLive));
+      setNavTab(firstLive ? "active" : "history");
       if (nextBoot.capabilities.auth) request<{ providers: Array<{ Name?: string; name?: string }> }>("/v1/providers").then((v) => setProviders(v.providers.map((p) => p.Name || p.name || "").filter(Boolean))).catch(() => {});
       if (nextBoot.capabilities.history) request<{ entries: string[] }>("/v1/history").then((v) => setHistory(v.entries || [])).catch(() => {});
     }).catch((error) => setTransport(error.message));
@@ -71,17 +87,17 @@ export default function App() {
   useEffect(() => {
     if (!selectedID) return;
     dispatch({ type: "workspace.reset", data: { sessionId: selectedID } });
-    if (selectedID !== liveID || !liveID || boot?.attachOnly) return historicalConnection(selectedID, dispatch, (message) => setTransport(message));
-    const live = liveConnection(dispatch, setTransport);
+    if (!selectedIsLive) return historicalConnection(selectedID, dispatch, (message) => setTransport(message));
+    const live = liveConnection(selectedID, dispatch, setTransport);
     return () => live.close();
-  }, [selectedID, liveID, boot?.attachOnly]);
+  }, [selectedID, selectedIsLive]);
   useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, [state.items]);
   useEffect(() => {
-    if (state.status.busy || !queue.length || selectedID !== liveID) return;
-    const [next, ...rest] = queue; setQueue(rest); void op("user.input", { text: next.text, images: next.images.map(({ mime, data }) => ({ mime, data })) });
-  }, [state.status.busy, queue, selectedID, liveID]);
+    if (state.status.busy || !queue.length || !selectedIsLive) return;
+    const [next, ...rest] = queue; setQueue(rest); void op("user.input", { text: next.text, images: next.images.map(({ mime, data }) => ({ mime, data })) }, selectedID);
+  }, [state.status.busy, queue, selectedIsLive, selectedID]);
 
-  const isLive = Boolean(liveID && selectedID === liveID && !boot?.attachOnly);
+  const isLive = Boolean(selectedIsLive && selectedID && !boot?.attachOnly);
   const children = useMemo(() => Object.entries(state.children), [state.children]);
   const completions = useMemo(() => {
     const token = draft.split(/\s/).at(-1) || "";
@@ -92,11 +108,11 @@ export default function App() {
 
   const execute = (text: string, attached: ImageAttachment[]) => {
     const command = text.trim();
-    if (command === "/compact") return void op("compact", { strategy: "summarize" });
-    if (command === "/prompt") return void op("inspect.prompt");
-    if (command === "/rewind") return void op("rewind", {});
-    if (command === "/rewind-files") return void op("rewind", { restoreFiles: true });
-    void op("user.input", { text: command, images: attached.map(({ mime, data }) => ({ mime, data })) });
+    if (command === "/compact") return void op("compact", { strategy: "summarize" }, selectedID);
+    if (command === "/prompt") return void op("inspect.prompt", undefined, selectedID);
+    if (command === "/rewind") return void op("rewind", {}, selectedID);
+    if (command === "/rewind-files") return void op("rewind", { restoreFiles: true }, selectedID);
+    void op("user.input", { text: command, images: attached.map(({ mime, data }) => ({ mime, data })) }, selectedID);
   };
   const submit = (event: FormEvent) => {
     event.preventDefault(); const text = draft.trim(); if (!text || !isLive) return;
@@ -106,7 +122,7 @@ export default function App() {
   const selectCompletion = (item: Completion) => setDraft((value) => `${value.slice(0, value.lastIndexOf(value.split(/\s/).at(-1) || ""))}${item.insert} `);
   const attach = async (files: FileList | null) => { if (!files) return; try { const added = await Promise.all([...files].map(readAttachment)); setImages((old) => [...old, ...added]); } catch (error) { window.alert((error as Error).message); } };
   const selectProvider = async (provider: string) => {
-    void op("select.model", { provider });
+    void op("select.model", { provider }, selectedID);
     if (boot?.capabilities.catalog) request<{ models: Array<{ ID?: string; id?: string }> }>(`/v1/models?provider=${encodeURIComponent(provider)}`).then((v) => setModels(v.models.map((m) => m.ID || m.id || "").filter(Boolean))).catch(() => setModels([]));
   };
   const inspectProject = async (tab: InspectorTab) => {
@@ -121,22 +137,47 @@ export default function App() {
     if (action === "delete" && window.confirm("Delete this durable session?")) await request(`/v1/sessions/${encodeURIComponent(selectedID)}`, { method: "DELETE" });
     await refreshSessions();
   };
+  const handleCreateWorkspace = async () => {
+    if (!boot?.capabilities.roots) return;
+    try {
+      const result = await createRoot();
+      await refreshRoots();
+      setSelectedID(result.id);
+      setSelectedIsLive(true);
+      setNavTab("active");
+    } catch (error) { window.alert((error as Error).message); }
+  };
+  const handleResume = async (id: string) => {
+    if (!boot?.capabilities.roots) return;
+    try {
+      const result = await resumeRoot(id);
+      await refreshRoots();
+      setSelectedID(result.id);
+      setSelectedIsLive(true);
+      setNavTab("active");
+    } catch (error) { window.alert((error as Error).message); }
+  };
+  const selectWorkspace = (id: string, isLive: boolean) => {
+    setSelectedID(id);
+    setSelectedIsLive(isLive);
+    setNavOpen(false);
+  };
 
   return <div className="app-shell">
     <header><button className="icon-button mobile-only" aria-label="Open navigation" onClick={() => setNavOpen(true)}>☰</button><div className="wordmark"><span className="mark">S</span><strong>STRIKE</strong><small>workspace</small></div><div className="session-line"><span className={state.status.busy ? "pulse busy" : "pulse"} />{state.status.busy ? "agent working" : transport}</div><button className="icon-button" aria-label="Open settings" onClick={() => setSettingsOpen(true)}>⚙</button><button className="icon-button" aria-label="Toggle inspector" aria-pressed={inspectorOpen} onClick={() => setInspectorOpen((open) => !open)}>◫</button></header>
-    <aside className={`navigation ${navOpen ? "open" : ""}`} aria-label="Workspace navigation"><div className="aside-heading"><span>SESSIONS</span><button className="mobile-only" aria-label="Close navigation" onClick={() => setNavOpen(false)}>×</button></div><nav>{sessions.map((session) => <button key={session.id} className={session.id === selectedID ? "session active" : "session"} onClick={() => { setSelectedID(session.id); setNavOpen(false); }}><span>{session.title || session.id.slice(0, 12)}</span>{session.id === liveID && <small>LIVE</small>}</button>)}</nav><div className="session-actions" aria-label="Session actions"><button disabled={!boot?.capabilities.sessions} onClick={() => void sessionAction("fork")}>Fork</button><button disabled={!boot?.capabilities.sessions} onClick={() => void sessionAction("rename")}>Rename</button><button disabled={!boot?.capabilities.sessions} onClick={() => void sessionAction("delete")}>Delete</button></div><div className="aside-heading">CHILD AGENTS</div><div className="children">{children.length ? children.map(([id, child]) => <div key={id}><span className={`child-state ${child.status}`} />{child.agent || id.slice(0, 8)}<small>{child.status}</small></div>) : <p>None dispatched</p>}</div><div className="workspace-meta"><span>ROOT</span><code>{state.status.cwd || "unavailable"}</code><span>BUILD</span><code>{boot?.version || "…"}</code></div></aside>
+    <aside className={`navigation ${navOpen ? "open" : ""}`} aria-label="Workspace navigation">{boot?.capabilities.roots ? <><div className="aside-heading"><button className={`nav-tab ${navTab === "active" ? "active" : ""}`} onClick={() => setNavTab("active")}>ACTIVE</button><button className={`nav-tab ${navTab === "history" ? "active" : ""}`} onClick={() => setNavTab("history")}>HISTORY</button><button className="mobile-only" aria-label="Close navigation" onClick={() => setNavOpen(false)}>×</button></div>{navTab === "active" && <><nav>{activeRoots.map((root) => <button key={root.id} className={root.id === selectedID && selectedIsLive ? "session active" : "session"} onClick={() => selectWorkspace(root.id, true)}><span className={root.busy ? "root-busy" : "root-idle"} />{root.agent || root.id.slice(0, 12)}{root.busy && <small>BUSY</small>}</button>)}</nav>{!boot?.attachOnly && <div className="session-actions"><button onClick={() => void handleCreateWorkspace()}>+ New workspace</button></div>}</>}{navTab === "history" && <><input className="history-search" type="search" placeholder="Search sessions…" aria-label="Search sessions" value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} /><nav>{sessions.filter((s) => !historySearch || s.title?.toLowerCase().includes(historySearch.toLowerCase()) || s.id.toLowerCase().includes(historySearch.toLowerCase())).map((session) => { const isActiveWorkspace = activeRoots.some((r) => r.id === session.id); return <button key={session.id} className={session.id === selectedID ? "session active" : "session"} onClick={() => selectWorkspace(session.id, isActiveWorkspace)}><span>{session.title || session.id.slice(0, 12)}</span>{isActiveWorkspace && <small className="live-badge">LIVE</small>}</button>; })}</nav><div className="session-actions">{!selectedIsLive && !boot?.attachOnly && <button onClick={() => void handleResume(selectedID)}>Resume as workspace</button>}{boot?.capabilities.sessions && <><button disabled={!boot?.capabilities.sessions} onClick={() => void sessionAction("fork")}>Fork</button><button disabled={!boot?.capabilities.sessions} onClick={() => void sessionAction("rename")}>Rename</button><button disabled={!boot?.capabilities.sessions} onClick={() => void sessionAction("delete")}>Delete</button></>}</div></>}</> : <><div className="aside-heading"><span>SESSIONS</span><button className="mobile-only" aria-label="Close navigation" onClick={() => setNavOpen(false)}>×</button></div><nav>{sessions.map((session) => <button key={session.id} className={session.id === selectedID ? "session active" : "session"} onClick={() => { setSelectedID(session.id); setSelectedIsLive(session.id === liveID && !boot?.attachOnly); setNavOpen(false); }}><span>{session.title || session.id.slice(0, 12)}</span>{session.id === liveID && <small>LIVE</small>}</button>)}</nav><div className="session-actions" aria-label="Session actions"><button disabled={!boot?.capabilities.sessions} onClick={() => void sessionAction("fork")}>Fork</button><button disabled={!boot?.capabilities.sessions} onClick={() => void sessionAction("rename")}>Rename</button><button disabled={!boot?.capabilities.sessions} onClick={() => void sessionAction("delete")}>Delete</button></div></>}<div className="aside-heading">CHILD AGENTS</div><div className="children">{children.length ? children.map(([id, child]) => <div key={id}><span className={`child-state ${child.status}`} />{child.agent || id.slice(0, 8)}<small>{child.status}</small></div>) : <p>None dispatched</p>}</div><div className="workspace-meta"><span>ROOT</span><code>{state.status.cwd || "unavailable"}</code><span>BUILD</span><code>{boot?.version || "…"}</code></div></aside>
     <main>
-      <section className="runtime" aria-label="Runtime controls"><Field label="Provider" value={state.status.provider} values={providers.length ? providers : state.status.provider ? [state.status.provider] : []} disabled={!isLive || state.status.busy || !boot?.capabilities.auth} onChange={(name) => void selectProvider(name)} /><Field label="Model" value={state.status.model} values={models.length ? models : state.status.model ? [state.status.model] : []} disabled={!isLive || state.status.busy || !boot?.capabilities.catalog} onChange={(model) => void op("select.model", { provider: state.status.provider, model })} /><Field label="Agent" value={state.status.agent} values={boot?.agents.map((agent) => agent.name) || []} disabled={!isLive || state.status.busy} onChange={(name) => void op("select.agent", { name })} /><Field label="Effort" value={state.status.effort} values={runtimeValues.effort} disabled={!isLive || state.status.busy} onChange={(level) => void op("set.effort", { level })} /><Field label="Autonomy" value={state.status.autonomy} values={runtimeValues.autonomy} disabled={!isLive || state.status.busy} onChange={(mode) => void op("set.autonomy", { mode })} /><Field label="Permission" value={state.status.permissionMode} values={runtimeValues.permission} disabled={!isLive || state.status.busy} onChange={(mode) => void op("set.permission_mode", { mode })} /><label className="fast-toggle"><input type="checkbox" checked={fast} disabled={!isLive || state.status.busy} onChange={(event) => { setFast(event.target.checked); void op("set.fast", { enabled: event.target.checked }); }} />FAST</label></section>
+      <section className="runtime" aria-label="Runtime controls"><Field label="Provider" value={state.status.provider} values={providers.length ? providers : state.status.provider ? [state.status.provider] : []} disabled={!isLive || state.status.busy || !boot?.capabilities.auth} onChange={(name) => void selectProvider(name)} /><Field label="Model" value={state.status.model} values={models.length ? models : state.status.model ? [state.status.model] : []} disabled={!isLive || state.status.busy || !boot?.capabilities.catalog} onChange={(model) => void op("select.model", { provider: state.status.provider, model }, selectedID)} /><Field label="Agent" value={state.status.agent} values={boot?.agents.map((agent) => agent.name) || []} disabled={!isLive || state.status.busy} onChange={(name) => void op("select.agent", { name }, selectedID)} /><Field label="Effort" value={state.status.effort} values={runtimeValues.effort} disabled={!isLive || state.status.busy} onChange={(level) => void op("set.effort", { level }, selectedID)} /><Field label="Autonomy" value={state.status.autonomy} values={runtimeValues.autonomy} disabled={!isLive || state.status.busy} onChange={(mode) => void op("set.autonomy", { mode }, selectedID)} /><Field label="Permission" value={state.status.permissionMode} values={runtimeValues.permission} disabled={!isLive || state.status.busy} onChange={(mode) => void op("set.permission_mode", { mode }, selectedID)} /><label className="fast-toggle"><input type="checkbox" checked={fast} disabled={!isLive || state.status.busy} onChange={(event) => { setFast(event.target.checked); void op("set.fast", { enabled: event.target.checked }, selectedID); }} />FAST</label></section>
       <section className="transcript" aria-live="polite" aria-label="Conversation transcript">{!state.items.length && <div className="empty-state"><span>01 / READY</span><h1>{boot?.attachOnly ? "Inspect the record." : "Direct the work."}</h1><p>{boot?.attachOnly ? "Select a durable session from the rail." : "Describe an outcome. Strike will plan, act, and report through the live engine seam."}</p></div>}{state.items.map((item) => <Transcript key={item.id} item={item} />)}<div ref={endRef} /></section>
       <form className="composer" onSubmit={submit}><label htmlFor="prompt">Instruction {state.status.busy && "— send to queue"}</label><textarea aria-label="Instruction" id="prompt" value={draft} disabled={!isLive} placeholder={isLive ? "Describe the next outcome…  / command  @ file" : "Historical session — read only"} onPaste={(event) => void attach(event.clipboardData.files)} onDrop={(event) => { event.preventDefault(); void attach(event.dataTransfer.files); }} onDragOver={(event) => event.preventDefault()} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !completions.length) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} />{completions.length > 0 && <div className="completion" role="listbox" aria-label="Composer completions">{completions.slice(0, 8).map((item) => <button type="button" role="option" key={item.label} onClick={() => selectCompletion(item)}><strong>{item.label}</strong><span>{item.detail}</span></button>)}</div>}{images.length > 0 && <div className="attachments">{images.map((image, index) => <button type="button" key={`${image.name}-${index}`} onClick={() => setImages((list) => list.filter((_, i) => i !== index))}>{image.name} ×</button>)}</div>}{queue.length > 0 && <ol className="prompt-queue" aria-label="Queued prompts">{queue.map((item, index) => <li key={index}><span>{item.text}</span><button type="button" aria-label={`Remove queued prompt ${index + 1}`} onClick={() => setQueue((list) => list.filter((_, i) => i !== index))}>×</button></li>)}</ol>}<div><span><kbd>↵</kbd> send · <kbd>⇧↵</kbd> newline</span><span><input ref={fileRef} hidden type="file" accept="image/*" multiple onChange={(event) => void attach(event.target.files)} /><button type="button" onClick={() => fileRef.current?.click()}>Attach</button>{history.length > 0 && <button type="button" onClick={() => setDraft(history.at(-1) || "")}>History</button>}{state.status.busy && <button type="button" className="stop" onClick={() => void op("interrupt")}>Interrupt</button>}<button type="submit" disabled={!draft.trim() || !isLive}>{state.status.busy ? "Queue" : "Send"}</button></span></div></form>
     </main>
     <aside className={`inspector ${inspectorOpen ? "open" : ""}`} aria-label="Inspector"><div className="inspector-tabs" role="tablist">{(["context", "activity", "files", "project", "capabilities"] as InspectorTab[]).map((tab) => <button role="tab" aria-selected={inspector === tab} key={tab} onClick={() => void inspectProject(tab)}>{tab}</button>)}</div><div className="inspector-body">{inspector === "context" && <><h2>Runtime context</h2><dl><dt>Provider</dt><dd>{state.status.provider || "unknown"}</dd><dt>Model</dt><dd>{state.status.model || "unknown"}</dd><dt>Phase</dt><dd>{state.status.phase || "idle"}</dd><dt>Context</dt><dd>{state.status.contextUsed !== undefined && state.status.contextLimit !== undefined ? `${state.status.contextUsed.toLocaleString()} / ${state.status.contextLimit.toLocaleString()}` : "not reported"}</dd><dt>Cost</dt><dd>not reported</dd></dl></>}{inspector === "activity" && <><h2>Changed files</h2>{state.changedFiles.length ? <ul>{state.changedFiles.map((file) => <li key={file}><code>{file}</code></li>)}</ul> : <p className="muted">No file invalidations reported.</p>}<h2>Child activity</h2><pre>{JSON.stringify(state.children, null, 2)}</pre></>}{(inspector === "files" || inspector === "project") && <><h2>{inspector === "files" ? "Workspace files" : "Project data"}</h2>{projectData ? <pre>{JSON.stringify(projectData, null, 2)}</pre> : <CapabilityUnavailable name={inspector === "files" ? "Workspace browsing and file mentions" : "Memory and issues"} />}</>}{inspector === "capabilities" && <CapabilityMatrix boot={boot} />}</div></aside>
     {settingsOpen && <SettingsDialog boot={boot} status={state.status} providers={providers} onClose={() => setSettingsOpen(false)} />}
-    {state.permission && <BlockingDialog title="Permission required"><p><strong>{String(state.permission.tool || state.permission.name || "Tool request")}</strong></p><pre>{JSON.stringify(state.permission, null, 2)}</pre><div className="dialog-actions"><button onClick={() => void op("permission.reply", { requestId: state.permission?.requestId, decision: "reject" })}>Reject</button><button onClick={() => void op("permission.reply", { requestId: state.permission?.requestId, decision: "always" })}>Allow session</button><button autoFocus onClick={() => void op("permission.reply", { requestId: state.permission?.requestId, decision: "once" })}>Allow once</button></div></BlockingDialog>}{state.question && <QuestionDialog question={state.question} />}
+    {state.permission && <BlockingDialog title="Permission required"><p><strong>{String(state.permission.tool || state.permission.name || "Tool request")}</strong></p><pre>{JSON.stringify(state.permission, null, 2)}</pre><div className="dialog-actions"><button onClick={() => void op("permission.reply", { requestId: state.permission?.requestId, decision: "reject" }, selectedID)}>Reject</button><button onClick={() => void op("permission.reply", { requestId: state.permission?.requestId, decision: "always" }, selectedID)}>Allow session</button><button autoFocus onClick={() => void op("permission.reply", { requestId: state.permission?.requestId, decision: "once" }, selectedID)}>Allow once</button></div></BlockingDialog>}{state.question && <QuestionDialog question={state.question} rootID={selectedID} />}
   </div>;
 }
 
 function SettingsDialog({ boot, status, providers, onClose }: { boot?: Bootstrap; status: Status; providers: string[]; onClose: () => void }) { const ref = useRef<HTMLDialogElement>(null); const [provider, setProvider] = useState(String(status.provider || providers[0] || "")); const [key, setKey] = useState(""); useEffect(() => { ref.current?.showModal(); }, []); const save = async () => { if (boot?.capabilities.settings) await request("/v1/settings", { method: "PATCH", body: JSON.stringify({ provider: String(status.provider || ""), model: String(status.model || ""), agent: String(status.agent || ""), effort: String(status.effort || ""), mode: String(status.permissionMode || "") }) }); onClose(); }; return <dialog ref={ref} aria-labelledby="settings-title" onClose={onClose}><div className="dialog-rule" /><h2 id="settings-title">Workspace settings</h2>{boot?.capabilities.auth ? <fieldset><legend>Provider authentication</legend><label>Provider<select value={provider} onChange={(event) => setProvider(event.target.value)}>{providers.map((item) => <option key={item}>{item}</option>)}</select></label><label>API key<input type="password" autoComplete="off" value={key} onChange={(event) => setKey(event.target.value)} /></label><div className="dialog-actions"><button onClick={() => void request(`/v1/auth/${encodeURIComponent(provider)}`, { method: "DELETE" }).then(() => setKey(""))}>Log out</button><button disabled={!provider || !key.trim()} onClick={() => void request("/v1/auth/key", { method: "POST", body: JSON.stringify({ provider, key }) }).then(() => setKey(""))}>Save key</button></div></fieldset> : <CapabilityUnavailable name="Provider authentication" />}{boot?.capabilities.settings ? <p className="muted">Save the current provider, model, agent, effort, and permission mode as defaults.</p> : <CapabilityUnavailable name="Saved defaults" />}<div className="dialog-actions"><button onClick={onClose}>Close</button><button disabled={!boot?.capabilities.settings} onClick={() => void save()}>Save defaults</button></div></dialog>; }
 function CapabilityUnavailable({ name }: { name: string }) { return <section className="unavailable" role="status"><strong>{name} unavailable</strong><p>The configured host did not provide this capability. No action was attempted.</p></section>; }
 function CapabilityMatrix({ boot }: { boot?: Bootstrap }) { const labels: Record<string, string> = { auth: "API-key authentication", oauth: "OAuth/device authentication (not provided by web host)", catalog: "Model catalog", settings: "Saved defaults", history: "Prompt history", files: "Files and mentions", memory: "Memory", issues: "Issues", sessions: "Fork, rename, delete", roots: "Concurrent roots", providers: "Custom providers", projectInit: "Project initialization", mcp: "MCP management", telemetry: "Diagnostics", terminal: "Interactive terminal/editor (not provided by web host)", export: "Session export (not provided by web host)", create: "Session create/resume (not provided by web host)" }; return <><h2>Host capabilities</h2><div className="capability-list">{Object.entries(labels).map(([key, label]) => <div key={key}><span>{label}</span><strong className={boot?.capabilities[key] ? "available" : "unavailable-label"}>{boot?.capabilities[key] ? "Available" : "Unavailable on this host"}</strong></div>)}</div><h2>Engine operations</h2><p className="muted">{(boot?.protocolOps || []).join(" · ") || "Unavailable in attach-only mode"}</p></>; }
-function QuestionDialog({ question }: { question: Record<string, unknown> }) { const [answers, setAnswers] = useState<string[]>([]); const prompts = Array.isArray(question.questions) ? question.questions as Array<Record<string, unknown>> : [{ question: question.question }]; const update = (index: number, value: string) => setAnswers((old) => { const next = [...old]; next[index] = value; return next; }); return <BlockingDialog title={String(question.title || "Agent question")}>{prompts.map((prompt, index) => { const options = Array.isArray(prompt.options) ? prompt.options as Array<Record<string, unknown>> : []; return <fieldset key={index}><legend>{String(prompt.question || "A response is required to continue.")}</legend>{options.length ? options.map((option) => <label key={String(option.label)}><input type="radio" name={`question-${index}`} value={String(option.label)} checked={answers[index] === String(option.label)} onChange={(event) => update(index, event.target.value)} />{String(option.label)} <small>{String(option.description || "")}</small></label>) : <input aria-label={`Answer ${index + 1}`} autoFocus={index === 0} value={answers[index] || ""} onChange={(event) => update(index, event.target.value)} />}</fieldset>; })}<div className="dialog-actions"><button disabled={prompts.some((_, index) => !answers[index]?.trim())} onClick={() => void op("question.reply", { requestId: question.requestId, answers })}>Continue</button></div></BlockingDialog>; }
+function QuestionDialog({ question, rootID }: { question: Record<string, unknown>; rootID: string }) { const [answers, setAnswers] = useState<string[]>([]); const prompts = Array.isArray(question.questions) ? question.questions as Array<Record<string, unknown>> : [{ question: question.question }]; const update = (index: number, value: string) => setAnswers((old) => { const next = [...old]; next[index] = value; return next; }); return <BlockingDialog title={String(question.title || "Agent question")}>{prompts.map((prompt, index) => { const options = Array.isArray(prompt.options) ? prompt.options as Array<Record<string, unknown>> : []; return <fieldset key={index}><legend>{String(prompt.question || "A response is required to continue.")}</legend>{options.length ? options.map((option) => <label key={String(option.label)}><input type="radio" name={`question-${index}`} value={String(option.label)} checked={answers[index] === String(option.label)} onChange={(event) => update(index, event.target.value)} />{String(option.label)} <small>{String(option.description || "")}</small></label>) : <input aria-label={`Answer ${index + 1}`} autoFocus={index === 0} value={answers[index] || ""} onChange={(event) => update(index, event.target.value)} />}</fieldset>; })}<div className="dialog-actions"><button disabled={prompts.some((_, index) => !answers[index]?.trim())} onClick={() => void op("question.reply", { requestId: question.requestId, answers }, rootID)}>Continue</button></div></BlockingDialog>; }
