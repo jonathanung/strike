@@ -48,6 +48,11 @@ export ANTHROPIC_API_KEY=sk-ant-…   # or: ./strike auth login anthropic
 Requires Nix with flakes enabled. Pins the exact Go 1.26, gopls, make, and git.
 
 ```sh
+nix profile install github:jonathanung/strike
+# or run without installing:
+nix run github:jonathanung/strike
+
+# development:
 nix develop
 make build
 ```

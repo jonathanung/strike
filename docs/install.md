@@ -64,6 +64,57 @@ package manager.
 
 Windows self-update is unsupported in v1; re-download from Releases.
 
+## Nix
+
+The repository flake builds `strike` from source, so NixOS does not depend on
+the FHS layout used by release binaries. Install it into your user profile:
+
+```sh
+nix profile install github:jonathanung/strike
+```
+
+Run it without installing:
+
+```sh
+nix run github:jonathanung/strike
+```
+
+For a declarative flake or Home Manager configuration, add the input and use
+its default package:
+
+```nix
+{
+  inputs.strike = {
+    url = "github:jonathanung/strike";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+}
+```
+
+Pass `strike` to Home Manager through `extraSpecialArgs`:
+
+```nix
+homeConfigurations.your-user = home-manager.lib.homeManagerConfiguration {
+  inherit pkgs;
+  extraSpecialArgs = { inherit strike; };
+  modules = [ ./home.nix ];
+};
+```
+
+Then install it in a Home Manager module:
+
+```nix
+{ pkgs, strike, ... }:
+{
+  home.packages = [
+    strike.packages.${pkgs.stdenv.hostPlatform.system}.default
+  ];
+}
+```
+
+When the package is installed through Nix, upgrade it by updating the lockfile
+that pins the `strike` input rather than using `strike --upgrade`.
+
 ## Domain / DNS (ops)
 
 Configure `strike.jonathanung.ca` with TLS and **redirect-only** rules:

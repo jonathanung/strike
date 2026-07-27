@@ -3,6 +3,7 @@
 .DS_Store
 .plan
 coverage.out
+/.nix-go/
 */worktrees
 web/node_modules/
 web/dist/

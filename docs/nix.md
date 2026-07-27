@@ -1,8 +1,9 @@
 # Nix dev environment
 
 This project provides a [Nix flake](https://nixos.wiki/wiki/Flakes) at the repo
-root. Running `nix develop` gives you an isolated shell with the exact Go 1.26,
-gopls, make, and git versions pinned in `flake.lock`.
+root. It exposes an installable `strike` package and an isolated development
+shell with the exact Go 1.26, gopls, make, and git versions pinned in
+`flake.lock`.
 
 ## Philosophy
 
@@ -62,12 +63,13 @@ These well-established Go and Nix projects use the same patterns:
 |---|---|
 | [devenv](https://github.com/cachix/devenv) (by Cachix) | Composable, module-based dev shell framework built on Nix. See their [flake.nix](https://github.com/cachix/devenv/blob/main/flake.nix) for how they manage a complex multi-input flake with overlays. |
 | [flake-parts](https://github.com/hercules-ci/flake-parts) (by Hercules CI) | The module-system approach to flake composition. Their [own flake](https://github.com/hercules-ci/flake-parts/blob/main/flake.nix) is a reference for self-hosting with partitions, checks, and templates. |
-| [nixpkgs Go infrastructure](https://github.com/NixOS/nixpkgs/blob/master/pkgs/development/go-modules/gomod2nix) | `buildGoModule` and `gomod2nix` are how Nixpkgs builds Go programs. Not needed for this dev shell (we use `go build` directly), but useful if you later want a Nix-built binary. |
+| [nixpkgs Go infrastructure](https://github.com/NixOS/nixpkgs/blob/master/pkgs/development/go-modules/gomod2nix) | `buildGoModule` builds the installable `strike` package; the dev shell continues to use `go build` directly. |
 | [golangci-lint flake](https://github.com/golangci/golangci-lint/blob/master/flake.nix) | A Go project with flakes for CI and development. Clean example of a minimal Go dev shell. |
 
 ## How it works in this project
 
-1. `flake.nix` declares the dev shell with nixpkgs-unstable + flake-utils.
+1. `flake.nix` declares the `strike` package, app, and dev shell with
+   nixpkgs-unstable + flake-utils.
 2. `flake.lock` pins the exact nixpkgs revision (update with `nix flake update`).
 3. `nix develop` drops you into a shell with `GOPATH`, `GOCACHE`, and `GOENV`
    scoped to `.nix-go/` inside the repo — no cross-project contamination.
