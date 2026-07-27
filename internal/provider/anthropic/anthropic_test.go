@@ -1,8 +1,10 @@
 package anthropic
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -401,5 +403,277 @@ func TestStreamOpenCodeBaseURLWithV1(t *testing.T) {
 	}
 	if sawPath != "/v1/messages" {
 		t.Errorf("path = %q, want /v1/messages (not /v1/v1/messages)", sawPath)
+	}
+}
+
+func wantEphemeral(t *testing.T, cc *apiCacheControl, where string) {
+	t.Helper()
+	if cc == nil {
+		t.Fatalf("%s: cache_control missing", where)
+	}
+	if cc.Type != "ephemeral" {
+		t.Fatalf("%s: cache_control.type = %q, want ephemeral", where, cc.Type)
+	}
+}
+
+func blockCacheControl(t *testing.T, raw json.RawMessage) *apiCacheControl {
+	t.Helper()
+	var block apiBlock
+	if err := json.Unmarshal(raw, &block); err != nil {
+		t.Fatalf("decode block: %v", err)
+	}
+	return block.CacheControl
+}
+
+// TestPromptCacheBreakpointsOnStablePrefix pins the three request-side
+// breakpoints peers set (system + last tool + last eligible message block).
+func TestPromptCacheBreakpointsOnStablePrefix(t *testing.T) {
+	req := provider.Request{
+		Model:  "claude-opus-5",
+		System: "you are strike",
+		Tools: []provider.ToolSchema{
+			{Name: "read", Description: "read file", InputSchema: json.RawMessage(`{"type":"object"}`)},
+			{Name: "bash", Description: "run shell", InputSchema: json.RawMessage(`{"type":"object"}`)},
+		},
+		Messages: []provider.Message{
+			{Role: provider.RoleUser, Text: "hi"},
+			{Role: provider.RoleAssistant, Text: "hello"},
+			{Role: provider.RoleUser, Text: "list files"},
+		},
+	}
+	out, err := toAPIRequest(req)
+	if err != nil {
+		t.Fatalf("toAPIRequest: %v", err)
+	}
+
+	if len(out.System) != 1 {
+		t.Fatalf("system blocks = %d, want 1", len(out.System))
+	}
+	if out.System[0].Type != "text" || out.System[0].Text != "you are strike" {
+		t.Fatalf("system[0] = %+v", out.System[0])
+	}
+	wantEphemeral(t, out.System[0].CacheControl, "system[0]")
+
+	if len(out.Tools) != 2 {
+		t.Fatalf("tools = %d, want 2", len(out.Tools))
+	}
+	if out.Tools[0].CacheControl != nil {
+		t.Errorf("tools[0] has cache_control; only last tool should")
+	}
+	wantEphemeral(t, out.Tools[1].CacheControl, "tools[last]")
+
+	if len(out.Messages) != 3 {
+		t.Fatalf("messages = %d, want 3", len(out.Messages))
+	}
+	// Earlier messages must not carry cache_control.
+	for i := 0; i < 2; i++ {
+		for j, raw := range out.Messages[i].Content {
+			if cc := blockCacheControl(t, raw); cc != nil {
+				t.Errorf("messages[%d].content[%d] has cache_control; only last eligible block should", i, j)
+			}
+		}
+	}
+	last := out.Messages[2].Content
+	if len(last) != 1 {
+		t.Fatalf("last message blocks = %d, want 1", len(last))
+	}
+	wantEphemeral(t, blockCacheControl(t, last[0]), "messages[last].content[last]")
+}
+
+// TestPromptCacheWireShape asserts the JSON the API receives — a wrong tag
+// would pass struct-level checks but fail on the wire.
+func TestPromptCacheWireShape(t *testing.T) {
+	out, err := toAPIRequest(provider.Request{
+		Model:  "claude-opus-5",
+		System: "sys",
+		Tools: []provider.ToolSchema{
+			{Name: "bash", Description: "sh", InputSchema: json.RawMessage(`{"type":"object"}`)},
+		},
+		Messages: []provider.Message{{Role: provider.RoleUser, Text: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("toAPIRequest: %v", err)
+	}
+	data, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire struct {
+		System []struct {
+			Type         string `json:"type"`
+			Text         string `json:"text"`
+			CacheControl *struct {
+				Type string `json:"type"`
+			} `json:"cache_control"`
+		} `json:"system"`
+		Tools []struct {
+			Name         string `json:"name"`
+			CacheControl *struct {
+				Type string `json:"type"`
+			} `json:"cache_control"`
+		} `json:"tools"`
+		Messages []struct {
+			Content []struct {
+				Type         string `json:"type"`
+				Text         string `json:"text"`
+				CacheControl *struct {
+					Type string `json:"type"`
+				} `json:"cache_control"`
+			} `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if len(wire.System) != 1 || wire.System[0].CacheControl == nil || wire.System[0].CacheControl.Type != "ephemeral" {
+		t.Errorf("wire system = %+v", wire.System)
+	}
+	if len(wire.Tools) != 1 || wire.Tools[0].CacheControl == nil || wire.Tools[0].CacheControl.Type != "ephemeral" {
+		t.Errorf("wire tools = %+v", wire.Tools)
+	}
+	if len(wire.Messages) != 1 || len(wire.Messages[0].Content) != 1 {
+		t.Fatalf("wire messages = %+v", wire.Messages)
+	}
+	c := wire.Messages[0].Content[0]
+	if c.CacheControl == nil || c.CacheControl.Type != "ephemeral" || c.Text != "hi" {
+		t.Errorf("wire last content = %+v", c)
+	}
+	// system must be an array, not a bare string
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(data, &top); err != nil {
+		t.Fatal(err)
+	}
+	if len(top["system"]) == 0 || top["system"][0] != '[' {
+		t.Errorf("system wire = %s, want JSON array", top["system"])
+	}
+}
+
+// TestPromptCacheSkipsThinkingBlocks places the message breakpoint on the last
+// eligible block, not on thinking/redacted_thinking (API rejects those).
+func TestPromptCacheSkipsThinkingBlocks(t *testing.T) {
+	thinking := json.RawMessage(`{"type":"thinking","thinking":"","signature":"sig=="}`)
+	out, err := toAPIRequest(provider.Request{
+		Model:  "claude-opus-5",
+		Effort: provider.EffortHigh,
+		Messages: []provider.Message{{
+			Role:      provider.RoleAssistant,
+			Text:      "done",
+			Reasoning: []json.RawMessage{thinking},
+			ToolCalls: []provider.ToolCall{{ID: "t1", Name: "bash", Args: json.RawMessage(`{"cmd":"ls"}`)}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("toAPIRequest: %v", err)
+	}
+	content := out.Messages[0].Content
+	// [thinking, text, tool_use] — breakpoint on tool_use (last eligible).
+	if got := len(content); got != 3 {
+		t.Fatalf("blocks = %d, want 3", got)
+	}
+	if string(content[0]) != string(thinking) {
+		t.Errorf("thinking block mutated: %s", content[0])
+	}
+	if cc := blockCacheControl(t, content[1]); cc != nil {
+		t.Errorf("text block has cache_control; want only last eligible")
+	}
+	wantEphemeral(t, blockCacheControl(t, content[2]), "tool_use")
+}
+
+// TestPromptCacheOmitsSystemWhenEmpty keeps system omitted rather than sending
+// an empty array that would burn a breakpoint for nothing.
+func TestPromptCacheOmitsSystemWhenEmpty(t *testing.T) {
+	out, err := toAPIRequest(provider.Request{
+		Model:    "claude-opus-5",
+		Messages: []provider.Message{{Role: provider.RoleUser, Text: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("toAPIRequest: %v", err)
+	}
+	if len(out.System) != 0 {
+		t.Fatalf("system = %+v, want omitted", out.System)
+	}
+	data, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(data, &keys); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := keys["system"]; ok {
+		t.Errorf("wire carries system = %s, want omitted", keys["system"])
+	}
+	wantEphemeral(t, blockCacheControl(t, out.Messages[0].Content[0]), "user text")
+}
+
+// TestPromptCacheOnToolResult marks tool_result when it is the conversation tail
+// (common after a tool round before the next model turn).
+func TestPromptCacheOnToolResult(t *testing.T) {
+	out, err := toAPIRequest(provider.Request{
+		Model: "claude-opus-5",
+		Messages: []provider.Message{
+			{Role: provider.RoleUser, Text: "run"},
+			{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{
+				{ID: "c1", Name: "bash", Args: json.RawMessage(`{}`)},
+			}},
+			{Role: provider.RoleTool, ToolResult: &provider.ToolResult{CallID: "c1", Output: "ok"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("toAPIRequest: %v", err)
+	}
+	last := out.Messages[len(out.Messages)-1]
+	var block apiBlock
+	if err := json.Unmarshal(last.Content[0], &block); err != nil {
+		t.Fatal(err)
+	}
+	if block.Type != "tool_result" {
+		t.Fatalf("last block type = %q, want tool_result", block.Type)
+	}
+	wantEphemeral(t, block.CacheControl, "tool_result")
+}
+
+// TestStreamSendsCacheControlOnWire catches regressions where toAPIRequest
+// sets breakpoints but Stream posts a different body.
+func TestStreamSendsCacheControlOnWire(t *testing.T) {
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var err error
+		body, err = io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"stop_reason":"end_turn","content":[{"type":"text","text":"ok"}],` +
+			`"usage":{"input_tokens":10,"output_tokens":1,"cache_read_input_tokens":8,"cache_creation_input_tokens":2}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	p := &Provider{Client: baseClientForTest(), baseURL: srv.URL}
+	stream, err := p.Stream(context.Background(), provider.Request{
+		Model:  "claude-opus-5",
+		System: "sys",
+		Tools: []provider.ToolSchema{
+			{Name: "bash", Description: "sh", InputSchema: json.RawMessage(`{"type":"object"}`)},
+		},
+		Messages: []provider.Message{{Role: provider.RoleUser, Text: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var usage *provider.Usage
+	for ev := range stream {
+		if ev.Type == provider.EventError {
+			t.Fatalf("stream error: %v", ev.Err)
+		}
+		if ev.Type == provider.EventDone {
+			usage = ev.Usage
+		}
+	}
+	if !bytes.Contains(body, []byte(`"cache_control"`)) || !bytes.Contains(body, []byte(`"ephemeral"`)) {
+		t.Fatalf("request body missing cache_control: %s", body)
+	}
+	if usage == nil || usage.CacheReadTokens != 8 || usage.CacheCreationTokens != 2 {
+		t.Fatalf("usage = %+v, want cache read=8 creation=2 still reported", usage)
 	}
 }

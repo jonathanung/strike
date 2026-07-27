@@ -11,10 +11,22 @@ import (
 )
 
 // effectiveToolSchemas returns registry tool schemas with hard-denied tools
-// removed. Used for the provider Tools array (every stream, including turn 1)
-// so the model never sees tools it cannot call under the active
-// agent/phase/permission profile. The additive tools prompt layer uses the
-// same effective name set (see toolGuidanceLayer) without restating schemas.
+// removed and descriptions compacted for the wire. Used for the provider
+// Tools array (every stream, including turn 1) so the model never sees tools
+// it cannot call under the active agent/phase/permission profile. The additive
+// tools prompt layer uses the same effective name set (see toolGuidanceLayer)
+// without restating schemas.
+//
+// Always-on payload strategy (#436 + #437):
+//  1. Subset by hard deny — agent permissions and plan-mode posture drop tools
+//     the model must not call (Peek == Deny). Ask/Allow tools stay listed.
+//  2. Compact descriptions — tool.CompactSchemaDescription replaces long usage
+//     prose with short purposes (skill keeps its available-skills list). Full
+//     InputSchema is unchanged; Registry.Schemas keeps full descriptions for
+//     toolsearch. This is not defer_loading (#438): every remaining tool is
+//     still bound on the first stream.
+//  3. System guidance is additive only — usage policy / when-to-use tips, not
+//     a second name/purpose catalog (#437).
 func (e *Engine) effectiveToolSchemas() (schemas []provider.ToolSchema, omitted int) {
 	if e == nil || e.opts.Registry == nil {
 		return nil, 0
@@ -34,6 +46,7 @@ func (e *Engine) effectiveToolSchemas() (schemas []provider.ToolSchema, omitted 
 			omitted++
 			continue
 		}
+		s.Description = tool.CompactSchemaDescription(name, s.Description)
 		out = append(out, s)
 	}
 	return out, omitted

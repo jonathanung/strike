@@ -191,3 +191,54 @@ func TestResolveCompactionStrategy(t *testing.T) {
 		t.Fatalf("unknown = %q", got)
 	}
 }
+
+func TestOverCompactionThreshold(t *testing.T) {
+	// Window 1000, MaxTokens 10, buffer 1 → reserve 11, budget 989.
+	// Default threshold 0.70 → limit 700. Custom 0.80 → limit 800.
+	cases := []struct {
+		name      string
+		window    int
+		threshold float64
+		buffer    int
+		maxTokens int
+		used      int
+		want      bool
+	}{
+		{name: "default fires at 70%", window: 1000, buffer: 1, maxTokens: 10, used: 700, want: true},
+		{name: "default quiet below 70%", window: 1000, buffer: 1, maxTokens: 10, used: 699, want: false},
+		{name: "legacy 0.80 still quiet at 700", window: 1000, threshold: 0.80, buffer: 1, maxTokens: 10, used: 700, want: false},
+		{name: "legacy 0.80 fires at 800", window: 1000, threshold: 0.80, buffer: 1, maxTokens: 10, used: 800, want: true},
+		{name: "custom 0.5 fires earlier", window: 1000, threshold: 0.5, buffer: 1, maxTokens: 10, used: 500, want: true},
+		{name: "threshold >=1 disables", window: 1000, threshold: 1, buffer: 1, maxTokens: 10, used: 999, want: false},
+		{name: "unknown window never fires", window: 0, threshold: 0.5, buffer: 1, maxTokens: 10, used: 900, want: false},
+		// lastUsed must be >0 so occupancyTokens does not fall through to estimate.
+		{name: "tiny occupancy quiet", window: 1000, threshold: 0.5, buffer: 1, maxTokens: 10, used: 1, want: false},
+		// reserve = 400+200=600 → budget 400; limit = min(0.9*1000, 400) = 400
+		{name: "buffer lowers effective limit", window: 1000, threshold: 0.9, buffer: 200, maxTokens: 400, used: 400, want: true},
+		{name: "buffer limit not yet reached", window: 1000, threshold: 0.9, buffer: 200, maxTokens: 400, used: 399, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := &Engine{
+				opts: Options{
+					ContextWindow:       tc.window,
+					CompactionThreshold: tc.threshold,
+					CompactionBuffer:    tc.buffer,
+					MaxTokens:           tc.maxTokens,
+				},
+				lastUsed:      tc.used,
+				lastUsedKnown: tc.used > 0,
+			}
+			if got := e.overCompactionThreshold(); got != tc.want {
+				t.Fatalf("overCompactionThreshold() = %v, want %v (used=%d window=%d thr=%v buf=%d max=%d)",
+					got, tc.want, tc.used, tc.window, tc.threshold, tc.buffer, tc.maxTokens)
+			}
+		})
+	}
+}
+
+func TestDefaultCompactionThresholdConstant(t *testing.T) {
+	if defaultCompactionThreshold != 0.70 {
+		t.Fatalf("defaultCompactionThreshold = %v, want 0.70", defaultCompactionThreshold)
+	}
+}

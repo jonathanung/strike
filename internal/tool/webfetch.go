@@ -17,8 +17,9 @@ import (
 const (
 	webfetchDefaultTimeout = 30 * time.Second
 	webfetchMaxTimeout     = 120 * time.Second
-	webfetchMaxBody        = 5 << 20 // 5 MiB
-	webfetchMaxOutputRunes = 100_000
+	webfetchMaxBody        = 2 << 20 // 2 MiB download bound before convert
+	// webfetchMaxOutputRunes caps model-facing output (history token cost).
+	webfetchMaxOutputRunes = 30_000
 	webfetchUserAgent      = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
 )
 
@@ -43,7 +44,7 @@ Usage notes:
   - Format options: "markdown" (default), "text", or "html"
   - Optional timeout in seconds (default 30, max 120)
   - This tool is read-only and does not modify any files
-  - Results may be truncated if the content is very large
+  - Results may be truncated (~30k characters) if the content is very large
   - Prefer this tool over curl/wget in bash for ordinary page fetches`
 }
 

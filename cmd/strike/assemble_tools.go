@@ -478,6 +478,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			HookRules:             cfg.HookRules(),
 			CompactionStrategy:    cfg.CompactionStrategy,
 			CompactionModel:       cfg.CompactionModel,
+			CompactionThreshold:   cfg.CompactionThreshold,
+			CompactionBuffer:      cfg.CompactionBuffer,
+			KeepUserTurns:         cfg.KeepUserTurns,
 			LookupContextWindow:   lookupContextWindow,
 			ListModels:            listModels,
 			PersistProjectRule: func(rule permission.Rule) error {

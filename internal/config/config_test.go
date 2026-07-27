@@ -756,6 +756,72 @@ func TestLoadCompactionStrategy(t *testing.T) {
 	}
 }
 
+func TestLoadCompactionThresholdKnobs(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(global, []byte(`{
+		"compactionThreshold": 0.80,
+		"compactionBuffer": 2048,
+		"keepUserTurns": 3
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(work, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(project), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(project, []byte(`{
+		"compactionThreshold": 0.65,
+		"compactionBuffer": 8192,
+		"keepUserTurns": 1
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CompactionThreshold != 0.65 {
+		t.Fatalf("threshold = %v, want 0.65", cfg.CompactionThreshold)
+	}
+	if cfg.CompactionBuffer != 8192 {
+		t.Fatalf("buffer = %d, want 8192", cfg.CompactionBuffer)
+	}
+	if cfg.KeepUserTurns != 1 {
+		t.Fatalf("keepUserTurns = %d, want 1", cfg.KeepUserTurns)
+	}
+}
+
+func TestClampCompactionKnobs(t *testing.T) {
+	if got := ClampCompactionThreshold(-0.5); got != 0 {
+		t.Fatalf("neg threshold = %v", got)
+	}
+	if got := ClampCompactionThreshold(0.7); got != 0.7 {
+		t.Fatalf("threshold = %v", got)
+	}
+	if got := ClampCompactionThreshold(1.5); got != 1.5 {
+		t.Fatalf("disable threshold = %v", got)
+	}
+	if got := ClampCompactionBuffer(-10); got != 0 {
+		t.Fatalf("neg buffer = %d", got)
+	}
+	if got := ClampCompactionBuffer(4096); got != 4096 {
+		t.Fatalf("buffer = %d", got)
+	}
+	if got := ClampKeepUserTurns(-2); got != 0 {
+		t.Fatalf("neg keep = %d", got)
+	}
+	if got := ClampKeepUserTurns(4); got != 4 {
+		t.Fatalf("keep = %d", got)
+	}
+}
+
 func TestNormalizeLeanCode(t *testing.T) {
 	cases := map[string]string{
 		"":        "",

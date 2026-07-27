@@ -6,6 +6,69 @@ import (
 	"testing"
 )
 
+func TestShortPurposeBuiltins(t *testing.T) {
+	for name, want := range shortPurposes {
+		if got := ShortPurpose(name, "ignored long description"); got != want {
+			t.Errorf("ShortPurpose(%q) = %q, want %q", name, got, want)
+		}
+	}
+}
+
+func TestShortPurposeFallback(t *testing.T) {
+	got := ShortPurpose("mcp_demo_echo", "[mcp:demo] Echo a message back to the caller. Extra detail.")
+	if got != "echo a message back to the caller" {
+		t.Fatalf("fallback = %q", got)
+	}
+}
+
+func TestCompactSchemaDescriptionBuiltins(t *testing.T) {
+	for name, want := range shortPurposes {
+		if name == "skill" {
+			continue
+		}
+		long := "Long multi-paragraph usage notes that should not appear on the wire. " + strings.Repeat("x", 200)
+		if got := CompactSchemaDescription(name, long); got != want {
+			t.Errorf("CompactSchemaDescription(%q) = %q, want %q", name, got, want)
+		}
+	}
+}
+
+func TestCompactSchemaDescriptionSkillKeepsCatalog(t *testing.T) {
+	desc := NewSkill([]SkillInfo{
+		{Name: "write-go-tests", Description: "tests"},
+		{Name: "test-and-validate", Description: "validate"},
+	}).Description()
+	got := CompactSchemaDescription("skill", desc)
+	if !strings.Contains(got, "Available skills:") {
+		t.Fatalf("missing skills catalog: %q", got)
+	}
+	if !strings.Contains(got, "write-go-tests") || !strings.Contains(got, "test-and-validate") {
+		t.Fatalf("missing skill names: %q", got)
+	}
+	if len(got) >= len(desc) {
+		t.Fatalf("skill compact not smaller: compact=%d full=%d", len(got), len(desc))
+	}
+	// Empty catalog path.
+	empty := CompactSchemaDescription("skill", NewSkill(nil).Description())
+	if !strings.Contains(empty, "Available skills:") || !strings.Contains(empty, "(none loaded)") {
+		t.Fatalf("empty skill catalog: %q", empty)
+	}
+}
+
+func TestCompactSchemaDescriptionMCPTruncates(t *testing.T) {
+	long := "[mcp:demo] " + strings.Repeat("word ", 80) + "End sentence. More."
+	got := CompactSchemaDescription("mcp_demo_bulk", long)
+	if got == "" {
+		t.Fatal("empty compact MCP description")
+	}
+	if len(got) >= len(long) {
+		t.Fatalf("MCP compact not smaller: %d vs %d", len(got), len(long))
+	}
+	if strings.Contains(got, "More.") {
+		t.Fatalf("kept second sentence: %q", got)
+	}
+}
+
 func TestPermissionName(t *testing.T) {
 	cases := map[string]string{
 		"read":          "read",
@@ -144,6 +207,23 @@ func TestBuildGuidanceDeterministic(t *testing.T) {
 	b := BuildGuidance(entries)
 	if a != b {
 		t.Fatalf("non-deterministic guidance")
+	}
+}
+
+func TestBuiltinShortPurposesCoversCoreTools(t *testing.T) {
+	core := []string{
+		"read", "write", "edit", "glob", "grep", "bash", "webfetch",
+		"todowrite", "todoread", "memory_write", "memory_read",
+		"issue_write", "issue_read", "notebook_edit", "sleep", "skill",
+		"toolsearch", "question", "apply_patch", "enter_plan_mode",
+		"exit_plan_mode", "phase_done", "task",
+		"task_status", "task_read", "task_message", "task_interrupt",
+	}
+	m := BuiltinShortPurposes()
+	for _, name := range core {
+		if _, ok := m[name]; !ok {
+			t.Errorf("missing short purpose for built-in %q", name)
+		}
 	}
 }
 
