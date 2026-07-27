@@ -34,6 +34,9 @@ type keyMap struct {
 	ScrollDown        key.Binding
 	JumpBottom        key.Binding
 	ToggleOrientation key.Binding
+	// CopyLastResponse copies the last assistant message (not tool spam) via
+	// OSC52. Global so it works while drafting a follow-up (alt+y).
+	CopyLastResponse key.Binding
 	// Tool cell selection/expand/copy/review/apply when the composer is empty
 	// (enter still sends when there is text; y/v/a still type when the composer
 	// has content; v/a only act with a selected tool cell).
@@ -100,6 +103,9 @@ func defaultKeyMap() keyMap {
 		// ctrl+semicolon, so WrapInput rewrites enhanced ctrl+; CSI to alt+;
 		// (same pattern as shift+enter → alt+enter for Newline).
 		ToggleOrientation: key.NewBinding(key.WithKeys("alt+;"), key.WithHelp("ctrl+;", "toggle split")),
+		// CopyLastResponse: alt+y stays off the printable path so it works with
+		// composer text present (unlike bare y cell-copy).
+		CopyLastResponse: key.NewBinding(key.WithKeys("alt+y"), key.WithHelp("alt+y", "copy last response")),
 		// Tool cell nav: only when composer is empty (see Model.handleToolCellKeys).
 		// alt+[/] avoid stealing printable brackets from the composer.
 		ToolPrev:   key.NewBinding(key.WithKeys("alt+["), key.WithHelp("alt+[", "prev tool cell")),
@@ -225,6 +231,7 @@ func applyKeybindOverrides(k *keyMap, overrides map[string][]string) {
 	set(&k.Interrupt, "global.interrupt", "")
 	set(&k.Quit, "global.quit", "")
 	set(&k.SaveDefaults, "global.save-defaults", "")
+	set(&k.CopyLastResponse, "global.copy-last", "")
 	set(&k.TerminalLeave, "editor.leave", "")
 	set(&k.Send, "composer.send", "")
 	set(&k.Newline, "composer.newline", "shift+enter")
@@ -396,6 +403,7 @@ func keybindCatalog(keys keyMap) []keybindEntry {
 		from("global.interrupt", "Global", keys.Interrupt),
 		from("global.quit", "Global", keys.Quit),
 		from("global.save-defaults", "Global", keys.SaveDefaults),
+		from("global.copy-last", "Global", keys.CopyLastResponse),
 		from("editor.leave", "Editor", keys.TerminalLeave),
 
 		from("composer.send", "Composer", keys.Send),

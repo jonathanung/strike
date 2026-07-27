@@ -266,7 +266,7 @@ Two different mechanisms, depending on whether it needs Go code:
    `host.Services.Skills`. Reserved names (`provider`, `model`, `effort`,
    `autonomy`, `auth`, `settings`, `agent`, `fast`, `vim`, `nano`, `md-read`,
    `theme`, `layout`, `split`, `compact`, `fork`, `undo`, `rewind`,
-   `session`, `export`, `help`, `keys`, `memory`, `issues`, `goal`, `loop`,
+   `session`, `export`, `copy`, `help`, `keys`, `memory`, `issues`, `goal`, `loop`,
    `context`, `effective-prompt`, `cost`, `upgrade`, `init`, `mcp`, `exit`,
    `quit`) are rejected by `config.ValidateSkillName` before
    they ever reach the frontend. `/init` is a builtin that writes project

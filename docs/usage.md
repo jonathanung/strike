@@ -55,6 +55,8 @@ strike launches without any provider configured. Pick one inside the TUI:
 /export [path] [--open]        # write the transcript to markdown (default
                                # .strike/exports/… or $TMPDIR); --open hands
                                # the file to $EDITOR / $VISUAL
+/copy                          # copy last assistant response to clipboard
+                               # (OSC52; also alt+y)
 /vim [path|@path[:line]]       # open file in editor (embedded/modal/takeover)
                                # or $EDITOR; @path like composer mentions
                                # (e.g. /vim @internal/foo.go)
@@ -98,6 +100,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/fork` | copy the current session JSONL into a new id (idle only) |
 | `/undo` / `/rewind` | undo last turn (idle only); bare opens picker; `chat` keeps disk; `files` restores per-file checkpoints from that turn (never `git reset --hard`) |
 | `/export` | dump the visible transcript to markdown (user/assistant/tool summaries); redacts common API-key shapes; default path under `.strike/exports/` or tmp; `--open` launches `$EDITOR` |
+| `/copy` | copy plain text of the last assistant response (not tool output) to the system clipboard via OSC52; same as `alt+y`; notice on success/failure |
 | `/compact` | ask the engine to compact model history |
 | `/memory` | bare = list browser; `list [tag]`, `get <key>`, `set <key> <value>`, `rm <key>`, `export [path]`, `import <path> [--replace]` (portable JSON; relative paths stay under project root) |
 | `/issues` | bare = list browser; `list [open\|closed]`, `add <title>`, `get <id>`, `close <id>`, `export [path]`, `import <path> [--replace]` (same portable rules as memory) |

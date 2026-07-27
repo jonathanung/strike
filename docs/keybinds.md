@@ -28,6 +28,7 @@ then the remaining binds. Remap chords in config (`keybinds` object) — see
 | `pgup` / `pgdn` | scroll transcript |
 | `ctrl+up` / `ctrl+down` | scroll transcript |
 | `ctrl+t` | jump to latest output |
+| `alt+y` | copy last assistant response (OSC52; also `/copy`) |
 | `ctrl+h` / `ctrl+l` | focus left / right pane (horizontal split) |
 | `ctrl+j` / `ctrl+k` | cycle right-pane focus next / previous within the active stack group, then to the next group (bare LF / `KeyCtrlJ` is also `ctrl+j`, not newline) |
 | `ctrl+;` | toggle split orientation (`/layout`, `/split`) |
@@ -68,6 +69,7 @@ to a single pane and cycle the same order one at a time. See [usage.md](usage.md
 | `alt+[` / `alt+]` | previous / next tool cell |
 | `enter` | expand / collapse tool output or large edit diff; else open `file:line` |
 | `y` | copy cell (tool/explore, else latest assistant/user) |
+| `alt+y` | copy last assistant response only (skips tool cells; also `/copy`) |
 | `v` | review edit in editor |
 | `a` | apply shown edit/patch into the active worktree (confirm) |
 

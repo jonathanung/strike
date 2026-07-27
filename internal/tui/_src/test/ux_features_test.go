@@ -518,7 +518,7 @@ func TestHelpCommandOpensFilterableCatalogModal(t *testing.T) {
 		t.Errorf("/help set notice %q, want empty (modal is unclipped)", m.notice)
 	}
 	wantLabels := []string{
-		"/provider", "/model", "/settings", "/session", "/theme", "/memory",
+		"/provider", "/model", "/settings", "/session", "/export", "/copy", "/theme", "/memory",
 		"/issues", "/compact", "/fork", "/undo", "/fast", "/think", "/layout", "/md-read", "/keys", "/exit", "/quit", "/review", "tab",
 	}
 	for _, want := range wantLabels {
@@ -557,6 +557,7 @@ func TestKeybindCatalogIncludesJumpBottomToggleAndScroll(t *testing.T) {
 		"nav.toggle-orient": keys.ToggleOrientation.Help().Key,
 		"nav.scroll-up":     keys.ScrollUp.Help().Key,
 		"nav.scroll-down":   keys.ScrollDown.Help().Key,
+		"global.copy-last":  keys.CopyLastResponse.Help().Key,
 	}
 	seen := map[string]keybindEntry{}
 	for _, e := range catalog {

@@ -65,6 +65,7 @@ var KnownKeybindIDs = map[string]struct{}{
 	"global.interrupt":         {},
 	"global.quit":              {},
 	"global.save-defaults":     {},
+	"global.copy-last":         {},
 	"editor.leave":             {},
 	"composer.send":            {},
 	"composer.newline":         {},

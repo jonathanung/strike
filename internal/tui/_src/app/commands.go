@@ -34,6 +34,7 @@ const (
 	commandUndo            commandID = "undo"
 	commandSession         commandID = "session"
 	commandExport          commandID = "export"
+	commandCopy            commandID = "copy"
 	commandMemory          commandID = "memory"
 	commandIssues          commandID = "issues"
 	commandGoal            commandID = "goal"
@@ -85,6 +86,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandUndo, Name: "/undo", Description: "undo last turn (chat only, or chat + restore files)", ArgsHint: "[chat|files]", Source: commandSourceBuiltin},
 	{ID: commandSession, Name: "/session", Description: "browse and resume a past session", ArgsHint: "[id]", Source: commandSourceBuiltin},
 	{ID: commandExport, Name: "/export", Description: "export the conversation to markdown", ArgsHint: "[path] [--open]", Source: commandSourceBuiltin},
+	{ID: commandCopy, Name: "/copy", Description: "copy the last assistant response to the clipboard", Source: commandSourceBuiltin},
 	{ID: commandHelp, Name: "/help", Description: "show available commands", Source: commandSourceBuiltin},
 	{ID: commandKeys, Name: "/keys", Description: "show keyboard shortcuts", ArgsHint: "[reset]", Source: commandSourceBuiltin},
 	{ID: commandMemory, Name: "/memory", Description: "list, get, set, delete, export, or import project memory", ArgsHint: "[list|get|set|rm|export|import] ...", Source: commandSourceBuiltin},
@@ -171,6 +173,7 @@ var reservedCommandNames = map[string]struct{}{
 	"rewind":           {},
 	"session":          {},
 	"export":           {},
+	"copy":             {},
 	"help":             {},
 	"keys":             {},
 	"memory":           {},
