@@ -198,6 +198,75 @@ func TestAskAnswerLenMismatch(t *testing.T) {
 	}
 }
 
+func TestAskMultiReplySuccess(t *testing.T) {
+	events := make(chan protocol.Event, 4)
+	svc := New(func(ev protocol.Event) { events <- ev })
+	corr := protocol.Correlation{SessionID: "s-multi", TurnID: "t1"}
+	prompts := []protocol.QuestionPrompt{
+		{ID: "a", Question: "First?", Options: []protocol.QuestionOption{{Label: "1"}, {Label: "2"}}},
+		{ID: "b", Header: "Notes", Question: "Second?"},
+		{ID: "c", Question: "Third?", Options: []protocol.QuestionOption{{Label: "x"}, {Label: "y"}}},
+	}
+
+	errCh := make(chan error, 1)
+	ansCh := make(chan []string, 1)
+	go func() {
+		answers, err := svc.Ask(context.Background(), corr, prompts)
+		ansCh <- answers
+		errCh <- err
+	}()
+
+	var asked protocol.QuestionAsked
+	select {
+	case ev := <-events:
+		var ok bool
+		asked, ok = ev.(protocol.QuestionAsked)
+		if !ok {
+			t.Fatalf("first event = %T, want QuestionAsked", ev)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for QuestionAsked")
+	}
+	if len(asked.Questions) != 3 {
+		t.Fatalf("asked questions = %d, want 3", len(asked.Questions))
+	}
+	for i, p := range prompts {
+		if asked.Questions[i].ID != p.ID || asked.Questions[i].Question != p.Question {
+			t.Errorf("question[%d] = %#v, want %#v", i, asked.Questions[i], p)
+		}
+	}
+
+	want := []string{"2", "freeform notes", "x"}
+	svc.Reply(protocol.QuestionReply{RequestID: asked.RequestID, Answers: want})
+
+	select {
+	case ev := <-events:
+		if _, ok := ev.(protocol.QuestionResolved); !ok {
+			t.Fatalf("second event = %T, want QuestionResolved", ev)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for QuestionResolved")
+	}
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("Ask: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for Ask return")
+	}
+	got := <-ansCh
+	if len(got) != len(want) {
+		t.Fatalf("answers = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("answers[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
 func TestConcurrentAsks(t *testing.T) {
 	var mu sync.Mutex
 	var events []protocol.Event
