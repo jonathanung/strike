@@ -60,7 +60,7 @@ event stream the TUI rendered from (see `internal/protocol/codec.go`).
 | `internal/goal` | Loop harness: goals, JSONL iterations/events, guards, critic, hooks | stdlib |
 | `internal/question` | User-question ask service: suspends a tool call until `QuestionReply` | `protocol`, stdlib |
 | `internal/permission` | Ordered allow/ask/deny rulesets, last-match-wins; the ask service that suspends a tool call for user input | `protocol`, `tool` (for `AskRequest`), stdlib |
-| `internal/session` | JSONL event-log persistence (append/replay) + concurrent Manager (multi-session open, durable list, event mux) | `protocol`, stdlib |
+| `internal/session` | JSONL event-log persistence (append/replay) + concurrent Manager (multi-session open, durable list, event mux). Sidecar `*.meta.json` stores `projectKey` (workspace folder) first for `/session` scoping | `protocol`, stdlib |
 | `internal/auth` | Credential store (0600 `auth.json`) + OAuth/PKCE/device flows | stdlib, net/http |
 | `internal/config` | Layered JSON config (defaults → global → project) + agents/skills markdown loading | `permission` (Ruleset is a config field), stdlib |
 | `internal/models` | models.dev catalog client, 24h cache with stale fallback | stdlib, net/http |
@@ -268,8 +268,11 @@ Two different mechanisms, depending on whether it needs Go code:
    `theme`, `layout`, `split`, `compact`, `fork`, `undo`, `rewind`,
    `session`, `export`, `help`, `keys`, `memory`, `issues`, `goal`, `loop`,
    `context`, `effective-prompt`, `cost`, `upgrade`, `init`, `mcp`, `exit`,
-   `quit`) are rejected by `config.ValidateSkillName` before
-   they ever reach the frontend. `/init` is a builtin that writes project
+   `quit`, and keybind-backed action mirrors such as `focus-left`, `palette`,
+   `interrupt`, `agent-next`, `tool-copy`, `subagent`, `root-new`, …) are
+   rejected by `config.ValidateSkillName` before they ever reach the frontend.
+   See `keybindSlashPrimary` in `internal/tui/keybind_slash.go` for the full
+   keybind→slash map. `/init` is a builtin that writes project
    `AGENTS.md` via `host.ProjectInit` (confirm before overwrite). PR URLs from successful `gh pr` bash
    output are stored via `protocol.SessionMeta` and `session` sidecar
    metadata. `/vim` embeds nvim/vim/nano in the right-pane `editor` window by
@@ -303,6 +306,7 @@ Same package `internal/tui`; split for reviewability only (no subpackages).
 | `command_dispatch.go` | `handleCommand` and slash handler implementations |
 | `cells.go` | transcript cell types and rendering helpers |
 | `keymap.go` / `keys.go` | keybind table and binding ids |
+| `keybind_slash.go` | keybind→slash registry + action mirrors |
 | `session_nav.go` | session list / child transcript projection |
 | `root_switch.go` | multi-root apply helpers |
 | `view.go` | header/hints and non-root view fragments |

@@ -23,7 +23,6 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.reflow()
 		return m, cmd
 	}
-	// Leader chords before other routing so ctrl+x down is not eaten.
 	// Completion dismiss before interrupt so first esc closes the popup and a
 	// second esc cancels the turn (docs/keybinds.md; modal already returned).
 	if m.focus == focusLeft && m.completion != nil {
@@ -235,33 +234,17 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.saveDefaultsCmd(m.providerName, m.modelName, m.agentName, string(m.effort), string(m.permMode.Normalize()), dotJoin(m.th, m.providerName+"/"+m.modelName, m.agentName))
 	case key.Matches(msg, m.keyMap.Agent):
-		// Tab cycles agents (opencode-style build/plan switching).
+		// Tab cycles agents (opencode-style build/plan switching); /agent-next.
 		if len(m.agents) > 1 && !m.turnRunning {
-			next := m.agents[0]
-			for i, name := range m.agents {
-				if name == m.agentName {
-					next = m.agents[(i+1)%len(m.agents)]
-					break
-				}
-			}
-			ops := m.ops
-			return m, func() tea.Msg {
-				ops <- protocol.SelectAgent{Name: next}
-				return nil
-			}
+			return m.cycleAgentPersona()
 		}
 		return m, nil
 	case key.Matches(msg, m.keyMap.PermissionMode):
-		// Shift+Tab cycles tool-permission posture (not a newline).
+		// Shift+Tab cycles tool-permission posture; /mode-next.
 		if m.turnRunning {
 			return m, nil
 		}
-		next := m.permMode.Next()
-		ops := m.ops
-		return m, func() tea.Msg {
-			ops <- protocol.SetPermissionMode{Mode: next}
-			return nil
-		}
+		return m.cyclePermissionMode()
 	}
 	return m.updateComposer(msg)
 }

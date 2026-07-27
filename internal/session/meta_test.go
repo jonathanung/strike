@@ -3,6 +3,7 @@ package session
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -27,6 +28,26 @@ func TestMetaRoundTrip(t *testing.T) {
 	}
 	if _, err := os.Stat(MetaPath(dir, "sess-1")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestMetaJSONProjectKeyFirst(t *testing.T) {
+	dir := t.TempDir()
+	if err := WriteMeta(dir, "top", Meta{
+		ProjectKey: "/home/me/proj",
+		Title:      "hello",
+		CreatedAt:  "2026-07-27T00:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(MetaPath(dir, "top"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Sidecar should embed workspace path at the top of the JSON object.
+	body := strings.TrimSpace(string(raw))
+	if !strings.HasPrefix(body, "{\n  \"projectKey\": \"/home/me/proj\"") {
+		t.Fatalf("meta JSON should start with projectKey, got:\n%s", body)
 	}
 }
 
