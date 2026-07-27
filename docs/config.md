@@ -55,10 +55,12 @@ tools stay always available: `read`/`glob`/`grep`/`edit`/`write`/
 `apply_patch`/`bash`, the `task*` family, `toolsearch`, `question`, and plan
 workflow tools. Deferred surface includes optional built-ins (`webfetch`,
 todo/memory/issue, `sleep`, `skill`, `notebook_edit`, …) and all `mcp_*`
-tools. Discovery is session-scoped on the live registry: matches from
-`toolsearch` load full schemas on the **next** model request (including the
-next iteration of the same turn’s tool loop). Set `"deferTools": "on"` in
-global or project config to enable.
+tools. Discovery lives on the process registry: matches from `toolsearch`
+load full schemas on the **next** model request (including the next
+iteration of the same turn’s tool loop). Tools already present as assistant
+tool calls in history are re-promoted on each stream (so `--continue` keeps
+schemas for tools used earlier). Set `"deferTools": "on"` in global or
+project config to enable.
 
 **Permission soft-approve / auto-approve:** session mode `soft-approve`
 (`permissionMode`, `/mode`, Shift+Tab) arms a **visible** 15s countdown on

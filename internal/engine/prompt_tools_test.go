@@ -541,6 +541,45 @@ func TestDeferToolsDirectCallPromotes(t *testing.T) {
 	waitTurnCompleted(t, eng)
 }
 
+// TestDeferToolsHistoryRepromotesOnResume ensures tools already called in
+// InitialMessages are loaded on the first stream after resume.
+func TestDeferToolsHistoryRepromotesOnResume(t *testing.T) {
+	reg := tool.NewRegistry(tool.NewRead(), tool.NewWebFetch(), tool.NewSleep())
+	reg.Register(tool.NewToolSearch(reg))
+	reg.SetDeferLoading(true)
+
+	req := captureStreamRequest(t, engine.Options{
+		WorkDir:  t.TempDir(),
+		Registry: reg,
+		Agents:   []engine.Agent{{Name: "build"}},
+		Rules:    []permission.Ruleset{permission.Defaults()},
+		InitialMessages: []provider.Message{
+			{Role: provider.RoleUser, Text: "fetch something"},
+			{
+				Role: provider.RoleAssistant,
+				ToolCalls: []provider.ToolCall{
+					{ID: "c1", Name: "webfetch", Args: json.RawMessage(`{"url":"https://example.com"}`)},
+				},
+			},
+			{
+				Role: provider.RoleTool,
+				ToolResult: &provider.ToolResult{
+					CallID: "c1",
+					Output: "ok",
+				},
+			},
+		},
+	}, "echo", "echo")
+
+	names := toolNameSet(req.Tools)
+	if !names["webfetch"] {
+		t.Fatalf("resume should re-promote webfetch from history: %v", names)
+	}
+	if names["sleep"] {
+		t.Fatalf("unused sleep should stay deferred: %v", names)
+	}
+}
+
 // TestDeferToolsOffSendsFullSet keeps default (defer off) behavior.
 func TestDeferToolsOffSendsFullSet(t *testing.T) {
 	reg := tool.NewRegistry(tool.NewRead(), tool.NewWebFetch(), tool.NewSleep())

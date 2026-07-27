@@ -20,6 +20,8 @@ func (e *Engine) effectiveToolSchemas() (schemas []provider.ToolSchema, omitted 
 	if e == nil || e.opts.Registry == nil {
 		return nil, 0
 	}
+	// Re-promote tools already used in history (resume / --continue).
+	e.discoverToolsFromHistory()
 	all := e.opts.Registry.SchemasForProvider()
 	if len(all) == 0 {
 		return nil, 0
@@ -38,6 +40,25 @@ func (e *Engine) effectiveToolSchemas() (schemas []provider.ToolSchema, omitted 
 		out = append(out, s)
 	}
 	return out, omitted
+}
+
+// discoverToolsFromHistory promotes deferred tools that already appear as
+// assistant tool calls in model history so resume keeps their schemas loaded.
+func (e *Engine) discoverToolsFromHistory() {
+	if e == nil || e.opts.Registry == nil || !e.opts.Registry.DeferLoading() {
+		return
+	}
+	var names []string
+	for _, m := range e.messages {
+		for _, c := range m.ToolCalls {
+			if n := strings.TrimSpace(c.Name); n != "" {
+				names = append(names, n)
+			}
+		}
+	}
+	if len(names) > 0 {
+		e.opts.Registry.Discover(names...)
+	}
 }
 
 // toolGuidanceLayer builds the effective Available tools section from the
