@@ -229,6 +229,9 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		return m.handleInitCommand()
 	case "/mcp":
 		return m.handleMCPCommand(fields[1:])
+	case "/exit", "/quit":
+		// Same graceful shutdown as the global quit keybinding (ctrl+c).
+		return m, tea.Quit
 	default:
 		// Unknown commands fall through to skills: /name args renders the
 		// skill template and submits it as the user message.

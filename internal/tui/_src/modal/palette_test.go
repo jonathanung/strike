@@ -59,6 +59,8 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		{ID: "command:upgrade", Label: "/upgrade", Description: "install the latest release and restart", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/upgrade"}},
 		{ID: "command:init", Label: "/init", Description: "create or update project AGENTS.md", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/init"}},
 		{ID: "command:mcp", Label: "/mcp", Description: "MCP servers: status, retry, disable", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/mcp"}},
+		{ID: "command:exit", Label: "/exit", Description: "quit strike", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/exit"}},
+		{ID: "command:quit", Label: "/quit", Description: "quit strike", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/quit"}},
 		{ID: "skill:review", Label: "/review", Description: "review a change", Action: paletteAction{Kind: paletteActionSkill, Value: "review"}},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -109,6 +111,10 @@ func TestPaletteAvailabilityAndDisabledSelection(t *testing.T) {
 		assertPaletteInvoke(t, m, "/cost", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/cost"}})
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
 		assertPaletteInvoke(t, m, "/mcp", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/mcp"}})
+		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
+		assertPaletteInvoke(t, m, "/exit", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/exit"}})
+		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
+		assertPaletteInvoke(t, m, "/quit", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/quit"}})
 	})
 }
 
@@ -159,8 +165,8 @@ func TestPaletteFilteringRanksExactPrefixAndSubsequenceStablyAndIgnoresCase(t *t
 
 func TestPaletteBackspaceRestoresResultsAndZeroResultsDoNotSelect(t *testing.T) {
 	m := newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true})
-	// "q" is not an ordered subsequence of any shipped label/description.
-	typePalette(t, m, "q")
+	// "zzzz" is not an ordered subsequence of any shipped label/description.
+	typePalette(t, m, "zzzz")
 	if view := m.view(80, theme.Default()); !strings.Contains(view, "no matching actions") {
 		t.Errorf("zero-result view did not explain its empty state:\n%s", view)
 	}
@@ -169,7 +175,9 @@ func TestPaletteBackspaceRestoresResultsAndZeroResultsDoNotSelect(t *testing.T) 
 		t.Fatal("enter with zero results closed the palette or emitted a command")
 	}
 
-	updatePalette(t, m, tea.KeyMsg{Type: tea.KeyBackspace})
+	for range 4 {
+		updatePalette(t, m, tea.KeyMsg{Type: tea.KeyBackspace})
+	}
 	assertPaletteEnter(t, m, paletteInvokeMsg{Action: paletteAction{Kind: paletteActionKeybinds}})
 }
 

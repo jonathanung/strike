@@ -22,6 +22,20 @@ type Result struct {
 	Metadata json.RawMessage
 }
 
+// UserRejectedError is returned when the user declines an interactive
+// approval that is not a permission ask (e.g. exit_plan_mode "No"). The
+// engine settles it as a tool-result error and interrupts the turn.
+type UserRejectedError struct {
+	Message string
+}
+
+func (e *UserRejectedError) Error() string {
+	if e != nil && e.Message != "" {
+		return e.Message
+	}
+	return "The user rejected this action."
+}
+
 // AskRequest is a permission ask raised by a tool mid-execution.
 type AskRequest struct {
 	Permission string   // e.g. "edit", "bash"

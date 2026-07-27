@@ -216,6 +216,74 @@ func TestChildQuestionReplyRouting(t *testing.T) {
 	}
 }
 
+// TestQuestionDismissInterruptsTurn: empty QuestionReply (esc dismiss) settles
+// the tool as an error and ends the turn with stopReason interrupted.
+func TestQuestionDismissInterruptsTurn(t *testing.T) {
+	call := questionToolCall("qcall-dismiss", map[string]any{
+		"question": "Continue?",
+		"options": []map[string]any{
+			{"label": "Yes"},
+			{"label": "No"},
+		},
+	})
+	// Only one stream step: a second stream would mean the turn continued.
+	prov := newScriptedProvider(toolCallStep(call))
+	eng := engine.New(engine.Options{
+		SessionID:       "sess-q-dismiss",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(tool.NewQuestion()),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "ask me"}
+
+	var (
+		sawToolEnd bool
+		toolOut    string
+		stopReason string
+	)
+	deadline := time.After(10 * time.Second)
+	for stopReason == "" {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for interrupted turn")
+		case ev := <-eng.Events():
+			switch ev := ev.(type) {
+			case protocol.QuestionAsked:
+				eng.Ops() <- protocol.QuestionReply{RequestID: ev.RequestID, Answers: nil}
+			case protocol.ToolCallEnd:
+				if ev.CallID != "qcall-dismiss" {
+					continue
+				}
+				sawToolEnd = true
+				toolOut = ev.Output
+				if !ev.IsError {
+					t.Error("dismissed question should be an error tool result")
+				}
+			case protocol.TurnCompleted:
+				stopReason = ev.StopReason
+			case protocol.EngineError:
+				t.Fatalf("engine error: %s", ev.Message)
+			}
+		}
+	}
+	if !sawToolEnd {
+		t.Error("missing ToolCallEnd for dismissed question")
+	}
+	if !strings.Contains(strings.ToLower(toolOut), "dismiss") &&
+		!strings.Contains(strings.ToLower(toolOut), "rejected") {
+		t.Errorf("tool output = %q, want dismiss/reject feedback", toolOut)
+	}
+	if stopReason != "interrupted" {
+		t.Errorf("stop reason = %q, want interrupted", stopReason)
+	}
+}
+
 // TestDeferredSwitchAgentAfterEnterPlanMode: enter_plan_mode queues the switch;
 // AgentSelected{plan} fires after the tool batch (before the next Stream), so
 // it may appear mid-turn before TurnCompleted.

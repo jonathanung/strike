@@ -329,6 +329,25 @@ func TestControlCQuitsBeforeOtherInputLayers(t *testing.T) {
 	assertNoAppOp(t, ops)
 }
 
+func TestExitAndQuitSlashCommandsQuitLikeCtrlC(t *testing.T) {
+	for _, name := range []string{"/exit", "/quit"} {
+		t.Run(name, func(t *testing.T) {
+			m, ops := newAppTestModel(nil, nil)
+			m.composer.SetValue(name)
+			m.turnRunning = true // quit must work mid-turn, like ctrl+c
+			updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			m = updated.(Model)
+			if _, ok := runAppCmd(t, cmd).(tea.QuitMsg); !ok {
+				t.Fatalf("%s did not return a quit command", name)
+			}
+			if m.PendingUpgrade() || m.PendingResume() != "" {
+				t.Errorf("%s set upgrade/resume side effects", name)
+			}
+			assertNoAppOp(t, ops)
+		})
+	}
+}
+
 func TestComposerEnterBindings(t *testing.T) {
 	t.Run("alt enter inserts newline without sending", func(t *testing.T) {
 		m, ops := newAppTestModel(nil, nil)
@@ -1813,7 +1832,7 @@ func TestPaletteHelpInvocationOpensHelpModal(t *testing.T) {
 	if !strings.Contains(plain, "Commands") {
 		t.Errorf("/help modal view missing title: %q", plain)
 	}
-	for _, want := range []string{"/session", "/rename", "/export", "/theme", "/memory", "/issues", "/compact", "/fast", "/think", "/layout", "/md-read", "/keys", "/settings"} {
+	for _, want := range []string{"/session", "/rename", "/export", "/theme", "/memory", "/issues", "/compact", "/fast", "/think", "/layout", "/md-read", "/keys", "/settings", "/exit", "/quit"} {
 		found := false
 		for _, entry := range help.entries {
 			if strings.HasPrefix(entry.Label, want) {

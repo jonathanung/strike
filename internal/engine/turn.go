@@ -587,6 +587,7 @@ func modelFacingToolOutput(res tool.Result, err error) (output string, isError b
 	var permDenied *permission.DeniedError
 	var permRejected *permission.RejectedError
 	var qRejected *question.RejectedError
+	var toolRejected *tool.UserRejectedError
 	switch {
 	case errors.As(err, &permDenied):
 		return permDenied.Error(), true
@@ -594,14 +595,34 @@ func modelFacingToolOutput(res tool.Result, err error) (output string, isError b
 		return permRejected.Error(), true
 	case errors.As(err, &qRejected):
 		return qRejected.Error(), true
+	case errors.As(err, &toolRejected):
+		return protocol.ToolFeedbackUserRejected(toolRejected.Message), true
 	default:
 		return protocol.ToolFeedbackError(err.Error()), true
 	}
 }
 
+// isUserTurnInterrupt reports whether err is an interactive user rejection
+// that should end the turn after the tool result is settled (permission
+// reject, question dismiss, plan/phase decline). Hard ruleset denies are not
+// included — those feed back so the model can try another approach.
+func isUserTurnInterrupt(err error) bool {
+	if err == nil {
+		return false
+	}
+	var permRejected *permission.RejectedError
+	var qRejected *question.RejectedError
+	var toolRejected *tool.UserRejectedError
+	return errors.As(err, &permRejected) ||
+		errors.As(err, &qRejected) ||
+		errors.As(err, &toolRejected)
+}
+
 // execToolCall runs one tool call and returns the tool-result message to
-// feed back to the model. Failures (unknown tool, bad args, rejection)
-// become correctable error results, never turn aborts. Cancellation after
+// feed back to the model. Failures (unknown tool, bad args, hard deny)
+// become correctable error results so the model can course-correct. User
+// permission rejects, question dismissals, and plan/phase declines settle
+// as error results then interrupt the turn. Cancellation after
 // ToolCallBegin yields one correlated ToolCallEnd with a deterministic
 // canceled output; it does not invent PermissionResolved. If begin was
 // never emitted, only a history-only unstarted result is returned.
@@ -799,7 +820,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 	// Declarative post rules observe the completed call (log/notify only).
 	e.fireHookRules(corr, permission.HookEventPostToolUse, call.Name, call.ID)
 
-	return e.settleToolFeedback(toolFeedback{
+	msg := e.settleToolFeedback(toolFeedback{
 		Corr:     corr,
 		CallID:   call.ID,
 		Output:   output,
@@ -808,6 +829,12 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 		Metadata: res.Metadata,
 		EmitEnd:  true,
 	})
+	// User reject/dismiss/decline: settle the tool with clear feedback, then
+	// cancel the turn so the agent does not continue as if approved.
+	if isUserTurnInterrupt(err) && e.turnCancel != nil {
+		e.turnCancel()
+	}
+	return msg
 }
 
 // runToolHooks runs configured shell hooks for a tool lifecycle event.
