@@ -54,6 +54,9 @@ func (m Model) enqueueUserInput(op protocol.UserInput, displayPrompt string) (te
 func (m Model) dispatchUserInput(op protocol.UserInput, displayPrompt string) (tea.Model, tea.Cmd) {
 	m.resetComposer()
 	m.clearNotice()
+	// Optimistic busy so esc can interrupt during the gap before TurnStarted
+	// arrives from the engine (ops queue + event round-trip).
+	m.turnRunning = true
 	ops := m.ops
 	send := func() tea.Msg {
 		ops <- op
@@ -92,6 +95,8 @@ func (m *Model) tryDrainInputQueue() tea.Cmd {
 	} else {
 		m.setInputQueueNotice()
 	}
+	// Match dispatchUserInput: busy immediately so esc works before TurnStarted.
+	m.turnRunning = true
 	ops := m.ops
 	op := protocol.UserInput{Text: item.modelText, Images: item.images}
 	return func() tea.Msg {

@@ -624,7 +624,13 @@ func (m *Model) interruptRoot(id string) tea.Cmd {
 		}
 		ops := m.ops
 		return func() tea.Msg {
-			ops <- protocol.Interrupt{}
+			if ops == nil {
+				return nil
+			}
+			select {
+			case ops <- protocol.Interrupt{}:
+			default:
+			}
 			return nil
 		}
 	}

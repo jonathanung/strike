@@ -586,6 +586,106 @@ func TestManagerForkCopiesPrefixAndMeta(t *testing.T) {
 	}
 }
 
+func TestManagerForkAtKeepsPrefixAndPreservesSource(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager(dir)
+	root, err := m.Create(CreateOptions{Title: "work", ProjectKey: "/repos/x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	corr1 := protocol.Correlation{SessionID: root.ID, TurnID: "t1"}
+	corr2 := protocol.Correlation{SessionID: root.ID, TurnID: "t2"}
+	evs := []protocol.Event{
+		protocol.ModelSelected{Correlation: protocol.Correlation{SessionID: root.ID}, Provider: "echo", Model: "echo"},
+		protocol.UserMessage{Correlation: corr1, Text: "first"},
+		protocol.TurnStarted{Correlation: corr1},
+		protocol.TextDelta{Correlation: corr1, Text: "one"},
+		protocol.TurnCompleted{Correlation: corr1, StopReason: "end_turn"},
+		protocol.UserMessage{Correlation: corr2, Text: "second"},
+		protocol.TurnStarted{Correlation: corr2},
+		protocol.TextDelta{Correlation: corr2, Text: "two"},
+		protocol.TurnCompleted{Correlation: corr2, StopReason: "end_turn"},
+	}
+	for _, ev := range evs {
+		if err := m.Append(root.ID, ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	points := protocol.RewindPoints(evs)
+	if len(points) != 2 {
+		t.Fatalf("RewindPoints = %+v", points)
+	}
+	keep := points[0].KeepEvents
+
+	fork, err := m.ForkAt(root.ID, keep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fork.ID == root.ID {
+		t.Fatal("fork id must differ")
+	}
+	if fork.ParentSessionID != "" {
+		t.Fatalf("ParentSessionID = %q", fork.ParentSessionID)
+	}
+	if fork.ProjectKey != "/repos/x" {
+		t.Fatalf("ProjectKey = %q", fork.ProjectKey)
+	}
+	meta, err := ReadMeta(dir, fork.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.ForkedFrom != root.ID {
+		t.Fatalf("ForkedFrom = %q", meta.ForkedFrom)
+	}
+
+	srcEvents, err := m.Replay(root.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(srcEvents) != len(evs) {
+		t.Fatalf("source events changed: %d → %d", len(evs), len(srcEvents))
+	}
+	forkEvents, err := m.Replay(fork.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(forkEvents) != keep {
+		t.Fatalf("fork events = %d, want %d", len(forkEvents), keep)
+	}
+	// Source still listable.
+	list, err := m.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var foundSrc, foundFork bool
+	for _, info := range list {
+		if info.ID == root.ID {
+			foundSrc = true
+		}
+		if info.ID == fork.ID {
+			foundFork = true
+		}
+	}
+	if !foundSrc || !foundFork {
+		t.Fatalf("list missing src/fork: %+v", list)
+	}
+
+	if _, err := m.ForkAt(root.ID, len(evs)+1); err == nil {
+		t.Fatal("expected keepEvents overflow error")
+	}
+	empty, err := m.ForkAt(root.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	emptyEvs, err := m.Replay(empty.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(emptyEvs) != 0 {
+		t.Fatalf("empty fork events = %d", len(emptyEvs))
+	}
+}
+
 func TestAppendSessionMetaUpdatesPRInfo(t *testing.T) {
 	dir := t.TempDir()
 	m := NewManager(dir)

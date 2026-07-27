@@ -32,6 +32,7 @@ const (
 	commandCompact         commandID = "compact"
 	commandFork            commandID = "fork"
 	commandUndo            commandID = "undo"
+	commandRewind          commandID = "rewind"
 	commandSession         commandID = "session"
 	commandRename          commandID = "rename"
 	commandExport          commandID = "export"
@@ -115,6 +116,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandCompact, Name: "/compact", Description: "compact model history (keep recent turns)", Source: commandSourceBuiltin},
 	{ID: commandFork, Name: "/fork", Description: "duplicate the conversation into a new id", Source: commandSourceBuiltin},
 	{ID: commandUndo, Name: "/undo", Description: "undo last turn (chat only, or chat + restore files)", ArgsHint: "[chat|files]", Source: commandSourceBuiltin},
+	{ID: commandRewind, Name: "/rewind", Description: "fork a new id from a previous turn (keeps original)", ArgsHint: "[turn]", Source: commandSourceBuiltin},
 	{ID: commandSession, Name: "/session", Description: "browse and resume a past session", ArgsHint: "[id]", Source: commandSourceBuiltin},
 	{ID: commandRename, Name: "/rename", Description: "rename the current session", ArgsHint: "[title]", Source: commandSourceBuiltin},
 	{ID: commandExport, Name: "/export", Description: "export the conversation to markdown", ArgsHint: "[path] [--open]", Source: commandSourceBuiltin},

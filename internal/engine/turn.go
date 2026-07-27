@@ -477,7 +477,25 @@ func (e *Engine) consumeStream(ctx context.Context, reqCorr protocol.Correlation
 	stopReason := ""
 	var streamErr error
 	terminated := false
-	for ev := range stream {
+	// Observe turn cancel between stream events so Interrupt does not wait
+	// for a slow/uncooperative provider to close the channel. Remaining
+	// events are drained so the provider goroutine is not stuck on send.
+	for {
+		if ctx.Err() != nil {
+			go drainStream(stream)
+			return streamOutcome{}, ctx.Err()
+		}
+		var ev provider.StreamEvent
+		var ok bool
+		select {
+		case <-ctx.Done():
+			go drainStream(stream)
+			return streamOutcome{}, ctx.Err()
+		case ev, ok = <-stream:
+			if !ok {
+				goto streamClosed
+			}
+		}
 		if terminated {
 			continue
 		}
@@ -515,6 +533,7 @@ func (e *Engine) consumeStream(ctx context.Context, reqCorr protocol.Correlation
 			}
 		}
 	}
+streamClosed:
 	if ctx.Err() != nil {
 		return streamOutcome{}, ctx.Err()
 	}
@@ -530,6 +549,13 @@ func (e *Engine) consumeStream(ctx context.Context, reqCorr protocol.Correlation
 		reasoning:  reasoning,
 		stopReason: stopReason,
 	}, nil
+}
+
+// drainStream consumes remaining provider events so a canceled consumer does
+// not leave the producer blocked on a full channel send.
+func drainStream(stream <-chan provider.StreamEvent) {
+	for range stream {
+	}
 }
 
 // appendUnstartedToolResults adds synthetic RoleTool error results for calls

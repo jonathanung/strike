@@ -211,16 +211,8 @@ func (m Model) handleKeybindSlashCommand(name string) (tea.Model, tea.Cmd) {
 		m.reflow()
 		return m, nil
 	case "/interrupt":
-		if m.turnRunning {
-			ops := m.ops
-			return m, func() tea.Msg {
-				ops <- protocol.Interrupt{}
-				return nil
-			}
-		}
-		if m.clearInputQueue() {
-			m.reflow()
-			return m, nil
+		if handled, cmd := m.handleInterruptKey(); handled {
+			return m, cmd
 		}
 		m.setNotice("nothing to interrupt", false)
 		return m, nil

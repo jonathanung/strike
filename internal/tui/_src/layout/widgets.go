@@ -11,7 +11,7 @@ import (
 
 func newComposer(th theme.Theme) textarea.Model {
 	ta := textarea.New()
-	ta.Placeholder = "Ask anything…  (/ for commands)"
+	ta.Placeholder = "Ask anything…  (/ commands, ! shell)"
 	ta.MaxHeight = composerMaxHeight
 	ta.SetHeight(composerMinHeight)
 	ta.ShowLineNumbers = false
