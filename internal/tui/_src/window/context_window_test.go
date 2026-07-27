@@ -74,6 +74,26 @@ func TestContextWindowViewUnknownUsageNotZeroSlashZero(t *testing.T) {
 	}
 }
 
+func TestContextWindowViewLabelsLastOutputAndMaximumSeparately(t *testing.T) {
+	th := theme.Default()
+	w := newContextWindow().resize(40, 16)
+	updated, _ := w.update(contextStateMsg{
+		Output:           protocol.KnownTokens(500),
+		OutputLimit:      8_192,
+		OutputLimitKnown: true,
+	})
+	plain := ansi.Strip(updated.view(th))
+	if !strings.Contains(plain, "last output") || !strings.Contains(plain, "500") {
+		t.Errorf("last-request output missing from view:\n%s", plain)
+	}
+	if !strings.Contains(plain, "max output") || !strings.Contains(plain, "8.1k") {
+		t.Errorf("maximum output missing from view:\n%s", plain)
+	}
+	if strings.Contains(plain, "out limit") || strings.Contains(plain, "\noutput") {
+		t.Errorf("ambiguous output labels remain in view:\n%s", plain)
+	}
+}
+
 func TestUsageReportedUpdatesModelAndContextView(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})

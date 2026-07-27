@@ -98,10 +98,10 @@ func (w contextWindow) view(th theme.Theme) string {
 		lines = append(lines, contextKVLine(th, w.width, "input", ui.FormatTokens(s.Input.N)))
 	}
 	if s.Output.Known {
-		lines = append(lines, contextKVLine(th, w.width, "output", ui.FormatTokens(s.Output.N)))
+		lines = append(lines, contextKVLine(th, w.width, "last output", ui.FormatTokens(s.Output.N)))
 	}
 	if s.OutputLimitKnown {
-		lines = append(lines, contextKVLine(th, w.width, "out limit", ui.FormatTokens(s.OutputLimit)))
+		lines = append(lines, contextKVLine(th, w.width, "max output", ui.FormatTokens(s.OutputLimit)))
 	}
 
 	lines = append(lines, "")
