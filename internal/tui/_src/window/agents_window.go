@@ -249,24 +249,24 @@ func agentsEmptyLabel(filter agentsViewFilter, text string) string {
 
 // agentsPaneFooter is the agents-window chrome hint row (n/enter/x/d/j/k/f).
 // Derived from defaultAgentsKeyMap so /keys and the pane stay aligned.
-func agentsPaneFooter(th theme.Theme) string {
+// width is the panel footer budget (PanelInnerWidth); ui.KeyHints keeps the
+// row single-line by dropping whole hints that do not fit.
+func agentsPaneFooter(th theme.Theme, width int) string {
+	return ui.KeyHints(th, width, agentsPaneKeyHints())
+}
+
+// agentsPaneKeyHints is the ordered agents-pane footer binding list.
+func agentsPaneKeyHints() []ui.KeyHint {
 	ak := defaultAgentsKeyMap()
-	parts := make([]string, 0, 6)
+	hints := make([]ui.KeyHint, 0, 6)
 	for _, b := range []key.Binding{ak.Spawn, ak.Open, ak.Interrupt, ak.Hide, ak.Move, ak.Filter} {
 		h := b.Help()
 		if h.Key == "" {
 			continue
 		}
-		if h.Desc != "" {
-			parts = append(parts, h.Key+" "+h.Desc)
-		} else {
-			parts = append(parts, h.Key)
-		}
+		hints = append(hints, ui.KeyHint{Key: h.Key, Label: h.Desc})
 	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return dotJoin(th, parts...)
+	return hints
 }
 
 func (w agentsWindow) handleKey(msg tea.KeyMsg) (agentsWindow, tea.Cmd) {

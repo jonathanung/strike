@@ -313,18 +313,29 @@ func panelTitleStyle(th theme.Theme, opts PanelOpts) lipgloss.Style {
 }
 
 // solidEdge builds one full-width surface bar with an optional label.
+// Labels that already carry SGR (e.g. ui.KeyHints) keep their styles; plain
+// labels are painted with labelStyle. Output is always exactly one row.
 func solidEdge(th theme.Theme, label string, width, padX int, bg lipgloss.TerminalColor, labelStyle lipgloss.Style) string {
 	if label == "" {
 		return paintSurface(strings.Repeat(" ", width), width, bg)
 	}
 	inner := max(0, width-2*padX)
 	label = truncate(th, label, inner)
-	seg := strings.Repeat(" ", padX) + labelStyle.Render(label)
+	if !hasSGR(label) {
+		label = labelStyle.Render(label)
+	}
+	seg := strings.Repeat(" ", padX) + label
 	// Trailing pad keeps the bar rectangular under the surface background.
 	if gap := width - lipgloss.Width(seg); gap > 0 {
 		seg += strings.Repeat(" ", gap)
 	}
 	return paintSurface(seg, width, bg)
+}
+
+// hasSGR reports whether s already includes ANSI SGR sequences so chrome
+// should not re-color it (KeyHints footers keep accented keys).
+func hasSGR(s string) bool {
+	return strings.Contains(s, "\x1b[")
 }
 
 // paintSurface applies a solid background across exactly width cells. Nested
@@ -342,9 +353,9 @@ func paintSurface(content string, width int, bg lipgloss.TerminalColor) string {
 }
 
 // edgeBorder builds one horizontal border run of exactly horiz cells, with an
-// optional label woven in as ─ label ─────. label is drawn with labelStyle,
-// the rule with the border color; an over-long label is truncated to keep the
-// run exactly horiz wide.
+// optional label woven in as ─ label ─────. Plain labels use labelStyle; labels
+// that already carry SGR (e.g. ui.KeyHints) keep their styles. An over-long
+// label is truncated so the run stays exactly horiz wide and one row.
 func edgeBorder(th theme.Theme, label string, horiz int, color lipgloss.AdaptiveColor, labelStyle lipgloss.Style) string {
 	bs := lipgloss.NewStyle().Foreground(color)
 	rule := func(n int) string {
@@ -359,9 +370,14 @@ func edgeBorder(th theme.Theme, label string, horiz int, color lipgloss.Adaptive
 		return rule(horiz)
 	}
 	label = truncate(th, label, maxLabel)
-	seg := " " + label + " "
-	trail := horiz - 1 - lipgloss.Width(seg)
-	return rule(1) + labelStyle.Render(seg) + rule(trail)
+	var mid string
+	if hasSGR(label) {
+		mid = " " + label + " "
+	} else {
+		mid = labelStyle.Render(" " + label + " ")
+	}
+	trail := horiz - 1 - lipgloss.Width(mid)
+	return rule(1) + mid + rule(trail)
 }
 
 // fitRows forces rows to exactly n lines: extra trailing lines are dropped,
