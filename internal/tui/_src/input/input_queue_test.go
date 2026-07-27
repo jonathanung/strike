@@ -37,20 +37,20 @@ func TestInputQueueDrainsFIFOOnTurnCompleted(t *testing.T) {
 	}
 
 	m = runEvent(t, m, protocol.TurnCompleted{StopReason: "end_turn"})
-	if m.turnRunning {
-		t.Fatal("turnRunning still true after TurnCompleted")
+	// Drain optimistically marks busy so esc can interrupt the next turn
+	// before TurnStarted arrives.
+	if !m.turnRunning {
+		t.Fatal("turnRunning false after drain dispatch; want optimistic busy")
 	}
 	if len(m.inputQueue) != 2 {
 		t.Fatalf("after first drain queue len = %d, want 2", len(m.inputQueue))
 	}
 	assertUserInputText(t, receiveAppOp(t, ops), "first queued")
 
-	m.turnRunning = true
 	_ = m.applyEvent(protocol.TurnStarted{})
 	m = runEvent(t, m, protocol.TurnCompleted{StopReason: "end_turn"})
 	assertUserInputText(t, receiveAppOp(t, ops), "second queued")
 
-	m.turnRunning = true
 	_ = m.applyEvent(protocol.TurnStarted{})
 	m = runEvent(t, m, protocol.TurnCompleted{StopReason: "end_turn"})
 	assertUserInputText(t, receiveAppOp(t, ops), "third queued")
