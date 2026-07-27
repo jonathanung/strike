@@ -677,4 +677,122 @@ func TestCatalogModelsMetadataFromCache(t *testing.T) {
 	if infos[0].HasCost || infos[0].Context != 0 {
 		t.Errorf("gpt-bare should lack meta: %+v", infos[0])
 	}
+	if full.Name != "Full" || full.Source != host.ModelSourceCatalog {
+		t.Errorf("gpt-full name/source = %q/%q", full.Name, full.Source)
+	}
+}
+
+func TestCatalogOverlayMergesWithoutDroppingCatalog(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cacheDir := filepath.Join(home, ".strike", "cache")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	catalog := `{"openai":{"id":"openai","name":"OpenAI","models":{` +
+		`"gpt-a":{"id":"gpt-a","name":"A","limit":{"context":100000,"output":1000}},` +
+		`"gpt-b":{"id":"gpt-b","name":"B","limit":{"context":50000,"output":500}}` +
+		`}}}`
+	if err := os.WriteFile(filepath.Join(cacheDir, "models.json"), []byte(catalog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	overlays := map[string][]config.ModelDef{
+		"openai": {
+			{
+				ID:    "gpt-a",
+				Name:  "A Overlay",
+				Limit: &config.ModelLimit{Context: 272000},
+				Variants: map[string]map[string]any{
+					"high": {"reasoningEffort": "high"},
+					"low":  {"reasoningEffort": "low"},
+				},
+			},
+			{ID: "gpt-custom", Name: "Custom Only"},
+		},
+	}
+	customs := config.NewCustomStoreWithOverlays(nil, overlays, "")
+	svc := New(nil, nil, nil, nil, nil, nil, customs, "")
+	infos, err := svc.Catalog.Models(context.Background(), "openai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 3 {
+		t.Fatalf("want 3 models (2 catalog + 1 config), got %#v", infos)
+	}
+	byID := map[string]host.ModelInfo{}
+	for _, info := range infos {
+		byID[info.ID] = info
+	}
+	a := byID["gpt-a"]
+	if a.Name != "A Overlay" || a.Context != 272000 || a.Source != host.ModelSourceMerge {
+		t.Errorf("gpt-a overlay = %+v", a)
+	}
+	if len(a.VariantIDs) != 2 || a.VariantIDs[0] != "high" {
+		t.Errorf("variants = %v", a.VariantIDs)
+	}
+	b := byID["gpt-b"]
+	if b.Name != "B" || b.Context != 50000 || b.Source != host.ModelSourceCatalog {
+		t.Errorf("gpt-b must stay catalog-only: %+v", b)
+	}
+	c := byID["gpt-custom"]
+	if c.Name != "Custom Only" || c.Source != host.ModelSourceConfig {
+		t.Errorf("gpt-custom = %+v", c)
+	}
+
+	// Context limit from config drives meter.
+	tokens, ok, err := svc.Catalog.ContextWindow(context.Background(), "openai", "gpt-a")
+	if err != nil || !ok || tokens != 272000 {
+		t.Errorf("ContextWindow overlay = %d,%v,%v", tokens, ok, err)
+	}
+	// Unoverlaid model keeps catalog limit.
+	tokens, ok, err = svc.Catalog.ContextWindow(context.Background(), "openai", "gpt-b")
+	if err != nil || !ok || tokens != 50000 {
+		t.Errorf("ContextWindow catalog = %d,%v,%v", tokens, ok, err)
+	}
+
+	// Omitted overlay → full catalog still listed.
+	svcBare := New(nil, nil, nil, nil, nil, nil, config.NewCustomStore(nil, ""), "")
+	bare, err := svcBare.Catalog.Models(context.Background(), "openai")
+	if err != nil || len(bare) != 2 {
+		t.Fatalf("bare catalog = %#v err=%v", bare, err)
+	}
+
+	effort, ok, err := svc.Catalog.ResolveVariant(context.Background(), "openai", "gpt-a", "high")
+	if err != nil || !ok || effort != "high" {
+		t.Errorf("ResolveVariant = %q ok=%v err=%v", effort, ok, err)
+	}
+}
+
+func TestCatalogCustomNestedModelsDTO(t *testing.T) {
+	cp := config.NormalizeCustomProvider(config.CustomProvider{
+		Name:    "kimi",
+		BaseURL: "https://k.example/v1",
+		API:     config.WireOpenAI,
+		ModelDefs: []config.ModelDef{
+			{
+				ID:    "k2",
+				Name:  "Kimi K2",
+				Limit: &config.ModelLimit{Context: 128000, Output: 8192},
+				Variants: map[string]map[string]any{
+					"medium": {"reasoningEffort": "medium"},
+				},
+			},
+		},
+	})
+	customs := config.NewCustomStore([]config.CustomProvider{cp}, "")
+	svc := New(nil, nil, nil, nil, nil, nil, customs, "")
+	infos, err := svc.Catalog.Models(context.Background(), "kimi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 1 {
+		t.Fatalf("infos = %#v", infos)
+	}
+	got := infos[0]
+	if got.ID != "k2" || got.Name != "Kimi K2" || got.Context != 128000 || got.Output != 8192 {
+		t.Errorf("dto = %+v", got)
+	}
+	if got.Source != host.ModelSourceConfig || len(got.VariantIDs) != 1 {
+		t.Errorf("source/variants = %+v", got)
+	}
 }

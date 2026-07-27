@@ -36,6 +36,11 @@ var providerNameRE = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 
 // CustomProvider is a user-declared LLM endpoint identified by Name.
 // Credentials never live here — only in the auth store (or apiKeyEnv).
+//
+// Models is the legacy flat id list (also the JSON field for config.providers).
+// ModelDefs holds rich nested defs from providers.jsonc; when empty, Normalize
+// synthesizes bare defs from Models. When ModelDefs is set, Models is kept in
+// sync as the id list for callers that only need ids.
 type CustomProvider struct {
 	Name      string            `json:"name"`
 	BaseURL   string            `json:"baseURL"`
@@ -43,6 +48,7 @@ type CustomProvider struct {
 	Headers   map[string]string `json:"headers,omitempty"`
 	APIKeyEnv string            `json:"apiKeyEnv,omitempty"`
 	Models    []string          `json:"models,omitempty"`
+	ModelDefs []ModelDef        `json:"-"`
 }
 
 // Validate checks a custom provider definition before persistence or use.
@@ -72,6 +78,11 @@ func (p CustomProvider) Validate() error {
 	for _, m := range p.Models {
 		if strings.TrimSpace(m) == "" {
 			return errors.New("models must not contain empty ids")
+		}
+	}
+	for _, d := range p.ModelDefs {
+		if err := d.Validate(); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -151,7 +162,27 @@ func NormalizeCustomProvider(p CustomProvider) CustomProvider {
 		}
 		p.Headers = out
 	}
-	if len(p.Models) > 0 {
+	// Prefer rich ModelDefs when present; otherwise promote Models ids.
+	if len(p.ModelDefs) > 0 {
+		defs := make([]ModelDef, 0, len(p.ModelDefs))
+		seen := map[string]struct{}{}
+		ids := make([]string, 0, len(p.ModelDefs))
+		for _, d := range p.ModelDefs {
+			d.ID = strings.TrimSpace(d.ID)
+			if d.ID == "" {
+				continue
+			}
+			if _, ok := seen[d.ID]; ok {
+				continue
+			}
+			seen[d.ID] = struct{}{}
+			d.Name = strings.TrimSpace(d.Name)
+			defs = append(defs, d)
+			ids = append(ids, d.ID)
+		}
+		p.ModelDefs = defs
+		p.Models = ids
+	} else if len(p.Models) > 0 {
 		models := make([]string, 0, len(p.Models))
 		seen := map[string]struct{}{}
 		for _, m := range p.Models {
@@ -166,6 +197,11 @@ func NormalizeCustomProvider(p CustomProvider) CustomProvider {
 			models = append(models, m)
 		}
 		p.Models = models
+		defs := make([]ModelDef, len(models))
+		for i, id := range models {
+			defs[i] = ModelDef{ID: id}
+		}
+		p.ModelDefs = defs
 	}
 	return p
 }
@@ -211,18 +247,42 @@ func mergeProviders(base, layer []CustomProvider) []CustomProvider {
 // ~/.strike/config, optional providers.jsonc layers, and project overrides.
 // Upsert writes the global config providers array; Remove drops the name from
 // memory and from every known persistence layer (config + providers.jsonc).
+//
+// ModelOverlays holds providers.jsonc model refinements for built-in (and
+// catalog-backed) providers — they never become CustomProvider rows.
 type CustomStore struct {
-	mu      sync.Mutex
-	items   []CustomProvider
-	workDir string
+	mu       sync.Mutex
+	items    []CustomProvider
+	overlays map[string][]ModelDef
+	workDir  string
 }
 
 // NewCustomStore seeds a store from a merged provider list (e.g. config.Load).
 // workDir scopes project-layer removals (./.strike/…); empty skips project files.
 func NewCustomStore(items []CustomProvider, workDir string) *CustomStore {
+	return NewCustomStoreWithOverlays(items, nil, workDir)
+}
+
+// NewCustomStoreWithOverlays seeds customs plus builtin model overlays.
+func NewCustomStoreWithOverlays(items []CustomProvider, overlays map[string][]ModelDef, workDir string) *CustomStore {
 	out := make([]CustomProvider, len(items))
 	copy(out, items)
-	return &CustomStore{items: out, workDir: workDir}
+	return &CustomStore{items: out, overlays: cloneOverlayMap(overlays), workDir: workDir}
+}
+
+// ModelOverlay returns config model defs for provider (builtin overlays or
+// custom provider ModelDefs). Caller must not mutate the returned slice.
+func (s *CustomStore) ModelOverlay(provider string) []ModelDef {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if defs := s.overlays[provider]; len(defs) > 0 {
+		return cloneModelDefs(defs)
+	}
+	if cp, ok := FindCustom(s.items, provider); ok {
+		return cloneModelDefs(cp.ModelDefs)
+	}
+	return nil
 }
 
 // List returns a snapshot of custom providers in stable order.

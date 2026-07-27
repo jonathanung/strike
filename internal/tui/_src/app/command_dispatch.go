@@ -2,6 +2,7 @@ package tui
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"path/filepath"
 	"strconv"
@@ -42,12 +43,20 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		return m.sendSelect(protocol.SelectModel{Provider: m.providerName, Model: fields[1]})
 	case "/effort":
 		if len(fields) < 2 {
-			// Bare /effort opens the centered picker.
+			// Bare /effort opens the centered picker (variants + ladder).
 			m.resetComposer()
 			m.modal = newEffortModal(m.effort, m.ops, m.services.Settings)
-			return m, nil
+			return m, loadEffortChoicesCmd(m.services.Catalog, m.providerName, m.modelName, m.effort, m.ops, m.services.Settings)
 		}
 		level, ok := protocol.ParseEffort(fields[1])
+		if (!ok || level == protocol.EffortDefault) && m.services.Catalog != nil {
+			// Config model variant id → effort (e.g. /effort high from variants.high).
+			if effort, vok, err := m.services.Catalog.ResolveVariant(context.Background(), m.providerName, m.modelName, fields[1]); err == nil && vok {
+				if parsed, pok := protocol.ParseEffort(effort); pok && parsed != protocol.EffortDefault {
+					level, ok = parsed, true
+				}
+			}
+		}
 		if !ok || level == protocol.EffortDefault {
 			m.setNotice("unknown effort "+fields[1]+" — want "+effortChoices(), true)
 			return m, nil

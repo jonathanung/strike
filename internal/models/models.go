@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -51,7 +52,9 @@ type Model struct {
 // Info is flat picker-facing metadata for one catalog model.
 type Info struct {
 	ID         string
+	Name       string  // display label; empty means use ID
 	Context    int     // tokens; 0 = unknown
+	Output     int     // max output tokens; 0 = unknown
 	InputCost  float64 // USD per million input tokens
 	OutputCost float64 // USD per million output tokens
 	HasCost    bool
@@ -137,12 +140,14 @@ func (c Catalog) Infos(provider string) []Info {
 func modelInfo(id string, m Model) Info {
 	info := Info{
 		ID:         id,
+		Name:       strings.TrimSpace(m.Name),
 		ToolCall:   m.ToolCall,
 		Reasoning:  m.Reasoning,
 		Attachment: m.Attachment,
 	}
 	if m.Limit != nil {
 		info.Context = m.Limit.Context
+		info.Output = m.Limit.Output
 	}
 	if m.Cost != nil {
 		info.HasCost = true

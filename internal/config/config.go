@@ -60,6 +60,10 @@ type Config struct {
 	// Providers are user-declared custom/self-hosted endpoints (name, base
 	// URL, wire api). API keys are never stored here — only in auth.json.
 	Providers []CustomProvider `json:"providers,omitempty"`
+	// ModelOverlays are providers.jsonc model refinements for built-in /
+	// catalog-backed providers (openai, anthropic, …). Not serialized on
+	// config JSON — loaded from providers.jsonc only.
+	ModelOverlays map[string][]ModelDef `json:"-"`
 	// CompactionStrategy is "trim" (default: drop older turns) or "summarize"
 	// (replace dropped turns with a model-authored summary). Unknown values
 	// are ignored at load time.
@@ -175,7 +179,14 @@ func Default() Config {
 }
 
 // DefaultModel is used when neither config nor flags set a model.
-// For custom providers, prefer CustomProvider.Models[0] via DefaultModelCustom.
+//
+// Precedence for the session model id (deterministic):
+//  1. config/flag model when set
+//  2. DefaultModelCustom first configured key (custom providers)
+//  3. DefaultModel(provider) built-in catalog default
+//  4. empty (caller may require freeform /model)
+//
+// Built-in defaults below are strike's catalog pins, not models.dev order.
 func DefaultModel(provider string) string {
 	switch provider {
 	case "openai":
@@ -191,9 +202,14 @@ func DefaultModel(provider string) string {
 
 // DefaultModelCustom returns the first configured model id for a custom
 // provider, or empty when none are listed (caller may leave model unset).
+// Nested providers.jsonc object key order is sorted alphabetically at parse
+// time; legacy []string keeps file order.
 func DefaultModelCustom(p CustomProvider) string {
 	if len(p.Models) > 0 {
 		return p.Models[0]
+	}
+	if len(p.ModelDefs) > 0 {
+		return p.ModelDefs[0].ID
 	}
 	return ""
 }
@@ -239,10 +255,15 @@ func Load(workDir string) (Config, error) {
 		}
 	}
 	// Global providers.jsonc/json (optional; loads even when config is absent).
-	if items, err := loadProvidersFileLayer(GlobalRoot()); err != nil {
+	if pf, err := loadProvidersFileLayer(GlobalRoot()); err != nil {
 		return cfg, err
-	} else if len(items) > 0 {
-		cfg.Providers = mergeProviders(cfg.Providers, items)
+	} else {
+		if len(pf.Customs) > 0 {
+			cfg.Providers = mergeProviders(cfg.Providers, pf.Customs)
+		}
+		if len(pf.Overlays) > 0 {
+			cfg.ModelOverlays = mergeOverlayMaps(cfg.ModelOverlays, pf.Overlays)
+		}
 	}
 	// Project config JSON (optional).
 	if workDir != "" {
@@ -256,10 +277,15 @@ func Load(workDir string) (Config, error) {
 		default:
 			cfg = merge(cfg, layer)
 		}
-		if items, err := loadProvidersFileLayer(projectRoot(workDir)); err != nil {
+		if pf, err := loadProvidersFileLayer(projectRoot(workDir)); err != nil {
 			return cfg, err
-		} else if len(items) > 0 {
-			cfg.Providers = mergeProviders(cfg.Providers, items)
+		} else {
+			if len(pf.Customs) > 0 {
+				cfg.Providers = mergeProviders(cfg.Providers, pf.Customs)
+			}
+			if len(pf.Overlays) > 0 {
+				cfg.ModelOverlays = mergeOverlayMaps(cfg.ModelOverlays, pf.Overlays)
+			}
 		}
 	}
 	return cfg, nil

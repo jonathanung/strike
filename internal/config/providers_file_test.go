@@ -29,10 +29,11 @@ func TestParseProvidersFileOpenCodeMap(t *testing.T) {
   }
 }
 `)
-	items, err := ParseProvidersFile(raw)
+	pf, err := ParseProvidersFile(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
+	items := pf.Customs
 	if len(items) != 2 {
 		t.Fatalf("items = %+v", items)
 	}
@@ -56,10 +57,11 @@ func TestParseProvidersFileArray(t *testing.T) {
 	raw := []byte(`[
 	  {"name":"ollama","baseURL":"http://localhost:11434/v1","api":"openai"}
 	]`)
-	items, err := ParseProvidersFile(raw)
+	pf, err := ParseProvidersFile(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
+	items := pf.Customs
 	if len(items) != 1 || items[0].Name != "ollama" {
 		t.Fatalf("items = %+v", items)
 	}

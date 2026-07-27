@@ -66,9 +66,24 @@ func (m *modelModal) filtered() []host.ModelInfo {
 	for _, info := range m.all {
 		if strings.Contains(strings.ToLower(info.ID), q) {
 			out = append(out, info)
+			continue
+		}
+		if info.Name != "" && strings.Contains(strings.ToLower(info.Name), q) {
+			out = append(out, info)
 		}
 	}
 	return out
+}
+
+// modelPickerLabel is the primary row text: display name when set, else id.
+func modelPickerLabel(info host.ModelInfo) string {
+	if name := strings.TrimSpace(info.Name); name != "" && name != info.ID {
+		return name
+	}
+	if name := strings.TrimSpace(info.Name); name != "" {
+		return name
+	}
+	return info.ID
 }
 
 func (m *modelModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
@@ -152,7 +167,7 @@ func (m *modelModal) view(width int, th theme.Theme) string {
 		items := make([]ui.ListItem, len(list))
 		for i, info := range list {
 			items[i] = ui.ListItem{
-				Label:   info.ID,
+				Label:   modelPickerLabel(info),
 				Detail:  formatModelDetail(th, info),
 				Current: info.ID == m.current,
 			}
@@ -176,9 +191,13 @@ func (m *modelModal) view(width int, th theme.Theme) string {
 }
 
 // formatModelDetail builds the muted trailing text for a picker row:
-// "128k · $2.5/$10 · tools · reason · vision". Missing fields are omitted.
+// "id · 128k · $2.5/$10 · tools · reason · vision · 4 var". Missing fields omitted.
 func formatModelDetail(th theme.Theme, info host.ModelInfo) string {
 	var parts []string
+	label := modelPickerLabel(info)
+	if label != info.ID {
+		parts = append(parts, info.ID)
+	}
 	if info.Context > 0 {
 		parts = append(parts, ui.FormatTokens(info.Context))
 	}
@@ -193,6 +212,9 @@ func formatModelDetail(th theme.Theme, info host.ModelInfo) string {
 	}
 	if info.Attachment {
 		parts = append(parts, "vision")
+	}
+	if n := len(info.VariantIDs); n > 0 {
+		parts = append(parts, strconv.Itoa(n)+" var")
 	}
 	return dotJoin(th, parts...)
 }
