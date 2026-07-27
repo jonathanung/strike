@@ -164,7 +164,7 @@ func paletteBuiltinDisabled(id commandID, availability paletteAvailability) stri
 		commandScrollUp, commandScrollDown, commandJumpBottom,
 		commandPalette, commandInterrupt, commandLeaveEditor:
 		return ""
-	case commandVim, commandNano, commandMDRead, commandThink, commandExport, commandContext, commandEffectivePrompt, commandCost, commandMCP,
+	case commandVim, commandNano, commandMDRead, commandThink, commandExport, commandContext, commandEffectivePrompt, commandCost, commandMCP, commandRename,
 		commandToolPrev, commandToolNext, commandToolExpand, commandToolCopy, commandToolReview, commandToolApply,
 		commandSubagent, commandParent, commandSubagentNext, commandSubagentPrev,
 		commandRootFilter:

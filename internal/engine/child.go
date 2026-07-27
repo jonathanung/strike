@@ -101,7 +101,7 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 	}
 
 	childID := rand.Text()
-	title := taskTitle(req.Prompt)
+	title := briefAgentSessionTitle(agentName, childID)
 	if e.opts.OpenChildSession != nil {
 		id, err := e.opts.OpenChildSession(e.opts.SessionID, childID, title)
 		if err != nil {
@@ -109,6 +109,8 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		}
 		if strings.TrimSpace(id) != "" {
 			childID = id
+			// Re-derive after the host may have rewritten the id.
+			title = briefAgentSessionTitle(agentName, childID)
 		}
 	}
 
@@ -152,6 +154,7 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		InitialProvider:     e.provName,
 		InitialModel:        e.model,
 		InitialEffort:       e.effort,
+		InitialTitled:       title != "",
 		MaxTokens:           e.opts.MaxTokens,
 		MaxStreamAttempts:   e.opts.MaxStreamAttempts,
 		StreamRetryBackoff:  e.opts.StreamRetryBackoff,
@@ -1029,21 +1032,41 @@ func lastAssistantText(messages []provider.Message) string {
 	return ""
 }
 
-func taskTitle(prompt string) string {
-	s := strings.Join(strings.Fields(strings.TrimSpace(prompt)), " ")
-	if s == "" {
+// briefAgentSessionTitle is the default child/subagent display name:
+// "{agent} {shortId}" (or just one part when the other is empty).
+func briefAgentSessionTitle(agent, id string) string {
+	agent = strings.TrimSpace(agent)
+	short := shortSessionID(id)
+	switch {
+	case agent != "" && short != "":
+		return agent + " " + short
+	case agent != "":
+		return agent
+	case short != "":
+		return short
+	default:
 		return "task"
 	}
-	const max = 48
-	if len(s) <= max {
-		return s
+}
+
+// shortSessionID returns a compact id fragment for default session labels.
+func shortSessionID(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ""
 	}
-	// Avoid mid-rune truncation.
-	r := []rune(s)
+	if i := strings.LastIndexAny(id, "/-_"); i >= 0 && i+1 < len(id) {
+		tail := id[i+1:]
+		if len([]rune(tail)) >= 6 {
+			id = tail
+		}
+	}
+	r := []rune(id)
+	const max = 8
 	if len(r) <= max {
-		return s
+		return id
 	}
-	return string(r[:max-1]) + "…"
+	return string(r[:max])
 }
 
 // taskModelPin is a resolved optional model override for a child spawn.

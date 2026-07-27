@@ -99,6 +99,7 @@ these controls manage **concurrent root sessions**:
 | `n` | new concurrent root session | `/root-new` |
 | `enter` | activate selected root (or open a child transcript) | `/root-open` |
 | `x` | interrupt the selected root or child | `/root-interrupt` |
+| `r` | rename the selected root or child (persists across resume) | `/rename` |
 | `j` / `k` | move cursor | — |
 | `f` | cycle view filter (all → attention → working → ready → roots) | `/root-filter` |
 | `d` | hide selected root from pane | `/root-hide` |

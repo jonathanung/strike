@@ -75,6 +75,7 @@ var reservedSkillNames = map[string]struct{}{
 	"goal":             {},
 	"loop":             {},
 	"session":          {},
+	"rename":           {},
 	"export":           {},
 	"context":          {},
 	"effective-prompt": {},
