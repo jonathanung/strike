@@ -217,6 +217,7 @@ func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.Ima
 		// parent that is still in-turn (e.g. sleep-polling) sees the result
 		// without waiting for idle auto-nudge.
 		e.injectPendingChildNotices()
+		e.maybePruneToolResults()
 		e.maybeThresholdCompact(ctx, turnID)
 		outcome, reqCorr, err := e.streamModel(ctx, turnID)
 		if err != nil {
@@ -264,6 +265,7 @@ func (e *Engine) runHarnessTurn(ctx context.Context, h harness.Harness, hName st
 	var streamCorr protocol.Correlation
 	stream := func(ctx context.Context) (harness.Outcome, error) {
 		e.injectPendingChildNotices()
+		e.maybePruneToolResults()
 		e.maybeThresholdCompact(ctx, turnID)
 		e.applyPendingAgent()
 		outcome, reqCorr, err := e.streamModel(ctx, turnID)
