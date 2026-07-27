@@ -400,8 +400,12 @@ func cloneEndpoint(e ProviderEndpoint) ProviderEndpoint {
 	return out
 }
 
-// wireFromNPM maps optional npm package hints to a wire dialect. Unknown or
-// empty npm defaults to openai-compatible chat completions.
+// wireFromNPM maps optional npm package hints to a wire dialect (OpenCode parity).
+// Packages are never installed — the string only selects the HTTP shape:
+//
+//   - name contains "anthropic" → Messages API
+//   - @ai-sdk/openai (exact / …/openai, not openai-compatible) → Responses API
+//   - @ai-sdk/openai-compatible and everything else → chat completions
 func wireFromNPM(npm string) WireAPI {
 	n := strings.ToLower(strings.TrimSpace(npm))
 	if n == "" {
@@ -409,6 +413,11 @@ func wireFromNPM(npm string) WireAPI {
 	}
 	if strings.Contains(n, "anthropic") {
 		return WireAnthropic
+	}
+	// @ai-sdk/openai default languageModel is Responses (/v1/responses).
+	// openai-compatible stays chat-completions.
+	if n == "@ai-sdk/openai" || strings.HasSuffix(n, "/openai") {
+		return WireResponses
 	}
 	return WireOpenAI
 }

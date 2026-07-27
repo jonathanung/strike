@@ -581,3 +581,101 @@ func TestToChatRequestIncludesImageParts(t *testing.T) {
 		t.Errorf("image url = %q", parts[1].ImageURL.URL)
 	}
 }
+
+func TestResponsesURL(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"", "https://api.openai.com/v1/responses"},
+		{"https://api.openai.com/v1", "https://api.openai.com/v1/responses"},
+		{"https://api.openai.com/v1/", "https://api.openai.com/v1/responses"},
+		{"https://proxy.example/v1/responses", "https://proxy.example/v1/responses"},
+	}
+	for _, tc := range cases {
+		if got := ResponsesURL(tc.in); got != tc.want {
+			t.Errorf("ResponsesURL(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestResponsesStreamWireModelAndPath(t *testing.T) {
+	var gotPath, gotModel, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if m, ok := body["model"].(string); ok {
+			gotModel = m
+		}
+		if stream, _ := body["stream"].(bool); stream {
+			t.Errorf("stream = true, want false (non-streaming phase 0)")
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "completed",
+			"output": []map[string]any{
+				{
+					"type": "message",
+					"content": []map[string]any{
+						{"type": "output_text", "text": "hello"},
+					},
+				},
+				{
+					"type":      "function_call",
+					"name":      "bash",
+					"call_id":   "c1",
+					"arguments": `{"cmd":"ls"}`,
+				},
+			},
+			"usage": map[string]any{"input_tokens": 2, "output_tokens": 3, "total_tokens": 5},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	p := NewResponses("qgenie", srv.URL+"/v1", func(context.Context) (string, error) {
+		return "sk-test", nil
+	}, nil)
+	ch, err := p.Stream(context.Background(), provider.Request{
+		Model:    "gpt-5.5",
+		Messages: []provider.Message{{Role: provider.RoleUser, Text: "hi"}},
+		Tools: []provider.ToolSchema{{
+			Name: "bash", Description: "run", InputSchema: json.RawMessage(`{}`),
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var text string
+	var calls int
+	var usage *provider.Usage
+	for ev := range ch {
+		switch ev.Type {
+		case provider.EventTextDelta:
+			text += ev.Text
+		case provider.EventToolCall:
+			calls++
+			if ev.ToolCall.Name != "bash" || ev.ToolCall.ID != "c1" {
+				t.Errorf("tool = %+v", ev.ToolCall)
+			}
+		case provider.EventDone:
+			usage = ev.Usage
+		case provider.EventError:
+			t.Fatalf("error: %v", ev.Err)
+		}
+	}
+	if gotPath != "/v1/responses" {
+		t.Errorf("path = %q", gotPath)
+	}
+	if gotAuth != "Bearer sk-test" {
+		t.Errorf("auth = %q", gotAuth)
+	}
+	if gotModel != "gpt-5.5" {
+		t.Errorf("model = %q", gotModel)
+	}
+	if text != "hello" || calls != 1 {
+		t.Errorf("text=%q calls=%d", text, calls)
+	}
+	if usage == nil || usage.InputTokens != 2 || usage.OutputTokens != 3 {
+		t.Errorf("usage = %+v", usage)
+	}
+}

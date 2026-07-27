@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/provider"
@@ -16,6 +17,9 @@ import (
 )
 
 const (
+	// defaultBaseURL is the Anthropic origin. OpenCode / @ai-sdk/anthropic use
+	// https://api.anthropic.com/v1 as baseURL and append /messages; MessagesURL
+	// accepts both shapes.
 	defaultBaseURL = "https://api.anthropic.com"
 	apiVersion     = "2023-06-01"
 )
@@ -42,8 +46,9 @@ func New(apiKey string) (*Provider, error) {
 }
 
 // NewCustom builds an Anthropic-messages adapter for a named custom/self-hosted
-// endpoint. baseURL is the origin (e.g. https://api.anthropic.com); the client
-// appends /v1/messages. Extra headers are merged after the auth headers.
+// endpoint. baseURL matches OpenCode/AI SDK shape: either the API root including
+// /v1 (https://api.anthropic.com/v1) or an origin (https://api.anthropic.com).
+// MessagesURL joins the correct /messages path. Extra headers merge after auth.
 // apiKey may be empty for open proxies; x-api-key is omitted when blank.
 func NewCustom(name, baseURL, apiKey string, headers map[string]string) (*Provider, error) {
 	if name == "" {
@@ -75,10 +80,30 @@ func NewCustom(name, baseURL, apiKey string, headers map[string]string) (*Provid
 }
 
 func (p *Provider) endpoint() string {
-	if p.baseURL != "" {
-		return p.baseURL + "/v1/messages"
+	return MessagesURL(p.baseURL)
+}
+
+// MessagesURL joins baseURL onto the Anthropic Messages path the way OpenCode
+// and @ai-sdk/anthropic do:
+//
+//   - empty → https://api.anthropic.com/v1/messages
+//   - …/messages (full endpoint) → unchanged
+//   - …/v1 (OpenCode/AI SDK baseURL) → …/v1/messages
+//   - origin only → …/v1/messages
+//
+// This avoids the double-/v1 404 when users paste OpenCode configs with /v1.
+func MessagesURL(baseURL string) string {
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if base == "" {
+		return defaultBaseURL + "/v1/messages"
 	}
-	return defaultBaseURL + "/v1/messages"
+	if strings.HasSuffix(base, "/messages") {
+		return base
+	}
+	if strings.HasSuffix(base, "/v1") {
+		return base + "/messages"
+	}
+	return base + "/v1/messages"
 }
 
 // Wire types for the Messages API.

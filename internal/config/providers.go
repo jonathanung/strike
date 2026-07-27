@@ -15,11 +15,13 @@ import (
 )
 
 // WireAPI is the HTTP dialect a custom provider endpoint speaks. It is not a
-// brand name — "openai" means chat-completions; "anthropic" means messages.
+// brand name — "openai" means chat-completions; "responses" means the OpenAI
+// Responses API; "anthropic" means Messages.
 type WireAPI string
 
 const (
 	WireOpenAI    WireAPI = "openai"
+	WireResponses WireAPI = "responses"
 	WireAnthropic WireAPI = "anthropic"
 )
 
@@ -94,12 +96,12 @@ func (p CustomProvider) Validate() error {
 // ValidateWireAPI accepts known wire dialects.
 func ValidateWireAPI(api WireAPI) error {
 	switch api {
-	case WireOpenAI, WireAnthropic:
+	case WireOpenAI, WireResponses, WireAnthropic:
 		return nil
 	case "":
-		return errors.New("api (wire dialect) is required: openai or anthropic")
+		return errors.New("api (wire dialect) is required: openai, responses, or anthropic")
 	default:
-		return fmt.Errorf("unknown api %q (want openai or anthropic)", api)
+		return fmt.Errorf("unknown api %q (want openai, responses, or anthropic)", api)
 	}
 }
 

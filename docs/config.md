@@ -262,7 +262,8 @@ files — use env refs and/or `/auth` / the auth store.
   "anthropic": {
     "name": "Corp Anthropic",
     "options": {
-      "baseURL": "https://proxy.example/anthropic",
+      // OpenCode/AI SDK shape: include /v1 (strike also accepts origin-only).
+      "baseURL": "https://proxy.example/anthropic/v1",
       "apiKey": "{env:CORP_ANTHROPIC_KEY}"
     }
   },
@@ -291,10 +292,10 @@ files — use env refs and/or `/auth` / the auth store.
 | Field | Required | Notes |
 |---|---|---|
 | map key | yes | provider id (lowercased slug). Built-ins (`anthropic`/`openai`/`xai`/`gemini`/`kimi`/`deepseek`/`echo`) stay builtins: options → **endpoint overlay**, models → **catalog overlay**. Other keys are custom providers. |
-| `options.baseURL` | custom yes | absolute `http`/`https` URL, or `{env:VAR}` / `$VAR` / `${VAR}`. On builtins, optional — overrides the stock origin (proxy). |
+| `options.baseURL` | custom yes | absolute `http`/`https` URL, or `{env:VAR}` / `$VAR` / `${VAR}`. On builtins, optional — overrides the stock endpoint. **OpenCode shape:** include `/v1` (Anthropic → `…/v1` + `/messages`; OpenAI → `…/v1` + `/chat/completions` or `/responses`). Origin-only Anthropic bases still work. |
 | `options.apiKey` | no | env ref only (`{env:NAME}`, `$NAME`, `${NAME}`) → checked before auth store. On builtins, pins the env var used for that provider. Missing env fails at select time with a clear error. |
-| `npm` | no | **advisory only** — never installed or executed; `anthropic` in the name → anthropic wire, else openai |
-| `api` | no | strike override: `openai` or `anthropic` (wins over npm hint) |
+| `npm` | no | **advisory only** — never installed; `anthropic` → Messages; `@ai-sdk/openai` → **Responses** (`/responses`); `@ai-sdk/openai-compatible` (default) → chat completions |
+| `api` | no | strike override: `openai` (chat), `responses`, or `anthropic` (wins over npm hint) |
 | `models` | no | `[]string` (legacy) **or** object map id → model def; see merge rules below |
 | `models.<id>` map key | yes (when nested) | **wire model id** sent on the API `model` field and used by `/model` selection |
 | `models.<id>.name` | no | **display label only** in `/model` (never sent on the wire; default: id or models.dev name) |
@@ -314,9 +315,22 @@ Variants and options never rewrite the wire id.
 
 Defining `"anthropic": { "options": { "baseURL", "apiKey" } }` (with or without
 `models`) keeps the builtin provider registered, routes HTTP to the custom
-origin, resolves the pinned apiKey env, and still lists models.dev when
+endpoint, resolves the pinned apiKey env, and still lists models.dev when
 `models` is omitted. Same for other credential builtins (openai chat-completions
 path when baseURL/apiKey is set — not the ChatGPT OAuth backend).
+
+#### baseURL path join (OpenCode parity)
+
+| Wire | `options.baseURL` example | Request path |
+|---|---|---|
+| anthropic | `https://proxy.example/v1` (OpenCode) | `…/v1/messages` |
+| anthropic | `https://proxy.example` (origin-only) | `…/v1/messages` |
+| openai (chat) | `https://proxy.example/v1` | `…/v1/chat/completions` |
+| responses (`@ai-sdk/openai`) | `https://proxy.example/v1` | `…/v1/responses` |
+
+Do **not** put `/messages` or `/chat/completions` in `baseURL` unless the whole
+URL is already the final endpoint (strike leaves a trailing `/messages` or
+`/responses` alone).
 
 #### models.dev / catalog merge
 
@@ -363,7 +377,7 @@ Variant bags may include `reasoningEffort` or `effort` (`off`\|`low`\|`medium`\|
 |---|---|---|
 | `name` | yes | lowercase slug (`[a-z][a-z0-9_-]{0,63}`); not `anthropic`/`openai`/`xai`/`gemini`/`kimi`/`deepseek`/`echo` |
 | `baseURL` | yes | absolute URL or env ref template |
-| `api` | yes | wire dialect: `openai` or `anthropic` |
+| `api` | yes | wire dialect: `openai` (chat), `responses`, or `anthropic` |
 | `apiKeyEnv` | no | env var name (or `{env:NAME}` / `$NAME`) checked before the auth store |
 | `models` | no | flat `[]string` ids listed in `/model`; first is the default when unset (rich nested models use `providers.jsonc`) |
 | `headers` | no | extra HTTP headers on every request (values may use env refs) |

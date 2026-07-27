@@ -178,7 +178,10 @@ func TestWireFromNPM(t *testing.T) {
 		t.Errorf("anthropic npm = %q", got)
 	}
 	if got := wireFromNPM("@ai-sdk/openai-compatible"); got != WireOpenAI {
-		t.Errorf("openai npm = %q", got)
+		t.Errorf("openai-compatible npm = %q", got)
+	}
+	if got := wireFromNPM("@ai-sdk/openai"); got != WireResponses {
+		t.Errorf("@ai-sdk/openai npm = %q, want responses", got)
 	}
 	if got := wireFromNPM(""); got != WireOpenAI {
 		t.Errorf("empty npm = %q", got)

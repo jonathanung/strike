@@ -628,6 +628,15 @@ func buildCustomProvider(cp config.CustomProvider, store *auth.Store) (provider.
 		// Empty key is allowed when no apiKeyEnv (local gateways like ollama).
 		source := optionalBearer(cp.Name, store, cp.APIKeyEnv)
 		return openaicompat.NewWithHeaders(cp.Name, cp.BaseURL, source, cp.Headers), defaultModel, nil
+	case config.WireResponses:
+		// OpenCode @ai-sdk/openai default: platform Responses API (/v1/responses).
+		if cp.APIKeyEnv != "" {
+			if _, ok := auth.APIKeyEnv(cp.Name, store, cp.APIKeyEnv); !ok {
+				return nil, "", fmt.Errorf("custom provider %s: set %s (or paste a key via /auth %s)", cp.Name, cp.APIKeyEnv, cp.Name)
+			}
+		}
+		source := optionalBearer(cp.Name, store, cp.APIKeyEnv)
+		return openaicompat.NewResponses(cp.Name, cp.BaseURL, source, cp.Headers), defaultModel, nil
 	case config.WireAnthropic:
 		key, ok := auth.APIKeyEnv(cp.Name, store, cp.APIKeyEnv)
 		if cp.APIKeyEnv != "" && !ok {
