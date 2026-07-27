@@ -227,11 +227,11 @@ endpoints via the `providers` array (global and project layers merge; same
 {
   "providers": [
     {
-      "name": "kimi",
+      "name": "acme",
       "baseURL": "https://api.example.com/v1",
       "api": "openai",
-      "apiKeyEnv": "KIMI_API_KEY",
-      "models": ["kimi-latest"],
+      "apiKeyEnv": "ACME_API_KEY",
+      "models": ["acme-latest"],
       "headers": { "X-Custom": "optional" }
     }
   ]

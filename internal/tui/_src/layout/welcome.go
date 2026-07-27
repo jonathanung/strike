@@ -160,7 +160,7 @@ func (m Model) welcomeCards(statuses []host.ProviderStatus) []welcomeCard {
 				return m.welcomeFirstRun(width, rows)
 			}})
 		} else {
-			cards = append(cards, welcomeCard{title: "get started", desired: 7, body: func(width, rows int) string {
+			cards = append(cards, welcomeCard{title: "get started", desired: 9, body: func(width, rows int) string {
 				return m.welcomeProviders(statuses, width, rows)
 			}})
 		}
@@ -301,8 +301,8 @@ func (m Model) welcomeProviders(statuses []host.ProviderStatus, width, rows int)
 		}
 	}
 	lines := make([]string, 0, min(6, rows))
-	// Lead-in only when the card is tall enough for 4 providers + action + tip.
-	providerBudget := 4
+	// Lead-in only when the card is tall enough for 6 providers + action + tip.
+	providerBudget := 6
 	if rows >= 9 {
 		lines = append(lines, st.Text.Render(welcomeTruncate("Connect a provider to start", width, th.Icons.Ellipsis)))
 	}

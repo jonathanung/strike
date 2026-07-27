@@ -26,7 +26,7 @@ const expectedUsage = `Usage:
   strike upgrade
 
 Options:
-  --provider <provider>              provider to use (anthropic|openai|xai|echo); overrides config
+  --provider <provider>              provider to use (anthropic|openai|xai|gemini|kimi|deepseek|echo); overrides config
   --model <model>                    model id; overrides config
   --effort <level>                   reasoning effort (off|low|medium|high|xhigh|max); overrides config
   --dangerously-skip-permissions     skip configured permission prompts (agent profile denies still apply)
@@ -226,7 +226,7 @@ func TestWriteUsageUsesCanonicalOptionsAndProviders(t *testing.T) {
 	if out.String() != expectedUsage {
 		t.Fatalf("usage changed:\n--- got ---\n%s--- want ---\n%s", out.String(), expectedUsage)
 	}
-	for _, text := range []string{"strike auth <command>", "--provider <provider>", "--model <model>", "anthropic", "openai", "xai", "echo"} {
+	for _, text := range []string{"strike auth <command>", "--provider <provider>", "--model <model>", "anthropic", "openai", "xai", "gemini", "echo"} {
 		if !strings.Contains(out.String(), text) {
 			t.Errorf("usage does not contain %q", text)
 		}

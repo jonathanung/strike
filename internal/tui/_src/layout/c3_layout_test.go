@@ -234,11 +234,11 @@ func TestC3WelcomeCapacityAndFocusTokens(t *testing.T) {
 
 func TestC3WelcomeProviderAndPromptLimits(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
-	statuses := []host.ProviderStatus{{Name: "one"}, {Name: "two"}, {Name: "three"}, {Name: "four"}, {Name: "five"}}
+	statuses := []host.ProviderStatus{{Name: "one"}, {Name: "two"}, {Name: "three"}, {Name: "four"}, {Name: "five"}, {Name: "six"}, {Name: "seven"}}
 	body := ansi.Strip(m.welcomeProviders(statuses, 30, 8))
-	// Four provider rows + /provider action + "type below · enter to send" tip.
-	if strings.Count(body, "\n")+1 != 6 || !strings.Contains(body, "/provider") || strings.Contains(body, "five") {
-		t.Errorf("provider card did not cap four rows plus action and tip: %q", body)
+	// Six provider rows + /provider action + "type below · enter to send" tip.
+	if strings.Count(body, "\n")+1 != 8 || !strings.Contains(body, "/provider") || strings.Contains(body, "seven") {
+		t.Errorf("provider card did not cap six rows plus action and tip: %q", body)
 	}
 	if !strings.Contains(body, "type below") || !strings.Contains(body, "enter") {
 		t.Errorf("provider card missing type-below/enter tip: %q", body)

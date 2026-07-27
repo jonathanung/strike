@@ -9,10 +9,10 @@ import (
 
 func TestCustomProviderValidate(t *testing.T) {
 	valid := CustomProvider{
-		Name:    "kimi",
-		BaseURL: "https://api.moonshot.cn/v1",
+		Name:    "acme",
+		BaseURL: "https://api.acme.example/v1",
 		API:     WireOpenAI,
-		Models:  []string{"moonshot-v1"},
+		Models:  []string{"acme-v1"},
 	}
 	if err := valid.Validate(); err != nil {
 		t.Fatalf("valid: %v", err)
@@ -24,10 +24,10 @@ func TestCustomProviderValidate(t *testing.T) {
 	}{
 		{"empty name", CustomProvider{BaseURL: "https://x.com", API: WireOpenAI}},
 		{"builtin name", CustomProvider{Name: "openai", BaseURL: "https://x.com", API: WireOpenAI}},
-		{"bad api", CustomProvider{Name: "kimi", BaseURL: "https://x.com", API: "gemini"}},
-		{"bad url", CustomProvider{Name: "kimi", BaseURL: "not-a-url", API: WireOpenAI}},
-		{"ftp url", CustomProvider{Name: "kimi", BaseURL: "ftp://x.com", API: WireOpenAI}},
-		{"uppercase name", CustomProvider{Name: "Kimi", BaseURL: "https://x.com", API: WireOpenAI}},
+		{"bad api", CustomProvider{Name: "acme", BaseURL: "https://x.com", API: "gemini"}},
+		{"bad url", CustomProvider{Name: "acme", BaseURL: "not-a-url", API: WireOpenAI}},
+		{"ftp url", CustomProvider{Name: "acme", BaseURL: "ftp://x.com", API: WireOpenAI}},
+		{"uppercase name", CustomProvider{Name: "Acme", BaseURL: "https://x.com", API: WireOpenAI}},
 	}
 	for _, tc := range cases {
 		p := NormalizeCustomProvider(tc.p)
@@ -50,15 +50,15 @@ func TestCustomStoreRoundTrip(t *testing.T) {
 
 	store := NewCustomStore(nil)
 	p := CustomProvider{
-		Name:    "kimi",
-		BaseURL: "https://api.moonshot.cn/v1",
+		Name:    "acme",
+		BaseURL: "https://api.acme.example/v1",
 		API:     WireOpenAI,
-		Models:  []string{"moonshot-v1-8k", "moonshot-v1-32k"},
+		Models:  []string{"acme-v1-8k", "acme-v1-32k"},
 	}
 	if err := store.Upsert(p); err != nil {
 		t.Fatal(err)
 	}
-	got, ok := store.Get("kimi")
+	got, ok := store.Get("acme")
 	if !ok || got.BaseURL != p.BaseURL || got.API != WireOpenAI || len(got.Models) != 2 {
 		t.Fatalf("Get = %+v ok=%v", got, ok)
 	}
@@ -71,7 +71,7 @@ func TestCustomStoreRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Providers) != 1 || cfg.Providers[0].Name != "kimi" {
+	if len(cfg.Providers) != 1 || cfg.Providers[0].Name != "acme" {
 		t.Fatalf("persisted = %+v", cfg.Providers)
 	}
 	// Secrets must not appear in config.
@@ -79,10 +79,10 @@ func TestCustomStoreRoundTrip(t *testing.T) {
 		t.Errorf("config must not hold secrets: %s", raw)
 	}
 
-	if err := store.Remove("kimi"); err != nil {
+	if err := store.Remove("acme"); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := store.Get("kimi"); ok {
+	if _, ok := store.Get("acme"); ok {
 		t.Fatal("expected removed")
 	}
 }
@@ -98,7 +98,7 @@ func TestLoadMergesProviders(t *testing.T) {
 	}
 	if err := os.WriteFile(global, []byte(`{
 		"providers": [
-			{"name":"kimi","baseURL":"https://global.example/v1","api":"openai"},
+			{"name":"acme","baseURL":"https://global.example/v1","api":"openai"},
 			{"name":"ollama","baseURL":"http://localhost:11434/v1","api":"openai"}
 		]
 	}`), 0o644); err != nil {
@@ -110,7 +110,7 @@ func TestLoadMergesProviders(t *testing.T) {
 	}
 	if err := os.WriteFile(project, []byte(`{
 		"providers": [
-			{"name":"kimi","baseURL":"https://project.example/v1","api":"openai","models":["kimi-k2"]}
+			{"name":"acme","baseURL":"https://project.example/v1","api":"openai","models":["acme-v2"]}
 		]
 	}`), 0o644); err != nil {
 		t.Fatal(err)
@@ -123,9 +123,9 @@ func TestLoadMergesProviders(t *testing.T) {
 	if len(cfg.Providers) != 2 {
 		t.Fatalf("providers = %+v", cfg.Providers)
 	}
-	kimi, ok := FindCustom(cfg.Providers, "kimi")
-	if !ok || kimi.BaseURL != "https://project.example/v1" || len(kimi.Models) != 1 {
-		t.Errorf("kimi project override = %+v", kimi)
+	acme, ok := FindCustom(cfg.Providers, "acme")
+	if !ok || acme.BaseURL != "https://project.example/v1" || len(acme.Models) != 1 {
+		t.Errorf("acme project override = %+v", acme)
 	}
 	if _, ok := FindCustom(cfg.Providers, "ollama"); !ok {
 		t.Error("ollama missing after merge")
@@ -134,17 +134,17 @@ func TestLoadMergesProviders(t *testing.T) {
 
 func TestCustomStoreList(t *testing.T) {
 	items := []CustomProvider{
-		{Name: "kimi", BaseURL: "https://a.example/v1", API: WireOpenAI},
+		{Name: "acme", BaseURL: "https://a.example/v1", API: WireOpenAI},
 		{Name: "ollama", BaseURL: "http://localhost:11434/v1", API: WireOpenAI},
 	}
 	store := NewCustomStore(items)
 	got := store.List()
-	if len(got) != 2 || got[0].Name != "kimi" || got[1].Name != "ollama" {
+	if len(got) != 2 || got[0].Name != "acme" || got[1].Name != "ollama" {
 		t.Fatalf("List = %+v", got)
 	}
 	got[0].Name = "mutated"
 	again := store.List()
-	if again[0].Name != "kimi" {
+	if again[0].Name != "acme" {
 		t.Errorf("List snapshot mutated store: %+v", again)
 	}
 	empty := NewCustomStore(nil).List()

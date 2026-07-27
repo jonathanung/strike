@@ -24,6 +24,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/provider/anthropic"
 	"github.com/jonathanung/strike-cli/internal/provider/chatgpt"
 	"github.com/jonathanung/strike-cli/internal/provider/echo"
+	"github.com/jonathanung/strike-cli/internal/provider/gemini"
 	"github.com/jonathanung/strike-cli/internal/provider/openaicompat"
 	"github.com/jonathanung/strike-cli/internal/session"
 	"github.com/jonathanung/strike-cli/internal/tool"
@@ -169,10 +170,28 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 				return nil, "", err
 			}
 			return openaicompat.NewXAI(source), config.DefaultModel(name), nil
+		case "gemini":
+			source := auth.BearerSource(name, authStore)
+			if _, err := source(context.Background()); err != nil {
+				return nil, "", err
+			}
+			return gemini.New(source), config.DefaultModel(name), nil
+		case "kimi":
+			source := auth.BearerSource(name, authStore)
+			if _, err := source(context.Background()); err != nil {
+				return nil, "", err
+			}
+			return openaicompat.New("kimi", "https://api.moonshot.cn/v1", source), config.DefaultModel(name), nil
+		case "deepseek":
+			source := auth.BearerSource(name, authStore)
+			if _, err := source(context.Background()); err != nil {
+				return nil, "", err
+			}
+			return openaicompat.New("deepseek", "https://api.deepseek.com/v1", source), config.DefaultModel(name), nil
 		default:
 			cp, ok := customStore.Get(name)
 			if !ok {
-				return nil, "", fmt.Errorf("unknown provider %q (want anthropic, openai, xai, echo, or a custom name from /settings)", name)
+				return nil, "", fmt.Errorf("unknown provider %q (want anthropic, openai, xai, gemini, kimi, deepseek, echo, or a custom name from /settings)", name)
 			}
 			return buildCustomProvider(cp, authStore)
 		}
