@@ -23,13 +23,14 @@ func NewBash() Tool { return bashTool{} }
 func (bashTool) Name() string { return "bash" }
 
 func (bashTool) Description() string {
-	return `Executes a shell command with bash in the working directory. Returns combined stdout/stderr.
+	return `Executes a shell command with bash in the session working directory. Returns combined stdout/stderr.
 
 Usage notes:
 - Prefer dedicated tools over shell: use read, glob, grep, edit, and write instead of cat, find, grep, sed, awk, or echo when those tools can do the job.
 - Always quote file paths that contain spaces.
 - Explain non-trivial commands that change the user's system before running them.
 - Independent commands may be issued as parallel tool calls; chain dependent commands with && in one call.
+- Each invocation starts at the session working directory (workspace/worktree root). A cd inside one call does not affect later bash or other tools — use (cd subdir && …) or && in the same command when you need a subdirectory.
 - Optional timeoutMs (default 120000, max 600000). Long output is truncated.
 - Do not use bash to communicate with the user; send a normal assistant message instead.`
 }
@@ -84,6 +85,8 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 		}
 	}
 
+	// Fresh process each call: Dir is always the session workdir so shell cd
+	// cannot stick across tool invocations.
 	proc, err := RunProcess(ctx, ProcessSpec{
 		Argv:      []string{"bash", "-c", a.Command},
 		Dir:       tc.WorkDir,

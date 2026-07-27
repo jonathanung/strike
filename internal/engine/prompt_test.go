@@ -363,6 +363,7 @@ func TestSystemPromptComposesEnvironmentAndInstructions(t *testing.T) {
 		"Working directory: " + work,
 		"Workspace root folder: " + root,
 		"Is directory a git repo: yes",
+		"Shell cd inside one bash invocation does not persist",
 		"You are powered by the model named model-a",
 		"scripted/model-a",
 		"Instructions from: /tmp/AGENTS.md",
