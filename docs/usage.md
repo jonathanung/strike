@@ -23,6 +23,11 @@ strike launches without any provider configured. Pick one inside the TUI:
 /mode soft-approve             # default | plan | soft-approve | accept-edits | yolo
 /agent                         # centered agent picker
 /agent plan                    # direct switch (build, plan, explore, …)
+/agents                        # focus the agents right pane
+/activity                      # focus the activity right pane
+/files                         # focus the files right pane
+/visualizer                    # focus the visualizer right pane
+/system                        # focus the system right pane
 /session                       # browse past root sessions for this workspace
                                # (auto-titles); ctrl+a shows all workspaces
 /session <id>                  # resume a specific session by id (any workspace)
@@ -94,10 +99,10 @@ strike launches without any provider configured. Pick one inside the TUI:
 /quit                          # alias of /exit
 # Keybind mirrors (same actions as chords; see keybinds.md and /keys):
 /focus-left /focus-right       # focus panes (ctrl+h / ctrl+l)
-/window-next /window-prev      # cycle right-pane windows (ctrl+j / ctrl+k)
+/window-next /window-prev      # cycle right-pane windows (ctrl+o / ctrl+p)
 /scroll-up /scroll-down        # transcript scroll
 /jump-bottom                   # jump to latest output (ctrl+t)
-/palette                       # command palette (ctrl+p)
+/palette                       # command palette (ctrl+k)
 /interrupt                     # interrupt running turn (esc)
 /save-defaults                 # save defaults (ctrl+d)
 /leave-editor                  # leave embedded editor (ctrl+g)
@@ -127,8 +132,9 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/export` | dump the visible transcript to markdown (user/assistant/tool summaries); redacts common API-key shapes; default path under `.strike/exports/` or tmp; `--open` launches `$EDITOR` |
 | `/copy` | copy plain text of the last assistant response (not tool output) to the system clipboard via OSC52; same as `alt+y`; notice on success/failure |
 | `/compact` | ask the engine to compact model history |
-| `/memory` | bare = list browser; `list [tag]`, `get <key>`, `set <key> <value>`, `rm <key>`, `export [path]`, `import <path> [--replace]` (portable JSON; relative paths stay under project root) |
-| `/issues` | bare = list browser; `list [open\|closed]`, `add <title>`, `get <id>`, `close <id>`, `export [path]`, `import <path> [--replace]` (same portable rules as memory) |
+| `/memory` | bare = list browser (focuses memory pane); `list [tag]`, `get <key>`, `set <key> <value>`, `rm <key>`, `export [path]`, `import <path> [--replace]` (portable JSON; relative paths stay under project root) |
+| `/issues` | bare = list browser (focuses issues pane); `list [open\|closed]`, `add <title>`, `get <id>`, `close <id>`, `export [path]`, `import <path> [--replace]` (same portable rules as memory) |
+| `/agents` `/activity` `/files` `/visualizer` `/system` | jump focus to the named right pane (`/agent` remains persona select) |
 | `/loop` | schedule a recurring prompt (`15m`, `2h`, …); session-only; `/loop list`, `/loop stop [id]` — see [loop.md](loop.md). Distinct from [`/goal`](goal.md) |
 | `/context` | context doctor modal: layer sizes, history msg count, oversized warnings (previews redacted) |
 | `/cost` | session input/output/cache totals from usage events; est. USD when catalog rates known; unknown stays explicit |
@@ -276,14 +282,14 @@ Do not confuse these with:
 Worktree isolation for second+ roots is configured via `worktree` in
 [config.md](config.md). Full chord table: [keybinds.md](keybinds.md).
 
-Vim-style pane keys (horizontal split): `ctrl+h` / `ctrl+l` focus the left
-or right pane; `ctrl+j` / `ctrl+k` move focus within the active stack group
-then to the next group (including bare LF from terminals that cannot
-disambiguate `ctrl+j`). `ctrl+;` (or `/layout` / `/split`) toggles a vertical
-top/bottom split and swaps those chords (focus becomes `ctrl+j`/`ctrl+k`,
-cycle becomes `ctrl+h`/`ctrl+l`). `ctrl+p` opens the command palette; `f1`
-(or `/keys`) opens a filterable keybind cheatsheet. Enter sends; Shift+Enter
-(or Alt+Enter after enhanced CSI) inserts a newline. `pgup`/`pgdn` (and `ctrl+up`/`ctrl+down`)
+Pane keys (orientation-independent): `ctrl+h` / `ctrl+l` focus the left
+(primary transcript) or right (secondary pane column); `ctrl+o` / `ctrl+p`
+cycle focus within the active stack group then to the next group. `ctrl+;`
+(or `/layout` / `/split`) toggles a vertical top/bottom split without swapping
+those chords. `ctrl+k` opens the command palette (when kill-to-end does not
+delete); `f1` (or `/keys`) opens a filterable keybind cheatsheet. Enter sends;
+`ctrl+j` or Shift+Enter (Alt+Enter after enhanced CSI) inserts a newline.
+`pgup`/`pgdn` (and `ctrl+up`/`ctrl+down`)
 scroll the transcript; `ctrl+t` jumps to the latest output. The transcript
 sticks to the bottom while you are already anchored, and keeps your scroll
 offset when you have scrolled up. Pickers, the command palette, and

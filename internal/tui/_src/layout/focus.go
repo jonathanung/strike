@@ -31,3 +31,19 @@ func (m *Model) focusPane(focus paneFocus) tea.Cmd {
 	}
 	return m.setPaneFocus(focus)
 }
+
+// focusRightWindow activates the named right-pane window and moves focus there.
+// Used by pane-jump slash commands (/agents, /files, …).
+func (m Model) focusRightWindow(id string) (tea.Model, tea.Cmd) {
+	m.resetComposer()
+	m.clearNotice()
+	var ok bool
+	m.windows, ok = m.windows.activate(id)
+	if !ok {
+		m.setNotice("pane "+id+" missing", true)
+		return m, nil
+	}
+	cmd := m.setPaneFocus(focusRight)
+	m.reflow()
+	return m, cmd
+}

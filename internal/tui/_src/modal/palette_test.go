@@ -34,6 +34,11 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		{ID: "command:auth", Label: "/auth", Description: "manage provider authentication", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/auth"}},
 		{ID: "command:settings", Label: "/settings", Description: "defaults (theme, editor, mode) and custom providers", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/settings"}},
 		{ID: "agent:build", Label: "/agent build", Description: "select an agent", Action: paletteAction{Kind: paletteActionAgent, Value: "build"}},
+		{ID: "command:agents", Label: "/agents", Description: "focus the agents right pane", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/agents"}},
+		{ID: "command:activity", Label: "/activity", Description: "focus the activity right pane", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/activity"}},
+		{ID: "command:files", Label: "/files", Description: "focus the files right pane", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/files"}},
+		{ID: "command:visualizer", Label: "/visualizer", Description: "focus the visualizer right pane", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/visualizer"}},
+		{ID: "command:system", Label: "/system", Description: "focus the system right pane", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/system"}},
 		{ID: "command:fast", Label: "/fast", Description: "toggle OpenAI priority tier (faster, ~2× cost)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/fast"}},
 		{ID: "command:think", Label: "/think", Description: "show or hide model chain-of-thought", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/think"}},
 		{ID: "command:vim", Label: "/vim", Description: "open a file in the editor (embedded/modal/takeover; see vimMode)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/vim"}},
@@ -124,7 +129,7 @@ func TestPaletteAvailabilityAndDisabledSelection(t *testing.T) {
 		assertPaletteInvoke(t, m, "/help", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/help"}})
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
 		assertPaletteInvoke(t, m, "/keys", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/keys"}})
-		// /vim, /nano, /md-read, /think, /export, /copy, /cost, /mcp, and prompt inspect stay available mid-turn.
+		// /vim, /nano, /md-read, /think, /export, /copy, /cost, /mcp, pane jumps, and prompt inspect stay available mid-turn.
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
 		assertPaletteInvoke(t, m, "/think", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/think"}})
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
@@ -145,6 +150,10 @@ func TestPaletteAvailabilityAndDisabledSelection(t *testing.T) {
 		assertPaletteInvoke(t, m, "/cost", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/cost"}})
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
 		assertPaletteInvoke(t, m, "/mcp", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/mcp"}})
+		for _, pane := range []string{"/agents", "/activity", "/files", "/visualizer", "/system"} {
+			m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
+			assertPaletteInvoke(t, m, pane, paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: pane}})
+		}
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
 		assertPaletteInvoke(t, m, "/exit", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/exit"}})
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})

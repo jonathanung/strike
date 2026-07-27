@@ -6,22 +6,24 @@ import (
 
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike-cli/internal/provider"
 	"github.com/jonathanung/strike-cli/internal/tool"
 )
 
-// toolGuidanceLayer builds the effective Available tools section from the
-// live registry after hard permission denies. Empty when no tools remain.
-func (e *Engine) toolGuidanceLayer() (text, source string) {
+// effectiveToolSchemas returns registry tool schemas with hard-denied tools
+// removed. Used for both the provider Tools array (every stream, including
+// turn 1) and the Available tools prompt layer so the model never sees tools
+// it cannot call under the active agent/phase/permission profile.
+func (e *Engine) effectiveToolSchemas() (schemas []provider.ToolSchema, omitted int) {
 	if e == nil || e.opts.Registry == nil {
-		return "", ""
+		return nil, 0
 	}
-	schemas := e.opts.Registry.Schemas()
-	if len(schemas) == 0 {
-		return "", ""
+	all := e.opts.Registry.Schemas()
+	if len(all) == 0 {
+		return nil, 0
 	}
-	entries := make([]tool.GuidanceEntry, 0, len(schemas))
-	omitted := 0
-	for _, s := range schemas {
+	out := make([]provider.ToolSchema, 0, len(all))
+	for _, s := range all {
 		name := strings.TrimSpace(s.Name)
 		if name == "" {
 			continue
@@ -31,9 +33,23 @@ func (e *Engine) toolGuidanceLayer() (text, source string) {
 			omitted++
 			continue
 		}
+		out = append(out, s)
+	}
+	return out, omitted
+}
+
+// toolGuidanceLayer builds the effective Available tools section from the
+// live registry after hard permission denies. Empty when no tools remain.
+func (e *Engine) toolGuidanceLayer() (text, source string) {
+	schemas, omitted := e.effectiveToolSchemas()
+	if len(schemas) == 0 {
+		return "", ""
+	}
+	entries := make([]tool.GuidanceEntry, 0, len(schemas))
+	for _, s := range schemas {
 		entries = append(entries, tool.GuidanceEntry{
-			Name:    name,
-			Purpose: tool.ShortPurpose(name, s.Description),
+			Name:    s.Name,
+			Purpose: tool.ShortPurpose(s.Name, s.Description),
 		})
 	}
 	text = tool.BuildGuidance(entries)

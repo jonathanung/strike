@@ -109,6 +109,110 @@ func TestQuestionFlow(t *testing.T) {
 	}
 }
 
+// TestQuestionMultiFlow: one question tool call with 2+ prompts; all answers
+// return in a single QuestionReply and appear in the tool output.
+func TestQuestionMultiFlow(t *testing.T) {
+	call := questionToolCall("qcall-multi",
+		map[string]any{
+			"id":       "ship",
+			"question": "Ship it?",
+			"options": []map[string]any{
+				{"label": "Yes"},
+				{"label": "No"},
+			},
+		},
+		map[string]any{
+			"id":       "channel",
+			"question": "Which channel?",
+			"options": []map[string]any{
+				{"label": "stable"},
+				{"label": "beta"},
+			},
+		},
+		map[string]any{
+			"question": "Any release notes?",
+		},
+	)
+	prov := newScriptedProvider(
+		toolCallStep(call),
+		completedStep("after multi answers"),
+	)
+	eng := engine.New(engine.Options{
+		SessionID:       "sess-q-multi",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(tool.NewQuestion()),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "ask several things"}
+
+	var (
+		sawAsked, sawResolved, sawToolEnd, sawCompleted bool
+		toolOutput                                      string
+	)
+	deadline := time.After(10 * time.Second)
+	for !sawCompleted {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out; asked=%v resolved=%v end=%v", sawAsked, sawResolved, sawToolEnd)
+		case ev := <-eng.Events():
+			switch ev := ev.(type) {
+			case protocol.QuestionAsked:
+				sawAsked = true
+				if len(ev.Questions) != 3 {
+					t.Fatalf("questions = %d, want 3: %#v", len(ev.Questions), ev.Questions)
+				}
+				if ev.Questions[0].Question != "Ship it?" ||
+					ev.Questions[1].Question != "Which channel?" ||
+					ev.Questions[2].Question != "Any release notes?" {
+					t.Errorf("questions = %#v", ev.Questions)
+				}
+				eng.Ops() <- protocol.QuestionReply{
+					RequestID: ev.RequestID,
+					Answers:   []string{"Yes", "beta", "n/a"},
+				}
+			case protocol.QuestionResolved:
+				sawResolved = true
+			case protocol.ToolCallEnd:
+				if ev.CallID != "qcall-multi" {
+					continue
+				}
+				sawToolEnd = true
+				toolOutput = ev.Output
+				if ev.IsError {
+					t.Errorf("tool error: %s", ev.Output)
+				}
+				if ev.Title != "Asked 3 questions" {
+					t.Errorf("title = %q, want Asked 3 questions", ev.Title)
+				}
+			case protocol.TurnCompleted:
+				sawCompleted = true
+			case protocol.EngineError:
+				t.Fatalf("engine error: %s", ev.Message)
+			}
+		}
+	}
+	if !sawAsked {
+		t.Error("no QuestionAsked")
+	}
+	if !sawResolved {
+		t.Error("no QuestionResolved")
+	}
+	if !sawToolEnd {
+		t.Error("no ToolCallEnd for multi question")
+	}
+	for _, want := range []string{"Yes", "beta", "n/a", "Ship it?", "Which channel?", "Any release notes?"} {
+		if !strings.Contains(toolOutput, want) {
+			t.Errorf("tool output missing %q: %q", want, toolOutput)
+		}
+	}
+}
+
 func TestChildQuestionReplyRouting(t *testing.T) {
 	const childPrompt = "ask in child"
 	taskCall := taskToolCall("task-q", childPrompt)

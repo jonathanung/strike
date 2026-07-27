@@ -1200,21 +1200,22 @@ func TestSubmittingRecalledHistoryResetsBrowsingState(t *testing.T) {
 	}
 }
 
-func TestControlPPreservesComposerClosesCompletionAndOpensPalette(t *testing.T) {
+func TestControlKPreservesComposerClosesCompletionAndOpensPalette(t *testing.T) {
 	m, ops := newAppTestModel([]string{"build"}, nil)
 	m.providerName = "echo"
-	m.setComposerValueAt("keep this suffix", len([]rune("keep")))
+	// EOL so kill-to-end does not claim; ctrl+k opens palette (#414).
+	m.setComposerValueAt("keep this suffix", len([]rune("keep this suffix")))
 	m.completion = leadingSlashCompletion("/", 0, 1, m.commands)
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlP})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
 	if got := m.composer.Value(); got != "keep this suffix" {
-		t.Errorf("ctrl+p changed composer: composer=%q", got)
+		t.Errorf("ctrl+k changed composer: composer=%q", got)
 	}
 	if m.completion != nil {
-		t.Error("ctrl+p left inline completion open")
+		t.Error("ctrl+k left inline completion open")
 	}
 	if _, ok := m.modal.(*paletteModal); !ok {
-		t.Fatalf("ctrl+p modal = %T, want command palette", m.modal)
+		t.Fatalf("ctrl+k modal = %T, want command palette", m.modal)
 	}
 	assertNoAppOp(t, ops)
 }
@@ -1224,18 +1225,18 @@ func TestActiveModalOwnsControlP(t *testing.T) {
 		m, _ := newAppTestModel(nil, nil)
 		probe := &appProbeModal{}
 		m.modal = probe
-		m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlP})
+		m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
 		if probe.keys != 1 || m.modal != probe {
-			t.Errorf("ctrl+p did not remain with active modal: keys=%d modal=%T", probe.keys, m.modal)
+			t.Errorf("ctrl+k did not remain with active modal: keys=%d modal=%T", probe.keys, m.modal)
 		}
 	})
 	t.Run("permission modal", func(t *testing.T) {
 		m, ops := newAppTestModel(nil, nil)
 		permission := newPermissionModal(protocol.PermissionAsked{RequestID: "req", Permission: "bash"}, ops)
 		m.modal = permission
-		m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlP})
+		m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
 		if m.modal != permission {
-			t.Errorf("ctrl+p replaced permission modal with %T", m.modal)
+			t.Errorf("ctrl+k replaced permission modal with %T", m.modal)
 		}
 		assertNoAppOp(t, ops)
 	})
@@ -1371,7 +1372,7 @@ func TestPaletteSkillInsertionUsesOneCommandArgumentSeparatorAcrossThemes(t *tes
 					m.th = themeCase.th
 					m.providerName = "echo"
 
-					m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlP})
+					m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
 					m = typeAppText(t, m, "/"+skillName)
 					updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 					m = updated.(Model)
@@ -1399,7 +1400,7 @@ func TestPaletteSkillInsertionUsesOneCommandArgumentSeparatorAcrossThemes(t *tes
 	}
 }
 
-func TestControlPPaletteAvailabilityTracksProviderAndTurn(t *testing.T) {
+func TestControlKPaletteAvailabilityTracksProviderAndTurn(t *testing.T) {
 	tests := []struct {
 		name       string
 		provider   string
@@ -1415,7 +1416,7 @@ func TestControlPPaletteAvailabilityTracksProviderAndTurn(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			m, _ := newAppTestModel(nil, nil)
 			m.providerName, m.turnRunning = tt.provider, tt.turn
-			m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlP})
+			m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
 			palette := m.modal.(*paletteModal)
 			for _, entry := range palette.entries {
 				if entry.Label == tt.command {
@@ -1433,7 +1434,7 @@ func TestControlPPaletteAvailabilityTracksProviderAndTurn(t *testing.T) {
 func TestOpenPaletteRefreshesWhenTurnStartsAndKeepsHelpAvailable(t *testing.T) {
 	m, ops := newAppTestModel([]string{"build"}, []host.Skill{fakeSkill("review", "review code", "")})
 	m.providerName = "echo"
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlP})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
 	palette := m.modal.(*paletteModal)
 
 	m.applyEvent(protocol.TurnStarted{})
@@ -1454,7 +1455,7 @@ func TestOpenPaletteReenablesRestrictedEntriesWhenTurnCompletes(t *testing.T) {
 	m, ops := newAppTestModel([]string{"build"}, []host.Skill{fakeSkill("review", "review code", "")})
 	m.providerName = "echo"
 	m.turnRunning = true
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlP})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
 	palette := m.modal.(*paletteModal)
 
 	m.applyEvent(protocol.TurnCompleted{})
@@ -1473,7 +1474,7 @@ func TestOpenPaletteReenablesRestrictedEntriesWhenTurnCompletes(t *testing.T) {
 
 func TestOpenPaletteRefreshesProviderDependentEntriesAfterModelSelected(t *testing.T) {
 	m, ops := newAppTestModel(nil, []host.Skill{fakeSkill("review", "review code", "")})
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlP})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
 	palette := m.modal.(*paletteModal)
 	for _, label := range []string{"/model", "/review"} {
 		copy := *palette
@@ -1528,7 +1529,7 @@ func TestConstructedRestrictedPaletteInvokeIsRejectedAgainstCurrentAvailability(
 			m, ops := newAppTestModel([]string{"build"}, []host.Skill{fakeSkill("review", "review code", "")})
 			m.providerName, m.turnRunning = tt.provider, tt.turn
 			m.composer.SetValue("unchanged draft")
-			m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlP})
+			m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
 			palette := m.modal
 			focused := m.composer.Focused()
 
@@ -1724,12 +1725,12 @@ func TestFocusAndPaletteClearCompletionBeforeChangingInputOwner(t *testing.T) {
 				t.Errorf("focus = %v, want right", m.focus)
 			}
 		}},
-		{"cycle next", keyMsgAltJ(), func(t *testing.T, m Model) {
+		{"cycle next", tea.KeyMsg{Type: tea.KeyCtrlO}, func(t *testing.T, m Model) {
 			if m.windows.index != 1 {
 				t.Errorf("window index = %d, want 1", m.windows.index)
 			}
 		}},
-		{"palette", tea.KeyMsg{Type: tea.KeyCtrlP}, func(t *testing.T, m Model) {
+		{"palette", tea.KeyMsg{Type: tea.KeyCtrlK}, func(t *testing.T, m Model) {
 			if _, ok := m.modal.(*paletteModal); !ok {
 				t.Errorf("modal = %T, want palette", m.modal)
 			}
@@ -1746,7 +1747,7 @@ func TestFocusAndPaletteClearCompletionBeforeChangingInputOwner(t *testing.T) {
 				statefulTestWindow{windowID: "a", windowTitle: "A"},
 				statefulTestWindow{windowID: "b", windowTitle: "B"},
 			}}
-			// Enhanced ctrl+j (alt+j) cycles from left focus (#240).
+			// ctrl+o cycles from left focus (#414).
 			m.completion = leadingSlashCompletion("/", 0, 1, m.commands)
 			m = updateApp(t, m, tt.key)
 			if m.completion != nil {
@@ -1762,8 +1763,8 @@ func TestCycleWindowKeysClearOpenCompletionAndCycleOnce(t *testing.T) {
 		name string
 		key  tea.KeyMsg
 	}{
-		// Enhanced ctrl+j (alt+j) cycles from either focus (#240).
-		{name: "ctrl+j", key: keyMsgAltJ()},
+		// ctrl+o cycles from either focus (#414).
+		{name: "ctrl+o", key: tea.KeyMsg{Type: tea.KeyCtrlO}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			m, ops := newAppTestModel(nil, nil)
@@ -1830,7 +1831,7 @@ func TestCompletionEscapeDismissesBeforeInterruptAndFocusChange(t *testing.T) {
 
 func TestModalOwnsGlobalKeysExceptQuit(t *testing.T) {
 	for _, msg := range []tea.KeyMsg{
-		keyMsgAltJ(), {Type: tea.KeyCtrlL}, {Type: tea.KeyCtrlH}, {Type: tea.KeyCtrlK}, {Type: tea.KeyCtrlP}, {Type: tea.KeyF1},
+		{Type: tea.KeyCtrlO}, {Type: tea.KeyCtrlL}, {Type: tea.KeyCtrlH}, {Type: tea.KeyCtrlK}, {Type: tea.KeyCtrlP}, {Type: tea.KeyF1},
 	} {
 		t.Run(msg.String(), func(t *testing.T) {
 			m, ops := newAppTestModel(nil, nil)
@@ -1877,7 +1878,7 @@ func TestRightPaneOwnsOrdinaryKeysAndGlobalKeysRemainGlobal(t *testing.T) {
 	}
 	assertNoAppOp(t, ops)
 
-	for _, msg := range []tea.KeyMsg{keyMsgAltJ(), {Type: tea.KeyCtrlK}} {
+	for _, msg := range []tea.KeyMsg{{Type: tea.KeyCtrlO}, {Type: tea.KeyCtrlP}} {
 		before := totalWindowUpdates(t, m.windows)
 		index := m.windows.index
 		m = updateApp(t, m, msg)
@@ -1888,9 +1889,9 @@ func TestRightPaneOwnsOrdinaryKeysAndGlobalKeysRemainGlobal(t *testing.T) {
 			t.Errorf("%s was recorded by window: updates %d, want %d", msg.String(), got, before)
 		}
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlP})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
 	if _, ok := m.modal.(*paletteModal); !ok {
-		t.Errorf("right-focused ctrl+p modal = %T, want palette", m.modal)
+		t.Errorf("right-focused ctrl+k modal = %T, want palette", m.modal)
 	}
 }
 
