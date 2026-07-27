@@ -345,6 +345,9 @@ type Sessions interface {
 	// returns the child. Parent stays intact. Implementations may reject
 	// subagent (parented) transcripts.
 	Fork(id string) (Session, error)
+	// ForkAt copies the first keepEvents of id's log into a new root session.
+	// keepEvents < 0 means the full log (same as Fork). Parent stays intact.
+	ForkAt(id string, keepEvents int) (Session, error)
 	// Rename sets the durable display title for id. Empty title clears it.
 	// Survives restart via session metadata.
 	Rename(id, title string) (Session, error)
