@@ -35,7 +35,7 @@ config overrides global, and session "always" grants override both.
 **Permission mode dial:** `permissionMode` sets the default tool-permission
 posture for **new** sessions: `default` | `plan` | `soft-approve` |
 `accept-edits` | `yolo` (see [usage.md](usage.md)). Session changes via
-Shift+Tab or `/mode` persist in the session JSONL, not back into this file.
+`/mode` persist in the session JSONL, not back into this file.
 Distinct from `/autonomy` (workflow exit gates).
 
 **Lean code:** `leanCode` is `off` | `lite` (default) | `full`. Injects
@@ -46,7 +46,7 @@ none for explore/reviewer/tester/validator/commit). Inspired by
 Details: [agents-skills.md](agents-skills.md#lean-code-ponytail-lite).
 
 **Permission soft-approve / auto-approve:** session mode `soft-approve`
-(`permissionMode`, `/mode`, Shift+Tab) arms a **visible** 15s countdown on
+(`permissionMode`, `/mode`) arms a **visible** 15s countdown on
 permission asks and submits **allow once** at zero if the user does nothing.
 Esc, reject, or any explicit once/session/project choice cancels the timer.
 Hard deny rules always win. Queued/hidden asks (behind another modal) do not
@@ -94,6 +94,10 @@ for one session). Non-git directories and `git worktree add` failures return a
 clear error and do not leave a half-bound session. Project-scoped state
 (history, memory, issues) stays keyed to the main repo, not the worktree path.
 Tools (`bash`, `read`, `write`, …) resolve paths inside the session worktree.
+
+**Model selection persists**: selecting a provider or model updates the global
+`provider` and `model` in `~/.strike/config`, so a new launch reuses that
+selection. CLI `--provider` and `--model` still override it for that launch.
 
 **ctrl+d saves defaults**: on the main screen it persists the current
 provider/model/agent/effort/theme to `~/.strike/config`; in the provider

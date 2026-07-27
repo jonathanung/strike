@@ -108,6 +108,42 @@ func TestRenderStylesAndColors(t *testing.T) {
 	}
 }
 
+func TestRenderTruecolorIgnoresGlobalProfile(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.Ascii)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	s := &Session{term: vt10x.New(vt10x.WithSize(1, 1))}
+	if _, err := s.term.Write([]byte("\x1b[38;2;18;52;86mF")); err != nil {
+		t.Fatal(err)
+	}
+	if out := Render(s, 1, 1); !strings.Contains(out, "38;2;18;52;86m") {
+		t.Fatalf("truecolor lost under global ASCII profile: %q", out)
+	}
+}
+
+func TestRenderTruecolor(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	s := &Session{term: vt10x.New(vt10x.WithSize(2, 1))}
+	if _, err := s.term.Write([]byte(
+		"\x1b[38;2;18;52;86mF" +
+			"\x1b[48;2;171;205;239mB",
+	)); err != nil {
+		t.Fatal(err)
+	}
+
+	out := Render(s, 2, 1)
+	if !strings.Contains(out, "38;2;18;52;86m") {
+		t.Fatalf("truecolor foreground missing from render: %q", out)
+	}
+	if !strings.Contains(out, "48;2;171;205;239m") {
+		t.Fatalf("truecolor background missing from render: %q", out)
+	}
+}
+
 func TestColorToHex(t *testing.T) {
 	tests := []struct {
 		name string
@@ -125,7 +161,8 @@ func TestColorToHex(t *testing.T) {
 		{name: "cube red-ish", c: 196, want: "#ff0000"},
 		{name: "greyscale first", c: 232, want: "#080808"},
 		{name: "greyscale last", c: 255, want: "#eeeeee"},
-		{name: "out of range", c: 300, want: ""},
+		{name: "packed truecolor", c: vt10x.Color(0x123456), want: "#123456"},
+		{name: "low packed truecolor", c: 300, want: "#00012c"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

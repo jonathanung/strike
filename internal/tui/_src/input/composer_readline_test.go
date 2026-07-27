@@ -29,6 +29,17 @@ func TestComposerReadlineKillYankAndWordNav(t *testing.T) {
 		t.Fatalf("ctrl+w cycled window to %d", m.windows.index)
 	}
 
+	// alt+backspace kills the previous word too.
+	m.composer.SetValue("hello world")
+	m.composer.SetCursor(11)
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyBackspace, Alt: true})
+	if got := m.composer.Value(); got != "hello " {
+		t.Fatalf("alt+backspace = %q, want %q", got, "hello ")
+	}
+	if m.killBuf != "world" {
+		t.Fatalf("killBuf after alt+backspace = %q, want world", m.killBuf)
+	}
+
 	// ctrl+u kills to line start.
 	m.composer.SetValue("hello world")
 	m.composer.SetCursor(5)

@@ -23,23 +23,6 @@ func TestPermissionModeBadgeInHeader(t *testing.T) {
 	}
 }
 
-func TestPermissionModeCycleKeySendsOp(t *testing.T) {
-	m, ops := newAppTestModel(nil, nil)
-	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
-	m.permMode = protocol.PermissionModeDefault
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
-	m = updated.(Model)
-	runAppCmd(t, cmd)
-	op := receiveAppOp(t, ops)
-	set, ok := op.(protocol.SetPermissionMode)
-	if !ok {
-		t.Fatalf("op = %T, want SetPermissionMode", op)
-	}
-	if set.Mode != protocol.PermissionModePlan {
-		t.Fatalf("cycled mode = %q, want plan", set.Mode)
-	}
-}
-
 func TestPermissionModeCommandDirect(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)
 	m.composer.SetValue("/mode yolo")

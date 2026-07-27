@@ -1024,9 +1024,23 @@ func (m Model) sendSelect(op protocol.SelectModel) (tea.Model, tea.Cmd) {
 	m.resetComposer()
 	m.clearNotice()
 	ops := m.ops
-	return m, func() tea.Msg {
+	selectCmd := func() tea.Msg {
 		ops <- op
 		return nil
+	}
+	return m, selectCmd
+}
+
+func (m Model) saveSelectedModelCmd(provider, model string) tea.Cmd {
+	return saveSelectedModelThroughCmd(m.services.Settings, provider, model)
+}
+
+func saveSelectedModelThroughCmd(settings host.Settings, provider, model string) tea.Cmd {
+	return func() tea.Msg {
+		if settings == nil || provider == "" || model == "" {
+			return nil
+		}
+		return selectionSavedMsg{err: settings.SaveDefaults(provider, model, "", "", "")}
 	}
 }
 

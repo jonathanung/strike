@@ -27,7 +27,7 @@ const (
 	worktreeSubdir    = "worktrees"
 	worktreeBranch    = "strike"
 	worktreeTimeout   = 30 * time.Second
-	worktreeGitIgnore = "*\n"
+	worktreeGitIgnore = "/*\n!/.gitignore\n"
 )
 
 // Worktree is one strike-managed git worktree bound to a session.
@@ -81,7 +81,7 @@ func WantWorktree(mode string, force bool, openRootCount int) bool {
 
 // WorktreePath is the strike-managed path for a session worktree under the
 // main repo: <repoRoot>/.strike/worktrees/<sessionID>/. Covered by repo
-// gitignore pattern */worktrees; a local .gitignore is also written.
+// gitignore pattern */worktrees when present.
 func WorktreePath(repoRoot, sessionID string) string {
 	return filepath.Join(repoRoot, ".strike", worktreeSubdir, sessionID)
 }
@@ -176,10 +176,6 @@ func Add(ctx context.Context, cwd, sessionID string) (Worktree, error) {
 	if err := os.MkdirAll(parent, 0o755); err != nil {
 		return Worktree{}, fmt.Errorf("worktree: mkdir: %w", err)
 	}
-	// Belt-and-suspenders ignore so worktree contents never stage even if the
-	// repo-level */worktrees pattern is missing.
-	_ = os.WriteFile(filepath.Join(parent, ".gitignore"), []byte(worktreeGitIgnore), 0o644)
-
 	gitCtx, cancel := context.WithTimeout(ctx, worktreeTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(gitCtx, "git", "-C", repoRoot, "worktree", "add", "-b", branch, path, "HEAD")
@@ -188,6 +184,9 @@ func Add(ctx context.Context, cwd, sessionID string) (Worktree, error) {
 		_ = os.RemoveAll(path)
 		return Worktree{}, fmt.Errorf("worktree: git worktree add: %w\n%s", err, strings.TrimSpace(string(out)))
 	}
+	// Write after creation: a parent ignore that matches the target makes
+	// `git worktree add` reject the destination as ignored.
+	_ = os.WriteFile(filepath.Join(parent, ".gitignore"), []byte(worktreeGitIgnore), 0o644)
 	canon, err := canonicalDir(path)
 	if err != nil {
 		_ = Remove(context.Background(), repoRoot, path, branch)

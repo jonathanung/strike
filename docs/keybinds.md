@@ -16,8 +16,8 @@ then the remaining binds. Remap chords in config (`keybinds` object) — see
 | `ctrl+c` | quit |
 | `ctrl+p` | command palette |
 | `f1` | keybind cheatsheet (`/keys`) |
-| `tab` | cycle agent personas (composer empty of `/` completion; not concurrent roots) |
-| `shift+tab` | cycle permission mode (default → plan → soft-approve → accept-edits → yolo) |
+| `tab` | cycle agent personas forward (composer empty of `/` completion; not concurrent roots) |
+| `shift+tab` | cycle agent personas backward |
 | `ctrl+d` | save defaults (see [config.md](config.md)) |
 | `ctrl+e` | open prompt in external editor (`$VISUAL`/`$EDITOR`, else nvim/vim/vi/nano) |
 
@@ -75,7 +75,7 @@ to a single pane and cycle the same order one at a time. See [usage.md](usage.md
 
 | Key | Action |
 |---|---|
-| `ctrl+w` | kill word backward |
+| `ctrl+w` / `alt+backspace` | kill word backward |
 | `alt+b` / `alt+f` | word backward / forward |
 | `ctrl+u` | kill to line start |
 | `ctrl+k` | kill to line end (when it deletes; else pane cycle) |

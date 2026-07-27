@@ -87,7 +87,7 @@ func helpMatchRank(entry helpEntry, query string) int {
 
 func (m *helpModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 	list := m.filtered()
-	if isEscape(msg) || msg.String() == "q" {
+	if isEscape(msg) {
 		return nil, nil
 	}
 	switch msg.String() {

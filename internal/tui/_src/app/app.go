@@ -54,6 +54,11 @@ type defaultsSavedMsg struct {
 	err  error
 }
 
+// selectionSavedMsg reports persistence of the last accepted model selection.
+type selectionSavedMsg struct {
+	err error
+}
+
 // cellClipboard holds a one-shot OSC52 sequence staged by y-to-copy. Model.View
 // prepends and clears it after Canvas so ansi.Cut cannot strip the sequence.
 type cellClipboard struct {
@@ -654,6 +659,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setNotice("saving defaults failed: "+msg.err.Error(), true)
 		} else {
 			m.setNotice("saved as default: "+msg.text, false)
+		}
+		return m, nil
+
+	case selectionSavedMsg:
+		if msg.err != nil {
+			m.setNotice("saving selected model failed: "+msg.err.Error(), true)
 		}
 		return m, nil
 

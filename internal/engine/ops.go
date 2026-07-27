@@ -233,10 +233,10 @@ func (e *Engine) handleSelect(op protocol.SelectModel) {
 		return
 	}
 	model := resolveSelectModel(op.Provider, op.Model, defaultModel)
-	e.setProvider(op.Provider, p, model)
+	e.setProvider(op.Provider, p, model, protocol.ModelSelectionUser)
 }
 
-func (e *Engine) setProvider(name string, p provider.Provider, model string) {
+func (e *Engine) setProvider(name string, p provider.Provider, model string, source protocol.ModelSelectionSource) {
 	// Chokepoint: never store a matching provider/ prefix (or doubles) on the
 	// active model string. Callers may still pass already-prefixed ids.
 	model = stripMatchingProviderPrefixes(name, model)
@@ -246,12 +246,13 @@ func (e *Engine) setProvider(name string, p provider.Provider, model string) {
 		Correlation: e.sessionCorr(),
 		Provider:    name,
 		Model:       model,
+		Source:      source,
 	})
 }
 
 // setModel stores a bare model id for the current provider, stripping any
 // matching provider/ prefixes first, and emits ModelSelected.
-func (e *Engine) setModel(model string) {
+func (e *Engine) setModel(model string, source protocol.ModelSelectionSource) {
 	if e.provName != "" {
 		model = stripMatchingProviderPrefixes(e.provName, model)
 	}
@@ -261,6 +262,7 @@ func (e *Engine) setModel(model string) {
 		Correlation: e.sessionCorr(),
 		Provider:    e.provName,
 		Model:       model,
+		Source:      source,
 	})
 }
 
@@ -486,9 +488,9 @@ func (e *Engine) applyAgent(name string) bool {
 			return true
 		}
 		model := resolveSelectModel(agentProvider, agentModel, defaultModel)
-		e.setProvider(agentProvider, p, model)
+		e.setProvider(agentProvider, p, model, protocol.ModelSelectionAgent)
 	case agentModel != "" && e.prov != nil:
-		e.setModel(agentModel)
+		e.setModel(agentModel, protocol.ModelSelectionAgent)
 	}
 	return true
 }

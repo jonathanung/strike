@@ -791,6 +791,39 @@ func TestModelAndAgentSlashCommandsEmitSelections(t *testing.T) {
 	})
 }
 
+func TestStartupModelSelectionDoesNotPersist(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m.applyEvent(protocol.ModelSelected{Provider: "openai", Model: "project-model", Source: protocol.ModelSelectionStartup})
+	settings := m.services.Settings.(*fakeSettings)
+	if len(settings.saved) != 0 {
+		t.Errorf("startup selection persisted %#v", settings.saved)
+	}
+}
+
+func TestExplicitModelSelectionPersistsForNextLaunch(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	cmd := m.applyEvent(protocol.ModelSelected{Provider: "openai", Model: "gpt-test", Source: protocol.ModelSelectionUser})
+	messages := runAllAppCmds(t, cmd)
+	var msg tea.Msg
+	for _, candidate := range messages {
+		if _, ok := candidate.(selectionSavedMsg); ok {
+			msg = candidate
+			break
+		}
+	}
+	if _, ok := msg.(selectionSavedMsg); !ok {
+		t.Fatalf("selection save message = %T, want selectionSavedMsg", msg)
+	}
+	m = updateApp(t, m, msg)
+	settings := m.services.Settings.(*fakeSettings)
+	if len(settings.saved) != 1 {
+		t.Fatalf("saved selections = %d, want 1", len(settings.saved))
+	}
+	if got := settings.saved[0]; got.provider != "openai" || got.model != "gpt-test" || got.agent != "" || got.effort != "" || got.mode != "" {
+		t.Errorf("saved selection = %#v, want only openai/gpt-test", got)
+	}
+}
+
 func TestBareAuthSlashCommandOpensProviderStatusModalWithoutSideEffects(t *testing.T) {
 	ops := make(chan protocol.Op, 8)
 	events := make(chan protocol.Event)
@@ -821,6 +854,7 @@ func TestTabCyclesAgentsWhenIdleWithoutCompletionOrModal(t *testing.T) {
 	}{
 		{name: "advances to next agent", current: "build", want: "plan"},
 		{name: "wraps to first agent", current: "plan", want: "build"},
+		{name: "shift tab goes to previous agent", current: "build", want: "plan"},
 	}
 
 	for _, tt := range tests {
@@ -828,7 +862,11 @@ func TestTabCyclesAgentsWhenIdleWithoutCompletionOrModal(t *testing.T) {
 			m, ops := newAppTestModel([]string{"build", "plan"}, nil)
 			m.agentName = tt.current
 
-			updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+			key := tea.KeyMsg{Type: tea.KeyTab}
+			if tt.name == "shift tab goes to previous agent" {
+				key = tea.KeyMsg{Type: tea.KeyShiftTab}
+			}
+			updated, cmd := m.Update(key)
 			m = updated.(Model)
 			runAppCmd(t, cmd)
 

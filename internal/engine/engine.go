@@ -407,7 +407,7 @@ func (e *Engine) Run(ctx context.Context) {
 			// unchanged (without a catalog we cannot tell a bare foreign id
 			// from a valid model name on this provider).
 			model := resolveSelectModel(e.opts.InitialProvider, e.opts.InitialModel, defaultModel)
-			e.setProvider(e.opts.InitialProvider, p, model)
+			e.setProvider(e.opts.InitialProvider, p, model, protocol.ModelSelectionStartup)
 		}
 	}
 	// The configured effort is applied before the agent so an agent's own

@@ -49,6 +49,16 @@ func TestWrapInputEnhancedRewrite(t *testing.T) {
 			in:   "\x1b[27;3;13~",
 			want: "\x1b\r",
 		},
+		{
+			name: "Kitty CSI-u Alt+Backspace",
+			in:   "\x1b[127;3u",
+			want: "\x1b\x7f",
+		},
+		{
+			name: "xterm modifyOtherKeys Alt+Backspace",
+			in:   "\x1b[27;3;127~",
+			want: "\x1b\x7f",
+		},
 		// --- Ctrl+Enter (both protocols) → passthrough (not letter, not Shift/Alt+Enter) ---
 		{
 			name: "Ctrl+Enter Kitty CSI-u passthrough",

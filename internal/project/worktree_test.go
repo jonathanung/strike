@@ -147,6 +147,25 @@ func TestAddRemoveIsolation(t *testing.T) {
 	}
 }
 
+func TestAddCreatesWorktreeBeforeManagedIgnore(t *testing.T) {
+	git := requireGit(t)
+	repo := initRepo(t, git)
+	runGit(t, git, "-C", repo, "commit", "--quiet", "--allow-empty", "-m", "init")
+
+	wt, err := Add(context.Background(), repo, "ignored-path")
+	if err != nil {
+		t.Fatalf("Add with managed ignore path: %v", err)
+	}
+	t.Cleanup(func() { _ = Remove(context.Background(), wt.RepoRoot, wt.Path, wt.Branch) })
+	data, err := os.ReadFile(filepath.Join(repo, ".strike", worktreeSubdir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read managed ignore: %v", err)
+	}
+	if string(data) != worktreeGitIgnore {
+		t.Errorf("managed ignore = %q, want %q", data, worktreeGitIgnore)
+	}
+}
+
 func TestAddNotAGitRepo(t *testing.T) {
 	requireGit(t)
 	dir := t.TempDir()

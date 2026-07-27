@@ -87,9 +87,9 @@ func defaultKeyMap() keyMap {
 		HistoryPrev:    key.NewBinding(key.WithKeys("up"), key.WithHelp("up", "history previous")),
 		HistoryNext:    key.NewBinding(key.WithKeys("down"), key.WithHelp("down", "history next")),
 		// Agent cycles personas (build/plan/…), not concurrent root sessions.
-		Agent: key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "cycle agent persona")),
-		// PermissionMode: shift+tab cycles tool-permission posture (not newline).
-		PermissionMode: key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "permission mode")),
+		Agent: key.NewBinding(key.WithKeys("tab", "shift+tab"), key.WithHelp("tab/shift+tab", "cycle agent persona")),
+		// PermissionMode remains available through /mode and the command palette.
+		PermissionMode: key.NewBinding(key.WithKeys(), key.WithHelp("/mode", "permission mode")),
 		SaveDefaults:   key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "save defaults")),
 		ScrollUp:       key.NewBinding(key.WithKeys("pgup", "ctrl+up"), key.WithHelp("pgup/ctrl+up", "scroll up")),
 		ScrollDown:     key.NewBinding(key.WithKeys("pgdown", "ctrl+down"), key.WithHelp("pgdn/ctrl+down", "scroll down")),
@@ -111,7 +111,7 @@ func defaultKeyMap() keyMap {
 		ToolReview: key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "review edit in editor")),
 		ToolApply:  key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "apply patch to worktree")),
 
-		KillWord:      key.NewBinding(key.WithKeys("ctrl+w"), key.WithHelp("ctrl+w", "kill word backward")),
+		KillWord:      key.NewBinding(key.WithKeys("ctrl+w", "alt+backspace"), key.WithHelp("ctrl+w/alt+backspace", "kill word backward")),
 		WordBackward:  key.NewBinding(key.WithKeys("alt+b"), key.WithHelp("alt+b", "word backward")),
 		WordForward:   key.NewBinding(key.WithKeys("alt+f"), key.WithHelp("alt+f", "word forward")),
 		KillLineStart: key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("ctrl+u", "kill to line start")),

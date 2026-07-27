@@ -540,6 +540,10 @@ func classifyEnhanced(seq []byte) (out []byte, drop bool, handled bool) {
 	if code == 13 && (shift || alt) && !ctrl {
 		return altEnter, false, true
 	}
+	// Alt+Backspace becomes ESC+DEL for Bubble Tea's alt+backspace binding.
+	if code == 127 && alt && !shift && !ctrl {
+		return []byte{0x1b, 0x7f}, false, true
+	}
 	// Ctrl+; → Alt+; for ToggleOrientation (no native ctrl+; KeyType).
 	if ctrl && !shift && !alt && code == int(';') {
 		return altSemicolon, false, true

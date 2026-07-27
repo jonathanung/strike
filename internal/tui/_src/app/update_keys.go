@@ -13,6 +13,14 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if key.Matches(msg, m.keyMap.Quit) {
 		return m, tea.Quit
 	}
+	if terminalCapturesKeys(m.windows, m.focus) {
+		if key.Matches(msg, m.keyMap.TerminalLeave) {
+			return m.leaveEmbeddedEditor()
+		}
+		var cmd tea.Cmd
+		m.windows, cmd = m.windows.update(msg)
+		return m, cmd
+	}
 	if m.modal != nil {
 		var cmd tea.Cmd
 		m.modal, cmd = m.modal.update(msg)
@@ -240,12 +248,16 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.saveDefaultsCmd(m.providerName, m.modelName, m.agentName, string(m.effort), string(m.permMode.Normalize()), dotJoin(m.th, m.providerName+"/"+m.modelName, m.agentName))
 	case key.Matches(msg, m.keyMap.Agent):
-		// Tab cycles agents (opencode-style build/plan switching).
+		// Tab cycles forward and Shift+Tab backward through agent personas.
 		if len(m.agents) > 1 && !m.turnRunning {
 			next := m.agents[0]
 			for i, name := range m.agents {
 				if name == m.agentName {
-					next = m.agents[(i+1)%len(m.agents)]
+					delta := 1
+					if msg.Type == tea.KeyShiftTab || msg.String() == "shift+tab" {
+						delta = -1
+					}
+					next = m.agents[(i+delta+len(m.agents))%len(m.agents)]
 					break
 				}
 			}
@@ -257,7 +269,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case key.Matches(msg, m.keyMap.PermissionMode):
-		// Shift+Tab cycles tool-permission posture (not a newline).
+		// Permission mode is normally selected through /mode or the palette.
 		if m.turnRunning {
 			return m, nil
 		}

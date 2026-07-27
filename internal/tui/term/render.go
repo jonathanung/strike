@@ -2,6 +2,7 @@ package term
 
 import (
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -29,7 +30,11 @@ func Render(s *Session, cols, rows int) string {
 	}
 	cur := term.Cursor()
 	curVis := term.CursorVisible()
-	profile := termenv.ColorProfile()
+	// The embedded PTY has already received SGR colors from its program.
+	// Preserve them independently of Bubble Tea's stdout profile detection,
+	// which can report Ascii while the alternate-screen terminal supports color.
+	renderer := lipgloss.NewRenderer(io.Discard)
+	renderer.SetColorProfile(termenv.TrueColor)
 
 	var b strings.Builder
 	for y := 0; y < rows; y++ {
@@ -42,7 +47,7 @@ func Render(s *Session, cols, rows int) string {
 			if ch == 0 {
 				ch = ' '
 			}
-			style := lipgloss.NewStyle()
+			style := renderer.NewStyle()
 			if fg := colorToHex(g.FG, false); fg != "" {
 				style = style.Foreground(lipgloss.Color(fg))
 			}
@@ -61,8 +66,6 @@ func Render(s *Session, cols, rows int) string {
 			if g.Mode&attrReverse != 0 || (curVis && cur.X == x && cur.Y == y) {
 				style = style.Reverse(true)
 			}
-			// Force truecolor profile when available so hex colors stick.
-			_ = profile
 			b.WriteString(style.Render(string(ch)))
 		}
 	}
@@ -97,8 +100,8 @@ func colorToHex(c vt10x.Color, bg bool) string {
 		r, g, b := xterm256RGB(uint32(c))
 		return fmt.Sprintf("#%02x%02x%02x", r, g, b)
 	}
-	// Truecolor packed as 0xRRGGBB in some emulators; vt10x uses Color as index.
-	return ""
+	// vt10x stores SGR 38;2/48;2 truecolor as packed 0xRRGGBB.
+	return fmt.Sprintf("#%06x", uint32(c)&0xffffff)
 }
 
 var ansi16Hex = [16]string{

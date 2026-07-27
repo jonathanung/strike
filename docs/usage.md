@@ -19,7 +19,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 /effort xhigh                  # off | low | medium | high | xhigh | max
 /autonomy                      # exit-gate policy picker
 /autonomy supervised           # supervised | agent | checks
-/mode                          # permission posture picker (Shift+Tab cycles)
+/mode                          # permission posture picker
 /mode soft-approve             # default | plan | soft-approve | accept-edits | yolo
 /agent                         # centered agent picker
 /agent plan                    # direct switch (build, plan, explore, …)
@@ -110,7 +110,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 
 ### Permission mode dial
 
-`/mode` (or **Shift+Tab**) cycles the session **tool-permission posture**. This
+`/mode` cycles the session **tool-permission posture**. This
 is distinct from `/autonomy` (exit gates). The header always shows `mode …`;
 yolo also paints a danger banner.
 

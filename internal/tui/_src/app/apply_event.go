@@ -166,6 +166,9 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		m.clearUsage()
 		m.refreshOpenPalette()
 		cmd = tea.Batch(m.fetchContextLimitsCmd(), m.broadcastContextState(), m.authExpiryNoticeCmd())
+		if ev.Source == protocol.ModelSelectionUser {
+			cmd = tea.Batch(cmd, m.saveSelectedModelCmd(ev.Provider, ev.Model))
+		}
 	case protocol.AgentSelected:
 		m.agentName = ev.Name
 		cmd = m.broadcastContextState()

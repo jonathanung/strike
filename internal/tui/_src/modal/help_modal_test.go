@@ -17,7 +17,7 @@ func TestHelpModalListsCatalogAndFilters(t *testing.T) {
 	if len(m.entries) != len(catalog)+1 {
 		t.Fatalf("entries = %d, want catalog+tab tip (%d)", len(m.entries), len(catalog)+1)
 	}
-	for _, want := range []string{"/session [id]", "/export [path] [--open]", "/theme [name|dark|light|auto]", "/memory [list|get|set|rm|export|import] ...", "/issues [list|add|get|close|export|import] ...", "/compact", "/fork", "/undo [chat|files]", "/fast [on|off]", "/think [on|off]", "/layout", "/md-read <path>", "/keys [reset]", "/settings", "/review $ARGUMENTS", "tab"} {
+	for _, want := range []string{"/session [id]", "/export [path] [--open]", "/theme [name|dark|light|auto]", "/memory [list|get|set|rm|export|import] ...", "/issues [list|add|get|close|export|import] ...", "/compact", "/fork", "/undo [chat|files]", "/fast [on|off]", "/think [on|off]", "/layout", "/md-read <path>", "/keys [reset]", "/settings", "/review $ARGUMENTS", "tab/shift+tab"} {
 		found := false
 		for _, entry := range m.entries {
 			if entry.Label == want {
@@ -37,6 +37,11 @@ func TestHelpModalListsCatalogAndFilters(t *testing.T) {
 	filtered := m.filtered()
 	if len(filtered) != 1 || !strings.HasPrefix(filtered[0].Label, "/memory") {
 		t.Fatalf("filter memory = %#v, want only /memory", filtered)
+	}
+	q := newHelpModal(catalog)
+	next, cmd = q.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	if next != q || cmd != nil || q.filter != "q" {
+		t.Fatalf("q = modal %T, cmd %v, filter %q; want retained modal with q filter", next, cmd, q.filter)
 	}
 	view := ansi.Strip(m.view(80, theme.Default()))
 	if !strings.Contains(view, "/memory") || !strings.Contains(view, "Commands") {

@@ -585,12 +585,22 @@ type TurnCompleted struct {
 	StopReason string `json:"stopReason,omitempty"`
 }
 
+// ModelSelectionSource identifies what changed the active model.
+type ModelSelectionSource string
+
+const (
+	ModelSelectionStartup ModelSelectionSource = "startup"
+	ModelSelectionUser    ModelSelectionSource = "user"
+	ModelSelectionAgent   ModelSelectionSource = "agent"
+)
+
 // ModelSelected confirms the active provider/model, at startup (if an
 // initial selection succeeded) and after each SelectModel.
 type ModelSelected struct {
 	Correlation
-	Provider string `json:"provider"`
-	Model    string `json:"model"`
+	Provider string               `json:"provider"`
+	Model    string               `json:"model"`
+	Source   ModelSelectionSource `json:"source,omitempty"`
 }
 
 // AgentSelected confirms the active agent.

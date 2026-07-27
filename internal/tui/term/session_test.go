@@ -64,6 +64,27 @@ ready:
 	}
 }
 
+func TestPTYEnvForcesTERMAndPreservesOtherVariables(t *testing.T) {
+	parent := []string{
+		"HOME=/home/alice",
+		"TERM=screen-256color",
+		"COLORTERM=truecolor",
+		"NVIM_APPNAME=embedded-test",
+		"TERM=vt100",
+	}
+	want := []string{
+		"HOME=/home/alice",
+		"COLORTERM=truecolor",
+		"NVIM_APPNAME=embedded-test",
+		"TERM=xterm-256color",
+	}
+
+	got := ptyEnv(parent)
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("ptyEnv(%q) = %q, want %q", parent, got, want)
+	}
+}
+
 func TestSessionResizeAndCleanShutdown(t *testing.T) {
 	cmd := exec.Command("sh", "-c", "sleep 30")
 	s, err := Start(cmd, 20, 5)
