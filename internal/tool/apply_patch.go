@@ -399,8 +399,10 @@ func planPatchOps(workDir string, hunks []patchHunk) ([]plannedOp, map[string]pa
 	}
 
 	for _, h := range hunks {
-		abs := absPath(workDir, h.Path)
-		rel := relPath(workDir, abs)
+		abs, rel, err := resolveInWorkspace(workDir, h.Path)
+		if err != nil {
+			return nil, nil, fmt.Errorf("apply_patch: %w", err)
+		}
 		switch h.Type {
 		case "add":
 			if err := captureOriginal(abs); err != nil {
@@ -455,8 +457,11 @@ func planPatchOps(workDir string, hunks []patchHunk) ([]plannedOp, map[string]pa
 			var absMove, relMove string
 			if h.MoveTo != "" {
 				opType = "move"
-				absMove = absPath(workDir, h.MoveTo)
-				relMove = relPath(workDir, absMove)
+				var moveErr error
+				absMove, relMove, moveErr = resolveInWorkspace(workDir, h.MoveTo)
+				if moveErr != nil {
+					return nil, nil, fmt.Errorf("apply_patch: %w", moveErr)
+				}
 				if absMove != abs {
 					if err := captureOriginal(absMove); err != nil {
 						return nil, nil, fmt.Errorf("apply_patch: Move to %q: %w", relMove, err)

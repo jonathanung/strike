@@ -80,8 +80,10 @@ func (notebookEditTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 		return Result{}, fmt.Errorf("cell_id is required for edit_mode=%s", mode)
 	}
 
-	path := absPath(tc.WorkDir, a.NotebookPath)
-	rel := relPath(tc.WorkDir, path)
+	path, rel, err := resolveInWorkspace(tc.WorkDir, a.NotebookPath)
+	if err != nil {
+		return Result{}, err
+	}
 	if !strings.EqualFold(filepath.Ext(path), ".ipynb") {
 		return Result{}, fmt.Errorf("file must be a Jupyter notebook (.ipynb)")
 	}

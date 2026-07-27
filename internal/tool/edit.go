@@ -54,8 +54,10 @@ func (editTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	if a.OldString == a.NewString {
 		return Result{}, fmt.Errorf("oldString and newString are identical")
 	}
-	path := absPath(tc.WorkDir, a.FilePath)
-	rel := relPath(tc.WorkDir, path)
+	path, rel, err := resolveInWorkspace(tc.WorkDir, a.FilePath)
+	if err != nil {
+		return Result{}, err
+	}
 	if err := tc.Files.CheckFresh(path, rel); err != nil {
 		return Result{}, err
 	}
