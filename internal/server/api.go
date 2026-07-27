@@ -78,7 +78,7 @@ var browserProtocolOps = []string{
 }
 
 func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
-	c := capabilities{Live: s.opts.Live != nil}
+	c := capabilities{Live: s.hasLive(), Roots: s.opts.LiveHub != nil}
 	var skills []map[string]any
 	if h := s.opts.Services; h != nil {
 		c.Auth, c.Catalog, c.Settings, c.History = h.Auth != nil, h.Catalog != nil, h.Settings != nil, h.History != nil
@@ -92,15 +92,16 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	}
 	var status *StatusSnapshot
 	var agents []AgentInfo
-	if s.opts.Live != nil {
-		v := s.opts.Live.Status()
-		status, agents = &v, s.opts.Live.Agents()
+	live := s.resolveLive(w, r)
+	if live != nil {
+		v := live.Status()
+		status, agents = &v, live.Agents()
 	}
 	var protocolOps []string
-	if s.opts.Live != nil {
+	if s.hasLive() {
 		protocolOps = browserProtocolOps
 	}
-	writeJSON(w, http.StatusOK, bootstrapResponse{Version: version.Version, AuthRequired: s.opts.Auth, AttachOnly: s.opts.Live == nil, Capabilities: c, Status: status, Agents: agents, Skills: skills, ProtocolOps: protocolOps})
+	writeJSON(w, http.StatusOK, bootstrapResponse{Version: version.Version, AuthRequired: s.opts.Auth, AttachOnly: !s.hasLive(), Capabilities: c, Status: status, Agents: agents, Skills: skills, ProtocolOps: protocolOps})
 }
 
 func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
@@ -204,19 +205,21 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	if s.opts.Live == nil {
+	live := s.resolveLive(w, r)
+	if live == nil {
 		http.Error(w, "live session unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.opts.Live.Status())
+	writeJSON(w, http.StatusOK, live.Status())
 }
 
 func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
-	if s.opts.Live == nil {
+	live := s.resolveLive(w, r)
+	if live == nil {
 		writeJSON(w, http.StatusOK, agentsResponse{Agents: nil})
 		return
 	}
-	writeJSON(w, http.StatusOK, agentsResponse{Agents: s.opts.Live.Agents()})
+	writeJSON(w, http.StatusOK, agentsResponse{Agents: live.Agents()})
 }
 
 func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
@@ -226,7 +229,12 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	liveID := ""
-	if s.opts.Live != nil {
+	if s.opts.LiveHub != nil {
+		live := s.opts.LiveHub.Active()
+		if live != nil {
+			liveID = live.SessionID()
+		}
+	} else if s.opts.Live != nil {
 		liveID = s.opts.Live.SessionID()
 	}
 	writeJSON(w, http.StatusOK, sessionsResponse{Sessions: items, LiveID: liveID})
@@ -387,7 +395,8 @@ func decodeBody(w http.ResponseWriter, r *http.Request, dst any) error {
 }
 
 func (s *Server) handleOps(w http.ResponseWriter, r *http.Request) {
-	if s.opts.Live == nil {
+	live := s.resolveLive(w, r)
+	if live == nil {
 		http.Error(w, "live session unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -410,7 +419,7 @@ func (s *Server) handleOps(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	if err := s.opts.Live.Submit(ctx, op); err != nil {
+	if err := live.Submit(ctx, op); err != nil {
 		writeJSON(w, http.StatusConflict, opErrorResponse{Error: err.Error()})
 		return
 	}
@@ -429,7 +438,8 @@ func ensureEOF(dec *json.Decoder) error {
 }
 
 func (s *Server) handleLiveEvents(w http.ResponseWriter, r *http.Request) {
-	if s.opts.Live == nil {
+	live := s.resolveLive(w, r)
+	if live == nil {
 		http.Error(w, "live session unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -446,7 +456,7 @@ func (s *Server) handleLiveEvents(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	ctx := r.Context()
-	id := s.opts.Live.SessionID()
+	id := live.SessionID()
 	path := session.LogPath(s.opts.SessionDir, id)
 	var offset int64
 	if st, err := os.Stat(path); err == nil {
@@ -474,7 +484,8 @@ func (s *Server) handleLiveEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
-	if s.opts.Live == nil {
+	live := s.resolveLive(w, r)
+	if live == nil {
 		http.Error(w, "live session unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -493,14 +504,14 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	// Hello: push current status as a synthetic control message.
 	statusEnv := map[string]any{
 		"type": "status",
-		"data": s.opts.Live.Status(),
+		"data": live.Status(),
 	}
 	if b, err := json.Marshal(statusEnv); err == nil {
 		_ = ws.WriteText(string(b))
 	}
 
 	// Replay to a fixed byte boundary, then tail strictly after that boundary.
-	id := s.opts.Live.SessionID()
+	id := live.SessionID()
 	path := session.LogPath(s.opts.SessionDir, id)
 	var offset int64
 	if st, err := os.Stat(path); err == nil {
@@ -527,7 +538,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			}
 			// Allow status request control message.
 			if env.Type == "status.get" {
-				b, _ := json.Marshal(map[string]any{"type": "status", "data": s.opts.Live.Status()})
+				b, _ := json.Marshal(map[string]any{"type": "status", "data": live.Status()})
 				_ = ws.WriteText(string(b))
 				continue
 			}
@@ -538,7 +549,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			submitCtx, submitCancel := context.WithTimeout(ctx, 5*time.Second)
-			err = s.opts.Live.Submit(submitCtx, op)
+			err = live.Submit(submitCtx, op)
 			submitCancel()
 			if err != nil {
 				msg, _ := json.Marshal(map[string]any{"type": "error", "data": map[string]string{"message": err.Error()}})
@@ -608,4 +619,66 @@ func (s *Server) writeWSRange(ctx context.Context, ws wsTextWriter, path string,
 			return offset, err
 		}
 	}
+}
+
+// --- root API ---
+
+type rootsResponse struct {
+	Roots    []RootSummary `json:"roots"`
+	ActiveID string        `json:"activeId,omitempty"`
+}
+
+func (s *Server) handleRoots(w http.ResponseWriter, r *http.Request) {
+	if s.opts.LiveHub == nil {
+		http.Error(w, "multi-root unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	writeJSON(w, http.StatusOK, rootsResponse{
+		Roots:    s.opts.LiveHub.List(),
+		ActiveID: s.opts.LiveHub.ActiveID(),
+	})
+}
+
+func (s *Server) handleRootCreate(w http.ResponseWriter, r *http.Request) {
+	if s.opts.LiveHub == nil {
+		http.Error(w, "multi-root unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	result, err := s.opts.LiveHub.Create(ctx)
+	if err != nil {
+		writeJSON(w, http.StatusConflict, opErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusCreated, result)
+}
+
+func (s *Server) handleRootActivate(w http.ResponseWriter, r *http.Request) {
+	if s.opts.LiveHub == nil {
+		http.Error(w, "multi-root unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if err := s.opts.LiveHub.Activate(id); err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, opOKResponse{OK: true})
+}
+
+func (s *Server) handleRootResume(w http.ResponseWriter, r *http.Request) {
+	if s.opts.LiveHub == nil {
+		http.Error(w, "multi-root unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	sessionID := strings.TrimSpace(r.PathValue("id"))
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	result, err := s.opts.LiveHub.Resume(ctx, sessionID)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }

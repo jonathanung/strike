@@ -585,3 +585,137 @@ func (w *testWS) readText(timeout time.Duration) (string, error) {
 	}
 	return string(payload), nil
 }
+
+func TestLiveHubAddAndActive(t *testing.T) {
+	ops1 := make(chan protocol.Op, 1)
+	ops2 := make(chan protocol.Op, 1)
+	live1 := NewLive("root1", "/a", nil, ops1)
+	live2 := NewLive("root2", "/b", nil, ops2)
+	defer live1.Close()
+	defer live2.Close()
+
+	hub := NewLiveHub(nil, nil)
+	hub.Add("root1", live1)
+	if got := hub.ActiveID(); got != "root1" {
+		t.Fatalf("active = %q, want root1", got)
+	}
+	if got := hub.Active(); got == nil || got.SessionID() != "root1" {
+		t.Fatal("Active() missing or wrong")
+	}
+
+	hub.Add("root2", live2)
+	if got := hub.ActiveID(); got != "root1" {
+		t.Fatalf("active = %q after add 2, want root1", got)
+	}
+	if err := hub.Activate("root2"); err != nil {
+		t.Fatal(err)
+	}
+	if got := hub.ActiveID(); got != "root2" {
+		t.Fatalf("active = %q after activate, want root2", got)
+	}
+	if got := hub.LiveFor("root1"); got == nil || got.SessionID() != "root1" {
+		t.Fatal("LiveFor root1 missing")
+	}
+}
+
+func TestLiveHubList(t *testing.T) {
+	live1 := NewLive("r1", "/a", []AgentInfo{{Name: "build"}}, make(chan protocol.Op))
+	live2 := NewLive("r2", "/b", nil, make(chan protocol.Op))
+	defer live1.Close()
+	defer live2.Close()
+	live1.Publish(protocol.AgentSelected{Name: "build"})
+	live2.Publish(protocol.TurnStarted{})
+	live2.Publish(protocol.TurnCompleted{})
+
+	hub := NewLiveHub(nil, nil)
+	hub.Add("r1", live1)
+	hub.Add("r2", live2)
+
+	list := hub.List()
+	if len(list) != 2 {
+		t.Fatalf("list = %d, want 2", len(list))
+	}
+	if list[0].ID != "r1" {
+		t.Fatalf("list[0] = %q, want r1 (first added)", list[0].ID)
+	}
+	if list[0].Agent != "build" {
+		t.Fatalf("list[0].Agent = %q, want build", list[0].Agent)
+	}
+	if list[1].Busy != false {
+		t.Fatalf("list[1] (r2) Busy = %v, want false (TurnCompleted)", list[1].Busy)
+	}
+}
+
+func TestLiveHubClose(t *testing.T) {
+	live := NewLive("r1", "/a", nil, make(chan protocol.Op))
+	hub := NewLiveHub(nil, nil)
+	hub.Add("r1", live)
+	hub.Close()
+	if got := hub.Active(); got != nil {
+		t.Fatal("Active() after close should be nil")
+	}
+	if got := hub.List(); len(got) != 0 {
+		t.Fatalf("List after close = %d, want 0", len(got))
+	}
+}
+
+func TestLiveHubActivateRejectsUnknown(t *testing.T) {
+	hub := NewLiveHub(nil, nil)
+	if err := hub.Activate("missing"); err == nil {
+		t.Fatal("expected error for missing root")
+	}
+}
+
+func TestLiveHubLiveForEmptyDelegatesToActive(t *testing.T) {
+	live := NewLive("r1", "/a", nil, make(chan protocol.Op))
+	defer live.Close()
+	hub := NewLiveHub(nil, nil)
+	hub.Add("r1", live)
+	if got := hub.LiveFor(""); got == nil || got.SessionID() != "r1" {
+		t.Fatal("LiveFor(\"\") should return active")
+	}
+}
+
+func TestLiveHubCreateAndRemove(t *testing.T) {
+	live1 := NewLive("r1", "/a", nil, make(chan protocol.Op))
+	live2 := NewLive("r2", "/b", nil, make(chan protocol.Op))
+	defer live1.Close()
+	defer live2.Close()
+	hub := NewLiveHub(nil, nil)
+	hub.Add("r1", live1)
+	hub.Add("r2", live2)
+	hub.Remove("r1")
+	if hub.ActiveID() != "r2" {
+		t.Fatalf("active should fall back to r2, got %q", hub.ActiveID())
+	}
+	list := hub.List()
+	if len(list) != 1 || list[0].ID != "r2" {
+		t.Fatalf("list after remove = %v", list)
+	}
+}
+
+func TestLiveHubResolveLiveBackwardCompat(t *testing.T) {
+	dir := t.TempDir()
+	ops := make(chan protocol.Op, 1)
+	singleLive := NewLive("single", "/", nil, ops)
+	defer singleLive.Close()
+
+	srv, err := New(Options{Auth: true, Token: "t", SessionDir: dir, Live: singleLive})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/v1/status?root=anything", nil)
+	req.Header.Set("Authorization", "Bearer t")
+	res := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d", res.Code)
+	}
+	var st StatusSnapshot
+	if err := json.NewDecoder(res.Body).Decode(&st); err != nil {
+		t.Fatal(err)
+	}
+	if st.SessionID != "single" {
+		t.Fatalf("SessionID = %q", st.SessionID)
+	}
+}
