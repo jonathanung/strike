@@ -145,14 +145,11 @@ func (exitPlanModeTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 				return Result{}, err
 			}
 			return postPlanResult(applied, true), nil
-		case strings.Contains(err.Error(), "declined"):
-			return Result{
-				Title:  "staying in plan mode",
-				Output: "User declined exiting plan mode. Remaining in plan phase (write/edit denied).",
-			}, nil
 		case strings.Contains(err.Error(), "no active workflow phase"):
 			// Fall through to agent-only exit path.
 		default:
+			// User decline and other gate failures propagate so the engine
+			// can interrupt the turn (decline) or surface the error.
 			return Result{}, err
 		}
 	}
@@ -181,10 +178,9 @@ func (exitPlanModeTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 			answer = strings.TrimSpace(resp.Answers[0])
 		}
 		if !isYesAnswer(answer) {
-			return Result{
-				Title:  "staying in plan mode",
-				Output: "User declined exiting plan mode. Remaining in plan mode.",
-			}, nil
+			return Result{}, &UserRejectedError{
+				Message: "User declined exiting plan mode. Remaining in plan mode.",
+			}
 		}
 	}
 
