@@ -46,9 +46,9 @@ func New(source TokenSource) *Provider {
 }
 
 type apiRequest struct {
-	SystemInstruction *apiContent        `json:"system_instruction,omitempty"`
-	Contents          []apiContent       `json:"contents"`
-	Tools             []apiTool          `json:"tools,omitempty"`
+	SystemInstruction *apiContent       `json:"system_instruction,omitempty"`
+	Contents          []apiContent      `json:"contents"`
+	Tools             []apiTool         `json:"tools,omitempty"`
 	GenerationConfig  *generationConfig `json:"generationConfig,omitempty"`
 }
 
