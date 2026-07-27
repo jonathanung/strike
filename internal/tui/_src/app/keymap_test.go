@@ -119,7 +119,7 @@ func TestKeybindCatalogCoversAppBindingsAndIsSearchable(t *testing.T) {
 		"global.palette", "global.keyhelp", "composer.external-editor",
 		"composer.kill-word", "composer.word-back", "composer.word-fwd",
 		"composer.kill-line-start", "composer.kill-line-end", "composer.yank",
-		"agents.move", "agents.open", "agents.spawn", "agents.interrupt", "agents.hide", "agents.filter",
+		"agents.move", "agents.open", "agents.spawn", "agents.interrupt", "agents.rename", "agents.hide", "agents.filter",
 	} {
 		if !seen[id] {
 			t.Errorf("catalog missing %q", id)
@@ -133,6 +133,7 @@ func TestKeybindCatalogCoversAppBindingsAndIsSearchable(t *testing.T) {
 		{"agents.spawn", ak.Spawn},
 		{"agents.open", ak.Open},
 		{"agents.interrupt", ak.Interrupt},
+		{"agents.rename", ak.Rename},
 		{"agents.hide", ak.Hide},
 		{"agents.move", ak.Move},
 		{"agents.filter", ak.Filter},
@@ -231,7 +232,7 @@ func TestOrderKeybindEntriesPromotesFocusContext(t *testing.T) {
 	if len(agents) != len(catalog) {
 		t.Fatalf("agents order length = %d, want %d (must not drop binds)", len(agents), len(catalog))
 	}
-	agentIDs := []string{"agents.move", "agents.open", "agents.spawn", "agents.interrupt", "agents.hide", "agents.filter"}
+	agentIDs := []string{"agents.move", "agents.open", "agents.spawn", "agents.interrupt", "agents.rename", "agents.hide", "agents.filter"}
 	for i, id := range agentIDs {
 		if agents[i].ID != id {
 			t.Fatalf("agents[%d] = %q, want %q", i, agents[i].ID, id)
@@ -345,7 +346,7 @@ func TestKeysModalOpensWithFocusContext(t *testing.T) {
 		t.Fatalf("contextLabel = %q, want agents", modal.contextLabel)
 	}
 	list = modal.filtered()
-	wantAgents := []string{"agents.move", "agents.open", "agents.spawn", "agents.interrupt", "agents.hide", "agents.filter"}
+	wantAgents := []string{"agents.move", "agents.open", "agents.spawn", "agents.interrupt", "agents.rename", "agents.hide", "agents.filter"}
 	for i, id := range wantAgents {
 		if i >= len(list) || list[i].ID != id || !list[i].Context {
 			t.Fatalf("agents focus list[%d] = %#v, want %s context", i, firstEntry(list[i:]), id)

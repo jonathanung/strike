@@ -26,6 +26,8 @@ strike launches without any provider configured. Pick one inside the TUI:
 /session                       # browse past root sessions for this workspace
                                # (auto-titles); ctrl+a shows all workspaces
 /session <id>                  # resume a specific session by id (any workspace)
+/rename                        # rename the current session (editor)
+/rename <title>                # rename the current session immediately
 /fast                          # toggle OpenAI priority tier (~2×, lower
                                # latency). Sticky session preference; no-op
                                # on Anthropic, xAI, ChatGPT subscription, or
@@ -95,6 +97,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 |---|---|
 | `/session` | picker of past **root** sessions for the **current workspace** only (auto-titles; resume reloads model history). `ctrl+a` toggles all workspaces. Legacy sessions without a stored folder path appear only in all-workspaces mode |
 | `/session <id>` | resume that root session by id (works across workspaces; list filter does not apply) |
+| `/rename [title]` | rename the current session (brief auto-titles; agents pane `r` too) |
 | `/fork` | copy the current session JSONL into a new id (idle only) |
 | `/undo` / `/rewind` | undo last turn (idle only); bare opens picker; `chat` keeps disk; `files` restores per-file checkpoints from that turn (never `git reset --hard`) |
 | `/export` | dump the visible transcript to markdown (user/assistant/tool summaries); redacts common API-key shapes; default path under `.strike/exports/` or tmp; `--open` launches `$EDITOR` |
