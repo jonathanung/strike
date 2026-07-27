@@ -39,7 +39,7 @@ const (
 	settingsFieldProvider // display-only
 	settingsFieldModel    // display-only
 	settingsFieldAgent    // display-only
-	settingsFieldEffort   // display-only
+	settingsFieldEffort
 )
 
 // settingsModal is the /settings UI: defaults editor + custom provider CRUD.
@@ -211,7 +211,7 @@ func (m *settingsModal) updateDefaults(msg tea.KeyMsg) (modal, tea.Cmd) {
 
 func settingsFieldEditable(f settingsField) bool {
 	switch f {
-	case settingsFieldTheme, settingsFieldVim, settingsFieldNano, settingsFieldMdRead, settingsFieldPerm:
+	case settingsFieldTheme, settingsFieldVim, settingsFieldNano, settingsFieldMdRead, settingsFieldPerm, settingsFieldEffort:
 		return true
 	default:
 		return false
@@ -312,6 +312,13 @@ func (m *settingsModal) pickOptionsFor(field settingsField) []settingsPickOption
 			out[i] = settingsPickOption{value: string(mode), label: string(mode), detail: mode.Describe()}
 		}
 		return out
+	case settingsFieldEffort:
+		levels := protocol.Efforts()
+		out := make([]settingsPickOption, len(levels))
+		for i, level := range levels {
+			out[i] = settingsPickOption{value: string(level), label: string(level), detail: level.Describe()}
+		}
+		return out
 	default:
 		return nil
 	}
@@ -391,7 +398,12 @@ func (m *settingsModal) fieldDisplay(field settingsField) (value, detail string)
 			return "default", "new sessions"
 		}
 		return raw, "new sessions"
-	case settingsFieldProvider, settingsFieldModel, settingsFieldAgent, settingsFieldEffort:
+	case settingsFieldEffort:
+		if raw == "" {
+			return "(unset)", "provider default"
+		}
+		return raw, "new sessions"
+	case settingsFieldProvider, settingsFieldModel, settingsFieldAgent:
 		if raw == "" {
 			return "(unset)", "set via picker + ctrl+d"
 		}
@@ -484,6 +496,8 @@ func (m *settingsModal) savePickCmd(opt settingsPickOption) tea.Cmd {
 			}
 		case settingsFieldPerm:
 			err = settings.SaveDefaults("", "", "", "", opt.value)
+		case settingsFieldEffort:
+			err = settings.SaveDefaults("", "", "", opt.value, "")
 		default:
 			return settingsSavedMsg{err: errors.New("unknown settings field")}
 		}

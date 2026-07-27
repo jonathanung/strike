@@ -16,6 +16,7 @@ strike launches without any provider configured. Pick one inside the TUI:
                                # 24h; type to filter)
 /model grok-4.5                # direct switch on the current provider
 /effort                        # centered picker for reasoning effort
+                               # (active level shows on the top status bar)
 /effort xhigh                  # off | low | medium | high | xhigh | max
 /autonomy                      # exit-gate policy picker
 /autonomy supervised           # supervised | agent | checks

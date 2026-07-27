@@ -49,6 +49,9 @@ directly; the active agent shows in the status bar. The `task` tool’s optional
 unknown names fail with `unknown agent "…" (available: …)`.
 Optional `model` pins the child’s model (bare id on the current provider, or
 `provider/model`) against the same catalog as `/model`; omit to inherit.
+Optional `effort` pins the child’s reasoning dial (`off`\|`low`\|`medium`\|
+`high`\|`xhigh`\|`max`); omit to inherit the parent (agent effort pins still
+apply). When set, task effort wins over agent profile effort.
 
 Each model request composes the system prompt in layers (like opencode):
 

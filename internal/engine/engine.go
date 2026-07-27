@@ -103,6 +103,9 @@ type Options struct {
 	// LockModel prevents agent profiles from changing provider/model. Set
 	// when the task tool pins a model for a child session.
 	LockModel bool
+	// LockEffort prevents agent profiles from changing the reasoning dial.
+	// Set when the task tool pins effort for a child session.
+	LockEffort bool
 	// CompactionThreshold is the occupancy fraction (0–1) that triggers
 	// automatic compaction before a Stream. Zero defaults to 0.80; >=1
 	// disables threshold compaction.

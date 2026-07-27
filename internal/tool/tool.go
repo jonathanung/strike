@@ -54,6 +54,10 @@ type TaskRequest struct {
 	// provider, or "provider/model"). Empty inherits the parent's model
 	// (subject to agent pins).
 	Model string
+	// Effort is an optional reasoning-effort level for the child
+	// (off|low|medium|high|xhigh|max). Empty inherits the parent's dial
+	// (subject to agent effort pins). When set, it wins over agent pins.
+	Effort string
 }
 
 // TaskResult is the outcome of spawning a child session.

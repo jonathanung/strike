@@ -63,6 +63,24 @@ func TestTaskSuccessfulSpawn(t *testing.T) {
 	}
 }
 
+func TestTaskPassesEffort(t *testing.T) {
+	tc := allowAll(t.TempDir())
+	var gotReq TaskRequest
+	tc.SpawnTask = func(_ context.Context, req TaskRequest) (TaskResult, error) {
+		gotReq = req
+		return TaskResult{Output: "started", Status: "started", SessionID: "s1"}, nil
+	}
+	if _, err := NewTask().Execute(context.Background(), mustJSON(t, map[string]any{
+		"prompt": "think hard",
+		"effort": "xhigh",
+	}), tc); err != nil {
+		t.Fatal(err)
+	}
+	if gotReq.Effort != "xhigh" {
+		t.Errorf("effort = %q, want xhigh", gotReq.Effort)
+	}
+}
+
 func TestTaskCanceledOrFailedStatus(t *testing.T) {
 	cases := []struct {
 		status string

@@ -461,7 +461,8 @@ func (e *Engine) applyAgent(name string) bool {
 		Correlation: e.sessionCorr(),
 		Name:        agent.Name,
 	})
-	if agent.Effort != protocol.EffortDefault {
+	// Task-tool effort pins set LockEffort so agent defaults cannot override.
+	if !e.opts.LockEffort && agent.Effort != protocol.EffortDefault {
 		e.setEffort(agent.Effort)
 	}
 
