@@ -289,7 +289,8 @@ cycle focus within the active stack group then to the next group. `ctrl+;`
 (or `/layout` / `/split`) toggles a vertical top/bottom split without swapping
 those chords. `ctrl+k` opens the command palette (when kill-to-end does not
 delete); `f1` (or `/keys`) opens a filterable keybind cheatsheet. Enter sends;
-`ctrl+j` or Shift+Enter (Alt+Enter after enhanced CSI) inserts a newline.
+`ctrl+j`, Shift+Enter, or Alt+Enter inserts a newline (Shift+Enter CSI
+rewrites to Alt+Enter).
 `pgup`/`pgdn` (and `ctrl+up`/`ctrl+down`)
 scroll the transcript; `ctrl+t` jumps to the latest output. The transcript
 sticks to the bottom while you are already anchored, and keeps your scroll

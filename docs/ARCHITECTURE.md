@@ -118,9 +118,9 @@ window index and has no close state or plugin mechanism. File bytes and
 directory listings reach the markdown and files windows through `host.Files`,
 not direct disk I/O from the TUI. Window input and resize updates stay inside
 `internal/tui`: no protocol Op or Event was added for this pane infrastructure.
-Composer input treats Enter as send and `ctrl+j` / Shift+Enter (normalized to
-Alt+Enter / Alt+j via a stdin wrapper and enhanced keyboard modes) as newline.
-Bare LF (`KeyCtrlJ`) is also newline. Pane focus is `ctrl+h`/`ctrl+l`
+Composer input treats Enter as send and `ctrl+j` / Shift+Enter / Alt+Enter
+as newline (Shift+Enter CSI normalizes to Alt+Enter; enhanced ctrl+j to
+Alt+j via a stdin wrapper). Bare LF (`KeyCtrlJ`) is also newline. Pane focus is `ctrl+h`/`ctrl+l`
 (primary vs secondary, orientation-independent); secondary-pane cycle is
 `ctrl+o`/`ctrl+p`; command palette is `ctrl+k` (when kill-to-end does not
 delete). Bare Escape from CSI-u is normalized to `0x1b`.

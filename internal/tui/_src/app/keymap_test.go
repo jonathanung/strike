@@ -61,11 +61,15 @@ func TestDefaultKeyMapBindingsMatchTheirRequiredKeysAndHaveHelp(t *testing.T) {
 		t.Error("ctrl+p must not match Palette (window-prev) (#414)")
 	}
 	newlineHelp := keys.Newline.Help()
-	if newlineHelp.Key != "ctrl+j/shift+enter" {
-		t.Errorf("Newline help key = %q, want ctrl+j/shift+enter", newlineHelp.Key)
+	if newlineHelp.Key != "ctrl+j/shift+enter/alt+enter" {
+		t.Errorf("Newline help key = %q, want ctrl+j/shift+enter/alt+enter", newlineHelp.Key)
 	}
 	if newlineHelp.Desc != "newline" {
 		t.Errorf("Newline help desc = %q, want newline", newlineHelp.Desc)
+	}
+	// alt+enter is first-class newline (same KeyMsg as post-CSI shift+enter) (#414).
+	if !key.Matches(tea.KeyMsg{Type: tea.KeyEnter, Alt: true}, keys.Newline) {
+		t.Error("KeyEnter+Alt (alt+enter / shift+enter) must match Newline")
 	}
 	// ToolExpand shares alt+enter with Newline; routing is composer-empty only (#421).
 	if keys.ToolExpand.Help().Key != "alt+enter" {
@@ -81,11 +85,11 @@ func keyMsgAltJ() tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}, Alt: true}
 }
 
-// TestShiftEnterKeyMsgDoesNotMatchCycleWindow pins that the post-WrapInput
-// KeyMsg for shift+enter (KeyEnter+Alt) matches Newline and ToolExpand (shared
+// TestAltEnterAndShiftEnterNewline pins that KeyEnter+Alt (native alt+enter
+// and post-WrapInput shift+enter) matches Newline and ToolExpand (shared
 // chord, context-routed) — never CycleWindow*/Send/Focus* — under both split
-// orientations (#53, #421).
-func TestShiftEnterKeyMsgDoesNotMatchCycleWindow(t *testing.T) {
+// orientations (#53, #414, #421).
+func TestAltEnterAndShiftEnterNewline(t *testing.T) {
 	msg := tea.KeyMsg{Type: tea.KeyEnter, Alt: true}
 	for _, tt := range []struct {
 		name   string
@@ -98,7 +102,7 @@ func TestShiftEnterKeyMsgDoesNotMatchCycleWindow(t *testing.T) {
 			keys := defaultKeyMap()
 			keys.applyOrientationKeys(tt.orient)
 			if !key.Matches(msg, keys.Newline) {
-				t.Error("KeyEnter+Alt must match Newline")
+				t.Error("KeyEnter+Alt (alt+enter/shift+enter) must match Newline")
 			}
 			if !key.Matches(msg, keys.ToolExpand) {
 				t.Error("KeyEnter+Alt must match ToolExpand (#421)")
