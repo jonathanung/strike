@@ -12,7 +12,7 @@ then the remaining binds. Remap chords in config (`keybinds` object) — see
 |---|---|
 | `enter` | send prompt |
 | `shift+enter` | newline (`alt+enter` after enhanced CSI) |
-| `esc` | interrupt turn / reject permission / close modal |
+| `esc` | interrupt turn (cancels tools/LLM; shows “interrupted”) / reject permission / close modal |
 | `ctrl+c` | quit |
 | `ctrl+p` | command palette |
 | `f1` | keybind cheatsheet (`/keys`) |
