@@ -18,10 +18,10 @@ Registry: `keybindSlashPrimary` / `keybindNoSlashReason` in
 | Key | Action | Slash |
 |---|---|---|
 | `enter` | send prompt | — |
-| `shift+enter` | newline (`alt+enter` after enhanced CSI) | — |
+| `ctrl+j` / `shift+enter` | newline (`alt+enter` / `alt+j` after enhanced CSI; bare LF is also `ctrl+j`) | — |
 | `esc` | interrupt turn (cancels tools/LLM; shows “interrupted”) / reject permission / close modal | `/interrupt` |
 | `ctrl+c` | quit | `/exit`, `/quit` |
-| `ctrl+p` | command palette | `/palette` |
+| `ctrl+k` | command palette (when kill-to-end does not delete) | `/palette` |
 | `f1` | keybind cheatsheet | `/keys` |
 | `tab` | cycle agent personas (composer empty of `/` completion; not concurrent roots) | `/agent-next` |
 | `shift+tab` | cycle permission mode (default → plan → soft-approve → accept-edits → yolo) | `/mode-next` |
@@ -35,12 +35,12 @@ Registry: `keybindSlashPrimary` / `keybindNoSlashReason` in
 | `pgup` / `pgdn` | scroll transcript | `/scroll-up`, `/scroll-down` |
 | `ctrl+up` / `ctrl+down` | scroll transcript | `/scroll-up`, `/scroll-down` |
 | `ctrl+t` | jump to latest output | `/jump-bottom` |
-| `ctrl+h` / `ctrl+l` | focus left / right pane (horizontal split) | `/focus-left`, `/focus-right` |
-| `ctrl+j` / `ctrl+k` | cycle right-pane focus next / previous within the active stack group, then to the next group (bare LF / `KeyCtrlJ` is also `ctrl+j`, not newline) | `/window-next`, `/window-prev` |
+| `ctrl+h` / `ctrl+l` | focus left (primary transcript) / right (secondary pane column) — **orientation-independent** | `/focus-left`, `/focus-right` |
+| `ctrl+o` / `ctrl+p` | cycle right-pane focus next / previous within the active stack group, then to the next group | `/window-next`, `/window-prev` |
 | `ctrl+;` | toggle split orientation | `/layout`, `/split` |
 
-In a vertical split, focus and cycle chords swap: focus is `ctrl+j`/`ctrl+k`,
-cycle is `ctrl+h`/`ctrl+l`.
+Focus and cycle chords do **not** swap when the split is stacked top/bottom:
+left/right mean primary transcript vs secondary pane column in either layout.
 
 Right-pane **stack groups** (related panes shown together when space allows):
 
@@ -85,7 +85,7 @@ to a single pane and cycle the same order one at a time. See [usage.md](usage.md
 | `ctrl+w` | kill word backward |
 | `alt+b` / `alt+f` | word backward / forward |
 | `ctrl+u` | kill to line start |
-| `ctrl+k` | kill to line end (when it deletes; else pane cycle) |
+| `ctrl+k` | kill to line end (when it deletes; else command palette) |
 | `ctrl+y` | yank |
 | `↑` / `↓` | prompt history (when composer has no multiline cursor motion) |
 
