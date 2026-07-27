@@ -91,6 +91,13 @@ type Options struct {
 	// LookupContextWindow resolves context limits when the provider/model
 	// changes. nil skips catalog lookups.
 	LookupContextWindow func(provider, model string) int
+	// ListModels returns catalog model ids for a provider (same merge as the
+	// TUI /model picker: models.dev + providers.jsonc overlays). Used to
+	// validate task-tool model pins. nil skips validation (tests).
+	ListModels func(ctx context.Context, provider string) ([]string, error)
+	// LockModel prevents agent profiles from changing provider/model. Set
+	// when the task tool pins a model for a child session.
+	LockModel bool
 	// CompactionThreshold is the occupancy fraction (0–1) that triggers
 	// automatic compaction before a Stream. Zero defaults to 0.80; >=1
 	// disables threshold compaction.

@@ -468,6 +468,10 @@ func (e *Engine) applyAgent(name string) bool {
 	// Model-only "provider/id" pins promote the prefix to a provider pin.
 	// setProvider / resolveSelectModel strip matching prefixes (including
 	// doubles) so we never store openai/openai/... on the active model.
+	// Task-tool model pins set LockModel so agent defaults cannot override.
+	if e.opts.LockModel {
+		return true
+	}
 	agentProvider, agentModel := agent.Provider, agent.Model
 	if agentProvider == "" {
 		if prov, _, ok := splitProviderModel(agent.Model); ok {

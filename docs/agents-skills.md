@@ -47,6 +47,8 @@ files under any later discovery root):
 directly; the active agent shows in the status bar. The `task` tool’s optional
 `agent` field must match one of these names (or a user-defined agent) —
 unknown names fail with `unknown agent "…" (available: …)`.
+Optional `model` pins the child’s model (bare id on the current provider, or
+`provider/model`) against the same catalog as `/model`; omit to inherit.
 
 Each model request composes the system prompt in layers (like opencode):
 

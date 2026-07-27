@@ -47,6 +47,7 @@ func TestTaskSuccessfulSpawn(t *testing.T) {
 	res, err := NewTask().Execute(context.Background(), mustJSON(t, map[string]any{
 		"prompt": "investigate flaky test",
 		"agent":  "plan",
+		"model":  "gpt-test",
 	}), tc)
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +58,7 @@ func TestTaskSuccessfulSpawn(t *testing.T) {
 	if res.Title != "task abc12345" {
 		t.Errorf("title = %q, want task abc12345", res.Title)
 	}
-	if gotReq.Prompt != "investigate flaky test" || gotReq.Agent != "plan" {
+	if gotReq.Prompt != "investigate flaky test" || gotReq.Agent != "plan" || gotReq.Model != "gpt-test" {
 		t.Errorf("SpawnTask req = %#v", gotReq)
 	}
 }

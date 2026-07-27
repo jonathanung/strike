@@ -23,6 +23,8 @@ func (taskTool) Description() string {
   explore (read-only search), general (multi-step), commit (git commits only),
   reviewer (read-only review), tester (run make test/vet/build), debugger (root-cause),
   build (default coding), plan (read-only planning).
+- Optional model pins the child's model (bare id on the current provider, or provider/model).
+  Must be a catalog id for that provider (same list as /model). Omit to inherit the parent model.
 - Nested task depth is bounded by MaxChildDepth (default 1: children cannot nest).
 - Use task_status/task_read/task_message/task_interrupt with the session id for
   intermediate control — do not sleep-poll for completion.
@@ -34,7 +36,8 @@ func (taskTool) Schema() json.RawMessage {
 		"type": "object",
 		"properties": {
 			"prompt": {"type": "string", "description": "The subtask instructions for the child agent"},
-			"agent": {"type": "string", "description": "Optional agent persona: explore, general, commit, reviewer, tester, debugger, build, plan, or a user-defined name (default: current agent)"}
+			"agent": {"type": "string", "description": "Optional agent persona: explore, general, commit, reviewer, tester, debugger, build, plan, or a user-defined name (default: current agent)"},
+			"model": {"type": "string", "description": "Optional model id for the child (bare id on the current provider, or provider/model). Must be in the shared model catalog; omit to inherit the parent model"}
 		},
 		"required": ["prompt"]
 	}`)
@@ -43,6 +46,7 @@ func (taskTool) Schema() json.RawMessage {
 type taskArgs struct {
 	Prompt string `json:"prompt"`
 	Agent  string `json:"agent"`
+	Model  string `json:"model"`
 }
 
 func (taskTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
@@ -59,7 +63,7 @@ func (taskTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	if tc.SpawnTask == nil {
 		return Result{}, fmt.Errorf("task is not available")
 	}
-	res, err := tc.SpawnTask(ctx, TaskRequest{Prompt: a.Prompt, Agent: a.Agent})
+	res, err := tc.SpawnTask(ctx, TaskRequest{Prompt: a.Prompt, Agent: a.Agent, Model: a.Model})
 	if err != nil {
 		return Result{}, err
 	}

@@ -38,7 +38,7 @@ func New(store *auth.Store, hist *history.Store, mem *memory.Store, issues *issu
 	}
 	services := host.Services{
 		Auth:      authAdapter{store: store, customs: customs},
-		Catalog:   catalogAdapter{customs: customs},
+		Catalog:   NewCatalog(customs),
 		Settings:  settingsAdapter{},
 		Providers: providersAdapter{store: customs},
 		Agents:    agents,
@@ -278,6 +278,12 @@ func (a authAdapter) acceptsAPIKey(provider string) bool {
 		return true
 	}
 	return false
+}
+
+// NewCatalog builds the shared model catalog used by the TUI /model picker
+// and by engine task-tool model validation (models.dev + providers.jsonc).
+func NewCatalog(customs *config.CustomStore) host.Catalog {
+	return catalogAdapter{customs: customs}
 }
 
 // catalogAdapter adapts the models.dev catalog to host.Catalog, with custom

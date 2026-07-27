@@ -93,6 +93,13 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		return tool.TaskResult{}, fmt.Errorf("unknown agent %q (available: %s)", agentName, agentNamesList(e.opts.Agents))
 	}
 
+	// Resolve optional model pin (catalog + Select) before opening a session
+	// so invalid models / bad providers fail the tool with no child side effects.
+	modelPin, err := e.resolveTaskModelPin(ctx, req.Model)
+	if err != nil {
+		return tool.TaskResult{}, err
+	}
+
 	childID := rand.Text()
 	title := taskTitle(req.Prompt)
 	if e.opts.OpenChildSession != nil {
@@ -150,6 +157,8 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		StreamRetryBackoff:  e.opts.StreamRetryBackoff,
 		ContextWindow:       e.contextWindow(),
 		LookupContextWindow: e.opts.LookupContextWindow,
+		ListModels:          e.opts.ListModels,
+		LockModel:           modelPin.lock,
 		CompactionThreshold: e.opts.CompactionThreshold,
 		CompactionBuffer:    e.opts.CompactionBuffer,
 		KeepUserTurns:       e.opts.KeepUserTurns,
@@ -161,18 +170,11 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		PersistProjectRule:  e.opts.PersistProjectRule,
 	})
 
-	// Inherit the parent's live provider/model/priority. Clearing InitialProvider
-	// avoids Run's silent Select failure leaving the child with no model while
-	// the parent is healthy. Agent pins may still re-Select in handleSelectAgent
-	// (those errors are emitted as EngineError and will surface via failMsg).
-	if e.prov != nil {
-		child.prov = e.prov
-		child.provName = e.provName
-		child.model = e.model
-		child.priority = e.priority
-		child.opts.InitialProvider = ""
-		child.opts.InitialModel = ""
-	}
+	// Inherit the parent's live provider/model/priority, then optionally apply
+	// a task model pin. Clearing InitialProvider avoids Run's silent Select
+	// failure leaving the child with no model while the parent is healthy.
+	// Agent pins may still re-Select in handleSelectAgent unless LockModel.
+	e.applyChildProviderModel(child, modelPin)
 
 	// Child lifetime follows the parent engine, not the invoking turn.
 	parentLife := e.runCtx
@@ -1042,4 +1044,105 @@ func taskTitle(prompt string) string {
 		return s
 	}
 	return string(r[:max-1]) + "…"
+}
+
+// taskModelPin is a resolved optional model override for a child spawn.
+type taskModelPin struct {
+	lock     bool
+	provider string
+	model    string
+	prov     provider.Provider // non-nil when Select was required for a foreign provider
+}
+
+// resolveTaskModelPin parses an optional task model pin (bare id or
+// "provider/model"), validates it against the shared catalog when available,
+// and Select-s a foreign provider when needed. Empty pin means inherit.
+func (e *Engine) resolveTaskModelPin(ctx context.Context, pin string) (taskModelPin, error) {
+	pin = strings.TrimSpace(pin)
+	if pin == "" {
+		return taskModelPin{}, nil
+	}
+	var providerName, model string
+	if prov, bare, ok := splitProviderModel(pin); ok {
+		providerName, model = prov, bare
+	} else {
+		if strings.TrimSpace(e.provName) == "" {
+			return taskModelPin{}, fmt.Errorf("no provider selected; cannot resolve model %q", pin)
+		}
+		providerName, model = e.provName, pin
+	}
+	model = stripMatchingProviderPrefixes(providerName, model)
+	if model == "" {
+		return taskModelPin{}, fmt.Errorf("model is empty")
+	}
+	if err := e.validateCatalogModel(ctx, providerName, model); err != nil {
+		return taskModelPin{}, err
+	}
+	out := taskModelPin{lock: true, provider: providerName, model: model}
+	if providerName == e.provName && e.prov != nil {
+		return out, nil
+	}
+	if e.opts.Select == nil {
+		return taskModelPin{}, fmt.Errorf("cannot select provider %q for task model", providerName)
+	}
+	p, defaultModel, err := e.opts.Select(providerName)
+	if err != nil {
+		return taskModelPin{}, fmt.Errorf("task model provider %q: %w", providerName, err)
+	}
+	if p == nil {
+		return taskModelPin{}, fmt.Errorf("task model provider %q: no provider", providerName)
+	}
+	if out.model == "" {
+		out.model = defaultModel
+	}
+	out.prov = p
+	return out, nil
+}
+
+// validateCatalogModel checks model against ListModels (same catalog as the
+// UI /model picker). When the catalog is unavailable or empty, freeform ids
+// are allowed — matching the picker fallback. When the catalog returns ids,
+// unknown models are rejected.
+func (e *Engine) validateCatalogModel(ctx context.Context, providerName, model string) error {
+	if e.opts.ListModels == nil {
+		return nil
+	}
+	ids, err := e.opts.ListModels(ctx, providerName)
+	if err != nil || len(ids) == 0 {
+		return nil
+	}
+	for _, id := range ids {
+		if id == model {
+			return nil
+		}
+	}
+	return fmt.Errorf("unknown model %q for provider %q", model, providerName)
+}
+
+// applyChildProviderModel sets the child's live provider/model from either a
+// resolved task pin or parent inheritance.
+func (e *Engine) applyChildProviderModel(child *Engine, pin taskModelPin) {
+	if pin.lock {
+		if pin.prov != nil {
+			child.prov = pin.prov
+			child.provName = pin.provider
+			child.model = pin.model
+		} else {
+			child.prov = e.prov
+			child.provName = e.provName
+			child.model = pin.model
+		}
+		child.priority = e.priority
+		child.opts.InitialProvider = ""
+		child.opts.InitialModel = ""
+		return
+	}
+	if e.prov != nil {
+		child.prov = e.prov
+		child.provName = e.provName
+		child.model = e.model
+		child.priority = e.priority
+		child.opts.InitialProvider = ""
+		child.opts.InitialModel = ""
+	}
 }
