@@ -120,11 +120,12 @@ type Catalog interface {
 
 // Settings persists user-chosen defaults. Empty fields mean "leave as is".
 type Settings interface {
-	// SaveDefaults persists the chosen provider, model, agent, and reasoning
-	// effort; each empty string leaves the corresponding stored value
-	// unchanged. Effort is a plain string so this contract stays
-	// stdlib-only; an unrecognized level is rejected with an error.
-	SaveDefaults(provider, model, agent, effort string) error
+	// SaveDefaults persists the chosen provider, model, agent, reasoning
+	// effort, and permission mode; each empty string leaves the corresponding
+	// stored value unchanged. Effort and mode are plain strings so this
+	// contract stays stdlib-only; an unrecognized value is rejected with an
+	// error. mode is default|plan|soft-approve|accept-edits|yolo.
+	SaveDefaults(provider, model, agent, effort, mode string) error
 	// SaveTheme persists the preferred TUI theme id (JSON theme file stem).
 	// Empty id is rejected.
 	SaveTheme(id string) error

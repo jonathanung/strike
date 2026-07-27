@@ -3,22 +3,26 @@ package tui
 import (
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 	"github.com/jonathanung/strike-cli/internal/tui/ui"
 )
 
-// permissionModeModal is the centered tool-permission posture picker.
+// permissionModeModal is the centered tool-permission posture picker. Enter
+// switches the session mode; ctrl+d saves the highlighted mode as the global
+// default for new sessions (config permissionMode).
 type permissionModeModal struct {
-	current protocol.PermissionMode
-	modes   []protocol.PermissionMode
-	cursor  int
-	ops     chan<- protocol.Op
+	current  protocol.PermissionMode
+	modes    []protocol.PermissionMode
+	cursor   int
+	ops      chan<- protocol.Op
+	settings host.Settings
 }
 
-func newPermissionModeModal(current protocol.PermissionMode, ops chan<- protocol.Op) *permissionModeModal {
+func newPermissionModeModal(current protocol.PermissionMode, ops chan<- protocol.Op, settings host.Settings) *permissionModeModal {
 	modes := protocol.PermissionModes()
-	m := &permissionModeModal{current: current.Normalize(), modes: modes, ops: ops}
+	m := &permissionModeModal{current: current.Normalize(), modes: modes, ops: ops, settings: settings}
 	for i, mode := range modes {
 		if mode == m.current {
 			m.cursor = i
@@ -52,6 +56,12 @@ func (m *permissionModeModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 			ops <- protocol.SetPermissionMode{Mode: mode}
 			return nil
 		}
+	case "ctrl+d":
+		if m.cursor >= len(m.modes) {
+			return m, nil
+		}
+		mode := m.modes[m.cursor]
+		return m, saveDefaultsThroughCmd(m.settings, "", "", "", "", string(mode), "mode "+string(mode))
 	default:
 		return m, nil
 	}
@@ -75,7 +85,7 @@ func (m *permissionModeModal) view(width int, th theme.Theme) string {
 	})
 	return ui.Dialog(th, ui.DialogOpts{
 		Title: "Permission mode",
-		Hint:  dotJoin(th, "up/down/j/k move", "enter select", "esc close"),
+		Hint:  dotJoin(th, "up/down/j/k move", "enter select", "ctrl+d set default", "esc close"),
 		Width: width,
 	}, body)
 }

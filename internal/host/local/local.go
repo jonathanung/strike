@@ -323,12 +323,12 @@ func (c catalogAdapter) OutputLimit(ctx context.Context, provider, model string)
 // settingsAdapter adapts global config persistence to host.Settings.
 type settingsAdapter struct{}
 
-func (settingsAdapter) SaveDefaults(provider, model, agent, effort string) error {
+func (settingsAdapter) SaveDefaults(provider, model, agent, effort, mode string) error {
 	level, ok := protocol.ParseEffort(effort)
 	if !ok {
 		return fmt.Errorf("unknown effort %q", effort)
 	}
-	return config.SetGlobalDefaults(provider, model, agent, level)
+	return config.SetGlobalDefaults(provider, model, agent, level, mode)
 }
 
 func (settingsAdapter) SaveTheme(id string) error {

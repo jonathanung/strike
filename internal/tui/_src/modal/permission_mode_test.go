@@ -148,7 +148,7 @@ func TestPermissionModeCommandUnknown(t *testing.T) {
 
 func TestPermissionModeModalSelectSendsOp(t *testing.T) {
 	ops := make(chan protocol.Op, 1)
-	picker := newPermissionModeModal(protocol.PermissionModeDefault, ops)
+	picker := newPermissionModeModal(protocol.PermissionModeDefault, ops, &fakeSettings{})
 	picker.update(tea.KeyMsg{Type: tea.KeyDown}) // plan
 	picker.update(tea.KeyMsg{Type: tea.KeyDown}) // soft-approve
 	picker.update(tea.KeyMsg{Type: tea.KeyDown}) // accept-edits
@@ -160,5 +160,63 @@ func TestPermissionModeModalSelectSendsOp(t *testing.T) {
 	op := receiveAppOp(t, ops)
 	if op != (protocol.SetPermissionMode{Mode: protocol.PermissionModeAcceptEdits}) {
 		t.Fatalf("op = %#v, want accept-edits", op)
+	}
+}
+
+func TestPermissionModePickerCtrlDSavesOnlyTheModeDefault(t *testing.T) {
+	settings := &fakeSettings{}
+	picker := newPermissionModeModal(protocol.PermissionModeDefault, make(chan protocol.Op, 1), settings)
+	picker.update(tea.KeyMsg{Type: tea.KeyDown}) // plan
+	picker.update(tea.KeyMsg{Type: tea.KeyDown}) // soft-approve
+
+	next, cmd := picker.update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	if next == nil {
+		t.Error("ctrl+d closed the picker, want it to stay open")
+	}
+	runAppCmd(t, cmd)
+
+	if len(settings.saved) != 1 {
+		t.Fatalf("saved defaults = %d, want 1", len(settings.saved))
+	}
+	got := settings.saved[0]
+	want := savedDefaults{mode: "soft-approve"}
+	if got != want {
+		t.Errorf("saved = %#v, want %#v (provider/model/agent/effort untouched)", got, want)
+	}
+}
+
+func TestPermissionModePickerHintListsSetDefault(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	picker := newPermissionModeModal(protocol.PermissionModeYolo, make(chan protocol.Op, 1), &fakeSettings{})
+	out := ansi.Strip(picker.view(72, m.th))
+	if !strings.Contains(out, "ctrl+d set default") {
+		t.Errorf("picker hint missing ctrl+d set default:\n%s", out)
+	}
+}
+
+// TestSaveDefaultsIncludesTheActivePermissionMode: global ctrl+d persists
+// the whole current selection, permission mode included.
+func TestSaveDefaultsIncludesTheActivePermissionMode(t *testing.T) {
+	m, _ := newAppTestModel([]string{"build"}, nil)
+	settings := m.services.Settings.(*fakeSettings)
+	m.providerName, m.modelName, m.agentName = "anthropic", "claude-opus-5", "build"
+	m.effort = protocol.EffortMax
+	m.permMode = protocol.PermissionModeAcceptEdits
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	runAppCmd(t, cmd)
+
+	if len(settings.saved) != 1 {
+		t.Fatalf("ctrl+d saved %d defaults, want 1", len(settings.saved))
+	}
+	want := savedDefaults{
+		provider: "anthropic",
+		model:    "claude-opus-5",
+		agent:    "build",
+		effort:   "max",
+		mode:     "accept-edits",
+	}
+	if settings.saved[0] != want {
+		t.Errorf("saved = %#v, want %#v", settings.saved[0], want)
 	}
 }

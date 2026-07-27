@@ -34,9 +34,11 @@ config overrides global, and session "always" grants override both.
 
 **Permission mode dial:** `permissionMode` sets the default tool-permission
 posture for **new** sessions: `default` | `plan` | `soft-approve` |
-`accept-edits` | `yolo` (see [usage.md](usage.md)). Session changes via
-Shift+Tab or `/mode` persist in the session JSONL, not back into this file.
-Distinct from `/autonomy` (workflow exit gates).
+`accept-edits` | `yolo` (see [usage.md](usage.md)). Set it here, or via
+**ctrl+d** in the `/mode` picker / global save-defaults. Session changes via
+Shift+Tab or `/mode` persist in the session JSONL, not back into this file
+unless you save defaults. Resume uses the JSONL posture. Distinct from
+`/autonomy` (workflow exit gates). Invalid values fail config load.
 
 **Lean code:** `leanCode` is `off` | `lite` (default) | `full`. Injects
 agent-scoped efficiency guidance into the system prompt (strict ladder for

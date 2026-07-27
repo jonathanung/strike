@@ -16,7 +16,9 @@ import (
 // SetGlobalDefaults persists non-empty fields into ~/.strike/config,
 // creating it if needed. Fields passed as "" are left unchanged, and
 // unrelated config (permissions, systemPrompt) is preserved.
-func SetGlobalDefaults(provider, model, agent string, effort protocol.Effort) error {
+// mode is a permissionMode string (default|plan|soft-approve|accept-edits|yolo);
+// empty leaves the stored default unchanged.
+func SetGlobalDefaults(provider, model, agent string, effort protocol.Effort, mode string) error {
 	cfg, err := readGlobalForWrite()
 	if err != nil {
 		return err
@@ -36,6 +38,13 @@ func SetGlobalDefaults(provider, model, agent string, effort protocol.Effort) er
 			return fmt.Errorf("unknown effort %q", effort)
 		}
 		cfg.Effort = parsed
+	}
+	if mode != "" {
+		parsed, ok := protocol.ParsePermissionMode(mode)
+		if !ok {
+			return fmt.Errorf("unknown permission mode %q", mode)
+		}
+		cfg.PermissionMode = parsed
 	}
 	return writeGlobal(cfg)
 }
