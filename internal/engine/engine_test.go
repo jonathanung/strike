@@ -263,9 +263,10 @@ selected:
 	}
 }
 
-// TestRejectionFeedsBackToModel verifies a rejected permission becomes a
-// correctable tool-result error via the formal feedback path, not a turn abort.
-func TestRejectionFeedsBackToModel(t *testing.T) {
+// TestRejectionInterruptsTurn verifies a rejected permission settles as a
+// tool-result error then ends the turn (stopReason interrupted), rather than
+// feeding back for another model stream.
+func TestRejectionInterruptsTurn(t *testing.T) {
 	eng := engine.New(engine.Options{
 		Select:          selectEcho,
 		InitialProvider: "echo",
@@ -280,8 +281,12 @@ func TestRejectionFeedsBackToModel(t *testing.T) {
 	eng.Ops() <- protocol.UserInput{Text: "run rm -rf /"}
 
 	want := protocol.ToolFeedbackUserRejected("do not delete anything")
+	var (
+		sawToolEnd bool
+		stopReason string
+	)
 	deadline := time.After(10 * time.Second)
-	for {
+	for stopReason == "" {
 		select {
 		case <-deadline:
 			t.Fatal("timed out")
@@ -294,6 +299,7 @@ func TestRejectionFeedsBackToModel(t *testing.T) {
 					Message:   "do not delete anything",
 				}
 			case protocol.ToolCallEnd:
+				sawToolEnd = true
 				if !ev.IsError {
 					t.Error("rejected call should be an error result")
 				}
@@ -301,11 +307,17 @@ func TestRejectionFeedsBackToModel(t *testing.T) {
 					t.Errorf("ToolCallEnd output = %q, want %q", ev.Output, want)
 				}
 			case protocol.TurnCompleted:
-				return
+				stopReason = ev.StopReason
 			case protocol.EngineError:
 				t.Fatalf("engine error: %s", ev.Message)
 			}
 		}
+	}
+	if !sawToolEnd {
+		t.Error("missing ToolCallEnd for rejected permission")
+	}
+	if stopReason != "interrupted" {
+		t.Errorf("stop reason = %q, want interrupted", stopReason)
 	}
 }
 

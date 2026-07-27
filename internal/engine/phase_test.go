@@ -260,6 +260,86 @@ func TestExitPlanModeRoutesToOrchestrator(t *testing.T) {
 	}
 }
 
+// TestPlanRejectInterruptsTurn: declining the plan exit gate settles the tool
+// as an error and ends the turn with stopReason interrupted.
+func TestPlanRejectInterruptsTurn(t *testing.T) {
+	exitArgs, _ := json.Marshal(map[string]any{})
+	call := provider.ToolCall{ID: "ex-no", Name: "exit_plan_mode", Args: exitArgs}
+	// Single stream only — a follow-up stream would mean the turn continued.
+	prov := newScriptedProvider(toolCallStep(call))
+	eng := engine.New(engine.Options{
+		SessionID:       "phase-exit-reject",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(tool.NewExitPlanMode()),
+		Agents: []engine.Agent{
+			{Name: "build"},
+			{Name: "plan"},
+		},
+		InitialAgent: "plan",
+		Workflows:    []config.Workflow{config.BuiltinPlanImplement()},
+		Rules:        []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	waitForEvent(t, eng, func(ev protocol.Event) bool {
+		p, ok := ev.(protocol.PhaseChanged)
+		return ok && p.Phase == "plan"
+	})
+
+	eng.Ops() <- protocol.UserInput{Text: "exit plan"}
+	var (
+		sawToolEnd bool
+		toolOut    string
+		stopReason string
+		stillPlan  = true
+	)
+	deadline := time.After(10 * time.Second)
+	for stopReason == "" {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for interrupted turn after plan reject")
+		case ev := <-eng.Events():
+			switch e := ev.(type) {
+			case protocol.QuestionAsked:
+				eng.Ops() <- protocol.QuestionReply{RequestID: e.RequestID, Answers: []string{"No"}}
+			case protocol.PhaseChanged:
+				if e.Phase == "implement" {
+					stillPlan = false
+				}
+			case protocol.ToolCallEnd:
+				if e.CallID != "ex-no" {
+					continue
+				}
+				sawToolEnd = true
+				toolOut = e.Output
+				if !e.IsError {
+					t.Error("plan reject should be an error tool result")
+				}
+			case protocol.TurnCompleted:
+				stopReason = e.StopReason
+			case protocol.EngineError:
+				t.Fatalf("engine error: %s", e.Message)
+			}
+		}
+	}
+	if !sawToolEnd {
+		t.Error("missing ToolCallEnd for rejected plan exit")
+	}
+	if !stillPlan {
+		t.Error("phase advanced to implement after plan reject")
+	}
+	if !strings.Contains(strings.ToLower(toolOut), "declined") &&
+		!strings.Contains(strings.ToLower(toolOut), "rejected") {
+		t.Errorf("tool output = %q, want decline/reject feedback", toolOut)
+	}
+	if stopReason != "interrupted" {
+		t.Errorf("stop reason = %q, want interrupted", stopReason)
+	}
+}
+
 func TestSelectOrchestratorFromPlanJumpsImplement(t *testing.T) {
 	prov := newScriptedProvider(completedStep("ok"))
 	eng := engine.New(engine.Options{
