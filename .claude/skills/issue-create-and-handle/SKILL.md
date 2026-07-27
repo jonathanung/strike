@@ -28,6 +28,14 @@ Stop and ask if authentication, repository access, or the required GitHub permis
 
 2. **Draft**
    - State the observed or requested behavior, likely affected area, acceptance criteria, and test expectations.
+   - **Headers are required** on every new issue (orchestrator depends on them):
+     ```text
+     wave: 0
+     depends: none
+     blocks: none
+     conflicts: none
+     priority: bugs-first
+     ```
    - Use a concise draft with this body structure:
      ```text
      wave: 0
@@ -46,9 +54,14 @@ Stop and ask if authentication, repository access, or the required GitHub permis
      - ...
 
      ## Verification
+     - Tier: A | B | C
      - ...
      ```
-   - For a feature rather than a bug, use an appropriate `wave` and `priority: feature`. Set dependency or conflict headers only when supported by repository evidence.
+   - For a feature rather than a bug, use an appropriate `wave` and `priority: feature`.
+   - Set `depends` / `conflicts` / `blocks` from repository evidence:
+     - `conflicts` when the change likely touches the same hotspots as another open issue (keymap/defaults, `engine/turn.go`, tool registry/defer, shared protocol events) — list those issue numbers.
+     - `depends` when another issue must land first.
+   - Do not create feature issues with missing headers; refuse and re-draft.
 
 3. **Refine and approve**
    - Present the proposed title and complete issue body to the user.
@@ -83,3 +96,4 @@ Stop and ask if authentication, repository access, or the required GitHub permis
 5. Create exactly one issue per approved request unless the user explicitly approves splitting it.
 6. After successful creation and assignment, invoke `issue-handler` immediately. Do not wait for another user prompt.
 7. If issue creation or assignment fails, do not start implementation under an untracked or unassigned issue.
+8. Never create issues without `wave` / `depends` / `blocks` / `conflicts` / `priority` headers.
