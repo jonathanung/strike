@@ -99,6 +99,16 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 	if err != nil {
 		return tool.TaskResult{}, err
 	}
+	// Resolve optional effort pin before opening a session so a bad level
+	// fails the tool with no child side effects.
+	effortPin, err := resolveTaskEffortPin(req.Effort)
+	if err != nil {
+		return tool.TaskResult{}, err
+	}
+	childEffort := e.effort
+	if effortPin.lock {
+		childEffort = effortPin.level
+	}
 
 	childID := rand.Text()
 	title := briefAgentSessionTitle(agentName, childID)
@@ -153,7 +163,7 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		InitialAgent:        agentName,
 		InitialProvider:     e.provName,
 		InitialModel:        e.model,
-		InitialEffort:       e.effort,
+		InitialEffort:       childEffort,
 		InitialTitled:       title != "",
 		MaxTokens:           e.opts.MaxTokens,
 		MaxStreamAttempts:   e.opts.MaxStreamAttempts,
@@ -162,6 +172,7 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		LookupContextWindow: e.opts.LookupContextWindow,
 		ListModels:          e.opts.ListModels,
 		LockModel:           modelPin.lock,
+		LockEffort:          effortPin.lock,
 		CompactionThreshold: e.opts.CompactionThreshold,
 		CompactionBuffer:    e.opts.CompactionBuffer,
 		KeepUserTurns:       e.opts.KeepUserTurns,
@@ -1075,6 +1086,27 @@ type taskModelPin struct {
 	provider string
 	model    string
 	prov     provider.Provider // non-nil when Select was required for a foreign provider
+}
+
+// taskEffortPin is a resolved optional effort override for a child spawn.
+type taskEffortPin struct {
+	lock  bool
+	level protocol.Effort
+}
+
+// resolveTaskEffortPin parses an optional task effort pin. Empty means inherit
+// the parent dial (agent pins may still apply). A set level locks the dial so
+// the child agent profile cannot override it.
+func resolveTaskEffortPin(pin string) (taskEffortPin, error) {
+	pin = strings.TrimSpace(pin)
+	if pin == "" {
+		return taskEffortPin{}, nil
+	}
+	level, ok := protocol.ParseEffort(pin)
+	if !ok || level == protocol.EffortDefault {
+		return taskEffortPin{}, fmt.Errorf("unknown effort %q (want %s)", pin, effortNames())
+	}
+	return taskEffortPin{lock: true, level: level}, nil
 }
 
 // resolveTaskModelPin parses an optional task model pin (bare id or

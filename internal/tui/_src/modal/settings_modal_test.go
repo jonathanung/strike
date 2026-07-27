@@ -115,6 +115,37 @@ func TestSettingsModalSavePermissionMode(t *testing.T) {
 	}
 }
 
+func TestSettingsModalSaveEffort(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	fs := m.services.Settings.(*fakeSettings)
+	sm := newSettingsModal(m.services, m.ops, m.th, m.workDir)
+	sm.page = settingsPageDefaults
+	sm.cursor = int(settingsFieldEffort)
+	next, _ := sm.update(tea.KeyMsg{Type: tea.KeyEnter})
+	sm = next.(*settingsModal)
+	if sm.page != settingsPagePick {
+		t.Fatalf("page = %v, want pick", sm.page)
+	}
+	for i, opt := range sm.pickOptions {
+		if opt.value == "xhigh" {
+			sm.pickCursor = i
+			break
+		}
+	}
+	_, cmd := sm.update(tea.KeyMsg{Type: tea.KeyEnter})
+	msg := cmd().(settingsSavedMsg)
+	if msg.err != nil {
+		t.Fatal(msg.err)
+	}
+	if len(fs.saved) != 1 || fs.saved[0].effort != "xhigh" {
+		t.Fatalf("saved = %#v", fs.saved)
+	}
+	sm.afterSettingsSaved(msg)
+	if sm.defaults.Effort != "xhigh" {
+		t.Fatalf("defaults effort = %q", sm.defaults.Effort)
+	}
+}
+
 func TestSettingsModalSaveThemeApplies(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	fs := m.services.Settings.(*fakeSettings)

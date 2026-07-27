@@ -2432,3 +2432,236 @@ func TestTaskSpawnWithoutModelKeepsInherit(t *testing.T) {
 		t.Errorf("child model = %q, want inherited %q", childModel, parentModel)
 	}
 }
+
+// TestTaskSpawnWithEffort pins reasoning effort on the child Stream request.
+func TestTaskSpawnWithEffort(t *testing.T) {
+	const childPrompt = "child with effort pin"
+	taskCall := taskToolCallWith("task-effort", map[string]any{
+		"prompt": childPrompt,
+		"effort": "xhigh",
+	})
+	var childEffort provider.Effort
+	prov := newScriptedProvider(
+		toolCallStep(taskCall),
+		func() streamStep {
+			s := completedStep("child ok with effort")
+			s.match = func(req provider.Request) bool {
+				if !matchUserText(childPrompt)(req) {
+					return false
+				}
+				childEffort = req.Effort
+				return true
+			}
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("parent ok")
+			s.match = matchToolResult("task-effort")
+			return s
+		}(),
+		childCompletedNudgeStep("parent ack effort"),
+	)
+	eng := engine.New(engine.Options{
+		SessionID: "parent-effort-pin",
+		Select: func(string) (provider.Provider, string, error) {
+			return prov, "m", nil
+		},
+		InitialProvider: "scripted",
+		InitialEffort:   protocol.EffortLow,
+		Registry:        tool.NewRegistry(tool.NewTask()),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "spawn with effort"}
+	events := drainAndReply(t, eng, 10*time.Second)
+
+	if n := countEvents[protocol.ChildStarted](events); n != 1 {
+		t.Fatalf("ChildStarted = %d, want 1; events=%v", n, summarizeEvents(events))
+	}
+	for _, ev := range events {
+		if end, ok := ev.(protocol.ToolCallEnd); ok && end.CallID == "task-effort" && end.IsError {
+			t.Fatalf("task failed: %s", end.Output)
+		}
+	}
+	if childEffort != provider.EffortXHigh {
+		t.Errorf("child Stream effort = %q, want xhigh", childEffort)
+	}
+}
+
+// TestTaskSpawnInvalidEffort rejects unknown levels without starting a child.
+func TestTaskSpawnInvalidEffort(t *testing.T) {
+	taskCall := taskToolCallWith("task-bad-effort", map[string]any{
+		"prompt": "should not run",
+		"effort": "turbo",
+	})
+	prov := newScriptedProvider(
+		toolCallStep(taskCall),
+		func() streamStep {
+			s := completedStep("parent after deny")
+			s.match = matchToolResult("task-bad-effort")
+			return s
+		}(),
+	)
+	eng := engine.New(engine.Options{
+		SessionID: "parent-bad-effort",
+		Select: func(string) (provider.Provider, string, error) {
+			return prov, "m", nil
+		},
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(tool.NewTask()),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "spawn bad effort"}
+	events := drainAndReply(t, eng, 10*time.Second)
+
+	if n := countEvents[protocol.ChildStarted](events); n != 0 {
+		t.Fatalf("ChildStarted = %d, want 0; events=%v", n, summarizeEvents(events))
+	}
+	var taskEnd *protocol.ToolCallEnd
+	for _, ev := range events {
+		if end, ok := ev.(protocol.ToolCallEnd); ok && end.CallID == "task-bad-effort" {
+			e := end
+			taskEnd = &e
+		}
+	}
+	if taskEnd == nil {
+		t.Fatal("missing task ToolCallEnd")
+	}
+	if !taskEnd.IsError {
+		t.Fatalf("task IsError = false, want true; output=%q", taskEnd.Output)
+	}
+	if !strings.Contains(taskEnd.Output, "unknown effort") {
+		t.Errorf("task output = %q, want unknown effort", taskEnd.Output)
+	}
+}
+
+// TestTaskSpawnEffortWinsOverAgentPin: explicit task effort locks the dial so
+// an agent profile effort cannot override it (mirrors LockModel).
+func TestTaskSpawnEffortWinsOverAgentPin(t *testing.T) {
+	const childPrompt = "explore with pinned effort"
+	taskCall := taskToolCallWith("task-agent-effort", map[string]any{
+		"prompt": childPrompt,
+		"agent":  "deep",
+		"effort": "low",
+	})
+	var childEffort provider.Effort
+	prov := newScriptedProvider(
+		toolCallStep(taskCall),
+		func() streamStep {
+			s := completedStep("deep child done")
+			s.match = func(req provider.Request) bool {
+				if !matchUserText(childPrompt)(req) {
+					return false
+				}
+				childEffort = req.Effort
+				return true
+			}
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("parent ok")
+			s.match = matchToolResult("task-agent-effort")
+			return s
+		}(),
+		childCompletedNudgeStep("parent ack deep effort"),
+	)
+	eng := engine.New(engine.Options{
+		SessionID: "parent-agent-effort",
+		Select: func(string) (provider.Provider, string, error) {
+			return prov, "m", nil
+		},
+		InitialProvider: "scripted",
+		InitialEffort:   protocol.EffortMedium,
+		Agents: []engine.Agent{
+			{Name: "build", Description: "default"},
+			{Name: "deep", Description: "thinks hard", Effort: protocol.EffortMax},
+		},
+		InitialAgent: "build",
+		Registry:     tool.NewRegistry(tool.NewTask()),
+		WorkDir:      t.TempDir(),
+		Rules:        []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "spawn deep+effort"}
+	events := drainAndReply(t, eng, 10*time.Second)
+
+	for _, ev := range events {
+		if end, ok := ev.(protocol.ToolCallEnd); ok && end.CallID == "task-agent-effort" && end.IsError {
+			t.Fatalf("task failed: %s", end.Output)
+		}
+	}
+	if n := countEvents[protocol.ChildStarted](events); n != 1 {
+		t.Fatalf("ChildStarted = %d, want 1; events=%v", n, summarizeEvents(events))
+	}
+	if childEffort != provider.EffortLow {
+		t.Errorf("child Stream effort = %q, want low (task pin must win over agent max)", childEffort)
+	}
+	if childEffort == provider.EffortMax {
+		t.Error("child used agent effort pin; LockEffort should have blocked it")
+	}
+}
+
+// TestTaskSpawnWithoutEffortInheritsParent keeps parent dial when effort omitted.
+func TestTaskSpawnWithoutEffortInheritsParent(t *testing.T) {
+	const childPrompt = "inherit effort child"
+	taskCall := taskToolCallWith("task-inherit-effort", map[string]any{
+		"prompt": childPrompt,
+	})
+	var childEffort provider.Effort
+	prov := newScriptedProvider(
+		toolCallStep(taskCall),
+		func() streamStep {
+			s := completedStep("child inherit effort ok")
+			s.match = func(req provider.Request) bool {
+				if !matchUserText(childPrompt)(req) {
+					return false
+				}
+				childEffort = req.Effort
+				return true
+			}
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("parent ok")
+			s.match = matchToolResult("task-inherit-effort")
+			return s
+		}(),
+		childCompletedNudgeStep("ack inherit effort"),
+	)
+	eng := engine.New(engine.Options{
+		SessionID: "parent-inherit-effort",
+		Select: func(string) (provider.Provider, string, error) {
+			return prov, "m", nil
+		},
+		InitialProvider: "scripted",
+		InitialEffort:   protocol.EffortHigh,
+		Registry:        tool.NewRegistry(tool.NewTask()),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "spawn inherit effort"}
+	events := drainAndReply(t, eng, 10*time.Second)
+
+	if n := countEvents[protocol.ChildStarted](events); n != 1 {
+		t.Fatalf("ChildStarted = %d, want 1", n)
+	}
+	if childEffort != provider.EffortHigh {
+		t.Errorf("child effort = %q, want inherited high", childEffort)
+	}
+}

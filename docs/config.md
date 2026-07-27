@@ -108,8 +108,8 @@ provider + model; in the effort picker it saves the highlighted level; in
 the theme picker it saves the highlighted theme id.
 
 **/settings Defaults**: interactive editor for theme, vimMode, nanoMode,
-mdReadMode, and permissionMode (plus a read-only view of provider/model/
-agent/effort). Changes write `~/.strike/config` and apply theme/editor
+mdReadMode, permissionMode, and effort (plus a read-only view of
+provider/model/agent). Changes write `~/.strike/config` and apply theme/editor
 presentation to the current session immediately.
 
 ## Theme
@@ -539,10 +539,14 @@ summary path never re-runs tools.
 ## Reasoning effort
 
 `/effort` sets how much internal reasoning the model spends before answering.
-The ladder is normalized across vendors and each adapter maps it to its own
-wire fields — Anthropic to adaptive thinking plus `output_config.effort`, the
-OpenAI family to a `reasoning_effort` string. With no level set, strike sends
-no reasoning fields at all and each provider's own default applies.
+The active level shows on the top status bar once set. Persist a default with
+`ctrl+d` in the effort picker, `/settings` → Defaults → Effort, config
+`"effort"`, or `--effort`. The ladder is normalized across vendors and each
+adapter maps it to its own wire fields — Anthropic to adaptive thinking plus
+`output_config.effort`, the OpenAI family to a `reasoning_effort` string. With
+no level set, strike sends no reasoning fields at all and each provider's own
+default applies. The `task` tool accepts optional `effort` so a parent can pin
+a child dial independently of the UI default.
 
 The two ends of the ladder are requests, not guarantees, because the vendor
 ladders differ in length: `off` disables thinking outright on Anthropic but
