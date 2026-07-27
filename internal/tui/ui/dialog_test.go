@@ -87,6 +87,35 @@ func TestDialogHintWrapsWhenLongerThanWidth(t *testing.T) {
 	}
 }
 
+func TestDialogWrapsLongBodyText(t *testing.T) {
+	const width = 32
+	body := "Which of the following is the best description of the primary purpose of a unit test?"
+	out := Dialog(theme.Default(), DialogOpts{
+		Title: "question",
+		Hint:  "enter select",
+		Width: width,
+	}, body)
+	// Solid focus chrome puts Icons.FocusBar in the pad column; drop it before
+	// joining so wrapped words reassemble across lines.
+	plain := strings.ReplaceAll(ansi.Strip(out), theme.Default().Resolve().Icons.FocusBar, "")
+	compact := strings.Join(strings.Fields(plain), " ")
+	if !strings.Contains(compact, "primary purpose of a unit test") {
+		t.Fatalf("dialog dropped wrapped body:\n%s\ncompact=%q", ansi.Strip(out), compact)
+	}
+	if strings.Contains(plain, "unit test…") || strings.Contains(plain, "unit test...") {
+		t.Fatalf("body should wrap, not ellipsis mid-sentence:\n%s", plain)
+	}
+	// More than title + single body + hint.
+	if strings.Count(out, "\n") < 4 {
+		t.Fatalf("expected multi-line wrapped body, got:\n%s", plain)
+	}
+	for i, line := range strings.Split(out, "\n") {
+		if w := lipgloss.Width(line); w > width {
+			t.Errorf("line %d width %d > %d: %q", i, w, width, line)
+		}
+	}
+}
+
 func TestDialogPlacesHintUsingThemeSpacing(t *testing.T) {
 	for _, tt := range []struct {
 		name         string

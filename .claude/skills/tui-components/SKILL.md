@@ -37,11 +37,11 @@ selection, and layout). Keep this catalog synchronized with `internal/tui/ui`.
 |---|---|---|
 | Panel | `Panel(th theme.Theme, opts PanelOpts, body string) string` | Width-safe framed tile. `PanelOpts` has `Title`, `Footer`, mandatory `Width`, optional `Height`, `Focused`, `Dim`, `Tone`, and `Borderless`. Default chrome is **solid**. Focused solid panes: body stays `Surface`, title edge uses `SurfaceFocus`, leading `BorderFocus` bar in the left pad column — never a full-panel wash. `TextSelection` is a separate role. Tone dialogs keep elevated `SurfaceFocus` body. `chrome: bordered` uses box-drawing + `BorderFocus`. `Borderless` omits chrome. |
 | Panel geometry | `InnerWidth(width int) int`; `PanelInnerWidth(th theme.Theme, width int) int`; `PanelInnerHeight(width, height int) int`; `PanelContentOrigin(th theme.Theme, width int) (x, y int)` | Body dimensions and content-cell origin under chrome. Themed callers must use `PanelInnerWidth`; `InnerWidth` is default-theme compatibility only. `PanelInnerHeight` clamps nonpositive dimensions and removes two rows only when chrome fits; narrow panels and fixed heights below two retain full height. |
-| Dialog | `Dialog(th theme.Theme, opts DialogOpts, body string) string` | Focused Panel with a muted final hint. `DialogOpts`: `Title`, `Hint`, `Width`, `Height`, `Tone`. |
+| Dialog | `Dialog(th theme.Theme, opts DialogOpts, body string) string` | Focused Panel with a muted final hint. `DialogOpts`: `Title`, `Hint`, `Width`, `Height`, `Tone`. Body lines longer than inner width are word-wrapped (idempotent if already wrapped). |
 | Badge | `Badge(th theme.Theme, tone Tone, text string) string` | Token-sized bracketed status chip. |
 | KeyHints | `KeyHints(th theme.Theme, width int, hints []KeyHint) string` | Width-safe footer hints. `KeyHint` has `Key`, `Label`. |
 | StatusBar | `StatusBar(th theme.Theme, width int, left, right string) string` | One exactly-width row with left/right content. |
-| List | `List(th theme.Theme, opts ListOpts) string` | Unframed picker body. `ListOpts`: `Items []ListItem`, `Cursor`, `Width`, `Visible`, `ShowFilter`, `Filter`, `Total`, `Empty`; `ListItem`: `Label`, `Detail`, `Current`, `Disabled`. |
+| List | `List(th theme.Theme, opts ListOpts) string` | Unframed picker body. `ListOpts`: `Items []ListItem`, `Cursor`, `Width`, `Visible`, `Wrap` (word-wrap labels/details instead of ellipsis; use for question options), `ShowFilter`, `Filter`, `Total`, `Empty`; `ListItem`: `Label`, `Detail`, `Current`, `Disabled`. |
 | Tree | `Tree(th theme.Theme, opts TreeOpts) string` | Unframed expand/collapse tree body. `TreeOpts`: `Nodes []TreeNode`, `Cursor`, `Width`, `Visible`, `Empty`; `TreeNode`: `ID`, `Label`, `Detail`, `Children`, `Expanded`, `Lazy`, `Leaf`, `Disabled`, `Current`, `Tone`. Helpers: `FlattenTree`, `TreeNodeAt`, `TreeToggleExpanded`. Indent uses `Spacing.SM`; expand glyphs are `Icons.TreeExpanded` / `TreeCollapsed`. |
 | Notice | `Notice(th theme.Theme, level Level, text string, width int) string` | One-line, level-colored feedback. |
 | Bento | `Bento(th theme.Theme, width int, cards []Card) string` | Card packer. `Card` has `Title`, `Footer`, `Body`, `Width`, `Tone`; its body wraps to `PanelInnerWidth(th, Width)`. Bento derives its inter-card gap from resolved `th.Spacing.SM`. |
@@ -53,11 +53,12 @@ selection, and layout). Keep this catalog synchronized with `internal/tui/ui`.
 | Sparkline | `Sparkline(th theme.Theme, width int, samples []float64) string` | Fixed-width activity chart from non-negative samples. Empty/unknown series draws hollow MeterEmpty row; glyphs from `Icons.Sparkline`. |
 | FormatTokens | `FormatTokens(n int) string` | Compact token count for chrome (`1.5k`, `2M`). |
 
-Panel and Dialog truncate long body lines; pre-wrap them to
-`ui.PanelInnerWidth(th, width)`. `Card` is the exception: it wraps its own
-body. Size panel-backed child windows with `ui.PanelInnerHeight(width, height)`
-rather than unconditionally subtracting border rows, so unbordered narrow
-panels retain their full height.
+Dialog word-wraps body lines to `PanelInnerWidth`; Panel still truncates any
+over-long line as a safety net. Prefer pre-wrapping free text for clarity.
+`List` truncates by default; set `Wrap: true` for multi-line option bodies
+(question modal). `Card` wraps its own body. Size panel-backed child windows
+with `ui.PanelInnerHeight(width, height)` rather than unconditionally
+subtracting border rows, so unbordered narrow panels retain their full height.
 
 ## Theme tokens
 

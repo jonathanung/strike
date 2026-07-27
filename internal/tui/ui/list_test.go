@@ -202,3 +202,76 @@ func TestListRendersSuffixWithoutRecoloring(t *testing.T) {
 		t.Fatalf("suffix not preserved: %q", out)
 	}
 }
+
+func TestListWrapShowsFullLongLabel(t *testing.T) {
+	const width = 36
+	label := "To verify that the entire system works correctly from end to end"
+	out := List(theme.Default(), ListOpts{
+		Items:  []ListItem{{Label: "1) " + label}},
+		Cursor: 0,
+		Width:  width,
+		Wrap:   true,
+	})
+	plain := ansi.Strip(out)
+	// Full phrase must appear across wrapped lines (no ellipsis clip).
+	compact := strings.Join(strings.Fields(plain), " ")
+	if !strings.Contains(compact, label) {
+		t.Fatalf("wrapped list dropped label text:\n%s", plain)
+	}
+	if strings.Contains(plain, "…") || strings.Contains(plain, "...") {
+		t.Fatalf("wrap mode should not ellipsis-truncate:\n%s", plain)
+	}
+	if strings.Count(plain, "\n") < 1 {
+		t.Fatalf("expected multi-line wrap, got single line:\n%s", plain)
+	}
+	for i, line := range strings.Split(out, "\n") {
+		if w := lipgloss.Width(line); w > width {
+			t.Errorf("line %d width %d > %d: %q", i, w, width, line)
+		}
+	}
+}
+
+func TestListWrapDetailAndWidthSafety(t *testing.T) {
+	const width = 28
+	out := List(theme.Default(), ListOpts{
+		Items: []ListItem{{
+			Label:  "1) Short label",
+			Detail: "a longer description that must wrap under the option",
+		}},
+		Cursor: 0,
+		Width:  width,
+		Wrap:   true,
+	})
+	plain := ansi.Strip(out)
+	if !strings.Contains(plain, "Short label") {
+		t.Fatalf("missing label:\n%s", plain)
+	}
+	if !strings.Contains(plain, "longer description") {
+		t.Fatalf("missing detail:\n%s", plain)
+	}
+	for i, line := range strings.Split(out, "\n") {
+		if w := lipgloss.Width(line); w > width {
+			t.Errorf("line %d width %d > %d: %q", i, w, width, line)
+		}
+	}
+}
+
+func TestListWrapFalseStillTruncates(t *testing.T) {
+	const width = 24
+	label := strings.Repeat("word ", 20)
+	out := List(theme.Default(), ListOpts{
+		Items: []ListItem{{Label: label}},
+		Width: width,
+		Wrap:  false,
+	})
+	plain := ansi.Strip(out)
+	if strings.Count(plain, "\n") != 0 {
+		t.Fatalf("non-wrap list should stay one line:\n%s", plain)
+	}
+	if !strings.Contains(plain, "…") && !strings.Contains(plain, "...") {
+		t.Fatalf("expected ellipsis truncation:\n%s", plain)
+	}
+	if w := lipgloss.Width(out); w > width {
+		t.Errorf("width %d > %d", w, width)
+	}
+}
