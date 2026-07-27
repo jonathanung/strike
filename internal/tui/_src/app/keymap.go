@@ -280,6 +280,9 @@ type keybindEntry struct {
 	Category string
 	Keys     string
 	Action   string
+	// Slash is the primary slash command that mirrors this keybind action
+	// (e.g. "/focus-left"), or empty when the bind is an intentional exception.
+	Slash string
 	// Context marks rows promoted into the "Current focus" section for the
 	// pane/window that was focused when the cheatsheet opened.
 	Context bool
@@ -373,11 +376,15 @@ func orderKeybindEntries(entries []keybindEntry, ctx keysModalContext) []keybind
 
 // keybindCatalog is the single source of truth for cheatsheet rows. App-level
 // bindings are taken from keyMap help text; modal/list conventions are listed
-// explicitly so the sheet stays complete without live modal state.
+// explicitly so the sheet stays complete without live modal state. Slash
+// cross-refs come from keybindSlashPrimary (see keybind_slash.go).
 func keybindCatalog(keys keyMap) []keybindEntry {
 	from := func(id, category string, b key.Binding) keybindEntry {
 		help := b.Help()
-		return keybindEntry{ID: id, Category: category, Keys: help.Key, Action: help.Desc}
+		return keybindEntry{
+			ID: id, Category: category, Keys: help.Key, Action: help.Desc,
+			Slash: slashForKeybindID(id),
+		}
 	}
 	entries := []keybindEntry{
 		from("nav.focus-left", "Navigation", keys.FocusLeft),
@@ -437,18 +444,18 @@ func keybindCatalog(keys keyMap) []keybindEntry {
 		from("agents.rename", "Agents", ak.Rename),
 		from("agents.hide", "Agents", ak.Hide),
 		from("agents.filter", "Agents", ak.Filter),
-		keybindEntry{ID: "lists.move", Category: "Lists", Keys: "up/down/ctrl+p/ctrl+n", Action: "move selection"},
-		keybindEntry{ID: "lists.move-jk", Category: "Lists", Keys: "j/k", Action: "move (pickers without filter)"},
-		keybindEntry{ID: "lists.select", Category: "Lists", Keys: "enter", Action: "confirm selection"},
-		keybindEntry{ID: "lists.filter", Category: "Lists", Keys: "type", Action: "filter (when available)"},
-		keybindEntry{ID: "lists.logout", Category: "Lists", Keys: "ctrl+x", Action: "log out provider (confirm y/n)"},
-		keybindEntry{ID: "lists.close", Category: "Lists", Keys: "esc", Action: "close"},
-		keybindEntry{ID: "lists.default", Category: "Lists", Keys: "ctrl+d", Action: "save highlighted default"},
-		keybindEntry{ID: "perm.choice", Category: "Permission", Keys: "left/right/h/l/tab", Action: "move choice"},
-		keybindEntry{ID: "perm.once", Category: "Permission", Keys: "1/y", Action: "allow once"},
-		keybindEntry{ID: "perm.session", Category: "Permission", Keys: "2/s", Action: "allow session"},
-		keybindEntry{ID: "perm.project", Category: "Permission", Keys: "3/p", Action: "allow project"},
-		keybindEntry{ID: "perm.reject", Category: "Permission", Keys: "4/n/esc", Action: "reject"},
+		keybindEntry{ID: "lists.move", Category: "Lists", Keys: "up/down/ctrl+p/ctrl+n", Action: "move selection", Slash: slashForKeybindID("lists.move")},
+		keybindEntry{ID: "lists.move-jk", Category: "Lists", Keys: "j/k", Action: "move (pickers without filter)", Slash: slashForKeybindID("lists.move-jk")},
+		keybindEntry{ID: "lists.select", Category: "Lists", Keys: "enter", Action: "confirm selection", Slash: slashForKeybindID("lists.select")},
+		keybindEntry{ID: "lists.filter", Category: "Lists", Keys: "type", Action: "filter (when available)", Slash: slashForKeybindID("lists.filter")},
+		keybindEntry{ID: "lists.logout", Category: "Lists", Keys: "ctrl+x", Action: "log out provider (confirm y/n)", Slash: slashForKeybindID("lists.logout")},
+		keybindEntry{ID: "lists.close", Category: "Lists", Keys: "esc", Action: "close", Slash: slashForKeybindID("lists.close")},
+		keybindEntry{ID: "lists.default", Category: "Lists", Keys: "ctrl+d", Action: "save highlighted default", Slash: slashForKeybindID("lists.default")},
+		keybindEntry{ID: "perm.choice", Category: "Permission", Keys: "left/right/h/l/tab", Action: "move choice", Slash: slashForKeybindID("perm.choice")},
+		keybindEntry{ID: "perm.once", Category: "Permission", Keys: "1/y", Action: "allow once", Slash: slashForKeybindID("perm.once")},
+		keybindEntry{ID: "perm.session", Category: "Permission", Keys: "2/s", Action: "allow session", Slash: slashForKeybindID("perm.session")},
+		keybindEntry{ID: "perm.project", Category: "Permission", Keys: "3/p", Action: "allow project", Slash: slashForKeybindID("perm.project")},
+		keybindEntry{ID: "perm.reject", Category: "Permission", Keys: "4/n/esc", Action: "reject", Slash: slashForKeybindID("perm.reject")},
 	)
 	return entries
 }
