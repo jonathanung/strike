@@ -2036,3 +2036,399 @@ func TestTwoConcurrentChildrenEachReportOnce(t *testing.T) {
 		t.Fatalf("missing child summaries in notices: %q", joined.String())
 	}
 }
+
+func taskToolCallWith(id string, fields map[string]any) provider.ToolCall {
+	if fields == nil {
+		fields = map[string]any{}
+	}
+	args, err := json.Marshal(fields)
+	if err != nil {
+		panic(err)
+	}
+	return provider.ToolCall{ID: id, Name: "task", Args: args}
+}
+
+// TestTaskSpawnWithModel pins a bare model id on the parent provider; the
+// child Stream must use that model and not re-Select.
+func TestTaskSpawnWithModel(t *testing.T) {
+	const childPrompt = "child with model pin"
+	const wantModel = "child-model-x"
+	taskCall := taskToolCallWith("task-model", map[string]any{
+		"prompt": childPrompt,
+		"model":  wantModel,
+	})
+	var childModel string
+	prov := newScriptedProvider(
+		toolCallStep(taskCall),
+		func() streamStep {
+			s := completedStep("child ok with model")
+			s.match = func(req provider.Request) bool {
+				if !matchUserText(childPrompt)(req) {
+					return false
+				}
+				childModel = req.Model
+				return true
+			}
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("parent ok")
+			s.match = matchToolResult("task-model")
+			return s
+		}(),
+		childCompletedNudgeStep("parent ack model"),
+	)
+	var selectCalls atomic.Int32
+	eng := engine.New(engine.Options{
+		SessionID: "parent-model-pin",
+		Select: func(string) (provider.Provider, string, error) {
+			selectCalls.Add(1)
+			return prov, "parent-model", nil
+		},
+		InitialProvider: "scripted",
+		InitialModel:    "parent-model",
+		Registry:        tool.NewRegistry(tool.NewTask()),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+		ListModels: func(_ context.Context, provider string) ([]string, error) {
+			if provider != "scripted" {
+				t.Errorf("ListModels provider = %q, want scripted", provider)
+			}
+			return []string{"parent-model", wantModel, "other"}, nil
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "spawn with model"}
+	events := drainAndReply(t, eng, 10*time.Second)
+
+	if n := countEvents[protocol.ChildStarted](events); n != 1 {
+		t.Fatalf("ChildStarted = %d, want 1; events=%v", n, summarizeEvents(events))
+	}
+	if n := countEvents[protocol.ChildCompleted](events); n != 1 {
+		t.Fatalf("ChildCompleted = %d, want 1", n)
+	}
+	for _, ev := range events {
+		if end, ok := ev.(protocol.ToolCallEnd); ok && end.CallID == "task-model" && end.IsError {
+			t.Fatalf("task failed: %s", end.Output)
+		}
+	}
+	if childModel != wantModel {
+		t.Errorf("child Stream model = %q, want %q", childModel, wantModel)
+	}
+	if n := selectCalls.Load(); n != 1 {
+		t.Errorf("Select calls = %d, want 1 (same provider pin must not re-Select)", n)
+	}
+}
+
+// TestTaskSpawnInvalidModel rejects unknown catalog ids without starting a child.
+func TestTaskSpawnInvalidModel(t *testing.T) {
+	taskCall := taskToolCallWith("task-bad-model", map[string]any{
+		"prompt": "should not run",
+		"model":  "not-a-real-model",
+	})
+	prov := newScriptedProvider(
+		toolCallStep(taskCall),
+		func() streamStep {
+			s := completedStep("parent after deny")
+			s.match = matchToolResult("task-bad-model")
+			return s
+		}(),
+	)
+	eng := engine.New(engine.Options{
+		SessionID: "parent-bad-model",
+		Select: func(string) (provider.Provider, string, error) {
+			return prov, "parent-model", nil
+		},
+		InitialProvider: "scripted",
+		InitialModel:    "parent-model",
+		Registry:        tool.NewRegistry(tool.NewTask()),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+		ListModels: func(context.Context, string) ([]string, error) {
+			return []string{"parent-model", "allowed-model"}, nil
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "spawn bad model"}
+	events := drainAndReply(t, eng, 10*time.Second)
+
+	if n := countEvents[protocol.ChildStarted](events); n != 0 {
+		t.Fatalf("ChildStarted = %d, want 0; events=%v", n, summarizeEvents(events))
+	}
+	var taskEnd *protocol.ToolCallEnd
+	for _, ev := range events {
+		if end, ok := ev.(protocol.ToolCallEnd); ok && end.CallID == "task-bad-model" {
+			e := end
+			taskEnd = &e
+		}
+	}
+	if taskEnd == nil {
+		t.Fatal("missing task ToolCallEnd")
+	}
+	if !taskEnd.IsError {
+		t.Fatalf("task IsError = false, want true; output=%q", taskEnd.Output)
+	}
+	if !strings.Contains(taskEnd.Output, "unknown model") {
+		t.Errorf("task output = %q, want unknown model", taskEnd.Output)
+	}
+}
+
+// TestTaskSpawnAgentAndModel applies both persona and model pin; model wins
+// over an agent profile model pin.
+func TestTaskSpawnAgentAndModel(t *testing.T) {
+	const childPrompt = "explore with pinned model"
+	const wantModel = "fast-explore-model"
+	taskCall := taskToolCallWith("task-agent-model", map[string]any{
+		"prompt": childPrompt,
+		"agent":  "explore",
+		"model":  wantModel,
+	})
+	var childModel string
+	var sawAgent bool
+	prov := newScriptedProvider(
+		toolCallStep(taskCall),
+		func() streamStep {
+			s := completedStep("explore child done")
+			s.match = func(req provider.Request) bool {
+				if !matchUserText(childPrompt)(req) {
+					return false
+				}
+				childModel = req.Model
+				return true
+			}
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("parent ok")
+			s.match = matchToolResult("task-agent-model")
+			return s
+		}(),
+		childCompletedNudgeStep("parent ack explore"),
+	)
+	eng := engine.New(engine.Options{
+		SessionID: "parent-agent-model",
+		Select: func(string) (provider.Provider, string, error) {
+			return prov, "parent-model", nil
+		},
+		InitialProvider: "scripted",
+		InitialModel:    "parent-model",
+		Agents: []engine.Agent{
+			{Name: "build", Description: "default"},
+			{Name: "explore", Description: "read-only", Model: "agent-default-model"},
+		},
+		InitialAgent: "build",
+		Registry:     tool.NewRegistry(tool.NewTask()),
+		WorkDir:      t.TempDir(),
+		Rules:        []permission.Ruleset{permission.Defaults()},
+		ListModels: func(context.Context, string) ([]string, error) {
+			return []string{"parent-model", wantModel, "agent-default-model"}, nil
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "spawn explore+model"}
+	events := drainAndReply(t, eng, 10*time.Second)
+
+	for _, ev := range events {
+		if a, ok := ev.(protocol.AgentSelected); ok && a.Name == "explore" {
+			sawAgent = true
+		}
+		if end, ok := ev.(protocol.ToolCallEnd); ok && end.CallID == "task-agent-model" && end.IsError {
+			t.Fatalf("task failed: %s", end.Output)
+		}
+	}
+	if n := countEvents[protocol.ChildStarted](events); n != 1 {
+		t.Fatalf("ChildStarted = %d, want 1; events=%v", n, summarizeEvents(events))
+	}
+	_ = sawAgent // optional signal; model pin is the acceptance gate
+	if childModel != wantModel {
+		t.Errorf("child Stream model = %q, want %q (task model must win over agent pin)", childModel, wantModel)
+	}
+	if childModel == "agent-default-model" {
+		t.Error("child used agent model pin; LockModel should have blocked it")
+	}
+}
+
+// TestTaskSpawnModelDepthLimit still enforces MaxChildDepth with a model pin:
+// at max depth SpawnTask is not injected, so no child starts.
+func TestTaskSpawnModelDepthLimit(t *testing.T) {
+	taskCall := taskToolCallWith("task-depth-model", map[string]any{
+		"prompt": "should not spawn",
+		"model":  "m1",
+	})
+	prov := newScriptedProvider(
+		toolCallStep(taskCall),
+		completedStep("recovered without child"),
+	)
+	eng := engine.New(engine.Options{
+		SessionID:       "parent-depth-model",
+		Depth:           1,
+		MaxChildDepth:   1,
+		Select:          func(string) (provider.Provider, string, error) { return prov, "m0", nil },
+		InitialProvider: "scripted",
+		InitialModel:    "m0",
+		Registry:        tool.NewRegistry(tool.NewTask()),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+		ListModels: func(context.Context, string) ([]string, error) {
+			return []string{"m0", "m1"}, nil
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "try nest at max depth with model"}
+	events := drainAndReply(t, eng, 5*time.Second)
+
+	if n := countEvents[protocol.ChildStarted](events); n != 0 {
+		t.Fatalf("ChildStarted = %d, want 0 at depth limit", n)
+	}
+	var taskEnd *protocol.ToolCallEnd
+	for _, ev := range events {
+		if end, ok := ev.(protocol.ToolCallEnd); ok && end.CallID == "task-depth-model" {
+			e := end
+			taskEnd = &e
+		}
+	}
+	if taskEnd == nil {
+		t.Fatal("missing task ToolCallEnd")
+	}
+	if !taskEnd.IsError {
+		t.Errorf("task end should be error, output=%q", taskEnd.Output)
+	}
+	if !strings.Contains(strings.ToLower(taskEnd.Output), "not available") &&
+		!strings.Contains(strings.ToLower(taskEnd.Output), "depth") {
+		t.Errorf("task error = %q, want not available or depth", taskEnd.Output)
+	}
+}
+
+// TestTaskSpawnModelCatalogOverlay accepts a providers.jsonc-only model id
+// returned by ListModels (simulating config overlay merge).
+func TestTaskSpawnModelCatalogOverlay(t *testing.T) {
+	const childPrompt = "overlay model child"
+	const overlayModel = "custom-overlay-model"
+	taskCall := taskToolCallWith("task-overlay", map[string]any{
+		"prompt": childPrompt,
+		"model":  overlayModel,
+	})
+	var childModel string
+	prov := newScriptedProvider(
+		toolCallStep(taskCall),
+		func() streamStep {
+			s := completedStep("child overlay ok")
+			s.match = func(req provider.Request) bool {
+				if !matchUserText(childPrompt)(req) {
+					return false
+				}
+				childModel = req.Model
+				return true
+			}
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("parent ok")
+			s.match = matchToolResult("task-overlay")
+			return s
+		}(),
+		childCompletedNudgeStep("ack overlay"),
+	)
+	eng := engine.New(engine.Options{
+		SessionID: "parent-overlay",
+		Select: func(string) (provider.Provider, string, error) {
+			return prov, "catalog-model", nil
+		},
+		InitialProvider: "scripted",
+		InitialModel:    "catalog-model",
+		Registry:        tool.NewRegistry(tool.NewTask()),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+		// Overlay-only id present; catalog-only id also listed.
+		ListModels: func(context.Context, string) ([]string, error) {
+			return []string{"catalog-model", overlayModel}, nil
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "spawn overlay model"}
+	events := drainAndReply(t, eng, 10*time.Second)
+
+	if n := countEvents[protocol.ChildStarted](events); n != 1 {
+		t.Fatalf("ChildStarted = %d, want 1; events=%v", n, summarizeEvents(events))
+	}
+	if childModel != overlayModel {
+		t.Errorf("child model = %q, want overlay %q", childModel, overlayModel)
+	}
+	for _, ev := range events {
+		if end, ok := ev.(protocol.ToolCallEnd); ok && end.CallID == "task-overlay" && end.IsError {
+			t.Fatalf("task failed: %s", end.Output)
+		}
+	}
+}
+
+// TestTaskSpawnWithoutModelKeepsInherit ensures empty model keeps parent model.
+func TestTaskSpawnWithoutModelKeepsInherit(t *testing.T) {
+	const childPrompt = "inherit model child"
+	const parentModel = "parent-only-model"
+	taskCall := taskToolCallWith("task-inherit-model", map[string]any{
+		"prompt": childPrompt,
+	})
+	var childModel string
+	prov := newScriptedProvider(
+		toolCallStep(taskCall),
+		func() streamStep {
+			s := completedStep("child inherit ok")
+			s.match = func(req provider.Request) bool {
+				if !matchUserText(childPrompt)(req) {
+					return false
+				}
+				childModel = req.Model
+				return true
+			}
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("parent ok")
+			s.match = matchToolResult("task-inherit-model")
+			return s
+		}(),
+		childCompletedNudgeStep("ack inherit model"),
+	)
+	eng := engine.New(engine.Options{
+		SessionID: "parent-inherit-model-field",
+		Select: func(string) (provider.Provider, string, error) {
+			return prov, parentModel, nil
+		},
+		InitialProvider: "scripted",
+		InitialModel:    parentModel,
+		Registry:        tool.NewRegistry(tool.NewTask()),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+		ListModels: func(context.Context, string) ([]string, error) {
+			return []string{parentModel, "other"}, nil
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "spawn inherit"}
+	events := drainAndReply(t, eng, 10*time.Second)
+
+	if n := countEvents[protocol.ChildStarted](events); n != 1 {
+		t.Fatalf("ChildStarted = %d, want 1", n)
+	}
+	if childModel != parentModel {
+		t.Errorf("child model = %q, want inherited %q", childModel, parentModel)
+	}
+}

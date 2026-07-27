@@ -22,7 +22,7 @@ var shortPurposes = map[string]string{
 	"write":           "create or overwrite a file",
 	"apply_patch":     "coordinated multi-file patch",
 	"bash":            "run a shell command",
-	"task":            "delegate a bounded subtask to a child agent",
+	"task":            "delegate a bounded subtask to a child agent (optional agent/model)",
 	"task_status":     "check status of a delegated child task",
 	"task_read":       "read a bounded child transcript slice",
 	"task_message":    "send guidance to a running child task",
@@ -225,7 +225,7 @@ func recommendedGuidance(entries []GuidanceEntry) string {
 	add(has("question"),
 		"Use `question` when a decision genuinely belongs to the user.")
 	add(has("task") && has("task_status", "task_read"),
-		"Use `task` for bounded non-blocking delegation; use `task_status`/`task_read` only when an intermediate check is needed (not every second). Prefer `task_message` to steer and `task_interrupt` to cancel. Completion still arrives once as `[child.completed]` — never sleep-poll.")
+		"Use `task` for bounded non-blocking delegation (optional `agent` persona and `model` catalog id); use `task_status`/`task_read` only when an intermediate check is needed (not every second). Prefer `task_message` to steer and `task_interrupt` to cancel. Completion still arrives once as `[child.completed]` — never sleep-poll.")
 	add(has("task") && !has("task_status", "task_read"),
 		"Use `task` for bounded non-blocking delegation (self-contained prompt). A later `[child.completed]` delivers the summary — never sleep-poll for task completion.")
 	add(has("sleep") && has("bash") && has("task"),

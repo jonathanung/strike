@@ -36,6 +36,10 @@ type AskRequest struct {
 type TaskRequest struct {
 	Prompt string
 	Agent  string
+	// Model is an optional model id for the child (bare id on the parent
+	// provider, or "provider/model"). Empty inherits the parent's model
+	// (subject to agent pins).
+	Model string
 }
 
 // TaskResult is the outcome of spawning a child session.

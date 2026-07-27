@@ -328,6 +328,12 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			Matcher:   h.Matcher,
 		})
 	}
+	// Shared catalog (models.dev + providers.jsonc) for task model pins and
+	// context-window lookups — same source as host.Catalog / TUI /model.
+	modelCatalog := local.NewCatalog(customStore)
+	listModels := func(ctx context.Context, providerName string) ([]string, error) {
+		return modelCatalog.ModelIDs(ctx, providerName)
+	}
 	lookupContextWindow := func(providerName, model string) int {
 		// Config limit overlays win over models.dev when set.
 		if defs := customStore.ModelOverlay(providerName); len(defs) > 0 {
@@ -467,6 +473,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			CompactionStrategy:    cfg.CompactionStrategy,
 			CompactionModel:       cfg.CompactionModel,
 			LookupContextWindow:   lookupContextWindow,
+			ListModels:            listModels,
 			PersistProjectRule: func(rule permission.Rule) error {
 				return config.AppendProjectPermission(launchDir, rule)
 			},
