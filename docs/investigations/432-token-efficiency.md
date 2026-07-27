@@ -82,7 +82,7 @@ These caps prevent a single call from being unbounded. They do **not** shrink re
 - Subsetting by agent/phase hard deny (explore/reviewer/plan posture) still drops tools the model cannot call.
 - The same effective set feeds additive system-prompt guidance via `tool.BuildGuidance` (`internal/tool/guidance.go` / `prompt_tools.go`) — **usage policy / when-to-use only** (schemas own names/descriptions; catalog restatement removed in #437).
 - Built-in surface is on the order of ~27 tools (read/glob/grep/edit/write/apply_patch/bash/task family/webfetch/todo/memory/issue/notebook/sleep/skill/question/plan mode/toolsearch/…).
-- `toolsearch` (`internal/tool/toolsearch.go`) searches full registry schemas; it does **not** defer loading schemas from the provider Tools array the way Claude Code’s `defer_loading` path does (#438).
+- `toolsearch` (`internal/tool/toolsearch.go`) searches full registry schemas. With config `deferTools: on` (issue #438), non-core/MCP tools are omitted from provider Tools until toolsearch discovers them (core coding tools stay always-on).
 
 ### Prompt cache: response parsing only (Anthropic)
 

@@ -895,6 +895,63 @@ func TestLoadLeanCodeMerge(t *testing.T) {
 	}
 }
 
+func TestNormalizeDeferTools(t *testing.T) {
+	cases := map[string]string{
+		"on":       DeferToolsOn,
+		"true":     DeferToolsOn,
+		"enabled":  DeferToolsOn,
+		"off":      DeferToolsOff,
+		"false":    DeferToolsOff,
+		"disabled": DeferToolsOff,
+		"":         "",
+		"maybe":    "",
+		"  ON  ":   DeferToolsOn,
+	}
+	for in, want := range cases {
+		if got := NormalizeDeferTools(in); got != want {
+			t.Errorf("NormalizeDeferTools(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if !DeferToolsEnabled("on") || DeferToolsEnabled("off") || DeferToolsEnabled("") {
+		t.Fatal("DeferToolsEnabled mismatch")
+	}
+}
+
+func TestLoadDeferToolsMerge(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(global, []byte(`{"deferTools": "on"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DeferTools != DeferToolsOn {
+		t.Fatalf("DeferTools = %q, want on", cfg.DeferTools)
+	}
+	project := filepath.Join(work, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(project), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(project, []byte(`{"deferTools": "off"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DeferTools != DeferToolsOff {
+		t.Fatalf("project DeferTools = %q, want off", cfg.DeferTools)
+	}
+}
+
 func TestLoadNotifyMerge(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

@@ -23,15 +23,21 @@ import (
 //  2. Compact descriptions — tool.CompactSchemaDescription replaces long usage
 //     prose with short purposes (skill keeps its available-skills list). Full
 //     InputSchema is unchanged; Registry.Schemas keeps full descriptions for
-//     toolsearch. This is not defer_loading (#438): every remaining tool is
-//     still bound on the first stream.
+//     toolsearch.
 //  3. System guidance is additive only — usage policy / when-to-use tips, not
 //     a second name/purpose catalog (#437).
+//
+// Optional defer_loading (#438): when registry.SetDeferLoading is on
+// (config deferTools), non-core tools are also omitted from SchemasForProvider
+// until toolsearch (or a direct call / history re-promote) discovers them.
+// Core coding tools remain always bound on the first stream.
 func (e *Engine) effectiveToolSchemas() (schemas []provider.ToolSchema, omitted int) {
 	if e == nil || e.opts.Registry == nil {
 		return nil, 0
 	}
-	all := e.opts.Registry.Schemas()
+	// Re-promote tools already used in history (resume / --continue).
+	e.discoverToolsFromHistory()
+	all := e.opts.Registry.SchemasForProvider()
 	if len(all) == 0 {
 		return nil, 0
 	}
@@ -52,10 +58,29 @@ func (e *Engine) effectiveToolSchemas() (schemas []provider.ToolSchema, omitted 
 	return out, omitted
 }
 
+// discoverToolsFromHistory promotes deferred tools that already appear as
+// assistant tool calls in model history so resume keeps their schemas loaded.
+func (e *Engine) discoverToolsFromHistory() {
+	if e == nil || e.opts.Registry == nil || !e.opts.Registry.DeferLoading() {
+		return
+	}
+	var names []string
+	for _, m := range e.messages {
+		for _, c := range m.ToolCalls {
+			if n := strings.TrimSpace(c.Name); n != "" {
+				names = append(names, n)
+			}
+		}
+	}
+	if len(names) > 0 {
+		e.opts.Registry.Discover(names...)
+	}
+}
+
 // toolGuidanceLayer builds the additive Available tools prompt section from
-// the live registry after hard permission denies. Schemas carry names and
-// descriptions; this layer is usage policy / when-to-use only. Empty when no
-// tools remain.
+// the live registry after hard permission denies (and defer filtering).
+// Schemas carry names and descriptions; this layer is usage policy /
+// when-to-use only. Empty when no tools remain.
 func (e *Engine) toolGuidanceLayer() (text, source string) {
 	schemas, omitted := e.effectiveToolSchemas()
 	if len(schemas) == 0 {
@@ -66,12 +91,23 @@ func (e *Engine) toolGuidanceLayer() (text, source string) {
 		entries = append(entries, tool.GuidanceEntry{Name: s.Name})
 	}
 	text = tool.BuildGuidance(entries)
+	if pending := e.opts.Registry.DeferredPendingCount(); pending > 0 {
+		text = strings.TrimRight(text, "\n") + "\n\n" +
+			fmt.Sprintf("%d additional tool(s) are deferred — use `toolsearch` to discover them; matches load full schemas on the next model request.\n", pending)
+	}
 	if strings.TrimSpace(text) == "" {
 		return "", ""
 	}
 	source = "registry:effective"
 	if omitted > 0 {
 		source = fmt.Sprintf("registry:effective+denied:%d", omitted)
+	}
+	if e.opts.Registry.DeferLoading() {
+		if pending := e.opts.Registry.DeferredPendingCount(); pending > 0 {
+			source = fmt.Sprintf("%s+deferred:%d", source, pending)
+		} else {
+			source = source + "+defer"
+		}
 	}
 	return text, source
 }

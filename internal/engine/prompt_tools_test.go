@@ -540,6 +540,194 @@ func TestFirstTurnToolsOmitPlanMutations(t *testing.T) {
 	}
 }
 
+// TestDeferToolsOmitThenDiscoverThenInclude covers the omit → toolsearch →
+// subsequent stream includes lifecycle when registry defer loading is on.
+func TestDeferToolsOmitThenDiscoverThenInclude(t *testing.T) {
+	reg := tool.NewRegistry(
+		tool.NewRead(),
+		tool.NewWebFetch(),
+		tool.NewSleep(),
+	)
+	reg.Register(tool.NewToolSearch(reg))
+	reg.SetDeferLoading(true)
+
+	callID := "ts-1"
+	prov := newScriptedProvider(
+		toolCallStep(provider.ToolCall{
+			ID:   callID,
+			Name: "toolsearch",
+			Args: json.RawMessage(`{"query":"webfetch"}`),
+		}),
+		streamStep{
+			match: matchToolResult(callID),
+			events: []provider.StreamEvent{
+				{Type: provider.EventTextDelta, Text: "found it"},
+				{Type: provider.EventDone, StopReason: "end_turn"},
+			},
+		},
+	)
+
+	eng := engine.New(engine.Options{
+		SessionID: "s-defer-tools",
+		WorkDir:   t.TempDir(),
+		Registry:  reg,
+		Agents:    []engine.Agent{{Name: "build"}},
+		Rules:     []permission.Ruleset{permission.Defaults()},
+		Select: func(string) (provider.Provider, string, error) {
+			return prov, "echo", nil
+		},
+		InitialProvider: "echo",
+		InitialModel:    "echo",
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "find webfetch"}
+	req1 := waitStreamRequest(t, eng, prov)
+	names1 := toolNameSet(req1.Tools)
+	if !names1["read"] || !names1["toolsearch"] {
+		t.Fatalf("first stream missing core tools: %v", names1)
+	}
+	if names1["webfetch"] || names1["sleep"] {
+		t.Fatalf("first stream should omit deferred tools: %v", names1)
+	}
+	if !strings.Contains(req1.System, "deferred") && !strings.Contains(req1.System, "toolsearch") {
+		// Guidance should mention deferred pending or toolsearch.
+		if !strings.Contains(req1.System, "additional tool") {
+			t.Fatalf("first-turn system missing defer/toolsearch guidance:\n%s", req1.System)
+		}
+	}
+
+	req2 := waitStreamRequest(t, eng, prov)
+	names2 := toolNameSet(req2.Tools)
+	if !names2["webfetch"] {
+		t.Fatalf("second stream missing discovered webfetch: %v", names2)
+	}
+	if names2["sleep"] {
+		t.Fatalf("unrelated sleep should stay deferred: %v", names2)
+	}
+	waitTurnCompleted(t, eng)
+}
+
+// TestDeferToolsDirectCallPromotes ensures calling a deferred tool by name
+// promotes it for subsequent streams.
+func TestDeferToolsDirectCallPromotes(t *testing.T) {
+	// MCP-named stub is deferred (non-core) and needs no permission Ask.
+	deferred := stubMCPTool{name: "mcp_demo_ping", desc: "ping the demo server"}
+	reg := tool.NewRegistry(tool.NewRead(), deferred)
+	reg.SetDeferLoading(true)
+
+	callID := "mcp-1"
+	prov := newScriptedProvider(
+		toolCallStep(provider.ToolCall{
+			ID:   callID,
+			Name: "mcp_demo_ping",
+			Args: json.RawMessage(`{}`),
+		}),
+		streamStep{
+			match: matchToolResult(callID),
+			events: []provider.StreamEvent{
+				{Type: provider.EventTextDelta, Text: "done"},
+				{Type: provider.EventDone, StopReason: "end_turn"},
+			},
+		},
+	)
+
+	eng := engine.New(engine.Options{
+		SessionID: "s-defer-direct",
+		WorkDir:   t.TempDir(),
+		Registry:  reg,
+		Agents:    []engine.Agent{{Name: "build"}},
+		Rules: []permission.Ruleset{
+			permission.Defaults(),
+			{{Permission: "mcp", Pattern: "*", Action: permission.Allow}},
+		},
+		Select: func(string) (provider.Provider, string, error) {
+			return prov, "echo", nil
+		},
+		InitialProvider: "echo",
+		InitialModel:    "echo",
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "ping"}
+	req1 := waitStreamRequest(t, eng, prov)
+	if toolNameSet(req1.Tools)["mcp_demo_ping"] {
+		t.Fatal("mcp_demo_ping should be deferred on first stream")
+	}
+	req2 := waitStreamRequest(t, eng, prov)
+	if !toolNameSet(req2.Tools)["mcp_demo_ping"] {
+		t.Fatal("mcp_demo_ping should be promoted after direct call")
+	}
+	waitTurnCompleted(t, eng)
+}
+
+// TestDeferToolsHistoryRepromotesOnResume ensures tools already called in
+// InitialMessages are loaded on the first stream after resume.
+func TestDeferToolsHistoryRepromotesOnResume(t *testing.T) {
+	reg := tool.NewRegistry(tool.NewRead(), tool.NewWebFetch(), tool.NewSleep())
+	reg.Register(tool.NewToolSearch(reg))
+	reg.SetDeferLoading(true)
+
+	req := captureStreamRequest(t, engine.Options{
+		WorkDir:  t.TempDir(),
+		Registry: reg,
+		Agents:   []engine.Agent{{Name: "build"}},
+		Rules:    []permission.Ruleset{permission.Defaults()},
+		InitialMessages: []provider.Message{
+			{Role: provider.RoleUser, Text: "fetch something"},
+			{
+				Role: provider.RoleAssistant,
+				ToolCalls: []provider.ToolCall{
+					{ID: "c1", Name: "webfetch", Args: json.RawMessage(`{"url":"https://example.com"}`)},
+				},
+			},
+			{
+				Role: provider.RoleTool,
+				ToolResult: &provider.ToolResult{
+					CallID: "c1",
+					Output: "ok",
+				},
+			},
+		},
+	}, "echo", "echo")
+
+	names := toolNameSet(req.Tools)
+	if !names["webfetch"] {
+		t.Fatalf("resume should re-promote webfetch from history: %v", names)
+	}
+	if names["sleep"] {
+		t.Fatalf("unused sleep should stay deferred: %v", names)
+	}
+}
+
+// TestDeferToolsOffSendsFullSet keeps default (defer off) behavior.
+func TestDeferToolsOffSendsFullSet(t *testing.T) {
+	reg := tool.NewRegistry(tool.NewRead(), tool.NewWebFetch(), tool.NewSleep())
+	// DeferLoading left false.
+	req := captureStreamRequest(t, engine.Options{
+		WorkDir:  t.TempDir(),
+		Registry: reg,
+		Agents:   []engine.Agent{{Name: "build"}},
+		Rules:    []permission.Ruleset{permission.Defaults()},
+	}, "echo", "echo")
+	names := toolNameSet(req.Tools)
+	if !names["read"] || !names["webfetch"] || !names["sleep"] {
+		t.Fatalf("defer off should send all tools: %v", names)
+	}
+}
+
+func toolNameSet(schemas []provider.ToolSchema) map[string]bool {
+	out := make(map[string]bool, len(schemas))
+	for _, s := range schemas {
+		out[s.Name] = true
+	}
+	return out
+}
+
 // captureStreamRequest starts an engine and returns the first provider Stream request.
 func captureStreamRequest(t *testing.T, opts engine.Options, providerName, model string) provider.Request {
 	t.Helper()

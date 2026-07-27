@@ -726,6 +726,11 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 	if !ok {
 		err = fmt.Errorf("unknown tool %q; available tools: %s", call.Name, e.toolNames())
 	} else {
+		// Promote deferred tools called by name so subsequent streams include
+		// their schemas (mirrors toolsearch discovery).
+		if e.opts.Registry != nil {
+			e.opts.Registry.Discover(call.Name)
+		}
 		callID := call.ID
 		tc := &tool.Context{
 			WorkDir:    e.opts.WorkDir,

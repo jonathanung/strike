@@ -287,6 +287,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tool.NewPhaseDone(),
 	)
 	registry.Register(tool.NewToolSearch(registry))
+	if config.DeferToolsEnabled(cfg.DeferTools) {
+		registry.SetDeferLoading(true)
+	}
 
 	// Built-ins (build, plan, explore, general, commit, …) plus user agents
 	// from ~/.strike/agents and ./.strike/agents. Empty Prompt on build/plan
