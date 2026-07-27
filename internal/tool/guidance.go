@@ -39,7 +39,7 @@ var shortPurposes = map[string]string{
 	"skill":           "load a named skill into context",
 	"question":        "ask the user a clarifying question",
 	"enter_plan_mode": "start the plan→implement workflow",
-	"exit_plan_mode":  "leave plan mode for build",
+	"exit_plan_mode":  "leave plan mode for build or orchestrator",
 	"phase_done":      "advance the active workflow phase gate",
 	"toolsearch":      "search registered tool names/descriptions",
 }

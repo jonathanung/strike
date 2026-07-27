@@ -164,7 +164,10 @@ Built-in `review-fix`:
 2. **fix** — `build` agent, check gate (`make test`)
 
 Tools `enter_plan_mode` / `exit_plan_mode` start and advance the default plan
-workflow. The active phase shows as a badge in the TUI header. Example custom
+workflow. After plan completes, `exit_plan_mode` switches to **build** (simple)
+or **orchestrator** (complex): pass `agent`, or omit and supply `steps` /
+`areas` / `multi_agent` (heuristic: steps ≥ 4, areas ≥ 3, or multi_agent →
+orchestrator). The active phase shows as a badge in the TUI header. Example custom
 file:
 
 ```json
