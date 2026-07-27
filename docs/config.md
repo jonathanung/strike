@@ -96,6 +96,10 @@ for one session). Non-git directories and `git worktree add` failures return a
 clear error and do not leave a half-bound session. Project-scoped state
 (history, memory, issues) stays keyed to the main repo, not the worktree path.
 Tools (`bash`, `read`, `write`, …) resolve paths inside the session worktree.
+Each `bash` invocation is a fresh process whose cwd is that session workdir
+(workspace root, or the bound git worktree root). A `cd` inside one command
+does not affect later bash calls or other tools; chain with `&&` or
+`(cd subdir && …)` when a single command needs a subdirectory.
 
 **ctrl+d saves defaults**: on the main screen it persists the current
 provider/model/agent/effort/theme to `~/.strike/config`; in the provider
