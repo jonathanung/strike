@@ -1,0 +1,25 @@
+export type Envelope = { type: string; time?: string; data?: Record<string, unknown> };
+export type Status = {
+  sessionId?: string; provider?: string; model?: string; agent?: string; effort?: string;
+  autonomy?: string; permissionMode?: string; phase?: string; workflow?: string; cwd?: string;
+  busy?: boolean; contextUsed?: number; contextLimit?: number;
+};
+export type Capabilities = Record<string, boolean>;
+export type Bootstrap = {
+  version: string; authRequired: boolean; attachOnly: boolean; capabilities: Capabilities;
+  status?: Status; agents: { name: string; description?: string }[];
+  skills: { name: string; description: string }[];
+  protocolOps: string[];
+};
+export type Session = { id: string; title?: string; mtime?: number; parentId?: string; open?: boolean };
+export type TranscriptItem = {
+  id: string; kind: "user" | "assistant" | "reasoning" | "tool" | "system" | "error";
+  title?: string; text: string; requestId?: string; data?: Record<string, unknown>;
+};
+export type ImageAttachment = { name: string; mime: string; data: string };
+export type WorkspaceState = {
+  items: TranscriptItem[]; seen: Set<string>; status: Status;
+  permission?: Record<string, unknown>; question?: Record<string, unknown>;
+  children: Record<string, { agent?: string; status: string; summary?: string }>;
+  changedFiles: string[];
+};

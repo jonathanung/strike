@@ -1,8 +1,7 @@
-# Experimental web cockpit
+# Web workspace
 
-`strike serve` hosts a browser cockpit that can drive a **live** engine session
-(composer, permissions, questions, status) and still **read-only attach** to any
-session JSONL log. The TUI remains the primary UI.
+`strike serve` hosts a React workspace that can drive a **live** engine session
+and read-only attach to durable session JSONL logs.
 
 ## Start
 
@@ -12,37 +11,38 @@ make serve
 ./strike serve --addr 127.0.0.1:8787
 ```
 
-If `--token` is omitted, strike mints one and prints it. Prefer setting a token
-yourself when scripting.
+Loopback serving is unauthenticated by default. Enable authentication explicitly;
+strike mints a token when `--auth` is used without `--token`.
 
 ```sh
-./strike serve --addr 127.0.0.1:8787 --token "$STRIKE_SERVE_TOKEN" --provider echo
+./strike serve --auth --token "$STRIKE_SERVE_TOKEN" --provider echo
 ```
 
 | Flag | Meaning |
 |---|---|
 | `--addr` | Bind address (default `127.0.0.1:8787`) |
-| `--expose` | Bind `0.0.0.0` (LAN). Requires token; loud WARNING; prints LAN URLs |
+| `--auth` | Require bearer authentication; auto-mint a token when omitted |
+| `--expose` | Bind `0.0.0.0` (LAN). Requires `--auth`; loud WARNING; prints LAN URLs |
 | `--allow-cidr` | With `--expose`, only accept client IPs in these CIDRs (repeatable) |
-| `--token` | Bearer token for `/v1/*` (auto-minted if omitted) |
+| `--token` | Bearer token for `/v1/*`; requires `--auth` |
 | `--provider` | Live engine provider (default `echo`) |
 | `--model` | Optional model id |
-| `--session-dir` | Sessions directory for RO listing/tails |
+| `--session-dir` | Sessions directory for `--attach-only`; rejected in live mode |
 | `--attach-only` | No live engine — JSONL SSE attach only |
 | `--auto`, `--dangerously-skip-permissions` | Auto-allow permission asks in the live engine (equivalent) |
 
 Open the cockpit:
 
 ```
-http://127.0.0.1:8787/attach?token=<token>
+http://127.0.0.1:8787/attach
 ```
 
 ## LAN expose (`--expose`)
 
 ```sh
-./strike serve --expose --token "$STRIKE_SERVE_TOKEN" --provider echo
+./strike serve --auth --expose --token "$STRIKE_SERVE_TOKEN" --provider echo
 # optional client allowlist:
-./strike serve --expose --allow-cidr 192.168.0.0/16 --token "$STRIKE_SERVE_TOKEN"
+./strike serve --auth --expose --allow-cidr 192.168.0.0/16 --token "$STRIKE_SERVE_TOKEN"
 ```
 
 Behavior:
@@ -51,7 +51,7 @@ Behavior:
   (e.g. `0.0.0.0:8787`) is **rejected** unless `--expose` is set.
 - `--expose` rewrites a loopback `--addr` host to `0.0.0.0` (same port). An
   explicit non-loopback host is kept (bind one interface).
-- Auth token is always required (auto-minted if omitted). The full cockpit URL
+- Auth is required for network exposure. The full cockpit URL
   including `?token=` is printed **once** on stdout together with detected LAN
   IPs.
 - A loud WARNING is printed on stderr (no TLS; token is bearer secret).
@@ -72,7 +72,7 @@ Behavior:
 
 ```sh
 # on the machine running strike:
-./strike serve --addr 127.0.0.1:8787 --token "$STRIKE_SERVE_TOKEN"
+./strike serve --auth --token "$STRIKE_SERVE_TOKEN"
 # on the laptop/phone-side jump host:
 ssh -L 8787:127.0.0.1:8787 user@strike-host
 # open http://127.0.0.1:8787/attach?token=...
@@ -84,7 +84,8 @@ ssh -L 8787:127.0.0.1:8787 user@strike-host
 |---|---|---|---|
 | `GET` | `/health` | no* | `{ "ok": true, "version", "commit" }` |
 | `GET` | `/` or `/attach` | no* | Cockpit HTML (composer + transcript) |
-| `GET` | `/v1/ws` | **yes** | WebSocket: ops in, event envelopes out |
+| `GET` | `/v1/bootstrap` | mode | Version, status, capabilities, agents, skills |
+| `GET` | `/v1/ws` | mode | WebSocket: ops in, event envelopes out |
 | `POST` | `/v1/ops` | **yes** | Submit one op envelope (JSON) |
 | `GET` | `/v1/live/events` | **yes** | SSE of live engine events (+ JSONL backlog) |
 | `GET` | `/v1/status` | **yes** | Live status (model, agent, mode, cwd, busy, …) |
@@ -94,7 +95,7 @@ ssh -L 8787:127.0.0.1:8787 user@strike-host
 
 \*Still subject to `--allow-cidr` when set.
 
-Auth for `/v1/*`:
+With `--auth`, authenticate `/v1/*` using:
 
 - `Authorization: Bearer <token>`, or
 - `?token=<token>` (EventSource / WebSocket query)
@@ -140,11 +141,11 @@ local UI iteration and CI asset checks.
 
 ```sh
 # terminal 1 — API (loopback)
-./strike serve --addr 127.0.0.1:8787 --token dev --provider echo
+./strike serve --provider echo
 
 # terminal 2 — Vite dev server (proxies /health and /v1 → strike)
 cd web && npm install && npm run dev
-# open http://127.0.0.1:5173/attach?token=dev
+# open http://127.0.0.1:5173
 ```
 
 | Env | Meaning |
@@ -154,13 +155,12 @@ cd web && npm install && npm run dev
 | `VITE_PORT` | Dev port (default `5173`) |
 
 ```sh
-make web-build   # npm ci && npm run build → web/dist (cockpit copy + build.json)
+make web-build   # npm ci && npm run build → internal/server/static
 ```
 
 CI runs `make web-build` when `web/package.json` is present. The Go binary does
-not require Node; embed remains the production path. To ship HTML changes:
-edit `internal/server/static/index.html` (source of truth), then `make web-build`
-to refresh `web/dist`.
+not require Node at runtime: generated Vite assets under `internal/server/static`
+are embedded at compile time. Edit sources under `web/src`, then build.
 
 Lifecycle: run Vite as a **sibling** process of `strike serve` (two terminals or
 a process supervisor). Strike does not spawn Vite as a child.
@@ -168,7 +168,7 @@ a process supervisor). Strike does not spawn Vite as a child.
 ## Security (summary)
 
 - Default bind is **loopback** (`127.0.0.1:8787`).
-- Non-loopback binds require **`--expose`**.
+- Non-loopback binds require **`--auth`** and **`--expose`**.
 - CORS allows localhost always; with `--expose`, also private-network origins.
 - Treat the token like a password; do not commit it.
 - See **Threat model** under LAN expose above.
@@ -185,11 +185,11 @@ a process supervisor). Strike does not spawn Vite as a child.
 
 ## Manual checklist
 
-1. `./strike serve --provider echo --token test` → open attach URL with token.
+1. `./strike serve --provider echo` → open the token-free loopback URL.
 2. Send a message → streamed `text.delta` → `turn.completed`.
 3. Send `run echo hi` → permission modal → allow once → tool result.
 4. Switch permission mode / agent from toolbar.
 5. RO attach: pick another session id → SSE transcript only.
-6. `./strike serve --expose --token test` → WARNING on stderr; phone on LAN loads
+6. `./strike serve --auth --expose --token test` → WARNING on stderr; phone on LAN loads
    printed cockpit URL; `/health` and live stream work with token.
 7. `./strike serve --addr 0.0.0.0:8787` without `--expose` → error.

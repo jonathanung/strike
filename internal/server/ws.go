@@ -13,9 +13,13 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
-const wsGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+const (
+	wsGUID       = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+	maxWSMessage = 8 << 20
+)
 
 // wsConn is a minimal RFC6455 WebSocket (text + control) over a hijacked conn.
 type wsConn struct {
@@ -46,6 +50,10 @@ func upgradeWebSocket(w http.ResponseWriter, r *http.Request) (*wsConn, error) {
 	conn, bufrw, err := hj.Hijack()
 	if err != nil {
 		return nil, err
+	}
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("clear hijacked connection deadline: %w", err)
 	}
 
 	accept := wsAcceptKey(key)
@@ -99,25 +107,36 @@ func (c *wsConn) ReadText() (string, error) {
 		}
 		switch opcode {
 		case 0x1: // text start
+			if started {
+				return "", errors.New("new data frame before fragmented message completed")
+			}
+			if len(data) > maxWSMessage {
+				return "", errors.New("websocket message too large")
+			}
 			payload = append(payload[:0], data...)
 			started = true
 			if fin {
+				if !utf8.Valid(payload) {
+					return "", errors.New("websocket text message is not valid UTF-8")
+				}
 				return string(payload), nil
 			}
 		case 0x0: // continuation
 			if !started {
 				return "", errors.New("unexpected continuation frame")
 			}
+			if len(payload) > maxWSMessage-len(data) {
+				return "", errors.New("websocket message too large")
+			}
 			payload = append(payload, data...)
 			if fin {
+				if !utf8.Valid(payload) {
+					return "", errors.New("websocket text message is not valid UTF-8")
+				}
 				return string(payload), nil
 			}
-		case 0x2: // binary as text
-			if fin {
-				return string(data), nil
-			}
-			payload = append(payload[:0], data...)
-			started = true
+		case 0x2:
+			return "", errors.New("websocket binary messages are not supported")
 		case 0x8:
 			return "", io.EOF
 		case 0x9:
@@ -140,10 +159,26 @@ func (c *wsConn) readFrame() (fin bool, opcode byte, payload []byte, err error) 
 	if _, err = io.ReadFull(c.bufr, h); err != nil {
 		return false, 0, nil, err
 	}
+	if h[0]&0x70 != 0 {
+		return false, 0, nil, errors.New("websocket reserved bits are not supported")
+	}
 	fin = h[0]&0x80 != 0
 	opcode = h[0] & 0x0f
 	masked := h[1]&0x80 != 0
+	if !masked {
+		return false, 0, nil, errors.New("websocket client frame is not masked")
+	}
+	control := opcode&0x08 != 0
+	if opcode != 0x0 && opcode != 0x1 && opcode != 0x2 && opcode != 0x8 && opcode != 0x9 && opcode != 0xA {
+		return false, 0, nil, fmt.Errorf("unsupported websocket opcode %d", opcode)
+	}
+	if control && !fin {
+		return false, 0, nil, errors.New("fragmented websocket control frame")
+	}
 	n := int(h[1] & 0x7f)
+	if control && n > 125 {
+		return false, 0, nil, errors.New("websocket control frame too large")
+	}
 	switch {
 	case n == 126:
 		var ext [2]byte
@@ -157,18 +192,14 @@ func (c *wsConn) readFrame() (fin bool, opcode byte, payload []byte, err error) 
 			return false, 0, nil, err
 		}
 		n64 := binary.BigEndian.Uint64(ext[:])
-		if n64 > 1<<20 {
+		if n64 > maxWSMessage {
 			return false, 0, nil, errors.New("websocket frame too large")
 		}
 		n = int(n64)
 	}
 	var mask [4]byte
-	if masked {
-		if _, err = io.ReadFull(c.bufr, mask[:]); err != nil {
-			return false, 0, nil, err
-		}
-	} else {
-		// Clients must mask; servers may send unmasked. Accept both for tests.
+	if _, err = io.ReadFull(c.bufr, mask[:]); err != nil {
+		return false, 0, nil, err
 	}
 	payload = make([]byte, n)
 	if n > 0 {
@@ -176,12 +207,26 @@ func (c *wsConn) readFrame() (fin bool, opcode byte, payload []byte, err error) 
 			return false, 0, nil, err
 		}
 	}
-	if masked {
-		for i := range payload {
-			payload[i] ^= mask[i%4]
+	for i := range payload {
+		payload[i] ^= mask[i%4]
+	}
+	if opcode == 0x8 && len(payload) == 1 {
+		return false, 0, nil, errors.New("invalid websocket close payload")
+	}
+	if opcode == 0x8 && len(payload) >= 2 {
+		code := binary.BigEndian.Uint16(payload[:2])
+		if !validWSCloseCode(code) {
+			return false, 0, nil, fmt.Errorf("invalid websocket close status code %d", code)
+		}
+		if !utf8.Valid(payload[2:]) {
+			return false, 0, nil, errors.New("websocket close reason is not valid UTF-8")
 		}
 	}
 	return fin, opcode, payload, nil
+}
+
+func validWSCloseCode(code uint16) bool {
+	return code >= 1000 && code <= 1014 && code != 1004 && code != 1005 && code != 1006 || code >= 3000 && code <= 4999
 }
 
 func (c *wsConn) writeControl(opcode byte, payload []byte) error {

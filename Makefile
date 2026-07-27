@@ -32,15 +32,15 @@ run: build
 run-echo: build
 	./strike --provider echo
 
-# Experimental web cockpit (auto-mints token; loopback only — see docs/web.md).
+# Web workspace (unauthenticated loopback by default — see docs/web.md).
 serve: build
 	./strike serve --addr 127.0.0.1:8787
 
-# LAN expose (WARNING: no TLS; token required — see docs/web.md).
+# LAN expose (WARNING: no TLS; authenticated with an auto-minted token).
 serve-expose: build
-	./strike serve --expose
+	./strike serve --auth --expose
 
-# Optional Vite workspace: production asset check / dist copy of embedded cockpit.
+# Vite workspace: builds production assets embedded by the Go binary.
 web-build:
 	@if [ ! -f web/package.json ]; then echo "web-build: no web/package.json"; exit 0; fi
 	cd web && npm ci && npm run build
