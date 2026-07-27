@@ -164,12 +164,13 @@ func TestExitPlanModeAdvancesToImplement(t *testing.T) {
 
 	eng.Ops() <- protocol.UserInput{Text: "exit plan"}
 	var sawImplement bool
+	var sawBuild bool
 	var endOK bool
 	deadline := time.After(10 * time.Second)
-	for !sawImplement || !endOK {
+	for !sawImplement || !endOK || !sawBuild {
 		select {
 		case <-deadline:
-			t.Fatalf("timeout implement=%v end=%v", sawImplement, endOK)
+			t.Fatalf("timeout implement=%v build=%v end=%v", sawImplement, sawBuild, endOK)
 		case ev := <-eng.Events():
 			switch e := ev.(type) {
 			case protocol.QuestionAsked:
@@ -178,10 +179,126 @@ func TestExitPlanModeAdvancesToImplement(t *testing.T) {
 				if e.Phase == "implement" {
 					sawImplement = true
 				}
+			case protocol.AgentSelected:
+				if e.Name == "build" {
+					sawBuild = true
+				}
 			case protocol.ToolCallEnd:
 				if e.CallID == "ex1" && !e.IsError {
 					endOK = true
 				}
+			}
+		}
+	}
+}
+
+func TestExitPlanModeRoutesToOrchestrator(t *testing.T) {
+	exitArgs, _ := json.Marshal(map[string]any{
+		"agent": "orchestrator",
+	})
+	call := provider.ToolCall{ID: "ex-orch", Name: "exit_plan_mode", Args: exitArgs}
+	prov := newScriptedProvider(
+		toolCallStep(call),
+		completedStep("delegating"),
+	)
+	eng := engine.New(engine.Options{
+		SessionID:       "phase-exit-orchestrator",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(tool.NewExitPlanMode()),
+		Agents: []engine.Agent{
+			{Name: "build"},
+			{Name: "plan"},
+			{Name: "orchestrator"},
+		},
+		InitialAgent: "plan",
+		Workflows:    []config.Workflow{config.BuiltinPlanImplement()},
+		Rules:        []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	waitForEvent(t, eng, func(ev protocol.Event) bool {
+		p, ok := ev.(protocol.PhaseChanged)
+		return ok && p.Phase == "plan"
+	})
+
+	eng.Ops() <- protocol.UserInput{Text: "exit to orchestrator"}
+	var sawImplement bool
+	var sawOrch bool
+	var endOK bool
+	deadline := time.After(10 * time.Second)
+	for !sawImplement || !sawOrch || !endOK {
+		select {
+		case <-deadline:
+			t.Fatalf("timeout implement=%v orch=%v end=%v", sawImplement, sawOrch, endOK)
+		case ev := <-eng.Events():
+			switch e := ev.(type) {
+			case protocol.QuestionAsked:
+				eng.Ops() <- protocol.QuestionReply{RequestID: e.RequestID, Answers: []string{"Yes"}}
+			case protocol.PhaseChanged:
+				if e.Phase == "implement" {
+					sawImplement = true
+				}
+			case protocol.AgentSelected:
+				if e.Name == "orchestrator" {
+					sawOrch = true
+				}
+			case protocol.ToolCallEnd:
+				if e.CallID == "ex-orch" {
+					if e.IsError {
+						t.Fatalf("exit_plan_mode error: %s", e.Output)
+					}
+					endOK = true
+					if !strings.Contains(e.Output, "orchestrator") {
+						t.Fatalf("tool output missing orchestrator: %q", e.Output)
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestSelectOrchestratorFromPlanJumpsImplement(t *testing.T) {
+	prov := newScriptedProvider(completedStep("ok"))
+	eng := engine.New(engine.Options{
+		SessionID:       "phase-select-orch",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		Agents: []engine.Agent{
+			{Name: "build"},
+			{Name: "plan"},
+			{Name: "orchestrator"},
+		},
+		InitialAgent: "plan",
+		Workflows:    []config.Workflow{config.BuiltinPlanImplement()},
+		Rules:        []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	waitForEvent(t, eng, func(ev protocol.Event) bool {
+		p, ok := ev.(protocol.PhaseChanged)
+		return ok && p.Phase == "plan"
+	})
+
+	eng.Ops() <- protocol.SelectAgent{Name: "orchestrator"}
+
+	var phase protocol.PhaseChanged
+	var agent string
+	deadline := time.After(5 * time.Second)
+	for phase.Phase != "implement" || agent != "orchestrator" {
+		select {
+		case <-deadline:
+			t.Fatalf("timeout phase=%#v agent=%q", phase, agent)
+		case ev := <-eng.Events():
+			switch e := ev.(type) {
+			case protocol.PhaseChanged:
+				phase = e
+			case protocol.AgentSelected:
+				agent = e.Name
 			}
 		}
 	}

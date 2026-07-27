@@ -47,6 +47,13 @@ func (e *Engine) clearPhase() {
 
 // enterPhase applies phase index of w: permissions, optional agent pin, event.
 func (e *Engine) enterPhase(w config.Workflow, index int) error {
+	return e.enterPhaseOpts(w, index, true)
+}
+
+// enterPhaseOpts is enterPhase with optional phase.Agent pin. pinAgent false
+// keeps the current persona (used when the user/tool already chose build or
+// orchestrator while leaving plan).
+func (e *Engine) enterPhaseOpts(w config.Workflow, index int, pinAgent bool) error {
 	if index < 0 || index >= len(w.Phases) {
 		return fmt.Errorf("workflow %q: phase index %d out of range", w.Name, index)
 	}
@@ -67,6 +74,9 @@ func (e *Engine) enterPhase(w config.Workflow, index int) error {
 		Gate:        gate,
 	})
 
+	if !pinAgent {
+		return nil
+	}
 	if agent := strings.TrimSpace(phase.Agent); agent != "" && e.agent.Name != agent {
 		if e.turnActive() {
 			if err := e.queueSwitchAgent(agent); err != nil {
@@ -188,6 +198,8 @@ func (e *Engine) currentPhase() (config.Phase, bool) {
 
 // syncPhaseWithAgent enters or leaves the plan workflow when the user
 // switches agents via tab / SelectAgent (outside tool-driven phase_done).
+// build and orchestrator both leave plan for the implement phase (post-plan
+// routing may pick either after exit_plan_mode).
 func (e *Engine) syncPhaseWithAgent(agentName string) {
 	switch agentName {
 	case "plan":
@@ -195,13 +207,14 @@ func (e *Engine) syncPhaseWithAgent(agentName string) {
 			return
 		}
 		_ = e.enterPlanPhase()
-	case "build":
+	case "build", "orchestrator":
 		if phase, ok := e.currentPhase(); ok && phase.Name == "plan" {
-			// User forced build: jump to implement phase of the active workflow.
+			// User/tool forced implementer: jump to implement phase without
+			// re-pinning phase.Agent (would clobber orchestrator → build).
 			w := e.workflow
 			for i, p := range w.Phases {
-				if p.Name == "implement" || p.Agent == "build" {
-					_ = e.enterPhase(w, i)
+				if p.Name == "implement" || p.Agent == "build" || p.Agent == "orchestrator" {
+					_ = e.enterPhaseOpts(w, i, false)
 					return
 				}
 			}

@@ -7,6 +7,13 @@ import (
 	"strings"
 )
 
+// Post-plan implementer routing thresholds (documented heuristic).
+// Complex plans route to orchestrator; simple ones to build.
+const (
+	postPlanComplexSteps = 4 // do-now steps >= this → orchestrator
+	postPlanComplexAreas = 3 // distinct code areas >= this → orchestrator
+)
+
 type enterPlanModeTool struct{}
 
 func NewEnterPlanMode() Tool { return enterPlanModeTool{} }
@@ -61,15 +68,55 @@ func (exitPlanModeTool) Name() string { return "exit_plan_mode" }
 func (exitPlanModeTool) Description() string {
 	return `Leave plan mode and advance the plan→implement workflow after the user approves.
 
-Runs the plan phase user exit gate, then loads the implement phase (build agent). If no workflow phase is active, falls back to a Yes/No confirmation and switches to build.`
+Runs the plan phase user exit gate, then loads the implement phase and switches to build (simple) or orchestrator (complex). Pass agent explicitly, or omit and supply steps/areas/multi_agent for the built-in complexity heuristic. If no workflow phase is active, falls back to confirmation and SwitchAgent only.`
 }
 
 func (exitPlanModeTool) Schema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
-		"properties": {},
+		"properties": {
+			"agent": {
+				"type": "string",
+				"description": "Post-plan implementer: \"build\" (solo simple) or \"orchestrator\" (multi-area / multi-agent). Overrides the complexity heuristic."
+			},
+			"steps": {
+				"type": "integer",
+				"description": "Count of do-now plan steps. When agent is omitted, steps >= 4 selects orchestrator."
+			},
+			"areas": {
+				"type": "integer",
+				"description": "Distinct packages/code areas touched. When agent is omitted, areas >= 3 selects orchestrator."
+			},
+			"multi_agent": {
+				"type": "boolean",
+				"description": "True when the plan needs parallel specialists or task delegation. When agent is omitted, selects orchestrator."
+			}
+		},
 		"additionalProperties": false
 	}`)
+}
+
+// exitPlanArgs are optional exit_plan_mode inputs for implementer routing.
+type exitPlanArgs struct {
+	Agent      string `json:"agent"`
+	Steps      int    `json:"steps"`
+	Areas      int    `json:"areas"`
+	MultiAgent bool   `json:"multi_agent"`
+}
+
+// PickPostPlanAgent chooses build (simple solo) or orchestrator (complex).
+// Explicit agent "build" or "orchestrator" wins; otherwise multi_agent, steps >= 4,
+// or areas >= 3 → orchestrator; else build. Unknown explicit agents fall through
+// to the heuristic.
+func PickPostPlanAgent(agent string, steps, areas int, multiAgent bool) string {
+	switch strings.ToLower(strings.TrimSpace(agent)) {
+	case "build", "orchestrator":
+		return strings.ToLower(strings.TrimSpace(agent))
+	}
+	if multiAgent || steps >= postPlanComplexSteps || areas >= postPlanComplexAreas {
+		return "orchestrator"
+	}
+	return "build"
 }
 
 func (exitPlanModeTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
@@ -81,14 +128,23 @@ func (exitPlanModeTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 		return Result{}, err
 	}
 
+	var parsed exitPlanArgs
+	if len(args) > 0 && string(args) != "null" {
+		if err := json.Unmarshal(args, &parsed); err != nil {
+			return Result{}, fmt.Errorf("exit_plan_mode: invalid args: %w", err)
+		}
+	}
+	target := PickPostPlanAgent(parsed.Agent, parsed.Steps, parsed.Areas, parsed.MultiAgent)
+
 	if tc.AdvancePhase != nil {
 		err := tc.AdvancePhase(ctx)
 		switch {
 		case err == nil:
-			return Result{
-				Title:  "build mode",
-				Output: "Exited plan mode. Advanced to implement phase — you may implement the plan.",
-			}, nil
+			applied, err := switchPostPlanAgent(tc, target)
+			if err != nil {
+				return Result{}, err
+			}
+			return postPlanResult(applied, true), nil
 		case strings.Contains(err.Error(), "declined"):
 			return Result{
 				Title:  "staying in plan mode",
@@ -110,9 +166,9 @@ func (exitPlanModeTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 			Questions: []QuestionItem{{
 				ID:       "exit_plan",
 				Header:   "Exit plan",
-				Question: "Exit plan mode and switch to build to implement?",
+				Question: fmt.Sprintf("Exit plan mode and switch to %s to implement?", target),
 				Options: []QuestionOption{
-					{Label: "Yes", Description: "Leave plan mode and switch to the build agent"},
+					{Label: "Yes", Description: fmt.Sprintf("Leave plan mode and switch to the %s agent", target)},
 					{Label: "No", Description: "Stay in plan mode"},
 				},
 			}},
@@ -132,13 +188,43 @@ func (exitPlanModeTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 		}
 	}
 
-	if err := tc.SwitchAgent("build"); err != nil {
+	applied, err := switchPostPlanAgent(tc, target)
+	if err != nil {
 		return Result{}, err
 	}
-	return Result{
-		Title:  "build mode",
-		Output: "Exited plan mode. Switched to build agent — you may implement the plan.",
-	}, nil
+	return postPlanResult(applied, false), nil
+}
+
+// switchPostPlanAgent queues the implementer. Falls back to build if the
+// preferred target is unknown (e.g. orchestrator not in the agent catalog).
+// Returns the agent actually queued.
+func switchPostPlanAgent(tc *Context, target string) (string, error) {
+	if tc.SwitchAgent == nil {
+		if target == "build" {
+			return "build", nil
+		}
+		return "", fmt.Errorf("exit_plan_mode: SwitchAgent is not configured (cannot switch to %s)", target)
+	}
+	if err := tc.SwitchAgent(target); err != nil {
+		if target != "build" {
+			if err2 := tc.SwitchAgent("build"); err2 == nil {
+				return "build", nil
+			}
+		}
+		return "", err
+	}
+	return target, nil
+}
+
+func postPlanResult(target string, viaPhase bool) Result {
+	title := target + " mode"
+	var output string
+	if viaPhase {
+		output = fmt.Sprintf("Exited plan mode. Advanced to implement phase as %s — you may implement the plan.", target)
+	} else {
+		output = fmt.Sprintf("Exited plan mode. Switched to %s agent — you may implement the plan.", target)
+	}
+	return Result{Title: title, Output: output}
 }
 
 func isYesAnswer(s string) bool {
