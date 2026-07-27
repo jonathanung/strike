@@ -8,10 +8,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
+
+var globalMu sync.Mutex
 
 // SetGlobalDefaults persists non-empty fields into ~/.strike/config,
 // creating it if needed. Fields passed as "" are left unchanged, and
@@ -19,7 +22,10 @@ import (
 // mode is a permissionMode string (default|plan|soft-approve|accept-edits|yolo);
 // empty leaves the stored default unchanged.
 func SetGlobalDefaults(provider, model, agent string, effort protocol.Effort, mode string) error {
-	cfg, err := readGlobalForWrite()
+	globalMu.Lock()
+	defer globalMu.Unlock()
+
+	cfg, unlock, err := readGlobalForWrite()
 	if err != nil {
 		return err
 	}
@@ -35,6 +41,7 @@ func SetGlobalDefaults(provider, model, agent string, effort protocol.Effort, mo
 	if effort != "" {
 		parsed, ok := protocol.ParseEffort(string(effort))
 		if !ok {
+			unlock()
 			return fmt.Errorf("unknown effort %q", effort)
 		}
 		cfg.Effort = parsed
@@ -42,11 +49,12 @@ func SetGlobalDefaults(provider, model, agent string, effort protocol.Effort, mo
 	if mode != "" {
 		parsed, ok := protocol.ParsePermissionMode(mode)
 		if !ok {
+			unlock()
 			return fmt.Errorf("unknown permission mode %q", mode)
 		}
 		cfg.PermissionMode = parsed
 	}
-	return writeGlobal(cfg)
+	return writeGlobal(cfg, unlock)
 }
 
 // SetGlobalTheme persists the preferred TUI theme id into ~/.strike/config.
@@ -55,35 +63,54 @@ func SetGlobalTheme(id string) error {
 	if id == "" {
 		return fmt.Errorf("theme id is required")
 	}
-	cfg, err := readGlobalForWrite()
+	globalMu.Lock()
+	defer globalMu.Unlock()
+
+	cfg, unlock, err := readGlobalForWrite()
 	if err != nil {
 		return err
 	}
 	cfg.Theme = id
-	return writeGlobal(cfg)
+	return writeGlobal(cfg, unlock)
 }
 
-func readGlobalForWrite() (Config, error) {
+func readGlobalForWrite() (Config, func() error, error) {
 	path := GlobalPath()
 	if path == "" {
-		return Config{}, fmt.Errorf("cannot locate home directory")
+		return Config{}, nil, fmt.Errorf("cannot locate home directory")
 	}
+	unlock, err := lockGlobalFile(path)
+	if err != nil {
+		return Config{}, nil, err
+	}
+	var readErr error
+	defer func() {
+		if readErr != nil {
+			unlock()
+		}
+	}()
 	var cfg Config
 	data, err := os.ReadFile(path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return cfg, nil
+		return cfg, unlock, nil
 	case err != nil:
-		return Config{}, err
+		readErr = err
+		return Config{}, nil, err
+	case len(data) == 0:
+		// Lock created the file; treat empty as not existing.
+		return cfg, unlock, nil
 	default:
 		if err := json.Unmarshal(data, &cfg); err != nil {
-			return Config{}, fmt.Errorf("existing %s is not valid JSON (%v) — fix it before saving defaults", path, err)
+			readErr = fmt.Errorf("existing %s is not valid JSON (%v) — fix it before saving defaults", path, err)
+			return Config{}, nil, readErr
 		}
-		return cfg, nil
+		return cfg, unlock, nil
 	}
 }
 
-func writeGlobal(cfg Config) error {
+func writeGlobal(cfg Config, unlock func() error) error {
+	defer unlock()
 	path := GlobalPath()
 	if path == "" {
 		return fmt.Errorf("cannot locate home directory")
@@ -95,7 +122,34 @@ func writeGlobal(cfg Config) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(out, '\n'), 0o644)
+	payload := append(out, '\n')
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".config-")
+	if err != nil {
+		return fmt.Errorf("create temp config: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := tmp.Write(payload); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write temp config: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("fsync temp config: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp config: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("rename temp config: %w", err)
+	}
+	// Fsync the directory so the rename is durable.
+	if dirFd, err := os.Open(dir); err == nil {
+		dirFd.Sync()
+		dirFd.Close()
+	}
+	return nil
 }
 
 // ProjectPath is the project config file, <workDir>/.strike/config (JSON).
