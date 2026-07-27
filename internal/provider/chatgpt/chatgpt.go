@@ -91,7 +91,7 @@ type inputItem struct {
 	Arguments string `json:"arguments,omitempty"`
 	CallID    string `json:"call_id,omitempty"`
 	// function_call_output
-	Output string `json:"output,omitempty"`
+	Output *string `json:"output,omitempty"`
 }
 
 type contentBlock struct {
@@ -258,10 +258,11 @@ func toResponsesRequest(req provider.Request) responsesRequest {
 				})
 			}
 		case provider.RoleTool:
+			output := m.ToolResult.Output
 			out.Input = append(out.Input, inputItem{
 				Type:   "function_call_output",
 				CallID: m.ToolResult.CallID,
-				Output: m.ToolResult.Output,
+				Output: &output,
 			})
 		}
 	}
