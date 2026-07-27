@@ -11,7 +11,8 @@ import (
 	"github.com/bmatcuk/doublestar/v4"
 )
 
-const globMaxResults = 200
+// globMaxResults caps paths returned per call (tighten the pattern if truncated).
+const globMaxResults = 100
 
 type globTool struct{}
 

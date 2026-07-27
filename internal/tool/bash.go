@@ -13,7 +13,9 @@ import (
 const (
 	bashDefaultTimeout = 2 * time.Minute
 	bashMaxTimeout     = 10 * time.Minute
-	bashMaxOutput      = 30000
+	// bashMaxOutput caps retained stdout+stderr bytes per call (token efficiency).
+	// Agents can re-run with head/tail/grep when they need a different slice.
+	bashMaxOutput = 16_000
 )
 
 type bashTool struct{}
@@ -31,7 +33,7 @@ Usage notes:
 - Explain non-trivial commands that change the user's system before running them.
 - Independent commands may be issued as parallel tool calls; chain dependent commands with && in one call.
 - Each invocation starts at the session working directory (workspace/worktree root). A cd inside one call does not affect later bash or other tools — use (cd subdir && …) or && in the same command when you need a subdirectory.
-- Optional timeoutMs (default 120000, max 600000). Long output is truncated.
+- Optional timeoutMs (default 120000, max 600000). Output is capped at ~16KB and truncated with a byte-total note.
 - Do not use bash to communicate with the user; send a normal assistant message instead.`
 }
 

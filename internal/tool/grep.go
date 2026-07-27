@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	grepMaxMatches  = 200
-	grepMaxFileSize = 1 << 20 // 1MB
+	// grepMaxMatches caps match lines returned (narrow pattern/include if truncated).
+	grepMaxMatches  = 100
+	grepMaxFileSize = 1 << 20 // 1MB per file scanned
 	grepMaxLineLen  = 400
 )
 

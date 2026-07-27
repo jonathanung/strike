@@ -28,7 +28,9 @@ const (
 	ProcessStatusError    ProcessStatus = "error"
 )
 
-const processDefaultMaxOutput = 30000
+// processDefaultMaxOutput caps retained stdout+stderr when MaxOutput is unset.
+// Kept in lockstep with bashMaxOutput for consistent shell/tool process budgets.
+const processDefaultMaxOutput = 16_000
 
 // ProcessSpec describes a bounded subprocess.
 type ProcessSpec struct {

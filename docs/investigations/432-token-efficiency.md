@@ -63,13 +63,18 @@ Compaction is real and useful (manual `/compact` and threshold/overflow paths), 
 
 ### Tool output caps: produce-time only
 
-Tools bound output when results are produced (examples):
+Tools bound output when results are produced (defaults after #439):
 
-- `internal/tool/bash.go` — `bashMaxOutput = 30000` (30KB)
-- `internal/tool/process.go` — `processDefaultMaxOutput = 30000`
-- `internal/tool/read.go` — `readDefaultLimit = 2000` lines, `readMaxLineLen = 2000`
+| Tool / helper | Constant | Default |
+| --- | --- | --- |
+| bash | `bashMaxOutput` | 16_000 bytes |
+| process (shared runner) | `processDefaultMaxOutput` | 16_000 bytes |
+| read | `readDefaultLimit` / `readMaxLineLen` | 500 lines / 1000 chars |
+| grep | `grepMaxMatches` | 100 matches |
+| glob | `globMaxResults` | 100 paths |
+| webfetch | `webfetchMaxOutputRunes` / `webfetchMaxBody` | 30_000 runes / 2 MiB download |
 
-These caps prevent a single call from being unbounded. They do **not** shrink results already stored in model history. N large bash results remain N × ~30KB of re-billed input until compaction.
+These caps prevent a single call from being unbounded. They do **not** shrink results already stored in model history — prune (#433) blanks older results. Tighter produce-time caps reduce **fresh** entry size between prune cycles.
 
 ### Tool schemas and guidance every request
 
@@ -169,14 +174,14 @@ Older tool parts are marked `time.compacted`; protected tools (e.g. `skill`) can
 | 2 | **HIGH** | No request-side prompt cache breakpoints (Anthropic/OpenCode peers set them deliberately) |
 | 3 | **MEDIUM** (was HIGH) | Coarse compaction still late (~80%); prune now handles continuous hygiene under that ceiling |
 | 4 | **MEDIUM** | All tool schemas on every request + system tool-guidance duplication |
-| 5 | **MEDIUM** | Large per-call caps still accumulate (e.g. 30KB bash × many calls) |
+| 5 | **MEDIUM** → **reduced** | Large per-call caps still accumulate; #439 tightened produce-time defaults (e.g. bash 16KB) |
 | 6 | **LOW / ruled out as primary** | Subagent parent-history duplication (does not happen); “calling tools too often” alone without replay economics |
 
 ---
 
 ## Illustrative cost model (simple math)
 
-Assume 10 tool rounds, each producing a **5KB** tool result (well under bash’s 30KB cap). Ignore system/tools fixed cost for a moment.
+Assume 10 tool rounds, each producing a **5KB** tool result (well under bash’s produce-time cap). Ignore system/tools fixed cost for a moment.
 
 **Strike (no prune):** each stream re-sends all prior tool results:
 
@@ -287,6 +292,8 @@ This document began as investigation-only; the same PR now also ships tool-resul
 - Walk backward; skip tool results inside the last 2 real user turns; protect ~40k tokens of newer eligible tool output; blank older bodies to `[Old tool result content cleared]` when savings exceed 20k tokens
 - Preserves tool_use/tool_result pairing; protects `skill` tool output; skips already-cleared results
 - In-memory model-facing history only (JSONL restore still has full outputs; prune re-applies on subsequent streams)
+
+**Produce-time caps (#439):** tightened bash/process/read/grep/glob/webfetch defaults (see table above) so fresh tool results enter history smaller; prune still clears stale bodies.
 
 **Deferred follow-ups:** Anthropic `cache_control` breakpoints; deferred tool schemas / toolsearch rewrite; compaction threshold tuning.
 
