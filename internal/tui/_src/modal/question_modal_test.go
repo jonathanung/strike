@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -148,7 +149,8 @@ func TestQuestionModalMultiStep(t *testing.T) {
 	if !strings.Contains(view, "confirm") {
 		t.Errorf("confirm view missing title:\n%s", view)
 	}
-	if !strings.Contains(view, "one") || !strings.Contains(view, "y") {
+	// Match answer tokens as whole words so "your" does not satisfy "y".
+	if !strings.Contains(view, "one") || !regexp.MustCompile(`\by\b`).MatchString(view) {
 		t.Errorf("confirm view missing answers:\n%s", view)
 	}
 
@@ -377,7 +379,27 @@ func TestQuestionModalHopBetweenQuestions(t *testing.T) {
 		t.Fatalf("phase=%v index=%d, want answer@2", qm.phase, qm.index)
 	}
 
-	// Finish again and submit.
+	// Hop back to q1, then right must visit q2 (not skip to confirm).
+	next, cmd = qm.update(questionKey("shift+tab"))
+	qm = expectQuestionModal(t, next, "back to q2")
+	runQuestionCmd(t, cmd)
+	next, cmd = qm.update(questionKey("shift+tab"))
+	qm = expectQuestionModal(t, next, "back to q1")
+	runQuestionCmd(t, cmd)
+	if qm.index != 0 {
+		t.Fatalf("index = %d, want 0", qm.index)
+	}
+	next, cmd = qm.update(questionKey("right"))
+	qm = expectQuestionModal(t, next, "right stays on q2 when all filled")
+	runQuestionCmd(t, cmd)
+	if qm.phase != questionPhaseAnswer || qm.index != 1 {
+		t.Fatalf("phase=%v index=%d, want answer@1 (not confirm)", qm.phase, qm.index)
+	}
+
+	// Advance to end and submit with a changed last answer.
+	next, cmd = qm.update(questionKey("right"))
+	qm = expectQuestionModal(t, next, "right to q3 again")
+	runQuestionCmd(t, cmd)
 	next, cmd = qm.update(questionKey("1"))
 	qm = expectQuestionModal(t, next, "re-confirm")
 	runQuestionCmd(t, cmd)

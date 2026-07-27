@@ -277,17 +277,19 @@ func (m *questionModal) goNext() (modal, tea.Cmd) {
 	if m.index < 0 || m.index >= len(m.filled) || !m.filled[m.index] {
 		return m, nil
 	}
-	if m.allFilled() {
-		m.phase = questionPhaseConfirm
-		m.input.Blur()
-		return m, nil
-	}
+	// Prefer the next prompt so hop stays linear even when the batch is already
+	// fully answered (e.g. editing q1 after confirm should reach q2, not skip).
 	if m.index+1 < len(m.req.Questions) {
 		m.index++
 		m.prepareStep()
 		if m.isFreeform() {
 			return m, m.input.Focus()
 		}
+		return m, nil
+	}
+	if m.allFilled() {
+		m.phase = questionPhaseConfirm
+		m.input.Blur()
 	}
 	return m, nil
 }
