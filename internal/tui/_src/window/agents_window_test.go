@@ -36,7 +36,7 @@ func TestAgentsWindowEmptyState(t *testing.T) {
 func TestAgentsPaneFooterDerivesFromKeyMap(t *testing.T) {
 	footer := ansi.Strip(agentsPaneFooter(theme.Default()))
 	ak := defaultAgentsKeyMap()
-	for _, b := range []key.Binding{ak.Spawn, ak.Open, ak.Interrupt, ak.Move, ak.Filter} {
+	for _, b := range []key.Binding{ak.Spawn, ak.Open, ak.Interrupt, ak.Hide, ak.Move, ak.Filter} {
 		h := b.Help()
 		if !strings.Contains(footer, h.Key) {
 			t.Errorf("footer missing key %q: %q", h.Key, footer)
@@ -44,6 +44,11 @@ func TestAgentsPaneFooterDerivesFromKeyMap(t *testing.T) {
 		if h.Desc != "" && !strings.Contains(footer, h.Desc) {
 			t.Errorf("footer missing desc %q: %q", h.Desc, footer)
 		}
+	}
+	// Help must document non-destructive hide (not delete/interrupt).
+	hide := ak.Hide.Help()
+	if !strings.Contains(hide.Desc, "hide") || strings.Contains(hide.Desc, "delete") {
+		t.Errorf("Hide help = %q, want non-destructive hide wording", hide.Desc)
 	}
 }
 
@@ -338,10 +343,11 @@ func agentsWindowFrom(t *testing.T, m Model) agentsWindow {
 
 // fakeRoots is a scriptable host.Roots for TUI tests.
 type fakeRoots struct {
-	active string
-	live   []string
-	dirs   map[string]string
-	err    error
+	active      string
+	live        []string
+	dirs        map[string]string
+	err         error
+	interrupted []string
 }
 
 func (f *fakeRoots) ActiveID() string { return f.active }
@@ -371,10 +377,11 @@ func (f *fakeRoots) Spawn() (string, error) {
 	return id, nil
 }
 func (f *fakeRoots) Open(id string) error { return f.Activate(id) }
-func (f *fakeRoots) Interrupt(string) error {
+func (f *fakeRoots) Interrupt(id string) error {
 	if f.err != nil {
 		return f.err
 	}
+	f.interrupted = append(f.interrupted, id)
 	return nil
 }
 func (f *fakeRoots) WorkDir(id string) string {
@@ -639,5 +646,274 @@ func TestAgentsWindowMultiRootWithFilters(t *testing.T) {
 	roots := agentsVisibleIDs(w)
 	if len(roots) != 3 {
 		t.Fatalf("roots = %v", roots)
+	}
+}
+
+func TestAgentsWindowHideKeyEmitsMsg(t *testing.T) {
+	w := newAgentsWindow().resize(40, 6).(agentsWindow)
+	next, _ := w.update(agentsStateMsg{
+		activeID: "root-a",
+		roots: []agentsRootSnap{
+			{ID: "root-a", Title: "a", State: theme.AgentStateReady},
+			{ID: "root-b", Title: "b", State: theme.AgentStateReady},
+		},
+	})
+	w = next.(agentsWindow)
+	next, _ = w.update(tea.KeyMsg{Type: tea.KeyDown})
+	w = next.(agentsWindow)
+	next, cmd := w.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	if cmd == nil {
+		t.Fatal("d produced no cmd")
+	}
+	msg := cmd()
+	hm, ok := msg.(agentsHideMsg)
+	if !ok || hm.sessionID != "root-b" {
+		t.Fatalf("hide msg = %#v, want agentsHideMsg{root-b}", msg)
+	}
+	_ = next
+}
+
+func TestAgentsHideRemovesFromPaneKeepsSession(t *testing.T) {
+	fs := newFakeSessions()
+	rootLog := mustSessionJSONL(t,
+		protocol.UserMessage{Text: "done work"},
+		protocol.TextDelta{Text: "finished reply"},
+	)
+	fs.put(host.Session{ID: "root-a", Title: "active"}, nil)
+	fs.put(host.Session{ID: "root-b", Title: "completed task"}, rootLog)
+
+	fr := &fakeRoots{
+		active: "root-a",
+		live:   []string{"root-a", "root-b"},
+	}
+	m, _ := newAppTestModel(nil, nil)
+	m.sessionID = "root-a"
+	m.services.Roots = fr
+	m.services.Sessions = fs
+	m.roots = map[string]*rootPane{
+		"root-b": {
+			sessionID:  "root-b",
+			titleTopic: "completed task",
+			toolByID:   map[string]*toolCell{},
+			cells:      []cell{&userCell{text: "done work"}},
+		},
+	}
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	reg, ok := m.windows.activate(agentsWindowID)
+	if !ok {
+		t.Fatal("activate agents")
+	}
+	m.windows = reg
+	m.focus = focusRight
+	m.windows, _ = m.windows.broadcast(m.agentsStateSnapshot())
+
+	// Hide completed background root.
+	m = updateApp(t, m, agentsHideMsg{sessionID: "root-b"})
+	if !m.isAgentHidden("root-b") {
+		t.Fatal("root-b should be hidden")
+	}
+	if m.noticeErr || !strings.Contains(m.notice, "session kept") {
+		t.Fatalf("notice = %q err=%v", m.notice, m.noticeErr)
+	}
+	// Gone from pane snapshot without restart.
+	snap := m.agentsStateSnapshot()
+	for _, r := range snap.roots {
+		if r.ID == "root-b" {
+			t.Fatalf("hidden root still in snapshot: %+v", snap.roots)
+		}
+	}
+	aw := agentsWindowFrom(t, m)
+	plain := ansi.Strip(aw.view(theme.Default()))
+	if strings.Contains(plain, "completed task") {
+		t.Errorf("agents pane still shows hidden root: %q", plain)
+	}
+	// Other root unaffected.
+	foundA := false
+	for _, r := range snap.roots {
+		if r.ID == "root-a" {
+			foundA = true
+		}
+	}
+	if !foundA {
+		t.Fatalf("active root missing from snapshot: %+v", snap.roots)
+	}
+	// Persistence invariants: no delete, no interrupt, JSONL intact.
+	if _, ok := fs.byID["root-b"]; !ok {
+		t.Fatal("session deleted from store")
+	}
+	data, err := fs.ReplayJSONL("root-b")
+	if err != nil || !strings.Contains(string(data), "finished reply") {
+		t.Fatalf("ReplayJSONL = %q err=%v", data, err)
+	}
+	if len(fr.interrupted) != 0 {
+		t.Fatalf("interrupt called: %v", fr.interrupted)
+	}
+	// Still listed by /session.
+	next, _ := m.handleCommand("/session")
+	nm := next.(Model)
+	sm, ok := nm.modal.(*sessionModal)
+	if !ok || sm == nil {
+		t.Fatalf("modal = %T", nm.modal)
+	}
+	found := false
+	for _, s := range sm.all {
+		if s.ID == "root-b" {
+			found = true
+			if s.Title != "completed task" {
+				t.Errorf("session title = %q", s.Title)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("/session missing root-b: %+v", sm.all)
+	}
+	// LiveIDs unchanged (still in-process; only pane filter).
+	lives := fr.LiveIDs()
+	if len(lives) != 2 {
+		t.Fatalf("LiveIDs = %v, want both roots still live", lives)
+	}
+}
+
+func TestAgentsHideChildCompleted(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m.sessionID = "root-a"
+	m.children = []childActivity{
+		{sessionID: "child-done", parentID: "root-a", agent: "explore", status: string(protocol.ChildStatusCompleted)},
+		{sessionID: "child-run", parentID: "root-a", agent: "build", status: "running"},
+	}
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = updateApp(t, m, agentsHideMsg{sessionID: "child-done"})
+	if !m.isAgentHidden("child-done") {
+		t.Fatal("child-done not hidden")
+	}
+	snap := m.agentsStateSnapshot()
+	if len(snap.roots) != 1 {
+		t.Fatalf("roots = %+v", snap.roots)
+	}
+	for _, ch := range snap.roots[0].Children {
+		if ch.sessionID == "child-done" {
+			t.Fatal("hidden child still in snapshot")
+		}
+		if ch.sessionID == "child-run" {
+			// ok
+		}
+	}
+	// Sibling still present.
+	foundRun := false
+	for _, ch := range snap.roots[0].Children {
+		if ch.sessionID == "child-run" {
+			foundRun = true
+		}
+	}
+	if !foundRun {
+		t.Fatal("running sibling removed")
+	}
+}
+
+func TestAgentsHideIneligibleRunningAndActive(t *testing.T) {
+	fr := &fakeRoots{
+		active: "root-a",
+		live:   []string{"root-a", "root-b"},
+	}
+	m, _ := newAppTestModel(nil, nil)
+	m.sessionID = "root-a"
+	m.services.Roots = fr
+	m.roots = map[string]*rootPane{
+		"root-b": {sessionID: "root-b", toolByID: map[string]*toolCell{}, turnRunning: true},
+	}
+	m.children = []childActivity{
+		{sessionID: "child-run", parentID: "root-a", agent: "explore", status: "running"},
+	}
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	// Active root blocked.
+	m = updateApp(t, m, agentsHideMsg{sessionID: "root-a"})
+	if m.isAgentHidden("root-a") {
+		t.Fatal("active root must not hide")
+	}
+	if !m.noticeErr || !strings.Contains(m.notice, "active") {
+		t.Fatalf("active notice = %q", m.notice)
+	}
+
+	// Running background root blocked.
+	m = updateApp(t, m, agentsHideMsg{sessionID: "root-b"})
+	if m.isAgentHidden("root-b") {
+		t.Fatal("running root must not hide")
+	}
+	if !m.noticeErr || !strings.Contains(m.notice, "running") {
+		t.Fatalf("running root notice = %q", m.notice)
+	}
+	if len(fr.interrupted) != 0 {
+		t.Fatalf("interrupt on ineligible hide: %v", fr.interrupted)
+	}
+
+	// Running child blocked.
+	m = updateApp(t, m, agentsHideMsg{sessionID: "child-run"})
+	if m.isAgentHidden("child-run") {
+		t.Fatal("running child must not hide")
+	}
+	if !m.noticeErr || !strings.Contains(m.notice, "running") {
+		t.Fatalf("running child notice = %q", m.notice)
+	}
+}
+
+func TestAgentsHideRevealWhenBusy(t *testing.T) {
+	fr := &fakeRoots{
+		active: "root-a",
+		live:   []string{"root-a", "root-b"},
+	}
+	m, _ := newAppTestModel(nil, nil)
+	m.sessionID = "root-a"
+	m.services.Roots = fr
+	m.roots = map[string]*rootPane{
+		"root-b": {sessionID: "root-b", toolByID: map[string]*toolCell{}},
+	}
+	m.agentsHidden = map[string]bool{"root-b": true}
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	// Background turn starts → auto-reveal.
+	m = updateApp(t, m, engineEventMsg{ev: protocol.TurnStarted{
+		Correlation: protocol.Correlation{SessionID: "root-b"},
+	}})
+	_ = m.broadcastAgentsState()
+	if m.isAgentHidden("root-b") {
+		t.Fatal("busy hidden root should auto-reveal")
+	}
+	snap := m.agentsStateSnapshot()
+	found := false
+	for _, r := range snap.roots {
+		if r.ID == "root-b" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("revealed root missing: %+v", snap.roots)
+	}
+}
+
+func TestAgentsHideUnhideOnActivate(t *testing.T) {
+	fr := &fakeRoots{
+		active: "root-a",
+		live:   []string{"root-a", "root-b"},
+	}
+	m, _ := newAppTestModel(nil, nil)
+	m.sessionID = "root-a"
+	m.services.Roots = fr
+	m.roots = map[string]*rootPane{
+		"root-b": {
+			sessionID:  "root-b",
+			titleTopic: "beta",
+			toolByID:   map[string]*toolCell{},
+			cells:      []cell{&userCell{text: "from b"}},
+		},
+	}
+	m.agentsHidden = map[string]bool{"root-b": true}
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = updateApp(t, m, agentsOpenMsg{sessionID: "root-b"})
+	if m.sessionID != "root-b" {
+		t.Fatalf("sessionID = %q", m.sessionID)
+	}
+	if m.isAgentHidden("root-b") {
+		t.Fatal("activated root should unhide")
 	}
 }

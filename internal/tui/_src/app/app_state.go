@@ -275,17 +275,16 @@ func recentVisualizerTools(cells []cell, limit int) []visualizerTool {
 }
 
 // agentsStateSnapshot pushes multi-root tree data into the agents window.
+// Hidden ids (agentsHidden) are omitted from the tree only — LiveIDs and
+// durable session storage are unchanged.
 func (m Model) agentsStateSnapshot() agentsStateMsg {
 	// Ensure active root is visible to the tree builder.
 	roots := m.liveRootIDs()
-	type rootSnap struct {
-		id       string
-		title    string
-		state    theme.AgentState
-		children []childActivity
-	}
 	snaps := make([]agentsRootSnap, 0, len(roots))
 	for _, id := range roots {
+		if m.isAgentHidden(id) {
+			continue
+		}
 		var kids []childActivity
 		if id == m.sessionID {
 			kids = append([]childActivity(nil), m.children...)
@@ -294,6 +293,7 @@ func (m Model) agentsStateSnapshot() agentsStateMsg {
 				kids = append([]childActivity(nil), p.children...)
 			}
 		}
+		kids = m.filterHiddenChildren(kids)
 		snaps = append(snaps, agentsRootSnap{
 			ID:       id,
 			Title:    m.rootTitleLabel(id),
@@ -310,6 +310,146 @@ func (m Model) agentsStateSnapshot() agentsStateMsg {
 		viewingID: viewing,
 		roots:     snaps,
 	}
+}
+
+func (m Model) isAgentHidden(id string) bool {
+	id = strings.TrimSpace(id)
+	if id == "" || m.agentsHidden == nil {
+		return false
+	}
+	return m.agentsHidden[id]
+}
+
+func (m Model) filterHiddenChildren(kids []childActivity) []childActivity {
+	if len(kids) == 0 || m.agentsHidden == nil {
+		return kids
+	}
+	out := make([]childActivity, 0, len(kids))
+	for _, ch := range kids {
+		if m.agentsHidden[ch.sessionID] {
+			continue
+		}
+		out = append(out, ch)
+	}
+	return out
+}
+
+// unhideAgent clears an ephemeral Agents-pane hide so the session reappears.
+func (m *Model) unhideAgent(id string) {
+	id = strings.TrimSpace(id)
+	if id == "" || m.agentsHidden == nil {
+		return
+	}
+	delete(m.agentsHidden, id)
+}
+
+// revealBusyHiddenAgents clears hide flags for roots/children that need the
+// user or are running so a dismissed row cannot silently bury an active task.
+func (m *Model) revealBusyHiddenAgents() {
+	if m.agentsHidden == nil || len(m.agentsHidden) == 0 {
+		return
+	}
+	for id := range m.agentsHidden {
+		if m.agentBusyForReveal(id) {
+			delete(m.agentsHidden, id)
+		}
+	}
+}
+
+func (m Model) agentBusyForReveal(id string) bool {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false
+	}
+	for _, live := range m.liveRootIDs() {
+		if live != id {
+			continue
+		}
+		st := m.rootAgentState(id)
+		return st == theme.AgentStateWorking || st == theme.AgentStateAttention
+	}
+	if ch, ok := m.lookupChildActivity(id); ok {
+		return ch.status == "running"
+	}
+	return false
+}
+
+func (m Model) lookupChildActivity(id string) (childActivity, bool) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return childActivity{}, false
+	}
+	for _, ch := range m.children {
+		if ch.sessionID == id {
+			return ch, true
+		}
+	}
+	if m.roots != nil {
+		for _, p := range m.roots {
+			if p == nil {
+				continue
+			}
+			for _, ch := range p.children {
+				if ch.sessionID == id {
+					return ch, true
+				}
+			}
+		}
+	}
+	return childActivity{}, false
+}
+
+// canHideAgentFromPane reports whether id may leave the Agents pane. Running
+// and active roots are blocked so hide never interrupts or buries live work.
+func (m Model) canHideAgentFromPane(id string) (ok bool, notice string) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false, "nothing selected"
+	}
+	if id == m.sessionID {
+		return false, "cannot hide the active session"
+	}
+	for _, live := range m.liveRootIDs() {
+		if live != id {
+			continue
+		}
+		st := m.rootAgentState(id)
+		if st == theme.AgentStateWorking || st == theme.AgentStateAttention {
+			return false, "cannot hide a running agent"
+		}
+		return true, ""
+	}
+	if ch, found := m.lookupChildActivity(id); found {
+		if ch.status == "running" {
+			return false, "cannot hide a running agent"
+		}
+		return true, ""
+	}
+	return false, "session not in agents pane"
+}
+
+// handleAgentsHide dismisses id from the Agents pane only. Never deletes JSONL
+// or sends Interrupt.
+func (m *Model) handleAgentsHide(id string) tea.Cmd {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil
+	}
+	if ok, reason := m.canHideAgentFromPane(id); !ok {
+		m.setNotice(reason, true)
+		return nil
+	}
+	// Close a child transcript view of the hidden id so the left pane does not
+	// keep showing a row that just left the tree.
+	if m.viewingID == id && m.viewingChild() {
+		_ = m.closeSessionView()
+	}
+	if m.agentsHidden == nil {
+		m.agentsHidden = map[string]bool{}
+	}
+	m.agentsHidden[id] = true
+	m.setNotice("hidden from agents pane (session kept)", false)
+	return m.broadcastAgentsState()
 }
 
 // handleAgentsOpen activates a root or opens a child transcript from the tree.
@@ -349,6 +489,7 @@ func (m *Model) handleAgentsOpen(msg agentsOpenMsg) tea.Cmd {
 
 // broadcastAgentsState pushes current subagent rows to every right-pane window.
 func (m *Model) broadcastAgentsState() tea.Cmd {
+	m.revealBusyHiddenAgents()
 	var cmd tea.Cmd
 	m.windows, cmd = m.windows.broadcast(m.agentsStateSnapshot())
 	return tea.Batch(cmd, m.broadcastVisualizerState())

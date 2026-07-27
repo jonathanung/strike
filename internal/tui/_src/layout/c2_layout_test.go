@@ -342,9 +342,10 @@ func TestAgentsPaneFooterOnlyWhenAgentsWindow(t *testing.T) {
 		t.Fatal("activate agents")
 	}
 	m.windows = reg
-	// Wide enough that Panel footer chrome can fit the full agents hint row.
-	agentsPane := ansi.Strip(m.rightPaneSingle(90, 12, false, m.windows.active()))
-	for _, b := range []key.Binding{ak.Spawn, ak.Open, ak.Interrupt, ak.Move, ak.Filter} {
+	// Wide enough that Panel footer chrome can fit the full agents hint row
+	// (n/enter/x/d/j/k/f including "hide from pane" + "cycle filter").
+	agentsPane := ansi.Strip(m.rightPaneSingle(120, 12, false, m.windows.active()))
+	for _, b := range []key.Binding{ak.Spawn, ak.Open, ak.Interrupt, ak.Hide, ak.Move, ak.Filter} {
 		h := b.Help()
 		if !strings.Contains(agentsPane, h.Key) {
 			t.Errorf("agents pane missing key %q: %q", h.Key, agentsPane)
@@ -354,7 +355,7 @@ func TestAgentsPaneFooterOnlyWhenAgentsWindow(t *testing.T) {
 		}
 	}
 	// Compact/borderless drops panel chrome footer (open/interrupt not in empty body).
-	compact := ansi.Strip(m.rightPaneSingle(90, 12, true, m.windows.active()))
+	compact := ansi.Strip(m.rightPaneSingle(120, 12, true, m.windows.active()))
 	if strings.Contains(compact, openHint) {
 		t.Errorf("compact agents pane still shows chrome footer: %q", compact)
 	}
