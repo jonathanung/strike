@@ -4,9 +4,9 @@ import "strings"
 
 // Model-facing tool-result feedback. The engine settles blocked, denied,
 // canceled, and other non-success tool calls by appending a RoleTool message
-// with these texts so the model can course-correct. Permission denials, user
-// rejects, hook blocks, and phase bounces should use these helpers rather than
-// inventing ad-hoc strings.
+// with these texts. Hard permission denials and hook blocks feed back so the
+// model can course-correct; interactive user rejects also use these helpers
+// for the settled tool result, then the engine interrupts the turn.
 
 // ToolFeedbackPermissionDenied explains a hard ruleset (or profile) deny.
 // reason is optional detail (e.g. "write is not allowed for this agent").

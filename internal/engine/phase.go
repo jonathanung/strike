@@ -10,6 +10,7 @@ import (
 
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike-cli/internal/question"
 )
 
 const phaseCheckTimeout = 30 * time.Second
@@ -139,7 +140,9 @@ func (e *Engine) runExitGate(ctx context.Context, phase config.Phase) error {
 			answer = strings.TrimSpace(answers[0])
 		}
 		if !isYesGateAnswer(answer) {
-			return fmt.Errorf("user declined leaving phase %q", phase.Name)
+			return &question.RejectedError{
+				Message: fmt.Sprintf("User declined leaving phase %q.", phase.Name),
+			}
 		}
 		return nil
 	case config.GateCheck:

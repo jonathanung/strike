@@ -73,15 +73,13 @@ func TestExitPlanModeAdvancePhase(t *testing.T) {
 
 func TestExitPlanModeAdvanceDeclined(t *testing.T) {
 	tc := allowAll(t.TempDir())
+	decline := errors.New("user declined leaving phase \"plan\"")
 	tc.AdvancePhase = func(context.Context) error {
-		return errors.New("user declined leaving phase \"plan\"")
+		return decline
 	}
-	res, err := NewExitPlanMode().Execute(context.Background(), mustJSON(t, map[string]any{}), tc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.Title != "staying in plan mode" {
-		t.Errorf("title = %q", res.Title)
+	_, err := NewExitPlanMode().Execute(context.Background(), mustJSON(t, map[string]any{}), tc)
+	if !errors.Is(err, decline) {
+		t.Fatalf("err = %v, want decline error", err)
 	}
 }
 
@@ -264,18 +262,16 @@ func TestExitPlanModeNoStays(t *testing.T) {
 	tc.AskUser = func(context.Context, QuestionRequest) (QuestionResponse, error) {
 		return QuestionResponse{Answers: []string{"No"}}, nil
 	}
-	res, err := NewExitPlanMode().Execute(context.Background(), mustJSON(t, map[string]any{}), tc)
-	if err != nil {
-		t.Fatal(err)
+	_, err := NewExitPlanMode().Execute(context.Background(), mustJSON(t, map[string]any{}), tc)
+	var rejected *UserRejectedError
+	if !errors.As(err, &rejected) {
+		t.Fatalf("err = %v, want *UserRejectedError", err)
 	}
 	if switched != "" {
 		t.Errorf("SwitchAgent called with %q, want no switch", switched)
 	}
-	if res.Title != "staying in plan mode" {
-		t.Errorf("title = %q", res.Title)
-	}
-	if !strings.Contains(res.Output, "declined") && !strings.Contains(res.Output, "Remaining") {
-		t.Errorf("output = %q", res.Output)
+	if !strings.Contains(rejected.Message, "declined") && !strings.Contains(rejected.Message, "Remaining") {
+		t.Errorf("message = %q", rejected.Message)
 	}
 }
 

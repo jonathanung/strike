@@ -55,6 +55,8 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/upgrade":          {"install the latest release and restart", "", commandSourceBuiltin},
 		"/init":             {"create or update project AGENTS.md", "", commandSourceBuiltin},
 		"/mcp":              {"MCP servers: status, retry, disable", "[retry [name]|disable <name>]", commandSourceBuiltin},
+		"/exit":             {"quit strike", "", commandSourceBuiltin},
+		"/quit":             {"quit strike", "", commandSourceBuiltin},
 		"/review":           {"review a change", "$ARGUMENTS", commandSourceSkill},
 		"/explain":          {"explain code", "", commandSourceSkill},
 	}
@@ -81,7 +83,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 }
 
 func TestValidSkillNameRejectsReservedBuiltinsIncludingMDRead(t *testing.T) {
-	for _, name := range []string{"provider", "model", "effort", "autonomy", "mode", "auth", "agent", "fast", "vim", "nano", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "export", "help", "keys", "memory", "issues", "goal", "loop", "context", "effective-prompt", "cost", "upgrade", "init", "mcp"} {
+	for _, name := range []string{"provider", "model", "effort", "autonomy", "mode", "auth", "agent", "fast", "vim", "nano", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "export", "help", "keys", "memory", "issues", "goal", "loop", "context", "effective-prompt", "cost", "upgrade", "init", "mcp", "exit", "quit"} {
 		if validSkillName(name) {
 			t.Errorf("validSkillName(%q) = true, want false for reserved builtin", name)
 		}
