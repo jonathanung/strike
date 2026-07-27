@@ -14,18 +14,19 @@ For agents developing strike. Authoring skills/docs may use this pipeline; apply
 - **Stop-and-ask:** no write access; `gh` missing; issue already has an open PR you did not create (attach or ask — no duplicate). Dirty primary is fine for `git worktree add` from `origin/main` — do not clean/stash primary WIP.
 
 ## Workflow
-0. **Orient** — `gh issue view N` (+ comments). Read `AGENTS.md` + `docs/ARCHITECTURE.md` for boundaries.
+0. **Orient** — `gh issue view N` (+ comments). Read `AGENTS.md` + `docs/ARCHITECTURE.md` for boundaries. Note issue headers (`wave`/`depends`/`conflicts`/`priority`) if present.
 1. **Research** — map issue→packages; read code + nearest tests. Optional local `.plan/features.md` / `FEATURES_STATUS.md` **if present** (never block if missing). State acceptance criteria bullets. Stop-and-ask if ambiguous.
 2. **Worktree** — create/enter; confirm `pwd` + branch before edits.
-3. **Plan** — smallest correct change; no drive-by refactors.
+3. **Plan** — smallest correct change; no drive-by refactors. Assign **risk tier A/B/C** (see Verification tiers).
 4. **Implement** — worktree only; load sibling skills when domain matches.
 5. **Test** — load `write-go-tests` when behavior changes.
-6. **Validate** — load `test-and-validate`; CI-equivalent gates; that skill’s report format.
-7. **Ship** — commit, push `origin/<branch>`, PR with `Fixes #N`.
-8. **Review loop** — spawn review agent(s); post findings as PR review comments; address them; re-review until merge-ready (see below).
-9. **Babysit CI** — fix branch-related failures; re-push; re-enter review loop after material code changes.
-10. **Merge** — only when merge gates pass (below).
-11. **Cleanup** — remove worktree after merge; leave cwd outside deleted tree.
+6. **Validate** — load `test-and-validate` for the **tier gate**; smoke when applicable.
+7. **Sync main** — if the PR will be open >~1h or `origin/main` moved, `git fetch origin main && git merge origin/main` then re-run tier gate before/at push.
+8. **Ship** — commit, push `origin/<branch>`, PR with `Fixes #N`.
+9. **Review loop** — tier-scaled (below); post findings; address; re-review until merge-ready.
+10. **Babysit CI** — fix branch-related failures; re-push; re-enter review loop after material code changes.
+11. **Merge** — only when merge gates pass (below).
+12. **Cleanup** — remove worktree after merge; leave cwd outside deleted tree.
 
 ## Worktree setup
 ```sh
@@ -51,14 +52,25 @@ git rev-parse --abbrev-ref HEAD   # must be $BRANCH
 ```
 Refuse Write/Edit under primary checkout for issue implementation.
 
-## Local verification
-CI-equivalent — **always** before push (not softer than CI):
-```sh
-test -z "$(gofmt -l .)"
-make test && make vet && make build
-go test -race ./... -count=1
-```
-Optional: `make run-echo` if CLI/TUI startup touched. CI (`.github/workflows/ci.yml`): gofmt, `go build ./...`, `go vet ./...`, `go test -race ./...`. Load `test-and-validate` for report format; issue-handler’s always-race gate overrides that skill’s “race when warranted” for the ship gate. Never weaken/delete tests for green.
+## Verification tiers (local ship gate)
+
+Source of truth: root `AGENTS.md` *Verification tiers*. Summary:
+
+| Tier | When | Local gate |
+|---|---|---|
+| **A** | Docs/skills/markdown only | gofmt if any `.go`; no full test suite |
+| **B** | Normal code (default) | gofmt → TUI generate if `_src` → `web-check` if `web/` → `make test && make vet && make build` |
+| **C** | tool / permission / auth / session / engine concurrency / protocol wire / sandbox | Tier B + `go test -race ./... -count=1` + focused package tests |
+
+CI runs `go test -race ./...` on every PR — do **not** always re-run full local race on A/B.
+
+**Smoke:** load skill `smoke` when the diff touches `cmd/`, `internal/engine`, TUI input/keymap/app, `session`, or `auth`.
+
+**Contract freeze:** default keybind or config-schema changes must update `docs/keybinds.md` / `docs/config.md` and call out migration in the PR body.
+
+**Flakes:** see `test-and-validate` flake policy — do not block unrelated merges on known env-only flakes; file `wave: 0` bugs.
+
+Load `test-and-validate` for report format. Never weaken/delete tests for green.
 
 ## Commit and push
 ```sh
@@ -83,28 +95,42 @@ gh pr create --base main --head "$BRANCH" --title "type(scope): summary" --body 
 ## Issue
 Fixes #<N>
 
+## Tier
+A | B | C
+
 ## Verification
-- gofmt clean; make test && make vet && make build; go test -race ./... -count=1
+- <exact commands from tier gate>
+- smoke: ran | skipped (reason)
 EOF
 )"
 ```
 Focused PR; no AI wall of text. If PR exists: `gh pr view`.
 
-## Review-agent loop (required)
+## Review-agent loop (required for B/C; optional for A)
 
-After the PR exists, **do not merge until this loop completes**. You (the issue handler) own dispatching reviewers, posting their findings on the PR, fixing code, and repeating.
+After the PR exists, **do not merge until the tier’s review bar is met**. You own dispatching reviewers, posting findings on the PR, fixing code, and repeating.
+
+### Pass budget (risk-scaled)
+
+| Tier | Review passes | Merge bar |
+|---|---|---|
+| **A** | 0–1 optional | Owner judgment; no blocking findings if a pass ran |
+| **B** | **1** clean pass on current HEAD | 0 **blocking**; should-fix fixed or explicitly deferred with reason on the PR |
+| **C** | **1–2** passes on current HEAD | 0 **blocking** and 0 **should-fix** |
+
+Stall ceiling: **5** passes max — if still dirty, stop-and-ask (do not merge). Five is a cap, not a target.
 
 ### When to run
-- Once after first push + PR open (may run in parallel with CI).
+- Tier B/C: once after first push + PR open (may run in parallel with CI).
 - Again after **any** push that changes production, test, skill, agent, workflow, or other merge-bound files — including review/CI fixes.
 - Skip re-review only for pure changelog typos that cannot affect behavior or process — when unsure, re-review.
 - A clean review on an **older** SHA does **not** satisfy merge gates after a new push.
 
-### Resolve PR identity (use these vars in recipes)
+### Resolve PR identity
 ```sh
 PR=$(gh pr view --json number -q .number)
 HEAD_SHA=$(gh pr view --json headRefOid -q .headRefOid)
-REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)   # owner/name
+REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 ```
 
 ### Spawn reviewers
@@ -112,9 +138,9 @@ REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)   # owner/name
 - Task `subagent_type: reviewer` when the host provides it, **or**
 - the in-repo agent at `.claude/agents/strike-reviewer.md`
 
-**Fallback** if Task/reviewer is unavailable: you (the issue handler) run the same rubric in-process — still load the diff, still post findings via `gh`. Never skip the loop.
+**Fallback** if Task/reviewer is unavailable: you run the same rubric in-process — still load the diff, still post findings via `gh`. Never skip the loop on Tier B/C.
 
-Optionally spawn a second pass focused on tests/security if the first pass is large or the change touches auth, permissions, tools, session, or concurrency.
+Optionally spawn a second pass focused on tests/security if Tier C or the first pass is large.
 
 Reviewer prompt **must** include:
 - PR number/URL, base branch (`main`), and current `headRefOid`
@@ -142,7 +168,6 @@ Post reviewer output on the PR (not only chat). **Post the reviewer’s ranked f
 **Preferred — single COMMENT review with inline notes** (only for lines in the PR diff hunk on `$HEAD_SHA`):
 ```sh
 HEAD_SHA=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
-# Build JSON from reviewer findings (verbatim). Example shape:
 gh api "repos/$REPO/pulls/$PR/reviews" --method POST --input - <<EOF
 {
   "commit_id": "$HEAD_SHA",
@@ -161,7 +186,7 @@ EOF
 ```
 If an inline `line` is not part of the diff hunk, the API 422s — put that finding in the top-level review body instead (do not invent lines).
 
-**Fallback — top-level PR comment** when inline mapping is impractical (preferred for long verbatim bodies; avoids JSON escaping issues):
+**Fallback — top-level PR comment** when inline mapping is impractical:
 ```sh
 gh pr comment "$PR" --body "$(cat <<EOF
 ## Review pass N (head \`$HEAD_SHA\`)
@@ -177,19 +202,18 @@ EOF
 )"
 ```
 
-**Clean pass (0 blocking, 0 should-fix) — still required on the PR:**
+**Clean pass (meets tier bar) — still required on the PR for B/C:**
 A chat-only “LGTM” does **not** count. Always record the clean pass against `$HEAD_SHA`:
 ```sh
 HEAD_SHA=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
 gh pr comment "$PR" --body "$(cat <<EOF
 ## Review pass N (head \`$HEAD_SHA\`) — clean
-0 blocking, 0 should-fix. Merge checklist may proceed for this SHA only.
+0 blocking, 0 should-fix (or should-fix deferred per tier B). Merge checklist may proceed for this SHA only.
 EOF
 )"
-# Or: gh api reviews with event COMMENT, commit_id=$HEAD_SHA, empty comments array.
 ```
 
-When building `gh api` JSON for inline reviews, encode bodies with `jq -n --arg body "$text"` (or similar) so quotes/newlines in verbatim findings do not break the payload. If encoding is painful, use the `gh pr comment` path above.
+When building `gh api` JSON for inline reviews, encode bodies with `jq -n --arg body "$text"` so quotes/newlines do not break the payload.
 
 Rules for posted comments:
 - Include severity tag and failure scenario for blocking/should-fix.
@@ -198,26 +222,21 @@ Rules for posted comments:
 
 ### Address comments
 1. List open review threads / new comments (human + automated).
-2. For each **blocking** and **should-fix**: fix in the worktree, add/adjust tests when behavior changes, run local verification.
+2. For each **blocking** (and **should-fix** on Tier C, or B when not deferring): fix in the worktree, add/adjust tests when behavior changes, run tier gate.
 3. **Nits:** fix if cheap and clearly better; otherwise reply on the thread why deferred (one line).
 4. Commit and push (new commit; no amend/force on shared PR branch).
 5. Reply on each addressed thread (or in a single PR comment) with what changed (`commit` shortsha + brief note).
-6. Re-run local gates; watch CI; **spawn another review pass on the new `headRefOid`**.
+6. Re-run tier gate; watch CI; **spawn another review pass on the new `headRefOid`** when the tier requires it.
 
-### Loop limits
-- Continue until a review pass on the **current** `headRefOid` reports **no blocking and no should-fix**, CI is green on that SHA, and merge gates pass.
-- Cap at **5** review passes. If **any** blocking or should-fix remains after 5, stop-and-ask with a summary (do not merge).
-- Product/design ambiguity in a comment → stop-and-ask; do not guess.
-
-### Merge-ready checklist (all required)
-- [ ] Clean review pass (0 blocking, 0 should-fix) recorded against **current** `headRefOid` (posted review/`commit_id` or comment must cite that SHA)
+### Merge-ready checklist (all required for the tier)
+- [ ] Review bar met for tier A/B/C on **current** `headRefOid` (posted review/comment cites that SHA)
 - [ ] That SHA matches `gh pr view --json headRefOid` at merge time
-- [ ] Reviewer findings from the latest pass were posted **verbatim** on the PR
+- [ ] Latest pass findings posted **verbatim** on the PR (when a pass ran)
 - [ ] All actionable human review comments addressed or explicitly deferred with reason
 - [ ] `reviewDecision` is not `CHANGES_REQUESTED` (human reviewers); do not use self-REQUEST_CHANGES
 - [ ] CI checks green on the same head SHA
 - [ ] `mergeable=MERGEABLE`, not draft, state `OPEN`
-- [ ] Local CI-equivalent gates passed on the same commit
+- [ ] Local tier gate passed on the same commit
 
 ## CI watch / fix
 gh-only (no Python watchers):
@@ -231,7 +250,7 @@ gh run view <run-id> --log-failed
 ```
 | Class | Action |
 |---|---|
-| Branch-related | fix in worktree → commit → push → re-watch → **re-enter review loop** |
+| Branch-related | fix in worktree → commit → push → re-watch → **re-enter review loop** if tier requires |
 | Flaky/infra | `gh run rerun <id> --failed` ≤2; then stop-and-ask |
 | Ambiguous | one diagnosis; then stop-and-ask |
 | Actionable review | fix → commit → push → **re-enter review loop** |
@@ -241,7 +260,7 @@ Merge **only when** the merge-ready checklist above is fully satisfied:
 ```sh
 gh pr merge --merge
 ```
-`--merge` matches repo history. Do not pass `--delete-branch` while still checked out on the feature branch in the worktree (main is already checked out in the primary tree) — remote/local branch deletion happens in Cleanup after `git worktree remove`. Blocked on review/permissions → stop-and-ask; never force. **Hard forbids:** force-push; careless `reset --hard`; merge with failing checks; merge without a clean review pass; close/reopen PR unprompted.
+`--merge` matches repo history. Do not pass `--delete-branch` while still checked out on the feature branch in the worktree — remote/local branch deletion happens in Cleanup after `git worktree remove`. Blocked on review/permissions → stop-and-ask; never force. **Hard forbids:** force-push; careless `reset --hard`; merge with failing checks; merge without meeting the tier review bar; close/reopen PR unprompted.
 
 ## Cleanup (after merge)
 From `MAIN_ROOT`:
@@ -258,19 +277,21 @@ Do not leave cwd inside deleted worktree. Only delete branch you created.
 |---|---|
 | Writing/extending `*_test.go` | `write-go-tests` |
 | Before claiming done / after impl or CI-fix | `test-and-validate` |
+| User-visible cmd/engine/tui/session/auth | `smoke` |
+| Cutting a version tag | `release` |
 | Any `internal/tui` view/panel/modal/theme | `tui-components` first |
 
 ## Hard rules
-1. Own issue end-to-end through merge — including review-agent loop.
+1. Own issue end-to-end through merge — including review-agent loop on B/C.
 2. Never edit primary checkout for issue implementation.
-3. Never claim done without CI-equivalent local gates (incl. race).
+3. Never claim done without the **tier** local gate (not always full race).
 4. Never push secrets. Never weaken/delete tests for green.
 5. Never force-push main; no destructive git on shared history.
 6. Smallest correct change; honor `AGENTS.md` scope. TUI imports: `protocol`, `host`, `tui/…` only.
 7. `.plan/` optional research only — never required; never treat unscoped roadmap as the issue.
 8. Stop-and-ask on ambiguity rather than guess.
-9. Never merge with open blocking/should-fix findings from the latest pass on the **current** head SHA.
-10. Always post review findings on the PR via `gh` (COMMENT review or comment) — chat-only review does not count.
+9. Never merge with open blocking findings (or tier-C should-fix) from the latest pass on the **current** head SHA.
+10. Always post review findings on the PR via `gh` (COMMENT review or comment) when a pass runs — chat-only review does not count.
 11. Post reviewer findings verbatim; never omit or downgrade severity. Disputes → stop-and-ask.
 12. Handler-authored automated reviews use `event: COMMENT` only — never self-APPROVE or self-REQUEST_CHANGES.
 
@@ -279,7 +300,7 @@ Do not leave cwd inside deleted worktree. Only delete branch you created.
 - Foreign/unexpected dirty worktree; ambiguous path/branch collision; CI red outside branch after 2 reruns
 - Merge conflicts with main you cannot resolve confidently (prefer `git merge origin/main` over rebase)
 - Review requires product decision; would commit secrets or change CI/security unexpectedly
-- Review loop still has blocking or should-fix findings after 5 passes
+- Review loop still fails the tier bar after 5 passes
 - Desire to drop or downgrade a reviewer’s blocking/should-fix finding
 
 ## What this skill is not

@@ -23,6 +23,23 @@ from several trees; **later roots override earlier ones by name**.
 - OpenCode-style `model: provider/id` splits into provider + model when `provider` is unset.
 - Nested Claude/OpenCode `permission:` maps map to strike permission rules (best-effort).
 
+## Project process skills (`.claude/skills`)
+
+Repo-local Claude skills used by agents developing strike (not the same as
+user-invoked built-ins like `/commit`). Load via the host `skill` tool:
+
+| Skill | Role |
+|---|---|
+| `test-and-validate` | Tiered verification (mirrors CI; see root `AGENTS.md`) |
+| `write-go-tests` | Author `*_test.go` |
+| `smoke` | Offline product happy-path |
+| `release` | Annotated tag + GitHub release |
+| `issue-handler` / `issue-orchestrator` / `issue-create-and-handle` | Issue → merge farm |
+| `tui-components` | `internal/tui/ui` + theme catalog |
+
+Built-in **user** skills shipped in the binary are listed under Skills below
+(`internal/config/skills/*.md`).
+
 ## Agents
 
 **Agents** (`agents/*.md`) are personas — a system prompt with optional

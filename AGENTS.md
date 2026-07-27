@@ -4,6 +4,16 @@ Go 1.26 agentic coding TUI. Engine emits protocol events; TUI consumes them. Ses
 
 ## Verification (required before claiming done)
 
+**Tiers** (skills `test-and-validate` / `issue-handler` follow this table — do not fork softer gates):
+
+| Tier | When | Local gate |
+|---|---|---|
+| **A** | Docs, skills, comments, markdown-only | `gofmt` if any `.go` touched; full suite not required |
+| **B** | Normal Go / web / TUI (default) | `gofmt` → `go generate ./internal/tui` if `internal/tui/_src` changed → `make web-check` if `web/` changed → `make test && make vet && make build` |
+| **C** | Trust boundary: tool, permission, auth, session, engine concurrency/turn, protocol wire, sandbox | Tier B + `go test -race ./... -count=1` + focused package tests first |
+
+CI (`.github/workflows/ci.yml`) always runs gofmt, TUI generate, web-check (when web present), build, vet, and `go test -race ./...`. Local race on every PR is redundant for tier A/B.
+
 ```sh
 make test          # go test ./...
 make vet           # go vet ./...
@@ -12,20 +22,10 @@ make cover         # go test ./... -coverprofile=coverage.out (+ total %)
 make cover-check   # cover + fail if total statements % < COVER_MIN (default 75)
 ```
 
-Stronger checks when touching concurrency, tools, permissions, auth, or session I/O:
+Product smoke (user-visible cmd/engine/tui/session/auth): skill `smoke` / `make run-echo`.
+Releases: skill `release`.
 
-```sh
-go test -race ./... -count=1
-make cover         # or: go test ./... -count=1 -cover
-```
-
-Offline smoke (no API keys):
-
-```sh
-make run-echo
-```
-
-Report exact commands and failing output verbatim. Do not claim green without running the suite.
+Report exact commands and failing output verbatim. Do not claim green without running the tier gate.
 
 ## Testing conventions
 
@@ -35,7 +35,7 @@ Report exact commands and failing output verbatim. Do not claim green without ru
 - Mock only external boundaries (HTTP via `httptest`, clocks when needed). Never mock the unit under test.
 - Tool tests: allow-all `Ask` helper unless testing permission denial.
 - Provider tests: `httptest.Server` for wire format; use `internal/provider/echo` for offline engine loops.
-- TUI tests: reuse helpers in `internal/tui/app_test.go` (`updateApp`, `runAppCmd`, etc.).
+- TUI tests: reuse helpers from `internal/tui/_src/app/app_test.go` (`updateApp`, `runAppCmd`, etc.; package tests after `go generate ./internal/tui`).
 
 ## Architecture map
 
@@ -85,3 +85,19 @@ service/theme token).
   `internal/tui/...` — enforced by `internal/tui/boundary_test.go`
   (`TestArchitectureBoundaries`), which fails the build on any other
   `internal/*` import from a TUI file.
+
+## Agent process skills (`.claude/skills`)
+
+| Skill | Role |
+|---|---|
+| `test-and-validate` | Tiered verification report (read-only) |
+| `write-go-tests` | Author `*_test.go` |
+| `smoke` | Offline product happy-path |
+| `release` | Tag + GitHub release |
+| `issue-handler` | Issue → worktree → PR → review → merge |
+| `issue-orchestrator` | Parallel issue board |
+| `issue-create-and-handle` | File approved issue then handle |
+| `tui-components` | TUI ui/theme catalog |
+
+Built-in user skills (`/verify`, `/ship`, `/learn`, …) live under `internal/config/skills/`.
+

@@ -8,7 +8,7 @@ Run the project's verification gates, diagnose failures, and fix branch-related 
 1. `git status --short`
 2. `git branch --show-current`
 3. Read `AGENTS.md` / `README` / `Makefile` / CI config for the expected gates
-4. Prefer documented commands (strike-cli typically: `make test`, `make vet`, `make build`; stronger: `go test -race ./... -count=1`)
+4. Prefer documented commands from root `AGENTS.md` *Verification tiers* (A/B/C). Typical: `make test`, `make vet`, `make build`; tier C: `go test -race ./... -count=1`. CI always races.
 
 ## Safety
 
@@ -22,7 +22,7 @@ Run the project's verification gates, diagnose failures, and fix branch-related 
 
 $ARGUMENTS
 
-1. Run the project verify suite (smallest full gate first; add race/cover when the change touches concurrency, tools, permissions, auth, or session I/O).
+1. Assign tier A/B/C from `AGENTS.md`, then run that gate (do not always full-race on docs-only changes). Add cover when useful; load process skill `smoke` for user-visible paths.
 2. On failure: capture the failing command and error verbatim; classify branch-related vs infra.
 3. Fix branch-related failures with the smallest correct change; re-run until green or blocked.
 4. Report: commands run, pass/fail, what you fixed (or why blocked). Do not claim green without running the suite.

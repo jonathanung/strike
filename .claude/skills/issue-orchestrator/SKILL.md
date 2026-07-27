@@ -43,15 +43,30 @@ priority: bugs-first | feature
 | `blocks` | What this unlocks (scheduling hint) |
 | `priority` | `bugs-first` before `feature` within the same wave |
 
-Closed `depends` count as satisfied. Missing headers: treat as `wave: 99`, `depends: none`, `conflicts: none`, `priority: feature` and prefer issues that have proper headers.
+Closed `depends` count as satisfied.
+
+**Missing headers:** treat as `wave: 99`, `depends: none`, `conflicts: none`, `priority: feature`. Prefer issues that have proper headers. When farming, **comment once** on headerless issues asking for headers (or load `issue-create-and-handle` to refine) before parallel dispatch — do not guess large parallel graphs.
+
+### Suggested `conflicts` hotspots
+
+Serialize (or mark mutual `conflicts`) when multiple issues touch:
+
+- `internal/tui/_src/app/keymap*.go`, default keybinds, `internal/config/keybinds.go`
+- `internal/engine/turn.go` / core turn loop
+- `internal/tool/registry.go` + defer/toolsearch wiring
+- `internal/protocol` event kind additions shared across frontends
+
+Prefer explicit `conflicts: #N` on the issue over silent collision.
 
 ## Sibling skills
 
 | Skill | Role |
 |---|---|
 | `issue-handler` | One issue → worktree → implement → test → PR → **review-agent loop** → CI → merge → cleanup |
-| `test-and-validate` | Verification report format |
+| `test-and-validate` | Verification report format + tiers |
 | `write-go-tests` | Tests when handler implements |
+| `smoke` | Product happy-path when user-visible |
+| `release` | Version tags (orchestrator does not cut releases unless asked) |
 | `tui-components` | TUI work inside a handler |
 
 Orchestrator **dispatches handlers**; handlers load domain skills.
@@ -67,8 +82,9 @@ Do **not** start large features while wave-0 bugs that touch the same surface ar
 ## Conflict rules
 
 - If A lists B under `conflicts` (or vice versa), **at most one** of A/B may be in-progress (open PR or active worktree) at a time.
-- Same package hotspots without headers: serialize when both touch `internal/tui/app.go` / `keymap.go` heavily — prefer explicit `conflicts` on new issues.
+- Same package hotspots without headers: serialize when both touch keymap/default binds or `engine/turn.go` heavily — prefer explicit `conflicts` on new issues.
 - Multi-issue “cluster” (e.g. all keymap bugs): **one worktree / one handler** for the whole cluster when they conflict with each other.
+- Parallelism cap defaults to **4**, but the **conflict graph wins** — fewer slots when hotspots overlap.
 
 ## Ready set
 
@@ -82,10 +98,10 @@ An issue is **ready** when all are true:
 
 ## Dispatch
 
-For each ready issue (up to a sensible parallelism cap, default **4** unless user says otherwise):
+For each ready issue (up to the parallelism cap / conflict graph):
 
 1. Spawn or instruct an agent to load **`issue-handler`** with the issue number.
-2. Handler must: worktree off `origin/main`, implement, tests per `AGENTS.md` (“as many tests as possible for new chunks”), PR `Fixes #N`, review loop, CI, merge, cleanup.
+2. Handler must: worktree off `origin/main`, implement, tests per `AGENTS.md`, tier gate, PR `Fixes #N`, review loop, CI, merge, cleanup.
 3. Orchestrator tracks: issue → branch → PR URL → status (`queued` / `in_progress` / `review` / `merged` / `blocked`).
 
 Do **not** implement production code in the primary checkout as the orchestrator.
@@ -106,7 +122,7 @@ loop:
 ### Stalls
 
 - CI red > reasonable time → handler fixes or orchestrator assigns handler to that PR  
-- Review loop > 5 passes → stop-and-ask per issue-handler  
+- Review loop hits stall ceiling (5) → stop-and-ask per issue-handler  
 - Merge conflict with main → handler merges `origin/main` in worktree  
 - Ambiguous product decision → comment on issue + stop that lane  
 

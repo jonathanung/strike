@@ -53,6 +53,11 @@ the user answers, and rejections carry feedback back to the model.
 
 ## Verification
 
+Risk-tiered gates live in root `AGENTS.md` (*Verification tiers*). Summary:
+tier **A** docs/skills; **B** normal code (`make test && make vet && make build`
+after gofmt / TUI generate / web-check as needed); **C** trust boundary adds
+`go test -race ./... -count=1`. CI always races.
+
 ```sh
 make test          # go test ./...
 make vet           # go vet ./...
@@ -62,7 +67,7 @@ make cover-check   # cover + enforce COVER_MIN (default 75)
 ```
 
 Stronger checks when touching concurrency, tools, permissions, auth, or
-session I/O:
+session I/O (tier C):
 
 ```sh
 go test -race ./... -count=1
