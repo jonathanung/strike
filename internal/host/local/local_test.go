@@ -782,8 +782,8 @@ func TestCatalogCustomNestedModelsDTO(t *testing.T) {
 		API:     config.WireOpenAI,
 		ModelDefs: []config.ModelDef{
 			{
-				ID:   "k2",
-				Name: "Acme K2",
+				ID:    "k2",
+				Name:  "Acme K2",
 				Limit: &config.ModelLimit{Context: 128000, Output: 8192},
 				Variants: map[string]map[string]any{
 					"medium": {"reasoningEffort": "medium"},
