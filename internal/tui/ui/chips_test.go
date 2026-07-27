@@ -58,7 +58,7 @@ func TestBadgeHonorsExplicitZeroSpacing(t *testing.T) {
 }
 
 func TestKeyHintsJoinsWithDotsWithinWidth(t *testing.T) {
-	hints := []KeyHint{{"enter", "send"}, {"ctrl+p", "palette"}, {"esc", "interrupt"}}
+	hints := []KeyHint{{"enter", "send"}, {"ctrl+k", "palette"}, {"esc", "interrupt"}}
 	out := KeyHints(theme.Default(), 80, hints)
 	for _, h := range hints {
 		if !strings.Contains(out, h.Key) || !strings.Contains(out, h.Label) {
@@ -74,7 +74,7 @@ func TestKeyHintsJoinsWithDotsWithinWidth(t *testing.T) {
 }
 
 func TestKeyHintsTruncatesByDroppingWholeHints(t *testing.T) {
-	hints := []KeyHint{{"enter", "send"}, {"ctrl+p", "palette"}, {"esc", "interrupt"}}
+	hints := []KeyHint{{"enter", "send"}, {"ctrl+k", "palette"}, {"esc", "interrupt"}}
 	out := KeyHints(theme.Default(), 14, hints)
 	if w := lipgloss.Width(out); w > 14 {
 		t.Errorf("truncated width %d exceeds 14: %q", w, out)

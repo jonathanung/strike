@@ -56,7 +56,7 @@ apply). When set, task effort wins over agent profile effort.
 Each model request composes the system prompt in layers (like opencode):
 
 1. **Shared baseline** — identity, ADHD-shaped response contract, doing-tasks
-2. **Tools** — effective registry guidance (name + short purpose, recommended use). Reflects agent/permission/depth/MCP; hard-denied tools omitted. Own `/context` provenance layer (`tools` / `registry:effective`).
+2. **Tools** — effective registry guidance (name + short purpose, recommended use). Reflects agent/permission/depth/MCP; hard-denied tools omitted. Own `/context` provenance layer (`tools` / `registry:effective`). On every stream (including turn 1) the same effective set is bound as provider tool schemas so the model has tools without discovery lag.
 3. **Provider overlay** — anthropic / openai (incl. chatgpt) / xai / default, chosen from the active provider and model id
 4. **Agent persona** — empty for built-in build/plan (provider overlay used); custom `agents/*.md` body replaces the provider overlay; config `systemPrompt` replaces it for build only
 5. **Plan overlay** — always added while the plan agent is active

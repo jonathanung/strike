@@ -360,7 +360,7 @@ func TestModelSelectedPreservesGeneralNoticesAndRefreshesOpenPaletteAndHeader(t 
 		t.Errorf("model selection changed general info notice: %q / %v", m.notice, m.noticeErr)
 	}
 	m.setNotice("unrelated error", true)
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlP})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
 	m.applyEvent(protocol.ModelSelected{Provider: "echo", Model: "chosen"})
 	if m.notice != "unrelated error" || !m.noticeErr {
 		t.Errorf("model selection changed general error notice: %q / %v", m.notice, m.noticeErr)

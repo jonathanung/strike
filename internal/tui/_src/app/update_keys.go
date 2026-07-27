@@ -71,14 +71,13 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	// Composer readline before nav chords so ctrl+k kills in the input
-	// instead of cycling windows / focusing the right pane.
+	// instead of opening the palette (same chord when kill deletes nothing).
 	if m.focus == focusLeft {
 		if next, cmd, ok := m.applyComposerReadline(msg); ok {
 			return next, cmd
 		}
-		// Composer newline (shift+enter → alt+enter) before focus/cycle.
-		// Bare LF / KeyCtrlJ is ctrl+j and matches CycleWindowNext / Focus*
-		// below — never newline (#324 Ubuntu).
+		// Composer newline (shift+enter → alt+enter; ctrl+j / bare LF / alt+j)
+		// before focus/cycle so it never pane-cycles (#414).
 		if key.Matches(msg, m.keyMap.Newline) {
 			m.resetHistoryBrowsing()
 			m.composer.InsertString("\n")
@@ -87,8 +86,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
-	// Focus/cycle before other left-composer handling so bare LF ctrl+j
-	// cycles panes even when the composer is focused (#324).
+	// Focus (ctrl+h/l) and cycle (ctrl+o/p) — orientation-independent (#414).
 	if key.Matches(msg, m.keyMap.FocusLeft) {
 		m.completion = nil
 		cmd := m.focusPane(focusLeft)
@@ -145,6 +143,12 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if key.Matches(msg, m.keyMap.JumpBottom) {
 		m.viewport.GotoBottom()
 		return m, nil
+	}
+	if key.Matches(msg, m.keyMap.CopyLastResponse) {
+		cmd := m.copyLastAssistantResponse()
+		m.reflow()
+		m.refreshViewport()
+		return m, cmd
 	}
 	if m.focus == focusRight {
 		if m.handleActivityKeys(msg) {

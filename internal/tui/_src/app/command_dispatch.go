@@ -127,6 +127,16 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 			ops <- protocol.SelectAgent{Name: name}
 			return nil
 		}
+	case "/agents":
+		return m.focusRightWindow(agentsWindowID)
+	case "/activity":
+		return m.focusRightWindow("activity")
+	case "/files":
+		return m.focusRightWindow(filesWindowID)
+	case "/visualizer":
+		return m.focusRightWindow(visualizerWindowID)
+	case "/system":
+		return m.focusRightWindow(telemetryWindowID)
 	case "/fast":
 		return m.handleFastCommand(fields[1:])
 	case "/think":
@@ -169,6 +179,13 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		return m.handleRenameCommand(fields[1:], text)
 	case "/export":
 		return m.handleExportCommand(fields[1:])
+	case "/copy":
+		m.resetComposer()
+		m.clearNotice()
+		cmd := m.copyLastAssistantResponse()
+		m.reflow()
+		m.refreshViewport()
+		return m, cmd
 	case "/help":
 		m.resetComposer()
 		m.clearNotice()

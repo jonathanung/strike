@@ -129,8 +129,10 @@ Remap app-level chords without recompiling. Ids match the in-app cheatsheet
 {
   "keybinds": {
     "nav.jump-bottom": "ctrl+b",
-    "global.palette": ["ctrl+p", "ctrl+k"],
-    "composer.newline": ["alt+enter", "ctrl+j"]
+    "global.palette": "ctrl+k",
+    "composer.newline": ["ctrl+j", "alt+enter"],
+    "nav.window-next": "ctrl+o",
+    "nav.window-prev": "ctrl+p"
   }
 }
 ```

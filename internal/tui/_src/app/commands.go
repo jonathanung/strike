@@ -19,6 +19,11 @@ const (
 	commandAuth            commandID = "auth"
 	commandSettings        commandID = "settings"
 	commandAgent           commandID = "agent"
+	commandAgents          commandID = "agents"
+	commandActivity        commandID = "activity"
+	commandFiles           commandID = "files"
+	commandVisualizer      commandID = "visualizer"
+	commandSystem          commandID = "system"
 	commandFast            commandID = "fast"
 	commandThink           commandID = "think"
 	commandVim             commandID = "vim"
@@ -36,6 +41,7 @@ const (
 	commandSession         commandID = "session"
 	commandRename          commandID = "rename"
 	commandExport          commandID = "export"
+	commandCopy            commandID = "copy"
 	commandMemory          commandID = "memory"
 	commandIssues          commandID = "issues"
 	commandGoal            commandID = "goal"
@@ -105,6 +111,11 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandAuth, Name: "/auth", Description: "manage provider authentication", ArgsHint: "[provider]", Source: commandSourceBuiltin},
 	{ID: commandSettings, Name: "/settings", Description: "defaults (theme, editor, mode) and custom providers", Source: commandSourceBuiltin},
 	{ID: commandAgent, Name: "/agent", Description: "select an agent", ArgsHint: "[name]", Source: commandSourceBuiltin},
+	{ID: commandAgents, Name: "/agents", Description: "focus the agents right pane", Source: commandSourceBuiltin},
+	{ID: commandActivity, Name: "/activity", Description: "focus the activity right pane", Source: commandSourceBuiltin},
+	{ID: commandFiles, Name: "/files", Description: "focus the files right pane", Source: commandSourceBuiltin},
+	{ID: commandVisualizer, Name: "/visualizer", Description: "focus the visualizer right pane", Source: commandSourceBuiltin},
+	{ID: commandSystem, Name: "/system", Description: "focus the system right pane", Source: commandSourceBuiltin},
 	{ID: commandFast, Name: "/fast", Description: "toggle OpenAI priority tier (faster, ~2× cost)", ArgsHint: "[on|off]", Source: commandSourceBuiltin},
 	{ID: commandThink, Name: "/think", Description: "show or hide model chain-of-thought", ArgsHint: "[on|off]", Source: commandSourceBuiltin},
 	{ID: commandVim, Name: "/vim", Description: "open a file in the editor (embedded/modal/takeover; see vimMode)", ArgsHint: "[path|@path[:line]]", Source: commandSourceBuiltin},
@@ -120,6 +131,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandSession, Name: "/session", Description: "browse and resume a past session", ArgsHint: "[id]", Source: commandSourceBuiltin},
 	{ID: commandRename, Name: "/rename", Description: "rename the current session", ArgsHint: "[title]", Source: commandSourceBuiltin},
 	{ID: commandExport, Name: "/export", Description: "export the conversation to markdown", ArgsHint: "[path] [--open]", Source: commandSourceBuiltin},
+	{ID: commandCopy, Name: "/copy", Description: "copy the last assistant response to the clipboard", Source: commandSourceBuiltin},
 	{ID: commandHelp, Name: "/help", Description: "show available commands", Source: commandSourceBuiltin},
 	{ID: commandKeys, Name: "/keys", Description: "show keyboard shortcuts", ArgsHint: "[reset]", Source: commandSourceBuiltin},
 	{ID: commandMemory, Name: "/memory", Description: "list, get, set, delete, export, or import project memory", ArgsHint: "[list|get|set|rm|export|import] ...", Source: commandSourceBuiltin},
@@ -198,6 +210,11 @@ var reservedCommandNames = map[string]struct{}{
 	"auth":             {},
 	"settings":         {},
 	"agent":            {},
+	"agents":           {},
+	"activity":         {},
+	"files":            {},
+	"visualizer":       {},
+	"system":           {},
 	"fast":             {},
 	"think":            {},
 	"vim":              {},
@@ -213,6 +230,7 @@ var reservedCommandNames = map[string]struct{}{
 	"session":          {},
 	"rename":           {},
 	"export":           {},
+	"copy":             {},
 	"help":             {},
 	"keys":             {},
 	"memory":           {},
