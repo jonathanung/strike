@@ -17,8 +17,10 @@ const (
 	// when compacting (the current intent plus one prior turn by default).
 	defaultKeepUserTurns = 2
 	// defaultCompactionThreshold triggers automatic compaction when occupancy
-	// reaches this fraction of the known context window.
-	defaultCompactionThreshold = 0.80
+	// reaches this fraction of the known context window. 0.70 responds to
+	// context pressure earlier than the historical 0.80 default, reducing
+	// overflow risk while prune handles continuous tool-result hygiene.
+	defaultCompactionThreshold = 0.70
 	// defaultCompactionBuffer reserves headroom (output allowance) so threshold
 	// compaction fires before hard exhaustion.
 	defaultCompactionBuffer = 4096

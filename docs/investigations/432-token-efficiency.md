@@ -54,7 +54,7 @@ stream, err := e.prov.Stream(ctx, provider.Request{
 
 | Constant | Default | Role |
 | --- | --- | --- |
-| `defaultCompactionThreshold` | `0.80` | Fire auto-compact when estimated occupancy ≥ 80% of known window |
+| `defaultCompactionThreshold` | `0.70` | Fire auto-compact when estimated occupancy ≥ 70% of known window (tuned earlier than historical 0.80; config: `compactionThreshold`) |
 | `defaultKeepUserTurns` | `2` | Preserve last 2 real user-turn starts (+ their tails) |
 | `defaultCompactionBuffer` | `4096` | Output headroom so threshold fires before hard exhaustion |
 | Strategies | `trim` \| `summarize` | Drop older messages to a marker, or replace with a model summary |
