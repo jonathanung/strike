@@ -23,9 +23,9 @@ strike launches without any provider configured. Pick one inside the TUI:
 /mode soft-approve             # default | plan | soft-approve | accept-edits | yolo
 /agent                         # centered agent picker
 /agent plan                    # direct switch (build, plan, explore, …)
-/session                       # browse past root sessions (auto-titles) and
-                               # resume one with full model history
-/session <id>                  # resume a specific session by id
+/session                       # browse past root sessions for this workspace
+                               # (auto-titles); ctrl+a shows all workspaces
+/session <id>                  # resume a specific session by id (any workspace)
 /rename                        # rename the current session (editor)
 /rename <title>                # rename the current session immediately
 /fast                          # toggle OpenAI priority tier (~2×, lower
@@ -115,8 +115,8 @@ strike launches without any provider configured. Pick one inside the TUI:
 
 | Command | Notes |
 |---|---|
-| `/session` | picker of past **root** sessions (auto-titles); resume reloads model history |
-| `/session <id>` | resume that root session by id |
+| `/session` | picker of past **root** sessions for the **current workspace** only (auto-titles; resume reloads model history). `ctrl+a` toggles all workspaces. Legacy sessions without a stored folder path appear only in all-workspaces mode |
+| `/session <id>` | resume that root session by id (works across workspaces; list filter does not apply) |
 | `/rename [title]` | rename the current session (brief auto-titles; agents pane `r` too) |
 | `/fork` | copy the current session JSONL into a new id (idle only) |
 | `/undo` / `/rewind` | undo last turn (idle only); bare opens picker; `chat` keeps disk; `files` restores per-file checkpoints from that turn (never `git reset --hard`) |
