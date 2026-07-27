@@ -23,6 +23,7 @@ var envVars = map[string]string{
 var refreshFlows = map[string]FlowConfig{
 	"openai": OpenAIFlow(),
 	"xai":    XAIFlow(),
+	"gemini": GoogleFlow(),
 }
 
 // Refresh slightly before expiry so a long tool call doesn't have to

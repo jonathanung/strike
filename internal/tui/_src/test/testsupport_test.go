@@ -50,14 +50,14 @@ func newFakeAuth() *fakeAuth {
 
 // defaultProviderStatuses mirrors the real local.New order and capability flags
 // (anthropic: API key only; openai: OAuth+key; xai: OAuth+device+key; gemini:
-// API key only; kimi: API key only; deepseek: API key only; echo: builtin)
+// OAuth+key; kimi: API key only; deepseek: API key only; echo: builtin)
 // so pickers and /auth behave as in production.
 func defaultProviderStatuses() []host.ProviderStatus {
 	return []host.ProviderStatus{
 		{Name: "anthropic", Detail: "none", APIKey: true},
 		{Name: "openai", Detail: "none", OAuth: true, APIKey: true},
 		{Name: "xai", Detail: "none", OAuth: true, Device: true, APIKey: true},
-		{Name: "gemini", Detail: "none", APIKey: true},
+		{Name: "gemini", Detail: "none", OAuth: true, APIKey: true},
 		{Name: "kimi", Detail: "none", APIKey: true},
 		{Name: "deepseek", Detail: "none", APIKey: true},
 		{Name: "echo", Detail: "offline dev provider", Authed: true, Builtin: true},

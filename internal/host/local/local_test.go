@@ -70,8 +70,8 @@ func TestStatusesOrderFlagsAndEcho(t *testing.T) {
 	if s := by["xai"]; !s.APIKey || !s.OAuth || !s.Device || s.Builtin {
 		t.Errorf("xai flags = %+v, want OAuth+Device+APIKey", s)
 	}
-	if s := by["gemini"]; !s.APIKey || s.OAuth || s.Device || s.Builtin {
-		t.Errorf("gemini flags = %+v, want APIKey-only", s)
+	if s := by["gemini"]; !s.APIKey || !s.OAuth || s.Device || s.Builtin {
+		t.Errorf("gemini flags = %+v, want OAuth+APIKey", s)
 	}
 	if s := by["kimi"]; !s.APIKey || s.OAuth || s.Device || s.Builtin {
 		t.Errorf("kimi flags = %+v, want APIKey-only", s)
@@ -215,6 +215,21 @@ func TestBeginOAuthUnsupported(t *testing.T) {
 		if _, err := svc.Auth.BeginOAuth(context.Background(), provider); err == nil {
 			t.Errorf("BeginOAuth(%q): expected error", provider)
 		}
+	}
+}
+
+func TestBeginOAuthGemini(t *testing.T) {
+	t.Setenv("GOOGLE_CLIENT_ID", "test-client-id.apps.googleusercontent.com")
+	svc, _ := newTestServices(t)
+	login, err := svc.Auth.BeginOAuth(context.Background(), "gemini")
+	if err != nil {
+		t.Fatalf("BeginOAuth(gemini): %v", err)
+	}
+	if login == nil {
+		t.Fatal("BeginOAuth(gemini) returned nil login")
+	}
+	if login.URL == "" {
+		t.Error("URL is empty")
 	}
 }
 

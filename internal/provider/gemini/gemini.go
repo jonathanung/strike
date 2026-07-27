@@ -36,7 +36,11 @@ func New(source TokenSource) *Provider {
 					return err
 				}
 				if token != "" {
-					req.Header.Set("x-goog-api-key", token)
+					if isOAuthAccessToken(token) {
+						req.Header.Set("Authorization", "Bearer "+token)
+					} else {
+						req.Header.Set("x-goog-api-key", token)
+					}
 				}
 				return nil
 			},
@@ -238,4 +242,11 @@ func userParts(m provider.Message) []apiPart {
 		return []apiPart{{Text: ""}}
 	}
 	return parts
+}
+
+// isOAuthAccessToken returns true when the token looks like a Google OAuth 2.0
+// access token (typically starts with "ya29."). API keys are sent as
+// x-goog-api-key; access tokens are sent as Authorization: Bearer.
+func isOAuthAccessToken(token string) bool {
+	return len(token) > 50 && token[0:5] == "ya29."
 }
