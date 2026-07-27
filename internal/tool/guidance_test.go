@@ -6,21 +6,6 @@ import (
 	"testing"
 )
 
-func TestShortPurposeBuiltins(t *testing.T) {
-	for name, want := range shortPurposes {
-		if got := ShortPurpose(name, "ignored long description"); got != want {
-			t.Errorf("ShortPurpose(%q) = %q, want %q", name, got, want)
-		}
-	}
-}
-
-func TestShortPurposeFallback(t *testing.T) {
-	got := ShortPurpose("mcp_demo_echo", "[mcp:demo] Echo a message back to the caller. Extra detail.")
-	if got != "echo a message back to the caller" {
-		t.Fatalf("fallback = %q", got)
-	}
-}
-
 func TestPermissionName(t *testing.T) {
 	cases := map[string]string{
 		"read":          "read",
@@ -37,33 +22,42 @@ func TestPermissionName(t *testing.T) {
 	}
 }
 
-func TestBuildGuidanceListsExactTools(t *testing.T) {
+func TestBuildGuidanceAdditiveOnlyNoCatalog(t *testing.T) {
 	text := BuildGuidance([]GuidanceEntry{
-		{Name: "read", Purpose: "read file contents"},
-		{Name: "glob", Purpose: "find files by name pattern"},
-		{Name: "bash", Purpose: "run a shell command"},
+		{Name: "read"},
+		{Name: "glob"},
+		{Name: "bash"},
 	})
 	for _, want := range []string{
 		"# Available tools",
-		"`read` — read file contents",
-		"`glob` — find files by name pattern",
-		"`bash` — run a shell command",
+		"provider Tools array",
+		"additive only",
+		"## Recommended use",
 		"Prefer `read`/`glob`/`grep` over shelling out",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q in:\n%s", want, text)
 		}
 	}
-	if strings.Contains(text, "`write`") || strings.Contains(text, "`task`") {
-		t.Fatalf("unexpected mutation/task guidance:\n%s", text)
+	// Must not restate name — purpose catalog lines (schemas own those).
+	for _, banned := range []string{
+		"`read` —",
+		"`glob` —",
+		"`bash` —",
+		"`write`",
+		"`task`",
+	} {
+		if strings.Contains(text, banned) {
+			t.Errorf("catalog-style or absent-tool mention %q in:\n%s", banned, text)
+		}
 	}
 }
 
 func TestBuildGuidanceOmitsMutationRecsWhenAbsent(t *testing.T) {
 	text := BuildGuidance([]GuidanceEntry{
-		{Name: "read", Purpose: "read file contents"},
-		{Name: "glob", Purpose: "find files by name pattern"},
-		{Name: "grep", Purpose: "search file contents by regex"},
+		{Name: "read"},
+		{Name: "glob"},
+		{Name: "grep"},
 	})
 	for _, banned := range []string{
 		"`edit`", "`write`", "`apply_patch`", "`bash`", "multi-file",
@@ -79,8 +73,8 @@ func TestBuildGuidanceOmitsMutationRecsWhenAbsent(t *testing.T) {
 
 func TestBuildGuidanceOmitsTaskWhenAbsent(t *testing.T) {
 	text := BuildGuidance([]GuidanceEntry{
-		{Name: "read", Purpose: "x"},
-		{Name: "sleep", Purpose: "y"},
+		{Name: "read"},
+		{Name: "sleep"},
 	})
 	if strings.Contains(text, "`task`") {
 		t.Fatalf("task mentioned without registry entry:\n%s", text)
@@ -89,39 +83,42 @@ func TestBuildGuidanceOmitsTaskWhenAbsent(t *testing.T) {
 
 func TestBuildGuidanceTaskStatusPreferred(t *testing.T) {
 	text := BuildGuidance([]GuidanceEntry{
-		{Name: "task", Purpose: "delegate"},
-		{Name: "task_status", Purpose: "status"},
-		{Name: "task_read", Purpose: "read"},
-		{Name: "sleep", Purpose: "wait"},
+		{Name: "task"},
+		{Name: "task_status"},
+		{Name: "task_read"},
+		{Name: "sleep"},
 	})
 	if !strings.Contains(text, "task_status") || !strings.Contains(text, "task_read") {
 		t.Fatalf("missing task_status/task_read guidance:\n%s", text)
 	}
 }
 
-func TestBuildGuidanceMCPListed(t *testing.T) {
+func TestBuildGuidanceMCPFewNoPerToolList(t *testing.T) {
 	text := BuildGuidance([]GuidanceEntry{
-		{Name: "read", Purpose: "read"},
-		{Name: "mcp_demo_echo", Purpose: "echo"},
+		{Name: "read"},
+		{Name: "mcp_demo_echo"},
 	})
-	if !strings.Contains(text, "`mcp_demo_echo` — echo") {
-		t.Fatalf("mcp tool missing:\n%s", text)
+	// Schemas list MCP tools; guidance must not restate each name — purpose.
+	if strings.Contains(text, "`mcp_demo_echo`") {
+		t.Fatalf("small MCP set should not list individual tools:\n%s", text)
 	}
 	if !strings.Contains(text, "registered `mcp_*` names") {
 		t.Fatalf("mcp rec missing:\n%s", text)
 	}
+	if strings.Contains(text, "MCP tools (") {
+		t.Fatalf("unexpected MCP bulk summary for small set:\n%s", text)
+	}
 }
 
 func TestBuildGuidanceMCPSummarizesWhenMany(t *testing.T) {
-	entries := []GuidanceEntry{{Name: "read", Purpose: "read"}, {Name: "toolsearch", Purpose: "search"}}
+	entries := []GuidanceEntry{{Name: "read"}, {Name: "toolsearch"}}
 	for i := 0; i < MaxMCPGuidanceListed+5; i++ {
 		entries = append(entries, GuidanceEntry{
-			Name:    fmt.Sprintf("mcp_srv_tool%d", i),
-			Purpose: fmt.Sprintf("purpose %d", i),
+			Name: fmt.Sprintf("mcp_srv_tool%d", i),
 		})
 	}
 	text := BuildGuidance(entries)
-	if strings.Contains(text, "`mcp_srv_tool0` —") {
+	if strings.Contains(text, "`mcp_srv_tool0`") {
 		t.Fatalf("expected MCP summary, got per-tool list:\n%s", text)
 	}
 	if !strings.Contains(text, fmt.Sprintf("MCP tools (%d from", MaxMCPGuidanceListed+5)) {
@@ -138,10 +135,10 @@ func TestBuildGuidanceMCPSummarizesWhenMany(t *testing.T) {
 
 func TestBuildGuidanceDeterministic(t *testing.T) {
 	entries := []GuidanceEntry{
-		{Name: "grep", Purpose: "g"},
-		{Name: "read", Purpose: "r"},
-		{Name: "mcp_b_x", Purpose: "bx"},
-		{Name: "mcp_a_y", Purpose: "ay"},
+		{Name: "grep"},
+		{Name: "read"},
+		{Name: "mcp_b_x"},
+		{Name: "mcp_a_y"},
 	}
 	a := BuildGuidance(entries)
 	b := BuildGuidance(entries)
@@ -150,27 +147,21 @@ func TestBuildGuidanceDeterministic(t *testing.T) {
 	}
 }
 
-func TestBuiltinShortPurposesCoversCoreTools(t *testing.T) {
-	// Drift guard: every tool constructed in TestToolNames (except task, which
-	// is optional in that table) plus task must have a short purpose.
-	core := []string{
-		"read", "write", "edit", "glob", "grep", "bash", "webfetch",
-		"todowrite", "todoread", "memory_write", "memory_read",
-		"issue_write", "issue_read", "notebook_edit", "sleep", "skill",
-		"toolsearch", "question", "apply_patch", "enter_plan_mode",
-		"exit_plan_mode", "phase_done", "task",
-		"task_status", "task_read", "task_message", "task_interrupt",
-	}
-	m := BuiltinShortPurposes()
-	for _, name := range core {
-		if _, ok := m[name]; !ok {
-			t.Errorf("missing short purpose for built-in %q", name)
-		}
-	}
-}
-
 func TestBuildGuidanceEmpty(t *testing.T) {
 	if got := BuildGuidance(nil); got != "" {
 		t.Fatalf("empty entries = %q", got)
+	}
+}
+
+func TestBuildGuidanceLayerPresence(t *testing.T) {
+	text := BuildGuidance([]GuidanceEntry{{Name: "read"}, {Name: "bash"}})
+	if !strings.Contains(text, "# Available tools") {
+		t.Fatal("missing tools layer heading")
+	}
+	if !strings.Contains(text, "## Recommended use") {
+		t.Fatal("missing recommended-use layer")
+	}
+	if !strings.Contains(text, "provider Tools array") {
+		t.Fatal("missing schemas-vs-guidance split note")
 	}
 }

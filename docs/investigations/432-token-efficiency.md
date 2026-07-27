@@ -74,7 +74,7 @@ These caps prevent a single call from being unbounded. They do **not** shrink re
 ### Tool schemas and guidance every request
 
 - `effectiveToolSchemas()` (`internal/engine/prompt_tools.go`) sends `Registry.Schemas()` minus hard-denied tools on **every** stream (including turn 1).
-- The same effective set is also rendered into the system prompt via `tool.BuildGuidance` (`internal/tool/guidance.go` / `prompt_tools.go`) — mild **schema + natural-language guidance duplication**.
+- The same effective set feeds additive system-prompt guidance via `tool.BuildGuidance` (`internal/tool/guidance.go` / `prompt_tools.go`) — **usage policy / when-to-use only** (schemas own names/descriptions; catalog restatement removed in #437).
 - Built-in surface is on the order of ~27 tools (read/glob/grep/edit/write/apply_patch/bash/task family/webfetch/todo/memory/issue/notebook/sleep/skill/question/plan mode/toolsearch/…).
 - `toolsearch` (`internal/tool/toolsearch.go`) searches schemas; it does **not** defer loading schemas from the provider Tools array the way Claude Code’s `defer_loading` path does.
 
