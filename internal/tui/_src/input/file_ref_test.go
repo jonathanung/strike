@@ -145,7 +145,7 @@ func TestCollectFileRefsFromTranscript(t *testing.T) {
 	}
 }
 
-func TestEmptyEnterOpensFileRefWhenNoToolExpand(t *testing.T) {
+func TestAltEnterOpensFileRefWhenNoToolExpand(t *testing.T) {
 	m, _ := newAppTestModelWithOptions(Options{WorkDir: t.TempDir(), VimMode: VimModeTakeover})
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
 	m.applyEvent(protocol.TextDelta{Text: "see target.go:4"})
@@ -155,10 +155,15 @@ func TestEmptyEnterOpensFileRefWhenNoToolExpand(t *testing.T) {
 	t.Setenv("EDITOR", "")
 	t.Setenv("PATH", t.TempDir())
 
-	// Empty enter should consume the key via open-at-line (no collapsible tools).
+	// Bare enter must not open file refs (#421).
 	handled, _ := m.handleToolCellKeys(tea.KeyMsg{Type: tea.KeyEnter})
+	if handled {
+		t.Fatal("bare enter must not open file ref")
+	}
+	// Empty-composer alt+enter opens at-line (no collapsible tools).
+	handled, _ = m.handleToolCellKeys(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
 	if !handled {
-		t.Fatal("empty enter should open file ref when no tool cells")
+		t.Fatal("alt+enter should open file ref when no tool cells")
 	}
 	if !m.noticeErr || !strings.Contains(m.notice, "no editor found") {
 		t.Fatalf("want missing-editor notice, got err=%v notice=%q", m.noticeErr, m.notice)

@@ -26,6 +26,7 @@ func TestDefaultKeyMapBindingsMatchTheirRequiredKeysAndHaveHelp(t *testing.T) {
 		{"interrupt", keys.Interrupt, tea.KeyMsg{Type: tea.KeyEsc}},
 		{"send", keys.Send, tea.KeyMsg{Type: tea.KeyEnter}},
 		{"newline alt+enter", keys.Newline, tea.KeyMsg{Type: tea.KeyEnter, Alt: true}},
+		{"tool expand alt+enter", keys.ToolExpand, tea.KeyMsg{Type: tea.KeyEnter, Alt: true}},
 		{"external editor", keys.ExternalEditor, tea.KeyMsg{Type: tea.KeyCtrlE}},
 	}
 	for _, tt := range tests {
@@ -57,6 +58,13 @@ func TestDefaultKeyMapBindingsMatchTheirRequiredKeysAndHaveHelp(t *testing.T) {
 	if newlineHelp.Desc != "newline" {
 		t.Errorf("Newline help desc = %q, want newline", newlineHelp.Desc)
 	}
+	// ToolExpand shares alt+enter with Newline; routing is composer-empty only (#421).
+	if keys.ToolExpand.Help().Key != "alt+enter" {
+		t.Errorf("ToolExpand help key = %q, want alt+enter", keys.ToolExpand.Help().Key)
+	}
+	if key.Matches(tea.KeyMsg{Type: tea.KeyEnter}, keys.ToolExpand) {
+		t.Error("bare enter must not match ToolExpand (#421)")
+	}
 }
 
 // keyMsgAltJ is the post-WrapInput KeyMsg for enhanced ctrl+j (#240).
@@ -65,8 +73,9 @@ func keyMsgAltJ() tea.KeyMsg {
 }
 
 // TestShiftEnterKeyMsgDoesNotMatchCycleWindow pins that the post-WrapInput
-// KeyMsg for shift+enter (KeyEnter+Alt) matches Newline only — never
-// CycleWindow*/Send/Focus* — under both split orientations (#53).
+// KeyMsg for shift+enter (KeyEnter+Alt) matches Newline and ToolExpand (shared
+// chord, context-routed) — never CycleWindow*/Send/Focus* — under both split
+// orientations (#53, #421).
 func TestShiftEnterKeyMsgDoesNotMatchCycleWindow(t *testing.T) {
 	msg := tea.KeyMsg{Type: tea.KeyEnter, Alt: true}
 	for _, tt := range []struct {
@@ -81,6 +90,9 @@ func TestShiftEnterKeyMsgDoesNotMatchCycleWindow(t *testing.T) {
 			keys.applyOrientationKeys(tt.orient)
 			if !key.Matches(msg, keys.Newline) {
 				t.Error("KeyEnter+Alt must match Newline")
+			}
+			if !key.Matches(msg, keys.ToolExpand) {
+				t.Error("KeyEnter+Alt must match ToolExpand (#421)")
 			}
 			if key.Matches(msg, keys.CycleWindowNext) {
 				t.Error("KeyEnter+Alt must not match CycleWindowNext")

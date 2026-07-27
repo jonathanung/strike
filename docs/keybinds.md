@@ -18,7 +18,7 @@ Registry: `keybindSlashPrimary` / `keybindNoSlashReason` in
 | Key | Action | Slash |
 |---|---|---|
 | `enter` | send prompt | — |
-| `shift+enter` | newline (`alt+enter` after enhanced CSI) | — |
+| `shift+enter` | newline (`alt+enter` after enhanced CSI; same chord expands a tool cell only when the composer is empty) | — |
 | `esc` | interrupt turn (cancels tools/LLM; shows “interrupted”) / reject permission / close modal | `/interrupt` |
 | `ctrl+c` | quit | `/exit`, `/quit` |
 | `ctrl+p` | command palette | `/palette` |
@@ -73,7 +73,7 @@ to a single pane and cycle the same order one at a time. See [usage.md](usage.md
 | Key | Action | Slash |
 |---|---|---|
 | `alt+[` / `alt+]` | previous / next tool cell | `/tool-prev`, `/tool-next` |
-| `enter` | expand / collapse tool output or large edit diff; else open `file:line` | `/tool-expand` |
+| `alt+enter` | expand / collapse tool output or large edit diff; else open `file:line` (composer empty only; with text, `alt+enter` is newline) | `/tool-expand` |
 | `y` | copy cell (tool/explore, else latest assistant/user) | `/tool-copy` |
 | `v` | review edit in editor | `/tool-review` |
 | `a` | apply shown edit/patch into the active worktree (confirm) | `/tool-apply` |

@@ -76,10 +76,11 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if next, cmd, ok := m.applyComposerReadline(msg); ok {
 			return next, cmd
 		}
-		// Composer newline (shift+enter → alt+enter) before focus/cycle.
-		// Bare LF / KeyCtrlJ is ctrl+j and matches CycleWindowNext / Focus*
-		// below — never newline (#324 Ubuntu).
-		if key.Matches(msg, m.keyMap.Newline) {
+		// Composer newline (shift+enter → alt+enter) before focus/cycle when
+		// there is text. Empty composer leaves alt+enter for tool expand
+		// (handleToolCellKeys); bare LF / KeyCtrlJ is ctrl+j pane cycle, never
+		// newline (#324 Ubuntu; #421).
+		if key.Matches(msg, m.keyMap.Newline) && strings.TrimSpace(m.composer.Value()) != "" {
 			m.resetHistoryBrowsing()
 			m.composer.InsertString("\n")
 			m.recomputeCompletion()
@@ -199,7 +200,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		text := strings.TrimSpace(m.composerTextExpanded())
 		images := pendingImageAttachments(m.pendingImages)
 		if text == "" && len(images) == 0 {
-			// Empty enter is tool expand / open-at-line (handleToolCellKeys).
+			// Empty enter does not expand cells (alt+enter / nav.tool-expand).
 			return m, nil
 		}
 		if text != "" && strings.HasPrefix(text, "/") && len(images) == 0 {

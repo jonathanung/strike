@@ -130,7 +130,8 @@ Remap app-level chords without recompiling. Ids match the in-app cheatsheet
   "keybinds": {
     "nav.jump-bottom": "ctrl+b",
     "global.palette": ["ctrl+p", "ctrl+k"],
-    "composer.newline": ["alt+enter", "ctrl+j"]
+    "composer.newline": ["alt+enter", "ctrl+j"],
+    "nav.tool-expand": "alt+enter"
   }
 }
 ```
@@ -140,9 +141,10 @@ and invalid/empty chords fail config load with a clear error. Critical
 `global.quit` and `global.interrupt` cannot be cleared.
 
 Shared chords across different actions are allowed (context-specific routing
-in the TUI decides the winner). `/keys` shows the effective map; `/keys reset`
-restores built-in defaults for the current session only — delete the
-`keybinds` object from config to persist defaults.
+in the TUI decides the winner — e.g. default `alt+enter` is newline while
+typing and tool expand only when the composer is empty). `/keys` shows the
+effective map; `/keys reset` restores built-in defaults for the current
+session only — delete the `keybinds` object from config to persist defaults.
 
 List/permission modal conventions (`lists.*`, `perm.*`) and agents-pane local
 controls (`agents.*`) are not remappable.

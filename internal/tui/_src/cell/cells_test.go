@@ -366,7 +366,7 @@ func TestToolCellLargeEditDiffExpandCollapse(t *testing.T) {
 	if !strings.Contains(plain, "more lines") {
 		t.Errorf("collapsed missing truncation:\n%s", plain)
 	}
-	if !strings.Contains(plain, "enter to expand") {
+	if !strings.Contains(plain, "alt+enter to expand") {
 		t.Errorf("collapsed missing expand hint:\n%s", plain)
 	}
 	// Collapsed window is 8 hunk lines; later inserts should be hidden.
@@ -384,7 +384,7 @@ func TestToolCellLargeEditDiffExpandCollapse(t *testing.T) {
 	if strings.Contains(plain, "more lines") {
 		t.Errorf("expanded still truncated:\n%s", plain)
 	}
-	if strings.Contains(plain, "enter to expand") {
+	if strings.Contains(plain, "alt+enter to expand") {
 		t.Errorf("expanded still shows expand hint:\n%s", plain)
 	}
 	for _, want := range []string{"-old-line-0", "-old-line-11", "+new-line-0", "+new-line-11"} {
@@ -397,7 +397,7 @@ func TestToolCellLargeEditDiffExpandCollapse(t *testing.T) {
 		t.Fatal("toggle should collapse")
 	}
 	plain = ansi.Strip(cell.render(80, th))
-	if !strings.Contains(plain, "more lines") || !strings.Contains(plain, "enter to expand") {
+	if !strings.Contains(plain, "more lines") || !strings.Contains(plain, "alt+enter to expand") {
 		t.Errorf("re-collapsed missing truncation affordance:\n%s", plain)
 	}
 }
@@ -466,7 +466,7 @@ func TestExploreCellGroupsConsecutiveReadGlobGrep(t *testing.T) {
 	}
 }
 
-func TestEmptyEnterTogglesSelectedToolCell(t *testing.T) {
+func TestAltEnterTogglesSelectedToolCell(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
 	var b strings.Builder
@@ -478,17 +478,26 @@ func TestEmptyEnterTogglesSelectedToolCell(t *testing.T) {
 	m.applyEvent(protocol.ToolCallBegin{CallID: "c1", Name: "bash"})
 	m.applyEvent(protocol.ToolCallEnd{CallID: "c1", Title: "run", Output: b.String()})
 	m.composer.SetValue("")
+	// Bare enter must not expand (#421).
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	tc := m.toolByID["c1"]
-	if tc == nil || !tc.expanded {
-		t.Fatalf("enter should expand collapsible tool: tc=%v expanded=%v", tc != nil, tc != nil && tc.expanded)
+	if tc == nil {
+		t.Fatal("missing tool cell")
+	}
+	if tc.expanded {
+		t.Fatal("bare enter must not expand tool cell")
+	}
+	// alt+enter expands when composer is empty.
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	if !tc.expanded {
+		t.Fatalf("alt+enter should expand collapsible tool: expanded=%v", tc.expanded)
 	}
 	if m.selectedCell < 0 {
-		t.Fatal("enter should select the tool cell")
+		t.Fatal("alt+enter should select the tool cell")
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
 	if tc.expanded {
-		t.Fatal("second enter should collapse")
+		t.Fatal("second alt+enter should collapse")
 	}
 	// Non-empty enter still sends (no expand side effect on send path with text).
 	m.composer.SetValue("hello")
@@ -496,6 +505,14 @@ func TestEmptyEnterTogglesSelectedToolCell(t *testing.T) {
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	if tc.expanded != before {
 		t.Fatal("send with text must not toggle tool expand")
+	}
+	// With text, alt+enter is newline — not expand (#421 / #414).
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	if tc.expanded != before {
+		t.Fatal("alt+enter with composer text must not toggle tool expand")
+	}
+	if !strings.Contains(m.composer.Value(), "\n") {
+		t.Fatalf("alt+enter with text should insert newline, got %q", m.composer.Value())
 	}
 }
 
@@ -653,8 +670,7 @@ func TestYCopiesSelectedToolCellViaOSC52(t *testing.T) {
 	m.applyEvent(protocol.ToolCallBegin{CallID: "c1", Name: "bash"})
 	m.applyEvent(protocol.ToolCallEnd{CallID: "c1", Title: "run", Output: body})
 	m.composer.SetValue("")
-	// Select via empty enter expand path.
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	// y copies latest tool/explore without needing expand selection.
 	tc := m.toolByID["c1"]
 	if tc == nil {
 		t.Fatal("missing tool cell")
