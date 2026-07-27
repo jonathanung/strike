@@ -294,8 +294,70 @@ func TestToResponsesRequestMapsRolesToolsAndDefaults(t *testing.T) {
 	if out.Input[2].Type != "function_call" || out.Input[2].CallID != "c1" || out.Input[2].Arguments != `{"x":1}` {
 		t.Errorf("function_call = %+v", out.Input[2])
 	}
-	if out.Input[3].Type != "function_call_output" || out.Input[3].CallID != "c1" || out.Input[3].Output != "out" {
+	if out.Input[3].Type != "function_call_output" || out.Input[3].CallID != "c1" || out.Input[3].Output == nil || *out.Input[3].Output != "out" {
 		t.Errorf("function_call_output = %+v", out.Input[3])
+	}
+}
+
+func TestResponsesRequestPairsDeniedCallAndEmptyFallbackOutput(t *testing.T) {
+	out := toResponsesRequest(provider.Request{Messages: []provider.Message{
+		{
+			Role: provider.RoleAssistant,
+			ToolCalls: []provider.ToolCall{{
+				ID: "git-denied", Name: "bash", Args: json.RawMessage(`{"command":"git diff"}`),
+			}},
+		},
+		{Role: provider.RoleTool, ToolResult: &provider.ToolResult{CallID: "git-denied", Output: "Permission denied."}},
+		{
+			Role: provider.RoleAssistant,
+			ToolCalls: []provider.ToolCall{{
+				ID: "empty-fallback", Name: "webfetch", Args: json.RawMessage(`{"url":"https://example.com"}`),
+			}},
+		},
+		{Role: provider.RoleTool, ToolResult: &provider.ToolResult{CallID: "empty-fallback", Output: ""}},
+	}})
+
+	data, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Input []map[string]json.RawMessage `json:"input"`
+	}
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatal(err)
+	}
+	calls := make(map[string]bool)
+	outputs := make(map[string]json.RawMessage)
+	for _, item := range body.Input {
+		var typ, callID string
+		if err := json.Unmarshal(item["type"], &typ); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(item["call_id"], &callID); err != nil {
+			t.Fatal(err)
+		}
+		switch typ {
+		case "function_call":
+			calls[callID] = true
+		case "function_call_output":
+			output, ok := item["output"]
+			if !ok {
+				t.Fatalf("output omitted for call %q: %s", callID, data)
+			}
+			outputs[callID] = output
+		}
+	}
+	for callID := range calls {
+		if _, ok := outputs[callID]; !ok {
+			t.Errorf("function call %q has no matching output: %s", callID, data)
+		}
+	}
+	if got := string(outputs["git-denied"]); got != `"Permission denied."` {
+		t.Errorf("denial output = %s", got)
+	}
+	if got := string(outputs["empty-fallback"]); got != `""` {
+		t.Errorf("empty fallback output = %s, want required empty string", got)
 	}
 }
 

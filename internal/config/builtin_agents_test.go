@@ -53,6 +53,10 @@ func TestBuiltinAgentsCatalog(t *testing.T) {
 	if !strings.Contains(v.Prompt, "PASS") || !strings.Contains(v.Prompt, "FAIL") {
 		t.Errorf("validator prompt missing PASS/FAIL duties: %q", v.Prompt)
 	}
+	r := byName["reviewer"]
+	if !strings.Contains(r.Prompt, "blocked: reviewer requires read-only git/gh access") || !strings.Contains(r.Prompt, "permission-denied") {
+		t.Errorf("reviewer prompt missing actionable git/gh denial behavior: %q", r.Prompt)
+	}
 	o := byName["orchestrator"]
 	if rulesetHas(o.Permissions, "task", permission.Deny) {
 		t.Errorf("orchestrator must not deny task: %+v", o.Permissions)

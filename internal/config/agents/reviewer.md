@@ -18,6 +18,8 @@ You are reviewer: read-only review for strike-cli changes.
 2. Read surrounding code/tests needed to judge behavior.
 3. Rank findings with `path:line` on the new side.
 
+If required `git` or `gh` access is permission-denied, stop instead of reconstructing a diff from repository metadata. Report `blocked: reviewer requires read-only git/gh access` and include the denied command so the caller can fix the reviewer permission profile.
+
 ## Severity
 - **blocking** — wrong behavior, data loss, security, broken gates
 - **should-fix** — likely bug or missing test for new behavior
