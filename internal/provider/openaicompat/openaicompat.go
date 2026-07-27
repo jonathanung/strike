@@ -24,6 +24,9 @@ type BearerSource = func(ctx context.Context) (string, error)
 type Provider struct {
 	base.Client
 	baseURL string
+	// images is false for compatible APIs whose chat-completions endpoint does
+	// not accept image_url content parts.
+	images bool
 	// priorityTier is true for the OpenAI platform API, which accepts
 	// service_tier=priority. xAI and other OpenAI-compatible hosts do not.
 	priorityTier bool
@@ -31,6 +34,15 @@ type Provider struct {
 
 func New(name, baseURL string, bearer BearerSource) *Provider {
 	return NewWithHeaders(name, baseURL, bearer, nil)
+}
+
+// NewTextOnly creates a provider whose API accepts text-only chat messages.
+// User images are omitted while retaining their accompanying text, allowing a
+// conversation created with a vision model to continue after switching.
+func NewTextOnly(name, baseURL string, bearer BearerSource) *Provider {
+	p := New(name, baseURL, bearer)
+	p.images = false
+	return p
 }
 
 // NewWithHeaders is New plus optional static headers (custom gateways).
@@ -50,6 +62,7 @@ func NewWithHeaders(name, baseURL string, bearer BearerSource, headers map[strin
 			Headers:      h,
 		},
 		baseURL: baseURL,
+		images:  true,
 	}
 }
 
@@ -132,7 +145,7 @@ type chatUsage struct {
 }
 
 func (p *Provider) Stream(ctx context.Context, req provider.Request) (<-chan provider.StreamEvent, error) {
-	chatReq := toChatRequest(req, p.priorityTier)
+	chatReq := toChatRequest(req, p.priorityTier, p.images)
 	return base.Stream(func(ch chan<- provider.StreamEvent) {
 		var resp chatResponse
 		if err := p.PostJSON(ctx, p.baseURL+"/chat/completions", chatReq, &resp); err != nil {
@@ -173,7 +186,7 @@ func (p *Provider) Stream(ctx context.Context, req provider.Request) (<-chan pro
 	}), nil
 }
 
-func toChatRequest(req provider.Request, priorityTier bool) chatRequest {
+func toChatRequest(req provider.Request, priorityTier, images bool) chatRequest {
 	out := chatRequest{Model: req.Model, ReasoningEffort: base.OpenAIEffort(req.Effort)}
 	if req.Priority && priorityTier {
 		out.ServiceTier = "priority"
@@ -194,7 +207,7 @@ func toChatRequest(req provider.Request, priorityTier bool) chatRequest {
 	for _, m := range req.Messages {
 		switch m.Role {
 		case provider.RoleUser:
-			out.Messages = append(out.Messages, chatMessage{Role: "user", Content: userContent(m)})
+			out.Messages = append(out.Messages, chatMessage{Role: "user", Content: userContent(m, images)})
 		case provider.RoleAssistant:
 			msg := chatMessage{Role: "assistant", Content: m.Text}
 			for _, call := range m.ToolCalls {
@@ -219,10 +232,10 @@ func toChatRequest(req provider.Request, priorityTier bool) chatRequest {
 	return out
 }
 
-// userContent is plain text when there are no images; otherwise a multimodal
-// parts array (text + image_url data URIs).
-func userContent(m provider.Message) any {
-	if len(m.Images) == 0 {
+// userContent is plain text when images are unsupported or absent; otherwise
+// it is a multimodal parts array (text + image_url data URIs).
+func userContent(m provider.Message, images bool) any {
+	if !images || len(m.Images) == 0 {
 		return m.Text
 	}
 	parts := make([]chatContentPart, 0, 1+len(m.Images))

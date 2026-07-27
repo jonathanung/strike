@@ -207,7 +207,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			if _, err := source(context.Background()); err != nil {
 				return nil, "", err
 			}
-			return openaicompat.New("deepseek", "https://api.deepseek.com/v1", source), config.DefaultModel(name), nil
+			return openaicompat.NewTextOnly("deepseek", "https://api.deepseek.com/v1", source), config.DefaultModel(name), nil
 		default:
 			cp, ok := customStore.Get(name)
 			if !ok {

@@ -338,7 +338,7 @@ func TestStreamContentOnlyOmitsToolEvents(t *testing.T) {
 }
 
 func TestChatRequestCarriesReasoningEffort(t *testing.T) {
-	out := toChatRequest(provider.Request{Model: "gpt-5.5", Effort: provider.EffortMax}, true)
+	out := toChatRequest(provider.Request{Model: "gpt-5.5", Effort: provider.EffortMax}, true, true)
 	if out.ReasoningEffort != "high" {
 		t.Errorf("reasoning_effort = %q, want high (max clamps down)", out.ReasoningEffort)
 	}
@@ -384,7 +384,7 @@ func TestVariantOptionsPassthrough(t *testing.T) {
 // TestChatRequestOmitsReasoningEffortWhenUnset keeps the field out of the body
 // entirely for models that would reject it.
 func TestChatRequestOmitsReasoningEffortWhenUnset(t *testing.T) {
-	out := toChatRequest(provider.Request{Model: "gpt-5.5"}, true)
+	out := toChatRequest(provider.Request{Model: "gpt-5.5"}, true, true)
 	data, err := json.Marshal(out)
 	if err != nil {
 		t.Fatal(err)
@@ -412,7 +412,7 @@ func TestToChatRequestPriorityTier(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			out := toChatRequest(provider.Request{Model: "gpt-5.6-sol", Priority: tt.priority}, tt.priorityTier)
+			out := toChatRequest(provider.Request{Model: "gpt-5.6-sol", Priority: tt.priority}, tt.priorityTier, true)
 			if out.ServiceTier != tt.wantTier {
 				t.Fatalf("ServiceTier = %q, want %q", out.ServiceTier, tt.wantTier)
 			}
@@ -440,7 +440,7 @@ func TestToChatRequestCombinesReasoningEffortAndPriorityTier(t *testing.T) {
 		Model:    "gpt-5.6-sol",
 		Effort:   provider.EffortMax,
 		Priority: true,
-	}, true)
+	}, true, true)
 	if out.ReasoningEffort != "high" {
 		t.Errorf("ReasoningEffort = %q, want high", out.ReasoningEffort)
 	}
@@ -461,7 +461,7 @@ func TestToChatRequestMapsRoles(t *testing.T) {
 			},
 			{Role: provider.RoleTool, ToolResult: &provider.ToolResult{CallID: "c", Output: "o"}},
 		},
-	}, false)
+	}, false, true)
 	if len(out.Messages) != 4 {
 		t.Fatalf("messages = %d, want 4", len(out.Messages))
 	}
@@ -560,7 +560,7 @@ func TestToChatRequestIncludesImageParts(t *testing.T) {
 			Images: []provider.Image{{MIME: "image/png", Data: png}},
 		}},
 	}
-	out := toChatRequest(req, false)
+	out := toChatRequest(req, false, true)
 	if len(out.Messages) != 1 {
 		t.Fatalf("messages = %d", len(out.Messages))
 	}
@@ -579,6 +579,24 @@ func TestToChatRequestIncludesImageParts(t *testing.T) {
 	}
 	if !strings.HasPrefix(parts[1].ImageURL.URL, "data:image/png;base64,") {
 		t.Errorf("image url = %q", parts[1].ImageURL.URL)
+	}
+}
+
+func TestToChatRequestOmitsImagesForTextOnlyProvider(t *testing.T) {
+	req := provider.Request{
+		Model: "deepseek-chat",
+		Messages: []provider.Message{{
+			Role:   provider.RoleUser,
+			Text:   "continue from this image",
+			Images: []provider.Image{{MIME: "image/png", Data: []byte{1, 2, 3}}},
+		}},
+	}
+	out := toChatRequest(req, false, false)
+	if len(out.Messages) != 1 {
+		t.Fatalf("messages = %d, want 1", len(out.Messages))
+	}
+	if got, ok := out.Messages[0].Content.(string); !ok || got != "continue from this image" {
+		t.Errorf("content = %#v, want text without image parts", out.Messages[0].Content)
 	}
 }
 
