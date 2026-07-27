@@ -86,6 +86,13 @@ type historyAddedMsg struct {
 	err error
 }
 
+// goalFinishedMsg is delivered when an async /goal run completes.
+type goalFinishedMsg struct {
+	goal host.Goal
+	err  error
+	op   string
+}
+
 // Options carries frontend-only construction flags. Host capabilities
 // (credentials, catalog, settings, history, agents, skills) arrive through
 // host.Services instead.
@@ -669,6 +676,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if m.services.History != nil {
 			m.entries = m.services.History.Entries()
 		}
+		return m, nil
+
+	case goalFinishedMsg:
+		if msg.err != nil {
+			m.setNotice("goal: "+msg.err.Error(), true)
+			return m, nil
+		}
+		m.setNotice("goal: "+formatGoalStatus(msg.goal), false)
 		return m, nil
 
 	case editorFinishedMsg:

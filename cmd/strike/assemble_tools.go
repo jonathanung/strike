@@ -10,6 +10,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/auth"
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/engine"
+	"github.com/jonathanung/strike-cli/internal/goal"
 	"github.com/jonathanung/strike-cli/internal/history"
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/host/local"
@@ -46,6 +47,7 @@ type assembled struct {
 	historyClose func() error
 	memoryClose  func() error
 	issuesClose  func() error
+	goalsClose   func() error
 	// worktreeClose removes a strike-managed worktree when cleanup=delete.
 	worktreeClose func() error
 	// mcpClose stops MCP server sessions (stdio/HTTP; process-scoped).
@@ -93,8 +95,16 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("opening project issues: %w", err)
 	}
+	goalStore, err := goal.Open(globalRoot, projectIdentity.Key)
+	if err != nil {
+		_ = issueStore.Close()
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, fmt.Errorf("opening project goals: %w", err)
+	}
 	cfg, err := config.Load(workDir)
 	if err != nil {
+		_ = goalStore.Close()
 		_ = issueStore.Close()
 		_ = memoryStore.Close()
 		_ = historyStore.Close()
@@ -111,6 +121,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	if opts.effort != "" {
 		level, ok := protocol.ParseEffort(opts.effort)
 		if !ok || level == protocol.EffortDefault {
+			_ = goalStore.Close()
 			_ = issueStore.Close()
 			_ = memoryStore.Close()
 			_ = historyStore.Close()
@@ -121,6 +132,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 
 	authStore, err := auth.OpenStore(auth.DefaultPath())
 	if err != nil {
+		_ = goalStore.Close()
 		_ = issueStore.Close()
 		_ = memoryStore.Close()
 		_ = historyStore.Close()
@@ -202,12 +214,14 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// /provider otherwise). Headless exec always requires a usable provider.
 	if requireProvider || (opts.providerSet && opts.provider != "") {
 		if cfg.Provider == "" {
+			_ = goalStore.Close()
 			_ = issueStore.Close()
 			_ = memoryStore.Close()
 			_ = historyStore.Close()
 			return nil, fmt.Errorf("no provider configured (pass --provider or set provider in config)")
 		}
 		if _, _, err := selectProvider(cfg.Provider); err != nil {
+			_ = goalStore.Close()
 			_ = issueStore.Close()
 			_ = memoryStore.Close()
 			_ = historyStore.Close()
@@ -219,6 +233,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// available names in its description at construction time.
 	skills, err := config.LoadSkillsWithError(workDir)
 	if err != nil {
+		_ = goalStore.Close()
 		_ = issueStore.Close()
 		_ = memoryStore.Close()
 		_ = historyStore.Close()
@@ -266,6 +281,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// other personas supply a body that becomes the persona layer.
 	loadedAgents, err := config.LoadAgentsWithError(workDir)
 	if err != nil {
+		_ = goalStore.Close()
 		_ = issueStore.Close()
 		_ = memoryStore.Close()
 		_ = historyStore.Close()
@@ -283,6 +299,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	instructions := config.LoadInstructions(workDir, projectIdentity.Root)
 	workflows, err := config.LoadWorkflows(workDir)
 	if err != nil {
+		_ = goalStore.Close()
+		_ = issueStore.Close()
 		_ = memoryStore.Close()
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("loading workflows: %w", err)
@@ -493,6 +511,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	if opts.continueSession {
 		info, err := sessions.LatestRoot(projectIdentity.Key)
 		if err != nil {
+			_ = goalStore.Close()
 			_ = issueStore.Close()
 			_ = memoryStore.Close()
 			_ = historyStore.Close()
@@ -502,6 +521,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	}
 	first, replay, err := openRoot(resumeID, true)
 	if err != nil {
+		_ = goalStore.Close()
 		_ = issueStore.Close()
 		_ = memoryStore.Close()
 		_ = historyStore.Close()
@@ -538,6 +558,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// the TUI never sees auth/config/models/history/memory/issues directly.
 	services := local.New(authStore, historyStore, memoryStore, issueStore, agentNames, skills, customStore, workDir)
 	services.Files = local.NewFiles(workDir)
+	services.Goals = local.NewGoals(goalStore, workDir)
 	services.Sessions = local.NewSessions(sessions, projectIdentity.Key)
 	services.Init = local.NewProjectInit(workDir)
 	services.MCP = local.NewMCP(mcpMgr)
@@ -566,6 +587,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		},
 		issuesClose: func() error {
 			return issueStore.Close()
+		},
+		goalsClose: func() error {
+			return goalStore.Close()
 		},
 		worktreeClose: first.wtClose,
 		mcpClose: func() error {
