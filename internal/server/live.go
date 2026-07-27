@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -47,6 +48,7 @@ type RootResumeFunc func(ctx context.Context, sessionID string) (rootID string, 
 // rootEntry tracks one live root inside LiveHub.
 type rootEntry struct {
 	live     *Live
+	title    string
 	activeAt time.Time
 	created  time.Time
 }
@@ -155,7 +157,7 @@ func (h *LiveHub) List() []RootSummary {
 		s := e.live.Status()
 		out = append(out, RootSummary{
 			ID:             id,
-			Title:          "", // derived from session metadata
+			Title:          e.title,
 			Agent:          s.Agent,
 			Busy:           s.Busy,
 			ActiveAt:       e.activeAt.UnixMilli(),
@@ -249,14 +251,17 @@ func (h *LiveHub) MarkActive(id string) {
 	}
 }
 
-func trimRootID(id string) string {
-	s := id
-	for i := 0; i < len(s); i++ {
-		if s[i] != ' ' && s[i] != '\t' {
-			return s[i:]
-		}
+// SetTitle records a display title for a root.
+func (h *LiveHub) SetTitle(id, title string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if entry, ok := h.entries[id]; ok {
+		entry.title = title
 	}
-	return ""
+}
+
+func trimRootID(id string) string {
+	return strings.TrimSpace(id)
 }
 
 // AgentInfo is a selectable agent exposed to the web UI.

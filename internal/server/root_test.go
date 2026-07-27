@@ -110,14 +110,21 @@ func TestRootCreate(t *testing.T) {
 	live := NewLive("r1", "/a", nil, make(chan protocol.Op))
 	defer live.Close()
 	var hub *LiveHub
+	var spawnedLives []*Live
 	hub = NewLiveHub(
 		func(ctx context.Context) (string, error) {
-			newLive := NewLive("new-root", "/new", nil, make(chan protocol.Op))
+			newLive := NewLive("new-root", "/new", nil, make(chan protocol.Op, 1))
+			spawnedLives = append(spawnedLives, newLive)
 			hub.Add("new-root", newLive)
 			return "new-root", nil
 		},
 		nil,
 	)
+	defer func() {
+		for _, l := range spawnedLives {
+			l.Close()
+		}
+	}()
 	hub.Add("r1", live)
 	srv, err := New(Options{Auth: true, Token: "t", SessionDir: dir, LiveHub: hub})
 	if err != nil {
@@ -150,17 +157,24 @@ func TestRootResume(t *testing.T) {
 	live := NewLive("r1", "/a", nil, make(chan protocol.Op))
 	defer live.Close()
 	var hub *LiveHub
+	var spawnedLives []*Live
 	hub = NewLiveHub(
 		nil,
 		func(ctx context.Context, sessionID string) (string, bool, error) {
 			if sessionID == "bad-child" {
 				return "", false, fmt.Errorf("cannot resume child session %q", sessionID)
 			}
-			newLive := NewLive(sessionID, "/resumed", nil, make(chan protocol.Op))
+			newLive := NewLive(sessionID, "/resumed", nil, make(chan protocol.Op, 1))
+			spawnedLives = append(spawnedLives, newLive)
 			hub.Add(sessionID, newLive)
 			return sessionID, false, nil
 		},
 	)
+	defer func() {
+		for _, l := range spawnedLives {
+			l.Close()
+		}
+	}()
 	hub.Add("r1", live)
 	srv, err := New(Options{Auth: true, Token: "t", SessionDir: dir, LiveHub: hub})
 	if err != nil {

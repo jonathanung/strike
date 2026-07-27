@@ -282,6 +282,9 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 				roots[slot.id] = sr
 				mu.Unlock()
 				liveHub.Add(slot.id, live)
+				if info, err := a.sessions.Get(slot.id); err == nil && info.Title != "" {
+					liveHub.SetTitle(slot.id, info.Title)
+				}
 				return slot.id, nil
 			},
 			func(ctx context.Context, sessionID string) (string, bool, error) {
@@ -318,6 +321,9 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 				roots[slot.id] = sr
 				mu.Unlock()
 				liveHub.Add(slot.id, live)
+				if info, err := a.sessions.Get(slot.id); err == nil && info.Title != "" {
+					liveHub.SetTitle(slot.id, info.Title)
+				}
 				return slot.id, false, nil
 			},
 		)
@@ -326,6 +332,9 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		initialSlot := a.firstSlot
 		initialLive := server.NewLive(initialSlot.id, initialSlot.workDir, agents, initialSlot.eng.Ops())
 		liveHub.Add(initialSlot.id, initialLive)
+		if info, err := a.sessions.Get(initialSlot.id); err == nil && info.Title != "" {
+			liveHub.SetTitle(initialSlot.id, info.Title)
+		}
 		initialSR := startServeRoot(ctx, initialSlot, initialLive)
 		roots[initialSlot.id] = initialSR
 

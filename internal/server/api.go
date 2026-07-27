@@ -92,10 +92,16 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	}
 	var status *StatusSnapshot
 	var agents []AgentInfo
-	live := s.resolveLive(w, r)
-	if live != nil {
-		v := live.Status()
-		status, agents = &v, live.Agents()
+	// Bootstrap uses a non-tracking resolve to avoid marking active on page load.
+	if s.opts.LiveHub != nil {
+		live := s.opts.LiveHub.LiveFor(rootParam(r))
+		if live != nil {
+			v := live.Status()
+			status, agents = &v, live.Agents()
+		}
+	} else if s.opts.Live != nil {
+		v := s.opts.Live.Status()
+		status, agents = &v, s.opts.Live.Agents()
 	}
 	var protocolOps []string
 	if s.hasLive() {
