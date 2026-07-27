@@ -173,7 +173,7 @@ func sessionTitleFromText(text string) string {
 	if s == "" {
 		return ""
 	}
-	const maxRunes = 60
+	const maxRunes = 32 // keep in sync with session.titleMaxRunes
 	if utf8.RuneCountInString(s) <= maxRunes {
 		return s
 	}

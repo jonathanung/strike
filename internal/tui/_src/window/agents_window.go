@@ -83,6 +83,11 @@ type agentsHideMsg struct {
 	sessionID string
 }
 
+// agentsRenameMsg requests renaming the selected root or child session.
+type agentsRenameMsg struct {
+	sessionID string
+}
+
 // agentsHighlightMsg announces the agents-tree cursor target so the visualizer
 // can follow selection without requiring Enter.
 type agentsHighlightMsg struct {
@@ -91,8 +96,8 @@ type agentsHighlightMsg struct {
 
 // agentsWindow is a multi-root session tree: top-level = parent agents, nested
 // = that parent's subagents. Keys: j/k move, enter select, n spawn, x interrupt,
-// d hide from pane (keeps session), space/h/l toggle expand, f cycle view
-// filter, / text filter.
+// r rename, d hide from pane (keeps session), space/h/l toggle expand, f cycle
+// view filter, / text filter.
 type agentsWindow struct {
 	activeID  string
 	viewingID string
@@ -258,8 +263,8 @@ func agentsPaneFooter(th theme.Theme, width int) string {
 // agentsPaneKeyHints is the ordered agents-pane footer binding list.
 func agentsPaneKeyHints() []ui.KeyHint {
 	ak := defaultAgentsKeyMap()
-	hints := make([]ui.KeyHint, 0, 6)
-	for _, b := range []key.Binding{ak.Spawn, ak.Open, ak.Interrupt, ak.Hide, ak.Move, ak.Filter} {
+	hints := make([]ui.KeyHint, 0, 7)
+	for _, b := range []key.Binding{ak.Spawn, ak.Open, ak.Interrupt, ak.Rename, ak.Hide, ak.Move, ak.Filter} {
 		h := b.Help()
 		if h.Key == "" {
 			continue
@@ -306,6 +311,12 @@ func (w agentsWindow) handleKey(msg tea.KeyMsg) (agentsWindow, tea.Cmd) {
 		}
 		id := rows[w.cursor].ID
 		return w, func() tea.Msg { return agentsInterruptMsg{sessionID: id} }
+	case "r":
+		if len(rows) == 0 {
+			return w, nil
+		}
+		id := rows[w.cursor].ID
+		return w, func() tea.Msg { return agentsRenameMsg{sessionID: id} }
 	case "d":
 		if len(rows) == 0 {
 			return w, nil
@@ -481,7 +492,7 @@ func (w agentsWindow) filterChildTree(kids []childActivity, q string) []ui.TreeN
 	}
 	var build func(ch childActivity) (ui.TreeNode, bool)
 	build = func(ch childActivity) (ui.TreeNode, bool) {
-		label := childViewTitle(ch.agent, ch.prompt)
+		label := childViewTitle(ch.agent, ch.prompt, ch.sessionID, ch.title)
 		if label == "" {
 			label = shortSessionID(ch.sessionID)
 		}
@@ -499,7 +510,7 @@ func (w agentsWindow) filterChildTree(kids []childActivity, q string) []ui.TreeN
 				children = append(children, gn)
 			}
 		}
-		selfOK := agentsStateMatches(state, w.viewFilter) && agentsTextMatches(q, ch.sessionID, label, ch.agent, ch.prompt)
+		selfOK := agentsStateMatches(state, w.viewFilter) && agentsTextMatches(q, ch.sessionID, label, ch.agent, ch.prompt, ch.title)
 		if !selfOK && len(children) == 0 {
 			return ui.TreeNode{}, false
 		}
@@ -639,13 +650,9 @@ func clampAgentsCursor(cursor, n int) int {
 func agentsListItem(th theme.Theme, ch childActivity, current bool) ui.ListItem {
 	th = th.Resolve()
 
-	agent := sanitizeDisplayData(ch.agent)
-	if agent == "" {
-		agent = "subagent"
-	}
-	label := agent
-	if short := shortSessionID(ch.sessionID); short != "" {
-		label = agent + themedSpace(th.Spacing.XS) + short
+	label := sanitizeDisplayData(childViewTitle(ch.agent, ch.prompt, ch.sessionID, ch.title))
+	if label == "" {
+		label = "subagent"
 	}
 
 	statusLabel, glyph, statusStyle := agentsStatusParts(th, ch.status)

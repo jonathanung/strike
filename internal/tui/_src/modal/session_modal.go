@@ -256,12 +256,15 @@ func (m *sessionModal) updateRename(msg tea.KeyMsg) (modal, tea.Cmd) {
 		}
 		// Update list in place so view reflects rename without full PR refresh churn.
 		keepID := got.ID
+		final := strings.TrimSpace(got.Title)
 		m.phase = sessionPhaseBrowse
 		m.renameBuf = ""
 		m.statusErr = ""
 		m.reload()
 		m.cursorOn(keepID)
-		return m, nil
+		return m, func() tea.Msg {
+			return sessionRenamedMsg{id: keepID, title: final}
+		}
 	case "backspace":
 		if m.renameBuf != "" {
 			// rune-safe trim

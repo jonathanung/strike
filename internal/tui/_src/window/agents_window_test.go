@@ -36,7 +36,7 @@ func TestAgentsWindowEmptyState(t *testing.T) {
 func TestAgentsPaneFooterDerivesFromKeyMap(t *testing.T) {
 	footer := ansi.Strip(agentsPaneFooter(theme.Default(), 120))
 	ak := defaultAgentsKeyMap()
-	for _, b := range []key.Binding{ak.Spawn, ak.Open, ak.Interrupt, ak.Hide, ak.Move, ak.Filter} {
+	for _, b := range []key.Binding{ak.Spawn, ak.Open, ak.Interrupt, ak.Rename, ak.Hide, ak.Move, ak.Filter} {
 		h := b.Help()
 		if !strings.Contains(footer, h.Key) {
 			t.Errorf("footer missing key %q: %q", h.Key, footer)

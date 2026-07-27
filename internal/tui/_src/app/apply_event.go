@@ -292,6 +292,9 @@ func (m *Model) onChildStarted(ev protocol.ChildStarted) {
 				m.children[i].startedAt = now
 			}
 			m.children[i].endedAt = time.Time{}
+			if m.children[i].title == "" {
+				m.children[i].title = m.lookupSessionTitle(id)
+			}
 			return
 		}
 	}
@@ -300,6 +303,7 @@ func (m *Model) onChildStarted(ev protocol.ChildStarted) {
 		parentID:  parentID,
 		agent:     ev.Agent,
 		prompt:    ev.Prompt,
+		title:     m.lookupSessionTitle(id),
 		status:    "running",
 		startedAt: now,
 	})

@@ -26,6 +26,8 @@ strike launches without any provider configured. Pick one inside the TUI:
 /session                       # browse past root sessions (auto-titles) and
                                # resume one with full model history
 /session <id>                  # resume a specific session by id
+/rename                        # rename the current session (editor)
+/rename <title>                # rename the current session immediately
 /fast                          # toggle OpenAI priority tier (~2×, lower
                                # latency). Sticky session preference; no-op
                                # on Anthropic, xAI, ChatGPT subscription, or
@@ -89,6 +91,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 |---|---|
 | `/session` | picker of past **root** sessions (auto-titles); resume reloads model history |
 | `/session <id>` | resume that root session by id |
+| `/rename [title]` | rename the current session (brief auto-titles; agents pane `r` too) |
 | `/fork` | copy the current session JSONL into a new id (idle only) |
 | `/undo` / `/rewind` | undo last turn (idle only); bare opens picker; `chat` keeps disk; `files` restores per-file checkpoints from that turn (never `git reset --hard`) |
 | `/export` | dump the visible transcript to markdown (user/assistant/tool summaries); redacts common API-key shapes; default path under `.strike/exports/` or tmp; `--open` launches `$EDITOR` |

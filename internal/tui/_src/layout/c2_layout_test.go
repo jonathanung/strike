@@ -346,7 +346,7 @@ func TestAgentsPaneFooterOnlyWhenAgentsWindow(t *testing.T) {
 	// Wide enough that Panel footer chrome can fit the full agents hint row
 	// (n/enter/x/d/j/k/f including "hide from pane" + "cycle filter").
 	agentsPane := ansi.Strip(m.rightPaneSingle(120, 12, false, m.windows.active()))
-	for _, b := range []key.Binding{ak.Spawn, ak.Open, ak.Interrupt, ak.Hide, ak.Move, ak.Filter} {
+	for _, b := range []key.Binding{ak.Spawn, ak.Open, ak.Interrupt, ak.Rename, ak.Hide, ak.Move, ak.Filter} {
 		h := b.Help()
 		if !strings.Contains(agentsPane, h.Key) {
 			t.Errorf("agents pane missing key %q: %q", h.Key, agentsPane)
