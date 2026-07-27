@@ -18,18 +18,21 @@ const (
 )
 
 // Meta is durable session-level metadata stored beside the JSONL event log
-// (lineage, title, shipping side-effects). Missing fields stay zero-valued so
-// older sidecars remain readable.
+// (workspace path, lineage, title, shipping side-effects). Missing fields stay
+// zero-valued so older sidecars remain readable. Field order is intentional:
+// projectKey (workspace folder) is written first in the sidecar JSON.
 type Meta struct {
+	// ProjectKey is the launch workspace/folder identity (same key as
+	// history/memory), typically the canonical git root or cwd. Empty on
+	// legacy sidecars. Written first so session meta embeds the folder path
+	// at the top of the JSON.
+	ProjectKey      string `json:"projectKey,omitempty"`
 	Title           string `json:"title,omitempty"`
 	ParentSessionID string `json:"parentSessionId,omitempty"`
 	// ForkedFrom is the source session id when this session was created via
 	// Fork. Empty for ordinary roots and subagent children. Forks remain root
 	// sessions (ParentSessionID empty) so --continue / pickers still work.
 	ForkedFrom string `json:"forkedFrom,omitempty"`
-	// ProjectKey is the launch project identity (same key as history/memory),
-	// typically the canonical git root or cwd. Empty on legacy sidecars.
-	ProjectKey string `json:"projectKey,omitempty"`
 	// WorktreePath is the absolute path of a strike-managed git worktree bound
 	// to this session (tool CWD). Empty when the session uses the launch cwd.
 	WorktreePath string `json:"worktreePath,omitempty"`
