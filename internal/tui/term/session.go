@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -46,11 +47,13 @@ func Start(cmd *exec.Cmd, cols, rows int) (*Session, error) {
 	if cmd == nil {
 		return nil, fmt.Errorf("term: nil command")
 	}
-	// Ensure the child sees a useful TERM for curses UIs.
-	if cmd.Env == nil {
-		cmd.Env = os.Environ()
+	// Preserve the caller environment (including COLORTERM and Vim config
+	// variables), but advertise one deterministic terminal capability.
+	env := cmd.Env
+	if env == nil {
+		env = os.Environ()
 	}
-	cmd.Env = append(cmd.Env, "TERM=xterm-256color")
+	cmd.Env = ptyEnv(env)
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{
 		Rows: uint16(rows),
@@ -83,6 +86,19 @@ func Start(cmd *exec.Cmd, cols, rows int) (*Session, error) {
 	}()
 	go s.waitLoop()
 	return s, nil
+}
+
+// ptyEnv preserves the parent environment while replacing, rather than
+// duplicating, TERM for the embedded xterm-compatible PTY.
+func ptyEnv(parent []string) []string {
+	env := make([]string, 0, len(parent)+1)
+	for _, entry := range parent {
+		name, _, _ := strings.Cut(entry, "=")
+		if name != "TERM" {
+			env = append(env, entry)
+		}
+	}
+	return append(env, "TERM=xterm-256color")
 }
 
 // Done is closed when the child process has exited and the reader has finished.
