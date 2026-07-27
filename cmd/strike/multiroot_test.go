@@ -58,7 +58,7 @@ func TestMultiRootHubSpawnAndActivate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hub := newMultiRootHub(first, makeSlot, files)
+	hub := newMultiRootHub(first, makeSlot, files, local.NewShell(dir))
 	defer func() { _ = hub.Close() }()
 
 	if got := hub.ActiveID(); got != first.id {

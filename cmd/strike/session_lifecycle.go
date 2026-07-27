@@ -217,7 +217,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 			warnedDangerous = true
 		}
 
-		hub := newMultiRootHub(a.firstSlot, a.spawnRoot, a.services.Files)
+		hub := newMultiRootHub(a.firstSlot, a.spawnRoot, a.services.Files, a.services.Shell)
 		a.services.Roots = hub
 		// Hub owns firstSlot bind + worktree cleanup and engine Run/tee.
 		hubOwned := true

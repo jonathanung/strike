@@ -772,6 +772,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case initResultMsg:
 		return m.applyInitResult(msg)
 
+	case bangResultMsg:
+		return m.applyBangResult(msg)
+
 	case applyDiffResultMsg:
 		cmd := m.applyApplyDiffResult(msg)
 		return m, cmd

@@ -211,6 +211,10 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if text != "" && strings.HasPrefix(text, "/") && len(images) == 0 {
 			return m.handleCommand(text)
 		}
+		// Bang escape: !cmd runs local bash (no LLM turn).
+		if text != "" && strings.HasPrefix(text, "!") && len(images) == 0 {
+			return m.handleBang(text)
+		}
 		if m.providerName == "" {
 			m.setNeedsModelNotice("No model selected — use /provider <anthropic|openai|xai|echo> [model]", true)
 			return m, nil // keep the typed prompt in the composer
