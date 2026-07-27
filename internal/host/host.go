@@ -437,6 +437,69 @@ type Telemetry interface {
 	Sample(ctx context.Context, root string) (TelemetrySample, error)
 }
 
+// GoalCriterion is one falsifiable success condition on a host.Goal.
+type GoalCriterion struct {
+	Description string
+	Check       string // "cmd: …" | "predicate: …" | "judge: …"
+	Satisfied   bool
+}
+
+// Goal is a project-local loop-harness goal for /goal.
+type Goal struct {
+	ID            string
+	Description   string
+	Criteria      []GoalCriterion
+	Status        string // pending|active|paused|done|failed|aborted
+	MaxIterations int
+	MaxCostUSD    float64
+	AllowedTools  []string
+	CostUSD       float64
+	LastIteration int
+	FailReason    string
+	CreatedAt     time.Time
+}
+
+// GoalSetOptions configures /goal set constraints.
+type GoalSetOptions struct {
+	MaxIterations      int
+	MaxCostUSD         float64
+	MaxWallClockS      int
+	MaxNoProgressIters int
+	AllowedTools       []string
+}
+
+// GoalIteration is one committed loop pass for /goal log.
+type GoalIteration struct {
+	N         int
+	Plan      string
+	StateHash string
+	CostUSD   float64
+	// Summary is a short human-readable line (criteria matrix + action count).
+	Summary string
+}
+
+// Goals is project-scoped loop-harness control for /goal.
+// Nil means the capability is absent; frontends must degrade gracefully.
+type Goals interface {
+	// Set validates and stores a pending goal (does not run).
+	// criteria entries are CheckSpec strings (cmd:/predicate:/judge:).
+	Set(description string, criteria []string, opts GoalSetOptions) (Goal, error)
+	// List returns goals newest-first.
+	List() ([]Goal, error)
+	// Get returns one goal by id.
+	Get(id string) (Goal, bool, error)
+	// Run starts or resumes the loop until terminal, paused, or ctx cancel.
+	Run(ctx context.Context, id string) (Goal, error)
+	// Pause requests pause of an active goal.
+	Pause(id string) (Goal, error)
+	// Resume marks a paused goal active without running iterations.
+	Resume(id string) (Goal, error)
+	// Abort terminates a non-terminal goal.
+	Abort(id string) (Goal, error)
+	// Log returns committed iterations (optional single iter when iter>0).
+	Log(id string, iter int) ([]GoalIteration, error)
+}
+
 // Services bundles everything a frontend receives from its host. Any field
 // may be nil/empty when a capability is absent (tests, future frontends);
 // frontends must degrade gracefully.
@@ -448,6 +511,7 @@ type Services struct {
 	Files     Files
 	Memory    Memory
 	Issues    Issues
+	Goals     Goals     // loop harness; nil when unsupported
 	Sessions  Sessions  // durable session list/replay; nil when unsupported
 	Roots     Roots     // concurrent parent sessions; nil when single-root only
 	Providers Providers // custom/self-hosted provider CRUD; nil when unsupported

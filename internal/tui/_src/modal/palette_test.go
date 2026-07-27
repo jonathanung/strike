@@ -50,6 +50,7 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		{ID: "command:keys", Label: "/keys", Description: "show keyboard shortcuts", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/keys"}},
 		{ID: "command:memory", Label: "/memory", Description: "list, get, set, delete, export, or import project memory", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/memory"}},
 		{ID: "command:issues", Label: "/issues", Description: "list, add, get, close, export, or import project issues", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/issues"}},
+		{ID: "command:goal", Label: "/goal", Description: "loop harness: set, run, status, pause, resume, abort, log, list", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/goal"}},
 		{ID: "command:context", Label: "/context", Description: "context doctor: system-prompt layer breakdown", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/context"}},
 		{ID: "command:effective-prompt", Label: "/effective-prompt", Description: "context doctor: system-prompt layer breakdown", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/effective-prompt"}},
 		{ID: "command:cost", Label: "/cost", Description: "session token and cost totals", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/cost"}},

@@ -243,6 +243,11 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 					out = err
 				}
 			}
+			if a.goalsClose != nil {
+				if err := a.goalsClose(); err != nil && out == nil {
+					out = err
+				}
+			}
 			if err := a.issuesClose(); err != nil && out == nil {
 				out = err
 			}
