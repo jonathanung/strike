@@ -916,6 +916,10 @@ func (f *fakeSessions) ReplayJSONL(id string) ([]byte, error) {
 }
 
 func (f *fakeSessions) Fork(id string) (host.Session, error) {
+	return f.ForkAt(id, -1)
+}
+
+func (f *fakeSessions) ForkAt(id string, keepEvents int) (host.Session, error) {
 	id = strings.TrimSpace(id)
 	src, ok := f.byID[id]
 	if !ok {
@@ -923,6 +927,23 @@ func (f *fakeSessions) Fork(id string) (host.Session, error) {
 	}
 	if src.ParentID != "" {
 		return host.Session{}, fmt.Errorf("session %q is a subagent transcript; fork a root session", id)
+	}
+	raw := f.logs[id]
+	lines := bytes.Split(raw, []byte("\n"))
+	// Drop trailing empty line from final newline.
+	for len(lines) > 0 && len(bytes.TrimSpace(lines[len(lines)-1])) == 0 {
+		lines = lines[:len(lines)-1]
+	}
+	n := len(lines)
+	if keepEvents < 0 {
+		keepEvents = n
+	}
+	if keepEvents > n {
+		return host.Session{}, fmt.Errorf("fork: keepEvents %d exceeds log length %d", keepEvents, n)
+	}
+	var kept []byte
+	if keepEvents > 0 {
+		kept = append(bytes.Join(lines[:keepEvents], []byte("\n")), '\n')
 	}
 	childID := id + "-fork"
 	if _, exists := f.byID[childID]; exists {
@@ -942,7 +963,7 @@ func (f *fakeSessions) Fork(id string) (host.Session, error) {
 		UpdatedAt:  time.Now().UTC(),
 	}
 	f.byID[child.ID] = child
-	f.logs[child.ID] = append([]byte(nil), f.logs[id]...)
+	f.logs[child.ID] = kept
 	return child, nil
 }
 

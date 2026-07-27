@@ -545,10 +545,19 @@ func (m *Manager) ReplayLast(id string, n int) ([]protocol.Event, int, error) {
 	return ReplayLast(LogPath(m.dir, id), n)
 }
 
-// Fork copies sourceID's event log into a new root session. The parent stays
-// intact. Title is "fork of …"; meta.ForkedFrom records lineage. ParentSessionID
-// stays empty so the fork remains eligible for --continue and the session picker.
+// Fork copies sourceID's full event log into a new root session. The parent
+// stays intact. Title is "fork of …"; meta.ForkedFrom records lineage.
+// ParentSessionID stays empty so the fork remains eligible for --continue and
+// the session picker.
 func (m *Manager) Fork(sourceID string) (Info, error) {
+	return m.ForkAt(sourceID, -1)
+}
+
+// ForkAt copies the first keepEvents of sourceID's log into a new root session.
+// The parent stays intact. keepEvents < 0 means the full log (same as Fork).
+// keepEvents may be 0 (empty transcript fork). keepEvents greater than the log
+// length is an error.
+func (m *Manager) ForkAt(sourceID string, keepEvents int) (Info, error) {
 	sourceID = strings.TrimSpace(sourceID)
 	if err := validateID(sourceID); err != nil {
 		return Info{}, err
@@ -573,10 +582,23 @@ func (m *Manager) Fork(sourceID string) (Info, error) {
 	if err != nil {
 		return Info{}, fmt.Errorf("fork: replaying: %w", err)
 	}
+	if keepEvents < 0 {
+		keepEvents = len(events)
+	}
+	if keepEvents > len(events) {
+		return Info{}, fmt.Errorf("fork: keepEvents %d exceeds log length %d", keepEvents, len(events))
+	}
+	events = events[:keepEvents]
 
 	baseTitle := strings.TrimSpace(src.Title)
 	if baseTitle == "" {
 		baseTitle = TitleFromEvents(events)
+	}
+	if baseTitle == "" {
+		// Fall back to full-log title when the kept prefix has no user text yet.
+		if all, err := m.Replay(sourceID); err == nil {
+			baseTitle = TitleFromEvents(all)
+		}
 	}
 	if baseTitle == "" {
 		baseTitle = sourceID
