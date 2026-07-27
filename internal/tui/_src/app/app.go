@@ -302,6 +302,11 @@ type Model struct {
 	// The active root's fields live on Model; others sit here until activated.
 	roots map[string]*rootPane
 
+	// agentsHidden is an ephemeral Agents-pane filter: session ids dismissed
+	// from the tree without deleting JSONL, interrupting turns, or changing
+	// /session. Cleared when a hidden root becomes busy or is activated again.
+	agentsHidden map[string]bool
+
 	// Subagent transcript navigation (ctrl+x leader chords). Root live
 	// cells stay in cells/toolByID; viewingID non-empty and != sessionID
 	// shows viewCells loaded from host.Sessions.
@@ -836,6 +841,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case agentsInterruptMsg:
 		cmd := m.interruptRoot(msg.sessionID)
+		return m, cmd
+
+	case agentsHideMsg:
+		cmd := m.handleAgentsHide(msg.sessionID)
+		m.reflow()
 		return m, cmd
 	}
 
