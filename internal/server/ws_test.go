@@ -72,6 +72,42 @@ func TestWebSocketRejectsInvalidClientFrames(t *testing.T) {
 	}
 }
 
+func TestWebSocketClosePayloadValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload []byte
+		wantErr string
+	}{
+		{name: "empty"},
+		{name: "normal", payload: []byte{0x03, 0xe8}},
+		{name: "normal with reason", payload: append([]byte{0x03, 0xe8}, []byte("done")...)},
+		{name: "last protocol code", payload: []byte{0x03, 0xf6}},
+		{name: "private code", payload: []byte{0x0b, 0xb8}},
+		{name: "last private code", payload: []byte{0x13, 0x87}},
+		{name: "one byte", payload: []byte{0x03}, wantErr: "invalid websocket close payload"},
+		{name: "below range", payload: []byte{0x03, 0xe7}, wantErr: "status code"},
+		{name: "reserved 1004", payload: []byte{0x03, 0xec}, wantErr: "status code"},
+		{name: "reserved 1005", payload: []byte{0x03, 0xed}, wantErr: "status code"},
+		{name: "reserved 1006", payload: []byte{0x03, 0xee}, wantErr: "status code"},
+		{name: "reserved 1015", payload: []byte{0x03, 0xf7}, wantErr: "status code"},
+		{name: "unregistered range", payload: []byte{0x03, 0xf8}, wantErr: "status code"},
+		{name: "above range", payload: []byte{0x13, 0x88}, wantErr: "status code"},
+		{name: "invalid reason UTF-8", payload: []byte{0x03, 0xe8, 0xff}, wantErr: "not valid UTF-8"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ws := &wsConn{bufr: bufio.NewReader(bytes.NewReader(maskedTestFrame(0x8, tt.payload)))}
+			_, _, _, err := ws.readFrame()
+			if tt.wantErr == "" && err != nil {
+				t.Fatalf("readFrame error = %v", err)
+			}
+			if tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Fatalf("readFrame error = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestWebSocketRejectsUnsupportedMessagePayloads(t *testing.T) {
 	tests := []struct {
 		name    string

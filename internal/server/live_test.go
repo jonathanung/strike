@@ -112,6 +112,27 @@ func TestLiveOpsPOSTAndStatus(t *testing.T) {
 	}
 }
 
+func TestOpsRejectsUntrustedOriginBeforeSubmit(t *testing.T) {
+	ops := make(chan protocol.Op, 1)
+	live := NewLive("live", "/cwd", nil, ops)
+	defer live.Close()
+	srv := mustServer(t, Options{SessionDir: t.TempDir(), Live: live})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/ops", strings.NewReader(`{"type":"user.input","data":{"text":"evil"}}`))
+	req.Header.Set("Content-Type", "text/plain")
+	req.Header.Set("Origin", "https://evil.example")
+	res := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(res, req)
+	if res.Code != http.StatusForbidden {
+		t.Fatalf("POST status = %d, want %d", res.Code, http.StatusForbidden)
+	}
+	select {
+	case op := <-ops:
+		t.Fatalf("unexpected submitted op: %#v", op)
+	default:
+	}
+}
+
 func TestLiveAgentsAndSessions(t *testing.T) {
 	ops := make(chan protocol.Op, 1)
 	live := NewLive("L1", "/cwd", []AgentInfo{{Name: "build"}, {Name: "plan"}}, ops)
@@ -282,6 +303,51 @@ func TestLiveReplayBoundaryDeliversEachEventOnce(t *testing.T) {
 	body := res.Body.String()
 	if strings.Count(body, `"text":"before"`) != 1 || strings.Count(body, `"text":"after"`) != 1 {
 		t.Fatalf("boundary replay duplicated or lost events: %s", body)
+	}
+}
+
+type recordingWSWriter struct {
+	messages []string
+}
+
+func (w *recordingWSWriter) WriteText(message string) error {
+	w.messages = append(w.messages, message)
+	return nil
+}
+
+func TestWriteWSRangeBoundaries(t *testing.T) {
+	lines := []string{`{"n":1}`, `{"n":2}`, `{"n":3}`}
+	content := strings.Join(lines, "\n") + "\n"
+	path := t.TempDir() + "/events.jsonl"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	firstBoundary := int64(len(lines[0]) + 1)
+	secondBoundary := firstBoundary + int64(len(lines[1])+1)
+	tests := []struct {
+		name       string
+		boundary   int64
+		wantOffset int64
+		want       []string
+	}{
+		{name: "complete line", boundary: firstBoundary, wantOffset: firstBoundary, want: lines[:1]},
+		{name: "partial trailing line", boundary: secondBoundary - 1, wantOffset: firstBoundary, want: lines[:1]},
+		{name: "fixed boundary excludes later lines", boundary: secondBoundary, wantOffset: secondBoundary, want: lines[:2]},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			writer := &recordingWSWriter{}
+			offset, err := mustServer(t, Options{SessionDir: t.TempDir()}).writeWSRange(context.Background(), writer, path, 0, tt.boundary)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if offset != tt.wantOffset {
+				t.Fatalf("offset = %d, want %d", offset, tt.wantOffset)
+			}
+			if strings.Join(writer.messages, "|") != strings.Join(tt.want, "|") {
+				t.Fatalf("messages = %q, want %q", writer.messages, tt.want)
+			}
+		})
 	}
 }
 

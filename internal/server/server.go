@@ -192,6 +192,12 @@ func (s *Server) withMiddleware(next http.Handler) http.Handler {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+		if stateChanging(r.Method) {
+			if origin := r.Header.Get("Origin"); origin != "" && !originAllowed(origin, s.opts.Expose) {
+				http.Error(w, "origin not allowed", http.StatusForbidden)
+				return
+			}
+		}
 		// Public: health + attach shell. Session event streams require a token.
 		if s.opts.Auth && requiresToken(r.URL.Path) && !s.authorized(r) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -199,6 +205,10 @@ func (s *Server) withMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func stateChanging(method string) bool {
+	return method == http.MethodPost || method == http.MethodPatch || method == http.MethodDelete || method == http.MethodPut
 }
 
 func (s *Server) applySecurityHeaders(w http.ResponseWriter) {

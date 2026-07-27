@@ -209,7 +209,20 @@ func (c *wsConn) readFrame() (fin bool, opcode byte, payload []byte, err error) 
 	if opcode == 0x8 && len(payload) == 1 {
 		return false, 0, nil, errors.New("invalid websocket close payload")
 	}
+	if opcode == 0x8 && len(payload) >= 2 {
+		code := binary.BigEndian.Uint16(payload[:2])
+		if !validWSCloseCode(code) {
+			return false, 0, nil, fmt.Errorf("invalid websocket close status code %d", code)
+		}
+		if !utf8.Valid(payload[2:]) {
+			return false, 0, nil, errors.New("websocket close reason is not valid UTF-8")
+		}
+	}
 	return fin, opcode, payload, nil
+}
+
+func validWSCloseCode(code uint16) bool {
+	return code >= 1000 && code <= 1014 && code != 1004 && code != 1005 && code != 1006 || code >= 3000 && code <= 4999
 }
 
 func (c *wsConn) writeControl(opcode byte, payload []byte) error {

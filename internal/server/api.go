@@ -1,6 +1,8 @@
 package server
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -568,7 +570,11 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) writeWSRange(ctx context.Context, ws *wsConn, path string, offset, boundary int64) (int64, error) {
+type wsTextWriter interface {
+	WriteText(string) error
+}
+
+func (s *Server) writeWSRange(ctx context.Context, ws wsTextWriter, path string, offset, boundary int64) (int64, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return offset, err
@@ -577,27 +583,29 @@ func (s *Server) writeWSRange(ctx context.Context, ws *wsConn, path string, offs
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
 		return offset, err
 	}
-	data, err := io.ReadAll(io.LimitReader(f, boundary-offset))
-	if err != nil {
-		return offset, err
+	if boundary <= offset {
+		return offset, nil
 	}
+	reader := bufio.NewReaderSize(io.LimitReader(f, boundary-offset), 64*1024)
 	for {
-		i := strings.IndexByte(string(data), '\n')
-		if i < 0 {
-			break
-		}
-		line := strings.TrimSpace(string(data[:i]))
-		offset += int64(i + 1)
-		data = data[i+1:]
 		if err := ctx.Err(); err != nil {
 			return offset, err
 		}
-		if line == "" || !json.Valid([]byte(line)) {
-			continue
+		line, err := reader.ReadBytes('\n')
+		if len(line) > 0 && line[len(line)-1] == '\n' {
+			offset += int64(len(line))
+			payload := bytes.TrimSpace(line)
+			if len(payload) > 0 && json.Valid(payload) {
+				if err := ws.WriteText(string(payload)); err != nil {
+					return offset, err
+				}
+			}
 		}
-		if err := ws.WriteText(line); err != nil {
+		if err != nil {
+			if err == io.EOF {
+				return offset, nil
+			}
 			return offset, err
 		}
 	}
-	return offset, nil
 }
