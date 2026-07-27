@@ -48,6 +48,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/memory":           {"list, get, set, delete, export, or import project memory", "[list|get|set|rm|export|import] ...", commandSourceBuiltin},
 		"/issues":           {"list, add, get, close, export, or import project issues", "[list|add|get|close|export|import] ...", commandSourceBuiltin},
 		"/goal":             {"loop harness: set, run, status, pause, resume, abort, log, list", "[set|run|status|pause|resume|abort|log|list] ...", commandSourceBuiltin},
+		"/loop":             {"schedule a recurring LLM job (session-only)", "[interval job|list|stop [id]]", commandSourceBuiltin},
 		"/context":          {"context doctor: system-prompt layer breakdown", "", commandSourceBuiltin},
 		"/effective-prompt": {"context doctor: system-prompt layer breakdown", "", commandSourceBuiltin},
 		"/cost":             {"session token and cost totals", "", commandSourceBuiltin},
@@ -80,7 +81,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 }
 
 func TestValidSkillNameRejectsReservedBuiltinsIncludingMDRead(t *testing.T) {
-	for _, name := range []string{"provider", "model", "effort", "autonomy", "mode", "auth", "agent", "fast", "vim", "nano", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "export", "help", "keys", "memory", "issues", "goal", "context", "effective-prompt", "cost", "upgrade", "init", "mcp"} {
+	for _, name := range []string{"provider", "model", "effort", "autonomy", "mode", "auth", "agent", "fast", "vim", "nano", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "export", "help", "keys", "memory", "issues", "goal", "loop", "context", "effective-prompt", "cost", "upgrade", "init", "mcp"} {
 		if validSkillName(name) {
 			t.Errorf("validSkillName(%q) = true, want false for reserved builtin", name)
 		}

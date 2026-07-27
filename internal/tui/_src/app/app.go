@@ -338,6 +338,10 @@ type Model struct {
 
 	// killBuf holds the last composer kill (ctrl+w/u/k) for ctrl+y yank.
 	killBuf string
+
+	// loops are session-scoped /loop schedules (canceled on quit; not persisted).
+	loops   []scheduledLoop
+	loopSeq int
 }
 
 // childActivity is one foreground subagent row in the activity/agents panes.
@@ -707,6 +711,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.setNotice("goal: "+formatGoalStatus(msg.goal), false)
 		return m, nil
+
+	case loopTickMsg:
+		return m.applyLoopTick(msg)
 
 	case editorFinishedMsg:
 		return m.applyEditorFinished(msg)
