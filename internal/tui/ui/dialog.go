@@ -25,15 +25,20 @@ type DialogOpts struct {
 //	    Title: "Select model", Hint: "↑/↓ move · enter select · esc close", Width: w,
 //	}, body)
 //
-// The body should already be wrapped to PanelInnerWidth(th, Width). The hint is
-// word-wrapped to that same inner width and capped at two lines (the last
-// visible line is ellipsis-truncated if more would wrap) so short terminals
-// do not clip the overlay; Panel still truncates any over-long body line.
+// Body lines longer than the inner width are word-wrapped so modal primary
+// text is not horizontally clipped. Callers may still pre-wrap; wrapping is
+// idempotent for lines that already fit. The hint is word-wrapped to the same
+// inner width and capped at two lines (the last visible line is
+// ellipsis-truncated if more would wrap) so short terminals do not clip the
+// overlay; Panel still truncates any over-long body line as a safety net.
 func Dialog(th theme.Theme, opts DialogOpts, body string) string {
 	th = th.Resolve()
+	inner := PanelInnerWidth(th, opts.Width)
+	if body != "" && inner > 0 {
+		body = wrapText(body, inner)
+	}
 	content := body
 	if opts.Hint != "" {
-		inner := PanelInnerWidth(th, opts.Width)
 		const maxHintLines = 2
 		raw := strings.Split(wrapText(opts.Hint, inner), "\n")
 		if len(raw) > maxHintLines {

@@ -6,6 +6,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -32,6 +34,40 @@ func TestQuestionModalOpensOnQuestionAsked(t *testing.T) {
 	view := strings.ToLower(modal.view(60, theme.Default()))
 	if !strings.Contains(view, "open me") {
 		t.Errorf("view missing question:\n%s", view)
+	}
+}
+
+func TestQuestionModalWrapsLongOptionLabels(t *testing.T) {
+	const width = 40
+	longOpt := "To verify that the entire system works correctly from end to end"
+	req := protocol.QuestionAsked{
+		RequestID: "q-wrap",
+		Questions: []protocol.QuestionPrompt{{
+			Question: "Which of the following is the best description of the primary purpose of a unit test?",
+			Options: []protocol.QuestionOption{
+				{Label: longOpt},
+				{Label: "To check the performance of the application under load"},
+			},
+		}},
+	}
+	m, _ := newTestQuestionModalFrom(req)
+	th := theme.Default().Resolve()
+	view := m.view(width, th)
+	plain := strings.ReplaceAll(ansi.Strip(view), th.Icons.FocusBar, "")
+	compact := strings.Join(strings.Fields(plain), " ")
+	if !strings.Contains(compact, longOpt) {
+		t.Fatalf("long option truncated instead of wrapped:\n%s", plain)
+	}
+	if !strings.Contains(compact, "primary purpose of a unit test") {
+		t.Fatalf("question text missing or clipped:\n%s", plain)
+	}
+	if strings.Contains(plain, "end to e…") || strings.Contains(plain, "end to e...") {
+		t.Fatalf("option still ellipsis-clipped:\n%s", plain)
+	}
+	for i, line := range strings.Split(view, "\n") {
+		if got := lipgloss.Width(line); got > width {
+			t.Errorf("line %d width = %d, want <= %d: %q", i, got, width, ansi.Strip(line))
+		}
 	}
 }
 

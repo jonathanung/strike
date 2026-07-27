@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
@@ -25,7 +26,11 @@ type ListOpts struct {
 	Items   []ListItem // the (already filtered) rows to show
 	Cursor  int        // index into Items of the highlighted row
 	Width   int        // content width; every row is clamped to it
-	Visible int        // max rows shown at once (window); 0 shows all
+	Visible int        // max items shown at once (window); 0 shows all
+	// Wrap word-wraps long labels/details across lines instead of ellipsis
+	// truncation. Prefer for question/option bodies; leave off for dense
+	// pickers where a fixed single-line window is intentional.
+	Wrap bool
 	// ShowFilter draws a "filter: <Filter>▏  <len(Items)>/<Total>" header.
 	ShowFilter bool
 	Filter     string // current filter text
@@ -46,7 +51,8 @@ type ListOpts struct {
 //	out := ui.Dialog(th, ui.DialogOpts{Title: "Select model", Width: w}, body)
 //
 // The window is centered on Cursor and always keeps it visible. Rows never
-// exceed Width.
+// exceed Width. With Wrap, one item may span multiple lines; Visible still
+// counts items, not screen rows.
 func List(th theme.Theme, opts ListOpts) string {
 	th = th.Resolve()
 	width := opts.Width
@@ -88,13 +94,13 @@ func List(th theme.Theme, opts ListOpts) string {
 
 	rows := make([]string, 0, end-start)
 	for i := start; i < end; i++ {
-		rows = append(rows, listRow(th, st, ic, opts.Items[i], activeCursor && i == cursor, width))
+		rows = append(rows, listRow(th, st, ic, opts.Items[i], activeCursor && i == cursor, width, opts.Wrap))
 	}
 	b.WriteString(strings.Join(rows, "\n"))
 	return b.String()
 }
 
-func listRow(th theme.Theme, st theme.Styles, ic theme.Icons, item ListItem, isCursor bool, width int) string {
+func listRow(th theme.Theme, st theme.Styles, ic theme.Icons, item ListItem, isCursor bool, width int, wrap bool) string {
 	markerWidth := lipgloss.Width(ic.Cursor) + th.Spacing.XS
 	marker := strings.Repeat(" ", markerWidth)
 	if isCursor {
@@ -121,6 +127,9 @@ func listRow(th theme.Theme, st theme.Styles, ic theme.Icons, item ListItem, isC
 		suffixGap = strings.Repeat(" ", th.Spacing.XS)
 		suffixW += th.Spacing.XS
 	}
+	if wrap {
+		return listRowWrapped(th, st, ic, label, item.Detail, suffix, suffixGap, suffixW, marker, markerWidth, labelStyle, width)
+	}
 	budget := width - suffixW
 	if budget < 1 {
 		suffix = ""
@@ -144,4 +153,137 @@ func listRow(th theme.Theme, st theme.Styles, ic theme.Icons, item ListItem, isC
 		return line
 	}
 	return line + suffixGap + suffix
+}
+
+// listRowWrapped word-wraps label and detail so primary option text is fully
+// readable inside modal widths. The cursor marker sits on the first line only;
+// continuation lines indent to the label column. Detail follows the label as
+// muted wrapped lines (separator on the first detail line).
+func listRowWrapped(th theme.Theme, st theme.Styles, ic theme.Icons, label, detail, suffix, suffixGap string, suffixW int, marker string, markerWidth int, labelStyle lipgloss.Style, width int) string {
+	budget := width - markerWidth
+	if budget < 1 {
+		return truncate(th, marker, width)
+	}
+	// Reserve suffix on the first line when it fits beside at least one cell of text.
+	firstBudget := budget
+	if suffix != "" {
+		if budget-suffixW >= 1 {
+			firstBudget = budget - suffixW
+		} else {
+			suffix = ""
+			suffixGap = ""
+			suffixW = 0
+		}
+	}
+
+	labelLines := wrapPlainLines(label, firstBudget, budget)
+	var lines []string
+	for i, plain := range labelLines {
+		styled := labelStyle.Render(plain)
+		if i == 0 {
+			row := marker + styled
+			if suffix != "" {
+				row += suffixGap + suffix
+			}
+			if lipgloss.Width(row) > width {
+				row = labelStyle.Render(truncate(th, marker+plain, width))
+			}
+			lines = append(lines, row)
+			continue
+		}
+		row := strings.Repeat(" ", markerWidth) + styled
+		if lipgloss.Width(row) > width {
+			row = labelStyle.Render(truncate(th, strings.Repeat(" ", markerWidth)+plain, width))
+		}
+		lines = append(lines, row)
+	}
+	if detail == "" {
+		return strings.Join(lines, "\n")
+	}
+
+	sep := strings.Repeat(" ", th.Spacing.XS) + ic.DetailSeparator + strings.Repeat(" ", th.Spacing.XS)
+	detailPlain := sep + detail
+	// First detail line may continue after a short label on the same visual
+	// block; keep detail on its own wrapped block under the label column.
+	for _, plain := range wrapPlainLines(detailPlain, budget, budget) {
+		styled := st.Muted.Render(plain)
+		row := strings.Repeat(" ", markerWidth) + styled
+		if lipgloss.Width(row) > width {
+			row = st.Muted.Render(truncate(th, strings.Repeat(" ", markerWidth)+plain, width))
+		}
+		lines = append(lines, row)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// wrapPlainLines word-wraps plain text. firstWidth applies to the first line
+// only (so a trailing suffix can share that row); later lines use nextWidth.
+func wrapPlainLines(s string, firstWidth, nextWidth int) []string {
+	if s == "" {
+		return []string{""}
+	}
+	firstWidth = max(1, firstWidth)
+	nextWidth = max(1, nextWidth)
+	// Wrap at firstWidth, then re-wrap any overlong continuation... simpler:
+	// wrap whole string at nextWidth, then if first line exceeds firstWidth,
+	// re-split. For equal widths this is one pass.
+	if firstWidth == nextWidth {
+		return splitWrapped(wrapText(s, firstWidth))
+	}
+	// First line budget may be tighter; take what fits, wrap the rest at nextWidth.
+	head := fitPlainPrefix(s, firstWidth)
+	if head == s {
+		return []string{s}
+	}
+	rest := strings.TrimPrefix(s, head)
+	rest = strings.TrimLeft(rest, " ")
+	if rest == "" {
+		return []string{head}
+	}
+	out := []string{head}
+	out = append(out, splitWrapped(wrapText(rest, nextWidth))...)
+	return out
+}
+
+func splitWrapped(s string) []string {
+	parts := strings.Split(s, "\n")
+	for i, p := range parts {
+		parts[i] = strings.TrimRight(p, " ")
+	}
+	return parts
+}
+
+// fitPlainPrefix returns the longest prefix of s whose display width is <= width,
+// breaking on spaces when a word would overflow (hard-breaks otherwise).
+func fitPlainPrefix(s string, width int) string {
+	if width < 1 || s == "" {
+		return ""
+	}
+	if lipgloss.Width(s) <= width {
+		return s
+	}
+	// Walk runes accumulating display width; remember last space.
+	var b strings.Builder
+	lastSpace := -1
+	w := 0
+	for _, r := range s {
+		rw := lipgloss.Width(string(r))
+		if w+rw > width {
+			break
+		}
+		b.WriteRune(r)
+		w += rw
+		if r == ' ' {
+			lastSpace = b.Len()
+		}
+	}
+	out := b.String()
+	if lastSpace > 0 && lipgloss.Width(strings.TrimRight(out[:lastSpace], " ")) > 0 {
+		return strings.TrimRight(out[:lastSpace], " ")
+	}
+	if out == "" {
+		// Single wide cell: force one display cell via truncate.
+		return ansi.Truncate(s, width, "")
+	}
+	return out
 }

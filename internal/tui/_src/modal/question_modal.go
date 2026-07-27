@@ -173,6 +173,7 @@ func (m *questionModal) view(width int, th theme.Theme) string {
 			Cursor:  m.cursor,
 			Width:   inner,
 			Visible: len(items),
+			Wrap:    true,
 			Empty:   "no options",
 		}))
 		hint = dotJoin(th, "up/down/j/k move", "enter or 1-9 select", "esc dismiss")
