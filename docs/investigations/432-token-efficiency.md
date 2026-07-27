@@ -54,7 +54,7 @@ stream, err := e.prov.Stream(ctx, provider.Request{
 
 | Constant | Default | Role |
 | --- | --- | --- |
-| `defaultCompactionThreshold` | `0.80` | Fire auto-compact when estimated occupancy ≥ 80% of known window |
+| `defaultCompactionThreshold` | `0.70` | Fire auto-compact when estimated occupancy ≥ 70% of known window (tuned earlier than historical 0.80; config: `compactionThreshold`) |
 | `defaultKeepUserTurns` | `2` | Preserve last 2 real user-turn starts (+ their tails) |
 | `defaultCompactionBuffer` | `4096` | Output headroom so threshold fires before hard exhaustion |
 | Strategies | `trim` \| `summarize` | Drop older messages to a marker, or replace with a model summary |
@@ -63,20 +63,26 @@ Compaction is real and useful (manual `/compact` and threshold/overflow paths), 
 
 ### Tool output caps: produce-time only
 
-Tools bound output when results are produced (examples):
+Tools bound output when results are produced (defaults after #439):
 
-- `internal/tool/bash.go` — `bashMaxOutput = 30000` (30KB)
-- `internal/tool/process.go` — `processDefaultMaxOutput = 30000`
-- `internal/tool/read.go` — `readDefaultLimit = 2000` lines, `readMaxLineLen = 2000`
+| Tool / helper | Constant | Default |
+| --- | --- | --- |
+| bash | `bashMaxOutput` | 16_000 bytes |
+| process (shared runner) | `processDefaultMaxOutput` | 16_000 bytes |
+| read | `readDefaultLimit` / `readMaxLineLen` | 500 lines / 1000 chars |
+| grep | `grepMaxMatches` | 100 matches |
+| glob | `globMaxResults` | 100 paths |
+| webfetch | `webfetchMaxOutputRunes` / `webfetchMaxBody` | 30_000 runes / 2 MiB download |
 
-These caps prevent a single call from being unbounded. They do **not** shrink results already stored in model history. N large bash results remain N × ~30KB of re-billed input until compaction.
+These caps prevent a single call from being unbounded. They do **not** shrink results already stored in model history — prune (#433) blanks older results. Tighter produce-time caps reduce **fresh** entry size between prune cycles.
 
 ### Tool schemas and guidance every request
 
-- `effectiveToolSchemas()` (`internal/engine/prompt_tools.go`) sends `Registry.Schemas()` minus hard-denied tools on **every** stream (including turn 1).
-- The same effective set is also rendered into the system prompt via `tool.BuildGuidance` (`internal/tool/guidance.go` / `prompt_tools.go`) — mild **schema + natural-language guidance duplication**.
+- `effectiveToolSchemas()` (`internal/engine/prompt_tools.go`) sends registry tools minus hard-denied tools on **every** stream (including turn 1), with **compacted descriptions** (`tool.CompactSchemaDescription`: short purposes; skill keeps available-skills list). Full InputSchema is unchanged; `Registry.Schemas()` keeps full prose for `toolsearch`.
+- Subsetting by agent/phase hard deny (explore/reviewer/plan posture) still drops tools the model cannot call.
+- The same effective set is also rendered into the system prompt via `tool.BuildGuidance` (`internal/tool/guidance.go` / `prompt_tools.go`) — mild **schema + natural-language guidance duplication** (see follow-up #437).
 - Built-in surface is on the order of ~27 tools (read/glob/grep/edit/write/apply_patch/bash/task family/webfetch/todo/memory/issue/notebook/sleep/skill/question/plan mode/toolsearch/…).
-- `toolsearch` (`internal/tool/toolsearch.go`) searches schemas. With config `deferTools: on` (issue #438), non-core/MCP tools are omitted from provider Tools until toolsearch discovers them (core coding tools stay always-on).
+- `toolsearch` (`internal/tool/toolsearch.go`) searches full registry schemas. With config `deferTools: on` (issue #438), non-core/MCP tools are omitted from provider Tools until toolsearch discovers them (core coding tools stay always-on).
 
 ### Prompt cache: response parsing only (Anthropic)
 
@@ -168,14 +174,14 @@ Older tool parts are marked `time.compacted`; protected tools (e.g. `skill`) can
 | 2 | **HIGH** | No request-side prompt cache breakpoints (Anthropic/OpenCode peers set them deliberately) |
 | 3 | **MEDIUM** (was HIGH) | Coarse compaction still late (~80%); prune now handles continuous hygiene under that ceiling |
 | 4 | **MEDIUM** | All tool schemas on every request + system tool-guidance duplication |
-| 5 | **MEDIUM** | Large per-call caps still accumulate (e.g. 30KB bash × many calls) |
+| 5 | **MEDIUM** → **reduced** | Large per-call caps still accumulate; #439 tightened produce-time defaults (e.g. bash 16KB) |
 | 6 | **LOW / ruled out as primary** | Subagent parent-history duplication (does not happen); “calling tools too often” alone without replay economics |
 
 ---
 
 ## Illustrative cost model (simple math)
 
-Assume 10 tool rounds, each producing a **5KB** tool result (well under bash’s 30KB cap). Ignore system/tools fixed cost for a moment.
+Assume 10 tool rounds, each producing a **5KB** tool result (well under bash’s produce-time cap). Ignore system/tools fixed cost for a moment.
 
 **Strike (no prune):** each stream re-sends all prior tool results:
 
@@ -230,7 +236,10 @@ Pointers for follow-up issues/PRs; this document does not schedule or implement 
    Continuous prune under the 80% ceiling so threshold compact is rare and cheaper when it runs.
 
 4. **Deferred schemas**  
-   Only if MCP / registry growth warrants it (`defer_loading` + toolsearch). Built-in ~27 tools are secondary to tool-result replay today.
+   Only if MCP / registry growth warrants it (`defer_loading` + toolsearch, #438). Built-in always-on description compaction shipped under #436; omit-until-discover remains separate.
+
+4b. **Always-on schema payload (#436 — shipped)**  
+   Compact wire descriptions + hard-deny subset in `effectiveToolSchemas`.
 
 5. **Telemetry**  
    Attribute input tokens to system / tools / user / assistant / tool_result slices so regressions are visible in-session (ties to prior usage/context visibility work in the core runtime audit).
@@ -283,6 +292,8 @@ This document began as investigation-only; the same PR now also ships tool-resul
 - Walk backward; skip tool results inside the last 2 real user turns; protect ~40k tokens of newer eligible tool output; blank older bodies to `[Old tool result content cleared]` when savings exceed 20k tokens
 - Preserves tool_use/tool_result pairing; protects `skill` tool output; skips already-cleared results
 - In-memory model-facing history only (JSONL restore still has full outputs; prune re-applies on subsequent streams)
+
+**Produce-time caps (#439):** tightened bash/process/read/grep/glob/webfetch defaults (see table above) so fresh tool results enter history smaller; prune still clears stale bodies.
 
 **Deferred follow-ups:** Anthropic `cache_control` breakpoints; deferred tool schemas / toolsearch rewrite; compaction threshold tuning.
 

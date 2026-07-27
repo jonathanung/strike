@@ -97,6 +97,17 @@ type Config struct {
 	// CompactionModel optionally pins the model id used for summarize
 	// compaction (same provider as the session). Empty uses the session model.
 	CompactionModel string `json:"compactionModel,omitempty"`
+	// CompactionThreshold is the occupancy fraction (0–1 exclusive of 0) that
+	// triggers automatic compaction. Zero means engine default (0.70). Values
+	// >=1 disable threshold compaction. Out-of-range negatives clamp to 0.
+	CompactionThreshold float64 `json:"compactionThreshold,omitempty"`
+	// CompactionBuffer is extra token headroom reserved with MaxTokens when
+	// computing the threshold budget. Zero means engine default (4096).
+	// Negatives clamp to 0.
+	CompactionBuffer int `json:"compactionBuffer,omitempty"`
+	// KeepUserTurns is how many trailing real user turns to preserve when
+	// compacting. Zero means engine default (2). Negatives clamp to 0.
+	KeepUserTurns int `json:"keepUserTurns,omitempty"`
 	// MaxChildDepth bounds nested task tool spawns (root depth 0). Zero means
 	// engine default (1: children cannot spawn further tasks).
 	MaxChildDepth int `json:"maxChildDepth,omitempty"`
@@ -442,6 +453,9 @@ func read(path string) (Config, error) {
 	}
 	c.CompactionStrategy = NormalizeCompactionStrategy(c.CompactionStrategy)
 	c.CompactionModel = strings.TrimSpace(c.CompactionModel)
+	c.CompactionThreshold = ClampCompactionThreshold(c.CompactionThreshold)
+	c.CompactionBuffer = ClampCompactionBuffer(c.CompactionBuffer)
+	c.KeepUserTurns = ClampKeepUserTurns(c.KeepUserTurns)
 	c.Notify = NormalizeNotify(c.Notify)
 	c.LeanCode = NormalizeLeanCode(c.LeanCode)
 	c.DeferTools = NormalizeDeferTools(c.DeferTools)
@@ -511,6 +525,31 @@ func NormalizeCompactionStrategy(s string) string {
 	default:
 		return ""
 	}
+}
+
+// ClampCompactionThreshold maps config values: <0 → 0 (engine default),
+// values in (0,1) kept, >=1 kept as-is (engine treats >=1 as disabled).
+func ClampCompactionThreshold(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	return v
+}
+
+// ClampCompactionBuffer maps config values: <0 → 0 (engine default).
+func ClampCompactionBuffer(n int) int {
+	if n < 0 {
+		return 0
+	}
+	return n
+}
+
+// ClampKeepUserTurns maps config values: <0 → 0 (engine default).
+func ClampKeepUserTurns(n int) int {
+	if n < 0 {
+		return 0
+	}
+	return n
 }
 
 // Notify mode values for Config.Notify / desktop notifications.
@@ -632,6 +671,15 @@ func merge(base, layer Config) Config {
 	}
 	if layer.CompactionModel != "" {
 		base.CompactionModel = layer.CompactionModel
+	}
+	if layer.CompactionThreshold != 0 {
+		base.CompactionThreshold = layer.CompactionThreshold
+	}
+	if layer.CompactionBuffer != 0 {
+		base.CompactionBuffer = layer.CompactionBuffer
+	}
+	if layer.KeepUserTurns != 0 {
+		base.KeepUserTurns = layer.KeepUserTurns
 	}
 	if layer.MaxChildDepth != 0 {
 		base.MaxChildDepth = layer.MaxChildDepth

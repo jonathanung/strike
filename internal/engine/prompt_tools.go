@@ -11,11 +11,23 @@ import (
 )
 
 // effectiveToolSchemas returns registry tool schemas with hard-denied tools
-// removed and, when defer loading is on, non-core tools omitted until
-// toolsearch (or a direct call) discovers them. Used for both the provider
+// removed and descriptions compacted for the wire. Used for both the provider
 // Tools array (every stream, including turn 1) and the Available tools prompt
 // layer so the model never sees tools it cannot call under the active
 // agent/phase/permission profile.
+//
+// Always-on payload strategy (#436):
+//  1. Subset by hard deny — agent permissions and plan-mode posture drop tools
+//     the model must not call (Peek == Deny). Ask/Allow tools stay listed.
+//  2. Compact descriptions — tool.CompactSchemaDescription replaces long usage
+//     prose with short purposes (skill keeps its available-skills list). Full
+//     InputSchema is unchanged; Registry.Schemas keeps full descriptions for
+//     toolsearch.
+//
+// Optional defer_loading (#438): when registry.SetDeferLoading is on
+// (config deferTools), non-core tools are also omitted from SchemasForProvider
+// until toolsearch (or a direct call / history re-promote) discovers them.
+// Core coding tools remain always bound on the first stream.
 func (e *Engine) effectiveToolSchemas() (schemas []provider.ToolSchema, omitted int) {
 	if e == nil || e.opts.Registry == nil {
 		return nil, 0
@@ -37,6 +49,7 @@ func (e *Engine) effectiveToolSchemas() (schemas []provider.ToolSchema, omitted 
 			omitted++
 			continue
 		}
+		s.Description = tool.CompactSchemaDescription(name, s.Description)
 		out = append(out, s)
 	}
 	return out, omitted

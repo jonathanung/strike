@@ -325,7 +325,7 @@ func TestWebFetchTimeout(t *testing.T) {
 }
 
 func TestWebFetchOutputTruncation(t *testing.T) {
-	// Body under 5MiB but more than webfetchMaxOutputRunes after conversion.
+	// Body under webfetchMaxBody but more than webfetchMaxOutputRunes after conversion.
 	// Use plain text so output ≈ body.
 	n := webfetchMaxOutputRunes + 5000
 	body := strings.Repeat("a", n)

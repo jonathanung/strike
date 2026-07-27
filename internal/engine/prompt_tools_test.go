@@ -302,6 +302,10 @@ func TestFirstTurnPreloadsEffectiveTools(t *testing.T) {
 	if len(req.Tools) != len(want) {
 		t.Fatalf("first-turn Tools len = %d, want %d (registry)", len(req.Tools), len(want))
 	}
+	fullByName := make(map[string]provider.ToolSchema, len(want))
+	for _, s := range reg.Schemas() {
+		fullByName[s.Name] = s
+	}
 	gotNames := make(map[string]bool, len(req.Tools))
 	for _, s := range req.Tools {
 		gotNames[s.Name] = true
@@ -310,6 +314,15 @@ func TestFirstTurnPreloadsEffectiveTools(t *testing.T) {
 		}
 		if strings.TrimSpace(s.Description) == "" {
 			t.Errorf("tool %q missing Description on first turn", s.Name)
+		}
+		// Wire descriptions are compacted; registry keeps full prose.
+		full := fullByName[s.Name]
+		wantDesc := tool.CompactSchemaDescription(s.Name, full.Description)
+		if s.Description != wantDesc {
+			t.Errorf("tool %q Description = %q, want compact %q", s.Name, s.Description, wantDesc)
+		}
+		if s.Name != "skill" && len(full.Description) > len(wantDesc)+20 && s.Description == full.Description {
+			t.Errorf("tool %q still has full registry description on the wire", s.Name)
 		}
 	}
 	for _, name := range want {
@@ -322,6 +335,99 @@ func TestFirstTurnPreloadsEffectiveTools(t *testing.T) {
 	}
 	if !strings.Contains(req.System, "# Available tools") {
 		t.Fatalf("first-turn system missing tools guidance:\n%s", req.System)
+	}
+}
+
+// TestEffectiveToolSchemasReducePayload measures description compaction and
+// agent/phase subsetting on the always-on Tools array (#436).
+func TestEffectiveToolSchemasReducePayload(t *testing.T) {
+	reg := fullToolRegistry(t)
+	full := reg.Schemas()
+	fullDescBytes := 0
+	for _, s := range full {
+		fullDescBytes += len(s.Description)
+	}
+
+	buildReq := captureStreamRequest(t, engine.Options{
+		WorkDir:  t.TempDir(),
+		Registry: reg,
+		Agents:   []engine.Agent{{Name: "build"}},
+		Rules:    []permission.Ruleset{permission.Defaults()},
+	}, "echo", "echo")
+	buildDescBytes := 0
+	for _, s := range buildReq.Tools {
+		buildDescBytes += len(s.Description)
+		if len(s.InputSchema) == 0 {
+			t.Errorf("build tool %q lost InputSchema", s.Name)
+		}
+	}
+	if len(buildReq.Tools) != len(full) {
+		t.Fatalf("build Tools count = %d, want full registry %d (compaction must not drop allowed tools)",
+			len(buildReq.Tools), len(full))
+	}
+	if buildDescBytes >= fullDescBytes {
+		t.Fatalf("build wire descriptions not smaller: wire=%d registry=%d", buildDescBytes, fullDescBytes)
+	}
+	// Expect a large cut: short purposes vs multi-paragraph usage notes.
+	if saved := fullDescBytes - buildDescBytes; saved < fullDescBytes/2 {
+		t.Fatalf("description savings too small: saved=%d of %d", saved, fullDescBytes)
+	}
+
+	// Explore-style agent: hard denies shrink the tool *count* as well.
+	exploreReq := captureStreamRequest(t, engine.Options{
+		WorkDir:  t.TempDir(),
+		Registry: reg,
+		Agents: []engine.Agent{
+			{Name: "build"},
+			{
+				Name: "explore",
+				Permissions: permission.Ruleset{
+					{Permission: "write", Pattern: "*", Action: permission.Deny},
+					{Permission: "edit", Pattern: "*", Action: permission.Deny},
+					{Permission: "bash", Pattern: "*", Action: permission.Deny},
+					{Permission: "task", Pattern: "*", Action: permission.Deny},
+				},
+			},
+		},
+		InitialAgent: "explore",
+		Rules:        []permission.Ruleset{permission.Defaults()},
+	}, "echo", "echo")
+	if len(exploreReq.Tools) >= len(buildReq.Tools) {
+		t.Fatalf("explore Tools count = %d, want fewer than build %d", len(exploreReq.Tools), len(buildReq.Tools))
+	}
+	for _, banned := range []string{"write", "edit", "apply_patch", "bash", "task"} {
+		for _, s := range exploreReq.Tools {
+			if s.Name == banned {
+				t.Errorf("explore still exposes %q", banned)
+			}
+		}
+	}
+	for _, want := range []string{"read", "glob", "grep"} {
+		found := false
+		for _, s := range exploreReq.Tools {
+			if s.Name == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("explore missing allowed tool %q", want)
+		}
+	}
+
+	// Plan permission mode also subsets mutations.
+	planReq := captureStreamRequest(t, engine.Options{
+		WorkDir:  t.TempDir(),
+		Registry: reg,
+		Agents: []engine.Agent{
+			{Name: "build"},
+			{Name: "plan"},
+		},
+		Rules:                 []permission.Ruleset{permission.Defaults()},
+		InitialPermissionMode: protocol.PermissionModePlan,
+	}, "echo", "echo")
+	if len(planReq.Tools) >= len(buildReq.Tools) {
+		t.Fatalf("plan Tools count = %d, want fewer than build %d", len(planReq.Tools), len(buildReq.Tools))
 	}
 }
 

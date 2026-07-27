@@ -107,7 +107,7 @@ type Options struct {
 	// Set when the task tool pins effort for a child session.
 	LockEffort bool
 	// CompactionThreshold is the occupancy fraction (0–1) that triggers
-	// automatic compaction before a Stream. Zero defaults to 0.80; >=1
+	// automatic compaction before a Stream. Zero defaults to 0.70; >=1
 	// disables threshold compaction.
 	CompactionThreshold float64
 	// CompactionBuffer is extra token headroom reserved with MaxTokens when

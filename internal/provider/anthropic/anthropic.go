@@ -109,11 +109,13 @@ func MessagesURL(baseURL string) string {
 // Wire types for the Messages API.
 
 type apiRequest struct {
-	Model     string       `json:"model"`
-	MaxTokens int          `json:"max_tokens"`
-	System    string       `json:"system,omitempty"`
-	Messages  []apiMessage `json:"messages"`
-	Tools     []apiTool    `json:"tools,omitempty"`
+	Model     string `json:"model"`
+	MaxTokens int    `json:"max_tokens"`
+	// System is an array of text blocks so cache_control can mark the stable
+	// system prefix (string form cannot carry breakpoints).
+	System   []apiSystemBlock `json:"system,omitempty"`
+	Messages []apiMessage     `json:"messages"`
+	Tools    []apiTool        `json:"tools,omitempty"`
 	// Thinking and OutputConfig carry the reasoning dial. budget_tokens is
 	// gone from current models (it now 400s), so depth is expressed as
 	// adaptive thinking plus an output_config.effort level.
@@ -127,6 +129,18 @@ type apiThinking struct {
 
 type apiOutputConfig struct {
 	Effort string `json:"effort,omitempty"` // low | medium | high | xhigh | max
+}
+
+// apiCacheControl is Anthropic's ephemeral prompt-cache breakpoint marker.
+// Max 4 per request; we place up to 3 (system, last tool, last message block).
+type apiCacheControl struct {
+	Type string `json:"type"` // "ephemeral"
+}
+
+type apiSystemBlock struct {
+	Type         string           `json:"type"` // "text"
+	Text         string           `json:"text"`
+	CacheControl *apiCacheControl `json:"cache_control,omitempty"`
 }
 
 // apiMessage content is held as raw blocks so thinking blocks can be replayed
@@ -150,6 +164,8 @@ type apiBlock struct {
 	ToolUseID string `json:"tool_use_id,omitempty"`
 	Content   string `json:"content,omitempty"`
 	IsError   bool   `json:"is_error,omitempty"`
+	// cache_control marks a prompt-cache breakpoint on eligible blocks.
+	CacheControl *apiCacheControl `json:"cache_control,omitempty"`
 }
 
 type apiImageSource struct {
@@ -159,9 +175,10 @@ type apiImageSource struct {
 }
 
 type apiTool struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	InputSchema json.RawMessage `json:"input_schema"`
+	Name         string           `json:"name"`
+	Description  string           `json:"description"`
+	InputSchema  json.RawMessage  `json:"input_schema"`
+	CacheControl *apiCacheControl `json:"cache_control,omitempty"`
 }
 
 type apiResponse struct {
@@ -233,7 +250,9 @@ func toAPIRequest(req provider.Request) (apiRequest, error) {
 	out := apiRequest{
 		Model:     req.Model,
 		MaxTokens: req.MaxTokens,
-		System:    req.System,
+	}
+	if req.System != "" {
+		out.System = []apiSystemBlock{{Type: "text", Text: req.System}}
 	}
 	applyEffort(&out, req.Effort)
 	for _, t := range req.Tools {
@@ -284,7 +303,60 @@ func toAPIRequest(req provider.Request) (apiRequest, error) {
 			out.Messages = append(out.Messages, apiMessage{Role: "user", Content: blocks})
 		}
 	}
+	applyPromptCache(&out)
 	return out, nil
+}
+
+// applyPromptCache places ephemeral cache_control breakpoints on the stable
+// Anthropic request prefix (OpenCode applyCaching / Claude Code patterns).
+//
+// Up to 3 of Anthropic's 4 allowed breakpoints:
+//  1. last system text block — agent/system prompt (stable across turns)
+//  2. last tool definition — tool schema prefix (stable when registry is)
+//  3. last eligible message content block — conversation prefix through the
+//     prior tail; moves each turn so the growing history remains cacheable
+//
+// thinking / redacted_thinking blocks are skipped (API rejects cache_control
+// on them; Claude Code does the same). Agent switches that rewrite system or
+// tools correctly miss cache — that is intentional, not thrash.
+func applyPromptCache(req *apiRequest) {
+	ephemeral := &apiCacheControl{Type: "ephemeral"}
+	if n := len(req.System); n > 0 {
+		req.System[n-1].CacheControl = ephemeral
+	}
+	if n := len(req.Tools); n > 0 {
+		req.Tools[n-1].CacheControl = ephemeral
+	}
+	for i := len(req.Messages) - 1; i >= 0; i-- {
+		msg := &req.Messages[i]
+		for j := len(msg.Content) - 1; j >= 0; j-- {
+			if markBlockCacheControl(&msg.Content[j], ephemeral) {
+				return
+			}
+		}
+	}
+}
+
+// markBlockCacheControl attaches cache_control to an eligible content block.
+// Returns false for thinking blocks and malformed JSON so the caller can keep
+// walking backward for a better breakpoint.
+func markBlockCacheControl(raw *json.RawMessage, cc *apiCacheControl) bool {
+	var block apiBlock
+	if err := json.Unmarshal(*raw, &block); err != nil {
+		return false
+	}
+	switch block.Type {
+	case "text", "tool_use", "tool_result", "image":
+	default:
+		return false
+	}
+	block.CacheControl = cc
+	data, err := json.Marshal(block)
+	if err != nil {
+		return false
+	}
+	*raw = data
+	return true
 }
 
 // applyEffort maps the normalized dial onto the Messages API reasoning
