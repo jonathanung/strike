@@ -1,14 +1,24 @@
 package tool
 
 import (
+	"sync"
+
 	"github.com/jonathanung/strike-cli/internal/provider"
 )
 
 // Registry holds the tools visible to the model. It is the primary
 // extension surface: MCP servers (internal/mcp) and plugin tools register here.
+//
+// When defer loading is enabled (SetDeferLoading), SchemasForProvider omits
+// non-core tools until Discover promotes them (toolsearch or direct call).
+// Schemas() always returns the full registered set (used by toolsearch).
 type Registry struct {
 	order []string
 	tools map[string]Tool
+
+	mu         sync.RWMutex
+	deferLoad  bool
+	discovered map[string]struct{}
 }
 
 func NewRegistry(tools ...Tool) *Registry {
@@ -41,6 +51,13 @@ func (r *Registry) Unregister(names ...string) {
 		}
 	}
 	r.order = order
+	r.mu.Lock()
+	if r.discovered != nil {
+		for _, name := range names {
+			delete(r.discovered, name)
+		}
+	}
+	r.mu.Unlock()
 }
 
 func (r *Registry) Get(name string) (Tool, bool) {
@@ -58,7 +75,105 @@ func (r *Registry) Names() []string {
 	return out
 }
 
-// Schemas returns the model-facing declarations in registration order.
+// SetDeferLoading enables or disables toolsearch-backed schema deferral.
+// When on, SchemasForProvider returns only core tools plus those Discover
+// has promoted (session-scoped on this registry).
+func (r *Registry) SetDeferLoading(on bool) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.deferLoad = on
+	if on && r.discovered == nil {
+		r.discovered = map[string]struct{}{}
+	}
+}
+
+// DeferLoading reports whether non-core schemas are omitted until discovered.
+func (r *Registry) DeferLoading() bool {
+	if r == nil {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.deferLoad
+}
+
+// Discover promotes deferred tools into the provider Tools set for subsequent
+// streams. Core tools and unknown names are ignored. No-op when defer is off.
+func (r *Registry) Discover(names ...string) {
+	if r == nil || len(names) == 0 {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.deferLoad {
+		return
+	}
+	if r.discovered == nil {
+		r.discovered = map[string]struct{}{}
+	}
+	for _, name := range names {
+		if name == "" {
+			continue
+		}
+		if _, ok := r.tools[name]; !ok {
+			continue
+		}
+		if IsCoreTool(name) {
+			continue
+		}
+		r.discovered[name] = struct{}{}
+	}
+}
+
+// Discovered reports whether name has been promoted (always true for core
+// tools when registered; false when defer is off for non-core).
+func (r *Registry) Discovered(name string) bool {
+	if r == nil {
+		return false
+	}
+	if IsCoreTool(name) {
+		_, ok := r.tools[name]
+		return ok
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if !r.deferLoad {
+		_, ok := r.tools[name]
+		return ok
+	}
+	_, ok := r.discovered[name]
+	return ok
+}
+
+// DeferredPendingCount is how many registered non-core tools are not yet
+// discovered. Zero when defer loading is off.
+func (r *Registry) DeferredPendingCount() int {
+	if r == nil {
+		return 0
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if !r.deferLoad {
+		return 0
+	}
+	n := 0
+	for _, name := range r.order {
+		if IsCoreTool(name) {
+			continue
+		}
+		if _, ok := r.discovered[name]; !ok {
+			n++
+		}
+	}
+	return n
+}
+
+// Schemas returns the full model-facing declarations in registration order.
+// Used by toolsearch to scan the whole registry. Prefer SchemasForProvider
+// for the provider Tools array when defer loading may be on.
 func (r *Registry) Schemas() []provider.ToolSchema {
 	if r == nil {
 		return nil
@@ -75,9 +190,41 @@ func (r *Registry) Schemas() []provider.ToolSchema {
 	return out
 }
 
+// SchemasForProvider returns schemas for provider Request.Tools: full set
+// when defer is off; core + discovered when on.
+func (r *Registry) SchemasForProvider() []provider.ToolSchema {
+	if r == nil {
+		return nil
+	}
+	r.mu.RLock()
+	deferLoad := r.deferLoad
+	r.mu.RUnlock()
+	if !deferLoad {
+		return r.Schemas()
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]provider.ToolSchema, 0, len(r.order))
+	for _, name := range r.order {
+		if !IsCoreTool(name) {
+			if _, ok := r.discovered[name]; !ok {
+				continue
+			}
+		}
+		t := r.tools[name]
+		out = append(out, provider.ToolSchema{
+			Name:        t.Name(),
+			Description: t.Description(),
+			InputSchema: t.Schema(),
+		})
+	}
+	return out
+}
+
 // CloneWithout returns a new registry with the same tools in registration
 // order, omitting any whose name is listed. Used to build child-session
-// registries without the task tool.
+// registries without the task tool. Copies defer-loading mode and the
+// discovered set (minus omitted names).
 func (r *Registry) CloneWithout(names ...string) *Registry {
 	if r == nil {
 		return NewRegistry()
@@ -93,5 +240,30 @@ func (r *Registry) CloneWithout(names ...string) *Registry {
 		}
 		tools = append(tools, r.tools[name])
 	}
-	return NewRegistry(tools...)
+	out := NewRegistry(tools...)
+	r.mu.RLock()
+	deferLoad := r.deferLoad
+	var disc map[string]struct{}
+	if r.discovered != nil {
+		disc = make(map[string]struct{}, len(r.discovered))
+		for name := range r.discovered {
+			if _, omit := skip[name]; omit {
+				continue
+			}
+			if _, ok := out.tools[name]; ok {
+				disc[name] = struct{}{}
+			}
+		}
+	}
+	r.mu.RUnlock()
+	if deferLoad {
+		out.mu.Lock()
+		out.deferLoad = true
+		out.discovered = disc
+		if out.discovered == nil {
+			out.discovered = map[string]struct{}{}
+		}
+		out.mu.Unlock()
+	}
+	return out
 }

@@ -23,9 +23,15 @@ func NewToolSearch(reg *Registry) Tool {
 func (t *toolSearchTool) Name() string { return "toolsearch" }
 
 func (t *toolSearchTool) Description() string {
-	return `Search available tools by name or description substring.
+	base := `Search available tools by name or description substring.
 
 Use when you need to discover which tools are registered and what they do. Query tokens are matched case-insensitively against each tool's name and description; all whitespace-separated tokens must match.`
+	if t.reg != nil && t.reg.DeferLoading() {
+		return base + `
+
+When deferred tool schemas are enabled, matching non-core tools are loaded into the tools array for subsequent model requests so you can call them.`
+	}
+	return base
 }
 
 func (t *toolSearchTool) Schema() json.RawMessage {
@@ -63,8 +69,10 @@ func (t *toolSearchTool) Execute(ctx context.Context, args json.RawMessage, tc *
 	}
 
 	tokens := strings.Fields(strings.ToLower(query))
+	// Search the full registry (including deferred tools not yet in Tools[]).
 	schemas := t.reg.Schemas()
 	var matches []string
+	var matchNames []string
 	for _, s := range schemas {
 		hay := strings.ToLower(s.Name + " " + s.Description)
 		ok := true
@@ -77,6 +85,7 @@ func (t *toolSearchTool) Execute(ctx context.Context, args json.RawMessage, tc *
 		if !ok {
 			continue
 		}
+		matchNames = append(matchNames, s.Name)
 		desc := s.Description
 		if utf8.RuneCountInString(desc) > toolSearchDescMax {
 			var b strings.Builder
@@ -95,13 +104,26 @@ func (t *toolSearchTool) Execute(ctx context.Context, args json.RawMessage, tc *
 		matches = append(matches, fmt.Sprintf("- %s: %s", s.Name, desc))
 	}
 
+	// Promote matches into provider Tools for subsequent streams (same turn
+	// tool loop and later turns). No-op when defer loading is off.
+	if len(matchNames) > 0 {
+		t.reg.Discover(matchNames...)
+	}
+
 	var out string
 	if len(matches) == 0 {
 		out = fmt.Sprintf("No tools matched %q", query)
 	} else {
 		out = strings.Join(matches, "\n")
+		if t.reg.DeferLoading() {
+			out += "\n\nDiscovered tools are available with full schemas on the next model request."
+		}
 	}
-	meta, _ := json.Marshal(map[string]any{"query": query, "count": len(matches)})
+	meta, _ := json.Marshal(map[string]any{
+		"query":      query,
+		"count":      len(matches),
+		"discovered": matchNames,
+	})
 	return Result{
 		Title:    fmt.Sprintf("%d matches for %q", len(matches), query),
 		Output:   out,

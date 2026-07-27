@@ -27,7 +27,12 @@ type Config struct {
 	SystemPrompt string          `json:"systemPrompt,omitempty"`
 	// LeanCode is agent-scoped lean-code guidance intensity: off|lite|full.
 	// Empty means lite (default). Unknown values are ignored at load time.
-	LeanCode     string `json:"leanCode,omitempty"`
+	LeanCode string `json:"leanCode,omitempty"`
+	// DeferTools controls toolsearch-backed schema deferral: on|off.
+	// When on, non-core tools (optional built-ins + MCP) are omitted from the
+	// provider tools[] until toolsearch discovers them (or they are called).
+	// Empty means off (default). Unknown values are ignored at load time.
+	DeferTools   string `json:"deferTools,omitempty"`
 	DefaultAgent string `json:"defaultAgent,omitempty"`
 	// Theme is the preferred TUI color theme id (bundled or JSON under
 	// ~/.strike/themes or ./.strike/themes). Empty means the stock "strike"
@@ -439,6 +444,7 @@ func read(path string) (Config, error) {
 	c.CompactionModel = strings.TrimSpace(c.CompactionModel)
 	c.Notify = NormalizeNotify(c.Notify)
 	c.LeanCode = NormalizeLeanCode(c.LeanCode)
+	c.DeferTools = NormalizeDeferTools(c.DeferTools)
 	// Keybinds: unknown ids / invalid chords fail the layer (and thus Load).
 	if err := ValidateKeybinds(c.Keybinds); err != nil {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
@@ -551,6 +557,30 @@ func NormalizeLeanCode(s string) string {
 	}
 }
 
+// DeferTools values for Config.DeferTools (toolsearch-backed schema deferral).
+const (
+	DeferToolsOn  = "on"
+	DeferToolsOff = "off"
+)
+
+// NormalizeDeferTools maps config aliases to on|off.
+// Empty and unknown values become "" (default off).
+func NormalizeDeferTools(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "on", "true", "1", "yes", "enable", "enabled":
+		return DeferToolsOn
+	case "off", "false", "0", "no", "disable", "disabled", "never":
+		return DeferToolsOff
+	default:
+		return ""
+	}
+}
+
+// DeferToolsEnabled reports whether deferred tool schemas are active.
+func DeferToolsEnabled(s string) bool {
+	return NormalizeDeferTools(s) == DeferToolsOn
+}
+
 func merge(base, layer Config) Config {
 	if layer.Provider != "" {
 		base.Provider = layer.Provider
@@ -566,6 +596,9 @@ func merge(base, layer Config) Config {
 	}
 	if layer.LeanCode != "" {
 		base.LeanCode = layer.LeanCode
+	}
+	if layer.DeferTools != "" {
+		base.DeferTools = layer.DeferTools
 	}
 	if layer.DefaultAgent != "" {
 		base.DefaultAgent = layer.DefaultAgent

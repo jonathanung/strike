@@ -10,6 +10,7 @@ JSON:
   "effort": "high",
   "defaultAgent": "build",
   "leanCode": "lite",
+  "deferTools": "off",
   "theme": "strike",
   "vimMode": "pane",
   "nanoMode": "pane",
@@ -46,6 +47,18 @@ build/general/debugger; softer scaling-aware lean for plan/orchestrator;
 none for explore/reviewer/tester/validator/commit). Inspired by
 [ponytail](https://github.com/DietrichGebert/ponytail) (clean-room wording).
 Details: [agents-skills.md](agents-skills.md#lean-code-ponytail-lite).
+
+**Deferred tool schemas:** `deferTools` is `on` | `off` (default off). When
+`on`, non-core tools are omitted from the provider `tools[]` array until
+`toolsearch` discovers them (or the model calls them by name). Core coding
+tools stay always available: `read`/`glob`/`grep`/`edit`/`write`/
+`apply_patch`/`bash`, the `task*` family, `toolsearch`, `question`, and plan
+workflow tools. Deferred surface includes optional built-ins (`webfetch`,
+todo/memory/issue, `sleep`, `skill`, `notebook_edit`, …) and all `mcp_*`
+tools. Discovery is session-scoped on the live registry: matches from
+`toolsearch` load full schemas on the **next** model request (including the
+next iteration of the same turn’s tool loop). Set `"deferTools": "on"` in
+global or project config to enable.
 
 **Permission soft-approve / auto-approve:** session mode `soft-approve`
 (`permissionMode`, `/mode`, Shift+Tab) arms a **visible** 15s countdown on

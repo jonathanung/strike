@@ -76,7 +76,7 @@ These caps prevent a single call from being unbounded. They do **not** shrink re
 - `effectiveToolSchemas()` (`internal/engine/prompt_tools.go`) sends `Registry.Schemas()` minus hard-denied tools on **every** stream (including turn 1).
 - The same effective set is also rendered into the system prompt via `tool.BuildGuidance` (`internal/tool/guidance.go` / `prompt_tools.go`) — mild **schema + natural-language guidance duplication**.
 - Built-in surface is on the order of ~27 tools (read/glob/grep/edit/write/apply_patch/bash/task family/webfetch/todo/memory/issue/notebook/sleep/skill/question/plan mode/toolsearch/…).
-- `toolsearch` (`internal/tool/toolsearch.go`) searches schemas; it does **not** defer loading schemas from the provider Tools array the way Claude Code’s `defer_loading` path does.
+- `toolsearch` (`internal/tool/toolsearch.go`) searches schemas. With config `deferTools: on` (issue #438), non-core/MCP tools are omitted from provider Tools until toolsearch discovers them (core coding tools stay always-on).
 
 ### Prompt cache: response parsing only (Anthropic)
 
