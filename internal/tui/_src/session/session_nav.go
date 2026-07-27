@@ -272,7 +272,7 @@ func (m *Model) openSessionView(id string) tea.Cmd {
 	if title == "" {
 		for _, ch := range m.children {
 			if ch.sessionID == id {
-				title = childViewTitle(ch.agent, ch.prompt)
+				title = childViewTitle(ch.agent, ch.prompt, ch.sessionID, ch.title)
 				break
 			}
 		}
@@ -354,17 +354,26 @@ func (m *Model) refreshViewingTranscript() tea.Cmd {
 	return nil
 }
 
-func childViewTitle(agent, prompt string) string {
+// childViewTitle builds a brief subagent label: durable title, else
+// "{agent} {shortId}", else one of those parts, else "subagent".
+func childViewTitle(agent, prompt, sessionID, title string) string {
+	if t := strings.TrimSpace(title); t != "" {
+		return sanitizeTitleTopic(t)
+	}
 	agent = strings.TrimSpace(agent)
-	prompt = strings.TrimSpace(prompt)
+	short := shortSessionID(sessionID)
 	switch {
-	case agent != "" && prompt != "":
-		return agent + ": " + prompt
+	case agent != "" && short != "":
+		return agent + " " + short
 	case agent != "":
 		return agent
-	case prompt != "":
-		return prompt
+	case short != "":
+		return short
 	default:
+		// prompt is a last-resort fallback for legacy rows without id/agent.
+		if p := strings.TrimSpace(prompt); p != "" {
+			return sanitizeTitleTopic(p)
+		}
 		return "subagent"
 	}
 }
@@ -791,7 +800,7 @@ func (m Model) navChildrenToTree(kids []navChild) []ui.TreeNode {
 	for _, ch := range kids {
 		label := ch.title
 		if label == "" {
-			label = childViewTitle(ch.agent, ch.prompt)
+			label = childViewTitle(ch.agent, ch.prompt, ch.id, "")
 		}
 		if label == "" {
 			label = shortSessionID(ch.id)

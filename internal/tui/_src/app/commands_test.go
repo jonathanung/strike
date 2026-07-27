@@ -43,6 +43,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/undo":             {"undo last turn (chat only, or chat + restore files)", "[chat|files]", commandSourceBuiltin},
 		"/rewind":           {"fork a new id from a previous turn (keeps original)", "[turn]", commandSourceBuiltin},
 		"/session":          {"browse and resume a past session", "[id]", commandSourceBuiltin},
+		"/rename":           {"rename the current session", "[title]", commandSourceBuiltin},
 		"/export":           {"export the conversation to markdown", "[path] [--open]", commandSourceBuiltin},
 		"/help":             {"show available commands", "", commandSourceBuiltin},
 		"/keys":             {"show keyboard shortcuts", "[reset]", commandSourceBuiltin},

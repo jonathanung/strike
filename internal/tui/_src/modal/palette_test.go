@@ -47,6 +47,7 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		{ID: "command:undo", Label: "/undo", Description: "undo last turn (chat only, or chat + restore files)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/undo"}},
 		{ID: "command:rewind", Label: "/rewind", Description: "fork a new id from a previous turn (keeps original)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/rewind"}},
 		{ID: "command:session", Label: "/session", Description: "browse and resume a past session", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/session"}},
+		{ID: "command:rename", Label: "/rename", Description: "rename the current session", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/rename"}},
 		{ID: "command:export", Label: "/export", Description: "export the conversation to markdown", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/export"}},
 		{ID: "command:help", Label: "/help", Description: "show available commands", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/help"}},
 		{ID: "command:keys", Label: "/keys", Description: "show keyboard shortcuts", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/keys"}},
