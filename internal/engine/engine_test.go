@@ -278,7 +278,9 @@ func TestRejectionInterruptsTurn(t *testing.T) {
 	defer cancel()
 	go eng.Run(ctx)
 
-	eng.Ops() <- protocol.UserInput{Text: "run rm -rf /"}
+	// Inside-workspace destructive path so permission ask still fires; workspace
+	// sandbox hard-blocks escapes like `rm -rf /` before Ask.
+	eng.Ops() <- protocol.UserInput{Text: "run rm -rf build"}
 
 	want := protocol.ToolFeedbackUserRejected("do not delete anything")
 	var (
