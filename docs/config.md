@@ -229,6 +229,39 @@ config. Layers merge last-wins by name:
 (`.json` is accepted as well as `.jsonc`.) Credentials never live in these
 files — use env refs and/or `/auth` / the auth store.
 
+### Disable default (builtin) providers
+
+Hide stock catalog providers (`anthropic`, `openai`, `xai`, `gemini`, `kimi`,
+`deepseek`, `echo`) so only custom endpoints appear in `/provider`, `/auth`,
+and model pickers. Same keys work in **`providers.jsonc`** or config JSON;
+later layers win (project overrides global; providers.jsonc overrides the
+config file in the same root).
+
+```jsonc
+// ~/.strike/providers.jsonc — custom-only setup, keep openai available
+{
+  "disable-default-providers": true,
+  "disable-default-openai": false, // per-provider override re-enables
+  "disable-default-anthropic": true, // redundant when all are disabled
+  "acme": {
+    "options": {
+      "baseURL": "https://api.example.com/v1",
+      "apiKey": "{env:ACME_API_KEY}"
+    },
+    "models": ["acme-latest"]
+  }
+}
+```
+
+| Key | Effect |
+|---|---|
+| `disable-default-providers` | `true` hides **all** builtins unless a per-provider flag says otherwise |
+| `disable-default-<name>` | `true` disables that builtin; `false` **re-enables** it when the bulk flag is on |
+
+Customs are never affected. Selecting a disabled builtin (`--provider`,
+`/provider`, config default) fails with a clear error. Overlays/endpoints for
+a disabled builtin are ignored for selection until it is re-enabled.
+
 ### `providers.jsonc` (OpenCode-style)
 
 ```jsonc
