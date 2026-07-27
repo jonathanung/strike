@@ -64,6 +64,9 @@ type Config struct {
 	// catalog-backed providers (openai, anthropic, …). Not serialized on
 	// config JSON — loaded from providers.jsonc only.
 	ModelOverlays map[string][]ModelDef `json:"-"`
+	// EndpointOverlays are providers.jsonc options (baseURL/apiKey/headers)
+	// for built-in providers. Not serialized on config JSON.
+	EndpointOverlays map[string]ProviderEndpoint `json:"-"`
 	// CompactionStrategy is "trim" (default: drop older turns) or "summarize"
 	// (replace dropped turns with a model-authored summary). Unknown values
 	// are ignored at load time.
@@ -270,6 +273,9 @@ func Load(workDir string) (Config, error) {
 		if len(pf.Overlays) > 0 {
 			cfg.ModelOverlays = mergeOverlayMaps(cfg.ModelOverlays, pf.Overlays)
 		}
+		if len(pf.Endpoints) > 0 {
+			cfg.EndpointOverlays = mergeEndpointMaps(cfg.EndpointOverlays, pf.Endpoints)
+		}
 	}
 	// Project config JSON (optional).
 	if workDir != "" {
@@ -291,6 +297,9 @@ func Load(workDir string) (Config, error) {
 			}
 			if len(pf.Overlays) > 0 {
 				cfg.ModelOverlays = mergeOverlayMaps(cfg.ModelOverlays, pf.Overlays)
+			}
+			if len(pf.Endpoints) > 0 {
+				cfg.EndpointOverlays = mergeEndpointMaps(cfg.EndpointOverlays, pf.Endpoints)
 			}
 		}
 	}

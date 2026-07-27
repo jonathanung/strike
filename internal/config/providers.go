@@ -251,26 +251,32 @@ func mergeProviders(base, layer []CustomProvider) []CustomProvider {
 // Upsert writes the global config providers array; Remove drops the name from
 // memory and from every known persistence layer (config + providers.jsonc).
 //
-// ModelOverlays holds providers.jsonc model refinements for built-in (and
-// catalog-backed) providers — they never become CustomProvider rows.
+// Model overlays and endpoint overlays come from providers.jsonc for built-in
+// (catalog-backed) providers — they never become CustomProvider rows.
 type CustomStore struct {
-	mu       sync.Mutex
-	items    []CustomProvider
-	overlays map[string][]ModelDef
-	workDir  string
+	mu        sync.Mutex
+	items     []CustomProvider
+	overlays  map[string][]ModelDef
+	endpoints map[string]ProviderEndpoint
+	workDir   string
 }
 
 // NewCustomStore seeds a store from a merged provider list (e.g. config.Load).
 // workDir scopes project-layer removals (./.strike/…); empty skips project files.
 func NewCustomStore(items []CustomProvider, workDir string) *CustomStore {
-	return NewCustomStoreWithOverlays(items, nil, workDir)
+	return NewCustomStoreWithOverlays(items, nil, nil, workDir)
 }
 
-// NewCustomStoreWithOverlays seeds customs plus builtin model overlays.
-func NewCustomStoreWithOverlays(items []CustomProvider, overlays map[string][]ModelDef, workDir string) *CustomStore {
+// NewCustomStoreWithOverlays seeds customs plus builtin model/endpoint overlays.
+func NewCustomStoreWithOverlays(items []CustomProvider, overlays map[string][]ModelDef, endpoints map[string]ProviderEndpoint, workDir string) *CustomStore {
 	out := make([]CustomProvider, len(items))
 	copy(out, items)
-	return &CustomStore{items: out, overlays: cloneOverlayMap(overlays), workDir: workDir}
+	return &CustomStore{
+		items:     out,
+		overlays:  cloneOverlayMap(overlays),
+		endpoints: cloneEndpointMap(endpoints),
+		workDir:   workDir,
+	}
 }
 
 // ModelOverlay returns config model defs for provider (builtin overlays or
@@ -286,6 +292,19 @@ func (s *CustomStore) ModelOverlay(provider string) []ModelDef {
 		return cloneModelDefs(cp.ModelDefs)
 	}
 	return nil
+}
+
+// Endpoint returns a builtin endpoint overlay (baseURL/apiKeyEnv/headers), if any.
+// The returned value is a copy. Does not env-expand — use ResolveEndpoint at runtime.
+func (s *CustomStore) Endpoint(provider string) (ProviderEndpoint, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	ep, ok := s.endpoints[provider]
+	if !ok || !ep.Active() {
+		return ProviderEndpoint{}, false
+	}
+	return cloneEndpoint(ep), true
 }
 
 // List returns a snapshot of custom providers in stable order.
