@@ -267,9 +267,12 @@ Two different mechanisms, depending on whether it needs Go code:
    `autonomy`, `auth`, `settings`, `agent`, `fast`, `vim`, `nano`, `md-read`,
    `theme`, `layout`, `split`, `compact`, `fork`, `undo`, `rewind`,
    `session`, `export`, `help`, `keys`, `memory`, `issues`, `goal`, `context`,
-   `effective-prompt`, `cost`, `upgrade`, `init`, `mcp`, `exit`, `quit`) are
+   `effective-prompt`, `cost`, `upgrade`, `init`, `mcp`, `exit`, `quit`, and
+   keybind-backed action mirrors such as `focus-left`, `palette`,
+   `interrupt`, `agent-next`, `tool-copy`, `subagent`, `root-new`, …) are
    rejected by `config.ValidateSkillName` before
-   they ever reach the frontend. `/init` is a builtin that writes project
+   they ever reach the frontend. See `keybindSlashPrimary` in
+   `internal/tui/keybind_slash.go` for the full keybind→slash map. `/init` is a builtin that writes project
    `AGENTS.md` via `host.ProjectInit` (confirm before overwrite). PR URLs from successful `gh pr` bash
    output are stored via `protocol.SessionMeta` and `session` sidecar
    metadata. `/vim` embeds nvim/vim/nano in the right-pane `editor` window by
@@ -303,6 +306,7 @@ Same package `internal/tui`; split for reviewability only (no subpackages).
 | `command_dispatch.go` | `handleCommand` and slash handler implementations |
 | `cells.go` | transcript cell types and rendering helpers |
 | `keymap.go` / `keys.go` | keybind table and binding ids |
+| `keybind_slash.go` | keybind→slash registry + action mirrors |
 | `session_nav.go` | session list / child transcript projection |
 | `root_switch.go` | multi-root apply helpers |
 | `view.go` | header/hints and non-root view fragments |

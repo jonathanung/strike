@@ -152,14 +152,22 @@ func buildPaletteEntries(specs []commandSpec, agents []string, availability pale
 }
 
 // paletteBuiltinDisabled returns why a shipped builtin is unavailable, or "".
-// Help/keys/exit/quit stay available always. Vim/nano/md-read, think, export,
-// cost, mcp, and effective-prompt inspect stay available mid-turn so users can
-// inspect or dump the transcript without interrupting the engine.
+// Help/keys/exit/quit and navigation/interrupt keybind mirrors stay available
+// always. Vim/nano/md-read, think, export, cost, mcp, tool-cell mirrors, and
+// effective-prompt inspect stay available mid-turn so users can inspect or
+// dump the transcript without interrupting the engine.
 func paletteBuiltinDisabled(id commandID, availability paletteAvailability) string {
 	switch id {
-	case commandHelp, commandKeys, commandExit, commandQuit:
+	case commandHelp, commandKeys, commandExit, commandQuit,
+		commandFocusLeft, commandFocusRight,
+		commandWindowNext, commandWindowPrev,
+		commandScrollUp, commandScrollDown, commandJumpBottom,
+		commandPalette, commandInterrupt, commandLeaveEditor:
 		return ""
-	case commandVim, commandNano, commandMDRead, commandThink, commandExport, commandContext, commandEffectivePrompt, commandCost, commandMCP:
+	case commandVim, commandNano, commandMDRead, commandThink, commandExport, commandContext, commandEffectivePrompt, commandCost, commandMCP,
+		commandToolPrev, commandToolNext, commandToolExpand, commandToolCopy, commandToolReview, commandToolApply,
+		commandSubagent, commandParent, commandSubagentNext, commandSubagentPrev,
+		commandRootFilter:
 		return ""
 	case commandModel:
 		if availability.TurnRunning {

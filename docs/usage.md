@@ -83,6 +83,26 @@ strike launches without any provider configured. Pick one inside the TUI:
  /mcp                           # MCP status; retry/disable servers
 /exit                          # quit strike (same as ctrl+c)
 /quit                          # alias of /exit
+# Keybind mirrors (same actions as chords; see keybinds.md and /keys):
+/focus-left /focus-right       # focus panes (ctrl+h / ctrl+l)
+/window-next /window-prev      # cycle right-pane windows (ctrl+j / ctrl+k)
+/scroll-up /scroll-down        # transcript scroll
+/jump-bottom                   # jump to latest output (ctrl+t)
+/palette                       # command palette (ctrl+p)
+/interrupt                     # interrupt running turn (esc)
+/save-defaults                 # save defaults (ctrl+d)
+/leave-editor                  # leave embedded editor (ctrl+g)
+/edit-prompt                   # external editor for prompt (ctrl+e)
+/agent-next                    # cycle agent persona (tab)
+/mode-next                     # cycle permission mode (shift+tab)
+/tool-prev /tool-next          # select tool cells (alt+[ / alt+])
+/tool-expand /tool-copy        # expand or copy selected cell
+/tool-review /tool-apply       # review/apply selected edit
+/subagent /parent              # enter first child / return to parent
+/subagent-next /subagent-prev  # sibling subagent cycle
+/root-new /root-open           # concurrent roots (agents pane n / enter)
+/root-interrupt /root-hide     # interrupt or hide selected root
+/root-filter                   # cycle agents pane filter (f)
 ```
 
 ### Session, memory, issues
