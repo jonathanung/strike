@@ -111,7 +111,7 @@ Child sessions spawned by tools (not concurrent roots):
 | `↑`/`↓`/`←`/`→` | parent / child / siblings while viewing a subagent (composer empty) |
 | `esc` | leave subagent view (when idle) / interrupt turn |
 
-## Embedded editor (`/vim`)
+## Embedded editor (`/vim`, `/nano`)
 
 | Key | Action |
 |---|---|

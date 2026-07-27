@@ -107,7 +107,7 @@ setup summary and `activity` for subagent status, recent parent tools, or idle
 tips), an `agents` multi-root tree, a `visualizer` for the selected node's
 status/tokens/cost/activity sparkline, a `files` explorer (lazy tree via
 `host.Files.ListDir`), `memory` and `issues` browsers, a `markdown` reader
-opened via `/md-read`, and an `editor` PTY window for `/vim`. Windows are
+opened via `/md-read`, and an `editor` PTY window for `/vim`/`/nano`. Windows are
 organized into stack **groups** (session: context+activity; agents:
 agents+visualizer; project: memory+issues; singles: files/markdown/editor).
 When the right pane is large enough, multi-member groups render as a paired
@@ -264,7 +264,7 @@ Two different mechanisms, depending on whether it needs Go code:
   format (`description:`) and `$ARGUMENTS` substitution. It becomes
   `/<name>` on the next launch automatically, through
    `host.Services.Skills`. Reserved names (`provider`, `model`, `effort`,
-   `autonomy`, `auth`, `settings`, `agent`, `fast`, `vim`, `md-read`,
+   `autonomy`, `auth`, `settings`, `agent`, `fast`, `vim`, `nano`, `md-read`,
    `theme`, `layout`, `split`, `compact`, `fork`, `undo`, `rewind`,
    `session`, `export`, `help`, `keys`, `memory`, `issues`, `goal`, `context`,
    `effective-prompt`, `cost`, `upgrade`, `init`, `mcp`) are rejected by
@@ -275,10 +275,11 @@ Two different mechanisms, depending on whether it needs Go code:
    metadata. `/vim` embeds nvim/vim/nano in the right-pane `editor` window by
    default (PTY + vt10x via `internal/tui/term`). Config key `vimMode`
    selects `pane`/`embedded` (default), `overlay`/`modal` (large scrim
-   popout), or `takeover` (full-screen `tea.ExecProcess`). `/md-read` uses
-   the same presentation vocabulary via `mdReadMode` (`embedded` default,
-   or `modal`). Editor resolution: `$VISUAL` → `$EDITOR` →
-   nvim/vim/vi/nano on PATH. GUI `$EDITOR` values always take over.
+   popout), or `takeover` (full-screen `tea.ExecProcess`). `/nano` is the
+   first-class nano command (same presentation via `nanoMode`; nano on PATH
+   only). `/md-read` uses the same presentation vocabulary via `mdReadMode`
+   (`embedded` default, or `modal`). `/vim` editor resolution: `$VISUAL` →
+   `$EDITOR` → nvim/vim/vi/nano on PATH. GUI `$EDITOR` values always take over.
 - **Builtin command (code).** Add a `commandSpec` to `builtinCommandSpecs`
   in `internal/tui/commands.go`, a `case "/yourcmd":` arm in
   `Model.handleCommand` (`internal/tui/command_dispatch.go`), and — if it's a primary

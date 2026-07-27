@@ -4,9 +4,8 @@ import "strings"
 
 // SurfacePresentation is how a content surface opens: embedded in the right
 // pane chrome, or as a large centered modal with background scrim.
-// Shared by the markdown reader and (via VimMode aliases) the embedded
-// editor path so future surfaces (e.g. first-class nano) can reuse the same
-// modes.
+// Shared by the markdown reader and embedded editors (/vim, /nano via
+// VimMode/NanoMode aliases).
 type SurfacePresentation string
 
 const (

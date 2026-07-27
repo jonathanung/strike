@@ -15,6 +15,7 @@ type terminalModal struct {
 	sess    *term.Session
 	path    string
 	display string
+	label   string // short editor name for chrome (vim, nano, nvim, …)
 	before  fileMeta
 	hadPath bool
 	// hostW/hostH are set by Model before each view so the overlay can size
@@ -22,11 +23,15 @@ type terminalModal struct {
 	hostW, hostH int
 }
 
-func newTerminalModal(sess *term.Session, path, display string, before fileMeta, hadPath bool) *terminalModal {
+func newTerminalModal(sess *term.Session, path, display string, before fileMeta, hadPath bool, label string) *terminalModal {
+	if label == "" {
+		label = "editor"
+	}
 	return &terminalModal{
 		sess:    sess,
 		path:    path,
 		display: display,
+		label:   label,
 		before:  before,
 		hadPath: hadPath,
 	}
@@ -63,10 +68,13 @@ func (m *terminalModal) view(width int, th theme.Theme) string {
 	}
 	innerW := max(20, min(width, outerW-2))
 	innerH := max(8, outerH-2)
-	title := "vim"
+	title := m.label
+	if title == "" {
+		title = "editor"
+	}
 	if m.display != "" {
 		// Title is plain text; separators come from theme at render via Panel.
-		title = "vim " + m.display
+		title = title + " " + m.display
 	}
 	body := ""
 	if m.sess != nil {

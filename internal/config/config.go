@@ -36,9 +36,11 @@ type Config struct {
 	// VimMode is how /vim presents the editor: "pane"/"embedded" (default,
 	// right-pane PTY), "overlay"/"modal" (large scrim modal), or "takeover"
 	// (full-screen tea.ExecProcess handoff). Unknown values are ignored at
-	// load time. Aliases share vocabulary with mdReadMode for nano and other
-	// future surfaces.
+	// load time. Aliases share vocabulary with mdReadMode and nanoMode.
 	VimMode string `json:"vimMode,omitempty"`
+	// NanoMode is how /nano presents nano: same values/aliases as VimMode
+	// (pane|embedded, overlay|modal, takeover). Unknown values are ignored.
+	NanoMode string `json:"nanoMode,omitempty"`
 	// MdReadMode is how /md-read presents markdown: "embedded"/"pane" (default,
 	// right-pane markdown window) or "modal"/"overlay" (large scrim modal).
 	// Unknown values are ignored at load time.
@@ -511,6 +513,9 @@ func merge(base, layer Config) Config {
 	}
 	if layer.VimMode != "" {
 		base.VimMode = layer.VimMode
+	}
+	if layer.NanoMode != "" {
+		base.NanoMode = layer.NanoMode
 	}
 	if layer.MdReadMode != "" {
 		base.MdReadMode = layer.MdReadMode

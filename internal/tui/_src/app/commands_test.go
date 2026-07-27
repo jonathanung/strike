@@ -33,6 +33,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/fast":             {"toggle OpenAI priority tier (faster, ~2× cost)", "[on|off]", commandSourceBuiltin},
 		"/think":            {"show or hide model chain-of-thought", "[on|off]", commandSourceBuiltin},
 		"/vim":              {"open a file in the editor (embedded/modal/takeover; see vimMode)", "[path[:line]]", commandSourceBuiltin},
+		"/nano":             {"open a file in nano (embedded/modal/takeover; see nanoMode)", "[path[:line]]", commandSourceBuiltin},
 		"/md-read":          {"open a markdown file (embedded right pane or modal; see mdReadMode)", "<path>", commandSourceBuiltin},
 		"/theme":            {"select a color theme or set appearance", "[name|dark|light|auto]", commandSourceBuiltin},
 		"/layout":           {"toggle horizontal/vertical pane split", "", commandSourceBuiltin},
@@ -79,7 +80,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 }
 
 func TestValidSkillNameRejectsReservedBuiltinsIncludingMDRead(t *testing.T) {
-	for _, name := range []string{"provider", "model", "effort", "autonomy", "mode", "auth", "agent", "fast", "vim", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "export", "help", "keys", "memory", "issues", "goal", "context", "effective-prompt", "cost", "upgrade", "init", "mcp"} {
+	for _, name := range []string{"provider", "model", "effort", "autonomy", "mode", "auth", "agent", "fast", "vim", "nano", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "export", "help", "keys", "memory", "issues", "goal", "context", "effective-prompt", "cost", "upgrade", "init", "mcp"} {
 		if validSkillName(name) {
 			t.Errorf("validSkillName(%q) = true, want false for reserved builtin", name)
 		}

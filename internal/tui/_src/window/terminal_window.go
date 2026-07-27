@@ -33,6 +33,7 @@ type terminalWindow struct {
 	height  int
 	path    string // absolute path opened, if any
 	display string
+	label   string // short editor name for chrome (vim, nano, nvim, …)
 	before  fileMeta
 	hadPath bool
 	// idle is true when no session is running (placeholder).
@@ -45,18 +46,26 @@ func newTerminalWindow() terminalWindow {
 
 func (w terminalWindow) id() string { return terminalWindowID }
 
+func (w terminalWindow) editorLabel() string {
+	if w.label != "" {
+		return w.label
+	}
+	return "editor"
+}
+
 func (w terminalWindow) title() string {
 	dot := theme.Default().Resolve().Icons.Dot
+	label := w.editorLabel()
 	if w.display != "" {
-		return "vim " + dot + " " + filepath.Base(w.display)
+		return label + " " + dot + " " + filepath.Base(w.display)
 	}
 	if w.path != "" {
-		return "vim " + dot + " " + filepath.Base(w.path)
+		return label + " " + dot + " " + filepath.Base(w.path)
 	}
 	if w.idle {
 		return "editor"
 	}
-	return "vim"
+	return label
 }
 
 func (w terminalWindow) init() tea.Cmd { return nil }
@@ -92,7 +101,7 @@ func (w terminalWindow) view(th theme.Theme) string {
 	}
 	if w.sess == nil || w.idle {
 		st := th.Resolve().S()
-		msg := "No editor open - /vim [path]"
+		msg := "No editor open - /vim or /nano [path]"
 		return lipgloss.NewStyle().Width(max(1, w.width)).Render(
 			st.Muted.Render(msg),
 		)
@@ -101,7 +110,7 @@ func (w terminalWindow) view(th theme.Theme) string {
 }
 
 // attach binds a live session and starts listening for redraw/exit.
-func (w terminalWindow) attach(sess *term.Session, path, display string, before fileMeta, hadPath bool) (terminalWindow, tea.Cmd) {
+func (w terminalWindow) attach(sess *term.Session, path, display string, before fileMeta, hadPath bool, label string) (terminalWindow, tea.Cmd) {
 	// Tear down any previous session.
 	if w.sess != nil && !w.idle {
 		_ = w.sess.Close()
@@ -109,6 +118,7 @@ func (w terminalWindow) attach(sess *term.Session, path, display string, before 
 	w.sess = sess
 	w.path = path
 	w.display = display
+	w.label = label
 	w.before = before
 	w.hadPath = hadPath
 	w.idle = false
@@ -153,6 +163,7 @@ func (w terminalWindow) markIdle() terminalWindow {
 	w.sess = nil
 	w.path = ""
 	w.display = ""
+	w.label = ""
 	w.hadPath = false
 	w.before = fileMeta{}
 	return w

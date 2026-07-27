@@ -22,6 +22,7 @@ const (
 	commandFast            commandID = "fast"
 	commandThink           commandID = "think"
 	commandVim             commandID = "vim"
+	commandNano            commandID = "nano"
 	commandHelp            commandID = "help"
 	commandKeys            commandID = "keys"
 	commandMDRead          commandID = "md-read"
@@ -71,6 +72,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandFast, Name: "/fast", Description: "toggle OpenAI priority tier (faster, ~2× cost)", ArgsHint: "[on|off]", Source: commandSourceBuiltin},
 	{ID: commandThink, Name: "/think", Description: "show or hide model chain-of-thought", ArgsHint: "[on|off]", Source: commandSourceBuiltin},
 	{ID: commandVim, Name: "/vim", Description: "open a file in the editor (embedded/modal/takeover; see vimMode)", ArgsHint: "[path[:line]]", Source: commandSourceBuiltin},
+	{ID: commandNano, Name: "/nano", Description: "open a file in nano (embedded/modal/takeover; see nanoMode)", ArgsHint: "[path[:line]]", Source: commandSourceBuiltin},
 	{ID: commandMDRead, Name: "/md-read", Description: "open a markdown file (embedded right pane or modal; see mdReadMode)", ArgsHint: "<path>", Source: commandSourceBuiltin},
 	{ID: commandTheme, Name: "/theme", Description: "select a color theme or set appearance", ArgsHint: "[name|dark|light|auto]", Source: commandSourceBuiltin},
 	{ID: commandLayout, Name: "/layout", Description: "toggle horizontal/vertical pane split", Source: commandSourceBuiltin},
@@ -152,6 +154,7 @@ var reservedCommandNames = map[string]struct{}{
 	"fast":             {},
 	"think":            {},
 	"vim":              {},
+	"nano":             {},
 	"md-read":          {},
 	"theme":            {},
 	"layout":           {},

@@ -116,6 +116,7 @@ func TestLoadSurfacePresentationMerge(t *testing.T) {
 	}
 	if err := os.WriteFile(global, []byte(`{
 		"vimMode": "overlay",
+		"nanoMode": "takeover",
 		"mdReadMode": "embedded"
 	}`), 0o644); err != nil {
 		t.Fatal(err)
@@ -125,7 +126,8 @@ func TestLoadSurfacePresentationMerge(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(project, []byte(`{
-		"mdReadMode": "modal"
+		"mdReadMode": "modal",
+		"nanoMode": "modal"
 	}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -135,6 +137,9 @@ func TestLoadSurfacePresentationMerge(t *testing.T) {
 	}
 	if cfg.VimMode != "overlay" {
 		t.Errorf("vimMode = %q, want overlay from global", cfg.VimMode)
+	}
+	if cfg.NanoMode != "modal" {
+		t.Errorf("nanoMode = %q, want modal from project", cfg.NanoMode)
 	}
 	if cfg.MdReadMode != "modal" {
 		t.Errorf("mdReadMode = %q, want modal from project", cfg.MdReadMode)

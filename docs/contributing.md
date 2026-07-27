@@ -99,7 +99,7 @@ matching paths (and keep relative links valid):
 | Slash commands | `internal/tui/commands.go` (`builtinCommandSpecs`) | [usage.md](usage.md) |
 | Keybinds | `internal/tui/keymap.go` (`defaultKeyMap`, `keybindCatalog`) | [keybinds.md](keybinds.md) |
 | CLI flags / `exec` | `cmd/strike` + `strike --help` | [install.md](install.md), [usage.md](usage.md) |
-| Config / custom providers / `vimMode` | `internal/config` | [config.md](config.md) |
+| Config / custom providers / `vimMode`/`nanoMode` | `internal/config` | [config.md](config.md) |
 | Agents, skills, workflows | `internal/config` builtins + loaders | [agents-skills.md](agents-skills.md) |
 | Tool inventory | `internal/tool` + `cmd/strike/wire.go` | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Index | — | [README.md](../README.md) |

@@ -112,6 +112,9 @@ type Options struct {
 	// VimMode selects pane/overlay/takeover for /vim (aliases embedded/modal).
 	// Empty defaults to pane.
 	VimMode VimMode
+	// NanoMode selects pane/overlay/takeover for /nano (aliases embedded/modal).
+	// Empty defaults to pane. Same vocabulary as VimMode.
+	NanoMode NanoMode
 	// MdReadMode selects embedded|modal for /md-read. Empty defaults to embedded.
 	MdReadMode SurfacePresentation
 	// PermissionAutoApproveSeconds arms permission-modal auto-allow once after
@@ -260,6 +263,8 @@ type Model struct {
 	pendingUpgrade bool
 	// vimMode selects pane/overlay/takeover for /vim.
 	vimMode VimMode
+	// nanoMode selects pane/overlay/takeover for /nano.
+	nanoMode NanoMode
 	// mdReadMode selects embedded|modal for /md-read.
 	mdReadMode SurfacePresentation
 	// usage* hold the latest UsageReported figures; Known=false means unknown
@@ -404,6 +409,9 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		if option.VimMode != "" {
 			m.vimMode = option.VimMode
 		}
+		if option.NanoMode != "" {
+			m.nanoMode = option.NanoMode
+		}
 		if option.MdReadMode != "" {
 			m.mdReadMode = option.MdReadMode
 		}
@@ -426,6 +434,9 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 	m.keyMap = buildKeyMap(m.keyOverrides, m.splitOrientation)
 	if m.vimMode == "" {
 		m.vimMode = VimModePane
+	}
+	if m.nanoMode == "" {
+		m.nanoMode = VimModePane
 	}
 	if m.mdReadMode == "" {
 		m.mdReadMode = PresentationEmbedded

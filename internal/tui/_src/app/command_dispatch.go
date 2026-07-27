@@ -133,6 +133,8 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		return m.handleThinkCommand(fields[1:])
 	case "/vim":
 		return m.handleVimCommand(fields[1:])
+	case "/nano":
+		return m.handleNanoCommand(fields[1:])
 	case "/md-read":
 		return m.handleMDRead(text, fields)
 	case "/theme":

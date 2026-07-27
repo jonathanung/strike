@@ -102,7 +102,7 @@ Optional Vite dev proxy lives in `web/`. Details and threat model:
 | [Nix dev env](docs/nix.md) | Nix philosophy, best practices, reference projects |
 | [Keybinds](docs/keybinds.md) | keyboard reference (`f1` / `/keys` in-app) |
 | [Auth & providers](docs/auth.md) | credentials, OAuth, billing routing |
-| [Config](docs/config.md) | JSON, permissions, custom providers, `vimMode` |
+| [Config](docs/config.md) | JSON, permissions, custom providers, `vimMode`/`nanoMode` |
 | [Agents & skills](docs/agents-skills.md) | personas, skills, workflows / autonomy |
 | [Web cockpit](docs/web.md) | experimental `strike serve` (live + RO) |
 | [Architecture](docs/ARCHITECTURE.md) | packages, seams, recipes |
