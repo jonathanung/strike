@@ -131,7 +131,7 @@ func (m Model) visualizerStateSnapshot() visualizerStateMsg {
 	// Child node?
 	if ch, ok := m.findChildActivity(id); ok {
 		msg.Kind = "child"
-		msg.Label = childViewTitle(ch.agent, ch.prompt)
+		msg.Label = childViewTitle(ch.agent, ch.prompt, ch.sessionID, ch.title)
 		if msg.Label == "" {
 			msg.Label = shortSessionID(id)
 		}
@@ -426,6 +426,100 @@ func (m Model) canHideAgentFromPane(id string) (ok bool, notice string) {
 		return true, ""
 	}
 	return false, "session not in agents pane"
+}
+
+// lookupSessionTitle returns the durable host title for id, or "".
+func (m Model) lookupSessionTitle(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" || m.services.Sessions == nil {
+		return ""
+	}
+	s, ok, err := m.services.Sessions.Get(id)
+	if err != nil || !ok {
+		return ""
+	}
+	return strings.TrimSpace(s.Title)
+}
+
+// applySessionRename updates live labels after a durable host rename.
+func (m *Model) applySessionRename(id, title string) tea.Cmd {
+	id = strings.TrimSpace(id)
+	title = strings.TrimSpace(title)
+	if id == "" {
+		return nil
+	}
+	if id == m.sessionID {
+		m.titleTopic = sanitizeTitleTopic(title)
+	}
+	if m.roots != nil {
+		if p, ok := m.roots[id]; ok && p != nil {
+			p.titleTopic = sanitizeTitleTopic(title)
+		}
+	}
+	for i := range m.children {
+		if m.children[i].sessionID == id {
+			m.children[i].title = title
+		}
+	}
+	if m.roots != nil {
+		for _, p := range m.roots {
+			if p == nil {
+				continue
+			}
+			for i := range p.children {
+				if p.children[i].sessionID == id {
+					p.children[i].title = title
+				}
+			}
+		}
+	}
+	if m.viewingID == id {
+		if title != "" {
+			m.viewTitle = sanitizeTitleTopic(title)
+		} else {
+			m.viewTitle = childViewTitle("", "", id, "")
+		}
+	}
+	if title != "" {
+		m.setNotice("renamed to "+sanitizeTitleTopic(title), false)
+	} else {
+		m.setNotice("title cleared", false)
+	}
+	var titleCmd tea.Cmd
+	if id == m.sessionID {
+		titleCmd = tea.SetWindowTitle(windowTitle(*m))
+	}
+	return tea.Batch(titleCmd, m.broadcastAgentsState(), m.broadcastContextState())
+}
+
+// openRenameModal opens the rename dialog for id (prefilled with current title).
+func (m *Model) openRenameModal(id string) tea.Cmd {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil
+	}
+	if m.services.Sessions == nil {
+		m.setNotice("session rename unavailable", true)
+		return nil
+	}
+	current := m.lookupSessionTitle(id)
+	if current == "" {
+		if id == m.sessionID {
+			current = strings.TrimSpace(m.titleTopic)
+		} else if m.roots != nil {
+			if p, ok := m.roots[id]; ok && p != nil {
+				current = strings.TrimSpace(p.titleTopic)
+			}
+		}
+	}
+	if current == "" {
+		if ch, ok := m.findChildActivity(id); ok {
+			current = childViewTitle(ch.agent, ch.prompt, ch.sessionID, ch.title)
+		}
+	}
+	m.modal = newRenameModal(m.services.Sessions, id, current)
+	m.reflow()
+	return nil
 }
 
 // handleAgentsHide dismisses id from the Agents pane only. Never deletes JSONL

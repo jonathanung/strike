@@ -429,6 +429,8 @@ func applyEventToPane(p *rootPane, ev protocol.Event) {
 			}
 		}
 		if !updated {
+			// Title is filled later via host lookup on rename or active-root
+			// ChildStarted; brief agent+id label is the default without it.
 			p.children = append(p.children, childActivity{
 				sessionID: id,
 				parentID:  e.ParentSessionID,
