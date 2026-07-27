@@ -53,11 +53,8 @@ func historyWithSizedTools(oldOut, recentOut string, oldN, recentN int) []provid
 }
 
 func TestPruneToolResultsBlanksOldBeyondProtect(t *testing.T) {
-	// Each old result ~25k tokens; two old results = 50k. After protect 40k,
-	// second (older when walking back... wait we walk back so newest old first)
-	// Walk: skip recent turn tools; then encounter old tools from end of old batch.
-	// oldN=3 * 25k = 75k total eligible. Protect first 40k of those (newest),
-	// prune the rest (~35k) which is > pruneMinimum 20k.
+	// oldN=3 * 25k = 75k eligible. Walking backward protects the newest ~40k,
+	// then blanks older bodies (~35k) once past pruneMinimum.
 	const per = 25_000
 	msgs := historyWithSizedTools(bigOutput(per), bigOutput(5_000), 3, 1)
 

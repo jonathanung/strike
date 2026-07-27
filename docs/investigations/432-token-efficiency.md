@@ -26,7 +26,7 @@ In `internal/engine/turn.go`, the default turn loop:
 
 1. Appends the user message to `e.messages`.
 2. Repeatedly:
-   - optionally runs threshold compaction (`maybeThresholdCompact`);
+   - runs tool-result prune (`maybePruneToolResults`) then optional threshold compaction;
    - calls `streamModel` → `consumeStream`;
    - appends the assistant message (text + tool calls);
    - for each tool call, appends the full tool-result message from `execToolCall`;
@@ -46,7 +46,7 @@ stream, err := e.prov.Stream(ctx, provider.Request{
 })
 ```
 
-There is **no intermediate pass** that blanks, truncates, or replaces older tool-result bodies before `Stream`. Once a tool result is in `e.messages`, it rides every subsequent request until coarse compaction rewrites history.
+**Mitigated:** `maybePruneToolResults` now blanks older tool-result bodies before `Stream` (see Mitigation shipped). Coarse compaction remains the heavier whole-history rewrite.
 
 ### Compaction: late, coarse, whole-history
 
@@ -164,9 +164,9 @@ Older tool parts are marked `time.compacted`; protected tools (e.g. `skill`) can
 
 | Rank | Severity | Cause |
 | ---: | --- | --- |
-| 1 | **CRITICAL** | Full tool-result history retransmitted on every stream (quadratic-ish input growth with tool rounds) — no microcompact/prune |
+| 1 | **CRITICAL** → **mitigated** | Full tool-result history retransmitted on every stream — addressed by continuous prune (`internal/engine/prune.go`) |
 | 2 | **HIGH** | No request-side prompt cache breakpoints (Anthropic/OpenCode peers set them deliberately) |
-| 3 | **HIGH** | Compaction only late (~80% threshold) as first real history defense; peers prune continuously under that ceiling |
+| 3 | **MEDIUM** (was HIGH) | Coarse compaction still late (~80%); prune now handles continuous hygiene under that ceiling |
 | 4 | **MEDIUM** | All tool schemas on every request + system tool-guidance duplication |
 | 5 | **MEDIUM** | Large per-call caps still accumulate (e.g. 30KB bash × many calls) |
 | 6 | **LOW / ruled out as primary** | Subagent parent-history duplication (does not happen); “calling tools too often” alone without replay economics |
@@ -221,8 +221,7 @@ Real billing also depends on tokenizer, cache hits, and whether the provider cha
 
 Pointers for follow-up issues/PRs; this document does not schedule or implement them.
 
-1. **Microcompact / prune (OpenCode-shaped)**  
-   Before each `Stream` (or as a history projection step), blank old tool results outside a protect budget / keep-recent policy. Preserve tool_use/tool_result structural validity. Optional allowlist of compactable tools (CC-style).
+1. **Microcompact / prune (OpenCode-shaped)** — **shipped** in this PR (`internal/engine/prune.go`).
 
 2. **Request-side prompt cache breakpoints**  
    Especially Anthropic: `cache_control` on system + tools + stable tail (CC / OpenCode `applyCaching` patterns). Measure `cache_read` vs `cache_creation` in existing usage fields.
@@ -238,12 +237,9 @@ Pointers for follow-up issues/PRs; this document does not schedule or implement 
 
 ---
 
-## Explicit non-goals of the PR that lands this doc
+## Scope note
 
-- No production Go/code changes  
-- No behavior change  
-- Investigation document only  
-- Do not treat this file as an implementation plan commitment  
+This document began as investigation-only; the same PR now also ships tool-result prune. Remaining items under Recommended directions stay follow-ups.
 
 ---
 
