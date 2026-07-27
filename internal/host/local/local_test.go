@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -722,7 +723,7 @@ func TestCatalogOverlayMergesWithoutDroppingCatalog(t *testing.T) {
 			{ID: "gpt-custom", Name: "Custom Only"},
 		},
 	}
-	customs := config.NewCustomStoreWithOverlays(nil, overlays, "")
+	customs := config.NewCustomStoreWithOverlays(nil, overlays, nil, "")
 	svc := New(nil, nil, nil, nil, nil, nil, customs, "")
 	infos, err := svc.Catalog.Models(context.Background(), "openai")
 	if err != nil {
@@ -772,6 +773,62 @@ func TestCatalogOverlayMergesWithoutDroppingCatalog(t *testing.T) {
 	effort, ok, err := svc.Catalog.ResolveVariant(context.Background(), "openai", "gpt-a", "high")
 	if err != nil || !ok || effort != "high" {
 		t.Errorf("ResolveVariant = %q ok=%v err=%v", effort, ok, err)
+	}
+}
+
+// TestCatalogBuiltinEndpointKeepsModelsDev lists catalog models when anthropic
+// has only options (no models) — endpoint overlay must not drop registration.
+func TestCatalogBuiltinEndpointKeepsModelsDev(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PROXY_KEY", "from-env")
+	cacheDir := filepath.Join(home, ".strike", "cache")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	catalog := `{"anthropic":{"id":"anthropic","name":"Anthropic","models":{` +
+		`"claude-test":{"id":"claude-test","name":"Claude Test","limit":{"context":200000,"output":8192}}` +
+		`}}}`
+	if err := os.WriteFile(filepath.Join(cacheDir, "models.json"), []byte(catalog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	endpoints := map[string]config.ProviderEndpoint{
+		"anthropic": {
+			BaseURL:   "https://proxy.example/anthropic",
+			APIKeyEnv: "PROXY_KEY",
+		},
+	}
+	customs := config.NewCustomStoreWithOverlays(nil, nil, endpoints, "")
+	store, err := auth.OpenStore(filepath.Join(home, ".strike", "auth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := New(store, nil, nil, nil, nil, nil, customs, "")
+
+	// Must not be treated as a custom provider.
+	if _, ok := svc.Providers.Get("anthropic"); ok {
+		t.Fatal("anthropic endpoint overlay must not create a custom provider row")
+	}
+	infos, err := svc.Catalog.Models(context.Background(), "anthropic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 1 || infos[0].ID != "claude-test" {
+		t.Fatalf("catalog models = %#v", infos)
+	}
+	by := statusByName(svc.Auth.Statuses())
+	ant := by["anthropic"]
+	if !ant.Authed {
+		t.Fatalf("anthropic should be authed via PROXY_KEY: %+v", ant)
+	}
+	if ant.Detail != "env" && !strings.Contains(ant.Detail, "env") {
+		t.Errorf("detail = %q, want env (+ optional host)", ant.Detail)
+	}
+	if ant.BaseURL != "https://proxy.example/anthropic" {
+		t.Errorf("BaseURL = %q", ant.BaseURL)
+	}
+	if ant.Custom {
+		t.Error("anthropic must remain non-custom")
 	}
 }
 

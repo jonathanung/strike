@@ -255,9 +255,17 @@ files — use env refs and/or `/auth` / the auth store.
       }
     }
   },
-  // Built-in catalog overlay — does NOT replace models.dev.
-  // Omit models (or leave empty) to keep the full catalog.
+  // Built-in overlay — does NOT become a separate custom provider.
+  // options.baseURL / options.apiKey customize the stock endpoint (proxy).
+  // Omit models (or leave empty) to keep the full models.dev catalog.
   // Overlay one id to refine name/limits/variants; other catalog ids remain.
+  "anthropic": {
+    "name": "Corp Anthropic",
+    "options": {
+      "baseURL": "https://proxy.example/anthropic",
+      "apiKey": "{env:CORP_ANTHROPIC_KEY}"
+    }
+  },
   "openai": {
     "models": {
       "gpt-5.5": {
@@ -282,29 +290,46 @@ files — use env refs and/or `/auth` / the auth store.
 
 | Field | Required | Notes |
 |---|---|---|
-| map key | yes | provider id (lowercased slug). Built-ins (`anthropic`/`openai`/`xai`/`gemini`/`kimi`/`deepseek`/`echo`) are **model overlays only** (not custom endpoints). Other keys are custom providers. |
-| `options.baseURL` | custom yes | absolute `http`/`https` URL, or `{env:VAR}` / `$VAR` / `${VAR}` (not required on builtin overlays) |
-| `options.apiKey` | no | env ref only (`{env:NAME}`, `$NAME`, `${NAME}`) → checked before auth store |
+| map key | yes | provider id (lowercased slug). Built-ins (`anthropic`/`openai`/`xai`/`gemini`/`kimi`/`deepseek`/`echo`) stay builtins: options → **endpoint overlay**, models → **catalog overlay**. Other keys are custom providers. |
+| `options.baseURL` | custom yes | absolute `http`/`https` URL, or `{env:VAR}` / `$VAR` / `${VAR}`. On builtins, optional — overrides the stock origin (proxy). |
+| `options.apiKey` | no | env ref only (`{env:NAME}`, `$NAME`, `${NAME}`) → checked before auth store. On builtins, pins the env var used for that provider. Missing env fails at select time with a clear error. |
 | `npm` | no | **advisory only** — never installed or executed; `anthropic` in the name → anthropic wire, else openai |
 | `api` | no | strike override: `openai` or `anthropic` (wins over npm hint) |
 | `models` | no | `[]string` (legacy) **or** object map id → model def; see merge rules below |
-| `models.<id>.name` | no | display label in `/model` (default: id or models.dev name) |
+| `models.<id>` map key | yes (when nested) | **wire model id** sent on the API `model` field and used by `/model` selection |
+| `models.<id>.name` | no | **display label only** in `/model` (never sent on the wire; default: id or models.dev name) |
 | `models.<id>.limit.context` / `.output` | no | token ceilings; overlay wins over models.dev when set (>0) |
-| `models.<id>.options` | no | opaque bag (unsupported keys ignored) |
+| `models.<id>.options` | no | opaque bag (unsupported keys ignored; must not change the wire id) |
 | `models.<id>.variants` | no | named effort presets; `reasoningEffort`/`effort` map onto `/effort` |
 | `options.headers` | no | extra HTTP headers (values may use env refs) |
+
+#### Wire id vs display name
+
+Nested `models` object **keys** are the ids strike selects and sends on the wire
+(`{"model":"<key>"}`). The optional `name` field is a UI label only. Example:
+`"gpt-5.5": { "name": "GPT-5.5" }` lists as “GPT-5.5” but requests `gpt-5.5`.
+Variants and options never rewrite the wire id.
+
+#### Builtin endpoint overlay (anthropic / openai / …)
+
+Defining `"anthropic": { "options": { "baseURL", "apiKey" } }` (with or without
+`models`) keeps the builtin provider registered, routes HTTP to the custom
+origin, resolves the pinned apiKey env, and still lists models.dev when
+`models` is omitted. Same for other credential builtins (openai chat-completions
+path when baseURL/apiKey is set — not the ChatGPT OAuth backend).
 
 #### models.dev / catalog merge
 
 | Situation | Behavior |
 |---|---|
 | Builtin (openai, anthropic, …) with models.dev data | `/model` lists **catalog** models by default |
+| Builtin with only `options` (no `models`) | endpoint overlay applied; **full catalog** unchanged |
 | Config omits `models` or `models` is empty | full catalog unchanged |
 | Config nested/flat models on a **builtin** | **merge/overlay** by id: config wins name/limits/variants; catalog-only ids still appear |
-| Config nested/flat models on a **custom** provider | config list is the full `/model` list (no models.dev) |
+| Config nested/flat models on a **custom** provider | config list is the full `/model` list (no models.dev); map keys are wire ids |
 | Config sets limits for a catalog id | config wins for those fields; other catalog metadata kept |
 
-You never need to paste an entire upstream catalog into `providers.jsonc` just to set one variant or context limit.
+You never need to paste an entire upstream catalog into `providers.jsonc` just to set one variant, context limit, or proxy baseURL.
 
 #### Default model precedence
 

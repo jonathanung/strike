@@ -105,6 +105,99 @@ func TestParseBuiltinOverlayDoesNotCreateCustom(t *testing.T) {
 	}
 }
 
+// TestParseBuiltinEndpointOnlyOptions registers anthropic/openai options
+// (baseURL + apiKey env) without models — OpenCode-style proxy overlay.
+func TestParseBuiltinEndpointOnlyOptions(t *testing.T) {
+	raw := []byte(`{
+  "anthropic": {
+    "name": "Corp Anthropic",
+    "options": {
+      "baseURL": "https://proxy.example/anthropic",
+      "apiKey": "{env:CORP_ANTHROPIC_KEY}"
+    }
+  },
+  "openai": {
+    "options": {
+      "baseURL": "$OPENAI_PROXY_URL",
+      "apiKey": "${OPENAI_PROXY_KEY}"
+    }
+  }
+}`)
+	pf, err := ParseProvidersFile(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pf.Customs) != 0 {
+		t.Fatalf("builtins must not become customs: %+v", pf.Customs)
+	}
+	if len(pf.Overlays) != 0 {
+		t.Fatalf("no models → no model overlays: %+v", pf.Overlays)
+	}
+	ant, ok := pf.Endpoints["anthropic"]
+	if !ok || ant.BaseURL != "https://proxy.example/anthropic" || ant.APIKeyEnv != "CORP_ANTHROPIC_KEY" {
+		t.Fatalf("anthropic endpoint = %+v ok=%v", ant, ok)
+	}
+	oai, ok := pf.Endpoints["openai"]
+	if !ok || oai.BaseURL != "$OPENAI_PROXY_URL" || oai.APIKeyEnv != "OPENAI_PROXY_KEY" {
+		t.Fatalf("openai endpoint = %+v ok=%v", oai, ok)
+	}
+}
+
+// TestParseCustomNestedModelIDIsMapKey ensures display name is label-only;
+// the models object key is the wire/selection id.
+func TestParseCustomNestedModelIDIsMapKey(t *testing.T) {
+	raw := []byte(`{
+  "QGenie_oai": {
+    "npm": "@ai-sdk/openai",
+    "name": "QGenie OAI",
+    "options": {
+      "baseURL": "https://proxy.example/v1",
+      "apiKey": "{env:QGENIE_KEY}"
+    },
+    "models": {
+      "gpt-5.5": {
+        "name": "GPT-5.5",
+        "limit": { "context": 272000, "output": 128000 },
+        "options": { "forcedReasoning": true },
+        "variants": {
+          "high": { "reasoningEffort": "high", "textVerbosity": "low" }
+        }
+      }
+    }
+  }
+}`)
+	pf, err := ParseProvidersFile(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pf.Customs) != 1 {
+		t.Fatalf("customs = %+v", pf.Customs)
+	}
+	cp := pf.Customs[0]
+	if cp.Name != "qgenie_oai" {
+		t.Errorf("provider id = %q, want qgenie_oai (map key, lowercased)", cp.Name)
+	}
+	if cp.API != WireOpenAI || cp.APIKeyEnv != "QGENIE_KEY" {
+		t.Fatalf("api/key = api=%q env=%q", cp.API, cp.APIKeyEnv)
+	}
+	def, ok := FindModelDef(cp.ModelDefs, "gpt-5.5")
+	if !ok {
+		t.Fatal("missing model id gpt-5.5")
+	}
+	if def.ID != "gpt-5.5" {
+		t.Errorf("wire id = %q", def.ID)
+	}
+	if def.Name != "GPT-5.5" {
+		t.Errorf("display name = %q", def.Name)
+	}
+	if def.ID == def.Name {
+		t.Fatal("display name must differ from wire id in this fixture")
+	}
+	if DefaultModelCustom(cp) != "gpt-5.5" {
+		t.Errorf("default model = %q, want map key", DefaultModelCustom(cp))
+	}
+}
+
 func TestParseInvalidModelFailsClearly(t *testing.T) {
 	cases := []struct {
 		name string
@@ -217,5 +310,58 @@ func TestLoadMergesBuiltinOverlay(t *testing.T) {
 	acme, ok := FindCustom(cfg.Providers, "acme")
 	if !ok || len(acme.Models) != 1 {
 		t.Fatalf("acme = %+v ok=%v", acme, ok)
+	}
+}
+
+func TestLoadMergesBuiltinEndpoint(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+	path := filepath.Join(home, ".strike", "providers.jsonc")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{
+  "anthropic": {
+    "options": {
+      "baseURL": "https://proxy.example/anthropic",
+      "apiKey": "{env:PROXY_KEY}"
+    }
+  }
+}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ep, ok := cfg.EndpointOverlays["anthropic"]
+	if !ok || ep.BaseURL != "https://proxy.example/anthropic" || ep.APIKeyEnv != "PROXY_KEY" {
+		t.Fatalf("EndpointOverlays = %+v", cfg.EndpointOverlays)
+	}
+	store := NewCustomStoreWithOverlays(cfg.Providers, cfg.ModelOverlays, cfg.EndpointOverlays, work)
+	got, ok := store.Endpoint("anthropic")
+	if !ok || got.APIKeyEnv != "PROXY_KEY" {
+		t.Fatalf("store.Endpoint = %+v ok=%v", got, ok)
+	}
+}
+
+func TestResolveEndpointExpandsEnv(t *testing.T) {
+	t.Setenv("EP_BASE", "https://env.example/v1")
+	t.Setenv("EP_HDR", "hdr-val")
+	got := ResolveEndpoint(ProviderEndpoint{
+		BaseURL:   "{env:EP_BASE}",
+		APIKeyEnv: "{env:EP_KEY}",
+		Headers:   map[string]string{"X-T": "$EP_HDR"},
+	})
+	if got.BaseURL != "https://env.example/v1" {
+		t.Errorf("BaseURL = %q", got.BaseURL)
+	}
+	if got.APIKeyEnv != "EP_KEY" {
+		t.Errorf("APIKeyEnv = %q", got.APIKeyEnv)
+	}
+	if got.Headers["X-T"] != "hdr-val" {
+		t.Errorf("Headers = %+v", got.Headers)
 	}
 }

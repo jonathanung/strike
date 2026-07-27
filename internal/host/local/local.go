@@ -90,10 +90,21 @@ func (a authAdapter) Statuses() []host.ProviderStatus {
 	customs := a.customs.List()
 	out := make([]host.ProviderStatus, 0, len(credentialProviders)+len(customs)+1)
 	for _, p := range credentialProviders {
-		p.Detail = auth.Describe(p.Name, a.store)
+		p.Detail = a.describeProvider(p.Name)
 		p.Authed = p.Detail != "none"
 		if cred, ok := a.store.Get(p.Name); ok && cred.Type == auth.TypeOAuth && !cred.ExpiresAt.IsZero() {
 			p.ExpiresAt = cred.ExpiresAt
+		}
+		if ep, ok := a.customs.Endpoint(p.Name); ok {
+			resolved := config.ResolveEndpoint(ep)
+			if u, err := url.Parse(resolved.BaseURL); err == nil && u.Host != "" {
+				if p.Detail == "none" {
+					p.Detail = u.Host
+				} else {
+					p.Detail = p.Detail + " · " + u.Host
+				}
+			}
+			p.BaseURL = resolved.BaseURL
 		}
 		out = append(out, p)
 	}
@@ -142,6 +153,12 @@ func (a authAdapter) Statuses() []host.ProviderStatus {
 }
 
 func (a authAdapter) Describe(provider string) string {
+	return a.describeProvider(provider)
+}
+
+// describeProvider resolves credential detail for builtins (including endpoint
+// apiKeyEnv overlays) and customs.
+func (a authAdapter) describeProvider(provider string) string {
 	if cp, ok := a.customs.Get(provider); ok {
 		resolved := config.ResolveCustom(cp)
 		if key, ok := auth.APIKeyEnv(provider, a.store, resolved.APIKeyEnv); ok && key != "" {
@@ -151,6 +168,23 @@ func (a authAdapter) Describe(provider string) string {
 			return "env"
 		}
 		return "none"
+	}
+	if ep, ok := a.customs.Endpoint(provider); ok {
+		resolved := config.ResolveEndpoint(ep)
+		if resolved.APIKeyEnv != "" {
+			if key, ok := auth.APIKeyEnv(provider, a.store, resolved.APIKeyEnv); ok && key != "" {
+				if d := auth.Describe(provider, a.store); d != "none" {
+					return d
+				}
+				return "env"
+			}
+			// Overlay pins a non-default env; do not claim authed via the
+			// stock ANTHROPIC_API_KEY etc. unless that env is the pin.
+			if d := auth.Describe(provider, a.store); d != "none" && d != "env" {
+				return d
+			}
+			return "none"
+		}
 	}
 	return auth.Describe(provider, a.store)
 }
