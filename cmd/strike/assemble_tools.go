@@ -10,6 +10,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/auth"
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/engine"
+	"github.com/jonathanung/strike-cli/internal/goal"
 	"github.com/jonathanung/strike-cli/internal/history"
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/host/local"
@@ -24,6 +25,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/provider/anthropic"
 	"github.com/jonathanung/strike-cli/internal/provider/chatgpt"
 	"github.com/jonathanung/strike-cli/internal/provider/echo"
+	"github.com/jonathanung/strike-cli/internal/provider/gemini"
 	"github.com/jonathanung/strike-cli/internal/provider/openaicompat"
 	"github.com/jonathanung/strike-cli/internal/session"
 	"github.com/jonathanung/strike-cli/internal/tool"
@@ -45,6 +47,7 @@ type assembled struct {
 	historyClose func() error
 	memoryClose  func() error
 	issuesClose  func() error
+	goalsClose   func() error
 	// worktreeClose removes a strike-managed worktree when cleanup=delete.
 	worktreeClose func() error
 	// mcpClose stops MCP server sessions (stdio/HTTP; process-scoped).
@@ -92,8 +95,16 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("opening project issues: %w", err)
 	}
+	goalStore, err := goal.Open(globalRoot, projectIdentity.Key)
+	if err != nil {
+		_ = issueStore.Close()
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, fmt.Errorf("opening project goals: %w", err)
+	}
 	cfg, err := config.Load(workDir)
 	if err != nil {
+		_ = goalStore.Close()
 		_ = issueStore.Close()
 		_ = memoryStore.Close()
 		_ = historyStore.Close()
@@ -110,6 +121,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	if opts.effort != "" {
 		level, ok := protocol.ParseEffort(opts.effort)
 		if !ok || level == protocol.EffortDefault {
+			_ = goalStore.Close()
 			_ = issueStore.Close()
 			_ = memoryStore.Close()
 			_ = historyStore.Close()
@@ -120,19 +132,28 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 
 	authStore, err := auth.OpenStore(auth.DefaultPath())
 	if err != nil {
+		_ = goalStore.Close()
 		_ = issueStore.Close()
 		_ = memoryStore.Close()
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("opening auth store: %w", err)
 	}
 
-	customStore := config.NewCustomStore(cfg.Providers, workDir)
+	customStore := config.NewCustomStoreWithOverlays(cfg.Providers, cfg.ModelOverlays, cfg.EndpointOverlays, workDir)
 
 	// selectProvider constructs a provider by name, probing credentials so
 	// a bad /provider selection fails at select time with a clear message
 	// instead of on the first prompt. Custom names resolve through
-	// customStore (live; includes mid-session /settings adds).
+	// customStore (live; includes mid-session /settings adds). Builtin
+	// endpoint overlays from providers.jsonc (baseURL/apiKey) apply here.
 	selectProvider := func(name string) (provider.Provider, string, error) {
+		if name != "echo" {
+			if ep, ok := customStore.Endpoint(name); ok {
+				if p, model, err, handled := buildBuiltinWithEndpoint(name, ep, authStore); handled {
+					return p, model, err
+				}
+			}
+		}
 		switch name {
 		case "echo":
 			return echo.New(), "echo", nil
@@ -169,10 +190,28 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 				return nil, "", err
 			}
 			return openaicompat.NewXAI(source), config.DefaultModel(name), nil
+		case "gemini":
+			source := auth.BearerSource(name, authStore)
+			if _, err := source(context.Background()); err != nil {
+				return nil, "", err
+			}
+			return gemini.New(source), config.DefaultModel(name), nil
+		case "kimi":
+			source := auth.BearerSource(name, authStore)
+			if _, err := source(context.Background()); err != nil {
+				return nil, "", err
+			}
+			return openaicompat.New("kimi", "https://api.moonshot.cn/v1", source), config.DefaultModel(name), nil
+		case "deepseek":
+			source := auth.BearerSource(name, authStore)
+			if _, err := source(context.Background()); err != nil {
+				return nil, "", err
+			}
+			return openaicompat.New("deepseek", "https://api.deepseek.com/v1", source), config.DefaultModel(name), nil
 		default:
 			cp, ok := customStore.Get(name)
 			if !ok {
-				return nil, "", fmt.Errorf("unknown provider %q (want anthropic, openai, xai, echo, or a custom name from /settings)", name)
+				return nil, "", fmt.Errorf("unknown provider %q (want anthropic, openai, xai, gemini, kimi, deepseek, echo, or a custom name from /settings)", name)
 			}
 			return buildCustomProvider(cp, authStore)
 		}
@@ -183,12 +222,14 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// /provider otherwise). Headless exec always requires a usable provider.
 	if requireProvider || (opts.providerSet && opts.provider != "") {
 		if cfg.Provider == "" {
+			_ = goalStore.Close()
 			_ = issueStore.Close()
 			_ = memoryStore.Close()
 			_ = historyStore.Close()
 			return nil, fmt.Errorf("no provider configured (pass --provider or set provider in config)")
 		}
 		if _, _, err := selectProvider(cfg.Provider); err != nil {
+			_ = goalStore.Close()
 			_ = issueStore.Close()
 			_ = memoryStore.Close()
 			_ = historyStore.Close()
@@ -200,6 +241,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// available names in its description at construction time.
 	skills, err := config.LoadSkillsWithError(workDir)
 	if err != nil {
+		_ = goalStore.Close()
 		_ = issueStore.Close()
 		_ = memoryStore.Close()
 		_ = historyStore.Close()
@@ -247,6 +289,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// other personas supply a body that becomes the persona layer.
 	loadedAgents, err := config.LoadAgentsWithError(workDir)
 	if err != nil {
+		_ = goalStore.Close()
 		_ = issueStore.Close()
 		_ = memoryStore.Close()
 		_ = historyStore.Close()
@@ -264,6 +307,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	instructions := config.LoadInstructions(workDir, projectIdentity.Root)
 	workflows, err := config.LoadWorkflows(workDir)
 	if err != nil {
+		_ = goalStore.Close()
+		_ = issueStore.Close()
 		_ = memoryStore.Close()
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("loading workflows: %w", err)
@@ -284,6 +329,12 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		})
 	}
 	lookupContextWindow := func(providerName, model string) int {
+		// Config limit overlays win over models.dev when set.
+		if defs := customStore.ModelOverlay(providerName); len(defs) > 0 {
+			if n, ok := config.ModelDefsContext(defs, model); ok {
+				return n
+			}
+		}
 		// Best-effort catalog lookup for threshold compaction. Failures
 		// leave the window unknown; overflow recovery still works.
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -468,6 +519,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	if opts.continueSession {
 		info, err := sessions.LatestRoot(projectIdentity.Key)
 		if err != nil {
+			_ = goalStore.Close()
 			_ = issueStore.Close()
 			_ = memoryStore.Close()
 			_ = historyStore.Close()
@@ -477,6 +529,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	}
 	first, replay, err := openRoot(resumeID, true)
 	if err != nil {
+		_ = goalStore.Close()
 		_ = issueStore.Close()
 		_ = memoryStore.Close()
 		_ = historyStore.Close()
@@ -513,6 +566,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// the TUI never sees auth/config/models/history/memory/issues directly.
 	services := local.New(authStore, historyStore, memoryStore, issueStore, agentNames, skills, customStore, workDir)
 	services.Files = local.NewFiles(workDir)
+	services.Goals = local.NewGoals(goalStore, workDir)
 	services.Sessions = local.NewSessions(sessions, projectIdentity.Key)
 	services.Init = local.NewProjectInit(workDir)
 	services.MCP = local.NewMCP(mcpMgr)
@@ -542,6 +596,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		issuesClose: func() error {
 			return issueStore.Close()
 		},
+		goalsClose: func() error {
+			return goalStore.Close()
+		},
 		worktreeClose: first.wtClose,
 		mcpClose: func() error {
 			return mcpMgr.Close()
@@ -554,6 +611,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 // buildCustomProvider maps a config custom provider onto the openaicompat or
 // anthropic adapter with the declared base URL and auth-store credentials.
 // Env placeholders in baseURL/headers/apiKeyEnv are expanded from the process env.
+// When apiKeyEnv is set, a missing key fails clearly at select time.
 func buildCustomProvider(cp config.CustomProvider, store *auth.Store) (provider.Provider, string, error) {
 	cp = config.ResolveCustom(cp)
 	if err := config.ValidateBaseURL(cp.BaseURL); err != nil {
@@ -562,12 +620,28 @@ func buildCustomProvider(cp config.CustomProvider, store *auth.Store) (provider.
 	defaultModel := config.DefaultModelCustom(cp)
 	switch cp.API {
 	case config.WireOpenAI:
-		// Empty key is allowed (local gateways like ollama); the adapter sends
-		// Authorization only when a token is present.
+		if cp.APIKeyEnv != "" {
+			if _, ok := auth.APIKeyEnv(cp.Name, store, cp.APIKeyEnv); !ok {
+				return nil, "", fmt.Errorf("custom provider %s: set %s (or paste a key via /auth %s)", cp.Name, cp.APIKeyEnv, cp.Name)
+			}
+		}
+		// Empty key is allowed when no apiKeyEnv (local gateways like ollama).
 		source := optionalBearer(cp.Name, store, cp.APIKeyEnv)
 		return openaicompat.NewWithHeaders(cp.Name, cp.BaseURL, source, cp.Headers), defaultModel, nil
+	case config.WireResponses:
+		// OpenCode @ai-sdk/openai default: platform Responses API (/v1/responses).
+		if cp.APIKeyEnv != "" {
+			if _, ok := auth.APIKeyEnv(cp.Name, store, cp.APIKeyEnv); !ok {
+				return nil, "", fmt.Errorf("custom provider %s: set %s (or paste a key via /auth %s)", cp.Name, cp.APIKeyEnv, cp.Name)
+			}
+		}
+		source := optionalBearer(cp.Name, store, cp.APIKeyEnv)
+		return openaicompat.NewResponses(cp.Name, cp.BaseURL, source, cp.Headers), defaultModel, nil
 	case config.WireAnthropic:
-		key, _ := auth.APIKeyEnv(cp.Name, store, cp.APIKeyEnv)
+		key, ok := auth.APIKeyEnv(cp.Name, store, cp.APIKeyEnv)
+		if cp.APIKeyEnv != "" && !ok {
+			return nil, "", fmt.Errorf("custom provider %s: set %s (or paste a key via /auth %s)", cp.Name, cp.APIKeyEnv, cp.Name)
+		}
 		p, err := anthropic.NewCustom(cp.Name, cp.BaseURL, key, cp.Headers)
 		if err != nil {
 			return nil, "", err
@@ -575,6 +649,123 @@ func buildCustomProvider(cp config.CustomProvider, store *auth.Store) (provider.
 		return p, defaultModel, nil
 	default:
 		return nil, "", fmt.Errorf("custom provider %s: unknown api %q", cp.Name, cp.API)
+	}
+}
+
+// builtinDefaultBaseURL is the stock origin for chat-completions builtins.
+func builtinDefaultBaseURL(name string) string {
+	switch name {
+	case "anthropic":
+		return "https://api.anthropic.com"
+	case "openai":
+		return "https://api.openai.com/v1"
+	case "xai":
+		return "https://api.x.ai/v1"
+	case "kimi":
+		return "https://api.moonshot.cn/v1"
+	case "deepseek":
+		return "https://api.deepseek.com/v1"
+	default:
+		return ""
+	}
+}
+
+func builtinKeyHint(name, envName string) string {
+	if envName != "" {
+		return envName
+	}
+	switch name {
+	case "anthropic":
+		return "ANTHROPIC_API_KEY"
+	case "openai":
+		return "OPENAI_API_KEY"
+	case "xai":
+		return "XAI_API_KEY"
+	case "gemini":
+		return "GEMINI_API_KEY"
+	case "kimi":
+		return "KIMI_API_KEY"
+	case "deepseek":
+		return "DEEPSEEK_API_KEY"
+	default:
+		return "API key"
+	}
+}
+
+// buildBuiltinWithEndpoint applies a providers.jsonc endpoint overlay onto a
+// built-in provider. handled is false when the overlay has nothing actionable
+// for this builtin (caller falls through to default wiring).
+func buildBuiltinWithEndpoint(name string, ep config.ProviderEndpoint, store *auth.Store) (provider.Provider, string, error, bool) {
+	ep = config.ResolveEndpoint(ep)
+	if !ep.Active() {
+		return nil, "", nil, false
+	}
+	defaultModel := config.DefaultModel(name)
+	envName := ep.APIKeyEnv
+	hint := builtinKeyHint(name, envName)
+
+	switch name {
+	case "anthropic":
+		baseURL := ep.BaseURL
+		if baseURL == "" {
+			baseURL = builtinDefaultBaseURL(name)
+		} else if err := config.ValidateBaseURL(baseURL); err != nil {
+			return nil, "", fmt.Errorf("anthropic endpoint: %w", err), true
+		}
+		var (
+			key string
+			ok  bool
+		)
+		if envName != "" {
+			key, ok = auth.APIKeyEnv(name, store, envName)
+		} else {
+			key, ok = auth.APIKey(name, store)
+		}
+		if !ok || key == "" {
+			return nil, "", fmt.Errorf("no Anthropic credentials: set %s or run `strike auth login anthropic`", hint), true
+		}
+		p, err := anthropic.NewCustom("anthropic", baseURL, key, ep.Headers)
+		if err != nil {
+			return nil, "", err, true
+		}
+		return p, defaultModel, nil, true
+
+	case "openai", "xai", "kimi", "deepseek":
+		baseURL := ep.BaseURL
+		if baseURL == "" {
+			baseURL = builtinDefaultBaseURL(name)
+		} else if err := config.ValidateBaseURL(baseURL); err != nil {
+			return nil, "", fmt.Errorf("%s endpoint: %w", name, err), true
+		}
+		// Overlay forces chat-completions (not ChatGPT OAuth backend).
+		var source openaicompat.BearerSource
+		if envName != "" {
+			if _, ok := auth.APIKeyEnv(name, store, envName); !ok {
+				return nil, "", fmt.Errorf("no %s credentials: set %s or paste a key via /auth %s", name, envName, name), true
+			}
+			source = optionalBearer(name, store, envName)
+		} else {
+			source = auth.BearerSource(name, store)
+			if _, err := source(context.Background()); err != nil {
+				return nil, "", fmt.Errorf("no %s credentials: set %s or run `strike auth login %s`", name, hint, name), true
+			}
+		}
+		return openaicompat.NewWithHeaders(name, baseURL, source, ep.Headers), defaultModel, nil, true
+
+	case "gemini":
+		if ep.BaseURL != "" {
+			return nil, "", fmt.Errorf("gemini endpoint baseURL overlay is not supported yet"), true
+		}
+		if envName == "" {
+			return nil, "", nil, false
+		}
+		if _, ok := auth.APIKeyEnv(name, store, envName); !ok {
+			return nil, "", fmt.Errorf("no gemini credentials: set %s", envName), true
+		}
+		return gemini.New(optionalBearer(name, store, envName)), defaultModel, nil, true
+
+	default:
+		return nil, "", nil, false
 	}
 }
 

@@ -75,6 +75,9 @@ var credentialProviders = []host.ProviderStatus{
 	{Name: "anthropic", APIKey: true},
 	{Name: "openai", OAuth: true, APIKey: true},
 	{Name: "xai", OAuth: true, Device: true, APIKey: true},
+	{Name: "gemini", APIKey: true},
+	{Name: "kimi", APIKey: true},
+	{Name: "deepseek", APIKey: true},
 }
 
 // authAdapter adapts *auth.Store to host.Auth.
@@ -87,10 +90,21 @@ func (a authAdapter) Statuses() []host.ProviderStatus {
 	customs := a.customs.List()
 	out := make([]host.ProviderStatus, 0, len(credentialProviders)+len(customs)+1)
 	for _, p := range credentialProviders {
-		p.Detail = auth.Describe(p.Name, a.store)
+		p.Detail = a.describeProvider(p.Name)
 		p.Authed = p.Detail != "none"
 		if cred, ok := a.store.Get(p.Name); ok && cred.Type == auth.TypeOAuth && !cred.ExpiresAt.IsZero() {
 			p.ExpiresAt = cred.ExpiresAt
+		}
+		if ep, ok := a.customs.Endpoint(p.Name); ok {
+			resolved := config.ResolveEndpoint(ep)
+			if u, err := url.Parse(resolved.BaseURL); err == nil && u.Host != "" {
+				if p.Detail == "none" {
+					p.Detail = u.Host
+				} else {
+					p.Detail = p.Detail + " · " + u.Host
+				}
+			}
+			p.BaseURL = resolved.BaseURL
 		}
 		out = append(out, p)
 	}
@@ -139,6 +153,12 @@ func (a authAdapter) Statuses() []host.ProviderStatus {
 }
 
 func (a authAdapter) Describe(provider string) string {
+	return a.describeProvider(provider)
+}
+
+// describeProvider resolves credential detail for builtins (including endpoint
+// apiKeyEnv overlays) and customs.
+func (a authAdapter) describeProvider(provider string) string {
 	if cp, ok := a.customs.Get(provider); ok {
 		resolved := config.ResolveCustom(cp)
 		if key, ok := auth.APIKeyEnv(provider, a.store, resolved.APIKeyEnv); ok && key != "" {
@@ -148,6 +168,23 @@ func (a authAdapter) Describe(provider string) string {
 			return "env"
 		}
 		return "none"
+	}
+	if ep, ok := a.customs.Endpoint(provider); ok {
+		resolved := config.ResolveEndpoint(ep)
+		if resolved.APIKeyEnv != "" {
+			if key, ok := auth.APIKeyEnv(provider, a.store, resolved.APIKeyEnv); ok && key != "" {
+				if d := auth.Describe(provider, a.store); d != "none" {
+					return d
+				}
+				return "env"
+			}
+			// Overlay pins a non-default env; do not claim authed via the
+			// stock ANTHROPIC_API_KEY etc. unless that env is the pin.
+			if d := auth.Describe(provider, a.store); d != "none" && d != "env" {
+				return d
+			}
+			return "none"
+		}
 	}
 	return auth.Describe(provider, a.store)
 }
@@ -262,41 +299,32 @@ func (c catalogAdapter) ModelIDs(ctx context.Context, provider string) ([]string
 }
 
 func (c catalogAdapter) Models(ctx context.Context, provider string) ([]host.ModelInfo, error) {
+	overlay := c.customs.ModelOverlay(provider)
 	if cp, ok := c.customs.Get(provider); ok {
-		if len(cp.Models) == 0 {
+		// Custom endpoint: config models only (no models.dev merge).
+		defs := cp.ModelDefs
+		if len(defs) == 0 {
 			return nil, fmt.Errorf("no models configured for %s — add model ids in /settings or use /model <id>", provider)
 		}
-		out := make([]host.ModelInfo, len(cp.Models))
-		for i, id := range cp.Models {
-			out[i] = host.ModelInfo{ID: id}
-		}
-		return out, nil
+		return modelDefsToInfo(defs, host.ModelSourceConfig), nil
 	}
 	catalog, err := models.Load(ctx)
 	if err != nil {
 		return nil, err
 	}
 	infos := catalog.Infos(provider)
-	if len(infos) == 0 {
+	if len(infos) == 0 && len(overlay) == 0 {
 		return nil, fmt.Errorf("no models listed for %s on models.dev", provider)
 	}
-	out := make([]host.ModelInfo, len(infos))
-	for i, info := range infos {
-		out[i] = host.ModelInfo{
-			ID:         info.ID,
-			Context:    info.Context,
-			InputCost:  info.InputCost,
-			OutputCost: info.OutputCost,
-			HasCost:    info.HasCost,
-			ToolCall:   info.ToolCall,
-			Reasoning:  info.Reasoning,
-			Attachment: info.Attachment,
-		}
-	}
-	return out, nil
+	return mergeCatalogAndOverlay(infos, overlay), nil
 }
 
 func (c catalogAdapter) ContextWindow(ctx context.Context, provider, model string) (int, bool, error) {
+	if defs := c.customs.ModelOverlay(provider); len(defs) > 0 {
+		if n, ok := config.ModelDefsContext(defs, model); ok {
+			return n, true, nil
+		}
+	}
 	if _, ok := c.customs.Get(provider); ok {
 		return 0, false, nil
 	}
@@ -309,6 +337,11 @@ func (c catalogAdapter) ContextWindow(ctx context.Context, provider, model strin
 }
 
 func (c catalogAdapter) OutputLimit(ctx context.Context, provider, model string) (int, bool, error) {
+	if defs := c.customs.ModelOverlay(provider); len(defs) > 0 {
+		if n, ok := config.ModelDefsOutput(defs, model); ok {
+			return n, true, nil
+		}
+	}
 	if _, ok := c.customs.Get(provider); ok {
 		return 0, false, nil
 	}
@@ -318,6 +351,108 @@ func (c catalogAdapter) OutputLimit(ctx context.Context, provider, model string)
 	}
 	tokens, ok := catalog.OutputLimit(provider, model)
 	return tokens, ok, nil
+}
+
+func (c catalogAdapter) ResolveVariant(_ context.Context, provider, model, variant string) (string, bool, error) {
+	defs := c.customs.ModelOverlay(provider)
+	def, ok := config.FindModelDef(defs, model)
+	if !ok {
+		return "", false, nil
+	}
+	opts, ok := config.ResolveVariant(def, variant)
+	if !ok {
+		return "", false, nil
+	}
+	level, ok := config.VariantEffort(opts)
+	if !ok {
+		return "", false, nil
+	}
+	return string(level), true, nil
+}
+
+// mergeCatalogAndOverlay builds the /model list: catalog entries first (id
+// sort already applied), config overlays refine by id, then config-only ids
+// append in overlay order. Omitting overlay leaves the full catalog.
+func mergeCatalogAndOverlay(catalog []models.Info, overlay []config.ModelDef) []host.ModelInfo {
+	if len(overlay) == 0 {
+		out := make([]host.ModelInfo, len(catalog))
+		for i, info := range catalog {
+			out[i] = catalogInfoToHost(info, host.ModelSourceCatalog)
+		}
+		return out
+	}
+	index := make(map[string]int, len(catalog)+len(overlay))
+	out := make([]host.ModelInfo, 0, len(catalog)+len(overlay))
+	for _, info := range catalog {
+		index[info.ID] = len(out)
+		out = append(out, catalogInfoToHost(info, host.ModelSourceCatalog))
+	}
+	for _, def := range overlay {
+		if i, ok := index[def.ID]; ok {
+			out[i] = applyModelDef(out[i], def)
+			continue
+		}
+		index[def.ID] = len(out)
+		out = append(out, modelDefToInfo(def, host.ModelSourceConfig))
+	}
+	return out
+}
+
+func catalogInfoToHost(info models.Info, source string) host.ModelInfo {
+	return host.ModelInfo{
+		ID:         info.ID,
+		Name:       info.Name,
+		Context:    info.Context,
+		Output:     info.Output,
+		InputCost:  info.InputCost,
+		OutputCost: info.OutputCost,
+		HasCost:    info.HasCost,
+		ToolCall:   info.ToolCall,
+		Reasoning:  info.Reasoning,
+		Attachment: info.Attachment,
+		Source:     source,
+	}
+}
+
+func applyModelDef(base host.ModelInfo, def config.ModelDef) host.ModelInfo {
+	base.Source = host.ModelSourceMerge
+	if name := strings.TrimSpace(def.Name); name != "" {
+		base.Name = name
+	}
+	if def.Limit != nil {
+		if def.Limit.Context > 0 {
+			base.Context = def.Limit.Context
+		}
+		if def.Limit.Output > 0 {
+			base.Output = def.Limit.Output
+		}
+	}
+	if ids := def.VariantIDs(); len(ids) > 0 {
+		base.VariantIDs = ids
+	}
+	return base
+}
+
+func modelDefsToInfo(defs []config.ModelDef, source string) []host.ModelInfo {
+	out := make([]host.ModelInfo, len(defs))
+	for i, d := range defs {
+		out[i] = modelDefToInfo(d, source)
+	}
+	return out
+}
+
+func modelDefToInfo(def config.ModelDef, source string) host.ModelInfo {
+	info := host.ModelInfo{
+		ID:         def.ID,
+		Name:       strings.TrimSpace(def.Name),
+		VariantIDs: def.VariantIDs(),
+		Source:     source,
+	}
+	if def.Limit != nil {
+		info.Context = def.Limit.Context
+		info.Output = def.Limit.Output
+	}
+	return info
 }
 
 // settingsAdapter adapts global config persistence to host.Settings.

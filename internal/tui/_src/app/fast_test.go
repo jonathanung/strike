@@ -127,6 +127,10 @@ func (c *fastCatalogProbe) OutputLimit(context.Context, string, string) (int, bo
 	return 0, false, nil
 }
 
+func (c *fastCatalogProbe) ResolveVariant(context.Context, string, string, string) (string, bool, error) {
+	return "", false, nil
+}
+
 func TestFastSelectedHandlingDoesNotLoadCatalog(t *testing.T) {
 	probe := &fastCatalogProbe{}
 	services := testServices(nil, nil)

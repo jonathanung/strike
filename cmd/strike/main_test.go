@@ -26,10 +26,10 @@ const expectedUsage = `Usage:
   strike upgrade
 
 Options:
-  --provider <provider>              provider to use (anthropic|openai|xai|echo); overrides config
+  --provider <provider>              provider to use (anthropic|openai|xai|gemini|kimi|deepseek|echo); overrides config
   --model <model>                    model id; overrides config
   --effort <level>                   reasoning effort (off|low|medium|high|xhigh|max); overrides config
-  --dangerously-skip-permissions     skip configured permission prompts (agent profile denies still apply)
+  --auto, --dangerously-skip-permissions skip configured permission prompts (agent profile denies still apply)
   --continue                         resume the most recent root session (model history + selections)
   --session <id>                     resume a specific session by id (model history + selections)
   --worktree                         run this session in an isolated git worktree under .strike/worktrees/
@@ -157,6 +157,10 @@ func TestParseCLIOptionsDangerousBooleanForms(t *testing.T) {
 		{args: []string{"--dangerously-skip-permissions"}, want: true},
 		{args: []string{"--dangerously-skip-permissions=true"}, want: true},
 		{args: []string{"--dangerously-skip-permissions=false"}, want: false},
+		{args: []string{"--auto"}, want: true},
+		{args: []string{"--auto=true"}, want: true},
+		{args: []string{"--auto=false"}, want: false},
+		{args: []string{"--auto", "--dangerously-skip-permissions"}, want: true},
 	}
 	for _, tt := range tests {
 		opts, err := parseCLIOptions(tt.args)
@@ -164,7 +168,7 @@ func TestParseCLIOptionsDangerousBooleanForms(t *testing.T) {
 			t.Fatalf("parseCLIOptions(%q): %v", tt.args, err)
 		}
 		if opts.dangerouslySkipPermissions != tt.want {
-			t.Errorf("dangerouslySkipPermissions = %t, want %t", opts.dangerouslySkipPermissions, tt.want)
+			t.Errorf("parseCLIOptions(%q) dangerouslySkipPermissions = %t, want %t", tt.args, opts.dangerouslySkipPermissions, tt.want)
 		}
 	}
 }
@@ -178,6 +182,7 @@ func TestParseCLIOptionsRejectsAliasesAndAbbreviations(t *testing.T) {
 		{args: []string{"-provider=echo"}, wantErr: "flag provided but not defined: -provider"},
 		{args: []string{"-model", "value"}, wantErr: "flag provided but not defined: -model"},
 		{args: []string{"-dangerously-skip-permissions"}, wantErr: "flag provided but not defined: -dangerously-skip-permissions"},
+		{args: []string{"-auto"}, wantErr: "flag provided but not defined: -auto"},
 		{args: []string{"--prov", "echo"}, wantErr: "flag provided but not defined: -prov"},
 		{args: []string{"-p", "echo"}, wantErr: "flag provided but not defined: -p"},
 		{args: []string{"--dangerously-skip"}, wantErr: "flag provided but not defined: -dangerously-skip"},
@@ -226,13 +231,16 @@ func TestWriteUsageUsesCanonicalOptionsAndProviders(t *testing.T) {
 	if out.String() != expectedUsage {
 		t.Fatalf("usage changed:\n--- got ---\n%s--- want ---\n%s", out.String(), expectedUsage)
 	}
-	for _, text := range []string{"strike auth <command>", "--provider <provider>", "--model <model>", "anthropic", "openai", "xai", "echo"} {
+	for _, text := range []string{"strike auth <command>", "--provider <provider>", "--model <model>", "anthropic", "openai", "xai", "gemini", "echo"} {
 		if !strings.Contains(out.String(), text) {
 			t.Errorf("usage does not contain %q", text)
 		}
 	}
-	if strings.Contains(out.String(), "--dangerously-skip-permissions <") {
+	if strings.Contains(out.String(), "--dangerously-skip-permissions <") || strings.Contains(out.String(), "--auto <") {
 		t.Error("boolean dangerous option has a value placeholder")
+	}
+	if !strings.Contains(out.String(), "--auto") || !strings.Contains(out.String(), "--dangerously-skip-permissions") {
+		t.Error("usage must list both --auto and --dangerously-skip-permissions")
 	}
 	if strings.Contains(out.String(), "-provider") && !strings.Contains(out.String(), "--provider") {
 		t.Error("provider is not rendered with its canonical double-dash name")
@@ -424,7 +432,13 @@ func TestWarningTextAndPreflightFailuresDoNotWarn(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", homeFile)
-	for _, args := range [][]string{nil, {"--dangerously-skip-permissions"}, {"--dangerously-skip-permissions=false"}} {
+	for _, args := range [][]string{
+		nil,
+		{"--dangerously-skip-permissions"},
+		{"--dangerously-skip-permissions=false"},
+		{"--auto"},
+		{"--auto=false"},
+	} {
 		var stdout, stderr bytes.Buffer
 		if code := runCLI(args, &stdout, &stderr); code != 1 {
 			t.Errorf("runCLI(%q) exit = %d, want startup failure exit 1", args, code)

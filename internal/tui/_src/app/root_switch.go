@@ -476,6 +476,7 @@ func (m *Model) activateRoot(id string) tea.Cmd {
 		m.setNotice("activate: "+err.Error(), true)
 		return nil
 	}
+	m.unhideAgent(id)
 	m.stashActiveRoot()
 	p := m.ensureRootPane(id)
 	// If pane is empty (just opened live), seed from durable log.
@@ -553,6 +554,7 @@ func (m *Model) openRootInProcess(id string) tea.Cmd {
 		// Fall back to composition-root resume loop.
 		return func() tea.Msg { return sessionResumeMsg{id: id} }
 	}
+	m.unhideAgent(id)
 	m.stashActiveRoot()
 	p := m.ensureRootPane(id)
 	if p != nil && m.services.Sessions != nil {

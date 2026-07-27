@@ -34,14 +34,15 @@ type keyMap struct {
 	ScrollDown        key.Binding
 	JumpBottom        key.Binding
 	ToggleOrientation key.Binding
-	// Tool cell selection/expand/copy/review when the composer is empty (enter
-	// still sends when there is text; y/v still type when the composer has
-	// content; v only launches review with a selected tool cell).
+	// Tool cell selection/expand/copy/review/apply when the composer is empty
+	// (enter still sends when there is text; y/v/a still type when the composer
+	// has content; v/a only act with a selected tool cell).
 	ToolPrev   key.Binding
 	ToolNext   key.Binding
 	ToolExpand key.Binding
 	ToolCopy   key.Binding
 	ToolReview key.Binding
+	ToolApply  key.Binding
 
 	// Composer readline editing (focusLeft only). ctrl+k must not be stolen by
 	// CycleWindowPrev / vertical FocusRight; palette/global chords stay global.
@@ -108,6 +109,7 @@ func defaultKeyMap() keyMap {
 		// including assistant/user chat text via OSC52).
 		ToolCopy:   key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy cell")),
 		ToolReview: key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "review edit in editor")),
+		ToolApply:  key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "apply patch to worktree")),
 
 		KillWord:      key.NewBinding(key.WithKeys("ctrl+w"), key.WithHelp("ctrl+w", "kill word backward")),
 		WordBackward:  key.NewBinding(key.WithKeys("alt+b"), key.WithHelp("alt+b", "word backward")),
@@ -133,6 +135,7 @@ type agentsKeyMap struct {
 	Open      key.Binding
 	Spawn     key.Binding
 	Interrupt key.Binding
+	Hide      key.Binding
 	Filter    key.Binding
 }
 
@@ -142,7 +145,9 @@ func defaultAgentsKeyMap() agentsKeyMap {
 		Open:      key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "activate root")),
 		Spawn:     key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new root")),
 		Interrupt: key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "interrupt root")),
-		Filter:    key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "cycle filter")),
+		// Hide removes the row from the agents pane only; session JSONL stays.
+		Hide:   key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "hide from pane")),
+		Filter: key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "cycle filter")),
 	}
 }
 
@@ -209,6 +214,7 @@ func applyKeybindOverrides(k *keyMap, overrides map[string][]string) {
 	set(&k.ToolExpand, "nav.tool-expand", "")
 	set(&k.ToolCopy, "nav.tool-copy", "")
 	set(&k.ToolReview, "nav.tool-review", "")
+	set(&k.ToolApply, "nav.tool-apply", "")
 	set(&k.Leader, "nav.leader", "")
 	set(&k.SessionChildFirst, "nav.session-child", "ctrl+x down")
 	set(&k.SessionParent, "nav.session-parent", "ctrl+x up")
@@ -378,6 +384,7 @@ func keybindCatalog(keys keyMap) []keybindEntry {
 		from("nav.tool-expand", "Navigation", keys.ToolExpand),
 		from("nav.tool-copy", "Navigation", keys.ToolCopy),
 		from("nav.tool-review", "Navigation", keys.ToolReview),
+		from("nav.tool-apply", "Navigation", keys.ToolApply),
 		from("nav.leader", "Navigation", keys.Leader),
 		from("nav.session-child", "Navigation", keys.SessionChildFirst),
 		from("nav.session-parent", "Navigation", keys.SessionParent),
@@ -417,6 +424,7 @@ func keybindCatalog(keys keyMap) []keybindEntry {
 		from("agents.open", "Agents", ak.Open),
 		from("agents.spawn", "Agents", ak.Spawn),
 		from("agents.interrupt", "Agents", ak.Interrupt),
+		from("agents.hide", "Agents", ak.Hide),
 		from("agents.filter", "Agents", ak.Filter),
 		keybindEntry{ID: "lists.move", Category: "Lists", Keys: "up/down/ctrl+p/ctrl+n", Action: "move selection"},
 		keybindEntry{ID: "lists.move-jk", Category: "Lists", Keys: "j/k", Action: "move (pickers without filter)"},

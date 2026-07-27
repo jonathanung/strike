@@ -29,7 +29,7 @@ strike mints a token when `--auth` is used without `--token`.
 | `--model` | Optional model id |
 | `--session-dir` | Sessions directory for `--attach-only`; rejected in live mode |
 | `--attach-only` | No live engine — JSONL SSE attach only |
-| `--dangerously-skip-permissions` | Auto-allow permission asks in the live engine |
+| `--auto`, `--dangerously-skip-permissions` | Auto-allow permission asks in the live engine (equivalent) |
 
 Open the cockpit:
 

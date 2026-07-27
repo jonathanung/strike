@@ -86,6 +86,13 @@ type historyAddedMsg struct {
 	err error
 }
 
+// goalFinishedMsg is delivered when an async /goal run completes.
+type goalFinishedMsg struct {
+	goal host.Goal
+	err  error
+	op   string
+}
+
 // Options carries frontend-only construction flags. Host capabilities
 // (credentials, catalog, settings, history, agents, skills) arrive through
 // host.Services instead.
@@ -301,6 +308,11 @@ type Model struct {
 	// roots holds frozen UI state for concurrent parent sessions (multi-root).
 	// The active root's fields live on Model; others sit here until activated.
 	roots map[string]*rootPane
+
+	// agentsHidden is an ephemeral Agents-pane filter: session ids dismissed
+	// from the tree without deleting JSONL, interrupting turns, or changing
+	// /session. Cleared when a hidden root becomes busy or is activated again.
+	agentsHidden map[string]bool
 
 	// Subagent transcript navigation (ctrl+x leader chords). Root live
 	// cells stay in cells/toolByID; viewingID non-empty and != sessionID
@@ -631,6 +643,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case effortChoicesLoadedMsg:
+		if msg.modal != nil {
+			m.modal = msg.modal
+		}
+		return m, nil
+
 	case defaultsSavedMsg:
 		if msg.err != nil {
 			m.setNotice("saving defaults failed: "+msg.err.Error(), true)
@@ -660,6 +678,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case goalFinishedMsg:
+		if msg.err != nil {
+			m.setNotice("goal: "+msg.err.Error(), true)
+			return m, nil
+		}
+		m.setNotice("goal: "+formatGoalStatus(msg.goal), false)
+		return m, nil
+
 	case editorFinishedMsg:
 		return m.applyEditorFinished(msg)
 
@@ -685,6 +711,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case initResultMsg:
 		return m.applyInitResult(msg)
+
+	case applyDiffResultMsg:
+		cmd := m.applyApplyDiffResult(msg)
+		return m, cmd
 
 	case authExpiryNoticeMsg:
 		if m.authExpiryNoticed {
@@ -826,6 +856,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case agentsInterruptMsg:
 		cmd := m.interruptRoot(msg.sessionID)
+		return m, cmd
+
+	case agentsHideMsg:
+		cmd := m.handleAgentsHide(msg.sessionID)
+		m.reflow()
 		return m, cmd
 	}
 

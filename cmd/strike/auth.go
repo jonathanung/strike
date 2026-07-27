@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -17,7 +18,7 @@ import (
 const authUsage = `Manage provider credentials.
 
 Usage:
-  strike auth login <anthropic|openai|xai> [--api-key] [--device]
+  strike auth login <anthropic|openai|xai|gemini|kimi|deepseek> [--api-key] [--device]
   strike auth status
   strike auth logout <provider>
 
@@ -26,9 +27,13 @@ Login methods:
   xai         OAuth browser flow (default), --device for headless machines,
               or --api-key to paste a key
   anthropic   --api-key (paste a key; OAuth not wired yet)
+  gemini      --api-key (paste a key; OAuth not wired yet)
+  kimi        --api-key (paste a key; OAuth not supported)
+  deepseek    --api-key (paste a key; OAuth not supported)
 
 API keys can also be provided via ANTHROPIC_API_KEY / OPENAI_API_KEY /
-XAI_API_KEY, which take precedence over stored credentials.`
+XAI_API_KEY / GEMINI_API_KEY / KIMI_API_KEY / DEEPSEEK_API_KEY, which take
+precedence over stored credentials.`
 
 func runAuth(args []string, output io.Writer) error {
 	store, err := auth.OpenStore(auth.DefaultPath())
@@ -81,8 +86,12 @@ func runAuthLogin(store *auth.Store, args []string, output io.Writer) error {
 			return loginAPIKey(store, prov, output)
 		}
 		return loginXAIOAuth(ctx, store, useDevice, output)
+	case "gemini":
+		return loginAPIKey(store, prov, output)
+	case "kimi", "deepseek":
+		return loginAPIKey(store, prov, output)
 	default:
-		return fmt.Errorf("unknown provider %q (want anthropic, openai, or xai)", prov)
+		return fmt.Errorf("unknown provider %q (want anthropic, openai, xai, gemini, kimi, or deepseek)", prov)
 	}
 }
 
@@ -143,9 +152,13 @@ func loginXAIOAuth(ctx context.Context, store *auth.Store, device bool, output i
 	return nil
 }
 
+// builtinAuthProviders are the credential-backed providers `strike auth`
+// knows by name, in display order.
+var builtinAuthProviders = []string{"anthropic", "openai", "xai", "gemini", "kimi", "deepseek"}
+
 func runAuthStatus(store *auth.Store, output io.Writer) error {
 	providers := store.Providers()
-	for _, name := range []string{"anthropic", "openai", "xai"} {
+	for _, name := range builtinAuthProviders {
 		status := "not logged in"
 		if key, ok := envKey(name); ok {
 			status = "using " + key + " from environment"
@@ -164,7 +177,7 @@ func runAuthStatus(store *auth.Store, output io.Writer) error {
 		fmt.Fprintf(output, "  %-10s %s\n", name, status)
 	}
 	for _, p := range providers {
-		if p != "anthropic" && p != "openai" && p != "xai" {
+		if !slices.Contains(builtinAuthProviders, p) {
 			fmt.Fprintf(output, "  %-10s credential stored (unknown provider)\n", p)
 		}
 	}
@@ -176,6 +189,9 @@ func envKey(provider string) (string, bool) {
 		"anthropic": "ANTHROPIC_API_KEY",
 		"openai":    "OPENAI_API_KEY",
 		"xai":       "XAI_API_KEY",
+		"gemini":    "GEMINI_API_KEY",
+		"kimi":      "KIMI_API_KEY",
+		"deepseek":  "DEEPSEEK_API_KEY",
 	}[provider]
 	if name != "" && os.Getenv(name) != "" {
 		return name, true

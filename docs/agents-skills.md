@@ -104,7 +104,7 @@ Or a single-line JSON array (same shape as config `permissions`), appended after
 permissions: [{"permission":"bash","pattern":"git *","action":"allow"}]
 ```
 
-Evaluation order: defaults → config → optional --dangerously-skip-permissions allow-all → active agent profile → session always grants (last-match-wins). Switching agents replaces the profile and clears session always-grants. Agent denies still apply under --dangerously-skip-permissions.
+Evaluation order: defaults → config → optional --auto / --dangerously-skip-permissions allow-all → active agent profile → session always grants (last-match-wins). Switching agents replaces the profile and clears session always-grants. Agent denies still apply under --auto / --dangerously-skip-permissions.
 
 Layered JSON config: [config.md](config.md).
 

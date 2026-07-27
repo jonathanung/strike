@@ -51,6 +51,18 @@ func TestParseExecArgsPromptForms(t *testing.T) {
 			want:    "--looks-like-flag",
 			wantOpt: cliOptions{provider: "echo", providerSet: true},
 		},
+		{
+			name:    "auto flag",
+			args:    []string{"--auto", "hi"},
+			want:    "hi",
+			wantOpt: cliOptions{dangerouslySkipPermissions: true},
+		},
+		{
+			name:    "dangerously-skip-permissions flag",
+			args:    []string{"--dangerously-skip-permissions", "hi"},
+			want:    "hi",
+			wantOpt: cliOptions{dangerouslySkipPermissions: true},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

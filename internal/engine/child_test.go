@@ -1749,6 +1749,87 @@ func TestTwoConcurrentTasksBothReachParent(t *testing.T) {
 	// model history (engine.Restore), so both summaries are model-visible.
 }
 
+func TestReviewerChildHardDenyFeedsNextProviderTurn(t *testing.T) {
+	const childPrompt = "review with unavailable git"
+	taskCall := taskToolCallWithAgent("task-review-deny", childPrompt, "reviewer")
+	gitCall := bashToolCall("git-denied", "git diff origin/main")
+	var childFollowup provider.Request
+	prov := newScriptedProvider(
+		toolCallStep(taskCall),
+		func() streamStep {
+			s := toolCallStep(gitCall)
+			s.match = matchUserText(childPrompt)
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("review blocked: read-only git access is unavailable")
+			s.match = func(req provider.Request) bool {
+				for _, m := range req.Messages {
+					if m.Role == provider.RoleTool && m.ToolResult != nil && m.ToolResult.CallID == gitCall.ID {
+						childFollowup = req
+						return m.ToolResult.IsError && strings.Contains(strings.ToLower(m.ToolResult.Output), "permission denied")
+					}
+				}
+				return false
+			}
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("parent after reviewer")
+			s.match = matchToolResult("task-review-deny")
+			return s
+		}(),
+		childCompletedNudgeStep("ack reviewer block"),
+	)
+	eng := engine.New(engine.Options{
+		SessionID:       "parent-review-deny",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(tool.NewTask(), tool.NewBash()),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+		Agents: []engine.Agent{
+			{Name: "build"},
+			{Name: "reviewer", Permissions: permission.Ruleset{
+				{Permission: "bash", Pattern: "*", Action: permission.Deny},
+				{Permission: "bash", Pattern: "git *", Action: permission.Allow},
+			}},
+		},
+		InitialAgent: "build",
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "delegate review"}
+	events := drainAndReply(t, eng, 15*time.Second)
+
+	if len(childFollowup.Messages) == 0 {
+		t.Fatal("reviewer did not reach a provider turn after permission denial")
+	}
+	var deniedEnds int
+	for _, ev := range events {
+		if end, ok := ev.(protocol.ToolCallEnd); ok && end.CallID == gitCall.ID {
+			deniedEnds++
+			if !end.IsError || !strings.Contains(strings.ToLower(end.Output), "permission denied") {
+				t.Errorf("denied ToolCallEnd = %#v", end)
+			}
+		}
+	}
+	if deniedEnds != 0 {
+		t.Fatalf("child ToolCallEnd leaked onto parent stream: %d", deniedEnds)
+	}
+	var completed protocol.ChildCompleted
+	for _, ev := range events {
+		if c, ok := ev.(protocol.ChildCompleted); ok {
+			completed = c
+		}
+	}
+	if completed.Status != protocol.ChildStatusCompleted || !strings.Contains(completed.Summary, "git access is unavailable") {
+		t.Fatalf("ChildCompleted = %#v, want actionable completed summary", completed)
+	}
+}
+
 // TestChildCompletedInjectedDuringSleepPoll: parent sleep-polls after task spawn;
 // child finishes mid-sleep; parent must see [child.completed] on the next Stream
 // without requiring idle auto-nudge only, and without unbounded sleep loops.

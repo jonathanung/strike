@@ -24,8 +24,23 @@ func TestParseServeArgs(t *testing.T) {
 	if opts.sessionDir != session.DefaultDir() {
 		t.Fatalf("sessionDir = %q, want default", opts.sessionDir)
 	}
-	if opts.provider != "echo" || opts.attachOnly || opts.expose {
-		t.Fatalf("defaults provider/attach/expose = %+v", opts)
+	if opts.provider != "echo" || opts.attachOnly || opts.expose || opts.dangerouslySkipPermissions {
+		t.Fatalf("defaults provider/attach/expose/danger = %+v", opts)
+	}
+
+	opts, err = parseServeArgs([]string{"--auto"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !opts.dangerouslySkipPermissions {
+		t.Fatalf("--auto should set dangerouslySkipPermissions: %+v", opts)
+	}
+	opts, err = parseServeArgs([]string{"--dangerously-skip-permissions"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !opts.dangerouslySkipPermissions {
+		t.Fatalf("--dangerously-skip-permissions should set dangerouslySkipPermissions: %+v", opts)
 	}
 
 	opts, err = parseServeArgs([]string{"--session-dir", "/tmp/sessions", "--provider", "anthropic", "--attach-only"})
@@ -89,6 +104,9 @@ func TestRunCLIServeHelp(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "--expose") {
 		t.Fatalf("usage missing --expose: %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "--auto") || !strings.Contains(stdout.String(), "--dangerously-skip-permissions") {
+		t.Fatalf("usage missing --auto / --dangerously-skip-permissions: %q", stdout.String())
 	}
 }
 

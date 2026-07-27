@@ -245,6 +245,11 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 					runErr = fmt.Errorf("closing mcp servers: %w", err)
 				}
 			}
+			if a.goalsClose != nil {
+				if err := a.goalsClose(); err != nil && runErr == nil {
+					runErr = fmt.Errorf("closing project goals: %w", err)
+				}
+			}
 			if err := a.issuesClose(); err != nil && runErr == nil {
 				runErr = fmt.Errorf("closing project issues: %w", err)
 			}
@@ -345,6 +350,11 @@ func runExec(opts cliOptions, prompt string, stdout, stderr io.Writer) (runErr e
 				runErr = fmt.Errorf("removing session worktree: %w", err)
 			}
 		}
+		if a.goalsClose != nil {
+			if err := a.goalsClose(); err != nil && runErr == nil {
+				runErr = fmt.Errorf("closing project goals: %w", err)
+			}
+		}
 		if err := a.issuesClose(); err != nil && runErr == nil {
 			runErr = fmt.Errorf("closing project issues: %w", err)
 		}
@@ -374,14 +384,15 @@ func runExec(opts cliOptions, prompt string, stdout, stderr io.Writer) (runErr e
 }
 
 // isFreshStrikeHome reports a first-run install: no global config file and no
-// real credentials for anthropic/openai/xai. echo does not count as configured.
+// real credentials for anthropic/openai/xai/kimi/deepseek. echo does not
+// count as configured.
 func isFreshStrikeHome(store *auth.Store) bool {
 	if path := config.GlobalPath(); path != "" {
 		if _, err := os.Stat(path); err == nil {
 			return false
 		}
 	}
-	for _, provider := range []string{"anthropic", "openai", "xai"} {
+	for _, provider := range []string{"anthropic", "openai", "xai", "kimi", "deepseek"} {
 		if auth.Describe(provider, store) != "none" {
 			return false
 		}

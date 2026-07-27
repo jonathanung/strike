@@ -11,7 +11,7 @@ func TestParseProvidersFileOpenCodeMap(t *testing.T) {
 	raw := []byte(`
 // custom gateways
 {
-  "kimi": {
+  "my-kimi": {
     "npm": "@ai-sdk/openai-compatible", // optional
     "name": "Kimi",
     "options": {
@@ -29,19 +29,20 @@ func TestParseProvidersFileOpenCodeMap(t *testing.T) {
   }
 }
 `)
-	items, err := ParseProvidersFile(raw)
+	pf, err := ParseProvidersFile(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
+	items := pf.Customs
 	if len(items) != 2 {
 		t.Fatalf("items = %+v", items)
 	}
-	kimi, ok := FindCustom(items, "kimi")
+	kimi, ok := FindCustom(items, "my-kimi")
 	if !ok || kimi.API != WireOpenAI || kimi.APIKeyEnv != "KIMI_API_KEY" {
-		t.Fatalf("kimi = %+v", kimi)
+		t.Fatalf("my-kimi = %+v", kimi)
 	}
 	if kimi.BaseURL != "https://api.moonshot.cn/v1" || len(kimi.Models) != 1 {
-		t.Fatalf("kimi fields = %+v", kimi)
+		t.Fatalf("my-kimi fields = %+v", kimi)
 	}
 	proxy, ok := FindCustom(items, "claude-proxy")
 	if !ok || proxy.API != WireAnthropic || proxy.APIKeyEnv != "ANTHROPIC_AUTH_TOKEN" {
@@ -56,10 +57,11 @@ func TestParseProvidersFileArray(t *testing.T) {
 	raw := []byte(`[
 	  {"name":"ollama","baseURL":"http://localhost:11434/v1","api":"openai"}
 	]`)
-	items, err := ParseProvidersFile(raw)
+	pf, err := ParseProvidersFile(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
+	items := pf.Customs
 	if len(items) != 1 || items[0].Name != "ollama" {
 		t.Fatalf("items = %+v", items)
 	}
@@ -142,7 +144,7 @@ func TestCustomStoreRemoveFromProvidersJSONC(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte(`{
-		"kimi": { "options": { "baseURL": "https://k.example/v1" }, "api": "openai" },
+		"my-kimi": { "options": { "baseURL": "https://k.example/v1" }, "api": "openai" },
 		"keep": { "options": { "baseURL": "https://keep.example/v1" }, "api": "openai" }
 	}`), 0o644); err != nil {
 		t.Fatal(err)
@@ -152,19 +154,19 @@ func TestCustomStoreRemoveFromProvidersJSONC(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := NewCustomStore(cfg.Providers, work)
-	if err := store.Remove("kimi"); err != nil {
+	if err := store.Remove("my-kimi"); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := store.Get("kimi"); ok {
+	if _, ok := store.Get("my-kimi"); ok {
 		t.Fatal("still in memory")
 	}
-	// Reload from disk — kimi must be gone from jsonc.
+	// Reload from disk — my-kimi must be gone from jsonc.
 	cfg2, err := Load(work)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := FindCustom(cfg2.Providers, "kimi"); ok {
-		t.Fatal("kimi still on disk after Remove")
+	if _, ok := FindCustom(cfg2.Providers, "my-kimi"); ok {
+		t.Fatal("my-kimi still on disk after Remove")
 	}
 	if _, ok := FindCustom(cfg2.Providers, "keep"); !ok {
 		t.Fatal("keep was removed")
@@ -176,7 +178,10 @@ func TestWireFromNPM(t *testing.T) {
 		t.Errorf("anthropic npm = %q", got)
 	}
 	if got := wireFromNPM("@ai-sdk/openai-compatible"); got != WireOpenAI {
-		t.Errorf("openai npm = %q", got)
+		t.Errorf("openai-compatible npm = %q", got)
+	}
+	if got := wireFromNPM("@ai-sdk/openai"); got != WireResponses {
+		t.Errorf("@ai-sdk/openai npm = %q, want responses", got)
 	}
 	if got := wireFromNPM(""); got != WireOpenAI {
 		t.Errorf("empty npm = %q", got)

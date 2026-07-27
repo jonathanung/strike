@@ -88,17 +88,28 @@ type Auth interface {
 	BeginDevice(ctx context.Context, provider string) (*DeviceLogin, error)
 }
 
+// Model source labels for ModelInfo.Source.
+const (
+	ModelSourceCatalog = "catalog" // models.dev (or equivalent) only
+	ModelSourceConfig  = "config"  // providers.jsonc / custom list only
+	ModelSourceMerge   = "merge"   // catalog entry refined by config
+)
+
 // ModelInfo is picker-facing metadata for one catalog model. Zero fields mean
 // unknown or unsupported; frontends must omit them from display.
 type ModelInfo struct {
 	ID         string
+	Name       string  // display label; empty means use ID
 	Context    int     // context window tokens; 0 = unknown
+	Output     int     // max output tokens; 0 = unknown
 	InputCost  float64 // USD per million input tokens
 	OutputCost float64 // USD per million output tokens
 	HasCost    bool
 	ToolCall   bool
 	Reasoning  bool
-	Attachment bool // multimodal / file attachments
+	Attachment bool     // multimodal / file attachments
+	VariantIDs []string // config effort/reasoning variant ids
+	Source     string   // ModelSourceCatalog | ModelSourceConfig | ModelSourceMerge
 }
 
 // Catalog lists model ids and limits for a provider (may hit network/cache;
@@ -116,6 +127,10 @@ type Catalog interface {
 	// OutputLimit returns the model's max output tokens.
 	// ok is false when unknown (not the same as zero).
 	OutputLimit(ctx context.Context, provider, model string) (tokens int, ok bool, err error)
+	// ResolveVariant maps a config model variant id to a reasoning effort
+	// level (protocol effort string). ok is false when the variant is unknown
+	// or carries no effort field.
+	ResolveVariant(ctx context.Context, provider, model, variant string) (effort string, ok bool, err error)
 }
 
 // Settings persists user-chosen defaults. Empty fields mean "leave as is".
@@ -157,9 +172,25 @@ type FileContent struct {
 	Skip    bool
 }
 
+// EditApply is one exact-string replacement for Files.ApplyEdit (diff viewer).
+type EditApply struct {
+	Path       string
+	OldString  string
+	NewString  string
+	ReplaceAll bool
+}
+
+// EditApplyResult is returned by Files.ApplyEdit after a successful apply.
+type EditApplyResult struct {
+	Path    string // project-relative path written
+	Count   int    // replacements performed (0 when Already)
+	Already bool   // true when the file already reflected NewString (no write)
+}
+
 // Files reads workspace files for frontend features (markdown reader, file
-// explorer, @file mentions). Nil means the capability is absent; frontends
-// must degrade gracefully.
+// explorer, @file mentions) and applies user-initiated edit/patch writes from
+// the diff viewer. Nil means the capability is absent; frontends must degrade
+// gracefully.
 type Files interface {
 	// ReadFile resolves path (relative to the host work directory, or absolute),
 	// then reads the file. Implementations enforce a size cap. Empty path,
@@ -186,6 +217,16 @@ type Files interface {
 	// and escapes set Skip. Directories expand to an immediate-child listing
 	// only (not recursive file contents); Path is returned with a trailing "/".
 	ReadScoped(path string) (FileContent, error)
+	// ApplyEdit performs an exact string replacement under the work root
+	// (symlink-safe). Failures leave the file unchanged. When OldString is
+	// absent but NewString is already present (single-match case), returns
+	// Already without writing. ReplaceAll replaces every occurrence; otherwise
+	// OldString must match exactly once.
+	ApplyEdit(req EditApply) (EditApplyResult, error)
+	// ApplyPatch applies a multi-file apply_patch envelope under the work root.
+	// Validates fully before writing and rolls back on commit failure so partial
+	// state is avoided when possible. Returns a short human summary on success.
+	ApplyPatch(patch string) (summary string, err error)
 }
 
 // MemoryEntry is one project-local key/value memory record.
@@ -396,6 +437,69 @@ type Telemetry interface {
 	Sample(ctx context.Context, root string) (TelemetrySample, error)
 }
 
+// GoalCriterion is one falsifiable success condition on a host.Goal.
+type GoalCriterion struct {
+	Description string
+	Check       string // "cmd: …" | "predicate: …" | "judge: …"
+	Satisfied   bool
+}
+
+// Goal is a project-local loop-harness goal for /goal.
+type Goal struct {
+	ID            string
+	Description   string
+	Criteria      []GoalCriterion
+	Status        string // pending|active|paused|done|failed|aborted
+	MaxIterations int
+	MaxCostUSD    float64
+	AllowedTools  []string
+	CostUSD       float64
+	LastIteration int
+	FailReason    string
+	CreatedAt     time.Time
+}
+
+// GoalSetOptions configures /goal set constraints.
+type GoalSetOptions struct {
+	MaxIterations      int
+	MaxCostUSD         float64
+	MaxWallClockS      int
+	MaxNoProgressIters int
+	AllowedTools       []string
+}
+
+// GoalIteration is one committed loop pass for /goal log.
+type GoalIteration struct {
+	N         int
+	Plan      string
+	StateHash string
+	CostUSD   float64
+	// Summary is a short human-readable line (criteria matrix + action count).
+	Summary string
+}
+
+// Goals is project-scoped loop-harness control for /goal.
+// Nil means the capability is absent; frontends must degrade gracefully.
+type Goals interface {
+	// Set validates and stores a pending goal (does not run).
+	// criteria entries are CheckSpec strings (cmd:/predicate:/judge:).
+	Set(description string, criteria []string, opts GoalSetOptions) (Goal, error)
+	// List returns goals newest-first.
+	List() ([]Goal, error)
+	// Get returns one goal by id.
+	Get(id string) (Goal, bool, error)
+	// Run starts or resumes the loop until terminal, paused, or ctx cancel.
+	Run(ctx context.Context, id string) (Goal, error)
+	// Pause requests pause of an active goal.
+	Pause(id string) (Goal, error)
+	// Resume marks a paused goal active without running iterations.
+	Resume(id string) (Goal, error)
+	// Abort terminates a non-terminal goal.
+	Abort(id string) (Goal, error)
+	// Log returns committed iterations (optional single iter when iter>0).
+	Log(id string, iter int) ([]GoalIteration, error)
+}
+
 // Services bundles everything a frontend receives from its host. Any field
 // may be nil/empty when a capability is absent (tests, future frontends);
 // frontends must degrade gracefully.
@@ -407,6 +511,7 @@ type Services struct {
 	Files     Files
 	Memory    Memory
 	Issues    Issues
+	Goals     Goals     // loop harness; nil when unsupported
 	Sessions  Sessions  // durable session list/replay; nil when unsupported
 	Roots     Roots     // concurrent parent sessions; nil when single-root only
 	Providers Providers // custom/self-hosted provider CRUD; nil when unsupported

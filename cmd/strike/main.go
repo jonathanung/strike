@@ -40,7 +40,7 @@ var optionSpecs = []optionSpec{
 	{
 		names:       []string{"provider"},
 		valueName:   "provider",
-		description: "provider to use (anthropic|openai|xai|echo); overrides config",
+		description: "provider to use (anthropic|openai|xai|gemini|kimi|deepseek|echo); overrides config",
 		register: func(fs *flag.FlagSet, opts *cliOptions) {
 			fs.StringVar(&opts.provider, "provider", "", "")
 		},
@@ -62,9 +62,10 @@ var optionSpecs = []optionSpec{
 		},
 	},
 	{
-		names:       []string{"dangerously-skip-permissions"},
+		names:       []string{"auto", "dangerously-skip-permissions"},
 		description: "skip configured permission prompts (agent profile denies still apply)",
 		register: func(fs *flag.FlagSet, opts *cliOptions) {
+			fs.BoolVar(&opts.dangerouslySkipPermissions, "auto", false, "")
 			fs.BoolVar(&opts.dangerouslySkipPermissions, "dangerously-skip-permissions", false, "")
 		},
 	},
@@ -262,10 +263,15 @@ func writeUsage(w io.Writer) {
 		if len(spec.names) == 2 && spec.names[0] == "h" {
 			spelling = "-h, --help"
 		} else {
-			spelling = "--" + spec.names[0]
-			if spec.valueName != "" {
-				spelling += " <" + spec.valueName + ">"
+			parts := make([]string, 0, len(spec.names))
+			for i, name := range spec.names {
+				p := "--" + name
+				if i == 0 && spec.valueName != "" {
+					p += " <" + spec.valueName + ">"
+				}
+				parts = append(parts, p)
 			}
+			spelling = strings.Join(parts, ", ")
 		}
 		fmt.Fprintf(w, "  %-34s %s\n", spelling, spec.description)
 	}

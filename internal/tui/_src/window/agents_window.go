@@ -77,6 +77,12 @@ type agentsInterruptMsg struct {
 	sessionID string
 }
 
+// agentsHideMsg requests removing the selected entry from the agents pane only
+// (ephemeral UI filter). It must not delete, truncate, or interrupt the session.
+type agentsHideMsg struct {
+	sessionID string
+}
+
 // agentsHighlightMsg announces the agents-tree cursor target so the visualizer
 // can follow selection without requiring Enter.
 type agentsHighlightMsg struct {
@@ -85,7 +91,8 @@ type agentsHighlightMsg struct {
 
 // agentsWindow is a multi-root session tree: top-level = parent agents, nested
 // = that parent's subagents. Keys: j/k move, enter select, n spawn, x interrupt,
-// space/h/l toggle expand, f cycle view filter, / text filter.
+// d hide from pane (keeps session), space/h/l toggle expand, f cycle view
+// filter, / text filter.
 type agentsWindow struct {
 	activeID  string
 	viewingID string
@@ -240,12 +247,12 @@ func agentsEmptyLabel(filter agentsViewFilter, text string) string {
 	}
 }
 
-// agentsPaneFooter is the agents-window chrome hint row (n/enter/x/j/k/f).
+// agentsPaneFooter is the agents-window chrome hint row (n/enter/x/d/j/k/f).
 // Derived from defaultAgentsKeyMap so /keys and the pane stay aligned.
 func agentsPaneFooter(th theme.Theme) string {
 	ak := defaultAgentsKeyMap()
-	parts := make([]string, 0, 5)
-	for _, b := range []key.Binding{ak.Spawn, ak.Open, ak.Interrupt, ak.Move, ak.Filter} {
+	parts := make([]string, 0, 6)
+	for _, b := range []key.Binding{ak.Spawn, ak.Open, ak.Interrupt, ak.Hide, ak.Move, ak.Filter} {
 		h := b.Help()
 		if h.Key == "" {
 			continue
@@ -299,6 +306,12 @@ func (w agentsWindow) handleKey(msg tea.KeyMsg) (agentsWindow, tea.Cmd) {
 		}
 		id := rows[w.cursor].ID
 		return w, func() tea.Msg { return agentsInterruptMsg{sessionID: id} }
+	case "d":
+		if len(rows) == 0 {
+			return w, nil
+		}
+		id := rows[w.cursor].ID
+		return w, func() tea.Msg { return agentsHideMsg{sessionID: id} }
 	case " ", "h", "left", "l", "right":
 		if len(rows) == 0 {
 			return w, nil

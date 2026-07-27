@@ -2,6 +2,7 @@ package tui
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"path/filepath"
 	"strconv"
@@ -9,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
@@ -42,12 +44,20 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		return m.sendSelect(protocol.SelectModel{Provider: m.providerName, Model: fields[1]})
 	case "/effort":
 		if len(fields) < 2 {
-			// Bare /effort opens the centered picker.
+			// Bare /effort opens the centered picker (variants + ladder).
 			m.resetComposer()
 			m.modal = newEffortModal(m.effort, m.ops, m.services.Settings)
-			return m, nil
+			return m, loadEffortChoicesCmd(m.services.Catalog, m.providerName, m.modelName, m.effort, m.ops, m.services.Settings)
 		}
 		level, ok := protocol.ParseEffort(fields[1])
+		if (!ok || level == protocol.EffortDefault) && m.services.Catalog != nil {
+			// Config model variant id → effort (e.g. /effort high from variants.high).
+			if effort, vok, err := m.services.Catalog.ResolveVariant(context.Background(), m.providerName, m.modelName, fields[1]); err == nil && vok {
+				if parsed, pok := protocol.ParseEffort(effort); pok && parsed != protocol.EffortDefault {
+					level, ok = parsed, true
+				}
+			}
+		}
 		if !ok || level == protocol.EffortDefault {
 			m.setNotice("unknown effort "+fields[1]+" — want "+effortChoices(), true)
 			return m, nil
@@ -177,6 +187,8 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		return m.handleMemoryCommand(fields[1:])
 	case "/issues":
 		return m.handleIssuesCommand(fields[1:])
+	case "/goal":
+		return m.handleGoalCommand(fields[1:])
 	case "/context", "/effective-prompt":
 		m.resetComposer()
 		m.clearNotice()
@@ -645,6 +657,293 @@ func (m Model) handleIssuesCommand(args []string) (tea.Model, tea.Cmd) {
 		m.setNotice(usage, true)
 		return m, nil
 	}
+}
+
+func (m Model) handleGoalCommand(args []string) (tea.Model, tea.Cmd) {
+	m.resetComposer()
+	if m.services.Goals == nil {
+		m.setNotice("project goals are unavailable", true)
+		return m, nil
+	}
+	usage := `usage: /goal set "<desc>" --criterion "cmd: …" [--max-iter N] [--budget-usd X] [--tools a,b]
+/goal run|status|pause|resume|abort|log|list [id]`
+	if len(args) == 0 {
+		args = []string{"list"}
+	}
+	switch args[0] {
+	case "set":
+		desc, criteria, opts, err := parseGoalSetArgs(args[1:])
+		if err != nil {
+			m.setNotice("goal: "+err.Error(), true)
+			return m, nil
+		}
+		g, err := m.services.Goals.Set(desc, criteria, opts)
+		if err != nil {
+			m.setNotice("goal: "+err.Error(), true)
+			return m, nil
+		}
+		m.setNotice(fmt.Sprintf("goal: set %s (pending) — /goal run %s", g.ID, g.ID), false)
+		return m, nil
+	case "list", "ls":
+		list, err := m.services.Goals.List()
+		if err != nil {
+			m.setNotice("goal: "+err.Error(), true)
+			return m, nil
+		}
+		if len(list) == 0 {
+			m.setNotice("goal: no goals", false)
+			return m, nil
+		}
+		var b strings.Builder
+		b.WriteString("goal: ")
+		for i, g := range list {
+			if i > 0 {
+				b.WriteString(" | ")
+			}
+			fmt.Fprintf(&b, "%s [%s] %s", g.ID, g.Status, truncateRunes(g.Description, 40))
+		}
+		m.setNotice(b.String(), false)
+		return m, nil
+	case "status":
+		id, err := m.resolveGoalID(args[1:])
+		if err != nil {
+			m.setNotice("goal: "+err.Error(), true)
+			return m, nil
+		}
+		g, ok, err := m.services.Goals.Get(id)
+		if err != nil {
+			m.setNotice("goal: "+err.Error(), true)
+			return m, nil
+		}
+		if !ok {
+			m.setNotice("goal: not found", true)
+			return m, nil
+		}
+		m.setNotice("goal: "+formatGoalStatus(g), false)
+		return m, nil
+	case "run":
+		id, err := m.resolveGoalID(args[1:])
+		if err != nil {
+			m.setNotice("goal: "+err.Error(), true)
+			return m, nil
+		}
+		m.setNotice("goal: running "+id+"...", false)
+		goals := m.services.Goals
+		return m, func() tea.Msg {
+			g, err := goals.Run(context.Background(), id)
+			return goalFinishedMsg{goal: g, err: err, op: "run"}
+		}
+	case "pause":
+		id, err := m.resolveGoalID(args[1:])
+		if err != nil {
+			m.setNotice("goal: "+err.Error(), true)
+			return m, nil
+		}
+		g, err := m.services.Goals.Pause(id)
+		if err != nil {
+			m.setNotice("goal: "+err.Error(), true)
+			return m, nil
+		}
+		m.setNotice(fmt.Sprintf("goal: paused %s", g.ID), false)
+		return m, nil
+	case "resume":
+		id, err := m.resolveGoalID(args[1:])
+		if err != nil {
+			m.setNotice("goal: "+err.Error(), true)
+			return m, nil
+		}
+		g, err := m.services.Goals.Resume(id)
+		if err != nil {
+			m.setNotice("goal: "+err.Error(), true)
+			return m, nil
+		}
+		m.setNotice(fmt.Sprintf("goal: resumed %s (active) — /goal run %s", g.ID, g.ID), false)
+		return m, nil
+	case "abort":
+		id, err := m.resolveGoalID(args[1:])
+		if err != nil {
+			m.setNotice("goal: "+err.Error(), true)
+			return m, nil
+		}
+		g, err := m.services.Goals.Abort(id)
+		if err != nil {
+			m.setNotice("goal: "+err.Error(), true)
+			return m, nil
+		}
+		m.setNotice(fmt.Sprintf("goal: aborted %s", g.ID), false)
+		return m, nil
+	case "log":
+		id, err := m.resolveGoalID(args[1:])
+		if err != nil {
+			m.setNotice("goal: "+err.Error(), true)
+			return m, nil
+		}
+		iterN := 0
+		if len(args) >= 3 {
+			if n, e := strconv.Atoi(args[2]); e == nil && n > 0 {
+				iterN = n
+			}
+		}
+		// Also support --iter N anywhere after id.
+		for i := 1; i < len(args)-1; i++ {
+			if args[i] == "--iter" {
+				if n, e := strconv.Atoi(args[i+1]); e == nil && n > 0 {
+					iterN = n
+				}
+			}
+		}
+		logs, err := m.services.Goals.Log(id, iterN)
+		if err != nil {
+			m.setNotice("goal: "+err.Error(), true)
+			return m, nil
+		}
+		if len(logs) == 0 {
+			m.setNotice("goal: no iterations logged", false)
+			return m, nil
+		}
+		var b strings.Builder
+		b.WriteString("goal log: ")
+		for i, line := range logs {
+			if i > 0 {
+				b.WriteString(" || ")
+			}
+			b.WriteString(line.Summary)
+		}
+		m.setNotice(b.String(), false)
+		return m, nil
+	default:
+		m.setNotice(usage, true)
+		return m, nil
+	}
+}
+
+func (m Model) resolveGoalID(args []string) (string, error) {
+	if len(args) >= 1 && !strings.HasPrefix(args[0], "-") {
+		return args[0], nil
+	}
+	list, err := m.services.Goals.List()
+	if err != nil {
+		return "", err
+	}
+	if len(list) == 0 {
+		return "", fmt.Errorf("no goals; use /goal set first")
+	}
+	return list[0].ID, nil
+}
+
+func formatGoalStatus(g host.Goal) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s [%s] iter=%d/%d cost=%.4f/%0.2f",
+		g.ID, g.Status, g.LastIteration, g.MaxIterations, g.CostUSD, g.MaxCostUSD)
+	if g.FailReason != "" {
+		fmt.Fprintf(&b, " reason=%s", g.FailReason)
+	}
+	b.WriteString(" | ")
+	b.WriteString(truncateRunes(g.Description, 48))
+	if len(g.Criteria) > 0 {
+		b.WriteString(" |")
+		for _, c := range g.Criteria {
+			mark := "FAIL"
+			if c.Satisfied {
+				mark = "OK"
+			}
+			fmt.Fprintf(&b, " %s %s", mark, truncateRunes(c.Description, 24))
+		}
+	}
+	return b.String()
+}
+
+func parseGoalSetArgs(args []string) (desc string, criteria []string, opts host.GoalSetOptions, err error) {
+	if len(args) == 0 {
+		return "", nil, opts, fmt.Errorf("description required")
+	}
+	// Description is either a single quoted-joined token sequence until first --flag,
+	// or the first arg if it doesn't start with --.
+	var descParts []string
+	i := 0
+	for i < len(args) {
+		a := args[i]
+		if strings.HasPrefix(a, "--") {
+			break
+		}
+		descParts = append(descParts, a)
+		i++
+	}
+	desc = strings.TrimSpace(strings.Join(descParts, " "))
+	// Strip surrounding quotes if the whole desc was one shell-ish token.
+	if len(desc) >= 2 {
+		if (desc[0] == '"' && desc[len(desc)-1] == '"') || (desc[0] == '\'' && desc[len(desc)-1] == '\'') {
+			desc = desc[1 : len(desc)-1]
+		}
+	}
+	if desc == "" {
+		return "", nil, opts, fmt.Errorf("description required")
+	}
+	for i < len(args) {
+		a := args[i]
+		switch a {
+		case "--criterion", "-c":
+			// Consume tokens until the next --flag so `cmd: pytest -q` works
+			// after strings.Fields splits on spaces.
+			i++
+			var parts []string
+			for i < len(args) && !strings.HasPrefix(args[i], "--") {
+				parts = append(parts, args[i])
+				i++
+			}
+			if len(parts) == 0 {
+				return "", nil, opts, fmt.Errorf("%s needs a value", a)
+			}
+			criteria = append(criteria, strings.Join(parts, " "))
+		case "--max-iter", "--max-iterations":
+			if i+1 >= len(args) {
+				return "", nil, opts, fmt.Errorf("%s needs a value", a)
+			}
+			n, e := strconv.Atoi(args[i+1])
+			if e != nil || n < 1 {
+				return "", nil, opts, fmt.Errorf("invalid %s", a)
+			}
+			opts.MaxIterations = n
+			i += 2
+		case "--budget-usd", "--max-cost":
+			if i+1 >= len(args) {
+				return "", nil, opts, fmt.Errorf("%s needs a value", a)
+			}
+			var f float64
+			if _, e := fmt.Sscanf(args[i+1], "%f", &f); e != nil || f < 0 {
+				return "", nil, opts, fmt.Errorf("invalid %s", a)
+			}
+			opts.MaxCostUSD = f
+			i += 2
+		case "--tools":
+			if i+1 >= len(args) {
+				return "", nil, opts, fmt.Errorf("%s needs a value", a)
+			}
+			for _, t := range strings.Split(args[i+1], ",") {
+				t = strings.TrimSpace(t)
+				if t != "" {
+					opts.AllowedTools = append(opts.AllowedTools, t)
+				}
+			}
+			i += 2
+		case "--max-wall", "--max-wall-s":
+			if i+1 >= len(args) {
+				return "", nil, opts, fmt.Errorf("%s needs a value", a)
+			}
+			n, e := strconv.Atoi(args[i+1])
+			if e != nil || n < 1 {
+				return "", nil, opts, fmt.Errorf("invalid %s", a)
+			}
+			opts.MaxWallClockS = n
+			i += 2
+		default:
+			return "", nil, opts, fmt.Errorf("unknown flag %q", a)
+		}
+	}
+	if len(criteria) == 0 {
+		return "", nil, opts, fmt.Errorf("at least one --criterion is required")
+	}
+	return desc, criteria, opts, nil
 }
 
 // parseImportArgs accepts: <path> | <path> --replace|--merge | --replace|--merge <path>

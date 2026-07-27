@@ -25,7 +25,8 @@ cmd/strike session_lifecycle.go (`run`) — composition root
 │     memoryStore, issueStore, agentNames, skills) — wraps internal/{auth,config,
 │     models,history,memory,issue} into host.Services{Auth, Catalog, Settings,
 │     History, Memory, Issues, Agents, Skills}, then attaches host.Files
-│     (local.NewFiles(workDir)) for frontend file reads
+│     (local.NewFiles(workDir)) for frontend file reads and diff-viewer
+│     apply writes (ApplyEdit / ApplyPatch)
 │
 └── tui.New(eng.Ops(), events, services, tui.Options{...})
       internal/tui's entire view of the world: two protocol channels plus
@@ -56,6 +57,7 @@ event stream the TUI rendered from (see `internal/protocol/codec.go`).
 | `internal/mcp` | MCP client (stdio + streamable HTTP) + session manager; bridges tools onto `tool.Registry` as `mcp_<server>_<tool>`; retry/disable | `tool`, stdlib, net/http |
 | `internal/memory` | Project-scoped durable key/value memory (JSON under `~/.strike/memory/`) | stdlib |
 | `internal/issue` | Project-scoped durable issues (JSON under `~/.strike/issues/`) | stdlib |
+| `internal/goal` | Loop harness: goals, JSONL iterations/events, guards, critic, hooks | stdlib |
 | `internal/question` | User-question ask service: suspends a tool call until `QuestionReply` | `protocol`, stdlib |
 | `internal/permission` | Ordered allow/ask/deny rulesets, last-match-wins; the ask service that suspends a tool call for user input | `protocol`, `tool` (for `AskRequest`), stdlib |
 | `internal/session` | JSONL event-log persistence (append/replay) + concurrent Manager (multi-session open, durable list, event mux) | `protocol`, stdlib |
@@ -245,8 +247,10 @@ branch in `internal/tui/view.go` for the pattern.
     `internal/tui/cells.go` (name, title, output preview, ok/err glyph).
     Edit-shaped `Metadata` (`oldString`/`newString`) is consumed by the TUI
     via `ui.DiffPreview` in the permission modal and completed tool cells;
-    other tools can keep emitting metadata without a TUI change until a
-    frontend renderer is added for them.
+    from a selected tool cell, `a` confirms and re-applies the shown edit
+    (or `apply_patch` envelope) into the active worktree through
+    `host.Files.ApplyEdit` / `ApplyPatch`. Other tools can keep emitting
+    metadata without a TUI change until a frontend renderer is added for them.
 
 ### Add a slash command
 
@@ -262,7 +266,7 @@ Two different mechanisms, depending on whether it needs Go code:
    `host.Services.Skills`. Reserved names (`provider`, `model`, `effort`,
    `autonomy`, `auth`, `settings`, `agent`, `fast`, `vim`, `md-read`,
    `theme`, `layout`, `split`, `compact`, `fork`, `undo`, `rewind`,
-   `session`, `export`, `help`, `keys`, `memory`, `issues`, `context`,
+   `session`, `export`, `help`, `keys`, `memory`, `issues`, `goal`, `context`,
    `effective-prompt`, `cost`, `upgrade`, `init`, `mcp`) are rejected by
    `config.ValidateSkillName` before
    they ever reach the frontend. `/init` is a builtin that writes project
@@ -324,7 +328,7 @@ Same package `internal/tui`; split for reviewability only (no subpackages).
    `internal/host/host.go`. This package is a stdlib-only contract — no
    importing `auth`, `config`, `models`, or `history` here, even for a type
    reference (the boundary test fails the build otherwise). Look at
-  `Auth`/`Catalog`/`Settings`/`History`/`Memory`/`Issues`/`Files` for the shape: small,
+   `Auth`/`Catalog`/`Settings`/`History`/`Memory`/`Issues`/`Goals`/`Files` for the shape: small,
   frontend-facing, `context`-aware when it may block.
 2. Implement it in `internal/host/local/` (e.g. `local.go`, `files.go`),
   wrapping the real backend package. This package is the seam that is allowed

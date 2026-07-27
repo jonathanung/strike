@@ -19,12 +19,12 @@ Usage:
   strike exec [options] -              read prompt from stdin
 
 Options are the same as strike ( --provider, --model, --effort,
---dangerously-skip-permissions ). Permission and question prompts cannot be
-answered interactively; asks are rejected unless --dangerously-skip-permissions
-is set (configured/agent denies still apply).`
+--auto / --dangerously-skip-permissions ). Permission and question prompts cannot be
+answered interactively; asks are rejected unless --auto or
+--dangerously-skip-permissions is set (configured/agent denies still apply).`
 
 const (
-	headlessPermissionReject = "headless mode: permission asks are denied; pass --dangerously-skip-permissions to allow tool calls that would prompt"
+	headlessPermissionReject = "headless mode: permission asks are denied; pass --auto or --dangerously-skip-permissions to allow tool calls that would prompt"
 	headlessQuestionReject   = "headless mode: interactive questions are not supported"
 )
 
@@ -73,7 +73,7 @@ func parseExecArgs(args []string, stdin io.Reader) (cliOptions, string, error) {
 					i++
 					flagArgs = append(flagArgs, args[i])
 				}
-			case "dangerously-skip-permissions":
+			case "auto", "dangerously-skip-permissions":
 				// bool; optional =value already handled via '=' branch
 			}
 			continue

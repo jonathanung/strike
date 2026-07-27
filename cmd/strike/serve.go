@@ -39,7 +39,7 @@ Options:
   --provider <name>      live engine provider (default echo)
   --model <id>           model id for the live provider
   --attach-only          read-only JSONL attach (no live engine)
-  --dangerously-skip-permissions
+  --auto, --dangerously-skip-permissions
                          auto-allow permission asks in the live engine
   -h, --help             show help
 
@@ -124,6 +124,7 @@ func parseServeArgs(args []string) (serveOptions, error) {
 	fs.StringVar(&opts.provider, "provider", "echo", "")
 	fs.StringVar(&opts.model, "model", "", "")
 	fs.BoolVar(&opts.attachOnly, "attach-only", false, "")
+	fs.BoolVar(&opts.dangerouslySkipPermissions, "auto", false, "")
 	fs.BoolVar(&opts.dangerouslySkipPermissions, "dangerously-skip-permissions", false, "")
 	if err := fs.Parse(args); err != nil {
 		return serveOptions{}, err
@@ -256,6 +257,11 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 			}
 			if a.worktreeClose != nil {
 				if err := a.worktreeClose(); err != nil && out == nil {
+					out = err
+				}
+			}
+			if a.goalsClose != nil {
+				if err := a.goalsClose(); err != nil && out == nil {
 					out = err
 				}
 			}

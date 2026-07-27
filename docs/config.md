@@ -34,11 +34,9 @@ config overrides global, and session "always" grants override both.
 
 **Permission mode dial:** `permissionMode` sets the default tool-permission
 posture for **new** sessions: `default` | `plan` | `soft-approve` |
-`accept-edits` | `yolo` (see [usage.md](usage.md)). Set it here, or via
-**ctrl+d** in the `/mode` picker / global save-defaults. Session changes via
-Shift+Tab or `/mode` persist in the session JSONL, not back into this file
-unless you save defaults. Resume uses the JSONL posture. Distinct from
-`/autonomy` (workflow exit gates). Invalid values fail config load.
+`accept-edits` | `yolo` (see [usage.md](usage.md)). Session changes via
+Shift+Tab or `/mode` persist in the session JSONL, not back into this file.
+Distinct from `/autonomy` (workflow exit gates).
 
 **Lean code:** `leanCode` is `off` | `lite` (default) | `full`. Injects
 agent-scoped efficiency guidance into the system prompt (strict ladder for
@@ -121,7 +119,7 @@ Remap app-level chords without recompiling. Ids match the in-app cheatsheet
   "keybinds": {
     "nav.jump-bottom": "ctrl+b",
     "global.palette": ["ctrl+p", "ctrl+k"],
-    "composer.newline": "alt+enter"
+    "composer.newline": ["alt+enter", "ctrl+j"]
   }
 }
 ```
@@ -234,14 +232,52 @@ files — use env refs and/or `/auth` / the auth store.
 ```jsonc
 // ~/.strike/providers.jsonc or ./.strike/providers.jsonc
 {
-  "kimi": {
+  // Custom / self-hosted endpoint
+  "acme": {
     "npm": "@ai-sdk/openai-compatible", // optional; hints wire dialect only (not loaded)
-    "name": "Kimi",
+    "name": "Acme",
     "options": {
       "baseURL": "https://api.example.com/v1",
-      "apiKey": "{env:KIMI_API_KEY}"
+      "apiKey": "{env:ACME_API_KEY}"
     },
-    "models": ["kimi-latest"]
+    // Legacy flat ids still work:
+    // "models": ["acme-latest"]
+    // Nested rich objects (display name, limits, variants):
+    "models": {
+      "acme-latest": {
+        "name": "Acme Latest",
+        "limit": { "context": 128000, "output": 8192 },
+        "options": { "forcedReasoning": true },
+        "variants": {
+          "high": { "reasoningEffort": "high", "textVerbosity": "low" },
+          "low": { "reasoningEffort": "low" }
+        }
+      }
+    }
+  },
+  // Built-in overlay — does NOT become a separate custom provider.
+  // options.baseURL / options.apiKey customize the stock endpoint (proxy).
+  // Omit models (or leave empty) to keep the full models.dev catalog.
+  // Overlay one id to refine name/limits/variants; other catalog ids remain.
+  "anthropic": {
+    "name": "Corp Anthropic",
+    "options": {
+      // OpenCode/AI SDK shape: include /v1 (strike also accepts origin-only).
+      "baseURL": "https://proxy.example/anthropic/v1",
+      "apiKey": "{env:CORP_ANTHROPIC_KEY}"
+    }
+  },
+  "openai": {
+    "models": {
+      "gpt-5.5": {
+        "name": "GPT-5.5",
+        "limit": { "context": 272000, "output": 128000 },
+        "variants": {
+          "high": { "reasoningEffort": "high" },
+          "xhigh": { "reasoningEffort": "xhigh" }
+        }
+      }
+    }
   },
   "claude-proxy": {
     "npm": "@ai-sdk/anthropic",
@@ -255,13 +291,70 @@ files — use env refs and/or `/auth` / the auth store.
 
 | Field | Required | Notes |
 |---|---|---|
-| map key | yes | provider id (lowercased slug); not `anthropic`/`openai`/`xai`/`echo` |
-| `options.baseURL` | yes | absolute `http`/`https` URL, or `{env:VAR}` / `$VAR` / `${VAR}` |
-| `options.apiKey` | no | env ref only (`{env:NAME}`, `$NAME`, `${NAME}`) → checked before auth store |
-| `npm` | no | ignored at runtime; `anthropic` in the name → anthropic wire, else openai |
-| `api` | no | strike override: `openai` or `anthropic` (wins over npm hint) |
-| `models` | no | listed in `/model`; first is the default when unset |
+| map key | yes | provider id (lowercased slug). Built-ins (`anthropic`/`openai`/`xai`/`gemini`/`kimi`/`deepseek`/`echo`) stay builtins: options → **endpoint overlay**, models → **catalog overlay**. Other keys are custom providers. |
+| `options.baseURL` | custom yes | absolute `http`/`https` URL, or `{env:VAR}` / `$VAR` / `${VAR}`. On builtins, optional — overrides the stock endpoint. **OpenCode shape:** include `/v1` (Anthropic → `…/v1` + `/messages`; OpenAI → `…/v1` + `/chat/completions` or `/responses`). Origin-only Anthropic bases still work. |
+| `options.apiKey` | no | env ref only (`{env:NAME}`, `$NAME`, `${NAME}`) → checked before auth store. On builtins, pins the env var used for that provider. Missing env fails at select time with a clear error. |
+| `npm` | no | **advisory only** — never installed; `anthropic` → Messages; `@ai-sdk/openai` → **Responses** (`/responses`); `@ai-sdk/openai-compatible` (default) → chat completions |
+| `api` | no | strike override: `openai` (chat), `responses`, or `anthropic` (wins over npm hint) |
+| `models` | no | `[]string` (legacy) **or** object map id → model def; see merge rules below |
+| `models.<id>` map key | yes (when nested) | **wire model id** sent on the API `model` field and used by `/model` selection |
+| `models.<id>.name` | no | **display label only** in `/model` (never sent on the wire; default: id or models.dev name) |
+| `models.<id>.limit.context` / `.output` | no | token ceilings; overlay wins over models.dev when set (>0) |
+| `models.<id>.options` | no | opaque bag (unsupported keys ignored; must not change the wire id) |
+| `models.<id>.variants` | no | named effort presets; `reasoningEffort`/`effort` map onto `/effort` |
 | `options.headers` | no | extra HTTP headers (values may use env refs) |
+
+#### Wire id vs display name
+
+Nested `models` object **keys** are the ids strike selects and sends on the wire
+(`{"model":"<key>"}`). The optional `name` field is a UI label only. Example:
+`"gpt-5.5": { "name": "GPT-5.5" }` lists as “GPT-5.5” but requests `gpt-5.5`.
+Variants and options never rewrite the wire id.
+
+#### Builtin endpoint overlay (anthropic / openai / …)
+
+Defining `"anthropic": { "options": { "baseURL", "apiKey" } }` (with or without
+`models`) keeps the builtin provider registered, routes HTTP to the custom
+endpoint, resolves the pinned apiKey env, and still lists models.dev when
+`models` is omitted. Same for other credential builtins (openai chat-completions
+path when baseURL/apiKey is set — not the ChatGPT OAuth backend).
+
+#### baseURL path join (OpenCode parity)
+
+| Wire | `options.baseURL` example | Request path |
+|---|---|---|
+| anthropic | `https://proxy.example/v1` (OpenCode) | `…/v1/messages` |
+| anthropic | `https://proxy.example` (origin-only) | `…/v1/messages` |
+| openai (chat) | `https://proxy.example/v1` | `…/v1/chat/completions` |
+| responses (`@ai-sdk/openai`) | `https://proxy.example/v1` | `…/v1/responses` |
+
+Do **not** put `/messages` or `/chat/completions` in `baseURL` unless the whole
+URL is already the final endpoint (strike leaves a trailing `/messages` or
+`/responses` alone).
+
+#### models.dev / catalog merge
+
+| Situation | Behavior |
+|---|---|
+| Builtin (openai, anthropic, …) with models.dev data | `/model` lists **catalog** models by default |
+| Builtin with only `options` (no `models`) | endpoint overlay applied; **full catalog** unchanged |
+| Config omits `models` or `models` is empty | full catalog unchanged |
+| Config nested/flat models on a **builtin** | **merge/overlay** by id: config wins name/limits/variants; catalog-only ids still appear |
+| Config nested/flat models on a **custom** provider | config list is the full `/model` list (no models.dev); map keys are wire ids |
+| Config sets limits for a catalog id | config wins for those fields; other catalog metadata kept |
+
+You never need to paste an entire upstream catalog into `providers.jsonc` just to set one variant, context limit, or proxy baseURL.
+
+#### Default model precedence
+
+1. `config.model` / `--model` when set  
+2. Custom provider: first configured model id (`models` array order, or sorted nested keys)  
+3. Built-in pin via `DefaultModel(provider)` (e.g. openai → `gpt-5.5`)  
+4. Otherwise unset (freeform `/model <id>`)
+
+#### Variants → effort
+
+Variant bags may include `reasoningEffort` or `effort` (`off`\|`low`\|`medium`\|`high`\|`xhigh`\|`max`). Selecting a variant (from the `/effort` picker when the active model has variants, or `/effort <variant-id>`) sets the session effort dial; adapters map that onto wire fields (`reasoning_effort`, Anthropic `output_config.effort`, …). Other variant keys are ignored for now.
 
 ### Config `providers` array (legacy)
 
@@ -269,11 +362,11 @@ files — use env refs and/or `/auth` / the auth store.
 {
   "providers": [
     {
-      "name": "kimi",
+      "name": "acme",
       "baseURL": "https://api.example.com/v1",
       "api": "openai",
-      "apiKeyEnv": "KIMI_API_KEY",
-      "models": ["kimi-latest"],
+      "apiKeyEnv": "ACME_API_KEY",
+      "models": ["acme-latest"],
       "headers": { "X-Custom": "optional" }
     }
   ]
@@ -282,12 +375,17 @@ files — use env refs and/or `/auth` / the auth store.
 
 | Field | Required | Notes |
 |---|---|---|
-| `name` | yes | lowercase slug (`[a-z][a-z0-9_-]{0,63}`); not builtins |
+| `name` | yes | lowercase slug (`[a-z][a-z0-9_-]{0,63}`); not `anthropic`/`openai`/`xai`/`gemini`/`kimi`/`deepseek`/`echo` |
 | `baseURL` | yes | absolute URL or env ref template |
-| `api` | yes | wire dialect: `openai` or `anthropic` |
+| `api` | yes | wire dialect: `openai` (chat), `responses`, or `anthropic` |
 | `apiKeyEnv` | no | env var name (or `{env:NAME}` / `$NAME`) checked before the auth store |
-| `models` | no | listed in `/model`; first is the default when unset |
+| `models` | no | flat `[]string` ids listed in `/model`; first is the default when unset (rich nested models use `providers.jsonc`) |
 | `headers` | no | extra HTTP headers on every request (values may use env refs) |
+
+**Migration:** existing `models: ["a","b"]` keeps working everywhere. Prefer
+`providers.jsonc` nested objects when you need display names, limits, or
+variants. Built-in overlays go under the builtin key in `providers.jsonc`
+(not in the `providers` array — builtin names remain reserved there).
 
 **Env interpolation:** `{env:NAME}`, `$NAME`, and `${NAME}` expand from the
 process environment (vars exported to the strike process, e.g. via bashrc).
@@ -304,14 +402,13 @@ Built-in logout only clears credentials.
 
 | Value | Behavior |
 |---|---|
-| `pane` (default) | embed nvim/vim/nano in the right-pane `editor` window (PTY) |
+| `pane` (default) | embed nvim/vim in the right-pane `editor` window (PTY) |
 | `overlay` | embed in a centered modal overlay |
 | `takeover` | full-screen handoff via `tea.ExecProcess` |
 
-Unknown values are ignored at load time. Resolution order: `$VISUAL`, then
-`$EDITOR`, then the first of `nvim`/`vim`/`vi`/`nano` on `PATH`. GUI `$EDITOR`
-values always take over the terminal regardless of `vimMode`. Leave the
-embedded editor with `ctrl+g`.
+Unknown values are ignored at load time. GUI `$EDITOR` values always take
+over the terminal regardless of `vimMode`. Leave the embedded editor with
+`ctrl+g`.
 
 ## Hooks
 

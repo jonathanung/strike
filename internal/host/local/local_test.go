@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,6 +28,9 @@ func newTestServices(t *testing.T) (host.Services, *auth.Store) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("OPENAI_API_KEY", "")
 	t.Setenv("XAI_API_KEY", "")
+	t.Setenv("KIMI_API_KEY", "")
+	t.Setenv("DEEPSEEK_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
 	store, err := auth.OpenStore(filepath.Join(home, ".strike", "auth.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +50,7 @@ func TestStatusesOrderFlagsAndEcho(t *testing.T) {
 	svc, _ := newTestServices(t)
 	got := svc.Auth.Statuses()
 
-	wantOrder := []string{"anthropic", "openai", "xai", "echo"}
+	wantOrder := []string{"anthropic", "openai", "xai", "gemini", "kimi", "deepseek", "echo"}
 	if len(got) != len(wantOrder) {
 		t.Fatalf("got %d statuses, want %d: %+v", len(got), len(wantOrder), got)
 	}
@@ -66,6 +70,15 @@ func TestStatusesOrderFlagsAndEcho(t *testing.T) {
 	if s := by["xai"]; !s.APIKey || !s.OAuth || !s.Device || s.Builtin {
 		t.Errorf("xai flags = %+v, want OAuth+Device+APIKey", s)
 	}
+	if s := by["gemini"]; !s.APIKey || s.OAuth || s.Device || s.Builtin {
+		t.Errorf("gemini flags = %+v, want APIKey-only", s)
+	}
+	if s := by["kimi"]; !s.APIKey || s.OAuth || s.Device || s.Builtin {
+		t.Errorf("kimi flags = %+v, want APIKey-only", s)
+	}
+	if s := by["deepseek"]; !s.APIKey || s.OAuth || s.Device || s.Builtin {
+		t.Errorf("deepseek flags = %+v, want APIKey-only", s)
+	}
 
 	echo := by["echo"]
 	if !echo.Builtin || !echo.Authed || echo.Detail != "offline dev provider" {
@@ -73,7 +86,7 @@ func TestStatusesOrderFlagsAndEcho(t *testing.T) {
 	}
 
 	// With an empty store and no env keys, credential providers are unauthed.
-	for _, name := range []string{"anthropic", "openai", "xai"} {
+	for _, name := range []string{"anthropic", "openai", "xai", "gemini", "kimi", "deepseek"} {
 		if s := by[name]; s.Authed || s.Detail != "none" {
 			t.Errorf("%s should be unauthenticated, got %+v", name, s)
 		}
@@ -676,5 +689,179 @@ func TestCatalogModelsMetadataFromCache(t *testing.T) {
 	}
 	if infos[0].HasCost || infos[0].Context != 0 {
 		t.Errorf("gpt-bare should lack meta: %+v", infos[0])
+	}
+	if full.Name != "Full" || full.Source != host.ModelSourceCatalog {
+		t.Errorf("gpt-full name/source = %q/%q", full.Name, full.Source)
+	}
+}
+
+func TestCatalogOverlayMergesWithoutDroppingCatalog(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cacheDir := filepath.Join(home, ".strike", "cache")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	catalog := `{"openai":{"id":"openai","name":"OpenAI","models":{` +
+		`"gpt-a":{"id":"gpt-a","name":"A","limit":{"context":100000,"output":1000}},` +
+		`"gpt-b":{"id":"gpt-b","name":"B","limit":{"context":50000,"output":500}}` +
+		`}}}`
+	if err := os.WriteFile(filepath.Join(cacheDir, "models.json"), []byte(catalog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	overlays := map[string][]config.ModelDef{
+		"openai": {
+			{
+				ID:    "gpt-a",
+				Name:  "A Overlay",
+				Limit: &config.ModelLimit{Context: 272000},
+				Variants: map[string]map[string]any{
+					"high": {"reasoningEffort": "high"},
+					"low":  {"reasoningEffort": "low"},
+				},
+			},
+			{ID: "gpt-custom", Name: "Custom Only"},
+		},
+	}
+	customs := config.NewCustomStoreWithOverlays(nil, overlays, nil, "")
+	svc := New(nil, nil, nil, nil, nil, nil, customs, "")
+	infos, err := svc.Catalog.Models(context.Background(), "openai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 3 {
+		t.Fatalf("want 3 models (2 catalog + 1 config), got %#v", infos)
+	}
+	byID := map[string]host.ModelInfo{}
+	for _, info := range infos {
+		byID[info.ID] = info
+	}
+	a := byID["gpt-a"]
+	if a.Name != "A Overlay" || a.Context != 272000 || a.Source != host.ModelSourceMerge {
+		t.Errorf("gpt-a overlay = %+v", a)
+	}
+	if len(a.VariantIDs) != 2 || a.VariantIDs[0] != "high" {
+		t.Errorf("variants = %v", a.VariantIDs)
+	}
+	b := byID["gpt-b"]
+	if b.Name != "B" || b.Context != 50000 || b.Source != host.ModelSourceCatalog {
+		t.Errorf("gpt-b must stay catalog-only: %+v", b)
+	}
+	c := byID["gpt-custom"]
+	if c.Name != "Custom Only" || c.Source != host.ModelSourceConfig {
+		t.Errorf("gpt-custom = %+v", c)
+	}
+
+	// Context limit from config drives meter.
+	tokens, ok, err := svc.Catalog.ContextWindow(context.Background(), "openai", "gpt-a")
+	if err != nil || !ok || tokens != 272000 {
+		t.Errorf("ContextWindow overlay = %d,%v,%v", tokens, ok, err)
+	}
+	// Unoverlaid model keeps catalog limit.
+	tokens, ok, err = svc.Catalog.ContextWindow(context.Background(), "openai", "gpt-b")
+	if err != nil || !ok || tokens != 50000 {
+		t.Errorf("ContextWindow catalog = %d,%v,%v", tokens, ok, err)
+	}
+
+	// Omitted overlay → full catalog still listed.
+	svcBare := New(nil, nil, nil, nil, nil, nil, config.NewCustomStore(nil, ""), "")
+	bare, err := svcBare.Catalog.Models(context.Background(), "openai")
+	if err != nil || len(bare) != 2 {
+		t.Fatalf("bare catalog = %#v err=%v", bare, err)
+	}
+
+	effort, ok, err := svc.Catalog.ResolveVariant(context.Background(), "openai", "gpt-a", "high")
+	if err != nil || !ok || effort != "high" {
+		t.Errorf("ResolveVariant = %q ok=%v err=%v", effort, ok, err)
+	}
+}
+
+// TestCatalogBuiltinEndpointKeepsModelsDev lists catalog models when anthropic
+// has only options (no models) — endpoint overlay must not drop registration.
+func TestCatalogBuiltinEndpointKeepsModelsDev(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PROXY_KEY", "from-env")
+	cacheDir := filepath.Join(home, ".strike", "cache")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	catalog := `{"anthropic":{"id":"anthropic","name":"Anthropic","models":{` +
+		`"claude-test":{"id":"claude-test","name":"Claude Test","limit":{"context":200000,"output":8192}}` +
+		`}}}`
+	if err := os.WriteFile(filepath.Join(cacheDir, "models.json"), []byte(catalog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	endpoints := map[string]config.ProviderEndpoint{
+		"anthropic": {
+			BaseURL:   "https://proxy.example/anthropic",
+			APIKeyEnv: "PROXY_KEY",
+		},
+	}
+	customs := config.NewCustomStoreWithOverlays(nil, nil, endpoints, "")
+	store, err := auth.OpenStore(filepath.Join(home, ".strike", "auth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := New(store, nil, nil, nil, nil, nil, customs, "")
+
+	// Must not be treated as a custom provider.
+	if _, ok := svc.Providers.Get("anthropic"); ok {
+		t.Fatal("anthropic endpoint overlay must not create a custom provider row")
+	}
+	infos, err := svc.Catalog.Models(context.Background(), "anthropic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 1 || infos[0].ID != "claude-test" {
+		t.Fatalf("catalog models = %#v", infos)
+	}
+	by := statusByName(svc.Auth.Statuses())
+	ant := by["anthropic"]
+	if !ant.Authed {
+		t.Fatalf("anthropic should be authed via PROXY_KEY: %+v", ant)
+	}
+	if ant.Detail != "env" && !strings.Contains(ant.Detail, "env") {
+		t.Errorf("detail = %q, want env (+ optional host)", ant.Detail)
+	}
+	if ant.BaseURL != "https://proxy.example/anthropic" {
+		t.Errorf("BaseURL = %q", ant.BaseURL)
+	}
+	if ant.Custom {
+		t.Error("anthropic must remain non-custom")
+	}
+}
+
+func TestCatalogCustomNestedModelsDTO(t *testing.T) {
+	cp := config.NormalizeCustomProvider(config.CustomProvider{
+		Name:    "acme",
+		BaseURL: "https://a.example/v1",
+		API:     config.WireOpenAI,
+		ModelDefs: []config.ModelDef{
+			{
+				ID:    "k2",
+				Name:  "Acme K2",
+				Limit: &config.ModelLimit{Context: 128000, Output: 8192},
+				Variants: map[string]map[string]any{
+					"medium": {"reasoningEffort": "medium"},
+				},
+			},
+		},
+	})
+	customs := config.NewCustomStore([]config.CustomProvider{cp}, "")
+	svc := New(nil, nil, nil, nil, nil, nil, customs, "")
+	infos, err := svc.Catalog.Models(context.Background(), "acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 1 {
+		t.Fatalf("infos = %#v", infos)
+	}
+	got := infos[0]
+	if got.ID != "k2" || got.Name != "Acme K2" || got.Context != 128000 || got.Output != 8192 {
+		t.Errorf("dto = %+v", got)
+	}
+	if got.Source != host.ModelSourceConfig || len(got.VariantIDs) != 1 {
+		t.Errorf("source/variants = %+v", got)
 	}
 }

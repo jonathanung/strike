@@ -170,10 +170,11 @@ or config `providers` — see [config.md](config.md).
 
 `--continue` and `--session` cannot be combined. `strike exec` accepts the
 same `--provider` / `--model` / `--effort` /
-`--dangerously-skip-permissions` flags as the TUI. Permission and question
-prompts cannot be answered interactively in exec; asks are rejected unless
-`--dangerously-skip-permissions` is set (configured/agent denies still
-apply). Full flag list: [install.md](install.md) or `strike --help`.
+`--auto` / `--dangerously-skip-permissions` flags as the TUI. Permission and
+question prompts cannot be answered interactively in exec; asks are rejected
+unless `--auto` or `--dangerously-skip-permissions` is set
+(configured/agent denies still apply). Full flag list:
+[install.md](install.md) or `strike --help`.
 
 ## UI
 
