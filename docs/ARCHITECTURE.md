@@ -118,10 +118,12 @@ window index and has no close state or plugin mechanism. File bytes and
 directory listings reach the markdown and files windows through `host.Files`,
 not direct disk I/O from the TUI. Window input and resize updates stay inside
 `internal/tui`: no protocol Op or Event was added for this pane infrastructure.
-Composer input treats Enter as send and Shift+Enter (normalized to Alt+Enter)
-as newline via a stdin wrapper and enhanced keyboard modes. Bare LF
-(`KeyCtrlJ`) is `ctrl+j` pane cycle, not newline. Bare Escape from CSI-u is
-normalized to `0x1b`.
+Composer input treats Enter as send and `ctrl+j` / Shift+Enter (normalized to
+Alt+Enter / Alt+j via a stdin wrapper and enhanced keyboard modes) as newline.
+Bare LF (`KeyCtrlJ`) is also newline. Pane focus is `ctrl+h`/`ctrl+l`
+(primary vs secondary, orientation-independent); secondary-pane cycle is
+`ctrl+o`/`ctrl+p`; command palette is `ctrl+k` (when kill-to-end does not
+delete). Bare Escape from CSI-u is normalized to `0x1b`.
 
 `View()` composes the full-width header first; its body is a horizontal
 left|right split by default, or a vertical top/bottom split when
@@ -135,8 +137,7 @@ In a horizontal split, the canonical widths are
 `left = width-gutter-right`. At or below 92 columns, only the active pane
 uses the full width. With a custom gutter `g`, the split threshold is
 `60 + g + 32`. Vertical split keeps full width and divides body height when
-there is room; focus/cycle key chords swap so focus stays on the
-cross-axis pair.
+there is room; focus/cycle chords stay fixed (not swapped by orientation).
 
 Transcript anchoring: `refreshViewport` calls `GotoBottom` only when the
 viewport was already `AtBottom` before `SetContent`; otherwise it restores

@@ -86,33 +86,40 @@ func TestComposerReadlineDoesNotStealPaletteOrRightPaneCycle(t *testing.T) {
 		statefulTestWindow{windowID: "b", windowTitle: "B"},
 	}}
 
-	// ctrl+p remains palette on left focus even with composer text.
+	// ctrl+o cycles windows on left focus even with composer text (#414).
 	m.composer.SetValue("draft")
 	m.composer.SetCursor(2)
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlP})
-	if _, ok := m.modal.(*paletteModal); !ok {
-		t.Fatalf("left-focus ctrl+p modal = %T, want palette", m.modal)
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlO})
+	if m.windows.active().id() != "b" {
+		t.Fatalf("left-focus ctrl+o window = %s, want b", m.windows.active().id())
 	}
 	if m.composer.Value() != "draft" {
-		t.Fatalf("palette stole composer edit: %q", m.composer.Value())
+		t.Fatalf("cycle stole composer edit: %q", m.composer.Value())
 	}
-	m.modal = nil
+	if m.modal != nil {
+		t.Fatalf("ctrl+o opened modal %T", m.modal)
+	}
 
-	// Right-focus ctrl+k still cycles windows.
+	// Right-focus ctrl+o still cycles windows; ctrl+k opens palette (#414).
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
 	if m.focus != focusRight {
 		t.Fatalf("focus = %v, want right", m.focus)
 	}
 	before := m.windows.index
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlO})
 	if m.windows.index == before {
-		t.Fatalf("right-focus ctrl+k did not cycle windows")
+		t.Fatalf("right-focus ctrl+o did not cycle windows")
 	}
 	if m.composer.Value() != "draft" {
-		t.Fatalf("right-focus ctrl+k edited composer: %q", m.composer.Value())
+		t.Fatalf("right-focus ctrl+o edited composer: %q", m.composer.Value())
 	}
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+	if _, ok := m.modal.(*paletteModal); !ok {
+		t.Fatalf("right-focus ctrl+k modal = %T, want palette", m.modal)
+	}
+	m.modal = nil
 
-	// Vertical split: mid-line kill wins; EOL falls through to focus bottom.
+	// Mid-line kill wins; EOL falls through to palette (shared ctrl+k).
 	m.focus = focusLeft
 	m.composer.Focus()
 	m.splitOrientation = orientVertical
@@ -126,11 +133,17 @@ func TestComposerReadlineDoesNotStealPaletteOrRightPaneCycle(t *testing.T) {
 	if got := m.composer.Value(); got != "alpha" {
 		t.Fatalf("vertical left ctrl+k = %q, want alpha", got)
 	}
+	if m.modal != nil {
+		t.Fatalf("mid-line kill opened modal %T", m.modal)
+	}
 	m.composer.SetValue("alpha")
-	m.composer.SetCursor(5) // EOL — no kill, focus bottom
+	m.composer.SetCursor(5) // EOL — no kill, palette
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
-	if m.focus != focusRight {
-		t.Fatalf("vertical left ctrl+k at EOL focus = %v, want right", m.focus)
+	if _, ok := m.modal.(*paletteModal); !ok {
+		t.Fatalf("EOL ctrl+k modal = %T, want palette", m.modal)
+	}
+	if m.focus != focusLeft {
+		t.Fatalf("EOL ctrl+k focus = %v, want left", m.focus)
 	}
 
 	assertNoAppOp(t, ops)

@@ -130,10 +130,10 @@ func TestActivityPaneBodyIdleTips(t *testing.T) {
 	body := ansi.Strip(m.activityPaneBody(40, 10))
 	for _, want := range []string{
 		"/",
-		keyHint(m.keyMap.Palette).Key,         // ctrl+p
+		keyHint(m.keyMap.Palette).Key,         // ctrl+k
 		keyHint(m.keyMap.Agent).Key,           // tab
-		keyHint(m.keyMap.CycleWindowNext).Key, // ctrl+j
-		keyHint(m.keyMap.Newline).Key,         // shift+enter
+		keyHint(m.keyMap.CycleWindowNext).Key, // ctrl+o
+		keyHint(m.keyMap.Newline).Key,         // ctrl+j/shift+enter
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("idle activity tips missing %q: %q", want, body)
@@ -200,7 +200,7 @@ func TestActivityPaneBodyWidthSafeAndNeverPlaceholder(t *testing.T) {
 			}
 		}
 	}
-	// Idle tips: widths at or above the longest tip key ("shift+enter") plus gap.
+	// Idle tips: widths at or above the longest tip key ("ctrl+j/shift+enter") plus gap.
 	// (Narrower than that can overshoot — see Findings.)
 	m.cells = nil
 	for _, width := range []int{16, 20, 28, 40} {
