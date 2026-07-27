@@ -25,7 +25,8 @@ cmd/strike session_lifecycle.go (`run`) — composition root
 │     memoryStore, issueStore, agentNames, skills) — wraps internal/{auth,config,
 │     models,history,memory,issue} into host.Services{Auth, Catalog, Settings,
 │     History, Memory, Issues, Agents, Skills}, then attaches host.Files
-│     (local.NewFiles(workDir)) for frontend file reads
+│     (local.NewFiles(workDir)) for frontend file reads and diff-viewer
+│     apply writes (ApplyEdit / ApplyPatch)
 │
 └── tui.New(eng.Ops(), events, services, tui.Options{...})
       internal/tui's entire view of the world: two protocol channels plus
@@ -245,8 +246,10 @@ branch in `internal/tui/view.go` for the pattern.
     `internal/tui/cells.go` (name, title, output preview, ok/err glyph).
     Edit-shaped `Metadata` (`oldString`/`newString`) is consumed by the TUI
     via `ui.DiffPreview` in the permission modal and completed tool cells;
-    other tools can keep emitting metadata without a TUI change until a
-    frontend renderer is added for them.
+    from a selected tool cell, `a` confirms and re-applies the shown edit
+    (or `apply_patch` envelope) into the active worktree through
+    `host.Files.ApplyEdit` / `ApplyPatch`. Other tools can keep emitting
+    metadata without a TUI change until a frontend renderer is added for them.
 
 ### Add a slash command
 

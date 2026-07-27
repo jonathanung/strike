@@ -157,9 +157,25 @@ type FileContent struct {
 	Skip    bool
 }
 
+// EditApply is one exact-string replacement for Files.ApplyEdit (diff viewer).
+type EditApply struct {
+	Path       string
+	OldString  string
+	NewString  string
+	ReplaceAll bool
+}
+
+// EditApplyResult is returned by Files.ApplyEdit after a successful apply.
+type EditApplyResult struct {
+	Path    string // project-relative path written
+	Count   int    // replacements performed (0 when Already)
+	Already bool   // true when the file already reflected NewString (no write)
+}
+
 // Files reads workspace files for frontend features (markdown reader, file
-// explorer, @file mentions). Nil means the capability is absent; frontends
-// must degrade gracefully.
+// explorer, @file mentions) and applies user-initiated edit/patch writes from
+// the diff viewer. Nil means the capability is absent; frontends must degrade
+// gracefully.
 type Files interface {
 	// ReadFile resolves path (relative to the host work directory, or absolute),
 	// then reads the file. Implementations enforce a size cap. Empty path,
@@ -186,6 +202,16 @@ type Files interface {
 	// and escapes set Skip. Directories expand to an immediate-child listing
 	// only (not recursive file contents); Path is returned with a trailing "/".
 	ReadScoped(path string) (FileContent, error)
+	// ApplyEdit performs an exact string replacement under the work root
+	// (symlink-safe). Failures leave the file unchanged. When OldString is
+	// absent but NewString is already present (single-match case), returns
+	// Already without writing. ReplaceAll replaces every occurrence; otherwise
+	// OldString must match exactly once.
+	ApplyEdit(req EditApply) (EditApplyResult, error)
+	// ApplyPatch applies a multi-file apply_patch envelope under the work root.
+	// Validates fully before writing and rolls back on commit failure so partial
+	// state is avoided when possible. Returns a short human summary on success.
+	ApplyPatch(patch string) (summary string, err error)
 }
 
 // MemoryEntry is one project-local key/value memory record.

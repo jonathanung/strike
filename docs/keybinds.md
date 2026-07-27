@@ -69,6 +69,7 @@ to a single pane and cycle the same order one at a time. See [usage.md](usage.md
 | `enter` | expand / collapse tool output or large edit diff; else open `file:line` |
 | `y` | copy cell (tool/explore, else latest assistant/user) |
 | `v` | review edit in editor |
+| `a` | apply shown edit/patch into the active worktree (confirm) |
 
 ## Composer editing
 

@@ -281,3 +281,7 @@ func (f *folderFiles) ReadScoped(path string) (host.FileContent, error) {
 	}
 	return host.FileContent{Path: path, Content: f.listing}, nil
 }
+func (f *folderFiles) ApplyEdit(host.EditApply) (host.EditApplyResult, error) {
+	return host.EditApplyResult{}, fmt.Errorf("unused")
+}
+func (f *folderFiles) ApplyPatch(string) (string, error) { return "", fmt.Errorf("unused") }

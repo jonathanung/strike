@@ -51,6 +51,48 @@ func (c *toolCell) reviewable() bool {
 	return c != nil && c.done && !c.isError && toolTouchedPath(c) != ""
 }
 
+// applyable reports whether this finished tool carries a patch the user can
+// re-apply into the worktree from the diff viewer (a).
+func (c *toolCell) applyable() bool {
+	if c == nil || !c.done {
+		return false
+	}
+	if _, ok := parseEditMetadata(c.metadata); ok && toolTouchedPath(c) != "" {
+		return true
+	}
+	return c.name == "apply_patch" && patchTextFromArgs(c.args) != ""
+}
+
+// editApplyRequest builds a host.EditApply from edit-shaped tool metadata.
+// ok is false when the cell is not an edit diff apply target.
+func (c *toolCell) editApplyRequest() (path, oldStr, newStr string, replaceAll bool, ok bool) {
+	if c == nil {
+		return "", "", "", false, false
+	}
+	meta, has := parseEditMetadata(c.metadata)
+	if !has {
+		return "", "", "", false, false
+	}
+	path = toolTouchedPath(c)
+	if path == "" {
+		return "", "", "", false, false
+	}
+	return path, meta.OldString, meta.NewString, meta.Count > 1, true
+}
+
+func patchTextFromArgs(args json.RawMessage) string {
+	if len(args) == 0 {
+		return ""
+	}
+	var parsed struct {
+		Patch string `json:"patch"`
+	}
+	if err := json.Unmarshal(args, &parsed); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(parsed.Patch)
+}
+
 // reviewTarget returns the workdir-relative path and 1-based line of the first
 // changed hunk for post-edit review. ok is false when the cell is not reviewable.
 func (c *toolCell) reviewTarget(workDir string) (path string, line int, ok bool) {

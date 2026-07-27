@@ -328,6 +328,12 @@ type fakeFiles struct {
 	// search optionally overrides SearchFiles results (nil → keys of files).
 	search []string
 	err    error
+	// applyErr forces ApplyEdit/ApplyPatch to fail when set.
+	applyErr error
+	// lastApply records the most recent ApplyEdit request (tests).
+	lastApply host.EditApply
+	// lastPatch records the most recent ApplyPatch text (tests).
+	lastPatch string
 }
 
 func (f *fakeFiles) ReadFile(path string) ([]byte, error) {
@@ -410,6 +416,56 @@ func (f *fakeFiles) ReadScoped(path string) (host.FileContent, error) {
 		return host.FileContent{Path: path, Skip: true, Notice: "binary file skipped"}, nil
 	}
 	return host.FileContent{Path: path, Content: string(data)}, nil
+}
+
+func (f *fakeFiles) ApplyEdit(req host.EditApply) (host.EditApplyResult, error) {
+	f.lastApply = req
+	if f.applyErr != nil {
+		return host.EditApplyResult{}, f.applyErr
+	}
+	if f.err != nil {
+		return host.EditApplyResult{}, f.err
+	}
+	path := strings.TrimSpace(req.Path)
+	if f.files == nil {
+		f.files = map[string][]byte{}
+	}
+	data, ok := f.files[path]
+	if !ok {
+		return host.EditApplyResult{}, fmt.Errorf("file not found: %s", path)
+	}
+	content := string(data)
+	count := strings.Count(content, req.OldString)
+	if count == 0 {
+		if !req.ReplaceAll && strings.Contains(content, req.NewString) {
+			return host.EditApplyResult{Path: path, Already: true}, nil
+		}
+		return host.EditApplyResult{}, fmt.Errorf("oldString not found in %s", path)
+	}
+	if count > 1 && !req.ReplaceAll {
+		return host.EditApplyResult{}, fmt.Errorf("oldString matches %d locations in %s", count, path)
+	}
+	var updated string
+	replaced := 1
+	if req.ReplaceAll {
+		updated = strings.ReplaceAll(content, req.OldString, req.NewString)
+		replaced = count
+	} else {
+		updated = strings.Replace(content, req.OldString, req.NewString, 1)
+	}
+	f.files[path] = []byte(updated)
+	return host.EditApplyResult{Path: path, Count: replaced}, nil
+}
+
+func (f *fakeFiles) ApplyPatch(patch string) (string, error) {
+	f.lastPatch = patch
+	if f.applyErr != nil {
+		return "", f.applyErr
+	}
+	if f.err != nil {
+		return "", f.err
+	}
+	return "Success. Updated the following files:\nM demo.go", nil
 }
 
 // --- fakeMemory: an in-memory host.Memory --------------------------------

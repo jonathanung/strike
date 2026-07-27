@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jonathanung/strike-cli/internal/host"
+	"github.com/jonathanung/strike-cli/internal/tool"
 )
 
 const (
@@ -93,6 +94,109 @@ func (f *filesService) skipSet() map[string]struct{} {
 		return defaultSkipSet()
 	}
 	return f.skipDirs
+}
+
+func (f *filesService) ApplyEdit(req host.EditApply) (host.EditApplyResult, error) {
+	path := strings.TrimSpace(req.Path)
+	if path == "" {
+		return host.EditApplyResult{}, fmt.Errorf("path is empty")
+	}
+	if req.OldString == req.NewString {
+		return host.EditApplyResult{}, fmt.Errorf("oldString and newString are identical")
+	}
+	resolved, rel, err := resolveUnderRoot(f.workRoot(), path)
+	if err != nil {
+		return host.EditApplyResult{}, err
+	}
+	info, err := os.Lstat(resolved)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return host.EditApplyResult{}, fmt.Errorf("file not found: %s", rel)
+		}
+		return host.EditApplyResult{}, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return host.EditApplyResult{}, fmt.Errorf("symlink not allowed: %s", rel)
+	}
+	if !info.Mode().IsRegular() {
+		return host.EditApplyResult{}, fmt.Errorf("not a regular file: %s", rel)
+	}
+	data, err := os.ReadFile(resolved)
+	if err != nil {
+		return host.EditApplyResult{}, err
+	}
+	content := string(data)
+	count := strings.Count(content, req.OldString)
+	if count == 0 {
+		// Already applied: file has newString and not oldString (single-edit case).
+		if !req.ReplaceAll && strings.Contains(content, req.NewString) {
+			return host.EditApplyResult{Path: rel, Already: true}, nil
+		}
+		return host.EditApplyResult{}, fmt.Errorf("oldString not found in %s", rel)
+	}
+	if count > 1 && !req.ReplaceAll {
+		return host.EditApplyResult{}, fmt.Errorf("oldString matches %d locations in %s; need unique context or replaceAll", count, rel)
+	}
+	var updated string
+	replaced := 1
+	if req.ReplaceAll {
+		updated = strings.ReplaceAll(content, req.OldString, req.NewString)
+		replaced = count
+	} else {
+		updated = strings.Replace(content, req.OldString, req.NewString, 1)
+	}
+	if err := writeFileAtomic(resolved, []byte(updated), info.Mode().Perm()); err != nil {
+		return host.EditApplyResult{}, err
+	}
+	return host.EditApplyResult{Path: rel, Count: replaced}, nil
+}
+
+func (f *filesService) ApplyPatch(patch string) (string, error) {
+	root := f.workRoot()
+	if strings.TrimSpace(root) == "" {
+		return "", fmt.Errorf("work directory is empty")
+	}
+	return tool.ApplyPatchToWorkDir(root, patch)
+}
+
+// writeFileAtomic writes data via a same-directory temp file + rename so a
+// failed apply does not leave a truncated target.
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	if perm == 0 {
+		perm = 0o644
+	}
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".strike-apply-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	cleanup = false
+	return nil
 }
 
 func (f *filesService) ReadFile(path string) ([]byte, error) {

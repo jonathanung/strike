@@ -71,9 +71,9 @@ func (m *Model) renderCell(c cell, width int) string {
 }
 
 // handleToolCellKeys handles tool selection (alt+[/]), expand/open-at-line
-// (enter), copy (y), and post-edit review (v) when the composer is empty.
-// handled is true when the key was consumed; cmd may launch the editor or clear
-// a copied flash.
+// (enter), copy (y), post-edit review (v), and apply patch (a) when the
+// composer is empty. handled is true when the key was consumed; cmd may launch
+// the editor, open a confirm modal, or clear a copied flash.
 func (m *Model) handleToolCellKeys(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
 	if m.focus != focusLeft || m.modal != nil || m.completion != nil {
 		return false, nil
@@ -102,6 +102,8 @@ func (m *Model) handleToolCellKeys(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
 		return m.copySelectedCell()
 	case key.Matches(msg, m.keyMap.ToolReview):
 		return m.reviewSelectedTool()
+	case key.Matches(msg, m.keyMap.ToolApply):
+		return m.applySelectedTool()
 	}
 	return false, nil
 }
@@ -111,7 +113,7 @@ func (m *Model) selectableCellIndexes() []int {
 	for i, c := range m.displayCells() {
 		switch tc := c.(type) {
 		case *toolCell:
-			if tc.collapsible() || tc.reviewable() {
+			if tc.collapsible() || tc.reviewable() || tc.applyable() {
 				idx = append(idx, i)
 			}
 		case *exploreCell:
@@ -231,6 +233,65 @@ func (m *Model) reviewSelectedTool() (bool, tea.Cmd) {
 	updated, cmd := (*m).openFileRef(fileRef{Path: path, Line: line})
 	*m = updated.(Model)
 	return true, cmd
+}
+
+// applySelectedTool opens a confirm modal to write the selected tool's shown
+// patch into the active worktree. Does not consume "a" when nothing is
+// selected so typing still reaches the empty composer.
+func (m *Model) applySelectedTool() (bool, tea.Cmd) {
+	cells := m.displayCells()
+	if m.selectedCell < 0 || m.selectedCell >= len(cells) {
+		return false, nil
+	}
+	tc, ok := cells[m.selectedCell].(*toolCell)
+	if !ok || !tc.applyable() {
+		m.setNotice("select an edit/patch tool cell to apply", true)
+		return true, nil
+	}
+	if m.services.Files == nil {
+		m.setNotice("file apply unavailable", true)
+		return true, nil
+	}
+	if path, oldS, newS, replaceAll, ok := tc.editApplyRequest(); ok {
+		m.modal = newApplyDiffModalEdit(m.services.Files, path, oldS, newS, replaceAll)
+		m.reflow()
+		return true, nil
+	}
+	if patch := patchTextFromArgs(tc.args); patch != "" {
+		m.modal = newApplyDiffModalPatch(m.services.Files, patch)
+		m.reflow()
+		return true, nil
+	}
+	m.setNotice("no patch to apply on this tool", true)
+	return true, nil
+}
+
+// applyApplyDiffResult handles the confirm-modal outcome for worktree apply.
+func (m *Model) applyApplyDiffResult(msg applyDiffResultMsg) tea.Cmd {
+	m.modal = nil
+	promote := m.afterModalClosed()
+	switch {
+	case msg.canceled:
+		m.setNotice("apply canceled", false)
+	case msg.err != "":
+		m.setNotice("apply failed: "+msg.err, true)
+	case msg.already:
+		m.setNotice("already applied: "+msg.path, false)
+	case msg.multi:
+		if msg.summary != "" {
+			m.setNotice("applied: "+msg.summary, false)
+		} else {
+			m.setNotice("applied patch", false)
+		}
+	default:
+		label := msg.path
+		if msg.count > 1 {
+			label += " (" + itoa(msg.count) + " replacements)"
+		}
+		m.setNotice("applied "+label, false)
+	}
+	m.reflow()
+	return promote
 }
 
 func (m *Model) syncToolSelectionFlags() {

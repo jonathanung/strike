@@ -686,6 +686,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case initResultMsg:
 		return m.applyInitResult(msg)
 
+	case applyDiffResultMsg:
+		cmd := m.applyApplyDiffResult(msg)
+		return m, cmd
+
 	case authExpiryNoticeMsg:
 		if m.authExpiryNoticed {
 			return m, nil

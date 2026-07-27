@@ -7,6 +7,8 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/jonathanung/strike-cli/internal/host"
 )
 
 func mustSymlink(t *testing.T, oldname, newname string) {
@@ -551,4 +553,175 @@ func bytesRepeat(b byte, n int) []byte {
 		out[i] = b
 	}
 	return out
+}
+
+func TestFilesApplyEditSuccessAndAlready(t *testing.T) {
+	work := t.TempDir()
+	path := filepath.Join(work, "main.go")
+	if err := os.WriteFile(path, []byte("hello world\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files := NewFiles(work)
+
+	res, err := files.ApplyEdit(host.EditApply{
+		Path:      "main.go",
+		OldString: "hello",
+		NewString: "hi",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Path != "main.go" || res.Count != 1 || res.Already {
+		t.Fatalf("ApplyEdit = %+v", res)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hi world\n" {
+		t.Fatalf("file = %q", got)
+	}
+
+	// Re-apply when already applied reports Already without changing content.
+	res, err = files.ApplyEdit(host.EditApply{
+		Path:      "main.go",
+		OldString: "hello",
+		NewString: "hi",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Already || res.Count != 0 {
+		t.Fatalf("already = %+v", res)
+	}
+	got, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hi world\n" {
+		t.Fatalf("file changed on already: %q", got)
+	}
+}
+
+func TestFilesApplyEditFailureLeavesFileUnchanged(t *testing.T) {
+	work := t.TempDir()
+	path := filepath.Join(work, "main.go")
+	orig := []byte("alpha beta alpha\n")
+	if err := os.WriteFile(path, orig, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files := NewFiles(work)
+
+	_, err := files.ApplyEdit(host.EditApply{
+		Path:      "main.go",
+		OldString: "alpha",
+		NewString: "A",
+	})
+	if err == nil || !strings.Contains(err.Error(), "matches 2") {
+		t.Fatalf("err = %v, want multi-match", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(orig) {
+		t.Fatalf("file mutated on failed apply: %q", got)
+	}
+
+	_, err = files.ApplyEdit(host.EditApply{
+		Path:      "main.go",
+		OldString: "missing",
+		NewString: "x",
+	})
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("err = %v, want not found", err)
+	}
+	got, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(orig) {
+		t.Fatalf("file mutated: %q", got)
+	}
+}
+
+func TestFilesApplyEditRejectsEscape(t *testing.T) {
+	work := t.TempDir()
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(secret, []byte("classified"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files := NewFiles(work)
+	_, err := files.ApplyEdit(host.EditApply{
+		Path:      secret,
+		OldString: "classified",
+		NewString: "leaked",
+	})
+	if err == nil {
+		t.Fatal("expected escape error")
+	}
+	got, err := os.ReadFile(secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "classified" {
+		t.Fatalf("outside file mutated: %q", got)
+	}
+}
+
+func TestFilesApplyPatchSuccessAndFailure(t *testing.T) {
+	work := t.TempDir()
+	if err := os.WriteFile(filepath.Join(work, "a.txt"), []byte("one\ntwo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files := NewFiles(work)
+
+	patch := strings.Join([]string{
+		"*** Begin Patch",
+		"*** Update File: a.txt",
+		"@@",
+		" one",
+		"-two",
+		"+TWO",
+		"*** End Patch",
+	}, "\n")
+	summary, err := files.ApplyPatch(patch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(summary, "M a.txt") {
+		t.Fatalf("summary = %q", summary)
+	}
+	got, err := os.ReadFile(filepath.Join(work, "a.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "one\nTWO\n" {
+		t.Fatalf("file = %q", got)
+	}
+
+	// Context mismatch fails before write.
+	if err := os.WriteFile(filepath.Join(work, "a.txt"), []byte("one\ntwo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bad := strings.Join([]string{
+		"*** Begin Patch",
+		"*** Update File: a.txt",
+		"@@",
+		" one",
+		"-missing",
+		"+x",
+		"*** End Patch",
+	}, "\n")
+	if _, err := files.ApplyPatch(bad); err == nil {
+		t.Fatal("expected patch failure")
+	}
+	got, err = os.ReadFile(filepath.Join(work, "a.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "one\ntwo\n" {
+		t.Fatalf("file mutated on failed patch: %q", got)
+	}
 }
