@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -88,8 +89,17 @@ func TestQuestionModalOptionSelectSendsReply(t *testing.T) {
 		t.Fatal("down closed modal")
 	}
 	next, cmd = next.(*questionModal).update(questionKey("enter"))
+	// Single answer → confirmation screen first.
+	qm := expectQuestionModal(t, next, "after option select")
+	if qm.phase != questionPhaseConfirm {
+		t.Fatalf("phase = %v, want confirm", qm.phase)
+	}
+	runQuestionCmd(t, cmd)
+	assertNoAppOp(t, ops)
+
+	next, cmd = qm.update(questionKey("enter"))
 	if next != nil {
-		t.Fatal("enter should close modal after final answer")
+		t.Fatal("confirm enter should close modal")
 	}
 	reply := receiveQuestionReply(t, ops, cmd)
 	if reply.RequestID != "q-opt" {
@@ -126,10 +136,27 @@ func TestQuestionModalMultiStep(t *testing.T) {
 	if qm.index != 1 {
 		t.Fatalf("index = %d, want 1", qm.index)
 	}
-	// Select second option on q2
+	// Select second option on q2 → confirm
 	next, cmd = qm.update(questionKey("2"))
+	qm = expectQuestionModal(t, next, "after last answer")
+	if qm.phase != questionPhaseConfirm {
+		t.Fatalf("phase = %v, want confirm", qm.phase)
+	}
+	runQuestionCmd(t, cmd)
+	assertNoAppOp(t, ops)
+
+	view := strings.ToLower(ansi.Strip(qm.view(60, theme.Default())))
+	if !strings.Contains(view, "confirm") {
+		t.Errorf("confirm view missing title:\n%s", view)
+	}
+	// Match answer tokens as whole words so "your" does not satisfy "y".
+	if !strings.Contains(view, "one") || !regexp.MustCompile(`\by\b`).MatchString(view) {
+		t.Errorf("confirm view missing answers:\n%s", view)
+	}
+
+	next, cmd = qm.update(questionKey("enter"))
 	if next != nil {
-		t.Fatal("expected modal closed after last answer")
+		t.Fatal("expected modal closed after confirm")
 	}
 	reply := receiveQuestionReply(t, ops, cmd)
 	if len(reply.Answers) != 2 || reply.Answers[0] != "One" || reply.Answers[1] != "Y" {
@@ -195,8 +222,16 @@ func TestQuestionModalMultiMixedFreeformAndOptions(t *testing.T) {
 	}
 
 	next, cmd = qm.update(questionKey("1")) // S
+	qm = expectQuestionModal(t, next, "after last mixed answer")
+	if qm.phase != questionPhaseConfirm {
+		t.Fatalf("phase = %v, want confirm", qm.phase)
+	}
+	runQuestionCmd(t, cmd)
+	assertNoAppOp(t, ops)
+
+	next, cmd = qm.update(questionKey("enter"))
 	if next != nil {
-		t.Fatal("expected modal closed after last answer")
+		t.Fatal("expected modal closed after confirm")
 	}
 	reply := receiveQuestionReply(t, ops, cmd)
 	if len(reply.Answers) != 3 ||
@@ -225,8 +260,16 @@ func TestQuestionModalFreeform(t *testing.T) {
 	}
 	runQuestionCmd(t, cmd)
 	next, cmd = next.(*questionModal).update(questionKey("enter"))
+	qm := expectQuestionModal(t, next, "after freeform enter")
+	if qm.phase != questionPhaseConfirm {
+		t.Fatalf("phase = %v, want confirm", qm.phase)
+	}
+	runQuestionCmd(t, cmd)
+	assertNoAppOp(t, ops)
+
+	next, cmd = qm.update(questionKey("enter"))
 	if next != nil {
-		t.Fatal("enter should submit freeform")
+		t.Fatal("confirm should submit freeform")
 	}
 	reply := receiveQuestionReply(t, ops, cmd)
 	if len(reply.Answers) != 1 || reply.Answers[0] != "hello" {
@@ -253,6 +296,230 @@ func TestQuestionModalEscEmptyAnswers(t *testing.T) {
 	}
 	if reply.Answers != nil && len(reply.Answers) != 0 {
 		t.Errorf("answers = %#v, want empty", reply.Answers)
+	}
+}
+
+func TestQuestionModalHopBetweenQuestions(t *testing.T) {
+	req := protocol.QuestionAsked{
+		RequestID: "q-hop",
+		Questions: []protocol.QuestionPrompt{
+			{Question: "First?", Options: []protocol.QuestionOption{{Label: "A"}, {Label: "B"}}},
+			{Question: "Second?", Options: []protocol.QuestionOption{{Label: "X"}, {Label: "Y"}}},
+			{Question: "Third?", Options: []protocol.QuestionOption{{Label: "1"}, {Label: "2"}}},
+		},
+	}
+	m, ops := newTestQuestionModalFrom(req)
+
+	next, cmd := m.update(questionKey("1")) // A
+	qm := expectQuestionModal(t, next, "after q1")
+	runQuestionCmd(t, cmd)
+	if qm.index != 1 {
+		t.Fatalf("index = %d, want 1", qm.index)
+	}
+
+	// Hop back to first question.
+	next, cmd = qm.update(questionKey("shift+tab"))
+	qm = expectQuestionModal(t, next, "back to q1")
+	runQuestionCmd(t, cmd)
+	if qm.index != 0 {
+		t.Fatalf("index = %d, want 0 after back", qm.index)
+	}
+	view := strings.ToLower(ansi.Strip(qm.view(60, theme.Default())))
+	if !strings.Contains(view, "first?") {
+		t.Errorf("expected first question after back:\n%s", view)
+	}
+
+	// Change answer on q1, then advance with right after fill.
+	next, cmd = qm.update(questionKey("2")) // B — advances to next unfilled (q2)
+	qm = expectQuestionModal(t, next, "after re-answer q1")
+	runQuestionCmd(t, cmd)
+	if qm.index != 1 {
+		t.Fatalf("index = %d, want 1", qm.index)
+	}
+
+	next, cmd = qm.update(questionKey("1")) // X
+	qm = expectQuestionModal(t, next, "after q2")
+	runQuestionCmd(t, cmd)
+	if qm.index != 2 {
+		t.Fatalf("index = %d, want 2", qm.index)
+	}
+
+	// left hops back
+	next, cmd = qm.update(questionKey("left"))
+	qm = expectQuestionModal(t, next, "left to q2")
+	runQuestionCmd(t, cmd)
+	if qm.index != 1 {
+		t.Fatalf("index = %d, want 1 after left", qm.index)
+	}
+
+	// right hops forward when filled
+	next, cmd = qm.update(questionKey("right"))
+	qm = expectQuestionModal(t, next, "right to q3")
+	runQuestionCmd(t, cmd)
+	if qm.index != 2 {
+		t.Fatalf("index = %d, want 2 after right", qm.index)
+	}
+
+	next, cmd = qm.update(questionKey("2")) // 2
+	qm = expectQuestionModal(t, next, "confirm after all")
+	runQuestionCmd(t, cmd)
+	assertNoAppOp(t, ops)
+	if qm.phase != questionPhaseConfirm {
+		t.Fatalf("phase = %v, want confirm", qm.phase)
+	}
+	if got := qm.answers; len(got) != 3 || got[0] != "B" || got[1] != "X" || got[2] != "2" {
+		t.Errorf("answers = %#v, want [B X 2]", got)
+	}
+
+	// From confirm, left returns to last question for edit.
+	next, cmd = qm.update(questionKey("left"))
+	qm = expectQuestionModal(t, next, "edit from confirm")
+	runQuestionCmd(t, cmd)
+	if qm.phase != questionPhaseAnswer || qm.index != 2 {
+		t.Fatalf("phase=%v index=%d, want answer@2", qm.phase, qm.index)
+	}
+
+	// Hop back to q1, then right must visit q2 (not skip to confirm).
+	next, cmd = qm.update(questionKey("shift+tab"))
+	qm = expectQuestionModal(t, next, "back to q2")
+	runQuestionCmd(t, cmd)
+	next, cmd = qm.update(questionKey("shift+tab"))
+	qm = expectQuestionModal(t, next, "back to q1")
+	runQuestionCmd(t, cmd)
+	if qm.index != 0 {
+		t.Fatalf("index = %d, want 0", qm.index)
+	}
+	next, cmd = qm.update(questionKey("right"))
+	qm = expectQuestionModal(t, next, "right stays on q2 when all filled")
+	runQuestionCmd(t, cmd)
+	if qm.phase != questionPhaseAnswer || qm.index != 1 {
+		t.Fatalf("phase=%v index=%d, want answer@1 (not confirm)", qm.phase, qm.index)
+	}
+
+	// Advance to end and submit with a changed last answer.
+	next, cmd = qm.update(questionKey("right"))
+	qm = expectQuestionModal(t, next, "right to q3 again")
+	runQuestionCmd(t, cmd)
+	next, cmd = qm.update(questionKey("1"))
+	qm = expectQuestionModal(t, next, "re-confirm")
+	runQuestionCmd(t, cmd)
+	next, cmd = qm.update(questionKey("enter"))
+	if next != nil {
+		t.Fatal("submit should close")
+	}
+	reply := receiveQuestionReply(t, ops, cmd)
+	if len(reply.Answers) != 3 || reply.Answers[0] != "B" || reply.Answers[1] != "X" || reply.Answers[2] != "1" {
+		t.Errorf("answers = %#v, want [B X 1]", reply.Answers)
+	}
+}
+
+func TestQuestionModalCustomAnswerOnOptions(t *testing.T) {
+	req := protocol.QuestionAsked{
+		RequestID: "q-custom",
+		Questions: []protocol.QuestionPrompt{{
+			Question: "Pick or type?",
+			Options:  []protocol.QuestionOption{{Label: "Red"}, {Label: "Blue"}},
+		}},
+	}
+	m, ops := newTestQuestionModalFrom(req)
+
+	view := strings.ToLower(ansi.Strip(m.view(60, theme.Default())))
+	if !strings.Contains(view, "write your own") {
+		t.Errorf("missing custom list row:\n%s", view)
+	}
+
+	// tab enters custom mode
+	next, cmd := m.update(questionKey("tab"))
+	qm := expectQuestionModal(t, next, "tab custom")
+	runQuestionCmd(t, cmd)
+	if !qm.customMode || !qm.isFreeform() {
+		t.Fatal("expected custom freeform mode")
+	}
+	view = strings.ToLower(ansi.Strip(qm.view(60, theme.Default())))
+	if !strings.Contains(view, "tab options") {
+		t.Errorf("custom mode missing tab-back hint:\n%s", view)
+	}
+
+	next, cmd = qm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("purple")})
+	qm = expectQuestionModal(t, next, "type custom")
+	runQuestionCmd(t, cmd)
+	next, cmd = qm.update(questionKey("enter"))
+	qm = expectQuestionModal(t, next, "after custom enter")
+	runQuestionCmd(t, cmd)
+	assertNoAppOp(t, ops)
+	if qm.phase != questionPhaseConfirm {
+		t.Fatalf("phase = %v, want confirm", qm.phase)
+	}
+	if qm.answers[0] != "purple" {
+		t.Errorf("answer = %q, want purple", qm.answers[0])
+	}
+
+	// Confirm view shows custom text.
+	view = strings.ToLower(ansi.Strip(qm.view(60, theme.Default())))
+	if !strings.Contains(view, "purple") {
+		t.Errorf("confirm missing custom answer:\n%s", view)
+	}
+
+	next, cmd = qm.update(questionKey("enter"))
+	if next != nil {
+		t.Fatal("confirm should close")
+	}
+	reply := receiveQuestionReply(t, ops, cmd)
+	if len(reply.Answers) != 1 || reply.Answers[0] != "purple" {
+		t.Errorf("answers = %#v, want [purple]", reply.Answers)
+	}
+}
+
+func TestQuestionModalCustomViaListRow(t *testing.T) {
+	req := protocol.QuestionAsked{
+		RequestID: "q-row",
+		Questions: []protocol.QuestionPrompt{{
+			Question: "Color?",
+			Options:  []protocol.QuestionOption{{Label: "Red"}, {Label: "Blue"}},
+		}},
+	}
+	m, ops := newTestQuestionModalFrom(req)
+	// Move to synthetic row (index 2) and enter.
+	next, cmd := m.update(questionKey("down"))
+	qm := expectQuestionModal(t, next, "down 1")
+	runQuestionCmd(t, cmd)
+	next, cmd = qm.update(questionKey("down"))
+	qm = expectQuestionModal(t, next, "down 2")
+	runQuestionCmd(t, cmd)
+	if qm.cursor != 2 {
+		t.Fatalf("cursor = %d, want 2 (custom row)", qm.cursor)
+	}
+	next, cmd = qm.update(questionKey("enter"))
+	qm = expectQuestionModal(t, next, "enter custom row")
+	runQuestionCmd(t, cmd)
+	if !qm.customMode {
+		t.Fatal("enter on custom row should enable custom mode")
+	}
+	assertNoAppOp(t, ops)
+}
+
+func TestQuestionModalConfirmEscDismisses(t *testing.T) {
+	req := protocol.QuestionAsked{
+		RequestID: "q-confirm-esc",
+		Questions: []protocol.QuestionPrompt{{
+			Question: "Sure?",
+			Options:  []protocol.QuestionOption{{Label: "Yes"}, {Label: "No"}},
+		}},
+	}
+	m, ops := newTestQuestionModalFrom(req)
+	next, cmd := m.update(questionKey("1"))
+	qm := expectQuestionModal(t, next, "to confirm")
+	runQuestionCmd(t, cmd)
+	if qm.phase != questionPhaseConfirm {
+		t.Fatalf("phase = %v", qm.phase)
+	}
+	next, cmd = qm.update(questionKey("esc"))
+	if next != nil {
+		t.Fatal("esc on confirm should dismiss")
+	}
+	reply := receiveQuestionReply(t, ops, cmd)
+	if len(reply.Answers) != 0 {
+		t.Errorf("answers = %#v, want empty dismiss", reply.Answers)
 	}
 }
 
@@ -307,6 +574,18 @@ func newTestQuestionModalFrom(req protocol.QuestionAsked) (*questionModal, chan 
 	return newQuestionModal(req, ops), ops
 }
 
+func expectQuestionModal(t *testing.T, next modal, when string) *questionModal {
+	t.Helper()
+	if next == nil {
+		t.Fatalf("%s: modal closed unexpectedly", when)
+	}
+	qm, ok := next.(*questionModal)
+	if !ok {
+		t.Fatalf("%s: modal = %T, want questionModal", when, next)
+	}
+	return qm
+}
+
 func questionKey(key string) tea.KeyMsg {
 	switch key {
 	case "enter":
@@ -317,6 +596,16 @@ func questionKey(key string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyUp}
 	case "down":
 		return tea.KeyMsg{Type: tea.KeyDown}
+	case "left":
+		return tea.KeyMsg{Type: tea.KeyLeft}
+	case "right":
+		return tea.KeyMsg{Type: tea.KeyRight}
+	case "tab":
+		return tea.KeyMsg{Type: tea.KeyTab}
+	case "shift+tab":
+		return tea.KeyMsg{Type: tea.KeyShiftTab}
+	case "backspace":
+		return tea.KeyMsg{Type: tea.KeyBackspace}
 	default:
 		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)}
 	}
