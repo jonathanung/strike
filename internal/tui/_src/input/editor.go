@@ -164,8 +164,9 @@ func parseVimArgs(args []string) (path string, line int, err error) {
 }
 
 // parseEditorPathArgs interprets `/name` path arguments shared by /vim and /nano.
+// Paths may use a leading @ mention (@path) the same way the composer does.
 func parseEditorPathArgs(name string, args []string) (path string, line int, err error) {
-	usage := fmt.Sprintf("usage: /%s [path[:line]]", name)
+	usage := fmt.Sprintf("usage: /%s [path|@path[:line]]", name)
 	if len(args) == 0 {
 		return "", 0, nil
 	}
@@ -173,7 +174,13 @@ func parseEditorPathArgs(name string, args []string) (path string, line int, err
 		return "", 0, fmt.Errorf("%s", usage)
 	}
 	if len(args) == 2 {
-		path = args[0]
+		path, err = resolveCommandPathArg(args[0])
+		if err != nil {
+			return "", 0, err
+		}
+		if path == "" {
+			return "", 0, fmt.Errorf("%s", usage)
+		}
 		lineArg := args[1]
 		if !strings.HasPrefix(lineArg, "+") {
 			return "", 0, fmt.Errorf("%s", usage)
@@ -196,11 +203,25 @@ func parseEditorPathArgs(name string, args []string) (path string, line int, err
 		if n, convErr := strconv.Atoi(suffix); convErr == nil && n >= 1 {
 			// Avoid treating "C:" as path:line on Windows-style inputs.
 			if !(len(raw) >= 2 && i == 1 && raw[1] == ':') {
-				return raw[:i], n, nil
+				path, err = resolveCommandPathArg(raw[:i])
+				if err != nil {
+					return "", 0, err
+				}
+				if path == "" {
+					return "", 0, fmt.Errorf("%s", usage)
+				}
+				return path, n, nil
 			}
 		}
 	}
-	return raw, 0, nil
+	path, err = resolveCommandPathArg(raw)
+	if err != nil {
+		return "", 0, err
+	}
+	if path == "" {
+		return "", 0, fmt.Errorf("%s", usage)
+	}
+	return path, 0, nil
 }
 
 // buildEditorCmd constructs the process to hand to tea.ExecProcess.

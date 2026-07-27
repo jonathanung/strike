@@ -78,7 +78,7 @@ func (w markdownWindow) view(th theme.Theme) string {
 	if w.path == "" {
 		st := th.Resolve().S()
 		return lipgloss.NewStyle().Width(max(1, w.width)).Render(
-			st.Muted.Render("No file open — /md-read <path>"),
+			st.Muted.Render("No file open — /md-read <path|@path>"),
 		)
 	}
 	return w.vp.View()
