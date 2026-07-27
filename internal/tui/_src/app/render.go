@@ -141,9 +141,11 @@ func (m Model) renderFrame() string {
 
 	if m.modal != nil {
 		var overlay string
-		if tm, ok := m.modal.(*terminalModal); ok {
-			tm.setHostSize(m.width, contentHeight)
-			overlay = tm.view(max(40, m.width-4), m.th)
+		// Large surface modals (editor PTY, markdown reader) stamp host size
+		// and use a near-full outer width; standard dialogs use ModalWidth.
+		if sm, ok := m.modal.(interface{ setHostSize(int, int) }); ok {
+			sm.setHostSize(m.width, contentHeight)
+			overlay = m.modal.view(largeModalOuterWidth(m.width), m.th)
 		} else {
 			overlay = m.modal.view(max(8, ui.ModalWidth(m.width)), m.th)
 		}

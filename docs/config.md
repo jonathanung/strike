@@ -12,6 +12,7 @@ JSON:
   "leanCode": "lite",
   "theme": "strike",
   "vimMode": "pane",
+  "mdReadMode": "embedded",
   "notify": "unfocused-only",
   "permissionMode": "default",
   "permissionAutoApproveSeconds": 0,
@@ -396,19 +397,38 @@ names appear in `/provider` like built-ins. **Logout** (`ctrl+x` or
 config/providers.jsonc and clears credentials; `/settings` `d` does the same.
 Built-in logout only clears credentials.
 
-## Embedded editor (`vimMode`)
+## Surface presentation (`vimMode`, `mdReadMode`)
+
+Editor and markdown-reader surfaces share a presentation vocabulary:
+**embedded** (right-pane chrome) vs **modal** (large centered overlay with
+background scrim). Prefer those names for new config; legacy aliases remain.
+
+### Embedded editor (`vimMode`)
 
 `/vim [path[:line]]` opens a file in an editor. `vimMode` selects how:
 
-| Value | Behavior |
-|---|---|
-| `pane` (default) | embed nvim/vim in the right-pane `editor` window (PTY) |
-| `overlay` | embed in a centered modal overlay |
-| `takeover` | full-screen handoff via `tea.ExecProcess` |
+| Value | Aliases | Behavior |
+|---|---|---|
+| `pane` (default) | `embedded` | embed nvim/vim/nano in the right-pane `editor` window (PTY) |
+| `overlay` | `modal` | large modal popout with background scrim |
+| `takeover` | — | full-screen handoff via `tea.ExecProcess` |
 
 Unknown values are ignored at load time. GUI `$EDITOR` values always take
-over the terminal regardless of `vimMode`. Leave the embedded editor with
-`ctrl+g`.
+over the terminal regardless of `vimMode`. Leave the embedded/modal editor
+with `ctrl+g`.
+
+### Markdown reader (`mdReadMode`)
+
+`/md-read <path>` opens a markdown file. `mdReadMode` selects how:
+
+| Value | Aliases | Behavior |
+|---|---|---|
+| `embedded` (default) | `pane` | right-pane `markdown` window |
+| `modal` | `overlay` | large modal popout with background scrim |
+
+Unknown values are ignored at load time. Dismiss the modal with `esc`, `q`,
+or `ctrl+g`. Preference is read from config at session start (global then
+project merge).
 
 ## Hooks
 

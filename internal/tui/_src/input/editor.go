@@ -15,27 +15,43 @@ import (
 	"github.com/jonathanung/strike-cli/internal/tui/term"
 )
 
-// VimMode selects how /vim presents the editor.
+// VimMode selects how /vim (and future first-class editors) present.
+// Canonical values: pane|overlay|takeover. Config also accepts SurfacePresentation
+// aliases embedded→pane and modal→overlay so editor and md-reader share vocabulary.
 type VimMode string
 
 const (
 	// VimModePane embeds the editor in the right-pane terminal window (default).
 	VimModePane VimMode = "pane"
-	// VimModeOverlay embeds the editor in a centered full-screen overlay.
+	// VimModeOverlay embeds the editor in a large modal overlay with scrim.
 	VimModeOverlay VimMode = "overlay"
 	// VimModeTakeover hands the whole terminal to the editor via tea.ExecProcess.
 	VimModeTakeover VimMode = "takeover"
 )
 
 // ParseVimMode resolves a config/flag value. Empty yields pane (default).
+// Accepts pane|overlay|takeover and aliases embedded|modal.
 func ParseVimMode(value string) (VimMode, bool) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", string(VimModePane):
+	case "", string(VimModePane), string(PresentationEmbedded):
 		return VimModePane, true
-	case string(VimModeOverlay):
+	case string(VimModeOverlay), string(PresentationModal):
 		return VimModeOverlay, true
 	case string(VimModeTakeover):
 		return VimModeTakeover, true
+	default:
+		return "", false
+	}
+}
+
+// Presentation maps editor mode onto the shared SurfacePresentation vocabulary.
+// Takeover is not a surface presentation (full terminal handoff).
+func (m VimMode) Presentation() (SurfacePresentation, bool) {
+	switch m {
+	case "", VimModePane:
+		return PresentationEmbedded, true
+	case VimModeOverlay:
+		return PresentationModal, true
 	default:
 		return "", false
 	}

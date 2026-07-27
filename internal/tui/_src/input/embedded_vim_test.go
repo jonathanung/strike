@@ -19,7 +19,9 @@ func TestParseVimMode(t *testing.T) {
 	}{
 		{in: "", want: VimModePane, ok: true},
 		{in: "pane", want: VimModePane, ok: true},
+		{in: "embedded", want: VimModePane, ok: true},
 		{in: "OVERLAY", want: VimModeOverlay, ok: true},
+		{in: "modal", want: VimModeOverlay, ok: true},
 		{in: "takeover", want: VimModeTakeover, ok: true},
 		{in: "nope", ok: false},
 	}
@@ -28,6 +30,56 @@ func TestParseVimMode(t *testing.T) {
 		if ok != tt.ok || (tt.ok && got != tt.want) {
 			t.Errorf("ParseVimMode(%q) = %q,%v want %q,%v", tt.in, got, ok, tt.want, tt.ok)
 		}
+	}
+}
+
+func TestVimModePresentation(t *testing.T) {
+	tests := []struct {
+		mode VimMode
+		want SurfacePresentation
+		ok   bool
+	}{
+		{mode: "", want: PresentationEmbedded, ok: true},
+		{mode: VimModePane, want: PresentationEmbedded, ok: true},
+		{mode: VimModeOverlay, want: PresentationModal, ok: true},
+		{mode: VimModeTakeover, ok: false},
+	}
+	for _, tt := range tests {
+		got, ok := tt.mode.Presentation()
+		if ok != tt.ok || (tt.ok && got != tt.want) {
+			t.Errorf("%q.Presentation() = %q,%v want %q,%v", tt.mode, got, ok, tt.want, tt.ok)
+		}
+	}
+}
+
+func TestParseSurfacePresentation(t *testing.T) {
+	tests := []struct {
+		in   string
+		want SurfacePresentation
+		ok   bool
+	}{
+		{in: "", want: PresentationEmbedded, ok: true},
+		{in: "embedded", want: PresentationEmbedded, ok: true},
+		{in: "pane", want: PresentationEmbedded, ok: true},
+		{in: "MODAL", want: PresentationModal, ok: true},
+		{in: "overlay", want: PresentationModal, ok: true},
+		{in: "takeover", ok: false},
+		{in: "nope", ok: false},
+	}
+	for _, tt := range tests {
+		got, ok := ParseSurfacePresentation(tt.in)
+		if ok != tt.ok || (tt.ok && got != tt.want) {
+			t.Errorf("ParseSurfacePresentation(%q) = %q,%v want %q,%v", tt.in, got, ok, tt.want, tt.ok)
+		}
+	}
+}
+
+func TestLargeModalOuterWidth(t *testing.T) {
+	if got := largeModalOuterWidth(120); got != 116 {
+		t.Errorf("largeModalOuterWidth(120) = %d, want 116", got)
+	}
+	if got := largeModalOuterWidth(30); got != 40 {
+		t.Errorf("largeModalOuterWidth(30) = %d, want floor 40", got)
 	}
 }
 

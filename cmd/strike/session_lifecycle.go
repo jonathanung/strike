@@ -273,6 +273,10 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 		if mode, ok := tui.ParseVimMode(a.cfg.VimMode); ok {
 			vimMode = mode
 		}
+		mdReadMode := tui.PresentationEmbedded
+		if mode, ok := tui.ParseSurfacePresentation(a.cfg.MdReadMode); ok {
+			mdReadMode = mode
+		}
 		notifyMode := tui.NotifyUnfocusedOnly
 		if mode, ok := tui.ParseNotifyMode(a.cfg.Notify); ok {
 			notifyMode = mode
@@ -296,6 +300,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 			WorkDir:                      a.workDir,
 			FirstRun:                     a.firstRun,
 			VimMode:                      vimMode,
+			MdReadMode:                   mdReadMode,
 			NotifyMode:                   notifyMode,
 			PermissionAutoApproveSeconds: a.cfg.PermissionAutoApproveSeconds,
 			PermissionAutoApproveExclude: a.cfg.PermissionAutoApproveExclude,

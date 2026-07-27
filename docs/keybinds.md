@@ -115,7 +115,14 @@ Child sessions spawned by tools (not concurrent roots):
 
 | Key | Action |
 |---|---|
-| `ctrl+g` | leave editor pane / overlay focus |
+| `ctrl+g` | leave editor pane / close modal overlay |
+
+## Markdown reader modal (`/md-read` when `mdReadMode=modal`)
+
+| Key | Action |
+|---|---|
+| `esc` / `q` / `ctrl+g` | close modal |
+| `↑`/`↓` / pgup/pgdn | scroll |
 
 ## Completion (slash / `@file`)
 

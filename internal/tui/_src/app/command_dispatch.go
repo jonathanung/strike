@@ -993,6 +993,19 @@ func (m Model) handleMDRead(text string, fields []string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	mode := m.mdReadMode
+	if mode == "" {
+		mode = PresentationEmbedded
+	}
+	if mode == PresentationModal {
+		modal := newMarkdownModal(pathArg, string(data))
+		modal.setHostSize(m.width, m.height)
+		m.modal = modal
+		m.clearNotice()
+		m.setNotice("markdown (modal) - esc closes", false)
+		return m, nil
+	}
+
 	loaded := newMarkdownWindow().load(pathArg, string(data))
 	var ok bool
 	m.windows, ok = m.windows.replace(markdownWindowID, loaded, true)
