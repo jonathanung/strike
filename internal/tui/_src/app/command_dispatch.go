@@ -1018,9 +1018,19 @@ func (m Model) handleMDRead(text string, fields []string) (tea.Model, tea.Cmd) {
 	pathArg := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(text), fields[0]))
 	m.resetComposer()
 	if pathArg == "" {
-		m.setNotice("usage: /md-read <path>", true)
+		m.setNotice("usage: /md-read <path|@path>", true)
 		return m, nil
 	}
+	resolved, err := resolveCommandPathArg(pathArg)
+	if err != nil {
+		m.setNotice(err.Error(), true)
+		return m, nil
+	}
+	if resolved == "" {
+		m.setNotice("usage: /md-read <path|@path>", true)
+		return m, nil
+	}
+	pathArg = resolved
 	if m.services.Files == nil {
 		m.setNotice("file reading is unavailable", true)
 		return m, nil

@@ -91,6 +91,61 @@ func TestExtractSessionPR(t *testing.T) {
 	}
 }
 
+func TestBashCWDResetsBetweenCalls(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	root := t.TempDir()
+	sub := filepath.Join(root, "nested")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Distinct absolute path outside root so a sticky cwd would be obvious.
+	outside := t.TempDir()
+	tc := allowAll(root)
+
+	first, err := NewBash().Execute(context.Background(), mustJSON(t, map[string]any{
+		"command": "cd " + outside + " && pwd",
+	}), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(first.Output); got != outside {
+		t.Fatalf("first pwd = %q, want %q", got, outside)
+	}
+
+	second, err := NewBash().Execute(context.Background(), mustJSON(t, map[string]any{
+		"command": "pwd",
+	}), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(second.Output); got != root {
+		t.Fatalf("second pwd = %q, want session root %q (cd must not stick)", got, root)
+	}
+
+	// cd within one call is fine and still starts from root.
+	third, err := NewBash().Execute(context.Background(), mustJSON(t, map[string]any{
+		"command": "cd nested && pwd",
+	}), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(third.Output); got != sub {
+		t.Fatalf("third pwd = %q, want %q", got, sub)
+	}
+
+	fourth, err := NewBash().Execute(context.Background(), mustJSON(t, map[string]any{
+		"command": "pwd",
+	}), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(fourth.Output); got != root {
+		t.Fatalf("fourth pwd = %q, want session root %q", got, root)
+	}
+}
+
 func TestBashRecordsSessionPRFromGH(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")

@@ -12,6 +12,46 @@ import (
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
 
+func TestResolveCommandPathArg(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{name: "empty", in: "", want: ""},
+		{name: "plain", in: "internal/foo.go", want: "internal/foo.go"},
+		{name: "at path", in: "@internal/foo.go", want: "internal/foo.go"},
+		{name: "at spaced", in: "  @pkg/a.go  ", want: "pkg/a.go"},
+		{name: "at dot slash", in: "@./pkg/a.go", want: "pkg/a.go"},
+		{name: "at backslash", in: `@pkg\a.go`, want: "pkg/a.go"},
+		{name: "bare at", in: "@", wantErr: true},
+		{name: "at only spaces after", in: "@   ", wantErr: true},
+		{name: "dotdot", in: "@../secret", wantErr: true},
+		{name: "dot", in: "@.", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveCommandPathArg(tt.in)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				if !strings.Contains(err.Error(), "unresolved") {
+					t.Fatalf("err = %v, want unresolved", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want {
+				t.Fatalf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFindFileMentions(t *testing.T) {
 	tests := []struct {
 		name string

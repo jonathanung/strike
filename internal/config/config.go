@@ -75,6 +75,16 @@ type Config struct {
 	// EndpointOverlays are providers.jsonc options (baseURL/apiKey/headers)
 	// for built-in providers. Not serialized on config JSON.
 	EndpointOverlays map[string]ProviderEndpoint `json:"-"`
+	// DisableDefaultProviders hides all builtin catalog providers when true
+	// (disable-default-providers in config or providers.jsonc). Per-provider
+	// overrides live in DisableDefaultPer. Not round-tripped via standard
+	// json tags alone — loaded via parseDisableDefaultFlags.
+	DisableDefaultProviders bool `json:"-"`
+	// disableDefaultProvidersSet is true when a layer explicitly set the bulk flag.
+	disableDefaultProvidersSet bool `json:"-"`
+	// DisableDefaultPer maps builtin name → disabled for disable-default-<name>.
+	// Explicit false re-enables when DisableDefaultProviders is true.
+	DisableDefaultPer map[string]bool `json:"-"`
 	// CompactionStrategy is "trim" (default: drop older turns) or "summarize"
 	// (replace dropped turns with a model-authored summary). Unknown values
 	// are ignored at load time.
@@ -275,15 +285,7 @@ func Load(workDir string) (Config, error) {
 	if pf, err := loadProvidersFileLayer(GlobalRoot()); err != nil {
 		return cfg, err
 	} else {
-		if len(pf.Customs) > 0 {
-			cfg.Providers = mergeProviders(cfg.Providers, pf.Customs)
-		}
-		if len(pf.Overlays) > 0 {
-			cfg.ModelOverlays = mergeOverlayMaps(cfg.ModelOverlays, pf.Overlays)
-		}
-		if len(pf.Endpoints) > 0 {
-			cfg.EndpointOverlays = mergeEndpointMaps(cfg.EndpointOverlays, pf.Endpoints)
-		}
+		cfg = applyProvidersFile(cfg, pf)
 	}
 	// Project config JSON (optional).
 	if workDir != "" {
@@ -300,18 +302,66 @@ func Load(workDir string) (Config, error) {
 		if pf, err := loadProvidersFileLayer(projectRoot(workDir)); err != nil {
 			return cfg, err
 		} else {
-			if len(pf.Customs) > 0 {
-				cfg.Providers = mergeProviders(cfg.Providers, pf.Customs)
-			}
-			if len(pf.Overlays) > 0 {
-				cfg.ModelOverlays = mergeOverlayMaps(cfg.ModelOverlays, pf.Overlays)
-			}
-			if len(pf.Endpoints) > 0 {
-				cfg.EndpointOverlays = mergeEndpointMaps(cfg.EndpointOverlays, pf.Endpoints)
-			}
+			cfg = applyProvidersFile(cfg, pf)
 		}
 	}
 	return cfg, nil
+}
+
+// applyProvidersFile merges customs/overlays/endpoints and disable-default flags.
+func applyProvidersFile(cfg Config, pf ProvidersFile) Config {
+	if len(pf.Customs) > 0 {
+		cfg.Providers = mergeProviders(cfg.Providers, pf.Customs)
+	}
+	if len(pf.Overlays) > 0 {
+		cfg.ModelOverlays = mergeOverlayMaps(cfg.ModelOverlays, pf.Overlays)
+	}
+	if len(pf.Endpoints) > 0 {
+		cfg.EndpointOverlays = mergeEndpointMaps(cfg.EndpointOverlays, pf.Endpoints)
+	}
+	return mergeDisableDefaultFromFile(cfg, pf)
+}
+
+// IsBuiltinProviderDisabled reports whether a builtin catalog provider is
+// hidden by disable-default-providers / disable-default-<name>. Customs are
+// never disabled. Per-provider false overrides a bulk true.
+func (c Config) IsBuiltinProviderDisabled(name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return false
+	}
+	if _, ok := BuiltinProviderNames[name]; !ok {
+		return false
+	}
+	if v, ok := c.DisableDefaultPer[name]; ok {
+		return v
+	}
+	return c.DisableDefaultProviders
+}
+
+func mergeDisableDefaultFromFile(cfg Config, pf ProvidersFile) Config {
+	if pf.DisableDefaultAll != nil {
+		cfg.DisableDefaultProviders = *pf.DisableDefaultAll
+		cfg.disableDefaultProvidersSet = true
+	}
+	if len(pf.DisableDefaultPer) > 0 {
+		cfg.DisableDefaultPer = mergeDisableDefaultPer(cfg.DisableDefaultPer, pf.DisableDefaultPer)
+	}
+	return cfg
+}
+
+func mergeDisableDefaultPer(base, layer map[string]bool) map[string]bool {
+	if len(layer) == 0 {
+		return cloneBoolMap(base)
+	}
+	out := cloneBoolMap(base)
+	if out == nil {
+		out = make(map[string]bool, len(layer))
+	}
+	for k, v := range layer {
+		out[strings.ToLower(strings.TrimSpace(k))] = v
+	}
+	return out
 }
 
 func read(path string) (Config, error) {
@@ -322,6 +372,18 @@ func read(path string) (Config, error) {
 	var c Config
 	if err := json.Unmarshal(data, &c); err != nil {
 		return Config{}, err
+	}
+	// disable-default-* top-level keys (same names as providers.jsonc).
+	if all, per, err := parseDisableDefaultFlags(data); err != nil {
+		return Config{}, fmt.Errorf("%s: %w", path, err)
+	} else {
+		if all != nil {
+			c.DisableDefaultProviders = *all
+			c.disableDefaultProvidersSet = true
+		}
+		if len(per) > 0 {
+			c.DisableDefaultPer = per
+		}
 	}
 	// Drop invalid custom providers at load so a bad row does not brick startup.
 	if len(c.Providers) > 0 {
@@ -552,7 +614,35 @@ func merge(base, layer Config) Config {
 	base.Providers = mergeProviders(base.Providers, layer.Providers)
 	base.Keybinds = MergeKeybinds(base.Keybinds, layer.Keybinds)
 	base.MCP = mergeMCP(base.MCP, layer.MCP)
+	if layer.disableDefaultProvidersSet {
+		base.DisableDefaultProviders = layer.DisableDefaultProviders
+		base.disableDefaultProvidersSet = true
+	}
+	if len(layer.DisableDefaultPer) > 0 {
+		base.DisableDefaultPer = mergeDisableDefaultPer(base.DisableDefaultPer, layer.DisableDefaultPer)
+	}
 	return base
+}
+
+// parseDisableDefaultFlags extracts disable-default-providers and
+// disable-default-<name> booleans from a JSON object (config or providers map).
+func parseDisableDefaultFlags(data []byte) (all *bool, per map[string]bool, err error) {
+	stripped := bytesTrimSpace(data)
+	if len(stripped) == 0 || stripped[0] != '{' {
+		return nil, nil, nil
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(stripped, &raw); err != nil {
+		return nil, nil, err
+	}
+	for k, v := range raw {
+		handled, herr := applyDisableDefaultKey(&all, &per, k, v)
+		if herr != nil {
+			return nil, nil, herr
+		}
+		_ = handled
+	}
+	return all, per, nil
 }
 
 // mergeMCP: when layer sets Servers (including empty map), it replaces base.

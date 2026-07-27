@@ -16,6 +16,27 @@ type fileMentionSpan struct {
 	End   int    // exclusive byte offset covering @path
 }
 
+// resolveCommandPathArg normalizes a slash-command file path argument.
+// Plain paths are returned unchanged. A leading @ (composer-style mention)
+// is stripped; bare "@", empty after strip, or path-escape forms error as
+// unresolved mentions.
+func resolveCommandPathArg(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	if !strings.HasPrefix(raw, "@") {
+		return raw, nil
+	}
+	path := strings.TrimPrefix(raw, "@")
+	path = strings.ReplaceAll(path, "\\", "/")
+	path = strings.TrimPrefix(path, "./")
+	if path == "" || path == "." || path == ".." || strings.HasPrefix(path, "../") {
+		return "", fmt.Errorf("unresolved file mention %q", raw)
+	}
+	return path, nil
+}
+
 // findFileMentions returns non-overlapping @path tokens. A mention starts at
 // '@' that is at the beginning of the string or after whitespace/newline, and
 // continues through path runes (letters, digits, / \ . - _ + ~).

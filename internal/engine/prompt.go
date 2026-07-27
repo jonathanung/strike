@@ -413,7 +413,8 @@ Here is some useful information about the environment you are running in:
   Is directory a git repo: %s
   Platform: %s
   Today's date: %s
-</env>`, modelLine, workDir, root, isGit, runtime.GOOS, time.Now().Format("Mon Jan 2 2006")))
+</env>
+Each bash and path-based tool call starts in the working directory above. Shell cd inside one bash invocation does not persist to later tool calls.`, modelLine, workDir, root, isGit, runtime.GOOS, time.Now().Format("Mon Jan 2 2006")))
 }
 
 // effectiveSnapshot is a redacted inspect view of system composition.

@@ -90,6 +90,9 @@ func (a authAdapter) Statuses() []host.ProviderStatus {
 	customs := a.customs.List()
 	out := make([]host.ProviderStatus, 0, len(credentialProviders)+len(customs)+1)
 	for _, p := range credentialProviders {
+		if a.customs != nil && a.customs.IsBuiltinDisabled(p.Name) {
+			continue
+		}
 		p.Detail = a.describeProvider(p.Name)
 		p.Authed = p.Detail != "none"
 		if cred, ok := a.store.Get(p.Name); ok && cred.Type == auth.TypeOAuth && !cred.ExpiresAt.IsZero() {
@@ -143,12 +146,14 @@ func (a authAdapter) Statuses() []host.ProviderStatus {
 			BaseURL: resolved.BaseURL,
 		})
 	}
-	out = append(out, host.ProviderStatus{
-		Name:    "echo",
-		Detail:  "offline dev provider",
-		Authed:  true,
-		Builtin: true,
-	})
+	if a.customs == nil || !a.customs.IsBuiltinDisabled("echo") {
+		out = append(out, host.ProviderStatus{
+			Name:    "echo",
+			Detail:  "offline dev provider",
+			Authed:  true,
+			Builtin: true,
+		})
+	}
 	return out
 }
 
