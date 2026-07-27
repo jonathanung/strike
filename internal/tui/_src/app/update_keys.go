@@ -144,6 +144,12 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.viewport.GotoBottom()
 		return m, nil
 	}
+	if key.Matches(msg, m.keyMap.CopyLastResponse) {
+		cmd := m.copyLastAssistantResponse()
+		m.reflow()
+		m.refreshViewport()
+		return m, cmd
+	}
 	if m.focus == focusRight {
 		if m.handleActivityKeys(msg) {
 			return m, nil

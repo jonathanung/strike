@@ -40,6 +40,7 @@ var keybindSlashPrimary = map[string]string{
 	"global.interrupt":     "/interrupt",
 	"global.quit":          "/exit",
 	"global.save-defaults": "/save-defaults",
+	"global.copy-last":     "/copy",
 
 	"editor.leave": "/leave-editor",
 

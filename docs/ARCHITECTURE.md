@@ -268,7 +268,7 @@ Two different mechanisms, depending on whether it needs Go code:
    `autonomy`, `auth`, `settings`, `agent`, `agents`, `activity`, `files`,
    `visualizer`, `system`, `fast`, `vim`, `nano`, `md-read`, `theme`,
    `layout`, `split`, `compact`, `fork`, `undo`, `rewind`, `session`,
-   `export`, `help`, `keys`, `memory`, `issues`, `goal`, `loop`, `context`,
+   `export`, `copy`, `help`, `keys`, `memory`, `issues`, `goal`, `loop`, `context`,
    `effective-prompt`, `cost`, `upgrade`, `init`, `mcp`, `exit`, `quit`, and
    keybind-backed action mirrors such as `focus-left`, `palette`,
    `interrupt`, `agent-next`, `tool-copy`, `subagent`, `root-new`, …) are

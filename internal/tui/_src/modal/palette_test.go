@@ -18,7 +18,7 @@ const paletteCmdTimeout = 2 * time.Second
 func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 	specs := append([]commandSpec{}, builtinCommandSpecs...)
 	specs = append(specs,
-		commandSpec{ID: "copy", Name: "/copy", Description: "copy output", Source: commandSourceBuiltin},
+		commandSpec{ID: "nonesuch", Name: "/nonesuch", Description: "unsupported builtin", Source: commandSourceBuiltin},
 		commandSpec{ID: "future", Name: "/future", Description: "future action", Source: commandSourceBuiltin},
 		commandSpec{ID: "skill:review", Name: "/review", Description: "review a change", Source: commandSourceSkill},
 	)
@@ -54,6 +54,7 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		{ID: "command:session", Label: "/session", Description: "browse and resume a past session", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/session"}},
 		{ID: "command:rename", Label: "/rename", Description: "rename the current session", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/rename"}},
 		{ID: "command:export", Label: "/export", Description: "export the conversation to markdown", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/export"}},
+		{ID: "command:copy", Label: "/copy", Description: "copy the last assistant response to the clipboard", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/copy"}},
 		{ID: "command:help", Label: "/help", Description: "show available commands", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/help"}},
 		{ID: "command:keys", Label: "/keys", Description: "show keyboard shortcuts", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/keys"}},
 		{ID: "command:memory", Label: "/memory", Description: "list, get, set, delete, export, or import project memory", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/memory"}},
@@ -103,7 +104,7 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		t.Errorf("palette entries =\n%#v\nwant\n%#v", got, want)
 	}
 	for _, entry := range got {
-		if entry.Label == "/copy" || entry.Label == "/future" {
+		if entry.Label == "/nonesuch" || entry.Label == "/future" {
 			t.Errorf("palette included unsupported builtin %q", entry.Label)
 		}
 	}
@@ -128,7 +129,7 @@ func TestPaletteAvailabilityAndDisabledSelection(t *testing.T) {
 		assertPaletteInvoke(t, m, "/help", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/help"}})
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
 		assertPaletteInvoke(t, m, "/keys", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/keys"}})
-		// /vim, /nano, /md-read, /think, /export, /cost, /mcp, pane jumps, and prompt inspect stay available mid-turn.
+		// /vim, /nano, /md-read, /think, /export, /copy, /cost, /mcp, pane jumps, and prompt inspect stay available mid-turn.
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
 		assertPaletteInvoke(t, m, "/think", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/think"}})
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
@@ -139,6 +140,8 @@ func TestPaletteAvailabilityAndDisabledSelection(t *testing.T) {
 		assertPaletteInvoke(t, m, "/md-read", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/md-read"}})
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
 		assertPaletteInvoke(t, m, "/export", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/export"}})
+		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
+		assertPaletteInvoke(t, m, "/copy", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/copy"}})
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
 		assertPaletteInvoke(t, m, "/context", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/context"}})
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})

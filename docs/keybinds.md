@@ -35,6 +35,7 @@ Registry: `keybindSlashPrimary` / `keybindNoSlashReason` in
 | `pgup` / `pgdn` | scroll transcript | `/scroll-up`, `/scroll-down` |
 | `ctrl+up` / `ctrl+down` | scroll transcript | `/scroll-up`, `/scroll-down` |
 | `ctrl+t` | jump to latest output | `/jump-bottom` |
+| `alt+y` | copy last assistant response (OSC52) | `/copy` |
 | `ctrl+h` / `ctrl+l` | focus left (primary transcript) / right (secondary pane column) — **orientation-independent** | `/focus-left`, `/focus-right` |
 | `ctrl+o` / `ctrl+p` | cycle right-pane focus next / previous within the active stack group, then to the next group | `/window-next`, `/window-prev` |
 | `ctrl+;` | toggle split orientation | `/layout`, `/split` |
@@ -75,6 +76,7 @@ to a single pane and cycle the same order one at a time. See [usage.md](usage.md
 | `alt+[` / `alt+]` | previous / next tool cell | `/tool-prev`, `/tool-next` |
 | `enter` | expand / collapse tool output or large edit diff; else open `file:line` | `/tool-expand` |
 | `y` | copy cell (tool/explore, else latest assistant/user) | `/tool-copy` |
+| `alt+y` | copy last assistant response only (skips tool cells) | `/copy` |
 | `v` | review edit in editor | `/tool-review` |
 | `a` | apply shown edit/patch into the active worktree (confirm) | `/tool-apply` |
 

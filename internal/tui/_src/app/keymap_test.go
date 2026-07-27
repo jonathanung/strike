@@ -125,7 +125,7 @@ func TestKeybindCatalogCoversAppBindingsAndIsSearchable(t *testing.T) {
 	}
 	for _, id := range []string{
 		"nav.focus-left", "nav.focus-right", "nav.window-next", "nav.window-prev",
-		"global.palette", "global.keyhelp", "composer.external-editor",
+		"global.palette", "global.keyhelp", "global.copy-last", "composer.external-editor",
 		"composer.kill-word", "composer.word-back", "composer.word-fwd",
 		"composer.kill-line-start", "composer.kill-line-end", "composer.yank",
 		"agents.move", "agents.open", "agents.spawn", "agents.interrupt", "agents.rename", "agents.hide", "agents.filter",
