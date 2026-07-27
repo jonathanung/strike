@@ -18,7 +18,7 @@ import (
 const authUsage = `Manage provider credentials.
 
 Usage:
-  strike auth login <anthropic|openai|xai|gemini|kimi|deepseek> [--api-key] [--device] [--oauth]
+  strike auth login <anthropic|openai|xai|gemini|kimi|deepseek> [--api-key] [--device]
   strike auth status
   strike auth logout <provider>
 

@@ -218,6 +218,21 @@ func TestBeginOAuthUnsupported(t *testing.T) {
 	}
 }
 
+func TestBeginOAuthGemini(t *testing.T) {
+	t.Setenv("GOOGLE_CLIENT_ID", "test-client-id.apps.googleusercontent.com")
+	svc, _ := newTestServices(t)
+	login, err := svc.Auth.BeginOAuth(context.Background(), "gemini")
+	if err != nil {
+		t.Fatalf("BeginOAuth(gemini): %v", err)
+	}
+	if login == nil {
+		t.Fatal("BeginOAuth(gemini) returned nil login")
+	}
+	if login.URL == "" {
+		t.Error("URL is empty")
+	}
+}
+
 func TestBeginDeviceUnsupported(t *testing.T) {
 	svc, _ := newTestServices(t)
 	// Only xai supports the device flow; the rest fail fast before network.
