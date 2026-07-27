@@ -201,25 +201,25 @@ func TestLogoutDeletesCustomProvider(t *testing.T) {
 	customs := config.NewCustomStore(nil, "")
 	svc := New(store, nil, nil, nil, nil, nil, customs, "")
 	if err := svc.Providers.Upsert(host.CustomProvider{
-		Name: "kimi", BaseURL: "https://api.moonshot.cn/v1", API: "openai",
+		Name: "acme", BaseURL: "https://api.moonshot.cn/v1", API: "openai",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.Auth.SetAPIKey("kimi", "sk-test"); err != nil {
+	if err := svc.Auth.SetAPIKey("acme", "sk-test"); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.Auth.Logout("kimi"); err != nil {
+	if err := svc.Auth.Logout("acme"); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := svc.Providers.Get("kimi"); ok {
+	if _, ok := svc.Providers.Get("acme"); ok {
 		t.Fatal("custom provider should be deleted on logout")
 	}
-	if _, ok := store.Get("kimi"); ok {
+	if _, ok := store.Get("acme"); ok {
 		t.Fatal("credential should be cleared")
 	}
 	by := statusByName(svc.Auth.Statuses())
-	if _, ok := by["kimi"]; ok {
-		t.Fatal("kimi still listed in Statuses")
+	if _, ok := by["acme"]; ok {
+		t.Fatal("acme still listed in Statuses")
 	}
 }
 
