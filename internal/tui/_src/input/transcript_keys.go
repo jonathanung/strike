@@ -71,9 +71,12 @@ func (m *Model) renderCell(c cell, width int) string {
 }
 
 // handleToolCellKeys handles tool selection (alt+[/]), expand/open-at-line
-// (enter), copy (y), post-edit review (v), and apply patch (a) when the
-// composer is empty. handled is true when the key was consumed; cmd may launch
-// the editor, open a confirm modal, or clear a copied flash.
+// (alt+enter), copy (y), post-edit review (v), and apply patch (a) when the
+// composer is empty. Bare enter is send-only and never expands (#421).
+// alt+enter matches both ToolExpand and Newline; with empty composer this
+// path wins and expands, otherwise Newline inserts. handled is true when the
+// key was consumed; cmd may launch the editor, open a confirm modal, or clear
+// a copied flash.
 func (m *Model) handleToolCellKeys(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
 	if m.focus != focusLeft || m.modal != nil || m.completion != nil {
 		return false, nil
@@ -88,7 +91,7 @@ func (m *Model) handleToolCellKeys(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
 	case key.Matches(msg, m.keyMap.ToolNext):
 		m.moveToolSelection(1)
 		return true, nil
-	case key.Matches(msg, m.keyMap.ToolExpand), key.Matches(msg, m.keyMap.Send):
+	case key.Matches(msg, m.keyMap.ToolExpand):
 		if m.toggleSelectedTool() {
 			return true, nil
 		}
@@ -458,6 +461,54 @@ func setCellCopiedFlash(c cell, on bool) {
 
 func clearCellCopiedFlash(c cell) {
 	setCellCopiedFlash(c, false)
+}
+
+// copyLastAssistantResponse stages OSC52 for the last assistant message plain
+// text (skips tool/explore spam). Uses the newest non-empty assistant cell —
+// complete when the turn finished, or the live stream mid-turn. Notice on
+// success/failure.
+func (m *Model) copyLastAssistantResponse() tea.Cmd {
+	cells := m.displayCells()
+	idx := resolveLastAssistantCopyIndex(cells)
+	if idx < 0 {
+		m.setNotice("no assistant response to copy", true)
+		return nil
+	}
+	text := cellCopyText(cells[idx])
+	if text == "" {
+		m.setNotice("no assistant response to copy", true)
+		return nil
+	}
+	m.cellClip.stage(text)
+	m.copyFlashGen++
+	gen := m.copyFlashGen
+	setCellCopiedFlash(cells[idx], true)
+	for i, c := range cells {
+		if i == idx {
+			continue
+		}
+		clearCellCopiedFlash(c)
+	}
+	m.setNotice("copied last response", false)
+	return tea.Tick(cellCopiedFlash, func(time.Time) tea.Msg {
+		return clearCellCopiedFlashMsg{idx: idx, gen: gen}
+	})
+}
+
+// resolveLastAssistantCopyIndex returns the index of the newest non-empty
+// assistant cell for /copy and alt+y, or -1 when none.
+func resolveLastAssistantCopyIndex(cells []cell) int {
+	for i := len(cells) - 1; i >= 0; i-- {
+		a, ok := cells[i].(*assistantCell)
+		if !ok {
+			continue
+		}
+		if a.copyText() == "" {
+			continue
+		}
+		return i
+	}
+	return -1
 }
 
 // resolveCopyCellIndex prefers the current tool/explore selection when it has

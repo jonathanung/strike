@@ -111,22 +111,26 @@ func TestToggleOrientationAndLayoutCommand(t *testing.T) {
 	if m.splitOrientation != orientVertical {
 		t.Fatalf("after toggle orientation = %v, want vertical", m.splitOrientation)
 	}
-	if !key.Matches(keyMsgAltJ(), m.keyMap.FocusLeft) {
-		t.Error("vertical: ctrl+j (alt+j) should focus top/left")
+	// Chords stay orientation-independent (#414).
+	if !key.Matches(tea.KeyMsg{Type: tea.KeyCtrlH}, m.keyMap.FocusLeft) {
+		t.Error("vertical: ctrl+h should focus left/primary")
 	}
-	if key.Matches(keyMsgAltJ(), m.keyMap.CycleWindowNext) {
-		t.Error("vertical: ctrl+j (alt+j) should not cycle windows")
+	if !key.Matches(tea.KeyMsg{Type: tea.KeyCtrlO}, m.keyMap.CycleWindowNext) {
+		t.Error("vertical: ctrl+o should cycle windows")
+	}
+	if key.Matches(tea.KeyMsg{Type: tea.KeyCtrlJ}, m.keyMap.FocusLeft, m.keyMap.CycleWindowNext) {
+		t.Error("vertical: ctrl+j must remain newline-only")
 	}
 
-	// /layout flips back to horizontal and restores default chords.
+	// /layout flips back to horizontal; chords unchanged.
 	m.composer.SetValue("/layout")
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(Model)
 	if m.splitOrientation != orientHorizontal {
 		t.Fatalf("/layout orientation = %v, want horizontal", m.splitOrientation)
 	}
-	if !key.Matches(keyMsgAltJ(), m.keyMap.CycleWindowNext) {
-		t.Error("horizontal: ctrl+j (alt+j) should cycle windows")
+	if !key.Matches(tea.KeyMsg{Type: tea.KeyCtrlO}, m.keyMap.CycleWindowNext) {
+		t.Error("horizontal: ctrl+o should cycle windows")
 	}
 	if !strings.Contains(m.notice, "horizontal") {
 		t.Errorf("layout notice = %q, want horizontal", m.notice)
@@ -152,7 +156,7 @@ func TestToggleOrientationAndLayoutCommand(t *testing.T) {
 	}
 }
 
-func TestVerticalFocusKeysSwapNotCycle(t *testing.T) {
+func TestVerticalFocusKeysStayOrientationIndependent(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
 	m.windows = windowRegistry{windows: []window{
@@ -164,12 +168,12 @@ func TestVerticalFocusKeysSwapNotCycle(t *testing.T) {
 		t.Fatal("need vertical orientation")
 	}
 	startIdx := m.windows.index
-	// Bare LF and enhanced ctrl+j are focus-top in vertical — never newline (#324).
+	// ctrl+j newlines even in vertical split (#414).
 	m.composer.SetValue("v")
 	m.composer.SetCursor(1)
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
-	if got := m.composer.Value(); got != "v" {
-		t.Errorf("vertical left bare LF composer = %q, want v", got)
+	if got := m.composer.Value(); got != "v\n" {
+		t.Errorf("vertical left bare LF composer = %q, want v\\n", got)
 	}
 	if m.focus != focusLeft {
 		t.Errorf("vertical left bare LF focus = %v, want left", m.focus)
@@ -177,32 +181,21 @@ func TestVerticalFocusKeysSwapNotCycle(t *testing.T) {
 	if m.windows.index != startIdx {
 		t.Errorf("vertical left bare LF cycled window index %d → %d", startIdx, m.windows.index)
 	}
-	// Enhanced ctrl+j while left-focused is focus-top (no-op focus, no newline).
-	m = updateApp(t, m, keyMsgAltJ())
-	if got := m.composer.Value(); got != "v" {
-		t.Errorf("vertical left enhanced ctrl+j composer = %q, want v", got)
-	}
-	if m.focus != focusLeft {
-		t.Errorf("vertical left enhanced ctrl+j focus = %v, want left", m.focus)
-	}
-	// From right pane, vertical bare LF / ctrl+j focuses top/left.
-	m.focus = focusRight
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
-	if m.focus != focusLeft {
-		t.Errorf("vertical right bare LF focus = %v, want left/top", m.focus)
-	}
-	m.focus = focusRight
-	m = updateApp(t, m, keyMsgAltJ())
-	if m.focus != focusLeft {
-		t.Errorf("vertical right ctrl+j focus = %v, want left/top", m.focus)
-	}
-	// Empty composer so ctrl+k is focus-bottom, not kill-line.
-	m.composer.SetValue("")
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+	// ctrl+h / ctrl+l still focus primary/secondary.
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
 	if m.focus != focusRight {
-		t.Errorf("vertical ctrl+k focus = %v, want right/bottom", m.focus)
+		t.Errorf("vertical ctrl+l focus = %v, want right/secondary", m.focus)
 	}
-	// With text mid-line, left-focus ctrl+k kills instead of focusing bottom (#86).
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlH})
+	if m.focus != focusLeft {
+		t.Errorf("vertical ctrl+h focus = %v, want left/primary", m.focus)
+	}
+	// ctrl+o cycles secondary panes.
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlO})
+	if m.windows.active().id() != "b" {
+		t.Errorf("vertical ctrl+o window = %s, want b", m.windows.active().id())
+	}
+	// Mid-line ctrl+k kills; empty ctrl+k opens palette.
 	m.focus = focusLeft
 	m.composer.Focus()
 	m.composer.SetValue("top bottom")
@@ -214,10 +207,13 @@ func TestVerticalFocusKeysSwapNotCycle(t *testing.T) {
 	if got := m.composer.Value(); got != "top" {
 		t.Errorf("vertical left ctrl+k composer = %q, want top", got)
 	}
-	// ctrl+l cycles next window in vertical mode.
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
-	if m.windows.active().id() != "b" {
-		t.Errorf("vertical ctrl+l window = %s, want b", m.windows.active().id())
+	if m.modal != nil {
+		t.Errorf("mid-line kill opened modal %T", m.modal)
+	}
+	m.composer.SetValue("")
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+	if _, ok := m.modal.(*paletteModal); !ok {
+		t.Errorf("empty ctrl+k modal = %T, want palette", m.modal)
 	}
 }
 
@@ -518,7 +514,7 @@ func TestHelpCommandOpensFilterableCatalogModal(t *testing.T) {
 		t.Errorf("/help set notice %q, want empty (modal is unclipped)", m.notice)
 	}
 	wantLabels := []string{
-		"/provider", "/model", "/settings", "/session", "/theme", "/memory",
+		"/provider", "/model", "/settings", "/session", "/rename", "/export", "/copy", "/theme", "/memory",
 		"/issues", "/compact", "/fork", "/undo", "/rewind", "/fast", "/think", "/layout", "/md-read", "/keys", "/exit", "/quit", "/palette", "/interrupt", "/agent-next", "/focus-left", "/review", "tab",
 	}
 	for _, want := range wantLabels {
@@ -557,6 +553,7 @@ func TestKeybindCatalogIncludesJumpBottomToggleAndScroll(t *testing.T) {
 		"nav.toggle-orient": keys.ToggleOrientation.Help().Key,
 		"nav.scroll-up":     keys.ScrollUp.Help().Key,
 		"nav.scroll-down":   keys.ScrollDown.Help().Key,
+		"global.copy-last":  keys.CopyLastResponse.Help().Key,
 	}
 	seen := map[string]keybindEntry{}
 	for _, e := range catalog {

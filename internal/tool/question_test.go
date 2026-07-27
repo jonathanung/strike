@@ -97,6 +97,59 @@ func TestQuestionFreeformSuccess(t *testing.T) {
 	}
 }
 
+func TestQuestionMultiSuccess(t *testing.T) {
+	q := NewQuestion()
+	tc := allowAll(t.TempDir())
+	var saw QuestionRequest
+	tc.AskUser = func(_ context.Context, req QuestionRequest) (QuestionResponse, error) {
+		saw = req
+		return QuestionResponse{Answers: []string{"Go", "tests"}}, nil
+	}
+	res, err := q.Execute(context.Background(), mustJSON(t, map[string]any{
+		"questions": []map[string]any{
+			{
+				"id":       "lang",
+				"header":   "Lang",
+				"question": "Which language?",
+				"options": []map[string]any{
+					{"label": "Go", "description": "gopher"},
+					{"label": "Rust", "description": "crab"},
+				},
+			},
+			{
+				"question": "Any notes?",
+			},
+		},
+	}), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(saw.Questions) != 2 {
+		t.Fatalf("AskUser questions = %d, want 2", len(saw.Questions))
+	}
+	if saw.Questions[0].ID != "lang" || saw.Questions[0].Question != "Which language?" {
+		t.Errorf("q0 = %#v", saw.Questions[0])
+	}
+	if len(saw.Questions[0].Options) != 2 || saw.Questions[0].Options[0].Label != "Go" {
+		t.Errorf("q0 options = %#v", saw.Questions[0].Options)
+	}
+	if saw.Questions[1].ID != "q2" { // default id when omitted
+		t.Errorf("q1 id = %q, want q2", saw.Questions[1].ID)
+	}
+	if len(saw.Questions[1].Options) != 0 {
+		t.Errorf("q1 should be freeform, got %#v", saw.Questions[1].Options)
+	}
+	if res.Title != "Asked 2 questions" {
+		t.Errorf("title = %q", res.Title)
+	}
+	if !strings.Contains(res.Output, "Go") || !strings.Contains(res.Output, "tests") {
+		t.Errorf("output missing both answers: %q", res.Output)
+	}
+	if !strings.Contains(res.Output, "Which language?") || !strings.Contains(res.Output, "Any notes?") {
+		t.Errorf("output missing question text: %q", res.Output)
+	}
+}
+
 func TestQuestionNilAskUser(t *testing.T) {
 	q := NewQuestion()
 	tc := allowAll(t.TempDir())

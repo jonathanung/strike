@@ -26,7 +26,7 @@ type DiffPreviewOpts struct {
 	// Empty skips relative path links; absolute paths and empty Path are fine.
 	LinkBase string
 	// MoreHint, when non-empty and the body is truncated, is appended after the
-	// more-lines count (for example "enter to expand").
+	// more-lines count (for example "alt+enter to expand").
 	MoreHint string
 }
 

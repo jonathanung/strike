@@ -231,16 +231,16 @@ func TestSubagentResultExpandViaEnter(t *testing.T) {
 	})
 	m.composer.SetValue("")
 	m.reflow()
-	// Select + expand like empty-enter tool convention.
+	// Select + expand via tool-expand path (alt+enter when composer empty).
 	if !m.toggleSelectedTool() {
-		t.Fatal("enter should expand subagent result")
+		t.Fatal("toggle should expand subagent result")
 	}
 	sc, ok := m.cells[len(m.cells)-1].(*subagentResultCell)
 	if !ok || !sc.expanded {
 		t.Fatalf("expanded=%v type=%T", ok && sc.expanded, m.cells[len(m.cells)-1])
 	}
 	if !m.toggleSelectedTool() || sc.expanded {
-		t.Fatal("second enter should collapse")
+		t.Fatal("second toggle should collapse")
 	}
 }
 

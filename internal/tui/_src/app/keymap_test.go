@@ -18,14 +18,16 @@ func TestDefaultKeyMapBindingsMatchTheirRequiredKeysAndHaveHelp(t *testing.T) {
 		{"quit", keys.Quit, tea.KeyMsg{Type: tea.KeyCtrlC}},
 		{"focus left", keys.FocusLeft, tea.KeyMsg{Type: tea.KeyCtrlH}},
 		{"focus right", keys.FocusRight, tea.KeyMsg{Type: tea.KeyCtrlL}},
-		{"window next alt+j", keys.CycleWindowNext, keyMsgAltJ()},
-		{"window next bare LF", keys.CycleWindowNext, tea.KeyMsg{Type: tea.KeyCtrlJ}},
-		{"window prev", keys.CycleWindowPrev, tea.KeyMsg{Type: tea.KeyCtrlK}},
-		{"palette", keys.Palette, tea.KeyMsg{Type: tea.KeyCtrlP}},
+		{"window next ctrl+o", keys.CycleWindowNext, tea.KeyMsg{Type: tea.KeyCtrlO}},
+		{"window prev ctrl+p", keys.CycleWindowPrev, tea.KeyMsg{Type: tea.KeyCtrlP}},
+		{"palette", keys.Palette, tea.KeyMsg{Type: tea.KeyCtrlK}},
 		{"keyhelp", keys.KeyHelp, tea.KeyMsg{Type: tea.KeyF1}},
 		{"interrupt", keys.Interrupt, tea.KeyMsg{Type: tea.KeyEsc}},
 		{"send", keys.Send, tea.KeyMsg{Type: tea.KeyEnter}},
 		{"newline alt+enter", keys.Newline, tea.KeyMsg{Type: tea.KeyEnter, Alt: true}},
+		{"newline bare LF ctrl+j", keys.Newline, tea.KeyMsg{Type: tea.KeyCtrlJ}},
+		{"newline enhanced ctrl+j", keys.Newline, keyMsgAltJ()},
+		{"tool expand alt+enter", keys.ToolExpand, tea.KeyMsg{Type: tea.KeyEnter, Alt: true}},
 		{"external editor", keys.ExternalEditor, tea.KeyMsg{Type: tea.KeyCtrlE}},
 	}
 	for _, tt := range tests {
@@ -39,23 +41,38 @@ func TestDefaultKeyMapBindingsMatchTheirRequiredKeysAndHaveHelp(t *testing.T) {
 			}
 		})
 	}
-	// CycleWindowNext help stays ctrl+j; bare LF and enhanced alt+j both match.
-	if keys.CycleWindowNext.Help().Key != "ctrl+j" {
-		t.Errorf("CycleWindowNext help key = %q, want ctrl+j", keys.CycleWindowNext.Help().Key)
+	if keys.CycleWindowNext.Help().Key != "ctrl+o" {
+		t.Errorf("CycleWindowNext help key = %q, want ctrl+o", keys.CycleWindowNext.Help().Key)
 	}
-	if key.Matches(tea.KeyMsg{Type: tea.KeyCtrlJ}, keys.Newline) {
-		t.Error("bare KeyCtrlJ must not match Newline (#324)")
+	if keys.CycleWindowPrev.Help().Key != "ctrl+p" {
+		t.Errorf("CycleWindowPrev help key = %q, want ctrl+p", keys.CycleWindowPrev.Help().Key)
 	}
-	if key.Matches(keyMsgAltJ(), keys.Newline) {
-		t.Error("alt+j (enhanced ctrl+j) must not match Newline (#324)")
+	if keys.Palette.Help().Key != "ctrl+k" {
+		t.Errorf("Palette help key = %q, want ctrl+k", keys.Palette.Help().Key)
 	}
-	// Newline help advertises shift+enter; binding is alt+enter after CSI rewrite.
+	// ctrl+j / bare LF / enhanced alt+j are newline, never pane cycle (#414).
+	if key.Matches(tea.KeyMsg{Type: tea.KeyCtrlJ}, keys.CycleWindowNext, keys.CycleWindowPrev) {
+		t.Error("bare KeyCtrlJ must not match CycleWindow* (#414)")
+	}
+	if key.Matches(keyMsgAltJ(), keys.CycleWindowNext, keys.CycleWindowPrev) {
+		t.Error("alt+j (enhanced ctrl+j) must not match CycleWindow* (#414)")
+	}
+	if key.Matches(tea.KeyMsg{Type: tea.KeyCtrlP}, keys.Palette) {
+		t.Error("ctrl+p must not match Palette (window-prev) (#414)")
+	}
 	newlineHelp := keys.Newline.Help()
-	if newlineHelp.Key != "shift+enter" {
-		t.Errorf("Newline help key = %q, want shift+enter", newlineHelp.Key)
+	if newlineHelp.Key != "ctrl+j/shift+enter" {
+		t.Errorf("Newline help key = %q, want ctrl+j/shift+enter", newlineHelp.Key)
 	}
 	if newlineHelp.Desc != "newline" {
 		t.Errorf("Newline help desc = %q, want newline", newlineHelp.Desc)
+	}
+	// ToolExpand shares alt+enter with Newline; routing is composer-empty only (#421).
+	if keys.ToolExpand.Help().Key != "alt+enter" {
+		t.Errorf("ToolExpand help key = %q, want alt+enter", keys.ToolExpand.Help().Key)
+	}
+	if key.Matches(tea.KeyMsg{Type: tea.KeyEnter}, keys.ToolExpand) {
+		t.Error("bare enter must not match ToolExpand (#421)")
 	}
 }
 
@@ -65,8 +82,9 @@ func keyMsgAltJ() tea.KeyMsg {
 }
 
 // TestShiftEnterKeyMsgDoesNotMatchCycleWindow pins that the post-WrapInput
-// KeyMsg for shift+enter (KeyEnter+Alt) matches Newline only — never
-// CycleWindow*/Send/Focus* — under both split orientations (#53).
+// KeyMsg for shift+enter (KeyEnter+Alt) matches Newline and ToolExpand (shared
+// chord, context-routed) — never CycleWindow*/Send/Focus* — under both split
+// orientations (#53, #421).
 func TestShiftEnterKeyMsgDoesNotMatchCycleWindow(t *testing.T) {
 	msg := tea.KeyMsg{Type: tea.KeyEnter, Alt: true}
 	for _, tt := range []struct {
@@ -81,6 +99,9 @@ func TestShiftEnterKeyMsgDoesNotMatchCycleWindow(t *testing.T) {
 			keys.applyOrientationKeys(tt.orient)
 			if !key.Matches(msg, keys.Newline) {
 				t.Error("KeyEnter+Alt must match Newline")
+			}
+			if !key.Matches(msg, keys.ToolExpand) {
+				t.Error("KeyEnter+Alt must match ToolExpand (#421)")
 			}
 			if key.Matches(msg, keys.CycleWindowNext) {
 				t.Error("KeyEnter+Alt must not match CycleWindowNext")
@@ -116,7 +137,7 @@ func TestKeybindCatalogCoversAppBindingsAndIsSearchable(t *testing.T) {
 	}
 	for _, id := range []string{
 		"nav.focus-left", "nav.focus-right", "nav.window-next", "nav.window-prev",
-		"global.palette", "global.keyhelp", "composer.external-editor",
+		"global.palette", "global.keyhelp", "global.copy-last", "composer.external-editor",
 		"composer.kill-word", "composer.word-back", "composer.word-fwd",
 		"composer.kill-line-start", "composer.kill-line-end", "composer.yank",
 		"agents.move", "agents.open", "agents.spawn", "agents.interrupt", "agents.rename", "agents.hide", "agents.filter",
@@ -407,47 +428,51 @@ func TestVimPaneAndWindowKeys(t *testing.T) {
 		t.Fatalf("ctrl+h focus = %v/composer=%v, want left/focused", m.focus, m.composer.Focused())
 	}
 
-	// Bare LF (KeyCtrlJ) and enhanced ctrl+j (alt+j) both cycle from left (#324).
+	// ctrl+o / ctrl+p cycle secondary panes from left focus without editing (#414).
 	m.composer.SetValue("draft")
 	m.composer.SetCursor(len("draft"))
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlO})
 	if got := m.composer.Value(); got != "draft" {
-		t.Fatalf("bare LF composer = %q, want draft (no newline)", got)
+		t.Fatalf("ctrl+o composer = %q, want draft", got)
 	}
 	if m.windows.index != 1 || m.windows.active().id() != "b" {
-		t.Fatalf("left bare LF window = %d/%s, want 1/b", m.windows.index, m.windows.active().id())
+		t.Fatalf("left ctrl+o window = %d/%s, want 1/b", m.windows.index, m.windows.active().id())
 	}
-	m = updateApp(t, m, keyMsgAltJ())
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlO})
 	if m.windows.index != 2 || m.windows.active().id() != "c" {
-		t.Fatalf("left enhanced ctrl+j window = %d/%s, want 2/c", m.windows.index, m.windows.active().id())
-	}
-	if got := m.composer.Value(); got != "draft" {
-		t.Fatalf("left enhanced ctrl+j changed composer to %q", got)
+		t.Fatalf("left second ctrl+o window = %d/%s, want 2/c", m.windows.index, m.windows.active().id())
 	}
 
-	// Cycle windows with ctrl+j while the right pane is focused.
+	// ctrl+j inserts newline, does not cycle (#414).
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	if got := m.composer.Value(); got != "draft\n" {
+		t.Fatalf("ctrl+j composer = %q, want draft\\n", got)
+	}
+	if m.windows.active().id() != "c" {
+		t.Fatalf("ctrl+j cycled window to %s", m.windows.active().id())
+	}
+
+	// Cycle windows with ctrl+o while the right pane is focused; ctrl+p prev.
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
 	if m.focus != focusRight {
 		t.Fatalf("ctrl+l focus = %v, want right", m.focus)
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlO})
 	if m.windows.index != 0 || m.windows.active().id() != "a" {
-		t.Errorf("right bare LF window = %d/%s, want 0/a", m.windows.index, m.windows.active().id())
+		t.Errorf("right ctrl+o window = %d/%s, want 0/a", m.windows.index, m.windows.active().id())
 	}
-	m = updateApp(t, m, keyMsgAltJ())
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlO})
 	if m.windows.active().id() != "b" {
-		t.Errorf("second right ctrl+j window = %s, want b", m.windows.active().id())
+		t.Errorf("second right ctrl+o window = %s, want b", m.windows.active().id())
 	}
-	// Empty composer: ctrl+k still cycles prev (kill only claims when it deletes).
-	// Active is b; prev → a, then c.
-	m.composer.SetValue("")
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+	// Active is b; ctrl+p prev → a, then c.
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlP})
 	if m.windows.active().id() != "a" {
-		t.Errorf("ctrl+k window = %s, want a", m.windows.active().id())
+		t.Errorf("ctrl+p window = %s, want a", m.windows.active().id())
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlP})
 	if m.windows.active().id() != "c" {
-		t.Errorf("second ctrl+k window = %s, want c", m.windows.active().id())
+		t.Errorf("second ctrl+p window = %s, want c", m.windows.active().id())
 	}
 }
 
@@ -551,19 +576,25 @@ func TestKeysResetRestoresDefaults(t *testing.T) {
 func TestBuildKeyMapOrientationPreservesOverrides(t *testing.T) {
 	overrides := map[string][]string{
 		"nav.focus-left":  {"alt+h"},
-		"nav.window-next": {"alt+j"},
+		"nav.window-next": {"alt+o"},
 	}
 	horiz := buildKeyMap(overrides, orientHorizontal)
 	if !key.Matches(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}, Alt: true}, horiz.FocusLeft) {
 		t.Fatal("horizontal focus-left override")
 	}
-	vert := buildKeyMap(overrides, orientVertical)
-	// Vertical swaps: focus-left gets window-next chords (alt+j).
-	if !key.Matches(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}, Alt: true}, vert.FocusLeft) {
-		t.Fatal("vertical focus-left should use former window-next override")
+	if !key.Matches(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}, Alt: true}, horiz.CycleWindowNext) {
+		t.Fatal("horizontal window-next override")
 	}
-	if !key.Matches(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}, Alt: true}, vert.CycleWindowPrev) {
-		t.Fatal("vertical window-prev should use former focus-left override")
+	vert := buildKeyMap(overrides, orientVertical)
+	// Orientation-independent: overrides stay on the same actions (#414).
+	if !key.Matches(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}, Alt: true}, vert.FocusLeft) {
+		t.Fatal("vertical focus-left should keep override")
+	}
+	if !key.Matches(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}, Alt: true}, vert.CycleWindowNext) {
+		t.Fatal("vertical window-next should keep override")
+	}
+	if key.Matches(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}, Alt: true}, vert.FocusLeft) {
+		t.Fatal("vertical must not swap window-next onto focus-left")
 	}
 }
 

@@ -34,9 +34,14 @@ type keyMap struct {
 	ScrollDown        key.Binding
 	JumpBottom        key.Binding
 	ToggleOrientation key.Binding
+	// CopyLastResponse copies the last assistant message (not tool spam) via
+	// OSC52. Global so it works while drafting a follow-up (alt+y).
+	CopyLastResponse key.Binding
 	// Tool cell selection/expand/copy/review/apply when the composer is empty
-	// (enter still sends when there is text; y/v/a still type when the composer
-	// has content; v/a only act with a selected tool cell).
+	// (enter still sends when there is text; alt+enter is newline while typing
+	// and expand only with an empty composer — see handleToolCellKeys; y/v/a
+	// still type when the composer has content; v/a only act with a selected
+	// tool cell).
 	ToolPrev   key.Binding
 	ToolNext   key.Binding
 	ToolExpand key.Binding
@@ -44,8 +49,8 @@ type keyMap struct {
 	ToolReview key.Binding
 	ToolApply  key.Binding
 
-	// Composer readline editing (focusLeft only). ctrl+k must not be stolen by
-	// CycleWindowPrev / vertical FocusRight; palette/global chords stay global.
+	// Composer readline editing (focusLeft only). ctrl+k kill-to-end claims the
+	// event only when it deletes; otherwise global.palette (also ctrl+k) may run.
 	KillWord      key.Binding
 	WordBackward  key.Binding
 	WordForward   key.Binding
@@ -63,15 +68,17 @@ type keyMap struct {
 
 func defaultKeyMap() keyMap {
 	return keyMap{
-		Quit:       key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
+		Quit: key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
+		// FocusLeft/Right are orientation-independent: primary (transcript) vs
+		// secondary (right/stack) pane column, even when the split is top/bottom (#414).
 		FocusLeft:  key.NewBinding(key.WithKeys("ctrl+h"), key.WithHelp("ctrl+h", "focus left")),
 		FocusRight: key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("ctrl+l", "focus right")),
-		// CycleWindowNext: user chord is ctrl+j. Enhanced CSI rewrites to alt+j;
-		// bare LF is also KeyCtrlJ (Ubuntu/legacy terminals). Both cycle panes —
-		// never newline (#324). Newline is shift+enter → alt+enter only.
-		CycleWindowNext:   key.NewBinding(key.WithKeys("alt+j", "ctrl+j"), key.WithHelp("ctrl+j", "next window")),
-		CycleWindowPrev:   key.NewBinding(key.WithKeys("ctrl+k"), key.WithHelp("ctrl+k", "prev window")),
-		Palette:           key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "palette")),
+		// Cycle secondary-stack panes. ctrl+o / ctrl+p — not orientation-swapped (#414).
+		CycleWindowNext: key.NewBinding(key.WithKeys("ctrl+o"), key.WithHelp("ctrl+o", "next window")),
+		CycleWindowPrev: key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "prev window")),
+		// Palette moved off ctrl+p (now window-prev). ctrl+k is free of pane-cycle;
+		// kill-to-end still claims mid-line first via readline routing.
+		Palette:           key.NewBinding(key.WithKeys("ctrl+k"), key.WithHelp("ctrl+k", "palette")),
 		KeyHelp:           key.NewBinding(key.WithKeys("f1"), key.WithHelp("f1", "keybinds")),
 		Interrupt:         key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "interrupt")),
 		TerminalLeave:     key.NewBinding(key.WithKeys("ctrl+g"), key.WithHelp("ctrl+g", "leave editor")),
@@ -80,9 +87,9 @@ func defaultKeyMap() keyMap {
 		CompletionPrev:    key.NewBinding(key.WithKeys("up"), key.WithHelp("up", "previous")),
 		CompletionNext:    key.NewBinding(key.WithKeys("down", "ctrl+n"), key.WithHelp("down/ctrl+n", "next")),
 		Send:              key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "send")),
-		// Newline: alt+enter is the post-WrapInput form of enhanced shift+enter
-		// CSI. Bare LF (KeyCtrlJ) is ctrl+j pane cycle, not newline (#324).
-		Newline:        key.NewBinding(key.WithKeys("alt+enter"), key.WithHelp("shift+enter", "newline")),
+		// Newline: shift+enter → alt+enter after WrapInput CSI rewrite; ctrl+j is
+		// bare LF / KeyCtrlJ (Ubuntu) and enhanced CSI → alt+j (#414; was cycle in #324).
+		Newline:        key.NewBinding(key.WithKeys("alt+enter", "ctrl+j", "alt+j"), key.WithHelp("ctrl+j/shift+enter", "newline")),
 		ExternalEditor: key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("ctrl+e", "external editor")),
 		HistoryPrev:    key.NewBinding(key.WithKeys("up"), key.WithHelp("up", "history previous")),
 		HistoryNext:    key.NewBinding(key.WithKeys("down"), key.WithHelp("down", "history next")),
@@ -100,11 +107,16 @@ func defaultKeyMap() keyMap {
 		// ctrl+semicolon, so WrapInput rewrites enhanced ctrl+; CSI to alt+;
 		// (same pattern as shift+enter → alt+enter for Newline).
 		ToggleOrientation: key.NewBinding(key.WithKeys("alt+;"), key.WithHelp("ctrl+;", "toggle split")),
+		// CopyLastResponse: alt+y stays off the printable path so it works with
+		// composer text present (unlike bare y cell-copy).
+		CopyLastResponse: key.NewBinding(key.WithKeys("alt+y"), key.WithHelp("alt+y", "copy last response")),
 		// Tool cell nav: only when composer is empty (see Model.handleToolCellKeys).
 		// alt+[/] avoid stealing printable brackets from the composer.
+		// Expand is alt+enter (not bare enter/send). Same chord is newline when
+		// the composer has text — handleToolCellKeys runs first only if empty (#421).
 		ToolPrev:   key.NewBinding(key.WithKeys("alt+["), key.WithHelp("alt+[", "prev tool cell")),
 		ToolNext:   key.NewBinding(key.WithKeys("alt+]"), key.WithHelp("alt+]", "next tool cell")),
-		ToolExpand: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "expand tool / open file:line")),
+		ToolExpand: key.NewBinding(key.WithKeys("alt+enter"), key.WithHelp("alt+enter", "expand tool / open file:line")),
 		// ToolCopy: bare y when composer is empty (yank selected/latest cell,
 		// including assistant/user chat text via OSC52).
 		ToolCopy:   key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy cell")),
@@ -153,19 +165,12 @@ func defaultAgentsKeyMap() agentsKeyMap {
 	}
 }
 
-// applyOrientationKeys swaps focus vs cycle chords for vertical splits.
-// Caller must start from a horizontal baseline (defaultKeyMap + overrides);
-// horizontal is a no-op. Vertical swaps the pairs and updates help text.
+// applyOrientationKeys is a no-op: focus (ctrl+h/l) and window cycle (ctrl+o/p)
+// are orientation-independent — left/right mean primary transcript vs secondary
+// pane column even when the split is stacked top/bottom (#414).
 func (k *keyMap) applyOrientationKeys(orient splitOrientation) {
-	if orient != orientVertical {
-		return
-	}
-	fl, fr := k.FocusLeft, k.FocusRight
-	cn, cp := k.CycleWindowNext, k.CycleWindowPrev
-	k.FocusLeft = rebindFrom(cn, "focus top")
-	k.FocusRight = rebindFrom(cp, "focus bottom")
-	k.CycleWindowNext = rebindFrom(fr, "next window")
-	k.CycleWindowPrev = rebindFrom(fl, "prev window")
+	_ = k
+	_ = orient
 }
 
 func rebindFrom(src key.Binding, desc string) key.Binding {
@@ -205,15 +210,15 @@ func applyKeybindOverrides(k *keyMap, overrides map[string][]string) {
 	}
 	set(&k.FocusLeft, "nav.focus-left", "")
 	set(&k.FocusRight, "nav.focus-right", "")
-	set(&k.CycleWindowNext, "nav.window-next", "ctrl+j")
-	set(&k.CycleWindowPrev, "nav.window-prev", "")
+	set(&k.CycleWindowNext, "nav.window-next", "ctrl+o")
+	set(&k.CycleWindowPrev, "nav.window-prev", "ctrl+p")
 	set(&k.ScrollUp, "nav.scroll-up", "")
 	set(&k.ScrollDown, "nav.scroll-down", "")
 	set(&k.JumpBottom, "nav.jump-bottom", "")
 	set(&k.ToggleOrientation, "nav.toggle-orient", "ctrl+;")
 	set(&k.ToolPrev, "nav.tool-prev", "")
 	set(&k.ToolNext, "nav.tool-next", "")
-	set(&k.ToolExpand, "nav.tool-expand", "")
+	set(&k.ToolExpand, "nav.tool-expand", "alt+enter")
 	set(&k.ToolCopy, "nav.tool-copy", "")
 	set(&k.ToolReview, "nav.tool-review", "")
 	set(&k.ToolApply, "nav.tool-apply", "")
@@ -227,9 +232,10 @@ func applyKeybindOverrides(k *keyMap, overrides map[string][]string) {
 	set(&k.Interrupt, "global.interrupt", "")
 	set(&k.Quit, "global.quit", "")
 	set(&k.SaveDefaults, "global.save-defaults", "")
+	set(&k.CopyLastResponse, "global.copy-last", "")
 	set(&k.TerminalLeave, "editor.leave", "")
 	set(&k.Send, "composer.send", "")
-	set(&k.Newline, "composer.newline", "shift+enter")
+	set(&k.Newline, "composer.newline", "ctrl+j/shift+enter")
 	set(&k.ExternalEditor, "composer.external-editor", "")
 	set(&k.HistoryPrev, "composer.history-prev", "")
 	set(&k.HistoryNext, "composer.history-next", "")
@@ -405,6 +411,7 @@ func keybindCatalog(keys keyMap) []keybindEntry {
 		from("global.interrupt", "Global", keys.Interrupt),
 		from("global.quit", "Global", keys.Quit),
 		from("global.save-defaults", "Global", keys.SaveDefaults),
+		from("global.copy-last", "Global", keys.CopyLastResponse),
 		from("editor.leave", "Editor", keys.TerminalLeave),
 
 		from("composer.send", "Composer", keys.Send),

@@ -27,12 +27,11 @@ func (m Model) updateComposer(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// applyComposerReadline handles focusLeft readline chords so they are not
-// stolen by window-cycle / focus bindings (notably ctrl+k). Palette and other
-// global chords are matched earlier and remain global.
+// applyComposerReadline handles focusLeft readline chords so kill-to-end
+// (ctrl+k) is not stolen by the palette binding that shares the same chord.
 //
 // ctrl+k only claims the event when it deletes text; at EOL / empty composer it
-// falls through so vertical FocusRight and horizontal CycleWindowPrev still work.
+// falls through so global.palette (also ctrl+k) can open.
 func (m Model) applyComposerReadline(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	switch {
 	case key.Matches(msg, m.keyMap.Yank):
@@ -61,7 +60,7 @@ func (m Model) applyComposerReadline(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		nm := next.(Model)
 		killed, ok := contiguousDeletion(before, nm.composer.Value())
 		if !ok {
-			// No deletion — leave the key for nav (cycle prev / focus bottom).
+			// No deletion — leave the key for palette (shared ctrl+k).
 			return m, nil, false
 		}
 		nm.killBuf = killed

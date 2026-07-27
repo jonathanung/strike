@@ -673,7 +673,7 @@ func TestStackedRightPaneCollapsesWhenCompact(t *testing.T) {
 	}
 	// Cycle still walks full focus order one pane at a time.
 	start := m.windows.active().id()
-	m = updateApp(t, m, keyMsgAltJ())
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlO})
 	if m.windows.active().id() == start {
 		t.Error("compact cycle did not advance focus")
 	}
