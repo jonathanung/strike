@@ -5,9 +5,65 @@ import (
 	"bytes"
 	"encoding/binary"
 	"net"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestUpgradeWebSocketClearsHijackedConnectionDeadline(t *testing.T) {
+	conn := &deadlineRecordingConn{}
+	w := &hijackResponseWriter{
+		conn:  conn,
+		bufrw: bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn)),
+	}
+	r, err := http.NewRequest(http.MethodGet, "/api/live", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Header.Set("Upgrade", "websocket")
+	r.Header.Set("Connection", "Upgrade")
+	r.Header.Set("Sec-WebSocket-Version", "13")
+	r.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+
+	ws, err := upgradeWebSocket(w, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ws.conn != conn {
+		t.Fatal("upgradeWebSocket returned a different connection")
+	}
+	if len(conn.deadlines) != 1 || !conn.deadlines[0].IsZero() {
+		t.Fatalf("SetDeadline calls = %v, want one zero deadline", conn.deadlines)
+	}
+}
+
+type hijackResponseWriter struct {
+	conn  net.Conn
+	bufrw *bufio.ReadWriter
+}
+
+func (*hijackResponseWriter) Header() http.Header       { return make(http.Header) }
+func (*hijackResponseWriter) Write([]byte) (int, error) { return 0, nil }
+func (*hijackResponseWriter) WriteHeader(int)           {}
+func (w *hijackResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return w.conn, w.bufrw, nil
+}
+
+type deadlineRecordingConn struct {
+	bytes.Buffer
+	deadlines []time.Time
+}
+
+func (*deadlineRecordingConn) Close() error         { return nil }
+func (*deadlineRecordingConn) LocalAddr() net.Addr  { return nil }
+func (*deadlineRecordingConn) RemoteAddr() net.Addr { return nil }
+func (c *deadlineRecordingConn) SetDeadline(t time.Time) error {
+	c.deadlines = append(c.deadlines, t)
+	return nil
+}
+func (*deadlineRecordingConn) SetReadDeadline(time.Time) error  { return nil }
+func (*deadlineRecordingConn) SetWriteDeadline(time.Time) error { return nil }
 
 func TestWebSocketMessageLimitAcrossFragments(t *testing.T) {
 	serverConn, clientConn := net.Pipe()

@@ -51,6 +51,10 @@ func upgradeWebSocket(w http.ResponseWriter, r *http.Request) (*wsConn, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("clear hijacked connection deadline: %w", err)
+	}
 
 	accept := wsAcceptKey(key)
 	_, _ = fmt.Fprintf(bufrw, "HTTP/1.1 101 Switching Protocols\r\n")
