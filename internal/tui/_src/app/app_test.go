@@ -792,6 +792,70 @@ func TestModelAndAgentSlashCommandsEmitSelections(t *testing.T) {
 		assertNoAppOp(t, ops)
 	})
 
+	t.Run("model provider/model switches provider", func(t *testing.T) {
+		m, ops := newAppTestModel(nil, nil)
+		m.providerName = "openai"
+		m.composer.SetValue("/model xai/grok-test")
+
+		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m = updated.(Model)
+		runAppCmd(t, cmd)
+
+		want := protocol.SelectModel{Provider: "xai", Model: "grok-test"}
+		if got := receiveAppOp(t, ops); got != want {
+			t.Errorf("operation = %#v, want %#v", got, want)
+		}
+		assertNoAppOp(t, ops)
+	})
+
+	t.Run("bare /model loads all authenticated providers", func(t *testing.T) {
+		m, _ := newAppTestModel(nil, nil)
+		m.providerName = "openai"
+		m.modelName = "gpt-a"
+		cat := &fakeCatalog{ids: map[string][]string{
+			"openai": {"gpt-a"},
+			"xai":    {"grok-b"},
+			"echo":   {"echo"},
+		}}
+		m.services.Catalog = cat
+		m.services.Auth = &fakeAuth{statuses: []host.ProviderStatus{
+			{Name: "openai", Authed: true},
+			{Name: "xai", Authed: true},
+			{Name: "echo", Authed: true, Builtin: true},
+			{Name: "anthropic", Authed: false},
+		}}
+		m.composer.SetValue("/model")
+		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m = updated.(Model)
+		if _, ok := m.modal.(*modelModal); !ok {
+			t.Fatalf("modal = %T", m.modal)
+		}
+		if cmd == nil {
+			t.Fatal("expected load cmd")
+		}
+		msg := cmd()
+		loaded, ok := msg.(modelsLoadedMsg)
+		if !ok {
+			t.Fatalf("msg type %T", msg)
+		}
+		if loaded.err != nil {
+			t.Fatalf("load err: %v", loaded.err)
+		}
+		if len(loaded.models) != 3 {
+			t.Fatalf("models = %#v, want 3 from openai+xai+echo", loaded.models)
+		}
+		byProv := map[string]string{}
+		for _, info := range loaded.models {
+			byProv[info.Provider] = info.ID
+		}
+		if byProv["openai"] != "gpt-a" || byProv["xai"] != "grok-b" || byProv["echo"] != "echo" {
+			t.Errorf("byProv = %v", byProv)
+		}
+		if _, ok := byProv["anthropic"]; ok {
+			t.Error("unauthenticated anthropic should not appear")
+		}
+	})
+
 	t.Run("agent preserves multi-word name", func(t *testing.T) {
 		m, ops := newAppTestModel([]string{"build", "code reviewer"}, nil)
 		m.composer.SetValue("/agent code reviewer")

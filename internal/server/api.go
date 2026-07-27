@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/session"
 	"github.com/jonathanung/strike-cli/internal/version"
@@ -165,18 +166,47 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	provider := strings.TrimSpace(r.URL.Query().Get("provider"))
-	if provider == "" {
-		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "provider is required"})
-		return
-	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	models, err := s.opts.Services.Catalog.Models(ctx, provider)
+	var (
+		models []host.ModelInfo
+		err    error
+	)
+	if provider != "" {
+		models, err = s.opts.Services.Catalog.Models(ctx, provider)
+	} else {
+		// No provider filter: list models from every authenticated provider
+		// (same multi-provider set as the TUI /model picker).
+		providers := authenticatedProviders(s.opts.Services.Auth)
+		if len(providers) == 0 {
+			writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "provider is required (no authenticated providers)"})
+			return
+		}
+		models, err = s.opts.Services.Catalog.ModelsForProviders(ctx, providers)
+	}
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, opErrorResponse{Error: err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"models": models})
+}
+
+// authenticatedProviders returns Authed provider names from host.Auth.
+func authenticatedProviders(auth host.Auth) []string {
+	if auth == nil {
+		return nil
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, s := range auth.Statuses() {
+		name := strings.TrimSpace(s.Name)
+		if name == "" || !s.Authed || seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	return out
 }
 
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {

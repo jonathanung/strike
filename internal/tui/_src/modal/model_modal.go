@@ -13,37 +13,73 @@ import (
 	"github.com/jonathanung/strike-cli/internal/tui/ui"
 )
 
-// modelsLoadedMsg delivers the catalog result for a provider.
+// modelsLoadedMsg delivers the multi-provider catalog result for the model picker.
 type modelsLoadedMsg struct {
-	provider string
+	fallback string // current provider at open (matches modal identity)
 	models   []host.ModelInfo
 	err      error
 }
 
-// loadModelsCmd fetches a provider's models (with metadata) from the host
+// loadModelsCmd fetches models for every listed provider from the host
 // catalog. A nil catalog degrades to a clear error rather than a panic.
-func loadModelsCmd(catalog host.Catalog, provider string) tea.Cmd {
+// providers should be authenticated (plus current) names; empty names are ignored.
+func loadModelsCmd(catalog host.Catalog, providers []string, fallback string) tea.Cmd {
 	return func() tea.Msg {
 		if catalog == nil {
-			return modelsLoadedMsg{provider: provider, err: errNoCatalog}
+			return modelsLoadedMsg{fallback: fallback, err: errNoCatalog}
 		}
-		models, err := catalog.Models(context.Background(), provider)
+		models, err := catalog.ModelsForProviders(context.Background(), providers)
 		if err != nil {
-			return modelsLoadedMsg{provider: provider, err: err}
+			return modelsLoadedMsg{fallback: fallback, err: err}
 		}
-		return modelsLoadedMsg{provider: provider, models: models}
+		return modelsLoadedMsg{fallback: fallback, models: models}
 	}
+}
+
+// authenticatedModelProviders lists Authed provider names from host.Auth,
+// always including current when non-empty so single-provider / unauthed edge
+// cases still load the active provider's catalog.
+func authenticatedModelProviders(auth host.Auth, current string) []string {
+	var out []string
+	seen := map[string]bool{}
+	if auth != nil {
+		for _, s := range auth.Statuses() {
+			name := strings.TrimSpace(s.Name)
+			if name == "" || !s.Authed || seen[name] {
+				continue
+			}
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	current = strings.TrimSpace(current)
+	if current != "" && !seen[current] {
+		out = append(out, current)
+	}
+	return out
+}
+
+// parseModelArg splits "provider/model" (first slash) or returns fallback + bare id.
+func parseModelArg(arg, fallbackProvider string) (provider, model string) {
+	arg = strings.TrimSpace(arg)
+	if arg == "" {
+		return fallbackProvider, ""
+	}
+	if prov, bare, ok := strings.Cut(arg, "/"); ok && prov != "" && bare != "" {
+		return prov, bare
+	}
+	return fallbackProvider, arg
 }
 
 const modelModalVisible = 10
 
-// modelModal is the centered model picker for the current provider, backed by
-// the host model catalog. Type to filter, enter to switch, ctrl+d to save
-// provider+model as global defaults. Rows show context window, cost, and
-// capability flags when the catalog provides them.
+// modelModal is the centered model picker listing models from all authenticated
+// providers. Type to filter, enter to switch (including cross-provider), ctrl+d
+// to save provider+model as global defaults. Rows show provider, context window,
+// cost, and capability flags when the catalog provides them.
 type modelModal struct {
-	provider string
-	current  string
+	provider string // current/fallback provider (for freeform + identity)
+	current  string // current model id
 	all      []host.ModelInfo
 	filter   string
 	cursor   int
@@ -70,6 +106,14 @@ func (m *modelModal) filtered() []host.ModelInfo {
 		}
 		if info.Name != "" && strings.Contains(strings.ToLower(info.Name), q) {
 			out = append(out, info)
+			continue
+		}
+		if info.Provider != "" && strings.Contains(strings.ToLower(info.Provider), q) {
+			out = append(out, info)
+			continue
+		}
+		if info.Provider != "" && strings.Contains(strings.ToLower(info.Provider+"/"+info.ID), q) {
+			out = append(out, info)
 		}
 	}
 	return out
@@ -84,6 +128,22 @@ func modelPickerLabel(info host.ModelInfo) string {
 		return name
 	}
 	return info.ID
+}
+
+// modelRowProvider returns the provider to use when selecting info.
+func modelRowProvider(info host.ModelInfo, fallback string) string {
+	if p := strings.TrimSpace(info.Provider); p != "" {
+		return p
+	}
+	return fallback
+}
+
+func (m *modelModal) isCurrent(info host.ModelInfo) bool {
+	if info.ID != m.current {
+		return false
+	}
+	p := modelRowProvider(info, m.provider)
+	return p == "" || p == m.provider
 }
 
 func (m *modelModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
@@ -110,13 +170,14 @@ func (m *modelModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 		return m, nil
 	case "enter":
 		// Freeform: when the catalog is empty/error or the filter matches
-		// nothing, Enter accepts the typed filter as a model id.
+		// nothing, Enter accepts the typed filter as a model id (or provider/model).
 		if len(list) == 0 {
-			model := strings.TrimSpace(m.filter)
-			if model == "" || m.loading {
+			raw := strings.TrimSpace(m.filter)
+			if raw == "" || m.loading {
 				return m, nil
 			}
-			ops, provider := m.ops, m.provider
+			provider, model := parseModelArg(raw, m.provider)
+			ops := m.ops
 			return nil, func() tea.Msg {
 				ops <- protocol.SelectModel{Provider: provider, Model: model}
 				return nil
@@ -125,7 +186,8 @@ func (m *modelModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 		if m.cursor >= len(list) {
 			return m, nil
 		}
-		ops, provider, model := m.ops, m.provider, list[m.cursor].ID
+		info := list[m.cursor]
+		ops, provider, model := m.ops, modelRowProvider(info, m.provider), info.ID
 		return nil, func() tea.Msg {
 			ops <- protocol.SelectModel{Provider: provider, Model: model}
 			return nil
@@ -134,7 +196,8 @@ func (m *modelModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 		if m.cursor >= len(list) {
 			return m, nil
 		}
-		provider, model := m.provider, list[m.cursor].ID
+		info := list[m.cursor]
+		provider, model := modelRowProvider(info, m.provider), info.ID
 		return m, saveDefaultsThroughCmd(m.settings, provider, model, "", "", "", provider+"/"+model)
 	default:
 		if msg.Type == tea.KeyRunes {
@@ -169,7 +232,7 @@ func (m *modelModal) view(width int, th theme.Theme) string {
 			items[i] = ui.ListItem{
 				Label:   modelPickerLabel(info),
 				Detail:  formatModelDetail(th, info),
-				Current: info.ID == m.current,
+				Current: m.isCurrent(info),
 			}
 		}
 		body = ui.List(th, ui.ListOpts{
@@ -183,17 +246,43 @@ func (m *modelModal) view(width int, th theme.Theme) string {
 			Empty:      "no matches for \"" + m.filter + "\"",
 		})
 	}
+	titleDetail := "all providers"
+	if n := modelProviderCount(m.all); n == 1 {
+		if p := strings.TrimSpace(m.all[0].Provider); p != "" {
+			titleDetail = p
+		} else {
+			titleDetail = m.provider
+		}
+	} else if n == 0 && m.provider != "" {
+		titleDetail = m.provider
+	}
 	return ui.Dialog(th, ui.DialogOpts{
-		Title: detailJoin(th, "Select model", m.provider),
+		Title: detailJoin(th, "Select model", titleDetail),
 		Hint:  dotJoin(th, "type to filter or freeform id", "↑/↓ move", "enter select", "ctrl+d set default", "esc close"),
 		Width: width,
 	}, body)
 }
 
+func modelProviderCount(infos []host.ModelInfo) int {
+	seen := map[string]bool{}
+	for _, info := range infos {
+		p := strings.TrimSpace(info.Provider)
+		if p == "" {
+			continue
+		}
+		seen[p] = true
+	}
+	return len(seen)
+}
+
 // formatModelDetail builds the muted trailing text for a picker row:
-// "id · 128k · $2.5/$10 · tools · reason · vision · 4 var". Missing fields omitted.
+// "openai · id · 128k · $2.5/$10 · tools · reason · vision · 4 var".
+// Missing fields omitted.
 func formatModelDetail(th theme.Theme, info host.ModelInfo) string {
 	var parts []string
+	if p := strings.TrimSpace(info.Provider); p != "" {
+		parts = append(parts, p)
+	}
 	label := modelPickerLabel(info)
 	if label != info.ID {
 		parts = append(parts, info.ID)
