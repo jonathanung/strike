@@ -75,6 +75,45 @@ func ShortPurpose(name, description string) string {
 	return truncatePurpose(description, 72)
 }
 
+// CompactSchemaDescription returns the model-facing tool description for
+// provider Tools arrays (every Stream). Built-ins use short purposes so the
+// always-on schema payload stays small; full prose remains on Registry.Schemas
+// for toolsearch. The skill tool keeps its available-skills catalog. Other
+// tools (MCP, plugins) get a truncated first sentence (120 runes).
+//
+// This is a size budget on descriptions, not deferred loading (#438): every
+// non-denied registered tool still appears in Tools with full InputSchema.
+func CompactSchemaDescription(name, description string) string {
+	name = strings.TrimSpace(name)
+	if name == "skill" {
+		return compactSkillSchemaDescription(description)
+	}
+	if p, ok := shortPurposes[name]; ok {
+		return p
+	}
+	return truncatePurpose(description, 120)
+}
+
+// compactSkillSchemaDescription keeps the available-skills list (required for
+// the model to pick a name) while dropping the multi-paragraph usage prose.
+func compactSkillSchemaDescription(description string) string {
+	base := shortPurposes["skill"]
+	if base == "" {
+		base = "load a named skill into context"
+	}
+	for _, line := range strings.Split(description, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "Available skills:") {
+			list := strings.TrimSpace(strings.TrimPrefix(line, "Available skills:"))
+			if list == "" {
+				return base
+			}
+			return base + ". Available skills: " + list
+		}
+	}
+	return base
+}
+
 // GuidanceEntry is one effective tool for prompt composition.
 type GuidanceEntry struct {
 	Name    string
