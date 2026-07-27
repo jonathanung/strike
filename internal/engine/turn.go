@@ -457,11 +457,12 @@ func (e *Engine) consumeStream(ctx context.Context, reqCorr protocol.Correlation
 	layers := e.systemLayers()
 	system := joinPromptLayerTexts(layers)
 	e.recordStreamEffective(layers, system)
+	tools, _ := e.effectiveToolSchemas()
 	stream, err := e.prov.Stream(ctx, provider.Request{
 		Model:     e.model,
 		System:    system,
 		Messages:  e.messages,
-		Tools:     e.opts.Registry.Schemas(),
+		Tools:     tools,
 		MaxTokens: e.opts.MaxTokens,
 		Effort:    providerEffort(e.effort),
 		Priority:  e.priority,
@@ -1018,8 +1019,9 @@ func (e *Engine) emitUsage(corr protocol.Correlation, u *provider.Usage) {
 }
 
 func (e *Engine) toolNames() string {
+	schemas, _ := e.effectiveToolSchemas()
 	var names []string
-	for _, s := range e.opts.Registry.Schemas() {
+	for _, s := range schemas {
 		names = append(names, s.Name)
 	}
 	return strings.Join(names, ", ")

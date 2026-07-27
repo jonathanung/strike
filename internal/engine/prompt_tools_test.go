@@ -283,6 +283,167 @@ func TestToolGuidanceMCPSizeCap(t *testing.T) {
 	}
 }
 
+// TestFirstTurnPreloadsEffectiveTools proves turn 1 binds the full effective
+// tool set as provider schemas and includes the Available tools prompt layer
+// (no discovery lag; guidance names match Tools).
+func TestFirstTurnPreloadsEffectiveTools(t *testing.T) {
+	reg := fullToolRegistry(t)
+	req := captureStreamRequest(t, engine.Options{
+		WorkDir:  t.TempDir(),
+		Registry: reg,
+		Agents:   []engine.Agent{{Name: "build"}},
+		Rules:    []permission.Ruleset{permission.Defaults()},
+	}, "echo", "echo")
+
+	if len(req.Tools) == 0 {
+		t.Fatal("first-turn Tools empty; expected effective schemas preloaded")
+	}
+	want := reg.Names()
+	if len(req.Tools) != len(want) {
+		t.Fatalf("first-turn Tools len = %d, want %d (registry)", len(req.Tools), len(want))
+	}
+	gotNames := make(map[string]bool, len(req.Tools))
+	for _, s := range req.Tools {
+		gotNames[s.Name] = true
+		if len(s.InputSchema) == 0 {
+			t.Errorf("tool %q missing InputSchema on first turn", s.Name)
+		}
+		if strings.TrimSpace(s.Description) == "" {
+			t.Errorf("tool %q missing Description on first turn", s.Name)
+		}
+	}
+	for _, name := range want {
+		if !gotNames[name] {
+			t.Errorf("registry tool %q missing from first-turn Tools", name)
+		}
+		if !strings.Contains(req.System, "`"+name+"`") {
+			t.Errorf("registry tool %q missing from first-turn system guidance", name)
+		}
+	}
+	if !strings.Contains(req.System, "# Available tools") {
+		t.Fatalf("first-turn system missing tools guidance:\n%s", req.System)
+	}
+}
+
+// TestFirstTurnToolsRespectPermissionDenies ensures hard-denied tools are
+// omitted from both the provider Tools array and prompt guidance on turn 1.
+func TestFirstTurnToolsRespectPermissionDenies(t *testing.T) {
+	reg := fullToolRegistry(t)
+	req := captureStreamRequest(t, engine.Options{
+		WorkDir:  t.TempDir(),
+		Registry: reg,
+		Agents: []engine.Agent{
+			{Name: "build"},
+			{
+				Name: "reviewer",
+				Permissions: permission.Ruleset{
+					{Permission: "write", Pattern: "*", Action: permission.Deny},
+					{Permission: "edit", Pattern: "*", Action: permission.Deny},
+					{Permission: "bash", Pattern: "*", Action: permission.Deny},
+				},
+			},
+		},
+		InitialAgent: "reviewer",
+		Rules:        []permission.Ruleset{permission.Defaults()},
+	}, "echo", "echo")
+
+	banned := []string{"write", "edit", "apply_patch", "bash"}
+	for _, name := range banned {
+		for _, s := range req.Tools {
+			if s.Name == name {
+				t.Errorf("denied tool %q still in first-turn Tools", name)
+			}
+		}
+		if strings.Contains(req.System, "`"+name+"` —") {
+			t.Errorf("denied tool %q still listed in first-turn guidance", name)
+		}
+	}
+	for _, want := range []string{"read", "glob", "grep"} {
+		found := false
+		for _, s := range req.Tools {
+			if s.Name == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("allowed tool %q missing from first-turn Tools", want)
+		}
+	}
+	// Guidance and Tools must agree (no schema/prompt drift on denied set).
+	toolSet := make(map[string]struct{}, len(req.Tools))
+	for _, s := range req.Tools {
+		toolSet[s.Name] = struct{}{}
+	}
+	for name := range toolSet {
+		if !strings.Contains(req.System, "`"+name+"`") {
+			t.Errorf("Tools has %q but guidance does not", name)
+		}
+	}
+}
+
+// TestFirstTurnToolsOmitPlanMutations covers permission-mode plan: mutation
+// tools must not appear in first-turn schemas.
+func TestFirstTurnToolsOmitPlanMutations(t *testing.T) {
+	reg := fullToolRegistry(t)
+	req := captureStreamRequest(t, engine.Options{
+		WorkDir:  t.TempDir(),
+		Registry: reg,
+		Agents: []engine.Agent{
+			{Name: "build"},
+			{Name: "plan"},
+		},
+		Rules:                 []permission.Ruleset{permission.Defaults()},
+		InitialPermissionMode: protocol.PermissionModePlan,
+	}, "echo", "echo")
+
+	for _, banned := range []string{"write", "edit", "apply_patch"} {
+		for _, s := range req.Tools {
+			if s.Name == banned {
+				t.Errorf("plan mode still exposes %q in first-turn Tools", banned)
+			}
+		}
+	}
+	foundRead := false
+	for _, s := range req.Tools {
+		if s.Name == "read" {
+			foundRead = true
+			break
+		}
+	}
+	if !foundRead {
+		t.Fatal("plan mode first-turn Tools missing read")
+	}
+}
+
+// captureStreamRequest starts an engine and returns the first provider Stream request.
+func captureStreamRequest(t *testing.T, opts engine.Options, providerName, model string) provider.Request {
+	t.Helper()
+	prov := newScriptedProvider(streamStep{
+		events: []provider.StreamEvent{
+			{Type: provider.EventTextDelta, Text: "ok"},
+			{Type: provider.EventDone, StopReason: "end_turn"},
+		},
+	})
+	opts.SessionID = "s-tool-preload"
+	opts.Select = func(string) (provider.Provider, string, error) {
+		return prov, model, nil
+	}
+	if opts.Registry == nil {
+		opts.Registry = tool.NewRegistry()
+	}
+	opts.InitialProvider = providerName
+	opts.InitialModel = model
+
+	eng := engine.New(opts)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "hi"}
+	return waitStreamRequest(t, eng, prov)
+}
+
 type stubMCPTool struct {
 	name, desc string
 }
