@@ -65,6 +65,11 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	if fields := strings.Fields(a.Command); len(fields) > 1 {
 		always = []string{fields[0] + " *"}
 	}
+	// Hard workspace boundary for destructive ops — runs before Ask so yolo /
+	// --dangerously-skip-permissions cannot remove paths outside WorkDir.
+	if err := checkBashWorkspaceBoundary(a.Command, tc.WorkDir); err != nil {
+		return Result{}, err
+	}
 	if err := tc.Ask(ctx, AskRequest{Permission: "bash", Patterns: []string{a.Command}, Always: always}); err != nil {
 		return Result{}, err
 	}
