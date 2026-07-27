@@ -246,7 +246,7 @@ func (c *toolCell) renderLinked(width int, th theme.Theme, linkBase string) stri
 			if c.expanded {
 				maxLines = diffExpandedMaxLines(meta)
 			} else if ui.DiffExceeds(meta.OldString, meta.NewString, diffPreviewMaxLinesCell) {
-				moreHint = "enter to expand"
+				moreHint = "alt+enter to expand"
 			}
 			path := c.title
 			diff := ui.DiffPreview(th, ui.DiffPreviewOpts{

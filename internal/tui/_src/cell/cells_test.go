@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -366,7 +367,7 @@ func TestToolCellLargeEditDiffExpandCollapse(t *testing.T) {
 	if !strings.Contains(plain, "more lines") {
 		t.Errorf("collapsed missing truncation:\n%s", plain)
 	}
-	if !strings.Contains(plain, "enter to expand") {
+	if !strings.Contains(plain, "alt+enter to expand") {
 		t.Errorf("collapsed missing expand hint:\n%s", plain)
 	}
 	// Collapsed window is 8 hunk lines; later inserts should be hidden.
@@ -384,7 +385,7 @@ func TestToolCellLargeEditDiffExpandCollapse(t *testing.T) {
 	if strings.Contains(plain, "more lines") {
 		t.Errorf("expanded still truncated:\n%s", plain)
 	}
-	if strings.Contains(plain, "enter to expand") {
+	if strings.Contains(plain, "alt+enter to expand") {
 		t.Errorf("expanded still shows expand hint:\n%s", plain)
 	}
 	for _, want := range []string{"-old-line-0", "-old-line-11", "+new-line-0", "+new-line-11"} {
@@ -397,7 +398,7 @@ func TestToolCellLargeEditDiffExpandCollapse(t *testing.T) {
 		t.Fatal("toggle should collapse")
 	}
 	plain = ansi.Strip(cell.render(80, th))
-	if !strings.Contains(plain, "more lines") || !strings.Contains(plain, "enter to expand") {
+	if !strings.Contains(plain, "more lines") || !strings.Contains(plain, "alt+enter to expand") {
 		t.Errorf("re-collapsed missing truncation affordance:\n%s", plain)
 	}
 }
@@ -466,7 +467,7 @@ func TestExploreCellGroupsConsecutiveReadGlobGrep(t *testing.T) {
 	}
 }
 
-func TestEmptyEnterTogglesSelectedToolCell(t *testing.T) {
+func TestAltEnterTogglesSelectedToolCell(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
 	var b strings.Builder
@@ -478,17 +479,26 @@ func TestEmptyEnterTogglesSelectedToolCell(t *testing.T) {
 	m.applyEvent(protocol.ToolCallBegin{CallID: "c1", Name: "bash"})
 	m.applyEvent(protocol.ToolCallEnd{CallID: "c1", Title: "run", Output: b.String()})
 	m.composer.SetValue("")
+	// Bare enter must not expand (#421).
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	tc := m.toolByID["c1"]
-	if tc == nil || !tc.expanded {
-		t.Fatalf("enter should expand collapsible tool: tc=%v expanded=%v", tc != nil, tc != nil && tc.expanded)
+	if tc == nil {
+		t.Fatal("missing tool cell")
+	}
+	if tc.expanded {
+		t.Fatal("bare enter must not expand tool cell")
+	}
+	// alt+enter expands when composer is empty.
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	if !tc.expanded {
+		t.Fatalf("alt+enter should expand collapsible tool: expanded=%v", tc.expanded)
 	}
 	if m.selectedCell < 0 {
-		t.Fatal("enter should select the tool cell")
+		t.Fatal("alt+enter should select the tool cell")
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
 	if tc.expanded {
-		t.Fatal("second enter should collapse")
+		t.Fatal("second alt+enter should collapse")
 	}
 	// Non-empty enter still sends (no expand side effect on send path with text).
 	m.composer.SetValue("hello")
@@ -496,6 +506,14 @@ func TestEmptyEnterTogglesSelectedToolCell(t *testing.T) {
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	if tc.expanded != before {
 		t.Fatal("send with text must not toggle tool expand")
+	}
+	// With text, alt+enter is newline — not expand (#421 / #414).
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	if tc.expanded != before {
+		t.Fatal("alt+enter with composer text must not toggle tool expand")
+	}
+	if !strings.Contains(m.composer.Value(), "\n") {
+		t.Fatalf("alt+enter with text should insert newline, got %q", m.composer.Value())
 	}
 }
 
@@ -653,8 +671,7 @@ func TestYCopiesSelectedToolCellViaOSC52(t *testing.T) {
 	m.applyEvent(protocol.ToolCallBegin{CallID: "c1", Name: "bash"})
 	m.applyEvent(protocol.ToolCallEnd{CallID: "c1", Title: "run", Output: body})
 	m.composer.SetValue("")
-	// Select via empty enter expand path.
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	// y copies latest tool/explore without needing expand selection.
 	tc := m.toolByID["c1"]
 	if tc == nil {
 		t.Fatal("missing tool cell")
@@ -879,6 +896,168 @@ func TestChatCellCopyText(t *testing.T) {
 	}
 	if got := (&assistantCell{}).copyText(); got != "" {
 		t.Errorf("empty assistant copyText = %q", got)
+	}
+}
+
+func keyMsgAltY() tea.KeyMsg {
+	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}, Alt: true}
+}
+
+func TestCopyLastResponseViaAltYAndSlash(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	const early = "first reply"
+	const final = "final assistant answer\nline two\n"
+	m.applyEvent(protocol.UserMessage{Text: "q1"})
+	m.applyEvent(protocol.TextDelta{Text: early})
+	m.applyEvent(protocol.TurnCompleted{})
+	m.applyEvent(protocol.UserMessage{Text: "q2"})
+	m.applyEvent(protocol.TextDelta{Text: "partial mid-tool "})
+	m.applyEvent(protocol.ToolCallBegin{CallID: "t1", Name: "bash"})
+	m.applyEvent(protocol.ToolCallEnd{CallID: "t1", Title: "run", Output: "tool-spam\n"})
+	m.applyEvent(protocol.TextDelta{Text: final})
+	m.applyEvent(protocol.TurnCompleted{})
+	// Composer has text: alt+y must still copy (unlike bare y).
+	m.composer.SetValue("draft follow-up")
+	m.selectedCell = -1
+
+	updated, cmd := m.Update(keyMsgAltY())
+	m = updated.(Model)
+	if got := m.composer.Value(); got != "draft follow-up" {
+		t.Fatalf("alt+y mutated composer: %q", got)
+	}
+	if m.notice != "copied last response" || m.noticeErr {
+		t.Fatalf("alt+y notice = %q err=%v, want success", m.notice, m.noticeErr)
+	}
+	var asst *assistantCell
+	for _, c := range m.cells {
+		if a, ok := c.(*assistantCell); ok && a.complete && strings.Contains(a.text, "final") {
+			asst = a
+		}
+	}
+	if asst == nil || !asst.copiedFlash {
+		t.Fatal("alt+y did not flash last complete assistant cell")
+	}
+	if m.cellClip == nil || m.cellClip.osc == "" {
+		t.Fatal("alt+y did not stage OSC52")
+	}
+	frame := m.View()
+	reqs := osc52Payloads(frame)
+	if len(reqs) != 1 {
+		t.Fatalf("View OSC52 count = %d, want 1", len(reqs))
+	}
+	payload, err := decodeOSC52Payload(reqs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.TrimRight(final, "\n")
+	if payload != want {
+		t.Errorf("OSC52 payload = %q, want %q", payload, want)
+	}
+	if strings.Contains(payload, "tool-spam") || strings.Contains(payload, early) {
+		t.Errorf("payload should be last complete assistant only: %q", payload)
+	}
+	if cmd == nil {
+		t.Fatal("alt+y returned nil cmd, want flash clear tick")
+	}
+
+	// /copy mirrors the same path and clears the composer.
+	m.cellClip = &cellClipboard{}
+	asst.copiedFlash = false
+	m.composer.SetValue("/copy")
+	updated, cmd = m.handleCommand("/copy")
+	m = updated.(Model)
+	if m.composer.Value() != "" {
+		t.Fatalf("/copy left composer = %q", m.composer.Value())
+	}
+	if m.notice != "copied last response" || m.noticeErr {
+		t.Fatalf("/copy notice = %q err=%v", m.notice, m.noticeErr)
+	}
+	if m.cellClip == nil || m.cellClip.osc == "" {
+		t.Fatal("/copy did not stage OSC52")
+	}
+	if !asst.copiedFlash {
+		t.Fatal("/copy did not flash assistant cell")
+	}
+	_ = cmd
+}
+
+func TestResolveLastAssistantCopyIndex(t *testing.T) {
+	// Newest non-empty assistant wins (even if incomplete / after tools).
+	cells := []cell{
+		&assistantCell{text: "done", complete: true},
+		&toolCell{name: "bash", output: "noise", done: true},
+		&assistantCell{text: "still streaming", complete: false},
+	}
+	if got := resolveLastAssistantCopyIndex(cells); got != 2 {
+		t.Fatalf("newest index = %d, want 2", got)
+	}
+	if got := resolveLastAssistantCopyIndex([]cell{
+		&assistantCell{text: "old", complete: true},
+		&assistantCell{text: "new", complete: true},
+	}); got != 1 {
+		t.Fatalf("latest complete = %d, want 1", got)
+	}
+	if got := resolveLastAssistantCopyIndex([]cell{
+		&assistantCell{text: "", complete: true},
+		&assistantCell{text: "ok", complete: true},
+	}); got != 1 {
+		t.Fatalf("skip empty = %d, want 1", got)
+	}
+	if got := resolveLastAssistantCopyIndex([]cell{&toolCell{name: "bash"}}); got != -1 {
+		t.Fatalf("no assistant = %d, want -1", got)
+	}
+}
+
+func TestCopyLastResponseEmptyNotice(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.applyEvent(protocol.UserMessage{Text: "only user"})
+	m.applyEvent(protocol.ToolCallBegin{CallID: "t1", Name: "bash"})
+	m.applyEvent(protocol.ToolCallEnd{CallID: "t1", Title: "run", Output: "tool only\n"})
+	m.composer.SetValue("")
+
+	updated, cmd := m.Update(keyMsgAltY())
+	m = updated.(Model)
+	if cmd != nil {
+		t.Fatal("empty copy should not schedule flash clear")
+	}
+	if m.notice != "no assistant response to copy" || !m.noticeErr {
+		t.Fatalf("notice = %q err=%v, want failure", m.notice, m.noticeErr)
+	}
+	if m.cellClip != nil && m.cellClip.osc != "" {
+		t.Error("empty copy staged OSC52")
+	}
+
+	m.clearNotice()
+	m.composer.SetValue("/copy")
+	updated, _ = m.handleCommand("/copy")
+	m = updated.(Model)
+	if m.notice != "no assistant response to copy" || !m.noticeErr {
+		t.Fatalf("/copy empty notice = %q err=%v", m.notice, m.noticeErr)
+	}
+}
+
+func TestCopyLastResponseBindingInCatalog(t *testing.T) {
+	keys := defaultKeyMap()
+	if !key.Matches(keyMsgAltY(), keys.CopyLastResponse) {
+		t.Fatal("alt+y must match CopyLastResponse")
+	}
+	help := keys.CopyLastResponse.Help()
+	if help.Key != "alt+y" || help.Desc != "copy last response" {
+		t.Fatalf("CopyLastResponse help = %#v", help)
+	}
+	found := false
+	for _, e := range keybindCatalog(keys) {
+		if e.ID == "global.copy-last" {
+			found = true
+			if e.Keys != "alt+y" || e.Action != "copy last response" {
+				t.Errorf("catalog entry = %#v", e)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("keybindCatalog missing global.copy-last")
 	}
 }
 

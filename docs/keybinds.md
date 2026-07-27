@@ -18,7 +18,7 @@ Registry: `keybindSlashPrimary` / `keybindNoSlashReason` in
 | Key | Action | Slash |
 |---|---|---|
 | `enter` | send prompt | — |
-| `ctrl+j` / `shift+enter` / `alt+enter` | newline (shift+enter CSI rewrites to `alt+enter`; enhanced ctrl+j → `alt+j`; bare LF is also `ctrl+j`) | — |
+| `ctrl+j` / `shift+enter` / `alt+enter` | newline (shift+enter CSI rewrites to `alt+enter`; enhanced ctrl+j → `alt+j`; bare LF is also `ctrl+j`; empty-composer `alt+enter` expands a tool cell instead) | — |
 | `esc` | interrupt turn (cancels tools/LLM; shows “interrupted”) / reject permission / close modal | `/interrupt` |
 | `ctrl+c` | quit | `/exit`, `/quit` |
 | `ctrl+k` | command palette (when kill-to-end does not delete) | `/palette` |
@@ -35,6 +35,7 @@ Registry: `keybindSlashPrimary` / `keybindNoSlashReason` in
 | `pgup` / `pgdn` | scroll transcript | `/scroll-up`, `/scroll-down` |
 | `ctrl+up` / `ctrl+down` | scroll transcript | `/scroll-up`, `/scroll-down` |
 | `ctrl+t` | jump to latest output | `/jump-bottom` |
+| `alt+y` | copy last assistant response (OSC52) | `/copy` |
 | `ctrl+h` / `ctrl+l` | focus left (primary transcript) / right (secondary pane column) — **orientation-independent** | `/focus-left`, `/focus-right` |
 | `ctrl+o` / `ctrl+p` | cycle right-pane focus next / previous within the active stack group, then to the next group | `/window-next`, `/window-prev` |
 | `ctrl+;` | toggle split orientation | `/layout`, `/split` |
@@ -73,8 +74,9 @@ to a single pane and cycle the same order one at a time. See [usage.md](usage.md
 | Key | Action | Slash |
 |---|---|---|
 | `alt+[` / `alt+]` | previous / next tool cell | `/tool-prev`, `/tool-next` |
-| `enter` | expand / collapse tool output or large edit diff; else open `file:line` | `/tool-expand` |
+| `alt+enter` | expand / collapse tool output or large edit diff; else open `file:line` (composer empty only; with text, `alt+enter` is newline) | `/tool-expand` |
 | `y` | copy cell (tool/explore, else latest assistant/user) | `/tool-copy` |
+| `alt+y` | copy last assistant response only (skips tool cells) | `/copy` |
 | `v` | review edit in editor | `/tool-review` |
 | `a` | apply shown edit/patch into the active worktree (confirm) | `/tool-apply` |
 
