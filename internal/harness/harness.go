@@ -50,7 +50,7 @@ type Request struct {
 // strategies like BestOfN or tree search without touching engine internals.
 type Harness interface {
 	// Name returns the harness identifier used in agent frontmatter
-	// (harness: <name>). Builtin names are "default" and "bestofn".
+	// (harness: <name>). The only builtin name is "default".
 	Name() string
 
 	// Run executes one turn. The harness may call req.Stream zero or more

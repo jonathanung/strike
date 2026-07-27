@@ -36,7 +36,7 @@ type Agent struct {
 	Model       string
 	Effort      protocol.Effort
 	Prompt      string
-	// Harness selects a custom turn-loop controller (default, bestofn, …).
+	// Harness selects a custom turn-loop controller (default, …).
 	// Empty and "default" use the built-in loop.
 	Harness     string
 	Permissions permission.Ruleset
