@@ -77,13 +77,19 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return next, cmd
 		}
 		// Composer newline (shift+enter → alt+enter; ctrl+j / bare LF / alt+j)
-		// before focus/cycle so it never pane-cycles (#414).
+		// before focus/cycle so it never pane-cycles (#414). Empty-composer
+		// alt+enter is shared with tool expand — defer to handleToolCellKeys
+		// when the chord also matches ToolExpand (#421).
 		if key.Matches(msg, m.keyMap.Newline) {
-			m.resetHistoryBrowsing()
-			m.composer.InsertString("\n")
-			m.recomputeCompletion()
-			m.reflow()
-			return m, nil
+			if strings.TrimSpace(m.composer.Value()) == "" && key.Matches(msg, m.keyMap.ToolExpand) {
+				// fall through
+			} else {
+				m.resetHistoryBrowsing()
+				m.composer.InsertString("\n")
+				m.recomputeCompletion()
+				m.reflow()
+				return m, nil
+			}
 		}
 	}
 	// Focus (ctrl+h/l) and cycle (ctrl+o/p) — orientation-independent (#414).
@@ -203,7 +209,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		text := strings.TrimSpace(m.composerTextExpanded())
 		images := pendingImageAttachments(m.pendingImages)
 		if text == "" && len(images) == 0 {
-			// Empty enter is tool expand / open-at-line (handleToolCellKeys).
+			// Empty enter does not expand cells (alt+enter / nav.tool-expand).
 			return m, nil
 		}
 		if text != "" && strings.HasPrefix(text, "/") && len(images) == 0 {

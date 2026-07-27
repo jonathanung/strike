@@ -71,9 +71,12 @@ func (m *Model) renderCell(c cell, width int) string {
 }
 
 // handleToolCellKeys handles tool selection (alt+[/]), expand/open-at-line
-// (enter), copy (y), post-edit review (v), and apply patch (a) when the
-// composer is empty. handled is true when the key was consumed; cmd may launch
-// the editor, open a confirm modal, or clear a copied flash.
+// (alt+enter), copy (y), post-edit review (v), and apply patch (a) when the
+// composer is empty. Bare enter is send-only and never expands (#421).
+// alt+enter matches both ToolExpand and Newline; with empty composer this
+// path wins and expands, otherwise Newline inserts. handled is true when the
+// key was consumed; cmd may launch the editor, open a confirm modal, or clear
+// a copied flash.
 func (m *Model) handleToolCellKeys(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
 	if m.focus != focusLeft || m.modal != nil || m.completion != nil {
 		return false, nil
@@ -88,7 +91,7 @@ func (m *Model) handleToolCellKeys(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
 	case key.Matches(msg, m.keyMap.ToolNext):
 		m.moveToolSelection(1)
 		return true, nil
-	case key.Matches(msg, m.keyMap.ToolExpand), key.Matches(msg, m.keyMap.Send):
+	case key.Matches(msg, m.keyMap.ToolExpand):
 		if m.toggleSelectedTool() {
 			return true, nil
 		}

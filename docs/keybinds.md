@@ -18,7 +18,7 @@ Registry: `keybindSlashPrimary` / `keybindNoSlashReason` in
 | Key | Action | Slash |
 |---|---|---|
 | `enter` | send prompt | — |
-| `ctrl+j` / `shift+enter` | newline (`alt+enter` / `alt+j` after enhanced CSI; bare LF is also `ctrl+j`) | — |
+| `ctrl+j` / `shift+enter` | newline (`alt+enter` / `alt+j` after enhanced CSI; bare LF is also `ctrl+j`; empty-composer `alt+enter` expands a tool cell instead) | — |
 | `esc` | interrupt turn (cancels tools/LLM; shows “interrupted”) / reject permission / close modal | `/interrupt` |
 | `ctrl+c` | quit | `/exit`, `/quit` |
 | `ctrl+k` | command palette (when kill-to-end does not delete) | `/palette` |
@@ -74,7 +74,7 @@ to a single pane and cycle the same order one at a time. See [usage.md](usage.md
 | Key | Action | Slash |
 |---|---|---|
 | `alt+[` / `alt+]` | previous / next tool cell | `/tool-prev`, `/tool-next` |
-| `enter` | expand / collapse tool output or large edit diff; else open `file:line` | `/tool-expand` |
+| `alt+enter` | expand / collapse tool output or large edit diff; else open `file:line` (composer empty only; with text, `alt+enter` is newline) | `/tool-expand` |
 | `y` | copy cell (tool/explore, else latest assistant/user) | `/tool-copy` |
 | `alt+y` | copy last assistant response only (skips tool cells) | `/copy` |
 | `v` | review edit in editor | `/tool-review` |

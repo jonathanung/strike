@@ -97,8 +97,9 @@ var criticalKeybindIDs = map[string]struct{}{
 // cannot be emptied (no disable path without an escape hatch).
 //
 // Chord conflicts across actions are allowed: many defaults share keys in
-// different UI contexts (e.g. enter for send vs expand). Routing order in the
-// TUI decides the winner; project layer overrides global per id (last-wins).
+// different UI contexts (e.g. alt+enter for newline vs tool expand when the
+// composer is empty). Routing order in the TUI decides the winner; project
+// layer overrides global per id (last-wins).
 func ValidateKeybinds(binds map[string]KeybindChords) error {
 	if len(binds) == 0 {
 		return nil
