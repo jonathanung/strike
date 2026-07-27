@@ -162,6 +162,13 @@ CI runs `make web-build` when `web/package.json` is present. The Go binary does
 not require Node at runtime: generated Vite assets under `internal/server/static`
 are embedded at compile time. Edit sources under `web/src`, then build.
 
+### Theme
+
+Cockpit colors track the stock TUI palette in `internal/tui/theme.Default()`
+(violet accent, solid surfaces, dark/light adaptive pairs). CSS variables live
+in `web/src/styles.css`; keep them aligned when changing `theme.go` (see
+`web/src/theme.test.ts` and [theme.md](theme.md)).
+
 Lifecycle: run Vite as a **sibling** process of `strike serve` (two terminals or
 a process supervisor). Strike does not spawn Vite as a child.
 

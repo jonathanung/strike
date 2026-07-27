@@ -47,5 +47,17 @@ JSON theme files:
 Bundled JSON under `internal/tui/theme/themes/`, then `~/.strike/themes`, then
 `./.strike/themes`. Pick with `/theme` or `config.theme`.
 
-See also [ARCHITECTURE.md](ARCHITECTURE.md) (theme tokens recipe) and the
-`tui-components` skill catalog.
+## Web cockpit parity
+
+The `strike serve` attach UI (`web/src/styles.css`, embedded under
+`internal/server/static`) mirrors the stock `theme.Default()` palette via CSS
+custom properties (dark defaults; light via `prefers-color-scheme: light`).
+Semantic roles map as `--ink`←Text, `--muted`←TextMuted, `--ground`←Background,
+`--surface`/`--raised`/`--surface-muted`←Surface*, `--rule`←Border,
+`--acid`←Accent, `--accent-alt`←AccentAlt, `--signal`←Error, `--user`/`--tool`
+← transcript labels, `--diff-add`/`--diff-del`←diff roles. Parity is guarded by
+`web/src/theme.test.ts`. User-selected TUI JSON themes are not yet applied to
+the web UI.
+
+See also [ARCHITECTURE.md](ARCHITECTURE.md) (theme tokens recipe),
+[web.md](web.md), and the `tui-components` skill catalog.
