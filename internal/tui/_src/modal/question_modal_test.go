@@ -137,6 +137,76 @@ func TestQuestionModalMultiStep(t *testing.T) {
 	}
 }
 
+func TestQuestionModalMultiMixedFreeformAndOptions(t *testing.T) {
+	req := protocol.QuestionAsked{
+		RequestID: "q-mixed",
+		Questions: []protocol.QuestionPrompt{
+			{
+				Question: "Pick flavor?",
+				Options:  []protocol.QuestionOption{{Label: "Vanilla"}, {Label: "Chocolate"}},
+			},
+			{Question: "Any toppings?"},
+			{
+				Question: "Size?",
+				Options:  []protocol.QuestionOption{{Label: "S"}, {Label: "L"}},
+			},
+		},
+	}
+	m, ops := newTestQuestionModalFrom(req)
+
+	view := strings.ToLower(m.view(60, theme.Default()))
+	if !strings.Contains(view, "question 1/3") {
+		t.Errorf("view missing 1/3 progress:\n%s", view)
+	}
+
+	next, cmd := m.update(questionKey("2")) // Chocolate
+	if next == nil {
+		t.Fatal("first answer closed modal early")
+	}
+	runQuestionCmd(t, cmd)
+	assertNoAppOp(t, ops)
+	qm := next.(*questionModal)
+	if !qm.isFreeform() || qm.index != 1 {
+		t.Fatalf("expected freeform step 2, index=%d freeform=%v", qm.index, qm.isFreeform())
+	}
+	view = strings.ToLower(qm.view(60, theme.Default()))
+	if !strings.Contains(view, "question 2/3") || !strings.Contains(view, "any toppings") {
+		t.Errorf("view missing step 2:\n%s", view)
+	}
+
+	next, cmd = qm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("sprinkles")})
+	if next == nil {
+		t.Fatal("typing closed modal")
+	}
+	runQuestionCmd(t, cmd)
+	next, cmd = next.(*questionModal).update(questionKey("enter"))
+	if next == nil {
+		t.Fatal("freeform submit closed before last question")
+	}
+	runQuestionCmd(t, cmd)
+	assertNoAppOp(t, ops)
+	qm = next.(*questionModal)
+	if qm.isFreeform() || qm.index != 2 {
+		t.Fatalf("expected options step 3, index=%d freeform=%v", qm.index, qm.isFreeform())
+	}
+	view = strings.ToLower(qm.view(60, theme.Default()))
+	if !strings.Contains(view, "question 3/3") {
+		t.Errorf("view missing 3/3 progress:\n%s", view)
+	}
+
+	next, cmd = qm.update(questionKey("1")) // S
+	if next != nil {
+		t.Fatal("expected modal closed after last answer")
+	}
+	reply := receiveQuestionReply(t, ops, cmd)
+	if len(reply.Answers) != 3 ||
+		reply.Answers[0] != "Chocolate" ||
+		reply.Answers[1] != "sprinkles" ||
+		reply.Answers[2] != "S" {
+		t.Errorf("answers = %#v, want [Chocolate sprinkles S]", reply.Answers)
+	}
+}
+
 func TestQuestionModalFreeform(t *testing.T) {
 	req := protocol.QuestionAsked{
 		RequestID: "q-free",
