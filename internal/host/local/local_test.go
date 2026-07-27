@@ -329,6 +329,32 @@ func TestSaveThemeWritesGlobalConfig(t *testing.T) {
 	}
 }
 
+func TestDefaultsAndSavePresentation(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	svc := New(nil, nil, nil, nil, nil, nil, nil, "")
+
+	if d := svc.Settings.Defaults(); d.Theme != "" || d.VimMode != "" {
+		t.Fatalf("empty defaults = %#v", d)
+	}
+	if err := svc.Settings.SaveTheme("nord"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Settings.SavePresentation("overlay", "pane", "modal"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Settings.SaveDefaults("openai", "gpt-x", "build", "high", "yolo"); err != nil {
+		t.Fatal(err)
+	}
+	d := svc.Settings.Defaults()
+	if d.Theme != "nord" || d.VimMode != "overlay" || d.NanoMode != "pane" || d.MdReadMode != "modal" {
+		t.Errorf("presentation defaults = %#v", d)
+	}
+	if d.Provider != "openai" || d.Model != "gpt-x" || d.Agent != "build" || d.Effort != "high" || d.PermissionMode != "yolo" {
+		t.Errorf("session defaults = %#v", d)
+	}
+}
+
 func TestHistoryNilTolerated(t *testing.T) {
 	svc := New(nil, nil, nil, nil, nil, nil, nil, "")
 	if svc.History != nil {

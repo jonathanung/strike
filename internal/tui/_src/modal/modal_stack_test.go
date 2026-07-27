@@ -12,7 +12,7 @@ import (
 
 func TestPermissionAskedDoesNotReplaceUserModal(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
-	settings := newSettingsModal(m.services, m.ops, m.th)
+	settings := newSettingsModal(m.services, m.ops, m.th, m.workDir)
 	settings.cursor = 0
 	m.modal = settings
 
@@ -52,7 +52,7 @@ func TestPermissionAskedDoesNotReplaceUserModal(t *testing.T) {
 
 func TestCloseUserModalPromotesQueuedPermission(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)
-	m.modal = newSettingsModal(m.services, m.ops, m.th)
+	m.modal = newSettingsModal(m.services, m.ops, m.th, m.workDir)
 	_ = m.applyEvent(protocol.PermissionAsked{
 		RequestID:  "p-promote",
 		Permission: "edit",
@@ -152,7 +152,7 @@ func TestQueuedPermissionCountdownDoesNotArmOrFire(t *testing.T) {
 	m, ops := newAppTestModelWithOptions(Options{
 		PermissionAutoApproveSeconds: 3,
 	})
-	m.modal = newSettingsModal(m.services, m.ops, m.th)
+	m.modal = newSettingsModal(m.services, m.ops, m.th, m.workDir)
 	_ = m.applyEvent(protocol.PermissionAsked{RequestID: "hidden", Permission: "edit", Patterns: []string{"a.go"}})
 
 	pm := m.modalQueue[0].(*permissionModal)
@@ -208,7 +208,7 @@ func TestQuestionAskedQueuesBehindUserModal(t *testing.T) {
 func TestRootSwitchPreservesModalQueue(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m.sessionID = "root-a"
-	m.modal = newSettingsModal(m.services, m.ops, m.th)
+	m.modal = newSettingsModal(m.services, m.ops, m.th, m.workDir)
 	_ = m.applyEvent(protocol.PermissionAsked{RequestID: "pa", Permission: "bash", Patterns: []string{"x"}})
 	m.stashActiveRoot()
 
@@ -250,7 +250,7 @@ func TestResizeKeepsModalQueue(t *testing.T) {
 
 func TestAwaitingPermissionStaysWhileQueueNonEmpty(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
-	m.modal = newSettingsModal(m.services, m.ops, m.th)
+	m.modal = newSettingsModal(m.services, m.ops, m.th, m.workDir)
 	_ = m.applyEvent(protocol.PermissionAsked{RequestID: "a1", Permission: "bash", Patterns: []string{"1"}})
 	_ = m.applyEvent(protocol.PermissionAsked{RequestID: "a2", Permission: "bash", Patterns: []string{"2"}})
 	if !m.awaitingPermission {
@@ -280,7 +280,7 @@ func TestDoctorYieldsToPermission(t *testing.T) {
 
 func TestInputRoutesToVisibleTopOnly(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)
-	m.modal = newSettingsModal(m.services, m.ops, m.th)
+	m.modal = newSettingsModal(m.services, m.ops, m.th, m.workDir)
 	_ = m.applyEvent(protocol.PermissionAsked{RequestID: "top", Permission: "bash", Patterns: []string{"ls"}})
 
 	// Keys go to settings only; must not submit a permission reply.

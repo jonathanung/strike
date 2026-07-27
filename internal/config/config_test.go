@@ -562,6 +562,79 @@ func TestSetGlobalThemeCreatesConfig(t *testing.T) {
 	}
 }
 
+func TestSetGlobalPresentationPersistsAndPreserves(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := GlobalPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	initial := Config{
+		Provider: "anthropic",
+		Theme:    "nord",
+		VimMode:  "pane",
+	}
+	raw, _ := json.MarshalIndent(initial, "", "  ")
+	if err := os.WriteFile(path, append(raw, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SetGlobalPresentation("modal", "takeover", "overlay"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadGlobalDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.VimMode != "overlay" {
+		t.Errorf("vimMode = %q, want overlay", got.VimMode)
+	}
+	if got.NanoMode != "takeover" {
+		t.Errorf("nanoMode = %q, want takeover", got.NanoMode)
+	}
+	if got.MdReadMode != "modal" {
+		t.Errorf("mdReadMode = %q, want modal", got.MdReadMode)
+	}
+	if got.Provider != "anthropic" || got.Theme != "nord" {
+		t.Errorf("unrelated fields changed: %#v", got)
+	}
+
+	// Empty fields leave prior values.
+	if err := SetGlobalPresentation("", "pane", ""); err != nil {
+		t.Fatal(err)
+	}
+	got, err = ReadGlobalDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.VimMode != "overlay" || got.NanoMode != "pane" || got.MdReadMode != "modal" {
+		t.Errorf("partial update = vim=%q nano=%q md=%q", got.VimMode, got.NanoMode, got.MdReadMode)
+	}
+}
+
+func TestSetGlobalPresentationRejectsUnknown(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := SetGlobalPresentation("floating", "", ""); err == nil {
+		t.Fatal("expected unknown vimMode error")
+	}
+	if err := SetGlobalPresentation("", "", "side"); err == nil {
+		t.Fatal("expected unknown mdReadMode error")
+	}
+}
+
+func TestReadGlobalDefaultsMissing(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	got, err := ReadGlobalDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Provider != "" || got.Theme != "" {
+		t.Errorf("missing config should be zero, got %#v", got)
+	}
+}
+
 func TestAppendProjectPermissionCreatesAndPreserves(t *testing.T) {
 	work := t.TempDir()
 	rule := permission.Rule{Permission: "bash", Pattern: "git *", Action: permission.Allow}

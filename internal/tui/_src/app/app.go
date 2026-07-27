@@ -696,6 +696,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case settingsSavedMsg:
+		if sm, ok := m.modal.(*settingsModal); ok {
+			sm.afterSettingsSaved(msg)
+		}
+		if msg.err != nil {
+			m.setNotice("saving settings failed: "+msg.err.Error(), true)
+			return m, nil
+		}
+		if msg.apply.theme != nil {
+			m.applyThemeEntry(*msg.apply.theme)
+		}
+		if msg.apply.hasVim {
+			m.vimMode = msg.apply.vimMode
+		}
+		if msg.apply.hasNano {
+			m.nanoMode = msg.apply.nanoMode
+		}
+		if msg.apply.hasMd {
+			m.mdReadMode = msg.apply.mdReadMode
+		}
+		label := msg.label
+		if label == "" {
+			label = msg.value
+		}
+		m.setNotice("saved default: "+label, false)
+		m.reflow()
+		return m, nil
+
 	case historyAddedMsg:
 		if msg.err != nil {
 			m.setNotice("saving prompt history failed: "+msg.err.Error(), true)

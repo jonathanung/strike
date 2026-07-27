@@ -24,7 +24,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 	}{
 		"/provider":         {"select a provider and model", "[name [model]]", commandSourceBuiltin},
 		"/model":            {"select a model for the current provider", "[model]", commandSourceBuiltin},
-		"/settings":         {"manage custom providers and settings", "", commandSourceBuiltin},
+		"/settings":         {"defaults (theme, editor, mode) and custom providers", "", commandSourceBuiltin},
 		"/effort":           {"set how much reasoning the model spends", "[level]", commandSourceBuiltin},
 		"/autonomy":         {"set exit-gate policy (supervised/agent/checks)", "[mode]", commandSourceBuiltin},
 		"/mode":             {"set permission posture (default/plan/accept-edits/yolo)", "[mode]", commandSourceBuiltin},

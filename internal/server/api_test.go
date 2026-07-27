@@ -38,11 +38,14 @@ func (h testHistory) Enqueue(string) <-chan error {
 
 type testSettings struct{ saved chan [5]string }
 
+func (testSettings) Defaults() host.UserDefaults { return host.UserDefaults{} }
+
 func (s testSettings) SaveDefaults(provider, model, agent, effort, mode string) error {
 	s.saved <- [5]string{provider, model, agent, effort, mode}
 	return nil
 }
-func (testSettings) SaveTheme(string) error { return nil }
+func (testSettings) SaveTheme(string) error                        { return nil }
+func (testSettings) SavePresentation(string, string, string) error { return nil }
 
 func TestAttachOnlyBootstrapDeclaresProtocolOpsUnavailable(t *testing.T) {
 	srv, err := New(Options{SessionDir: t.TempDir()})
