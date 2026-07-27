@@ -255,12 +255,17 @@ func mergeProviders(base, layer []CustomProvider) []CustomProvider {
 //
 // Model overlays and endpoint overlays come from providers.jsonc for built-in
 // (catalog-backed) providers — they never become CustomProvider rows.
+//
+// Disable-default flags (disable-default-providers / disable-default-<name>)
+// hide builtin catalog providers from auth/provider pickers and block select.
 type CustomStore struct {
-	mu        sync.Mutex
-	items     []CustomProvider
-	overlays  map[string][]ModelDef
-	endpoints map[string]ProviderEndpoint
-	workDir   string
+	mu                sync.Mutex
+	items             []CustomProvider
+	overlays          map[string][]ModelDef
+	endpoints         map[string]ProviderEndpoint
+	workDir           string
+	disableDefaultAll bool
+	disableDefaultPer map[string]bool
 }
 
 // NewCustomStore seeds a store from a merged provider list (e.g. config.Load).
@@ -279,6 +284,50 @@ func NewCustomStoreWithOverlays(items []CustomProvider, overlays map[string][]Mo
 		endpoints: cloneEndpointMap(endpoints),
 		workDir:   workDir,
 	}
+}
+
+// SetDisableDefault applies merged disable-default-providers flags from config.
+func (s *CustomStore) SetDisableDefault(all bool, per map[string]bool) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.disableDefaultAll = all
+	s.disableDefaultPer = cloneBoolMap(per)
+}
+
+// IsBuiltinDisabled reports whether a builtin catalog provider is hidden by
+// disable-default-providers / disable-default-<name>. Custom names are never
+// disabled by these flags. Per-provider false overrides a bulk true.
+func (s *CustomStore) IsBuiltinDisabled(name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return false
+	}
+	if _, ok := BuiltinProviderNames[name]; !ok {
+		return false
+	}
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if v, ok := s.disableDefaultPer[name]; ok {
+		return v
+	}
+	return s.disableDefaultAll
+}
+
+func cloneBoolMap(in map[string]bool) map[string]bool {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 // ModelOverlay returns config model defs for provider (builtin overlays or

@@ -141,6 +141,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	}
 
 	customStore := config.NewCustomStoreWithOverlays(cfg.Providers, cfg.ModelOverlays, cfg.EndpointOverlays, workDir)
+	customStore.SetDisableDefault(cfg.DisableDefaultProviders, cfg.DisableDefaultPer)
 
 	// selectProvider constructs a provider by name, probing credentials so
 	// a bad /provider selection fails at select time with a clear message
@@ -148,6 +149,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// customStore (live; includes mid-session /settings adds). Builtin
 	// endpoint overlays from providers.jsonc (baseURL/apiKey) apply here.
 	selectProvider := func(name string) (provider.Provider, string, error) {
+		if customStore.IsBuiltinDisabled(name) {
+			return nil, "", fmt.Errorf("provider %q is disabled (set disable-default-%s to false, or disable-default-providers to false)", name, name)
+		}
 		if name != "echo" {
 			if ep, ok := customStore.Endpoint(name); ok {
 				if p, model, err, handled := buildBuiltinWithEndpoint(name, ep, authStore); handled {
