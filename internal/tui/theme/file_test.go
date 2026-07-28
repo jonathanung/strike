@@ -114,7 +114,7 @@ func TestBuiltinCatalogContainsStrikeAndJSONThemes(t *testing.T) {
 			t.Errorf("%s missing text.dark", e.ID)
 		}
 	}
-	for _, want := range []string{"dracula", "nord", "catppuccin", "gruvbox", "monokai"} {
+	for _, want := range []string{"dracula", "nord", "catppuccin", "gruvbox", "monokai", "tokyo-night"} {
 		if !ids[want] {
 			t.Errorf("missing builtin %s", want)
 		}
