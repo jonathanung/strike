@@ -47,8 +47,8 @@ func Start(cmd *exec.Cmd, cols, rows int) (*Session, error) {
 	if cmd == nil {
 		return nil, fmt.Errorf("term: nil command")
 	}
-	// Preserve the caller environment (including COLORTERM and Vim config
-	// variables), but advertise one deterministic terminal capability.
+	// Preserve editor configuration while advertising only the terminal
+	// capabilities the embedded vt10x screen can render faithfully.
 	env := cmd.Env
 	if env == nil {
 		env = os.Environ()
@@ -88,13 +88,13 @@ func Start(cmd *exec.Cmd, cols, rows int) (*Session, error) {
 	return s, nil
 }
 
-// ptyEnv preserves the parent environment while replacing, rather than
-// duplicating, TERM for the embedded xterm-compatible PTY.
+// ptyEnv preserves the parent environment while replacing TERM and removing
+// truecolor signaling for the embedded xterm-256color PTY.
 func ptyEnv(parent []string) []string {
 	env := make([]string, 0, len(parent)+1)
 	for _, entry := range parent {
 		name, _, _ := strings.Cut(entry, "=")
-		if name != "TERM" {
+		if name != "TERM" && name != "COLORTERM" {
 			env = append(env, entry)
 		}
 	}
