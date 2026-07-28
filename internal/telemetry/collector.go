@@ -31,15 +31,14 @@ type Host struct {
 	pid int
 
 	// Disk cache: reuse last successful (or failed) probe for diskTTL.
-	diskRoot              string
-	diskUsed              uint64
-	diskTotal             uint64
-	diskFree              uint64
-	diskOK                bool
-	diskAt                time.Time
-	diskTTL               time.Duration // 0 → DefaultDiskInterval
-	diskRefreshInFlight   bool
-	diskRefreshGeneration uint64 // bumps when a refresh goroutine finishes
+	diskRoot            string
+	diskUsed            uint64
+	diskTotal           uint64
+	diskFree            uint64
+	diskOK              bool
+	diskAt              time.Time
+	diskTTL             time.Duration // 0 → DefaultDiskInterval
+	diskRefreshInFlight bool
 
 	// Optional hooks for tests. nil → platform defaults.
 	readDiskFn func(root string) (used, total, free uint64, ok bool)
@@ -188,7 +187,6 @@ func (h *Host) sampleDisk(ctx context.Context, s *Sample, root string) {
 		return
 	}
 	h.diskRefreshInFlight = true
-	startGen := h.diskRefreshGeneration
 	h.mu.Unlock()
 
 	fn := readDisk
@@ -209,7 +207,6 @@ func (h *Host) sampleDisk(ctx context.Context, s *Sample, root string) {
 		h.diskOK = ok
 		h.diskAt = h.now()
 		h.diskRefreshInFlight = false
-		h.diskRefreshGeneration = startGen + 1
 		h.mu.Unlock()
 		ch <- diskRes{u, t, f, ok}
 	}()
