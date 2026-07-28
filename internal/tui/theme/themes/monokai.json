@@ -13,7 +13,8 @@
     "purple": "#ae81ff",
     "lightBg": "#fafafa",
     "lightFg": "#272822",
-    "lightMuted": "#75715e"
+    "lightMuted": "#75715e",
+    "yellowDeep": "#8a8018"
   },
   "colors": {
     "text": { "light": "lightFg", "dark": "fg" },
@@ -22,7 +23,7 @@
     "accentAlt": { "light": "blue", "dark": "blue" },
     "highlight": { "light": "orange", "dark": "fg" },
     "success": { "light": "green", "dark": "green" },
-    "warning": { "light": "orange", "dark": "orange" },
+    "warning": { "light": "yellowDeep", "dark": "yellow" },
     "error": { "light": "red", "dark": "red" },
     "danger": { "light": "red", "dark": "red" },
     "background": { "light": "lightBg", "dark": "bg" },

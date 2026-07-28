@@ -205,7 +205,7 @@ func TestHeaderRecolorsForEachLiveAgentState(t *testing.T) {
 			},
 			state: theme.AgentStateAttention,
 			color: "#333333",
-			label: "attention",
+			label: "needs you",
 		},
 		{
 			name: "error",

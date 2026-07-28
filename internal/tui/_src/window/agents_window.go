@@ -34,7 +34,7 @@ func (f agentsViewFilter) next() agentsViewFilter {
 func (f agentsViewFilter) label() string {
 	switch f {
 	case agentsFilterAttention:
-		return "attention"
+		return "needs you"
 	case agentsFilterWorking:
 		return "working"
 	case agentsFilterReady:
@@ -130,7 +130,7 @@ func (w agentsWindow) title() string {
 		if n := w.countState(theme.AgentStateAttention); n > 0 {
 			return dotJoin(th, base, itoa(n)+" need you")
 		}
-		return dotJoin(th, base, "attention")
+		return dotJoin(th, base, "needs you")
 	case agentsFilterWorking:
 		return dotJoin(th, base, "working")
 	case agentsFilterReady:
@@ -623,7 +623,7 @@ func agentsRootDetail(state theme.AgentState) string {
 	case theme.AgentStateWorking:
 		return "working"
 	case theme.AgentStateAttention:
-		return "attention"
+		return "needs you"
 	case theme.AgentStateError:
 		return "error"
 	case theme.AgentStateDead:

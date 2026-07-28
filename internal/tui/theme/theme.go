@@ -61,7 +61,7 @@ func Default() Theme {
 		AccentAlt:  lipgloss.AdaptiveColor{Light: "#0b7285", Dark: "#5cd0e8"},
 		Highlight:  lipgloss.AdaptiveColor{Light: "#4c1d95", Dark: "#f4f1ff"},
 		Success:    lipgloss.AdaptiveColor{Light: "#1f8a4c", Dark: "#5edb92"},
-		Warning:    lipgloss.AdaptiveColor{Light: "#b7791f", Dark: "#f5c451"},
+		Warning:    lipgloss.AdaptiveColor{Light: "#9a6700", Dark: "#ffcc33"},
 		Error:      lipgloss.AdaptiveColor{Light: "#c23b3b", Dark: "#ff8087"},
 		Danger:     lipgloss.AdaptiveColor{Light: "#c23b3b", Dark: "#ff8087"},
 		Background: lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#1c1b22"},

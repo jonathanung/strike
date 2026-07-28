@@ -193,7 +193,7 @@ func visualizerStateGlyph(th theme.Theme, state theme.AgentState, status string)
 	case theme.AgentStateWorking:
 		return ic.Ellipsis
 	case theme.AgentStateAttention:
-		return ic.Info
+		return ic.Bolt
 	case theme.AgentStateError:
 		return ic.Err
 	case theme.AgentStateDead:

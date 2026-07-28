@@ -15,7 +15,7 @@ func TestAgentStateLabel(t *testing.T) {
 	}{
 		{theme.AgentStateReady, "ready"},
 		{theme.AgentStateWorking, "working"},
-		{theme.AgentStateAttention, "attention"},
+		{theme.AgentStateAttention, "needs you"},
 		{theme.AgentStateError, "error"},
 		{theme.AgentStateDead, "dead"},
 	}
@@ -99,5 +99,47 @@ func TestSpinnerStyleUsesWorkingToken(t *testing.T) {
 	th := theme.Default()
 	if got, want := th.S().Spinner.GetForeground(), th.AccentAlt; got != want {
 		t.Errorf("Spinner fg = %v, want AccentAlt %v", got, want)
+	}
+}
+
+func TestDefaultWarningIsClearYellow(t *testing.T) {
+	// Needs-you / attention chrome uses Warning; both adaptive sides must be a
+	// clear yellow with enough weight for light and dark terminals.
+	th := theme.Default()
+	want := lipgloss.AdaptiveColor{Light: "#9a6700", Dark: "#ffcc33"}
+	if th.Warning != want {
+		t.Fatalf("Default Warning = %#v, want clear yellow %#v", th.Warning, want)
+	}
+	if got := th.AgentStateColor(theme.AgentStateAttention); got != want {
+		t.Fatalf("Attention color = %#v, want Warning yellow %#v", got, want)
+	}
+}
+
+func TestPackagedThemesWarningYellowReadable(t *testing.T) {
+	// Stock packs must keep needs-you on a yellow warning token. Light side is
+	// deeper than dark so pale yellows do not wash out on light backgrounds.
+	cases := []struct {
+		id          string
+		light, dark string
+	}{
+		{"nord", "#9e7a2f", "#ebcb8b"},
+		{"dracula", "#8a7f12", "#f1fa8c"},
+		{"monokai", "#8a8018", "#e6db74"},
+		{"catppuccin", "#df8e1d", "#f9e2af"},
+		{"gruvbox", "#b57614", "#fabd2f"},
+	}
+	cat := theme.Builtin()
+	for _, tc := range cases {
+		t.Run(tc.id, func(t *testing.T) {
+			e, ok := theme.Lookup(cat, tc.id)
+			if !ok {
+				t.Fatalf("theme %q missing from Builtin", tc.id)
+			}
+			got := e.Theme.AgentStateColor(theme.AgentStateAttention)
+			want := lipgloss.AdaptiveColor{Light: tc.light, Dark: tc.dark}
+			if got != want {
+				t.Fatalf("Attention/Warning = %#v, want yellow %#v", got, want)
+			}
+		})
 	}
 }

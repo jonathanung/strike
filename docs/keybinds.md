@@ -103,7 +103,7 @@ these controls manage **concurrent root sessions**:
 | `x` | interrupt the selected root or child | `/root-interrupt` |
 | `r` | rename the selected root or child (persists across resume) | `/rename` |
 | `j` / `k` | move cursor | — |
-| `f` | cycle view filter (all → attention → working → ready → roots) | `/root-filter` |
+| `f` | cycle view filter (all → needs you → working → ready → roots) | `/root-filter` |
 | `d` | hide selected root from pane | `/root-hide` |
 
 `Tab` switches **agent personas** (build/plan/explore/…), not root sessions.
