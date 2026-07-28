@@ -35,14 +35,26 @@ func padRight(th theme.Theme, s string, width int) string {
 	return s
 }
 
-// wrapText hard-wraps s to width cells. It is a convenience for card/panel
-// bodies; Panel still truncates every line, so width-safety never depends on
-// the wrap being perfect.
-func wrapText(s string, width int) string {
+// WrapText word-wraps s to width display cells, preferring breaks at spaces so
+// words are not split mid-token across lines. Tokens longer than width are
+// hard-broken. Trailing pad spaces from the layout engine are stripped so
+// callers can indent without overflowing the budget. width < 1 returns s
+// unchanged. Panel still truncates every line as a width-safety net.
+func WrapText(s string, width int) string {
 	if width < 1 {
 		return s
 	}
-	return lipgloss.NewStyle().Width(width).Render(s)
+	out := lipgloss.NewStyle().Width(width).Render(s)
+	lines := strings.Split(out, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, " ")
+	}
+	return strings.Join(lines, "\n")
+}
+
+// wrapText is the unexported alias used inside this package.
+func wrapText(s string, width int) string {
+	return WrapText(s, width)
 }
 
 // clamp constrains v to [lo, hi]; if hi < lo it returns lo.

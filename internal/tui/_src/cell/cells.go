@@ -580,7 +580,9 @@ func indent(s, prefix string) string {
 }
 
 func renderCellText(style lipgloss.Style, text string, width int) string {
-	return style.Render(ansi.Hardwrap(text, width, false))
+	// Word-wrap (not ansi.Hardwrap) so prose does not split mid-word across
+	// lines (#460). Overlong tokens still hard-break inside ui.WrapText.
+	return style.Render(ui.WrapText(text, width))
 }
 
 func previewLines(s string, n int, ellipsis, space string) string {

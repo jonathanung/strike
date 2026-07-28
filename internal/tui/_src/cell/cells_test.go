@@ -1301,7 +1301,7 @@ func TestAssistantCellMarkdownErrorFallback(t *testing.T) {
 	cell := &assistantCell{text: src, complete: true}
 	out := cell.render(width, th)
 	plain := ansi.Strip(out)
-	// Hardwrap may insert mid-word breaks; compare with all whitespace removed.
+	// Word-wrap may move spaces to line breaks; compare with whitespace removed.
 	if !strings.Contains(stripAllWS(plain), stripAllWS(src)) {
 		t.Errorf("error fallback omitted source text:\n%s", plain)
 	}
@@ -1370,7 +1370,7 @@ func TestAssistantCellMarkdownCache(t *testing.T) {
 }
 
 func TestUserCellUnchangedByMarkdown(t *testing.T) {
-	// User cells stay plain Hardwrap text; markdown markers must remain literal.
+	// User cells stay plain word-wrapped text; markdown markers must remain literal.
 	th := theme.Default()
 	plain := ansi.Strip((&userCell{text: "# Title"}).render(80, th))
 	if !strings.Contains(plain, "# Title") {
@@ -1378,6 +1378,73 @@ func TestUserCellUnchangedByMarkdown(t *testing.T) {
 	}
 	if !strings.Contains(plain, "you") {
 		t.Errorf("user label missing:\n%s", plain)
+	}
+}
+
+func TestUserCellWordWrapKeepsTokens(t *testing.T) {
+	// #460: transcript cells used ansi.Hardwrap and split words mid-token
+	// (e.g. "GitHub" → "Git"/"Hub", "issue-handler" mid-path).
+	th := theme.Default()
+	const src = `Use the skill tool with name "issue-handler" (if available), or follow the issue-handler workflow from .claude/skills/issue-handler/SKILL.md if present. Own GitHub issue #460 end-to-end for strike-cli.`
+	for _, width := range []int{60, 70, 80, 90} {
+		out := (&userCell{text: src}).render(width, th)
+		plain := ansi.Strip(out)
+		for i, line := range strings.Split(out, "\n") {
+			if got := ansi.StringWidth(line); got > width {
+				t.Errorf("width %d line %d: StringWidth=%d > %d: %q", width, i, got, width, ansi.Strip(line))
+			}
+		}
+		body := assistantBodyPlain(plain) // strip label line
+		for _, tok := range []string{"issue-handler", "GitHub", "strike-cli"} {
+			if !strings.Contains(body, tok) {
+				t.Errorf("width %d body missing intact token %q:\n%s", width, tok, body)
+			}
+		}
+		if !strings.Contains(collapsedWS(body), "Own GitHub issue #460") {
+			t.Errorf("width %d lost prose around GitHub:\n%s", width, body)
+		}
+	}
+}
+
+func TestAssistantCellStreamingWordWrapKeepsTokens(t *testing.T) {
+	th := theme.Default()
+	const src = `Checking GitHub issue status before applying the issue-handler workflow end-to-end.`
+	const width = 40
+	out := (&assistantCell{text: src, complete: false}).render(width, th)
+	plain := ansi.Strip(out)
+	body := assistantBodyPlain(plain)
+	for _, tok := range []string{"GitHub", "issue-handler"} {
+		if !strings.Contains(body, tok) {
+			t.Errorf("streaming body missing intact token %q:\n%s", tok, body)
+		}
+	}
+	for i, line := range strings.Split(out, "\n") {
+		if got := ansi.StringWidth(line); got > width {
+			t.Errorf("line %d width %d > %d: %q", i, got, width, ansi.Strip(line))
+		}
+	}
+}
+
+func TestAssistantCellMarkdownErrorFallbackWordWrap(t *testing.T) {
+	orig := markdownRender
+	t.Cleanup(func() { markdownRender = orig })
+	markdownRender = func(source string, width int) (string, error) {
+		return "", errMarkdownTest
+	}
+
+	th := theme.Default()
+	const src = "fallback plain source about GitHub issue-handler visibility"
+	const width = 36
+	out := (&assistantCell{text: src, complete: true}).render(width, th)
+	plain := ansi.Strip(out)
+	body := assistantBodyPlain(plain)
+	for _, tok := range []string{"GitHub", "issue-handler"} {
+		if !strings.Contains(body, tok) {
+			t.Errorf("fallback missing intact token %q:\n%s", tok, body)
+		}
+	}
+	if !strings.Contains(stripAllWS(plain), stripAllWS(src)) {
+		t.Errorf("fallback omitted source text:\n%s", plain)
 	}
 }
 
