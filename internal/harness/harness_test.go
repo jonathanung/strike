@@ -268,6 +268,24 @@ func TestRegistry_RegisterAndOverride(t *testing.T) {
 	}
 }
 
+func TestRegistryRegisterFunc(t *testing.T) {
+	r := harness.NewRegistry()
+	r.RegisterFunc("chess", func(_ context.Context, req harness.Request) (harness.Result, error) {
+		return harness.Result{Text: "move for " + req.Agent}, nil
+	})
+	h, err := r.Resolve("chess")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := h.Run(context.Background(), harness.Request{Agent: "stockfish"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Text != "move for stockfish" {
+		t.Fatalf("result.Text = %q", result.Text)
+	}
+}
+
 type stubHarness struct {
 	name   string
 	runErr error

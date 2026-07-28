@@ -73,6 +73,21 @@ type Harness interface {
 	Run(ctx context.Context, req Request) (Result, error)
 }
 
+// Func is an ordinary Go harness function. Register it with Registry.RegisterFunc
+// when embedding an application directly instead of using the process ABI.
+type Func func(context.Context, Request) (Result, error)
+
+type namedFunc struct {
+	name string
+	fn   Func
+}
+
+func (h namedFunc) Name() string { return h.name }
+
+func (h namedFunc) Run(ctx context.Context, req Request) (Result, error) {
+	return h.fn(ctx, req)
+}
+
 // Registry maps harness names to constructors. The zero value is ready to
 // use (no harnesses beyond builtins). Safe for concurrent reads after
 // initial registration.
@@ -107,6 +122,14 @@ func (r *Registry) Register(h Harness) {
 		panic("harness: empty name")
 	}
 	r.builtins[name] = h
+}
+
+// RegisterFunc registers an ordinary Go function under name.
+func (r *Registry) RegisterFunc(name string, fn Func) {
+	if fn == nil {
+		panic("harness: nil function")
+	}
+	r.Register(namedFunc{name: name, fn: fn})
 }
 
 // Known returns true when name is registered.

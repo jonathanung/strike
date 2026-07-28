@@ -43,6 +43,39 @@ The harness may loop, branch, run MCTS, invoke external programs, maintain its
 own state, call Strike tools through `execute`, or return immediately. It does
 not declare phases or a workflow graph.
 
+The primary boundary is application-oriented and language-neutral. A chess
+engine, theorem prover, neural-symbolic runtime, or other native application
+can implement the process ABI directly; JavaScript and `runHarness` are only a
+convenience adapter.
+
+## Embedded Go applications
+
+Go applications compiled into Strike can register an ordinary function without
+implementing an interface wrapper:
+
+```go
+registry.RegisterFunc("chess", func(ctx context.Context, req harness.Request) (harness.Result, error) {
+	position := decodePosition(req.Request)
+	for depth := 1; ; depth++ {
+		if err := ctx.Err(); err != nil {
+			return harness.Result{}, err
+		}
+		move := search(position, depth)
+		req.Progress(json.RawMessage(fmt.Sprintf(
+			`{"kind":"depth","current":%d,"move":%q}`,
+			depth, move,
+		)))
+		if solved(move) {
+			return harness.Result{Text: move, StopReason: "complete"}, nil
+		}
+	}
+})
+```
+
+The application owns its search, state, branching, and termination. Strike's
+`harness.Request` only supplies host capabilities such as model calls, progress,
+tool execution, cancellation context, and the initial normalized request.
+
 `sdk/harness.mjs` hides the subprocess JSONL protocol. Harness code does not
 manage turn IDs, call IDs, protocol messages, or process lifecycle.
 
