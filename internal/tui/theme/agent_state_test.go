@@ -127,6 +127,7 @@ func TestPackagedThemesWarningYellowReadable(t *testing.T) {
 		{"monokai", "#8a8018", "#e6db74"},
 		{"catppuccin", "#df8e1d", "#f9e2af"},
 		{"gruvbox", "#b57614", "#fabd2f"},
+		{"tokyo-night", "#8c6c3e", "#e0af68"},
 	}
 	cat := theme.Builtin()
 	for _, tc := range cases {
