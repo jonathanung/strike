@@ -203,6 +203,27 @@ func TestListRendersSuffixWithoutRecoloring(t *testing.T) {
 	}
 }
 
+func TestListRendersPrefixWithoutRecoloring(t *testing.T) {
+	th := theme.Default().Resolve()
+	prefix := th.S().Success.Render("Y")
+	out := List(th, ListOpts{
+		Items:  []ListItem{{Prefix: prefix, Detail: "Status · success"}},
+		Cursor: 0,
+		Width:  40,
+	})
+	plain := ansi.Strip(out)
+	if !strings.Contains(plain, "Y") {
+		t.Fatalf("missing prefix glyph: %q", plain)
+	}
+	if !strings.Contains(plain, "success") {
+		t.Fatalf("missing detail: %q", plain)
+	}
+	// Prefix keeps its own styling bytes under the selected row.
+	if !strings.Contains(out, prefix) {
+		t.Fatalf("prefix restyled away: %q", out)
+	}
+}
+
 func TestListWrapShowsFullLongLabel(t *testing.T) {
 	const width = 36
 	label := "To verify that the entire system works correctly from end to end"

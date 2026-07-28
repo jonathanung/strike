@@ -14,6 +14,9 @@ import (
 type ListItem struct {
 	Label  string // primary text
 	Detail string // muted trailing text after " — "
+	// Prefix is optional pre-styled leading content (e.g. a colored glyph). It
+	// is not recolored; width is measured with lipgloss.Width (ANSI-aware).
+	Prefix string
 	// Suffix is optional pre-styled trailing content (e.g. a Badge). It is not
 	// recolored; width is measured with lipgloss.Width (ANSI-aware).
 	Suffix   string
@@ -120,6 +123,13 @@ func listRow(th theme.Theme, st theme.Styles, ic theme.Icons, item ListItem, isC
 	if item.Current {
 		label += " (current)"
 	}
+	prefix := item.Prefix
+	prefixW := lipgloss.Width(prefix)
+	prefixGap := ""
+	if prefix != "" && (label != "" || item.Detail != "") {
+		prefixGap = strings.Repeat(" ", th.Spacing.XS)
+		prefixW += th.Spacing.XS
+	}
 	suffix := item.Suffix
 	suffixW := lipgloss.Width(suffix)
 	suffixGap := ""
@@ -128,7 +138,7 @@ func listRow(th theme.Theme, st theme.Styles, ic theme.Icons, item ListItem, isC
 		suffixW += th.Spacing.XS
 	}
 	if wrap {
-		return listRowWrapped(th, st, ic, label, item.Detail, suffix, suffixGap, suffixW, marker, markerWidth, labelStyle, width)
+		return listRowWrapped(th, st, ic, prefix, prefixGap, prefixW, label, item.Detail, suffix, suffixGap, suffixW, marker, markerWidth, labelStyle, width)
 	}
 	budget := width - suffixW
 	if budget < 1 {
@@ -137,8 +147,8 @@ func listRow(th theme.Theme, st theme.Styles, ic theme.Icons, item ListItem, isC
 		suffixW = 0
 		budget = width
 	}
-	plain := marker + label
-	line := marker + labelStyle.Render(label)
+	plain := marker + strings.Repeat(" ", lipgloss.Width(prefix)) + prefixGap + label
+	line := marker + prefix + prefixGap + labelStyle.Render(label)
 	if item.Detail != "" {
 		separator := strings.Repeat(" ", th.Spacing.XS) + ic.DetailSeparator + strings.Repeat(" ", th.Spacing.XS)
 		plain += separator + item.Detail
@@ -146,7 +156,7 @@ func listRow(th theme.Theme, st theme.Styles, ic theme.Icons, item ListItem, isC
 	}
 	if lipgloss.Width(plain) > budget {
 		// Restyle the whole truncated row in one style to keep it width-safe.
-		// Drop pre-styled suffix when the body alone overflows the budget.
+		// Drop pre-styled prefix/suffix when the body alone overflows the budget.
 		return labelStyle.Render(truncate(th, plain, width))
 	}
 	if suffix == "" {
@@ -156,13 +166,14 @@ func listRow(th theme.Theme, st theme.Styles, ic theme.Icons, item ListItem, isC
 }
 
 // listRowWrapped word-wraps label and detail so primary option text is fully
-// readable inside modal widths. The cursor marker sits on the first line only;
-// continuation lines indent to the label column. Detail follows the label as
-// muted wrapped lines (separator on the first detail line).
-func listRowWrapped(th theme.Theme, st theme.Styles, ic theme.Icons, label, detail, suffix, suffixGap string, suffixW int, marker string, markerWidth int, labelStyle lipgloss.Style, width int) string {
-	budget := width - markerWidth
+// readable inside modal widths. The cursor marker and optional prefix sit on
+// the first line only; continuation lines indent to the label column. Detail
+// follows the label as muted wrapped lines (separator on the first detail line).
+func listRowWrapped(th theme.Theme, st theme.Styles, ic theme.Icons, prefix, prefixGap string, prefixW int, label, detail, suffix, suffixGap string, suffixW int, marker string, markerWidth int, labelStyle lipgloss.Style, width int) string {
+	leadW := markerWidth + prefixW
+	budget := width - leadW
 	if budget < 1 {
-		return truncate(th, marker, width)
+		return truncate(th, marker+ansi.Strip(prefix), width)
 	}
 	// Reserve suffix on the first line when it fits beside at least one cell of text.
 	firstBudget := budget
@@ -181,19 +192,19 @@ func listRowWrapped(th theme.Theme, st theme.Styles, ic theme.Icons, label, deta
 	for i, plain := range labelLines {
 		styled := labelStyle.Render(plain)
 		if i == 0 {
-			row := marker + styled
+			row := marker + prefix + prefixGap + styled
 			if suffix != "" {
 				row += suffixGap + suffix
 			}
 			if lipgloss.Width(row) > width {
-				row = labelStyle.Render(truncate(th, marker+plain, width))
+				row = labelStyle.Render(truncate(th, marker+strings.Repeat(" ", lipgloss.Width(prefix))+prefixGap+plain, width))
 			}
 			lines = append(lines, row)
 			continue
 		}
-		row := strings.Repeat(" ", markerWidth) + styled
+		row := strings.Repeat(" ", leadW) + styled
 		if lipgloss.Width(row) > width {
-			row = labelStyle.Render(truncate(th, strings.Repeat(" ", markerWidth)+plain, width))
+			row = labelStyle.Render(truncate(th, strings.Repeat(" ", leadW)+plain, width))
 		}
 		lines = append(lines, row)
 	}
@@ -207,9 +218,9 @@ func listRowWrapped(th theme.Theme, st theme.Styles, ic theme.Icons, label, deta
 	// block; keep detail on its own wrapped block under the label column.
 	for _, plain := range wrapPlainLines(detailPlain, budget, budget) {
 		styled := st.Muted.Render(plain)
-		row := strings.Repeat(" ", markerWidth) + styled
+		row := strings.Repeat(" ", leadW) + styled
 		if lipgloss.Width(row) > width {
-			row = st.Muted.Render(truncate(th, strings.Repeat(" ", markerWidth)+plain, width))
+			row = st.Muted.Render(truncate(th, strings.Repeat(" ", leadW)+plain, width))
 		}
 		lines = append(lines, row)
 	}

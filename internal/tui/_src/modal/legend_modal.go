@@ -4,12 +4,36 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 	"github.com/jonathanung/strike-cli/internal/tui/ui"
 )
 
 const legendModalMaxRows = 12
+
+// legendPaint selects the theme style used for a legend glyph sample.
+type legendPaint int
+
+const (
+	legendPaintDefault legendPaint = iota
+	legendPaintUser
+	legendPaintAssistant
+	legendPaintTool
+	legendPaintSuccess
+	legendPaintError
+	legendPaintWarning
+	legendPaintAccent
+	legendPaintAccentAlt
+	legendPaintSelected
+	legendPaintBorderFocus
+	legendPaintInputCursor
+	legendPaintMuted
+	legendPaintAgentReady
+	legendPaintAgentWorking
+	legendPaintAgentAttention
+	legendPaintAgentError
+)
 
 // legendEntry is one row in the UI legend (glyph/token + meaning).
 type legendEntry struct {
@@ -18,6 +42,8 @@ type legendEntry struct {
 	// hardcodes glyphs that drift from Icons.
 	Glyph       string
 	Description string
+	// Paint colors the glyph sample to match live chrome (status, roles, …).
+	Paint legendPaint
 }
 
 // legendModal is a filterable cheatsheet of TUI icons, status labels, and chrome.
@@ -36,35 +62,35 @@ func buildLegendEntries(th theme.Theme) []legendEntry {
 	ic := th.Icons
 	entries := []legendEntry{
 		// Transcript / roles
-		{"Transcript", ic.Prompt, "user prompt and composer marker"},
-		{"Transcript", ic.Assistant, "assistant message label"},
-		{"Transcript", ic.Tool, "tool call label"},
-		{"Transcript", ic.ToolGuide, "tool transcript guide line"},
-		{"Transcript", ic.Agent, "agent / persona marker"},
-		{"Transcript", ic.Bolt, "brand motif"},
+		{"Transcript", ic.Prompt, "user prompt and composer marker", legendPaintUser},
+		{"Transcript", ic.Assistant, "assistant message label", legendPaintAssistant},
+		{"Transcript", ic.Tool, "tool call label", legendPaintTool},
+		{"Transcript", ic.ToolGuide, "tool transcript guide line", legendPaintTool},
+		{"Transcript", ic.Agent, "agent / persona marker", legendPaintAccent},
+		{"Transcript", ic.Bolt, "brand motif", legendPaintWarning},
 		// Outcomes
-		{"Status", ic.OK, "success / completed"},
-		{"Status", ic.Err, "error / failed"},
-		{"Status", ic.Info, "informational"},
+		{"Status", ic.OK, "success / completed", legendPaintSuccess},
+		{"Status", ic.Err, "error / failed", legendPaintError},
+		{"Status", ic.Info, "informational", legendPaintWarning},
 		// Agent runtime chrome (words + color roles)
-		{"Agent state", theme.AgentStateReady.Label(), "idle, awaiting input (success color)"},
-		{"Agent state", theme.AgentStateWorking.Label(), "turn or tool loop in flight (accent)"},
-		{"Agent state", theme.AgentStateAttention.Label(), "needs you: permission, gate, or prompt (warning)"},
-		{"Agent state", theme.AgentStateError.Label(), "failed turn, tool, or provider (error color)"},
+		{"Agent state", theme.AgentStateReady.Label(), "idle, awaiting input (success color)", legendPaintAgentReady},
+		{"Agent state", theme.AgentStateWorking.Label(), "turn or tool loop in flight (accent)", legendPaintAgentWorking},
+		{"Agent state", theme.AgentStateAttention.Label(), "needs you: permission, gate, or prompt (warning)", legendPaintAgentAttention},
+		{"Agent state", theme.AgentStateError.Label(), "failed turn, tool, or provider (error color)", legendPaintAgentError},
 		// Navigation / input
-		{"Chrome", ic.Cursor, "list selection cursor"},
-		{"Chrome", ic.InputCursor, "text input cursor"},
-		{"Chrome", ic.FilterCursor, "active filter cursor"},
-		{"Chrome", ic.FocusBar, "focused pane edge marker"},
-		{"Chrome", ic.Dot, "inline separator between fields"},
-		{"Chrome", ic.DetailSeparator, "label/detail separator"},
-		{"Chrome", ic.Ellipsis, "truncated marker"},
-		{"Chrome", ic.BadgeLeft + ic.Ellipsis + ic.BadgeRight, "status badge delimiters"},
+		{"Chrome", ic.Cursor, "list selection cursor", legendPaintSelected},
+		{"Chrome", ic.InputCursor, "text input cursor", legendPaintInputCursor},
+		{"Chrome", ic.FilterCursor, "active filter cursor", legendPaintInputCursor},
+		{"Chrome", ic.FocusBar, "focused pane edge marker", legendPaintBorderFocus},
+		{"Chrome", ic.Dot, "inline separator between fields", legendPaintMuted},
+		{"Chrome", ic.DetailSeparator, "label/detail separator", legendPaintMuted},
+		{"Chrome", ic.Ellipsis, "truncated marker", legendPaintMuted},
+		{"Chrome", ic.BadgeLeft + ic.Ellipsis + ic.BadgeRight, "status badge delimiters", legendPaintMuted},
 		// Meters / trees
-		{"Chrome", ic.MeterFill + ic.MeterEmpty, "context meter fill / empty"},
-		{"Chrome", ic.TreeExpanded, "expanded tree node"},
-		{"Chrome", ic.TreeCollapsed, "collapsed tree node"},
-		{"Chrome", ic.LogoTopRule + " / " + ic.LogoBottomRule, "logo top / bottom rules"},
+		{"Chrome", ic.MeterFill + ic.MeterEmpty, "context meter fill / empty", legendPaintAccent},
+		{"Chrome", ic.TreeExpanded, "expanded tree node", legendPaintDefault},
+		{"Chrome", ic.TreeCollapsed, "collapsed tree node", legendPaintDefault},
+		{"Chrome", ic.LogoTopRule + " / " + ic.LogoBottomRule, "logo top / bottom rules", legendPaintMuted},
 	}
 	if spark := strings.TrimSpace(ic.Sparkline); spark != "" {
 		// Show ends of the sparkline scale rather than the full bar set.
@@ -73,9 +99,50 @@ func buildLegendEntries(th theme.Theme) []legendEntry {
 		if len(runes) >= 2 {
 			sample = string(runes[0]) + ic.Ellipsis + string(runes[len(runes)-1])
 		}
-		entries = append(entries, legendEntry{"Chrome", sample, "activity sparkline (low to high)"})
+		entries = append(entries, legendEntry{"Chrome", sample, "activity sparkline (low to high)", legendPaintAccentAlt})
 	}
 	return entries
+}
+
+func (p legendPaint) style(th theme.Theme) lipgloss.Style {
+	th = th.Resolve()
+	st := th.S()
+	switch p {
+	case legendPaintUser:
+		return st.UserLabel
+	case legendPaintAssistant:
+		return st.AssistantLabel
+	case legendPaintTool:
+		return st.ToolLabel
+	case legendPaintSuccess:
+		return st.Success
+	case legendPaintError:
+		return st.Error
+	case legendPaintWarning:
+		return st.Warning
+	case legendPaintAccent:
+		return st.Accent
+	case legendPaintAccentAlt:
+		return st.AccentAlt
+	case legendPaintSelected:
+		return st.Selected
+	case legendPaintBorderFocus:
+		return st.BorderFocus
+	case legendPaintInputCursor:
+		return st.InputCursor
+	case legendPaintMuted:
+		return st.Muted
+	case legendPaintAgentReady:
+		return th.AgentStateStyle(theme.AgentStateReady)
+	case legendPaintAgentWorking:
+		return th.AgentStateStyle(theme.AgentStateWorking)
+	case legendPaintAgentAttention:
+		return th.AgentStateStyle(theme.AgentStateAttention)
+	case legendPaintAgentError:
+		return th.AgentStateStyle(theme.AgentStateError)
+	default:
+		return st.Text
+	}
 }
 
 func (m *legendModal) filtered() []legendEntry {
@@ -153,7 +220,7 @@ func (m *legendModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 
 func (m *legendModal) view(width int, th theme.Theme) string {
 	// Rebuild from the active theme so a mid-session theme switch cannot leave
-	// stale glyphs in the legend.
+	// stale glyphs or colors in the legend.
 	m.entries = buildLegendEntries(th)
 
 	list := m.filtered()
@@ -162,8 +229,10 @@ func (m *legendModal) view(width int, th theme.Theme) string {
 	}
 	items := make([]ui.ListItem, len(list))
 	for i, entry := range list {
+		glyph := sanitizeDisplayData(entry.Glyph)
 		items[i] = ui.ListItem{
-			Label:  sanitizeDisplayData(entry.Glyph),
+			// Prefix keeps semantic color; List would recolor Label on select.
+			Prefix: entry.Paint.style(th).Render(glyph),
 			Detail: sanitizeDisplayData(detailJoin(th, entry.Category, entry.Description)),
 		}
 	}
