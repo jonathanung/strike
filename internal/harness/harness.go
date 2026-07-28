@@ -21,13 +21,25 @@ type Outcome struct {
 
 // Result is the harness's final turn outcome.
 type Result struct {
+	Text       string
+	Calls      []provider.ToolCall
+	Reasoning  []json.RawMessage
 	StopReason string
 }
 
 // Request carries per-turn callbacks. The engine handles event emission and
 // message history; the harness controls the loop.
 type Request struct {
-	TurnID string
+	TurnID       string
+	Agent        string
+	ProviderName string
+	Request      provider.Request
+
+	// Provider performs an engine-selected provider request. Implementations may
+	// call it concurrently. The engine forces the selected model and applies its
+	// normal authentication, retry, usage, and cancellation behavior without
+	// committing speculative output to conversation history.
+	Provider func(ctx context.Context, req provider.Request) (<-chan provider.StreamEvent, error)
 
 	// Stream performs one model request with engine-managed retries,
 	// compaction recovery, delta emission, and usage reporting. The engine

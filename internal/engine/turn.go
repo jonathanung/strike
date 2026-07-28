@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -205,7 +206,11 @@ func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.Ima
 	})
 
 	// Dispatch to custom harness when the agent specifies one.
-	h, hName := e.resolveTurnHarness()
+	h, hName, harnessErr := e.resolveTurnHarness()
+	if harnessErr != nil {
+		e.failTurn(harnessErr, turnCorr, finishing)
+		return
+	}
 	if h != nil {
 		e.runHarnessTurn(ctx, h, hName, turnCorr, turnID, finishing)
 		return
@@ -262,8 +267,11 @@ func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.Ima
 func (e *Engine) runHarnessTurn(ctx context.Context, h harness.Harness, hName string,
 	turnCorr protocol.Correlation, turnID string, finishing chan struct{}) {
 
-	var streamCorr protocol.Correlation
+	streamCorr := turnCorr
+	var callbackMu sync.Mutex
 	stream := func(ctx context.Context) (harness.Outcome, error) {
+		callbackMu.Lock()
+		defer callbackMu.Unlock()
 		e.injectPendingChildNotices()
 		e.maybePruneToolResults()
 		e.maybeThresholdCompact(ctx, turnID)
@@ -291,6 +299,8 @@ func (e *Engine) runHarnessTurn(ctx context.Context, h harness.Harness, hName st
 	}
 
 	execute := func(ctx context.Context, call provider.ToolCall) provider.Message {
+		callbackMu.Lock()
+		defer callbackMu.Unlock()
 		if ctx.Err() != nil {
 			msg := e.settleToolFeedback(toolFeedback{
 				CallID:  call.ID,
@@ -312,9 +322,99 @@ func (e *Engine) runHarnessTurn(ctx context.Context, h harness.Harness, hName st
 			Payload:     payload,
 		})
 	}
+	providerCall := func(ctx context.Context, req provider.Request) (<-chan provider.StreamEvent, error) {
+		req.Model = e.model
+		req.Priority = e.priority
+		out := make(chan provider.StreamEvent)
+		go func() {
+			defer close(out)
+			maxAttempts := e.opts.MaxStreamAttempts
+			if maxAttempts < 1 {
+				maxAttempts = 1
+			}
+			for attempt := 1; attempt <= maxAttempts; attempt++ {
+				if ctx.Err() != nil {
+					sendStreamEvent(ctx, out, provider.StreamEvent{Type: provider.EventError, Err: ctx.Err()})
+					return
+				}
+				corr := turnCorr
+				corr.ProviderRequestID = rand.Text()
+				corr.Attempt = attempt
+				stream, err := e.prov.Stream(ctx, req)
+				if err != nil {
+					if attempt == maxAttempts || !provider.IsRetryable(err) {
+						sendStreamEvent(ctx, out, provider.StreamEvent{Type: provider.EventError, Err: err})
+						return
+					}
+				} else {
+					stream = provider.NormalizeStream(stream)
+					var terminal provider.StreamEvent
+				streamLoop:
+					for {
+						var ev provider.StreamEvent
+						var ok bool
+						select {
+						case <-ctx.Done():
+							sendStreamEvent(ctx, out, provider.StreamEvent{Type: provider.EventError, Err: ctx.Err()})
+							return
+						case ev, ok = <-stream:
+							if !ok {
+								break streamLoop
+							}
+						}
+						if ev.Type == provider.EventDone || ev.Type == provider.EventError {
+							terminal = ev
+							break
+						}
+						select {
+						case out <- ev:
+						case <-ctx.Done():
+							sendStreamEvent(ctx, out, provider.StreamEvent{Type: provider.EventError, Err: ctx.Err()})
+							return
+						}
+					}
+					if terminal.Type == provider.EventDone {
+						callbackMu.Lock()
+						e.emitUsage(corr, terminal.Usage)
+						callbackMu.Unlock()
+						sendStreamEvent(ctx, out, terminal)
+						return
+					}
+					if terminal.Err == nil {
+						terminal.Err = provider.ErrIncompleteStream
+					}
+					if attempt == maxAttempts || !provider.IsRetryable(terminal.Err) {
+						sendStreamEvent(ctx, out, terminal)
+						return
+					}
+				}
+				delay := e.streamRetryDelay(attempt + 1)
+				if delay > 0 {
+					timer := time.NewTimer(delay)
+					select {
+					case <-ctx.Done():
+						timer.Stop()
+						sendStreamEvent(ctx, out, provider.StreamEvent{Type: provider.EventError, Err: ctx.Err()})
+						return
+					case <-timer.C:
+					}
+				}
+			}
+		}()
+		return out, nil
+	}
 
 	result, err := h.Run(ctx, harness.Request{
-		TurnID:   turnID,
+		TurnID:       turnID,
+		Agent:        e.agent.Name,
+		ProviderName: e.provName,
+		Request: provider.Request{
+			Model: e.model, System: joinPromptLayerTexts(e.systemLayers()),
+			Messages:  append([]provider.Message(nil), e.messages...),
+			Tools:     func() []provider.ToolSchema { tools, _ := e.effectiveToolSchemas(); return tools }(),
+			MaxTokens: e.opts.MaxTokens, Effort: providerEffort(e.effort), Priority: e.priority,
+		},
+		Provider: providerCall,
 		Stream:   stream,
 		Execute:  execute,
 		Progress: progress,
@@ -323,34 +423,42 @@ func (e *Engine) runHarnessTurn(ctx context.Context, h harness.Harness, hName st
 		e.failTurn(err, streamCorr, finishing)
 		return
 	}
-	e.completeTurn(finishing, streamCorr, result.StopReason)
+	for _, raw := range result.Reasoning {
+		if text := provider.ReasoningText(raw); text != "" {
+			e.emit(protocol.ReasoningDelta{Correlation: turnCorr, Text: text})
+		}
+	}
+	if result.Text != "" {
+		e.emit(protocol.TextDelta{Correlation: turnCorr, Text: result.Text})
+	}
+	e.messages = append(e.messages, provider.Message{Role: provider.RoleAssistant, Text: result.Text, ToolCalls: result.Calls, Reasoning: result.Reasoning})
+	e.completeTurn(finishing, turnCorr, result.StopReason)
+}
+
+func sendStreamEvent(ctx context.Context, out chan<- provider.StreamEvent, ev provider.StreamEvent) {
+	select {
+	case out <- ev:
+	case <-ctx.Done():
+	}
 }
 
 // resolveTurnHarness returns the harness for the current agent. It returns
 // (nil, "") when the agent uses the default loop. A non-nil harness is
 // returned only when the agent specifies a registered non-default harness.
-// Unknown harness names emit an error and fall back to default.
-func (e *Engine) resolveTurnHarness() (harness.Harness, string) {
+// Unknown harness names fail closed.
+func (e *Engine) resolveTurnHarness() (harness.Harness, string, error) {
 	name := e.agent.Harness
 	if name == "" || name == "default" {
-		return nil, ""
+		return nil, "", nil
 	}
 	if e.opts.HarnessRegistry == nil {
-		e.emit(protocol.EngineError{
-			Correlation: e.sessionCorr(),
-			Message:     fmt.Sprintf("agent %q specifies harness %q but no harness registry is configured", e.agent.Name, name),
-		})
-		return nil, ""
+		return nil, "", fmt.Errorf("agent %q specifies harness %q but no harness registry is configured", e.agent.Name, name)
 	}
 	h, err := e.opts.HarnessRegistry.Resolve(name)
 	if err != nil {
-		e.emit(protocol.EngineError{
-			Correlation: e.sessionCorr(),
-			Message:     fmt.Sprintf("agent %q: %v", e.agent.Name, err),
-		})
-		return nil, ""
+		return nil, "", fmt.Errorf("agent %q: %w", e.agent.Name, err)
 	}
-	return h, name
+	return h, name, nil
 }
 
 // streamOutcome is one successful provider stream (after any retries).

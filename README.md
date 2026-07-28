@@ -10,6 +10,10 @@ Architecture is informed by deep-dives into
 [codex](https://github.com/openai/codex). Full package map and dependency
 rules: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+> [!WARNING]
+> Planned external harnesses are trusted executables, not sandboxed plugins.
+> See the [harness JSONL ABI and TypeScript SDK](docs/harnesses.md).
+
 ## Install
 
 ```sh
@@ -106,6 +110,7 @@ Optional Vite dev proxy lives in `web/`. Details and threat model:
 | [Config](docs/config.md) | JSON, permissions, custom providers, `vimMode`/`nanoMode` |
 | [Agents & skills](docs/agents-skills.md) | personas, skills, workflows / autonomy |
 | [Web cockpit](docs/web.md) | experimental `strike serve` (live + RO) |
+| [External harnesses](docs/harnesses.md) | planned JSONL ABI, trust model, TypeScript SDK |
 | [Architecture](docs/ARCHITECTURE.md) | packages, seams, recipes |
 | [Contributing](docs/contributing.md) | layout, verification, doc check |
 

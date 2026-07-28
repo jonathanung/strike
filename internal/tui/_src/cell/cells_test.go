@@ -415,6 +415,40 @@ func TestInfoAndErrorCellRender(t *testing.T) {
 	}
 }
 
+func TestHarnessProgressFormattingAndReplay(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload json.RawMessage
+		want    string
+	}{
+		{name: "conventional", payload: json.RawMessage(`{"kind":"search","message":"expanding","current":2,"total":5}`), want: "tree: search - expanding - 2/5"},
+		{name: "raw fallback", payload: json.RawMessage(`{ "score": 0.75 }`), want: `tree: {"score":0.75}`},
+		{name: "empty payload", payload: nil, want: "tree"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ev := protocol.HarnessProgress{Name: "tree", Payload: tt.payload}
+			if got := formatHarnessProgress(ev); got != tt.want {
+				t.Fatalf("formatHarnessProgress() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+
+	events := []protocol.Event{
+		protocol.UserMessage{Text: "solve"},
+		protocol.HarnessProgress{Name: "tree", Payload: json.RawMessage(`{"kind":"search","current":1,"total":3}`)},
+		protocol.TextDelta{Text: "answer"},
+	}
+	cells, _ := cellsFromEvents(events)
+	if len(cells) != 3 {
+		t.Fatalf("replay cells = %d, want 3", len(cells))
+	}
+	progress, ok := cells[1].(*infoCell)
+	if !ok || progress.text != "tree: search - 1/3" {
+		t.Fatalf("progress cell = %T %#v", cells[1], cells[1])
+	}
+}
+
 func TestExploreCellGroupsConsecutiveReadGlobGrep(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m.applyEvent(protocol.ToolCallBegin{CallID: "r1", Name: "read", Args: json.RawMessage(`{"path":"a.go"}`)})

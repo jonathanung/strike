@@ -216,6 +216,8 @@ func restoreCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 		return e.Correlation, true
 	case protocol.TurnCompleted:
 		return e.Correlation, true
+	case protocol.HarnessProgress:
+		return e.Correlation, true
 	case protocol.TextDelta:
 		return e.Correlation, true
 	case protocol.ToolCallBegin:
