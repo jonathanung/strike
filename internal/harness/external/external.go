@@ -44,22 +44,22 @@ func New(name string, cfg Config) (*External, error) {
 func (e *External) Name() string { return e.name }
 
 type envelope struct {
-	Version    int               `json:"version"`
-	Type       string            `json:"type"`
-	TurnID     string            `json:"turnId"`
-	CallID     string            `json:"callId,omitempty"`
-	ToolCallID string            `json:"toolCallId,omitempty"`
-	Request    *wireRequest      `json:"request,omitempty"`
-	Name       string            `json:"name,omitempty"`
-	Arguments  json.RawMessage   `json:"arguments,omitempty"`
-	Payload    json.RawMessage   `json:"payload,omitempty"`
-	Message    json.RawMessage   `json:"message,omitempty"`
-	Code       string            `json:"code,omitempty"`
-	ErrorText  string            `json:"error,omitempty"`
-	Text       string            `json:"text,omitempty"`
-	Reasoning  []json.RawMessage `json:"reasoning,omitempty"`
-	ToolCalls  []wireToolCall    `json:"toolCalls,omitempty"`
-	StopReason string            `json:"stopReason,omitempty"`
+	Version      int               `json:"version"`
+	Type         string            `json:"type"`
+	InvocationID string            `json:"invocationId"`
+	CallID       string            `json:"callId,omitempty"`
+	ToolCallID   string            `json:"toolCallId,omitempty"`
+	Request      *wireRequest      `json:"request,omitempty"`
+	Name         string            `json:"name,omitempty"`
+	Arguments    json.RawMessage   `json:"arguments,omitempty"`
+	Payload      json.RawMessage   `json:"payload,omitempty"`
+	Message      json.RawMessage   `json:"message,omitempty"`
+	Code         string            `json:"code,omitempty"`
+	ErrorText    string            `json:"error,omitempty"`
+	Text         string            `json:"text,omitempty"`
+	Reasoning    []json.RawMessage `json:"reasoning,omitempty"`
+	ToolCalls    []wireToolCall    `json:"toolCalls,omitempty"`
+	StopReason   string            `json:"stopReason,omitempty"`
 }
 
 type wireRequest struct {
@@ -163,12 +163,12 @@ func (e *External) Run(ctx context.Context, req harness.Request) (harness.Result
 	start := struct {
 		Version      int         `json:"version"`
 		Type         string      `json:"type"`
-		TurnID       string      `json:"turnId"`
+		InvocationID string      `json:"invocationId"`
 		Agent        string      `json:"agent"`
 		Provider     string      `json:"provider"`
 		Request      wireRequest `json:"request"`
 		Capabilities []string    `json:"capabilities"`
-	}{1, "turn.start", req.TurnID, req.Agent, req.ProviderName, toWire(req.Request), []string{"provider.call", "progress.emit", "tool.execute", "turn.cancel"}}
+	}{1, "harness.start", req.InvocationID, req.Agent, req.ProviderName, toWire(req.Request), []string{"provider.call", "progress.emit", "tool.execute", "harness.cancel"}}
 	if err := write(start); err != nil {
 		terminateProcess(cmd)
 		<-processDone
@@ -197,8 +197,8 @@ func (e *External) Run(ctx context.Context, req harness.Request) (harness.Result
 				done <- terminal{err: fmt.Errorf("external harness: malformed JSON: %w", err)}
 				return
 			}
-			if m.Version != 1 || m.TurnID != req.TurnID {
-				done <- terminal{err: fmt.Errorf("external harness: invalid version or turnId")}
+			if m.Version != 1 || m.InvocationID != req.InvocationID {
+				done <- terminal{err: fmt.Errorf("external harness: invalid version or invocationId")}
 				return
 			}
 			switch m.Type {
@@ -242,13 +242,13 @@ func (e *External) Run(ctx context.Context, req harness.Request) (harness.Result
 					msg := req.Execute(ctx, provider.ToolCall{ID: m.ToolCallID, Name: m.Name, Args: m.Arguments})
 					tr := msg.ToolResult
 					out := struct {
-						Version    int    `json:"version"`
-						Type       string `json:"type"`
-						TurnID     string `json:"turnId"`
-						ToolCallID string `json:"toolCallId"`
-						Output     string `json:"output,omitempty"`
-						Error      string `json:"error,omitempty"`
-					}{Version: 1, Type: "tool.result", TurnID: req.TurnID, ToolCallID: m.ToolCallID}
+						Version      int    `json:"version"`
+						Type         string `json:"type"`
+						InvocationID string `json:"invocationId"`
+						ToolCallID   string `json:"toolCallId"`
+						Output       string `json:"output,omitempty"`
+						Error        string `json:"error,omitempty"`
+					}{Version: 1, Type: "tool.result", InvocationID: req.InvocationID, ToolCallID: m.ToolCallID}
 					if tr != nil {
 						out.Output = tr.Output
 						if tr.IsError {
@@ -257,14 +257,14 @@ func (e *External) Run(ctx context.Context, req harness.Request) (harness.Result
 					}
 					_ = write(out)
 				}(m)
-			case "turn.complete":
+			case "harness.complete":
 				result := harness.Result{Text: m.Text, Reasoning: m.Reasoning, StopReason: m.StopReason}
 				for _, c := range m.ToolCalls {
 					result.Calls = append(result.Calls, provider.ToolCall{ID: c.ID, Name: c.Name, Args: c.Args})
 				}
 				done <- terminal{result: result}
 				return
-			case "turn.error":
+			case "harness.error":
 				msg := m.ErrorText
 				if msg == "" {
 					msg = string(m.Message)
@@ -279,7 +279,7 @@ func (e *External) Run(ctx context.Context, req harness.Request) (harness.Result
 		if err := s.Err(); err != nil {
 			done <- terminal{err: fmt.Errorf("external harness: read: %w", err)}
 		} else {
-			done <- terminal{err: errors.New("external harness exited without turn.complete or turn.error")}
+			done <- terminal{err: errors.New("external harness exited without harness.complete or harness.error")}
 		}
 	}()
 
@@ -302,18 +302,18 @@ func (e *External) Run(ctx context.Context, req harness.Request) (harness.Result
 		relays.Wait()
 		if t.err == nil && waitErr != nil && !forced {
 			t.err = fmt.Errorf("external harness exit: %w", waitErr)
-		} else if t.err != nil && waitErr != nil && !forced && strings.Contains(t.err.Error(), "exited without turn.complete") {
+		} else if t.err != nil && waitErr != nil && !forced && strings.Contains(t.err.Error(), "exited without harness.complete") {
 			t.err = fmt.Errorf("%v; external harness exit: %w", t.err, waitErr)
 		}
 		return t.result, t.err
 	case <-ctx.Done():
 		ctxErr := ctx.Err()
 		_ = write(struct {
-			Version int    `json:"version"`
-			Type    string `json:"type"`
-			TurnID  string `json:"turnId"`
-			Reason  string `json:"reason"`
-		}{1, "turn.cancel", req.TurnID, ctxErr.Error()})
+			Version      int    `json:"version"`
+			Type         string `json:"type"`
+			InvocationID string `json:"invocationId"`
+			Reason       string `json:"reason"`
+		}{1, "harness.cancel", req.InvocationID, ctxErr.Error()})
 		cancel()
 		select {
 		case <-done:
@@ -340,12 +340,12 @@ func terminateProcess(cmd *exec.Cmd) {
 
 func relayProvider(ctx context.Context, req harness.Request, callID string, r provider.Request, write func(any) error) {
 	if req.Provider == nil {
-		_ = write(providerEvent(req.TurnID, callID, provider.StreamEvent{Type: provider.EventError, Err: errors.New("provider callback unavailable")}))
+		_ = write(providerEvent(req.InvocationID, callID, provider.StreamEvent{Type: provider.EventError, Err: errors.New("provider callback unavailable")}))
 		return
 	}
 	stream, err := req.Provider(ctx, r)
 	if err != nil {
-		_ = write(providerEvent(req.TurnID, callID, provider.StreamEvent{Type: provider.EventError, Err: err}))
+		_ = write(providerEvent(req.InvocationID, callID, provider.StreamEvent{Type: provider.EventError, Err: err}))
 		return
 	}
 	stream = provider.NormalizeStream(stream)
@@ -361,28 +361,28 @@ func relayProvider(ctx context.Context, req harness.Request, callID string, r pr
 			}
 		}
 		if ev.Type == provider.EventDone && ev.Usage != nil {
-			if write(providerUsageEvent(req.TurnID, callID, ev.Usage)) != nil {
+			if write(providerUsageEvent(req.InvocationID, callID, ev.Usage)) != nil {
 				return
 			}
 		}
-		if write(providerEvent(req.TurnID, callID, ev)) != nil {
+		if write(providerEvent(req.InvocationID, callID, ev)) != nil {
 			return
 		}
 	}
 }
 
-func providerUsageEvent(turnID, callID string, usage *provider.Usage) any {
+func providerUsageEvent(invocationID, callID string, usage *provider.Usage) any {
 	return struct {
-		Version int             `json:"version"`
-		Type    string          `json:"type"`
-		TurnID  string          `json:"turnId"`
-		CallID  string          `json:"callId"`
-		Kind    string          `json:"kind"`
-		Usage   *provider.Usage `json:"usage"`
-	}{1, "provider.event", turnID, callID, "usage", usage}
+		Version      int             `json:"version"`
+		Type         string          `json:"type"`
+		InvocationID string          `json:"invocationId"`
+		CallID       string          `json:"callId"`
+		Kind         string          `json:"kind"`
+		Usage        *provider.Usage `json:"usage"`
+	}{1, "provider.event", invocationID, callID, "usage", usage}
 }
 
-func providerEvent(turnID, callID string, ev provider.StreamEvent) any {
+func providerEvent(invocationID, callID string, ev provider.StreamEvent) any {
 	kind := "error"
 	done := false
 	switch ev.Type {
@@ -403,17 +403,17 @@ func providerEvent(turnID, callID string, ev provider.StreamEvent) any {
 		errText = ev.Err.Error()
 	}
 	return struct {
-		Version    int                `json:"version"`
-		Type       string             `json:"type"`
-		TurnID     string             `json:"turnId"`
-		CallID     string             `json:"callId"`
-		Kind       string             `json:"kind"`
-		Done       bool               `json:"done,omitempty"`
-		Text       string             `json:"text,omitempty"`
-		Reasoning  json.RawMessage    `json:"reasoning,omitempty"`
-		ToolCall   *provider.ToolCall `json:"toolCall,omitempty"`
-		Usage      *provider.Usage    `json:"usage,omitempty"`
-		StopReason string             `json:"stopReason,omitempty"`
-		Error      string             `json:"error,omitempty"`
-	}{1, "provider.event", turnID, callID, kind, done, ev.Text, ev.Reasoning, ev.ToolCall, ev.Usage, ev.StopReason, errText}
+		Version      int                `json:"version"`
+		Type         string             `json:"type"`
+		InvocationID string             `json:"invocationId"`
+		CallID       string             `json:"callId"`
+		Kind         string             `json:"kind"`
+		Done         bool               `json:"done,omitempty"`
+		Text         string             `json:"text,omitempty"`
+		Reasoning    json.RawMessage    `json:"reasoning,omitempty"`
+		ToolCall     *provider.ToolCall `json:"toolCall,omitempty"`
+		Usage        *provider.Usage    `json:"usage,omitempty"`
+		StopReason   string             `json:"stopReason,omitempty"`
+		Error        string             `json:"error,omitempty"`
+	}{1, "provider.event", invocationID, callID, kind, done, ev.Text, ev.Reasoning, ev.ToolCall, ev.Usage, ev.StopReason, errText}
 }

@@ -405,7 +405,7 @@ func (e *Engine) runHarnessTurn(ctx context.Context, h harness.Harness, hName st
 	}
 
 	result, err := h.Run(ctx, harness.Request{
-		TurnID:       turnID,
+		InvocationID: turnID,
 		Agent:        e.agent.Name,
 		ProviderName: e.provName,
 		Request: provider.Request{

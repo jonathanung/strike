@@ -93,7 +93,7 @@ func TestDefaultHarness_EmptyTurn(t *testing.T) {
 
 	streamed := false
 	result, err := dh.Run(context.Background(), harness.Request{
-		TurnID: "turn-1",
+		InvocationID: "invocation-1",
 		Stream: func(ctx context.Context) (harness.Outcome, error) {
 			streamed = true
 			return harness.Outcome{StopReason: "end_turn"}, nil
@@ -123,7 +123,7 @@ func TestDefaultHarness_ToolLoop(t *testing.T) {
 	execCalls := 0
 
 	req := harness.Request{
-		TurnID: "turn-1",
+		InvocationID: "invocation-1",
 		Stream: func(ctx context.Context) (harness.Outcome, error) {
 			streamCalls++
 			switch streamCalls {
@@ -171,7 +171,7 @@ func TestDefaultHarness_StreamError(t *testing.T) {
 	wantErr := errors.New("provider down")
 
 	_, err := dh.Run(context.Background(), harness.Request{
-		TurnID: "turn-1",
+		InvocationID: "invocation-1",
 		Stream: func(ctx context.Context) (harness.Outcome, error) {
 			return harness.Outcome{}, wantErr
 		},
@@ -189,7 +189,7 @@ func TestDefaultHarness_Cancellation(t *testing.T) {
 	cancel() // immediate cancel
 
 	_, err := dh.Run(ctx, harness.Request{
-		TurnID: "turn-1",
+		InvocationID: "invocation-1",
 		Stream: func(ctx context.Context) (harness.Outcome, error) {
 			return harness.Outcome{StopReason: "end_turn"}, nil
 		},
@@ -213,7 +213,7 @@ func TestDefaultHarness_ExecutesAllCallsEvenCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	_, err := dh.Run(ctx, harness.Request{
-		TurnID: "turn-1",
+		InvocationID: "invocation-1",
 		Stream: func(ctx context.Context) (harness.Outcome, error) {
 			return harness.Outcome{
 				Calls: []provider.ToolCall{

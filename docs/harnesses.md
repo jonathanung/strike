@@ -77,7 +77,7 @@ The application owns its search, state, branching, and termination. Strike's
 tool execution, cancellation context, and the initial normalized request.
 
 `sdk/harness.mjs` hides the subprocess JSONL protocol. Harness code does not
-manage turn IDs, call IDs, protocol messages, or process lifecycle.
+manage invocation IDs, call IDs, protocol messages, or process lifecycle.
 
 > [!WARNING]
 > Harnesses are trusted native executables. Loading one is equivalent to
@@ -144,14 +144,14 @@ Harness functions should use `runHarness` rather than producing these messages.
 
 ### Process model
 
-Strike starts one harness process per turn. Messages are single-line JSON
-objects with `version: 1`, a `type`, and the active `turnId`. Harness stdout is
+Strike starts one harness process per invocation. Messages are single-line JSON
+objects with `version: 1`, a `type`, and the active `invocationId`. Harness stdout is
 reserved for protocol messages; diagnostics should use stderr.
 
 Strike serializes writes to the process. A harness may issue multiple
 `provider.call` requests concurrently by assigning each a unique `callId`.
 Provider calls are speculative: their output does not enter Strike's
-conversation history. Only the response supplied by `turn.complete` becomes
+conversation history. Only the response supplied by `harness.complete` becomes
 the final assistant message.
 
 Strike rejects malformed messages, unsupported versions, duplicate request
@@ -160,15 +160,15 @@ limits, not security boundaries.
 
 ### Messages
 
-#### `turn.start`
+#### `harness.start`
 
 Strike sends the initial request and active selection:
 
 ```json
 {
   "version": 1,
-  "type": "turn.start",
-  "turnId": "turn-id",
+  "type": "harness.start",
+  "invocationId": "invocation-id",
   "agent": "search",
   "provider": "openai",
   "request": {
@@ -183,7 +183,7 @@ Strike sends the initial request and active selection:
     "provider.call",
     "progress.emit",
     "tool.execute",
-    "turn.cancel"
+    "harness.cancel"
   ]
 }
 ```
@@ -199,7 +199,7 @@ The harness requests a normalized model stream:
 {
   "version": 1,
   "type": "provider.call",
-  "turnId": "turn-id",
+  "invocationId": "invocation-id",
   "callId": "candidate-1",
   "request": {
     "model": "ignored",
@@ -214,8 +214,8 @@ messages carrying the same `callId`. Event `kind` values are `text`,
 `reasoning`, `tool_call`, `usage`, `completion`, and `error`.
 
 ```json
-{"version":1,"type":"provider.event","turnId":"turn-id","callId":"candidate-1","kind":"text","text":"candidate"}
-{"version":1,"type":"provider.event","turnId":"turn-id","callId":"candidate-1","kind":"completion","done":true,"stopReason":"end_turn"}
+{"version":1,"type":"provider.event","invocationId":"invocation-id","callId":"candidate-1","kind":"text","text":"candidate"}
+{"version":1,"type":"provider.event","invocationId":"invocation-id","callId":"candidate-1","kind":"completion","done":true,"stopReason":"end_turn"}
 ```
 
 #### `progress.emit`
@@ -226,7 +226,7 @@ The harness may publish structured progress:
 {
   "version": 1,
   "type": "progress.emit",
-  "turnId": "turn-id",
+  "invocationId": "invocation-id",
   "payload": {
     "kind": "iteration",
     "message": "Expanded node 12",
@@ -246,7 +246,7 @@ The harness can ask Strike to execute a built-in tool:
 {
   "version": 1,
   "type": "tool.execute",
-  "turnId": "turn-id",
+  "invocationId": "invocation-id",
   "toolCallId": "tool-1",
   "name": "read",
   "arguments": {"filePath": "README.md"}
@@ -257,33 +257,33 @@ Strike routes the call through its normal tool implementation, permissions,
 hooks, questions, and event emission, then replies with `tool.result`:
 
 ```json
-{"version":1,"type":"tool.result","turnId":"turn-id","toolCallId":"tool-1","output":"..."}
+{"version":1,"type":"tool.result","invocationId":"invocation-id","toolCallId":"tool-1","output":"..."}
 ```
 
 `tool.execute` is a convenience API, not a sandbox boundary. The harness may
 also execute external logic directly.
 
-#### `turn.complete` and `turn.error`
+#### `harness.complete` and `harness.error`
 
-Return the final assistant response with `turn.complete`:
+Return the final assistant response with `harness.complete`:
 
 ```json
 {
   "version": 1,
-  "type": "turn.complete",
-  "turnId": "turn-id",
+  "type": "harness.complete",
+  "invocationId": "invocation-id",
   "text": "Final response",
   "stopReason": "end_turn"
 }
 ```
 
-A terminal harness failure uses `turn.error`:
+A terminal harness failure uses `harness.error`:
 
 ```json
 {
   "version": 1,
-  "type": "turn.error",
-  "turnId": "turn-id",
+  "type": "harness.error",
+  "invocationId": "invocation-id",
   "code": "search_failed",
   "error": "No viable candidate"
 }
@@ -291,12 +291,12 @@ A terminal harness failure uses `turn.error`:
 
 Exactly one terminal message is required. Exiting without one fails the turn.
 
-#### `turn.cancel`
+#### `harness.cancel`
 
 When a turn is interrupted, Strike sends a best-effort cancellation message:
 
 ```json
-{"version":1,"type":"turn.cancel","turnId":"turn-id","reason":"context canceled"}
+{"version":1,"type":"harness.cancel","invocationId":"invocation-id","reason":"context canceled"}
 ```
 
 The harness should cancel its work and exit promptly. Strike closes or

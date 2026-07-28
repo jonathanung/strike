@@ -59,15 +59,15 @@ export function runHarness(harness) {
       waiters.get(message.toolCallId)?.push({ ...message, done: true });
       return;
     }
-    if (message.type === "turn.cancel") {
+    if (message.type === "harness.cancel") {
       controller?.abort(new Error(message.reason || "harness canceled"));
       return;
     }
-    if (message.type !== "turn.start" || started) return;
+    if (message.type !== "harness.start" || started) return;
     started = true;
 
     controller = new AbortController();
-    const base = { version: 1, turnId: message.turnId };
+    const base = { version: 1, invocationId: message.invocationId };
     const provider = (request) => {
       const callId = `provider-${++sequence}`;
       const result = stream(callId);
@@ -96,9 +96,9 @@ export function runHarness(harness) {
         execute,
         signal: controller.signal,
       });
-      send({ ...base, type: "turn.complete", ...response });
+      send({ ...base, type: "harness.complete", ...response });
     } catch (error) {
-      send({ ...base, type: "turn.error", error: String(error?.message || error) });
+      send({ ...base, type: "harness.error", error: String(error?.message || error) });
     } finally {
       lines.close();
     }

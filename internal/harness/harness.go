@@ -30,7 +30,7 @@ type Result struct {
 // Request carries per-turn callbacks. The engine handles event emission and
 // message history; the harness controls the loop.
 type Request struct {
-	TurnID       string
+	InvocationID string
 	Agent        string
 	ProviderName string
 	Request      provider.Request
