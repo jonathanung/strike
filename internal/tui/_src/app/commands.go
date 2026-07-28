@@ -31,6 +31,7 @@ const (
 	commandNano            commandID = "nano"
 	commandHelp            commandID = "help"
 	commandKeys            commandID = "keys"
+	commandLegend          commandID = "legend"
 	commandMDRead          commandID = "md-read"
 	commandTheme           commandID = "theme"
 	commandLayout          commandID = "layout"
@@ -136,6 +137,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandCopy, Name: "/copy", Description: "copy the last assistant response to the clipboard", Source: commandSourceBuiltin},
 	{ID: commandHelp, Name: "/help", Description: "show available commands", Source: commandSourceBuiltin},
 	{ID: commandKeys, Name: "/keys", Description: "show keyboard shortcuts", ArgsHint: "[reset]", Source: commandSourceBuiltin},
+	{ID: commandLegend, Name: "/legend", Description: "explain UI icons, status glyphs, and chrome", Source: commandSourceBuiltin},
 	{ID: commandMemory, Name: "/memory", Description: "list, get, set, delete, export, or import project memory", ArgsHint: "[list|get|set|rm|export|import] ...", Source: commandSourceBuiltin},
 	{ID: commandIssues, Name: "/issues", Description: "list, add, get, close, export, or import project issues", ArgsHint: "[list|add|get|close|export|import] ...", Source: commandSourceBuiltin},
 	{ID: commandGoal, Name: "/goal", Description: "loop harness: set, run, status, pause, resume, abort, log, list", ArgsHint: "[set|run|status|pause|resume|abort|log|list] ...", Source: commandSourceBuiltin},
@@ -236,6 +238,7 @@ var reservedCommandNames = map[string]struct{}{
 	"copy":             {},
 	"help":             {},
 	"keys":             {},
+	"legend":           {},
 	"memory":           {},
 	"issues":           {},
 	"goal":             {},

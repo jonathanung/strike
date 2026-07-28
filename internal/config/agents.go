@@ -76,6 +76,7 @@ var reservedSkillNames = map[string]struct{}{
 	"rewind":           {},
 	"help":             {},
 	"keys":             {},
+	"legend":           {},
 	"memory":           {},
 	"issues":           {},
 	"goal":             {},

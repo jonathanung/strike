@@ -215,6 +215,12 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		m.modal = m.newKeysModal()
 		m.reflow()
 		return m, nil
+	case "/legend":
+		m.resetComposer()
+		m.clearNotice()
+		m.modal = newLegendModal(m.th)
+		m.reflow()
+		return m, nil
 	case "/memory":
 		return m.handleMemoryCommand(fields[1:])
 	case "/issues":
