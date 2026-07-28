@@ -59,23 +59,40 @@ jobs:
           )
           ls -la dist
 
+      - name: Build release notes from changelog
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          awk -v heading="## [${TAG}]" '
+            $0 == heading || index($0, heading " - ") == 1 { found = 1; next }
+            found && /^## \[/ { exit }
+            found && /^\[[^]]+\]: / { exit }
+            found { print }
+            END { if (!found) exit 1 }
+          ' CHANGELOG.md > changelog-entry.md
+          if ! grep -q '[^[:space:]]' changelog-entry.md; then
+            echo "::error::CHANGELOG.md has no non-empty ${TAG} entry"
+            exit 1
+          fi
+          {
+            printf '## Install\n\n'
+            printf '```sh\n'
+            printf 'curl -fsSL https://strike.jonathanung.ca/install | bash\n'
+            printf '```\n\n'
+            printf 'Or download an archive below, verify `checksums.txt`, and place `strike` on your PATH.\n\n'
+            printf '## Changelog\n'
+            cat changelog-entry.md
+          } > release-notes.md
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           TAG="${{ github.ref_name }}"
-          NOTES="strike ${TAG}
-
-          Install:
-          \`\`\`sh
-          curl -fsSL https://strike.jonathanung.ca/install | bash
-          \`\`\`
-
-          Or download an archive below, verify \`checksums.txt\`, and place \`strike\` on your PATH.
-          "
           gh release create "${TAG}" \
             --title "strike ${TAG}" \
-            --notes "${NOTES}" \
+            --notes-file release-notes.md \
             dist/strike_*.tar.gz \
             dist/checksums.txt

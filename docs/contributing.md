@@ -111,3 +111,30 @@ matching paths (and keep relative links valid):
 
 No heavy doc framework — a PR that changes the surface should touch the table
 row above in the same change.
+
+## Changelog and releases
+
+`CHANGELOG.md` is the canonical source for release notes. It follows these
+rules:
+
+- Add every notable user-facing change to `[Unreleased]` in the same pull
+  request as the change.
+- Use only `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, and `Security`;
+  omit empty categories.
+- Describe user impact, not implementation activity. Group related changes
+  and link their pull requests where practical.
+- Use absolute URLs because version entries are copied to GitHub Releases.
+- Put breaking behavior, changed defaults, and migration steps in a bold
+  **Upgrade note** under `Changed`.
+- Omit tests, refactors, chores, and documentation-only changes unless they
+  materially affect the shipped product.
+
+To prepare a release, rename `[Unreleased]` to `[vX.Y.Z] - YYYY-MM-DD`, add a
+fresh `[Unreleased]` section above it, and update the comparison links at the
+bottom of the file. Use the annotated tag date for `YYYY-MM-DD` and Semantic
+Versioning for `vX.Y.Z`.
+
+GitHub release titles use `strike vX.Y.Z`. Their bodies contain the standard
+install block followed by the matching changelog entry verbatim. The release
+workflow enforces this by failing when the tagged version has no non-empty
+entry in `CHANGELOG.md`.

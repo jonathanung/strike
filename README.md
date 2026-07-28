@@ -97,6 +97,7 @@ Optional Vite dev proxy lives in `web/`. Details and threat model:
 
 | Topic | |
 |---|---|
+| [Changelog](CHANGELOG.md) | release history and upgrade notes |
 | [Install & build](docs/install.md) | curl install, releases, upgrade, make targets |
 | [Usage](docs/usage.md) | slash commands, `@file`, resume/fork, panes |
 | [Loop](docs/loop.md) | `/loop` recurring session jobs (vs `/goal`) |
