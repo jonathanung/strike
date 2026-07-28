@@ -161,6 +161,8 @@ func (w telemetryWindow) armTick(d time.Duration) tea.Cmd {
 }
 
 // startSample marks in-flight collection and returns a non-blocking sample cmd.
+// The host collector honors ctx (disk Statfs is cached/off-thread); the timeout
+// bounds worst-case wait so the UI tick loop cannot stall on a hung volume.
 func (w telemetryWindow) startSample() (telemetryWindow, tea.Cmd) {
 	if !w.enabled {
 		w.sampling = false

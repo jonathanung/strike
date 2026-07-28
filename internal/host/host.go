@@ -465,7 +465,8 @@ type TelemetrySample struct {
 // never upload samples or attach them to provider requests.
 type Telemetry interface {
 	// Sample collects one snapshot. root is the project/worktree path used for
-	// disk (empty skips disk). Respects ctx cancellation.
+	// disk (empty skips disk). Must respect ctx cancellation and must not block
+	// the caller past ctx (slow disk probes should be cached/off-thread).
 	Sample(ctx context.Context, root string) (TelemetrySample, error)
 }
 

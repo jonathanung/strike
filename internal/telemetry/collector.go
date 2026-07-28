@@ -10,6 +10,10 @@ import (
 // Host is the default platform collector for macOS/Linux. It is safe for
 // concurrent Collect calls but keeps CPU deltas in internal state, so prefer
 // one instance per process.
+//
+// Disk Statfs results are cached for DefaultDiskInterval and probed off-thread
+// so slow/network/FUSE volumes cannot block Collect past ctx or stack
+// unbounded refresh goroutines.
 type Host struct {
 	mu sync.Mutex
 
@@ -25,6 +29,21 @@ type Host struct {
 
 	// pid is fixed at construction for process CPU.
 	pid int
+
+	// Disk cache: reuse last successful (or failed) probe for diskTTL.
+	diskRoot              string
+	diskUsed              uint64
+	diskTotal             uint64
+	diskFree              uint64
+	diskOK                bool
+	diskAt                time.Time
+	diskTTL               time.Duration // 0 → DefaultDiskInterval
+	diskRefreshInFlight   bool
+	diskRefreshGeneration uint64 // bumps when a refresh goroutine finishes
+
+	// Optional hooks for tests. nil → platform defaults.
+	readDiskFn func(root string) (used, total, free uint64, ok bool)
+	nowFn      func() time.Time
 }
 
 // NewHost builds a Host collector for the current process.
@@ -32,24 +51,62 @@ func NewHost() *Host {
 	return &Host{pid: os.Getpid()}
 }
 
+func (h *Host) now() time.Time {
+	if h.nowFn != nil {
+		return h.nowFn()
+	}
+	return time.Now()
+}
+
+func (h *Host) diskCacheTTL() time.Duration {
+	if h.diskTTL > 0 {
+		return h.diskTTL
+	}
+	return DefaultDiskInterval
+}
+
 // Collect gathers CPU, memory, and disk for root. Partial failures mark the
 // corresponding OK flag false rather than inventing zeros.
+//
+// Collect respects ctx: already-canceled contexts return immediately with
+// ctx.Err(). Mid-collect cancellation returns any metrics gathered so far
+// (err == nil) so the UI can keep CPU/RAM fresh when disk Statfs is slow.
+// Disk probes run off-thread and are cached for DefaultDiskInterval so a
+// hung Statfs cannot block the caller past ctx and cannot stack unbounded
+// refresh goroutines.
 func (h *Host) Collect(ctx context.Context, root string) (Sample, error) {
 	if err := ctx.Err(); err != nil {
 		return Sample{}, err
 	}
 	var s Sample
-	s.At = time.Now()
+	s.At = h.now()
 	s.DiskRoot = root
+
+	h.sampleCPU(&s)
+	if err := ctx.Err(); err != nil {
+		return s, nil
+	}
+
+	h.sampleMem(&s)
+	if err := ctx.Err(); err != nil {
+		return s, nil
+	}
+
+	if root != "" {
+		h.sampleDisk(ctx, &s, root)
+	}
+	return s, nil
+}
+
+func (h *Host) sampleCPU(s *Sample) {
+	idle, total, hostOK := readHostCPU()
+	procNS, procOK := readProcessCPUTime(h.pid)
+	now := h.now()
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	if err := ctx.Err(); err != nil {
-		return Sample{}, err
-	}
-
-	if idle, total, ok := readHostCPU(); ok {
+	if hostOK {
 		if h.prevHostOK && total > h.prevHostTotal {
 			deltaTotal := total - h.prevHostTotal
 			deltaIdle := idle - h.prevHostIdle
@@ -70,8 +127,7 @@ func (h *Host) Collect(ctx context.Context, root string) (Sample, error) {
 		h.prevHostOK = true
 	}
 
-	if procNS, ok := readProcessCPUTime(h.pid); ok {
-		now := time.Now()
+	if procOK {
 		if h.prevProcOK && !h.prevWall.IsZero() {
 			wall := now.Sub(h.prevWall).Seconds()
 			if wall > 0 && procNS >= h.prevProcNS {
@@ -89,21 +145,87 @@ func (h *Host) Collect(ctx context.Context, root string) (Sample, error) {
 		h.prevWall = now
 		h.prevProcOK = true
 	}
+}
 
-	if used, total, ok := readMemory(); ok {
-		s.MemUsedBytes = used
-		s.MemTotalBytes = total
-		s.MemOK = true
+func (h *Host) sampleMem(s *Sample) {
+	used, total, ok := readMemory()
+	if !ok {
+		return
 	}
+	s.MemUsedBytes = used
+	s.MemTotalBytes = total
+	s.MemOK = true
+}
 
-	if root != "" {
-		if used, total, free, ok := readDisk(root); ok {
-			s.DiskUsedBytes = used
-			s.DiskTotalBytes = total
-			s.DiskFreeBytes = free
+// sampleDisk fills disk fields from cache and/or a non-blocking probe.
+// Never blocks past ctx; never stacks multiple Statfs goroutines.
+func (h *Host) sampleDisk(ctx context.Context, s *Sample, root string) {
+	ttl := h.diskCacheTTL()
+	now := h.now()
+
+	h.mu.Lock()
+	cacheHit := root == h.diskRoot && !h.diskAt.IsZero() && now.Sub(h.diskAt) < ttl
+	if cacheHit {
+		if h.diskOK {
+			s.DiskUsedBytes = h.diskUsed
+			s.DiskTotalBytes = h.diskTotal
+			s.DiskFreeBytes = h.diskFree
 			s.DiskOK = true
 		}
+		h.mu.Unlock()
+		return
+	}
+	// Stale-while-revalidate: serve last value for this root while a refresh runs.
+	staleOK := root == h.diskRoot && h.diskOK
+	if staleOK {
+		s.DiskUsedBytes = h.diskUsed
+		s.DiskTotalBytes = h.diskTotal
+		s.DiskFreeBytes = h.diskFree
+		s.DiskOK = true
+	}
+	if h.diskRefreshInFlight {
+		h.mu.Unlock()
+		return
+	}
+	h.diskRefreshInFlight = true
+	startGen := h.diskRefreshGeneration
+	h.mu.Unlock()
+
+	fn := readDisk
+	if h.readDiskFn != nil {
+		fn = h.readDiskFn
 	}
 
-	return s, nil
+	type diskRes struct {
+		used, total, free uint64
+		ok                bool
+	}
+	ch := make(chan diskRes, 1)
+	go func() {
+		u, t, f, ok := fn(root)
+		h.mu.Lock()
+		h.diskRoot = root
+		h.diskUsed, h.diskTotal, h.diskFree = u, t, f
+		h.diskOK = ok
+		h.diskAt = h.now()
+		h.diskRefreshInFlight = false
+		h.diskRefreshGeneration = startGen + 1
+		h.mu.Unlock()
+		ch <- diskRes{u, t, f, ok}
+	}()
+
+	select {
+	case <-ctx.Done():
+		// Keep stale fields already copied; first probe yields DiskOK=false.
+		return
+	case r := <-ch:
+		if r.ok {
+			s.DiskUsedBytes = r.used
+			s.DiskTotalBytes = r.total
+			s.DiskFreeBytes = r.free
+			s.DiskOK = true
+		} else {
+			s.DiskOK = false
+		}
+	}
 }
