@@ -373,6 +373,22 @@ func lookupAgent(agents []Agent, name string) (Agent, bool) {
 	return Agent{}, false
 }
 
+func TestResolveAgentModelCanonicalizesGeminiAlias(t *testing.T) {
+	for _, tt := range []struct {
+		name, provider, model, wantProvider, wantModel string
+	}{
+		{name: "explicit provider", provider: "gemini", model: "gemini-2.5-pro", wantProvider: "google", wantModel: "gemini-2.5-pro"},
+		{name: "model prefix", model: "gemini/gemini-2.5-flash", wantProvider: "google", wantModel: "gemini-2.5-flash"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			provider, model := resolveAgentModel(tt.provider, tt.model)
+			if provider != tt.wantProvider || model != tt.wantModel {
+				t.Fatalf("resolveAgentModel(%q, %q) = %q, %q; want %q, %q", tt.provider, tt.model, provider, model, tt.wantProvider, tt.wantModel)
+			}
+		})
+	}
+}
+
 func TestLoadSkillsWithErrorRejectsUnsafeAndReservedNamesClearly(t *testing.T) {
 	tests := []struct {
 		name       string

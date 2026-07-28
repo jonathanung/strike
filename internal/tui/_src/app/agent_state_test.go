@@ -100,7 +100,7 @@ func TestAgentStateErrorFromFailedTurn(t *testing.T) {
 func TestAgentStateErrorFromIdleEngineError(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 
-	m.applyEvent(protocol.EngineError{Message: "no model selected — use /provider <anthropic|openai|xai|echo> [model]"})
+	m.applyEvent(protocol.EngineError{Message: "no model selected — use /provider <anthropic|openai|xai|google|kimi|deepseek|echo> [model]"})
 	if got := m.agentState(); got != theme.AgentStateError {
 		t.Fatalf("idle EngineError state = %v, want error", got)
 	}

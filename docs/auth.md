@@ -1,8 +1,13 @@
 # Auth & providers
 
 Credentials live in `~/.strike/auth.json` (0600). Environment
-variables (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `XAI_API_KEY` / `KIMI_API_KEY` / `DEEPSEEK_API_KEY`) always
-take precedence over stored credentials.
+variables (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `XAI_API_KEY` /
+`GEMINI_API_KEY` or `GOOGLE_API_KEY` / `KIMI_API_KEY` / `DEEPSEEK_API_KEY`)
+always take precedence over stored credentials.
+
+The Google AI Studio provider id is **`google`** (model ids stay `gemini-*`).
+The shipped name **`gemini`** is accepted as an alias for login, logout,
+config `provider`, and `--provider`, and is stored/listed as `google`.
 
 ## OpenAI billing routing
 
@@ -25,6 +30,7 @@ strike auth login openai            # OAuth "Sign in with ChatGPT" (browser);
                                     # API key usable on api.openai.com
 strike auth login xai               # xAI Grok OAuth (browser, PKCE)
 strike auth login xai --device      # RFC 8628 device flow for headless/SSH
+strike auth login google --api-key  # Google AI Studio (paste API key; alias: gemini)
 strike auth login kimi --api-key    # Kimi (paste API key)
 strike auth login deepseek --api-key # DeepSeek (paste API key)
 strike auth login <provider> --api-key   # paste a key instead (any provider)
@@ -41,11 +47,8 @@ before expiry, and rotated refresh tokens are persisted.
 Provider selection happens in-app with `/provider`; `--provider` on the
 command line just pre-selects (and validates credentials eagerly). Defaults
 when a provider is chosen without a model: `claude-sonnet-5` (Anthropic),
-`gpt-5.5` (OpenAI), `grok-4.5` (xAI), `moonshot-v1` (Kimi), `deepseek-chat` (DeepSeek).
-
-command line just pre-selects (and validates credentials eagerly). Defaults
-when a provider is chosen without a model: `claude-sonnet-5`, `gpt-5.5`,
-`grok-4.5`.
+`gpt-5.5` (OpenAI), `grok-4.5` (xAI), `gemini-2.5-pro` (Google),
+`moonshot-v1` (Kimi), `deepseek-chat` (DeepSeek).
 
 Custom/self-hosted providers (`.strike/providers.jsonc` or `/settings`) use
 env refs (`{env:NAME}`, `$NAME`) and/or a stored API key. Logging out of a

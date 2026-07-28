@@ -236,10 +236,12 @@ func parseProvidersMap(data []byte) (ProvidersFile, error) {
 		if err := json.Unmarshal(raw[key], &entry); err != nil {
 			return ProvidersFile{}, fmt.Errorf("provider %q: %w", key, err)
 		}
-		id := strings.ToLower(strings.TrimSpace(key))
+		id := CanonicalProviderID(key)
 		if id == "" {
 			return ProvidersFile{}, errors.New("empty provider id")
 		}
+		// gemini is reserved as an alias of google; CanonicalProviderID maps it
+		// so overlays/endpoints land under the google builtin key.
 		if _, builtin := BuiltinProviderNames[id]; builtin {
 			// Endpoint overlay (baseURL / apiKey / headers) — OpenCode-style
 			// customization of a catalog-backed provider. echo has no HTTP
@@ -287,7 +289,7 @@ func applyDisableDefaultKey(all **bool, per *map[string]bool, key string, raw js
 	if !strings.HasPrefix(k, prefix) {
 		return false, nil
 	}
-	name := strings.TrimSpace(k[len(prefix):])
+	name := CanonicalProviderID(k[len(prefix):])
 	if name == "" || name == "providers" {
 		return false, nil
 	}
@@ -405,6 +407,7 @@ func mergeEndpoint(base, layer ProviderEndpoint) ProviderEndpoint {
 }
 
 // mergeEndpointMaps merges provider→endpoint maps; later layer wins per field.
+// Provider keys are canonicalized (gemini → google).
 func mergeEndpointMaps(base, layer map[string]ProviderEndpoint) map[string]ProviderEndpoint {
 	if len(layer) == 0 {
 		return cloneEndpointMap(base)
@@ -414,7 +417,8 @@ func mergeEndpointMaps(base, layer map[string]ProviderEndpoint) map[string]Provi
 		out = make(map[string]ProviderEndpoint, len(layer))
 	}
 	for prov, ep := range layer {
-		out[prov] = mergeEndpoint(out[prov], ep)
+		id := CanonicalProviderID(prov)
+		out[id] = mergeEndpoint(out[id], ep)
 	}
 	return out
 }
@@ -425,7 +429,7 @@ func cloneEndpointMap(in map[string]ProviderEndpoint) map[string]ProviderEndpoin
 	}
 	out := make(map[string]ProviderEndpoint, len(in))
 	for k, v := range in {
-		out[k] = cloneEndpoint(v)
+		out[CanonicalProviderID(k)] = cloneEndpoint(v)
 	}
 	return out
 }

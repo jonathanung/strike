@@ -14,7 +14,7 @@ var envVars = map[string]string{
 	"anthropic": "ANTHROPIC_API_KEY",
 	"openai":    "OPENAI_API_KEY",
 	"xai":       "XAI_API_KEY",
-	"gemini":    "GEMINI_API_KEY",
+	"google":    "GEMINI_API_KEY",
 	"kimi":      "KIMI_API_KEY",
 	"deepseek":  "DEEPSEEK_API_KEY",
 }
@@ -22,7 +22,7 @@ var envVars = map[string]string{
 // envAliases lists secondary env vars checked after the primary name in envVars
 // (Google AI Studio keys are commonly exported as GOOGLE_API_KEY).
 var envAliases = map[string][]string{
-	"gemini": {"GOOGLE_API_KEY"},
+	"google": {"GOOGLE_API_KEY"},
 }
 
 // refreshFlows maps providers to the flow used for OAuth token refresh.
@@ -37,7 +37,9 @@ const refreshSkew = 2 * time.Minute
 
 // APIKey resolves a plain API key (env or stored) for a provider.
 // Env order: primary envVars name, then envAliases, then the auth store.
+// Provider ids are canonicalized (gemini → google) so alias requests resolve.
 func APIKey(provider string, store *Store) (string, bool) {
+	provider = canonicalProvider(provider)
 	for _, env := range envNames(provider) {
 		if key := os.Getenv(env); key != "" {
 			return key, true
@@ -51,6 +53,7 @@ func APIKey(provider string, store *Store) (string, bool) {
 
 // envNames returns primary + alias environment variable names for a provider.
 func envNames(provider string) []string {
+	provider = canonicalProvider(provider)
 	primary := envVars[provider]
 	aliases := envAliases[provider]
 	if primary == "" {
@@ -66,6 +69,7 @@ func envNames(provider string) []string {
 // name (for custom providers' apiKeyEnv), then the stored credential.
 // Empty envName skips the environment lookup.
 func APIKeyEnv(provider string, store *Store, envName string) (string, bool) {
+	provider = canonicalProvider(provider)
 	if envName != "" {
 		if key := os.Getenv(envName); key != "" {
 			return key, true
@@ -80,6 +84,7 @@ func APIKeyEnv(provider string, store *Store, envName string) (string, bool) {
 // BearerSourceEnv is BearerSource with a custom environment variable name
 // checked before the auth store (used by custom/self-hosted providers).
 func BearerSourceEnv(provider string, store *Store, envName string) func(ctx context.Context) (string, error) {
+	provider = canonicalProvider(provider)
 	return func(ctx context.Context) (string, error) {
 		if key, ok := APIKeyEnv(provider, store, envName); ok {
 			return key, nil
@@ -99,6 +104,7 @@ func BearerSourceEnv(provider string, store *Store, envName string) func(ctx con
 // freshOAuth returns the stored OAuth credential for a provider, refreshed
 // (and persisted) when close to expiry.
 func freshOAuth(ctx context.Context, store *Store, provider string) (Credential, error) {
+	provider = canonicalProvider(provider)
 	cred, ok := store.Get(provider)
 	if !ok || cred.Type != TypeOAuth || cred.Access == "" {
 		return Credential{}, fmt.Errorf("no OAuth credentials for %s — run `strike auth login %s` (or /auth %s in the TUI)", provider, provider, provider)
@@ -129,6 +135,7 @@ func freshOAuth(ctx context.Context, store *Store, provider string) (Credential,
 // BearerSource returns a per-request credential resolver for a provider:
 // API key when available, otherwise OAuth access token with auto-refresh.
 func BearerSource(provider string, store *Store) func(ctx context.Context) (string, error) {
+	provider = canonicalProvider(provider)
 	return func(ctx context.Context) (string, error) {
 		if key, ok := APIKey(provider, store); ok {
 			return key, nil

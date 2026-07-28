@@ -173,6 +173,102 @@ func TestCustomStoreRemoveFromProvidersJSONC(t *testing.T) {
 	}
 }
 
+func TestParseProvidersFileGoogleAndGeminiAliasKeys(t *testing.T) {
+	// Overlay/endpoint keys under gemini land on canonical google.
+	rawGemini := []byte(`{
+		"gemini": {
+			"options": { "baseURL": "https://gemini-proxy.example/v1beta", "apiKey": "{env:GEMINI_API_KEY}" },
+			"models": {
+				"gemini-2.5-flash": { "name": "Flash via alias" }
+			}
+		},
+		"disable-default-gemini": true
+	}`)
+	pf, err := ParseProvidersFile(rawGemini)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pf.Customs) != 0 {
+		t.Fatalf("gemini must not become a custom: %+v", pf.Customs)
+	}
+	ep, ok := pf.Endpoints["google"]
+	if !ok {
+		t.Fatalf("Endpoints missing google: %+v", pf.Endpoints)
+	}
+	if _, hasGemini := pf.Endpoints["gemini"]; hasGemini {
+		t.Fatalf("Endpoints must not keep gemini key: %+v", pf.Endpoints)
+	}
+	if ep.BaseURL != "https://gemini-proxy.example/v1beta" {
+		t.Errorf("BaseURL = %q", ep.BaseURL)
+	}
+	if ep.APIKeyEnv != "GEMINI_API_KEY" {
+		t.Errorf("APIKeyEnv = %q", ep.APIKeyEnv)
+	}
+	overlay, ok := pf.Overlays["google"]
+	if !ok || len(overlay) != 1 || overlay[0].ID != "gemini-2.5-flash" {
+		t.Fatalf("Overlays[google] = %+v", pf.Overlays)
+	}
+	if _, hasGemini := pf.Overlays["gemini"]; hasGemini {
+		t.Fatalf("Overlays must not keep gemini key: %+v", pf.Overlays)
+	}
+	// disable-default-gemini canonicalizes onto google.
+	if pf.DisableDefaultPer["google"] != true {
+		t.Errorf("DisableDefaultPer = %+v, want google:true", pf.DisableDefaultPer)
+	}
+	if _, ok := pf.DisableDefaultPer["gemini"]; ok {
+		t.Errorf("DisableDefaultPer must not keep gemini key: %+v", pf.DisableDefaultPer)
+	}
+
+	// Canonical google key also lands under google (not a custom).
+	rawGoogle := []byte(`{
+		"google": {
+			"options": { "baseURL": "https://google-proxy.example/v1beta" },
+			"models": { "gemini-2.5-pro": { "name": "Pro" } }
+		}
+	}`)
+	pf2, err := ParseProvidersFile(rawGoogle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pf2.Customs) != 0 {
+		t.Fatalf("google must not become a custom: %+v", pf2.Customs)
+	}
+	if ep, ok := pf2.Endpoints["google"]; !ok || ep.BaseURL != "https://google-proxy.example/v1beta" {
+		t.Fatalf("Endpoints[google] = %+v ok=%v", ep, ok)
+	}
+}
+
+func TestLoadProvidersJSONCGeminiEndpointCanonicalizes(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".strike"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".strike", "providers.jsonc"), []byte(`{
+		"gemini": {
+			"options": { "baseURL": "https://alias-endpoint.example/v1beta" },
+			"models": { "gemini-2.5-flash": {} }
+		}
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ep, ok := cfg.EndpointOverlays["google"]
+	if !ok || ep.BaseURL != "https://alias-endpoint.example/v1beta" {
+		t.Fatalf("EndpointOverlays[google] = %+v ok=%v", ep, ok)
+	}
+	if _, ok := cfg.EndpointOverlays["gemini"]; ok {
+		t.Fatal("EndpointOverlays must not keep gemini key")
+	}
+	if defs := cfg.ModelOverlays["google"]; len(defs) == 0 {
+		t.Fatalf("ModelOverlays[google] empty: %+v", cfg.ModelOverlays)
+	}
+}
+
 func TestWireFromNPM(t *testing.T) {
 	if got := wireFromNPM("@ai-sdk/anthropic"); got != WireAnthropic {
 		t.Errorf("anthropic npm = %q", got)

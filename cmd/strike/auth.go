@@ -13,12 +13,13 @@ import (
 	"golang.org/x/term"
 
 	"github.com/jonathanung/strike-cli/internal/auth"
+	"github.com/jonathanung/strike-cli/internal/config"
 )
 
 const authUsage = `Manage provider credentials.
 
 Usage:
-  strike auth login <anthropic|openai|xai|gemini|kimi|deepseek> [--api-key] [--device]
+  strike auth login <anthropic|openai|xai|google|kimi|deepseek> [--api-key] [--device]
   strike auth status
   strike auth logout <provider>
 
@@ -27,13 +28,15 @@ Login methods:
   xai         OAuth browser flow (default), --device for headless machines,
               or --api-key to paste a key
   anthropic   --api-key (paste a key; OAuth not wired yet)
-  gemini      --api-key (Google AI Studio key; OAuth not supported)
+  google      --api-key (Google AI Studio key; OAuth not supported)
+              (alias: gemini)
   kimi        --api-key (paste a key; OAuth not supported)
   deepseek    --api-key (paste a key; OAuth not supported)
 
 API keys can also be provided via ANTHROPIC_API_KEY / OPENAI_API_KEY /
 XAI_API_KEY / GEMINI_API_KEY (or GOOGLE_API_KEY) / KIMI_API_KEY /
-DEEPSEEK_API_KEY, which take precedence over stored credentials.`
+DEEPSEEK_API_KEY, which take precedence over stored credentials.
+The shipped name gemini is accepted as an alias of google for login/logout.`
 
 func runAuth(args []string, output io.Writer) error {
 	store, err := auth.OpenStore(auth.DefaultPath())
@@ -53,10 +56,11 @@ func runAuth(args []string, output io.Writer) error {
 		if len(args) < 2 {
 			return fmt.Errorf("usage: strike auth logout <provider>")
 		}
-		if err := store.Delete(args[1]); err != nil {
+		prov := config.CanonicalProviderID(args[1])
+		if err := store.Delete(prov); err != nil {
 			return err
 		}
-		fmt.Fprintln(output, "Logged out of", args[1])
+		fmt.Fprintln(output, "Logged out of", prov)
 		return nil
 	default:
 		fmt.Fprintln(output, authUsage)
@@ -66,15 +70,15 @@ func runAuth(args []string, output io.Writer) error {
 
 func runAuthLogin(store *auth.Store, args []string, output io.Writer) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: strike auth login <anthropic|openai|xai> [--api-key] [--device]")
+		return fmt.Errorf("usage: strike auth login <anthropic|openai|xai|google|kimi|deepseek> [--api-key] [--device]")
 	}
-	prov := args[0]
+	prov := config.CanonicalProviderID(args[0])
 	useAPIKey := hasFlag(args[1:], "--api-key")
 	useDevice := hasFlag(args[1:], "--device")
 	ctx := context.Background()
 
 	switch prov {
-	case "anthropic", "gemini", "kimi", "deepseek":
+	case "anthropic", "google", "kimi", "deepseek":
 		return loginAPIKey(store, prov, output)
 	case "openai":
 		if useAPIKey {
@@ -87,13 +91,13 @@ func runAuthLogin(store *auth.Store, args []string, output io.Writer) error {
 		}
 		return loginXAIOAuth(ctx, store, useDevice, output)
 	default:
-		return fmt.Errorf("unknown provider %q (want anthropic, openai, xai, gemini, kimi, or deepseek)", prov)
+		return fmt.Errorf("unknown provider %q (want anthropic, openai, xai, google, kimi, or deepseek; gemini is an alias of google)", prov)
 	}
 }
 
 func loginAPIKeyPrompt(prov string) string {
-	switch prov {
-	case "gemini":
+	switch config.CanonicalProviderID(prov) {
+	case "google":
 		return "Paste your Google AI Studio API key (aistudio.google.com/apikey): "
 	default:
 		return fmt.Sprintf("Paste your %s API key: ", prov)
@@ -158,8 +162,8 @@ func loginXAIOAuth(ctx context.Context, store *auth.Store, device bool, output i
 }
 
 // builtinAuthProviders are the credential-backed providers `strike auth`
-// knows by name, in display order.
-var builtinAuthProviders = []string{"anthropic", "openai", "xai", "gemini", "kimi", "deepseek"}
+// knows by name, in display order. google is canonical; gemini is an alias.
+var builtinAuthProviders = []string{"anthropic", "openai", "xai", "google", "kimi", "deepseek"}
 
 func runAuthStatus(store *auth.Store, output io.Writer) error {
 	providers := store.Providers()
@@ -190,13 +194,14 @@ func runAuthStatus(store *auth.Store, output io.Writer) error {
 }
 
 func envKey(provider string) (string, bool) {
-	// Keep in sync with internal/auth envVars + envAliases (gemini accepts
-	// GOOGLE_API_KEY as a Google AI Studio alias).
+	// Keep in sync with internal/auth envVars + envAliases (google accepts
+	// GEMINI_API_KEY primary and GOOGLE_API_KEY as a Google AI Studio alias).
+	provider = config.CanonicalProviderID(provider)
 	names := map[string][]string{
 		"anthropic": {"ANTHROPIC_API_KEY"},
 		"openai":    {"OPENAI_API_KEY"},
 		"xai":       {"XAI_API_KEY"},
-		"gemini":    {"GEMINI_API_KEY", "GOOGLE_API_KEY"},
+		"google":    {"GEMINI_API_KEY", "GOOGLE_API_KEY"},
 		"kimi":      {"KIMI_API_KEY"},
 		"deepseek":  {"DEEPSEEK_API_KEY"},
 	}[provider]

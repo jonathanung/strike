@@ -224,13 +224,15 @@ func Default() Config {
 //  4. empty (caller may require freeform /model)
 //
 // Built-in defaults below are strike's catalog pins, not models.dev order.
+// Provider ids are canonicalized (gemini → google). Model ids keep vendor names
+// (e.g. gemini-2.5-pro for the google provider).
 func DefaultModel(provider string) string {
-	switch provider {
+	switch CanonicalProviderID(provider) {
 	case "openai":
 		return "gpt-5.5"
 	case "xai":
 		return "grok-4.5"
-	case "gemini":
+	case "google":
 		return "gemini-2.5-pro"
 	case "kimi":
 		return "moonshot-v1"
@@ -321,6 +323,7 @@ func Load(workDir string) (Config, error) {
 			cfg = applyProvidersFile(cfg, pf)
 		}
 	}
+	cfg.Provider = CanonicalProviderID(cfg.Provider)
 	return cfg, nil
 }
 
@@ -341,8 +344,9 @@ func applyProvidersFile(cfg Config, pf ProvidersFile) Config {
 // IsBuiltinProviderDisabled reports whether a builtin catalog provider is
 // hidden by disable-default-providers / disable-default-<name>. Customs are
 // never disabled. Per-provider false overrides a bulk true.
+// Alias ids (gemini) are canonicalized to google before lookup.
 func (c Config) IsBuiltinProviderDisabled(name string) bool {
-	name = strings.ToLower(strings.TrimSpace(name))
+	name = CanonicalProviderID(name)
 	if name == "" {
 		return false
 	}
@@ -375,7 +379,7 @@ func mergeDisableDefaultPer(base, layer map[string]bool) map[string]bool {
 		out = make(map[string]bool, len(layer))
 	}
 	for k, v := range layer {
-		out[strings.ToLower(strings.TrimSpace(k))] = v
+		out[CanonicalProviderID(k)] = v
 	}
 	return out
 }
@@ -389,6 +393,7 @@ func read(path string) (Config, error) {
 	if err := json.Unmarshal(data, &c); err != nil {
 		return Config{}, err
 	}
+	c.Provider = CanonicalProviderID(c.Provider)
 	// disable-default-* top-level keys (same names as providers.jsonc).
 	if all, per, err := parseDisableDefaultFlags(data); err != nil {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
@@ -622,7 +627,7 @@ func DeferToolsEnabled(s string) bool {
 
 func merge(base, layer Config) Config {
 	if layer.Provider != "" {
-		base.Provider = layer.Provider
+		base.Provider = CanonicalProviderID(layer.Provider)
 	}
 	if layer.Model != "" {
 		base.Model = layer.Model

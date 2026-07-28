@@ -79,16 +79,17 @@ func TestOAuthLoginCompletesAndSwitchesProviderWhenSelectAfter(t *testing.T) {
 	}
 }
 
-func TestAPIKeyModalGeminiGuide(t *testing.T) {
-	if got := apiKeyModalTitle("gemini"); got != "Enter Google AI Studio API key" {
+func TestAPIKeyModalGoogleGuide(t *testing.T) {
+	// Canonical provider id is google; guide mentions the gemini alias.
+	if got := apiKeyModalTitle("google"); got != "Enter Google AI Studio API key" {
 		t.Errorf("title = %q", got)
 	}
 	if got := apiKeyModalTitle("anthropic"); got != "Enter anthropic API key" {
 		t.Errorf("title = %q", got)
 	}
 	th := theme.Default()
-	guide := apiKeyGuide("gemini", th)
-	for _, want := range []string{"Google AI Studio", "aistudio.google.com", "GEMINI_API_KEY", "GOOGLE_API_KEY", "gemini"} {
+	guide := apiKeyGuide("google", th)
+	for _, want := range []string{"Google AI Studio", "aistudio.google.com", "GEMINI_API_KEY", "GOOGLE_API_KEY", "google", "alias gemini"} {
 		if !strings.Contains(guide, want) {
 			t.Errorf("guide missing %q: %q", want, guide)
 		}
@@ -97,10 +98,13 @@ func TestAPIKeyModalGeminiGuide(t *testing.T) {
 		t.Errorf("anthropic guide should be empty")
 	}
 	m, _ := newAppTestModel(nil, nil)
-	modal := newAPIKeyModal("gemini", m.services.Auth, m.th, false)
+	modal := newAPIKeyModal("google", m.services.Auth, m.th, false)
 	view := ansi.Strip(modal.view(60, m.th))
 	if !strings.Contains(view, "Google AI Studio") {
 		t.Errorf("view missing Google AI Studio guidance:\n%s", view)
+	}
+	if !strings.Contains(view, "alias gemini") {
+		t.Errorf("view missing gemini alias mention:\n%s", view)
 	}
 }
 
@@ -190,6 +194,17 @@ func TestAuthCommandsDataDrivenFromStatuses(t *testing.T) {
 		}
 		if strings.Contains(m.notice, "echo") {
 			t.Errorf("status notice listed the builtin echo provider: %q", m.notice)
+		}
+	})
+
+	t.Run("gemini login alias opens google key modal", func(t *testing.T) {
+		m, _ := newAppTestModel(nil, nil)
+		m.composer.SetValue("/auth gemini key")
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m = updated.(Model)
+		modal, ok := m.modal.(*apiKeyModal)
+		if !ok || modal.provider != "google" {
+			t.Fatalf("/auth gemini modal = %#v, want google API key modal", m.modal)
 		}
 	})
 
@@ -453,7 +468,7 @@ func TestAuthMethodsForLabels(t *testing.T) {
 			kinds: []authMethodKind{authMethodAPIKey},
 		},
 		{
-			st:    host.ProviderStatus{Name: "gemini", APIKey: true},
+			st:    host.ProviderStatus{Name: "google", APIKey: true},
 			want:  []string{"API key"},
 			kinds: []authMethodKind{authMethodAPIKey},
 		},

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
@@ -1126,6 +1127,7 @@ func (e *Engine) resolveTaskModelPin(ctx context.Context, pin string) (taskModel
 		}
 		providerName, model = e.provName, pin
 	}
+	providerName = config.CanonicalProviderID(providerName)
 	model = stripMatchingProviderPrefixes(providerName, model)
 	if model == "" {
 		return taskModelPin{}, fmt.Errorf("model is empty")
@@ -1180,7 +1182,7 @@ func (e *Engine) applyChildProviderModel(child *Engine, pin taskModelPin) {
 	if pin.lock {
 		if pin.prov != nil {
 			child.prov = pin.prov
-			child.provName = pin.provider
+			child.provName = config.CanonicalProviderID(pin.provider)
 			child.model = pin.model
 		} else {
 			child.prov = e.prov

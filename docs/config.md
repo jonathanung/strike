@@ -262,11 +262,12 @@ files — use env refs and/or `/auth` / the auth store.
 
 ### Disable default (builtin) providers
 
-Hide stock catalog providers (`anthropic`, `openai`, `xai`, `gemini`, `kimi`,
+Hide stock catalog providers (`anthropic`, `openai`, `xai`, `google`, `kimi`,
 `deepseek`, `echo`) so only custom endpoints appear in `/provider`, `/auth`,
-and model pickers. Same keys work in **`providers.jsonc`** or config JSON;
-later layers win (project overrides global; providers.jsonc overrides the
-config file in the same root).
+and model pickers. The shipped alias `gemini` is accepted on
+`disable-default-gemini` and routes to `google`. Same keys work in
+**`providers.jsonc`** or config JSON; later layers win (project overrides
+global; providers.jsonc overrides the config file in the same root).
 
 ```jsonc
 // ~/.strike/providers.jsonc — custom-only setup, keep openai available
@@ -357,7 +358,7 @@ a disabled builtin are ignored for selection until it is re-enabled.
 
 | Field | Required | Notes |
 |---|---|---|
-| map key | yes | provider id (lowercased slug). Built-ins (`anthropic`/`openai`/`xai`/`gemini`/`kimi`/`deepseek`/`echo`) stay builtins: options → **endpoint overlay**, models → **catalog overlay**. Other keys are custom providers. |
+| map key | yes | provider id (lowercased slug). Built-ins (`anthropic`/`openai`/`xai`/`google`/`kimi`/`deepseek`/`echo`) stay builtins: options → **endpoint overlay**, models → **catalog overlay**. The shipped alias `gemini` is accepted and canonicalized to `google`. Other keys are custom providers. |
 | `options.baseURL` | custom yes | absolute `http`/`https` URL, or `{env:VAR}` / `$VAR` / `${VAR}`. On builtins, optional — overrides the stock endpoint. **OpenCode shape:** include `/v1` (Anthropic → `…/v1` + `/messages`; OpenAI → `…/v1` + `/chat/completions` or `/responses`). Origin-only Anthropic bases still work. |
 | `options.apiKey` | no | env ref only (`{env:NAME}`, `$NAME`, `${NAME}`) → checked before auth store. On builtins, pins the env var used for that provider. Missing env fails at select time with a clear error. |
 | `npm` | no | **advisory only** — never installed; `anthropic` → Messages; `@ai-sdk/openai` → **Responses** (`/responses`); `@ai-sdk/openai-compatible` (default) → chat completions |
@@ -441,7 +442,7 @@ Variant bags may include `reasoningEffort` or `effort` (`off`\|`low`\|`medium`\|
 
 | Field | Required | Notes |
 |---|---|---|
-| `name` | yes | lowercase slug (`[a-z][a-z0-9_-]{0,63}`); not `anthropic`/`openai`/`xai`/`gemini`/`kimi`/`deepseek`/`echo` |
+| `name` | yes | lowercase slug (`[a-z][a-z0-9_-]{0,63}`); not `anthropic`/`openai`/`xai`/`google`/`gemini`/`kimi`/`deepseek`/`echo` (`gemini` is reserved as an alias of `google`) |
 | `baseURL` | yes | absolute URL or env ref template |
 | `api` | yes | wire dialect: `openai` (chat), `responses`, or `anthropic` |
 | `apiKeyEnv` | no | env var name (or `{env:NAME}` / `$NAME`) checked before the auth store |

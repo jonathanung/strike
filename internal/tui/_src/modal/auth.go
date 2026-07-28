@@ -89,6 +89,9 @@ func (m Model) handleAuth(args []string) (tea.Model, tea.Cmd) {
 	}
 
 	provider := args[0]
+	if provider == "gemini" {
+		provider = "google"
+	}
 	st, ok := findStatus(statuses, provider)
 	if !ok || st.Builtin {
 		m.setNotice("unknown provider "+provider+" — usage: /auth <"+strings.Join(names, "|")+"> [key|device|oauth]", true)
@@ -575,7 +578,7 @@ func (m *apiKeyModal) view(width int, th theme.Theme) string {
 // apiKeyModalTitle is the dialog title when pasting a provider API key.
 func apiKeyModalTitle(provider string) string {
 	switch provider {
-	case "gemini":
+	case "google":
 		return "Enter Google AI Studio API key"
 	default:
 		return "Enter " + provider + " API key"
@@ -585,11 +588,11 @@ func apiKeyModalTitle(provider string) string {
 // apiKeyGuide is optional muted copy above the key field (how to get a key).
 func apiKeyGuide(provider string, th theme.Theme) string {
 	switch provider {
-	case "gemini":
+	case "google":
 		return dotJoin(th,
 			"Google AI Studio key (aistudio.google.com/apikey)",
 			"env GEMINI_API_KEY or GOOGLE_API_KEY",
-			"provider id gemini",
+			"provider id google (alias gemini)",
 		)
 	default:
 		return ""

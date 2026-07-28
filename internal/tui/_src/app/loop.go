@@ -63,7 +63,7 @@ interval: Go duration (15m, 2h, 30s, 1h30m); session-only, canceled on quit`
 		return m, nil
 	}
 	if m.providerName == "" {
-		m.setNeedsModelNotice("No model selected — use /provider <anthropic|openai|xai|echo> [model]", true)
+		m.setNeedsModelNotice("No model selected — use /provider <anthropic|openai|xai|google|kimi|deepseek|echo> [model]", true)
 		return m, nil
 	}
 	if len(m.loops) >= maxScheduledLoops {

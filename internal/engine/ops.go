@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
@@ -24,7 +25,7 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 		if e.prov == nil {
 			e.emit(protocol.EngineError{
 				Correlation: e.sessionCorr(),
-				Message:     "no model selected — use /provider <anthropic|openai|xai|echo> [model]",
+				Message:     "no model selected — use /provider <anthropic|openai|xai|google|kimi|deepseek|echo> [model]",
 			})
 			return
 		}
@@ -181,7 +182,7 @@ func stripMatchingProviderPrefixes(providerName, model string) string {
 	const maxStrip = 8
 	for range maxStrip {
 		prov, bare, ok := splitProviderModel(model)
-		if !ok || !strings.EqualFold(prov, providerName) {
+		if !ok || config.CanonicalProviderID(prov) != config.CanonicalProviderID(providerName) {
 			return model
 		}
 		model = bare
@@ -195,7 +196,7 @@ func stripMatchingProviderPrefixes(providerName, model string) string {
 // bare ids pass through.
 func resolveSelectModel(providerName, model, defaultModel string) string {
 	if prov, _, ok := splitProviderModel(model); ok {
-		if strings.EqualFold(prov, providerName) {
+		if config.CanonicalProviderID(prov) == config.CanonicalProviderID(providerName) {
 			// First segment matches: strip all matching prefixes (handles
 			// doubles like openai/openai/gpt-5.6-sol).
 			model = stripMatchingProviderPrefixes(providerName, model)
@@ -224,7 +225,8 @@ func (e *Engine) handleSelect(op protocol.SelectModel) {
 		})
 		return
 	}
-	p, defaultModel, err := e.opts.Select(op.Provider)
+	name := config.CanonicalProviderID(op.Provider)
+	p, defaultModel, err := e.opts.Select(name)
 	if err != nil {
 		e.emit(protocol.EngineError{
 			Correlation: e.sessionCorr(),
@@ -232,11 +234,12 @@ func (e *Engine) handleSelect(op protocol.SelectModel) {
 		})
 		return
 	}
-	model := resolveSelectModel(op.Provider, op.Model, defaultModel)
-	e.setProvider(op.Provider, p, model)
+	model := resolveSelectModel(name, op.Model, defaultModel)
+	e.setProvider(name, p, model)
 }
 
 func (e *Engine) setProvider(name string, p provider.Provider, model string) {
+	name = config.CanonicalProviderID(name)
 	// Chokepoint: never store a matching provider/ prefix (or doubles) on the
 	// active model string. Callers may still pass already-prefixed ids.
 	model = stripMatchingProviderPrefixes(name, model)

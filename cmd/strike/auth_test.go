@@ -156,47 +156,120 @@ func TestRunAuthLoginAPIKey(t *testing.T) {
 	}
 }
 
-func TestRunAuthLoginGeminiAPIKeyOnly(t *testing.T) {
+func TestRunAuthLoginGoogleAPIKeyOnly(t *testing.T) {
 	authHome(t)
 	t.Setenv("GEMINI_API_KEY", "")
 	t.Setenv("GOOGLE_API_KEY", "")
 	withStdin(t, "AIzaSy-test-studio-key\n")
 
 	var out bytes.Buffer
-	// Default login is API key (no OAuth path for gemini).
-	if err := runAuth([]string{"login", "gemini"}, &out); err != nil {
+	// Default login is API key (no OAuth path for google).
+	if err := runAuth([]string{"login", "google"}, &out); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "Google AI Studio") {
 		t.Errorf("prompt/out missing Google AI Studio guidance: %q", out.String())
 	}
-	if !strings.Contains(out.String(), "Stored gemini API key") {
+	if !strings.Contains(out.String(), "Stored google API key") {
 		t.Errorf("out = %q", out.String())
 	}
 	st := openTestStore(t)
-	cred, ok := st.Get("gemini")
+	cred, ok := st.Get("google")
 	if !ok || cred.APIKey != "AIzaSy-test-studio-key" || cred.Type != auth.TypeAPIKey {
 		t.Fatalf("cred = %+v ok=%v", cred, ok)
 	}
+	// Alias id also resolves the stored credential.
+	if cred, ok := st.Get("gemini"); !ok || cred.APIKey != "AIzaSy-test-studio-key" {
+		t.Fatalf("Get(gemini) alias = %+v ok=%v", cred, ok)
+	}
 
-	// Status reports GOOGLE_API_KEY alias when set.
+	// Status lists canonical google and reports GOOGLE_API_KEY when set.
 	t.Setenv("GOOGLE_API_KEY", "from-google-env")
 	out.Reset()
 	if err := runAuthStatus(st, &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "GOOGLE_API_KEY") {
-		t.Errorf("status missing GOOGLE_API_KEY: %q", out.String())
+	got := out.String()
+	if !strings.Contains(got, "google") {
+		t.Errorf("status missing google: %q", got)
+	}
+	if strings.Contains(got, "gemini") {
+		t.Errorf("status must list google only, not gemini: %q", got)
+	}
+	if !strings.Contains(got, "GOOGLE_API_KEY") {
+		t.Errorf("status missing GOOGLE_API_KEY: %q", got)
 	}
 }
 
-func TestLoginAPIKeyPromptGemini(t *testing.T) {
-	got := loginAPIKeyPrompt("gemini")
-	if !strings.Contains(got, "Google AI Studio") || !strings.Contains(got, "aistudio.google.com") {
-		t.Errorf("prompt = %q", got)
+func TestRunAuthLoginGeminiAliasStoresCanonical(t *testing.T) {
+	authHome(t)
+	withStdin(t, "AIzaSy-alias-login-key\n")
+
+	var out bytes.Buffer
+	if err := runAuth([]string{"login", "gemini"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	// Login message uses the canonical provider id.
+	if !strings.Contains(out.String(), "Stored google API key") {
+		t.Errorf("out = %q, want Stored google API key", out.String())
+	}
+	st := openTestStore(t)
+	cred, ok := st.Get("google")
+	if !ok || cred.APIKey != "AIzaSy-alias-login-key" {
+		t.Fatalf("canonical store = %+v ok=%v", cred, ok)
+	}
+	// Disk must not keep a legacy gemini key after alias login.
+	raw, err := os.ReadFile(auth.DefaultPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"gemini"`) {
+		t.Errorf("auth.json still has gemini key after alias login: %s", raw)
+	}
+}
+
+func TestRunAuthLogoutGeminiAlias(t *testing.T) {
+	authHome(t)
+	st := openTestStore(t)
+	if err := st.Set("google", auth.Credential{Type: auth.TypeAPIKey, APIKey: "k"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	if err := runAuth([]string{"logout", "gemini"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Logged out of google") {
+		t.Errorf("out = %q", out.String())
+	}
+	st2 := openTestStore(t)
+	if _, ok := st2.Get("google"); ok {
+		t.Error("credential still present after logout gemini alias")
+	}
+}
+
+func TestLoginAPIKeyPromptGoogle(t *testing.T) {
+	for _, id := range []string{"google", "gemini"} {
+		got := loginAPIKeyPrompt(id)
+		if !strings.Contains(got, "Google AI Studio") || !strings.Contains(got, "aistudio.google.com") {
+			t.Errorf("prompt(%q) = %q", id, got)
+		}
 	}
 	if got := loginAPIKeyPrompt("anthropic"); !strings.Contains(got, "anthropic") {
 		t.Errorf("anthropic prompt = %q", got)
+	}
+}
+
+func TestAuthUsageListsGoogle(t *testing.T) {
+	var out bytes.Buffer
+	if err := runAuth(nil, &out); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	for _, want := range []string{"google", "alias: gemini", "GEMINI_API_KEY", "GOOGLE_API_KEY"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("auth usage missing %q:\n%s", want, got)
+		}
 	}
 }
 

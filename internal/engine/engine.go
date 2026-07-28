@@ -419,13 +419,14 @@ func (e *Engine) Run(ctx context.Context) {
 	defer e.shutdownChildren()
 	e.quietStartup = e.opts.QuietStartup
 	if e.opts.InitialProvider != "" && e.opts.Select != nil {
-		if p, defaultModel, err := e.opts.Select(e.opts.InitialProvider); err == nil {
+		name := config.CanonicalProviderID(e.opts.InitialProvider)
+		if p, defaultModel, err := e.opts.Select(name); err == nil {
 			// Same normalization as SelectModel: matching "provider/id" → bare
 			// id; foreign prefixes → provider default. Bare ids pass through
 			// unchanged (without a catalog we cannot tell a bare foreign id
 			// from a valid model name on this provider).
-			model := resolveSelectModel(e.opts.InitialProvider, e.opts.InitialModel, defaultModel)
-			e.setProvider(e.opts.InitialProvider, p, model)
+			model := resolveSelectModel(name, e.opts.InitialModel, defaultModel)
+			e.setProvider(name, p, model)
 		}
 	}
 	// The configured effort is applied before the agent so an agent's own

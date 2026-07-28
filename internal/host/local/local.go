@@ -75,7 +75,7 @@ var credentialProviders = []host.ProviderStatus{
 	{Name: "anthropic", APIKey: true},
 	{Name: "openai", OAuth: true, APIKey: true},
 	{Name: "xai", OAuth: true, Device: true, APIKey: true},
-	{Name: "gemini", APIKey: true},
+	{Name: "google", APIKey: true},
 	{Name: "kimi", APIKey: true},
 	{Name: "deepseek", APIKey: true},
 }
@@ -158,12 +158,13 @@ func (a authAdapter) Statuses() []host.ProviderStatus {
 }
 
 func (a authAdapter) Describe(provider string) string {
-	return a.describeProvider(provider)
+	return a.describeProvider(config.CanonicalProviderID(provider))
 }
 
 // describeProvider resolves credential detail for builtins (including endpoint
-// apiKeyEnv overlays) and customs.
+// apiKeyEnv overlays) and customs. provider must already be canonical.
 func (a authAdapter) describeProvider(provider string) string {
+	provider = config.CanonicalProviderID(provider)
 	if cp, ok := a.customs.Get(provider); ok {
 		resolved := config.ResolveCustom(cp)
 		if key, ok := auth.APIKeyEnv(provider, a.store, resolved.APIKeyEnv); ok && key != "" {
@@ -197,6 +198,7 @@ func (a authAdapter) describeProvider(provider string) string {
 // SetAPIKey trims surrounding whitespace (matching the former modal), then
 // rejects an empty key or a provider that does not accept API keys.
 func (a authAdapter) SetAPIKey(provider, key string) error {
+	provider = config.CanonicalProviderID(provider)
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return errors.New("api key is empty")
@@ -208,6 +210,7 @@ func (a authAdapter) SetAPIKey(provider, key string) error {
 }
 
 func (a authAdapter) Logout(provider string) error {
+	provider = config.CanonicalProviderID(provider)
 	err := a.store.Delete(provider)
 	// Logging out of a custom provider also deletes its definition (config +
 	// providers.jsonc layers). Built-ins only clear credentials.
@@ -222,6 +225,7 @@ func (a authAdapter) Logout(provider string) error {
 }
 
 func (a authAdapter) BeginOAuth(ctx context.Context, provider string) (*host.OAuthLogin, error) {
+	provider = config.CanonicalProviderID(provider)
 	var flow auth.FlowConfig
 	switch provider {
 	case "openai":
@@ -251,6 +255,7 @@ func (a authAdapter) BeginOAuth(ctx context.Context, provider string) (*host.OAu
 }
 
 func (a authAdapter) BeginDevice(ctx context.Context, provider string) (*host.DeviceLogin, error) {
+	provider = config.CanonicalProviderID(provider)
 	if provider != "xai" {
 		return nil, fmt.Errorf("provider %q does not support device login", provider)
 	}
@@ -274,6 +279,7 @@ func (a authAdapter) BeginDevice(ctx context.Context, provider string) (*host.De
 // acceptsAPIKey reports whether a provider stores a pasted API key. echo does
 // not; customs and credential builtins do.
 func (a authAdapter) acceptsAPIKey(provider string) bool {
+	provider = config.CanonicalProviderID(provider)
 	for _, p := range credentialProviders {
 		if p.Name == provider {
 			return p.APIKey
@@ -310,6 +316,7 @@ func (c catalogAdapter) ModelIDs(ctx context.Context, provider string) ([]string
 }
 
 func (c catalogAdapter) Models(ctx context.Context, provider string) ([]host.ModelInfo, error) {
+	provider = config.CanonicalProviderID(provider)
 	overlay := c.customs.ModelOverlay(provider)
 	if cp, ok := c.customs.Get(provider); ok {
 		// Custom endpoint: config models only (no models.dev merge).
@@ -337,7 +344,7 @@ func (c catalogAdapter) ModelsForProviders(ctx context.Context, providers []stri
 		tried   int
 	)
 	for _, name := range providers {
-		name = strings.TrimSpace(name)
+		name = config.CanonicalProviderID(name)
 		if name == "" {
 			continue
 		}
@@ -364,6 +371,7 @@ func tagProvider(provider string, infos []host.ModelInfo) []host.ModelInfo {
 }
 
 func (c catalogAdapter) ContextWindow(ctx context.Context, provider, model string) (int, bool, error) {
+	provider = config.CanonicalProviderID(provider)
 	if defs := c.customs.ModelOverlay(provider); len(defs) > 0 {
 		if n, ok := config.ModelDefsContext(defs, model); ok {
 			return n, true, nil
@@ -381,6 +389,7 @@ func (c catalogAdapter) ContextWindow(ctx context.Context, provider, model strin
 }
 
 func (c catalogAdapter) OutputLimit(ctx context.Context, provider, model string) (int, bool, error) {
+	provider = config.CanonicalProviderID(provider)
 	if defs := c.customs.ModelOverlay(provider); len(defs) > 0 {
 		if n, ok := config.ModelDefsOutput(defs, model); ok {
 			return n, true, nil
@@ -398,6 +407,7 @@ func (c catalogAdapter) OutputLimit(ctx context.Context, provider, model string)
 }
 
 func (c catalogAdapter) ResolveVariant(_ context.Context, provider, model, variant string) (string, bool, error) {
+	provider = config.CanonicalProviderID(provider)
 	defs := c.customs.ModelOverlay(provider)
 	def, ok := config.FindModelDef(defs, model)
 	if !ok {
@@ -508,7 +518,7 @@ func (settingsAdapter) Defaults() host.UserDefaults {
 		return host.UserDefaults{}
 	}
 	return host.UserDefaults{
-		Provider:       cfg.Provider,
+		Provider:       config.CanonicalProviderID(cfg.Provider),
 		Model:          cfg.Model,
 		Agent:          cfg.DefaultAgent,
 		Effort:         string(cfg.Effort),

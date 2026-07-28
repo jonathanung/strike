@@ -9,7 +9,7 @@ strike launches without any provider configured. Pick one inside the TUI:
                                # selecting an unauthenticated one starts its
                                # login and switches once it succeeds;
                                # ctrl+x logs out (y/n confirm)
-/provider anthropic            # direct switch (or openai, xai, echo)
+/provider anthropic            # direct switch (or openai, xai, google, kimi, deepseek, echo)
 /provider openai gpt-5.5       # optional explicit model
 /model                         # centered model picker for the current
                                # provider (live models.dev catalog, cached

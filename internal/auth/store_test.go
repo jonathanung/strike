@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -86,5 +87,125 @@ func TestOpenStoreMissingIsEmpty(t *testing.T) {
 	}
 	if len(st.Providers()) != 0 {
 		t.Fatalf("Providers = %v", st.Providers())
+	}
+}
+
+// TestGoogleStoreCanonicalAndLegacy covers gemini→google storage semantics:
+// legacy gemini keys are readable via either id, canonical google wins when
+// both exist, Set writes only google (and drops gemini), Delete either removes
+// both, and Providers de-dupes to google.
+func TestGoogleStoreCanonicalAndLegacy(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.json")
+	// Seed a legacy-only file (pre-migration auth.json).
+	if err := os.WriteFile(path, []byte(`{"gemini":{"type":"api","apiKey":"legacy-key"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, err := OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Legacy gemini is readable through both google and gemini ids.
+	for _, id := range []string{"google", "gemini"} {
+		cred, ok := st.Get(id)
+		if !ok || cred.APIKey != "legacy-key" {
+			t.Fatalf("Get(%q) = %+v ok=%v, want legacy-key", id, cred, ok)
+		}
+	}
+	if got := st.Providers(); !reflect.DeepEqual(got, []string{"google"}) {
+		t.Errorf("Providers with legacy gemini = %v, want [google]", got)
+	}
+
+	// Canonical google takes precedence when both keys exist on disk.
+	if err := os.WriteFile(path, []byte(`{
+		"gemini":{"type":"api","apiKey":"legacy-key"},
+		"google":{"type":"api","apiKey":"canonical-key"}
+	}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, err = OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"google", "gemini"} {
+		cred, ok := st.Get(id)
+		if !ok || cred.APIKey != "canonical-key" {
+			t.Fatalf("Get(%q) with both = %+v ok=%v, want canonical-key", id, cred, ok)
+		}
+	}
+	if got := st.Providers(); !reflect.DeepEqual(got, []string{"google"}) {
+		t.Errorf("Providers with both keys = %v, want [google]", got)
+	}
+
+	// Set via either id writes only google and removes gemini.
+	if err := st.Set("gemini", Credential{Type: TypeAPIKey, APIKey: "from-alias"}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var disk map[string]Credential
+	if err := json.Unmarshal(raw, &disk); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := disk["gemini"]; ok {
+		t.Errorf("Set(gemini) left gemini on disk: %s", raw)
+	}
+	if c, ok := disk["google"]; !ok || c.APIKey != "from-alias" {
+		t.Errorf("Set(gemini) disk google = %+v ok=%v", c, ok)
+	}
+	cred, ok := st.Get("google")
+	if !ok || cred.APIKey != "from-alias" {
+		t.Fatalf("after Set(gemini): Get(google) = %+v ok=%v", cred, ok)
+	}
+
+	// Re-seed both, then Delete via either id removes both.
+	if err := os.WriteFile(path, []byte(`{
+		"gemini":{"type":"api","apiKey":"legacy-key"},
+		"google":{"type":"api","apiKey":"canonical-key"}
+	}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, err = OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Delete("gemini"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := st.Get("google"); ok {
+		t.Error("Get(google) still present after Delete(gemini)")
+	}
+	if _, ok := st.Get("gemini"); ok {
+		t.Error("Get(gemini) still present after Delete(gemini)")
+	}
+	raw, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var afterDel map[string]Credential
+	if err := json.Unmarshal(raw, &afterDel); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := afterDel["gemini"]; ok {
+		t.Errorf("disk still has gemini: %s", raw)
+	}
+	if _, ok := afterDel["google"]; ok {
+		t.Errorf("disk still has google: %s", raw)
+	}
+
+	// Delete("google") also clears a legacy-only store.
+	if err := os.WriteFile(path, []byte(`{"gemini":{"type":"api","apiKey":"legacy-key"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, err = OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Delete("google"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := st.Get("gemini"); ok {
+		t.Error("legacy gemini survived Delete(google)")
 	}
 }

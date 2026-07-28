@@ -1,4 +1,4 @@
-package gemini
+package google
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 
 func TestNew(t *testing.T) {
 	p := New(func(context.Context) (string, error) { return "k", nil })
-	if p.Name() != "gemini" {
+	if p.Name() != "google" {
 		t.Errorf("Name = %q", p.Name())
 	}
 	if p.baseURL != defaultBaseURL {
@@ -137,7 +137,7 @@ func TestStreamEmitsTextToolCallsAndDone(t *testing.T) {
 		t.Fatalf("done = %+v", done)
 	}
 	if gotReq.SystemInstruction == nil || gotReq.SystemInstruction.Parts[0].Text != "sys" {
-		t.Errorf("system_instruction = %+v", gotReq.SystemInstruction)
+		t.Errorf("systemInstruction = %+v", gotReq.SystemInstruction)
 	}
 	if gotReq.GenerationConfig == nil || gotReq.GenerationConfig.MaxOutputTokens != 256 {
 		t.Errorf("generationConfig = %+v", gotReq.GenerationConfig)
@@ -153,6 +153,58 @@ func TestStreamEmitsTextToolCallsAndDone(t *testing.T) {
 	}
 	if gotReq.Contents[2].Parts[0].FunctionResponse == nil || gotReq.Contents[2].Parts[0].FunctionResponse.Name != "bash" {
 		t.Errorf("function response = %+v", gotReq.Contents[2].Parts[0].FunctionResponse)
+	}
+}
+
+// TestStreamRequestBodyCamelCaseKeys pins the Google AI Studio wire dialect:
+// system prompt, inline image, and tools must serialize as camelCase JSON keys
+// (not the snake_case names some SDKs emit).
+func TestStreamRequestBodyCamelCaseKeys(t *testing.T) {
+	var raw []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var err error
+		raw, err = io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"candidates":[{"content":{"parts":[{"text":"hi"}]},"finishReason":"STOP"}]}`)
+	}))
+	defer srv.Close()
+
+	p := New(func(context.Context) (string, error) { return "k", nil })
+	p.baseURL = srv.URL
+	stream, err := p.Stream(context.Background(), provider.Request{
+		Model:  "gemini-2.5-pro",
+		System: "be helpful",
+		Tools: []provider.ToolSchema{{
+			Name: "bash", Description: "run", InputSchema: json.RawMessage(`{"type":"object"}`),
+		}},
+		Messages: []provider.Message{
+			{Role: provider.RoleUser, Text: "look", Images: []provider.Image{{MIME: "image/png", Data: []byte{1, 2, 3}}}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	for ev := range stream {
+		if ev.Type == provider.EventError {
+			t.Fatalf("stream error: %v", ev.Err)
+		}
+	}
+	body := string(raw)
+	if body == "" {
+		t.Fatal("empty request body")
+	}
+	for _, want := range []string{"systemInstruction", "inlineData", "mimeType", "functionDeclarations"} {
+		if !strings.Contains(body, `"`+want+`"`) {
+			t.Errorf("missing camelCase key %q in body:\n%s", want, body)
+		}
+	}
+	for _, bad := range []string{"system_instruction", "inline_data", "mime_type", "function_declarations"} {
+		if strings.Contains(body, `"`+bad+`"`) {
+			t.Errorf("unexpected snake_case key %q in body:\n%s", bad, body)
+		}
 	}
 }
 
@@ -181,7 +233,7 @@ func TestStreamNoCandidates(t *testing.T) {
 }
 
 func TestStreamAlwaysUsesAPIKeyHeader(t *testing.T) {
-	// OAuth is not a gemini auth path; every credential is sent as x-goog-api-key.
+	// OAuth is not a google auth path; every credential is sent as x-goog-api-key.
 	var gotKey, gotBearer string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotKey = r.Header.Get("x-goog-api-key")

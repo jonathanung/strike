@@ -32,7 +32,7 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		return m.sendSelect(op)
 	case "/model":
 		if m.providerName == "" {
-			m.setNeedsModelNotice("select a provider first: /provider <anthropic|openai|xai|echo>", true)
+			m.setNeedsModelNotice("select a provider first: /provider <anthropic|openai|xai|google|kimi|deepseek|echo>", true)
 			return m, nil
 		}
 		if len(fields) < 2 {
@@ -280,7 +280,7 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 				continue
 			}
 			if m.providerName == "" {
-				m.setNeedsModelNotice("No model selected — use /provider <anthropic|openai|xai|echo> [model]", true)
+				m.setNeedsModelNotice("No model selected — use /provider <anthropic|openai|xai|google|kimi|deepseek|echo> [model]", true)
 				return m, nil
 			}
 			args := strings.TrimSpace(strings.TrimPrefix(text, fields[0]))

@@ -30,7 +30,7 @@ func SetGlobalDefaults(provider, model, agent string, effort protocol.Effort, mo
 		return err
 	}
 	if provider != "" {
-		cfg.Provider = provider
+		cfg.Provider = CanonicalProviderID(provider)
 	}
 	if model != "" {
 		cfg.Model = model

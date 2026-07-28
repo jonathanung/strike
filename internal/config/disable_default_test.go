@@ -63,8 +63,12 @@ func TestIsBuiltinProviderDisabledPrecedence(t *testing.T) {
 			DisableDefaultProviders: true,
 			DisableDefaultPer:       map[string]bool{"openai": false},
 		}, "anthropic", true},
-		{"override force disable without bulk", Config{
-			DisableDefaultPer: map[string]bool{"gemini": true},
+		{"override force disable google", Config{
+			DisableDefaultPer: map[string]bool{"google": true},
+		}, "google", true},
+		// Lookup name is canonicalized: gemini alias sees a google-keyed disable.
+		{"gemini alias sees google disable", Config{
+			DisableDefaultPer: map[string]bool{"google": true},
 		}, "gemini", true},
 		{"unknown not builtin", Config{DisableDefaultProviders: true}, "not-a-provider", false},
 	}
@@ -147,6 +151,36 @@ func TestLoadDisableDefaultMergePrecedence(t *testing.T) {
 	}
 	if store.IsBuiltinDisabled("acme") {
 		t.Error("store: custom never disabled")
+	}
+}
+
+func TestLoadDisableDefaultGeminiAliasCanonicalizes(t *testing.T) {
+	// disable-default-gemini in config/providers.jsonc is stored under google.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, ".strike"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".strike", "config"), []byte(`{
+		"disable-default-gemini": true
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := cfg.DisableDefaultPer["gemini"]; ok {
+		t.Fatalf("DisableDefaultPer kept gemini key: %+v", cfg.DisableDefaultPer)
+	}
+	if cfg.DisableDefaultPer["google"] != true {
+		t.Fatalf("DisableDefaultPer[google] = %v, want true", cfg.DisableDefaultPer["google"])
+	}
+	if !cfg.IsBuiltinProviderDisabled("google") || !cfg.IsBuiltinProviderDisabled("gemini") {
+		t.Fatal("google and gemini alias should both report disabled")
+	}
+	if cfg.IsBuiltinProviderDisabled("openai") {
+		t.Fatal("openai should remain enabled")
 	}
 }
 

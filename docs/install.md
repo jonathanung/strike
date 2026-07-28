@@ -167,7 +167,7 @@ strike launches without any provider configured. Pick one inside the TUI
 export ANTHROPIC_API_KEY=sk-ant-…   # or: strike auth login anthropic
 ./strike                            # tries the config default silently;
                                     # otherwise select with /provider
-./strike --provider <provider>       # anthropic, openai, xai, or echo;
+./strike --provider <provider>       # anthropic, openai, xai, google, kimi, deepseek, or echo;
                                     # fails loudly if no credentials
 ./strike --model <model>             # pre-select a model
 ./strike --effort <level>            # off, low, medium, high, xhigh, or max
@@ -184,7 +184,7 @@ and is visibly marked as dangerous mode in the TUI. Run `strike --help` for
 the authoritative CLI usage and option list.
 
 Defaults when a provider is chosen without a model: `claude-sonnet-5`,
-`gpt-5.5`, `grok-4.5`.
+`gpt-5.5`, `grok-4.5`, `gemini-2.5-pro`, `moonshot-v1`, and `deepseek-chat`.
 
 If you use the `strike` shell alias (points at this repo's built binary),
 re-run `make build` after pulling changes to refresh it.

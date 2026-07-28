@@ -79,8 +79,8 @@ type Provider struct {
 type Catalog map[string]Provider
 
 // modelsDevID maps strike provider ids to models.dev catalog keys.
-// Strike's Gemini provider is id "gemini"; models.dev lists Google AI Studio
-// models under "google".
+// Strike's Google AI Studio provider id is "google" (same as models.dev);
+// the shipped "gemini" alias still resolves here for uncanonicalized callers.
 func modelsDevID(provider string) string {
 	if provider == "gemini" {
 		return "google"

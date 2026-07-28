@@ -244,7 +244,7 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		if m.turnRunning {
 			m.cells = append(m.cells, &errorCell{text: ev.Message})
 		} else {
-			if ev.Message == "no model selected — use /provider <anthropic|openai|xai|echo> [model]" {
+			if ev.Message == "no model selected — use /provider <anthropic|openai|xai|google|kimi|deepseek|echo> [model]" {
 				m.setNeedsModelNotice(ev.Message, true)
 			} else {
 				m.setNotice(ev.Message, true)
