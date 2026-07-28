@@ -14,6 +14,16 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+## [v0.0.10] - 2026-07-28
+
+### Fixed
+
+- Advertised `xterm-256color` to embedded editors and cleared inherited `COLORTERM`, so Vim and similar tools pick a compatible palette inside the TUI ([#478](https://github.com/jonathanung/strike/pull/478)).
+
+**Contributors:** [@dayvidpham](https://github.com/dayvidpham).
+
+**Full changelog:** [v0.0.9...v0.0.10](https://github.com/jonathanung/strike/compare/v0.0.9...v0.0.10)
+
 ## [v0.0.9] - 2026-07-28
 
 ### Changed
@@ -202,7 +212,8 @@ Initial public release.
 
 **Full changelog:** [commits through v0.0.1](https://github.com/jonathanung/strike/commits/v0.0.1)
 
-[Unreleased]: https://github.com/jonathanung/strike/compare/v0.0.9...HEAD
+[Unreleased]: https://github.com/jonathanung/strike/compare/v0.0.10...HEAD
+[v0.0.10]: https://github.com/jonathanung/strike/compare/v0.0.9...v0.0.10
 [v0.0.9]: https://github.com/jonathanung/strike/compare/v0.0.8...v0.0.9
 [v0.0.8]: https://github.com/jonathanung/strike/compare/v0.0.7...v0.0.8
 [v0.0.7]: https://github.com/jonathanung/strike/compare/v0.0.6...v0.0.7
