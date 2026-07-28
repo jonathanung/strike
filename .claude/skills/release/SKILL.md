@@ -31,16 +31,22 @@ Load `test-and-validate` tier B (or C if trust-boundary commits dominate since l
 
 Optional: load `smoke` for a quick product check.
 
-## Notes
+## Changelog
 
-Draft notes from `git log PREV..HEAD` (feat/fix highlights). Do **not** ship install-only boilerplate as the entire body.
+Draft the version entry from `git log PREV..HEAD` before tagging. Follow the
+standard in `CHANGELOG.md` and `docs/contributing.md`: rename `[Unreleased]` to
+`[vX.Y.Z] - YYYY-MM-DD`, add a fresh `[Unreleased]`, and update the comparison
+links. Commit and push that entry to `main`; the release workflow fails if the
+tag has no matching non-empty entry.
 
 Include:
 
-- Install snippet (`curl …/install` or project standard)
-- Highlights since previous tag (bullets)
+- User-facing changes grouped under the standard categories
 - Breaking/default changes (keybinds, config) if any
 - Upgrade note when relevant
+
+Do **not** ship install-only boilerplate or copy implementation-only commit
+activity into the changelog.
 
 ## Tag and push
 
@@ -65,12 +71,13 @@ gh release view "$VERSION"
 
 Confirm assets: linux/darwin × amd64/arm64 tarballs + `checksums.txt`.
 
-## Enrich GitHub release body
+## Verify GitHub release body
 
-`release.yml` may create minimal notes — edit immediately:
+`release.yml` creates the install block and copies the matching changelog entry.
+Verify both are present:
 
 ```sh
-gh release edit "$VERSION" --notes-file notes.md
+gh release view "$VERSION" --json body --jq .body
 ```
 
 ## Post-verify
@@ -85,7 +92,7 @@ gh release view "$VERSION" --json tagName,assets,url
 - Tag, commit SHA, release URL
 - Workflow conclusion
 - Asset names
-- Whether notes were enriched
+- Whether the body matches the versioned changelog entry
 
 ## Hard rules
 
