@@ -330,7 +330,7 @@ func TestBareProviderPickerSelectionClearsPriorModelRequiredNotice(t *testing.T)
 }
 
 func TestModelSelectedClearsOnlyExactNoModelEngineError(t *testing.T) {
-	canonical := "no model selected — use /provider <anthropic|openai|xai|echo> [model]"
+	canonical := "no model selected — use /provider <anthropic|openai|xai|google|kimi|deepseek|echo> [model]"
 	for _, message := range []string{canonical, "\"" + canonical + "\"", canonical + ".", "No model selected — use /provider <echo>"} {
 		m, _ := newAppTestModel(nil, nil)
 		m.applyEvent(protocol.EngineError{Message: message})

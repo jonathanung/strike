@@ -90,36 +90,46 @@ func TestAPIKey(t *testing.T) {
 	}
 }
 
-func TestAPIKeyGeminiGoogleAlias(t *testing.T) {
+func TestAPIKeyGoogleEnvNames(t *testing.T) {
 	st, err := OpenStore(filepath.Join(t.TempDir(), "auth.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("GEMINI_API_KEY", "")
 	t.Setenv("GOOGLE_API_KEY", "")
-	if _, ok := APIKey("gemini", st); ok {
-		t.Fatal("expected no gemini key")
+	for _, id := range []string{"google", "gemini"} {
+		if _, ok := APIKey(id, st); ok {
+			t.Fatalf("expected no key for %q", id)
+		}
 	}
+	// GOOGLE_API_KEY secondary alias resolves for both google and gemini ids.
 	t.Setenv("GOOGLE_API_KEY", "google-ai-studio-key")
-	if key, ok := APIKey("gemini", st); !ok || key != "google-ai-studio-key" {
-		t.Errorf("GOOGLE_API_KEY alias: key=%q ok=%v", key, ok)
+	for _, id := range []string{"google", "gemini"} {
+		if key, ok := APIKey(id, st); !ok || key != "google-ai-studio-key" {
+			t.Errorf("GOOGLE_API_KEY via %q: key=%q ok=%v", id, key, ok)
+		}
+		if got := Describe(id, st); got != "GOOGLE_API_KEY" {
+			t.Errorf("Describe(%q) = %q, want GOOGLE_API_KEY", id, got)
+		}
 	}
-	if got := Describe("gemini", st); got != "GOOGLE_API_KEY" {
-		t.Errorf("Describe = %q, want GOOGLE_API_KEY", got)
-	}
-	// Primary env wins over alias.
+	// GEMINI_API_KEY primary wins over GOOGLE_API_KEY.
 	t.Setenv("GEMINI_API_KEY", "primary-gemini-key")
-	if key, ok := APIKey("gemini", st); !ok || key != "primary-gemini-key" {
-		t.Errorf("GEMINI_API_KEY primary: key=%q ok=%v", key, ok)
-	}
-	if got := Describe("gemini", st); got != "GEMINI_API_KEY" {
-		t.Errorf("Describe = %q, want GEMINI_API_KEY", got)
+	for _, id := range []string{"google", "gemini"} {
+		if key, ok := APIKey(id, st); !ok || key != "primary-gemini-key" {
+			t.Errorf("GEMINI_API_KEY primary via %q: key=%q ok=%v", id, key, ok)
+		}
+		if got := Describe(id, st); got != "GEMINI_API_KEY" {
+			t.Errorf("Describe(%q) = %q, want GEMINI_API_KEY", id, got)
+		}
 	}
 }
 
-func TestRefreshFlowsNoGemini(t *testing.T) {
-	if _, ok := refreshFlows["gemini"]; ok {
-		t.Fatal("gemini must not have an OAuth refresh flow")
+func TestRefreshFlowsNoGoogleOAuth(t *testing.T) {
+	// Neither the canonical google id nor the gemini alias has an OAuth refresh flow.
+	for _, id := range []string{"google", "gemini"} {
+		if _, ok := refreshFlows[id]; ok {
+			t.Fatalf("%s must not have an OAuth refresh flow", id)
+		}
 	}
 	if _, ok := refreshFlows["openai"]; !ok {
 		t.Fatal("openai refresh flow missing")

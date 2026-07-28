@@ -1,5 +1,5 @@
-// Package gemini adapts the Google Gemini generateContent API to the provider interface.
-package gemini
+// Package google adapts the Google AI Studio generateContent API to the provider interface.
+package google
 
 import (
 	"context"
@@ -17,7 +17,7 @@ import (
 
 const defaultBaseURL = "https://generativelanguage.googleapis.com/v1beta"
 
-// TokenSource resolves a Google AI Studio / Gemini API key per request.
+// TokenSource resolves a Google AI Studio API key per request.
 type TokenSource = func(ctx context.Context) (string, error)
 
 type Provider struct {
@@ -28,7 +28,7 @@ type Provider struct {
 func New(source TokenSource) *Provider {
 	return &Provider{
 		Client: base.Client{
-			ProviderName: "gemini",
+			ProviderName: "google",
 			HTTP:         &http.Client{Timeout: 5 * time.Minute},
 			Auth: func(ctx context.Context, req *http.Request) error {
 				token, err := source(ctx)
@@ -36,7 +36,7 @@ func New(source TokenSource) *Provider {
 					return err
 				}
 				if token != "" {
-					// Google AI Studio / Gemini API keys use x-goog-api-key
+					// Google AI Studio API keys use x-goog-api-key
 					// (OAuth is not a supported auth path for this provider).
 					req.Header.Set("x-goog-api-key", token)
 				}
@@ -48,7 +48,7 @@ func New(source TokenSource) *Provider {
 }
 
 type apiRequest struct {
-	SystemInstruction *apiContent       `json:"system_instruction,omitempty"`
+	SystemInstruction *apiContent       `json:"systemInstruction,omitempty"`
 	Contents          []apiContent      `json:"contents"`
 	Tools             []apiTool         `json:"tools,omitempty"`
 	GenerationConfig  *generationConfig `json:"generationConfig,omitempty"`
@@ -65,13 +65,13 @@ type apiContent struct {
 
 type apiPart struct {
 	Text             string               `json:"text,omitempty"`
-	InlineData       *inlineData          `json:"inline_data,omitempty"`
+	InlineData       *inlineData          `json:"inlineData,omitempty"`
 	FunctionCall     *apiFunctionCall     `json:"functionCall,omitempty"`
 	FunctionResponse *apiFunctionResponse `json:"functionResponse,omitempty"`
 }
 
 type inlineData struct {
-	MIMEType string `json:"mime_type"`
+	MIMEType string `json:"mimeType"`
 	Data     string `json:"data"`
 }
 
@@ -86,7 +86,7 @@ type apiFunctionResponse struct {
 }
 
 type apiTool struct {
-	FunctionDeclarations []apiFunctionDeclaration `json:"function_declarations"`
+	FunctionDeclarations []apiFunctionDeclaration `json:"functionDeclarations"`
 }
 
 type apiFunctionDeclaration struct {
@@ -121,7 +121,7 @@ func (p *Provider) Stream(ctx context.Context, req provider.Request) (<-chan pro
 			return
 		}
 		if len(resp.Candidates) == 0 {
-			base.Fail(ch, fmt.Errorf("gemini: response has no candidates"))
+			base.Fail(ch, fmt.Errorf("google: response has no candidates"))
 			return
 		}
 		candidate := resp.Candidates[0]

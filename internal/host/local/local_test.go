@@ -51,13 +51,19 @@ func TestStatusesOrderFlagsAndEcho(t *testing.T) {
 	svc, _ := newTestServices(t)
 	got := svc.Auth.Statuses()
 
-	wantOrder := []string{"anthropic", "openai", "xai", "gemini", "kimi", "deepseek", "echo"}
+	wantOrder := []string{"anthropic", "openai", "xai", "google", "kimi", "deepseek", "echo"}
 	if len(got) != len(wantOrder) {
 		t.Fatalf("got %d statuses, want %d: %+v", len(got), len(wantOrder), got)
 	}
 	for i, name := range wantOrder {
 		if got[i].Name != name {
 			t.Errorf("status[%d] = %q, want %q", i, got[i].Name, name)
+		}
+	}
+	// gemini is an alias of google — status list must not include both.
+	for _, s := range got {
+		if s.Name == "gemini" {
+			t.Fatalf("Statuses listed gemini; want google only: %+v", got)
 		}
 	}
 
@@ -71,8 +77,8 @@ func TestStatusesOrderFlagsAndEcho(t *testing.T) {
 	if s := by["xai"]; !s.APIKey || !s.OAuth || !s.Device || s.Builtin {
 		t.Errorf("xai flags = %+v, want OAuth+Device+APIKey", s)
 	}
-	if s := by["gemini"]; !s.APIKey || s.OAuth || s.Device || s.Builtin {
-		t.Errorf("gemini flags = %+v, want APIKey-only", s)
+	if s := by["google"]; !s.APIKey || s.OAuth || s.Device || s.Builtin {
+		t.Errorf("google flags = %+v, want APIKey-only", s)
 	}
 	if s := by["kimi"]; !s.APIKey || s.OAuth || s.Device || s.Builtin {
 		t.Errorf("kimi flags = %+v, want APIKey-only", s)
@@ -87,7 +93,7 @@ func TestStatusesOrderFlagsAndEcho(t *testing.T) {
 	}
 
 	// With an empty store and no env keys, credential providers are unauthed.
-	for _, name := range []string{"anthropic", "openai", "xai", "gemini", "kimi", "deepseek"} {
+	for _, name := range []string{"anthropic", "openai", "xai", "google", "kimi", "deepseek"} {
 		if s := by[name]; s.Authed || s.Detail != "none" {
 			t.Errorf("%s should be unauthenticated, got %+v", name, s)
 		}
@@ -212,7 +218,7 @@ func TestBeginOAuthUnsupported(t *testing.T) {
 	svc, _ := newTestServices(t)
 	// API-key-only providers and echo have no OAuth flow. These must fail
 	// fast, before any network or loopback server is touched.
-	for _, provider := range []string{"anthropic", "gemini", "echo", "mystery"} {
+	for _, provider := range []string{"anthropic", "google", "gemini", "echo", "mystery"} {
 		if _, err := svc.Auth.BeginOAuth(context.Background(), provider); err == nil {
 			t.Errorf("BeginOAuth(%q): expected error", provider)
 		}
@@ -636,8 +642,10 @@ func TestCatalogFromCache(t *testing.T) {
 	}
 }
 
-func TestCatalogGeminiUsesGoogleModelsDev(t *testing.T) {
-	// models.dev keys Google AI Studio as "google"; strike provider id is "gemini".
+func TestCatalogGoogleAndGeminiAliasUseGoogleModelsDev(t *testing.T) {
+	// models.dev keys Google AI Studio as "google"; strike canonical id is
+	// google, and the gemini alias still resolves to the same catalog entry.
+	// ModelInfo.Provider is always stamped with the canonical id.
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	cacheDir := filepath.Join(home, ".strike", "cache")
@@ -653,23 +661,57 @@ func TestCatalogGeminiUsesGoogleModelsDev(t *testing.T) {
 	}
 	svc := New(nil, nil, nil, nil, nil, nil, nil, "")
 
-	ids, err := svc.Catalog.ModelIDs(context.Background(), "gemini")
-	if err != nil {
+	for _, id := range []string{"google", "gemini"} {
+		ids, err := svc.Catalog.ModelIDs(context.Background(), id)
+		if err != nil {
+			t.Fatalf("ModelIDs(%q): %v", id, err)
+		}
+		if want := []string{"gemini-2.5-flash", "gemini-2.5-pro"}; !reflect.DeepEqual(ids, want) {
+			t.Errorf("ModelIDs(%q) = %v, want %v", id, ids, want)
+		}
+		infos, err := svc.Catalog.Models(context.Background(), id)
+		if err != nil {
+			t.Fatalf("Models(%q): %v", id, err)
+		}
+		if len(infos) != 2 || infos[0].Provider != "google" {
+			t.Fatalf("Models(%q) = %#v, want Provider=google", id, infos)
+		}
+		tokens, ok, err := svc.Catalog.ContextWindow(context.Background(), id, "gemini-2.5-pro")
+		if err != nil || !ok || tokens != 1_048_576 {
+			t.Errorf("ContextWindow(%q) = %d,%v,%v", id, tokens, ok, err)
+		}
+	}
+}
+
+func TestAuthGoogleAliasSetAndDescribe(t *testing.T) {
+	svc, store := newTestServices(t)
+	// SetAPIKey via gemini alias stores under canonical google.
+	if err := svc.Auth.SetAPIKey("gemini", "AIzaSy-host-alias"); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"gemini-2.5-flash", "gemini-2.5-pro"}; !reflect.DeepEqual(ids, want) {
-		t.Errorf("ModelIDs(gemini) = %v, want %v", ids, want)
+	cred, ok := store.Get("google")
+	if !ok || cred.APIKey != "AIzaSy-host-alias" {
+		t.Fatalf("store Get(google) = %+v ok=%v", cred, ok)
 	}
-	infos, err := svc.Catalog.Models(context.Background(), "gemini")
-	if err != nil {
+	if got := svc.Auth.Describe("google"); got != "api key" {
+		t.Errorf("Describe(google) = %q", got)
+	}
+	if got := svc.Auth.Describe("gemini"); got != "api key" {
+		t.Errorf("Describe(gemini) = %q", got)
+	}
+	by := statusByName(svc.Auth.Statuses())
+	if s := by["google"]; !s.Authed || s.Detail != "api key" {
+		t.Errorf("google status = %+v", s)
+	}
+	if _, ok := by["gemini"]; ok {
+		t.Fatal("Statuses must not list gemini alias")
+	}
+	// Logout via alias clears the canonical credential.
+	if err := svc.Auth.Logout("gemini"); err != nil {
 		t.Fatal(err)
 	}
-	if len(infos) != 2 || infos[0].Provider != "gemini" {
-		t.Fatalf("Models(gemini) = %#v", infos)
-	}
-	tokens, ok, err := svc.Catalog.ContextWindow(context.Background(), "gemini", "gemini-2.5-pro")
-	if err != nil || !ok || tokens != 1_048_576 {
-		t.Errorf("ContextWindow = %d,%v,%v", tokens, ok, err)
+	if _, ok := store.Get("google"); ok {
+		t.Error("credential survived Logout(gemini)")
 	}
 }
 

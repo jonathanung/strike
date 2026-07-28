@@ -276,10 +276,10 @@ func resolveAgentModel(provider, model string) (string, string) {
 	if provider == "" && strings.Contains(model, "/") {
 		p, m, ok := strings.Cut(model, "/")
 		if ok && p != "" && m != "" {
-			return p, m
+			return CanonicalProviderID(p), m
 		}
 	}
-	return provider, model
+	return CanonicalProviderID(provider), model
 }
 
 // LoadSkills reads skills from discovery roots (see skillDiscoveryRoots).

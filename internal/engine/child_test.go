@@ -1240,7 +1240,7 @@ func TestTaskChildInheritsParentProvider(t *testing.T) {
 // implementation cannot hit that path, the streamed EventError path below
 // still pins failMsg surfacing for any EngineError text.
 func TestTaskSurfacesChildEngineErrorMessage(t *testing.T) {
-	const errMsg = "no model selected — use /provider <anthropic|openai|xai|echo> [model]"
+	const errMsg = "no model selected — use /provider <anthropic|openai|xai|google|kimi|deepseek|echo> [model]"
 	// Use a streamed EventError so the child emits EngineError with this exact
 	// message (same text as the pre-turn no-provider path).
 	const childPrompt = "child engine error"

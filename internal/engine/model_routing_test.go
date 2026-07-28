@@ -40,6 +40,41 @@ func taskToolCallWithAgent(id, prompt, agent string) provider.ToolCall {
 	return provider.ToolCall{ID: id, Name: "task", Args: args}
 }
 
+func TestGeminiAliasCanonicalizesProviderSelection(t *testing.T) {
+	googleProv := newScriptedProvider(completedStep("ok"))
+	eng := engine.New(engine.Options{
+		Select: multiProviderSelect(
+			map[string]*scriptedProvider{"google": googleProv},
+			map[string]string{"google": "gemini-2.5-pro"},
+		),
+		InitialProvider: "gemini",
+		InitialModel:    "gemini/gemini-2.5-flash",
+		Registry:        tool.NewRegistry(),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	selected := waitForEvent(t, eng, func(ev protocol.Event) bool {
+		_, ok := ev.(protocol.ModelSelected)
+		return ok
+	}).(protocol.ModelSelected)
+	if selected.Provider != "google" || selected.Model != "gemini-2.5-flash" {
+		t.Fatalf("startup ModelSelected = %+v, want google/gemini-2.5-flash", selected)
+	}
+
+	eng.Ops() <- protocol.SelectModel{Provider: "gemini", Model: "gemini/gemini-2.5-pro"}
+	selected = waitForEvent(t, eng, func(ev protocol.Event) bool {
+		_, ok := ev.(protocol.ModelSelected)
+		return ok
+	}).(protocol.ModelSelected)
+	if selected.Provider != "google" || selected.Model != "gemini-2.5-pro" {
+		t.Fatalf("alias ModelSelected = %+v, want google/gemini-2.5-pro", selected)
+	}
+}
+
 // TestInitialModelForeignPrefixUsesProviderDefault: startup with
 // InitialProvider "xai" and InitialModel "openai/gpt-5.6-sol" must not keep
 // the foreign prefixed id. resolveSelectModel discards the foreign prefix and

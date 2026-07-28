@@ -1,6 +1,6 @@
 // Package provider defines the LLM provider abstraction: internal/engine
 // and the provider/* adapters (base, anthropic, openaicompat, chatgpt,
-// echo) share one normalized stream-event vocabulary regardless of vendor.
+// google, echo) share one normalized stream-event vocabulary regardless of vendor.
 // internal/tool imports it only for ToolSchema, the model-facing tool
 // declaration. internal/tui never imports it — turn output reaches the
 // frontend only as internal/protocol events, already translated by the

@@ -26,7 +26,7 @@ const expectedUsage = `Usage:
   strike upgrade
 
 Options:
-  --provider <provider>              provider to use (anthropic|openai|xai|gemini|kimi|deepseek|echo); overrides config
+  --provider <provider>              provider to use (anthropic|openai|xai|google|kimi|deepseek|echo; gemini=google alias); overrides config
   --model <model>                    model id; overrides config
   --effort <level>                   reasoning effort (off|low|medium|high|xhigh|max); overrides config
   --auto, --dangerously-skip-permissions skip configured permission prompts (agent profile denies still apply)
@@ -237,7 +237,7 @@ func TestWriteUsageUsesCanonicalOptionsAndProviders(t *testing.T) {
 	if out.String() != expectedUsage {
 		t.Fatalf("usage changed:\n--- got ---\n%s--- want ---\n%s", out.String(), expectedUsage)
 	}
-	for _, text := range []string{"strike auth <command>", "--provider <provider>", "--model <model>", "anthropic", "openai", "xai", "gemini", "echo"} {
+	for _, text := range []string{"strike auth <command>", "--provider <provider>", "--model <model>", "anthropic", "openai", "xai", "google", "echo", "gemini=google alias"} {
 		if !strings.Contains(out.String(), text) {
 			t.Errorf("usage does not contain %q", text)
 		}
@@ -308,7 +308,7 @@ func TestRunCLIFirstArgumentAuthUsesSuppliedOutputDestinations(t *testing.T) {
 			name:       "login missing provider is a safe usage error",
 			args:       []string{"auth", "login"},
 			wantExit:   1,
-			wantStderr: "strike: usage: strike auth login <anthropic|openai|xai> [--api-key] [--device]\n",
+			wantStderr: "strike: usage: strike auth login <anthropic|openai|xai|google|kimi|deepseek> [--api-key] [--device]\n",
 		},
 		{
 			name:       "unknown command separates usage and diagnostic",

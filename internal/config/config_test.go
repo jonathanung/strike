@@ -15,12 +15,55 @@ func TestDefaultModel(t *testing.T) {
 		"openai":    "gpt-5.5",
 		"xai":       "grok-4.5",
 		"anthropic": "claude-sonnet-5",
+		"google":    "gemini-2.5-pro",
+		"gemini":    "gemini-2.5-pro", // alias of google
 		"other":     "claude-sonnet-5",
 	}
 	for p, want := range cases {
 		if got := DefaultModel(p); got != want {
 			t.Errorf("DefaultModel(%q) = %q, want %q", p, got, want)
 		}
+	}
+}
+
+func TestCanonicalProviderID(t *testing.T) {
+	cases := map[string]string{
+		"":         "",
+		"  ":       "",
+		"OpenAI":   "openai",
+		" google ": "google",
+		"GOOGLE":   "google",
+		"gemini":   "google",
+		"Gemini":   "google",
+		" GEMINI ": "google",
+		"echo":     "echo",
+	}
+	for in, want := range cases {
+		if got := CanonicalProviderID(in); got != want {
+			t.Errorf("CanonicalProviderID(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestLoadCanonicalizesProviderGeminiAlias(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"provider":"gemini","model":"gemini-2.5-flash"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Provider != "google" {
+		t.Errorf("Provider = %q, want google (gemini alias)", cfg.Provider)
+	}
+	if cfg.Model != "gemini-2.5-flash" {
+		t.Errorf("Model = %q, want gemini-2.5-flash (model id unchanged)", cfg.Model)
 	}
 }
 

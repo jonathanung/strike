@@ -27,34 +27,34 @@ func TestModelIDs(t *testing.T) {
 	}
 }
 
-func TestGeminiMapsToGoogleCatalog(t *testing.T) {
-	// models.dev lists Google AI Studio under "google"; strike's provider id is "gemini".
+func TestGoogleAndGeminiAliasMapToGoogleCatalog(t *testing.T) {
+	// models.dev lists Google AI Studio under "google"; strike's canonical
+	// provider id is also "google", with "gemini" accepted as a shipped alias.
 	c := Catalog{
 		"google": {ID: "google", Name: "Google", Models: map[string]Model{
 			"gemini-2.5-pro":   {ID: "gemini-2.5-pro", Name: "Gemini 2.5 Pro", Limit: &ModelLimit{Context: 1_048_576, Output: 65_536}},
 			"gemini-2.5-flash": {ID: "gemini-2.5-flash", Name: "Gemini 2.5 Flash"},
 		}},
 	}
-	ids := c.ModelIDs("gemini")
-	if len(ids) != 2 || ids[0] != "gemini-2.5-flash" || ids[1] != "gemini-2.5-pro" {
-		t.Fatalf("ModelIDs(gemini) = %#v", ids)
+	for _, id := range []string{"google", "gemini"} {
+		ids := c.ModelIDs(id)
+		if len(ids) != 2 || ids[0] != "gemini-2.5-flash" || ids[1] != "gemini-2.5-pro" {
+			t.Fatalf("ModelIDs(%q) = %#v", id, ids)
+		}
+		infos := c.Infos(id)
+		if len(infos) != 2 || infos[1].Context != 1_048_576 {
+			t.Fatalf("Infos(%q) = %#v", id, infos)
+		}
+		if tokens, ok := c.ContextWindow(id, "gemini-2.5-pro"); !ok || tokens != 1_048_576 {
+			t.Errorf("ContextWindow(%q, gemini-2.5-pro) = %d,%v", id, tokens, ok)
+		}
+		if tokens, ok := c.OutputLimit(id, "gemini-2.5-pro"); !ok || tokens != 65_536 {
+			t.Errorf("OutputLimit(%q, gemini-2.5-pro) = %d,%v", id, tokens, ok)
+		}
 	}
-	infos := c.Infos("gemini")
-	if len(infos) != 2 || infos[1].Context != 1_048_576 {
-		t.Fatalf("Infos(gemini) = %#v", infos)
-	}
-	if tokens, ok := c.ContextWindow("gemini", "gemini-2.5-pro"); !ok || tokens != 1_048_576 {
-		t.Errorf("ContextWindow(gemini, gemini-2.5-pro) = %d,%v", tokens, ok)
-	}
-	if tokens, ok := c.OutputLimit("gemini", "gemini-2.5-pro"); !ok || tokens != 65_536 {
-		t.Errorf("OutputLimit(gemini, gemini-2.5-pro) = %d,%v", tokens, ok)
-	}
-	// Direct "google" id still works.
-	if got := c.ModelIDs("google"); len(got) != 2 {
-		t.Errorf("ModelIDs(google) = %#v", got)
-	}
-	if modelsDevID("gemini") != "google" || modelsDevID("openai") != "openai" {
-		t.Errorf("modelsDevID mapping broken")
+	if modelsDevID("google") != "google" || modelsDevID("gemini") != "google" || modelsDevID("openai") != "openai" {
+		t.Errorf("modelsDevID mapping broken: google=%q gemini=%q openai=%q",
+			modelsDevID("google"), modelsDevID("gemini"), modelsDevID("openai"))
 	}
 }
 

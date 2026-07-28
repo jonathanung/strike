@@ -118,6 +118,7 @@ func mergeModelDefs(base, layer []ModelDef) []ModelDef {
 }
 
 // mergeOverlayMaps merges provider→defs maps; later layer wins per model id.
+// Provider keys are canonicalized (gemini → google).
 func mergeOverlayMaps(base, layer map[string][]ModelDef) map[string][]ModelDef {
 	if len(layer) == 0 {
 		return cloneOverlayMap(base)
@@ -127,7 +128,8 @@ func mergeOverlayMaps(base, layer map[string][]ModelDef) map[string][]ModelDef {
 		out = make(map[string][]ModelDef, len(layer))
 	}
 	for prov, defs := range layer {
-		out[prov] = mergeModelDefs(out[prov], defs)
+		id := CanonicalProviderID(prov)
+		out[id] = mergeModelDefs(out[id], defs)
 	}
 	return out
 }
@@ -138,7 +140,7 @@ func cloneOverlayMap(in map[string][]ModelDef) map[string][]ModelDef {
 	}
 	out := make(map[string][]ModelDef, len(in))
 	for k, v := range in {
-		out[k] = cloneModelDefs(v)
+		out[CanonicalProviderID(k)] = cloneModelDefs(v)
 	}
 	return out
 }

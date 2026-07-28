@@ -26,14 +26,27 @@ const (
 )
 
 // BuiltinProviderNames cannot be used as custom provider ids.
+// "gemini" is a shipped alias of "google" and stays reserved so it cannot be
+// claimed as a custom name; list/select surfaces only "google".
 var BuiltinProviderNames = map[string]struct{}{
 	"anthropic": {},
 	"openai":    {},
 	"xai":       {},
+	"google":    {},
 	"gemini":    {},
 	"kimi":      {},
 	"deepseek":  {},
 	"echo":      {},
+}
+
+// CanonicalProviderID normalizes a provider id: trim, lowercase, and map the
+// shipped gemini alias onto google. Empty input stays empty.
+func CanonicalProviderID(id string) string {
+	id = strings.ToLower(strings.TrimSpace(id))
+	if id == "gemini" {
+		return "google"
+	}
+	return id
 }
 
 // providerNameRE is a stable slug: letter start, then letters/digits/_/-.
@@ -300,8 +313,9 @@ func (s *CustomStore) SetDisableDefault(all bool, per map[string]bool) {
 // IsBuiltinDisabled reports whether a builtin catalog provider is hidden by
 // disable-default-providers / disable-default-<name>. Custom names are never
 // disabled by these flags. Per-provider false overrides a bulk true.
+// Alias ids (gemini) are canonicalized to google before lookup.
 func (s *CustomStore) IsBuiltinDisabled(name string) bool {
-	name = strings.ToLower(strings.TrimSpace(name))
+	name = CanonicalProviderID(name)
 	if name == "" {
 		return false
 	}
@@ -325,7 +339,7 @@ func cloneBoolMap(in map[string]bool) map[string]bool {
 	}
 	out := make(map[string]bool, len(in))
 	for k, v := range in {
-		out[k] = v
+		out[CanonicalProviderID(k)] = v
 	}
 	return out
 }
@@ -335,7 +349,7 @@ func cloneBoolMap(in map[string]bool) map[string]bool {
 func (s *CustomStore) ModelOverlay(provider string) []ModelDef {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	provider = strings.ToLower(strings.TrimSpace(provider))
+	provider = CanonicalProviderID(provider)
 	if defs := s.overlays[provider]; len(defs) > 0 {
 		return cloneModelDefs(defs)
 	}
@@ -350,7 +364,7 @@ func (s *CustomStore) ModelOverlay(provider string) []ModelDef {
 func (s *CustomStore) Endpoint(provider string) (ProviderEndpoint, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	provider = strings.ToLower(strings.TrimSpace(provider))
+	provider = CanonicalProviderID(provider)
 	ep, ok := s.endpoints[provider]
 	if !ok || !ep.Active() {
 		return ProviderEndpoint{}, false

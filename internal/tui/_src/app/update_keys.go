@@ -228,7 +228,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.handleBang(text)
 		}
 		if m.providerName == "" {
-			m.setNeedsModelNotice("No model selected — use /provider <anthropic|openai|xai|echo> [model]", true)
+			m.setNeedsModelNotice("No model selected — use /provider <anthropic|openai|xai|google|kimi|deepseek|echo> [model]", true)
 			return m, nil // keep the typed prompt in the composer
 		}
 		if len(images) > 0 {

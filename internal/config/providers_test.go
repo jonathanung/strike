@@ -24,7 +24,9 @@ func TestCustomProviderValidate(t *testing.T) {
 	}{
 		{"empty name", CustomProvider{BaseURL: "https://x.com", API: WireOpenAI}},
 		{"builtin name", CustomProvider{Name: "openai", BaseURL: "https://x.com", API: WireOpenAI}},
-		{"bad api", CustomProvider{Name: "acme", BaseURL: "https://x.com", API: "gemini"}},
+		{"reserved google", CustomProvider{Name: "google", BaseURL: "https://x.com", API: WireOpenAI}},
+		{"reserved gemini alias", CustomProvider{Name: "gemini", BaseURL: "https://x.com", API: WireOpenAI}},
+		{"bad api", CustomProvider{Name: "acme", BaseURL: "https://x.com", API: "gemini"}}, // intentionally invalid WireAPI dialect
 		{"bad url", CustomProvider{Name: "acme", BaseURL: "not-a-url", API: WireOpenAI}},
 		{"ftp url", CustomProvider{Name: "acme", BaseURL: "ftp://x.com", API: WireOpenAI}},
 		{"uppercase name", CustomProvider{Name: "Acme", BaseURL: "https://x.com", API: WireOpenAI}},
@@ -40,6 +42,14 @@ func TestCustomProviderValidate(t *testing.T) {
 		}
 		if err := p.Validate(); err == nil {
 			t.Errorf("%s: expected error", tc.name)
+		}
+	}
+}
+
+func TestBuiltinProviderNamesReserveGoogleAndGemini(t *testing.T) {
+	for _, name := range []string{"google", "gemini"} {
+		if _, ok := BuiltinProviderNames[name]; !ok {
+			t.Errorf("%q must be reserved in BuiltinProviderNames", name)
 		}
 	}
 }

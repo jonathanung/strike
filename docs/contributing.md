@@ -11,7 +11,7 @@ internal/auth/         credential store + OAuth (PKCE, device) flows
 internal/provider/     provider interface; base/ (embeddable client: HTTP,
                        auth, JSON/SSE, error shaping) embedded by anthropic,
                        openaicompat (openai platform + xai), chatgpt
-                       (subscription backend); echo dev adapter
+                       (subscription backend), google; echo dev adapter
 internal/tool/         tool contract + registry (read/glob/grep/edit/write/
                        apply_patch/bash/task/webfetch/todo*/memory_*/issue_*/
                        notebook_edit/sleep/skill/question/plan_mode/phase_done/

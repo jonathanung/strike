@@ -26,7 +26,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/provider/anthropic"
 	"github.com/jonathanung/strike-cli/internal/provider/chatgpt"
 	"github.com/jonathanung/strike-cli/internal/provider/echo"
-	"github.com/jonathanung/strike-cli/internal/provider/gemini"
+	"github.com/jonathanung/strike-cli/internal/provider/google"
 	"github.com/jonathanung/strike-cli/internal/provider/openaicompat"
 	"github.com/jonathanung/strike-cli/internal/session"
 	"github.com/jonathanung/strike-cli/internal/tool"
@@ -112,8 +112,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		return nil, fmt.Errorf("loading config: %w", err)
 	}
 	if opts.providerSet && opts.provider != "" {
-		cfg.Provider = opts.provider
+		cfg.Provider = config.CanonicalProviderID(opts.provider)
 	}
+	cfg.Provider = config.CanonicalProviderID(cfg.Provider)
 	if opts.model != "" {
 		cfg.Model = opts.model
 	}
@@ -149,6 +150,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// customStore (live; includes mid-session /settings adds). Builtin
 	// endpoint overlays from providers.jsonc (baseURL/apiKey) apply here.
 	selectProvider := func(name string) (provider.Provider, string, error) {
+		name = config.CanonicalProviderID(name)
 		if customStore.IsBuiltinDisabled(name) {
 			return nil, "", fmt.Errorf("provider %q is disabled (set disable-default-%s to false, or disable-default-providers to false)", name, name)
 		}
@@ -195,12 +197,12 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 				return nil, "", err
 			}
 			return openaicompat.NewXAI(source), config.DefaultModel(name), nil
-		case "gemini":
+		case "google":
 			source := auth.BearerSource(name, authStore)
 			if _, err := source(context.Background()); err != nil {
 				return nil, "", err
 			}
-			return gemini.New(source), config.DefaultModel(name), nil
+			return google.New(source), config.DefaultModel(name), nil
 		case "kimi":
 			source := auth.BearerSource(name, authStore)
 			if _, err := source(context.Background()); err != nil {
@@ -216,7 +218,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		default:
 			cp, ok := customStore.Get(name)
 			if !ok {
-				return nil, "", fmt.Errorf("unknown provider %q (want anthropic, openai, xai, gemini, kimi, deepseek, echo, or a custom name from /settings)", name)
+				return nil, "", fmt.Errorf("unknown provider %q (want anthropic, openai, xai, google, kimi, deepseek, echo, or a custom name from /settings; gemini is accepted as an alias of google)", name)
 			}
 			return buildCustomProvider(cp, authStore)
 		}
@@ -701,7 +703,7 @@ func builtinKeyHint(name, envName string) string {
 		return "OPENAI_API_KEY"
 	case "xai":
 		return "XAI_API_KEY"
-	case "gemini":
+	case "google":
 		return "GEMINI_API_KEY"
 	case "kimi":
 		return "KIMI_API_KEY"
@@ -772,17 +774,17 @@ func buildBuiltinWithEndpoint(name string, ep config.ProviderEndpoint, store *au
 		}
 		return openaicompat.NewWithHeaders(name, baseURL, source, ep.Headers), defaultModel, nil, true
 
-	case "gemini":
+	case "google":
 		if ep.BaseURL != "" {
-			return nil, "", fmt.Errorf("gemini endpoint baseURL overlay is not supported yet"), true
+			return nil, "", fmt.Errorf("google endpoint baseURL overlay is not supported yet"), true
 		}
 		if envName == "" {
 			return nil, "", nil, false
 		}
 		if _, ok := auth.APIKeyEnv(name, store, envName); !ok {
-			return nil, "", fmt.Errorf("no gemini credentials: set %s", envName), true
+			return nil, "", fmt.Errorf("no google credentials: set %s", envName), true
 		}
-		return gemini.New(optionalBearer(name, store, envName)), defaultModel, nil, true
+		return google.New(optionalBearer(name, store, envName)), defaultModel, nil, true
 
 	default:
 		return nil, "", nil, false
