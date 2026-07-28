@@ -11,6 +11,11 @@ import (
 // DefaultInterval is the default sampler period (~1 Hz).
 const DefaultInterval = time.Second
 
+// DefaultDiskInterval is how long Host reuses a disk Statfs result before the
+// next probe. Disk changes slowly; caching avoids repeated Statfs on slow,
+// network, or FUSE volumes (the main telemetry stall source when enabled).
+const DefaultDiskInterval = 5 * time.Second
+
 // Pressure thresholds for utilization ratios (used/total). Documented constants
 // with sensible defaults; keep in sync with ui.Meter pressure bands.
 const (
