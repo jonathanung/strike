@@ -103,15 +103,15 @@ func TestSpinnerStyleUsesWorkingToken(t *testing.T) {
 }
 
 func TestDefaultWarningIsClearYellow(t *testing.T) {
-	// Needs-you / attention chrome uses Warning; both adaptive sides must be a
-	// clear yellow with enough weight for light and dark terminals.
+	// Needs-you (Attention) and other caution chrome share Warning; keep it a
+	// readable yellow pair, not muddy amber.
 	th := theme.Default()
-	want := lipgloss.AdaptiveColor{Light: "#9a6700", Dark: "#ffcc33"}
+	want := lipgloss.AdaptiveColor{Light: "#a16207", Dark: "#ffd84d"}
 	if th.Warning != want {
-		t.Fatalf("Default Warning = %#v, want clear yellow %#v", th.Warning, want)
+		t.Errorf("Default Warning = %#v, want clear yellow %#v", th.Warning, want)
 	}
 	if got := th.AgentStateColor(theme.AgentStateAttention); got != want {
-		t.Fatalf("Attention color = %#v, want Warning yellow %#v", got, want)
+		t.Errorf("Attention color = %#v, want Default Warning yellow %#v", got, want)
 	}
 }
 

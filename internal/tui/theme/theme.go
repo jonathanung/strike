@@ -25,7 +25,7 @@ type Theme struct {
 	AccentAlt    lipgloss.AdaptiveColor // secondary emphasis (user label, info)
 	Highlight    lipgloss.AdaptiveColor // foreground of the selected/active item
 	Success      lipgloss.AdaptiveColor // positive state (ok, added)
-	Warning      lipgloss.AdaptiveColor // caution state (permission prompts)
+	Warning      lipgloss.AdaptiveColor // caution / needs-you yellow (permission, attention)
 	Error        lipgloss.AdaptiveColor // failure state (errors, removed)
 	Danger       lipgloss.AdaptiveColor // destructive actions
 	Background   lipgloss.TerminalColor // application background; NoColor is transparent
@@ -55,13 +55,17 @@ func Default() Theme {
 	return Theme{
 		// Dark Text/Muted lean brighter for contrast on #1c1b22; borders sit
 		// a step clearer against both light and dark chrome.
-		Text:       lipgloss.AdaptiveColor{Light: "#1a1820", Dark: "#eceaf4"},
-		TextMuted:  lipgloss.AdaptiveColor{Light: "#5a5868", Dark: "#a09eb0"},
-		Accent:     lipgloss.AdaptiveColor{Light: "#6d43d6", Dark: "#b39dff"},
-		AccentAlt:  lipgloss.AdaptiveColor{Light: "#0b7285", Dark: "#5cd0e8"},
-		Highlight:  lipgloss.AdaptiveColor{Light: "#4c1d95", Dark: "#f4f1ff"},
-		Success:    lipgloss.AdaptiveColor{Light: "#1f8a4c", Dark: "#5edb92"},
-		Warning:    lipgloss.AdaptiveColor{Light: "#9a6700", Dark: "#ffcc33"},
+		Text:      lipgloss.AdaptiveColor{Light: "#1a1820", Dark: "#eceaf4"},
+		TextMuted: lipgloss.AdaptiveColor{Light: "#5a5868", Dark: "#a09eb0"},
+		Accent:    lipgloss.AdaptiveColor{Light: "#6d43d6", Dark: "#b39dff"},
+		AccentAlt: lipgloss.AdaptiveColor{Light: "#0b7285", Dark: "#5cd0e8"},
+		Highlight: lipgloss.AdaptiveColor{Light: "#4c1d95", Dark: "#f4f1ff"},
+		Success:   lipgloss.AdaptiveColor{Light: "#1f8a4c", Dark: "#5edb92"},
+		// Warning is clear yellow (needs-you / attention, permission, caution).
+		// Prior amber (#b7791f / #f5c451) read muddy and low-contrast when the
+		// terminal mis-detected light/dark and applied the light member on a
+		// dark background.
+		Warning:    lipgloss.AdaptiveColor{Light: "#a16207", Dark: "#ffd84d"},
 		Error:      lipgloss.AdaptiveColor{Light: "#c23b3b", Dark: "#ff8087"},
 		Danger:     lipgloss.AdaptiveColor{Light: "#c23b3b", Dark: "#ff8087"},
 		Background: lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#1c1b22"},
