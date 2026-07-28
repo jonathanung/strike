@@ -14,6 +14,22 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+## [v0.0.9] - 2026-07-28
+
+### Changed
+
+- **Upgrade note:** Renamed the canonical Google AI Studio provider id from `gemini` to `google`. Existing `gemini` CLI, config, session, agent, environment, and stored-credential paths remain compatible and migrate to `google` when saved ([#476](https://github.com/jonathanung/strike/pull/476)).
+
+### Fixed
+
+- Fixed Google Gemini requests returning HTTP 400 by sending the required lower-camel-case `generateContent` fields ([#476](https://github.com/jonathanung/strike/pull/476)).
+- Colored `/legend` glyph samples with their live theme colors ([#470](https://github.com/jonathanung/strike/pull/470)).
+- Made the agent `needs you` state consistently visible in yellow across built-in themes and constrained legend rows ([#473](https://github.com/jonathanung/strike/pull/473), [#474](https://github.com/jonathanung/strike/pull/474), [#477](https://github.com/jonathanung/strike/pull/477)).
+
+**Contributors:** [@jonathanung](https://github.com/jonathanung).
+
+**Full changelog:** [v0.0.8...v0.0.9](https://github.com/jonathanung/strike/compare/v0.0.8...v0.0.9)
+
 ## [v0.0.8] - 2026-07-27
 
 ### Added
@@ -186,7 +202,8 @@ Initial public release.
 
 **Full changelog:** [commits through v0.0.1](https://github.com/jonathanung/strike/commits/v0.0.1)
 
-[Unreleased]: https://github.com/jonathanung/strike/compare/v0.0.8...HEAD
+[Unreleased]: https://github.com/jonathanung/strike/compare/v0.0.9...HEAD
+[v0.0.9]: https://github.com/jonathanung/strike/compare/v0.0.8...v0.0.9
 [v0.0.8]: https://github.com/jonathanung/strike/compare/v0.0.7...v0.0.8
 [v0.0.7]: https://github.com/jonathanung/strike/compare/v0.0.6...v0.0.7
 [v0.0.6]: https://github.com/jonathanung/strike/compare/v0.0.5...v0.0.6
