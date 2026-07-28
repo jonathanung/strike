@@ -14,6 +14,20 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+## [v0.0.11] - 2026-07-28
+
+### Added
+
+- Added the Tokyo Night built-in theme palette ([#480](https://github.com/jonathanung/strike/pull/480)).
+
+### Fixed
+
+- Stopped continuous idle spinner ticks and files-pane polling during the welcome/init screen so SSH sessions only repaint on real events ([#482](https://github.com/jonathanung/strike/pull/482)).
+
+**Contributors:** [@jonathanung](https://github.com/jonathanung).
+
+**Full changelog:** [v0.0.10...v0.0.11](https://github.com/jonathanung/strike/compare/v0.0.10...v0.0.11)
+
 ## [v0.0.10] - 2026-07-28
 
 ### Fixed
@@ -212,7 +226,8 @@ Initial public release.
 
 **Full changelog:** [commits through v0.0.1](https://github.com/jonathanung/strike/commits/v0.0.1)
 
-[Unreleased]: https://github.com/jonathanung/strike/compare/v0.0.10...HEAD
+[Unreleased]: https://github.com/jonathanung/strike/compare/v0.0.11...HEAD
+[v0.0.11]: https://github.com/jonathanung/strike/compare/v0.0.10...v0.0.11
 [v0.0.10]: https://github.com/jonathanung/strike/compare/v0.0.9...v0.0.10
 [v0.0.9]: https://github.com/jonathanung/strike/compare/v0.0.8...v0.0.9
 [v0.0.8]: https://github.com/jonathanung/strike/compare/v0.0.7...v0.0.8
