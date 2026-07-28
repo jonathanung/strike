@@ -147,18 +147,27 @@ func listRow(th theme.Theme, st theme.Styles, ic theme.Icons, item ListItem, isC
 		suffixW = 0
 		budget = width
 	}
-	plain := marker + strings.Repeat(" ", lipgloss.Width(prefix)) + prefixGap + label
-	line := marker + prefix + prefixGap + labelStyle.Render(label)
+	bodyPlain := label
+	bodyStyled := labelStyle.Render(label)
 	if item.Detail != "" {
 		separator := strings.Repeat(" ", th.Spacing.XS) + ic.DetailSeparator + strings.Repeat(" ", th.Spacing.XS)
-		plain += separator + item.Detail
-		line += st.Muted.Render(separator + item.Detail)
+		bodyPlain += separator + item.Detail
+		bodyStyled += st.Muted.Render(separator + item.Detail)
 	}
-	if lipgloss.Width(plain) > budget {
-		// Restyle the whole truncated row in one style to keep it width-safe.
-		// Drop pre-styled prefix/suffix when the body alone overflows the budget.
+	// Lead is marker + optional pre-styled prefix (never recolored). Reserve it
+	// so overflow truncates label/detail only — legend and status samples keep
+	// their semantic color at typical modal widths.
+	leadW := markerWidth + prefixW
+	bodyBudget := budget - leadW
+	if bodyBudget < 1 {
+		// Extreme narrow: cannot keep prefix styling width-safe; strip and clamp.
+		plain := marker + ansi.Strip(prefix) + prefixGap + bodyPlain
 		return labelStyle.Render(truncate(th, plain, width))
 	}
+	if lipgloss.Width(bodyPlain) > bodyBudget {
+		bodyStyled = labelStyle.Render(truncate(th, bodyPlain, bodyBudget))
+	}
+	line := marker + prefix + prefixGap + bodyStyled
 	if suffix == "" {
 		return line
 	}
@@ -197,7 +206,13 @@ func listRowWrapped(th theme.Theme, st theme.Styles, ic theme.Icons, prefix, pre
 				row += suffixGap + suffix
 			}
 			if lipgloss.Width(row) > width {
-				row = labelStyle.Render(truncate(th, marker+strings.Repeat(" ", lipgloss.Width(prefix))+prefixGap+plain, width))
+				// Keep pre-styled prefix; clamp the label cell into the remainder.
+				remain := width - leadW
+				if remain < 1 {
+					row = labelStyle.Render(truncate(th, marker+ansi.Strip(prefix)+prefixGap+plain, width))
+				} else {
+					row = marker + prefix + prefixGap + labelStyle.Render(truncate(th, plain, remain))
+				}
 			}
 			lines = append(lines, row)
 			continue

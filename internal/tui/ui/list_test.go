@@ -224,6 +224,39 @@ func TestListRendersPrefixWithoutRecoloring(t *testing.T) {
 	}
 }
 
+func TestListKeepsPrefixColorWhenDetailOverflows(t *testing.T) {
+	// Regression: overflow used to replace Prefix with spaces and restyle the
+	// whole row, wiping legend/status sample colors at typical modal widths.
+	saved := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(saved) })
+
+	th := theme.Default().Resolve()
+	label := theme.AgentStateAttention.Label()
+	prefix := th.AgentStateStyle(theme.AgentStateAttention).Render(label)
+	if prefix == label {
+		t.Fatal("expected colored attention prefix under TrueColor")
+	}
+	detail := "Agent state · needs you: permission, gate, or prompt (yellow)"
+	for _, width := range []int{48, 56, 64, 70, 72} {
+		out := List(th, ListOpts{
+			Items:  []ListItem{{Prefix: prefix, Detail: detail}},
+			Cursor: 0,
+			Width:  width,
+		})
+		plain := ansi.Strip(out)
+		if !strings.Contains(plain, label) {
+			t.Errorf("width %d: prefix text lost: %q", width, plain)
+		}
+		if !strings.Contains(out, prefix) {
+			t.Errorf("width %d: colored prefix lost: plain=%q raw=%q", width, plain, out)
+		}
+		if w := lipgloss.Width(strings.Split(out, "\n")[0]); w > width {
+			t.Errorf("width %d: row width %d exceeds budget", width, w)
+		}
+	}
+}
+
 func TestListWrapShowsFullLongLabel(t *testing.T) {
 	const width = 36
 	label := "To verify that the entire system works correctly from end to end"
