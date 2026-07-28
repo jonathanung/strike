@@ -93,6 +93,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 /effective-prompt              # alias of /context
 /cost                          # session token totals and estimated USD cost
 /keys                          # filterable keybind cheatsheet (also f1)
+/legend                        # UI icons, status glyphs, and chrome meanings
 /help                          # list commands
 /upgrade                       # install latest GitHub Release and restart
 /init                          # create or update project AGENTS.md (confirm

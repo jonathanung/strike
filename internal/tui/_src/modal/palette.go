@@ -158,7 +158,7 @@ func buildPaletteEntries(specs []commandSpec, agents []string, availability pale
 // users can inspect UI or dump the transcript without interrupting the engine.
 func paletteBuiltinDisabled(id commandID, availability paletteAvailability) string {
 	switch id {
-	case commandHelp, commandKeys, commandExit, commandQuit,
+	case commandHelp, commandKeys, commandLegend, commandExit, commandQuit,
 		commandFocusLeft, commandFocusRight,
 		commandWindowNext, commandWindowPrev,
 		commandScrollUp, commandScrollDown, commandJumpBottom,
