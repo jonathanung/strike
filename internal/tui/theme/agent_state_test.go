@@ -15,7 +15,7 @@ func TestAgentStateLabel(t *testing.T) {
 	}{
 		{theme.AgentStateReady, "ready"},
 		{theme.AgentStateWorking, "working"},
-		{theme.AgentStateAttention, "attention"},
+		{theme.AgentStateAttention, "needs you"},
 		{theme.AgentStateError, "error"},
 		{theme.AgentStateDead, "dead"},
 	}
@@ -112,5 +112,34 @@ func TestDefaultWarningIsClearYellow(t *testing.T) {
 	}
 	if got := th.AgentStateColor(theme.AgentStateAttention); got != want {
 		t.Errorf("Attention color = %#v, want Default Warning yellow %#v", got, want)
+	}
+}
+
+func TestPackagedThemesWarningYellowReadable(t *testing.T) {
+	// Stock packs must keep needs-you on a yellow warning token. Light side is
+	// deeper than dark so pale yellows do not wash out on light backgrounds.
+	cases := []struct {
+		id          string
+		light, dark string
+	}{
+		{"nord", "#9e7a2f", "#ebcb8b"},
+		{"dracula", "#8a7f12", "#f1fa8c"},
+		{"monokai", "#8a8018", "#e6db74"},
+		{"catppuccin", "#df8e1d", "#f9e2af"},
+		{"gruvbox", "#b57614", "#fabd2f"},
+	}
+	cat := theme.Builtin()
+	for _, tc := range cases {
+		t.Run(tc.id, func(t *testing.T) {
+			e, ok := theme.Lookup(cat, tc.id)
+			if !ok {
+				t.Fatalf("theme %q missing from Builtin", tc.id)
+			}
+			got := e.Theme.AgentStateColor(theme.AgentStateAttention)
+			want := lipgloss.AdaptiveColor{Light: tc.light, Dark: tc.dark}
+			if got != want {
+				t.Fatalf("Attention/Warning = %#v, want yellow %#v", got, want)
+			}
+		})
 	}
 }

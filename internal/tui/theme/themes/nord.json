@@ -17,7 +17,8 @@
     "nord12": "#d08770",
     "nord13": "#ebcb8b",
     "nord14": "#a3be8c",
-    "nord15": "#b48ead"
+    "nord15": "#b48ead",
+    "nord13Deep": "#9e7a2f"
   },
   "colors": {
     "text": { "light": "nord0", "dark": "nord4" },
@@ -26,7 +27,7 @@
     "accentAlt": { "light": "nord7", "dark": "nord7" },
     "highlight": { "light": "nord10", "dark": "nord6" },
     "success": { "light": "nord14", "dark": "nord14" },
-    "warning": { "light": "nord13", "dark": "nord13" },
+    "warning": { "light": "nord13Deep", "dark": "nord13" },
     "error": { "light": "nord11", "dark": "nord11" },
     "danger": { "light": "nord11", "dark": "nord11" },
     "background": { "light": "nord6", "dark": "nord0" },

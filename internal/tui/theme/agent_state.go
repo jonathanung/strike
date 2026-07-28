@@ -29,7 +29,7 @@ func (s AgentState) Label() string {
 	case AgentStateWorking:
 		return "working"
 	case AgentStateAttention:
-		return "attention"
+		return "needs you"
 	case AgentStateError:
 		return "error"
 	case AgentStateDead:

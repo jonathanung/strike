@@ -90,8 +90,8 @@ func projectActivityEntries(cells []cell, children []childActivity, awaitingPerm
 			ID:         "attention",
 			Kind:       activityAttention,
 			Seq:        seq,
-			Label:      "attention required",
-			Status:     "attention",
+			Label:      "needs you",
+			Status:     "needs you",
 			DetailBody: "permission or question pending",
 		})
 	}
@@ -426,7 +426,7 @@ func activityListItem(th theme.Theme, e activityEntry) ui.ListItem {
 		return ui.ListItem{
 			Label:  sanitizeDisplayData(e.Label),
 			Detail: e.Status,
-			Suffix: st.Warning.Render(space + ic.Info),
+			Suffix: st.Warning.Render(space + ic.Bolt),
 		}
 	default: // tool
 		glyph := ic.Ellipsis

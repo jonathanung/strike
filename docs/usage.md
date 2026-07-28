@@ -280,7 +280,7 @@ cheatsheet (including **Agents** when not focused):
 | `enter` | activate the selected root (or open a child transcript) |
 | `x` | interrupt the selected root or child |
 | `j` / `k` | move |
-| `f` | cycle filters (all / attention / working / ready / roots) |
+| `f` | cycle filters (all / needs you / working / ready / roots) |
 
 Do not confuse these with:
 

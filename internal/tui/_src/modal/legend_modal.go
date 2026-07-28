@@ -75,7 +75,7 @@ func buildLegendEntries(th theme.Theme) []legendEntry {
 		// Agent runtime chrome (words + color roles)
 		{"Agent state", theme.AgentStateReady.Label(), "idle, awaiting input (success color)", legendPaintAgentReady},
 		{"Agent state", theme.AgentStateWorking.Label(), "turn or tool loop in flight (accent)", legendPaintAgentWorking},
-		{"Agent state", theme.AgentStateAttention.Label(), "needs you: permission, gate, or prompt (yellow)", legendPaintAgentAttention},
+		{"Agent state", theme.AgentStateAttention.Label(), "permission, gate, or prompt (yellow)", legendPaintAgentAttention},
 		{"Agent state", theme.AgentStateError.Label(), "failed turn, tool, or provider (error color)", legendPaintAgentError},
 		// Navigation / input
 		{"Chrome", ic.Cursor, "list selection cursor", legendPaintSelected},

@@ -15,7 +15,8 @@
     "lightBg": "#f8f8f2",
     "lightFg": "#282a36",
     "lightMuted": "#6272a4",
-    "lightBorder": "#bd93f9"
+    "lightBorder": "#bd93f9",
+    "yellowDeep": "#8a7f12"
   },
   "colors": {
     "text": { "light": "lightFg", "dark": "fg" },
@@ -24,7 +25,7 @@
     "accentAlt": { "light": "cyan", "dark": "cyan" },
     "highlight": { "light": "pink", "dark": "fg" },
     "success": { "light": "green", "dark": "green" },
-    "warning": { "light": "orange", "dark": "orange" },
+    "warning": { "light": "yellowDeep", "dark": "yellow" },
     "error": { "light": "red", "dark": "red" },
     "danger": { "light": "red", "dark": "red" },
     "background": { "light": "lightBg", "dark": "bg" },
