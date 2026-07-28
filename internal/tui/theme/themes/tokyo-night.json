@@ -12,9 +12,7 @@
     "nightMagenta": "#bb9af7",
     "nightGreen": "#9ece6a",
     "nightYellow": "#e0af68",
-    "nightOrange": "#ff9e64",
     "nightRed": "#f7768e",
-    "nightTeal": "#73daca",
     "dayBg": "#e1e2e7",
     "dayFg": "#3760bf",
     "dayMuted": "#6172b0",
@@ -25,9 +23,7 @@
     "dayMagenta": "#9854f1",
     "dayGreen": "#587539",
     "dayYellow": "#8c6c3e",
-    "dayOrange": "#b15c00",
-    "dayRed": "#f52a65",
-    "dayTeal": "#118c74"
+    "dayRed": "#f52a65"
   },
   "colors": {
     "text": { "light": "dayFg", "dark": "nightFg" },
