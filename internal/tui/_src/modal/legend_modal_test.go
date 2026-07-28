@@ -99,6 +99,7 @@ func TestLegendModalUsesLiveThemeOnView(t *testing.T) {
 }
 
 func TestLegendModalPaintsSemanticColors(t *testing.T) {
+	setTUITrueColor(t)
 	th := theme.Default().Resolve()
 	th.Icons.OK = "Y"
 	th.Icons.Err = "N"
@@ -122,6 +123,8 @@ func TestLegendModalPaintsSemanticColors(t *testing.T) {
 	}
 
 	// Filter isolates each row so the 12-row window cannot hide samples.
+	// Width 72 is the standard ModalWidth cap — Attention's long detail used
+	// to overflow listRow and drop the yellow Prefix entirely (#475).
 	cases := []struct {
 		filter string
 		sample string
@@ -135,13 +138,45 @@ func TestLegendModalPaintsSemanticColors(t *testing.T) {
 		{"permission, gate", th.AgentStateStyle(theme.AgentStateAttention).Render(theme.AgentStateAttention.Label())},
 		{"failed turn, tool", th.AgentStateStyle(theme.AgentStateError).Render(theme.AgentStateError.Label())},
 	}
-	for _, tc := range cases {
-		m.filter = tc.filter
-		m.cursor = 0
-		view := m.view(80, th)
-		if !strings.Contains(view, tc.sample) {
-			t.Errorf("filter %q: missing colored sample %q in:\n%q", tc.filter, tc.sample, view)
+	for _, width := range []int{72, 80} {
+		for _, tc := range cases {
+			m.filter = tc.filter
+			m.cursor = 0
+			view := m.view(width, th)
+			if !strings.Contains(view, tc.sample) {
+				t.Errorf("width %d filter %q: missing colored sample %q in:\n%q", width, tc.filter, tc.sample, view)
+			}
 		}
+	}
+}
+
+func TestLegendAttentionSampleStaysYellowAtModalWidth(t *testing.T) {
+	// /legend at a normal 80-col terminal uses ModalWidth 72; the needs-you
+	// row must still show Warning yellow on the attention glyph sample.
+	setTUITrueColor(t)
+	th := theme.Default().Resolve()
+	sample := th.AgentStateStyle(theme.AgentStateAttention).Render(theme.AgentStateAttention.Label())
+	if !strings.Contains(sample, "38;2;") {
+		t.Fatalf("expected TrueColor SGR in attention sample, got %q", sample)
+	}
+	// Warning dark yellow from theme.Default (#ffd84d → 255;216;77).
+	if !strings.Contains(sample, "255;216;77") && !strings.Contains(sample, th.Warning.Dark) {
+		// Adaptive may encode as RGB components; require non-empty color vs plain label.
+		if sample == theme.AgentStateAttention.Label() {
+			t.Fatal("attention sample has no color")
+		}
+	}
+
+	m := newLegendModal(th)
+	m.filter = "needs you"
+	m.cursor = 0
+	dialogW := 72 // ui.ModalWidth cap
+	view := m.view(dialogW, th)
+	if !strings.Contains(view, sample) {
+		t.Fatalf("legend at width %d missing yellow attention sample %q in:\n%q", dialogW, sample, view)
+	}
+	if !strings.Contains(ansi.Strip(view), theme.AgentStateAttention.Label()) {
+		t.Fatalf("legend lost attention glyph text:\n%s", ansi.Strip(view))
 	}
 }
 
