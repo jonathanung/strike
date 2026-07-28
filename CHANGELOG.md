@@ -14,6 +14,26 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+## [v0.0.8] - 2026-07-27
+
+### Added
+
+- Added a filterable `/legend` modal that explains TUI icons, agent statuses, and chrome glyphs ([#462](https://github.com/jonathanung/strike/pull/462)).
+
+### Changed
+
+- **Upgrade note:** Gemini authentication now uses API keys only; the unsupported Google OAuth flow was removed. Configure `GEMINI_API_KEY` or `GOOGLE_API_KEY`, or paste a Google AI Studio key when prompted ([#468](https://github.com/jonathanung/strike/pull/468)).
+
+### Fixed
+
+- Preserved whole words when wrapping transcript messages, except when a single token exceeds the available width ([#464](https://github.com/jonathanung/strike/pull/464)).
+- Prevented slow network or FUSE disk probes from freezing telemetry updates ([#465](https://github.com/jonathanung/strike/pull/465)).
+- Listed Gemini models correctly after API-key authentication and applied their catalog context limits ([#468](https://github.com/jonathanung/strike/pull/468)).
+
+**Contributors:** [@jonathanung](https://github.com/jonathanung).
+
+**Full changelog:** [v0.0.7...v0.0.8](https://github.com/jonathanung/strike/compare/v0.0.7...v0.0.8)
+
 ## [v0.0.7] - 2026-07-27
 
 ### Added
@@ -166,7 +186,8 @@ Initial public release.
 
 **Full changelog:** [commits through v0.0.1](https://github.com/jonathanung/strike/commits/v0.0.1)
 
-[Unreleased]: https://github.com/jonathanung/strike/compare/v0.0.7...HEAD
+[Unreleased]: https://github.com/jonathanung/strike/compare/v0.0.8...HEAD
+[v0.0.8]: https://github.com/jonathanung/strike/compare/v0.0.7...v0.0.8
 [v0.0.7]: https://github.com/jonathanung/strike/compare/v0.0.6...v0.0.7
 [v0.0.6]: https://github.com/jonathanung/strike/compare/v0.0.5...v0.0.6
 [v0.0.5]: https://github.com/jonathanung/strike/compare/v0.0.4...v0.0.5
