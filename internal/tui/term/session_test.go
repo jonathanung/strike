@@ -64,7 +64,7 @@ ready:
 	}
 }
 
-func TestPTYEnvForcesTERMAndPreservesOtherVariables(t *testing.T) {
+func TestPTYEnvForcesXterm256ColorEnvironment(t *testing.T) {
 	parent := []string{
 		"HOME=/home/alice",
 		"TERM=screen-256color",
@@ -74,7 +74,6 @@ func TestPTYEnvForcesTERMAndPreservesOtherVariables(t *testing.T) {
 	}
 	want := []string{
 		"HOME=/home/alice",
-		"COLORTERM=truecolor",
 		"NVIM_APPNAME=embedded-test",
 		"TERM=xterm-256color",
 	}
@@ -86,7 +85,7 @@ func TestPTYEnvForcesTERMAndPreservesOtherVariables(t *testing.T) {
 }
 
 func TestStartPassesNormalizedPTYEnvToChild(t *testing.T) {
-	cmd := exec.Command("sh", "-c", "printf 'TERM=%s COLORTERM=%s NVIM_APPNAME=%s\\n' \"$TERM\" \"$COLORTERM\" \"$NVIM_APPNAME\"")
+	cmd := exec.Command("sh", "-c", "if [ \"${COLORTERM+x}\" = x ]; then color=present; else color=unset; fi; printf 'TERM=%s COLORTERM=%s NVIM_APPNAME=%s\\n' \"$TERM\" \"$color\" \"$NVIM_APPNAME\"")
 	cmd.Env = []string{
 		"TERM=screen-256color",
 		"COLORTERM=truecolor",
@@ -104,12 +103,12 @@ func TestStartPassesNormalizedPTYEnvToChild(t *testing.T) {
 		case <-deadline:
 			t.Fatalf("timed out waiting for normalized environment; screen=%q", s.Terminal().String())
 		case <-s.Notify():
-			if text := s.Terminal().String(); strings.Contains(text, "TERM=xterm-256color COLORTERM=truecolor NVIM_APPNAME=embedded-test") {
+			if text := s.Terminal().String(); strings.Contains(text, "TERM=xterm-256color COLORTERM=unset NVIM_APPNAME=embedded-test") {
 				return
 			}
 		case <-s.Done():
 			text := s.Terminal().String()
-			if strings.Contains(text, "TERM=xterm-256color COLORTERM=truecolor NVIM_APPNAME=embedded-test") {
+			if strings.Contains(text, "TERM=xterm-256color COLORTERM=unset NVIM_APPNAME=embedded-test") {
 				return
 			}
 			t.Fatalf("child exited before printing normalized environment: %v screen=%q", s.WaitErr(), text)
