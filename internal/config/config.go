@@ -120,16 +120,6 @@ type Config struct {
 	// MCP configures external Model Context Protocol servers (stdio or HTTP).
 	// Project layer replaces global when mcp.servers is present (including {}).
 	MCP MCPConfig `json:"mcp,omitempty"`
-	// Harnesses configures named external turn-loop controllers. Project
-	// definitions replace global definitions with the same name.
-	Harnesses map[string]HarnessConfig `json:"harnesses,omitempty"`
-}
-
-// HarnessConfig is one named external harness command.
-type HarnessConfig struct {
-	Command string            `json:"command"`
-	Args    []string          `json:"args,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
 }
 
 // MCPConfig is the JSON "mcp" object.
@@ -473,17 +463,6 @@ func read(path string) (Config, error) {
 	if err := ValidateKeybinds(c.Keybinds); err != nil {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
 	}
-	for name, harness := range c.Harnesses {
-		if err := validateConfigIdentifier(name, "harness"); err != nil {
-			return Config{}, fmt.Errorf("%s: %w", path, err)
-		}
-		if strings.TrimSpace(name) != name {
-			return Config{}, fmt.Errorf("%s: harness name %q has leading or trailing whitespace", path, name)
-		}
-		if strings.TrimSpace(harness.Command) == "" {
-			return Config{}, fmt.Errorf("%s: harness %q command is empty", path, name)
-		}
-	}
 	return c, nil
 }
 
@@ -716,7 +695,6 @@ func merge(base, layer Config) Config {
 	base.Providers = mergeProviders(base.Providers, layer.Providers)
 	base.Keybinds = MergeKeybinds(base.Keybinds, layer.Keybinds)
 	base.MCP = mergeMCP(base.MCP, layer.MCP)
-	base.Harnesses = mergeHarnesses(base.Harnesses, layer.Harnesses)
 	if layer.disableDefaultProvidersSet {
 		base.DisableDefaultProviders = layer.DisableDefaultProviders
 		base.disableDefaultProvidersSet = true
@@ -725,39 +703,6 @@ func merge(base, layer Config) Config {
 		base.DisableDefaultPer = mergeDisableDefaultPer(base.DisableDefaultPer, layer.DisableDefaultPer)
 	}
 	return base
-}
-
-func mergeHarnesses(base, layer map[string]HarnessConfig) map[string]HarnessConfig {
-	out := cloneHarnesses(base)
-	if out == nil && layer != nil {
-		out = make(map[string]HarnessConfig, len(layer))
-	}
-	for name, harness := range layer {
-		out[name] = cloneHarnessConfig(harness)
-	}
-	return out
-}
-
-func cloneHarnesses(in map[string]HarnessConfig) map[string]HarnessConfig {
-	if in == nil {
-		return nil
-	}
-	out := make(map[string]HarnessConfig, len(in))
-	for name, harness := range in {
-		out[name] = cloneHarnessConfig(harness)
-	}
-	return out
-}
-
-func cloneHarnessConfig(in HarnessConfig) HarnessConfig {
-	out := HarnessConfig{Command: in.Command, Args: append([]string(nil), in.Args...)}
-	if in.Env != nil {
-		out.Env = make(map[string]string, len(in.Env))
-		for name, value := range in.Env {
-			out.Env[name] = value
-		}
-	}
-	return out
 }
 
 // parseDisableDefaultFlags extracts disable-default-providers and

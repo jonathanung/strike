@@ -93,28 +93,6 @@ func TestRestoreSkipsChildLineage(t *testing.T) {
 	}
 }
 
-func TestRestoreHarnessProgressUsesCorrelationWithoutAddingHistory(t *testing.T) {
-	root := protocol.Correlation{SessionID: "root", TurnID: "t1", ProviderRequestID: "r1"}
-	child := protocol.Correlation{SessionID: "child", ParentSessionID: "root", Depth: 1, TurnID: "ct", ProviderRequestID: "cr"}
-	events := []protocol.Event{
-		protocol.UserMessage{Correlation: root, Text: "parent"},
-		protocol.TextDelta{Correlation: root, Text: "before"},
-		protocol.HarnessProgress{Correlation: child, Name: "child", Payload: json.RawMessage(`{"current":1}`)},
-		protocol.TextDelta{Correlation: root, Text: " after"},
-		protocol.HarnessProgress{Correlation: root, Name: "root", Payload: json.RawMessage(`{"current":2}`)},
-		protocol.TurnCompleted{Correlation: root},
-	}
-
-	got := engine.Restore(events)
-	want := []provider.Message{
-		{Role: provider.RoleUser, Text: "parent"},
-		{Role: provider.RoleAssistant, Text: "before after"},
-	}
-	if !reflect.DeepEqual(got.Messages, want) {
-		t.Fatalf("Messages = %#v, want %#v", got.Messages, want)
-	}
-}
-
 func TestRestoreCompactionRecord(t *testing.T) {
 	// Build three user turns then a compaction that keeps the last two.
 	var events []protocol.Event

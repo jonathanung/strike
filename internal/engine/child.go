@@ -159,7 +159,6 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		Memory:              e.opts.Memory,
 		SystemPrompt:        e.opts.SystemPrompt,
 		LeanCode:            e.opts.LeanCode,
-		HarnessRegistry:     e.opts.HarnessRegistry,
 		Agents:              e.opts.Agents,
 		InitialAgent:        agentName,
 		InitialProvider:     e.provName,

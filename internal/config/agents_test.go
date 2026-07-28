@@ -82,28 +82,6 @@ func TestLoadAgentsAndSkills(t *testing.T) {
 	}
 }
 
-func TestLoadAgentsAcceptsCustomHarness(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	work := t.TempDir()
-	dir := filepath.Join(work, ".strike", "agents")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "custom.md"), []byte("---\nharness: review-loop\n---\nReview."), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	agents, err := LoadAgentsWithError(work)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, agent := range agents {
-		if agent.Name == "custom" && agent.Harness == "review-loop" {
-			return
-		}
-	}
-	t.Fatalf("custom harness agent not loaded: %+v", agents)
-}
-
 func skillNames(skills []Skill) map[string]bool {
 	m := make(map[string]bool, len(skills))
 	for _, s := range skills {

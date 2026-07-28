@@ -663,8 +663,6 @@ func cellsFromEvents(events []protocol.Event) ([]cell, map[string]*toolCell) {
 			if tc, ok := toolByID[ev.CallID]; ok {
 				applyToolCallEnd(tc, ev.Title, ev.Output, ev.Metadata, ev.IsError)
 			}
-		case protocol.HarnessProgress:
-			cells = append(cells, &infoCell{text: formatHarnessProgress(ev)})
 		case protocol.ChildStarted:
 			id := strings.TrimSpace(ev.SessionID)
 			if id == "" {

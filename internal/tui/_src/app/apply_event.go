@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -166,7 +164,13 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 	case protocol.HarnessProgress:
 		// Surface harness progress as an info cell in the transcript.
 		if m.turnRunning {
-			m.cells = append(m.cells, &infoCell{text: formatHarnessProgress(ev)})
+			payload := string(ev.Payload)
+			if payload == "" || payload == "null" {
+				payload = ev.Name
+			} else {
+				payload = ev.Name + ": " + payload
+			}
+			m.cells = append(m.cells, &infoCell{text: payload})
 		}
 	case protocol.ModelSelected:
 		if m.noticeCause == noticeNeedsModel {
@@ -268,73 +272,6 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		}
 	}
 	return cmd
-}
-
-func formatHarnessProgress(ev protocol.HarnessProgress) string {
-	var payload struct {
-		Kind    string          `json:"kind"`
-		Message string          `json:"message"`
-		Current json.RawMessage `json:"current"`
-		Total   json.RawMessage `json:"total"`
-	}
-	if json.Unmarshal(ev.Payload, &payload) == nil {
-		parts := make([]string, 0, 3)
-		if kind := sanitizeDisplayData(strings.TrimSpace(payload.Kind)); kind != "" {
-			parts = append(parts, kind)
-		}
-		if message := sanitizeDisplayData(strings.TrimSpace(payload.Message)); message != "" {
-			parts = append(parts, message)
-		}
-		current, currentOK := progressJSONScalar(payload.Current)
-		total, totalOK := progressJSONScalar(payload.Total)
-		switch {
-		case currentOK && totalOK:
-			parts = append(parts, current+"/"+total)
-		case currentOK:
-			parts = append(parts, current)
-		case totalOK:
-			parts = append(parts, "?/"+total)
-		}
-		if len(parts) > 0 {
-			return progressName(ev.Name, strings.Join(parts, " - "))
-		}
-	}
-
-	raw := strings.TrimSpace(string(ev.Payload))
-	var compact bytes.Buffer
-	if json.Compact(&compact, ev.Payload) == nil {
-		raw = compact.String()
-	}
-	if raw == "" || raw == "null" {
-		return sanitizeDisplayData(ev.Name)
-	}
-	return progressName(ev.Name, sanitizeDisplayData(raw))
-}
-
-func progressJSONScalar(raw json.RawMessage) (string, bool) {
-	if len(raw) == 0 || string(raw) == "null" {
-		return "", false
-	}
-	var value any
-	if json.Unmarshal(raw, &value) != nil {
-		return "", false
-	}
-	switch value := value.(type) {
-	case string:
-		return sanitizeDisplayData(strings.TrimSpace(value)), true
-	case float64, bool:
-		return string(raw), true
-	default:
-		return "", false
-	}
-}
-
-func progressName(name, detail string) string {
-	name = sanitizeDisplayData(strings.TrimSpace(name))
-	if name == "" {
-		return detail
-	}
-	return name + ": " + detail
 }
 
 const maxChildActivity = 12
