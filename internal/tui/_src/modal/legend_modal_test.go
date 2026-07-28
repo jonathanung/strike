@@ -98,6 +98,84 @@ func TestLegendModalUsesLiveThemeOnView(t *testing.T) {
 	}
 }
 
+func TestLegendModalPaintsSemanticColors(t *testing.T) {
+	th := theme.Default().Resolve()
+	th.Icons.OK = "Y"
+	th.Icons.Err = "N"
+	th.Icons.Prompt = "P"
+	m := newLegendModal(th)
+
+	// Paint roles must match live chrome tokens.
+	wantPaint := map[string]legendPaint{
+		"Y":                               legendPaintSuccess,
+		"N":                               legendPaintError,
+		"P":                               legendPaintUser,
+		theme.AgentStateReady.Label():     legendPaintAgentReady,
+		theme.AgentStateWorking.Label():   legendPaintAgentWorking,
+		theme.AgentStateAttention.Label(): legendPaintAgentAttention,
+		theme.AgentStateError.Label():     legendPaintAgentError,
+	}
+	for _, e := range m.entries {
+		if want, ok := wantPaint[e.Glyph]; ok && e.Paint != want {
+			t.Errorf("glyph %q paint = %v, want %v", e.Glyph, e.Paint, want)
+		}
+	}
+
+	// Filter isolates each row so the 12-row window cannot hide samples.
+	cases := []struct {
+		filter string
+		sample string
+	}{
+		{"user prompt", th.S().UserLabel.Render("P")},
+		{"success / completed", th.S().Success.Render("Y")},
+		{"error / failed", th.S().Error.Render("N")},
+		{"awaiting input", th.AgentStateStyle(theme.AgentStateReady).Render(theme.AgentStateReady.Label())},
+		{"tool loop in flight", th.AgentStateStyle(theme.AgentStateWorking).Render(theme.AgentStateWorking.Label())},
+		{"permission, gate", th.AgentStateStyle(theme.AgentStateAttention).Render(theme.AgentStateAttention.Label())},
+		{"failed turn, tool", th.AgentStateStyle(theme.AgentStateError).Render(theme.AgentStateError.Label())},
+	}
+	for _, tc := range cases {
+		m.filter = tc.filter
+		m.cursor = 0
+		view := m.view(80, th)
+		if !strings.Contains(view, tc.sample) {
+			t.Errorf("filter %q: missing colored sample %q in:\n%q", tc.filter, tc.sample, view)
+		}
+	}
+}
+
+func TestLegendPaintStylesMatchThemeTokens(t *testing.T) {
+	th := theme.Default().Resolve()
+	st := th.S()
+	cases := []struct {
+		paint legendPaint
+		want  string
+	}{
+		{legendPaintSuccess, st.Success.Render("x")},
+		{legendPaintError, st.Error.Render("x")},
+		{legendPaintUser, st.UserLabel.Render("x")},
+		{legendPaintAssistant, st.AssistantLabel.Render("x")},
+		{legendPaintTool, st.ToolLabel.Render("x")},
+		{legendPaintWarning, st.Warning.Render("x")},
+		{legendPaintAccent, st.Accent.Render("x")},
+		{legendPaintAccentAlt, st.AccentAlt.Render("x")},
+		{legendPaintSelected, st.Selected.Render("x")},
+		{legendPaintBorderFocus, st.BorderFocus.Render("x")},
+		{legendPaintInputCursor, st.InputCursor.Render("x")},
+		{legendPaintMuted, st.Muted.Render("x")},
+		{legendPaintAgentReady, th.AgentStateStyle(theme.AgentStateReady).Render("x")},
+		{legendPaintAgentWorking, th.AgentStateStyle(theme.AgentStateWorking).Render("x")},
+		{legendPaintAgentAttention, th.AgentStateStyle(theme.AgentStateAttention).Render("x")},
+		{legendPaintAgentError, th.AgentStateStyle(theme.AgentStateError).Render("x")},
+		{legendPaintDefault, st.Text.Render("x")},
+	}
+	for _, tc := range cases {
+		if got := tc.paint.style(th).Render("x"); got != tc.want {
+			t.Errorf("paint %v style = %q, want %q", tc.paint, got, tc.want)
+		}
+	}
+}
+
 func TestLegendSlashCommandOpensModal(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
