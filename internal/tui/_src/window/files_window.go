@@ -72,7 +72,32 @@ func (w filesWindow) title() string {
 	return "files"
 }
 
-func (w filesWindow) init() tea.Cmd { return filesRefreshCmd() }
+// init does not arm the idle poll. Polling runs only while the files pane is
+// active (see filesWindowActive + Model.Update filesRefreshMsg) so session
+// init with context/activity visible is event-driven (#481).
+func (w filesWindow) init() tea.Cmd { return nil }
+
+// filesWindowActive reports whether the files explorer is in the active
+// right-pane group (and therefore visible when the right pane is shown).
+func filesWindowActive(r windowRegistry) bool {
+	for _, wi := range r.activeGroup().members {
+		if wi < 0 || wi >= len(r.windows) {
+			continue
+		}
+		if r.windows[wi].id() == filesWindowID {
+			return true
+		}
+	}
+	return false
+}
+
+// filesPollCmd arms the ~1 Hz directory rescan when the files pane is active.
+func filesPollCmd(r windowRegistry) tea.Cmd {
+	if !filesWindowActive(r) {
+		return nil
+	}
+	return filesRefreshCmd()
+}
 
 func (w filesWindow) update(msg tea.Msg) (window, tea.Cmd) {
 	switch msg := msg.(type) {

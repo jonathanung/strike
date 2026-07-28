@@ -2106,3 +2106,59 @@ func TestProtocolEventsAndSpinnerDoNotChangeRightFocus(t *testing.T) {
 		t.Errorf("spinner tick changed focus from %v to %v", before, m.focus)
 	}
 }
+
+func TestIdleSpinnerDoesNotArmOrContinue(t *testing.T) {
+	// Welcome/init must stay event-driven: no spinner FPS full-frame redraws (#481).
+	// Init uses spinTickCmd(), so a nil arm here means Init does not start ticks.
+	m, _ := newAppTestModel(nil, nil)
+	if m.agentState() != theme.AgentStateReady {
+		t.Fatalf("agentState = %v, want Ready", m.agentState())
+	}
+	if cmd := m.spinTickCmd(); cmd != nil {
+		t.Fatal("spinTickCmd must be nil while Ready")
+	}
+	updated, cmd := m.Update(spinner.TickMsg{})
+	_ = updated
+	if cmd != nil {
+		t.Fatal("idle spinner.TickMsg must not re-arm the tick chain")
+	}
+}
+
+func TestWorkingSpinnerArmsAndContinues(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m.turnRunning = true
+	if cmd := m.spinTickCmd(); cmd == nil {
+		t.Fatal("spinTickCmd must arm while Working")
+	}
+	// Drive one tick through Update so the spinner schedules its follow-up.
+	tick := m.spin.Tick()
+	updated, cmd := m.Update(tick)
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("working spinner.TickMsg must continue the tick chain")
+	}
+	// Turn complete drops the chain on the next tick.
+	m.turnRunning = false
+	updated, cmd = m.Update(spinner.TickMsg{})
+	_ = updated
+	if cmd != nil {
+		t.Fatal("spinner must stop after leaving Working")
+	}
+}
+
+func TestTurnStartedArmsSpinner(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	cmd := m.applyEvent(protocol.TurnStarted{})
+	if !m.turnRunning {
+		t.Fatal("TurnStarted should set turnRunning")
+	}
+	foundSpin := false
+	for _, msg := range runAllAppCmds(t, cmd) {
+		if _, ok := msg.(spinner.TickMsg); ok {
+			foundSpin = true
+		}
+	}
+	if !foundSpin {
+		t.Fatal("TurnStarted must arm spinner.Tick while Working")
+	}
+}

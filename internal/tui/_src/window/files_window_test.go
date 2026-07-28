@@ -418,15 +418,28 @@ func TestFilesWindowRefreshOnToolEndAndFocusAndTick(t *testing.T) {
 		t.Fatalf("FocusMsg did not refresh tree: %+v", filesWin(m).nodes)
 	}
 
-	// Idle poll tick.
+	// Idle poll tick only while files pane is active (#481).
+	reg, ok := m.windows.activate(filesWindowID)
+	if !ok {
+		t.Fatal("activate files")
+	}
+	m.windows = reg
 	ff.dirs[""] = append(ff.dirs[""], host.DirEntry{Name: "tick.txt", IsDir: false})
 	updated, cmd := m.Update(filesRefreshMsg{})
 	m = updated.(Model)
 	if cmd == nil {
-		t.Fatal("filesRefreshMsg should re-arm poll tick")
+		t.Fatal("filesRefreshMsg should re-arm poll tick while files active")
 	}
 	if !hasID(m, "tick.txt") {
 		t.Fatalf("poll tick did not refresh tree: %+v", filesWin(m).nodes)
+	}
+
+	// Leaving files stops the poll chain (no full-frame 1 Hz redraw on session panes).
+	m.windows, _ = m.windows.activate("context")
+	updated, cmd = m.Update(filesRefreshMsg{})
+	m = updated.(Model)
+	if cmd != nil {
+		t.Fatal("filesRefreshMsg must not re-arm when context/activity is active")
 	}
 
 	// FilesInvalidated (external editor signal).
@@ -448,10 +461,32 @@ func TestIsWorkspaceFSTool(t *testing.T) {
 	}
 }
 
-func TestFilesWindowInitArmsRefreshTick(t *testing.T) {
-	cmd := newFilesWindow().init()
-	if cmd == nil {
-		t.Fatal("init should arm files refresh tick")
+func TestFilesWindowInitDoesNotArmRefreshTick(t *testing.T) {
+	// Session init shows context/activity; continuous files polling would
+	// redraw the full TUI at 1 Hz over SSH (#481).
+	if cmd := newFilesWindow().init(); cmd != nil {
+		t.Fatal("files init must not arm idle poll; poll arms when pane is active")
+	}
+}
+
+func TestFilesWindowActiveAndPollCmd(t *testing.T) {
+	r := newWindowRegistry()
+	if filesWindowActive(r) {
+		t.Fatal("default active group is session, not files")
+	}
+	if cmd := filesPollCmd(r); cmd != nil {
+		t.Fatal("filesPollCmd must be nil off the files pane")
+	}
+	var ok bool
+	r, ok = r.activate(filesWindowID)
+	if !ok {
+		t.Fatal("activate files")
+	}
+	if !filesWindowActive(r) {
+		t.Fatal("files should be active after activate")
+	}
+	if cmd := filesPollCmd(r); cmd == nil {
+		t.Fatal("filesPollCmd should arm while files active")
 	}
 }
 

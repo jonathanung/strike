@@ -52,7 +52,7 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		m.turnStartedAt = time.Now()
 		m.toolCallsThisTurn = 0
 		m.refreshOpenPalette()
-		cmd = m.broadcastContextState()
+		cmd = tea.Batch(m.broadcastContextState(), m.spinTickCmd())
 	case protocol.TextDelta:
 		if last, ok := lastCell[*assistantCell](m.cells); ok {
 			last.text += ev.Text
