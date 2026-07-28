@@ -19,11 +19,16 @@ var envVars = map[string]string{
 	"deepseek":  "DEEPSEEK_API_KEY",
 }
 
+// envAliases lists secondary env vars checked after the primary name in envVars
+// (Google AI Studio keys are commonly exported as GOOGLE_API_KEY).
+var envAliases = map[string][]string{
+	"gemini": {"GOOGLE_API_KEY"},
+}
+
 // refreshFlows maps providers to the flow used for OAuth token refresh.
 var refreshFlows = map[string]FlowConfig{
 	"openai": OpenAIFlow(),
 	"xai":    XAIFlow(),
-	"gemini": GoogleFlow(),
 }
 
 // Refresh slightly before expiry so a long tool call doesn't have to
@@ -31,8 +36,30 @@ var refreshFlows = map[string]FlowConfig{
 const refreshSkew = 2 * time.Minute
 
 // APIKey resolves a plain API key (env or stored) for a provider.
+// Env order: primary envVars name, then envAliases, then the auth store.
 func APIKey(provider string, store *Store) (string, bool) {
-	return APIKeyEnv(provider, store, envVars[provider])
+	for _, env := range envNames(provider) {
+		if key := os.Getenv(env); key != "" {
+			return key, true
+		}
+	}
+	if cred, ok := store.Get(provider); ok && cred.APIKey != "" {
+		return cred.APIKey, true
+	}
+	return "", false
+}
+
+// envNames returns primary + alias environment variable names for a provider.
+func envNames(provider string) []string {
+	primary := envVars[provider]
+	aliases := envAliases[provider]
+	if primary == "" {
+		return append([]string(nil), aliases...)
+	}
+	out := make([]string, 0, 1+len(aliases))
+	out = append(out, primary)
+	out = append(out, aliases...)
+	return out
 }
 
 // APIKeyEnv resolves a plain API key using an explicit environment variable
@@ -109,6 +136,9 @@ func BearerSource(provider string, store *Store) func(ctx context.Context) (stri
 		cred, err := freshOAuth(ctx, store, provider)
 		if err != nil {
 			env := envVars[provider]
+			if env == "" {
+				env = "an API key"
+			}
 			return "", fmt.Errorf("no credentials for %s: set %s or run `strike auth login %s`", provider, env, provider)
 		}
 		return cred.Access, nil

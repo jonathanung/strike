@@ -48,8 +48,10 @@ func CompleteLogin(ctx context.Context, store *Store, provider string, tokens *T
 // Describe returns a short credential status for a provider, for status
 // displays: which env var is active, or what kind of credential is stored.
 func Describe(provider string, store *Store) string {
-	if env := envVars[provider]; env != "" && os.Getenv(env) != "" {
-		return env
+	for _, env := range envNames(provider) {
+		if os.Getenv(env) != "" {
+			return env
+		}
 	}
 	cred, ok := store.Get(provider)
 	if !ok {

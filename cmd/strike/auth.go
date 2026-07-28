@@ -27,13 +27,13 @@ Login methods:
   xai         OAuth browser flow (default), --device for headless machines,
               or --api-key to paste a key
   anthropic   --api-key (paste a key; OAuth not wired yet)
-  gemini      OAuth browser flow (default), or --api-key to paste a key
+  gemini      --api-key (Google AI Studio key; OAuth not supported)
   kimi        --api-key (paste a key; OAuth not supported)
   deepseek    --api-key (paste a key; OAuth not supported)
 
 API keys can also be provided via ANTHROPIC_API_KEY / OPENAI_API_KEY /
-XAI_API_KEY / GEMINI_API_KEY / KIMI_API_KEY / DEEPSEEK_API_KEY, which take
-precedence over stored credentials.`
+XAI_API_KEY / GEMINI_API_KEY (or GOOGLE_API_KEY) / KIMI_API_KEY /
+DEEPSEEK_API_KEY, which take precedence over stored credentials.`
 
 func runAuth(args []string, output io.Writer) error {
 	store, err := auth.OpenStore(auth.DefaultPath())
@@ -74,7 +74,7 @@ func runAuthLogin(store *auth.Store, args []string, output io.Writer) error {
 	ctx := context.Background()
 
 	switch prov {
-	case "anthropic":
+	case "anthropic", "gemini", "kimi", "deepseek":
 		return loginAPIKey(store, prov, output)
 	case "openai":
 		if useAPIKey {
@@ -86,20 +86,22 @@ func runAuthLogin(store *auth.Store, args []string, output io.Writer) error {
 			return loginAPIKey(store, prov, output)
 		}
 		return loginXAIOAuth(ctx, store, useDevice, output)
-	case "gemini":
-		if useAPIKey {
-			return loginAPIKey(store, prov, output)
-		}
-		return loginGoogleOAuth(ctx, store, output)
-	case "kimi", "deepseek":
-		return loginAPIKey(store, prov, output)
 	default:
 		return fmt.Errorf("unknown provider %q (want anthropic, openai, xai, gemini, kimi, or deepseek)", prov)
 	}
 }
 
+func loginAPIKeyPrompt(prov string) string {
+	switch prov {
+	case "gemini":
+		return "Paste your Google AI Studio API key (aistudio.google.com/apikey): "
+	default:
+		return fmt.Sprintf("Paste your %s API key: ", prov)
+	}
+}
+
 func loginAPIKey(store *auth.Store, prov string, output io.Writer) error {
-	key, err := promptSecret(output, fmt.Sprintf("Paste your %s API key: ", prov))
+	key, err := promptSecret(output, loginAPIKeyPrompt(prov))
 	if err != nil {
 		return err
 	}
@@ -155,23 +157,6 @@ func loginXAIOAuth(ctx context.Context, store *auth.Store, device bool, output i
 	return nil
 }
 
-func loginGoogleOAuth(ctx context.Context, store *auth.Store, output io.Writer) error {
-	flow := auth.GoogleFlow()
-	if flow.ClientID == "" {
-		return fmt.Errorf("GOOGLE_CLIENT_ID is not set — create an OAuth 2.0 Client ID (Desktop app) in the Google Cloud Console")
-	}
-	tokens, err := flow.Login(ctx)
-	if err != nil {
-		return err
-	}
-	outcome, err := auth.CompleteLogin(ctx, store, "gemini", tokens)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintln(output, outcome)
-	return nil
-}
-
 // builtinAuthProviders are the credential-backed providers `strike auth`
 // knows by name, in display order.
 var builtinAuthProviders = []string{"anthropic", "openai", "xai", "gemini", "kimi", "deepseek"}
@@ -205,16 +190,20 @@ func runAuthStatus(store *auth.Store, output io.Writer) error {
 }
 
 func envKey(provider string) (string, bool) {
-	name := map[string]string{
-		"anthropic": "ANTHROPIC_API_KEY",
-		"openai":    "OPENAI_API_KEY",
-		"xai":       "XAI_API_KEY",
-		"gemini":    "GEMINI_API_KEY",
-		"kimi":      "KIMI_API_KEY",
-		"deepseek":  "DEEPSEEK_API_KEY",
+	// Keep in sync with internal/auth envVars + envAliases (gemini accepts
+	// GOOGLE_API_KEY as a Google AI Studio alias).
+	names := map[string][]string{
+		"anthropic": {"ANTHROPIC_API_KEY"},
+		"openai":    {"OPENAI_API_KEY"},
+		"xai":       {"XAI_API_KEY"},
+		"gemini":    {"GEMINI_API_KEY", "GOOGLE_API_KEY"},
+		"kimi":      {"KIMI_API_KEY"},
+		"deepseek":  {"DEEPSEEK_API_KEY"},
 	}[provider]
-	if name != "" && os.Getenv(name) != "" {
-		return name, true
+	for _, name := range names {
+		if name != "" && os.Getenv(name) != "" {
+			return name, true
+		}
 	}
 	return "", false
 }
