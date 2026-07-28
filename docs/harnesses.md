@@ -1,8 +1,50 @@
-# External harnesses
+# Function harnesses
 
-An external harness replaces Strike's default model/tool control loop for an
-agent turn. It is an ordinary executable that communicates with Strike over
-bidirectional JSON Lines (JSONL) on stdin and stdout.
+A harness is one ordinary function. Strike calls it once with the user's
+request, model access, a progress callback, optional Strike tool execution, and
+an abort signal. The function owns all control flow and returns the final
+response:
+
+```js
+import { runHarness } from "../../sdk/harness.mjs";
+
+const chooseBest = (candidates) =>
+  candidates.reduce((best, candidate) =>
+    candidate.length > best.length ? candidate : best, "");
+
+async function harness({ request, provider, emit, execute, signal }) {
+  emit({ kind: "started", message: "Searching candidates" });
+
+  const candidates = [];
+  for (let i = 0; i < 4; i++) {
+    signal.throwIfAborted();
+    let text = "";
+    for await (const event of provider({
+      ...request,
+      messages: [
+        ...request.messages,
+        { role: "user", text: `Generate candidate ${i + 1}` },
+      ],
+    })) {
+      if (event.kind === "text") text += event.text;
+      if (event.kind === "error") throw new Error(event.error);
+    }
+    candidates.push(text);
+    emit({ kind: "iteration", current: i + 1, total: 4 });
+  }
+
+  return { text: chooseBest(candidates), stopReason: "end_turn" };
+}
+
+runHarness(harness);
+```
+
+The harness may loop, branch, run MCTS, invoke external programs, maintain its
+own state, call Strike tools through `execute`, or return immediately. It does
+not declare phases or a workflow graph.
+
+`sdk/harness.mjs` hides the subprocess JSONL protocol. Harness code does not
+manage turn IDs, call IDs, protocol messages, or process lifecycle.
 
 > [!WARNING]
 > Harnesses are trusted native executables. Loading one is equivalent to
@@ -18,7 +60,7 @@ Define named harnesses in `~/.strike/config` or `./.strike/config`:
   "harnesses": {
     "mcts": {
       "command": "node",
-      "args": ["./.strike/harnesses/mcts.js"],
+      "args": ["./.strike/harnesses/mcts.mjs"],
       "env": {
         "SEARCH_BUDGET": "100"
       }
@@ -42,7 +84,32 @@ harness: mcts
 Unknown harness references fail during startup. Omitting `harness`, or setting
 it to `default`, keeps Strike's built-in loop.
 
-## Process model
+## Function API
+
+```ts
+type Harness = (context: {
+  request: ProviderRequest;
+  provider: (request: ProviderRequest) => AsyncIterable<ProviderEvent>;
+  emit: (progress: ProgressEvent) => void;
+  execute: (call: ToolCall) => Promise<ToolResult>;
+  signal: AbortSignal;
+}) => Promise<Response>;
+```
+
+- `request` is the initial normalized request, including messages and tools.
+- `provider` performs a Strike-managed model call. Calls may run concurrently
+  and do not enter conversation history.
+- `emit` publishes structured progress to the UI and session log.
+- `execute` optionally runs a Strike tool through normal permissions and hooks.
+- `signal` is aborted when the user interrupts the request.
+- The returned `Response` is the only assistant response committed to history.
+
+## Private transport
+
+The remaining protocol is an implementation detail for SDK/runner authors.
+Harness functions should use `runHarness` rather than producing these messages.
+
+### Process model
 
 Strike starts one harness process per turn. Messages are single-line JSON
 objects with `version: 1`, a `type`, and the active `turnId`. Harness stdout is
@@ -58,9 +125,9 @@ Strike rejects malformed messages, unsupported versions, duplicate request
 IDs, lines over 1 MiB, and aggregate output over 16 MiB. These are reliability
 limits, not security boundaries.
 
-## Messages
+### Messages
 
-### `turn.start`
+#### `turn.start`
 
 Strike sends the initial request and active selection:
 
@@ -91,7 +158,7 @@ Strike sends the initial request and active selection:
 The request contains normalized provider messages and the currently available
 Strike tool schemas. Strike retains provider selection and authentication.
 
-### `provider.call`
+#### `provider.call`
 
 The harness requests a normalized model stream:
 
@@ -118,7 +185,7 @@ messages carrying the same `callId`. Event `kind` values are `text`,
 {"version":1,"type":"provider.event","turnId":"turn-id","callId":"candidate-1","kind":"completion","done":true,"stopReason":"end_turn"}
 ```
 
-### `progress.emit`
+#### `progress.emit`
 
 The harness may publish structured progress:
 
@@ -138,7 +205,7 @@ The harness may publish structured progress:
 
 Strike records this as `harness.progress` in the session event log.
 
-### `tool.execute`
+#### `tool.execute`
 
 The harness can ask Strike to execute a built-in tool:
 
@@ -163,7 +230,7 @@ hooks, questions, and event emission, then replies with `tool.result`:
 `tool.execute` is a convenience API, not a sandbox boundary. The harness may
 also execute external logic directly.
 
-### `turn.complete` and `turn.error`
+#### `turn.complete` and `turn.error`
 
 Return the final assistant response with `turn.complete`:
 
@@ -191,7 +258,7 @@ A terminal harness failure uses `turn.error`:
 
 Exactly one terminal message is required. Exiting without one fails the turn.
 
-### `turn.cancel`
+#### `turn.cancel`
 
 When a turn is interrupted, Strike sends a best-effort cancellation message:
 
