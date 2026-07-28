@@ -561,17 +561,15 @@ func countLeadingSpaces(s string) int {
 	return n
 }
 
-// validAgentHarnessNames is the allowlist of harness names accepted in agent
-// frontmatter. The engine resolves names through its HarnessRegistry; config
-// validates against this list at parse time so bad harness names fail loudly.
-var validAgentHarnessNames = map[string]struct{}{
-	"":        {},
-	"default": {},
-}
-
 func validateAgentHarness(name string) error {
-	if _, ok := validAgentHarnessNames[name]; ok {
+	if name == "" {
 		return nil
 	}
-	return fmt.Errorf("unknown harness %q (want default)", name)
+	if err := validateConfigIdentifier(name, "harness"); err != nil {
+		return err
+	}
+	if strings.TrimSpace(name) != name {
+		return fmt.Errorf("harness name %q has leading or trailing whitespace", name)
+	}
+	return nil
 }
