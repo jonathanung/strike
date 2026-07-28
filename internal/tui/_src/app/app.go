@@ -479,7 +479,9 @@ func (m Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{
 		textarea.Blink,
 		m.listen(),
-		m.spin.Tick,
+		// Spinner ticks only while Working (spinTickCmd); idle init must not
+		// redraw the full frame at spinner FPS over SSH (#481).
+		m.spinTickCmd(),
 		m.windows.init(),
 		tea.SetWindowTitle(windowTitle(m)),
 		// Kitty/Ghostty keep separate keyboard stacks per screen; re-enable
@@ -616,6 +618,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.broadcastContextState()
 
 	case spinner.TickMsg:
+		// Drop the tick chain when idle so welcome/context/activity stop
+		// repainting without engine events (#481).
+		if m.agentState() != theme.AgentStateWorking {
+			return m, nil
+		}
 		var cmd tea.Cmd
 		m.spin, cmd = m.spin.Update(msg)
 		return m, cmd
@@ -823,6 +830,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case filesRefreshMsg:
+		// Poll only while the files pane is active; session init keeps
+		// context/activity visible without a 1 Hz full-frame redraw (#481).
+		if !filesWindowActive(m.windows) {
+			return m, nil
+		}
 		m.windows = refreshFilesWindows(m.windows)
 		return m, filesRefreshCmd()
 

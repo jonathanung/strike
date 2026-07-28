@@ -1,10 +1,22 @@
 package tui
 
 import (
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 	"github.com/jonathanung/strike-cli/internal/tui/ui"
 )
+
+// spinTickCmd arms the header spinner only while the agent is Working.
+// Idle init/welcome must not tick: each spinner frame forces a full View
+// redraw, which is expensive over SSH (#481).
+func (m Model) spinTickCmd() tea.Cmd {
+	if m.agentState() != theme.AgentStateWorking {
+		return nil
+	}
+	return m.spin.Tick
+}
 
 // agentState derives the live runtime coloring state from protocol-backed
 // fields on the model. Views must call this rather than inventing status from

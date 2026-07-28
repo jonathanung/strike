@@ -96,6 +96,8 @@ func (m *Model) tryDrainInputQueue() tea.Cmd {
 		m.setInputQueueNotice()
 	}
 	// Match dispatchUserInput: busy immediately so esc works before TurnStarted.
+	// Spinner arms on TurnStarted (spinTickCmd) so submit stays a single send
+	// cmd for callers that execute it directly (#481).
 	m.turnRunning = true
 	ops := m.ops
 	op := protocol.UserInput{Text: item.modelText, Images: item.images}

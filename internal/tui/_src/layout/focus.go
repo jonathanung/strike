@@ -45,5 +45,5 @@ func (m Model) focusRightWindow(id string) (tea.Model, tea.Cmd) {
 	}
 	cmd := m.setPaneFocus(focusRight)
 	m.reflow()
-	return m, cmd
+	return m, tea.Batch(cmd, filesPollCmd(m.windows))
 }
