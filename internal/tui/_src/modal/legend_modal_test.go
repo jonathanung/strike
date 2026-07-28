@@ -131,6 +131,7 @@ func TestLegendModalPaintsSemanticColors(t *testing.T) {
 		{"error / failed", th.S().Error.Render("N")},
 		{"awaiting input", th.AgentStateStyle(theme.AgentStateReady).Render(theme.AgentStateReady.Label())},
 		{"tool loop in flight", th.AgentStateStyle(theme.AgentStateWorking).Render(theme.AgentStateWorking.Label())},
+		{"needs you", th.AgentStateStyle(theme.AgentStateAttention).Render(theme.AgentStateAttention.Label())},
 		{"permission, gate", th.AgentStateStyle(theme.AgentStateAttention).Render(theme.AgentStateAttention.Label())},
 		{"failed turn, tool", th.AgentStateStyle(theme.AgentStateError).Render(theme.AgentStateError.Label())},
 	}

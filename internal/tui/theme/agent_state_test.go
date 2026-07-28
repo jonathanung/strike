@@ -101,3 +101,16 @@ func TestSpinnerStyleUsesWorkingToken(t *testing.T) {
 		t.Errorf("Spinner fg = %v, want AccentAlt %v", got, want)
 	}
 }
+
+func TestDefaultWarningIsClearYellow(t *testing.T) {
+	// Needs-you (Attention) and other caution chrome share Warning; keep it a
+	// readable yellow pair, not muddy amber.
+	th := theme.Default()
+	want := lipgloss.AdaptiveColor{Light: "#a16207", Dark: "#ffd84d"}
+	if th.Warning != want {
+		t.Errorf("Default Warning = %#v, want clear yellow %#v", th.Warning, want)
+	}
+	if got := th.AgentStateColor(theme.AgentStateAttention); got != want {
+		t.Errorf("Attention color = %#v, want Default Warning yellow %#v", got, want)
+	}
+}
