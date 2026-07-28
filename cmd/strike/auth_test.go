@@ -26,6 +26,10 @@ func authHome(t *testing.T) string {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("OPENAI_API_KEY", "")
 	t.Setenv("XAI_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("GOOGLE_API_KEY", "")
+	t.Setenv("KIMI_API_KEY", "")
+	t.Setenv("DEEPSEEK_API_KEY", "")
 	return home
 }
 
@@ -149,6 +153,50 @@ func TestRunAuthLoginAPIKey(t *testing.T) {
 	cred, ok := st.Get("anthropic")
 	if !ok || cred.APIKey != "sk-test-key-123" || cred.Type != auth.TypeAPIKey {
 		t.Fatalf("cred = %+v ok=%v", cred, ok)
+	}
+}
+
+func TestRunAuthLoginGeminiAPIKeyOnly(t *testing.T) {
+	authHome(t)
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("GOOGLE_API_KEY", "")
+	withStdin(t, "AIzaSy-test-studio-key\n")
+
+	var out bytes.Buffer
+	// Default login is API key (no OAuth path for gemini).
+	if err := runAuth([]string{"login", "gemini"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Google AI Studio") {
+		t.Errorf("prompt/out missing Google AI Studio guidance: %q", out.String())
+	}
+	if !strings.Contains(out.String(), "Stored gemini API key") {
+		t.Errorf("out = %q", out.String())
+	}
+	st := openTestStore(t)
+	cred, ok := st.Get("gemini")
+	if !ok || cred.APIKey != "AIzaSy-test-studio-key" || cred.Type != auth.TypeAPIKey {
+		t.Fatalf("cred = %+v ok=%v", cred, ok)
+	}
+
+	// Status reports GOOGLE_API_KEY alias when set.
+	t.Setenv("GOOGLE_API_KEY", "from-google-env")
+	out.Reset()
+	if err := runAuthStatus(st, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "GOOGLE_API_KEY") {
+		t.Errorf("status missing GOOGLE_API_KEY: %q", out.String())
+	}
+}
+
+func TestLoginAPIKeyPromptGemini(t *testing.T) {
+	got := loginAPIKeyPrompt("gemini")
+	if !strings.Contains(got, "Google AI Studio") || !strings.Contains(got, "aistudio.google.com") {
+		t.Errorf("prompt = %q", got)
+	}
+	if got := loginAPIKeyPrompt("anthropic"); !strings.Contains(got, "anthropic") {
+		t.Errorf("anthropic prompt = %q", got)
 	}
 }
 

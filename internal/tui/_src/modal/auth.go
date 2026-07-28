@@ -556,13 +556,42 @@ func (m *apiKeyModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 
 func (m *apiKeyModal) view(width int, th theme.Theme) string {
 	th = th.Resolve()
+	st := th.S()
 	inner := ui.PanelInnerWidth(th, width)
 	cursorWidth := max(1, ansi.StringWidth(m.input.Cursor.View()))
 	m.input.Width = max(1, inner-ansi.StringWidth(m.input.Prompt)-cursorWidth)
 	m.input.SetValue(m.input.Value())
+	body := m.input.View()
+	if guide := apiKeyGuide(m.provider, th); guide != "" {
+		body = st.Muted.Render(guide) + "\n" + body
+	}
 	return ui.Dialog(th, ui.DialogOpts{
-		Title: "Enter " + m.provider + " API key",
+		Title: apiKeyModalTitle(m.provider),
 		Hint:  dotJoin(th, "enter save", "esc cancel (input is hidden)"),
 		Width: width,
-	}, m.input.View())
+	}, body)
+}
+
+// apiKeyModalTitle is the dialog title when pasting a provider API key.
+func apiKeyModalTitle(provider string) string {
+	switch provider {
+	case "gemini":
+		return "Enter Google AI Studio API key"
+	default:
+		return "Enter " + provider + " API key"
+	}
+}
+
+// apiKeyGuide is optional muted copy above the key field (how to get a key).
+func apiKeyGuide(provider string, th theme.Theme) string {
+	switch provider {
+	case "gemini":
+		return dotJoin(th,
+			"Google AI Studio key (aistudio.google.com/apikey)",
+			"env GEMINI_API_KEY or GOOGLE_API_KEY",
+			"provider id gemini",
+		)
+	default:
+		return ""
+	}
 }

@@ -79,6 +79,31 @@ func TestOAuthLoginCompletesAndSwitchesProviderWhenSelectAfter(t *testing.T) {
 	}
 }
 
+func TestAPIKeyModalGeminiGuide(t *testing.T) {
+	if got := apiKeyModalTitle("gemini"); got != "Enter Google AI Studio API key" {
+		t.Errorf("title = %q", got)
+	}
+	if got := apiKeyModalTitle("anthropic"); got != "Enter anthropic API key" {
+		t.Errorf("title = %q", got)
+	}
+	th := theme.Default()
+	guide := apiKeyGuide("gemini", th)
+	for _, want := range []string{"Google AI Studio", "aistudio.google.com", "GEMINI_API_KEY", "GOOGLE_API_KEY", "gemini"} {
+		if !strings.Contains(guide, want) {
+			t.Errorf("guide missing %q: %q", want, guide)
+		}
+	}
+	if apiKeyGuide("anthropic", th) != "" {
+		t.Errorf("anthropic guide should be empty")
+	}
+	m, _ := newAppTestModel(nil, nil)
+	modal := newAPIKeyModal("gemini", m.services.Auth, m.th, false)
+	view := ansi.Strip(modal.view(60, m.th))
+	if !strings.Contains(view, "Google AI Studio") {
+		t.Errorf("view missing Google AI Studio guidance:\n%s", view)
+	}
+}
+
 func TestAPIKeyModalStoresKeyThroughAuthServiceAndIgnoresEmptySubmit(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	fake := m.services.Auth.(*fakeAuth)
@@ -424,6 +449,11 @@ func TestAuthMethodsForLabels(t *testing.T) {
 		},
 		{
 			st:    host.ProviderStatus{Name: "anthropic", APIKey: true},
+			want:  []string{"API key"},
+			kinds: []authMethodKind{authMethodAPIKey},
+		},
+		{
+			st:    host.ProviderStatus{Name: "gemini", APIKey: true},
 			want:  []string{"API key"},
 			kinds: []authMethodKind{authMethodAPIKey},
 		},

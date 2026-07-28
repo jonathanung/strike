@@ -90,6 +90,45 @@ func TestAPIKey(t *testing.T) {
 	}
 }
 
+func TestAPIKeyGeminiGoogleAlias(t *testing.T) {
+	st, err := OpenStore(filepath.Join(t.TempDir(), "auth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("GOOGLE_API_KEY", "")
+	if _, ok := APIKey("gemini", st); ok {
+		t.Fatal("expected no gemini key")
+	}
+	t.Setenv("GOOGLE_API_KEY", "google-ai-studio-key")
+	if key, ok := APIKey("gemini", st); !ok || key != "google-ai-studio-key" {
+		t.Errorf("GOOGLE_API_KEY alias: key=%q ok=%v", key, ok)
+	}
+	if got := Describe("gemini", st); got != "GOOGLE_API_KEY" {
+		t.Errorf("Describe = %q, want GOOGLE_API_KEY", got)
+	}
+	// Primary env wins over alias.
+	t.Setenv("GEMINI_API_KEY", "primary-gemini-key")
+	if key, ok := APIKey("gemini", st); !ok || key != "primary-gemini-key" {
+		t.Errorf("GEMINI_API_KEY primary: key=%q ok=%v", key, ok)
+	}
+	if got := Describe("gemini", st); got != "GEMINI_API_KEY" {
+		t.Errorf("Describe = %q, want GEMINI_API_KEY", got)
+	}
+}
+
+func TestRefreshFlowsNoGemini(t *testing.T) {
+	if _, ok := refreshFlows["gemini"]; ok {
+		t.Fatal("gemini must not have an OAuth refresh flow")
+	}
+	if _, ok := refreshFlows["openai"]; !ok {
+		t.Fatal("openai refresh flow missing")
+	}
+	if _, ok := refreshFlows["xai"]; !ok {
+		t.Fatal("xai refresh flow missing")
+	}
+}
+
 func TestNewPKCE(t *testing.T) {
 	a := newPKCE()
 	b := newPKCE()

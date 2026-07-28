@@ -17,7 +17,7 @@ import (
 
 const defaultBaseURL = "https://generativelanguage.googleapis.com/v1beta"
 
-// TokenSource resolves a Gemini API key or OAuth access token per request.
+// TokenSource resolves a Google AI Studio / Gemini API key per request.
 type TokenSource = func(ctx context.Context) (string, error)
 
 type Provider struct {
@@ -36,11 +36,9 @@ func New(source TokenSource) *Provider {
 					return err
 				}
 				if token != "" {
-					if isOAuthAccessToken(token) {
-						req.Header.Set("Authorization", "Bearer "+token)
-					} else {
-						req.Header.Set("x-goog-api-key", token)
-					}
+					// Google AI Studio / Gemini API keys use x-goog-api-key
+					// (OAuth is not a supported auth path for this provider).
+					req.Header.Set("x-goog-api-key", token)
 				}
 				return nil
 			},
@@ -242,11 +240,4 @@ func userParts(m provider.Message) []apiPart {
 		return []apiPart{{Text: ""}}
 	}
 	return parts
-}
-
-// isOAuthAccessToken returns true when the token looks like a Google OAuth 2.0
-// access token (typically starts with "ya29."). API keys are sent as
-// x-goog-api-key; access tokens are sent as Authorization: Bearer.
-func isOAuthAccessToken(token string) bool {
-	return len(token) > 50 && token[0:5] == "ya29."
 }

@@ -31,6 +31,7 @@ func newTestServices(t *testing.T) (host.Services, *auth.Store) {
 	t.Setenv("KIMI_API_KEY", "")
 	t.Setenv("DEEPSEEK_API_KEY", "")
 	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("GOOGLE_API_KEY", "")
 	store, err := auth.OpenStore(filepath.Join(home, ".strike", "auth.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -70,8 +71,8 @@ func TestStatusesOrderFlagsAndEcho(t *testing.T) {
 	if s := by["xai"]; !s.APIKey || !s.OAuth || !s.Device || s.Builtin {
 		t.Errorf("xai flags = %+v, want OAuth+Device+APIKey", s)
 	}
-	if s := by["gemini"]; !s.APIKey || !s.OAuth || s.Device || s.Builtin {
-		t.Errorf("gemini flags = %+v, want OAuth+APIKey", s)
+	if s := by["gemini"]; !s.APIKey || s.OAuth || s.Device || s.Builtin {
+		t.Errorf("gemini flags = %+v, want APIKey-only", s)
 	}
 	if s := by["kimi"]; !s.APIKey || s.OAuth || s.Device || s.Builtin {
 		t.Errorf("kimi flags = %+v, want APIKey-only", s)
@@ -209,27 +210,12 @@ func TestLogout(t *testing.T) {
 
 func TestBeginOAuthUnsupported(t *testing.T) {
 	svc, _ := newTestServices(t)
-	// anthropic (API-key only) and echo (builtin) have no OAuth flow. These
-	// must fail fast, before any network or loopback server is touched.
-	for _, provider := range []string{"anthropic", "echo", "mystery"} {
+	// API-key-only providers and echo have no OAuth flow. These must fail
+	// fast, before any network or loopback server is touched.
+	for _, provider := range []string{"anthropic", "gemini", "echo", "mystery"} {
 		if _, err := svc.Auth.BeginOAuth(context.Background(), provider); err == nil {
 			t.Errorf("BeginOAuth(%q): expected error", provider)
 		}
-	}
-}
-
-func TestBeginOAuthGemini(t *testing.T) {
-	t.Setenv("GOOGLE_CLIENT_ID", "test-client-id.apps.googleusercontent.com")
-	svc, _ := newTestServices(t)
-	login, err := svc.Auth.BeginOAuth(context.Background(), "gemini")
-	if err != nil {
-		t.Fatalf("BeginOAuth(gemini): %v", err)
-	}
-	if login == nil {
-		t.Fatal("BeginOAuth(gemini) returned nil login")
-	}
-	if login.URL == "" {
-		t.Error("URL is empty")
 	}
 }
 
@@ -647,6 +633,43 @@ func TestCatalogFromCache(t *testing.T) {
 	_, err = svc.Catalog.ModelIDs(context.Background(), "xai")
 	if err == nil || err.Error() != "no models listed for xai on models.dev" {
 		t.Errorf("empty-list error = %v, want \"no models listed for xai on models.dev\"", err)
+	}
+}
+
+func TestCatalogGeminiUsesGoogleModelsDev(t *testing.T) {
+	// models.dev keys Google AI Studio as "google"; strike provider id is "gemini".
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cacheDir := filepath.Join(home, ".strike", "cache")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	catalog := `{"google":{"id":"google","name":"Google","models":{` +
+		`"gemini-2.5-flash":{"id":"gemini-2.5-flash","name":"Flash"},` +
+		`"gemini-2.5-pro":{"id":"gemini-2.5-pro","name":"Pro","limit":{"context":1048576,"output":65536}}` +
+		`}}}`
+	if err := os.WriteFile(filepath.Join(cacheDir, "models.json"), []byte(catalog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svc := New(nil, nil, nil, nil, nil, nil, nil, "")
+
+	ids, err := svc.Catalog.ModelIDs(context.Background(), "gemini")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"gemini-2.5-flash", "gemini-2.5-pro"}; !reflect.DeepEqual(ids, want) {
+		t.Errorf("ModelIDs(gemini) = %v, want %v", ids, want)
+	}
+	infos, err := svc.Catalog.Models(context.Background(), "gemini")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 2 || infos[0].Provider != "gemini" {
+		t.Fatalf("Models(gemini) = %#v", infos)
+	}
+	tokens, ok, err := svc.Catalog.ContextWindow(context.Background(), "gemini", "gemini-2.5-pro")
+	if err != nil || !ok || tokens != 1_048_576 {
+		t.Errorf("ContextWindow = %d,%v,%v", tokens, ok, err)
 	}
 }
 

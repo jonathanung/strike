@@ -78,6 +78,16 @@ type Provider struct {
 // Catalog maps provider id (anthropic, openai, xai, …) to its models.
 type Catalog map[string]Provider
 
+// modelsDevID maps strike provider ids to models.dev catalog keys.
+// Strike's Gemini provider is id "gemini"; models.dev lists Google AI Studio
+// models under "google".
+func modelsDevID(provider string) string {
+	if provider == "gemini" {
+		return "google"
+	}
+	return provider
+}
+
 func cachePath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -121,7 +131,7 @@ func (c Catalog) ModelIDs(provider string) []string {
 
 // Infos lists a provider's models with catalog metadata, sorted by id.
 func (c Catalog) Infos(provider string) []Info {
-	p, ok := c[provider]
+	p, ok := c[modelsDevID(provider)]
 	if !ok {
 		return nil
 	}
@@ -161,7 +171,7 @@ func modelInfo(id string, m Model) Info {
 // mode for the model (OpenAI priority service tier). Unknown providers or
 // models return false.
 func (c Catalog) SupportsPriority(provider, model string) bool {
-	p, ok := c[provider]
+	p, ok := c[modelsDevID(provider)]
 	if !ok {
 		return false
 	}
@@ -194,7 +204,7 @@ func (c Catalog) OutputLimit(provider, model string) (tokens int, ok bool) {
 }
 
 func (c Catalog) lookup(provider, model string) (Model, bool) {
-	p, ok := c[provider]
+	p, ok := c[modelsDevID(provider)]
 	if !ok {
 		return Model{}, false
 	}
