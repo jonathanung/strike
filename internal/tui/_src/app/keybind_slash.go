@@ -67,6 +67,7 @@ var keybindSlashAliases = map[string][]string{
 // slash-invocable (composer editing, completion, modal list conventions, etc.).
 var keybindNoSlashReason = map[string]string{
 	"nav.leader": "prefix chord only; use /subagent and siblings for the actions",
+	"nav.root-switcher": "session switcher modal (ctrl+s)",
 
 	"composer.send":            "enter sends the composer; not a discrete command",
 	"composer.newline":         "input editing",

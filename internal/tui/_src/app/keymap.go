@@ -28,6 +28,7 @@ type keyMap struct {
 	HistoryPrev       key.Binding
 	HistoryNext       key.Binding
 	Agent             key.Binding
+	RootSwitcher      key.Binding
 	PermissionMode    key.Binding
 	SaveDefaults      key.Binding
 	ScrollUp          key.Binding
@@ -96,6 +97,10 @@ func defaultKeyMap() keyMap {
 		HistoryNext:    key.NewBinding(key.WithKeys("down"), key.WithHelp("down", "history next")),
 		// Agent cycles personas (build/plan/…), not concurrent root sessions.
 		Agent: key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "cycle agent persona")),
+		// RootSwitcher opens a session picker modal listing live roots with
+		// numbered shortcuts (ctrl+s).
+		RootSwitcher: key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "switch session")),
+
 		// PermissionMode: shift+tab cycles tool-permission posture (not newline).
 		PermissionMode: key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "permission mode")),
 		SaveDefaults:   key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "save defaults")),
@@ -241,6 +246,7 @@ func applyKeybindOverrides(k *keyMap, overrides map[string][]string) {
 	set(&k.HistoryPrev, "composer.history-prev", "")
 	set(&k.HistoryNext, "composer.history-next", "")
 	set(&k.Agent, "composer.agent", "")
+	set(&k.RootSwitcher, "nav.root-switcher", "")
 	set(&k.PermissionMode, "composer.permission-mode", "shift+tab")
 	set(&k.KillWord, "composer.kill-word", "")
 	set(&k.WordBackward, "composer.word-back", "")
@@ -421,6 +427,7 @@ func keybindCatalog(keys keyMap) []keybindEntry {
 		from("composer.history-prev", "Composer", keys.HistoryPrev),
 		from("composer.history-next", "Composer", keys.HistoryNext),
 		from("composer.agent", "Composer", keys.Agent),
+		from("nav.root-switcher", "Navigation", keys.RootSwitcher),
 		from("composer.permission-mode", "Composer", keys.PermissionMode),
 		from("composer.kill-word", "Composer", keys.KillWord),
 		from("composer.word-back", "Composer", keys.WordBackward),

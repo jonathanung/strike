@@ -48,6 +48,11 @@ type engineEventMsg struct {
 
 type engineClosedMsg struct{}
 
+// activateRootMsg is sent by the root switcher modal to activate a session.
+type activateRootMsg struct {
+	id string
+}
+
 // defaultsSavedMsg reports the outcome of a ctrl+d "save as default".
 type defaultsSavedMsg struct {
 	text string
@@ -579,6 +584,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case engineClosedMsg:
 		return m, tea.Quit
+
+	case activateRootMsg:
+		cmd := m.activateRoot(msg.id)
+		if cmd == nil {
+			return m, nil
+		}
+		return m, tea.Batch(cmd, filesPollCmd(m.windows))
 
 	case rewindForkMsg:
 		return m.applyRewindFork(msg.keepEvents)
