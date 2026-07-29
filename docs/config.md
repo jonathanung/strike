@@ -145,30 +145,48 @@ detect), not the color-theme id.
 ## Keybinds
 
 Remap app-level chords without recompiling. Ids match the in-app cheatsheet
-(`/keys` / `f1`). Values are a key string or an array of alternate sequences:
+(`/keys` / `f1`). Prefer a dedicated file (JSONC comments allowed); the
+`keybinds` object in config still works:
+
+```jsonc
+// ~/.strike/keybinds.jsonc or ./.strike/keybinds.jsonc
+// Flat map (preferred). Wrapped {"keybinds": {...}} is also accepted.
+{
+  "nav.jump-bottom": "ctrl+b",
+  "global.palette": "ctrl+k",
+  "composer.newline": ["ctrl+j", "alt+enter"],
+  "nav.window-next": "ctrl+o",
+  "nav.window-prev": "ctrl+p",
+  "nav.tool-expand": "alt+enter"
+}
+```
+
+Legacy shape in `~/.strike/config` or `./.strike/config`:
 
 ```json
 {
   "keybinds": {
     "nav.jump-bottom": "ctrl+b",
-    "global.palette": "ctrl+k",
-    "composer.newline": ["ctrl+j", "alt+enter"],
-    "nav.window-next": "ctrl+o",
-    "nav.window-prev": "ctrl+p",
-    "nav.tool-expand": "alt+enter"
+    "global.palette": "ctrl+k"
   }
 }
 ```
 
-Layers merge last-wins per id (project overrides global). Unknown binding ids
-and invalid/empty chords fail config load with a clear error. Critical
-`global.quit` and `global.interrupt` cannot be cleared.
+Layers merge last-wins per id:
+
+`defaults → ~/.strike/config → ~/.strike/keybinds.jsonc → ./.strike/config → ./.strike/keybinds.jsonc`
+
+(`.json` is accepted as well as `.jsonc`. In the same root, the dedicated file
+overrides the config object.) Unknown binding ids and invalid/empty chords
+fail config load with a clear error. Critical `global.quit` and
+`global.interrupt` cannot be cleared.
 
 Shared chords across different actions are allowed (context-specific routing
 in the TUI decides the winner — e.g. default `alt+enter` is newline while
 typing and tool expand only when the composer is empty). `/keys` shows the
 effective map; `/keys reset` restores built-in defaults for the current
-session only — delete the `keybinds` object from config to persist defaults.
+session only — remove remaps from `keybinds.jsonc` / the config `keybinds`
+object to persist defaults.
 
 List/permission modal conventions (`lists.*`, `perm.*`) and agents-pane local
 controls (`agents.*`) are not remappable.

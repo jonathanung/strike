@@ -146,3 +146,157 @@ func TestMergeKeybindsLastWins(t *testing.T) {
 		t.Fatalf("%#v", got)
 	}
 }
+
+func TestParseKeybindsFileFlatAndWrapped(t *testing.T) {
+	flat, err := ParseKeybindsFile([]byte(`{
+		// jump
+		"nav.jump-bottom": "ctrl+b",
+		"global.palette": ["ctrl+k", "ctrl+p"]
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := []string(flat["nav.jump-bottom"]); len(got) != 1 || got[0] != "ctrl+b" {
+		t.Fatalf("flat jump = %#v", got)
+	}
+	if got := []string(flat["global.palette"]); len(got) != 2 || got[0] != "ctrl+k" {
+		t.Fatalf("flat palette = %#v", got)
+	}
+
+	wrapped, err := ParseKeybindsFile([]byte(`{
+		"keybinds": {
+			"nav.jump-bottom": "Ctrl+G"
+		}
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := []string(wrapped["nav.jump-bottom"]); len(got) != 1 || got[0] != "ctrl+g" {
+		t.Fatalf("wrapped = %#v", got)
+	}
+
+	empty, err := ParseKeybindsFile([]byte(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("empty = %#v", empty)
+	}
+
+	if _, err := ParseKeybindsFile([]byte(`{"nope.id":"x"}`)); err == nil || !strings.Contains(err.Error(), "unknown binding id") {
+		t.Fatalf("err = %v, want unknown binding id", err)
+	}
+	if _, err := ParseKeybindsFile([]byte(`[]`)); err == nil || !strings.Contains(err.Error(), "JSON object") {
+		t.Fatalf("err = %v, want JSON object", err)
+	}
+}
+
+func TestLoadKeybindsJSONCLayers(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	globalCfg := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(globalCfg), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Config sets palette; dedicated file should override same-root config.
+	if err := os.WriteFile(globalCfg, []byte(`{
+		"keybinds": {
+			"global.palette": "ctrl+p",
+			"nav.jump-bottom": "ctrl+g"
+		}
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	globalKB := filepath.Join(home, ".strike", "keybinds.jsonc")
+	if err := os.WriteFile(globalKB, []byte(`{
+		// overrides config in same root
+		"global.palette": "ctrl+k",
+		"composer.newline": "ctrl+j"
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	projectKB := filepath.Join(work, ".strike", "keybinds.json")
+	if err := os.MkdirAll(filepath.Dir(projectKB), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(projectKB, []byte(`{
+		"nav.jump-bottom": "ctrl+b"
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := []string(cfg.Keybinds["global.palette"]); len(got) != 1 || got[0] != "ctrl+k" {
+		t.Fatalf("global jsonc should override config palette: %#v", got)
+	}
+	if got := []string(cfg.Keybinds["composer.newline"]); len(got) != 1 || got[0] != "ctrl+j" {
+		t.Fatalf("global jsonc newline: %#v", got)
+	}
+	if got := []string(cfg.Keybinds["nav.jump-bottom"]); len(got) != 1 || got[0] != "ctrl+b" {
+		t.Fatalf("project file should win jump-bottom: %#v", got)
+	}
+
+	// Prefer .jsonc over .json when both exist.
+	home2 := t.TempDir()
+	t.Setenv("HOME", home2)
+	root := filepath.Join(home2, ".strike")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "keybinds.json"), []byte(`{"nav.jump-bottom":"ctrl+j"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "keybinds.jsonc"), []byte(`{"nav.jump-bottom":"ctrl+c"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// ctrl+c is valid for jump-bottom (critical check only for quit/interrupt).
+	cfg2, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := []string(cfg2.Keybinds["nav.jump-bottom"]); len(got) != 1 || got[0] != "ctrl+c" {
+		t.Fatalf("jsonc preferred: %#v", got)
+	}
+
+	// Bad dedicated file fails Load.
+	home3 := t.TempDir()
+	t.Setenv("HOME", home3)
+	bad := filepath.Join(home3, ".strike", "keybinds.jsonc")
+	if err := os.MkdirAll(filepath.Dir(bad), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bad, []byte(`{"nope.id":"x"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(t.TempDir()); err == nil || !strings.Contains(err.Error(), "unknown binding id") {
+		t.Fatalf("Load err = %v, want unknown binding id", err)
+	}
+}
+
+func TestKeybindsFilePathHelpers(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if p := GlobalKeybindsFilePath(); !strings.HasSuffix(p, "keybinds.jsonc") {
+		t.Fatalf("missing path default = %q", p)
+	}
+	root := filepath.Join(home, ".strike")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	jsonPath := filepath.Join(root, "keybinds.json")
+	if err := os.WriteFile(jsonPath, []byte(`{}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if p := GlobalKeybindsFilePath(); p != jsonPath {
+		t.Fatalf("existing json = %q want %q", p, jsonPath)
+	}
+	work := t.TempDir()
+	if p := ProjectKeybindsFilePath(work); !strings.HasSuffix(p, filepath.Join(".strike", "keybinds.jsonc")) {
+		t.Fatalf("project missing = %q", p)
+	}
+}

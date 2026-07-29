@@ -2,7 +2,11 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"unicode"
 )
@@ -155,6 +159,107 @@ func KeybindsMap(binds map[string]KeybindChords) map[string][]string {
 		out[id] = append([]string(nil), chords...)
 	}
 	return out
+}
+
+// GlobalKeybindsFilePath prefers keybinds.jsonc then keybinds.json under
+// ~/.strike. Empty string means the path cannot be resolved.
+func GlobalKeybindsFilePath() string {
+	root := GlobalRoot()
+	if root == "" {
+		return ""
+	}
+	return firstExisting(
+		filepath.Join(root, "keybinds.jsonc"),
+		filepath.Join(root, "keybinds.json"),
+	)
+}
+
+// ProjectKeybindsFilePath prefers keybinds.jsonc then keybinds.json under
+// <workDir>/.strike.
+func ProjectKeybindsFilePath(workDir string) string {
+	if workDir == "" {
+		return ""
+	}
+	root := projectRoot(workDir)
+	return firstExisting(
+		filepath.Join(root, "keybinds.jsonc"),
+		filepath.Join(root, "keybinds.json"),
+	)
+}
+
+func keybindsFileCandidates(dir string) []string {
+	if dir == "" {
+		return nil
+	}
+	return []string{
+		filepath.Join(dir, "keybinds.jsonc"),
+		filepath.Join(dir, "keybinds.json"),
+	}
+}
+
+// loadKeybindsFileLayer loads the first existing keybinds.jsonc/json in dir.
+// Missing dir/files yield nil and nil error.
+func loadKeybindsFileLayer(dir string) (map[string]KeybindChords, error) {
+	for _, path := range keybindsFileCandidates(dir) {
+		binds, err := ReadKeybindsFile(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		return binds, nil
+	}
+	return nil, nil
+}
+
+// ReadKeybindsFile parses keybinds.jsonc/json. Accepts a flat id→chords map or
+// a wrapped {"keybinds": {...}} object (same shape as config). Supports JSONC.
+func ReadKeybindsFile(path string) (map[string]KeybindChords, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return ParseKeybindsFile(data)
+}
+
+// ParseKeybindsFile decodes keybinds.jsonc/json bytes.
+func ParseKeybindsFile(data []byte) (map[string]KeybindChords, error) {
+	stripped, err := stripJSONC(data)
+	if err != nil {
+		return nil, err
+	}
+	stripped = bytesTrimSpace(stripped)
+	if len(stripped) == 0 {
+		return nil, nil
+	}
+	if stripped[0] != '{' {
+		return nil, fmt.Errorf("keybinds file must be a JSON object")
+	}
+	// Prefer wrapped {"keybinds": {...}} when that key is present.
+	var wrapped struct {
+		Keybinds map[string]KeybindChords `json:"keybinds"`
+	}
+	if err := json.Unmarshal(stripped, &wrapped); err != nil {
+		return nil, err
+	}
+	if wrapped.Keybinds != nil {
+		if err := ValidateKeybinds(wrapped.Keybinds); err != nil {
+			return nil, err
+		}
+		return wrapped.Keybinds, nil
+	}
+	// Flat map of binding id → chords (preferred dedicated-file shape).
+	var flat map[string]KeybindChords
+	if err := json.Unmarshal(stripped, &flat); err != nil {
+		return nil, err
+	}
+	// Reject objects that only carry unrelated keys without any known ids —
+	// empty {} is OK (no remaps).
+	if err := ValidateKeybinds(flat); err != nil {
+		return nil, err
+	}
+	return flat, nil
 }
 
 func normalizeChords(chords KeybindChords) (KeybindChords, error) {
