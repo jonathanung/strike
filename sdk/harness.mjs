@@ -18,13 +18,12 @@ export function runHarness(harness) {
     const readers = [];
     let done = false;
 
-    waiters.set(id, {
       push(event) {
         if (readers.length) readers.shift()({ value: event, done: false });
         else events.push(event);
         if (event.done || event.kind === "error") {
           done = true;
-          if (readers.length) readers.shift()({ done: true });
+          while (readers.length) readers.shift()({ done: true });
           waiters.delete(id);
         }
       },
