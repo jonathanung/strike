@@ -33,7 +33,8 @@ func (m Model) View() string {
 }
 
 // renderFrame builds the full-screen UI without OSC52 side effects or the
-// active text-selection overlay (callers apply those separately).
+// active text-selection overlay (callers apply those separately). Unchanged
+// layers may reuse the last composed string when frames.allowSkip says so (#494).
 func (m Model) renderFrame() string {
 	if m.paint != nil {
 		m.paint.renderFrameCalls++
@@ -43,6 +44,11 @@ func (m Model) renderFrame() string {
 			return warning + "\nstarting…"
 		}
 		return "starting…"
+	}
+
+	fc := m.frames
+	if fc == nil {
+		fc = newFrameCache()
 	}
 
 	gutter := m.th.Resolve().Spacing.XS
@@ -58,6 +64,7 @@ func (m Model) renderFrame() string {
 	showLeft, showRight := true, false
 	vGutter := 0
 	splitVertical := false
+	hGutter := 0
 
 	if m.splitOrientation == orientVertical {
 		geo := computeVerticalPaneGeometry(m.width, bodyHeight, gutter, m.focus)
@@ -80,17 +87,44 @@ func (m Model) renderFrame() string {
 	} else if hGeometry.mode == paneSplit {
 		showLeft, showRight = true, true
 		rightWidth, rightHeight = hGeometry.rightWidth, bodyHeight
+		hGutter = hGeometry.gutter
 	} else if m.focus == focusRight {
 		showLeft, showRight = false, true
 		rightWidth = m.width
 	}
 
-	compact := leftWidth < compactWidth || m.height < compactHeight
-	var leftBody string
-	if showLeft {
+	leftCompact := leftWidth < compactWidth || m.height < compactHeight
+	rightCompact := m.width < compactWidth || m.height < compactHeight
+	bandHeight := bodyHeight
+	if splitVertical && showLeft && showRight {
+		bandHeight = bodyHeight + vGutter + rightHeight
+	}
+	headerOn := l.header > 0
+	hintsOn := l.hints > 0
+	dangerOn := l.danger > 0
+	hasModal := m.modal != nil
+
+	geoOK := fc.matchGeo(
+		m.width, m.height, leftWidth, bodyHeight, rightWidth, rightHeight,
+		hGutter, vGutter, m.focus, m.splitOrientation,
+		showLeft, showRight, splitVertical, leftCompact, rightCompact, hasModal,
+		headerOn, hintsOn, dangerOn, bandHeight,
+	)
+	skip := frameDirty(0)
+	if geoOK {
+		skip = fc.allowSkip
+	}
+	fc.storeGeo(
+		m.width, m.height, leftWidth, bodyHeight, rightWidth, rightHeight,
+		hGutter, vGutter, m.focus, m.splitOrientation,
+		showLeft, showRight, splitVertical, leftCompact, rightCompact, hasModal,
+		headerOn, hintsOn, dangerOn, bandHeight,
+	)
+
+	if showLeft && skip&dirtyLeft == 0 {
 		left := make([]string, 0, 4)
 		if l.transcript > 0 {
-			left = append(left, m.transcriptView(compact, leftWidth, l.transcript))
+			left = append(left, m.transcriptView(leftCompact, leftWidth, l.transcript))
 		}
 		if l.notice > 0 {
 			left = append(left, m.noticeView(leftWidth, l.notice))
@@ -101,35 +135,49 @@ func (m Model) renderFrame() string {
 			}
 		}
 		if l.composer > 0 {
-			left = append(left, m.composerView(compact, leftWidth, l.composer))
+			left = append(left, m.composerView(leftCompact, leftWidth, l.composer))
 		}
-		leftBody = lipgloss.JoinVertical(lipgloss.Left, left...)
+		fc.leftBody = lipgloss.JoinVertical(lipgloss.Left, left...)
+	}
+	if !showLeft {
+		fc.leftBody = ""
+	}
+
+	if showRight && skip&dirtyRight == 0 {
+		rc := false
+		if splitVertical || !showLeft {
+			rc = rightCompact
+		}
+		fc.right = m.rightPaneView(rightWidth, rightHeight, rc)
+		fc.rightComposeN++
+	}
+	if !showRight {
+		fc.right = ""
 	}
 
 	var body string
 	switch {
 	case showLeft && showRight && splitVertical:
-		rightCompact := m.width < compactWidth || m.height < compactHeight
-		right := m.rightPaneView(rightWidth, rightHeight, rightCompact)
-		body = lipgloss.JoinVertical(lipgloss.Left, leftBody, paneGutter(m.th, m.width, vGutter), right)
+		body = lipgloss.JoinVertical(lipgloss.Left, fc.leftBody, paneGutter(m.th, m.width, vGutter), fc.right)
 	case showLeft && showRight:
-		body = lipgloss.JoinHorizontal(lipgloss.Top, leftBody, paneGutter(m.th, hGeometry.gutter, bodyHeight), m.rightPaneView(rightWidth, rightHeight, false))
+		body = lipgloss.JoinHorizontal(lipgloss.Top, fc.leftBody, paneGutter(m.th, hGutter, bodyHeight), fc.right)
 	case showRight:
-		rightCompact := m.width < compactWidth || m.height < compactHeight
-		body = m.rightPaneView(rightWidth, rightHeight, rightCompact)
+		body = fc.right
 	default:
-		body = leftBody
+		body = fc.leftBody
 	}
 
-	// Full body band height for overlay centering (left stack and/or right).
-	bandHeight := bodyHeight
-	if splitVertical && showLeft && showRight {
-		bandHeight = bodyHeight + vGutter + rightHeight
+	if headerOn && skip&dirtyHeader == 0 {
+		fc.header = m.headerView(m.width)
+		fc.headerComposeN++
+	}
+	if !headerOn {
+		fc.header = ""
 	}
 
 	contentParts := make([]string, 0, 2)
-	if l.header > 0 {
-		contentParts = append(contentParts, m.headerView(m.width))
+	if headerOn {
+		contentParts = append(contentParts, fc.header)
 	}
 	if bandHeight > 0 && body != "" {
 		contentParts = append(contentParts, body)
@@ -137,16 +185,22 @@ func (m Model) renderFrame() string {
 	content := strings.Join(contentParts, "\n")
 	contentHeight := l.header + bandHeight
 
-	footer := make([]string, 0, 2)
-	if l.hints > 0 {
-		footer = append(footer, m.hintsView(m.width))
-	}
-	if l.danger > 0 {
-		warning := m.dangerView(m.width)
-		if warning != "" {
-			footer = append(footer, warning)
+	if skip&dirtyFooter == 0 {
+		footer := make([]string, 0, 2)
+		if hintsOn {
+			footer = append(footer, m.hintsView(m.width))
 		}
+		if dangerOn {
+			warning := m.dangerView(m.width)
+			if warning != "" {
+				footer = append(footer, warning)
+			}
+		}
+		fc.footer = strings.Join(footer, "\n")
 	}
+
+	// One-shot skip: next paint fully recomposes unless Update marks again.
+	fc.allowSkip = 0
 
 	if m.modal != nil {
 		var overlay string
@@ -160,11 +214,13 @@ func (m Model) renderFrame() string {
 		}
 		content = ui.OverlayCenter(m.th, content, overlay, m.width, contentHeight)
 	}
-	parts := make([]string, 0, 1+len(footer))
+	parts := make([]string, 0, 2)
 	if content != "" {
 		parts = append(parts, content)
 	}
-	parts = append(parts, footer...)
+	if fc.footer != "" {
+		parts = append(parts, fc.footer)
+	}
 	return ui.Canvas(m.th, m.width, m.height, strings.Join(parts, "\n"))
 }
 
