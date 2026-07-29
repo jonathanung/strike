@@ -112,6 +112,36 @@ func TestExternalToolExecutePreservesID(t *testing.T) {
 	}
 }
 
+func TestExternalCompleteWaitsForInflightTool(t *testing.T) {
+	h := newFixture(t, "tool-completes-early")
+	release := make(chan struct{})
+	returned := make(chan error, 1)
+	go func() {
+		_, err := h.Run(context.Background(), harness.Request{
+			InvocationID: "invocation-1",
+			Execute: func(context.Context, provider.ToolCall) provider.Message {
+				<-release
+				return provider.Message{}
+			},
+		})
+		returned <- err
+	}()
+	select {
+	case err := <-returned:
+		t.Fatalf("Run returned before tool completed: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case err := <-returned:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after tool completed")
+	}
+}
+
 func TestExternalCancellationStopsLiveHarness(t *testing.T) {
 	h := newFixture(t, "blocks")
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -188,6 +218,11 @@ func TestHarnessHelperProcess(t *testing.T) {
 				return
 			}
 		}
+		return
+	}
+	if mode == "tool-completes-early" {
+		fmt.Println(`{"version":1,"type":"tool.execute","invocationId":"invocation-1","toolCallId":"tool-7","name":"allowed","arguments":{}}`)
+		fmt.Println(`{"version":1,"type":"harness.complete","invocationId":"invocation-1","text":"final"}`)
 		return
 	}
 	fmt.Println(`{"version":1,"type":"progress.emit","invocationId":"invocation-1","payload":{"message":"working"}}`)

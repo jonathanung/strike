@@ -301,6 +301,18 @@ func (e *Engine) runHarnessTurn(ctx context.Context, h harness.Harness, hName st
 	execute := func(ctx context.Context, call provider.ToolCall) provider.Message {
 		callbackMu.Lock()
 		defer callbackMu.Unlock()
+		paired := false
+		for i := len(e.messages) - 1; i >= 0 && e.messages[i].Role != provider.RoleUser; i-- {
+			for _, existing := range e.messages[i].ToolCalls {
+				if existing.ID == call.ID {
+					paired = true
+					break
+				}
+			}
+		}
+		if !paired {
+			e.messages = append(e.messages, provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{call}})
+		}
 		if ctx.Err() != nil {
 			msg := e.settleToolFeedback(toolFeedback{
 				CallID:  call.ID,

@@ -146,6 +146,40 @@ func TestHarnessToolExecuteUsesPermissionPipelineAndPreservesID(t *testing.T) {
 	}
 }
 
+func TestHarnessToolExecutePersistsMatchingAssistantCall(t *testing.T) {
+	var second []provider.Message
+	runs := 0
+	registry := harness.NewRegistry()
+	registry.Register(&testHarness{name: "tools", run: func(ctx context.Context, req harness.Request) (harness.Result, error) {
+		runs++
+		if runs == 1 {
+			req.Execute(ctx, toolCall("external-7", "missing"))
+		} else {
+			second = append([]provider.Message(nil), req.Request.Messages...)
+		}
+		return harness.Result{Text: "done", StopReason: "end_turn"}, nil
+	}})
+	eng := newHarnessEngine(t, registry, &scriptedProvider{}, "tools")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+	eng.Ops() <- protocol.UserInput{Text: "first"}
+	_ = waitForTurnCompleted(t, eng.Events())
+	eng.Ops() <- protocol.UserInput{Text: "second"}
+	_ = waitForTurnCompleted(t, eng.Events())
+
+	for i, message := range second {
+		if message.ToolResult == nil || message.ToolResult.CallID != "external-7" {
+			continue
+		}
+		if i == 0 || len(second[i-1].ToolCalls) != 1 || second[i-1].ToolCalls[0].ID != "external-7" {
+			t.Fatalf("tool result is not paired with preceding assistant call: %#v", second)
+		}
+		return
+	}
+	t.Fatalf("tool result not persisted: %#v", second)
+}
+
 func countText(events []protocol.Event, text string) int {
 	count := 0
 	for _, ev := range events {

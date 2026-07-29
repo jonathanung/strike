@@ -262,6 +262,7 @@ func (e *External) Run(ctx context.Context, req harness.Request) (harness.Result
 				for _, c := range m.ToolCalls {
 					result.Calls = append(result.Calls, provider.ToolCall{ID: c.ID, Name: c.Name, Args: c.Args})
 				}
+				relays.Wait()
 				done <- terminal{result: result}
 				return
 			case "harness.error":
