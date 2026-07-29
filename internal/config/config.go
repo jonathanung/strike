@@ -286,13 +286,15 @@ func DefaultModelCustom(p CustomProvider) string {
 	return ""
 }
 
-// GlobalRoot is ~/.strike — strike's home for all user-level state.
+// GlobalRoot is ~/.strike — strike's home for all user-level state. Existing
+// directory symlinks are resolved so the state directory can live elsewhere
+// (history/memory/issue open with O_NOFOLLOW require a real directory).
 func GlobalRoot() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".strike")
+	return resolveExisting(filepath.Join(home, ".strike"))
 }
 
 // GlobalPath is the global config file, ~/.strike/config (JSON).
@@ -304,9 +306,25 @@ func GlobalPath() string {
 	return filepath.Join(root, "config")
 }
 
-// projectRoot is the per-project .strike directory.
+// projectRoot is the per-project .strike directory. Existing directory
+// symlinks are resolved so project state can live outside the work tree.
 func projectRoot(workDir string) string {
-	return filepath.Join(workDir, ".strike")
+	if workDir == "" {
+		return ""
+	}
+	return resolveExisting(filepath.Join(workDir, ".strike"))
+}
+
+// resolveExisting returns path with symlinks resolved when the path exists.
+// Missing paths (first-run) are returned unchanged so callers can create them.
+func resolveExisting(path string) string {
+	if path == "" {
+		return ""
+	}
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	return path
 }
 
 // Load merges:

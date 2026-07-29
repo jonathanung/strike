@@ -1,7 +1,13 @@
 # Config
 
 `~/.strike/config` (global) merged with `./.strike/config` (project), both
-JSON:
+JSON.
+
+**Symlinks:** `~/.strike` and `<project>/.strike` may be directory symlinks
+(state lives elsewhere). Strike resolves them before opening history/memory/
+issues and before writing config. A file symlink at `~/.strike/config` (for
+example stow/dotfiles) is preserved on save — the referent is updated, not
+replaced by a plain file.
 
 ```json
 {

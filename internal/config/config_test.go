@@ -45,6 +45,89 @@ func TestCanonicalProviderID(t *testing.T) {
 	}
 }
 
+func TestGlobalRootResolvesSymlink(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	target := filepath.Join(t.TempDir(), "state")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(home, ".strike")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	if got := GlobalRoot(); got != target {
+		t.Errorf("GlobalRoot() = %q, want resolved target %q", got, target)
+	}
+	if got := GlobalPath(); got != filepath.Join(target, "config") {
+		t.Errorf("GlobalPath() = %q, want path below resolved target", got)
+	}
+}
+
+func TestGlobalRootMissingIsUnresolved(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	want := filepath.Join(home, ".strike")
+	if got := GlobalRoot(); got != want {
+		t.Errorf("GlobalRoot() = %q, want unresolved %q", got, want)
+	}
+}
+
+func TestProjectRootResolvesSymlink(t *testing.T) {
+	work := t.TempDir()
+	target := filepath.Join(t.TempDir(), "project-state")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(work, ".strike")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if got := projectRoot(work); got != target {
+		t.Errorf("projectRoot() = %q, want %q", got, target)
+	}
+	if got := ProjectPath(work); got != filepath.Join(target, "config") {
+		t.Errorf("ProjectPath() = %q, want under target", got)
+	}
+}
+
+func TestAgentDiscoveryRootsUseResolvedStrikeHomes(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	globalTarget := filepath.Join(t.TempDir(), "global-state")
+	if err := os.MkdirAll(filepath.Join(globalTarget, "agents"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(globalTarget, filepath.Join(home, ".strike")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	work := t.TempDir()
+	projectTarget := filepath.Join(t.TempDir(), "project-state")
+	if err := os.MkdirAll(filepath.Join(projectTarget, "agents"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(projectTarget, filepath.Join(work, ".strike")); err != nil {
+		t.Fatal(err)
+	}
+
+	roots := agentDiscoveryRoots(work)
+	if len(roots) < 2 {
+		t.Fatalf("agentDiscoveryRoots len = %d, want at least global+project", len(roots))
+	}
+	if roots[0].dir != filepath.Join(globalTarget, "agents") {
+		t.Errorf("global agents root = %q, want under resolved global", roots[0].dir)
+	}
+	var foundProject bool
+	for _, r := range roots {
+		if r.dir == filepath.Join(projectTarget, "agents") {
+			foundProject = true
+			break
+		}
+	}
+	if !foundProject {
+		t.Errorf("project agents root not found in %#v", roots)
+	}
+}
+
 func TestLoadCanonicalizesProviderGeminiAlias(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

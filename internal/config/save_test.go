@@ -282,3 +282,74 @@ func TestSetGlobalDefaultsWithLockContention(t *testing.T) {
 		t.Errorf("permissionMode = %q, want yolo", got.PermissionMode)
 	}
 }
+
+func TestSetGlobalDefaultsPreservesConfigFileSymlink(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	state := filepath.Join(t.TempDir(), "state")
+	if err := os.MkdirAll(state, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Real config lives outside ~/.strike; ~/.strike/config is a file symlink.
+	strikeDir := filepath.Join(home, ".strike")
+	if err := os.Mkdir(strikeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	referent := filepath.Join(state, "config.json")
+	if err := os.WriteFile(referent, []byte(`{"provider":"anthropic","model":"keep-me"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(strikeDir, "config")
+	if err := os.Symlink(referent, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	if err := SetGlobalDefaults("openai", "gpt-test", "", "", ""); err != nil {
+		t.Fatalf("SetGlobalDefaults: %v", err)
+	}
+
+	info, err := os.Lstat(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("config path is no longer a symlink after save")
+	}
+	data, err := os.ReadFile(referent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got Config
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("referent JSON: %v\n%s", err, data)
+	}
+	if got.Provider != "openai" || got.Model != "gpt-test" {
+		t.Errorf("referent provider/model = %q/%q, want openai/gpt-test", got.Provider, got.Model)
+	}
+}
+
+func TestSetGlobalDefaultsThroughGlobalRootDirSymlink(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	target := filepath.Join(t.TempDir(), "state")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(home, ".strike")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := SetGlobalDefaults("xai", "grok-test", "build", "", ""); err != nil {
+		t.Fatalf("SetGlobalDefaults: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(target, "config"))
+	if err != nil {
+		t.Fatalf("read config under symlink target: %v", err)
+	}
+	var got Config
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Provider != "xai" || got.Model != "grok-test" || got.DefaultAgent != "build" {
+		t.Errorf("got %+v", got)
+	}
+}

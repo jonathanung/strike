@@ -171,3 +171,36 @@ func TestLookupMiss(t *testing.T) {
 		t.Error("expected miss")
 	}
 }
+
+func TestUserThemesDirResolvesStrikeDirSymlink(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	target := filepath.Join(t.TempDir(), "state")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(home, ".strike")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	got := UserThemesDir()
+	want := filepath.Join(target, "themes")
+	if got != want {
+		t.Errorf("UserThemesDir() = %q, want %q", got, want)
+	}
+}
+
+func TestProjectThemesDirResolvesStrikeDirSymlink(t *testing.T) {
+	work := t.TempDir()
+	target := filepath.Join(t.TempDir(), "project-state")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(work, ".strike")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	got := ProjectThemesDir(work)
+	want := filepath.Join(target, "themes")
+	if got != want {
+		t.Errorf("ProjectThemesDir() = %q, want %q", got, want)
+	}
+}

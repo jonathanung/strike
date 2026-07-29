@@ -280,3 +280,20 @@ func TestCatalogJSONShape(t *testing.T) {
 		t.Fatalf("%#v", cat)
 	}
 }
+
+func TestCachePathResolvesStrikeDirSymlink(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	target := filepath.Join(t.TempDir(), "state")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(home, ".strike")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	got := cachePath()
+	want := filepath.Join(target, "cache", "models.json")
+	if got != want {
+		t.Errorf("cachePath() = %q, want %q", got, want)
+	}
+}

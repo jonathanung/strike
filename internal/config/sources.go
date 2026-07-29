@@ -43,16 +43,20 @@ type skillSource struct {
 func agentDiscoveryRoots(workDir string) []agentSource {
 	var out []agentSource
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		if root := GlobalRoot(); root != "" {
+			out = append(out, agentSource{filepath.Join(root, "agents"), strictLoad})
+		}
 		out = append(out,
-			agentSource{filepath.Join(home, ".strike", "agents"), strictLoad},
 			agentSource{filepath.Join(home, ".claude", "agents"), softLoad},
 			agentSource{filepath.Join(opencodeConfigHome(home), "agents"), softLoad},
 			agentSource{filepath.Join(home, ".opencode", "agents"), softLoad},
 		)
 	}
 	if workDir != "" {
+		if root := projectRoot(workDir); root != "" {
+			out = append(out, agentSource{filepath.Join(root, "agents"), strictLoad})
+		}
 		out = append(out,
-			agentSource{filepath.Join(workDir, ".strike", "agents"), strictLoad},
 			agentSource{filepath.Join(workDir, ".claude", "agents"), softLoad},
 			agentSource{filepath.Join(workDir, ".opencode", "agent"), softLoad},
 			agentSource{filepath.Join(workDir, ".opencode", "agents"), softLoad},
@@ -78,16 +82,20 @@ func agentDiscoveryRoots(workDir string) []agentSource {
 func skillDiscoveryRoots(workDir string) []skillSource {
 	var out []skillSource
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		if root := GlobalRoot(); root != "" {
+			out = append(out, skillSource{filepath.Join(root, "skills"), strictLoad})
+		}
 		out = append(out,
-			skillSource{filepath.Join(home, ".strike", "skills"), strictLoad},
 			skillSource{filepath.Join(home, ".claude", "skills"), softLoad},
 			skillSource{filepath.Join(opencodeConfigHome(home), "skills"), softLoad},
 			skillSource{filepath.Join(home, ".opencode", "skills"), softLoad},
 		)
 	}
 	if workDir != "" {
+		if root := projectRoot(workDir); root != "" {
+			out = append(out, skillSource{filepath.Join(root, "skills"), strictLoad})
+		}
 		out = append(out,
-			skillSource{filepath.Join(workDir, ".strike", "skills"), strictLoad},
 			skillSource{filepath.Join(workDir, ".claude", "skills"), softLoad},
 			skillSource{filepath.Join(workDir, ".claude", "commands"), softLoad},
 			skillSource{filepath.Join(workDir, ".opencode", "skills"), softLoad},
