@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,12 +18,7 @@ func TestRunRestoreCLIGlobal(t *testing.T) {
 		t.Fatalf("code=%d stderr=%q stdout=%q", code, stderr.String(), stdout.String())
 	}
 	cfg := filepath.Join(home, ".strike", "config")
-	data, err := os.ReadFile(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
+	if _, err := os.Stat(cfg); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(stdout.String(), "strike restore:") {
@@ -58,12 +52,13 @@ func TestRunRestoreCLIProject(t *testing.T) {
 	if strings.Count(stdout.String(), "strike restore:") != 2 {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
-	cfg, err := os.ReadFile(filepath.Join(pRoot, "config"))
-	if err != nil {
-		t.Fatal(err)
+	// Corrupt project config is quarantined, not rewritten (optional file).
+	if _, err := os.Stat(filepath.Join(pRoot, "config")); !os.IsNotExist(err) {
+		t.Fatalf("project config should be absent after quarantine, err=%v", err)
 	}
-	if !json.Valid(cfg) {
-		t.Fatalf("project config still invalid: %s", cfg)
+	matches, _ := filepath.Glob(filepath.Join(pRoot, "config.corrupt-*"))
+	if len(matches) != 1 {
+		t.Fatalf("expected one config backup, got %v", matches)
 	}
 	if fi, err := os.Stat(filepath.Join(pRoot, "worktrees")); err != nil || !fi.IsDir() {
 		t.Fatalf("worktrees: %v", err)

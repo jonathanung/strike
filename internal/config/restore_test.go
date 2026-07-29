@@ -215,8 +215,8 @@ func TestRestoreProjectLayout(t *testing.T) {
 			t.Fatalf("project dir %s: %v", name, err)
 		}
 	}
-	// Project must not create global-only dirs.
-	for _, name := range []string{"sessions", "history", "bin", "auth.json"} {
+	// Project must not create global-only dirs or invent optional config.
+	for _, name := range []string{"sessions", "history", "bin", "auth.json", "config"} {
 		if _, err := os.Stat(filepath.Join(root, name)); !os.IsNotExist(err) {
 			t.Fatalf("project should not have %s", name)
 		}
@@ -224,6 +224,61 @@ func TestRestoreProjectLayout(t *testing.T) {
 	// No starter skill on project.
 	if _, err := os.Stat(filepath.Join(root, "skills", "commit.md")); !os.IsNotExist(err) {
 		t.Fatal("project should not get commit skill")
+	}
+}
+
+func TestRestoreQuarantinesEmptyConfig(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".strike")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(root, "config")
+	if err := os.WriteFile(cfgPath, []byte("   \n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fixed := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	if _, err := config.Restore(config.RestoreOptions{
+		Root: root,
+		Kind: config.RestoreGlobal,
+		Now:  func() time.Time { return fixed },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !json.Valid(data) {
+		t.Fatalf("empty config not replaced: %q", data)
+	}
+	if _, err := os.Stat(cfgPath + ".corrupt-20260304-050607"); err != nil {
+		t.Fatalf("empty config backup: %v", err)
+	}
+}
+
+func TestRestoreProjectQuarantinesCorruptConfigWithoutRewrite(t *testing.T) {
+	work := t.TempDir()
+	root := filepath.Join(work, ".strike")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(root, "config")
+	if err := os.WriteFile(cfgPath, []byte("{bad"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fixed := time.Date(2026, 4, 5, 6, 7, 8, 0, time.UTC)
+	if _, err := config.Restore(config.RestoreOptions{
+		Root: root,
+		Kind: config.RestoreProject,
+		Now:  func() time.Time { return fixed },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(cfgPath); !os.IsNotExist(err) {
+		t.Fatalf("project config should stay absent after quarantine, err=%v", err)
+	}
+	if _, err := os.Stat(cfgPath + ".corrupt-20260405-060708"); err != nil {
+		t.Fatalf("backup: %v", err)
 	}
 }
 

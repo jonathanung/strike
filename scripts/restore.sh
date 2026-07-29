@@ -278,7 +278,10 @@ restore_project() {
   ensure_dir "${root}/workflows" 755
   ensure_dir "${root}/worktrees" 755
   ensure_dir "${root}/exports" 755
-  quarantine_if_bad_json "${root}/config" "$DEFAULT_CONFIG"
+  # Project config is optional — quarantine corrupt only; do not invent one.
+  if [ -e "${root}/config" ]; then
+    quarantine_if_bad_json "${root}/config" ""
+  fi
   for f in mcp.jsonc mcp.json providers.jsonc providers.json keybinds.jsonc keybinds.json; do
     if [ -e "${root}/${f}" ]; then
       quarantine_if_bad_json "${root}/${f}" ""

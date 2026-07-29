@@ -96,9 +96,12 @@ func Restore(opts RestoreOptions) (RestoreResult, error) {
 		}
 	}
 
-	// Required config: create default when missing; quarantine+replace when corrupt.
+	// Global config is required for a usable home: create default when missing;
+	// quarantine+replace when corrupt. Project config is optional — quarantine
+	// corrupt only; never invent a project-level config (missing is valid).
 	cfgPath := filepath.Join(root, "config")
-	if err := restoreJSONFile(cfgPath, []byte(defaultGlobalConfigJSON), true, now, &res); err != nil {
+	writeDefaultConfig := opts.Kind == RestoreGlobal
+	if err := restoreJSONFile(cfgPath, []byte(defaultGlobalConfigJSON), writeDefaultConfig, now, &res); err != nil {
 		return res, err
 	}
 
@@ -347,19 +350,16 @@ func quarantinePath(path string, now func() time.Time) (string, error) {
 	return backup, nil
 }
 
-// jsonValid reports whether data is empty, whitespace-only, or parseable JSON
-// after stripping // and /* */ comments (JSONC).
+// jsonValid reports whether data is parseable JSON after stripping JSONC
+// comments. Empty or comment-only files are invalid — config.Load and sidecar
+// parsers reject empty input, so restore must quarantine them.
 func jsonValid(data []byte) bool {
-	trimmed := strings.TrimSpace(string(data))
-	if trimmed == "" {
-		return true
-	}
 	stripped, err := stripJSONC(data)
 	if err != nil {
 		return false
 	}
 	if strings.TrimSpace(string(stripped)) == "" {
-		return true
+		return false
 	}
 	var v any
 	return json.Unmarshal(stripped, &v) == nil
