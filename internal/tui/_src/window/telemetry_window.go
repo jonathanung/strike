@@ -138,9 +138,20 @@ func (w telemetryWindow) view(th theme.Theme) string {
 	diskR, diskOK := telemetryDiskRatio(w.sample)
 	lines := []string{
 		telemetryMetricLine(th, w.width, "RAM", telemetryMemText(th, w.sample), memR, memOK),
+	}
+	// Cache is reclaimable — never pressure-colored (high cache is healthy).
+	if cacheR, cacheOK := telemetryCacheRatio(w.sample); cacheOK {
+		lines = append(lines, telemetryMetricLineNeutral(th, w.width, "Cache", telemetryCacheText(th, w.sample), cacheR, cacheOK))
+	}
+	// Hide swap row when the OS reports no swap configured (0/0).
+	if w.sample.SwapOK && w.sample.SwapTotalBytes > 0 {
+		swapR, swapOK := telemetrySwapRatio(w.sample)
+		lines = append(lines, telemetryMetricLine(th, w.width, "Swap", telemetrySwapText(th, w.sample), swapR, swapOK))
+	}
+	lines = append(lines,
 		telemetryMetricLine(th, w.width, "CPU", telemetryCPUText(th, w.sample, includeProc), cpuR, cpuOK),
 		telemetryMetricLine(th, w.width, "Disk", telemetryDiskText(th, w.sample), diskR, diskOK),
-	}
+	)
 	if w.err != "" && w.width >= 12 {
 		lines = append(lines, wrapWindowText(st.Muted.Render(welcomeTruncate(w.err, w.width, th.Icons.Ellipsis)), w.width))
 	}
@@ -290,6 +301,34 @@ func telemetryMemRatio(s host.TelemetrySample) (float64, bool) {
 	return r, true
 }
 
+func telemetryCacheRatio(s host.TelemetrySample) (float64, bool) {
+	if !s.MemCachedOK || !s.MemOK || s.MemTotalBytes == 0 {
+		return 0, false
+	}
+	r := float64(s.MemCachedBytes) / float64(s.MemTotalBytes)
+	if r < 0 {
+		r = 0
+	}
+	if r > 1 {
+		r = 1
+	}
+	return r, true
+}
+
+func telemetrySwapRatio(s host.TelemetrySample) (float64, bool) {
+	if !s.SwapOK || s.SwapTotalBytes == 0 {
+		return 0, false
+	}
+	r := float64(s.SwapUsedBytes) / float64(s.SwapTotalBytes)
+	if r < 0 {
+		r = 0
+	}
+	if r > 1 {
+		r = 1
+	}
+	return r, true
+}
+
 func telemetryCPURatio(s host.TelemetrySample) (float64, bool) {
 	if !s.CPUHostOK {
 		return 0, false
@@ -328,6 +367,34 @@ func telemetryMemText(th theme.Theme, s host.TelemetrySample) string {
 	}
 	sep := th.Resolve().Icons.DetailSeparator
 	return telemetryFormatBytes(s.MemUsedBytes) + " / " + telemetryFormatBytes(s.MemTotalBytes) +
+		" used " + sep + " " + telemetryFormatPercent(r*100)
+}
+
+func telemetryCacheText(th theme.Theme, s host.TelemetrySample) string {
+	if !s.MemCachedOK || !s.MemOK {
+		return telemetryUnavailable
+	}
+	sep := th.Resolve().Icons.DetailSeparator
+	line := telemetryFormatBytes(s.MemCachedBytes) + " cache"
+	if r, ok := telemetryCacheRatio(s); ok {
+		line += " " + sep + " " + telemetryFormatPercent(r*100)
+	}
+	return line
+}
+
+func telemetrySwapText(th theme.Theme, s host.TelemetrySample) string {
+	if !s.SwapOK {
+		return telemetryUnavailable
+	}
+	sep := th.Resolve().Icons.DetailSeparator
+	if s.SwapTotalBytes == 0 {
+		return telemetryFormatBytes(0) + " / " + telemetryFormatBytes(0) + " used"
+	}
+	r, ok := telemetrySwapRatio(s)
+	if !ok {
+		return telemetryUnavailable
+	}
+	return telemetryFormatBytes(s.SwapUsedBytes) + " / " + telemetryFormatBytes(s.SwapTotalBytes) +
 		" used " + sep + " " + telemetryFormatPercent(r*100)
 }
 
@@ -399,6 +466,16 @@ func telemetryFormatPercent(pct float64) string {
 // telemetryMetricLine renders "RAM  text [bar]" with pressure-colored bar.
 // At tiny widths the bar is dropped; unavailable never shows as zero.
 func telemetryMetricLine(th theme.Theme, width int, label, text string, ratio float64, ok bool) string {
+	return telemetryMetricLineStyled(th, width, label, text, ratio, ok, true)
+}
+
+// telemetryMetricLineNeutral is like telemetryMetricLine but never applies
+// warn/crit pressure colors (for reclaimable cache — high is not bad).
+func telemetryMetricLineNeutral(th theme.Theme, width int, label, text string, ratio float64, ok bool) string {
+	return telemetryMetricLineStyled(th, width, label, text, ratio, ok, false)
+}
+
+func telemetryMetricLineStyled(th theme.Theme, width int, label, text string, ratio float64, ok, pressure bool) string {
 	th = th.Resolve()
 	st := th.S()
 	if width <= 0 {
@@ -422,7 +499,7 @@ func telemetryMetricLine(th theme.Theme, width int, label, text string, ratio fl
 	textStyle := st.Text
 	if text == telemetryUnavailable {
 		textStyle = st.Muted
-	} else if ok {
+	} else if ok && pressure {
 		switch {
 		case ratio > telemetryCritRatio:
 			textStyle = st.Error
@@ -431,6 +508,8 @@ func telemetryMetricLine(th theme.Theme, width int, label, text string, ratio fl
 		default:
 			textStyle = st.Success
 		}
+	} else if ok {
+		textStyle = st.Muted
 	}
 
 	bar := ""

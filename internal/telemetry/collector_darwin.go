@@ -56,33 +56,82 @@ func readProcessCPUTime(pid int) (ns int64, ok bool) {
 	return sec*1e9 + int64(usec)*1e3, true
 }
 
-func readMemory() (used, total uint64, ok bool) {
-	// hw.memsize for total
+func readMemory() (used, cached, total uint64, ok, cachedOK bool) {
+	// hw.memsize for total physical RAM.
 	memsize, err := unix.SysctlUint64("hw.memsize")
 	if err != nil || memsize == 0 {
-		return 0, 0, false
+		return 0, 0, 0, false, false
 	}
 	total = memsize
 
-	// vm.page_free_count * vm.pagesize ≈ free; used ≈ total - free - speculative.
 	pageSize := uint64(4096)
 	if ps, err := unix.SysctlUint64("hw.pagesize"); err == nil && ps > 0 {
 		pageSize = ps
 	}
-	freePages, err1 := unix.SysctlUint32("vm.page_free_count")
-	inactive, err2 := unix.SysctlUint32("vm.page_inactive_count")
-	if err1 != nil {
-		// Total known but used unknown — still better than silent zero used.
+
+	// Page counts via sysctl. free is required; others degrade gracefully.
+	freePages, err := unix.SysctlUint32("vm.page_free_count")
+	if err != nil {
+		return 0, 0, 0, false, false
+	}
+	active := sysctlPages("vm.page_active_count")
+	inactive := sysctlPages("vm.page_inactive_count")
+	speculative := sysctlPages("vm.page_speculative_count")
+	wired := sysctlPages("vm.page_wire_count")
+	purgeable := sysctlPages("vm.page_purgeable_count")
+	// compressor_page_count is "Pages occupied by compressor" (still used RAM).
+	compressor := sysctlPages("vm.compressor_page_count")
+
+	used, cached = darwinMemPressure(pageSize, total,
+		uint64(freePages), active, inactive, speculative, wired, purgeable, compressor)
+	// Cache metric is meaningful when we read at least one reclaimable class.
+	cachedOK = inactive > 0 || speculative > 0 || purgeable > 0 || cached > 0
+	// If wired/active sysctls failed entirely, fall back so we still show something.
+	if wired == 0 && active == 0 && compressor == 0 {
+		// Legacy-ish: total − free − inactive − speculative (still excludes file cache).
+		reclaim := (uint64(freePages) + inactive + speculative) * pageSize
+		if reclaim > total {
+			reclaim = total
+		}
+		used = total - reclaim
+		cached = (inactive + speculative) * pageSize
+		cachedOK = cached > 0
+	}
+	return used, cached, total, true, cachedOK
+}
+
+func sysctlPages(name string) uint64 {
+	v, err := unix.SysctlUint32(name)
+	if err != nil {
+		return 0
+	}
+	return uint64(v)
+}
+
+// xswUsage matches struct xsw_usage in sys/sysctl.h (darwin).
+type xswUsage struct {
+	Total     uint64
+	Avail     uint64
+	Used      uint64
+	Pagesize  int32
+	Encrypted bool
+}
+
+func readSwap() (used, total uint64, ok bool) {
+	raw, err := unix.SysctlRaw("vm.swapusage")
+	if err != nil || len(raw) < int(unsafe.Sizeof(xswUsage{})) {
 		return 0, 0, false
 	}
-	free := uint64(freePages) * pageSize
-	if err2 == nil {
-		free += uint64(inactive) * pageSize
+	swap := *(*xswUsage)(unsafe.Pointer(&raw[0]))
+	if swap.Total == 0 && swap.Used == 0 {
+		// No swap configured — still a valid measurement.
+		return 0, 0, true
 	}
-	if free > total {
-		free = total
+	used = swap.Used
+	total = swap.Total
+	if used > total && total > 0 {
+		used = total
 	}
-	used = total - free
 	return used, total, true
 }
 

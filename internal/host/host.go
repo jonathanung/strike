@@ -450,6 +450,13 @@ type TelemetrySample struct {
 	MemUsedBytes  uint64
 	MemTotalBytes uint64
 	MemOK         bool
+	// MemCachedBytes is reclaimable OS page/file cache excluded from MemUsedBytes.
+	MemCachedBytes uint64
+	MemCachedOK    bool
+
+	SwapUsedBytes  uint64
+	SwapTotalBytes uint64
+	SwapOK         bool
 
 	DiskUsedBytes  uint64
 	DiskTotalBytes uint64

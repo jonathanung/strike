@@ -55,12 +55,22 @@ func TestFormatLinesKnown(t *testing.T) {
 		CPUHostOK: true, CPUHostPct: 42.3,
 		CPUProcOK: true, CPUProcPct: 1.2,
 		MemOK: true, MemUsedBytes: 10*1024*1024*1024 + 100*1024*1024, MemTotalBytes: 32 * 1024 * 1024 * 1024,
+		MemCachedOK: true, MemCachedBytes: 4 * 1024 * 1024 * 1024,
+		SwapOK: true, SwapUsedBytes: 512 * 1024 * 1024, SwapTotalBytes: 2 * 1024 * 1024 * 1024,
 		DiskOK: true, DiskUsedBytes: 287 * 1024 * 1024 * 1024, DiskTotalBytes: 494 * 1024 * 1024 * 1024,
 		DiskFreeBytes: 207 * 1024 * 1024 * 1024,
 	}
 	mem := FormatMemLine(s)
-	if !strings.Contains(mem, "used") || !strings.Contains(mem, "%") {
+	if !strings.Contains(mem, "used") || !strings.Contains(mem, "%") || !strings.Contains(mem, "cache") {
 		t.Errorf("mem line = %q", mem)
+	}
+	cache := FormatCacheLine(s)
+	if !strings.Contains(cache, "cache") || !strings.Contains(cache, "%") {
+		t.Errorf("cache line = %q", cache)
+	}
+	swap := FormatSwapLine(s)
+	if !strings.Contains(swap, "used") || !strings.Contains(swap, "%") {
+		t.Errorf("swap line = %q", swap)
 	}
 	cpu := FormatCPULine(s, true)
 	if !strings.Contains(cpu, "42.3%") || !strings.Contains(cpu, "proc") {
@@ -72,6 +82,21 @@ func TestFormatLinesKnown(t *testing.T) {
 	disk := FormatDiskLine(s)
 	if !strings.Contains(disk, "free") || !strings.Contains(disk, "used") {
 		t.Errorf("disk line = %q", disk)
+	}
+}
+
+func TestFormatCacheSwapUnavailable(t *testing.T) {
+	var s Sample
+	if got := FormatCacheLine(s); got != Unavailable {
+		t.Errorf("cache = %q", got)
+	}
+	if got := FormatSwapLine(s); got != Unavailable {
+		t.Errorf("swap = %q", got)
+	}
+	s.SwapOK = true
+	s.SwapTotalBytes = 0
+	if got := FormatSwapLine(s); !strings.Contains(got, "0 B") {
+		t.Errorf("empty swap = %q", got)
 	}
 }
 
@@ -114,6 +139,17 @@ func TestSampleRatios(t *testing.T) {
 	s.MemTotalBytes = 100
 	if r, ok := s.MemRatio(); !ok || r != 0.25 {
 		t.Errorf("mem ratio = %v %v", r, ok)
+	}
+	s.MemCachedOK = true
+	s.MemCachedBytes = 10
+	if r, ok := s.MemCachedRatio(); !ok || r != 0.1 {
+		t.Errorf("cache ratio = %v %v", r, ok)
+	}
+	s.SwapOK = true
+	s.SwapUsedBytes = 1
+	s.SwapTotalBytes = 4
+	if r, ok := s.SwapRatio(); !ok || r != 0.25 {
+		t.Errorf("swap ratio = %v %v", r, ok)
 	}
 	s.DiskOK = true
 	s.DiskUsedBytes = 50

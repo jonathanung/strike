@@ -52,11 +52,28 @@ func TestTelemetryFormatHelpers(t *testing.T) {
 	if got := telemetryMemText(th, empty); got != telemetryUnavailable {
 		t.Errorf("mem empty = %q", got)
 	}
+	if got := telemetryCacheText(th, empty); got != telemetryUnavailable {
+		t.Errorf("cache empty = %q", got)
+	}
+	if got := telemetrySwapText(th, empty); got != telemetryUnavailable {
+		t.Errorf("swap empty = %q", got)
+	}
 	if got := telemetryCPUText(th, empty, true); got != telemetryUnavailable {
 		t.Errorf("cpu empty = %q", got)
 	}
 	if got := telemetryDiskText(th, empty); got != telemetryUnavailable {
 		t.Errorf("disk empty = %q", got)
+	}
+	withCache := host.TelemetrySample{
+		MemOK: true, MemUsedBytes: 8 * 1024 * 1024 * 1024, MemTotalBytes: 24 * 1024 * 1024 * 1024,
+		MemCachedOK: true, MemCachedBytes: 6 * 1024 * 1024 * 1024,
+		SwapOK: true, SwapUsedBytes: 0, SwapTotalBytes: 0,
+	}
+	if got := telemetryCacheText(th, withCache); !strings.Contains(got, "cache") {
+		t.Errorf("cache text = %q", got)
+	}
+	if got := telemetrySwapText(th, withCache); !strings.Contains(got, "0 B") {
+		t.Errorf("empty swap text = %q", got)
 	}
 }
 
@@ -65,6 +82,8 @@ func TestTelemetryWindowRenderStates(t *testing.T) {
 	normal := host.TelemetrySample{
 		CPUHostOK: true, CPUHostPct: 42.3,
 		MemOK: true, MemUsedBytes: 10 * 1024 * 1024 * 1024, MemTotalBytes: 32 * 1024 * 1024 * 1024,
+		MemCachedOK: true, MemCachedBytes: 4 * 1024 * 1024 * 1024,
+		SwapOK: true, SwapUsedBytes: 512 * 1024 * 1024, SwapTotalBytes: 2 * 1024 * 1024 * 1024,
 		DiskOK: true, DiskUsedBytes: 287 * 1024 * 1024 * 1024, DiskTotalBytes: 494 * 1024 * 1024 * 1024,
 		DiskFreeBytes: 207 * 1024 * 1024 * 1024,
 	}
@@ -79,22 +98,35 @@ func TestTelemetryWindowRenderStates(t *testing.T) {
 		sample host.TelemetrySample
 		width  int
 		want   []string
+		forbid []string
 		noZero bool
 	}{
-		{"normal wide", normal, 48, []string{"RAM", "CPU", "Disk", "42.3%", "used"}, false},
-		{"warning", warn, 48, []string{"RAM", "used"}, false},
-		{"critical", crit, 48, []string{"CPU", "95.0%"}, false},
-		{"unavailable", host.TelemetrySample{}, 40, []string{"RAM", "CPU", "Disk", telemetryUnavailable}, true},
-		{"compact", normal, 20, []string{"RAM", "CPU"}, false},
-		{"tiny", normal, 10, []string{"RAM"}, false},
+		{"normal wide", normal, 48, []string{"RAM", "Cache", "Swap", "CPU", "Disk", "42.3%", "used"}, nil, false},
+		{"warning", warn, 48, []string{"RAM", "used"}, nil, false},
+		{"critical", crit, 48, []string{"CPU", "95.0%"}, nil, false},
+		{"unavailable", host.TelemetrySample{}, 40, []string{"RAM", "CPU", "Disk", telemetryUnavailable}, nil, true},
+		{"compact", normal, 20, []string{"RAM", "CPU"}, nil, false},
+		{"tiny", normal, 10, []string{"RAM"}, nil, false},
+		{"no swap configured", host.TelemetrySample{
+			MemOK: true, MemUsedBytes: 1, MemTotalBytes: 2,
+			MemCachedOK: true, MemCachedBytes: 1,
+			SwapOK: true, SwapTotalBytes: 0,
+			CPUHostOK: true, CPUHostPct: 1,
+			DiskOK: true, DiskUsedBytes: 1, DiskTotalBytes: 2, DiskFreeBytes: 1,
+		}, 48, []string{"RAM", "Cache", "CPU", "Disk"}, []string{"Swap"}, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			w := telemetryWindow{tel: &scriptedTelemetry{}, sample: tt.sample, has: true, width: tt.width, height: 5}
+			w := telemetryWindow{tel: &scriptedTelemetry{}, sample: tt.sample, has: true, width: tt.width, height: 8}
 			view := w.view(th)
 			plain := ansi.Strip(view)
 			for _, want := range tt.want {
 				if !strings.Contains(plain, want) {
 					t.Errorf("missing %q in %q", want, plain)
+				}
+			}
+			for _, bad := range tt.forbid {
+				if strings.Contains(plain, bad) {
+					t.Errorf("unexpected %q in %q", bad, plain)
 				}
 			}
 			for _, line := range strings.Split(view, "\n") {
