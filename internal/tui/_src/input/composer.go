@@ -12,7 +12,7 @@ func (m Model) updateComposer(msg tea.Msg) (tea.Model, tea.Cmd) {
 	before := m.composer.Value()
 	var cmd tea.Cmd
 	m.composer, cmd = m.composer.Update(msg)
-	if cleaned := stripComposerOSCLeak(m.composer.Value()); cleaned != m.composer.Value() {
+	if cleaned := stripComposerLeaks(m.composer.Value()); cleaned != m.composer.Value() {
 		m.composer.SetValue(cleaned)
 	}
 	if m.historyPos >= 0 && m.composer.Value() != before {

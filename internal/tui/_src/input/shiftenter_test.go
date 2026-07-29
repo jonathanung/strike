@@ -376,6 +376,121 @@ func TestBareESCDeliveredImmediately(t *testing.T) {
 	}
 }
 
+// TestWrapInputLeakedSGRMouseRePrefixed covers #484: when ESC is delivered as a
+// bare KeyEsc, the following "[<64;col;rowM" body must be re-prefixed so Bubble
+// Tea decodes MouseMsg (scroll) instead of typing the body into the composer.
+func TestWrapInputLeakedSGRMouseRePrefixed(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "wheel up body",
+			in:   "[<64;56;36M",
+			want: "\x1b[<64;56;36M",
+		},
+		{
+			name: "wheel down body",
+			in:   "[<65;62;26M",
+			want: "\x1b[<65;62;26M",
+		},
+		{
+			name: "release m terminator",
+			in:   "[<0;10;12m",
+			want: "\x1b[<0;10;12m",
+		},
+		{
+			name: "full sequence passthrough",
+			in:   "\x1b[<64;56;36M",
+			want: "\x1b[<64;56;36M",
+		},
+		{
+			name: "leak then text",
+			in:   "[<64;1;1Mhi",
+			want: "\x1b[<64;1;1Mhi",
+		},
+		{
+			name: "normal bracket typing",
+			in:   "[notes]",
+			want: "[notes]",
+		},
+		{
+			name: "bracket less-than without digits",
+			in:   "[<foo",
+			want: "[<foo",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := io.ReadAll(WrapInput(strings.NewReader(tt.in)))
+			if err != nil {
+				t.Fatalf("ReadAll: %v", err)
+			}
+			if string(got) != tt.want {
+				t.Errorf("WrapInput(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWrapInputLeakedSGRMouseSplitAcrossReads(t *testing.T) {
+	// ESC alone, then leaked body chunks — body must re-gain ESC, not type.
+	cr := &chunkReader{chunks: [][]byte{
+		[]byte("\x1b"),
+		[]byte("[<64;"),
+		[]byte("56;36M"),
+		[]byte("x"),
+	}}
+	got, err := io.ReadAll(WrapInput(cr))
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	want := "\x1b\x1b[<64;56;36Mx"
+	if string(got) != want {
+		t.Errorf("split mouse leak = %q, want %q", got, want)
+	}
+}
+
+func TestPartialLeakedMouseHeldAcrossReads(t *testing.T) {
+	cr := &chunkReader{chunks: [][]byte{
+		[]byte("[<64"),
+		[]byte(";1;2M"),
+	}}
+	r := WrapInput(cr)
+	buf := make([]byte, 32)
+	n, err := r.Read(buf)
+	if n != 0 || err != nil {
+		t.Fatalf("partial leaked mouse Read = %d %q err=%v, want 0, nil", n, buf[:n], err)
+	}
+	n, err = r.Read(buf)
+	if err != nil && err != io.EOF {
+		t.Fatalf("complete Read err: %v", err)
+	}
+	if string(buf[:n]) != "\x1b[<64;1;2M" {
+		t.Fatalf("complete Read = %q, want re-prefixed mouse CSI", buf[:n])
+	}
+}
+
+func TestStripComposerMouseLeak(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{"[<64;56;36M", ""},
+		{"[<65;62;26M", ""},
+		{"hello[<64;1;1Mworld", "helloworld"},
+		{"\x1b[<64;56;36M", ""},
+		{"[notes]", "[notes]"},
+		{"[<foo", "[<foo"},
+		{"pre[<0;1;2mok", "preok"},
+	}
+	for _, tt := range tests {
+		if got := stripComposerMouseLeak(tt.in); got != tt.want {
+			t.Errorf("stripComposerMouseLeak(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
 // TestDivergentCSINotStuck ensures up-arrow (and similar non-rewritten CSI)
 // is delivered on the first Read and never held as a rewrite prefix.
 func TestDivergentCSINotStuck(t *testing.T) {
