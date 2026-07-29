@@ -178,6 +178,9 @@ type Model struct {
 	// transcriptPlainLines mirrors viewport content without ANSI, used for
 	// path:line hit-testing (open-at-line).
 	transcriptPlainLines []string
+	// vpCache holds per-cell rendered transcript blocks so refreshViewport
+	// only re-renders dirty cells (typically the streaming tail).
+	vpCache viewportCache
 	// selectedFileRef is set when the user click-selects a path:line citation
 	// (-1 = none). Empty-composer enter opens it when no tool expand applies.
 	selectedFileRef int
