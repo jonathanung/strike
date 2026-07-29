@@ -68,6 +68,9 @@ type responsesRequest struct {
 	Store        bool                 `json:"store"`
 	Stream       bool                 `json:"stream"`
 	Reasoning    *responsesReasoning  `json:"reasoning,omitempty"`
+	// PromptCacheKey improves sticky routing for shared prompt prefixes
+	// (OpenAI/xAI prompt_cache_key). Omitted when empty.
+	PromptCacheKey string `json:"prompt_cache_key,omitempty"`
 }
 
 type responsesReasoning struct {
@@ -112,9 +115,17 @@ type responsesError struct {
 }
 
 type responsesUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
-	TotalTokens  int `json:"total_tokens"`
+	InputTokens        int                       `json:"input_tokens"`
+	OutputTokens       int                       `json:"output_tokens"`
+	TotalTokens        int                       `json:"total_tokens"`
+	InputTokensDetails *responsesInputTokDetails `json:"input_tokens_details,omitempty"`
+}
+
+// responsesInputTokDetails carries OpenAI/xAI cache breakouts. Fields are
+// subsets of input_tokens (not additive extras).
+type responsesInputTokDetails struct {
+	CachedTokens     int `json:"cached_tokens"`
+	CacheWriteTokens int `json:"cache_write_tokens"`
 }
 
 type responsesOutputItem struct {
@@ -176,14 +187,45 @@ func (p *ResponsesProvider) Stream(ctx context.Context, req provider.Request) (<
 			done.StopReason = "completed"
 		}
 		if resp.Usage != nil {
-			done.Usage = &provider.Usage{
-				InputTokens:  resp.Usage.InputTokens,
-				OutputTokens: resp.Usage.OutputTokens,
-				TotalTokens:  resp.Usage.TotalTokens,
-			}
+			done.Usage = responsesUsageToProvider(resp.Usage)
 		}
 		ch <- done
 	}), nil
+}
+
+// responsesUsageToProvider maps Responses API usage onto provider.Usage with
+// the same subset accounting as chatUsageToProvider.
+func responsesUsageToProvider(u *responsesUsage) *provider.Usage {
+	if u == nil {
+		return nil
+	}
+	out := &provider.Usage{
+		InputTokens:  u.InputTokens,
+		OutputTokens: u.OutputTokens,
+		TotalTokens:  u.TotalTokens,
+	}
+	if u.InputTokensDetails == nil {
+		return out
+	}
+	cached := u.InputTokensDetails.CachedTokens
+	write := u.InputTokensDetails.CacheWriteTokens
+	if cached < 0 {
+		cached = 0
+	}
+	if write < 0 {
+		write = 0
+	}
+	if cached > out.InputTokens {
+		cached = out.InputTokens
+	}
+	remain := out.InputTokens - cached
+	if write > remain {
+		write = remain
+	}
+	out.CacheReadTokens = cached
+	out.CacheCreationTokens = write
+	out.InputTokens = remain - write
+	return out
 }
 
 func toResponsesRequest(req provider.Request) responsesRequest {
@@ -193,6 +235,9 @@ func toResponsesRequest(req provider.Request) responsesRequest {
 		ToolChoice:   "auto",
 		Store:        false,
 		Stream:       false,
+	}
+	if k := strings.TrimSpace(req.CacheKey); k != "" {
+		out.PromptCacheKey = k
 	}
 	if effort := base.OpenAIEffort(req.Effort); effort != "" {
 		out.Reasoning = &responsesReasoning{Effort: effort}
