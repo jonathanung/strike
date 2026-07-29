@@ -234,6 +234,159 @@ func TestResponsesRequestCarriesReasoningEffort(t *testing.T) {
 	}
 }
 
+// TestToResponsesRequestPromptCacheKey pins Codex/OpenClaw-shaped cache key
+// on the chatgpt.com Responses body (and omits blank keys).
+func TestToResponsesRequestPromptCacheKey(t *testing.T) {
+	out := toResponsesRequest(provider.Request{
+		Model:    "gpt-5.5",
+		CacheKey: "  sess-chatgpt  ",
+	})
+	if out.PromptCacheKey != "sess-chatgpt" {
+		t.Fatalf("PromptCacheKey = %q, want sess-chatgpt", out.PromptCacheKey)
+	}
+	raw, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"prompt_cache_key":"sess-chatgpt"`) {
+		t.Fatalf("wire missing prompt_cache_key: %s", raw)
+	}
+	// Must never emit prompt_cache_retention — chatgpt.com 400s on it.
+	if strings.Contains(string(raw), "prompt_cache_retention") {
+		t.Fatalf("chatgpt body must omit prompt_cache_retention: %s", raw)
+	}
+
+	empty := toResponsesRequest(provider.Request{Model: "gpt-5.5", CacheKey: "   "})
+	rawEmpty, err := json.Marshal(empty)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(rawEmpty), "prompt_cache_key") {
+		t.Fatalf("blank CacheKey must omit prompt_cache_key: %s", rawEmpty)
+	}
+}
+
+// TestToResponsesRequestIncludesEncryptedReasoning matches Codex include list.
+func TestToResponsesRequestIncludesEncryptedReasoning(t *testing.T) {
+	out := toResponsesRequest(provider.Request{Model: "gpt-5.5"})
+	if len(out.Include) != 1 || out.Include[0] != "reasoning.encrypted_content" {
+		t.Fatalf("Include = %#v, want [reasoning.encrypted_content]", out.Include)
+	}
+	raw, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"reasoning.encrypted_content"`) {
+		t.Fatalf("wire missing include entry: %s", raw)
+	}
+}
+
+// TestStreamSendsPromptCacheKeyOnWire pins request body cache key + usage map.
+func TestStreamSendsPromptCacheKeyOnWire(t *testing.T) {
+	var gotBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("session_id") == "" {
+			t.Error("session_id header missing")
+		}
+		var err error
+		gotBody, err = io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read body: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":100,"output_tokens":5,"total_tokens":105,"input_tokens_details":{"cached_tokens":80,"cache_write_tokens":10}}}}`+"\n")
+	}))
+	defer srv.Close()
+
+	p := New(func(context.Context) (string, string, error) { return "t", "a", nil })
+	p.endpoint = srv.URL
+	stream, err := p.Stream(context.Background(), provider.Request{
+		Model:    "gpt-5.5",
+		CacheKey: "session-531",
+		Messages: []provider.Message{{Role: provider.RoleUser, Text: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var done *provider.StreamEvent
+	for ev := range stream {
+		if ev.Type == provider.EventError {
+			t.Fatalf("stream error: %v", ev.Err)
+		}
+		if ev.Type == provider.EventDone {
+			cp := ev
+			done = &cp
+		}
+	}
+	if !strings.Contains(string(gotBody), `"prompt_cache_key":"session-531"`) {
+		t.Fatalf("request body missing prompt_cache_key: %s", gotBody)
+	}
+	if !strings.Contains(string(gotBody), `"reasoning.encrypted_content"`) {
+		t.Fatalf("request body missing include: %s", gotBody)
+	}
+	if done == nil || done.Usage == nil {
+		t.Fatalf("done/usage = %+v", done)
+	}
+	// 100 input − 80 cached − 10 write = 10 uncached input
+	if done.Usage.InputTokens != 10 || done.Usage.CacheReadTokens != 80 || done.Usage.CacheCreationTokens != 10 {
+		t.Errorf("Usage = %+v, want input=10 cacheRead=80 cacheWrite=10", done.Usage)
+	}
+	if done.Usage.OutputTokens != 5 || done.Usage.TotalTokens != 105 {
+		t.Errorf("Usage output/total = %+v", done.Usage)
+	}
+}
+
+func TestStreamUsageToProviderCacheBreakout(t *testing.T) {
+	tests := []struct {
+		name string
+		in   *streamUsage
+		want provider.Usage
+	}{
+		{
+			name: "nil",
+			in:   nil,
+		},
+		{
+			name: "no details",
+			in:   &streamUsage{InputTokens: 50, OutputTokens: 3, TotalTokens: 53},
+			want: provider.Usage{InputTokens: 50, OutputTokens: 3, TotalTokens: 53},
+		},
+		{
+			name: "cached and write subsets",
+			in: &streamUsage{
+				InputTokens: 200, OutputTokens: 1, TotalTokens: 201,
+				InputTokensDetails: &streamInputTokDetails{CachedTokens: 150, CacheWriteTokens: 20},
+			},
+			want: provider.Usage{InputTokens: 30, OutputTokens: 1, TotalTokens: 201, CacheReadTokens: 150, CacheCreationTokens: 20},
+		},
+		{
+			name: "clamps oversize cache counts",
+			in: &streamUsage{
+				InputTokens:        10,
+				InputTokensDetails: &streamInputTokDetails{CachedTokens: 100, CacheWriteTokens: 50},
+			},
+			want: provider.Usage{InputTokens: 0, CacheReadTokens: 10, CacheCreationTokens: 0},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := streamUsageToProvider(tt.in)
+			if tt.in == nil {
+				if got != nil {
+					t.Fatalf("got %+v, want nil", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatal("got nil")
+			}
+			if *got != tt.want {
+				t.Errorf("got %+v, want %+v", *got, tt.want)
+			}
+		})
+	}
+}
+
 // TestResponsesRequestOmitsReasoningWhenUnset keeps the nested object out of
 // the body rather than sending an empty one.
 func TestResponsesRequestOmitsReasoningWhenUnset(t *testing.T) {

@@ -10,7 +10,7 @@ today, what landed for non-Anthropic paths, and when cache misses are expected.
 | --- | --- | --- | --- |
 | **anthropic** | Yes — engineered breakpoints | `cache_control: { "type": "ephemeral" }` on last system block, last tool, last eligible message content block (max 3 of Anthropic’s 4) | Yes — `cache_read_input_tokens` → `CacheReadTokens`, `cache_creation_input_tokens` → `CacheCreationTokens` |
 | **openaicompat** (OpenAI platform, xAI, custom OpenAI-compat hosts) | Yes — stable session cache key | `prompt_cache_key` on chat-completions and Responses bodies | Yes — `prompt_tokens_details.cached_tokens` / `cache_write_tokens` (chat) and `input_tokens_details.*` (Responses) → `CacheReadTokens` / `CacheCreationTokens` |
-| **chatgpt** (subscription Responses at chatgpt.com) | No deliberate markers | Backend may cache opaquely; no documented public breakpoint / key on this transport | No separate cache fields today |
+| **chatgpt** (subscription Responses at chatgpt.com) | Yes — stable session cache key (Codex-shaped) | `prompt_cache_key` on body; `include: ["reasoning.encrypted_content"]`; **never** `prompt_cache_retention` (backend 400s) | Yes — `input_tokens_details.cached_tokens` / `cache_write_tokens` when present |
 | **google** (Gemini `generateContent`) | No | Google’s explicit context-cache API is a different product (create/cachedContents + `cachedContent` name); not the same as per-request breakpoints | `usageMetadata` has no cache breakout in our wire types |
 | **echo** | N/A | Offline test double | Synthetic usage only |
 
@@ -66,10 +66,19 @@ still surface cache hits via existing `UsageReported.cacheRead` /
 | High RPM on one key | OpenAI may shed sticky routing (~15 rpm/key guidance); rare for interactive Strike sessions |
 | Provider switch mid-session | Different host/model → independent caches |
 
+### Why chatgpt also sends `prompt_cache_key`
+
+Codex CLI and OpenClaw both attach `prompt_cache_key` (session id) and
+`include: ["reasoning.encrypted_content"]` on
+`chatgpt.com/backend-api/codex/responses`. Strike mirrors that so the
+subscription backend gets the same sticky-routing + reasoning-resume shape.
+Do **not** send `prompt_cache_retention` or platform-only `metadata` — peers
+strip those because the ChatGPT backend rejects them.
+
 ## Non-goals (this issue)
 
 - Re-implement Anthropic `cache_control` (already done).
-- Fake markers on Google/ChatGPT without a real wire contract.
+- Fake markers on Google without a real wire contract.
 - GPT-5.6-only `prompt_cache_breakpoint` (follow-up when Strike’s default
   OpenAI models require explicit mode).
 - Changing prune or compaction behavior.
@@ -82,4 +91,5 @@ still surface cache hits via existing `UsageReported.cacheRead` /
 | Engine stamp | `internal/engine/turn.go`, `compaction.go` (`SessionID`) |
 | Chat wire + usage | `internal/provider/openaicompat/openaicompat.go` |
 | Responses wire + usage | `internal/provider/openaicompat/responses.go` |
-| Tests | `openaicompat_test.go` (`prompt_cache_key` golden body + usage tables) |
+| ChatGPT subscription wire + usage | `internal/provider/chatgpt/chatgpt.go` |
+| Tests | `openaicompat_test.go`, `chatgpt_test.go` (`prompt_cache_key` golden body + usage tables) |
