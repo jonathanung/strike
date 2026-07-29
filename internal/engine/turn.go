@@ -325,7 +325,7 @@ func (e *Engine) runHarnessTurn(ctx context.Context, h harness.Harness, hName st
 	providerCall := func(ctx context.Context, req provider.Request) (<-chan provider.StreamEvent, error) {
 		req.Model = e.model
 		req.Priority = e.priority
-		out := make(chan provider.StreamEvent)
+		out := make(chan provider.StreamEvent, 16)
 		go func() {
 			defer close(out)
 			maxAttempts := e.opts.MaxStreamAttempts
