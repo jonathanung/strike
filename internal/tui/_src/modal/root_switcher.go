@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"strings"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -16,9 +18,11 @@ type rootSwitcherEntry struct {
 
 // rootSwitcherModal is the centered session switcher (ctrl+s). It lists
 // concurrent root sessions with numbered shortcuts (1-9). Number keys jump
-// directly; enter/j selects the highlighted entry; esc dismisses.
+// directly; enter selects the highlighted entry; esc dismisses. Type to filter
+// (same pattern as the command palette).
 type rootSwitcherModal struct {
 	roots  []rootSwitcherEntry
+	filter string
 	cursor int
 }
 
@@ -26,61 +30,94 @@ func newRootSwitcherModal(roots []rootSwitcherEntry) *rootSwitcherModal {
 	return &rootSwitcherModal{roots: roots}
 }
 
+func (m *rootSwitcherModal) filtered() []rootSwitcherEntry {
+	query := strings.ToLower(strings.TrimSpace(m.filter))
+	if query == "" {
+		return m.roots
+	}
+	matches := make([]rootSwitcherEntry, 0, len(m.roots))
+	for _, r := range m.roots {
+		if strings.Contains(strings.ToLower(r.label), query) ||
+			strings.Contains(strings.ToLower(r.state), query) {
+			matches = append(matches, r)
+		}
+	}
+	return matches
+}
+
 func (m *rootSwitcherModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
+	list := m.filtered()
 	if isEscape(msg) {
 		return nil, nil
 	}
-	// Direct number shortcut: 1-9 jump to that root.
+	// Direct number shortcut: 1-9 jump to the Nth filtered entry.
 	if len(msg.Runes) == 1 {
 		r := msg.Runes[0]
 		if r >= '1' && r <= '9' {
 			idx := int(r - '1')
-			if idx < len(m.roots) {
-				return nil, func() tea.Msg { return activateRootMsg{id: m.roots[idx].id} }
+			if idx < len(list) {
+				return nil, func() tea.Msg { return activateRootMsg{id: list[idx].id} }
 			}
 			return m, nil
 		}
 	}
 	switch msg.String() {
-	case "up", "k", "ctrl+p":
-		if m.cursor > 0 {
-			m.cursor--
+	case "up", "ctrl+p":
+		if len(list) > 0 {
+			m.cursor = (m.cursor + len(list) - 1) % len(list)
 		}
-		return m, nil
-	case "down", "j", "ctrl+n":
-		if m.cursor < len(m.roots)-1 {
-			m.cursor++
+	case "down", "ctrl+n":
+		if len(list) > 0 {
+			m.cursor = (m.cursor + 1) % len(list)
 		}
-		return m, nil
+	case "backspace":
+		runes := []rune(m.filter)
+		if len(runes) > 0 {
+			m.filter = string(runes[:len(runes)-1])
+			m.cursor = 0
+		}
 	case "enter":
-		if m.cursor >= 0 && m.cursor < len(m.roots) {
-			return nil, func() tea.Msg { return activateRootMsg{id: m.roots[m.cursor].id} }
+		if m.cursor >= 0 && m.cursor < len(list) {
+			return nil, func() tea.Msg { return activateRootMsg{id: list[m.cursor].id} }
 		}
 		return m, nil
+	default:
+		if msg.Type == tea.KeyRunes {
+			m.filter += string(msg.Runes)
+			m.cursor = 0
+		}
 	}
 	return m, nil
 }
 
 func (m *rootSwitcherModal) view(width int, th theme.Theme) string {
-	inner := max(1, ui.PanelInnerWidth(th, width))
-	items := make([]ui.ListItem, len(m.roots))
-	for i, r := range m.roots {
+	list := m.filtered()
+	if m.cursor >= len(list) {
+		m.cursor = max(0, len(list)-1)
+	}
+	items := make([]ui.ListItem, len(list))
+	for i, r := range list {
 		prefix := ""
 		if i < 9 {
 			prefix = string(rune('1'+i)) + ") "
 		}
 		items[i] = ui.ListItem{
-			Label: prefix + r.label,
+			Label:  prefix + r.label,
+			Detail: r.state,
 		}
 	}
+	inner := max(1, ui.PanelInnerWidth(th, width))
 	body := ui.List(th, ui.ListOpts{
-		Items:   items,
-		Cursor:  m.cursor,
-		Width:   inner,
-		Visible: len(items),
-		Empty:   "no concurrent sessions",
+		Items:      items,
+		Cursor:     m.cursor,
+		Width:      inner,
+		Visible:    len(items),
+		ShowFilter: true,
+		Filter:     m.filter,
+		Total:      len(m.roots),
+		Empty:      "no matching sessions",
 	})
-	hint := dotJoin(th, "1-9 jump", "up/down/j/k move", "enter select", "esc close")
+	hint := dotJoin(th, "type to filter", "1-9 jump", "↑/↓ move", "enter select", "esc close")
 	return ui.Dialog(th, ui.DialogOpts{
 		Title: "Switch session",
 		Hint:  hint,

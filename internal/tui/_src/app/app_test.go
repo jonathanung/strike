@@ -4018,3 +4018,134 @@ func TestRootSwitcherNumberShortcut(t *testing.T) {
 		t.Fatalf("modal = %T, want nil after selection", m.modal)
 	}
 }
+
+func TestRootSwitcherFilterNarrows(t *testing.T) {
+	entries := []rootSwitcherEntry{
+		{id: "aaa", label: "alpha project", state: "ready"},
+		{id: "bbb", label: "beta project", state: "working"},
+	}
+	rs := newRootSwitcherModal(entries)
+	if len(rs.filtered()) != 2 {
+		t.Fatalf("unfiltered list = %d, want 2", len(rs.filtered()))
+	}
+
+	// Type "alpha" - only one match (beta does not contain "alpha")
+	for _, r := range "alpha" {
+		rs.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	if len(rs.filtered()) != 1 {
+		t.Fatalf("filtered to %q: got %d entries, want 1", rs.filter, len(rs.filtered()))
+	}
+	if rs.filtered()[0].id != "aaa" {
+		t.Fatalf("filtered entry = %q, want aaa", rs.filtered()[0].id)
+	}
+}
+
+func TestRootSwitcherFilterMatchesState(t *testing.T) {
+	entries := []rootSwitcherEntry{
+		{id: "s1", label: "topic one", state: "ready"},
+		{id: "s2", label: "topic two", state: "working"},
+	}
+	rs := newRootSwitcherModal(entries)
+
+	// Type "working" - only the second entry matches on state
+	for _, r := range "working" {
+		rs.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	if len(rs.filtered()) != 1 {
+		t.Fatalf("filtered to %q: got %d entries, want 1", rs.filter, len(rs.filtered()))
+	}
+	if rs.filtered()[0].id != "s2" {
+		t.Fatalf("filtered entry = %q, want s2", rs.filtered()[0].id)
+	}
+}
+
+func TestRootSwitcherBackspaceRestores(t *testing.T) {
+	entries := []rootSwitcherEntry{
+		{id: "s1", label: "session one", state: "ready"},
+		{id: "s2", label: "session two", state: "working"},
+	}
+	rs := newRootSwitcherModal(entries)
+
+	// Type something with no match
+	for _, r := range "zzzz" {
+		rs.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	if len(rs.filtered()) != 0 {
+		t.Fatalf("zero-match filter: got %d entries", len(rs.filtered()))
+	}
+
+	// Backspace to clear filter and restore all entries
+	for range 4 {
+		rs.update(tea.KeyMsg{Type: tea.KeyBackspace})
+	}
+	if len(rs.filtered()) != 2 {
+		t.Fatalf("unfiltered: got %d entries, want 2", len(rs.filtered()))
+	}
+}
+
+func TestRootSwitcherViewShowsFilter(t *testing.T) {
+	entries := []rootSwitcherEntry{
+		{id: "a", label: "alpha session", state: "ready"},
+		{id: "b", label: "beta session", state: "working"},
+	}
+	rs := newRootSwitcherModal(entries)
+	rs.filter = "alpha"
+
+	view := rs.view(80, theme.Default())
+	if !strings.Contains(view, "filter:") {
+		t.Fatalf("view missing filter header:\n%s", view)
+	}
+	if !strings.Contains(view, "alpha") {
+		t.Fatalf("view missing filter text 'alpha':\n%s", view)
+	}
+	if !strings.Contains(view, "ready") {
+		t.Fatalf("view missing detail 'ready':\n%s", view)
+	}
+	if !strings.Contains(view, "1/2") {
+		t.Fatalf("view missing filter counter '1/2':\n%s", view)
+	}
+	if !strings.Contains(view, "1)") {
+		t.Fatalf("view missing numeric prefix '1)':\n%s", view)
+	}
+}
+
+func TestRootSwitcherNumberShortcutWithFilter(t *testing.T) {
+	entries := []rootSwitcherEntry{
+		{id: "a", label: "zulu session", state: "working"},
+		{id: "b", label: "alpha session", state: "error"},
+		{id: "c", label: "apple session", state: "ready"},
+	}
+	rs := newRootSwitcherModal(entries)
+	// Filter to "a" - matches "alpha" and "apple" (2 entries; "zulu" has no 'a')
+	for _, r := range "a" {
+		rs.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	list := rs.filtered()
+	if len(list) != 2 {
+		t.Fatalf("filtered to %q: got %d entries, want 2", rs.filter, len(list))
+	}
+
+	// "1" jumps to index 0 (alpha)
+	next, cmd := rs.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("1")})
+	if cmd == nil {
+		t.Fatal("number shortcut 1 emitted no command")
+	}
+	msg := cmd()
+	if _, ok := msg.(activateRootMsg); !ok {
+		t.Fatalf("number shortcut 1 emitted %T, want activateRootMsg", msg)
+	}
+	if next != nil {
+		t.Fatal("number shortcut should close modal (return nil)")
+	}
+
+	// Re-setup: re-type filter "a"
+	rs2 := newRootSwitcherModal(entries)
+	for _, ch := range "a" {
+		rs2.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{ch}})
+	}
+	next2, _ := rs2.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")})
+	if next2 == nil {
+		t.Fatal("number 3 out of range should keep modal open")
+	}
+}
