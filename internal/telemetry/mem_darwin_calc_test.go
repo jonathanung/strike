@@ -3,12 +3,14 @@ package telemetry
 import "testing"
 
 const (
-	darwinPageSize = 16384                   // Apple silicon
-	darwinTotal    = 24 * 1024 * 1024 * 1024 // 24 GiB, the machine in #521
+	testPageSize = 16384                   // Apple silicon
+	testTotal    = 24 * 1024 * 1024 * 1024 // 24 GiB, the machine in #521
 )
 
-// darwinSnapshot is a real sysctl/vm_stat capture from a 64 GiB M-series Mac,
-// taken while Activity Monitor reported ~52.8 GB used and ~13.5 GB cached files.
+// darwinSnapshot is a real sysctl/vm_stat capture from a 64 GiB M-series Mac.
+// Fed through darwinMemUsage it yields 53.76 GB used / 13.91 GB cached (78.2%);
+// the same snapshot's Mach counters put Activity Monitor's "Memory Used" at
+// 52.77 GB. Before this fix the same machine reported 67.67 GB (98.5%).
 type darwinSnapshot struct {
 	pageSize  uint64
 	total     uint64
@@ -132,7 +134,7 @@ func TestDarwinMemUsageDegradesPerMissingCounter(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			used, cached, ok := darwinMemUsage(darwinPageSize, darwinTotal, tc.pages)
+			used, cached, ok := darwinMemUsage(testPageSize, testTotal, tc.pages)
 			if ok != tc.wantOK {
 				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
 			}
@@ -142,11 +144,11 @@ func TestDarwinMemUsageDegradesPerMissingCounter(t *testing.T) {
 				}
 				return
 			}
-			if want := tc.wantCached * darwinPageSize; cached != want {
+			if want := tc.wantCached * testPageSize; cached != want {
 				t.Errorf("cached = %d, want %d", cached, want)
 			}
 			// used + free + cached always accounts for all of physical RAM.
-			if want := darwinTotal - (free+tc.wantCached)*darwinPageSize; used != want {
+			if want := testTotal - (free+tc.wantCached)*testPageSize; used != want {
 				t.Errorf("used = %d, want %d", used, want)
 			}
 		})
@@ -156,29 +158,102 @@ func TestDarwinMemUsageDegradesPerMissingCounter(t *testing.T) {
 func TestDarwinMemUsageGuardsBadInput(t *testing.T) {
 	full := darwinVMPages{Free: 1, External: 1, ExternalOK: true, Purgeable: 1, PurgeableOK: true}
 
-	if used, cached, ok := darwinMemUsage(0, darwinTotal, full); used != 0 || cached != 0 || ok {
+	if used, cached, ok := darwinMemUsage(0, testTotal, full); used != 0 || cached != 0 || ok {
 		t.Errorf("zero page size = (%d, %d, %v), want (0, 0, false)", used, cached, ok)
 	}
-	if used, cached, ok := darwinMemUsage(darwinPageSize, 0, full); used != 0 || cached != 0 || ok {
+	if used, cached, ok := darwinMemUsage(testPageSize, 0, full); used != 0 || cached != 0 || ok {
 		t.Errorf("zero total = (%d, %d, %v), want (0, 0, false)", used, cached, ok)
 	}
 
-	// Page counts far beyond physical RAM must clamp, never wrap. 1<<63 each
-	// would overflow uint64 if the counts were summed before clamping.
-	for _, n := range []uint64{1 << 60, 1 << 63, ^uint64(0)} {
-		huge := darwinVMPages{
-			Free: n, External: n, ExternalOK: true,
-			Purgeable: n, PurgeableOK: true,
+	// A page count larger than physical RAM means the counter does not mean
+	// what we think it does. Clamping it would render a confident 0.0% used;
+	// report unavailable instead.
+	const totalPages = testTotal / testPageSize
+	for _, n := range []uint64{totalPages + 1, 1 << 60, 1 << 63, ^uint64(0)} {
+		for _, tc := range []struct {
+			name  string
+			pages darwinVMPages
+		}{
+			{"external", darwinVMPages{Free: 1, External: n, ExternalOK: true}},
+			{"purgeable", darwinVMPages{Free: 1, External: 1, ExternalOK: true, Purgeable: n, PurgeableOK: true}},
+			{"free", darwinVMPages{Free: n, External: 1, ExternalOK: true}},
+		} {
+			used, cached, ok := darwinMemUsage(testPageSize, testTotal, tc.pages)
+			if ok || used != 0 || cached != 0 {
+				t.Errorf("%s = %d: got (%d, %d, %v), want (0, 0, false)", tc.name, n, used, cached, ok)
+			}
 		}
-		used, cached, ok := darwinMemUsage(darwinPageSize, darwinTotal, huge)
-		if !ok {
-			t.Errorf("%d: ok = false, want true", n)
-		}
-		if used != 0 {
-			t.Errorf("%d: used = %d, want 0 when everything is reclaimable", n, used)
-		}
-		if cached != darwinTotal {
-			t.Errorf("%d: cached = %d, want clamped to total %d", n, cached, darwinTotal)
-		}
+	}
+}
+
+// Regression for #521 on the darwin/amd64 release artifact: under Rosetta,
+// hw.pagesize reports 4096 while the kernel keeps its vm.* counters in native
+// 16 KiB pages, scaling every count 4x low and pinning the RAM bar near full.
+func TestDarwinPageSizeCorrectsRosettaLie(t *testing.T) {
+	const (
+		total   = 68719476736 // 64 GiB
+		vmPages = 4100101     // kernel page pool, measured on the same machine
+	)
+
+	tests := []struct {
+		name       string
+		hwPageSize uint64
+		total      uint64
+		vmPages    uint64
+		want       uint64
+		wantOK     bool
+	}{
+		{"native arm64", 16384, total, vmPages, 16384, true},
+		{"rosetta lies 4096", 4096, total, vmPages, 16384, true},
+		{"intel 4 KiB pages", 4096, 17179869184, 4128768, 4096, true},
+		{"no pool to check against", 16384, total, 0, 16384, true},
+		{"no pool and no hw.pagesize", 0, total, 0, 0, false},
+		{"absurd pool implies bad page size", 4096, total, 1 << 40, 0, false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := darwinPageSize(tc.hwPageSize, tc.total, tc.vmPages)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
+			}
+			if got != tc.want {
+				t.Errorf("pageSize = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// The Rosetta page size must not merely be corrected in isolation — it has to
+// move the RAM bar back off near-full.
+func TestDarwinMemUsageUnaffectedByRosettaPageSize(t *testing.T) {
+	s := liveSnapshot()
+	const vmPages = 4100101
+
+	native, ok := darwinPageSize(16384, s.total, vmPages)
+	if !ok {
+		t.Fatal("native page size unavailable")
+	}
+	rosetta, ok := darwinPageSize(4096, s.total, vmPages)
+	if !ok {
+		t.Fatal("rosetta page size unavailable")
+	}
+	if native != rosetta {
+		t.Fatalf("page size differs by arch: native %d, rosetta %d", native, rosetta)
+	}
+
+	usedNative, cachedNative, _ := darwinMemUsage(native, s.total, s.pages())
+	usedRosetta, cachedRosetta, _ := darwinMemUsage(rosetta, s.total, s.pages())
+	if usedNative != usedRosetta || cachedNative != cachedRosetta {
+		t.Errorf("arch-dependent reading: native (%d, %d), rosetta (%d, %d)",
+			usedNative, cachedNative, usedRosetta, cachedRosetta)
+	}
+	// Trusting hw.pagesize=4096 is what reproduced #521 at ~95%.
+	usedUncorrected, _, _ := darwinMemUsage(4096, s.total, s.pages())
+	if r := float64(usedUncorrected) / float64(s.total); r < 0.9 {
+		t.Fatalf("uncorrected page size no longer reproduces the bug: ratio %.3f", r)
+	}
+	if r := float64(usedNative) / float64(s.total); r > 0.85 {
+		t.Errorf("corrected used ratio %.3f still reads near-full", r)
 	}
 }

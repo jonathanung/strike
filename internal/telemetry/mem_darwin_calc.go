@@ -1,5 +1,36 @@
 package telemetry
 
+import "math/bits"
+
+// minDarwinPageSize is the smallest page size any macOS kernel uses. A derived
+// value below this means the page pool is not what we think it is.
+const minDarwinPageSize = 4096
+
+// darwinPageSize resolves the page size the vm.* counters are expressed in.
+//
+// hw.pagesize is per-process and lies under Rosetta: an x86_64 binary reads
+// 4096 while the kernel keeps its counters in the native 16 KiB pages. That
+// scales every page count 4x low and puts the RAM bar back near-full — #521
+// reproduces on the darwin/amd64 release artifact, which install.sh picks
+// whenever uname -m reports x86_64.
+//
+// vm.pages is the kernel's own page-pool size, so totalBytes/vmPages recovers
+// the real page size: the pool is within a few percent of physical RAM, far
+// short of the 2x that would round to the wrong power of two.
+func darwinPageSize(hwPageSize, totalBytes, vmPages uint64) (uint64, bool) {
+	if totalBytes == 0 || vmPages == 0 {
+		// Nothing to cross-check against; hw.pagesize is all there is.
+		return hwPageSize, hwPageSize >= minDarwinPageSize
+	}
+	// A pool larger than RAM is nonsense; guard before the shift, which would
+	// otherwise be by -1 when the ratio rounds to zero.
+	ratio := totalBytes / vmPages
+	if ratio < minDarwinPageSize {
+		return 0, false
+	}
+	return uint64(1) << (bits.Len64(ratio) - 1), true
+}
+
 // darwinVMPages holds the macOS VM page counts the RAM metric is derived from.
 // Each optional field carries its own OK flag because the set of exported vm.*
 // sysctls varies by kernel version, and a missing one must degrade rather than
@@ -34,29 +65,31 @@ type darwinVMPages struct {
 //
 // Pure function (no syscalls) so Linux CI can lock the formula.
 func darwinMemUsage(pageSize, totalBytes uint64, p darwinVMPages) (used, cached uint64, ok bool) {
-	if pageSize == 0 || totalBytes == 0 || !p.ExternalOK {
+	if pageSize < minDarwinPageSize || totalBytes == 0 || !p.ExternalOK {
 		return 0, 0, false
 	}
-	// Clamp every page count to the physical page pool before any arithmetic,
-	// so a bogus sysctl value can neither overflow a sum nor scale past total.
+	// A single class cannot exceed physical RAM. If one does, the counter does
+	// not mean what this code thinks it means (a units change, or an OID
+	// repurposed to carry something else), and clamping would turn that into a
+	// confident wrong number — the #534 failure mode. Report unavailable.
 	totalPages := totalBytes / pageSize
-	cachedPages := clampPages(p.External, totalPages)
+	if p.Free > totalPages || p.External > totalPages || p.Purgeable > totalPages {
+		return 0, 0, false
+	}
+
+	cachedPages := p.External
 	if p.PurgeableOK {
 		// Purgeable pages are anonymous, so they never overlap External.
-		cachedPages = clampPages(cachedPages+clampPages(p.Purgeable, totalPages), totalPages)
+		cachedPages += p.Purgeable
 	}
-	freePages := clampPages(p.Free, totalPages)
-
-	reclaimable := (freePages + cachedPages) * pageSize
+	// Each term is <= totalPages, so the sum cannot overflow; it can still
+	// exceed total if the counters race, hence the clamp.
+	reclaimable := (p.Free + cachedPages) * pageSize
 	if reclaimable > totalBytes {
 		reclaimable = totalBytes
 	}
-	return totalBytes - reclaimable, cachedPages * pageSize, true
-}
-
-func clampPages(pages, max uint64) uint64 {
-	if pages > max {
-		return max
+	if cachedPages > totalPages {
+		cachedPages = totalPages
 	}
-	return pages
+	return totalBytes - reclaimable, cachedPages * pageSize, true
 }

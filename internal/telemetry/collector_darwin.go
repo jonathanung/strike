@@ -65,9 +65,13 @@ func readMemory() (used, cached, total uint64, ok, cachedOK bool) {
 	}
 	total = memsize
 
-	pageSize := uint64(4096)
-	if ps, err := unix.SysctlUint64("hw.pagesize"); err == nil && ps > 0 {
-		pageSize = ps
+	// hw.pagesize alone is not trustworthy — see darwinPageSize. vm.pages is
+	// the kernel page pool the counters are drawn from, so it cross-checks it.
+	hwPageSize, _ := unix.SysctlUint64("hw.pagesize")
+	vmPages, _ := sysctlPageCount("vm.pages")
+	pageSize, ok := darwinPageSize(hwPageSize, memsize, vmPages)
+	if !ok {
+		return 0, 0, 0, false, false
 	}
 
 	// Page counts via sysctl. free is required; the rest degrade gracefully.
@@ -75,13 +79,14 @@ func readMemory() (used, cached, total uint64, ok, cachedOK bool) {
 	// vm.page_wire_count / vm.compressor_page_count at all — those are Mach
 	// host_statistics64 fields, not sysctls — so the metric is built from the
 	// OIDs that do exist.
-	freePages, ok := sysctlPageCount("vm.page_free_count")
-	if !ok {
+	freePages, freeOK := sysctlPageCount("vm.page_free_count")
+	if !freeOK {
 		return 0, 0, 0, false, false
 	}
 	pages := darwinVMPages{Free: freePages}
-	// File-backed ("Cached Files") pages. Older kernels expose only the
-	// pageable subset under a different name.
+	// File-backed ("Cached Files") pages. Both OIDs exist on current macOS;
+	// the second is a narrower fallback that omits non-pageable external pages,
+	// so prefer the full count and only fall back if it is missing.
 	if v, ok := sysctlPageCount("vm.vm_page_external_count"); ok {
 		pages.External, pages.ExternalOK = v, true
 	} else if v, ok := sysctlPageCount("vm.page_pageable_external_count"); ok {
