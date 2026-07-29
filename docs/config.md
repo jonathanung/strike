@@ -198,7 +198,49 @@ servers so their tools appear in the model registry as `mcp_<server>_<tool>`.
 Supported transports: **stdio** (local subprocess) and **streamable HTTP**
 (remote endpoint; JSON or SSE responses).
 
-### Stdio (local)
+Prefer **`mcp.jsonc`** (or `mcp.json`) for server definitions. The legacy
+`mcp` object in config still works. Layers merge last-wins by file:
+
+`defaults → ~/.strike/config → ~/.strike/mcp.jsonc → ./.strike/config → ./.strike/mcp.jsonc`
+
+(`.json` is accepted as well as `.jsonc`.) When a layer sets servers
+(including `{}`), it **replaces** the previous layer's server map. Omitted
+`mcp` / missing mcp file leaves the lower layer unchanged.
+
+### `mcp.jsonc` (preferred)
+
+Bare server map or wrapped `servers` object; JSONC comments allowed:
+
+```jsonc
+// ~/.strike/mcp.jsonc or ./.strike/mcp.jsonc
+{
+  "github": {
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-github"],
+    "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "…" }
+  },
+  "remote": {
+    "type": "http",
+    "url": "https://mcp.example.com/mcp",
+    "headers": { "Authorization": "Bearer …" }
+  }
+}
+```
+
+Equivalent wrapped form:
+
+```jsonc
+{
+  "servers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"]
+    }
+  }
+}
+```
+
+### Legacy: `mcp` in config
 
 ```json
 {
@@ -214,22 +256,6 @@ Supported transports: **stdio** (local subprocess) and **streamable HTTP**
 }
 ```
 
-### Streamable HTTP (remote)
-
-```json
-{
-  "mcp": {
-    "servers": {
-      "remote": {
-        "type": "http",
-        "url": "https://mcp.example.com/mcp",
-        "headers": { "Authorization": "Bearer …" }
-      }
-    }
-  }
-}
-```
-
 | Field | Required | Notes |
 |---|---|---|
 | `servers.<name>` | yes | short letter-led slug (`[A-Za-z][A-Za-z0-9_-]*`) |
@@ -239,9 +265,6 @@ Supported transports: **stdio** (local subprocess) and **streamable HTTP**
 | `env` | no | stdio env overlay; **never logged** |
 | `url` | http | MCP endpoint URL (if set without `type`, transport is `http`) |
 | `headers` | no | HTTP request headers (e.g. `Authorization`); **never logged or shown in `/mcp`** |
-
-Layers: when a layer sets `mcp.servers` (including `{}`), it **replaces** the
-previous layer's server map. Omitted `mcp` leaves the lower layer unchanged.
 
 Lifecycle: servers start with the session (after the tool worktree is bound),
 list tools once, and shut down on exit. A crashed or unreachable server does
@@ -267,9 +290,9 @@ Permissions: every MCP tool call asks with permission name `mcp` and pattern
 ```
 
 Treat project-local MCP config like shell hooks: stdio runs local commands;
-HTTP may send secrets via `headers`. Prefer global `~/.strike/config` for shared
-servers; review `command`/`args`/`env`/`url`/`headers` before trusting a
-project's `.strike/config`.
+HTTP may send secrets via `headers`. Prefer global `~/.strike/mcp.jsonc` for
+shared servers; review `command`/`args`/`env`/`url`/`headers` before trusting
+a project's `.strike/mcp.jsonc`.
 
 ## Custom providers
 
