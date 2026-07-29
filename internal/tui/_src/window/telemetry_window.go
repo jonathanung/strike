@@ -44,8 +44,8 @@ type telemetrySampleMsg struct {
 }
 
 // telemetryWindow is the right-pane system resource panel (CPU/RAM/disk).
-// Off by default: enabled is set via --telemetry or /telemetry on so the pane
-// is absent from the session stack and no 1 Hz sampler runs until opted in.
+// On by default (sampler ~1 Hz). Hide with /telemetry off; --telemetry keeps
+// the pane on at launch.
 type telemetryWindow struct {
 	tel     host.Telemetry
 	root    string
@@ -61,7 +61,7 @@ type telemetryWindow struct {
 }
 
 func newTelemetryWindow() telemetryWindow {
-	return telemetryWindow{}
+	return telemetryWindow{enabled: true}
 }
 
 func (w telemetryWindow) id() string { return telemetryWindowID }
@@ -208,7 +208,7 @@ func applyTelemetryMsg(r windowRegistry, msg tea.Msg) (windowRegistry, tea.Cmd) 
 }
 
 // configureTelemetryWindow binds host.Telemetry + workDir onto the system pane.
-// Does not enable sampling; use setTelemetryEnabled for opt-in.
+// Does not change enabled; use setTelemetryEnabled to show/hide.
 func configureTelemetryWindow(r windowRegistry, root string, tel host.Telemetry) windowRegistry {
 	for i, w := range r.windows {
 		tw, ok := w.(telemetryWindow)
@@ -227,7 +227,7 @@ func configureTelemetryWindow(r windowRegistry, root string, tel host.Telemetry)
 	return r
 }
 
-// telemetryEnabled reports whether the system telemetry pane is opted in.
+// telemetryEnabled reports whether the system telemetry pane is shown.
 func telemetryEnabled(r windowRegistry) bool {
 	for _, w := range r.windows {
 		if tw, ok := w.(telemetryWindow); ok {

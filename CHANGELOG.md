@@ -14,6 +14,10 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+### Changed
+
+- System telemetry (CPU/RAM/disk pane) is on by default again; disable with `/telemetry off` ([#485](https://github.com/jonathanung/strike/issues/485)).
+
 ## [v0.0.11] - 2026-07-28
 
 ### Added

@@ -94,7 +94,7 @@ var optionSpecs = []optionSpec{
 	},
 	{
 		names:       []string{"telemetry"},
-		description: "show local system metrics pane (CPU/RAM/disk); off by default",
+		description: "show local system metrics pane (CPU/RAM/disk); on by default",
 		register: func(fs *flag.FlagSet, opts *cliOptions) {
 			fs.BoolVar(&opts.telemetry, "telemetry", false, "")
 		},
