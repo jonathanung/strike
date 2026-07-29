@@ -517,7 +517,7 @@ func (m *Model) openRenameModal(id string) tea.Cmd {
 			current = childViewTitle(ch.agent, ch.prompt, ch.sessionID, ch.title)
 		}
 	}
-	m.modal = newRenameModal(m.services.Sessions, id, current)
+	m.modal = newRenameModal(m.services.Sessions, id, current, m.th)
 	m.reflow()
 	return nil
 }
