@@ -139,6 +139,9 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "serve" {
 		return runServeCLI(args[1:], stdout, stderr)
 	}
+	if len(args) > 0 && args[0] == "restore" {
+		return runRestoreCLI(args[1:], stdout, stderr)
+	}
 	if len(args) > 0 && (args[0] == "version" || args[0] == "--version" || args[0] == "-version") {
 		fmt.Fprintln(stdout, version.String())
 		return 0
@@ -262,6 +265,7 @@ func writeUsage(w io.Writer) {
 	fmt.Fprintln(w, "  strike exec [options] <prompt>")
 	fmt.Fprintln(w, "  strike serve [options]")
 	fmt.Fprintln(w, "  strike auth <command> [arguments]")
+	fmt.Fprintln(w, "  strike restore [options]")
 	fmt.Fprintln(w, "  strike version")
 	fmt.Fprintln(w, "  strike upgrade")
 	fmt.Fprintln(w)

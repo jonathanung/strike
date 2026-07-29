@@ -1,4 +1,4 @@
-.PHONY: build run run-echo serve serve-expose web-build web-test web-check test vet cover cover-check clean setup tui-gen
+.PHONY: build run run-echo serve serve-expose web-build web-test web-check test vet cover cover-check clean setup restore tui-gen
 
 # Overall statement-coverage floor for `make cover-check` (local / optional CI).
 # Soft baseline ~77%; keep below measured total so the gate does not flake.
@@ -23,6 +23,10 @@ build: tui-gen
 # Creates ~/.strike (config, example agent + skill); never overwrites.
 setup:
 	bash scripts/setup.sh
+
+# Repair missing/corrupt ~/.strike layout (prefer: strike restore).
+restore:
+	bash scripts/restore.sh
 
 # Runs with your configured/default provider (needs credentials; see README).
 run: build
