@@ -52,11 +52,28 @@ func TestTelemetryFormatHelpers(t *testing.T) {
 	if got := telemetryMemText(th, empty); got != telemetryUnavailable {
 		t.Errorf("mem empty = %q", got)
 	}
+	if got := telemetryCacheText(th, empty); got != telemetryUnavailable {
+		t.Errorf("cache empty = %q", got)
+	}
+	if got := telemetrySwapText(th, empty); got != telemetryUnavailable {
+		t.Errorf("swap empty = %q", got)
+	}
 	if got := telemetryCPUText(th, empty, true); got != telemetryUnavailable {
 		t.Errorf("cpu empty = %q", got)
 	}
 	if got := telemetryDiskText(th, empty); got != telemetryUnavailable {
 		t.Errorf("disk empty = %q", got)
+	}
+	withCache := host.TelemetrySample{
+		MemOK: true, MemUsedBytes: 8 * 1024 * 1024 * 1024, MemTotalBytes: 24 * 1024 * 1024 * 1024,
+		MemCachedOK: true, MemCachedBytes: 6 * 1024 * 1024 * 1024,
+		SwapOK: true, SwapUsedBytes: 0, SwapTotalBytes: 0,
+	}
+	if got := telemetryCacheText(th, withCache); !strings.Contains(got, "cache") {
+		t.Errorf("cache text = %q", got)
+	}
+	if got := telemetrySwapText(th, withCache); !strings.Contains(got, "0 B") {
+		t.Errorf("empty swap text = %q", got)
 	}
 }
 
@@ -65,6 +82,8 @@ func TestTelemetryWindowRenderStates(t *testing.T) {
 	normal := host.TelemetrySample{
 		CPUHostOK: true, CPUHostPct: 42.3,
 		MemOK: true, MemUsedBytes: 10 * 1024 * 1024 * 1024, MemTotalBytes: 32 * 1024 * 1024 * 1024,
+		MemCachedOK: true, MemCachedBytes: 4 * 1024 * 1024 * 1024,
+		SwapOK: true, SwapUsedBytes: 512 * 1024 * 1024, SwapTotalBytes: 2 * 1024 * 1024 * 1024,
 		DiskOK: true, DiskUsedBytes: 287 * 1024 * 1024 * 1024, DiskTotalBytes: 494 * 1024 * 1024 * 1024,
 		DiskFreeBytes: 207 * 1024 * 1024 * 1024,
 	}
@@ -81,7 +100,7 @@ func TestTelemetryWindowRenderStates(t *testing.T) {
 		want   []string
 		noZero bool
 	}{
-		{"normal wide", normal, 48, []string{"RAM", "CPU", "Disk", "42.3%", "used"}, false},
+		{"normal wide", normal, 48, []string{"RAM", "Cache", "Swap", "CPU", "Disk", "42.3%", "used"}, false},
 		{"warning", warn, 48, []string{"RAM", "used"}, false},
 		{"critical", crit, 48, []string{"CPU", "95.0%"}, false},
 		{"unavailable", host.TelemetrySample{}, 40, []string{"RAM", "CPU", "Disk", telemetryUnavailable}, true},

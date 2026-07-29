@@ -54,7 +54,8 @@ func FormatPercent(pct float64) string {
 }
 
 // FormatMemLine builds the RAM summary without a bar:
-// "10.1 GB / 32 GB used · 31.6%" or Unavailable.
+// "10.1 GB / 32 GB used · 31.6%" or with cache "… · 4.2 GB cache · 31.6%"
+// or Unavailable.
 func FormatMemLine(s Sample) string {
 	if !s.MemOK {
 		return Unavailable
@@ -63,7 +64,40 @@ func FormatMemLine(s Sample) string {
 	if !ok {
 		return Unavailable
 	}
-	return FormatBytes(s.MemUsedBytes) + " / " + FormatBytes(s.MemTotalBytes) +
+	line := FormatBytes(s.MemUsedBytes) + " / " + FormatBytes(s.MemTotalBytes) + " used"
+	if s.MemCachedOK {
+		line += " · " + FormatBytes(s.MemCachedBytes) + " cache"
+	}
+	return line + " · " + FormatPercent(r*100)
+}
+
+// FormatCacheLine builds the reclaimable cache summary:
+// "4.2 GB cache · 13.1%" of total RAM, or Unavailable.
+func FormatCacheLine(s Sample) string {
+	if !s.MemCachedOK || !s.MemOK {
+		return Unavailable
+	}
+	r, ok := s.MemCachedRatio()
+	if !ok {
+		return FormatBytes(s.MemCachedBytes) + " cache"
+	}
+	return FormatBytes(s.MemCachedBytes) + " cache · " + FormatPercent(r*100)
+}
+
+// FormatSwapLine builds the swap summary without a bar:
+// "512 MB / 2 GB used · 25.0%", "0 B / 0 B" when swap is off, or Unavailable.
+func FormatSwapLine(s Sample) string {
+	if !s.SwapOK {
+		return Unavailable
+	}
+	if s.SwapTotalBytes == 0 {
+		return FormatBytes(0) + " / " + FormatBytes(0) + " used · " + FormatPercent(0)
+	}
+	r, ok := s.SwapRatio()
+	if !ok {
+		return Unavailable
+	}
+	return FormatBytes(s.SwapUsedBytes) + " / " + FormatBytes(s.SwapTotalBytes) +
 		" used · " + FormatPercent(r*100)
 }
 

@@ -48,6 +48,15 @@ type Sample struct {
 	MemUsedBytes  uint64
 	MemTotalBytes uint64
 	MemOK         bool
+	// MemCachedBytes is reclaimable OS file/page cache excluded from MemUsedBytes
+	// (macOS inactive/speculative/purgeable; Linux Cached+SReclaimable). Optional.
+	MemCachedBytes uint64
+	MemCachedOK    bool
+
+	// SwapUsedBytes / SwapTotalBytes are OS swap / compressed-swap backing when known.
+	SwapUsedBytes  uint64
+	SwapTotalBytes uint64
+	SwapOK         bool
 
 	DiskUsedBytes  uint64
 	DiskTotalBytes uint64
@@ -115,6 +124,22 @@ func (s Sample) MemRatio() (float64, bool) {
 		return 0, false
 	}
 	return Ratio(s.MemUsedBytes, s.MemTotalBytes)
+}
+
+// MemCachedRatio is reclaimable cache / total RAM when MemCachedOK and MemOK.
+func (s Sample) MemCachedRatio() (float64, bool) {
+	if !s.MemCachedOK || !s.MemOK {
+		return 0, false
+	}
+	return Ratio(s.MemCachedBytes, s.MemTotalBytes)
+}
+
+// SwapRatio is used/total swap when SwapOK and total > 0.
+func (s Sample) SwapRatio() (float64, bool) {
+	if !s.SwapOK {
+		return 0, false
+	}
+	return Ratio(s.SwapUsedBytes, s.SwapTotalBytes)
 }
 
 // DiskRatio is used/total disk when DiskOK.

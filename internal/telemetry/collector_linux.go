@@ -77,35 +77,81 @@ func readProcessCPUTime(pid int) (ns int64, ok bool) {
 	return int64(sec * 1e9), true
 }
 
-func readMemory() (used, total uint64, ok bool) {
+func readMemory() (used, cached, total uint64, ok, cachedOK bool) {
 	f, err := os.Open("/proc/meminfo")
 	if err != nil {
-		return 0, 0, false
+		return 0, 0, 0, false, false
 	}
 	defer f.Close()
-	var memTotal, memAvailable uint64
-	var haveTotal, haveAvail bool
+	var memTotal, memAvailable, memCached, sReclaimable uint64
+	var haveTotal, haveAvail, haveCached, haveSReclaim bool
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		line := sc.Text()
-		if strings.HasPrefix(line, "MemTotal:") {
+		switch {
+		case strings.HasPrefix(line, "MemTotal:"):
 			memTotal, haveTotal = parseMeminfoKB(line)
-		} else if strings.HasPrefix(line, "MemAvailable:") {
+		case strings.HasPrefix(line, "MemAvailable:"):
 			memAvailable, haveAvail = parseMeminfoKB(line)
+		case strings.HasPrefix(line, "Cached:"):
+			memCached, haveCached = parseMeminfoKB(line)
+		case strings.HasPrefix(line, "SReclaimable:"):
+			sReclaimable, haveSReclaim = parseMeminfoKB(line)
 		}
-		if haveTotal && haveAvail {
+		if haveTotal && haveAvail && haveCached && haveSReclaim {
 			break
 		}
 	}
 	if !haveTotal || memTotal == 0 {
-		return 0, 0, false
+		return 0, 0, 0, false, false
 	}
 	total = memTotal
+	// MemAvailable already excludes reclaimable cache/buffers (like Activity Monitor used).
 	if haveAvail && memAvailable <= memTotal {
 		used = memTotal - memAvailable
 	} else {
 		// Fallback: MemTotal - MemFree - Buffers - Cached is less accurate.
 		used = memTotal
+	}
+	if haveCached {
+		cached = memCached
+		if haveSReclaim {
+			cached += sReclaimable
+		}
+		if cached > total {
+			cached = total
+		}
+		cachedOK = true
+	}
+	return used, cached, total, true, cachedOK
+}
+
+func readSwap() (used, total uint64, ok bool) {
+	f, err := os.Open("/proc/meminfo")
+	if err != nil {
+		return 0, 0, false
+	}
+	defer f.Close()
+	var swapTotal, swapFree uint64
+	var haveTotal, haveFree bool
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := sc.Text()
+		if strings.HasPrefix(line, "SwapTotal:") {
+			swapTotal, haveTotal = parseMeminfoKB(line)
+		} else if strings.HasPrefix(line, "SwapFree:") {
+			swapFree, haveFree = parseMeminfoKB(line)
+		}
+		if haveTotal && haveFree {
+			break
+		}
+	}
+	if !haveTotal {
+		return 0, 0, false
+	}
+	total = swapTotal
+	if haveFree && swapFree <= swapTotal {
+		used = swapTotal - swapFree
 	}
 	return used, total, true
 }

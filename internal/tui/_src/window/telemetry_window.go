@@ -138,9 +138,17 @@ func (w telemetryWindow) view(th theme.Theme) string {
 	diskR, diskOK := telemetryDiskRatio(w.sample)
 	lines := []string{
 		telemetryMetricLine(th, w.width, "RAM", telemetryMemText(th, w.sample), memR, memOK),
+	}
+	if cacheR, cacheOK := telemetryCacheRatio(w.sample); cacheOK || w.sample.MemCachedOK {
+		lines = append(lines, telemetryMetricLine(th, w.width, "Cache", telemetryCacheText(th, w.sample), cacheR, cacheOK))
+	}
+	if swapR, swapOK := telemetrySwapRatio(w.sample); swapOK || w.sample.SwapOK {
+		lines = append(lines, telemetryMetricLine(th, w.width, "Swap", telemetrySwapText(th, w.sample), swapR, swapOK))
+	}
+	lines = append(lines,
 		telemetryMetricLine(th, w.width, "CPU", telemetryCPUText(th, w.sample, includeProc), cpuR, cpuOK),
 		telemetryMetricLine(th, w.width, "Disk", telemetryDiskText(th, w.sample), diskR, diskOK),
-	}
+	)
 	if w.err != "" && w.width >= 12 {
 		lines = append(lines, wrapWindowText(st.Muted.Render(welcomeTruncate(w.err, w.width, th.Icons.Ellipsis)), w.width))
 	}
@@ -290,6 +298,34 @@ func telemetryMemRatio(s host.TelemetrySample) (float64, bool) {
 	return r, true
 }
 
+func telemetryCacheRatio(s host.TelemetrySample) (float64, bool) {
+	if !s.MemCachedOK || !s.MemOK || s.MemTotalBytes == 0 {
+		return 0, false
+	}
+	r := float64(s.MemCachedBytes) / float64(s.MemTotalBytes)
+	if r < 0 {
+		r = 0
+	}
+	if r > 1 {
+		r = 1
+	}
+	return r, true
+}
+
+func telemetrySwapRatio(s host.TelemetrySample) (float64, bool) {
+	if !s.SwapOK || s.SwapTotalBytes == 0 {
+		return 0, false
+	}
+	r := float64(s.SwapUsedBytes) / float64(s.SwapTotalBytes)
+	if r < 0 {
+		r = 0
+	}
+	if r > 1 {
+		r = 1
+	}
+	return r, true
+}
+
 func telemetryCPURatio(s host.TelemetrySample) (float64, bool) {
 	if !s.CPUHostOK {
 		return 0, false
@@ -328,6 +364,34 @@ func telemetryMemText(th theme.Theme, s host.TelemetrySample) string {
 	}
 	sep := th.Resolve().Icons.DetailSeparator
 	return telemetryFormatBytes(s.MemUsedBytes) + " / " + telemetryFormatBytes(s.MemTotalBytes) +
+		" used " + sep + " " + telemetryFormatPercent(r*100)
+}
+
+func telemetryCacheText(th theme.Theme, s host.TelemetrySample) string {
+	if !s.MemCachedOK || !s.MemOK {
+		return telemetryUnavailable
+	}
+	sep := th.Resolve().Icons.DetailSeparator
+	line := telemetryFormatBytes(s.MemCachedBytes) + " cache"
+	if r, ok := telemetryCacheRatio(s); ok {
+		line += " " + sep + " " + telemetryFormatPercent(r*100)
+	}
+	return line
+}
+
+func telemetrySwapText(th theme.Theme, s host.TelemetrySample) string {
+	if !s.SwapOK {
+		return telemetryUnavailable
+	}
+	sep := th.Resolve().Icons.DetailSeparator
+	if s.SwapTotalBytes == 0 {
+		return telemetryFormatBytes(0) + " / " + telemetryFormatBytes(0) + " used"
+	}
+	r, ok := telemetrySwapRatio(s)
+	if !ok {
+		return telemetryUnavailable
+	}
+	return telemetryFormatBytes(s.SwapUsedBytes) + " / " + telemetryFormatBytes(s.SwapTotalBytes) +
 		" used " + sep + " " + telemetryFormatPercent(r*100)
 }
 

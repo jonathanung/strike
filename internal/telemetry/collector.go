@@ -147,13 +147,22 @@ func (h *Host) sampleCPU(s *Sample) {
 }
 
 func (h *Host) sampleMem(s *Sample) {
-	used, total, ok := readMemory()
-	if !ok {
-		return
+	used, cached, total, ok, cachedOK := readMemory()
+	if ok {
+		s.MemUsedBytes = used
+		s.MemTotalBytes = total
+		s.MemOK = true
+		if cachedOK {
+			s.MemCachedBytes = cached
+			s.MemCachedOK = true
+		}
 	}
-	s.MemUsedBytes = used
-	s.MemTotalBytes = total
-	s.MemOK = true
+	swapUsed, swapTotal, swapOK := readSwap()
+	if swapOK {
+		s.SwapUsedBytes = swapUsed
+		s.SwapTotalBytes = swapTotal
+		s.SwapOK = true
+	}
 }
 
 // sampleDisk fills disk fields from cache and/or a non-blocking probe.
