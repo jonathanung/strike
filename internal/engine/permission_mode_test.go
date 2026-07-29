@@ -87,7 +87,7 @@ func TestSetPermissionModeRejectsUnknown(t *testing.T) {
 	}
 }
 
-func TestSetPermissionModeRejectedWhileTurnRunning(t *testing.T) {
+func TestSetPermissionModeAcceptedWhileTurnRunning(t *testing.T) {
 	const sessionID = "session-perm-mode-active"
 	prov := &blockingFastProvider{requests: make(chan provider.Request, 1)}
 	eng := engine.New(engine.Options{
@@ -117,11 +117,67 @@ func TestSetPermissionModeRejectedWhileTurnRunning(t *testing.T) {
 
 	eng.Ops() <- protocol.SetPermissionMode{Mode: protocol.PermissionModeYolo}
 	event := waitForEvent(t, eng, func(ev protocol.Event) bool {
-		err, ok := ev.(protocol.EngineError)
-		return ok && strings.Contains(err.Message, "cannot change permission mode")
+		sel, ok := ev.(protocol.PermissionModeSelected)
+		return ok && sel.Mode == protocol.PermissionModeYolo
 	})
-	if event.(protocol.EngineError).Correlation != (protocol.Correlation{SessionID: sessionID}) {
-		t.Errorf("EngineError correlation = %#v, want session only", event.(protocol.EngineError).Correlation)
+	selected := event.(protocol.PermissionModeSelected)
+	if selected.Correlation != (protocol.Correlation{SessionID: sessionID}) {
+		t.Errorf("PermissionModeSelected correlation = %#v, want session only", selected.Correlation)
+	}
+}
+
+func TestSetPermissionModePlanMidTurn(t *testing.T) {
+	prov := &blockingFastProvider{requests: make(chan provider.Request, 1)}
+	eng := engine.New(engine.Options{
+		SessionID:       "session-perm-mode-plan-mid",
+		InitialProvider: "blocking",
+		Select: func(string) (provider.Provider, string, error) {
+			return prov, "model", nil
+		},
+		Registry: tool.NewRegistry(),
+		WorkDir:  t.TempDir(),
+		Agents: []engine.Agent{
+			{Name: "build", Description: "build"},
+			{Name: "plan", Description: "plan"},
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	waitForEvent(t, eng, func(ev protocol.Event) bool {
+		_, ok := ev.(protocol.PermissionModeSelected)
+		return ok
+	})
+
+	eng.Ops() <- protocol.UserInput{Text: "keep the turn active"}
+	select {
+	case <-prov.requests:
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for active provider request")
+	}
+
+	eng.Ops() <- protocol.SetPermissionMode{Mode: protocol.PermissionModePlan}
+	var sawMode, sawPhase bool
+	deadline := time.After(10 * time.Second)
+	for !sawMode || !sawPhase {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for plan mode+phase mid-turn (mode=%v phase=%v)", sawMode, sawPhase)
+		case ev := <-eng.Events():
+			switch e := ev.(type) {
+			case protocol.PermissionModeSelected:
+				if e.Mode == protocol.PermissionModePlan {
+					sawMode = true
+				}
+			case protocol.PhaseChanged:
+				if e.Phase == "plan" {
+					sawPhase = true
+				}
+			case protocol.EngineError:
+				t.Fatalf("unexpected EngineError mid-turn plan mode: %s", e.Message)
+			}
+		}
 	}
 }
 

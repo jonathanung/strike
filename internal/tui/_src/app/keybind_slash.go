@@ -335,10 +335,7 @@ func (m Model) cycleAgentPersona() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) cyclePermissionMode() (tea.Model, tea.Cmd) {
-	if m.turnRunning {
-		m.setNotice("cannot cycle mode while a turn is running", true)
-		return m, nil
-	}
+	// Allowed mid-turn: engine applies posture to subsequent tool asks.
 	next := m.permMode.Next()
 	ops := m.ops
 	return m, func() tea.Msg {

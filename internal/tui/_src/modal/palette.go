@@ -154,8 +154,10 @@ func buildPaletteEntries(specs []commandSpec, agents []string, availability pale
 // paletteBuiltinDisabled returns why a shipped builtin is unavailable, or "".
 // Help/keys/exit/quit and navigation/interrupt keybind mirrors stay available
 // always. Vim/nano/md-read, think, export, cost, mcp, tool-cell mirrors,
-// pane-jump commands, and effective-prompt inspect stay available mid-turn so
-// users can inspect UI or dump the transcript without interrupting the engine.
+// pane-jump commands, permission mode dial (/mode, /mode-next), and
+// effective-prompt inspect stay available mid-turn so users can inspect UI,
+// change tool-permission posture, or dump the transcript without interrupting
+// the engine.
 func paletteBuiltinDisabled(id commandID, availability paletteAvailability) string {
 	switch id {
 	case commandHelp, commandKeys, commandLegend, commandExit, commandQuit,
@@ -168,7 +170,9 @@ func paletteBuiltinDisabled(id commandID, availability paletteAvailability) stri
 		commandAgents, commandActivity, commandFiles, commandVisualizer, commandSystem,
 		commandToolPrev, commandToolNext, commandToolExpand, commandToolCopy, commandToolReview, commandToolApply,
 		commandSubagent, commandParent, commandSubagentNext, commandSubagentPrev,
-		commandRootFilter:
+		commandRootFilter,
+		// Permission mode dial is live mid-turn (engine accepts SetPermissionMode).
+		commandMode, commandModeNext:
 		return ""
 	case commandModel:
 		if availability.TurnRunning {
