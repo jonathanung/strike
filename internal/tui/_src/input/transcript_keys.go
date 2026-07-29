@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"encoding/binary"
+	"hash/fnv"
 	"strings"
 	"time"
 
@@ -8,6 +10,28 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 )
+
+// viewportCacheItem is one displayed cell's cached render outputs.
+type viewportCacheItem struct {
+	c      cell
+	fp     uint64
+	raw    string
+	linked string
+	plain  string
+}
+
+// viewportCache avoids re-rendering completed transcript cells on each
+// refreshViewport call. Invalidated by width, theme, or workDir changes;
+// per-cell fingerprints catch content/selection/expand/flash updates.
+type viewportCache struct {
+	width   int
+	themeID string
+	workDir string
+	items   []viewportCacheItem
+	// cellRenders / cellHits are stats for the most recent refreshViewport.
+	cellRenders int
+	cellHits    int
+}
 
 // lastCell returns the trailing cell if it has type T; a new message part
 // starts a new cell otherwise.
@@ -22,6 +46,7 @@ func (m *Model) refreshViewport() {
 		m.viewport.GotoTop()
 		m.transcriptPlainLines = nil
 		m.selectedFileRef = -1
+		m.vpCache = viewportCache{}
 		return
 	}
 	m.syncToolSelectionFlags()
@@ -29,32 +54,170 @@ func (m *Model) refreshViewport() {
 	// so users reading history are not yanked down on each event.
 	atBottom := m.viewport.AtBottom()
 	yOff := m.viewport.YOffset
-	blocks := make([]string, 0, len(cells))
+
+	globalOK := m.vpCache.width == width &&
+		m.vpCache.themeID == m.themeID &&
+		m.vpCache.workDir == m.workDir
+	oldByPtr := map[any]viewportCacheItem{}
+	if globalOK {
+		for _, it := range m.vpCache.items {
+			oldByPtr[it.c] = it
+		}
+	}
+
+	items := make([]viewportCacheItem, 0, len(cells))
+	blocks := make([]string, 0, len(cells)+1)
+	plains := make([]string, 0, len(cells)+1)
+	renders, hits := 0, 0
 	for _, c := range cells {
 		if _, ok := c.(*reasoningCell); ok && !m.showThinking {
 			continue
 		}
-		blocks = append(blocks, m.renderCell(c, width))
+		fp := cellRenderFingerprint(c)
+		if old, ok := oldByPtr[c]; ok && old.fp == fp {
+			items = append(items, old)
+			blocks = append(blocks, old.linked)
+			plains = append(plains, old.plain)
+			hits++
+			continue
+		}
+		raw := m.renderCell(c, width)
+		linked := postLinkifyRendered(raw, m.th, m.workDir)
+		plain := ansi.Strip(raw)
+		items = append(items, viewportCacheItem{c: c, fp: fp, raw: raw, linked: linked, plain: plain})
+		blocks = append(blocks, linked)
+		plains = append(plains, plain)
+		renders++
 	}
 	// Live working chrome in the transcript when a turn is running and no
 	// assistant/tool content has arrived yet (providers with no CoT stream).
 	if m.turnRunning && !m.viewingChild() {
 		if thinkingPlaceholderVisible(cells, m.showThinking) {
-			blocks = append(blocks, renderThinkingPlaceholder(width, m.th, m.turnStartedAt))
+			ph := renderThinkingPlaceholder(width, m.th, m.turnStartedAt)
+			blocks = append(blocks, ph)
+			plains = append(plains, ansi.Strip(ph))
 		}
 	}
 	content := strings.Join(blocks, "\n\n")
-	m.transcriptPlainLines = strings.Split(ansi.Strip(content), "\n")
+	m.transcriptPlainLines = joinBlockPlainLines(plains)
 	if m.selectedFileRef >= len(m.collectFileRefs()) {
 		m.selectedFileRef = -1
 	}
-	linked := postLinkifyRendered(content, m.th, m.workDir)
-	m.viewport.SetContent(linked)
+	m.viewport.SetContent(content)
 	if atBottom {
 		m.viewport.GotoBottom()
 	} else {
 		m.viewport.SetYOffset(yOff)
 	}
+	m.vpCache = viewportCache{
+		width:       width,
+		themeID:     m.themeID,
+		workDir:     m.workDir,
+		items:       items,
+		cellRenders: renders,
+		cellHits:    hits,
+	}
+}
+
+// joinBlockPlainLines rebuilds the transcript plain-line map from per-block
+// strips, matching strings.Split(ansi.Strip(strings.Join(blocks, "\n\n")), "\n").
+func joinBlockPlainLines(plains []string) []string {
+	if len(plains) == 0 {
+		return nil
+	}
+	var lines []string
+	for i, p := range plains {
+		if i > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, strings.Split(p, "\n")...)
+	}
+	return lines
+}
+
+// cellRenderFingerprint hashes render-relevant cell state for cache keys.
+func cellRenderFingerprint(c cell) uint64 {
+	h := fnv.New64a()
+	writeStr := func(s string) {
+		var n [8]byte
+		binary.LittleEndian.PutUint64(n[:], uint64(len(s)))
+		_, _ = h.Write(n[:])
+		_, _ = h.Write([]byte(s))
+	}
+	writeByte := func(b byte) { _, _ = h.Write([]byte{b}) }
+	writeBool := func(v bool) {
+		if v {
+			writeByte(1)
+		} else {
+			writeByte(0)
+		}
+	}
+	writeU64 := func(v uint64) {
+		var n [8]byte
+		binary.LittleEndian.PutUint64(n[:], v)
+		_, _ = h.Write(n[:])
+	}
+	switch tc := c.(type) {
+	case *userCell:
+		writeByte('u')
+		writeBool(tc.copiedFlash)
+		writeStr(tc.text)
+	case *assistantCell:
+		writeByte('a')
+		writeBool(tc.complete)
+		writeBool(tc.copiedFlash)
+		writeStr(tc.text)
+	case *toolCell:
+		writeByte('t')
+		writeStr(tc.callID)
+		writeStr(tc.name)
+		writeStr(string(tc.args))
+		writeStr(tc.title)
+		writeStr(tc.output)
+		writeStr(string(tc.metadata))
+		writeBool(tc.done)
+		writeBool(tc.isError)
+		writeBool(tc.expanded)
+		writeBool(tc.selected)
+		writeBool(tc.copiedFlash)
+	case *exploreCell:
+		writeByte('e')
+		writeBool(tc.accepting)
+		writeBool(tc.expanded)
+		writeBool(tc.selected)
+		writeBool(tc.copiedFlash)
+		for _, call := range tc.calls {
+			if call == nil {
+				writeByte(0)
+				continue
+			}
+			writeU64(cellRenderFingerprint(call))
+		}
+	case *reasoningCell:
+		writeByte('r')
+		writeStr(tc.text)
+	case *infoCell:
+		writeByte('i')
+		writeStr(tc.text)
+	case *errorCell:
+		writeByte('E')
+		writeStr(tc.text)
+	case *subagentResultCell:
+		writeByte('s')
+		writeStr(tc.sessionID)
+		writeStr(tc.agent)
+		writeStr(tc.status)
+		writeStr(tc.summary)
+		writeU64(uint64(tc.elapsed))
+		writeBool(tc.expanded)
+		writeBool(tc.selected)
+		writeBool(tc.copiedFlash)
+	default:
+		// Unknown cell types always miss the cache.
+		writeByte('?')
+		writeU64(uint64(time.Now().UnixNano()))
+	}
+	return h.Sum64()
 }
 
 // renderCell paints one transcript cell, attaching OSC 8 file links using the
