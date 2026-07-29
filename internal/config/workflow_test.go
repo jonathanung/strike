@@ -209,3 +209,31 @@ func TestLoadWorkflowsIncludesBuiltinAndOverride(t *testing.T) {
 		t.Fatalf("builtin review-fix missing: %#v", got)
 	}
 }
+
+func TestLoadWorkflowsEmptyWorkDirSkipsProjectLayer(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	// A cwd-relative workflows/ or .strike/workflows must not be treated as
+	// the project layer when workDir is empty.
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	for _, dir := range []string{
+		filepath.Join(cwd, "workflows"),
+		filepath.Join(cwd, ".strike", "workflows"),
+	} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		body := `{"name":"cwd-leak","phases":[{"name":"x","exit":{"type":"user"}}]}`
+		if err := os.WriteFile(filepath.Join(dir, "leak.json"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ws, err := LoadWorkflows("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := FindWorkflow(ws, "cwd-leak"); ok {
+		t.Fatal("empty workDir loaded cwd workflow as project layer")
+	}
+}

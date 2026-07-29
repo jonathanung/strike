@@ -193,10 +193,11 @@ func LoadWorkflows(workDir string) ([]Workflow, error) {
 		byName[w.Name] = w
 		order = append(order, w.Name)
 	}
-	for _, dir := range []string{
-		filepath.Join(GlobalRoot(), "workflows"),
-		filepath.Join(projectRoot(workDir), "workflows"),
-	} {
+	dirs := []string{filepath.Join(GlobalRoot(), "workflows")}
+	if workDir != "" {
+		dirs = append(dirs, filepath.Join(projectRoot(workDir), "workflows"))
+	}
+	for _, dir := range dirs {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			continue
