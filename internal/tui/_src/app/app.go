@@ -623,9 +623,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.broadcastContextState()
 
 	case spinner.TickMsg:
-		// Drop the tick chain when idle so welcome/context/activity stop
-		// repainting without engine events (#481).
-		if m.agentState() != theme.AgentStateWorking {
+		// Drop the tick chain when idle (#481) or static working chrome (#497)
+		// so SSH sessions are not redrawn at spinner FPS without engine events.
+		if m.agentState() != theme.AgentStateWorking || staticWorkingChrome() {
 			return m, nil
 		}
 		var cmd tea.Cmd
