@@ -13,12 +13,16 @@ import (
 
 // Redraw/byte budget guards for the TUI performance epic (#452).
 // Prefer counters over wall-clock/SSH FPS tests so CI stays deterministic.
-// Tighten stream/viewport ceilings when coalesce (#496) and incremental
-// refreshViewport (#493) land; until then these encode non-regression floors.
+// Full-frame paints are FPS-capped by #496; refreshViewport still runs per
+// TextDelta until a later coalesce of that path.
 
-// streamRefreshPerDelta is the pre-coalesce ceiling: one refreshViewport per
-// TextDelta Update. Coalesce should drop this toward an FPS-style cap.
+// streamRefreshPerDelta is one refreshViewport per TextDelta Update (model
+// apply path). Full Canvas rebuilds are separately FPS-capped (#496).
 const streamRefreshPerDelta = 1
+
+// streamRenderFrameCap is the max full renderFrame builds for N TextDeltas
+// delivered in one FPS window (plus a small slack for TurnStarted priming).
+const streamRenderFrameCap = 4
 
 // idleViewByteSlack is how much View payload may grow across idle pumps
 // (spinner glyph / clock noise). Zero growth is ideal after #482.
@@ -104,12 +108,18 @@ func TestStreamTextDeltaRefreshBudget(t *testing.T) {
 		t.Fatal("refreshViewport = 0, want ≥ 1 (stream produced no transcript refresh)")
 	}
 	if got := m.paint.refreshViewportCalls; got > refreshBudget {
-		// Actual vs budget — tighten refreshBudget when coalesce (#496) lands.
 		t.Fatalf("refreshViewport = %d, budget ≤ %d (N=%d × %d)", got, refreshBudget, n, streamRefreshPerDelta)
 	}
-	viewBudget := n // this test calls View once per delta
+	viewBudget := n // this test calls View once per delta (including suppressed)
 	if got := m.paint.viewCalls; got > viewBudget {
 		t.Fatalf("viewCalls = %d, budget ≤ %d (N=%d)", got, viewBudget, n)
+	}
+	// #496: full Canvas rebuilds are O(FPS), not O(N), within one paint window.
+	if got := m.paint.renderFrameCalls; got == 0 {
+		t.Fatal("renderFrameCalls = 0, want ≥ 1")
+	}
+	if got := m.paint.renderFrameCalls; got > streamRenderFrameCap {
+		t.Fatalf("renderFrameCalls = %d over %d deltas, budget ≤ %d (FPS coalesce)", got, n, streamRenderFrameCap)
 	}
 	if m.paint.lastViewBytes <= 0 {
 		t.Fatal("stream View produced empty frame")

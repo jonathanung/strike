@@ -187,8 +187,9 @@ type Model struct {
 	// cellClip stages one-shot OSC52 for y-to-copy (pointer so value-receiver
 	// View can clear it). Never nil after New.
 	cellClip *cellClipboard
-	// paint tracks View/refresh/cell render counters for redraw budget tests
-	// (#452/#495). Pointer so value-receiver View can increment. Never nil after New.
+	// paint tracks View/refresh/cell render counters (#495) and FPS-coalesce
+	// state for soft TextDelta/spinner paints (#496). Pointer so value-receiver
+	// View can mutate. Never nil after New.
 	paint *paintBudget
 	// textSel is app-owned mouse highlight (transcript + prompt only).
 	textSel textSel
@@ -545,7 +546,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Default: full recompose. Spinner may markFrameSkip for unchanged layers.
 	m.clearFrameSkip()
 
+	// Default: immediate full-frame paint. Soft paths (TextDelta, spinner)
+	// re-arm FPS coalesce before return (#496).
+	switch msg.(type) {
+	case paintFlushMsg:
+		// handled below
+	default:
+		if !softCoalesceMsg(msg) {
+			m.markImmediatePaint()
+		}
+	}
+
 	switch msg := msg.(type) {
+	case paintFlushMsg:
+		m.applyPaintFlush()
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.width, m.height = max(0, msg.Width), max(0, msg.Height)
 		firstReady := !m.ready
@@ -596,7 +612,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.reflow()
 		m.refreshViewport()
-		return m, tea.Batch(m.listen(), cmd)
+		var softCmd tea.Cmd
+		if softCoalesceEvent(msg.ev) {
+			softCmd = m.coalesceSoftPaint()
+		}
+		return m, tea.Batch(m.listen(), cmd, softCmd)
 
 	case permissionCountdownMsg:
 		pm, ok := m.modal.(*permissionModal)
@@ -632,6 +652,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Drop the tick chain when idle (#481) or static working chrome (#497)
 		// so SSH sessions are not redrawn at spinner FPS without engine events.
 		if m.agentState() != theme.AgentStateWorking || staticWorkingChrome() {
+			// Keep cached frame; idle/static ticks must not force full rebuilds.
+			if p := m.ensurePaint(); p.lastFrame != "" {
+				p.suppress = true
+			}
 			return m, nil
 		}
 		var cmd tea.Cmd
@@ -641,7 +665,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.frames != nil && m.frames.width > 0 {
 			m.markFrameSkip(dirtyLeft | dirtyRight | dirtyFooter)
 		}
-		return m, cmd
+		// FPS-cap full Canvas rebuilds even when dirty-mask trims layers (#496).
+		return m, tea.Batch(cmd, m.coalesceSoftPaint())
 
 	case projectDataMutatedMsg:
 		cmd := m.applyProjectDataMutation(msg)
