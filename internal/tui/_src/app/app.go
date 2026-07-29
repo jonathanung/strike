@@ -184,6 +184,9 @@ type Model struct {
 	// cellClip stages one-shot OSC52 for y-to-copy (pointer so value-receiver
 	// View can clear it). Never nil after New.
 	cellClip *cellClipboard
+	// paint tracks View/refresh/cell render counters for redraw budget tests
+	// (#452/#495). Pointer so value-receiver View can increment. Never nil after New.
+	paint *paintBudget
 	// textSel is app-owned mouse highlight (transcript + prompt only).
 	textSel textSel
 	// copyFlashGen invalidates in-flight clearCellCopiedFlashMsg timers.
@@ -390,6 +393,7 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		selectedCell:        -1,
 		selectedFileRef:     -1,
 		cellClip:            &cellClipboard{},
+		paint:               &paintBudget{},
 		composer:            ta,
 		keyMap:              defaultKeyMap(),
 		windows:             newWindowRegistry(),
