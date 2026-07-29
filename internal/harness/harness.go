@@ -21,13 +21,25 @@ type Outcome struct {
 
 // Result is the harness's final turn outcome.
 type Result struct {
+	Text       string
+	Calls      []provider.ToolCall
+	Reasoning  []json.RawMessage
 	StopReason string
 }
 
 // Request carries per-turn callbacks. The engine handles event emission and
 // message history; the harness controls the loop.
 type Request struct {
-	TurnID string
+	InvocationID string
+	Agent        string
+	ProviderName string
+	Request      provider.Request
+
+	// Provider performs an engine-selected provider request. Implementations may
+	// call it concurrently. The engine forces the selected model and applies its
+	// normal authentication, retry, usage, and cancellation behavior without
+	// committing speculative output to conversation history.
+	Provider func(ctx context.Context, req provider.Request) (<-chan provider.StreamEvent, error)
 
 	// Stream performs one model request with engine-managed retries,
 	// compaction recovery, delta emission, and usage reporting. The engine
@@ -59,6 +71,21 @@ type Harness interface {
 	// a non-nil error to abort the turn with an engine error. Context
 	// cancellation (via ctx) signals the turn should stop.
 	Run(ctx context.Context, req Request) (Result, error)
+}
+
+// Func is an ordinary Go harness function. Register it with Registry.RegisterFunc
+// when embedding an application directly instead of using the process ABI.
+type Func func(context.Context, Request) (Result, error)
+
+type namedFunc struct {
+	name string
+	fn   Func
+}
+
+func (h namedFunc) Name() string { return h.name }
+
+func (h namedFunc) Run(ctx context.Context, req Request) (Result, error) {
+	return h.fn(ctx, req)
 }
 
 // Registry maps harness names to constructors. The zero value is ready to
@@ -95,6 +122,19 @@ func (r *Registry) Register(h Harness) {
 		panic("harness: empty name")
 	}
 	r.builtins[name] = h
+}
+
+func (r *Registry) RegisterFunc(name string, fn Func) {
+	if fn == nil {
+		panic("harness: nil function")
+	}
+	if name == "" {
+		panic("harness: empty name")
+	}
+	if name[0] <= ' ' || name[len(name)-1] <= ' ' {
+		panic(fmt.Sprintf("harness: invalid name %q", name))
+	}
+	r.Register(namedFunc{name: name, fn: fn})
 }
 
 // Known returns true when name is registered.
