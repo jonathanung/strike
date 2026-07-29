@@ -11,7 +11,7 @@ import (
 
 // paintFPSInterval caps full-frame View rebuilds for soft-coalesced updates
 // (streaming TextDelta/ReasoningDelta and working spinner ticks). ~6 FPS sits
-// in the 4–8 FPS band targeted for SSH-friendly streaming (#496 / epic #452).
+// in the 4–8 FPS band targeted for SSH-friendly streaming (issue #496 / epic #452).
 // Immediate-flush messages bypass the cap on the next Update cycle.
 const paintFPSInterval = time.Second / 6
 
