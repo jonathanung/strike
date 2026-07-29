@@ -509,6 +509,42 @@ func (m *Model) activateRoot(id string) tea.Cmd {
 	return tea.Batch(m.broadcastContextState(), m.broadcastAgentsState())
 }
 
+// activateRootByIndex jumps to the Nth concurrently visible living root (0-indexed).
+// Matches indices to the agents pane tree order.
+func (m Model) activateRootByIndex(idx int) (tea.Model, tea.Cmd) {
+	ids := m.liveRootIDs()
+	if idx < 0 || idx >= len(ids) {
+		return m, nil
+	}
+	if ids[idx] == m.sessionID {
+		return m, nil
+	}
+	cmd := m.activateRoot(ids[idx])
+	if cmd == nil {
+		return m, nil
+	}
+	pollCmd := filesPollCmd(m.windows)
+	return m, tea.Batch(cmd, pollCmd)
+}
+
+// openRootSwitcher opens the ctrl+s session switcher modal with a snapshot
+// of live roots.
+func (m Model) openRootSwitcher() (tea.Model, tea.Cmd) {
+	ids := m.liveRootIDs()
+	entries := make([]rootSwitcherEntry, 0, len(ids))
+	for _, id := range ids {
+		label := m.rootTitleLabel(id)
+		state := m.rootAgentState(id)
+		entries = append(entries, rootSwitcherEntry{
+			id:    id,
+			label: label,
+			state: agentsRootDetail(state),
+		})
+	}
+	m.modal = newRootSwitcherModal(entries)
+	return m, nil
+}
+
 // spawnRoot creates a new concurrent parent and focuses it.
 func (m *Model) spawnRoot() tea.Cmd {
 	if m.services.Roots == nil {

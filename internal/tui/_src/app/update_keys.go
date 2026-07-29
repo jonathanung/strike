@@ -255,6 +255,9 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, m.saveDefaultsCmd(m.providerName, m.modelName, m.agentName, string(m.effort), string(m.permMode.Normalize()), dotJoin(m.th, m.providerName+"/"+m.modelName, m.agentName))
+	case key.Matches(msg, m.keyMap.RootSwitcher):
+		// ctrl+s opens a session switcher modal listing live roots.
+		return m.openRootSwitcher()
 	case key.Matches(msg, m.keyMap.Agent):
 		// Tab cycles agents (opencode-style build/plan switching); /agent-next.
 		if len(m.agents) > 1 && !m.turnRunning {

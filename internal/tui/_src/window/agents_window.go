@@ -408,9 +408,11 @@ func (w agentsWindow) buildNodes() []ui.TreeNode {
 	}
 	q := strings.ToLower(strings.TrimSpace(w.textFilter))
 	out := make([]ui.TreeNode, 0, len(w.roots))
+	rootNum := 0
 	for _, root := range w.roots {
 		id := strings.TrimSpace(root.ID)
 		if id == "" {
+			rootNum++
 			continue
 		}
 		label := strings.TrimSpace(root.Title)
@@ -420,6 +422,11 @@ func (w agentsWindow) buildNodes() []ui.TreeNode {
 		if label == "" {
 			label = "session"
 		}
+		// Prefix with 1)–9) for ctrl+s modal numbering; no keybinding, visual label only.
+		if rootNum < 9 {
+			label = itoa(rootNum+1) + ") " + label
+		}
+		rootNum++
 		node := ui.TreeNode{
 			ID:      id,
 			Label:   label,

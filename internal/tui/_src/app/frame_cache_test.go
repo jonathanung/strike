@@ -16,8 +16,8 @@ const dirtyMaskTestHeight = 40
 
 func warmDirtyMaskFrame(t *testing.T) Model {
 	t.Helper()
-	forceAnimatedWorkingChrome(t)
 	m, _ := newAppTestModel(nil, nil)
+	t.Setenv("STRIKE_WORKING_CHROME", "animate")
 	styleSpinner(&m.spin, m.th)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: dirtyMaskTestWidth, Height: dirtyMaskTestHeight})
 	_ = m.renderFrame()
@@ -123,8 +123,8 @@ func TestDirtyMaskSpinnerPreservesRightPixels(t *testing.T) {
 }
 
 func TestColdCacheSpinnerStillComposesRight(t *testing.T) {
-	forceAnimatedWorkingChrome(t)
 	m, _ := newAppTestModel(nil, nil)
+	t.Setenv("STRIKE_WORKING_CHROME", "animate")
 	styleSpinner(&m.spin, m.th)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: dirtyMaskTestWidth, Height: dirtyMaskTestHeight})
 	if m.frames.width != 0 {
