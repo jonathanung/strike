@@ -139,21 +139,53 @@ func TestDoctorModalLayerBreakdownAndRedactedPreview(t *testing.T) {
 		SystemChars:    12000,
 		MessageCount:   4,
 		FromLastStream: true,
+		Attribution: protocol.RequestTokenAttribution{
+			System:      protocol.KnownTokens(3000),
+			Tools:       protocol.KnownTokens(1200),
+			Messages:    protocol.KnownTokens(800),
+			ToolResults: protocol.KnownTokens(400),
+			Total:       protocol.KnownTokens(5400),
+			Source:      protocol.UsageSourceEstimated,
+		},
 	}
 	m := newDoctorModal(ev, 20_000, true)
-	plain := ansi.Strip(m.view(72, theme.Default()))
+	// Scroll through the full body so layers + attribution are both covered.
+	var plain strings.Builder
+	for i := 0; i < 12; i++ {
+		plain.WriteString(ansi.Strip(m.view(72, theme.Default())))
+		plain.WriteByte('\n')
+		m.scroll++
+	}
+	got := plain.String()
 	for _, want := range []string{
 		"Context doctor", "last request", "12000 chars", "4 msgs",
 		"shared", "project_memory", "memory:keys", "[REDACTED]",
 		"~tok", "warning",
+		"Request input", "tool_results", "estimated", "not provider-measured",
+		"~3k", "~1.2k",
 	} {
-		if !strings.Contains(plain, want) {
-			t.Errorf("doctor missing %q:\n%s", want, plain)
+		if !strings.Contains(got, want) {
+			t.Errorf("doctor missing %q:\n%s", want, got)
 		}
 	}
 	// Must not invent a bare measured token occupancy line as "0/0".
-	if strings.Contains(plain, "0/0") {
-		t.Fatalf("fabricated 0/0:\n%s", plain)
+	if strings.Contains(got, "0/0") {
+		t.Fatalf("fabricated 0/0:\n%s", got)
+	}
+}
+
+func TestDoctorModalOmitsAttributionWhenEmpty(t *testing.T) {
+	ev := protocol.EffectivePrompt{
+		Layers: []protocol.PromptLayerInfo{
+			{Kind: protocol.PromptLayerShared, Source: "builtin:shared", Mode: protocol.PromptLayerAppend, Chars: 100},
+		},
+		SystemChars:  100,
+		MessageCount: 1,
+	}
+	m := newDoctorModal(ev, 200_000, true)
+	plain := ansi.Strip(m.view(60, theme.Default()))
+	if strings.Contains(plain, "Request input") {
+		t.Fatalf("empty attribution should omit request block:\n%s", plain)
 	}
 }
 

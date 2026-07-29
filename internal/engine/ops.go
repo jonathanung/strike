@@ -108,6 +108,7 @@ func (e *Engine) handleInspectEffectivePrompt() {
 		SystemChars:    snap.SystemChars,
 		MessageCount:   snap.MessageCount,
 		FromLastStream: snap.FromLastStream,
+		Attribution:    snap.Attribution,
 	})
 }
 

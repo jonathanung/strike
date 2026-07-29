@@ -60,7 +60,7 @@ func (m *doctorModal) view(width int, th theme.Theme) string {
 		inner = max(1, width)
 	}
 	lines := m.bodyLines(th)
-	const maxBody = 18
+	const maxBody = 24
 	if m.scroll > max(0, len(lines)-maxBody) {
 		m.scroll = max(0, len(lines)-maxBody)
 	}
@@ -150,37 +150,73 @@ func (m *doctorModal) bodyLines(th theme.Theme) []string {
 	lines = append(lines, st.Title.Render("Layers"))
 	if len(ev.Layers) == 0 {
 		lines = append(lines, st.Muted.Render("(no layers)"))
-		return lines
+	} else {
+		total := ev.SystemChars
+		if total <= 0 {
+			for _, layer := range ev.Layers {
+				total += layer.Chars
+			}
+		}
+		for i, layer := range ev.Layers {
+			kind := sanitizeDisplayData(layer.Kind)
+			source := sanitizeDisplayData(layer.Source)
+			mode := sanitizeDisplayData(layer.Mode)
+			head := fmt.Sprintf("%d. %s [%s]", i+1, kind, mode)
+			lines = append(lines, st.Text.Render(head))
+			parts := []string{source, fmt.Sprintf("%d chars", layer.Chars)}
+			if total > 0 && layer.Chars > 0 {
+				parts = append(parts, fmt.Sprintf("%d%%", (layer.Chars*100)/total))
+			}
+			detail := "   " + dotJoin(th, parts...)
+			lines = append(lines, st.Muted.Render(detail))
+			if preview := strings.TrimSpace(layer.Preview); preview != "" {
+				// Previews are engine-redacted; still strip controls for display.
+				prev := sanitizeDisplayData(preview)
+				if len([]rune(prev)) > 80 {
+					prev = string([]rune(prev)[:80]) + th.Icons.Ellipsis
+				}
+				lines = append(lines, st.Muted.Render("   "+prev))
+			}
+		}
 	}
 
-	total := ev.SystemChars
-	if total <= 0 {
-		for _, layer := range ev.Layers {
-			total += layer.Chars
-		}
-	}
-	for i, layer := range ev.Layers {
-		kind := sanitizeDisplayData(layer.Kind)
-		source := sanitizeDisplayData(layer.Source)
-		mode := sanitizeDisplayData(layer.Mode)
-		head := fmt.Sprintf("%d. %s [%s]", i+1, kind, mode)
-		lines = append(lines, st.Text.Render(head))
-		parts := []string{source, fmt.Sprintf("%d chars", layer.Chars)}
-		if total > 0 && layer.Chars > 0 {
-			parts = append(parts, fmt.Sprintf("%d%%", (layer.Chars*100)/total))
-		}
-		detail := "   " + dotJoin(th, parts...)
-		lines = append(lines, st.Muted.Render(detail))
-		if preview := strings.TrimSpace(layer.Preview); preview != "" {
-			// Previews are engine-redacted; still strip controls for display.
-			prev := sanitizeDisplayData(preview)
-			if len([]rune(prev)) > 80 {
-				prev = string([]rune(prev)[:80]) + th.Icons.Ellipsis
-			}
-			lines = append(lines, st.Muted.Render("   "+prev))
-		}
+	if attrLines := attributionLines(th, ev.Attribution); len(attrLines) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, attrLines...)
 	}
 	return lines
+}
+
+// attributionLines renders estimate-labeled request-slice token breakdown.
+// Empty when attribution was never populated (legacy sessions).
+func attributionLines(th theme.Theme, a protocol.RequestTokenAttribution) []string {
+	th = th.Resolve()
+	st := th.S()
+	if a.Source == "" && !a.Total.Known && !a.System.Known && !a.Tools.Known && !a.Messages.Known && !a.ToolResults.Known {
+		return nil
+	}
+	dash := th.Icons.DetailSeparator
+	src := a.Source
+	if src == "" {
+		src = protocol.UsageSourceEstimated
+	}
+	var lines []string
+	lines = append(lines, st.Title.Render("Request input (est.)"))
+	lines = append(lines, costKV(th, "system", formatEstTokenCount(a.System, dash)))
+	lines = append(lines, costKV(th, "tools", formatEstTokenCount(a.Tools, dash)))
+	lines = append(lines, costKV(th, "messages", formatEstTokenCount(a.Messages, dash)))
+	lines = append(lines, costKV(th, "tool_results", formatEstTokenCount(a.ToolResults, dash)))
+	lines = append(lines, costKV(th, "total", formatEstTokenCount(a.Total, dash)))
+	lines = append(lines, costKV(th, "source", src))
+	lines = append(lines, st.Muted.Render(fmt.Sprintf("Local ~%d chars/token; not provider-measured.", doctorCharsPerTokenEst)))
+	return lines
+}
+
+func formatEstTokenCount(tc protocol.TokenCount, dash string) string {
+	if !tc.Known {
+		return dash
+	}
+	return "~" + ui.FormatTokens(tc.N)
 }
 
 func (m *doctorModal) warnings(th theme.Theme) []string {

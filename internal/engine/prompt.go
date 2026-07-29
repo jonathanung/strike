@@ -13,6 +13,7 @@ import (
 
 	"github.com/jonathanung/strike-cli/internal/memory"
 	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike-cli/internal/provider"
 )
 
 // MemorySource is the engine-facing surface for auto-loading tagged project
@@ -417,17 +418,19 @@ Here is some useful information about the environment you are running in:
 Each bash and path-based tool call starts in the working directory above. Shell cd inside one bash invocation does not persist to later tool calls.`, modelLine, workDir, root, isGit, runtime.GOOS, time.Now().Format("Mon Jan 2 2006")))
 }
 
-// effectiveSnapshot is a redacted inspect view of system composition.
+// effectiveSnapshot is a redacted inspect view of system composition plus
+// estimate-labeled request-slice token attribution.
 type effectiveSnapshot struct {
 	Layers         []protocol.PromptLayerInfo
 	System         string // exact joined system text last sent (or current)
 	SystemChars    int
 	MessageCount   int
 	FromLastStream bool
+	Attribution    protocol.RequestTokenAttribution
 }
 
-func (e *Engine) recordStreamEffective(layers []promptLayer, system string) {
-	snap := buildEffectiveSnapshot(layers, system, len(e.messages), true)
+func (e *Engine) recordStreamEffective(layers []promptLayer, system string, tools []provider.ToolSchema) {
+	snap := buildEffectiveSnapshot(layers, system, tools, e.messages, true)
 	e.effectiveMu.Lock()
 	e.lastEffective = snap
 	e.effectiveMu.Unlock()
@@ -436,20 +439,21 @@ func (e *Engine) recordStreamEffective(layers []promptLayer, system string) {
 func (e *Engine) currentEffectiveSnapshot() effectiveSnapshot {
 	layers := e.systemLayers()
 	system := joinPromptLayerTexts(layers)
-	return buildEffectiveSnapshot(layers, system, len(e.messages), false)
+	tools, _ := e.effectiveToolSchemas()
+	return buildEffectiveSnapshot(layers, system, tools, e.messages, false)
 }
 
 func (e *Engine) lastOrCurrentEffective() effectiveSnapshot {
 	e.effectiveMu.Lock()
 	snap := e.lastEffective
 	e.effectiveMu.Unlock()
-	if snap.SystemChars > 0 || len(snap.Layers) > 0 {
+	if snap.SystemChars > 0 || len(snap.Layers) > 0 || snap.Attribution.Total.Known {
 		return snap
 	}
 	return e.currentEffectiveSnapshot()
 }
 
-func buildEffectiveSnapshot(layers []promptLayer, system string, messageCount int, fromStream bool) effectiveSnapshot {
+func buildEffectiveSnapshot(layers []promptLayer, system string, tools []provider.ToolSchema, msgs []provider.Message, fromStream bool) effectiveSnapshot {
 	infos := make([]protocol.PromptLayerInfo, 0, len(layers))
 	for _, layer := range layers {
 		text := strings.TrimSpace(layer.Text)
@@ -465,8 +469,9 @@ func buildEffectiveSnapshot(layers []promptLayer, system string, messageCount in
 		Layers:         infos,
 		System:         system,
 		SystemChars:    utf8.RuneCountInString(strings.TrimSpace(system)),
-		MessageCount:   messageCount,
+		MessageCount:   len(msgs),
 		FromLastStream: fromStream,
+		Attribution:    estimateRequestAttribution(system, tools, msgs),
 	}
 }
 
