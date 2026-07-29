@@ -161,7 +161,10 @@ strike launches without any provider configured. Pick one inside the TUI:
 
 `/mode` (or **Shift+Tab**) cycles the session **tool-permission posture**. This
 is distinct from `/autonomy` (exit gates). The header always shows `mode …`;
-yolo also paints a danger banner.
+yolo also paints a danger banner. Mode changes are accepted **mid-turn**: the
+new posture applies to subsequent tool permission checks in the same turn
+(in-flight permission asks are rejected so the model retries under the new
+rules).
 
 | Mode | Behavior |
 |---|---|

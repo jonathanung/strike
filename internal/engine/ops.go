@@ -60,13 +60,8 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 		}
 		e.setAutonomy(op.Mode)
 	case protocol.SetPermissionMode:
-		if e.turnActive() {
-			e.emit(protocol.EngineError{
-				Correlation: e.sessionCorr(),
-				Message:     "cannot change permission mode while a turn is running",
-			})
-			return
-		}
+		// Allowed mid-turn: posture applies to subsequent tool asks in the
+		// same turn (pending asks are rejected by the permission service).
 		e.setPermissionMode(op.Mode)
 	case protocol.SetFast:
 		if e.turnActive() {
@@ -323,7 +318,9 @@ func autonomyNames() string {
 
 // setPermissionMode records tool-permission posture, updates the permission
 // service, and aligns plan posture with the plan-implement workflow. Empty
-// normalizes to default; unrecognized values are rejected.
+// normalizes to default; unrecognized values are rejected. Safe mid-turn:
+// rules take effect for the next Ask; agent pins from plan enter/leave are
+// queued when a turn is active (same as enterPhaseOpts).
 func (e *Engine) setPermissionMode(mode protocol.PermissionMode) {
 	e.applyPermissionMode(mode, true)
 }
@@ -331,7 +328,7 @@ func (e *Engine) setPermissionMode(mode protocol.PermissionMode) {
 // applyPermissionMode is the shared implementation for startup and SetPermissionMode.
 // When alignPlan is false (startup), only rules + confirm are applied; the caller
 // enters the plan workflow after agent select. When true (user dial), plan is
-// entered or left immediately.
+// entered or left immediately (agent switch deferred mid-turn).
 func (e *Engine) applyPermissionMode(mode protocol.PermissionMode, alignPlan bool) {
 	parsed, ok := protocol.ParsePermissionMode(string(mode))
 	if !ok {
@@ -355,7 +352,11 @@ func (e *Engine) applyPermissionMode(mode protocol.PermissionMode, alignPlan boo
 				e.clearPhase()
 				if e.agent.Name == "plan" {
 					if _, ok := e.findAgent("build"); ok {
-						e.handleSelectAgent(protocol.SelectAgent{Name: "build"})
+						if e.turnActive() {
+							_ = e.queueSwitchAgent("build")
+						} else {
+							e.handleSelectAgent(protocol.SelectAgent{Name: "build"})
+						}
 					}
 				}
 			}

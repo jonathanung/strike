@@ -131,7 +131,12 @@ func TestPaletteAvailabilityAndDisabledSelection(t *testing.T) {
 		assertPaletteInvoke(t, m, "/help", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/help"}})
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
 		assertPaletteInvoke(t, m, "/keys", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/keys"}})
-		// /vim, /nano, /md-read, /think, /export, /copy, /cost, /mcp, pane jumps, and prompt inspect stay available mid-turn.
+		// /vim, /nano, /md-read, /think, /export, /copy, /cost, /mcp, pane jumps,
+		// permission mode dial, and prompt inspect stay available mid-turn.
+		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
+		assertPaletteInvoke(t, m, "/mode", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/mode"}})
+		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
+		assertPaletteInvoke(t, m, "/mode-next", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/mode-next"}})
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
 		assertPaletteInvoke(t, m, "/think", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/think"}})
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
