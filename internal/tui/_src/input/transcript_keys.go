@@ -15,6 +15,9 @@ func (m *Model) refreshViewport() {
 	if !m.ready {
 		return
 	}
+	if m.paint != nil {
+		m.paint.refreshViewportCalls++
+	}
 	width := max(1, m.viewport.Width)
 	cells := m.displayCells()
 	if len(cells) == 0 {
@@ -60,6 +63,9 @@ func (m *Model) refreshViewport() {
 // renderCell paints one transcript cell, attaching OSC 8 file links using the
 // session work directory as the relative-path base.
 func (m *Model) renderCell(c cell, width int) string {
+	if m.paint != nil {
+		m.paint.renderCellCalls++
+	}
 	switch tc := c.(type) {
 	case *toolCell:
 		return tc.renderLinked(width, m.th, m.workDir)
