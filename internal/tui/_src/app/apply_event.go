@@ -474,7 +474,13 @@ func lastCell[T cell](cells []cell) (T, bool) {
 // completeAssistantCells marks every assistant transcript cell complete so
 // markdown rendering runs for finished replies (including those no longer trailing).
 func (m *Model) completeAssistantCells() {
-	for _, c := range m.cells {
+	completeAssistantCellsIn(m.cells)
+}
+
+// completeAssistantCellsIn marks assistant cells complete and drops markdown
+// cache so the next render runs glamour (active model and background root panes).
+func completeAssistantCellsIn(cells []cell) {
+	for _, c := range cells {
 		if a, ok := c.(*assistantCell); ok {
 			a.complete = true
 			a.mdCacheOK = false
