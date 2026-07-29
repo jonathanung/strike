@@ -128,7 +128,8 @@ type Config struct {
 	MaxChildDepth int `json:"maxChildDepth,omitempty"`
 	// Keybinds remaps app-level binding ids to key sequence(s). Ids match the
 	// TUI keybind catalog (e.g. "nav.jump-bottom"). Merged last-wins per id
-	// across global then project layers. Unknown ids fail Load.
+	// across global/project config and keybinds.jsonc layers. Unknown ids fail
+	// Load. Prefer ~/.strike/keybinds.jsonc (or ./.strike/keybinds.jsonc).
 	Keybinds map[string]KeybindChords `json:"keybinds,omitempty"`
 	// Session holds per-session runtime preferences (worktree isolation).
 	Session SessionConfig `json:"session,omitempty"`
@@ -311,11 +312,14 @@ func projectRoot(workDir string) string {
 // Load merges:
 //
 //	default → ~/.strike/config → ~/.strike/mcp.jsonc → ~/.strike/providers.jsonc
-//	→ ./.strike/config → ./.strike/mcp.jsonc → ./.strike/providers.jsonc
+//	→ ~/.strike/keybinds.jsonc → ./.strike/config → ./.strike/mcp.jsonc
+//	→ ./.strike/providers.jsonc → ./.strike/keybinds.jsonc
 //
 // mcp.jsonc/json is preferred for MCP servers (see ReadMCPFile); the legacy
 // mcp object in config still works. providers.jsonc is OpenCode-compatible
 // (see ReadProvidersFile); the legacy providers array in config still works.
+// Dedicated keybinds.jsonc/json overrides the config keybinds object in the
+// same root (last-wins per id).
 func Load(workDir string) (Config, error) {
 	cfg := Default()
 	// Global config JSON (optional).
@@ -342,6 +346,12 @@ func Load(workDir string) (Config, error) {
 	} else {
 		cfg = applyProvidersFile(cfg, pf)
 	}
+	// Global keybinds.jsonc/json (optional; overrides config keybinds).
+	if kb, err := loadKeybindsFileLayer(GlobalRoot()); err != nil {
+		return cfg, err
+	} else if len(kb) > 0 {
+		cfg.Keybinds = MergeKeybinds(cfg.Keybinds, kb)
+	}
 	// Project config JSON (optional).
 	if workDir != "" {
 		path := filepath.Join(projectRoot(workDir), "config")
@@ -363,6 +373,11 @@ func Load(workDir string) (Config, error) {
 			return cfg, err
 		} else {
 			cfg = applyProvidersFile(cfg, pf)
+		}
+		if kb, err := loadKeybindsFileLayer(projectRoot(workDir)); err != nil {
+			return cfg, err
+		} else if len(kb) > 0 {
+			cfg.Keybinds = MergeKeybinds(cfg.Keybinds, kb)
 		}
 	}
 	cfg.Provider = CanonicalProviderID(cfg.Provider)
