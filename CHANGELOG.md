@@ -14,9 +14,31 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+## [v0.0.12] - 2026-07-29
+
+This is the first release orchestrated by strike itself.
+
+### Added
+
+- Added executable and embedded Go function harnesses for custom turn-loop controllers ([#483](https://github.com/jonathanung/strike/pull/483)).
+- Added configurable tool-result pruning thresholds and protected tools ([#501](https://github.com/jonathanung/strike/pull/501)).
+- Added estimated system, tool, message, and tool-result token attribution to `/context` ([#507](https://github.com/jonathanung/strike/pull/507)).
+- Added prompt cache keys and cached-token usage reporting for OpenAI-compatible providers ([#505](https://github.com/jonathanung/strike/pull/505)).
+
 ### Changed
 
-- System telemetry (CPU/RAM/disk pane) is on by default again; disable with `/telemetry off` ([#485](https://github.com/jonathanung/strike/issues/485)).
+- System telemetry (CPU/RAM/disk pane) is on by default again; disable with `/telemetry off` ([#486](https://github.com/jonathanung/strike/pull/486)).
+- Reduced TUI rendering work during streaming and over SSH through incremental viewport rendering, redraw coalescing, static SSH working chrome, and unchanged-pane caching ([#499](https://github.com/jonathanung/strike/pull/499), [#504](https://github.com/jonathanung/strike/pull/504), [#506](https://github.com/jonathanung/strike/pull/506), [#508](https://github.com/jonathanung/strike/pull/508)).
+
+### Fixed
+
+- Prevented SGR mouse sequences from leaking into the prompt ([#487](https://github.com/jonathanung/strike/pull/487)).
+- Fixed rename-modal caret placement and space input ([#503](https://github.com/jonathanung/strike/pull/503)).
+- Rendered completed Markdown correctly after switching back to a background agent ([#500](https://github.com/jonathanung/strike/pull/500)).
+
+**Contributors:** [@FrederickPu](https://github.com/FrederickPu) and [@jonathanung](https://github.com/jonathanung).
+
+**Full changelog:** [v0.0.11...v0.0.12](https://github.com/jonathanung/strike/compare/v0.0.11...v0.0.12)
 
 ## [v0.0.11] - 2026-07-28
 
@@ -230,7 +252,8 @@ Initial public release.
 
 **Full changelog:** [commits through v0.0.1](https://github.com/jonathanung/strike/commits/v0.0.1)
 
-[Unreleased]: https://github.com/jonathanung/strike/compare/v0.0.11...HEAD
+[Unreleased]: https://github.com/jonathanung/strike/compare/v0.0.12...HEAD
+[v0.0.12]: https://github.com/jonathanung/strike/compare/v0.0.11...v0.0.12
 [v0.0.11]: https://github.com/jonathanung/strike/compare/v0.0.10...v0.0.11
 [v0.0.10]: https://github.com/jonathanung/strike/compare/v0.0.9...v0.0.10
 [v0.0.9]: https://github.com/jonathanung/strike/compare/v0.0.8...v0.0.9
