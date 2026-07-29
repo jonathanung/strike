@@ -91,6 +91,29 @@ func TestRefreshViewportThemeChangeInvalidatesCache(t *testing.T) {
 	}
 }
 
+func TestRefreshViewportAppearanceChangeInvalidatesCache(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.applyEvent(protocol.UserMessage{Text: "appearance user"})
+	m.applyEvent(protocol.TextDelta{Text: "appearance asst"})
+	m.applyEvent(protocol.TurnCompleted{StopReason: "end_turn"})
+	m.appearance = appearanceDark
+	m.refreshViewport()
+	n := len(m.vpCache.items)
+	if n == 0 {
+		t.Fatal("empty cache after seed")
+	}
+	m.refreshViewport()
+	if m.vpCache.cellRenders != 0 || m.vpCache.cellHits != n {
+		t.Fatalf("same appearance: renders=%d hits=%d want 0/%d", m.vpCache.cellRenders, m.vpCache.cellHits, n)
+	}
+	m.appearance = appearanceLight
+	m.refreshViewport()
+	if m.vpCache.cellRenders != n || m.vpCache.cellHits != 0 {
+		t.Fatalf("appearance change: renders=%d hits=%d want %d/0", m.vpCache.cellRenders, m.vpCache.cellHits, n)
+	}
+}
+
 func TestRefreshViewportThinkingToggleInvalidatesVisibility(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -105,8 +128,6 @@ func TestRefreshViewportThinkingToggleInvalidatesVisibility(t *testing.T) {
 	if strings.Contains(hidden, "secret chain") {
 		t.Fatal("reasoning visible while showThinking=false")
 	}
-	stableHits := m.vpCache.cellHits
-	_ = stableHits
 
 	m.showThinking = true
 	m.refreshViewport()
@@ -174,12 +195,12 @@ func TestRefreshViewportPlainLinesMatchFullStrip(t *testing.T) {
 			t.Fatalf("plain[%d]=%q want %q", i, got[i], want[i])
 		}
 	}
-	// And match a naive full strip of joined raw blocks.
-	var raws []string
+	// Match join of per-block plains (equivalent to full strip of joined raw).
+	var plains []string
 	for _, it := range m.vpCache.items {
-		raws = append(raws, it.raw)
+		plains = append(plains, it.plain)
 	}
-	naive := strings.Split(ansi.Strip(strings.Join(raws, "\n\n")), "\n")
+	naive := joinBlockPlainLines(plains)
 	if len(naive) != len(got) {
 		t.Fatalf("naive plain len %d vs incremental %d", len(naive), len(got))
 	}
