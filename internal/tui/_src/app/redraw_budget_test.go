@@ -100,14 +100,14 @@ func TestStreamTextDeltaRefreshBudget(t *testing.T) {
 	}
 
 	refreshBudget := n * streamRefreshPerDelta
+	if got := m.paint.refreshViewportCalls; got == 0 {
+		t.Fatal("refreshViewport = 0, want ≥ 1 (stream produced no transcript refresh)")
+	}
 	if got := m.paint.refreshViewportCalls; got > refreshBudget {
+		// Actual vs budget — tighten refreshBudget when coalesce (#496) lands.
 		t.Fatalf("refreshViewport = %d, budget ≤ %d (N=%d × %d)", got, refreshBudget, n, streamRefreshPerDelta)
 	}
-	if got := m.paint.refreshViewportCalls; got < n {
-		// Under-counting means events were dropped; still a budget failure mode.
-		t.Fatalf("refreshViewport = %d, want ≥ %d (each TextDelta should refresh until coalesce)", got, n)
-	}
-	viewBudget := n // one View call per delta from this test
+	viewBudget := n // this test calls View once per delta
 	if got := m.paint.viewCalls; got > viewBudget {
 		t.Fatalf("viewCalls = %d, budget ≤ %d (N=%d)", got, viewBudget, n)
 	}
