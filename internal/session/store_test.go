@@ -277,3 +277,20 @@ func TestReplaySliceAndLastBounded(t *testing.T) {
 		t.Fatal("expected n<=0 error")
 	}
 }
+
+func TestDefaultDirResolvesStrikeDirSymlink(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	target := filepath.Join(t.TempDir(), "state")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(home, ".strike")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	got := DefaultDir()
+	want := filepath.Join(target, "sessions")
+	if got != want {
+		t.Errorf("DefaultDir() = %q, want %q", got, want)
+	}
+}

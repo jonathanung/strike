@@ -69,6 +69,23 @@ func TestDefaultPath(t *testing.T) {
 	}
 }
 
+func TestDefaultPathResolvesStrikeDirSymlink(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	target := filepath.Join(t.TempDir(), "state")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(home, ".strike")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	got := DefaultPath()
+	want := filepath.Join(target, "auth.json")
+	if got != want {
+		t.Errorf("DefaultPath = %q, want %q", got, want)
+	}
+}
+
 func TestOpenStoreCorruptJSON(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "auth.json")
 	if err := os.WriteFile(path, []byte("{not-json"), 0o600); err != nil {

@@ -46,13 +46,17 @@ type Store struct {
 }
 
 // DefaultPath is ~/.strike/auth.json — ~/.strike is strike's home for all
-// user-level state.
+// user-level state. Existing ~/.strike directory symlinks are resolved.
 func DefaultPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return filepath.Join(os.TempDir(), "strike", "auth.json")
 	}
-	return filepath.Join(home, ".strike", "auth.json")
+	root := filepath.Join(home, ".strike")
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
+	return filepath.Join(root, "auth.json")
 }
 
 func OpenStore(path string) (*Store, error) {

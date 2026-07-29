@@ -69,12 +69,17 @@ func UserThemesDir() string {
 	return filepath.Join(root, "themes")
 }
 
-// ProjectThemesDir is <workDir>/.strike/themes.
+// ProjectThemesDir is <workDir>/.strike/themes. Existing .strike directory
+// symlinks are resolved so project themes can live outside the work tree.
 func ProjectThemesDir(workDir string) string {
 	if workDir == "" {
 		return ""
 	}
-	return filepath.Join(workDir, ".strike", "themes")
+	root := filepath.Join(workDir, ".strike")
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
+	return filepath.Join(root, "themes")
 }
 
 // Catalog merges builtins, then user themes, then project themes. Later
@@ -147,10 +152,16 @@ func loadDir(dir, source string) []Entry {
 }
 
 // globalRoot mirrors config.GlobalRoot without importing config (TUI boundary).
+// Existing ~/.strike directory symlinks are resolved so themes load from the
+// real state directory.
 func globalRoot() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".strike")
+	root := filepath.Join(home, ".strike")
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		return resolved
+	}
+	return root
 }

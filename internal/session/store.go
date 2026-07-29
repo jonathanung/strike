@@ -26,13 +26,17 @@ type Store struct {
 }
 
 // DefaultDir is ~/.strike/sessions — ~/.strike is strike's home for all
-// user-level state.
+// user-level state. Existing ~/.strike directory symlinks are resolved.
 func DefaultDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return filepath.Join(os.TempDir(), "strike", "sessions")
 	}
-	return filepath.Join(home, ".strike", "sessions")
+	root := filepath.Join(home, ".strike")
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
+	return filepath.Join(root, "sessions")
 }
 
 // newIDLast is advanced under newIDMu so rapid NewID calls stay strictly

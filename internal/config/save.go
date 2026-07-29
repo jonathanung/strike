@@ -220,6 +220,12 @@ func writeGlobal(cfg Config, unlock func() error) error {
 	if path == "" {
 		return fmt.Errorf("cannot locate home directory")
 	}
+	// If config itself is a file symlink (stow/dotfiles), write the referent
+	// so atomic rename does not replace the symlink node with a plain file.
+	path, err := resolveWritePath(path)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -255,6 +261,26 @@ func writeGlobal(cfg Config, unlock func() error) error {
 		dirFd.Close()
 	}
 	return nil
+}
+
+// resolveWritePath returns path suitable for atomic rename. File symlinks are
+// resolved to their referent; missing paths and regular files are unchanged.
+func resolveWritePath(path string) (string, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return path, nil
+		}
+		return "", err
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return path, nil
+	}
+	real, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve config symlink: %w", err)
+	}
+	return real, nil
 }
 
 // ProjectPath is the project config file, <workDir>/.strike/config (JSON).

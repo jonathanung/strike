@@ -93,7 +93,11 @@ func cachePath() string {
 	if err != nil {
 		return filepath.Join(os.TempDir(), "strike", "models.json")
 	}
-	return filepath.Join(home, ".strike", "cache", "models.json")
+	root := filepath.Join(home, ".strike")
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
+	return filepath.Join(root, "cache", "models.json")
 }
 
 // Load returns the catalog: fresh cache if young enough, otherwise a

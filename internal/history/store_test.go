@@ -907,3 +907,27 @@ func firstRuneIn(s string) (rune, int) {
 	}
 	return 0, 0
 }
+
+func TestOpenAcceptsResolvedPathBehindFormerSymlink(t *testing.T) {
+	// Users symlink ~/.strike → elsewhere; callers must pass EvalSymlinks(root)
+	// (config.GlobalRoot). Open still rejects an unresolved symlink root.
+	parent := t.TempDir()
+	referent := filepath.Join(parent, "real-global")
+	if err := os.Mkdir(referent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(parent, "link-global")
+	makeSymlinkOrSkip(t, referent, link)
+
+	if _, err := Open(link, "proj"); err == nil {
+		t.Fatal("Open(unresolved symlink root) error = nil, want rejection")
+	}
+	s, err := Open(referent, "proj")
+	if err != nil {
+		t.Fatalf("Open(resolved referent) error = %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if err := s.Add("hello via relocated state"); err != nil {
+		t.Fatal(err)
+	}
+}
