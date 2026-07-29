@@ -184,6 +184,27 @@ func TestDarwinMemUsageGuardsBadInput(t *testing.T) {
 			}
 		}
 	}
+
+	// Terms individually within bounds but summing past total: clamping here
+	// would render a confident "0 B used · 0.0%" as if it were measured.
+	const half = totalPages/2 + 1
+	overSum := darwinVMPages{
+		Free: half, External: half, ExternalOK: true,
+	}
+	if used, cached, ok := darwinMemUsage(testPageSize, testTotal, overSum); ok || used != 0 || cached != 0 {
+		t.Errorf("free+cached over total = (%d, %d, %v), want (0, 0, false)", used, cached, ok)
+	}
+
+	// Exactly accounting for every page is legitimate: used is 0 because
+	// nothing is left, not because a counter was truncated.
+	exact := darwinVMPages{Free: 1, External: totalPages - 1, ExternalOK: true}
+	used, cached, ok := darwinMemUsage(testPageSize, testTotal, exact)
+	if !ok {
+		t.Fatal("free+cached == total: ok = false, want true")
+	}
+	if used != 0 || cached != (totalPages-1)*testPageSize {
+		t.Errorf("free+cached == total = (%d, %d), want (0, %d)", used, cached, (totalPages-1)*testPageSize)
+	}
 }
 
 // Regression for #521 on the darwin/amd64 release artifact: under Rosetta,
@@ -209,6 +230,17 @@ func TestDarwinPageSizeCorrectsRosettaLie(t *testing.T) {
 		{"no pool to check against", 16384, total, 0, 16384, true},
 		{"no pool and no hw.pagesize", 0, total, 0, 0, false},
 		{"absurd pool implies bad page size", 4096, total, 1 << 40, 0, false},
+
+		// A pool larger than RAM lands in [4096, 16384) on Apple silicon, so
+		// the ratio floor alone would derive 8192/4096 and put the bar back at
+		// ~94% with ok=true. Rosetta only under-reports hw.pagesize, so a
+		// derived size below it is always an anomaly.
+		{"pool one page over total", 16384, total, total/16384 + 1, 0, false},
+		{"pool 3x total derives 4096", 16384, total, 3 * (total / 16384), 0, false},
+		{"pool 2x total derives 8192", 16384, total, 2 * (total / 16384), 0, false},
+		// Tiny pool would derive an absurd page size; bounded from above.
+		{"single-page pool", 16384, total, 1, 0, false},
+		{"hw.pagesize absurd, no pool", 1 << 40, total, 0, 1 << 40, false},
 	}
 
 	for _, tc := range tests {

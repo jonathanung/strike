@@ -2,9 +2,12 @@ package telemetry
 
 import "math/bits"
 
-// minDarwinPageSize is the smallest page size any macOS kernel uses. A derived
-// value below this means the page pool is not what we think it is.
-const minDarwinPageSize = 4096
+// Bounds on a macOS VM page size: 4 KiB on Intel, 16 KiB on Apple silicon.
+// A value outside these means the page pool is not what we think it is.
+const (
+	minDarwinPageSize = 4096
+	maxDarwinPageSize = 1 << 21
+)
 
 // darwinPageSize resolves the page size the vm.* counters are expressed in.
 //
@@ -18,17 +21,31 @@ const minDarwinPageSize = 4096
 // the real page size: the pool is within a few percent of physical RAM, far
 // short of the 2x that would round to the wrong power of two.
 func darwinPageSize(hwPageSize, totalBytes, vmPages uint64) (uint64, bool) {
+	hwOK := hwPageSize >= minDarwinPageSize && hwPageSize <= maxDarwinPageSize
 	if totalBytes == 0 || vmPages == 0 {
 		// Nothing to cross-check against; hw.pagesize is all there is.
-		return hwPageSize, hwPageSize >= minDarwinPageSize
+		return hwPageSize, hwOK
 	}
-	// A pool larger than RAM is nonsense; guard before the shift, which would
-	// otherwise be by -1 when the ratio rounds to zero.
+	// Guard before the shift, which would otherwise be by -1 once the ratio
+	// rounds to zero.
 	ratio := totalBytes / vmPages
 	if ratio < minDarwinPageSize {
 		return 0, false
 	}
-	return uint64(1) << (bits.Len64(ratio) - 1), true
+	derived := uint64(1) << (bits.Len64(ratio) - 1)
+	if derived > maxDarwinPageSize {
+		return 0, false
+	}
+	// Rosetta only ever under-reports hw.pagesize, so a derived size below it
+	// is not a translation correction — it means vm.pages is not the pool this
+	// code assumes. Testing `ratio < minDarwinPageSize` alone would only catch
+	// that on a 4 KiB machine: on Apple silicon a pool up to 4x too large still
+	// lands in [4096, 16384) and would silently derive 8192 or 4096, putting
+	// the bar back at ~94% with ok=true. Fail closed instead.
+	if hwOK && derived < hwPageSize {
+		return 0, false
+	}
+	return derived, true
 }
 
 // darwinVMPages holds the macOS VM page counts the RAM metric is derived from.
@@ -82,14 +99,13 @@ func darwinMemUsage(pageSize, totalBytes uint64, p darwinVMPages) (used, cached 
 		// Purgeable pages are anonymous, so they never overlap External.
 		cachedPages += p.Purgeable
 	}
-	// Each term is <= totalPages, so the sum cannot overflow; it can still
-	// exceed total if the counters race, hence the clamp.
-	reclaimable := (p.Free + cachedPages) * pageSize
-	if reclaimable > totalBytes {
-		reclaimable = totalBytes
+	// Each term is <= totalPages, so the sum cannot overflow. Apply the same
+	// rule to the sum: free and cache are disjoint subsets of a pool strictly
+	// smaller than RAM, so exceeding total is impossible on a healthy machine.
+	// Clamping instead would report a confident "0 B used · 0.0%" if a counter
+	// ever drifted in units — the same failure mode as the per-class guard.
+	if p.Free+cachedPages > totalPages {
+		return 0, 0, false
 	}
-	if cachedPages > totalPages {
-		cachedPages = totalPages
-	}
-	return totalBytes - reclaimable, cachedPages * pageSize, true
+	return totalBytes - (p.Free+cachedPages)*pageSize, cachedPages * pageSize, true
 }
