@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
+	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
 
 func TestChildViewTitleBrief(t *testing.T) {
@@ -66,7 +67,7 @@ func TestRenameModalPersistsAndEmits(t *testing.T) {
 	fs.put(host.Session{ID: "s1", Title: "old"}, nil)
 	m := newRenameModal(fs, "s1", "old")
 	// Clear and type.
-	for range m.buf {
+	for range m.input.Value() {
 		next, _ := m.update(tea.KeyMsg{Type: tea.KeyBackspace})
 		m = next.(*renameModal)
 	}
@@ -87,6 +88,53 @@ func TestRenameModalPersistsAndEmits(t *testing.T) {
 	got, ok, err := fs.Get("s1")
 	if err != nil || !ok || got.Title != "brief name" {
 		t.Fatalf("host title = %+v ok=%v err=%v", got, ok, err)
+	}
+}
+
+func TestRenameModalAcceptsKeySpace(t *testing.T) {
+	fs := newFakeSessions()
+	fs.put(host.Session{ID: "s1", Title: "a"}, nil)
+	m := newRenameModal(fs, "s1", "a")
+	// Bubble Tea delivers space as KeySpace (with Runes still set), not KeyRunes.
+	next, _ := m.update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}})
+	m = next.(*renameModal)
+	next, _ = m.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("b")})
+	m = next.(*renameModal)
+	if got := m.input.Value(); got != "a b" {
+		t.Fatalf("value = %q, want %q", got, "a b")
+	}
+	next, cmd := m.update(tea.KeyMsg{Type: tea.KeyEnter})
+	if next != nil {
+		t.Fatalf("modal after save = %T, want nil", next)
+	}
+	msg := cmd()
+	rm, ok := msg.(sessionRenamedMsg)
+	if !ok || rm.title != "a b" {
+		t.Fatalf("msg = %#v", msg)
+	}
+}
+
+func TestRenameModalCaretIsPromptPrefix(t *testing.T) {
+	fs := newFakeSessions()
+	fs.put(host.Session{ID: "s1", Title: "ship it"}, nil)
+	m := newRenameModal(fs, "s1", "ship it")
+	plain := ansi.Strip(m.view(72, theme.Default()))
+	// InputCursor (">") is the left-side prompt, not a trailing caret.
+	// Match newTextInput: prompt then value; value must not end with ">".
+	idx := strings.Index(plain, "ship it")
+	if idx < 0 {
+		t.Fatalf("view missing title:\n%s", plain)
+	}
+	// Prompt glyph appears before the title text on the input line.
+	before := plain[:idx]
+	if !strings.Contains(before, ">") {
+		t.Fatalf("expected InputCursor prompt before title, view:\n%s", plain)
+	}
+	after := plain[idx+len("ship it"):]
+	// Strip common trailing chrome (newline / dialog padding) and reject a
+	// glued trailing caret like "ship it>".
+	if strings.HasPrefix(strings.TrimLeft(after, " \t"), ">") {
+		t.Fatalf("caret still trailing the title:\n%s", plain)
 	}
 }
 
@@ -123,8 +171,8 @@ func TestRenameCommandOpensModalWithoutArgs(t *testing.T) {
 	if !ok {
 		t.Fatalf("modal = %T, want *renameModal", m.modal)
 	}
-	if rm.id != "root-1" || rm.buf != "live" {
-		t.Fatalf("rename modal id=%q buf=%q", rm.id, rm.buf)
+	if rm.id != "root-1" || rm.input.Value() != "live" {
+		t.Fatalf("rename modal id=%q value=%q", rm.id, rm.input.Value())
 	}
 	plain := ansi.Strip(rm.view(72, m.th))
 	if !strings.Contains(plain, "Rename") {

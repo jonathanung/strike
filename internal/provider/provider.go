@@ -77,6 +77,10 @@ type Request struct {
 	// exists (OpenAI platform service_tier=priority). Adapters that do not
 	// support it ignore the flag.
 	Priority bool
+	// CacheKey is an optional stable key for provider prompt-cache routing
+	// (OpenAI/xAI prompt_cache_key). Empty omits the wire field. Engine sets
+	// this to the session id so turns in one session share cache affinity.
+	CacheKey string
 }
 
 type StreamEventType int

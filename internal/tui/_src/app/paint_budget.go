@@ -18,28 +18,43 @@ const paintFPSInterval = time.Second / 6
 // paintFlushMsg drains a pending coalesced paint after paintFPSInterval.
 type paintFlushMsg struct{}
 
-// paintCoalesce tracks FPS-capped full-frame rebuilds. Stored as a pointer on
-// Model so value-receiver View/Update can share cache and counters.
-type paintCoalesce struct {
-	lastAt      time.Time
-	lastFrame   string
-	pending     bool // model changed since last real frame build
-	armed       bool // paintFlushMsg tick already scheduled
-	suppress    bool // next View returns lastFrame without renderFrame
-	frameBuilds int  // full renderFrame invocations (tests / guards)
-	nowFn       func() time.Time
+// paintBudget holds redraw counters for CI budget guards (#452 epic, #495)
+// and FPS-coalesce state for soft updates (#496). Shared via pointer so
+// value-receiver View/renderFrame can still increment. Production paths
+// always allocate one in New; zero value is a no-op observer.
+type paintBudget struct {
+	viewCalls            int
+	renderFrameCalls     int
+	refreshViewportCalls int
+	renderCellCalls      int
+	lastViewBytes        int
+
+	// FPS coalesce (#496)
+	lastAt    time.Time
+	lastFrame string
+	pending   bool // model changed since last real frame build
+	armed     bool // paintFlushMsg tick already scheduled
+	suppress  bool // next View returns lastFrame without renderFrame
+	nowFn     func() time.Time
 }
 
-func (p *paintCoalesce) now() time.Time {
+func (p *paintBudget) reset() {
+	if p == nil {
+		return
+	}
+	*p = paintBudget{}
+}
+
+func (p *paintBudget) now() time.Time {
 	if p != nil && p.nowFn != nil {
 		return p.nowFn()
 	}
 	return time.Now()
 }
 
-func (m *Model) ensurePaint() *paintCoalesce {
+func (m *Model) ensurePaint() *paintBudget {
 	if m.paint == nil {
-		m.paint = &paintCoalesce{}
+		m.paint = &paintBudget{}
 	}
 	return m.paint
 }
@@ -114,11 +129,10 @@ func (m *Model) applyPaintFlush() {
 	p.lastAt = p.now()
 }
 
-// noteFrameBuild records a full renderFrame result for the next suppressed View.
-func (m Model) noteFrameBuild(frame string) {
+// noteCachedFrame stores the non-OSC frame for suppressed Views.
+func (m Model) noteCachedFrame(frame string) {
 	if m.paint == nil {
 		return
 	}
 	m.paint.lastFrame = frame
-	m.paint.frameBuilds++
 }

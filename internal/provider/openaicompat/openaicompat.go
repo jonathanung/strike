@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/provider"
@@ -84,6 +85,9 @@ type chatRequest struct {
 	Tools           []chatTool    `json:"tools,omitempty"`
 	ReasoningEffort string        `json:"reasoning_effort,omitempty"`
 	ServiceTier     string        `json:"service_tier,omitempty"`
+	// PromptCacheKey improves sticky routing for shared prompt prefixes
+	// (OpenAI prompt_cache_key / xAI conv affinity). Omitted when empty.
+	PromptCacheKey string `json:"prompt_cache_key,omitempty"`
 }
 
 type chatMessage struct {
@@ -139,9 +143,17 @@ type chatResponse struct {
 }
 
 type chatUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens        int                   `json:"prompt_tokens"`
+	CompletionTokens    int                   `json:"completion_tokens"`
+	TotalTokens         int                   `json:"total_tokens"`
+	PromptTokensDetails *chatPromptTokDetails `json:"prompt_tokens_details,omitempty"`
+}
+
+// chatPromptTokDetails carries OpenAI/xAI cache breakouts. cached_tokens and
+// cache_write_tokens are subsets of prompt_tokens (not additive extras).
+type chatPromptTokDetails struct {
+	CachedTokens     int `json:"cached_tokens"`
+	CacheWriteTokens int `json:"cache_write_tokens"`
 }
 
 func (p *Provider) Stream(ctx context.Context, req provider.Request) (<-chan provider.StreamEvent, error) {
@@ -176,20 +188,56 @@ func (p *Provider) Stream(ctx context.Context, req provider.Request) (<-chan pro
 		}
 		done := provider.StreamEvent{Type: provider.EventDone, StopReason: choice.FinishReason}
 		if resp.Usage != nil {
-			done.Usage = &provider.Usage{
-				InputTokens:  resp.Usage.PromptTokens,
-				OutputTokens: resp.Usage.CompletionTokens,
-				TotalTokens:  resp.Usage.TotalTokens,
-			}
+			done.Usage = chatUsageToProvider(resp.Usage)
 		}
 		ch <- done
 	}), nil
+}
+
+// chatUsageToProvider maps chat-completions usage onto provider.Usage.
+// OpenAI/xAI report prompt_tokens as the full prompt; cached_tokens and
+// cache_write_tokens are subsets. Engine occupancy is
+// Input+CacheRead+CacheCreation+Output, so uncached input is the remainder.
+func chatUsageToProvider(u *chatUsage) *provider.Usage {
+	if u == nil {
+		return nil
+	}
+	out := &provider.Usage{
+		InputTokens:  u.PromptTokens,
+		OutputTokens: u.CompletionTokens,
+		TotalTokens:  u.TotalTokens,
+	}
+	if u.PromptTokensDetails == nil {
+		return out
+	}
+	cached := u.PromptTokensDetails.CachedTokens
+	write := u.PromptTokensDetails.CacheWriteTokens
+	if cached < 0 {
+		cached = 0
+	}
+	if write < 0 {
+		write = 0
+	}
+	if cached > out.InputTokens {
+		cached = out.InputTokens
+	}
+	remain := out.InputTokens - cached
+	if write > remain {
+		write = remain
+	}
+	out.CacheReadTokens = cached
+	out.CacheCreationTokens = write
+	out.InputTokens = remain - write
+	return out
 }
 
 func toChatRequest(req provider.Request, priorityTier, images bool) chatRequest {
 	out := chatRequest{Model: req.Model, ReasoningEffort: base.OpenAIEffort(req.Effort)}
 	if req.Priority && priorityTier {
 		out.ServiceTier = "priority"
+	}
+	if k := strings.TrimSpace(req.CacheKey); k != "" {
+		out.PromptCacheKey = k
 	}
 	if req.System != "" {
 		out.Messages = append(out.Messages, chatMessage{Role: "system", Content: req.System})

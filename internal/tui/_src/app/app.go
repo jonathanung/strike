@@ -178,15 +178,19 @@ type Model struct {
 	// transcriptPlainLines mirrors viewport content without ANSI, used for
 	// path:line hit-testing (open-at-line).
 	transcriptPlainLines []string
+	// vpCache holds per-cell rendered transcript blocks so refreshViewport
+	// only re-renders dirty cells (typically the streaming tail).
+	vpCache viewportCache
 	// selectedFileRef is set when the user click-selects a path:line citation
 	// (-1 = none). Empty-composer enter opens it when no tool expand applies.
 	selectedFileRef int
 	// cellClip stages one-shot OSC52 for y-to-copy (pointer so value-receiver
 	// View can clear it). Never nil after New.
 	cellClip *cellClipboard
-	// paint FPS-caps soft full-frame rebuilds (TextDelta/spinner); pointer so
-	// value-receiver View can cache frames (#496). Never nil after New.
-	paint *paintCoalesce
+	// paint tracks View/refresh/cell render counters (#495) and FPS-coalesce
+	// state for soft TextDelta/spinner paints (#496). Pointer so value-receiver
+	// View can mutate. Never nil after New.
+	paint *paintBudget
 	// textSel is app-owned mouse highlight (transcript + prompt only).
 	textSel textSel
 	// copyFlashGen invalidates in-flight clearCellCopiedFlashMsg timers.
@@ -393,7 +397,7 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		selectedCell:        -1,
 		selectedFileRef:     -1,
 		cellClip:            &cellClipboard{},
-		paint:               &paintCoalesce{},
+		paint:               &paintBudget{},
 		composer:            ta,
 		keyMap:              defaultKeyMap(),
 		windows:             newWindowRegistry(),
@@ -639,10 +643,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.broadcastContextState()
 
 	case spinner.TickMsg:
-		// Drop the tick chain when idle so welcome/context/activity stop
-		// repainting without engine events (#481).
-		if m.agentState() != theme.AgentStateWorking {
-			// Keep cached frame; idle ticks must not force full rebuilds.
+		// Drop the tick chain when idle (#481) or static working chrome (#497)
+		// so SSH sessions are not redrawn at spinner FPS without engine events.
+		if m.agentState() != theme.AgentStateWorking || staticWorkingChrome() {
+			// Keep cached frame; idle/static ticks must not force full rebuilds.
 			if p := m.ensurePaint(); p.lastFrame != "" {
 				p.suppress = true
 			}

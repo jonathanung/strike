@@ -650,6 +650,19 @@ func TestInspectEffectivePromptMatchesStream(t *testing.T) {
 		// Stream may still carry secrets (real request); inspect must not.
 		t.Fatal("stream system should still contain the raw persona key for this fixture")
 	}
+	if ev.Attribution.Source != protocol.UsageSourceEstimated {
+		t.Fatalf("attribution source = %q, want estimated", ev.Attribution.Source)
+	}
+	if !ev.Attribution.Total.Known || ev.Attribution.Total.N <= 0 {
+		t.Fatalf("attribution total = %+v", ev.Attribution.Total)
+	}
+	if !ev.Attribution.System.Known || ev.Attribution.System.N <= 0 {
+		t.Fatalf("attribution system = %+v", ev.Attribution.System)
+	}
+	// Messages include the user turn sent on the stream.
+	if !ev.Attribution.Messages.Known || ev.Attribution.Messages.N <= 0 {
+		t.Fatalf("attribution messages = %+v", ev.Attribution.Messages)
+	}
 }
 
 func TestInspectEffectivePromptBeforeStreamUsesCurrent(t *testing.T) {

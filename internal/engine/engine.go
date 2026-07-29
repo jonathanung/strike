@@ -116,6 +116,18 @@ type Options struct {
 	// KeepUserTurns is how many trailing real user turns to preserve when
 	// compacting. Zero defaults to 2.
 	KeepUserTurns int
+	// PruneProtectTokens is how many recent tool-output tokens to keep intact
+	// during continuous tool-result prune. Zero defaults to 40000.
+	PruneProtectTokens int
+	// PruneMinimumTokens is the minimum estimated tokens freed before prune
+	// mutates history. Zero defaults to 20000.
+	PruneMinimumTokens int
+	// PruneKeepUserTurns skips tool results inside the most recent N real user
+	// turns during prune. Zero defaults to 2.
+	PruneKeepUserTurns int
+	// PruneProtectTools names additional tools whose results stay available
+	// after prune (merged with the built-in "skill" protect). Empty adds none.
+	PruneProtectTools []string
 	// CompactionStrategy is "trim" (default) or "summarize". Unknown values
 	// fall back to trim.
 	CompactionStrategy string

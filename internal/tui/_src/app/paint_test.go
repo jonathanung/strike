@@ -21,7 +21,7 @@ func frameBuilds(m Model) int {
 	if m.paint == nil {
 		return 0
 	}
-	return m.paint.frameBuilds
+	return m.paint.renderFrameCalls
 }
 
 func TestTextDeltaPaintsAreFPSCapped(t *testing.T) {
@@ -141,6 +141,9 @@ func TestPermissionAskedImmediateFlush(t *testing.T) {
 }
 
 func TestWorkingSpinnerTicksAreFPSCapped(t *testing.T) {
+	if staticWorkingChrome() {
+		t.Skip("static working chrome disables spinner ticks (#497)")
+	}
 	m, _ := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	now := time.Unix(1_700_000_000, 0)

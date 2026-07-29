@@ -865,6 +865,104 @@ func TestClampCompactionKnobs(t *testing.T) {
 	}
 }
 
+func TestLoadPruneKnobs(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(global, []byte(`{
+		"pruneProtectTokens": 50000,
+		"pruneMinimumTokens": 25000,
+		"pruneKeepUserTurns": 3,
+		"pruneProtectTools": ["bash", " Bash ", "memory_read"]
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(work, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(project), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(project, []byte(`{
+		"pruneProtectTokens": 10000,
+		"pruneMinimumTokens": 5000,
+		"pruneKeepUserTurns": 1,
+		"pruneProtectTools": ["webfetch"]
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PruneProtectTokens != 10000 {
+		t.Fatalf("protect = %d, want 10000", cfg.PruneProtectTokens)
+	}
+	if cfg.PruneMinimumTokens != 5000 {
+		t.Fatalf("minimum = %d, want 5000", cfg.PruneMinimumTokens)
+	}
+	if cfg.PruneKeepUserTurns != 1 {
+		t.Fatalf("keep = %d, want 1", cfg.PruneKeepUserTurns)
+	}
+	if len(cfg.PruneProtectTools) != 1 || cfg.PruneProtectTools[0] != "webfetch" {
+		t.Fatalf("tools = %#v, want [webfetch]", cfg.PruneProtectTools)
+	}
+}
+
+func TestLoadPruneKnobsDefaultsOmit(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+	cfg, err := Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PruneProtectTokens != 0 || cfg.PruneMinimumTokens != 0 || cfg.PruneKeepUserTurns != 0 {
+		t.Fatalf("omit want zeros, got protect=%d min=%d keep=%d",
+			cfg.PruneProtectTokens, cfg.PruneMinimumTokens, cfg.PruneKeepUserTurns)
+	}
+	if cfg.PruneProtectTools != nil {
+		t.Fatalf("tools = %#v, want nil", cfg.PruneProtectTools)
+	}
+}
+
+func TestClampPruneKnobs(t *testing.T) {
+	if got := ClampPruneProtectTokens(-1); got != 0 {
+		t.Fatalf("neg protect = %d", got)
+	}
+	if got := ClampPruneProtectTokens(40000); got != 40000 {
+		t.Fatalf("protect = %d", got)
+	}
+	if got := ClampPruneMinimumTokens(-10); got != 0 {
+		t.Fatalf("neg minimum = %d", got)
+	}
+	if got := ClampPruneMinimumTokens(20000); got != 20000 {
+		t.Fatalf("minimum = %d", got)
+	}
+	if got := ClampPruneKeepUserTurns(-2); got != 0 {
+		t.Fatalf("neg keep = %d", got)
+	}
+	if got := ClampPruneKeepUserTurns(4); got != 4 {
+		t.Fatalf("keep = %d", got)
+	}
+}
+
+func TestNormalizePruneProtectTools(t *testing.T) {
+	if got := NormalizePruneProtectTools(nil); got != nil {
+		t.Fatalf("nil = %#v", got)
+	}
+	if got := NormalizePruneProtectTools([]string{"", "  "}); got != nil {
+		t.Fatalf("blanks = %#v", got)
+	}
+	got := NormalizePruneProtectTools([]string{" Bash ", "bash", "memory_read", ""})
+	if len(got) != 2 || got[0] != "bash" || got[1] != "memory_read" {
+		t.Fatalf("got %#v", got)
+	}
+}
+
 func TestNormalizeLeanCode(t *testing.T) {
 	cases := map[string]string{
 		"":        "",

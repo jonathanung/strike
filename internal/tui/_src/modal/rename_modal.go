@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -21,15 +22,24 @@ type sessionRenamedMsg struct {
 type renameModal struct {
 	sessions host.Sessions
 	id       string
-	buf      string
+	input    textinput.Model
 	err      string
 }
 
-func newRenameModal(sessions host.Sessions, id, current string) *renameModal {
+func newRenameModal(sessions host.Sessions, id, current string, themes ...theme.Theme) *renameModal {
+	th := theme.Default()
+	if len(themes) > 0 {
+		th = themes[0]
+	}
+	th = th.Resolve()
+	in := newTextInput(th, "session title")
+	in.SetValue(strings.TrimSpace(current))
+	in.CursorEnd()
+	in.Focus()
 	return &renameModal{
 		sessions: sessions,
 		id:       strings.TrimSpace(id),
-		buf:      strings.TrimSpace(current),
+		input:    in,
 	}
 }
 
@@ -46,7 +56,7 @@ func (m *renameModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 		if m.id == "" {
 			return nil, nil
 		}
-		title := strings.TrimSpace(m.buf)
+		title := strings.TrimSpace(m.input.Value())
 		got, err := m.sessions.Rename(m.id, title)
 		if err != nil {
 			m.err = err.Error()
@@ -60,20 +70,11 @@ func (m *renameModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 		return nil, func() tea.Msg {
 			return sessionRenamedMsg{id: id, title: final}
 		}
-	case "backspace":
-		if m.buf != "" {
-			r := []rune(m.buf)
-			m.buf = string(r[:len(r)-1])
-		}
-		m.err = ""
-		return m, nil
-	default:
-		if msg.Type == tea.KeyRunes {
-			m.buf += string(msg.Runes)
-			m.err = ""
-		}
-		return m, nil
 	}
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	m.err = ""
+	return m, cmd
 }
 
 func (m *renameModal) view(width int, th theme.Theme) string {
@@ -87,9 +88,10 @@ func (m *renameModal) view(width int, th theme.Theme) string {
 	if label == "" {
 		label = "session"
 	}
+	sizeInput(&m.input, inner)
 	lines := []string{
 		st.Muted.Render("Rename " + label),
-		st.Input.Render(m.buf) + st.InputCursor.Render(th.Icons.InputCursor),
+		m.input.View(),
 	}
 	if m.err != "" {
 		lines = append(lines, st.Error.Render(sanitizeDisplayData(m.err)))

@@ -15,6 +15,10 @@ func bigOutput(tokens int) string {
 	return strings.Repeat("x", tokens*4)
 }
 
+func defaultPrune() pruneParams {
+	return resolvePruneParams(0, 0, 0, nil)
+}
+
 func toolMsg(id, name, out string) (assistant, result provider.Message) {
 	assistant = provider.Message{
 		Role:      provider.RoleAssistant,
@@ -59,7 +63,7 @@ func TestPruneToolResultsBlanksOldBeyondProtect(t *testing.T) {
 	msgs := historyWithSizedTools(bigOutput(per), bigOutput(5_000), 3, 1)
 
 	before := estimateTokens("", msgs)
-	cleared, freed := pruneToolResults(msgs)
+	cleared, freed := pruneToolResults(msgs, defaultPrune())
 	if cleared == 0 {
 		t.Fatalf("expected some results cleared, freed=%d", freed)
 	}
@@ -114,7 +118,7 @@ func TestPruneToolResultsProtectsRecentBudget(t *testing.T) {
 	// Single large old result (~30k) under protect+minimum dynamics:
 	// total eligible 30k <= protect 40k → nothing pruned.
 	msgs := historyWithSizedTools(bigOutput(30_000), bigOutput(1_000), 1, 1)
-	cleared, freed := pruneToolResults(msgs)
+	cleared, freed := pruneToolResults(msgs, defaultPrune())
 	if cleared != 0 || freed != 0 {
 		t.Fatalf("cleared=%d freed=%d, want no-op under protect budget", cleared, freed)
 	}
@@ -144,7 +148,7 @@ func TestPruneToolResultsNoopBelowMinimum(t *testing.T) {
 	an, rn := toolMsg("new-b", "bash", bigOutput(100))
 	msgs = append(msgs, an, rn)
 
-	cleared, freed := pruneToolResults(msgs)
+	cleared, freed := pruneToolResults(msgs, defaultPrune())
 	if cleared != 0 || freed != 0 {
 		t.Fatalf("cleared=%d freed=%d, want no-op when freed <= pruneMinimum", cleared, freed)
 	}
@@ -161,7 +165,7 @@ func TestPruneToolResultsKeepsPairsValid(t *testing.T) {
 	if !historyToolPairsValid(msgs) {
 		t.Fatal("setup invalid")
 	}
-	cleared, _ := pruneToolResults(msgs)
+	cleared, _ := pruneToolResults(msgs, defaultPrune())
 	if cleared == 0 {
 		t.Fatal("expected clears")
 	}
@@ -194,9 +198,9 @@ func TestPruneToolResultsSkipsAlreadyCleared(t *testing.T) {
 		}
 	}
 	// First prune pass on remaining should still work or stop at boundary.
-	_, _ = pruneToolResults(msgs)
+	_, _ = pruneToolResults(msgs, defaultPrune())
 	// Second pass: everything already at boundary / under minimum → stable.
-	cleared2, freed2 := pruneToolResults(msgs)
+	cleared2, freed2 := pruneToolResults(msgs, defaultPrune())
 	if cleared2 != 0 {
 		t.Fatalf("second pass cleared=%d freed=%d, want stable no-op", cleared2, freed2)
 	}
@@ -223,7 +227,7 @@ func TestPruneToolResultsProtectsSkillTool(t *testing.T) {
 	aRecent, rRecent := toolMsg("br", "bash", bigOutput(100))
 	msgs = append(msgs, aRecent, rRecent)
 
-	cleared, _ := pruneToolResults(msgs)
+	cleared, _ := pruneToolResults(msgs, defaultPrune())
 	if cleared == 0 {
 		t.Fatal("expected bash results to clear")
 	}
@@ -238,16 +242,106 @@ func TestPruneToolResultsProtectsSkillTool(t *testing.T) {
 }
 
 func TestPruneToolResultsEmptyNoop(t *testing.T) {
-	cleared, freed := pruneToolResults(nil)
+	cleared, freed := pruneToolResults(nil, defaultPrune())
 	if cleared != 0 || freed != 0 {
 		t.Fatalf("nil: cleared=%d freed=%d", cleared, freed)
 	}
 	cleared, freed = pruneToolResults([]provider.Message{
 		{Role: provider.RoleUser, Text: "hi"},
 		{Role: provider.RoleAssistant, Text: "yo"},
-	})
+	}, defaultPrune())
 	if cleared != 0 || freed != 0 {
 		t.Fatalf("no tools: cleared=%d freed=%d", cleared, freed)
+	}
+}
+
+func TestResolvePruneParamsDefaults(t *testing.T) {
+	p := resolvePruneParams(0, 0, 0, nil)
+	if p.protect != pruneProtect || p.minimum != pruneMinimum || p.recentUserTurns != pruneRecentUserTurns {
+		t.Fatalf("defaults: protect=%d minimum=%d recent=%d", p.protect, p.minimum, p.recentUserTurns)
+	}
+	if _, ok := p.protectedTools["skill"]; !ok {
+		t.Fatal("default protect missing skill")
+	}
+	// Negatives / zero still fall through to defaults at resolve time.
+	p2 := resolvePruneParams(-1, -5, -2, nil)
+	if p2.protect != pruneProtect || p2.minimum != pruneMinimum || p2.recentUserTurns != pruneRecentUserTurns {
+		t.Fatalf("negatives: protect=%d minimum=%d recent=%d", p2.protect, p2.minimum, p2.recentUserTurns)
+	}
+}
+
+func TestResolvePruneParamsOverrides(t *testing.T) {
+	p := resolvePruneParams(1000, 500, 1, []string{" Bash ", "bash", "memory_read", ""})
+	if p.protect != 1000 || p.minimum != 500 || p.recentUserTurns != 1 {
+		t.Fatalf("override: %+v", p)
+	}
+	for _, name := range []string{"skill", "bash", "memory_read"} {
+		if _, ok := p.protectedTools[name]; !ok {
+			t.Fatalf("missing protected tool %q in %#v", name, p.protectedTools)
+		}
+	}
+}
+
+func TestPruneToolResultsRespectsCustomThresholds(t *testing.T) {
+	// Under defaults, 30k old is fully inside protect 40k → no-op.
+	// With protect=5k and minimum=1k, the same history must clear.
+	msgs := historyWithSizedTools(bigOutput(30_000), bigOutput(1_000), 1, 1)
+	cleared, freed := pruneToolResults(msgs, resolvePruneParams(5_000, 1_000, 2, nil))
+	if cleared == 0 || freed == 0 {
+		t.Fatalf("cleared=%d freed=%d, want prune with tight protect", cleared, freed)
+	}
+	for _, m := range msgs {
+		if m.Role == provider.RoleTool && m.ToolResult != nil &&
+			strings.HasPrefix(m.ToolResult.CallID, "old-") &&
+			m.ToolResult.Output != prunedToolResultText {
+			t.Fatal("old result not cleared under custom protect")
+		}
+	}
+}
+
+func TestPruneToolResultsExtraProtectTools(t *testing.T) {
+	bashOut := bigOutput(30_000)
+	msgs := []provider.Message{{Role: provider.RoleUser, Text: "u1"}}
+	aBash1, rBash1 := toolMsg("b1", "bash", bashOut)
+	aBash2, rBash2 := toolMsg("b2", "bash", bashOut)
+	aBash3, rBash3 := toolMsg("b3", "bash", bashOut)
+	msgs = append(msgs, aBash1, rBash1, aBash2, rBash2, aBash3, rBash3)
+	msgs = append(msgs, provider.Message{Role: provider.RoleUser, Text: "u2"})
+	aMid, rMid := toolMsg("bm", "read", bigOutput(100))
+	msgs = append(msgs, aMid, rMid)
+	msgs = append(msgs, provider.Message{Role: provider.RoleUser, Text: "u3"})
+	aRecent, rRecent := toolMsg("br", "read", bigOutput(100))
+	msgs = append(msgs, aRecent, rRecent)
+
+	// Protect bash via config extension; only non-bash could clear, but mid/recent
+	// sit inside keep-user-turns so nothing is eligible → no-op.
+	cleared, _ := pruneToolResults(msgs, resolvePruneParams(1_000, 500, 2, []string{"bash"}))
+	if cleared != 0 {
+		t.Fatalf("cleared=%d, want 0 when bash protected", cleared)
+	}
+	for _, m := range msgs {
+		if m.Role == provider.RoleTool && m.ToolResult != nil && m.ToolResult.Output == prunedToolResultText {
+			t.Fatal("unexpected clear with bash protected")
+		}
+	}
+}
+
+func TestEnginePruneParamsFromOpts(t *testing.T) {
+	e := &Engine{opts: Options{
+		PruneProtectTokens: 1111,
+		PruneMinimumTokens: 2222,
+		PruneKeepUserTurns: 3,
+		PruneProtectTools:  []string{"webfetch"},
+	}}
+	p := e.pruneParams()
+	if p.protect != 1111 || p.minimum != 2222 || p.recentUserTurns != 3 {
+		t.Fatalf("engine params: protect=%d minimum=%d recent=%d", p.protect, p.minimum, p.recentUserTurns)
+	}
+	if _, ok := p.protectedTools["webfetch"]; !ok {
+		t.Fatal("missing webfetch")
+	}
+	if _, ok := p.protectedTools["skill"]; !ok {
+		t.Fatal("missing skill")
 	}
 }
 

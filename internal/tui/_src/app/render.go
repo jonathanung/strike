@@ -13,7 +13,12 @@ func (m Model) View() string {
 	// Soft-coalesced updates reuse the last full frame so Bubble Tea's
 	// post-Update View call does not rebuild Canvas at token/spinner rate (#496).
 	if p := m.paint; p != nil && p.suppress && p.lastFrame != "" {
+		p.viewCalls++
+		p.lastViewBytes = len(p.lastFrame)
 		return p.lastFrame
+	}
+	if m.paint != nil {
+		m.paint.viewCalls++
 	}
 	frame := m.renderFrame()
 	if m.textSel.active() {
@@ -21,14 +26,17 @@ func (m Model) View() string {
 	}
 	// Cache the visible frame without OSC52 so suppressed Views stay current
 	// and one-shot clipboard sequences are never replayed (#496).
-	m.noteFrameBuild(frame)
+	m.noteCachedFrame(frame)
 	if wm, ok := m.modal.(*authWaitModal); ok {
 		if osc := wm.TakeCopyOSC(); osc != "" {
-			return osc + frame
+			frame = osc + frame
 		}
 	}
 	if osc := m.cellClip.take(); osc != "" {
-		return osc + frame
+		frame = osc + frame
+	}
+	if m.paint != nil {
+		m.paint.lastViewBytes = len(frame)
 	}
 	return frame
 }
@@ -36,6 +44,9 @@ func (m Model) View() string {
 // renderFrame builds the full-screen UI without OSC52 side effects or the
 // active text-selection overlay (callers apply those separately).
 func (m Model) renderFrame() string {
+	if m.paint != nil {
+		m.paint.renderFrameCalls++
+	}
 	if !m.ready {
 		if warning := m.dangerView(0); warning != "" {
 			return warning + "\nstarting…"

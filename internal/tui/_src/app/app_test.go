@@ -2110,6 +2110,7 @@ func TestProtocolEventsAndSpinnerDoNotChangeRightFocus(t *testing.T) {
 func TestIdleSpinnerDoesNotArmOrContinue(t *testing.T) {
 	// Welcome/init must stay event-driven: no spinner FPS full-frame redraws (#481).
 	// Init uses spinTickCmd(), so a nil arm here means Init does not start ticks.
+	forceAnimatedWorkingChrome(t)
 	m, _ := newAppTestModel(nil, nil)
 	if m.agentState() != theme.AgentStateReady {
 		t.Fatalf("agentState = %v, want Ready", m.agentState())
@@ -2125,6 +2126,7 @@ func TestIdleSpinnerDoesNotArmOrContinue(t *testing.T) {
 }
 
 func TestWorkingSpinnerArmsAndContinues(t *testing.T) {
+	forceAnimatedWorkingChrome(t)
 	m, _ := newAppTestModel(nil, nil)
 	m.turnRunning = true
 	if cmd := m.spinTickCmd(); cmd == nil {
@@ -2147,6 +2149,7 @@ func TestWorkingSpinnerArmsAndContinues(t *testing.T) {
 }
 
 func TestTurnStartedArmsSpinner(t *testing.T) {
+	forceAnimatedWorkingChrome(t)
 	m, _ := newAppTestModel(nil, nil)
 	cmd := m.applyEvent(protocol.TurnStarted{})
 	if !m.turnRunning {
@@ -2161,4 +2164,69 @@ func TestTurnStartedArmsSpinner(t *testing.T) {
 	if !foundSpin {
 		t.Fatal("TurnStarted must arm spinner.Tick while Working")
 	}
+}
+
+func TestStaticWorkingChromeDoesNotArmOrContinue(t *testing.T) {
+	// SSH / STRIKE_WORKING_CHROME=static: static glyph, no tick chain (#497).
+	t.Setenv("STRIKE_WORKING_CHROME", "static")
+	t.Setenv("SSH_CONNECTION", "")
+	t.Setenv("SSH_TTY", "")
+	m, _ := newAppTestModel(nil, nil)
+	styleSpinner(&m.spin, m.th)
+	m.turnRunning = true
+	if m.agentState() != theme.AgentStateWorking {
+		t.Fatalf("agentState = %v, want Working", m.agentState())
+	}
+	if cmd := m.spinTickCmd(); cmd != nil {
+		t.Fatal("spinTickCmd must be nil in static working chrome")
+	}
+	updated, cmd := m.Update(spinner.TickMsg{})
+	_ = updated
+	if cmd != nil {
+		t.Fatal("static working chrome must drop spinner.TickMsg without re-arm")
+	}
+	cmd = m.applyEvent(protocol.TurnStarted{})
+	for _, msg := range runAllAppCmds(t, cmd) {
+		if _, ok := msg.(spinner.TickMsg); ok {
+			t.Fatal("TurnStarted must not arm spinner.Tick in static chrome")
+		}
+	}
+}
+
+func TestSSHConnectionImpliesStaticWorkingChrome(t *testing.T) {
+	t.Setenv("STRIKE_WORKING_CHROME", "")
+	t.Setenv("SSH_CONNECTION", "10.0.0.1 50000 10.0.0.2 22")
+	t.Setenv("SSH_TTY", "")
+	if !staticWorkingChrome() {
+		t.Fatal("SSH_CONNECTION should imply static working chrome")
+	}
+	m, _ := newAppTestModel(nil, nil)
+	m.turnRunning = true
+	if cmd := m.spinTickCmd(); cmd != nil {
+		t.Fatal("spinTickCmd must be nil over SSH")
+	}
+}
+
+func TestWorkingChromeAnimateOverrideOnSSH(t *testing.T) {
+	t.Setenv("SSH_CONNECTION", "10.0.0.1 50000 10.0.0.2 22")
+	t.Setenv("SSH_TTY", "/dev/pts/0")
+	t.Setenv("STRIKE_WORKING_CHROME", "animate")
+	if staticWorkingChrome() {
+		t.Fatal("STRIKE_WORKING_CHROME=animate must force ticks over SSH")
+	}
+	m, _ := newAppTestModel(nil, nil)
+	styleSpinner(&m.spin, m.th)
+	m.turnRunning = true
+	if cmd := m.spinTickCmd(); cmd == nil {
+		t.Fatal("spinTickCmd must arm when animate overrides SSH")
+	}
+}
+
+// forceAnimatedWorkingChrome pins local animated chrome so arm/disarm tests
+// do not flake under developer SSH or stray STRIKE_WORKING_CHROME env.
+func forceAnimatedWorkingChrome(t *testing.T) {
+	t.Helper()
+	t.Setenv("STRIKE_WORKING_CHROME", "animate")
+	t.Setenv("SSH_CONNECTION", "")
+	t.Setenv("SSH_TTY", "")
 }

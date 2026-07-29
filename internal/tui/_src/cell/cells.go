@@ -56,6 +56,9 @@ type assistantCell struct {
 	mdCacheKey string
 	mdCacheW   int
 	mdCacheOK  bool
+	// mdMisses counts full markdownRender paths (cache miss). Used by redraw
+	// budget tests (#452/#495) so completed cells stay on the cache hit path.
+	mdMisses int
 	// copiedFlash is set after y-to-copy until clearCellCopiedFlashMsg.
 	copiedFlash bool
 }
@@ -89,6 +92,7 @@ func (c *assistantCell) render(width int, th theme.Theme) string {
 	case c.mdCacheOK && c.mdCacheKey == src && c.mdCacheW == bodyWidth:
 		body = c.mdCache
 	default:
+		c.mdMisses++
 		out, err := markdownRender(src, bodyWidth)
 		if err != nil {
 			body = renderCellText(st.Text, src, bodyWidth)

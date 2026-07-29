@@ -697,3 +697,225 @@ func TestResponsesStreamWireModelAndPath(t *testing.T) {
 		t.Errorf("usage = %+v", usage)
 	}
 }
+
+func TestToChatRequestPromptCacheKey(t *testing.T) {
+	out := toChatRequest(provider.Request{
+		Model:    "gpt-5.5",
+		CacheKey: "  sess-abc  ",
+		Messages: []provider.Message{{Role: provider.RoleUser, Text: "hi"}},
+	}, true, true)
+	if out.PromptCacheKey != "sess-abc" {
+		t.Fatalf("PromptCacheKey = %q, want sess-abc", out.PromptCacheKey)
+	}
+	raw, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"prompt_cache_key":"sess-abc"`) {
+		t.Fatalf("wire missing prompt_cache_key: %s", raw)
+	}
+
+	empty := toChatRequest(provider.Request{Model: "gpt-5.5", CacheKey: "   "}, true, true)
+	rawEmpty, err := json.Marshal(empty)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(rawEmpty), "prompt_cache_key") {
+		t.Fatalf("blank CacheKey must omit prompt_cache_key: %s", rawEmpty)
+	}
+}
+
+func TestToResponsesRequestPromptCacheKey(t *testing.T) {
+	out := toResponsesRequest(provider.Request{
+		Model:    "gpt-5.5",
+		CacheKey: "sess-xyz",
+		Messages: []provider.Message{{Role: provider.RoleUser, Text: "hi"}},
+	})
+	if out.PromptCacheKey != "sess-xyz" {
+		t.Fatalf("PromptCacheKey = %q, want sess-xyz", out.PromptCacheKey)
+	}
+	raw, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"prompt_cache_key":"sess-xyz"`) {
+		t.Fatalf("wire missing prompt_cache_key: %s", raw)
+	}
+}
+
+func TestChatUsageToProviderCacheBreakout(t *testing.T) {
+	tests := []struct {
+		name string
+		in   chatUsage
+		want provider.Usage
+	}{
+		{
+			name: "no details",
+			in:   chatUsage{PromptTokens: 100, CompletionTokens: 20, TotalTokens: 120},
+			want: provider.Usage{InputTokens: 100, OutputTokens: 20, TotalTokens: 120},
+		},
+		{
+			name: "cached only",
+			in: chatUsage{
+				PromptTokens: 2006, CompletionTokens: 300, TotalTokens: 2306,
+				PromptTokensDetails: &chatPromptTokDetails{CachedTokens: 1920},
+			},
+			// uncached = 2006-1920 = 86
+			want: provider.Usage{InputTokens: 86, OutputTokens: 300, CacheReadTokens: 1920, TotalTokens: 2306},
+		},
+		{
+			name: "cached and write",
+			in: chatUsage{
+				PromptTokens: 1000, CompletionTokens: 10, TotalTokens: 1010,
+				PromptTokensDetails: &chatPromptTokDetails{CachedTokens: 700, CacheWriteTokens: 200},
+			},
+			// uncached non-write = 1000-700-200 = 100
+			want: provider.Usage{InputTokens: 100, OutputTokens: 10, CacheReadTokens: 700, CacheCreationTokens: 200, TotalTokens: 1010},
+		},
+		{
+			name: "clamps cached above prompt",
+			in: chatUsage{
+				PromptTokens: 50, CompletionTokens: 1, TotalTokens: 51,
+				PromptTokensDetails: &chatPromptTokDetails{CachedTokens: 999},
+			},
+			want: provider.Usage{InputTokens: 0, OutputTokens: 1, CacheReadTokens: 50, TotalTokens: 51},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := chatUsageToProvider(&tt.in)
+			if got == nil {
+				t.Fatal("nil usage")
+			}
+			if *got != tt.want {
+				t.Fatalf("got %+v, want %+v", *got, tt.want)
+			}
+			// Occupancy identity: parts sum to prompt+completion when details present.
+			parts := got.InputTokens + got.CacheReadTokens + got.CacheCreationTokens + got.OutputTokens
+			wantParts := tt.in.PromptTokens + tt.in.CompletionTokens
+			if parts != wantParts {
+				t.Fatalf("parts sum %d, want prompt+completion %d", parts, wantParts)
+			}
+		})
+	}
+}
+
+func TestResponsesUsageToProviderCacheBreakout(t *testing.T) {
+	got := responsesUsageToProvider(&responsesUsage{
+		InputTokens:  500,
+		OutputTokens: 40,
+		TotalTokens:  540,
+		InputTokensDetails: &responsesInputTokDetails{
+			CachedTokens:     400,
+			CacheWriteTokens: 50,
+		},
+	})
+	want := provider.Usage{
+		InputTokens:         50,
+		OutputTokens:        40,
+		CacheReadTokens:     400,
+		CacheCreationTokens: 50,
+		TotalTokens:         540,
+	}
+	if got == nil || *got != want {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+}
+
+// TestStreamSendsPromptCacheKeyOnWire pins chat-completions request-side cache key.
+func TestStreamSendsPromptCacheKeyOnWire(t *testing.T) {
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],
+			"usage":{
+				"prompt_tokens":2006,
+				"completion_tokens":3,
+				"total_tokens":2009,
+				"prompt_tokens_details":{"cached_tokens":1920,"cache_write_tokens":0}
+			}
+		}`))
+	}))
+	defer srv.Close()
+
+	p := New("openai", srv.URL, func(context.Context) (string, error) { return "k", nil })
+	stream, err := p.Stream(context.Background(), provider.Request{
+		Model:    "gpt-5.5",
+		CacheKey: "session-491",
+		System:   "stable system",
+		Messages: []provider.Message{{Role: provider.RoleUser, Text: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var usage *provider.Usage
+	for ev := range stream {
+		if ev.Type == provider.EventError {
+			t.Fatalf("stream error: %v", ev.Err)
+		}
+		if ev.Type == provider.EventDone {
+			usage = ev.Usage
+		}
+	}
+	if !strings.Contains(string(body), `"prompt_cache_key":"session-491"`) {
+		t.Fatalf("request body missing prompt_cache_key: %s", body)
+	}
+	if usage == nil || usage.CacheReadTokens != 1920 || usage.InputTokens != 86 || usage.OutputTokens != 3 {
+		t.Fatalf("usage = %+v, want cacheRead=1920 input=86 output=3", usage)
+	}
+}
+
+// TestResponsesStreamSendsPromptCacheKeyOnWire pins Responses API cache key + usage map.
+func TestResponsesStreamSendsPromptCacheKeyOnWire(t *testing.T) {
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ = io.ReadAll(r.Body)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "completed",
+			"output": []map[string]any{
+				{"type": "message", "content": []map[string]any{
+					{"type": "output_text", "text": "ok"},
+				}},
+			},
+			"usage": map[string]any{
+				"input_tokens":  100,
+				"output_tokens": 5,
+				"total_tokens":  105,
+				"input_tokens_details": map[string]any{
+					"cached_tokens":      80,
+					"cache_write_tokens": 10,
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	p := NewResponses("openai", srv.URL+"/v1", func(context.Context) (string, error) {
+		return "k", nil
+	}, nil)
+	stream, err := p.Stream(context.Background(), provider.Request{
+		Model:    "gpt-5.5",
+		CacheKey: "session-resp",
+		Messages: []provider.Message{{Role: provider.RoleUser, Text: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var usage *provider.Usage
+	for ev := range stream {
+		if ev.Type == provider.EventError {
+			t.Fatalf("stream error: %v", ev.Err)
+		}
+		if ev.Type == provider.EventDone {
+			usage = ev.Usage
+		}
+	}
+	if !strings.Contains(string(body), `"prompt_cache_key":"session-resp"`) {
+		t.Fatalf("request body missing prompt_cache_key: %s", body)
+	}
+	if usage == nil || usage.CacheReadTokens != 80 || usage.CacheCreationTokens != 10 || usage.InputTokens != 10 {
+		t.Fatalf("usage = %+v, want cacheRead=80 creation=10 input=10", usage)
+	}
+}

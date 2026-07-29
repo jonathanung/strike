@@ -500,6 +500,10 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			CompactionThreshold:   cfg.CompactionThreshold,
 			CompactionBuffer:      cfg.CompactionBuffer,
 			KeepUserTurns:         cfg.KeepUserTurns,
+			PruneProtectTokens:    cfg.PruneProtectTokens,
+			PruneMinimumTokens:    cfg.PruneMinimumTokens,
+			PruneKeepUserTurns:    cfg.PruneKeepUserTurns,
+			PruneProtectTools:     cfg.PruneProtectTools,
 			LookupContextWindow:   lookupContextWindow,
 			ListModels:            listModels,
 			PersistProjectRule: func(rule permission.Rule) error {
