@@ -10,6 +10,11 @@ import (
 )
 
 func (m Model) View() string {
+	// Soft-coalesced updates reuse the last full frame so Bubble Tea's
+	// post-Update View call does not rebuild Canvas at token/spinner rate (#496).
+	if p := m.paint; p != nil && p.suppress && p.lastFrame != "" {
+		return p.lastFrame
+	}
 	frame := m.renderFrame()
 	if m.textSel.active() {
 		frame = applyTextSelection(frame, m.textSel, m.th.S().TextSelection)
@@ -17,12 +22,15 @@ func (m Model) View() string {
 	// Prepend OSC52 after Canvas so overlay/ansi.Cut cannot strip it.
 	if wm, ok := m.modal.(*authWaitModal); ok {
 		if osc := wm.TakeCopyOSC(); osc != "" {
+			// Do not cache OSC52 frames; one-shot clipboard sequences must not
+			// replay on the next suppressed View.
 			return osc + frame
 		}
 	}
 	if osc := m.cellClip.take(); osc != "" {
 		return osc + frame
 	}
+	m.noteFrameBuild(frame)
 	return frame
 }
 
