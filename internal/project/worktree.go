@@ -40,15 +40,15 @@ type Worktree struct {
 	RepoRoot string
 }
 
-// NormalizeWorktreeMode maps config strings to off|auto|always (default off).
+// NormalizeWorktreeMode maps config strings to off|auto|always (default always).
 func NormalizeWorktreeMode(s string) string {
 	switch strings.ToLower(strings.TrimSpace(s)) {
+	case WorktreeOff:
+		return WorktreeOff
 	case WorktreeAuto:
 		return WorktreeAuto
-	case WorktreeAlways:
-		return WorktreeAlways
 	default:
-		return WorktreeOff
+		return WorktreeAlways
 	}
 }
 

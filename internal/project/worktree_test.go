@@ -10,12 +10,13 @@ import (
 
 func TestNormalizeWorktreeMode(t *testing.T) {
 	cases := map[string]string{
-		"":        WorktreeOff,
+		"":        WorktreeAlways,
 		"off":     WorktreeOff,
 		"OFF":     WorktreeOff,
 		"auto":    WorktreeAuto,
 		" Always": WorktreeAlways,
-		"nope":    WorktreeOff,
+		"always":  WorktreeAlways,
+		"nope":    WorktreeAlways,
 	}
 	for in, want := range cases {
 		if got := NormalizeWorktreeMode(in); got != want {
@@ -43,6 +44,7 @@ func TestWantWorktree(t *testing.T) {
 		open  int
 		want  bool
 	}{
+		{mode: "", open: 0, want: true},
 		{mode: "off", open: 0, want: false},
 		{mode: "off", open: 5, want: false},
 		{mode: "off", force: true, want: true},

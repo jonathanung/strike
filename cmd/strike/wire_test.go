@@ -1056,7 +1056,8 @@ func TestBindSessionWorktreeOffStaysOnLaunch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	toolDir, cleanup, err := bindSessionWorktree(mgr, info.ID, dir, config.Config{}, false, false, 0)
+	cfg := config.Config{Session: config.SessionConfig{Worktree: "off"}}
+	toolDir, cleanup, err := bindSessionWorktree(mgr, info.ID, dir, cfg, false, false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1066,6 +1067,49 @@ func TestBindSessionWorktreeOffStaysOnLaunch(t *testing.T) {
 	if cleanup != nil {
 		t.Fatal("unexpected cleanup")
 	}
+}
+
+func TestBindSessionWorktreeDefaultAlways(t *testing.T) {
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git unavailable")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command(git, args...)
+		cmd.Dir = repo
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "--quiet")
+	run("config", "user.email", "t@t")
+	run("config", "user.name", "t")
+	run("commit", "--quiet", "--allow-empty", "-m", "init")
+
+	mgr := session.NewManager(filepath.Join(home, ".strike", "sessions"))
+	info, err := mgr.Create(session.CreateOptions{ID: "wt-default", ProjectKey: repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Empty Session.Worktree uses default always.
+	toolDir, cleanup, err := bindSessionWorktree(mgr, info.ID, repo, config.Config{}, false, false, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if toolDir == repo {
+		t.Fatal("expected worktree path for default always, got launch dir")
+	}
+	if cleanup != nil {
+		t.Fatal("default cleanup is keep")
+	}
+	t.Cleanup(func() {
+		got, _ := mgr.Get(info.ID)
+		_ = project.Remove(context.Background(), repo, got.WorktreePath, got.WorktreeBranch)
+	})
 }
 
 func TestBindSessionWorktreeAutoSecondRoot(t *testing.T) {

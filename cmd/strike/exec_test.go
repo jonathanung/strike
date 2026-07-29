@@ -303,6 +303,10 @@ func TestRunHeadlessFrontendEngineError(t *testing.T) {
 func TestRunExecEchoOneShot(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	// Non-git workdir: opt out of default session.worktree=always.
+	if err := writeSessionWorktreeOff(home); err != nil {
+		t.Fatal(err)
+	}
 	// Session store under HOME via DefaultDir.
 	work := t.TempDir()
 	// runExec uses Getwd; change into temp workdir.
@@ -343,6 +347,9 @@ func TestRunExecRequiresUsableProvider(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("ANTHROPIC_API_KEY", "")
+	if err := writeSessionWorktreeOff(home); err != nil {
+		t.Fatal(err)
+	}
 	orig, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -364,6 +371,9 @@ func TestRunExecRequiresUsableProvider(t *testing.T) {
 func TestRunExecCLIEndToEndEcho(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	if err := writeSessionWorktreeOff(home); err != nil {
+		t.Fatal(err)
+	}
 	orig, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -382,4 +392,14 @@ func TestRunExecCLIEndToEndEcho(t *testing.T) {
 	if !strings.Contains(stdout.String(), "You said: ping") {
 		t.Errorf("stdout = %q", stdout.String())
 	}
+}
+
+// writeSessionWorktreeOff sets session.worktree=off so tests in non-git
+// temp dirs are not blocked by the default always mode.
+func writeSessionWorktreeOff(home string) error {
+	dir := filepath.Join(home, ".strike")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "config"), []byte(`{"session":{"worktree":"off"}}`+"\n"), 0o644)
 }
