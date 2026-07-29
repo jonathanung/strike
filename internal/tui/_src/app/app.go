@@ -352,6 +352,9 @@ type Model struct {
 	// loops are session-scoped /loop schedules (canceled on quit; not persisted).
 	loops   []scheduledLoop
 	loopSeq int
+
+	// frames caches compose layers for dirty-mask skip (#494). Never nil after New.
+	frames *frameCache
 }
 
 // childActivity is one foreground subagent row in the activity/agents panes.
@@ -398,6 +401,7 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		selectedFileRef:     -1,
 		cellClip:            &cellClipboard{},
 		paint:               &paintBudget{},
+		frames:              newFrameCache(),
 		composer:            ta,
 		keyMap:              defaultKeyMap(),
 		windows:             newWindowRegistry(),
@@ -539,6 +543,8 @@ func (m Model) listen() tea.Cmd {
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
+	// Default: full recompose. Spinner may markFrameSkip for unchanged layers.
+	m.clearFrameSkip()
 
 	// Default: immediate full-frame paint. Soft paths (TextDelta, spinner)
 	// re-arm FPS coalesce before return (#496).
@@ -654,6 +660,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		var cmd tea.Cmd
 		m.spin, cmd = m.spin.Update(msg)
+		// Header spinner/elapsed only when a prior View warmed the layer cache
+		// (frames.width set by storeGeo). Cold cache fully recomposes (#494).
+		if m.frames != nil && m.frames.width > 0 {
+			m.markFrameSkip(dirtyLeft | dirtyRight | dirtyFooter)
+		}
+		// FPS-cap full Canvas rebuilds even when dirty-mask trims layers (#496).
 		return m, tea.Batch(cmd, m.coalesceSoftPaint())
 
 	case projectDataMutatedMsg:
