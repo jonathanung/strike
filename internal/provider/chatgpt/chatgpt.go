@@ -63,7 +63,10 @@ func chatGPTAuth(source TokenSource) base.AuthFunc {
 	}
 }
 
-// Responses API wire types (the subset we use).
+// Responses API wire types (the subset we use). Codex CLI and OpenClaw both
+// send prompt_cache_key + include=["reasoning.encrypted_content"] on this
+// transport; matching that shape keeps sticky cache routing and multi-turn
+// reasoning continuity on the subscription backend.
 
 type responsesRequest struct {
 	Model             string           `json:"model"`
@@ -76,6 +79,10 @@ type responsesRequest struct {
 	Stream            bool             `json:"stream"`
 	Include           []string         `json:"include"`
 	Reasoning         *reasoningConfig `json:"reasoning,omitempty"`
+	// PromptCacheKey improves sticky routing for shared prompt prefixes
+	// (same field as platform Responses). Omitted when empty. Do not send
+	// prompt_cache_retention — the chatgpt.com backend rejects it with 400.
+	PromptCacheKey string `json:"prompt_cache_key,omitempty"`
 }
 
 type reasoningConfig struct {
@@ -124,16 +131,31 @@ type sseEvent struct {
 		Error  *struct {
 			Message string `json:"message"`
 		} `json:"error"`
-		Usage *struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
-			TotalTokens  int `json:"total_tokens"`
-		} `json:"usage"`
+		Usage *streamUsage `json:"usage"`
 	} `json:"response"`
 	Message string `json:"message"` // top-level error events
 }
 
+// streamUsage is Responses usage on response.completed. Cache breakouts are
+// subsets of input_tokens (same accounting as openaicompat Responses).
+type streamUsage struct {
+	InputTokens        int                    `json:"input_tokens"`
+	OutputTokens       int                    `json:"output_tokens"`
+	TotalTokens        int                    `json:"total_tokens"`
+	InputTokensDetails *streamInputTokDetails `json:"input_tokens_details,omitempty"`
+}
+
+type streamInputTokDetails struct {
+	CachedTokens     int `json:"cached_tokens"`
+	CacheWriteTokens int `json:"cache_write_tokens"`
+}
+
 func (p *Provider) Stream(ctx context.Context, req provider.Request) (<-chan provider.StreamEvent, error) {
+	// Prefer the session id for backend session affinity when the engine
+	// stamped CacheKey (matches Codex session_id / prompt_cache_key pairing).
+	if k := strings.TrimSpace(req.CacheKey); k != "" && p.Headers != nil {
+		p.Headers["session_id"] = k
+	}
 	body, err := p.PostSSE(ctx, p.endpoint, toResponsesRequest(req))
 	if err != nil {
 		return nil, err
@@ -187,12 +209,7 @@ func (p *Provider) readStream(body io.Reader, ch chan<- provider.StreamEvent) er
 		case "response.completed":
 			done := provider.StreamEvent{Type: provider.EventDone, StopReason: "completed"}
 			if ev.Response != nil && ev.Response.Usage != nil {
-				u := ev.Response.Usage
-				done.Usage = &provider.Usage{
-					InputTokens:  u.InputTokens,
-					OutputTokens: u.OutputTokens,
-					TotalTokens:  u.TotalTokens,
-				}
+				done.Usage = streamUsageToProvider(ev.Response.Usage)
 			}
 			ch <- done
 			return nil
@@ -212,6 +229,41 @@ func (p *Provider) readStream(body io.Reader, ch chan<- provider.StreamEvent) er
 	return fmt.Errorf("chatgpt backend: stream ended without response.completed")
 }
 
+// streamUsageToProvider maps Responses usage onto provider.Usage. Cache
+// counts are subsets of input_tokens (not additive extras).
+func streamUsageToProvider(u *streamUsage) *provider.Usage {
+	if u == nil {
+		return nil
+	}
+	out := &provider.Usage{
+		InputTokens:  u.InputTokens,
+		OutputTokens: u.OutputTokens,
+		TotalTokens:  u.TotalTokens,
+	}
+	if u.InputTokensDetails == nil {
+		return out
+	}
+	cached := u.InputTokensDetails.CachedTokens
+	write := u.InputTokensDetails.CacheWriteTokens
+	if cached < 0 {
+		cached = 0
+	}
+	if write < 0 {
+		write = 0
+	}
+	if cached > out.InputTokens {
+		cached = out.InputTokens
+	}
+	remain := out.InputTokens - cached
+	if write > remain {
+		write = remain
+	}
+	out.CacheReadTokens = cached
+	out.CacheCreationTokens = write
+	out.InputTokens = remain - write
+	return out
+}
+
 func toResponsesRequest(req provider.Request) responsesRequest {
 	out := responsesRequest{
 		Model:        req.Model,
@@ -219,7 +271,12 @@ func toResponsesRequest(req provider.Request) responsesRequest {
 		ToolChoice:   "auto",
 		Store:        false,
 		Stream:       true,
-		Include:      []string{},
+		// Codex / OpenClaw always request encrypted reasoning content so
+		// multi-turn reasoning models can resume without re-prefilling.
+		Include: []string{"reasoning.encrypted_content"},
+	}
+	if k := strings.TrimSpace(req.CacheKey); k != "" {
+		out.PromptCacheKey = k
 	}
 	if effort := base.OpenAIEffort(req.Effort); effort != "" {
 		out.Reasoning = &reasoningConfig{Effort: effort}
