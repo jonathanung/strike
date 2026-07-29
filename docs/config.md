@@ -29,7 +29,7 @@ JSON:
   "pruneKeepUserTurns": 2,
   "pruneProtectTools": [],
   "session": {
-    "worktree": "off",
+    "worktree": "always",
     "worktreeCleanup": "keep"
   },
   "permissions": [
@@ -104,9 +104,9 @@ can bind each session's tool CWD to its own `git worktree` under
 
 | `session.worktree` | Behavior |
 |---|---|
-| `off` (default) | launch cwd; single-session default |
+| `always` (default) | every new root session gets a worktree (git repos only) |
 | `auto` | worktree when a second root session starts in-process |
-| `always` | every new root session gets a worktree (git repos only) |
+| `off` | launch cwd; no isolation |
 
 | `session.worktreeCleanup` | Behavior |
 |---|---|

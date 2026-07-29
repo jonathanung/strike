@@ -289,8 +289,9 @@ Do not confuse these with:
 - **`ctrl+x` leader chords** — navigate **child/subagent** transcripts nested
   under a parent; they do not create or switch concurrent roots.
 
-Worktree isolation for second+ roots is configured via `worktree` in
-[config.md](config.md). Full chord table: [keybinds.md](keybinds.md).
+Session worktree isolation defaults to `always` (per-root git worktree);
+configure via `session.worktree` in [config.md](config.md). Full chord table:
+[keybinds.md](keybinds.md).
 
 Pane keys (orientation-independent): `ctrl+h` / `ctrl+l` focus the left
 (primary transcript) or right (secondary pane column); `ctrl+o` / `ctrl+p`
