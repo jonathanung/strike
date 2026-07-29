@@ -25,9 +25,6 @@ func TestPaneSlashCommandsFocusNamedWindows(t *testing.T) {
 			if m.focus != focusLeft {
 				t.Fatalf("start focus = %v, want left", m.focus)
 			}
-			if tt.wantID == telemetryWindowID {
-				m.windows, _ = setTelemetryEnabled(m.windows, true)
-			}
 			// Leave a different window active so activate is observable.
 			if reg, ok := m.windows.activate(memoryWindowID); ok {
 				m.windows = reg
@@ -57,6 +54,7 @@ func TestPaneSlashCommandsFocusNamedWindows(t *testing.T) {
 func TestSystemSlashRequiresTelemetry(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	m.windows, _ = setTelemetryEnabled(m.windows, false)
 	m.composer.SetValue("/system")
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	if !strings.Contains(m.notice, "telemetry off") {
@@ -70,13 +68,21 @@ func TestSystemSlashRequiresTelemetry(t *testing.T) {
 func TestTelemetrySlashToggle(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
-	if telemetryEnabled(m.windows) {
-		t.Fatal("default telemetry on")
+	if !telemetryEnabled(m.windows) {
+		t.Fatal("default telemetry off")
 	}
 	m.composer.SetValue("/telemetry status")
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if !strings.Contains(m.notice, "off") {
+	if !strings.Contains(m.notice, "on") {
 		t.Fatalf("status notice = %q", m.notice)
+	}
+	m.composer.SetValue("/telemetry off")
+	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if telemetryEnabled(m.windows) {
+		t.Fatal("/telemetry off did not disable")
+	}
+	if !strings.Contains(m.notice, "off") {
+		t.Fatalf("off notice = %q", m.notice)
 	}
 	m.composer.SetValue("/telemetry on")
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -89,11 +95,6 @@ func TestTelemetrySlashToggle(t *testing.T) {
 	}
 	if !strings.Contains(m.notice, "on") {
 		t.Fatalf("on notice = %q", m.notice)
-	}
-	m.composer.SetValue("/telemetry off")
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if telemetryEnabled(m.windows) {
-		t.Fatal("/telemetry off did not disable")
 	}
 }
 

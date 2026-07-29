@@ -228,14 +228,33 @@ func TestApplyTelemetryMsgRoutesToWindow(t *testing.T) {
 	t.Fatal("telemetry window missing")
 }
 
-func TestTelemetryDefaultOffNoSampler(t *testing.T) {
+func TestTelemetryDefaultOnSamplerAndOptOut(t *testing.T) {
 	ft := &scriptedTelemetry{sample: host.TelemetrySample{CPUHostOK: true, CPUHostPct: 1}}
 	r := newWindowRegistry()
 	r = configureTelemetryWindow(r, "/proj", ft)
-	if telemetryEnabled(r) {
-		t.Fatal("telemetry enabled by default")
+	if !telemetryEnabled(r) {
+		t.Fatal("telemetry disabled by default")
 	}
-	// Session stack omits system pane.
+	// Session stack includes system pane when on.
+	found := false
+	for _, g := range r.groups {
+		if g.id != "session" {
+			continue
+		}
+		for _, mi := range g.members {
+			if r.windows[mi].id() == telemetryWindowID {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("session group missing telemetry when on")
+	}
+	// Disable stops sampling and drops in-flight gen.
+	r, _ = setTelemetryEnabled(r, false)
+	if telemetryEnabled(r) {
+		t.Fatal("disable failed")
+	}
 	for _, g := range r.groups {
 		if g.id != "session" {
 			continue
@@ -246,7 +265,6 @@ func TestTelemetryDefaultOffNoSampler(t *testing.T) {
 			}
 		}
 	}
-	// Tick against disabled telemetry must not sample.
 	r, cmd := applyTelemetryMsg(r, telemetryTickMsg{gen: 0})
 	if cmd != nil {
 		t.Fatal("disabled telemetry armed a sample cmd")
@@ -254,7 +272,7 @@ func TestTelemetryDefaultOffNoSampler(t *testing.T) {
 	if ft.calls.Load() != 0 {
 		t.Fatalf("Sample called %d times while off", ft.calls.Load())
 	}
-	// Enable starts sampling; disable stops and drops in-flight gen.
+	// Re-enable starts sampling.
 	r, cmd = setTelemetryEnabled(r, true)
 	if !telemetryEnabled(r) {
 		t.Fatal("enable failed")
@@ -269,9 +287,6 @@ func TestTelemetryDefaultOffNoSampler(t *testing.T) {
 	}
 	_ = cmd() // run sample
 	r, _ = setTelemetryEnabled(r, false)
-	if telemetryEnabled(r) {
-		t.Fatal("disable failed")
-	}
 	r, cmd = applyTelemetryMsg(r, telemetryTickMsg{gen: tick.gen})
 	if cmd != nil {
 		t.Fatal("stale tick after disable should not sample")

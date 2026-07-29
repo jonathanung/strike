@@ -400,17 +400,7 @@ func TestWindowRegistryReplaceByID(t *testing.T) {
 func TestWindowRegistryCycleIncludesFilesAndMarkdown(t *testing.T) {
 	r := newWindowRegistry()
 	var order []string
-	// Telemetry off by default — 9 cycleable windows + wrap.
-	for range 10 {
-		order = append(order, r.active().id())
-		r = r.cycle()
-	}
-	want := []string{"context", "activity", "agents", "visualizer", "files", "memory", "issues", "markdown", "editor", "context"}
-	if !stringsEqual(order, want) {
-		t.Errorf("cycle order = %q, want %q", order, want)
-	}
-	r, _ = setTelemetryEnabled(newWindowRegistry(), true)
-	order = nil
+	// Telemetry on by default — 10 cycleable windows + wrap.
 	for range 11 {
 		order = append(order, r.active().id())
 		r = r.cycle()
@@ -418,6 +408,16 @@ func TestWindowRegistryCycleIncludesFilesAndMarkdown(t *testing.T) {
 	wantOn := []string{"context", "activity", "telemetry", "agents", "visualizer", "files", "memory", "issues", "markdown", "editor", "context"}
 	if !stringsEqual(order, wantOn) {
 		t.Errorf("cycle with telemetry = %q, want %q", order, wantOn)
+	}
+	r, _ = setTelemetryEnabled(newWindowRegistry(), false)
+	order = nil
+	for range 10 {
+		order = append(order, r.active().id())
+		r = r.cycle()
+	}
+	wantOff := []string{"context", "activity", "agents", "visualizer", "files", "memory", "issues", "markdown", "editor", "context"}
+	if !stringsEqual(order, wantOff) {
+		t.Errorf("cycle without telemetry = %q, want %q", order, wantOff)
 	}
 }
 
@@ -445,10 +445,11 @@ func TestWindowRegistryPreservesMarkdownScrollAcrossCycle(t *testing.T) {
 		t.Fatal("setup did not scroll markdown content")
 	}
 
-	// Cycle through remaining windows and back around to markdown (telemetry off).
+	// Cycle through remaining windows and back around to markdown (telemetry on).
 	r = r.cycle() // editor
 	r = r.cycle() // context
 	r = r.cycle() // activity
+	r = r.cycle() // telemetry
 	r = r.cycle() // agents
 	r = r.cycle() // visualizer
 	r = r.cycle() // files
@@ -479,7 +480,7 @@ func TestDefaultWindowGroupsPairRelatedPanes(t *testing.T) {
 		id      string
 		members []string
 	}{
-		{"session", []string{"context", "activity"}}, // telemetry opt-in
+		{"session", []string{"context", "activity", "telemetry"}},
 		{"agents", []string{"agents", "visualizer"}},
 		{"files", []string{"files"}},
 		{"project", []string{"memory", "issues"}},
@@ -504,8 +505,8 @@ func TestDefaultWindowGroupsPairRelatedPanes(t *testing.T) {
 	if g := r.activeGroup(); g.id != "session" {
 		t.Errorf("initial active group = %q, want session", g.id)
 	}
-	r, _ = setTelemetryEnabled(r, true)
-	got := make([]string, 0, 3)
+	r, _ = setTelemetryEnabled(r, false)
+	got := make([]string, 0, 2)
 	for _, g := range r.groups {
 		if g.id != "session" {
 			continue
@@ -514,21 +515,21 @@ func TestDefaultWindowGroupsPairRelatedPanes(t *testing.T) {
 			got = append(got, r.windows[mi].id())
 		}
 	}
-	if !stringsEqual(got, []string{"context", "activity", "telemetry"}) {
-		t.Errorf("session with telemetry = %q", got)
+	if !stringsEqual(got, []string{"context", "activity"}) {
+		t.Errorf("session without telemetry = %q", got)
 	}
 }
 
 func TestWindowRegistryFocusCycleIsDeterministicAcrossGroups(t *testing.T) {
 	r := newWindowRegistry()
 	var order []string
-	for range 12 {
+	for range 13 {
 		order = append(order, r.active().id())
 		r = r.cycleBy(1)
 	}
 	want := []string{
-		"context", "activity", "agents", "visualizer", "files", "memory",
-		"issues", "markdown", "editor", "context", "activity", "agents",
+		"context", "activity", "telemetry", "agents", "visualizer", "files", "memory",
+		"issues", "markdown", "editor", "context", "activity", "telemetry",
 	}
 	if !stringsEqual(order, want) {
 		t.Errorf("cycle order = %q, want %q", order, want)
@@ -630,16 +631,16 @@ func TestStackedRightPaneShowsPairedGroupTitles(t *testing.T) {
 		want       []string
 		wantAbsent []string
 	}{
-		{"session", "context", false, []string{"context", "activity"}, []string{"system"}},
-		{"session+telemetry", "context", true, []string{"context", "activity", "system"}, nil},
-		{"agents", "agents", false, []string{"agents", "visualizer"}, nil},
-		{"project", "memory", false, []string{"memory", "issues"}, nil},
+		{"session", "context", true, []string{"context", "activity", "system"}, nil},
+		{"session-no-telemetry", "context", false, []string{"context", "activity"}, []string{"system"}},
+		{"agents", "agents", true, []string{"agents", "visualizer"}, nil},
+		{"project", "memory", true, []string{"memory", "issues"}, nil},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			m, _ := newAppTestModel(nil, nil)
 			m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
-			if tt.telemetry {
-				m.windows, _ = setTelemetryEnabled(m.windows, true)
+			if !tt.telemetry {
+				m.windows, _ = setTelemetryEnabled(m.windows, false)
 			}
 			var ok bool
 			m.windows, ok = m.windows.activate(tt.activate)

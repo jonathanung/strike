@@ -47,7 +47,7 @@ func windowCycleable(w window) bool {
 
 // defaultWindowGroups pairs related panes for simultaneous split display.
 // Focus cycle order is the concatenation of group members (same as the former
-// flat window list). Disabled telemetry is omitted from the session stack.
+// flat window list). Telemetry is on by default; /telemetry off omits it.
 func defaultWindowGroups(windows []window) []windowGroup {
 	indexOf := map[string]int{}
 	for i, w := range windows {
