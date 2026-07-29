@@ -526,6 +526,7 @@ func (m Model) activateRootByIndex(idx int) (tea.Model, tea.Cmd) {
 	pollCmd := filesPollCmd(m.windows)
 	return m, tea.Batch(cmd, pollCmd)
 }
+
 // openRootSwitcher opens the ctrl+s session switcher modal with a snapshot
 // of live roots.
 func (m Model) openRootSwitcher() (tea.Model, tea.Cmd) {

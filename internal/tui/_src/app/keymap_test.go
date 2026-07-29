@@ -1,35 +1,25 @@
 package tui
 
-
-
 import (
-
 	"strings"
 
 	"testing"
 
-
-
 	"github.com/charmbracelet/bubbles/key"
 
 	tea "github.com/charmbracelet/bubbletea"
-
 )
-
-
 
 func TestDefaultKeyMapBindingsMatchTheirRequiredKeysAndHaveHelp(t *testing.T) {
 
 	keys := defaultKeyMap()
 
 	tests := []struct {
-
-		name    string
+		name string
 
 		binding key.Binding
 
-		msg     tea.KeyMsg
-
+		msg tea.KeyMsg
 	}{
 
 		{"quit", keys.Quit, tea.KeyMsg{Type: tea.KeyCtrlC}},
@@ -59,7 +49,6 @@ func TestDefaultKeyMapBindingsMatchTheirRequiredKeysAndHaveHelp(t *testing.T) {
 		{"tool expand alt+enter", keys.ToolExpand, tea.KeyMsg{Type: tea.KeyEnter, Alt: true}},
 
 		{"external editor", keys.ExternalEditor, tea.KeyMsg{Type: tea.KeyCtrlE}},
-
 	}
 
 	for _, tt := range tests {
@@ -160,8 +149,6 @@ func TestDefaultKeyMapBindingsMatchTheirRequiredKeysAndHaveHelp(t *testing.T) {
 
 }
 
-
-
 // keyMsgAltJ is the post-WrapInput KeyMsg for enhanced ctrl+j (#240).
 
 func keyMsgAltJ() tea.KeyMsg {
@@ -169,8 +156,6 @@ func keyMsgAltJ() tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}, Alt: true}
 
 }
-
-
 
 // TestAltEnterAndShiftEnterNewline pins that KeyEnter+Alt (native alt+enter
 
@@ -185,17 +170,14 @@ func TestAltEnterAndShiftEnterNewline(t *testing.T) {
 	msg := tea.KeyMsg{Type: tea.KeyEnter, Alt: true}
 
 	for _, tt := range []struct {
-
-		name   string
+		name string
 
 		orient splitOrientation
-
 	}{
 
 		{"horizontal", orientHorizontal},
 
 		{"vertical", orientVertical},
-
 	} {
 
 		t.Run(tt.name, func(t *testing.T) {
@@ -246,8 +228,6 @@ func TestAltEnterAndShiftEnterNewline(t *testing.T) {
 
 }
 
-
-
 func TestKeybindCatalogCoversAppBindingsAndIsSearchable(t *testing.T) {
 
 	keys := defaultKeyMap()
@@ -291,7 +271,6 @@ func TestKeybindCatalogCoversAppBindingsAndIsSearchable(t *testing.T) {
 		"composer.kill-line-start", "composer.kill-line-end", "composer.yank",
 
 		"agents.move", "agents.open", "agents.spawn", "agents.interrupt", "agents.rename", "agents.hide", "agents.filter",
-
 	} {
 
 		if !seen[id] {
@@ -305,11 +284,9 @@ func TestKeybindCatalogCoversAppBindingsAndIsSearchable(t *testing.T) {
 	ak := defaultAgentsKeyMap()
 
 	for _, tt := range []struct {
-
 		id string
 
-		b  key.Binding
-
+		b key.Binding
 	}{
 
 		{"agents.spawn", ak.Spawn},
@@ -325,7 +302,6 @@ func TestKeybindCatalogCoversAppBindingsAndIsSearchable(t *testing.T) {
 		{"agents.move", ak.Move},
 
 		{"agents.filter", ak.Filter},
-
 	} {
 
 		help := tt.b.Help()
@@ -394,24 +370,20 @@ func TestKeybindCatalogCoversAppBindingsAndIsSearchable(t *testing.T) {
 
 }
 
-
-
 func TestKeysModalContextForFocus(t *testing.T) {
 
 	tests := []struct {
+		name string
 
-		name     string
-
-		focus    paneFocus
+		focus paneFocus
 
 		windowID string
 
-		label    string
+		label string
 
-		wantCat  string
+		wantCat string
 
 		wantPref string
-
 	}{
 
 		{"composer", focusLeft, "", "composer", "Composer", "nav.tool-"},
@@ -423,7 +395,6 @@ func TestKeysModalContextForFocus(t *testing.T) {
 		{"files", focusRight, filesWindowID, "files", "Lists", ""},
 
 		{"activity", focusRight, "activity", "activity", "Navigation", ""},
-
 	}
 
 	for _, tt := range tests {
@@ -492,8 +463,6 @@ func TestKeysModalContextForFocus(t *testing.T) {
 
 }
 
-
-
 func TestOrderKeybindEntriesPromotesFocusContext(t *testing.T) {
 
 	keys := defaultKeyMap()
@@ -505,8 +474,6 @@ func TestOrderKeybindEntriesPromotesFocusContext(t *testing.T) {
 		t.Fatalf("catalog too small: %d", len(catalog))
 
 	}
-
-
 
 	agents := orderKeybindEntries(catalog, keysModalContextFor(focusRight, agentsWindowID))
 
@@ -549,8 +516,6 @@ func TestOrderKeybindEntriesPromotesFocusContext(t *testing.T) {
 		}
 
 	}
-
-
 
 	composer := orderKeybindEntries(catalog, keysModalContextFor(focusLeft, ""))
 
@@ -640,8 +605,6 @@ func TestOrderKeybindEntriesPromotesFocusContext(t *testing.T) {
 
 	}
 
-
-
 	// Empty context is a no-op.
 
 	plain := orderKeybindEntries(catalog, keysModalContext{})
@@ -658,15 +621,11 @@ func TestOrderKeybindEntriesPromotesFocusContext(t *testing.T) {
 
 }
 
-
-
 func TestKeysModalOpensWithFocusContext(t *testing.T) {
 
 	m, _ := newAppTestModel(nil, nil)
 
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
-
-
 
 	// Default left/composer focus → composer binds first.
 
@@ -709,8 +668,6 @@ func TestKeysModalOpensWithFocusContext(t *testing.T) {
 	}
 
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEsc})
-
-
 
 	// Agents pane focused → agent root controls first.
 
@@ -774,8 +731,6 @@ func TestKeysModalOpensWithFocusContext(t *testing.T) {
 
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEsc})
 
-
-
 	// Switching focus and reopening updates the context section.
 
 	m.focus = focusLeft
@@ -814,8 +769,6 @@ func TestKeysModalOpensWithFocusContext(t *testing.T) {
 
 }
 
-
-
 func firstEntry(list []keybindEntry) any {
 
 	if len(list) == 0 {
@@ -827,8 +780,6 @@ func firstEntry(list []keybindEntry) any {
 	return list[0]
 
 }
-
-
 
 func TestVimPaneAndWindowKeys(t *testing.T) {
 
@@ -843,10 +794,7 @@ func TestVimPaneAndWindowKeys(t *testing.T) {
 		statefulTestWindow{windowID: "b", windowTitle: "B"},
 
 		statefulTestWindow{windowID: "c", windowTitle: "C"},
-
 	}}
-
-
 
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
 
@@ -863,8 +811,6 @@ func TestVimPaneAndWindowKeys(t *testing.T) {
 		t.Fatalf("ctrl+h focus = %v/composer=%v, want left/focused", m.focus, m.composer.Focused())
 
 	}
-
-
 
 	// ctrl+o / ctrl+p cycle secondary panes from left focus without editing (#414).
 
@@ -894,8 +840,6 @@ func TestVimPaneAndWindowKeys(t *testing.T) {
 
 	}
 
-
-
 	// ctrl+j inserts newline, does not cycle (#414).
 
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
@@ -911,8 +855,6 @@ func TestVimPaneAndWindowKeys(t *testing.T) {
 		t.Fatalf("ctrl+j cycled window to %s", m.windows.active().id())
 
 	}
-
-
 
 	// Cycle windows with ctrl+o while the right pane is focused; ctrl+p prev.
 
@@ -960,8 +902,6 @@ func TestVimPaneAndWindowKeys(t *testing.T) {
 
 }
 
-
-
 func TestKeyHelpOpensFilterableCheatsheet(t *testing.T) {
 
 	m, _ := newAppTestModel(nil, nil)
@@ -1002,8 +942,6 @@ func TestKeyHelpOpensFilterableCheatsheet(t *testing.T) {
 
 }
 
-
-
 func TestKeysCommandAndPaletteOpenCheatsheet(t *testing.T) {
 
 	m, _ := newAppTestModel(nil, nil)
@@ -1020,8 +958,6 @@ func TestKeysCommandAndPaletteOpenCheatsheet(t *testing.T) {
 
 	}
 
-
-
 	m, _ = newAppTestModel(nil, nil)
 
 	m = updateApp(t, m, paletteInvokeMsg{Action: paletteAction{Kind: paletteActionKeybinds}})
@@ -1033,8 +969,6 @@ func TestKeysCommandAndPaletteOpenCheatsheet(t *testing.T) {
 	}
 
 }
-
-
 
 func TestKeybindOverridesChangeJumpBottomAndCheatsheet(t *testing.T) {
 
@@ -1112,14 +1046,11 @@ func TestKeybindOverridesChangeJumpBottomAndCheatsheet(t *testing.T) {
 
 }
 
-
-
 func TestKeysResetRestoresDefaults(t *testing.T) {
 
 	m, _ := newAppTestModelWithOptions(Options{
 
 		Keybinds: map[string][]string{"nav.jump-bottom": {"ctrl+b"}},
-
 	})
 
 	if !key.Matches(tea.KeyMsg{Type: tea.KeyCtrlB}, m.keyMap.JumpBottom) {
@@ -1154,16 +1085,13 @@ func TestKeysResetRestoresDefaults(t *testing.T) {
 
 }
 
-
-
 func TestBuildKeyMapOrientationPreservesOverrides(t *testing.T) {
 
 	overrides := map[string][]string{
 
-		"nav.focus-left":  {"alt+h"},
+		"nav.focus-left": {"alt+h"},
 
 		"nav.window-next": {"alt+o"},
-
 	}
 
 	horiz := buildKeyMap(overrides, orientHorizontal)
@@ -1204,8 +1132,6 @@ func TestBuildKeyMapOrientationPreservesOverrides(t *testing.T) {
 
 }
 
-
-
 func TestWindowRegistryCycleByWrapsBothDirections(t *testing.T) {
 
 	r := windowRegistry{windows: []window{
@@ -1213,7 +1139,6 @@ func TestWindowRegistryCycleByWrapsBothDirections(t *testing.T) {
 		statefulTestWindow{windowID: "one"},
 
 		statefulTestWindow{windowID: "two"},
-
 	}}
 
 	r = r.cycleBy(-1)
@@ -1233,7 +1158,6 @@ func TestWindowRegistryCycleByWrapsBothDirections(t *testing.T) {
 	}
 
 }
-
 
 func TestRootSwitcherDefaultBinding(t *testing.T) {
 	km := defaultKeyMap()
@@ -1286,4 +1210,3 @@ func TestRootSwitcherInCatalog(t *testing.T) {
 		t.Fatal("catalog missing nav.root-switcher")
 	}
 }
-

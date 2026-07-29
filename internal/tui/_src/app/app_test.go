@@ -1,9 +1,6 @@
 package tui
 
-
-
 import (
-
 	"slices"
 
 	"strings"
@@ -11,8 +8,6 @@ import (
 	"testing"
 
 	"time"
-
-
 
 	"github.com/charmbracelet/bubbles/key"
 
@@ -24,8 +19,6 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-
-
 	"github.com/jonathanung/strike-cli/internal/host"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -33,14 +26,9 @@ import (
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 
 	"github.com/jonathanung/strike-cli/internal/tui/ui"
-
 )
 
-
-
 const appCmdTimeout = 2 * time.Second
-
-
 
 func rowsContaining(view, text string) []string {
 
@@ -60,20 +48,16 @@ func rowsContaining(view, text string) []string {
 
 }
 
-
-
 func TestCompletionReplacementPreservesArgumentsAndLinesAtCursorPositions(t *testing.T) {
 
 	tests := []struct {
+		name string
 
-		name   string
-
-		value  string
+		value string
 
 		offset int
 
-		want   string
-
+		want string
 	}{
 
 		{name: "cursor in middle", value: "/pr old argument\nlater line", offset: 2, want: "/provider old argument\nlater line"},
@@ -81,7 +65,6 @@ func TestCompletionReplacementPreservesArgumentsAndLinesAtCursorPositions(t *tes
 		{name: "cursor at end", value: "/pr old argument\nlater line", offset: 3, want: "/provider old argument\nlater line"},
 
 		{name: "wide unicode skill", value: "/部 old argument\nlater 界", offset: 2, want: "/部署 old argument\nlater 界"},
-
 	}
 
 	for _, tt := range tests {
@@ -136,16 +119,12 @@ func TestCompletionReplacementPreservesArgumentsAndLinesAtCursorPositions(t *tes
 
 }
 
-
-
 func TestCompletionDelimitersRespectCommandSourceAndExistingWhitespace(t *testing.T) {
 
 	themes := []struct {
-
 		name string
 
-		th   theme.Theme
-
+		th theme.Theme
 	}{
 
 		{name: "default", th: theme.Default()},
@@ -169,7 +148,6 @@ func TestCompletionDelimitersRespectCommandSourceAndExistingWhitespace(t *testin
 			return th
 
 		}()},
-
 	}
 
 	skills := []host.Skill{
@@ -177,49 +155,43 @@ func TestCompletionDelimitersRespectCommandSourceAndExistingWhitespace(t *testin
 		fakeSkill("review", "", "Review $ARGUMENTS"),
 
 		fakeSkill("explain", "", "Explain this"),
-
 	}
 
 	tests := make([]struct {
+		name string
 
-		name   string
-
-		value  string
+		value string
 
 		offset int
 
 		skills []host.Skill
 
-		th     theme.Theme
+		th theme.Theme
 
-		want   string
-
+		want string
 	}, 0, len(builtinCommandSpecs)+len(themes)*2+4)
 
 	for _, spec := range builtinCommandSpecs {
 
 		tests = append(tests, struct {
+			name string
 
-			name   string
-
-			value  string
+			value string
 
 			offset int
 
 			skills []host.Skill
 
-			th     theme.Theme
+			th theme.Theme
 
-			want   string
-
+			want string
 		}{
 
-			name:  "builtin " + spec.Name,
+			name: "builtin " + spec.Name,
 
 			value: spec.Name,
 
-			want:  spec.Name,
-
+			want: spec.Name,
 		})
 
 	}
@@ -229,31 +201,28 @@ func TestCompletionDelimitersRespectCommandSourceAndExistingWhitespace(t *testin
 		for _, skillName := range []string{"review", "explain"} {
 
 			tests = append(tests, struct {
+				name string
 
-				name   string
-
-				value  string
+				value string
 
 				offset int
 
 				skills []host.Skill
 
-				th     theme.Theme
+				th theme.Theme
 
-				want   string
-
+				want string
 			}{
 
-				name:   themeCase.name + " skill " + skillName,
+				name: themeCase.name + " skill " + skillName,
 
-				value:  "/" + skillName,
+				value: "/" + skillName,
 
 				skills: skills,
 
-				th:     themeCase.th,
+				th: themeCase.th,
 
-				want:   "/" + skillName + " ",
-
+				want: "/" + skillName + " ",
 			})
 
 		}
@@ -263,36 +232,31 @@ func TestCompletionDelimitersRespectCommandSourceAndExistingWhitespace(t *testin
 	for _, value := range []string{"/provider existing", "/fast  existing", "/review existing", "/explain  existing"} {
 
 		tests = append(tests, struct {
+			name string
 
-			name   string
-
-			value  string
+			value string
 
 			offset int
 
 			skills []host.Skill
 
-			th     theme.Theme
+			th theme.Theme
 
-			want   string
-
+			want string
 		}{
 
-			name:   "existing whitespace " + value,
+			name: "existing whitespace " + value,
 
-			value:  value,
+			value: value,
 
 			offset: strings.Index(value, " "),
 
 			skills: skills,
 
-			want:   value,
-
+			want: value,
 		})
 
 	}
-
-
 
 	for _, tt := range tests {
 
@@ -334,8 +298,6 @@ func TestCompletionDelimitersRespectCommandSourceAndExistingWhitespace(t *testin
 
 }
 
-
-
 func TestCompletionClosesWhenCursorLeavesLeadingToken(t *testing.T) {
 
 	m, _ := newAppTestModel(nil, nil)
@@ -359,8 +321,6 @@ func TestCompletionClosesWhenCursorLeavesLeadingToken(t *testing.T) {
 	}
 
 }
-
-
 
 func TestModelUpdateCompletionConsumesEscapeTabAndEnter(t *testing.T) {
 
@@ -390,8 +350,6 @@ func TestModelUpdateCompletionConsumesEscapeTabAndEnter(t *testing.T) {
 
 	})
 
-
-
 	t.Run("tab completes instead of cycling agent", func(t *testing.T) {
 
 		m, ops := newAppTestModel([]string{"build", "plan"}, nil)
@@ -411,8 +369,6 @@ func TestModelUpdateCompletionConsumesEscapeTabAndEnter(t *testing.T) {
 		assertNoAppOp(t, ops)
 
 	})
-
-
 
 	t.Run("first enter completes and second executes bare command", func(t *testing.T) {
 
@@ -450,8 +406,6 @@ func TestModelUpdateCompletionConsumesEscapeTabAndEnter(t *testing.T) {
 
 }
 
-
-
 func TestModalReceivesKeysBeforeCompletionAndComposer(t *testing.T) {
 
 	m, ops := newAppTestModel(nil, nil)
@@ -479,8 +433,6 @@ func TestModalReceivesKeysBeforeCompletionAndComposer(t *testing.T) {
 	assertNoAppOp(t, ops)
 
 }
-
-
 
 func TestModalVisuallyUnfocusesComposerAndSuppressesCompletionUntilClosed(t *testing.T) {
 
@@ -519,8 +471,6 @@ func TestModalVisuallyUnfocusesComposerAndSuppressesCompletionUntilClosed(t *tes
 	m.modal = probe
 
 	m.reflow()
-
-
 
 	withModal := m.View()
 
@@ -572,8 +522,6 @@ func TestModalVisuallyUnfocusesComposerAndSuppressesCompletionUntilClosed(t *tes
 
 	}
 
-
-
 	m.modal = nil
 
 	m.reflow()
@@ -624,8 +572,6 @@ func TestModalVisuallyUnfocusesComposerAndSuppressesCompletionUntilClosed(t *tes
 
 }
 
-
-
 func TestControlCQuitsBeforeOtherInputLayers(t *testing.T) {
 
 	m, ops := newAppTestModel(nil, nil)
@@ -637,8 +583,6 @@ func TestControlCQuitsBeforeOtherInputLayers(t *testing.T) {
 	probe := &appProbeModal{}
 
 	m.modal = probe
-
-
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 
@@ -659,8 +603,6 @@ func TestControlCQuitsBeforeOtherInputLayers(t *testing.T) {
 	assertNoAppOp(t, ops)
 
 }
-
-
 
 func TestExitAndQuitSlashCommandsQuitLikeCtrlC(t *testing.T) {
 
@@ -698,8 +640,6 @@ func TestExitAndQuitSlashCommandsQuitLikeCtrlC(t *testing.T) {
 
 }
 
-
-
 func TestComposerEnterBindings(t *testing.T) {
 
 	t.Run("alt enter inserts newline without sending", func(t *testing.T) {
@@ -724,8 +664,6 @@ func TestComposerEnterBindings(t *testing.T) {
 
 	})
 
-
-
 	// Shift+Enter CSI → WrapInput → KeyEnter+Alt → newline; no send, no pane cycle.
 
 	t.Run("shift enter CSI via WrapInput inserts newline without sending", func(t *testing.T) {
@@ -745,7 +683,6 @@ func TestComposerEnterBindings(t *testing.T) {
 				statefulTestWindow{windowID: "a", windowTitle: "A"},
 
 				statefulTestWindow{windowID: "b", windowTitle: "B"},
-
 			}}
 
 			startWin := m.windows.index
@@ -773,8 +710,6 @@ func TestComposerEnterBindings(t *testing.T) {
 		}
 
 	})
-
-
 
 	// Plain KeyEnter always sends. Shift+Enter is only distinguishable after
 
@@ -820,20 +755,16 @@ func TestComposerEnterBindings(t *testing.T) {
 
 }
 
-
-
 func TestComposerHeightCountsWrappedLogicalLinesAtExactBoundaries(t *testing.T) {
 
 	tests := []struct {
+		name string
 
-		name           string
+		value string
 
-		value          string
-
-		wantHeight     int
+		wantHeight int
 
 		wantCursorLine int
-
 	}{
 
 		{name: "empty retains minimum", value: "", wantHeight: composerMinHeight, wantCursorLine: -1},
@@ -855,10 +786,7 @@ func TestComposerHeightCountsWrappedLogicalLinesAtExactBoundaries(t *testing.T) 
 		{name: "short line before exact-boundary tall line", value: "y\n" + strings.Repeat("x", 16), wantHeight: 0, wantCursorLine: -1},
 
 		{name: "mixed explicit and soft rows cap at eight", value: strings.Repeat("x", 16) + "\na\nb\nc\nd\ne\nf", wantHeight: composerMaxHeight, wantCursorLine: -1},
-
 	}
-
-
 
 	for _, tt := range tests {
 
@@ -876,11 +804,7 @@ func TestComposerHeightCountsWrappedLogicalLinesAtExactBoundaries(t *testing.T) 
 
 			}
 
-
-
 			m.reflow()
-
-
 
 			want := tt.wantHeight
 
@@ -930,8 +854,6 @@ func TestComposerHeightCountsWrappedLogicalLinesAtExactBoundaries(t *testing.T) 
 
 }
 
-
-
 func TestLayoutReflowHandlesTinyWindowsPopupPasteResizeAndReset(t *testing.T) {
 
 	m, _ := newAppTestModel(nil, nil)
@@ -945,7 +867,6 @@ func TestLayoutReflowHandlesTinyWindowsPopupPasteResizeAndReset(t *testing.T) {
 		{Width: 3, Height: 2},
 
 		{Width: 9, Height: 4},
-
 	} {
 
 		m = updateApp(t, m, size)
@@ -982,8 +903,6 @@ func TestLayoutReflowHandlesTinyWindowsPopupPasteResizeAndReset(t *testing.T) {
 
 }
 
-
-
 func TestDangerousPermissionsIndicatorPersistsAcrossStateAndNoticeChanges(t *testing.T) {
 
 	const indicator = "DANGER: permissions bypassed"
@@ -991,8 +910,6 @@ func TestDangerousPermissionsIndicatorPersistsAcrossStateAndNoticeChanges(t *tes
 	m, _ := newAppTestModelWithOptions(Options{DangerouslySkipPermissions: true})
 
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
-
-
 
 	assertViewContainsPlainText(t, m.View(), indicator)
 
@@ -1005,8 +922,6 @@ func TestDangerousPermissionsIndicatorPersistsAcrossStateAndNoticeChanges(t *tes
 		t.Errorf("running view does not retain danger indicator and running status:\n%s", plain)
 
 	}
-
-
 
 	m.applyEvent(protocol.ModelSelected{Provider: "echo", Model: "test-model"})
 
@@ -1028,8 +943,6 @@ func TestDangerousPermissionsIndicatorPersistsAcrossStateAndNoticeChanges(t *tes
 
 }
 
-
-
 func TestDangerousPermissionsIndicatorIsOptInAndSafeAtTinyWidths(t *testing.T) {
 
 	const indicator = "DANGER: permissions bypassed"
@@ -1041,8 +954,6 @@ func TestDangerousPermissionsIndicatorIsOptInAndSafeAtTinyWidths(t *testing.T) {
 	normal = updateApp(t, normal, tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	assertViewOmitsPlainText(t, normal.View(), indicator)
-
-
 
 	dangerous, _ := newAppTestModelWithOptions(Options{DangerouslySkipPermissions: true})
 
@@ -1057,7 +968,6 @@ func TestDangerousPermissionsIndicatorIsOptInAndSafeAtTinyWidths(t *testing.T) {
 		{Width: 3, Height: 2},
 
 		{Width: 9, Height: 4},
-
 	} {
 
 		dangerous = updateApp(t, dangerous, size)
@@ -1088,20 +998,16 @@ func TestDangerousPermissionsIndicatorIsOptInAndSafeAtTinyWidths(t *testing.T) {
 
 }
 
-
-
 func TestDangerousPermissionsIndicatorRemainsVisibleWithActiveModals(t *testing.T) {
 
 	const indicator = "DANGER: permissions bypassed"
 
 	tests := []struct {
+		name string
 
-		name    string
-
-		open    func(*Model)
+		open func(*Model)
 
 		content []string
-
 	}{
 
 		{
@@ -1121,7 +1027,6 @@ func TestDangerousPermissionsIndicatorRemainsVisibleWithActiveModals(t *testing.
 			},
 
 			content: []string{"Select model — echo", "echo-regression-model"},
-
 		},
 
 		{
@@ -1135,7 +1040,6 @@ func TestDangerousPermissionsIndicatorRemainsVisibleWithActiveModals(t *testing.
 			},
 
 			content: []string{"Select provider", "echo"},
-
 		},
 
 		{
@@ -1146,18 +1050,16 @@ func TestDangerousPermissionsIndicatorRemainsVisibleWithActiveModals(t *testing.
 
 				m.applyEvent(protocol.PermissionAsked{
 
-					RequestID:  "danger-modal-regression",
+					RequestID: "danger-modal-regression",
 
 					Permission: "bash",
 
-					Patterns:   []string{"go test ./..."},
-
+					Patterns: []string{"go test ./..."},
 				})
 
 			},
 
 			content: []string{"Permission required:", "bash", "allow once", "reject"},
-
 		},
 
 		{
@@ -1171,23 +1073,17 @@ func TestDangerousPermissionsIndicatorRemainsVisibleWithActiveModals(t *testing.
 			},
 
 			content: []string{"Command palette", "Keyboard shortcuts", "/provider", "/settings"},
-
 		},
-
 	}
-
-
 
 	for _, tt := range tests {
 
 		t.Run(tt.name, func(t *testing.T) {
 
 			for _, size := range []struct {
-
 				window tea.WindowSizeMsg
 
-				tiny   bool
-
+				tiny bool
 			}{
 
 				{window: tea.WindowSizeMsg{Width: 80, Height: 22}},
@@ -1195,7 +1091,6 @@ func TestDangerousPermissionsIndicatorRemainsVisibleWithActiveModals(t *testing.
 				{window: tea.WindowSizeMsg{Width: 32, Height: 14}},
 
 				{window: tea.WindowSizeMsg{Width: 9, Height: 4}, tiny: true},
-
 			} {
 
 				name := itoa(size.window.Width) + "x" + itoa(size.window.Height)
@@ -1244,8 +1139,6 @@ func TestDangerousPermissionsIndicatorRemainsVisibleWithActiveModals(t *testing.
 
 					}
 
-
-
 					normal, _ := newAppTestModelWithOptions(Options{})
 
 					normal = updateApp(t, normal, size.window)
@@ -1288,8 +1181,6 @@ func TestDangerousPermissionsIndicatorRemainsVisibleWithActiveModals(t *testing.
 
 }
 
-
-
 func TestDangerousPermissionsIndicatorAndModalPersistAcrossRunningStateAndNotice(t *testing.T) {
 
 	const indicator = "DANGER: permissions bypassed"
@@ -1304,15 +1195,11 @@ func TestDangerousPermissionsIndicatorAndModalPersistAcrossRunningStateAndNotice
 
 	m.modal = newPaletteModal(m.commands, nil, m.currentPaletteAvailability())
 
-
-
 	m.applyEvent(protocol.TurnStarted{})
 
 	m.setNotice("unrelated notice", true)
 
 	m.applyEvent(protocol.ModelSelected{Provider: "echo", Model: "notice-regression-model"})
-
-
 
 	plain := ansi.Strip(m.View())
 
@@ -1325,7 +1212,6 @@ func TestDangerousPermissionsIndicatorAndModalPersistAcrossRunningStateAndNotice
 		"working",
 
 		"unrelated notice",
-
 	} {
 
 		if !strings.Contains(plain, want) {
@@ -1337,8 +1223,6 @@ func TestDangerousPermissionsIndicatorAndModalPersistAcrossRunningStateAndNotice
 	}
 
 }
-
-
 
 func TestSlashCommandExecutionAndSkillRenderingRemainIntact(t *testing.T) {
 
@@ -1372,8 +1256,6 @@ func TestSlashCommandExecutionAndSkillRenderingRemainIntact(t *testing.T) {
 
 	})
 
-
-
 	t.Run("skill substitutes arguments and sends rendered prompt", func(t *testing.T) {
 
 		skill := fakeSkill("review", "review code", "Review: $ARGUMENTS")
@@ -1397,8 +1279,6 @@ func TestSlashCommandExecutionAndSkillRenderingRemainIntact(t *testing.T) {
 	})
 
 }
-
-
 
 func TestContextSlashCommandInspectsEffectivePrompt(t *testing.T) {
 
@@ -1440,8 +1320,6 @@ func TestContextSlashCommandInspectsEffectivePrompt(t *testing.T) {
 
 	}
 
-
-
 	// Pending doctor opens a modal (not a transcript dump).
 
 	m, _ := newAppTestModel(nil, nil)
@@ -1461,15 +1339,13 @@ func TestContextSlashCommandInspectsEffectivePrompt(t *testing.T) {
 			{Kind: protocol.PromptLayerPersona, Source: "agent:build", Mode: protocol.PromptLayerReplace, Chars: 40},
 
 			{Kind: protocol.PromptLayerMemory, Source: "memory:prefs", Mode: protocol.PromptLayerAppend, Chars: 20, Preview: "api_key=sk-ant-secretvaluehere"},
-
 		},
 
-		SystemChars:    200,
+		SystemChars: 200,
 
-		MessageCount:   3,
+		MessageCount: 3,
 
 		FromLastStream: true,
-
 	}})
 
 	if m.pendingContextDoctor {
@@ -1512,10 +1388,9 @@ func TestContextSlashCommandInspectsEffectivePrompt(t *testing.T) {
 
 	m2 = updateApp(t, m2, engineEventMsg{ev: protocol.EffectivePrompt{
 
-		Layers:      []protocol.PromptLayerInfo{{Kind: protocol.PromptLayerShared, Source: "builtin:shared", Mode: protocol.PromptLayerAppend, Chars: 10}},
+		Layers: []protocol.PromptLayerInfo{{Kind: protocol.PromptLayerShared, Source: "builtin:shared", Mode: protocol.PromptLayerAppend, Chars: 10}},
 
 		SystemChars: 10,
-
 	}})
 
 	if m2.modal != nil {
@@ -1544,8 +1419,6 @@ func TestContextSlashCommandInspectsEffectivePrompt(t *testing.T) {
 
 }
 
-
-
 func TestModelAndAgentSlashCommandsEmitSelections(t *testing.T) {
 
 	t.Run("model selects id for current provider", func(t *testing.T) {
@@ -1556,15 +1429,11 @@ func TestModelAndAgentSlashCommandsEmitSelections(t *testing.T) {
 
 		m.composer.SetValue("/model gpt-test")
 
-
-
 		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
 		m = updated.(Model)
 
 		runAppCmd(t, cmd)
-
-
 
 		want := protocol.SelectModel{Provider: "openai", Model: "gpt-test"}
 
@@ -1584,8 +1453,6 @@ func TestModelAndAgentSlashCommandsEmitSelections(t *testing.T) {
 
 	})
 
-
-
 	t.Run("model provider/model switches provider", func(t *testing.T) {
 
 		m, ops := newAppTestModel(nil, nil)
@@ -1594,15 +1461,11 @@ func TestModelAndAgentSlashCommandsEmitSelections(t *testing.T) {
 
 		m.composer.SetValue("/model xai/grok-test")
 
-
-
 		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
 		m = updated.(Model)
 
 		runAppCmd(t, cmd)
-
-
 
 		want := protocol.SelectModel{Provider: "xai", Model: "grok-test"}
 
@@ -1616,8 +1479,6 @@ func TestModelAndAgentSlashCommandsEmitSelections(t *testing.T) {
 
 	})
 
-
-
 	t.Run("bare /model loads all authenticated providers", func(t *testing.T) {
 
 		m, _ := newAppTestModel(nil, nil)
@@ -1630,10 +1491,9 @@ func TestModelAndAgentSlashCommandsEmitSelections(t *testing.T) {
 
 			"openai": {"gpt-a"},
 
-			"xai":    {"grok-b"},
+			"xai": {"grok-b"},
 
-			"echo":   {"echo"},
-
+			"echo": {"echo"},
 		}}
 
 		m.services.Catalog = cat
@@ -1647,7 +1507,6 @@ func TestModelAndAgentSlashCommandsEmitSelections(t *testing.T) {
 			{Name: "echo", Authed: true, Builtin: true},
 
 			{Name: "anthropic", Authed: false},
-
 		}}
 
 		m.composer.SetValue("/model")
@@ -1712,23 +1571,17 @@ func TestModelAndAgentSlashCommandsEmitSelections(t *testing.T) {
 
 	})
 
-
-
 	t.Run("agent preserves multi-word name", func(t *testing.T) {
 
 		m, ops := newAppTestModel([]string{"build", "code reviewer"}, nil)
 
 		m.composer.SetValue("/agent code reviewer")
 
-
-
 		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
 		m = updated.(Model)
 
 		runAppCmd(t, cmd)
-
-
 
 		want := protocol.SelectAgent{Name: "code reviewer"}
 
@@ -1750,8 +1603,6 @@ func TestModelAndAgentSlashCommandsEmitSelections(t *testing.T) {
 
 }
 
-
-
 func TestBareAuthSlashCommandOpensProviderStatusModalWithoutSideEffects(t *testing.T) {
 
 	ops := make(chan protocol.Op, 8)
@@ -1764,8 +1615,6 @@ func TestBareAuthSlashCommandOpensProviderStatusModalWithoutSideEffects(t *testi
 
 	m.composer.SetValue("/auth")
 
-
-
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
 	m = updated.(Model)
@@ -1775,8 +1624,6 @@ func TestBareAuthSlashCommandOpensProviderStatusModalWithoutSideEffects(t *testi
 		t.Errorf("/auth returned unexpected message %#v", msg)
 
 	}
-
-
 
 	if got := m.View(); !strings.Contains(got, "Select provider") {
 
@@ -1794,27 +1641,20 @@ func TestBareAuthSlashCommandOpensProviderStatusModalWithoutSideEffects(t *testi
 
 }
 
-
-
 func TestTabCyclesAgentsWhenIdleWithoutCompletionOrModal(t *testing.T) {
 
 	tests := []struct {
-
-		name    string
+		name string
 
 		current string
 
-		want    string
-
+		want string
 	}{
 
 		{name: "advances to next agent", current: "build", want: "plan"},
 
 		{name: "wraps to first agent", current: "plan", want: "build"},
-
 	}
-
-
 
 	for _, tt := range tests {
 
@@ -1824,15 +1664,11 @@ func TestTabCyclesAgentsWhenIdleWithoutCompletionOrModal(t *testing.T) {
 
 			m.agentName = tt.current
 
-
-
 			updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 
 			m = updated.(Model)
 
 			runAppCmd(t, cmd)
-
-
 
 			want := protocol.SelectAgent{Name: tt.want}
 
@@ -1856,23 +1692,17 @@ func TestTabCyclesAgentsWhenIdleWithoutCompletionOrModal(t *testing.T) {
 
 }
 
-
-
 func TestEscapeInterruptsRunningTurnExactlyOnceWithoutInputOwner(t *testing.T) {
 
 	m, ops := newAppTestModel([]string{"build", "plan"}, nil)
 
 	m.turnRunning = true
 
-
-
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 
 	m = updated.(Model)
 
 	runAppCmd(t, cmd)
-
-
 
 	if got := receiveAppOp(t, ops); got != (protocol.Interrupt{}) {
 
@@ -1889,8 +1719,6 @@ func TestEscapeInterruptsRunningTurnExactlyOnceWithoutInputOwner(t *testing.T) {
 	assertNoAppOp(t, ops)
 
 }
-
-
 
 func TestEscapeInterruptsImmediatelyAfterSubmitBeforeTurnStarted(t *testing.T) {
 
@@ -1920,8 +1748,6 @@ func TestEscapeInterruptsImmediatelyAfterSubmitBeforeTurnStarted(t *testing.T) {
 
 	}
 
-
-
 	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 
 	m = updated.(Model)
@@ -1938,8 +1764,6 @@ func TestEscapeInterruptsImmediatelyAfterSubmitBeforeTurnStarted(t *testing.T) {
 
 }
 
-
-
 func TestEscapeInterruptsDespiteArmedLeader(t *testing.T) {
 
 	m, ops := newAppTestModel(nil, nil)
@@ -1948,15 +1772,11 @@ func TestEscapeInterruptsDespiteArmedLeader(t *testing.T) {
 
 	m.leaderArmed = true
 
-
-
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 
 	m = updated.(Model)
 
 	runAppCmd(t, cmd)
-
-
 
 	if m.leaderArmed {
 
@@ -1973,8 +1793,6 @@ func TestEscapeInterruptsDespiteArmedLeader(t *testing.T) {
 	assertNoAppOp(t, ops)
 
 }
-
-
 
 func TestMatchesInterruptAcceptsKeyEscAndBinding(t *testing.T) {
 
@@ -2010,8 +1828,6 @@ func TestMatchesInterruptAcceptsKeyEscAndBinding(t *testing.T) {
 
 }
 
-
-
 func TestTurnCompletedInterruptedSetsNotice(t *testing.T) {
 
 	m, _ := newAppTestModel(nil, nil)
@@ -2034,8 +1850,6 @@ func TestTurnCompletedInterruptedSetsNotice(t *testing.T) {
 
 }
 
-
-
 func TestOptionalHistoryIsBackwardCompatibleWhenOmitted(t *testing.T) {
 
 	m, ops := newAppTestModel(nil, nil)
@@ -2044,15 +1858,11 @@ func TestOptionalHistoryIsBackwardCompatibleWhenOmitted(t *testing.T) {
 
 	m.composer.SetValue("no history configured")
 
-
-
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
 	m = updated.(Model)
 
 	runAppCmd(t, cmd)
-
-
 
 	assertUserInputText(t, receiveAppOp(t, ops), "no history configured")
 
@@ -2064,15 +1874,11 @@ func TestOptionalHistoryIsBackwardCompatibleWhenOmitted(t *testing.T) {
 
 }
 
-
-
 func TestHistoryNavigationRecallsEntriesAndRestoresEmptyDraftAtNewestBoundary(t *testing.T) {
 
 	store := newFakeHistory("oldest", "middle", "newest")
 
 	m, _ := newAppTestModelWithHistory(nil, nil, store)
-
-
 
 	for i, want := range []string{"newest", "middle", "oldest", "oldest"} {
 
@@ -2114,8 +1920,6 @@ func TestHistoryNavigationRecallsEntriesAndRestoresEmptyDraftAtNewestBoundary(t 
 
 }
 
-
-
 func TestHistoryKeysOnNonemptyDraftRemainTextareaNavigation(t *testing.T) {
 
 	store := newFakeHistory("must not replace draft")
@@ -2123,8 +1927,6 @@ func TestHistoryKeysOnNonemptyDraftRemainTextareaNavigation(t *testing.T) {
 	m, _ := newAppTestModelWithHistory(nil, nil, store)
 
 	m.setComposerValueAt("first line\nsecond line", len([]rune("first line\nsecond line")))
-
-
 
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyUp})
 
@@ -2150,8 +1952,6 @@ func TestHistoryKeysOnNonemptyDraftRemainTextareaNavigation(t *testing.T) {
 
 }
 
-
-
 func TestHistoryRecallReflowsMultilineUnicodeAndEditingExitsBrowsing(t *testing.T) {
 
 	prompt := "界界界界界界界界\nsecond 🙂 line"
@@ -2163,8 +1963,6 @@ func TestHistoryRecallReflowsMultilineUnicodeAndEditingExitsBrowsing(t *testing.
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 12, Height: 20})
 
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyUp})
-
-
 
 	if got := m.composer.Value(); got != prompt {
 
@@ -2190,28 +1988,23 @@ func TestHistoryRecallReflowsMultilineUnicodeAndEditingExitsBrowsing(t *testing.
 
 }
 
-
-
 func TestSubmitDuringRunningTurnEnqueuesInsteadOfRejecting(t *testing.T) {
 
 	tests := []struct {
+		name string
 
-		name        string
+		skills []host.Skill
 
-		skills      []host.Skill
+		composer string
 
-		composer    string
-
-		wantModel   string
+		wantModel string
 
 		wantHistory string
-
 	}{
 
 		{name: "ordinary", composer: "draft while busy", wantModel: "draft while busy", wantHistory: "draft while busy"},
 
 		{name: "skill", skills: []host.Skill{fakeSkill("review", "", "Rendered: $ARGUMENTS")}, composer: "/review keep me", wantModel: "Rendered: keep me", wantHistory: "/review keep me"},
-
 	}
 
 	for _, tt := range tests {
@@ -2227,8 +2020,6 @@ func TestSubmitDuringRunningTurnEnqueuesInsteadOfRejecting(t *testing.T) {
 			m.turnRunning = true
 
 			m.composer.SetValue(tt.composer)
-
-
 
 			updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
@@ -2276,28 +2067,23 @@ func TestSubmitDuringRunningTurnEnqueuesInsteadOfRejecting(t *testing.T) {
 
 }
 
-
-
 func TestSubmissionsPersistDisplayPromptAndStillEmitUserInput(t *testing.T) {
 
 	tests := []struct {
+		name string
 
-		name        string
+		skills []host.Skill
 
-		skills      []host.Skill
+		composer string
 
-		composer    string
-
-		wantInput   string
+		wantInput string
 
 		wantHistory string
-
 	}{
 
 		{name: "ordinary", composer: "  hello 界\nnext line  ", wantInput: "hello 界\nnext line", wantHistory: "hello 界\nnext line"},
 
 		{name: "skill", skills: []host.Skill{fakeSkill("review", "", "Rendered: $ARGUMENTS")}, composer: "/review exact invocation", wantInput: "Rendered: exact invocation", wantHistory: "/review exact invocation"},
-
 	}
 
 	for _, tt := range tests {
@@ -2311,8 +2097,6 @@ func TestSubmissionsPersistDisplayPromptAndStillEmitUserInput(t *testing.T) {
 			m.providerName = "echo"
 
 			m.composer.SetValue(tt.composer)
-
-
 
 			updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
@@ -2344,8 +2128,6 @@ func TestSubmissionsPersistDisplayPromptAndStillEmitUserInput(t *testing.T) {
 
 }
 
-
-
 func TestRapidSubmissionsEnqueueHistoryInSubmissionOrderBeforeCommandCompletion(t *testing.T) {
 
 	// First enter dispatches immediately (optimistic turnRunning). A second enter
@@ -2359,8 +2141,6 @@ func TestRapidSubmissionsEnqueueHistoryInSubmissionOrderBeforeCommandCompletion(
 	m, ops := newAppTestModelWithHistory(nil, nil, store)
 
 	m.providerName = "echo"
-
-
 
 	m.composer.SetValue("first prompt")
 
@@ -2384,8 +2164,6 @@ func TestRapidSubmissionsEnqueueHistoryInSubmissionOrderBeforeCommandCompletion(
 
 	}
 
-
-
 	m.composer.SetValue("second prompt")
 
 	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -2406,8 +2184,6 @@ func TestRapidSubmissionsEnqueueHistoryInSubmissionOrderBeforeCommandCompletion(
 
 	}
 
-
-
 	if msg := runAppCmd(t, firstBatch[0]); msg != nil {
 
 		t.Errorf("engine send returned unexpected message %#v", msg)
@@ -2417,8 +2193,6 @@ func TestRapidSubmissionsEnqueueHistoryInSubmissionOrderBeforeCommandCompletion(
 	assertUserInputText(t, receiveAppOp(t, ops), "first prompt")
 
 	assertNoAppOp(t, ops)
-
-
 
 	// Await persistence in reverse completion order; durable order stays submission order.
 
@@ -2452,8 +2226,6 @@ func TestRapidSubmissionsEnqueueHistoryInSubmissionOrderBeforeCommandCompletion(
 
 }
 
-
-
 func TestHistoryFailureShowsNoticeWithoutSuppressingSubmission(t *testing.T) {
 
 	store := newFakeHistory()
@@ -2465,8 +2237,6 @@ func TestHistoryFailureShowsNoticeWithoutSuppressingSubmission(t *testing.T) {
 	m.providerName = "echo"
 
 	m.composer.SetValue("send despite persistence failure")
-
-
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
@@ -2488,8 +2258,6 @@ func TestHistoryFailureShowsNoticeWithoutSuppressingSubmission(t *testing.T) {
 
 }
 
-
-
 func TestSubmittingRecalledHistoryResetsBrowsingState(t *testing.T) {
 
 	store := newFakeHistory("recalled prompt")
@@ -2505,8 +2273,6 @@ func TestSubmittingRecalledHistoryResetsBrowsingState(t *testing.T) {
 		t.Fatal("up did not enter history browsing")
 
 	}
-
-
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
@@ -2528,8 +2294,6 @@ func TestSubmittingRecalledHistoryResetsBrowsingState(t *testing.T) {
 
 }
 
-
-
 func TestControlKPreservesComposerClosesCompletionAndOpensPalette(t *testing.T) {
 
 	m, ops := newAppTestModel([]string{"build"}, nil)
@@ -2541,8 +2305,6 @@ func TestControlKPreservesComposerClosesCompletionAndOpensPalette(t *testing.T) 
 	m.setComposerValueAt("keep this suffix", len([]rune("keep this suffix")))
 
 	m.completion = leadingSlashCompletion("/", 0, 1, m.commands)
-
-
 
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
 
@@ -2567,8 +2329,6 @@ func TestControlKPreservesComposerClosesCompletionAndOpensPalette(t *testing.T) 
 	assertNoAppOp(t, ops)
 
 }
-
-
 
 func TestActiveModalOwnsControlP(t *testing.T) {
 
@@ -2612,8 +2372,6 @@ func TestActiveModalOwnsControlP(t *testing.T) {
 
 }
 
-
-
 func TestPermissionResolvedOnlyClosesMatchingPermissionModal(t *testing.T) {
 
 	t.Run("unrelated resolution leaves palette open", func(t *testing.T) {
@@ -2624,11 +2382,7 @@ func TestPermissionResolvedOnlyClosesMatchingPermissionModal(t *testing.T) {
 
 		m.modal = palette
 
-
-
 		m.applyEvent(protocol.PermissionResolved{RequestID: "req-1"})
-
-
 
 		if m.modal != palette {
 
@@ -2638,8 +2392,6 @@ func TestPermissionResolvedOnlyClosesMatchingPermissionModal(t *testing.T) {
 
 	})
 
-
-
 	t.Run("only matching permission request closes", func(t *testing.T) {
 
 		m, ops := newAppTestModel(nil, nil)
@@ -2647,8 +2399,6 @@ func TestPermissionResolvedOnlyClosesMatchingPermissionModal(t *testing.T) {
 		permission := newPermissionModal(protocol.PermissionAsked{RequestID: "req-2", Permission: "bash"}, ops)
 
 		m.modal = permission
-
-
 
 		m.applyEvent(protocol.PermissionResolved{RequestID: "req-1"})
 
@@ -2669,8 +2419,6 @@ func TestPermissionResolvedOnlyClosesMatchingPermissionModal(t *testing.T) {
 	})
 
 }
-
-
 
 func TestPaletteInvokeUsesExistingCommandBehavior(t *testing.T) {
 
@@ -2772,8 +2520,6 @@ func TestPaletteInvokeUsesExistingCommandBehavior(t *testing.T) {
 
 }
 
-
-
 func TestPaletteInsertOnlyFocusesComposerWithoutSubmissionOrHistoryWrite(t *testing.T) {
 
 	store := newFakeHistory("existing")
@@ -2787,8 +2533,6 @@ func TestPaletteInsertOnlyFocusesComposerWithoutSubmissionOrHistoryWrite(t *test
 	m.historyPos = 0
 
 	m.historyDraft = "draft"
-
-
 
 	updated, cmd := m.Update(paletteInvokeMsg{Action: paletteAction{Kind: paletteActionSkill, Value: "review"}})
 
@@ -2818,16 +2562,12 @@ func TestPaletteInsertOnlyFocusesComposerWithoutSubmissionOrHistoryWrite(t *test
 
 }
 
-
-
 func TestPaletteSkillInsertionUsesOneCommandArgumentSeparatorAcrossThemes(t *testing.T) {
 
 	themes := []struct {
-
 		name string
 
-		th   theme.Theme
-
+		th theme.Theme
 	}{
 
 		{name: "default", th: theme.Default()},
@@ -2851,7 +2591,6 @@ func TestPaletteSkillInsertionUsesOneCommandArgumentSeparatorAcrossThemes(t *tes
 			return th
 
 		}()},
-
 	}
 
 	for _, themeCase := range themes {
@@ -2872,8 +2611,6 @@ func TestPaletteSkillInsertionUsesOneCommandArgumentSeparatorAcrossThemes(t *tes
 
 					m.providerName = "echo"
 
-
-
 					m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
 
 					m = typeAppText(t, m, "/"+skillName)
@@ -2889,8 +2626,6 @@ func TestPaletteSkillInsertionUsesOneCommandArgumentSeparatorAcrossThemes(t *tes
 						t.Fatalf("palette insertion = %q, want %q", got, "/"+skillName+" ")
 
 					}
-
-
 
 					m = typeAppText(t, m, "main.go")
 
@@ -2928,22 +2663,18 @@ func TestPaletteSkillInsertionUsesOneCommandArgumentSeparatorAcrossThemes(t *tes
 
 }
 
-
-
 func TestControlKPaletteAvailabilityTracksProviderAndTurn(t *testing.T) {
 
 	tests := []struct {
+		name string
 
-		name       string
+		provider string
 
-		provider   string
+		turn bool
 
-		turn       bool
-
-		command    string
+		command string
 
 		wantReason string
-
 	}{
 
 		{name: "model needs provider", command: "/model", wantReason: "select a provider first"},
@@ -2951,7 +2682,6 @@ func TestControlKPaletteAvailabilityTracksProviderAndTurn(t *testing.T) {
 		{name: "turn disables provider", provider: "echo", turn: true, command: "/provider", wantReason: "unavailable while a turn is running"},
 
 		{name: "idle provider enables model", provider: "echo", command: "/model"},
-
 	}
 
 	for _, tt := range tests {
@@ -2990,8 +2720,6 @@ func TestControlKPaletteAvailabilityTracksProviderAndTurn(t *testing.T) {
 
 }
 
-
-
 func TestOpenPaletteRefreshesWhenTurnStartsAndKeepsHelpAvailable(t *testing.T) {
 
 	m, ops := newAppTestModel([]string{"build"}, []host.Skill{fakeSkill("review", "review code", "")})
@@ -3002,8 +2730,6 @@ func TestOpenPaletteRefreshesWhenTurnStartsAndKeepsHelpAvailable(t *testing.T) {
 
 	palette := m.modal.(*paletteModal)
 
-
-
 	m.applyEvent(protocol.TurnStarted{})
 
 	if m.modal != palette {
@@ -3011,8 +2737,6 @@ func TestOpenPaletteRefreshesWhenTurnStartsAndKeepsHelpAvailable(t *testing.T) {
 		t.Fatalf("turn start replaced open palette with %T", m.modal)
 
 	}
-
-
 
 	for _, label := range []string{"/provider", "/model", "/auth", "/agent build", "/review"} {
 
@@ -3030,8 +2754,6 @@ func TestOpenPaletteRefreshesWhenTurnStartsAndKeepsHelpAvailable(t *testing.T) {
 
 }
 
-
-
 func TestOpenPaletteReenablesRestrictedEntriesWhenTurnCompletes(t *testing.T) {
 
 	m, ops := newAppTestModel([]string{"build"}, []host.Skill{fakeSkill("review", "review code", "")})
@@ -3043,8 +2765,6 @@ func TestOpenPaletteReenablesRestrictedEntriesWhenTurnCompletes(t *testing.T) {
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
 
 	palette := m.modal.(*paletteModal)
-
-
 
 	m.applyEvent(protocol.TurnCompleted{})
 
@@ -3072,8 +2792,6 @@ func TestOpenPaletteReenablesRestrictedEntriesWhenTurnCompletes(t *testing.T) {
 
 }
 
-
-
 func TestOpenPaletteRefreshesProviderDependentEntriesAfterModelSelected(t *testing.T) {
 
 	m, ops := newAppTestModel(nil, []host.Skill{fakeSkill("review", "review code", "")})
@@ -3089,8 +2807,6 @@ func TestOpenPaletteRefreshesProviderDependentEntriesAfterModelSelected(t *testi
 		assertPaletteDisabled(t, &copy, label, "select a provider first")
 
 	}
-
-
 
 	m.applyEvent(protocol.ModelSelected{Provider: "echo", Model: "test-model"})
 
@@ -3124,58 +2840,50 @@ func TestOpenPaletteRefreshesProviderDependentEntriesAfterModelSelected(t *testi
 
 }
 
-
-
 func TestConstructedRestrictedPaletteInvokeIsRejectedAgainstCurrentAvailability(t *testing.T) {
 
 	tests := []struct {
+		name string
 
-		name       string
+		provider string
 
-		provider   string
+		turn bool
 
-		turn       bool
-
-		action     paletteAction
+		action paletteAction
 
 		wantNotice string
-
 	}{
 
 		{
 
-			name:       "agent while turn is running",
+			name: "agent while turn is running",
 
-			provider:   "echo",
+			provider: "echo",
 
-			turn:       true,
+			turn: true,
 
-			action:     paletteAction{Kind: paletteActionAgent, Value: "build"},
+			action: paletteAction{Kind: paletteActionAgent, Value: "build"},
 
 			wantNotice: "unavailable while a turn is running",
-
 		},
 
 		{
 
-			name:       "model without provider",
+			name: "model without provider",
 
-			action:     paletteAction{Kind: paletteActionBuiltin, Value: "/model"},
+			action: paletteAction{Kind: paletteActionBuiltin, Value: "/model"},
 
 			wantNotice: "select a provider first",
-
 		},
 
 		{
 
-			name:       "skill without provider",
+			name: "skill without provider",
 
-			action:     paletteAction{Kind: paletteActionSkill, Value: "review"},
+			action: paletteAction{Kind: paletteActionSkill, Value: "review"},
 
 			wantNotice: "select a provider first",
-
 		},
-
 	}
 
 	for _, tt := range tests {
@@ -3193,8 +2901,6 @@ func TestConstructedRestrictedPaletteInvokeIsRejectedAgainstCurrentAvailability(
 			palette := m.modal
 
 			focused := m.composer.Focused()
-
-
 
 			updated, cmd := m.Update(paletteInvokeMsg{Action: tt.action})
 
@@ -3232,15 +2938,9 @@ func TestConstructedRestrictedPaletteInvokeIsRejectedAgainstCurrentAvailability(
 
 }
 
-
-
 type appProbeModal struct {
-
 	keys int
-
 }
-
-
 
 func (m *appProbeModal) update(tea.KeyMsg) (modal, tea.Cmd) {
 
@@ -3250,11 +2950,7 @@ func (m *appProbeModal) update(tea.KeyMsg) (modal, tea.Cmd) {
 
 }
 
-
-
 func (m *appProbeModal) view(int, theme.Theme) string { return "probe" }
-
-
 
 func assertViewContainsPlainText(t *testing.T, view, want string) {
 
@@ -3268,8 +2964,6 @@ func assertViewContainsPlainText(t *testing.T, view, want string) {
 
 }
 
-
-
 func assertViewOmitsPlainText(t *testing.T, view, unwanted string) {
 
 	t.Helper()
@@ -3282,15 +2976,11 @@ func assertViewOmitsPlainText(t *testing.T, view, unwanted string) {
 
 }
 
-
-
 func hasReverseVideo(s string) bool {
 
 	return strings.Contains(s, "\x1b[7m") || strings.Contains(s, "\x1b[7;")
 
 }
-
-
 
 func compactAppPlainText(text string) string {
 
@@ -3313,12 +3003,9 @@ func compactAppPlainText(text string) string {
 		"╯", "",
 
 		"─", "",
-
 	).Replace(text)
 
 }
-
-
 
 func updateApp(t *testing.T, m Model, msg tea.Msg) Model {
 
@@ -3330,8 +3017,6 @@ func updateApp(t *testing.T, m Model, msg tea.Msg) Model {
 
 }
 
-
-
 func typeAppText(t *testing.T, m Model, text string) Model {
 
 	t.Helper()
@@ -3339,8 +3024,6 @@ func typeAppText(t *testing.T, m Model, text string) Model {
 	return updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(text)})
 
 }
-
-
 
 func runAppCmd(t *testing.T, cmd tea.Cmd) tea.Msg {
 
@@ -3371,8 +3054,6 @@ func runAppCmd(t *testing.T, cmd tea.Cmd) tea.Msg {
 	}
 
 }
-
-
 
 func runAllAppCmds(t *testing.T, cmd tea.Cmd) []tea.Msg {
 
@@ -3406,8 +3087,6 @@ func runAllAppCmds(t *testing.T, cmd tea.Cmd) []tea.Msg {
 
 }
 
-
-
 func receiveAppOp(t *testing.T, ops <-chan protocol.Op) protocol.Op {
 
 	t.Helper()
@@ -3428,8 +3107,6 @@ func receiveAppOp(t *testing.T, ops <-chan protocol.Op) protocol.Op {
 
 }
 
-
-
 func assertNoAppOp(t *testing.T, ops <-chan protocol.Op) {
 
 	t.Helper()
@@ -3445,8 +3122,6 @@ func assertNoAppOp(t *testing.T, ops <-chan protocol.Op) {
 	}
 
 }
-
-
 
 // assertUserInputText checks a received op is UserInput with the given text
 
@@ -3474,8 +3149,6 @@ func assertUserInputText(t *testing.T, got protocol.Op, wantText string) protoco
 
 }
 
-
-
 func TestHeaderAgentBadgeGuardsDisplaySafety(t *testing.T) {
 
 	// Agents are not host-filtered; every render site must gate the name.
@@ -3484,8 +3157,6 @@ func TestHeaderAgentBadgeGuardsDisplaySafety(t *testing.T) {
 
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 
-
-
 	m.applyEvent(protocol.AgentSelected{Name: "evil\x1b[2Jagent"})
 
 	if view := m.View(); strings.Contains(view, "\x1b[2J") {
@@ -3493,8 +3164,6 @@ func TestHeaderAgentBadgeGuardsDisplaySafety(t *testing.T) {
 		t.Fatalf("header rendered raw control sequence from agent name:\n%q", view)
 
 	}
-
-
 
 	m.applyEvent(protocol.AgentSelected{Name: "build"})
 
@@ -3505,8 +3174,6 @@ func TestHeaderAgentBadgeGuardsDisplaySafety(t *testing.T) {
 	}
 
 }
-
-
 
 func TestPaneFocusStartsLeftAndPreservesComposerDraftAndCursor(t *testing.T) {
 
@@ -3523,8 +3190,6 @@ func TestPaneFocusStartsLeftAndPreservesComposerDraftAndCursor(t *testing.T) {
 	m.setComposerValueAt("first\nsecond", len([]rune("first\nsec")))
 
 	draft, line, info := m.composer.Value(), m.composer.Line(), m.composer.LineInfo()
-
-
 
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
 
@@ -3556,18 +3221,14 @@ func TestPaneFocusStartsLeftAndPreservesComposerDraftAndCursor(t *testing.T) {
 
 }
 
-
-
 func TestFocusAndPaletteClearCompletionBeforeChangingInputOwner(t *testing.T) {
 
 	for _, tt := range []struct {
+		name string
 
-		name  string
-
-		key   tea.KeyMsg
+		key tea.KeyMsg
 
 		check func(*testing.T, Model)
-
 	}{
 
 		{"focus right", tea.KeyMsg{Type: tea.KeyCtrlL}, func(t *testing.T, m Model) {
@@ -3609,7 +3270,6 @@ func TestFocusAndPaletteClearCompletionBeforeChangingInputOwner(t *testing.T) {
 			}
 
 		}},
-
 	} {
 
 		t.Run(tt.name, func(t *testing.T) {
@@ -3621,7 +3281,6 @@ func TestFocusAndPaletteClearCompletionBeforeChangingInputOwner(t *testing.T) {
 				statefulTestWindow{windowID: "a", windowTitle: "A"},
 
 				statefulTestWindow{windowID: "b", windowTitle: "B"},
-
 			}}
 
 			// ctrl+o cycles from left focus (#414).
@@ -3644,22 +3303,17 @@ func TestFocusAndPaletteClearCompletionBeforeChangingInputOwner(t *testing.T) {
 
 }
 
-
-
 func TestCycleWindowKeysClearOpenCompletionAndCycleOnce(t *testing.T) {
 
 	for _, tt := range []struct {
-
 		name string
 
-		key  tea.KeyMsg
-
+		key tea.KeyMsg
 	}{
 
 		// ctrl+o cycles from either focus (#414).
 
 		{name: "ctrl+o", key: tea.KeyMsg{Type: tea.KeyCtrlO}},
-
 	} {
 
 		t.Run(tt.name, func(t *testing.T) {
@@ -3675,7 +3329,6 @@ func TestCycleWindowKeysClearOpenCompletionAndCycleOnce(t *testing.T) {
 				statefulTestWindow{windowID: "second", windowTitle: "Second"},
 
 				statefulTestWindow{windowID: "third", windowTitle: "Third", updates: []string{"prior state"}},
-
 			}}
 
 			m.setComposerValueAt("/provider echo", len([]rune("/pro")))
@@ -3695,8 +3348,6 @@ func TestCycleWindowKeysClearOpenCompletionAndCycleOnce(t *testing.T) {
 			// Stale left completion + right focus: cycle still clears completion.
 
 			m.focus = focusRight
-
-
 
 			updated, cmd := m.Update(tt.key)
 
@@ -3746,8 +3397,6 @@ func TestCycleWindowKeysClearOpenCompletionAndCycleOnce(t *testing.T) {
 
 }
 
-
-
 func TestCompletionEscapeDismissesBeforeInterruptAndFocusChange(t *testing.T) {
 
 	m, ops := newAppTestModel(nil, nil)
@@ -3786,14 +3435,11 @@ func TestCompletionEscapeDismissesBeforeInterruptAndFocusChange(t *testing.T) {
 
 }
 
-
-
 func TestModalOwnsGlobalKeysExceptQuit(t *testing.T) {
 
 	for _, msg := range []tea.KeyMsg{
 
 		{Type: tea.KeyCtrlO}, {Type: tea.KeyCtrlL}, {Type: tea.KeyCtrlH}, {Type: tea.KeyCtrlK}, {Type: tea.KeyCtrlP}, {Type: tea.KeyF1},
-
 	} {
 
 		t.Run(msg.String(), func(t *testing.T) {
@@ -3822,8 +3468,6 @@ func TestModalOwnsGlobalKeysExceptQuit(t *testing.T) {
 
 }
 
-
-
 func TestRightPaneOwnsOrdinaryKeysAndGlobalKeysRemainGlobal(t *testing.T) {
 
 	m, ops := newAppTestModel([]string{"build", "plan"}, nil)
@@ -3839,7 +3483,6 @@ func TestRightPaneOwnsOrdinaryKeysAndGlobalKeysRemainGlobal(t *testing.T) {
 		statefulTestWindow{windowID: "right-one"},
 
 		statefulTestWindow{windowID: "right-two"},
-
 	}}
 
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
@@ -3857,7 +3500,6 @@ func TestRightPaneOwnsOrdinaryKeysAndGlobalKeysRemainGlobal(t *testing.T) {
 		{Type: tea.KeyRunes, Runes: []rune("x")}, {Type: tea.KeyEnter}, {Type: tea.KeyTab}, {Type: tea.KeyCtrlD},
 
 		{Type: tea.KeyUp}, {Type: tea.KeyDown},
-
 	} {
 
 		m = updateApp(t, m, msg)
@@ -3883,8 +3525,6 @@ func TestRightPaneOwnsOrdinaryKeysAndGlobalKeysRemainGlobal(t *testing.T) {
 	}
 
 	assertNoAppOp(t, ops)
-
-
 
 	for _, msg := range []tea.KeyMsg{{Type: tea.KeyCtrlO}, {Type: tea.KeyCtrlP}} {
 
@@ -3918,8 +3558,6 @@ func TestRightPaneOwnsOrdinaryKeysAndGlobalKeysRemainGlobal(t *testing.T) {
 
 }
 
-
-
 func TestPaletteSkillInvocationReturnsFocusToComposerFromRightPane(t *testing.T) {
 
 	m, ops := newAppTestModel(nil, []host.Skill{fakeSkill("review", "", "review $ARGUMENTS")})
@@ -3942,8 +3580,6 @@ func TestPaletteSkillInvocationReturnsFocusToComposerFromRightPane(t *testing.T)
 
 }
 
-
-
 func TestPaletteHelpInvocationOpensHelpModal(t *testing.T) {
 
 	m, ops := newAppTestModel(nil, nil)
@@ -3953,8 +3589,6 @@ func TestPaletteHelpInvocationOpensHelpModal(t *testing.T) {
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
 
 	m.modal = newPaletteModal(m.commands, m.agents, m.currentPaletteAvailability())
-
-
 
 	m = updateApp(t, m, paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/help"}})
 
@@ -4002,8 +3636,6 @@ func TestPaletteHelpInvocationOpensHelpModal(t *testing.T) {
 
 }
 
-
-
 func TestPalettePickerActionsAndStaleNoticeDoNotStealRightFocus(t *testing.T) {
 
 	m, ops := newAppTestModel(nil, nil)
@@ -4015,8 +3647,6 @@ func TestPalettePickerActionsAndStaleNoticeDoNotStealRightFocus(t *testing.T) {
 	m.setNotice("commands: stale help", false)
 
 	m.modal = newPaletteModal(m.commands, m.agents, m.currentPaletteAvailability())
-
-
 
 	m = updateApp(t, m, paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/provider"}})
 
@@ -4035,8 +3665,6 @@ func TestPalettePickerActionsAndStaleNoticeDoNotStealRightFocus(t *testing.T) {
 	assertNoAppOp(t, ops)
 
 }
-
-
 
 func TestViewportScrollOffsetSurvivesRightFocusRoundTripAndRefreshesOnResizeAndEvent(t *testing.T) {
 
@@ -4068,8 +3696,6 @@ func TestViewportScrollOffsetSurvivesRightFocusRoundTripAndRefreshesOnResizeAndE
 
 	}
 
-
-
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
 
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlH})
@@ -4079,8 +3705,6 @@ func TestViewportScrollOffsetSurvivesRightFocusRoundTripAndRefreshesOnResizeAndE
 		t.Errorf("focus round trip viewport offset = %d, want %d", got, wantOffset)
 
 	}
-
-
 
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 93, Height: 24})
 
@@ -4109,8 +3733,6 @@ func TestViewportScrollOffsetSurvivesRightFocusRoundTripAndRefreshesOnResizeAndE
 	}
 
 }
-
-
 
 // TestViewportStickToBottomFollowsTextDeltaWhenAtBottom pins that live output
 
@@ -4156,8 +3778,6 @@ func TestViewportStickToBottomFollowsTextDeltaWhenAtBottom(t *testing.T) {
 
 }
 
-
-
 func totalWindowUpdates(t *testing.T, r windowRegistry) int {
 
 	t.Helper()
@@ -4173,8 +3793,6 @@ func totalWindowUpdates(t *testing.T, r windowRegistry) int {
 	return total
 
 }
-
-
 
 func TestProtocolEventsAndSpinnerDoNotChangeRightFocus(t *testing.T) {
 
@@ -4214,8 +3832,6 @@ func TestProtocolEventsAndSpinnerDoNotChangeRightFocus(t *testing.T) {
 
 }
 
-
-
 func TestIdleSpinnerDoesNotArmOrContinue(t *testing.T) {
 
 	// Welcome/init must stay event-driven: no spinner FPS full-frame redraws (#481).
@@ -4247,8 +3863,6 @@ func TestIdleSpinnerDoesNotArmOrContinue(t *testing.T) {
 	}
 
 }
-
-
 
 func TestWorkingSpinnerArmsAndContinues(t *testing.T) {
 
@@ -4292,8 +3906,6 @@ func TestWorkingSpinnerArmsAndContinues(t *testing.T) {
 
 }
 
-
-
 func TestTurnStartedArmsSpinner(t *testing.T) {
 
 	m, _ := newAppTestModel(nil, nil)
@@ -4325,8 +3937,6 @@ func TestTurnStartedArmsSpinner(t *testing.T) {
 	}
 
 }
-
-
 
 func TestRootSwitcherOpensModal(t *testing.T) {
 	m, ops := newAppTestModel([]string{"build", "plan"}, nil)
@@ -4408,4 +4018,3 @@ func TestRootSwitcherNumberShortcut(t *testing.T) {
 		t.Fatalf("modal = %T, want nil after selection", m.modal)
 	}
 }
-

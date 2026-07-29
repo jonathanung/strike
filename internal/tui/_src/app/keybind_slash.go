@@ -66,7 +66,7 @@ var keybindSlashAliases = map[string][]string{
 // keybindNoSlashReason documents catalog IDs that are intentionally not
 // slash-invocable (composer editing, completion, modal list conventions, etc.).
 var keybindNoSlashReason = map[string]string{
-	"nav.leader": "prefix chord only; use /subagent and siblings for the actions",
+	"nav.leader":        "prefix chord only; use /subagent and siblings for the actions",
 	"nav.root-switcher": "session switcher modal (ctrl+s)",
 
 	"composer.send":            "enter sends the composer; not a discrete command",
