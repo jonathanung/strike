@@ -49,7 +49,7 @@ type Sample struct {
 	MemTotalBytes uint64
 	MemOK         bool
 	// MemCachedBytes is reclaimable OS file/page cache excluded from MemUsedBytes
-	// (macOS inactive/speculative/purgeable; Linux Cached+SReclaimable). Optional.
+	// (macOS file-backed+purgeable; Linux Cached+SReclaimable). Optional.
 	MemCachedBytes uint64
 	MemCachedOK    bool
 

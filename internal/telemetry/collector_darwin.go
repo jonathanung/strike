@@ -3,6 +3,7 @@
 package telemetry
 
 import (
+	"encoding/binary"
 	"syscall"
 	"unsafe"
 
@@ -64,48 +65,60 @@ func readMemory() (used, cached, total uint64, ok, cachedOK bool) {
 	}
 	total = memsize
 
-	pageSize := uint64(4096)
-	if ps, err := unix.SysctlUint64("hw.pagesize"); err == nil && ps > 0 {
-		pageSize = ps
-	}
-
-	// Page counts via sysctl. free is required; others degrade gracefully.
-	freePages, err := unix.SysctlUint32("vm.page_free_count")
-	if err != nil {
+	// hw.pagesize alone is not trustworthy — see darwinPageSize. vm.pages is
+	// the kernel page pool the counters are drawn from, so it cross-checks it.
+	hwPageSize, _ := unix.SysctlUint64("hw.pagesize")
+	vmPages, _ := sysctlPageCount("vm.pages")
+	pageSize, ok := darwinPageSize(hwPageSize, memsize, vmPages)
+	if !ok {
 		return 0, 0, 0, false, false
 	}
-	active := sysctlPages("vm.page_active_count")
-	inactive := sysctlPages("vm.page_inactive_count")
-	speculative := sysctlPages("vm.page_speculative_count")
-	wired := sysctlPages("vm.page_wire_count")
-	purgeable := sysctlPages("vm.page_purgeable_count")
-	// compressor_page_count is "Pages occupied by compressor" (still used RAM).
-	compressor := sysctlPages("vm.compressor_page_count")
 
-	used, cached = darwinMemPressure(pageSize, total,
-		uint64(freePages), active, inactive, speculative, wired, purgeable, compressor)
-	// Cache metric is meaningful when we read at least one reclaimable class.
-	cachedOK = inactive > 0 || speculative > 0 || purgeable > 0 || cached > 0
-	// If wired/active sysctls failed entirely, fall back so we still show something.
-	if wired == 0 && active == 0 && compressor == 0 {
-		// Legacy-ish: total − free − inactive − speculative (still excludes file cache).
-		reclaim := (uint64(freePages) + inactive + speculative) * pageSize
-		if reclaim > total {
-			reclaim = total
-		}
-		used = total - reclaim
-		cached = (inactive + speculative) * pageSize
-		cachedOK = cached > 0
+	// Page counts via sysctl. free is required; the rest degrade gracefully.
+	// Note macOS does not export vm.page_active_count / vm.page_inactive_count /
+	// vm.page_wire_count / vm.compressor_page_count at all — those are Mach
+	// host_statistics64 fields, not sysctls — so the metric is built from the
+	// OIDs that do exist.
+	freePages, freeOK := sysctlPageCount("vm.page_free_count")
+	if !freeOK {
+		return 0, 0, 0, false, false
 	}
-	return used, cached, total, true, cachedOK
+	pages := darwinVMPages{Free: freePages}
+	// File-backed ("Cached Files") pages. Both OIDs exist on current macOS;
+	// the second is a narrower fallback that omits non-pageable external pages,
+	// so prefer the full count and only fall back if it is missing.
+	if v, ok := sysctlPageCount("vm.vm_page_external_count"); ok {
+		pages.External, pages.ExternalOK = v, true
+	} else if v, ok := sysctlPageCount("vm.page_pageable_external_count"); ok {
+		pages.External, pages.ExternalOK = v, true
+	}
+	pages.Purgeable, pages.PurgeableOK = sysctlPageCount("vm.page_purgeable_count")
+
+	used, cached, ok = darwinMemUsage(pageSize, total, pages)
+	if !ok {
+		return 0, 0, 0, false, false
+	}
+	return used, cached, total, true, true
 }
 
-func sysctlPages(name string) uint64 {
-	v, err := unix.SysctlUint32(name)
+// sysctlPageCount reads a VM page-count sysctl. macOS exports these as either
+// 32-bit or 64-bit integers depending on the OID (vm.page_free_count is 32-bit,
+// vm.vm_page_external_count is 64-bit), so decode by the width the kernel
+// actually returned — unix.SysctlUint32 fails outright on the 64-bit ones.
+func sysctlPageCount(name string) (uint64, bool) {
+	raw, err := unix.SysctlRaw(name)
 	if err != nil {
-		return 0
+		return 0, false
 	}
-	return uint64(v)
+	// darwin is little-endian on every supported arch.
+	switch len(raw) {
+	case 4:
+		return uint64(binary.LittleEndian.Uint32(raw)), true
+	case 8:
+		return binary.LittleEndian.Uint64(raw), true
+	default:
+		return 0, false
+	}
 }
 
 // xswUsage matches struct xsw_usage in sys/sysctl.h (darwin).
