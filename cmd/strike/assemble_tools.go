@@ -12,6 +12,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/engine"
 	"github.com/jonathanung/strike-cli/internal/goal"
 	"github.com/jonathanung/strike-cli/internal/harness"
+	"github.com/jonathanung/strike-cli/internal/harness/external"
 	"github.com/jonathanung/strike-cli/internal/history"
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/host/local"
@@ -314,6 +315,19 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			{Name: "build", Description: "Default coding agent. Full tools subject to permission rules."},
 		}
 	}
+	harnessRegistry := harness.NewRegistry()
+	for name, hc := range cfg.Harnesses {
+		h, err := external.New(name, external.Config{Command: hc.Command, Args: hc.Args, Env: hc.Env})
+		if err != nil {
+			return nil, fmt.Errorf("configuring harness %q: %w", name, err)
+		}
+		harnessRegistry.Register(h)
+	}
+	for _, agent := range agents {
+		if agent.Harness != "" && agent.Harness != "default" && !harnessRegistry.Known(agent.Harness) {
+			return nil, fmt.Errorf("agent %q references unknown harness %q", agent.Name, agent.Harness)
+		}
+	}
 	instructions := config.LoadInstructions(workDir, projectIdentity.Root)
 	workflows, err := config.LoadWorkflows(workDir)
 	if err != nil {
@@ -461,7 +475,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			Memory:                memoryStore,
 			SystemPrompt:          cfg.SystemPrompt,
 			LeanCode:              cfg.LeanCode,
-			HarnessRegistry:       harness.NewRegistry(),
+			HarnessRegistry:       harnessRegistry,
 			MaxChildDepth:         cfg.MaxChildDepth,
 			InitialProvider:       initialProvider,
 			InitialModel:          initialModel,
@@ -486,6 +500,10 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			CompactionThreshold:   cfg.CompactionThreshold,
 			CompactionBuffer:      cfg.CompactionBuffer,
 			KeepUserTurns:         cfg.KeepUserTurns,
+			PruneProtectTokens:    cfg.PruneProtectTokens,
+			PruneMinimumTokens:    cfg.PruneMinimumTokens,
+			PruneKeepUserTurns:    cfg.PruneKeepUserTurns,
+			PruneProtectTools:     cfg.PruneProtectTools,
 			LookupContextWindow:   lookupContextWindow,
 			ListModels:            listModels,
 			PersistProjectRule: func(rule permission.Rule) error {
