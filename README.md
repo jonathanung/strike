@@ -31,6 +31,7 @@ Requires Go 1.26+.
 
 ```sh
 make setup          # one-time: ~/.strike (config + example agent/skill)
+make restore        # repair missing/corrupt ~/.strike (or: strike restore)
 make build          # builds ./strike (stamps version via git describe)
 make run-echo       # offline dev loop — no API key
 make run            # real agent with your configured provider

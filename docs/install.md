@@ -139,6 +139,8 @@ Requires Go 1.26+ (`brew install go`).
 ```sh
 make setup          # one-time: creates ~/.strike (config + example
                     # plan agent and commit skill); never overwrites
+make restore        # repair missing/corrupt ~/.strike layout
+                    # (or: strike restore [--project])
 make build          # builds ./strike with version/commit ldflags
 make run-echo       # offline dev loop — no API key needed. Type
                     # `run <command>` to exercise tool dispatch and the
@@ -147,6 +149,25 @@ make run            # real agent with your configured provider
 make test           # go test ./...
 make vet            # go vet ./...
 ```
+
+### Repair a broken `~/.strike`
+
+If config or sidecar JSON under `~/.strike` is missing or corrupted (startup
+fails with a JSON parse error, or directories were deleted), run:
+
+```sh
+strike restore              # ~/.strike only
+strike restore --project    # also ./.strike in the current directory
+# no binary yet:
+bash scripts/restore.sh
+make restore
+```
+
+Valid files are never overwritten. Corrupt JSON is moved to
+`<name>.corrupt-<timestamp>`; required `config` is rewritten with safe
+defaults. Session logs, memory, issues, goals, history, and valid
+`auth.json` credentials are left intact. After a quarantined `auth.json`,
+re-run `strike auth login …`.
 
 `make build` stamps:
 

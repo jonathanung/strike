@@ -22,6 +22,7 @@ const expectedUsage = `Usage:
   strike exec [options] <prompt>
   strike serve [options]
   strike auth <command> [arguments]
+  strike restore [options]
   strike version
   strike upgrade
 
