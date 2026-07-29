@@ -133,7 +133,8 @@ type Config struct {
 	// Session holds per-session runtime preferences (worktree isolation).
 	Session SessionConfig `json:"session,omitempty"`
 	// MCP configures external Model Context Protocol servers (stdio or HTTP).
-	// Project layer replaces global when mcp.servers is present (including {}).
+	// Prefer mcp.jsonc (see Load). When a layer sets servers (including {}),
+	// it replaces the previous layer's server map.
 	MCP MCPConfig `json:"mcp,omitempty"`
 	// Harnesses configures named external turn-loop controllers. Project
 	// definitions replace global definitions with the same name.
@@ -307,8 +308,13 @@ func projectRoot(workDir string) string {
 	return filepath.Join(workDir, ".strike")
 }
 
-// Load merges default <- global config <- global providers.jsonc <- project
-// config <- project providers.jsonc. providers.jsonc is OpenCode-compatible
+// Load merges:
+//
+//	default → ~/.strike/config → ~/.strike/mcp.jsonc → ~/.strike/providers.jsonc
+//	→ ./.strike/config → ./.strike/mcp.jsonc → ./.strike/providers.jsonc
+//
+// mcp.jsonc/json is preferred for MCP servers (see ReadMCPFile); the legacy
+// mcp object in config still works. providers.jsonc is OpenCode-compatible
 // (see ReadProvidersFile); the legacy providers array in config still works.
 func Load(workDir string) (Config, error) {
 	cfg := Default()
@@ -323,6 +329,12 @@ func Load(workDir string) (Config, error) {
 		default:
 			cfg = merge(cfg, layer)
 		}
+	}
+	// Global mcp.jsonc/json (optional; loads even when config is absent).
+	if mc, err := loadMCPFileLayer(GlobalRoot()); err != nil {
+		return cfg, err
+	} else {
+		cfg.MCP = mergeMCP(cfg.MCP, mc)
 	}
 	// Global providers.jsonc/json (optional; loads even when config is absent).
 	if pf, err := loadProvidersFileLayer(GlobalRoot()); err != nil {
@@ -341,6 +353,11 @@ func Load(workDir string) (Config, error) {
 			return cfg, err
 		default:
 			cfg = merge(cfg, layer)
+		}
+		if mc, err := loadMCPFileLayer(projectRoot(workDir)); err != nil {
+			return cfg, err
+		} else {
+			cfg.MCP = mergeMCP(cfg.MCP, mc)
 		}
 		if pf, err := loadProvidersFileLayer(projectRoot(workDir)); err != nil {
 			return cfg, err

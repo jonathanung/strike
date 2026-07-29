@@ -29,7 +29,7 @@ license-incompatible copy-paste, default product stays lean.
 | Lifecycle hooks | CC/OpenCode/Crush hooks | config `hooks` (see below) | shipped (schema lean) |
 | Compact history | CC/OpenCode compact | `/compact` builtin | shipped |
 | Memory / issues | various | `/memory` `/issues` + tools | shipped |
-| MCP servers | peers MCP hosts | config `mcp` + `/mcp` | shipped |
+| MCP servers | peers MCP hosts | `mcp.jsonc` / config `mcp` + `/mcp` | shipped |
 | Security review pack | CC security-review | gap (use `/review` + focus args) | gap |
 | Changelog / translate packs | OpenCode commands | gap (user skills) | gap |
 | Node plugin hosts | OpenCode plugins | **out of scope** | wont |

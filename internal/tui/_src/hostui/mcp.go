@@ -10,7 +10,7 @@ import (
 func (m Model) handleMCPCommand(args []string) (tea.Model, tea.Cmd) {
 	m.resetComposer()
 	if m.services.MCP == nil {
-		m.setNotice("no MCP servers configured (add mcp.servers in config)", false)
+		m.setNotice("no MCP servers configured (add servers in ~/.strike/mcp.jsonc)", false)
 		return m, nil
 	}
 	if len(args) == 0 {
@@ -55,7 +55,7 @@ func (m Model) handleMCPCommand(args []string) (tea.Model, tea.Cmd) {
 func (m Model) mcpStatusNotice() (tea.Model, tea.Cmd) {
 	statuses := m.services.MCP.Statuses()
 	if len(statuses) == 0 {
-		m.setNotice("no MCP servers configured (add mcp.servers in config)", false)
+		m.setNotice("no MCP servers configured (add servers in ~/.strike/mcp.jsonc)", false)
 		return m, nil
 	}
 	var b strings.Builder

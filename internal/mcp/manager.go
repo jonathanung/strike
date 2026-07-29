@@ -424,7 +424,7 @@ func redactErr(err error) string {
 // FormatStatuses is a multi-line human summary for /mcp.
 func FormatStatuses(statuses []Status) string {
 	if len(statuses) == 0 {
-		return "no MCP servers configured (add mcp.servers in ~/.strike/config or ./.strike/config)"
+		return "no MCP servers configured (add servers in ~/.strike/mcp.jsonc or ./.strike/mcp.jsonc)"
 	}
 	var b strings.Builder
 	for i, st := range statuses {

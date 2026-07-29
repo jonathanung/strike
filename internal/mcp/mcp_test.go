@@ -403,6 +403,10 @@ func TestFormatStatusesHint(t *testing.T) {
 	if !strings.Contains(s, "/mcp retry") || !strings.Contains(s, "disable") {
 		t.Fatalf("summary = %q", s)
 	}
+	empty := FormatStatuses(nil)
+	if !strings.Contains(empty, "mcp.jsonc") {
+		t.Fatalf("empty hint = %q", empty)
+	}
 }
 
 func TestStartMissingCommand(t *testing.T) {
