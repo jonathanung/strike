@@ -8,11 +8,11 @@ import (
 	"github.com/jonathanung/strike-cli/internal/tui/ui"
 )
 
-// spinTickCmd arms the header spinner only while the agent is Working.
-// Idle init/welcome must not tick: each spinner frame forces a full View
-// redraw, which is expensive over SSH (#481).
+// spinTickCmd arms the header spinner only while the agent is Working and
+// chrome is animated. Idle must not tick (#481). SSH/static mode keeps a
+// static working glyph with no tick chain (#497).
 func (m Model) spinTickCmd() tea.Cmd {
-	if m.agentState() != theme.AgentStateWorking {
+	if m.agentState() != theme.AgentStateWorking || staticWorkingChrome() {
 		return nil
 	}
 	return m.spin.Tick
