@@ -124,10 +124,15 @@ func (r *Registry) Register(h Harness) {
 	r.builtins[name] = h
 }
 
-// RegisterFunc registers an ordinary Go function under name.
 func (r *Registry) RegisterFunc(name string, fn Func) {
 	if fn == nil {
 		panic("harness: nil function")
+	}
+	if name == "" {
+		panic("harness: empty name")
+	}
+	if name[0] <= ' ' || name[len(name)-1] <= ' ' {
+		panic(fmt.Sprintf("harness: invalid name %q", name))
 	}
 	r.Register(namedFunc{name: name, fn: fn})
 }
