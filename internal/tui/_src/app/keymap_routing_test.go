@@ -689,6 +689,80 @@ func TestJumpToBottomBindingCtrlT(t *testing.T) {
 	}
 }
 
+// TestNoSGRMouseJunkInComposer covers #484: scroll-wheel SGR bodies must not
+// type into the prompt when ESC was consumed separately.
+func TestNoSGRMouseJunkInComposer(t *testing.T) {
+	const junk = "[<64;56;36M"
+	const full = "\x1b[<64;56;36M"
+	const wheelDown = "[<65;62;26M"
+
+	for _, wire := range []string{junk, wheelDown, junk + "ok", "pre" + full + "post"} {
+		got, err := io.ReadAll(WrapInput(strings.NewReader(wire)))
+		if err != nil {
+			t.Fatalf("WrapInput: %v", err)
+		}
+		s := string(got)
+		// Bodies without ESC are re-prefixed; nothing should remain as bare "[<"
+		// junk ready to type. Full CSI is fine (Bubble Tea → MouseMsg).
+		if strings.Contains(s, "[<") && !strings.Contains(s, "\x1b[<") {
+			t.Errorf("WrapInput(%q) left bare mouse body: %q", wire, s)
+		}
+	}
+	got, err := io.ReadAll(WrapInput(strings.NewReader(junk + "ok")))
+	if err != nil {
+		t.Fatalf("WrapInput junk+ok: %v", err)
+	}
+	if !strings.HasSuffix(string(got), "ok") {
+		t.Errorf("WrapInput(junk+ok) = %q, want suffix ok", got)
+	}
+
+	// Byte-at-a-time leaked mouse reaches the composer as runes; strip there.
+	mChunk, _ := newAppTestModel(nil, nil)
+	mChunk = updateApp(t, mChunk, tea.WindowSizeMsg{Width: 80, Height: 24})
+	for _, r := range junk {
+		mChunk = updateApp(t, mChunk, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	if strings.Contains(mChunk.composer.Value(), "[<") || strings.Contains(mChunk.composer.Value(), "64;56") {
+		t.Errorf("composer after chunked mouse runes = %q", mChunk.composer.Value())
+	}
+	mChunk = updateApp(t, mChunk, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("ok")})
+	if mChunk.composer.Value() != "ok" {
+		t.Errorf("composer after chunked mouse + ok = %q, want ok", mChunk.composer.Value())
+	}
+
+	// Normal typing of "[notes" must not be eaten.
+	if got := stripComposerMouseLeak("[notes]"); got != "[notes]" {
+		t.Errorf("stripComposerMouseLeak(notes) = %q, want preserved", got)
+	}
+	got, err = io.ReadAll(WrapInput(strings.NewReader("[notes]")))
+	if err != nil {
+		t.Fatalf("typing WrapInput: %v", err)
+	}
+	if string(got) != "[notes]" {
+		t.Errorf("typing WrapInput = %q, want preserved", got)
+	}
+
+	// Wheel MouseMsg still scrolls the transcript (proper action path).
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	for i := range 40 {
+		m.applyEvent(protocol.UserMessage{Text: strings.Repeat("scroll-line ", 8) + string(rune('a'+i%26))})
+	}
+	m.refreshViewport()
+	m.viewport.GotoBottom()
+	bottom := m.viewport.YOffset
+	if bottom == 0 {
+		t.Fatal("setup: expected scrollable transcript")
+	}
+	m = updateApp(t, m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
+	if m.viewport.YOffset >= bottom {
+		t.Fatalf("wheel up did not scroll: offset=%d bottom=%d", m.viewport.YOffset, bottom)
+	}
+	if m.composer.Value() != "" {
+		t.Errorf("composer after wheel = %q, want empty", m.composer.Value())
+	}
+}
+
 // TestNoOSCBackgroundJunkInComposerAfterSubmit covers #57 / #52.
 func TestNoOSCBackgroundJunkInComposerAfterSubmit(t *testing.T) {
 	const junk = "]11;rgb:0000/0000/0000\\"

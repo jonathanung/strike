@@ -201,6 +201,18 @@ func (s *shiftEnterReader) rewrite() []byte {
 				i += n
 				continue
 			}
+			// Re-prefix leaked SGR mouse reports (ESC eaten as KeyEsc) so Bubble
+			// Tea can decode them as MouseMsg instead of typing "[<64;…M" (#484).
+			n, hold = scanLeakedMouse(s.buf[i:])
+			if hold {
+				break
+			}
+			if n > 0 {
+				out.WriteByte(0x1b)
+				out.Write(s.buf[i : i+n])
+				i += n
+				continue
+			}
 			out.WriteByte(s.buf[i])
 			i++
 			continue
@@ -424,6 +436,47 @@ func isHexByte(c byte) bool {
 	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
 }
 
+// scanLeakedMouse matches an SGR mouse report whose leading ESC was already
+// consumed (KeyEsc ate the introducer): "[<Cb;Cx;CyM" or "[<Cb;Cx;Cym".
+// drop is the leaked body length (without ESC); hold means an incomplete
+// distinctive prefix that must stay buffered so chunked delivery cannot type
+// into the composer.
+func scanLeakedMouse(b []byte) (drop int, hold bool) {
+	if len(b) == 0 || b[0] != '[' {
+		return 0, false
+	}
+	// Bare "[" must pass through immediately (normal typing).
+	if len(b) == 1 {
+		return 0, false
+	}
+	// SGR mouse (DECSET 1006): CSI < Cb ; Cx ; Cy M/m
+	if b[1] != '<' {
+		return 0, false
+	}
+	if len(b) == 2 {
+		return 0, true // "[<" — hold until digit or divergence
+	}
+	if b[2] < '0' || b[2] > '9' {
+		return 0, false
+	}
+	// Params are digits and ';' only; final is M (press) or m (release).
+	for i := 3; i < len(b); i++ {
+		c := b[i]
+		if c == 'M' || c == 'm' {
+			return i + 1, false
+		}
+		if (c >= '0' && c <= '9') || c == ';' {
+			// Bound runaway garbage that looks vaguely like a mouse prefix.
+			if i > 48 {
+				return 0, false
+			}
+			continue
+		}
+		return 0, false
+	}
+	return 0, true
+}
+
 // stripComposerOSCLeak removes terminated OSC 11 color replies that reached
 // the composer as typed text (chunked stdin after ESC was consumed). Only
 // terminated ]digits;rgb:…\ / BEL forms are cut so mid-sequence prefixes and
@@ -457,6 +510,63 @@ func stripOneComposerOSCLeak(s string) string {
 		}
 	}
 	return s
+}
+
+// stripComposerMouseLeak removes terminated SGR mouse reports that reached the
+// composer as typed text after ESC was consumed (#484). Only complete
+// "[<digits…M/m" forms are cut so normal "[" / "[notes" typing stays intact.
+func stripComposerMouseLeak(s string) string {
+	if s == "" || (!strings.Contains(s, "[<") && !strings.Contains(s, "\x1b[<")) {
+		return s
+	}
+	for {
+		next := stripOneComposerMouseLeak(s)
+		if next == s {
+			return s
+		}
+		s = next
+	}
+}
+
+func stripOneComposerMouseLeak(s string) string {
+	for i := 0; i < len(s); i++ {
+		if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '[' {
+			end, csi, incomplete := scanCSI([]byte(s[i:]))
+			if !incomplete && csi && end > 0 && isSGRMouseCSI([]byte(s[i:i+end])) {
+				return s[:i] + s[i+end:]
+			}
+		}
+		if s[i] != '[' {
+			continue
+		}
+		if n, hold := scanLeakedMouse([]byte(s[i:])); !hold && n > 0 {
+			return s[:i] + s[i+n:]
+		}
+	}
+	return s
+}
+
+// isSGRMouseCSI reports whether seq is a full ESC-prefixed SGR mouse report.
+func isSGRMouseCSI(seq []byte) bool {
+	if len(seq) < 5 || seq[0] != 0x1b || seq[1] != '[' || seq[2] != '<' {
+		return false
+	}
+	final := seq[len(seq)-1]
+	if final != 'M' && final != 'm' {
+		return false
+	}
+	for _, c := range seq[3 : len(seq)-1] {
+		if !((c >= '0' && c <= '9') || c == ';') {
+			return false
+		}
+	}
+	return len(seq) > 4 && seq[3] >= '0' && seq[3] <= '9'
+}
+
+// stripComposerLeaks removes terminal reply/mouse junk that landed in the
+// composer as typed text (OSC color replies, SGR mouse reports).
+func stripComposerLeaks(s string) string {
+	return stripComposerMouseLeak(stripComposerOSCLeak(s))
 }
 
 // classifyEnhanced maps known enhanced-keyboard CSI sequences to legacy bytes.
