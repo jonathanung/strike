@@ -67,6 +67,14 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 			SystemChars:    100,
 			MessageCount:   2,
 			FromLastStream: true,
+			Attribution: RequestTokenAttribution{
+				System:      KnownTokens(25),
+				Tools:       KnownTokens(40),
+				Messages:    KnownTokens(10),
+				ToolResults: KnownTokens(5),
+				Total:       KnownTokens(80),
+				Source:      UsageSourceEstimated,
+			},
 		},
 	}
 	for _, want := range events {

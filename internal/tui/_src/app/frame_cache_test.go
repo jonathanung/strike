@@ -16,7 +16,9 @@ const dirtyMaskTestHeight = 40
 
 func warmDirtyMaskFrame(t *testing.T) Model {
 	t.Helper()
+	forceAnimatedWorkingChrome(t)
 	m, _ := newAppTestModel(nil, nil)
+	styleSpinner(&m.spin, m.th)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: dirtyMaskTestWidth, Height: dirtyMaskTestHeight})
 	_ = m.renderFrame()
 	if m.frames == nil || m.frames.width == 0 {
@@ -121,7 +123,9 @@ func TestDirtyMaskSpinnerPreservesRightPixels(t *testing.T) {
 }
 
 func TestColdCacheSpinnerStillComposesRight(t *testing.T) {
+	forceAnimatedWorkingChrome(t)
 	m, _ := newAppTestModel(nil, nil)
+	styleSpinner(&m.spin, m.th)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: dirtyMaskTestWidth, Height: dirtyMaskTestHeight})
 	if m.frames.width != 0 {
 		t.Fatalf("width fingerprint = %d, want 0 before first paint", m.frames.width)

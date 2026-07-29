@@ -10,6 +10,9 @@ import (
 )
 
 func (m Model) View() string {
+	if m.paint != nil {
+		m.paint.viewCalls++
+	}
 	frame := m.renderFrame()
 	if m.textSel.active() {
 		frame = applyTextSelection(frame, m.textSel, m.th.S().TextSelection)
@@ -17,11 +20,14 @@ func (m Model) View() string {
 	// Prepend OSC52 after Canvas so overlay/ansi.Cut cannot strip it.
 	if wm, ok := m.modal.(*authWaitModal); ok {
 		if osc := wm.TakeCopyOSC(); osc != "" {
-			return osc + frame
+			frame = osc + frame
 		}
 	}
 	if osc := m.cellClip.take(); osc != "" {
-		return osc + frame
+		frame = osc + frame
+	}
+	if m.paint != nil {
+		m.paint.lastViewBytes = len(frame)
 	}
 	return frame
 }
@@ -30,6 +36,9 @@ func (m Model) View() string {
 // active text-selection overlay (callers apply those separately). Unchanged
 // layers may reuse the last composed string when frames.allowSkip says so (#494).
 func (m Model) renderFrame() string {
+	if m.paint != nil {
+		m.paint.renderFrameCalls++
+	}
 	if !m.ready {
 		if warning := m.dangerView(0); warning != "" {
 			return warning + "\nstarting…"

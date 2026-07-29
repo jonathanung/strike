@@ -89,7 +89,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 /loop <interval> <job>         # recurring LLM job (session-only; see loop.md)
 /loop list                     # list active loops
 /loop stop [id]                # stop one loop or all
-/context                       # context doctor modal (prompt layer breakdown)
+/context                       # context doctor (layers + request token slices)
 /effective-prompt              # alias of /context
 /cost                          # session token totals and estimated USD cost
 /keys                          # filterable keybind cheatsheet (also f1)
@@ -141,7 +141,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/agents` `/activity` `/files` `/visualizer` `/system` | jump focus to the named right pane (`/agent` remains persona select; `/system` needs telemetry on) |
 | `/telemetry [on\|off\|status]` | local system metrics pane (CPU/RAM/disk); **on by default** (~1 Hz sampler). Disable with `/telemetry off` |
 | `/loop` | schedule a recurring prompt (`15m`, `2h`, …); session-only; `/loop list`, `/loop stop [id]` — see [loop.md](loop.md). Distinct from [`/goal`](goal.md) |
-| `/context` | context doctor modal: layer sizes, history msg count, oversized warnings (previews redacted) |
+| `/context` | context doctor modal: system-prompt layer sizes, history msg count, **request token attribution** (system / tools / messages / tool_results; local ~4 chars/token estimate, labeled `estimated`), oversized warnings (previews redacted) |
 | `/cost` | session input/output/cache totals from usage events; est. USD when catalog rates known; unknown stays explicit |
 | `/init` | light local scan → write `AGENTS.md`; confirms before overwrite |
 | `/mcp` | MCP status (`up`/`down`/`error`/`disabled`); `/mcp retry [name]`, `/mcp disable <name>` (see [config.md](config.md#mcp-servers-stdio--http)) |

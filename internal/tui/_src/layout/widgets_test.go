@@ -3,14 +3,83 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/bubbles/cursor"
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
+
+func TestStaticWorkingChromeDetection(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		chrome string
+		ssh    string
+		tty    string
+		want   bool
+	}{
+		{name: "local default", want: false},
+		{name: "ssh connection", ssh: "1.2.3.4 22 5.6.7.8 9", want: true},
+		{name: "ssh tty", tty: "/dev/pts/1", want: true},
+		{name: "env static", chrome: "static", want: true},
+		{name: "env off", chrome: "off", want: true},
+		{name: "env animate overrides ssh", chrome: "animate", ssh: "x", tty: "y", want: false},
+		{name: "env on overrides ssh", chrome: "on", ssh: "x", want: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("STRIKE_WORKING_CHROME", tt.chrome)
+			t.Setenv("SSH_CONNECTION", tt.ssh)
+			t.Setenv("SSH_TTY", tt.tty)
+			if got := staticWorkingChrome(); got != tt.want {
+				t.Fatalf("staticWorkingChrome() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStyleSpinnerFPSAndFrames(t *testing.T) {
+	th := theme.Default()
+	th.Icons.Dot = "·"
+	th.Icons.Cursor = ">"
+
+	t.Run("animated local", func(t *testing.T) {
+		t.Setenv("STRIKE_WORKING_CHROME", "animate")
+		t.Setenv("SSH_CONNECTION", "")
+		t.Setenv("SSH_TTY", "")
+		sp := newSpinner(th)
+		if got := sp.Spinner.FPS; got != localWorkingSpinnerFPS {
+			t.Errorf("FPS = %v, want %v", got, localWorkingSpinnerFPS)
+		}
+		if got, want := sp.Spinner.Frames, []string{"·", ">"}; len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+			t.Errorf("Frames = %v, want %v", got, want)
+		}
+		// Longer interval than MiniDot ⇒ lower frame rate for SSH-friendly wire use.
+		if localWorkingSpinnerFPS <= spinner.MiniDot.FPS {
+			t.Errorf("local interval %v must be slower than MiniDot %v", localWorkingSpinnerFPS, spinner.MiniDot.FPS)
+		}
+		if localWorkingSpinnerFPS < time.Second/4 {
+			t.Errorf("local interval %v exceeds ~4 FPS budget", localWorkingSpinnerFPS)
+		}
+	})
+
+	t.Run("static ssh", func(t *testing.T) {
+		t.Setenv("STRIKE_WORKING_CHROME", "")
+		t.Setenv("SSH_CONNECTION", "10.0.0.1 1 10.0.0.2 22")
+		t.Setenv("SSH_TTY", "")
+		sp := newSpinner(th)
+		if got, want := sp.Spinner.Frames, []string{"·"}; len(got) != 1 || got[0] != want[0] {
+			t.Errorf("Frames = %v, want %v", got, want)
+		}
+		// Static mode still renders a themed glyph for Working header chrome.
+		if view := sp.View(); !strings.Contains(view, "·") {
+			t.Errorf("static spinner view missing Dot: %q", view)
+		}
+	})
+}
 
 func TestFocusedInputsRenderStaticThemedReverseCursorAfterMovingLeft(t *testing.T) {
 	setTUITrueColor(t)
