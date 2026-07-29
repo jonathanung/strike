@@ -24,7 +24,7 @@ Registry: `keybindSlashPrimary` / `keybindNoSlashReason` in
 | `ctrl+k` | command palette (when kill-to-end does not delete) | `/palette` |
 | `f1` | keybind cheatsheet | `/keys` |
 | `tab` | cycle agent personas (composer empty of `/` completion; not concurrent roots) | `/agent-next` |
-| `shift+tab` | cycle permission mode (default → plan → soft-approve → accept-edits → yolo) | `/mode-next` |
+| `shift+tab` | cycle permission mode (default → plan → soft-approve → accept-edits → yolo); works mid-turn | `/mode-next` |
 | `ctrl+d` | save defaults (see [config.md](config.md)) | `/save-defaults` |
 | `ctrl+e` | open prompt in external editor (`$VISUAL`/`$EDITOR`, else nvim/vim/vi/nano) | `/edit-prompt` |
 

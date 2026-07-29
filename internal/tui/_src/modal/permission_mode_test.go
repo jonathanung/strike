@@ -40,6 +40,49 @@ func TestPermissionModeCycleKeySendsOp(t *testing.T) {
 	}
 }
 
+func TestPermissionModeCycleKeyMidTurn(t *testing.T) {
+	m, ops := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
+	m.turnRunning = true
+	m.permMode = protocol.PermissionModeDefault
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected SetPermissionMode cmd mid-turn")
+	}
+	runAppCmd(t, cmd)
+	op := receiveAppOp(t, ops)
+	set, ok := op.(protocol.SetPermissionMode)
+	if !ok {
+		t.Fatalf("op = %T, want SetPermissionMode", op)
+	}
+	if set.Mode != protocol.PermissionModePlan {
+		t.Fatalf("cycled mode = %q, want plan", set.Mode)
+	}
+	if m.noticeErr {
+		t.Fatalf("unexpected error notice mid-turn: %s", m.notice)
+	}
+}
+
+func TestPermissionModeNextCommandMidTurn(t *testing.T) {
+	m, ops := newAppTestModel(nil, nil)
+	m.turnRunning = true
+	m.permMode = protocol.PermissionModeAcceptEdits
+	_, cmd := m.handleCommand("/mode-next")
+	if cmd == nil {
+		t.Fatal("expected set mode cmd mid-turn")
+	}
+	runAppCmd(t, cmd)
+	op := receiveAppOp(t, ops)
+	set, ok := op.(protocol.SetPermissionMode)
+	if !ok {
+		t.Fatalf("op = %#v, want SetPermissionMode", op)
+	}
+	if set.Mode != protocol.PermissionModeYolo {
+		t.Fatalf("cycled mode = %q, want yolo", set.Mode)
+	}
+}
+
 func TestPermissionModeCommandDirect(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)
 	m.composer.SetValue("/mode yolo")

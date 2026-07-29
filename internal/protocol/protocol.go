@@ -327,8 +327,10 @@ type SetAutonomy struct {
 	Mode Autonomy `json:"mode"`
 }
 
-// SetPermissionMode changes the session tool-permission posture. Rejected
-// while a turn is running, like the other selection ops.
+// SetPermissionMode changes the session tool-permission posture. Accepted
+// while a turn is running so Shift+Tab / /mode can tighten or loosen asks
+// mid-turn; the permission service applies the new posture to subsequent
+// tool checks and rejects any in-flight permission asks.
 type SetPermissionMode struct {
 	Mode PermissionMode `json:"mode"`
 }
