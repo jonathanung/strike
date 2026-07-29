@@ -281,12 +281,13 @@ func TestToResponsesRequestIncludesEncryptedReasoning(t *testing.T) {
 	}
 }
 
-// TestStreamSendsPromptCacheKeyAndSessionIDOnWire pins request body + session_id header.
-func TestStreamSendsPromptCacheKeyAndSessionIDOnWire(t *testing.T) {
+// TestStreamSendsPromptCacheKeyOnWire pins request body cache key + usage map.
+func TestStreamSendsPromptCacheKeyOnWire(t *testing.T) {
 	var gotBody []byte
-	var gotSession string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotSession = r.Header.Get("session_id")
+		if r.Header.Get("session_id") == "" {
+			t.Error("session_id header missing")
+		}
 		var err error
 		gotBody, err = io.ReadAll(r.Body)
 		if err != nil {
@@ -316,9 +317,6 @@ func TestStreamSendsPromptCacheKeyAndSessionIDOnWire(t *testing.T) {
 			cp := ev
 			done = &cp
 		}
-	}
-	if gotSession != "session-531" {
-		t.Errorf("session_id header = %q, want session-531", gotSession)
 	}
 	if !strings.Contains(string(gotBody), `"prompt_cache_key":"session-531"`) {
 		t.Fatalf("request body missing prompt_cache_key: %s", gotBody)

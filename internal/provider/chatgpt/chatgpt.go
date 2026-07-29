@@ -151,11 +151,6 @@ type streamInputTokDetails struct {
 }
 
 func (p *Provider) Stream(ctx context.Context, req provider.Request) (<-chan provider.StreamEvent, error) {
-	// Prefer the session id for backend session affinity when the engine
-	// stamped CacheKey (matches Codex session_id / prompt_cache_key pairing).
-	if k := strings.TrimSpace(req.CacheKey); k != "" && p.Headers != nil {
-		p.Headers["session_id"] = k
-	}
 	body, err := p.PostSSE(ctx, p.endpoint, toResponsesRequest(req))
 	if err != nil {
 		return nil, err
