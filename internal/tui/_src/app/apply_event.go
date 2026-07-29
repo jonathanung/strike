@@ -448,6 +448,20 @@ func formatEffectivePrompt(ev protocol.EffectivePrompt) string {
 	}
 	fmt.Fprintf(&b, "effective prompt (%s) - system %d chars - history %d msgs",
 		scope, ev.SystemChars, ev.MessageCount)
+	if a := ev.Attribution; a.Source != "" || a.Total.Known {
+		src := a.Source
+		if src == "" {
+			src = protocol.UsageSourceEstimated
+		}
+		fmt.Fprintf(&b, "\n  request ~tok (%s): system %s / tools %s / messages %s / tool_results %s / total %s",
+			src,
+			formatAttrTok(a.System),
+			formatAttrTok(a.Tools),
+			formatAttrTok(a.Messages),
+			formatAttrTok(a.ToolResults),
+			formatAttrTok(a.Total),
+		)
+	}
 	if len(ev.Layers) == 0 {
 		b.WriteString("\n  (no layers)")
 		return b.String()
@@ -460,6 +474,13 @@ func formatEffectivePrompt(ev protocol.EffectivePrompt) string {
 			i+1, kind, mode, source, layer.Chars)
 	}
 	return b.String()
+}
+
+func formatAttrTok(tc protocol.TokenCount) string {
+	if !tc.Known {
+		return "?"
+	}
+	return fmt.Sprintf("~%d", tc.N)
 }
 
 func lastCell[T cell](cells []cell) (T, bool) {

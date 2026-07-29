@@ -814,6 +814,21 @@ type PromptLayerInfo struct {
 	Preview string `json:"preview,omitempty"`
 }
 
+// RequestTokenAttribution breaks model-facing input into slices for one
+// stream request (or the composition that would be sent next).
+//
+// Local estimates use ~4 chars/token and set Source to UsageSourceEstimated.
+// Providers do not currently report per-slice measured tokens; when they do,
+// Source may be UsageSourceActual. Never treat these as billing precision.
+type RequestTokenAttribution struct {
+	System      TokenCount `json:"system"`
+	Tools       TokenCount `json:"tools"`       // tool schemas bound on the request
+	Messages    TokenCount `json:"messages"`    // user/assistant text + tool_use (excl. tool_result bodies)
+	ToolResults TokenCount `json:"toolResults"` // tool_result bodies (pruned placeholders stay small)
+	Total       TokenCount `json:"total"`
+	Source      string     `json:"source,omitempty"` // actual | estimated
+}
+
 // EffectivePrompt is the inspectable composition of the system prompt for the
 // last Stream (or the current composition when no stream has run yet).
 type EffectivePrompt struct {
@@ -822,6 +837,9 @@ type EffectivePrompt struct {
 	SystemChars    int               `json:"systemChars"`
 	MessageCount   int               `json:"messageCount"`
 	FromLastStream bool              `json:"fromLastStream,omitempty"`
+	// Attribution is the estimate-labeled request-slice token breakdown
+	// (system / tools / messages / tool_results) for the same scope.
+	Attribution RequestTokenAttribution `json:"attribution"`
 }
 
 func (UserMessage) isEvent()            {}

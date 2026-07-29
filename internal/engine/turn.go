@@ -458,8 +458,8 @@ func (e *Engine) streamRetryDelay(nextAttempt int) time.Duration {
 func (e *Engine) consumeStream(ctx context.Context, reqCorr protocol.Correlation) (streamOutcome, error) {
 	layers := e.systemLayers()
 	system := joinPromptLayerTexts(layers)
-	e.recordStreamEffective(layers, system)
 	tools, _ := e.effectiveToolSchemas()
+	e.recordStreamEffective(layers, system, tools)
 	stream, err := e.prov.Stream(ctx, provider.Request{
 		Model:     e.model,
 		System:    system,
