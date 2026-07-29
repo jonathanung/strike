@@ -25,20 +25,84 @@ var pruneProtectedTools = map[string]struct{}{
 	"skill": {},
 }
 
+// pruneParams holds resolved thresholds for one prune pass. Zero fields are
+// filled from the package defaults by resolvePruneParams.
+type pruneParams struct {
+	protect         int
+	minimum         int
+	recentUserTurns int
+	protectedTools  map[string]struct{}
+}
+
+func resolvePruneParams(protect, minimum, recent int, extraTools []string) pruneParams {
+	p := pruneParams{
+		protect:         protect,
+		minimum:         minimum,
+		recentUserTurns: recent,
+	}
+	if p.protect <= 0 {
+		p.protect = pruneProtect
+	}
+	if p.minimum <= 0 {
+		p.minimum = pruneMinimum
+	}
+	if p.recentUserTurns <= 0 {
+		p.recentUserTurns = pruneRecentUserTurns
+	}
+	if len(extraTools) == 0 {
+		p.protectedTools = pruneProtectedTools
+		return p
+	}
+	tools := make(map[string]struct{}, len(pruneProtectedTools)+len(extraTools))
+	for name := range pruneProtectedTools {
+		tools[name] = struct{}{}
+	}
+	for _, raw := range extraTools {
+		name := strings.ToLower(strings.TrimSpace(raw))
+		if name == "" {
+			continue
+		}
+		tools[name] = struct{}{}
+	}
+	p.protectedTools = tools
+	return p
+}
+
+func (e *Engine) pruneParams() pruneParams {
+	return resolvePruneParams(
+		e.opts.PruneProtectTokens,
+		e.opts.PruneMinimumTokens,
+		e.opts.PruneKeepUserTurns,
+		e.opts.PruneProtectTools,
+	)
+}
+
 // pruneToolResults blanks older completed tool-result bodies outside the
 // protect budget while keeping tool_use/tool_result pairing and call structure
 // intact. Mutates msgs in place via ToolResult pointers.
 //
-// Walks backward: protect recent user turns, then ~pruneProtect tokens of
-// newer tool output; older results beyond that are candidates. Applies only
-// when candidate savings exceed pruneMinimum. Already-cleared results stop the
-// walk (older history was pruned earlier).
+// Walks backward: protect recent user turns, then ~protect tokens of newer
+// tool output; older results beyond that are candidates. Applies only when
+// candidate savings exceed minimum. Already-cleared results stop the walk
+// (older history was pruned earlier).
 //
 // Returns how many results were cleared and the approximate token estimate of
 // their former bodies (before replacement).
-func pruneToolResults(msgs []provider.Message) (cleared, tokensFreed int) {
+func pruneToolResults(msgs []provider.Message, p pruneParams) (cleared, tokensFreed int) {
 	if len(msgs) == 0 {
 		return 0, 0
+	}
+	if p.protect <= 0 {
+		p.protect = pruneProtect
+	}
+	if p.minimum <= 0 {
+		p.minimum = pruneMinimum
+	}
+	if p.recentUserTurns <= 0 {
+		p.recentUserTurns = pruneRecentUserTurns
+	}
+	if p.protectedTools == nil {
+		p.protectedTools = pruneProtectedTools
 	}
 
 	callTool := make(map[string]string)
@@ -70,7 +134,7 @@ func pruneToolResults(msgs []provider.Message) (cleared, tokensFreed int) {
 				userTurns++
 			}
 		}
-		if userTurns < pruneRecentUserTurns {
+		if userTurns < p.recentUserTurns {
 			continue
 		}
 		if m.Role != provider.RoleTool || m.ToolResult == nil {
@@ -82,7 +146,7 @@ func pruneToolResults(msgs []provider.Message) (cleared, tokensFreed int) {
 			break
 		}
 		name := callTool[m.ToolResult.CallID]
-		if _, ok := pruneProtectedTools[name]; ok {
+		if _, ok := p.protectedTools[name]; ok {
 			continue
 		}
 		est := estimateToolOutputTokens(out)
@@ -90,14 +154,14 @@ func pruneToolResults(msgs []provider.Message) (cleared, tokensFreed int) {
 			continue
 		}
 		total += est
-		if total <= pruneProtect {
+		if total <= p.protect {
 			continue
 		}
 		prunedEst += est
 		toPrune = append(toPrune, cand{idx: i, est: est})
 	}
 
-	if prunedEst <= pruneMinimum {
+	if prunedEst <= p.minimum {
 		return 0, 0
 	}
 
@@ -124,7 +188,7 @@ func estimateToolOutputTokens(output string) int {
 // history before the next provider Stream. No-ops when below the minimum free
 // threshold. Resets occupancy cache when anything was cleared.
 func (e *Engine) maybePruneToolResults() {
-	cleared, _ := pruneToolResults(e.messages)
+	cleared, _ := pruneToolResults(e.messages, e.pruneParams())
 	if cleared == 0 {
 		return
 	}

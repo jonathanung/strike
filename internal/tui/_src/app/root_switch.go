@@ -328,6 +328,9 @@ func applyEventToPane(p *rootPane, ev protocol.Event) {
 	case protocol.PermissionResolved, protocol.QuestionResolved:
 		p.awaitingPermission = false
 	case protocol.TurnCompleted:
+		// Match applyEvent: finished replies must prettify when the user
+		// switches back into this root (markdown only renders when complete).
+		completeAssistantCellsIn(p.cells)
 		p.turnRunning = false
 		p.awaitingPermission = false
 		if e.StopReason == "error" {
@@ -339,6 +342,7 @@ func applyEventToPane(p *rootPane, ev protocol.Event) {
 		}
 	case protocol.UserMessage:
 		p.sessionErrored = false
+		completeAssistantCellsIn(p.cells)
 		// Model-facing notice only; subagentResultCell comes from ChildCompleted.
 		if isChildCompletedNotice(e.Text) {
 			break

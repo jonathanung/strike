@@ -108,6 +108,21 @@ type Config struct {
 	// KeepUserTurns is how many trailing real user turns to preserve when
 	// compacting. Zero means engine default (2). Negatives clamp to 0.
 	KeepUserTurns int `json:"keepUserTurns,omitempty"`
+	// PruneProtectTokens is how many recent tool-output tokens to keep intact
+	// while walking history backward during continuous tool-result prune.
+	// Zero means engine default (40000). Negatives clamp to 0.
+	PruneProtectTokens int `json:"pruneProtectTokens,omitempty"`
+	// PruneMinimumTokens is the minimum estimated tokens that must be freed
+	// before prune mutates history (avoids thrash). Zero means engine default
+	// (20000). Negatives clamp to 0.
+	PruneMinimumTokens int `json:"pruneMinimumTokens,omitempty"`
+	// PruneKeepUserTurns skips tool results inside the most recent N real user
+	// turns during prune. Zero means engine default (2). Negatives clamp to 0.
+	PruneKeepUserTurns int `json:"pruneKeepUserTurns,omitempty"`
+	// PruneProtectTools names additional tools whose results stay available
+	// after prune (merged with the built-in "skill" protect). Empty means no
+	// extras. Names are lowercased and deduped at load.
+	PruneProtectTools []string `json:"pruneProtectTools,omitempty"`
 	// MaxChildDepth bounds nested task tool spawns (root depth 0). Zero means
 	// engine default (1: children cannot spawn further tasks).
 	MaxChildDepth int `json:"maxChildDepth,omitempty"`
@@ -120,6 +135,16 @@ type Config struct {
 	// MCP configures external Model Context Protocol servers (stdio or HTTP).
 	// Project layer replaces global when mcp.servers is present (including {}).
 	MCP MCPConfig `json:"mcp,omitempty"`
+	// Harnesses configures named external turn-loop controllers. Project
+	// definitions replace global definitions with the same name.
+	Harnesses map[string]HarnessConfig `json:"harnesses,omitempty"`
+}
+
+// HarnessConfig is one named external harness command.
+type HarnessConfig struct {
+	Command string            `json:"command"`
+	Args    []string          `json:"args,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
 }
 
 // MCPConfig is the JSON "mcp" object.
@@ -461,12 +486,27 @@ func read(path string) (Config, error) {
 	c.CompactionThreshold = ClampCompactionThreshold(c.CompactionThreshold)
 	c.CompactionBuffer = ClampCompactionBuffer(c.CompactionBuffer)
 	c.KeepUserTurns = ClampKeepUserTurns(c.KeepUserTurns)
+	c.PruneProtectTokens = ClampPruneProtectTokens(c.PruneProtectTokens)
+	c.PruneMinimumTokens = ClampPruneMinimumTokens(c.PruneMinimumTokens)
+	c.PruneKeepUserTurns = ClampPruneKeepUserTurns(c.PruneKeepUserTurns)
+	c.PruneProtectTools = NormalizePruneProtectTools(c.PruneProtectTools)
 	c.Notify = NormalizeNotify(c.Notify)
 	c.LeanCode = NormalizeLeanCode(c.LeanCode)
 	c.DeferTools = NormalizeDeferTools(c.DeferTools)
 	// Keybinds: unknown ids / invalid chords fail the layer (and thus Load).
 	if err := ValidateKeybinds(c.Keybinds); err != nil {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
+	}
+	for name, harness := range c.Harnesses {
+		if err := validateConfigIdentifier(name, "harness"); err != nil {
+			return Config{}, fmt.Errorf("%s: %w", path, err)
+		}
+		if strings.TrimSpace(name) != name {
+			return Config{}, fmt.Errorf("%s: harness name %q has leading or trailing whitespace", path, name)
+		}
+		if strings.TrimSpace(harness.Command) == "" {
+			return Config{}, fmt.Errorf("%s: harness %q command is empty", path, name)
+		}
 	}
 	return c, nil
 }
@@ -555,6 +595,55 @@ func ClampKeepUserTurns(n int) int {
 		return 0
 	}
 	return n
+}
+
+// ClampPruneProtectTokens maps config values: <0 → 0 (engine default).
+func ClampPruneProtectTokens(n int) int {
+	if n < 0 {
+		return 0
+	}
+	return n
+}
+
+// ClampPruneMinimumTokens maps config values: <0 → 0 (engine default).
+func ClampPruneMinimumTokens(n int) int {
+	if n < 0 {
+		return 0
+	}
+	return n
+}
+
+// ClampPruneKeepUserTurns maps config values: <0 → 0 (engine default).
+func ClampPruneKeepUserTurns(n int) int {
+	if n < 0 {
+		return 0
+	}
+	return n
+}
+
+// NormalizePruneProtectTools lowercases, trims, and dedupes tool names.
+// Empty / all-blank input becomes nil.
+func NormalizePruneProtectTools(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	seen := make(map[string]struct{}, len(in))
+	for _, raw := range in {
+		name := strings.ToLower(strings.TrimSpace(raw))
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // Notify mode values for Config.Notify / desktop notifications.
@@ -686,6 +775,18 @@ func merge(base, layer Config) Config {
 	if layer.KeepUserTurns != 0 {
 		base.KeepUserTurns = layer.KeepUserTurns
 	}
+	if layer.PruneProtectTokens != 0 {
+		base.PruneProtectTokens = layer.PruneProtectTokens
+	}
+	if layer.PruneMinimumTokens != 0 {
+		base.PruneMinimumTokens = layer.PruneMinimumTokens
+	}
+	if layer.PruneKeepUserTurns != 0 {
+		base.PruneKeepUserTurns = layer.PruneKeepUserTurns
+	}
+	if layer.PruneProtectTools != nil {
+		base.PruneProtectTools = layer.PruneProtectTools
+	}
 	if layer.MaxChildDepth != 0 {
 		base.MaxChildDepth = layer.MaxChildDepth
 	}
@@ -700,6 +801,7 @@ func merge(base, layer Config) Config {
 	base.Providers = mergeProviders(base.Providers, layer.Providers)
 	base.Keybinds = MergeKeybinds(base.Keybinds, layer.Keybinds)
 	base.MCP = mergeMCP(base.MCP, layer.MCP)
+	base.Harnesses = mergeHarnesses(base.Harnesses, layer.Harnesses)
 	if layer.disableDefaultProvidersSet {
 		base.DisableDefaultProviders = layer.DisableDefaultProviders
 		base.disableDefaultProvidersSet = true
@@ -708,6 +810,39 @@ func merge(base, layer Config) Config {
 		base.DisableDefaultPer = mergeDisableDefaultPer(base.DisableDefaultPer, layer.DisableDefaultPer)
 	}
 	return base
+}
+
+func mergeHarnesses(base, layer map[string]HarnessConfig) map[string]HarnessConfig {
+	out := cloneHarnesses(base)
+	if out == nil && layer != nil {
+		out = make(map[string]HarnessConfig, len(layer))
+	}
+	for name, harness := range layer {
+		out[name] = cloneHarnessConfig(harness)
+	}
+	return out
+}
+
+func cloneHarnesses(in map[string]HarnessConfig) map[string]HarnessConfig {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]HarnessConfig, len(in))
+	for name, harness := range in {
+		out[name] = cloneHarnessConfig(harness)
+	}
+	return out
+}
+
+func cloneHarnessConfig(in HarnessConfig) HarnessConfig {
+	out := HarnessConfig{Command: in.Command, Args: append([]string(nil), in.Args...)}
+	if in.Env != nil {
+		out.Env = make(map[string]string, len(in.Env))
+		for name, value := range in.Env {
+			out.Env[name] = value
+		}
+	}
+	return out
 }
 
 // parseDisableDefaultFlags extracts disable-default-providers and

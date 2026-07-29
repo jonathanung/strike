@@ -24,6 +24,10 @@ JSON:
   "compactionThreshold": 0.70,
   "compactionBuffer": 4096,
   "keepUserTurns": 2,
+  "pruneProtectTokens": 40000,
+  "pruneMinimumTokens": 20000,
+  "pruneKeepUserTurns": 2,
+  "pruneProtectTools": [],
   "session": {
     "worktree": "off",
     "worktreeCleanup": "keep"
@@ -560,11 +564,17 @@ threshold compaction is the coarser whole-history rewrite.
 | `compactionThreshold` | occupancy fraction of the known context window that triggers auto-compact before a Stream; `>=1` disables threshold compaction; omit/`0` uses the engine default | `0.70` |
 | `compactionBuffer` | extra token headroom reserved with `MaxTokens` so threshold compaction fires before hard exhaustion; omit/`0` uses the engine default | `4096` |
 | `keepUserTurns` | trailing real user turns preserved when compacting (compact markers do not count); omit/`0` uses the engine default | `2` |
+| `pruneProtectTokens` | recent tool-output tokens kept intact while walking history backward during continuous prune; omit/`0` uses the engine default; negatives clamp to `0` | `40000` |
+| `pruneMinimumTokens` | minimum estimated tokens that must be freed before prune mutates history (avoids thrash); omit/`0` uses the engine default; negatives clamp to `0` | `20000` |
+| `pruneKeepUserTurns` | real user turns whose tool results stay complete during prune (compact markers do not count); omit/`0` uses the engine default; negatives clamp to `0` | `2` |
+| `pruneProtectTools` | extra tool names whose results are never blanked (merged with built-in `skill`); names lowercased/deduped; omit/empty adds none | `[]` (+ built-in `skill`) |
 
 Recommended ranges: threshold `0.60`–`0.85` (lower = earlier pressure response;
 too low thrash-compacts short sessions), buffer `1024`–`8192`, keep turns
-`1`–`4`. Overflow recovery still compacts on context-length provider errors
-regardless of threshold.
+`1`–`4`. For prune, lower `pruneProtectTokens` / `pruneMinimumTokens` on
+MCP-heavy sessions (tighter reclaim); raise minimum on short interactive
+sessions to avoid thrash. Overflow recovery still compacts on context-length
+provider errors regardless of threshold.
 
 On summarize failure the engine falls back to trim and emits a notice. The
 summary path never re-runs tools.
