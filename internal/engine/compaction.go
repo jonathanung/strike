@@ -289,6 +289,7 @@ func (e *Engine) summarizeHistory(ctx context.Context, dropped []provider.Messag
 			Text: "Summarize this conversation history:\n\n" + body,
 		}},
 		MaxTokens: summarizeMaxTokens,
+		CacheKey:  e.opts.SessionID,
 	})
 	if err != nil {
 		return "", err

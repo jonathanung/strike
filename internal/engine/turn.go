@@ -588,6 +588,7 @@ func (e *Engine) consumeStream(ctx context.Context, reqCorr protocol.Correlation
 		MaxTokens: e.opts.MaxTokens,
 		Effort:    providerEffort(e.effort),
 		Priority:  e.priority,
+		CacheKey:  e.opts.SessionID,
 	})
 	if err != nil {
 		return streamOutcome{}, err
