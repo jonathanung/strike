@@ -19,18 +19,17 @@ func (m Model) View() string {
 	if m.textSel.active() {
 		frame = applyTextSelection(frame, m.textSel, m.th.S().TextSelection)
 	}
-	// Prepend OSC52 after Canvas so overlay/ansi.Cut cannot strip it.
+	// Cache the visible frame without OSC52 so suppressed Views stay current
+	// and one-shot clipboard sequences are never replayed (#496).
+	m.noteFrameBuild(frame)
 	if wm, ok := m.modal.(*authWaitModal); ok {
 		if osc := wm.TakeCopyOSC(); osc != "" {
-			// Do not cache OSC52 frames; one-shot clipboard sequences must not
-			// replay on the next suppressed View.
 			return osc + frame
 		}
 	}
 	if osc := m.cellClip.take(); osc != "" {
 		return osc + frame
 	}
-	m.noteFrameBuild(frame)
 	return frame
 }
 
