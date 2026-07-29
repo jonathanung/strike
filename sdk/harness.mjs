@@ -18,6 +18,7 @@ export function runHarness(harness) {
     const readers = [];
     let done = false;
 
+    waiters.set(id, {
       push(event) {
         if (readers.length) readers.shift()({ value: event, done: false });
         else events.push(event);
