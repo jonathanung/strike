@@ -98,22 +98,35 @@ func TestTelemetryWindowRenderStates(t *testing.T) {
 		sample host.TelemetrySample
 		width  int
 		want   []string
+		forbid []string
 		noZero bool
 	}{
-		{"normal wide", normal, 48, []string{"RAM", "Cache", "Swap", "CPU", "Disk", "42.3%", "used"}, false},
-		{"warning", warn, 48, []string{"RAM", "used"}, false},
-		{"critical", crit, 48, []string{"CPU", "95.0%"}, false},
-		{"unavailable", host.TelemetrySample{}, 40, []string{"RAM", "CPU", "Disk", telemetryUnavailable}, true},
-		{"compact", normal, 20, []string{"RAM", "CPU"}, false},
-		{"tiny", normal, 10, []string{"RAM"}, false},
+		{"normal wide", normal, 48, []string{"RAM", "Cache", "Swap", "CPU", "Disk", "42.3%", "used"}, nil, false},
+		{"warning", warn, 48, []string{"RAM", "used"}, nil, false},
+		{"critical", crit, 48, []string{"CPU", "95.0%"}, nil, false},
+		{"unavailable", host.TelemetrySample{}, 40, []string{"RAM", "CPU", "Disk", telemetryUnavailable}, nil, true},
+		{"compact", normal, 20, []string{"RAM", "CPU"}, nil, false},
+		{"tiny", normal, 10, []string{"RAM"}, nil, false},
+		{"no swap configured", host.TelemetrySample{
+			MemOK: true, MemUsedBytes: 1, MemTotalBytes: 2,
+			MemCachedOK: true, MemCachedBytes: 1,
+			SwapOK: true, SwapTotalBytes: 0,
+			CPUHostOK: true, CPUHostPct: 1,
+			DiskOK: true, DiskUsedBytes: 1, DiskTotalBytes: 2, DiskFreeBytes: 1,
+		}, 48, []string{"RAM", "Cache", "CPU", "Disk"}, []string{"Swap"}, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			w := telemetryWindow{tel: &scriptedTelemetry{}, sample: tt.sample, has: true, width: tt.width, height: 5}
+			w := telemetryWindow{tel: &scriptedTelemetry{}, sample: tt.sample, has: true, width: tt.width, height: 8}
 			view := w.view(th)
 			plain := ansi.Strip(view)
 			for _, want := range tt.want {
 				if !strings.Contains(plain, want) {
 					t.Errorf("missing %q in %q", want, plain)
+				}
+			}
+			for _, bad := range tt.forbid {
+				if strings.Contains(plain, bad) {
+					t.Errorf("unexpected %q in %q", bad, plain)
 				}
 			}
 			for _, line := range strings.Split(view, "\n") {

@@ -139,10 +139,13 @@ func (w telemetryWindow) view(th theme.Theme) string {
 	lines := []string{
 		telemetryMetricLine(th, w.width, "RAM", telemetryMemText(th, w.sample), memR, memOK),
 	}
-	if cacheR, cacheOK := telemetryCacheRatio(w.sample); cacheOK || w.sample.MemCachedOK {
-		lines = append(lines, telemetryMetricLine(th, w.width, "Cache", telemetryCacheText(th, w.sample), cacheR, cacheOK))
+	// Cache is reclaimable — never pressure-colored (high cache is healthy).
+	if cacheR, cacheOK := telemetryCacheRatio(w.sample); cacheOK {
+		lines = append(lines, telemetryMetricLineNeutral(th, w.width, "Cache", telemetryCacheText(th, w.sample), cacheR, cacheOK))
 	}
-	if swapR, swapOK := telemetrySwapRatio(w.sample); swapOK || w.sample.SwapOK {
+	// Hide swap row when the OS reports no swap configured (0/0).
+	if w.sample.SwapOK && w.sample.SwapTotalBytes > 0 {
+		swapR, swapOK := telemetrySwapRatio(w.sample)
 		lines = append(lines, telemetryMetricLine(th, w.width, "Swap", telemetrySwapText(th, w.sample), swapR, swapOK))
 	}
 	lines = append(lines,
@@ -463,6 +466,16 @@ func telemetryFormatPercent(pct float64) string {
 // telemetryMetricLine renders "RAM  text [bar]" with pressure-colored bar.
 // At tiny widths the bar is dropped; unavailable never shows as zero.
 func telemetryMetricLine(th theme.Theme, width int, label, text string, ratio float64, ok bool) string {
+	return telemetryMetricLineStyled(th, width, label, text, ratio, ok, true)
+}
+
+// telemetryMetricLineNeutral is like telemetryMetricLine but never applies
+// warn/crit pressure colors (for reclaimable cache — high is not bad).
+func telemetryMetricLineNeutral(th theme.Theme, width int, label, text string, ratio float64, ok bool) string {
+	return telemetryMetricLineStyled(th, width, label, text, ratio, ok, false)
+}
+
+func telemetryMetricLineStyled(th theme.Theme, width int, label, text string, ratio float64, ok, pressure bool) string {
 	th = th.Resolve()
 	st := th.S()
 	if width <= 0 {
@@ -486,7 +499,7 @@ func telemetryMetricLine(th theme.Theme, width int, label, text string, ratio fl
 	textStyle := st.Text
 	if text == telemetryUnavailable {
 		textStyle = st.Muted
-	} else if ok {
+	} else if ok && pressure {
 		switch {
 		case ratio > telemetryCritRatio:
 			textStyle = st.Error
@@ -495,6 +508,8 @@ func telemetryMetricLine(th theme.Theme, width int, label, text string, ratio fl
 		default:
 			textStyle = st.Success
 		}
+	} else if ok {
+		textStyle = st.Muted
 	}
 
 	bar := ""
