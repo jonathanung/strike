@@ -262,10 +262,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case key.Matches(msg, m.keyMap.PermissionMode):
-		// Shift+Tab cycles tool-permission posture; /mode-next.
-		if m.turnRunning {
-			return m, nil
-		}
+		// Shift+Tab cycles tool-permission posture mid-turn too; /mode-next.
 		return m.cyclePermissionMode()
 	}
 	return m.updateComposer(msg)
