@@ -88,10 +88,12 @@ func readMemory() (used, cached, total uint64, ok, cachedOK bool) {
 		pages.External, pages.ExternalOK = v, true
 	}
 	pages.Purgeable, pages.PurgeableOK = sysctlPageCount("vm.page_purgeable_count")
-	pages.Speculative, pages.SpeculativeOK = sysctlPageCount("vm.page_speculative_count")
 
-	used, cached, cachedOK = darwinMemUsage(pageSize, total, pages)
-	return used, cached, total, true, cachedOK
+	used, cached, ok = darwinMemUsage(pageSize, total, pages)
+	if !ok {
+		return 0, 0, 0, false, false
+	}
+	return used, cached, total, true, true
 }
 
 // sysctlPageCount reads a VM page-count sysctl. macOS exports these as either

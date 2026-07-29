@@ -10,12 +10,11 @@ const (
 // darwinSnapshot is a real sysctl/vm_stat capture from a 64 GiB M-series Mac,
 // taken while Activity Monitor reported ~52.8 GB used and ~13.5 GB cached files.
 type darwinSnapshot struct {
-	pageSize    uint64
-	total       uint64
-	free        uint64
-	external    uint64 // vm_stat "File-backed pages"
-	purgeable   uint64
-	speculative uint64
+	pageSize  uint64
+	total     uint64
+	free      uint64
+	external  uint64 // vm_stat "File-backed pages"
+	purgeable uint64
 
 	// Mach-only counters, used to derive the Activity Monitor reference value.
 	anonymous  uint64
@@ -25,15 +24,14 @@ type darwinSnapshot struct {
 
 func liveSnapshot() darwinSnapshot {
 	return darwinSnapshot{
-		pageSize:    16384,
-		total:       68719476736,
-		free:        64148,
-		external:    816205,
-		purgeable:   32642,
-		speculative: 7448,
-		anonymous:   2946848,
-		wired:       250966,
-		compressor:  55750,
+		pageSize:   16384,
+		total:      68719476736,
+		free:       64148,
+		external:   816205,
+		purgeable:  32642,
+		anonymous:  2946848,
+		wired:      250966,
+		compressor: 55750,
 	}
 }
 
@@ -46,13 +44,11 @@ func (s darwinSnapshot) activityMonitorUsed() uint64 {
 
 func (s darwinSnapshot) pages() darwinVMPages {
 	return darwinVMPages{
-		Free:          s.free,
-		External:      s.external,
-		ExternalOK:    true,
-		Purgeable:     s.purgeable,
-		PurgeableOK:   true,
-		Speculative:   s.speculative,
-		SpeculativeOK: true,
+		Free:        s.free,
+		External:    s.external,
+		ExternalOK:  true,
+		Purgeable:   s.purgeable,
+		PurgeableOK: true,
 	}
 }
 
@@ -60,25 +56,29 @@ func (s darwinSnapshot) pages() darwinVMPages {
 // showed at ~77%, because reclaimable file cache counted as used.
 func TestDarwinMemUsageExcludesFileCache(t *testing.T) {
 	s := liveSnapshot()
-	used, cached, cachedOK := darwinMemUsage(s.pageSize, s.total, s.pages())
+	used, cached, ok := darwinMemUsage(s.pageSize, s.total, s.pages())
 
-	if !cachedOK {
-		t.Fatal("cachedOK = false, want true when external+purgeable are readable")
+	if !ok {
+		t.Fatal("ok = false, want true when external+purgeable are readable")
 	}
 	if wantCached := (s.external + s.purgeable) * s.pageSize; cached != wantCached {
 		t.Errorf("cached = %d, want %d", cached, wantCached)
 	}
 
-	// Within 5% of total RAM of what Activity Monitor reports. The residual gap
-	// is memory the kernel reserves outside the VM page pool (hw.memsize is
-	// larger than vm.pages), which this formula attributes to used.
+	// This reconciles the sysctl formula against the same snapshot's Mach
+	// counters — it is an internal consistency check, not a live comparison
+	// against Activity Monitor. The only expected difference is memory the
+	// kernel reserves outside the VM page pool (hw.memsize exceeds
+	// vm.pages * pagesize), which this formula attributes to used. On this
+	// snapshot that carveout is 60387 pages, 1.44% of total; anything beyond
+	// 2% means the two decompositions have genuinely diverged.
 	ref := s.activityMonitorUsed()
 	delta := used - ref
 	if used < ref {
 		delta = ref - used
 	}
-	if off := float64(delta) / float64(s.total); off > 0.05 {
-		t.Errorf("used = %d, Activity Monitor reference %d: off by %.1f%% of total RAM", used, ref, off*100)
+	if off := float64(delta) / float64(s.total); off > 0.02 {
+		t.Errorf("used = %d, Mach-counter reference %d: off by %.2f%% of total RAM", used, ref, off*100)
 	}
 
 	// The pre-fix formula (total − free, cache counted as used) pinned the bar
@@ -96,10 +96,10 @@ func TestDarwinMemUsageDegradesPerMissingCounter(t *testing.T) {
 	const free = 100_000
 
 	tests := []struct {
-		name        string
-		pages       darwinVMPages
-		wantCached  uint64 // page count
-		wantCacheOK bool
+		name       string
+		pages      darwinVMPages
+		wantCached uint64 // page count
+		wantOK     bool
 	}{
 		{
 			name: "external and purgeable",
@@ -107,36 +107,40 @@ func TestDarwinMemUsageDegradesPerMissingCounter(t *testing.T) {
 				Free: free, External: 800_000, ExternalOK: true,
 				Purgeable: 30_000, PurgeableOK: true,
 			},
-			wantCached: 830_000, wantCacheOK: true,
+			wantCached: 830_000, wantOK: true,
 		},
 		{
-			name: "no external falls back to speculative",
-			pages: darwinVMPages{
-				Free: free, Purgeable: 30_000, PurgeableOK: true,
-				Speculative: 7_000, SpeculativeOK: true,
-			},
-			wantCached: 37_000, wantCacheOK: true,
-		},
-		{
-			name: "external present ignores speculative subset",
+			name: "purgeable missing still measures file cache",
 			pages: darwinVMPages{
 				Free: free, External: 800_000, ExternalOK: true,
-				Speculative: 7_000, SpeculativeOK: true,
 			},
-			wantCached: 800_000, wantCacheOK: true,
+			wantCached: 800_000, wantOK: true,
 		},
 		{
-			name:       "no cache counters at all",
-			pages:      darwinVMPages{Free: free},
-			wantCached: 0, wantCacheOK: false,
+			// Reporting total-free here is what let #521 survive its first fix:
+			// it reads ~98% and is indistinguishable from a real measurement.
+			name:   "no external counter reports unavailable",
+			pages:  darwinVMPages{Free: free, Purgeable: 30_000, PurgeableOK: true},
+			wantOK: false,
+		},
+		{
+			name:   "no counters at all reports unavailable",
+			pages:  darwinVMPages{Free: free},
+			wantOK: false,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			used, cached, cachedOK := darwinMemUsage(darwinPageSize, darwinTotal, tc.pages)
-			if cachedOK != tc.wantCacheOK {
-				t.Errorf("cachedOK = %v, want %v", cachedOK, tc.wantCacheOK)
+			used, cached, ok := darwinMemUsage(darwinPageSize, darwinTotal, tc.pages)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
+			}
+			if !tc.wantOK {
+				if used != 0 || cached != 0 {
+					t.Errorf("unavailable = (%d, %d), want (0, 0)", used, cached)
+				}
+				return
 			}
 			if want := tc.wantCached * darwinPageSize; cached != want {
 				t.Errorf("cached = %d, want %d", cached, want)
@@ -159,19 +163,22 @@ func TestDarwinMemUsageGuardsBadInput(t *testing.T) {
 		t.Errorf("zero total = (%d, %d, %v), want (0, 0, false)", used, cached, ok)
 	}
 
-	// Page counts far beyond physical RAM must clamp instead of overflowing.
-	huge := darwinVMPages{
-		Free: 1 << 60, External: 1 << 60, ExternalOK: true,
-		Purgeable: 1 << 60, PurgeableOK: true,
-	}
-	used, cached, ok := darwinMemUsage(darwinPageSize, darwinTotal, huge)
-	if !ok {
-		t.Error("cachedOK = false, want true")
-	}
-	if used != 0 {
-		t.Errorf("used = %d, want 0 when everything is reclaimable", used)
-	}
-	if cached != darwinTotal {
-		t.Errorf("cached = %d, want clamped to total %d", cached, darwinTotal)
+	// Page counts far beyond physical RAM must clamp, never wrap. 1<<63 each
+	// would overflow uint64 if the counts were summed before clamping.
+	for _, n := range []uint64{1 << 60, 1 << 63, ^uint64(0)} {
+		huge := darwinVMPages{
+			Free: n, External: n, ExternalOK: true,
+			Purgeable: n, PurgeableOK: true,
+		}
+		used, cached, ok := darwinMemUsage(darwinPageSize, darwinTotal, huge)
+		if !ok {
+			t.Errorf("%d: ok = false, want true", n)
+		}
+		if used != 0 {
+			t.Errorf("%d: used = %d, want 0 when everything is reclaimable", n, used)
+		}
+		if cached != darwinTotal {
+			t.Errorf("%d: cached = %d, want clamped to total %d", n, cached, darwinTotal)
+		}
 	}
 }
