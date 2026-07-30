@@ -106,33 +106,39 @@ func (t *Team) IsLive(sessionID string) bool {
 
 // ResolveAddress maps a teammate address to a session id.
 // Prefer exact session id; otherwise unique stable name match.
-// Empty, unknown, or ambiguous name → ok false.
+// Empty, unknown, or ambiguous name → ok false with a detail reason.
 func (t *Team) ResolveAddress(addr string) (sessionID string, ok bool) {
+	id, _, ok := t.ResolveAddressDetail(addr)
+	return id, ok
+}
+
+// ResolveAddressDetail is ResolveAddress plus a stable rejection detail when !ok.
+func (t *Team) ResolveAddressDetail(addr string) (sessionID, detail string, ok bool) {
 	if t == nil {
-		return "", false
+		return "", "no team", false
 	}
 	addr = strings.TrimSpace(addr)
 	if addr == "" {
-		return "", false
+		return "", "address is required", false
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if _, found := t.members[addr]; found {
-		return addr, true
+		return addr, "", true
 	}
 	var match string
 	for id, m := range t.members {
 		if strings.TrimSpace(m.Name) == addr {
 			if match != "" {
-				return "", false // ambiguous
+				return "", "teammate name is ambiguous", false
 			}
 			match = id
 		}
 	}
 	if match == "" {
-		return "", false
+		return "", "recipient is not on this team", false
 	}
-	return match, true
+	return match, "", true
 }
 
 // Member returns a copy of the roster entry for sessionID.

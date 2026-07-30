@@ -488,6 +488,67 @@ func TestAgentMessageResolveByName(t *testing.T) {
 	if _, ok := team.ResolveAddress("missing"); ok {
 		t.Fatal("missing should fail")
 	}
+	_, detail, ok := team.ResolveAddressDetail("missing")
+	if ok || detail != "recipient is not on this team" {
+		t.Fatalf("missing detail = %q ok=%v", detail, ok)
+	}
+
+	// Ambiguous name across two members.
+	_ = team.Enroll(engine.TeamMember{
+		SessionID: "sess-y", ParentSessionID: "L", Name: "explorer", Depth: 1,
+	})
+	_, detail, ok = team.ResolveAddressDetail("explorer")
+	if ok || detail != "teammate name is ambiguous" {
+		t.Fatalf("ambiguous detail = %q ok=%v", detail, ok)
+	}
+}
+
+func TestAgentMessageRejectsAmbiguousName(t *testing.T) {
+	const leadID = "lead-am-ambig"
+	team := engine.NewTeam(leadID, "build")
+	_ = team.Enroll(engine.TeamMember{SessionID: "a1", ParentSessionID: leadID, Name: "twin", Depth: 1})
+	_ = team.Enroll(engine.TeamMember{SessionID: "a2", ParentSessionID: leadID, Name: "twin", Depth: 1})
+	// Direct engine call without full Run (resolve only).
+	eng := engine.New(engine.Options{
+		SessionID: leadID, Team: team, Agents: []engine.Agent{{Name: "build"}},
+	})
+	// agentMessage is unexported — exercise via tool registry + Run.
+	call := controlToolCall("am-ambig", "agent_message", map[string]any{
+		"to": "twin", "body": "which one?",
+	})
+	prov := newScriptedProvider(
+		toolCallStep(call),
+		func() streamStep {
+			s := completedStep("after")
+			s.match = matchToolResult("am-ambig")
+			return s
+		}(),
+	)
+	eng = engine.New(engine.Options{
+		SessionID: leadID, Team: team, Agents: []engine.Agent{{Name: "build"}},
+		Select:          func(string) (provider.Provider, string, error) { return prov, "m", nil },
+		InitialProvider: "scripted",
+		Registry:        agentMessageRegistry(),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	// Need live recipients only if delivery proceeds — resolve fails first.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+	waitTeamLive(t, team, leadID)
+	eng.Ops() <- protocol.UserInput{Text: "ambig"}
+	events := drainUntil(t, eng, 8*time.Second, func(evs []protocol.Event) bool {
+		end, ok := toolEnd(evs, "am-ambig")
+		return ok && end.Output != ""
+	})
+	end, ok := toolEnd(events, "am-ambig")
+	if !ok || !end.IsError {
+		t.Fatalf("want error end, got %#v", end)
+	}
+	if !strings.Contains(end.Output, "ambiguous") {
+		t.Fatalf("output = %q", end.Output)
+	}
 }
 
 func TestAgentMessagePermissionDefaultAllow(t *testing.T) {

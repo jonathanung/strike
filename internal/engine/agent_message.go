@@ -27,12 +27,15 @@ func (e *Engine) agentMessage(ctx context.Context, req tool.AgentMessageRequest)
 		return tool.AgentMessageResult{}, fmt.Errorf("body is required")
 	}
 
-	toID, ok := e.team.ResolveAddress(toAddr)
+	toID, detail, ok := e.team.ResolveAddressDetail(toAddr)
 	if !ok {
+		if detail == "" {
+			detail = "recipient is not on this team"
+		}
 		return tool.AgentMessageResult{
 			To:     toAddr,
 			Status: "rejected",
-			Detail: "recipient is not on this team",
+			Detail: detail,
 		}, nil
 	}
 
