@@ -238,6 +238,7 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 			State:           protocol.TeamMemberRunning,
 			ParentSessionID: e.opts.SessionID,
 			Depth:           childDepth,
+			StartedAt:       h.startedAt,
 		})
 	}
 
@@ -249,6 +250,7 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 	e.emit(startedEv)
 	e.persistChildEvent(childID, startedEv)
 	h.noteEvent(startedEv)
+	e.emitTeamRoster()
 
 	// stopReason is delivered once when the child turn ends. Buffer 1 so the
 	// drain goroutine never blocks on a late reader.
@@ -283,6 +285,9 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 			case protocol.AgentMessage:
 				// Peer mailbox traffic on a child: surface on the parent
 				// stream for TUI/debug (recipient correlation retained).
+				e.emit(ev)
+			case protocol.TeamRoster:
+				// Nested engines share the lead team; bubble roster snapshots.
 				e.emit(ev)
 			case protocol.TurnCompleted:
 				// One-shot task: record stop reason. Do not cancel here —
@@ -414,20 +419,26 @@ func (e *Engine) finishChild(h *childHandle, completed protocol.ChildCompleted) 
 	// Stop accepting peer mail before the handle leaves the live map.
 	if e.team != nil {
 		e.team.DetachMailbox(h.id)
-		e.team.SetState(h.id, protocol.TeamMemberStateFromChild(completed.Status))
 	}
 
 	e.childMu.Lock()
-	defer e.childMu.Unlock()
 	delete(e.children, h.id)
 	if e.childHistory == nil {
 		e.childHistory = make(map[string]*childRecord)
 	}
 	e.childHistory[h.id] = rec
+	// Terminal members remain listable on the team until lead Dissolve.
+	if e.team != nil {
+		e.team.SetTerminal(h.id, protocol.TeamMemberStateFromChild(completed.Status), completed.Summary)
+	}
+	e.childMu.Unlock()
+	e.emitTeamRoster()
 }
 
 // dissolveTeamIfLead clears the implicit team when this engine is the lead.
 // Nested engines share the pointer and must not dissolve the lead's roster.
+// No team.roster event here: session end already tears down the UI, and
+// emitting would re-append to the JSONL on every quiet resume exit.
 func (e *Engine) dissolveTeamIfLead() {
 	if e == nil || e.team == nil {
 		return

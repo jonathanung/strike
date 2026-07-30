@@ -43,6 +43,12 @@ func TestDefaultsIncludesTaskAllow(t *testing.T) {
 	}
 }
 
+func TestDefaultsIncludesAgentRosterAllow(t *testing.T) {
+	if got := Evaluate("agent_roster", "*", Defaults()); got != Allow {
+		t.Errorf("Defaults agent_roster = %q, want allow", got)
+	}
+}
+
 func TestDenyOnly(t *testing.T) {
 	in := Ruleset{
 		{Permission: "bash", Pattern: "*", Action: Allow},

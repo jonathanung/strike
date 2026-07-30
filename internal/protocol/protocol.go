@@ -445,6 +445,31 @@ func TeamMemberStateFromChild(s ChildStatus) TeamMemberState {
 	}
 }
 
+// TeamRosterMember is one entry in a TeamRoster snapshot event.
+// State prefers task_status vocabulary (starting|working|needs_attention|
+// completed|failed|canceled|unknown) when the emitter has live detail;
+// otherwise terminal TeamMemberState values are used.
+type TeamRosterMember struct {
+	SessionID       string `json:"sessionId"`
+	Name            string `json:"name,omitempty"`
+	Agent           string `json:"agent,omitempty"`
+	State           string `json:"state"`
+	ParentSessionID string `json:"parentSessionId,omitempty"`
+	Depth           int    `json:"depth,omitempty"`
+	StartedAt       string `json:"startedAt,omitempty"` // RFC3339 when known
+	TerminalSummary string `json:"terminalSummary,omitempty"`
+	Role            string `json:"role,omitempty"` // "lead" or "member"
+}
+
+// TeamRoster is a full snapshot of the implicit session team roster.
+// Emitted when membership or member state changes so UIs can render without
+// calling the agent_roster tool. Correlation.SessionID is the lead id.
+type TeamRoster struct {
+	Correlation
+	LeadID  string             `json:"leadId"`
+	Members []TeamRosterMember `json:"members"`
+}
+
 // ChildStarted marks the beginning of a foreground child/subagent session.
 // Emitted by the parent engine with the child's correlation.
 type ChildStarted struct {
@@ -915,6 +940,7 @@ func (EngineError) isEvent()            {}
 func (ChildStarted) isEvent()           {}
 func (ChildCompleted) isEvent()         {}
 func (AgentMessage) isEvent()           {}
+func (TeamRoster) isEvent()             {}
 func (UsageReported) isEvent()          {}
 func (ProviderRetrying) isEvent()       {}
 func (CompactionStarted) isEvent()      {}

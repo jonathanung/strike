@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
@@ -36,8 +37,10 @@ type TeamMember struct {
 	Name            string // optional stable alias (filled by later naming work)
 	Persona         string // agent persona name
 	State           protocol.TeamMemberState
-	ParentSessionID string // empty on the lead
-	Depth           int    // 0 = lead
+	ParentSessionID string    // empty on the lead
+	Depth           int       // 0 = lead
+	StartedAt       time.Time // enrollment / lead creation time when known
+	Summary         string    // short terminal summary when done
 }
 
 // NewTeam creates a team whose identity is leadID. The lead is enrolled as a
@@ -56,6 +59,7 @@ func NewTeam(leadID, persona string) *Team {
 		Persona:   strings.TrimSpace(persona),
 		State:     protocol.TeamMemberRunning,
 		Depth:     0,
+		StartedAt: time.Now(),
 	}
 	return t
 }
@@ -157,12 +161,22 @@ func (t *Team) Enroll(m TeamMember) bool {
 		if n := strings.TrimSpace(m.Name); n != "" {
 			existing.Name = n
 		}
+		if s := strings.TrimSpace(m.Summary); s != "" {
+			existing.Summary = s
+		}
+		if !m.StartedAt.IsZero() && existing.StartedAt.IsZero() {
+			existing.StartedAt = m.StartedAt
+		}
 		t.members[id] = existing
 		return true
 	}
 	state := m.State
 	if state == "" {
 		state = protocol.TeamMemberRunning
+	}
+	started := m.StartedAt
+	if started.IsZero() {
+		started = time.Now()
 	}
 	t.members[id] = TeamMember{
 		SessionID:       id,
@@ -171,6 +185,8 @@ func (t *Team) Enroll(m TeamMember) bool {
 		State:           state,
 		ParentSessionID: parent,
 		Depth:           m.Depth,
+		StartedAt:       started,
+		Summary:         strings.TrimSpace(m.Summary),
 	}
 	return true
 }
@@ -191,6 +207,29 @@ func (t *Team) SetState(sessionID string, state protocol.TeamMemberState) bool {
 		return false
 	}
 	m.State = state
+	t.members[id] = m
+	return true
+}
+
+// SetTerminal marks a member terminal with optional summary.
+func (t *Team) SetTerminal(sessionID string, state protocol.TeamMemberState, summary string) bool {
+	if t == nil || state == "" {
+		return false
+	}
+	id := strings.TrimSpace(sessionID)
+	if id == "" {
+		return false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	m, ok := t.members[id]
+	if !ok {
+		return false
+	}
+	m.State = state
+	if s := strings.TrimSpace(summary); s != "" {
+		m.Summary = s
+	}
 	t.members[id] = m
 	return true
 }
