@@ -305,7 +305,13 @@ func (m *Model) applyEventToRoot(rootID string, ev protocol.Event) tea.Cmd {
 	}
 	applyEventToPane(p, ev)
 	// Keep live activity snapshot for the agents tree.
-	return m.broadcastAgentsState()
+	cmd := m.broadcastAgentsState()
+	switch ev.(type) {
+	case protocol.ToolCallBegin, protocol.ToolCallEnd:
+		// Mid-turn tool strip for the focused background root (#625).
+		cmd = tea.Batch(cmd, m.broadcastVisualizerState())
+	}
+	return cmd
 }
 
 // applyEventToPane mutates a stashed pane the same way applyEvent mutates Model

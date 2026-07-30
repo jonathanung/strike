@@ -77,31 +77,32 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		// Coalesce consecutive sleep ticks into one in-place row (no spam).
 		if ev.Name == "sleep" {
 			m.cells = beginSleepToolCell(m.cells, m.toolByID, ev.CallID, ev.Name, ev.Args)
-			break
-		}
-		tc := &toolCell{callID: ev.CallID, name: ev.Name, args: ev.Args}
-		m.toolByID[ev.CallID] = tc
-		if isExploreTool(ev.Name) {
-			if exp, ok := lastCell[*exploreCell](m.cells); ok && exp.accepting {
-				exp.calls = append(exp.calls, tc)
-				break
-			}
-			// First explore tool stays a normal cell; a second consecutive one
-			// promotes the pair into an exploring group.
-			if prev, ok := lastCell[*toolCell](m.cells); ok && isExploreTool(prev.name) {
-				m.cells[len(m.cells)-1] = &exploreCell{
-					calls:     []*toolCell{prev, tc},
-					accepting: true,
+		} else {
+			tc := &toolCell{callID: ev.CallID, name: ev.Name, args: ev.Args}
+			m.toolByID[ev.CallID] = tc
+			if isExploreTool(ev.Name) {
+				if exp, ok := lastCell[*exploreCell](m.cells); ok && exp.accepting {
+					exp.calls = append(exp.calls, tc)
+				} else if prev, ok := lastCell[*toolCell](m.cells); ok && isExploreTool(prev.name) {
+					// First explore tool stays a normal cell; a second consecutive
+					// one promotes the pair into an exploring group.
+					m.cells[len(m.cells)-1] = &exploreCell{
+						calls:     []*toolCell{prev, tc},
+						accepting: true,
+					}
+				} else {
+					m.cells = append(m.cells, tc)
 				}
-				break
+			} else {
+				if exp, ok := lastCell[*exploreCell](m.cells); ok {
+					exp.accepting = false
+				}
+				m.cells = append(m.cells, tc)
 			}
-			m.cells = append(m.cells, tc)
-			break
 		}
-		if exp, ok := lastCell[*exploreCell](m.cells); ok {
-			exp.accepting = false
-		}
-		m.cells = append(m.cells, tc)
+		// Push tool strip mid-turn (not only on TurnCompleted) so activity/
+		// visualizer show shell and other tools as they start (#625).
+		cmd = m.broadcastVisualizerState()
 	case protocol.ToolCallOutput:
 		if tc, ok := m.toolByID[ev.CallID]; ok && !tc.done {
 			tc.output += ev.Data
@@ -116,6 +117,7 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 				m.windows = refreshFilesWindows(m.windows)
 			}
 		}
+		cmd = m.broadcastVisualizerState()
 	case protocol.PermissionAsked:
 		pm := newPermissionModal(ev, m.ops, m.th)
 		showCmd := m.presentBlockingModal(pm)

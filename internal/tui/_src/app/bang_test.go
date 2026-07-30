@@ -6,8 +6,10 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
+	"github.com/jonathanung/strike-cli/internal/protocol"
 )
 
 func TestParseBangCommand(t *testing.T) {
@@ -169,6 +171,72 @@ func TestBangDoesNotRequireProvider(t *testing.T) {
 	assertNoAppOp(t, ops)
 	if sh.calls != 1 {
 		t.Fatalf("calls = %d", sh.calls)
+	}
+}
+
+func TestBangShowsToolInTranscriptImmediately(t *testing.T) {
+	// Starting a conversation with !shell must paint the bash tool cell in the
+	// transcript viewport without waiting for an agent turn or bangResultMsg (#625).
+	// handleBang refreshes the viewport synchronously before the shell finishes.
+	sh := &fakeShell{res: host.ShellResult{Output: "hello\n", ExitCode: 0}}
+	m, ops := newAppTestModel(nil, nil)
+	m.services.Shell = sh
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	_ = m.View()
+	m.composer.SetValue("!echo hello")
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	// Assert before draining cmds: in-flight tool must already be in the viewport.
+	plain := ansi.Strip(m.viewport.View())
+	if !strings.Contains(plain, "bash") && !strings.Contains(plain, "echo hello") {
+		t.Fatalf("transcript missing in-flight bang tool activity:\n%s", plain)
+	}
+	body := ansi.Strip(m.activityPaneBody(40, 10))
+	if !strings.Contains(body, "echo hello") && !strings.Contains(body, "bash") {
+		t.Fatalf("activity pane missing bang tool:\n%s", body)
+	}
+	assertNoAppOp(t, ops)
+	m = applyCmds(t, m, cmd)
+	plain = ansi.Strip(m.viewport.View())
+	if !strings.Contains(plain, "hello") {
+		t.Fatalf("transcript missing bang output after complete:\n%s", plain)
+	}
+}
+
+func TestBangDuringAgentTurnShowsWithoutWaitingForTurnEnd(t *testing.T) {
+	// !shell mid-prompt must refresh the transcript immediately; previously
+	// the viewport stayed stale until the next engine turn event (#625).
+	sh := &fakeShell{res: host.ShellResult{Output: "mid\n", ExitCode: 0}}
+	m, ops := newAppTestModel(nil, nil)
+	m.services.Shell = sh
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = updateApp(t, m, engineEventMsg{ev: protocol.TurnStarted{}})
+	m = updateApp(t, m, engineEventMsg{ev: protocol.TextDelta{Text: "thinking…"}})
+	_ = m.View()
+	before := ansi.Strip(m.viewport.View())
+	if !strings.Contains(before, "thinking") {
+		t.Fatalf("setup missing streamed text: %q", before)
+	}
+	m.composer.SetValue("!pwd")
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	// Before bangResultMsg and before TurnCompleted.
+	plain := ansi.Strip(m.viewport.View())
+	if !strings.Contains(plain, "bash") && !strings.Contains(plain, "pwd") {
+		t.Fatalf("mid-turn bang missing from transcript before TurnCompleted:\n%s", plain)
+	}
+	if !strings.Contains(plain, "thinking") {
+		t.Fatalf("mid-turn bang wiped assistant stream:\n%s", plain)
+	}
+	if !m.turnRunning {
+		t.Fatal("turn should still be running")
+	}
+	assertNoAppOp(t, ops)
+	m = applyCmds(t, m, cmd)
+	m = updateApp(t, m, engineEventMsg{ev: protocol.TurnCompleted{StopReason: "end_turn"}})
+	plain = ansi.Strip(m.viewport.View())
+	if !strings.Contains(plain, "mid") && !strings.Contains(plain, "pwd") {
+		t.Fatalf("after turn complete missing bang result:\n%s", plain)
 	}
 }
 
