@@ -4149,3 +4149,24 @@ func TestRootSwitcherNumberShortcutWithFilter(t *testing.T) {
 		t.Fatal("number 3 out of range should keep modal open")
 	}
 }
+
+func TestRootSwitcherCtrlNSpawnsNewSession(t *testing.T) {
+	entries := []rootSwitcherEntry{
+		{id: "a", label: "alpha session", state: "ready"},
+		{id: "b", label: "beta session", state: "working"},
+	}
+	rs := newRootSwitcherModal(entries)
+
+	// ctrl+n closes the modal and emits agentsSpawnMsg to spawn a new session.
+	next, cmd := rs.update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	if cmd == nil {
+		t.Fatal("ctrl+n emitted no command")
+	}
+	msg := cmd()
+	if _, ok := msg.(agentsSpawnMsg); !ok {
+		t.Fatalf("ctrl+n emitted %T, want agentsSpawnMsg", msg)
+	}
+	if next != nil {
+		t.Fatal("ctrl+n should close modal (return nil)")
+	}
+}
