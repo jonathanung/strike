@@ -56,9 +56,10 @@ type keybindEditor struct {
 	settings  host.Settings
 	tab       int // index into editorTabOrder; -1 means "all"
 
-	confirm       *conflictPending // non-nil when user must confirm a conflict
-	unsavedPrompt bool             // user tried to close with unsaved changes
-	closeAfterSave bool            // close modal once save completes
+	confirm        *conflictPending // non-nil when user must confirm a conflict
+	unsavedPrompt  bool             // user tried to close with unsaved changes
+	closeAfterSave bool             // close modal once save completes
+	dirty          bool             // user made at least one modification
 }
 
 func newKeybindEditor(effective keyMap, persistedOverrides map[string][]string, settings host.Settings) *keybindEditor {
@@ -214,6 +215,7 @@ func (m *keybindEditor) updateConfirm(msg tea.KeyMsg) (modal, tea.Cmd) {
 		c := m.confirm
 		chords := []string{c.Chord}
 		m.pending[c.CaptureID] = chords
+		m.dirty = true
 		id := c.CaptureID
 		m.confirm = nil
 		return m, func() tea.Msg {
@@ -228,13 +230,13 @@ func (m *keybindEditor) updateConfirm(msg tea.KeyMsg) (modal, tea.Cmd) {
 }
 
 func (m *keybindEditor) hasUnsaved() bool {
-	return len(m.pending) > 0
+	return m.dirty
 }
 
 func (m *keybindEditor) updateUnsavedPrompt(msg tea.KeyMsg) (modal, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y":
-		if len(m.pending) == 0 {
+		if !m.dirty {
 			m.unsavedPrompt = false
 			return nil, nil
 		}
@@ -286,6 +288,7 @@ func (m *keybindEditor) updateCapture(msg tea.KeyMsg) (modal, tea.Cmd) {
 	}
 	chords := []string{chord}
 	m.pending[m.captureID] = chords
+	m.dirty = true
 	id := m.captureID
 	m.capturing = false
 	m.captureID = ""
@@ -332,6 +335,7 @@ func (m *keybindEditor) resetOverride() (modal, tea.Cmd) {
 	}
 	id := m.filtered[m.cursor].ID
 	delete(m.pending, id)
+	m.dirty = true
 	return m, func() tea.Msg {
 		return rebindAppliedMsg{ID: id, Chords: nil}
 	}
@@ -339,6 +343,7 @@ func (m *keybindEditor) resetOverride() (modal, tea.Cmd) {
 
 func (m *keybindEditor) saveComplete() {
 	m.closeAfterSave = false
+	m.dirty = false
 	m.pending = make(map[string][]string)
 }
 
