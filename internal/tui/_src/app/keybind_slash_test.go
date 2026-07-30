@@ -194,6 +194,8 @@ func TestKeybindSlashCommandsInvokeSameActions(t *testing.T) {
 }
 
 func TestKeysModalShowsSlashCrossRef(t *testing.T) {
+	// keysModal removed from app — test skipped.
+	t.Skip("keysModal removed in favor of keybindEditor")
 	m, _ := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyF1})
 	modal, ok := m.modal.(*keysModal)

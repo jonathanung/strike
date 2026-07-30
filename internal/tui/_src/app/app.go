@@ -942,7 +942,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reflow()
 			return m, m.setPaneFocus(focusLeft)
 		case paletteActionKeybinds:
-			m.modal = m.newKeysModal()
+			m.resetComposer()
+			m.clearNotice()
+			m.modal = newKeybindEditor(m.keyMap, m.keyOverrides, m.services.Settings)
 			m.reflow()
 			return m, nil
 		case paletteActionKeybindEditor:

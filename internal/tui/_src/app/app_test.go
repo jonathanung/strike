@@ -1072,7 +1072,7 @@ func TestDangerousPermissionsIndicatorRemainsVisibleWithActiveModals(t *testing.
 
 			},
 
-			content: []string{"Command palette", "Keyboard shortcuts", "/provider", "/settings"},
+			content: []string{"Command palette", "Rebind keys", "/provider", "/settings"},
 		},
 	}
 
@@ -3263,9 +3263,9 @@ func TestFocusAndPaletteClearCompletionBeforeChangingInputOwner(t *testing.T) {
 
 		{"keyhelp", tea.KeyMsg{Type: tea.KeyF1}, func(t *testing.T, m Model) {
 
-			if _, ok := m.modal.(*keysModal); !ok {
+			if _, ok := m.modal.(*keybindEditor); !ok {
 
-				t.Errorf("modal = %T, want keys", m.modal)
+				t.Errorf("modal = %T, want keybindEditor", m.modal)
 
 			}
 
