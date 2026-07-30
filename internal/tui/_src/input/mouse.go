@@ -20,9 +20,9 @@ type openURIMsg struct {
 	err error
 }
 
-// handleMouse routes wheel scrolling, region-limited text selection, and
-// left-click hit testing for the transcript (path:line refs, OSC 8 links,
-// collapsible tool/explore cells).
+// handleMouse routes wheel scrolling, pane focus, region-limited text
+// selection, and left-click hit testing for the transcript (path:line refs,
+// OSC 8 links, collapsible tool/explore cells).
 //
 // Mouse cell motion is enabled so the terminal cannot natively highlight UI
 // chrome. App-owned drag selection only starts inside the transcript and
@@ -51,13 +51,14 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleMouseLeft(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	switch msg.Action {
 	case tea.MouseActionPress:
+		focusCmd := m.focusPaneAtMouse(msg.X, msg.Y)
 		if region, ok := m.textSelectRegionAt(msg.X, msg.Y); ok {
 			m.textSel.start(screenPos{X: msg.X, Y: msg.Y}, region)
-			return m, nil
+			return m, focusCmd
 		}
 		// Chrome / right pane / modal: no selection highlight.
 		m.textSel.clear()
-		return m, nil
+		return m, focusCmd
 
 	case tea.MouseActionMotion:
 		if m.textSel.dragging {
@@ -83,6 +84,68 @@ func (m Model) handleMouseLeft(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	default:
 		return m, nil
 	}
+}
+
+// focusPaneAtMouse moves focus only when the point lies in a currently visible
+// pane. Pane borders belong to their pane; gutters, global chrome, and modal
+// overlays do not change focus.
+func (m *Model) focusPaneAtMouse(x, y int) tea.Cmd {
+	focus, ok := m.paneFocusAtMouse(x, y)
+	if !ok || m.focus == focus {
+		return nil
+	}
+	cmd := m.setPaneFocus(focus)
+	m.reflow()
+	return cmd
+}
+
+func (m Model) paneFocusAtMouse(x, y int) (paneFocus, bool) {
+	if m.modal != nil || !m.ready || x < 0 || y < 0 || x >= m.width || y >= m.height {
+		return focusLeft, false
+	}
+	gutter := m.th.Resolve().Spacing.XS
+	leftWidth := m.width
+	if m.splitOrientation != orientVertical {
+		leftWidth = computePaneGeometry(m.width, gutter, m.focus).leftCandidateWidth(m.width)
+	}
+	l := computeLayout(leftWidth, m.height, m.composer.Height(), m.completionPopupHeightFor(leftWidth), m.showDangerBanner(), m.noticeRowsFor(leftWidth))
+	bodyHeight := l.transcript + l.notice + l.popup + l.composer
+	bodyY := l.header
+
+	if m.splitOrientation == orientVertical {
+		geo := computeVerticalPaneGeometry(m.width, bodyHeight, gutter, m.focus)
+		if geo.mode == paneSingle {
+			if y >= bodyY && y < bodyY+bodyHeight {
+				return m.focus, true
+			}
+			return focusLeft, false
+		}
+		l = l.withBodyHeight(geo.leftHeight)
+		leftHeight := l.transcript + l.notice + l.popup + l.composer
+		if y >= bodyY && y < bodyY+leftHeight {
+			return focusLeft, true
+		}
+		rightY := bodyY + leftHeight + geo.gutter
+		if y >= rightY && y < rightY+geo.rightHeight {
+			return focusRight, true
+		}
+		return focusLeft, false
+	}
+
+	geo := computePaneGeometry(m.width, gutter, m.focus)
+	if y < bodyY || y >= bodyY+bodyHeight {
+		return focusLeft, false
+	}
+	if geo.mode == paneSingle {
+		return m.focus, true
+	}
+	if x < geo.leftWidth {
+		return focusLeft, true
+	}
+	if x >= geo.leftWidth+geo.gutter {
+		return focusRight, true
+	}
+	return focusLeft, false
 }
 
 // handleMouseClick runs path/link/expand actions for a left click that did not
