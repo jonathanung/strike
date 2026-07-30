@@ -245,19 +245,21 @@ func TestKeybindEditorViewWithPending(t *testing.T) {
 	_ = m.view(60, th)
 }
 
-func TestKeybindEditorCaptureRKey(t *testing.T) {
+func TestKeybindEditorCaptureRKeyFallsThroughToFilter(t *testing.T) {
 	m := newTestKeybindEditor()
 	m.cursor = 0
 
 	next, cmd := m.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
 	if next == nil {
-		t.Fatal("r on row closed modal")
+		t.Fatal("r closed modal")
 	}
-	if !m.capturing {
-		t.Fatal("expected capturing=true after r")
+	if m.capturing {
+		t.Fatal("r should not start capture — it filters now")
+	}
+	if m.filter != "r" {
+		t.Fatalf("filter = %q, want %q", m.filter, "r")
 	}
 	if cmd != nil {
 		t.Error("r should not produce cmd")
 	}
-	_, _ = m.update(tea.KeyMsg{Type: tea.KeyEsc})
 }

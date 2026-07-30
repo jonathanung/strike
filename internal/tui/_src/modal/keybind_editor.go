@@ -193,7 +193,7 @@ func (m *keybindEditor) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 			m.refilter()
 		}
 		return m, nil
-	case "enter", "r":
+	case "enter":
 		return m.startCapture()
 	case "ctrl+d":
 		return m.resetOverride()
@@ -521,7 +521,7 @@ func (m *keybindEditor) view(width int, th theme.Theme) string {
 	} else if m.unsavedPrompt {
 		title = "⚠  Unsaved changes"
 	}
-	hint := "left/right switch tab | type to filter | up/down/j/k move | enter/r rebind | ctrl+d reset | ctrl+s save | esc close"
+	hint := "left/right switch tab | type to filter | up/down/j/k move | enter rebind | ctrl+d reset | ctrl+s save | esc close"
 	if m.capturing {
 		hint = "press any key to bind | esc cancel"
 	} else if m.confirm != nil {
