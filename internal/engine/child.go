@@ -152,6 +152,7 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		Depth:               childDepth,
 		MaxChildDepth:       maxDepth,
 		TaskOneShot:         true,
+		Team:                e.team, // share lead roster; nested enrolls on same team
 		Select:              e.opts.Select,
 		Registry:            childReg,
 		WorkDir:             e.opts.WorkDir,
@@ -228,6 +229,17 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 	}
 	e.children[childID] = h
 	e.childMu.Unlock()
+
+	// Auto-enroll on the lead's implicit team (no TeamCreate).
+	if e.team != nil {
+		e.team.Enroll(TeamMember{
+			SessionID:       childID,
+			Persona:         agentName,
+			State:           protocol.TeamMemberRunning,
+			ParentSessionID: e.opts.SessionID,
+			Depth:           childDepth,
+		})
+	}
 
 	startedEv := protocol.ChildStarted{
 		Correlation: childCorr,
@@ -402,6 +414,23 @@ func (e *Engine) finishChild(h *childHandle, completed protocol.ChildCompleted) 
 		e.childHistory = make(map[string]*childRecord)
 	}
 	e.childHistory[h.id] = rec
+
+	// Terminal members remain listable on the team until lead Dissolve.
+	if e.team != nil {
+		e.team.SetState(h.id, protocol.TeamMemberStateFromChild(completed.Status))
+	}
+}
+
+// dissolveTeamIfLead clears the implicit team when this engine is the lead.
+// Nested engines share the pointer and must not dissolve the lead's roster.
+func (e *Engine) dissolveTeamIfLead() {
+	if e == nil || e.team == nil {
+		return
+	}
+	if e.team.LeadID() != e.opts.SessionID {
+		return
+	}
+	e.team.Dissolve()
 }
 
 func (h *childHandle) noteEvent(ev protocol.Event) {

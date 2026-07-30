@@ -527,9 +527,11 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 				return err
 			},
 			OpenChildSession: func(parentID, childID, title string) (string, error) {
+				parentMeta, _ := session.ReadMeta(sessionDir, parentID)
 				info, err := sessions.Create(session.CreateOptions{
 					ID:              childID,
 					ParentSessionID: parentID,
+					LeadSessionID:   session.ResolveChildLeadID(parentID, parentMeta),
 					Title:           title,
 					ProjectKey:      projectIdentity.Key,
 				})

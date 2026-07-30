@@ -36,6 +36,7 @@ func TestManagerCreateAppendReplayList(t *testing.T) {
 
 	child, err := m.Create(CreateOptions{
 		ParentSessionID: root.ID,
+		LeadSessionID:   root.ID,
 		Title:           "child task",
 	})
 	if err != nil {
@@ -43,6 +44,16 @@ func TestManagerCreateAppendReplayList(t *testing.T) {
 	}
 	if child.ParentSessionID != root.ID {
 		t.Fatalf("child parent = %q, want %q", child.ParentSessionID, root.ID)
+	}
+	if child.LeadSessionID != root.ID {
+		t.Fatalf("child lead = %q, want %q", child.LeadSessionID, root.ID)
+	}
+	childMeta, err := ReadMeta(dir, child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if childMeta.LeadSessionID != root.ID {
+		t.Fatalf("child meta lead = %q, want %q", childMeta.LeadSessionID, root.ID)
 	}
 
 	if err := m.Append(root.ID, protocol.UserMessage{

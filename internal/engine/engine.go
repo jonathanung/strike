@@ -173,6 +173,11 @@ type Options struct {
 	Depth int
 	// ParentSessionID is the spawning session's ID; empty on root engines.
 	ParentSessionID string
+	// Team is the implicit session-scoped agent team (lead + children).
+	// Root engines create one in New when nil. Child engines receive the
+	// lead's shared pointer from spawnChild so nested descendants enroll on
+	// the same roster. See team.go for nested membership policy.
+	Team *Team
 	// PersistSessionMeta, when set, writes durable session metadata (sidecar).
 	// The engine emits protocol.SessionMeta after a successful persist.
 	PersistSessionMeta func(meta protocol.SessionMeta) error
@@ -277,6 +282,9 @@ type Engine struct {
 	// finish so task_status/task_read can return completed state without a
 	// new spawn. Only sessions this engine started are present.
 	childHistory map[string]*childRecord
+	// team is the implicit lead+children roster. Shared with descendant
+	// engines; only the lead dissolves it on Run exit.
+	team *Team
 
 	// childDone delivers ChildCompleted from drain goroutines to Run so the
 	// parent can inject a model-visible summary and auto-nudge when idle.
@@ -354,6 +362,19 @@ func New(opts Options) *Engine {
 	if len(opts.Workflows) == 0 {
 		opts.Workflows = []config.Workflow{config.BuiltinPlanImplement()}
 	}
+	// Implicit team: root owns a new Team; nested engines inherit Options.Team.
+	team := opts.Team
+	if team == nil && opts.Depth == 0 {
+		persona := ""
+		if opts.InitialAgent != "" {
+			persona = opts.InitialAgent
+		} else if len(opts.Agents) > 0 {
+			persona = opts.Agents[0].Name
+		}
+		team = NewTeam(opts.SessionID, persona)
+	}
+	opts.Team = team
+
 	e := &Engine{
 		opts:                opts,
 		ops:                 make(chan protocol.Op, 16),
@@ -363,6 +384,7 @@ func New(opts Options) *Engine {
 		checkpoints:         tool.NewCheckpointStore(),
 		children:            make(map[string]*childHandle),
 		childHistory:        make(map[string]*childRecord),
+		team:                team,
 		childDone:           make(chan protocol.ChildCompleted, 32),
 		childWake:           make(chan struct{}),
 		contextWindowTokens: opts.ContextWindow,
@@ -379,6 +401,15 @@ func New(opts Options) *Engine {
 	}
 	e.questions = question.New(e.emit)
 	return e
+}
+
+// Team returns the implicit session-scoped agent team (may be nil on
+// non-lead engines that were constructed without Options.Team).
+func (e *Engine) Team() *Team {
+	if e == nil {
+		return nil
+	}
+	return e.team
 }
 
 // Messages returns a copy of the model-facing conversation history.
@@ -427,7 +458,10 @@ func (e *Engine) sessionCorr() protocol.Correlation {
 func (e *Engine) Run(ctx context.Context) {
 	e.runCtx = ctx
 	// Keep Events open until children finish so ChildCompleted can emit.
+	// Dissolve the team after children shut down so terminal members stay
+	// listable for the lead's lifetime, then clear on lead exit.
 	defer close(e.events)
+	defer e.dissolveTeamIfLead()
 	defer e.shutdownChildren()
 	e.quietStartup = e.opts.QuietStartup
 	if e.opts.InitialProvider != "" && e.opts.Select != nil {
