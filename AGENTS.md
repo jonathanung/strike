@@ -81,10 +81,16 @@ service/theme token).
   tokens — no raw lipgloss styles or hardcoded glyphs in views; colors and
   icons come from the theme. Load the `tui-components` skill before TUI
   view/panel/modal/picker work (`.claude/skills/tui-components/`).
+- **TUI source trap:** package `internal/tui` sources live under
+  `internal/tui/_src/<group>/` and are flattened by `go generate ./internal/tui`
+  (make/CI run this first). Flattened `internal/tui/*.go` are gitignored —
+  edit `_src/` only; editing flattened files is silently reverted.
 - `internal/tui` may import only `internal/protocol`, `internal/host`, and
   `internal/tui/...` — enforced by `internal/tui/boundary_test.go`
   (`TestArchitectureBoundaries`), which fails the build on any other
-  `internal/*` import from a TUI file.
+  `internal/*` import from a TUI file. Charm paths: v1
+  `github.com/charmbracelet/…` or v2 `charm.land/…`; never
+  `github.com/charmbracelet/…/v2` (`TestCharmImportPaths`).
 
 ## Agent process skills (`.claude/skills`)
 

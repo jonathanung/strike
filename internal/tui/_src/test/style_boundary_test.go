@@ -17,6 +17,11 @@ import (
 	"testing"
 )
 
+// lipglossPath is the module path style-boundary resolves against.
+// Today: github.com/charmbracelet/lipgloss (v1).
+// E13.2: change to charm.land/lipgloss/v2 in the same commit as the import
+// rewrites (edit _src/ and real packages theme/ui/term — never flattened
+// internal/tui/*.go). See TestCharmImportPaths.
 const lipglossPath = "github.com/charmbracelet/lipgloss"
 
 // Every exported Style method in Lip Gloss v1.1 is deliberately classified.

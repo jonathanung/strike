@@ -22,6 +22,10 @@
 //
 //	make build / make test  # runs generate first
 //
+// Flattened internal/tui/*.go copies are gitignored and regenerated on every
+// build/test. Editing them is silently discarded — source of truth is _src/.
+// TestSrcFlattenInSync fails the suite if the flatten is stale.
+//
 // Independent subpackages (real packages, not flattened):
 //
 //   - theme  — design tokens
@@ -30,6 +34,8 @@
 //   - common — pure formatting helpers
 //
 // Import boundary (boundary_test.go): only protocol, host, and tui/….
+// Charm module paths: github.com/charmbracelet/… (v1) or charm.land/… (v2);
+// github.com/charmbracelet/…/v2 is rejected (TestCharmImportPaths).
 package tui
 
 //go:generate go run gen_src.go .

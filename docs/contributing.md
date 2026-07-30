@@ -22,7 +22,8 @@ internal/server/       experimental read-only HTTP attach (strike serve)
 internal/config/       layered config + agents/skills/workflows
 internal/host/         frontend-facing host-service contract (stdlib-only);
                        local/ wraps auth/config/models/history/memory/issue/files
-internal/tui/          BubbleTea app: transcript cells, modals, composer
+internal/tui/          BubbleTea app (flattened package; edit _src/ only)
+internal/tui/_src/     source of truth by concern — go generate flattens here
 internal/tui/theme/    design tokens: adaptive colors, icons, precomputed styles
 internal/tui/ui/       reusable components: Panel, Dialog, Badge, List, Bento, …
 ```
@@ -30,6 +31,11 @@ internal/tui/ui/       reusable components: Panel, Dialog, Badge, List, Bento, �
 Full dataflow, import rules, and recipes (add a provider/tool/slash
 command/UI component/host service/theme token):
 [ARCHITECTURE.md](ARCHITECTURE.md).
+
+**TUI edit rule:** change files under `internal/tui/_src/<group>/` (or the
+real packages `theme`/`ui`/`term`/`common`), then `go generate ./internal/tui`.
+Flattened `internal/tui/*.go` are gitignored and wiped on generate — never
+edit them.
 
 ## Architecture in one paragraph
 
