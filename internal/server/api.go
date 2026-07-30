@@ -9,7 +9,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -375,6 +377,56 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"entries": items})
+}
+
+type changedFileItem struct {
+	Path    string `json:"path"`
+	Added   int    `json:"added"`
+	Deleted int    `json:"deleted"`
+	Diff    string `json:"diff"`
+}
+
+func (s *Server) handleChangedFiles(w http.ResponseWriter, r *http.Request) {
+	cwd := strings.TrimSpace(s.currentCWD(r))
+	if cwd == "" {
+		capabilityUnavailable(w, "changed files")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "git", "-C", cwd, "diff", "--numstat", "--").Output()
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "changed files unavailable: " + err.Error()})
+		return
+	}
+	var items []changedFileItem
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		fields := strings.Split(line, "\t")
+		if len(fields) < 3 {
+			continue
+		}
+		added, _ := strconv.Atoi(fields[0])
+		deleted, _ := strconv.Atoi(fields[1])
+		path := strings.TrimSpace(fields[2])
+		if path == "" || strings.Contains(path, "\x00") {
+			continue
+		}
+		diff, _ := exec.CommandContext(ctx, "git", "-C", cwd, "diff", "--", path).Output()
+		items = append(items, changedFileItem{Path: path, Added: added, Deleted: deleted, Diff: string(diff)})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"files": items})
+}
+
+func (s *Server) currentCWD(r *http.Request) string {
+	if s.opts.LiveHub != nil {
+		if live := s.opts.LiveHub.LiveFor(rootParam(r)); live != nil {
+			return live.Status().CWD
+		}
+	}
+	if s.opts.Live != nil {
+		return s.opts.Live.Status().CWD
+	}
+	return ""
 }
 
 func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
