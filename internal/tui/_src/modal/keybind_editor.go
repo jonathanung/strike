@@ -456,7 +456,7 @@ func (m *keybindEditor) view(width int, th theme.Theme) string {
 	buf.WriteString(col1 + "  " + col2 + "  " + col3 + "\n")
 
 	// Separator line.
-		// Data rows (visible window around cursor).
+	// Data rows (visible window around cursor).
 	half := keybindEditorVisible / 2
 	start := max(0, m.cursor-half)
 	end := min(len(list), start+keybindEditorVisible)
@@ -501,9 +501,9 @@ func (m *keybindEditor) view(width int, th theme.Theme) string {
 
 	// Scroll indicator.
 	if end < len(list) {
-		buf.WriteString(s.Muted.Render("  ↓ " + itoa(len(list)-end) + " more") + "\n")
+		buf.WriteString(s.Muted.Render("  ↓ "+itoa(len(list)-end)+" more") + "\n")
 	} else if start > 0 {
-		buf.WriteString(s.Muted.Render("  ↑ " + itoa(start) + " hidden") + "\n")
+		buf.WriteString(s.Muted.Render("  ↑ "+itoa(start)+" hidden") + "\n")
 	}
 
 	body := buf.String()

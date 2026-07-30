@@ -1,0 +1,16 @@
+{
+  "permissions": [
+    {
+      "permission": "bash",
+      "pattern": "cd *",
+      "action": "allow"
+    },
+    {
+      "permission": "bash",
+      "pattern": "cd *",
+      "action": "allow"
+    }
+  ],
+  "session": {},
+  "mcp": {}
+}
