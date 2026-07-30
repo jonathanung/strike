@@ -135,7 +135,9 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if key.Matches(msg, m.keyMap.KeyHelp) {
 		m.completion = nil
-		m.modal = m.newKeysModal()
+		m.resetComposer()
+		m.clearNotice()
+		m.modal = newKeybindEditor(m.keyMap, m.keyOverrides, m.services.Settings)
 		m.reflow()
 		return m, nil
 	}
