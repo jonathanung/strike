@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host/local"
@@ -23,7 +23,7 @@ func TestApplyDiffModalConfirmAppliesEdit(t *testing.T) {
 	files := local.NewFiles(work)
 	m := newApplyDiffModalEdit(files, "f.go", "old line", "new line", false)
 
-	next, cmd := m.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	next, cmd := m.update(tea.KeyPressMsg{Text: "y"})
 	if next != nil {
 		t.Fatalf("modal should close after apply, got %T", next)
 	}
@@ -50,7 +50,7 @@ func TestApplyDiffModalConfirmAppliesEdit(t *testing.T) {
 func TestApplyDiffModalCancel(t *testing.T) {
 	ff := &fakeFiles{files: map[string][]byte{"a.go": []byte("x")}}
 	m := newApplyDiffModalEdit(ff, "a.go", "x", "y", false)
-	next, cmd := m.update(tea.KeyMsg{Type: tea.KeyEsc})
+	next, cmd := m.update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if next != nil {
 		t.Fatalf("want closed, got %T", next)
 	}
@@ -69,7 +69,7 @@ func TestApplyDiffModalFailureSurfacesError(t *testing.T) {
 		applyErr: errBoom("disk full"),
 	}
 	m := newApplyDiffModalEdit(ff, "a.go", "hello", "hi", false)
-	_, cmd := m.update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	res := cmd().(applyDiffResultMsg)
 	if res.err == "" || !strings.Contains(res.err, "disk full") {
 		t.Fatalf("result = %+v", res)
@@ -80,7 +80,7 @@ func TestApplyDiffModalPatchPath(t *testing.T) {
 	ff := &fakeFiles{}
 	patch := "*** Begin Patch\n*** End Patch"
 	m := newApplyDiffModalPatch(ff, patch)
-	_, cmd := m.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("1")})
+	_, cmd := m.update(tea.KeyPressMsg{Text: "1"})
 	res := cmd().(applyDiffResultMsg)
 	if res.err != "" || !res.multi {
 		t.Fatalf("result = %+v", res)
@@ -131,7 +131,7 @@ func TestApplySelectedToolOpensModalAndApplies(t *testing.T) {
 	if !ok || am == nil {
 		t.Fatalf("modal = %T", m.modal)
 	}
-	next, applyCmd := am.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	next, applyCmd := am.update(tea.KeyPressMsg{Text: "y"})
 	if next != nil || applyCmd == nil {
 		t.Fatalf("confirm next=%T cmd=%v", next, applyCmd != nil)
 	}
@@ -166,7 +166,7 @@ func TestApplySelectedToolKeyRouting(t *testing.T) {
 	m.composer.SetValue("")
 	m.focus = focusLeft
 
-	handled, _ := m.handleToolCellKeys(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	handled, _ := m.handleToolCellKeys(tea.KeyPressMsg{Text: "a"})
 	if !handled {
 		t.Fatal("a should be handled")
 	}

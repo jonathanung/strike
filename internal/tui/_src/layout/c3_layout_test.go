@@ -5,7 +5,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -129,16 +129,16 @@ func TestC3WelcomeColumnsAndNoOuterPanel(t *testing.T) {
 
 	m, _ = newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(viewString(m))
 	// Header always uses the compact wordmark; full logo band needs more height.
 	if !strings.Contains(plain, "⚡ strike") {
 		t.Errorf("header brand missing compact wordmark:\n%s", plain)
 	}
-	assertNoWelcomeOuterPanel(t, m.View())
+	assertNoWelcomeOuterPanel(t, viewString(m))
 	m.applyEvent(protocol.UserMessage{Text: "populated"})
 	m.refreshViewport()
 	// Panel title is the auto-title (first user text) once the transcript has cells.
-	if plain = ansi.Strip(m.View()); !strings.Contains(plain, "populated") || strings.Contains(plain, "get started") {
+	if plain = ansi.Strip(viewString(m)); !strings.Contains(plain, "populated") || strings.Contains(plain, "get started") {
 		t.Errorf("populated transcript did not replace dashboard with session panel:\n%s", plain)
 	}
 }
@@ -200,13 +200,13 @@ func TestC3WelcomeCapacityAndFocusTokens(t *testing.T) {
 		m, _ := newAppTestModelWithHistory([]string{"build", "plan", "ship", "test"}, []host.Skill{fakeSkill("review", "", ""), fakeSkill("audit", "", "")}, newFakeHistory("one", "two", "three"))
 		m.dangerouslySkipPermissions = danger
 		m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
-		plain := ansi.Strip(m.View())
+		plain := ansi.Strip(viewString(m))
 		for _, want := range []string{"get started", "keys", "agents & skills", "recent prompts"} {
 			if !strings.Contains(plain, want) {
 				t.Errorf("danger=%v dropped eligible %q:\n%s", danger, want, plain)
 			}
 		}
-		assertCanvas(t, m.View(), 80, 24)
+		assertCanvas(t, viewString(m), 80, 24)
 	}
 
 	setTUITrueColor(t)
@@ -216,17 +216,17 @@ func TestC3WelcomeCapacityAndFocusTokens(t *testing.T) {
 	th.OverlayScrim = fixedColor("#070809")
 	m, _ := newAppTestModelWithOptions(Options{Theme: &th})
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
-	if !strings.Contains(m.View(), rgbBGSGR("#010203")) || !strings.Contains(m.View(), rgbBGSGR("#040506")) {
+	if !strings.Contains(viewString(m), rgbBGSGR("#010203")) || !strings.Contains(viewString(m), rgbBGSGR("#040506")) {
 		t.Fatal("focused and dim dashboard surfaces are not tokenized")
 	}
 	m.focus = focusRight
 	m.reflow()
-	if !strings.Contains(m.View(), rgbBGSGR("#010203")) || !strings.Contains(m.View(), rgbBGSGR("#040506")) {
+	if !strings.Contains(viewString(m), rgbBGSGR("#010203")) || !strings.Contains(viewString(m), rgbBGSGR("#040506")) {
 		t.Fatal("right focus did not preserve focused/dim surface tokens")
 	}
 	m.modal = &appProbeModal{}
 	m.reflow()
-	view := m.View()
+	view := viewString(m)
 	if strings.Contains(view, rgbBGSGR("#010203")) || !strings.Contains(view, rgbSGR("#070809")) {
 		t.Fatal("modal did not scrim dashboard background")
 	}
@@ -264,7 +264,7 @@ func TestC3WelcomeProviderAndPromptLimits(t *testing.T) {
 	const dangerousPrompt = "before\x1b[2J\u0085after"
 	hostModel, _ := newAppTestModelWithHistory(nil, nil, newFakeHistory(dangerousPrompt))
 	hostModel = updateApp(t, hostModel, tea.WindowSizeMsg{Width: 120, Height: 80})
-	raw := hostModel.View()
+	raw := viewString(hostModel)
 	if strings.Contains(raw, "\x1b[2J") {
 		t.Errorf("raw welcome output retained injected clear-screen sequence: %q", raw)
 	}
@@ -305,7 +305,7 @@ func TestC3ModelSelectionPreservesExistingNoticeAndRefreshesPalette(t *testing.T
 	if m.providerName != "unique-provider" || m.modelName != "unique-model" || m.notice != "unrelated failure" || !m.noticeErr {
 		t.Fatalf("model selection changed fields or unrelated notice: %#v", m)
 	}
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(viewString(m))
 	// Header badge and context pane both show provider/model when the right
 	// pane is visible; reject the legacy "model: …" chrome form.
 	if strings.Contains(plain, "model: unique-provider/unique-model") {
@@ -327,7 +327,7 @@ func TestC3DangerNoticeHintsAndWorkingRows(t *testing.T) {
 		if modal != nil {
 			modal(&m)
 		}
-		plain := ansi.Strip(m.View())
+		plain := ansi.Strip(viewString(m))
 		lines := strings.Split(plain, "\n")
 		if strings.Count(plain, danger) != 1 || lines[len(lines)-1] != danger+strings.Repeat(" ", 80-len(danger)) {
 			t.Errorf("danger must be exact once in final full row:\n%s", plain)
@@ -340,7 +340,7 @@ func TestC3DangerNoticeHintsAndWorkingRows(t *testing.T) {
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.setNotice("separate notice", false)
 	m.applyEvent(protocol.TurnStarted{})
-	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	lines := strings.Split(ansi.Strip(viewString(m)), "\n")
 	l := computeLayout(80, 24, m.composer.Height(), 0, false, m.noticeRowsFor(80))
 	noticeRow := l.header + l.transcript
 	if !strings.Contains(lines[0], "working") || !strings.Contains(lines[noticeRow], "separate notice") || !strings.Contains(lines[len(lines)-1], "ctrl+h") {
@@ -366,14 +366,14 @@ func TestC3CanonicalLayoutCanvas(t *testing.T) {
 			m.skills = []host.Skill{fakeSkill("review", "", "")}
 			m.setNotice("long status "+strings.Repeat("界", 80), true)
 			m = updateApp(t, m, tea.WindowSizeMsg{Width: tt.width, Height: tt.height})
-			view, plain := m.View(), ansi.Strip(m.View())
+			view, plain := viewString(m), ansi.Strip(viewString(m))
 			assertCanvas(t, view, tt.width, tt.height)
 			// Full logo band is intentional chrome when the dashboard has room;
 			// compact header brand is always present on left-focused layouts.
 			if tt.focus != focusRight && !strings.Contains(plain, "⚡ strike") && !strings.Contains(plain, "S T R I K E") {
 				t.Errorf("welcome missing logo/header brand:\n%s", plain)
 			}
-			assertNoWelcomeOuterPanel(t, m.View())
+			assertNoWelcomeOuterPanel(t, viewString(m))
 			if tt.focus == focusRight && strings.Contains(plain, "get started") {
 				t.Errorf("right-only layout rendered dashboard:\n%s", plain)
 			}
@@ -399,7 +399,7 @@ func TestC3LongDashboardHistoryAndSelectedModelEvidence(t *testing.T) {
 	m.applyEvent(protocol.TurnStarted{})
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 160, Height: 45})
 
-	view, plain := m.View(), ansi.Strip(m.View())
+	view, plain := viewString(m), ansi.Strip(viewString(m))
 	assertCanvas(t, view, 160, 45)
 	// Header badge and context pane both surface the selection in split layout.
 	if got := strings.Count(plain, "c3-unique-provider/c3-unique-model"); got < 1 || got > 2 {
@@ -500,7 +500,7 @@ func TestC3ModalDangerGeometry(t *testing.T) {
 	m, _ := newAppTestModelWithOptions(Options{DangerouslySkipPermissions: true})
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
 	m.modal = newPaletteModal(m.commands, nil, m.currentPaletteAvailability())
-	view, plain := m.View(), ansi.Strip(m.View())
+	view, plain := viewString(m), ansi.Strip(viewString(m))
 	assertCanvas(t, view, 120, 40)
 	if strings.Count(plain, "DANGER: permissions bypassed") != 1 {
 		t.Errorf("modal duplicated or hid danger:\n%s", plain)

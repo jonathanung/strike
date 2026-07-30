@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -30,7 +30,7 @@ func TestHelpModalListsCatalogAndFilters(t *testing.T) {
 		}
 	}
 
-	next, cmd := m.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("memory")})
+	next, cmd := m.update(tea.KeyPressMsg{Text: "memory"})
 	if next != m || cmd != nil {
 		t.Fatal("typing filter closed help modal or emitted a command")
 	}
@@ -43,7 +43,7 @@ func TestHelpModalListsCatalogAndFilters(t *testing.T) {
 		t.Errorf("help view missing expected content:\n%s", view)
 	}
 
-	next, cmd = m.update(tea.KeyMsg{Type: tea.KeyEsc})
+	next, cmd = m.update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if next != nil || cmd != nil {
 		t.Fatal("escape did not close help modal")
 	}

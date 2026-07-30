@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -21,10 +21,10 @@ func TestMouseWheelScrollsTranscript(t *testing.T) {
 	}
 	m.refreshViewport()
 	m.viewport.GotoBottom()
-	bottom := m.viewport.YOffset
-	m = updateApp(t, m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
-	if m.viewport.YOffset >= bottom {
-		t.Fatalf("wheel up did not scroll: offset=%d bottom=%d", m.viewport.YOffset, bottom)
+	bottom := m.viewport.YOffset()
+	m = updateApp(t, m, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	if m.viewport.YOffset() >= bottom {
+		t.Fatalf("wheel up did not scroll: offset=%d bottom=%d", m.viewport.YOffset(), bottom)
 	}
 }
 
@@ -99,18 +99,8 @@ func TestMouseClickOpensOSC8HTTPLink(t *testing.T) {
 	if !ok {
 		t.Fatal("transcript origin not available")
 	}
-	m = updateApp(t, m, tea.MouseMsg{
-		Action: tea.MouseActionPress,
-		Button: tea.MouseButtonLeft,
-		X:      ox + col,
-		Y:      oy,
-	})
-	updated, cmd := m.Update(tea.MouseMsg{
-		Action: tea.MouseActionRelease,
-		Button: tea.MouseButtonLeft,
-		X:      ox + col,
-		Y:      oy,
-	})
+	m = updateApp(t, m, tea.MouseClickMsg{X: ox + col, Y: oy, Button: tea.MouseLeft})
+	updated, cmd := m.Update(tea.MouseReleaseMsg{X: ox + col, Y: oy, Button: tea.MouseLeft})
 	_ = updated
 	if cmd == nil {
 		t.Fatal("expected openURICmd from http link click")
@@ -285,18 +275,8 @@ func TestMouseClickIgnoresModal(t *testing.T) {
 // mouseClick sends left press+release at the same cell (no drag).
 func mouseClick(t *testing.T, m Model, x, y int) Model {
 	t.Helper()
-	m = updateApp(t, m, tea.MouseMsg{
-		Action: tea.MouseActionPress,
-		Button: tea.MouseButtonLeft,
-		X:      x,
-		Y:      y,
-	})
-	return updateApp(t, m, tea.MouseMsg{
-		Action: tea.MouseActionRelease,
-		Button: tea.MouseButtonLeft,
-		X:      x,
-		Y:      y,
-	})
+	m = updateApp(t, m, tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
+	return updateApp(t, m, tea.MouseReleaseMsg{X: x, Y: y, Button: tea.MouseLeft})
 }
 
 func TestExploreCellTitleLinksWhenExpanded(t *testing.T) {
@@ -413,7 +393,7 @@ func TestMouseClickChangesVisiblePaneFocus(t *testing.T) {
 			m.focus = tt.initial
 			m = updateApp(t, m, tea.WindowSizeMsg{Width: tt.width, Height: 40})
 			x, y := tt.click(m)
-			m = updateApp(t, m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: x, Y: y})
+			m = updateApp(t, m, tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
 			if m.focus != tt.want {
 				t.Fatalf("focus after click = %v, want %v", m.focus, tt.want)
 			}
@@ -425,14 +405,14 @@ func TestMousePaneFocusDoesNotBypassModalOrGutter(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
 	geo := computePaneGeometry(m.width, m.th.Resolve().Spacing.XS, m.focus)
-	m = updateApp(t, m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: geo.leftWidth, Y: 1})
+	m = updateApp(t, m, tea.MouseClickMsg{X: geo.leftWidth, Y: 1, Button: tea.MouseLeft})
 	if m.focus != focusLeft {
 		t.Fatalf("gutter click changed focus to %v", m.focus)
 	}
 
 	m.modal = &appProbeModal{}
 	m.reflow()
-	m = updateApp(t, m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: geo.leftWidth + geo.gutter, Y: 1})
+	m = updateApp(t, m, tea.MouseClickMsg{X: geo.leftWidth + geo.gutter, Y: 1, Button: tea.MouseLeft})
 	if m.focus != focusLeft {
 		t.Fatalf("modal click changed focus to %v", m.focus)
 	}

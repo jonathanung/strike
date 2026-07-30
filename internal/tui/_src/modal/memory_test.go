@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -15,7 +15,7 @@ import (
 func runMemory(t *testing.T, m Model, command string) Model {
 	t.Helper()
 	m.composer.SetValue(command)
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if cmd != nil {
 		runAppCmd(t, cmd)
@@ -56,7 +56,7 @@ func TestMemoryCommandListSetGetRm(t *testing.T) {
 	}
 
 	// Return focus so slash commands still work from the composer.
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlH})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
 	m = runMemory(t, m, "/memory set build.cmd make test")
 	if !strings.Contains(m.notice, "set build.cmd") {
 		t.Fatalf("set notice = %q", m.notice)
@@ -80,7 +80,7 @@ func TestMemoryCommandListSetGetRm(t *testing.T) {
 		t.Fatalf("list entries = %+v", mw.entries)
 	}
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlH})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
 	m = runMemory(t, m, "/memory rm build.cmd")
 	if !strings.Contains(m.notice, "deleted build.cmd") {
 		t.Fatalf("rm notice = %q", m.notice)
@@ -195,9 +195,9 @@ func TestMemoryWindowBrowseExpandDetail(t *testing.T) {
 		t.Fatalf("list view missing entries:\n%s", view)
 	}
 
-	next, _ := w.update(tea.KeyMsg{Type: tea.KeyDown})
+	next, _ := w.update(tea.KeyPressMsg{Code: tea.KeyDown})
 	w = next.(memoryWindow)
-	next, _ = w.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ = w.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	w = next.(memoryWindow)
 	if !w.detail {
 		t.Fatal("enter did not open detail")
@@ -207,7 +207,7 @@ func TestMemoryWindowBrowseExpandDetail(t *testing.T) {
 		t.Fatalf("detail view missing content:\n%s", detail)
 	}
 
-	next, _ = w.update(tea.KeyMsg{Type: tea.KeyEsc})
+	next, _ = w.update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	w = next.(memoryWindow)
 	if w.detail {
 		t.Fatal("esc did not leave detail")
@@ -237,7 +237,7 @@ func TestMemoryCommandManyEntriesOpensPaneNotNotice(t *testing.T) {
 	if m.modal != nil {
 		t.Fatalf("opened modal %T", m.modal)
 	}
-	view := ansi.Strip(m.View())
+	view := ansi.Strip(viewString(m))
 	if !strings.Contains(view, "memory") {
 		t.Fatalf("view missing memory pane title:\n%s", view)
 	}
@@ -286,7 +286,7 @@ func TestMemoryModalBrowseFilterDetail(t *testing.T) {
 		t.Fatalf("filter = %+v", list)
 	}
 	modal.cursor = 0
-	next, _ := modal.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ := modal.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	mm := next.(*memoryModal)
 	if !mm.detail {
 		t.Fatal("enter did not open detail")
@@ -296,12 +296,12 @@ func TestMemoryModalBrowseFilterDetail(t *testing.T) {
 		t.Fatalf("detail view missing content:\n%s", detail)
 	}
 
-	next, _ = mm.update(tea.KeyMsg{Type: tea.KeyEsc})
+	next, _ = mm.update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	mm = next.(*memoryModal)
 	if mm.detail {
 		t.Fatal("esc did not leave detail")
 	}
-	next, _ = mm.update(tea.KeyMsg{Type: tea.KeyEsc})
+	next, _ = mm.update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if next != nil {
 		t.Fatalf("esc list = %T, want nil", next)
 	}

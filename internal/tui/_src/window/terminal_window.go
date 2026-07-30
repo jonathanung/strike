@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jonathanung/strike-cli/internal/tui/term"
@@ -72,7 +72,7 @@ func (w terminalWindow) init() tea.Cmd { return nil }
 
 func (w terminalWindow) update(msg tea.Msg) (window, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if w.sess == nil || w.idle {
 			return w, nil
 		}

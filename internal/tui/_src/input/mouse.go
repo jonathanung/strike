@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -28,62 +28,67 @@ type openURIMsg struct {
 // chrome. App-owned drag selection only starts inside the transcript and
 // prompt content regions; chrome presses clear any active selection.
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	switch msg.Button { //nolint:exhaustive
-	case tea.MouseButtonWheelUp:
-		if msg.Action != tea.MouseActionPress {
+	switch msg := msg.(type) {
+	case tea.MouseWheelMsg:
+		switch msg.Button { //nolint:exhaustive
+		case tea.MouseWheelUp:
+			m.viewport.ScrollUp(m.viewport.MouseWheelDelta)
+		case tea.MouseWheelDown:
+			m.viewport.ScrollDown(m.viewport.MouseWheelDelta)
+		}
+		return m, nil
+	case tea.MouseClickMsg:
+		if msg.Button != tea.MouseLeft {
 			return m, nil
 		}
-		m.viewport.ScrollUp(m.viewport.MouseWheelDelta)
-		return m, nil
-	case tea.MouseButtonWheelDown:
-		if msg.Action != tea.MouseActionPress {
+		return m.handleMouseLeftPress(msg.Mouse())
+	case tea.MouseMotionMsg:
+		if msg.Button != tea.MouseLeft {
 			return m, nil
 		}
-		m.viewport.ScrollDown(m.viewport.MouseWheelDelta)
-		return m, nil
-	case tea.MouseButtonLeft:
-		return m.handleMouseLeft(msg)
+		return m.handleMouseLeftMotion(msg.Mouse())
+	case tea.MouseReleaseMsg:
+		if msg.Button != tea.MouseLeft {
+			return m, nil
+		}
+		return m.handleMouseLeftRelease(msg.Mouse())
 	default:
 		return m, nil
 	}
 }
 
-func (m Model) handleMouseLeft(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	switch msg.Action {
-	case tea.MouseActionPress:
-		focusCmd := m.focusPaneAtMouse(msg.X, msg.Y)
-		if region, ok := m.textSelectRegionAt(msg.X, msg.Y); ok {
-			m.textSel.start(screenPos{X: msg.X, Y: msg.Y}, region)
-			return m, focusCmd
-		}
-		// Chrome / right pane / modal: no selection highlight.
-		m.textSel.clear()
+func (m Model) handleMouseLeftPress(mouse tea.Mouse) (tea.Model, tea.Cmd) {
+	focusCmd := m.focusPaneAtMouse(mouse.X, mouse.Y)
+	if region, ok := m.textSelectRegionAt(mouse.X, mouse.Y); ok {
+		m.textSel.start(screenPos{X: mouse.X, Y: mouse.Y}, region)
 		return m, focusCmd
+	}
+	// Chrome / right pane / modal: no selection highlight.
+	m.textSel.clear()
+	return m, focusCmd
+}
 
-	case tea.MouseActionMotion:
-		if m.textSel.dragging {
-			m.textSel.drag(screenPos{X: msg.X, Y: msg.Y})
-		}
-		return m, nil
+func (m Model) handleMouseLeftMotion(mouse tea.Mouse) (tea.Model, tea.Cmd) {
+	if m.textSel.dragging {
+		m.textSel.drag(screenPos{X: mouse.X, Y: mouse.Y})
+	}
+	return m, nil
+}
 
-	case tea.MouseActionRelease:
-		if !m.textSel.dragging {
-			return m, nil
-		}
-		m.textSel.drag(screenPos{X: msg.X, Y: msg.Y})
-		if m.textSel.finish() {
-			frame := m.renderFrame()
-			if text := extractTextSelection(frame, m.textSel); text != "" {
-				m.cellClip.stage(text)
-			}
-			return m, nil
-		}
-		// Bare click inside a select region → existing hit testing.
-		return m.handleMouseClick(msg)
-
-	default:
+func (m Model) handleMouseLeftRelease(mouse tea.Mouse) (tea.Model, tea.Cmd) {
+	if !m.textSel.dragging {
 		return m, nil
 	}
+	m.textSel.drag(screenPos{X: mouse.X, Y: mouse.Y})
+	if m.textSel.finish() {
+		frame := m.renderFrame()
+		if text := extractTextSelection(frame, m.textSel); text != "" {
+			m.cellClip.stage(text)
+		}
+		return m, nil
+	}
+	// Bare click inside a select region → existing hit testing.
+	return m.handleMouseClick(mouse)
 }
 
 // focusPaneAtMouse moves focus only when the point lies in a currently visible
@@ -150,21 +155,21 @@ func (m Model) paneFocusAtMouse(x, y int) (paneFocus, bool) {
 
 // handleMouseClick runs path/link/expand actions for a left click that did not
 // become a drag selection.
-func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleMouseClick(mouse tea.Mouse) (tea.Model, tea.Cmd) {
 	if m.modal != nil || len(m.cells) == 0 {
 		return m, nil
 	}
 	// Prefer path:line citations (open in editor) — same as Enter.
-	if ref, ok := m.fileRefAtMouse(msg); ok {
+	if ref, ok := m.fileRefAtMouse(mouse); ok {
 		return m.openFileRef(ref)
 	}
 	originX, originY, ok := m.transcriptContentOrigin()
 	if !ok {
 		return m, nil
 	}
-	relX := msg.X - originX
-	relY := msg.Y - originY
-	if relX < 0 || relY < 0 || relX >= m.viewport.Width || relY >= m.viewport.Height {
+	relX := mouse.X - originX
+	relY := mouse.Y - originY
+	if relX < 0 || relY < 0 || relX >= m.viewport.Width() || relY >= m.viewport.Height() {
 		return m, nil
 	}
 	// OSC 8 targets under the cursor (http(s) / bare file:// titles).
@@ -177,7 +182,7 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, openURICmd(uri)
 	}
 	// Toggle collapsible tool/explore cell under the click.
-	contentLine := m.viewport.YOffset + relY
+	contentLine := m.viewport.YOffset() + relY
 	idx := m.cellIndexAtContentLine(contentLine)
 	if idx < 0 {
 		return m, nil
@@ -236,7 +241,7 @@ func (m *Model) cellIndexAtContentLine(line int) int {
 	if line < 0 || len(m.cells) == 0 {
 		return -1
 	}
-	width := max(1, m.viewport.Width)
+	width := max(1, m.viewport.Width())
 	cur := 0
 	for i, c := range m.cells {
 		block := m.renderCell(c, width)

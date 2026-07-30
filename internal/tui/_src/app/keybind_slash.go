@@ -3,7 +3,7 @@ package tui
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
@@ -200,10 +200,10 @@ func (m Model) handleKeybindSlashCommand(name string) (tea.Model, tea.Cmd) {
 		m.reflow()
 		return m, filesPollCmd(m.windows)
 	case "/scroll-up":
-		m.viewport.HalfViewUp()
+		m.viewport.HalfPageUp()
 		return m, nil
 	case "/scroll-down":
-		m.viewport.HalfViewDown()
+		m.viewport.HalfPageDown()
 		return m, nil
 	case "/jump-bottom":
 		m.viewport.GotoBottom()
@@ -355,16 +355,16 @@ func (m Model) dispatchAgentsSlash(name string) (tea.Model, tea.Cmd) {
 	}
 	m.windows = reg
 	_ = m.focusPane(focusRight)
-	var msg tea.KeyMsg
+	var msg tea.KeyPressMsg
 	switch name {
 	case "/root-open":
-		msg = tea.KeyMsg{Type: tea.KeyEnter}
+		msg = tea.KeyPressMsg{Code: tea.KeyEnter}
 	case "/root-interrupt":
-		msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}}
+		msg = tea.KeyPressMsg{Code: 'x', Text: string([]rune{'x'})}
 	case "/root-hide":
-		msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}}
+		msg = tea.KeyPressMsg{Code: 'd', Text: string([]rune{'d'})}
 	case "/root-filter":
-		msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}}
+		msg = tea.KeyPressMsg{Code: 'f', Text: string([]rune{'f'})}
 	default:
 		return m, nil
 	}

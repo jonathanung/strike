@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
@@ -82,45 +82,25 @@ func TestMouseDragSelectsTranscriptAndIgnoresChrome(t *testing.T) {
 	x0, y0 := tr.X+2, tr.Y
 	x1 := tr.X + 12
 
-	m = updateApp(t, m, tea.MouseMsg{
-		Action: tea.MouseActionPress,
-		Button: tea.MouseButtonLeft,
-		X:      x0,
-		Y:      y0,
-	})
+	m = updateApp(t, m, tea.MouseClickMsg{X: x0, Y: y0, Button: tea.MouseLeft})
 	if !m.textSel.dragging {
 		t.Fatal("press in transcript should start drag")
 	}
-	m = updateApp(t, m, tea.MouseMsg{
-		Action: tea.MouseActionMotion,
-		Button: tea.MouseButtonLeft,
-		X:      x1,
-		Y:      y0,
-	})
-	m = updateApp(t, m, tea.MouseMsg{
-		Action: tea.MouseActionRelease,
-		Button: tea.MouseButtonLeft,
-		X:      x1,
-		Y:      y0,
-	})
+	m = updateApp(t, m, tea.MouseMotionMsg{X: x1, Y: y0, Button: tea.MouseLeft})
+	m = updateApp(t, m, tea.MouseReleaseMsg{X: x1, Y: y0, Button: tea.MouseLeft})
 	if !m.textSel.has {
 		t.Fatal("drag should finish with a selection")
 	}
 	if m.cellClip == nil || m.cellClip.osc == "" {
 		t.Fatal("selection should stage OSC52 copy")
 	}
-	frame := m.View()
+	frame := viewString(m)
 	if len(osc52Payloads(frame)) != 1 {
 		t.Fatalf("view should emit one OSC52, got %d", len(osc52Payloads(frame)))
 	}
 
 	// Chrome press clears selection.
-	m = updateApp(t, m, tea.MouseMsg{
-		Action: tea.MouseActionPress,
-		Button: tea.MouseButtonLeft,
-		X:      1,
-		Y:      0,
-	})
+	m = updateApp(t, m, tea.MouseClickMsg{X: 1, Y: 0, Button: tea.MouseLeft})
 	if m.textSel.active() {
 		t.Fatal("chrome press should clear text selection")
 	}
@@ -137,19 +117,9 @@ func TestMouseDragOutsideRegionClamps(t *testing.T) {
 	if !ok {
 		t.Fatal("no transcript rect")
 	}
-	m = updateApp(t, m, tea.MouseMsg{
-		Action: tea.MouseActionPress,
-		Button: tea.MouseButtonLeft,
-		X:      tr.X + 1,
-		Y:      tr.Y,
-	})
+	m = updateApp(t, m, tea.MouseClickMsg{X: tr.X + 1, Y: tr.Y, Button: tea.MouseLeft})
 	// Drag into header chrome — focus must stay inside transcript rect.
-	m = updateApp(t, m, tea.MouseMsg{
-		Action: tea.MouseActionMotion,
-		Button: tea.MouseButtonLeft,
-		X:      tr.X + 1,
-		Y:      0,
-	})
+	m = updateApp(t, m, tea.MouseMotionMsg{X: tr.X + 1, Y: 0, Button: tea.MouseLeft})
 	if !tr.contains(m.textSel.b.X, m.textSel.b.Y) {
 		t.Fatalf("focus %+v escaped transcript %+v", m.textSel.b, tr)
 	}
@@ -161,12 +131,7 @@ func TestMouseSelectDoesNotStartOnChrome(t *testing.T) {
 	m.applyEvent(protocol.UserMessage{Text: "hi"})
 	m.refreshViewport()
 
-	m = updateApp(t, m, tea.MouseMsg{
-		Action: tea.MouseActionPress,
-		Button: tea.MouseButtonLeft,
-		X:      2,
-		Y:      0, // header
-	})
+	m = updateApp(t, m, tea.MouseClickMsg{X: 2, Y: 0, Button: tea.MouseLeft})
 	if m.textSel.dragging || m.textSel.has {
 		t.Fatal("header press must not start text selection")
 	}
@@ -182,27 +147,12 @@ func TestPromptRegionAcceptsSelection(t *testing.T) {
 	if !ok {
 		t.Fatal("no prompt rect")
 	}
-	m = updateApp(t, m, tea.MouseMsg{
-		Action: tea.MouseActionPress,
-		Button: tea.MouseButtonLeft,
-		X:      pr.X + 1,
-		Y:      pr.Y,
-	})
+	m = updateApp(t, m, tea.MouseClickMsg{X: pr.X + 1, Y: pr.Y, Button: tea.MouseLeft})
 	if !m.textSel.dragging {
 		t.Fatal("press in prompt should start selection")
 	}
-	m = updateApp(t, m, tea.MouseMsg{
-		Action: tea.MouseActionMotion,
-		Button: tea.MouseButtonLeft,
-		X:      pr.X + 8,
-		Y:      pr.Y,
-	})
-	m = updateApp(t, m, tea.MouseMsg{
-		Action: tea.MouseActionRelease,
-		Button: tea.MouseButtonLeft,
-		X:      pr.X + 8,
-		Y:      pr.Y,
-	})
+	m = updateApp(t, m, tea.MouseMotionMsg{X: pr.X + 8, Y: pr.Y, Button: tea.MouseLeft})
+	m = updateApp(t, m, tea.MouseReleaseMsg{X: pr.X + 8, Y: pr.Y, Button: tea.MouseLeft})
 	if !m.textSel.has {
 		t.Fatal("prompt drag should yield a selection")
 	}
@@ -289,7 +239,7 @@ func TestModalOverlayFullBleedNoSpillAt80x24And120x40(t *testing.T) {
 		m = updateApp(t, m, tea.WindowSizeMsg{Width: size.w, Height: size.h})
 		m.modal = &appProbeModal{}
 		m.reflow()
-		view := m.View()
+		view := viewString(m)
 		lines := strings.Split(view, "\n")
 		if len(lines) != size.h {
 			t.Errorf("%dx%d: lines=%d", size.w, size.h, len(lines))
@@ -315,7 +265,7 @@ func TestFocusedPaneHasChromeNotBodyWash(t *testing.T) {
 	th.SurfaceMuted = fixedColor("#aabbcc")
 	m, _ := newAppTestModelWithOptions(Options{Theme: &th})
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
-	view := m.View()
+	view := viewString(m)
 	// Title edge focus token present; body uses Surface not a full SurfaceFocus flood.
 	if !strings.Contains(view, rgbBGSGR("#445566")) {
 		t.Fatal("focused title edge missing SurfaceFocus")
@@ -335,8 +285,8 @@ func TestFocusedPaneHasChromeNotBodyWash(t *testing.T) {
 		t.Fatal("dim pane missing SurfaceMuted")
 	}
 	// Focus switch moves the thin rule to the right pane only.
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
-	rightView := m.View()
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
+	rightView := viewString(m)
 	if !strings.Contains(rightView, rgbSGR("#778899")) {
 		t.Fatal("right-focused view missing BorderFocus thin rule")
 	}

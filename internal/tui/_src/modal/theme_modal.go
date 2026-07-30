@@ -3,7 +3,7 @@ package tui
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -53,7 +53,7 @@ func (m *themeModal) refilter() {
 	}
 }
 
-func (m *themeModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *themeModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	if isEscape(msg) || msg.String() == "q" {
 		return nil, nil
 	}
@@ -88,8 +88,8 @@ func (m *themeModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 		id := m.filtered[m.cursor].ID
 		return m, saveThemeThroughCmd(m.settings, id)
 	default:
-		if msg.Type == tea.KeyRunes {
-			m.filter += string(msg.Runes)
+		if len(msg.Text) > 0 {
+			m.filter += msg.Text
 			m.cursor = 0
 			m.refilter()
 		}

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -34,7 +34,7 @@ func TestGallery(t *testing.T) {
 		build(&m)
 		m.reflow()
 		m.refreshViewport()
-		t.Logf("\n=== %s (%dx%d) ===\n%s\n", name, width, height, m.View())
+		t.Logf("\n=== %s (%dx%d) ===\n%s\n", name, width, height, viewString(m))
 	}
 	renderWithHistory := func(name string, width, height int, history *fakeHistory, build func(*Model)) {
 		m, _ := newAppTestModelWithHistory(
@@ -46,7 +46,7 @@ func TestGallery(t *testing.T) {
 		build(&m)
 		m.reflow()
 		m.refreshViewport()
-		t.Logf("\n=== %s (%dx%d) ===\n%s\n", name, width, height, m.View())
+		t.Logf("\n=== %s (%dx%d) ===\n%s\n", name, width, height, viewString(m))
 	}
 	render("80x24 left dashboard", 80, 24, func(m *Model) {})
 	render("80x24 right context", 80, 24, func(m *Model) { m.focus = focusRight })

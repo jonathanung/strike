@@ -1,7 +1,7 @@
 package tui
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -29,7 +29,7 @@ func newAutonomyModal(current protocol.Autonomy, ops chan<- protocol.Op) *autono
 	return m
 }
 
-func (m *autonomyModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *autonomyModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	if isEscape(msg) {
 		return nil, nil
 	}

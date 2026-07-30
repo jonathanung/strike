@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -146,7 +146,7 @@ func (m *modelModal) isCurrent(info host.ModelInfo) bool {
 	return p == "" || p == m.provider
 }
 
-func (m *modelModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *modelModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	list := m.filtered()
 	if isEscape(msg) {
 		return nil, nil
@@ -200,8 +200,8 @@ func (m *modelModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 		provider, model := modelRowProvider(info, m.provider), info.ID
 		return m, saveDefaultsThroughCmd(m.settings, provider, model, "", "", "", provider+"/"+model)
 	default:
-		if msg.Type == tea.KeyRunes {
-			m.filter += string(msg.Runes)
+		if len(msg.Text) > 0 {
+			m.filter += msg.Text
 			m.cursor = 0
 		}
 		return m, nil

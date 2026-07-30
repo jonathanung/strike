@@ -3,8 +3,8 @@ package tui
 import (
 	"path/filepath"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 	"github.com/jonathanung/strike-cli/internal/tui/ui"
@@ -28,7 +28,7 @@ func newMarkdownModal(path, source string) *markdownModal {
 	return &markdownModal{
 		path:   path,
 		source: source,
-		vp:     viewport.New(1, 0),
+		vp:     viewport.New(viewport.WithWidth(1), viewport.WithHeight(0)),
 	}
 }
 
@@ -36,8 +36,8 @@ func (m *markdownModal) setHostSize(w, h int) {
 	m.hostW, m.hostH = w, h
 }
 
-func (m *markdownModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
-	if isEscape(msg) || msg.String() == "q" || msg.Type == tea.KeyCtrlG {
+func (m *markdownModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
+	if isEscape(msg) || msg.String() == "q" || msg.String() == "ctrl+g" {
 		return nil, nil
 	}
 	var cmd tea.Cmd
@@ -80,8 +80,8 @@ func (m *markdownModal) view(width int, th theme.Theme) string {
 }
 
 func (m *markdownModal) ensureRendered(contentW, contentH int) {
-	m.vp.Width = max(1, contentW)
-	m.vp.Height = max(0, contentH)
+	m.vp.SetWidth(max(1, contentW))
+	m.vp.SetHeight(max(0, contentH))
 	if contentW == m.contentW && m.vp.TotalLineCount() > 0 {
 		return
 	}

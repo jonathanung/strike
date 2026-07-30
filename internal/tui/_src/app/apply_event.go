@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
@@ -40,13 +40,13 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		if m.titleTopic == "" {
 			if topic := sanitizeTitleTopic(ev.Text); topic != "" {
 				m.titleTopic = topic
-				cmd = tea.Batch(tea.SetWindowTitle(windowTitle(*m)), m.broadcastContextState())
+				cmd = m.broadcastContextState()
 			}
 		}
 	case protocol.SessionTitled:
 		if topic := sanitizeTitleTopic(ev.Title); topic != "" {
 			m.titleTopic = topic
-			cmd = tea.Batch(tea.SetWindowTitle(windowTitle(*m)), m.broadcastContextState())
+			cmd = m.broadcastContextState()
 		}
 	case protocol.TurnStarted:
 		m.turnStartedAt = time.Now()

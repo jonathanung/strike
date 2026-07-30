@@ -3,7 +3,7 @@ package tui
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -44,7 +44,7 @@ func (w memoryWindow) update(msg tea.Msg) (window, tea.Cmd) {
 	switch msg := msg.(type) {
 	case projectDataRefreshMsg:
 		return w.reload(), nil
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return w.handleKey(msg)
 	}
 	return w, nil
@@ -165,7 +165,7 @@ func (w memoryWindow) reload() memoryWindow {
 	return w
 }
 
-func (w memoryWindow) handleKey(msg tea.KeyMsg) (memoryWindow, tea.Cmd) {
+func (w memoryWindow) handleKey(msg tea.KeyPressMsg) (memoryWindow, tea.Cmd) {
 	if w.mem == nil {
 		return w, nil
 	}

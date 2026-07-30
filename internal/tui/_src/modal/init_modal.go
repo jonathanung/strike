@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -23,7 +23,7 @@ func newInitConfirmModal(path string, init host.ProjectInit) *initConfirmModal {
 	return &initConfirmModal{path: path, init: init, choice: 1}
 }
 
-func (m *initConfirmModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *initConfirmModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	if m.decided {
 		return nil, nil
 	}

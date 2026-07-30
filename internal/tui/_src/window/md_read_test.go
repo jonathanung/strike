@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -20,7 +20,7 @@ func runMDRead(t *testing.T, m Model, command string) Model {
 		}
 	}
 	m.composer.SetValue(command)
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if cmd != nil {
 		runAppCmd(t, cmd)
@@ -85,7 +85,7 @@ func TestMDReadSuccessActivatesMarkdownAndShowsContent(t *testing.T) {
 	if m.notice != "" {
 		t.Errorf("notice = %q, want cleared on success", m.notice)
 	}
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(viewString(m))
 	if !strings.Contains(plain, "Hello") && !strings.Contains(plain, "world") {
 		t.Errorf("view missing markdown content: %q", plain)
 	}
@@ -108,8 +108,8 @@ func TestMDReadPathWithSpaces(t *testing.T) {
 	if mw.path != "my file.md" {
 		t.Errorf("path = %q, want %q", mw.path, "my file.md")
 	}
-	if !strings.Contains(ansi.Strip(m.View()), "SpacedTitle") {
-		t.Errorf("view missing spaced-file content: %q", ansi.Strip(m.View()))
+	if !strings.Contains(ansi.Strip(viewString(m)), "SpacedTitle") {
+		t.Errorf("view missing spaced-file content: %q", ansi.Strip(viewString(m)))
 	}
 }
 
@@ -127,8 +127,8 @@ func TestMDReadAtMentionPath(t *testing.T) {
 	if mw.path != "notes.md" {
 		t.Errorf("path = %q, want notes.md", mw.path)
 	}
-	if !strings.Contains(ansi.Strip(m.View()), "AtMentionDoc") {
-		t.Errorf("view missing content: %q", ansi.Strip(m.View()))
+	if !strings.Contains(ansi.Strip(viewString(m)), "AtMentionDoc") {
+		t.Errorf("view missing content: %q", ansi.Strip(viewString(m)))
 	}
 }
 
@@ -203,7 +203,7 @@ func TestMDReadSecondCallReplacesContent(t *testing.T) {
 	if strings.Contains(second.source, "FirstDoc") {
 		t.Errorf("second source still contains FirstDoc: %q", second.source)
 	}
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(viewString(m))
 	if !strings.Contains(plain, "unique-bbb") {
 		t.Errorf("view after replace missing second content: %q", plain)
 	}

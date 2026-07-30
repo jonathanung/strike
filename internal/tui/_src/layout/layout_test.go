@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -57,7 +57,7 @@ func TestViewFillsExactlyScreenHeightAtCommonSizes(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			m, _ := newAppTestModel([]string{"build"}, nil)
 			m = updateApp(t, m, size)
-			view := m.View()
+			view := viewString(m)
 			lines := strings.Split(view, "\n")
 			if len(lines) != size.Height {
 				t.Fatalf("view has %d lines, want exactly screen height %d", len(lines), size.Height)

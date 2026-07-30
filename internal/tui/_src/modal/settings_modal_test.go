@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -22,7 +22,7 @@ func TestSettingsModalMenuAndDefaults(t *testing.T) {
 	}
 
 	m.composer.SetValue("/settings")
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	sm, ok := m.modal.(*settingsModal)
 	if !ok {
 		t.Fatalf("modal = %T", m.modal)
@@ -33,7 +33,7 @@ func TestSettingsModalMenuAndDefaults(t *testing.T) {
 	}
 
 	// Open Defaults.
-	next, _ := sm.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ := sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	sm = next.(*settingsModal)
 	view = ansi.Strip(sm.view(80, m.th))
 	for _, want := range []string{"Theme", "dracula", "Vim mode", "Permission mode", "Provider", "echo"} {
@@ -44,14 +44,14 @@ func TestSettingsModalMenuAndDefaults(t *testing.T) {
 
 	// Open vim mode picker and save overlay.
 	sm.cursor = int(settingsFieldVim)
-	next, _ = sm.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ = sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	sm = next.(*settingsModal)
 	if sm.page != settingsPagePick {
 		t.Fatalf("page = %v, want pick", sm.page)
 	}
 	// overlay is index 1
 	sm.pickCursor = 1
-	_, cmd := sm.update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("expected save cmd")
 	}
@@ -92,7 +92,7 @@ func TestSettingsModalSavePermissionMode(t *testing.T) {
 	sm := newSettingsModal(m.services, m.ops, m.th, m.workDir)
 	sm.page = settingsPageDefaults
 	sm.cursor = int(settingsFieldPerm)
-	next, _ := sm.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ := sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	sm = next.(*settingsModal)
 	// find yolo
 	for i, opt := range sm.pickOptions {
@@ -101,7 +101,7 @@ func TestSettingsModalSavePermissionMode(t *testing.T) {
 			break
 		}
 	}
-	_, cmd := sm.update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	msg := cmd().(settingsSavedMsg)
 	if msg.err != nil {
 		t.Fatal(msg.err)
@@ -121,7 +121,7 @@ func TestSettingsModalSaveEffort(t *testing.T) {
 	sm := newSettingsModal(m.services, m.ops, m.th, m.workDir)
 	sm.page = settingsPageDefaults
 	sm.cursor = int(settingsFieldEffort)
-	next, _ := sm.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ := sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	sm = next.(*settingsModal)
 	if sm.page != settingsPagePick {
 		t.Fatalf("page = %v, want pick", sm.page)
@@ -132,7 +132,7 @@ func TestSettingsModalSaveEffort(t *testing.T) {
 			break
 		}
 	}
-	_, cmd := sm.update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	msg := cmd().(settingsSavedMsg)
 	if msg.err != nil {
 		t.Fatal(msg.err)
@@ -159,7 +159,7 @@ func TestSettingsModalSaveThemeApplies(t *testing.T) {
 		}
 	}
 	want := sm.pickOptions[sm.pickCursor].value
-	_, cmd := sm.update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	msg := cmd().(settingsSavedMsg)
 	if msg.err != nil {
 		t.Fatal(msg.err)
@@ -182,17 +182,17 @@ func TestSettingsModalEscNavigation(t *testing.T) {
 	sm := newSettingsModal(m.services, m.ops, m.th, m.workDir)
 	sm.page = settingsPagePick
 	sm.pickField = settingsFieldVim
-	next, _ := sm.update(tea.KeyMsg{Type: tea.KeyEscape})
+	next, _ := sm.update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	sm = next.(*settingsModal)
 	if sm.page != settingsPageDefaults {
 		t.Fatalf("pick esc → %v, want defaults", sm.page)
 	}
-	next, _ = sm.update(tea.KeyMsg{Type: tea.KeyEscape})
+	next, _ = sm.update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	sm = next.(*settingsModal)
 	if sm.page != settingsPageMenu {
 		t.Fatalf("defaults esc → %v, want menu", sm.page)
 	}
-	next, _ = sm.update(tea.KeyMsg{Type: tea.KeyEscape})
+	next, _ = sm.update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if next != nil {
 		t.Fatalf("menu esc → %T, want nil", next)
 	}
@@ -204,7 +204,7 @@ func TestSettingsModalDisplayOnlyRows(t *testing.T) {
 	}}, nil, themeDefaultForTest(), "")
 	sm.page = settingsPageDefaults
 	sm.cursor = int(settingsFieldProvider)
-	next, cmd := sm.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if next != sm || cmd != nil {
 		t.Fatalf("provider row should not open picker: next=%T cmd=%v", next, cmd != nil)
 	}

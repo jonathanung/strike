@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -31,7 +31,7 @@ func TestEffortCommandWithArgumentSendsSetEffort(t *testing.T) {
 	m.providerName = "echo"
 	m.composer.SetValue("/effort xhigh")
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	runAppCmd(t, cmd)
 
@@ -52,7 +52,7 @@ func TestEffortCommandAcceptsEveryLevel(t *testing.T) {
 		t.Run(string(level), func(t *testing.T) {
 			m, ops := newAppTestModel(nil, nil)
 			m.composer.SetValue("/effort " + string(level))
-			updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 			m = updated.(Model)
 			runAppCmd(t, cmd)
 			if op := receiveAppOp(t, ops); op != (protocol.SetEffort{Level: level}) {
@@ -69,7 +69,7 @@ func TestEffortCommandRejectsUnknownLevelWithoutSendingAnOp(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)
 	m.composer.SetValue("/effort turbo")
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	runAppCmd(t, cmd)
 
@@ -95,7 +95,7 @@ func TestBareEffortOpensPickerOnTheActiveLevel(t *testing.T) {
 	m.effort = protocol.EffortMedium
 	m.composer.SetValue("/effort")
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	picker, ok := m.modal.(*effortModal)
 	if !ok {
@@ -114,7 +114,7 @@ func TestBareEffortOpensPickerOnTheActiveLevel(t *testing.T) {
 func TestBareEffortWithNoLevelSetOpensAtTheFirstRung(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m.composer.SetValue("/effort")
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	picker := m.modal.(*effortModal)
 	if picker.cursor != 0 {
@@ -128,9 +128,9 @@ func TestEffortPickerEnterSendsSelectionAndClosesModal(t *testing.T) {
 
 	// Move to "medium" (off, low, medium).
 	for i := 0; i < 2; i++ {
-		picker.update(tea.KeyMsg{Type: tea.KeyDown})
+		picker.update(tea.KeyPressMsg{Code: tea.KeyDown})
 	}
-	next, cmd := picker.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := picker.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if next != nil {
 		t.Errorf("enter left modal open as %T, want closed", next)
 	}
@@ -143,13 +143,13 @@ func TestEffortPickerEnterSendsSelectionAndClosesModal(t *testing.T) {
 func TestEffortPickerCursorStaysInRange(t *testing.T) {
 	picker := newEffortModal(protocol.EffortOff, make(chan protocol.Op, 1), &fakeSettings{})
 	for i := 0; i < 20; i++ {
-		picker.update(tea.KeyMsg{Type: tea.KeyDown})
+		picker.update(tea.KeyPressMsg{Code: tea.KeyDown})
 	}
 	if picker.cursor != len(picker.choices)-1 {
 		t.Errorf("cursor = %d, want %d", picker.cursor, len(picker.choices)-1)
 	}
 	for i := 0; i < 20; i++ {
-		picker.update(tea.KeyMsg{Type: tea.KeyUp})
+		picker.update(tea.KeyPressMsg{Code: tea.KeyUp})
 	}
 	if picker.cursor != 0 {
 		t.Errorf("cursor = %d after scrolling up, want 0", picker.cursor)
@@ -159,9 +159,9 @@ func TestEffortPickerCursorStaysInRange(t *testing.T) {
 func TestEffortPickerCtrlDSavesOnlyTheEffortDefault(t *testing.T) {
 	settings := &fakeSettings{}
 	picker := newEffortModal(protocol.EffortDefault, make(chan protocol.Op, 1), settings)
-	picker.update(tea.KeyMsg{Type: tea.KeyDown}) // -> low
+	picker.update(tea.KeyPressMsg{Code: tea.KeyDown}) // -> low
 
-	next, cmd := picker.update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	next, cmd := picker.update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
 	if next == nil {
 		t.Error("ctrl+d closed the picker, want it to stay open")
 	}
@@ -180,7 +180,7 @@ func TestEffortPickerCtrlDSavesOnlyTheEffortDefault(t *testing.T) {
 func TestEffortPickerEscClosesWithoutSelecting(t *testing.T) {
 	ops := make(chan protocol.Op, 1)
 	picker := newEffortModal(protocol.EffortHigh, ops, &fakeSettings{})
-	next, cmd := picker.update(tea.KeyMsg{Type: tea.KeyEsc})
+	next, cmd := picker.update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if next != nil {
 		t.Errorf("esc left modal open as %T", next)
 	}
@@ -244,7 +244,7 @@ func TestSaveDefaultsIncludesTheActiveEffort(t *testing.T) {
 	m.providerName, m.modelName, m.agentName = "anthropic", "claude-opus-5", "build"
 	m.effort = protocol.EffortMax
 
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
 	runAppCmd(t, cmd)
 
 	if len(settings.saved) != 1 {
@@ -259,7 +259,7 @@ func TestSaveDefaultsIncludesTheActiveEffort(t *testing.T) {
 func TestHelpListsTheEffortCommand(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m.composer.SetValue("/help")
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	help, ok := m.modal.(*helpModal)
 	if !ok {
 		t.Fatalf("/help modal = %T, want helpModal", m.modal)

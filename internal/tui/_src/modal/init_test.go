@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -120,7 +120,7 @@ func TestInitConfirmsWhenExists(t *testing.T) {
 
 	// Cancel via esc.
 	var closeCmd tea.Cmd
-	nm.modal, closeCmd = modal.update(tea.KeyMsg{Type: tea.KeyEsc})
+	nm.modal, closeCmd = modal.update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if nm.modal != nil {
 		t.Fatal("modal should close on esc")
 	}
@@ -141,7 +141,7 @@ func TestInitConfirmReplace(t *testing.T) {
 	modal := m.modal.(*initConfirmModal)
 	modal.choice = 0
 	var cmd tea.Cmd
-	m.modal, cmd = modal.update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.modal, cmd = modal.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.modal != nil {
 		t.Fatal("modal should close after replace")
 	}
@@ -191,7 +191,7 @@ func TestWelcomeMentionsInitWhenMissing(t *testing.T) {
 	m.services.Init = &fakeInit{exists: false}
 	m.providerName = ""
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(viewString(m))
 	if !strings.Contains(plain, "/init") {
 		t.Fatalf("welcome missing /init CTA:\n%s", plain)
 	}
@@ -201,7 +201,7 @@ func TestWelcomeFirstRunMentionsInit(t *testing.T) {
 	m, _ := newAppTestModelWithOptions(Options{FirstRun: true})
 	m.providerName = ""
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(viewString(m))
 	if !strings.Contains(plain, "/init") && !strings.Contains(plain, "AGENTS.md") {
 		t.Fatalf("first-run missing init mention:\n%s", plain)
 	}
