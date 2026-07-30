@@ -65,3 +65,25 @@ jobs:
       - name: Coverage (soft)
         continue-on-error: true
         run: make cover-check
+
+  # Darwin-only tests (//go:build darwin) never compile on ubuntu-latest, so a
+  # broken libSystem trampoline or wrong-sysctl path ships green (#521, #602).
+  # Restrict to packages with _darwin.go — not the full suite — because macOS
+  # runners bill at 10× Linux minutes. telemetry is the concentrated risk;
+  # wall clock is ~2s of tests so billable cost is mostly runner boot (~1–2 min
+  # × 10 ≈ 10–20 macOS-minutes per run).
+  test-darwin:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup Go
+        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Test darwin-specific packages
+        run: go test -race ./internal/telemetry/...
