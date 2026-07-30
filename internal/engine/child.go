@@ -42,6 +42,7 @@ type childHandle struct {
 	startedAt time.Time
 	agent     string
 	prompt    string
+	name      string // optional stable teammate alias
 
 	mu             sync.Mutex
 	currentTool    string
@@ -61,6 +62,7 @@ type childRecord struct {
 	endedAt   time.Time
 	agent     string
 	prompt    string
+	name      string
 	status    protocol.ChildStatus
 	summary   string
 	activity  []string
@@ -112,6 +114,17 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 	childEffort := e.effort
 	if effortPin.lock {
 		childEffort = effortPin.level
+	}
+
+	// Optional stable teammate alias: validate + uniqueness before side effects.
+	memberName, err := ValidateMemberName(req.Name)
+	if err != nil {
+		return tool.TaskResult{}, err
+	}
+	if memberName != "" && e.team != nil {
+		if owner, taken := e.team.NameOwner(memberName); taken {
+			return tool.TaskResult{}, fmt.Errorf("name %q is already used by session %s", memberName, owner)
+		}
 	}
 
 	childID := rand.Text()
@@ -224,6 +237,7 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		startedAt: time.Now(),
 		agent:     agentName,
 		prompt:    req.Prompt,
+		name:      memberName,
 	}
 
 	e.childMu.Lock()
@@ -235,20 +249,33 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 
 	// Auto-enroll on the lead's implicit team (no TeamCreate).
 	if e.team != nil {
-		e.team.Enroll(TeamMember{
+		if !e.team.Enroll(TeamMember{
 			SessionID:       childID,
+			Name:            memberName,
 			Persona:         agentName,
 			State:           protocol.TeamMemberRunning,
 			ParentSessionID: e.opts.SessionID,
 			Depth:           childDepth,
 			StartedAt:       h.startedAt,
-		})
+		}) {
+			// Race: another spawn claimed the name between NameOwner and Enroll.
+			e.childMu.Lock()
+			delete(e.children, childID)
+			e.childMu.Unlock()
+			cancel()
+			e.closeChildSession(childID)
+			if memberName != "" {
+				return tool.TaskResult{}, fmt.Errorf("name %q is already used on this team", memberName)
+			}
+			return tool.TaskResult{}, fmt.Errorf("failed to enroll child on team")
+		}
 	}
 
 	startedEv := protocol.ChildStarted{
 		Correlation: childCorr,
 		Agent:       agentName,
 		Prompt:      req.Prompt,
+		Name:        memberName,
 	}
 	e.emit(startedEv)
 	e.persistChildEvent(childID, startedEv)
@@ -362,6 +389,7 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 			Correlation: childCorr,
 			Status:      status,
 			Summary:     summary,
+			Name:        memberName,
 		}
 		e.emit(completed)
 		e.persistChildEvent(childID, completed)
@@ -389,14 +417,23 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 	case child.Ops() <- protocol.UserInput{Text: req.Prompt}:
 	}
 
-	out := fmt.Sprintf(
-		"Started child session %s (agent %s). It runs independently and does not block this turn. Continue other work if useful; a [child.completed] message will deliver the terminal summary automatically — do not sleep-poll for it.",
-		childID, agentName,
-	)
+	var out string
+	if memberName != "" {
+		out = fmt.Sprintf(
+			"Started child session %s (name %s, agent %s). It runs independently and does not block this turn. Continue other work if useful; a [child.completed] message will deliver the terminal summary automatically — do not sleep-poll for it. Address this teammate by name %q or session id.",
+			childID, memberName, agentName, memberName,
+		)
+	} else {
+		out = fmt.Sprintf(
+			"Started child session %s (agent %s). It runs independently and does not block this turn. Continue other work if useful; a [child.completed] message will deliver the terminal summary automatically — do not sleep-poll for it.",
+			childID, agentName,
+		)
+	}
 	return tool.TaskResult{
 		Output:    out,
 		Status:    "started",
 		SessionID: childID,
+		Name:      memberName,
 	}, nil
 }
 
@@ -412,6 +449,7 @@ func (e *Engine) finishChild(h *childHandle, completed protocol.ChildCompleted) 
 		endedAt:   time.Now(),
 		agent:     h.agent,
 		prompt:    h.prompt,
+		name:      h.name,
 		status:    completed.Status,
 		summary:   completed.Summary,
 		activity:  append([]string(nil), h.activity...),
@@ -588,6 +626,7 @@ func (e *Engine) childStatus(ctx context.Context, req tool.TaskStatusRequest) (t
 	if id == "" {
 		return tool.TaskStatusResult{}, fmt.Errorf("session_id is required")
 	}
+	id = e.resolveOwnedChildRef(id)
 
 	e.childMu.Lock()
 	h := e.children[id]
@@ -601,6 +640,20 @@ func (e *Engine) childStatus(ctx context.Context, req tool.TaskStatusRequest) (t
 		return rec.statusSnapshot(req.IncludeRecent), nil
 	}
 	return tool.TaskStatusResult{}, fmt.Errorf("unknown or inaccessible child session %q", id)
+}
+
+// resolveOwnedChildRef maps a session id or team name alias to a session id.
+// When the ref is not on the team, the original string is returned so ownership
+// checks still fail closed with the caller's token.
+func (e *Engine) resolveOwnedChildRef(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" || e == nil || e.team == nil {
+		return ref
+	}
+	if id, ok := e.team.Resolve(ref); ok {
+		return id
+	}
+	return ref
 }
 
 func (h *childHandle) statusSnapshot(includeRecent bool) tool.TaskStatusResult {
@@ -656,6 +709,7 @@ func (e *Engine) childRead(ctx context.Context, req tool.TaskReadRequest) (tool.
 	if id == "" {
 		return tool.TaskReadResult{}, fmt.Errorf("session_id is required")
 	}
+	id = e.resolveOwnedChildRef(id)
 	limit := tool.ClampTaskReadLimit(req.Limit)
 	if req.Last > 0 {
 		limit = tool.ClampTaskReadLimit(req.Last)
@@ -741,6 +795,7 @@ func (e *Engine) childMessage(ctx context.Context, req tool.TaskMessageRequest) 
 	if text == "" {
 		return tool.TaskMessageResult{}, fmt.Errorf("text is required")
 	}
+	id = e.resolveOwnedChildRef(id)
 
 	e.childMu.Lock()
 	h := e.children[id]
@@ -804,6 +859,7 @@ func (e *Engine) childInterrupt(ctx context.Context, req tool.TaskInterruptReque
 	if id == "" {
 		return tool.TaskInterruptResult{}, fmt.Errorf("session_id is required")
 	}
+	id = e.resolveOwnedChildRef(id)
 
 	e.childMu.Lock()
 	h := e.children[id]
@@ -991,10 +1047,16 @@ func formatChildCompletedNotice(c protocol.ChildCompleted) string {
 	if len(short) > 8 {
 		short = short[:8]
 	}
+	name := strings.TrimSpace(c.Name)
 	var b strings.Builder
-	if short != "" {
+	switch {
+	case short != "" && name != "":
+		fmt.Fprintf(&b, "[child.completed session=%s name=%s status=%s]", short, name, status)
+	case short != "":
 		fmt.Fprintf(&b, "[child.completed session=%s status=%s]", short, status)
-	} else {
+	case name != "":
+		fmt.Fprintf(&b, "[child.completed name=%s status=%s]", name, status)
+	default:
 		fmt.Fprintf(&b, "[child.completed status=%s]", status)
 	}
 	if summary := strings.TrimSpace(c.Summary); summary != "" {

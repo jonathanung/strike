@@ -19,6 +19,8 @@ func (taskTool) Description() string {
 - Returns immediately after the child starts (does not block this turn).
 - Result includes the child session id; a later [child.completed] message carries the terminal summary automatically.
 - Do not sleep-poll waiting for the child — continue other work or end the turn; completion is event-driven.
+- Optional name is a stable teammate alias unique on the session team (e.g. explorer).
+  Addressable in agent_roster and messaging tools; session_id still works when omitted.
 - Optional agent selects a persona (defaults to the current agent). Built-in names include:
   explore (read-only search), general (multi-step), commit (git commits only),
   reviewer (read-only review), tester (run make test/vet/build), debugger (root-cause),
@@ -28,7 +30,7 @@ func (taskTool) Description() string {
 - Optional effort pins the child's reasoning effort (off|low|medium|high|xhigh|max).
   Omit to inherit the parent dial (agent effort pins still apply). When set, wins over agent pins.
 - Nested task depth is bounded by MaxChildDepth (default 1: children cannot nest).
-- Use task_status/task_read/task_message/task_interrupt with the session id for
+- Use task_status/task_read/task_message/task_interrupt with the session id or name for
   intermediate control — do not sleep-poll for completion.
 - Use for scoped work that benefits from a fresh message history.`
 }
@@ -38,6 +40,7 @@ func (taskTool) Schema() json.RawMessage {
 		"type": "object",
 		"properties": {
 			"prompt": {"type": "string", "description": "The subtask instructions for the child agent"},
+			"name": {"type": "string", "description": "Optional stable teammate alias unique on this session team (e.g. explorer). Addressable in roster/messaging; omit to use session id only"},
 			"agent": {"type": "string", "description": "Optional agent persona: explore, general, commit, reviewer, tester, debugger, build, plan, or a user-defined name (default: current agent)"},
 			"model": {"type": "string", "description": "Optional model id for the child (bare id on the current provider, or provider/model). Must be in the shared model catalog; omit to inherit the parent model"},
 			"effort": {"type": "string", "description": "Optional reasoning effort for the child: off, low, medium, high, xhigh, or max. Omit to inherit the parent dial"}
@@ -48,6 +51,7 @@ func (taskTool) Schema() json.RawMessage {
 
 type taskArgs struct {
 	Prompt string `json:"prompt"`
+	Name   string `json:"name"`
 	Agent  string `json:"agent"`
 	Model  string `json:"model"`
 	Effort string `json:"effort"`
@@ -67,13 +71,15 @@ func (taskTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	if tc.SpawnTask == nil {
 		return Result{}, fmt.Errorf("task is not available")
 	}
-	res, err := tc.SpawnTask(ctx, TaskRequest{Prompt: a.Prompt, Agent: a.Agent, Model: a.Model, Effort: a.Effort})
+	res, err := tc.SpawnTask(ctx, TaskRequest{Prompt: a.Prompt, Name: a.Name, Agent: a.Agent, Model: a.Model, Effort: a.Effort})
 	if err != nil {
 		return Result{}, err
 	}
 	out := res.Output
 	title := "task"
-	if res.SessionID != "" {
+	if n := strings.TrimSpace(res.Name); n != "" {
+		title = "task " + n
+	} else if res.SessionID != "" {
 		title = "task " + shortID(res.SessionID)
 	}
 	meta := taskMetadata(res)
@@ -102,13 +108,17 @@ func shortID(id string) string {
 }
 
 func taskMetadata(res TaskResult) json.RawMessage {
-	if res.SessionID == "" && res.Status == "" {
+	if res.SessionID == "" && res.Status == "" && res.Name == "" {
 		return nil
 	}
-	b, err := json.Marshal(map[string]string{
+	meta := map[string]string{
 		"sessionId": res.SessionID,
 		"status":    res.Status,
-	})
+	}
+	if n := strings.TrimSpace(res.Name); n != "" {
+		meta["name"] = n
+	}
+	b, err := json.Marshal(meta)
 	if err != nil {
 		return nil
 	}

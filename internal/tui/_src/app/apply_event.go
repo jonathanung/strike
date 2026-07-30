@@ -289,6 +289,7 @@ func (m *Model) onChildStarted(ev protocol.ChildStarted) {
 		if m.children[i].sessionID == id {
 			m.children[i].agent = ev.Agent
 			m.children[i].prompt = ev.Prompt
+			m.children[i].name = ev.Name
 			m.children[i].status = "running"
 			if parentID != "" {
 				m.children[i].parentID = parentID
@@ -308,6 +309,7 @@ func (m *Model) onChildStarted(ev protocol.ChildStarted) {
 		parentID:  parentID,
 		agent:     ev.Agent,
 		prompt:    ev.Prompt,
+		name:      ev.Name,
 		title:     m.lookupSessionTitle(id),
 		status:    "running",
 		startedAt: now,
@@ -327,6 +329,9 @@ func (m *Model) onChildCompleted(ev protocol.ChildCompleted) {
 	for i := range m.children {
 		if m.children[i].sessionID == id || (id == "" && i == len(m.children)-1) {
 			m.children[i].status = status
+			if ev.Name != "" {
+				m.children[i].name = ev.Name
+			}
 			if ev.ParentSessionID != "" && m.children[i].parentID == "" {
 				m.children[i].parentID = ev.ParentSessionID
 			}
@@ -343,6 +348,7 @@ func (m *Model) onChildCompleted(ev protocol.ChildCompleted) {
 		m.children = append(m.children, childActivity{
 			sessionID: id,
 			parentID:  ev.ParentSessionID,
+			name:      ev.Name,
 			status:    status,
 			startedAt: now,
 			endedAt:   now,

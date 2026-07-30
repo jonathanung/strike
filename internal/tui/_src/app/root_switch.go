@@ -428,6 +428,7 @@ func applyEventToPane(p *rootPane, ev protocol.Event) {
 			if p.children[i].sessionID == id {
 				p.children[i].agent = e.Agent
 				p.children[i].prompt = e.Prompt
+				p.children[i].name = e.Name
 				p.children[i].status = "running"
 				p.children[i].startedAt = time.Now()
 				p.children[i].endedAt = time.Time{}
@@ -446,6 +447,7 @@ func applyEventToPane(p *rootPane, ev protocol.Event) {
 				parentID:  e.ParentSessionID,
 				agent:     e.Agent,
 				prompt:    e.Prompt,
+				name:      e.Name,
 				status:    "running",
 				startedAt: time.Now(),
 			})
@@ -463,6 +465,9 @@ func applyEventToPane(p *rootPane, ev protocol.Event) {
 			if p.children[i].sessionID == id || (id == "" && i == len(p.children)-1) {
 				p.children[i].status = status
 				p.children[i].endedAt = time.Now()
+				if e.Name != "" {
+					p.children[i].name = e.Name
+				}
 				if e.ParentSessionID != "" && p.children[i].parentID == "" {
 					p.children[i].parentID = e.ParentSessionID
 				}

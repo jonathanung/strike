@@ -50,6 +50,9 @@ type AskRequest struct {
 type TaskRequest struct {
 	Prompt string
 	Agent  string
+	// Name is an optional stable teammate alias unique within the session team
+	// (e.g. "explorer"). Empty leaves the child addressable by session id only.
+	Name string
 	// Model is an optional model id for the child (bare id on the parent
 	// provider, or "provider/model"). Empty inherits the parent's model
 	// (subject to agent pins).
@@ -68,6 +71,8 @@ type TaskResult struct {
 	Output    string
 	Status    string
 	SessionID string
+	// Name is the stable alias assigned at spawn when requested (may be empty).
+	Name string
 }
 
 // Task control request/result types for parent inspection of owned children.
