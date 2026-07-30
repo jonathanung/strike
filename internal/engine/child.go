@@ -98,6 +98,10 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 	if !ok {
 		return tool.TaskResult{}, fmt.Errorf("unknown agent %q (available: %s)", agentName, agentNamesList(e.opts.Agents))
 	}
+	childHarness, childHarnessName, err := e.resolveHarness(childAgent)
+	if err != nil {
+		return tool.TaskResult{}, err
+	}
 
 	// Resolve optional model pin (catalog + Select) before opening a session
 	// so invalid models / bad providers fail the tool with no child side effects.
@@ -206,6 +210,8 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		HookRules:           e.opts.HookRules,
 		PersistProjectRule:  e.opts.PersistProjectRule,
 	})
+	child.taskHarness = childHarness
+	child.taskHarnessName = childHarnessName
 
 	// Inherit the parent's live provider/model/priority, then optionally apply
 	// a task model pin. Clearing InitialProvider avoids Run's silent Select
@@ -548,6 +554,9 @@ func (h *childHandle) noteEvent(ev protocol.Event) {
 		}
 	case protocol.TextDelta:
 		// skip high-frequency deltas in activity
+	case protocol.HarnessProgress:
+		summary := strings.TrimSpace(ev.Name + ": " + string(ev.Payload))
+		h.pushActivityLocked(truncateRunes(strings.TrimSuffix(summary, ":"), 80))
 	case protocol.EngineError:
 		if msg := strings.TrimSpace(ev.Message); msg != "" {
 			h.pushActivityLocked("error: " + truncateRunes(msg, 80))
@@ -612,6 +621,9 @@ func summarizeChildEvent(index int, ev protocol.Event) (tool.TaskTranscriptEntry
 		if t := strings.TrimSpace(ev.Text); t != "" {
 			return tool.TaskTranscriptEntry{Index: index, Kind: "reasoning", Summary: truncateRunes(t, 160)}, true
 		}
+	case protocol.HarnessProgress:
+		summary := strings.TrimSpace(ev.Name + ": " + string(ev.Payload))
+		return tool.TaskTranscriptEntry{Index: index, Kind: "harness.progress", Summary: truncateRunes(strings.TrimSuffix(summary, ":"), 200)}, true
 	case protocol.EngineError:
 		return tool.TaskTranscriptEntry{Index: index, Kind: "error", Summary: truncateRunes(ev.Message, 200)}, true
 	}

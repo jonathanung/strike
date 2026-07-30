@@ -1,0 +1,11 @@
+name = "strike-harness-example"
+version = "0.1.0"
+defaultTargets = ["choose_best_lean"]
+
+[[require]]
+name = "strike-harness"
+path = "../../sdk/lean"
+
+[[lean_exe]]
+name = "choose_best_lean"
+root = "ChooseBest"

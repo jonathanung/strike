@@ -47,8 +47,8 @@ type Agent struct {
 	Model       string
 	Effort      protocol.Effort
 	Prompt      string
-	// Harness selects a custom turn-loop controller. Empty and "default" use
-	// the built-in loop; registered names dispatch to a harness from Options.
+	// Harness selects the function used when this agent runs as a task subagent.
+	// Empty and "default" use the built-in child model/tool loop.
 	// An unknown name falls back to default with a startup error.
 	Harness     string
 	Permissions permission.Ruleset
@@ -216,8 +216,8 @@ type Options struct {
 	// seeds from Replay. Cleared before the op loop so user-driven changes
 	// still emit.
 	QuietStartup bool
-	// HarnessRegistry resolves named harnesses from agent frontmatter.
-	// nil means no custom harnesses (all agents use the default loop).
+	// HarnessRegistry maps task-subagent Agent.Harness names to complete agent-run
+	// functions. nil means every child uses the built-in loop.
 	HarnessRegistry *harness.Registry
 }
 
@@ -261,6 +261,9 @@ type Engine struct {
 	// permMode is the session tool-permission posture dial.
 	permMode protocol.PermissionMode
 	agent    Agent
+	// taskHarness is attached only by spawnChild for the selected child agent.
+	taskHarness     harness.Func
+	taskHarnessName string
 	// priority requests OpenAI service_tier=priority on subsequent turns.
 	// Sticky across model switches; adapters that do not support it no-op.
 	priority bool

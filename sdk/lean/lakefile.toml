@@ -1,0 +1,6 @@
+name = "strike-harness"
+version = "0.1.0"
+defaultTargets = ["StrikeHarness"]
+
+[[lean_lib]]
+name = "StrikeHarness"
