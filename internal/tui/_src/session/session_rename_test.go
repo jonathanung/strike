@@ -45,9 +45,16 @@ func TestChildViewTitleBrief(t *testing.T) {
 			wantContains: []string{"subagent"},
 		},
 	}
+	// Stable spawn name beats agent+id; durable title still wins.
+	if got := childViewTitle("explore", "p", "child-abcdef12", "", "researcher"); got != "researcher" {
+		t.Fatalf("name alias label = %q, want researcher", got)
+	}
+	if got := childViewTitle("explore", "p", "child-abcdef12", "ship auth", "researcher"); got != "ship auth" {
+		t.Fatalf("durable title should win over name: got %q", got)
+	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := childViewTitle(tt.agent, tt.prompt, tt.id, tt.title)
+			got := childViewTitle(tt.agent, tt.prompt, tt.id, tt.title, "")
 			for _, w := range tt.wantContains {
 				if !strings.Contains(got, w) {
 					t.Errorf("got %q, want contain %q", got, w)
@@ -233,7 +240,7 @@ func TestApplySessionRenameUpdatesChildAndRoot(t *testing.T) {
 	if m.children[0].title != "new child" {
 		t.Fatalf("child title = %q", m.children[0].title)
 	}
-	label := childViewTitle(m.children[0].agent, m.children[0].prompt, m.children[0].sessionID, m.children[0].title)
+	label := childViewTitle(m.children[0].agent, m.children[0].prompt, m.children[0].sessionID, m.children[0].title, m.children[0].name)
 	if label != "new child" {
 		t.Fatalf("label = %q", label)
 	}

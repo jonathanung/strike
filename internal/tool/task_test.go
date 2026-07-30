@@ -81,6 +81,32 @@ func TestTaskPassesEffort(t *testing.T) {
 	}
 }
 
+func TestTaskPassesName(t *testing.T) {
+	tc := allowAll(t.TempDir())
+	var gotReq TaskRequest
+	tc.SpawnTask = func(_ context.Context, req TaskRequest) (TaskResult, error) {
+		gotReq = req
+		return TaskResult{Output: "started", Status: "started", SessionID: "abc12345xyz", Name: "explorer"}, nil
+	}
+	res, err := NewTask().Execute(context.Background(), mustJSON(t, map[string]any{
+		"prompt": "scan tree",
+		"name":   "explorer",
+		"agent":  "explore",
+	}), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotReq.Name != "explorer" || gotReq.Agent != "explore" {
+		t.Fatalf("SpawnTask req = %#v", gotReq)
+	}
+	if res.Title != "task explorer" {
+		t.Fatalf("title = %q, want task explorer", res.Title)
+	}
+	if !strings.Contains(string(res.Metadata), `"name":"explorer"`) {
+		t.Fatalf("metadata = %s, want name", res.Metadata)
+	}
+}
+
 func TestTaskCanceledOrFailedStatus(t *testing.T) {
 	cases := []struct {
 		status string

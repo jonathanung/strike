@@ -194,6 +194,7 @@ type navChild struct {
 	prompt string
 	status string
 	title  string
+	name   string
 }
 
 func (m *Model) listChildren(parentID string) []navChild {
@@ -221,6 +222,8 @@ func (m *Model) listChildren(parentID string) []navChild {
 				agent:  ch.agent,
 				prompt: ch.prompt,
 				status: ch.status,
+				title:  ch.title,
+				name:   ch.name,
 			})
 		}
 		if len(out) > 0 {
@@ -237,15 +240,24 @@ func (m *Model) listChildren(parentID string) []navChild {
 	out := make([]navChild, 0, len(list))
 	for _, s := range list {
 		status := ""
+		name := ""
+		agent := ""
+		prompt := ""
 		for _, ch := range m.children {
 			if ch.sessionID == s.ID {
 				status = ch.status
+				name = ch.name
+				agent = ch.agent
+				prompt = ch.prompt
 				break
 			}
 		}
 		out = append(out, navChild{
 			id:     s.ID,
 			title:  s.Title,
+			name:   name,
+			agent:  agent,
+			prompt: prompt,
 			status: status,
 		})
 	}
@@ -273,7 +285,7 @@ func (m *Model) openSessionView(id string) tea.Cmd {
 	if title == "" {
 		for _, ch := range m.children {
 			if ch.sessionID == id {
-				title = childViewTitle(ch.agent, ch.prompt, ch.sessionID, ch.title)
+				title = childViewTitle(ch.agent, ch.prompt, ch.sessionID, ch.title, ch.name)
 				break
 			}
 		}
@@ -355,11 +367,14 @@ func (m *Model) refreshViewingTranscript() tea.Cmd {
 	return nil
 }
 
-// childViewTitle builds a brief subagent label: durable title, else
-// "{agent} {shortId}", else one of those parts, else "subagent".
-func childViewTitle(agent, prompt, sessionID, title string) string {
+// childViewTitle builds a brief subagent label: durable title, else stable
+// spawn name, else "{agent} {shortId}", else one of those parts, else "subagent".
+func childViewTitle(agent, prompt, sessionID, title, name string) string {
 	if t := strings.TrimSpace(title); t != "" {
 		return sanitizeTitleTopic(t)
+	}
+	if n := strings.TrimSpace(name); n != "" {
+		return n
 	}
 	agent = strings.TrimSpace(agent)
 	short := shortSessionID(sessionID)
@@ -533,6 +548,7 @@ func childrenFromEvents(events []protocol.Event) []childActivity {
 			if i, ok := index[id]; ok {
 				out[i].agent = e.Agent
 				out[i].prompt = e.Prompt
+				out[i].name = e.Name
 				out[i].status = "running"
 				if e.ParentSessionID != "" {
 					out[i].parentID = e.ParentSessionID
@@ -545,6 +561,7 @@ func childrenFromEvents(events []protocol.Event) []childActivity {
 				parentID:  e.ParentSessionID,
 				agent:     e.Agent,
 				prompt:    e.Prompt,
+				name:      e.Name,
 				status:    "running",
 			})
 		case protocol.ChildCompleted:
@@ -556,6 +573,9 @@ func childrenFromEvents(events []protocol.Event) []childActivity {
 			if id != "" {
 				if i, ok := index[id]; ok {
 					out[i].status = status
+					if e.Name != "" {
+						out[i].name = e.Name
+					}
 					if e.ParentSessionID != "" && out[i].parentID == "" {
 						out[i].parentID = e.ParentSessionID
 					}
@@ -563,6 +583,9 @@ func childrenFromEvents(events []protocol.Event) []childActivity {
 				}
 			} else if len(out) > 0 {
 				out[len(out)-1].status = status
+				if e.Name != "" {
+					out[len(out)-1].name = e.Name
+				}
 				continue
 			}
 			if id == "" {
@@ -572,6 +595,7 @@ func childrenFromEvents(events []protocol.Event) []childActivity {
 			out = append(out, childActivity{
 				sessionID: id,
 				parentID:  e.ParentSessionID,
+				name:      e.Name,
 				status:    status,
 			})
 		}
@@ -780,6 +804,8 @@ func (m Model) sessionTreeNodes() []ui.TreeNode {
 						agent:  ch.agent,
 						prompt: ch.prompt,
 						status: ch.status,
+						title:  ch.title,
+						name:   ch.name,
 					})
 				}
 			}
@@ -799,10 +825,7 @@ func (m Model) sessionTreeNodes() []ui.TreeNode {
 func (m Model) navChildrenToTree(kids []navChild) []ui.TreeNode {
 	out := make([]ui.TreeNode, 0, len(kids))
 	for _, ch := range kids {
-		label := ch.title
-		if label == "" {
-			label = childViewTitle(ch.agent, ch.prompt, ch.id, "")
-		}
+		label := childViewTitle(ch.agent, ch.prompt, ch.id, ch.title, ch.name)
 		if label == "" {
 			label = shortSessionID(ch.id)
 		}

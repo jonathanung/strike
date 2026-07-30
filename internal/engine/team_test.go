@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -318,4 +319,77 @@ func rosterIDs(tm *Team) []string {
 		ids[i] = m.SessionID
 	}
 	return ids
+}
+
+func TestValidateMemberName(t *testing.T) {
+	cases := []struct {
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{"", "", false},
+		{"  explorer  ", "explorer", false},
+		{"a_b-1", "a_b-1", false},
+		{"has space", "", true},
+		{"bad!", "", true},
+		{strings.Repeat("x", maxTeamMemberNameLen+1), "", true},
+		{strings.Repeat("x", maxTeamMemberNameLen), strings.Repeat("x", maxTeamMemberNameLen), false},
+	}
+	for _, tc := range cases {
+		got, err := ValidateMemberName(tc.in)
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("ValidateMemberName(%q) err=nil, want error", tc.in)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("ValidateMemberName(%q) err=%v", tc.in, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("ValidateMemberName(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestTeamNameAliasUniqueAndResolve(t *testing.T) {
+	tm := NewTeam("L", "build")
+	if !tm.Enroll(TeamMember{SessionID: "A", ParentSessionID: "L", Name: "explorer", Depth: 1}) {
+		t.Fatal("enroll A explorer")
+	}
+	if tm.Enroll(TeamMember{SessionID: "B", ParentSessionID: "L", Name: "explorer", Depth: 1}) {
+		t.Fatal("duplicate name must be rejected")
+	}
+	if tm.Contains("B") {
+		t.Fatal("B must not enroll after name collision")
+	}
+	if !tm.Enroll(TeamMember{SessionID: "B", ParentSessionID: "L", Name: "implementer", Depth: 1}) {
+		t.Fatal("enroll B implementer")
+	}
+
+	id, ok := tm.Resolve("explorer")
+	if !ok || id != "A" {
+		t.Fatalf("Resolve(explorer) = %q ok=%v, want A", id, ok)
+	}
+	id, ok = tm.Resolve("A")
+	if !ok || id != "A" {
+		t.Fatalf("Resolve(session) = %q ok=%v", id, ok)
+	}
+	// Session id wins over a name that collides with another member's id.
+	if !tm.Enroll(TeamMember{SessionID: "C", ParentSessionID: "L", Name: "B", Depth: 1}) {
+		t.Fatal("enroll C named B (name equals another session id)")
+	}
+	id, ok = tm.Resolve("B")
+	if !ok || id != "B" {
+		t.Fatalf("Resolve prefers session id: got %q ok=%v", id, ok)
+	}
+	owner, ok := tm.NameOwner("implementer")
+	if !ok || owner != "B" {
+		t.Fatalf("NameOwner(implementer) = %q ok=%v", owner, ok)
+	}
+	// Re-enroll same id with same name is fine.
+	if !tm.Enroll(TeamMember{SessionID: "A", ParentSessionID: "L", Name: "explorer", Persona: "explore", Depth: 1}) {
+		t.Fatal("re-enroll A with same name")
+	}
 }

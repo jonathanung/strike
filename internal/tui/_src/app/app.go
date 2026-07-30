@@ -368,6 +368,7 @@ type childActivity struct {
 	parentID  string // spawning session; empty means direct root child
 	agent     string
 	prompt    string
+	name      string // optional stable teammate alias from task spawn
 	title     string // durable display title when known (user rename / create)
 	status    string // running | completed | failed | canceled
 	startedAt time.Time
