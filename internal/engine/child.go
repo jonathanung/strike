@@ -280,6 +280,10 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 				e.emit(ev)
 			case protocol.ChildCompleted:
 				e.emit(ev)
+			case protocol.AgentMessage:
+				// Peer mailbox traffic on a child: surface on the parent
+				// stream for TUI/debug (recipient correlation retained).
+				e.emit(ev)
 			case protocol.TurnCompleted:
 				// One-shot task: record stop reason. Do not cancel here —
 				// TaskOneShot Run exits when idle so nested grandchildren
@@ -407,6 +411,12 @@ func (e *Engine) finishChild(h *childHandle, completed protocol.ChildCompleted) 
 	}
 	h.mu.Unlock()
 
+	// Stop accepting peer mail before the handle leaves the live map.
+	if e.team != nil {
+		e.team.DetachMailbox(h.id)
+		e.team.SetState(h.id, protocol.TeamMemberStateFromChild(completed.Status))
+	}
+
 	e.childMu.Lock()
 	defer e.childMu.Unlock()
 	delete(e.children, h.id)
@@ -414,11 +424,6 @@ func (e *Engine) finishChild(h *childHandle, completed protocol.ChildCompleted) 
 		e.childHistory = make(map[string]*childRecord)
 	}
 	e.childHistory[h.id] = rec
-
-	// Terminal members remain listable on the team until lead Dissolve.
-	if e.team != nil {
-		e.team.SetState(h.id, protocol.TeamMemberStateFromChild(completed.Status))
-	}
 }
 
 // dissolveTeamIfLead clears the implicit team when this engine is the lead.

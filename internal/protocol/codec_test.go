@@ -42,6 +42,14 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 		EngineError{Correlation: corr, Message: "boom"},
 		ChildStarted{Correlation: childCorr, Agent: "build", Prompt: "do the subtask"},
 		ChildCompleted{Correlation: childCorr, Status: ChildStatusCompleted, Summary: "done"},
+		AgentMessage{
+			Correlation: childCorr,
+			From:        "session-1",
+			To:          "child-1",
+			Body:        "handoff package path",
+			TeamID:      "session-1",
+			MessageID:   "msg-1",
+		},
 		UsageReported{
 			Correlation: corr,
 			Input:       KnownTokens(100),
@@ -389,6 +397,7 @@ func TestEventTypeCoverage(t *testing.T) {
 		"engine.error":         EngineError{},
 		"child.started":        ChildStarted{},
 		"child.completed":      ChildCompleted{},
+		"agent.message":        AgentMessage{},
 		"usage.reported":       UsageReported{},
 		"provider.retrying":    ProviderRetrying{},
 		"compaction.started":   CompactionStarted{},

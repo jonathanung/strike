@@ -304,6 +304,15 @@ type Engine struct {
 	// follow-up prompts typed mid-turn are not lost.
 	pendingUserInputs []pendingUserInput
 
+	// mailbox holds unread peer/team messages for this session. Delivery is
+	// at tool-round / turn boundaries (injectPendingMailbox /
+	// flushPendingMailbox), never mid-tool-call.
+	mailbox *Mailbox
+	// mailboxMu guards mailboxWake. Wake is signaled when a peer message is
+	// enqueued so idle Run can auto-nudge.
+	mailboxMu   sync.Mutex
+	mailboxWake chan struct{}
+
 	// pendingAgent is set by tools via SwitchAgent and applied after each tool
 	// batch (so the next Stream sees the new agent/prompt) and again in
 	// completeTurn if anything remains when the turn ends.
@@ -462,7 +471,11 @@ func (e *Engine) Run(ctx context.Context) {
 	// listable for the lead's lifetime, then clear on lead exit.
 	defer close(e.events)
 	defer e.dissolveTeamIfLead()
+	defer e.detachMailbox()
 	defer e.shutdownChildren()
+	if e.team != nil {
+		e.team.AttachMailbox(e)
+	}
 	e.quietStartup = e.opts.QuietStartup
 	if e.opts.InitialProvider != "" && e.opts.Select != nil {
 		name := config.CanonicalProviderID(e.opts.InitialProvider)
@@ -524,6 +537,7 @@ func (e *Engine) Run(ctx context.Context) {
 		if e.turnDone != nil {
 			turnDone = e.turnDone
 		}
+		mailboxWake := e.mailboxWakeCh()
 		select {
 		case <-ctx.Done():
 			e.cancelAndJoinTurn()
@@ -545,6 +559,11 @@ func (e *Engine) Run(ctx context.Context) {
 			if e.taskOneShotIdle(oneshotTurnSeen) {
 				return
 			}
+		case <-mailboxWake:
+			e.drainIdleFollowups(ctx)
+			if e.taskOneShotIdle(oneshotTurnSeen) {
+				return
+			}
 		case <-turnDone:
 			oneshotTurnSeen = true
 			e.reapTurn()
@@ -556,6 +575,13 @@ func (e *Engine) Run(ctx context.Context) {
 	}
 }
 
+func (e *Engine) detachMailbox() {
+	if e == nil || e.team == nil {
+		return
+	}
+	e.team.DetachMailbox(e.opts.SessionID)
+}
+
 // taskOneShotIdle reports whether a task-spawned engine should exit Run:
 // at least one turn finished, no nested children, no active turn, and no
 // queued follow-ups (child notices or pending user inputs).
@@ -563,7 +589,7 @@ func (e *Engine) taskOneShotIdle(turnSeen bool) bool {
 	if !e.opts.TaskOneShot || !turnSeen {
 		return false
 	}
-	if e.turnActive() || e.hasPendingChildNotices() || len(e.pendingUserInputs) > 0 {
+	if e.turnActive() || e.hasPendingChildNotices() || e.hasPendingMailbox() || len(e.pendingUserInputs) > 0 {
 		return false
 	}
 	e.childMu.Lock()
