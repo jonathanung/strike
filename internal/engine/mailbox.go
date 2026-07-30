@@ -287,12 +287,15 @@ func (t *Team) DeliverMessage(msg MailboxMessage) MailboxStatus {
 
 // EnqueueTeamMessage is the engine-facing inject API for peer mailbox delivery.
 // Used by agent_message / agent_broadcast. from defaults to this session.
+// to may be a session id or stable teammate name alias (resolved via Team.Resolve).
 func (e *Engine) EnqueueTeamMessage(from, to, body string) MailboxStatus {
 	return e.EnqueueTeamMail(MailboxMessage{From: from, To: to, Body: body})
 }
 
 // EnqueueTeamMail delivers a full mailbox message (optional Summary).
-// From defaults to this session when empty.
+// From defaults to this session when empty. Never rewrite From via name —
+// callers must use their session id so the sender cannot be spoofed.
+// To may be a session id or unique roster name alias.
 func (e *Engine) EnqueueTeamMail(msg MailboxMessage) MailboxStatus {
 	if e == nil {
 		return MailboxStatus{Status: "rejected", Detail: "no engine", To: strings.TrimSpace(msg.To)}
@@ -301,14 +304,20 @@ func (e *Engine) EnqueueTeamMail(msg MailboxMessage) MailboxStatus {
 	if from == "" {
 		from = e.opts.SessionID
 	}
+	to := strings.TrimSpace(msg.To)
 	msg.From = from
+	msg.To = to
 	if e.team == nil {
 		return MailboxStatus{
 			From:   from,
-			To:     strings.TrimSpace(msg.To),
+			To:     to,
 			Status: "rejected",
 			Detail: "no team",
 		}
+	}
+	// Resolve recipient aliases only.
+	if id, ok := e.team.Resolve(to); ok {
+		msg.To = id
 	}
 	return e.team.DeliverMessage(msg)
 }

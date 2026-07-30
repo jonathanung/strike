@@ -494,61 +494,91 @@ func TestAgentMessageResolveByName(t *testing.T) {
 		t.Fatalf("missing detail = %q ok=%v", detail, ok)
 	}
 
-	// Ambiguous name across two members.
-	_ = team.Enroll(engine.TeamMember{
+	// Team.Enroll rejects duplicate names (#611); second enroll must fail and
+	// the original alias must still resolve uniquely.
+	if team.Enroll(engine.TeamMember{
 		SessionID: "sess-y", ParentSessionID: "L", Name: "explorer", Depth: 1,
-	})
-	_, detail, ok = team.ResolveAddressDetail("explorer")
-	if ok || detail != "teammate name is ambiguous" {
-		t.Fatalf("ambiguous detail = %q ok=%v", detail, ok)
+	}) {
+		t.Fatal("duplicate name enroll should fail")
+	}
+	id, ok = team.ResolveAddress("explorer")
+	if !ok || id != "sess-x" {
+		t.Fatalf("after failed dup enroll resolve = %q %v", id, ok)
 	}
 }
 
-func TestAgentMessageRejectsAmbiguousName(t *testing.T) {
-	const leadID = "lead-am-ambig"
+func TestAgentMessageByNameDelivers(t *testing.T) {
+	const (
+		leadID = "lead-am-byname"
+		toID   = "child-named-am"
+		body   = "hello-by-name"
+	)
 	team := engine.NewTeam(leadID, "build")
-	_ = team.Enroll(engine.TeamMember{SessionID: "a1", ParentSessionID: leadID, Name: "twin", Depth: 1})
-	_ = team.Enroll(engine.TeamMember{SessionID: "a2", ParentSessionID: leadID, Name: "twin", Depth: 1})
-	// Direct engine call without full Run (resolve only).
-	eng := engine.New(engine.Options{
-		SessionID: leadID, Team: team, Agents: []engine.Agent{{Name: "build"}},
+	if !team.Enroll(engine.TeamMember{
+		SessionID: toID, ParentSessionID: leadID, Name: "researcher", Depth: 1,
+	}) {
+		t.Fatal("enroll")
+	}
+	childProv := newScriptedProvider(completedStep("warm"), completedStep("got"))
+	call := controlToolCall("am-name", "agent_message", map[string]any{
+		"to": "researcher", "body": body,
 	})
-	// agentMessage is unexported — exercise via tool registry + Run.
-	call := controlToolCall("am-ambig", "agent_message", map[string]any{
-		"to": "twin", "body": "which one?",
-	})
-	prov := newScriptedProvider(
+	leadProv := newScriptedProvider(
 		toolCallStep(call),
 		func() streamStep {
-			s := completedStep("after")
-			s.match = matchToolResult("am-ambig")
+			s := completedStep("sent")
+			s.match = matchToolResult("am-name")
 			return s
 		}(),
 	)
-	eng = engine.New(engine.Options{
+	lead := engine.New(engine.Options{
 		SessionID: leadID, Team: team, Agents: []engine.Agent{{Name: "build"}},
-		Select:          func(string) (provider.Provider, string, error) { return prov, "m", nil },
-		InitialProvider: "scripted",
-		Registry:        agentMessageRegistry(),
-		WorkDir:         t.TempDir(),
-		Rules:           []permission.Ruleset{permission.Defaults()},
+		Select:          func(string) (provider.Provider, string, error) { return leadProv, "m", nil },
+		InitialProvider: "scripted", Registry: agentMessageRegistry(),
+		WorkDir: t.TempDir(), Rules: []permission.Ruleset{permission.Defaults()},
 	})
-	// Need live recipients only if delivery proceeds — resolve fails first.
+	child := engine.New(engine.Options{
+		SessionID: toID, ParentSessionID: leadID, Depth: 1, Team: team,
+		Agents:          []engine.Agent{{Name: "explore"}},
+		Select:          func(string) (provider.Provider, string, error) { return childProv, "m", nil },
+		InitialProvider: "scripted", WorkDir: t.TempDir(),
+		Rules: []permission.Ruleset{permission.Defaults()},
+	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go eng.Run(ctx)
-	waitTeamLive(t, team, leadID)
-	eng.Ops() <- protocol.UserInput{Text: "ambig"}
-	events := drainUntil(t, eng, 8*time.Second, func(evs []protocol.Event) bool {
-		end, ok := toolEnd(evs, "am-ambig")
-		return ok && end.Output != ""
+	go lead.Run(ctx)
+	go child.Run(ctx)
+	go func() {
+		for range child.Events() {
+		}
+	}()
+	waitTeamLive(t, team, leadID, toID)
+	lead.Ops() <- protocol.UserInput{Text: "msg by name"}
+	events := drainUntil(t, lead, 8*time.Second, func(evs []protocol.Event) bool {
+		_, ok := toolEndOutput(evs, "am-name")
+		return ok
 	})
-	end, ok := toolEnd(events, "am-ambig")
-	if !ok || !end.IsError {
-		t.Fatalf("want error end, got %#v", end)
+	out, ok := toolEndOutput(events, "am-name")
+	if !ok {
+		t.Fatal("missing tool end")
 	}
-	if !strings.Contains(end.Output, "ambiguous") {
-		t.Fatalf("output = %q", end.Output)
+	var parsed tool.AgentMessageResult
+	if err := json.Unmarshal([]byte(out), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Status != "accepted" || parsed.To != toID {
+		t.Fatalf("result = %+v", parsed)
+	}
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case req := <-childProv.requests:
+			if requestHasMailboxBody(req, body) {
+				return
+			}
+		case <-deadline:
+			t.Fatal("named recipient never saw body")
+		}
 	}
 }
 

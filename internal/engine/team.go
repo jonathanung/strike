@@ -1,13 +1,19 @@
 package engine
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
+
+// maxTeamMemberNameLen bounds optional teammate aliases.
+const maxTeamMemberNameLen = 64
 
 // Team is the implicit session-scoped agent team for one lead.
 //
@@ -34,13 +40,36 @@ type Team struct {
 // TeamMember is one roster entry (lead or child).
 type TeamMember struct {
 	SessionID       string
-	Name            string // optional stable alias (filled by later naming work)
+	Name            string // optional stable alias unique within the team
 	Persona         string // agent persona name
 	State           protocol.TeamMemberState
 	ParentSessionID string    // empty on the lead
 	Depth           int       // 0 = lead
 	StartedAt       time.Time // enrollment / lead creation time when known
 	Summary         string    // short terminal summary when done
+}
+
+// ValidateMemberName normalizes and checks an optional teammate alias.
+// Empty input is valid (no alias). Non-empty names must be ≤64 runes, contain
+// no whitespace, and use only letters, digits, '_' and '-'.
+func ValidateMemberName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", nil
+	}
+	if utf8.RuneCountInString(name) > maxTeamMemberNameLen {
+		return "", fmt.Errorf("name exceeds %d characters", maxTeamMemberNameLen)
+	}
+	for _, r := range name {
+		if unicode.IsSpace(r) {
+			return "", fmt.Errorf("name must not contain whitespace")
+		}
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-' {
+			continue
+		}
+		return "", fmt.Errorf("name may only contain letters, digits, '_' and '-'")
+	}
+	return name, nil
 }
 
 // NewTeam creates a team whose identity is leadID. The lead is enrolled as a
@@ -156,6 +185,31 @@ func (t *Team) Member(sessionID string) (TeamMember, bool) {
 	return m, ok
 }
 
+// Resolve maps a session id or stable name alias to a session id.
+// Session id match wins; names must be unique (ambiguous → false).
+func (t *Team) Resolve(ref string) (sessionID string, ok bool) {
+	return t.ResolveAddress(ref)
+}
+
+// NameOwner returns the session id that currently holds name, if any.
+func (t *Team) NameOwner(name string) (sessionID string, ok bool) {
+	if t == nil {
+		return "", false
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for id, m := range t.members {
+		if m.Name == name {
+			return id, true
+		}
+	}
+	return "", false
+}
+
 // Roster returns a stable snapshot: lead first, then other members sorted by
 // session id.
 func (t *Team) Roster() []TeamMember {
@@ -187,8 +241,9 @@ func (t *Team) Roster() []TeamMember {
 // Enroll adds a child (or nested descendant) to the roster.
 //
 // Rejects empty ids, the lead id (already present), unknown parents (parent
-// must be the lead or an enrolled member), and no-ops if already enrolled
-// (updates persona/name when provided).
+// must be the lead or an enrolled member), and name collisions with another
+// member. Already-enrolled members update persona/name/summary when provided
+// (name still unique across the team).
 func (t *Team) Enroll(m TeamMember) bool {
 	if t == nil {
 		return false
@@ -196,6 +251,10 @@ func (t *Team) Enroll(m TeamMember) bool {
 	id := strings.TrimSpace(m.SessionID)
 	parent := strings.TrimSpace(m.ParentSessionID)
 	if id == "" || parent == "" {
+		return false
+	}
+	name, err := ValidateMemberName(m.Name)
+	if err != nil {
 		return false
 	}
 	t.mu.Lock()
@@ -206,12 +265,19 @@ func (t *Team) Enroll(m TeamMember) bool {
 	if _, ok := t.members[parent]; !ok {
 		return false
 	}
+	if name != "" {
+		for otherID, other := range t.members {
+			if other.Name == name && otherID != id {
+				return false
+			}
+		}
+	}
 	if existing, ok := t.members[id]; ok {
 		if p := strings.TrimSpace(m.Persona); p != "" {
 			existing.Persona = p
 		}
-		if n := strings.TrimSpace(m.Name); n != "" {
-			existing.Name = n
+		if name != "" {
+			existing.Name = name
 		}
 		if s := strings.TrimSpace(m.Summary); s != "" {
 			existing.Summary = s
@@ -232,7 +298,7 @@ func (t *Team) Enroll(m TeamMember) bool {
 	}
 	t.members[id] = TeamMember{
 		SessionID:       id,
-		Name:            strings.TrimSpace(m.Name),
+		Name:            name,
 		Persona:         strings.TrimSpace(m.Persona),
 		State:           state,
 		ParentSessionID: parent,
