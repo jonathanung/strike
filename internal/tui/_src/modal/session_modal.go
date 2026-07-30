@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -138,7 +138,7 @@ func (m *sessionModal) selected() (host.Session, bool) {
 	return list[m.cursor], true
 }
 
-func (m *sessionModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *sessionModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	switch m.phase {
 	case sessionPhaseRename:
 		return m.updateRename(msg)
@@ -149,7 +149,7 @@ func (m *sessionModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 	}
 }
 
-func (m *sessionModal) updateBrowse(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *sessionModal) updateBrowse(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	list := m.filtered()
 	if isEscape(msg) {
 		return nil, nil
@@ -218,16 +218,16 @@ func (m *sessionModal) updateBrowse(msg tea.KeyMsg) (modal, tea.Cmd) {
 			return sessionResumeMsg{id: id}
 		}
 	default:
-		if msg.Type == tea.KeyRunes {
+		if len(msg.Text) > 0 {
 			m.statusErr = ""
-			m.filter += string(msg.Runes)
+			m.filter += msg.Text
 			m.cursor = 0
 		}
 		return m, nil
 	}
 }
 
-func (m *sessionModal) updateRename(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *sessionModal) updateRename(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	if isEscape(msg) {
 		m.phase = sessionPhaseBrowse
 		m.renameBuf = ""
@@ -273,14 +273,14 @@ func (m *sessionModal) updateRename(msg tea.KeyMsg) (modal, tea.Cmd) {
 		}
 		return m, nil
 	default:
-		if msg.Type == tea.KeyRunes {
-			m.renameBuf += string(msg.Runes)
+		if len(msg.Text) > 0 {
+			m.renameBuf += msg.Text
 		}
 		return m, nil
 	}
 }
 
-func (m *sessionModal) updateConfirmDelete(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *sessionModal) updateConfirmDelete(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	if isEscape(msg) || msg.String() == "n" {
 		m.phase = sessionPhaseBrowse
 		m.deleteID = ""

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -25,7 +25,7 @@ func TestProviderModalFilterAndNoJKMove(t *testing.T) {
 	pm := newProviderModal(m.services, "", m.ops, m.th)
 	// j/k type into the filter instead of moving the cursor.
 	start := pm.cursor
-	next, _ := pm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	next, _ := pm.update(tea.KeyPressMsg{Text: "j"})
 	pm = next.(*providerModal)
 	if pm.cursor != 0 {
 		t.Fatalf("j moved cursor to %d, want filter-only (cursor 0)", pm.cursor)
@@ -33,7 +33,7 @@ func TestProviderModalFilterAndNoJKMove(t *testing.T) {
 	if pm.filter != "j" {
 		t.Fatalf("filter = %q, want j", pm.filter)
 	}
-	next, _ = pm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
+	next, _ = pm.update(tea.KeyPressMsg{Text: "k"})
 	pm = next.(*providerModal)
 	if pm.filter != "jk" {
 		t.Fatalf("filter = %q, want jk", pm.filter)
@@ -45,7 +45,7 @@ func TestProviderModalFilterAndNoJKMove(t *testing.T) {
 	// Clear and filter to custom provider.
 	pm.filter = ""
 	pm.cursor = 0
-	next, _ = pm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("kim")})
+	next, _ = pm.update(tea.KeyPressMsg{Text: "kim"})
 	pm = next.(*providerModal)
 	list := pm.filtered()
 	if len(list) != 1 || list[0].Name != "kimi" {
@@ -85,7 +85,7 @@ func TestProviderModalLogoutConfirmAccept(t *testing.T) {
 	pm.cursor = 0
 
 	// ctrl+x opens confirm; no logout yet.
-	next, cmd := pm.update(tea.KeyMsg{Type: tea.KeyCtrlX})
+	next, cmd := pm.update(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	pm = next.(*providerModal)
 	if cmd != nil {
 		t.Fatal("ctrl+x should open confirm without a command")
@@ -108,7 +108,7 @@ func TestProviderModalLogoutConfirmAccept(t *testing.T) {
 	}
 
 	// y commits logout.
-	next, cmd = pm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	next, cmd = pm.update(tea.KeyPressMsg{Text: "y"})
 	if next != pm {
 		t.Fatalf("logout kept modal open, got %T", next)
 	}
@@ -154,7 +154,7 @@ func TestProviderModalLogoutConfirmCancel(t *testing.T) {
 	pm := newProviderModal(m.services, "", m.ops, m.th)
 	pm.cursor = 0
 
-	next, _ := pm.update(tea.KeyMsg{Type: tea.KeyCtrlX})
+	next, _ := pm.update(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	pm = next.(*providerModal)
 	if pm.phase != providerPhaseConfirmLogout {
 		t.Fatalf("phase = %v", pm.phase)
@@ -171,7 +171,7 @@ func TestProviderModalLogoutConfirmCancel(t *testing.T) {
 	}
 
 	// n cancels — credentials intact.
-	next, cmd := pm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	next, cmd := pm.update(tea.KeyPressMsg{Text: "n"})
 	pm = next.(*providerModal)
 	if cmd != nil {
 		t.Fatal("cancel should not run logout")
@@ -187,9 +187,9 @@ func TestProviderModalLogoutConfirmCancel(t *testing.T) {
 	}
 
 	// esc also cancels.
-	next, _ = pm.update(tea.KeyMsg{Type: tea.KeyCtrlX})
+	next, _ = pm.update(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	pm = next.(*providerModal)
-	next, cmd = pm.update(tea.KeyMsg{Type: tea.KeyEscape})
+	next, cmd = pm.update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	pm = next.(*providerModal)
 	if cmd != nil || pm.phase != providerPhaseBrowse {
 		t.Fatalf("esc cancel: phase=%v cmd=%v", pm.phase, cmd != nil)
@@ -207,9 +207,9 @@ func TestProviderModalLogoutConfirmEnterAccept(t *testing.T) {
 	}
 	pm := newProviderModal(m.services, "", m.ops, m.th)
 	pm.cursor = 0
-	next, _ := pm.update(tea.KeyMsg{Type: tea.KeyCtrlX})
+	next, _ := pm.update(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	pm = next.(*providerModal)
-	_, cmd := pm.update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := pm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("enter should confirm logout")
 	}
@@ -283,12 +283,12 @@ func TestProviderModalNavigationWithFilter(t *testing.T) {
 		t.Fatal("expected some matches for filter a")
 	}
 	pm.cursor = 0
-	next, _ := pm.update(tea.KeyMsg{Type: tea.KeyDown})
+	next, _ := pm.update(tea.KeyPressMsg{Code: tea.KeyDown})
 	pm = next.(*providerModal)
 	if pm.cursor != 1 && len(list) > 1 {
 		t.Fatalf("down cursor = %d, want 1", pm.cursor)
 	}
-	next, _ = pm.update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	next, _ = pm.update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	pm = next.(*providerModal)
 	if pm.cursor != 0 {
 		t.Fatalf("ctrl+p cursor = %d, want 0", pm.cursor)
@@ -327,14 +327,14 @@ func TestProviderModalLogoutDeletesCustom(t *testing.T) {
 	pm := newProviderModal(m.services, "kimi", m.ops, m.th)
 	pm.cursor = 0
 
-	next, _ := pm.update(tea.KeyMsg{Type: tea.KeyCtrlX})
+	next, _ := pm.update(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	pm = next.(*providerModal)
 	view := ansi.Strip(pm.view(80, m.th))
 	if !strings.Contains(view, "Deletes this custom provider") {
 		t.Fatalf("confirm should say delete custom: %q", view)
 	}
 
-	_, cmd := pm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	_, cmd := pm.update(tea.KeyPressMsg{Text: "y"})
 	if cmd == nil {
 		t.Fatal("expected logout cmd")
 	}

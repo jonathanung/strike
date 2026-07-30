@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
@@ -201,7 +201,7 @@ func TestQuestionModalMultiMixedFreeformAndOptions(t *testing.T) {
 		t.Errorf("view missing step 2:\n%s", view)
 	}
 
-	next, cmd = qm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("sprinkles")})
+	next, cmd = qm.update(tea.KeyPressMsg{Text: "sprinkles"})
 	if next == nil {
 		t.Fatal("typing closed modal")
 	}
@@ -254,7 +254,7 @@ func TestQuestionModalFreeform(t *testing.T) {
 		t.Fatal("expected freeform")
 	}
 	// Type via textinput update path.
-	next, cmd := m.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hello")})
+	next, cmd := m.update(tea.KeyPressMsg{Text: "hello"})
 	if next == nil {
 		t.Fatal("typing closed modal")
 	}
@@ -440,7 +440,7 @@ func TestQuestionModalCustomAnswerOnOptions(t *testing.T) {
 		t.Errorf("custom mode missing tab-back hint:\n%s", view)
 	}
 
-	next, cmd = qm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("purple")})
+	next, cmd = qm.update(tea.KeyPressMsg{Text: "purple"})
 	qm = expectQuestionModal(t, next, "type custom")
 	runQuestionCmd(t, cmd)
 	next, cmd = qm.update(questionKey("enter"))
@@ -586,28 +586,28 @@ func expectQuestionModal(t *testing.T, next modal, when string) *questionModal {
 	return qm
 }
 
-func questionKey(key string) tea.KeyMsg {
+func questionKey(key string) tea.KeyPressMsg {
 	switch key {
 	case "enter":
-		return tea.KeyMsg{Type: tea.KeyEnter}
+		return tea.KeyPressMsg{Code: tea.KeyEnter}
 	case "esc":
-		return tea.KeyMsg{Type: tea.KeyEsc}
+		return tea.KeyPressMsg{Code: tea.KeyEsc}
 	case "up":
-		return tea.KeyMsg{Type: tea.KeyUp}
+		return tea.KeyPressMsg{Code: tea.KeyUp}
 	case "down":
-		return tea.KeyMsg{Type: tea.KeyDown}
+		return tea.KeyPressMsg{Code: tea.KeyDown}
 	case "left":
-		return tea.KeyMsg{Type: tea.KeyLeft}
+		return tea.KeyPressMsg{Code: tea.KeyLeft}
 	case "right":
-		return tea.KeyMsg{Type: tea.KeyRight}
+		return tea.KeyPressMsg{Code: tea.KeyRight}
 	case "tab":
-		return tea.KeyMsg{Type: tea.KeyTab}
+		return tea.KeyPressMsg{Code: tea.KeyTab}
 	case "shift+tab":
-		return tea.KeyMsg{Type: tea.KeyShiftTab}
+		return tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}
 	case "backspace":
-		return tea.KeyMsg{Type: tea.KeyBackspace}
+		return tea.KeyPressMsg{Code: tea.KeyBackspace}
 	default:
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)}
+		return tea.KeyPressMsg{Text: key}
 	}
 }
 

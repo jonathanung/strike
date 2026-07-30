@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -58,7 +58,7 @@ func newCostModal(
 	return m
 }
 
-func (m *costModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *costModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	if isEscape(msg) || msg.String() == "q" || msg.String() == "enter" {
 		return nil, nil
 	}

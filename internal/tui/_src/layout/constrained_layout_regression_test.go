@@ -4,8 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/cursor"
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -110,7 +109,7 @@ func TestConstrainedCanvasKeepsHeaderTranscriptDraftAndCompletionWithin20Rows(t 
 		t.Fatal("slash draft did not open completion")
 	}
 
-	view := m.View()
+	view := viewString(m)
 	assertCanvas(t, view, 80, 20)
 	plain := ansi.Strip(view)
 	if !strings.Contains(strings.Split(plain, "\n")[0], "strike") {
@@ -136,7 +135,7 @@ func TestPopulatedReviewerSessionKeepsOneTranscriptRowWithoutTwoBorderRows(t *te
 	if l.transcript != 1 {
 		t.Fatalf("transcript allocation = %d, want one row: %+v", l.transcript, l)
 	}
-	view := m.View()
+	view := viewString(m)
 	assertCanvas(t, view, 80, 20)
 	plain := ansi.Strip(view)
 	if !strings.Contains(strings.Split(plain, "\n")[0], "strike") {
@@ -161,7 +160,10 @@ func TestConstrainedComposerKeepsCursorLineVisibleWithoutMutatingStoredState(t *
 			m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: height})
 			m.setComposerValueAt(draft, len([]rune(draft))-1)
 			m.reflow()
-			m.composer.Cursor.SetMode(cursor.CursorStatic)
+			m.composer.SetVirtualCursor(true)
+			styles := m.composer.Styles()
+			styles.Cursor.Blink = false
+			m.composer.SetStyles(styles)
 			before := composerRenderState(m)
 			l := computeLayout(80, height, m.composer.Height(), 0, false)
 			out := m.composerView(tt.compact, 80, l.composer)
@@ -200,7 +202,7 @@ func composerRenderState(m Model) composerState {
 		line:           m.composer.Line(),
 		logicalColumn:  info.StartColumn + info.ColumnOffset,
 		viewRows:       strings.Join(strings.Split(m.composer.View(), "\n"), "\n"),
-		viewportOffset: m.viewport.YOffset,
+		viewportOffset: m.viewport.YOffset(),
 	}
 }
 
@@ -256,19 +258,19 @@ func TestConstrainedRightPaneAndModalCanvasAreExact(t *testing.T) {
 			m.focus = focusRight
 			m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: height})
 			if height == 0 {
-				if got := m.View(); got != "" {
+				if got := viewString(m); got != "" {
 					t.Errorf("zero-height right pane = %q, want empty", ansi.Strip(got))
 				}
 			} else {
-				assertCanvas(t, m.View(), 80, height)
+				assertCanvas(t, viewString(m), 80, height)
 			}
 			m.modal = newPaletteModal(m.commands, nil, m.currentPaletteAvailability())
 			if height == 0 {
-				if got := m.View(); got != "" {
+				if got := viewString(m); got != "" {
 					t.Errorf("zero-height modal = %q, want empty", ansi.Strip(got))
 				}
 			} else {
-				assertCanvas(t, m.View(), 80, height)
+				assertCanvas(t, viewString(m), 80, height)
 			}
 		})
 	}
@@ -281,17 +283,19 @@ func TestModelSelectionClearsOnlyModelRequiredNotices(t *testing.T) {
 	}{
 		{"ordinary submit", func(t *testing.T, m Model) Model {
 			m.composer.SetValue("prompt")
-			return updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+			return updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 		}},
 		{"skill submit", func(t *testing.T, m Model) Model {
 			m.composer.SetValue("/review code")
-			return updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+			return updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 		}},
 		{"model command", func(t *testing.T, m Model) Model {
 			m.composer.SetValue("/model x")
-			return updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+			return updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 		}},
-		{"save defaults", func(t *testing.T, m Model) Model { return updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlD}) }},
+		{"save defaults", func(t *testing.T, m Model) Model {
+			return updateApp(t, m, tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+		}},
 		{"palette rejection", func(t *testing.T, m Model) Model {
 			return updateApp(t, m, paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/model"}})
 		}},
@@ -317,9 +321,9 @@ func TestModelSelectionClearsOnlyModelRequiredNotices(t *testing.T) {
 func TestBareProviderPickerSelectionClearsPriorModelRequiredNotice(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m.composer.SetValue("prompt")
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	m.composer.SetValue("/provider")
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if _, ok := m.modal.(*providerModal); !ok {
 		t.Fatalf("bare /provider modal = %T, want provider picker", m.modal)
 	}
@@ -360,7 +364,7 @@ func TestModelSelectedPreservesGeneralNoticesAndRefreshesOpenPaletteAndHeader(t 
 		t.Errorf("model selection changed general info notice: %q / %v", m.notice, m.noticeErr)
 	}
 	m.setNotice("unrelated error", true)
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl})
 	m.applyEvent(protocol.ModelSelected{Provider: "echo", Model: "chosen"})
 	if m.notice != "unrelated error" || !m.noticeErr {
 		t.Errorf("model selection changed general error notice: %q / %v", m.notice, m.noticeErr)

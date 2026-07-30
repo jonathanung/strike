@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -108,7 +108,7 @@ func TestModelModalSelectUsesProviderFromRow(t *testing.T) {
 		{ID: "b", Provider: "xai", Context: 2000},
 	}
 	m.cursor = 1
-	next, cmd := m.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if next != nil {
 		t.Fatal("expected modal to close on enter")
 	}
@@ -139,7 +139,7 @@ func TestModelModalSelectUsesID(t *testing.T) {
 		{ID: "b", Provider: "openai", Context: 2000},
 	}
 	m.cursor = 1
-	next, cmd := m.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if next != nil {
 		t.Fatal("expected modal to close on enter")
 	}
@@ -180,7 +180,7 @@ func TestModelModalFreeformParsesProviderModel(t *testing.T) {
 	m := newModelModal("openai", "", ops, nil)
 	m.loading = false
 	m.filter = "xai/grok-4"
-	next, cmd := m.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if next != nil {
 		t.Fatal("expected close")
 	}

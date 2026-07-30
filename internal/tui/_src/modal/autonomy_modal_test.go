@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -30,7 +30,7 @@ func TestAutonomyCommandWithArgumentSendsSetAutonomy(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)
 	m.composer.SetValue("/autonomy agent")
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	runAppCmd(t, cmd)
 
@@ -49,7 +49,7 @@ func TestAutonomyCommandAcceptsEveryMode(t *testing.T) {
 		t.Run(string(mode), func(t *testing.T) {
 			m, ops := newAppTestModel(nil, nil)
 			m.composer.SetValue("/autonomy " + string(mode))
-			updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 			m = updated.(Model)
 			runAppCmd(t, cmd)
 			if op := receiveAppOp(t, ops); op != (protocol.SetAutonomy{Mode: mode}) {
@@ -66,7 +66,7 @@ func TestAutonomyCommandRejectsUnknownModeWithoutSendingAnOp(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)
 	m.composer.SetValue("/autonomy yolo")
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	runAppCmd(t, cmd)
 
@@ -90,7 +90,7 @@ func TestBareAutonomyOpensPickerOnTheActiveMode(t *testing.T) {
 	m.autonomy = protocol.AutonomyChecks
 	m.composer.SetValue("/autonomy")
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	picker, ok := m.modal.(*autonomyModal)
 	if !ok {
@@ -109,8 +109,8 @@ func TestAutonomyPickerEnterSendsSelectionAndClosesModal(t *testing.T) {
 	picker := newAutonomyModal(protocol.AutonomySupervised, ops)
 
 	// supervised, agent — move to agent.
-	picker.update(tea.KeyMsg{Type: tea.KeyDown})
-	next, cmd := picker.update(tea.KeyMsg{Type: tea.KeyEnter})
+	picker.update(tea.KeyPressMsg{Code: tea.KeyDown})
+	next, cmd := picker.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if next != nil {
 		t.Errorf("enter left modal open as %T, want closed", next)
 	}
@@ -123,13 +123,13 @@ func TestAutonomyPickerEnterSendsSelectionAndClosesModal(t *testing.T) {
 func TestAutonomyPickerCursorStaysInRange(t *testing.T) {
 	picker := newAutonomyModal(protocol.AutonomySupervised, make(chan protocol.Op, 1))
 	for i := 0; i < 20; i++ {
-		picker.update(tea.KeyMsg{Type: tea.KeyDown})
+		picker.update(tea.KeyPressMsg{Code: tea.KeyDown})
 	}
 	if picker.cursor != len(picker.modes)-1 {
 		t.Errorf("cursor = %d, want %d", picker.cursor, len(picker.modes)-1)
 	}
 	for i := 0; i < 20; i++ {
-		picker.update(tea.KeyMsg{Type: tea.KeyUp})
+		picker.update(tea.KeyPressMsg{Code: tea.KeyUp})
 	}
 	if picker.cursor != 0 {
 		t.Errorf("cursor = %d after scrolling up, want 0", picker.cursor)
@@ -139,7 +139,7 @@ func TestAutonomyPickerCursorStaysInRange(t *testing.T) {
 func TestAutonomyPickerEscClosesWithoutSelecting(t *testing.T) {
 	ops := make(chan protocol.Op, 1)
 	picker := newAutonomyModal(protocol.AutonomyAgent, ops)
-	next, cmd := picker.update(tea.KeyMsg{Type: tea.KeyEsc})
+	next, cmd := picker.update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if next != nil {
 		t.Errorf("esc left modal open as %T", next)
 	}
@@ -196,7 +196,7 @@ func TestHeaderAlwaysShowsAutonomyBadge(t *testing.T) {
 func TestHelpListsTheAutonomyCommand(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m.composer.SetValue("/help")
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	help, ok := m.modal.(*helpModal)
 	if !ok {
 		t.Fatalf("/help modal = %T, want helpModal", m.modal)

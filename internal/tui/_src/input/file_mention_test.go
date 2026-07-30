@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -195,7 +195,7 @@ func TestSubmitExpandsFileMentionsForModel(t *testing.T) {
 	m.modelName = "echo"
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
 	m.setComposerValueAt("read @note.go", len([]rune("read @note.go")))
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	_ = runAllAppCmds(t, cmd)
 
@@ -223,7 +223,7 @@ func TestSubmitWithoutMentionUnchanged(t *testing.T) {
 	m.modelName = "echo"
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.setComposerValueAt("hello world", len([]rune("hello world")))
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	_ = updated
 	_ = runAllAppCmds(t, cmd)
 	op := receiveAppOp(t, ops)
@@ -242,7 +242,7 @@ func TestFileCompletionDismissEsc(t *testing.T) {
 	if m.completion == nil {
 		t.Fatal("expected @ completion")
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	if m.completion != nil {
 		t.Fatal("esc should dismiss file completion")
 	}
@@ -257,7 +257,7 @@ func TestFileMentionWorksWithMultiline(t *testing.T) {
 	m.modelName = "echo"
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.setComposerValueAt("line one\nsee @z.go", len([]rune("line one\nsee @z.go")))
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	_ = updated
 	_ = runAllAppCmds(t, cmd)
 	op := receiveAppOp(t, ops)

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestPaneSlashCommandsFocusNamedWindows(t *testing.T) {
@@ -30,7 +30,7 @@ func TestPaneSlashCommandsFocusNamedWindows(t *testing.T) {
 				m.windows = reg
 			}
 			m.composer.SetValue(tt.command)
-			updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 			m = updated.(Model)
 			if cmd != nil {
 				runAppCmd(t, cmd)
@@ -56,7 +56,7 @@ func TestSystemSlashRequiresTelemetry(t *testing.T) {
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
 	m.windows, _ = setTelemetryEnabled(m.windows, false)
 	m.composer.SetValue("/system")
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !strings.Contains(m.notice, "telemetry off") {
 		t.Fatalf("notice = %q, want telemetry off hint", m.notice)
 	}
@@ -72,12 +72,12 @@ func TestTelemetrySlashToggle(t *testing.T) {
 		t.Fatal("default telemetry off")
 	}
 	m.composer.SetValue("/telemetry status")
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !strings.Contains(m.notice, "on") {
 		t.Fatalf("status notice = %q", m.notice)
 	}
 	m.composer.SetValue("/telemetry off")
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if telemetryEnabled(m.windows) {
 		t.Fatal("/telemetry off did not disable")
 	}
@@ -85,7 +85,7 @@ func TestTelemetrySlashToggle(t *testing.T) {
 		t.Fatalf("off notice = %q", m.notice)
 	}
 	m.composer.SetValue("/telemetry on")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if cmd != nil {
 		runAppCmd(t, cmd)
@@ -104,7 +104,7 @@ func TestAgentsPaneSlashDoesNotOpenAgentPicker(t *testing.T) {
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
 
 	m.composer.SetValue("/agents")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if cmd != nil {
 		runAppCmd(t, cmd)
@@ -120,9 +120,9 @@ func TestAgentsPaneSlashDoesNotOpenAgentPicker(t *testing.T) {
 	}
 
 	// /agent remains persona select.
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlH})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
 	m.composer.SetValue("/agent")
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if _, ok := m.modal.(*agentModal); !ok {
 		t.Fatalf("modal = %T, want *agentModal after /agent", m.modal)
 	}

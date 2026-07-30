@@ -35,6 +35,8 @@ type Rule struct {
 type Ruleset []Rule
 
 // Known permission names tools actually Ask with, plus "*".
+// Team messaging (agent_message/agent_broadcast/agent_roster) is registered
+// even before tools land so config deny rules and Defaults stay valid.
 var knownPermissions = map[string]struct{}{
 	"*": {}, "read": {}, "glob": {}, "grep": {}, "edit": {}, "write": {},
 	"bash": {}, "task": {}, "task_status": {}, "task_read": {}, "task_message": {},
@@ -75,6 +77,11 @@ func ValidateRuleset(rs Ruleset) error {
 // executes asks. task is allowed so agents can spawn children while
 // depth remains below MaxChildDepth; DeriveChildRules denies task only
 // when the child cannot nest further.
+//
+// Team messaging (agent_message, agent_broadcast, agent_roster) defaults
+// to Allow so in-team peers do not prompt on every message. Users can
+// still Deny via config/agent rules; transport isolation (same team only)
+// is enforced by the engine mailbox, not by these rules.
 func Defaults() Ruleset {
 	return Ruleset{
 		{Permission: "read", Pattern: "*", Action: Allow},
@@ -136,6 +143,10 @@ func DenyOnly(rs Ruleset) Ruleset {
 // Only Deny entries from childExtra are kept so a child cannot widen a
 // parent Deny/Ask via Allow. Parent last-match-wins order is preserved,
 // including parent allow-after-deny patterns.
+//
+// denyTask is task-only: team messaging permissions (agent_message,
+// agent_broadcast, agent_roster, and parent→child task_message) stay at the
+// parent's effective action so depth-capped leaves can still coordinate.
 func DeriveChildRules(parentLayers []Ruleset, denyTask bool, childExtra ...Ruleset) []Ruleset {
 	out := make([]Ruleset, 0, len(parentLayers)+len(childExtra)+1)
 	for _, layer := range parentLayers {

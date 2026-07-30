@@ -111,15 +111,15 @@ func (m Model) textSelectRegionAt(x, y int) (contentRect, bool) {
 // transcriptContentRect is the viewport body in screen coordinates.
 func (m Model) transcriptContentRect() (contentRect, bool) {
 	leftWidth, l, showLeft, ok := m.leftStackGeom()
-	if !ok || !showLeft || l.transcript <= 0 || m.viewport.Height <= 0 {
+	if !ok || !showLeft || l.transcript <= 0 || m.viewport.Height() <= 0 {
 		return contentRect{}, false
 	}
 	x, y := m.panelContentOrigin(leftWidth, l.header, l.compact)
-	w := m.viewport.Width
+	w := m.viewport.Width()
 	if w <= 0 {
 		w = l.transcriptInnerWidthFor(m.th.Resolve(), leftWidth)
 	}
-	h := m.viewport.Height
+	h := m.viewport.Height()
 	if h <= 0 {
 		h = l.transcriptInnerHeight()
 	}

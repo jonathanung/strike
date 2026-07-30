@@ -3,7 +3,7 @@ package tui
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 	"github.com/jonathanung/strike-cli/internal/tui/ui"
@@ -45,7 +45,7 @@ func (m *rootSwitcherModal) filtered() []rootSwitcherEntry {
 	return matches
 }
 
-func (m *rootSwitcherModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *rootSwitcherModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	list := m.filtered()
 	if isEscape(msg) {
 		return nil, nil
@@ -55,8 +55,8 @@ func (m *rootSwitcherModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 		return nil, func() tea.Msg { return agentsSpawnMsg{} }
 	}
 	// Direct number shortcut: 1-9 jump to the Nth filtered entry.
-	if len(msg.Runes) == 1 {
-		r := msg.Runes[0]
+	if len([]rune(msg.Text)) == 1 {
+		r := []rune(msg.Text)[0]
 		if r >= '1' && r <= '9' {
 			idx := int(r - '1')
 			if idx < len(list) {
@@ -86,8 +86,8 @@ func (m *rootSwitcherModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 		}
 		return m, nil
 	default:
-		if msg.Type == tea.KeyRunes {
-			m.filter += string(msg.Runes)
+		if len(msg.Text) > 0 {
+			m.filter += msg.Text
 			m.cursor = 0
 		}
 	}

@@ -49,12 +49,70 @@ func TestDefaultsIncludesAgentRosterAllow(t *testing.T) {
 	}
 }
 
-func TestDefaultsIncludesAgentMessageAllow(t *testing.T) {
-	if got := Evaluate("agent_message", "*", Defaults()); got != Allow {
-		t.Errorf("Defaults agent_message = %q, want allow", got)
+func TestDefaultsIncludesTeamMessagingAllow(t *testing.T) {
+	// In-team messaging defaults to allow so peers do not prompt every send.
+	for _, perm := range []string{"agent_message", "agent_broadcast", "agent_roster"} {
+		if got := Evaluate(perm, "*", Defaults()); got != Allow {
+			t.Errorf("Defaults %s = %q, want allow", perm, got)
+		}
 	}
-	if got := Evaluate("agent_broadcast", "*", Defaults()); got != Allow {
-		t.Errorf("Defaults agent_broadcast = %q, want allow", got)
+}
+
+func TestDenyRuleAgentMessageBlocks(t *testing.T) {
+	// Config/agent deny must hard-block agent_message without prompting.
+	base := Defaults()
+	deny := Ruleset{{Permission: "agent_message", Pattern: "*", Action: Deny}}
+	if got := Evaluate("agent_message", "*", base, deny); got != Deny {
+		t.Fatalf("Evaluate agent_message with deny = %q, want deny", got)
+	}
+	// Sibling messaging tools stay allow unless also denied.
+	if got := Evaluate("agent_broadcast", "*", base, deny); got != Allow {
+		t.Errorf("agent_broadcast = %q, want allow", got)
+	}
+	if got := Evaluate("agent_roster", "*", base, deny); got != Allow {
+		t.Errorf("agent_roster = %q, want allow", got)
+	}
+
+	var events []protocol.Event
+	svc := New(func(ev protocol.Event) { events = append(events, ev) }, base, deny)
+	err := svc.Ask(context.Background(), tool.AskRequest{
+		Permission: "agent_message",
+		Patterns:   []string{"*"},
+	})
+	var denied *DeniedError
+	if !errors.As(err, &denied) {
+		t.Fatalf("Ask agent_message = %v, want DeniedError", err)
+	}
+	if len(events) != 0 {
+		t.Errorf("deny must not emit permission events, got %#v", events)
+	}
+}
+
+func TestDefaultsTeamMessagingNoPrompt(t *testing.T) {
+	// Default allow: Ask succeeds with zero PermissionAsked events.
+	var events []protocol.Event
+	svc := New(func(ev protocol.Event) { events = append(events, ev) }, Defaults())
+	for _, perm := range []string{"agent_message", "agent_broadcast", "agent_roster"} {
+		if err := svc.Ask(context.Background(), tool.AskRequest{
+			Permission: perm,
+			Patterns:   []string{"*"},
+		}); err != nil {
+			t.Fatalf("Ask %s: %v", perm, err)
+		}
+	}
+	if len(events) != 0 {
+		t.Errorf("default team messaging must not prompt, got %#v", events)
+	}
+}
+
+func TestValidateRulesetAcceptsTeamMessaging(t *testing.T) {
+	rs := Ruleset{
+		{Permission: "agent_message", Pattern: "*", Action: Deny},
+		{Permission: "agent_broadcast", Pattern: "*", Action: Allow},
+		{Permission: "agent_roster", Pattern: "*", Action: Ask},
+	}
+	if err := ValidateRuleset(rs); err != nil {
+		t.Fatalf("ValidateRuleset team messaging: %v", err)
 	}
 }
 
@@ -132,6 +190,36 @@ func TestDeriveChildRules(t *testing.T) {
 		// Parent defaults still allow task.
 		if got := Evaluate("task", "*", parent...); got != Allow {
 			t.Errorf("parent task = %q, want allow", got)
+		}
+	})
+
+	t.Run("keeps team messaging when denyTask", func(t *testing.T) {
+		// Depth ceiling denies nested task spawn only; leaves still message.
+		parent := []Ruleset{Defaults()}
+		derived := DeriveChildRules(parent, true)
+		if got := Evaluate("task", "*", derived...); got != Deny {
+			t.Fatalf("task = %q, want deny at depth cap", got)
+		}
+		for _, perm := range []string{
+			"agent_message", "agent_broadcast", "agent_roster", "task_message",
+		} {
+			if got := Evaluate(perm, "*", derived...); got != Allow {
+				t.Errorf("%s = %q, want allow (not stripped by denyTask)", perm, got)
+			}
+		}
+	})
+
+	t.Run("parent deny agent_message survives denyTask", func(t *testing.T) {
+		parent := []Ruleset{
+			Defaults(),
+			{{Permission: "agent_message", Pattern: "*", Action: Deny}},
+		}
+		derived := DeriveChildRules(parent, true)
+		if got := Evaluate("agent_message", "*", derived...); got != Deny {
+			t.Errorf("agent_message = %q, want deny", got)
+		}
+		if got := Evaluate("agent_broadcast", "*", derived...); got != Allow {
+			t.Errorf("agent_broadcast = %q, want allow", got)
 		}
 	})
 

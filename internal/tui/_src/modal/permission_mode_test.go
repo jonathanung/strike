@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -14,7 +14,7 @@ func TestPermissionModeBadgeInHeader(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
 	m.permMode = protocol.PermissionModeYolo
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(viewString(m))
 	if !strings.Contains(plain, "yolo") {
 		t.Fatalf("header missing yolo badge:\n%s", plain)
 	}
@@ -27,7 +27,7 @@ func TestPermissionModeCycleKeySendsOp(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
 	m.permMode = protocol.PermissionModeDefault
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	m = updated.(Model)
 	runAppCmd(t, cmd)
 	op := receiveAppOp(t, ops)
@@ -45,7 +45,7 @@ func TestPermissionModeCycleKeyMidTurn(t *testing.T) {
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
 	m.turnRunning = true
 	m.permMode = protocol.PermissionModeDefault
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	m = updated.(Model)
 	if cmd == nil {
 		t.Fatal("expected SetPermissionMode cmd mid-turn")
@@ -86,7 +86,7 @@ func TestPermissionModeNextCommandMidTurn(t *testing.T) {
 func TestPermissionModeCommandDirect(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)
 	m.composer.SetValue("/mode yolo")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	runAppCmd(t, cmd)
 	op := receiveAppOp(t, ops)
@@ -104,7 +104,7 @@ func TestPermissionModeCommandAcceptsEveryMode(t *testing.T) {
 		t.Run(string(mode), func(t *testing.T) {
 			m, ops := newAppTestModel(nil, nil)
 			m.composer.SetValue("/mode " + string(mode))
-			updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 			m = updated.(Model)
 			runAppCmd(t, cmd)
 			if op := receiveAppOp(t, ops); op != (protocol.SetPermissionMode{Mode: mode}) {
@@ -122,7 +122,7 @@ func TestPermissionModeCommandOpensModal(t *testing.T) {
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
 	m.permMode = protocol.PermissionModeAcceptEdits
 	m.composer.SetValue("/mode")
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	picker, ok := m.modal.(*permissionModeModal)
 	if !ok {
 		t.Fatalf("modal = %T, want *permissionModeModal", m.modal)
@@ -130,7 +130,7 @@ func TestPermissionModeCommandOpensModal(t *testing.T) {
 	if picker.modes[picker.cursor] != protocol.PermissionModeAcceptEdits {
 		t.Errorf("cursor on %q, want accept-edits", picker.modes[picker.cursor])
 	}
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(viewString(m))
 	for _, want := range []string{"default", "plan", "soft-approve", "accept-edits", "yolo"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("modal missing %q:\n%s", want, plain)
@@ -148,7 +148,7 @@ func TestSoftApproveModeSelectedShowsArmedChrome(t *testing.T) {
 	if got := m.effectivePermissionAutoApproveSeconds(); got != protocol.SoftApproveSeconds {
 		t.Fatalf("effective seconds = %d, want %d", got, protocol.SoftApproveSeconds)
 	}
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(viewString(m))
 	if !strings.Contains(plain, "soft") {
 		t.Fatalf("missing soft badge:\n%s", plain)
 	}
@@ -164,7 +164,7 @@ func TestPermissionModeSelectedUpdatesChrome(t *testing.T) {
 	if m.permMode != protocol.PermissionModeAcceptEdits {
 		t.Fatalf("permMode = %q, want accept-edits", m.permMode)
 	}
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(viewString(m))
 	if !strings.Contains(plain, "edits") {
 		t.Fatalf("header missing accept-edits short label:\n%s", plain)
 	}
@@ -176,7 +176,7 @@ func TestPermissionModeSelectedUpdatesChrome(t *testing.T) {
 func TestPermissionModeCommandUnknown(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)
 	m.composer.SetValue("/mode nope")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	runAppCmd(t, cmd)
 	select {
@@ -192,10 +192,10 @@ func TestPermissionModeCommandUnknown(t *testing.T) {
 func TestPermissionModeModalSelectSendsOp(t *testing.T) {
 	ops := make(chan protocol.Op, 1)
 	picker := newPermissionModeModal(protocol.PermissionModeDefault, ops, &fakeSettings{})
-	picker.update(tea.KeyMsg{Type: tea.KeyDown}) // plan
-	picker.update(tea.KeyMsg{Type: tea.KeyDown}) // soft-approve
-	picker.update(tea.KeyMsg{Type: tea.KeyDown}) // accept-edits
-	next, cmd := picker.update(tea.KeyMsg{Type: tea.KeyEnter})
+	picker.update(tea.KeyPressMsg{Code: tea.KeyDown}) // plan
+	picker.update(tea.KeyPressMsg{Code: tea.KeyDown}) // soft-approve
+	picker.update(tea.KeyPressMsg{Code: tea.KeyDown}) // accept-edits
+	next, cmd := picker.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if next != nil {
 		t.Fatalf("modal still open after enter: %T", next)
 	}
@@ -209,10 +209,10 @@ func TestPermissionModeModalSelectSendsOp(t *testing.T) {
 func TestPermissionModePickerCtrlDSavesOnlyTheModeDefault(t *testing.T) {
 	settings := &fakeSettings{}
 	picker := newPermissionModeModal(protocol.PermissionModeDefault, make(chan protocol.Op, 1), settings)
-	picker.update(tea.KeyMsg{Type: tea.KeyDown}) // plan
-	picker.update(tea.KeyMsg{Type: tea.KeyDown}) // soft-approve
+	picker.update(tea.KeyPressMsg{Code: tea.KeyDown}) // plan
+	picker.update(tea.KeyPressMsg{Code: tea.KeyDown}) // soft-approve
 
-	next, cmd := picker.update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	next, cmd := picker.update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
 	if next == nil {
 		t.Error("ctrl+d closed the picker, want it to stay open")
 	}
@@ -246,7 +246,7 @@ func TestSaveDefaultsIncludesTheActivePermissionMode(t *testing.T) {
 	m.effort = protocol.EffortMax
 	m.permMode = protocol.PermissionModeAcceptEdits
 
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
 	runAppCmd(t, cmd)
 
 	if len(settings.saved) != 1 {

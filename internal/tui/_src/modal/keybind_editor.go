@@ -3,7 +3,7 @@ package tui
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -136,7 +136,7 @@ func filterByCategory(entries []keybindEntry, tab int) []keybindEntry {
 	return out
 }
 
-func (m *keybindEditor) update(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *keybindEditor) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	if m.capturing {
 		return m.updateCapture(msg)
 	}
@@ -200,8 +200,8 @@ func (m *keybindEditor) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 	case "alt+s":
 		return m.savePending()
 	default:
-		if msg.Type == tea.KeyRunes {
-			m.filter += string(msg.Runes)
+		if len(msg.Text) > 0 {
+			m.filter += msg.Text
 			m.cursor = 0
 			m.refilter()
 		}
@@ -209,7 +209,7 @@ func (m *keybindEditor) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 	}
 }
 
-func (m *keybindEditor) updateConfirm(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *keybindEditor) updateConfirm(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y":
 		c := m.confirm
@@ -233,7 +233,7 @@ func (m *keybindEditor) hasUnsaved() bool {
 	return m.dirty
 }
 
-func (m *keybindEditor) updateUnsavedPrompt(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *keybindEditor) updateUnsavedPrompt(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y":
 		if !m.dirty {
@@ -263,7 +263,7 @@ func (m *keybindEditor) startCapture() (modal, tea.Cmd) {
 	return m, nil
 }
 
-func (m *keybindEditor) updateCapture(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *keybindEditor) updateCapture(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	if isEscape(msg) {
 		m.capturing = false
 		m.captureID = ""

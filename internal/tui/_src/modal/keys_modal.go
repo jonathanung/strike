@@ -3,7 +3,7 @@ package tui
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 	"github.com/jonathanung/strike-cli/internal/tui/ui"
@@ -80,7 +80,7 @@ func keysMatchRank(entry keybindEntry, query string) int {
 	return best
 }
 
-func (m *keysModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *keysModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	list := m.filtered()
 	if isEscape(msg) || msg.String() == "q" || msg.String() == "f1" {
 		return nil, nil
@@ -104,8 +104,8 @@ func (m *keysModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 		// Informational only — enter closes like esc.
 		return nil, nil
 	default:
-		if msg.Type == tea.KeyRunes {
-			m.filter += string(msg.Runes)
+		if len(msg.Text) > 0 {
+			m.filter += msg.Text
 			m.cursor = 0
 		}
 	}

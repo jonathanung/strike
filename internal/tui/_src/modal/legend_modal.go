@@ -3,7 +3,7 @@ package tui
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -187,7 +187,7 @@ func legendMatchRank(entry legendEntry, query string) int {
 	return best
 }
 
-func (m *legendModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *legendModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	list := m.filtered()
 	if isEscape(msg) || msg.String() == "q" {
 		return nil, nil
@@ -210,8 +210,8 @@ func (m *legendModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 	case "enter":
 		return nil, nil
 	default:
-		if msg.Type == tea.KeyRunes {
-			m.filter += string(msg.Runes)
+		if len(msg.Text) > 0 {
+			m.filter += msg.Text
 			m.cursor = 0
 		}
 	}

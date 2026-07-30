@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -169,7 +169,7 @@ func TestActivityCursorSticksToNewestAndAnchorsSelection(t *testing.T) {
 	}
 
 	// Move down to B (index 1).
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	m = updateApp(t, m, tea.KeyPressMsg{Text: "j"})
 	entries = projectActivityEntries(m.cells, nil, false)
 	cur := m.activityDisplayCursor(entries)
 	if cur != 1 || entries[cur].Label != "B" {
@@ -192,7 +192,7 @@ func TestActivityCursorSticksToNewestAndAnchorsSelection(t *testing.T) {
 	}
 
 	// Return to top and stick again.
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	m = updateApp(t, m, tea.KeyPressMsg{Text: "g"})
 	if !m.activityStickNewest {
 		t.Fatal("g should stick to newest")
 	}
@@ -217,7 +217,7 @@ func TestActivityDetailKeepsChronologicalBody(t *testing.T) {
 		},
 	}
 	m.activityStickNewest = true
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.activityDetail {
 		t.Fatal("enter should open detail")
 	}

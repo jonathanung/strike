@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
@@ -21,14 +21,14 @@ const permissionCmdTimeout = 2 * time.Second
 func TestPermissionModalRejectChoicesOpenFeedbackWithoutReply(t *testing.T) {
 	tests := []struct {
 		name    string
-		prepare []tea.KeyMsg
-		key     tea.KeyMsg
+		prepare []tea.KeyPressMsg
+		key     tea.KeyPressMsg
 	}{
 		{name: "option 4", key: permissionKey("4")},
 		{name: "n", key: permissionKey("n")},
 		{
 			name:    "enter on selected reject",
-			prepare: []tea.KeyMsg{permissionKey("right"), permissionKey("right"), permissionKey("right")},
+			prepare: []tea.KeyPressMsg{permissionKey("right"), permissionKey("right"), permissionKey("right")},
 			key:     permissionKey("enter"),
 		},
 	}
@@ -109,24 +109,24 @@ func TestPermissionModalEscapeRejectsWithoutFeedback(t *testing.T) {
 func TestPermissionModalAllowsRemainImmediateAndHaveNoFeedback(t *testing.T) {
 	tests := []struct {
 		name     string
-		keys     []tea.KeyMsg
+		keys     []tea.KeyPressMsg
 		decision protocol.Decision
 	}{
-		{name: "option 1", keys: []tea.KeyMsg{permissionKey("1")}, decision: protocol.DecisionOnce},
-		{name: "y", keys: []tea.KeyMsg{permissionKey("y")}, decision: protocol.DecisionOnce},
-		{name: "enter on allow once", keys: []tea.KeyMsg{permissionKey("enter")}, decision: protocol.DecisionOnce},
-		{name: "option 2", keys: []tea.KeyMsg{permissionKey("2")}, decision: protocol.DecisionAlways},
-		{name: "s", keys: []tea.KeyMsg{permissionKey("s")}, decision: protocol.DecisionAlways},
+		{name: "option 1", keys: []tea.KeyPressMsg{permissionKey("1")}, decision: protocol.DecisionOnce},
+		{name: "y", keys: []tea.KeyPressMsg{permissionKey("y")}, decision: protocol.DecisionOnce},
+		{name: "enter on allow once", keys: []tea.KeyPressMsg{permissionKey("enter")}, decision: protocol.DecisionOnce},
+		{name: "option 2", keys: []tea.KeyPressMsg{permissionKey("2")}, decision: protocol.DecisionAlways},
+		{name: "s", keys: []tea.KeyPressMsg{permissionKey("s")}, decision: protocol.DecisionAlways},
 		{
 			name:     "enter on allow session",
-			keys:     []tea.KeyMsg{permissionKey("right"), permissionKey("enter")},
+			keys:     []tea.KeyPressMsg{permissionKey("right"), permissionKey("enter")},
 			decision: protocol.DecisionAlways,
 		},
-		{name: "option 3", keys: []tea.KeyMsg{permissionKey("3")}, decision: protocol.DecisionProject},
-		{name: "p", keys: []tea.KeyMsg{permissionKey("p")}, decision: protocol.DecisionProject},
+		{name: "option 3", keys: []tea.KeyPressMsg{permissionKey("3")}, decision: protocol.DecisionProject},
+		{name: "p", keys: []tea.KeyPressMsg{permissionKey("p")}, decision: protocol.DecisionProject},
 		{
 			name:     "enter on allow project",
-			keys:     []tea.KeyMsg{permissionKey("right"), permissionKey("right"), permissionKey("enter")},
+			keys:     []tea.KeyPressMsg{permissionKey("right"), permissionKey("right"), permissionKey("enter")},
 			decision: protocol.DecisionProject,
 		},
 	}
@@ -376,7 +376,7 @@ func TestPermissionModalLargeDiffExpandCollapse(t *testing.T) {
 	}
 
 	// d expands
-	next, _ := m.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	next, _ := m.update(tea.KeyPressMsg{Code: 'd', Text: string([]rune{'d'})})
 	pm, ok := next.(*permissionModal)
 	if !ok || pm == nil || !pm.diffExpanded {
 		t.Fatalf("d should expand diff: next=%T expanded=%v", next, pm != nil && pm.diffExpanded)
@@ -395,7 +395,7 @@ func TestPermissionModalLargeDiffExpandCollapse(t *testing.T) {
 	}
 
 	// d collapses again
-	next, _ = pm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	next, _ = pm.update(tea.KeyPressMsg{Code: 'd', Text: string([]rune{'d'})})
 	pm, ok = next.(*permissionModal)
 	if !ok || pm == nil || pm.diffExpanded {
 		t.Fatalf("d should collapse diff: expanded=%v", pm != nil && pm.diffExpanded)
@@ -415,7 +415,7 @@ func TestPermissionModalLargeDiffExpandCollapse(t *testing.T) {
 	if short.diffCollapsible() {
 		t.Fatal("short edit should not be collapsible")
 	}
-	next, _ = short.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	next, _ = short.update(tea.KeyPressMsg{Code: 'd', Text: string([]rune{'d'})})
 	sm, ok := next.(*permissionModal)
 	if !ok || sm.diffExpanded {
 		t.Fatalf("d on short diff should not expand: expanded=%v", sm != nil && sm.diffExpanded)
@@ -816,16 +816,16 @@ func enterPermissionFeedback(t *testing.T, m *permissionModal) {
 	runPermissionCmd(t, cmd)
 }
 
-func permissionKey(key string) tea.KeyMsg {
+func permissionKey(key string) tea.KeyPressMsg {
 	switch key {
 	case "enter":
-		return tea.KeyMsg{Type: tea.KeyEnter}
+		return tea.KeyPressMsg{Code: tea.KeyEnter}
 	case "esc":
-		return tea.KeyMsg{Type: tea.KeyEsc}
+		return tea.KeyPressMsg{Code: tea.KeyEsc}
 	case "right":
-		return tea.KeyMsg{Type: tea.KeyRight}
+		return tea.KeyPressMsg{Code: tea.KeyRight}
 	default:
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)}
+		return tea.KeyPressMsg{Text: key}
 	}
 }
 

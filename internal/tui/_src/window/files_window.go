@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -101,7 +101,7 @@ func filesPollCmd(r windowRegistry) tea.Cmd {
 
 func (w filesWindow) update(msg tea.Msg) (window, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return w.handleKey(msg)
 	}
 	return w, nil
@@ -291,7 +291,7 @@ func refreshFilesWindows(r windowRegistry) windowRegistry {
 	return r
 }
 
-func (w filesWindow) handleKey(msg tea.KeyMsg) (filesWindow, tea.Cmd) {
+func (w filesWindow) handleKey(msg tea.KeyPressMsg) (filesWindow, tea.Cmd) {
 	if w.files == nil || w.root == "" {
 		return w, nil
 	}

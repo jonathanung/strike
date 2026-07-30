@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -67,11 +67,11 @@ func TestSessionNavCtrlXDownOpensChildTranscript(t *testing.T) {
 	m.cells = []cell{&userCell{text: "root prompt"}}
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlX})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	if !m.leaderArmed {
 		t.Fatal("leader not armed after ctrl+x")
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
 	if !m.viewingChild() || m.viewingID != "child-1" {
 		t.Fatalf("viewingID = %q, want child-1", m.viewingID)
 	}
@@ -80,7 +80,7 @@ func TestSessionNavCtrlXDownOpensChildTranscript(t *testing.T) {
 	}
 	// Force viewport content for the child cells.
 	m.refreshViewport()
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(viewString(m))
 	if !strings.Contains(plain, "child says hi") {
 		t.Errorf("view missing child text:\n%s", plain)
 	}
@@ -91,7 +91,7 @@ func TestSessionNavCtrlXDownOpensChildTranscript(t *testing.T) {
 		t.Errorf("root cells mutated: %d", len(m.cells))
 	}
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	if m.viewingChild() {
 		t.Fatal("still viewing child after esc")
 	}
@@ -111,20 +111,20 @@ func TestSessionNavSiblingCycle(t *testing.T) {
 	}
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 30})
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlX})
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
 	if m.viewingID != "c1" {
 		t.Fatalf("first child = %q", m.viewingID)
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRight})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyRight})
 	if m.viewingID != "c2" {
 		t.Fatalf("next sibling = %q, want c2", m.viewingID)
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyLeft})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyLeft})
 	if m.viewingID != "c1" {
 		t.Fatalf("prev sibling = %q, want c1", m.viewingID)
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
 	if m.viewingChild() {
 		t.Fatal("up should return to parent")
 	}
@@ -132,7 +132,7 @@ func TestSessionNavSiblingCycle(t *testing.T) {
 
 func TestSessionNavLeaderTimeout(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlX})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	if !m.leaderArmed {
 		t.Fatal("expected leader armed")
 	}
@@ -148,8 +148,8 @@ func TestSessionNavNoChildrenNotice(t *testing.T) {
 	m.sessionID = "root"
 	m.services.Sessions = newFakeSessions()
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlX})
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
 	if m.viewingChild() {
 		t.Fatal("opened child without any children")
 	}
@@ -224,15 +224,15 @@ func TestSubmitBlockedWhileViewingChild(t *testing.T) {
 		status:    string(protocol.ChildStatusCompleted),
 	}}
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlX})
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
 	if !m.viewingChild() {
 		t.Fatal("expected child view")
 	}
 
 	const draft = "should not go to parent"
 	m.composer.SetValue(draft)
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	assertNoAppOp(t, ops)
 	if m.composer.Value() != draft {
 		t.Fatalf("composer = %q, want draft kept", m.composer.Value())
@@ -262,14 +262,14 @@ func TestSkillSubmitBlockedWhileViewingChild(t *testing.T) {
 		status:    string(protocol.ChildStatusCompleted),
 	}}
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlX})
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
 	if !m.viewingChild() {
 		t.Fatal("expected child view")
 	}
 
 	m.composer.SetValue("/review this diff")
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	assertNoAppOp(t, ops)
 	if m.composer.Value() != "/review this diff" {
 		t.Fatalf("composer = %q, want skill draft kept", m.composer.Value())
@@ -289,8 +289,8 @@ func TestChildCompletedRefreshesViewingTranscript(t *testing.T) {
 	m.services.Sessions = fs
 	m.children = []childActivity{{sessionID: "c1", agent: "build", status: "running"}}
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 30})
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlX})
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
 	if !m.viewingChild() {
 		t.Fatal("not viewing")
 	}

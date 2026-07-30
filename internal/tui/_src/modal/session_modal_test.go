@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -35,7 +35,7 @@ func TestSessionModalFiltersByProject(t *testing.T) {
 		t.Errorf("missing all-projects hint:\n%s", view)
 	}
 
-	next, _ := m.update(tea.KeyMsg{Type: tea.KeyCtrlA})
+	next, _ := m.update(tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl})
 	sm := next.(*sessionModal)
 	if !sm.allProjects || len(sm.all) != 3 {
 		t.Fatalf("all projects: allProjects=%v list=%+v", sm.allProjects, sm.all)
@@ -47,7 +47,7 @@ func TestSessionModalFiltersByProject(t *testing.T) {
 	if !strings.Contains(view, "repo B work") {
 		t.Errorf("all mode missing B:\n%s", view)
 	}
-	next, _ = sm.update(tea.KeyMsg{Type: tea.KeyCtrlA})
+	next, _ = sm.update(tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl})
 	sm = next.(*sessionModal)
 	if sm.allProjects || len(sm.all) != 1 {
 		t.Fatalf("toggle back: allProjects=%v list=%+v", sm.allProjects, sm.all)
@@ -128,7 +128,7 @@ func TestSessionModalEnterResumesOther(t *testing.T) {
 		t.Fatal("other not in list")
 	}
 	modal.cursor = idx
-	next, cmd := modal.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := modal.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if next != nil {
 		t.Fatalf("modal after enter = %T, want nil", next)
 	}
@@ -146,7 +146,7 @@ func TestSessionModalEnterCurrentCloses(t *testing.T) {
 	fs := newFakeSessions()
 	fs.put(host.Session{ID: "cur", Title: "current"}, nil)
 	modal := newSessionModal(fs, "cur")
-	next, cmd := modal.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := modal.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if next != nil || cmd != nil {
 		t.Fatalf("selecting current: next=%T cmd=%v", next, cmd != nil)
 	}
@@ -323,7 +323,7 @@ func TestSessionModalFilterLive(t *testing.T) {
 	fs.put(host.Session{ID: "a", Title: "alpha work"}, nil)
 	fs.put(host.Session{ID: "b", Title: "beta task"}, nil)
 	m := newSessionModal(fs, "")
-	next, _ := m.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("bet")})
+	next, _ := m.update(tea.KeyPressMsg{Text: "bet"})
 	sm := next.(*sessionModal)
 	list := sm.filtered()
 	if len(list) != 1 || list[0].ID != "b" {
@@ -342,19 +342,19 @@ func TestSessionModalRenamePersistsViaHost(t *testing.T) {
 	fs := newFakeSessions()
 	fs.put(host.Session{ID: "s1", Title: "old name"}, nil)
 	m := newSessionModal(fs, "")
-	next, _ := m.update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	next, _ := m.update(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
 	sm := next.(*sessionModal)
 	if sm.phase != sessionPhaseRename {
 		t.Fatalf("phase = %v, want rename", sm.phase)
 	}
 	// Clear prefilled title then type new.
 	for range sm.renameBuf {
-		next, _ = sm.update(tea.KeyMsg{Type: tea.KeyBackspace})
+		next, _ = sm.update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 		sm = next.(*sessionModal)
 	}
-	next, _ = sm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("fresh title")})
+	next, _ = sm.update(tea.KeyPressMsg{Text: "fresh title"})
 	sm = next.(*sessionModal)
-	next, _ = sm.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ = sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	sm = next.(*sessionModal)
 	if sm.phase != sessionPhaseBrowse {
 		t.Fatalf("phase after save = %v", sm.phase)
@@ -382,12 +382,12 @@ func TestSessionModalDeleteRemovesFromList(t *testing.T) {
 			break
 		}
 	}
-	next, _ := m.update(tea.KeyMsg{Type: tea.KeyCtrlX})
+	next, _ := m.update(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	sm := next.(*sessionModal)
 	if sm.phase != sessionPhaseConfirmDelete || sm.deleteID != "gone" {
 		t.Fatalf("confirm: phase=%v id=%q", sm.phase, sm.deleteID)
 	}
-	next, _ = sm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	next, _ = sm.update(tea.KeyPressMsg{Text: "y"})
 	sm = next.(*sessionModal)
 	if sm.phase != sessionPhaseBrowse {
 		t.Fatalf("phase after delete = %v", sm.phase)
@@ -404,10 +404,10 @@ func TestSessionModalDeleteOpenRequiresForce(t *testing.T) {
 	fs := newFakeSessions()
 	fs.put(host.Session{ID: "open-one", Title: "busy", Open: true}, nil)
 	m := newSessionModal(fs, "other")
-	next, _ := m.update(tea.KeyMsg{Type: tea.KeyCtrlX})
+	next, _ := m.update(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	sm := next.(*sessionModal)
 	// y without force should stay in confirm.
-	next, _ = sm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	next, _ = sm.update(tea.KeyPressMsg{Text: "y"})
 	sm = next.(*sessionModal)
 	if sm.phase != sessionPhaseConfirmDelete {
 		t.Fatalf("phase = %v, want still confirm", sm.phase)
@@ -415,12 +415,12 @@ func TestSessionModalDeleteOpenRequiresForce(t *testing.T) {
 	if _, ok, _ := fs.Get("open-one"); !ok {
 		t.Fatal("open session deleted without force")
 	}
-	next, _ = sm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
+	next, _ = sm.update(tea.KeyPressMsg{Text: "f"})
 	sm = next.(*sessionModal)
 	if !sm.deleteForce {
 		t.Fatal("force not armed")
 	}
-	next, _ = sm.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ = sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	sm = next.(*sessionModal)
 	if sm.phase != sessionPhaseBrowse {
 		t.Fatalf("phase = %v after force delete", sm.phase)
@@ -434,9 +434,9 @@ func TestSessionModalDeleteCurrentRequiresForce(t *testing.T) {
 	fs := newFakeSessions()
 	fs.put(host.Session{ID: "cur", Title: "current"}, nil)
 	m := newSessionModal(fs, "cur")
-	next, _ := m.update(tea.KeyMsg{Type: tea.KeyCtrlX})
+	next, _ := m.update(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	sm := next.(*sessionModal)
-	next, _ = sm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	next, _ = sm.update(tea.KeyPressMsg{Text: "y"})
 	sm = next.(*sessionModal)
 	if sm.phase != sessionPhaseConfirmDelete {
 		t.Fatalf("current delete without force left confirm: phase=%v", sm.phase)
@@ -445,7 +445,7 @@ func TestSessionModalDeleteCurrentRequiresForce(t *testing.T) {
 		t.Fatal("current deleted without force")
 	}
 	sm.deleteForce = true
-	next, _ = sm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	next, _ = sm.update(tea.KeyPressMsg{Text: "y"})
 	sm = next.(*sessionModal)
 	if _, ok, _ := fs.Get("cur"); ok {
 		t.Fatal("current still present after force")

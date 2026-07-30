@@ -16,7 +16,7 @@ func TestWrapInputNil(t *testing.T) {
 
 // TestWrapInputEnhancedRewrite pins byte-level rewrites under EnableEnhancedKeys.
 //
-// Model.Update tests that inject tea.KeyMsg{Type: KeyCtrlC} (and similar) only
+// Model.Update tests that inject tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl} (and similar) only
 // validate routing after Bubble Tea has already decoded a key. These WrapInput
 // tests cover the terminal wire format: Kitty CSI-u and xterm modifyOtherKeys
 // sequences that must become legacy control bytes (or Alt+Enter) before the

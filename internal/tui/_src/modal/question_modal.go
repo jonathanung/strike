@@ -3,8 +3,8 @@ package tui
 import (
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -126,7 +126,7 @@ func (m *questionModal) prepareStep() {
 	}
 }
 
-func (m *questionModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *questionModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	if len(m.req.Questions) == 0 {
 		if isEscape(msg) {
 			return nil, m.reply(nil)
@@ -144,7 +144,7 @@ func (m *questionModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 	return m.updateAnswer(msg)
 }
 
-func (m *questionModal) updateConfirm(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *questionModal) updateConfirm(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	switch msg.String() {
 	case "enter", "y":
 		return nil, m.reply(append([]string(nil), m.answers...))
@@ -163,7 +163,7 @@ func (m *questionModal) updateConfirm(msg tea.KeyMsg) (modal, tea.Cmd) {
 	return m, nil
 }
 
-func (m *questionModal) updateAnswer(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *questionModal) updateAnswer(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	key := msg.String()
 
 	// Navigation between questions (shift+tab always; left/right only when not typing).
@@ -383,8 +383,8 @@ func (m *questionModal) view(width int, th theme.Theme) string {
 
 	var hint string
 	if m.isFreeform() {
-		cursorWidth := max(1, ansi.StringWidth(m.input.Cursor.View()))
-		m.input.Width = max(1, inner-ansi.StringWidth(m.input.Prompt)-cursorWidth)
+		cursorWidth := max(1, 1)
+		m.input.SetWidth(max(1, inner-ansi.StringWidth(m.input.Prompt)-cursorWidth))
 		m.input.SetValue(m.input.Value())
 		parts = append(parts, m.input.View())
 		hints := []string{"enter next"}
