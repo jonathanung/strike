@@ -22,6 +22,13 @@ type Host struct {
 	prevHostIdle  uint64
 	prevHostOK    bool
 
+	// Last computed host percent, reused when the kernel counters have not
+	// advanced since the previous sample. macOS aggregates per-core ticks
+	// lazily (roughly once a second), so at the 1 Hz DefaultInterval a sample
+	// can land inside a window with no movement.
+	prevHostPct   float64
+	prevHostPctOK bool
+
 	// Previous process CPU time (ns) and wall time for process percent.
 	prevProcNS int64
 	prevWall   time.Time
@@ -41,8 +48,9 @@ type Host struct {
 	diskRefreshInFlight bool
 
 	// Optional hooks for tests. nil → platform defaults.
-	readDiskFn func(root string) (used, total, free uint64, ok bool)
-	nowFn      func() time.Time
+	readDiskFn    func(root string) (used, total, free uint64, ok bool)
+	readHostCPUFn func() (idle, total uint64, ok bool)
+	nowFn         func() time.Time
 }
 
 // NewHost builds a Host collector for the current process.
@@ -98,7 +106,11 @@ func (h *Host) Collect(ctx context.Context, root string) (Sample, error) {
 }
 
 func (h *Host) sampleCPU(s *Sample) {
-	idle, total, hostOK := readHostCPU()
+	readCPU := readHostCPU
+	if h.readHostCPUFn != nil {
+		readCPU = h.readHostCPUFn
+	}
+	idle, total, hostOK := readCPU()
 	procNS, procOK := readProcessCPUTime(h.pid)
 	now := h.now()
 
@@ -106,10 +118,10 @@ func (h *Host) sampleCPU(s *Sample) {
 	defer h.mu.Unlock()
 
 	if hostOK {
-		if h.prevHostOK && total > h.prevHostTotal {
-			deltaTotal := total - h.prevHostTotal
-			deltaIdle := idle - h.prevHostIdle
-			if deltaTotal > 0 {
+		if h.prevHostOK {
+			if total > h.prevHostTotal {
+				deltaTotal := total - h.prevHostTotal
+				deltaIdle := idle - h.prevHostIdle
 				busy := float64(deltaTotal-deltaIdle) / float64(deltaTotal) * 100
 				if busy < 0 {
 					busy = 0
@@ -118,6 +130,13 @@ func (h *Host) sampleCPU(s *Sample) {
 					busy = 100
 				}
 				s.CPUHostPct = busy
+				s.CPUHostOK = true
+				h.prevHostPct = busy
+				h.prevHostPctOK = true
+			} else if h.prevHostPctOK {
+				// Counters did not advance. Hold the last percent rather than
+				// flickering the row to "unavailable" — see prevHostPct.
+				s.CPUHostPct = h.prevHostPct
 				s.CPUHostOK = true
 			}
 		}

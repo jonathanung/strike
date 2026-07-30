@@ -4,44 +4,32 @@ package telemetry
 
 import (
 	"encoding/binary"
+	"sync"
 	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
 
+// hostCPUTicks widens the Mach tick counters across their 32-bit rollover. It
+// has its own lock because readHostCPU runs before sampleCPU takes Host.mu, and
+// Collect is documented safe for concurrent use.
+var hostCPUTicks struct {
+	mu sync.Mutex
+	machTickWidener
+}
+
 func readHostCPU() (idle, total uint64, ok bool) {
-	// kern.cp_time: user nice sys idle intr
-	raw, err := unix.SysctlRaw("kern.cp_time")
-	if err != nil || len(raw) < 5*8 {
+	// Host CPU load is a Mach RPC on macOS — see mach_cpu_darwin.go. The old
+	// kern.cp_time sysctl read here is BSD-only; macOS never exported it, so
+	// this always reported unavailable (#602).
+	ticks, ok := machHostCPUTicks()
+	if !ok {
 		return 0, 0, false
 	}
-	// Each counter is a 64-bit (or long) value depending on arch.
-	// On modern darwin, sysctl returns array of uint64/long.
-	n := len(raw) / 8
-	if n < 5 {
-		// 32-bit longs
-		if len(raw) < 5*4 {
-			return 0, 0, false
-		}
-		vals := make([]uint64, 5)
-		for i := 0; i < 5; i++ {
-			vals[i] = uint64(*(*uint32)(unsafe.Pointer(&raw[i*4])))
-		}
-		idle = vals[3]
-		for _, v := range vals {
-			total += v
-		}
-		return idle, total, true
-	}
-	vals := make([]uint64, 5)
-	for i := 0; i < 5; i++ {
-		vals[i] = *(*uint64)(unsafe.Pointer(&raw[i*8]))
-	}
-	idle = vals[3]
-	for _, v := range vals {
-		total += v
-	}
+	hostCPUTicks.mu.Lock()
+	defer hostCPUTicks.mu.Unlock()
+	idle, total = hostCPUTicks.add(ticks)
 	return idle, total, true
 }
 
