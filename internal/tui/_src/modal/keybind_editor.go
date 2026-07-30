@@ -34,7 +34,6 @@ const keybindEditorVisible = 18
 // display order. Only these categories appear in the tab bar.
 var editorTabOrder = []string{"Navigation", "Global", "Editor", "Composer", "Completion"}
 
-// conflictPending holds conflict state when the captured chord is already bound.
 type conflictPending struct {
 	Chord      string
 	CaptureID  string // the entry being rebound
@@ -57,7 +56,9 @@ type keybindEditor struct {
 	settings  host.Settings
 	tab       int // index into editorTabOrder; -1 means "all"
 
-	confirm *conflictPending // non-nil when user must confirm a conflict
+	confirm       *conflictPending // non-nil when user must confirm a conflict
+	unsavedPrompt bool             // user tried to close with unsaved changes
+	closeAfterSave bool            // close modal once save completes
 }
 
 func newKeybindEditor(effective keyMap, persistedOverrides map[string][]string, settings host.Settings) *keybindEditor {
@@ -141,6 +142,13 @@ func (m *keybindEditor) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 	if m.confirm != nil {
 		return m.updateConfirm(msg)
 	}
+	if m.unsavedPrompt {
+		return m.updateUnsavedPrompt(msg)
+	}
+	if (isEscape(msg) || msg.String() == "q") && m.hasUnsaved() {
+		m.unsavedPrompt = true
+		return m, nil
+	}
 	if isEscape(msg) || msg.String() == "q" {
 		return nil, nil
 	}
@@ -213,6 +221,31 @@ func (m *keybindEditor) updateConfirm(msg tea.KeyMsg) (modal, tea.Cmd) {
 		}
 	case "n", "N", "esc":
 		m.confirm = nil
+		return m, nil
+	default:
+		return m, nil
+	}
+}
+
+func (m *keybindEditor) hasUnsaved() bool {
+	return len(m.pending) > 0
+}
+
+func (m *keybindEditor) updateUnsavedPrompt(msg tea.KeyMsg) (modal, tea.Cmd) {
+	switch msg.String() {
+	case "y", "Y":
+		if len(m.pending) == 0 {
+			m.unsavedPrompt = false
+			return nil, nil
+		}
+		m.closeAfterSave = true
+		m.unsavedPrompt = false
+		return m.savePending()
+	case "n", "N":
+		m.unsavedPrompt = false
+		return nil, nil
+	case "esc":
+		m.unsavedPrompt = false
 		return m, nil
 	default:
 		return m, nil
@@ -305,6 +338,7 @@ func (m *keybindEditor) resetOverride() (modal, tea.Cmd) {
 }
 
 func (m *keybindEditor) saveComplete() {
+	m.closeAfterSave = false
 	m.pending = make(map[string][]string)
 }
 
@@ -418,12 +452,16 @@ func (m *keybindEditor) view(width int, th theme.Theme) string {
 		title = "Press new key for " + m.captureID + th.Icons.Ellipsis
 	} else if m.confirm != nil {
 		title = "⚠  Key conflict"
+	} else if m.unsavedPrompt {
+		title = "⚠  Unsaved changes"
 	}
 	hint := "left/right switch tab | type to filter | up/down/j/k move | enter/r rebind | ctrl+d reset | ctrl+s save | esc close"
 	if m.capturing {
 		hint = "press any key to bind | esc cancel"
 	} else if m.confirm != nil {
 		hint = "y rebind anyway | n cancel"
+	} else if m.unsavedPrompt {
+		hint = "y save and close | n discard | esc back"
 	}
 	// Use Panel directly, not Dialog, so the ANSI-colored tab bar is not
 	// passed through word-wrap (which mangles ANSI escapes).
@@ -439,6 +477,10 @@ func (m *keybindEditor) view(width int, th theme.Theme) string {
 		}
 		content += "\n\n" + th.S().Warning.Render(
 			m.confirm.Chord+" is used by \""+label+"\". Rebinding will unassign it.",
+		)
+	} else if m.unsavedPrompt {
+		content += "\n\n" + th.S().Warning.Render(
+			"You have unsaved keybind changes. Save before closing?",
 		)
 	}
 	if hint != "" {

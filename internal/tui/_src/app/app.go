@@ -1043,6 +1043,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.setNotice("keybinds saved to ~/.strike/keybinds.jsonc", false)
 			if ed, ok := m.modal.(*keybindEditor); ok {
+				if ed.closeAfterSave {
+					m.modal = nil
+					promote := m.afterModalClosed()
+					m.refreshAwaitingPermission()
+					m.reflow()
+					return m, promote
+				}
 				ed.saveComplete()
 			}
 		}
