@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -258,7 +258,7 @@ func (m Model) sessionPanelTitle() string {
 // transcriptFooter shows a scroll indicator when the transcript overflows its
 // viewport, and nothing otherwise.
 func (m Model) transcriptFooter() string {
-	if m.viewport.Height <= 0 || m.viewport.TotalLineCount() <= m.viewport.Height {
+	if m.viewport.Height() <= 0 || m.viewport.TotalLineCount() <= m.viewport.Height() {
 		return ""
 	}
 	return dotJoin(m.th, strconv.Itoa(int(m.viewport.ScrollPercent()*100))+"%", "pgup/pgdn", keyHint(m.keyMap.JumpBottom).Key)

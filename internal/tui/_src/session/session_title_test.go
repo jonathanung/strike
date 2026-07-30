@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -27,10 +27,9 @@ func TestSessionTitledSetsPanelAndWindowTitle(t *testing.T) {
 	if got := windowTitle(m); !strings.Contains(got, "fix the auth flow") {
 		t.Errorf("windowTitle = %q", got)
 	}
-	if cmd == nil {
-		t.Fatal("expected title update cmd")
-	}
-	plain := ansi.Strip(m.View())
+	// Bubble Tea v2 sets the window title from View().WindowTitle; no cmd.
+	_ = cmd
+	plain := ansi.Strip(viewString(m))
 	if !strings.Contains(plain, "fix the auth flow") {
 		t.Errorf("view missing session title:\n%s", plain)
 	}

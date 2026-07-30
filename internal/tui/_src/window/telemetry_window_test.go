@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
@@ -356,7 +356,7 @@ func TestTelemetryInSessionStack(t *testing.T) {
 	m.focus = focusRight
 	m.windows, _ = m.windows.activate("context")
 	m.reflow()
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(viewString(m))
 	for _, want := range []string{"context", "activity", "system", "RAM", "CPU", "Disk"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("stack missing %q:\n%s", want, plain)
@@ -365,7 +365,7 @@ func TestTelemetryInSessionStack(t *testing.T) {
 	// Off removes the pane.
 	m.windows, _ = setTelemetryEnabled(m.windows, false)
 	m.reflow()
-	plain = ansi.Strip(m.View())
+	plain = ansi.Strip(viewString(m))
 	if strings.Contains(plain, "system") && strings.Contains(plain, "RAM") {
 		t.Errorf("system pane still visible after off:\n%s", plain)
 	}

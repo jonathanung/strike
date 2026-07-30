@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -60,7 +60,7 @@ func TestCloseUserModalPromotesQueuedPermission(t *testing.T) {
 	})
 
 	// Escape closes settings; permission becomes visible exactly once.
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEscape})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	pm, ok := m.modal.(*permissionModal)
 	if !ok {
 		t.Fatalf("modal = %T, want permissionModal", m.modal)
@@ -93,13 +93,13 @@ func TestMultipleAsksQueueOrderAndCorrelate(t *testing.T) {
 	}
 
 	// Dismiss theme → first permission.
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEscape})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	if pm, ok := m.modal.(*permissionModal); !ok || pm.req.RequestID != "p1" {
 		t.Fatalf("first promote = %T id=%v", m.modal, modalRequestID(m.modal))
 	}
 
 	// User answers p1; dismiss promotes the next queued ask immediately.
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	updated, cmd := m.Update(tea.KeyPressMsg{Text: "y"})
 	m = updated.(Model)
 	reply := receiveSinglePermissionReply(t, ops, cmd)
 	assertPermissionReply(t, reply, "p1", protocol.DecisionOnce, "")
@@ -127,7 +127,7 @@ func TestResolvedWhileQueuedNeverAppears(t *testing.T) {
 		t.Fatalf("queue id = %q, want keep", id)
 	}
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEscape})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	if pm, ok := m.modal.(*permissionModal); !ok || pm.req.RequestID != "keep" {
 		t.Fatalf("promoted = %T id=%v", m.modal, modalRequestID(m.modal))
 	}
@@ -169,7 +169,7 @@ func TestQueuedPermissionCountdownDoesNotArmOrFire(t *testing.T) {
 	}
 
 	// After promote, countdown arms.
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEscape})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	pm, ok := m.modal.(*permissionModal)
 	if !ok {
 		t.Fatalf("modal = %T", m.modal)
@@ -284,7 +284,7 @@ func TestInputRoutesToVisibleTopOnly(t *testing.T) {
 	_ = m.applyEvent(protocol.PermissionAsked{RequestID: "top", Permission: "bash", Patterns: []string{"ls"}})
 
 	// Keys go to settings only; must not submit a permission reply.
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	m = updateApp(t, m, tea.KeyPressMsg{Text: "j"})
 	if _, ok := m.modal.(*settingsModal); !ok {
 		t.Fatalf("modal = %T", m.modal)
 	}

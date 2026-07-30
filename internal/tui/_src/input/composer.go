@@ -4,8 +4,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
 )
 
 func (m Model) updateComposer(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -32,7 +32,7 @@ func (m Model) updateComposer(msg tea.Msg) (tea.Model, tea.Cmd) {
 //
 // ctrl+k only claims the event when it deletes text; at EOL / empty composer it
 // falls through so global.palette (also ctrl+k) can open.
-func (m Model) applyComposerReadline(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+func (m Model) applyComposerReadline(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	switch {
 	case key.Matches(msg, m.keyMap.Yank):
 		if m.killBuf == "" {
@@ -224,7 +224,7 @@ func (m *Model) setComposerValueAt(value string, offset int) {
 	for steps := 0; m.composer.Line() > targetRow && steps <= len(runes)+1; steps++ {
 		m.composer.CursorUp()
 	}
-	m.composer.SetCursor(targetCol)
+	m.composer.SetCursorColumn(targetCol)
 }
 
 func (m *Model) resetComposer() {
@@ -236,7 +236,7 @@ func (m *Model) resetComposer() {
 	m.reflow()
 }
 
-func (m *Model) handleHistoryKey(msg tea.KeyMsg) bool {
+func (m *Model) handleHistoryKey(msg tea.KeyPressMsg) bool {
 	if m.historyPos >= 0 {
 		switch {
 		case key.Matches(msg, m.keyMap.HistoryPrev):

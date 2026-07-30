@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -16,7 +16,7 @@ func TestBareAgentOpensPickerOnTheActiveAgent(t *testing.T) {
 	m.agentName = "plan"
 	m.composer.SetValue("/agent")
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	picker, ok := m.modal.(*agentModal)
 	if !ok {
@@ -34,7 +34,7 @@ func TestAgentCommandWithArgumentSendsSelectAgent(t *testing.T) {
 	m, ops := newAppTestModel([]string{"build", "plan"}, nil)
 	m.composer.SetValue("/agent plan")
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	runAppCmd(t, cmd)
 
@@ -55,8 +55,8 @@ func TestAgentPickerEnterSendsSelectionAndClosesModal(t *testing.T) {
 	ops := make(chan protocol.Op, 4)
 	picker := newAgentModal("build", []string{"build", "plan"}, ops, nil)
 
-	picker.update(tea.KeyMsg{Type: tea.KeyDown})
-	next, cmd := picker.update(tea.KeyMsg{Type: tea.KeyEnter})
+	picker.update(tea.KeyPressMsg{Code: tea.KeyDown})
+	next, cmd := picker.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if next != nil {
 		t.Errorf("enter left modal open as %T, want closed", next)
 	}
@@ -69,13 +69,13 @@ func TestAgentPickerEnterSendsSelectionAndClosesModal(t *testing.T) {
 func TestAgentPickerCursorStaysInRange(t *testing.T) {
 	picker := newAgentModal("build", []string{"build", "plan", "review"}, make(chan protocol.Op, 1), nil)
 	for i := 0; i < 20; i++ {
-		picker.update(tea.KeyMsg{Type: tea.KeyDown})
+		picker.update(tea.KeyPressMsg{Code: tea.KeyDown})
 	}
 	if picker.cursor != len(picker.agents)-1 {
 		t.Errorf("cursor = %d, want %d", picker.cursor, len(picker.agents)-1)
 	}
 	for i := 0; i < 20; i++ {
-		picker.update(tea.KeyMsg{Type: tea.KeyUp})
+		picker.update(tea.KeyPressMsg{Code: tea.KeyUp})
 	}
 	if picker.cursor != 0 {
 		t.Errorf("cursor = %d after scrolling up, want 0", picker.cursor)
@@ -85,7 +85,7 @@ func TestAgentPickerCursorStaysInRange(t *testing.T) {
 func TestAgentPickerEscClosesWithoutSelecting(t *testing.T) {
 	ops := make(chan protocol.Op, 1)
 	picker := newAgentModal("plan", []string{"build", "plan"}, ops, nil)
-	next, cmd := picker.update(tea.KeyMsg{Type: tea.KeyEsc})
+	next, cmd := picker.update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if next != nil {
 		t.Errorf("esc left modal open as %T", next)
 	}
@@ -129,7 +129,7 @@ func TestAgentPickerEmptyList(t *testing.T) {
 	if !strings.Contains(out, "no agents configured") {
 		t.Errorf("empty picker missing empty copy:\n%s", out)
 	}
-	next, cmd := picker.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := picker.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if next != picker {
 		t.Errorf("enter on empty list closed modal as %T", next)
 	}
@@ -139,9 +139,9 @@ func TestAgentPickerEmptyList(t *testing.T) {
 func TestAgentPickerCtrlDSavesOnlyTheAgentDefault(t *testing.T) {
 	settings := &fakeSettings{}
 	picker := newAgentModal("build", []string{"build", "plan"}, make(chan protocol.Op, 1), settings)
-	picker.update(tea.KeyMsg{Type: tea.KeyDown})
+	picker.update(tea.KeyPressMsg{Code: tea.KeyDown})
 
-	next, cmd := picker.update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	next, cmd := picker.update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
 	if next == nil {
 		t.Error("ctrl+d closed the picker, want it to stay open")
 	}

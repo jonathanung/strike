@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
@@ -19,7 +19,7 @@ import (
 // CSI rewrites to ESC+\r; BT's sequence table decodes that as KeyEnter+Alt
 // (bubbletea key_sequences: "\x1b"+CR → Key{Type: KeyEnter, Alt: true}).
 // Enhanced ctrl+j rewrites to ESC+j → KeyRunes{'j'}+Alt (#240).
-func keyMsgFromWrapInput(t *testing.T, wire string) tea.KeyMsg {
+func keyMsgFromWrapInput(t *testing.T, wire string) tea.KeyPressMsg {
 	t.Helper()
 	got, err := io.ReadAll(WrapInput(strings.NewReader(wire)))
 	if err != nil {
@@ -27,12 +27,12 @@ func keyMsgFromWrapInput(t *testing.T, wire string) tea.KeyMsg {
 	}
 	switch {
 	case bytes.Equal(got, altEnter):
-		return tea.KeyMsg{Type: tea.KeyEnter, Alt: true}
+		return tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt}
 	case bytes.Equal(got, altJ):
 		return keyMsgAltJ()
 	default:
 		t.Fatalf("WrapInput(%q) = %q (%v), no KeyMsg mapping for this test", wire, got, got)
-		return tea.KeyMsg{}
+		return tea.KeyPressMsg{}
 	}
 }
 
@@ -57,25 +57,25 @@ func TestLeftFocusKeymapRoutingMatrix(t *testing.T) {
 
 	tests := []struct {
 		name string
-		msg  tea.KeyMsg
+		msg  tea.KeyPressMsg
 		want kind
 	}{
-		{"send enter", tea.KeyMsg{Type: tea.KeyEnter}, kindSend},
-		{"newline alt+enter", tea.KeyMsg{Type: tea.KeyEnter, Alt: true}, kindNewline},
+		{"send enter", tea.KeyPressMsg{Code: tea.KeyEnter}, kindSend},
+		{"newline alt+enter", tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt}, kindNewline},
 		// Bare LF (Ubuntu ctrl+j) and enhanced alt+j both newline (#414).
-		{"newline bare LF ctrl+j", tea.KeyMsg{Type: tea.KeyCtrlJ}, kindNewline},
+		{"newline bare LF ctrl+j", tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl}, kindNewline},
 		{"newline enhanced ctrl+j", keyMsgAltJ(), kindNewline},
-		{"cycle next ctrl+o", tea.KeyMsg{Type: tea.KeyCtrlO}, kindCycleNext},
-		{"cycle prev ctrl+p", tea.KeyMsg{Type: tea.KeyCtrlP}, kindCyclePrev},
-		{"scroll pgup", tea.KeyMsg{Type: tea.KeyPgUp}, kindScrollUp},
-		{"scroll ctrl+up", tea.KeyMsg{Type: tea.KeyCtrlUp}, kindScrollUp},
-		{"scroll pgdown", tea.KeyMsg{Type: tea.KeyPgDown}, kindScrollDown},
-		{"scroll ctrl+down", tea.KeyMsg{Type: tea.KeyCtrlDown}, kindScrollDown},
-		{"jump ctrl+t", tea.KeyMsg{Type: tea.KeyCtrlT}, kindJumpBottom},
-		{"toggle alt+;", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{';'}, Alt: true}, kindToggle},
-		{"focus left ctrl+h", tea.KeyMsg{Type: tea.KeyCtrlH}, kindFocusLeft},
-		{"focus right ctrl+l", tea.KeyMsg{Type: tea.KeyCtrlL}, kindFocusRight},
-		{"kill line end ctrl+k", tea.KeyMsg{Type: tea.KeyCtrlK}, kindKillLineEnd},
+		{"cycle next ctrl+o", tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}, kindCycleNext},
+		{"cycle prev ctrl+p", tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl}, kindCyclePrev},
+		{"scroll pgup", tea.KeyPressMsg{Code: tea.KeyPgUp}, kindScrollUp},
+		{"scroll ctrl+up", tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModCtrl}, kindScrollUp},
+		{"scroll pgdown", tea.KeyPressMsg{Code: tea.KeyPgDown}, kindScrollDown},
+		{"scroll ctrl+down", tea.KeyPressMsg{Code: tea.KeyDown, Mod: tea.ModCtrl}, kindScrollDown},
+		{"jump ctrl+t", tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl}, kindJumpBottom},
+		{"toggle alt+;", tea.KeyPressMsg{Code: ';', Mod: tea.ModAlt}, kindToggle},
+		{"focus left ctrl+h", tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl}, kindFocusLeft},
+		{"focus right ctrl+l", tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl}, kindFocusRight},
+		{"kill line end ctrl+k", tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl}, kindKillLineEnd},
 	}
 
 	for _, tt := range tests {
@@ -94,13 +94,13 @@ func TestLeftFocusKeymapRoutingMatrix(t *testing.T) {
 			}
 			m.refreshViewport()
 			m.viewport.GotoBottom()
-			bottom := m.viewport.YOffset
+			bottom := m.viewport.YOffset()
 
 			startOrient := m.splitOrientation
 			startFocus := m.focus
 			startWin := m.windows.index
 			m.composer.SetValue("hello world")
-			m.composer.SetCursor(5) // after "hello" so ctrl+k kills " world"
+			m.composer.SetCursorColumn(5) // after "hello" so ctrl+k kills " world"
 			composerBefore := m.composer.Value()
 
 			updated, cmd := m.Update(tt.msg)
@@ -156,8 +156,8 @@ func TestLeftFocusKeymapRoutingMatrix(t *testing.T) {
 				}
 				assertNoAppOp(t, ops)
 			case kindScrollUp:
-				if m.viewport.YOffset >= bottom {
-					t.Errorf("scroll up offset=%d bottom=%d", m.viewport.YOffset, bottom)
+				if m.viewport.YOffset() >= bottom {
+					t.Errorf("scroll up offset=%d bottom=%d", m.viewport.YOffset(), bottom)
 				}
 				if m.composer.Value() != composerBefore {
 					t.Errorf("scroll up changed composer to %q", m.composer.Value())
@@ -165,8 +165,8 @@ func TestLeftFocusKeymapRoutingMatrix(t *testing.T) {
 			case kindScrollDown:
 				m.viewport.GotoTop()
 				m = updateApp(t, m, tt.msg)
-				if m.viewport.YOffset <= 0 {
-					t.Errorf("scroll down offset=%d, want > 0", m.viewport.YOffset)
+				if m.viewport.YOffset() <= 0 {
+					t.Errorf("scroll down offset=%d, want > 0", m.viewport.YOffset())
 				}
 				if m.composer.Value() != composerBefore {
 					t.Errorf("scroll down changed composer to %q", m.composer.Value())
@@ -175,7 +175,7 @@ func TestLeftFocusKeymapRoutingMatrix(t *testing.T) {
 				m.viewport.GotoTop()
 				m = updateApp(t, m, tt.msg)
 				if !m.viewport.AtBottom() {
-					t.Errorf("jump bottom AtBottom=false offset=%d", m.viewport.YOffset)
+					t.Errorf("jump bottom AtBottom=false offset=%d", m.viewport.YOffset())
 				}
 			case kindToggle:
 				if m.splitOrientation == startOrient {
@@ -221,7 +221,7 @@ func TestLeftFocusKeymapRoutingMatrix(t *testing.T) {
 		m, _ := newAppTestModel(nil, nil)
 		m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
 		m.composer.SetValue("")
-		m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+		m = updateApp(t, m, tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl})
 		if _, ok := m.modal.(*paletteModal); !ok {
 			t.Fatalf("empty ctrl+k modal = %T, want palette", m.modal)
 		}
@@ -273,7 +273,7 @@ func TestShiftEnterNewlineWithoutPaneCycle(t *testing.T) {
 				startOrient := m.splitOrientation
 				m.composer.SetValue("line1")
 				// Cursor at end so InsertString("\n") appends.
-				m.composer.SetCursor(len("line1"))
+				m.composer.SetCursorColumn(len("line1"))
 
 				if !key.Matches(msg, m.keyMap.Newline) {
 					t.Fatalf("msg %v does not match Newline", msg)
@@ -338,16 +338,16 @@ func TestUbuntuBareLFCtrlJNewlinesNotCycle(t *testing.T) {
 		statefulTestWindow{windowID: "b", windowTitle: "B"},
 	}}
 	m.composer.SetValue("keep")
-	m.composer.SetCursor(len("keep"))
+	m.composer.SetCursorColumn(len("keep"))
 
 	// Left-focus bare LF → newline, no cycle.
-	if !key.Matches(tea.KeyMsg{Type: tea.KeyCtrlJ}, m.keyMap.Newline) {
+	if !key.Matches(tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl}, m.keyMap.Newline) {
 		t.Fatal("KeyCtrlJ must match Newline")
 	}
-	if key.Matches(tea.KeyMsg{Type: tea.KeyCtrlJ}, m.keyMap.CycleWindowNext) {
+	if key.Matches(tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl}, m.keyMap.CycleWindowNext) {
 		t.Fatal("KeyCtrlJ must not match CycleWindowNext")
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl})
 	if got := m.composer.Value(); got != "keep\n" {
 		t.Fatalf("bare LF composer = %q, want keep\\n", got)
 	}
@@ -356,14 +356,14 @@ func TestUbuntuBareLFCtrlJNewlinesNotCycle(t *testing.T) {
 	}
 
 	// ctrl+o still cycles from left.
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlO})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
 	if m.windows.index != 1 || m.windows.active().id() != "b" {
 		t.Fatalf("ctrl+o window = %d/%s, want 1/b", m.windows.index, m.windows.active().id())
 	}
 
 	// Enter still sends.
 	m.focus = focusLeft
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if m.composer.Value() != "" {
 		t.Errorf("enter left composer = %q, want empty", m.composer.Value())
@@ -381,7 +381,7 @@ func TestUbuntuBareLFCtrlJNewlinesNotCycle(t *testing.T) {
 
 	// Shift+enter CSI still newlines.
 	m.composer.SetValue("line")
-	m.composer.SetCursor(len("line"))
+	m.composer.SetCursorColumn(len("line"))
 	m = updateApp(t, m, keyMsgFromWrapInput(t, "\x1b[13;2u"))
 	if got := m.composer.Value(); got != "line\n" {
 		t.Errorf("shift+enter composer = %q, want line\\n", got)
@@ -398,22 +398,22 @@ func TestCtrlOPCyclesWindows(t *testing.T) {
 		statefulTestWindow{windowID: "b", windowTitle: "B"},
 	}}
 	m.composer.SetValue("keep")
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlO})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
 	if got := m.composer.Value(); got != "keep" {
 		t.Fatalf("ctrl+o composer = %q, want keep", got)
 	}
 	if m.windows.index != 1 || m.windows.active().id() != "b" {
 		t.Fatalf("ctrl+o window = %d/%s, want 1/b", m.windows.index, m.windows.active().id())
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlP})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	if m.windows.index != 0 || m.windows.active().id() != "a" {
 		t.Fatalf("ctrl+p window = %d/%s, want 0/a", m.windows.index, m.windows.active().id())
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 	if m.focus != focusRight {
 		t.Fatalf("focus = %v, want right", m.focus)
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlO})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
 	if m.windows.index != 1 || m.windows.active().id() != "b" {
 		t.Errorf("right ctrl+o window = %d/%s, want 1/b", m.windows.index, m.windows.active().id())
 	}
@@ -449,7 +449,7 @@ func TestEnhancedCtrlJWireNewlines(t *testing.T) {
 					statefulTestWindow{windowID: "b", windowTitle: "B"},
 				}}
 				m.composer.SetValue("draft")
-				m.composer.SetCursor(len("draft"))
+				m.composer.SetCursorColumn(len("draft"))
 				startWin := m.windows.index
 				startFocus := m.focus
 
@@ -526,7 +526,7 @@ func TestCtrlSemicolonToggleOrientationViaKeyMsg(t *testing.T) {
 		t.Fatal("want horizontal start")
 	}
 	// Update path: alt+; KeyMsg (post-rewrite form).
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{';'}, Alt: true}
+	msg := tea.KeyPressMsg{Code: ';', Mod: tea.ModAlt}
 	if !key.Matches(msg, m.keyMap.ToggleOrientation) {
 		t.Fatal("alt+; does not match ToggleOrientation")
 	}
@@ -535,19 +535,19 @@ func TestCtrlSemicolonToggleOrientationViaKeyMsg(t *testing.T) {
 		t.Fatalf("after ctrl+; orientation = %v, want vertical", m.splitOrientation)
 	}
 	// Orientation-independent chords: focus stays h/l, cycle stays o/p (#414).
-	if !key.Matches(tea.KeyMsg{Type: tea.KeyCtrlH}, m.keyMap.FocusLeft) {
+	if !key.Matches(tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl}, m.keyMap.FocusLeft) {
 		t.Error("vertical: ctrl+h should still focus left/primary")
 	}
-	if !key.Matches(tea.KeyMsg{Type: tea.KeyCtrlL}, m.keyMap.FocusRight) {
+	if !key.Matches(tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl}, m.keyMap.FocusRight) {
 		t.Error("vertical: ctrl+l should still focus right/secondary")
 	}
-	if !key.Matches(tea.KeyMsg{Type: tea.KeyCtrlO}, m.keyMap.CycleWindowNext) {
+	if !key.Matches(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}, m.keyMap.CycleWindowNext) {
 		t.Error("vertical: ctrl+o should still cycle next")
 	}
-	if !key.Matches(tea.KeyMsg{Type: tea.KeyCtrlP}, m.keyMap.CycleWindowPrev) {
+	if !key.Matches(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl}, m.keyMap.CycleWindowPrev) {
 		t.Error("vertical: ctrl+p should still cycle prev")
 	}
-	if key.Matches(tea.KeyMsg{Type: tea.KeyCtrlJ}, m.keyMap.FocusLeft, m.keyMap.CycleWindowNext) {
+	if key.Matches(tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl}, m.keyMap.FocusLeft, m.keyMap.CycleWindowNext) {
 		t.Error("vertical: ctrl+j must remain newline-only")
 	}
 	m = updateApp(t, m, msg)
@@ -568,21 +568,18 @@ func TestTranscriptScrollChordsAndMouseWheel(t *testing.T) {
 	}
 	m.refreshViewport()
 	m.viewport.GotoBottom()
-	bottom := m.viewport.YOffset
+	bottom := m.viewport.YOffset()
 	if bottom == 0 {
 		t.Fatal("setup: expected scrollable transcript")
 	}
 	m.composer.SetValue("keep-me")
 
 	// Left-focus keyboard scroll.
-	for _, msg := range []tea.KeyMsg{
-		{Type: tea.KeyPgUp},
-		{Type: tea.KeyCtrlUp},
-	} {
+	for _, msg := range []tea.KeyPressMsg{{Code: tea.KeyPgUp}} {
 		m.viewport.GotoBottom()
 		before := m.composer.Value()
 		m = updateApp(t, m, msg)
-		if m.viewport.YOffset >= bottom {
+		if m.viewport.YOffset() >= bottom {
 			t.Errorf("%v did not scroll transcript up", msg)
 		}
 		if m.composer.Value() != before {
@@ -590,14 +587,11 @@ func TestTranscriptScrollChordsAndMouseWheel(t *testing.T) {
 		}
 	}
 	m.viewport.GotoTop()
-	top := m.viewport.YOffset
-	for _, msg := range []tea.KeyMsg{
-		{Type: tea.KeyPgDown},
-		{Type: tea.KeyCtrlDown},
-	} {
+	top := m.viewport.YOffset()
+	for _, msg := range []tea.KeyPressMsg{{Code: tea.KeyPgDown}} {
 		m.viewport.GotoTop()
 		m = updateApp(t, m, msg)
-		if m.viewport.YOffset <= top {
+		if m.viewport.YOffset() <= top {
 			t.Errorf("%v did not scroll transcript down", msg)
 		}
 		if m.composer.Value() != "keep-me" {
@@ -606,13 +600,13 @@ func TestTranscriptScrollChordsAndMouseWheel(t *testing.T) {
 	}
 
 	// Right-focus: scroll still moves transcript, not only the terminal pane.
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 	if m.focus != focusRight {
 		t.Fatalf("focus = %v, want right", m.focus)
 	}
 	m.viewport.GotoBottom()
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
-	if m.viewport.YOffset >= bottom {
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyPgUp})
+	if m.viewport.YOffset() >= bottom {
 		t.Error("pgup with right focus did not scroll transcript")
 	}
 	if m.composer.Value() != "keep-me" {
@@ -621,19 +615,13 @@ func TestTranscriptScrollChordsAndMouseWheel(t *testing.T) {
 
 	// Mouse wheel → transcript.
 	m.viewport.GotoBottom()
-	m = updateApp(t, m, tea.MouseMsg{
-		Action: tea.MouseActionPress,
-		Button: tea.MouseButtonWheelUp,
-	})
-	if m.viewport.YOffset >= bottom {
+	m = updateApp(t, m, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	if m.viewport.YOffset() >= bottom {
 		t.Error("wheel up did not scroll transcript")
 	}
-	afterWheelUp := m.viewport.YOffset
-	m = updateApp(t, m, tea.MouseMsg{
-		Action: tea.MouseActionPress,
-		Button: tea.MouseButtonWheelDown,
-	})
-	if m.viewport.YOffset <= afterWheelUp {
+	afterWheelUp := m.viewport.YOffset()
+	m = updateApp(t, m, tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	if m.viewport.YOffset() <= afterWheelUp {
 		t.Error("wheel down did not scroll transcript")
 	}
 	if m.composer.Value() != "keep-me" {
@@ -647,7 +635,7 @@ func TestJumpToBottomBindingCtrlT(t *testing.T) {
 	if keys.JumpBottom.Help().Key != "ctrl+t" {
 		t.Fatalf("JumpBottom help = %q, want ctrl+t", keys.JumpBottom.Help().Key)
 	}
-	if !key.Matches(tea.KeyMsg{Type: tea.KeyCtrlT}, keys.JumpBottom) {
+	if !key.Matches(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl}, keys.JumpBottom) {
 		t.Fatal("ctrl+t does not match JumpBottom")
 	}
 	// Catalog / help stay in sync.
@@ -674,9 +662,9 @@ func TestJumpToBottomBindingCtrlT(t *testing.T) {
 	if m.viewport.AtBottom() {
 		t.Fatal("setup still at bottom")
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlT})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
 	if !m.viewport.AtBottom() {
-		t.Errorf("ctrl+t did not jump to bottom: offset=%d", m.viewport.YOffset)
+		t.Errorf("ctrl+t did not jump to bottom: offset=%d", m.viewport.YOffset())
 	}
 	// Footer hint uses keymap, not a hardcoded ctrl+end.
 	m.reflow()
@@ -720,12 +708,12 @@ func TestNoSGRMouseJunkInComposer(t *testing.T) {
 	mChunk, _ := newAppTestModel(nil, nil)
 	mChunk = updateApp(t, mChunk, tea.WindowSizeMsg{Width: 80, Height: 24})
 	for _, r := range junk {
-		mChunk = updateApp(t, mChunk, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		mChunk = updateApp(t, mChunk, tea.KeyPressMsg{Text: string([]rune{r})})
 	}
 	if strings.Contains(mChunk.composer.Value(), "[<") || strings.Contains(mChunk.composer.Value(), "64;56") {
 		t.Errorf("composer after chunked mouse runes = %q", mChunk.composer.Value())
 	}
-	mChunk = updateApp(t, mChunk, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("ok")})
+	mChunk = updateApp(t, mChunk, tea.KeyPressMsg{Text: "ok"})
 	if mChunk.composer.Value() != "ok" {
 		t.Errorf("composer after chunked mouse + ok = %q, want ok", mChunk.composer.Value())
 	}
@@ -750,13 +738,13 @@ func TestNoSGRMouseJunkInComposer(t *testing.T) {
 	}
 	m.refreshViewport()
 	m.viewport.GotoBottom()
-	bottom := m.viewport.YOffset
+	bottom := m.viewport.YOffset()
 	if bottom == 0 {
 		t.Fatal("setup: expected scrollable transcript")
 	}
-	m = updateApp(t, m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
-	if m.viewport.YOffset >= bottom {
-		t.Fatalf("wheel up did not scroll: offset=%d bottom=%d", m.viewport.YOffset, bottom)
+	m = updateApp(t, m, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	if m.viewport.YOffset() >= bottom {
+		t.Fatalf("wheel up did not scroll: offset=%d bottom=%d", m.viewport.YOffset(), bottom)
 	}
 	if m.composer.Value() != "" {
 		t.Errorf("composer after wheel = %q, want empty", m.composer.Value())
@@ -785,12 +773,12 @@ func TestNoOSCBackgroundJunkInComposerAfterSubmit(t *testing.T) {
 	mChunk, _ := newAppTestModel(nil, nil)
 	mChunk = updateApp(t, mChunk, tea.WindowSizeMsg{Width: 80, Height: 24})
 	for _, r := range junk {
-		mChunk = updateApp(t, mChunk, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		mChunk = updateApp(t, mChunk, tea.KeyPressMsg{Text: string([]rune{r})})
 	}
 	if strings.Contains(mChunk.composer.Value(), "rgb:0000") || strings.Contains(mChunk.composer.Value(), "]11;") {
 		t.Errorf("composer after chunked OSC runes = %q", mChunk.composer.Value())
 	}
-	mChunk = updateApp(t, mChunk, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("ok")})
+	mChunk = updateApp(t, mChunk, tea.KeyPressMsg{Text: "ok"})
 	if mChunk.composer.Value() != "ok" {
 		t.Errorf("composer after chunked OSC + ok = %q, want ok", mChunk.composer.Value())
 	}
@@ -812,7 +800,7 @@ func TestNoOSCBackgroundJunkInComposerAfterSubmit(t *testing.T) {
 	m.providerName = "echo"
 	m.modelName = "echo-1"
 	m.composer.SetValue("hello world")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if cmd != nil {
 		_ = runAllAppCmds(t, cmd)
@@ -834,14 +822,14 @@ func TestNoOSCBackgroundJunkInComposerAfterSubmit(t *testing.T) {
 			if strings.Contains(string(got), "rgb:") || strings.Contains(string(got), "]11") {
 				t.Fatalf("post-submit rewrite still has junk: %q", got)
 			}
-			m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(string(got))})
+			m = updateApp(t, m, tea.KeyPressMsg{Text: string(got)})
 		}
 	}
 
 	if strings.Contains(m.composer.Value(), "rgb:0000") || strings.Contains(m.composer.Value(), "]11;") {
 		t.Errorf("composer value has OSC junk: %q", m.composer.Value())
 	}
-	view := m.View()
+	view := viewString(m)
 	plain := ansi.Strip(view)
 	if strings.Contains(plain, "rgb:0000") || strings.Contains(plain, "]11;rgb") {
 		t.Errorf("rendered view has OSC junk: %q", plain)
@@ -890,14 +878,14 @@ func TestMarkdownRenderDoesNotUseAutoStyle(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.composer.SetValue("prompt")
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	_ = m.applyEvent(protocol.TextDelta{Text: "# Title\n\n- item"})
 	_ = m.applyEvent(protocol.TurnCompleted{})
-	_ = m.View() // forces markdown render on complete cell
+	_ = viewString(m) // forces markdown render on complete cell
 	if strings.Contains(m.composer.Value(), "rgb:0000") || strings.Contains(m.composer.Value(), "]11;") {
 		t.Errorf("composer after markdown view has OSC junk: %q", m.composer.Value())
 	}
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(viewString(m))
 	if strings.Contains(plain, "rgb:0000") || strings.Contains(plain, "]11;rgb") {
 		t.Errorf("view after markdown has OSC junk: %q", plain)
 	}

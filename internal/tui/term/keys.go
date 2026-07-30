@@ -3,20 +3,26 @@ package term
 import (
 	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // EncodeKey maps a Bubble Tea key message to bytes for a PTY running under
 // xterm-style key reporting. Unknown keys yield nil.
-func EncodeKey(msg tea.KeyMsg) []byte {
-	// Printable runes first (including space).
-	if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
-		// Ctrl modified runes sometimes arrive as KeyRunes with Alt.
-		out := make([]byte, 0, len(msg.Runes)*utf8.UTFMax)
-		for _, r := range msg.Runes {
-			if msg.Alt {
-				out = append(out, 0x1b)
-			}
+func EncodeKey(msg tea.KeyPressMsg) []byte {
+	// Printable text first (including space when Text is set).
+	if len(msg.Text) > 0 && msg.Mod == 0 {
+		out := make([]byte, 0, len(msg.Text)*utf8.UTFMax)
+		for _, r := range msg.Text {
+			buf := make([]byte, utf8.UTFMax)
+			n := utf8.EncodeRune(buf, r)
+			out = append(out, buf[:n]...)
+		}
+		return out
+	}
+	if len(msg.Text) > 0 && msg.Mod.Contains(tea.ModAlt) && !msg.Mod.Contains(tea.ModCtrl) {
+		out := make([]byte, 0, 1+len(msg.Text)*utf8.UTFMax)
+		for _, r := range msg.Text {
+			out = append(out, 0x1b)
 			buf := make([]byte, utf8.UTFMax)
 			n := utf8.EncodeRune(buf, r)
 			out = append(out, buf[:n]...)
@@ -24,13 +30,80 @@ func EncodeKey(msg tea.KeyMsg) []byte {
 		return out
 	}
 
-	switch msg.Type {
+	// Ctrl+letter (and a few specials) via Code+Mod.
+	if msg.Mod.Contains(tea.ModCtrl) && !msg.Mod.Contains(tea.ModAlt) {
+		switch msg.Code {
+		case tea.KeyUp:
+			return []byte("\x1b[1;5A")
+		case tea.KeyDown:
+			return []byte("\x1b[1;5B")
+		case tea.KeyLeft:
+			return []byte("\x1b[1;5D")
+		case tea.KeyRight:
+			return []byte("\x1b[1;5C")
+		case 'a', 'A':
+			return []byte{0x01}
+		case 'b', 'B':
+			return []byte{0x02}
+		case 'c', 'C':
+			return []byte{0x03}
+		case 'd', 'D':
+			return []byte{0x04}
+		case 'e', 'E':
+			return []byte{0x05}
+		case 'f', 'F':
+			return []byte{0x06}
+		case 'g', 'G':
+			return []byte{0x07}
+		case 'h', 'H':
+			return []byte{0x08}
+		case 'j', 'J':
+			return []byte{0x0a}
+		case 'k', 'K':
+			return []byte{0x0b}
+		case 'l', 'L':
+			return []byte{0x0c}
+		case 'n', 'N':
+			return []byte{0x0e}
+		case 'o', 'O':
+			return []byte{0x0f}
+		case 'p', 'P':
+			return []byte{0x10}
+		case 'q', 'Q':
+			return []byte{0x11}
+		case 'r', 'R':
+			return []byte{0x12}
+		case 's', 'S':
+			return []byte{0x13}
+		case 't', 'T':
+			return []byte{0x14}
+		case 'u', 'U':
+			return []byte{0x15}
+		case 'v', 'V':
+			return []byte{0x16}
+		case 'w', 'W':
+			return []byte{0x17}
+		case 'x', 'X':
+			return []byte{0x18}
+		case 'y', 'Y':
+			return []byte{0x19}
+		case 'z', 'Z':
+			return []byte{0x1a}
+		case '\\':
+			return []byte{0x1c}
+		}
+	}
+
+	// Shift+Tab
+	if msg.Code == tea.KeyTab && msg.Mod.Contains(tea.ModShift) {
+		return []byte("\x1b[Z")
+	}
+
+	switch msg.Code {
 	case tea.KeyEnter:
 		return []byte{'\r'}
 	case tea.KeyTab:
 		return []byte{'\t'}
-	case tea.KeyShiftTab:
-		return []byte("\x1b[Z")
 	case tea.KeySpace:
 		return []byte{' '}
 	case tea.KeyBackspace:
@@ -43,10 +116,6 @@ func EncodeKey(msg tea.KeyMsg) []byte {
 		return []byte("\x1b[A")
 	case tea.KeyDown:
 		return []byte("\x1b[B")
-	case tea.KeyCtrlUp:
-		return []byte("\x1b[1;5A")
-	case tea.KeyCtrlDown:
-		return []byte("\x1b[1;5B")
 	case tea.KeyRight:
 		return []byte("\x1b[C")
 	case tea.KeyLeft:
@@ -59,56 +128,6 @@ func EncodeKey(msg tea.KeyMsg) []byte {
 		return []byte("\x1b[5~")
 	case tea.KeyPgDown:
 		return []byte("\x1b[6~")
-	case tea.KeyCtrlA:
-		return []byte{0x01}
-	case tea.KeyCtrlB:
-		return []byte{0x02}
-	case tea.KeyCtrlC:
-		return []byte{0x03}
-	case tea.KeyCtrlD:
-		return []byte{0x04}
-	case tea.KeyCtrlE:
-		return []byte{0x05}
-	case tea.KeyCtrlF:
-		return []byte{0x06}
-	case tea.KeyCtrlG:
-		return []byte{0x07}
-	case tea.KeyCtrlH:
-		return []byte{0x08}
-	case tea.KeyCtrlJ:
-		return []byte{0x0a}
-	case tea.KeyCtrlK:
-		return []byte{0x0b}
-	case tea.KeyCtrlL:
-		return []byte{0x0c}
-	case tea.KeyCtrlN:
-		return []byte{0x0e}
-	case tea.KeyCtrlO:
-		return []byte{0x0f}
-	case tea.KeyCtrlP:
-		return []byte{0x10}
-	case tea.KeyCtrlQ:
-		return []byte{0x11}
-	case tea.KeyCtrlR:
-		return []byte{0x12}
-	case tea.KeyCtrlS:
-		return []byte{0x13}
-	case tea.KeyCtrlT:
-		return []byte{0x14}
-	case tea.KeyCtrlU:
-		return []byte{0x15}
-	case tea.KeyCtrlV:
-		return []byte{0x16}
-	case tea.KeyCtrlW:
-		return []byte{0x17}
-	case tea.KeyCtrlX:
-		return []byte{0x18}
-	case tea.KeyCtrlY:
-		return []byte{0x19}
-	case tea.KeyCtrlZ:
-		return []byte{0x1a}
-	case tea.KeyCtrlBackslash:
-		return []byte{0x1c}
 	case tea.KeyF1:
 		return []byte("\x1bOP")
 	case tea.KeyF2:

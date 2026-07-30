@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
@@ -17,7 +17,7 @@ func TestWelcomeDashboardRendersBentoCardsForEmptyTranscript(t *testing.T) {
 	m, _ := newAppTestModel([]string{"build", "plan"}, []host.Skill{fakeSkill("review", "review code", "Review $ARGUMENTS")})
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
 
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(viewString(m))
 	for _, want := range []string{
 		"get started",     // provider-status card title
 		"anthropic",       // provider status drawn from host.Auth
@@ -48,14 +48,14 @@ func TestWelcomeDashboardRendersBentoCardsForEmptyTranscript(t *testing.T) {
 func TestWelcomeDashboardSurfacesRecentPromptsOnlyWithHistory(t *testing.T) {
 	without, _ := newAppTestModel(nil, nil)
 	without = updateApp(t, without, tea.WindowSizeMsg{Width: 120, Height: 80})
-	if plain := ansi.Strip(without.View()); strings.Contains(plain, "recent prompts") {
+	if plain := ansi.Strip(viewString(without)); strings.Contains(plain, "recent prompts") {
 		t.Errorf("recent-prompts card rendered without any history:\n%s", plain)
 	}
 
 	store := newFakeHistory("earlier prompt one", "earlier prompt two")
 	with, _ := newAppTestModelWithHistory(nil, nil, store)
 	with = updateApp(t, with, tea.WindowSizeMsg{Width: 120, Height: 80})
-	plain := ansi.Strip(with.View())
+	plain := ansi.Strip(viewString(with))
 	if !strings.Contains(plain, "recent prompts") || !strings.Contains(plain, "earlier prompt two") {
 		t.Errorf("welcome dashboard did not surface recent history:\n%s", plain)
 	}
@@ -64,13 +64,13 @@ func TestWelcomeDashboardSurfacesRecentPromptsOnlyWithHistory(t *testing.T) {
 func TestTranscriptReplacesWelcomeDashboardOnceCellsStream(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
-	if plain := ansi.Strip(m.View()); !strings.Contains(plain, "get started") {
+	if plain := ansi.Strip(viewString(m)); !strings.Contains(plain, "get started") {
 		t.Fatalf("empty transcript did not show the welcome dashboard:\n%s", plain)
 	}
 
 	m.applyEvent(protocol.UserMessage{Text: "hello strike"})
 	m.refreshViewport()
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(viewString(m))
 	if strings.Contains(plain, "get started") {
 		t.Errorf("welcome dashboard persisted after a cell streamed:\n%s", plain)
 	}
@@ -82,9 +82,9 @@ func TestTranscriptReplacesWelcomeDashboardOnceCellsStream(t *testing.T) {
 func TestWelcomeDashboardRecomputesOnResize(t *testing.T) {
 	m, _ := newAppTestModel([]string{"build"}, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
-	wide := ansi.Strip(m.View())
+	wide := ansi.Strip(viewString(m))
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 64, Height: 24})
-	narrow := ansi.Strip(m.View())
+	narrow := ansi.Strip(viewString(m))
 	if wide == narrow {
 		t.Errorf("welcome dashboard did not repack on resize")
 	}
@@ -112,9 +112,9 @@ func TestWelcomeDashboardUsesCustomThemeWithoutChangingContent(t *testing.T) {
 	customModel.agents, customModel.skills = agents, skills
 	customModel = updateApp(t, customModel, tea.WindowSizeMsg{Width: 100, Height: 30})
 
-	custom := customModel.View()
+	custom := viewString(customModel)
 	for _, want := range []string{"get started", "anthropic", "deepseek", "/provider", "keys", "agents & skills", "build", "plan", "/review"} {
-		if !strings.Contains(ansi.Strip(defaultModel.View()), want) || !strings.Contains(ansi.Strip(custom), want) {
+		if !strings.Contains(ansi.Strip(viewString(defaultModel)), want) || !strings.Contains(ansi.Strip(custom), want) {
 			t.Errorf("theme changed semantic welcome content %q", want)
 		}
 	}
@@ -125,7 +125,7 @@ func TestWelcomeDashboardUsesCustomThemeWithoutChangingContent(t *testing.T) {
 	if !strings.Contains(custom, rgbSGR("#010203")) || !strings.Contains(custom, rgbBGSGR("#040506")) {
 		t.Errorf("custom color tokens are not observable: %q", custom)
 	}
-	if defaultModel.View() == custom || lipgloss.Width(custom) != 100 {
+	if viewString(defaultModel) == custom || lipgloss.Width(custom) != 100 {
 		t.Errorf("custom theme did not produce a distinct, width-safe welcome view")
 	}
 }

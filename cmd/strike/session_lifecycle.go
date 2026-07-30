@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/auth"
 	"github.com/jonathanung/strike-cli/internal/config"
@@ -294,8 +294,9 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 				themeID = entry.ID
 			}
 		}
-		// WithMouseCellMotion so chrome cannot be natively selected; the TUI
-		// owns drag-highlight only inside transcript and prompt regions.
+		// Alt screen, mouse cell motion, and focus reporting are declared on
+		// Model.View (Bubble Tea v2). Mouse cell motion keeps chrome from being
+		// natively selected; the TUI owns drag-highlight in transcript/prompt.
 		program := tea.NewProgram(tui.New(hub.Ops(), hub.Events(), a.services, tui.Options{
 			DangerouslySkipPermissions:   opts.dangerouslySkipPermissions,
 			Theme:                        themePtr,
@@ -312,7 +313,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 			Replay:                       a.replay,
 			Keybinds:                     config.KeybindsMap(a.cfg.Keybinds),
 			Telemetry:                    opts.telemetry,
-		}), tea.WithAltScreen(), tea.WithOutput(stdout), tea.WithInput(tui.WrapInput(os.Stdin)), tea.WithReportFocus(), tea.WithMouseCellMotion())
+		}), tea.WithOutput(stdout), tea.WithInput(tui.WrapInput(os.Stdin)))
 		final, runProgErr := program.Run()
 		restore()
 		if m, ok := final.(tui.Model); ok {

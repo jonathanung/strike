@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -189,7 +189,7 @@ func (m *Model) setActivityCursor(entries []activityEntry, idx int) {
 
 // handleActivityKeys navigates the activity feed when the activity window is
 // focused on the right pane. Returns true when the key was consumed.
-func (m *Model) handleActivityKeys(msg tea.KeyMsg) bool {
+func (m *Model) handleActivityKeys(msg tea.KeyPressMsg) bool {
 	if m.windows.active() == nil || m.windows.active().id() != "activity" {
 		return false
 	}

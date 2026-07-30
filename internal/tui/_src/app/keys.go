@@ -1,8 +1,8 @@
 package tui
 
 import (
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
@@ -10,14 +10,14 @@ import (
 // isEscape reports whether msg is Escape (KeyEsc or the "esc" string form).
 // Modals and dismiss paths should use this instead of comparing String() alone
 // so CSI-u normalized bare ESC and classic KeyEsc both match.
-func isEscape(msg tea.KeyMsg) bool {
-	return msg.Type == tea.KeyEsc || msg.String() == "esc"
+func isEscape(msg tea.KeyPressMsg) bool {
+	return msg.Code == tea.KeyEsc || msg.String() == "esc"
 }
 
 // matchesInterrupt reports whether msg is the interrupt chord. When the bind
 // still includes esc (default), also accept isEscape so CSI-u / KeyEsc forms
 // match even if key.Matches string tables diverge.
-func (m Model) matchesInterrupt(msg tea.KeyMsg) bool {
+func (m Model) matchesInterrupt(msg tea.KeyPressMsg) bool {
 	if key.Matches(msg, m.keyMap.Interrupt) {
 		return true
 	}

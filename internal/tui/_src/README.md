@@ -28,7 +28,8 @@ Independent real packages (not flattened): `../theme`, `../ui`, `../term`, `../c
 
 | Era | Paths |
 |-----|--------|
-| v1 (current) | `github.com/charmbracelet/{bubbletea,lipgloss,bubbles,glamour,…}` |
+| v1 | `github.com/charmbracelet/{lipgloss,glamour,…}` (remaining until E13.2/E13.5) |
+| v2 (current for tea/bubbles) | `charm.land/{bubbletea,bubbles}/v2` (+ `charm.land/lipgloss/v2` only at bubbles theme bridge) |
 | v2 (correct) | `charm.land/{bubbletea,lipgloss,bubbles,glamour}/v2` |
 | v2 (wrong) | `github.com/charmbracelet/…/v2` — rejected by `TestCharmImportPaths` |
 

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -16,14 +16,14 @@ import (
 func TestProviderModalAddCustomRow(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m.composer.SetValue("/provider")
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	pm, ok := m.modal.(*providerModal)
 	if !ok {
 		t.Fatalf("modal = %T", m.modal)
 	}
 	// Last row is Add custom provider…
 	pm.cursor = pm.rowCount() - 1
-	next, _ := pm.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ := pm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	form, ok := next.(*customProviderFormModal)
 	if !ok {
 		t.Fatalf("enter add row → %T", next)
@@ -93,14 +93,14 @@ func TestSettingsModalCRUD(t *testing.T) {
 	}}
 
 	m.composer.SetValue("/settings")
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	sm, ok := m.modal.(*settingsModal)
 	if !ok {
 		t.Fatalf("modal = %T", m.modal)
 	}
 	// Menu → Custom providers.
 	sm.cursor = int(settingsMenuProviders)
-	next, _ := sm.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ := sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	sm, ok = next.(*settingsModal)
 	if !ok {
 		t.Fatalf("after enter providers = %T", next)
@@ -113,7 +113,7 @@ func TestSettingsModalCRUD(t *testing.T) {
 
 	// Remove ollama (cursor on first custom = index 1).
 	sm.cursor = 1
-	_, cmd := sm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	_, cmd := sm.update(tea.KeyPressMsg{Text: "d"})
 	if cmd == nil {
 		t.Fatal("expected remove cmd")
 	}
@@ -148,81 +148,81 @@ func TestCustomProviderFormUpdateAdvanceAndBack(t *testing.T) {
 	}
 
 	// Empty name rejected.
-	next, _ := form.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ := form.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	form = next.(*customProviderFormModal)
 	if form.step != 0 || form.err == "" {
 		t.Fatalf("empty name: step=%d err=%q", form.step, form.err)
 	}
 
 	form.name.SetValue("  Kimi  ")
-	next, _ = form.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ = form.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	form = next.(*customProviderFormModal)
 	if form.step != 1 || form.name.Value() != "kimi" {
 		t.Fatalf("after name: step=%d name=%q", form.step, form.name.Value())
 	}
 
 	// Empty URL rejected.
-	next, _ = form.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ = form.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	form = next.(*customProviderFormModal)
 	if form.step != 1 || form.err == "" {
 		t.Fatalf("empty url: step=%d err=%q", form.step, form.err)
 	}
 
 	form.url.SetValue("https://api.example.com/v1")
-	next, _ = form.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ = form.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	form = next.(*customProviderFormModal)
 	if form.step != 2 {
 		t.Fatalf("after url step=%d", form.step)
 	}
 
 	// API step: j/k cycle wire API.
-	next, _ = form.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	next, _ = form.update(tea.KeyPressMsg{Text: "j"})
 	form = next.(*customProviderFormModal)
 	if form.apiCursor != 1 {
 		t.Fatalf("j apiCursor=%d, want 1", form.apiCursor)
 	}
-	next, _ = form.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
+	next, _ = form.update(tea.KeyPressMsg{Text: "k"})
 	form = next.(*customProviderFormModal)
 	if form.apiCursor != 0 {
 		t.Fatalf("k apiCursor=%d, want 0", form.apiCursor)
 	}
-	next, _ = form.update(tea.KeyMsg{Type: tea.KeyDown})
+	next, _ = form.update(tea.KeyPressMsg{Code: tea.KeyDown})
 	form = next.(*customProviderFormModal)
 	if form.apiCursor != 1 {
 		t.Fatalf("down apiCursor=%d, want 1", form.apiCursor)
 	}
-	next, _ = form.update(tea.KeyMsg{Type: tea.KeyUp})
+	next, _ = form.update(tea.KeyPressMsg{Code: tea.KeyUp})
 	form = next.(*customProviderFormModal)
 	if form.apiCursor != 0 {
 		t.Fatalf("up apiCursor=%d, want 0", form.apiCursor)
 	}
 
-	next, _ = form.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ = form.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	form = next.(*customProviderFormModal)
 	if form.step != 3 {
 		t.Fatalf("after api step=%d", form.step)
 	}
-	next, _ = form.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ = form.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	form = next.(*customProviderFormModal)
 	if form.step != 4 {
 		t.Fatalf("after key step=%d", form.step)
 	}
 
 	// shift+tab backs up (not past name when creating).
-	next, _ = form.update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	next, _ = form.update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	form = next.(*customProviderFormModal)
 	if form.step != 3 {
 		t.Fatalf("shift+tab step=%d, want 3", form.step)
 	}
 	for form.step > 0 {
-		next, _ = form.update(tea.KeyMsg{Type: tea.KeyShiftTab})
+		next, _ = form.update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 		form = next.(*customProviderFormModal)
 	}
 	if form.step != 0 {
 		t.Fatalf("backed to step=%d", form.step)
 	}
 	// shift+tab at step 0 is noop.
-	next, _ = form.update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	next, _ = form.update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	form = next.(*customProviderFormModal)
 	if form.step != 0 {
 		t.Fatalf("shift+tab at 0 moved to %d", form.step)
@@ -233,7 +233,7 @@ func TestCustomProviderFormEscReturnsToParent(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)
 	parent := &settingsModal{}
 	form := newCustomProviderFormModal(m.services, ops, m.th, nil, false, parent)
-	next, cmd := form.update(tea.KeyMsg{Type: tea.KeyEsc})
+	next, cmd := form.update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if next != parent {
 		t.Fatalf("esc → %T, want parent settingsModal", next)
 	}
@@ -261,7 +261,7 @@ func TestCustomProviderFormEditSkipsName(t *testing.T) {
 		t.Fatalf("apiCursor=%d, want 1 anthropic", form.apiCursor)
 	}
 	// shift+tab must not retreat past url when editing.
-	next, _ := form.update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	next, _ := form.update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	form = next.(*customProviderFormModal)
 	if form.step != 1 {
 		t.Fatalf("edit shift+tab step=%d, want 1", form.step)
@@ -372,7 +372,7 @@ func TestCustomProviderFormSaveErrors(t *testing.T) {
 		form.url.SetValue("http://z")
 		form.models.SetValue("a, b; c, d")
 		form.step = 4
-		next, cmd := form.update(tea.KeyMsg{Type: tea.KeyEnter})
+		next, cmd := form.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if next != form || cmd == nil {
 			t.Fatalf("enter save: next=%T cmd=%v", next, cmd != nil)
 		}

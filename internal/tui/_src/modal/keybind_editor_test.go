@@ -3,7 +3,7 @@ package tui
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
@@ -17,7 +17,7 @@ func TestKeybindEditorOpenClose(t *testing.T) {
 	if m == nil {
 		t.Fatal("newKeybindEditor returned nil")
 	}
-	next, cmd := m.update(tea.KeyMsg{Type: tea.KeyEsc})
+	next, cmd := m.update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if next != nil {
 		t.Error("esc did not close modal")
 	}
@@ -28,7 +28,7 @@ func TestKeybindEditorOpenClose(t *testing.T) {
 
 func TestKeybindEditorCloseQ(t *testing.T) {
 	m := newTestKeybindEditor()
-	next, _ := m.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	next, _ := m.update(tea.KeyPressMsg{Code: 'q', Text: string([]rune{'q'})})
 	if next != nil {
 		t.Error("q did not close modal")
 	}
@@ -36,7 +36,7 @@ func TestKeybindEditorCloseQ(t *testing.T) {
 
 func TestKeybindEditorFilter(t *testing.T) {
 	m := newTestKeybindEditor()
-	next, cmd := m.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q', 'u', 'i', 't'}})
+	next, cmd := m.update(tea.KeyPressMsg{Text: string([]rune{'q', 'u', 'i', 't'})})
 	if next == nil {
 		t.Fatal("filter keystroke closed modal")
 	}
@@ -67,7 +67,7 @@ func TestKeybindEditorCaptureAndRebind(t *testing.T) {
 	}
 	m.cursor = jumpIdx
 
-	next, cmd := m.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if next == nil {
 		t.Fatal("enter on row closed modal")
 	}
@@ -81,7 +81,7 @@ func TestKeybindEditorCaptureAndRebind(t *testing.T) {
 		t.Error("enter should not have a cmd")
 	}
 
-	next, cmd = m.update(tea.KeyMsg{Type: tea.KeyCtrlB})
+	next, cmd = m.update(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
 	if next == nil {
 		t.Fatal("capturing keystroke closed modal")
 	}
@@ -109,7 +109,7 @@ func TestKeybindEditorCaptureEscCancels(t *testing.T) {
 	m.capturing = true
 	m.captureID = "nav.jump-bottom"
 
-	next, cmd := m.update(tea.KeyMsg{Type: tea.KeyEsc})
+	next, cmd := m.update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if next == nil {
 		t.Fatal("esc during capture should not close modal")
 	}
@@ -134,7 +134,7 @@ func TestKeybindEditorResetOverride(t *testing.T) {
 		}
 	}
 
-	next, cmd := m.update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	next, cmd := m.update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
 	if next == nil {
 		t.Fatal("ctrl+d closed modal")
 	}
@@ -171,7 +171,7 @@ func TestKeybindEditorResetClearsSaved(t *testing.T) {
 		}
 	}
 
-	next, cmd := m.update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	next, cmd := m.update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
 	if next == nil {
 		t.Fatal("ctrl+d closed modal")
 	}
@@ -190,7 +190,7 @@ func TestKeybindEditorSavePending(t *testing.T) {
 	m := newTestKeybindEditor()
 	m.pending["nav.jump-bottom"] = []string{"ctrl+b"}
 
-	next, cmd := m.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}, Alt: true})
+	next, cmd := m.update(tea.KeyPressMsg{Code: 's', Mod: tea.ModAlt})
 	if next == nil {
 		t.Fatal("alt+s closed modal")
 	}
@@ -237,7 +237,7 @@ func TestKeybindEditorCaptureInvalidChord(t *testing.T) {
 	m.capturing = true
 	m.captureID = "global.quit"
 
-	next, cmd := m.update(tea.KeyMsg{Type: tea.KeyEsc})
+	next, cmd := m.update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if next == nil {
 		t.Fatal("esc during capture should not close modal")
 	}
@@ -278,7 +278,7 @@ func TestKeybindEditorCaptureRKeyFallsThroughToFilter(t *testing.T) {
 	m := newTestKeybindEditor()
 	m.cursor = 0
 
-	next, cmd := m.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	next, cmd := m.update(tea.KeyPressMsg{Code: 'r', Text: string([]rune{'r'})})
 	if next == nil {
 		t.Fatal("r closed modal")
 	}

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 
@@ -37,7 +37,7 @@ func TestFastCommandBareToggleAndAliases(t *testing.T) {
 			m, ops := newAppTestModel(nil, nil)
 			m.fastEnabled = tt.initial
 			m.composer.SetValue(tt.command)
-			updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 			m = updated.(Model)
 			runAppCmd(t, cmd)
 			if got := receiveAppOp(t, ops); got != (protocol.SetFast{Enabled: tt.want}) {
@@ -53,7 +53,7 @@ func TestFastCommandBareToggleAndAliases(t *testing.T) {
 func TestFastCommandRejectsInvalidUsageWithoutSending(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)
 	m.composer.SetValue("/fast maybe")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if msg := runAppCmd(t, cmd); msg != nil {
 		t.Errorf("invalid /fast returned message %#v", msg)
@@ -68,7 +68,7 @@ func TestFastCommandWaitsForEngineConfirmationBeforeChangingState(t *testing.T) 
 	m, ops := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})
 	m.composer.SetValue("/fast on")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	runAppCmd(t, cmd)
 	if got := receiveAppOp(t, ops); got != (protocol.SetFast{Enabled: true}) {

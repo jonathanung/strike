@@ -9,13 +9,13 @@ import (
 
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
+	"charm.land/bubbles/v2/key"
 
-	"github.com/charmbracelet/bubbles/spinner"
+	"charm.land/bubbles/v2/spinner"
 
-	"github.com/charmbracelet/bubbles/textarea"
+	"charm.land/bubbles/v2/textarea"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -312,7 +312,7 @@ func TestCompletionClosesWhenCursorLeavesLeadingToken(t *testing.T) {
 
 	}
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRight})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyRight})
 
 	if m.completion != nil {
 
@@ -338,7 +338,7 @@ func TestModelUpdateCompletionConsumesEscapeTabAndEnter(t *testing.T) {
 
 		}
 
-		m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+		m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
 
 		if m.completion != nil {
 
@@ -358,7 +358,7 @@ func TestModelUpdateCompletionConsumesEscapeTabAndEnter(t *testing.T) {
 
 		m = typeAppText(t, m, "/pr")
 
-		m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyTab})
+		m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 
 		if got := m.composer.Value(); got != "/provider" {
 
@@ -376,7 +376,7 @@ func TestModelUpdateCompletionConsumesEscapeTabAndEnter(t *testing.T) {
 
 		m = typeAppText(t, m, "/he")
 
-		m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+		m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 		if got := m.composer.Value(); got != "/help" {
 
@@ -386,7 +386,7 @@ func TestModelUpdateCompletionConsumesEscapeTabAndEnter(t *testing.T) {
 
 		assertNoAppOp(t, ops)
 
-		m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+		m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 		if m.composer.Value() != "" {
 
@@ -416,7 +416,7 @@ func TestModalReceivesKeysBeforeCompletionAndComposer(t *testing.T) {
 
 	m.modal = probe
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if probe.keys != 1 {
 
@@ -472,7 +472,7 @@ func TestModalVisuallyUnfocusesComposerAndSuppressesCompletionUntilClosed(t *tes
 
 	m.reflow()
 
-	withModal := m.View()
+	withModal := viewString(m)
 
 	if !m.composer.Focused() {
 
@@ -526,7 +526,7 @@ func TestModalVisuallyUnfocusesComposerAndSuppressesCompletionUntilClosed(t *tes
 
 	m.reflow()
 
-	afterClose := m.View()
+	afterClose := viewString(m)
 
 	if strings.Contains(afterClose, rgbSGR("#99aabb")) {
 
@@ -560,7 +560,7 @@ func TestModalVisuallyUnfocusesComposerAndSuppressesCompletionUntilClosed(t *tes
 
 	}
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyTab})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 
 	if m.composer.Value() != "/fast" {
 
@@ -584,7 +584,7 @@ func TestControlCQuitsBeforeOtherInputLayers(t *testing.T) {
 
 	m.modal = probe
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 
 	m = updated.(Model)
 
@@ -616,7 +616,7 @@ func TestExitAndQuitSlashCommandsQuitLikeCtrlC(t *testing.T) {
 
 			m.turnRunning = true // quit must work mid-turn, like ctrl+c
 
-			updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 			m = updated.(Model)
 
@@ -650,7 +650,7 @@ func TestComposerEnterBindings(t *testing.T) {
 
 		m = typeAppText(t, m, "first")
 
-		m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+		m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt})
 
 		m = typeAppText(t, m, "second")
 
@@ -727,7 +727,7 @@ func TestComposerEnterBindings(t *testing.T) {
 
 			m = typeAppText(t, m, "send me")
 
-			updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 			m = updated.(Model)
 
@@ -871,33 +871,33 @@ func TestLayoutReflowHandlesTinyWindowsPopupPasteResizeAndReset(t *testing.T) {
 
 		m = updateApp(t, m, size)
 
-		m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/"), Paste: false})
+		m = updateApp(t, m, tea.KeyPressMsg{Text: "/"})
 
-		_ = m.View()
+		_ = viewString(m)
 
-		m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+		m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
 
-		m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("界界\nmore\nlines"), Paste: true})
+		m = updateApp(t, m, tea.PasteMsg{Content: "界界\nmore\nlines"})
 
-		_ = m.View()
+		_ = viewString(m)
 
-		if m.width < 0 || m.height < 0 || m.viewport.Width < 0 || m.viewport.Height < 0 || m.composer.Width() < 1 || m.composer.Height() < composerMinHeight {
+		if m.width < 0 || m.height < 0 || m.viewport.Width() < 0 || m.viewport.Height() < 0 || m.composer.Width() < 1 || m.composer.Height() < composerMinHeight {
 
-			t.Fatalf("negative/invalid dimensions after %#v: model=%dx%d viewport=%dx%d composer=%dx%d", size, m.width, m.height, m.viewport.Width, m.viewport.Height, m.composer.Width(), m.composer.Height())
+			t.Fatalf("negative/invalid dimensions after %#v: model=%dx%d viewport=%dx%d composer=%dx%d", size, m.width, m.height, m.viewport.Width(), m.viewport.Height(), m.composer.Width(), m.composer.Height())
 
 		}
 
 		m.resetComposer()
 
-		_ = m.View()
+		_ = viewString(m)
 
 	}
 
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 
-	if m.viewport.Width != ui.InnerWidth(80) || m.viewport.Height < 0 {
+	if m.viewport.Width() != ui.InnerWidth(80) || m.viewport.Height() < 0 {
 
-		t.Errorf("resize did not restore effective viewport dimensions: %dx%d", m.viewport.Width, m.viewport.Height)
+		t.Errorf("resize did not restore effective viewport dimensions: %dx%d", m.viewport.Width(), m.viewport.Height())
 
 	}
 
@@ -911,11 +911,11 @@ func TestDangerousPermissionsIndicatorPersistsAcrossStateAndNoticeChanges(t *tes
 
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 
-	assertViewContainsPlainText(t, m.View(), indicator)
+	assertViewContainsPlainText(t, viewString(m), indicator)
 
 	m.applyEvent(protocol.TurnStarted{})
 
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(viewString(m))
 
 	if !strings.Contains(plain, indicator) || !strings.Contains(plain, "working") {
 
@@ -925,21 +925,21 @@ func TestDangerousPermissionsIndicatorPersistsAcrossStateAndNoticeChanges(t *tes
 
 	m.applyEvent(protocol.ModelSelected{Provider: "echo", Model: "test-model"})
 
-	assertViewContainsPlainText(t, m.View(), indicator)
+	assertViewContainsPlainText(t, viewString(m), indicator)
 
-	if strings.Contains(ansi.Strip(m.View()), "model: echo/test-model") {
+	if strings.Contains(ansi.Strip(viewString(m)), "model: echo/test-model") {
 
-		t.Errorf("model selection unexpectedly rendered a routine notice:\n%s", ansi.Strip(m.View()))
+		t.Errorf("model selection unexpectedly rendered a routine notice:\n%s", ansi.Strip(viewString(m)))
 
 	}
 
 	m.applyEvent(protocol.EngineError{Message: "transient engine error"})
 
-	assertViewContainsPlainText(t, m.View(), indicator)
+	assertViewContainsPlainText(t, viewString(m), indicator)
 
 	m.applyEvent(protocol.TurnCompleted{})
 
-	assertViewContainsPlainText(t, m.View(), indicator)
+	assertViewContainsPlainText(t, viewString(m), indicator)
 
 }
 
@@ -949,15 +949,15 @@ func TestDangerousPermissionsIndicatorIsOptInAndSafeAtTinyWidths(t *testing.T) {
 
 	normal, _ := newAppTestModelWithOptions(Options{})
 
-	assertViewOmitsPlainText(t, normal.View(), indicator)
+	assertViewOmitsPlainText(t, viewString(normal), indicator)
 
 	normal = updateApp(t, normal, tea.WindowSizeMsg{Width: 80, Height: 24})
 
-	assertViewOmitsPlainText(t, normal.View(), indicator)
+	assertViewOmitsPlainText(t, viewString(normal), indicator)
 
 	dangerous, _ := newAppTestModelWithOptions(Options{DangerouslySkipPermissions: true})
 
-	assertViewContainsPlainText(t, dangerous.View(), indicator)
+	assertViewContainsPlainText(t, viewString(dangerous), indicator)
 
 	for _, size := range []tea.WindowSizeMsg{
 
@@ -972,7 +972,7 @@ func TestDangerousPermissionsIndicatorIsOptInAndSafeAtTinyWidths(t *testing.T) {
 
 		dangerous = updateApp(t, dangerous, size)
 
-		plain := ansi.Strip(dangerous.View())
+		plain := ansi.Strip(viewString(dangerous))
 
 		if size.Width == 0 && size.Height == 0 {
 
@@ -1103,7 +1103,7 @@ func TestDangerousPermissionsIndicatorRemainsVisibleWithActiveModals(t *testing.
 
 					tt.open(&dangerous)
 
-					plain := ansi.Strip(dangerous.View())
+					plain := ansi.Strip(viewString(dangerous))
 
 					content := tt.content
 
@@ -1145,7 +1145,7 @@ func TestDangerousPermissionsIndicatorRemainsVisibleWithActiveModals(t *testing.
 
 					tt.open(&normal)
 
-					normalPlain := ansi.Strip(normal.View())
+					normalPlain := ansi.Strip(viewString(normal))
 
 					if strings.Contains(normalPlain, wantIndicator) {
 
@@ -1201,7 +1201,7 @@ func TestDangerousPermissionsIndicatorAndModalPersistAcrossRunningStateAndNotice
 
 	m.applyEvent(protocol.ModelSelected{Provider: "echo", Model: "notice-regression-model"})
 
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(viewString(m))
 
 	for _, want := range []string{
 
@@ -1232,7 +1232,7 @@ func TestSlashCommandExecutionAndSkillRenderingRemainIntact(t *testing.T) {
 
 		m.composer.SetValue("/provider echo test-model")
 
-		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 		m = updated.(Model)
 
@@ -1266,7 +1266,7 @@ func TestSlashCommandExecutionAndSkillRenderingRemainIntact(t *testing.T) {
 
 		m.composer.SetValue("/review this diff")
 
-		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 		m = updated.(Model)
 
@@ -1290,7 +1290,7 @@ func TestContextSlashCommandInspectsEffectivePrompt(t *testing.T) {
 
 			m.composer.SetValue(cmdName)
 
-			updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 			m = updated.(Model)
 
@@ -1429,7 +1429,7 @@ func TestModelAndAgentSlashCommandsEmitSelections(t *testing.T) {
 
 		m.composer.SetValue("/model gpt-test")
 
-		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 		m = updated.(Model)
 
@@ -1461,7 +1461,7 @@ func TestModelAndAgentSlashCommandsEmitSelections(t *testing.T) {
 
 		m.composer.SetValue("/model xai/grok-test")
 
-		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 		m = updated.(Model)
 
@@ -1511,7 +1511,7 @@ func TestModelAndAgentSlashCommandsEmitSelections(t *testing.T) {
 
 		m.composer.SetValue("/model")
 
-		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 		m = updated.(Model)
 
@@ -1577,7 +1577,7 @@ func TestModelAndAgentSlashCommandsEmitSelections(t *testing.T) {
 
 		m.composer.SetValue("/agent code reviewer")
 
-		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 		m = updated.(Model)
 
@@ -1615,7 +1615,7 @@ func TestBareAuthSlashCommandOpensProviderStatusModalWithoutSideEffects(t *testi
 
 	m.composer.SetValue("/auth")
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	m = updated.(Model)
 
@@ -1625,7 +1625,7 @@ func TestBareAuthSlashCommandOpensProviderStatusModalWithoutSideEffects(t *testi
 
 	}
 
-	if got := m.View(); !strings.Contains(got, "Select provider") {
+	if got := viewString(m); !strings.Contains(got, "Select provider") {
 
 		t.Errorf("/auth view does not show provider status modal:\n%s", got)
 
@@ -1664,7 +1664,7 @@ func TestTabCyclesAgentsWhenIdleWithoutCompletionOrModal(t *testing.T) {
 
 			m.agentName = tt.current
 
-			updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+			updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 
 			m = updated.(Model)
 
@@ -1698,7 +1698,7 @@ func TestEscapeInterruptsRunningTurnExactlyOnceWithoutInputOwner(t *testing.T) {
 
 	m.turnRunning = true
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 	m = updated.(Model)
 
@@ -1730,7 +1730,7 @@ func TestEscapeInterruptsImmediatelyAfterSubmitBeforeTurnStarted(t *testing.T) {
 
 	m.composer.SetValue("go")
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	m = updated.(Model)
 
@@ -1748,7 +1748,7 @@ func TestEscapeInterruptsImmediatelyAfterSubmitBeforeTurnStarted(t *testing.T) {
 
 	}
 
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 	m = updated.(Model)
 
@@ -1772,7 +1772,7 @@ func TestEscapeInterruptsDespiteArmedLeader(t *testing.T) {
 
 	m.leaderArmed = true
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 	m = updated.(Model)
 
@@ -1798,13 +1798,13 @@ func TestMatchesInterruptAcceptsKeyEscAndBinding(t *testing.T) {
 
 	m, _ := newAppTestModel(nil, nil)
 
-	if !m.matchesInterrupt(tea.KeyMsg{Type: tea.KeyEsc}) {
+	if !m.matchesInterrupt(tea.KeyPressMsg{Code: tea.KeyEsc}) {
 
 		t.Error("matchesInterrupt(KeyEsc) = false")
 
 	}
 
-	if m.matchesInterrupt(tea.KeyMsg{Type: tea.KeyEnter}) {
+	if m.matchesInterrupt(tea.KeyPressMsg{Code: tea.KeyEnter}) {
 
 		t.Error("matchesInterrupt(Enter) = true")
 
@@ -1814,13 +1814,13 @@ func TestMatchesInterruptAcceptsKeyEscAndBinding(t *testing.T) {
 
 	m.keyMap.Interrupt = key.NewBinding(key.WithKeys("ctrl+x"), key.WithHelp("ctrl+x", "interrupt"))
 
-	if m.matchesInterrupt(tea.KeyMsg{Type: tea.KeyEsc}) {
+	if m.matchesInterrupt(tea.KeyPressMsg{Code: tea.KeyEsc}) {
 
 		t.Error("matchesInterrupt(KeyEsc) = true after remap away from esc")
 
 	}
 
-	if !m.matchesInterrupt(tea.KeyMsg{Type: tea.KeyCtrlX}) {
+	if !m.matchesInterrupt(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl}) {
 
 		t.Error("matchesInterrupt(ctrl+x) = false after remap")
 
@@ -1858,7 +1858,7 @@ func TestOptionalHistoryIsBackwardCompatibleWhenOmitted(t *testing.T) {
 
 	m.composer.SetValue("no history configured")
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	m = updated.(Model)
 
@@ -1882,7 +1882,7 @@ func TestHistoryNavigationRecallsEntriesAndRestoresEmptyDraftAtNewestBoundary(t 
 
 	for i, want := range []string{"newest", "middle", "oldest", "oldest"} {
 
-		m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyUp})
+		m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
 
 		if got := m.composer.Value(); got != want {
 
@@ -1894,7 +1894,7 @@ func TestHistoryNavigationRecallsEntriesAndRestoresEmptyDraftAtNewestBoundary(t 
 
 	for i, want := range []string{"middle", "newest", ""} {
 
-		m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyDown})
+		m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
 
 		if got := m.composer.Value(); got != want {
 
@@ -1910,7 +1910,7 @@ func TestHistoryNavigationRecallsEntriesAndRestoresEmptyDraftAtNewestBoundary(t 
 
 	}
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
 
 	if got := m.composer.Value(); got != "" {
 
@@ -1928,7 +1928,7 @@ func TestHistoryKeysOnNonemptyDraftRemainTextareaNavigation(t *testing.T) {
 
 	m.setComposerValueAt("first line\nsecond line", len([]rune("first line\nsecond line")))
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
 
 	if got := m.composer.Value(); got != "first line\nsecond line" || m.composer.Line() != 0 {
 
@@ -1936,7 +1936,7 @@ func TestHistoryKeysOnNonemptyDraftRemainTextareaNavigation(t *testing.T) {
 
 	}
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
 
 	if got := m.composer.Value(); got != "first line\nsecond line" || m.composer.Line() != 1 {
 
@@ -1962,7 +1962,7 @@ func TestHistoryRecallReflowsMultilineUnicodeAndEditingExitsBrowsing(t *testing.
 
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 12, Height: 20})
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
 
 	if got := m.composer.Value(); got != prompt {
 
@@ -1976,7 +1976,7 @@ func TestHistoryRecallReflowsMultilineUnicodeAndEditingExitsBrowsing(t *testing.
 
 	}
 
-	_ = m.View()
+	_ = viewString(m)
 
 	m = typeAppText(t, m, "!")
 
@@ -2021,7 +2021,7 @@ func TestSubmitDuringRunningTurnEnqueuesInsteadOfRejecting(t *testing.T) {
 
 			m.composer.SetValue(tt.composer)
 
-			updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 			m = updated.(Model)
 
@@ -2098,7 +2098,7 @@ func TestSubmissionsPersistDisplayPromptAndStillEmitUserInput(t *testing.T) {
 
 			m.composer.SetValue(tt.composer)
 
-			updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 			m = updated.(Model)
 
@@ -2144,7 +2144,7 @@ func TestRapidSubmissionsEnqueueHistoryInSubmissionOrderBeforeCommandCompletion(
 
 	m.composer.SetValue("first prompt")
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	m = updated.(Model)
 
@@ -2166,7 +2166,7 @@ func TestRapidSubmissionsEnqueueHistoryInSubmissionOrderBeforeCommandCompletion(
 
 	m.composer.SetValue("second prompt")
 
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	m = updated.(Model)
 
@@ -2238,7 +2238,7 @@ func TestHistoryFailureShowsNoticeWithoutSuppressingSubmission(t *testing.T) {
 
 	m.composer.SetValue("send despite persistence failure")
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	m = updated.(Model)
 
@@ -2266,7 +2266,7 @@ func TestSubmittingRecalledHistoryResetsBrowsingState(t *testing.T) {
 
 	m.providerName = "echo"
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
 
 	if m.historyPos < 0 {
 
@@ -2274,7 +2274,7 @@ func TestSubmittingRecalledHistoryResetsBrowsingState(t *testing.T) {
 
 	}
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	m = updated.(Model)
 
@@ -2306,7 +2306,7 @@ func TestControlKPreservesComposerClosesCompletionAndOpensPalette(t *testing.T) 
 
 	m.completion = leadingSlashCompletion("/", 0, 1, m.commands)
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl})
 
 	if got := m.composer.Value(); got != "keep this suffix" {
 
@@ -2340,7 +2340,7 @@ func TestActiveModalOwnsControlP(t *testing.T) {
 
 		m.modal = probe
 
-		m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+		m = updateApp(t, m, tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl})
 
 		if probe.keys != 1 || m.modal != probe {
 
@@ -2358,7 +2358,7 @@ func TestActiveModalOwnsControlP(t *testing.T) {
 
 		m.modal = permission
 
-		m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+		m = updateApp(t, m, tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl})
 
 		if m.modal != permission {
 
@@ -2432,7 +2432,7 @@ func TestPaletteInvokeUsesExistingCommandBehavior(t *testing.T) {
 
 		m = updateApp(t, m, paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/provider"}})
 
-		if view := m.View(); !strings.Contains(view, "Select provider") {
+		if view := viewString(m); !strings.Contains(view, "Select provider") {
 
 			t.Errorf("provider palette action did not open picker:\n%s", view)
 
@@ -2454,7 +2454,7 @@ func TestPaletteInvokeUsesExistingCommandBehavior(t *testing.T) {
 
 		m = updated.(Model)
 
-		if cmd == nil || !strings.Contains(m.View(), "Select model") || !strings.Contains(m.View(), "echo") {
+		if cmd == nil || !strings.Contains(viewString(m), "Select model") || !strings.Contains(viewString(m), "echo") {
 
 			t.Errorf("model palette action did not reuse model picker behavior")
 
@@ -2474,7 +2474,7 @@ func TestPaletteInvokeUsesExistingCommandBehavior(t *testing.T) {
 
 		m = updateApp(t, m, paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/auth"}})
 
-		if !strings.Contains(m.View(), "Select provider") {
+		if !strings.Contains(viewString(m), "Select provider") {
 
 			t.Error("auth palette action did not open auth provider status")
 
@@ -2611,11 +2611,11 @@ func TestPaletteSkillInsertionUsesOneCommandArgumentSeparatorAcrossThemes(t *tes
 
 					m.providerName = "echo"
 
-					m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+					m = updateApp(t, m, tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl})
 
 					m = typeAppText(t, m, "/"+skillName)
 
-					updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+					updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 					m = updated.(Model)
 
@@ -2635,7 +2635,7 @@ func TestPaletteSkillInsertionUsesOneCommandArgumentSeparatorAcrossThemes(t *tes
 
 					}
 
-					updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+					updated, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 					m = updated.(Model)
 
@@ -2692,7 +2692,7 @@ func TestControlKPaletteAvailabilityTracksProviderAndTurn(t *testing.T) {
 
 			m.providerName, m.turnRunning = tt.provider, tt.turn
 
-			m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+			m = updateApp(t, m, tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl})
 
 			palette := m.modal.(*paletteModal)
 
@@ -2726,7 +2726,7 @@ func TestOpenPaletteRefreshesWhenTurnStartsAndKeepsHelpAvailable(t *testing.T) {
 
 	m.providerName = "echo"
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl})
 
 	palette := m.modal.(*paletteModal)
 
@@ -2762,7 +2762,7 @@ func TestOpenPaletteReenablesRestrictedEntriesWhenTurnCompletes(t *testing.T) {
 
 	m.turnRunning = true
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl})
 
 	palette := m.modal.(*paletteModal)
 
@@ -2796,7 +2796,7 @@ func TestOpenPaletteRefreshesProviderDependentEntriesAfterModelSelected(t *testi
 
 	m, ops := newAppTestModel(nil, []host.Skill{fakeSkill("review", "review code", "")})
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl})
 
 	palette := m.modal.(*paletteModal)
 
@@ -2896,7 +2896,7 @@ func TestConstructedRestrictedPaletteInvokeIsRejectedAgainstCurrentAvailability(
 
 			m.composer.SetValue("unchanged draft")
 
-			m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+			m = updateApp(t, m, tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl})
 
 			palette := m.modal
 
@@ -2942,7 +2942,7 @@ type appProbeModal struct {
 	keys int
 }
 
-func (m *appProbeModal) update(tea.KeyMsg) (modal, tea.Cmd) {
+func (m *appProbeModal) update(tea.KeyPressMsg) (modal, tea.Cmd) {
 
 	m.keys++
 
@@ -3021,7 +3021,7 @@ func typeAppText(t *testing.T, m Model, text string) Model {
 
 	t.Helper()
 
-	return updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(text)})
+	return updateApp(t, m, tea.KeyPressMsg{Text: text})
 
 }
 
@@ -3159,7 +3159,7 @@ func TestHeaderAgentBadgeGuardsDisplaySafety(t *testing.T) {
 
 	m.applyEvent(protocol.AgentSelected{Name: "evil\x1b[2Jagent"})
 
-	if view := m.View(); strings.Contains(view, "\x1b[2J") {
+	if view := viewString(m); strings.Contains(view, "\x1b[2J") {
 
 		t.Fatalf("header rendered raw control sequence from agent name:\n%q", view)
 
@@ -3167,7 +3167,7 @@ func TestHeaderAgentBadgeGuardsDisplaySafety(t *testing.T) {
 
 	m.applyEvent(protocol.AgentSelected{Name: "build"})
 
-	if plain := ansi.Strip(m.View()); !strings.Contains(plain, "build") {
+	if plain := ansi.Strip(viewString(m)); !strings.Contains(plain, "build") {
 
 		t.Errorf("header dropped a valid agent name:\n%s", plain)
 
@@ -3191,7 +3191,7 @@ func TestPaneFocusStartsLeftAndPreservesComposerDraftAndCursor(t *testing.T) {
 
 	draft, line, info := m.composer.Value(), m.composer.Line(), m.composer.LineInfo()
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 
 	if m.focus != focusRight || m.composer.Focused() {
 
@@ -3205,7 +3205,7 @@ func TestPaneFocusStartsLeftAndPreservesComposerDraftAndCursor(t *testing.T) {
 
 	}
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlH})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
 
 	if m.focus != focusLeft || !m.composer.Focused() {
 
@@ -3226,12 +3226,12 @@ func TestFocusAndPaletteClearCompletionBeforeChangingInputOwner(t *testing.T) {
 	for _, tt := range []struct {
 		name string
 
-		key tea.KeyMsg
+		key tea.KeyPressMsg
 
 		check func(*testing.T, Model)
 	}{
 
-		{"focus right", tea.KeyMsg{Type: tea.KeyCtrlL}, func(t *testing.T, m Model) {
+		{"focus right", tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl}, func(t *testing.T, m Model) {
 
 			if m.focus != focusRight {
 
@@ -3241,7 +3241,7 @@ func TestFocusAndPaletteClearCompletionBeforeChangingInputOwner(t *testing.T) {
 
 		}},
 
-		{"cycle next", tea.KeyMsg{Type: tea.KeyCtrlO}, func(t *testing.T, m Model) {
+		{"cycle next", tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}, func(t *testing.T, m Model) {
 
 			if m.windows.index != 1 {
 
@@ -3251,7 +3251,7 @@ func TestFocusAndPaletteClearCompletionBeforeChangingInputOwner(t *testing.T) {
 
 		}},
 
-		{"palette", tea.KeyMsg{Type: tea.KeyCtrlK}, func(t *testing.T, m Model) {
+		{"palette", tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl}, func(t *testing.T, m Model) {
 
 			if _, ok := m.modal.(*paletteModal); !ok {
 
@@ -3261,7 +3261,7 @@ func TestFocusAndPaletteClearCompletionBeforeChangingInputOwner(t *testing.T) {
 
 		}},
 
-		{"keyhelp", tea.KeyMsg{Type: tea.KeyF1}, func(t *testing.T, m Model) {
+		{"keyhelp", tea.KeyPressMsg{Code: tea.KeyF1}, func(t *testing.T, m Model) {
 
 			if _, ok := m.modal.(*keybindEditor); !ok {
 
@@ -3308,12 +3308,12 @@ func TestCycleWindowKeysClearOpenCompletionAndCycleOnce(t *testing.T) {
 	for _, tt := range []struct {
 		name string
 
-		key tea.KeyMsg
+		key tea.KeyPressMsg
 	}{
 
 		// ctrl+o cycles from either focus (#414).
 
-		{name: "ctrl+o", key: tea.KeyMsg{Type: tea.KeyCtrlO}},
+		{name: "ctrl+o", key: tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}},
 	} {
 
 		t.Run(tt.name, func(t *testing.T) {
@@ -3405,7 +3405,7 @@ func TestCompletionEscapeDismissesBeforeInterruptAndFocusChange(t *testing.T) {
 
 	m.completion = leadingSlashCompletion("/", 0, 1, m.commands)
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 	m = updated.(Model)
 
@@ -3419,7 +3419,7 @@ func TestCompletionEscapeDismissesBeforeInterruptAndFocusChange(t *testing.T) {
 
 	assertNoAppOp(t, ops)
 
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 	m = updated.(Model)
 
@@ -3437,10 +3437,7 @@ func TestCompletionEscapeDismissesBeforeInterruptAndFocusChange(t *testing.T) {
 
 func TestModalOwnsGlobalKeysExceptQuit(t *testing.T) {
 
-	for _, msg := range []tea.KeyMsg{
-
-		{Type: tea.KeyCtrlO}, {Type: tea.KeyCtrlL}, {Type: tea.KeyCtrlH}, {Type: tea.KeyCtrlK}, {Type: tea.KeyCtrlP}, {Type: tea.KeyF1},
-	} {
+	for _, msg := range []tea.KeyPressMsg{{Code: 'o', Mod: tea.ModCtrl}} {
 
 		t.Run(msg.String(), func(t *testing.T) {
 
@@ -3485,7 +3482,7 @@ func TestRightPaneOwnsOrdinaryKeysAndGlobalKeysRemainGlobal(t *testing.T) {
 		statefulTestWindow{windowID: "right-two"},
 	}}
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 
 	completion := leadingSlashCompletion("/", 0, 1, m.commands)
 
@@ -3495,15 +3492,11 @@ func TestRightPaneOwnsOrdinaryKeysAndGlobalKeysRemainGlobal(t *testing.T) {
 
 	// Ordinary keys go to the right pane; pgup/pgdn scroll the transcript globally.
 
-	for _, msg := range []tea.KeyMsg{
-
-		{Type: tea.KeyRunes, Runes: []rune("x")}, {Type: tea.KeyEnter}, {Type: tea.KeyTab}, {Type: tea.KeyCtrlD},
-
-		{Type: tea.KeyUp}, {Type: tea.KeyDown},
+	for _, msg := range []tea.KeyPressMsg{
+		{Code: 'x', Text: "x"}, {Code: tea.KeyEnter}, {Code: tea.KeyTab}, {Code: 'd', Mod: tea.ModCtrl},
+		{Code: tea.KeyUp}, {Code: tea.KeyDown},
 	} {
-
 		m = updateApp(t, m, msg)
-
 	}
 
 	if m.composer.Value() != "unchanged" || m.composer.Line() != startLine || m.composer.LineInfo().ColumnOffset != startOffset || m.historyPos != -1 || m.agentName != "" {
@@ -3526,7 +3519,7 @@ func TestRightPaneOwnsOrdinaryKeysAndGlobalKeysRemainGlobal(t *testing.T) {
 
 	assertNoAppOp(t, ops)
 
-	for _, msg := range []tea.KeyMsg{{Type: tea.KeyCtrlO}, {Type: tea.KeyCtrlP}} {
+	for _, msg := range []tea.KeyPressMsg{{Code: 'o', Mod: tea.ModCtrl}, {Code: 'p', Mod: tea.ModCtrl}} {
 
 		before := totalWindowUpdates(t, m.windows)
 
@@ -3548,7 +3541,7 @@ func TestRightPaneOwnsOrdinaryKeysAndGlobalKeysRemainGlobal(t *testing.T) {
 
 	}
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl})
 
 	if _, ok := m.modal.(*paletteModal); !ok {
 
@@ -3586,7 +3579,7 @@ func TestPaletteHelpInvocationOpensHelpModal(t *testing.T) {
 
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 
 	m.modal = newPaletteModal(m.commands, m.agents, m.currentPaletteAvailability())
 
@@ -3600,7 +3593,7 @@ func TestPaletteHelpInvocationOpensHelpModal(t *testing.T) {
 
 	}
 
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(viewString(m))
 
 	if !strings.Contains(plain, "Commands") {
 
@@ -3642,7 +3635,7 @@ func TestPalettePickerActionsAndStaleNoticeDoNotStealRightFocus(t *testing.T) {
 
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 
 	m.setNotice("commands: stale help", false)
 
@@ -3680,9 +3673,9 @@ func TestViewportScrollOffsetSurvivesRightFocusRoundTripAndRefreshesOnResizeAndE
 
 	m.refreshViewport()
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyPgUp})
 
-	wantOffset := m.viewport.YOffset
+	wantOffset := m.viewport.YOffset()
 
 	if wantOffset == 0 {
 
@@ -3696,11 +3689,11 @@ func TestViewportScrollOffsetSurvivesRightFocusRoundTripAndRefreshesOnResizeAndE
 
 	}
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlH})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
 
-	if got := m.viewport.YOffset; got != wantOffset {
+	if got := m.viewport.YOffset(); got != wantOffset {
 
 		t.Errorf("focus round trip viewport offset = %d, want %d", got, wantOffset)
 
@@ -3716,7 +3709,7 @@ func TestViewportScrollOffsetSurvivesRightFocusRoundTripAndRefreshesOnResizeAndE
 
 	// Scrolled-up users must keep their place when engine events refresh content.
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 
 	m = updateApp(t, m, engineEventMsg{ev: protocol.TextDelta{Text: "engine refresh"}})
 
@@ -3726,7 +3719,7 @@ func TestViewportScrollOffsetSurvivesRightFocusRoundTripAndRefreshesOnResizeAndE
 
 	}
 
-	if got := m.viewport.YOffset; got < wantOffset-2 || got > wantOffset+2 {
+	if got := m.viewport.YOffset(); got < wantOffset-2 || got > wantOffset+2 {
 
 		t.Errorf("engine event viewport offset = %d, want near preserved %d", got, wantOffset)
 
@@ -3766,7 +3759,7 @@ func TestViewportStickToBottomFollowsTextDeltaWhenAtBottom(t *testing.T) {
 
 		t.Errorf("TextDelta while at bottom lost follow: YOffset=%d total=%d height=%d",
 
-			m.viewport.YOffset, m.viewport.TotalLineCount(), m.viewport.Height)
+			m.viewport.YOffset(), m.viewport.TotalLineCount(), m.viewport.Height())
 
 	}
 
@@ -3800,7 +3793,7 @@ func TestProtocolEventsAndSpinnerDoNotChangeRightFocus(t *testing.T) {
 
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 
 	for _, ev := range []protocol.Event{protocol.UserMessage{Text: "user"}, protocol.TextDelta{Text: "assistant"}} {
 
@@ -3944,7 +3937,7 @@ func TestRootSwitcherOpensModal(t *testing.T) {
 	m.titleTopic = "my topic"
 
 	// ctrl+s opens the session switcher modal
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	m = updated.(Model)
 
 	rs, ok := m.modal.(*rootSwitcherModal)
@@ -3966,7 +3959,7 @@ func TestRootSwitcherWorksWithComposerText(t *testing.T) {
 	m.sessionID = "s1"
 	m.composer.SetValue("some text in the composer")
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	m = updated.(Model)
 
 	if _, ok := m.modal.(*rootSwitcherModal); !ok {
@@ -3984,14 +3977,14 @@ func TestRootSwitcherEscCloses(t *testing.T) {
 	m.sessionID = "s1"
 
 	// Open the root switcher
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	m = updated.(Model)
 	if m.modal == nil {
 		t.Fatal("expected root switcher modal to be open")
 	}
 
 	// Esc closes it
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = updated.(Model)
 	if m.modal != nil {
 		t.Fatalf("modal = %T, want nil after esc", m.modal)
@@ -4004,14 +3997,14 @@ func TestRootSwitcherNumberShortcut(t *testing.T) {
 	m.sessionID = "root-1"
 
 	// Open root switcher
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	m = updated.(Model)
 	if _, ok := m.modal.(*rootSwitcherModal); !ok {
 		t.Fatal("expected root switcher modal")
 	}
 
 	// Press "1" — sends activateRootMsg
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("1")})
+	updated, _ = m.Update(tea.KeyPressMsg{Text: "1"})
 	m = updated.(Model)
 	// Modal should be closed (the Cmd returns nil modal + activateRootMsg)
 	if m.modal != nil {
@@ -4031,7 +4024,7 @@ func TestRootSwitcherFilterNarrows(t *testing.T) {
 
 	// Type "alpha" - only one match (beta does not contain "alpha")
 	for _, r := range "alpha" {
-		rs.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		rs.update(tea.KeyPressMsg{Text: string([]rune{r})})
 	}
 	if len(rs.filtered()) != 1 {
 		t.Fatalf("filtered to %q: got %d entries, want 1", rs.filter, len(rs.filtered()))
@@ -4050,7 +4043,7 @@ func TestRootSwitcherFilterMatchesState(t *testing.T) {
 
 	// Type "working" - only the second entry matches on state
 	for _, r := range "working" {
-		rs.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		rs.update(tea.KeyPressMsg{Text: string([]rune{r})})
 	}
 	if len(rs.filtered()) != 1 {
 		t.Fatalf("filtered to %q: got %d entries, want 1", rs.filter, len(rs.filtered()))
@@ -4069,7 +4062,7 @@ func TestRootSwitcherBackspaceRestores(t *testing.T) {
 
 	// Type something with no match
 	for _, r := range "zzzz" {
-		rs.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		rs.update(tea.KeyPressMsg{Text: string([]rune{r})})
 	}
 	if len(rs.filtered()) != 0 {
 		t.Fatalf("zero-match filter: got %d entries", len(rs.filtered()))
@@ -4077,7 +4070,7 @@ func TestRootSwitcherBackspaceRestores(t *testing.T) {
 
 	// Backspace to clear filter and restore all entries
 	for range 4 {
-		rs.update(tea.KeyMsg{Type: tea.KeyBackspace})
+		rs.update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	}
 	if len(rs.filtered()) != 2 {
 		t.Fatalf("unfiltered: got %d entries, want 2", len(rs.filtered()))
@@ -4119,7 +4112,7 @@ func TestRootSwitcherNumberShortcutWithFilter(t *testing.T) {
 	rs := newRootSwitcherModal(entries)
 	// Filter to "a" - matches "alpha" and "apple" (2 entries; "zulu" has no 'a')
 	for _, r := range "a" {
-		rs.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		rs.update(tea.KeyPressMsg{Text: string([]rune{r})})
 	}
 	list := rs.filtered()
 	if len(list) != 2 {
@@ -4127,7 +4120,7 @@ func TestRootSwitcherNumberShortcutWithFilter(t *testing.T) {
 	}
 
 	// "1" jumps to index 0 (alpha)
-	next, cmd := rs.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("1")})
+	next, cmd := rs.update(tea.KeyPressMsg{Text: "1"})
 	if cmd == nil {
 		t.Fatal("number shortcut 1 emitted no command")
 	}
@@ -4142,9 +4135,9 @@ func TestRootSwitcherNumberShortcutWithFilter(t *testing.T) {
 	// Re-setup: re-type filter "a"
 	rs2 := newRootSwitcherModal(entries)
 	for _, ch := range "a" {
-		rs2.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{ch}})
+		rs2.update(tea.KeyPressMsg{Text: string([]rune{ch})})
 	}
-	next2, _ := rs2.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")})
+	next2, _ := rs2.update(tea.KeyPressMsg{Text: "3"})
 	if next2 == nil {
 		t.Fatal("number 3 out of range should keep modal open")
 	}
@@ -4158,7 +4151,7 @@ func TestRootSwitcherCtrlNSpawnsNewSession(t *testing.T) {
 	rs := newRootSwitcherModal(entries)
 
 	// ctrl+n closes the modal and emits agentsSpawnMsg to spawn a new session.
-	next, cmd := rs.update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	next, cmd := rs.update(tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("ctrl+n emitted no command")
 	}

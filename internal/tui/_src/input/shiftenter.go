@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // altEnter is Alt+Enter as delivered to Bubble Tea after rewrite (KeyEnter+Alt).
@@ -101,7 +101,7 @@ func (s *shiftEnterFile) Name() string {
 // call multiple times. A nil writer is a no-op.
 //
 // Call once before tea.NewProgram (covers terminals that share mode across
-// screens) and again from Model.Init after WithAltScreen so Kitty/Ghostty apply
+// screens) and again from Model.Init after alt-screen enter so Kitty/Ghostty apply
 // the mode on the alternate-screen keyboard stack.
 func EnableEnhancedKeys(w io.Writer) (restore func()) {
 	noop := func() {}

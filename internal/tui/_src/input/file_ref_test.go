@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -156,12 +156,12 @@ func TestAltEnterOpensFileRefWhenNoToolExpand(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 
 	// Bare enter must not open file refs (#421).
-	handled, _ := m.handleToolCellKeys(tea.KeyMsg{Type: tea.KeyEnter})
+	handled, _ := m.handleToolCellKeys(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if handled {
 		t.Fatal("bare enter must not open file ref")
 	}
 	// Empty-composer alt+enter opens at-line (no collapsible tools).
-	handled, _ = m.handleToolCellKeys(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	handled, _ = m.handleToolCellKeys(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt})
 	if !handled {
 		t.Fatal("alt+enter should open file ref when no tool cells")
 	}
@@ -193,16 +193,11 @@ func TestFileRefAtMouseHit(t *testing.T) {
 	if !found {
 		t.Fatalf("no ref in plain lines: %#v", m.transcriptPlainLines)
 	}
-	msg := tea.MouseMsg{
-		X:      ox + col,
-		Y:      oy + (lineIdx - m.viewport.YOffset),
-		Button: tea.MouseButtonLeft,
-		Action: tea.MouseActionPress,
-	}
-	ref, ok := m.fileRefAtMouse(msg)
+	msg := tea.MouseClickMsg{X: ox + col, Y: oy + (lineIdx - m.viewport.YOffset()), Button: tea.MouseLeft}
+	ref, ok := m.fileRefAtMouse(tea.Mouse(msg))
 	if !ok || ref.Path != "hit.go" || ref.Line != 3 {
 		t.Fatalf("fileRefAtMouse = ok=%v ref=%+v (origin=%d,%d lineIdx=%d col=%d yOff=%d plain=%q)",
-			ok, ref, ox, oy, lineIdx, col, m.viewport.YOffset, m.transcriptPlainLines[lineIdx])
+			ok, ref, ox, oy, lineIdx, col, m.viewport.YOffset(), m.transcriptPlainLines[lineIdx])
 	}
 }
 

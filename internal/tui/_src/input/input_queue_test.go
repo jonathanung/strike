@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -65,7 +65,7 @@ func TestInputQueueSurvivesInterruptThenDrains(t *testing.T) {
 	m.providerName = "echo"
 	m.turnRunning = true
 	m.composer.SetValue("after interrupt")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	for _, msg := range runAllAppCmds(t, cmd) {
 		m = updateApp(t, m, msg)
@@ -75,7 +75,7 @@ func TestInputQueueSurvivesInterruptThenDrains(t *testing.T) {
 		t.Fatalf("queue len = %d", len(m.inputQueue))
 	}
 
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = updated.(Model)
 	for _, msg := range runAllAppCmds(t, cmd) {
 		m = updateApp(t, m, msg)
@@ -102,7 +102,7 @@ func TestInputQueuePopLastToComposerAndClearWhenIdle(t *testing.T) {
 	m.composer.SetValue("")
 	m.focus = focusLeft
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	m = updated.(Model)
 	assertNoAppOp(t, ops)
 	if got := m.composer.Value(); got != "b" {
@@ -114,7 +114,7 @@ func TestInputQueuePopLastToComposerAndClearWhenIdle(t *testing.T) {
 
 	m.turnRunning = false
 	m.composer.SetValue("")
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = updated.(Model)
 	if len(m.inputQueue) != 0 {
 		t.Fatalf("esc did not clear queue: %#v", m.inputQueue)
@@ -133,7 +133,7 @@ func TestInputQueueFullKeepsComposerDraft(t *testing.T) {
 		m.inputQueue[i] = queuedInput{modelText: "x", displayPrompt: "x"}
 	}
 	m.composer.SetValue("overflow draft")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	for _, msg := range runAllAppCmds(t, cmd) {
 		m = updateApp(t, m, msg)
@@ -157,7 +157,7 @@ func TestInputQueueBadgeRendersInComposerTitle(t *testing.T) {
 	m.turnRunning = true
 	m.inputQueue = []queuedInput{{modelText: "hello", displayPrompt: "hello"}}
 	m.reflow()
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(viewString(m))
 	if !strings.Contains(plain, "queued 1") {
 		t.Fatalf("view missing queue badge:\n%s", plain)
 	}
@@ -170,7 +170,7 @@ func TestInputQueueSkillEnqueuePreservesDisplayAndModelText(t *testing.T) {
 	m.providerName = "echo"
 	m.turnRunning = true
 	m.composer.SetValue("/review exact")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	for _, msg := range runAllAppCmds(t, cmd) {
 		m = updateApp(t, m, msg)

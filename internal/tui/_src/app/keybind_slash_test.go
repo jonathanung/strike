@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
@@ -197,7 +197,7 @@ func TestKeysModalShowsSlashCrossRef(t *testing.T) {
 	// keysModal removed from app — test skipped.
 	t.Skip("keysModal removed in favor of keybindEditor")
 	m, _ := newAppTestModel(nil, nil)
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyF1})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyF1})
 	modal, ok := m.modal.(*keysModal)
 	if !ok {
 		t.Fatalf("modal = %T", m.modal)

@@ -4,8 +4,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -83,7 +83,7 @@ func newCustomProviderFormModal(
 	return m
 }
 
-func (m *customProviderFormModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *customProviderFormModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	if isEscape(msg) {
 		return m.returnTo, nil
 	}
@@ -314,7 +314,7 @@ func (m *customProviderFormModal) view(width int, th theme.Theme) string {
 }
 
 func sizeInput(in *textinput.Model, inner int) {
-	cursorWidth := max(1, ansi.StringWidth(in.Cursor.View()))
-	in.Width = max(1, inner-ansi.StringWidth(in.Prompt)-cursorWidth)
+	cursorWidth := max(1, 1)
+	in.SetWidth(max(1, inner-ansi.StringWidth(in.Prompt)-cursorWidth))
 	in.SetValue(in.Value())
 }

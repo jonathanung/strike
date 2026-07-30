@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -97,7 +97,7 @@ func TestCostSlashCommandOpensModalWithTotals(t *testing.T) {
 	}
 
 	m.composer.SetValue("/cost")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	runAppCmd(t, cmd)
 	assertNoAppOp(t, ops)
@@ -113,7 +113,7 @@ func TestCostSlashCommandOpensModalWithTotals(t *testing.T) {
 		}
 	}
 	// Close on esc.
-	next, _ := cm.update(tea.KeyMsg{Type: tea.KeyEscape})
+	next, _ := cm.update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if next != nil {
 		t.Fatal("esc did not close cost modal")
 	}

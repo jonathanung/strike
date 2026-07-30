@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -485,11 +485,8 @@ func (m *Model) applySessionRename(id, title string) tea.Cmd {
 	} else {
 		m.setNotice("title cleared", false)
 	}
-	var titleCmd tea.Cmd
-	if id == m.sessionID {
-		titleCmd = tea.SetWindowTitle(windowTitle(*m))
-	}
-	return tea.Batch(titleCmd, m.broadcastAgentsState(), m.broadcastContextState())
+	// Window title is declared in View(); no SetWindowTitle command in v2.
+	return tea.Batch(m.broadcastAgentsState(), m.broadcastContextState())
 }
 
 // openRenameModal opens the rename dialog for id (prefilled with current title).

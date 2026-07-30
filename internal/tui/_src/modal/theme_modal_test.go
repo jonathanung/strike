@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -25,7 +25,7 @@ func TestThemeModalUpdateKeys(t *testing.T) {
 		name       string
 		current    string
 		setup      func(*themeModal)
-		keys       []tea.KeyMsg
+		keys       []tea.KeyPressMsg
 		wantCursor int
 		wantFilter string
 		wantClose  bool
@@ -34,19 +34,19 @@ func TestThemeModalUpdateKeys(t *testing.T) {
 		{
 			name:       "down moves cursor",
 			current:    "strike",
-			keys:       []tea.KeyMsg{{Type: tea.KeyDown}},
+			keys:       []tea.KeyPressMsg{{Code: tea.KeyDown}},
 			wantCursor: 1,
 		},
 		{
 			name:       "j moves cursor",
 			current:    "strike",
-			keys:       []tea.KeyMsg{{Type: tea.KeyRunes, Runes: []rune("j")}},
+			keys:       []tea.KeyPressMsg{{Text: "j"}},
 			wantCursor: 1,
 		},
 		{
 			name:       "up at top stays",
 			current:    "strike",
-			keys:       []tea.KeyMsg{{Type: tea.KeyUp}},
+			keys:       []tea.KeyPressMsg{{Code: tea.KeyUp}},
 			wantCursor: 0,
 		},
 		{
@@ -55,7 +55,7 @@ func TestThemeModalUpdateKeys(t *testing.T) {
 			setup: func(m *themeModal) {
 				m.cursor = 2
 			},
-			keys:       []tea.KeyMsg{{Type: tea.KeyUp}},
+			keys:       []tea.KeyPressMsg{{Code: tea.KeyUp}},
 			wantCursor: 1,
 		},
 		{
@@ -64,13 +64,13 @@ func TestThemeModalUpdateKeys(t *testing.T) {
 			setup: func(m *themeModal) {
 				m.cursor = 2
 			},
-			keys:       []tea.KeyMsg{{Type: tea.KeyRunes, Runes: []rune("k")}},
+			keys:       []tea.KeyPressMsg{{Text: "k"}},
 			wantCursor: 1,
 		},
 		{
 			name:       "ctrl+n moves down",
 			current:    "strike",
-			keys:       []tea.KeyMsg{{Type: tea.KeyCtrlN}},
+			keys:       []tea.KeyPressMsg{{Code: 'n', Mod: tea.ModCtrl}},
 			wantCursor: 1,
 		},
 		{
@@ -79,13 +79,13 @@ func TestThemeModalUpdateKeys(t *testing.T) {
 			setup: func(m *themeModal) {
 				m.cursor = 2
 			},
-			keys:       []tea.KeyMsg{{Type: tea.KeyCtrlP}},
+			keys:       []tea.KeyPressMsg{{Code: 'p', Mod: tea.ModCtrl}},
 			wantCursor: 1,
 		},
 		{
 			name:       "tab moves down",
 			current:    "strike",
-			keys:       []tea.KeyMsg{{Type: tea.KeyTab}},
+			keys:       []tea.KeyPressMsg{{Code: tea.KeyTab}},
 			wantCursor: 1,
 		},
 		{
@@ -94,14 +94,14 @@ func TestThemeModalUpdateKeys(t *testing.T) {
 			setup: func(m *themeModal) {
 				m.cursor = len(entries) - 1
 			},
-			keys:       []tea.KeyMsg{{Type: tea.KeyDown}},
+			keys:       []tea.KeyPressMsg{{Code: tea.KeyDown}},
 			wantCursor: len(entries) - 1,
 		},
 		{
 			name:       "type filters and resets cursor",
 			current:    "strike",
 			setup:      func(m *themeModal) { m.cursor = 2 },
-			keys:       []tea.KeyMsg{{Type: tea.KeyRunes, Runes: []rune("d")}, {Type: tea.KeyRunes, Runes: []rune("r")}},
+			keys:       []tea.KeyPressMsg{{Text: "d"}, {Text: "r"}},
 			wantCursor: 0,
 			wantFilter: "dr",
 		},
@@ -112,40 +112,40 @@ func TestThemeModalUpdateKeys(t *testing.T) {
 				m.refilter()
 				m.cursor = 0
 			},
-			keys:       []tea.KeyMsg{{Type: tea.KeyBackspace}},
+			keys:       []tea.KeyPressMsg{{Code: tea.KeyBackspace}},
 			wantCursor: 0,
 			wantFilter: "dr",
 		},
 		{
 			name:       "backspace on empty filter is noop",
 			current:    "strike",
-			keys:       []tea.KeyMsg{{Type: tea.KeyBackspace}},
+			keys:       []tea.KeyPressMsg{{Code: tea.KeyBackspace}},
 			wantCursor: 0,
 			wantFilter: "",
 		},
 		{
 			name:      "esc closes",
 			current:   "strike",
-			keys:      []tea.KeyMsg{{Type: tea.KeyEsc}},
+			keys:      []tea.KeyPressMsg{{Code: tea.KeyEsc}},
 			wantClose: true,
 		},
 		{
 			name:      "q closes",
 			current:   "strike",
-			keys:      []tea.KeyMsg{{Type: tea.KeyRunes, Runes: []rune("q")}},
+			keys:      []tea.KeyPressMsg{{Text: "q"}},
 			wantClose: true,
 		},
 		{
 			name:      "enter selects and closes",
 			current:   "strike",
-			keys:      []tea.KeyMsg{{Type: tea.KeyEnter}},
+			keys:      []tea.KeyPressMsg{{Code: tea.KeyEnter}},
 			wantClose: true,
 			wantCmd:   "select",
 		},
 		{
 			name:    "ctrl+d saves without closing",
 			current: "strike",
-			keys:    []tea.KeyMsg{{Type: tea.KeyCtrlD}},
+			keys:    []tea.KeyPressMsg{{Code: 'd', Mod: tea.ModCtrl}},
 			wantCmd: "save",
 		},
 		{
@@ -154,7 +154,7 @@ func TestThemeModalUpdateKeys(t *testing.T) {
 				m.filter = "zzz-no-match"
 				m.refilter()
 			},
-			keys:       []tea.KeyMsg{{Type: tea.KeyEnter}},
+			keys:       []tea.KeyPressMsg{{Code: tea.KeyEnter}},
 			wantCursor: 0,
 			wantFilter: "zzz-no-match",
 		},
@@ -164,7 +164,7 @@ func TestThemeModalUpdateKeys(t *testing.T) {
 				m.filter = "zzz-no-match"
 				m.refilter()
 			},
-			keys:       []tea.KeyMsg{{Type: tea.KeyCtrlD}},
+			keys:       []tea.KeyPressMsg{{Code: 'd', Mod: tea.ModCtrl}},
 			wantCursor: 0,
 			wantFilter: "zzz-no-match",
 		},
@@ -325,7 +325,7 @@ func TestThemeModalEnterSelectsEntry(t *testing.T) {
 			break
 		}
 	}
-	next, cmd := m.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if next != nil {
 		t.Fatalf("enter left modal open: %T", next)
 	}
@@ -347,7 +347,7 @@ func TestThemeModalCtrlDSavesDefault(t *testing.T) {
 			break
 		}
 	}
-	next, cmd := m.update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	next, cmd := m.update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
 	if next == nil {
 		t.Fatal("ctrl+d closed modal")
 	}

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
@@ -21,7 +21,7 @@ func TestOptionsNilThemeMatchesDefaultTheme(t *testing.T) {
 	defaultModel = updateApp(t, defaultModel, tea.WindowSizeMsg{Width: 80, Height: 24})
 	nilModel = updateApp(t, nilModel, tea.WindowSizeMsg{Width: 80, Height: 24})
 
-	if got, want := nilModel.View(), defaultModel.View(); got != want {
+	if got, want := viewString(nilModel), viewString(defaultModel); got != want {
 		t.Error("a nil Options.Theme does not render like theme.Default()")
 	}
 }
@@ -39,7 +39,7 @@ func TestOptionsThemeResolvesAndCopiesCallerValueBeforeWidgetSetup(t *testing.T)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.composer.SetValue("themed composer text")
 
-	if got := m.View(); !strings.Contains(got, rgbSGR("#010203")) {
+	if got := viewString(m); !strings.Contains(got, rgbSGR("#010203")) {
 		t.Fatalf("resolved custom accent is not observable in the rendered model: %q", got)
 	} else if strings.Contains(got, rgbSGR("#a1a2a3")) {
 		t.Fatalf("rendered model changed after caller mutated Options.Theme: %q", got)
@@ -55,9 +55,9 @@ func TestOptionsThemeCopiesPointedBackgroundColorBeforeRendering(t *testing.T) {
 	th := theme.Theme{Background: &background}
 	m, _ := newAppTestModelWithOptions(Options{Theme: &th})
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 40, Height: 12})
-	before := m.View()
+	before := viewString(m)
 	background = "#445566"
-	after := m.View()
+	after := viewString(m)
 
 	if !strings.Contains(before, "48;2;17;34;51") {
 		t.Fatalf("initial view omitted configured background: %q", before)
@@ -105,7 +105,7 @@ func TestCustomThemeSpacingControlsRootTranscriptHeaderAndPermissionLayout(t *te
 			if !strings.Contains(header, "strike"+tt.headGap+"["+badgeSpace+"no model"+badgeSpace+"]") {
 				t.Errorf("header badge spacing = %q", header)
 			}
-			for i, row := range strings.Split(m.View(), "\n") {
+			for i, row := range strings.Split(viewString(m), "\n") {
 				if got := ansi.StringWidth(row); got != 60 {
 					t.Errorf("model row %d width = %d, want 60", i, got)
 				}
@@ -165,7 +165,7 @@ func TestThemeStylesComposerTextInputsAndSpinnerWithoutWidgetBackgrounds(t *test
 		"spinner":    m.spin.View(),
 		"API key":    apiKey.input.View(),
 		"permission": permission.feedback.View(),
-		"final view": m.View(),
+		"final view": viewString(m),
 	} {
 		if hasTUIBackgroundSGR(out) {
 			t.Errorf("%s emitted a background-setting SGR sequence in NoBackground mode: %q", name, out)
@@ -194,7 +194,7 @@ func TestModelViewCanvasCoversModalGuttersAndFooter(t *testing.T) {
 	m, _ := newAppTestModelWithOptions(Options{Theme: &th})
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.modal = newProviderModal(m.services, "", m.ops, m.th)
-	out := m.View()
+	out := viewString(m)
 
 	lines := strings.Split(out, "\n")
 	if len(lines) != 24 {

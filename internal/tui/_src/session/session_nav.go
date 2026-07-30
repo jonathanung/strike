@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -64,7 +64,7 @@ func (m *Model) clearLeader() {
 
 // handleLeaderKey consumes a key while the leader is armed. handled is true
 // when the chord was recognized or the leader state was cleared.
-func (m *Model) handleLeaderKey(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
+func (m *Model) handleLeaderKey(msg tea.KeyPressMsg) (handled bool, cmd tea.Cmd) {
 	if !m.leaderArmed {
 		return false, nil
 	}
@@ -93,7 +93,7 @@ func (m *Model) handleLeaderKey(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
 
 // handleSessionNavKeys handles bare up/down/left/right while viewing a child
 // (opencode-style in-session navigation). At root only leader chords navigate.
-func (m *Model) handleSessionNavKeys(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
+func (m *Model) handleSessionNavKeys(msg tea.KeyPressMsg) (handled bool, cmd tea.Cmd) {
 	if m.focus != focusLeft || m.modal != nil || m.completion != nil {
 		return false, nil
 	}
