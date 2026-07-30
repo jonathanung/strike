@@ -50,6 +50,10 @@ func (m *rootSwitcherModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 	if isEscape(msg) {
 		return nil, nil
 	}
+	switch msg.String() {
+	case "ctrl+n":
+		return nil, func() tea.Msg { return agentsSpawnMsg{} }
+	}
 	// Direct number shortcut: 1-9 jump to the Nth filtered entry.
 	if len(msg.Runes) == 1 {
 		r := msg.Runes[0]
@@ -66,7 +70,7 @@ func (m *rootSwitcherModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 		if len(list) > 0 {
 			m.cursor = (m.cursor + len(list) - 1) % len(list)
 		}
-	case "down", "ctrl+n":
+	case "down":
 		if len(list) > 0 {
 			m.cursor = (m.cursor + 1) % len(list)
 		}
@@ -117,7 +121,7 @@ func (m *rootSwitcherModal) view(width int, th theme.Theme) string {
 		Total:      len(m.roots),
 		Empty:      "no matching sessions",
 	})
-	hint := dotJoin(th, "type to filter", "1-9 jump", "↑/↓ move", "enter select", "esc close")
+	hint := dotJoin(th, "ctrl+n new", "type to filter", "1-9 jump", "↑/↓ move", "enter select", "esc close")
 	return ui.Dialog(th, ui.DialogOpts{
 		Title: "Switch session",
 		Hint:  hint,
