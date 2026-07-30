@@ -23,7 +23,12 @@ var hostCPUTicks struct {
 
 // hostCPUSnapshot is a variable so tests can force a specific interleaving of
 // snapshot-versus-fold, which is what the lock scope in readHostCPU exists to
-// prevent. Production always uses machHostCPUTicks.
+// prevent. Production always uses machHostCPUTicks and never reassigns it.
+//
+// It is read under hostCPUTicks.mu. Tests must swap it via swapHostCPUSnapshot
+// so the write is ordered against that lock; assigning it directly would race
+// as soon as any telemetry test runs in parallel, and would also let
+// TestReadHostCPUTakesSnapshotUnderLock pass for the wrong reason.
 var hostCPUSnapshot = machHostCPUTicks
 
 func readHostCPU() (idle, total uint64, ok bool) {

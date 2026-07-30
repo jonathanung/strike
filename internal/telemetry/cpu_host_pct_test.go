@@ -97,12 +97,14 @@ func TestSampleCPUUnavailableWhenReadFails(t *testing.T) {
 	}
 }
 
-func TestSampleCPUClampsBogusDeltas(t *testing.T) {
+// Idle should never exceed total, but the subtraction is unsigned: without a
+// clamp it underflows to ~1.8e19 and reports a maximally *busy* CPU for a
+// sample whose idle time exceeded its total — the opposite of the truth.
+func TestSampleCPUIdleExceedingTotalReadsAsIdle(t *testing.T) {
 	h := NewHost()
-	// Idle grows faster than total, which would drive busy negative.
 	h.readHostCPUFn = scriptedCPU([][2]uint64{
 		{0, 0},
-		{5000, 1000},
+		{5000, 1000}, // idle grew 5x faster than total
 	})
 	ctx := context.Background()
 
@@ -111,8 +113,8 @@ func TestSampleCPUClampsBogusDeltas(t *testing.T) {
 	if !s.CPUHostOK {
 		t.Fatal("CPUHostOK = false")
 	}
-	if s.CPUHostPct < 0 || s.CPUHostPct > 100 {
-		t.Errorf("CPUHostPct = %v, want clamped within [0, 100]", s.CPUHostPct)
+	if s.CPUHostPct != 0 {
+		t.Errorf("CPUHostPct = %v, want 0 — more idle than total cannot mean busy", s.CPUHostPct)
 	}
 }
 
@@ -147,28 +149,55 @@ func TestSampleCPUHoldExpires(t *testing.T) {
 	}
 }
 
-// Counters running backwards is the strongest signal the reading is nonsense,
-// so it must not be absorbed by the hold.
-func TestSampleCPURegressionReportsUnavailable(t *testing.T) {
+// A sample whose counters sit below the previous one is a stale read, not a
+// dead counter: overlapping Collect calls reach h.mu in an order independent of
+// when they read the counters. Blanking the row there would reintroduce exactly
+// the flicker the hold exists to remove.
+func TestSampleCPUStaleSampleHoldsRatherThanBlanking(t *testing.T) {
 	h := NewHost()
 	h.readHostCPUFn = scriptedCPU([][2]uint64{
 		{0, 0},
-		{750, 1000},
-		{700, 900}, // total went backwards
-		{700, 900},
+		{1500, 3000}, // 50% busy
+		{750, 1000},  // an older read landing late
 	})
 	ctx := context.Background()
 
 	h.Collect(ctx, "")
-	if s, _ := h.Collect(ctx, ""); !s.CPUHostOK {
-		t.Fatal("second sample should report a percent")
+	if s, _ := h.Collect(ctx, ""); s.CPUHostPct != 50 {
+		t.Fatalf("CPUHostPct = %v, want 50", s.CPUHostPct)
 	}
-	if s, _ := h.Collect(ctx, ""); s.CPUHostOK {
-		t.Error("regressed counters should report unavailable, not a held percent")
+	s, _ := h.Collect(ctx, "")
+	if !s.CPUHostOK {
+		t.Error("a stale sample blanked the CPU row instead of holding")
 	}
-	// And it stays unavailable rather than resurrecting the stale value.
-	if s, _ := h.Collect(ctx, ""); s.CPUHostOK {
-		t.Error("stale percent resurrected after a regression")
+	if s.CPUHostPct != 50 {
+		t.Errorf("CPUHostPct = %v, want the held value 50", s.CPUHostPct)
+	}
+}
+
+// A stale sample must not drag the baseline backwards, or the next real sample
+// spans an interval that has already been reported and double-counts it.
+func TestSampleCPUStaleSampleDoesNotRewindBaseline(t *testing.T) {
+	h := NewHost()
+	h.readHostCPUFn = scriptedCPU([][2]uint64{
+		{0, 0},
+		{1500, 3000}, // 50% busy, baseline now (1500, 3000)
+		{750, 1000},  // stale read
+		{2000, 4000}, // real next sample: delta from (1500,3000) is 500 idle of 1000 -> 50%
+	})
+	ctx := context.Background()
+
+	h.Collect(ctx, "")
+	h.Collect(ctx, "")
+	h.Collect(ctx, "")
+	s, _ := h.Collect(ctx, "")
+	if !s.CPUHostOK {
+		t.Fatal("CPUHostOK = false after a real sample following a stale one")
+	}
+	// Had the stale sample rewound the baseline to (750, 1000), the delta would
+	// be 1250 idle of 3000 -> ~58.3% busy instead of 50%.
+	if s.CPUHostPct != 50 {
+		t.Errorf("CPUHostPct = %v, want 50 — baseline was rewound by the stale sample", s.CPUHostPct)
 	}
 }
 

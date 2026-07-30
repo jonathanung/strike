@@ -134,11 +134,8 @@ func TestCollectReportsHostCPUOnDarwin(t *testing.T) {
 // pre-fix code. If the mutex can be acquired while the snapshot is being taken,
 // the snapshot is unprotected and the reorder is possible.
 func TestReadHostCPUTakesSnapshotUnderLock(t *testing.T) {
-	restore := hostCPUSnapshot
-	defer func() { hostCPUSnapshot = restore }()
-
 	var lockedDuringSnapshot, called bool
-	hostCPUSnapshot = func() ([cpuStateMax]uint32, bool) {
+	swapHostCPUSnapshot(t, func() ([cpuStateMax]uint32, bool) {
 		called = true
 		// TryLock succeeding means the mutex is free, i.e. the snapshot is
 		// running outside the critical section.
@@ -149,7 +146,7 @@ func TestReadHostCPUTakesSnapshotUnderLock(t *testing.T) {
 			lockedDuringSnapshot = true
 		}
 		return machHostCPUTicks()
-	}
+	})
 
 	readHostCPU()
 
@@ -165,9 +162,6 @@ func TestReadHostCPUTakesSnapshotUnderLock(t *testing.T) {
 // arrives, so corruption is impossible independently of the lock. Paired with
 // TestMachTickWidenerRejectsOutOfOrderSnapshot, which pins the arithmetic.
 func TestReadHostCPURejectsRegressedSnapshot(t *testing.T) {
-	restore := hostCPUSnapshot
-	defer func() { hostCPUSnapshot = restore }()
-
 	cur, ok := machHostCPUTicks()
 	if !ok {
 		t.Fatal("machHostCPUTicks not ok")
@@ -175,11 +169,11 @@ func TestReadHostCPURejectsRegressedSnapshot(t *testing.T) {
 	older := cur
 	older[cpuStateIdle] -= 500
 
-	hostCPUSnapshot = func() ([cpuStateMax]uint32, bool) { return cur, true }
+	swapHostCPUSnapshot(t, func() ([cpuStateMax]uint32, bool) { return cur, true })
 	readHostCPU()
 	_, before, _ := readHostCPU()
 
-	hostCPUSnapshot = func() ([cpuStateMax]uint32, bool) { return older, true }
+	swapHostCPUSnapshot(t, func() ([cpuStateMax]uint32, bool) { return older, true })
 	idle, total, ok := readHostCPU()
 	if !ok {
 		return // rejected outright, which is the preferred outcome
@@ -195,4 +189,24 @@ func TestReadHostCPURejectsRegressedSnapshot(t *testing.T) {
 	if idle > total {
 		t.Fatalf("idle %d exceeds total %d", idle, total)
 	}
+}
+
+// swapHostCPUSnapshot installs a snapshot stub under hostCPUTicks.mu and
+// restores both it and the widener baseline on cleanup. Restoring the widener
+// matters because a rejected snapshot advances w.prev, which would otherwise
+// leak a fabricated baseline into any later test that calls readHostCPU.
+func swapHostCPUSnapshot(t *testing.T, fn func() ([cpuStateMax]uint32, bool)) {
+	t.Helper()
+	hostCPUTicks.mu.Lock()
+	prevFn := hostCPUSnapshot
+	prevWidener := hostCPUTicks.machTickWidener
+	hostCPUSnapshot = fn
+	hostCPUTicks.mu.Unlock()
+
+	t.Cleanup(func() {
+		hostCPUTicks.mu.Lock()
+		hostCPUSnapshot = prevFn
+		hostCPUTicks.machTickWidener = prevWidener
+		hostCPUTicks.mu.Unlock()
+	})
 }

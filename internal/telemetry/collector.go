@@ -133,34 +133,41 @@ func (h *Host) sampleCPU(s *Sample) {
 		case total > h.prevHostTotal:
 			deltaTotal := total - h.prevHostTotal
 			deltaIdle := idle - h.prevHostIdle
+			// Idle is a subset of total on both platforms, so this only trips on
+			// inconsistent counters. Clamp rather than let the unsigned
+			// subtraction below underflow, which would read as fully busy.
+			if deltaIdle > deltaTotal {
+				deltaIdle = deltaTotal
+			}
 			busy := float64(deltaTotal-deltaIdle) / float64(deltaTotal) * 100
-			if busy < 0 {
-				busy = 0
-			}
-			if busy > 100 {
-				busy = 100
-			}
 			s.CPUHostPct = busy
 			s.CPUHostOK = true
 			h.prevHostPct = busy
 			h.prevHostPctOK = true
 			h.heldHostSamples = 0
-		case total == h.prevHostTotal && h.prevHostPctOK && h.heldHostSamples < maxHeldHostCPUSamples:
-			// Counters have not moved yet. Hold the last percent rather than
-			// flickering the row to "unavailable" — see prevHostPct.
+		case h.prevHostPctOK && h.heldHostSamples < maxHeldHostCPUSamples:
+			// The counters have not advanced past the last sample. Either they
+			// have not been flushed yet, or this sample read them before another
+			// concurrent Collect that already reported — overlapping samples
+			// reach h.mu in an order independent of when they read. Neither is a
+			// dead counter, so hold the last percent rather than flickering the
+			// row to "unavailable".
 			h.heldHostSamples++
 			s.CPUHostPct = h.prevHostPct
 			s.CPUHostOK = true
 		default:
-			// Either the counters went backwards, or they have been frozen for
-			// longer than the aggregation gap explains. Both mean the reading
-			// is no longer measuring anything, so stop publishing a stale
-			// number and let the row read "unavailable".
+			// Frozen for longer than the aggregation gap explains, or nothing
+			// measured yet. Stop publishing a stale number.
 			h.prevHostPctOK = false
 			h.heldHostSamples = 0
 		}
-		h.prevHostTotal = total
-		h.prevHostIdle = idle
+		// Never move the baseline backwards. A sample that read older counters
+		// than one already folded in would otherwise make the next delta span an
+		// interval that has already been reported.
+		if total >= h.prevHostTotal {
+			h.prevHostTotal = total
+			h.prevHostIdle = idle
+		}
 		h.prevHostOK = true
 	}
 
