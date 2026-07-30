@@ -410,47 +410,108 @@ func renderTabBar(th theme.Theme, tab int, maxCells int) string {
 
 func (m *keybindEditor) view(width int, th theme.Theme) string {
 	th = th.Resolve()
+	s := th.S()
 	list := m.filtered
 	if m.cursor >= len(list) {
 		m.cursor = max(0, len(list)-1)
 	}
-	items := make([]ui.ListItem, len(list))
-	for i, entry := range list {
-		defaultKeys := entry.Keys
-		overrideKeys, hasOverride := m.pending[entry.ID]
-		if !hasOverride {
-			overrideKeys, hasOverride = m.saved[entry.ID]
-		}
-		var displayKeys string
-		if hasOverride && len(overrideKeys) > 0 {
-			displayKeys = th.Icons.Bolt + " " + defaultKeys + " / " + strings.Join(overrideKeys, "/")
-		} else {
-			displayKeys = defaultKeys
-		}
-		items[i] = ui.ListItem{
-			Label:  sanitizeDisplayData(entry.Action),
-			Detail: sanitizeDisplayData(displayKeys),
-		}
-	}
-	listWidth := max(1, ui.PanelInnerWidth(th, width))
+	inner := max(1, ui.PanelInnerWidth(th, width))
 	if width < 4 {
-		listWidth = max(1, width)
+		inner = max(1, width)
 	}
-	body := ui.List(th, ui.ListOpts{
-		Items:      items,
-		Cursor:     m.cursor,
-		Width:      listWidth,
-		Visible:    keybindEditorVisible,
-		ShowFilter: true,
-		Filter:     sanitizeDisplayData(m.filter),
-		Total:      len(m.entries),
-		Empty:      "no matching keybinds",
-	})
+
+	// Three columns: action | default | override.
+	gap := 2
+	defCol := 14 // wide enough for "ctrl+shift+down"
+	ovrCol := 16 // wide enough for "ctrl+b / ctrl+down"
+	actCol := inner - defCol - ovrCol - gap*2
+	if actCol < 10 {
+		// Narrow width: give action the lion's share, shrink override first.
+		ovrCol = max(4, inner/5)
+		defCol = max(4, inner/5)
+		actCol = inner - defCol - ovrCol - gap*2
+		if actCol < 4 {
+			actCol = max(4, inner/3)
+		}
+	}
+
+	var buf strings.Builder
+
+	// Filter bar with count.
+	filterLine := ""
+	if m.filter != "" {
+		filterLine = th.S().Muted.Render("filter: " + sanitizeDisplayData(m.filter))
+	} else {
+		filterLine = " " // keep vertical alignment
+	}
+	showing := len(list)
+	total := len(m.entries)
+	countStr := th.S().Muted.Render(itoa(showing) + "/" + itoa(total))
+	buf.WriteString(filterLine + strings.Repeat(" ", max(1, inner-lipgloss.Width(filterLine)-lipgloss.Width(countStr))) + countStr + "\n")
+
+	// Header row.
+	col1 := s.Muted.Render(padRight("Action", actCol))
+	col2 := s.Muted.Render(padRight("Default", defCol))
+	col3 := s.Muted.Render(padRight("Override", ovrCol))
+	buf.WriteString(col1 + "  " + col2 + "  " + col3 + "\n")
+
+	// Separator line.
+		// Data rows (visible window around cursor).
+	half := keybindEditorVisible / 2
+	start := max(0, m.cursor-half)
+	end := min(len(list), start+keybindEditorVisible)
+	if end-start < keybindEditorVisible && start > 0 {
+		start = max(0, end-keybindEditorVisible)
+	}
+	for i := start; i < end; i++ {
+		entry := list[i]
+		selected := i == m.cursor
+
+		// Action label.
+		label := sanitizeDisplayData(entry.Action)
+		label = padRight(label, actCol)
+
+		// Default keys.
+		defaultStr := entry.Keys
+
+		// Override keys.
+		overrideChords, hasOverride := m.pending[entry.ID]
+		if !hasOverride {
+			overrideChords, hasOverride = m.saved[entry.ID]
+		}
+		overrideStr := ""
+		if hasOverride && len(overrideChords) > 0 {
+			overrideStr = th.Icons.Bolt + " " + strings.Join(overrideChords, "/")
+		}
+		defaultStr = padRight(defaultStr, defCol)
+		overrideStr = padRight(overrideStr, ovrCol)
+
+		row := label + "  " + defaultStr + "  " + overrideStr
+		if selected {
+			row = s.Accent.Render(row)
+		}
+		buf.WriteString(row + "\n")
+	}
+
+	// Empty state.
+	if len(list) == 0 {
+		empty := th.S().Muted.Render("  no matching keybinds")
+		buf.WriteString(empty + "\n")
+	}
+
+	// Scroll indicator.
+	if end < len(list) {
+		buf.WriteString(s.Muted.Render("  ↓ " + itoa(len(list)-end) + " more") + "\n")
+	} else if start > 0 {
+		buf.WriteString(s.Muted.Render("  ↑ " + itoa(start) + " hidden") + "\n")
+	}
+
+	body := buf.String()
 	if width < 4 {
 		return body
 	}
 
-	tabBar := renderTabBar(th, m.tab, listWidth)
+	tabBar := renderTabBar(th, m.tab, inner)
 
 	title := "Keyboard shortcuts"
 	if m.capturing {
@@ -468,9 +529,6 @@ func (m *keybindEditor) view(width int, th theme.Theme) string {
 	} else if m.unsavedPrompt {
 		hint = "y save and close | n discard | esc back"
 	}
-	// Use Panel directly, not Dialog, so the ANSI-colored tab bar is not
-	// passed through word-wrap (which mangles ANSI escapes).
-	inner := ui.PanelInnerWidth(th, width)
 	content := tabBar + "\n\n" + body
 	if m.confirm != nil {
 		label := m.confirm.ConflictID
@@ -480,11 +538,11 @@ func (m *keybindEditor) view(width int, th theme.Theme) string {
 				break
 			}
 		}
-		content += "\n\n" + th.S().Warning.Render(
+		content += "\n\n" + s.Warning.Render(
 			m.confirm.Chord+" is used by \""+label+"\". Rebinding will unassign it.",
 		)
 	} else if m.unsavedPrompt {
-		content += "\n\n" + th.S().Warning.Render(
+		content += "\n\n" + s.Warning.Render(
 			"You have unsaved keybind changes. Save before closing?",
 		)
 	}
@@ -492,10 +550,10 @@ func (m *keybindEditor) view(width int, th theme.Theme) string {
 		hintLines := strings.Split(ui.WrapText(hint, inner), "\n")
 		if len(hintLines) > 2 {
 			hintLines = hintLines[:2]
-			hintLines[1] = th.S().Muted.Render(hintLines[1])
+			hintLines[1] = s.Muted.Render(hintLines[1])
 		}
 		for _, hl := range hintLines {
-			content += "\n" + th.S().Muted.Render(hl)
+			content += "\n" + s.Muted.Render(hl)
 		}
 	}
 	return ui.Panel(th, ui.PanelOpts{
@@ -503,6 +561,16 @@ func (m *keybindEditor) view(width int, th theme.Theme) string {
 		Width:   width,
 		Focused: true,
 	}, content)
+}
+
+// padRight pads s with spaces on the right to the given width (measured in
+// cell columns). If s is already wider, it is truncated.
+func padRight(s string, width int) string {
+	w := lipgloss.Width(s)
+	if w >= width {
+		return s
+	}
+	return s + strings.Repeat(" ", width-w)
 }
 
 func saveKeybindsThroughCmd(settings host.Settings, overrides map[string][]string) tea.Cmd {
