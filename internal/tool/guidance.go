@@ -31,6 +31,8 @@ var shortPurposes = map[string]string{
 	"task_message":    "send guidance to a running child task",
 	"task_interrupt":  "cancel a running child task",
 	"agent_roster":    "list lead and teammate agents on the session team",
+	"agent_message":   "send a peer message to one teammate",
+	"agent_broadcast": "broadcast a peer message to all other teammates",
 	"webfetch":        "fetch a URL",
 	"todowrite":       "write the multi-step todo list",
 	"todoread":        "read the current todo list",
@@ -254,6 +256,9 @@ func recommendedGuidance(entries []GuidanceEntry) string {
 		"Use `task` for bounded non-blocking delegation (self-contained prompt). A later `[child.completed]` delivers the summary — never sleep-poll for task completion.")
 	add(has("agent_roster"),
 		"Use `agent_roster` to list the lead and teammates (session ids, personas, states) on the implicit session team.")
+	add(has("agent_message") || has("agent_broadcast"),
+		"Use `agent_message` / `agent_broadcast` for mid-turn peer coordination on the session team (child↔child, child↔lead). Prefer waiting for `[child.completed]` when you only need a child's final result. `task_message` remains parent→owned-child guidance.")
+
 	add(has("sleep") && has("bash") && has("task"),
 		"Prefer `sleep` over bash sleep for external readiness (services, rate limits). Never sleep-poll for `task`/subagent completion.")
 	add(has("sleep") && has("bash") && !has("task"),

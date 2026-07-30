@@ -89,6 +89,52 @@ func (t *Team) Contains(sessionID string) bool {
 	return ok
 }
 
+// IsLive reports whether sessionID has an attached running engine mailbox.
+func (t *Team) IsLive(sessionID string) bool {
+	if t == nil {
+		return false
+	}
+	id := strings.TrimSpace(sessionID)
+	if id == "" {
+		return false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	target := t.live[id]
+	return target != nil && target.eng != nil && target.box != nil
+}
+
+// ResolveAddress maps a teammate address to a session id.
+// Prefer exact session id; otherwise unique stable name match.
+// Empty, unknown, or ambiguous name → ok false.
+func (t *Team) ResolveAddress(addr string) (sessionID string, ok bool) {
+	if t == nil {
+		return "", false
+	}
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return "", false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if _, found := t.members[addr]; found {
+		return addr, true
+	}
+	var match string
+	for id, m := range t.members {
+		if strings.TrimSpace(m.Name) == addr {
+			if match != "" {
+				return "", false // ambiguous
+			}
+			match = id
+		}
+	}
+	if match == "" {
+		return "", false
+	}
+	return match, true
+}
+
 // Member returns a copy of the roster entry for sessionID.
 func (t *Team) Member(sessionID string) (TeamMember, bool) {
 	if t == nil {

@@ -160,7 +160,9 @@ func (taskMessageTool) Description() string {
 - Delivered at a safe boundary: accepted immediately when the child is idle,
   or queued until the active child turn finishes (does not corrupt the live request).
 - Returns status queued|accepted|rejected with the child's current state.
-- Cannot widen child permissions. Unknown/closed children are rejected.`
+- Cannot widen child permissions. Unknown/closed children are rejected.
+- Parent→owned-child only. For peer/team messaging (any teammate, including
+  child→child and child→lead), use agent_message / agent_broadcast instead.`
 }
 
 func (taskMessageTool) Schema() json.RawMessage {

@@ -275,6 +275,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tool.NewTaskMessage(),
 		tool.NewTaskInterrupt(),
 		tool.NewAgentRoster(),
+		tool.NewAgentMessage(),
+		tool.NewAgentBroadcast(),
 		tool.NewWebFetch(),
 		tool.NewTodoWrite(todoStore),
 		tool.NewTodoRead(todoStore),

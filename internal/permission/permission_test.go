@@ -49,6 +49,15 @@ func TestDefaultsIncludesAgentRosterAllow(t *testing.T) {
 	}
 }
 
+func TestDefaultsIncludesAgentMessageAllow(t *testing.T) {
+	if got := Evaluate("agent_message", "*", Defaults()); got != Allow {
+		t.Errorf("Defaults agent_message = %q, want allow", got)
+	}
+	if got := Evaluate("agent_broadcast", "*", Defaults()); got != Allow {
+		t.Errorf("Defaults agent_broadcast = %q, want allow", got)
+	}
+}
+
 func TestDenyOnly(t *testing.T) {
 	in := Ruleset{
 		{Permission: "bash", Pattern: "*", Action: Allow},

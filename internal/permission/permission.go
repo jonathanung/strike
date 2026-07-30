@@ -38,7 +38,8 @@ type Ruleset []Rule
 var knownPermissions = map[string]struct{}{
 	"*": {}, "read": {}, "glob": {}, "grep": {}, "edit": {}, "write": {},
 	"bash": {}, "task": {}, "task_status": {}, "task_read": {}, "task_message": {},
-	"task_interrupt": {}, "agent_roster": {}, "webfetch": {}, "todowrite": {}, "todoread": {},
+	"task_interrupt": {}, "agent_roster": {}, "agent_message": {}, "agent_broadcast": {},
+	"webfetch": {}, "todowrite": {}, "todoread": {},
 	"memory_write": {}, "memory_read": {}, "issue_write": {}, "issue_read": {},
 	"sleep": {}, "skill": {}, "question": {}, "toolsearch": {}, "hook": {},
 	"enter_plan_mode": {}, "exit_plan_mode": {}, "phase_done": {},
@@ -90,6 +91,10 @@ func Defaults() Ruleset {
 		{Permission: "task_message", Pattern: "*", Action: Allow},
 		{Permission: "task_interrupt", Pattern: "*", Action: Allow},
 		{Permission: "agent_roster", Pattern: "*", Action: Allow},
+		// Peer messaging is allow-by-default within a team; Deliver still
+		// rejects out-of-team targets. Users may deny via rules.
+		{Permission: "agent_message", Pattern: "*", Action: Allow},
+		{Permission: "agent_broadcast", Pattern: "*", Action: Allow},
 		{Permission: "webfetch", Pattern: "*", Action: Ask},
 		{Permission: "todowrite", Pattern: "*", Action: Allow},
 		{Permission: "todoread", Pattern: "*", Action: Allow},

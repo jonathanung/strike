@@ -938,9 +938,12 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			tc.TaskMessage = e.childMessage
 			tc.TaskInterrupt = e.childInterrupt
 		}
-		// agent_roster is available on lead and children (shared team).
+		// Team tools are available on lead and children (shared team).
+		// Messaging is not stripped at depth ceiling (unlike nested task).
 		if e.team != nil {
 			tc.AgentRoster = e.agentRoster
+			tc.AgentMessage = e.agentMessage
+			tc.AgentBroadcast = e.agentBroadcast
 		}
 		tc.ChildWake = e.childWakeCh()
 		tc.HasChildNotice = e.hasPendingChildNotices
