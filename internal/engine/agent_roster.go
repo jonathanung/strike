@@ -34,9 +34,20 @@ func (e *Engine) agentRoster(ctx context.Context, _ tool.AgentRosterRequest) (to
 		Members: make([]tool.AgentRosterMember, 0, len(members)),
 	}
 
+	// Snapshot handle/record pointers under the lock so concurrent finishChild
+	// map writes cannot race with lookups (statusSnapshot takes its own locks).
+	type liveSnap struct {
+		h   *childHandle
+		rec *childRecord
+	}
+	byID := make(map[string]liveSnap, len(members))
 	e.childMu.Lock()
-	children := e.children
-	history := e.childHistory
+	for _, m := range members {
+		byID[m.SessionID] = liveSnap{
+			h:   e.children[m.SessionID],
+			rec: e.childHistory[m.SessionID],
+		}
+	}
 	e.childMu.Unlock()
 
 	for _, m := range members {
@@ -59,20 +70,21 @@ func (e *Engine) agentRoster(ctx context.Context, _ tool.AgentRosterRequest) (to
 		}
 
 		// Prefer live task_status vocabulary for children this engine owns.
-		if h := children[m.SessionID]; h != nil {
-			snap := h.statusSnapshot(false)
-			entry.State = snap.State
+		snap := byID[m.SessionID]
+		if h := snap.h; h != nil {
+			st := h.statusSnapshot(false)
+			entry.State = st.State
 			if entry.StartedAt == "" && !h.startedAt.IsZero() {
 				entry.StartedAt = h.startedAt.UTC().Format(time.RFC3339)
 			}
 			if entry.Agent == "" {
 				entry.Agent = h.agent
 			}
-		} else if rec := history[m.SessionID]; rec != nil {
-			snap := rec.statusSnapshot(false)
-			entry.State = snap.State
+		} else if rec := snap.rec; rec != nil {
+			st := rec.statusSnapshot(false)
+			entry.State = st.State
 			if entry.TerminalSummary == "" {
-				entry.TerminalSummary = snap.TerminalSummary
+				entry.TerminalSummary = st.TerminalSummary
 			}
 			if entry.StartedAt == "" && !rec.startedAt.IsZero() {
 				entry.StartedAt = rec.startedAt.UTC().Format(time.RFC3339)
