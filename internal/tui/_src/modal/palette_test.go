@@ -25,7 +25,7 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 
 	got := newPaletteModal(specs, []string{"build"}, paletteAvailability{HasProvider: true}).entries
 	want := []paletteEntry{
-		{ID: "keybinds-rebind", Label: "Rebind keys", Description: "interactively rebind keyboard shortcuts", Action: paletteAction{Kind: paletteActionKeybindEditor}},
+		{ID: "keybinds-rebind", Label: "Keyboard shortcuts", Description: "interactively rebind keyboard shortcuts", Action: paletteAction{Kind: paletteActionKeybindEditor}},
 		{ID: "command:provider", Label: "/provider", Description: "select a provider and model", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/provider"}},
 		{ID: "command:model", Label: "/model", Description: "select a model from authenticated providers", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/model"}},
 		{ID: "command:effort", Label: "/effort", Description: "set how much reasoning the model spends", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/effort"}},

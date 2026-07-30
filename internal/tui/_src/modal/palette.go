@@ -85,7 +85,7 @@ func buildPaletteEntries(specs []commandSpec, agents []string, availability pale
 	entries := make([]paletteEntry, 0, len(builtinCommandSpecs)+len(agents)+len(specs))
 	entries = append(entries, paletteEntry{
 		ID:          "keybinds-rebind",
-		Label:       "Rebind keys",
+		Label:       "Keyboard shortcuts",
 		Description: "interactively rebind keyboard shortcuts",
 		Action:      paletteAction{Kind: paletteActionKeybindEditor},
 	})
