@@ -177,8 +177,9 @@ func TestAgentMessageChildToLead(t *testing.T) {
 	defer cancel()
 	go lead.Run(ctx)
 	go child.Run(ctx)
+	// Drain lead events so mailbox-nudge turn does not block on a full buffer.
 	go func() {
-		for range child.Events() {
+		for range lead.Events() {
 		}
 	}()
 	waitTeamLive(t, team, leadID, fromID)
