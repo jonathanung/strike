@@ -197,7 +197,7 @@ func (m *keybindEditor) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 		return m.startCapture()
 	case "ctrl+d":
 		return m.resetOverride()
-	case "ctrl+s":
+	case "alt+s":
 		return m.savePending()
 	default:
 		if msg.Type == tea.KeyRunes {
@@ -335,6 +335,7 @@ func (m *keybindEditor) resetOverride() (modal, tea.Cmd) {
 	}
 	id := m.filtered[m.cursor].ID
 	delete(m.pending, id)
+	delete(m.saved, id)
 	m.dirty = true
 	return m, func() tea.Msg {
 		return rebindAppliedMsg{ID: id, Chords: nil}
@@ -521,7 +522,7 @@ func (m *keybindEditor) view(width int, th theme.Theme) string {
 	} else if m.unsavedPrompt {
 		title = "⚠  Unsaved changes"
 	}
-	hint := "left/right switch tab | type to filter | up/down/j/k move | enter rebind | ctrl+d reset | ctrl+s save | esc close"
+	hint := "left/right switch tab | type to filter | up/down/j/k move | enter rebind | ctrl+d reset | alt+s save | esc close"
 	if m.capturing {
 		hint = "press any key to bind | esc cancel"
 	} else if m.confirm != nil {
@@ -538,13 +539,15 @@ func (m *keybindEditor) view(width int, th theme.Theme) string {
 				break
 			}
 		}
-		content += "\n\n" + s.Warning.Render(
-			m.confirm.Chord+" is used by \""+label+"\". Rebinding will unassign it.",
-		)
+		warn := m.confirm.Chord + " is used by \"" + label + "\". Rebinding will unassign it."
+		for _, wl := range strings.Split(ui.WrapText(warn, inner), "\n") {
+			content += "\n" + s.Warning.Render(wl)
+		}
 	} else if m.unsavedPrompt {
-		content += "\n\n" + s.Warning.Render(
-			"You have unsaved keybind changes. Save before closing?",
-		)
+		warn := "You have unsaved keybind changes. Save before closing?"
+		for _, wl := range strings.Split(ui.WrapText(warn, inner), "\n") {
+			content += "\n" + s.Warning.Render(wl)
+		}
 	}
 	if hint != "" {
 		hintLines := strings.Split(ui.WrapText(hint, inner), "\n")
