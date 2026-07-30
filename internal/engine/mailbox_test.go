@@ -169,17 +169,6 @@ func TestTeamDeliverToLiveIdleAccepted(t *testing.T) {
 		tm.DetachMailbox("A")
 	})
 
-	// Drain AgentMessage from child so emit does not block forever if buffer fills.
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for range child.Events() {
-		}
-	}()
-	t.Cleanup(func() {
-		// Events only close on Run exit; force-close path N/A — stop by canceling drain via detach only.
-	})
-
 	st := tm.Deliver("L", "A", "peer hello")
 	if st.Status != "accepted" {
 		t.Fatalf("status = %#v", st)

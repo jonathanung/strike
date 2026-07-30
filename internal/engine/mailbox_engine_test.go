@@ -120,11 +120,28 @@ func TestMailboxInjectedAtToolRoundBoundary(t *testing.T) {
 		t.Fatalf("invalid tool pairs after mailbox inject: %#v", second.Messages)
 	}
 
-	// AgentMessage emitted on recipient (and may bubble via parent drain).
-	// Child Events may still be open; poll briefly for the structured event.
-	// We already validated model injection; soft-check event via status MessageID.
 	if st.MessageID == "" {
 		t.Fatal("missing message id on deliver")
+	}
+
+	// AgentMessage is emitted on boundary inject (recipient Run/turn path).
+	// Drain until we see it (other turn lifecycle events may come first).
+	msgDeadline := time.After(3 * time.Second)
+	for {
+		select {
+		case ev := <-child.Events():
+			if am, ok := ev.(protocol.AgentMessage); ok && am.Body == body {
+				if am.From != leadID || am.To != toID || am.TeamID != leadID {
+					t.Fatalf("AgentMessage = %#v", am)
+				}
+				if am.MessageID != st.MessageID {
+					t.Fatalf("MessageID = %q, want %q", am.MessageID, st.MessageID)
+				}
+				return
+			}
+		case <-msgDeadline:
+			t.Fatal("no AgentMessage event after boundary inject")
+		}
 	}
 }
 
@@ -281,10 +298,6 @@ func TestMailboxOrderingPreservedUnderConcurrentSenders(t *testing.T) {
 	})
 	team.AttachMailbox(lead)
 	team.AttachMailbox(child)
-	go func() {
-		for range child.Events() {
-		}
-	}()
 
 	const n = 40
 	var wg sync.WaitGroup
@@ -341,10 +354,6 @@ func TestMailboxCapDropOldestUnderFlood(t *testing.T) {
 	})
 	team.AttachMailbox(lead)
 	team.AttachMailbox(child)
-	go func() {
-		for range child.Events() {
-		}
-	}()
 
 	// Flood past capacity; last enqueue should report Dropped when eviction happens.
 	var sawDrop bool

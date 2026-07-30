@@ -256,15 +256,9 @@ func (t *Team) Deliver(from, to, body string) MailboxStatus {
 	st.MessageID = msg.ID
 	st.Dropped = target.box.Dropped() > beforeDrop
 
-	// Structured event for UI/debug (recipient correlation).
-	target.eng.emit(protocol.AgentMessage{
-		Correlation: target.eng.sessionCorr(),
-		From:        from,
-		To:          to,
-		Body:        body,
-		TeamID:      leadID,
-		MessageID:   msg.ID,
-	})
+	// Wake recipient Run to idle-nudge or continue; AgentMessage is emitted
+	// from the recipient turn/Run path on boundary inject (never from this
+	// goroutine — avoids send-on-closed-events during recipient shutdown).
 	target.eng.signalMailboxWake()
 
 	st.Status = "accepted"
@@ -346,6 +340,7 @@ func (e *Engine) injectPendingMailbox() {
 	if len(msgs) == 0 {
 		return
 	}
+	e.emitAgentMessages(msgs)
 	text := formatMailboxNotices(msgs)
 	e.emit(protocol.UserMessage{Correlation: e.sessionCorr(), Text: text})
 	e.messages = append(e.messages, provider.Message{
@@ -372,7 +367,27 @@ func (e *Engine) flushPendingMailbox(ctx context.Context) {
 	if len(msgs) == 0 {
 		return
 	}
+	e.emitAgentMessages(msgs)
 	e.startTurn(ctx, formatMailboxNotices(msgs), nil)
+}
+
+// emitAgentMessages emits structured AgentMessage events (recipient Run/turn
+// only). Parent child-drain re-emits child AgentMessage for TUI/debug.
+func (e *Engine) emitAgentMessages(msgs []MailboxMessage) {
+	if e == nil || len(msgs) == 0 {
+		return
+	}
+	corr := e.sessionCorr()
+	for _, m := range msgs {
+		e.emit(protocol.AgentMessage{
+			Correlation: corr,
+			From:        m.From,
+			To:          m.To,
+			Body:        m.Body,
+			TeamID:      m.TeamID,
+			MessageID:   m.ID,
+		})
+	}
 }
 
 func formatMailboxNotices(msgs []MailboxMessage) string {

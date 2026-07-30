@@ -464,8 +464,8 @@ type ChildCompleted struct {
 // AgentMessage records a peer/team mailbox delivery for UI and debugging.
 // Correlation is the recipient session. Body is the message text; From/To are
 // session ids; TeamID is the lead session id (team identity).
-// Emitted when the message is accepted into the recipient mailbox (before
-// boundary injection into the model).
+// Emitted on the recipient engine at boundary injection (tool-round / idle
+// nudge), never mid-tool-call.
 type AgentMessage struct {
 	Correlation
 	From   string `json:"from"`
