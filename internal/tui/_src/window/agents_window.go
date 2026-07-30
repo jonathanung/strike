@@ -499,7 +499,7 @@ func (w agentsWindow) filterChildTree(kids []childActivity, q string) []ui.TreeN
 	}
 	var build func(ch childActivity) (ui.TreeNode, bool)
 	build = func(ch childActivity) (ui.TreeNode, bool) {
-		label := childViewTitle(ch.agent, ch.prompt, ch.sessionID, ch.title)
+		label := childViewTitle(ch.agent, ch.prompt, ch.sessionID, ch.title, ch.name)
 		if label == "" {
 			label = shortSessionID(ch.sessionID)
 		}
@@ -517,7 +517,7 @@ func (w agentsWindow) filterChildTree(kids []childActivity, q string) []ui.TreeN
 				children = append(children, gn)
 			}
 		}
-		selfOK := agentsStateMatches(state, w.viewFilter) && agentsTextMatches(q, ch.sessionID, label, ch.agent, ch.prompt, ch.title)
+		selfOK := agentsStateMatches(state, w.viewFilter) && agentsTextMatches(q, ch.sessionID, label, ch.agent, ch.prompt, ch.title, ch.name)
 		if !selfOK && len(children) == 0 {
 			return ui.TreeNode{}, false
 		}
@@ -657,7 +657,7 @@ func clampAgentsCursor(cursor, n int) int {
 func agentsListItem(th theme.Theme, ch childActivity, current bool) ui.ListItem {
 	th = th.Resolve()
 
-	label := sanitizeDisplayData(childViewTitle(ch.agent, ch.prompt, ch.sessionID, ch.title))
+	label := sanitizeDisplayData(childViewTitle(ch.agent, ch.prompt, ch.sessionID, ch.title, ch.name))
 	if label == "" {
 		label = "subagent"
 	}

@@ -22,6 +22,7 @@ type MailboxMessage struct {
 	From      string
 	To        string
 	Body      string
+	Summary   string // optional short UI label
 	TeamID    string
 	CreatedAt time.Time
 }
@@ -172,6 +173,12 @@ func (t *Team) DetachMailbox(sessionID string) {
 }
 
 // Deliver enqueues a peer message to a live teammate's mailbox.
+// Equivalent to DeliverMessage with From/To/Body only.
+func (t *Team) Deliver(from, to, body string) MailboxStatus {
+	return t.DeliverMessage(MailboxMessage{From: from, To: to, Body: body})
+}
+
+// DeliverMessage enqueues msg to a live teammate's mailbox.
 //
 // Rules:
 //   - from and to must be on the team roster
@@ -183,10 +190,11 @@ func (t *Team) DetachMailbox(sessionID string) {
 // always happens at a tool-round / turn boundary — never mid-tool-call).
 // "queued" is reserved for future back-pressure; callers should treat both as
 // success. Do not call turnActive here (cross-goroutine race with Run).
-func (t *Team) Deliver(from, to, body string) MailboxStatus {
-	from = strings.TrimSpace(from)
-	to = strings.TrimSpace(to)
-	body = strings.TrimSpace(body)
+func (t *Team) DeliverMessage(msg MailboxMessage) MailboxStatus {
+	from := strings.TrimSpace(msg.From)
+	to := strings.TrimSpace(msg.To)
+	body := strings.TrimSpace(msg.Body)
+	summary := strings.TrimSpace(msg.Summary)
 	st := MailboxStatus{From: from, To: to}
 	if t == nil {
 		st.Status = "rejected"
@@ -209,13 +217,20 @@ func (t *Team) Deliver(from, to, body string) MailboxStatus {
 		return st
 	}
 
-	msgID := rand.Text()
-	msg := MailboxMessage{
+	msgID := strings.TrimSpace(msg.ID)
+	if msgID == "" {
+		msgID = rand.Text()
+	}
+	out := MailboxMessage{
 		ID:        msgID,
 		From:      from,
 		To:        to,
 		Body:      body,
-		CreatedAt: time.Now().UTC(),
+		Summary:   summary,
+		CreatedAt: msg.CreatedAt,
+	}
+	if out.CreatedAt.IsZero() {
+		out.CreatedAt = time.Now().UTC()
 	}
 
 	// Hold team lock through live lookup + enqueue so DetachMailbox cannot
@@ -247,15 +262,15 @@ func (t *Team) Deliver(from, to, body string) MailboxStatus {
 		st.Detail = "recipient is not live"
 		return st
 	}
-	msg.TeamID = t.leadID
+	out.TeamID = t.leadID
 	beforeDrop := target.box.Dropped()
-	if !target.box.Enqueue(msg) {
+	if !target.box.Enqueue(out) {
 		t.mu.Unlock()
 		st.Status = "rejected"
 		st.Detail = "enqueue failed"
 		return st
 	}
-	st.MessageID = msg.ID
+	st.MessageID = out.ID
 	st.Dropped = target.box.Dropped() > beforeDrop
 	eng := target.eng
 	t.mu.Unlock()
@@ -271,24 +286,40 @@ func (t *Team) Deliver(from, to, body string) MailboxStatus {
 }
 
 // EnqueueTeamMessage is the engine-facing inject API for peer mailbox delivery.
-// Foundation for agent_message tools (#610). from defaults to this session.
+// Used by agent_message / agent_broadcast. from defaults to this session.
+// to may be a session id or stable teammate name alias (resolved via Team.Resolve).
 func (e *Engine) EnqueueTeamMessage(from, to, body string) MailboxStatus {
+	return e.EnqueueTeamMail(MailboxMessage{From: from, To: to, Body: body})
+}
+
+// EnqueueTeamMail delivers a full mailbox message (optional Summary).
+// From defaults to this session when empty. Never rewrite From via name —
+// callers must use their session id so the sender cannot be spoofed.
+// To may be a session id or unique roster name alias.
+func (e *Engine) EnqueueTeamMail(msg MailboxMessage) MailboxStatus {
 	if e == nil {
-		return MailboxStatus{Status: "rejected", Detail: "no engine", To: strings.TrimSpace(to)}
+		return MailboxStatus{Status: "rejected", Detail: "no engine", To: strings.TrimSpace(msg.To)}
 	}
-	from = strings.TrimSpace(from)
+	from := strings.TrimSpace(msg.From)
 	if from == "" {
 		from = e.opts.SessionID
 	}
+	to := strings.TrimSpace(msg.To)
+	msg.From = from
+	msg.To = to
 	if e.team == nil {
 		return MailboxStatus{
 			From:   from,
-			To:     strings.TrimSpace(to),
+			To:     to,
 			Status: "rejected",
 			Detail: "no team",
 		}
 	}
-	return e.team.Deliver(from, to, body)
+	// Resolve recipient aliases only.
+	if id, ok := e.team.Resolve(to); ok {
+		msg.To = id
+	}
+	return e.team.DeliverMessage(msg)
 }
 
 // Mailbox returns this engine's per-session mailbox (may be nil before attach).
@@ -388,6 +419,7 @@ func (e *Engine) emitAgentMessages(msgs []MailboxMessage) {
 			From:        m.From,
 			To:          m.To,
 			Body:        m.Body,
+			Summary:     m.Summary,
 			TeamID:      m.TeamID,
 			MessageID:   m.ID,
 		})
@@ -414,9 +446,27 @@ func formatMailboxNotice(m MailboxMessage) string {
 	} else {
 		b.WriteString("[agent.message]")
 	}
+	if s := compactMailboxSummary(m.Summary); s != "" {
+		fmt.Fprintf(&b, " summary=%s", s)
+	}
 	if body := strings.TrimSpace(m.Body); body != "" {
 		b.WriteByte('\n')
 		b.WriteString(body)
 	}
 	return b.String()
+}
+
+// compactMailboxSummary flattens whitespace and caps length so the notice
+// header stays single-line.
+func compactMailboxSummary(s string) string {
+	s = strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
+	const max = 120
+	if len(s) <= max {
+		return s
+	}
+	// Cap by runes approximately via byte cut then trim incomplete tail.
+	if max < len(s) {
+		s = s[:max]
+	}
+	return strings.TrimSpace(s) + "…"
 }

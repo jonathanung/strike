@@ -476,6 +476,8 @@ type ChildStarted struct {
 	Correlation
 	Agent  string `json:"agent,omitempty"`
 	Prompt string `json:"prompt,omitempty"`
+	// Name is an optional stable teammate alias assigned at spawn.
+	Name string `json:"name,omitempty"`
 }
 
 // ChildCompleted marks the end of a foreground child/subagent session.
@@ -484,6 +486,8 @@ type ChildCompleted struct {
 	Correlation
 	Status  ChildStatus `json:"status"`
 	Summary string      `json:"summary,omitempty"`
+	// Name is the stable teammate alias when one was assigned at spawn.
+	Name string `json:"name,omitempty"`
 }
 
 // AgentMessage records a peer/team mailbox delivery for UI and debugging.
@@ -493,10 +497,12 @@ type ChildCompleted struct {
 // nudge), never mid-tool-call.
 type AgentMessage struct {
 	Correlation
-	From   string `json:"from"`
-	To     string `json:"to"`
-	Body   string `json:"body"`
-	TeamID string `json:"teamId,omitempty"`
+	From string `json:"from"`
+	To   string `json:"to"`
+	Body string `json:"body"`
+	// Summary is an optional short UI label (not required for delivery).
+	Summary string `json:"summary,omitempty"`
+	TeamID  string `json:"teamId,omitempty"`
 	// MessageID is a stable id for ack/dedup within the session.
 	MessageID string `json:"messageId,omitempty"`
 }

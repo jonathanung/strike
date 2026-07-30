@@ -1,6 +1,7 @@
 // Package tool defines the tool contract and the built-in tool set
 // (read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/
-// task_message/task_interrupt/agent_roster/webfetch/todowrite/todoread/
+// task_message/task_interrupt/agent_roster/agent_message/agent_broadcast/
+// webfetch/todowrite/todoread/
 // memory_write/memory_read/issue_write/issue_read/notebook_edit/sleep/skill/question/enter_plan_mode/
 // exit_plan_mode/phase_done/toolsearch).
 // Used by internal/engine (dispatch), internal/permission (AskRequest, for the
@@ -50,6 +51,9 @@ type AskRequest struct {
 type TaskRequest struct {
 	Prompt string
 	Agent  string
+	// Name is an optional stable teammate alias unique within the session team
+	// (e.g. "explorer"). Empty leaves the child addressable by session id only.
+	Name string
 	// Model is an optional model id for the child (bare id on the parent
 	// provider, or "provider/model"). Empty inherits the parent's model
 	// (subject to agent pins).
@@ -68,6 +72,8 @@ type TaskResult struct {
 	Output    string
 	Status    string
 	SessionID string
+	// Name is the stable alias assigned at spawn when requested (may be empty).
+	Name string
 }
 
 // Task control request/result types for parent inspection of owned children.
@@ -169,6 +175,46 @@ type AgentRosterResult struct {
 	Members []AgentRosterMember `json:"members"`
 }
 
+// AgentMessageRequest sends one peer message to a teammate.
+// To is a session id (or stable name when aliases are set).
+type AgentMessageRequest struct {
+	To      string
+	Body    string
+	Summary string // optional short UI label
+}
+
+// AgentMessageResult acknowledges peer delivery (mailbox status vocabulary).
+// Status is queued|accepted|rejected.
+type AgentMessageResult struct {
+	To        string `json:"to"`
+	Status    string `json:"status"`
+	Detail    string `json:"detail,omitempty"`
+	MessageID string `json:"message_id,omitempty"`
+	Dropped   bool   `json:"dropped,omitempty"`
+}
+
+// AgentBroadcastRequest sends one body to every other teammate.
+type AgentBroadcastRequest struct {
+	Body    string
+	Summary string
+}
+
+// AgentBroadcastDelivery is one recipient outcome from agent_broadcast.
+type AgentBroadcastDelivery struct {
+	To        string `json:"to"`
+	Status    string `json:"status"`
+	Detail    string `json:"detail,omitempty"`
+	MessageID string `json:"message_id,omitempty"`
+	Dropped   bool   `json:"dropped,omitempty"`
+}
+
+// AgentBroadcastResult aggregates per-recipient deliveries.
+type AgentBroadcastResult struct {
+	Delivered int                      `json:"delivered"` // accepted|queued count
+	Rejected  int                      `json:"rejected"`
+	Results   []AgentBroadcastDelivery `json:"results"`
+}
+
 // QuestionOption is one selectable choice on a QuestionItem.
 type QuestionOption struct {
 	Label       string
@@ -207,6 +253,7 @@ type SessionPR struct {
 // TaskStatus/TaskRead/TaskMessage/TaskInterrupt, when non-nil, inspect or
 // control owned descendant sessions (never arbitrary sessions).
 // AgentRoster, when non-nil, lists the implicit session team (lead + peers).
+// AgentMessage/AgentBroadcast, when non-nil, send peer mail on the team.
 // AskUser, when non-nil, blocks until the user answers a question batch.
 // SwitchAgent, when non-nil, queues an agent switch applied when the turn ends.
 // EnterPlanPhase starts the built-in plan→implement workflow at plan.
@@ -228,8 +275,12 @@ type Context struct {
 	TaskInterrupt func(ctx context.Context, req TaskInterruptRequest) (TaskInterruptResult, error)
 	// AgentRoster lists lead + teammates on the implicit session team.
 	AgentRoster func(ctx context.Context, req AgentRosterRequest) (AgentRosterResult, error)
-	AskUser     func(ctx context.Context, req QuestionRequest) (QuestionResponse, error)
-	SwitchAgent func(name string) error
+	// AgentMessage sends a peer mailbox message to one teammate.
+	AgentMessage func(ctx context.Context, req AgentMessageRequest) (AgentMessageResult, error)
+	// AgentBroadcast sends a peer mailbox message to all other teammates.
+	AgentBroadcast func(ctx context.Context, req AgentBroadcastRequest) (AgentBroadcastResult, error)
+	AskUser        func(ctx context.Context, req QuestionRequest) (QuestionResponse, error)
+	SwitchAgent    func(name string) error
 	// EnterPlanPhase starts the default plan-implement workflow at the plan phase.
 	EnterPlanPhase func() error
 	// AdvancePhase clears the current phase exit gate and advances (or ends).

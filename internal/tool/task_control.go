@@ -27,7 +27,8 @@ func (taskStatusTool) Name() string { return "task_status" }
 func (taskStatusTool) Description() string {
 	return `Inspect live or terminal status of an owned child session started by task.
 
-- Input session_id from a prior task result (or child.completed notice).
+- Input session_id from a prior task result (or child.completed notice), or the
+  child's stable name alias when one was set at spawn.
 - Returns state (starting|working|needs_attention|completed|failed|canceled|unknown),
   elapsed time, current tool, optional recent activity, and terminal_summary when done.
 - Prefer this only when you need an intermediate check. Do not poll every second —
@@ -39,7 +40,7 @@ func (taskStatusTool) Schema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
-			"session_id": {"type": "string", "description": "Child session id returned by task"},
+			"session_id": {"type": "string", "description": "Child session id or stable name alias from task"},
 			"include_recent": {"type": "boolean", "description": "Include latest_activity lines (default false)"}
 		},
 		"required": ["session_id"]
@@ -157,17 +158,20 @@ func (taskMessageTool) Name() string { return "task_message" }
 func (taskMessageTool) Description() string {
 	return `Send additional guidance to a running owned child session.
 
+- session_id may be the child session id or its stable name alias from task spawn.
 - Delivered at a safe boundary: accepted immediately when the child is idle,
   or queued until the active child turn finishes (does not corrupt the live request).
 - Returns status queued|accepted|rejected with the child's current state.
-- Cannot widen child permissions. Unknown/closed children are rejected.`
+- Cannot widen child permissions. Unknown/closed children are rejected.
+- Parent→owned-child only. For peer/team messaging (any teammate, including
+  child→child and child→lead), use agent_message / agent_broadcast instead.`
 }
 
 func (taskMessageTool) Schema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
-			"session_id": {"type": "string", "description": "Child session id"},
+			"session_id": {"type": "string", "description": "Child session id or stable name alias"},
 			"text": {"type": "string", "description": "Guidance for the child agent"}
 		},
 		"required": ["session_id", "text"]

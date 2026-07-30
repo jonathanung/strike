@@ -131,7 +131,7 @@ func (m Model) visualizerStateSnapshot() visualizerStateMsg {
 	// Child node?
 	if ch, ok := m.findChildActivity(id); ok {
 		msg.Kind = "child"
-		msg.Label = childViewTitle(ch.agent, ch.prompt, ch.sessionID, ch.title)
+		msg.Label = childViewTitle(ch.agent, ch.prompt, ch.sessionID, ch.title, ch.name)
 		if msg.Label == "" {
 			msg.Label = shortSessionID(id)
 		}
@@ -477,7 +477,7 @@ func (m *Model) applySessionRename(id, title string) tea.Cmd {
 		if title != "" {
 			m.viewTitle = sanitizeTitleTopic(title)
 		} else {
-			m.viewTitle = childViewTitle("", "", id, "")
+			m.viewTitle = childViewTitle("", "", id, "", "")
 		}
 	}
 	if title != "" {
@@ -511,7 +511,7 @@ func (m *Model) openRenameModal(id string) tea.Cmd {
 	}
 	if current == "" {
 		if ch, ok := m.findChildActivity(id); ok {
-			current = childViewTitle(ch.agent, ch.prompt, ch.sessionID, ch.title)
+			current = childViewTitle(ch.agent, ch.prompt, ch.sessionID, ch.title, ch.name)
 		}
 	}
 	m.modal = newRenameModal(m.services.Sessions, id, current, m.th)
