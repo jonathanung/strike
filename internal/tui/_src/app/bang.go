@@ -60,7 +60,11 @@ func (m Model) handleBang(text string) (tea.Model, tea.Cmd) {
 		m.toolByID = map[string]*toolCell{}
 	}
 	m.toolByID[callID] = tc
+	// Same path as engine tool events: reflow + refreshViewport so the
+	// transcript/activity surfaces show the running bash cell immediately
+	// (not only after a later agent turn refreshes the viewport).
 	m.reflow()
+	m.refreshViewport()
 
 	shell := m.services.Shell
 	var histCmd tea.Cmd
@@ -89,10 +93,11 @@ func (m Model) handleBang(text string) (tea.Model, tea.Cmd) {
 		}
 		return msg
 	}
+	vizCmd := m.broadcastVisualizerState()
 	if histCmd != nil {
-		return m, tea.Batch(runCmd, histCmd)
+		return m, tea.Batch(runCmd, histCmd, vizCmd)
 	}
-	return m, runCmd
+	return m, tea.Batch(runCmd, vizCmd)
 }
 
 func (m Model) applyBangResult(msg bangResultMsg) (tea.Model, tea.Cmd) {
@@ -102,6 +107,7 @@ func (m Model) applyBangResult(msg bangResultMsg) (tea.Model, tea.Cmd) {
 			m.setNotice("!"+msg.command+": "+msg.err, true)
 		}
 		m.reflow()
+		m.refreshViewport()
 		return m, nil
 	}
 	tc.done = true
@@ -114,5 +120,6 @@ func (m Model) applyBangResult(msg bangResultMsg) (tea.Model, tea.Cmd) {
 		tc.output = msg.err
 	}
 	m.reflow()
-	return m, nil
+	m.refreshViewport()
+	return m, m.broadcastVisualizerState()
 }

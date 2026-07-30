@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
@@ -124,6 +125,45 @@ func TestVisualizerFollowsAgentsHighlightAndUsage(t *testing.T) {
 	plain = ansi.Strip(viz.view(theme.Default()))
 	if !strings.Contains(plain, "50") || !strings.Contains(plain, "10") {
 		t.Fatalf("root usage missing after highlight switch:\n%s", plain)
+	}
+}
+
+func TestVisualizerToolsUpdateOnToolCallMidTurn(t *testing.T) {
+	// Tool activity must reach the visualizer strip when bash starts, not only
+	// after TurnCompleted (#625). Snapshot is what broadcastVisualizerState pushes.
+	m, _ := newAppTestModel(nil, nil)
+	m.sessionID = "root-a"
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = updateApp(t, m, engineEventMsg{ev: protocol.TurnStarted{}})
+	m = updateApp(t, m, engineEventMsg{ev: protocol.ToolCallBegin{
+		CallID: "c1", Name: "bash", Args: []byte(`{"command":"ls"}`),
+	}})
+	if !m.turnRunning {
+		t.Fatal("turn should still be running")
+	}
+	snap := m.visualizerStateSnapshot()
+	if len(snap.Tools) == 0 {
+		t.Fatal("visualizer snapshot has no tools after ToolCallBegin mid-turn")
+	}
+	found := false
+	for _, tool := range snap.Tools {
+		if tool.Name == "bash" || strings.Contains(tool.Name, "ls") {
+			found = true
+			if tool.Done {
+				t.Error("in-flight bash marked done")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("snapshot tools = %#v, want bash", snap.Tools)
+	}
+	// applyEvent returns broadcastVisualizerState on ToolCallBegin; push it
+	// the same way the runtime window update path does.
+	m.windows, _ = m.windows.broadcast(snap)
+	viz := mustVisualizer(t, m).resize(40, 24).(visualizerWindow)
+	plain := ansi.Strip(viz.view(theme.Default()))
+	if !strings.Contains(plain, "bash") {
+		t.Fatalf("visualizer view missing bash:\n%s", plain)
 	}
 }
 
