@@ -290,11 +290,10 @@ func (e *Engine) EnqueueTeamMessage(from, to, body string) MailboxStatus {
 			Detail: "no team",
 		}
 	}
+	// Resolve recipient aliases only. Never rewrite `from` via name — callers
+	// must use their session id (defaulted above) so sender cannot be spoofed.
 	if id, ok := e.team.Resolve(to); ok {
 		to = id
-	}
-	if id, ok := e.team.Resolve(from); ok {
-		from = id
 	}
 	return e.team.Deliver(from, to, body)
 }
