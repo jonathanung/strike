@@ -59,7 +59,7 @@ func (agentMessageTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 	}
 	to := strings.TrimSpace(a.To)
 	body := strings.TrimSpace(a.Body)
-	summary := strings.TrimSpace(a.Summary)
+	summary := clampAgentMessageSummary(a.Summary)
 	if to == "" {
 		return Result{}, fmt.Errorf("to is required")
 	}
@@ -125,7 +125,7 @@ func (agentBroadcastTool) Execute(ctx context.Context, args json.RawMessage, tc 
 		return Result{}, fmt.Errorf("invalid arguments: %w", err)
 	}
 	body := strings.TrimSpace(a.Body)
-	summary := strings.TrimSpace(a.Summary)
+	summary := clampAgentMessageSummary(a.Summary)
 	if body == "" {
 		return Result{}, fmt.Errorf("body is required")
 	}
@@ -148,4 +148,19 @@ func (agentBroadcastTool) Execute(ctx context.Context, args json.RawMessage, tc 
 		return Result{Title: title, Output: string(out)}, fmt.Errorf("broadcast delivered to 0 teammates (%d rejected)", res.Rejected)
 	}
 	return Result{Title: title, Output: string(out)}, nil
+}
+
+// MaxAgentMessageSummaryRunes caps optional summary labels.
+const MaxAgentMessageSummaryRunes = 120
+
+func clampAgentMessageSummary(s string) string {
+	s = strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
+	if s == "" {
+		return ""
+	}
+	if utf8.RuneCountInString(s) <= MaxAgentMessageSummaryRunes {
+		return s
+	}
+	runes := []rune(s)
+	return string(runes[:MaxAgentMessageSummaryRunes])
 }

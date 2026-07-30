@@ -437,7 +437,7 @@ func formatMailboxNotice(m MailboxMessage) string {
 	} else {
 		b.WriteString("[agent.message]")
 	}
-	if s := strings.TrimSpace(m.Summary); s != "" {
+	if s := compactMailboxSummary(m.Summary); s != "" {
 		fmt.Fprintf(&b, " summary=%s", s)
 	}
 	if body := strings.TrimSpace(m.Body); body != "" {
@@ -445,4 +445,19 @@ func formatMailboxNotice(m MailboxMessage) string {
 		b.WriteString(body)
 	}
 	return b.String()
+}
+
+// compactMailboxSummary flattens whitespace and caps length so the notice
+// header stays single-line.
+func compactMailboxSummary(s string) string {
+	s = strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
+	const max = 120
+	if len(s) <= max {
+		return s
+	}
+	// Cap by runes approximately via byte cut then trim incomplete tail.
+	if max < len(s) {
+		s = s[:max]
+	}
+	return strings.TrimSpace(s) + "…"
 }
