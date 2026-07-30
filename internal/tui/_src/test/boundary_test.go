@@ -26,6 +26,11 @@ const modulePath = "github.com/jonathanung/strike-cli"
 //
 // A violation names the offending file and import so the boundary cannot be
 // crossed silently.
+//
+// Charm stack paths are checked separately by TestCharmImportPaths. When E13
+// rewrites Bubble Tea / Lip Gloss / Bubbles / Glamour to charm.land/…, update
+// charm path helpers (and style_boundary lipglossPath) in the same commit as
+// the import rewrites — edit internal/tui/_src/ only, then go generate.
 func TestArchitectureBoundaries(t *testing.T) {
 	root := moduleRoot(t)
 	fset := token.NewFileSet()
@@ -66,6 +71,57 @@ func TestArchitectureBoundaries(t *testing.T) {
 	}
 }
 
+// TestCharmImportPaths enforces the Charm module path allowlist across every
+// .go file (including tests and cmd/):
+//
+//   - v1 (current): github.com/charmbracelet/…
+//   - v2 (E13):     charm.land/…  (vanity domain)
+//
+// github.com/charmbracelet/…/v2 is forbidden — that is not a valid Charm v2
+// module path. When E13 migrates imports, keep this allowlist in the same
+// commit as the rewrites.
+func TestCharmImportPaths(t *testing.T) {
+	root := moduleRoot(t)
+	fset := token.NewFileSet()
+
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if d.Name() == ".git" || d.Name() == "vendor" {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		// Skip fixtures that intentionally embed bad import strings.
+		if strings.Contains(filepath.ToSlash(rel), "/testdata/") {
+			return nil
+		}
+		file, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
+		if err != nil {
+			return err
+		}
+		for _, spec := range file.Imports {
+			imp := strings.Trim(spec.Path.Value, `"`)
+			if violation := charmImportViolation(imp); violation != "" {
+				t.Errorf("%s imports %q: %s", rel, imp, violation)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking module: %v", err)
+	}
+}
+
 // boundaryViolation returns a non-empty explanation when pkgDir importing imp
 // breaks a dependency rule, or "" when the import is allowed.
 func boundaryViolation(pkgDir, imp string) string {
@@ -75,7 +131,7 @@ func boundaryViolation(pkgDir, imp string) string {
 	switch {
 	case isTUIDir(pkgDir):
 		if !strings.HasPrefix(imp, internal) {
-			return "" // stdlib or third-party is fine
+			return "" // stdlib or third-party is fine (Charm paths: TestCharmImportPaths)
 		}
 		suffix := strings.TrimPrefix(imp, internal)
 		if suffix == "protocol" || suffix == "host" || suffix == "tui" || strings.HasPrefix(suffix, "tui/") {
@@ -96,6 +152,29 @@ func boundaryViolation(pkgDir, imp string) string {
 		return ""
 	}
 	return ""
+}
+
+// charmImportViolation returns a non-empty explanation when imp is a forbidden
+// Charm module path. Allowlist:
+//
+//	github.com/charmbracelet/…   — v1 (current)
+//	charm.land/…                 — v2 vanity (E13+)
+//
+// Forbidden: github.com/charmbracelet/…/v2 (upgrade guides require charm.land).
+func charmImportViolation(imp string) string {
+	switch {
+	case strings.HasPrefix(imp, "charm.land/"):
+		return ""
+	case strings.HasPrefix(imp, "github.com/charmbracelet/"):
+		for _, seg := range strings.Split(imp, "/") {
+			if seg == "v2" {
+				return "Charm v2 imports must use charm.land/..., not github.com/charmbracelet/.../v2"
+			}
+		}
+		return ""
+	default:
+		return ""
+	}
 }
 
 func isTUIDir(pkgDir string) bool {
@@ -119,5 +198,33 @@ func moduleRoot(t *testing.T) string {
 			t.Fatalf("go.mod not found from working directory")
 		}
 		dir = parent
+	}
+}
+
+func TestCharmImportViolation(t *testing.T) {
+	cases := []struct {
+		imp  string
+		want string // empty = allowed
+	}{
+		{"github.com/charmbracelet/bubbletea", ""},
+		{"github.com/charmbracelet/lipgloss", ""},
+		{"github.com/charmbracelet/bubbles/viewport", ""},
+		{"github.com/charmbracelet/glamour/styles", ""},
+		{"github.com/charmbracelet/x/ansi", ""},
+		{"charm.land/bubbletea/v2", ""},
+		{"charm.land/lipgloss/v2", ""},
+		{"charm.land/bubbles/v2/viewport", ""},
+		{"charm.land/glamour/v2", ""},
+		{"github.com/charmbracelet/bubbletea/v2", "Charm v2 imports must use charm.land/..., not github.com/charmbracelet/.../v2"},
+		{"github.com/charmbracelet/lipgloss/v2", "Charm v2 imports must use charm.land/..., not github.com/charmbracelet/.../v2"},
+		{"github.com/charmbracelet/bubbles/v2", "Charm v2 imports must use charm.land/..., not github.com/charmbracelet/.../v2"},
+		{"github.com/other/thing", ""},
+		{"fmt", ""},
+	}
+	for _, tc := range cases {
+		got := charmImportViolation(tc.imp)
+		if got != tc.want {
+			t.Errorf("charmImportViolation(%q) = %q, want %q", tc.imp, got, tc.want)
+		}
 	}
 }
