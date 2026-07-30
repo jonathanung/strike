@@ -34,6 +34,14 @@ const keybindEditorVisible = 18
 // display order. Only these categories appear in the tab bar.
 var editorTabOrder = []string{"Navigation", "Global", "Editor", "Composer", "Completion"}
 
+// conflictPending holds conflict state when the captured chord is already bound.
+type conflictPending struct {
+	Chord      string
+	CaptureID  string // the entry being rebound
+	ConflictID string // existing entry that uses this chord
+	Keys       string // current keys of the conflicted entry (for display)
+}
+
 // keybindEditor is a modal for interactively rebinding keys and saving overrides
 // to ~/.strike/keybinds.jsonc. Bindings are filtered by the active category tab.
 type keybindEditor struct {
@@ -48,6 +56,8 @@ type keybindEditor struct {
 	effective keyMap
 	settings  host.Settings
 	tab       int // index into editorTabOrder; -1 means "all"
+
+	confirm *conflictPending // non-nil when user must confirm a conflict
 }
 
 func newKeybindEditor(effective keyMap, persistedOverrides map[string][]string, settings host.Settings) *keybindEditor {
@@ -128,6 +138,9 @@ func (m *keybindEditor) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 	if m.capturing {
 		return m.updateCapture(msg)
 	}
+	if m.confirm != nil {
+		return m.updateConfirm(msg)
+	}
 	if isEscape(msg) || msg.String() == "q" {
 		return nil, nil
 	}
@@ -187,6 +200,25 @@ func (m *keybindEditor) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 	}
 }
 
+func (m *keybindEditor) updateConfirm(msg tea.KeyMsg) (modal, tea.Cmd) {
+	switch msg.String() {
+	case "y", "Y":
+		c := m.confirm
+		chords := []string{c.Chord}
+		m.pending[c.CaptureID] = chords
+		id := c.CaptureID
+		m.confirm = nil
+		return m, func() tea.Msg {
+			return rebindAppliedMsg{ID: id, Chords: chords}
+		}
+	case "n", "N", "esc":
+		m.confirm = nil
+		return m, nil
+	default:
+		return m, nil
+	}
+}
+
 func (m *keybindEditor) startCapture() (modal, tea.Cmd) {
 	if m.cursor < 0 || m.cursor >= len(m.filtered) {
 		return m, nil
@@ -208,6 +240,17 @@ func (m *keybindEditor) updateCapture(msg tea.KeyMsg) (modal, tea.Cmd) {
 		m.captureID = ""
 		return m, nil
 	}
+	// Check if this chord is already bound to a different entry.
+	if conflict, conflictKeys := m.conflictingBind(chord); conflict != nil {
+		m.capturing = false
+		m.confirm = &conflictPending{
+			Chord:      chord,
+			CaptureID:  m.captureID,
+			ConflictID: conflict.ID,
+			Keys:       conflictKeys,
+		}
+		return m, nil
+	}
 	chords := []string{chord}
 	m.pending[m.captureID] = chords
 	id := m.captureID
@@ -216,6 +259,38 @@ func (m *keybindEditor) updateCapture(msg tea.KeyMsg) (modal, tea.Cmd) {
 	return m, func() tea.Msg {
 		return rebindAppliedMsg{ID: id, Chords: chords}
 	}
+}
+
+// conflictingBind returns the keybindEntry that already has the given chord as
+// its active keys, excluding the entry being captured and any entry already
+// overridden to a different chord. Nil means no conflict. activeKeys is the
+// effective chord string displayed in the UI for the conflicting entry.
+func (m *keybindEditor) conflictingBind(chord string) (conflict *keybindEntry, activeKeys string) {
+	for _, e := range m.entries {
+		if e.ID == m.captureID {
+			continue
+		}
+		// Effective keys: pending override, then saved override, then default.
+		effective := e.Keys
+		if chords, ok := m.pending[e.ID]; ok && len(chords) > 0 {
+			effective = joinChords(chords)
+		} else if chords, ok := m.saved[e.ID]; ok && len(chords) > 0 {
+			effective = joinChords(chords)
+		}
+		// activeKeys may be "ctrl+t/ctrl+down" — check each segment.
+		for _, k := range strings.Split(effective, "/") {
+			k = strings.TrimSpace(k)
+			if k == chord {
+				return &e, effective
+			}
+		}
+	}
+	return nil, ""
+}
+
+// joinChords joins multiple chord strings with "/".
+func joinChords(chords []string) string {
+	return strings.Join(chords, "/")
 }
 
 func (m *keybindEditor) resetOverride() (modal, tea.Cmd) {
@@ -338,18 +413,34 @@ func (m *keybindEditor) view(width int, th theme.Theme) string {
 
 	tabBar := renderTabBar(th, m.tab, listWidth)
 
-	title := "Rebind keys"
+	title := "Keyboard shortcuts"
 	if m.capturing {
 		title = "Press new key for " + m.captureID + th.Icons.Ellipsis
+	} else if m.confirm != nil {
+		title = "⚠  Key conflict"
 	}
 	hint := "left/right switch tab | type to filter | up/down/j/k move | enter/r rebind | ctrl+d reset | ctrl+s save | esc close"
 	if m.capturing {
 		hint = "press any key to bind | esc cancel"
+	} else if m.confirm != nil {
+		hint = "y rebind anyway | n cancel"
 	}
 	// Use Panel directly, not Dialog, so the ANSI-colored tab bar is not
 	// passed through word-wrap (which mangles ANSI escapes).
 	inner := ui.PanelInnerWidth(th, width)
 	content := tabBar + "\n\n" + body
+	if m.confirm != nil {
+		label := m.confirm.ConflictID
+		for _, e := range m.entries {
+			if e.ID == m.confirm.ConflictID {
+				label = e.Action + " (" + m.confirm.Keys + ")"
+				break
+			}
+		}
+		content += "\n\n" + th.S().Warning.Render(
+			m.confirm.Chord+" is used by \""+label+"\". Rebinding will unassign it.",
+		)
+	}
 	if hint != "" {
 		hintLines := strings.Split(ui.WrapText(hint, inner), "\n")
 		if len(hintLines) > 2 {
