@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -60,7 +60,7 @@ func issueMatches(iss host.Issue, q string) bool {
 	return strings.Contains(id, q) || strings.Contains(fmt.Sprintf("%d", iss.ID), q)
 }
 
-func (m *issuesModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *issuesModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	if m.detail {
 		if isEscape(msg) || msg.String() == "enter" || msg.String() == "q" {
 			m.detail = false
@@ -92,8 +92,8 @@ func (m *issuesModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 		}
 		m.detail = true
 	default:
-		if msg.Type == tea.KeyRunes {
-			m.filter += string(msg.Runes)
+		if len(msg.Text) > 0 {
+			m.filter += msg.Text
 			m.cursor = 0
 		}
 	}

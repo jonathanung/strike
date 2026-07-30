@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -73,7 +73,7 @@ func TestBangPwdShowsInTranscriptWithoutUserInputOp(t *testing.T) {
 	m.workDir = root
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.composer.SetValue("!pwd")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = applyCmds(t, updated.(Model), cmd)
 	if sh.calls != 1 || sh.lastCmd != "pwd" {
 		t.Fatalf("shell calls=%d cmd=%q, want 1 pwd", sh.calls, sh.lastCmd)
@@ -110,7 +110,7 @@ func TestBangEmptyShowsNotice(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)
 	m.services.Shell = &fakeShell{}
 	m.composer.SetValue("!")
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !strings.Contains(m.notice, "empty") {
 		t.Fatalf("notice = %q, want empty command hint", m.notice)
 	}
@@ -127,7 +127,7 @@ func TestBangUnavailableShell(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m.services.Shell = nil
 	m.composer.SetValue("!pwd")
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !strings.Contains(m.notice, "unavailable") {
 		t.Fatalf("notice = %q, want unavailable", m.notice)
 	}
@@ -143,7 +143,7 @@ func TestBangSandboxErrorMarksToolError(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)
 	m.services.Shell = sh
 	m.composer.SetValue("!rm -rf /tmp/x")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = applyCmds(t, updated.(Model), cmd)
 	assertNoAppOp(t, ops)
 	var tc *toolCell
@@ -166,7 +166,7 @@ func TestBangDoesNotRequireProvider(t *testing.T) {
 	m.services.Shell = sh
 	m.providerName = ""
 	m.composer.SetValue("!echo ok")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	_ = applyCmds(t, updated.(Model), cmd)
 	assertNoAppOp(t, ops)
 	if sh.calls != 1 {
@@ -182,9 +182,9 @@ func TestBangShowsToolInTranscriptImmediately(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)
 	m.services.Shell = sh
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
-	_ = m.View()
+	_ = viewString(m)
 	m.composer.SetValue("!echo hello")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	// Assert before draining cmds: in-flight tool must already be in the viewport.
 	plain := ansi.Strip(m.viewport.View())
@@ -212,13 +212,13 @@ func TestBangDuringAgentTurnShowsWithoutWaitingForTurnEnd(t *testing.T) {
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = updateApp(t, m, engineEventMsg{ev: protocol.TurnStarted{}})
 	m = updateApp(t, m, engineEventMsg{ev: protocol.TextDelta{Text: "thinking…"}})
-	_ = m.View()
+	_ = viewString(m)
 	before := ansi.Strip(m.viewport.View())
 	if !strings.Contains(before, "thinking") {
 		t.Fatalf("setup missing streamed text: %q", before)
 	}
 	m.composer.SetValue("!pwd")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	// Before bangResultMsg and before TurnCompleted.
 	plain := ansi.Strip(m.viewport.View())

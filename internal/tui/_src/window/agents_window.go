@@ -4,8 +4,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -166,7 +166,7 @@ func (w agentsWindow) update(msg tea.Msg) (window, tea.Cmd) {
 		}
 		w.cursor = clampAgentsCursor(w.cursor, len(rows))
 		return w, nil
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return w.handleKey(msg)
 	}
 	return w, nil
@@ -274,7 +274,7 @@ func agentsPaneKeyHints() []ui.KeyHint {
 	return hints
 }
 
-func (w agentsWindow) handleKey(msg tea.KeyMsg) (agentsWindow, tea.Cmd) {
+func (w agentsWindow) handleKey(msg tea.KeyPressMsg) (agentsWindow, tea.Cmd) {
 	if w.filterEdit {
 		return w.handleFilterEditKey(msg)
 	}
@@ -364,7 +364,7 @@ func (w agentsWindow) highlightCmd() tea.Cmd {
 	return func() tea.Msg { return agentsHighlightMsg{sessionID: id} }
 }
 
-func (w agentsWindow) handleFilterEditKey(msg tea.KeyMsg) (agentsWindow, tea.Cmd) {
+func (w agentsWindow) handleFilterEditKey(msg tea.KeyPressMsg) (agentsWindow, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		w.filterEdit = false
@@ -385,8 +385,8 @@ func (w agentsWindow) handleFilterEditKey(msg tea.KeyMsg) (agentsWindow, tea.Cmd
 		w.nodes = w.buildNodes()
 		w.cursor = clampAgentsCursor(w.cursor, len(ui.FlattenTree(w.nodes)))
 	default:
-		if msg.Type == tea.KeyRunes {
-			w.textFilter += string(msg.Runes)
+		if len(msg.Text) > 0 {
+			w.textFilter += msg.Text
 			w.nodes = w.buildNodes()
 			w.cursor = clampAgentsCursor(w.cursor, len(ui.FlattenTree(w.nodes)))
 		}

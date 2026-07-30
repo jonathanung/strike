@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -499,9 +499,8 @@ func (m Model) Init() tea.Cmd {
 		// redraw the full frame at spinner FPS over SSH (#481).
 		m.spinTickCmd(),
 		m.windows.init(),
-		tea.SetWindowTitle(windowTitle(m)),
 		// Kitty/Ghostty keep separate keyboard stacks per screen; re-enable
-		// after WithAltScreen so shift+enter CSI is actually delivered (#187).
+		// after alt-screen enter so shift+enter CSI is actually delivered (#187).
 		enableEnhancedKeysCmd(),
 	}
 	if m.firstRun {
@@ -572,7 +571,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = max(0, msg.Width), max(0, msg.Height)
 		firstReady := !m.ready
 		if !m.ready {
-			m.viewport = viewport.New(max(1, m.width), 0)
+			m.viewport = viewport.New(viewport.WithWidth(max(1, m.width)), viewport.WithHeight(0))
 			m.ready = true
 		}
 		m.reflow()
@@ -969,7 +968,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.refreshViewingTranscript()
 
-	case tea.KeyMsg:
+	case tea.PasteMsg:
+		// Bracketed paste: images → chip; large multi-line text → chip.
+		m.handleComposerPaste(msg.Content)
+		m.recomputeCompletion()
+		m.reflow()
+		return m, nil
+
+	case tea.KeyPressMsg:
 		return m.handleKeyMsg(msg)
 
 	case tea.MouseMsg:

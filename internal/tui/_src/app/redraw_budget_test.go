@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -68,14 +68,14 @@ func TestIdleRedrawBudget(t *testing.T) {
 	}
 
 	// Explicit View is allowed; payload should stay stable across idle Views.
-	_ = m.View()
+	_ = viewString(m)
 	firstBytes := m.paint.lastViewBytes
 	if firstBytes <= 0 {
 		t.Fatal("View produced empty frame")
 	}
 	viewsBefore := m.paint.viewCalls
 	for i := 0; i < 5; i++ {
-		_ = m.View()
+		_ = viewString(m)
 	}
 	if got := m.paint.viewCalls - viewsBefore; got != 5 {
 		t.Fatalf("viewCalls delta = %d, want 5", got)
@@ -100,7 +100,7 @@ func TestStreamTextDeltaRefreshBudget(t *testing.T) {
 	for i := 0; i < n; i++ {
 		m = updateApp(t, m, engineEventMsg{ev: protocol.TextDelta{Text: "x"}})
 		// Simulate Bubble Tea painting after each Update (worst case paint rate).
-		_ = m.View()
+		_ = viewString(m)
 	}
 
 	refreshBudget := n * streamRefreshPerDelta
@@ -172,7 +172,7 @@ func TestViewportCompletedCellMarkdownBudget(t *testing.T) {
 	}
 	// One more explicit refresh + View to ensure render path ran.
 	m.refreshViewport()
-	_ = m.View()
+	_ = viewString(m)
 
 	if hist.mdMisses != missesAfterPrime {
 		t.Fatalf("historical assistant mdMisses = %d, budget %d (tail stream re-parsed completed markdown)",

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/term"
@@ -95,7 +95,7 @@ func TestVimTakeoverModeUsesExecProcess(t *testing.T) {
 	m.vimMode = VimModeTakeover
 	m.workDir = t.TempDir()
 	m.composer.SetValue("/vim")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if msg := runAppCmd(t, cmd); msg != nil {
 		t.Errorf("unexpected msg %#v", msg)
@@ -117,7 +117,7 @@ func TestNanoTakeoverModeMissingBinary(t *testing.T) {
 	m.nanoMode = VimModeTakeover
 	m.workDir = t.TempDir()
 	m.composer.SetValue("/nano")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if msg := runAppCmd(t, cmd); msg != nil {
 		t.Errorf("unexpected msg %#v", msg)
@@ -149,7 +149,7 @@ func TestNanoPaneModeEmbedsNano(t *testing.T) {
 	m.workDir = dir
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
 	m.composer.SetValue("/nano note.txt")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 
 	deadline := time.After(5 * time.Second)
@@ -212,7 +212,7 @@ func TestVimPaneModeEmbedsNvim(t *testing.T) {
 	m.workDir = dir
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
 	m.composer.SetValue("/vim note.txt")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 
 	// Drain listen cmds until terminal is running or we time out.
@@ -292,12 +292,12 @@ func TestEmbeddedEditorCapturesGlobalKeysBeforeAppRouting(t *testing.T) {
 	m.focus = focusRight
 	t.Cleanup(func() { m.closeEmbeddedSessions() })
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlL})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 	m = updated.(Model)
 	if msg := runAppCmd(t, cmd); msg != nil {
 		t.Errorf("typing returned %T, want nil", msg)
 	}
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if msg := runAppCmd(t, cmd); msg != nil {
 		t.Errorf("enter returned %T, want nil", msg)
@@ -316,7 +316,7 @@ func TestEmbeddedEditorCapturesGlobalKeysBeforeAppRouting(t *testing.T) {
 		}
 	}
 
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
+	updated, cmd = m.Update(tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
 	m = updated.(Model)
 	if msg := runAppCmd(t, cmd); msg != nil {
 		t.Errorf("ctrl+g returned %T, want nil", msg)
@@ -351,7 +351,7 @@ func TestEmbeddedEditorDefersToActiveModal(t *testing.T) {
 	m.modal = newPermissionModal(protocol.PermissionAsked{RequestID: "permission", Permission: "bash"}, ops, m.th)
 	t.Cleanup(func() { m.closeEmbeddedSessions() })
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	updated, cmd := m.Update(tea.KeyPressMsg{Text: "y"})
 	m = updated.(Model)
 	if msg := runAppCmd(t, cmd); msg != nil {
 		t.Errorf("permission reply returned %T, want nil", msg)

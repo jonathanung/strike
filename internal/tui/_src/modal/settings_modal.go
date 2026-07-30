@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -125,7 +125,7 @@ func (m *settingsModal) reload() {
 	}
 }
 
-func (m *settingsModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *settingsModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	if isEscape(msg) || msg.String() == "q" {
 		switch m.page {
 		case settingsPageMenu:
@@ -153,7 +153,7 @@ func (m *settingsModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 	return m, nil
 }
 
-func (m *settingsModal) updateMenu(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *settingsModal) updateMenu(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	const n = 2
 	switch msg.String() {
 	case "up", "k":
@@ -189,7 +189,7 @@ func (m *settingsModal) defaultsFields() []settingsField {
 	}
 }
 
-func (m *settingsModal) updateDefaults(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *settingsModal) updateDefaults(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	fields := m.defaultsFields()
 	if len(fields) == 0 {
 		return m, nil
@@ -431,7 +431,7 @@ func mdModeDetail(v string) string {
 	return "right pane"
 }
 
-func (m *settingsModal) updatePick(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *settingsModal) updatePick(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	if len(m.pickOptions) == 0 {
 		return m, nil
 	}
@@ -530,7 +530,7 @@ type settingsSavedMsg struct {
 	err   error
 }
 
-func (m *settingsModal) updateProviders(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *settingsModal) updateProviders(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	if len(m.items) == 0 {
 		return m, nil
 	}

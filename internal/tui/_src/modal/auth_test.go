@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -30,7 +30,7 @@ func TestOAuthLoginCompletesAndSwitchesProviderWhenSelectAfter(t *testing.T) {
 	picker.cursor = 1 // openai: unauthenticated, OAuth+APIKey
 	m.modal = picker
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if cmd != nil {
 		t.Fatalf("opening method chooser returned unexpected command %T", cmd)
@@ -44,7 +44,7 @@ func TestOAuthLoginCompletesAndSwitchesProviderWhenSelectAfter(t *testing.T) {
 	}
 
 	// Enter on the first method (ChatGPT subscription / browser OAuth).
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if _, ok := m.modal.(*authWaitModal); !ok {
 		t.Fatalf("selecting browser OAuth did not open the wait modal: %T", m.modal)
@@ -114,7 +114,7 @@ func TestAPIKeyModalStoresKeyThroughAuthServiceAndIgnoresEmptySubmit(t *testing.
 
 	modal := newAPIKeyModal("anthropic", m.services.Auth, m.th, false)
 	modal.input.SetValue("sk-test-123")
-	next, cmd := modal.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := modal.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if next != nil {
 		t.Fatal("enter with a key did not close the modal")
 	}
@@ -127,7 +127,7 @@ func TestAPIKeyModalStoresKeyThroughAuthServiceAndIgnoresEmptySubmit(t *testing.
 
 	empty := newAPIKeyModal("anthropic", m.services.Auth, m.th, false)
 	empty.input.SetValue("   ")
-	next, cmd = empty.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd = empty.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if next != nil || cmd != nil {
 		t.Fatal("empty submit should be ignored without closing or emitting a command")
 	}
@@ -172,7 +172,7 @@ func TestAuthCommandsDataDrivenFromStatuses(t *testing.T) {
 		m, _ := newAppTestModel(nil, nil)
 		fake := m.services.Auth.(*fakeAuth)
 		m.composer.SetValue("/auth logout xai")
-		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		m = updated.(Model)
 		if len(fake.logoutCalls) != 1 || fake.logoutCalls[0] != "xai" {
 			t.Errorf("logout calls = %v, want [xai]", fake.logoutCalls)
@@ -185,7 +185,7 @@ func TestAuthCommandsDataDrivenFromStatuses(t *testing.T) {
 	t.Run("status reports every credential provider", func(t *testing.T) {
 		m, _ := newAppTestModel(nil, nil)
 		m.composer.SetValue("/auth status")
-		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		m = updated.(Model)
 		for _, want := range []string{"anthropic: none", "openai: none", "xai: none"} {
 			if !strings.Contains(m.notice, want) {
@@ -200,7 +200,7 @@ func TestAuthCommandsDataDrivenFromStatuses(t *testing.T) {
 	t.Run("gemini login alias opens google key modal", func(t *testing.T) {
 		m, _ := newAppTestModel(nil, nil)
 		m.composer.SetValue("/auth gemini key")
-		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		m = updated.(Model)
 		modal, ok := m.modal.(*apiKeyModal)
 		if !ok || modal.provider != "google" {
@@ -211,7 +211,7 @@ func TestAuthCommandsDataDrivenFromStatuses(t *testing.T) {
 	t.Run("unknown provider usage lists credential providers", func(t *testing.T) {
 		m, _ := newAppTestModel(nil, nil)
 		m.composer.SetValue("/auth nope")
-		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		m = updated.(Model)
 		if !m.noticeErr || !strings.Contains(m.notice, "anthropic|openai|xai") {
 			t.Errorf("unknown-provider notice = %q (err=%v), want data-driven usage", m.notice, m.noticeErr)
@@ -281,7 +281,7 @@ func TestAuthWaitModalOAuthURLCopyUX(t *testing.T) {
 	m.modal = wm
 
 	before := wm.view(80, m.th)
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlY})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
 	m = updated.(Model)
 	if got := m.composer.Value(); got != "leave composer unchanged" {
 		t.Errorf("composer after modal copy key = %q, want unchanged", got)
@@ -300,7 +300,7 @@ func TestAuthWaitModalOAuthURLCopyUX(t *testing.T) {
 	}
 
 	// OSC52 is prepended to the full app frame (after OverlayCenter/Canvas).
-	afterFrame := m.View()
+	afterFrame := viewString(m)
 	if wm.copyOSC != "" {
 		t.Error("Model.View did not consume one-shot OSC52")
 	}
@@ -330,7 +330,7 @@ func TestAuthWaitModalOAuthURLCopyUX(t *testing.T) {
 	assertModalURL(t, afterModal, url)
 
 	// Repeated ctrl+y stages a fresh OSC52; printable c/C do not.
-	updated, nextCmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlY})
+	updated, nextCmd := m.Update(tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
 	m = updated.(Model)
 	if nextCmd != nil {
 		t.Errorf("ctrl+y returned unexpected command %T", nextCmd)
@@ -338,11 +338,8 @@ func TestAuthWaitModalOAuthURLCopyUX(t *testing.T) {
 	if wm.copyOSC == "" {
 		t.Error("repeated ctrl+y did not stage a fresh OSC52")
 	}
-	_ = m.View() // consume
-	for _, key := range []tea.KeyMsg{
-		{Type: tea.KeyRunes, Runes: []rune("c")},
-		{Type: tea.KeyRunes, Runes: []rune("C")},
-	} {
+	_ = viewString(m) // consume
+	for _, key := range []tea.KeyPressMsg{{Text: "c"}} {
 		updated, nextCmd = m.Update(key)
 		m = updated.(Model)
 		if nextCmd != nil {
@@ -353,7 +350,7 @@ func TestAuthWaitModalOAuthURLCopyUX(t *testing.T) {
 		}
 	}
 
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = updated.(Model)
 	if m.modal != nil || cmd != nil {
 		t.Errorf("escape after copy = modal %T, command %v; want closed with no command", m.modal, cmd)
@@ -364,7 +361,7 @@ func TestAuthWaitModalCopyKeyOnlyAppliesToOAuthURL(t *testing.T) {
 	t.Run("device flow ctrl+y is ignored", func(t *testing.T) {
 		wm := newAuthWaitModalForTest("")
 		wm.userCode, wm.verifyURI = "ABCD-EFGH", "https://login.example/device"
-		next, cmd := wm.update(tea.KeyMsg{Type: tea.KeyCtrlY})
+		next, cmd := wm.update(tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
 		if next != wm || cmd != nil || wm.copyRequested {
 			t.Errorf("device flow ctrl+y = modal %T command %v requested=%v, want no-op", next, cmd, wm.copyRequested)
 		}
@@ -372,7 +369,7 @@ func TestAuthWaitModalCopyKeyOnlyAppliesToOAuthURL(t *testing.T) {
 
 	t.Run("OAuth wait without a URL ctrl+y is ignored", func(t *testing.T) {
 		wm := newAuthWaitModalForTest("")
-		next, cmd := wm.update(tea.KeyMsg{Type: tea.KeyCtrlY})
+		next, cmd := wm.update(tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
 		if next != wm || cmd != nil || wm.copyRequested {
 			t.Errorf("empty OAuth wait ctrl+y = modal %T command %v requested=%v, want no-op", next, cmd, wm.copyRequested)
 		}
@@ -380,7 +377,7 @@ func TestAuthWaitModalCopyKeyOnlyAppliesToOAuthURL(t *testing.T) {
 
 	t.Run("normal composer c still inserts", func(t *testing.T) {
 		m, _ := newAppTestModel(nil, nil)
-		m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")})
+		m = updateApp(t, m, tea.KeyPressMsg{Text: "c"})
 		if got := m.composer.Value(); got != "c" {
 			t.Errorf("composer c = %q, want c", got)
 		}
@@ -389,7 +386,7 @@ func TestAuthWaitModalCopyKeyOnlyAppliesToOAuthURL(t *testing.T) {
 	t.Run("OAuth paste field accepts leading c", func(t *testing.T) {
 		wm := newAuthWaitModalForTest("https://login.example/authorize")
 		wm.oauth = host.NewOAuthLogin(wm.url, nil).WithPaste(func(string) error { return nil })
-		next, cmd := wm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")})
+		next, cmd := wm.update(tea.KeyPressMsg{Text: "c"})
 		if next != wm || cmd != nil {
 			t.Fatalf("leading c = modal %T cmd %v", next, cmd)
 		}
@@ -408,7 +405,7 @@ func TestOAuthURLCopyCommandWritesOneExactOSC52Request(t *testing.T) {
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	wm := newAuthWaitModalForTest(url)
 	m.modal = wm
-	next, cmd := wm.update(tea.KeyMsg{Type: tea.KeyCtrlY})
+	next, cmd := wm.update(tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
 	if next != wm || cmd != nil {
 		t.Fatalf("copy key = modal %T cmd %v, want same modal and nil cmd", next, cmd)
 	}
@@ -420,7 +417,7 @@ func TestOAuthURLCopyCommandWritesOneExactOSC52Request(t *testing.T) {
 	if wm.copyOSC == "" {
 		t.Fatal("modal.view consumed OSC52; should leave it for Model.View")
 	}
-	rendered := m.View()
+	rendered := viewString(m)
 	requests := osc52Payloads(rendered)
 	if len(requests) != 1 {
 		t.Fatalf("app View OSC52 requests = %d, want 1: %q", len(requests), rendered)
@@ -434,7 +431,7 @@ func TestOAuthURLCopyCommandWritesOneExactOSC52Request(t *testing.T) {
 	}
 
 	// One-shot: a subsequent frame must not re-emit the clipboard sequence.
-	if second := osc52Payloads(m.View()); len(second) != 0 {
+	if second := osc52Payloads(viewString(m)); len(second) != 0 {
 		t.Errorf("second app View re-emitted OSC52: %v", second)
 	}
 }
@@ -496,7 +493,7 @@ func TestAuthMethodChooserFromProviderModal(t *testing.T) {
 	picker.cursor = 1 // openai
 	m.modal = picker
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if cmd != nil {
 		t.Fatalf("chooser open returned cmd %T", cmd)
@@ -516,7 +513,7 @@ func TestAuthMethodChooserFromProviderModal(t *testing.T) {
 	}
 
 	// Enter on subscription (OAuth) → wait modal.
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if _, ok := m.modal.(*authWaitModal); !ok {
 		t.Fatalf("OAuth row → %T, want authWaitModal", m.modal)
@@ -532,8 +529,8 @@ func TestAuthMethodChooserFromProviderModal(t *testing.T) {
 		auth:     m.services.Auth,
 		th:       m.th,
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyDown})
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+	updated, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if cmd != nil {
 		t.Fatalf("API key row returned unexpected cmd %T", cmd)
@@ -547,7 +544,7 @@ func TestAuthSlashCommandsOpenCorrectModals(t *testing.T) {
 	t.Run("/auth openai opens chooser", func(t *testing.T) {
 		m, _ := newAppTestModel(nil, nil)
 		m.composer.SetValue("/auth openai")
-		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		m = updated.(Model)
 		if cmd != nil {
 			t.Fatalf("unexpected cmd %T", cmd)
@@ -561,7 +558,7 @@ func TestAuthSlashCommandsOpenCorrectModals(t *testing.T) {
 	t.Run("/auth openai key skips chooser", func(t *testing.T) {
 		m, _ := newAppTestModel(nil, nil)
 		m.composer.SetValue("/auth openai key")
-		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		m = updated.(Model)
 		if cmd != nil {
 			t.Fatalf("unexpected cmd %T", cmd)
@@ -575,7 +572,7 @@ func TestAuthSlashCommandsOpenCorrectModals(t *testing.T) {
 	t.Run("/auth anthropic opens api key directly", func(t *testing.T) {
 		m, _ := newAppTestModel(nil, nil)
 		m.composer.SetValue("/auth anthropic")
-		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		m = updated.(Model)
 		if cmd != nil {
 			t.Fatalf("unexpected cmd %T", cmd)
@@ -622,7 +619,7 @@ func TestAuthWaitModalPasteSuccess(t *testing.T) {
 
 	modal := m.modal.(*authWaitModal)
 	modal.paste.SetValue(secretPaste)
-	updated, pasteCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, pasteCmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if pasteCmd == nil {
 		t.Fatal("enter with paste returned nil command")
@@ -678,7 +675,7 @@ func TestAuthWaitModalPasteErrorStaysOpen(t *testing.T) {
 
 	modal := m.modal.(*authWaitModal)
 	modal.paste.SetValue(secretPaste)
-	updated, pasteCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, pasteCmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	pasteMsg := runAppCmd(t, pasteCmd)
 	pe, ok := pasteMsg.(authPasteErrMsg)
@@ -742,15 +739,15 @@ func TestAuthWaitModalCtrlYCopiesEvenWithPasteContent(t *testing.T) {
 	m.modal = wm
 
 	// Empty paste: ctrl+y stages OSC52; Model.View emits once then is clean.
-	next, cmd := wm.update(tea.KeyMsg{Type: tea.KeyCtrlY})
+	next, cmd := wm.update(tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
 	if next != wm || cmd != nil || wm.copyOSC == "" {
 		t.Fatalf("empty paste ctrl+y = modal=%T cmd=%v osc empty=%v", next, cmd, wm.copyOSC == "")
 	}
-	first := m.View()
+	first := viewString(m)
 	if n := len(osc52Payloads(first)); n != 1 {
 		t.Fatalf("first app View OSC52 count = %d, want 1", n)
 	}
-	if n := len(osc52Payloads(m.View())); n != 0 {
+	if n := len(osc52Payloads(viewString(m))); n != 0 {
 		t.Fatalf("second app View OSC52 count = %d, want 0", n)
 	}
 
@@ -758,7 +755,7 @@ func TestAuthWaitModalCtrlYCopiesEvenWithPasteContent(t *testing.T) {
 	wm.paste.SetValue("partial")
 	wm.copyRequested = false
 	wm.copyOSC = ""
-	next, cmd = wm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")})
+	next, cmd = wm.update(tea.KeyPressMsg{Text: "c"})
 	if next != wm || cmd != nil {
 		t.Fatalf("non-empty paste c = modal=%T cmd=%v", next, cmd)
 	}
@@ -768,7 +765,7 @@ func TestAuthWaitModalCtrlYCopiesEvenWithPasteContent(t *testing.T) {
 	if got := wm.paste.Value(); got != "partialc" {
 		t.Errorf("paste after c = %q, want partialc", got)
 	}
-	next, cmd = wm.update(tea.KeyMsg{Type: tea.KeyCtrlY})
+	next, cmd = wm.update(tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
 	if next != wm || cmd != nil || wm.copyOSC == "" {
 		t.Fatalf("ctrl+y with paste content = modal=%T cmd=%v osc empty=%v", next, cmd, wm.copyOSC == "")
 	}
@@ -780,7 +777,7 @@ func TestAuthWaitModalCtrlYCopiesEvenWithPasteContent(t *testing.T) {
 func TestXAIAuthMethodChooserHasThreeRows(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m.composer.SetValue("/auth xai")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if cmd != nil {
 		t.Fatalf("unexpected cmd %T", cmd)
@@ -834,13 +831,13 @@ func TestSelectAfterThroughChooserAPIKey(t *testing.T) {
 	picker.cursor = 1 // openai
 	m.modal = picker
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter}) // chooser
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // chooser
 	ch, ok := m.modal.(*authMethodModal)
 	if !ok || !ch.selectAfter {
 		t.Fatalf("chooser selectAfter = %#v", m.modal)
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyDown}) // API key row
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyDown}) // API key row
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	ak, ok := m.modal.(*apiKeyModal)
 	if !ok || !ak.selectAfter || cmd != nil {
@@ -848,7 +845,7 @@ func TestSelectAfterThroughChooserAPIKey(t *testing.T) {
 	}
 
 	ak.input.SetValue("sk-select-after")
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	done := runAppCmd(t, cmd)
 	updated, cmd = m.Update(done)

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -57,7 +57,7 @@ func TestLegendModalListsThemeIconsAndFilters(t *testing.T) {
 		}
 	}
 
-	next, cmd := m.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("prompt")})
+	next, cmd := m.update(tea.KeyPressMsg{Text: "prompt"})
 	if next != m || cmd != nil {
 		t.Fatal("typing filter closed legend modal or emitted a command")
 	}
@@ -73,7 +73,7 @@ func TestLegendModalListsThemeIconsAndFilters(t *testing.T) {
 		t.Errorf("legend view missing themed prompt glyph:\n%s", view)
 	}
 
-	next, cmd = m.update(tea.KeyMsg{Type: tea.KeyEsc})
+	next, cmd = m.update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if next != nil || cmd != nil {
 		t.Fatal("escape did not close legend modal")
 	}
@@ -216,7 +216,7 @@ func TestLegendSlashCommandOpensModal(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.composer.SetValue("/legend")
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	leg, ok := m.modal.(*legendModal)
 	if !ok {
@@ -228,11 +228,11 @@ func TestLegendSlashCommandOpensModal(t *testing.T) {
 	if len(leg.entries) == 0 {
 		t.Fatal("legend modal has no entries")
 	}
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(viewString(m))
 	if !strings.Contains(plain, "Legend") {
 		t.Errorf("/legend view missing title:\n%s", plain)
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	if m.modal != nil {
 		t.Errorf("esc left legend modal open: %T", m.modal)
 	}

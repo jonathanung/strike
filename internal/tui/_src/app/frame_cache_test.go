@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -62,7 +62,7 @@ func TestDirtyMaskInvalidateResizeFocusThemeModal(t *testing.T) {
 		{
 			name: "focus cycle",
 			act: func(m Model) Model {
-				m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
+				m = updateApp(t, m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 				if m.focus != focusRight {
 					t.Fatalf("focus = %v, want right", m.focus)
 				}
@@ -82,7 +82,7 @@ func TestDirtyMaskInvalidateResizeFocusThemeModal(t *testing.T) {
 		{
 			name: "modal open",
 			act: func(m Model) Model {
-				return updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+				return updateApp(t, m, tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl})
 			},
 		},
 	}
@@ -112,7 +112,7 @@ func TestDirtyMaskSpinnerPreservesRightPixels(t *testing.T) {
 	if m.frames.right != rightBefore {
 		t.Fatal("spinner tick changed cached right pane string")
 	}
-	view := ansi.Strip(m.View())
+	view := ansi.Strip(viewString(m))
 	if len(view) < 10 {
 		t.Fatalf("view too short after spinner: %q", view)
 	}

@@ -3,8 +3,8 @@ package tui
 import (
 	"path/filepath"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -23,7 +23,7 @@ type markdownWindow struct {
 }
 
 func newMarkdownWindow() markdownWindow {
-	return markdownWindow{vp: viewport.New(1, 0)}
+	return markdownWindow{vp: viewport.New(viewport.WithWidth(1), viewport.WithHeight(0))}
 }
 
 func (w markdownWindow) id() string { return markdownWindowID }
@@ -60,13 +60,13 @@ func (w markdownWindow) resize(width, height int) window {
 	width, height = max(0, width), max(0, height)
 	widthChanged := width != w.width
 	w.width, w.height = width, height
-	w.vp.Width = max(1, width)
-	w.vp.Height = max(0, height)
+	w.vp.SetWidth(max(1, width))
+	w.vp.SetHeight(max(0, height))
 	if w.path != "" && w.source != "" && widthChanged && width > 0 {
 		w = w.render()
 	} else {
 		// Clamp scroll so growing the pane doesn't leave empty padding.
-		w.vp.SetYOffset(w.vp.YOffset)
+		w.vp.SetYOffset(w.vp.YOffset())
 	}
 	return w
 }

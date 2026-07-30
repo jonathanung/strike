@@ -1,7 +1,7 @@
 package tui
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -37,7 +37,7 @@ func newAgentModal(current string, agents []string, ops chan<- protocol.Op, sett
 	return m
 }
 
-func (m *agentModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *agentModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	if isEscape(msg) {
 		return nil, nil
 	}

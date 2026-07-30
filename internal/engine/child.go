@@ -22,6 +22,9 @@ const childEventCap = 256
 const childActivityCap = 12
 
 // leafTaskTools are stripped from registries that cannot nest further.
+// Team messaging tools (agent_roster, agent_message, agent_broadcast) must
+// NOT be listed here — depth-capped leaves still coordinate mid-turn.
+// task_message is parent-control and is stripped with the other task_* tools.
 var leafTaskTools = []string{
 	"task", "task_status", "task_read", "task_message", "task_interrupt",
 }

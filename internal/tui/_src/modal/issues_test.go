@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -15,7 +15,7 @@ import (
 func runIssues(t *testing.T, m Model, command string) Model {
 	t.Helper()
 	m.composer.SetValue(command)
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if cmd != nil {
 		runAppCmd(t, cmd)
@@ -54,7 +54,7 @@ func TestIssuesCommandListAddGetClose(t *testing.T) {
 		t.Fatalf("list opened modal %T", m.modal)
 	}
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlH})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
 	m = runIssues(t, m, "/issues add fix auth")
 	if !strings.Contains(m.notice, "opened #1 fix auth") {
 		t.Fatalf("add notice = %q", m.notice)
@@ -77,7 +77,7 @@ func TestIssuesCommandListAddGetClose(t *testing.T) {
 		t.Fatalf("list items = %+v", iw.items)
 	}
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlH})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
 	m = runIssues(t, m, "/issues close 1")
 	if !strings.Contains(m.notice, "closed #1 fix auth") {
 		t.Fatalf("close notice = %q", m.notice)
@@ -89,7 +89,7 @@ func TestIssuesCommandListAddGetClose(t *testing.T) {
 		t.Fatalf("open list = %+v status=%q", iw.items, iw.status)
 	}
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlH})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
 	m = runIssues(t, m, "/issues list closed")
 	iw = issuesWin(t, m)
 	if iw.status != "closed" || len(iw.items) != 1 || iw.items[0].Status != "closed" {
@@ -177,7 +177,7 @@ func TestIssuesWindowBrowseExpandDetail(t *testing.T) {
 		t.Fatalf("list view missing issues:\n%s", view)
 	}
 
-	next, _ := w.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ := w.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	w = next.(issuesWindow)
 	if !w.detail {
 		t.Fatal("enter did not open detail")
@@ -187,7 +187,7 @@ func TestIssuesWindowBrowseExpandDetail(t *testing.T) {
 		t.Fatalf("detail view missing content:\n%s", detail)
 	}
 
-	next, _ = w.update(tea.KeyMsg{Type: tea.KeyEsc})
+	next, _ = w.update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	w = next.(issuesWindow)
 	if w.detail {
 		t.Fatal("esc did not leave detail")
@@ -217,7 +217,7 @@ func TestIssuesCommandManyItemsOpensPaneNotNotice(t *testing.T) {
 	if m.modal != nil {
 		t.Fatalf("opened modal %T", m.modal)
 	}
-	view := ansi.Strip(m.View())
+	view := ansi.Strip(viewString(m))
 	if !strings.Contains(view, "issues") {
 		t.Fatalf("view missing issues pane title:\n%s", view)
 	}
@@ -273,7 +273,7 @@ func TestIssuesModalBrowseFilterDetail(t *testing.T) {
 		t.Fatalf("filter = %+v", list)
 	}
 	modal.cursor = 0
-	next, _ := modal.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ := modal.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	im := next.(*issuesModal)
 	if !im.detail {
 		t.Fatal("enter did not open detail")
@@ -283,12 +283,12 @@ func TestIssuesModalBrowseFilterDetail(t *testing.T) {
 		t.Fatalf("detail view missing content:\n%s", detail)
 	}
 
-	next, _ = im.update(tea.KeyMsg{Type: tea.KeyEsc})
+	next, _ = im.update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	im = next.(*issuesModal)
 	if im.detail {
 		t.Fatal("esc did not leave detail")
 	}
-	next, _ = im.update(tea.KeyMsg{Type: tea.KeyEsc})
+	next, _ = im.update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if next != nil {
 		t.Fatalf("esc list = %T, want nil", next)
 	}

@@ -4,7 +4,7 @@ import (
 	"errors"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -130,7 +130,7 @@ func (m *providerModal) clearLogoutConfirm() {
 	m.logoutCustom = false
 }
 
-func (m *providerModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *providerModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	if m.phase == providerPhaseConfirmLogout {
 		return m.updateConfirmLogout(msg)
 	}
@@ -169,15 +169,15 @@ func (m *providerModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 	case "enter":
 		return m.selectCurrent()
 	default:
-		if msg.Type == tea.KeyRunes {
-			m.filter += string(msg.Runes)
+		if len(msg.Text) > 0 {
+			m.filter += msg.Text
 			m.cursor = 0
 		}
 		return m, nil
 	}
 }
 
-func (m *providerModal) updateConfirmLogout(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *providerModal) updateConfirmLogout(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	if isEscape(msg) || msg.String() == "n" {
 		m.clearLogoutConfirm()
 		return m, nil
