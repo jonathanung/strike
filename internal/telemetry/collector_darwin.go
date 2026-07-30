@@ -4,45 +4,48 @@ package telemetry
 
 import (
 	"encoding/binary"
+	"sync"
 	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
 
+// hostCPUTicks widens the Mach tick counters across their 32-bit rollover. It
+// has its own lock because readHostCPU runs before sampleCPU takes Host.mu, and
+// Collect is documented safe for concurrent use. Multiple Host instances share
+// it deliberately: it only produces absolute counters, and each Host keeps its
+// own previous reading.
+var hostCPUTicks struct {
+	mu sync.Mutex
+	machTickWidener
+}
+
+// hostCPUSnapshot is a variable so tests can force a specific interleaving of
+// snapshot-versus-fold, which is what the lock scope in readHostCPU exists to
+// prevent. Production always uses machHostCPUTicks and never reassigns it.
+//
+// It is read under hostCPUTicks.mu. Tests must swap it via swapHostCPUSnapshot
+// so the write is ordered against that lock; assigning it directly would race
+// as soon as any telemetry test runs in parallel, and would also let
+// TestReadHostCPUTakesSnapshotUnderLock pass for the wrong reason.
+var hostCPUSnapshot = machHostCPUTicks
+
 func readHostCPU() (idle, total uint64, ok bool) {
-	// kern.cp_time: user nice sys idle intr
-	raw, err := unix.SysctlRaw("kern.cp_time")
-	if err != nil || len(raw) < 5*8 {
+	// Host CPU load is a Mach RPC on macOS — see mach_cpu_darwin.go. The old
+	// kern.cp_time sysctl read here is BSD-only; macOS never exported it, so
+	// this always reported unavailable (#602).
+	//
+	// The lock covers the snapshot as well as the fold. Reading outside it lets
+	// two concurrent Collect calls hand the widener snapshots in reverse order,
+	// which underflows the uint32 delta and adds ~2^32 ticks.
+	hostCPUTicks.mu.Lock()
+	defer hostCPUTicks.mu.Unlock()
+	ticks, ok := hostCPUSnapshot()
+	if !ok {
 		return 0, 0, false
 	}
-	// Each counter is a 64-bit (or long) value depending on arch.
-	// On modern darwin, sysctl returns array of uint64/long.
-	n := len(raw) / 8
-	if n < 5 {
-		// 32-bit longs
-		if len(raw) < 5*4 {
-			return 0, 0, false
-		}
-		vals := make([]uint64, 5)
-		for i := 0; i < 5; i++ {
-			vals[i] = uint64(*(*uint32)(unsafe.Pointer(&raw[i*4])))
-		}
-		idle = vals[3]
-		for _, v := range vals {
-			total += v
-		}
-		return idle, total, true
-	}
-	vals := make([]uint64, 5)
-	for i := 0; i < 5; i++ {
-		vals[i] = *(*uint64)(unsafe.Pointer(&raw[i*8]))
-	}
-	idle = vals[3]
-	for _, v := range vals {
-		total += v
-	}
-	return idle, total, true
+	return hostCPUTicks.add(ticks)
 }
 
 func readProcessCPUTime(pid int) (ns int64, ok bool) {

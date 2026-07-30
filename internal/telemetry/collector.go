@@ -7,6 +7,13 @@ import (
 	"time"
 )
 
+// maxHeldHostCPUSamples bounds how many consecutive samples may reuse the last
+// host CPU percent while the kernel counters sit still. macOS flushes per-core
+// ticks roughly once a second, so at the 1 Hz DefaultInterval one or two stalled
+// samples are normal; beyond that the counter is not advancing for a reason the
+// aggregation gap explains, and a stale number is worse than "unavailable".
+const maxHeldHostCPUSamples = 3
+
 // Host is the default platform collector for macOS/Linux. It is safe for
 // concurrent Collect calls but keeps CPU deltas in internal state, so prefer
 // one instance per process.
@@ -21,6 +28,15 @@ type Host struct {
 	prevHostTotal uint64
 	prevHostIdle  uint64
 	prevHostOK    bool
+
+	// Last computed host percent, reused when the kernel counters have not
+	// advanced since the previous sample. macOS aggregates per-core ticks
+	// lazily (roughly once a second), so at the 1 Hz DefaultInterval a sample
+	// can land inside a window with no movement. heldHostSamples bounds how
+	// long that substitution may continue.
+	prevHostPct     float64
+	prevHostPctOK   bool
+	heldHostSamples int
 
 	// Previous process CPU time (ns) and wall time for process percent.
 	prevProcNS int64
@@ -41,8 +57,9 @@ type Host struct {
 	diskRefreshInFlight bool
 
 	// Optional hooks for tests. nil → platform defaults.
-	readDiskFn func(root string) (used, total, free uint64, ok bool)
-	nowFn      func() time.Time
+	readDiskFn    func(root string) (used, total, free uint64, ok bool)
+	readHostCPUFn func() (idle, total uint64, ok bool)
+	nowFn         func() time.Time
 }
 
 // NewHost builds a Host collector for the current process.
@@ -98,7 +115,11 @@ func (h *Host) Collect(ctx context.Context, root string) (Sample, error) {
 }
 
 func (h *Host) sampleCPU(s *Sample) {
-	idle, total, hostOK := readHostCPU()
+	readCPU := readHostCPU
+	if h.readHostCPUFn != nil {
+		readCPU = h.readHostCPUFn
+	}
+	idle, total, hostOK := readCPU()
 	procNS, procOK := readProcessCPUTime(h.pid)
 	now := h.now()
 
@@ -106,23 +127,47 @@ func (h *Host) sampleCPU(s *Sample) {
 	defer h.mu.Unlock()
 
 	if hostOK {
-		if h.prevHostOK && total > h.prevHostTotal {
+		switch {
+		case !h.prevHostOK:
+			// First reading only establishes the baseline.
+		case total > h.prevHostTotal:
 			deltaTotal := total - h.prevHostTotal
 			deltaIdle := idle - h.prevHostIdle
-			if deltaTotal > 0 {
-				busy := float64(deltaTotal-deltaIdle) / float64(deltaTotal) * 100
-				if busy < 0 {
-					busy = 0
-				}
-				if busy > 100 {
-					busy = 100
-				}
-				s.CPUHostPct = busy
-				s.CPUHostOK = true
+			// Idle is a subset of total on both platforms, so this only trips on
+			// inconsistent counters. Clamp rather than let the unsigned
+			// subtraction below underflow, which would read as fully busy.
+			if deltaIdle > deltaTotal {
+				deltaIdle = deltaTotal
 			}
+			busy := float64(deltaTotal-deltaIdle) / float64(deltaTotal) * 100
+			s.CPUHostPct = busy
+			s.CPUHostOK = true
+			h.prevHostPct = busy
+			h.prevHostPctOK = true
+			h.heldHostSamples = 0
+		case h.prevHostPctOK && h.heldHostSamples < maxHeldHostCPUSamples:
+			// The counters have not advanced past the last sample. Either they
+			// have not been flushed yet, or this sample read them before another
+			// concurrent Collect that already reported — overlapping samples
+			// reach h.mu in an order independent of when they read. Neither is a
+			// dead counter, so hold the last percent rather than flickering the
+			// row to "unavailable".
+			h.heldHostSamples++
+			s.CPUHostPct = h.prevHostPct
+			s.CPUHostOK = true
+		default:
+			// Frozen for longer than the aggregation gap explains, or nothing
+			// measured yet. Stop publishing a stale number.
+			h.prevHostPctOK = false
+			h.heldHostSamples = 0
 		}
-		h.prevHostTotal = total
-		h.prevHostIdle = idle
+		// Never move the baseline backwards. A sample that read older counters
+		// than one already folded in would otherwise make the next delta span an
+		// interval that has already been reported.
+		if total >= h.prevHostTotal {
+			h.prevHostTotal = total
+			h.prevHostIdle = idle
+		}
 		h.prevHostOK = true
 	}
 
