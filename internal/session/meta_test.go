@@ -77,11 +77,59 @@ func TestReadMetaMissingIsZero(t *testing.T) {
 	}
 }
 
+func TestTeamLeadIDAndResolveChildLeadID(t *testing.T) {
+	root := Meta{}
+	if got := root.TeamLeadID("L"); got != "L" {
+		t.Fatalf("root TeamLeadID = %q, want L", got)
+	}
+	child := Meta{ParentSessionID: "L", LeadSessionID: "L"}
+	if got := child.TeamLeadID("A"); got != "L" {
+		t.Fatalf("child TeamLeadID = %q, want L", got)
+	}
+	// Nested grandchild stores the same lead, not intermediate parent.
+	nested := Meta{ParentSessionID: "A", LeadSessionID: "L"}
+	if got := nested.TeamLeadID("G"); got != "L" {
+		t.Fatalf("nested TeamLeadID = %q, want L", got)
+	}
+	// Legacy child without LeadSessionID falls back to parent.
+	legacy := Meta{ParentSessionID: "P"}
+	if got := legacy.TeamLeadID("C"); got != "P" {
+		t.Fatalf("legacy TeamLeadID = %q, want P", got)
+	}
+	if got := ResolveChildLeadID("L", root); got != "L" {
+		t.Fatalf("ResolveChildLeadID root parent = %q", got)
+	}
+	if got := ResolveChildLeadID("A", child); got != "L" {
+		t.Fatalf("ResolveChildLeadID mid parent = %q", got)
+	}
+}
+
+func TestMetaLeadSessionIDRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	want := Meta{
+		ProjectKey:      "/repos/acme",
+		ParentSessionID: "lead-1",
+		LeadSessionID:   "lead-1",
+		Title:           "explore abc",
+	}
+	if err := WriteMeta(dir, "child-1", want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadMeta(dir, "child-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("ReadMeta = %+v, want %+v", got, want)
+	}
+}
+
 func TestUpdateMetaMerges(t *testing.T) {
 	dir := t.TempDir()
 	if err := WriteMeta(dir, "s", Meta{
 		Title:           "ship it",
 		ParentSessionID: "parent-1",
+		LeadSessionID:   "lead-root",
 		PRURL:           "https://example.com/pull/1",
 		PRNumber:        1,
 	}); err != nil {
@@ -99,7 +147,7 @@ func TestUpdateMetaMerges(t *testing.T) {
 	if got.PRURL != "https://github.com/acme/repo/pull/9" || got.PRNumber != 9 || got.PRState != PRStateOpen {
 		t.Fatalf("UpdateMeta = %+v", got)
 	}
-	if got.Title != "ship it" || got.ParentSessionID != "parent-1" {
+	if got.Title != "ship it" || got.ParentSessionID != "parent-1" || got.LeadSessionID != "lead-root" {
 		t.Fatalf("UpdateMeta dropped fields: %+v", got)
 	}
 	// Malformed existing file surfaces.

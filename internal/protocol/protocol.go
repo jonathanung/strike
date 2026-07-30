@@ -418,6 +418,33 @@ const (
 	ChildStatusCanceled  ChildStatus = "canceled"
 )
 
+// TeamMemberState is the roster lifecycle state of one agent on an implicit
+// session-scoped team (lead + children). Values align with ChildStatus for
+// terminal outcomes; "running" covers live members including the lead.
+type TeamMemberState string
+
+const (
+	TeamMemberRunning   TeamMemberState = "running"
+	TeamMemberCompleted TeamMemberState = "completed"
+	TeamMemberFailed    TeamMemberState = "failed"
+	TeamMemberCanceled  TeamMemberState = "canceled"
+)
+
+// TeamMemberStateFromChild maps a terminal child outcome onto a roster state.
+// Unknown statuses fall back to failed.
+func TeamMemberStateFromChild(s ChildStatus) TeamMemberState {
+	switch s {
+	case ChildStatusCompleted:
+		return TeamMemberCompleted
+	case ChildStatusCanceled:
+		return TeamMemberCanceled
+	case ChildStatusFailed:
+		return TeamMemberFailed
+	default:
+		return TeamMemberFailed
+	}
+}
+
 // ChildStarted marks the beginning of a foreground child/subagent session.
 // Emitted by the parent engine with the child's correlation.
 type ChildStarted struct {

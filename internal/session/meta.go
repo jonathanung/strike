@@ -29,6 +29,12 @@ type Meta struct {
 	ProjectKey      string `json:"projectKey,omitempty"`
 	Title           string `json:"title,omitempty"`
 	ParentSessionID string `json:"parentSessionId,omitempty"`
+	// LeadSessionID is the implicit agent-team lead for this session. Empty on
+	// roots (the session is its own lead). Set on task children to the root
+	// lead so roster/messaging can resolve team identity without the live
+	// engine tree. Nested grandchildren store the same lead id (not their
+	// immediate parent).
+	LeadSessionID string `json:"leadSessionId,omitempty"`
 	// ForkedFrom is the source session id when this session was created via
 	// Fork. Empty for ordinary roots and subagent children. Forks remain root
 	// sessions (ParentSessionID empty) so --continue / pickers still work.
@@ -57,6 +63,36 @@ func NormalizePRState(s string) string {
 	default:
 		return ""
 	}
+}
+
+// TeamLeadID resolves the implicit team lead for sessionID given its meta.
+// Roots (no parent) are their own lead. Children use LeadSessionID when set;
+// otherwise parent is the best-effort lead (depth-1 legacy sidecars).
+func (m Meta) TeamLeadID(sessionID string) string {
+	sid := strings.TrimSpace(sessionID)
+	if strings.TrimSpace(m.ParentSessionID) == "" {
+		if sid != "" {
+			return sid
+		}
+		return ""
+	}
+	if lead := strings.TrimSpace(m.LeadSessionID); lead != "" {
+		return lead
+	}
+	return strings.TrimSpace(m.ParentSessionID)
+}
+
+// ResolveChildLeadID picks the LeadSessionID to store on a new child of parentID
+// using the parent's meta. Roots yield parentID; children yield their lead.
+func ResolveChildLeadID(parentID string, parentMeta Meta) string {
+	parentID = strings.TrimSpace(parentID)
+	if parentID == "" {
+		return ""
+	}
+	if lead := parentMeta.TeamLeadID(parentID); lead != "" {
+		return lead
+	}
+	return parentID
 }
 
 // MetaPath is the sidecar JSON path for a session id under dir.

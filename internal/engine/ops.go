@@ -454,6 +454,9 @@ func (e *Engine) applyAgent(name string) bool {
 		return false
 	}
 	e.agent = agent
+	if e.team != nil {
+		e.team.SetPersona(e.opts.SessionID, agent.Name)
+	}
 	// Child sessions may only apply Deny rules from an agent profile so a
 	// subagent cannot widen parent Deny/Ask via Allow (AG3). Root keeps the
 	// full profile (AG1/AG2).
