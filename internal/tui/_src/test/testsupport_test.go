@@ -253,12 +253,13 @@ type savedPresentation struct {
 }
 
 type fakeSettings struct {
-	defaults    host.UserDefaults
-	saved       []savedDefaults
-	savedThemes []string
-	savedPres   []savedPresentation
-	err         error
-	themeErr    error
+	defaults      host.UserDefaults
+	saved         []savedDefaults
+	savedThemes   []string
+	savedPres     []savedPresentation
+	savedKeybinds []map[string][]string
+	err           error
+	themeErr      error
 }
 
 func (s *fakeSettings) Defaults() host.UserDefaults {
@@ -305,6 +306,11 @@ func (s *fakeSettings) SavePresentation(vimMode, nanoMode, mdReadMode string) er
 	if mdReadMode != "" {
 		s.defaults.MdReadMode = mdReadMode
 	}
+	return s.err
+}
+
+func (s *fakeSettings) SaveKeybinds(overrides map[string][]string) error {
+	s.savedKeybinds = append(s.savedKeybinds, cloneKeybindMap(overrides))
 	return s.err
 }
 

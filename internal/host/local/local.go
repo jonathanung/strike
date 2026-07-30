@@ -546,6 +546,10 @@ func (settingsAdapter) SavePresentation(vimMode, nanoMode, mdReadMode string) er
 	return config.SetGlobalPresentation(vimMode, nanoMode, mdReadMode)
 }
 
+func (settingsAdapter) SaveKeybinds(overrides map[string][]string) error {
+	return config.SetGlobalKeybinds(config.KeybindsToChords(overrides))
+}
+
 // memoryAdapter adapts *memory.Store to host.Memory.
 type memoryAdapter struct {
 	store   *memory.Store

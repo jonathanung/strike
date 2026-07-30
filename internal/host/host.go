@@ -173,6 +173,10 @@ type Settings interface {
 	// (pane|embedded|overlay|modal|takeover vocabulary). Empty leaves the
 	// stored value unchanged; unknown values are rejected.
 	SavePresentation(vimMode, nanoMode, mdReadMode string) error
+	// SaveKeybinds persists binding-id overrides to ~/.strike/keybinds.jsonc.
+	// Unknown ids are silently dropped; callers should pre-filter. A nil
+	// map deletes the file (reset to defaults).
+	SaveKeybinds(overrides map[string][]string) error
 }
 
 // History is project-scoped prompt history. Enqueue is async; the channel
