@@ -209,6 +209,17 @@ func (t *Team) Deliver(from, to, body string) MailboxStatus {
 		return st
 	}
 
+	msgID := rand.Text()
+	msg := MailboxMessage{
+		ID:        msgID,
+		From:      from,
+		To:        to,
+		Body:      body,
+		CreatedAt: time.Now().UTC(),
+	}
+
+	// Hold team lock through live lookup + enqueue so DetachMailbox cannot
+	// interleave (false "accepted" onto a detaching recipient).
 	t.mu.Lock()
 	if _, ok := t.members[from]; !ok {
 		t.mu.Unlock()
@@ -230,36 +241,29 @@ func (t *Team) Deliver(from, to, body string) MailboxStatus {
 		return st
 	}
 	target := t.live[to]
-	leadID := t.leadID
-	t.mu.Unlock()
-
 	if target == nil || target.eng == nil || target.box == nil {
+		t.mu.Unlock()
 		st.Status = "rejected"
 		st.Detail = "recipient is not live"
 		return st
 	}
-
-	msg := MailboxMessage{
-		ID:        rand.Text(),
-		From:      from,
-		To:        to,
-		Body:      body,
-		TeamID:    leadID,
-		CreatedAt: time.Now().UTC(),
-	}
+	msg.TeamID = t.leadID
 	beforeDrop := target.box.Dropped()
 	if !target.box.Enqueue(msg) {
+		t.mu.Unlock()
 		st.Status = "rejected"
 		st.Detail = "enqueue failed"
 		return st
 	}
 	st.MessageID = msg.ID
 	st.Dropped = target.box.Dropped() > beforeDrop
+	eng := target.eng
+	t.mu.Unlock()
 
 	// Wake recipient Run to idle-nudge or continue; AgentMessage is emitted
 	// from the recipient turn/Run path on boundary inject (never from this
 	// goroutine — avoids send-on-closed-events during recipient shutdown).
-	target.eng.signalMailboxWake()
+	eng.signalMailboxWake()
 
 	st.Status = "accepted"
 	st.Detail = "enqueued for boundary delivery"
