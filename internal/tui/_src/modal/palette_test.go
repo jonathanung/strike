@@ -26,6 +26,7 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 	got := newPaletteModal(specs, []string{"build"}, paletteAvailability{HasProvider: true}).entries
 	want := []paletteEntry{
 		{ID: "keybinds", Label: "Keyboard shortcuts", Description: "filterable keybind cheatsheet", Action: paletteAction{Kind: paletteActionKeybinds}},
+		{ID: "keybinds-rebind", Label: "Rebind keys", Description: "interactively rebind keyboard shortcuts", Action: paletteAction{Kind: paletteActionKeybindEditor}},
 		{ID: "command:provider", Label: "/provider", Description: "select a provider and model", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/provider"}},
 		{ID: "command:model", Label: "/model", Description: "select a model from authenticated providers", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/model"}},
 		{ID: "command:effort", Label: "/effort", Description: "set how much reasoning the model spends", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/effort"}},
@@ -232,9 +233,9 @@ func TestPaletteNavigationKeysWrapAndSelectExpectedActions(t *testing.T) {
 		keys []tea.KeyMsg
 		want paletteInvokeMsg
 	}{
-		{name: "down", keys: []tea.KeyMsg{{Type: tea.KeyDown}}, want: paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/provider"}}},
+		{name: "down", keys: []tea.KeyMsg{{Type: tea.KeyDown}}, want: paletteInvokeMsg{Action: paletteAction{Kind: paletteActionKeybindEditor}}},
 		{name: "up wraps", keys: []tea.KeyMsg{{Type: tea.KeyUp}}, want: paletteInvokeMsg{Action: paletteAction{Kind: paletteActionSkill, Value: "review"}}},
-		{name: "ctrl n", keys: []tea.KeyMsg{{Type: tea.KeyCtrlN}}, want: paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/provider"}}},
+		{name: "ctrl n", keys: []tea.KeyMsg{{Type: tea.KeyCtrlN}}, want: paletteInvokeMsg{Action: paletteAction{Kind: paletteActionKeybindEditor}}},
 		{name: "ctrl p wraps", keys: []tea.KeyMsg{{Type: tea.KeyCtrlP}}, want: paletteInvokeMsg{Action: paletteAction{Kind: paletteActionSkill, Value: "review"}}},
 	}
 	for _, tt := range tests {

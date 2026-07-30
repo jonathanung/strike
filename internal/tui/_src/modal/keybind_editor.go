@@ -1,0 +1,378 @@
+package tui
+
+import (
+	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/jonathanung/strike-cli/internal/host"
+	"github.com/jonathanung/strike-cli/internal/tui/theme"
+	"github.com/jonathanung/strike-cli/internal/tui/ui"
+)
+
+// rebindAppliedMsg is sent when a single keybind override is applied in-session.
+// Chords is nil when resetting to default.
+type rebindAppliedMsg struct {
+	ID     string
+	Chords []string
+}
+
+// keybindsSaveMsg triggers persisting all pending overrides.
+type keybindsSaveMsg struct {
+	Overrides map[string][]string
+}
+
+// keybindsSavedMsg reports the outcome of a save.
+type keybindsSavedMsg struct {
+	err error
+}
+
+const keybindEditorVisible = 18
+
+// editorTabOrder defines the category tabs shown in the keybind editor and their
+// display order. Only these categories appear in the tab bar.
+var editorTabOrder = []string{"Navigation", "Global", "Editor", "Composer", "Completion"}
+
+// keybindEditor is a modal for interactively rebinding keys and saving overrides
+// to ~/.strike/keybinds.jsonc. Bindings are filtered by the active category tab.
+type keybindEditor struct {
+	entries    []keybindEntry
+	filtered   []keybindEntry
+	cursor     int
+	filter     string
+	pending    map[string][]string
+	saved      map[string][]string
+	capturing  bool
+	captureID  string
+	effective  keyMap
+	settings   host.Settings
+	tab        int // index into editorTabOrder; -1 means "all"
+}
+
+
+func newKeybindEditor(effective keyMap, persistedOverrides map[string][]string, settings host.Settings) *keybindEditor {
+	m := &keybindEditor{
+		entries:   keybindCatalog(effective),
+		effective: effective,
+		settings:  settings,
+		tab:       -1, // start showing all categories
+	}
+	if len(persistedOverrides) > 0 {
+		m.saved = make(map[string][]string, len(persistedOverrides))
+		for id, chords := range persistedOverrides {
+			if chords != nil {
+				m.saved[id] = append([]string(nil), chords...)
+			}
+		}
+	}
+	if m.saved == nil {
+		m.saved = make(map[string][]string)
+	}
+	m.pending = make(map[string][]string)
+	for id, chords := range m.saved {
+		m.pending[id] = append([]string(nil), chords...)
+	}
+	m.refilter()
+	return m
+}
+
+func (m *keybindEditor) refilter() {
+	q := strings.ToLower(strings.TrimSpace(m.filter))
+	// Start from all entries.
+	pool := m.entries
+	if q == "" {
+		m.filtered = filterByCategory(pool, m.tab)
+		if m.cursor >= len(m.filtered) {
+			m.cursor = max(0, len(m.filtered)-1)
+		}
+		return
+	}
+	// With a filter query, search all entries (ignore tab).
+	out := make([]keybindEntry, 0, len(pool))
+	for _, e := range pool {
+		fields := []string{e.Action, e.Category, e.ID, e.Keys}
+		matched := false
+		for _, f := range fields {
+			if strings.Contains(strings.ToLower(f), q) {
+				matched = true
+				break
+			}
+		}
+		if matched {
+			out = append(out, e)
+		}
+	}
+	m.filtered = out
+	if m.cursor >= len(m.filtered) {
+		m.cursor = max(0, len(m.filtered)-1)
+	}
+}
+
+// filterByCategory returns only entries whose Category matches the tab at the
+// given index, or all entries when tab < 0.
+func filterByCategory(entries []keybindEntry, tab int) []keybindEntry {
+	if tab < 0 || tab >= len(editorTabOrder) {
+		return entries
+	}
+	cat := editorTabOrder[tab]
+	out := make([]keybindEntry, 0, len(entries))
+	for _, e := range entries {
+		if e.Category == cat {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func (m *keybindEditor) update(msg tea.KeyMsg) (modal, tea.Cmd) {
+	if m.capturing {
+		return m.updateCapture(msg)
+	}
+	if isEscape(msg) || msg.String() == "q" {
+		return nil, nil
+	}
+	switch msg.String() {
+	case "up", "k", "ctrl+p":
+		if m.cursor > 0 {
+			m.cursor--
+		}
+		return m, nil
+	case "down", "j", "ctrl+n", "tab":
+		if m.cursor < len(m.filtered)-1 {
+			m.cursor++
+		}
+		return m, nil
+	case "left", "ctrl+h":
+		if m.tab < 0 {
+			m.tab = len(editorTabOrder) - 1
+		} else if m.tab == 0 {
+			m.tab = -1
+		} else {
+			m.tab--
+		}
+		m.cursor = 0
+		m.refilter()
+		return m, nil
+	case "right", "ctrl+l":
+		if m.tab < 0 {
+			m.tab = 0
+		} else if m.tab >= len(editorTabOrder)-1 {
+			m.tab = -1
+		} else {
+			m.tab++
+		}
+		m.cursor = 0
+		m.refilter()
+		return m, nil
+	case "backspace":
+		if m.filter != "" {
+			m.filter = m.filter[:len(m.filter)-1]
+			m.cursor = 0
+			m.refilter()
+		}
+		return m, nil
+	case "enter", "r":
+		return m.startCapture()
+	case "ctrl+d":
+		return m.resetOverride()
+	case "ctrl+s":
+		return m.savePending()
+	default:
+		if msg.Type == tea.KeyRunes {
+			m.filter += string(msg.Runes)
+			m.cursor = 0
+			m.refilter()
+		}
+		return m, nil
+	}
+}
+
+func (m *keybindEditor) startCapture() (modal, tea.Cmd) {
+	if m.cursor < 0 || m.cursor >= len(m.filtered) {
+		return m, nil
+	}
+	m.capturing = true
+	m.captureID = m.filtered[m.cursor].ID
+	return m, nil
+}
+
+func (m *keybindEditor) updateCapture(msg tea.KeyMsg) (modal, tea.Cmd) {
+	if isEscape(msg) {
+		m.capturing = false
+		m.captureID = ""
+		return m, nil
+	}
+	chord := msg.String()
+	if chord == "" {
+		m.capturing = false
+		m.captureID = ""
+		return m, nil
+	}
+	chords := []string{chord}
+	m.pending[m.captureID] = chords
+	id := m.captureID
+	m.capturing = false
+	m.captureID = ""
+	return m, func() tea.Msg {
+		return rebindAppliedMsg{ID: id, Chords: chords}
+	}
+}
+
+func (m *keybindEditor) resetOverride() (modal, tea.Cmd) {
+	if m.cursor < 0 || m.cursor >= len(m.filtered) {
+		return m, nil
+	}
+	id := m.filtered[m.cursor].ID
+	delete(m.pending, id)
+	return m, func() tea.Msg {
+		return rebindAppliedMsg{ID: id, Chords: nil}
+	}
+}
+
+func (m *keybindEditor) saveComplete() {
+	m.pending = make(map[string][]string)
+}
+
+func (m *keybindEditor) savePending() (modal, tea.Cmd) {
+	if len(m.pending) == 0 {
+		return m, nil
+	}
+	overrides := make(map[string][]string, len(m.pending))
+	for id, chords := range m.pending {
+		overrides[id] = append([]string(nil), chords...)
+	}
+	return m, saveKeybindsThroughCmd(m.settings, overrides)
+}
+
+// renderTabBar draws the category tab row, fitting within maxCells. tab < 0
+// means "all" (default view). Excess categories are omitted from the right.
+func renderTabBar(th theme.Theme, tab int, maxCells int) string {
+	th = th.Resolve()
+	sel := th.S().Accent
+	unsel := th.S().Muted
+
+	// Build "All" tab.
+	var all string
+	if tab < 0 {
+		all = sel.Render("All")
+	} else {
+		all = unsel.Render("All")
+	}
+
+	// Build category tabs and measure total width.
+	type ct struct {
+		label string
+		width int
+	}
+	var tabs []ct
+	total := lipgloss.Width(all) + 1 // +1 for separator space
+	for i, cat := range editorTabOrder {
+		var label string
+		if i == tab {
+			label = sel.Render(cat)
+		} else {
+			label = unsel.Render(cat)
+		}
+		w := lipgloss.Width(label)
+		tabs = append(tabs, ct{label: label, width: w})
+		total += w + 1
+	}
+
+	// Drop from the right until total fits.
+	for total > maxCells && len(tabs) > 1 {
+		last := tabs[len(tabs)-1]
+		total -= last.width + 1
+		tabs = tabs[:len(tabs)-1]
+	}
+
+	// Join what fits.
+	var parts []string
+	parts = append(parts, all)
+	for _, t := range tabs {
+		parts = append(parts, t.label)
+	}
+	return strings.Join(parts, " ")
+}
+
+func (m *keybindEditor) view(width int, th theme.Theme) string {
+	th = th.Resolve()
+	list := m.filtered
+	if m.cursor >= len(list) {
+		m.cursor = max(0, len(list)-1)
+	}
+	items := make([]ui.ListItem, len(list))
+	for i, entry := range list {
+		defaultKeys := entry.Keys
+		overrideKeys, hasOverride := m.pending[entry.ID]
+		if !hasOverride {
+			overrideKeys, hasOverride = m.saved[entry.ID]
+		}
+		var displayKeys string
+		if hasOverride && len(overrideKeys) > 0 {
+			displayKeys = th.Icons.Bolt + " " + defaultKeys + " / " + strings.Join(overrideKeys, "/")
+		} else {
+			displayKeys = defaultKeys
+		}
+		items[i] = ui.ListItem{
+			Label:  sanitizeDisplayData(entry.Action),
+			Detail: sanitizeDisplayData(displayKeys),
+		}
+	}
+	listWidth := max(1, ui.PanelInnerWidth(th, width))
+	if width < 4 {
+		listWidth = max(1, width)
+	}
+	body := ui.List(th, ui.ListOpts{
+		Items:      items,
+		Cursor:     m.cursor,
+		Width:      listWidth,
+		Visible:    keybindEditorVisible,
+		ShowFilter: true,
+		Filter:     sanitizeDisplayData(m.filter),
+		Total:      len(m.entries),
+		Empty:      "no matching keybinds",
+	})
+	if width < 4 {
+		return body
+	}
+
+	tabBar := renderTabBar(th, m.tab, listWidth)
+
+	title := "Rebind keys"
+	if m.capturing {
+		title = "Press new key for " + m.captureID + th.Icons.Ellipsis
+	}
+	hint := "left/right switch tab | type to filter | up/down/j/k move | enter/r rebind | ctrl+d reset | ctrl+s save | esc close"
+	if m.capturing {
+		hint = "press any key to bind | esc cancel"
+	}
+	// Use Panel directly, not Dialog, so the ANSI-colored tab bar is not
+	// passed through word-wrap (which mangles ANSI escapes).
+	inner := ui.PanelInnerWidth(th, width)
+	content := tabBar + "\n\n" + body
+	if hint != "" {
+		hintLines := strings.Split(ui.WrapText(hint, inner), "\n")
+		if len(hintLines) > 2 {
+			hintLines = hintLines[:2]
+			hintLines[1] = th.S().Muted.Render(hintLines[1])
+		}
+		for _, hl := range hintLines {
+			content += "\n" + th.S().Muted.Render(hl)
+		}
+	}
+	return ui.Panel(th, ui.PanelOpts{
+		Title:   title,
+		Width:   width,
+		Focused: true,
+	}, content)
+}
+
+func saveKeybindsThroughCmd(settings host.Settings, overrides map[string][]string) tea.Cmd {
+	return func() tea.Msg {
+		if settings == nil {
+			return keybindsSavedMsg{err: errNoSettings}
+		}
+		return keybindsSavedMsg{err: settings.SaveKeybinds(overrides)}
+	}
+}

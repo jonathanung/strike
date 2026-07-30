@@ -150,6 +150,25 @@ func MergeKeybinds(base, layer map[string]KeybindChords) map[string]KeybindChord
 	return out
 }
 
+// KeybindsToChords converts a plain string map to KeybindChords.
+// Unknown ids are silently dropped. Use this before SetGlobalKeybinds.
+func KeybindsToChords(raw map[string][]string) map[string]KeybindChords {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make(map[string]KeybindChords, len(raw))
+	for id, chords := range raw {
+		if _, ok := KnownKeybindIDs[id]; !ok {
+			continue
+		}
+		out[id] = append(KeybindChords(nil), chords...)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // KeybindsMap copies validated chords into a plain map for host/TUI options.
 func KeybindsMap(binds map[string]KeybindChords) map[string][]string {
 	if len(binds) == 0 {

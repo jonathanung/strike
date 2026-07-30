@@ -123,12 +123,13 @@ func (m *keysModal) view(width int, th theme.Theme) string {
 		if entry.Context {
 			category = "Current focus"
 		}
-		detail := detailJoin(th, category, entry.Action)
+		detail := entry.Keys
 		if slash := strings.TrimSpace(entry.Slash); slash != "" {
 			detail = detailJoin(th, detail, slash)
 		}
+		detail = detailJoin(th, detail, category)
 		items[i] = ui.ListItem{
-			Label:  sanitizeDisplayData(entry.Keys),
+			Label:  sanitizeDisplayData(entry.Action),
 			Detail: sanitizeDisplayData(detail),
 		}
 	}

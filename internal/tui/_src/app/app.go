@@ -945,6 +945,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.modal = m.newKeysModal()
 			m.reflow()
 			return m, nil
+		case paletteActionKeybindEditor:
+			m.resetComposer()
+			m.clearNotice()
+			m.modal = newKeybindEditor(m.keyMap, m.keyOverrides, m.services.Settings)
+			m.reflow()
+			return m, nil
 		}
 		return m, nil
 
@@ -1012,6 +1018,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := m.applySessionRename(msg.id, msg.title)
 		m.reflow()
 		return m, cmd
+
+	case rebindAppliedMsg:
+		if msg.Chords == nil {
+			delete(m.keyOverrides, msg.ID)
+		} else {
+			if m.keyOverrides == nil {
+				m.keyOverrides = make(map[string][]string)
+			}
+			m.keyOverrides[msg.ID] = msg.Chords
+		}
+		m.keyMap = buildKeyMap(m.keyOverrides, m.splitOrientation)
+		m.reflow()
+		if ed, ok := m.modal.(*keybindEditor); ok {
+			ed.effective = m.keyMap
+		}
+		return m, nil
+
+	case keybindsSavedMsg:
+		if msg.err != nil {
+			m.setNotice("save keybinds: "+msg.err.Error(), true)
+		} else {
+			m.setNotice("keybinds saved to ~/.strike/keybinds.jsonc", false)
+			if ed, ok := m.modal.(*keybindEditor); ok {
+				ed.saveComplete()
+			}
+		}
+		m.reflow()
+		return m, nil
 	}
 
 	var cmd tea.Cmd

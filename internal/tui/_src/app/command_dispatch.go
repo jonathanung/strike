@@ -202,6 +202,13 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		m.reflow()
 		return m, nil
 	case "/keys":
+		if len(fields) >= 2 && fields[1] == "bind" {
+			m.resetComposer()
+			m.clearNotice()
+			m.modal = newKeybindEditor(m.keyMap, m.keyOverrides, m.services.Settings)
+			m.reflow()
+			return m, nil
+		}
 		if len(fields) >= 2 && fields[1] == "reset" {
 			m.resetComposer()
 			m.clearNotice()

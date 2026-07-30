@@ -74,6 +74,127 @@ func SetGlobalTheme(id string) error {
 	return writeGlobal(cfg, unlock)
 }
 
+// SetGlobalKeybinds persists overrides into ~/.strike/keybinds.jsonc, merging
+// with any existing binds in that file. Pass nil to delete the file entirely
+// (reset to defaults). Unknown ids from the new binds are silently dropped;
+// unknown ids already in the file survive round-trip.
+func SetGlobalKeybinds(binds map[string]KeybindChords) error {
+	globalMu.Lock()
+	defer globalMu.Unlock()
+
+	path := keybindsWritePath()
+	if path == "" {
+		return fmt.Errorf("cannot locate home directory")
+	}
+
+	if len(binds) == 0 {
+		return deleteKeybindsFile(path)
+	}
+
+	existing, err := readKeybindsRelaxed(path)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		existing = make(map[string]KeybindChords)
+	}
+	// Overwrite only known ids; unknown ids in the file survive.
+	for id, chords := range binds {
+		if _, ok := KnownKeybindIDs[id]; ok {
+			existing[id] = append(KeybindChords(nil), chords...)
+		}
+	}
+	return writeKeybindsFile(path, existing)
+}
+
+func keybindsWritePath() string {
+	root := GlobalRoot()
+	if root == "" {
+		return ""
+	}
+	return filepath.Join(root, "keybinds.jsonc")
+}
+
+// readKeybindsRelaxed reads the file and returns all keybind entries, including
+// any with unknown ids (they survive round-trip). Missing file → nil, nil.
+func readKeybindsRelaxed(path string) (map[string]KeybindChords, error) {
+	data, err := os.ReadFile(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return nil, nil
+	case err != nil:
+		return nil, fmt.Errorf("read keybinds file: %w", err)
+	}
+	stripped, err := stripJSONC(data)
+	if err != nil {
+		return nil, err
+	}
+	stripped = bytesTrimSpace(stripped)
+	if len(stripped) == 0 || stripped[0] != '{' {
+		return nil, fmt.Errorf("keybinds file must be a JSON object")
+	}
+	// Accept wrapped {"keybinds":{...}} or flat.
+	var wrapped struct {
+		Keybinds map[string]KeybindChords `json:"keybinds"`
+	}
+	if err := json.Unmarshal(stripped, &wrapped); err != nil {
+		return nil, err
+	}
+	if wrapped.Keybinds != nil {
+		return wrapped.Keybinds, nil
+	}
+	var flat map[string]KeybindChords
+	if err := json.Unmarshal(stripped, &flat); err != nil {
+		return nil, err
+	}
+	return flat, nil
+}
+
+func deleteKeybindsFile(path string) error {
+	err := os.Remove(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return err
+}
+
+func writeKeybindsFile(path string, binds map[string]KeybindChords) error {
+	out, err := json.MarshalIndent(binds, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal keybinds: %w", err)
+	}
+	payload := append(out, '\n')
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".keybinds-")
+	if err != nil {
+		return fmt.Errorf("create temp keybinds: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := tmp.Write(payload); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write temp keybinds: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("fsync temp keybinds: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp keybinds: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("rename temp keybinds: %w", err)
+	}
+	if dirFd, err := os.Open(dir); err == nil {
+		dirFd.Sync()
+		dirFd.Close()
+	}
+	return nil
+}
+
 // SetGlobalPresentation persists non-empty editor/reader presentation modes
 // into ~/.strike/config. Empty fields are left unchanged. Values match config
 // keys vimMode/nanoMode/mdReadMode (pane|embedded|overlay|modal|takeover).

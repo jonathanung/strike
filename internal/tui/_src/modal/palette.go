@@ -34,6 +34,7 @@ const (
 	paletteActionAgent
 	paletteActionSkill
 	paletteActionKeybinds
+	paletteActionKeybindEditor
 )
 
 type paletteAction struct {
@@ -87,6 +88,12 @@ func buildPaletteEntries(specs []commandSpec, agents []string, availability pale
 		Label:       "Keyboard shortcuts",
 		Description: "filterable keybind cheatsheet",
 		Action:      paletteAction{Kind: paletteActionKeybinds},
+	})
+	entries = append(entries, paletteEntry{
+		ID:          "keybinds-rebind",
+		Label:       "Rebind keys",
+		Description: "interactively rebind keyboard shortcuts",
+		Action:      paletteAction{Kind: paletteActionKeybindEditor},
 	})
 	// Walk the shipped builtin catalog order so the palette stays complete as
 	// commands are added to builtinCommandSpecs. Unknown builtins present only
