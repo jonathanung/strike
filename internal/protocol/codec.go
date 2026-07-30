@@ -72,6 +72,8 @@ func eventType(ev Event) string {
 		return "child.started"
 	case ChildCompleted:
 		return "child.completed"
+	case TeamRoster:
+		return "team.roster"
 	case UsageReported:
 		return "usage.reported"
 	case ProviderRetrying:
@@ -166,6 +168,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &ChildStarted{}
 	case "child.completed":
 		ev = &ChildCompleted{}
+	case "team.roster":
+		ev = &TeamRoster{}
 	case "usage.reported":
 		ev = &UsageReported{}
 	case "provider.retrying":
@@ -248,6 +252,8 @@ func deref(ev Event) Event {
 	case *ChildStarted:
 		return *v
 	case *ChildCompleted:
+		return *v
+	case *TeamRoster:
 		return *v
 	case *UsageReported:
 		return *v

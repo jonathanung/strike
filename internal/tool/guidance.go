@@ -30,6 +30,7 @@ var shortPurposes = map[string]string{
 	"task_read":       "read a bounded child transcript slice",
 	"task_message":    "send guidance to a running child task",
 	"task_interrupt":  "cancel a running child task",
+	"agent_roster":    "list lead and teammate agents on the session team",
 	"webfetch":        "fetch a URL",
 	"todowrite":       "write the multi-step todo list",
 	"todoread":        "read the current todo list",
@@ -251,6 +252,8 @@ func recommendedGuidance(entries []GuidanceEntry) string {
 		"Use `task` for bounded non-blocking delegation (optional `agent` persona and `model` catalog id); use `task_status`/`task_read` only when an intermediate check is needed (not every second). Prefer `task_message` to steer and `task_interrupt` to cancel. Completion still arrives once as `[child.completed]` — never sleep-poll.")
 	add(has("task") && !has("task_status", "task_read"),
 		"Use `task` for bounded non-blocking delegation (self-contained prompt). A later `[child.completed]` delivers the summary — never sleep-poll for task completion.")
+	add(has("agent_roster"),
+		"Use `agent_roster` to list the lead and teammates (session ids, personas, states) on the implicit session team.")
 	add(has("sleep") && has("bash") && has("task"),
 		"Prefer `sleep` over bash sleep for external readiness (services, rate limits). Never sleep-poll for `task`/subagent completion.")
 	add(has("sleep") && has("bash") && !has("task"),
