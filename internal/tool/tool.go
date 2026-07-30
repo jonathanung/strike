@@ -1,6 +1,6 @@
 // Package tool defines the tool contract and the built-in tool set
 // (read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/
-// task_message/task_interrupt/webfetch/todowrite/todoread/
+// task_message/task_interrupt/agent_roster/webfetch/todowrite/todoread/
 // memory_write/memory_read/issue_write/issue_read/notebook_edit/sleep/skill/question/enter_plan_mode/
 // exit_plan_mode/phase_done/toolsearch).
 // Used by internal/engine (dispatch), internal/permission (AskRequest, for the
@@ -144,6 +144,31 @@ type TaskInterruptResult struct {
 	Detail    string
 }
 
+// AgentRosterRequest lists the implicit session team (no filters today).
+type AgentRosterRequest struct{}
+
+// AgentRosterMember is one teammate row for agent_roster.
+// State matches task_status vocabulary where possible
+// (starting|working|needs_attention|completed|failed|canceled|unknown).
+type AgentRosterMember struct {
+	SessionID       string `json:"session_id"`
+	Name            string `json:"name,omitempty"`
+	Agent           string `json:"agent,omitempty"`
+	State           string `json:"state"`
+	Role            string `json:"role,omitempty"` // lead | member
+	ParentSessionID string `json:"parent_session_id,omitempty"`
+	Depth           int    `json:"depth,omitempty"`
+	StartedAt       string `json:"started_at,omitempty"` // RFC3339
+	TerminalSummary string `json:"terminal_summary,omitempty"`
+	IsSelf          bool   `json:"is_self"`
+}
+
+// AgentRosterResult is the full team snapshot for agent_roster.
+type AgentRosterResult struct {
+	LeadID  string              `json:"lead_id"`
+	Members []AgentRosterMember `json:"members"`
+}
+
 // QuestionOption is one selectable choice on a QuestionItem.
 type QuestionOption struct {
 	Label       string
@@ -181,6 +206,7 @@ type SessionPR struct {
 // SpawnTask, when non-nil, starts a child session (non-blocking for the parent).
 // TaskStatus/TaskRead/TaskMessage/TaskInterrupt, when non-nil, inspect or
 // control owned descendant sessions (never arbitrary sessions).
+// AgentRoster, when non-nil, lists the implicit session team (lead + peers).
 // AskUser, when non-nil, blocks until the user answers a question batch.
 // SwitchAgent, when non-nil, queues an agent switch applied when the turn ends.
 // EnterPlanPhase starts the built-in plan→implement workflow at plan.
@@ -200,8 +226,10 @@ type Context struct {
 	TaskMessage func(ctx context.Context, req TaskMessageRequest) (TaskMessageResult, error)
 	// TaskInterrupt cancels an owned running child by session id.
 	TaskInterrupt func(ctx context.Context, req TaskInterruptRequest) (TaskInterruptResult, error)
-	AskUser       func(ctx context.Context, req QuestionRequest) (QuestionResponse, error)
-	SwitchAgent   func(name string) error
+	// AgentRoster lists lead + teammates on the implicit session team.
+	AgentRoster func(ctx context.Context, req AgentRosterRequest) (AgentRosterResult, error)
+	AskUser     func(ctx context.Context, req QuestionRequest) (QuestionResponse, error)
+	SwitchAgent func(name string) error
 	// EnterPlanPhase starts the default plan-implement workflow at the plan phase.
 	EnterPlanPhase func() error
 	// AdvancePhase clears the current phase exit gate and advances (or ends).

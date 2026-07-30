@@ -932,6 +932,10 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			tc.TaskMessage = e.childMessage
 			tc.TaskInterrupt = e.childInterrupt
 		}
+		// agent_roster is available on lead and children (shared team).
+		if e.team != nil {
+			tc.AgentRoster = e.agentRoster
+		}
 		tc.ChildWake = e.childWakeCh()
 		tc.HasChildNotice = e.hasPendingChildNotices
 		res, err = t.Execute(ctx, call.Args, tc)

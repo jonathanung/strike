@@ -237,11 +237,16 @@ type beginReq struct {
 }
 
 type Engine struct {
-	opts      Options
-	ops       chan protocol.Op
-	events    chan protocol.Event
-	perms     *permission.Service
-	questions *question.Service
+	opts   Options
+	ops    chan protocol.Op
+	events chan protocol.Event
+	// emitMu serializes emit against Events close so child drain can still
+	// publish terminal snapshots (ChildCompleted, team.roster) without racing
+	// Run's deferred close.
+	emitMu       sync.Mutex
+	eventsClosed bool
+	perms        *permission.Service
+	questions    *question.Service
 
 	// beginReqs is served only by Run so Interrupt stays responsive while a
 	// worker needs ToolCallBegin emitted into a full Events buffer.
@@ -425,7 +430,24 @@ func (e *Engine) Messages() []provider.Message {
 func (e *Engine) Ops() chan<- protocol.Op       { return e.ops }
 func (e *Engine) Events() <-chan protocol.Event { return e.events }
 
-func (e *Engine) emit(ev protocol.Event) { e.events <- ev }
+func (e *Engine) emit(ev protocol.Event) {
+	e.emitMu.Lock()
+	defer e.emitMu.Unlock()
+	if e.eventsClosed {
+		return
+	}
+	e.events <- ev
+}
+
+func (e *Engine) closeEvents() {
+	e.emitMu.Lock()
+	defer e.emitMu.Unlock()
+	if e.eventsClosed {
+		return
+	}
+	e.eventsClosed = true
+	close(e.events)
+}
 
 // emitSelected emits selection/phase confirms unless quietStartup is set
 // (resume re-applies state without re-appending the JSONL).
@@ -460,7 +482,7 @@ func (e *Engine) Run(ctx context.Context) {
 	// Keep Events open until children finish so ChildCompleted can emit.
 	// Dissolve the team after children shut down so terminal members stay
 	// listable for the lead's lifetime, then clear on lead exit.
-	defer close(e.events)
+	defer e.closeEvents()
 	defer e.dissolveTeamIfLead()
 	defer e.shutdownChildren()
 	e.quietStartup = e.opts.QuietStartup

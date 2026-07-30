@@ -1,11 +1,13 @@
 package engine
 
 import (
+	"context"
 	"slices"
 	"testing"
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike-cli/internal/tool"
 )
 
 func TestTeamLeadAndChildrenRoster(t *testing.T) {
@@ -149,9 +151,21 @@ func TestFinishChildUpdatesTeamState(t *testing.T) {
 		Status:      protocol.ChildStatusCanceled,
 		Summary:     "canceled",
 	})
+	// Drain team.roster snapshot emitted by finishChild.
+	select {
+	case ev := <-e.Events():
+		if _, ok := ev.(protocol.TeamRoster); !ok {
+			t.Fatalf("expected TeamRoster, got %T", ev)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for TeamRoster")
+	}
 	m, ok := e.team.Member("A")
 	if !ok || m.State != protocol.TeamMemberCanceled {
 		t.Fatalf("after cancel finish: %+v ok=%v", m, ok)
+	}
+	if m.Summary != "canceled" {
+		t.Fatalf("summary = %q", m.Summary)
 	}
 	if e.children["A"] != nil {
 		t.Fatal("live handle should be removed")
@@ -165,6 +179,11 @@ func TestFinishChildUpdatesTeamState(t *testing.T) {
 	e.finishChild(h2, protocol.ChildCompleted{
 		Status: protocol.ChildStatusFailed,
 	})
+	select {
+	case <-e.Events():
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for second TeamRoster")
+	}
 	m, _ = e.team.Member("B")
 	if m.State != protocol.TeamMemberFailed {
 		t.Fatalf("fail state = %q", m.State)
@@ -216,6 +235,78 @@ func TestTeamMemberStateFromChild(t *testing.T) {
 	for _, tc := range cases {
 		if got := protocol.TeamMemberStateFromChild(tc.in); got != tc.want {
 			t.Errorf("TeamMemberStateFromChild(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestAgentRosterChildSeesLeadAndSiblings(t *testing.T) {
+	lead := New(Options{SessionID: "L", InitialAgent: "build", Agents: []Agent{{Name: "build"}}})
+	tm := lead.team
+	if tm == nil {
+		t.Fatal("nil team")
+	}
+	if !tm.Enroll(TeamMember{SessionID: "A", ParentSessionID: "L", Persona: "explore", Depth: 1, StartedAt: time.Now()}) {
+		t.Fatal("enroll A")
+	}
+	if !tm.Enroll(TeamMember{SessionID: "B", ParentSessionID: "L", Persona: "general", Depth: 1, StartedAt: time.Now()}) {
+		t.Fatal("enroll B")
+	}
+	tm.SetTerminal("B", protocol.TeamMemberCompleted, "b done")
+
+	// Child engine A shares the lead team pointer.
+	childA := New(Options{
+		SessionID:       "A",
+		ParentSessionID: "L",
+		Depth:           1,
+		MaxChildDepth:   1,
+		Team:            tm,
+		InitialAgent:    "explore",
+		Agents:          []Agent{{Name: "explore"}, {Name: "build"}},
+	})
+	res, err := childA.agentRoster(context.Background(), tool.AgentRosterRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.LeadID != "L" || len(res.Members) != 3 {
+		t.Fatalf("roster = %+v", res)
+	}
+	var sawLead, sawSelf, sawSibling bool
+	for _, m := range res.Members {
+		switch m.SessionID {
+		case "L":
+			sawLead = m.Role == "lead" && !m.IsSelf && m.State == "working"
+		case "A":
+			sawSelf = m.IsSelf && m.Role == "member" && m.Agent == "explore"
+		case "B":
+			sawSibling = !m.IsSelf && m.State == "completed" && m.TerminalSummary == "b done"
+		}
+	}
+	if !sawLead || !sawSelf || !sawSibling {
+		t.Fatalf("lead=%v self=%v sibling=%v members=%+v", sawLead, sawSelf, sawSibling, res.Members)
+	}
+}
+
+func TestAgentRosterNilTeam(t *testing.T) {
+	e := &Engine{opts: Options{SessionID: "x"}}
+	if _, err := e.agentRoster(context.Background(), tool.AgentRosterRequest{}); err == nil {
+		t.Fatal("expected error for nil team")
+	}
+}
+
+func TestTeamStateToTaskVocab(t *testing.T) {
+	cases := []struct {
+		in   protocol.TeamMemberState
+		want string
+	}{
+		{protocol.TeamMemberRunning, "working"},
+		{protocol.TeamMemberCompleted, "completed"},
+		{protocol.TeamMemberFailed, "failed"},
+		{protocol.TeamMemberCanceled, "canceled"},
+		{"", "unknown"},
+	}
+	for _, tc := range cases {
+		if got := teamStateToTaskVocab(tc.in); got != tc.want {
+			t.Errorf("teamStateToTaskVocab(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }
