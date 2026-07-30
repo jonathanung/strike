@@ -37,19 +37,18 @@ var editorTabOrder = []string{"Navigation", "Global", "Editor", "Composer", "Com
 // keybindEditor is a modal for interactively rebinding keys and saving overrides
 // to ~/.strike/keybinds.jsonc. Bindings are filtered by the active category tab.
 type keybindEditor struct {
-	entries    []keybindEntry
-	filtered   []keybindEntry
-	cursor     int
-	filter     string
-	pending    map[string][]string
-	saved      map[string][]string
-	capturing  bool
-	captureID  string
-	effective  keyMap
-	settings   host.Settings
-	tab        int // index into editorTabOrder; -1 means "all"
+	entries   []keybindEntry
+	filtered  []keybindEntry
+	cursor    int
+	filter    string
+	pending   map[string][]string
+	saved     map[string][]string
+	capturing bool
+	captureID string
+	effective keyMap
+	settings  host.Settings
+	tab       int // index into editorTabOrder; -1 means "all"
 }
-
 
 func newKeybindEditor(effective keyMap, persistedOverrides map[string][]string, settings host.Settings) *keybindEditor {
 	m := &keybindEditor{

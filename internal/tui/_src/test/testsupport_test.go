@@ -253,13 +253,13 @@ type savedPresentation struct {
 }
 
 type fakeSettings struct {
-	defaults       host.UserDefaults
-	saved          []savedDefaults
-	savedThemes    []string
-	savedPres      []savedPresentation
-	savedKeybinds  []map[string][]string
-	err            error
-	themeErr       error
+	defaults      host.UserDefaults
+	saved         []savedDefaults
+	savedThemes   []string
+	savedPres     []savedPresentation
+	savedKeybinds []map[string][]string
+	err           error
+	themeErr      error
 }
 
 func (s *fakeSettings) Defaults() host.UserDefaults {

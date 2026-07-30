@@ -46,7 +46,7 @@ func (s testSettings) SaveDefaults(provider, model, agent, effort, mode string) 
 }
 func (testSettings) SaveTheme(string) error                        { return nil }
 func (testSettings) SavePresentation(string, string, string) error { return nil }
-func (testSettings) SaveKeybinds(map[string][]string) error         { return nil }
+func (testSettings) SaveKeybinds(map[string][]string) error        { return nil }
 
 func TestAttachOnlyBootstrapDeclaresProtocolOpsUnavailable(t *testing.T) {
 	srv, err := New(Options{SessionDir: t.TempDir()})
