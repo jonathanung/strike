@@ -3,7 +3,7 @@ package tui
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/tui/ui"
@@ -283,5 +283,10 @@ func styleColumns(line string, start, end int, style lipgloss.Style) string {
 	left := ansi.Cut(line, 0, start)
 	mid := ansi.Strip(ansi.Cut(line, start, end))
 	right := ansi.Cut(line, end, w)
+	// Lip Gloss v2 Render("") still emits open/close SGR (e.g. reverse). Skip
+	// empty mids so zero-width style pairs cannot shift later ansi.Cut cells.
+	if mid == "" {
+		return left + right
+	}
 	return left + style.Render(mid) + right
 }

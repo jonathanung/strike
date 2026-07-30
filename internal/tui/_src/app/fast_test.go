@@ -6,8 +6,6 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
 
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -80,10 +78,6 @@ func TestFastCommandWaitsForEngineConfirmationBeforeChangingState(t *testing.T) 
 }
 
 func TestFastSelectedUpdatesNoticeAndRendersAlongsideEffort(t *testing.T) {
-	saved := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(saved) })
-
 	m, _ := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})
 	m.applyEvent(protocol.EffortSelected{Level: protocol.EffortHigh})

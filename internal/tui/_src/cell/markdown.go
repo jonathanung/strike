@@ -4,9 +4,9 @@ import (
 	"strings"
 	"sync"
 
+	"charm.land/lipgloss/v2/compat"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/glamour/styles"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -25,7 +25,7 @@ func glamourStyle() string {
 	glamourStyleMu.Lock()
 	defer glamourStyleMu.Unlock()
 	if glamourStyleName == "" {
-		if lipgloss.HasDarkBackground() {
+		if compat.HasDarkBackground {
 			glamourStyleName = styles.DarkStyle
 		} else {
 			glamourStyleName = styles.LightStyle

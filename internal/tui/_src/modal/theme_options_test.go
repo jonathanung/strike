@@ -7,9 +7,8 @@ import (
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/muesli/termenv"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -51,12 +50,13 @@ func TestOptionsThemeResolvesAndCopiesCallerValueBeforeWidgetSetup(t *testing.T)
 
 func TestOptionsThemeCopiesPointedBackgroundColorBeforeRendering(t *testing.T) {
 	setTUITrueColor(t)
-	background := lipgloss.Color("#112233")
+	background := theme.AdaptiveColor{Light: "#112233", Dark: "#112233"}
 	th := theme.Theme{Background: &background}
 	m, _ := newAppTestModelWithOptions(Options{Theme: &th})
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 40, Height: 12})
 	before := viewString(m)
-	background = "#445566"
+	background.Light = "#445566"
+	background.Dark = "#445566"
 	after := viewString(m)
 
 	if !strings.Contains(before, "48;2;17;34;51") {
@@ -231,15 +231,12 @@ func TestModelViewCanvasCoversModalGuttersAndFooter(t *testing.T) {
 	}
 }
 
-func fixedColor(hex string) lipgloss.AdaptiveColor {
-	return lipgloss.AdaptiveColor{Light: hex, Dark: hex}
+func fixedColor(hex string) theme.AdaptiveColor {
+	return theme.AdaptiveColor{Light: hex, Dark: hex}
 }
 
 func setTUITrueColor(t *testing.T) {
 	t.Helper()
-	saved := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(saved) })
 }
 
 func rgbSGR(hex string) string {

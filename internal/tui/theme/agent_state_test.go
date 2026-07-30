@@ -1,9 +1,8 @@
 package theme_test
 
 import (
+	"image/color"
 	"testing"
-
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
@@ -30,7 +29,7 @@ func TestAgentStateColorTokens(t *testing.T) {
 	th := theme.Default()
 	cases := []struct {
 		state theme.AgentState
-		want  lipgloss.AdaptiveColor
+		want  theme.AdaptiveColor
 	}{
 		{theme.AgentStateReady, th.Success},
 		{theme.AgentStateWorking, th.AccentAlt},
@@ -48,11 +47,11 @@ func TestAgentStateColorTokens(t *testing.T) {
 
 func TestAgentStateColorUsesCustomThemeTokens(t *testing.T) {
 	th := theme.Theme{
-		Success:   lipgloss.AdaptiveColor{Light: "#010101", Dark: "#010101"},
-		AccentAlt: lipgloss.AdaptiveColor{Light: "#020202", Dark: "#020202"},
-		Warning:   lipgloss.AdaptiveColor{Light: "#030303", Dark: "#030303"},
-		Error:     lipgloss.AdaptiveColor{Light: "#040404", Dark: "#040404"},
-		TextMuted: lipgloss.AdaptiveColor{Light: "#050505", Dark: "#050505"},
+		Success:   theme.AdaptiveColor{Light: "#010101", Dark: "#010101"},
+		AccentAlt: theme.AdaptiveColor{Light: "#020202", Dark: "#020202"},
+		Warning:   theme.AdaptiveColor{Light: "#030303", Dark: "#030303"},
+		Error:     theme.AdaptiveColor{Light: "#040404", Dark: "#040404"},
+		TextMuted: theme.AdaptiveColor{Light: "#050505", Dark: "#050505"},
 	}.Resolve()
 
 	if got := th.AgentStateColor(theme.AgentStateReady); got != th.Success {
@@ -82,11 +81,11 @@ func TestAgentStateStylesUseTokenForeground(t *testing.T) {
 		theme.AgentStateDead,
 	} {
 		want := th.AgentStateColor(state)
-		if got := th.AgentStateStyle(state).GetForeground(); got != want {
+		if got := th.AgentStateStyle(state).GetForeground(); got != color.Color(want) {
 			t.Errorf("AgentStateStyle(%v) fg = %v, want %v", state, got, want)
 		}
 		strong := th.AgentStateStrongStyle(state)
-		if got := strong.GetForeground(); got != want {
+		if got := strong.GetForeground(); got != color.Color(want) {
 			t.Errorf("AgentStateStrongStyle(%v) fg = %v, want %v", state, got, want)
 		}
 		if !strong.GetBold() {
@@ -97,7 +96,7 @@ func TestAgentStateStylesUseTokenForeground(t *testing.T) {
 
 func TestSpinnerStyleUsesWorkingToken(t *testing.T) {
 	th := theme.Default()
-	if got, want := th.S().Spinner.GetForeground(), th.AccentAlt; got != want {
+	if got, want := th.S().Spinner.GetForeground(), color.Color(th.AccentAlt); got != want {
 		t.Errorf("Spinner fg = %v, want AccentAlt %v", got, want)
 	}
 }
@@ -106,7 +105,7 @@ func TestDefaultWarningIsClearYellow(t *testing.T) {
 	// Needs-you (Attention) and other caution chrome share Warning; keep it a
 	// readable yellow pair, not muddy amber.
 	th := theme.Default()
-	want := lipgloss.AdaptiveColor{Light: "#a16207", Dark: "#ffd84d"}
+	want := theme.AdaptiveColor{Light: "#a16207", Dark: "#ffd84d"}
 	if th.Warning != want {
 		t.Errorf("Default Warning = %#v, want clear yellow %#v", th.Warning, want)
 	}
@@ -137,7 +136,7 @@ func TestPackagedThemesWarningYellowReadable(t *testing.T) {
 				t.Fatalf("theme %q missing from Builtin", tc.id)
 			}
 			got := e.Theme.AgentStateColor(theme.AgentStateAttention)
-			want := lipgloss.AdaptiveColor{Light: tc.light, Dark: tc.dark}
+			want := theme.AdaptiveColor{Light: tc.light, Dark: tc.dark}
 			if got != want {
 				t.Fatalf("Attention/Warning = %#v, want yellow %#v", got, want)
 			}

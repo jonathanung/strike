@@ -104,7 +104,7 @@ func TestReasoningDeltaHiddenByDefaultAndShownWhenToggled(t *testing.T) {
 		t.Errorf("answer missing with toggle on:\n%s", shown)
 	}
 	header := ansi.Strip(m.headerView(100))
-	if !strings.Contains(header, ui.Badge(m.th, ui.ToneMuted, "think")) {
+	if !strings.Contains(header, ansi.Strip(ui.Badge(m.th, ui.ToneMuted, "think"))) {
 		t.Errorf("header does not render think as muted badge:\n%s", header)
 	}
 }

@@ -1,6 +1,6 @@
 package theme
 
-import "github.com/charmbracelet/lipgloss"
+import "charm.land/lipgloss/v2"
 
 // Styles holds the handful of lipgloss styles nearly every view needs,
 // precomputed from a Theme's color roles. Building them once through S()
@@ -29,7 +29,8 @@ type Styles struct {
 
 // S returns the common styles for this theme. It allocates fresh styles on
 // each call (lipgloss styles are cheap value types); call it once per render
-// and reuse the result.
+// and reuse the result. AdaptiveColor → lipgloss color conversion happens
+// here via AdaptiveColor.RGBA (compat).
 func (t Theme) S() Styles {
 	t = t.Resolve()
 	base := lipgloss.NewStyle()
