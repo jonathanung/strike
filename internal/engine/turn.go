@@ -89,12 +89,17 @@ func (e *Engine) enqueueUserInput(op protocol.UserInput) {
 }
 
 // drainIdleFollowups starts at most one follow-up turn when idle: preferred
-// user-queued input, otherwise pending child-completion notices.
+// user-queued input, otherwise pending child-completion notices, otherwise
+// peer mailbox messages.
 func (e *Engine) drainIdleFollowups(ctx context.Context) {
 	if e.startNextPendingUserInput(ctx) {
 		return
 	}
-	e.flushPendingChildNotices(ctx)
+	if e.hasPendingChildNotices() {
+		e.flushPendingChildNotices(ctx)
+		return
+	}
+	e.flushPendingMailbox(ctx)
 }
 
 // startNextPendingUserInput pops and starts the next queued UserInput when
@@ -218,10 +223,10 @@ func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.Ima
 
 	// Default loop (unchanged).
 	for {
-		// Deliver child.completed into model history before each Stream so a
-		// parent that is still in-turn (e.g. sleep-polling) sees the result
-		// without waiting for idle auto-nudge.
+		// Deliver child.completed and peer mailbox messages into model history
+		// before each Stream (tool-round boundary). Never mid-tool-call.
 		e.injectPendingChildNotices()
+		e.injectPendingMailbox()
 		e.maybePruneToolResults()
 		e.maybeThresholdCompact(ctx, turnID)
 		outcome, reqCorr, err := e.streamModel(ctx, turnID)
@@ -273,6 +278,7 @@ func (e *Engine) runHarnessTurn(ctx context.Context, h harness.Harness, hName st
 		callbackMu.Lock()
 		defer callbackMu.Unlock()
 		e.injectPendingChildNotices()
+		e.injectPendingMailbox()
 		e.maybePruneToolResults()
 		e.maybeThresholdCompact(ctx, turnID)
 		e.applyPendingAgent()

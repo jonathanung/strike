@@ -282,6 +282,10 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 				e.emit(ev)
 			case protocol.ChildCompleted:
 				e.emit(ev)
+			case protocol.AgentMessage:
+				// Peer mailbox traffic on a child: surface on the parent
+				// stream for TUI/debug (recipient correlation retained).
+				e.emit(ev)
 			case protocol.TeamRoster:
 				// Nested engines share the lead team; bubble roster snapshots.
 				e.emit(ev)
@@ -411,6 +415,11 @@ func (e *Engine) finishChild(h *childHandle, completed protocol.ChildCompleted) 
 		events:    append([]tool.TaskTranscriptEntry(nil), h.events...),
 	}
 	h.mu.Unlock()
+
+	// Stop accepting peer mail before the handle leaves the live map.
+	if e.team != nil {
+		e.team.DetachMailbox(h.id)
+	}
 
 	e.childMu.Lock()
 	delete(e.children, h.id)

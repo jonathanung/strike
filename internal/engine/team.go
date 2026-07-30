@@ -21,10 +21,14 @@ import (
 // never appear here.
 //
 // Terminal members stay listable until Dissolve (lead session end / GC).
+//
+// Live mailbox targets (see AttachMailbox) enable peer delivery while an
+// engine's Run is active; completed members reject new mail.
 type Team struct {
 	mu      sync.Mutex
 	leadID  string
-	members map[string]TeamMember // session id → member
+	members map[string]TeamMember     // session id → member
+	live    map[string]*mailboxTarget // session id → live engine mailbox
 }
 
 // TeamMember is one roster entry (lead or child).
@@ -259,6 +263,7 @@ func (t *Team) Dissolve() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.members = make(map[string]TeamMember)
+	t.live = make(map[string]*mailboxTarget)
 }
 
 // Len returns the number of roster entries (including the lead while active).

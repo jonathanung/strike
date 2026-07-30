@@ -486,6 +486,21 @@ type ChildCompleted struct {
 	Summary string      `json:"summary,omitempty"`
 }
 
+// AgentMessage records a peer/team mailbox delivery for UI and debugging.
+// Correlation is the recipient session. Body is the message text; From/To are
+// session ids; TeamID is the lead session id (team identity).
+// Emitted on the recipient engine at boundary injection (tool-round / idle
+// nudge), never mid-tool-call.
+type AgentMessage struct {
+	Correlation
+	From   string `json:"from"`
+	To     string `json:"to"`
+	Body   string `json:"body"`
+	TeamID string `json:"teamId,omitempty"`
+	// MessageID is a stable id for ack/dedup within the session.
+	MessageID string `json:"messageId,omitempty"`
+}
+
 // UserMessage echoes accepted user input into the event stream so the
 // transcript is fully reconstructable from events alone.
 type UserMessage struct {
@@ -924,6 +939,7 @@ func (FilesInvalidated) isEvent()       {}
 func (EngineError) isEvent()            {}
 func (ChildStarted) isEvent()           {}
 func (ChildCompleted) isEvent()         {}
+func (AgentMessage) isEvent()           {}
 func (TeamRoster) isEvent()             {}
 func (UsageReported) isEvent()          {}
 func (ProviderRetrying) isEvent()       {}
