@@ -141,6 +141,9 @@ func TestKeybindEditorResetOverride(t *testing.T) {
 	if _, ok := m.pending["nav.jump-bottom"]; ok {
 		t.Error("expected pending to be cleared after ctrl+d")
 	}
+	if _, ok := m.saved["nav.jump-bottom"]; ok {
+		t.Error("expected saved to be cleared after ctrl+d")
+	}
 	if cmd == nil {
 		t.Fatal("expected cmd after ctrl+d reset")
 	}
@@ -157,13 +160,39 @@ func TestKeybindEditorResetOverride(t *testing.T) {
 	}
 }
 
+func TestKeybindEditorResetClearsSaved(t *testing.T) {
+	m := newTestKeybindEditor()
+	m.saved["nav.jump-bottom"] = []string{"ctrl+b"}
+	m.pending["nav.jump-bottom"] = []string{"ctrl+b"}
+	for i, e := range m.filtered {
+		if e.ID == "nav.jump-bottom" {
+			m.cursor = i
+			break
+		}
+	}
+
+	next, cmd := m.update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	if next == nil {
+		t.Fatal("ctrl+d closed modal")
+	}
+	if _, ok := m.pending["nav.jump-bottom"]; ok {
+		t.Error("expected pending cleared after ctrl+d")
+	}
+	if _, ok := m.saved["nav.jump-bottom"]; ok {
+		t.Error("expected saved cleared after ctrl+d")
+	}
+	if cmd == nil {
+		t.Fatal("expected cmd after ctrl+d reset")
+	}
+}
+
 func TestKeybindEditorSavePending(t *testing.T) {
 	m := newTestKeybindEditor()
 	m.pending["nav.jump-bottom"] = []string{"ctrl+b"}
 
-	next, cmd := m.update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	next, cmd := m.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}, Alt: true})
 	if next == nil {
-		t.Fatal("ctrl+s closed modal")
+		t.Fatal("alt+s closed modal")
 	}
 	if cmd == nil {
 		t.Fatal("expected cmd for save")
