@@ -98,6 +98,8 @@ func Defaults() Ruleset {
 		{Permission: "task_message", Pattern: "*", Action: Allow},
 		{Permission: "task_interrupt", Pattern: "*", Action: Allow},
 		{Permission: "agent_roster", Pattern: "*", Action: Allow},
+		// Peer messaging is allow-by-default within a team; Deliver still
+		// rejects out-of-team targets. Users may deny via rules.
 		{Permission: "agent_message", Pattern: "*", Action: Allow},
 		{Permission: "agent_broadcast", Pattern: "*", Action: Allow},
 		{Permission: "webfetch", Pattern: "*", Action: Ask},

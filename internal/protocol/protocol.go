@@ -497,10 +497,12 @@ type ChildCompleted struct {
 // nudge), never mid-tool-call.
 type AgentMessage struct {
 	Correlation
-	From   string `json:"from"`
-	To     string `json:"to"`
-	Body   string `json:"body"`
-	TeamID string `json:"teamId,omitempty"`
+	From string `json:"from"`
+	To   string `json:"to"`
+	Body string `json:"body"`
+	// Summary is an optional short UI label (not required for delivery).
+	Summary string `json:"summary,omitempty"`
+	TeamID  string `json:"teamId,omitempty"`
 	// MessageID is a stable id for ack/dedup within the session.
 	MessageID string `json:"messageId,omitempty"`
 }

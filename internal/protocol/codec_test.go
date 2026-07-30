@@ -47,6 +47,7 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 			From:        "session-1",
 			To:          "child-1",
 			Body:        "handoff package path",
+			Summary:     "handoff",
 			TeamID:      "session-1",
 			MessageID:   "msg-1",
 		},

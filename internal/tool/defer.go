@@ -11,6 +11,8 @@ var coreToolNames = map[string]struct{}{
 	"bash": {},
 	"task": {}, "task_status": {}, "task_read": {}, "task_message": {}, "task_interrupt": {},
 	"agent_roster":    {},
+	"agent_message":   {},
+	"agent_broadcast": {},
 	"toolsearch":      {},
 	"question":        {},
 	"enter_plan_mode": {}, "exit_plan_mode": {}, "phase_done": {},
