@@ -13,24 +13,34 @@ import (
 
 // hostCPUTicks widens the Mach tick counters across their 32-bit rollover. It
 // has its own lock because readHostCPU runs before sampleCPU takes Host.mu, and
-// Collect is documented safe for concurrent use.
+// Collect is documented safe for concurrent use. Multiple Host instances share
+// it deliberately: it only produces absolute counters, and each Host keeps its
+// own previous reading.
 var hostCPUTicks struct {
 	mu sync.Mutex
 	machTickWidener
 }
 
+// hostCPUSnapshot is a variable so tests can force a specific interleaving of
+// snapshot-versus-fold, which is what the lock scope in readHostCPU exists to
+// prevent. Production always uses machHostCPUTicks.
+var hostCPUSnapshot = machHostCPUTicks
+
 func readHostCPU() (idle, total uint64, ok bool) {
 	// Host CPU load is a Mach RPC on macOS — see mach_cpu_darwin.go. The old
 	// kern.cp_time sysctl read here is BSD-only; macOS never exported it, so
 	// this always reported unavailable (#602).
-	ticks, ok := machHostCPUTicks()
+	//
+	// The lock covers the snapshot as well as the fold. Reading outside it lets
+	// two concurrent Collect calls hand the widener snapshots in reverse order,
+	// which underflows the uint32 delta and adds ~2^32 ticks.
+	hostCPUTicks.mu.Lock()
+	defer hostCPUTicks.mu.Unlock()
+	ticks, ok := hostCPUSnapshot()
 	if !ok {
 		return 0, 0, false
 	}
-	hostCPUTicks.mu.Lock()
-	defer hostCPUTicks.mu.Unlock()
-	idle, total = hostCPUTicks.add(ticks)
-	return idle, total, true
+	return hostCPUTicks.add(ticks)
 }
 
 func readProcessCPUTime(pid int) (ns int64, ok bool) {

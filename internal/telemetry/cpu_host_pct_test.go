@@ -115,3 +115,82 @@ func TestSampleCPUClampsBogusDeltas(t *testing.T) {
 		t.Errorf("CPUHostPct = %v, want clamped within [0, 100]", s.CPUHostPct)
 	}
 }
+
+// A stalled counter may substitute the last percent only briefly. Past that the
+// reading is not measuring anything and a stale number is worse than
+// "unavailable" — the #602/#521 failure mode.
+func TestSampleCPUHoldExpires(t *testing.T) {
+	stalled := [2]uint64{750, 1000}
+	readings := [][2]uint64{{0, 0}, stalled}
+	for i := 0; i < maxHeldHostCPUSamples+2; i++ {
+		readings = append(readings, stalled)
+	}
+	h := NewHost()
+	h.readHostCPUFn = scriptedCPU(readings)
+	ctx := context.Background()
+
+	h.Collect(ctx, "")
+	if s, _ := h.Collect(ctx, ""); s.CPUHostPct != 25 {
+		t.Fatalf("CPUHostPct = %v, want 25", s.CPUHostPct)
+	}
+	for i := 0; i < maxHeldHostCPUSamples; i++ {
+		s, _ := h.Collect(ctx, "")
+		if !s.CPUHostOK {
+			t.Fatalf("hold %d: CPUHostOK = false, want the held value", i)
+		}
+		if s.CPUHostPct != 25 {
+			t.Errorf("hold %d: CPUHostPct = %v, want 25", i, s.CPUHostPct)
+		}
+	}
+	if s, _ := h.Collect(ctx, ""); s.CPUHostOK {
+		t.Errorf("hold did not expire after %d stalled samples", maxHeldHostCPUSamples)
+	}
+}
+
+// Counters running backwards is the strongest signal the reading is nonsense,
+// so it must not be absorbed by the hold.
+func TestSampleCPURegressionReportsUnavailable(t *testing.T) {
+	h := NewHost()
+	h.readHostCPUFn = scriptedCPU([][2]uint64{
+		{0, 0},
+		{750, 1000},
+		{700, 900}, // total went backwards
+		{700, 900},
+	})
+	ctx := context.Background()
+
+	h.Collect(ctx, "")
+	if s, _ := h.Collect(ctx, ""); !s.CPUHostOK {
+		t.Fatal("second sample should report a percent")
+	}
+	if s, _ := h.Collect(ctx, ""); s.CPUHostOK {
+		t.Error("regressed counters should report unavailable, not a held percent")
+	}
+	// And it stays unavailable rather than resurrecting the stale value.
+	if s, _ := h.Collect(ctx, ""); s.CPUHostOK {
+		t.Error("stale percent resurrected after a regression")
+	}
+}
+
+// A recovered counter must start reporting again.
+func TestSampleCPURecoversAfterStall(t *testing.T) {
+	h := NewHost()
+	h.readHostCPUFn = scriptedCPU([][2]uint64{
+		{0, 0},
+		{750, 1000},  // 25%
+		{750, 1000},  // stall
+		{1500, 3000}, // resumes: delta idle 750 of 2000 -> 62.5%
+	})
+	ctx := context.Background()
+
+	h.Collect(ctx, "")
+	h.Collect(ctx, "")
+	h.Collect(ctx, "")
+	s, _ := h.Collect(ctx, "")
+	if !s.CPUHostOK {
+		t.Fatal("CPUHostOK = false after counters resumed")
+	}
+	if s.CPUHostPct != 62.5 {
+		t.Errorf("CPUHostPct = %v, want 62.5", s.CPUHostPct)
+	}
+}

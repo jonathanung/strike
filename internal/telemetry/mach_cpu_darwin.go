@@ -5,8 +5,7 @@ package telemetry
 import (
 	"sync"
 	"syscall"
-	"unsafe"
-	_ "unsafe" // for go:linkname
+	"unsafe" // also required for go:linkname below
 )
 
 // Host CPU load on macOS comes from host_statistics(HOST_CPU_LOAD_INFO), a Mach

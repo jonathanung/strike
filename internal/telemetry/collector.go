@@ -7,6 +7,13 @@ import (
 	"time"
 )
 
+// maxHeldHostCPUSamples bounds how many consecutive samples may reuse the last
+// host CPU percent while the kernel counters sit still. macOS flushes per-core
+// ticks roughly once a second, so at the 1 Hz DefaultInterval one or two stalled
+// samples are normal; beyond that the counter is not advancing for a reason the
+// aggregation gap explains, and a stale number is worse than "unavailable".
+const maxHeldHostCPUSamples = 3
+
 // Host is the default platform collector for macOS/Linux. It is safe for
 // concurrent Collect calls but keeps CPU deltas in internal state, so prefer
 // one instance per process.
@@ -25,9 +32,11 @@ type Host struct {
 	// Last computed host percent, reused when the kernel counters have not
 	// advanced since the previous sample. macOS aggregates per-core ticks
 	// lazily (roughly once a second), so at the 1 Hz DefaultInterval a sample
-	// can land inside a window with no movement.
-	prevHostPct   float64
-	prevHostPctOK bool
+	// can land inside a window with no movement. heldHostSamples bounds how
+	// long that substitution may continue.
+	prevHostPct     float64
+	prevHostPctOK   bool
+	heldHostSamples int
 
 	// Previous process CPU time (ns) and wall time for process percent.
 	prevProcNS int64
@@ -118,27 +127,37 @@ func (h *Host) sampleCPU(s *Sample) {
 	defer h.mu.Unlock()
 
 	if hostOK {
-		if h.prevHostOK {
-			if total > h.prevHostTotal {
-				deltaTotal := total - h.prevHostTotal
-				deltaIdle := idle - h.prevHostIdle
-				busy := float64(deltaTotal-deltaIdle) / float64(deltaTotal) * 100
-				if busy < 0 {
-					busy = 0
-				}
-				if busy > 100 {
-					busy = 100
-				}
-				s.CPUHostPct = busy
-				s.CPUHostOK = true
-				h.prevHostPct = busy
-				h.prevHostPctOK = true
-			} else if h.prevHostPctOK {
-				// Counters did not advance. Hold the last percent rather than
-				// flickering the row to "unavailable" — see prevHostPct.
-				s.CPUHostPct = h.prevHostPct
-				s.CPUHostOK = true
+		switch {
+		case !h.prevHostOK:
+			// First reading only establishes the baseline.
+		case total > h.prevHostTotal:
+			deltaTotal := total - h.prevHostTotal
+			deltaIdle := idle - h.prevHostIdle
+			busy := float64(deltaTotal-deltaIdle) / float64(deltaTotal) * 100
+			if busy < 0 {
+				busy = 0
 			}
+			if busy > 100 {
+				busy = 100
+			}
+			s.CPUHostPct = busy
+			s.CPUHostOK = true
+			h.prevHostPct = busy
+			h.prevHostPctOK = true
+			h.heldHostSamples = 0
+		case total == h.prevHostTotal && h.prevHostPctOK && h.heldHostSamples < maxHeldHostCPUSamples:
+			// Counters have not moved yet. Hold the last percent rather than
+			// flickering the row to "unavailable" — see prevHostPct.
+			h.heldHostSamples++
+			s.CPUHostPct = h.prevHostPct
+			s.CPUHostOK = true
+		default:
+			// Either the counters went backwards, or they have been frozen for
+			// longer than the aggregation gap explains. Both mean the reading
+			// is no longer measuring anything, so stop publishing a stale
+			// number and let the row read "unavailable".
+			h.prevHostPctOK = false
+			h.heldHostSamples = 0
 		}
 		h.prevHostTotal = total
 		h.prevHostIdle = idle
