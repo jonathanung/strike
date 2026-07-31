@@ -14,13 +14,45 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
-### Changed
+## [v0.1.0] - 2026-07-31
 
-- **Upgrade note:** `session.worktree` defaults to `off` again (launch cwd). Isolated git worktrees are opt-in via `session.worktree` `auto`/`always` or `strike --worktree` ([#672](https://github.com/jonathanung/strike/issues/672)).
+First minor milestone: agent teams, layout polish, Charm v2 TUI stack, and safer session defaults.
 
 ### Added
 
-- Added **agent teams**: an implicit session-scoped team (lead + `task` children in the same session tree) with `agent_roster`, `agent_message`, and `agent_broadcast` for mid-turn peer coordination, boundary-safe mailbox delivery, and default-allow permissions (out-of-team fails closed). Optional stable `name` aliases on `task` spawn. Parent-only `task_*` workflows remain unchanged when team tools are unused ([#404](https://github.com/jonathanung/strike/issues/404), [#607](https://github.com/jonathanung/strike/issues/607)–[#614](https://github.com/jonathanung/strike/issues/614), [#616](https://github.com/jonathanung/strike/issues/616)).
+- Added **agent teams**: an implicit session-scoped team (lead + `task` children in the same session tree) with `agent_roster`, `agent_message`, and `agent_broadcast` for mid-turn peer coordination, boundary-safe mailbox delivery, and default-allow permissions (out-of-team fails closed). Optional stable `name` aliases on `task` spawn. Shared `team_task` board with claim/CAS for multi-agent work items. Parent-only `task_*` workflows remain unchanged when team tools are unused ([#404](https://github.com/jonathanung/strike/issues/404), [#607](https://github.com/jonathanung/strike/issues/607)–[#616](https://github.com/jonathanung/strike/issues/616), [#644](https://github.com/jonathanung/strike/pull/644)).
+- Added team roster and message surfaces in the agents and activity panes ([#642](https://github.com/jonathanung/strike/pull/642)).
+- Added a pre-first-prompt **home layout** (centered wordmark and prompt, thin context bar) that switches to the multi-pane workspace after the first transcript cell ([#677](https://github.com/jonathanung/strike/issues/677), [#682](https://github.com/jonathanung/strike/pull/682)).
+- Added content-aware flex sizing for stacked right panes so sparse panes (context, system) shrink to content and activity fills the remainder ([#680](https://github.com/jonathanung/strike/issues/680), [#682](https://github.com/jonathanung/strike/pull/682)).
+- Added stronger prompt chrome: composer mode title, focused glyph, and send-state / image / queue / pending-approval chips ([#678](https://github.com/jonathanung/strike/issues/678), [#682](https://github.com/jonathanung/strike/pull/682)).
+- Added context-sensitive footer hints (composer vs right-pane navigation) instead of one overloaded keybind sentence ([#679](https://github.com/jonathanung/strike/issues/679), [#682](https://github.com/jonathanung/strike/pull/682)).
+- Added `ctrl+shift+o` / `ctrl+shift+p` (and `/group-next` / `/group-prev`) to cycle right-pane **stack groups** ([#671](https://github.com/jonathanung/strike/issues/671), [#676](https://github.com/jonathanung/strike/pull/676)).
+- Added Family-style soft rounded bento chrome and a calmer Default palette density ([#648](https://github.com/jonathanung/strike/pull/648), [#654](https://github.com/jonathanung/strike/pull/654), [#656](https://github.com/jonathanung/strike/pull/656)).
+- Added terminal background detection so adaptive theme colors follow the host terminal ([#643](https://github.com/jonathanung/strike/pull/643)).
+- Added task **function harnesses** with Go, TypeScript, and Lean SDKs plus examples for custom turn-loop controllers ([#627](https://github.com/jonathanung/strike/pull/627)).
+
+### Changed
+
+- **Upgrade note:** `session.worktree` defaults to `off` again (launch cwd). Isolated git worktrees are opt-in via `session.worktree` `auto`/`always` or `strike --worktree`. This reverses the v0.0.14 default of always-on worktrees ([#672](https://github.com/jonathanung/strike/issues/672), [#674](https://github.com/jonathanung/strike/pull/674)).
+- Migrated the TUI stack to Charm v2 (Bubble Tea, Lip Gloss, Bubbles, Glamour) with adaptive theme colors ([#636](https://github.com/jonathanung/strike/pull/636), [#640](https://github.com/jonathanung/strike/pull/640), [#646](https://github.com/jonathanung/strike/pull/646), [#647](https://github.com/jonathanung/strike/pull/647)).
+- Refactored the experimental web cockpit workspace panels for clearer attach UX ([#622](https://github.com/jonathanung/strike/pull/622)).
+
+### Fixed
+
+- Fixed web cockpit attach token auth: opening `/attach?token=…` sets an HttpOnly cookie and redirects so subsequent API/SSE/WebSocket calls authenticate without leaving the secret in the address bar ([#662](https://github.com/jonathanung/strike/issues/662), [#673](https://github.com/jonathanung/strike/pull/673)).
+- Fixed sibling `agent_message` delivery when models address teammates by unique short session-id prefixes ([#650](https://github.com/jonathanung/strike/issues/650), [#681](https://github.com/jonathanung/strike/pull/681)).
+- Restored bash access for the default `general` persona when spawned as a task child ([#651](https://github.com/jonathanung/strike/issues/651), [#668](https://github.com/jonathanung/strike/pull/668)).
+- Soft-failed session worktree bind outside git repositories instead of hard-erroring on launch ([#661](https://github.com/jonathanung/strike/issues/661), [#667](https://github.com/jonathanung/strike/pull/667)).
+- Limited left-pane focus highlight to the prompt box rather than the whole column ([#663](https://github.com/jonathanung/strike/issues/663), [#666](https://github.com/jonathanung/strike/pull/666)).
+- Clarified the activity empty state (no idle keybind noise) and visualizer metric (tokens/turn) ([#669](https://github.com/jonathanung/strike/issues/669), [#670](https://github.com/jonathanung/strike/issues/670), [#675](https://github.com/jonathanung/strike/pull/675)).
+- Preserved composer drafts across palette actions and restored embedded Vim truecolor / terminal color queries ([#653](https://github.com/jonathanung/strike/pull/653), [#657](https://github.com/jonathanung/strike/pull/657), [#658](https://github.com/jonathanung/strike/pull/658), [#660](https://github.com/jonathanung/strike/pull/660)).
+- Showed bang/shell tool activity immediately in the activity pane ([#631](https://github.com/jonathanung/strike/pull/631)).
+- Treated Linux idle/iowait regression as busy CPU so telemetry no longer reports 0% under heavy I/O ([#630](https://github.com/jonathanung/strike/pull/630)).
+- Allowed child-agent permission allow to upgrade a parent ask without failing closed incorrectly ([#668](https://github.com/jonathanung/strike/pull/668)).
+
+**Contributors:** [@jonathanung](https://github.com/jonathanung), [@FrederickPu](https://github.com/FrederickPu), [@dayvidpham](https://github.com/dayvidpham), and [@NicholasTamm](https://github.com/NicholasTamm).
+
+**Full changelog:** [v0.0.14...v0.1.0](https://github.com/jonathanung/strike/compare/v0.0.14...v0.1.0)
 
 ## [v0.0.14] - 2026-07-30
 
@@ -284,7 +316,8 @@ Initial public release.
 
 **Full changelog:** [commits through v0.0.1](https://github.com/jonathanung/strike/commits/v0.0.1)
 
-[Unreleased]: https://github.com/jonathanung/strike/compare/v0.0.14...HEAD
+[Unreleased]: https://github.com/jonathanung/strike/compare/v0.1.0...HEAD
+[v0.1.0]: https://github.com/jonathanung/strike/compare/v0.0.14...v0.1.0
 [v0.0.14]: https://github.com/jonathanung/strike/compare/v0.0.12...v0.0.14
 [v0.0.12]: https://github.com/jonathanung/strike/compare/v0.0.11...v0.0.12
 [v0.0.11]: https://github.com/jonathanung/strike/compare/v0.0.10...v0.0.11
