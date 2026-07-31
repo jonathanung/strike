@@ -73,6 +73,11 @@ func (m Model) renderFrame() string {
 		return "starting…"
 	}
 
+	// Pre-first-prompt home: centered wordmark + prompt, no multi-pane split (#677).
+	if m.showHomeLayout() {
+		return m.renderHomeFrame()
+	}
+
 	fc := m.frames
 	if fc == nil {
 		fc = newFrameCache()

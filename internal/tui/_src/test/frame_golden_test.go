@@ -73,10 +73,19 @@ func TestFrameGolden(t *testing.T) {
 			t.Cleanup(func() { compat.HasDarkBackground = savedDark })
 			compat.HasDarkBackground = true
 
-			m, _ := newAppTestModel(
-				[]string{"build", "plan"},
-				[]host.Skill{fakeSkill("review", "review a change", "Review $ARGUMENTS")},
-			)
+			// Empty-frame goldens use home layout (#677); busy transcript uses multi-pane.
+			var m Model
+			if strings.Contains(tc.file, "busy-transcript") {
+				m, _ = newAppTestModel(
+					[]string{"build", "plan"},
+					[]host.Skill{fakeSkill("review", "review a change", "Review $ARGUMENTS")},
+				)
+			} else {
+				m, _ = newAppTestModelHome(
+					[]string{"build", "plan"},
+					[]host.Skill{fakeSkill("review", "review a change", "Review $ARGUMENTS")},
+				)
+			}
 			m.workDir = "/tmp/strike-golden"
 			m = updateApp(t, m, tea.WindowSizeMsg{Width: tc.width, Height: tc.height})
 			tc.build(&m)

@@ -1,40 +1,40 @@
 ⚡ strike /tmp/strike-golden   no model                                                 ready
-▁▁▁▁▁▁▁▁▁▁▁▁▁▁                                               ╭─ context ────────────────────╮
-⚡ S T R I K E                                               │ model  none /provider        │
-▔▔▔▔▔▔▔▔▔▔▔▔▔▔                                               │ autonomy  supervised         │
-                                                             │ skills  1                    │
-╭─ get started ─────────────╮  ╭─ keys ────────────────────╮ │                              │
-│ /provider connect a model │  │ ctrl+h  focus left        │ │                              │
-│ ◦ anthropic  none         │  │ ctrl+l  focus right       │ │                              │
-│ ◦ openai  none            │  │ ctrl+o  next window       │ │                              │
-│ ◦ xai  none               │  │ ctrl+p  prev window       │ │                              │
-│ ◦ google  none            │  │ ctrl+;  toggle split      │ │                              │
-│ ◦ kimi  none              │  │ ctrl+e  external editor   │ │                              │
-│ type below · enter to se… │  │ ctrl+k  palette           │ ╰──────────────────────────────╯
-│         ╭─ Select theme ───────────────────────────────────────────────────────╮
-│         │ filter: ▏  7/7                                                       │──────────╮
-│         │ ▸ Strike (current) — strike · builtin                                │          │
-│         │   Catppuccin — catppuccin · builtin                                  │          │
-│         │   Dracula — dracula · builtin                                        │          │
-╰─────────│   Gruvbox — gruvbox · builtin                                        │          │
-          │   Monokai — monokai · builtin                                        │          │
-          │   Nord — nord · builtin                                              │          │
-╭─ agents │   Tokyo Night — tokyo-night · builtin                                │          │
-│ agents  │                                                                      │          │
-│   ◆ buil│ up/down/j/k move · type to filter · enter select · ctrl+d set        │          │
-│ skills  │ default · esc close                                                  │          │
-│   /revie╰──────────────────────────────────────────────────────────────────────╯──────────╯
-│   ◆ plan                                                 │
-│                                                          │ ╭─ system ─────────────────────╮
-│                                                          │ │ sampling…                    │
-│                                                          │ │                              │
-│                                                          │ │                              │
-│                                                          │ │                              │
-│                                                          │ │                              │
-╰──────────────────────────────────────────────────────────╯ │                              │
-                                                             │                              │
-╭─ prompt ❯ ───────────────────────────────────────────────╮ │                              │
-│ ❯ Ask anything…  (/ commands, ! shell)                   │ │                              │
-│ ❯                                                        │ │                              │
-╰─ enter send · ctrl+j/shift+enter/alt+enter newline ──────╯ ╰──────────────────────────────╯
-ctrl+h/ctrl+l panes · ctrl+o/ctrl+p windows · ctrl+; toggle split · ctrl+k palette
+╭─ context ─────────────────────────────────────────────────────────────────────────────────╮
+│ supervised · 1 skills · default permissions · /provider to connect                        │
+╰───────────────────────────────────────────────────────────────────────────────────────────╯
+
+
+
+
+
+
+
+
+
+          ╭─ Select theme ───────────────────────────────────────────────────────╮
+          │ filter: ▏  7/7                                                       │
+          │ ▸ Strike (current) — strike · builtin                                │
+          │   Catppuccin — catppuccin · builtin                                  │
+          │   Dracula — dracula · builtin                                        │
+          │   Gruvbox — gruvbox · builtin                                        │
+          │   Monokai — monokai · builtin                                        │
+          │   Nord — nord · builtin                                              │
+          │   Tokyo Night — tokyo-night · builtin                                │
+          │                                                                      │
+          │ up/down/j/k move · type to filter · enter select · ctrl+d set        │
+          │ default · esc close                                                  │
+          ╰──────────────────────────────────────────────────────────────────────╯
+
+
+
+
+
+
+
+
+
+
+
+
+
+esc close · f1 keybinds

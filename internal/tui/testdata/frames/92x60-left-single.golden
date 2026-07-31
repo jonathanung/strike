@@ -1,60 +1,60 @@
 ⚡ strike /tmp/strike-golden   no model                                                ready
-▁▁▁▁▁▁▁▁▁▁▁▁▁▁
-⚡ S T R I K E
-▔▔▔▔▔▔▔▔▔▔▔▔▔▔
-
-╭─ get started ─────────────────────────────╮  ╭─ keys ────────────────────────────────────╮
-│ /provider connect a model                 │  │ ctrl+h  focus left                        │
-│ ◦ anthropic  none                         │  │ ctrl+l  focus right                       │
-│ ◦ openai  none                            │  │ ctrl+o  next window                       │
-│ ◦ xai  none                               │  │ ctrl+p  prev window                       │
-│ ◦ google  none                            │  │ ctrl+;  toggle split                      │
-│ ◦ kimi  none                              │  │ ctrl+e  external editor                   │
-│ type below · enter to send                │  │ ctrl+k  palette                           │
-│                                           │  │ f1  keybinds                              │
-│                                           │  │ esc  interrupt                            │
-│                                           │  │                                           │
-│                                           │  │                                           │
-│                                           │  │                                           │
-│                                           │  │                                           │
-│                                           │  │                                           │
-│                                           │  │                                           │
-│                                           │  │                                           │
-│                                           │  │                                           │
-│                                           │  │                                           │
-│                                           │  │                                           │
-│                                           │  │                                           │
-│                                           │  │                                           │
-│                                           │  │                                           │
-╰───────────────────────────────────────────╯  ╰───────────────────────────────────────────╯
-
-
-╭─ agents & skills ────────────────────────────────────────────────────────────────────────╮
-│ agents                                                                                   │
-│   ◆ build                                                                                │
-│ skills                                                                                   │
-│   /review                                                                                │
-│   ◆ plan                                                                                 │
-│                                                                                          │
-│                                                                                          │
-│                                                                                          │
-│                                                                                          │
-│                                                                                          │
-│                                                                                          │
-│                                                                                          │
-│                                                                                          │
-│                                                                                          │
-│                                                                                          │
-│                                                                                          │
-│                                                                                          │
-│                                                                                          │
-│                                                                                          │
-│                                                                                          │
-│                                                                                          │
+╭─ context ────────────────────────────────────────────────────────────────────────────────╮
+│ supervised · 1 skills · default permissions · /provider to connect                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────╯
 
-╭─ prompt ❯ ───────────────────────────────────────────────────────────────────────────────╮
-│ ❯ Ask anything…  (/ commands, ! shell)                                                   │
-│ ❯                                                                                        │
-╰─ enter send · ctrl+j/shift+enter/alt+enter newline ──────────────────────────────────────╯
-ctrl+h/ctrl+l panes · ctrl+o/ctrl+p windows · ctrl+; toggle split · ctrl+k palette
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                       ▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+                                       ⚡ S T R I K E
+                                       ▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+
+                  ╭─ chat ❯ ─────────────────────────────────────────────╮
+                  │ ❯ Ask anything…  (/ commands, ! shell)               │
+                  │ ❯                                                    │
+                  ╰─ enter send · ctrl+j/shift+enter/alt+enter newline ──╯
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+enter send · ctrl+j/shift+enter/alt+enter newline · ctrl+e external editor · esc cancel

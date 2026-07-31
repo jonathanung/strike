@@ -39,8 +39,9 @@ func TestConstrainedCompletionAndComposerViewsUseSoftChrome(t *testing.T) {
 					if !hasBox {
 						t.Errorf("%s missing soft rounded chrome: %q", name, plain)
 					}
-					if name == "composer" && !strings.Contains(plain, "prompt") {
-						t.Errorf("%s chrome missing title: %q", name, plain)
+					if name == "composer" && !strings.Contains(plain, "command") && !strings.Contains(plain, "chat") {
+						// Slash draft → command mode title (#678); bare drafts use chat.
+						t.Errorf("%s chrome missing mode title: %q", name, plain)
 					}
 				} else if hasBox && tt.height < 3 {
 					// height 1–2 may be borderless; soft chrome needs height ≥ 2

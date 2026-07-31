@@ -116,6 +116,7 @@ func TestConfigureFilesWindowOnModelNew(t *testing.T) {
 	services := testServices(nil, nil)
 	services.Files = ff
 	m := New(ops, events, services, Options{WorkDir: "/workspace/proj"})
+	m.testForceMultiPane = true // multi-pane surface for files split (#677)
 	var fw filesWindow
 	found := false
 	for _, w := range m.windows.windows {

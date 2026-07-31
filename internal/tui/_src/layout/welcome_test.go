@@ -39,64 +39,58 @@ func TestWelcomeCardTitleUsesSoftBentoTones(t *testing.T) {
 }
 
 func TestWelcomeDashboardRendersBentoCardsForEmptyTranscript(t *testing.T) {
-	m, _ := newAppTestModel([]string{"build", "plan"}, []host.Skill{fakeSkill("review", "review code", "Review $ARGUMENTS")})
-	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
-
-	plain := ansi.Strip(viewString(m))
+	// welcomeView remains unit-testable; the live empty screen is home (#677).
+	m, _ := newAppTestModelHome([]string{"build", "plan"}, []host.Skill{fakeSkill("review", "review code", "Review $ARGUMENTS")})
+	plain := ansi.Strip(m.welcomeView(100, 30))
 	for _, want := range []string{
-		"get started",     // provider-status card title
-		"anthropic",       // provider status drawn from host.Auth
-		"/provider",       // get-started hint
-		"keys",            // keybinding card
-		"agents & skills", // agents/skills card
-		"build",           // selectable agent
-		"plan",            // second agent
-		"/review",         // skill from services
+		"get started",
+		"anthropic",
+		"/provider",
+		"keys",
+		"agents & skills",
+		"build",
+		"plan",
+		"/review",
 	} {
 		if !strings.Contains(plain, want) {
-			t.Errorf("welcome dashboard missing %q:\n%s", want, plain)
+			t.Errorf("welcomeView missing %q:\n%s", want, plain)
 		}
 	}
-	// Composer actions stay in composer chrome instead of repeating in this card.
 	keys := ansi.Strip(m.welcomeKeys())
 	if strings.Contains(keys, "send") || strings.Contains(keys, "newline") {
 		t.Errorf("welcome keys repeats composer actions: %q", keys)
 	}
-	// Standalone titled "logo" card is gone; a Logo band (S T R I K E) may still
-	// appear above the card grid when height allows — that is intentional chrome.
-	if strings.Contains(plain, "strike"+"┐") || strings.Contains(plain, "╭─ logo") {
-		t.Errorf("welcome dashboard retained removed standalone logo card:\n%s", plain)
-	}
 }
 
 func TestWelcomeDashboardSurfacesRecentPromptsOnlyWithHistory(t *testing.T) {
-	without, _ := newAppTestModel(nil, nil)
-	without = updateApp(t, without, tea.WindowSizeMsg{Width: 120, Height: 80})
-	if plain := ansi.Strip(viewString(without)); strings.Contains(plain, "recent prompts") {
-		t.Errorf("recent-prompts card rendered without any history:\n%s", plain)
+	without, _ := newAppTestModelHome(nil, nil)
+	if hasWelcomeCard(without.welcomeCards(without.services.Auth.Statuses()), "recent prompts") {
+		t.Error("recent-prompts card without history")
 	}
 
 	store := newFakeHistory("earlier prompt one", "earlier prompt two")
-	with, _ := newAppTestModelWithHistory(nil, nil, store)
-	with = updateApp(t, with, tea.WindowSizeMsg{Width: 120, Height: 80})
-	plain := ansi.Strip(viewString(with))
-	if !strings.Contains(plain, "recent prompts") || !strings.Contains(plain, "earlier prompt two") {
-		t.Errorf("welcome dashboard did not surface recent history:\n%s", plain)
+	with, _ := newAppTestModelHomeWithHistory(nil, nil, store)
+	if !hasWelcomeCard(with.welcomeCards(with.services.Auth.Statuses()), "recent prompts") {
+		t.Error("recent-prompts card missing with history")
+	}
+	body := ansi.Strip(with.welcomeRecent(80, 3))
+	if !strings.Contains(body, "earlier prompt two") {
+		t.Errorf("welcomeRecent missing history:\n%s", body)
 	}
 }
 
 func TestTranscriptReplacesWelcomeDashboardOnceCellsStream(t *testing.T) {
-	m, _ := newAppTestModel(nil, nil)
+	m, _ := newAppTestModelHome(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
-	if plain := ansi.Strip(viewString(m)); !strings.Contains(plain, "get started") {
-		t.Fatalf("empty transcript did not show the welcome dashboard:\n%s", plain)
+	if !m.showHomeLayout() {
+		t.Fatal("empty transcript should show home layout")
 	}
 
 	m.applyEvent(protocol.UserMessage{Text: "hello strike"})
 	m.refreshViewport()
 	plain := ansi.Strip(viewString(m))
-	if strings.Contains(plain, "get started") {
-		t.Errorf("welcome dashboard persisted after a cell streamed:\n%s", plain)
+	if m.showHomeLayout() {
+		t.Error("home layout persisted after a cell streamed")
 	}
 	if !strings.Contains(plain, "hello strike") {
 		t.Errorf("transcript did not render the streamed user message:\n%s", plain)
@@ -104,17 +98,14 @@ func TestTranscriptReplacesWelcomeDashboardOnceCellsStream(t *testing.T) {
 }
 
 func TestWelcomeDashboardRecomputesOnResize(t *testing.T) {
-	m, _ := newAppTestModel([]string{"build"}, nil)
-	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
-	wide := ansi.Strip(viewString(m))
-	m = updateApp(t, m, tea.WindowSizeMsg{Width: 64, Height: 24})
-	narrow := ansi.Strip(viewString(m))
+	m, _ := newAppTestModelHome([]string{"build"}, nil)
+	wide := ansi.Strip(m.welcomeView(120, 40))
+	narrow := ansi.Strip(m.welcomeView(64, 24))
 	if wide == narrow {
-		t.Errorf("welcome dashboard did not repack on resize")
+		t.Errorf("welcomeView did not repack on resize")
 	}
-	// The dashboard must still name a provider at the narrower width.
 	if !strings.Contains(narrow, "anthropic") {
-		t.Errorf("narrow welcome dashboard dropped provider content:\n%s", narrow)
+		t.Errorf("narrow welcomeView dropped provider content:\n%s", narrow)
 	}
 }
 
@@ -141,8 +132,7 @@ func TestWelcomeKeysDoNotRepeatComposerActions(t *testing.T) {
 
 // TestLeftFocusHighlightsOnlyPromptNotWelcomeKeys locks #663: when the left
 // (prompt) side has focus, only the composer panel uses focus chrome. The
-// welcome keys card (primary when the selected provider is already authed)
-// stays visible without BorderFocus / SurfaceFocus.
+// welcome keys card stays without BorderFocus / SurfaceFocus.
 func TestLeftFocusHighlightsOnlyPromptNotWelcomeKeys(t *testing.T) {
 	setTUITrueColor(t)
 	th := theme.Default()
@@ -151,17 +141,13 @@ func TestLeftFocusHighlightsOnlyPromptNotWelcomeKeys(t *testing.T) {
 	th.BorderFocus = fixedColor("#778899")
 	th.SurfaceMuted = fixedColor("#aabbcc")
 	th.Border = fixedColor("#ddeeff")
-	m, _ := newAppTestModelWithOptions(Options{Theme: &th})
-	// Authed selected provider drops "get started", so keys becomes primary.
+	m, _ := newAppTestModelHome(nil, nil)
+	m.th = th
 	m.providerName = "echo"
 	m.modelName = "echo-1"
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
 	if m.focus != focusLeft {
 		t.Fatalf("focus = %v, want left", m.focus)
-	}
-	cards := m.welcomeCards(m.services.Auth.Statuses())
-	if len(cards) == 0 || cards[0].title != "keys" || !cards[0].primary {
-		t.Fatalf("welcome cards = %+v, want primary keys first", cards)
 	}
 
 	welcome := m.welcomeView(60, 20)
@@ -176,8 +162,8 @@ func TestLeftFocusHighlightsOnlyPromptNotWelcomeKeys(t *testing.T) {
 	}
 
 	composer := m.composerView(false, 60, 6)
-	if plain := ansi.Strip(composer); !strings.Contains(plain, "prompt") {
-		t.Fatalf("composer missing prompt title:\n%s", plain)
+	if plain := ansi.Strip(composer); !strings.Contains(plain, "chat") {
+		t.Fatalf("composer missing mode title:\n%s", plain)
 	}
 	if !strings.Contains(composer, rgbSGR("#778899")) {
 		t.Fatal("prompt box missing BorderFocus when left-focused")
@@ -185,23 +171,14 @@ func TestLeftFocusHighlightsOnlyPromptNotWelcomeKeys(t *testing.T) {
 	if !strings.Contains(composer, rgbBGSGR("#445566")) {
 		t.Fatal("prompt box missing SurfaceFocus title edge when left-focused")
 	}
-
-	// Full frame: keys still present; focus chrome still comes from the prompt.
-	view := viewString(m)
-	if plain := ansi.Strip(view); !strings.Contains(plain, "keys") || !strings.Contains(plain, "prompt") {
-		t.Fatalf("full view missing keys or prompt:\n%s", plain)
-	}
-	if !strings.Contains(view, rgbSGR("#778899")) {
-		t.Fatal("left-focused full view missing prompt BorderFocus")
-	}
 }
 
 func TestWelcomeDashboardUsesCustomThemeWithoutChangingContent(t *testing.T) {
 	setTUITrueColor(t)
 	agents := []string{"build", "plan"}
 	skills := []host.Skill{fakeSkill("review", "review code", "Review $ARGUMENTS")}
-	defaultModel, _ := newAppTestModel(agents, skills)
-	defaultModel = updateApp(t, defaultModel, tea.WindowSizeMsg{Width: 100, Height: 30})
+	defaultModel, _ := newAppTestModelHome(agents, skills)
+	defaultView := defaultModel.welcomeView(100, 30)
 
 	th := theme.Default()
 	th.Accent = fixedColor("#010203")
@@ -210,13 +187,12 @@ func TestWelcomeDashboardUsesCustomThemeWithoutChangingContent(t *testing.T) {
 	th.Spacing = theme.NewSpacing(1, 4, 3, 4)
 	th.Icons.Agent = "A"
 	th.Icons.Bolt = "B"
-	customModel, _ := newAppTestModelWithOptions(Options{Theme: &th})
-	customModel.agents, customModel.skills = agents, skills
-	customModel = updateApp(t, customModel, tea.WindowSizeMsg{Width: 100, Height: 30})
+	customModel, _ := newAppTestModelHome(agents, skills)
+	customModel.th = th
+	custom := customModel.welcomeView(100, 30)
 
-	custom := viewString(customModel)
 	for _, want := range []string{"get started", "anthropic", "/provider", "keys", "agents & skills", "build", "plan", "/review"} {
-		if !strings.Contains(ansi.Strip(viewString(defaultModel)), want) || !strings.Contains(ansi.Strip(custom), want) {
+		if !strings.Contains(ansi.Strip(defaultView), want) || !strings.Contains(ansi.Strip(custom), want) {
 			t.Errorf("theme changed semantic welcome content %q", want)
 		}
 	}
@@ -227,7 +203,7 @@ func TestWelcomeDashboardUsesCustomThemeWithoutChangingContent(t *testing.T) {
 	if !strings.Contains(custom, rgbSGR("#010203")) || !strings.Contains(custom, rgbBGSGR("#040506")) {
 		t.Errorf("custom color tokens are not observable: %q", custom)
 	}
-	if viewString(defaultModel) == custom || lipgloss.Width(custom) != 100 {
+	if defaultView == custom || lipgloss.Width(custom) != 100 {
 		t.Errorf("custom theme did not produce a distinct, width-safe welcome view")
 	}
 }

@@ -143,3 +143,90 @@ func (m Model) contextPaneBody(width, height int) string {
 	}
 	return strings.Join(lines, "\n")
 }
+
+// contextPaneContentRows is the number of label/value rows the context body
+// would paint (uncapped). Used for content-sized stack flex (#680).
+func (m Model) contextPaneContentRows() int {
+	n := 1 // model row always present
+	if m.agentName != "" && validAgentName(m.agentName) {
+		n++
+	}
+	if m.effort != protocol.EffortDefault {
+		n++
+	}
+	n++ // autonomy
+	if m.fastEnabled {
+		n++
+	}
+	if m.showThinking {
+		n++
+	}
+	if m.services.Auth != nil && m.providerName != "" {
+		if d := strings.TrimSpace(m.services.Auth.Describe(m.providerName)); d != "" {
+			n++
+		}
+	}
+	skillCount := 0
+	for _, skill := range m.skills {
+		if validSkillName(skill.Name) {
+			skillCount++
+		}
+	}
+	if skillCount > 0 {
+		n++
+	}
+	return n
+}
+
+// memberPreferredSizes returns per-member outer size hints for stack flex
+// (#680). Values <=0 mean flex (absorb remainder). pairHorizontal prefers
+// equal widths (no content signal), so returns nil for equal split.
+func (m Model) memberPreferredSizes(g windowGroup, outerW, outerH int, compact, pairHorizontal bool) []int {
+	n := len(g.members)
+	if n < 2 || pairHorizontal {
+		return nil
+	}
+	chrome := 0
+	if !compact {
+		chrome = 2 // top + bottom panel edge
+	}
+	// Cap any single preferred pane so flex siblings still get minStackMemberOuter.
+	maxPref := max(minStackMemberOuter, outerH-minStackMemberOuter*(n-1))
+	pref := make([]int, n)
+	for i, wi := range g.members {
+		var w window
+		if wi >= 0 && wi < len(m.windows.windows) {
+			w = m.windows.windows[wi]
+		}
+		if w == nil {
+			pref[i] = 0 // flex
+			continue
+		}
+		switch w.id() {
+		case "context":
+			body := m.contextPaneContentRows()
+			pref[i] = min(maxPref, chrome+max(1, body))
+		case "telemetry", "system":
+			// CPU / RAM / disk — three metric rows (+ optional error line).
+			pref[i] = min(maxPref, chrome+3)
+		case "activity":
+			// Activity is the flex feed: grow into leftover space.
+			pref[i] = 0
+		default:
+			// Agents/files/etc. share space equally (flex) unless sparse.
+			pref[i] = 0
+		}
+	}
+	// Ensure at least one flex member so remainder has a home.
+	hasFlex := false
+	for _, p := range pref {
+		if p <= 0 {
+			hasFlex = true
+			break
+		}
+	}
+	if !hasFlex {
+		pref[n-1] = 0
+	}
+	return pref
+}

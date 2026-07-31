@@ -308,33 +308,31 @@ const minStackMemberOuter = 6
 
 // computeMemberSlots splits the right-pane outer box among n group members.
 // pairHorizontal places members side-by-side (bottom-bar orientation); otherwise
-// they stack top/bottom. Returns nil when n < 2 or the box is too small to split.
-func computeMemberSlots(width, height, gutter, n int, pairHorizontal bool) []memberSlot {
+// they stack top/bottom. preferred, when non-nil and len==n, is a content-sized
+// outer height (or width when pairHorizontal) hint per member: values <=0 mean
+// "flex" (absorb remainder). Sparse panes keep tight preferred sizes so empty
+// bordered voids shrink (#680). Returns nil when n < 2 or the box is too small.
+func computeMemberSlots(width, height, gutter, n int, pairHorizontal bool, preferred ...[]int) []memberSlot {
 	width, height, gutter, n = max(0, width), max(0, height), max(0, gutter), max(0, n)
 	if n < 2 {
 		return nil
+	}
+	var pref []int
+	if len(preferred) > 0 && len(preferred[0]) == n {
+		pref = preferred[0]
 	}
 	if pairHorizontal {
 		if width < minStackMemberOuter+gutter+minStackMemberOuter {
 			return nil
 		}
 		available := max(0, width-gutter*(n-1))
-		base := available / n
-		if base < minStackMemberOuter {
+		sizes := distributeFlexSizes(available, n, minStackMemberOuter, pref)
+		if sizes == nil {
 			return nil
 		}
 		slots := make([]memberSlot, n)
-		used := 0
 		for i := 0; i < n; i++ {
-			w := base
-			if i == n-1 {
-				w = available - used
-			}
-			if w < minStackMemberOuter {
-				return nil
-			}
-			slots[i] = memberSlot{width: w, height: height}
-			used += w
+			slots[i] = memberSlot{width: sizes[i], height: height}
 		}
 		return slots
 	}
@@ -342,24 +340,108 @@ func computeMemberSlots(width, height, gutter, n int, pairHorizontal bool) []mem
 		return nil
 	}
 	available := max(0, height-gutter*(n-1))
-	base := available / n
-	if base < minStackMemberOuter {
+	sizes := distributeFlexSizes(available, n, minStackMemberOuter, pref)
+	if sizes == nil {
 		return nil
 	}
 	slots := make([]memberSlot, n)
-	used := 0
 	for i := 0; i < n; i++ {
-		h := base
-		if i == n-1 {
-			h = available - used
-		}
-		if h < minStackMemberOuter {
-			return nil
-		}
-		slots[i] = memberSlot{width: width, height: h}
-		used += h
+		slots[i] = memberSlot{width: width, height: sizes[i]}
 	}
 	return slots
+}
+
+// distributeFlexSizes allocates available cells across n members.
+// preferred[i] > 0 is a content affordance (clamped to [minSize, available]);
+// preferred[i] <= 0 marks a flex member that absorbs remainder after preferred
+// panes take their share. With no preferred hints, sizes are equal (legacy).
+// Returns nil when even minSize*n cannot fit.
+func distributeFlexSizes(available, n, minSize int, preferred []int) []int {
+	if n < 1 || available < minSize*n {
+		return nil
+	}
+	sizes := make([]int, n)
+	if len(preferred) != n {
+		// Equal split (last absorbs rounding).
+		base := available / n
+		if base < minSize {
+			return nil
+		}
+		used := 0
+		for i := 0; i < n; i++ {
+			sizes[i] = base
+			if i == n-1 {
+				sizes[i] = available - used
+			}
+			if sizes[i] < minSize {
+				return nil
+			}
+			used += sizes[i]
+		}
+		return sizes
+	}
+	// First pass: clamp preferred, count flex members.
+	flexIdx := make([]int, 0, n)
+	used := 0
+	for i := 0; i < n; i++ {
+		p := preferred[i]
+		if p <= 0 {
+			sizes[i] = minSize // provisional floor; flex grows later
+			flexIdx = append(flexIdx, i)
+			used += minSize
+			continue
+		}
+		// Content-sized: prefer p but never below min or above what remains
+		// if every other member also needs minSize.
+		maxForMe := available - minSize*(n-1)
+		h := min(max(p, minSize), maxForMe)
+		sizes[i] = h
+		used += h
+	}
+	if used > available {
+		// Shrink preferred panes (largest first) until we fit; keep minSize.
+		overflow := used - available
+		for overflow > 0 {
+			// Find largest preferred (non-flex) above minSize.
+			best := -1
+			for i := 0; i < n; i++ {
+				if preferred[i] <= 0 {
+					continue
+				}
+				if sizes[i] <= minSize {
+					continue
+				}
+				if best < 0 || sizes[i] > sizes[best] {
+					best = i
+				}
+			}
+			if best < 0 {
+				return nil
+			}
+			sizes[best]--
+			overflow--
+		}
+		used = available
+	}
+	// Remainder goes to flex members (equal share; last absorbs rounding).
+	remain := available - used
+	if len(flexIdx) == 0 {
+		// No flex member: give remainder to the last pane so the stack fills.
+		sizes[n-1] += remain
+		return sizes
+	}
+	// used already counted minSize per flex; add remain on top.
+	extraBase := remain / len(flexIdx)
+	extraUsed := 0
+	for j, i := range flexIdx {
+		extra := extraBase
+		if j == len(flexIdx)-1 {
+			extra = remain - extraUsed
+		}
+		sizes[i] += extra
+		extraUsed += extra
+	}
+	return sizes
 }
 
 // resizeMembers applies per-window inner dimensions. missing indices keep prior
