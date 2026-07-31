@@ -89,6 +89,18 @@ func TestRegistryRegisterPanics(t *testing.T) {
 		{name: "empty name", fn: func(harness.Input, harness.Provider, harness.Emit) (harness.Result, error) {
 			return harness.Result{}, nil
 		}},
+		{name: "leading whitespace", key: " custom", fn: func(harness.Input, harness.Provider, harness.Emit) (harness.Result, error) {
+			return harness.Result{}, nil
+		}},
+		{name: "trailing whitespace", key: "custom ", fn: func(harness.Input, harness.Provider, harness.Emit) (harness.Result, error) {
+			return harness.Result{}, nil
+		}},
+		{name: "control character", key: "custom\nname", fn: func(harness.Input, harness.Provider, harness.Emit) (harness.Result, error) {
+			return harness.Result{}, nil
+		}},
+		{name: "invalid UTF-8", key: string([]byte{0xff}), fn: func(harness.Input, harness.Provider, harness.Emit) (harness.Result, error) {
+			return harness.Result{}, nil
+		}},
 		{name: "nil function", key: "custom"},
 	}
 	for _, tt := range tests {

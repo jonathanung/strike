@@ -336,4 +336,7 @@ message:
 ```
 
 The harness should cancel its work and exit promptly. Strike closes or
-terminates an unresponsive process after a short grace period.
+terminates an unresponsive process after a short grace period. Go and
+JavaScript expose cancellation to harness code through their input context or
+signal. Lean observes cancellation while waiting for a provider call; otherwise
+Strike terminates the process after the grace period.

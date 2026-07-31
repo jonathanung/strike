@@ -75,7 +75,12 @@ def runHarness (harness : Harness) : IO Unit := do
     send stdout (message invocationId "progress.emit" [("payload", payload)])
   try
     let result ← harness { request } { call } emit
-    send stdout ((message invocationId "harness.complete").mergeObj result)
+    send stdout (message invocationId "harness.complete" [
+      ("text", result.getObjValD "text"),
+      ("reasoning", result.getObjValD "reasoning"),
+      ("toolCalls", result.getObjValD "toolCalls"),
+      ("stopReason", result.getObjValD "stopReason")
+    ])
   catch error =>
     send stdout (message invocationId "harness.error" [("error", toJson error.toString)])
 

@@ -163,6 +163,24 @@ func TestExternalCompleteDoesNotWaitForLiveHarness(t *testing.T) {
 	}
 }
 
+func TestExternalCompleteDoesNotWaitForOutstandingProviderCall(t *testing.T) {
+	h := newFixture(t, "complete-with-call")
+	release := make(chan struct{})
+	defer close(release)
+	result, err := h(harness.Input{Context: context.Background()}, harness.Provider{
+		Call: func(provider.Request) (harness.ModelResponse, error) {
+			<-release
+			return harness.ModelResponse{}, nil
+		},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Text != "final" {
+		t.Fatalf("result.Text = %q", result.Text)
+	}
+}
+
 func TestExternalCancellationStopsLiveHarness(t *testing.T) {
 	h := newFixture(t, "blocks")
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -246,6 +264,11 @@ func TestHarnessHelperProcess(t *testing.T) {
 		time.Sleep(time.Hour)
 	}
 	if mode == "stays-alive" {
+		fmt.Printf(`{"version":1,"type":"harness.complete","invocationId":%q,"text":"final"}`+"\n", start.InvocationID)
+		time.Sleep(time.Hour)
+	}
+	if mode == "complete-with-call" {
+		fmt.Printf(`{"version":1,"type":"provider.call","invocationId":%q,"callId":"pending","request":{"model":"candidate","messages":[]}}`+"\n", start.InvocationID)
 		fmt.Printf(`{"version":1,"type":"harness.complete","invocationId":%q,"text":"final"}`+"\n", start.InvocationID)
 		time.Sleep(time.Hour)
 	}

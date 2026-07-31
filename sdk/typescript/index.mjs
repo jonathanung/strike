@@ -60,7 +60,17 @@ export function runHarness(harness) {
 
     try {
       const response = await harness(input, provider, emit);
-      send({ ...base, type: "harness.complete", ...response });
+      if (response == null || typeof response !== "object") {
+        throw new Error("harness must return an object");
+      }
+      send({
+        ...base,
+        type: "harness.complete",
+        text: response.text,
+        reasoning: response.reasoning,
+        toolCalls: response.toolCalls,
+        stopReason: response.stopReason,
+      });
     } catch (error) {
       send({ ...base, type: "harness.error", error: String(error?.message || error) });
     } finally {

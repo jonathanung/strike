@@ -124,6 +124,53 @@ func TestTaskChildInvokesAgentHarness(t *testing.T) {
 	t.Fatalf("missing ChildCompleted; events=%#v", events)
 }
 
+func TestTaskChildHarnessRejectsToolCalls(t *testing.T) {
+	registry := harness.NewRegistry()
+	registry.Register("invalid", func(harness.Input, harness.Provider, harness.Emit) (harness.Result, error) {
+		return harness.Result{
+			Calls:      []provider.ToolCall{{ID: "call-1", Name: "read"}},
+			StopReason: "tool_use",
+		}, nil
+	})
+	prov := newScriptedProvider(toolCallStep(taskToolCallWithAgent("task-invalid", "delegate", "worker")))
+	eng := engine.New(engine.Options{
+		SessionID:       "parent",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		InitialAgent:    "parent",
+		Agents: []engine.Agent{
+			{Name: "parent"},
+			{Name: "worker", Harness: "invalid"},
+		},
+		HarnessRegistry: registry,
+		Registry:        tool.NewRegistry(tool.NewTask()),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+	eng.Ops() <- protocol.UserInput{Text: "delegate"}
+
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case event := <-eng.Events():
+			if completed, ok := event.(protocol.ChildCompleted); ok {
+				if completed.Status == protocol.ChildStatusCompleted {
+					t.Fatalf("ChildCompleted = %#v, want failure", completed)
+				}
+				if !strings.Contains(completed.Summary, "cannot execute") {
+					t.Fatalf("ChildCompleted summary = %q", completed.Summary)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for failed ChildCompleted")
+		}
+	}
+}
+
 func TestTaskChildHarnessEndToEnd(t *testing.T) {
 	tests := []struct {
 		name string

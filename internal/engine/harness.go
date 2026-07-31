@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -58,10 +59,11 @@ func (e *Engine) harnessEnvironment(ctx context.Context, corr protocol.Correlati
 			stream, err := e.prov.Stream(ctx, req)
 			if err == nil {
 				response := harness.ModelResponse{}
+				var text strings.Builder
 				for ev := range provider.NormalizeStream(stream) {
 					switch ev.Type {
 					case provider.EventTextDelta:
-						response.Text += ev.Text
+						text.WriteString(ev.Text)
 					case provider.EventReasoning:
 						response.Reasoning = append(response.Reasoning, ev.Reasoning)
 					case provider.EventToolCall:
@@ -69,6 +71,7 @@ func (e *Engine) harnessEnvironment(ctx context.Context, corr protocol.Correlati
 							response.Calls = append(response.Calls, *ev.ToolCall)
 						}
 					case provider.EventDone:
+						response.Text = text.String()
 						response.StopReason = ev.StopReason
 						response.Usage = ev.Usage
 						callbackMu.Lock()

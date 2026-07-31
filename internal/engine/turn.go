@@ -208,6 +208,10 @@ func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.Ima
 			e.failTurn(err, turnCorr, finishing)
 			return
 		}
+		if len(result.Calls) != 0 || result.StopReason == "tool_use" {
+			e.failTurn(errors.New("task harness returned tool calls that it cannot execute"), turnCorr, finishing)
+			return
+		}
 		for _, raw := range result.Reasoning {
 			if text := provider.ReasoningText(raw); text != "" {
 				e.emit(protocol.ReasoningDelta{Correlation: turnCorr, Text: text})
@@ -216,7 +220,7 @@ func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.Ima
 		if result.Text != "" {
 			e.emit(protocol.TextDelta{Correlation: turnCorr, Text: result.Text})
 		}
-		e.messages = append(e.messages, provider.Message{Role: provider.RoleAssistant, Text: result.Text, ToolCalls: result.Calls, Reasoning: result.Reasoning})
+		e.messages = append(e.messages, provider.Message{Role: provider.RoleAssistant, Text: result.Text, Reasoning: result.Reasoning})
 		e.completeTurn(finishing, turnCorr, result.StopReason)
 		return
 	}

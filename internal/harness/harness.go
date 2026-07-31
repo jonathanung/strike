@@ -6,7 +6,10 @@ package harness
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/jonathanung/strike-cli/internal/provider"
 )
@@ -72,8 +75,8 @@ func (r *Registry) Get(name string) Func {
 
 // Register adds or replaces a harness function.
 func (r *Registry) Register(name string, fn Func) {
-	if name == "" {
-		panic("harness: empty name")
+	if err := validateName(name); err != nil {
+		panic(err)
 	}
 	if fn == nil {
 		panic("harness: nil function")
@@ -82,6 +85,24 @@ func (r *Registry) Register(name string, fn Func) {
 		r.funcs = make(map[string]Func)
 	}
 	r.funcs[name] = fn
+}
+
+func validateName(name string) error {
+	if name == "" {
+		return errors.New("harness: empty name")
+	}
+	if strings.TrimSpace(name) != name {
+		return fmt.Errorf("harness: name %q has leading or trailing whitespace", name)
+	}
+	if !utf8.ValidString(name) {
+		return fmt.Errorf("harness: name %q is not valid UTF-8", name)
+	}
+	for _, r := range name {
+		if r <= '\u001f' || r >= '\u007f' && r <= '\u009f' {
+			return fmt.Errorf("harness: name %q contains a control character", name)
+		}
+	}
+	return nil
 }
 
 // Known returns true when name is registered.

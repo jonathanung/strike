@@ -162,7 +162,6 @@ func (e *runner) run(input harness.Input, p harness.Provider, emit harness.Emit)
 		err    error
 	}
 	done := make(chan terminal, 1)
-	var relays sync.WaitGroup
 	go func() {
 		s := bufio.NewScanner(pipe)
 		s.Buffer(make([]byte, 64*1024), maxLineBytes)
@@ -194,9 +193,7 @@ func (e *runner) run(input harness.Input, p harness.Provider, emit harness.Emit)
 					return
 				}
 				ids[m.CallID] = m.Type
-				relays.Add(1)
 				go func() {
-					defer relays.Done()
 					relayProvider(ctx, p.Call, invocationID, m.CallID, m.Request.providerRequest(), write)
 				}()
 			case "progress.emit":
@@ -215,7 +212,6 @@ func (e *runner) run(input harness.Input, p harness.Provider, emit harness.Emit)
 				for _, c := range m.ToolCalls {
 					result.Calls = append(result.Calls, provider.ToolCall{ID: c.ID, Name: c.Name, Args: c.Args})
 				}
-				relays.Wait()
 				done <- terminal{result: result}
 				return
 			case "harness.error":
@@ -253,7 +249,6 @@ func (e *runner) run(input harness.Input, p harness.Provider, emit harness.Emit)
 			_ = pipe.Kill()
 			waitErr = <-processDone
 		}
-		relays.Wait()
 		if t.err == nil && waitErr != nil && !forced {
 			t.err = fmt.Errorf("external harness exit: %w", waitErr)
 		} else if t.err != nil && waitErr != nil && !forced && strings.Contains(t.err.Error(), "exited without harness.complete") {
@@ -281,7 +276,6 @@ func (e *runner) run(input harness.Input, p harness.Provider, emit harness.Emit)
 			_ = pipe.Kill()
 			<-processDone
 		}
-		relays.Wait()
 		return harness.Result{}, ctxErr
 	}
 }
