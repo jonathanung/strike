@@ -37,6 +37,12 @@ func newComposer(th theme.Theme) textarea.Model {
 	ta.SetHeight(composerMinHeight)
 	ta.ShowLineNumbers = false
 	ta.SetVirtualCursor(true)
+	// Bubbles v2 DefaultKeyMap binds enter/ctrl+m to InsertNewline. Strike
+	// owns Enter as send and Newline as shift/alt+enter / ctrl+j — disable
+	// the widget binding so a fall-through Update never inserts a newline.
+	km := textarea.DefaultKeyMap()
+	km.InsertNewline.SetEnabled(false)
+	ta.KeyMap = km
 	styleComposer(&ta, th)
 	ta.Focus()
 	return ta
