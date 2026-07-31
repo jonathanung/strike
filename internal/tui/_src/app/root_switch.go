@@ -17,9 +17,10 @@ type rootPane struct {
 	workDir    string
 	titleTopic string
 
-	cells    []cell
-	toolByID map[string]*toolCell
-	children []childActivity
+	cells        []cell
+	toolByID     map[string]*toolCell
+	children     []childActivity
+	teamMessages []teamMessage
 
 	providerName  string
 	modelName     string
@@ -72,6 +73,7 @@ func (m *Model) stashActiveRoot() {
 		viewTools[k] = v
 	}
 	children := append([]childActivity(nil), m.children...)
+	teamMsgs := append([]teamMessage(nil), m.teamMessages...)
 	m.roots[m.sessionID] = &rootPane{
 		sessionID:          m.sessionID,
 		workDir:            m.workDir,
@@ -79,6 +81,7 @@ func (m *Model) stashActiveRoot() {
 		cells:              append([]cell(nil), m.cells...),
 		toolByID:           toolByID,
 		children:           children,
+		teamMessages:       teamMsgs,
 		providerName:       m.providerName,
 		modelName:          m.modelName,
 		agentName:          m.agentName,
@@ -125,6 +128,7 @@ func (m *Model) loadRootPane(p *rootPane) {
 		m.toolByID[k] = v
 	}
 	m.children = append([]childActivity(nil), p.children...)
+	m.teamMessages = append([]teamMessage(nil), p.teamMessages...)
 	m.providerName = p.providerName
 	m.modelName = p.modelName
 	m.agentName = p.agentName
@@ -477,6 +481,10 @@ func applyEventToPane(p *rootPane, ev protocol.Event) {
 		applyChildCompletedToTaskCells(p.toolByID, e)
 		agent, elapsed := lookupChildMeta(p.children, e.SessionID)
 		p.cells = appendSubagentResultCell(p.cells, e, agent, elapsed)
+	case protocol.TeamRoster:
+		applyTeamRosterToPane(p, e)
+	case protocol.AgentMessage:
+		applyAgentMessageToPane(p, e)
 	}
 }
 
@@ -647,6 +655,7 @@ func seedPaneFromReplay(p *rootPane, events []protocol.Event) {
 	p.cells = tmp.cells
 	p.toolByID = tmp.toolByID
 	p.children = tmp.children
+	p.teamMessages = tmp.teamMessages
 	p.titleTopic = tmp.titleTopic
 	p.providerName = tmp.providerName
 	p.modelName = tmp.modelName

@@ -322,6 +322,9 @@ type Model struct {
 	// children tracks active/recent subagent sessions for the activity pane.
 	// Lifecycle never appends transcript cells.
 	children []childActivity
+	// teamMessages is a bounded ring of recent peer mailbox deliveries for the
+	// lead activity pane (agent.message). Oldest drop under broadcast storms.
+	teamMessages []teamMessage
 	// activityCursor / activityAnchorID navigate the newest-first activity feed.
 	// activityStickNewest keeps the cursor on the newest row as events arrive.
 	// activityDetail expands one entry's chronological body.
@@ -371,8 +374,10 @@ type childActivity struct {
 	name      string // optional stable teammate alias from task spawn
 	title     string // durable display title when known (user rename / create)
 	status    string // running | completed | failed | canceled
-	startedAt time.Time
-	endedAt   time.Time
+	// rosterState is a short display chip from team.roster (working, needs you, …).
+	rosterState string
+	startedAt   time.Time
+	endedAt     time.Time
 }
 
 // New builds the frontend model. services supplies every host capability; any
