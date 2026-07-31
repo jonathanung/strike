@@ -4,10 +4,14 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/jonathanung/strike-cli/internal/host"
+	"github.com/jonathanung/strike-cli/internal/protocol"
 )
 
 type testAuth struct {
@@ -67,6 +71,47 @@ func TestAttachOnlyBootstrapDeclaresProtocolOpsUnavailable(t *testing.T) {
 	for _, unwanted := range []string{`"set.fast"`, `"rewind"`} {
 		if strings.Contains(body, unwanted) {
 			t.Errorf("attach-only bootstrap unexpectedly includes %s: %s", unwanted, body)
+		}
+	}
+}
+
+func TestChangedFilesAPIReportsGitDiffs(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+	dir := t.TempDir()
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	runGit("init")
+	path := filepath.Join(dir, "alpha.txt")
+	if err := os.WriteFile(path, []byte("one\ntwo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", "alpha.txt")
+	runGit("commit", "-m", "initial")
+	if err := os.WriteFile(path, []byte("one\nthree\nfour\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	live := NewLive("live", dir, nil, make(chan protocol.Op))
+	srv, err := New(Options{SessionDir: t.TempDir(), Live: live})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/v1/changed-files", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("changed files = %d %s", res.Code, res.Body.String())
+	}
+	body := res.Body.String()
+	for _, want := range []string{`"path":"alpha.txt"`, `"added":2`, `"deleted":1`, "+three", "-two"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("changed files missing %q: %s", want, body)
 		}
 	}
 }

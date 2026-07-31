@@ -167,6 +167,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PATCH /v1/sessions/{id}", s.handleSessionRename)
 	s.mux.HandleFunc("DELETE /v1/sessions/{id}", s.handleSessionDelete)
 	s.mux.HandleFunc("GET /v1/files", s.handleFiles)
+	s.mux.HandleFunc("GET /v1/changed-files", s.handleChangedFiles)
 	s.mux.HandleFunc("GET /v1/file", s.handleFile)
 	s.mux.HandleFunc("GET /v1/memory", s.handleMemory)
 	s.mux.HandleFunc("GET /v1/issues", s.handleIssues)

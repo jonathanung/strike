@@ -46,26 +46,65 @@ describe("App", () => {
     expect(screen.getByRole("option", { name: /ship/ })).toBeInTheDocument();
   });
 
-  it("shows tested unavailable host workflows and unknown measurements", async () => {
+  it("shows the refactored inspector tabs and unavailable project workflows", async () => {
     render(<App />);
     await screen.findByText("Current");
     expect(screen.getAllByText("not reported")).toHaveLength(2);
+    expect(screen.getByRole("tab", { name: "context" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "files" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "memory" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "issues" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "activity" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "project" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "capabilities" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "files" }));
-    expect(screen.getByRole("status")).toHaveTextContent("Workspace browsing and file mentions unavailable");
-    fireEvent.click(screen.getByRole("tab", { name: "capabilities" }));
-    expect(screen.getByText("Concurrent roots").parentElement).toHaveTextContent("Unavailable on this host");
-    expect(screen.getByText(/user.input/)).toHaveTextContent("compact");
+    expect(screen.getByRole("status")).toHaveTextContent("Changed files unavailable");
+    fireEvent.click(screen.getByRole("tab", { name: "memory" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Memory unavailable");
+    fireEvent.click(screen.getByRole("tab", { name: "issues" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Issues unavailable");
   });
 
-  it("shows protocol operations unavailable and uses historical SSE in attach-only mode", async () => {
+  it("uses historical SSE in attach-only mode", async () => {
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input).includes("bootstrap") ? response({ version: "test", authRequired: false, attachOnly: true, capabilities: { live: false }, protocolOps: null, agents: [], skills: [] }) : String(input).includes("sessions") ? response({ sessions: [{ id: "saved", title: "Saved" }] }) : response({ ok: true })));
     render(<App />);
     await screen.findByText("Saved");
     await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
     expect(FakeEventSource.instances[0].url).toContain("/v1/sessions/saved/events");
     expect(FakeWebSocket.instances).toHaveLength(0);
-    fireEvent.click(screen.getByRole("tab", { name: "capabilities" }));
-    expect(screen.getByText("Unavailable in attach-only mode")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "memory" })).toBeInTheDocument();
+  });
+
+  it("renders changed file summaries, expandable diffs, memory, issues, and panel controls", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) return response({ version: "test", authRequired: false, attachOnly: false, capabilities: { live: true, files: true, memory: true, issues: true, roots: false }, protocolOps: ["user.input"], status: { sessionId: "live", provider: "echo", busy: false }, agents: [{ name: "build" }], skills: [] });
+      if (url.includes("sessions")) return response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" });
+      if (url.includes("changed-files")) return response({ files: [{ path: "web/src/App.tsx", added: 12, deleted: 3, diff: "+new line\n-old line" }] });
+      if (url.includes("memory")) return response({ entries: [{ Key: "prefs", Value: "use tests", Tags: ["project-convention"] }] });
+      if (url.includes("issues")) return response({ issues: [{ ID: 7, Title: "Fix panel", Status: "open", Body: "Resize it" }] });
+      return response({ ok: true });
+    }));
+    render(<App />);
+    await screen.findByText("Current");
+    expect(screen.getByLabelText("Resize agents panel")).toBeInTheDocument();
+    expect(screen.getByLabelText("Resize inspector panel")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Toggle agents panel" }));
+    expect(screen.getByRole("button", { name: "Toggle agents panel" })).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(screen.getByRole("button", { name: "Toggle inspector" }));
+    expect(screen.getByRole("button", { name: "Toggle inspector" })).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(screen.getByRole("tab", { name: "files" }));
+    expect(await screen.findByText("web/src/App.tsx")).toBeInTheDocument();
+    expect(screen.getByText("+12")).toBeInTheDocument();
+    expect(screen.getByText("-3")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /web\/src\/App.tsx/ }));
+    expect(screen.getByText(/new line/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "memory" }));
+    expect(await screen.findByText("prefs")).toBeInTheDocument();
+    expect(screen.getByText("use tests")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "issues" }));
+    expect(await screen.findByText("#7 Fix panel")).toBeInTheDocument();
+    expect(screen.getByText("Resize it")).toBeInTheDocument();
   });
 
   it("shows explicit settings and authentication unavailable states", async () => {
