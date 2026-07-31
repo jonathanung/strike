@@ -11,7 +11,32 @@ import (
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
+	"github.com/jonathanung/strike-cli/internal/tui/ui"
 )
+
+func TestWelcomeCardTitleUsesSoftBentoTones(t *testing.T) {
+	th := theme.Default()
+	// Titles keep multi-accent hierarchy without elevating panel body Tone.
+	keys := welcomeCardTitle(th, "keys", ui.ToneAccent)
+	if ansi.Strip(keys) != "keys" {
+		t.Fatalf("keys title strip = %q", ansi.Strip(keys))
+	}
+	if keys == "keys" {
+		t.Fatal("keys title should carry Accent SGR")
+	}
+	started := welcomeCardTitle(th, "get started", ui.ToneAccentAlt)
+	if started == keys {
+		t.Fatal("Accent vs AccentAlt titles should differ")
+	}
+	agents := welcomeCardTitle(th, "agents & skills", ui.ToneSuccess)
+	if agents == keys || agents == started {
+		t.Fatal("Success title should differ from Accent/AccentAlt")
+	}
+	plain := welcomeCardTitle(th, "recent prompts", ui.ToneMuted)
+	if plain == keys {
+		t.Fatal("Muted title should differ from Accent")
+	}
+}
 
 func TestWelcomeDashboardRendersBentoCardsForEmptyTranscript(t *testing.T) {
 	m, _ := newAppTestModel([]string{"build", "plan"}, []host.Skill{fakeSkill("review", "review code", "Review $ARGUMENTS")})

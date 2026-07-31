@@ -16,7 +16,8 @@
  * --highlight    Highlight
  * --success      Success
  * --warning      Warning
- * --signal       Error / Danger
+ * --signal       Error
+ * --danger       Danger (destructive; distinct from Error)
  * --user         UserLabel
  * --tool         ToolLabel
  * --diff-add     DiffAdded
@@ -27,35 +28,36 @@
  */
 :root {
   color-scheme: dark light;
-  --ink: #eceaf4;
-  --muted: #a09eb0;
-  --ground: #1c1b22;
-  --surface: #252430;
-  --raised: #2f2c3c;
-  --surface-muted: #21202a;
-  --rule: #4a4858;
-  --border-focus: #b39dff;
-  --border-muted: #323040;
-  --acid: #b39dff;
-  --accent-alt: #5cd0e8;
-  --highlight: #f4f1ff;
-  --success: #5edb92;
-  --warning: #f5c451;
-  --signal: #ff8087;
-  --user: #5cd0e8;
-  --tool: #9db2ff;
-  --diff-add: #5edb92;
-  --diff-del: #ff8087;
+  --ink: #f3f1fa;
+  --muted: #9b99b0;
+  --ground: #14131c;
+  --surface: #232230;
+  --raised: #2e2c3e;
+  --surface-muted: #1a1924;
+  --rule: #4f4d63;
+  --border-focus: #c4b5fd;
+  --border-muted: #2c2a3a;
+  --acid: #c4b5fd;
+  --accent-alt: #22d3ee;
+  --highlight: #f5f3ff;
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --signal: #fb7185;
+  --danger: #fb923c;
+  --user: #22d3ee;
+  --tool: #7dd3fc;
+  --diff-add: #4ade80;
+  --diff-del: #fb7185;
   --diff-add-bg: #1a2a22;
   --diff-del-bg: #2a1a1c;
-  --code-bg: #21202a;
-  --overlay: #6a6878;
-  --mark-ink: #1c1b22;
-  --header-bg: #1c1b22e8;
-  --glow: #b39dff66;
-  --idle: #4a4858;
+  --code-bg: #1a1924;
+  --overlay: #7c7a90;
+  --mark-ink: #14131c;
+  --header-bg: #14131ce8;
+  --glow: #c4b5fd66;
+  --idle: #4f4d63;
   --shadow: #00000088;
-  --cap-border: #4a4858;
+  --cap-border: #4f4d63;
   --unavailable-bg: #2a1a1c;
   font-family: "SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace;
   background: var(--ground);
@@ -64,35 +66,36 @@
 
 @media (prefers-color-scheme: light) {
   :root {
-    --ink: #1a1820;
-    --muted: #5a5868;
+    --ink: #1a1528;
+    --muted: #5c586e;
     --ground: #ffffff;
-    --surface: #f3f1f8;
-    --raised: #ebe6f8;
-    --surface-muted: #f7f6fb;
-    --rule: #b8b6c6;
-    --border-focus: #6d43d6;
-    --border-muted: #d8d6e2;
-    --acid: #6d43d6;
-    --accent-alt: #0b7285;
-    --highlight: #4c1d95;
-    --success: #1f8a4c;
-    --warning: #b7791f;
-    --signal: #c23b3b;
-    --user: #0b7285;
-    --tool: #3f51b5;
-    --diff-add: #1f8a4c;
-    --diff-del: #c23b3b;
+    --surface: #f3eef9;
+    --raised: #e9e0f7;
+    --surface-muted: #f8f5fc;
+    --rule: #c4bfd4;
+    --border-focus: #6d28d9;
+    --border-muted: #ddd8ea;
+    --acid: #6d28d9;
+    --accent-alt: #0e7490;
+    --highlight: #5b21b6;
+    --success: #15803d;
+    --warning: #b45309;
+    --signal: #e11d48;
+    --danger: #ea580c;
+    --user: #0e7490;
+    --tool: #2563eb;
+    --diff-add: #15803d;
+    --diff-del: #e11d48;
     --diff-add-bg: #e8f5ec;
     --diff-del-bg: #f8e8e8;
-    --code-bg: #f7f6fb;
-    --overlay: #a8a6b4;
+    --code-bg: #f8f5fc;
+    --overlay: #a8a3b8;
     --mark-ink: #ffffff;
     --header-bg: #fffffff0;
-    --glow: #6d43d666;
-    --idle: #b8b6c6;
-    --shadow: #1a182033;
-    --cap-border: #b8b6c6;
+    --glow: #6d28d966;
+    --idle: #c4bfd4;
+    --shadow: #1a152833;
+    --cap-border: #c4bfd4;
     --unavailable-bg: #f8e8e8;
   }
 }

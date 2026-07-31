@@ -101,16 +101,16 @@ func TestSpinnerStyleUsesWorkingToken(t *testing.T) {
 	}
 }
 
-func TestDefaultWarningIsClearYellow(t *testing.T) {
+func TestDefaultWarningIsClearAmber(t *testing.T) {
 	// Needs-you (Attention) and other caution chrome share Warning; keep it a
-	// readable yellow pair, not muddy amber.
+	// readable amber pair distinct from Error/Danger (E13.8 soft-bento).
 	th := theme.Default()
-	want := theme.AdaptiveColor{Light: "#a16207", Dark: "#ffd84d"}
+	want := theme.AdaptiveColor{Light: "#b45309", Dark: "#fbbf24"}
 	if th.Warning != want {
-		t.Errorf("Default Warning = %#v, want clear yellow %#v", th.Warning, want)
+		t.Errorf("Default Warning = %#v, want amber %#v", th.Warning, want)
 	}
 	if got := th.AgentStateColor(theme.AgentStateAttention); got != want {
-		t.Errorf("Attention color = %#v, want Default Warning yellow %#v", got, want)
+		t.Errorf("Attention color = %#v, want Default Warning amber %#v", got, want)
 	}
 }
 

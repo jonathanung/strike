@@ -441,11 +441,64 @@ func TestDefaultPaletteDistinguishesKeyRoles(t *testing.T) {
 		{"Border vs BorderFocus", th.Border, th.BorderFocus},
 		{"Border vs BorderMuted", th.Border, th.BorderMuted},
 		{"Success vs Error", th.Success, th.Error},
+		{"Error vs Danger", th.Error, th.Danger},
 	}
 	for _, p := range pairs {
 		if p.a == p.b {
 			t.Errorf("%s should be visually distinct roles but are identical: %+v", p.name, p.a)
 		}
+	}
+}
+
+// TestDefaultPaletteE138Map locks the soft-bento multi-accent Default() map
+// from issue #628 / docs/theme.md (21 color roles).
+func TestDefaultPaletteE138Map(t *testing.T) {
+	th := Default()
+	want := map[string]AdaptiveColor{
+		"Text":         {Light: "#1a1528", Dark: "#f3f1fa"},
+		"TextMuted":    {Light: "#5c586e", Dark: "#9b99b0"},
+		"Accent":       {Light: "#6d28d9", Dark: "#c4b5fd"},
+		"AccentAlt":    {Light: "#0e7490", Dark: "#22d3ee"},
+		"Highlight":    {Light: "#5b21b6", Dark: "#f5f3ff"},
+		"Success":      {Light: "#15803d", Dark: "#4ade80"},
+		"Warning":      {Light: "#b45309", Dark: "#fbbf24"},
+		"Error":        {Light: "#e11d48", Dark: "#fb7185"},
+		"Danger":       {Light: "#ea580c", Dark: "#fb923c"},
+		"Surface":      {Light: "#f3eef9", Dark: "#232230"},
+		"SurfaceFocus": {Light: "#e9e0f7", Dark: "#2e2c3e"},
+		"SurfaceMuted": {Light: "#f8f5fc", Dark: "#1a1924"},
+		"Border":       {Light: "#c4bfd4", Dark: "#4f4d63"},
+		"BorderFocus":  {Light: "#6d28d9", Dark: "#c4b5fd"},
+		"BorderMuted":  {Light: "#ddd8ea", Dark: "#2c2a3a"},
+		"UserLabel":    {Light: "#0e7490", Dark: "#22d3ee"},
+		"ToolLabel":    {Light: "#2563eb", Dark: "#7dd3fc"},
+		"DiffAdded":    {Light: "#15803d", Dark: "#4ade80"},
+		"DiffRemoved":  {Light: "#e11d48", Dark: "#fb7185"},
+		"OverlayScrim": {Light: "#a8a3b8", Dark: "#7c7a90"},
+	}
+	got := map[string]AdaptiveColor{
+		"Text": th.Text, "TextMuted": th.TextMuted, "Accent": th.Accent,
+		"AccentAlt": th.AccentAlt, "Highlight": th.Highlight, "Success": th.Success,
+		"Warning": th.Warning, "Error": th.Error, "Danger": th.Danger,
+		"Surface": th.Surface, "SurfaceFocus": th.SurfaceFocus, "SurfaceMuted": th.SurfaceMuted,
+		"Border": th.Border, "BorderFocus": th.BorderFocus, "BorderMuted": th.BorderMuted,
+		"UserLabel": th.UserLabel, "ToolLabel": th.ToolLabel,
+		"DiffAdded": th.DiffAdded, "DiffRemoved": th.DiffRemoved, "OverlayScrim": th.OverlayScrim,
+	}
+	for name, w := range want {
+		if g := got[name]; g != w {
+			t.Errorf("Default().%s = %#v, want %#v", name, g, w)
+		}
+	}
+	bg, ok := th.Background.(AdaptiveColor)
+	if !ok {
+		t.Fatalf("Default().Background type = %T, want AdaptiveColor", th.Background)
+	}
+	if bg != (AdaptiveColor{Light: "#ffffff", Dark: "#14131c"}) {
+		t.Errorf("Default().Background = %#v, want soft-bento ground", bg)
+	}
+	if th.Chrome != ChromeSolid {
+		t.Errorf("Default().Chrome = %v, want ChromeSolid", th.Chrome)
 	}
 }
 
