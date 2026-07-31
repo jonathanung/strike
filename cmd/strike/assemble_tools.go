@@ -52,6 +52,8 @@ type assembled struct {
 	goalsClose   func() error
 	// worktreeClose removes a strike-managed worktree when cleanup=delete.
 	worktreeClose func() error
+	// worktreeNotice is a user-visible soft-fail message (e.g. non-git cwd).
+	worktreeNotice string
 	// mcpClose stops MCP server sessions (stdio/HTTP; process-scoped).
 	mcpClose func() error
 	// spawnRoot creates additional concurrent root engines (interactive multi-root).
@@ -464,7 +466,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 
 		// Bind tool CWD to a per-session git worktree when configured / forced.
 		// Project-scoped state stays on projectIdentity.Key (launch repo).
-		toolDir, wtClose, err := bindSessionWorktree(sessions, sessionID, launchDir, cfg, opts.worktree, resuming, openRootsBefore)
+		// Non-git cwd soft-fails (launchDir + notice) so the app still starts.
+		toolDir, wtClose, wtNotice, err := bindSessionWorktree(sessions, sessionID, launchDir, cfg, opts.worktree, resuming, openRootsBefore)
 		if err != nil {
 			if !resuming {
 				_ = sessions.Destroy(sessionID)
@@ -558,11 +561,12 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			},
 		})
 		return &rootSlot{
-			id:      sid,
-			eng:     eng,
-			bound:   bound,
-			workDir: toolDir,
-			wtClose: wtClose,
+			id:       sid,
+			eng:      eng,
+			bound:    bound,
+			workDir:  toolDir,
+			wtClose:  wtClose,
+			wtNotice: wtNotice,
 		}, replay, nil
 	}
 
@@ -651,7 +655,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		goalsClose: func() error {
 			return goalStore.Close()
 		},
-		worktreeClose: first.wtClose,
+		worktreeClose:  first.wtClose,
+		worktreeNotice: first.wtNotice,
 		mcpClose: func() error {
 			return mcpMgr.Close()
 		},
