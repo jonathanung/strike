@@ -944,6 +944,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			tc.AgentRoster = e.agentRoster
 			tc.AgentMessage = e.agentMessage
 			tc.AgentBroadcast = e.agentBroadcast
+			tc.TeamTask = e.teamTask
 		}
 		tc.ChildWake = e.childWakeCh()
 		tc.HasChildNotice = e.hasPendingChildNotices

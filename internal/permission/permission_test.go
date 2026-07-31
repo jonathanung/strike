@@ -51,7 +51,7 @@ func TestDefaultsIncludesAgentRosterAllow(t *testing.T) {
 
 func TestDefaultsIncludesTeamMessagingAllow(t *testing.T) {
 	// In-team messaging defaults to allow so peers do not prompt every send.
-	for _, perm := range []string{"agent_message", "agent_broadcast", "agent_roster"} {
+	for _, perm := range []string{"agent_message", "agent_broadcast", "agent_roster", "team_task"} {
 		if got := Evaluate(perm, "*", Defaults()); got != Allow {
 			t.Errorf("Defaults %s = %q, want allow", perm, got)
 		}
@@ -110,6 +110,7 @@ func TestValidateRulesetAcceptsTeamMessaging(t *testing.T) {
 		{Permission: "agent_message", Pattern: "*", Action: Deny},
 		{Permission: "agent_broadcast", Pattern: "*", Action: Allow},
 		{Permission: "agent_roster", Pattern: "*", Action: Ask},
+		{Permission: "team_task", Pattern: "*", Action: Allow},
 	}
 	if err := ValidateRuleset(rs); err != nil {
 		t.Fatalf("ValidateRuleset team messaging: %v", err)

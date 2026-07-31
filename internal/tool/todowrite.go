@@ -61,7 +61,9 @@ Usage notes:
   - Provide the full todo list on every call; the list is replaced entirely (pass an empty array to clear).
   - Each item needs a unique id, non-empty content, and status: pending, in_progress, completed, or cancelled.
   - Use todoread to inspect the current list without changing it; this write also returns the full list.
-  - Prefer this for multi-step tasks so progress stays visible across turns.`
+  - Prefer this for solo multi-step planning so progress stays visible across turns.
+  - When multiple teammates split work and need claim/assign, use team_task (shared
+    board, exclusive claim, CAS) instead of todowrite full-replace races.`
 }
 
 func (t *todoWriteTool) Schema() json.RawMessage {

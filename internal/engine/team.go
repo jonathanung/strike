@@ -30,11 +30,17 @@ const maxTeamMemberNameLen = 64
 //
 // Live mailbox targets (see AttachMailbox) enable peer delivery while an
 // engine's Run is active; completed members reject new mail.
+//
+// The shared task board (see team_board.go) is keyed by this Team (lead
+// session id). Claim uses exclusive owner + optional CAS version. Board is
+// cleared on Dissolve with the rest of team lifecycle GC.
 type Team struct {
-	mu      sync.Mutex
-	leadID  string
-	members map[string]TeamMember     // session id → member
-	live    map[string]*mailboxTarget // session id → live engine mailbox
+	mu       sync.Mutex
+	leadID   string
+	members  map[string]TeamMember     // session id → member
+	live     map[string]*mailboxTarget // session id → live engine mailbox
+	board    map[string]BoardTask      // task id → item
+	boardSeq int                       // monotonic id allocator (t1, t2, …)
 }
 
 // TeamMember is one roster entry (lead or child).
@@ -371,9 +377,10 @@ func (t *Team) SetPersona(sessionID, persona string) {
 	t.members[id] = m
 }
 
-// Dissolve clears the roster (team ends with the lead session). After Dissolve,
-// Contains is false for everyone and Roster is empty. The Team value should not
-// be reused; callers may replace the pointer.
+// Dissolve clears the roster and shared task board (team ends with the lead
+// session). After Dissolve, Contains is false for everyone, Roster is empty,
+// and Board is empty. The Team value should not be reused; callers may replace
+// the pointer.
 func (t *Team) Dissolve() {
 	if t == nil {
 		return
@@ -382,6 +389,7 @@ func (t *Team) Dissolve() {
 	defer t.mu.Unlock()
 	t.members = make(map[string]TeamMember)
 	t.live = make(map[string]*mailboxTarget)
+	t.clearBoardLocked()
 }
 
 // Len returns the number of roster entries (including the lead while active).

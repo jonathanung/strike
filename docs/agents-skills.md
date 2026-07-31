@@ -81,11 +81,13 @@ orchestrator prefers a few sequential or small parallel slices).
 | Tool / event | Role |
 |--------------|------|
 | `agent_message` / `agent_broadcast` | Mid-flight peer coordination (any teammate: child↔child, child↔lead) |
+| `team_task` | Shared claim/assign board (create/list/update/claim/complete; CAS) |
 | `[child.completed]` | Finished work product — terminal summary when a child ends |
 | `task_message` | Parent→owned-child steer only (not team chat) |
 | `task_status` / `task_read` | Rare one-off pulse / transcript slice — **not** busy-poll |
 | `agent_roster` | Who is on the team and live state |
 | `task_interrupt` | Cancel an owned child |
+| `todowrite` / `todoread` | Solo session todo list (full-replace) — **not** multi-agent claim |
 
 **Semantics:** prefer **messages** for mid-flight blockers/handoffs/questions;
 prefer **completion** for finished deliverables. Lead should not busy-poll
@@ -93,6 +95,11 @@ prefer **completion** for finished deliverables. Lead should not busy-poll
 early when blocked. Avoid chatty loops (no status ping-pong). Plain text bodies
 are enough; optional conventions (`blocker` / `handoff` / `question`) are fine
 without structured kinds.
+
+**Todos vs team board:** use `todowrite`/`todoread` for solo lead multi-step
+tracking. Use `team_task` when two or more teammates must see the same board and
+claim items (exclusive owner + optional `expected_version` CAS). The board is
+keyed by the lead session id and cleared when the lead session ends.
 
 Each model request composes the system prompt in layers (like opencode):
 

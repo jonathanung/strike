@@ -33,6 +33,7 @@ var shortPurposes = map[string]string{
 	"agent_roster":    "list lead and teammate agents on the session team",
 	"agent_message":   "send a peer message to one teammate",
 	"agent_broadcast": "broadcast a peer message to all other teammates",
+	"team_task":       "shared team task board (create/list/claim/complete)",
 	"webfetch":        "fetch a URL",
 	"todowrite":       "write the multi-step todo list",
 	"todoread":        "read the current todo list",
@@ -258,6 +259,8 @@ func recommendedGuidance(entries []GuidanceEntry) string {
 		"Use `agent_roster` to list the lead and teammates (session ids, personas, states) on the implicit session team — prefer over status polling when you only need who is live.")
 	add(has("agent_message") || has("agent_broadcast"),
 		"Prefer `agent_message` / `agent_broadcast` for mid-flight coordination (blockers, handoffs, child→lead early). Prefer `[child.completed]` for finished work products. Avoid chatty loops. `task_message` remains parent→owned-child steer only — not a parent-only team control plane.")
+	add(has("team_task"),
+		"Use `team_task` for a shared claim/assign board across teammates (create/list/update/claim/complete; CAS via expected_version). Prefer `todowrite`/`todoread` for solo lead planning only — not for multi-agent claim coordination.")
 
 	add(has("sleep") && has("bash") && has("task"),
 		"Prefer `sleep` over bash sleep for external readiness (services, rate limits). Never sleep-poll for `task`/subagent completion.")
@@ -271,7 +274,9 @@ func recommendedGuidance(entries []GuidanceEntry) string {
 		"Use `issue_write`/`issue_read` for project-local tracked issues on demand (never auto-injected).")
 	add(has("issue_read") && !has("issue_write"),
 		"Use `issue_read` for project-local tracked issues on demand.")
-	add(has("todowrite", "todoread"),
+	add(has("todowrite", "todoread") && has("team_task"),
+		"Use `todowrite`/`todoread` for solo multi-step tracking (full list on each write). Use `team_task` when teammates must claim shared work items.")
+	add(has("todowrite", "todoread") && !has("team_task"),
 		"Use `todowrite`/`todoread` for multi-step task tracking (full list on each write).")
 	add(has("skill"),
 		"Use `skill` to load named skill content when a task matches.")

@@ -1,7 +1,7 @@
 // Package tool defines the tool contract and the built-in tool set
 // (read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/
 // task_message/task_interrupt/agent_roster/agent_message/agent_broadcast/
-// webfetch/todowrite/todoread/
+// team_task/webfetch/todowrite/todoread/
 // memory_write/memory_read/issue_write/issue_read/notebook_edit/sleep/skill/question/enter_plan_mode/
 // exit_plan_mode/phase_done/toolsearch).
 // Used by internal/engine (dispatch), internal/permission (AskRequest, for the
@@ -215,6 +215,40 @@ type AgentBroadcastResult struct {
 	Results   []AgentBroadcastDelivery `json:"results"`
 }
 
+// TeamTaskRequest mutates or lists the shared team task board.
+// Action is create|list|update|claim|complete.
+type TeamTaskRequest struct {
+	Action          string
+	ID              string
+	Content         string
+	ContentSet      bool // true when JSON included "content" (allows empty reject vs omit)
+	Status          string
+	ExpectedVersion int // 0 = skip CAS version check
+}
+
+// TeamTaskItem is one board row for team_task.
+type TeamTaskItem struct {
+	ID        string `json:"id"`
+	Content   string `json:"content"`
+	Status    string `json:"status"`
+	Owner     string `json:"owner,omitempty"`
+	Version   int    `json:"version"`
+	CreatedBy string `json:"created_by,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty"` // RFC3339
+}
+
+// TeamTaskResult is the team_task tool payload.
+// On claim/update/complete conflicts, Conflict is true and Task holds the
+// current row (Detail explains); list/create still return Tasks when useful.
+type TeamTaskResult struct {
+	LeadID   string         `json:"lead_id,omitempty"`
+	Action   string         `json:"action,omitempty"`
+	Task     *TeamTaskItem  `json:"task,omitempty"`
+	Tasks    []TeamTaskItem `json:"tasks,omitempty"`
+	Conflict bool           `json:"conflict,omitempty"`
+	Detail   string         `json:"detail,omitempty"`
+}
+
 // QuestionOption is one selectable choice on a QuestionItem.
 type QuestionOption struct {
 	Label       string
@@ -254,6 +288,7 @@ type SessionPR struct {
 // control owned descendant sessions (never arbitrary sessions).
 // AgentRoster, when non-nil, lists the implicit session team (lead + peers).
 // AgentMessage/AgentBroadcast, when non-nil, send peer mail on the team.
+// TeamTask, when non-nil, mutates the shared lead-scoped team task board.
 // AskUser, when non-nil, blocks until the user answers a question batch.
 // SwitchAgent, when non-nil, queues an agent switch applied when the turn ends.
 // EnterPlanPhase starts the built-in plan→implement workflow at plan.
@@ -279,8 +314,10 @@ type Context struct {
 	AgentMessage func(ctx context.Context, req AgentMessageRequest) (AgentMessageResult, error)
 	// AgentBroadcast sends a peer mailbox message to all other teammates.
 	AgentBroadcast func(ctx context.Context, req AgentBroadcastRequest) (AgentBroadcastResult, error)
-	AskUser        func(ctx context.Context, req QuestionRequest) (QuestionResponse, error)
-	SwitchAgent    func(name string) error
+	// TeamTask creates/lists/updates/claims/completes shared team board items.
+	TeamTask    func(ctx context.Context, req TeamTaskRequest) (TeamTaskResult, error)
+	AskUser     func(ctx context.Context, req QuestionRequest) (QuestionResponse, error)
+	SwitchAgent func(name string) error
 	// EnterPlanPhase starts the default plan-implement workflow at the plan phase.
 	EnterPlanPhase func() error
 	// AdvancePhase clears the current phase exit gate and advances (or ends).
