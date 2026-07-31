@@ -314,10 +314,13 @@ func TestC2HintsAndWelcomeKeysDeriveFromBindings(t *testing.T) {
 		t.Errorf("wide left hints omit left-only send binding: %q", wideLeftHints)
 	}
 	welcome := ansi.Strip(m.welcomeKeys())
-	for _, binding := range []ui.KeyHint{keyHint(m.keyMap.FocusLeft), keyHint(m.keyMap.FocusRight), keyHint(m.keyMap.Send)} {
+	for _, binding := range []ui.KeyHint{keyHint(m.keyMap.FocusLeft), keyHint(m.keyMap.FocusRight), keyHint(m.keyMap.ExternalEditor)} {
 		if !strings.Contains(welcome, binding.Key) || !strings.Contains(welcome, binding.Label) {
 			t.Errorf("welcome keys omit binding-derived %q %q: %q", binding.Key, binding.Label, welcome)
 		}
+	}
+	if strings.Contains(welcome, keyHint(m.keyMap.Send).Label) {
+		t.Errorf("welcome keys repeat composer send binding: %q", welcome)
 	}
 	m = updateApp(t, m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 	rightHints := ansi.Strip(m.hintsView(160))

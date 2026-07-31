@@ -1,22 +1,22 @@
-⚡ strike /tmp/strike-golden   no model   auto sup   def                               ready
+⚡ strike /tmp/strike-golden   no model                                                ready
 ▁▁▁▁▁▁▁▁▁▁▁▁▁▁
 ⚡ S T R I K E
 ▔▔▔▔▔▔▔▔▔▔▔▔▔▔
 
 ╭─ get started ─────────────────────────────╮  ╭─ keys ────────────────────────────────────╮
-│ Connect a provider to start               │  │ ctrl+h  focus left                        │
+│ /provider connect a model                 │  │ ctrl+h  focus left                        │
 │ ◦ anthropic  none                         │  │ ctrl+l  focus right                       │
 │ ◦ openai  none                            │  │ ctrl+o  next window                       │
 │ ◦ xai  none                               │  │ ctrl+p  prev window                       │
 │ ◦ google  none                            │  │ ctrl+;  toggle split                      │
-│ ◦ kimi  none                              │  │ enter  send                               │
-│ ◦ deepseek  none                          │  │ ctrl+j/shift+enter/alt+enter  newline     │
-│ /provider to choose one                   │  │ ctrl+e  external editor                   │
-│ type below · enter to send                │  │ pgup/ctrl+up  scroll up                   │
-│                                           │  │ ctrl+t  jump to bottom                    │
-│                                           │  │ ctrl+k  palette                           │
+│ ◦ kimi  none                              │  │ ctrl+e  external editor                   │
+│ type below · enter to send                │  │ ctrl+k  palette                           │
 │                                           │  │ f1  keybinds                              │
 │                                           │  │ esc  interrupt                            │
+│                                           │  │                                           │
+│                                           │  │                                           │
+│                                           │  │                                           │
+│                                           │  │                                           │
 │                                           │  │                                           │
 │                                           │  │                                           │
 │                                           │  │                                           │
@@ -29,29 +29,29 @@
 ╰───────────────────────────────────────────╯  ╰───────────────────────────────────────────╯
 
 
-╭─ agents & skills ─────────────────────────╮
-│ agents                                    │
-│   ◆ build                                 │
-│ skills                                    │
-│   /review                                 │
-│   ◆ plan                                  │
-│                                           │
-│                                           │
-│                                           │
-│                                           │
-│                                           │
-│                                           │
-│                                           │
-│                                           │
-│                                           │
-│                                           │
-│                                           │
-│                                           │
-│                                           │
-│                                           │
-│                                           │
-│                                           │
-╰───────────────────────────────────────────╯
+╭─ agents & skills ────────────────────────────────────────────────────────────────────────╮
+│ agents                                                                                   │
+│   ◆ build                                                                                │
+│ skills                                                                                   │
+│   /review                                                                                │
+│   ◆ plan                                                                                 │
+│                                                                                          │
+│                                                                                          │
+│                                                                                          │
+│                                                                                          │
+│                                                                                          │
+│                                                                                          │
+│                                                                                          │
+│                                                                                          │
+│                                                                                          │
+│                                                                                          │
+│                                                                                          │
+│                                                                                          │
+│                                                                                          │
+│                                                                                          │
+│                                                                                          │
+│                                                                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────╯
 
 ╭─ prompt ❯ ───────────────────────────────────────────────────────────────────────────────╮
 │ ❯ Ask anything…  (/ commands, ! shell)                                                   │

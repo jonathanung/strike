@@ -50,6 +50,7 @@ func TestGallery(t *testing.T) {
 	}
 	render("80x24 left dashboard", 80, 24, func(m *Model) {})
 	render("80x24 right context", 80, 24, func(m *Model) { m.focus = focusRight })
+	render("60x20 narrow dashboard", 60, 20, func(m *Model) {})
 	render("80x24 right visualizer", 80, 24, func(m *Model) {
 		m.focus = focusRight
 		m.sessionID = "gallery-root"
@@ -70,6 +71,7 @@ func TestGallery(t *testing.T) {
 		m.windows, _ = m.windows.broadcast(m.visualizerStateSnapshot())
 	})
 	render("93x40 split canonical (left=60 gutter=1 right=32)", 93, 40, func(m *Model) {})
+	render("93x19 constrained split", 93, 19, func(m *Model) { m.focus = focusRight })
 	render("92 left single (left=92 right=0)", 92, 60, func(m *Model) {})
 	render("120x40 split (left=80 gutter=1 right=39)", 120, 40, func(m *Model) {})
 	render("120x48 session stack with telemetry", 120, 48, func(m *Model) {

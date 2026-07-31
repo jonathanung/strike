@@ -182,14 +182,14 @@ func TestAutonomySelectedEventUpdatesModelAndHeaderBadge(t *testing.T) {
 	}
 }
 
-func TestHeaderAlwaysShowsAutonomyBadge(t *testing.T) {
+func TestHeaderOmitsDefaultAutonomyBadge(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m.width, m.height, m.ready = 100, 30, true
 	m.providerName, m.modelName = "anthropic", "claude-opus-5"
 
 	header := ansi.Strip(m.headerView(100))
-	if !strings.Contains(header, "auto sup") {
-		t.Errorf("header omits default autonomy badge:\n%s", header)
+	if strings.Contains(header, "auto sup") {
+		t.Errorf("header includes redundant default autonomy badge:\n%s", header)
 	}
 }
 

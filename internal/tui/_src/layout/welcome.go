@@ -80,14 +80,18 @@ func (m Model) welcomeView(width, height int) string {
 			if len(parts) > 0 {
 				parts = append(parts, themedSpace(gap))
 			}
-			inner := ui.PanelInnerWidth(th, cardWidth)
+			outerWidth := cardWidth
+			if columns == 2 && end-start == 1 {
+				outerWidth = width
+			}
+			inner := ui.PanelInnerWidth(th, outerWidth)
 			bodyRows := max(0, rowHeights[row]-2)
 			parts = append(parts, ui.Panel(th, ui.PanelOpts{
 				Title:   welcomeCardTitle(th, card.title, card.tone),
-				Width:   cardWidth,
+				Width:   outerWidth,
 				Height:  rowHeights[row],
-				Focused: m.focus == focusLeft && m.modal == nil,
-				Dim:     m.focus == focusRight || m.modal != nil,
+				Focused: card.primary && m.focus == focusLeft && m.modal == nil,
+				Dim:     !card.primary || m.focus == focusRight || m.modal != nil,
 				Tone:    ui.ToneDefault,
 			}, card.body(inner, bodyRows)))
 		}
@@ -130,6 +134,7 @@ func welcomeLogoBand(th theme.Theme, width, height, gap int) (string, int) {
 type welcomeCard struct {
 	title   string
 	tone    ui.Tone // multi-accent title hierarchy; body stays default surface
+	primary bool
 	desired int
 	body    func(width, rows int) string
 }
@@ -176,11 +181,11 @@ func (m Model) welcomeCards(statuses []host.ProviderStatus) []welcomeCard {
 	cards := make([]welcomeCard, 0, 4)
 	if m.providerName == "" || selectedUnauthed {
 		if m.firstRun {
-			cards = append(cards, welcomeCard{title: "first run", tone: ui.ToneAccentAlt, desired: 7, body: func(width, rows int) string {
+			cards = append(cards, welcomeCard{title: "first run", tone: ui.ToneAccentAlt, primary: true, desired: 7, body: func(width, rows int) string {
 				return m.welcomeFirstRun(width, rows)
 			}})
 		} else {
-			cards = append(cards, welcomeCard{title: "get started", tone: ui.ToneAccentAlt, desired: 9, body: func(width, rows int) string {
+			cards = append(cards, welcomeCard{title: "get started", tone: ui.ToneAccentAlt, primary: true, desired: 9, body: func(width, rows int) string {
 				return m.welcomeProviders(statuses, width, rows)
 			}})
 		}
@@ -196,6 +201,9 @@ func (m Model) welcomeCards(statuses []host.ProviderStatus) []welcomeCard {
 	if len(m.entries) > 0 {
 		cards = append(cards, welcomeCard{title: "recent prompts", tone: ui.ToneMuted, desired: 5, body: m.welcomeRecent})
 	}
+	if len(cards) > 0 && !cards[0].primary {
+		cards[0].primary = true
+	}
 	return cards
 }
 
@@ -205,7 +213,7 @@ func welcomeFits(height, cards, columns, gap int) bool {
 }
 
 func welcomeDropCard(cards []welcomeCard) []welcomeCard {
-	for _, title := range []string{"recent prompts", "agents & skills", "get started", "first run"} {
+	for _, title := range []string{"recent prompts", "agents & skills", "keys"} {
 		for i, card := range cards {
 			if card.title == title {
 				return append(cards[:i:i], cards[i+1:]...)
@@ -321,11 +329,16 @@ func (m Model) welcomeProviders(statuses []host.ProviderStatus, width, rows int)
 		}
 	}
 	lines := make([]string, 0, min(6, rows))
-	// Lead-in only when the card is tall enough for 6 providers + action + tip.
-	providerBudget := 6
-	if rows >= 9 {
-		lines = append(lines, st.Text.Render(welcomeTruncate("Connect a provider to start", width, th.Icons.Ellipsis)))
+	if rows > 0 {
+		action := welcomeTruncate("/provider"+space+"connect a model", width, th.Icons.Ellipsis)
+		command, detail, hasDetail := strings.Cut(action, space)
+		line := st.AccentStrong.Render(command)
+		if hasDetail {
+			line += st.Text.Render(space + detail)
+		}
+		lines = append(lines, line)
 	}
+	providerBudget := 5
 	providers := 0
 	for _, status := range ordered {
 		if providers >= providerBudget || len(lines) >= rows {
@@ -355,15 +368,6 @@ func (m Model) welcomeProviders(statuses []host.ProviderStatus, width, rows int)
 	}
 	if providers == 0 && len(lines) == 0 && rows > 1 {
 		lines = append(lines, st.Muted.Render(welcomeTruncate("no providers configured", width, th.Icons.Ellipsis)))
-	}
-	if len(lines) < rows {
-		action := welcomeTruncate("/provider"+space+"to choose one", width, th.Icons.Ellipsis)
-		command, detail, hasDetail := strings.Cut(action, space)
-		line := st.Accent.Render(command)
-		if hasDetail {
-			line += st.Muted.Render(space + detail)
-		}
-		lines = append(lines, line)
 	}
 	if len(lines) < rows && m.agentsMDMissing() {
 		action := welcomeTruncate("/init"+space+"project AGENTS.md", width, th.Icons.Ellipsis)
@@ -406,8 +410,7 @@ func (m Model) welcomeKeys(size ...int) string {
 		m.keyMap.FocusLeft, m.keyMap.FocusRight,
 		m.keyMap.CycleWindowNext, m.keyMap.CycleWindowPrev,
 		m.keyMap.ToggleOrientation,
-		m.keyMap.Send, m.keyMap.Newline, m.keyMap.ExternalEditor,
-		m.keyMap.ScrollUp, m.keyMap.JumpBottom,
+		m.keyMap.ExternalEditor,
 		m.keyMap.Palette, m.keyMap.KeyHelp, m.keyMap.Interrupt,
 	}
 	lines := make([]string, 0, min(rows, len(bindings)))

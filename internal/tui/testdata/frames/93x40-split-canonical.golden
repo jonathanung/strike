@@ -1,37 +1,37 @@
-⚡ strike /tmp/strike-golden   no model   auto sup   def                                ready
+⚡ strike /tmp/strike-golden   no model                                                 ready
 ▁▁▁▁▁▁▁▁▁▁▁▁▁▁                                               ╭─ context ────────────────────╮
 ⚡ S T R I K E                                               │ model  none /provider        │
 ▔▔▔▔▔▔▔▔▔▔▔▔▔▔                                               │ autonomy  supervised         │
                                                              │ skills  1                    │
 ╭─ get started ─────────────╮  ╭─ keys ────────────────────╮ │                              │
-│ Connect a provider to st… │  │ ctrl+h  focus left        │ │                              │
+│ /provider connect a model │  │ ctrl+h  focus left        │ │                              │
 │ ◦ anthropic  none         │  │ ctrl+l  focus right       │ │                              │
 │ ◦ openai  none            │  │ ctrl+o  next window       │ │                              │
 │ ◦ xai  none               │  │ ctrl+p  prev window       │ │                              │
 │ ◦ google  none            │  │ ctrl+;  toggle split      │ │                              │
-│ ◦ kimi  none              │  │ enter  send               │ │                              │
-│ ◦ deepseek  none          │  │ ctrl+j/shift+enter/alt+e… │ ╰──────────────────────────────╯
-│ /provider to choose one   │  │ ctrl+e  external editor   │
-│ type below · enter to se… │  │ pgup/ctrl+up  scroll up   │ ╭─ activity ───────────────────╮
-│                           │  │ ctrl+t  jump to bottom    │ │ /  commands                  │
-│                           │  │ ctrl+k  palette           │ │ ctrl+k  palette              │
-│                           │  │ f1  keybinds              │ │ tab  cycle agent persona     │
+│ ◦ kimi  none              │  │ ctrl+e  external editor   │ │                              │
+│ type below · enter to se… │  │ ctrl+k  palette           │ ╰──────────────────────────────╯
+│                           │  │ f1  keybinds              │
+│                           │  │ esc  interrupt            │ ╭─ activity ───────────────────╮
+│                           │  │                           │ │ /  commands                  │
+│                           │  │                           │ │ ctrl+k  palette              │
+│                           │  │                           │ │ tab  cycle agent persona     │
 ╰───────────────────────────╯  ╰───────────────────────────╯ │ ctrl+o  next window          │
                                                              │ ctrl+;  toggle split         │
                                                              │ ctrl+j/shift+enter/alt+enter │
-╭─ agents & skills ─────────╮                                │ ctrl+x down  subagent        │
-│ agents                    │                                │                              │
-│   ◆ build                 │                                │                              │
-│ skills                    │                                │                              │
-│   /review                 │                                ╰──────────────────────────────╯
-│   ◆ plan                  │
-│                           │                                ╭─ system ─────────────────────╮
-│                           │                                │ sampling…                    │
-│                           │                                │                              │
-│                           │                                │                              │
-│                           │                                │                              │
-│                           │                                │                              │
-╰───────────────────────────╯                                │                              │
+╭─ agents & skills ────────────────────────────────────────╮ │ ctrl+x down  subagent        │
+│ agents                                                   │ │                              │
+│   ◆ build                                                │ │                              │
+│ skills                                                   │ │                              │
+│   /review                                                │ ╰──────────────────────────────╯
+│   ◆ plan                                                 │
+│                                                          │ ╭─ system ─────────────────────╮
+│                                                          │ │ sampling…                    │
+│                                                          │ │                              │
+│                                                          │ │                              │
+│                                                          │ │                              │
+│                                                          │ │                              │
+╰──────────────────────────────────────────────────────────╯ │                              │
                                                              │                              │
 ╭─ prompt ❯ ───────────────────────────────────────────────╮ │                              │
 │ ❯ Ask anything…  (/ commands, ! shell)                   │ │                              │

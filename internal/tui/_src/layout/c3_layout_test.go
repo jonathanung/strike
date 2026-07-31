@@ -255,9 +255,9 @@ func TestC3WelcomeProviderAndPromptLimits(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	statuses := []host.ProviderStatus{{Name: "one"}, {Name: "two"}, {Name: "three"}, {Name: "four"}, {Name: "five"}, {Name: "six"}, {Name: "seven"}}
 	body := ansi.Strip(m.welcomeProviders(statuses, 30, 8))
-	// Six provider rows + /provider action + "type below · enter to send" tip.
-	if strings.Count(body, "\n")+1 != 8 || !strings.Contains(body, "/provider") || strings.Contains(body, "seven") {
-		t.Errorf("provider card did not cap six rows plus action and tip: %q", body)
+	// Primary /provider action + five provider rows + "type below · enter to send" tip.
+	if strings.Count(body, "\n")+1 != 7 || !strings.HasPrefix(body, "/provider") || strings.Contains(body, "six") {
+		t.Errorf("provider card did not prioritize its action and cap provider rows: %q", body)
 	}
 	if !strings.Contains(body, "type below") || !strings.Contains(body, "enter") {
 		t.Errorf("provider card missing type-below/enter tip: %q", body)

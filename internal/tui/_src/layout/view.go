@@ -88,9 +88,14 @@ func (m Model) headerView(width int) string {
 	if m.effort != protocol.EffortDefault {
 		chips = append(chips, headerChip{20, ui.Badge(th, ui.ToneMuted, "effort"+inlineGap+string(m.effort))})
 	}
-	// Autonomy + permission always preferred over decorative chips.
-	chips = append(chips, headerChip{85, ui.Badge(th, ui.ToneAccentAlt, "auto"+inlineGap+m.autonomy.Short())})
-	chips = append(chips, headerChip{85, ui.Badge(th, permissionModeBadgeTone(m.permMode), m.permMode.Short())})
+	// Normal posture stays out of the header; exceptional autonomy and permission
+	// modes remain prominent because they change how the agent may act.
+	if m.autonomy.Normalize() != protocol.AutonomySupervised {
+		chips = append(chips, headerChip{85, ui.Badge(th, ui.ToneAccentAlt, "auto"+inlineGap+m.autonomy.Short())})
+	}
+	if m.permMode.Normalize() != protocol.PermissionModeDefault {
+		chips = append(chips, headerChip{85, ui.Badge(th, permissionModeBadgeTone(m.permMode), m.permMode.Short())})
+	}
 	if secs := m.effectivePermissionAutoApproveSeconds(); secs > 0 {
 		chips = append(chips, headerChip{80, ui.Badge(th, ui.ToneWarning, "auto-allow"+inlineGap+itoa(secs)+"s")})
 	}

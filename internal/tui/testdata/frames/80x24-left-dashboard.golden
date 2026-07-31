@@ -1,21 +1,21 @@
-⚡ strike /tmp/strike-golden   no model   auto sup   def                   ready
+⚡ strike /tmp/strike-golden   no model                                    ready
 ╭─ get started ───────────────────────╮  ╭─ keys ──────────────────────────────╮
-│ ◦ anthropic  none                   │  │ ctrl+h  focus left                  │
-│ ◦ openai  none                      │  │ ctrl+l  focus right                 │
-│ ◦ xai  none                         │  │ ctrl+o  next window                 │
-│ ◦ google  none                      │  │ ctrl+p  prev window                 │
-│ ◦ kimi  none                        │  │ ctrl+;  toggle split                │
-│ ◦ deepseek  none                    │  │ enter  send                         │
+│ /provider connect a model           │  │ ctrl+h  focus left                  │
+│ ◦ anthropic  none                   │  │ ctrl+l  focus right                 │
+│ ◦ openai  none                      │  │ ctrl+o  next window                 │
+│ ◦ xai  none                         │  │ ctrl+p  prev window                 │
+│ ◦ google  none                      │  │ ctrl+;  toggle split                │
+│ ◦ kimi  none                        │  │ ctrl+e  external editor             │
 ╰─────────────────────────────────────╯  ╰─────────────────────────────────────╯
 
 
-╭─ agents & skills ───────────────────╮
-│ agents                              │
-│   ◆ build                           │
-│ skills                              │
-│   /review                           │
-│   ◆ plan                            │
-╰─────────────────────────────────────╯
+╭─ agents & skills ────────────────────────────────────────────────────────────╮
+│ agents                                                                       │
+│   ◆ build                                                                    │
+│ skills                                                                       │
+│   /review                                                                    │
+│   ◆ plan                                                                     │
+╰──────────────────────────────────────────────────────────────────────────────╯
 
 ╭─ prompt ❯ ───────────────────────────────────────────────────────────────────╮
 │ ❯ Ask anything…  (/ commands, ! shell)                                       │
