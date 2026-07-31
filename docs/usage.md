@@ -146,6 +146,34 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/init` | light local scan → write `AGENTS.md`; confirms before overwrite |
 | `/mcp` | MCP status (`up`/`down`/`error`/`disabled`); `/mcp retry [name]`, `/mcp disable <name>` (see [config.md](config.md#mcp-servers-stdio--http)) |
 
+### Agent teams
+
+**Team = same session tree by default.** When a lead session spawns `task`
+children, those agents (lead + children) form an implicit team — no separate
+team-create step. Concurrent roots are independent teams.
+
+| Capability | How |
+|---|---|
+| Spawn teammates | `task` with optional `name` (stable alias) and `agent` persona |
+| List roster | `agent_roster` |
+| Peer message | `agent_message` (`to` = `session_id` or `name`) |
+| Fan-out | `agent_broadcast` (all other teammates; use sparingly) |
+| Parent steer only | `task_message` (owned child; not peer chat) |
+| Finish signal | `[child.completed]` on the lead |
+
+Messages land at tool-round / idle boundaries (safe injection). Defaults allow
+in-team messaging; out-of-team targets fail closed; permission deny rules still
+apply. Parent-only flows that never call `agent_*` tools are unchanged.
+
+**Example — parallel explore + implement with one peer handoff:**
+
+1. Lead: `task(name=explorer, agent=explore, …)` and
+   `task(name=implementer, agent=general, …)` in the same turn.
+2. Explorer: `agent_message(to="implementer", body="change X in path Y; tests in Z")`.
+3. Implementer acts on the handoff; lead synthesizes from completion + inbox.
+
+Full coordination semantics: [agents-skills.md](agents-skills.md#agent-teams).
+
 ### Autonomy & workflows
 
 `/autonomy` sets the session exit-gate policy for multi-phase workflows

@@ -14,6 +14,10 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+### Added
+
+- Added **agent teams**: an implicit session-scoped team (lead + `task` children in the same session tree) with `agent_roster`, `agent_message`, and `agent_broadcast` for mid-turn peer coordination, boundary-safe mailbox delivery, and default-allow permissions (out-of-team fails closed). Optional stable `name` aliases on `task` spawn. Parent-only `task_*` workflows remain unchanged when team tools are unused ([#404](https://github.com/jonathanung/strike/issues/404), [#607](https://github.com/jonathanung/strike/issues/607)–[#614](https://github.com/jonathanung/strike/issues/614), [#616](https://github.com/jonathanung/strike/issues/616)).
+
 ## [v0.0.14] - 2026-07-30
 
 ### Added
