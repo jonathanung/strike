@@ -236,6 +236,38 @@ func (m *Model) resetComposer() {
 	m.reflow()
 }
 
+type composerSnapshot struct {
+	value         string
+	cursor        int
+	pendingPastes []pasteChip
+	pendingImages []imageChip
+	completion    *completionState
+	historyPos    int
+	historyDraft  string
+}
+
+func (m Model) snapshotComposer() composerSnapshot {
+	info := m.composer.LineInfo()
+	return composerSnapshot{
+		value:         m.composer.Value(),
+		cursor:        runeOffset(m.composer.Value(), m.composer.Line(), info.StartColumn+info.ColumnOffset),
+		pendingPastes: m.pendingPastes,
+		pendingImages: m.pendingImages,
+		completion:    m.completion,
+		historyPos:    m.historyPos,
+		historyDraft:  m.historyDraft,
+	}
+}
+
+func (m *Model) restoreComposer(snapshot composerSnapshot) {
+	m.setComposerValueAt(snapshot.value, snapshot.cursor)
+	m.pendingPastes = snapshot.pendingPastes
+	m.pendingImages = snapshot.pendingImages
+	m.completion = snapshot.completion
+	m.historyPos = snapshot.historyPos
+	m.historyDraft = snapshot.historyDraft
+}
+
 func (m *Model) handleHistoryKey(msg tea.KeyPressMsg) bool {
 	if m.historyPos >= 0 {
 		switch {
