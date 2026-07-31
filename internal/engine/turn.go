@@ -87,12 +87,17 @@ func (e *Engine) enqueueUserInput(op protocol.UserInput) {
 }
 
 // drainIdleFollowups starts at most one follow-up turn when idle: preferred
-// user-queued input, otherwise pending child-completion notices.
+// user-queued input, otherwise pending child-completion notices, otherwise
+// peer mailbox messages.
 func (e *Engine) drainIdleFollowups(ctx context.Context) {
 	if e.startNextPendingUserInput(ctx) {
 		return
 	}
-	e.flushPendingChildNotices(ctx)
+	if e.hasPendingChildNotices() {
+		e.flushPendingChildNotices(ctx)
+		return
+	}
+	e.flushPendingMailbox(ctx)
 }
 
 // startNextPendingUserInput pops and starts the next queued UserInput when
@@ -226,10 +231,10 @@ func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.Ima
 	}
 
 	for {
-		// Deliver child.completed into model history before each Stream so a
-		// parent that is still in-turn (e.g. sleep-polling) sees the result
-		// without waiting for idle auto-nudge.
+		// Deliver child.completed and peer mailbox messages into model history
+		// before each Stream (tool-round boundary). Never mid-tool-call.
 		e.injectPendingChildNotices()
+		e.injectPendingMailbox()
 		e.maybePruneToolResults()
 		e.maybeThresholdCompact(ctx, turnID)
 		outcome, reqCorr, err := e.streamModel(ctx, turnID)
@@ -384,6 +389,7 @@ func (e *Engine) consumeStream(ctx context.Context, reqCorr protocol.Correlation
 		MaxTokens: e.opts.MaxTokens,
 		Effort:    providerEffort(e.effort),
 		Priority:  e.priority,
+		CacheKey:  e.opts.SessionID,
 	})
 	if err != nil {
 		return streamOutcome{}, err
@@ -726,6 +732,14 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			tc.TaskRead = e.childRead
 			tc.TaskMessage = e.childMessage
 			tc.TaskInterrupt = e.childInterrupt
+		}
+		// Team tools are available on lead and children (shared team).
+		// Messaging is not stripped at depth ceiling (unlike nested task).
+		if e.team != nil {
+			tc.AgentRoster = e.agentRoster
+			tc.AgentMessage = e.agentMessage
+			tc.AgentBroadcast = e.agentBroadcast
+			tc.TeamTask = e.teamTask
 		}
 		tc.ChildWake = e.childWakeCh()
 		tc.HasChildNotice = e.hasPendingChildNotices
