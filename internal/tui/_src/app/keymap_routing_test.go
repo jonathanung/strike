@@ -840,20 +840,14 @@ func TestNoOSCBackgroundJunkInComposerAfterSubmit(t *testing.T) {
 // on every complete assistant cell and dumps the reply into the composer.
 func TestMarkdownRenderDoesNotUseAutoStyle(t *testing.T) {
 	savedMD := glamourStyleName
-	savedDetected := appearanceDetected
-	savedDetectedDark := appearanceDetectedDark
 	savedDark := compat.HasDarkBackground
 	t.Cleanup(func() {
 		glamourStyleName = savedMD
-		appearanceDetected = savedDetected
-		appearanceDetectedDark = savedDetectedDark
-		compat.HasDarkBackground = (savedDark)
+		compat.HasDarkBackground = savedDark
 	})
 
-	PinAppearance()
-	if !appearanceDetected {
-		t.Fatal("PinAppearance did not mark appearance detected")
-	}
+	// Pin glamour to a concrete dark/light style (never "auto") as applyAppearance does.
+	setGlamourStyle(true)
 	style := glamourStyle()
 	if style != "dark" && style != "light" {
 		t.Fatalf("glamourStyle = %q, want dark or light (never auto)", style)

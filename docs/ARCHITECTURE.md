@@ -148,8 +148,9 @@ events remain filtered except permissions and questions.
 Color themes load from bundled JSON plus `~/.strike/themes` and
 `./.strike/themes`; `/theme` opens a picker (or `/theme <id>` applies one)
 and `config.theme` / ctrl+d persists the choice. Session-local appearance
-(`/theme dark|light|auto`) still calls `lipgloss.SetHasDarkBackground` for
-forced modes and restores the initially detected background for auto.
+(`/theme dark|light|auto`) is model state that feeds theme resolution; terminal
+background comes from Bubble Tea `BackgroundColorMsg` (not a pre-program OSC 11
+query). Forced dark/light override detection; auto uses the last detected bg.
 Default chrome is **solid** (surface fills, no box-drawing primary frame);
 themes may opt into `chrome: "bordered"`. See [theme.md](theme.md).
 

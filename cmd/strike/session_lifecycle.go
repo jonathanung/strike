@@ -266,9 +266,6 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 		sessionPath := a.store.Path()
 
 		restore := tui.EnableEnhancedKeys(stdout)
-		// Detect bg once before the program owns stdin — glamour/lipgloss OSC 11
-		// replies must not race into the composer (#52).
-		tui.PinAppearance()
 		vimMode := tui.VimModePane
 		if mode, ok := tui.ParseVimMode(a.cfg.VimMode); ok {
 			vimMode = mode
