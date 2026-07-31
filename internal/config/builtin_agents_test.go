@@ -86,6 +86,17 @@ func TestBuiltinAgentsCatalog(t *testing.T) {
 	if !strings.Contains(g.Prompt, "agent_message") || !strings.Contains(strings.ToLower(g.Prompt), "block") {
 		t.Errorf("general prompt should teach early blocker messaging: %q", g.Prompt)
 	}
+	// general is a multi-step implementer (root or task child): bash must be
+	// allow so it is not stuck on every shell prompt (#651).
+	if !rulesetHas(g.Permissions, "bash", permission.Allow) {
+		t.Errorf("general missing bash allow: %+v", g.Permissions)
+	}
+	if !rulesetHas(g.Permissions, "task", permission.Deny) {
+		t.Errorf("general missing task deny: %+v", g.Permissions)
+	}
+	if got := permission.Evaluate("bash", "ls", permission.Defaults(), g.Permissions); got != permission.Allow {
+		t.Errorf("Evaluate bash with general profile = %q, want allow", got)
+	}
 	if err := ValidateAgentName("pr-babysitter"); err != nil {
 		t.Fatalf("ValidateAgentName(pr-babysitter) = %v", err)
 	}

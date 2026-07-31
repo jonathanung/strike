@@ -634,3 +634,178 @@ func TestChildAgentDenyFurtherRestricts(t *testing.T) {
 		t.Errorf("file content = %q, want unchanged %q", data, original)
 	}
 }
+
+func generalBashAllow() permission.Ruleset {
+	return permission.Ruleset{
+		{Permission: "bash", Pattern: "*", Action: permission.Allow},
+		{Permission: "task", Pattern: "*", Action: permission.Deny},
+	}
+}
+
+// TestGeneralRootAllowsBashWithoutAsk: selecting general at root applies
+// permission.bash: allow over defaults (bash=ask).
+func TestGeneralRootAllowsBashWithoutAsk(t *testing.T) {
+	call := bashToolCall("b-root", "echo root-ok")
+	prov := newScriptedProvider(
+		toolCallStep(call),
+		completedStep("done"),
+	)
+	eng := engine.New(engine.Options{
+		SessionID:       "general-bash-root",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(tool.NewBash()),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+		Agents: []engine.Agent{
+			{Name: "build"},
+			{Name: "general", Permissions: generalBashAllow()},
+		},
+		InitialAgent: "general",
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	waitForEvent(t, eng, func(ev protocol.Event) bool {
+		sel, ok := ev.(protocol.AgentSelected)
+		return ok && sel.Name == "general"
+	})
+
+	eng.Ops() <- protocol.UserInput{Text: "run bash"}
+	var (
+		sawEnd bool
+		end    protocol.ToolCallEnd
+	)
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("timed out")
+		case ev := <-eng.Events():
+			switch ev := ev.(type) {
+			case protocol.PermissionAsked:
+				t.Fatalf("unexpected PermissionAsked under general bash allow: %#v", ev)
+			case protocol.ToolCallEnd:
+				if ev.CallID == "b-root" {
+					end = ev
+					sawEnd = true
+				}
+			case protocol.TurnCompleted:
+				goto done
+			case protocol.EngineError:
+				t.Fatalf("engine error: %s", ev.Message)
+			}
+		}
+	}
+done:
+	if !sawEnd {
+		t.Fatal("missing bash ToolCallEnd")
+	}
+	if end.IsError {
+		t.Fatalf("bash ToolCallEnd error: %q", end.Output)
+	}
+}
+
+// TestGeneralChildAllowsBashWithoutAsk is the #651 exit criterion: task-spawned
+// general upgrades parent bash=ask to allow so the subagent is not stuck on
+// every shell prompt. Parent Deny still wins (see AG3).
+//
+// Child ToolCallEnd is not re-emitted on the parent event stream; success is
+// observed via a workdir side effect and the absence of PermissionAsked.
+func TestGeneralChildAllowsBashWithoutAsk(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "general-bash-marker.txt")
+	const childPrompt = "run bash marker"
+	taskCall := taskToolCallWithAgent("task-general-bash", childPrompt, "general")
+	// Write a marker so we can observe the child bash ran without parent ToolCallEnd.
+	bashCall := bashToolCall("b-child", "echo child-ok > general-bash-marker.txt")
+	prov := newScriptedProvider(
+		toolCallStep(taskCall),
+		func() streamStep {
+			s := toolCallStep(bashCall)
+			s.match = matchUserText(childPrompt)
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("child done")
+			s.match = matchToolResult("b-child")
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("parent done")
+			s.match = matchToolResult("task-general-bash")
+			return s
+		}(),
+		childCompletedNudgeStep("parent ack general bash"),
+	)
+
+	eng := engine.New(engine.Options{
+		SessionID:       "general-bash-child",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(tool.NewTask(), tool.NewBash()),
+		WorkDir:         dir,
+		// Defaults: bash=ask. general profile must upgrade without prompting.
+		Rules: []permission.Ruleset{permission.Defaults()},
+		Agents: []engine.Agent{
+			{Name: "build"},
+			{Name: "general", Permissions: generalBashAllow()},
+		},
+		InitialAgent: "build",
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	waitForEvent(t, eng, func(ev protocol.Event) bool {
+		sel, ok := ev.(protocol.AgentSelected)
+		return ok && sel.Name == "build"
+	})
+
+	eng.Ops() <- protocol.UserInput{Text: "delegate to general"}
+	var (
+		askedBash  bool
+		childDone  bool
+		parentDone bool
+		sawTask    bool
+	)
+	deadline := time.After(15 * time.Second)
+	for !(parentDone && childDone && sawTask) {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out askedBash=%v childDone=%v sawTask=%v", askedBash, childDone, sawTask)
+		case ev := <-eng.Events():
+			switch ev := ev.(type) {
+			case protocol.PermissionAsked:
+				if ev.Permission == "bash" {
+					askedBash = true
+				}
+				eng.Ops() <- protocol.PermissionReply{
+					RequestID: ev.RequestID,
+					Decision:  protocol.DecisionOnce,
+				}
+			case protocol.ToolCallEnd:
+				if ev.CallID == "task-general-bash" {
+					sawTask = true
+				}
+			case protocol.ChildCompleted:
+				childDone = true
+			case protocol.TurnCompleted:
+				parentDone = true
+			case protocol.EngineError:
+				t.Fatalf("engine error: %s", ev.Message)
+			}
+		}
+	}
+	if askedBash {
+		t.Error("child general bash emitted PermissionAsked; profile allow must upgrade parent ask")
+	}
+	data, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("child bash did not write marker: %v", err)
+	}
+	if !strings.Contains(string(data), "child-ok") {
+		t.Fatalf("marker = %q, want child-ok", data)
+	}
+}

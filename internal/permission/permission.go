@@ -125,8 +125,6 @@ func Defaults() Ruleset {
 }
 
 // DenyOnly returns a defensive copy of rs containing only Deny rules.
-// Used so child agent profiles can further restrict without widening
-// parent Deny/Ask via Allow (AG3).
 func DenyOnly(rs Ruleset) Ruleset {
 	var out Ruleset
 	for _, rule := range rs {
@@ -137,15 +135,45 @@ func DenyOnly(rs Ruleset) Ruleset {
 	return out
 }
 
-// DeriveChildRules deep-copies parentLayers and appends only Deny rules from
-// childExtra. When denyTask is true (child depth has reached MaxChildDepth),
-// appends Deny task * so the child cannot spawn further. Does NOT copy parent
-// session grants (caller passes opts.Rules plus the parent's active agent
-// profile). Child Service.granted starts empty.
+// ChildAgentRules returns the subset of a child agent profile that is safe to
+// apply under a parent permission ceiling (AG3).
 //
-// Only Deny entries from childExtra are kept so a child cannot widen a
-// parent Deny/Ask via Allow. Parent last-match-wins order is preserved,
-// including parent allow-after-deny patterns.
+//   - Deny always applies (child may further restrict).
+//   - Allow applies only when the parent ceiling does not already Deny that
+//     permission/pattern — Ask→Allow is permitted so personas like general
+//     (permission.bash: allow) work as task subagents; Deny→Allow is not.
+//   - Ask entries are dropped (parent Ask stands unless upgraded by Allow).
+//
+// Defensively copies kept rules. parentLayers is the child's base ceiling
+// (defaults/config plus parent agent profile), not session always-grants.
+func ChildAgentRules(parentLayers []Ruleset, child Ruleset) Ruleset {
+	var out Ruleset
+	for _, rule := range child {
+		switch rule.Action {
+		case Deny:
+			out = append(out, rule)
+		case Allow:
+			pat := rule.Pattern
+			if pat == "" {
+				pat = "*"
+			}
+			if Evaluate(rule.Permission, pat, parentLayers...) != Deny {
+				out = append(out, rule)
+			}
+		}
+	}
+	return out
+}
+
+// DeriveChildRules deep-copies parentLayers and appends filtered childExtra
+// rules via ChildAgentRules (denies always; allows only when they do not
+// override a parent Deny). When denyTask is true (child depth has reached
+// MaxChildDepth), appends Deny task * so the child cannot spawn further. Does
+// NOT copy parent session grants (caller passes opts.Rules plus the parent's
+// active agent profile). Child Service.granted starts empty.
+//
+// Parent last-match-wins order is preserved, including parent
+// allow-after-deny patterns.
 //
 // denyTask is task-only: team messaging permissions (agent_message,
 // agent_broadcast, agent_roster, and parent→child task_message) stay at the
@@ -156,8 +184,8 @@ func DeriveChildRules(parentLayers []Ruleset, denyTask bool, childExtra ...Rules
 		out = append(out, append(Ruleset(nil), layer...))
 	}
 	for _, extra := range childExtra {
-		if denies := DenyOnly(extra); len(denies) > 0 {
-			out = append(out, denies)
+		if filtered := ChildAgentRules(out, extra); len(filtered) > 0 {
+			out = append(out, filtered)
 		}
 	}
 	if denyTask {
