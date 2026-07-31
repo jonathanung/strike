@@ -4,9 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/hinshun/vt10x"
-	"github.com/muesli/termenv"
 )
 
 // Render returns a lipgloss-styled string of the current VT screen, clipped to
@@ -29,7 +28,6 @@ func Render(s *Session, cols, rows int) string {
 	}
 	cur := term.Cursor()
 	curVis := term.CursorVisible()
-	profile := termenv.ColorProfile()
 
 	var b strings.Builder
 	for y := 0; y < rows; y++ {
@@ -61,8 +59,6 @@ func Render(s *Session, cols, rows int) string {
 			if g.Mode&attrReverse != 0 || (curVis && cur.X == x && cur.Y == y) {
 				style = style.Reverse(true)
 			}
-			// Force truecolor profile when available so hex colors stick.
-			_ = profile
 			b.WriteString(style.Render(string(ch)))
 		}
 	}

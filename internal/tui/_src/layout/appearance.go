@@ -1,7 +1,7 @@
 package tui
 
 import (
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2/compat"
 )
 
 // appearanceMode is the session-local light/dark preference.
@@ -15,8 +15,9 @@ const (
 
 // appearanceAutoDark caches the terminal's detected background the first time
 // applyAppearance runs, so cycling back to "auto" after a forced mode restores
-// detection rather than sticking on the last forced value. lipgloss has no
-// public unset for SetHasDarkBackground.
+// detection rather than sticking on the last forced value. compat.HasDarkBackground
+// is the package-level switch AdaptiveColor.RGBA reads (E13.2); E13.3 will drive
+// it from Bubble Tea BackgroundColorMsg instead of the one-shot detect here.
 var (
 	appearanceDetected     bool
 	appearanceDetectedDark bool
@@ -34,7 +35,7 @@ func PinAppearance() {
 // appearance without going through slash-command parsing.
 func applyAppearance(mode appearanceMode) {
 	if !appearanceDetected {
-		appearanceDetectedDark = lipgloss.HasDarkBackground()
+		appearanceDetectedDark = compat.HasDarkBackground
 		appearanceDetected = true
 	}
 	var dark bool
@@ -46,7 +47,7 @@ func applyAppearance(mode appearanceMode) {
 	default:
 		dark = appearanceDetectedDark
 	}
-	lipgloss.SetHasDarkBackground(dark)
+	compat.HasDarkBackground = dark
 	setGlamourStyle(dark)
 }
 

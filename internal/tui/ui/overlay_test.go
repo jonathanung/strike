@@ -4,9 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/muesli/termenv"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
@@ -66,12 +65,8 @@ func TestOverlayCenterKeepsAnsiBalancedAndWidthCorrect(t *testing.T) {
 }
 
 func TestOverlayCenterScrimsBackgroundNotForeground(t *testing.T) {
-	saved := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(saved) })
-
 	th := theme.Default()
-	th.OverlayScrim = lipgloss.AdaptiveColor{Light: "#112233", Dark: "#112233"}
+	th.OverlayScrim = theme.AdaptiveColor{Light: "#112233", Dark: "#112233"}
 	bgLine := lipgloss.NewStyle().Foreground(lipgloss.Color("#ff0000")).Render(strings.Repeat("B", 20))
 	bg := strings.Join([]string{bgLine, bgLine, bgLine, bgLine, bgLine}, "\n")
 	fg := lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff00")).Render("MODAL")
@@ -109,12 +104,8 @@ func TestScrimEmptyAndPreservesPlainText(t *testing.T) {
 	if got := Scrim(theme.Default(), ""); got != "" {
 		t.Errorf("Scrim empty = %q", got)
 	}
-	saved := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(saved) })
-
 	th := theme.Default()
-	th.OverlayScrim = lipgloss.AdaptiveColor{Light: "#aabbcc", Dark: "#aabbcc"}
+	th.OverlayScrim = theme.AdaptiveColor{Light: "#aabbcc", Dark: "#aabbcc"}
 	out := Scrim(th, "hello\nworld")
 	if plain := ansi.Strip(out); plain != "hello\nworld" {
 		t.Errorf("Scrim plain = %q, want hello\\nworld", plain)
@@ -135,12 +126,8 @@ func TestModalWidthCapsAndMargins(t *testing.T) {
 
 func TestOverlayCenterPadsScrimToFullWidth(t *testing.T) {
 	// Short bg lines must not leave an un-scrimmed spill strip on the right.
-	saved := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(saved) })
-
 	th := theme.Default()
-	th.OverlayScrim = lipgloss.AdaptiveColor{Light: "#112233", Dark: "#112233"}
+	th.OverlayScrim = theme.AdaptiveColor{Light: "#112233", Dark: "#112233"}
 	bg := "short\nnarrow"
 	out := OverlayCenter(th, bg, "X", 20, 4)
 	lines := strings.Split(out, "\n")
@@ -164,14 +151,10 @@ func TestOverlayCenterPadsScrimToFullWidth(t *testing.T) {
 func TestOverlayCenterDoesNotBleedModalSurfaceRight(t *testing.T) {
 	// Solid Dialog rows end with an open surface background (paintSurface).
 	// The right scrim must not inherit that fill out to the terminal edge.
-	saved := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(saved) })
-
 	th := theme.Default().Resolve()
-	th.Surface = lipgloss.AdaptiveColor{Light: "#112233", Dark: "#112233"}
-	th.SurfaceFocus = lipgloss.AdaptiveColor{Light: "#445566", Dark: "#445566"}
-	th.OverlayScrim = lipgloss.AdaptiveColor{Light: "#99aabb", Dark: "#99aabb"}
+	th.Surface = theme.AdaptiveColor{Light: "#112233", Dark: "#112233"}
+	th.SurfaceFocus = theme.AdaptiveColor{Light: "#445566", Dark: "#445566"}
+	th.OverlayScrim = theme.AdaptiveColor{Light: "#99aabb", Dark: "#99aabb"}
 
 	const screenW, screenH = 40, 7
 	mw := ModalWidth(screenW)

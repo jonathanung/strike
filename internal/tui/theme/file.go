@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-
-	"github.com/charmbracelet/lipgloss"
 )
 
 // fileDoc is the on-disk JSON shape for a theme. Colors map to Theme roles;
@@ -99,7 +97,7 @@ func applyColor(th *Theme, role string, raw json.RawMessage, defs map[string]str
 		th.Background = NoBackground()
 		return nil
 	}
-	c := lipgloss.AdaptiveColor{Light: light, Dark: dark}
+	c := AdaptiveColor{Light: light, Dark: dark}
 	switch role {
 	case "text":
 		th.Text = c

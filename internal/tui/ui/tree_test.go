@@ -4,9 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/muesli/termenv"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
@@ -217,10 +216,6 @@ func TestTreeEmptyState(t *testing.T) {
 }
 
 func TestTreeCurrentDetailDisabledAndTone(t *testing.T) {
-	saved := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(saved) })
-
 	th := theme.Default()
 	nodes := []TreeNode{
 		{Label: "cur", Detail: "meta", Current: true, Leaf: true},

@@ -24,13 +24,16 @@ func (agentMessageTool) Description() string {
 
 - to: teammate session_id (from agent_roster / task result). Stable name aliases
   resolve when set on the roster.
-- body: message text (required; size-capped).
+- body: message text (required; size-capped). Plain text is enough; optional
+  conventions like blocker/handoff/question help readers — structured kinds optional.
 - summary: optional short label for UI/debug (not a substitute for body).
 - Delivered at a safe boundary on the recipient (tool-round / idle turn) —
   never corrupts an in-flight tool call.
 - Sender and recipient must share the same session team; out-of-team fails closed.
-- Prefer this for peer coordination while both are running. Prefer waiting for
-  [child.completed] when you only need the final result of a child you own.
+- Prefer messages for mid-flight coordination (blockers, handoffs, questions).
+  Prefer [child.completed] for finished work products from a child you own.
+  Children should message the lead early on blockers — do not wait for terminal fail.
+  Avoid chatty loops (no status ping-pong the roster/completion already cover).
 - Available to lead and children (not stripped at depth ceiling).
 - task_message remains parent→owned-child guidance; use agent_message for any
   teammate (including child→child and child→lead).`
@@ -100,8 +103,9 @@ func (agentBroadcastTool) Description() string {
 - Delivers N-1 copies (one per other teammate) via the same mailbox path as
   agent_message. Per-recipient status is returned; some may reject (closed).
 - Out-of-team is impossible by construction (roster-scoped).
-- Prefer agent_message for a single known recipient. Prefer [child.completed]
-  when you only need terminal results from owned children.
+- Prefer agent_message for a single known recipient. Use broadcast sparingly for
+  true team-wide facts — avoid chatty fan-out. Prefer [child.completed] when you
+  only need terminal results from owned children.
 - Available to lead and children (not stripped at depth ceiling).`
 }
 

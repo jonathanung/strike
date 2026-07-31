@@ -3,7 +3,7 @@ package fixture
 import (
 	"context"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
 

@@ -1,6 +1,6 @@
 package theme
 
-import "github.com/charmbracelet/lipgloss"
+import "charm.land/lipgloss/v2"
 
 // AgentState is the live runtime state used for dynamic coloring of session
 // and agent chrome. Values map to semantic theme tokens — never raw colors in
@@ -41,7 +41,7 @@ func (s AgentState) Label() string {
 
 // AgentStateColor resolves the semantic color token for a runtime state.
 // Dead maps to TextMuted so the reserved state is already tokenized.
-func (t Theme) AgentStateColor(s AgentState) lipgloss.AdaptiveColor {
+func (t Theme) AgentStateColor(s AgentState) AdaptiveColor {
 	t = t.Resolve()
 	switch s {
 	case AgentStateWorking:

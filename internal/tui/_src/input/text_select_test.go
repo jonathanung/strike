@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -224,11 +224,17 @@ func TestSelectionDoesNotPaintRightPaneColumns(t *testing.T) {
 	baseLines := strings.Split(base, "\n")
 	styledLines := strings.Split(styled, "\n")
 	for y := sel.a.Y; y <= sel.b.Y && y < len(styledLines); y++ {
-		// Cells outside the region must match the unstyled base exactly.
+		// Cells outside the region must keep the same glyph. v2 full-fidelity
+		// Render can re-emit SGR prefixes via ansi.Cut after a mid-line style
+		// splice; compare stripped cells and reject reverse on the glyph.
 		baseCell := ansi.Cut(baseLines[y], rightX, rightX+1)
 		gotCell := ansi.Cut(styledLines[y], rightX, rightX+1)
-		if baseCell != gotCell {
-			t.Fatalf("row %d col %d changed outside region\nbase=%q\ngot=%q", y, rightX, baseCell, gotCell)
+		if ansi.Strip(baseCell) != ansi.Strip(gotCell) {
+			t.Fatalf("row %d col %d glyph changed outside region\nbase=%q\ngot=%q", y, rightX, baseCell, gotCell)
+		}
+		glyph := ansi.Strip(gotCell)
+		if glyph != "" && strings.Contains(gotCell, "\x1b[7m"+glyph) {
+			t.Fatalf("row %d col %d selection reverse painted outside region: %q", y, rightX, gotCell)
 		}
 	}
 }
