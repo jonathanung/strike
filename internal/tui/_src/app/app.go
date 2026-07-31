@@ -21,6 +21,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
+	"github.com/jonathanung/strike-cli/internal/tui/ui"
 )
 
 const (
@@ -114,6 +115,9 @@ type Options struct {
 	// FirstRun is true when the host detected a fresh strike home (no global
 	// config and no real provider credentials). The TUI shows onboarding.
 	FirstRun bool
+	// StartupAlert is a one-shot dismissible modal body shown after Init
+	// (e.g. session worktree soft-fail outside a git repository). Empty skips.
+	StartupAlert string
 	// VimMode selects pane/overlay/takeover for /vim (aliases embedded/modal).
 	// Empty defaults to pane.
 	VimMode VimMode
@@ -305,6 +309,8 @@ type Model struct {
 
 	// firstRun drives the empty-transcript onboarding card and auto provider modal.
 	firstRun, firstRunModalOpened bool
+	// startupAlert is consumed once into an alertModal after Init.
+	startupAlert string
 	// turnStartedAt / toolCallsThisTurn power the working-status elapsed label.
 	turnStartedAt     time.Time
 	toolCallsThisTurn int
@@ -441,6 +447,9 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		if option.FirstRun {
 			m.firstRun = true
 		}
+		if option.StartupAlert != "" {
+			m.startupAlert = option.StartupAlert
+		}
 		if option.VimMode != "" {
 			m.vimMode = option.VimMode
 		}
@@ -514,7 +523,10 @@ func (m Model) Init() tea.Cmd {
 		// Terminal bg via Bubble Tea (not pre-program OSC 11); feeds appearance.
 		tea.RequestBackgroundColor,
 	}
-	if m.firstRun {
+	if m.startupAlert != "" {
+		cmds = append(cmds, func() tea.Msg { return startupAlertMsg{} })
+	} else if m.firstRun {
+		// Defer first-run picker when a startup alert will claim the modal first.
 		cmds = append(cmds, func() tea.Msg { return firstRunSetupMsg{} })
 	}
 	if notice := m.authExpiryNoticeCmd(); notice != nil {
@@ -854,6 +866,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.applyTerminalExit(msg)
 
 	case firstRunSetupMsg:
+		if m.firstRun && !m.firstRunModalOpened && m.modal == nil && len(m.cells) == 0 {
+			m.firstRunModalOpened = true
+			m.modal = newProviderModal(m.services, m.providerName, m.ops, m.th)
+			m.reflow()
+		}
+		return m, nil
+
+	case startupAlertMsg:
+		if text := strings.TrimSpace(m.startupAlert); text != "" && m.modal == nil {
+			m.startupAlert = ""
+			m.modal = newAlertModal("Session worktree", text, ui.ToneWarning)
+			m.reflow()
+		}
+		return m, nil
+
+	case alertDismissedMsg:
+		// Startup alert may have deferred first-run provider setup.
 		if m.firstRun && !m.firstRunModalOpened && m.modal == nil && len(m.cells) == 0 {
 			m.firstRunModalOpened = true
 			m.modal = newProviderModal(m.services, m.providerName, m.ops, m.th)

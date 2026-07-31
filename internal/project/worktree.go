@@ -2,6 +2,7 @@ package project
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +10,10 @@ import (
 	"strings"
 	"time"
 )
+
+// ErrNotGitRepository is returned when a worktree operation needs a git repo
+// but cwd is not inside one. Callers may soft-fail and stay on the launch cwd.
+var ErrNotGitRepository = errors.New("not a git repository")
 
 // Worktree mode values (config session.worktree).
 const (
@@ -109,7 +114,7 @@ func MainRoot(ctx context.Context, cwd string) (string, error) {
 	defer cancel()
 	out, err := exec.CommandContext(gitCtx, "git", "-C", canonicalCWD, "rev-parse", "--is-inside-work-tree").Output()
 	if err != nil || strings.TrimSpace(string(out)) != "true" {
-		return "", fmt.Errorf("worktree: %q is not a git repository", canonicalCWD)
+		return "", fmt.Errorf("worktree: %q is not a git repository: %w", canonicalCWD, ErrNotGitRepository)
 	}
 	commonOut, err := exec.CommandContext(gitCtx, "git", "-C", canonicalCWD, "rev-parse", "--git-common-dir").Output()
 	if err != nil {

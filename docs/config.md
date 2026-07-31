@@ -120,8 +120,10 @@ can bind each session's tool CWD to its own `git worktree` under
 | `delete` | `git worktree remove` + delete the branch on close |
 
 CLI: `strike --worktree` forces a worktree for that invocation (same as always
-for one session). Non-git directories and `git worktree add` failures return a
-clear error and do not leave a half-bound session. Project-scoped state
+for one session). Non-git directories soft-fail: the app launches on the launch
+cwd and shows a dismissible modal (TUI) or stderr line (exec) explaining that
+no git repository was detected. Other `git worktree add` failures still return
+a clear error and do not leave a half-bound session. Project-scoped state
 (history, memory, issues) stays keyed to the main repo, not the worktree path.
 Tools (`bash`, `read`, `write`, …) resolve paths inside the session worktree.
 Each `bash` invocation is a fresh process whose cwd is that session workdir

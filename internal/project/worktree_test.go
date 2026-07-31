@@ -2,6 +2,7 @@ package project
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -155,6 +156,9 @@ func TestAddNotAGitRepo(t *testing.T) {
 	_, err := Add(context.Background(), dir, "s1")
 	if err == nil {
 		t.Fatal("Add non-git: want error")
+	}
+	if !errors.Is(err, ErrNotGitRepository) {
+		t.Errorf("error = %v, want ErrNotGitRepository", err)
 	}
 	if !strings.Contains(err.Error(), "not a git repository") {
 		t.Errorf("error = %v", err)

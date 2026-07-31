@@ -1008,9 +1008,12 @@ func TestBindSessionWorktreeCreatesAndCleans(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := config.Config{Session: config.SessionConfig{Worktree: "always", WorktreeCleanup: "delete"}}
-	toolDir, cleanup, err := bindSessionWorktree(mgr, info.ID, repo, cfg, false, false, 0)
+	toolDir, cleanup, notice, err := bindSessionWorktree(mgr, info.ID, repo, cfg, false, false, 0)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if notice != "" {
+		t.Fatalf("unexpected notice: %q", notice)
 	}
 	if toolDir == repo {
 		t.Fatal("expected worktree path, got launch dir")
@@ -1057,15 +1060,66 @@ func TestBindSessionWorktreeOffStaysOnLaunch(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := config.Config{Session: config.SessionConfig{Worktree: "off"}}
-	toolDir, cleanup, err := bindSessionWorktree(mgr, info.ID, dir, cfg, false, false, 0)
+	toolDir, cleanup, notice, err := bindSessionWorktree(mgr, info.ID, dir, cfg, false, false, 0)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if notice != "" {
+		t.Fatalf("unexpected notice: %q", notice)
 	}
 	if toolDir != dir {
 		t.Fatalf("toolDir = %q, want %q", toolDir, dir)
 	}
 	if cleanup != nil {
 		t.Fatal("unexpected cleanup")
+	}
+}
+
+func TestBindSessionWorktreeNonGitSoftFails(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := t.TempDir()
+	mgr := session.NewManager(filepath.Join(home, ".strike", "sessions"))
+	info, err := mgr.Create(session.CreateOptions{ID: "non-git-wt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Default always wants a worktree; non-git cwd must not hard-fail launch.
+	toolDir, cleanup, notice, err := bindSessionWorktree(mgr, info.ID, dir, config.Config{}, false, false, 0)
+	if err != nil {
+		t.Fatalf("soft-fail path returned error: %v", err)
+	}
+	if toolDir != dir {
+		t.Fatalf("toolDir = %q, want launch dir %q", toolDir, dir)
+	}
+	if cleanup != nil {
+		t.Fatal("unexpected cleanup on soft-fail")
+	}
+	if notice == "" || !strings.Contains(notice, "no git repository") {
+		t.Fatalf("notice = %q, want no-git explanation", notice)
+	}
+	got, err := mgr.Get(info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.WorktreePath != "" {
+		t.Fatalf("meta worktree path = %q, want empty", got.WorktreePath)
+	}
+
+	// Explicit --worktree force also soft-fails outside a repo.
+	info2, err := mgr.Create(session.CreateOptions{ID: "non-git-force"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	toolDir, cleanup, notice, err = bindSessionWorktree(mgr, info2.ID, dir, config.Config{Session: config.SessionConfig{Worktree: "off"}}, true, false, 0)
+	if err != nil {
+		t.Fatalf("force soft-fail: %v", err)
+	}
+	if toolDir != dir || cleanup != nil {
+		t.Fatalf("force soft-fail toolDir=%q cleanup=%v", toolDir, cleanup != nil)
+	}
+	if !strings.Contains(notice, "no git repository") {
+		t.Fatalf("force notice = %q", notice)
 	}
 }
 
@@ -1096,9 +1150,12 @@ func TestBindSessionWorktreeDefaultAlways(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Empty Session.Worktree uses default always.
-	toolDir, cleanup, err := bindSessionWorktree(mgr, info.ID, repo, config.Config{}, false, false, 0)
+	toolDir, cleanup, notice, err := bindSessionWorktree(mgr, info.ID, repo, config.Config{}, false, false, 0)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if notice != "" {
+		t.Fatalf("unexpected notice: %q", notice)
 	}
 	if toolDir == repo {
 		t.Fatal("expected worktree path for default always, got launch dir")
@@ -1140,9 +1197,12 @@ func TestBindSessionWorktreeAutoSecondRoot(t *testing.T) {
 	}
 	cfg := config.Config{Session: config.SessionConfig{Worktree: "auto"}}
 	// First root (openRootsBefore=0): no worktree.
-	tool1, _, err := bindSessionWorktree(mgr, first.ID, repo, cfg, false, false, 0)
+	tool1, _, notice, err := bindSessionWorktree(mgr, first.ID, repo, cfg, false, false, 0)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if notice != "" {
+		t.Fatalf("unexpected notice: %q", notice)
 	}
 	if tool1 != repo {
 		t.Fatalf("first root toolDir = %q", tool1)
@@ -1151,9 +1211,12 @@ func TestBindSessionWorktreeAutoSecondRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tool2, cleanup, err := bindSessionWorktree(mgr, second.ID, repo, cfg, false, false, 1)
+	tool2, cleanup, notice, err := bindSessionWorktree(mgr, second.ID, repo, cfg, false, false, 1)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if notice != "" {
+		t.Fatalf("unexpected notice: %q", notice)
 	}
 	if tool2 == repo {
 		t.Fatal("second root should get worktree")

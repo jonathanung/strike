@@ -21,8 +21,10 @@ type rootSlot struct {
 	bound   session.Bound
 	workDir string
 	wtClose func() error
-	cancel  context.CancelFunc
-	done    chan struct{}
+	// wtNotice is a soft-fail message from worktree bind (e.g. non-git cwd).
+	wtNotice string
+	cancel   context.CancelFunc
+	done     chan struct{}
 }
 
 // rootSpawner creates additional in-process root engines sharing backend deps.

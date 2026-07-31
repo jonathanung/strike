@@ -107,10 +107,16 @@ func runSession(
 	return out
 }
 
+// worktreeNotGitNotice is shown when session.worktree / --worktree wants a
+// git worktree but the launch path is not a repository. App continues on cwd.
+const worktreeNotGitNotice = "Session worktree was not created because no git repository was detected. Continuing in the launch directory."
+
 // bindSessionWorktree resolves the tool CWD for a root session. On resume it
 // reuses a durable worktree path when still present. On create it may add a
 // git worktree under <main>/.strike/worktrees/<id>/ when mode/force says so.
 // Returns a cleanup func (possibly nil) for worktreeCleanup=delete.
+// When the path is not a git repo, soft-fails: toolDir stays launchDir, notice
+// explains why, and err is nil so the app can launch normally.
 func bindSessionWorktree(
 	sessions *session.Manager,
 	sessionID, launchDir string,
@@ -118,11 +124,11 @@ func bindSessionWorktree(
 	force bool,
 	resuming bool,
 	openRootsBefore int,
-) (toolDir string, cleanup func() error, err error) {
+) (toolDir string, cleanup func() error, notice string, err error) {
 	toolDir = launchDir
 	info, err := sessions.Get(sessionID)
 	if err != nil {
-		return launchDir, nil, fmt.Errorf("session worktree: %w", err)
+		return launchDir, nil, "", fmt.Errorf("session worktree: %w", err)
 	}
 
 	if resuming {
@@ -131,27 +137,31 @@ func bindSessionWorktree(
 			if statErr == nil && st.IsDir() {
 				toolDir = info.WorktreePath
 				cleanup = worktreeCleanupFunc(cfg, info.WorktreePath, info.WorktreeBranch, launchDir)
-				return toolDir, cleanup, nil
+				return toolDir, cleanup, "", nil
 			}
 		}
 		// Missing worktree on resume: stay on launch cwd (no half-bind).
-		return launchDir, nil, nil
+		return launchDir, nil, "", nil
 	}
 
 	if !project.WantWorktree(cfg.Session.Worktree, force, openRootsBefore) {
-		return launchDir, nil, nil
+		return launchDir, nil, "", nil
 	}
 
 	wt, err := project.Add(context.Background(), launchDir, sessionID)
 	if err != nil {
-		return launchDir, nil, fmt.Errorf("session worktree: %w", err)
+		if errors.Is(err, project.ErrNotGitRepository) {
+			// Default always / --worktree outside a repo: stay on launch cwd.
+			return launchDir, nil, worktreeNotGitNotice, nil
+		}
+		return launchDir, nil, "", fmt.Errorf("session worktree: %w", err)
 	}
 	if err := sessions.SetWorktree(sessionID, wt.Path, wt.Branch); err != nil {
 		_ = project.Remove(context.Background(), wt.RepoRoot, wt.Path, wt.Branch)
-		return launchDir, nil, fmt.Errorf("session worktree: binding meta: %w", err)
+		return launchDir, nil, "", fmt.Errorf("session worktree: binding meta: %w", err)
 	}
 	cleanup = worktreeCleanupFunc(cfg, wt.Path, wt.Branch, wt.RepoRoot)
-	return wt.Path, cleanup, nil
+	return wt.Path, cleanup, "", nil
 }
 
 func worktreeCleanupFunc(cfg config.Config, path, branch, repoRoot string) func() error {
@@ -301,6 +311,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 			SessionID:                    a.sessionID,
 			WorkDir:                      a.workDir,
 			FirstRun:                     a.firstRun,
+			StartupAlert:                 a.worktreeNotice,
 			VimMode:                      vimMode,
 			NanoMode:                     nanoMode,
 			MdReadMode:                   mdReadMode,
@@ -347,6 +358,9 @@ func runExec(opts cliOptions, prompt string, stdout, stderr io.Writer) (runErr e
 	a, err := assemble(opts, true)
 	if err != nil {
 		return err
+	}
+	if a.worktreeNotice != "" {
+		fmt.Fprintln(stderr, a.worktreeNotice)
 	}
 	defer func() {
 		if a.mcpClose != nil {
