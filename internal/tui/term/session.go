@@ -89,7 +89,7 @@ func Start(cmd *exec.Cmd, cols, rows int) (*Session, error) {
 }
 
 // ptyEnv preserves the parent environment while replacing TERM and removing
-// truecolor signaling for the embedded xterm-256color PTY.
+// truecolor support for the embedded xterm-256color PTY.
 func ptyEnv(parent []string) []string {
 	env := make([]string, 0, len(parent)+1)
 	for _, entry := range parent {
@@ -98,7 +98,7 @@ func ptyEnv(parent []string) []string {
 			env = append(env, entry)
 		}
 	}
-	return append(env, "TERM=xterm-256color")
+	return append(env, "TERM=xterm-256color", "COLORTERM=truecolor")
 }
 
 // Done is closed when the child process has exited and the reader has finished.
