@@ -1,7 +1,7 @@
 package tui
 
 import (
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2/compat"
 )
 
 // appearanceMode is the session-local light/dark preference.
@@ -12,43 +12,6 @@ const (
 	appearanceDark  appearanceMode = "dark"
 	appearanceLight appearanceMode = "light"
 )
-
-// appearanceAutoDark caches the terminal's detected background the first time
-// applyAppearance runs, so cycling back to "auto" after a forced mode restores
-// detection rather than sticking on the last forced value. lipgloss has no
-// public unset for SetHasDarkBackground.
-var (
-	appearanceDetected     bool
-	appearanceDetectedDark bool
-)
-
-// PinAppearance detects the terminal background once and freezes lipgloss plus
-// glamour style selection. Call before tea.NewProgram so OSC 11 replies cannot
-// race the program's stdin reader into the composer (#52).
-func PinAppearance() {
-	applyAppearance(appearanceAuto)
-}
-
-// applyAppearance forces lipgloss adaptive colors for dark/light, or restores
-// the initially detected background for auto. Package-level so tests can drive
-// appearance without going through slash-command parsing.
-func applyAppearance(mode appearanceMode) {
-	if !appearanceDetected {
-		appearanceDetectedDark = lipgloss.HasDarkBackground()
-		appearanceDetected = true
-	}
-	var dark bool
-	switch mode {
-	case appearanceDark:
-		dark = true
-	case appearanceLight:
-		dark = false
-	default:
-		dark = appearanceDetectedDark
-	}
-	lipgloss.SetHasDarkBackground(dark)
-	setGlamourStyle(dark)
-}
 
 func parseAppearance(s string) (appearanceMode, bool) {
 	switch s {
@@ -61,4 +24,26 @@ func parseAppearance(s string) (appearanceMode, bool) {
 	default:
 		return "", false
 	}
+}
+
+// effectiveDark reports whether adaptive colors should use the dark member for
+// the current session appearance and terminal background detection.
+func (m Model) effectiveDark() bool {
+	switch m.appearance {
+	case appearanceDark:
+		return true
+	case appearanceLight:
+		return false
+	default:
+		return m.detectedDark
+	}
+}
+
+// applyAppearance resolves session appearance into compat adaptive colors and
+// the pinned glamour style. Session state (appearance + detectedDark) is the
+// source of truth; globals are updated only as the resolution side effect.
+func (m *Model) applyAppearance() {
+	dark := m.effectiveDark()
+	compat.HasDarkBackground = dark
+	setGlamourStyle(dark)
 }

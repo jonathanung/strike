@@ -35,10 +35,14 @@ type Rule struct {
 type Ruleset []Rule
 
 // Known permission names tools actually Ask with, plus "*".
+// Team messaging (agent_message/agent_broadcast/agent_roster) is registered
+// even before tools land so config deny rules and Defaults stay valid.
 var knownPermissions = map[string]struct{}{
 	"*": {}, "read": {}, "glob": {}, "grep": {}, "edit": {}, "write": {},
 	"bash": {}, "task": {}, "task_status": {}, "task_read": {}, "task_message": {},
-	"task_interrupt": {}, "webfetch": {}, "todowrite": {}, "todoread": {},
+	"task_interrupt": {}, "agent_roster": {}, "agent_message": {}, "agent_broadcast": {},
+	"team_task": {},
+	"webfetch":  {}, "todowrite": {}, "todoread": {},
 	"memory_write": {}, "memory_read": {}, "issue_write": {}, "issue_read": {},
 	"sleep": {}, "skill": {}, "question": {}, "toolsearch": {}, "hook": {},
 	"enter_plan_mode": {}, "exit_plan_mode": {}, "phase_done": {},
@@ -74,6 +78,11 @@ func ValidateRuleset(rs Ruleset) error {
 // executes asks. task is allowed so agents can spawn children while
 // depth remains below MaxChildDepth; DeriveChildRules denies task only
 // when the child cannot nest further.
+//
+// Team messaging (agent_message, agent_broadcast, agent_roster) defaults
+// to Allow so in-team peers do not prompt on every message. Users can
+// still Deny via config/agent rules; transport isolation (same team only)
+// is enforced by the engine mailbox, not by these rules.
 func Defaults() Ruleset {
 	return Ruleset{
 		{Permission: "read", Pattern: "*", Action: Allow},
@@ -89,6 +98,13 @@ func Defaults() Ruleset {
 		{Permission: "task_read", Pattern: "*", Action: Allow},
 		{Permission: "task_message", Pattern: "*", Action: Allow},
 		{Permission: "task_interrupt", Pattern: "*", Action: Allow},
+		{Permission: "agent_roster", Pattern: "*", Action: Allow},
+		// Peer messaging is allow-by-default within a team; Deliver still
+		// rejects out-of-team targets. Users may deny via rules.
+		{Permission: "agent_message", Pattern: "*", Action: Allow},
+		{Permission: "agent_broadcast", Pattern: "*", Action: Allow},
+		// Shared team board (claim/assign); transport is team-scoped in engine.
+		{Permission: "team_task", Pattern: "*", Action: Allow},
 		{Permission: "webfetch", Pattern: "*", Action: Ask},
 		{Permission: "todowrite", Pattern: "*", Action: Allow},
 		{Permission: "todoread", Pattern: "*", Action: Allow},
@@ -130,6 +146,10 @@ func DenyOnly(rs Ruleset) Ruleset {
 // Only Deny entries from childExtra are kept so a child cannot widen a
 // parent Deny/Ask via Allow. Parent last-match-wins order is preserved,
 // including parent allow-after-deny patterns.
+//
+// denyTask is task-only: team messaging permissions (agent_message,
+// agent_broadcast, agent_roster, and parent→child task_message) stay at the
+// parent's effective action so depth-capped leaves can still coordinate.
 func DeriveChildRules(parentLayers []Ruleset, denyTask bool, childExtra ...Ruleset) []Ruleset {
 	out := make([]Ruleset, 0, len(parentLayers)+len(childExtra)+1)
 	for _, layer := range parentLayers {

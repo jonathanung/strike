@@ -4,10 +4,9 @@ import (
 	"sort"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 	"github.com/jonathanung/strike-cli/internal/tui/ui"
 )
@@ -19,6 +18,7 @@ const (
 	activityTool activityKind = iota
 	activityChild
 	activityAttention
+	activityTeamMsg
 )
 
 // activityEntry is one projected activity-pane row. Higher Seq is newer.
@@ -32,14 +32,22 @@ type activityEntry struct {
 	Done       bool
 	IsError    bool
 	DetailBody string // tool output / attention detail; chrono order
+	// NavSessionID is a teammate session to open on enter (team messages).
+	NavSessionID string
 }
 
 // projectActivityEntries builds the flat activity feed newest-first.
 // Order is stable for equal Seq (by ID). Covers parent tools, child lifecycle
-// rows, and an attention row while a permission/question is pending.
-// Replay and live paths share this projection (same cells/children inputs).
-func projectActivityEntries(cells []cell, children []childActivity, awaitingPermission bool) []activityEntry {
-	entries := make([]activityEntry, 0, len(cells)+len(children)+1)
+// rows, recent team messages, and an attention row while a permission/question
+// is pending. Replay and live paths share this projection.
+func projectActivityEntries(cells []cell, children []childActivity, messages []teamMessage, awaitingPermission bool) []activityEntry {
+	return projectActivityEntriesNamed(cells, children, messages, awaitingPermission, nil)
+}
+
+// projectActivityEntriesNamed is projectActivityEntries with optional teammate
+// name resolution for message rows (lead UI).
+func projectActivityEntriesNamed(cells []cell, children []childActivity, messages []teamMessage, awaitingPermission bool, resolveName func(id string) string) []activityEntry {
+	entries := make([]activityEntry, 0, len(cells)+len(children)+len(messages)+1)
 	var seq int64
 
 	// Tools in transcript order; later cells/calls get higher seq.
@@ -68,19 +76,53 @@ func projectActivityEntries(cells []cell, children []childActivity, awaitingPerm
 		} else {
 			id = "child:" + id
 		}
-		label := strings.TrimSpace(ch.agent)
+		// Prefer stable teammate alias / title; else agent + prompt (activity
+		// readability); agents tree uses childViewTitle for compact rows.
+		label := strings.TrimSpace(ch.name)
 		if label == "" {
-			label = "subagent"
+			label = strings.TrimSpace(ch.title)
 		}
-		if p := strings.TrimSpace(ch.prompt); p != "" {
-			label = label + " " + p
+		if label == "" {
+			label = strings.TrimSpace(ch.agent)
+			if label == "" {
+				label = "subagent"
+			}
+			if p := strings.TrimSpace(ch.prompt); p != "" {
+				label = label + " " + p
+			}
+		}
+		status := ch.status
+		if ch.rosterState != "" {
+			status = ch.rosterState
 		}
 		entries = append(entries, activityEntry{
-			ID:     id,
-			Kind:   activityChild,
-			Seq:    seq,
-			Label:  label,
-			Status: ch.status,
+			ID:           id,
+			Kind:         activityChild,
+			Seq:          seq,
+			Label:        label,
+			Status:       status,
+			NavSessionID: strings.TrimSpace(ch.sessionID),
+		})
+	}
+
+	// Team messages in arrival order; later deliveries get higher seq.
+	for i, msg := range messages {
+		seq++
+		id := strings.TrimSpace(msg.id)
+		if id == "" {
+			id = "team-msg-" + itoa(i)
+		} else {
+			id = "msg:" + id
+		}
+		label := teamMsgActivityLabel(msg, resolveName)
+		entries = append(entries, activityEntry{
+			ID:           id,
+			Kind:         activityTeamMsg,
+			Seq:          seq,
+			Label:        label,
+			Status:       "message",
+			DetailBody:   msg.body,
+			NavSessionID: firstNonEmpty(msg.from, msg.to),
 		})
 	}
 
@@ -104,6 +146,15 @@ func projectActivityEntries(cells []cell, children []childActivity, awaitingPerm
 		return entries[i].ID < entries[j].ID
 	})
 	return entries
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if s := strings.TrimSpace(v); s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 func toolActivityEntry(tc *toolCell, seq int64) activityEntry {
@@ -188,14 +239,15 @@ func (m *Model) setActivityCursor(entries []activityEntry, idx int) {
 }
 
 // handleActivityKeys navigates the activity feed when the activity window is
-// focused on the right pane. Returns true when the key was consumed.
-func (m *Model) handleActivityKeys(msg tea.KeyMsg) bool {
+// focused on the right pane. handled is true when the key was consumed.
+// cmd may open a teammate transcript (enter on child/message rows).
+func (m *Model) handleActivityKeys(msg tea.KeyPressMsg) (handled bool, cmd tea.Cmd) {
 	if m.windows.active() == nil || m.windows.active().id() != "activity" {
-		return false
+		return false, nil
 	}
 	entries := m.activityEntries()
 	if len(entries) == 0 {
-		return false
+		return false, nil
 	}
 	// Re-resolve cursor from anchor before navigating.
 	m.activityCursor = m.activityDisplayCursor(entries)
@@ -213,19 +265,19 @@ func (m *Model) handleActivityKeys(msg tea.KeyMsg) bool {
 		switch msg.String() {
 		case "enter", "esc", "q", "left", "h":
 			m.activityDetail = false
-			return true
+			return true, nil
 		case "up", "k":
 			if m.activityCursor > 0 {
 				m.setActivityCursor(entries, m.activityCursor-1)
 			}
-			return true
+			return true, nil
 		case "down", "j":
 			if m.activityCursor < len(entries)-1 {
 				m.setActivityCursor(entries, m.activityCursor+1)
 			}
-			return true
+			return true, nil
 		default:
-			return false
+			return false, nil
 		}
 	}
 
@@ -234,31 +286,61 @@ func (m *Model) handleActivityKeys(msg tea.KeyMsg) bool {
 		if m.activityCursor > 0 {
 			m.setActivityCursor(entries, m.activityCursor-1)
 		}
-		return true
+		return true, nil
 	case "down", "j":
 		if m.activityCursor < len(entries)-1 {
 			m.setActivityCursor(entries, m.activityCursor+1)
 		}
-		return true
+		return true, nil
 	case "enter", "right", "l":
 		e := entries[m.activityCursor]
-		if e.DetailBody != "" || e.Kind == activityAttention {
-			m.activityDetail = true
+		switch e.Kind {
+		case activityTeamMsg:
+			nav := ""
+			if msgID := strings.TrimPrefix(e.ID, "msg:"); msgID != "" {
+				for _, tm := range m.teamMessages {
+					if tm.id == msgID {
+						nav = m.resolveTeamMsgNav(tm.from, tm.to)
+						break
+					}
+				}
+			}
+			if nav == "" {
+				nav = m.resolveTeamMsgNav(e.NavSessionID, "")
+			}
+			if nav != "" {
+				return true, m.openSessionView(nav)
+			}
+			if e.DetailBody != "" {
+				m.activityDetail = true
+			}
+			return true, nil
+		case activityChild:
+			if id := strings.TrimSpace(e.NavSessionID); id != "" && id != "child" {
+				return true, m.openSessionView(id)
+			}
+			return true, nil
+		default:
+			if e.DetailBody != "" || e.Kind == activityAttention {
+				m.activityDetail = true
+			}
+			return true, nil
 		}
-		return true
 	case "g":
 		m.setActivityCursor(entries, 0)
-		return true
+		return true, nil
 	case "G":
 		m.setActivityCursor(entries, len(entries)-1)
-		return true
+		return true, nil
 	default:
-		return false
+		return false, nil
 	}
 }
 
 // activityEntries projects the flat feed for the current model. Children with
 // real session ids appear in the session tree instead of the flat list.
+// Recent team messages always surface so the lead sees peer mail without
+// reading tool JSON.
 func (m Model) activityEntries() []activityEntry {
 	showTree := len(m.liveRootIDs()) > 1 || len(m.listChildren(m.sessionID)) > 0
 	var kids []childActivity
@@ -266,7 +348,7 @@ func (m Model) activityEntries() []activityEntry {
 		// Ephemeral / id-less children only in the flat feed.
 		kids = m.children
 	}
-	return projectActivityEntries(m.cells, kids, m.awaitingPermission)
+	return projectActivityEntriesNamed(m.cells, kids, m.teamMessages, m.awaitingPermission, m.teamMemberLabel)
 }
 
 // activityPaneBody shows a session tree when subagents exist, then the newest-
@@ -404,16 +486,19 @@ func activityListItem(th theme.Theme, e activityEntry) ui.ListItem {
 		glyph := ic.Ellipsis
 		suffixStyle := st.Muted
 		switch e.Status {
-		case "running":
+		case "running", "working", "starting":
 			suffixStyle = st.AccentAlt
 			glyph = ic.Ellipsis
-		case string(protocol.ChildStatusCompleted):
+		case "needs you", "needs_attention":
+			suffixStyle = st.Warning
+			glyph = ic.Bolt
+		case "completed", "done":
 			suffixStyle = st.Success
 			glyph = ic.OK
-		case string(protocol.ChildStatusFailed):
+		case "failed", "error":
 			suffixStyle = st.Error
 			glyph = ic.Err
-		case string(protocol.ChildStatusCanceled):
+		case "canceled", "cancelled":
 			suffixStyle = st.Muted
 			glyph = ic.Info
 		}
@@ -421,6 +506,12 @@ func activityListItem(th theme.Theme, e activityEntry) ui.ListItem {
 			Label:  sanitizeDisplayData(e.Label),
 			Detail: e.Status,
 			Suffix: suffixStyle.Render(space + glyph),
+		}
+	case activityTeamMsg:
+		return ui.ListItem{
+			Label:  sanitizeDisplayData(e.Label),
+			Detail: e.Status,
+			Suffix: st.Accent.Render(space + ic.Info),
 		}
 	case activityAttention:
 		return ui.ListItem{

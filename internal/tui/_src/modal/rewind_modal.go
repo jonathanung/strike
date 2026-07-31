@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -84,7 +84,7 @@ func (m *rewindModal) load() {
 	}
 }
 
-func (m *rewindModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *rewindModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	if isEscape(msg) {
 		return nil, nil
 	}

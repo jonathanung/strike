@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -480,7 +480,7 @@ func TestAltEnterTogglesSelectedToolCell(t *testing.T) {
 	m.applyEvent(protocol.ToolCallEnd{CallID: "c1", Title: "run", Output: b.String()})
 	m.composer.SetValue("")
 	// Bare enter must not expand (#421).
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	tc := m.toolByID["c1"]
 	if tc == nil {
 		t.Fatal("missing tool cell")
@@ -489,26 +489,26 @@ func TestAltEnterTogglesSelectedToolCell(t *testing.T) {
 		t.Fatal("bare enter must not expand tool cell")
 	}
 	// alt+enter expands when composer is empty.
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt})
 	if !tc.expanded {
 		t.Fatalf("alt+enter should expand collapsible tool: expanded=%v", tc.expanded)
 	}
 	if m.selectedCell < 0 {
 		t.Fatal("alt+enter should select the tool cell")
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt})
 	if tc.expanded {
 		t.Fatal("second alt+enter should collapse")
 	}
 	// Non-empty enter still sends (no expand side effect on send path with text).
 	m.composer.SetValue("hello")
 	before := tc.expanded
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if tc.expanded != before {
 		t.Fatal("send with text must not toggle tool expand")
 	}
 	// With text, alt+enter is newline — not expand (#421 / #414).
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt})
 	if tc.expanded != before {
 		t.Fatal("alt+enter with composer text must not toggle tool expand")
 	}
@@ -548,14 +548,14 @@ func TestVReviewsSelectedEditToolAtFirstHunk(t *testing.T) {
 	m.composer.SetValue("")
 
 	// Without selection, v must reach the composer (not steal typing).
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
+	m = updateApp(t, m, tea.KeyPressMsg{Text: "v"})
 	if m.composer.Value() != "v" {
 		t.Fatalf("unselected v should type into composer, got %q", m.composer.Value())
 	}
 	m.composer.SetValue("")
 
 	// Select the short edit cell (reviewable even when not collapsible).
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}, Alt: true})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: ']', Mod: tea.ModAlt})
 	if m.selectedCell < 0 {
 		t.Fatal("alt+] should select reviewable edit cell")
 	}
@@ -569,7 +569,7 @@ func TestVReviewsSelectedEditToolAtFirstHunk(t *testing.T) {
 	t.Setenv("EDITOR", "")
 	t.Setenv("PATH", filepath.Join(t.TempDir(), "empty-bin"))
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
+	updated, cmd := m.Update(tea.KeyPressMsg{Text: "v"})
 	m = updated.(Model)
 	// reviewSelectedTool → handleVimCommand may return a cmd that delivers
 	// editorFinishedMsg with launchErr, or set notice immediately.
@@ -606,11 +606,11 @@ func TestVOnBashToolShowsNotice(t *testing.T) {
 	m.applyEvent(protocol.ToolCallBegin{CallID: "c1", Name: "bash"})
 	m.applyEvent(protocol.ToolCallEnd{CallID: "c1", Title: "run", Output: b.String()})
 	m.composer.SetValue("")
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}, Alt: true})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: ']', Mod: tea.ModAlt})
 	if m.selectedCell < 0 {
 		t.Fatal("expected selection")
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
+	m = updateApp(t, m, tea.KeyPressMsg{Text: "v"})
 	if !m.noticeErr || !strings.Contains(m.notice, "no file to review") {
 		t.Fatalf("notice = %q err=%v, want no file to review", m.notice, m.noticeErr)
 	}
@@ -677,7 +677,7 @@ func TestYCopiesSelectedToolCellViaOSC52(t *testing.T) {
 		t.Fatal("missing tool cell")
 	}
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	updated, cmd := m.Update(tea.KeyPressMsg{Text: "y"})
 	m = updated.(Model)
 	if m.composer.Value() != "" {
 		t.Fatalf("y with empty composer mutated composer: %q", m.composer.Value())
@@ -693,7 +693,7 @@ func TestYCopiesSelectedToolCellViaOSC52(t *testing.T) {
 		t.Fatal("y did not stage OSC52")
 	}
 
-	frame := m.View()
+	frame := viewString(m)
 	if m.cellClip.osc != "" {
 		t.Error("View did not consume one-shot OSC52")
 	}
@@ -709,7 +709,7 @@ func TestYCopiesSelectedToolCellViaOSC52(t *testing.T) {
 	if payload != want {
 		t.Errorf("OSC52 payload = %q, want %q", payload, want)
 	}
-	if second := osc52Payloads(m.View()); len(second) != 0 {
+	if second := osc52Payloads(viewString(m)); len(second) != 0 {
 		t.Errorf("second View re-emitted OSC52: %v", second)
 	}
 
@@ -744,13 +744,13 @@ func TestYCopiesEditDiffAndFallsBackToLatest(t *testing.T) {
 	})
 	m.composer.SetValue("")
 	m.selectedCell = -1 // force latest-cell fallback
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	updated, _ := m.Update(tea.KeyPressMsg{Text: "y"})
 	m = updated.(Model)
 	tc := m.toolByID["e1"]
 	if tc == nil || !tc.copiedFlash {
 		t.Fatal("expected flash on latest edit cell")
 	}
-	frame := m.View()
+	frame := viewString(m)
 	reqs := osc52Payloads(frame)
 	if len(reqs) != 1 {
 		t.Fatalf("OSC52 count = %d, want 1", len(reqs))
@@ -772,7 +772,7 @@ func TestYWithComposerTextInsertsY(t *testing.T) {
 	m.composer.SetValue("hel")
 	// Place cursor at end so runes append.
 	m.setComposerValueAt("hel", 3)
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = updateApp(t, m, tea.KeyPressMsg{Text: "y"})
 	if got := m.composer.Value(); got != "hely" {
 		t.Errorf("composer after y = %q, want hely", got)
 	}
@@ -794,7 +794,7 @@ func TestYCopiesAssistantChatTextViaOSC52(t *testing.T) {
 	m.composer.SetValue("")
 	m.selectedCell = -1
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	updated, cmd := m.Update(tea.KeyPressMsg{Text: "y"})
 	m = updated.(Model)
 	if m.composer.Value() != "" {
 		t.Fatalf("y with chat text mutated composer: %q", m.composer.Value())
@@ -811,7 +811,7 @@ func TestYCopiesAssistantChatTextViaOSC52(t *testing.T) {
 	if m.cellClip == nil || m.cellClip.osc == "" {
 		t.Fatal("y did not stage OSC52 for assistant text")
 	}
-	frame := m.View()
+	frame := viewString(m)
 	reqs := osc52Payloads(frame)
 	if len(reqs) != 1 {
 		t.Fatalf("View OSC52 count = %d, want 1", len(reqs))
@@ -834,7 +834,7 @@ func TestYCopiesAssistantChatTextViaOSC52(t *testing.T) {
 	m.selectedCell = -1
 	m.cellClip = &cellClipboard{}
 	asst.copiedFlash = false
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	updated, _ = m.Update(tea.KeyPressMsg{Text: "y"})
 	m = updated.(Model)
 	tc := m.toolByID["t1"]
 	if tc == nil || !tc.copiedFlash {
@@ -843,7 +843,7 @@ func TestYCopiesAssistantChatTextViaOSC52(t *testing.T) {
 	if asst.copiedFlash {
 		t.Error("assistant flash should clear when copying tool")
 	}
-	frame = m.View()
+	frame = viewString(m)
 	reqs = osc52Payloads(frame)
 	if len(reqs) != 1 {
 		t.Fatalf("tool OSC52 count = %d, want 1", len(reqs))
@@ -862,7 +862,7 @@ func TestYCopiesUserMessageWhenNoAssistantOrTool(t *testing.T) {
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.applyEvent(protocol.UserMessage{Text: "solo user prompt\n"})
 	m.composer.SetValue("")
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	updated, _ := m.Update(tea.KeyPressMsg{Text: "y"})
 	m = updated.(Model)
 	var uc *userCell
 	for _, c := range m.cells {
@@ -873,7 +873,7 @@ func TestYCopiesUserMessageWhenNoAssistantOrTool(t *testing.T) {
 	if uc == nil || !uc.copiedFlash {
 		t.Fatal("y should copy user cell when it is the only copyable content")
 	}
-	frame := m.View()
+	frame := viewString(m)
 	reqs := osc52Payloads(frame)
 	if len(reqs) != 1 {
 		t.Fatalf("OSC52 count = %d, want 1", len(reqs))
@@ -899,8 +899,8 @@ func TestChatCellCopyText(t *testing.T) {
 	}
 }
 
-func keyMsgAltY() tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}, Alt: true}
+func keyMsgAltY() tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: 'y', Mod: tea.ModAlt}
 }
 
 func TestCopyLastResponseViaAltYAndSlash(t *testing.T) {
@@ -941,7 +941,7 @@ func TestCopyLastResponseViaAltYAndSlash(t *testing.T) {
 	if m.cellClip == nil || m.cellClip.osc == "" {
 		t.Fatal("alt+y did not stage OSC52")
 	}
-	frame := m.View()
+	frame := viewString(m)
 	reqs := osc52Payloads(frame)
 	if len(reqs) != 1 {
 		t.Fatalf("View OSC52 count = %d, want 1", len(reqs))

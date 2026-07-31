@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -15,10 +15,10 @@ func TestMarkdownModalDismissKeys(t *testing.T) {
 	m.renderMarkdown = func(source string, width int) (string, error) {
 		return "RENDERED:" + source, nil
 	}
-	for _, key := range []tea.KeyMsg{
-		{Type: tea.KeyEsc},
-		{Type: tea.KeyRunes, Runes: []rune{'q'}},
-		{Type: tea.KeyCtrlG},
+	for _, key := range []tea.KeyPressMsg{
+		{Code: tea.KeyEsc},
+		{Text: "q"},
+		{Code: 'g', Mod: tea.ModCtrl},
 	} {
 		next, cmd := m.update(key)
 		if next != nil {
@@ -56,7 +56,7 @@ func TestMarkdownModalViewRendersAndScrolls(t *testing.T) {
 	}
 
 	// Scroll keys keep the modal open.
-	next, _ := m.update(tea.KeyMsg{Type: tea.KeyDown})
+	next, _ := m.update(tea.KeyPressMsg{Code: tea.KeyDown})
 	if next == nil {
 		t.Fatal("down closed modal")
 	}
@@ -107,7 +107,7 @@ func TestMDReadModalModeOpensOverlayWithScrim(t *testing.T) {
 	}
 	// Re-assign modal after render hook (Model is a value type).
 	m.modal = mm
-	view := m.View()
+	view := viewString(m)
 	plain := ansi.Strip(view)
 	if !strings.Contains(plain, "ModalHello") && !strings.Contains(plain, "unique-modal-md") {
 		if !strings.Contains(plain, "markdown") {
@@ -124,7 +124,7 @@ func TestMDReadModalModeOpensOverlayWithScrim(t *testing.T) {
 		t.Errorf("view missing markdown modal title: %q", plain)
 	}
 	// Close with esc (focus trap: keys go to modal).
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	if m.modal != nil {
 		t.Fatalf("esc left modal open: %T", m.modal)
 	}

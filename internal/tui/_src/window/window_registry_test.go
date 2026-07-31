@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -25,7 +25,7 @@ func (w statefulTestWindow) id() string    { return w.windowID }
 func (w statefulTestWindow) title() string { return w.windowTitle }
 func (w statefulTestWindow) init() tea.Cmd { return nil }
 func (w statefulTestWindow) update(msg tea.Msg) (window, tea.Cmd) {
-	if km, ok := msg.(tea.KeyMsg); ok {
+	if km, ok := msg.(tea.KeyPressMsg); ok {
 		w.updates = append(w.updates, km.String())
 	}
 	return w, nil
@@ -59,7 +59,7 @@ func TestWindowRegistryPreservesOrderAndValueStateAcrossCycleUpdateAndResize(t *
 	if got := r.active().id(); got != "two" {
 		t.Fatalf("cycled active window = %q, want two", got)
 	}
-	r, _ = r.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	r, _ = r.update(tea.KeyPressMsg{Text: "x"})
 	if got := testWindow(t, r.active()).updates; len(got) != 1 || got[0] != "x" {
 		t.Fatalf("active update = %q, want [x]", got)
 	}
@@ -83,7 +83,7 @@ func TestModelsHaveIsolatedWindowRegistryState(t *testing.T) {
 	left.windows = windowRegistry{windows: []window{statefulTestWindow{windowID: "left"}}}
 	right.windows = windowRegistry{windows: []window{statefulTestWindow{windowID: "right"}}}
 	left.focus = focusRight
-	left = updateApp(t, left, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	left = updateApp(t, left, tea.KeyPressMsg{Text: "a"})
 	left = updateApp(t, left, tea.WindowSizeMsg{Width: 11, Height: 5})
 
 	if got := testWindow(t, left.windows.active()); len(got.updates) != 1 || got.width != 11 || got.height != 3 {
@@ -139,7 +139,7 @@ func TestCompactRightPaneIsBorderlessAndUsesFullBodyDimensionsAtThresholds(t *te
 			if got.width != tt.wantW || got.height != tt.wantH {
 				t.Errorf("registry dimensions = %dx%d, want %dx%d", got.width, got.height, tt.wantW, tt.wantH)
 			}
-			view := m.View()
+			view := viewString(m)
 			rows := strings.Split(view, "\n")
 			if len(rows) != tt.height {
 				t.Fatalf("canvas rows = %d, want %d", len(rows), tt.height)
@@ -329,7 +329,7 @@ func TestDefaultWindowRegistryHasUniqueWidthSafeWindows(t *testing.T) {
 	// Full Model.View at split size shows real context content, not a placeholder.
 	m, _ := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 93, Height: 40})
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(viewString(m))
 	if strings.Contains(plain, "Context window placeholder.") {
 		t.Errorf("split view still shows placeholder copy:\n%s", plain)
 	}
@@ -437,10 +437,10 @@ func TestWindowRegistryPreservesMarkdownScrollAcrossCycle(t *testing.T) {
 	if !ok {
 		t.Fatal("replace markdown failed")
 	}
-	r, _ = r.update(tea.KeyMsg{Type: tea.KeyPgDown})
-	r, _ = r.update(tea.KeyMsg{Type: tea.KeyPgDown})
+	r, _ = r.update(tea.KeyPressMsg{Code: tea.KeyPgDown})
+	r, _ = r.update(tea.KeyPressMsg{Code: tea.KeyPgDown})
 	active := r.active().(markdownWindow)
-	wantOffset := active.vp.YOffset
+	wantOffset := active.vp.YOffset()
 	if wantOffset == 0 {
 		t.Fatal("setup did not scroll markdown content")
 	}
@@ -457,8 +457,8 @@ func TestWindowRegistryPreservesMarkdownScrollAcrossCycle(t *testing.T) {
 	r = r.cycle() // issues
 	r = r.cycle() // markdown again
 	got := r.active().(markdownWindow)
-	if got.vp.YOffset != wantOffset {
-		t.Errorf("YOffset after cycle away/back = %d, want %d", got.vp.YOffset, wantOffset)
+	if got.vp.YOffset() != wantOffset {
+		t.Errorf("YOffset after cycle away/back = %d, want %d", got.vp.YOffset(), wantOffset)
 	}
 }
 
@@ -648,7 +648,7 @@ func TestStackedRightPaneShowsPairedGroupTitles(t *testing.T) {
 				t.Fatalf("activate(%s) failed", tt.activate)
 			}
 			m.reflow()
-			plain := ansi.Strip(m.View())
+			plain := ansi.Strip(viewString(m))
 			for _, title := range tt.want {
 				if !strings.Contains(plain, title) {
 					t.Errorf("split view missing %q title:\n%s", title, plain)
@@ -668,13 +668,13 @@ func TestStackedRightPaneCollapsesWhenCompact(t *testing.T) {
 	m.focus = focusRight
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 50, Height: 18})
 	// Session group active (context); compact must not paint the pair partner title chrome.
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(viewString(m))
 	if strings.Contains(plain, "╭") {
 		t.Errorf("compact view retained panel chrome:\n%s", plain)
 	}
 	// Cycle still walks full focus order one pane at a time.
 	start := m.windows.active().id()
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlO})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
 	if m.windows.active().id() == start {
 		t.Error("compact cycle did not advance focus")
 	}

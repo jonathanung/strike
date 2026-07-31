@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -35,7 +35,7 @@ func TestThinkCommandBareToggleAndAliases(t *testing.T) {
 			m, ops := newAppTestModel(nil, nil)
 			m.showThinking = tt.initial
 			m.composer.SetValue(tt.command)
-			updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 			m = updated.(Model)
 			if msg := runAppCmd(t, cmd); msg != nil {
 				t.Errorf("unexpected message %#v", msg)
@@ -54,7 +54,7 @@ func TestThinkCommandBareToggleAndAliases(t *testing.T) {
 func TestThinkCommandRejectsInvalidUsage(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)
 	m.composer.SetValue("/think maybe")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if msg := runAppCmd(t, cmd); msg != nil {
 		t.Errorf("invalid /think returned message %#v", msg)
@@ -87,7 +87,7 @@ func TestReasoningDeltaHiddenByDefaultAndShownWhenToggled(t *testing.T) {
 	}
 
 	m.composer.SetValue("/think on")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	runAppCmd(t, cmd)
 	if !m.showThinking {
@@ -104,7 +104,7 @@ func TestReasoningDeltaHiddenByDefaultAndShownWhenToggled(t *testing.T) {
 		t.Errorf("answer missing with toggle on:\n%s", shown)
 	}
 	header := ansi.Strip(m.headerView(100))
-	if !strings.Contains(header, ui.Badge(m.th, ui.ToneMuted, "think")) {
+	if !strings.Contains(header, ansi.Strip(ui.Badge(m.th, ui.ToneMuted, "think"))) {
 		t.Errorf("header does not render think as muted badge:\n%s", header)
 	}
 }

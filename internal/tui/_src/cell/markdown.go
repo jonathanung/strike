@@ -4,9 +4,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/charmbracelet/glamour"
-	"github.com/charmbracelet/glamour/styles"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/glamour/v2"
+	"charm.land/glamour/v2/styles"
+	"charm.land/lipgloss/v2/compat"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -14,8 +14,8 @@ import (
 var markdownRender = glamourRender
 
 // glamourStyleName is the pinned dark/light style for assistant markdown.
-// Never "auto": glamour.WithAutoStyle queries OSC 11 on every NewTermRenderer,
-// and that reply races Bubble Tea's stdin into the composer (#52).
+// Glamour v2 removed WithAutoStyle; style must be chosen explicitly via
+// WithStylePath so OSC 11 is never queried during NewTermRenderer (#52).
 var (
 	glamourStyleMu   sync.Mutex
 	glamourStyleName string
@@ -25,7 +25,7 @@ func glamourStyle() string {
 	glamourStyleMu.Lock()
 	defer glamourStyleMu.Unlock()
 	if glamourStyleName == "" {
-		if lipgloss.HasDarkBackground() {
+		if compat.HasDarkBackground {
 			glamourStyleName = styles.DarkStyle
 		} else {
 			glamourStyleName = styles.LightStyle
@@ -46,8 +46,10 @@ func setGlamourStyle(dark bool) {
 
 func glamourRender(source string, width int) (string, error) {
 	source = expandMermaidFences(source, width)
+	// WithStylePath pins dark|light from E13.3 background detection.
+	// Color downsampling is Lip Gloss's job at print time (no WithColorProfile).
 	r, err := glamour.NewTermRenderer(
-		glamour.WithStandardStyle(glamourStyle()),
+		glamour.WithStylePath(glamourStyle()),
 		glamour.WithWordWrap(max(1, width)),
 	)
 	if err != nil {

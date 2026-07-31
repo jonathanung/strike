@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -17,9 +17,10 @@ type rootPane struct {
 	workDir    string
 	titleTopic string
 
-	cells    []cell
-	toolByID map[string]*toolCell
-	children []childActivity
+	cells        []cell
+	toolByID     map[string]*toolCell
+	children     []childActivity
+	teamMessages []teamMessage
 
 	providerName  string
 	modelName     string
@@ -72,6 +73,7 @@ func (m *Model) stashActiveRoot() {
 		viewTools[k] = v
 	}
 	children := append([]childActivity(nil), m.children...)
+	teamMsgs := append([]teamMessage(nil), m.teamMessages...)
 	m.roots[m.sessionID] = &rootPane{
 		sessionID:          m.sessionID,
 		workDir:            m.workDir,
@@ -79,6 +81,7 @@ func (m *Model) stashActiveRoot() {
 		cells:              append([]cell(nil), m.cells...),
 		toolByID:           toolByID,
 		children:           children,
+		teamMessages:       teamMsgs,
 		providerName:       m.providerName,
 		modelName:          m.modelName,
 		agentName:          m.agentName,
@@ -125,6 +128,7 @@ func (m *Model) loadRootPane(p *rootPane) {
 		m.toolByID[k] = v
 	}
 	m.children = append([]childActivity(nil), p.children...)
+	m.teamMessages = append([]teamMessage(nil), p.teamMessages...)
 	m.providerName = p.providerName
 	m.modelName = p.modelName
 	m.agentName = p.agentName
@@ -305,7 +309,13 @@ func (m *Model) applyEventToRoot(rootID string, ev protocol.Event) tea.Cmd {
 	}
 	applyEventToPane(p, ev)
 	// Keep live activity snapshot for the agents tree.
-	return m.broadcastAgentsState()
+	cmd := m.broadcastAgentsState()
+	switch ev.(type) {
+	case protocol.ToolCallBegin, protocol.ToolCallEnd:
+		// Mid-turn tool strip for the focused background root (#625).
+		cmd = tea.Batch(cmd, m.broadcastVisualizerState())
+	}
+	return cmd
 }
 
 // applyEventToPane mutates a stashed pane the same way applyEvent mutates Model
@@ -422,6 +432,7 @@ func applyEventToPane(p *rootPane, ev protocol.Event) {
 			if p.children[i].sessionID == id {
 				p.children[i].agent = e.Agent
 				p.children[i].prompt = e.Prompt
+				p.children[i].name = e.Name
 				p.children[i].status = "running"
 				p.children[i].startedAt = time.Now()
 				p.children[i].endedAt = time.Time{}
@@ -440,6 +451,7 @@ func applyEventToPane(p *rootPane, ev protocol.Event) {
 				parentID:  e.ParentSessionID,
 				agent:     e.Agent,
 				prompt:    e.Prompt,
+				name:      e.Name,
 				status:    "running",
 				startedAt: time.Now(),
 			})
@@ -457,6 +469,9 @@ func applyEventToPane(p *rootPane, ev protocol.Event) {
 			if p.children[i].sessionID == id || (id == "" && i == len(p.children)-1) {
 				p.children[i].status = status
 				p.children[i].endedAt = time.Now()
+				if e.Name != "" {
+					p.children[i].name = e.Name
+				}
 				if e.ParentSessionID != "" && p.children[i].parentID == "" {
 					p.children[i].parentID = e.ParentSessionID
 				}
@@ -466,6 +481,10 @@ func applyEventToPane(p *rootPane, ev protocol.Event) {
 		applyChildCompletedToTaskCells(p.toolByID, e)
 		agent, elapsed := lookupChildMeta(p.children, e.SessionID)
 		p.cells = appendSubagentResultCell(p.cells, e, agent, elapsed)
+	case protocol.TeamRoster:
+		applyTeamRosterToPane(p, e)
+	case protocol.AgentMessage:
+		applyAgentMessageToPane(p, e)
 	}
 }
 
@@ -636,6 +655,7 @@ func seedPaneFromReplay(p *rootPane, events []protocol.Event) {
 	p.cells = tmp.cells
 	p.toolByID = tmp.toolByID
 	p.children = tmp.children
+	p.teamMessages = tmp.teamMessages
 	p.titleTopic = tmp.titleTopic
 	p.providerName = tmp.providerName
 	p.modelName = tmp.modelName

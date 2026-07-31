@@ -1,13 +1,14 @@
 package tui
 
 import (
+	"image/color"
 	"io"
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2/compat"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -16,7 +17,7 @@ import (
 )
 
 func TestIsEscapeMatchesKeyEscAndStringEsc(t *testing.T) {
-	esc := tea.KeyMsg{Type: tea.KeyEsc}
+	esc := tea.KeyPressMsg{Code: tea.KeyEsc}
 	if esc.String() != "esc" {
 		t.Fatalf("KeyEsc.String() = %q, want esc", esc.String())
 	}
@@ -25,10 +26,10 @@ func TestIsEscapeMatchesKeyEscAndStringEsc(t *testing.T) {
 	}
 	// String()=="esc" is the secondary path (CSI-u normalized bare ESC).
 	// KeyEsc already satisfies both Type and String checks.
-	if isEscape(tea.KeyMsg{Type: tea.KeyEnter}) {
+	if isEscape(tea.KeyPressMsg{Code: tea.KeyEnter}) {
 		t.Error("isEscape(Enter) = true")
 	}
-	if isEscape(tea.KeyMsg{Type: tea.KeyCtrlC}) {
+	if isEscape(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}) {
 		t.Error("isEscape(CtrlC) = true")
 	}
 }
@@ -62,30 +63,30 @@ func TestScrollBindingsCtrlUpDownAndJumpBottom(t *testing.T) {
 	}
 	m.refreshViewport()
 	m.viewport.GotoBottom()
-	bottom := m.viewport.YOffset
+	bottom := m.viewport.YOffset()
 	if bottom == 0 {
 		t.Fatal("setup: long transcript still at top")
 	}
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlUp})
-	if m.viewport.YOffset >= bottom {
-		t.Errorf("ctrl+up did not scroll up: offset=%d bottom=%d", m.viewport.YOffset, bottom)
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModCtrl})
+	if m.viewport.YOffset() >= bottom {
+		t.Errorf("ctrl+up did not scroll up: offset=%d bottom=%d", m.viewport.YOffset(), bottom)
 	}
-	afterUp := m.viewport.YOffset
+	afterUp := m.viewport.YOffset()
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlDown})
-	if m.viewport.YOffset <= afterUp {
-		t.Errorf("ctrl+down did not scroll down: offset=%d afterUp=%d", m.viewport.YOffset, afterUp)
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyDown, Mod: tea.ModCtrl})
+	if m.viewport.YOffset() <= afterUp {
+		t.Errorf("ctrl+down did not scroll down: offset=%d afterUp=%d", m.viewport.YOffset(), afterUp)
 	}
 
 	// Scroll away, then ctrl+t jumps to bottom and re-enables follow.
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyPgUp})
 	if m.viewport.AtBottom() {
 		t.Fatal("pgup left viewport at bottom")
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlT})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
 	if !m.viewport.AtBottom() {
-		t.Errorf("ctrl+t did not jump to bottom: YOffset=%d", m.viewport.YOffset)
+		t.Errorf("ctrl+t did not jump to bottom: YOffset=%d", m.viewport.YOffset())
 	}
 	m = updateApp(t, m, engineEventMsg{ev: protocol.TextDelta{Text: "follow-after-end"}})
 	if !m.viewport.AtBottom() {
@@ -112,24 +113,24 @@ func TestToggleOrientationAndLayoutCommand(t *testing.T) {
 		t.Fatalf("after toggle orientation = %v, want vertical", m.splitOrientation)
 	}
 	// Chords stay orientation-independent (#414).
-	if !key.Matches(tea.KeyMsg{Type: tea.KeyCtrlH}, m.keyMap.FocusLeft) {
+	if !key.Matches(tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl}, m.keyMap.FocusLeft) {
 		t.Error("vertical: ctrl+h should focus left/primary")
 	}
-	if !key.Matches(tea.KeyMsg{Type: tea.KeyCtrlO}, m.keyMap.CycleWindowNext) {
+	if !key.Matches(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}, m.keyMap.CycleWindowNext) {
 		t.Error("vertical: ctrl+o should cycle windows")
 	}
-	if key.Matches(tea.KeyMsg{Type: tea.KeyCtrlJ}, m.keyMap.FocusLeft, m.keyMap.CycleWindowNext) {
+	if key.Matches(tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl}, m.keyMap.FocusLeft, m.keyMap.CycleWindowNext) {
 		t.Error("vertical: ctrl+j must remain newline-only")
 	}
 
 	// /layout flips back to horizontal; chords unchanged.
 	m.composer.SetValue("/layout")
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if m.splitOrientation != orientHorizontal {
 		t.Fatalf("/layout orientation = %v, want horizontal", m.splitOrientation)
 	}
-	if !key.Matches(tea.KeyMsg{Type: tea.KeyCtrlO}, m.keyMap.CycleWindowNext) {
+	if !key.Matches(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}, m.keyMap.CycleWindowNext) {
 		t.Error("horizontal: ctrl+o should cycle windows")
 	}
 	if !strings.Contains(m.notice, "horizontal") {
@@ -138,7 +139,7 @@ func TestToggleOrientationAndLayoutCommand(t *testing.T) {
 
 	// /split is an alias.
 	m.composer.SetValue("/split")
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if m.splitOrientation != orientVertical {
 		t.Fatalf("/split orientation = %v, want vertical", m.splitOrientation)
@@ -148,7 +149,7 @@ func TestToggleOrientationAndLayoutCommand(t *testing.T) {
 	}
 
 	// Wire form is alt+; (after WrapInput rewrites ctrl+; CSI); help stays ctrl+;.
-	if !key.Matches(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{';'}, Alt: true}, m.keyMap.ToggleOrientation) {
+	if !key.Matches(tea.KeyPressMsg{Code: ';', Mod: tea.ModAlt}, m.keyMap.ToggleOrientation) {
 		t.Error("ToggleOrientation should match alt+; KeyMsg")
 	}
 	if m.keyMap.ToggleOrientation.Help().Key != "ctrl+;" {
@@ -170,8 +171,8 @@ func TestVerticalFocusKeysStayOrientationIndependent(t *testing.T) {
 	startIdx := m.windows.index
 	// ctrl+j newlines even in vertical split (#414).
 	m.composer.SetValue("v")
-	m.composer.SetCursor(1)
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	m.composer.SetCursorColumn(1)
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl})
 	if got := m.composer.Value(); got != "v\n" {
 		t.Errorf("vertical left bare LF composer = %q, want v\\n", got)
 	}
@@ -182,16 +183,16 @@ func TestVerticalFocusKeysStayOrientationIndependent(t *testing.T) {
 		t.Errorf("vertical left bare LF cycled window index %d → %d", startIdx, m.windows.index)
 	}
 	// ctrl+h / ctrl+l still focus primary/secondary.
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 	if m.focus != focusRight {
 		t.Errorf("vertical ctrl+l focus = %v, want right/secondary", m.focus)
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlH})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
 	if m.focus != focusLeft {
 		t.Errorf("vertical ctrl+h focus = %v, want left/primary", m.focus)
 	}
 	// ctrl+o cycles secondary panes.
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlO})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
 	if m.windows.active().id() != "b" {
 		t.Errorf("vertical ctrl+o window = %s, want b", m.windows.active().id())
 	}
@@ -199,8 +200,8 @@ func TestVerticalFocusKeysStayOrientationIndependent(t *testing.T) {
 	m.focus = focusLeft
 	m.composer.Focus()
 	m.composer.SetValue("top bottom")
-	m.composer.SetCursor(3)
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+	m.composer.SetCursorColumn(3)
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl})
 	if m.focus != focusLeft {
 		t.Errorf("vertical left ctrl+k with text focus = %v, want left", m.focus)
 	}
@@ -211,7 +212,7 @@ func TestVerticalFocusKeysStayOrientationIndependent(t *testing.T) {
 		t.Errorf("mid-line kill opened modal %T", m.modal)
 	}
 	m.composer.SetValue("")
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl})
 	if _, ok := m.modal.(*paletteModal); !ok {
 		t.Errorf("empty ctrl+k modal = %T, want palette", m.modal)
 	}
@@ -238,21 +239,18 @@ func TestHorizontalC2GeometryStillHolds(t *testing.T) {
 }
 
 func TestThemeCommandAppearanceAndPicker(t *testing.T) {
-	// Save/restore lipgloss background detection and package appearance cache.
-	savedDark := lipgloss.HasDarkBackground()
-	savedDetected := appearanceDetected
-	savedDetectedDark := appearanceDetectedDark
+	savedDark := compat.HasDarkBackground
 	savedMDStyle := glamourStyleName
 	t.Cleanup(func() {
-		lipgloss.SetHasDarkBackground(savedDark)
-		appearanceDetected = savedDetected
-		appearanceDetectedDark = savedDetectedDark
+		compat.HasDarkBackground = savedDark
 		glamourStyleName = savedMDStyle
 	})
-	appearanceDetected = false
 
 	m, _ := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	// Seed terminal detection so /theme auto restores a known value.
+	m.detectedDark = true
+	m.applyAppearance()
 
 	runTheme := func(args string) Model {
 		t.Helper()
@@ -261,7 +259,7 @@ func TestThemeCommandAppearanceAndPicker(t *testing.T) {
 			cmd += " " + args
 		}
 		m.composer.SetValue(cmd)
-		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		return updated.(Model)
 	}
 
@@ -269,7 +267,7 @@ func TestThemeCommandAppearanceAndPicker(t *testing.T) {
 	if m.appearance != appearanceDark {
 		t.Errorf("/theme dark appearance = %q", m.appearance)
 	}
-	if !lipgloss.HasDarkBackground() {
+	if !compat.HasDarkBackground {
 		t.Error("dark theme did not set HasDarkBackground")
 	}
 	if !strings.Contains(m.notice, "dark") {
@@ -277,13 +275,16 @@ func TestThemeCommandAppearanceAndPicker(t *testing.T) {
 	}
 
 	m = runTheme("light")
-	if m.appearance != appearanceLight || lipgloss.HasDarkBackground() {
-		t.Errorf("light: appearance=%q darkBg=%v", m.appearance, lipgloss.HasDarkBackground())
+	if m.appearance != appearanceLight || compat.HasDarkBackground {
+		t.Errorf("light: appearance=%q darkBg=%v", m.appearance, compat.HasDarkBackground)
 	}
 
 	m = runTheme("auto")
 	if m.appearance != appearanceAuto {
 		t.Errorf("auto appearance = %q", m.appearance)
+	}
+	if !compat.HasDarkBackground {
+		t.Error("auto did not restore detected dark background")
 	}
 
 	m = runTheme("nope")
@@ -302,7 +303,7 @@ func TestThemeCommandSelectsNamedTheme(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.composer.SetValue("/theme dracula")
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if m.themeID != "dracula" {
 		t.Fatalf("themeID = %q, want dracula", m.themeID)
@@ -319,7 +320,7 @@ func TestThemePickerSelectAndSave(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
 	m.composer.SetValue("/theme")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	picker, ok := m.modal.(*themeModal)
 	if !ok {
@@ -334,7 +335,7 @@ func TestThemePickerSelectAndSave(t *testing.T) {
 	}
 	// ctrl+d saves default without closing.
 	settings := m.services.Settings.(*fakeSettings)
-	next, saveCmd := picker.update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	next, saveCmd := picker.update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
 	if next == nil {
 		t.Fatal("ctrl+d closed picker")
 	}
@@ -351,7 +352,7 @@ func TestThemePickerSelectAndSave(t *testing.T) {
 	}
 
 	// enter selects and closes.
-	next, selCmd := picker.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, selCmd := picker.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if next != nil {
 		t.Fatal("enter did not close picker")
 	}
@@ -371,40 +372,87 @@ func TestThemePickerSelectAndSave(t *testing.T) {
 }
 
 func TestApplyAppearanceIsTestable(t *testing.T) {
-	savedDark := lipgloss.HasDarkBackground()
-	savedDetected := appearanceDetected
-	savedDetectedDark := appearanceDetectedDark
+	savedDark := compat.HasDarkBackground
 	savedMDStyle := glamourStyleName
 	t.Cleanup(func() {
-		lipgloss.SetHasDarkBackground(savedDark)
-		appearanceDetected = savedDetected
-		appearanceDetectedDark = savedDetectedDark
+		compat.HasDarkBackground = savedDark
 		glamourStyleName = savedMDStyle
 	})
-	// Seed detection cache as if the terminal reported dark, then force modes.
-	appearanceDetected = true
-	appearanceDetectedDark = true
 
-	applyAppearance(appearanceLight)
-	if lipgloss.HasDarkBackground() {
+	m, _ := newAppTestModel(nil, nil)
+	m.detectedDark = true
+
+	m.appearance = appearanceLight
+	m.applyAppearance()
+	if compat.HasDarkBackground {
 		t.Error("applyAppearance(light) left dark background")
 	}
 	if glamourStyle() != "light" {
 		t.Errorf("glamour style after light = %q", glamourStyle())
 	}
-	applyAppearance(appearanceDark)
-	if !lipgloss.HasDarkBackground() {
+	m.appearance = appearanceDark
+	m.applyAppearance()
+	if !compat.HasDarkBackground {
 		t.Error("applyAppearance(dark) left light background")
 	}
 	if glamourStyle() != "dark" {
 		t.Errorf("glamour style after dark = %q", glamourStyle())
 	}
-	applyAppearance(appearanceAuto)
-	if !lipgloss.HasDarkBackground() {
+	m.appearance = appearanceAuto
+	m.applyAppearance()
+	if !compat.HasDarkBackground {
 		t.Error("applyAppearance(auto) did not restore detected dark")
 	}
 	if glamourStyle() != "dark" {
 		t.Errorf("glamour style after auto = %q", glamourStyle())
+	}
+}
+
+func TestBackgroundColorMsgFeedsAppearance(t *testing.T) {
+	savedDark := compat.HasDarkBackground
+	savedMDStyle := glamourStyleName
+	t.Cleanup(func() {
+		compat.HasDarkBackground = savedDark
+		glamourStyleName = savedMDStyle
+	})
+
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.appearance = appearanceAuto
+	m.detectedDark = true
+	m.applyAppearance()
+
+	// Light terminal background.
+	m = updateApp(t, m, tea.BackgroundColorMsg{Color: color.RGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}})
+	if m.detectedDark {
+		t.Fatal("light BackgroundColorMsg left detectedDark true")
+	}
+	if compat.HasDarkBackground || glamourStyle() != "light" {
+		t.Errorf("auto+light bg: darkBg=%v glamour=%q", compat.HasDarkBackground, glamourStyle())
+	}
+
+	// Forced dark ignores a subsequent light detection update for styling,
+	// but still records detectedDark for when the user returns to auto.
+	m.appearance = appearanceDark
+	m.applyAppearance()
+	m = updateApp(t, m, tea.BackgroundColorMsg{Color: color.RGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}})
+	if m.detectedDark {
+		t.Fatal("forced dark path should still record light detection")
+	}
+	if !compat.HasDarkBackground || glamourStyle() != "dark" {
+		t.Errorf("forced dark with light detect: darkBg=%v glamour=%q", compat.HasDarkBackground, glamourStyle())
+	}
+
+	m.appearance = appearanceAuto
+	m.applyAppearance()
+	if compat.HasDarkBackground {
+		t.Error("auto after light detect should be light")
+	}
+
+	// Dark terminal background.
+	m = updateApp(t, m, tea.BackgroundColorMsg{Color: color.RGBA{R: 0, G: 0, B: 0, A: 0xff}})
+	if !m.detectedDark || !compat.HasDarkBackground || glamourStyle() != "dark" {
+		t.Errorf("dark msg: detected=%v darkBg=%v glamour=%q", m.detectedDark, compat.HasDarkBackground, glamourStyle())
 	}
 }
 
@@ -504,7 +552,7 @@ func TestHelpCommandOpensFilterableCatalogModal(t *testing.T) {
 	m, _ := newAppTestModel(nil, []host.Skill{fakeSkill("review", "review a change", "")})
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.composer.SetValue("/help")
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	help, ok := m.modal.(*helpModal)
 	if !ok {
@@ -529,17 +577,17 @@ func TestHelpCommandOpensFilterableCatalogModal(t *testing.T) {
 			t.Errorf("/help catalog omitted %q", want)
 		}
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("session")})
+	m = updateApp(t, m, tea.KeyPressMsg{Text: "session"})
 	help = m.modal.(*helpModal)
 	filtered := help.filtered()
 	if len(filtered) == 0 || !strings.HasPrefix(filtered[0].Label, "/session") {
 		t.Fatalf("filter session = %#v, want /session first", filtered)
 	}
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(viewString(m))
 	if !strings.Contains(plain, "/session") {
 		t.Errorf("help modal view missing filtered command:\n%s", plain)
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	if m.modal != nil {
 		t.Errorf("esc left help modal open: %T", m.modal)
 	}

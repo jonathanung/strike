@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -76,21 +76,21 @@ func TestMarkdownWindowScrollIncreasesYOffset(t *testing.T) {
 	}
 	w = w.resize(40, 5).(markdownWindow)
 	w = w.load("tall.md", "# tall")
-	if w.vp.YOffset != 0 {
-		t.Fatalf("initial YOffset = %d, want 0", w.vp.YOffset)
+	if w.vp.YOffset() != 0 {
+		t.Fatalf("initial YOffset = %d, want 0", w.vp.YOffset())
 	}
 
-	updated, _ := w.update(tea.KeyMsg{Type: tea.KeyDown})
+	updated, _ := w.update(tea.KeyPressMsg{Code: tea.KeyDown})
 	w = updated.(markdownWindow)
-	if w.vp.YOffset <= 0 {
-		t.Errorf("after KeyDown YOffset = %d, want > 0", w.vp.YOffset)
+	if w.vp.YOffset() <= 0 {
+		t.Errorf("after KeyDown YOffset = %d, want > 0", w.vp.YOffset())
 	}
-	afterDown := w.vp.YOffset
+	afterDown := w.vp.YOffset()
 
-	updated, _ = w.update(tea.KeyMsg{Type: tea.KeyPgDown})
+	updated, _ = w.update(tea.KeyPressMsg{Code: tea.KeyPgDown})
 	w = updated.(markdownWindow)
-	if w.vp.YOffset <= afterDown {
-		t.Errorf("after PgDown YOffset = %d, want > %d", w.vp.YOffset, afterDown)
+	if w.vp.YOffset() <= afterDown {
+		t.Errorf("after PgDown YOffset = %d, want > %d", w.vp.YOffset(), afterDown)
 	}
 }
 

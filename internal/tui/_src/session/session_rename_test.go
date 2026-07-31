@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -45,9 +45,16 @@ func TestChildViewTitleBrief(t *testing.T) {
 			wantContains: []string{"subagent"},
 		},
 	}
+	// Stable spawn name beats agent+id; durable title still wins.
+	if got := childViewTitle("explore", "p", "child-abcdef12", "", "researcher"); got != "researcher" {
+		t.Fatalf("name alias label = %q, want researcher", got)
+	}
+	if got := childViewTitle("explore", "p", "child-abcdef12", "ship auth", "researcher"); got != "ship auth" {
+		t.Fatalf("durable title should win over name: got %q", got)
+	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := childViewTitle(tt.agent, tt.prompt, tt.id, tt.title)
+			got := childViewTitle(tt.agent, tt.prompt, tt.id, tt.title, "")
 			for _, w := range tt.wantContains {
 				if !strings.Contains(got, w) {
 					t.Errorf("got %q, want contain %q", got, w)
@@ -68,12 +75,12 @@ func TestRenameModalPersistsAndEmits(t *testing.T) {
 	m := newRenameModal(fs, "s1", "old")
 	// Clear and type.
 	for range m.input.Value() {
-		next, _ := m.update(tea.KeyMsg{Type: tea.KeyBackspace})
+		next, _ := m.update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 		m = next.(*renameModal)
 	}
-	next, _ := m.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("brief name")})
+	next, _ := m.update(tea.KeyPressMsg{Text: "brief name"})
 	m = next.(*renameModal)
-	next, cmd := m.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if next != nil {
 		t.Fatalf("modal after save = %T, want nil", next)
 	}
@@ -96,14 +103,14 @@ func TestRenameModalAcceptsKeySpace(t *testing.T) {
 	fs.put(host.Session{ID: "s1", Title: "a"}, nil)
 	m := newRenameModal(fs, "s1", "a")
 	// Bubble Tea delivers space as KeySpace (with Runes still set), not KeyRunes.
-	next, _ := m.update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}})
+	next, _ := m.update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 	m = next.(*renameModal)
-	next, _ = m.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("b")})
+	next, _ = m.update(tea.KeyPressMsg{Text: "b"})
 	m = next.(*renameModal)
 	if got := m.input.Value(); got != "a b" {
 		t.Fatalf("value = %q, want %q", got, "a b")
 	}
-	next, cmd := m.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if next != nil {
 		t.Fatalf("modal after save = %T, want nil", next)
 	}
@@ -195,7 +202,7 @@ func TestAgentsPaneRenameKeyOpensModal(t *testing.T) {
 		roots:    []agentsRootSnap{{ID: "root-a", Title: "alpha"}},
 	})
 	w = next.(agentsWindow)
-	next, cmd = w.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	next, cmd = w.update(tea.KeyPressMsg{Text: "r"})
 	if cmd == nil {
 		t.Fatal("expected agentsRenameMsg")
 	}
@@ -233,7 +240,7 @@ func TestApplySessionRenameUpdatesChildAndRoot(t *testing.T) {
 	if m.children[0].title != "new child" {
 		t.Fatalf("child title = %q", m.children[0].title)
 	}
-	label := childViewTitle(m.children[0].agent, m.children[0].prompt, m.children[0].sessionID, m.children[0].title)
+	label := childViewTitle(m.children[0].agent, m.children[0].prompt, m.children[0].sessionID, m.children[0].title, m.children[0].name)
 	if label != "new child" {
 		t.Fatalf("label = %q", label)
 	}
@@ -243,15 +250,15 @@ func TestSessionModalRenameEmitsLiveUpdate(t *testing.T) {
 	fs := newFakeSessions()
 	fs.put(host.Session{ID: "s1", Title: "old name"}, nil)
 	sm := newSessionModal(fs, "s1")
-	next, _ := sm.update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	next, _ := sm.update(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
 	sm = next.(*sessionModal)
 	for range sm.renameBuf {
-		next, _ = sm.update(tea.KeyMsg{Type: tea.KeyBackspace})
+		next, _ = sm.update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 		sm = next.(*sessionModal)
 	}
-	next, _ = sm.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("fresh")})
+	next, _ = sm.update(tea.KeyPressMsg{Text: "fresh"})
 	sm = next.(*sessionModal)
-	next, cmd := sm.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	sm = next.(*sessionModal)
 	if cmd == nil {
 		t.Fatal("expected sessionRenamedMsg from session modal")

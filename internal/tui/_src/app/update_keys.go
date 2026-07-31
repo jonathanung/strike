@@ -3,13 +3,13 @@ package tui
 import (
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
 
-func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if key.Matches(msg, m.keyMap.Quit) {
 		return m, tea.Quit
 	}
@@ -149,11 +149,11 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Transcript scroll/jump always target the chat viewport, never the
 	// right-pane terminal — handle before focusRight window routing.
 	if key.Matches(msg, m.keyMap.ScrollUp) {
-		m.viewport.HalfViewUp()
+		m.viewport.HalfPageUp()
 		return m, nil
 	}
 	if key.Matches(msg, m.keyMap.ScrollDown) {
-		m.viewport.HalfViewDown()
+		m.viewport.HalfPageDown()
 		return m, nil
 	}
 	if key.Matches(msg, m.keyMap.JumpBottom) {
@@ -167,8 +167,8 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	if m.focus == focusRight {
-		if m.handleActivityKeys(msg) {
-			return m, nil
+		if handled, cmd := m.handleActivityKeys(msg); handled {
+			return m, cmd
 		}
 		var cmd tea.Cmd
 		m.windows, cmd = m.windows.update(msg)
@@ -184,20 +184,13 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	// Empty composer + queued prompts: backspace pops last item for edit.
 	if m.focus == focusLeft && m.composer.Value() == "" && len(m.inputQueue) > 0 {
-		if msg.Type == tea.KeyBackspace || msg.Type == tea.KeyCtrlH {
+		if msg.Code == tea.KeyBackspace || msg.String() == "ctrl+h" {
 			if m.popInputQueueToComposer() {
 				return m, nil
 			}
 		}
 	}
-	// Bracketed paste: images → chip; large multi-line text → chip.
-	if msg.Paste {
-		m.handleComposerPaste(string(msg.Runes))
-		m.recomputeCompletion()
-		m.reflow()
-		return m, nil
-	}
-	if msg.Type == tea.KeyCtrlV {
+	if msg.String() == "ctrl+v" {
 		m.attachClipboardImage()
 		m.recomputeCompletion()
 		m.reflow()

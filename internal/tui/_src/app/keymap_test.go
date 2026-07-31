@@ -5,9 +5,9 @@ import (
 
 	"testing"
 
-	"github.com/charmbracelet/bubbles/key"
+	"charm.land/bubbles/v2/key"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestDefaultKeyMapBindingsMatchTheirRequiredKeysAndHaveHelp(t *testing.T) {
@@ -19,36 +19,36 @@ func TestDefaultKeyMapBindingsMatchTheirRequiredKeysAndHaveHelp(t *testing.T) {
 
 		binding key.Binding
 
-		msg tea.KeyMsg
+		msg tea.KeyPressMsg
 	}{
 
-		{"quit", keys.Quit, tea.KeyMsg{Type: tea.KeyCtrlC}},
+		{"quit", keys.Quit, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}},
 
-		{"focus left", keys.FocusLeft, tea.KeyMsg{Type: tea.KeyCtrlH}},
+		{"focus left", keys.FocusLeft, tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl}},
 
-		{"focus right", keys.FocusRight, tea.KeyMsg{Type: tea.KeyCtrlL}},
+		{"focus right", keys.FocusRight, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl}},
 
-		{"window next ctrl+o", keys.CycleWindowNext, tea.KeyMsg{Type: tea.KeyCtrlO}},
+		{"window next ctrl+o", keys.CycleWindowNext, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}},
 
-		{"window prev ctrl+p", keys.CycleWindowPrev, tea.KeyMsg{Type: tea.KeyCtrlP}},
+		{"window prev ctrl+p", keys.CycleWindowPrev, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl}},
 
-		{"palette", keys.Palette, tea.KeyMsg{Type: tea.KeyCtrlK}},
+		{"palette", keys.Palette, tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl}},
 
-		{"keyhelp", keys.KeyHelp, tea.KeyMsg{Type: tea.KeyF1}},
+		{"keyhelp", keys.KeyHelp, tea.KeyPressMsg{Code: tea.KeyF1}},
 
-		{"interrupt", keys.Interrupt, tea.KeyMsg{Type: tea.KeyEsc}},
+		{"interrupt", keys.Interrupt, tea.KeyPressMsg{Code: tea.KeyEsc}},
 
-		{"send", keys.Send, tea.KeyMsg{Type: tea.KeyEnter}},
+		{"send", keys.Send, tea.KeyPressMsg{Code: tea.KeyEnter}},
 
-		{"newline alt+enter", keys.Newline, tea.KeyMsg{Type: tea.KeyEnter, Alt: true}},
+		{"newline alt+enter", keys.Newline, tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt}},
 
-		{"newline bare LF ctrl+j", keys.Newline, tea.KeyMsg{Type: tea.KeyCtrlJ}},
+		{"newline bare LF ctrl+j", keys.Newline, tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl}},
 
 		{"newline enhanced ctrl+j", keys.Newline, keyMsgAltJ()},
 
-		{"tool expand alt+enter", keys.ToolExpand, tea.KeyMsg{Type: tea.KeyEnter, Alt: true}},
+		{"tool expand alt+enter", keys.ToolExpand, tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt}},
 
-		{"external editor", keys.ExternalEditor, tea.KeyMsg{Type: tea.KeyCtrlE}},
+		{"external editor", keys.ExternalEditor, tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl}},
 	}
 
 	for _, tt := range tests {
@@ -93,7 +93,7 @@ func TestDefaultKeyMapBindingsMatchTheirRequiredKeysAndHaveHelp(t *testing.T) {
 
 	// ctrl+j / bare LF / enhanced alt+j are newline, never pane cycle (#414).
 
-	if key.Matches(tea.KeyMsg{Type: tea.KeyCtrlJ}, keys.CycleWindowNext, keys.CycleWindowPrev) {
+	if key.Matches(tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl}, keys.CycleWindowNext, keys.CycleWindowPrev) {
 
 		t.Error("bare KeyCtrlJ must not match CycleWindow* (#414)")
 
@@ -105,7 +105,7 @@ func TestDefaultKeyMapBindingsMatchTheirRequiredKeysAndHaveHelp(t *testing.T) {
 
 	}
 
-	if key.Matches(tea.KeyMsg{Type: tea.KeyCtrlP}, keys.Palette) {
+	if key.Matches(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl}, keys.Palette) {
 
 		t.Error("ctrl+p must not match Palette (window-prev) (#414)")
 
@@ -127,7 +127,7 @@ func TestDefaultKeyMapBindingsMatchTheirRequiredKeysAndHaveHelp(t *testing.T) {
 
 	// alt+enter is first-class newline (same KeyMsg as post-CSI shift+enter) (#414).
 
-	if !key.Matches(tea.KeyMsg{Type: tea.KeyEnter, Alt: true}, keys.Newline) {
+	if !key.Matches(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt}, keys.Newline) {
 
 		t.Error("KeyEnter+Alt (alt+enter / shift+enter) must match Newline")
 
@@ -141,7 +141,7 @@ func TestDefaultKeyMapBindingsMatchTheirRequiredKeysAndHaveHelp(t *testing.T) {
 
 	}
 
-	if key.Matches(tea.KeyMsg{Type: tea.KeyEnter}, keys.ToolExpand) {
+	if key.Matches(tea.KeyPressMsg{Code: tea.KeyEnter}, keys.ToolExpand) {
 
 		t.Error("bare enter must not match ToolExpand (#421)")
 
@@ -151,9 +151,9 @@ func TestDefaultKeyMapBindingsMatchTheirRequiredKeysAndHaveHelp(t *testing.T) {
 
 // keyMsgAltJ is the post-WrapInput KeyMsg for enhanced ctrl+j (#240).
 
-func keyMsgAltJ() tea.KeyMsg {
+func keyMsgAltJ() tea.KeyPressMsg {
 
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}, Alt: true}
+	return tea.KeyPressMsg{Code: 'j', Mod: tea.ModAlt}
 
 }
 
@@ -167,7 +167,7 @@ func keyMsgAltJ() tea.KeyMsg {
 
 func TestAltEnterAndShiftEnterNewline(t *testing.T) {
 
-	msg := tea.KeyMsg{Type: tea.KeyEnter, Alt: true}
+	msg := tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt}
 
 	for _, tt := range []struct {
 		name string
@@ -626,13 +626,13 @@ func TestKeybindOverridesChangeJumpBottomAndCheatsheet(t *testing.T) {
 
 	m, _ := newAppTestModelWithOptions(Options{Keybinds: overrides})
 
-	if !key.Matches(tea.KeyMsg{Type: tea.KeyCtrlB}, m.keyMap.JumpBottom) {
+	if !key.Matches(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl}, m.keyMap.JumpBottom) {
 
 		t.Fatal("ctrl+b should match JumpBottom after override")
 
 	}
 
-	if key.Matches(tea.KeyMsg{Type: tea.KeyCtrlT}, m.keyMap.JumpBottom) {
+	if key.Matches(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl}, m.keyMap.JumpBottom) {
 
 		t.Fatal("ctrl+t should no longer match JumpBottom")
 
@@ -674,7 +674,7 @@ func TestKeybindOverridesChangeJumpBottomAndCheatsheet(t *testing.T) {
 
 	// /keys modal shows effective chords.
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyF1})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyF1})
 
 	modal, ok := m.modal.(*keybindEditor)
 
@@ -703,7 +703,7 @@ func TestKeysResetRestoresDefaults(t *testing.T) {
 		Keybinds: map[string][]string{"nav.jump-bottom": {"ctrl+b"}},
 	})
 
-	if !key.Matches(tea.KeyMsg{Type: tea.KeyCtrlB}, m.keyMap.JumpBottom) {
+	if !key.Matches(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl}, m.keyMap.JumpBottom) {
 
 		t.Fatal("precondition: override active")
 
@@ -711,17 +711,17 @@ func TestKeysResetRestoresDefaults(t *testing.T) {
 
 	m.composer.SetValue("/keys reset")
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	m = updated.(Model)
 
-	if !key.Matches(tea.KeyMsg{Type: tea.KeyCtrlT}, m.keyMap.JumpBottom) {
+	if !key.Matches(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl}, m.keyMap.JumpBottom) {
 
 		t.Fatal("after reset, ctrl+t should match JumpBottom")
 
 	}
 
-	if key.Matches(tea.KeyMsg{Type: tea.KeyCtrlB}, m.keyMap.JumpBottom) {
+	if key.Matches(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl}, m.keyMap.JumpBottom) {
 
 		t.Fatal("after reset, ctrl+b should not match JumpBottom")
 
@@ -746,13 +746,13 @@ func TestBuildKeyMapOrientationPreservesOverrides(t *testing.T) {
 
 	horiz := buildKeyMap(overrides, orientHorizontal)
 
-	if !key.Matches(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}, Alt: true}, horiz.FocusLeft) {
+	if !key.Matches(tea.KeyPressMsg{Code: 'h', Mod: tea.ModAlt}, horiz.FocusLeft) {
 
 		t.Fatal("horizontal focus-left override")
 
 	}
 
-	if !key.Matches(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}, Alt: true}, horiz.CycleWindowNext) {
+	if !key.Matches(tea.KeyPressMsg{Code: 'o', Mod: tea.ModAlt}, horiz.CycleWindowNext) {
 
 		t.Fatal("horizontal window-next override")
 
@@ -762,19 +762,19 @@ func TestBuildKeyMapOrientationPreservesOverrides(t *testing.T) {
 
 	// Orientation-independent: overrides stay on the same actions (#414).
 
-	if !key.Matches(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}, Alt: true}, vert.FocusLeft) {
+	if !key.Matches(tea.KeyPressMsg{Code: 'h', Mod: tea.ModAlt}, vert.FocusLeft) {
 
 		t.Fatal("vertical focus-left should keep override")
 
 	}
 
-	if !key.Matches(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}, Alt: true}, vert.CycleWindowNext) {
+	if !key.Matches(tea.KeyPressMsg{Code: 'o', Mod: tea.ModAlt}, vert.CycleWindowNext) {
 
 		t.Fatal("vertical window-next should keep override")
 
 	}
 
-	if key.Matches(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}, Alt: true}, vert.FocusLeft) {
+	if key.Matches(tea.KeyPressMsg{Code: 'o', Mod: tea.ModAlt}, vert.FocusLeft) {
 
 		t.Fatal("vertical must not swap window-next onto focus-left")
 
@@ -811,7 +811,7 @@ func TestWindowRegistryCycleByWrapsBothDirections(t *testing.T) {
 
 func TestRootSwitcherDefaultBinding(t *testing.T) {
 	km := defaultKeyMap()
-	if !key.Matches(tea.KeyMsg{Type: tea.KeyCtrlS}, km.RootSwitcher) {
+	if !key.Matches(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl}, km.RootSwitcher) {
 		t.Fatal("ctrl+s should match RootSwitcher by default")
 	}
 	help := km.RootSwitcher.Help()
@@ -826,10 +826,10 @@ func TestRootSwitcherDefaultBinding(t *testing.T) {
 func TestRootSwitcherOverride(t *testing.T) {
 	overrides := map[string][]string{"nav.root-switcher": {"ctrl+\\"}}
 	m, _ := newAppTestModelWithOptions(Options{Keybinds: overrides})
-	if !key.Matches(tea.KeyMsg{Type: tea.KeyCtrlBackslash}, m.keyMap.RootSwitcher) {
+	if !key.Matches(tea.KeyPressMsg{Code: '\\', Mod: tea.ModCtrl}, m.keyMap.RootSwitcher) {
 		t.Fatal("ctrl+\\ should match RootSwitcher after override")
 	}
-	if key.Matches(tea.KeyMsg{Type: tea.KeyCtrlS}, m.keyMap.RootSwitcher) {
+	if key.Matches(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl}, m.keyMap.RootSwitcher) {
 		t.Fatal("ctrl+s should not match RootSwitcher after override")
 	}
 	help := m.keyMap.RootSwitcher.Help()

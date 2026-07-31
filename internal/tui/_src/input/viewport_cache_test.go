@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -68,7 +68,7 @@ func TestRefreshViewportWidthChangeInvalidatesCache(t *testing.T) {
 		t.Fatalf("same width: renders=%d hits=%d want 0/%d", m.vpCache.cellRenders, m.vpCache.cellHits, n)
 	}
 
-	m.viewport.Width = 40
+	m.viewport.SetWidth(40)
 	m.refreshViewport()
 	if m.vpCache.cellRenders != n || m.vpCache.cellHits != 0 {
 		t.Fatalf("width change: renders=%d hits=%d want %d/0", m.vpCache.cellRenders, m.vpCache.cellHits, n)
@@ -111,6 +111,31 @@ func TestRefreshViewportAppearanceChangeInvalidatesCache(t *testing.T) {
 	m.refreshViewport()
 	if m.vpCache.cellRenders != n || m.vpCache.cellHits != 0 {
 		t.Fatalf("appearance change: renders=%d hits=%d want %d/0", m.vpCache.cellRenders, m.vpCache.cellHits, n)
+	}
+}
+
+func TestRefreshViewportEffectiveDarkChangeInvalidatesCache(t *testing.T) {
+	// auto + BackgroundColorMsg flips effectiveDark without changing appearance mode.
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.applyEvent(protocol.UserMessage{Text: "bg user"})
+	m.applyEvent(protocol.TextDelta{Text: "bg asst"})
+	m.applyEvent(protocol.TurnCompleted{StopReason: "end_turn"})
+	m.appearance = appearanceAuto
+	m.detectedDark = true
+	m.refreshViewport()
+	n := len(m.vpCache.items)
+	if n == 0 {
+		t.Fatal("empty cache after seed")
+	}
+	m.refreshViewport()
+	if m.vpCache.cellRenders != 0 || m.vpCache.cellHits != n {
+		t.Fatalf("same effective dark: renders=%d hits=%d want 0/%d", m.vpCache.cellRenders, m.vpCache.cellHits, n)
+	}
+	m.detectedDark = false
+	m.refreshViewport()
+	if m.vpCache.cellRenders != n || m.vpCache.cellHits != 0 {
+		t.Fatalf("effective dark change: renders=%d hits=%d want %d/0", m.vpCache.cellRenders, m.vpCache.cellHits, n)
 	}
 }
 
@@ -219,11 +244,11 @@ func TestRefreshViewportPreservesScrollOnPartialRebuild(t *testing.T) {
 	}
 	m.refreshViewport()
 	m.viewport.GotoBottom()
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyPgUp})
 	if m.viewport.AtBottom() {
 		t.Fatal("setup: still at bottom")
 	}
-	off := m.viewport.YOffset
+	off := m.viewport.YOffset()
 	// Stream while scrolled up — offset must not jump to bottom.
 	m.applyEvent(protocol.TurnStarted{})
 	m.applyEvent(protocol.TextDelta{Text: "tail-only-change"})
@@ -231,7 +256,7 @@ func TestRefreshViewportPreservesScrollOnPartialRebuild(t *testing.T) {
 	if m.viewport.AtBottom() {
 		t.Fatal("partial rebuild yanked to bottom")
 	}
-	if got := m.viewport.YOffset; got < off-2 || got > off+2 {
+	if got := m.viewport.YOffset(); got < off-2 || got > off+2 {
 		t.Fatalf("YOffset=%d want near %d", got, off)
 	}
 }

@@ -173,6 +173,11 @@ type Options struct {
 	Depth int
 	// ParentSessionID is the spawning session's ID; empty on root engines.
 	ParentSessionID string
+	// Team is the implicit session-scoped agent team (lead + children).
+	// Root engines create one in New when nil. Child engines receive the
+	// lead's shared pointer from spawnChild so nested descendants enroll on
+	// the same roster. See team.go for nested membership policy.
+	Team *Team
 	// PersistSessionMeta, when set, writes durable session metadata (sidecar).
 	// The engine emits protocol.SessionMeta after a successful persist.
 	PersistSessionMeta func(meta protocol.SessionMeta) error
@@ -232,11 +237,16 @@ type beginReq struct {
 }
 
 type Engine struct {
-	opts      Options
-	ops       chan protocol.Op
-	events    chan protocol.Event
-	perms     *permission.Service
-	questions *question.Service
+	opts   Options
+	ops    chan protocol.Op
+	events chan protocol.Event
+	// emitMu serializes emit against Events close so child drain can still
+	// publish terminal snapshots (ChildCompleted, team.roster) without racing
+	// Run's deferred close.
+	emitMu       sync.Mutex
+	eventsClosed bool
+	perms        *permission.Service
+	questions    *question.Service
 
 	// beginReqs is served only by Run so Interrupt stays responsive while a
 	// worker needs ToolCallBegin emitted into a full Events buffer.
@@ -277,6 +287,9 @@ type Engine struct {
 	// finish so task_status/task_read can return completed state without a
 	// new spawn. Only sessions this engine started are present.
 	childHistory map[string]*childRecord
+	// team is the implicit lead+children roster. Shared with descendant
+	// engines; only the lead dissolves it on Run exit.
+	team *Team
 
 	// childDone delivers ChildCompleted from drain goroutines to Run so the
 	// parent can inject a model-visible summary and auto-nudge when idle.
@@ -295,6 +308,15 @@ type Engine struct {
 	// Drained FIFO one-at-a-time after each turn ends. Survives Interrupt so
 	// follow-up prompts typed mid-turn are not lost.
 	pendingUserInputs []pendingUserInput
+
+	// mailbox holds unread peer/team messages for this session. Delivery is
+	// at tool-round / turn boundaries (injectPendingMailbox /
+	// flushPendingMailbox), never mid-tool-call.
+	mailbox *Mailbox
+	// mailboxMu guards mailboxWake. Wake is signaled when a peer message is
+	// enqueued so idle Run can auto-nudge.
+	mailboxMu   sync.Mutex
+	mailboxWake chan struct{}
 
 	// pendingAgent is set by tools via SwitchAgent and applied after each tool
 	// batch (so the next Stream sees the new agent/prompt) and again in
@@ -354,6 +376,19 @@ func New(opts Options) *Engine {
 	if len(opts.Workflows) == 0 {
 		opts.Workflows = []config.Workflow{config.BuiltinPlanImplement()}
 	}
+	// Implicit team: root owns a new Team; nested engines inherit Options.Team.
+	team := opts.Team
+	if team == nil && opts.Depth == 0 {
+		persona := ""
+		if opts.InitialAgent != "" {
+			persona = opts.InitialAgent
+		} else if len(opts.Agents) > 0 {
+			persona = opts.Agents[0].Name
+		}
+		team = NewTeam(opts.SessionID, persona)
+	}
+	opts.Team = team
+
 	e := &Engine{
 		opts:                opts,
 		ops:                 make(chan protocol.Op, 16),
@@ -363,6 +398,7 @@ func New(opts Options) *Engine {
 		checkpoints:         tool.NewCheckpointStore(),
 		children:            make(map[string]*childHandle),
 		childHistory:        make(map[string]*childRecord),
+		team:                team,
 		childDone:           make(chan protocol.ChildCompleted, 32),
 		childWake:           make(chan struct{}),
 		contextWindowTokens: opts.ContextWindow,
@@ -381,6 +417,15 @@ func New(opts Options) *Engine {
 	return e
 }
 
+// Team returns the implicit session-scoped agent team (may be nil on
+// non-lead engines that were constructed without Options.Team).
+func (e *Engine) Team() *Team {
+	if e == nil {
+		return nil
+	}
+	return e.team
+}
+
 // Messages returns a copy of the model-facing conversation history.
 func (e *Engine) Messages() []provider.Message {
 	if len(e.messages) == 0 {
@@ -394,7 +439,24 @@ func (e *Engine) Messages() []provider.Message {
 func (e *Engine) Ops() chan<- protocol.Op       { return e.ops }
 func (e *Engine) Events() <-chan protocol.Event { return e.events }
 
-func (e *Engine) emit(ev protocol.Event) { e.events <- ev }
+func (e *Engine) emit(ev protocol.Event) {
+	e.emitMu.Lock()
+	defer e.emitMu.Unlock()
+	if e.eventsClosed {
+		return
+	}
+	e.events <- ev
+}
+
+func (e *Engine) closeEvents() {
+	e.emitMu.Lock()
+	defer e.emitMu.Unlock()
+	if e.eventsClosed {
+		return
+	}
+	e.eventsClosed = true
+	close(e.events)
+}
 
 // emitSelected emits selection/phase confirms unless quietStartup is set
 // (resume re-applies state without re-appending the JSONL).
@@ -427,8 +489,15 @@ func (e *Engine) sessionCorr() protocol.Correlation {
 func (e *Engine) Run(ctx context.Context) {
 	e.runCtx = ctx
 	// Keep Events open until children finish so ChildCompleted can emit.
-	defer close(e.events)
+	// Dissolve the team after children shut down so terminal members stay
+	// listable for the lead's lifetime, then clear on lead exit.
+	defer e.closeEvents()
+	defer e.dissolveTeamIfLead()
+	defer e.detachMailbox()
 	defer e.shutdownChildren()
+	if e.team != nil {
+		e.team.AttachMailbox(e)
+	}
 	e.quietStartup = e.opts.QuietStartup
 	if e.opts.InitialProvider != "" && e.opts.Select != nil {
 		name := config.CanonicalProviderID(e.opts.InitialProvider)
@@ -490,6 +559,7 @@ func (e *Engine) Run(ctx context.Context) {
 		if e.turnDone != nil {
 			turnDone = e.turnDone
 		}
+		mailboxWake := e.mailboxWakeCh()
 		select {
 		case <-ctx.Done():
 			e.cancelAndJoinTurn()
@@ -511,6 +581,11 @@ func (e *Engine) Run(ctx context.Context) {
 			if e.taskOneShotIdle(oneshotTurnSeen) {
 				return
 			}
+		case <-mailboxWake:
+			e.drainIdleFollowups(ctx)
+			if e.taskOneShotIdle(oneshotTurnSeen) {
+				return
+			}
 		case <-turnDone:
 			oneshotTurnSeen = true
 			e.reapTurn()
@@ -522,6 +597,13 @@ func (e *Engine) Run(ctx context.Context) {
 	}
 }
 
+func (e *Engine) detachMailbox() {
+	if e == nil || e.team == nil {
+		return
+	}
+	e.team.DetachMailbox(e.opts.SessionID)
+}
+
 // taskOneShotIdle reports whether a task-spawned engine should exit Run:
 // at least one turn finished, no nested children, no active turn, and no
 // queued follow-ups (child notices or pending user inputs).
@@ -529,7 +611,7 @@ func (e *Engine) taskOneShotIdle(turnSeen bool) bool {
 	if !e.opts.TaskOneShot || !turnSeen {
 		return false
 	}
-	if e.turnActive() || e.hasPendingChildNotices() || len(e.pendingUserInputs) > 0 {
+	if e.turnActive() || e.hasPendingChildNotices() || e.hasPendingMailbox() || len(e.pendingUserInputs) > 0 {
 		return false
 	}
 	e.childMu.Lock()

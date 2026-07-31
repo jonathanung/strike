@@ -17,36 +17,38 @@ import (
 	"testing"
 )
 
-const lipglossPath = "github.com/charmbracelet/lipgloss"
+// lipglossPath is the module path style-boundary resolves against.
+// E13.2: charm.land/lipgloss/v2 (compat colors live under lipglossCompatPath).
+const lipglossPath = "charm.land/lipgloss/v2"
+const lipglossCompatPath = "charm.land/lipgloss/v2/compat"
 
-// Every exported Style method in Lip Gloss v1.1 is deliberately classified.
+// Every exported Style method in Lip Gloss v2 is deliberately classified.
 // Visual methods are prohibited outside theme; structural methods only control
 // layout or inspect/render an existing style. The remaining methods compose a
-// preexisting style, select its renderer, or manage its stored content.
+// preexisting style or manage its stored content.
 var forbiddenVisualStyleMethods = stringSet(
 	"Align", "AlignHorizontal", "AlignVertical", "Background", "Blink", "Bold",
-	"Border", "BorderBackground", "BorderBottom", "BorderBottomBackground", "BorderBottomForeground", "BorderForeground", "BorderLeft", "BorderLeftBackground", "BorderLeftForeground", "BorderRight", "BorderRightBackground", "BorderRightForeground", "BorderStyle", "BorderTop", "BorderTopBackground", "BorderTopForeground",
-	"ColorWhitespace", "Faint", "Foreground", "Inline", "Italic",
-	"Margin", "MarginBackground", "MarginBottom", "MarginLeft", "MarginRight", "MarginTop",
-	"Padding", "PaddingBottom", "PaddingLeft", "PaddingRight", "PaddingTop",
-	"Reverse", "Strikethrough", "StrikethroughSpaces", "TabWidth", "Transform", "Underline", "UnderlineSpaces",
+	"Border", "BorderBackground", "BorderBottom", "BorderBottomBackground", "BorderBottomForeground", "BorderForeground", "BorderForegroundBlend", "BorderForegroundBlendOffset", "BorderLeft", "BorderLeftBackground", "BorderLeftForeground", "BorderRight", "BorderRightBackground", "BorderRightForeground", "BorderStyle", "BorderTop", "BorderTopBackground", "BorderTopForeground",
+	"ColorWhitespace", "Faint", "Foreground", "Hyperlink", "Inline", "Italic",
+	"Margin", "MarginBackground", "MarginBottom", "MarginChar", "MarginLeft", "MarginRight", "MarginTop",
+	"Padding", "PaddingBottom", "PaddingChar", "PaddingLeft", "PaddingRight", "PaddingTop",
+	"Reverse", "Strikethrough", "StrikethroughSpaces", "TabWidth", "Transform", "Underline", "UnderlineColor", "UnderlineSpaces", "UnderlineStyle",
 	"UnsetAlign", "UnsetAlignHorizontal", "UnsetAlignVertical", "UnsetBackground", "UnsetBlink", "UnsetBold",
-	"UnsetBorderBackground", "UnsetBorderBottom", "UnsetBorderBottomBackground", "UnsetBorderBottomForeground", "UnsetBorderForeground", "UnsetBorderLeft", "UnsetBorderLeftBackground", "UnsetBorderLeftForeground", "UnsetBorderRight", "UnsetBorderRightBackground", "UnsetBorderRightForeground", "UnsetBorderStyle", "UnsetBorderTop", "UnsetBorderTopBackground", "UnsetBorderTopBackgroundColor", "UnsetBorderTopForeground",
-	"UnsetColorWhitespace", "UnsetFaint", "UnsetForeground", "UnsetInline", "UnsetItalic",
+	"UnsetBorderBackground", "UnsetBorderBottom", "UnsetBorderBottomBackground", "UnsetBorderBottomForeground", "UnsetBorderForeground", "UnsetBorderForegroundBlend", "UnsetBorderForegroundBlendOffset", "UnsetBorderLeft", "UnsetBorderLeftBackground", "UnsetBorderLeftForeground", "UnsetBorderRight", "UnsetBorderRightBackground", "UnsetBorderRightForeground", "UnsetBorderStyle", "UnsetBorderTop", "UnsetBorderTopBackground", "UnsetBorderTopBackgroundColor", "UnsetBorderTopForeground",
+	"UnsetColorWhitespace", "UnsetFaint", "UnsetForeground", "UnsetHyperlink", "UnsetInline", "UnsetItalic",
 	"UnsetMarginBackground", "UnsetMarginBottom", "UnsetMarginLeft", "UnsetMarginRight", "UnsetMarginTop", "UnsetMargins",
-	"UnsetPadding", "UnsetPaddingBottom", "UnsetPaddingLeft", "UnsetPaddingRight", "UnsetPaddingTop",
+	"UnsetPadding", "UnsetPaddingBottom", "UnsetPaddingChar", "UnsetPaddingLeft", "UnsetPaddingRight", "UnsetPaddingTop",
 	"UnsetReverse", "UnsetStrikethrough", "UnsetStrikethroughSpaces", "UnsetTabWidth", "UnsetTransform", "UnsetUnderline", "UnsetUnderlineSpaces",
 )
 
 var structuralStyleMethods = stringSet(
-	"GetAlign", "GetAlignHorizontal", "GetAlignVertical", "GetBackground", "GetBlink", "GetBold", "GetBorder", "GetBorderBottom", "GetBorderBottomBackground", "GetBorderBottomForeground", "GetBorderBottomSize", "GetBorderLeft", "GetBorderLeftBackground", "GetBorderLeftForeground", "GetBorderLeftSize", "GetBorderRight", "GetBorderRightBackground", "GetBorderRightForeground", "GetBorderRightSize", "GetBorderStyle", "GetBorderTop", "GetBorderTopBackground", "GetBorderTopForeground", "GetBorderTopSize", "GetBorderTopWidth", "GetColorWhitespace", "GetFaint", "GetForeground", "GetFrameSize", "GetHeight", "GetHorizontalBorderSize", "GetHorizontalFrameSize", "GetHorizontalMargins", "GetHorizontalPadding", "GetInline", "GetItalic", "GetMargin", "GetMarginBottom", "GetMarginLeft", "GetMarginRight", "GetMarginTop", "GetMaxHeight", "GetMaxWidth", "GetPadding", "GetPaddingBottom", "GetPaddingLeft", "GetPaddingRight", "GetPaddingTop", "GetReverse", "GetStrikethrough", "GetStrikethroughSpaces", "GetTabWidth", "GetTransform", "GetUnderline", "GetUnderlineSpaces", "GetVerticalBorderSize", "GetVerticalFrameSize", "GetVerticalMargins", "GetVerticalPadding", "GetWidth",
+	"GetAlign", "GetAlignHorizontal", "GetAlignVertical", "GetBackground", "GetBlink", "GetBold", "GetBorder", "GetBorderBottom", "GetBorderBottomBackground", "GetBorderBottomForeground", "GetBorderBottomSize", "GetBorderForegroundBlend", "GetBorderForegroundBlendOffset", "GetBorderLeft", "GetBorderLeftBackground", "GetBorderLeftForeground", "GetBorderLeftSize", "GetBorderRight", "GetBorderRightBackground", "GetBorderRightForeground", "GetBorderRightSize", "GetBorderStyle", "GetBorderTop", "GetBorderTopBackground", "GetBorderTopForeground", "GetBorderTopSize", "GetBorderTopWidth", "GetColorWhitespace", "GetFaint", "GetForeground", "GetFrameSize", "GetHeight", "GetHorizontalBorderSize", "GetHorizontalFrameSize", "GetHorizontalMargins", "GetHorizontalPadding", "GetHyperlink", "GetInline", "GetItalic", "GetMargin", "GetMarginBottom", "GetMarginChar", "GetMarginLeft", "GetMarginRight", "GetMarginTop", "GetMaxHeight", "GetMaxWidth", "GetPadding", "GetPaddingBottom", "GetPaddingChar", "GetPaddingLeft", "GetPaddingRight", "GetPaddingTop", "GetReverse", "GetStrikethrough", "GetStrikethroughSpaces", "GetTabWidth", "GetTransform", "GetUnderline", "GetUnderlineColor", "GetUnderlineSpaces", "GetUnderlineStyle", "GetVerticalBorderSize", "GetVerticalFrameSize", "GetVerticalMargins", "GetVerticalPadding", "GetWidth",
 	"Height", "MaxHeight", "MaxWidth", "Render", "String", "UnsetHeight", "UnsetMaxHeight", "UnsetMaxWidth", "UnsetWidth", "Value", "Width",
 )
 
 var permittedStyleMethods = stringSet(
 	"Copy",        // Copies an existing style without choosing visual values.
 	"Inherit",     // Composes an already-defined style, typically from theme.
-	"Renderer",    // Selects the terminal output context, not a visual value.
 	"SetString",   // Stores render content rather than visual presentation.
 	"UnsetString", // Clears stored render content rather than visual presentation.
 )
@@ -122,13 +124,16 @@ func TestStyleBoundaryFixtures(t *testing.T) {
 		"bad_inline_transform":      {"root", []string{"SB001", "SB001", "SB007", "SB007"}},
 		"bad_method_value_argument": {"root", []string{"SB007"}},
 		"bad_tab_width":             {"ui", []string{"SB002", "SB007"}},
-		"bad_missing_modifiers":     {"ui", []string{"SB002", "SB002", "SB002", "SB002", "SB002", "SB002", "SB002", "SB002", "SB002", "SB002", "SB002", "SB002", "SB002", "SB002", "SB002", "SB003", "SB003", "SB003", "SB003", "SB003", "SB003", "SB003", "SB003", "SB003", "SB003", "SB003", "SB004"}},
-		"bad_color_composites":      {"ui", []string{"SB003", "SB003", "SB003", "SB003", "SB003", "SB004"}},
-		"bad_embedded_dot":          {"ui", []string{"SB006"}},
-		"bad_glyph_constant":        {"ui", []string{"SB006", "SB006", "SB006", "SB006"}},
-		"bad_unresolved":            {"ui", []string{"SB002", "SB002"}},
-		"bad_visual_unsets":         {"ui", []string{"SB002", "SB002", "SB007", "SB007"}},
-		"good":                      {"ui", nil},
+		// v2: Color() args are SB003; Border*Foreground/Background with Color()
+		// still flag the Color constructor (11×) plus structural visual methods.
+		"bad_missing_modifiers": {"ui", []string{"SB002", "SB002", "SB002", "SB002", "SB003", "SB003", "SB003", "SB003", "SB003", "SB003", "SB003", "SB003", "SB003", "SB003", "SB003", "SB004"}},
+		// Adaptive/Complete live in compat; each composite + Color() arg is SB003.
+		"bad_color_composites": {"ui", []string{"SB003", "SB003", "SB003", "SB003", "SB003", "SB003", "SB003", "SB003", "SB004"}},
+		"bad_embedded_dot":     {"ui", []string{"SB006"}},
+		"bad_glyph_constant":   {"ui", []string{"SB006", "SB006", "SB006", "SB006"}},
+		"bad_unresolved":       {"ui", []string{"SB002", "SB002"}},
+		"bad_visual_unsets":    {"ui", []string{"SB002", "SB002", "SB007", "SB007"}},
+		"good":                 {"ui", nil},
 	}
 	for name, tc := range want {
 		t.Run(name, func(t *testing.T) {
@@ -357,8 +362,14 @@ func isLipglossColorComposite(lit *ast.CompositeLit, info *types.Info) bool {
 	if path == lipglossPath {
 		return true
 	}
-	for _, name := range []string{"ANSIColor", "AdaptiveColor", "CompleteColor", "CompleteAdaptiveColor", "NoColor"} {
+	for _, name := range []string{"ANSIColor", "NoColor"} {
 		if namedTypePath(info.TypeOf(lit), name) == lipglossPath {
+			return true
+		}
+	}
+	// Adaptive/Complete colors moved to lipgloss/v2/compat in E13.2.
+	for _, name := range []string{"AdaptiveColor", "CompleteColor", "CompleteAdaptiveColor"} {
+		if p := namedTypePath(info.TypeOf(lit), name); p == lipglossPath || p == lipglossCompatPath {
 			return true
 		}
 	}
@@ -403,22 +414,33 @@ func lipglossCall(call *ast.CallExpr, info *types.Info) (name string, visual, co
 	case *ast.Ident: // dot import
 		obj = info.Uses[f]
 	}
-	if typ, ok := obj.(*types.TypeName); ok && typ.Pkg() != nil && typ.Pkg().Path() == lipglossPath {
-		switch typ.Name() {
-		case "Color", "ANSIColor", "AdaptiveColor", "CompleteColor", "CompleteAdaptiveColor", "NoColor":
-			return typ.Name(), false, true
+	if typ, ok := obj.(*types.TypeName); ok && typ.Pkg() != nil {
+		switch typ.Pkg().Path() {
+		case lipglossPath:
+			switch typ.Name() {
+			case "Color", "ANSIColor", "NoColor":
+				return typ.Name(), false, true
+			}
+		case lipglossCompatPath:
+			switch typ.Name() {
+			case "AdaptiveColor", "CompleteColor", "CompleteAdaptiveColor":
+				return typ.Name(), false, true
+			}
 		}
 	}
 	fn, ok := obj.(*types.Func)
-	if !ok || fn.Pkg() == nil || fn.Pkg().Path() != lipglossPath {
+	if !ok || fn.Pkg() == nil {
 		return "", false, false
 	}
 	name = fn.Name()
+	if fn.Pkg().Path() != lipglossPath {
+		return "", false, false
+	}
 	if sig, ok := fn.Type().(*types.Signature); ok && sig.Recv() != nil && namedTypePath(sig.Recv().Type(), "Style") == lipglossPath && forbiddenVisualStyleMethods[name] {
 		return name, true, false
 	}
 	switch name {
-	case "Color", "ANSIColor", "AdaptiveColor", "CompleteColor", "CompleteAdaptiveColor", "NoColor":
+	case "Color", "ANSIColor", "NoColor":
 		return name, false, true
 	}
 	if borderConstructors[name] {

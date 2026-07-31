@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -317,11 +317,16 @@ type Model struct {
 	// splitOrientation is horizontal (left|right) by default; vertical stacks
 	// the left body above the right pane (top/bottom).
 	splitOrientation splitOrientation
-	// appearance is session-local auto|dark|light (lipgloss adaptive bg).
-	appearance appearanceMode
+	// appearance is session-local auto|dark|light. detectedDark is the terminal
+	// background from tea.BackgroundColorMsg (provisional until the first msg).
+	appearance   appearanceMode
+	detectedDark bool
 	// children tracks active/recent subagent sessions for the activity pane.
 	// Lifecycle never appends transcript cells.
 	children []childActivity
+	// teamMessages is a bounded ring of recent peer mailbox deliveries for the
+	// lead activity pane (agent.message). Oldest drop under broadcast storms.
+	teamMessages []teamMessage
 	// activityCursor / activityAnchorID navigate the newest-first activity feed.
 	// activityStickNewest keeps the cursor on the newest row as events arrive.
 	// activityDetail expands one entry's chronological body.
@@ -368,10 +373,13 @@ type childActivity struct {
 	parentID  string // spawning session; empty means direct root child
 	agent     string
 	prompt    string
+	name      string // optional stable teammate alias from task spawn
 	title     string // durable display title when known (user rename / create)
 	status    string // running | completed | failed | canceled
-	startedAt time.Time
-	endedAt   time.Time
+	// rosterState is a short display chip from team.roster (working, needs you, …).
+	rosterState string
+	startedAt   time.Time
+	endedAt     time.Time
 }
 
 // New builds the frontend model. services supplies every host capability; any
@@ -416,9 +424,11 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		focused:             true,
 		notifyMode:          NotifyUnfocusedOnly,
 		appearance:          appearanceAuto,
+		detectedDark:        true, // until BackgroundColorMsg; matches lipgloss default
 		autonomy:            protocol.AutonomySupervised,
 		permMode:            protocol.PermissionModeDefault,
 	}
+	m.applyAppearance()
 	var replay []protocol.Event
 	for _, option := range options {
 		m.dangerouslySkipPermissions = option.DangerouslySkipPermissions
@@ -498,10 +508,11 @@ func (m Model) Init() tea.Cmd {
 		// redraw the full frame at spinner FPS over SSH (#481).
 		m.spinTickCmd(),
 		m.windows.init(),
-		tea.SetWindowTitle(windowTitle(m)),
 		// Kitty/Ghostty keep separate keyboard stacks per screen; re-enable
-		// after WithAltScreen so shift+enter CSI is actually delivered (#187).
+		// after alt-screen enter so shift+enter CSI is actually delivered (#187).
 		enableEnhancedKeysCmd(),
+		// Terminal bg via Bubble Tea (not pre-program OSC 11); feeds appearance.
+		tea.RequestBackgroundColor,
 	}
 	if m.firstRun {
 		cmds = append(cmds, func() tea.Msg { return firstRunSetupMsg{} })
@@ -567,11 +578,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyPaintFlush()
 		return m, nil
 
+	case tea.BackgroundColorMsg:
+		m.detectedDark = msg.IsDark()
+		m.applyAppearance()
+		m.restyleWidgets()
+		m.reflow()
+		m.refreshViewport()
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.width, m.height = max(0, msg.Width), max(0, msg.Height)
 		firstReady := !m.ready
 		if !m.ready {
-			m.viewport = viewport.New(max(1, m.width), 0)
+			m.viewport = viewport.New(viewport.WithWidth(max(1, m.width)), viewport.WithHeight(0))
 			m.ready = true
 		}
 		m.reflow()
@@ -968,7 +987,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.refreshViewingTranscript()
 
-	case tea.KeyMsg:
+	case tea.PasteMsg:
+		// Bracketed paste: images → chip; large multi-line text → chip.
+		m.handleComposerPaste(msg.Content)
+		m.recomputeCompletion()
+		m.reflow()
+		return m, nil
+
+	case tea.KeyPressMsg:
 		return m.handleKeyMsg(msg)
 
 	case tea.MouseMsg:

@@ -1,9 +1,10 @@
 package ui
 
 import (
+	"image/color"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -123,7 +124,7 @@ func renderSolidPanel(th theme.Theme, opts PanelOpts, width, padX int, rows []st
 // The rule is Icons.FocusBar in BorderFocus foreground on the body fill — not a
 // solid background block — so the edge reads as a quiet marker. Layout width is
 // unchanged: the glyph reuses the left padding column.
-func paintFocusBarRow(th theme.Theme, content string, width int, bg, bar lipgloss.TerminalColor) string {
+func paintFocusBarRow(th theme.Theme, content string, width int, bg, bar color.Color) string {
 	if width < 2 {
 		return paintSurface(content, width, bg)
 	}
@@ -229,7 +230,7 @@ func panelMetrics(th theme.Theme, width int) (chrome bool, padX, inner int) {
 	return true, padX, width - 2*padX
 }
 
-func panelBorderColor(th theme.Theme, opts PanelOpts) lipgloss.AdaptiveColor {
+func panelBorderColor(th theme.Theme, opts PanelOpts) theme.AdaptiveColor {
 	th = th.Resolve()
 	switch {
 	case opts.Tone != ToneDefault:
@@ -246,7 +247,7 @@ func panelBorderColor(th theme.Theme, opts PanelOpts) lipgloss.AdaptiveColor {
 // panelBodySurface is the fill for panel body rows. Focused panes keep the
 // normal Surface so text stays readable and selectable; focus is title chrome
 // and the leading bar, not a full-panel wash.
-func panelBodySurface(th theme.Theme, opts PanelOpts) lipgloss.TerminalColor {
+func panelBodySurface(th theme.Theme, opts PanelOpts) color.Color {
 	th = th.Resolve()
 	switch {
 	case opts.Tone != ToneDefault:
@@ -261,7 +262,7 @@ func panelBodySurface(th theme.Theme, opts PanelOpts) lipgloss.TerminalColor {
 
 // panelEdgeSurface is the fill for the solid title edge. Focused panes use
 // SurfaceFocus here only — a non-copyable chrome affordance.
-func panelEdgeSurface(th theme.Theme, opts PanelOpts) lipgloss.TerminalColor {
+func panelEdgeSurface(th theme.Theme, opts PanelOpts) color.Color {
 	th = th.Resolve()
 	switch {
 	case opts.Tone != ToneDefault:
@@ -277,7 +278,7 @@ func panelEdgeSurface(th theme.Theme, opts PanelOpts) lipgloss.TerminalColor {
 
 // panelSurfaceColor is the body surface (tests and callers that need the
 // primary fill token). Focus no longer maps to SurfaceFocus.
-func panelSurfaceColor(th theme.Theme, opts PanelOpts) lipgloss.TerminalColor {
+func panelSurfaceColor(th theme.Theme, opts PanelOpts) color.Color {
 	return panelBodySurface(th, opts)
 }
 
@@ -315,7 +316,7 @@ func panelTitleStyle(th theme.Theme, opts PanelOpts) lipgloss.Style {
 // solidEdge builds one full-width surface bar with an optional label.
 // Labels that already carry SGR (e.g. ui.KeyHints) keep their styles; plain
 // labels are painted with labelStyle. Output is always exactly one row.
-func solidEdge(th theme.Theme, label string, width, padX int, bg lipgloss.TerminalColor, labelStyle lipgloss.Style) string {
+func solidEdge(th theme.Theme, label string, width, padX int, bg color.Color, labelStyle lipgloss.Style) string {
 	if label == "" {
 		return paintSurface(strings.Repeat(" ", width), width, bg)
 	}
@@ -341,7 +342,7 @@ func hasSGR(s string) bool {
 // paintSurface applies a solid background across exactly width cells. Nested
 // styles that clear the background (SGR 0 / 49) are patched so the surface
 // fill stays continuous across the row.
-func paintSurface(content string, width int, bg lipgloss.TerminalColor) string {
+func paintSurface(content string, width int, bg color.Color) string {
 	if width < 1 {
 		return ""
 	}
@@ -356,7 +357,7 @@ func paintSurface(content string, width int, bg lipgloss.TerminalColor) string {
 // optional label woven in as ─ label ─────. Plain labels use labelStyle; labels
 // that already carry SGR (e.g. ui.KeyHints) keep their styles. An over-long
 // label is truncated so the run stays exactly horiz wide and one row.
-func edgeBorder(th theme.Theme, label string, horiz int, color lipgloss.AdaptiveColor, labelStyle lipgloss.Style) string {
+func edgeBorder(th theme.Theme, label string, horiz int, color theme.AdaptiveColor, labelStyle lipgloss.Style) string {
 	bs := lipgloss.NewStyle().Foreground(color)
 	rule := func(n int) string {
 		if n <= 0 {

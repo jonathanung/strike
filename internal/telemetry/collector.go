@@ -132,12 +132,16 @@ func (h *Host) sampleCPU(s *Sample) {
 			// First reading only establishes the baseline.
 		case total > h.prevHostTotal:
 			deltaTotal := total - h.prevHostTotal
-			deltaIdle := idle - h.prevHostIdle
-			// Idle is a subset of total on both platforms, so this only trips on
-			// inconsistent counters. Clamp rather than let the unsigned
-			// subtraction below underflow, which would read as fully busy.
-			if deltaIdle > deltaTotal {
-				deltaIdle = deltaTotal
+			// Linux /proc/stat idle includes iowait, which man 5 proc notes may
+			// decrease. Treat idle regression as zero idle in the window (fully
+			// busy). When idle advances, clamp deltaIdle to deltaTotal so a
+			// genuine idle>total inconsistency reads as idle, not underflow-busy.
+			var deltaIdle uint64
+			if idle >= h.prevHostIdle {
+				deltaIdle = idle - h.prevHostIdle
+				if deltaIdle > deltaTotal {
+					deltaIdle = deltaTotal
+				}
 			}
 			busy := float64(deltaTotal-deltaIdle) / float64(deltaTotal) * 100
 			s.CPUHostPct = busy
@@ -147,11 +151,11 @@ func (h *Host) sampleCPU(s *Sample) {
 			h.heldHostSamples = 0
 		case h.prevHostPctOK && h.heldHostSamples < maxHeldHostCPUSamples:
 			// The counters have not advanced past the last sample. Either they
-			// have not been flushed yet, or this sample read them before another
-			// concurrent Collect that already reported — overlapping samples
-			// reach h.mu in an order independent of when they read. Neither is a
-			// dead counter, so hold the last percent rather than flickering the
-			// row to "unavailable".
+			// have not been flushed yet, total briefly regressed (Linux iowait
+			// can drop), or this sample read them before another concurrent
+			// Collect that already reported — overlapping samples reach h.mu in
+			// an order independent of when they read. Hold the last percent
+			// rather than flickering the row to "unavailable".
 			h.heldHostSamples++
 			s.CPUHostPct = h.prevHostPct
 			s.CPUHostOK = true
@@ -161,9 +165,10 @@ func (h *Host) sampleCPU(s *Sample) {
 			h.prevHostPctOK = false
 			h.heldHostSamples = 0
 		}
-		// Never move the baseline backwards. A sample that read older counters
-		// than one already folded in would otherwise make the next delta span an
-		// interval that has already been reported.
+		// Prefer forward baselines. A sample that read older counters than one
+		// already folded in would otherwise make the next delta span an interval
+		// that has already been reported. (Linux iowait can decrease, so total
+		// is not strictly monotonic; the hold path covers short regressions.)
 		if total >= h.prevHostTotal {
 			h.prevHostTotal = total
 			h.prevHostIdle = idle

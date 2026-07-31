@@ -50,7 +50,7 @@ service/theme token).
 | `internal/protocol` | Ops/Events seam; JSONL envelopes |
 | `internal/engine` | Turn loop, tool dispatch, interrupts |
 | `internal/provider` | LLM adapters (+ `base`, `echo`, anthropic, openai, xai, google, chatgpt) |
-| `internal/tool` | read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/task_message/task_interrupt/webfetch/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/toolsearch |
+| `internal/tool` | read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/task_message/task_interrupt/agent_roster/agent_message/agent_broadcast/team_task/webfetch/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/toolsearch |
 | `internal/mcp` | MCP client (stdio + streamable HTTP); bridges external tools onto the registry |
 | `internal/question` | user-question ask service (suspend tool until QuestionReply) |
 | `internal/permission` | last-match-wins allow/ask/deny + ask service |
@@ -81,10 +81,16 @@ service/theme token).
   tokens — no raw lipgloss styles or hardcoded glyphs in views; colors and
   icons come from the theme. Load the `tui-components` skill before TUI
   view/panel/modal/picker work (`.claude/skills/tui-components/`).
+- **TUI source trap:** package `internal/tui` sources live under
+  `internal/tui/_src/<group>/` and are flattened by `go generate ./internal/tui`
+  (make/CI run this first). Flattened `internal/tui/*.go` are gitignored —
+  edit `_src/` only; editing flattened files is silently reverted.
 - `internal/tui` may import only `internal/protocol`, `internal/host`, and
   `internal/tui/...` — enforced by `internal/tui/boundary_test.go`
   (`TestArchitectureBoundaries`), which fails the build on any other
-  `internal/*` import from a TUI file.
+  `internal/*` import from a TUI file. Charm paths: v1
+  `github.com/charmbracelet/…` or v2 `charm.land/…`; never
+  `github.com/charmbracelet/…/v2` (`TestCharmImportPaths`).
 
 ## Agent process skills (`.claude/skills`)
 

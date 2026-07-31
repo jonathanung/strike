@@ -5,10 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/bubbles/cursor"
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -90,22 +89,25 @@ func TestFocusedInputsRenderStaticThemedReverseCursorAfterMovingLeft(t *testing.
 	composer := newComposer(th)
 	composer.SetWidth(20)
 	composer.SetValue("abc")
-	composer, _ = composer.Update(tea.KeyMsg{Type: tea.KeyLeft})
-	assertStaticCursorOnMovedCharacter(t, "composer", composer.Cursor.Mode(), composer.View())
+	composer, _ = composer.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
+	if !composer.VirtualCursor() || composer.Styles().Cursor.Blink {
+		t.Fatalf("composer want virtual static cursor, virtual=%v blink=%v", composer.VirtualCursor(), composer.Styles().Cursor.Blink)
+	}
+	assertStaticCursorOnMovedCharacter(t, "composer", composer.View())
 
 	input := newTextInput(th, "")
 	input.Focus()
-	input.Width = 20
+	input.SetWidth(20)
 	input.SetValue("abc")
-	input, _ = input.Update(tea.KeyMsg{Type: tea.KeyLeft})
-	assertStaticCursorOnMovedCharacter(t, "text input", input.Cursor.Mode(), input.View())
+	input, _ = input.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
+	if !input.VirtualCursor() || input.Styles().Cursor.Blink {
+		t.Fatalf("text input want virtual static cursor, virtual=%v blink=%v", input.VirtualCursor(), input.Styles().Cursor.Blink)
+	}
+	assertStaticCursorOnMovedCharacter(t, "text input", input.View())
 }
 
-func assertStaticCursorOnMovedCharacter(t *testing.T, name string, mode cursor.Mode, out string) {
+func assertStaticCursorOnMovedCharacter(t *testing.T, name string, out string) {
 	t.Helper()
-	if mode != cursor.CursorStatic {
-		t.Errorf("%s cursor mode = %v, want CursorStatic", name, mode)
-	}
 	if plain := ansi.Strip(out); !strings.Contains(plain, "abc") {
 		t.Errorf("%s did not render typed text: %q", name, out)
 	}
@@ -174,6 +176,22 @@ func TestComposerPlaceholderMentionsAskAnythingAndSlash(t *testing.T) {
 	}
 }
 
+// TestComposerDisablesBubblesInsertNewline pins E13.4: Bubbles v2 DefaultKeyMap
+// binds enter to InsertNewline; strike owns Enter as send and inserts newlines
+// only via the Newline binding (shift/alt+enter, ctrl+j).
+func TestComposerDisablesBubblesInsertNewline(t *testing.T) {
+	ta := newComposer(theme.Default())
+	if ta.KeyMap.InsertNewline.Enabled() {
+		t.Fatal("composer InsertNewline must be disabled so Enter cannot fall through to textarea newline")
+	}
+	// Fall-through Update with KeyEnter must not mutate value.
+	ta.SetValue("keep")
+	ta, _ = ta.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if got := ta.Value(); got != "keep" {
+		t.Fatalf("textarea Update(enter) = %q, want unchanged (InsertNewline disabled)", got)
+	}
+}
+
 func TestComposerFooterAdvertisesEnterAndShiftEnter(t *testing.T) {
 	// Bordered composer at a non-compact size with empty transcript should
 	// surface send/newline help in the panel footer.
@@ -181,7 +199,7 @@ func TestComposerFooterAdvertisesEnterAndShiftEnter(t *testing.T) {
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 93, Height: 40})
 	sendKey := keyHint(m.keyMap.Send).Key
 	nlKey := keyHint(m.keyMap.Newline).Key
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(viewString(m))
 	if !strings.Contains(plain, sendKey) {
 		t.Errorf("bordered view missing send key %q:\n%s", sendKey, plain)
 	}

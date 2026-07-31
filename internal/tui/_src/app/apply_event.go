@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
@@ -18,7 +18,10 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		switch ev.(type) {
 		case protocol.PermissionAsked, protocol.PermissionResolved,
 			protocol.QuestionAsked, protocol.QuestionResolved,
-			protocol.ChildStarted, protocol.ChildCompleted:
+			protocol.ChildStarted, protocol.ChildCompleted,
+			// Parent re-emits child peer mail + nested roster with child
+			// correlation; keep them for team UI (issue #614).
+			protocol.AgentMessage, protocol.TeamRoster:
 		default:
 			return nil
 		}
@@ -40,13 +43,13 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		if m.titleTopic == "" {
 			if topic := sanitizeTitleTopic(ev.Text); topic != "" {
 				m.titleTopic = topic
-				cmd = tea.Batch(tea.SetWindowTitle(windowTitle(*m)), m.broadcastContextState())
+				cmd = m.broadcastContextState()
 			}
 		}
 	case protocol.SessionTitled:
 		if topic := sanitizeTitleTopic(ev.Title); topic != "" {
 			m.titleTopic = topic
-			cmd = tea.Batch(tea.SetWindowTitle(windowTitle(*m)), m.broadcastContextState())
+			cmd = m.broadcastContextState()
 		}
 	case protocol.TurnStarted:
 		m.turnStartedAt = time.Now()
@@ -77,31 +80,32 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		// Coalesce consecutive sleep ticks into one in-place row (no spam).
 		if ev.Name == "sleep" {
 			m.cells = beginSleepToolCell(m.cells, m.toolByID, ev.CallID, ev.Name, ev.Args)
-			break
-		}
-		tc := &toolCell{callID: ev.CallID, name: ev.Name, args: ev.Args}
-		m.toolByID[ev.CallID] = tc
-		if isExploreTool(ev.Name) {
-			if exp, ok := lastCell[*exploreCell](m.cells); ok && exp.accepting {
-				exp.calls = append(exp.calls, tc)
-				break
-			}
-			// First explore tool stays a normal cell; a second consecutive one
-			// promotes the pair into an exploring group.
-			if prev, ok := lastCell[*toolCell](m.cells); ok && isExploreTool(prev.name) {
-				m.cells[len(m.cells)-1] = &exploreCell{
-					calls:     []*toolCell{prev, tc},
-					accepting: true,
+		} else {
+			tc := &toolCell{callID: ev.CallID, name: ev.Name, args: ev.Args}
+			m.toolByID[ev.CallID] = tc
+			if isExploreTool(ev.Name) {
+				if exp, ok := lastCell[*exploreCell](m.cells); ok && exp.accepting {
+					exp.calls = append(exp.calls, tc)
+				} else if prev, ok := lastCell[*toolCell](m.cells); ok && isExploreTool(prev.name) {
+					// First explore tool stays a normal cell; a second consecutive
+					// one promotes the pair into an exploring group.
+					m.cells[len(m.cells)-1] = &exploreCell{
+						calls:     []*toolCell{prev, tc},
+						accepting: true,
+					}
+				} else {
+					m.cells = append(m.cells, tc)
 				}
-				break
+			} else {
+				if exp, ok := lastCell[*exploreCell](m.cells); ok {
+					exp.accepting = false
+				}
+				m.cells = append(m.cells, tc)
 			}
-			m.cells = append(m.cells, tc)
-			break
 		}
-		if exp, ok := lastCell[*exploreCell](m.cells); ok {
-			exp.accepting = false
-		}
-		m.cells = append(m.cells, tc)
+		// Push tool strip mid-turn (not only on TurnCompleted) so activity/
+		// visualizer show shell and other tools as they start (#625).
+		cmd = m.broadcastVisualizerState()
 	case protocol.ToolCallOutput:
 		if tc, ok := m.toolByID[ev.CallID]; ok && !tc.done {
 			tc.output += ev.Data
@@ -116,6 +120,7 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 				m.windows = refreshFilesWindows(m.windows)
 			}
 		}
+		cmd = m.broadcastVisualizerState()
 	case protocol.PermissionAsked:
 		pm := newPermissionModal(ev, m.ops, m.th)
 		showCmd := m.presentBlockingModal(pm)
@@ -270,6 +275,11 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 				cmd = tea.Batch(cmd, refresh)
 			}
 		}
+	case protocol.TeamRoster:
+		m.onTeamRoster(ev)
+		cmd = m.broadcastAgentsState()
+	case protocol.AgentMessage:
+		m.onAgentMessage(ev)
 	}
 	return cmd
 }
@@ -287,6 +297,7 @@ func (m *Model) onChildStarted(ev protocol.ChildStarted) {
 		if m.children[i].sessionID == id {
 			m.children[i].agent = ev.Agent
 			m.children[i].prompt = ev.Prompt
+			m.children[i].name = ev.Name
 			m.children[i].status = "running"
 			if parentID != "" {
 				m.children[i].parentID = parentID
@@ -306,6 +317,7 @@ func (m *Model) onChildStarted(ev protocol.ChildStarted) {
 		parentID:  parentID,
 		agent:     ev.Agent,
 		prompt:    ev.Prompt,
+		name:      ev.Name,
 		title:     m.lookupSessionTitle(id),
 		status:    "running",
 		startedAt: now,
@@ -325,6 +337,9 @@ func (m *Model) onChildCompleted(ev protocol.ChildCompleted) {
 	for i := range m.children {
 		if m.children[i].sessionID == id || (id == "" && i == len(m.children)-1) {
 			m.children[i].status = status
+			if ev.Name != "" {
+				m.children[i].name = ev.Name
+			}
 			if ev.ParentSessionID != "" && m.children[i].parentID == "" {
 				m.children[i].parentID = ev.ParentSessionID
 			}
@@ -341,6 +356,7 @@ func (m *Model) onChildCompleted(ev protocol.ChildCompleted) {
 		m.children = append(m.children, childActivity{
 			sessionID: id,
 			parentID:  ev.ParentSessionID,
+			name:      ev.Name,
 			status:    status,
 			startedAt: now,
 			endedAt:   now,
@@ -433,6 +449,10 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	case protocol.ChildStarted:
 		return e.Correlation, true
 	case protocol.ChildCompleted:
+		return e.Correlation, true
+	case protocol.AgentMessage:
+		return e.Correlation, true
+	case protocol.TeamRoster:
 		return e.Correlation, true
 	default:
 		return protocol.Correlation{}, false

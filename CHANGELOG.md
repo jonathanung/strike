@@ -14,6 +14,34 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+### Added
+
+- Added **agent teams**: an implicit session-scoped team (lead + `task` children in the same session tree) with `agent_roster`, `agent_message`, and `agent_broadcast` for mid-turn peer coordination, boundary-safe mailbox delivery, and default-allow permissions (out-of-team fails closed). Optional stable `name` aliases on `task` spawn. Parent-only `task_*` workflows remain unchanged when team tools are unused ([#404](https://github.com/jonathanung/strike/issues/404), [#607](https://github.com/jonathanung/strike/issues/607)–[#614](https://github.com/jonathanung/strike/issues/614), [#616](https://github.com/jonathanung/strike/issues/616)).
+
+## [v0.0.14] - 2026-07-30
+
+### Added
+
+- Added an interactive keybind editor with default and override columns, conflict warnings, save-or-discard prompts, and reset support through `/keys` and the command palette ([#603](https://github.com/jonathanung/strike/pull/603), [#606](https://github.com/jonathanung/strike/pull/606), [#617](https://github.com/jonathanung/strike/pull/617)).
+- Added a session switcher with filtering, numbered root shortcuts, and `ctrl+n` for starting a new session, plus mouse-click pane focus ([#526](https://github.com/jonathanung/strike/pull/526), [#618](https://github.com/jonathanung/strike/pull/618), [#623](https://github.com/jonathanung/strike/pull/623)).
+- Added `strike restore` to recreate missing or corrupt `.strike` metadata without touching sessions or other durable data ([#535](https://github.com/jonathanung/strike/pull/535)).
+- Added dedicated layered `keybinds.jsonc` and `mcp.jsonc` project and global configuration files ([#518](https://github.com/jonathanung/strike/pull/518), [#519](https://github.com/jonathanung/strike/pull/519)).
+- Added support for following directory and file symlinks for global and project strike state ([#532](https://github.com/jonathanung/strike/pull/532)).
+
+### Changed
+
+- **Upgrade note:** New sessions in Git repositories now use an isolated git worktree by default. Set `session.worktree` to `off` or `auto` to retain the previous behavior ([#520](https://github.com/jonathanung/strike/pull/520)).
+- Permission modes can now change during an active turn, allowing `/mode`, `/mode-next`, and `Shift+Tab` to take effect without interrupting it ([#533](https://github.com/jonathanung/strike/pull/533)).
+
+### Fixed
+
+- Corrected macOS CPU and memory telemetry, excluded reclaimable file cache from memory pressure, made cache display neutral, and hid the swap row when no swap is configured ([#534](https://github.com/jonathanung/strike/pull/534), [#601](https://github.com/jonathanung/strike/pull/601), [#604](https://github.com/jonathanung/strike/pull/604), [#605](https://github.com/jonathanung/strike/pull/605)).
+- Corrected ChatGPT subscription prompt-cache request fields, session routing, and cache usage reporting ([#536](https://github.com/jonathanung/strike/pull/536)).
+
+**Contributors:** [@jonathanung](https://github.com/jonathanung), [@tianyaohu](https://github.com/tianyaohu), and [@NicholasTamm](https://github.com/NicholasTamm).
+
+**Full changelog:** [v0.0.12...v0.0.14](https://github.com/jonathanung/strike/compare/v0.0.12...v0.0.14)
+
 ## [v0.0.12] - 2026-07-29
 
 This is the first release orchestrated by strike itself.
@@ -252,7 +280,8 @@ Initial public release.
 
 **Full changelog:** [commits through v0.0.1](https://github.com/jonathanung/strike/commits/v0.0.1)
 
-[Unreleased]: https://github.com/jonathanung/strike/compare/v0.0.12...HEAD
+[Unreleased]: https://github.com/jonathanung/strike/compare/v0.0.14...HEAD
+[v0.0.14]: https://github.com/jonathanung/strike/compare/v0.0.12...v0.0.14
 [v0.0.12]: https://github.com/jonathanung/strike/compare/v0.0.11...v0.0.12
 [v0.0.11]: https://github.com/jonathanung/strike/compare/v0.0.10...v0.0.11
 [v0.0.10]: https://github.com/jonathanung/strike/compare/v0.0.9...v0.0.10

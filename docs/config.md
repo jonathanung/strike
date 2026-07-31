@@ -145,8 +145,8 @@ presentation to the current session immediately.
 `theme` is a color-theme id: bundled JSON themes plus files under
 `~/.strike/themes` and `./.strike/themes`. Empty means the stock `strike`
 palette. In the TUI, bare `/theme` opens a picker; `/theme <id>` applies one;
-`/theme dark|light|auto` only adjusts session appearance (forced background
-detect), not the color-theme id.
+`/theme dark|light|auto` only adjusts session appearance (forced or terminal
+background from Bubble Tea detection), not the color-theme id.
 
 ## Keybinds
 

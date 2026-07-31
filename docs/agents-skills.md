@@ -69,6 +69,71 @@ Optional `model` pins the child’s model (bare id on the current provider, or
 Optional `effort` pins the child’s reasoning dial (`off`\|`low`\|`medium`\|
 `high`\|`xhigh`\|`max`); omit to inherit the parent (agent effort pins still
 apply). When set, task effort wins over agent profile effort.
+Optional `name` sets a stable teammate alias on the session team (roster +
+messaging).
+
+### Agent teams
+
+**Team = the same session tree by default.** Spawning `task` children joins an
+**implicit session team**: the lead (root or coordinating parent) plus its
+live/terminal children in that tree. No `TeamCreate` step and no opt-in flag —
+parent + children already are the team. Concurrent root sessions stay separate
+teams. Depth and fan-out stay bounded (`MaxChildDepth`; orchestrator prefers a
+few sequential or small parallel slices).
+
+Parent-only workflows are unchanged: if you never call `agent_*` tools,
+`task` / `task_message` / `task_status` / `task_read` / `task_interrupt` behave
+as before.
+
+| Tool / event | Role |
+|--------------|------|
+| `agent_message` / `agent_broadcast` | Mid-flight peer coordination (any teammate: child↔child, child↔lead) |
+| `team_task` | Shared claim/assign board (create/list/update/claim/complete; CAS) |
+| `[child.completed]` | Finished work product — terminal summary when a child ends |
+| `task_message` | Parent→owned-child steer only (not team chat) |
+| `task_status` / `task_read` | Rare one-off pulse / transcript slice — **not** busy-poll |
+| `agent_roster` | Who is on the team and live state |
+| `task_interrupt` | Cancel an owned child |
+| `todowrite` / `todoread` | Solo session todo list (full-replace) — **not** multi-agent claim |
+
+**Semantics:** prefer **messages** for mid-flight blockers/handoffs/questions;
+prefer **completion** for finished deliverables. Lead should not busy-poll
+`task_status` — use completion events + inbox. Children should message the lead
+early when blocked. Avoid chatty loops (no status ping-pong). Plain text bodies
+are enough; optional conventions (`blocker` / `handoff` / `question`) are fine
+without structured kinds. Messages inject at tool-round / idle turn boundaries
+(never mid-tool-call). Defaults **allow** team messaging; out-of-team targets
+fail closed; config/agent deny rules still hard-block.
+
+#### Example: parallel explore + implement with peer handoff
+
+```
+User ↔ Lead (build / orchestrator)
+         │  task(name=explorer, agent=explore, prompt="find the package for X")
+         │  task(name=implementer, agent=general, prompt="wait for handoff, then implement")
+         │
+         ├─ explorer  ──agent_message(to=implementer)──►  implementer
+         │     "change X in path Y; tests in Z"                 │
+         │                                                     ▼
+         └─ [child.completed] + inbox  ←── lead synthesizes for the user
+```
+
+1. Lead spawns **explore** and **general** in parallel with stable `name`
+   aliases (`explorer`, `implementer`).
+2. Explorer finds the right package and calls `agent_message` with
+   `to: "implementer"` (or the implementer’s `session_id` from `agent_roster` /
+   the task result) and a short handoff body.
+3. Implementer receives the message at the next safe boundary, implements, and
+   finishes; lead sees `[child.completed]` (and any inbox traffic) then answers
+   the user.
+
+Use `agent_broadcast` sparingly for team-wide notices; prefer a single
+`agent_message` when the recipient is known. See also [usage.md](usage.md#agent-teams).
+
+**Todos vs team board:** use `todowrite`/`todoread` for solo lead multi-step
+tracking. Use `team_task` when two or more teammates must see the same board and
+claim items (exclusive owner + optional `expected_version` CAS). The board is
+keyed by the lead session id and cleared when the lead session ends.
 
 Each model request composes the system prompt in layers (like opencode):
 

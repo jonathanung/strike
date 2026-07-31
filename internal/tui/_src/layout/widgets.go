@@ -5,10 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/cursor"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/textinput"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/textinput"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
@@ -37,7 +36,13 @@ func newComposer(th theme.Theme) textarea.Model {
 	ta.MaxHeight = composerMaxHeight
 	ta.SetHeight(composerMinHeight)
 	ta.ShowLineNumbers = false
-	ta.Cursor.SetMode(cursor.CursorStatic)
+	ta.SetVirtualCursor(true)
+	// Bubbles v2 DefaultKeyMap binds enter/ctrl+m to InsertNewline. Strike
+	// owns Enter as send and Newline as shift/alt+enter / ctrl+j — disable
+	// the widget binding so a fall-through Update never inserts a newline.
+	km := textarea.DefaultKeyMap()
+	km.InsertNewline.SetEnabled(false)
+	ta.KeyMap = km
 	styleComposer(&ta, th)
 	ta.Focus()
 	return ta
@@ -45,20 +50,27 @@ func newComposer(th theme.Theme) textarea.Model {
 
 // styleComposer applies resolved theme tokens to an existing textarea so
 // appearance toggles can restyle without dropping value or cursor state.
+// Styles come from theme.S() (the visual chokepoint) — no lipgloss.Foreground
+// outside internal/tui/theme.
 func styleComposer(ta *textarea.Model, th theme.Theme) {
 	th = th.Resolve()
 	st := th.S()
-	ta.Prompt = th.Icons.Prompt + themedSpace(th.Spacing.XS)
-	ta.FocusedStyle = textarea.Style{
-		Base:        st.Input,
-		CursorLine:  st.Input,
-		Placeholder: st.InputPlaceholder,
-		Prompt:      st.InputPrompt,
-		Text:        st.Input,
+	styles := textarea.DefaultDarkStyles()
+	styles.Focused = textarea.StyleState{
+		Base:             st.Input,
+		Text:             st.Input,
+		CursorLine:       st.Input,
+		Placeholder:      st.InputPlaceholder,
+		Prompt:           st.InputPrompt,
+		LineNumber:       st.InputPlaceholder,
+		CursorLineNumber: st.InputPrompt,
+		EndOfBuffer:      st.InputPlaceholder,
 	}
-	ta.BlurredStyle = ta.FocusedStyle
-	ta.Cursor.Style = st.InputCursor
-	ta.Cursor.TextStyle = st.Input
+	styles.Blurred = styles.Focused
+	styles.Cursor.Color = th.Accent.Compat()
+	styles.Cursor.Blink = false
+	ta.SetStyles(styles)
+	ta.Prompt = th.Icons.Prompt + themedSpace(th.Spacing.XS)
 }
 
 func newTextInput(th theme.Theme, placeholder string) textinput.Model {
@@ -67,12 +79,17 @@ func newTextInput(th theme.Theme, placeholder string) textinput.Model {
 	in := textinput.New()
 	in.Placeholder = placeholder
 	in.Prompt = th.Icons.InputCursor + themedSpace(th.Spacing.XS)
-	in.PromptStyle = st.InputPrompt
-	in.TextStyle = st.Input
-	in.PlaceholderStyle = st.InputPlaceholder
-	in.Cursor.Style = st.InputCursor
-	in.Cursor.TextStyle = st.Input
-	in.Cursor.SetMode(cursor.CursorStatic)
+	in.SetVirtualCursor(true)
+	styles := textinput.DefaultDarkStyles()
+	styles.Focused = textinput.StyleState{
+		Prompt:      st.InputPrompt,
+		Text:        st.Input,
+		Placeholder: st.InputPlaceholder,
+	}
+	styles.Blurred = styles.Focused
+	styles.Cursor.Color = th.Accent.Compat()
+	styles.Cursor.Blink = false
+	in.SetStyles(styles)
 	return in
 }
 

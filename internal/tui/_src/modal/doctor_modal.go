@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -38,7 +38,7 @@ func newDoctorModal(ev protocol.EffectivePrompt, contextLimit int, contextLimitK
 	}
 }
 
-func (m *doctorModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *doctorModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	if isEscape(msg) || msg.String() == "q" || msg.String() == "enter" {
 		return nil, nil
 	}

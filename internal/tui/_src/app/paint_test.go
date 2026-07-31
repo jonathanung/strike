@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -29,16 +29,16 @@ func TestTextDeltaPaintsAreFPSCapped(t *testing.T) {
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	now := time.Unix(1_700_000_000, 0)
 	m = withPaintClock(m, &now)
-	_ = m.View()
+	_ = viewString(m)
 	base := frameBuilds(m)
 
 	m = updateApp(t, m, engineEventMsg{ev: protocol.TurnStarted{}})
-	_ = m.View()
+	_ = viewString(m)
 
 	const n = 80
 	for i := 0; i < n; i++ {
 		m = updateApp(t, m, engineEventMsg{ev: protocol.TextDelta{Text: "x"}})
-		_ = m.View()
+		_ = viewString(m)
 	}
 	// All deltas in one FPS window → O(1) full builds, not O(n).
 	deltaBuilds := frameBuilds(m) - base
@@ -58,7 +58,7 @@ func TestTextDeltaPaintsAreFPSCapped(t *testing.T) {
 	if got := ansi.Strip(m.viewport.View()); !strings.Contains(got, "x") {
 		t.Fatalf("flushed viewport missing streamed text: %q", got)
 	}
-	_ = m.View()
+	_ = viewString(m)
 	if m.paint.suppress {
 		t.Fatal("paint still suppressed after flush rebuild")
 	}
@@ -70,11 +70,11 @@ func TestImmediateFlushBypassesFPSCap(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	m = withPaintClock(m, &now)
 	m = updateApp(t, m, engineEventMsg{ev: protocol.TurnStarted{}})
-	_ = m.View()
+	_ = viewString(m)
 
 	for i := 0; i < 20; i++ {
 		m = updateApp(t, m, engineEventMsg{ev: protocol.TextDelta{Text: "a"}})
-		_ = m.View()
+		_ = viewString(m)
 	}
 	before := frameBuilds(m)
 
@@ -82,7 +82,7 @@ func TestImmediateFlushBypassesFPSCap(t *testing.T) {
 	m = updateApp(t, m, engineEventMsg{ev: protocol.ToolCallBegin{
 		CallID: "c1", Name: "bash", Args: []byte(`{"command":"echo hi"}`),
 	}})
-	_ = m.View()
+	_ = viewString(m)
 	if frameBuilds(m) <= before {
 		t.Fatal("ToolCallBegin did not force an immediate full-frame paint")
 	}
@@ -95,7 +95,7 @@ func TestImmediateFlushBypassesFPSCap(t *testing.T) {
 
 	before = frameBuilds(m)
 	m = updateApp(t, m, engineEventMsg{ev: protocol.TurnCompleted{StopReason: "end_turn"}})
-	_ = m.View()
+	_ = viewString(m)
 	if frameBuilds(m) <= before {
 		t.Fatal("TurnCompleted did not force an immediate full-frame paint")
 	}
@@ -104,11 +104,11 @@ func TestImmediateFlushBypassesFPSCap(t *testing.T) {
 	m = updateApp(t, m, engineEventMsg{ev: protocol.TurnStarted{}})
 	for i := 0; i < 10; i++ {
 		m = updateApp(t, m, engineEventMsg{ev: protocol.TextDelta{Text: "b"}})
-		_ = m.View()
+		_ = viewString(m)
 	}
 	before = frameBuilds(m)
 	m = typeAppText(t, m, "hi")
-	_ = m.View()
+	_ = viewString(m)
 	if frameBuilds(m) <= before {
 		t.Fatal("key input did not force an immediate full-frame paint")
 	}
@@ -122,7 +122,7 @@ func TestPermissionAskedImmediateFlush(t *testing.T) {
 	m = updateApp(t, m, engineEventMsg{ev: protocol.TurnStarted{}})
 	for i := 0; i < 15; i++ {
 		m = updateApp(t, m, engineEventMsg{ev: protocol.TextDelta{Text: "p"}})
-		_ = m.View()
+		_ = viewString(m)
 	}
 	before := frameBuilds(m)
 	m = updateApp(t, m, engineEventMsg{ev: protocol.PermissionAsked{
@@ -130,7 +130,7 @@ func TestPermissionAskedImmediateFlush(t *testing.T) {
 		Permission: "bash",
 		Patterns:   []string{"bash"},
 	}})
-	view := m.View()
+	view := viewString(m)
 	if frameBuilds(m) <= before {
 		t.Fatal("PermissionAsked did not force immediate paint")
 	}
@@ -149,14 +149,14 @@ func TestWorkingSpinnerTicksAreFPSCapped(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	m = withPaintClock(m, &now)
 	m.turnRunning = true
-	_ = m.View()
+	_ = viewString(m)
 	base := frameBuilds(m)
 
 	for i := 0; i < 30; i++ {
 		updated, cmd := m.Update(m.spin.Tick())
 		m = updated.(Model)
 		_ = cmd
-		_ = m.View()
+		_ = viewString(m)
 	}
 	builds := frameBuilds(m) - base
 	if builds > 3 {
@@ -170,11 +170,11 @@ func TestPaintFlushAfterIntervalRebuilds(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	m = withPaintClock(m, &now)
 	m = updateApp(t, m, engineEventMsg{ev: protocol.TurnStarted{}})
-	_ = m.View()
+	_ = viewString(m)
 
 	for i := 0; i < 10; i++ {
 		m = updateApp(t, m, engineEventMsg{ev: protocol.TextDelta{Text: "z"}})
-		_ = m.View()
+		_ = viewString(m)
 	}
 	if !m.paint.pending && !m.paint.suppress {
 		t.Fatal("expected pending/suppressed soft paints before flush")
@@ -182,7 +182,7 @@ func TestPaintFlushAfterIntervalRebuilds(t *testing.T) {
 	before := frameBuilds(m)
 	now = now.Add(paintFPSInterval + time.Millisecond)
 	m = updateApp(t, m, paintFlushMsg{})
-	_ = m.View()
+	_ = viewString(m)
 	if frameBuilds(m) <= before {
 		t.Fatal("paintFlushMsg did not rebuild a full frame")
 	}
@@ -217,7 +217,7 @@ func TestSoftCoalesceEventClassification(t *testing.T) {
 	if !softCoalesceMsg(spinner.TickMsg{}) {
 		t.Fatal("spinner.TickMsg should soft-coalesce")
 	}
-	if softCoalesceMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")}) {
+	if softCoalesceMsg(tea.KeyPressMsg{Text: "a"}) {
 		t.Fatal("key msg must immediate-flush")
 	}
 }

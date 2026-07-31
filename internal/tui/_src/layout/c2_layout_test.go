@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -82,7 +82,7 @@ func TestC2ViewGeometryAndActivePanes(t *testing.T) {
 			m, _ := newAppTestModel(nil, nil)
 			m.focus = tt.focus
 			m = updateApp(t, m, tea.WindowSizeMsg{Width: tt.width, Height: tt.height})
-			view := m.View()
+			view := viewString(m)
 			rows := strings.Split(view, "\n")
 			if len(rows) != tt.height {
 				t.Fatalf("line count = %d, want %d", len(rows), tt.height)
@@ -159,11 +159,11 @@ func TestC2ViewGeometryAndActivePanes(t *testing.T) {
 func TestC2FocusToggleCollapsesToActivePaneImmediately(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 40})
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 	if m.focus != focusRight || computePaneGeometry(m.width, m.th.Spacing.XS, m.focus).rightWidth != 80 {
 		t.Fatalf("right focus did not claim collapsed width: focus=%d geometry=%+v", m.focus, computePaneGeometry(m.width, m.th.Spacing.XS, m.focus))
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlH})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
 	if m.focus != focusLeft || computePaneGeometry(m.width, m.th.Spacing.XS, m.focus).leftWidth != 80 {
 		t.Fatalf("left focus did not reclaim collapsed width: focus=%d geometry=%+v", m.focus, computePaneGeometry(m.width, m.th.Spacing.XS, m.focus))
 	}
@@ -176,7 +176,7 @@ func TestC2RegistryReceivesRightPanelInnerBodyDimensionsAndRetainsStateAcrossRes
 	m.setComposerValueAt("draft survives", len("draft survives"))
 	m.applyEvent(protocol.UserMessage{Text: "transcript survives"})
 	m.windows = m.windows.cycle()
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	m = updateApp(t, m, tea.KeyPressMsg{Text: "x"})
 	for _, size := range []tea.WindowSizeMsg{{Width: 120, Height: 80}, {Width: 93, Height: 60}, {Width: 92, Height: 60}, {Width: 80, Height: 40}, {Width: 160, Height: 106}, {Width: 93, Height: 60}} {
 		m = updateApp(t, m, size)
 		g := computePaneGeometry(size.Width, m.th.Spacing.XS, focusRight)
@@ -194,7 +194,7 @@ func TestC2RegistryReceivesRightPanelInnerBodyDimensionsAndRetainsStateAcrossRes
 			}
 		}
 	}
-	if m.composer.Value() != "draft survives" || !strings.Contains(ansi.Strip(m.View()), "transcript survives") {
+	if m.composer.Value() != "draft survives" || !strings.Contains(ansi.Strip(viewString(m)), "transcript survives") {
 		t.Error("resize storm lost left-pane draft or transcript")
 	}
 	if got := testWindow(t, m.windows.active()); got.windowID != "two" || len(got.updates) != 1 || got.updates[0] != "x" {
@@ -213,7 +213,7 @@ func TestC2CustomGutterIsPaintedAtExactWidth(t *testing.T) {
 	}
 	// Slice by display columns: the welcome logo bolt is double-width, so
 	// rune-index offsets misalign the gutter on logo rows.
-	for _, row := range strings.Split(m.View(), "\n")[1:3] {
+	for _, row := range strings.Split(viewString(m), "\n")[1:3] {
 		gutter := sliceDisplayCols(ansi.Strip(row), g.leftWidth, g.leftWidth+g.gutter)
 		if strings.TrimSpace(gutter) != "" {
 			t.Errorf("gutter cells are not blank: %q", gutter)
@@ -275,18 +275,18 @@ func TestC2PaneFocusAndModalUseFocusAndMutedThemeTokens(t *testing.T) {
 	th.OverlayScrim = fixedColor("#070809")
 	m, _ := newAppTestModelWithOptions(Options{Theme: &th})
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 80})
-	leftRows, rightRows := rowsContaining(m.View(), "get started"), rowsContaining(m.View(), "context")
+	leftRows, rightRows := rowsContaining(viewString(m), "get started"), rowsContaining(viewString(m), "context")
 	if !strings.Contains(strings.Join(leftRows, "\n"), rgbBGSGR("#010203")) || !strings.Contains(strings.Join(rightRows, "\n"), rgbBGSGR("#040506")) {
 		t.Fatal("left focus/right dim surface tokens are not visible on their respective panes")
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
-	leftRows, rightRows = rowsContaining(m.View(), "get started"), rowsContaining(m.View(), "context")
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
+	leftRows, rightRows = rowsContaining(viewString(m), "get started"), rowsContaining(viewString(m), "context")
 	if !strings.Contains(strings.Join(leftRows, "\n"), rgbBGSGR("#040506")) || !strings.Contains(strings.Join(rightRows, "\n"), rgbBGSGR("#010203")) {
 		t.Fatal("focus toggle did not swap pane focus/dim surface tokens")
 	}
 	m.modal = &appProbeModal{}
 	m.reflow()
-	view := m.View()
+	view := viewString(m)
 	if strings.Contains(view, rgbBGSGR("#010203")) || strings.Contains(view, rgbBGSGR("#040506")) || !strings.Contains(view, rgbSGR("#070809")) {
 		t.Error("modal did not scrim both panes with OverlayScrim")
 	}
@@ -318,7 +318,7 @@ func TestC2HintsAndWelcomeKeysDeriveFromBindings(t *testing.T) {
 			t.Errorf("welcome keys omit binding-derived %q %q: %q", binding.Key, binding.Label, welcome)
 		}
 	}
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 	rightHints := ansi.Strip(m.hintsView(160))
 	if strings.Contains(rightHints, keyHint(m.keyMap.Send).Label) {
 		t.Errorf("right/global hints retained left-only send binding: %q", rightHints)

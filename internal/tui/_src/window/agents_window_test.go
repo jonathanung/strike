@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -128,9 +128,9 @@ func TestAgentsWindowEnterOpensRoot(t *testing.T) {
 		},
 	})
 	w = next.(agentsWindow)
-	next, _ = w.update(tea.KeyMsg{Type: tea.KeyDown})
+	next, _ = w.update(tea.KeyPressMsg{Code: tea.KeyDown})
 	w = next.(agentsWindow)
-	next, cmd := w.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := w.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("enter produced no cmd")
 	}
@@ -144,7 +144,7 @@ func TestAgentsWindowEnterOpensRoot(t *testing.T) {
 
 func TestAgentsWindowSpawnKey(t *testing.T) {
 	w := newAgentsWindow().resize(40, 4).(agentsWindow)
-	_, cmd := w.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	_, cmd := w.update(tea.KeyPressMsg{Code: 'n', Text: string([]rune{'n'})})
 	if cmd == nil {
 		t.Fatal("n produced no cmd")
 	}
@@ -171,11 +171,11 @@ func TestAgentsWindowEnterOpensChild(t *testing.T) {
 	})
 	w = next.(agentsWindow)
 	// cursor 0 = root; down to first child; down to second
-	next, _ = w.update(tea.KeyMsg{Type: tea.KeyDown})
+	next, _ = w.update(tea.KeyPressMsg{Code: tea.KeyDown})
 	w = next.(agentsWindow)
-	next, _ = w.update(tea.KeyMsg{Type: tea.KeyDown})
+	next, _ = w.update(tea.KeyPressMsg{Code: tea.KeyDown})
 	w = next.(agentsWindow)
-	next, cmd := w.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := w.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("enter produced no cmd")
 	}
@@ -261,7 +261,7 @@ func TestAgentsOpenMsgNavigatesTranscript(t *testing.T) {
 	if !m.viewingChild() || m.viewingID != "child-nav" {
 		t.Fatalf("viewingID = %q, want child-nav", m.viewingID)
 	}
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(viewString(m))
 	if !strings.Contains(plain, "child reply here") {
 		t.Errorf("view missing child transcript:\n%s", plain)
 	}
@@ -604,7 +604,7 @@ func TestAgentsWindowCycleFilterKey(t *testing.T) {
 		agentsFilterAll,
 	}
 	for _, want := range seq {
-		next, _ := w.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+		next, _ := w.update(tea.KeyPressMsg{Code: 'f', Text: string([]rune{'f'})})
 		w = next.(agentsWindow)
 		if w.viewFilter != want {
 			t.Fatalf("after f: filter = %v, want %v", w.viewFilter, want)
@@ -635,13 +635,13 @@ func TestAgentsWindowTitleAttentionCount(t *testing.T) {
 
 func TestAgentsWindowTextFilter(t *testing.T) {
 	w := loadAgentsFixture(t)
-	next, _ := w.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	next, _ := w.update(tea.KeyPressMsg{Code: '/', Text: string([]rune{'/'})})
 	w = next.(agentsWindow)
 	if !w.filterEdit {
 		t.Fatal(" / did not enter filter edit")
 	}
 	for _, r := range "idle" {
-		next, _ = w.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		next, _ = w.update(tea.KeyPressMsg{Text: string([]rune{r})})
 		w = next.(agentsWindow)
 	}
 	ids := agentsVisibleIDs(w)
@@ -652,7 +652,7 @@ func TestAgentsWindowTextFilter(t *testing.T) {
 	if !strings.Contains(plain, "filter:") {
 		t.Errorf("missing filter header: %q", plain)
 	}
-	next, _ = w.update(tea.KeyMsg{Type: tea.KeyEscape})
+	next, _ = w.update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	w = next.(agentsWindow)
 	if w.filterEdit || w.textFilter != "" {
 		t.Fatalf("esc should clear filter: edit=%v text=%q", w.filterEdit, w.textFilter)
@@ -683,9 +683,9 @@ func TestAgentsWindowHideKeyEmitsMsg(t *testing.T) {
 		},
 	})
 	w = next.(agentsWindow)
-	next, _ = w.update(tea.KeyMsg{Type: tea.KeyDown})
+	next, _ = w.update(tea.KeyPressMsg{Code: tea.KeyDown})
 	w = next.(agentsWindow)
-	next, cmd := w.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	next, cmd := w.update(tea.KeyPressMsg{Code: 'd', Text: string([]rune{'d'})})
 	if cmd == nil {
 		t.Fatal("d produced no cmd")
 	}

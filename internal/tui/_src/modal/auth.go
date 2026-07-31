@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -239,7 +239,7 @@ type authMethodModal struct {
 	selectAfter bool
 }
 
-func (m *authMethodModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *authMethodModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	if len(m.items) == 0 {
 		if isEscape(msg) {
 			return nil, nil
@@ -336,7 +336,7 @@ func startDeviceModal(authsvc host.Auth, provider string, selectAfter bool) (mod
 	}
 }
 
-func (m *authWaitModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *authWaitModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	if isEscape(msg) {
 		m.cancel() // the in-flight Wait/Poll returns promptly with ctx error
 		return nil, nil
@@ -393,8 +393,8 @@ func (m *authWaitModal) view(width int, th theme.Theme) string {
 		if m.copyRequested {
 			status = "copy requested"
 		}
-		cursorWidth := max(1, ansi.StringWidth(m.paste.Cursor.View()))
-		m.paste.Width = max(1, inner-ansi.StringWidth(m.paste.Prompt)-cursorWidth)
+		cursorWidth := max(1, 1)
+		m.paste.SetWidth(max(1, inner-ansi.StringWidth(m.paste.Prompt)-cursorWidth))
 		m.paste.SetValue(m.paste.Value())
 		body = st.Text.Render("Complete the login in your browser.") +
 			"\n" + st.Muted.Render("If it did not open, visit:") +
@@ -535,7 +535,7 @@ func newAPIKeyModal(provider string, authsvc host.Auth, th theme.Theme, selectAf
 	return &apiKeyModal{provider: provider, auth: authsvc, input: in, th: th, selectAfter: selectAfter}
 }
 
-func (m *apiKeyModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *apiKeyModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	if isEscape(msg) {
 		return nil, nil
 	}
@@ -561,8 +561,8 @@ func (m *apiKeyModal) view(width int, th theme.Theme) string {
 	th = th.Resolve()
 	st := th.S()
 	inner := ui.PanelInnerWidth(th, width)
-	cursorWidth := max(1, ansi.StringWidth(m.input.Cursor.View()))
-	m.input.Width = max(1, inner-ansi.StringWidth(m.input.Prompt)-cursorWidth)
+	cursorWidth := max(1, 1)
+	m.input.SetWidth(max(1, inner-ansi.StringWidth(m.input.Prompt)-cursorWidth))
 	m.input.SetValue(m.input.Value())
 	body := m.input.View()
 	if guide := apiKeyGuide(m.provider, th); guide != "" {

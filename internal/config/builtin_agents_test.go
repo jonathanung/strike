@@ -70,6 +70,22 @@ func TestBuiltinAgentsCatalog(t *testing.T) {
 	if !strings.Contains(o.Prompt, "task") || !strings.Contains(o.Prompt, "MaxChildDepth") {
 		t.Errorf("orchestrator prompt missing delegate/MaxChildDepth duties: %q", o.Prompt)
 	}
+	for _, needle := range []string{
+		"agent_message",
+		"child.completed",
+		"busy-poll",
+		"mid-flight",
+		"task_status",
+		"chatty",
+	} {
+		if !strings.Contains(o.Prompt, needle) {
+			t.Errorf("orchestrator prompt missing coordination needle %q: %q", needle, o.Prompt)
+		}
+	}
+	g := byName["general"]
+	if !strings.Contains(g.Prompt, "agent_message") || !strings.Contains(strings.ToLower(g.Prompt), "block") {
+		t.Errorf("general prompt should teach early blocker messaging: %q", g.Prompt)
+	}
 	if err := ValidateAgentName("pr-babysitter"); err != nil {
 		t.Fatalf("ValidateAgentName(pr-babysitter) = %v", err)
 	}

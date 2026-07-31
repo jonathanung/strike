@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -40,7 +40,7 @@ func (w issuesWindow) update(msg tea.Msg) (window, tea.Cmd) {
 	switch msg := msg.(type) {
 	case projectDataRefreshMsg:
 		return w.reload(), nil
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return w.handleKey(msg)
 	}
 	return w, nil
@@ -157,7 +157,7 @@ func (w issuesWindow) reload() issuesWindow {
 	return w
 }
 
-func (w issuesWindow) handleKey(msg tea.KeyMsg) (issuesWindow, tea.Cmd) {
+func (w issuesWindow) handleKey(msg tea.KeyPressMsg) (issuesWindow, tea.Cmd) {
 	if w.store == nil {
 		return w, nil
 	}

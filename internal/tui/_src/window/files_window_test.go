@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -31,7 +31,7 @@ func TestFilesWindowBindLoadsRootAndNavigates(t *testing.T) {
 	}
 
 	// Cursor starts at 0 (pkg). Expand with enter.
-	next, _ := w.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ := w.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	w = next.(filesWindow)
 	plain = ansi.Strip(w.view(theme.Default()))
 	if !strings.Contains(plain, "main.go") {
@@ -43,23 +43,23 @@ func TestFilesWindowBindLoadsRootAndNavigates(t *testing.T) {
 	}
 
 	// Move down to main.go.
-	next, _ = w.update(tea.KeyMsg{Type: tea.KeyDown})
+	next, _ = w.update(tea.KeyPressMsg{Code: tea.KeyDown})
 	w = next.(filesWindow)
-	next, _ = w.update(tea.KeyMsg{Type: tea.KeyDown})
+	next, _ = w.update(tea.KeyPressMsg{Code: tea.KeyDown})
 	w = next.(filesWindow)
 	if w.cursor != 2 {
 		t.Errorf("cursor = %d, want 2", w.cursor)
 	}
 
 	// Collapse pkg via left while on child — left on leaf is no-op; move to pkg first.
-	next, _ = w.update(tea.KeyMsg{Type: tea.KeyUp})
+	next, _ = w.update(tea.KeyPressMsg{Code: tea.KeyUp})
 	w = next.(filesWindow)
-	next, _ = w.update(tea.KeyMsg{Type: tea.KeyUp})
+	next, _ = w.update(tea.KeyPressMsg{Code: tea.KeyUp})
 	w = next.(filesWindow)
 	if w.cursor != 0 {
 		t.Fatalf("cursor on pkg = %d, want 0", w.cursor)
 	}
-	next, _ = w.update(tea.KeyMsg{Type: tea.KeyLeft})
+	next, _ = w.update(tea.KeyPressMsg{Code: tea.KeyLeft})
 	w = next.(filesWindow)
 	plain = ansi.Strip(w.view(theme.Default()))
 	if strings.Contains(plain, "main.go") {
@@ -141,7 +141,7 @@ func TestConfigureFilesWindowOnModelNew(t *testing.T) {
 	m.windows = reg
 	m.focus = focusRight
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 93, Height: 40})
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(viewString(m))
 	if !strings.Contains(plain, "src") || !strings.Contains(plain, "go.mod") {
 		t.Errorf("split view missing files tree:\n%s", plain)
 	}
@@ -157,7 +157,7 @@ func TestFilesWindowLazyLoadErrorKeepsTree(t *testing.T) {
 	}}
 	w := newFilesWindow().bind("/tmp", ff).resize(30, 8).(filesWindow)
 	// Expand first dir (ok) — should error
-	next, _ := w.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ := w.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	w = next.(filesWindow)
 	if w.err == "" {
 		t.Fatal("expected expand error")
@@ -180,21 +180,21 @@ func TestFilesWindowEnterOnLeafEmitsOpenMsg(t *testing.T) {
 	w := newFilesWindow().bind("/tmp/proj", ff).resize(40, 10).(filesWindow)
 
 	// Cursor on pkg (dir) — enter expands, no open msg.
-	next, cmd := w.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := w.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	w = next.(filesWindow)
 	if cmd != nil {
 		t.Fatal("enter on dir should not return a cmd")
 	}
 
 	// Move to README.md (cursor 1 after collapse still shows pkg + files)
-	next, _ = w.update(tea.KeyMsg{Type: tea.KeyLeft}) // collapse pkg
+	next, _ = w.update(tea.KeyPressMsg{Code: tea.KeyLeft}) // collapse pkg
 	w = next.(filesWindow)
-	next, _ = w.update(tea.KeyMsg{Type: tea.KeyDown})
+	next, _ = w.update(tea.KeyPressMsg{Code: tea.KeyDown})
 	w = next.(filesWindow)
 	if w.cursor != 1 {
 		t.Fatalf("cursor = %d, want 1 (README.md)", w.cursor)
 	}
-	next, cmd = w.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd = w.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	w = next.(filesWindow)
 	if cmd == nil {
 		t.Fatal("enter on leaf should return open cmd")
@@ -206,9 +206,9 @@ func TestFilesWindowEnterOnLeafEmitsOpenMsg(t *testing.T) {
 	}
 
 	// main.go via right key
-	next, _ = w.update(tea.KeyMsg{Type: tea.KeyDown})
+	next, _ = w.update(tea.KeyPressMsg{Code: tea.KeyDown})
 	w = next.(filesWindow)
-	next, cmd = w.update(tea.KeyMsg{Type: tea.KeyRight})
+	next, cmd = w.update(tea.KeyPressMsg{Code: tea.KeyRight})
 	_ = next
 	if cmd == nil {
 		t.Fatal("right on leaf should return open cmd")
@@ -247,7 +247,7 @@ func TestFilesExplorerOpenMarkdownAndCode(t *testing.T) {
 	m.focus = focusRight
 
 	// Open markdown leaf → markdown window.
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if cmd != nil {
 		msg := runAppCmd(t, cmd)
@@ -275,12 +275,12 @@ func TestFilesExplorerOpenMarkdownAndCode(t *testing.T) {
 	m.windows = reg
 	m.focus = focusRight
 	// Cursor still on README.md; move to main.go.
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	m = updated.(Model)
 	t.Setenv("VISUAL", "")
 	t.Setenv("EDITOR", "")
 	t.Setenv("PATH", t.TempDir())
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if cmd != nil {
 		msg := runAppCmd(t, cmd)
@@ -308,9 +308,9 @@ func TestFilesWindowRefreshPreservesExpansionAndCursor(t *testing.T) {
 		},
 	}}
 	w := newFilesWindow().bind("/tmp/proj", ff).resize(40, 10).(filesWindow)
-	next, _ := w.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ := w.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	w = next.(filesWindow)
-	next, _ = w.update(tea.KeyMsg{Type: tea.KeyDown})
+	next, _ = w.update(tea.KeyPressMsg{Code: tea.KeyDown})
 	w = next.(filesWindow)
 	if w.cursor != 1 {
 		t.Fatalf("cursor = %d, want 1 (main.go)", w.cursor)
@@ -356,7 +356,7 @@ func TestFilesWindowRefreshDropsMissingCursorPath(t *testing.T) {
 		},
 	}}
 	w := newFilesWindow().bind("/tmp", ff).resize(30, 6).(filesWindow)
-	next, _ := w.update(tea.KeyMsg{Type: tea.KeyDown})
+	next, _ := w.update(tea.KeyPressMsg{Code: tea.KeyDown})
 	w = next.(filesWindow)
 	if w.cursor != 1 {
 		t.Fatalf("cursor = %d, want 1", w.cursor)

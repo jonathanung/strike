@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
@@ -92,7 +92,7 @@ func TestComposerImagePasteChipAndSend(t *testing.T) {
 	m.modelAttachmentKnown = true
 
 	uri := "data:image/png;base64," + base64.StdEncoding.EncodeToString(tinyPNG)
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(uri), Paste: true})
+	m = updateApp(t, m, tea.PasteMsg{Content: uri})
 	if !strings.Contains(m.composer.Value(), "[image 1]") {
 		t.Fatalf("composer = %q, want [image 1] chip", m.composer.Value())
 	}
@@ -101,7 +101,7 @@ func TestComposerImagePasteChipAndSend(t *testing.T) {
 	}
 
 	m = typeAppText(t, m, " see this")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	_ = runAllAppCmds(t, cmd)
 
@@ -130,11 +130,11 @@ func TestComposerCtrlVAttachesClipboardImage(t *testing.T) {
 	m.modelAttachmentKnown = true
 	m.clipboardImage = func() ([]byte, error) { return tinyPNG, nil }
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlV})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
 	if got := m.composer.Value(); got != "[image 1]" {
 		t.Fatalf("composer = %q, want image chip", got)
 	}
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	_ = runAllAppCmds(t, cmd)
 
@@ -160,7 +160,7 @@ func TestComposerCtrlVWithoutImageKeepsDraft(t *testing.T) {
 	m.setComposerValueAt("keep me", len("keep me"))
 	m.clipboardImage = func() ([]byte, error) { return nil, nil }
 
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlV})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
 	if got := m.composer.Value(); got != "keep me" {
 		t.Fatalf("composer = %q, want draft retained", got)
 	}
@@ -181,9 +181,9 @@ func TestComposerImageUnsupportedKeepsDraft(t *testing.T) {
 	m.modelAttachment = false
 
 	uri := "data:image/png;base64," + base64.StdEncoding.EncodeToString(tinyPNG)
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(uri), Paste: true})
+	m = updateApp(t, m, tea.PasteMsg{Content: uri})
 	m = typeAppText(t, m, " keep me")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	_ = runAllAppCmds(t, cmd)
 

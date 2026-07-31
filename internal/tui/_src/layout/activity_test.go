@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -16,7 +16,7 @@ func TestProjectActivityEntriesNewestFirst(t *testing.T) {
 		&toolCell{callID: "b", name: "tool-b", title: "B", done: true},
 		&toolCell{callID: "c", name: "tool-c", title: "C", done: true},
 	}
-	got := projectActivityEntries(cells, nil, false)
+	got := projectActivityEntries(cells, nil, nil, false)
 	if len(got) != 3 {
 		t.Fatalf("len = %d, want 3", len(got))
 	}
@@ -34,12 +34,12 @@ func TestProjectActivityEntriesNewEventAtTop(t *testing.T) {
 		&toolCell{callID: "b", name: "tool-b", title: "B", done: true},
 		&toolCell{callID: "c", name: "tool-c", title: "C", done: true},
 	}
-	before := projectActivityEntries(cells, nil, false)
+	before := projectActivityEntries(cells, nil, nil, false)
 	if before[0].Label != "C" {
 		t.Fatalf("before top = %q, want C", before[0].Label)
 	}
 	cells = append(cells, &toolCell{callID: "d", name: "tool-d", title: "D", done: false})
-	after := projectActivityEntries(cells, nil, false)
+	after := projectActivityEntries(cells, nil, nil, false)
 	if after[0].Label != "D" {
 		t.Fatalf("after top = %q, want D", after[0].Label)
 	}
@@ -56,7 +56,7 @@ func TestProjectActivityEntriesChildAndToolOrder(t *testing.T) {
 		{sessionID: "c1", agent: "alpha", status: "running"},
 		{sessionID: "c2", agent: "beta", status: "running"},
 	}
-	got := projectActivityEntries(cells, children, false)
+	got := projectActivityEntries(cells, children, nil, false)
 	// Newest is last child (c2), then c1, then tool x.
 	if len(got) != 3 {
 		t.Fatalf("len = %d, want 3", len(got))
@@ -79,7 +79,7 @@ func TestProjectActivityEntriesIncludesAttentionAndChildren(t *testing.T) {
 	children := []childActivity{
 		{sessionID: "child-1", agent: "explore", prompt: "scan", status: "running"},
 	}
-	got := projectActivityEntries(cells, children, true)
+	got := projectActivityEntries(cells, children, nil, true)
 	if len(got) != 3 {
 		t.Fatalf("len = %d, want 3", len(got))
 	}
@@ -102,7 +102,7 @@ func TestProjectActivityEntriesExploreCallsNewestFirst(t *testing.T) {
 		}},
 		&toolCell{callID: "b1", name: "bash", title: "B1", done: true},
 	}
-	got := projectActivityEntries(cells, nil, false)
+	got := projectActivityEntries(cells, nil, nil, false)
 	if len(got) != 3 {
 		t.Fatalf("len = %d, want 3", len(got))
 	}
@@ -163,14 +163,14 @@ func TestActivityCursorSticksToNewestAndAnchorsSelection(t *testing.T) {
 		&toolCell{callID: "c", name: "c", title: "C", done: true},
 	}
 	m.activityStickNewest = true
-	entries := projectActivityEntries(m.cells, nil, false)
+	entries := projectActivityEntries(m.cells, nil, nil, false)
 	if m.activityDisplayCursor(entries) != 0 || entries[0].Label != "C" {
 		t.Fatalf("stick newest cursor=%d top=%q", m.activityDisplayCursor(entries), entries[0].Label)
 	}
 
 	// Move down to B (index 1).
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
-	entries = projectActivityEntries(m.cells, nil, false)
+	m = updateApp(t, m, tea.KeyPressMsg{Text: "j"})
+	entries = projectActivityEntries(m.cells, nil, nil, false)
 	cur := m.activityDisplayCursor(entries)
 	if cur != 1 || entries[cur].Label != "B" {
 		t.Fatalf("after j cursor=%d label=%q, want B", cur, entries[cur].Label)
@@ -182,7 +182,7 @@ func TestActivityCursorSticksToNewestAndAnchorsSelection(t *testing.T) {
 
 	// New event D arrives: selection stays on B.
 	m.cells = append(m.cells, &toolCell{callID: "d", name: "d", title: "D", done: false})
-	entries = projectActivityEntries(m.cells, nil, false)
+	entries = projectActivityEntries(m.cells, nil, nil, false)
 	cur = m.activityDisplayCursor(entries)
 	if entries[cur].ID != anchor || entries[cur].Label != "B" {
 		t.Fatalf("anchor lost: cursor=%d id=%q label=%q want B (%s)", cur, entries[cur].ID, entries[cur].Label, anchor)
@@ -192,12 +192,12 @@ func TestActivityCursorSticksToNewestAndAnchorsSelection(t *testing.T) {
 	}
 
 	// Return to top and stick again.
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	m = updateApp(t, m, tea.KeyPressMsg{Text: "g"})
 	if !m.activityStickNewest {
 		t.Fatal("g should stick to newest")
 	}
 	m.cells = append(m.cells, &toolCell{callID: "e", name: "e", title: "Echo", done: false})
-	entries = projectActivityEntries(m.cells, nil, false)
+	entries = projectActivityEntries(m.cells, nil, nil, false)
 	if m.activityDisplayCursor(entries) != 0 || entries[0].Label != "Echo" {
 		t.Errorf("stuck newest: cursor=%d top=%q", m.activityDisplayCursor(entries), entries[0].Label)
 	}
@@ -217,7 +217,7 @@ func TestActivityDetailKeepsChronologicalBody(t *testing.T) {
 		},
 	}
 	m.activityStickNewest = true
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.activityDetail {
 		t.Fatal("enter should open detail")
 	}
@@ -247,7 +247,7 @@ func TestActivityPaneLongListAndResize(t *testing.T) {
 		})
 	}
 	// Cursor on an older item mid-list.
-	entries := projectActivityEntries(m.cells, nil, false)
+	entries := projectActivityEntries(m.cells, nil, nil, false)
 	m.setActivityCursor(entries, 15)
 	anchor := m.activityAnchorID
 
@@ -272,7 +272,7 @@ func TestActivityPaneLongListAndResize(t *testing.T) {
 		}
 	}
 	// Anchor preserved across resizes.
-	entries = projectActivityEntries(m.cells, nil, false)
+	entries = projectActivityEntries(m.cells, nil, nil, false)
 	if got := entries[m.activityDisplayCursor(entries)].ID; got != anchor {
 		t.Errorf("anchor after resize = %q, want %q", got, anchor)
 	}
@@ -327,7 +327,7 @@ func TestActivityReplayMatchesLiveOrdering(t *testing.T) {
 	liveKids := []childActivity{
 		{sessionID: "ch", agent: "explore", status: string(protocol.ChildStatusCompleted)},
 	}
-	live := projectActivityEntries(liveCells, liveKids, false)
+	live := projectActivityEntries(liveCells, liveKids, nil, false)
 
 	// Replay path: identical reconstructed slices.
 	replayCells := []cell{
@@ -337,7 +337,7 @@ func TestActivityReplayMatchesLiveOrdering(t *testing.T) {
 	replayKids := []childActivity{
 		{sessionID: "ch", agent: "explore", status: string(protocol.ChildStatusCompleted)},
 	}
-	replay := projectActivityEntries(replayCells, replayKids, false)
+	replay := projectActivityEntries(replayCells, replayKids, nil, false)
 	if len(live) != len(replay) {
 		t.Fatalf("len live=%d replay=%d", len(live), len(replay))
 	}
@@ -353,4 +353,45 @@ func activityFirstLine(lines []string) string {
 		return ""
 	}
 	return lines[0]
+}
+
+func TestProjectActivityEntriesTeamMessages(t *testing.T) {
+	msgs := []teamMessage{
+		{id: "m1", from: "c1", to: "lead", summary: "hello", body: "full body"},
+		{id: "m2", from: "c2", to: "c1", body: "peer ping"},
+	}
+	got := projectActivityEntries(nil, nil, msgs, false)
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if got[0].Kind != activityTeamMsg || !strings.Contains(got[0].Label, "peer ping") {
+		t.Errorf("newest = %+v", got[0])
+	}
+	if got[1].ID != "msg:m1" || got[1].DetailBody != "full body" {
+		t.Errorf("older = %+v", got[1])
+	}
+}
+
+func TestActivityEntriesSurfacesTeamMessagesWithNamedChildren(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m.sessionID = "lead"
+	m.children = []childActivity{
+		{sessionID: "c1", name: "researcher", agent: "explore", status: "running"},
+	}
+	m.teamMessages = []teamMessage{
+		{id: "x", from: "c1", to: "lead", summary: "done scanning"},
+	}
+	// With a real child, tree mode hides children from the flat feed but
+	// messages must still appear.
+	entries := m.activityEntries()
+	found := false
+	for _, e := range entries {
+		if e.Kind == activityTeamMsg && strings.Contains(e.Label, "researcher") && strings.Contains(e.Label, "done scanning") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("missing named team message in %+v", entries)
+	}
 }

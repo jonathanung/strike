@@ -81,6 +81,32 @@ func TestTaskPassesEffort(t *testing.T) {
 	}
 }
 
+func TestTaskPassesName(t *testing.T) {
+	tc := allowAll(t.TempDir())
+	var gotReq TaskRequest
+	tc.SpawnTask = func(_ context.Context, req TaskRequest) (TaskResult, error) {
+		gotReq = req
+		return TaskResult{Output: "started", Status: "started", SessionID: "abc12345xyz", Name: "explorer"}, nil
+	}
+	res, err := NewTask().Execute(context.Background(), mustJSON(t, map[string]any{
+		"prompt": "scan tree",
+		"name":   "explorer",
+		"agent":  "explore",
+	}), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotReq.Name != "explorer" || gotReq.Agent != "explore" {
+		t.Fatalf("SpawnTask req = %#v", gotReq)
+	}
+	if res.Title != "task explorer" {
+		t.Fatalf("title = %q, want task explorer", res.Title)
+	}
+	if !strings.Contains(string(res.Metadata), `"name":"explorer"`) {
+		t.Fatalf("metadata = %s, want name", res.Metadata)
+	}
+}
+
 func TestTaskCanceledOrFailedStatus(t *testing.T) {
 	cases := []struct {
 		status string
@@ -183,5 +209,35 @@ func TestCloneWithoutOmitsTask(t *testing.T) {
 	schemas := child.Schemas()
 	if len(schemas) != 2 || schemas[0].Name != "read" || schemas[1].Name != "bash" {
 		t.Fatalf("child schemas = %+v", schemas)
+	}
+}
+
+func TestTaskDescriptionCoordinationSemantics(t *testing.T) {
+	d := NewTask().Description()
+	for _, needle := range []string{
+		"agent_message",
+		"child.completed",
+		"busy-loop",
+		"task_status",
+		"not a parent-only control plane",
+		"mid-flight",
+		"MaxChildDepth",
+	} {
+		if !strings.Contains(d, needle) {
+			t.Errorf("task description missing %q:\n%s", needle, d)
+		}
+	}
+	// Must not frame control as parent-only without the peer path.
+	if strings.Contains(d, "intermediate control") && !strings.Contains(d, "agent_message") {
+		t.Errorf("task description still implies parent-only intermediate control:\n%s", d)
+	}
+}
+
+func TestTaskStatusDescriptionDiscouragesBusyPoll(t *testing.T) {
+	d := NewTaskStatus().Description()
+	for _, needle := range []string{"busy-poll", "child.completed", "agent_message"} {
+		if !strings.Contains(d, needle) {
+			t.Errorf("task_status description missing %q:\n%s", needle, d)
+		}
 	}
 }

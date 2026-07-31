@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -131,7 +131,7 @@ func (m Model) visualizerStateSnapshot() visualizerStateMsg {
 	// Child node?
 	if ch, ok := m.findChildActivity(id); ok {
 		msg.Kind = "child"
-		msg.Label = childViewTitle(ch.agent, ch.prompt, ch.sessionID, ch.title)
+		msg.Label = childViewTitle(ch.agent, ch.prompt, ch.sessionID, ch.title, ch.name)
 		if msg.Label == "" {
 			msg.Label = shortSessionID(id)
 		}
@@ -477,7 +477,7 @@ func (m *Model) applySessionRename(id, title string) tea.Cmd {
 		if title != "" {
 			m.viewTitle = sanitizeTitleTopic(title)
 		} else {
-			m.viewTitle = childViewTitle("", "", id, "")
+			m.viewTitle = childViewTitle("", "", id, "", "")
 		}
 	}
 	if title != "" {
@@ -485,11 +485,8 @@ func (m *Model) applySessionRename(id, title string) tea.Cmd {
 	} else {
 		m.setNotice("title cleared", false)
 	}
-	var titleCmd tea.Cmd
-	if id == m.sessionID {
-		titleCmd = tea.SetWindowTitle(windowTitle(*m))
-	}
-	return tea.Batch(titleCmd, m.broadcastAgentsState(), m.broadcastContextState())
+	// Window title is declared in View(); no SetWindowTitle command in v2.
+	return tea.Batch(m.broadcastAgentsState(), m.broadcastContextState())
 }
 
 // openRenameModal opens the rename dialog for id (prefilled with current title).
@@ -514,7 +511,7 @@ func (m *Model) openRenameModal(id string) tea.Cmd {
 	}
 	if current == "" {
 		if ch, ok := m.findChildActivity(id); ok {
-			current = childViewTitle(ch.agent, ch.prompt, ch.sessionID, ch.title)
+			current = childViewTitle(ch.agent, ch.prompt, ch.sessionID, ch.title, ch.name)
 		}
 	}
 	m.modal = newRenameModal(m.services.Sessions, id, current, m.th)

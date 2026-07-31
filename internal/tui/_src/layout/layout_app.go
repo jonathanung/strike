@@ -3,8 +3,8 @@ package tui
 import (
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textarea"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/ui"
@@ -92,8 +92,8 @@ func (m *Model) reflow() {
 			rightHeight = bodyHeight
 		}
 
-		m.viewport.Width = max(1, l.transcriptInnerWidthFor(m.th, leftWidth))
-		m.viewport.Height = max(0, l.transcriptInnerHeight())
+		m.viewport.SetWidth(max(1, l.transcriptInnerWidthFor(m.th, leftWidth)))
+		m.viewport.SetHeight(max(0, l.transcriptInnerHeight()))
 		if rightWidth > 0 && rightHeight > 0 {
 			m.windows = m.resizeRightWindows(rightWidth, rightHeight, rightCompact)
 		}

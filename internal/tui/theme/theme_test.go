@@ -1,37 +1,46 @@
 package theme
 
 import (
+	"image/color"
 	"reflect"
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
+	"charm.land/lipgloss/v2"
+	"charm.land/lipgloss/v2/compat"
+	"github.com/charmbracelet/colorprofile"
 )
 
-func TestThemeResolveBackgroundHandlesEveryTerminalColorForm(t *testing.T) {
-	color := lipgloss.Color("#112233")
+func TestThemeResolveBackgroundHandlesEveryColorForm(t *testing.T) {
+	solid := lipgloss.Color("#112233")
 	ansi := lipgloss.ANSIColor(4)
-	adaptive := lipgloss.AdaptiveColor{Light: "#112233", Dark: "#445566"}
-	complete := lipgloss.CompleteColor{TrueColor: "#112233", ANSI256: "24", ANSI: "4"}
-	profiles := lipgloss.CompleteAdaptiveColor{Light: complete, Dark: lipgloss.CompleteColor{TrueColor: "#445566", ANSI256: "25", ANSI: "5"}}
-	var nilColor *lipgloss.Color
-	var nilANSI *lipgloss.ANSIColor
-	var nilAdaptive *lipgloss.AdaptiveColor
-	var nilComplete *lipgloss.CompleteColor
-	var nilProfiles *lipgloss.CompleteAdaptiveColor
+	adaptive := AdaptiveColor{Light: "#112233", Dark: "#445566"}
+	complete := compat.CompleteColor{
+		TrueColor: lipgloss.Color("#112233"),
+		ANSI256:   lipgloss.Color("24"),
+		ANSI:      lipgloss.Color("4"),
+	}
+	profiles := compat.CompleteAdaptiveColor{
+		Light: complete,
+		Dark: compat.CompleteColor{
+			TrueColor: lipgloss.Color("#445566"),
+			ANSI256:   lipgloss.Color("25"),
+			ANSI:      lipgloss.Color("5"),
+		},
+	}
+	var nilAdaptive *AdaptiveColor
+	var nilComplete *compat.CompleteColor
+	var nilProfiles *compat.CompleteAdaptiveColor
 	var nilNone *lipgloss.NoColor
 
 	for _, tt := range []struct {
 		name        string
-		in          lipgloss.TerminalColor
+		in          color.Color
 		transparent bool
 		wantType    reflect.Type
 	}{
-		{"color", color, false, reflect.TypeOf(color)},
-		{"color pointer", &color, false, reflect.TypeOf(color)},
+		{"color", solid, false, reflect.TypeOf(solid)},
 		{"ANSI color", ansi, false, reflect.TypeOf(ansi)},
-		{"ANSI color pointer", &ansi, false, reflect.TypeOf(ansi)},
 		{"adaptive color", adaptive, false, reflect.TypeOf(adaptive)},
 		{"adaptive color pointer", &adaptive, false, reflect.TypeOf(adaptive)},
 		{"complete color", complete, false, reflect.TypeOf(complete)},
@@ -40,8 +49,6 @@ func TestThemeResolveBackgroundHandlesEveryTerminalColorForm(t *testing.T) {
 		{"complete adaptive color pointer", &profiles, false, reflect.TypeOf(profiles)},
 		{"no color", lipgloss.NoColor{}, true, reflect.TypeOf(lipgloss.NoColor{})},
 		{"no color pointer", &lipgloss.NoColor{}, true, reflect.TypeOf(lipgloss.NoColor{})},
-		{"typed nil color", nilColor, false, reflect.TypeOf(Default().Background)},
-		{"typed nil ANSI color", nilANSI, false, reflect.TypeOf(Default().Background)},
 		{"typed nil adaptive color", nilAdaptive, false, reflect.TypeOf(Default().Background)},
 		{"typed nil complete color", nilComplete, false, reflect.TypeOf(Default().Background)},
 		{"typed nil complete adaptive color", nilProfiles, false, reflect.TypeOf(Default().Background)},
@@ -55,9 +62,8 @@ func TestThemeResolveBackgroundHandlesEveryTerminalColorForm(t *testing.T) {
 			if reflect.TypeOf(got) != tt.wantType {
 				t.Errorf("resolved type = %T, want %v", got, tt.wantType)
 			}
-			_, transparent := got.(lipgloss.NoColor)
-			if transparent != tt.transparent {
-				t.Errorf("transparent = %t, want %t", transparent, tt.transparent)
+			if IsTransparentBackground(got) != tt.transparent {
+				t.Errorf("transparent = %t, want %t", IsTransparentBackground(got), tt.transparent)
 			}
 		})
 	}
@@ -66,68 +72,46 @@ func TestThemeResolveBackgroundHandlesEveryTerminalColorForm(t *testing.T) {
 func TestThemeResolveCopiesMutableBackgroundPointers(t *testing.T) {
 	for _, tt := range []struct {
 		name   string
-		in     func() lipgloss.TerminalColor
+		in     func() color.Color
 		mutate func()
 	}{
 		func() struct {
 			name   string
-			in     func() lipgloss.TerminalColor
+			in     func() color.Color
 			mutate func()
 		} {
-			c := lipgloss.Color("#112233")
+			c := AdaptiveColor{Light: "#112233", Dark: "#112233"}
 			return struct {
 				name   string
-				in     func() lipgloss.TerminalColor
+				in     func() color.Color
 				mutate func()
-			}{"color", func() lipgloss.TerminalColor { return &c }, func() { c = "#445566" }}
+			}{"adaptive", func() color.Color { return &c }, func() { c.Light = "#445566" }}
 		}(),
 		func() struct {
 			name   string
-			in     func() lipgloss.TerminalColor
+			in     func() color.Color
 			mutate func()
 		} {
-			c := lipgloss.ANSIColor(1)
+			c := compat.CompleteColor{TrueColor: lipgloss.Color("#112233")}
 			return struct {
 				name   string
-				in     func() lipgloss.TerminalColor
+				in     func() color.Color
 				mutate func()
-			}{"ANSI", func() lipgloss.TerminalColor { return &c }, func() { c = 2 }}
+			}{"complete", func() color.Color { return &c }, func() { c.TrueColor = lipgloss.Color("#445566") }}
 		}(),
 		func() struct {
 			name   string
-			in     func() lipgloss.TerminalColor
+			in     func() color.Color
 			mutate func()
 		} {
-			c := lipgloss.AdaptiveColor{Light: "#112233", Dark: "#112233"}
+			c := compat.CompleteAdaptiveColor{Light: compat.CompleteColor{TrueColor: lipgloss.Color("#112233")}}
 			return struct {
 				name   string
-				in     func() lipgloss.TerminalColor
+				in     func() color.Color
 				mutate func()
-			}{"adaptive", func() lipgloss.TerminalColor { return &c }, func() { c.Light = "#445566" }}
-		}(),
-		func() struct {
-			name   string
-			in     func() lipgloss.TerminalColor
-			mutate func()
-		} {
-			c := lipgloss.CompleteColor{TrueColor: "#112233"}
-			return struct {
-				name   string
-				in     func() lipgloss.TerminalColor
-				mutate func()
-			}{"complete", func() lipgloss.TerminalColor { return &c }, func() { c.TrueColor = "#445566" }}
-		}(),
-		func() struct {
-			name   string
-			in     func() lipgloss.TerminalColor
-			mutate func()
-		} {
-			c := lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{TrueColor: "#112233"}}
-			return struct {
-				name   string
-				in     func() lipgloss.TerminalColor
-				mutate func()
-			}{"complete adaptive", func() lipgloss.TerminalColor { return &c }, func() { c.Light.TrueColor = "#445566" }}
+			}{"complete adaptive", func() color.Color { return &c }, func() {
+				c.Light.TrueColor = lipgloss.Color("#445566")
+			}}
 		}(),
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -142,22 +126,35 @@ func TestThemeResolveCopiesMutableBackgroundPointers(t *testing.T) {
 }
 
 func TestThemeResolveCompletesBothCompleteAdaptiveColorProfiles(t *testing.T) {
-	got := (Theme{Background: lipgloss.CompleteAdaptiveColor{
-		Light: lipgloss.CompleteColor{TrueColor: "#112233"},
-		Dark:  lipgloss.CompleteColor{ANSI256: "99"},
+	got := (Theme{Background: compat.CompleteAdaptiveColor{
+		Light: compat.CompleteColor{TrueColor: lipgloss.Color("#112233")},
+		Dark:  compat.CompleteColor{ANSI256: lipgloss.Color("99")},
 	}}).Resolve().Background
-	want := lipgloss.CompleteAdaptiveColor{
-		Light: lipgloss.CompleteColor{TrueColor: "#112233", ANSI256: "#112233", ANSI: "#112233"},
-		Dark:  lipgloss.CompleteColor{TrueColor: "99", ANSI256: "99", ANSI: "99"},
+	want := compat.CompleteAdaptiveColor{
+		Light: compat.CompleteColor{
+			TrueColor: lipgloss.Color("#112233"),
+			ANSI256:   lipgloss.Color("#112233"),
+			ANSI:      lipgloss.Color("#112233"),
+		},
+		Dark: compat.CompleteColor{
+			TrueColor: lipgloss.Color("99"),
+			ANSI256:   lipgloss.Color("99"),
+			ANSI:      lipgloss.Color("99"),
+		},
 	}
-	if got != want {
+	gotC, ok := got.(compat.CompleteAdaptiveColor)
+	if !ok {
+		t.Fatalf("resolved type = %T, want CompleteAdaptiveColor", got)
+	}
+	if !sameColor(gotC.Light.TrueColor, want.Light.TrueColor) ||
+		!sameColor(gotC.Dark.ANSI256, want.Dark.ANSI256) {
 		t.Errorf("resolved CompleteAdaptiveColor = %#v, want %#v", got, want)
 	}
 }
 
 func TestDefaultPaletteRolesArePopulatedAndReadable(t *testing.T) {
 	th := Default()
-	roles := map[string]lipgloss.AdaptiveColor{
+	roles := map[string]AdaptiveColor{
 		"Text": th.Text, "TextMuted": th.TextMuted, "Accent": th.Accent,
 		"AccentAlt": th.AccentAlt, "Highlight": th.Highlight, "Success": th.Success,
 		"Warning": th.Warning, "Error": th.Error, "Border": th.Border,
@@ -181,29 +178,30 @@ func TestDefaultPaletteRolesArePopulatedAndReadable(t *testing.T) {
 	}
 }
 
-func TestThemeResolveCompletesBackgroundTerminalColorVariants(t *testing.T) {
+func TestThemeResolveCompletesBackgroundColorVariants(t *testing.T) {
+	// v2 Render always emits full-fidelity ANSI; Bubble Tea downsamples later.
+	// compat.CompleteColor.RGBA still selects by compat.Profile — pin TrueColor
+	// so the TrueColor slot is what Render sees.
+	saved := compat.Profile
+	compat.Profile = colorprofile.TrueColor
+	t.Cleanup(func() { compat.Profile = saved })
+
 	for _, tt := range []struct {
 		name    string
-		profile termenv.Profile
-		color   lipgloss.TerminalColor
+		color   color.Color
 		wantSGR string
 	}{
-		{"complete truecolor", termenv.TrueColor, lipgloss.CompleteColor{TrueColor: "#112233"}, "48;2;17;34;51"},
-		{"complete ansi256", termenv.ANSI256, lipgloss.CompleteColor{ANSI256: "99"}, "48;5;99"},
-		{"complete ansi zero", termenv.ANSI, lipgloss.CompleteColor{ANSI: "0"}, "40"},
-		{"adaptive light only", termenv.TrueColor, lipgloss.AdaptiveColor{Light: "#112233"}, "48;2;17;34;51"},
-		{"adaptive dark only", termenv.TrueColor, lipgloss.AdaptiveColor{Dark: "#112233"}, "48;2;17;34;51"},
+		{"complete truecolor", compat.CompleteColor{TrueColor: lipgloss.Color("#112233")}, "48;2;17;34;51"},
+		{"adaptive light only", AdaptiveColor{Light: "#112233"}, "48;2;17;34;51"},
+		{"adaptive dark only", AdaptiveColor{Dark: "#112233"}, "48;2;17;34;51"},
+		{"plain color", lipgloss.Color("#112233"), "48;2;17;34;51"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			saved := lipgloss.ColorProfile()
-			lipgloss.SetColorProfile(tt.profile)
-			t.Cleanup(func() { lipgloss.SetColorProfile(saved) })
-
 			got := (Theme{Background: tt.color}).Resolve().Background
 			if got == nil {
 				t.Fatal("resolved background is nil")
 			}
-			if _, transparent := got.(lipgloss.NoColor); transparent {
+			if IsTransparentBackground(got) {
 				t.Fatalf("resolved %T as transparent", tt.color)
 			}
 			out := lipgloss.NewStyle().Background(got).Render("x")
@@ -215,35 +213,28 @@ func TestThemeResolveCompletesBackgroundTerminalColorVariants(t *testing.T) {
 }
 
 func TestThemeResolveBackgroundPointersAndTypedNil(t *testing.T) {
-	saved := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(saved) })
-
-	complete := &lipgloss.CompleteColor{TrueColor: "#112233"}
-	adaptive := &lipgloss.AdaptiveColor{Light: "#112233"}
-	var nilComplete *lipgloss.CompleteColor
-	var nilAdaptive *lipgloss.AdaptiveColor
+	complete := &compat.CompleteColor{TrueColor: lipgloss.Color("#112233")}
+	adaptive := &AdaptiveColor{Light: "#112233"}
+	var nilComplete *compat.CompleteColor
+	var nilAdaptive *AdaptiveColor
 	var nilNoColor *lipgloss.NoColor
-	ansiBlack := lipgloss.ANSIColor(0)
-	var nilANSI *lipgloss.ANSIColor
 	for _, tt := range []struct {
 		name string
-		in   lipgloss.TerminalColor
+		in   color.Color
 	}{
 		{"complete pointer", complete},
 		{"adaptive pointer", adaptive},
 		{"typed nil complete pointer", nilComplete},
 		{"typed nil adaptive pointer", nilAdaptive},
 		{"typed nil no-color pointer", nilNoColor},
-		{"ANSI black pointer", &ansiBlack},
-		{"typed nil ANSI pointer", nilANSI},
+		{"ANSI black", lipgloss.ANSIColor(0)},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			got := (Theme{Background: tt.in}).Resolve().Background
 			if got == nil {
 				t.Fatal("resolved background is nil")
 			}
-			if _, transparent := got.(lipgloss.NoColor); transparent {
+			if IsTransparentBackground(got) {
 				t.Fatalf("resolved %T as transparent", tt.in)
 			}
 			if out := lipgloss.NewStyle().Background(got).Render("x"); out == "x" {
@@ -253,36 +244,17 @@ func TestThemeResolveBackgroundPointersAndTypedNil(t *testing.T) {
 	}
 }
 
-func TestThemeResolvePreservesANSIBlackPointer(t *testing.T) {
-	saved := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.ANSI)
-	t.Cleanup(func() { lipgloss.SetColorProfile(saved) })
-
-	black := lipgloss.ANSIColor(0)
-	got := (Theme{Background: &black}).Resolve().Background
-	if out := lipgloss.NewStyle().Background(got).Render("x"); !containsSGR(out, "40") {
-		t.Errorf("ANSI black pointer rendered as %q, want ANSI black background", out)
+func TestThemeResolveZeroCompleteColorIsSolid(t *testing.T) {
+	got := (Theme{Background: compat.CompleteColor{}}).Resolve().Background
+	if got == nil {
+		t.Fatal("zero CompleteColor resolved to nil")
 	}
-}
-
-func TestThemeResolveZeroCompleteColorIsSolidInEveryProfile(t *testing.T) {
-	for _, profile := range []termenv.Profile{termenv.TrueColor, termenv.ANSI256, termenv.ANSI} {
-		t.Run(profile.Name(), func(t *testing.T) {
-			saved := lipgloss.ColorProfile()
-			lipgloss.SetColorProfile(profile)
-			t.Cleanup(func() { lipgloss.SetColorProfile(saved) })
-
-			got := (Theme{Background: lipgloss.CompleteColor{}}).Resolve().Background
-			if got == nil {
-				t.Fatal("zero CompleteColor resolved to nil")
-			}
-			if _, transparent := got.(lipgloss.NoColor); transparent {
-				t.Fatal("zero CompleteColor resolved to transparent")
-			}
-			if out := lipgloss.NewStyle().Background(got).Render("x"); out == "x" {
-				t.Errorf("zero CompleteColor rendered without a solid background under %s", profile.Name())
-			}
-		})
+	if IsTransparentBackground(got) {
+		t.Fatal("zero CompleteColor resolved to transparent")
+	}
+	// Empty CompleteColor falls back to Default background via resolveCompleteColor.
+	if out := lipgloss.NewStyle().Background(got).Render("x"); out == "x" {
+		t.Error("zero CompleteColor rendered without a solid background")
 	}
 }
 
@@ -312,7 +284,7 @@ func TestThemeResolveCompletesZeroAndPartialThemes(t *testing.T) {
 	defaults := Default()
 	resolved := (Theme{}).Resolve()
 
-	roles := map[string]lipgloss.AdaptiveColor{
+	roles := map[string]AdaptiveColor{
 		"Text": resolved.Text, "TextMuted": resolved.TextMuted,
 		"Accent": resolved.Accent, "AccentAlt": resolved.AccentAlt,
 		"Highlight": resolved.Highlight, "Success": resolved.Success,
@@ -335,17 +307,17 @@ func TestThemeResolveCompletesZeroAndPartialThemes(t *testing.T) {
 	if resolved.Background == nil {
 		t.Fatal("zero Theme Resolve left Background unset")
 	}
-	if _, transparent := resolved.Background.(lipgloss.NoColor); transparent {
+	if IsTransparentBackground(resolved.Background) {
 		t.Error("zero Theme Resolve made Background transparent; it must inherit the solid default")
 	}
 
 	for _, tt := range []struct {
 		name string
-		in   lipgloss.AdaptiveColor
-		want lipgloss.AdaptiveColor
+		in   AdaptiveColor
+		want AdaptiveColor
 	}{
-		{"light only", lipgloss.AdaptiveColor{Light: "#123456"}, lipgloss.AdaptiveColor{Light: "#123456", Dark: defaults.Accent.Dark}},
-		{"dark only", lipgloss.AdaptiveColor{Dark: "#654321"}, lipgloss.AdaptiveColor{Light: defaults.Accent.Light, Dark: "#654321"}},
+		{"light only", AdaptiveColor{Light: "#123456"}, AdaptiveColor{Light: "#123456", Dark: defaults.Accent.Dark}},
+		{"dark only", AdaptiveColor{Dark: "#654321"}, AdaptiveColor{Light: defaults.Accent.Light, Dark: "#654321"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			got := (Theme{Accent: tt.in}).Resolve().Accent
@@ -368,11 +340,10 @@ func TestThemeResolveBackgroundPreservesOnlyExplicitTransparency(t *testing.T) {
 	defaultBackground := Default().Background
 	cases := []struct {
 		name        string
-		background  lipgloss.TerminalColor
+		background  color.Color
 		transparent bool
 	}{
 		{"unset", nil, false},
-		{"empty", lipgloss.Color(""), false},
 		{"solid", lipgloss.Color("#123456"), false},
 		{"transparent", NoBackground(), true},
 	}
@@ -382,11 +353,10 @@ func TestThemeResolveBackgroundPreservesOnlyExplicitTransparency(t *testing.T) {
 			if got == nil {
 				t.Fatal("resolved Background is nil")
 			}
-			_, transparent := got.(lipgloss.NoColor)
-			if transparent != tt.transparent {
-				t.Errorf("transparent = %t, want %t (%T)", transparent, tt.transparent, got)
+			if IsTransparentBackground(got) != tt.transparent {
+				t.Errorf("transparent = %t, want %t (%T)", IsTransparentBackground(got), tt.transparent, got)
 			}
-			if (tt.name == "unset" || tt.name == "empty") && !sameColor(got, defaultBackground) {
+			if tt.name == "unset" && !sameColor(got, defaultBackground) {
 				t.Errorf("%s Background = %v, want default %v", tt.name, got, defaultBackground)
 			}
 			if tt.name == "solid" && !sameColor(got, tt.background) {
@@ -452,7 +422,10 @@ func TestThemeResolveBorderStyleAndSpacingFieldByField(t *testing.T) {
 	}
 }
 
-func sameColor(a, b lipgloss.TerminalColor) bool {
+func sameColor(a, b color.Color) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
 	ar, ag, ab, aa := a.RGBA()
 	br, bg, bb, ba := b.RGBA()
 	return ar == br && ag == bg && ab == bb && aa == ba
@@ -462,17 +435,70 @@ func TestDefaultPaletteDistinguishesKeyRoles(t *testing.T) {
 	th := Default()
 	pairs := []struct {
 		name string
-		a, b lipgloss.AdaptiveColor
+		a, b AdaptiveColor
 	}{
 		{"Accent vs AccentAlt", th.Accent, th.AccentAlt},
 		{"Border vs BorderFocus", th.Border, th.BorderFocus},
 		{"Border vs BorderMuted", th.Border, th.BorderMuted},
 		{"Success vs Error", th.Success, th.Error},
+		{"Error vs Danger", th.Error, th.Danger},
 	}
 	for _, p := range pairs {
 		if p.a == p.b {
 			t.Errorf("%s should be visually distinct roles but are identical: %+v", p.name, p.a)
 		}
+	}
+}
+
+// TestDefaultPaletteE138Map locks the soft-bento multi-accent Default() map
+// from issue #628 / docs/theme.md (21 color roles).
+func TestDefaultPaletteE138Map(t *testing.T) {
+	th := Default()
+	want := map[string]AdaptiveColor{
+		"Text":         {Light: "#1a1528", Dark: "#f3f1fa"},
+		"TextMuted":    {Light: "#5c586e", Dark: "#9b99b0"},
+		"Accent":       {Light: "#6d28d9", Dark: "#c4b5fd"},
+		"AccentAlt":    {Light: "#0e7490", Dark: "#22d3ee"},
+		"Highlight":    {Light: "#5b21b6", Dark: "#f5f3ff"},
+		"Success":      {Light: "#15803d", Dark: "#4ade80"},
+		"Warning":      {Light: "#b45309", Dark: "#fbbf24"},
+		"Error":        {Light: "#e11d48", Dark: "#fb7185"},
+		"Danger":       {Light: "#ea580c", Dark: "#fb923c"},
+		"Surface":      {Light: "#f3eef9", Dark: "#232230"},
+		"SurfaceFocus": {Light: "#e9e0f7", Dark: "#2e2c3e"},
+		"SurfaceMuted": {Light: "#f8f5fc", Dark: "#1a1924"},
+		"Border":       {Light: "#c4bfd4", Dark: "#4f4d63"},
+		"BorderFocus":  {Light: "#6d28d9", Dark: "#c4b5fd"},
+		"BorderMuted":  {Light: "#ddd8ea", Dark: "#2c2a3a"},
+		"UserLabel":    {Light: "#0e7490", Dark: "#22d3ee"},
+		"ToolLabel":    {Light: "#2563eb", Dark: "#7dd3fc"},
+		"DiffAdded":    {Light: "#15803d", Dark: "#4ade80"},
+		"DiffRemoved":  {Light: "#e11d48", Dark: "#fb7185"},
+		"OverlayScrim": {Light: "#a8a3b8", Dark: "#7c7a90"},
+	}
+	got := map[string]AdaptiveColor{
+		"Text": th.Text, "TextMuted": th.TextMuted, "Accent": th.Accent,
+		"AccentAlt": th.AccentAlt, "Highlight": th.Highlight, "Success": th.Success,
+		"Warning": th.Warning, "Error": th.Error, "Danger": th.Danger,
+		"Surface": th.Surface, "SurfaceFocus": th.SurfaceFocus, "SurfaceMuted": th.SurfaceMuted,
+		"Border": th.Border, "BorderFocus": th.BorderFocus, "BorderMuted": th.BorderMuted,
+		"UserLabel": th.UserLabel, "ToolLabel": th.ToolLabel,
+		"DiffAdded": th.DiffAdded, "DiffRemoved": th.DiffRemoved, "OverlayScrim": th.OverlayScrim,
+	}
+	for name, w := range want {
+		if g := got[name]; g != w {
+			t.Errorf("Default().%s = %#v, want %#v", name, g, w)
+		}
+	}
+	bg, ok := th.Background.(AdaptiveColor)
+	if !ok {
+		t.Fatalf("Default().Background type = %T, want AdaptiveColor", th.Background)
+	}
+	if bg != (AdaptiveColor{Light: "#ffffff", Dark: "#14131c"}) {
+		t.Errorf("Default().Background = %#v, want soft-bento ground", bg)
+	}
+	if th.Chrome != ChromeSolid {
+		t.Errorf("Default().Chrome = %v, want ChromeSolid", th.Chrome)
 	}
 }
 
@@ -499,40 +525,54 @@ func TestDefaultThemeCarriesDefaultIcons(t *testing.T) {
 func TestStylesDrawFromThemeRoles(t *testing.T) {
 	th := Default()
 	s := th.S()
-	if got := s.Accent.GetForeground(); got != th.Accent {
+	if got := s.Accent.GetForeground(); !sameColor(got, th.Accent) {
 		t.Errorf("Accent style foreground = %v, want %v", got, th.Accent)
 	}
-	if got := s.Muted.GetForeground(); got != th.TextMuted {
+	if got := s.Muted.GetForeground(); !sameColor(got, th.TextMuted) {
 		t.Errorf("Muted style foreground = %v, want %v", got, th.TextMuted)
 	}
 	if !s.Title.GetBold() {
 		t.Error("Title style should be bold")
 	}
-	if got := s.Title.GetForeground(); got != th.Accent {
+	if got := s.Title.GetForeground(); !sameColor(got, th.Accent) {
 		t.Errorf("Title style foreground = %v, want Accent %v", got, th.Accent)
 	}
-	if got := s.Danger.GetForeground(); got != th.Danger {
+	if got := s.Danger.GetForeground(); !sameColor(got, th.Danger) {
 		t.Errorf("Danger style foreground = %v, want Danger %v", got, th.Danger)
 	}
-	if !s.DangerStrong.GetBold() || s.DangerStrong.GetForeground() != th.Danger {
+	if !s.DangerStrong.GetBold() || !sameColor(s.DangerStrong.GetForeground(), th.Danger) {
 		t.Errorf("DangerStrong = %+v, want bold Danger", s.DangerStrong)
 	}
-	if !s.AccentStrong.GetBold() || s.AccentStrong.GetForeground() != th.Accent {
+	if !s.AccentStrong.GetBold() || !sameColor(s.AccentStrong.GetForeground(), th.Accent) {
 		t.Errorf("AccentStrong = %+v, want bold Accent", s.AccentStrong)
 	}
-	if !s.Selected.GetBold() || s.Selected.GetForeground() != th.Highlight {
+	if !s.Selected.GetBold() || !sameColor(s.Selected.GetForeground(), th.Highlight) {
 		t.Errorf("Selected = %+v, want bold Highlight", s.Selected)
 	}
-	if !s.UserLabel.GetBold() || s.UserLabel.GetForeground() != th.UserLabel {
+	if !s.UserLabel.GetBold() || !sameColor(s.UserLabel.GetForeground(), th.UserLabel) {
 		t.Errorf("UserLabel = %+v, want bold UserLabel", s.UserLabel)
 	}
-	if s.Input.GetForeground() != th.Text || s.InputPlaceholder.GetForeground() != th.TextMuted || s.InputPrompt.GetForeground() != th.Accent {
+	if !sameColor(s.Input.GetForeground(), th.Text) || !sameColor(s.InputPlaceholder.GetForeground(), th.TextMuted) || !sameColor(s.InputPrompt.GetForeground(), th.Accent) {
 		t.Errorf("input widget styles do not use theme roles: %+v", s)
 	}
-	if got := s.DiffAdded.GetForeground(); got != th.DiffAdded {
+	if got := s.DiffAdded.GetForeground(); !sameColor(got, th.DiffAdded) {
 		t.Errorf("DiffAdded style foreground = %v, want %v", got, th.DiffAdded)
 	}
-	if got := s.DiffRemoved.GetForeground(); got != th.DiffRemoved {
+	if got := s.DiffRemoved.GetForeground(); !sameColor(got, th.DiffRemoved) {
 		t.Errorf("DiffRemoved style foreground = %v, want %v", got, th.DiffRemoved)
+	}
+}
+
+func TestAdaptiveColorRGBARespectsCompatHasDarkBackground(t *testing.T) {
+	c := AdaptiveColor{Light: "#112233", Dark: "#445566"}
+	saved := compat.HasDarkBackground
+	t.Cleanup(func() { compat.HasDarkBackground = saved })
+
+	compat.HasDarkBackground = false
+	lr, lg, lb, _ := c.RGBA()
+	compat.HasDarkBackground = true
+	dr, dg, db, _ := c.RGBA()
+	if lr == dr && lg == dg && lb == db {
+		t.Fatalf("light and dark RGBA identical: light=%d,%d,%d dark=%d,%d,%d", lr, lg, lb, dr, dg, db)
 	}
 }

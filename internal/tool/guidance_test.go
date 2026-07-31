@@ -154,6 +154,35 @@ func TestBuildGuidanceTaskStatusPreferred(t *testing.T) {
 	if !strings.Contains(text, "task_status") || !strings.Contains(text, "task_read") {
 		t.Fatalf("missing task_status/task_read guidance:\n%s", text)
 	}
+	if !strings.Contains(text, "busy-poll") && !strings.Contains(text, "Do not busy-poll") {
+		t.Fatalf("task guidance should discourage busy-poll:\n%s", text)
+	}
+}
+
+func TestBuildGuidancePeerCoordination(t *testing.T) {
+	text := BuildGuidance([]GuidanceEntry{
+		{Name: "task"},
+		{Name: "task_message"},
+		{Name: "agent_roster"},
+		{Name: "agent_message"},
+		{Name: "agent_broadcast"},
+	})
+	for _, needle := range []string{
+		"agent_message",
+		"mid-flight",
+		"child.completed",
+		"task_message",
+		"parent→owned-child",
+		"chatty",
+	} {
+		if !strings.Contains(text, needle) {
+			t.Fatalf("missing peer coordination needle %q:\n%s", needle, text)
+		}
+	}
+	if strings.Contains(text, "parent-only control plane") && !strings.Contains(text, "not a parent-only") {
+		// Ensure we do not reintroduce parent-only control-plane framing without negation.
+		t.Fatalf("guidance should not imply parent-only control plane:\n%s", text)
+	}
 }
 
 func TestBuildGuidanceMCPFewNoPerToolList(t *testing.T) {
@@ -218,6 +247,7 @@ func TestBuiltinShortPurposesCoversCoreTools(t *testing.T) {
 		"toolsearch", "question", "apply_patch", "enter_plan_mode",
 		"exit_plan_mode", "phase_done", "task",
 		"task_status", "task_read", "task_message", "task_interrupt",
+		"agent_roster", "agent_message", "agent_broadcast", "team_task",
 	}
 	m := BuiltinShortPurposes()
 	for _, name := range core {

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/tui/term"
@@ -20,7 +20,7 @@ func TestTerminalModalNilSession(t *testing.T) {
 		t.Fatal("listenCmd with nil session should be nil")
 	}
 
-	next, cmd := m.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	next, cmd := m.update(tea.KeyPressMsg{Code: 'a', Text: string([]rune{'a'})})
 	if next == nil {
 		t.Fatal("key update closed nil-session modal")
 	}
@@ -28,7 +28,7 @@ func TestTerminalModalNilSession(t *testing.T) {
 		t.Fatal("key update should not emit cmd without session")
 	}
 
-	next, cmd = m.update(tea.KeyMsg{Type: tea.KeyCtrlG})
+	next, cmd = m.update(tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
 	if next != nil {
 		t.Fatal("ctrl+g should close modal")
 	}
@@ -110,7 +110,7 @@ sleep 30
 
 	// Forward printable keys + enter.
 	for _, r := range []rune{'p', 'i', 'n', 'g'} {
-		next, c := m.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		next, c := m.update(tea.KeyPressMsg{Text: string([]rune{r})})
 		if next == nil {
 			t.Fatal("forwarded key closed modal")
 		}
@@ -118,7 +118,7 @@ sleep 30
 			t.Fatal("key forward should not return cmd")
 		}
 	}
-	next, c := m.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, c := m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if next == nil || c != nil {
 		t.Fatal("enter should stay open without cmd")
 	}
@@ -131,7 +131,7 @@ sleep 30
 	}
 
 	// ctrl+g closes session and emits exit with snapshot fields.
-	next, c = m.update(tea.KeyMsg{Type: tea.KeyCtrlG})
+	next, c = m.update(tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
 	if next != nil {
 		t.Fatal("ctrl+g should close modal")
 	}

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
@@ -78,7 +78,7 @@ func TestComposerLargePasteCollapsesToChip(t *testing.T) {
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	body := "line1\nline2\nline3\nline4"
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(body), Paste: true})
+	m = updateApp(t, m, tea.PasteMsg{Content: body})
 
 	wantChip := fmt.Sprintf("[pasted %d lines]", pasteLineCount(body))
 	if got := m.composer.Value(); got != wantChip {
@@ -97,7 +97,7 @@ func TestComposerSmallPasteInsertsVerbatim(t *testing.T) {
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	body := "short\npaste"
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(body), Paste: true})
+	m = updateApp(t, m, tea.PasteMsg{Content: body})
 
 	if got := m.composer.Value(); got != body {
 		t.Fatalf("composer = %q, want verbatim %q", got, body)
@@ -115,14 +115,14 @@ func TestComposerPasteExpandsOnSend(t *testing.T) {
 
 	body := "alpha\nbeta\ngamma\ndelta"
 	m = typeAppText(t, m, "note: ")
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(body), Paste: true})
+	m = updateApp(t, m, tea.PasteMsg{Content: body})
 
 	chip := fmt.Sprintf("[pasted %d lines]", pasteLineCount(body))
 	if !strings.Contains(m.composer.Value(), chip) {
 		t.Fatalf("composer before send = %q, want chip %q", m.composer.Value(), chip)
 	}
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	_ = runAllAppCmds(t, cmd)
 	op := receiveAppOp(t, ops)
@@ -145,9 +145,9 @@ func TestComposerMultiplePastesGetUniqueChips(t *testing.T) {
 
 	a := "a1\na2\na3"
 	b := "b1\nb2\nb3"
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(a), Paste: true})
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" "), Paste: false})
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(b), Paste: true})
+	m = updateApp(t, m, tea.PasteMsg{Content: a})
+	m = updateApp(t, m, tea.KeyPressMsg{Text: " "})
+	m = updateApp(t, m, tea.PasteMsg{Content: b})
 
 	want := "[pasted 3 lines] [pasted 3 lines #2]"
 	if got := m.composer.Value(); got != want {
@@ -167,7 +167,7 @@ func TestComposerDeletingChipPrunesPendingPaste(t *testing.T) {
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	body := "x\ny\nz"
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(body), Paste: true})
+	m = updateApp(t, m, tea.PasteMsg{Content: body})
 	if len(m.pendingPastes) != 1 {
 		t.Fatalf("setup: pendingPastes = %+v", m.pendingPastes)
 	}
@@ -183,8 +183,8 @@ func TestComposerPasteKeepsDraftWhenNoProvider(t *testing.T) {
 	// providerName empty by default
 
 	body := "one\ntwo\nthree"
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(body), Paste: true})
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = updateApp(t, m, tea.PasteMsg{Content: body})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	assertNoAppOp(t, ops)
 	chip := fmt.Sprintf("[pasted %d lines]", pasteLineCount(body))

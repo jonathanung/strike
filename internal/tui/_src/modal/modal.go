@@ -4,9 +4,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -18,7 +18,7 @@ import (
 // centered overlay dialog (opencode's dialog-stack pattern). A nil return
 // from update closes it. The width passed to view is the dialog box width.
 type modal interface {
-	update(msg tea.KeyMsg) (modal, tea.Cmd)
+	update(msg tea.KeyPressMsg) (modal, tea.Cmd)
 	view(width int, th theme.Theme) string
 }
 
@@ -125,7 +125,7 @@ func (m *permissionModal) onCountdown(msg permissionCountdownMsg) (modal, tea.Cm
 	return nil, m.reply(protocol.DecisionOnce)
 }
 
-func (m *permissionModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *permissionModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	if m.state == permissionModalFeedback {
 		if isEscape(msg) {
 			return nil, m.replyWithMessage(protocol.DecisionReject, "")
@@ -207,7 +207,7 @@ func (m *permissionModal) view(width int, th theme.Theme) string {
 	th = th.Resolve()
 	st := th.S()
 	inner := max(1, ui.PanelInnerWidth(th, width))
-	cursorWidth := max(1, ansi.StringWidth(m.feedback.Cursor.View()))
+	cursorWidth := max(1, 1)
 	heading := wrapToWidth(st.WarningStrong.Render("Permission required: "+m.req.Permission), inner)
 	detail := wrapToWidth(st.Text.Render(strings.Join(m.req.Patterns, "\n")), inner)
 
@@ -246,7 +246,7 @@ func (m *permissionModal) view(width int, th theme.Theme) string {
 
 	if m.state == permissionModalFeedback {
 		prompt := st.Text.Render("Optional feedback for the rejection:")
-		m.feedback.Width = max(1, inner-ansi.StringWidth(m.feedback.Prompt)-cursorWidth)
+		m.feedback.SetWidth(max(1, inner-ansi.StringWidth(m.feedback.Prompt)-cursorWidth))
 		m.feedback.SetValue(m.feedback.Value())
 		body := heading + "\n" + detail + diffSection + strings.Repeat("\n", max(1, th.Spacing.SM)) + prompt + "\n" + m.feedback.View()
 		return ui.Dialog(th, ui.DialogOpts{

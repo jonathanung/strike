@@ -118,6 +118,30 @@ func TestSampleCPUIdleExceedingTotalReadsAsIdle(t *testing.T) {
 	}
 }
 
+// Linux /proc/stat idle includes iowait, which may decrease (man 5 proc). When
+// idle drops while total advances, unsigned deltaIdle underflows; the old clamp
+// then forced deltaIdle == deltaTotal and reported 0% busy — inverted from the
+// truth (no measurable idle in the window → fully busy). Issue #626.
+func TestSampleCPUIdleRegressionReadsAsBusy(t *testing.T) {
+	h := NewHost()
+	// Issue reproduction: prev idle=24000 total=25500; cur idle=23960 total=25520
+	// (user+50, system+10, idle+0, iowait−40). deltaTotal=20, idle regressed.
+	h.readHostCPUFn = scriptedCPU([][2]uint64{
+		{24000, 25500},
+		{23960, 25520},
+	})
+	ctx := context.Background()
+
+	h.Collect(ctx, "")
+	s, _ := h.Collect(ctx, "")
+	if !s.CPUHostOK {
+		t.Fatal("CPUHostOK = false")
+	}
+	if s.CPUHostPct != 100 {
+		t.Errorf("CPUHostPct = %v, want 100 — idle regression is zero idle, not fully idle", s.CPUHostPct)
+	}
+}
+
 // A stalled counter may substitute the last percent only briefly. Past that the
 // reading is not measuring anything and a stale number is worse than
 // "unavailable" — the #602/#521 failure mode.

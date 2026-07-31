@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -207,7 +207,7 @@ func TestPaletteFilteringRanksExactPrefixAndSubsequenceStablyAndIgnoresCase(t *t
 	for i, want := range want {
 		copy := *m
 		for range i {
-			updatePalette(t, &copy, tea.KeyMsg{Type: tea.KeyDown})
+			updatePalette(t, &copy, tea.KeyPressMsg{Code: tea.KeyDown})
 		}
 		assertPaletteEnter(t, &copy, want)
 	}
@@ -220,13 +220,13 @@ func TestPaletteBackspaceRestoresResultsAndZeroResultsDoNotSelect(t *testing.T) 
 	if view := m.view(80, theme.Default()); !strings.Contains(view, "no matching actions") {
 		t.Errorf("zero-result view did not explain its empty state:\n%s", view)
 	}
-	next, cmd := m.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if next != m || cmd != nil {
 		t.Fatal("enter with zero results closed the palette or emitted a command")
 	}
 
 	for range 4 {
-		updatePalette(t, m, tea.KeyMsg{Type: tea.KeyBackspace})
+		updatePalette(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
 	}
 	assertPaletteEnter(t, m, paletteInvokeMsg{Action: paletteAction{Kind: paletteActionKeybindEditor}})
 }
@@ -234,13 +234,13 @@ func TestPaletteBackspaceRestoresResultsAndZeroResultsDoNotSelect(t *testing.T) 
 func TestPaletteNavigationKeysWrapAndSelectExpectedActions(t *testing.T) {
 	tests := []struct {
 		name string
-		keys []tea.KeyMsg
+		keys []tea.KeyPressMsg
 		want paletteInvokeMsg
 	}{
-		{name: "down", keys: []tea.KeyMsg{{Type: tea.KeyDown}}, want: paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/provider"}}},
-		{name: "up wraps", keys: []tea.KeyMsg{{Type: tea.KeyUp}}, want: paletteInvokeMsg{Action: paletteAction{Kind: paletteActionSkill, Value: "review"}}},
-		{name: "ctrl n", keys: []tea.KeyMsg{{Type: tea.KeyCtrlN}}, want: paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/provider"}}},
-		{name: "ctrl p wraps", keys: []tea.KeyMsg{{Type: tea.KeyCtrlP}}, want: paletteInvokeMsg{Action: paletteAction{Kind: paletteActionSkill, Value: "review"}}},
+		{name: "down", keys: []tea.KeyPressMsg{{Code: tea.KeyDown}}, want: paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/provider"}}},
+		{name: "up wraps", keys: []tea.KeyPressMsg{{Code: tea.KeyUp}}, want: paletteInvokeMsg{Action: paletteAction{Kind: paletteActionSkill, Value: "review"}}},
+		{name: "ctrl n", keys: []tea.KeyPressMsg{{Code: 'n', Mod: tea.ModCtrl}}, want: paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/provider"}}},
+		{name: "ctrl p wraps", keys: []tea.KeyPressMsg{{Code: 'p', Mod: tea.ModCtrl}}, want: paletteInvokeMsg{Action: paletteAction{Kind: paletteActionSkill, Value: "review"}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -256,7 +256,7 @@ func TestPaletteNavigationKeysWrapAndSelectExpectedActions(t *testing.T) {
 func TestPaletteFilteringResetsSelectionToFirstMatch(t *testing.T) {
 	m := newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true})
 	for range 5 {
-		updatePalette(t, m, tea.KeyMsg{Type: tea.KeyDown})
+		updatePalette(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
 	}
 	// Filter to a unique prefix so the first match is deterministic.
 	typePalette(t, m, "auth")
@@ -266,7 +266,7 @@ func TestPaletteFilteringResetsSelectionToFirstMatch(t *testing.T) {
 func TestPaletteRefreshPreservesFilterAndSelectedAction(t *testing.T) {
 	m := newPaletteModal(paletteTestSpecs(), []string{"build", "code reviewer"}, paletteAvailability{HasProvider: true})
 	typePalette(t, m, "agent")
-	updatePalette(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	updatePalette(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
 
 	m.refresh(buildPaletteEntries(paletteTestSpecs(), []string{"build", "code reviewer"}, paletteAvailability{HasProvider: true, TurnRunning: true}))
 	if m.filter != "agent" {
@@ -360,7 +360,7 @@ func TestPaletteViewDoesNotRenderDescriptionControlPayloadAsTerminalMetadataOrRo
 
 func TestPaletteEscapeClosesWithoutCommand(t *testing.T) {
 	m := newPaletteModal(paletteTestSpecs(), nil, paletteAvailability{HasProvider: true})
-	next, cmd := m.update(tea.KeyMsg{Type: tea.KeyEsc})
+	next, cmd := m.update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if next != nil || cmd != nil {
 		t.Fatal("escape did not close the palette without emitting a command")
 	}
@@ -395,7 +395,7 @@ func assertPaletteDisabled(t *testing.T, m *paletteModal, filter, reason string)
 	if view := m.view(80, theme.Default()); !strings.Contains(view, reason) {
 		t.Errorf("disabled action %q did not show reason %q:\n%s", filter, reason, view)
 	}
-	next, cmd := m.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if next != m {
 		t.Errorf("enter on disabled action %q closed the palette", filter)
 	}
@@ -412,7 +412,7 @@ func assertPaletteInvoke(t *testing.T, m *paletteModal, filter string, want pale
 
 func assertPaletteEnter(t *testing.T, m *paletteModal, want paletteInvokeMsg) {
 	t.Helper()
-	next, cmd := m.update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if next != nil {
 		t.Fatal("enter on enabled action did not close the palette")
 	}
@@ -428,10 +428,10 @@ func assertPaletteEnter(t *testing.T, m *paletteModal, want paletteInvokeMsg) {
 
 func typePalette(t *testing.T, m *paletteModal, text string) {
 	t.Helper()
-	updatePalette(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(text)})
+	updatePalette(t, m, tea.KeyPressMsg{Text: text})
 }
 
-func updatePalette(t *testing.T, m *paletteModal, key tea.KeyMsg) {
+func updatePalette(t *testing.T, m *paletteModal, key tea.KeyPressMsg) {
 	t.Helper()
 	next, cmd := m.update(key)
 	if next == nil {

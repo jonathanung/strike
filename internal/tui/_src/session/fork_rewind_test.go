@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
@@ -186,7 +186,7 @@ func TestRewindModalEnterForks(t *testing.T) {
 	next, _ := m.handleCommand("/rewind")
 	nm := next.(Model)
 	modal := nm.modal.(*rewindModal)
-	updated, cmd := modal.update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := modal.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if updated != nil {
 		t.Fatal("enter should close modal")
 	}
@@ -226,7 +226,7 @@ func TestUndoModalEnterSendsRestore(t *testing.T) {
 	nm := next.(Model)
 	modal := nm.modal.(*undoModal)
 	// Default cursor is "chat and files".
-	updated, cmd := modal.update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := modal.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if updated != nil {
 		t.Fatal("enter should close modal")
 	}

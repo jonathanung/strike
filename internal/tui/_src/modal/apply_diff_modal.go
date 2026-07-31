@@ -3,7 +3,7 @@ package tui
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -48,7 +48,7 @@ func newApplyDiffModalPatch(files host.Files, patch string) *applyDiffModal {
 	}
 }
 
-func (m *applyDiffModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *applyDiffModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	if m.decided {
 		return nil, nil
 	}

@@ -418,12 +418,66 @@ const (
 	ChildStatusCanceled  ChildStatus = "canceled"
 )
 
+// TeamMemberState is the roster lifecycle state of one agent on an implicit
+// session-scoped team (lead + children). Values align with ChildStatus for
+// terminal outcomes; "running" covers live members including the lead.
+type TeamMemberState string
+
+const (
+	TeamMemberRunning   TeamMemberState = "running"
+	TeamMemberCompleted TeamMemberState = "completed"
+	TeamMemberFailed    TeamMemberState = "failed"
+	TeamMemberCanceled  TeamMemberState = "canceled"
+)
+
+// TeamMemberStateFromChild maps a terminal child outcome onto a roster state.
+// Unknown statuses fall back to failed.
+func TeamMemberStateFromChild(s ChildStatus) TeamMemberState {
+	switch s {
+	case ChildStatusCompleted:
+		return TeamMemberCompleted
+	case ChildStatusCanceled:
+		return TeamMemberCanceled
+	case ChildStatusFailed:
+		return TeamMemberFailed
+	default:
+		return TeamMemberFailed
+	}
+}
+
+// TeamRosterMember is one entry in a TeamRoster snapshot event.
+// State prefers task_status vocabulary (starting|working|needs_attention|
+// completed|failed|canceled|unknown) when the emitter has live detail;
+// otherwise terminal TeamMemberState values are used.
+type TeamRosterMember struct {
+	SessionID       string `json:"sessionId"`
+	Name            string `json:"name,omitempty"`
+	Agent           string `json:"agent,omitempty"`
+	State           string `json:"state"`
+	ParentSessionID string `json:"parentSessionId,omitempty"`
+	Depth           int    `json:"depth,omitempty"`
+	StartedAt       string `json:"startedAt,omitempty"` // RFC3339 when known
+	TerminalSummary string `json:"terminalSummary,omitempty"`
+	Role            string `json:"role,omitempty"` // "lead" or "member"
+}
+
+// TeamRoster is a full snapshot of the implicit session team roster.
+// Emitted when membership or member state changes so UIs can render without
+// calling the agent_roster tool. Correlation.SessionID is the lead id.
+type TeamRoster struct {
+	Correlation
+	LeadID  string             `json:"leadId"`
+	Members []TeamRosterMember `json:"members"`
+}
+
 // ChildStarted marks the beginning of a foreground child/subagent session.
 // Emitted by the parent engine with the child's correlation.
 type ChildStarted struct {
 	Correlation
 	Agent  string `json:"agent,omitempty"`
 	Prompt string `json:"prompt,omitempty"`
+	// Name is an optional stable teammate alias assigned at spawn.
+	Name string `json:"name,omitempty"`
 }
 
 // ChildCompleted marks the end of a foreground child/subagent session.
@@ -432,6 +486,25 @@ type ChildCompleted struct {
 	Correlation
 	Status  ChildStatus `json:"status"`
 	Summary string      `json:"summary,omitempty"`
+	// Name is the stable teammate alias when one was assigned at spawn.
+	Name string `json:"name,omitempty"`
+}
+
+// AgentMessage records a peer/team mailbox delivery for UI and debugging.
+// Correlation is the recipient session. Body is the message text; From/To are
+// session ids; TeamID is the lead session id (team identity).
+// Emitted on the recipient engine at boundary injection (tool-round / idle
+// nudge), never mid-tool-call.
+type AgentMessage struct {
+	Correlation
+	From string `json:"from"`
+	To   string `json:"to"`
+	Body string `json:"body"`
+	// Summary is an optional short UI label (not required for delivery).
+	Summary string `json:"summary,omitempty"`
+	TeamID  string `json:"teamId,omitempty"`
+	// MessageID is a stable id for ack/dedup within the session.
+	MessageID string `json:"messageId,omitempty"`
 }
 
 // UserMessage echoes accepted user input into the event stream so the
@@ -872,6 +945,8 @@ func (FilesInvalidated) isEvent()       {}
 func (EngineError) isEvent()            {}
 func (ChildStarted) isEvent()           {}
 func (ChildCompleted) isEvent()         {}
+func (AgentMessage) isEvent()           {}
+func (TeamRoster) isEvent()             {}
 func (UsageReported) isEvent()          {}
 func (ProviderRetrying) isEvent()       {}
 func (CompactionStarted) isEvent()      {}

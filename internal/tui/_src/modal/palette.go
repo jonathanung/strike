@@ -3,7 +3,7 @@ package tui
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 	"github.com/jonathanung/strike-cli/internal/tui/ui"
@@ -234,7 +234,7 @@ func paletteMatchRank(entry paletteEntry, query string) int {
 	return best
 }
 
-func (m *paletteModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *paletteModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	list := m.filtered()
 	if isEscape(msg) {
 		return nil, nil
@@ -263,8 +263,8 @@ func (m *paletteModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
 			return paletteInvokeMsg{Action: entry.Action}
 		}
 	default:
-		if msg.Type == tea.KeyRunes {
-			m.filter += string(msg.Runes)
+		if len(msg.Text) > 0 {
+			m.filter += msg.Text
 			m.cursor = 0
 		}
 	}

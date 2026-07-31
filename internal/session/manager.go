@@ -18,6 +18,7 @@ import (
 type Info struct {
 	ID              string
 	ParentSessionID string
+	LeadSessionID   string // team lead; empty on roots (self is lead)
 	Title           string
 	ProjectKey      string // launch project identity; empty on legacy sessions
 	WorktreePath    string // strike-managed git worktree; empty = launch cwd
@@ -35,6 +36,7 @@ type Info struct {
 type CreateOptions struct {
 	ID              string
 	ParentSessionID string
+	LeadSessionID   string // implicit team lead for children; empty on roots
 	Title           string
 	ProjectKey      string // same key as history/memory (canonical project root)
 }
@@ -97,6 +99,7 @@ func (m *Manager) Create(opts CreateOptions) (Info, error) {
 	meta := Meta{
 		Title:           strings.TrimSpace(opts.Title),
 		ParentSessionID: strings.TrimSpace(opts.ParentSessionID),
+		LeadSessionID:   strings.TrimSpace(opts.LeadSessionID),
 		ProjectKey:      strings.TrimSpace(opts.ProjectKey),
 		CreatedAt:       now.Format(time.RFC3339Nano),
 	}
@@ -107,6 +110,7 @@ func (m *Manager) Create(opts CreateOptions) (Info, error) {
 	info := Info{
 		ID:              id,
 		ParentSessionID: meta.ParentSessionID,
+		LeadSessionID:   meta.LeadSessionID,
 		Title:           meta.Title,
 		ProjectKey:      meta.ProjectKey,
 		WorktreePath:    meta.WorktreePath,
@@ -829,6 +833,7 @@ func (m *Manager) infoFromDiskLocked(id string, st os.FileInfo) (Info, error) {
 	return Info{
 		ID:              id,
 		ParentSessionID: meta.ParentSessionID,
+		LeadSessionID:   meta.LeadSessionID,
 		Title:           title,
 		ProjectKey:      meta.ProjectKey,
 		WorktreePath:    meta.WorktreePath,

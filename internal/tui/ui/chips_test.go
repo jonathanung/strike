@@ -4,14 +4,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
 
 func TestBadgeWrapsTextInBrackets(t *testing.T) {
-	out := Badge(theme.Default(), ToneAccent, "anthropic/claude-sonnet-5")
+	out := ansi.Strip(Badge(theme.Default(), ToneAccent, "anthropic/claude-sonnet-5"))
 	if !strings.Contains(out, "anthropic/claude-sonnet-5") {
 		t.Errorf("badge missing text: %q", out)
 	}
@@ -20,11 +20,28 @@ func TestBadgeWrapsTextInBrackets(t *testing.T) {
 	}
 }
 
+func TestToneDangerMapsToThemeDanger(t *testing.T) {
+	th := theme.Default()
+	if got := toneColor(th, ToneDanger); got != th.Danger {
+		t.Errorf("toneColor(ToneDanger) = %#v, want Danger %#v", got, th.Danger)
+	}
+	if got := toneColor(th, ToneError); got != th.Error {
+		t.Errorf("toneColor(ToneError) = %#v, want Error %#v", got, th.Error)
+	}
+	if th.Danger == th.Error {
+		t.Fatal("Default Danger must stay distinct from Error for ToneDanger")
+	}
+	out := Badge(th, ToneDanger, "yolo")
+	if !strings.Contains(ansi.Strip(out), "yolo") {
+		t.Errorf("ToneDanger badge missing label: %q", out)
+	}
+}
+
 func TestBadgeUsesCustomDelimitersAndStrongTone(t *testing.T) {
 	th := theme.Default()
 	th.Icons.BadgeLeft = "<"
 	th.Icons.BadgeRight = ">"
-	if out := Badge(th, ToneAccent, "model"); !strings.HasPrefix(out, "<") || !strings.HasSuffix(out, ">") {
+	if out := ansi.Strip(Badge(th, ToneAccent, "model")); !strings.HasPrefix(out, "<") || !strings.HasSuffix(out, ">") {
 		t.Errorf("badge did not use custom delimiters: %q", out)
 	}
 }
@@ -52,7 +69,7 @@ func TestWidgetsSafelyRenderNegativeThemeSpacing(t *testing.T) {
 func TestBadgeHonorsExplicitZeroSpacing(t *testing.T) {
 	th := theme.Default()
 	th.Spacing = theme.NewSpacing(0, 0, 0, 0)
-	if got := Badge(th, ToneAccent, "x"); got != "[x]" {
+	if got := ansi.Strip(Badge(th, ToneAccent, "x")); got != "[x]" {
 		t.Errorf("Badge with zero XS spacing = %q, want [x]", got)
 	}
 }
@@ -79,7 +96,7 @@ func TestKeyHintsTruncatesByDroppingWholeHints(t *testing.T) {
 	if w := lipgloss.Width(out); w > 14 {
 		t.Errorf("truncated width %d exceeds 14: %q", w, out)
 	}
-	if !strings.Contains(out, "enter send") {
+	if !strings.Contains(ansi.Strip(out), "enter send") {
 		t.Errorf("first hint dropped: %q", out)
 	}
 	if strings.Contains(out, "interrupt") {
@@ -182,7 +199,7 @@ func TestNoticeRendersLevelGlyphs(t *testing.T) {
 	}
 	for _, c := range cases {
 		out := Notice(th, c.level, "message text", 40)
-		if !strings.HasPrefix(out, c.glyph) {
+		if !strings.HasPrefix(ansi.Strip(out), c.glyph) {
 			t.Errorf("level %d prefix = %q, want glyph %q", c.level, out, c.glyph)
 		}
 		if !strings.Contains(out, "message text") {

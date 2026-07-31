@@ -3,19 +3,19 @@ package tui
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/jonathanung/strike-cli/internal/tui/ui"
 )
 
-func (m Model) View() string {
+func (m Model) View() tea.View {
 	// Soft-coalesced updates reuse the last full frame so Bubble Tea's
 	// post-Update View call does not rebuild Canvas at token/spinner rate (#496).
 	if p := m.paint; p != nil && p.suppress && p.lastFrame != "" {
 		p.viewCalls++
 		p.lastViewBytes = len(p.lastFrame)
-		return p.lastFrame
+		return m.teaView(p.lastFrame)
 	}
 	if m.paint != nil {
 		m.paint.viewCalls++
@@ -38,7 +38,25 @@ func (m Model) View() string {
 	if m.paint != nil {
 		m.paint.lastViewBytes = len(frame)
 	}
-	return frame
+	return m.teaView(frame)
+}
+
+// viewString returns the rendered frame content for tests and string-based
+// assertions. Prefer this over View().Content at call sites that predate v2.
+func viewString(m Model) string {
+	return m.View().Content
+}
+
+// teaView wraps a frame string in the declarative Bubble Tea v2 View fields
+// that replaced WithAltScreen / WithMouseCellMotion / WithReportFocus /
+// SetWindowTitle program options and commands.
+func (m Model) teaView(frame string) tea.View {
+	v := tea.NewView(frame)
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	v.ReportFocus = true
+	v.WindowTitle = windowTitle(m)
+	return v
 }
 
 // renderFrame builds the full-screen UI without OSC52 side effects or the

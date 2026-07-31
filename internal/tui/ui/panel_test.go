@@ -4,9 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/muesli/termenv"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
@@ -17,6 +16,8 @@ func lastLine(s string) string {
 	lines := strings.Split(s, "\n")
 	return lines[len(lines)-1]
 }
+
+func plainLine(s string) string { return ansi.Strip(s) }
 
 func borderedTheme() theme.Theme {
 	th := theme.Default()
@@ -82,10 +83,11 @@ func TestPanelKeyHintsFooterStaysSingleLine(t *testing.T) {
 func TestPanelBorderedEmbedsTitleInTopBorder(t *testing.T) {
 	out := Panel(borderedTheme(), PanelOpts{Title: "session", Width: 40}, "body")
 	top := firstLine(out)
-	if !strings.HasPrefix(top, "╭─ session ") {
+	plain := plainLine(top)
+	if !strings.HasPrefix(plain, "╭─ session ") {
 		t.Errorf("top border does not embed the title: %q", top)
 	}
-	if !strings.HasSuffix(top, "╮") {
+	if !strings.HasSuffix(plain, "╮") {
 		t.Errorf("top border does not close with ╮: %q", top)
 	}
 	if w := lipgloss.Width(top); w != 40 {
@@ -96,10 +98,11 @@ func TestPanelBorderedEmbedsTitleInTopBorder(t *testing.T) {
 func TestPanelBorderedEmbedsFooterInBottomBorder(t *testing.T) {
 	out := Panel(borderedTheme(), PanelOpts{Title: "keys", Footer: "esc close", Width: 40}, "body")
 	bottom := lastLine(out)
-	if !strings.HasPrefix(bottom, "╰─ esc close ") {
+	plain := plainLine(bottom)
+	if !strings.HasPrefix(plain, "╰─ esc close ") {
 		t.Errorf("bottom border does not embed the footer: %q", bottom)
 	}
-	if !strings.HasSuffix(bottom, "╯") {
+	if !strings.HasSuffix(plain, "╯") {
 		t.Errorf("bottom border does not close with ╯: %q", bottom)
 	}
 }
@@ -203,7 +206,7 @@ func TestPanelBorderColorSelectionPrecedence(t *testing.T) {
 	tests := []struct {
 		name string
 		opts PanelOpts
-		want lipgloss.AdaptiveColor
+		want theme.AdaptiveColor
 	}{
 		{"default", PanelOpts{}, th.Border},
 		{"focused", PanelOpts{Focused: true}, th.BorderFocus},
@@ -225,8 +228,8 @@ func TestPanelSurfaceColorSelectionPrecedence(t *testing.T) {
 	tests := []struct {
 		name     string
 		opts     PanelOpts
-		wantBody lipgloss.AdaptiveColor
-		wantEdge lipgloss.AdaptiveColor
+		wantBody theme.AdaptiveColor
+		wantEdge theme.AdaptiveColor
 	}{
 		{"default", PanelOpts{}, th.Surface, th.Surface},
 		// Focus: body stays Surface; edge alone uses SurfaceFocus (no full wash).
@@ -237,12 +240,12 @@ func TestPanelSurfaceColorSelectionPrecedence(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			gotBody := panelBodySurface(th, tt.opts)
-			ac, ok := gotBody.(lipgloss.AdaptiveColor)
+			ac, ok := gotBody.(theme.AdaptiveColor)
 			if !ok || ac != tt.wantBody {
 				t.Errorf("panelBodySurface = %v, want %v", gotBody, tt.wantBody)
 			}
 			gotEdge := panelEdgeSurface(th, tt.opts)
-			ac, ok = gotEdge.(lipgloss.AdaptiveColor)
+			ac, ok = gotEdge.(theme.AdaptiveColor)
 			if !ok || ac != tt.wantEdge {
 				t.Errorf("panelEdgeSurface = %v, want %v", gotEdge, tt.wantEdge)
 			}
@@ -254,15 +257,11 @@ func TestPanelSurfaceColorSelectionPrecedence(t *testing.T) {
 }
 
 func TestPanelFocusStateChangesRenderedChrome(t *testing.T) {
-	saved := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(saved) })
-
 	th := theme.Default()
-	th.Surface = lipgloss.AdaptiveColor{Light: "#111111", Dark: "#111111"}
-	th.SurfaceFocus = lipgloss.AdaptiveColor{Light: "#222222", Dark: "#222222"}
-	th.BorderFocus = lipgloss.AdaptiveColor{Light: "#333333", Dark: "#333333"}
-	th.SurfaceMuted = lipgloss.AdaptiveColor{Light: "#444444", Dark: "#444444"}
+	th.Surface = theme.AdaptiveColor{Light: "#111111", Dark: "#111111"}
+	th.SurfaceFocus = theme.AdaptiveColor{Light: "#222222", Dark: "#222222"}
+	th.BorderFocus = theme.AdaptiveColor{Light: "#333333", Dark: "#333333"}
+	th.SurfaceMuted = theme.AdaptiveColor{Light: "#444444", Dark: "#444444"}
 	focused := Panel(th, PanelOpts{Title: "x", Width: 24, Focused: true}, "body")
 	unfocused := Panel(th, PanelOpts{Title: "x", Width: 24}, "body")
 	dim := Panel(th, PanelOpts{Title: "x", Width: 24, Dim: true}, "body")
@@ -304,12 +303,8 @@ func TestPanelFocusStateChangesRenderedChrome(t *testing.T) {
 }
 
 func TestPanelFocusedThinBarWidthSafeAt80AndNarrow(t *testing.T) {
-	saved := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(saved) })
-
 	th := theme.Default()
-	th.BorderFocus = lipgloss.AdaptiveColor{Light: "#abcdef", Dark: "#abcdef"}
+	th.BorderFocus = theme.AdaptiveColor{Light: "#abcdef", Dark: "#abcdef"}
 	body := strings.Join([]string{
 		"the quick brown fox jumps over the lazy dog and keeps going",
 		"second line with 界 wide runes and more text to wrap pressure",
@@ -462,18 +457,18 @@ func TestPanelUsesValidCustomBordersAndFallsBackFromInvalidGlyphs(t *testing.T) 
 		TopLeft: "+", TopRight: "+", BottomLeft: "+", BottomRight: "+", Horizontal: "=", Vertical: "!",
 	}
 	out := Panel(custom, PanelOpts{Title: "x", Width: 20}, "body")
-	if top := firstLine(out); !strings.HasPrefix(top, "+") || !strings.HasSuffix(top, "+") || !strings.Contains(top, "=") {
-		t.Errorf("custom top border = %q", top)
+	if top := plainLine(firstLine(out)); !strings.HasPrefix(top, "+") || !strings.HasSuffix(top, "+") || !strings.Contains(top, "=") {
+		t.Errorf("custom top border = %q", firstLine(out))
 	}
-	if body := strings.Split(out, "\n")[1]; !strings.HasPrefix(body, "!") || !strings.HasSuffix(body, "!") {
-		t.Errorf("custom vertical border = %q", body)
+	if body := plainLine(strings.Split(out, "\n")[1]); !strings.HasPrefix(body, "!") || !strings.HasSuffix(body, "!") {
+		t.Errorf("custom vertical border = %q", strings.Split(out, "\n")[1])
 	}
 
 	invalid := borderedTheme()
 	invalid.BorderStyle = theme.BorderStyle{TopLeft: "界", Horizontal: "--"}
 	out = Panel(invalid, PanelOpts{Width: 20}, "body")
-	if top := firstLine(out); strings.Contains(top, "界") || strings.Contains(top, "--") || !strings.HasPrefix(top, "╭") {
-		t.Errorf("invalid custom border did not fall back: %q", top)
+	if top := plainLine(firstLine(out)); strings.Contains(top, "界") || strings.Contains(top, "--") || !strings.HasPrefix(top, "╭") {
+		t.Errorf("invalid custom border did not fall back: %q", firstLine(out))
 	}
 	for i, line := range strings.Split(out, "\n") {
 		if got := lipgloss.Width(line); got != 20 {
@@ -500,7 +495,7 @@ func TestPanelRejectsControlCharacterBorderGlyphs(t *testing.T) {
 			t.Errorf("row %d retained a carriage return border glyph: %q", i, line)
 		}
 	}
-	if !strings.HasPrefix(lines[0], "╭") || !strings.HasSuffix(lines[0], "╮") {
+	if plain := plainLine(lines[0]); !strings.HasPrefix(plain, "╭") || !strings.HasSuffix(plain, "╮") {
 		t.Errorf("invalid border glyphs did not fall back to the light preset: %q", lines[0])
 	}
 }

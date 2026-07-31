@@ -1,7 +1,7 @@
 package tui
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/tui/term"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -37,9 +37,9 @@ func newTerminalModal(sess *term.Session, path, display string, before fileMeta,
 	}
 }
 
-func (m *terminalModal) update(msg tea.KeyMsg) (modal, tea.Cmd) {
+func (m *terminalModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	// ctrl+g closes the overlay editor.
-	if msg.Type == tea.KeyCtrlG {
+	if msg.String() == "ctrl+g" {
 		if m.sess != nil {
 			_ = m.sess.Close()
 		}

@@ -1,7 +1,7 @@
 package ui
 
 import (
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
@@ -20,11 +20,12 @@ const (
 	ToneSuccess               // positive
 	ToneWarning               // caution
 	ToneError                 // failure
+	ToneDanger                // destructive (distinct from Error)
 	ToneMuted                 // de-emphasized
 )
 
 // toneColor resolves a Tone to its adaptive color for the given theme.
-func toneColor(th theme.Theme, tone Tone) lipgloss.AdaptiveColor {
+func toneColor(th theme.Theme, tone Tone) theme.AdaptiveColor {
 	th = th.Resolve()
 	switch tone {
 	case ToneAccent:
@@ -37,6 +38,8 @@ func toneColor(th theme.Theme, tone Tone) lipgloss.AdaptiveColor {
 		return th.Warning
 	case ToneError:
 		return th.Error
+	case ToneDanger:
+		return th.Danger
 	case ToneMuted:
 		return th.TextMuted
 	default:
@@ -58,6 +61,8 @@ func toneStyle(th theme.Theme, tone Tone) lipgloss.Style {
 		return st.Warning
 	case ToneError:
 		return st.Error
+	case ToneDanger:
+		return st.Danger
 	case ToneMuted:
 		return st.Muted
 	default:
@@ -78,6 +83,8 @@ func toneStrongStyle(th theme.Theme, tone Tone) lipgloss.Style {
 		return st.WarningStrong
 	case ToneError:
 		return st.ErrorStrong
+	case ToneDanger:
+		return st.DangerStrong
 	case ToneMuted:
 		return st.MutedStrong
 	default:

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -184,7 +184,7 @@ func TestFirstRunWelcomeCard(t *testing.T) {
 	// No provider selected → first-run onboarding card.
 	first.providerName = ""
 	first = updateApp(t, first, tea.WindowSizeMsg{Width: 100, Height: 30})
-	plain := ansi.Strip(first.View())
+	plain := ansi.Strip(viewString(first))
 	for _, want := range []string{"first run", "/auth", "/model"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("first-run welcome missing %q:\n%s", want, plain)
@@ -198,7 +198,7 @@ func TestFirstRunWelcomeCard(t *testing.T) {
 	normal, _ := newAppTestModel(nil, nil)
 	normal.providerName = ""
 	normal = updateApp(t, normal, tea.WindowSizeMsg{Width: 100, Height: 30})
-	plain = ansi.Strip(normal.View())
+	plain = ansi.Strip(viewString(normal))
 	if !strings.Contains(plain, "get started") {
 		t.Errorf("default welcome missing get started:\n%s", plain)
 	}

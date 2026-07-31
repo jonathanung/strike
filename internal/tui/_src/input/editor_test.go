@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
@@ -235,7 +235,7 @@ func TestFileChangedSinceDetectsCreateModifyDelete(t *testing.T) {
 func TestVimCommandUsageError(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)
 	m.composer.SetValue("/vim a b c")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if msg := runAppCmd(t, cmd); msg != nil {
 		t.Errorf("unexpected msg %#v", msg)
@@ -249,7 +249,7 @@ func TestVimCommandUsageError(t *testing.T) {
 func TestNanoCommandUsageError(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)
 	m.composer.SetValue("/nano a b c")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if msg := runAppCmd(t, cmd); msg != nil {
 		t.Errorf("unexpected msg %#v", msg)
@@ -263,7 +263,7 @@ func TestNanoCommandUsageError(t *testing.T) {
 func TestVimCommandUnresolvedAtMention(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)
 	m.composer.SetValue("/vim @")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if msg := runAppCmd(t, cmd); msg != nil {
 		t.Errorf("unexpected msg %#v", msg)
@@ -307,7 +307,7 @@ func TestVimCommandMissingEditor(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)
 	m.workDir = t.TempDir()
 	m.composer.SetValue("/vim")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if m.composer.Value() != "" {
 		t.Errorf("composer = %q, want reset", m.composer.Value())
@@ -330,7 +330,7 @@ func TestNanoCommandMissingNano(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)
 	m.workDir = t.TempDir()
 	m.composer.SetValue("/nano note.txt")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	if m.composer.Value() != "" {
 		t.Errorf("composer = %q, want reset", m.composer.Value())
@@ -415,7 +415,7 @@ func TestFilesInvalidatedNotice(t *testing.T) {
 func TestHelpListsVimAndNano(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m.composer.SetValue("/help")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 	runAppCmd(t, cmd)
 	help, ok := m.modal.(*helpModal)
@@ -446,7 +446,7 @@ func TestComposerExternalEditorMissingEditorKeepsDraft(t *testing.T) {
 
 	m, ops := newAppTestModel(nil, nil)
 	m.composer.SetValue("keep this draft")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlE})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
 	m = updated.(Model)
 	msg := runAppCmd(t, cmd)
 	finished, ok := msg.(composerEditorFinishedMsg)
@@ -521,11 +521,11 @@ func TestComposerExternalEditorIgnoredWhenRightFocused(t *testing.T) {
 
 	m, _ := newAppTestModel(nil, nil)
 	m.composer.SetValue("draft")
-	m = updateApp(t, m, tea.KeyMsg{Type: tea.KeyCtrlL})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 	if m.focus != focusRight {
 		t.Fatalf("focus = %v, want right", m.focus)
 	}
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlE})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
 	m = updated.(Model)
 	if msg := runAppCmd(t, cmd); msg != nil {
 		if _, ok := msg.(composerEditorFinishedMsg); ok {

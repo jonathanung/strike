@@ -3,8 +3,8 @@ package tui
 import (
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -83,7 +83,7 @@ func (m Model) welcomeView(width, height int) string {
 			inner := ui.PanelInnerWidth(th, cardWidth)
 			bodyRows := max(0, rowHeights[row]-2)
 			parts = append(parts, ui.Panel(th, ui.PanelOpts{
-				Title:   card.title,
+				Title:   welcomeCardTitle(th, card.title, card.tone),
 				Width:   cardWidth,
 				Height:  rowHeights[row],
 				Focused: m.focus == focusLeft && m.modal == nil,
@@ -129,8 +129,28 @@ func welcomeLogoBand(th theme.Theme, width, height, gap int) (string, int) {
 
 type welcomeCard struct {
 	title   string
+	tone    ui.Tone // multi-accent title hierarchy; body stays default surface
 	desired int
 	body    func(width, rows int) string
+}
+
+// welcomeCardTitle paints the card title in its soft-bento accent tone.
+// Pre-styled SGR is preserved by ui.Panel solidEdge (no body Tone elevation).
+func welcomeCardTitle(th theme.Theme, title string, tone ui.Tone) string {
+	th = th.Resolve()
+	if title == "" {
+		return ""
+	}
+	switch tone {
+	case ui.ToneAccentAlt:
+		return th.S().AccentAltStrong.Render(title)
+	case ui.ToneSuccess:
+		return th.S().SuccessStrong.Render(title)
+	case ui.ToneMuted:
+		return th.S().MutedStrong.Render(title)
+	default:
+		return th.S().Title.Render(title)
+	}
 }
 
 func (m Model) welcomeCards(statuses []host.ProviderStatus) []welcomeCard {
@@ -156,25 +176,25 @@ func (m Model) welcomeCards(statuses []host.ProviderStatus) []welcomeCard {
 	cards := make([]welcomeCard, 0, 4)
 	if m.providerName == "" || selectedUnauthed {
 		if m.firstRun {
-			cards = append(cards, welcomeCard{title: "first run", desired: 7, body: func(width, rows int) string {
+			cards = append(cards, welcomeCard{title: "first run", tone: ui.ToneAccentAlt, desired: 7, body: func(width, rows int) string {
 				return m.welcomeFirstRun(width, rows)
 			}})
 		} else {
-			cards = append(cards, welcomeCard{title: "get started", desired: 9, body: func(width, rows int) string {
+			cards = append(cards, welcomeCard{title: "get started", tone: ui.ToneAccentAlt, desired: 9, body: func(width, rows int) string {
 				return m.welcomeProviders(statuses, width, rows)
 			}})
 		}
 	}
-	cards = append(cards, welcomeCard{title: "keys", desired: 10, body: func(width, rows int) string {
+	cards = append(cards, welcomeCard{title: "keys", tone: ui.ToneAccent, desired: 10, body: func(width, rows int) string {
 		return m.welcomeKeys(width, rows)
 	}})
 	if len(validAgents) > 0 || len(validSkills) > 0 {
-		cards = append(cards, welcomeCard{title: "agents & skills", desired: 8, body: func(width, rows int) string {
+		cards = append(cards, welcomeCard{title: "agents & skills", tone: ui.ToneSuccess, desired: 8, body: func(width, rows int) string {
 			return m.welcomeAgentsSkills(validAgents, validSkills, width, rows)
 		}})
 	}
 	if len(m.entries) > 0 {
-		cards = append(cards, welcomeCard{title: "recent prompts", desired: 5, body: m.welcomeRecent})
+		cards = append(cards, welcomeCard{title: "recent prompts", tone: ui.ToneMuted, desired: 5, body: m.welcomeRecent})
 	}
 	return cards
 }

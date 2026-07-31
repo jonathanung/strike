@@ -4,9 +4,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -166,7 +166,7 @@ func (w agentsWindow) update(msg tea.Msg) (window, tea.Cmd) {
 		}
 		w.cursor = clampAgentsCursor(w.cursor, len(rows))
 		return w, nil
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return w.handleKey(msg)
 	}
 	return w, nil
@@ -274,7 +274,7 @@ func agentsPaneKeyHints() []ui.KeyHint {
 	return hints
 }
 
-func (w agentsWindow) handleKey(msg tea.KeyMsg) (agentsWindow, tea.Cmd) {
+func (w agentsWindow) handleKey(msg tea.KeyPressMsg) (agentsWindow, tea.Cmd) {
 	if w.filterEdit {
 		return w.handleFilterEditKey(msg)
 	}
@@ -364,7 +364,7 @@ func (w agentsWindow) highlightCmd() tea.Cmd {
 	return func() tea.Msg { return agentsHighlightMsg{sessionID: id} }
 }
 
-func (w agentsWindow) handleFilterEditKey(msg tea.KeyMsg) (agentsWindow, tea.Cmd) {
+func (w agentsWindow) handleFilterEditKey(msg tea.KeyPressMsg) (agentsWindow, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		w.filterEdit = false
@@ -385,8 +385,8 @@ func (w agentsWindow) handleFilterEditKey(msg tea.KeyMsg) (agentsWindow, tea.Cmd
 		w.nodes = w.buildNodes()
 		w.cursor = clampAgentsCursor(w.cursor, len(ui.FlattenTree(w.nodes)))
 	default:
-		if msg.Type == tea.KeyRunes {
-			w.textFilter += string(msg.Runes)
+		if len(msg.Text) > 0 {
+			w.textFilter += msg.Text
 			w.nodes = w.buildNodes()
 			w.cursor = clampAgentsCursor(w.cursor, len(ui.FlattenTree(w.nodes)))
 		}
@@ -499,17 +499,24 @@ func (w agentsWindow) filterChildTree(kids []childActivity, q string) []ui.TreeN
 	}
 	var build func(ch childActivity) (ui.TreeNode, bool)
 	build = func(ch childActivity) (ui.TreeNode, bool) {
-		label := childViewTitle(ch.agent, ch.prompt, ch.sessionID, ch.title)
+		label := childViewTitle(ch.agent, ch.prompt, ch.sessionID, ch.title, ch.name)
 		if label == "" {
 			label = shortSessionID(ch.sessionID)
 		}
 		state := childAgentState(ch.status)
+		if ch.rosterState == "needs you" {
+			state = theme.AgentStateAttention
+		}
+		detail := ch.status
+		if ch.rosterState != "" {
+			detail = ch.rosterState
+		}
 		node := ui.TreeNode{
 			ID:      ch.sessionID,
 			Label:   label,
-			Detail:  ch.status,
+			Detail:  detail,
 			Current: w.viewingID == ch.sessionID,
-			Tone:    childStatusTone(ch.status),
+			Tone:    childStatusTone(detail),
 		}
 		var children []ui.TreeNode
 		for _, g := range byParent[ch.sessionID] {
@@ -517,7 +524,7 @@ func (w agentsWindow) filterChildTree(kids []childActivity, q string) []ui.TreeN
 				children = append(children, gn)
 			}
 		}
-		selfOK := agentsStateMatches(state, w.viewFilter) && agentsTextMatches(q, ch.sessionID, label, ch.agent, ch.prompt, ch.title)
+		selfOK := agentsStateMatches(state, w.viewFilter) && agentsTextMatches(q, ch.sessionID, label, ch.agent, ch.prompt, ch.title, ch.name)
 		if !selfOK && len(children) == 0 {
 			return ui.TreeNode{}, false
 		}
@@ -565,12 +572,14 @@ func agentsTextMatches(q string, parts ...string) bool {
 }
 
 func childAgentState(status string) theme.AgentState {
-	switch status {
-	case "running":
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "running", "working", "starting":
 		return theme.AgentStateWorking
-	case string(protocol.ChildStatusFailed):
+	case "needs you", "needs_attention":
+		return theme.AgentStateAttention
+	case "failed", "error":
 		return theme.AgentStateError
-	case string(protocol.ChildStatusCanceled):
+	case "canceled", "cancelled":
 		return theme.AgentStateDead
 	default:
 		// completed / unknown → idle green (ready)
@@ -611,14 +620,16 @@ func listableChildActivities(children []childActivity) []childActivity {
 }
 
 func childStatusTone(status string) ui.Tone {
-	switch status {
-	case "running":
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "running", "working", "starting":
 		return ui.ToneAccentAlt
-	case string(protocol.ChildStatusCompleted):
+	case "needs you", "needs_attention":
+		return ui.ToneWarning
+	case "completed", "done":
 		return ui.ToneSuccess
-	case string(protocol.ChildStatusFailed):
+	case "failed", "error":
 		return ui.ToneError
-	case string(protocol.ChildStatusCanceled):
+	case "canceled", "cancelled":
 		return ui.ToneMuted
 	default:
 		return ui.ToneDefault
@@ -657,7 +668,7 @@ func clampAgentsCursor(cursor, n int) int {
 func agentsListItem(th theme.Theme, ch childActivity, current bool) ui.ListItem {
 	th = th.Resolve()
 
-	label := sanitizeDisplayData(childViewTitle(ch.agent, ch.prompt, ch.sessionID, ch.title))
+	label := sanitizeDisplayData(childViewTitle(ch.agent, ch.prompt, ch.sessionID, ch.title, ch.name))
 	if label == "" {
 		label = "subagent"
 	}

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -20,12 +20,14 @@ type viewportCacheItem struct {
 }
 
 // viewportCache avoids re-rendering completed transcript cells on each
-// refreshViewport call. Invalidated by width, theme, appearance, or workDir
-// changes; per-cell fingerprints catch content/selection/expand/flash updates.
+// refreshViewport call. Invalidated by width, theme, appearance, effective
+// dark (auto+BackgroundColorMsg), or workDir changes; per-cell fingerprints
+// catch content/selection/expand/flash updates.
 type viewportCache struct {
 	width      int
 	themeID    string
 	appearance appearanceMode
+	dark       bool // m.effectiveDark() at cache fill
 	workDir    string
 	items      []viewportCacheItem
 	// cellRenders / cellHits are stats for the most recent refreshViewport.
@@ -42,7 +44,7 @@ func (m *Model) refreshViewport() {
 	if m.paint != nil {
 		m.paint.refreshViewportCalls++
 	}
-	width := max(1, m.viewport.Width)
+	width := max(1, m.viewport.Width())
 	cells := m.displayCells()
 	if len(cells) == 0 {
 		m.viewport.SetContent("")
@@ -56,11 +58,12 @@ func (m *Model) refreshViewport() {
 	// Stick to bottom only when already anchored; otherwise preserve scroll
 	// so users reading history are not yanked down on each event.
 	atBottom := m.viewport.AtBottom()
-	yOff := m.viewport.YOffset
+	yOff := m.viewport.YOffset()
 
 	globalOK := m.vpCache.width == width &&
 		m.vpCache.themeID == m.themeID &&
 		m.vpCache.appearance == m.appearance &&
+		m.vpCache.dark == m.effectiveDark() &&
 		m.vpCache.workDir == m.workDir
 	oldByPtr := map[any]viewportCacheItem{}
 	if globalOK {
@@ -117,6 +120,7 @@ func (m *Model) refreshViewport() {
 		width:       width,
 		themeID:     m.themeID,
 		appearance:  m.appearance,
+		dark:        m.effectiveDark(),
 		workDir:     m.workDir,
 		items:       items,
 		cellRenders: renders,
@@ -248,7 +252,7 @@ func (m *Model) renderCell(c cell, width int) string {
 // path wins and expands, otherwise Newline inserts. handled is true when the
 // key was consumed; cmd may launch the editor, open a confirm modal, or clear
 // a copied flash.
-func (m *Model) handleToolCellKeys(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
+func (m *Model) handleToolCellKeys(msg tea.KeyPressMsg) (handled bool, cmd tea.Cmd) {
 	if m.focus != focusLeft || m.modal != nil || m.completion != nil {
 		return false, nil
 	}
@@ -527,7 +531,7 @@ func (m Model) openFileRef(ref fileRef) (tea.Model, tea.Cmd) {
 }
 
 // fileRefAtMouse maps a left-click in the transcript viewport to a path:line.
-func (m Model) fileRefAtMouse(msg tea.MouseMsg) (fileRef, bool) {
+func (m Model) fileRefAtMouse(msg tea.Mouse) (fileRef, bool) {
 	if m.modal != nil || len(m.transcriptPlainLines) == 0 {
 		return fileRef{}, false
 	}
@@ -537,10 +541,10 @@ func (m Model) fileRefAtMouse(msg tea.MouseMsg) (fileRef, bool) {
 	}
 	relY := msg.Y - oy
 	relX := msg.X - ox
-	if relY < 0 || relX < 0 || relY >= m.viewport.Height {
+	if relY < 0 || relX < 0 || relY >= m.viewport.Height() {
 		return fileRef{}, false
 	}
-	lineIdx := m.viewport.YOffset + relY
+	lineIdx := m.viewport.YOffset() + relY
 	if lineIdx < 0 || lineIdx >= len(m.transcriptPlainLines) {
 		return fileRef{}, false
 	}
