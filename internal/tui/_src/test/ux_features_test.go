@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"image/color"
 	"io"
 	"strings"
 	"testing"
@@ -238,21 +239,18 @@ func TestHorizontalC2GeometryStillHolds(t *testing.T) {
 }
 
 func TestThemeCommandAppearanceAndPicker(t *testing.T) {
-	// Save/restore lipgloss background detection and package appearance cache.
 	savedDark := compat.HasDarkBackground
-	savedDetected := appearanceDetected
-	savedDetectedDark := appearanceDetectedDark
 	savedMDStyle := glamourStyleName
 	t.Cleanup(func() {
-		compat.HasDarkBackground = (savedDark)
-		appearanceDetected = savedDetected
-		appearanceDetectedDark = savedDetectedDark
+		compat.HasDarkBackground = savedDark
 		glamourStyleName = savedMDStyle
 	})
-	appearanceDetected = false
 
 	m, _ := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	// Seed terminal detection so /theme auto restores a known value.
+	m.detectedDark = true
+	m.applyAppearance()
 
 	runTheme := func(args string) Model {
 		t.Helper()
@@ -284,6 +282,9 @@ func TestThemeCommandAppearanceAndPicker(t *testing.T) {
 	m = runTheme("auto")
 	if m.appearance != appearanceAuto {
 		t.Errorf("auto appearance = %q", m.appearance)
+	}
+	if !compat.HasDarkBackground {
+		t.Error("auto did not restore detected dark background")
 	}
 
 	m = runTheme("nope")
@@ -372,39 +373,86 @@ func TestThemePickerSelectAndSave(t *testing.T) {
 
 func TestApplyAppearanceIsTestable(t *testing.T) {
 	savedDark := compat.HasDarkBackground
-	savedDetected := appearanceDetected
-	savedDetectedDark := appearanceDetectedDark
 	savedMDStyle := glamourStyleName
 	t.Cleanup(func() {
-		compat.HasDarkBackground = (savedDark)
-		appearanceDetected = savedDetected
-		appearanceDetectedDark = savedDetectedDark
+		compat.HasDarkBackground = savedDark
 		glamourStyleName = savedMDStyle
 	})
-	// Seed detection cache as if the terminal reported dark, then force modes.
-	appearanceDetected = true
-	appearanceDetectedDark = true
 
-	applyAppearance(appearanceLight)
+	m, _ := newAppTestModel(nil, nil)
+	m.detectedDark = true
+
+	m.appearance = appearanceLight
+	m.applyAppearance()
 	if compat.HasDarkBackground {
 		t.Error("applyAppearance(light) left dark background")
 	}
 	if glamourStyle() != "light" {
 		t.Errorf("glamour style after light = %q", glamourStyle())
 	}
-	applyAppearance(appearanceDark)
+	m.appearance = appearanceDark
+	m.applyAppearance()
 	if !compat.HasDarkBackground {
 		t.Error("applyAppearance(dark) left light background")
 	}
 	if glamourStyle() != "dark" {
 		t.Errorf("glamour style after dark = %q", glamourStyle())
 	}
-	applyAppearance(appearanceAuto)
+	m.appearance = appearanceAuto
+	m.applyAppearance()
 	if !compat.HasDarkBackground {
 		t.Error("applyAppearance(auto) did not restore detected dark")
 	}
 	if glamourStyle() != "dark" {
 		t.Errorf("glamour style after auto = %q", glamourStyle())
+	}
+}
+
+func TestBackgroundColorMsgFeedsAppearance(t *testing.T) {
+	savedDark := compat.HasDarkBackground
+	savedMDStyle := glamourStyleName
+	t.Cleanup(func() {
+		compat.HasDarkBackground = savedDark
+		glamourStyleName = savedMDStyle
+	})
+
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.appearance = appearanceAuto
+	m.detectedDark = true
+	m.applyAppearance()
+
+	// Light terminal background.
+	m = updateApp(t, m, tea.BackgroundColorMsg{Color: color.RGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}})
+	if m.detectedDark {
+		t.Fatal("light BackgroundColorMsg left detectedDark true")
+	}
+	if compat.HasDarkBackground || glamourStyle() != "light" {
+		t.Errorf("auto+light bg: darkBg=%v glamour=%q", compat.HasDarkBackground, glamourStyle())
+	}
+
+	// Forced dark ignores a subsequent light detection update for styling,
+	// but still records detectedDark for when the user returns to auto.
+	m.appearance = appearanceDark
+	m.applyAppearance()
+	m = updateApp(t, m, tea.BackgroundColorMsg{Color: color.RGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}})
+	if m.detectedDark {
+		t.Fatal("forced dark path should still record light detection")
+	}
+	if !compat.HasDarkBackground || glamourStyle() != "dark" {
+		t.Errorf("forced dark with light detect: darkBg=%v glamour=%q", compat.HasDarkBackground, glamourStyle())
+	}
+
+	m.appearance = appearanceAuto
+	m.applyAppearance()
+	if compat.HasDarkBackground {
+		t.Error("auto after light detect should be light")
+	}
+
+	// Dark terminal background.
+	m = updateApp(t, m, tea.BackgroundColorMsg{Color: color.RGBA{R: 0, G: 0, B: 0, A: 0xff}})
+	if !m.detectedDark || !compat.HasDarkBackground || glamourStyle() != "dark" {
+		t.Errorf("dark msg: detected=%v darkBg=%v glamour=%q", m.detectedDark, compat.HasDarkBackground, glamourStyle())
 	}
 }
 

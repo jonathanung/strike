@@ -20,12 +20,14 @@ type viewportCacheItem struct {
 }
 
 // viewportCache avoids re-rendering completed transcript cells on each
-// refreshViewport call. Invalidated by width, theme, appearance, or workDir
-// changes; per-cell fingerprints catch content/selection/expand/flash updates.
+// refreshViewport call. Invalidated by width, theme, appearance, effective
+// dark (auto+BackgroundColorMsg), or workDir changes; per-cell fingerprints
+// catch content/selection/expand/flash updates.
 type viewportCache struct {
 	width      int
 	themeID    string
 	appearance appearanceMode
+	dark       bool // m.effectiveDark() at cache fill
 	workDir    string
 	items      []viewportCacheItem
 	// cellRenders / cellHits are stats for the most recent refreshViewport.
@@ -61,6 +63,7 @@ func (m *Model) refreshViewport() {
 	globalOK := m.vpCache.width == width &&
 		m.vpCache.themeID == m.themeID &&
 		m.vpCache.appearance == m.appearance &&
+		m.vpCache.dark == m.effectiveDark() &&
 		m.vpCache.workDir == m.workDir
 	oldByPtr := map[any]viewportCacheItem{}
 	if globalOK {
@@ -117,6 +120,7 @@ func (m *Model) refreshViewport() {
 		width:       width,
 		themeID:     m.themeID,
 		appearance:  m.appearance,
+		dark:        m.effectiveDark(),
 		workDir:     m.workDir,
 		items:       items,
 		cellRenders: renders,

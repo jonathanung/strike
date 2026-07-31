@@ -114,6 +114,31 @@ func TestRefreshViewportAppearanceChangeInvalidatesCache(t *testing.T) {
 	}
 }
 
+func TestRefreshViewportEffectiveDarkChangeInvalidatesCache(t *testing.T) {
+	// auto + BackgroundColorMsg flips effectiveDark without changing appearance mode.
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.applyEvent(protocol.UserMessage{Text: "bg user"})
+	m.applyEvent(protocol.TextDelta{Text: "bg asst"})
+	m.applyEvent(protocol.TurnCompleted{StopReason: "end_turn"})
+	m.appearance = appearanceAuto
+	m.detectedDark = true
+	m.refreshViewport()
+	n := len(m.vpCache.items)
+	if n == 0 {
+		t.Fatal("empty cache after seed")
+	}
+	m.refreshViewport()
+	if m.vpCache.cellRenders != 0 || m.vpCache.cellHits != n {
+		t.Fatalf("same effective dark: renders=%d hits=%d want 0/%d", m.vpCache.cellRenders, m.vpCache.cellHits, n)
+	}
+	m.detectedDark = false
+	m.refreshViewport()
+	if m.vpCache.cellRenders != n || m.vpCache.cellHits != 0 {
+		t.Fatalf("effective dark change: renders=%d hits=%d want %d/0", m.vpCache.cellRenders, m.vpCache.cellHits, n)
+	}
+}
+
 func TestRefreshViewportThinkingToggleInvalidatesVisibility(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
