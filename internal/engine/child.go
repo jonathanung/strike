@@ -160,8 +160,9 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 
 	// Parent effective ceiling: configured layers plus the active parent
 	// agent profile. Session always-grants are intentionally omitted so the
-	// child starts with an empty granted set. Child agent Allows are dropped
-	// in handleSelectAgent (Depth > 0) so a child profile cannot widen.
+	// child starts with an empty granted set. Child agent Allows that would
+	// override a parent Deny are dropped (AG3); Ask→Allow is kept so personas
+	// like general (bash allow) work as task subagents.
 	parentLayers := append([]permission.Ruleset(nil), e.opts.Rules...)
 	if len(e.agent.Permissions) > 0 {
 		parentLayers = append(parentLayers, append(permission.Ruleset(nil), e.agent.Permissions...))
