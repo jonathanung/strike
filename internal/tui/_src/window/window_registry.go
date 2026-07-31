@@ -240,8 +240,9 @@ type memberSlot struct {
 	height int
 }
 
-// minStackMemberOuter is the smallest useful bordered panel (top, one body, bottom).
-const minStackMemberOuter = 3
+// minStackMemberOuter is the smallest useful chrome panel (top, one body, bottom).
+// Matches ui.ChromeMinOuter for default soft chrome so stacked tiles keep rounded frames.
+const minStackMemberOuter = 6
 
 // computeMemberSlots splits the right-pane outer box among n group members.
 // pairHorizontal places members side-by-side (bottom-bar orientation); otherwise

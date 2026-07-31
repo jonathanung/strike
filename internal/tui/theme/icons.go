@@ -18,8 +18,8 @@ type Icons struct {
 	FilterCursor    string // ▏ active filter cursor
 	ToolGuide       string // │ tool transcript guide
 	FocusBar        string // ▏ solid-chrome focused pane edge marker (one cell)
-	BadgeLeft       string // [ badge opening delimiter
-	BadgeRight      string // ] badge closing delimiter
+	BadgeLeft       string // optional badge opening delimiter (stock: empty)
+	BadgeRight      string // optional badge closing delimiter (stock: empty)
 	DetailSeparator string // — list detail separator
 	Ellipsis        string // … truncation marker
 	LogoTopRule     string // ▁ logo top rule
@@ -36,6 +36,9 @@ type Icons struct {
 // DefaultIcons returns the stock glyph set. A zero Icons value is treated as
 // "unset" by the ui package, which falls back to these, so components stay
 // usable when handed a bare theme.
+//
+// Badge delimiters are empty by default so status chips render as soft surface
+// pills without heavy brackets. Themes may restore "[" / "]" via JSON icons.
 func DefaultIcons() Icons {
 	return Icons{
 		Prompt:       "❯",
@@ -52,7 +55,8 @@ func DefaultIcons() Icons {
 		FilterCursor: "▏",
 		ToolGuide:    "│",
 		FocusBar:     "▏",
-		BadgeLeft:    "[", BadgeRight: "]", DetailSeparator: "—", Ellipsis: "…",
+		// Soft pills: no bracket delimiters (themes may set "[" / "]").
+		BadgeLeft: "", BadgeRight: "", DetailSeparator: "—", Ellipsis: "…",
 		LogoTopRule: "▁", LogoBottomRule: "▔",
 		MeterFill: "█", MeterEmpty: "░",
 		TreeExpanded: "▾", TreeCollapsed: "▸",
@@ -103,6 +107,14 @@ func resolveIcons(i, d Icons) Icons {
 	if i.FocusBar == "" {
 		i.FocusBar = d.FocusBar
 	}
+	// BadgeLeft/BadgeRight: empty is a valid stock value (soft pills). Only
+	// fill from defaults when the theme Icons value is the zero Icons struct
+	// overall — callers that set Icons partially already get d via Theme.Resolve
+	// pairing. Preserve explicit empty by not overriding when d is also empty.
+	// When a theme file omits icons entirely, Resolve passes zero Icons and d
+	// is DefaultIcons (empty badges). When a theme sets BadgeLeft to "[", it is
+	// non-empty and kept. There is no "explicit empty override of non-empty
+	// default" path beyond Default itself being empty.
 	if i.BadgeLeft == "" {
 		i.BadgeLeft = d.BadgeLeft
 	}

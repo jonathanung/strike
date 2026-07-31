@@ -20,8 +20,9 @@ func TestDialogEmbedsTitleAndPlacesHintAtFoot(t *testing.T) {
 	if top := ansi.Strip(firstLine(out)); !strings.Contains(top, "Select provider") {
 		t.Errorf("title not embedded in top chrome: %q", top)
 	}
-	if strings.ContainsAny(ansi.Strip(firstLine(out)), "╭╮│") {
-		t.Errorf("default dialog used box-drawing chrome: %q", firstLine(out))
+	// Default chrome is soft: rounded corners on the title edge.
+	if top := ansi.Strip(firstLine(out)); !strings.HasPrefix(top, "╭") || !strings.HasSuffix(top, "╮") {
+		t.Errorf("default soft dialog missing rounded top: %q", firstLine(out))
 	}
 	if !strings.Contains(out, "choose a provider") {
 		t.Error("dialog body missing")
@@ -90,9 +91,9 @@ func TestDialogWrapsLongBodyText(t *testing.T) {
 		Hint:  "enter select",
 		Width: width,
 	}, body)
-	// Solid focus chrome puts Icons.FocusBar in the pad column; drop it before
-	// joining so wrapped words reassemble across lines.
-	plain := strings.ReplaceAll(ansi.Strip(out), theme.Default().Resolve().Icons.FocusBar, "")
+	// Soft chrome uses │ verticals; strip before joining so wrapped words reassemble.
+	plain := strings.ReplaceAll(ansi.Strip(out), "│", "")
+	plain = strings.ReplaceAll(plain, theme.Default().Resolve().Icons.FocusBar, "")
 	compact := strings.Join(strings.Fields(plain), " ")
 	if !strings.Contains(compact, "primary purpose of a unit test") {
 		t.Fatalf("dialog dropped wrapped body:\n%s\ncompact=%q", ansi.Strip(out), compact)

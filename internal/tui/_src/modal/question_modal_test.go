@@ -55,6 +55,17 @@ func TestQuestionModalWrapsLongOptionLabels(t *testing.T) {
 	th := theme.Default().Resolve()
 	view := m.view(width, th)
 	plain := strings.ReplaceAll(ansi.Strip(view), th.Icons.FocusBar, "")
+	// Soft chrome verticals break Fields-join across wrapped lines; strip outline.
+	for _, g := range []string{
+		th.BorderStyle.TopLeft, th.BorderStyle.TopRight,
+		th.BorderStyle.BottomLeft, th.BorderStyle.BottomRight,
+		th.BorderStyle.Horizontal, th.BorderStyle.Vertical,
+		"╭", "╮", "╰", "╯", "│", "─",
+	} {
+		if g != "" {
+			plain = strings.ReplaceAll(plain, g, " ")
+		}
+	}
 	compact := strings.Join(strings.Fields(plain), " ")
 	if !strings.Contains(compact, longOpt) {
 		t.Fatalf("long option truncated instead of wrapped:\n%s", plain)

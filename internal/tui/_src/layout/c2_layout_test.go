@@ -145,7 +145,8 @@ func TestC2ViewGeometryAndActivePanes(t *testing.T) {
 				titleIdx := strings.Index(topPlain, "context")
 				if titleIdx < 0 {
 					t.Errorf("right panel top chrome missing title on body start row: %q", topPlain)
-				} else if titleCol := ansi.StringWidth(topPlain[:titleIdx]); titleCol < rightStart-1 || titleCol > rightStart+2 {
+				} else if titleCol := ansi.StringWidth(topPlain[:titleIdx]); titleCol < rightStart-1 || titleCol > rightStart+4 {
+					// Soft chrome prefixes title with ╭─ (+2–3 cells); solid is near rightStart.
 					t.Errorf("right panel title at col %d, want near rightStart %d: %q", titleCol, rightStart, topPlain)
 				}
 				if bottomCh := displayColRune(bottomPlain, rightStart); bottomCh == 0 {

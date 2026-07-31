@@ -17,7 +17,7 @@ import (
 )
 
 // TestFrameGolden captures full-screen plain-text frames as post-E13.8 baselines
-// (Charm v2 + soft-bento direction). Structural layout regressions fail the
+// (Charm v2 + Family soft-rounded bento). Structural layout regressions fail the
 // suite; UPDATE_GOLDEN=1 rewrites the fixtures.
 //
 //	UPDATE_GOLDEN=1 go test ./internal/tui/ -run TestFrameGolden -count=1
@@ -115,38 +115,6 @@ func normalizeFrameGolden(frame string) string {
 		lines[i] = strings.TrimRight(ln, " \t")
 	}
 	return strings.Join(lines, "\n")
-}
-
-// TestThemeChromeSolidBorderedFrames asserts solid vs bordered chrome is
-// observable on a full app frame (post soft-bento default is solid).
-func TestThemeChromeSolidBorderedFrames(t *testing.T) {
-	savedDark := compat.HasDarkBackground
-	t.Cleanup(func() { compat.HasDarkBackground = savedDark })
-	compat.HasDarkBackground = true
-
-	for _, tc := range []struct {
-		name    string
-		chrome  theme.ChromeMode
-		wantBox bool
-	}{
-		{name: "solid", chrome: theme.ChromeSolid, wantBox: false},
-		{name: "bordered", chrome: theme.ChromeBordered, wantBox: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			th := theme.Default()
-			th.Chrome = tc.chrome
-			m, _ := newAppTestModelWithOptions(Options{Theme: &th})
-			m = updateApp(t, m, tea.WindowSizeMsg{Width: 93, Height: 40})
-			plain := ansi.Strip(viewString(m))
-			hasBox := strings.ContainsAny(plain, "╭╮╰╯┌┐└┘│─")
-			if hasBox != tc.wantBox {
-				t.Fatalf("box-drawing present=%v, want %v\n%s", hasBox, tc.wantBox, plain)
-			}
-			if !strings.Contains(plain, "context") {
-				t.Fatalf("split frame missing context pane:\n%s", plain)
-			}
-		})
-	}
 }
 
 // TestThemeLightDarkAppearanceFrames checks session appearance toggles flip

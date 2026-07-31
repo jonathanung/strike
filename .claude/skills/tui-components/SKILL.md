@@ -40,16 +40,16 @@ selection, and layout). Keep this catalog synchronized with `internal/tui/ui`.
 
 | Component | Exact signature | Use |
 |---|---|---|
-| Panel | `Panel(th theme.Theme, opts PanelOpts, body string) string` | Width-safe framed tile. `PanelOpts` has `Title`, `Footer`, mandatory `Width`, optional `Height`, `Focused`, `Dim`, `Tone`, and `Borderless`. Default chrome is **solid**. Focused solid panes: body stays `Surface`, title edge uses `SurfaceFocus`, leading `BorderFocus` bar in the left pad column — never a full-panel wash. `TextSelection` is a separate role. Tone dialogs keep elevated `SurfaceFocus` body. `chrome: bordered` uses box-drawing + `BorderFocus`. `Borderless` omits chrome. |
-| Panel geometry | `InnerWidth(width int) int`; `PanelInnerWidth(th theme.Theme, width int) int`; `PanelInnerHeight(width, height int) int`; `PanelContentOrigin(th theme.Theme, width int) (x, y int)` | Body dimensions and content-cell origin under chrome. Themed callers must use `PanelInnerWidth`; `InnerWidth` is default-theme compatibility only. `PanelInnerHeight` clamps nonpositive dimensions and removes two rows only when chrome fits; narrow panels and fixed heights below two retain full height. |
+| Panel | `Panel(th theme.Theme, opts PanelOpts, body string) string` | Width-safe framed tile. `PanelOpts` has `Title`, `Footer`, mandatory `Width`, optional `Height`, `Focused`, `Dim`, `Tone`, and `Borderless`. Default chrome is **soft** (surface-filled body + rounded `╭╮╰╯` outline). Focused soft panes: body stays `Surface`, title edge uses `SurfaceFocus`, outline uses `BorderFocus` — no FocusBar. Solid chrome keeps title-edge `SurfaceFocus` + thin FocusBar. Never a full-panel wash. `TextSelection` is a separate role. Tone dialogs keep elevated `SurfaceFocus` body. `chrome: bordered` uses outline only. Soft degrades below width 6. `Borderless` omits chrome. |
+| Panel geometry | `InnerWidth(width int) int`; `PanelInnerWidth(th theme.Theme, width int) int`; `PanelInnerHeight(width, height int) int`; `PanelInnerHeightFor(th, width, height int) int`; `PanelContentOrigin(th theme.Theme, width int) (x, y int)` | Body dimensions and content-cell origin under chrome. Themed callers must use `PanelInnerWidth`; `InnerWidth` is default-theme compatibility only. `PanelInnerHeight` uses default soft chrome; use `PanelInnerHeightFor` for non-default themes. |
 | Dialog | `Dialog(th theme.Theme, opts DialogOpts, body string) string` | Focused Panel with a muted final hint. `DialogOpts`: `Title`, `Hint`, `Width`, `Height`, `Tone`. Body lines longer than inner width are word-wrapped (idempotent if already wrapped). |
-| Badge | `Badge(th theme.Theme, tone Tone, text string) string` | Token-sized bracketed status chip. |
+| Badge | `Badge(th theme.Theme, tone Tone, text string) string` | Soft pill: tone label on `SurfaceMuted` with XS pad. Stock delimiters empty; themes may set `Icons.BadgeLeft`/`BadgeRight`. |
 | KeyHints | `KeyHints(th theme.Theme, width int, hints []KeyHint) string` | Width-safe footer hints. `KeyHint` has `Key`, `Label`. |
 | StatusBar | `StatusBar(th theme.Theme, width int, left, right string) string` | One exactly-width row with left/right content. |
 | List | `List(th theme.Theme, opts ListOpts) string` | Unframed picker body. `ListOpts`: `Items []ListItem`, `Cursor`, `Width`, `Visible`, `Wrap` (word-wrap labels/details instead of ellipsis; use for question options), `ShowFilter`, `Filter`, `Total`, `Empty`; `ListItem`: `Label`, `Detail`, `Current`, `Disabled`. |
 | Tree | `Tree(th theme.Theme, opts TreeOpts) string` | Unframed expand/collapse tree body. `TreeOpts`: `Nodes []TreeNode`, `Cursor`, `Width`, `Visible`, `Empty`; `TreeNode`: `ID`, `Label`, `Detail`, `Children`, `Expanded`, `Lazy`, `Leaf`, `Disabled`, `Current`, `Tone`. Helpers: `FlattenTree`, `TreeNodeAt`, `TreeToggleExpanded`. Indent uses `Spacing.SM`; expand glyphs are `Icons.TreeExpanded` / `TreeCollapsed`. |
 | Notice | `Notice(th theme.Theme, level Level, text string, width int) string` | One-line, level-colored feedback. |
-| Bento | `Bento(th theme.Theme, width int, cards []Card) string` | Card packer. `Card` has `Title`, `Footer`, `Body`, `Width`, `Tone`; its body wraps to `PanelInnerWidth(th, Width)`. Bento derives its inter-card gap from resolved `th.Spacing.SM`. |
+| Bento | `Bento(th theme.Theme, width int, cards []Card) string` | Card packer. `Card` has `Title`, `Footer`, `Body`, `Width`, optional `Height`, `Tone`, `Focused`, `Dim`; body wraps to `PanelInnerWidth(th, Width)`. Bento derives its inter-card gap from resolved `th.Spacing.SM`. |
 | Overlay | `OverlayCenter(th theme.Theme, bg, fg string, width, height int) string`; `Scrim(th theme.Theme, s string) string`; `ModalWidth(screenWidth int) int` | ANSI-aware centered overlay: scrims bg via `OverlayScrim`, pads every bg row to exact width (no bright spill strip), keeps fg sharp. Standalone `Scrim`; dialog width `min(72, screenWidth-4)`. |
 | Canvas | `Canvas(th theme.Theme, width, height int, body string) string` | Final full-screen fit operation and owner of the application background. |
 | Logo | `Logo(th theme.Theme) string`; `LogoCompact(th theme.Theme) string` | Full and compact Strike wordmarks. |
@@ -62,7 +62,7 @@ Dialog word-wraps body lines to `PanelInnerWidth`; Panel still truncates any
 over-long line as a safety net. Prefer pre-wrapping free text for clarity.
 `List` truncates by default; set `Wrap: true` for multi-line option bodies
 (question modal). `Card` wraps its own body. Size panel-backed child windows
-with `ui.PanelInnerHeight(width, height)` rather than unconditionally
+with `ui.PanelInnerHeight` / `PanelInnerHeightFor` rather than unconditionally
 subtracting border rows, so unbordered narrow panels retain their full height.
 
 ## Theme tokens
@@ -78,12 +78,12 @@ otherwise `Background` resolves to a solid `lipgloss.TerminalColor`.
 | `Accent`, `AccentAlt`, `Highlight` | primary, secondary, and selected emphasis |
 | `Success`, `Warning`, `Error`, `Danger` | semantic state colors |
 | `Background` | application background (`lipgloss.TerminalColor`) |
-| `Surface`, `SurfaceFocus`, `SurfaceMuted` | solid panel fills: body default / title-edge focus (and tone dialogs) / dim |
-| `Border`, `BorderFocus`, `BorderMuted` | bordered-chrome frame colors |
+| `Surface`, `SurfaceFocus`, `SurfaceMuted` | panel fills: body default / title-edge focus (and tone dialogs) / dim |
+| `Border`, `BorderFocus`, `BorderMuted` | soft/bordered frame colors |
 | `UserLabel`, `ToolLabel`, `DiffAdded`, `DiffRemoved` | transcript and diff roles |
-| `Chrome` | `ChromeSolid` (default) or `ChromeBordered` |
-| `BorderStyle` | bordered-chrome panel border weight and six glyphs |
-| `Spacing` | `None`, `XS`, `SM`, `MD`, `LG` layout gaps; `Label` is the gap between a numbered permission-choice shortcut (for example, `1)`) and its label, defaulting to `1` when resolved |
+| `Chrome` | `ChromeSoft` (default), `ChromeSolid`, or `ChromeBordered` |
+| `BorderStyle` | soft/bordered panel border weight and six glyphs |
+| `Spacing` | `None`, `XS`, `SM`, `MD`, `LG` layout gaps; left\|right pane gutter uses `XS` (keeps 93-col split); bento/welcome card gaps use `SM`; `Label` is the gap between a numbered permission-choice shortcut (for example, `1)`) and its label, defaulting to `1` when resolved |
 | `Icons` | glyph set below |
 | `AgentState` | runtime status coloring via `Theme.AgentStateColor` / `AgentStateStyle` (not a palette field) |
 
@@ -92,8 +92,8 @@ otherwise `Background` resolves to a solid `lipgloss.TerminalColor`.
 `FocusBar`,
 `BadgeLeft`, `BadgeRight`, `DetailSeparator`, `Ellipsis`, `LogoTopRule`,
 `LogoBottomRule`, `MeterFill`, `MeterEmpty`, `TreeExpanded`,
-`TreeCollapsed`, and `Sparkline` (low→high bar runes). Use `th.Icons`, never
-the literal glyph.
+`TreeCollapsed`, and `Sparkline` (low→high bar runes). Stock badge delimiters
+are empty (soft pills). Use `th.Icons`, never the literal glyph.
 
 `theme.AgentState` is the live session/agent status vocabulary for dynamic
 coloring: `Ready` → `Success`, `Working` → `AccentAlt`, `Attention` →
@@ -138,13 +138,13 @@ return ui.Dialog(th, ui.DialogOpts{Title: "Select provider", Width: width}, body
 
 The empty-transcript dashboard is app composition, not a component API. Its
 header owns the compact brand; the dashboard directly allocates fixed-height
-`Panel` cards, with one or two columns according to available width. It has no
-outer welcome panel or logo card. The `keys` card is always present; `get
-started` is present only when no provider is selected or the selected provider
-is unauthenticated; `agents & skills` requires at least one valid configured
-agent or skill; and `recent prompts` requires history. Preserve those
-conditions and the short-view fallback when changing the dashboard, without
-exposing app-private helpers as component recipes.
+`Panel` cards (soft chrome by default), with one or two columns according to
+available width. It has no outer welcome panel or logo card. The `keys` card is
+always present; `get started` is present only when no provider is selected or
+the selected provider is unauthenticated; `agents & skills` requires at least
+one valid configured agent or skill; and `recent prompts` requires history.
+Preserve those conditions and the short-view fallback when changing the
+dashboard, without exposing app-private helpers as component recipes.
 
 ## Extending and verification
 

@@ -10,13 +10,24 @@ import (
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
 
-func TestBadgeWrapsTextInBrackets(t *testing.T) {
-	out := ansi.Strip(Badge(theme.Default(), ToneAccent, "anthropic/claude-sonnet-5"))
-	if !strings.Contains(out, "anthropic/claude-sonnet-5") {
-		t.Errorf("badge missing text: %q", out)
+func TestBadgeContainsTextAsSoftPill(t *testing.T) {
+	out := Badge(theme.Default(), ToneAccent, "anthropic/claude-sonnet-5")
+	plain := ansi.Strip(out)
+	if !strings.Contains(plain, "anthropic/claude-sonnet-5") {
+		t.Errorf("badge missing text: %q", plain)
 	}
-	if !strings.HasPrefix(out, "[") || !strings.HasSuffix(out, "]") {
-		t.Errorf("badge is not bracketed: %q", out)
+	// Stock soft pills: no heavy brackets.
+	if strings.HasPrefix(plain, "[") || strings.HasSuffix(plain, "]") {
+		t.Errorf("default badge still bracket-heavy: %q", plain)
+	}
+	if out == "" {
+		t.Error("badge empty")
+	}
+}
+
+func TestBadgeEmptyTextNoCrash(t *testing.T) {
+	if got := Badge(theme.Default(), ToneAccent, ""); got != "" {
+		t.Errorf("empty badge = %q, want empty", got)
 	}
 }
 
@@ -69,8 +80,9 @@ func TestWidgetsSafelyRenderNegativeThemeSpacing(t *testing.T) {
 func TestBadgeHonorsExplicitZeroSpacing(t *testing.T) {
 	th := theme.Default()
 	th.Spacing = theme.NewSpacing(0, 0, 0, 0)
-	if got := ansi.Strip(Badge(th, ToneAccent, "x")); got != "[x]" {
-		t.Errorf("Badge with zero XS spacing = %q, want [x]", got)
+	// Soft pill: no brackets, zero pad → just the label.
+	if got := ansi.Strip(Badge(th, ToneAccent, "x")); got != "x" {
+		t.Errorf("Badge with zero XS spacing = %q, want x", got)
 	}
 }
 

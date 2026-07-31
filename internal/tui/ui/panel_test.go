@@ -25,14 +25,51 @@ func borderedTheme() theme.Theme {
 	return th
 }
 
-func TestPanelSolidEmbedsTitleWithoutBoxDrawing(t *testing.T) {
+func solidTheme() theme.Theme {
+	th := theme.Default()
+	th.Chrome = theme.ChromeSolid
+	return th
+}
+
+func softTheme() theme.Theme {
+	th := theme.Default()
+	th.Chrome = theme.ChromeSoft
+	return th
+}
+
+func TestPanelSoftRoundedCornersAndSurfaceBody(t *testing.T) {
 	out := Panel(theme.Default(), PanelOpts{Title: "session", Width: 40}, "body")
+	top := ansi.Strip(firstLine(out))
+	if !strings.HasPrefix(top, "╭") || !strings.HasSuffix(top, "╮") {
+		t.Errorf("soft top missing rounded corners: %q", top)
+	}
+	if !strings.Contains(top, "session") {
+		t.Errorf("soft top missing title: %q", top)
+	}
+	body := ansi.Strip(strings.Split(out, "\n")[1])
+	if !strings.HasPrefix(body, "│") || !strings.HasSuffix(body, "│") {
+		t.Errorf("soft body missing verticals: %q", body)
+	}
+	if !strings.Contains(body, "body") {
+		t.Errorf("soft body missing content: %q", body)
+	}
+	bottom := ansi.Strip(lastLine(out))
+	if !strings.HasPrefix(bottom, "╰") || !strings.HasSuffix(bottom, "╯") {
+		t.Errorf("soft bottom missing rounded corners: %q", bottom)
+	}
+	if w := lipgloss.Width(firstLine(out)); w != 40 {
+		t.Errorf("top width = %d, want 40", w)
+	}
+}
+
+func TestPanelSolidEmbedsTitleWithoutBoxDrawing(t *testing.T) {
+	out := Panel(solidTheme(), PanelOpts{Title: "session", Width: 40}, "body")
 	top := ansi.Strip(firstLine(out))
 	if !strings.Contains(top, "session") {
 		t.Errorf("top chrome missing title: %q", top)
 	}
 	if strings.ContainsAny(top, "╭╮╰╯│") {
-		t.Errorf("solid default used box-drawing chrome: %q", top)
+		t.Errorf("solid used box-drawing chrome: %q", top)
 	}
 	if w := lipgloss.Width(firstLine(out)); w != 40 {
 		t.Errorf("top width = %d, want 40", w)
@@ -43,7 +80,7 @@ func TestPanelSolidEmbedsTitleWithoutBoxDrawing(t *testing.T) {
 }
 
 func TestPanelSolidEmbedsFooter(t *testing.T) {
-	out := Panel(theme.Default(), PanelOpts{Title: "keys", Footer: "esc close", Width: 40}, "body")
+	out := Panel(solidTheme(), PanelOpts{Title: "keys", Footer: "esc close", Width: 40}, "body")
 	bottom := ansi.Strip(lastLine(out))
 	if !strings.Contains(bottom, "esc close") {
 		t.Errorf("bottom chrome missing footer: %q", bottom)
@@ -109,7 +146,7 @@ func TestPanelBorderedEmbedsFooterInBottomBorder(t *testing.T) {
 
 func TestPanelRendersExactlyRequestedWidth(t *testing.T) {
 	body := "the quick brown fox jumps over the lazy dog, then keeps on going for a while"
-	for _, th := range []theme.Theme{theme.Default(), borderedTheme()} {
+	for _, th := range []theme.Theme{theme.Default(), solidTheme(), borderedTheme()} {
 		for _, width := range []int{3, 4, 5, 6, 8, 12, 24, 40, 80, 120} {
 			out := Panel(th, PanelOpts{Title: "session", Footer: "esc", Width: width}, body)
 			for i, line := range strings.Split(out, "\n") {
@@ -144,6 +181,19 @@ func TestPanelDegradesAtTinyWidthsWithoutPanic(t *testing.T) {
 	}
 }
 
+func TestPanelSoftDegradesBelowWidth6(t *testing.T) {
+	for _, width := range []int{3, 4, 5} {
+		out := Panel(softTheme(), PanelOpts{Title: "title", Width: width}, "body")
+		plain := ansi.Strip(out)
+		if strings.ContainsAny(plain, "╭╮╰╯") {
+			t.Errorf("width %d soft should degrade without rounded chrome: %q", width, plain)
+		}
+		if w := lipgloss.Width(firstLine(out)); w != width {
+			t.Errorf("width %d: got %d", width, w)
+		}
+	}
+}
+
 func TestPanelFixedHeightClampsAndPads(t *testing.T) {
 	tall := strings.Join([]string{"1", "2", "3", "4", "5", "6"}, "\n")
 	clamped := Panel(theme.Default(), PanelOpts{Title: "t", Width: 20, Height: 5}, tall)
@@ -162,7 +212,7 @@ func TestPanelFixedHeightClampsAndPads(t *testing.T) {
 }
 
 func TestPanelTinyFixedHeightsDegradeWithoutPhantomBorderRows(t *testing.T) {
-	th := theme.Default()
+	th := solidTheme()
 	for _, tt := range []struct {
 		name          string
 		width, height int
@@ -257,7 +307,7 @@ func TestPanelSurfaceColorSelectionPrecedence(t *testing.T) {
 }
 
 func TestPanelFocusStateChangesRenderedChrome(t *testing.T) {
-	th := theme.Default()
+	th := solidTheme()
 	th.Surface = theme.AdaptiveColor{Light: "#111111", Dark: "#111111"}
 	th.SurfaceFocus = theme.AdaptiveColor{Light: "#222222", Dark: "#222222"}
 	th.BorderFocus = theme.AdaptiveColor{Light: "#333333", Dark: "#333333"}
@@ -275,13 +325,11 @@ func TestPanelFocusStateChangesRenderedChrome(t *testing.T) {
 	// Focused body must not flood SurfaceFocus; title edge + thin rule carry focus.
 	bodyLine := strings.Split(focused, "\n")[1]
 	if strings.Count(bodyLine, "48;2;34;34;34") > 2 {
-		// SurfaceFocus RGB 34,34,34 — body should not be washed with it.
 		t.Errorf("focused body still floods SurfaceFocus: %q", bodyLine)
 	}
 	if !strings.Contains(firstLine(focused), "48;2;34;34;34") {
 		t.Errorf("focused title edge missing SurfaceFocus: %q", firstLine(focused))
 	}
-	// Thin rule: BorderFocus as foreground (38;2), not a solid background block (48;2).
 	if !strings.Contains(bodyLine, "38;2;51;51;51") {
 		t.Errorf("focused body missing BorderFocus thin rule fg: %q", bodyLine)
 	}
@@ -291,7 +339,6 @@ func TestPanelFocusStateChangesRenderedChrome(t *testing.T) {
 	if !strings.Contains(ansi.Strip(bodyLine), th.Resolve().Icons.FocusBar) {
 		t.Errorf("focused body missing FocusBar glyph: %q", ansi.Strip(bodyLine))
 	}
-	// Body surface fill remains under the rule cell (quiet chrome, not a wash).
 	if !strings.Contains(bodyLine, "48;2;17;17;17") {
 		t.Errorf("focused body missing Surface under thin rule: %q", bodyLine)
 	}
@@ -302,8 +349,25 @@ func TestPanelFocusStateChangesRenderedChrome(t *testing.T) {
 	}
 }
 
+func TestPanelSoftFocusUsesOutlineNotFocusBar(t *testing.T) {
+	th := softTheme()
+	th.BorderFocus = theme.AdaptiveColor{Light: "#333333", Dark: "#333333"}
+	focused := Panel(th, PanelOpts{Title: "x", Width: 24, Focused: true}, "body")
+	unfocused := Panel(th, PanelOpts{Title: "x", Width: 24}, "body")
+	if focused == unfocused {
+		t.Error("soft focused/unfocused identical")
+	}
+	plain := ansi.Strip(focused)
+	if strings.Contains(plain, th.Resolve().Icons.FocusBar) {
+		t.Errorf("soft focus should not use FocusBar: %q", plain)
+	}
+	if !strings.ContainsAny(plain, "╭│╰") {
+		t.Errorf("soft focus missing outline: %q", plain)
+	}
+}
+
 func TestPanelFocusedThinBarWidthSafeAt80AndNarrow(t *testing.T) {
-	th := theme.Default()
+	th := solidTheme()
 	th.BorderFocus = theme.AdaptiveColor{Light: "#abcdef", Dark: "#abcdef"}
 	body := strings.Join([]string{
 		"the quick brown fox jumps over the lazy dog and keeps going",
@@ -325,12 +389,11 @@ func TestPanelFocusedThinBarWidthSafeAt80AndNarrow(t *testing.T) {
 			if width >= 3 {
 				plain := ansi.Strip(out)
 				if !strings.Contains(plain, th.Resolve().Icons.FocusBar) {
-					t.Errorf("width=%d focused panel missing FocusBar glyph: %q", width, plain)
+					t.Errorf("width=%d focused solid panel missing FocusBar glyph: %q", width, plain)
 				}
 			}
 		}
 	}
-	// Custom multi-cell FocusBar must fall back so width stays exact.
 	th.Icons.FocusBar = ">>"
 	out := Panel(th, PanelOpts{Title: "t", Width: 20, Focused: true}, "body")
 	for i, line := range strings.Split(out, "\n") {
@@ -344,27 +407,39 @@ func TestPanelFocusedThinBarWidthSafeAt80AndNarrow(t *testing.T) {
 }
 
 func TestPanelContentOriginMatchesChrome(t *testing.T) {
-	solid := theme.Default()
+	solid := solidTheme()
 	// Solid padX=1 → content at (1, 1).
 	if x, y := PanelContentOrigin(solid, 40); x != 1 || y != 1 {
 		t.Errorf("solid origin = (%d,%d), want (1,1)", x, y)
 	}
+	soft := softTheme()
+	// Soft: left border + padX=1 → (2, 1).
+	if x, y := PanelContentOrigin(soft, 40); x != 2 || y != 1 {
+		t.Errorf("soft origin = (%d,%d), want (2,1)", x, y)
+	}
 	bt := borderedTheme()
-	// Bordered: left border + padX=1 → (2, 1).
 	if x, y := PanelContentOrigin(bt, 40); x != 2 || y != 1 {
 		t.Errorf("bordered origin = (%d,%d), want (2,1)", x, y)
 	}
-	if x, y := PanelContentOrigin(solid, 2); x != 0 || y != 0 {
+	if x, y := PanelContentOrigin(soft, 2); x != 0 || y != 0 {
 		t.Errorf("narrow origin = (%d,%d), want (0,0)", x, y)
 	}
 }
 
-func TestInnerWidthAccountsForSolidChromeAndPadding(t *testing.T) {
-	// Default solid: no vertical frame columns.
-	tests := map[int]int{0: 0, 2: 2, 4: 2, 5: 3, 6: 4, 40: 38, 80: 78}
+func TestInnerWidthAccountsForSoftChromeAndPadding(t *testing.T) {
+	// Default soft: vertical frame columns + pad.
+	tests := map[int]int{0: 0, 2: 2, 4: 4, 5: 5, 6: 2, 40: 36, 80: 76}
 	for width, want := range tests {
 		if got := InnerWidth(width); got != want {
 			t.Errorf("InnerWidth(%d) = %d, want %d", width, got, want)
+		}
+	}
+	// Solid: no vertical frame columns.
+	st := solidTheme()
+	solid := map[int]int{0: 0, 2: 2, 4: 2, 5: 3, 6: 4, 40: 38, 80: 78}
+	for width, want := range solid {
+		if got := PanelInnerWidth(st, width); got != want {
+			t.Errorf("solid PanelInnerWidth(%d) = %d, want %d", width, got, want)
 		}
 	}
 	// Bordered retains the classic budget.
@@ -387,7 +462,10 @@ func TestPanelInnerHeightAccountsForBorderOnlyWhenItFits(t *testing.T) {
 		{"negative width", -1, 40, 0},
 		{"one column unbordered", 1, 40, 40},
 		{"two columns unbordered", 2, 40, 40},
-		{"three columns chrome", 3, 40, 38},
+		// Soft default: chrome from width 6.
+		{"three columns soft degrade", 3, 40, 40},
+		{"five columns soft degrade", 5, 40, 40},
+		{"six columns chrome", 6, 40, 38},
 		{"normal chrome", 80, 40, 38},
 		{"zero height", 80, 0, 0},
 		{"negative height", 80, -1, 0},
@@ -419,7 +497,7 @@ func TestPanelInnerWidthMatchesRenderedBodyBudgetAndLegacyInnerWidth(t *testing.
 		})
 	}
 
-	for width, want := range map[int]int{0: 0, 2: 2, 4: 2, 5: 3, 6: 4, 40: 38, 80: 78} {
+	for width, want := range map[int]int{0: 0, 2: 2, 4: 4, 5: 5, 6: 2, 40: 36, 80: 76} {
 		if got := InnerWidth(width); got != want {
 			t.Errorf("legacy InnerWidth(%d) = %d, want %d", width, got, want)
 		}
@@ -535,19 +613,19 @@ func TestBorderlessPanelUsesExactCanvasWithoutChromeOrPadding(t *testing.T) {
 	defaultPanel := Panel(theme.Default(), PanelOpts{Title: "title", Footer: "footer", Width: 20, Height: 4}, "body")
 	plain := ansi.Strip(defaultPanel)
 	if !strings.Contains(plain, "title") || !strings.Contains(plain, "footer") || !strings.Contains(plain, "body") {
-		t.Errorf("default solid Panel missing chrome labels: %q", plain)
+		t.Errorf("default soft Panel missing chrome labels: %q", plain)
 	}
-	if strings.ContainsAny(plain, "╭╮╰╯│") {
-		t.Errorf("default solid Panel used box-drawing: %q", plain)
+	if !strings.ContainsAny(plain, "╭╮╰╯│") {
+		t.Errorf("default soft Panel missing rounded box-drawing: %q", plain)
 	}
 }
 
-func TestDefaultThemeChromeIsSolid(t *testing.T) {
+func TestDefaultThemeChromeIsSoft(t *testing.T) {
 	th := theme.Default().Resolve()
-	if th.Chrome != theme.ChromeSolid {
-		t.Errorf("default chrome = %v, want solid", th.Chrome)
+	if th.Chrome != theme.ChromeSoft {
+		t.Errorf("default chrome = %v, want soft", th.Chrome)
 	}
-	if (theme.Theme{}).Resolve().Chrome != theme.ChromeSolid {
-		t.Error("zero theme did not resolve chrome to solid")
+	if (theme.Theme{}).Resolve().Chrome != theme.ChromeSoft {
+		t.Error("zero theme did not resolve chrome to soft")
 	}
 }

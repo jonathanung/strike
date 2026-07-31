@@ -242,7 +242,8 @@ func (c *completionState) view(width, height int, th theme.Theme) string {
 		}
 		items[i] = ui.ListItem{Label: name, Detail: detail}
 	}
-	borderless := height < 3 || popupWidth < 4
+	minChrome := ui.ChromeMinOuter(th)
+	borderless := height < 3 || popupWidth < minChrome
 	bodyWidth := max(1, ui.PanelInnerWidth(th, popupWidth))
 	bodyHeight := max(0, height-2)
 	if borderless {

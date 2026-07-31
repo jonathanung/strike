@@ -56,7 +56,7 @@ type Theme struct {
 	Surface      AdaptiveColor // solid panel fill
 	SurfaceFocus AdaptiveColor // focused/active panel fill
 	SurfaceMuted AdaptiveColor // dim/inactive panel fill
-	Border       AdaptiveColor // standard panel border (bordered chrome)
+	Border       AdaptiveColor // standard panel border (bordered/soft chrome)
 	BorderFocus  AdaptiveColor // border of the focused/active panel
 	BorderMuted  AdaptiveColor // dim chrome (inactive tiles, gutters)
 	UserLabel    AdaptiveColor // "you" transcript label
@@ -64,19 +64,19 @@ type Theme struct {
 	DiffAdded    AdaptiveColor // added lines in diffs
 	DiffRemoved  AdaptiveColor // removed lines in diffs
 	OverlayScrim AdaptiveColor // de-emphasized modal background fill
-	Chrome       ChromeMode    // solid surfaces vs box borders
+	Chrome       ChromeMode    // soft/solid/bordered panel chrome
 	BorderStyle  BorderStyle   // panel border weight and glyphs
 	Spacing      Spacing       // named layout spacing
 	Icons        Icons         // glyph set (see DefaultIcons)
 }
 
-// Default returns strike's stock theme: a soft-bento multi-accent palette
-// (dark-first) with violet primary, cyan secondary, mint success, amber
-// warning, coral error, and distinct orange danger. Colors are hex adaptive
-// pairs (lipgloss degrades them for non-truecolor / 256-color terminals such
-// as tmux-256color); both the light and dark member of every pair is chosen
-// to stay legible and role-distinct after quantization. See docs/theme.md
-// (North star palette E13.8).
+// Default returns strike's stock theme: a Family-inspired soft-rounded bento
+// multi-accent palette (dark-first) with violet primary, cyan secondary, mint
+// success, amber warning, coral error, and distinct orange danger. Colors are
+// hex adaptive pairs (lipgloss degrades them for non-truecolor / 256-color
+// terminals such as tmux-256color); both the light and dark member of every
+// pair is chosen to stay legible and role-distinct after quantization. See
+// docs/theme.md (North star palette E13.8 + Family chrome).
 func Default() Theme {
 	return Theme{
 		Text:      AdaptiveColor{Light: "#1a1528", Dark: "#f3f1fa"},
@@ -91,7 +91,7 @@ func Default() Theme {
 		// Danger is orange — distinct from coral Error for destructive actions.
 		Danger:     AdaptiveColor{Light: "#ea580c", Dark: "#fb923c"},
 		Background: AdaptiveColor{Light: "#ffffff", Dark: "#14131c"},
-		// Surfaces ladder above Background so solid panels read as soft tiles.
+		// Surfaces ladder above Background so soft panels read as calm tiles.
 		Surface:      AdaptiveColor{Light: "#f3eef9", Dark: "#232230"},
 		SurfaceFocus: AdaptiveColor{Light: "#e9e0f7", Dark: "#2e2c3e"},
 		SurfaceMuted: AdaptiveColor{Light: "#f8f5fc", Dark: "#1a1924"},
@@ -103,7 +103,7 @@ func Default() Theme {
 		DiffAdded:    AdaptiveColor{Light: "#15803d", Dark: "#4ade80"},
 		DiffRemoved:  AdaptiveColor{Light: "#e11d48", Dark: "#fb7185"},
 		OverlayScrim: AdaptiveColor{Light: "#a8a3b8", Dark: "#7c7a90"},
-		Chrome:       ChromeSolid,
+		Chrome:       ChromeSoft,
 		BorderStyle:  lightBorderStyle(),
 		Spacing:      NewSpacing(1, 2, 3, 4).WithLabel(1),
 		Icons:        DefaultIcons(),

@@ -173,8 +173,8 @@ func TestDefaultPaletteRolesArePopulatedAndReadable(t *testing.T) {
 			t.Errorf("%s uses the same color for light and dark (%q); adaptive pairs should differ", name, c.Light)
 		}
 	}
-	if th.Chrome != ChromeSolid {
-		t.Errorf("default chrome = %v, want solid", th.Chrome)
+	if th.Chrome != ChromeSoft {
+		t.Errorf("default chrome = %v, want soft", th.Chrome)
 	}
 }
 
@@ -301,8 +301,8 @@ func TestThemeResolveCompletesZeroAndPartialThemes(t *testing.T) {
 			t.Errorf("zero Theme Resolve left %s incomplete: %+v", name, role)
 		}
 	}
-	if resolved.Chrome != ChromeSolid {
-		t.Errorf("zero Theme Resolve chrome = %v, want solid", resolved.Chrome)
+	if resolved.Chrome != ChromeSoft {
+		t.Errorf("zero Theme Resolve chrome = %v, want soft", resolved.Chrome)
 	}
 	if resolved.Background == nil {
 		t.Fatal("zero Theme Resolve left Background unset")
@@ -367,8 +367,11 @@ func TestThemeResolveBackgroundPreservesOnlyExplicitTransparency(t *testing.T) {
 }
 
 func TestThemeResolveChromeModes(t *testing.T) {
-	if got := (Theme{}).Resolve().Chrome; got != ChromeSolid {
-		t.Errorf("unset chrome = %v, want solid", got)
+	if got := (Theme{}).Resolve().Chrome; got != ChromeSoft {
+		t.Errorf("unset chrome = %v, want soft", got)
+	}
+	if got := (Theme{Chrome: ChromeSoft}).Resolve().Chrome; got != ChromeSoft {
+		t.Errorf("soft chrome = %v", got)
 	}
 	if got := (Theme{Chrome: ChromeSolid}).Resolve().Chrome; got != ChromeSolid {
 		t.Errorf("solid chrome = %v", got)
@@ -497,8 +500,8 @@ func TestDefaultPaletteE138Map(t *testing.T) {
 	if bg != (AdaptiveColor{Light: "#ffffff", Dark: "#14131c"}) {
 		t.Errorf("Default().Background = %#v, want soft-bento ground", bg)
 	}
-	if th.Chrome != ChromeSolid {
-		t.Errorf("Default().Chrome = %v, want ChromeSolid", th.Chrome)
+	if th.Chrome != ChromeSoft {
+		t.Errorf("Default().Chrome = %v, want ChromeSoft", th.Chrome)
 	}
 }
 

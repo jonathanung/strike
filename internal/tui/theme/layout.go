@@ -11,16 +11,20 @@ import (
 type ChromeMode uint8
 
 const (
-	// ChromeUnset resolves to ChromeSolid.
+	// ChromeUnset resolves to ChromeSoft (Family-style default).
 	ChromeUnset ChromeMode = iota
 	// ChromeSolid paints panels as filled surfaces with title/footer bars
-	// (no box-drawing frame). Default for the stock theme.
+	// (no box-drawing frame).
 	ChromeSolid
-	// ChromeBordered paints classic box-drawing panel borders.
+	// ChromeBordered paints classic box-drawing panel borders (outline only,
+	// minimal surface wash).
 	ChromeBordered
+	// ChromeSoft paints surface-filled bodies with a rounded box outline
+	// (╭╮╰╯). Default for the stock theme — Family-inspired calm cards.
+	ChromeSoft
 )
 
-// BorderWeight selects a stock border glyph preset (ChromeBordered only).
+// BorderWeight selects a stock border glyph preset (ChromeBordered / ChromeSoft).
 type BorderWeight uint8
 
 const (
@@ -29,7 +33,7 @@ const (
 	BorderWeightHeavy
 )
 
-// BorderStyle controls the six glyphs used to render bordered panels.
+// BorderStyle controls the six glyphs used to render bordered/soft panels.
 type BorderStyle struct {
 	Weight                                     BorderWeight
 	TopLeft, TopRight, BottomLeft, BottomRight string
@@ -37,10 +41,16 @@ type BorderStyle struct {
 }
 
 func resolveChrome(c ChromeMode) ChromeMode {
-	if c == ChromeBordered {
+	switch c {
+	case ChromeSolid:
+		return ChromeSolid
+	case ChromeBordered:
 		return ChromeBordered
+	case ChromeSoft:
+		return ChromeSoft
+	default:
+		return ChromeSoft
 	}
-	return ChromeSolid
 }
 
 func lightBorderStyle() BorderStyle {

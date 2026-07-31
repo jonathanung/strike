@@ -102,8 +102,13 @@ func TestCustomThemeSpacingControlsRootTranscriptHeaderAndPermissionLayout(t *te
 			m = updateApp(t, m, tea.WindowSizeMsg{Width: 60, Height: 18})
 			header := ansi.Strip(m.headerView(60))
 			badgeSpace := strings.Repeat(" ", th.Spacing.XS)
-			if !strings.Contains(header, "strike"+tt.headGap+"["+badgeSpace+"no model"+badgeSpace+"]") {
-				t.Errorf("header badge spacing = %q", header)
+			// Soft pills: stock BadgeLeft/Right empty; XS pad around label.
+			pill := badgeSpace + "no model" + badgeSpace
+			if th.Icons.BadgeLeft != "" {
+				pill = th.Icons.BadgeLeft + pill + th.Icons.BadgeRight
+			}
+			if !strings.Contains(header, "strike"+tt.headGap+pill) {
+				t.Errorf("header badge spacing = %q, want %q", header, "strike"+tt.headGap+pill)
 			}
 			for i, row := range strings.Split(viewString(m), "\n") {
 				if got := ansi.StringWidth(row); got != 60 {
