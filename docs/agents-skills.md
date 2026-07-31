@@ -69,6 +69,30 @@ Optional `model` pins the child’s model (bare id on the current provider, or
 Optional `effort` pins the child’s reasoning dial (`off`\|`low`\|`medium`\|
 `high`\|`xhigh`\|`max`); omit to inherit the parent (agent effort pins still
 apply). When set, task effort wins over agent profile effort.
+Optional `name` sets a stable teammate alias on the session team (roster +
+messaging).
+
+### Team coordination (lead + children)
+
+Spawning `task` children joins an **implicit session team** (lead + children).
+No separate team-create step. Depth and fan-out stay bounded (`MaxChildDepth`;
+orchestrator prefers a few sequential or small parallel slices).
+
+| Tool / event | Role |
+|--------------|------|
+| `agent_message` / `agent_broadcast` | Mid-flight peer coordination (any teammate: child↔child, child↔lead) |
+| `[child.completed]` | Finished work product — terminal summary when a child ends |
+| `task_message` | Parent→owned-child steer only (not team chat) |
+| `task_status` / `task_read` | Rare one-off pulse / transcript slice — **not** busy-poll |
+| `agent_roster` | Who is on the team and live state |
+| `task_interrupt` | Cancel an owned child |
+
+**Semantics:** prefer **messages** for mid-flight blockers/handoffs/questions;
+prefer **completion** for finished deliverables. Lead should not busy-poll
+`task_status` — use completion events + inbox. Children should message the lead
+early when blocked. Avoid chatty loops (no status ping-pong). Plain text bodies
+are enough; optional conventions (`blocker` / `handoff` / `question`) are fine
+without structured kinds.
 
 Each model request composes the system prompt in layers (like opencode):
 

@@ -62,7 +62,10 @@ func (m *Model) ensurePaint() *paintBudget {
 // softCoalesceEvent reports protocol events that may batch under the FPS cap.
 func softCoalesceEvent(ev protocol.Event) bool {
 	switch ev.(type) {
-	case protocol.TextDelta, protocol.ReasoningDelta:
+	case protocol.TextDelta, protocol.ReasoningDelta,
+		// Team UI: roster snapshots and peer mail can flood under broadcast;
+		// coalesce paints so the activity/agents panes stay responsive (#614).
+		protocol.TeamRoster, protocol.AgentMessage:
 		return true
 	default:
 		return false

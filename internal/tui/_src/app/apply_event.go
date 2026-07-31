@@ -18,7 +18,10 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		switch ev.(type) {
 		case protocol.PermissionAsked, protocol.PermissionResolved,
 			protocol.QuestionAsked, protocol.QuestionResolved,
-			protocol.ChildStarted, protocol.ChildCompleted:
+			protocol.ChildStarted, protocol.ChildCompleted,
+			// Parent re-emits child peer mail + nested roster with child
+			// correlation; keep them for team UI (issue #614).
+			protocol.AgentMessage, protocol.TeamRoster:
 		default:
 			return nil
 		}
@@ -272,6 +275,11 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 				cmd = tea.Batch(cmd, refresh)
 			}
 		}
+	case protocol.TeamRoster:
+		m.onTeamRoster(ev)
+		cmd = m.broadcastAgentsState()
+	case protocol.AgentMessage:
+		m.onAgentMessage(ev)
 	}
 	return cmd
 }
@@ -441,6 +449,10 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	case protocol.ChildStarted:
 		return e.Correlation, true
 	case protocol.ChildCompleted:
+		return e.Correlation, true
+	case protocol.AgentMessage:
+		return e.Correlation, true
+	case protocol.TeamRoster:
 		return e.Correlation, true
 	default:
 		return protocol.Correlation{}, false

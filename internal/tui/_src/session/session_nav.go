@@ -499,9 +499,16 @@ func seedFromReplay(m *Model, events []protocol.Event) {
 	m.toolCallsThisTurn = 0
 	m.clearModalStack()
 	m.children = childrenFromEvents(events)
+	m.teamMessages = teamMessagesFromEvents(events)
 	for _, ev := range events {
 		if corr, ok := eventCorrelation(ev); ok && (corr.ParentSessionID != "" || corr.Depth > 0) {
-			continue
+			// Team roster/messages may carry child correlation when re-emitted
+			// from nested engines; still applied above via dedicated helpers.
+			switch ev.(type) {
+			case protocol.TeamRoster, protocol.AgentMessage:
+			default:
+				continue
+			}
 		}
 		switch e := ev.(type) {
 		case protocol.UserMessage:
@@ -535,6 +542,7 @@ func seedFromReplay(m *Model, events []protocol.Event) {
 
 // childrenFromEvents rebuilds activity-pane child rows. A ChildStarted without
 // ChildCompleted is treated as canceled — the child process is gone on resume.
+// Later team.roster snapshots enrich names/states for teammates.
 func childrenFromEvents(events []protocol.Event) []childActivity {
 	var out []childActivity
 	index := map[string]int{}
@@ -598,6 +606,12 @@ func childrenFromEvents(events []protocol.Event) []childActivity {
 				name:      e.Name,
 				status:    status,
 			})
+		case protocol.TeamRoster:
+			leadID := strings.TrimSpace(e.LeadID)
+			if leadID == "" {
+				leadID = strings.TrimSpace(e.SessionID)
+			}
+			applyTeamRosterMembers(&out, index, e.Members, leadID)
 		}
 	}
 	for i := range out {

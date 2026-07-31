@@ -167,8 +167,8 @@ func (m Model) handleKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	if m.focus == focusRight {
-		if m.handleActivityKeys(msg) {
-			return m, nil
+		if handled, cmd := m.handleActivityKeys(msg); handled {
+			return m, cmd
 		}
 		var cmd tea.Cmd
 		m.windows, cmd = m.windows.update(msg)

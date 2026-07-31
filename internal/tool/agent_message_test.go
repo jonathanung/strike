@@ -200,3 +200,23 @@ func TestAgentBroadcastValidation(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestAgentMessageDescriptionCoordinationSemantics(t *testing.T) {
+	d := NewAgentMessage().Description()
+	for _, needle := range []string{
+		"mid-flight",
+		"child.completed",
+		"blockers",
+		"chatty",
+		"task_message",
+		"child→lead",
+	} {
+		if !strings.Contains(d, needle) {
+			t.Errorf("agent_message description missing %q:\n%s", needle, d)
+		}
+	}
+	bd := NewAgentBroadcast().Description()
+	if !strings.Contains(bd, "chatty") && !strings.Contains(bd, "sparingly") {
+		t.Errorf("agent_broadcast should discourage chatty fan-out:\n%s", bd)
+	}
+}
