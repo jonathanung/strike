@@ -151,7 +151,7 @@ func bindSessionWorktree(
 	wt, err := project.Add(context.Background(), launchDir, sessionID)
 	if err != nil {
 		if errors.Is(err, project.ErrNotGitRepository) {
-			// Default always / --worktree outside a repo: stay on launch cwd.
+			// always / --worktree outside a repo: stay on launch cwd.
 			return launchDir, nil, worktreeNotGitNotice, nil
 		}
 		return launchDir, nil, "", fmt.Errorf("session worktree: %w", err)
