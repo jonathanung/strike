@@ -11,7 +11,7 @@ import (
 )
 
 func (m *Model) reflow() {
-	gutter := m.th.Resolve().Spacing.XS
+	gutter := m.paneGutter()
 	leftWidth := m.width
 	if m.splitOrientation != orientVertical {
 		geometry := computePaneGeometry(m.width, gutter, m.focus)
@@ -107,7 +107,7 @@ func (m Model) resizeRightWindows(rightWidth, rightHeight int, compact bool) win
 	fullInnerW, fullInnerH := rightWidth, rightHeight
 	if !compact {
 		fullInnerW = max(0, ui.PanelInnerWidth(m.th, rightWidth))
-		fullInnerH = ui.PanelInnerHeight(rightWidth, rightHeight)
+		fullInnerH = ui.PanelInnerHeightFor(m.th, rightWidth, rightHeight)
 	}
 	r = r.resize(fullInnerW, fullInnerH)
 
@@ -124,7 +124,7 @@ func (m Model) resizeRightWindows(rightWidth, rightHeight int, compact bool) win
 		innerW, innerH := outer.width, outer.height
 		if !compact {
 			innerW = max(0, ui.PanelInnerWidth(m.th, outer.width))
-			innerH = ui.PanelInnerHeight(outer.width, outer.height)
+			innerH = ui.PanelInnerHeightFor(m.th, outer.width, outer.height)
 		}
 		dims[wi] = memberSlot{width: innerW, height: innerH}
 	}

@@ -40,10 +40,18 @@ func saveDefaultsThroughCmd(settings host.Settings, provider, model, agent, effo
 	}
 }
 
+// headerChip is one budgeted header badge. Lower prio drops first under width
+// pressure (Family quiet hierarchy: drop think → effort → phase → health-dot
+// before core status chips).
+type headerChip struct {
+	prio int
+	view string // rendered badge only (no leading gap)
+}
+
 // headerView is the one-line header strip: the compact wordmark, a shortened
 // workdir path, provider/model and agent badges on the left, and dynamic
 // agent-state status on the right. Status chrome tints from theme tokens via
-// agentState.
+// agentState. Under width pressure badges drop lowest-priority first.
 func (m Model) headerView(width int) string {
 	th := m.th.Resolve()
 	ic := iconsFor(th)
@@ -53,55 +61,47 @@ func (m Model) headerView(width int) string {
 	stateTone := agentStateTone(state)
 
 	brand := ui.LogoCompact(th)
-	var badges string
+
+	// Build ordered chips with drop priorities (lower = drop sooner).
+	var chips []headerChip
 	if m.providerName == "" {
-		badges += badgeGap + ui.Badge(th, ui.ToneMuted, "no model")
+		chips = append(chips, headerChip{100, ui.Badge(th, ui.ToneMuted, "no model")})
 	} else {
 		model := m.modelName
 		if model == "" {
 			model = "default"
 		}
-		badges += badgeGap + ui.Badge(th, ui.ToneAccent, m.providerName+"/"+model)
+		chips = append(chips, headerChip{100, ui.Badge(th, ui.ToneAccent, m.providerName+"/"+model)})
 		if tone, ok := providerHealthTone(m); ok {
-			badges += inlineGap + ui.Badge(th, tone, ic.Dot)
+			chips = append(chips, headerChip{40, ui.Badge(th, tone, ic.Dot)})
 		}
 	}
 	// Same display-safety gate as the palette and welcome card: agents are
 	// not host-filtered, so every render site guards the name itself.
-	// Agent badge tone follows live runtime state (tokenized coloring).
 	if m.agentName != "" && validAgentName(m.agentName) {
-		badges += inlineGap + ui.Badge(th, stateTone, ic.Agent+inlineGap+sanitizeDisplayData(m.agentName))
+		chips = append(chips, headerChip{90, ui.Badge(th, stateTone, ic.Agent+inlineGap+sanitizeDisplayData(m.agentName))})
 	}
-	// Workflow phase badge (plan→implement, custom workflows).
 	if m.phaseName != "" {
 		label := "phase" + inlineGap + sanitizeDisplayData(m.phaseName)
-		badges += inlineGap + ui.Badge(th, ui.ToneAccentAlt, label)
+		chips = append(chips, headerChip{30, ui.Badge(th, ui.ToneAccentAlt, label)})
 	}
-	// Only shown once a level is set — an unset dial means "whatever the
-	// provider does by default", which is not worth a badge.
 	if m.effort != protocol.EffortDefault {
-		badges += inlineGap + ui.Badge(th, ui.ToneMuted, "effort"+inlineGap+string(m.effort))
+		chips = append(chips, headerChip{20, ui.Badge(th, ui.ToneMuted, "effort"+inlineGap+string(m.effort))})
 	}
-	// Autonomy is always visible so mode is never only implicit in gates.
-	// Compact short label keeps the working status visible on narrow widths.
-	// Soft-bento: secondary chrome uses AccentAlt so muted badges do not blend.
-	badges += inlineGap + ui.Badge(th, ui.ToneAccentAlt, "auto"+inlineGap+m.autonomy.Short())
-	// Permission posture dial — always shown (short label + tone); yolo is danger.
-	badges += inlineGap + ui.Badge(th, permissionModeBadgeTone(m.permMode), m.permMode.Short())
+	// Autonomy + permission always preferred over decorative chips.
+	chips = append(chips, headerChip{85, ui.Badge(th, ui.ToneAccentAlt, "auto"+inlineGap+m.autonomy.Short())})
+	chips = append(chips, headerChip{85, ui.Badge(th, permissionModeBadgeTone(m.permMode), m.permMode.Short())})
 	if secs := m.effectivePermissionAutoApproveSeconds(); secs > 0 {
-		// Warning tone: soft-approve / config auto-allow is safety-visible.
-		badges += inlineGap + ui.Badge(th, ui.ToneWarning, "auto-allow"+inlineGap+itoa(secs)+"s")
+		chips = append(chips, headerChip{80, ui.Badge(th, ui.ToneWarning, "auto-allow"+inlineGap+itoa(secs)+"s")})
 	}
 	if label := m.pendingBlockingLabel(); label != "" {
-		// Queued permission/question asks while a user modal is open.
-		badges += inlineGap + ui.Badge(th, ui.ToneWarning, label)
+		chips = append(chips, headerChip{80, ui.Badge(th, ui.ToneWarning, label)})
 	}
 	if m.fastEnabled {
-		// Warning tone: priority tier is a cost-visible session preference.
-		badges += inlineGap + ui.Badge(th, ui.ToneWarning, "fast")
+		chips = append(chips, headerChip{80, ui.Badge(th, ui.ToneWarning, "fast")})
 	}
 	if m.showThinking {
-		badges += inlineGap + ui.Badge(th, ui.ToneMuted, "think")
+		chips = append(chips, headerChip{10, ui.Badge(th, ui.ToneMuted, "think")})
 	}
 
 	statusStyle := th.AgentStateStyle(state)
@@ -117,8 +117,13 @@ func (m Model) headerView(width int) string {
 		right = statusStyle.Render(state.Label())
 	}
 
-	// Path sits between brand and badges when free cells remain after StatusBar's
-	// mid gap. Budgeted before the meter so the cwd stays visible longer.
+	// Fit badges into width after brand + right + StatusBar mid gap.
+	// Reserve a little room so path/meter can still appear when space allows.
+	fixed := lipgloss.Width(brand) + lipgloss.Width(right) + 1
+	badgeBudget := max(0, width-fixed)
+	badges := fitHeaderChips(chips, badgeBudget, badgeGap, inlineGap)
+
+	// Path sits between brand and badges when free cells remain.
 	left := brand
 	pathBudget := width - lipgloss.Width(brand) - lipgloss.Width(badges) - lipgloss.Width(right) - 1 - th.Spacing.XS
 	if path := m.headerWorkDirLabel(th, pathBudget); path != "" {
@@ -126,13 +131,52 @@ func (m Model) headerView(width int) string {
 	}
 	left += badges
 
-	// Meter only when left chrome + right status leave room. Reserve StatusBar's
-	// minimum mid gap (1) and the inline gap that prefixes the meter.
+	// Meter only when left chrome + right status leave room.
 	meterBudget := width - lipgloss.Width(left) - lipgloss.Width(right) - 1 - th.Spacing.XS
 	if meter := m.headerContextMeter(th, meterBudget); meter != "" {
 		left += inlineGap + meter
 	}
 	return ui.StatusBar(m.th, max(1, width), left, right)
+}
+
+// fitHeaderChips joins chips with gaps, dropping lowest-priority chips first
+// until the rendered string fits budget display cells.
+func fitHeaderChips(chips []headerChip, budget int, firstGap, restGap string) string {
+	if budget < 1 || len(chips) == 0 {
+		return ""
+	}
+	active := append([]headerChip(nil), chips...)
+	for len(active) > 0 {
+		out := joinHeaderChips(active, firstGap, restGap)
+		if lipgloss.Width(out) <= budget {
+			return out
+		}
+		// Drop lowest priority (stable: first among ties).
+		drop := 0
+		for i := 1; i < len(active); i++ {
+			if active[i].prio < active[drop].prio {
+				drop = i
+			}
+		}
+		active = append(active[:drop], active[drop+1:]...)
+	}
+	return ""
+}
+
+func joinHeaderChips(chips []headerChip, firstGap, restGap string) string {
+	if len(chips) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for i, c := range chips {
+		if i == 0 {
+			b.WriteString(firstGap)
+		} else {
+			b.WriteString(restGap)
+		}
+		b.WriteString(c.view)
+	}
+	return b.String()
 }
 
 // headerWorkDirLabel is the muted, home-shortened cwd for the header brand row.

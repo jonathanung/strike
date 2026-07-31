@@ -140,7 +140,7 @@ func (m Model) promptContentRect() (contentRect, bool) {
 	h := l.composer
 	w := leftWidth
 	if !l.compact {
-		h = ui.PanelInnerHeight(leftWidth, l.composer)
+		h = ui.PanelInnerHeightFor(m.th.Resolve(), leftWidth, l.composer)
 		w = ui.PanelInnerWidth(m.th.Resolve(), leftWidth)
 	}
 	if w <= 0 || h <= 0 {
@@ -154,8 +154,7 @@ func (m Model) leftStackGeom() (leftWidth int, l layout, showLeft bool, ok bool)
 	if !m.ready || m.width <= 0 || m.height <= 0 {
 		return 0, layout{}, false, false
 	}
-	th := m.th.Resolve()
-	gutter := th.Spacing.XS
+	gutter := m.paneGutter()
 	leftWidth = m.width
 	showLeft = true
 	if m.splitOrientation != orientVertical {

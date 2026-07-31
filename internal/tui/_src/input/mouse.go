@@ -108,7 +108,7 @@ func (m Model) paneFocusAtMouse(x, y int) (paneFocus, bool) {
 	if m.modal != nil || !m.ready || x < 0 || y < 0 || x >= m.width || y >= m.height {
 		return focusLeft, false
 	}
-	gutter := m.th.Resolve().Spacing.XS
+	gutter := m.paneGutter()
 	leftWidth := m.width
 	if m.splitOrientation != orientVertical {
 		leftWidth = computePaneGeometry(m.width, gutter, m.focus).leftCandidateWidth(m.width)

@@ -1,40 +1,40 @@
-⚡ strike /tmp/strike-golden  [ echo/echo-1 ] [ · ] [ ◆ build ] [ auto sup ] [ def ]                               ready
- Refactor the auth store.                                                         context
-▏❯ you                                                                            model  echo/echo-1
-▏  Refactor the auth store.                                                       agent  build
-▏                                                                                 autonomy  supervised
-▏● strike                                                                         auth  offline dev provider
-▏  Reading the store, then running tests.                                         skills  1
-▏
-▏⚙ read · internal/auth/store.go ✓
-▏  │ package auth
-▏
-▏
-▏
-▏
-▏                                                                                 activity
-▏                                                                                   internal/auth/store.go — done  ✓
-▏
-▏
-▏
-▏
-▏
-▏
-▏
-▏
-▏
-▏
-▏
-▏                                                                                 system
-▏                                                                                 sampling…
-▏
-▏
-▏
-▏
-
-
- prompt ❯
-▏❯ Ask anything…  (/ commands, ! shell)
-▏❯
- enter send · ctrl+j/shift+enter/alt+enter newline
+⚡ strike /tmp/strike-golden   echo/echo-1   ·   ◆ build   auto sup   def                                          ready
+╭─ Refactor the auth store. ───────────────────────────────────────────────────╮ ╭─ context ───────────────────────────╮
+│ ❯ you                                                                        │ │ model  echo/echo-1                  │
+│   Refactor the auth store.                                                   │ │ agent  build                        │
+│                                                                              │ │ autonomy  supervised                │
+│ ● strike                                                                     │ │ auth  offline dev provider          │
+│   Reading the store, then running tests.                                     │ │ skills  1                           │
+│                                                                              │ │                                     │
+│ ⚙ read · internal/auth/store.go ✓                                            │ │                                     │
+│   │ package auth                                                             │ │                                     │
+│                                                                              │ │                                     │
+│                                                                              │ │                                     │
+│                                                                              │ ╰─────────────────────────────────────╯
+│                                                                              │
+│                                                                              │ ╭─ activity ──────────────────────────╮
+│                                                                              │ │   internal/auth/store.go — done  ✓  │
+│                                                                              │ │                                     │
+│                                                                              │ │                                     │
+│                                                                              │ │                                     │
+│                                                                              │ │                                     │
+│                                                                              │ │                                     │
+│                                                                              │ │                                     │
+│                                                                              │ │                                     │
+│                                                                              │ │                                     │
+│                                                                              │ │                                     │
+│                                                                              │ ╰─────────────────────────────────────╯
+│                                                                              │
+│                                                                              │ ╭─ system ────────────────────────────╮
+│                                                                              │ │ sampling…                           │
+│                                                                              │ │                                     │
+│                                                                              │ │                                     │
+│                                                                              │ │                                     │
+│                                                                              │ │                                     │
+╰──────────────────────────────────────────────────────────────────────────────╯ │                                     │
+                                                                                 │                                     │
+╭─ prompt ❯ ───────────────────────────────────────────────────────────────────╮ │                                     │
+│ ❯ Ask anything…  (/ commands, ! shell)                                       │ │                                     │
+│ ❯                                                                            │ │                                     │
+╰─ enter send · ctrl+j/shift+enter/alt+enter newline ──────────────────────────╯ ╰─────────────────────────────────────╯
 ctrl+h/ctrl+l panes · ctrl+o/ctrl+p windows · ctrl+; toggle split · ctrl+k palette · f1 keybinds · esc interrupt

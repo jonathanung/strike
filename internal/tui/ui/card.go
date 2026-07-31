@@ -15,7 +15,15 @@ type Card struct {
 	Footer string // bottom-border hint
 	Body   string // tile content (wrapped to fit)
 	Width  int    // preferred outer width; capped to the row width
-	Tone   Tone   // border accent; ToneDefault renders a calm dim border
+	// Height, when > 0, fixes the outer panel height (truncated/padded). Zero
+	// lets Bento equalize row height from content.
+	Height int
+	Tone   Tone // border accent; ToneDefault renders a calm dim border
+	// Focused marks the tile as the active pane focus (soft outline + title).
+	Focused bool
+	// Dim forces muted surface; default true when Tone is ToneDefault and not Focused.
+	// Set explicitly when the app owns focus/dim (welcome dashboard).
+	Dim *bool
 }
 
 // Bento packs cards left-to-right into rows that fit width, wrapping to a new
@@ -71,7 +79,11 @@ func bentoRow(th theme.Theme, cards []Card, gap int) string {
 	rendered := make([]string, len(cards))
 	height := 0
 	for i, c := range cards {
-		rendered[i] = cardPanel(th, c, 0)
+		// Prefer an explicit Height as the row floor.
+		if c.Height > height {
+			height = c.Height
+		}
+		rendered[i] = cardPanel(th, c, c.Height)
 		if h := lineCount(rendered[i]); h > height {
 			height = h
 		}
@@ -83,13 +95,18 @@ func bentoRow(th theme.Theme, cards []Card, gap int) string {
 }
 
 func cardPanel(th theme.Theme, c Card, height int) string {
+	dim := c.Tone == ToneDefault && !c.Focused
+	if c.Dim != nil {
+		dim = *c.Dim
+	}
 	return Panel(th, PanelOpts{
-		Title:  c.Title,
-		Footer: c.Footer,
-		Width:  c.Width,
-		Height: height,
-		Dim:    c.Tone == ToneDefault,
-		Tone:   c.Tone,
+		Title:   c.Title,
+		Footer:  c.Footer,
+		Width:   c.Width,
+		Height:  height,
+		Focused: c.Focused,
+		Dim:     dim,
+		Tone:    c.Tone,
 	}, wrapText(c.Body, PanelInnerWidth(th, c.Width)))
 }
 

@@ -1,40 +1,40 @@
-⚡ strike /tmp/strike-golden  [ no model ] [ auto sup ] [ def ]                                                    ready
-▁▁▁▁▁▁▁▁▁▁▁▁▁▁                                                                    context
-⚡ S T R I K E                                                                    model  none /provider
-▔▔▔▔▔▔▔▔▔▔▔▔▔▔                                                                    autonomy  supervised
-                                                                                  skills  1
- get started                              keys
-▏Connect a provider to start             ▏ctrl+h  focus left
-▏◦ anthropic  none                       ▏ctrl+l  focus right
-▏◦ openai  none                          ▏ctrl+o  next window
-▏◦ xai  none                             ▏ctrl+p  prev window
-▏◦ google  none                          ▏ctrl+;  toggle split
-▏◦ kimi  none                            ▏enter  send
-▏◦ deepseek  none                        ▏ctrl+j/shift+enter/alt+enter  newline
-▏/provider to choose one                 ▏ctrl+e  external editor
-▏type below · enter to send              ▏pgup/ctrl+up  scroll up                 activity
-▏                                        ▏ctrl+t  jump to bottom                  /  commands
-▏                                        ▏ctrl+k  palette                         ctrl+k  palette
-▏                                        ▏f1  keybinds                            tab  cycle agent persona
-                                                                                  ctrl+o  next window
-                                                                                  ctrl+;  toggle split
-                                                                                  ctrl+j/shift+enter/alt+enter  newline
- agents & skills                                                                  ctrl+x down  subagent
-▏agents
-▏  ◆ build
-▏skills
-▏  /review
-▏  ◆ plan
-▏                                                                                 system
-▏                                                                                 sampling…
-▏
-▏
-▏
-▏
-
-
- prompt ❯
-▏❯ Ask anything…  (/ commands, ! shell)
-▏❯
- enter send · ctrl+j/shift+enter/alt+enter newline
+⚡ strike /tmp/strike-golden   no model   auto sup   def                                                           ready
+▁▁▁▁▁▁▁▁▁▁▁▁▁▁                                                                   ╭─ context ───────────────────────────╮
+⚡ S T R I K E                                                                   │ model  none /provider               │
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔                                                                   │ autonomy  supervised                │
+                                                                                 │ skills  1                           │
+╭─ get started ───────────────────────╮  ╭─ keys ──────────────────────────────╮ │                                     │
+│ Connect a provider to start         │  │ ctrl+h  focus left                  │ │                                     │
+│ ◦ anthropic  none                   │  │ ctrl+l  focus right                 │ │                                     │
+│ ◦ openai  none                      │  │ ctrl+o  next window                 │ │                                     │
+│ ◦ xai  none                         │  │ ctrl+p  prev window                 │ │                                     │
+│ ◦ google  none                      │  │ ctrl+;  toggle split                │ │                                     │
+│ ◦ kimi  none                        │  │ enter  send                         │ │                                     │
+│ ◦ deepseek  none                    │  │ ctrl+j/shift+enter/alt+enter  newl… │ ╰─────────────────────────────────────╯
+│ /provider to choose one             │  │ ctrl+e  external editor             │
+│ type below · enter to send          │  │ pgup/ctrl+up  scroll up             │ ╭─ activity ──────────────────────────╮
+│                                     │  │ ctrl+t  jump to bottom              │ │ /  commands                         │
+│                                     │  │ ctrl+k  palette                     │ │ ctrl+k  palette                     │
+│                                     │  │ f1  keybinds                        │ │ tab  cycle agent persona            │
+╰─────────────────────────────────────╯  ╰─────────────────────────────────────╯ │ ctrl+o  next window                 │
+                                                                                 │ ctrl+;  toggle split                │
+                                                                                 │ ctrl+j/shift+enter/alt+enter  newl… │
+╭─ agents & skills ───────────────────╮                                          │ ctrl+x down  subagent               │
+│ agents                              │                                          │                                     │
+│   ◆ build                           │                                          │                                     │
+│ skills                              │                                          │                                     │
+│   /review                           │                                          ╰─────────────────────────────────────╯
+│   ◆ plan                            │
+│                                     │                                          ╭─ system ────────────────────────────╮
+│                                     │                                          │ sampling…                           │
+│                                     │                                          │                                     │
+│                                     │                                          │                                     │
+│                                     │                                          │                                     │
+│                                     │                                          │                                     │
+╰─────────────────────────────────────╯                                          │                                     │
+                                                                                 │                                     │
+╭─ prompt ❯ ───────────────────────────────────────────────────────────────────╮ │                                     │
+│ ❯ Ask anything…  (/ commands, ! shell)                                       │ │                                     │
+│ ❯                                                                            │ │                                     │
+╰─ enter send · ctrl+j/shift+enter/alt+enter newline ──────────────────────────╯ ╰─────────────────────────────────────╯
 ctrl+h/ctrl+l panes · ctrl+o/ctrl+p windows · ctrl+; toggle split · ctrl+k palette · f1 keybinds · esc interrupt

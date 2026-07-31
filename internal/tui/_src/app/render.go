@@ -78,7 +78,7 @@ func (m Model) renderFrame() string {
 		fc = newFrameCache()
 	}
 
-	gutter := m.th.Resolve().Spacing.XS
+	gutter := m.paneGutter()
 	leftWidth := m.width
 	var hGeometry paneGeometry
 	if m.splitOrientation != orientVertical {
@@ -255,7 +255,7 @@ func (m Model) renderFrame() string {
 // pane is the only visible pane. Existing notices do not move focus: only the
 // result of the selected palette action does.
 func (m Model) paletteResultFocus(priorNotice string, priorNoticeErr bool, cmd tea.Cmd) (tea.Model, tea.Cmd) {
-	gutter := m.th.Resolve().Spacing.XS
+	gutter := m.paneGutter()
 	singleRight := m.focus == focusRight
 	if m.splitOrientation == orientVertical {
 		bodyGuess := max(0, m.height-2)
@@ -279,7 +279,7 @@ func (m Model) paletteResultFocus(priorNotice string, priorNoticeErr bool, cmd t
 func (m Model) completionPopupHeight() int {
 	leftWidth := m.width
 	if m.splitOrientation != orientVertical {
-		geometry := computePaneGeometry(m.width, m.th.Resolve().Spacing.XS, m.focus)
+		geometry := computePaneGeometry(m.width, m.paneGutter(), m.focus)
 		leftWidth = geometry.leftCandidateWidth(m.width)
 	}
 	return m.completionPopupHeightFor(leftWidth)
@@ -301,7 +301,7 @@ func (m Model) completionPopupHeightFor(width int) int {
 func (m Model) compact() bool {
 	leftWidth := m.width
 	if m.splitOrientation != orientVertical {
-		geometry := computePaneGeometry(m.width, m.th.Resolve().Spacing.XS, m.focus)
+		geometry := computePaneGeometry(m.width, m.paneGutter(), m.focus)
 		leftWidth = geometry.leftCandidateWidth(m.width)
 	}
 	return leftWidth < compactWidth || m.height < compactHeight

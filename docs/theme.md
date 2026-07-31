@@ -4,11 +4,17 @@ Strike's TUI look is owned by `internal/tui/theme`. Views compose
 `theme.Styles` and `internal/tui/ui` components; they never hardcode colors,
 glyphs, or chrome geometry.
 
-## North star palette (E13.8)
+## North star palette (E13.8) + Family chrome
 
-Stock `theme.Default()` is a **soft-bento multi-accent** system: dark-first
-ground, raised soft cards, and semantic accents that stay a bit more colorful
-than the visual refs while remaining legible over SSH + tmux.
+Stock `theme.Default()` is a **Family-inspired soft-rounded bento** system:
+dark-first ground, raised soft cards with rounded outlines, generous gutters,
+and semantic accents that stay a bit more colorful than the visual refs while
+remaining legible over SSH + tmux.
+
+[Family.app](https://family.co) is a north-star reference for calm rounded
+cards and quiet hierarchy — not a clone. Terminal constraints apply; strike
+layout/keymaps stay; no web-only effects (real drop shadows, blur) and **no
+new idle animation**.
 
 ### Visual refs
 
@@ -18,8 +24,7 @@ than the visual refs while remaining legible over SSH + tmux.
 Take from refs: dark ground, raised soft cards, multi-accent semantic colors
 (purple / blue / coral / green / yellow family), calm typography, separation by
 surface step more than heavy boxes. Push slightly more colorful accents than
-the refs. Not a clone — terminal constraints; strike layout/keymaps stay; no
-web-only effects (real drop shadows, blur).
+the refs.
 
 ### Token → hex (light + dark)
 
@@ -47,9 +52,11 @@ web-only effects (real drop shadows, blur).
 | DiffRemoved | `#e11d48` | `#fb7185` |
 | OverlayScrim | `#a8a3b8` | `#7c7a90` |
 
-Chrome mode defaults to `solid`; spacing and `DefaultIcons` are unchanged.
-Bundled named themes (nord, …) keep their own hexes — only `Default()` uses
-this map.
+Chrome mode defaults to **`soft`** (surface-filled body + rounded outline).
+Spacing defaults are unchanged (`XS=1`, `SM=2`, …). Left|right pane gutter uses
+`SM` for Family breathing room. Stock badges are delimiter-free soft pills on
+`SurfaceMuted`. Bundled named themes (nord, …) keep their own hexes — only
+`Default()` uses this map.
 
 ### Role semantics
 
@@ -66,7 +73,7 @@ this map.
 ### Surface ladder
 
 `background` < `surfaceMuted` < `surface` < `surfaceFocus` — enough step that
-solid panels read as soft tiles under 256-color quantization, not only in
+soft panels read as calm tiles under 256-color quantization, not only in
 truecolor.
 
 ### SSH / tmux acceptance
@@ -78,22 +85,25 @@ truecolor.
   (prefer hues that land on distinct xterm-256 buckets).
 - Spot-check truecolor local still looks good (more colorful is OK).
 - No idle full-frame animation or rainbow noise on idle redraw.
+- Pure string UI; no full-tree restyle per frame.
 
 ### Motion budget
 
-Region-scoped animation only (header spinner, focus pulse via solid title edge
-+ FocusBar, badge/meter updates, short copied-flash on transcript cells) —
-invalidate cached regions, never recompose the full transcript every tick.
-Existing `paint_budget` (~6 FPS soft coalesce) and `frame_cache` patterns are
-the model. Correctness over delight on low-FPS remote.
+Region-scoped animation only (header spinner, focus via soft outline /
+solid title edge + FocusBar, badge/meter updates, short copied-flash on
+transcript cells) — invalidate cached regions, never recompose the full
+transcript every tick. Existing `paint_budget` (~6 FPS soft coalesce) and
+`frame_cache` patterns are the model. Correctness over delight on low-FPS
+remote. **No new animation** for this Family chrome pass.
 
-### Chrome density (soft-bento hierarchy)
+### Chrome density (Family soft-bento hierarchy)
 
-Solid surfaces + multi-accent badges/labels carry hierarchy more than heavy
-boxes. Header clusters status badges by semantic tone; composer and right-pane
-footers use `KeyHints`; welcome empty state is a bento of solid `Panel` cards
-(no outer welcome frame). Dialogs stay elevated (`SurfaceFocus`) with optional
-tone chrome for warning/danger.
+Soft rounded surfaces + multi-accent soft pills/labels carry hierarchy more
+than heavy brackets. Header drops lowest-priority badges under width pressure
+(think → effort → phase → health-dot first). Composer and right-pane footers
+use `KeyHints`; welcome empty state is a bento of soft `Panel` cards (no outer
+welcome frame). Dialogs stay elevated (`SurfaceFocus`) with optional tone
+chrome for warning/danger.
 
 ## Chrome mode
 
@@ -102,15 +112,16 @@ Panels (transcript, composer, side panes, dialogs, bento cards) paint through
 
 | Value | Behavior |
 |---|---|
-| `solid` (default) | Filled surfaces (`surface` / `surfaceFocus` / `surfaceMuted`) with title and footer bars. No box-drawing frame. Focus is a surface/emphasis change. |
-| `bordered` | Classic light/heavy box-drawing borders (`border` glyph weight). |
+| `soft` (**default**) | Surface-filled body + rounded box outline (`╭╮╰╯`). Focus is `BorderFocus` outline + title-edge `SurfaceFocus` (no FocusBar). Degrades to plain text when width &lt; 6. |
+| `solid` | Filled surfaces with title/footer bars. No box-drawing frame. Focus is title-edge `SurfaceFocus` + thin FocusBar. |
+| `bordered` | Classic light/heavy box-drawing borders (outline, minimal surface wash). |
 
 JSON theme files:
 
 ```json
 {
   "id": "my-theme",
-  "chrome": "solid",
+  "chrome": "soft",
   "border": "light",
   "colors": {
     "background": { "light": "#ffffff", "dark": "#14131c" },
@@ -121,17 +132,24 @@ JSON theme files:
 }
 ```
 
-`border` (`light` | `heavy`) only affects glyph choice when `chrome` is
+`border` (`light` | `heavy`) affects glyph choice when `chrome` is `soft` or
 `bordered`.
 
 ## Surfaces and canvas
 
 - `background` — application fill, painted last by `ui.Canvas`
-- `surface` / `surfaceFocus` / `surfaceMuted` — solid panel fills
+- `surface` / `surfaceFocus` / `surfaceMuted` — panel fills
 - Nested surface backgrounds survive the canvas pass; canvas restores its
   background only after SGR clears (reset / default background)
 - Modals still scrim the frame with `overlayScrim` via `ui.Scrim` /
   `ui.OverlayCenter`
+
+## Soft pills (badges)
+
+`ui.Badge` paints a tone-colored label on `SurfaceMuted` with XS horizontal
+pad. Stock `Icons.BadgeLeft` / `BadgeRight` are empty so chips read as soft
+pills without heavy `[` `]` weight. Themes may restore bracket delimiters via
+JSON icons.
 
 ## Loading themes
 

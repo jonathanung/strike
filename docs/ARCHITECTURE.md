@@ -69,7 +69,7 @@ event stream the TUI rendered from (see `internal/protocol/codec.go`).
 | `internal/host` | **Frozen contract**: the services a frontend needs from its host process | stdlib only — enforced by the boundary test |
 | `internal/host/local` | Real `host.Services` implementation; wraps auth/config/models/history/memory/issue/files/mcp for the frontend | `auth`, `config`, `history`, `host`, `issue`, `mcp`, `memory`, `models` |
 | `internal/tui` | Bubble Tea frontend: app model, layout, cells, modals, composer. Sources under `_src/<group>/`, flattened by `go generate` | `protocol`, `host`, `tui/...` only — enforced by the boundary test |
-| `internal/tui/theme` | Resolved design tokens: adaptive color roles, surfaces, chrome mode (solid\|bordered), terminal background, glyphs, border/spacing tokens, and precomputed styles | lipgloss, stdlib |
+| `internal/tui/theme` | Resolved design tokens: adaptive color roles, surfaces, chrome mode (soft\|solid\|bordered), terminal background, glyphs, border/spacing tokens, and precomputed styles | lipgloss, stdlib |
 | `internal/tui/common` | Pure formatting helpers (ThemedSpace, DotJoin, compact durations) | `tui/theme`, stdlib |
 | `internal/tui/term` | PTY + vt10x for embedded editors | stdlib + pty/vt10x |
 | `internal/tui/ui` | Reusable component library (Panel, Dialog, Badge, KeyHints, StatusBar, List, Notice, Card/Bento, OverlayCenter/Scrim, Canvas, Logo) | stdlib, lipgloss, bubbles, charmbracelet/x/ansi, `tui/theme` |
@@ -151,8 +151,8 @@ and `config.theme` / ctrl+d persists the choice. Session-local appearance
 (`/theme dark|light|auto`) is model state that feeds theme resolution; terminal
 background comes from Bubble Tea `BackgroundColorMsg` (not a pre-program OSC 11
 query). Forced dark/light override detection; auto uses the last detected bg.
-Default chrome is **solid** (surface fills, no box-drawing primary frame);
-themes may opt into `chrome: "bordered"`. See [theme.md](theme.md).
+Default chrome is **soft** (surface-filled rounded cards, Family-style);
+themes may opt into `chrome: "solid"` or `chrome: "bordered"`. See [theme.md](theme.md).
 
 
 ## TUI file map

@@ -1,24 +1,24 @@
-⚡ strike /tmp/strike-golden  [ no model ] [ auto sup ] [ def ]            ready
- get started                              keys
-▏◦ anthropic  none                       ▏ctrl+h  focus left
-▏◦ openai  none                          ▏ctrl+l  focus right
-▏◦ xai  none                             ▏ctrl+o  next window
-▏◦ google  none                          ▏ctrl+p  prev window
-▏◦ kimi  none                            ▏ctrl+;  toggle split
-▏◦ deepseek  none                        ▏enter  send
+⚡ strike /tmp/strike-golden   no model   auto sup   def                   ready
+╭─ get started ───────────────────────╮  ╭─ keys ──────────────────────────────╮
+│ ◦ anthropic  none                   │  │ ctrl+h  focus left                  │
+│ ◦ openai  none                      │  │ ctrl+l  focus right                 │
+│ ◦ xai  none                         │  │ ctrl+o  next window                 │
+│ ◦ google  none                      │  │ ctrl+p  prev window                 │
+│ ◦ kimi  none                        │  │ ctrl+;  toggle split                │
+│ ◦ deepseek  none                    │  │ enter  send                         │
+╰─────────────────────────────────────╯  ╰─────────────────────────────────────╯
 
 
+╭─ agents & skills ───────────────────╮
+│ agents                              │
+│   ◆ build                           │
+│ skills                              │
+│   /review                           │
+│   ◆ plan                            │
+╰─────────────────────────────────────╯
 
- agents & skills
-▏agents
-▏  ◆ build
-▏skills
-▏  /review
-▏  ◆ plan
-
-
- prompt ❯
-▏❯ Ask anything…  (/ commands, ! shell)
-▏❯
- enter send · ctrl+j/shift+enter/alt+enter newline
+╭─ prompt ❯ ───────────────────────────────────────────────────────────────────╮
+│ ❯ Ask anything…  (/ commands, ! shell)                                       │
+│ ❯                                                                            │
+╰─ enter send · ctrl+j/shift+enter/alt+enter newline ──────────────────────────╯
 ctrl+h/ctrl+l panes · ctrl+o/ctrl+p windows · ctrl+; toggle split

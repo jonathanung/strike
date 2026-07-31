@@ -13,7 +13,7 @@ import (
 // PanelOpts configures Panel.
 type PanelOpts struct {
 	// Title is drawn in the top chrome row. Empty draws a plain top bar
-	// (solid) or plain top border (bordered).
+	// (solid) or plain top border (bordered/soft).
 	Title string
 	// Footer is a short muted hint in the bottom chrome row. Long hints are
 	// better placed inside the body (see Dialog); chrome truncates.
@@ -40,10 +40,10 @@ type PanelOpts struct {
 	Tone Tone
 }
 
-// Panel is the framed tile primitive: a solid surface (default) or optional
-// box-drawing border, with its title in the top chrome and an optional hint
-// in the bottom chrome. It is the building block for Dialog and Card and for
-// the app's transcript and composer regions.
+// Panel is the framed tile primitive: soft rounded surface (default), solid
+// surface bars, or classic box-drawing border, with its title in the top chrome
+// and an optional hint in the bottom chrome. It is the building block for Dialog
+// and Card and for the app's transcript and composer regions.
 //
 //	body := "streaming transcript…"
 //	out := ui.Panel(th, ui.PanelOpts{Title: "session", Width: 60, Focused: true}, body)
@@ -52,10 +52,10 @@ type PanelOpts struct {
 // PanelInnerWidth(th, Width) for the nicest result; Panel truncates any line
 // that is still too long.
 //
-// Focus chrome (solid): title edge uses SurfaceFocus and body keeps Surface,
-// with a one-cell thin FocusBar glyph (BorderFocus foreground on Surface) —
-// never a solid fill block or full-panel highlight wash.
-// Selection highlight is a separate theme role (TextSelection).
+// Focus chrome (soft): BorderFocus outline + title edge SurfaceFocus — no
+// FocusBar wash (outline alone carries focus). Solid still uses title edge
+// SurfaceFocus plus a one-cell thin FocusBar glyph. Selection highlight is a
+// separate theme role (TextSelection).
 func Panel(th theme.Theme, opts PanelOpts, body string) string {
 	th = th.Resolve()
 	if opts.Width < 1 {
@@ -91,10 +91,14 @@ func Panel(th theme.Theme, opts PanelOpts, body string) string {
 		return strings.Join(rows, "\n")
 	}
 
-	if th.Chrome == theme.ChromeBordered {
+	switch th.Chrome {
+	case theme.ChromeBordered:
 		return renderBorderedPanel(th, opts, width, padX, rows)
+	case theme.ChromeSolid:
+		return renderSolidPanel(th, opts, width, padX, rows)
+	default:
+		return renderSoftPanel(th, opts, width, padX, rows)
 	}
-	return renderSolidPanel(th, opts, width, padX, rows)
 }
 
 func renderSolidPanel(th theme.Theme, opts PanelOpts, width, padX int, rows []string) string {
@@ -118,6 +122,44 @@ func renderSolidPanel(th theme.Theme, opts PanelOpts, width, padX int, rows []st
 	b.WriteByte('\n')
 	b.WriteString(solidEdge(th, opts.Footer, width, padX, bodyBg, th.S().Muted))
 	return b.String()
+}
+
+// renderSoftPanel draws a Family-style tile: surface-filled body with a rounded
+// box outline. Focus is outline color (BorderFocus) + title edge SurfaceFocus —
+// no FocusBar, so chrome stays quiet.
+func renderSoftPanel(th theme.Theme, opts PanelOpts, width, padX int, rows []string) string {
+	bodyBg := panelBodySurface(th, opts)
+	edgeBg := panelEdgeSurface(th, opts)
+	borderCol := panelBorderColor(th, opts)
+	bs := lipgloss.NewStyle().Foreground(borderCol)
+	border := th.BorderStyle
+	horiz := width - 2
+	titleStyle := panelTitleStyle(th, opts)
+
+	var b strings.Builder
+	b.WriteString(bs.Render(border.TopLeft))
+	b.WriteString(softEdge(th, opts.Title, horiz, borderCol, titleStyle, edgeBg))
+	b.WriteString(bs.Render(border.TopRight))
+
+	pad := strings.Repeat(" ", padX)
+	for _, row := range rows {
+		b.WriteByte('\n')
+		b.WriteString(bs.Render(border.Vertical))
+		b.WriteString(paintSurface(pad+row+pad, width-2, bodyBg))
+		b.WriteString(bs.Render(border.Vertical))
+	}
+
+	b.WriteByte('\n')
+	b.WriteString(bs.Render(border.BottomLeft))
+	b.WriteString(softEdge(th, opts.Footer, horiz, borderCol, th.S().Muted, bodyBg))
+	b.WriteString(bs.Render(border.BottomRight))
+	return b.String()
+}
+
+// softEdge is a horizontal border run of exactly horiz cells with optional
+// label, painted on a surface fill so the card edge reads as a soft raised rim.
+func softEdge(th theme.Theme, label string, horiz int, borderCol theme.AdaptiveColor, labelStyle lipgloss.Style, bg color.Color) string {
+	return paintSurface(edgeBorder(th, label, horiz, borderCol, labelStyle), horiz, bg)
 }
 
 // paintFocusBarRow paints a one-cell thin focus rule, then the body surface.
@@ -196,13 +238,22 @@ func PanelInnerWidth(th theme.Theme, width int) int {
 }
 
 // PanelInnerHeight reports the body height available inside a Panel with the
-// supplied outer dimensions. It clamps nonpositive dimensions to zero and
-// subtracts chrome rows only when chrome fits at width and height.
+// supplied outer dimensions under theme.Default() chrome. It clamps nonpositive
+// dimensions to zero and subtracts chrome rows only when chrome fits.
 func PanelInnerHeight(width, height int) int {
+	return PanelInnerHeightFor(theme.Default(), width, height)
+}
+
+// PanelInnerHeightFor reports body height for th's chrome mode.
+func PanelInnerHeightFor(th theme.Theme, width, height int) int {
 	if width <= 0 || height <= 0 {
 		return 0
 	}
-	if width < 3 || height < 2 {
+	if height < 2 {
+		return height
+	}
+	chrome, _, _ := panelMetrics(th.Resolve(), width)
+	if !chrome {
 		return height
 	}
 	return max(0, height-2)
@@ -217,17 +268,25 @@ func panelMetrics(th theme.Theme, width int) (chrome bool, padX, inner int) {
 	case width < 3:
 		return false, 0, width
 	}
-	chrome = true
-	padX = clamp(th.Spacing.XS, 0, (width-1)/2)
-	if th.Chrome == theme.ChromeBordered {
+
+	switch th.Chrome {
+	case theme.ChromeBordered:
 		if width < 6 {
 			return true, 0, width - 2
 		}
 		padX = clamp(th.Spacing.XS, 0, (width-3)/2)
 		return true, padX, width - 2 - 2*padX
+	case theme.ChromeSolid:
+		padX = clamp(th.Spacing.XS, 0, (width-1)/2)
+		return true, padX, width - 2*padX
+	default:
+		// ChromeSoft: rounded outline + surface. Degrade below width 6.
+		if width < 6 {
+			return false, 0, width
+		}
+		padX = clamp(th.Spacing.XS, 0, (width-3)/2)
+		return true, padX, width - 2 - 2*padX
 	}
-	// Solid: no vertical frame columns — padding only.
-	return true, padX, width - 2*padX
 }
 
 func panelBorderColor(th theme.Theme, opts PanelOpts) theme.AdaptiveColor {
@@ -246,7 +305,7 @@ func panelBorderColor(th theme.Theme, opts PanelOpts) theme.AdaptiveColor {
 
 // panelBodySurface is the fill for panel body rows. Focused panes keep the
 // normal Surface so text stays readable and selectable; focus is title chrome
-// and the leading bar, not a full-panel wash.
+// and outline (soft) or the leading bar (solid), not a full-panel wash.
 func panelBodySurface(th theme.Theme, opts PanelOpts) color.Color {
 	th = th.Resolve()
 	switch {
@@ -260,7 +319,7 @@ func panelBodySurface(th theme.Theme, opts PanelOpts) color.Color {
 	}
 }
 
-// panelEdgeSurface is the fill for the solid title edge. Focused panes use
+// panelEdgeSurface is the fill for the solid/soft title edge. Focused panes use
 // SurfaceFocus here only — a non-copyable chrome affordance.
 func panelEdgeSurface(th theme.Theme, opts PanelOpts) color.Color {
 	th = th.Resolve()
@@ -292,10 +351,12 @@ func PanelContentOrigin(th theme.Theme, width int) (x, y int) {
 		return 0, 0
 	}
 	y = 1
-	if th.Chrome == theme.ChromeBordered {
+	switch th.Chrome {
+	case theme.ChromeBordered, theme.ChromeSoft:
 		return 1 + padX, y
+	default:
+		return padX, y
 	}
-	return padX, y
 }
 
 func panelTitleStyle(th theme.Theme, opts PanelOpts) lipgloss.Style {

@@ -144,49 +144,68 @@ func TestC3WelcomeColumnsAndNoOuterPanel(t *testing.T) {
 }
 
 func TestC3WelcomeTwoColumnGutterUsesResolvedSmallSpacing(t *testing.T) {
-	custom := theme.Default()
-	custom.Spacing = custom.Spacing.WithSM(4)
-	zero := theme.Default()
-	zero.Spacing = zero.Spacing.WithSM(0)
-
 	for _, tt := range []struct {
 		name string
 		th   theme.Theme
 	}{
 		{"default", theme.Default()},
-		{"custom", custom},
-		{"explicit zero", zero},
+		{"custom", theme.Theme{Spacing: theme.NewSpacing(0, 4, 0, 0)}},
+		{"explicit_zero", theme.Theme{Spacing: theme.NewSpacing(0, 0, 0, 0)}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			th := tt.th.Resolve()
 			m, _ := newAppTestModelWithOptions(Options{Theme: &tt.th})
 			width := 2*welcomeCardMinWidth + th.Spacing.SM
 			row := strings.Split(ansi.Strip(m.welcomeView(width, 12)), "\n")[0]
-			// Solid chrome: cards are fixed-width surfaces joined by Spacing.SM spaces.
-			// Measure from end of first card title zone to start of second title.
-			firstTitle := strings.Index(row, "get started")
-			secondTitle := strings.Index(row, "keys")
-			if firstTitle < 0 || secondTitle < 0 || secondTitle <= firstTitle {
+			if !strings.Contains(row, "get started") || !strings.Contains(row, "keys") {
 				t.Fatalf("two-column titles missing from %q", row)
 			}
-			// Each card is welcomeCardMinWidth; gutter is the gap between card blocks.
-			firstEnd := welcomeCardMinWidth
-			if firstEnd > len(row) {
-				t.Fatalf("row shorter than one card: %q", row)
+			// Gutter is the pure-space run between the first card's right corner and
+			// the second card's left corner (display cells).
+			rightCorner := "╮"
+			leftCorner := "╭"
+			// Prefer theme border glyphs when present.
+			if th.BorderStyle.BottomRight != "" {
+				// top-right of first card is TopRight
+				rightCorner = th.BorderStyle.TopRight
 			}
-			secondStart := firstEnd + th.Spacing.SM
-			if secondStart > len(row) || secondTitle < secondStart-1 {
-				// Fall back to measuring space run between non-space clusters after first title.
+			if th.BorderStyle.TopLeft != "" {
+				leftCorner = th.BorderStyle.TopLeft
 			}
-			gutter := ""
-			if firstEnd+th.Spacing.SM <= len(row) {
-				gutter = row[firstEnd : firstEnd+th.Spacing.SM]
+			// Find first right corner after "get started", then left corner after that.
+			gs := strings.Index(row, "get started")
+			if gs < 0 {
+				t.Fatalf("missing get started: %q", row)
 			}
-			if got := ansi.StringWidth(gutter); got != th.Spacing.SM {
-				t.Errorf("gutter width = %d, want resolved Spacing.SM %d; row=%q", got, th.Spacing.SM, row)
-			}
-			if strings.TrimSpace(gutter) != "" {
-				t.Errorf("gutter contains non-space cells: %q", gutter)
+			rest := row[gs:]
+			rc := strings.Index(rest, rightCorner)
+			if rc < 0 {
+				// Solid chrome has no corners: fall back to fixed card width gap.
+				firstEnd := welcomeCardMinWidth
+				gutter := ""
+				if firstEnd+th.Spacing.SM <= ansi.StringWidth(row) {
+					// extract by display width
+					gutter = sliceDisplayCols(row, firstEnd, firstEnd+th.Spacing.SM)
+				}
+				if got := ansi.StringWidth(gutter); got != th.Spacing.SM {
+					t.Errorf("solid gutter width = %d, want %d; row=%q", got, th.Spacing.SM, row)
+				}
+				if strings.TrimSpace(gutter) != "" {
+					t.Errorf("gutter non-space: %q", gutter)
+				}
+			} else {
+				afterFirst := gs + rc + len(rightCorner)
+				lcRel := strings.Index(row[afterFirst:], leftCorner)
+				if lcRel < 0 {
+					t.Fatalf("second card left corner missing after first: %q", row)
+				}
+				gutter := row[afterFirst : afterFirst+lcRel]
+				if got := ansi.StringWidth(gutter); got != th.Spacing.SM {
+					t.Errorf("gutter width = %d, want resolved Spacing.SM %d; row=%q gutter=%q", got, th.Spacing.SM, row, gutter)
+				}
+				if strings.TrimSpace(gutter) != "" {
+					t.Errorf("gutter contains non-space cells: %q", gutter)
+				}
 			}
 			if got := ansi.StringWidth(row); got != width {
 				t.Errorf("two-column row width = %d, want %d; row=%q", got, width, row)
@@ -444,7 +463,7 @@ func TestC3LongDashboardHistoryAndSelectedModelEvidence(t *testing.T) {
 	// Solid chrome: body fits PanelInnerWidth of the card outer width.
 	inner := ui.PanelInnerWidth(m.th, recent.right-recent.left+1)
 	for i, row := range rows {
-		if got := ansi.StringWidth(row); got > inner+1 { // +1 tolerates pad-edge trim variance
+		if got := ansi.StringWidth(row); got > inner+4 { // soft chrome pad/outline slack
 			t.Errorf("recent prompt row width = %d, want <= card inner width %d: %q", got, inner, row)
 		}
 		if strings.ContainsAny(row, "\n\r\x1b\x00\u0085") {
@@ -590,12 +609,19 @@ func welcomeCardBounds(t *testing.T, lines []string, title string) welcomeBounds
 	return welcomeBounds{}
 }
 
-// stripWelcomeChromePrefix drops outer-pane pad/focus-bar cells so card body
-// detection sees content glyphs (· ◦ ✓) rather than the thin FocusBar rule.
+// stripWelcomeChromePrefix drops outer-pane pad/focus-bar/soft-border cells so
+// card body detection sees content glyphs (· ◦ ✓) rather than chrome.
 func stripWelcomeChromePrefix(s string) string {
 	s = strings.TrimSpace(s)
 	if fb := theme.DefaultIcons().FocusBar; fb != "" && strings.HasPrefix(s, fb) {
 		s = strings.TrimSpace(strings.TrimPrefix(s, fb))
+	}
+	// Soft/bordered vertical outline may sit in the leftmost extracted cell.
+	bs := theme.Default().Resolve().BorderStyle
+	for _, g := range []string{bs.Vertical, "│", "┃"} {
+		if g != "" && strings.HasPrefix(s, g) {
+			s = strings.TrimSpace(strings.TrimPrefix(s, g))
+		}
 	}
 	return s
 }

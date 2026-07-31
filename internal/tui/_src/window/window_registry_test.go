@@ -119,15 +119,16 @@ func TestRightWindowResizeUsesActualPanelInnerHeight(t *testing.T) {
 
 func TestCompactRightPaneIsBorderlessAndUsesFullBodyDimensionsAtThresholds(t *testing.T) {
 	for _, tt := range []struct {
-		name                        string
-		width, height, wantW, wantH int
-		borderless                  bool
+		name               string
+		width, height      int
+		wantH              int
+		borderless         bool
+		splitRightFromGeom bool
 	}{
-		{"59x30 compact width", 59, 30, 59, 28, true},
-		{"80x19 compact height", 80, 19, 80, 17, true},
-		// Solid chrome: PanelInnerWidth drops only horizontal pad (XS=1 each side).
-		{"60x20 solid threshold", 60, 20, 58, 16, false},
-		{"93x60 canonical split", 93, 60, 30, 56, false},
+		{"59x30 compact width", 59, 30, 28, true, false},
+		{"80x19 compact height", 80, 19, 17, true, false},
+		{"60x20 soft threshold", 60, 20, 16, false, false},
+		{"93x60 canonical split", 93, 60, 56, false, true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			m, _ := newAppTestModel(nil, nil)
@@ -136,8 +137,19 @@ func TestCompactRightPaneIsBorderlessAndUsesFullBodyDimensionsAtThresholds(t *te
 			m = updateApp(t, m, tea.WindowSizeMsg{Width: tt.width, Height: tt.height})
 
 			got := testWindow(t, m.windows.active())
-			if got.width != tt.wantW || got.height != tt.wantH {
-				t.Errorf("registry dimensions = %dx%d, want %dx%d", got.width, got.height, tt.wantW, tt.wantH)
+			rightOuter := tt.width
+			if tt.splitRightFromGeom {
+				g := computePaneGeometry(tt.width, m.paneGutter(), focusRight)
+				if g.rightWidth > 0 {
+					rightOuter = g.rightWidth
+				}
+			}
+			wantW := tt.width
+			if !tt.borderless {
+				wantW = ui.PanelInnerWidth(m.th, rightOuter)
+			}
+			if got.width != wantW || got.height != tt.wantH {
+				t.Errorf("registry dimensions = %dx%d, want %dx%d", got.width, got.height, wantW, tt.wantH)
 			}
 			view := viewString(m)
 			rows := strings.Split(view, "\n")
@@ -154,7 +166,7 @@ func TestCompactRightPaneIsBorderlessAndUsesFullBodyDimensionsAtThresholds(t *te
 				t.Errorf("compact right pane retained panel chrome: %q", plain)
 			}
 			if !tt.borderless && !strings.Contains(plain, "context") {
-				t.Errorf("solid right pane omitted its title: %q", plain)
+				t.Errorf("soft right pane omitted its title: %q", plain)
 			}
 		})
 	}

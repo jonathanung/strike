@@ -13,8 +13,8 @@ type fileDoc struct {
 	ID     string                     `json:"id"`
 	Defs   map[string]string          `json:"defs"`
 	Colors map[string]json.RawMessage `json:"colors"`
-	Chrome string                     `json:"chrome"` // solid | bordered
-	Border string                     `json:"border"` // light | heavy (bordered chrome glyphs)
+	Chrome string                     `json:"chrome"` // soft | solid | bordered
+	Border string                     `json:"border"` // light | heavy (bordered/soft chrome glyphs)
 	Icons  *fileIcons                 `json:"icons"`
 }
 
@@ -59,14 +59,16 @@ func Parse(data []byte, idHint string) (Entry, error) {
 		}
 	}
 	switch strings.ToLower(strings.TrimSpace(doc.Chrome)) {
-	case "", "solid":
-		if doc.Chrome != "" {
-			th.Chrome = ChromeSolid
-		}
+	case "":
+		// Unset → Resolve supplies ChromeSoft.
+	case "soft":
+		th.Chrome = ChromeSoft
+	case "solid":
+		th.Chrome = ChromeSolid
 	case "bordered":
 		th.Chrome = ChromeBordered
 	default:
-		return Entry{}, fmt.Errorf("unknown chrome %q (want solid or bordered)", doc.Chrome)
+		return Entry{}, fmt.Errorf("unknown chrome %q (want soft, solid, or bordered)", doc.Chrome)
 	}
 	switch strings.ToLower(strings.TrimSpace(doc.Border)) {
 	case "", "light":
