@@ -86,13 +86,14 @@ func (m Model) welcomeView(width, height int) string {
 			}
 			inner := ui.PanelInnerWidth(th, outerWidth)
 			bodyRows := max(0, rowHeights[row]-2)
+			// Left-pane focus highlights only the composer (prompt box). Welcome
+			// cards stay unfocused; primary still avoids Dim for calm hierarchy.
 			parts = append(parts, ui.Panel(th, ui.PanelOpts{
-				Title:   welcomeCardTitle(th, card.title, card.tone),
-				Width:   outerWidth,
-				Height:  rowHeights[row],
-				Focused: card.primary && m.focus == focusLeft && m.modal == nil,
-				Dim:     !card.primary || m.focus == focusRight || m.modal != nil,
-				Tone:    ui.ToneDefault,
+				Title:  welcomeCardTitle(th, card.title, card.tone),
+				Width:  outerWidth,
+				Height: rowHeights[row],
+				Dim:    !card.primary || m.focus == focusRight || m.modal != nil,
+				Tone:   ui.ToneDefault,
 			}, card.body(inner, bodyRows)))
 		}
 		block := lipgloss.JoinHorizontal(lipgloss.Top, parts...)
