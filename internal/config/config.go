@@ -173,7 +173,7 @@ type MCPServer struct {
 
 // SessionConfig is the JSON "session" object in config.
 type SessionConfig struct {
-	// Worktree is always (default), auto (second+ concurrent root), or off.
+	// Worktree is off (default), auto (second+ concurrent root), or always.
 	Worktree string `json:"worktree,omitempty"`
 	// WorktreeCleanup is keep (default) or delete on session close.
 	WorktreeCleanup string `json:"worktreeCleanup,omitempty"`
