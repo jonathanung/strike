@@ -38,6 +38,7 @@ Registry: `keybindSlashPrimary` / `keybindNoSlashReason` in
 | `alt+y` | copy last assistant response (OSC52) | `/copy` |
 | `ctrl+h` / `ctrl+l` | focus left (primary transcript) / right (secondary pane column) — **orientation-independent** | `/focus-left`, `/focus-right` |
 | `ctrl+o` / `ctrl+p` | cycle right-pane focus next / previous within the active stack group, then to the next group | `/window-next`, `/window-prev` |
+| `ctrl+shift+o` / `ctrl+shift+p` | cycle right-pane **stack groups** next / previous (lands on the group's first pane) | `/group-next`, `/group-prev` |
 | `ctrl+;` | toggle split orientation | `/layout`, `/split` |
 
 Focus and cycle chords do **not** swap when the split is stacked top/bottom:
@@ -47,14 +48,16 @@ Right-pane **stack groups** (related panes shown together when space allows):
 
 | Group | Panes (split) |
 |---|---|
-| Session | `context` + `activity` |
+| Session | `context` + `activity` (+ `telemetry` when enabled) |
 | Agents | `agents` + `visualizer` |
 | Project | `memory` + `issues` |
 | Singles | `files`, `markdown`, `editor` (full height each) |
 
 Focus cycle order is deterministic: top→bottom (or left→right in a bottom-bar
 split) inside the group, then the next group. Narrow/compact terminals collapse
-to a single pane and cycle the same order one at a time. See [usage.md](usage.md).
+to a single pane and cycle the same order one at a time. Group cycle
+(`ctrl+shift+o`/`ctrl+shift+p`) skips remaining members of the current group
+and jumps to the first pane of the next/previous group. See [usage.md](usage.md).
 
 ## Permission prompts
 

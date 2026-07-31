@@ -49,6 +49,8 @@ var KnownKeybindIDs = map[string]struct{}{
 	"nav.focus-right":          {},
 	"nav.window-next":          {},
 	"nav.window-prev":          {},
+	"nav.group-next":           {},
+	"nav.group-prev":           {},
 	"nav.scroll-up":            {},
 	"nav.scroll-down":          {},
 	"nav.jump-bottom":          {},

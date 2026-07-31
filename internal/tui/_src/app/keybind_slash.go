@@ -20,6 +20,8 @@ var keybindSlashPrimary = map[string]string{
 	"nav.focus-right":    "/focus-right",
 	"nav.window-next":    "/window-next",
 	"nav.window-prev":    "/window-prev",
+	"nav.group-next":     "/group-next",
+	"nav.group-prev":     "/group-prev",
 	"nav.scroll-up":      "/scroll-up",
 	"nav.scroll-down":    "/scroll-down",
 	"nav.jump-bottom":    "/jump-bottom",
@@ -110,6 +112,8 @@ var keybindBackedCommandSpecs = []commandSpec{
 	{ID: commandFocusRight, Name: "/focus-right", Description: "focus right pane", Source: commandSourceBuiltin},
 	{ID: commandWindowNext, Name: "/window-next", Description: "cycle to next right-pane window", Source: commandSourceBuiltin},
 	{ID: commandWindowPrev, Name: "/window-prev", Description: "cycle to previous right-pane window", Source: commandSourceBuiltin},
+	{ID: commandGroupNext, Name: "/group-next", Description: "cycle to next right-pane stack group", Source: commandSourceBuiltin},
+	{ID: commandGroupPrev, Name: "/group-prev", Description: "cycle to previous right-pane stack group", Source: commandSourceBuiltin},
 	{ID: commandScrollUp, Name: "/scroll-up", Description: "scroll transcript up", Source: commandSourceBuiltin},
 	{ID: commandScrollDown, Name: "/scroll-down", Description: "scroll transcript down", Source: commandSourceBuiltin},
 	{ID: commandJumpBottom, Name: "/jump-bottom", Description: "jump transcript to latest output", Source: commandSourceBuiltin},
@@ -160,6 +164,7 @@ func isKeybindBackedSlash(name string) bool {
 	switch name {
 	case "/focus-left", "/focus-right",
 		"/window-next", "/window-prev",
+		"/group-next", "/group-prev",
 		"/scroll-up", "/scroll-down", "/jump-bottom",
 		"/palette", "/interrupt", "/save-defaults",
 		"/leave-editor", "/edit-prompt",
@@ -196,6 +201,16 @@ func (m Model) handleKeybindSlashCommand(name string) (tea.Model, tea.Cmd) {
 		return m, filesPollCmd(m.windows)
 	case "/window-prev":
 		m.windows = m.windows.cycleBy(-1)
+		m.windows = refreshProjectDataWindows(m.windows)
+		m.reflow()
+		return m, filesPollCmd(m.windows)
+	case "/group-next":
+		m.windows = m.windows.cycleGroupBy(1)
+		m.windows = refreshProjectDataWindows(m.windows)
+		m.reflow()
+		return m, filesPollCmd(m.windows)
+	case "/group-prev":
+		m.windows = m.windows.cycleGroupBy(-1)
 		m.windows = refreshProjectDataWindows(m.windows)
 		m.reflow()
 		return m, filesPollCmd(m.windows)

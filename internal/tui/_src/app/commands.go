@@ -62,6 +62,8 @@ const (
 	commandFocusRight    commandID = "focus-right"
 	commandWindowNext    commandID = "window-next"
 	commandWindowPrev    commandID = "window-prev"
+	commandGroupNext     commandID = "group-next"
+	commandGroupPrev     commandID = "group-prev"
 	commandScrollUp      commandID = "scroll-up"
 	commandScrollDown    commandID = "scroll-down"
 	commandJumpBottom    commandID = "jump-bottom"
@@ -256,6 +258,8 @@ var reservedCommandNames = map[string]struct{}{
 	"focus-right":    {},
 	"window-next":    {},
 	"window-prev":    {},
+	"group-next":     {},
+	"group-prev":     {},
 	"scroll-up":      {},
 	"scroll-down":    {},
 	"jump-bottom":    {},

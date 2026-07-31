@@ -559,6 +559,71 @@ func TestWindowRegistryFocusCycleIsDeterministicAcrossGroups(t *testing.T) {
 	}
 }
 
+func TestWindowRegistryCycleGroupByJumpsToGroupFirstMember(t *testing.T) {
+	r := newWindowRegistry()
+	// Mid-group (activity) → next group lands on agents (first of agents group).
+	r, ok := r.activate("activity")
+	if !ok {
+		t.Fatal("activate activity")
+	}
+	r = r.cycleGroupBy(1)
+	if got := r.active().id(); got != "agents" {
+		t.Fatalf("group next from activity = %q, want agents", got)
+	}
+	if g := r.activeGroup(); g.id != "agents" {
+		t.Fatalf("active group = %q, want agents", g.id)
+	}
+	// Next again → files (singleton group).
+	r = r.cycleGroupBy(1)
+	if got := r.active().id(); got != "files" {
+		t.Fatalf("group next from agents = %q, want files", got)
+	}
+	// From mid-session, prev wraps to editor (last group's first member).
+	r, _ = r.activate("telemetry")
+	r = r.cycleGroupBy(-1)
+	if got := r.active().id(); got != "editor" {
+		t.Fatalf("group prev from telemetry = %q, want editor", got)
+	}
+	// Full forward ring of group first-members.
+	r = newWindowRegistry()
+	var order []string
+	for range 7 {
+		order = append(order, r.active().id())
+		r = r.cycleGroupBy(1)
+	}
+	want := []string{"context", "agents", "files", "memory", "markdown", "editor", "context"}
+	if !stringsEqual(order, want) {
+		t.Errorf("group cycle order = %q, want %q", order, want)
+	}
+	// One-by-one cycle still walks every pane (regression for #671).
+	r = newWindowRegistry()
+	var panes []string
+	for range 4 {
+		panes = append(panes, r.active().id())
+		r = r.cycleBy(1)
+	}
+	if !stringsEqual(panes, []string{"context", "activity", "telemetry", "agents"}) {
+		t.Errorf("pane cycle still broken: %q", panes)
+	}
+}
+
+func TestWindowRegistryCycleGroupByEmptyGroupsFallsBackToSingletons(t *testing.T) {
+	r := newWindowRegistry()
+	r.groups = nil
+	start := r.active().id()
+	r = r.cycleGroupBy(1)
+	if r.active().id() == start && len(r.windows) > 1 {
+		t.Fatalf("empty groups: cycleGroupBy stuck on %q", start)
+	}
+	// With no groups, cycleGroupBy matches cycleBy (one step).
+	r2 := newWindowRegistry()
+	r2.groups = nil
+	r2 = r2.cycleBy(1)
+	if r.active().id() != r2.active().id() {
+		t.Fatalf("empty groups cycleGroupBy=%q cycleBy=%q", r.active().id(), r2.active().id())
+	}
+}
+
 func TestComputeMemberSlotsStableUnderResizeStorm(t *testing.T) {
 	for _, tt := range []struct {
 		name           string

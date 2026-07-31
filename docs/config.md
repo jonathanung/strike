@@ -165,6 +165,8 @@ Remap app-level chords without recompiling. Ids match the in-app cheatsheet
   "composer.newline": ["ctrl+j", "alt+enter"],
   "nav.window-next": "ctrl+o",
   "nav.window-prev": "ctrl+p",
+  "nav.group-next": "ctrl+shift+o",
+  "nav.group-prev": "ctrl+shift+p",
   "nav.tool-expand": "alt+enter"
 }
 ```

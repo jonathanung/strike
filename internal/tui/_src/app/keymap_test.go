@@ -32,6 +32,10 @@ func TestDefaultKeyMapBindingsMatchTheirRequiredKeysAndHaveHelp(t *testing.T) {
 
 		{"window prev ctrl+p", keys.CycleWindowPrev, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl}},
 
+		{"group next ctrl+shift+o", keys.CycleGroupNext, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl | tea.ModShift}},
+
+		{"group prev ctrl+shift+p", keys.CycleGroupPrev, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl | tea.ModShift}},
+
 		{"palette", keys.Palette, tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl}},
 
 		{"keyhelp", keys.KeyHelp, tea.KeyPressMsg{Code: tea.KeyF1}},
@@ -83,6 +87,26 @@ func TestDefaultKeyMapBindingsMatchTheirRequiredKeysAndHaveHelp(t *testing.T) {
 
 		t.Errorf("CycleWindowPrev help key = %q, want ctrl+p", keys.CycleWindowPrev.Help().Key)
 
+	}
+
+	if keys.CycleGroupNext.Help().Key != "ctrl+shift+o" {
+
+		t.Errorf("CycleGroupNext help key = %q, want ctrl+shift+o", keys.CycleGroupNext.Help().Key)
+
+	}
+
+	if keys.CycleGroupPrev.Help().Key != "ctrl+shift+p" {
+
+		t.Errorf("CycleGroupPrev help key = %q, want ctrl+shift+p", keys.CycleGroupPrev.Help().Key)
+
+	}
+
+	// ctrl+o must not match group cycle; ctrl+shift+o must not match window cycle (#671).
+	if key.Matches(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}, keys.CycleGroupNext, keys.CycleGroupPrev) {
+		t.Error("ctrl+o must not match CycleGroup*")
+	}
+	if key.Matches(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl | tea.ModShift}, keys.CycleWindowNext, keys.CycleWindowPrev) {
+		t.Error("ctrl+shift+o must not match CycleWindow*")
 	}
 
 	if keys.Palette.Help().Key != "ctrl+k" {
@@ -263,6 +287,7 @@ func TestKeybindCatalogCoversAppBindingsAndIsSearchable(t *testing.T) {
 	for _, id := range []string{
 
 		"nav.focus-left", "nav.focus-right", "nav.window-next", "nav.window-prev",
+		"nav.group-next", "nav.group-prev",
 
 		"global.palette", "global.keyhelp", "global.copy-last", "composer.external-editor",
 

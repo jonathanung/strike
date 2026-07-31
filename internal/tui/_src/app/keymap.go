@@ -9,11 +9,16 @@ import (
 // keyMap collects the app-level bindings so routing remains independent of
 // Bubble Tea's rendered key strings.
 type keyMap struct {
-	Quit              key.Binding
-	FocusLeft         key.Binding
-	FocusRight        key.Binding
-	CycleWindowNext   key.Binding
-	CycleWindowPrev   key.Binding
+	Quit            key.Binding
+	FocusLeft       key.Binding
+	FocusRight      key.Binding
+	CycleWindowNext key.Binding
+	CycleWindowPrev key.Binding
+	// CycleGroupNext/Prev jump to the first pane of the next/previous stack
+	// group (ctrl+shift+o/p). Distinct from CycleWindow* which walks panes
+	// one-by-one (#671).
+	CycleGroupNext    key.Binding
+	CycleGroupPrev    key.Binding
 	Palette           key.Binding
 	KeyHelp           key.Binding
 	Interrupt         key.Binding
@@ -77,6 +82,10 @@ func defaultKeyMap() keyMap {
 		// Cycle secondary-stack panes. ctrl+o / ctrl+p — not orientation-swapped (#414).
 		CycleWindowNext: key.NewBinding(key.WithKeys("ctrl+o"), key.WithHelp("ctrl+o", "next window")),
 		CycleWindowPrev: key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "prev window")),
+		// Cycle stack groups (session → agents → …). ctrl+shift+o/p — free of
+		// window-cycle and palette chords (#671).
+		CycleGroupNext: key.NewBinding(key.WithKeys("ctrl+shift+o"), key.WithHelp("ctrl+shift+o", "next pane group")),
+		CycleGroupPrev: key.NewBinding(key.WithKeys("ctrl+shift+p"), key.WithHelp("ctrl+shift+p", "prev pane group")),
 		// Palette moved off ctrl+p (now window-prev). ctrl+k is free of pane-cycle;
 		// kill-to-end still claims mid-line first via readline routing.
 		Palette:           key.NewBinding(key.WithKeys("ctrl+k"), key.WithHelp("ctrl+k", "palette")),
@@ -171,9 +180,10 @@ func defaultAgentsKeyMap() agentsKeyMap {
 	}
 }
 
-// applyOrientationKeys is a no-op: focus (ctrl+h/l) and window cycle (ctrl+o/p)
-// are orientation-independent — left/right mean primary transcript vs secondary
-// pane column even when the split is stacked top/bottom (#414).
+// applyOrientationKeys is a no-op: focus (ctrl+h/l), window cycle (ctrl+o/p),
+// and group cycle (ctrl+shift+o/p) are orientation-independent — left/right mean
+// primary transcript vs secondary pane column even when the split is stacked
+// top/bottom (#414, #671).
 func (k *keyMap) applyOrientationKeys(orient splitOrientation) {
 	_ = k
 	_ = orient
@@ -218,6 +228,8 @@ func applyKeybindOverrides(k *keyMap, overrides map[string][]string) {
 	set(&k.FocusRight, "nav.focus-right", "")
 	set(&k.CycleWindowNext, "nav.window-next", "ctrl+o")
 	set(&k.CycleWindowPrev, "nav.window-prev", "ctrl+p")
+	set(&k.CycleGroupNext, "nav.group-next", "ctrl+shift+o")
+	set(&k.CycleGroupPrev, "nav.group-prev", "ctrl+shift+p")
 	set(&k.ScrollUp, "nav.scroll-up", "")
 	set(&k.ScrollDown, "nav.scroll-down", "")
 	set(&k.JumpBottom, "nav.jump-bottom", "")
@@ -397,6 +409,8 @@ func keybindCatalog(keys keyMap) []keybindEntry {
 		from("nav.focus-right", "Navigation", keys.FocusRight),
 		from("nav.window-next", "Navigation", keys.CycleWindowNext),
 		from("nav.window-prev", "Navigation", keys.CycleWindowPrev),
+		from("nav.group-next", "Navigation", keys.CycleGroupNext),
+		from("nav.group-prev", "Navigation", keys.CycleGroupPrev),
 		from("nav.scroll-up", "Navigation", keys.ScrollUp),
 		from("nav.scroll-down", "Navigation", keys.ScrollDown),
 		from("nav.jump-bottom", "Navigation", keys.JumpBottom),
