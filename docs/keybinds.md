@@ -38,7 +38,7 @@ Registry: `keybindSlashPrimary` / `keybindNoSlashReason` in
 | `ctrl+up` / `ctrl+down` | scroll transcript | `/scroll-up`, `/scroll-down` |
 | `ctrl+t` | jump to latest output | `/jump-bottom` |
 | `alt+y` | copy last assistant response (OSC52) | `/copy` |
-| `ctrl+h` / `ctrl+l` | focus left (primary transcript) / right (secondary pane column) — **orientation-independent** | `/focus-left`, `/focus-right` |
+| `ctrl+h` / `ctrl+l` | focus left (primary transcript) / right (secondary pane column) — **orientation-independent**; on the lean home screen, `ctrl+l` also opens the multi-pane workspace (launch left, panels right) | `/focus-left`, `/focus-right` |
 | `ctrl+o` / `ctrl+p` | cycle right-pane focus next / previous within the active stack group, then to the next group | `/window-next`, `/window-prev` |
 | `ctrl+shift+o` / `ctrl+shift+p` | cycle right-pane **stack groups** next / previous (lands on the group's first pane) | `/group-next`, `/group-prev` |
 | `ctrl+;` | toggle split orientation | `/layout`, `/split` |

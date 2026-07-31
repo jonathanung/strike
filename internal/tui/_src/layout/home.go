@@ -19,10 +19,12 @@ const homePromptMinWidth = 28
 
 // showHomeLayout is the pre-first-prompt screen: empty root transcript only.
 // After the first user/assistant/tool cell appears, the normal multi-pane
-// layout takes over (#677). testForceMultiPane lets unit tests keep the
-// multi-pane surface without seeding a fake user message.
+// layout takes over (#677). ctrl+l / focus-right from home opens the right
+// pane column and keeps multi-pane with the launch stack on the left (#684).
+// testForceMultiPane lets unit tests keep the multi-pane surface without
+// seeding a fake user message.
 func (m Model) showHomeLayout() bool {
-	if m.testForceMultiPane {
+	if m.testForceMultiPane || m.homePanesOpen {
 		return false
 	}
 	return len(m.displayCells()) == 0 && !m.viewingChild()
