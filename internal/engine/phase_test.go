@@ -464,3 +464,252 @@ func TestPlanSystemPromptIncludesPhaseOverlay(t *testing.T) {
 		t.Fatalf("missing interview duties:\n%s", sys)
 	}
 }
+
+// TestPhaseAgentTransitionKeepsSessionModel: workflow phase agent pins must
+// not thrash provider/model. Explicit SelectAgent still applies pins.
+func TestPhaseAgentTransitionKeepsSessionModel(t *testing.T) {
+	const sessionModel = "session-model"
+	// Custom workflow so phase agents carry pins while startup stays on an
+	// unpinned build (startup SelectAgent would otherwise apply build pins).
+	wf := config.Workflow{
+		Name: "sticky-plan-implement",
+		Phases: []config.Phase{
+			{
+				Name:  "plan",
+				Agent: "planner",
+				Permissions: permission.Ruleset{
+					{Permission: "write", Pattern: "*", Action: permission.Deny},
+					{Permission: "edit", Pattern: "*", Action: permission.Deny},
+				},
+				Exit: config.ExitGate{Type: config.GateUser},
+			},
+			{
+				Name:  "implement",
+				Agent: "coder",
+				Exit:  config.ExitGate{Type: config.GateAgent},
+			},
+		},
+	}
+	enterArgs, _ := json.Marshal(map[string]any{})
+	doneArgs, _ := json.Marshal(map[string]any{})
+	enterCall := provider.ToolCall{ID: "en-sticky", Name: "enter_plan_mode", Args: enterArgs}
+	// phase_done (not exit_plan_mode): advances without forcing build/orchestrator.
+	doneCall := provider.ToolCall{ID: "pd-sticky", Name: "phase_done", Args: doneArgs}
+
+	sessionProv := newScriptedProvider(
+		toolCallStep(enterCall),
+		toolCallStep(doneCall),
+		completedStep("implementing"),
+	)
+	planProv := newScriptedProvider(completedStep("plan-pin-should-not-run"))
+	coderProv := newScriptedProvider(completedStep("coder-pin-should-not-run"))
+	providers := map[string]*scriptedProvider{
+		"session":  sessionProv,
+		"planpin":  planProv,
+		"coderpin": coderProv,
+	}
+	defaults := map[string]string{
+		"session":  sessionModel,
+		"planpin":  "plan-pinned-model",
+		"coderpin": "coder-pinned-model",
+	}
+
+	eng := engine.New(engine.Options{
+		SessionID:       "phase-sticky-model",
+		Select:          multiProviderSelect(providers, defaults),
+		InitialProvider: "session",
+		InitialModel:    sessionModel,
+		Registry:        tool.NewRegistry(tool.NewEnterPlanMode(), tool.NewPhaseDone()),
+		Agents: []engine.Agent{
+			{Name: "build"},
+			{Name: "plan"},
+			{Name: "planner", Provider: "planpin", Model: "plan-pinned-model"},
+			{Name: "coder", Provider: "coderpin", Model: "coder-pinned-model"},
+		},
+		InitialAgent:    "build",
+		Workflows:       []config.Workflow{wf, config.BuiltinPlanImplement()},
+		DefaultWorkflow: "sticky-plan-implement",
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	// Startup model.
+	waitForEvent(t, eng, func(ev protocol.Event) bool {
+		ms, ok := ev.(protocol.ModelSelected)
+		return ok && ms.Provider == "session" && ms.Model == sessionModel
+	})
+
+	eng.Ops() <- protocol.UserInput{Text: "plan then implement"}
+
+	var sawPlan, sawImplement, sawPlanner, sawCoder, turnDone bool
+	var modelAfterPhase []protocol.ModelSelected
+	deadline := time.After(15 * time.Second)
+	for !sawImplement || !sawCoder || !turnDone {
+		select {
+		case <-deadline:
+			t.Fatalf("timeout plan=%v implement=%v planner=%v coder=%v turn=%v models=%v",
+				sawPlan, sawImplement, sawPlanner, sawCoder, turnDone, modelAfterPhase)
+		case ev := <-eng.Events():
+			switch e := ev.(type) {
+			case protocol.QuestionAsked:
+				eng.Ops() <- protocol.QuestionReply{RequestID: e.RequestID, Answers: []string{"Yes"}}
+			case protocol.PhaseChanged:
+				switch e.Phase {
+				case "plan":
+					sawPlan = true
+				case "implement":
+					sawImplement = true
+				}
+			case protocol.AgentSelected:
+				switch e.Name {
+				case "planner":
+					sawPlanner = true
+				case "coder":
+					sawCoder = true
+				}
+			case protocol.ModelSelected:
+				// Ignore startup; collect any model changes after phase work starts.
+				if sawPlan || sawPlanner {
+					modelAfterPhase = append(modelAfterPhase, e)
+				}
+			case protocol.TurnCompleted:
+				turnDone = true
+			case protocol.EngineError:
+				t.Fatalf("engine error: %s", e.Message)
+			}
+		}
+	}
+
+	if !sawPlan || !sawPlanner {
+		t.Fatalf("expected plan phase+agent; plan=%v planner=%v", sawPlan, sawPlanner)
+	}
+	for _, ms := range modelAfterPhase {
+		if ms.Provider != "session" || ms.Model != sessionModel {
+			t.Fatalf("phase agent transition changed model: %+v (want session/%s)", ms, sessionModel)
+		}
+	}
+	// Pinned providers must not have been selected for streaming.
+	select {
+	case req := <-planProv.requests:
+		t.Fatalf("plan-pinned provider received Stream: model=%q", req.Model)
+	default:
+	}
+	select {
+	case req := <-coderProv.requests:
+		t.Fatalf("coder-pinned provider received Stream: model=%q", req.Model)
+	default:
+	}
+
+	// Explicit user SelectAgent still applies model pins.
+	eng.Ops() <- protocol.SelectAgent{Name: "planner"}
+	ms := waitForEvent(t, eng, func(ev protocol.Event) bool {
+		m, ok := ev.(protocol.ModelSelected)
+		return ok && m.Provider == "planpin" && m.Model == "plan-pinned-model"
+	}).(protocol.ModelSelected)
+	if ms.Provider != "planpin" || ms.Model != "plan-pinned-model" {
+		t.Fatalf("explicit SelectAgent model = %+v, want planpin/plan-pinned-model", ms)
+	}
+}
+
+// TestPhaseDoneAdvanceKeepsSessionModel: phase_done advancing to a phase with
+// a different agent pin must not emit a model change.
+func TestPhaseDoneAdvanceKeepsSessionModel(t *testing.T) {
+	const sessionModel = "sticky-session"
+	wf := config.Workflow{
+		Name: "two-agent",
+		Phases: []config.Phase{
+			{Name: "first", Agent: "alpha", Exit: config.ExitGate{Type: config.GateAgent}},
+			{Name: "second", Agent: "beta", Exit: config.ExitGate{Type: config.GateAgent}},
+		},
+	}
+	args, _ := json.Marshal(map[string]any{})
+	enterCall := provider.ToolCall{ID: "en-pd", Name: "enter_plan_mode", Args: args}
+	doneCall := provider.ToolCall{ID: "pd-sticky", Name: "phase_done", Args: args}
+
+	sessionProv := newScriptedProvider(
+		toolCallStep(enterCall),
+		toolCallStep(doneCall),
+		completedStep("on second"),
+	)
+	alphaProv := newScriptedProvider(completedStep("alpha-pin"))
+	betaProv := newScriptedProvider(completedStep("beta-pin"))
+	providers := map[string]*scriptedProvider{
+		"session": sessionProv,
+		"alpha":   alphaProv,
+		"beta":    betaProv,
+	}
+	defaults := map[string]string{
+		"session": sessionModel,
+		"alpha":   "alpha-model",
+		"beta":    "beta-model",
+	}
+
+	eng := engine.New(engine.Options{
+		SessionID:       "phase-done-sticky",
+		Select:          multiProviderSelect(providers, defaults),
+		InitialProvider: "session",
+		InitialModel:    sessionModel,
+		Registry:        tool.NewRegistry(tool.NewEnterPlanMode(), tool.NewPhaseDone()),
+		Agents: []engine.Agent{
+			{Name: "build"},
+			{Name: "plan"},
+			{Name: "alpha", Provider: "alpha", Model: "alpha-model"},
+			{Name: "beta", Provider: "beta", Model: "beta-model"},
+		},
+		Workflows:       []config.Workflow{wf, config.BuiltinPlanImplement()},
+		DefaultWorkflow: "two-agent",
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	waitForEvent(t, eng, func(ev protocol.Event) bool {
+		ms, ok := ev.(protocol.ModelSelected)
+		return ok && ms.Provider == "session" && ms.Model == sessionModel
+	})
+
+	eng.Ops() <- protocol.UserInput{Text: "advance"}
+
+	var sawSecond, sawBeta bool
+	var badModels []protocol.ModelSelected
+	deadline := time.After(15 * time.Second)
+	for !sawSecond || !sawBeta {
+		select {
+		case <-deadline:
+			t.Fatalf("timeout second=%v beta=%v badModels=%v", sawSecond, sawBeta, badModels)
+		case ev := <-eng.Events():
+			switch e := ev.(type) {
+			case protocol.PhaseChanged:
+				if e.Phase == "second" {
+					sawSecond = true
+				}
+			case protocol.AgentSelected:
+				if e.Name == "beta" {
+					sawBeta = true
+				}
+			case protocol.ModelSelected:
+				if e.Provider != "session" || e.Model != sessionModel {
+					badModels = append(badModels, e)
+				}
+			case protocol.EngineError:
+				t.Fatalf("engine error: %s", e.Message)
+			}
+		}
+	}
+	if len(badModels) > 0 {
+		t.Fatalf("phase_done agent transition changed model: %v", badModels)
+	}
+	select {
+	case req := <-alphaProv.requests:
+		t.Fatalf("alpha-pinned provider streamed: %q", req.Model)
+	default:
+	}
+	select {
+	case req := <-betaProv.requests:
+		t.Fatalf("beta-pinned provider streamed: %q", req.Model)
+	default:
+	}
+}

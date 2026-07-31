@@ -84,8 +84,9 @@ func (e *Engine) enterPhaseOpts(w config.Workflow, index int, pinAgent bool) err
 				return err
 			}
 		} else {
+			// keepModel: phase agent pins must not thrash the session model.
 			// applyAgent only — avoid syncPhaseWithAgent re-entry.
-			e.applyAgent(agent)
+			e.applyAgent(agent, true)
 		}
 	}
 	return nil
