@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strconv"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -149,14 +150,18 @@ func (w visualizerWindow) view(th theme.Theme) string {
 		lines = append(lines, contextKVLine(th, w.width, "source", s.Source))
 	}
 
-	// Activity sparkline — hollow when no known samples.
+	// Tokens-per-turn sparkline — labeled metric + scale so the graph is readable.
+	// Hollow when no known samples (never fabricate zeros from missing usage).
 	sparkW := min(w.width, max(8, w.width-2))
 	if sparkW > 24 {
 		sparkW = 24
 	}
 	if w.width >= 8 {
 		lines = append(lines, "")
-		lines = append(lines, wrapWindowText(st.Muted.Render("activity"), w.width))
+		lines = append(lines, wrapWindowText(st.Muted.Render(visualizerActivityHeading(th, s.Activity)), w.width))
+		if scale := visualizerActivityScale(th, s.Activity); scale != "" {
+			lines = append(lines, wrapWindowText(st.Muted.Render(scale), w.width))
+		}
 		lines = append(lines, wrapWindowText(ui.Sparkline(th, sparkW, s.Activity), w.width))
 	}
 
@@ -184,6 +189,35 @@ func visualizerFit(lines []string, height int) string {
 		lines = lines[:height]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// visualizerActivityHeading names the sparkline metric (tokens per completed turn).
+func visualizerActivityHeading(th theme.Theme, samples []float64) string {
+	if len(samples) == 0 {
+		return "tokens/turn"
+	}
+	n := len(samples)
+	unit := "turns"
+	if n == 1 {
+		unit = "turn"
+	}
+	return dotJoin(th, "tokens/turn", strconv.Itoa(n)+" "+unit)
+}
+
+// visualizerActivityScale summarizes peak and latest sample in token units.
+// Empty when there are no samples (heading alone is enough).
+func visualizerActivityScale(th theme.Theme, samples []float64) string {
+	if len(samples) == 0 {
+		return ""
+	}
+	peak := samples[0]
+	for _, v := range samples[1:] {
+		if v > peak {
+			peak = v
+		}
+	}
+	last := samples[len(samples)-1]
+	return dotJoin(th, "peak "+ui.FormatTokens(int(peak)), "last "+ui.FormatTokens(int(last)))
 }
 
 func visualizerStateGlyph(th theme.Theme, state theme.AgentState, status string) string {

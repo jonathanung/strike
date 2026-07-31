@@ -15,11 +15,11 @@
 │         │ filter: ▏  7/7                                                       │──────────╮
 │         │ ▸ Strike (current) — strike · builtin                                │          │
 │         │   Catppuccin — catppuccin · builtin                                  │          │
-│         │   Dracula — dracula · builtin                                        │rsona     │
+│         │   Dracula — dracula · builtin                                        │          │
 ╰─────────│   Gruvbox — gruvbox · builtin                                        │          │
-          │   Monokai — monokai · builtin                                        │t         │
-          │   Nord — nord · builtin                                              │alt+enter │
-╭─ agents │   Tokyo Night — tokyo-night · builtin                                │nt        │
+          │   Monokai — monokai · builtin                                        │          │
+          │   Nord — nord · builtin                                              │          │
+╭─ agents │   Tokyo Night — tokyo-night · builtin                                │          │
 │ agents  │                                                                      │          │
 │   ◆ buil│ up/down/j/k move · type to filter · enter select · ctrl+d set        │          │
 │ skills  │ default · esc close                                                  │          │

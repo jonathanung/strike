@@ -283,9 +283,9 @@ slot hosts one active window from the registry:
 | Window | Role |
 |---|---|
 | `context` | setup summary (provider, model, agent, …) |
-| `activity` | tools/tips / subagent status |
+| `activity` | tools / subagent status / empty-state |
 | `agents` | multi-root session/agent tree (concurrent roots + children) |
-| `visualizer` | selected-node status, tokens/cost, activity sparkline |
+| `visualizer` | selected-node status, tokens/cost, tokens/turn sparkline |
 | `files` | workspace file tree (`host.Files`) |
 | `memory` | project memory browser |
 | `issues` | project issue browser |

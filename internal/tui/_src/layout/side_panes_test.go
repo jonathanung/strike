@@ -125,33 +125,32 @@ func TestContextPaneBodyWidthSafe(t *testing.T) {
 	}
 }
 
-func TestActivityPaneBodyIdleTips(t *testing.T) {
+func TestActivityPaneBodyEmptyState(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	body := ansi.Strip(m.activityPaneBody(40, 10))
-	for _, want := range []string{
-		"/",
-		keyHint(m.keyMap.Palette).Key,         // ctrl+k
-		keyHint(m.keyMap.Agent).Key,           // tab
-		keyHint(m.keyMap.CycleWindowNext).Key, // ctrl+o
-		keyHint(m.keyMap.Newline).Key,         // ctrl+j/shift+enter/alt+enter
+	if !strings.Contains(body, activityEmptyMessage) {
+		t.Errorf("idle activity missing empty-state %q: %q", activityEmptyMessage, body)
+	}
+	// Keybind chrome belongs on the welcome/keys card, not the empty activity feed.
+	for _, tip := range []string{
+		keyHint(m.keyMap.Palette).Key,
+		keyHint(m.keyMap.Agent).Key,
+		keyHint(m.keyMap.CycleWindowNext).Key,
+		keyHint(m.keyMap.Newline).Key,
+		keyHint(m.keyMap.Palette).Label,
+		"commands",
+		"subagent",
 	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("idle activity tips missing %q: %q", want, body)
+		if strings.Contains(body, tip) {
+			t.Errorf("empty activity still shows keybind tip %q: %q", tip, body)
 		}
-	}
-	// Descriptions derive from keyMap help (plus the literal "/" commands tip).
-	if !strings.Contains(body, keyHint(m.keyMap.Palette).Label) && !strings.Contains(body, "commands") {
-		t.Errorf("idle tips missing command/palette descriptions: %q", body)
-	}
-	if !strings.Contains(body, keyHint(m.keyMap.Newline).Label) {
-		t.Errorf("idle tips missing newline description: %q", body)
 	}
 	if strings.Contains(strings.ToLower(body), "placeholder") {
 		t.Errorf("activity body contains placeholder copy: %q", body)
 	}
 }
 
-func TestActivityPaneBodyShowsToolNameWithoutIdleTips(t *testing.T) {
+func TestActivityPaneBodyShowsToolNameWithoutEmptyState(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m.cells = []cell{
 		&toolCell{name: "bash", title: "run tests", done: true},
@@ -160,16 +159,8 @@ func TestActivityPaneBodyShowsToolNameWithoutIdleTips(t *testing.T) {
 	if !strings.Contains(body, "run tests") && !strings.Contains(body, "bash") {
 		t.Errorf("activity with tools missing tool name: %q", body)
 	}
-	// Idle tips should not appear once tools are present.
-	for _, tip := range []string{
-		keyHint(m.keyMap.Palette).Key,
-		keyHint(m.keyMap.Newline).Key,
-		keyHint(m.keyMap.Palette).Label,
-		"commands",
-	} {
-		if strings.Contains(body, tip) {
-			t.Errorf("activity with tools still shows idle tip %q: %q", tip, body)
-		}
+	if strings.Contains(body, activityEmptyMessage) {
+		t.Errorf("activity with tools still shows empty-state: %q", body)
 	}
 	if strings.Contains(strings.ToLower(body), "placeholder") {
 		t.Errorf("activity body contains placeholder copy: %q", body)
@@ -200,14 +191,16 @@ func TestActivityPaneBodyWidthSafeAndNeverPlaceholder(t *testing.T) {
 			}
 		}
 	}
-	// Idle tips: widths at or above the longest tip key ("ctrl+j/shift+enter/alt+enter") plus gap.
-	// (Narrower than that can overshoot — see Findings.)
+	// Empty state: short copy must stay width-safe at tight right-pane widths.
 	m.cells = nil
-	for _, width := range []int{16, 20, 28, 40} {
+	for _, width := range []int{8, 16, 20, 28, 40} {
 		body := m.activityPaneBody(width, 5)
 		plain := ansi.Strip(body)
 		if strings.Contains(strings.ToLower(plain), "placeholder") {
 			t.Errorf("idle width=%d contains placeholder: %q", width, plain)
+		}
+		if width >= len(activityEmptyMessage) && !strings.Contains(plain, activityEmptyMessage) {
+			t.Errorf("idle width=%d missing empty-state: %q", width, plain)
 		}
 		for i, line := range strings.Split(body, "\n") {
 			if line == "" {

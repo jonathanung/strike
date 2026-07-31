@@ -99,7 +99,7 @@ func buildLegendEntries(th theme.Theme) []legendEntry {
 		if len(runes) >= 2 {
 			sample = string(runes[0]) + ic.Ellipsis + string(runes[len(runes)-1])
 		}
-		entries = append(entries, legendEntry{"Chrome", sample, "activity sparkline (low to high)", legendPaintAccentAlt})
+		entries = append(entries, legendEntry{"Chrome", sample, "tokens/turn sparkline (low to high)", legendPaintAccentAlt})
 	}
 	return entries
 }

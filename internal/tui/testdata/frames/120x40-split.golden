@@ -13,13 +13,13 @@
 │ type below · enter to send          │  │ ctrl+k  palette                     │ ╰─────────────────────────────────────╯
 │                                     │  │ f1  keybinds                        │
 │                                     │  │ esc  interrupt                      │ ╭─ activity ──────────────────────────╮
-│                                     │  │                                     │ │ /  commands                         │
-│                                     │  │                                     │ │ ctrl+k  palette                     │
-│                                     │  │                                     │ │ tab  cycle agent persona            │
-╰─────────────────────────────────────╯  ╰─────────────────────────────────────╯ │ ctrl+o  next window                 │
-                                                                                 │ ctrl+;  toggle split                │
-                                                                                 │ ctrl+j/shift+enter/alt+enter  newl… │
-╭─ agents & skills ────────────────────────────────────────────────────────────╮ │ ctrl+x down  subagent               │
+│                                     │  │                                     │ │ nothing here yet :)                 │
+│                                     │  │                                     │ │                                     │
+│                                     │  │                                     │ │                                     │
+╰─────────────────────────────────────╯  ╰─────────────────────────────────────╯ │                                     │
+                                                                                 │                                     │
+                                                                                 │                                     │
+╭─ agents & skills ────────────────────────────────────────────────────────────╮ │                                     │
 │ agents                                                                       │ │                                     │
 │   ◆ build                                                                    │ │                                     │
 │ skills                                                                       │ │                                     │
