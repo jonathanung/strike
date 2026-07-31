@@ -504,12 +504,19 @@ func (w agentsWindow) filterChildTree(kids []childActivity, q string) []ui.TreeN
 			label = shortSessionID(ch.sessionID)
 		}
 		state := childAgentState(ch.status)
+		if ch.rosterState == "needs you" {
+			state = theme.AgentStateAttention
+		}
+		detail := ch.status
+		if ch.rosterState != "" {
+			detail = ch.rosterState
+		}
 		node := ui.TreeNode{
 			ID:      ch.sessionID,
 			Label:   label,
-			Detail:  ch.status,
+			Detail:  detail,
 			Current: w.viewingID == ch.sessionID,
-			Tone:    childStatusTone(ch.status),
+			Tone:    childStatusTone(detail),
 		}
 		var children []ui.TreeNode
 		for _, g := range byParent[ch.sessionID] {
@@ -565,12 +572,14 @@ func agentsTextMatches(q string, parts ...string) bool {
 }
 
 func childAgentState(status string) theme.AgentState {
-	switch status {
-	case "running":
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "running", "working", "starting":
 		return theme.AgentStateWorking
-	case string(protocol.ChildStatusFailed):
+	case "needs you", "needs_attention":
+		return theme.AgentStateAttention
+	case "failed", "error":
 		return theme.AgentStateError
-	case string(protocol.ChildStatusCanceled):
+	case "canceled", "cancelled":
 		return theme.AgentStateDead
 	default:
 		// completed / unknown → idle green (ready)
@@ -611,14 +620,16 @@ func listableChildActivities(children []childActivity) []childActivity {
 }
 
 func childStatusTone(status string) ui.Tone {
-	switch status {
-	case "running":
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "running", "working", "starting":
 		return ui.ToneAccentAlt
-	case string(protocol.ChildStatusCompleted):
+	case "needs you", "needs_attention":
+		return ui.ToneWarning
+	case "completed", "done":
 		return ui.ToneSuccess
-	case string(protocol.ChildStatusFailed):
+	case "failed", "error":
 		return ui.ToneError
-	case string(protocol.ChildStatusCanceled):
+	case "canceled", "cancelled":
 		return ui.ToneMuted
 	default:
 		return ui.ToneDefault
