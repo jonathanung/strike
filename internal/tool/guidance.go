@@ -251,13 +251,13 @@ func recommendedGuidance(entries []GuidanceEntry) string {
 	add(has("question"),
 		"Use `question` when a decision genuinely belongs to the user.")
 	add(has("task") && has("task_status", "task_read"),
-		"Use `task` for bounded non-blocking delegation (optional `agent` persona and `model` catalog id); use `task_status`/`task_read` only when an intermediate check is needed (not every second). Prefer `task_message` to steer and `task_interrupt` to cancel. Completion still arrives once as `[child.completed]` — never sleep-poll.")
+		"Use `task` for bounded non-blocking delegation (optional `agent`/`model`/`name`). Do not busy-poll `task_status` — prefer `[child.completed]` and the peer inbox. One-off `task_status`/`task_read` only when needed. `task_message` steers owned children; `task_interrupt` cancels. Bound fan-out (MaxChildDepth).")
 	add(has("task") && !has("task_status", "task_read"),
-		"Use `task` for bounded non-blocking delegation (self-contained prompt). A later `[child.completed]` delivers the summary — never sleep-poll for task completion.")
+		"Use `task` for bounded non-blocking delegation (self-contained prompt). A later `[child.completed]` delivers the finished summary — never sleep-poll for task completion.")
 	add(has("agent_roster"),
-		"Use `agent_roster` to list the lead and teammates (session ids, personas, states) on the implicit session team.")
+		"Use `agent_roster` to list the lead and teammates (session ids, personas, states) on the implicit session team — prefer over status polling when you only need who is live.")
 	add(has("agent_message") || has("agent_broadcast"),
-		"Use `agent_message` / `agent_broadcast` for mid-turn peer coordination on the session team (child↔child, child↔lead). Prefer waiting for `[child.completed]` when you only need a child's final result. `task_message` remains parent→owned-child guidance.")
+		"Prefer `agent_message` / `agent_broadcast` for mid-flight coordination (blockers, handoffs, child→lead early). Prefer `[child.completed]` for finished work products. Avoid chatty loops. `task_message` remains parent→owned-child steer only — not a parent-only team control plane.")
 
 	add(has("sleep") && has("bash") && has("task"),
 		"Prefer `sleep` over bash sleep for external readiness (services, rate limits). Never sleep-poll for `task`/subagent completion.")

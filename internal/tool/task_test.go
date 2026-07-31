@@ -211,3 +211,33 @@ func TestCloneWithoutOmitsTask(t *testing.T) {
 		t.Fatalf("child schemas = %+v", schemas)
 	}
 }
+
+func TestTaskDescriptionCoordinationSemantics(t *testing.T) {
+	d := NewTask().Description()
+	for _, needle := range []string{
+		"agent_message",
+		"child.completed",
+		"busy-loop",
+		"task_status",
+		"not a parent-only control plane",
+		"mid-flight",
+		"MaxChildDepth",
+	} {
+		if !strings.Contains(d, needle) {
+			t.Errorf("task description missing %q:\n%s", needle, d)
+		}
+	}
+	// Must not frame control as parent-only without the peer path.
+	if strings.Contains(d, "intermediate control") && !strings.Contains(d, "agent_message") {
+		t.Errorf("task description still implies parent-only intermediate control:\n%s", d)
+	}
+}
+
+func TestTaskStatusDescriptionDiscouragesBusyPoll(t *testing.T) {
+	d := NewTaskStatus().Description()
+	for _, needle := range []string{"busy-poll", "child.completed", "agent_message"} {
+		if !strings.Contains(d, needle) {
+			t.Errorf("task_status description missing %q:\n%s", needle, d)
+		}
+	}
+}
