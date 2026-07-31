@@ -105,8 +105,8 @@ The right pane is TUI-local. Its private, value-oriented `window` interface
 has identity/title, initialization, update, resize, and view methods; updates
 and resizes return replacement values so model copies do not share mutable
 state. The registry holds right-pane windows: named session panes (`context` for
-setup summary and `activity` for subagent status, recent parent tools, or idle
-tips), an `agents` multi-root tree, a `visualizer` for the selected node's
+setup summary and `activity` for subagent status, recent parent tools, or an
+empty-state line), an `agents` multi-root tree, a `visualizer` for the selected node's
 status/tokens/cost/tokens-per-turn sparkline, a `files` explorer (lazy tree via
 `host.Files.ListDir`), `memory` and `issues` browsers, a `markdown` reader
 opened via `/md-read`, and an `editor` PTY window for `/vim`/`/nano`. Windows are
