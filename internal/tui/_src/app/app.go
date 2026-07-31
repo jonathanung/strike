@@ -317,8 +317,10 @@ type Model struct {
 	// splitOrientation is horizontal (left|right) by default; vertical stacks
 	// the left body above the right pane (top/bottom).
 	splitOrientation splitOrientation
-	// appearance is session-local auto|dark|light (lipgloss adaptive bg).
-	appearance appearanceMode
+	// appearance is session-local auto|dark|light. detectedDark is the terminal
+	// background from tea.BackgroundColorMsg (provisional until the first msg).
+	appearance   appearanceMode
+	detectedDark bool
 	// children tracks active/recent subagent sessions for the activity pane.
 	// Lifecycle never appends transcript cells.
 	children []childActivity
@@ -422,9 +424,11 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		focused:             true,
 		notifyMode:          NotifyUnfocusedOnly,
 		appearance:          appearanceAuto,
+		detectedDark:        true, // until BackgroundColorMsg; matches lipgloss default
 		autonomy:            protocol.AutonomySupervised,
 		permMode:            protocol.PermissionModeDefault,
 	}
+	m.applyAppearance()
 	var replay []protocol.Event
 	for _, option := range options {
 		m.dangerouslySkipPermissions = option.DangerouslySkipPermissions
@@ -507,6 +511,8 @@ func (m Model) Init() tea.Cmd {
 		// Kitty/Ghostty keep separate keyboard stacks per screen; re-enable
 		// after alt-screen enter so shift+enter CSI is actually delivered (#187).
 		enableEnhancedKeysCmd(),
+		// Terminal bg via Bubble Tea (not pre-program OSC 11); feeds appearance.
+		tea.RequestBackgroundColor,
 	}
 	if m.firstRun {
 		cmds = append(cmds, func() tea.Msg { return firstRunSetupMsg{} })
@@ -570,6 +576,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case paintFlushMsg:
 		m.applyPaintFlush()
+		return m, nil
+
+	case tea.BackgroundColorMsg:
+		m.detectedDark = msg.IsDark()
+		m.applyAppearance()
+		m.restyleWidgets()
+		m.reflow()
+		m.refreshViewport()
 		return m, nil
 
 	case tea.WindowSizeMsg:

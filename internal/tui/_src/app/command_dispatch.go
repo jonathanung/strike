@@ -1242,7 +1242,7 @@ func (m Model) handleThemeCommand(args []string) (tea.Model, tea.Cmd) {
 	arg := strings.ToLower(strings.TrimSpace(args[0]))
 	if mode, ok := parseAppearance(arg); ok {
 		m.appearance = mode
-		applyAppearance(m.appearance)
+		m.applyAppearance()
 		m.restyleWidgets()
 		m.setNotice("appearance: "+string(m.appearance), false)
 		m.reflow()
