@@ -276,12 +276,18 @@ func TestC2PaneFocusAndModalUseFocusAndMutedThemeTokens(t *testing.T) {
 	th.OverlayScrim = fixedColor("#070809")
 	m, _ := newAppTestModelWithOptions(Options{Theme: &th})
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 80})
-	leftRows, rightRows := rowsContaining(viewString(m), "get started"), rowsContaining(viewString(m), "context")
+	// Left focus highlights the prompt box only — not welcome cards (#663).
+	leftRows, rightRows := rowsContaining(viewString(m), "prompt"), rowsContaining(viewString(m), "context")
 	if !strings.Contains(strings.Join(leftRows, "\n"), rgbBGSGR("#010203")) || !strings.Contains(strings.Join(rightRows, "\n"), rgbBGSGR("#040506")) {
 		t.Fatal("left focus/right dim surface tokens are not visible on their respective panes")
 	}
+	// Welcome primary card stays without focus chrome while left-focused.
+	welcomeRows := rowsContaining(viewString(m), "get started")
+	if strings.Contains(strings.Join(welcomeRows, "\n"), rgbBGSGR("#010203")) {
+		t.Fatal("welcome card must not use SurfaceFocus when left focus is on the prompt")
+	}
 	m = updateApp(t, m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
-	leftRows, rightRows = rowsContaining(viewString(m), "get started"), rowsContaining(viewString(m), "context")
+	leftRows, rightRows = rowsContaining(viewString(m), "prompt"), rowsContaining(viewString(m), "context")
 	if !strings.Contains(strings.Join(leftRows, "\n"), rgbBGSGR("#040506")) || !strings.Contains(strings.Join(rightRows, "\n"), rgbBGSGR("#010203")) {
 		t.Fatal("focus toggle did not swap pane focus/dim surface tokens")
 	}

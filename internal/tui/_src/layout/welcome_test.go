@@ -139,6 +139,63 @@ func TestWelcomeKeysDoNotRepeatComposerActions(t *testing.T) {
 	}
 }
 
+// TestLeftFocusHighlightsOnlyPromptNotWelcomeKeys locks #663: when the left
+// (prompt) side has focus, only the composer panel uses focus chrome. The
+// welcome keys card (primary when the selected provider is already authed)
+// stays visible without BorderFocus / SurfaceFocus.
+func TestLeftFocusHighlightsOnlyPromptNotWelcomeKeys(t *testing.T) {
+	setTUITrueColor(t)
+	th := theme.Default()
+	th.Surface = fixedColor("#112233")
+	th.SurfaceFocus = fixedColor("#445566")
+	th.BorderFocus = fixedColor("#778899")
+	th.SurfaceMuted = fixedColor("#aabbcc")
+	th.Border = fixedColor("#ddeeff")
+	m, _ := newAppTestModelWithOptions(Options{Theme: &th})
+	// Authed selected provider drops "get started", so keys becomes primary.
+	m.providerName = "echo"
+	m.modelName = "echo-1"
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	if m.focus != focusLeft {
+		t.Fatalf("focus = %v, want left", m.focus)
+	}
+	cards := m.welcomeCards(m.services.Auth.Statuses())
+	if len(cards) == 0 || cards[0].title != "keys" || !cards[0].primary {
+		t.Fatalf("welcome cards = %+v, want primary keys first", cards)
+	}
+
+	welcome := m.welcomeView(60, 20)
+	if plain := ansi.Strip(welcome); !strings.Contains(plain, "keys") {
+		t.Fatalf("welcome missing keys card:\n%s", plain)
+	}
+	if strings.Contains(welcome, rgbSGR("#778899")) {
+		t.Fatal("welcome keys card used BorderFocus while left focus belongs to prompt")
+	}
+	if strings.Contains(welcome, rgbBGSGR("#445566")) {
+		t.Fatal("welcome keys card used SurfaceFocus title edge while left focus belongs to prompt")
+	}
+
+	composer := m.composerView(false, 60, 6)
+	if plain := ansi.Strip(composer); !strings.Contains(plain, "prompt") {
+		t.Fatalf("composer missing prompt title:\n%s", plain)
+	}
+	if !strings.Contains(composer, rgbSGR("#778899")) {
+		t.Fatal("prompt box missing BorderFocus when left-focused")
+	}
+	if !strings.Contains(composer, rgbBGSGR("#445566")) {
+		t.Fatal("prompt box missing SurfaceFocus title edge when left-focused")
+	}
+
+	// Full frame: keys still present; focus chrome still comes from the prompt.
+	view := viewString(m)
+	if plain := ansi.Strip(view); !strings.Contains(plain, "keys") || !strings.Contains(plain, "prompt") {
+		t.Fatalf("full view missing keys or prompt:\n%s", plain)
+	}
+	if !strings.Contains(view, rgbSGR("#778899")) {
+		t.Fatal("left-focused full view missing prompt BorderFocus")
+	}
+}
+
 func TestWelcomeDashboardUsesCustomThemeWithoutChangingContent(t *testing.T) {
 	setTUITrueColor(t)
 	agents := []string{"build", "plan"}
