@@ -176,6 +176,22 @@ func TestComposerPlaceholderMentionsAskAnythingAndSlash(t *testing.T) {
 	}
 }
 
+// TestComposerDisablesBubblesInsertNewline pins E13.4: Bubbles v2 DefaultKeyMap
+// binds enter to InsertNewline; strike owns Enter as send and inserts newlines
+// only via the Newline binding (shift/alt+enter, ctrl+j).
+func TestComposerDisablesBubblesInsertNewline(t *testing.T) {
+	ta := newComposer(theme.Default())
+	if ta.KeyMap.InsertNewline.Enabled() {
+		t.Fatal("composer InsertNewline must be disabled so Enter cannot fall through to textarea newline")
+	}
+	// Fall-through Update with KeyEnter must not mutate value.
+	ta.SetValue("keep")
+	ta, _ = ta.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if got := ta.Value(); got != "keep" {
+		t.Fatalf("textarea Update(enter) = %q, want unchanged (InsertNewline disabled)", got)
+	}
+}
+
 func TestComposerFooterAdvertisesEnterAndShiftEnter(t *testing.T) {
 	// Bordered composer at a non-compact size with empty transcript should
 	// surface send/newline help in the panel footer.
