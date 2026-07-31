@@ -2520,6 +2520,56 @@ func TestPaletteInvokeUsesExistingCommandBehavior(t *testing.T) {
 
 }
 
+func TestPaletteInvokePreservesPopulatedComposer(t *testing.T) {
+	tests := []struct {
+		name   string
+		action paletteAction
+	}{
+		{name: "builtin", action: paletteAction{Kind: paletteActionBuiltin, Value: "/help"}},
+		{name: "agent", action: paletteAction{Kind: paletteActionAgent, Value: "build"}},
+		{name: "keybind editor", action: paletteAction{Kind: paletteActionKeybindEditor}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, _ := newAppTestModel([]string{"build"}, nil)
+			m.setComposerValueAt("keep this\nunfinished prompt", len([]rune("keep this\nunfin")))
+			m.pendingPastes = []pasteChip{{Placeholder: "[paste 1]", Content: "full paste"}}
+			m.completion = &completionState{Selected: 1}
+			m.historyPos = 2
+			m.historyDraft = "history draft"
+			want := m.snapshotComposer()
+
+			updated, _ := m.Update(paletteInvokeMsg{Action: tt.action})
+			m = updated.(Model)
+			got := m.snapshotComposer()
+
+			if got.value != want.value || got.cursor != want.cursor || got.completion != want.completion || got.historyPos != want.historyPos || got.historyDraft != want.historyDraft || len(got.pendingPastes) != 1 {
+				t.Fatalf("palette action changed composer state: got=%+v want=%+v", got, want)
+			}
+		})
+	}
+}
+
+func TestPaletteEnterPreservesPopulatedComposer(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m.setComposerValueAt("draft survives", len([]rune("draft sur")))
+	want := m.snapshotComposer()
+	m.modal = newPaletteModal(m.commands, nil, m.currentPaletteAvailability())
+	palette := m.modal.(*paletteModal)
+	palette.filter = "help"
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(Model)
+	msg := runAppCmd(t, cmd)
+	updated, _ = m.Update(msg)
+	m = updated.(Model)
+
+	got := m.snapshotComposer()
+	if got.value != want.value || got.cursor != want.cursor {
+		t.Fatalf("palette enter changed composer: value=%q cursor=%d; want %q/%d", got.value, got.cursor, want.value, want.cursor)
+	}
+}
+
 func TestPaletteInsertOnlyFocusesComposerWithoutSubmissionOrHistoryWrite(t *testing.T) {
 
 	store := newFakeHistory("existing")
@@ -2533,6 +2583,7 @@ func TestPaletteInsertOnlyFocusesComposerWithoutSubmissionOrHistoryWrite(t *test
 	m.historyPos = 0
 
 	m.historyDraft = "draft"
+	m.composer.SetValue("existing prompt")
 
 	updated, cmd := m.Update(paletteInvokeMsg{Action: paletteAction{Kind: paletteActionSkill, Value: "review"}})
 
@@ -2540,7 +2591,7 @@ func TestPaletteInsertOnlyFocusesComposerWithoutSubmissionOrHistoryWrite(t *test
 
 	runAppCmd(t, cmd)
 
-	if m.composer.Value() != "/review " || !m.composer.Focused() {
+	if m.composer.Value() != "/review existing prompt" || !m.composer.Focused() {
 
 		t.Errorf("insert-only composer value/focus = %q/%v", m.composer.Value(), m.composer.Focused())
 

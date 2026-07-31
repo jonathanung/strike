@@ -935,10 +935,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if _, paletteOpen := m.modal.(*paletteModal); paletteOpen {
 			m.modal = nil
 		}
+		composer := m.snapshotComposer()
 		switch msg.Action.Kind {
 		case paletteActionBuiltin:
 			next, cmd := m.handleCommand(msg.Action.Value)
 			nm := next.(Model)
+			nm.restoreComposer(composer)
 			// Promote queued asks only when the command did not open another modal.
 			if nm.modal == nil {
 				if promote := nm.afterModalClosed(); promote != nil {
@@ -947,7 +949,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return nm.paletteResultFocus(priorNotice, priorNoticeErr, cmd)
 		case paletteActionAgent:
-			m.resetComposer()
 			ops, name := m.ops, msg.Action.Value
 			return m, func() tea.Msg {
 				ops <- protocol.SelectAgent{Name: name}
@@ -955,19 +956,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case paletteActionSkill:
 			m.resetHistoryBrowsing()
-			text := "/" + msg.Action.Value + " "
+			text := "/" + msg.Action.Value + " " + m.composer.Value()
 			m.setComposerValueAt(text, len([]rune(text)))
 			m.recomputeCompletion()
 			m.reflow()
 			return m, m.setPaneFocus(focusLeft)
 		case paletteActionKeybinds:
-			m.resetComposer()
 			m.clearNotice()
 			m.modal = newKeybindEditor(m.keyMap, m.keyOverrides, m.services.Settings)
 			m.reflow()
 			return m, nil
 		case paletteActionKeybindEditor:
-			m.resetComposer()
 			m.clearNotice()
 			m.modal = newKeybindEditor(m.keyMap, m.keyOverrides, m.services.Settings)
 			m.reflow()
