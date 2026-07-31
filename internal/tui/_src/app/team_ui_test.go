@@ -7,6 +7,33 @@ import (
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
 
+func TestOnTeamRosterDoesNotReviveTerminal(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m.sessionID = "lead"
+	m.children = []childActivity{
+		{sessionID: "c1", name: "done-one", status: string(protocol.ChildStatusCompleted)},
+	}
+	m.onTeamRoster(protocol.TeamRoster{
+		LeadID: "lead",
+		Members: []protocol.TeamRosterMember{
+			{SessionID: "c1", Role: "member", Name: "done-one", State: "working"},
+		},
+	})
+	if m.children[0].status != string(protocol.ChildStatusCompleted) {
+		t.Fatalf("status revived to %q", m.children[0].status)
+	}
+	// Terminal→terminal still allowed (failed after completed is rare but ok).
+	m.onTeamRoster(protocol.TeamRoster{
+		LeadID: "lead",
+		Members: []protocol.TeamRosterMember{
+			{SessionID: "c1", Role: "member", Name: "done-one", State: "failed"},
+		},
+	})
+	if m.children[0].status != string(protocol.ChildStatusFailed) {
+		t.Fatalf("terminal update = %q, want failed", m.children[0].status)
+	}
+}
+
 func TestOnTeamRosterUpdatesNamesAndStates(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m.sessionID = "lead-1"

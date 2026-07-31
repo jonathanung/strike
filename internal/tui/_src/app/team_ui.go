@@ -25,6 +25,16 @@ type teamMessage struct {
 	at      time.Time
 }
 
+func childStatusTerminal(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case string(protocol.ChildStatusCompleted), string(protocol.ChildStatusFailed),
+		string(protocol.ChildStatusCanceled), "cancelled":
+		return true
+	default:
+		return false
+	}
+}
+
 // rosterStatusToChild maps team.roster / task_status vocabulary onto the
 // childActivity status strings used by agents/activity panes.
 func rosterStatusToChild(state string) string {
@@ -111,7 +121,8 @@ func applyTeamRosterMembers(children *[]childActivity, index map[string]int, mem
 			if parentID != "" && ch.parentID == "" {
 				ch.parentID = parentID
 			}
-			if status != "" {
+			// Never revive a terminal child from a late/stale roster snapshot.
+			if status != "" && (!childStatusTerminal(ch.status) || childStatusTerminal(status)) {
 				ch.status = status
 			}
 			if detail != "" {
