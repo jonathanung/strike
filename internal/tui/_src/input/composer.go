@@ -266,6 +266,7 @@ func (m *Model) restoreComposer(snapshot composerSnapshot) {
 	m.completion = snapshot.completion
 	m.historyPos = snapshot.historyPos
 	m.historyDraft = snapshot.historyDraft
+	m.reflow()
 }
 
 func (m *Model) handleHistoryKey(msg tea.KeyPressMsg) bool {
