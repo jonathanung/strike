@@ -74,12 +74,11 @@ func TestArchitectureBoundaries(t *testing.T) {
 // TestCharmImportPaths enforces the Charm module path allowlist across every
 // .go file (including tests and cmd/):
 //
-//   - v2 (E13): charm.land/… (bubbletea, bubbles, lipgloss)
-//   - remaining v1: github.com/charmbracelet/glamour, x/ansi, …
+//   - v2 (E13): charm.land/… (bubbletea, bubbles, lipgloss, glamour)
+//   - remaining v1: github.com/charmbracelet/x/ansi, …
 //
 // github.com/charmbracelet/…/v2 is forbidden — that is not a valid Charm v2
-// module path. Migrated packages (bubbletea/bubbles/lipgloss) must not regress
-// to github.com/charmbracelet paths.
+// module path. Migrated packages must not regress to github.com/charmbracelet paths.
 func TestCharmImportPaths(t *testing.T) {
 	root := moduleRoot(t)
 	fset := token.NewFileSet()
@@ -158,14 +157,15 @@ func boundaryViolation(pkgDir, imp string) string {
 // Charm module path. Allowlist:
 //
 //	charm.land/…                              — v2 vanity (E13+)
-//	github.com/charmbracelet/glamour[/*]      — still on v1 until E13.5
 //	github.com/charmbracelet/x/…              — shared x/* utilities
+//	github.com/charmbracelet/colorprofile     — color profile helper
 //
 // Forbidden:
 //   - github.com/charmbracelet/…/v2 (upgrade guides require charm.land)
 //   - github.com/charmbracelet/bubbles[/*] (E13.4: bubbles is charm.land only)
 //   - github.com/charmbracelet/bubbletea[/*] (E13.1)
 //   - github.com/charmbracelet/lipgloss[/*] (E13.2)
+//   - github.com/charmbracelet/glamour[/*] (E13.5: glamour is charm.land only)
 func charmImportViolation(imp string) string {
 	switch {
 	case strings.HasPrefix(imp, "charm.land/"):
@@ -186,6 +186,8 @@ func charmImportViolation(imp string) string {
 			return "Bubble Tea v2 imports must use charm.land/bubbletea/v2, not github.com/charmbracelet/bubbletea"
 		case "lipgloss":
 			return "Lip Gloss v2 imports must use charm.land/lipgloss/v2, not github.com/charmbracelet/lipgloss"
+		case "glamour":
+			return "Glamour v2 imports must use charm.land/glamour/v2, not github.com/charmbracelet/glamour"
 		}
 		return ""
 	default:
@@ -226,9 +228,10 @@ func TestCharmImportViolation(t *testing.T) {
 		{"github.com/charmbracelet/lipgloss", "Lip Gloss v2 imports must use charm.land/lipgloss/v2, not github.com/charmbracelet/lipgloss"},
 		{"github.com/charmbracelet/bubbles/viewport", "Bubbles v2 imports must use charm.land/bubbles/v2, not github.com/charmbracelet/bubbles"},
 		{"github.com/charmbracelet/bubbles", "Bubbles v2 imports must use charm.land/bubbles/v2, not github.com/charmbracelet/bubbles"},
-		{"github.com/charmbracelet/glamour/styles", ""},
-		{"github.com/charmbracelet/glamour", ""},
+		{"github.com/charmbracelet/glamour/styles", "Glamour v2 imports must use charm.land/glamour/v2, not github.com/charmbracelet/glamour"},
+		{"github.com/charmbracelet/glamour", "Glamour v2 imports must use charm.land/glamour/v2, not github.com/charmbracelet/glamour"},
 		{"github.com/charmbracelet/x/ansi", ""},
+		{"github.com/charmbracelet/colorprofile", ""},
 		{"charm.land/bubbletea/v2", ""},
 		{"charm.land/lipgloss/v2", ""},
 		{"charm.land/lipgloss/v2/compat", ""},
@@ -236,9 +239,11 @@ func TestCharmImportViolation(t *testing.T) {
 		{"charm.land/bubbles/v2/textarea", ""},
 		{"charm.land/bubbles/v2/textinput", ""},
 		{"charm.land/glamour/v2", ""},
+		{"charm.land/glamour/v2/styles", ""},
 		{"github.com/charmbracelet/bubbletea/v2", "Charm v2 imports must use charm.land/..., not github.com/charmbracelet/.../v2"},
 		{"github.com/charmbracelet/lipgloss/v2", "Charm v2 imports must use charm.land/..., not github.com/charmbracelet/.../v2"},
 		{"github.com/charmbracelet/bubbles/v2", "Charm v2 imports must use charm.land/..., not github.com/charmbracelet/.../v2"},
+		{"github.com/charmbracelet/glamour/v2", "Charm v2 imports must use charm.land/..., not github.com/charmbracelet/.../v2"},
 		{"github.com/other/thing", ""},
 		{"fmt", ""},
 	}

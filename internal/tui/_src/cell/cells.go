@@ -52,10 +52,11 @@ type assistantCell struct {
 	text     string
 	complete bool // true after turn/tool boundary; markdown only when complete
 
-	mdCache    string
-	mdCacheKey string
-	mdCacheW   int
-	mdCacheOK  bool
+	mdCache      string
+	mdCacheKey   string
+	mdCacheW     int
+	mdCacheStyle string // glamour dark|light; style changes must miss cache
+	mdCacheOK    bool
 	// mdMisses counts full markdownRender paths (cache miss). Used by redraw
 	// budget tests (#452/#495) so completed cells stay on the cache hit path.
 	mdMisses int
@@ -89,7 +90,7 @@ func (c *assistantCell) render(width int, th theme.Theme) string {
 	case !c.complete:
 		// Plain text while streaming — avoid glamour on incomplete fences.
 		body = renderCellText(st.Text, src, bodyWidth)
-	case c.mdCacheOK && c.mdCacheKey == src && c.mdCacheW == bodyWidth:
+	case c.mdCacheOK && c.mdCacheKey == src && c.mdCacheW == bodyWidth && c.mdCacheStyle == glamourStyle():
 		body = c.mdCache
 	default:
 		c.mdMisses++
@@ -102,6 +103,7 @@ func (c *assistantCell) render(width int, th theme.Theme) string {
 		c.mdCache = body
 		c.mdCacheKey = src
 		c.mdCacheW = bodyWidth
+		c.mdCacheStyle = glamourStyle()
 		c.mdCacheOK = true
 	}
 	return label + "\n" + indent(body, indentation)

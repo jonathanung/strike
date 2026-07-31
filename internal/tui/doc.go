@@ -34,7 +34,7 @@
 //   - common — pure formatting helpers
 //
 // Import boundary (boundary_test.go): only protocol, host, and tui/….
-// Charm module paths: github.com/charmbracelet/… (v1) or charm.land/… (v2);
+// Charm module paths: charm.land/… (v2) or remaining v1 github.com/charmbracelet/x/…;
 // github.com/charmbracelet/…/v2 is rejected (TestCharmImportPaths).
 package tui
 
