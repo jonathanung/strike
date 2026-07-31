@@ -64,6 +64,43 @@ ready:
 	}
 }
 
+func TestSessionRespondsToBackgroundColorQuery(t *testing.T) {
+	cmd := exec.Command("bash", "-c", `
+		stty raw -echo
+		printf '\033]11;?\007'
+		IFS= read -r -d $'\a' response
+		case "$response" in
+			$'\033]11;rgb:'*) printf '\033[2J\033[HRESPONSE:OK' ;;
+			*) printf '\033[2J\033[HRESPONSE:BAD' ;;
+		esac
+	`)
+	s, err := Start(cmd, 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for background color response; screen=%q", s.Terminal().String())
+		case <-s.Notify():
+			if text := s.Terminal().String(); strings.Contains(text, "RESPONSE:OK") {
+				return
+			} else if strings.Contains(text, "RESPONSE:BAD") {
+				t.Fatalf("child received an invalid background color response: screen=%q", text)
+			}
+		case <-s.Done():
+			text := s.Terminal().String()
+			if strings.Contains(text, "RESPONSE:OK") {
+				return
+			}
+			t.Fatalf("child exited without background color response: %v screen=%q", s.WaitErr(), text)
+		}
+	}
+}
+
 func TestPTYEnvForcesXterm256ColorEnvironment(t *testing.T) {
 	parent := []string{
 		"HOME=/home/alice",
