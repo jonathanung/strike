@@ -355,7 +355,8 @@ func (e *Engine) applyPermissionMode(mode protocol.PermissionMode, alignPlan boo
 						if e.turnActive() {
 							_ = e.queueSwitchAgent("build")
 						} else {
-							e.handleSelectAgent(protocol.SelectAgent{Name: "build"})
+							// Phase-aligned dial exit: keep session model.
+							_ = e.applyAgent("build", true)
 						}
 					}
 				}
@@ -431,9 +432,9 @@ func agentNamesList(agents []Agent) string {
 }
 
 // handleSelectAgent switches the active persona and syncs workflow phase
-// when the user picks build/plan (tab, /agent, tools via SwitchAgent).
+// when the user picks an agent (tab, /agent). Applies agent model pins.
 func (e *Engine) handleSelectAgent(op protocol.SelectAgent) {
-	if !e.applyAgent(op.Name) {
+	if !e.applyAgent(op.Name, false) {
 		return
 	}
 	// Root only: child sessions do not drive parent workflow phases.
@@ -442,9 +443,12 @@ func (e *Engine) handleSelectAgent(op protocol.SelectAgent) {
 	}
 }
 
-// applyAgent switches persona, agent permission profile, and optional
-// provider/model pins without touching workflow phase state.
-func (e *Engine) applyAgent(name string) bool {
+// applyAgent switches persona and agent permission profile without touching
+// workflow phase state. keepModel skips provider/model pins so phase and
+// tool-driven agent-type transitions keep the session model; explicit user
+// SelectAgent and startup pass keepModel=false so pins still apply. Effort
+// pins always apply (unless LockEffort). Task-tool LockModel also blocks pins.
+func (e *Engine) applyAgent(name string, keepModel bool) bool {
 	agent, ok := e.findAgent(name)
 	if !ok {
 		e.emit(protocol.EngineError{
@@ -478,7 +482,8 @@ func (e *Engine) applyAgent(name string) bool {
 	// setProvider / resolveSelectModel strip matching prefixes (including
 	// doubles) so we never store openai/openai/... on the active model.
 	// Task-tool model pins set LockModel so agent defaults cannot override.
-	if e.opts.LockModel {
+	// Phase/tool transitions pass keepModel so the session model sticks.
+	if e.opts.LockModel || keepModel {
 		return true
 	}
 	agentProvider, agentModel := agent.Provider, agent.Model
@@ -508,6 +513,7 @@ func (e *Engine) applyAgent(name string) bool {
 
 // queueSwitchAgent validates name and queues it for application after the
 // current tool batch (before the next provider Stream) or at turn end.
+// Queued switches keep the session model (phase/tool transitions).
 func (e *Engine) queueSwitchAgent(name string) error {
 	if _, ok := e.findAgent(name); !ok {
 		return fmt.Errorf("unknown agent %q (available: %s)", name, agentNamesList(e.opts.Agents))
@@ -518,7 +524,8 @@ func (e *Engine) queueSwitchAgent(name string) error {
 	return nil
 }
 
-// applyPendingAgent applies a tool-queued agent switch, if any.
+// applyPendingAgent applies a tool/phase-queued agent switch, if any.
+// Keeps the session model; only explicit SelectAgent applies model pins.
 func (e *Engine) applyPendingAgent() {
 	e.pendingAgentMu.Lock()
 	name := e.pendingAgent
@@ -527,5 +534,10 @@ func (e *Engine) applyPendingAgent() {
 	if name == "" {
 		return
 	}
-	e.handleSelectAgent(protocol.SelectAgent{Name: name})
+	if !e.applyAgent(name, true) {
+		return
+	}
+	if e.opts.Depth == 0 {
+		e.syncPhaseWithAgent(name)
+	}
 }

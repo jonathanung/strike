@@ -43,8 +43,11 @@ Built-in **user** skills shipped in the binary are listed under Skills below
 ## Agents
 
 **Agents** (`agents/*.md`) are personas — a system prompt with optional
-provider/model/effort pins. Shipping built-ins (override with same-named
-files under any later discovery root):
+provider/model/effort pins. Model pins apply on explicit selection (Tab,
+`/agent`) and on `task` spawn; **workflow phase transitions** that switch
+agent type keep the session model (they do not thrash provider/model).
+Effort pins still apply on phase switches unless locked. Shipping built-ins
+(override with same-named files under any later discovery root):
 
 | Name | Role |
 |------|------|
@@ -237,7 +240,8 @@ overrides global by name). Strike ships built-in workflows that may be
 overridden by the same name.
 
 Each phase may pin an agent, extra prompt context, a permission ruleset, and
-an exit gate:
+an exit gate. Phase agent pins change persona/permissions only — the session
+provider/model stays put (see Agents above).
 
 | Gate `type` | Clears when |
 |---|---|
