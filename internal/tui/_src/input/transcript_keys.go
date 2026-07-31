@@ -527,7 +527,7 @@ func (m Model) openFileRef(ref fileRef) (tea.Model, tea.Cmd) {
 			break
 		}
 	}
-	return m.handleVimCommand(args)
+	return m.launchVim(args, vimInvocationFileRef)
 }
 
 // fileRefAtMouse maps a left-click in the transcript viewport to a path:line.

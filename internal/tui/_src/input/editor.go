@@ -425,13 +425,26 @@ func prefersTakeover(bin string) bool {
 	return ok
 }
 
+type vimInvocation uint8
+
+const (
+	vimInvocationCommand vimInvocation = iota
+	vimInvocationFileRef
+)
+
 func (m Model) handleVimCommand(args []string) (tea.Model, tea.Cmd) {
+	return m.launchVim(args, vimInvocationCommand)
+}
+
+func (m Model) launchVim(args []string, invocation vimInvocation) (tea.Model, tea.Cmd) {
 	path, line, err := parseEditorPathArgs("vim", args)
 	if err != nil {
 		m.setNotice(err.Error(), true)
 		return m, nil
 	}
-	m.resetComposer()
+	if invocation == vimInvocationCommand {
+		m.resetComposer()
+	}
 	m.clearNotice()
 
 	mode := m.vimMode

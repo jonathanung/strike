@@ -207,9 +207,15 @@ func TestOpenFileRefUsesPathLineArgs(t *testing.T) {
 	t.Setenv("VISUAL", "")
 	t.Setenv("EDITOR", "")
 	t.Setenv("PATH", t.TempDir())
+	m.setComposerValueAt("keep this\nunfinished prompt", len([]rune("keep this\nunfin")))
+	draft, line, column := m.composer.Value(), m.composer.Line(), m.composer.LineInfo().ColumnOffset
+
 	updated, _ := m.openFileRef(fileRef{Path: "x.go", Line: 9})
 	mm := updated.(Model)
 	if !mm.noticeErr || !strings.Contains(mm.notice, "no editor found") {
 		t.Fatalf("expected missing-editor notice, got err=%v notice=%q", mm.noticeErr, mm.notice)
+	}
+	if got, gotLine, gotColumn := mm.composer.Value(), mm.composer.Line(), mm.composer.LineInfo().ColumnOffset; got != draft || gotLine != line || gotColumn != column {
+		t.Fatalf("openFileRef changed composer from %q line=%d column=%d to %q line=%d column=%d", draft, line, column, got, gotLine, gotColumn)
 	}
 }

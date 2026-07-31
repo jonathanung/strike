@@ -93,7 +93,9 @@ func colorToHex(c vt10x.Color, bg bool) string {
 		r, g, b := xterm256RGB(uint32(c))
 		return fmt.Sprintf("#%02x%02x%02x", r, g, b)
 	}
-	// Truecolor packed as 0xRRGGBB in some emulators; vt10x uses Color as index.
+	if c <= 0xffffff {
+		return fmt.Sprintf("#%06x", uint32(c))
+	}
 	return ""
 }
 

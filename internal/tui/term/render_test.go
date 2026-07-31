@@ -75,6 +75,7 @@ func TestRenderStylesAndColors(t *testing.T) {
 		"printf '\\033[38;5;196mX\\033[0m'\n" +
 		"printf '\\033[38;5;232mG\\033[0m'\n" +
 		"printf '\\033[38;5;15mW\\033[0m'\n" +
+		"printf '\\033[38;2;18;52;86mT\\033[0m'\n" +
 		"printf '\\n'\n" +
 		"sleep 30\n"
 	dir := t.TempDir()
@@ -89,12 +90,15 @@ func TestRenderStylesAndColors(t *testing.T) {
 	}
 	defer func() { _ = s.Close() }()
 
-	waitScreenContains(t, s, "BUIRXGW", 3*time.Second)
+	waitScreenContains(t, s, "BUIRXGWT", 3*time.Second)
 
 	out := Render(s, 20, 4)
 	plain := ansi.Strip(out)
-	if !strings.Contains(plain, "BUIRXGW") {
+	if !strings.Contains(plain, "BUIRXGWT") {
 		t.Fatalf("styled render plain text = %q", plain)
+	}
+	if !strings.Contains(out, "38;2;18;52;86") {
+		t.Fatalf("styled render discarded truecolor foreground: %q", out)
 	}
 	// Styled output should retain SGR / lipgloss sequences beyond plain text.
 	if out == plain {
@@ -119,7 +123,9 @@ func TestColorToHex(t *testing.T) {
 		{name: "cube red-ish", c: 196, want: "#ff0000"},
 		{name: "greyscale first", c: 232, want: "#080808"},
 		{name: "greyscale last", c: 255, want: "#eeeeee"},
-		{name: "out of range", c: 300, want: ""},
+		{name: "truecolor", c: 0x123456, want: "#123456"},
+		{name: "truecolor maximum", c: 0xffffff, want: "#ffffff"},
+		{name: "out of range", c: 0x1000000, want: ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
