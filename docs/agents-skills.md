@@ -193,6 +193,11 @@ permissions: [{"permission":"bash","pattern":"git *","action":"allow"}]
 
 Evaluation order: defaults → config → optional --auto / --dangerously-skip-permissions allow-all → active agent profile → session always grants (last-match-wins). Switching agents replaces the profile and clears session always-grants. Agent denies still apply under --auto / --dangerously-skip-permissions.
 
+Task subagents (depth > 0) apply a filtered profile: agent **deny** always
+restricts further; agent **allow** upgrades parent Ask→Allow but cannot
+override a parent **deny** (so `general` / `tester` `permission.bash: allow`
+works when spawned from build, while a read-only parent still blocks write).
+
 Layered JSON config: [config.md](config.md).
 
 ## Skills

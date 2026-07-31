@@ -457,12 +457,12 @@ func (e *Engine) applyAgent(name string) bool {
 	if e.team != nil {
 		e.team.SetPersona(e.opts.SessionID, agent.Name)
 	}
-	// Child sessions may only apply Deny rules from an agent profile so a
-	// subagent cannot widen parent Deny/Ask via Allow (AG3). Root keeps the
-	// full profile (AG1/AG2).
+	// Child sessions apply a filtered agent profile (AG3): denies always;
+	// allows only when they do not override a parent Deny (Ask→Allow is OK so
+	// personas like general keep bash). Root keeps the full profile (AG1/AG2).
 	agentRules := agent.Permissions
 	if e.opts.Depth > 0 {
-		agentRules = permission.DenyOnly(agentRules)
+		agentRules = permission.ChildAgentRules(e.opts.Rules, agent.Permissions)
 	}
 	e.perms.SetAgentRules(agentRules)
 	e.emitSelected(protocol.AgentSelected{

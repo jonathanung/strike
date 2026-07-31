@@ -149,6 +149,60 @@ func TestDenyOnly(t *testing.T) {
 	}
 }
 
+func TestChildAgentRules(t *testing.T) {
+	parentAsk := []Ruleset{Defaults()}
+	general := Ruleset{
+		{Permission: "bash", Pattern: "*", Action: Allow},
+		{Permission: "task", Pattern: "*", Action: Deny},
+	}
+	got := ChildAgentRules(parentAsk, general)
+	if !rulesetHasAction(got, "bash", Allow) {
+		t.Fatalf("under parent Ask, bash allow kept: %+v", got)
+	}
+	if !rulesetHasAction(got, "task", Deny) {
+		t.Fatalf("task deny kept: %+v", got)
+	}
+	if Evaluate("bash", "ls", append(parentAsk, got)...) != Allow {
+		t.Fatalf("bash effective under general child = %q, want allow", Evaluate("bash", "ls", append(parentAsk, got)...))
+	}
+
+	parentDenyBash := []Ruleset{{
+		{Permission: "bash", Pattern: "*", Action: Deny},
+	}}
+	got = ChildAgentRules(parentDenyBash, general)
+	if rulesetHasAction(got, "bash", Allow) {
+		t.Fatalf("under parent Deny, bash allow must drop: %+v", got)
+	}
+	if !rulesetHasAction(got, "task", Deny) {
+		t.Fatalf("task deny still kept under parent bash deny: %+v", got)
+	}
+	if Evaluate("bash", "ls", append(parentDenyBash, got)...) != Deny {
+		t.Fatalf("bash effective = %q, want deny", Evaluate("bash", "ls", append(parentDenyBash, got)...))
+	}
+
+	// Ask entries dropped.
+	mixed := Ruleset{
+		{Permission: "webfetch", Pattern: "*", Action: Ask},
+		{Permission: "edit", Pattern: "*", Action: Deny},
+	}
+	got = ChildAgentRules(parentAsk, mixed)
+	if rulesetHasAction(got, "webfetch", Ask) || rulesetHasAction(got, "webfetch", Allow) {
+		t.Fatalf("Ask must drop: %+v", got)
+	}
+	if !rulesetHasAction(got, "edit", Deny) {
+		t.Fatalf("edit deny kept: %+v", got)
+	}
+}
+
+func rulesetHasAction(rs Ruleset, perm string, action Action) bool {
+	for _, r := range rs {
+		if r.Permission == perm && r.Action == action {
+			return true
+		}
+	}
+	return false
+}
+
 func TestDeriveChildRules(t *testing.T) {
 	t.Run("parent deny beats childExtra allow", func(t *testing.T) {
 		parent := []Ruleset{{{Permission: "bash", Pattern: "*", Action: Deny}}}
@@ -159,12 +213,14 @@ func TestDeriveChildRules(t *testing.T) {
 		}
 	})
 
-	t.Run("parent ask beats childExtra allow", func(t *testing.T) {
+	t.Run("parent ask upgraded by childExtra allow", func(t *testing.T) {
+		// Ask→Allow is permitted so task subagents (e.g. general) can use
+		// permission.bash: allow without prompting on every command.
 		parent := []Ruleset{{{Permission: "bash", Pattern: "*", Action: Ask}}}
 		childExtra := Ruleset{{Permission: "bash", Pattern: "*", Action: Allow}}
 		derived := DeriveChildRules(parent, true, childExtra)
-		if got := Evaluate("bash", "echo hi", derived...); got != Ask {
-			t.Errorf("bash = %q, want ask (Allow dropped from childExtra)", got)
+		if got := Evaluate("bash", "echo hi", derived...); got != Allow {
+			t.Errorf("bash = %q, want allow (child may upgrade parent Ask)", got)
 		}
 	})
 
