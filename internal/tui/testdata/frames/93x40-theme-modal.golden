@@ -1,0 +1,40 @@
+⚡ strike /tmp/strike-golden  [ no model ] [ auto sup ] [ def ]                         ready
+▁▁▁▁▁▁▁▁▁▁▁▁▁▁                                                context
+⚡ S T R I K E                                                model  none /provider
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔                                                autonomy  supervised
+                                                              skills  1
+ get started                    keys
+ Connect a provider to start    ctrl+h  focus left
+ ◦ anthropic  none              ctrl+l  focus right
+ ◦ openai  none                 ctrl+o  next window
+ ◦ xai  none                    ctrl+p  prev window
+ ◦ google  none                 ctrl+;  toggle split
+ ◦ kimi  none                   enter  send
+ ◦ deepseek  none               ctrl+j/shift+enter/alt+ent…
+ /provider Select theme
+ type belo▏filter: ▏  7/7
+          ▏▸ Strike (current) — strike · builtin
+          ▏  Catppuccin — catppuccin · builtin
+          ▏  Dracula — dracula · builtin                                          sona
+          ▏  Gruvbox — gruvbox · builtin
+          ▏  Monokai — monokai · builtin
+          ▏  Nord — nord · builtin                                                lt+enter
+ agents & ▏  Tokyo Night — tokyo-night · builtin                                  t
+ agents   ▏
+   ◆ build▏up/down/j/k move · type to filter · enter select · ctrl+d set default
+ skills   ▏· esc close
+   /review
+   ◆ plan
+                                                              system
+                                                              sampling…
+
+
+
+
+
+
+ prompt ❯
+ ❯ Ask anything…  (/ commands, ! shell)
+ ❯
+ enter send · ctrl+j/shift+enter/alt+enter newline
+ctrl+h/ctrl+l panes · ctrl+o/ctrl+p windows · ctrl+; toggle split · ctrl+k palette
