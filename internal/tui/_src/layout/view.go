@@ -355,7 +355,7 @@ func (m Model) composerView(compact bool, width, height int) string {
 	borderless := compact || height < 3
 	contentHeight := height
 	if !borderless {
-		contentHeight = ui.PanelInnerHeight(width, height)
+		contentHeight = ui.PanelInnerHeightFor(m.th, width, height)
 	}
 	composer.SetHeight(contentHeight)
 	composer.View()
@@ -467,11 +467,11 @@ func (m Model) rightPaneSingle(width, height int, compact bool, active window, f
 			if nw.height > 0 {
 				innerH = nw.height
 			} else {
-				innerH = ui.PanelInnerHeight(width, height)
+				innerH = ui.PanelInnerHeightFor(m.th, width, height)
 			}
 		} else {
 			innerW = ui.PanelInnerWidth(m.th, width)
-			innerH = ui.PanelInnerHeight(width, height)
+			innerH = ui.PanelInnerHeightFor(m.th, width, height)
 		}
 		if compact {
 			innerW, innerH = width, height

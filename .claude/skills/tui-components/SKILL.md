@@ -83,7 +83,7 @@ otherwise `Background` resolves to a solid `lipgloss.TerminalColor`.
 | `UserLabel`, `ToolLabel`, `DiffAdded`, `DiffRemoved` | transcript and diff roles |
 | `Chrome` | `ChromeSoft` (default), `ChromeSolid`, or `ChromeBordered` |
 | `BorderStyle` | soft/bordered panel border weight and six glyphs |
-| `Spacing` | `None`, `XS`, `SM`, `MD`, `LG` layout gaps; left\|right pane gutter uses `SM`; `Label` is the gap between a numbered permission-choice shortcut (for example, `1)`) and its label, defaulting to `1` when resolved |
+| `Spacing` | `None`, `XS`, `SM`, `MD`, `LG` layout gaps; left\|right pane gutter uses `XS` (keeps 93-col split); bento/welcome card gaps use `SM`; `Label` is the gap between a numbered permission-choice shortcut (for example, `1)`) and its label, defaulting to `1` when resolved |
 | `Icons` | glyph set below |
 | `AgentState` | runtime status coloring via `Theme.AgentStateColor` / `AgentStateStyle` (not a palette field) |
 

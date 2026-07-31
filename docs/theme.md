@@ -53,8 +53,9 @@ the refs.
 | OverlayScrim | `#a8a3b8` | `#7c7a90` |
 
 Chrome mode defaults to **`soft`** (surface-filled body + rounded outline).
-Spacing defaults are unchanged (`XS=1`, `SM=2`, …). Left|right pane gutter uses
-`SM` for Family breathing room. Stock badges are delimiter-free soft pills on
+Spacing defaults are unchanged (`XS=1`, `SM=2`, …). Left|right pane gutter stays
+`XS` so the canonical 93-col split (`60+gutter+32`) remains intact; Family breathing
+room comes from soft rounded card chrome and bento `SM` gaps between welcome tiles. Stock badges are delimiter-free soft pills on
 `SurfaceMuted`. Bundled named themes (nord, …) keep their own hexes — only
 `Default()` uses this map.
 

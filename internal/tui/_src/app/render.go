@@ -290,7 +290,7 @@ func (m Model) completionPopupHeightFor(width int) int {
 		return 0
 	}
 	borderRows := 0
-	if width >= 4 {
+	if width >= ui.ChromeMinOuter(m.th) {
 		borderRows = 2
 	}
 	return m.completion.rows + borderRows

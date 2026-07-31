@@ -44,7 +44,7 @@ func (m *Model) reflow() {
 		m.completion.rows = 0
 		if leftWidth > 0 {
 			borderRows := 0
-			if leftWidth >= 4 {
+			if leftWidth >= ui.ChromeMinOuter(m.th) {
 				borderRows = 2
 			}
 			available := max(0, m.height-2-composerRows-borderRows)

@@ -230,6 +230,17 @@ func InnerWidth(width int) int {
 	return PanelInnerWidth(theme.Default(), width)
 }
 
+// ChromeMinOuter is the minimum outer width at which Panel paints chrome for th.
+// Soft needs 6 cells for a rounded outline; solid/bordered chrome starts at 3.
+func ChromeMinOuter(th theme.Theme) int {
+	switch th.Resolve().Chrome {
+	case theme.ChromeSolid, theme.ChromeBordered:
+		return 3
+	default:
+		return 6
+	}
+}
+
 // PanelInnerWidth reports the content width using th's resolved panel spacing
 // and chrome mode. Themed callers must use this instead of InnerWidth.
 func PanelInnerWidth(th theme.Theme, width int) int {

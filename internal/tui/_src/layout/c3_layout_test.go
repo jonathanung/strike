@@ -460,7 +460,7 @@ func TestC3LongDashboardHistoryAndSelectedModelEvidence(t *testing.T) {
 	if len(rows) != 3 {
 		t.Fatalf("recent prompt rows = %d, want exactly 3: %q (card=%+v)", len(rows), rows, recent)
 	}
-	// Solid chrome: body fits PanelInnerWidth of the card outer width.
+	// Body should fit PanelInnerWidth of the card outer width (soft pad slack below).
 	inner := ui.PanelInnerWidth(m.th, recent.right-recent.left+1)
 	for i, row := range rows {
 		if got := ansi.StringWidth(row); got > inner+4 { // soft chrome pad/outline slack
