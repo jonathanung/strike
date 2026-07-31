@@ -170,6 +170,9 @@ func TestBoardRejectsOffTeamActor(t *testing.T) {
 
 func TestBoardUpdateAndCancel(t *testing.T) {
 	tm := NewTeam("L", "build")
+	if !tm.Enroll(TeamMember{SessionID: "A", ParentSessionID: "L", Depth: 1}) {
+		t.Fatal("enroll A")
+	}
 	item, err := tm.CreateBoardTask("old", "L")
 	if err != nil {
 		t.Fatal(err)
@@ -184,5 +187,31 @@ func TestBoardUpdateAndCancel(t *testing.T) {
 	}
 	if _, err := tm.ClaimBoardTask(item.ID, "L", 0); err == nil {
 		t.Fatal("claim cancelled should fail")
+	}
+}
+
+func TestBoardUpdateCannotBypassForeignOwner(t *testing.T) {
+	tm := NewTeam("L", "build")
+	if !tm.Enroll(TeamMember{SessionID: "A", ParentSessionID: "L", Depth: 1}) {
+		t.Fatal("enroll A")
+	}
+	if !tm.Enroll(TeamMember{SessionID: "B", ParentSessionID: "L", Depth: 1}) {
+		t.Fatal("enroll B")
+	}
+	item, err := tm.CreateBoardTask("owned", "L")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tm.ClaimBoardTask(item.ID, "A", 0); err != nil {
+		t.Fatal(err)
+	}
+	// B must not complete/cancel/reclaim via update.
+	for _, st := range []string{BoardStatusCompleted, BoardStatusCancelled, BoardStatusClaimed} {
+		s := st
+		_, err := tm.UpdateBoardTask(item.ID, "B", nil, &s, 0)
+		var conf *BoardConflictError
+		if !errors.As(err, &conf) {
+			t.Fatalf("update status=%s err = %v, want conflict", st, err)
+		}
 	}
 }

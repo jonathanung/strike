@@ -179,9 +179,10 @@ func (t *Team) ClaimBoardTask(id, actor string, expectedVersion int) (BoardTask,
 }
 
 // UpdateBoardTask patches content and/or status with optional CAS.
-// Status may be pending|claimed|completed|cancelled. Setting claimed without
-// an owner is rejected; completing does not require ownership (use Complete
-// for owner-gated finish). When status becomes pending, owner is cleared.
+// Status may be pending|claimed|completed|cancelled. When status becomes
+// pending, owner is cleared. Setting claimed assigns actor only if unowned;
+// foreign owners cannot be overwritten. completed/cancelled require the same
+// owner gate as CompleteBoardTask (unclaimed OK; claimed → owner only).
 func (t *Team) UpdateBoardTask(id, actor string, content *string, status *string, expectedVersion int) (BoardTask, error) {
 	if t == nil {
 		return BoardTask{}, fmt.Errorf("no team")
@@ -228,16 +229,30 @@ func (t *Team) UpdateBoardTask(id, actor string, content *string, status *string
 	}
 	if status != nil {
 		s := strings.TrimSpace(*status)
+		owner := strings.TrimSpace(item.Owner)
 		switch s {
 		case BoardStatusPending:
 			item.Status = BoardStatusPending
 			item.Owner = ""
 		case BoardStatusClaimed:
-			if strings.TrimSpace(item.Owner) == "" {
-				item.Owner = actor
+			if owner != "" && owner != actor {
+				return BoardTask{}, &BoardConflictError{
+					Reason: fmt.Sprintf("task %q is claimed by %s", id, owner),
+					Task:   item,
+				}
 			}
+			item.Owner = actor
 			item.Status = BoardStatusClaimed
 		case BoardStatusCompleted, BoardStatusCancelled:
+			if owner != "" && owner != actor {
+				return BoardTask{}, &BoardConflictError{
+					Reason: fmt.Sprintf("task %q is owned by %s", id, owner),
+					Task:   item,
+				}
+			}
+			if owner == "" {
+				item.Owner = actor
+			}
 			item.Status = s
 		default:
 			return BoardTask{}, fmt.Errorf("status must be pending, claimed, completed, or cancelled")
