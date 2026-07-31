@@ -1,11 +1,15 @@
 import type { Bootstrap, Envelope, RootsResponse, RootCreateResult, RootResumeResult, Session } from "./types";
 
+// Token may arrive via ?token= before the server handoff redirect strips it and
+// sets an HttpOnly cookie. After handoff, same-origin cookies authenticate
+// fetch / EventSource / WebSocket without a query param.
 const queryToken = new URLSearchParams(location.search).get("token") || "";
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const requestHeaders = new Headers(init.headers);
   requestHeaders.set("Content-Type", "application/json");
   if (queryToken) requestHeaders.set("Authorization", `Bearer ${queryToken}`);
-  const response = await fetch(path, { ...init, headers: requestHeaders });
+  // same-origin credentials so the attach handoff cookie is always sent.
+  const response = await fetch(path, { credentials: "same-origin", ...init, headers: requestHeaders });
   if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || `${response.status} ${response.statusText}`);
   if (response.status === 204) return undefined as T;
   return response.json();

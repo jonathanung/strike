@@ -212,6 +212,146 @@ func TestAttachPage(t *testing.T) {
 	}
 }
 
+func TestAuthAcceptsBearerCookieAndQuery(t *testing.T) {
+	srv := testServer(t, t.TempDir(), "secret")
+	cases := []struct {
+		name string
+		mod  func(*http.Request)
+		code int
+	}{
+		{
+			name: "missing",
+			mod:  func(*http.Request) {},
+			code: http.StatusUnauthorized,
+		},
+		{
+			name: "bearer",
+			mod:  func(r *http.Request) { r.Header.Set("Authorization", "Bearer secret") },
+			code: http.StatusOK,
+		},
+		{
+			name: "bearer case-insensitive scheme",
+			mod:  func(r *http.Request) { r.Header.Set("Authorization", "bearer secret") },
+			code: http.StatusOK,
+		},
+		{
+			name: "bad bearer",
+			mod:  func(r *http.Request) { r.Header.Set("Authorization", "Bearer wrong") },
+			code: http.StatusUnauthorized,
+		},
+		{
+			name: "query token",
+			mod:  func(r *http.Request) { r.URL.RawQuery = "token=secret" },
+			code: http.StatusOK,
+		},
+		{
+			name: "bad query token",
+			mod:  func(r *http.Request) { r.URL.RawQuery = "token=wrong" },
+			code: http.StatusUnauthorized,
+		},
+		{
+			name: "cookie",
+			mod: func(r *http.Request) {
+				r.AddCookie(&http.Cookie{Name: authCookieName, Value: "secret"})
+			},
+			code: http.StatusOK,
+		},
+		{
+			name: "bad cookie",
+			mod: func(r *http.Request) {
+				r.AddCookie(&http.Cookie{Name: authCookieName, Value: "wrong"})
+			},
+			code: http.StatusUnauthorized,
+		},
+		{
+			name: "bad bearer still allows valid cookie",
+			mod: func(r *http.Request) {
+				r.Header.Set("Authorization", "Bearer wrong")
+				r.AddCookie(&http.Cookie{Name: authCookieName, Value: "secret"})
+			},
+			code: http.StatusOK,
+		},
+		{
+			name: "bad bearer still allows valid query",
+			mod: func(r *http.Request) {
+				r.Header.Set("Authorization", "Bearer wrong")
+				r.URL.RawQuery = "token=secret"
+			},
+			code: http.StatusOK,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/v1/bootstrap", nil)
+			tc.mod(req)
+			srv.Handler().ServeHTTP(res, req)
+			if res.Code != tc.code {
+				t.Fatalf("status = %d, want %d body=%q", res.Code, tc.code, res.Body.String())
+			}
+		})
+	}
+}
+
+func TestAttachTokenHandoffSetsCookieAndStripsQuery(t *testing.T) {
+	srv := testServer(t, t.TempDir(), "secret")
+
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/attach?token=secret&tab=history", nil)
+	srv.Handler().ServeHTTP(res, req)
+	if res.Code != http.StatusFound {
+		t.Fatalf("handoff status = %d, want %d", res.Code, http.StatusFound)
+	}
+	if loc := res.Header().Get("Location"); loc != "/attach?tab=history" {
+		t.Fatalf("Location = %q, want /attach?tab=history", loc)
+	}
+	cookie := res.Result().Cookies()
+	var got *http.Cookie
+	for _, c := range cookie {
+		if c.Name == authCookieName {
+			got = c
+			break
+		}
+	}
+	if got == nil || got.Value != "secret" {
+		t.Fatalf("Set-Cookie = %#v, want %s=secret", cookie, authCookieName)
+	}
+	if !got.HttpOnly || got.Path != "/" || got.SameSite != http.SameSiteStrictMode {
+		t.Fatalf("cookie flags = HttpOnly:%v Path:%q SameSite:%v", got.HttpOnly, got.Path, got.SameSite)
+	}
+
+	// Follow-up API call with only the handoff cookie succeeds.
+	api := httptest.NewRecorder()
+	apiReq := httptest.NewRequest(http.MethodGet, "/v1/bootstrap", nil)
+	apiReq.AddCookie(got)
+	srv.Handler().ServeHTTP(api, apiReq)
+	if api.Code != http.StatusOK {
+		t.Fatalf("cookie auth status = %d, want 200 body=%q", api.Code, api.Body.String())
+	}
+
+	// Root path handoff.
+	root := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(root, httptest.NewRequest(http.MethodGet, "/?token=secret", nil))
+	if root.Code != http.StatusFound {
+		t.Fatalf("root handoff status = %d, want %d", root.Code, http.StatusFound)
+	}
+	if loc := root.Header().Get("Location"); loc != "/" {
+		t.Fatalf("root Location = %q, want /", loc)
+	}
+
+	// Invalid token does not set cookie or redirect.
+	bad := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(bad, httptest.NewRequest(http.MethodGet, "/attach?token=wrong", nil))
+	if bad.Code != http.StatusOK {
+		t.Fatalf("bad token status = %d, want 200 (serve page)", bad.Code)
+	}
+	for _, c := range bad.Result().Cookies() {
+		if c.Name == authCookieName {
+			t.Fatalf("invalid token must not set auth cookie, got %#v", c)
+		}
+	}
+}
+
 func TestEmbeddedAssetAndSecurityHeaders(t *testing.T) {
 	srv := testServer(t, t.TempDir(), "")
 	index := httptest.NewRecorder()

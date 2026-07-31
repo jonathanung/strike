@@ -95,10 +95,17 @@ ssh -L 8787:127.0.0.1:8787 user@strike-host
 
 \*Still subject to `--allow-cidr` when set.
 
-With `--auth`, authenticate `/v1/*` using:
+With `--auth`, authenticate `/v1/*` using any of:
 
-- `Authorization: Bearer <token>`, or
-- `?token=<token>` (EventSource / WebSocket query)
+- `Authorization: Bearer <token>`
+- HttpOnly `strike_serve_token` cookie (set automatically when you open
+  `/attach?token=…` or `/?token=…` — the server redirects to a token-free URL)
+- `?token=<token>` (EventSource / WebSocket query fallback)
+
+Opening the cockpit URL printed by `strike serve` (includes `?token=`) performs
+a one-time handoff: valid tokens become a `SameSite=Strict` HttpOnly cookie so
+subsequent same-origin `fetch` / EventSource / WebSocket calls succeed without
+leaving the secret in the address bar.
 
 ### Op envelopes (client → engine)
 

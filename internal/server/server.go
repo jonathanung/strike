@@ -256,20 +256,93 @@ func (s *Server) applySecurityHeaders(w http.ResponseWriter) {
 	w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 }
 
+const authCookieName = "strike_serve_token"
+
 func requiresToken(path string) bool {
 	return strings.HasPrefix(path, "/v1/")
 }
 
 func (s *Server) authorized(r *http.Request) bool {
 	want := s.opts.Token
-	if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
-		got := strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
-		return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
+	if want == "" {
+		return false
 	}
-	if got := strings.TrimSpace(r.URL.Query().Get("token")); got != "" {
-		return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
+	// Any valid source is enough: Bearer header, HttpOnly cookie from attach
+	// handoff, or ?token= for EventSource/WebSocket clients that cannot set
+	// headers. Empty candidates are ignored so a missing Bearer still allows
+	// cookie/query auth.
+	if tokenEqual(bearerToken(r.Header.Get("Authorization")), want) {
+		return true
+	}
+	if tokenEqual(cookieToken(r), want) {
+		return true
+	}
+	if tokenEqual(strings.TrimSpace(r.URL.Query().Get("token")), want) {
+		return true
 	}
 	return false
+}
+
+// bearerToken extracts a Bearer credential. Scheme match is case-insensitive
+// per RFC 7235.
+func bearerToken(auth string) string {
+	auth = strings.TrimSpace(auth)
+	const prefix = "bearer "
+	if len(auth) < len(prefix) || !strings.EqualFold(auth[:len(prefix)], prefix) {
+		return ""
+	}
+	return strings.TrimSpace(auth[len(prefix):])
+}
+
+func cookieToken(r *http.Request) string {
+	c, err := r.Cookie(authCookieName)
+	if err != nil || c == nil {
+		return ""
+	}
+	return strings.TrimSpace(c.Value)
+}
+
+func tokenEqual(got, want string) bool {
+	if got == "" || want == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
+}
+
+// maybeHandoffToken consumes ?token= on the attach shell: valid tokens become
+// an HttpOnly SameSite=Strict cookie and the URL is redirected without the
+// secret so subsequent same-origin fetch/EventSource/WebSocket calls
+// authenticate via cookie. Invalid tokens leave the page unauthenticated.
+func (s *Server) maybeHandoffToken(w http.ResponseWriter, r *http.Request) bool {
+	if !s.opts.Auth {
+		return false
+	}
+	tok := strings.TrimSpace(r.URL.Query().Get("token"))
+	if tok == "" {
+		return false
+	}
+	if !tokenEqual(tok, s.opts.Token) {
+		return false
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     authCookieName,
+		Value:    s.opts.Token,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		// Secure omitted: strike serve is cleartext by design (loopback / --expose).
+	})
+	q := r.URL.Query()
+	q.Del("token")
+	target := r.URL.Path
+	if target == "" {
+		target = "/"
+	}
+	if enc := q.Encode(); enc != "" {
+		target += "?" + enc
+	}
+	http.Redirect(w, r, target, http.StatusFound)
+	return true
 }
 
 func (s *Server) applyCORS(w http.ResponseWriter, r *http.Request) {
@@ -340,6 +413,9 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAttach(w http.ResponseWriter, r *http.Request) {
+	if s.maybeHandoffToken(w, r) {
+		return
+	}
 	data, err := fs.ReadFile(s.static, "index.html")
 	if err != nil {
 		http.Error(w, "attach page missing", http.StatusInternalServerError)
