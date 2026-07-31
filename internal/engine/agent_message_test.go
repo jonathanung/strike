@@ -507,6 +507,114 @@ func TestAgentMessageResolveByName(t *testing.T) {
 	}
 }
 
+// TestAgentMessageSiblingByShortSessionID reproduces #650: two children
+// spawned by the same lead; one addresses the other with tool shortID (first
+// 8 chars of session id) instead of the full id or stable name. Before the
+// fix this failed closed with "recipient is not on this team".
+func TestAgentMessageSiblingByShortSessionID(t *testing.T) {
+	const (
+		leadID = "1f0d0c5d-lead-0000-0000-000000000001"
+		fromID = "a1b2c3d4-from-bbbb-cccc-ddddeeeeffff"
+		toID   = "c0a9b0d4-toaa-bbbb-cccc-ddddeeeeffff"
+		body   = "please create the files under /tmp/demo"
+	)
+	shortTo := toID[:8] // tool shortID / UI fragment
+	if shortTo != "c0a9b0d4" {
+		t.Fatalf("fixture short id = %q", shortTo)
+	}
+
+	team := engine.NewTeam(leadID, "build")
+	if !team.Enroll(engine.TeamMember{
+		SessionID: fromID, ParentSessionID: leadID, Name: "worker-b", Persona: "general", Depth: 1,
+	}) {
+		t.Fatal("enroll from")
+	}
+	if !team.Enroll(engine.TeamMember{
+		SessionID: toID, ParentSessionID: leadID, Name: "worker-a", Persona: "general", Depth: 1,
+	}) {
+		t.Fatal("enroll to")
+	}
+
+	toProv := newScriptedProvider(
+		completedStep("warmup-a"),
+		completedStep("got-mail"),
+	)
+	fromCall := controlToolCall("am-short", "agent_message", map[string]any{
+		"to": shortTo, "body": body,
+	})
+	fromProv := newScriptedProvider(
+		toolCallStep(fromCall),
+		func() streamStep {
+			s := completedStep("sent")
+			s.match = matchToolResult("am-short")
+			return s
+		}(),
+	)
+
+	lead := engine.New(engine.Options{
+		SessionID: leadID, Team: team, Agents: []engine.Agent{{Name: "build"}},
+		Select: func(string) (provider.Provider, string, error) {
+			return newScriptedProvider(completedStep("lead")), "m", nil
+		},
+		InitialProvider: "scripted", WorkDir: t.TempDir(),
+		Rules: []permission.Ruleset{permission.Defaults()},
+	})
+	from := engine.New(engine.Options{
+		SessionID: fromID, ParentSessionID: leadID, Depth: 1, Team: team,
+		Agents:          []engine.Agent{{Name: "general"}},
+		Select:          func(string) (provider.Provider, string, error) { return fromProv, "m", nil },
+		InitialProvider: "scripted", Registry: agentMessageRegistry(),
+		WorkDir: t.TempDir(), Rules: []permission.Ruleset{permission.Defaults()},
+	})
+	to := engine.New(engine.Options{
+		SessionID: toID, ParentSessionID: leadID, Depth: 1, Team: team,
+		Agents:          []engine.Agent{{Name: "general"}},
+		Select:          func(string) (provider.Provider, string, error) { return toProv, "m", nil },
+		InitialProvider: "scripted", WorkDir: t.TempDir(),
+		Rules: []permission.Ruleset{permission.Defaults()},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go lead.Run(ctx)
+	go from.Run(ctx)
+	go to.Run(ctx)
+	go func() {
+		for range lead.Events() {
+		}
+	}()
+	waitTeamLive(t, team, leadID, fromID, toID)
+
+	from.Ops() <- protocol.UserInput{Text: "msg sibling by short id"}
+	events := drainUntil(t, from, 8*time.Second, func(evs []protocol.Event) bool {
+		_, ok := toolEndOutput(evs, "am-short")
+		return ok
+	})
+	out, ok := toolEndOutput(events, "am-short")
+	if !ok {
+		t.Fatal("missing agent_message tool end")
+	}
+	var parsed tool.AgentMessageResult
+	if err := json.Unmarshal([]byte(out), &parsed); err != nil {
+		t.Fatalf("parse %q: %v", out, err)
+	}
+	if parsed.Status != "accepted" || parsed.To != toID || parsed.MessageID == "" {
+		t.Fatalf("result = %+v, want accepted to full session id", parsed)
+	}
+
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case req := <-toProv.requests:
+			if requestHasMailboxBody(req, body) {
+				return
+			}
+		case <-deadline:
+			t.Fatal("recipient never saw peer body")
+		}
+	}
+}
+
 func TestAgentMessageByNameDelivers(t *testing.T) {
 	const (
 		leadID = "lead-am-byname"
