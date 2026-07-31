@@ -244,6 +244,9 @@ func TestVimCommandUsageError(t *testing.T) {
 	if !m.noticeErr || !strings.Contains(m.notice, "usage: /vim") {
 		t.Errorf("notice = %q err=%v", m.notice, m.noticeErr)
 	}
+	if got := m.composer.Value(); got != "/vim a b c" {
+		t.Errorf("composer = %q, want invalid command retained", got)
+	}
 }
 
 func TestNanoCommandUsageError(t *testing.T) {
