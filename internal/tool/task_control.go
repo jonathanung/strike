@@ -31,9 +31,10 @@ func (taskStatusTool) Description() string {
   child's stable name alias when one was set at spawn.
 - Returns state (starting|working|needs_attention|completed|failed|canceled|unknown),
   elapsed time, current tool, optional recent activity, and terminal_summary when done.
-- Prefer this only when you need an intermediate check. Do not poll every second —
-  child.completed is pushed automatically when the child finishes.
-- Cannot access sessions you do not own.`
+- One-off pulse only — do not busy-poll. Prefer [child.completed] for finished work and
+  the peer inbox (agent_message) for mid-flight updates. agent_roster lists who is live.
+- Cannot access sessions you do not own (parent→child ownership). For peer chat use
+  agent_message / agent_broadcast.`
 }
 
 func (taskStatusTool) Schema() json.RawMessage {
@@ -156,15 +157,16 @@ func (taskReadTool) Execute(ctx context.Context, args json.RawMessage, tc *Conte
 func (taskMessageTool) Name() string { return "task_message" }
 
 func (taskMessageTool) Description() string {
-	return `Send additional guidance to a running owned child session.
+	return `Send additional guidance to a running owned child session (parent→child steer).
 
 - session_id may be the child session id or its stable name alias from task spawn.
 - Delivered at a safe boundary: accepted immediately when the child is idle,
   or queued until the active child turn finishes (does not corrupt the live request).
 - Returns status queued|accepted|rejected with the child's current state.
 - Cannot widen child permissions. Unknown/closed children are rejected.
-- Parent→owned-child only. For peer/team messaging (any teammate, including
-  child→child and child→lead), use agent_message / agent_broadcast instead.`
+- Parent→owned-child only — not the team chat plane. For peer messaging (any teammate,
+  including child→child and child→lead mid-flight), use agent_message / agent_broadcast.
+  Prefer [child.completed] when you only need the child's finished deliverable.`
 }
 
 func (taskMessageTool) Schema() json.RawMessage {

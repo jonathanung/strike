@@ -17,8 +17,10 @@ func (taskTool) Description() string {
 	return `Delegate a bounded subtask to a child agent with its own context.
 
 - Returns immediately after the child starts (does not block this turn).
-- Result includes the child session id; a later [child.completed] message carries the terminal summary automatically.
-- Do not sleep-poll waiting for the child — continue other work or end the turn; completion is event-driven.
+- Result includes the child session id; a later [child.completed] carries the terminal
+  summary (finished work product). Mid-flight coordination uses peer messages, not polling.
+- Do not sleep-poll or busy-loop task_status waiting for the child — continue other work
+  or end the turn; completion and peer inbox traffic are event-driven.
 - Optional name is a stable teammate alias unique on the session team (e.g. explorer).
   Addressable in agent_roster and messaging tools; session_id still works when omitted.
 - Optional agent selects a persona (defaults to the current agent). Built-in names include:
@@ -29,9 +31,12 @@ func (taskTool) Description() string {
   Must be a catalog id for that provider (same list as /model). Omit to inherit the parent model.
 - Optional effort pins the child's reasoning effort (off|low|medium|high|xhigh|max).
   Omit to inherit the parent dial (agent effort pins still apply). When set, wins over agent pins.
-- Nested task depth is bounded by MaxChildDepth (default 1: children cannot nest).
-- Use task_status/task_read/task_message/task_interrupt with the session id or name for
-  intermediate control — do not sleep-poll for completion.
+- Nested task depth is bounded by MaxChildDepth (default 1: children cannot nest). Bound fan-out.
+- Parent→owned-child control: task_status / task_read / task_message / task_interrupt
+  (session id or name). Peer/team chat (any teammate, including child→lead and child→child):
+  agent_message / agent_broadcast — not a parent-only control plane.
+- Prefer agent_message for mid-flight blockers/handoffs; prefer [child.completed] for the
+  finished deliverable. Avoid chatty status ping-pong.
 - Use for scoped work that benefits from a fresh message history.`
 }
 
