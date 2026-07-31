@@ -62,7 +62,7 @@ func Start(cmd *exec.Cmd, cols, rows int) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	term := vt10x.New(vt10x.WithSize(cols, rows))
+	term := vt10x.New(vt10x.WithSize(cols, rows), vt10x.WithWriter(ptmx))
 	s := &Session{
 		cmd:        cmd,
 		ptmx:       ptmx,
