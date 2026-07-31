@@ -183,7 +183,13 @@ func TestUserThemesDirResolvesStrikeDirSymlink(t *testing.T) {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 	got := UserThemesDir()
-	want := filepath.Join(target, "themes")
+	// macOS TempDir is often /var/... while EvalSymlinks yields /private/var/...
+	// Resolve the existing target dir (themes/ may not exist yet).
+	realTarget, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(realTarget, "themes")
 	if got != want {
 		t.Errorf("UserThemesDir() = %q, want %q", got, want)
 	}
@@ -199,7 +205,11 @@ func TestProjectThemesDirResolvesStrikeDirSymlink(t *testing.T) {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 	got := ProjectThemesDir(work)
-	want := filepath.Join(target, "themes")
+	realTarget, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(realTarget, "themes")
 	if got != want {
 		t.Errorf("ProjectThemesDir() = %q, want %q", got, want)
 	}
