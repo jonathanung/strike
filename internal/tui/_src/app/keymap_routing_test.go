@@ -8,7 +8,7 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2/compat"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -842,12 +842,12 @@ func TestMarkdownRenderDoesNotUseAutoStyle(t *testing.T) {
 	savedMD := glamourStyleName
 	savedDetected := appearanceDetected
 	savedDetectedDark := appearanceDetectedDark
-	savedDark := lipgloss.HasDarkBackground()
+	savedDark := compat.HasDarkBackground
 	t.Cleanup(func() {
 		glamourStyleName = savedMD
 		appearanceDetected = savedDetected
 		appearanceDetectedDark = savedDetectedDark
-		lipgloss.SetHasDarkBackground(savedDark)
+		compat.HasDarkBackground = (savedDark)
 	})
 
 	PinAppearance()

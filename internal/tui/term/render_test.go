@@ -8,10 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/hinshun/vt10x"
-	"github.com/muesli/termenv"
 )
 
 func TestRenderNilSession(t *testing.T) {
@@ -68,10 +66,6 @@ sleep 30
 
 func TestRenderStylesAndColors(t *testing.T) {
 	// Non-TTY test runners often pick Ascii; force truecolor so styles stick.
-	prev := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
-
 	// Bold red, underline, italic, reverse, ansi16, 256-color, greyscale.
 	script := "#!/bin/sh\n" +
 		"printf '\\033[1;31mB\\033[0m'\n" +

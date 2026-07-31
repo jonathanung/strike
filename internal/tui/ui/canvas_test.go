@@ -6,9 +6,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/muesli/termenv"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
@@ -34,58 +33,26 @@ func TestCanvasPaintsContentPaddingAndBlankRows(t *testing.T) {
 	assertSolidBackground(t, out, "48;2;17;34;51")
 }
 
-func TestCanvasUsesResolvedCompleteBackgroundInSupportedProfiles(t *testing.T) {
-	for _, tt := range []struct {
-		name    string
-		profile termenv.Profile
-		wantSGR string
-	}{
-		{"ansi256", termenv.ANSI256, "48;5;99"},
-		{"ansi zero", termenv.ANSI, "40"},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			saved := lipgloss.ColorProfile()
-			lipgloss.SetColorProfile(tt.profile)
-			t.Cleanup(func() { lipgloss.SetColorProfile(saved) })
-			th := theme.Default()
-			th.Background = lipgloss.CompleteColor{ANSI256: "99", ANSI: "0"}
-			if out := Canvas(th, 4, 1, "x"); !strings.Contains(out, "["+tt.wantSGR+"m") {
-				t.Errorf("Canvas(%s) = %q, want background %q", tt.name, out, tt.wantSGR)
-			}
-		})
+func TestCanvasUsesResolvedBackgroundTrueColor(t *testing.T) {
+	// Lip Gloss v2 Render always emits full-fidelity ANSI; Bubble Tea
+	// downsamples at the output layer (E13.2).
+	th := theme.Default()
+	th.Background = lipgloss.Color("#112233")
+	out := Canvas(th, 4, 1, "x")
+	if !strings.Contains(out, "[48;2;17;34;51m") {
+		t.Errorf("Canvas = %q, want truecolor background", out)
 	}
 }
 
-func TestCanvasHandlesANSIBlackPointersWithoutLosingItsSolidBackground(t *testing.T) {
-	for _, tt := range []struct {
-		name       string
-		background lipgloss.TerminalColor
-		want       string
-	}{
-		{"ANSI black pointer", ansiColorPointer(0), "40"},
-		{"typed nil ANSI pointer falls back", typedNilANSIColor(), "40"},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			saved := lipgloss.ColorProfile()
-			lipgloss.SetColorProfile(termenv.ANSI)
-			t.Cleanup(func() { lipgloss.SetColorProfile(saved) })
-			th := theme.Default()
-			th.Background = tt.background
-
-			out := Canvas(th, 4, 1, "x")
-			assertCanvasSize(t, out, 4, 1)
-			if !strings.Contains(out, "["+tt.want+"m") {
-				t.Errorf("Canvas background = %q, want solid ANSI background %q", out, tt.want)
-			}
-		})
+func TestCanvasHandlesANSIBlackWithoutLosingItsSolidBackground(t *testing.T) {
+	th := theme.Default()
+	th.Background = lipgloss.ANSIColor(0)
+	out := Canvas(th, 4, 1, "x")
+	assertCanvasSize(t, out, 4, 1)
+	// v2 may encode indexed black as truecolor #000000 or ANSI 40 depending on type path.
+	if !strings.Contains(out, "[40m") && !strings.Contains(out, "[48;2;0;0;0m") && !strings.Contains(out, "[48;5;0m") {
+		t.Errorf("Canvas background = %q, want solid black background", out)
 	}
-}
-
-func ansiColorPointer(value lipgloss.ANSIColor) lipgloss.TerminalColor { return &value }
-
-func typedNilANSIColor() lipgloss.TerminalColor {
-	var color *lipgloss.ANSIColor
-	return color
 }
 
 func TestCanvasOverflowRetainsFinalRows(t *testing.T) {
@@ -338,9 +305,6 @@ func assertCanvasSize(t *testing.T, out string, width, height int) {
 
 func setTrueColor(t *testing.T) {
 	t.Helper()
-	saved := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(saved) })
 }
 
 func assertSolidBackground(t *testing.T, out, want string) {

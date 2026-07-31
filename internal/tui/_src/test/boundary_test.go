@@ -213,6 +213,7 @@ func TestCharmImportViolation(t *testing.T) {
 		{"github.com/charmbracelet/x/ansi", ""},
 		{"charm.land/bubbletea/v2", ""},
 		{"charm.land/lipgloss/v2", ""},
+		{"charm.land/lipgloss/v2/compat", ""},
 		{"charm.land/bubbles/v2/viewport", ""},
 		{"charm.land/glamour/v2", ""},
 		{"github.com/charmbracelet/bubbletea/v2", "Charm v2 imports must use charm.land/..., not github.com/charmbracelet/.../v2"},

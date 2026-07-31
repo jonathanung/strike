@@ -5,9 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/muesli/termenv"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
@@ -106,7 +105,7 @@ func TestListFilterHeaderShowsCounter(t *testing.T) {
 		Items: listItems(3), Cursor: 0, Width: 40, Visible: 10,
 		ShowFilter: true, Filter: "ab", Total: 12,
 	})
-	header := firstLine(out)
+	header := ansi.Strip(firstLine(out))
 	if !strings.Contains(header, "filter: ab") {
 		t.Errorf("filter text missing: %q", header)
 	}
@@ -141,32 +140,24 @@ func TestListCurrentTagAndWidthSafety(t *testing.T) {
 }
 
 func TestListDisabledRowRendersMuted(t *testing.T) {
-	saved := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(saved) })
-
 	th := theme.Default()
 	enabled := List(th, ListOpts{Items: []ListItem{{Label: "row"}}, Cursor: 0, Width: 20, Visible: 1})
 	disabled := List(th, ListOpts{Items: []ListItem{{Label: "row", Disabled: true}}, Cursor: 0, Width: 20, Visible: 1})
 	if enabled == disabled {
 		t.Error("disabled cursor row renders identically to the enabled highlighted row")
 	}
-	if !strings.HasPrefix(disabled, "▸ ") {
+	if !strings.HasPrefix(ansi.Strip(disabled), "▸ ") {
 		t.Errorf("disabled row should still keep the cursor marker: %q", disabled)
 	}
 }
 
 func TestListUsesCustomCursorAndSelectedStyle(t *testing.T) {
-	saved := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(saved) })
-
 	th := theme.Default()
 	th.Icons.Cursor = ">"
 	items := []ListItem{{Label: "selected"}, {Label: "other"}}
 	selected := List(th, ListOpts{Items: items, Cursor: 0, Width: 20})
 	unselected := List(th, ListOpts{Items: items, Cursor: 1, Width: 20})
-	if !strings.HasPrefix(selected, "> ") {
+	if !strings.HasPrefix(ansi.Strip(selected), "> ") {
 		t.Errorf("custom cursor is not rendered: %q", selected)
 	}
 	if selected == unselected {
@@ -178,7 +169,7 @@ func TestListUsesCustomDetailSeparator(t *testing.T) {
 	th := theme.Default()
 	th.Icons.DetailSeparator = "|"
 	out := List(th, ListOpts{Items: []ListItem{{Label: "label", Detail: "detail"}}, Width: 30})
-	if !strings.Contains(out, "label | detail") {
+	if !strings.Contains(ansi.Strip(out), "label | detail") {
 		t.Errorf("custom detail separator is not rendered: %q", out)
 	}
 }
@@ -227,10 +218,6 @@ func TestListRendersPrefixWithoutRecoloring(t *testing.T) {
 func TestListKeepsPrefixColorWhenDetailOverflows(t *testing.T) {
 	// Regression: overflow used to replace Prefix with spaces and restyle the
 	// whole row, wiping legend/status sample colors at typical modal widths.
-	saved := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(saved) })
-
 	th := theme.Default().Resolve()
 	label := theme.AgentStateAttention.Label()
 	prefix := th.AgentStateStyle(theme.AgentStateAttention).Render(label)

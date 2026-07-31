@@ -4,9 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/muesli/termenv"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
@@ -38,10 +37,6 @@ func TestDialogEmbedsTitleAndPlacesHintAtFoot(t *testing.T) {
 }
 
 func TestDialogToneOverridesChromeEmphasis(t *testing.T) {
-	saved := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(saved) })
-
 	th := theme.Default()
 	warn := Dialog(th, DialogOpts{Title: "Permission required", Width: 40, Tone: ToneWarning}, "rm -rf")
 	normal := Dialog(th, DialogOpts{Title: "Permission required", Width: 40}, "rm -rf")

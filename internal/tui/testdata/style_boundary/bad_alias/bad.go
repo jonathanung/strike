@@ -1,5 +1,5 @@
 package fixture
 
-import lg "github.com/charmbracelet/lipgloss"
+import lg "charm.land/lipgloss/v2"
 
 func f() { _ = lg.NewStyle().Bold(true) }

@@ -8,9 +8,6 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
-	lg "charm.land/lipgloss/v2"
-	"charm.land/lipgloss/v2/compat"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
@@ -33,16 +30,6 @@ func staticWorkingChrome() bool {
 	return os.Getenv("SSH_CONNECTION") != "" || os.Getenv("SSH_TTY") != ""
 }
 
-// adaptiveStyle builds a lipgloss v2 style from a v1 AdaptiveColor token so
-// bubbles v2 (lipgloss v2) can be themed without migrating the whole theme
-// package (E13.2).
-func adaptiveStyle(c lipgloss.AdaptiveColor) lg.Style {
-	return lg.NewStyle().Foreground(compat.AdaptiveColor{
-		Light: lg.Color(c.Light),
-		Dark:  lg.Color(c.Dark),
-	})
-}
-
 func newComposer(th theme.Theme) textarea.Model {
 	ta := textarea.New()
 	ta.Placeholder = "Ask anything…  (/ commands, ! shell)"
@@ -57,24 +44,24 @@ func newComposer(th theme.Theme) textarea.Model {
 
 // styleComposer applies resolved theme tokens to an existing textarea so
 // appearance toggles can restyle without dropping value or cursor state.
+// Styles come from theme.S() (the visual chokepoint) — no lipgloss.Foreground
+// outside internal/tui/theme.
 func styleComposer(ta *textarea.Model, th theme.Theme) {
 	th = th.Resolve()
+	st := th.S()
 	styles := textarea.DefaultDarkStyles()
-	input := adaptiveStyle(th.Text)
-	prompt := adaptiveStyle(th.Accent)
-	placeholder := adaptiveStyle(th.TextMuted)
 	styles.Focused = textarea.StyleState{
-		Base:             input,
-		Text:             input,
-		CursorLine:       input,
-		Placeholder:      placeholder,
-		Prompt:           prompt,
-		LineNumber:       placeholder,
-		CursorLineNumber: prompt,
-		EndOfBuffer:      placeholder,
+		Base:             st.Input,
+		Text:             st.Input,
+		CursorLine:       st.Input,
+		Placeholder:      st.InputPlaceholder,
+		Prompt:           st.InputPrompt,
+		LineNumber:       st.InputPlaceholder,
+		CursorLineNumber: st.InputPrompt,
+		EndOfBuffer:      st.InputPlaceholder,
 	}
 	styles.Blurred = styles.Focused
-	styles.Cursor.Color = compat.AdaptiveColor{Light: lg.Color(th.Accent.Light), Dark: lg.Color(th.Accent.Dark)}
+	styles.Cursor.Color = th.Accent.Compat()
 	styles.Cursor.Blink = false
 	ta.SetStyles(styles)
 	ta.Prompt = th.Icons.Prompt + themedSpace(th.Spacing.XS)
@@ -82,21 +69,19 @@ func styleComposer(ta *textarea.Model, th theme.Theme) {
 
 func newTextInput(th theme.Theme, placeholder string) textinput.Model {
 	th = th.Resolve()
+	st := th.S()
 	in := textinput.New()
 	in.Placeholder = placeholder
 	in.Prompt = th.Icons.InputCursor + themedSpace(th.Spacing.XS)
 	in.SetVirtualCursor(true)
 	styles := textinput.DefaultDarkStyles()
-	input := adaptiveStyle(th.Text)
-	prompt := adaptiveStyle(th.Accent)
-	ph := adaptiveStyle(th.TextMuted)
 	styles.Focused = textinput.StyleState{
-		Prompt:      prompt,
-		Text:        input,
-		Placeholder: ph,
+		Prompt:      st.InputPrompt,
+		Text:        st.Input,
+		Placeholder: st.InputPlaceholder,
 	}
 	styles.Blurred = styles.Focused
-	styles.Cursor.Color = compat.AdaptiveColor{Light: lg.Color(th.Accent.Light), Dark: lg.Color(th.Accent.Dark)}
+	styles.Cursor.Color = th.Accent.Compat()
 	styles.Cursor.Blink = false
 	in.SetStyles(styles)
 	return in
@@ -120,7 +105,7 @@ func styleSpinner(sp *spinner.Model, th theme.Theme) {
 			FPS:    localWorkingSpinnerFPS,
 		}
 	}
-	sp.Style = adaptiveStyle(th.AccentAlt)
+	sp.Style = th.S().Spinner
 }
 
 // restyleWidgets reapplies theme tokens to composer and spinner after an

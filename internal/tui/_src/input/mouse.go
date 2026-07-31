@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 // openURIMsg is emitted after a best-effort open of a clicked hyperlink.

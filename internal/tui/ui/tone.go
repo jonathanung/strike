@@ -1,7 +1,7 @@
 package ui
 
 import (
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
@@ -24,7 +24,7 @@ const (
 )
 
 // toneColor resolves a Tone to its adaptive color for the given theme.
-func toneColor(th theme.Theme, tone Tone) lipgloss.AdaptiveColor {
+func toneColor(th theme.Theme, tone Tone) theme.AdaptiveColor {
 	th = th.Resolve()
 	switch tone {
 	case ToneAccent:

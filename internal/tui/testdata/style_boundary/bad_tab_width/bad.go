@@ -1,6 +1,6 @@
 package fixture
 
-import "github.com/charmbracelet/lipgloss"
+import "charm.land/lipgloss/v2"
 
 func f() {
 	_ = lipgloss.NewStyle().TabWidth(4)

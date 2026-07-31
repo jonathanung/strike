@@ -1,5 +1,5 @@
 package fixture
 
-import "github.com/charmbracelet/lipgloss"
+import "charm.land/lipgloss/v2"
 
 func f() { s := lipgloss.NewStyle(); _ = s.Underline(true) }

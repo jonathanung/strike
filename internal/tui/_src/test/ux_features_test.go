@@ -7,7 +7,7 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2/compat"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -239,12 +239,12 @@ func TestHorizontalC2GeometryStillHolds(t *testing.T) {
 
 func TestThemeCommandAppearanceAndPicker(t *testing.T) {
 	// Save/restore lipgloss background detection and package appearance cache.
-	savedDark := lipgloss.HasDarkBackground()
+	savedDark := compat.HasDarkBackground
 	savedDetected := appearanceDetected
 	savedDetectedDark := appearanceDetectedDark
 	savedMDStyle := glamourStyleName
 	t.Cleanup(func() {
-		lipgloss.SetHasDarkBackground(savedDark)
+		compat.HasDarkBackground = (savedDark)
 		appearanceDetected = savedDetected
 		appearanceDetectedDark = savedDetectedDark
 		glamourStyleName = savedMDStyle
@@ -269,7 +269,7 @@ func TestThemeCommandAppearanceAndPicker(t *testing.T) {
 	if m.appearance != appearanceDark {
 		t.Errorf("/theme dark appearance = %q", m.appearance)
 	}
-	if !lipgloss.HasDarkBackground() {
+	if !compat.HasDarkBackground {
 		t.Error("dark theme did not set HasDarkBackground")
 	}
 	if !strings.Contains(m.notice, "dark") {
@@ -277,8 +277,8 @@ func TestThemeCommandAppearanceAndPicker(t *testing.T) {
 	}
 
 	m = runTheme("light")
-	if m.appearance != appearanceLight || lipgloss.HasDarkBackground() {
-		t.Errorf("light: appearance=%q darkBg=%v", m.appearance, lipgloss.HasDarkBackground())
+	if m.appearance != appearanceLight || compat.HasDarkBackground {
+		t.Errorf("light: appearance=%q darkBg=%v", m.appearance, compat.HasDarkBackground)
 	}
 
 	m = runTheme("auto")
@@ -371,12 +371,12 @@ func TestThemePickerSelectAndSave(t *testing.T) {
 }
 
 func TestApplyAppearanceIsTestable(t *testing.T) {
-	savedDark := lipgloss.HasDarkBackground()
+	savedDark := compat.HasDarkBackground
 	savedDetected := appearanceDetected
 	savedDetectedDark := appearanceDetectedDark
 	savedMDStyle := glamourStyleName
 	t.Cleanup(func() {
-		lipgloss.SetHasDarkBackground(savedDark)
+		compat.HasDarkBackground = (savedDark)
 		appearanceDetected = savedDetected
 		appearanceDetectedDark = savedDetectedDark
 		glamourStyleName = savedMDStyle
@@ -386,21 +386,21 @@ func TestApplyAppearanceIsTestable(t *testing.T) {
 	appearanceDetectedDark = true
 
 	applyAppearance(appearanceLight)
-	if lipgloss.HasDarkBackground() {
+	if compat.HasDarkBackground {
 		t.Error("applyAppearance(light) left dark background")
 	}
 	if glamourStyle() != "light" {
 		t.Errorf("glamour style after light = %q", glamourStyle())
 	}
 	applyAppearance(appearanceDark)
-	if !lipgloss.HasDarkBackground() {
+	if !compat.HasDarkBackground {
 		t.Error("applyAppearance(dark) left light background")
 	}
 	if glamourStyle() != "dark" {
 		t.Errorf("glamour style after dark = %q", glamourStyle())
 	}
 	applyAppearance(appearanceAuto)
-	if !lipgloss.HasDarkBackground() {
+	if !compat.HasDarkBackground {
 		t.Error("applyAppearance(auto) did not restore detected dark")
 	}
 	if glamourStyle() != "dark" {
