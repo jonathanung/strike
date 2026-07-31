@@ -187,21 +187,20 @@ func TestInitExistsError(t *testing.T) {
 }
 
 func TestWelcomeMentionsInitWhenMissing(t *testing.T) {
-	m, _ := newAppTestModel(nil, nil)
+	m, _ := newAppTestModelHome(nil, nil)
 	m.services.Init = &fakeInit{exists: false}
 	m.providerName = ""
-	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
-	plain := ansi.Strip(viewString(m))
+	plain := ansi.Strip(m.welcomeView(100, 40))
 	if !strings.Contains(plain, "/init") {
 		t.Fatalf("welcome missing /init CTA:\n%s", plain)
 	}
 }
 
 func TestWelcomeFirstRunMentionsInit(t *testing.T) {
-	m, _ := newAppTestModelWithOptions(Options{FirstRun: true})
+	m, _ := newAppTestModelHome(nil, nil)
+	m.firstRun = true
 	m.providerName = ""
-	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
-	plain := ansi.Strip(viewString(m))
+	plain := ansi.Strip(m.welcomeView(100, 40))
 	if !strings.Contains(plain, "/init") && !strings.Contains(plain, "AGENTS.md") {
 		t.Fatalf("first-run missing init mention:\n%s", plain)
 	}

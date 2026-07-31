@@ -346,8 +346,23 @@ func (m Model) noticeRowsFor(width int) int {
 	return strings.Count(out, "\n") + 1
 }
 
+// composerInputMode is the live input mode for chrome: chat, shell (!), or
+// command (/). Empty drafts default to chat (#678).
+func (m Model) composerInputMode() string {
+	v := strings.TrimLeft(m.composer.Value(), " \t")
+	switch {
+	case strings.HasPrefix(v, "!"):
+		return "shell"
+	case strings.HasPrefix(v, "/"):
+		return "command"
+	default:
+		return "chat"
+	}
+}
+
 // composerView renders the focused composer: the textarea inside a titled
-// panel, or bare in compact mode.
+// panel, or bare in compact mode. Title carries mode, prompt glyph, queue /
+// attachment / pending-approval chips so the box reads as the main input (#678).
 func (m Model) composerView(compact bool, width, height int) string {
 	if height <= 0 {
 		return ""
@@ -363,6 +378,15 @@ func (m Model) composerView(compact bool, width, height int) string {
 		contentHeight = ui.PanelInnerHeightFor(m.th, width, height)
 	}
 	composer.SetHeight(contentHeight)
+	// Stronger prompt marker when focused (#678).
+	th := m.th.Resolve()
+	if visualFocus {
+		styles := composer.Styles()
+		styles.Focused.Prompt = th.S().AccentStrong
+		styles.Blurred.Prompt = th.S().AccentStrong
+		composer.SetStyles(styles)
+		composer.Prompt = th.Icons.Prompt + themedSpace(th.Spacing.XS)
+	}
 	composer.View()
 	composer, _ = composer.Update(nil)
 	if !visualFocus {
@@ -370,25 +394,56 @@ func (m Model) composerView(compact bool, width, height int) string {
 	}
 	var footer string
 	if !borderless {
-		// Always show composer keybinds in chrome (focused or dim); width-safe.
+		// Composer chrome footer stays minimal; global footer is context-sensitive (#679).
 		footer = composerFooter(m.th, m.keyMap, ui.PanelInnerWidth(m.th, width), len(m.inputQueue) > 0 && m.composer.Value() == "")
 	}
-	// Soft-bento: accent title + glyph; queue badge keeps its own tone.
-	thTitle := m.th.Resolve()
-	stTitle := thTitle.S()
-	title := stTitle.Title.Render("prompt") + themedSpace(thTitle.Spacing.XS) + stTitle.Accent.Render(m.themeIcons().Prompt)
-	if badge := m.inputQueueBadge(); badge != "" {
-		title += themedSpace(thTitle.Spacing.SM) + badge
-	}
+	title := m.composerTitle(th, visualFocus)
+	focused := m.focus == focusLeft && m.modal == nil
 	return ui.Panel(m.th, ui.PanelOpts{
 		Title:      title,
 		Footer:     footer,
 		Width:      width,
 		Height:     height,
 		Borderless: borderless,
-		Focused:    m.focus == focusLeft && m.modal == nil,
-		Dim:        m.focus == focusRight || m.modal != nil,
+		// Focused outline (BorderFocus) is the primary affordance; body stays
+		// Surface so the textarea remains readable (#678).
+		Focused: focused,
+		Dim:     m.focus == focusRight || m.modal != nil,
 	}, composer.View())
+}
+
+// composerTitle builds mode + glyph + status chips for the prompt panel edge.
+func (m Model) composerTitle(th theme.Theme, focused bool) string {
+	th = th.Resolve()
+	st := th.S()
+	mode := m.composerInputMode()
+	modeStyled := st.Muted.Render(mode)
+	if focused {
+		modeStyled = st.AccentStrong.Render(mode)
+	}
+	glyph := st.Accent.Render(th.Icons.Prompt)
+	if focused {
+		glyph = st.AccentStrong.Render(th.Icons.Prompt)
+	}
+	title := modeStyled + themedSpace(th.Spacing.XS) + glyph
+	// Send-state chip when draft is non-empty and left-focused.
+	if focused && strings.TrimSpace(m.composer.Value()) != "" && m.modal == nil {
+		label := "ready"
+		if m.turnRunning {
+			label = "queue"
+		}
+		title += themedSpace(th.Spacing.SM) + ui.Badge(th, ui.ToneSuccess, label)
+	}
+	if n := len(m.pendingImages); n > 0 {
+		title += themedSpace(th.Spacing.SM) + ui.Badge(th, ui.ToneAccentAlt, itoa(n)+" img")
+	}
+	if badge := m.inputQueueBadge(); badge != "" {
+		title += themedSpace(th.Spacing.SM) + badge
+	}
+	if label := m.pendingBlockingLabel(); label != "" {
+		title += themedSpace(th.Spacing.SM) + ui.Badge(th, ui.ToneWarning, label)
+	}
+	return title
 }
 
 // composerFooter advertises send/newline when the panel has room for a footer.
@@ -413,7 +468,8 @@ func (m Model) rightPaneView(width, height int, compact bool) string {
 	g := m.windows.activeGroup()
 	pairHorizontal := m.splitOrientation == orientVertical
 	stackGutter := m.th.Resolve().Spacing.XS
-	slots := computeMemberSlots(width, height, stackGutter, len(g.members), pairHorizontal)
+	pref := m.memberPreferredSizes(g, width, height, compact, pairHorizontal)
+	slots := computeMemberSlots(width, height, stackGutter, len(g.members), pairHorizontal, pref)
 	if compact || len(slots) == 0 || len(g.members) < 2 {
 		return m.rightPaneSingle(width, height, compact, m.windows.active())
 	}
@@ -510,32 +566,56 @@ func paneGutter(th theme.Theme, width, height int) string {
 	return strings.TrimSuffix(strings.Repeat(row+"\n", height), "\n")
 }
 
-// hintsView is the keybinding footer. ui.KeyHints drops whole hints that do
-// not fit rather than cutting mid-hint.
+// hintsView is the context-sensitive keybinding footer (#679). Only controls
+// relevant to the focused region are shown so the row stays scannable.
 func (m Model) hintsView(width int) string {
-	paneLabel := "panes"
-	if m.splitOrientation == orientVertical {
-		paneLabel = "stack"
+	return ui.KeyHints(m.th, max(1, width), m.footerHints())
+}
+
+// footerHints selects the hint set for the current focus / home / modal state.
+func (m Model) footerHints() []ui.KeyHint {
+	// Modal owns the screen — keep a minimal escape hatch.
+	if m.modal != nil {
+		return []ui.KeyHint{
+			{Key: "esc", Label: "close"},
+			keyHint(m.keyMap.KeyHelp),
+		}
 	}
-	hints := []ui.KeyHint{
-		{Key: keyHint(m.keyMap.FocusLeft).Key + "/" + keyHint(m.keyMap.FocusRight).Key, Label: paneLabel},
-		{Key: keyHint(m.keyMap.CycleWindowNext).Key + "/" + keyHint(m.keyMap.CycleWindowPrev).Key, Label: "windows"},
-		keyHint(m.keyMap.ToggleOrientation),
-		keyHint(m.keyMap.Palette),
-		keyHint(m.keyMap.KeyHelp),
-		keyHint(m.keyMap.Interrupt),
-	}
-	if m.focus == focusLeft {
-		hints = append(hints,
+	// Home / left composer: send-oriented chrome.
+	if m.showHomeLayout() || m.focus == focusLeft {
+		hints := []ui.KeyHint{
 			keyHint(m.keyMap.Send),
 			keyHint(m.keyMap.Newline),
-			keyHint(m.keyMap.Agent),
-			keyHint(m.keyMap.SaveDefaults),
-			ui.KeyHint{Key: keyHint(m.keyMap.ScrollUp).Key + "/" + keyHint(m.keyMap.ScrollDown).Key, Label: "scroll"},
-			keyHint(m.keyMap.JumpBottom),
+			keyHint(m.keyMap.ExternalEditor),
+		}
+		if m.turnRunning {
+			hints = append(hints, keyHint(m.keyMap.Interrupt))
+		} else {
+			hints = append(hints, ui.KeyHint{Key: "esc", Label: "cancel"})
+		}
+		hints = append(hints,
+			keyHint(m.keyMap.Palette),
+			keyHint(m.keyMap.KeyHelp),
 		)
+		// After first prompt, left focus can still scroll the transcript.
+		if !m.showHomeLayout() {
+			hints = append(hints,
+				ui.KeyHint{Key: keyHint(m.keyMap.ScrollUp).Key + "/" + keyHint(m.keyMap.ScrollDown).Key, Label: "scroll"},
+				keyHint(m.keyMap.FocusRight),
+			)
+		}
+		return hints
 	}
-	return ui.KeyHints(m.th, max(1, width), hints)
+	// Right pane: navigation for the active window / group.
+	hints := []ui.KeyHint{
+		{Key: "↑↓", Label: "select"},
+		{Key: "enter", Label: "open"},
+		keyHint(m.keyMap.FocusLeft),
+		{Key: keyHint(m.keyMap.CycleWindowNext).Key + "/" + keyHint(m.keyMap.CycleWindowPrev).Key, Label: "next pane"},
+		keyHint(m.keyMap.Palette),
+		keyHint(m.keyMap.KeyHelp),
+	}
+	return hints
 }
 
 func keyHint(binding key.Binding) ui.KeyHint {

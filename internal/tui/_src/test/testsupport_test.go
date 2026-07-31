@@ -1096,16 +1096,41 @@ func testServices(agents []string, skills []host.Skill) host.Services {
 func newAppTestModel(agents []string, skills []host.Skill) (Model, chan protocol.Op) {
 	ops := make(chan protocol.Op, 8)
 	events := make(chan protocol.Event)
+	m := New(ops, events, testServices(agents, skills))
+	// Multi-pane is the default test surface; home-layout coverage uses
+	// newAppTestModelHome (#677).
+	m.testForceMultiPane = true
+	return m, ops
+}
+
+// newAppTestModelHome builds a model with the pre-first-prompt home layout
+// active (empty transcript, no testForceMultiPane).
+func newAppTestModelHome(agents []string, skills []host.Skill) (Model, chan protocol.Op) {
+	ops := make(chan protocol.Op, 8)
+	events := make(chan protocol.Event)
 	return New(ops, events, testServices(agents, skills)), ops
 }
 
 func newAppTestModelWithOptions(options Options) (Model, chan protocol.Op) {
 	ops := make(chan protocol.Op, 8)
 	events := make(chan protocol.Event)
-	return New(ops, events, testServices(nil, nil), options), ops
+	m := New(ops, events, testServices(nil, nil), options)
+	m.testForceMultiPane = true
+	return m, ops
 }
 
 func newAppTestModelWithHistory(agents []string, skills []host.Skill, hist *fakeHistory) (Model, chan protocol.Op) {
+	ops := make(chan protocol.Op, 8)
+	events := make(chan protocol.Event)
+	services := testServices(agents, skills)
+	services.History = hist
+	m := New(ops, events, services)
+	m.testForceMultiPane = true
+	return m, ops
+}
+
+// newAppTestModelHomeWithHistory is empty-transcript home with history entries.
+func newAppTestModelHomeWithHistory(agents []string, skills []host.Skill, hist *fakeHistory) (Model, chan protocol.Op) {
 	ops := make(chan protocol.Op, 8)
 	events := make(chan protocol.Event)
 	services := testServices(agents, skills)

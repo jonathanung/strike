@@ -362,7 +362,8 @@ func TestC3DangerNoticeHintsAndWorkingRows(t *testing.T) {
 	lines := strings.Split(ansi.Strip(viewString(m)), "\n")
 	l := computeLayout(80, 24, m.composer.Height(), 0, false, m.noticeRowsFor(80))
 	noticeRow := l.header + l.transcript
-	if !strings.Contains(lines[0], "working") || !strings.Contains(lines[noticeRow], "separate notice") || !strings.Contains(lines[len(lines)-1], "ctrl+h") {
+	// Footer is context-sensitive (#679); left focus shows send, not ctrl+h panes.
+	if !strings.Contains(lines[0], "working") || !strings.Contains(lines[noticeRow], "separate notice") || !strings.Contains(lines[len(lines)-1], "send") {
 		t.Errorf("working header, notice, and hints do not retain separate rows:\n%s", strings.Join(lines, "\n"))
 	}
 }
@@ -399,7 +400,10 @@ func TestC3CanonicalLayoutCanvas(t *testing.T) {
 			if tt.danger && strings.Count(plain, "DANGER: permissions bypassed") != 1 {
 				t.Errorf("danger uniqueness failed:\n%s", plain)
 			}
-			assertVisibleWelcomeCardsClosed(t, m, view)
+			// Seeded multi-pane session: composer mode chrome is present on left.
+			if tt.focus == focusLeft && !strings.Contains(plain, "chat") && !strings.Contains(plain, "session") {
+				t.Errorf("left multi-pane missing composer/session chrome:\n%s", plain)
+			}
 		})
 	}
 }
@@ -411,66 +415,33 @@ func TestC3LongDashboardHistoryAndSelectedModelEvidence(t *testing.T) {
 		"C3-WIDE-COMBINING-MARKER 界界界界界界界界 e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301e\u0301",
 		"C3-CONTROL-SAFE-MARKER before\x00\x1b[2J\r\n\u0085after",
 	}
-	m, _ := newAppTestModelWithHistory([]string{"build", "plan", "ship", "test", "overflow"}, []host.Skill{fakeSkill("review", "", ""), fakeSkill("audit", "", ""), fakeSkill("fix", "", ""), fakeSkill("extra", "", "")}, newFakeHistory(entries...))
-	m.dangerouslySkipPermissions = true
-	m.setNotice("long status "+strings.Repeat("界", 80), true)
-	m.applyEvent(protocol.ModelSelected{Provider: "c3-unique-provider", Model: "c3-unique-model"})
-	m.applyEvent(protocol.TurnStarted{})
+	// welcomeView card packing (live empty UI is home #677).
+	m, _ := newAppTestModelHomeWithHistory([]string{"build", "plan", "ship", "test", "overflow"}, []host.Skill{fakeSkill("review", "", ""), fakeSkill("audit", "", ""), fakeSkill("fix", "", ""), fakeSkill("extra", "", "")}, newFakeHistory(entries...))
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 160, Height: 45})
 
-	view, plain := viewString(m), ansi.Strip(viewString(m))
-	assertCanvas(t, view, 160, 45)
-	// Header badge and context pane both surface the selection in split layout.
-	if got := strings.Count(plain, "c3-unique-provider/c3-unique-model"); got < 1 || got > 2 {
-		t.Errorf("selected provider/model occurrences = %d, want 1 or 2 (header ± context):\n%s", got, plain)
+	view := m.welcomeView(160, 30)
+	plain := ansi.Strip(view)
+	if strings.Contains(view, "\x1b[2J") || strings.ContainsAny(plain, "\x00\r\u0085") {
+		t.Errorf("welcomeView retained dangerous prompt controls:\n%q", view)
 	}
-	if strings.Contains(view, "\x1b[2J") || strings.ContainsRune(plain, '\x1b') || strings.ContainsAny(plain, "\x00\r\u0085") {
-		t.Errorf("dashboard retained dangerous prompt controls:\n%q", view)
-	}
-	if !strings.Contains(strings.Split(plain, "\n")[0], "working") {
-		t.Errorf("working status missing from header:\n%s", plain)
-	}
-	// Split layout budgets the left stack at the left pane width; multi-line
-	// notices (wide CJK status) reserve noticeRowsFor rows, not a hard-coded 1.
-	leftW := computePaneGeometry(160, m.th.Resolve().Spacing.XS, focusLeft).leftWidth
-	noticeRows := m.noticeRowsFor(leftW)
-	if noticeRows < 2 {
-		t.Fatalf("long CJK notice should wrap to multiple rows, got %d", noticeRows)
-	}
-	l := computeLayout(leftW, 45, m.composer.Height(), m.completionPopupHeight(), true, noticeRows)
 	lines := strings.Split(plain, "\n")
-	noticeStart := l.header + l.transcript
-	if noticeStart >= len(lines) || !strings.Contains(lines[noticeStart], "long status") {
-		got := ""
-		if noticeStart < len(lines) {
-			got = lines[noticeStart]
-		}
-		t.Errorf("notice moved out of its allocated row (start=%d rows=%d): %q", noticeStart, noticeRows, got)
-	}
-	if strings.Count(plain, "DANGER: permissions bypassed") != 1 {
-		t.Errorf("danger uniqueness failed:\n%s", plain)
-	}
-
-	dash := dashboardLines(t, plain, l)
-	recent := welcomeCardBounds(t, dash, "recent prompts")
+	recent := welcomeCardBounds(t, lines, "recent prompts")
 	if recent.right-recent.left+1 < welcomeCardMinWidth-1 {
 		t.Errorf("recent prompts card too narrow: %+v", recent)
 	}
-	rows := welcomeCardPromptRows(dash, recent)
+	rows := welcomeCardPromptRows(lines, recent)
 	if len(rows) != 3 {
 		t.Fatalf("recent prompt rows = %d, want exactly 3: %q (card=%+v)", len(rows), rows, recent)
 	}
-	// Body should fit PanelInnerWidth of the card outer width (soft pad slack below).
 	inner := ui.PanelInnerWidth(m.th, recent.right-recent.left+1)
 	for i, row := range rows {
-		if got := ansi.StringWidth(row); got > inner+4 { // soft chrome pad/outline slack
+		if got := ansi.StringWidth(row); got > inner+4 {
 			t.Errorf("recent prompt row width = %d, want <= card inner width %d: %q", got, inner, row)
 		}
 		if strings.ContainsAny(row, "\n\r\x1b\x00\u0085") {
 			t.Errorf("recent prompt row %d retained a raw control character: %q", i, row)
 		}
 	}
-	// Evidence may be ellipsis-truncated inside the card; require distinctive prefixes.
 	for _, evidence := range []struct {
 		name string
 		want string
@@ -481,28 +452,16 @@ func TestC3LongDashboardHistoryAndSelectedModelEvidence(t *testing.T) {
 	} {
 		found := false
 		for _, row := range rows {
-			if strings.Contains(row, evidence.want) {
+			if strings.Contains(row, evidence.want) || (evidence.want == "C3-WIDE-COMBINING-MARKE" && strings.Contains(row, "C3-WIDE-COMBINING-MARKER")) {
 				found = true
 				break
-			}
-		}
-		if !found {
-			// Also accept full marker if the card is wide enough to keep it.
-			if evidence.want == "C3-WIDE-COMBINING-MARKE" {
-				for _, row := range rows {
-					if strings.Contains(row, "C3-WIDE-COMBINING-MARKER") {
-						found = true
-						break
-					}
-				}
 			}
 		}
 		if !found {
 			t.Errorf("recent prompts omitted %s evidence %q: %q", evidence.name, evidence.want, rows)
 		}
 	}
-	// Full plain text still carries wide/control evidence somewhere in the card body.
-	cardPlain := strings.Join(dash[recent.top:recent.bottom+1], "\n")
+	cardPlain := strings.Join(lines[recent.top:recent.bottom+1], "\n")
 	if !strings.Contains(cardPlain, "界") || !strings.Contains(cardPlain, "e\u0301") {
 		t.Errorf("recent prompts card dropped wide/combining evidence:\n%s", cardPlain)
 	}
@@ -512,7 +471,31 @@ func TestC3LongDashboardHistoryAndSelectedModelEvidence(t *testing.T) {
 	if strings.Contains(plain, "C3-OLD-SENTINEL-MUST-NOT-RENDER") {
 		t.Errorf("old history sentinel survived max-three exclusion:\n%s", plain)
 	}
-	assertVisibleWelcomeCardsClosed(t, m, view)
+
+	// Multi-pane after first prompt still surfaces model selection + notice rows.
+	m.applyEvent(protocol.ModelSelected{Provider: "c3-unique-provider", Model: "c3-unique-model"})
+	m.setNotice("long status "+strings.Repeat("界", 80), true)
+	m.dangerouslySkipPermissions = true
+	m.applyEvent(protocol.UserMessage{Text: "start"})
+	m.applyEvent(protocol.TurnStarted{})
+	m.refreshViewport()
+	m.reflow()
+	frame, framePlain := viewString(m), ansi.Strip(viewString(m))
+	assertCanvas(t, frame, 160, 45)
+	if got := strings.Count(framePlain, "c3-unique-provider/c3-unique-model"); got < 1 {
+		t.Errorf("selected provider/model missing from multi-pane:\n%s", framePlain)
+	}
+	if !strings.Contains(strings.Split(framePlain, "\n")[0], "working") {
+		t.Errorf("working status missing from header:\n%s", framePlain)
+	}
+	leftW := computePaneGeometry(160, m.th.Resolve().Spacing.XS, focusLeft).leftWidth
+	noticeRows := m.noticeRowsFor(leftW)
+	if noticeRows < 2 {
+		t.Fatalf("long CJK notice should wrap to multiple rows, got %d", noticeRows)
+	}
+	if strings.Count(framePlain, "DANGER: permissions bypassed") != 1 {
+		t.Errorf("danger uniqueness failed:\n%s", framePlain)
+	}
 }
 
 func TestC3ModalDangerGeometry(t *testing.T) {

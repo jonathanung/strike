@@ -13,11 +13,18 @@ import (
 func (m *Model) reflow() {
 	gutter := m.paneGutter()
 	leftWidth := m.width
-	if m.splitOrientation != orientVertical {
+	home := m.showHomeLayout()
+	if !home && m.splitOrientation != orientVertical {
 		geometry := computePaneGeometry(m.width, gutter, m.focus)
 		leftWidth = geometry.leftCandidateWidth(m.width)
 	}
+	if home {
+		leftWidth = homePromptWidth(m.width)
+	}
 	compact := leftWidth < compactWidth || m.height < compactHeight
+	if home {
+		compact = m.width < compactWidth || m.height < compactHeight
+	}
 	composerWidth := leftWidth
 	if !compact {
 		composerWidth = ui.PanelInnerWidth(m.th, leftWidth)
@@ -36,7 +43,14 @@ func (m *Model) reflow() {
 			break
 		}
 	}
-	composerRows := min(composerMaxHeight, max(composerMinHeight, visualLines))
+	// Home layout uses a slightly taller floor so the centered prompt reads as
+	// the primary input surface (#678). Multiline drafts still grow via
+	// visualLines up to composerMaxHeight.
+	minRows := composerMinHeight
+	if home {
+		minRows = max(composerMinHeight, 3)
+	}
+	composerRows := min(composerMaxHeight, max(minRows, visualLines))
 	m.composer.SetHeight(composerRows)
 
 	popupHeight := 0
@@ -57,6 +71,11 @@ func (m *Model) reflow() {
 				popupHeight = m.completion.rows + borderRows
 			}
 		}
+	}
+
+	if m.ready && home {
+		// Home keeps the composer sized to the centered box; no right pane.
+		return
 	}
 
 	if m.ready {
@@ -114,7 +133,8 @@ func (m Model) resizeRightWindows(rightWidth, rightHeight int, compact bool) win
 	g := r.activeGroup()
 	pairHorizontal := m.splitOrientation == orientVertical
 	stackGutter := m.th.Resolve().Spacing.XS
-	slots := computeMemberSlots(rightWidth, rightHeight, stackGutter, len(g.members), pairHorizontal)
+	pref := m.memberPreferredSizes(g, rightWidth, rightHeight, compact, pairHorizontal)
+	slots := computeMemberSlots(rightWidth, rightHeight, stackGutter, len(g.members), pairHorizontal, pref)
 	if compact || len(slots) == 0 {
 		return r
 	}

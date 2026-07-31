@@ -198,11 +198,11 @@ func TestAuthExpiryNoticeViaModelSelected(t *testing.T) {
 }
 
 func TestFirstRunWelcomeCard(t *testing.T) {
-	first, _ := newAppTestModelWithOptions(Options{FirstRun: true})
-	// No provider selected → first-run onboarding card.
+	// welcomeView still carries first-run onboarding cards; live empty UI is home.
+	first, _ := newAppTestModelHome(nil, nil)
+	first.firstRun = true
 	first.providerName = ""
-	first = updateApp(t, first, tea.WindowSizeMsg{Width: 100, Height: 30})
-	plain := ansi.Strip(viewString(first))
+	plain := ansi.Strip(first.welcomeView(100, 30))
 	for _, want := range []string{"first run", "/auth", "/model"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("first-run welcome missing %q:\n%s", want, plain)
@@ -213,15 +213,23 @@ func TestFirstRunWelcomeCard(t *testing.T) {
 	}
 
 	// Default FirstRun false keeps existing unauthed "get started" card.
-	normal, _ := newAppTestModel(nil, nil)
+	normal, _ := newAppTestModelHome(nil, nil)
 	normal.providerName = ""
-	normal = updateApp(t, normal, tea.WindowSizeMsg{Width: 100, Height: 30})
-	plain = ansi.Strip(viewString(normal))
+	plain = ansi.Strip(normal.welcomeView(100, 30))
 	if !strings.Contains(plain, "get started") {
 		t.Errorf("default welcome missing get started:\n%s", plain)
 	}
 	if strings.Contains(plain, "first run") {
 		t.Errorf("default welcome showed first run:\n%s", plain)
+	}
+
+	// Home context bar surfaces first-run when Options say so.
+	home, _ := newAppTestModelHome(nil, nil)
+	home.firstRun = true
+	home.providerName = ""
+	home = updateApp(t, home, tea.WindowSizeMsg{Width: 100, Height: 30})
+	if plain := ansi.Strip(viewString(home)); !strings.Contains(plain, "first run") {
+		t.Errorf("home context bar missing first run:\n%s", plain)
 	}
 }
 

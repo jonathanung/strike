@@ -128,15 +128,21 @@ Alt+j via a stdin wrapper). Bare LF (`KeyCtrlJ`) is also newline. Pane focus is 
 command palette is `ctrl+k` (when kill-to-end does not delete). Bare Escape
 from CSI-u is normalized to `0x1b`.
 
-`View()` composes the full-width header first; its body is a horizontal
+`View()` composes the full-width header first. **Pre-first-prompt home**
+(empty root transcript): a thin full-width context bar, centered STRIKE
+wordmark + centered prompt box, optional recent-history line, and a
+composer-oriented footer — no multi-pane split. After the first transcript
+cell, the normal multi-pane layout takes over. That body is a horizontal
 left|right split by default, or a vertical top/bottom split when
 `splitOrientation` is vertical (`ctrl+;` or `/layout`). The left stack is
 transcript, notice, completion, composer (in that order); then full-width
-hints and the optional danger banner. `ui.Canvas` is the final full-screen
-operation. With the default one-column gutter, horizontal split mode begins at
-width 93: left is at least 60 columns, gutter is 1, and right is at least 32.
-In a horizontal split, the canonical widths are
-`right = max(32, (width-gutter)/3)` and
+**context-sensitive** hints (composer vs right-pane nav) and the optional
+danger banner. Stacked right-pane groups size sparse members (context,
+system telemetry) to content and flex the remainder into activity (#680).
+`ui.Canvas` is the final full-screen operation. With the default one-column
+gutter, horizontal split mode begins at width 93: left is at least 60
+columns, gutter is 1, and right is at least 32. In a horizontal split, the
+canonical widths are `right = max(32, (width-gutter)/3)` and
 `left = width-gutter-right`. At or below 92 columns, only the active pane
 uses the full width. With a custom gutter `g`, the split threshold is
 `60 + g + 32`. Vertical split keeps full width and divides body height when

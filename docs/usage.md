@@ -276,10 +276,16 @@ unless `--auto` or `--dangerously-skip-permissions` is set
 
 ## UI
 
-The screen has a full-width header, footer hints, and danger banner when
-needed. Its left pane is one aggregate stack: `session` transcript, reserved
-notice line, slash-command completion, and `prompt ❯` composer. The right
-slot hosts one active window from the registry:
+**Before the first prompt**, the screen is a centered home layout: header,
+thin context bar, STRIKE wordmark, focused prompt box (mode: chat / shell /
+command), optional recent-history line, and a short composer-oriented footer.
+After the first message, the multi-pane session layout takes over.
+
+That layout has a full-width header, **context-sensitive** footer hints
+(composer vs right-pane navigation), and a danger banner when needed. Its left
+pane is one aggregate stack: `session` transcript, reserved notice line,
+slash-command completion, and mode-titled `chat ❯` / `shell ❯` / `command ❯`
+composer. The right slot hosts one active window from the registry:
 
 | Window | Role |
 |---|---|
@@ -294,10 +300,12 @@ slot hosts one active window from the registry:
 | `editor` | embedded nvim/vim/nano PTY for `/vim` or `/nano` (modal via `vimMode`/`nanoMode`) |
 
 Related right-pane windows stack as **groups** when the pane is tall/wide
-enough: session (`context`+`activity`), agents (`agents`+`visualizer`), and
-project (`memory`+`issues`) share a 50/50 split (vertical in a side column,
-horizontal in a bottom bar). `files`, `markdown`, and `editor` stay full-height
-singles. Compact or narrow terminals collapse each group to one pane.
+enough: session (`context`+`activity`[+`system` telemetry]), agents
+(`agents`+`visualizer`), and project (`memory`+`issues`). Sparse panes
+(context, system) size to their content; activity (and other flex members)
+absorb the remainder so empty bordered voids stay small. `files`, `markdown`,
+and `editor` stay full-height singles. Compact or narrow terminals collapse
+each group to one pane.
 
 ### Concurrent root sessions
 

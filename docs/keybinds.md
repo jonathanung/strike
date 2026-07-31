@@ -3,7 +3,9 @@
 In-app cheatsheet: `f1` or `/keys` (filterable). The list leads with a
 **Current focus** section for the focused pane (composer/transcript on the
 left; the active right-pane window such as `agents`, `files`, or `editor`),
-then the remaining binds. Each command action also shows its slash mirror
+then the remaining binds. The bottom footer is also **context-sensitive**:
+composer focus shows send / newline / external editor; right-pane focus shows
+select / open / next pane. Each command action also shows its slash mirror
 (when one exists). Remap chords in `keybinds.jsonc` (or the config `keybinds`
 object) — see [config.md](config.md). `/keys reset` restores session defaults.
 

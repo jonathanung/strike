@@ -309,6 +309,10 @@ type Model struct {
 
 	// firstRun drives the empty-transcript onboarding card and auto provider modal.
 	firstRun, firstRunModalOpened bool
+	// testForceMultiPane disables the pre-first-prompt home layout so unit
+	// tests can exercise the multi-pane session surface without seeding a
+	// fake user message. Production always leaves this false (#677).
+	testForceMultiPane bool
 	// startupAlert is consumed once into an alertModal after Init.
 	startupAlert string
 	// turnStartedAt / toolCallsThisTurn power the working-status elapsed label.
