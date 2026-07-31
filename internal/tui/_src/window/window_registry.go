@@ -213,6 +213,68 @@ func (r windowRegistry) cycleBy(delta int) windowRegistry {
 	return r
 }
 
+// cycleGroupBy moves focus to the first member of the group delta steps away
+// from the active window's group (wrapping). When groups are empty, each
+// cycleable window is its own group (same as cycleBy).
+func (r windowRegistry) cycleGroupBy(delta int) windowRegistry {
+	groups := r.cycleGroups()
+	n := len(groups)
+	if n == 0 {
+		return r
+	}
+	if n == 1 {
+		// Single group: land on its first member (no-op when already there).
+		if len(groups[0].members) > 0 {
+			r.index = groups[0].members[0]
+		}
+		return r
+	}
+	cur := r.index % len(r.windows)
+	pos := 0
+	for i, g := range groups {
+		for _, m := range g.members {
+			if m == cur {
+				pos = i
+				goto found
+			}
+		}
+	}
+found:
+	pos = (pos + delta%n + n) % n
+	if len(groups[pos].members) == 0 {
+		return r
+	}
+	r.index = groups[pos].members[0]
+	return r
+}
+
+// cycleGroups returns stack groups used for group-level focus cycling.
+// Empty registry groups fall back to one singleton group per cycleable window
+// in focusOrder, matching activeGroup's singleton behavior.
+func (r windowRegistry) cycleGroups() []windowGroup {
+	if len(r.windows) == 0 {
+		return nil
+	}
+	if len(r.groups) > 0 {
+		out := make([]windowGroup, 0, len(r.groups))
+		for _, g := range r.groups {
+			if len(g.members) == 0 {
+				continue
+			}
+			out = append(out, g)
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	order := r.focusOrder()
+	out := make([]windowGroup, 0, len(order))
+	for _, idx := range order {
+		out = append(out, windowGroup{id: r.windows[idx].id(), members: []int{idx}})
+	}
+	return out
+}
+
 func (r windowRegistry) update(msg tea.Msg) (windowRegistry, tea.Cmd) {
 	if len(r.windows) == 0 {
 		return r, nil

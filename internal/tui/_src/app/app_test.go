@@ -3354,6 +3354,37 @@ func TestFocusAndPaletteClearCompletionBeforeChangingInputOwner(t *testing.T) {
 
 }
 
+func TestCycleGroupKeysJumpGroupsAndLeaveWindowCycleIntact(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	var ok bool
+	m.windows, ok = m.windows.activate("activity")
+	if !ok {
+		t.Fatal("activate activity")
+	}
+	// ctrl+shift+o → next group first member (agents).
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl | tea.ModShift})
+	if got := m.windows.active().id(); got != "agents" {
+		t.Fatalf("ctrl+shift+o = %q, want agents", got)
+	}
+	// ctrl+o still walks one pane (agents → visualizer).
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
+	if got := m.windows.active().id(); got != "visualizer" {
+		t.Fatalf("ctrl+o after group jump = %q, want visualizer", got)
+	}
+	// ctrl+shift+p → previous group first member (session/context).
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl | tea.ModShift})
+	if got := m.windows.active().id(); got != "context" {
+		t.Fatalf("ctrl+shift+p = %q, want context", got)
+	}
+	// ctrl+p still walks one pane backward.
+	m.windows, _ = m.windows.activate("agents")
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
+	if got := m.windows.active().id(); got != "telemetry" {
+		t.Fatalf("ctrl+p = %q, want telemetry", got)
+	}
+}
+
 func TestCycleWindowKeysClearOpenCompletionAndCycleOnce(t *testing.T) {
 
 	for _, tt := range []struct {

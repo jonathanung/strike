@@ -547,6 +547,12 @@ func TestCtrlSemicolonToggleOrientationViaKeyMsg(t *testing.T) {
 	if !key.Matches(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl}, m.keyMap.CycleWindowPrev) {
 		t.Error("vertical: ctrl+p should still cycle prev")
 	}
+	if !key.Matches(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl | tea.ModShift}, m.keyMap.CycleGroupNext) {
+		t.Error("vertical: ctrl+shift+o should still cycle group next")
+	}
+	if !key.Matches(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl | tea.ModShift}, m.keyMap.CycleGroupPrev) {
+		t.Error("vertical: ctrl+shift+p should still cycle group prev")
+	}
 	if key.Matches(tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl}, m.keyMap.FocusLeft, m.keyMap.CycleWindowNext) {
 		t.Error("vertical: ctrl+j must remain newline-only")
 	}

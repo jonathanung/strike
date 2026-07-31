@@ -100,7 +100,9 @@ func (m Model) handleKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
-	// Focus (ctrl+h/l) and cycle (ctrl+o/p) — orientation-independent (#414).
+	// Focus (ctrl+h/l), pane cycle (ctrl+o/p), group cycle (ctrl+shift+o/p) —
+	// orientation-independent (#414, #671). Match group chords before window
+	// cycle so ctrl+shift+o is not swallowed if a remap ever overlaps.
 	if key.Matches(msg, m.keyMap.FocusLeft) {
 		m.completion = nil
 		cmd := m.focusPane(focusLeft)
@@ -112,6 +114,20 @@ func (m Model) handleKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		cmd := m.focusPane(focusRight)
 		m.reflow()
 		return m, cmd
+	}
+	if key.Matches(msg, m.keyMap.CycleGroupNext) {
+		m.completion = nil
+		m.windows = m.windows.cycleGroupBy(1)
+		m.windows = refreshProjectDataWindows(m.windows)
+		m.reflow()
+		return m, filesPollCmd(m.windows)
+	}
+	if key.Matches(msg, m.keyMap.CycleGroupPrev) {
+		m.completion = nil
+		m.windows = m.windows.cycleGroupBy(-1)
+		m.windows = refreshProjectDataWindows(m.windows)
+		m.reflow()
+		return m, filesPollCmd(m.windows)
 	}
 	if key.Matches(msg, m.keyMap.CycleWindowNext) {
 		m.completion = nil

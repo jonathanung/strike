@@ -105,6 +105,27 @@ func TestKeybindSlashCommandsInvokeSameActions(t *testing.T) {
 		}
 	})
 
+	t.Run("group cycle", func(t *testing.T) {
+		m, _ := newAppTestModel(nil, nil)
+		m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+		// Land mid-session group so group-next skips remaining members.
+		var ok bool
+		m.windows, ok = m.windows.activate("activity")
+		if !ok {
+			t.Fatal("activate activity")
+		}
+		next, _ := m.handleCommand("/group-next")
+		m = next.(Model)
+		if got := m.windows.active().id(); got != "agents" {
+			t.Fatalf("group-next from activity = %q, want agents", got)
+		}
+		next, _ = m.handleCommand("/group-prev")
+		m = next.(Model)
+		if got := m.windows.active().id(); got != "context" {
+			t.Fatalf("group-prev back = %q, want context (group first)", got)
+		}
+	})
+
 	t.Run("palette and keys", func(t *testing.T) {
 		m, _ := newAppTestModel(nil, nil)
 		next, _ := m.handleCommand("/palette")

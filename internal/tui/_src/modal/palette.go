@@ -166,6 +166,7 @@ func paletteBuiltinDisabled(id commandID, availability paletteAvailability) stri
 	case commandHelp, commandKeys, commandLegend, commandExit, commandQuit,
 		commandFocusLeft, commandFocusRight,
 		commandWindowNext, commandWindowPrev,
+		commandGroupNext, commandGroupPrev,
 		commandScrollUp, commandScrollDown, commandJumpBottom,
 		commandPalette, commandInterrupt, commandLeaveEditor:
 		return ""

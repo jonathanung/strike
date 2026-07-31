@@ -98,6 +98,8 @@ var reservedSkillNames = map[string]struct{}{
 	"focus-right":    {},
 	"window-next":    {},
 	"window-prev":    {},
+	"group-next":     {},
+	"group-prev":     {},
 	"scroll-up":      {},
 	"scroll-down":    {},
 	"jump-bottom":    {},

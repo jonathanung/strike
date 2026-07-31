@@ -75,6 +75,8 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		{ID: "command:focus-right", Label: "/focus-right", Description: "focus right pane", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/focus-right"}},
 		{ID: "command:window-next", Label: "/window-next", Description: "cycle to next right-pane window", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/window-next"}},
 		{ID: "command:window-prev", Label: "/window-prev", Description: "cycle to previous right-pane window", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/window-prev"}},
+		{ID: "command:group-next", Label: "/group-next", Description: "cycle to next right-pane stack group", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/group-next"}},
+		{ID: "command:group-prev", Label: "/group-prev", Description: "cycle to previous right-pane stack group", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/group-prev"}},
 		{ID: "command:scroll-up", Label: "/scroll-up", Description: "scroll transcript up", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/scroll-up"}},
 		{ID: "command:scroll-down", Label: "/scroll-down", Description: "scroll transcript down", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/scroll-down"}},
 		{ID: "command:jump-bottom", Label: "/jump-bottom", Description: "jump transcript to latest output", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/jump-bottom"}},
