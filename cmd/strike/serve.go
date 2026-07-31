@@ -56,7 +56,8 @@ Endpoints:
   GET  /v1/sessions/{id}/events     SSE tail of a session JSONL log
 
 Auth: loopback is unauthenticated by default. Under --auth, use
-Authorization: Bearer <token> or ?token= on /v1/* routes.
+Authorization: Bearer <token>, the strike_serve_token cookie (set by opening
+/attach?token=…), or ?token= on /v1/* routes.
 
 DANGER: --expose (or any non-loopback bind) puts session transcripts and the
 live control plane on the network. There is no TLS. Prefer loopback + SSH -L

@@ -66,13 +66,20 @@ describe("App", () => {
   });
 
   it("uses historical SSE in attach-only mode", async () => {
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input).includes("bootstrap") ? response({ version: "test", authRequired: false, attachOnly: true, capabilities: { live: false }, protocolOps: null, agents: [], skills: [] }) : String(input).includes("sessions") ? response({ sessions: [{ id: "saved", title: "Saved" }] }) : response({ ok: true })));
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input).includes("bootstrap") ? response({ version: "test", authRequired: false, attachOnly: true, capabilities: { live: false }, protocolOps: null, agents: [], skills: [] }) : String(input).includes("sessions") ? response({ sessions: [{ id: "saved", title: "Saved" }] }) : String(input).includes("roots") ? Promise.resolve(new Response("multi-root unavailable", { status: 503 })) : response({ ok: true })));
     render(<App />);
     await screen.findByText("Saved");
     await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
     expect(FakeEventSource.instances[0].url).toContain("/v1/sessions/saved/events");
     expect(FakeWebSocket.instances).toHaveLength(0);
     expect(screen.getByRole("tab", { name: "memory" })).toBeInTheDocument();
+  });
+
+  it("shows a cockpit load error when bootstrap is forbidden", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("forbidden", { status: 403, statusText: "Forbidden" }))));
+    render(<App />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("403 Forbidden");
+    expect(screen.getByRole("alert")).toHaveTextContent("Failed to load cockpit");
   });
 
   it("renders changed file summaries, expandable diffs, memory, issues, and panel controls", async () => {
