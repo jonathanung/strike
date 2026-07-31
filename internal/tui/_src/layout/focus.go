@@ -12,6 +12,13 @@ const (
 func (m *Model) setPaneFocus(focus paneFocus) tea.Cmd {
 	m.focus = focus
 	if focus == focusRight {
+		// From lean home, opening the right column switches to multi-pane:
+		// launch (empty transcript + composer) on the left, panels on the
+		// right. Sticky so ctrl+h can focus the left without collapsing (#684).
+		if !m.testForceMultiPane && !m.homePanesOpen &&
+			len(m.displayCells()) == 0 && !m.viewingChild() {
+			m.homePanesOpen = true
+		}
 		m.composer.Blur()
 		return nil
 	}

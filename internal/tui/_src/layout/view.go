@@ -597,8 +597,11 @@ func (m Model) footerHints() []ui.KeyHint {
 			keyHint(m.keyMap.Palette),
 			keyHint(m.keyMap.KeyHelp),
 		)
-		// After first prompt, left focus can still scroll the transcript.
-		if !m.showHomeLayout() {
+		if m.showHomeLayout() {
+			// Lean home: ctrl+l opens the right pane column (#684).
+			hints = append(hints, keyHint(m.keyMap.FocusRight))
+		} else {
+			// Multi-pane left: scroll transcript + focus right.
 			hints = append(hints,
 				ui.KeyHint{Key: keyHint(m.keyMap.ScrollUp).Key + "/" + keyHint(m.keyMap.ScrollDown).Key, Label: "scroll"},
 				keyHint(m.keyMap.FocusRight),

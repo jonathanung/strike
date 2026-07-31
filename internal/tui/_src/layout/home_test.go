@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
@@ -83,6 +84,101 @@ func TestHomeLayoutSwitchesToMultiPaneAfterFirstPrompt(t *testing.T) {
 	// Right pane stack becomes available in multi-pane layout.
 	if !strings.Contains(plain, "context") {
 		t.Errorf("multi-pane missing context after first prompt:\n%s", plain)
+	}
+}
+
+// TestHomeCtrlLOpensMultiPane covers #684: on the lean launch screen, ctrl+l
+// opens the right pane column; the launch stack stays as the left pane.
+func TestHomeCtrlLOpensMultiPane(t *testing.T) {
+	m, _ := newAppTestModelHome(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	if !m.showHomeLayout() {
+		t.Fatal("expected lean home before ctrl+l")
+	}
+	plainHome := ansi.Strip(viewString(m))
+	if !strings.Contains(plainHome, "S T R I K E") {
+		t.Fatalf("home missing wordmark:\n%s", plainHome)
+	}
+	// Discoverability: lean home footerHints include focus-right (may truncate
+	// in a narrow KeyHints row, so assert the hint set directly).
+	if !footerHintsContain(m.footerHints(), m.keyMap.FocusRight) {
+		t.Errorf("home footerHints missing focus-right: %+v", m.footerHints())
+	}
+	// Lean home has no right-pane stack chrome.
+	if strings.Contains(plainHome, "╭─ activity") || strings.Contains(plainHome, "╭─ system") {
+		t.Errorf("lean home showed multi-pane stack chrome:\n%s", plainHome)
+	}
+
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
+	if m.showHomeLayout() {
+		t.Fatal("ctrl+l should leave lean home for multi-pane")
+	}
+	if !m.homePanesOpen {
+		t.Fatal("homePanesOpen should stick after focus-right from home")
+	}
+	if m.focus != focusRight {
+		t.Fatalf("focus = %v, want right", m.focus)
+	}
+	if m.composer.Focused() {
+		t.Fatal("composer should blur when right pane is focused")
+	}
+	plain := ansi.Strip(viewString(m))
+	// Right column panels visible (session stack titles).
+	if !strings.Contains(plain, "activity") && !strings.Contains(plain, "system") {
+		t.Errorf("multi-pane missing right panels after ctrl+l:\n%s", plain)
+	}
+	// Left launch stack still has the composer (mode title).
+	if !strings.Contains(plain, "chat") {
+		t.Errorf("left launch stack missing composer after ctrl+l:\n%s", plain)
+	}
+	// Split geometry: right pane column is present (not full-screen lean home).
+	// Empty left may still show welcome cards/logo in the transcript slot.
+	if computePaneGeometry(m.width, m.paneGutter(), m.focus).mode != paneSplit {
+		// Wide enough terminal should split; if single, right-only is ok when
+		// focused right — still not lean home.
+		if m.showHomeLayout() {
+			t.Fatal("still on lean home after ctrl+l")
+		}
+	}
+
+	// Sticky: ctrl+h focuses left without collapsing back to lean home.
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
+	if m.focus != focusLeft {
+		t.Fatalf("ctrl+h focus = %v, want left", m.focus)
+	}
+	if m.showHomeLayout() {
+		t.Fatal("ctrl+h must not collapse multi-pane back to lean home")
+	}
+	if !m.homePanesOpen {
+		t.Fatal("homePanesOpen should remain sticky on focus-left")
+	}
+	plainLeft := ansi.Strip(viewString(m))
+	if !strings.Contains(plainLeft, "activity") && !strings.Contains(plainLeft, "system") {
+		t.Errorf("right panels should stay after focus-left:\n%s", plainLeft)
+	}
+	if !m.composer.Focused() {
+		t.Fatal("composer should refocus on left")
+	}
+}
+
+func footerHintsContain(hints []ui.KeyHint, binding key.Binding) bool {
+	want := keyHint(binding).Key
+	for _, h := range hints {
+		if h.Key == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestHomeFocusRightSlashOpensMultiPane(t *testing.T) {
+	m, _ := newAppTestModelHome(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	next, _ := m.handleCommand("/focus-right")
+	m = next.(Model)
+	m.reflow()
+	if m.showHomeLayout() || !m.homePanesOpen || m.focus != focusRight {
+		t.Fatalf("home=%v panesOpen=%v focus=%v after /focus-right", m.showHomeLayout(), m.homePanesOpen, m.focus)
 	}
 }
 

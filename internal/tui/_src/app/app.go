@@ -313,6 +313,10 @@ type Model struct {
 	// tests can exercise the multi-pane session surface without seeding a
 	// fake user message. Production always leaves this false (#677).
 	testForceMultiPane bool
+	// homePanesOpen is set when the user opens the right pane column from the
+	// lean home screen (ctrl+l / focus-right / pane jump). Sticky until the
+	// first transcript cell ends home anyway (#684).
+	homePanesOpen bool
 	// startupAlert is consumed once into an alertModal after Init.
 	startupAlert string
 	// turnStartedAt / toolCallsThisTurn power the working-status elapsed label.

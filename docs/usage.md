@@ -279,7 +279,10 @@ unless `--auto` or `--dangerously-skip-permissions` is set
 **Before the first prompt**, the screen is a centered home layout: header,
 thin context bar, STRIKE wordmark, focused prompt box (mode: chat / shell /
 command), optional recent-history line, and a short composer-oriented footer.
-After the first message, the multi-pane session layout takes over.
+`ctrl+l` (or `/focus-right` / a pane jump like `/agents`) opens the multi-pane
+workspace early: the launch stack (empty transcript + composer) becomes the
+left pane and the right pane column fills with session panels. After the first
+message, the multi-pane session layout takes over either way.
 
 That layout has a full-width header, **context-sensitive** footer hints
 (composer vs right-pane navigation), and a danger banner when needed. Its left
