@@ -10,7 +10,7 @@ import (
 // xterm-style key reporting. Unknown keys yield nil.
 func EncodeKey(msg tea.KeyPressMsg) []byte {
 	// Printable text first (including space when Text is set).
-	if len(msg.Text) > 0 && msg.Mod == 0 {
+	if len(msg.Text) > 0 && (msg.Mod == 0 || msg.Mod == tea.ModShift) {
 		out := make([]byte, 0, len(msg.Text)*utf8.UTFMax)
 		for _, r := range msg.Text {
 			buf := make([]byte, utf8.UTFMax)

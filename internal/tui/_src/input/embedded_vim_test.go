@@ -337,6 +337,54 @@ func TestEmbeddedEditorCapturesGlobalKeysBeforeAppRouting(t *testing.T) {
 	}
 }
 
+func TestEmbeddedEditorForwardsShiftedPrintableInput(t *testing.T) {
+	editorCmd := exec.Command("sh", "-c", "IFS= read -r line; if [ \"$line\" = 'A!' ]; then printf SHIFTED_INPUT; else printf 'WRONG:%s' \"$line\"; fi; IFS= read -r _")
+	sess, err := term.Start(editorCmd, 40, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m, _ := newAppTestModel(nil, nil)
+	tw, _ := newTerminalWindow().attach(sess, "", "", fileMeta{}, false, "vim")
+	m.windows = windowRegistry{windows: []window{tw}}
+	m.focus = focusRight
+	t.Cleanup(func() { m.closeEmbeddedSessions() })
+
+	for _, msg := range []tea.KeyPressMsg{
+		{Code: 'A', Text: "A", Mod: tea.ModShift},
+		{Code: '!', Text: "!", Mod: tea.ModShift},
+		{Code: tea.KeyEnter},
+	} {
+		updated, cmd := m.Update(msg)
+		m = updated.(Model)
+		if got := runAppCmd(t, cmd); got != nil {
+			t.Errorf("typing returned %T, want nil", got)
+		}
+	}
+
+	received := false
+	deadline := time.After(3 * time.Second)
+	for !received {
+		select {
+		case <-deadline:
+			t.Fatalf("embedded editor did not receive shifted input; screen=%q", sess.Terminal().String())
+		case <-sess.Notify():
+			received = strings.Contains(sess.Terminal().String(), "SHIFTED_INPUT")
+		case <-sess.Done():
+			t.Fatalf("embedded editor exited early: %v; screen=%q", sess.WaitErr(), sess.Terminal().String())
+		}
+	}
+
+	if _, err := sess.Write([]byte("\r")); err != nil {
+		t.Fatalf("stop embedded editor: %v", err)
+	}
+	select {
+	case <-sess.Done():
+	case <-time.After(3 * time.Second):
+		t.Fatal("embedded editor did not exit after final input")
+	}
+}
+
 func TestEmbeddedEditorDefersToActiveModal(t *testing.T) {
 	editorCmd := exec.Command("sh", "-c", "IFS= read -r _")
 	sess, err := term.Start(editorCmd, 40, 10)
