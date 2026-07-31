@@ -17,11 +17,14 @@ Session tree = implicit team (you = lead + live/terminal children). Peer tools w
 | Channel | Use for |
 |---------|---------|
 | `agent_message` / `agent_broadcast` | Mid-flight coordination: blockers, handoffs, questions, shared findings while work is still running |
+| `team_task` | Shared claim/assign board so parallel children do not double-work the same slice |
 | `[child.completed]` | Finished work product — terminal summary when a child is done |
 | `task_message` | Parent→owned-child steer only (not peer/team chat) |
 | `task_status` / `task_read` | Rare intermediate pulse or content peek — **not** a busy-poll loop |
+| `todowrite` / `todoread` | Solo lead planning list only — not multi-agent claim coordination |
 
 - Prefer **messages** for mid-flight coordination; prefer **completion events** for finished deliverables. Do not treat completion as the only way children can talk, and do not spam messages instead of finishing.
+- Use **`team_task`** (create → children claim → complete) when splitting a backlog across teammates. Prefer `todowrite` only for your own solo checklist.
 - **Do not busy-poll `task_status`.** After spawn, continue other work or end the turn. Completion arrives as `[child.completed]`; peer traffic arrives in the inbox at turn/tool boundaries. Use `agent_roster` when you need who is live; use `task_status` only for a one-off check.
 - Tell children (in each `task` prompt) to **`agent_message` the lead early on blockers** — do not wait until terminal failure to surface a stuck slice.
 - Avoid chatty loops: one clear message beats many ACKs; bound fan-out; no ping-pong for status the roster/completion already provide. Plain text is enough (optional conventions: blocker / handoff / question); structured kinds are not required.

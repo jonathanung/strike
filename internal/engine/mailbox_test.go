@@ -284,17 +284,17 @@ func TestCrossTeamMessageIsolation(t *testing.T) {
 }
 
 // TestLeafRegistryKeepsTeamMessagingTools: depth-capped CloneWithout(leafTaskTools)
-// must not strip agent_roster / agent_message / agent_broadcast.
+// must not strip agent_roster / agent_message / agent_broadcast / team_task.
 func TestLeafRegistryKeepsTeamMessagingTools(t *testing.T) {
-	// Register stand-ins for tools that may land after this PR (#610).
 	reg := tool.NewRegistry(
 		tool.NewAgentRoster(),
-		namedStubTool{name: "agent_message"},
-		namedStubTool{name: "agent_broadcast"},
+		tool.NewAgentMessage(),
+		tool.NewAgentBroadcast(),
+		tool.NewTeamTask(),
 		tool.NewTask(), // stripped at leaf
 	)
 	leaf := reg.CloneWithout(leafTaskTools...)
-	for _, name := range []string{"agent_roster", "agent_message", "agent_broadcast"} {
+	for _, name := range []string{"agent_roster", "agent_message", "agent_broadcast", "team_task"} {
 		if _, ok := leaf.Get(name); !ok {
 			t.Errorf("leaf registry missing %s", name)
 		}
