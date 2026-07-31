@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/hinshun/vt10x"
 )
 
 func TestSessionEchoBytesRoundTrip(t *testing.T) {
@@ -105,14 +107,16 @@ func TestPTYEnvForcesXterm256ColorEnvironment(t *testing.T) {
 	parent := []string{
 		"HOME=/home/alice",
 		"TERM=screen-256color",
-		"COLORTERM=truecolor",
+		"COLORTERM=24bit",
 		"NVIM_APPNAME=embedded-test",
 		"TERM=vt100",
+		"COLORTERM=truecolor",
 	}
 	want := []string{
 		"HOME=/home/alice",
 		"NVIM_APPNAME=embedded-test",
 		"TERM=xterm-256color",
+		"COLORTERM=truecolor",
 	}
 
 	got := ptyEnv(parent)
@@ -122,7 +126,7 @@ func TestPTYEnvForcesXterm256ColorEnvironment(t *testing.T) {
 }
 
 func TestStartPassesNormalizedPTYEnvToChild(t *testing.T) {
-	cmd := exec.Command("sh", "-c", "if [ \"${COLORTERM+x}\" = x ]; then color=present; else color=unset; fi; printf 'TERM=%s COLORTERM=%s NVIM_APPNAME=%s\\n' \"$TERM\" \"$color\" \"$NVIM_APPNAME\"")
+	cmd := exec.Command("sh", "-c", "printf 'TERM=%s COLORTERM=%s NVIM_APPNAME=%s\\n' \"$TERM\" \"$COLORTERM\" \"$NVIM_APPNAME\"")
 	cmd.Env = []string{
 		"TERM=screen-256color",
 		"COLORTERM=truecolor",
@@ -140,17 +144,80 @@ func TestStartPassesNormalizedPTYEnvToChild(t *testing.T) {
 		case <-deadline:
 			t.Fatalf("timed out waiting for normalized environment; screen=%q", s.Terminal().String())
 		case <-s.Notify():
-			if text := s.Terminal().String(); strings.Contains(text, "TERM=xterm-256color COLORTERM=unset NVIM_APPNAME=embedded-test") {
+			if text := s.Terminal().String(); strings.Contains(text, "TERM=xterm-256color COLORTERM=truecolor NVIM_APPNAME=embedded-test") {
 				return
 			}
 		case <-s.Done():
 			text := s.Terminal().String()
-			if strings.Contains(text, "TERM=xterm-256color COLORTERM=unset NVIM_APPNAME=embedded-test") {
+			if strings.Contains(text, "TERM=xterm-256color COLORTERM=truecolor NVIM_APPNAME=embedded-test") {
 				return
 			}
 			t.Fatalf("child exited before printing normalized environment: %v screen=%q", s.WaitErr(), text)
 		}
 	}
+}
+
+func TestSessionNvimRendersTruecolorBufferText(t *testing.T) {
+	if _, err := exec.LookPath("nvim"); err != nil {
+		t.Skip("nvim not installed")
+	}
+	dir := t.TempDir()
+	path := dir + "/sample.go"
+	if err := os.WriteFile(path, []byte("package marker\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(
+		"nvim", "--clean", "-u", "NONE", "-n",
+		"--cmd", `if $COLORTERM !=# 'truecolor' | cquit | endif`,
+		"-c", "set termguicolors",
+		"-c", "highlight EmbeddedKeyword guifg=#12ab34",
+		"-c", `call matchadd('EmbeddedKeyword', '^package')`,
+		"-c", "redraw!",
+		path,
+	)
+	s, err := Start(cmd, 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatalf("nvim did not render truecolor buffer text; screen=%q", s.Terminal().String())
+		case <-s.Notify():
+			if nvimTokenHasForeground(s, "package", vt10x.Color(0x12ab34)) {
+				_, _ = s.Write([]byte(":q!\r"))
+				return
+			}
+		case <-s.Done():
+			t.Fatalf("nvim exited before rendering truecolor buffer text: %v screen=%q", s.WaitErr(), s.Terminal().String())
+		}
+	}
+}
+
+func nvimTokenHasForeground(s *Session, token string, want vt10x.Color) bool {
+	s.Lock()
+	defer s.Unlock()
+	cols, rows := s.Terminal().Size()
+	for y := 0; y < rows; y++ {
+		line := make([]rune, cols)
+		for x := 0; x < cols; x++ {
+			line[x] = s.Terminal().Cell(x, y).Char
+		}
+		start := strings.Index(string(line), token)
+		if start < 0 {
+			continue
+		}
+		for x := start; x < start+len([]rune(token)); x++ {
+			if s.Terminal().Cell(x, y).FG != want {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 func TestSessionResizeAndCleanShutdown(t *testing.T) {
