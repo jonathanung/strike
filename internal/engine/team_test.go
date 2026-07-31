@@ -393,3 +393,68 @@ func TestTeamNameAliasUniqueAndResolve(t *testing.T) {
 		t.Fatal("re-enroll A with same name")
 	}
 }
+
+// TestTeamResolveSessionIDPrefix covers #650: agent_message to= short session
+// id prefixes (tool shortID / UI fragments) must resolve when unique.
+func TestTeamResolveSessionIDPrefix(t *testing.T) {
+	const (
+		leadID = "1f0d0c5d-lead-0000-0000-000000000001"
+		aID    = "c0a9b0d4-aaaa-bbbb-cccc-ddddeeeeffff"
+		bID    = "a1b2c3d4-1111-2222-3333-444455556666"
+	)
+	tm := NewTeam(leadID, "build")
+	if !tm.Enroll(TeamMember{SessionID: aID, ParentSessionID: leadID, Name: "worker-a", Depth: 1}) {
+		t.Fatal("enroll worker-a")
+	}
+	if !tm.Enroll(TeamMember{SessionID: bID, ParentSessionID: leadID, Name: "worker-b", Depth: 1}) {
+		t.Fatal("enroll worker-b")
+	}
+
+	// Exact name still works.
+	id, ok := tm.ResolveAddress("worker-a")
+	if !ok || id != aID {
+		t.Fatalf("name resolve = %q ok=%v", id, ok)
+	}
+
+	// Unique 8-char prefix (tool shortID of aID).
+	id, ok = tm.ResolveAddress("c0a9b0d4")
+	if !ok || id != aID {
+		t.Fatalf("unique prefix resolve = %q ok=%v, want %s", id, ok, aID)
+	}
+
+	// Longer unique prefix.
+	id, ok = tm.ResolveAddress("c0a9b0d4-aaaa")
+	if !ok || id != aID {
+		t.Fatalf("longer prefix = %q ok=%v", id, ok)
+	}
+
+	// Too short: must not prefix-match (avoids accidental collisions).
+	if _, ok := tm.ResolveAddress("c0a9b0"); ok {
+		t.Fatal("prefix shorter than minSessionIDPrefixLen must not resolve")
+	}
+
+	// Unknown prefix.
+	_, detail, ok := tm.ResolveAddressDetail("deadbeef")
+	if ok || detail != "recipient is not on this team" {
+		t.Fatalf("unknown prefix detail = %q ok=%v", detail, ok)
+	}
+
+	// Ambiguous prefix when two members share the same head.
+	tm2 := NewTeam("L", "build")
+	if !tm2.Enroll(TeamMember{SessionID: "abcdef01-one", ParentSessionID: "L", Depth: 1}) {
+		t.Fatal("enroll one")
+	}
+	if !tm2.Enroll(TeamMember{SessionID: "abcdef01-two", ParentSessionID: "L", Depth: 1}) {
+		t.Fatal("enroll two")
+	}
+	_, detail, ok = tm2.ResolveAddressDetail("abcdef01")
+	if ok || detail != "session id prefix is ambiguous" {
+		t.Fatalf("ambiguous prefix = detail %q ok=%v", detail, ok)
+	}
+
+	// Exact full id still preferred over being a prefix of another id.
+	id, ok = tm2.ResolveAddress("abcdef01-one")
+	if !ok || id != "abcdef01-one" {
+		t.Fatalf("exact id = %q ok=%v", id, ok)
+	}
+}

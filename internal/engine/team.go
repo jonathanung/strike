@@ -15,6 +15,11 @@ import (
 // maxTeamMemberNameLen bounds optional teammate aliases.
 const maxTeamMemberNameLen = 64
 
+// minSessionIDPrefixLen is the shortest unique session-id prefix accepted by
+// ResolveAddress. Matches tool shortID (first 8 runes) so agent_message/to
+// values copied from UI titles still resolve when unambiguous (#650).
+const minSessionIDPrefixLen = 8
+
 // Team is the implicit session-scoped agent team for one lead.
 //
 // Team identity is the lead session id. No TeamCreate is required: spawning
@@ -140,8 +145,9 @@ func (t *Team) IsLive(sessionID string) bool {
 }
 
 // ResolveAddress maps a teammate address to a session id.
-// Prefer exact session id; otherwise unique stable name match.
-// Empty, unknown, or ambiguous name → ok false with a detail reason.
+// Prefer exact session id; otherwise unique stable name; otherwise a unique
+// session-id prefix of at least minSessionIDPrefixLen characters (UI short
+// ids). Empty, unknown, or ambiguous → ok false with a detail reason.
 func (t *Team) ResolveAddress(addr string) (sessionID string, ok bool) {
 	id, _, ok := t.ResolveAddressDetail(addr)
 	return id, ok
@@ -170,10 +176,26 @@ func (t *Team) ResolveAddressDetail(addr string) (sessionID, detail string, ok b
 			match = id
 		}
 	}
-	if match == "" {
-		return "", "recipient is not on this team", false
+	if match != "" {
+		return match, "", true
 	}
-	return match, "", true
+	// Unique session-id prefix: models often pass tool shortID / UI fragments
+	// (first 8 chars) instead of the full id from agent_roster (#650).
+	if utf8.RuneCountInString(addr) >= minSessionIDPrefixLen {
+		var prefixMatch string
+		for id := range t.members {
+			if strings.HasPrefix(id, addr) {
+				if prefixMatch != "" {
+					return "", "session id prefix is ambiguous", false
+				}
+				prefixMatch = id
+			}
+		}
+		if prefixMatch != "" {
+			return prefixMatch, "", true
+		}
+	}
+	return "", "recipient is not on this team", false
 }
 
 // Member returns a copy of the roster entry for sessionID.

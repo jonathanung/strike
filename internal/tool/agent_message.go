@@ -22,8 +22,8 @@ func (agentMessageTool) Name() string { return "agent_message" }
 func (agentMessageTool) Description() string {
 	return `Send a message to one teammate on the implicit session team.
 
-- to: teammate session_id (from agent_roster / task result). Stable name aliases
-  resolve when set on the roster.
+- to: teammate session_id (from agent_roster / task result), a unique session_id
+  prefix (≥8 chars, e.g. UI short id), or a stable name alias when set on the roster.
 - body: message text (required; size-capped). Plain text is enough; optional
   conventions like blocker/handoff/question help readers — structured kinds optional.
 - summary: optional short label for UI/debug (not a substitute for body).
