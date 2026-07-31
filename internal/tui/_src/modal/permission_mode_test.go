@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike-cli/internal/tui/ui"
 )
 
 func TestPermissionModeBadgeInHeader(t *testing.T) {
@@ -20,6 +21,19 @@ func TestPermissionModeBadgeInHeader(t *testing.T) {
 	}
 	if !strings.Contains(plain, "DANGER: yolo mode") {
 		t.Fatalf("yolo danger banner missing:\n%s", plain)
+	}
+}
+
+func TestPermissionModeBadgeToneMapsYoloToDanger(t *testing.T) {
+	// Soft-bento: yolo is destructive (orange Danger), not coral Error.
+	if got := permissionModeBadgeTone(protocol.PermissionModeYolo); got != ui.ToneDanger {
+		t.Fatalf("yolo tone = %v, want ToneDanger", got)
+	}
+	if got := permissionModeBadgeTone(protocol.PermissionModePlan); got != ui.ToneAccentAlt {
+		t.Fatalf("plan tone = %v, want ToneAccentAlt", got)
+	}
+	if got := permissionModeBadgeTone(protocol.PermissionModeDefault); got != ui.ToneMuted {
+		t.Fatalf("default tone = %v, want ToneMuted", got)
 	}
 }
 
