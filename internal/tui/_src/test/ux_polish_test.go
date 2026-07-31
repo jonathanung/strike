@@ -109,6 +109,24 @@ func TestHealthBadgeInHeader(t *testing.T) {
 	}
 }
 
+func TestHeaderHidesNormalPostureAndShowsExceptionalPosture(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
+	plain := ansi.Strip(m.headerView(100))
+	if strings.Contains(plain, "auto sup") || strings.Contains(plain, " def ") {
+		t.Fatalf("normal posture adds redundant header badges:\n%s", plain)
+	}
+
+	m.autonomy = protocol.AutonomyAgent
+	m.permMode = protocol.PermissionModeYolo
+	plain = ansi.Strip(m.headerView(100))
+	for _, want := range []string{"auto agent", "yolo"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("exceptional posture missing %q:\n%s", want, plain)
+		}
+	}
+}
+
 func TestAuthExpiryNoticeOnce(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m.providerName = "openai"

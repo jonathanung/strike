@@ -1,4 +1,4 @@
-⚡ strike /tmp/strike-golden   echo/echo-1   ·   ◆ build   auto sup   def                                          ready
+⚡ strike /tmp/strike-golden   echo/echo-1   ·   ◆ build                                                           ready
 ╭─ Refactor the auth store. ───────────────────────────────────────────────────╮ ╭─ context ───────────────────────────╮
 │ ❯ you                                                                        │ │ model  echo/echo-1                  │
 │   Refactor the auth store.                                                   │ │ agent  build                        │

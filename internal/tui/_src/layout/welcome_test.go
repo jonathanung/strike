@@ -46,7 +46,6 @@ func TestWelcomeDashboardRendersBentoCardsForEmptyTranscript(t *testing.T) {
 	for _, want := range []string{
 		"get started",     // provider-status card title
 		"anthropic",       // provider status drawn from host.Auth
-		"deepseek",        // built-in provider (5-slot preview budget)
 		"/provider",       // get-started hint
 		"keys",            // keybinding card
 		"agents & skills", // agents/skills card
@@ -58,10 +57,10 @@ func TestWelcomeDashboardRendersBentoCardsForEmptyTranscript(t *testing.T) {
 			t.Errorf("welcome dashboard missing %q:\n%s", want, plain)
 		}
 	}
-	// Keys card includes newline help when height allows (default welcomeKeys rows).
+	// Composer actions stay in composer chrome instead of repeating in this card.
 	keys := ansi.Strip(m.welcomeKeys())
-	if !strings.Contains(keys, "shift+enter") && !strings.Contains(keys, "newline") {
-		t.Errorf("welcome keys missing newline help: %q", keys)
+	if strings.Contains(keys, "send") || strings.Contains(keys, "newline") {
+		t.Errorf("welcome keys repeats composer actions: %q", keys)
 	}
 	// Standalone titled "logo" card is gone; a Logo band (S T R I K E) may still
 	// appear above the card grid when height allows — that is intentional chrome.
@@ -119,6 +118,27 @@ func TestWelcomeDashboardRecomputesOnResize(t *testing.T) {
 	}
 }
 
+func TestWelcomeConstrainedHeightKeepsPrimaryOnboarding(t *testing.T) {
+	m, _ := newAppTestModel([]string{"build"}, []host.Skill{fakeSkill("review", "review code", "Review $ARGUMENTS")})
+	cards := m.welcomeCards(m.services.Auth.Statuses())
+	for len(cards) > 1 {
+		cards = welcomeDropCard(cards)
+	}
+	if got := cards[0].title; got != "get started" {
+		t.Fatalf("last welcome card = %q, want primary onboarding", got)
+	}
+}
+
+func TestWelcomeKeysDoNotRepeatComposerActions(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	plain := ansi.Strip(m.welcomeKeys(80, 20))
+	for _, repeated := range []string{"send", "newline"} {
+		if strings.Contains(plain, repeated) {
+			t.Errorf("welcome keys repeats composer action %q:\n%s", repeated, plain)
+		}
+	}
+}
+
 func TestWelcomeDashboardUsesCustomThemeWithoutChangingContent(t *testing.T) {
 	setTUITrueColor(t)
 	agents := []string{"build", "plan"}
@@ -138,7 +158,7 @@ func TestWelcomeDashboardUsesCustomThemeWithoutChangingContent(t *testing.T) {
 	customModel = updateApp(t, customModel, tea.WindowSizeMsg{Width: 100, Height: 30})
 
 	custom := viewString(customModel)
-	for _, want := range []string{"get started", "anthropic", "deepseek", "/provider", "keys", "agents & skills", "build", "plan", "/review"} {
+	for _, want := range []string{"get started", "anthropic", "/provider", "keys", "agents & skills", "build", "plan", "/review"} {
 		if !strings.Contains(ansi.Strip(viewString(defaultModel)), want) || !strings.Contains(ansi.Strip(custom), want) {
 			t.Errorf("theme changed semantic welcome content %q", want)
 		}

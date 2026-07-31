@@ -1,18 +1,18 @@
-⚡ strike /tmp/strike-golden   no model   auto sup   def                                ready
+⚡ strike /tmp/strike-golden   no model                                                 ready
 ▁▁▁▁▁▁▁▁▁▁▁▁▁▁                                               ╭─ context ────────────────────╮
 ⚡ S T R I K E                                               │ model  none /provider        │
 ▔▔▔▔▔▔▔▔▔▔▔▔▔▔                                               │ autonomy  supervised         │
                                                              │ skills  1                    │
 ╭─ get started ─────────────╮  ╭─ keys ────────────────────╮ │                              │
-│ Connect a provider to st… │  │ ctrl+h  focus left        │ │                              │
+│ /provider connect a model │  │ ctrl+h  focus left        │ │                              │
 │ ◦ anthropic  none         │  │ ctrl+l  focus right       │ │                              │
 │ ◦ openai  none            │  │ ctrl+o  next window       │ │                              │
 │ ◦ xai  none               │  │ ctrl+p  prev window       │ │                              │
 │ ◦ google  none            │  │ ctrl+;  toggle split      │ │                              │
-│ ◦ kimi  none              │  │ enter  send               │ │                              │
-│ ◦ deepseek  none          │  │ ctrl+j/shift+enter/alt+e… │ ╰──────────────────────────────╯
-│ /provide╭─ Select theme ───────────────────────────────────────────────────────╮
-│ type bel│ filter: ▏  7/7                                                       │──────────╮
+│ ◦ kimi  none              │  │ ctrl+e  external editor   │ │                              │
+│ type below · enter to se… │  │ ctrl+k  palette           │ ╰──────────────────────────────╯
+│         ╭─ Select theme ───────────────────────────────────────────────────────╮
+│         │ filter: ▏  7/7                                                       │──────────╮
 │         │ ▸ Strike (current) — strike · builtin                                │          │
 │         │   Catppuccin — catppuccin · builtin                                  │          │
 │         │   Dracula — dracula · builtin                                        │rsona     │
@@ -24,14 +24,14 @@
 │   ◆ buil│ up/down/j/k move · type to filter · enter select · ctrl+d set        │          │
 │ skills  │ default · esc close                                                  │          │
 │   /revie╰──────────────────────────────────────────────────────────────────────╯──────────╯
-│   ◆ plan                  │
-│                           │                                ╭─ system ─────────────────────╮
-│                           │                                │ sampling…                    │
-│                           │                                │                              │
-│                           │                                │                              │
-│                           │                                │                              │
-│                           │                                │                              │
-╰───────────────────────────╯                                │                              │
+│   ◆ plan                                                 │
+│                                                          │ ╭─ system ─────────────────────╮
+│                                                          │ │ sampling…                    │
+│                                                          │ │                              │
+│                                                          │ │                              │
+│                                                          │ │                              │
+│                                                          │ │                              │
+╰──────────────────────────────────────────────────────────╯ │                              │
                                                              │                              │
 ╭─ prompt ❯ ───────────────────────────────────────────────╮ │                              │
 │ ❯ Ask anything…  (/ commands, ! shell)                   │ │                              │
