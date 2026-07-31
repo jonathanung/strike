@@ -70,41 +70,39 @@ type Theme struct {
 	Icons        Icons         // glyph set (see DefaultIcons)
 }
 
-// Default returns strike's stock theme: a Posting-inspired palette with a
-// violet primary accent, cyan secondary, warm success/warning, and calm muted
-// chrome. Colors are hex adaptive pairs (lipgloss degrades them for
-// non-truecolor terminals); both the light and dark member of every pair is
-// chosen to stay legible on its background.
+// Default returns strike's stock theme: a soft-bento multi-accent palette
+// (dark-first) with violet primary, cyan secondary, mint success, amber
+// warning, coral error, and distinct orange danger. Colors are hex adaptive
+// pairs (lipgloss degrades them for non-truecolor / 256-color terminals such
+// as tmux-256color); both the light and dark member of every pair is chosen
+// to stay legible and role-distinct after quantization. See docs/theme.md
+// (North star palette E13.8).
 func Default() Theme {
 	return Theme{
-		// Dark Text/Muted lean brighter for contrast on #1c1b22; borders sit
-		// a step clearer against both light and dark chrome.
-		Text:      AdaptiveColor{Light: "#1a1820", Dark: "#eceaf4"},
-		TextMuted: AdaptiveColor{Light: "#5a5868", Dark: "#a09eb0"},
-		Accent:    AdaptiveColor{Light: "#6d43d6", Dark: "#b39dff"},
-		AccentAlt: AdaptiveColor{Light: "#0b7285", Dark: "#5cd0e8"},
-		Highlight: AdaptiveColor{Light: "#4c1d95", Dark: "#f4f1ff"},
-		Success:   AdaptiveColor{Light: "#1f8a4c", Dark: "#5edb92"},
-		// Warning is clear yellow (needs-you / attention, permission, caution).
-		// Prior amber (#b7791f / #f5c451) read muddy and low-contrast when the
-		// terminal mis-detected light/dark and applied the light member on a
-		// dark background.
-		Warning:    AdaptiveColor{Light: "#a16207", Dark: "#ffd84d"},
-		Error:      AdaptiveColor{Light: "#c23b3b", Dark: "#ff8087"},
-		Danger:     AdaptiveColor{Light: "#c23b3b", Dark: "#ff8087"},
-		Background: AdaptiveColor{Light: "#ffffff", Dark: "#1c1b22"},
-		// Surfaces sit a step above Background so solid panels read as tiles.
-		Surface:      AdaptiveColor{Light: "#f3f1f8", Dark: "#252430"},
-		SurfaceFocus: AdaptiveColor{Light: "#ebe6f8", Dark: "#2f2c3c"},
-		SurfaceMuted: AdaptiveColor{Light: "#f7f6fb", Dark: "#21202a"},
-		Border:       AdaptiveColor{Light: "#b8b6c6", Dark: "#4a4858"},
-		BorderFocus:  AdaptiveColor{Light: "#6d43d6", Dark: "#b39dff"},
-		BorderMuted:  AdaptiveColor{Light: "#d8d6e2", Dark: "#323040"},
-		UserLabel:    AdaptiveColor{Light: "#0b7285", Dark: "#5cd0e8"},
-		ToolLabel:    AdaptiveColor{Light: "#3f51b5", Dark: "#9db2ff"},
-		DiffAdded:    AdaptiveColor{Light: "#1f8a4c", Dark: "#5edb92"},
-		DiffRemoved:  AdaptiveColor{Light: "#c23b3b", Dark: "#ff8087"},
-		OverlayScrim: AdaptiveColor{Light: "#a8a6b4", Dark: "#6a6878"},
+		Text:      AdaptiveColor{Light: "#1a1528", Dark: "#f3f1fa"},
+		TextMuted: AdaptiveColor{Light: "#5c586e", Dark: "#9b99b0"},
+		Accent:    AdaptiveColor{Light: "#6d28d9", Dark: "#c4b5fd"},
+		AccentAlt: AdaptiveColor{Light: "#0e7490", Dark: "#22d3ee"},
+		Highlight: AdaptiveColor{Light: "#5b21b6", Dark: "#f5f3ff"},
+		Success:   AdaptiveColor{Light: "#15803d", Dark: "#4ade80"},
+		// Warning is amber (needs-you / attention, permission, caution).
+		Warning: AdaptiveColor{Light: "#b45309", Dark: "#fbbf24"},
+		Error:   AdaptiveColor{Light: "#e11d48", Dark: "#fb7185"},
+		// Danger is orange — distinct from coral Error for destructive actions.
+		Danger:     AdaptiveColor{Light: "#ea580c", Dark: "#fb923c"},
+		Background: AdaptiveColor{Light: "#ffffff", Dark: "#14131c"},
+		// Surfaces ladder above Background so solid panels read as soft tiles.
+		Surface:      AdaptiveColor{Light: "#f3eef9", Dark: "#232230"},
+		SurfaceFocus: AdaptiveColor{Light: "#e9e0f7", Dark: "#2e2c3e"},
+		SurfaceMuted: AdaptiveColor{Light: "#f8f5fc", Dark: "#1a1924"},
+		Border:       AdaptiveColor{Light: "#c4bfd4", Dark: "#4f4d63"},
+		BorderFocus:  AdaptiveColor{Light: "#6d28d9", Dark: "#c4b5fd"},
+		BorderMuted:  AdaptiveColor{Light: "#ddd8ea", Dark: "#2c2a3a"},
+		UserLabel:    AdaptiveColor{Light: "#0e7490", Dark: "#22d3ee"},
+		ToolLabel:    AdaptiveColor{Light: "#2563eb", Dark: "#7dd3fc"},
+		DiffAdded:    AdaptiveColor{Light: "#15803d", Dark: "#4ade80"},
+		DiffRemoved:  AdaptiveColor{Light: "#e11d48", Dark: "#fb7185"},
+		OverlayScrim: AdaptiveColor{Light: "#a8a3b8", Dark: "#7c7a90"},
 		Chrome:       ChromeSolid,
 		BorderStyle:  lightBorderStyle(),
 		Spacing:      NewSpacing(1, 2, 3, 4).WithLabel(1),

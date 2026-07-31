@@ -455,7 +455,7 @@ func (m *sessionModal) viewConfirmDelete(width int, th theme.Theme, inner int) s
 		}
 	}
 	lines := []string{
-		st.Error.Render("Delete session?"),
+		st.Danger.Render("Delete session?"),
 		st.Text.Render(sanitizeDisplayData(title)),
 		st.Muted.Render(shortSessionID(m.deleteID)),
 	}
@@ -467,7 +467,7 @@ func (m *sessionModal) viewConfirmDelete(width int, th theme.Theme, inner int) s
 		Title: "Delete session",
 		Hint:  dotJoin(th, "y/enter confirm", "f force", "n/esc cancel"),
 		Width: width,
-		Tone:  ui.ToneError,
+		Tone:  ui.ToneDanger,
 	}, body)
 }
 

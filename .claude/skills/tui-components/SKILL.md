@@ -35,8 +35,8 @@ selection, and layout). Keep this catalog synchronized with `internal/tui/ui`.
 ## Component catalog
 
 `Tone` is `ToneDefault`, `ToneAccent`, `ToneAccentAlt`, `ToneSuccess`,
-`ToneWarning`, `ToneError`, or `ToneMuted`. `Level` is `LevelInfo`,
-`LevelSuccess`, `LevelWarning`, or `LevelError`.
+`ToneWarning`, `ToneError`, `ToneDanger`, or `ToneMuted`. `Level` is
+`LevelInfo`, `LevelSuccess`, `LevelWarning`, or `LevelError`.
 
 | Component | Exact signature | Use |
 |---|---|---|

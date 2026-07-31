@@ -84,7 +84,8 @@ func (m Model) headerView(width int) string {
 	}
 	// Autonomy is always visible so mode is never only implicit in gates.
 	// Compact short label keeps the working status visible on narrow widths.
-	badges += inlineGap + ui.Badge(th, ui.ToneMuted, "auto"+inlineGap+m.autonomy.Short())
+	// Soft-bento: secondary chrome uses AccentAlt so muted badges do not blend.
+	badges += inlineGap + ui.Badge(th, ui.ToneAccentAlt, "auto"+inlineGap+m.autonomy.Short())
 	// Permission posture dial — always shown (short label + tone); yolo is danger.
 	badges += inlineGap + ui.Badge(th, permissionModeBadgeTone(m.permMode), m.permMode.Short())
 	if secs := m.effectivePermissionAutoApproveSeconds(); secs > 0 {
@@ -323,9 +324,12 @@ func (m Model) composerView(compact bool, width, height int) string {
 		// Always show composer keybinds in chrome (focused or dim); width-safe.
 		footer = composerFooter(m.th, m.keyMap, ui.PanelInnerWidth(m.th, width), len(m.inputQueue) > 0 && m.composer.Value() == "")
 	}
-	title := "prompt" + themedSpace(m.th.Resolve().Spacing.XS) + m.themeIcons().Prompt
+	// Soft-bento: accent title + glyph; queue badge keeps its own tone.
+	thTitle := m.th.Resolve()
+	stTitle := thTitle.S()
+	title := stTitle.Title.Render("prompt") + themedSpace(thTitle.Spacing.XS) + stTitle.Accent.Render(m.themeIcons().Prompt)
 	if badge := m.inputQueueBadge(); badge != "" {
-		title += themedSpace(m.th.Resolve().Spacing.SM) + badge
+		title += themedSpace(thTitle.Spacing.SM) + badge
 	}
 	return ui.Panel(m.th, ui.PanelOpts{
 		Title:      title,
@@ -525,7 +529,7 @@ func permissionModeBadgeTone(mode protocol.PermissionMode) ui.Tone {
 	case protocol.PermissionModeAcceptEdits:
 		return ui.ToneWarning
 	case protocol.PermissionModeYolo:
-		return ui.ToneError
+		return ui.ToneDanger
 	default:
 		return ui.ToneMuted
 	}

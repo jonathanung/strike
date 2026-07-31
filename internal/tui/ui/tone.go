@@ -20,6 +20,7 @@ const (
 	ToneSuccess               // positive
 	ToneWarning               // caution
 	ToneError                 // failure
+	ToneDanger                // destructive (distinct from Error)
 	ToneMuted                 // de-emphasized
 )
 
@@ -37,6 +38,8 @@ func toneColor(th theme.Theme, tone Tone) theme.AdaptiveColor {
 		return th.Warning
 	case ToneError:
 		return th.Error
+	case ToneDanger:
+		return th.Danger
 	case ToneMuted:
 		return th.TextMuted
 	default:
@@ -58,6 +61,8 @@ func toneStyle(th theme.Theme, tone Tone) lipgloss.Style {
 		return st.Warning
 	case ToneError:
 		return st.Error
+	case ToneDanger:
+		return st.Danger
 	case ToneMuted:
 		return st.Muted
 	default:
@@ -78,6 +83,8 @@ func toneStrongStyle(th theme.Theme, tone Tone) lipgloss.Style {
 		return st.WarningStrong
 	case ToneError:
 		return st.ErrorStrong
+	case ToneDanger:
+		return st.DangerStrong
 	case ToneMuted:
 		return st.MutedStrong
 	default:

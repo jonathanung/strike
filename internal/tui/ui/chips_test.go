@@ -20,6 +20,23 @@ func TestBadgeWrapsTextInBrackets(t *testing.T) {
 	}
 }
 
+func TestToneDangerMapsToThemeDanger(t *testing.T) {
+	th := theme.Default()
+	if got := toneColor(th, ToneDanger); got != th.Danger {
+		t.Errorf("toneColor(ToneDanger) = %#v, want Danger %#v", got, th.Danger)
+	}
+	if got := toneColor(th, ToneError); got != th.Error {
+		t.Errorf("toneColor(ToneError) = %#v, want Error %#v", got, th.Error)
+	}
+	if th.Danger == th.Error {
+		t.Fatal("Default Danger must stay distinct from Error for ToneDanger")
+	}
+	out := Badge(th, ToneDanger, "yolo")
+	if !strings.Contains(ansi.Strip(out), "yolo") {
+		t.Errorf("ToneDanger badge missing label: %q", out)
+	}
+}
+
 func TestBadgeUsesCustomDelimitersAndStrongTone(t *testing.T) {
 	th := theme.Default()
 	th.Icons.BadgeLeft = "<"
