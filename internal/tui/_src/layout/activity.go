@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 	"github.com/jonathanung/strike-cli/internal/tui/ui"
@@ -351,8 +350,11 @@ func (m Model) activityEntries() []activityEntry {
 	return projectActivityEntriesNamed(m.cells, kids, m.teamMessages, m.awaitingPermission, m.teamMemberLabel)
 }
 
+// activityEmptyMessage is the idle body when the activity feed has nothing yet.
+const activityEmptyMessage = "nothing here yet :)"
+
 // activityPaneBody shows a session tree when subagents exist, then the newest-
-// first activity feed (tools, children, attention), then idle tips.
+// first activity feed (tools, children, attention), then an empty-state line.
 // Expanded detail keeps chronological body order. Never renders placeholder
 // copy or child transcript text.
 func (m Model) activityPaneBody(width, height int) string {
@@ -361,7 +363,6 @@ func (m Model) activityPaneBody(width, height int) string {
 	}
 	th := m.th.Resolve()
 	st := th.S()
-	ellipsis := th.Icons.Ellipsis
 
 	entries := m.activityEntries()
 	cursor := m.activityDisplayCursor(entries)
@@ -445,34 +446,8 @@ func (m Model) activityPaneBody(width, height int) string {
 		return strings.Join(lines, "\n")
 	}
 
-	// Idle tips when there is no tree and no activity feed.
-	tips := []ui.KeyHint{
-		{Key: "/", Label: "commands"},
-		keyHint(m.keyMap.Palette),
-		keyHint(m.keyMap.Agent),
-		keyHint(m.keyMap.CycleWindowNext),
-		keyHint(m.keyMap.ToggleOrientation),
-		keyHint(m.keyMap.Newline),
-		{Key: "ctrl+x down", Label: "subagent"},
-	}
-	if len(tips) > height {
-		tips = tips[:height]
-	}
-	gap := themedSpace(th.Spacing.SM)
-	out := make([]string, 0, len(tips))
-	for _, tip := range tips {
-		keyText := welcomeTruncate(tip.Key, width, ellipsis)
-		budget := max(0, width-ansi.StringWidth(keyText)-ansi.StringWidth(gap))
-		line := st.Accent.Render(keyText)
-		if budget > 0 {
-			line += st.Muted.Render(gap + welcomeTruncate(tip.Label, budget, ellipsis))
-		}
-		if pad := width - ansi.StringWidth(ansi.Strip(line)); pad > 0 {
-			line += themedSpace(pad)
-		}
-		out = append(out, line)
-	}
-	return strings.Join(out, "\n")
+	// Empty feed (and no session tree): plain empty-state, not keybind chrome.
+	return wrapWindowText(st.Muted.Render(activityEmptyMessage), width)
 }
 
 func activityListItem(th theme.Theme, e activityEntry) ui.ListItem {

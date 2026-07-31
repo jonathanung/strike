@@ -61,13 +61,55 @@ func TestVisualizerWindowKnownUsageAndSparkline(t *testing.T) {
 		},
 	})
 	plain := ansi.Strip(updated.view(theme.Default()))
-	for _, want := range []string{"build", "working", "1.2k", "400", "1.6k", "activity", "tools", "read", "bash"} {
+	for _, want := range []string{
+		"build", "working", "1.2k", "400", "1.6k",
+		"tokens/turn", "4 turns", "peak 800", "last 800",
+		"tools", "read", "bash",
+	} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("missing %q:\n%s", want, plain)
 		}
 	}
+	// Opaque bare "activity" label is gone — metric must name units.
+	if strings.Contains(plain, "activity") && !strings.Contains(plain, "tokens/turn") {
+		t.Errorf("opaque activity label without metric:\n%s", plain)
+	}
 	if strings.Contains(plain, "select a session") {
 		t.Errorf("should not show empty hint when node present:\n%s", plain)
+	}
+}
+
+func TestVisualizerActivityMetricLabels(t *testing.T) {
+	th := theme.Default()
+	if got := visualizerActivityHeading(th, nil); got != "tokens/turn" {
+		t.Errorf("empty heading = %q", got)
+	}
+	if got := visualizerActivityScale(th, nil); got != "" {
+		t.Errorf("empty scale = %q, want blank", got)
+	}
+	if got, want := visualizerActivityHeading(th, []float64{10}), dotJoin(th, "tokens/turn", "1 turn"); got != want {
+		t.Errorf("single heading = %q, want %q", got, want)
+	}
+	if got, want := visualizerActivityHeading(th, []float64{10, 20, 5}), dotJoin(th, "tokens/turn", "3 turns"); got != want {
+		t.Errorf("multi heading = %q, want %q", got, want)
+	}
+	if got, want := visualizerActivityScale(th, []float64{100, 400, 200}), dotJoin(th, "peak 400", "last 200"); got != want {
+		t.Errorf("scale = %q, want %q", got, want)
+	}
+
+	// Empty samples: heading only, no fabricated peak/last.
+	w := newVisualizerWindow().resize(32, 16).(visualizerWindow)
+	updated, _ := w.update(visualizerStateMsg{
+		SessionID: "s",
+		Label:     "main",
+		State:     theme.AgentStateReady,
+	})
+	plain := ansi.Strip(updated.view(theme.Default()))
+	if !strings.Contains(plain, "tokens/turn") {
+		t.Fatalf("missing metric name:\n%s", plain)
+	}
+	if strings.Contains(plain, "peak") || strings.Contains(plain, "last") {
+		t.Fatalf("empty samples should not show scale:\n%s", plain)
 	}
 }
 
