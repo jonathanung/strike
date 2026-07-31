@@ -1,0 +1,13 @@
+{"version": "1.2.0",
+ "packagesDir": ".lake/packages",
+ "packages":
+ [{"type": "path",
+   "scope": "",
+   "name": "«strike-harness»",
+   "manifestFile": "lake-manifest.json",
+   "inherited": false,
+   "dir": "../../sdk/lean",
+   "configFile": "lakefile.toml"}],
+ "name": "«strike-harness-example»",
+ "lakeDir": ".lake",
+ "fixedToolchain": false}

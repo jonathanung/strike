@@ -1,0 +1,16 @@
+{
+  "harnesses": {
+    "choose-best-go-process": {
+      "command": "go",
+      "args": ["run", "./examples/harnesses/go-subprocess"]
+    },
+    "choose-best-js": {
+      "command": "node",
+      "args": ["./examples/harnesses/choose-best.mjs"]
+    },
+    "choose-best-lean": {
+      "command": "lake",
+      "args": ["--dir", "./examples/harnesses", "exe", "choose_best_lean"]
+    }
+  }
+}

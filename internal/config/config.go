@@ -137,12 +137,13 @@ type Config struct {
 	// Prefer mcp.jsonc (see Load). When a layer sets servers (including {}),
 	// it replaces the previous layer's server map.
 	MCP MCPConfig `json:"mcp,omitempty"`
-	// Harnesses configures named external turn-loop controllers. Project
+	// Harnesses configures named external function harnesses. Project
 	// definitions replace global definitions with the same name.
 	Harnesses map[string]HarnessConfig `json:"harnesses,omitempty"`
 }
 
-// HarnessConfig is one named external harness command.
+// HarnessConfig is one named external subprocess harness command. Embedded Go
+// harnesses are compile-time registrations and cannot be declared in config.
 type HarnessConfig struct {
 	Command string            `json:"command"`
 	Args    []string          `json:"args,omitempty"`

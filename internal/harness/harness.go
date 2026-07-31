@@ -1,25 +1,20 @@
-// Package harness defines pluggable agent turn-loop controllers. The engine
-// dispatches to a named harness after setting up the turn; the harness decides
-// how many model streams to run and which tool calls to execute.
+// Package harness defines function-based agent control flow. A harness receives
+// its input, a model provider capability, and a progress callback, owns the
+// complete run, and returns one final result.
 package harness
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/jonathanung/strike-cli/internal/provider"
 )
 
-// Outcome is one successful model stream result.
-type Outcome struct {
-	Text       string
-	Calls      []provider.ToolCall
-	Reasoning  []json.RawMessage
-	StopReason string
-}
-
-// Result is the harness's final turn outcome.
+// Result is the harness's final response.
 type Result struct {
 	Text       string
 	Calls      []provider.ToolCall
@@ -27,114 +22,87 @@ type Result struct {
 	StopReason string
 }
 
-// Request carries per-turn callbacks. The engine handles event emission and
-// message history; the harness controls the loop.
-type Request struct {
-	InvocationID string
-	Agent        string
-	ProviderName string
-	Request      provider.Request
-
-	// Provider performs an engine-selected provider request. Implementations may
-	// call it concurrently. The engine forces the selected model and applies its
-	// normal authentication, retry, usage, and cancellation behavior without
-	// committing speculative output to conversation history.
-	Provider func(ctx context.Context, req provider.Request) (<-chan provider.StreamEvent, error)
-
-	// Stream performs one model request with engine-managed retries,
-	// compaction recovery, delta emission, and usage reporting. The engine
-	// appends the assistant message to history before returning.
-	Stream func(ctx context.Context) (Outcome, error)
-
-	// Execute runs one tool call through the full engine pipeline
-	// (permission, hooks, cancel, feedback). Uses the correlation from the
-	// most recent successful Stream. The engine appends the tool result
-	// message to history. Must only be called after a successful Stream.
-	Execute func(ctx context.Context, call provider.ToolCall) provider.Message
-
-	// Progress emits a harness-specific progress event to the frontend.
-	// Payload is harness-defined JSON.
-	Progress func(payload json.RawMessage)
+// ModelResponse is one completed speculative model call. Provider streaming is
+// consumed by the engine and does not leak into harness control flow.
+type ModelResponse struct {
+	Text       string
+	Calls      []provider.ToolCall
+	Reasoning  []json.RawMessage
+	StopReason string
+	Usage      *provider.Usage
 }
 
-// Harness controls one complete agent turn by orchestrating model streams
-// and tool execution callbacks. Custom harnesses implement alternative
-// strategies like BestOfN or tree search without touching engine internals.
-type Harness interface {
-	// Name returns the harness identifier used in agent frontmatter
-	// (harness: <name>). The only builtin name is "default".
-	Name() string
-
-	// Run executes one turn. The harness may call req.Stream zero or more
-	// times, and req.Execute for any tool calls it wants to commit. Return
-	// nil error and Result with StopReason when the turn is complete; return
-	// a non-nil error to abort the turn with an engine error. Context
-	// cancellation (via ctx) signals the turn should stop.
-	Run(ctx context.Context, req Request) (Result, error)
+// Input describes one harness invocation independently of the model provider it
+// may use.
+type Input struct {
+	Context context.Context
+	Request provider.Request
 }
 
-// Func is an ordinary Go harness function. Register it with Registry.RegisterFunc
-// when embedding an application directly instead of using the process ABI.
-type Func func(context.Context, Request) (Result, error)
-
-type namedFunc struct {
-	name string
-	fn   Func
+// Provider performs complete model requests without committing their responses
+// to conversation history.
+type Provider struct {
+	Call func(provider.Request) (ModelResponse, error)
 }
 
-func (h namedFunc) Name() string { return h.name }
+// Emit publishes a harness-defined progress update.
+type Emit func(json.RawMessage)
 
-func (h namedFunc) Run(ctx context.Context, req Request) (Result, error) {
-	return h.fn(ctx, req)
-}
+// Func is the complete agent run. Go applications may register a Func compiled
+// into their binary; external.Adapter also exposes subprocesses as Func values.
+// The function owns all control flow, may make provider calls concurrently,
+// emits optional progress, and returns one result.
+type Func func(Input, Provider, Emit) (Result, error)
 
-// Registry maps harness names to constructors. The zero value is ready to
-// use (no harnesses beyond builtins). Safe for concurrent reads after
-// initial registration.
+// Registry maps names to already constructed harness functions. It does not
+// discover or load Go code: embedded functions must be registered by the
+// composition root, while configured subprocesses are registered through an
+// external adapter. The zero value is ready to use and is safe for concurrent
+// reads after initial registration.
 type Registry struct {
-	builtins map[string]Harness
+	funcs map[string]Func
 }
 
-// NewRegistry returns a registry seeded with the built-in harnesses.
-func NewRegistry() *Registry {
-	return &Registry{
-		builtins: map[string]Harness{
-			"default": &DefaultHarness{},
-		},
-	}
-}
+func NewRegistry() *Registry { return &Registry{} }
 
-// Get returns the harness registered under name, or nil when not found.
-func (r *Registry) Get(name string) Harness {
-	if r == nil || r.builtins == nil {
+// Get returns the function registered under name, or nil when not found.
+func (r *Registry) Get(name string) Func {
+	if r == nil || r.funcs == nil {
 		return nil
 	}
-	return r.builtins[name]
+	return r.funcs[name]
 }
 
-// Register adds or replaces a harness. Panics when name is empty.
-func (r *Registry) Register(h Harness) {
-	if r.builtins == nil {
-		r.builtins = make(map[string]Harness)
+// Register adds or replaces a harness function.
+func (r *Registry) Register(name string, fn Func) {
+	if err := validateName(name); err != nil {
+		panic(err)
 	}
-	name := h.Name()
-	if name == "" {
-		panic("harness: empty name")
-	}
-	r.builtins[name] = h
-}
-
-func (r *Registry) RegisterFunc(name string, fn Func) {
 	if fn == nil {
 		panic("harness: nil function")
 	}
+	if r.funcs == nil {
+		r.funcs = make(map[string]Func)
+	}
+	r.funcs[name] = fn
+}
+
+func validateName(name string) error {
 	if name == "" {
-		panic("harness: empty name")
+		return errors.New("harness: empty name")
 	}
-	if name[0] <= ' ' || name[len(name)-1] <= ' ' {
-		panic(fmt.Sprintf("harness: invalid name %q", name))
+	if strings.TrimSpace(name) != name {
+		return fmt.Errorf("harness: name %q has leading or trailing whitespace", name)
 	}
-	r.Register(namedFunc{name: name, fn: fn})
+	if !utf8.ValidString(name) {
+		return fmt.Errorf("harness: name %q is not valid UTF-8", name)
+	}
+	for _, r := range name {
+		if r <= '\u001f' || r >= '\u007f' && r <= '\u009f' {
+			return fmt.Errorf("harness: name %q contains a control character", name)
+		}
+	}
+	return nil
 }
 
 // Known returns true when name is registered.
@@ -142,31 +110,19 @@ func (r *Registry) Known(name string) bool {
 	if r == nil {
 		return false
 	}
-	_, ok := r.builtins[name]
+	_, ok := r.funcs[name]
 	return ok
 }
 
-// Resolve returns the harness for name. Empty names and "default" return the
-// DefaultHarness. Unknown names return an error.
-func (r *Registry) Resolve(name string) (Harness, error) {
-	if name == "" || name == "default" {
-		if r == nil {
-			return &DefaultHarness{}, nil
-		}
-		if h := r.Get("default"); h != nil {
-			return h, nil
-		}
-		return &DefaultHarness{}, nil
-	}
+// Resolve returns the named harness function. The engine handles its built-in
+// default loop without representing it as a harness.
+func (r *Registry) Resolve(name string) (Func, error) {
 	if r == nil {
 		return nil, fmt.Errorf("harness: unknown harness %q (no registry)", name)
 	}
-	h := r.Get(name)
-	if h == nil {
+	fn := r.Get(name)
+	if fn == nil {
 		return nil, fmt.Errorf("harness: unknown harness %q", name)
 	}
-	return h, nil
+	return fn, nil
 }
-
-// BuiltinNames lists built-in harness names.
-func BuiltinNames() []string { return []string{"default"} }

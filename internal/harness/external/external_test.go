@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,36 +16,31 @@ import (
 	"github.com/jonathanung/strike-cli/internal/harness"
 	"github.com/jonathanung/strike-cli/internal/harness/external"
 	"github.com/jonathanung/strike-cli/internal/provider"
+	gosdk "github.com/jonathanung/strike-cli/sdk/go/harness"
 )
 
 func TestExternalHappyConcurrentProviderCalls(t *testing.T) {
 	t.Setenv("GO_WANT_HARNESS_HELPER", "happy")
-	h, err := external.New("fixture", external.Config{Command: os.Args[0], Args: []string{"-test.run=TestHarnessHelperProcess"}})
+	adapter, err := external.Command(external.Config{Command: os.Args[0], Args: []string{"-test.run=TestHarnessHelperProcess"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := external.New("fixture", adapter)
 	if err != nil {
 		t.Fatal(err)
 	}
 	progress := make(chan json.RawMessage, 1)
-	result, err := h.Run(context.Background(), harness.Request{
-		InvocationID: "invocation-1",
-		Agent:        "build",
-		ProviderName: "echo",
-		Request:      provider.Request{Model: "selected"},
-		Provider: func(_ context.Context, req provider.Request) (<-chan provider.StreamEvent, error) {
+	result, err := h(harness.Input{
+		Context: context.Background(),
+		Request: provider.Request{Model: "selected"},
+	}, harness.Provider{
+		Call: func(req provider.Request) (harness.ModelResponse, error) {
 			if req.Model != "candidate" {
 				t.Errorf("callback model = %q, want fixture request", req.Model)
 			}
-			ch := make(chan provider.StreamEvent, 2)
-			ch <- provider.StreamEvent{Type: provider.EventTextDelta, Text: "candidate"}
-			ch <- provider.StreamEvent{Type: provider.EventDone, StopReason: "stop", Usage: &provider.Usage{OutputTokens: 1}}
-			close(ch)
-			return ch, nil
+			return harness.ModelResponse{Text: "candidate", StopReason: "stop", Usage: &provider.Usage{OutputTokens: 1}}, nil
 		},
-		Execute: func(context.Context, provider.ToolCall) provider.Message {
-			t.Fatal("unexpected tool call")
-			return provider.Message{}
-		},
-		Progress: func(raw json.RawMessage) { progress <- raw },
-	})
+	}, func(raw json.RawMessage) { progress <- raw })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,6 +48,79 @@ func TestExternalHappyConcurrentProviderCalls(t *testing.T) {
 		t.Fatalf("result = %#v", result)
 	}
 	if got := string(<-progress); got != `{"message":"working"}` {
+		t.Fatalf("progress = %s", got)
+	}
+}
+
+func TestSDKExampleChooseBest(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to run the SDK harness example")
+	}
+	example, err := filepath.Abs(filepath.Join("..", "..", "..", "examples", "harnesses", "choose-best.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter, err := external.Command(external.Config{Command: node, Args: []string{example}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fn, err := external.New("choose-best", adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	candidates := []string{"first", "the longest candidate", "third choice"}
+	providerCalls := 0
+	progress := make(chan json.RawMessage, len(candidates))
+	result, err := fn(harness.Input{
+		Context: context.Background(),
+		Request: provider.Request{
+			Model:    "fixture-model",
+			Messages: []provider.Message{{Role: provider.RoleUser, Text: "solve"}},
+		},
+	}, harness.Provider{
+		Call: func(req provider.Request) (harness.ModelResponse, error) {
+			if len(req.Messages) != 2 {
+				t.Errorf("provider messages = %#v", req.Messages)
+			}
+			response := harness.ModelResponse{Text: candidates[providerCalls], StopReason: "end_turn"}
+			providerCalls++
+			return response, nil
+		},
+	}, func(payload json.RawMessage) { progress <- payload })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Text != "the longest candidate" || result.StopReason != "end_turn" {
+		t.Fatalf("result = %#v", result)
+	}
+	if providerCalls != 3 || len(progress) != 3 {
+		t.Fatalf("provider calls = %d, progress events = %d", providerCalls, len(progress))
+	}
+}
+
+func TestGoSDKEndToEnd(t *testing.T) {
+	fn := newFixture(t, "go-sdk")
+	progress := make(chan json.RawMessage, 1)
+	result, err := fn(harness.Input{
+		Context: context.Background(),
+		Request: provider.Request{Model: "fixture", Messages: []provider.Message{{Role: provider.RoleUser, Text: "solve"}}},
+	}, harness.Provider{
+		Call: func(req provider.Request) (harness.ModelResponse, error) {
+			if req.Model != "fixture" || len(req.Messages) != 1 {
+				t.Fatalf("provider request = %#v", req)
+			}
+			return harness.ModelResponse{Text: "go sdk result", StopReason: "end_turn"}, nil
+		},
+	}, func(payload json.RawMessage) { progress <- payload })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Text != "go sdk result" || result.StopReason != "end_turn" {
+		t.Fatalf("result = %#v", result)
+	}
+	if got := string(<-progress); got != `{"kind":"go-sdk"}` {
 		t.Fatalf("progress = %s", got)
 	}
 }
@@ -70,7 +140,7 @@ func TestExternalRejectsMalformedJSON(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.mode, func(t *testing.T) {
 			h := newFixture(t, tt.mode)
-			_, err := h.Run(context.Background(), harness.Request{InvocationID: "invocation-1"})
+			_, err := h(harness.Input{Context: context.Background()}, harness.Provider{}, nil)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("err = %v, want substring %q", err, tt.want)
 			}
@@ -81,7 +151,7 @@ func TestExternalRejectsMalformedJSON(t *testing.T) {
 func TestExternalCompleteDoesNotWaitForLiveHarness(t *testing.T) {
 	h := newFixture(t, "stays-alive")
 	started := time.Now()
-	result, err := h.Run(context.Background(), harness.Request{InvocationID: "invocation-1"})
+	result, err := h(harness.Input{Context: context.Background()}, harness.Provider{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,52 +163,21 @@ func TestExternalCompleteDoesNotWaitForLiveHarness(t *testing.T) {
 	}
 }
 
-func TestExternalToolExecutePreservesID(t *testing.T) {
-	h := newFixture(t, "tool")
-	result, err := h.Run(context.Background(), harness.Request{
-		InvocationID: "invocation-1",
-		Execute: func(_ context.Context, call provider.ToolCall) provider.Message {
-			if call.ID != "tool-7" || call.Name != "allowed" || string(call.Args) != `{"value":1}` {
-				t.Errorf("call = %#v", call)
-			}
-			return provider.Message{Role: provider.RoleTool, ToolResult: &provider.ToolResult{CallID: call.ID, Output: "routed"}}
+func TestExternalCompleteDoesNotWaitForOutstandingProviderCall(t *testing.T) {
+	h := newFixture(t, "complete-with-call")
+	release := make(chan struct{})
+	defer close(release)
+	result, err := h(harness.Input{Context: context.Background()}, harness.Provider{
+		Call: func(provider.Request) (harness.ModelResponse, error) {
+			<-release
+			return harness.ModelResponse{}, nil
 		},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Text != "routed" {
+	if result.Text != "final" {
 		t.Fatalf("result.Text = %q", result.Text)
-	}
-}
-
-func TestExternalCompleteWaitsForInflightTool(t *testing.T) {
-	h := newFixture(t, "tool-completes-early")
-	release := make(chan struct{})
-	returned := make(chan error, 1)
-	go func() {
-		_, err := h.Run(context.Background(), harness.Request{
-			InvocationID: "invocation-1",
-			Execute: func(context.Context, provider.ToolCall) provider.Message {
-				<-release
-				return provider.Message{}
-			},
-		})
-		returned <- err
-	}()
-	select {
-	case err := <-returned:
-		t.Fatalf("Run returned before tool completed: %v", err)
-	case <-time.After(100 * time.Millisecond):
-	}
-	close(release)
-	select {
-	case err := <-returned:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("Run did not return after tool completed")
 	}
 }
 
@@ -147,7 +186,7 @@ func TestExternalCancellationStopsLiveHarness(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	started := time.Now()
-	_, err := h.Run(ctx, harness.Request{InvocationID: "invocation-1"})
+	_, err := h(harness.Input{Context: ctx}, harness.Provider{}, nil)
 	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err = %v, want deadline exceeded", err)
 	}
@@ -156,10 +195,14 @@ func TestExternalCancellationStopsLiveHarness(t *testing.T) {
 	}
 }
 
-func newFixture(t *testing.T, mode string) *external.External {
+func newFixture(t *testing.T, mode string) harness.Func {
 	t.Helper()
 	t.Setenv("GO_WANT_HARNESS_HELPER", mode)
-	h, err := external.New("fixture", external.Config{Command: os.Args[0], Args: []string{"-test.run=TestHarnessHelperProcess"}})
+	adapter, err := external.Command(external.Config{Command: os.Args[0], Args: []string{"-test.run=TestHarnessHelperProcess"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := external.New("fixture", adapter)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,8 +214,30 @@ func TestHarnessHelperProcess(t *testing.T) {
 	if mode == "" {
 		return
 	}
+	if mode == "go-sdk" {
+		err := gosdk.Run(func(input gosdk.Input, p gosdk.Provider, emit gosdk.Emit) (gosdk.Result, error) {
+			response, err := p.Call(input.Request)
+			if err != nil {
+				return gosdk.Result{}, err
+			}
+			if err := emit(map[string]string{"kind": "go-sdk"}); err != nil {
+				return gosdk.Result{}, err
+			}
+			return gosdk.Result{Text: response.Text, StopReason: response.StopReason}, nil
+		})
+		if err != nil {
+			os.Exit(2)
+		}
+		return
+	}
 	scanner := bufio.NewScanner(os.Stdin)
 	if !scanner.Scan() {
+		os.Exit(2)
+	}
+	var start struct {
+		InvocationID string `json:"invocationId"`
+	}
+	if json.Unmarshal(scanner.Bytes(), &start) != nil || start.InvocationID == "" {
 		os.Exit(2)
 	}
 	if mode == "malformed" {
@@ -180,11 +245,11 @@ func TestHarnessHelperProcess(t *testing.T) {
 		return
 	}
 	if mode == "version" {
-		fmt.Println(`{"version":2,"type":"harness.complete","invocationId":"invocation-1"}`)
+		fmt.Printf(`{"version":2,"type":"harness.complete","invocationId":%q}`+"\n", start.InvocationID)
 		return
 	}
 	if mode == "unknown" {
-		fmt.Println(`{"version":1,"type":"future.message","invocationId":"invocation-1"}`)
+		fmt.Printf(`{"version":1,"type":"future.message","invocationId":%q}`+"\n", start.InvocationID)
 		return
 	}
 	if mode == "missing" {
@@ -194,51 +259,35 @@ func TestHarnessHelperProcess(t *testing.T) {
 		os.Exit(3)
 	}
 	if mode == "duplicate" {
-		fmt.Println(`{"version":1,"type":"provider.call","invocationId":"invocation-1","callId":"same","request":{"model":"candidate","messages":[]}}`)
-		fmt.Println(`{"version":1,"type":"tool.execute","invocationId":"invocation-1","toolCallId":"same","name":"x","arguments":{}}`)
+		fmt.Printf(`{"version":1,"type":"provider.call","invocationId":%q,"callId":"same","request":{"model":"candidate","messages":[]}}`+"\n", start.InvocationID)
+		fmt.Printf(`{"version":1,"type":"provider.call","invocationId":%q,"callId":"same","request":{"model":"candidate","messages":[]}}`+"\n", start.InvocationID)
 		time.Sleep(time.Hour)
 	}
 	if mode == "stays-alive" {
-		fmt.Println(`{"version":1,"type":"harness.complete","invocationId":"invocation-1","text":"final"}`)
+		fmt.Printf(`{"version":1,"type":"harness.complete","invocationId":%q,"text":"final"}`+"\n", start.InvocationID)
+		time.Sleep(time.Hour)
+	}
+	if mode == "complete-with-call" {
+		fmt.Printf(`{"version":1,"type":"provider.call","invocationId":%q,"callId":"pending","request":{"model":"candidate","messages":[]}}`+"\n", start.InvocationID)
+		fmt.Printf(`{"version":1,"type":"harness.complete","invocationId":%q,"text":"final"}`+"\n", start.InvocationID)
 		time.Sleep(time.Hour)
 	}
 	if mode == "blocks" {
 		time.Sleep(time.Hour)
 	}
-	if mode == "tool" {
-		fmt.Println(`{"version":1,"type":"tool.execute","invocationId":"invocation-1","toolCallId":"tool-7","name":"allowed","arguments":{"value":1}}`)
-		for scanner.Scan() {
-			var m struct {
-				Type       string `json:"type"`
-				ToolCallID string `json:"toolCallId"`
-				Output     string `json:"output"`
-			}
-			if json.Unmarshal(scanner.Bytes(), &m) == nil && m.Type == "tool.result" {
-				fmt.Printf(`{"version":1,"type":"harness.complete","invocationId":"invocation-1","text":%q}`+"\n", m.Output)
-				return
-			}
-		}
-		return
-	}
-	if mode == "tool-completes-early" {
-		fmt.Println(`{"version":1,"type":"tool.execute","invocationId":"invocation-1","toolCallId":"tool-7","name":"allowed","arguments":{}}`)
-		fmt.Println(`{"version":1,"type":"harness.complete","invocationId":"invocation-1","text":"final"}`)
-		return
-	}
-	fmt.Println(`{"version":1,"type":"progress.emit","invocationId":"invocation-1","payload":{"message":"working"}}`)
-	for _, id := range []string{"a", "b"} {
-		fmt.Printf(`{"version":1,"type":"provider.call","invocationId":"invocation-1","callId":%q,"request":{"model":"candidate","messages":[]}}`+"\n", id)
+	fmt.Printf(`{"version":1,"type":"progress.emit","invocationId":%q,"payload":{"message":"working"}}`+"\n", start.InvocationID)
+	for _, callID := range []string{"a", "b"} {
+		fmt.Printf(`{"version":1,"type":"provider.call","invocationId":%q,"callId":%q,"request":{"model":"candidate","messages":[]}}`+"\n", start.InvocationID, callID)
 	}
 	completions := 0
 	for scanner.Scan() {
 		var m struct {
 			Type string `json:"type"`
-			Kind string `json:"kind"`
 		}
-		if json.Unmarshal(scanner.Bytes(), &m) == nil && m.Type == "provider.event" && (m.Kind == "completion" || m.Kind == "error") {
+		if json.Unmarshal(scanner.Bytes(), &m) == nil && m.Type == "provider.result" {
 			completions++
 			if completions == 2 {
-				fmt.Println(`{"version":1,"type":"harness.complete","invocationId":"invocation-1","text":"final","stopReason":"end_turn"}`)
+				fmt.Printf(`{"version":1,"type":"harness.complete","invocationId":%q,"text":"final","stopReason":"end_turn"}`+"\n", start.InvocationID)
 				return
 			}
 		}

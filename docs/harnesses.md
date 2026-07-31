@@ -1,47 +1,53 @@
 # Function harnesses
 
-A harness is one ordinary function. Strike calls it once with the user's
-request, model access, a progress callback, optional Strike tool execution, and
-an abort signal. The function owns all control flow and returns the final
-response:
+A harness is one ordinary function used to implement a task subagent. When the
+parent delegates to that agent, Strike calls the function once with an input,
+a provider capability, and a progress callback. The input contains the subtask
+request and abort signal; the provider only performs additional model calls.
+The function owns the complete subagent run and returns its final response.
 
-```js
-import { runHarness } from "../../sdk/harness.mjs";
+## Integration modes
 
-const chooseBest = (candidates) =>
-  candidates.reduce((best, candidate) =>
-    candidate.length > best.length ? candidate : best, "");
+Every implementation becomes a `harness.Func`, but there are two distinct ways
+to construct one:
 
-async function harness({ request, provider, emit, execute, signal }) {
-  emit({ kind: "started", message: "Searching candidates" });
+| Mode | Loading | Configuration | Stock binary |
+|---|---|---|---|
+| Embedded Go | Imported, compiled, and registered by a Go composition root | Not configurable | No custom Go harnesses registered |
+| External process | Command started at runtime and adapted to `harness.Func` over JSONL | `harnesses` entries in Strike config | Supported for any executable |
 
-  const candidates = [];
-  for (let i = 0; i < 4; i++) {
-    signal.throwIfAborted();
-    let text = "";
-    for await (const event of provider({
-      ...request,
-      messages: [
-        ...request.messages,
-        { role: "user", text: `Generate candidate ${i + 1}` },
-      ],
-    })) {
-      if (event.kind === "text") text += event.text;
-      if (event.kind === "error") throw new Error(event.error);
-    }
-    candidates.push(text);
-    emit({ kind: "iteration", current: i + 1, total: 4 });
-  }
+Go, JavaScript, and Lean can all use the external-process mode through
+`sdk/go/harness`, `sdk/typescript`, and `sdk/lean`. These SDKs only help build a
+compatible program; they do not add language-specific linkage to Strike. The
+stock CLI reads configured commands in `cmd/strike`, starts one process per
+invocation, and communicates through the language-neutral protocol.
 
-  return { text: chooseBest(candidates), stopReason: "end_turn" };
-}
+An embedded Go harness is available only in binaries whose source explicitly
+imports and registers that function. Go harnesses are not discovered from the
+filesystem or loaded from JSON. The Go example in this repository is linked
+into the integration test binary, not the stock `strike` executable.
 
-runHarness(harness);
-```
+The repository keeps the complete choose-best integration fixture in
+[`examples/harnesses`](../examples/harnesses):
+
+- [`examples/harnesses/choose_best.go`](../examples/harnesses/choose_best.go)
+  implements `harness.Func` directly in Go.
+- [`examples/harnesses/go-subprocess`](../examples/harnesses/go-subprocess)
+  uses the public Go subprocess SDK.
+- [`examples/harnesses/choose-best.mjs`](../examples/harnesses/choose-best.mjs)
+  uses the typed JavaScript runtime from
+  [`sdk/typescript`](../sdk/typescript).
+- [`examples/harnesses/ChooseBest.lean`](../examples/harnesses/ChooseBest.lean)
+  imports the reusable [`sdk/lean`](../sdk/lean) Lake package.
+- [`examples/harnesses/config.example.json`](../examples/harnesses/config.example.json)
+  configures all external implementations.
+
+All implementations make three model calls, report progress, select the longest
+candidate, and return it as the only committed response.
 
 The harness may loop, branch, run MCTS, invoke external programs, maintain its
-own state, call Strike tools through `execute`, or return immediately. It does
-not declare phases or a workflow graph.
+own state, or return immediately. It does not declare phases or a workflow
+graph.
 
 The primary boundary is application-oriented and language-neutral. A chess
 engine, theorem prover, neural-symbolic runtime, or other native application
@@ -50,18 +56,38 @@ convenience adapter.
 
 ## Embedded Go applications
 
-Go applications compiled into Strike can register an ordinary function without
-implementing an interface wrapper:
+Go harnesses are compile-time extensions. They cannot be named or loaded from
+JSON because a Go function must already be linked into the Strike binary.
+
+First, define the function in the Strike source tree. See the complete
+[`choose_best.go`](../examples/harnesses/choose_best.go) example. Its compile-time
+assertion confirms that it implements the same function contract used by the
+engine:
 
 ```go
-registry.RegisterFunc("chess", func(ctx context.Context, req harness.Request) (harness.Result, error) {
-	position := decodePosition(req.Request)
+var _ harness.Func = ChooseBest
+```
+
+A minimal custom function looks like this:
+
+```go
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+
+	"github.com/jonathanung/strike-cli/internal/harness"
+)
+
+func chessHarness(input harness.Input, provider harness.Provider, emit harness.Emit) (harness.Result, error) {
+	position := decodePosition(input.Request)
 	for depth := 1; ; depth++ {
-		if err := ctx.Err(); err != nil {
+		if err := input.Context.Err(); err != nil {
 			return harness.Result{}, err
 		}
 		move := search(position, depth)
-		req.Progress(json.RawMessage(fmt.Sprintf(
+		emit(json.RawMessage(fmt.Sprintf(
 			`{"kind":"depth","current":%d,"move":%q}`,
 			depth, move,
 		)))
@@ -69,34 +95,70 @@ registry.RegisterFunc("chess", func(ctx context.Context, req harness.Request) (h
 			return harness.Result{Text: move, StopReason: "complete"}, nil
 		}
 	}
-})
+}
 ```
 
-The application owns its search, state, branching, and termination. Strike's
-`harness.Request` only supplies host capabilities such as model calls, progress,
-tool execution, cancellation context, and the initial normalized request.
+Second, register it after `harness.NewRegistry()` in
+`cmd/strike/assemble_tools.go`:
 
-`sdk/harness.mjs` hides the subprocess JSONL protocol. Harness code does not
-manage invocation IDs, call IDs, protocol messages, or process lifecycle.
+```go
+harnessRegistry := harness.NewRegistry()
+harnessRegistry.Register("chess", chessHarness)
+```
+
+The composition root already passes that registry to `engine.Options`. Finally,
+select the registered name in the task agent's frontmatter:
+
+```yaml
+---
+description: searches chess positions
+harness: chess
+---
+```
+
+Rebuild Strike after adding or changing an embedded Go harness. The application
+owns its search, state, branching, and termination; Strike supplies only the
+input, provider capability, and progress callback.
+
+## Engine integration
+
+The integration path is deliberately small:
+
+1. `cmd/strike` converts configured commands into `harness.Func` values and
+   registers them by name.
+2. Agent frontmatter stores the selected name in `engine.Agent.Harness`.
+3. When `task` starts that agent, the child engine resolves the name. With no
+   custom name it runs the built-in child model/tool loop; otherwise the
+   complete subagent run is one function call. Root turns never invoke harnesses.
+4. `internal/engine/harness.go` constructs the input, provider capability, and
+   progress callback. Only the function's returned `harness.Result` is committed
+   as the assistant response.
+
+`sdk/typescript` and `sdk/lean` hide the subprocess JSONL protocol. Harness code
+does not manage invocation IDs, call IDs, protocol messages, or process
+lifecycle. The TypeScript package exports declarations alongside its Node
+runtime; the Lean package exports `StrikeHarness.runHarness`.
 
 > [!WARNING]
 > Harnesses are trusted native executables. Loading one is equivalent to
 > running its configured command directly. Strike does not sandbox harnesses,
 > filter their environment, or restrict their direct access to the system.
 
-## Configuration
+## External process configuration
 
-Define named harnesses in `~/.strike/config` or `./.strike/config`:
+JSON configuration is for subprocess harnesses. Define their commands in
+`~/.strike/config` or `./.strike/config`:
 
 ```json
 {
   "harnesses": {
-    "mcts": {
+    "choose-best-js": {
       "command": "node",
-      "args": ["./.strike/harnesses/mcts.mjs"],
-      "env": {
-        "SEARCH_BUDGET": "100"
-      }
+      "args": ["./examples/harnesses/choose-best.mjs"]
+    },
+    "choose-best-lean": {
+      "command": "lake",
+      "args": ["--dir", "./examples/harnesses", "exe", "choose_best_lean"]
     }
   }
 }
@@ -105,36 +167,38 @@ Define named harnesses in `~/.strike/config` or `./.strike/config`:
 Global and project definitions merge by name. A project definition replaces a
 global definition with the same name.
 
-Select the harness in agent frontmatter:
+Select the external harness in frontmatter for an agent intended to run through
+`task`:
 
 ```yaml
 ---
 description: searches for the strongest solution
-harness: mcts
+harness: choose-best-js
 ---
 ```
 
-Unknown harness references fail during startup. Omitting `harness`, or setting
-it to `default`, keeps Strike's built-in loop.
+For both embedded and external harnesses, unknown names fail during startup.
+Omitting `harness`, or setting it to `default`, keeps Strike's built-in child
+loop.
 
 ## Function API
 
 ```ts
-type Harness = (context: {
-  request: ProviderRequest;
-  provider: (request: ProviderRequest) => AsyncIterable<ProviderEvent>;
-  emit: (progress: ProgressEvent) => void;
-  execute: (call: ToolCall) => Promise<ToolResult>;
-  signal: AbortSignal;
-}) => Promise<Response>;
+type Harness = (input: {
+	request: ProviderRequest;
+	signal: AbortSignal;
+}, provider: {
+	call: (request: ProviderRequest) => Promise<ModelResponse>;
+}, emit: (progress: ProgressEvent) => void) => Promise<Response>;
 ```
 
-- `request` is the initial normalized request, including messages and tools.
-- `provider` performs a Strike-managed model call. Calls may run concurrently
-  and do not enter conversation history.
+- `input.request` is the initial normalized request, including messages and
+  tools.
+- `provider.call` performs a complete Strike-managed model call. Calls may run
+	concurrently and do not enter conversation history. Provider streaming and
+	retries remain internal to Strike.
 - `emit` publishes structured progress to the UI and session log.
-- `execute` optionally runs a Strike tool through normal permissions and hooks.
-- `signal` is aborted when the user interrupts the request.
+- `input.signal` is aborted when the user interrupts the agent run.
 - The returned `Response` is the only assistant response committed to history.
 
 ## Private transport
@@ -169,9 +233,7 @@ Strike sends the initial request and active selection:
   "version": 1,
   "type": "harness.start",
   "invocationId": "invocation-id",
-  "agent": "search",
-  "provider": "openai",
-  "request": {
+	"request": {
     "model": "gpt-5",
     "system": "...",
     "messages": [{"role": "user", "text": "..."}],
@@ -179,11 +241,10 @@ Strike sends the initial request and active selection:
     "maxOutputTokens": 8192,
     "effort": "high"
   },
-  "capabilities": [
-    "provider.call",
-    "progress.emit",
-    "tool.execute",
-    "harness.cancel"
+	"capabilities": [
+	  "provider.call",
+	  "progress.emit",
+	  "harness.cancel"
   ]
 }
 ```
@@ -193,7 +254,7 @@ Strike tool schemas. Strike retains provider selection and authentication.
 
 #### `provider.call`
 
-The harness requests a normalized model stream:
+The harness requests a completed model response:
 
 ```json
 {
@@ -209,13 +270,11 @@ The harness requests a normalized model stream:
 }
 ```
 
-Strike forces the active model and forwards normalized `provider.event`
-messages carrying the same `callId`. Event `kind` values are `text`,
-`reasoning`, `tool_call`, `usage`, `completion`, and `error`.
+Strike forces the active model, consumes its stream internally, and replies
+once with the same `callId`:
 
 ```json
-{"version":1,"type":"provider.event","invocationId":"invocation-id","callId":"candidate-1","kind":"text","text":"candidate"}
-{"version":1,"type":"provider.event","invocationId":"invocation-id","callId":"candidate-1","kind":"completion","done":true,"stopReason":"end_turn"}
+{"version":1,"type":"provider.result","invocationId":"invocation-id","callId":"candidate-1","text":"candidate","stopReason":"end_turn"}
 ```
 
 #### `progress.emit`
@@ -237,31 +296,6 @@ The harness may publish structured progress:
 ```
 
 Strike records this as `harness.progress` in the session event log.
-
-#### `tool.execute`
-
-The harness can ask Strike to execute a built-in tool:
-
-```json
-{
-  "version": 1,
-  "type": "tool.execute",
-  "invocationId": "invocation-id",
-  "toolCallId": "tool-1",
-  "name": "read",
-  "arguments": {"filePath": "README.md"}
-}
-```
-
-Strike routes the call through its normal tool implementation, permissions,
-hooks, questions, and event emission, then replies with `tool.result`:
-
-```json
-{"version":1,"type":"tool.result","invocationId":"invocation-id","toolCallId":"tool-1","output":"..."}
-```
-
-`tool.execute` is a convenience API, not a sandbox boundary. The harness may
-also execute external logic directly.
 
 #### `harness.complete` and `harness.error`
 
@@ -289,15 +323,20 @@ A terminal harness failure uses `harness.error`:
 }
 ```
 
-Exactly one terminal message is required. Exiting without one fails the turn.
+Exactly one terminal message is required. Exiting without one fails the agent
+run.
 
 #### `harness.cancel`
 
-When a turn is interrupted, Strike sends a best-effort cancellation message:
+When the agent run is interrupted, Strike sends a best-effort cancellation
+message:
 
 ```json
 {"version":1,"type":"harness.cancel","invocationId":"invocation-id","reason":"context canceled"}
 ```
 
 The harness should cancel its work and exit promptly. Strike closes or
-terminates an unresponsive process after a short grace period.
+terminates an unresponsive process after a short grace period. Go and
+JavaScript expose cancellation to harness code through their input context or
+signal. Lean observes cancellation while waiting for a provider call; otherwise
+Strike terminates the process after the grace period.

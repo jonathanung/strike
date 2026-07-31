@@ -1,14 +1,15 @@
-// Package external implements the version 1 JSONL subprocess harness transport.
+// Package external adapts any subprocess implementing the version 1 JSONL
+// transport into a harness.Func. JavaScript and Lean harnesses use this same
+// language-neutral path and are not linked into the Strike binary.
 package external
 
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -23,35 +24,26 @@ const (
 	cancelGrace    = 250 * time.Millisecond
 )
 
-type Config struct {
-	Command string
-	Args    []string
-	Env     map[string]string
+type runner struct {
+	name    string
+	adapter Adapter
 }
 
-type External struct {
-	name string
-	cfg  Config
-}
-
-func New(name string, cfg Config) (*External, error) {
-	if strings.TrimSpace(name) == "" || strings.TrimSpace(cfg.Command) == "" {
-		return nil, errors.New("external harness: name and command are required")
+// New runs the language-neutral harness protocol over an adapter's pipe.
+func New(name string, adapter Adapter) (harness.Func, error) {
+	if strings.TrimSpace(name) == "" || adapter == nil {
+		return nil, errors.New("external harness: name and adapter are required")
 	}
-	return &External{name: name, cfg: cfg}, nil
+	r := &runner{name: name, adapter: adapter}
+	return r.run, nil
 }
-
-func (e *External) Name() string { return e.name }
 
 type envelope struct {
 	Version      int               `json:"version"`
 	Type         string            `json:"type"`
 	InvocationID string            `json:"invocationId"`
 	CallID       string            `json:"callId,omitempty"`
-	ToolCallID   string            `json:"toolCallId,omitempty"`
 	Request      *wireRequest      `json:"request,omitempty"`
-	Name         string            `json:"name,omitempty"`
-	Arguments    json.RawMessage   `json:"arguments,omitempty"`
 	Payload      json.RawMessage   `json:"payload,omitempty"`
 	Message      json.RawMessage   `json:"message,omitempty"`
 	Code         string            `json:"code,omitempty"`
@@ -123,28 +115,20 @@ func (w wireRequest) providerRequest() provider.Request {
 	return r
 }
 
-func (e *External) Run(ctx context.Context, req harness.Request) (harness.Result, error) {
+func (e *runner) run(input harness.Input, p harness.Provider, emit harness.Emit) (harness.Result, error) {
+	ctx := input.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	cmd := exec.Command(e.cfg.Command, e.cfg.Args...)
-	cmd.Env = os.Environ()
-	for k, v := range e.cfg.Env {
-		cmd.Env = append(cmd.Env, k+"="+v)
-	}
-	stdin, err := cmd.StdinPipe()
+	invocationID := rand.Text()
+	pipe, err := e.adapter.Start(ctx)
 	if err != nil {
-		return harness.Result{}, err
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return harness.Result{}, err
-	}
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
 		return harness.Result{}, fmt.Errorf("start external harness %q: %w", e.name, err)
 	}
 	processDone := make(chan error, 1)
-	go func() { processDone <- cmd.Wait() }()
+	go func() { processDone <- pipe.Wait() }()
 
 	var writeMu sync.Mutex
 	write := func(v any) error {
@@ -157,20 +141,18 @@ func (e *External) Run(ctx context.Context, req harness.Request) (harness.Result
 		if len(b) > maxLineBytes {
 			return errors.New("external harness: outbound line exceeds limit")
 		}
-		_, err = stdin.Write(append(b, '\n'))
+		_, err = pipe.Write(append(b, '\n'))
 		return err
 	}
 	start := struct {
 		Version      int         `json:"version"`
 		Type         string      `json:"type"`
 		InvocationID string      `json:"invocationId"`
-		Agent        string      `json:"agent"`
-		Provider     string      `json:"provider"`
 		Request      wireRequest `json:"request"`
 		Capabilities []string    `json:"capabilities"`
-	}{1, "harness.start", req.InvocationID, req.Agent, req.ProviderName, toWire(req.Request), []string{"provider.call", "progress.emit", "tool.execute", "harness.cancel"}}
+	}{1, "harness.start", invocationID, toWire(input.Request), []string{"provider.call", "progress.emit", "harness.cancel"}}
 	if err := write(start); err != nil {
-		terminateProcess(cmd)
+		_ = pipe.Kill()
 		<-processDone
 		return harness.Result{}, err
 	}
@@ -180,9 +162,8 @@ func (e *External) Run(ctx context.Context, req harness.Request) (harness.Result
 		err    error
 	}
 	done := make(chan terminal, 1)
-	var relays sync.WaitGroup
 	go func() {
-		s := bufio.NewScanner(stdout)
+		s := bufio.NewScanner(pipe)
 		s.Buffer(make([]byte, 64*1024), maxLineBytes)
 		total := 0
 		ids := make(map[string]string)
@@ -197,7 +178,7 @@ func (e *External) Run(ctx context.Context, req harness.Request) (harness.Result
 				done <- terminal{err: fmt.Errorf("external harness: malformed JSON: %w", err)}
 				return
 			}
-			if m.Version != 1 || m.InvocationID != req.InvocationID {
+			if m.Version != 1 || m.InvocationID != invocationID {
 				done <- terminal{err: fmt.Errorf("external harness: invalid version or invocationId")}
 				return
 			}
@@ -212,10 +193,8 @@ func (e *External) Run(ctx context.Context, req harness.Request) (harness.Result
 					return
 				}
 				ids[m.CallID] = m.Type
-				relays.Add(1)
 				go func() {
-					defer relays.Done()
-					relayProvider(ctx, req, m.CallID, m.Request.providerRequest(), write)
+					relayProvider(ctx, p.Call, invocationID, m.CallID, m.Request.providerRequest(), write)
 				}()
 			case "progress.emit":
 				p := m.Payload
@@ -225,44 +204,14 @@ func (e *External) Run(ctx context.Context, req harness.Request) (harness.Result
 				if len(p) == 0 {
 					p = json.RawMessage(`{}`)
 				}
-				req.Progress(p)
-			case "tool.execute":
-				if m.ToolCallID == "" || m.Name == "" {
-					done <- terminal{err: errors.New("external harness: tool.execute requires IDs and name")}
-					return
+				if emit != nil {
+					emit(p)
 				}
-				if previous := ids[m.ToolCallID]; previous != "" {
-					done <- terminal{err: fmt.Errorf("external harness: duplicate request ID %q (already used by %s)", m.ToolCallID, previous)}
-					return
-				}
-				ids[m.ToolCallID] = m.Type
-				relays.Add(1)
-				go func(m envelope) {
-					defer relays.Done()
-					msg := req.Execute(ctx, provider.ToolCall{ID: m.ToolCallID, Name: m.Name, Args: m.Arguments})
-					tr := msg.ToolResult
-					out := struct {
-						Version      int    `json:"version"`
-						Type         string `json:"type"`
-						InvocationID string `json:"invocationId"`
-						ToolCallID   string `json:"toolCallId"`
-						Output       string `json:"output,omitempty"`
-						Error        string `json:"error,omitempty"`
-					}{Version: 1, Type: "tool.result", InvocationID: req.InvocationID, ToolCallID: m.ToolCallID}
-					if tr != nil {
-						out.Output = tr.Output
-						if tr.IsError {
-							out.Error = tr.Output
-						}
-					}
-					_ = write(out)
-				}(m)
 			case "harness.complete":
 				result := harness.Result{Text: m.Text, Reasoning: m.Reasoning, StopReason: m.StopReason}
 				for _, c := range m.ToolCalls {
 					result.Calls = append(result.Calls, provider.ToolCall{ID: c.ID, Name: c.Name, Args: c.Args})
 				}
-				relays.Wait()
 				done <- terminal{result: result}
 				return
 			case "harness.error":
@@ -287,9 +236,9 @@ func (e *External) Run(ctx context.Context, req harness.Request) (harness.Result
 	select {
 	case t := <-done:
 		cancel()
-		_ = stdin.Close()
+		_ = pipe.CloseWrite()
 		if t.err != nil {
-			terminateProcess(cmd)
+			_ = pipe.Kill()
 		}
 		var waitErr error
 		forced := false
@@ -297,10 +246,9 @@ func (e *External) Run(ctx context.Context, req harness.Request) (harness.Result
 		case waitErr = <-processDone:
 		case <-time.After(cancelGrace):
 			forced = true
-			terminateProcess(cmd)
+			_ = pipe.Kill()
 			waitErr = <-processDone
 		}
-		relays.Wait()
 		if t.err == nil && waitErr != nil && !forced {
 			t.err = fmt.Errorf("external harness exit: %w", waitErr)
 		} else if t.err != nil && waitErr != nil && !forced && strings.Contains(t.err.Error(), "exited without harness.complete") {
@@ -314,107 +262,57 @@ func (e *External) Run(ctx context.Context, req harness.Request) (harness.Result
 			Type         string `json:"type"`
 			InvocationID string `json:"invocationId"`
 			Reason       string `json:"reason"`
-		}{1, "harness.cancel", req.InvocationID, ctxErr.Error()})
+		}{1, "harness.cancel", invocationID, ctxErr.Error()})
 		cancel()
 		select {
 		case <-done:
 		case <-time.After(cancelGrace):
-			terminateProcess(cmd)
+			_ = pipe.Kill()
 		}
-		_ = stdin.Close()
+		_ = pipe.CloseWrite()
 		select {
 		case <-processDone:
 		case <-time.After(cancelGrace):
-			terminateProcess(cmd)
+			_ = pipe.Kill()
 			<-processDone
 		}
-		relays.Wait()
 		return harness.Result{}, ctxErr
 	}
 }
 
-func terminateProcess(cmd *exec.Cmd) {
-	if cmd.Process != nil {
-		_ = cmd.Process.Kill()
-	}
-}
-
-func relayProvider(ctx context.Context, req harness.Request, callID string, r provider.Request, write func(any) error) {
-	if req.Provider == nil {
-		_ = write(providerEvent(req.InvocationID, callID, provider.StreamEvent{Type: provider.EventError, Err: errors.New("provider callback unavailable")}))
+func relayProvider(ctx context.Context, call func(provider.Request) (harness.ModelResponse, error), invocationID, callID string, r provider.Request, write func(any) error) {
+	out := struct {
+		Version      int               `json:"version"`
+		Type         string            `json:"type"`
+		InvocationID string            `json:"invocationId"`
+		CallID       string            `json:"callId"`
+		Text         string            `json:"text,omitempty"`
+		Reasoning    []json.RawMessage `json:"reasoning,omitempty"`
+		ToolCalls    []wireToolCall    `json:"toolCalls,omitempty"`
+		StopReason   string            `json:"stopReason,omitempty"`
+		Usage        *provider.Usage   `json:"usage,omitempty"`
+		Error        string            `json:"error,omitempty"`
+	}{Version: 1, Type: "provider.result", InvocationID: invocationID, CallID: callID}
+	if call == nil {
+		out.Error = "provider callback unavailable"
+		_ = write(out)
 		return
 	}
-	stream, err := req.Provider(ctx, r)
+	if ctx.Err() != nil {
+		return
+	}
+	result, err := call(r)
 	if err != nil {
-		_ = write(providerEvent(req.InvocationID, callID, provider.StreamEvent{Type: provider.EventError, Err: err}))
+		out.Error = err.Error()
+		_ = write(out)
 		return
 	}
-	stream = provider.NormalizeStream(stream)
-	for {
-		var ev provider.StreamEvent
-		var ok bool
-		select {
-		case <-ctx.Done():
-			return
-		case ev, ok = <-stream:
-			if !ok {
-				return
-			}
-		}
-		if ev.Type == provider.EventDone && ev.Usage != nil {
-			if write(providerUsageEvent(req.InvocationID, callID, ev.Usage)) != nil {
-				return
-			}
-		}
-		if write(providerEvent(req.InvocationID, callID, ev)) != nil {
-			return
-		}
+	out.Text = result.Text
+	out.Reasoning = result.Reasoning
+	out.StopReason = result.StopReason
+	out.Usage = result.Usage
+	for _, call := range result.Calls {
+		out.ToolCalls = append(out.ToolCalls, wireToolCall{ID: call.ID, Name: call.Name, Args: call.Args})
 	}
-}
-
-func providerUsageEvent(invocationID, callID string, usage *provider.Usage) any {
-	return struct {
-		Version      int             `json:"version"`
-		Type         string          `json:"type"`
-		InvocationID string          `json:"invocationId"`
-		CallID       string          `json:"callId"`
-		Kind         string          `json:"kind"`
-		Usage        *provider.Usage `json:"usage"`
-	}{1, "provider.event", invocationID, callID, "usage", usage}
-}
-
-func providerEvent(invocationID, callID string, ev provider.StreamEvent) any {
-	kind := "error"
-	done := false
-	switch ev.Type {
-	case provider.EventTextDelta:
-		kind = "text"
-	case provider.EventReasoning:
-		kind = "reasoning"
-	case provider.EventToolCall:
-		kind = "tool_call"
-	case provider.EventDone:
-		kind = "completion"
-		done = true
-	case provider.EventError:
-		done = true
-	}
-	errText := ""
-	if ev.Err != nil {
-		errText = ev.Err.Error()
-	}
-	return struct {
-		Version      int                `json:"version"`
-		Type         string             `json:"type"`
-		InvocationID string             `json:"invocationId"`
-		CallID       string             `json:"callId"`
-		Kind         string             `json:"kind"`
-		Done         bool               `json:"done,omitempty"`
-		Text         string             `json:"text,omitempty"`
-		Reasoning    json.RawMessage    `json:"reasoning,omitempty"`
-		ToolCall     *provider.ToolCall `json:"toolCall,omitempty"`
-		Usage        *provider.Usage    `json:"usage,omitempty"`
-		StopReason   string             `json:"stopReason,omitempty"`
-		Error        string             `json:"error,omitempty"`
-	}{1, "provider.event", invocationID, callID, kind, done, ev.Text, ev.Reasoning, ev.ToolCall, ev.Usage, ev.StopReason, errText}
+	_ = write(out)
 }

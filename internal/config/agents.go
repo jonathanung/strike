@@ -36,8 +36,8 @@ type Agent struct {
 	Model       string
 	Effort      protocol.Effort
 	Prompt      string
-	// Harness selects a custom turn-loop controller (default, …).
-	// Empty and "default" use the built-in loop.
+	// Harness selects the function used when this agent runs through task.
+	// Empty and "default" use the built-in child model/tool loop.
 	Harness     string
 	Permissions permission.Ruleset
 }

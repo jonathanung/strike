@@ -320,12 +320,18 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		}
 	}
 	harnessRegistry := harness.NewRegistry()
+	// Config only creates external subprocess harnesses. A custom Strike binary
+	// may register embedded Go functions here before validating agent references.
 	for name, hc := range cfg.Harnesses {
-		h, err := external.New(name, external.Config{Command: hc.Command, Args: hc.Args, Env: hc.Env})
+		adapter, err := external.Command(external.Config{Command: hc.Command, Args: hc.Args, Env: hc.Env})
 		if err != nil {
 			return nil, fmt.Errorf("configuring harness %q: %w", name, err)
 		}
-		harnessRegistry.Register(h)
+		h, err := external.New(name, adapter)
+		if err != nil {
+			return nil, fmt.Errorf("configuring harness %q: %w", name, err)
+		}
+		harnessRegistry.Register(name, h)
 	}
 	for _, agent := range agents {
 		if agent.Harness != "" && agent.Harness != "default" && !harnessRegistry.Known(agent.Harness) {
