@@ -346,7 +346,12 @@ func TestHomeCompletionStaysAttachedToPrompt(t *testing.T) {
 	if popupRow < 0 || promptRow < 0 {
 		t.Fatalf("completion or prompt missing (popup=%d prompt=%d):\n%s", popupRow, promptRow, strings.Join(lines, "\n"))
 	}
-	if promptRow-popupRow > completionMaxRows+2 {
-		t.Errorf("completion is too far from prompt: popup row %d, prompt row %d", popupRow, promptRow)
+	if promptRow <= popupRow {
+		t.Errorf("completion rendered below prompt: popup row %d, prompt row %d", popupRow, promptRow)
+	}
+	for i := popupRow; i < promptRow; i++ {
+		if strings.TrimSpace(lines[i]) == "" {
+			t.Errorf("blank row separates completion from prompt at row %d", i)
+		}
 	}
 }

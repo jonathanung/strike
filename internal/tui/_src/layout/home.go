@@ -367,7 +367,7 @@ func (m Model) renderHomeFrame() string {
 	composerRows := m.homeComposerRows(promptW, compact)
 	popupHeight := 0
 	if m.completion != nil && m.modal == nil {
-		// Popup sits above the centered band; budget a few rows.
+		// Budget the popup as part of the centered logo/prompt band.
 		n := len(m.completion.Candidates)
 		if n == 0 && m.completion.emptyHint != "" {
 			n = 1
