@@ -63,6 +63,22 @@ func TestWrapTextNarrowAndEmpty(t *testing.T) {
 	}
 }
 
+func TestWrapTextEgyptianHieroglyphsStayWithinWidth(t *testing.T) {
+	// Regression #689: unpadded hieroglyphs measure 1 but paint ~2 cells,
+	// shredding multi-column layout. After pad, wrap must keep measured width.
+	const width = 40
+	src := strings.Repeat("𓀀", 80)
+	out := WrapText(src, width)
+	for i, line := range strings.Split(out, "\n") {
+		if got := ansi.StringWidth(line); got > width {
+			t.Errorf("line %d width %d > %d: %q", i, got, width, line)
+		}
+	}
+	if !strings.Contains(out, "𓀀") {
+		t.Fatalf("lost hieroglyphs:\n%s", out)
+	}
+}
+
 func stripWS(s string) string {
 	return strings.Map(func(r rune) rune {
 		if r == ' ' || r == '\n' || r == '\t' || r == '\r' {

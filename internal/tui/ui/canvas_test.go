@@ -22,6 +22,17 @@ func TestCanvasFitsEveryCellAtCommonScreenSizes(t *testing.T) {
 	}
 }
 
+func TestCanvasFitsEgyptianHieroglyphWall(t *testing.T) {
+	// Regression #689: unpadded hieroglyph rows measured short and overflowed.
+	th := theme.Default()
+	wall := strings.Repeat("𓀀𓁹𓂀", 200)
+	out := Canvas(th, 80, 24, wall+"\n"+wall)
+	assertCanvasSize(t, out, 80, 24)
+	if !strings.Contains(ansi.Strip(out), "𓀀") {
+		t.Fatal("canvas dropped hieroglyph content")
+	}
+}
+
 func TestCanvasPaintsContentPaddingAndBlankRows(t *testing.T) {
 	setTrueColor(t)
 	th := theme.Default()

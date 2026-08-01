@@ -1177,6 +1177,39 @@ func TestAssistantCellMarkdownWidthSafeLongFence(t *testing.T) {
 	}
 }
 
+func TestAssistantAndUserCellHieroglyphsWidthSafe(t *testing.T) {
+	// Regression #689: Egyptian Hieroglyph walls shredded the TUI layout.
+	th := theme.Default()
+	src := strings.Repeat("𓀀𓁹𓂀𓃀", 50)
+	for _, width := range []int{24, 40, 80} {
+		for _, cell := range []cell{
+			&userCell{text: src},
+			&assistantCell{text: src, complete: false},
+			&assistantCell{text: src, complete: true},
+		} {
+			out := cell.render(width, th)
+			for i, line := range strings.Split(out, "\n") {
+				if got := ansi.StringWidth(line); got > width {
+					t.Errorf("%T width %d line %d: StringWidth=%d > %d: %q",
+						cell, width, i, got, width, ansi.Strip(line))
+				}
+			}
+			if !strings.Contains(ansi.Strip(out), "𓀀") {
+				t.Errorf("%T width %d dropped hieroglyphs", cell, width)
+			}
+		}
+	}
+	// Copy text stays unpadded so clipboard matches the model/user source.
+	u := &userCell{text: src}
+	if got := u.copyText(); got != strings.TrimRight(src, "\n") {
+		t.Errorf("user copyText was altered by display padding")
+	}
+	a := &assistantCell{text: src, complete: true}
+	if got := a.copyText(); got != strings.TrimRight(src, "\n") {
+		t.Errorf("assistant copyText was altered by display padding")
+	}
+}
+
 func TestAssistantCellStreamingVsComplete(t *testing.T) {
 	th := theme.Default()
 	const src = "# Title"

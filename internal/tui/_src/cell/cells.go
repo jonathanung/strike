@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/jonathanung/strike-cli/internal/tui/common"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 	"github.com/jonathanung/strike-cli/internal/tui/ui"
 )
@@ -564,7 +565,8 @@ type infoCell struct {
 func (c *infoCell) render(width int, th theme.Theme) string {
 	th = th.Resolve()
 	ic := iconsFor(th)
-	return th.S().Warning.Width(max(1, width)).Render(ic.Info + themedSpace(th.Spacing.XS) + c.text)
+	text := common.PadWideGlyphs(c.text)
+	return th.S().Warning.Width(max(1, width)).Render(ic.Info + themedSpace(th.Spacing.XS) + text)
 }
 
 type errorCell struct {
@@ -574,7 +576,8 @@ type errorCell struct {
 func (c *errorCell) render(width int, th theme.Theme) string {
 	th = th.Resolve()
 	ic := iconsFor(th)
-	return th.S().Error.Width(max(1, width)).Render(ic.Err + themedSpace(th.Spacing.XS) + c.text)
+	text := common.PadWideGlyphs(c.text)
+	return th.S().Error.Width(max(1, width)).Render(ic.Err + themedSpace(th.Spacing.XS) + text)
 }
 
 func indent(s, prefix string) string {
@@ -588,6 +591,7 @@ func indent(s, prefix string) string {
 func renderCellText(style lipgloss.Style, text string, width int) string {
 	// Word-wrap (not ansi.Hardwrap) so prose does not split mid-word across
 	// lines (#460). Overlong tokens still hard-break inside ui.WrapText.
+	// WrapText pads wide-neutral historic scripts (#689).
 	return style.Render(ui.WrapText(text, width))
 }
 

@@ -7,11 +7,14 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/jonathanung/strike-cli/internal/tui/common"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
 
 // Canvas fits body to the terminal rectangle. A solid theme background is
 // applied to every cell here, after all views and overlays have composed.
+// Wide-neutral historic scripts are padded before cut so a last-chance width
+// clamp matches double-cell terminal paint (#689).
 func Canvas(th theme.Theme, width, height int, body string) string {
 	if width <= 0 || height <= 0 {
 		return ""
@@ -27,7 +30,7 @@ func Canvas(th theme.Theme, width, height int, body string) string {
 	for i := range out {
 		row := ""
 		if i+start < len(rows) {
-			row = ansi.Cut(rows[i+start], 0, width)
+			row = ansi.Cut(common.PadWideGlyphs(rows[i+start]), 0, width)
 		}
 		rowState := ""
 		if i == 0 {
