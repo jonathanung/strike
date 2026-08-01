@@ -169,6 +169,21 @@ func TestPanelNeverExceedsWidthWithWideRunesAndLongTitle(t *testing.T) {
 	}
 }
 
+func TestPanelNeverExceedsWidthWithEgyptianHieroglyphs(t *testing.T) {
+	// Regression #689: hieroglyph walls broke panel geometry / multi-column join.
+	body := strings.Repeat("𓀀𓁹𓂀", 40)
+	title := "session"
+	for _, width := range []int{10, 20, 40, 80} {
+		out := Panel(theme.Default(), PanelOpts{Title: title, Width: width, Height: 12}, body)
+		for i, line := range strings.Split(out, "\n") {
+			if got := lipgloss.Width(line); got != width {
+				t.Errorf("width %d line %d: lipgloss.Width=%d, want %d\n%s",
+					width, i, got, width, ansi.Strip(line))
+			}
+		}
+	}
+}
+
 func TestPanelDegradesAtTinyWidthsWithoutPanic(t *testing.T) {
 	for _, width := range []int{0, 1, 2} {
 		out := Panel(theme.Default(), PanelOpts{Title: "x", Width: width}, "content")

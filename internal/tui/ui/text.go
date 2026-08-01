@@ -6,15 +6,19 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/jonathanung/strike-cli/internal/tui/common"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
 
 // truncate shortens s to at most width display cells, appending an ellipsis
 // when it must cut. ANSI- and wide-rune-aware; width <= 0 yields "".
+// Wide-neutral historic scripts are padded first so measured width matches
+// common double-cell terminal paint (#689).
 func truncate(th theme.Theme, s string, width int) string {
 	if width <= 0 {
 		return ""
 	}
+	s = common.PadWideGlyphs(s)
 	if lipgloss.Width(s) <= width {
 		return s
 	}
@@ -40,10 +44,14 @@ func padRight(th theme.Theme, s string, width int) string {
 // hard-broken. Trailing pad spaces from the layout engine are stripped so
 // callers can indent without overflowing the budget. width < 1 returns s
 // unchanged. Panel still truncates every line as a width-safety net.
+//
+// Wide-neutral historic scripts (e.g. Egyptian Hieroglyphs) are padded before
+// wrapping so lipgloss width matches double-cell terminal glyphs (#689).
 func WrapText(s string, width int) string {
 	if width < 1 {
 		return s
 	}
+	s = common.PadWideGlyphs(s)
 	out := lipgloss.NewStyle().Width(width).Render(s)
 	lines := strings.Split(out, "\n")
 	for i, line := range lines {

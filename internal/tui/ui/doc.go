@@ -14,6 +14,7 @@
 //   - Zero-value tolerant: a bare theme.Theme{} resolves to the default theme.
 //
 // Imports are limited to the standard library, lipgloss, bubbles,
-// charmbracelet/x/ansi, and internal/tui/theme. Views compose these
-// components rather than building raw lipgloss boxes or lists.
+// charmbracelet/x/ansi, internal/tui/theme, and internal/tui/common (pure
+// display helpers). Views compose these components rather than building raw
+// lipgloss boxes or lists.
 package ui
