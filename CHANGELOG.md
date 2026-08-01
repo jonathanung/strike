@@ -14,6 +14,15 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+## [v0.1.1] - 2026-08-01
+
+Patch release focused on TUI layout stability and launch-screen usability.
+
+### Fixed
+
+- Fixed lean launch-screen autocomplete suggestions appearing far above the prompt on tall terminals ([#688](https://github.com/jonathanung/strike/issues/688), [#690](https://github.com/jonathanung/strike/pull/690)).
+- Fixed Egyptian hieroglyphs and other historic scripts disrupting multi-column TUI layout when rendered in terminals that display them double-wide ([#689](https://github.com/jonathanung/strike/issues/689), [#691](https://github.com/jonathanung/strike/pull/691)).
+
 ## [v0.1.0] - 2026-07-31
 
 First minor milestone: agent teams, layout polish, Charm v2 TUI stack, and safer session defaults.
@@ -316,7 +325,8 @@ Initial public release.
 
 **Full changelog:** [commits through v0.0.1](https://github.com/jonathanung/strike/commits/v0.0.1)
 
-[Unreleased]: https://github.com/jonathanung/strike/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/jonathanung/strike/compare/v0.1.1...HEAD
+[v0.1.1]: https://github.com/jonathanung/strike/compare/v0.1.0...v0.1.1
 [v0.1.0]: https://github.com/jonathanung/strike/compare/v0.0.14...v0.1.0
 [v0.0.14]: https://github.com/jonathanung/strike/compare/v0.0.12...v0.0.14
 [v0.0.12]: https://github.com/jonathanung/strike/compare/v0.0.11...v0.0.12
