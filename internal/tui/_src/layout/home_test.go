@@ -324,3 +324,34 @@ func TestLeftFocusComposerBorderTokens(t *testing.T) {
 		t.Fatal("prompt box missing SurfaceFocus title edge when left-focused")
 	}
 }
+
+func TestHomeCompletionStaysAttachedToPrompt(t *testing.T) {
+	m, _ := newAppTestModelHome(nil, nil)
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
+	m.composer.SetValue("/")
+	m.recomputeCompletion()
+	if m.completion == nil {
+		t.Fatal("slash completion did not open")
+	}
+	lines := strings.Split(ansi.Strip(viewString(m)), "\n")
+	popupRow, promptRow := -1, -1
+	for i, line := range lines {
+		if popupRow < 0 && strings.Contains(line, "select a provider") {
+			popupRow = i
+		}
+		if promptRow < 0 && strings.Contains(line, "command ❯") {
+			promptRow = i
+		}
+	}
+	if popupRow < 0 || promptRow < 0 {
+		t.Fatalf("completion or prompt missing (popup=%d prompt=%d):\n%s", popupRow, promptRow, strings.Join(lines, "\n"))
+	}
+	if promptRow <= popupRow {
+		t.Errorf("completion rendered below prompt: popup row %d, prompt row %d", popupRow, promptRow)
+	}
+	for i := popupRow; i < promptRow; i++ {
+		if strings.TrimSpace(lines[i]) == "" {
+			t.Errorf("blank row separates completion from prompt at row %d", i)
+		}
+	}
+}

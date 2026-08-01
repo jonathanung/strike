@@ -133,9 +133,9 @@ func (m Model) homeRecentLine(width int) string {
 	return padHomeLine(th, line, width)
 }
 
-// homeCenterBand vertically centers logo + prompt (+ optional recent) in the
-// allotted height, matching the pre-first-prompt mock (#677).
-func (m Model) homeCenterBand(width, height, promptOuterH int, compact bool) string {
+// homeCenterBand vertically centers logo + completion popup + prompt (+ optional
+// recent) in the allotted height, matching the pre-first-prompt mock (#677).
+func (m Model) homeCenterBand(width, height, promptOuterH int, compact bool, popup string, popupH int) string {
 	if width <= 0 || height <= 0 {
 		return ""
 	}
@@ -170,19 +170,19 @@ func (m Model) homeCenterBand(width, height, promptOuterH int, compact bool) str
 		gapRecent = 1
 	}
 
-	blockH := logoH + gapLogo + promptOuterH + gapRecent + recentH
+	blockH := logoH + gapLogo + popupH + promptOuterH + gapRecent + recentH
 	// If the band is too short, drop logo then recent to keep the prompt.
 	for blockH > height && logoH > 0 {
 		logo, logoH, gapLogo = "", 0, 0
-		blockH = logoH + gapLogo + promptOuterH + gapRecent + recentH
+		blockH = logoH + gapLogo + popupH + promptOuterH + gapRecent + recentH
 	}
 	for blockH > height && recentH > 0 {
 		recent, recentH, gapRecent = "", 0, 0
-		blockH = logoH + gapLogo + promptOuterH + gapRecent + recentH
+		blockH = logoH + gapLogo + popupH + promptOuterH + gapRecent + recentH
 	}
-	if promptOuterH > height {
-		promptOuterH = height
-		blockH = promptOuterH
+	if promptOuterH+popupH > height {
+		promptOuterH = max(0, height-popupH)
+		blockH = popupH + promptOuterH
 		logo, logoH, gapLogo = "", 0, 0
 		recent, recentH, gapRecent = "", 0, 0
 	}
@@ -200,9 +200,9 @@ func (m Model) homeCenterBand(width, height, promptOuterH int, compact bool) str
 			parts = append(parts, themedSpace(width))
 		}
 	}
-	// Prompt is rendered by the caller into the stack; here we only reserve
-	// space via a placeholder the parent replaces — actually parent joins
-	// prompt separately. homeCenterBand returns the full band including prompt.
+	if popupH > 0 && popup != "" {
+		parts = append(parts, centerHomeBlock(th, popup, width))
+	}
 	prompt := m.composerView(compact, promptW, promptOuterH)
 	parts = append(parts, centerHomeBlock(th, prompt, width))
 	if recentH > 0 {
@@ -367,7 +367,7 @@ func (m Model) renderHomeFrame() string {
 	composerRows := m.homeComposerRows(promptW, compact)
 	popupHeight := 0
 	if m.completion != nil && m.modal == nil {
-		// Popup sits above the centered band; budget a few rows.
+		// Budget the popup as part of the centered logo/prompt band.
 		n := len(m.completion.Candidates)
 		if n == 0 && m.completion.emptyHint != "" {
 			n = 1
@@ -403,15 +403,12 @@ func (m Model) renderHomeFrame() string {
 	if hl.notice > 0 {
 		parts = append(parts, m.noticeView(width, hl.notice))
 	}
+	popup := ""
 	if hl.popup > 0 && m.completion != nil && m.modal == nil {
-		// Center the completion popup over the prompt width.
-		pop := m.completion.view(promptW, hl.popup, m.th)
-		if pop != "" {
-			parts = append(parts, centerHomeBlock(m.th.Resolve(), pop, width))
-		}
+		popup = m.completion.view(promptW, hl.popup, m.th)
 	}
-	if hl.center > 0 {
-		parts = append(parts, m.homeCenterBand(width, hl.center, hl.composer, hl.compact))
+	if hl.center+hl.popup > 0 {
+		parts = append(parts, m.homeCenterBand(width, hl.center+hl.popup, hl.composer, hl.compact, popup, hl.popup))
 	}
 	if hl.hints > 0 {
 		parts = append(parts, m.hintsView(width))
