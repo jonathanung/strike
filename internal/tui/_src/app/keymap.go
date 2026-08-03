@@ -45,9 +45,9 @@ type keyMap struct {
 	CopyLastResponse key.Binding
 	// Tool cell selection/expand/copy/review/apply when the composer is empty
 	// (enter still sends when there is text; alt+enter is newline while typing
-	// and expand only with an empty composer — see handleToolCellKeys; y/v/a
-	// still type when the composer has content; v/a only act with a selected
-	// tool cell).
+	// and expand only with an empty composer — see handleToolCellKeys; y/v
+	// still type when the composer has content; v only acts with a selected
+	// tool cell). ToolApply is alt+a so bare a never steals chat typing (#693).
 	ToolPrev   key.Binding
 	ToolNext   key.Binding
 	ToolExpand key.Binding
@@ -136,7 +136,9 @@ func defaultKeyMap() keyMap {
 		// including assistant/user chat text via OSC52).
 		ToolCopy:   key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy cell")),
 		ToolReview: key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "review edit in editor")),
-		ToolApply:  key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "apply patch to worktree")),
+		// alt+a (not bare a): sticky tool selection + empty composer used to
+		// swallow every "a" keystroke in the chat box (#693).
+		ToolApply: key.NewBinding(key.WithKeys("alt+a"), key.WithHelp("alt+a", "apply patch to worktree")),
 
 		KillWord:      key.NewBinding(key.WithKeys("ctrl+w"), key.WithHelp("ctrl+w", "kill word backward")),
 		WordBackward:  key.NewBinding(key.WithKeys("alt+b"), key.WithHelp("alt+b", "word backward")),
@@ -239,7 +241,7 @@ func applyKeybindOverrides(k *keyMap, overrides map[string][]string) {
 	set(&k.ToolExpand, "nav.tool-expand", "alt+enter")
 	set(&k.ToolCopy, "nav.tool-copy", "")
 	set(&k.ToolReview, "nav.tool-review", "")
-	set(&k.ToolApply, "nav.tool-apply", "")
+	set(&k.ToolApply, "nav.tool-apply", "alt+a")
 	set(&k.Leader, "nav.leader", "")
 	set(&k.SessionChildFirst, "nav.session-child", "ctrl+x down")
 	set(&k.SessionParent, "nav.session-parent", "ctrl+x up")

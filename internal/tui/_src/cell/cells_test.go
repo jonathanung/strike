@@ -616,6 +616,51 @@ func TestVOnBashToolShowsNotice(t *testing.T) {
 	}
 }
 
+// TestATypesIntoComposerWithSelectedTool pins #693: bare a/A must reach the
+// chat composer even when a tool cell is selected and the composer is empty.
+// Apply is alt+a (and still works with a selected applyable edit).
+func TestATypesIntoComposerWithSelectedTool(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m.services.Files = &fakeFiles{files: map[string][]byte{"f.go": []byte("old")}}
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	meta := json.RawMessage(`{"oldString":"old","newString":"new","count":1}`)
+	m.applyEvent(protocol.ToolCallBegin{
+		CallID: "e1", Name: "edit",
+		Args: json.RawMessage(`{"filePath":"f.go","oldString":"old","newString":"new"}`),
+	})
+	m.applyEvent(protocol.ToolCallEnd{
+		CallID: "e1", Title: "f.go", Output: "Edited f.go", Metadata: meta,
+	})
+	m.composer.SetValue("")
+	m = updateApp(t, m, tea.KeyPressMsg{Code: ']', Mod: tea.ModAlt})
+	if m.selectedCell < 0 {
+		t.Fatal("alt+] should select applyable edit cell")
+	}
+
+	// Empty composer + selected tool: bare a and A type, never open apply.
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'a', Text: "a"})
+	if got := m.composer.Value(); got != "a" {
+		t.Fatalf("bare a with selection = %q, want a", got)
+	}
+	if m.modal != nil {
+		t.Fatalf("bare a opened modal %T", m.modal)
+	}
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'A', Text: "A", Mod: tea.ModShift})
+	if got := m.composer.Value(); got != "aA" {
+		t.Fatalf("shift+A = %q, want aA", got)
+	}
+
+	// Clear composer; alt+a still applies the selected edit.
+	m.composer.SetValue("")
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'a', Mod: tea.ModAlt})
+	if m.composer.Value() != "" {
+		t.Fatalf("alt+a mutated composer: %q", m.composer.Value())
+	}
+	if _, ok := m.modal.(*applyDiffModal); !ok {
+		t.Fatalf("alt+a modal = %T, want applyDiffModal", m.modal)
+	}
+}
+
 func TestToolCellCopyTextPrefersDiffOutputCommand(t *testing.T) {
 	meta := json.RawMessage(`{"oldString":"foo\nbar","newString":"baz"}`)
 	diffCell := &toolCell{

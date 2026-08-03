@@ -166,9 +166,17 @@ func TestApplySelectedToolKeyRouting(t *testing.T) {
 	m.composer.SetValue("")
 	m.focus = focusLeft
 
+	// Default bind is alt+a (#693); bare "a" must not open apply.
 	handled, _ := m.handleToolCellKeys(tea.KeyPressMsg{Text: "a"})
+	if handled {
+		t.Fatal("bare a must not handle tool-apply")
+	}
+	if m.modal != nil {
+		t.Fatalf("bare a opened modal %T", m.modal)
+	}
+	handled, _ = m.handleToolCellKeys(tea.KeyPressMsg{Code: 'a', Mod: tea.ModAlt})
 	if !handled {
-		t.Fatal("a should be handled")
+		t.Fatal("alt+a should be handled")
 	}
 	if _, ok := m.modal.(*applyDiffModal); !ok {
 		t.Fatalf("modal = %T", m.modal)

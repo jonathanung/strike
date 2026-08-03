@@ -83,7 +83,7 @@ and jumps to the first pane of the next/previous group. See [usage.md](usage.md)
 | `y` | copy cell (tool/explore, else latest assistant/user) | `/tool-copy` |
 | `alt+y` | copy last assistant response only (skips tool cells) | `/copy` |
 | `v` | review edit in editor | `/tool-review` |
-| `a` | apply shown edit/patch into the active worktree (confirm) | `/tool-apply` |
+| `alt+a` | apply shown edit/patch into the active worktree (confirm; not bare `a`, which types in the composer) | `/tool-apply` |
 
 ## Composer editing
 
