@@ -101,6 +101,9 @@ func (s sessionsAdapter) ReplayJSONL(id string) ([]byte, error) {
 	if id == "" {
 		return nil, fmt.Errorf("session id is empty")
 	}
+	// Flush an open writer first so live subagent polls see recent appends
+	// (TUI refreshes child transcripts while the child is still running).
+	_ = s.m.Sync(id)
 	path := s.m.Path(id)
 	data, err := os.ReadFile(path)
 	if err != nil {

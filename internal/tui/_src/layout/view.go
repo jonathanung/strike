@@ -260,7 +260,12 @@ func (m Model) transcriptView(compact bool, width, height int) string {
 	if len(m.displayCells()) == 0 {
 		if m.viewingChild() {
 			// Empty subagent log still shows a panel (not the root welcome card).
-			body := m.th.Resolve().S().Muted.Render("subagent transcript empty")
+			// Distinguish live children so a brief empty poll is not alarming.
+			msg := "subagent transcript empty"
+			if m.childIsRunning(m.viewingID) {
+				msg = "subagent running…"
+			}
+			body := m.th.Resolve().S().Muted.Render(msg)
 			if compact {
 				return body
 			}

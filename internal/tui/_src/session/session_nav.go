@@ -276,7 +276,18 @@ func (m *Model) openSessionView(id string) tea.Cmd {
 		m.setNotice("session navigation unavailable", true)
 		return nil
 	}
-	cells, tools, title, parentID, err := loadSessionTranscript(m.services.Sessions, id)
+	live := m.childIsRunning(id)
+	var (
+		cells           []cell
+		tools           map[string]*toolCell
+		title, parentID string
+		err             error
+	)
+	if live {
+		cells, tools, title, parentID, err = loadSessionTranscriptLive(m.services.Sessions, id)
+	} else {
+		cells, tools, title, parentID, err = loadSessionTranscript(m.services.Sessions, id)
+	}
 	if err != nil {
 		m.setNotice("subagent transcript: "+err.Error(), true)
 		return nil
@@ -310,7 +321,7 @@ func (m *Model) openSessionView(id string) tea.Cmd {
 	m.viewport.GotoBottom()
 	agentsCmd := m.broadcastAgentsState()
 	// Live refresh while the child is still running.
-	if m.childIsRunning(id) {
+	if live {
 		gen := m.viewGen
 		return tea.Batch(agentsCmd, tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg {
 			return childTranscriptRefreshMsg{id: id, gen: gen}
@@ -333,7 +344,11 @@ func (m *Model) closeSessionView() tea.Cmd {
 
 func (m *Model) childIsRunning(id string) bool {
 	for _, ch := range m.children {
-		if ch.sessionID == id && ch.status == "running" {
+		if ch.sessionID != id {
+			continue
+		}
+		// Treat any non-terminal status as live (running/working/starting/…).
+		if ch.status != "" && !childStatusTerminal(ch.status) {
 			return true
 		}
 	}
@@ -345,8 +360,26 @@ func (m *Model) refreshViewingTranscript() tea.Cmd {
 		return nil
 	}
 	id := m.viewingID
-	cells, tools, title, parentID, err := loadSessionTranscript(m.services.Sessions, id)
+	live := m.childIsRunning(id)
+	var (
+		cells           []cell
+		tools           map[string]*toolCell
+		title, parentID string
+		err             error
+	)
+	if live {
+		cells, tools, title, parentID, err = loadSessionTranscriptLive(m.services.Sessions, id)
+	} else {
+		cells, tools, title, parentID, err = loadSessionTranscript(m.services.Sessions, id)
+	}
 	if err != nil {
+		// Keep prior cells on transient read/decode errors; keep polling while live.
+		if live {
+			gen := m.viewGen
+			return tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg {
+				return childTranscriptRefreshMsg{id: id, gen: gen}
+			})
+		}
 		return nil
 	}
 	if title != "" {
@@ -358,7 +391,7 @@ func (m *Model) refreshViewingTranscript() tea.Cmd {
 	m.viewCells = cells
 	m.viewToolByID = tools
 	m.refreshViewport()
-	if m.childIsRunning(id) {
+	if live {
 		gen := m.viewGen
 		return tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg {
 			return childTranscriptRefreshMsg{id: id, gen: gen}
@@ -395,6 +428,16 @@ func childViewTitle(agent, prompt, sessionID, title, name string) string {
 }
 
 func loadSessionTranscript(sessions host.Sessions, id string) (cells []cell, tools map[string]*toolCell, title, parentID string, err error) {
+	return loadSessionTranscriptOpts(sessions, id, false)
+}
+
+// loadSessionTranscriptLive rebuilds a still-running child transcript without
+// force-completing the trailing assistant/explore stream (issue #692).
+func loadSessionTranscriptLive(sessions host.Sessions, id string) (cells []cell, tools map[string]*toolCell, title, parentID string, err error) {
+	return loadSessionTranscriptOpts(sessions, id, true)
+}
+
+func loadSessionTranscriptOpts(sessions host.Sessions, id string, live bool) (cells []cell, tools map[string]*toolCell, title, parentID string, err error) {
 	data, err := sessions.ReplayJSONL(id)
 	if err != nil {
 		return nil, nil, "", "", err
@@ -407,7 +450,11 @@ func loadSessionTranscript(sessions host.Sessions, id string) (cells []cell, too
 		parentID = info.ParentID
 		title = strings.TrimSpace(info.Title)
 	}
-	cells, tools = cellsFromEvents(events)
+	if live {
+		cells, tools = cellsFromEventsLive(events)
+	} else {
+		cells, tools = cellsFromEvents(events)
+	}
 	if title == "" {
 		for _, ev := range events {
 			if t, ok := ev.(protocol.SessionTitled); ok {
@@ -432,28 +479,43 @@ func loadSessionTranscript(sessions host.Sessions, id string) (cells []cell, too
 }
 
 func decodeSessionJSONL(data []byte) ([]protocol.Event, error) {
-	var events []protocol.Event
+	// Collect lines first so a trailing partial write (live child still
+	// appending) can be skipped without failing the whole transcript.
 	sc := bufio.NewScanner(bytes.NewReader(data))
 	// Multimodal user.message lines can carry multi-MiB base64 images.
 	sc.Buffer(make([]byte, 0, 64*1024), 32<<20)
-	line := 0
+	var lines [][]byte
 	for sc.Scan() {
 		raw := bytes.TrimSpace(sc.Bytes())
 		if len(raw) == 0 {
 			continue
 		}
-		line++
+		// Scanner reuses its buffer; copy each line.
+		lines = append(lines, append([]byte(nil), raw...))
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	var events []protocol.Event
+	for i, raw := range lines {
 		var env protocol.Envelope
 		if err := json.Unmarshal(raw, &env); err != nil {
+			// Last line may be mid-append while the child is still writing.
+			if i == len(lines)-1 {
+				break
+			}
 			return nil, err
 		}
 		ev, err := env.Decode()
 		if err != nil {
+			if i == len(lines)-1 {
+				break
+			}
 			return nil, err
 		}
 		events = append(events, ev)
 	}
-	return events, sc.Err()
+	return events, nil
 }
 
 // seedFromReplay rebuilds transcript cells and durable UI selection state from
@@ -625,9 +687,21 @@ func childrenFromEvents(events []protocol.Event) []childActivity {
 	return out
 }
 
-// cellsFromEvents rebuilds transcript cells from a session event log without
-// side effects (no modals, notices, or agent-state updates).
+// cellsFromEvents rebuilds transcript cells from a finished session event log
+// without side effects (no modals, notices, or agent-state updates). Trailing
+// assistants are marked complete (resume/history).
 func cellsFromEvents(events []protocol.Event) ([]cell, map[string]*toolCell) {
+	return cellsFromEventsOpts(events, false)
+}
+
+// cellsFromEventsLive rebuilds a still-running child transcript. Trailing
+// assistant/explore streams stay incomplete so glamour is not run on partial
+// markdown and live tool tails keep updating (issue #692).
+func cellsFromEventsLive(events []protocol.Event) ([]cell, map[string]*toolCell) {
+	return cellsFromEventsOpts(events, true)
+}
+
+func cellsFromEventsOpts(events []protocol.Event, live bool) ([]cell, map[string]*toolCell) {
 	var cells []cell
 	toolByID := map[string]*toolCell{}
 	childAgent := map[string]string{}
@@ -728,9 +802,16 @@ func cellsFromEvents(events []protocol.Event) ([]cell, map[string]*toolCell) {
 			cells = append(cells, &errorCell{text: ev.Message})
 		}
 	}
-	complete()
-	if exp, ok := lastCell[*exploreCell](cells); ok {
-		exp.accepting = false
+	if live {
+		// Keep trailing stream incomplete while the child is still writing.
+		if exp, ok := lastCell[*exploreCell](cells); ok && exp.allDone() {
+			exp.accepting = false
+		}
+	} else {
+		complete()
+		if exp, ok := lastCell[*exploreCell](cells); ok {
+			exp.accepting = false
+		}
 	}
 	return cells, toolByID
 }

@@ -20,6 +20,58 @@ import (
 	"github.com/jonathanung/strike-cli/internal/tui/ui"
 )
 
+func TestSanitizeTranscriptTextStripsCRAndANSI(t *testing.T) {
+	in := "a\r\nb\rprogress\x1b[31mred\x1b[0m\x00done"
+	got := sanitizeTranscriptText(in)
+	if strings.ContainsAny(got, "\r\x00") {
+		t.Fatalf("retained controls: %q", got)
+	}
+	if strings.Contains(got, "\x1b") {
+		t.Fatalf("retained ANSI: %q", got)
+	}
+	if !strings.Contains(got, "progress") || !strings.Contains(got, "red") || !strings.Contains(got, "done") {
+		t.Fatalf("lost payload: %q", got)
+	}
+	// Newlines preserved (CRLF → LF, bare CR → LF).
+	if !strings.Contains(got, "a\nb\n") {
+		t.Fatalf("newlines not normalized: %q", got)
+	}
+}
+
+func TestToolCellLiveOutputStripsCRFromRender(t *testing.T) {
+	th := theme.Default()
+	cell := &toolCell{
+		name:   "bash",
+		output: "step 1\rstep 2\x1b[2Jcleared",
+		done:   false,
+	}
+	out := cell.render(40, th)
+	if strings.Contains(out, "\r") {
+		t.Fatalf("live tool render retained CR: %q", out)
+	}
+	if strings.Contains(out, "\x1b[2J") {
+		t.Fatalf("live tool render retained clear CSI: %q", out)
+	}
+	plain := ansi.Strip(out)
+	if !strings.Contains(plain, "step 2") {
+		t.Fatalf("missing sanitized tail: %q", plain)
+	}
+}
+
+func TestToolCellHeadClampedToWidth(t *testing.T) {
+	th := theme.Default()
+	long := strings.Repeat("very/long/path/segment/", 8) + "file.go"
+	cell := &toolCell{name: "read", title: long, done: true}
+	for _, w := range []int{20, 40, 60} {
+		out := cell.render(w, th)
+		for i, line := range strings.Split(out, "\n") {
+			if got := ansi.StringWidth(line); got > w {
+				t.Errorf("width %d line %d StringWidth=%d > %d: %q", w, i, got, w, ansi.Strip(line))
+			}
+		}
+	}
+}
+
 func TestToolCellUsesToolGuideIconRatherThanBorderVertical(t *testing.T) {
 	th := theme.Default()
 	th.Icons.ToolGuide = ">"

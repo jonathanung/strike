@@ -82,6 +82,38 @@ func TestNewSessionsNil(t *testing.T) {
 	}
 }
 
+func TestReplayJSONLSyncsOpenSession(t *testing.T) {
+	dir := t.TempDir()
+	mgr := session.NewManager(dir)
+	root, err := mgr.Create(session.CreateOptions{ID: "root-sync", Title: "root"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := mgr.Create(session.CreateOptions{
+		ID:              "child-sync",
+		ParentSessionID: root.ID,
+		Title:           "live",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewSessions(mgr, "")
+	// Append after adapter creation; ReplayJSONL must flush before read.
+	if err := mgr.Append(child.ID, protocol.TextDelta{
+		Correlation: protocol.Correlation{SessionID: child.ID, ParentSessionID: root.ID, Depth: 1},
+		Text:        "synced-live-delta",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := svc.ReplayJSONL(child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "synced-live-delta") {
+		t.Fatalf("ReplayJSONL missed unsynced append: %s", data)
+	}
+}
+
 func TestSessionsAdapterFork(t *testing.T) {
 	dir := t.TempDir()
 	mgr := session.NewManager(dir)
