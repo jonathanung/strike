@@ -244,6 +244,11 @@ func (c *toolCell) renderLinked(width int, th theme.Theme, linkBase string) stri
 		head = toolPart
 	}
 	out := marker + head + space + status
+	// Clamp the head row so OSC 8 path titles cannot overflow the viewport
+	// and get mid-sequence truncated by Panel (terminal corruption, #692).
+	if width > 0 && ansi.StringWidth(out) > width {
+		out = ansi.Truncate(out, width, ic.Ellipsis)
+	}
 	if c.done {
 		prefix := themedSpace(th.Spacing.SM) + st.BorderMuted.Render(ic.ToolGuide) + space
 		bodyWidth := max(1, width-lipgloss.Width(prefix))
@@ -395,6 +400,9 @@ func (c *exploreCell) renderLinked(width int, th theme.Theme, linkBase string) s
 		glyph = ic.TreeExpanded
 	}
 	out := labelStyle.Render(glyph) + space + labelStyle.Render(ic.Tool+space+head) + space + status
+	if width > 0 && ansi.StringWidth(out) > width {
+		out = ansi.Truncate(out, width, ic.Ellipsis)
+	}
 	if !c.expanded {
 		return out
 	}
@@ -592,7 +600,37 @@ func renderCellText(style lipgloss.Style, text string, width int) string {
 	// Word-wrap (not ansi.Hardwrap) so prose does not split mid-word across
 	// lines (#460). Overlong tokens still hard-break inside ui.WrapText.
 	// WrapText pads wide-neutral historic scripts (#689).
-	return style.Render(ui.WrapText(text, width))
+	// Sanitize first: live tool tails often carry CR progress bars and raw
+	// ANSI that corrupt the alt-screen frame when embedded mid-row (#692).
+	return style.Render(ui.WrapText(sanitizeTranscriptText(text), width))
+}
+
+// sanitizeTranscriptText strips terminal-breaking controls from untrusted
+// transcript body text (tool output, streamed assistant plain text). Keeps
+// newlines and tabs; normalizes CR to LF; drops ANSI/CSI/OSC and other C0/C1.
+func sanitizeTranscriptText(s string) string {
+	if s == "" {
+		return s
+	}
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	// Drop embedded SGR/OSC from bash etc. before width measure + paint.
+	s = ansi.Strip(s)
+	if !strings.ContainsFunc(s, func(r rune) bool {
+		return r != '\n' && r != '\t' && (r <= 0x1f || (r >= 0x7f && r <= 0x9f))
+	}) {
+		return s
+	}
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r == '\n' || r == '\t':
+			return r
+		case r <= 0x1f || (r >= 0x7f && r <= 0x9f):
+			return -1
+		default:
+			return r
+		}
+	}, s)
 }
 
 func previewLines(s string, n int, ellipsis, space string) string {

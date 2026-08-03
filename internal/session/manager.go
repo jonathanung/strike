@@ -511,12 +511,33 @@ func (m *Manager) List() ([]Info, error) {
 	return out, nil
 }
 
+// Sync flushes an open session's JSONL writer so concurrent readers (Replay,
+// ReplayJSONL) see the latest appends. No-op when the session is not open.
+func (m *Manager) Sync(id string) error {
+	id = strings.TrimSpace(id)
+	if err := validateID(id); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if e, ok := m.sessions[id]; ok && e.store != nil {
+		return e.store.Sync()
+	}
+	return nil
+}
+
 // Replay loads the full event log for a session id.
 func (m *Manager) Replay(id string) ([]protocol.Event, error) {
 	id = strings.TrimSpace(id)
 	if err := validateID(id); err != nil {
 		return nil, err
 	}
+	// Flush open store so live child transcripts are fully visible.
+	m.mu.Lock()
+	if e, ok := m.sessions[id]; ok && e.store != nil {
+		_ = e.store.Sync()
+	}
+	m.mu.Unlock()
 	return Replay(LogPath(m.dir, id))
 }
 

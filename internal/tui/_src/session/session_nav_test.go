@@ -279,6 +279,165 @@ func TestSkillSubmitBlockedWhileViewingChild(t *testing.T) {
 	}
 }
 
+func TestDecodeSessionJSONLSkipsTrailingPartialLine(t *testing.T) {
+	good := mustSessionJSONL(t,
+		protocol.UserMessage{Text: "go"},
+		protocol.TextDelta{Text: "partial ok"},
+	)
+	// Append a truncated JSON line as a live writer might mid-append.
+	raw := append(append([]byte{}, good...), []byte(`{"type":"text.delta","payload":{"text":"cut`)...)
+	events, err := decodeSessionJSONL(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("events = %d, want 2 complete lines (skip trailing partial)", len(events))
+	}
+	// A corrupt middle line must still fail.
+	badMid := mustSessionJSONL(t, protocol.UserMessage{Text: "a"})
+	badMid = append(badMid, []byte("not-json\n")...)
+	badMid = append(badMid, mustSessionJSONL(t, protocol.TextDelta{Text: "b"})...)
+	if _, err := decodeSessionJSONL(badMid); err == nil {
+		t.Fatal("expected error for corrupt non-trailing line")
+	}
+}
+
+func TestCellsFromEventsLiveKeepsTrailingStreamIncomplete(t *testing.T) {
+	// Trailing TextDelta with no TurnCompleted: finished path force-completes;
+	// live path leaves the assistant incomplete (no glamour on partial md).
+	streamEvents := []protocol.Event{
+		protocol.UserMessage{Text: "work"},
+		protocol.TextDelta{Text: "still streaming **md"},
+	}
+	doneCells, _ := cellsFromEvents(streamEvents)
+	acDone, ok := doneCells[1].(*assistantCell)
+	if !ok || !acDone.complete {
+		t.Fatalf("finished path assistant complete=%v type=%T", ok && acDone.complete, doneCells[1])
+	}
+	liveStream, _ := cellsFromEventsLive(streamEvents)
+	ac, ok := liveStream[1].(*assistantCell)
+	if !ok {
+		t.Fatalf("cell1 = %T, want *assistantCell", liveStream[1])
+	}
+	if ac.complete {
+		t.Fatal("live path must not complete trailing assistant")
+	}
+
+	// Open tool at end of log: assistant is completed by ToolCallBegin (correct),
+	// but the tool stays !done so live tails keep rendering.
+	toolEvents := []protocol.Event{
+		protocol.UserMessage{Text: "work"},
+		protocol.TextDelta{Text: "calling tool"},
+		protocol.ToolCallBegin{CallID: "c1", Name: "bash", Args: json.RawMessage(`{"command":"ls"}`)},
+		protocol.ToolCallOutput{CallID: "c1", Data: "line\rprogress\x1b[31mred\x1b[0m"},
+	}
+	liveCells, tools := cellsFromEventsLive(toolEvents)
+	if len(liveCells) < 3 {
+		t.Fatalf("live cells = %d, want user+assistant+tool", len(liveCells))
+	}
+	acTool, ok := liveCells[1].(*assistantCell)
+	if !ok || !acTool.complete {
+		t.Fatalf("assistant before tool should be complete, ok=%v complete=%v", ok, ok && acTool.complete)
+	}
+	tc, ok := tools["c1"]
+	if !ok || tc.done {
+		t.Fatalf("live tool done=%v ok=%v", ok && tc.done, ok)
+	}
+	if !strings.Contains(tc.output, "progress") {
+		t.Fatalf("tool output = %q", tc.output)
+	}
+}
+
+func TestOpenRunningChildUsesLiveTranscriptAndRefresh(t *testing.T) {
+	fs := newFakeSessions()
+	fs.put(host.Session{ID: "c-live", ParentID: "root", Title: "general"}, mustSessionJSONL(t,
+		protocol.UserMessage{Text: "do work"},
+		protocol.TextDelta{Text: "thinking about it"},
+		protocol.ToolCallBegin{CallID: "t1", Name: "bash", Args: json.RawMessage(`{"command":"echo hi"}`)},
+		protocol.ToolCallOutput{CallID: "t1", Data: "hi\rbye\x1b[2J"},
+	))
+	m, _ := newAppTestModel(nil, nil)
+	m.sessionID = "root"
+	m.services.Sessions = fs
+	m.children = []childActivity{{
+		sessionID: "c-live",
+		agent:     "general",
+		status:    "running",
+	}}
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	cmd := m.openSessionView("c-live")
+	if !m.viewingChild() || m.viewingID != "c-live" {
+		t.Fatalf("viewingID = %q", m.viewingID)
+	}
+	// Live rebuild: open tool stays !done (assistant before tool is complete).
+	var sawAssistant, sawTool bool
+	for _, c := range m.viewCells {
+		switch cell := c.(type) {
+		case *assistantCell:
+			sawAssistant = true
+		case *toolCell:
+			sawTool = true
+			if cell.done {
+				t.Error("running child tool should stay open")
+			}
+		}
+	}
+	if !sawAssistant || !sawTool {
+		t.Fatalf("viewCells missing stream cells: %#v", m.viewCells)
+	}
+	// Refresh tick must be scheduled while running.
+	if cmd == nil {
+		t.Fatal("expected live refresh tick cmd")
+	}
+	// Render must not retain CR / CSI that would corrupt the alt screen.
+	m.refreshViewport()
+	frame := viewString(m)
+	if strings.Contains(frame, "\r") {
+		t.Fatal("rendered frame retained carriage return")
+	}
+	if strings.Contains(frame, "\x1b[2J") {
+		t.Fatal("rendered frame retained clear-screen CSI from tool output")
+	}
+	plain := ansi.Strip(frame)
+	if !strings.Contains(plain, "thinking about it") && !strings.Contains(plain, "bash") {
+		t.Errorf("missing live child content:\n%s", plain)
+	}
+	if !strings.Contains(plain, "subagent running") {
+		// Only when empty; with content we should show the transcript panel title.
+		if !strings.Contains(plain, "general") && !strings.Contains(plain, "do work") {
+			t.Errorf("missing child title chrome:\n%s", plain)
+		}
+	}
+}
+
+func TestRunningChildEmptyShowsLivePlaceholder(t *testing.T) {
+	fs := newFakeSessions()
+	// ChildStarted-only log yields no transcript cells.
+	fs.put(host.Session{ID: "c-empty", ParentID: "root", Title: "general"}, mustSessionJSONL(t,
+		protocol.ChildStarted{
+			Correlation: protocol.Correlation{SessionID: "c-empty", ParentSessionID: "root", Depth: 1},
+			Agent:       "general",
+			Prompt:      "soon",
+		},
+	))
+	m, _ := newAppTestModel(nil, nil)
+	m.sessionID = "root"
+	m.services.Sessions = fs
+	m.children = []childActivity{{sessionID: "c-empty", agent: "general", status: "running"}}
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	_ = m.openSessionView("c-empty")
+	if len(m.viewCells) != 0 {
+		t.Fatalf("viewCells = %d, want 0", len(m.viewCells))
+	}
+	plain := ansi.Strip(viewString(m))
+	if !strings.Contains(plain, "subagent running") {
+		t.Errorf("want live placeholder, got:\n%s", plain)
+	}
+	if strings.Contains(plain, "subagent transcript empty") {
+		t.Errorf("finished empty copy shown for running child:\n%s", plain)
+	}
+}
+
 func TestChildCompletedRefreshesViewingTranscript(t *testing.T) {
 	fs := newFakeSessions()
 	fs.put(host.Session{ID: "c1", ParentID: "root", Title: "work"}, mustSessionJSONL(t,
