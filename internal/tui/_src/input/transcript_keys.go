@@ -246,8 +246,8 @@ func (m *Model) renderCell(c cell, width int) string {
 }
 
 // handleToolCellKeys handles tool selection (alt+[/]), expand/open-at-line
-// (alt+enter), copy (y), post-edit review (v), and apply patch (a) when the
-// composer is empty. Bare enter is send-only and never expands (#421).
+// (alt+enter), copy (y), post-edit review (v), and apply patch (alt+a) when
+// the composer is empty. Bare enter is send-only and never expands (#421).
 // alt+enter matches both ToolExpand and Newline; with empty composer this
 // path wins and expands, otherwise Newline inserts. handled is true when the
 // key was consumed; cmd may launch the editor, open a confirm modal, or clear
@@ -414,8 +414,8 @@ func (m *Model) reviewSelectedTool() (bool, tea.Cmd) {
 }
 
 // applySelectedTool opens a confirm modal to write the selected tool's shown
-// patch into the active worktree. Does not consume "a" when nothing is
-// selected so typing still reaches the empty composer.
+// patch into the active worktree. Does not consume the apply chord when
+// nothing is selected. Default bind is alt+a so bare "a" always types (#693).
 func (m *Model) applySelectedTool() (bool, tea.Cmd) {
 	cells := m.displayCells()
 	if m.selectedCell < 0 || m.selectedCell >= len(cells) {
