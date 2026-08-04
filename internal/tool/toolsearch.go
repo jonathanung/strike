@@ -25,7 +25,7 @@ func (t *toolSearchTool) Name() string { return "toolsearch" }
 func (t *toolSearchTool) Description() string {
 	base := `Search available tools by name or description substring.
 
-Use when you need to discover which tools are registered and what they do. Query tokens are matched case-insensitively against each tool's name and description; all whitespace-separated tokens must match.`
+Use when you need to discover which tools are registered and what they do. Query tokens are matched case-insensitively against each tool's name and description; all whitespace-separated tokens must match. Wrap multi-word phrases in double quotes to search for a literal substring (e.g. "read file").`
 	if t.reg != nil && t.reg.DeferLoading() {
 		return base + `
 
@@ -38,7 +38,7 @@ func (t *toolSearchTool) Schema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
-			"query": {"type": "string", "description": "Case-insensitive substring query (whitespace-separated tokens all must match)"}
+			"query": {"type": "string", "description": "Case-insensitive substring query. Whitespace-separated tokens all must match. Wrap multi-word phrases in double quotes to search for a literal substring (e.g. \"read file\")."}
 		},
 		"required": ["query"]
 	}`)
@@ -46,6 +46,46 @@ func (t *toolSearchTool) Schema() json.RawMessage {
 
 type toolSearchArgs struct {
 	Query string `json:"query"`
+}
+
+// splitQuery splits a tool search query into tokens. Quoted segments ("...")
+// are treated as single literal tokens with spaces preserved. Unquoted segments
+// are split on whitespace. An unmatched opening quote treats the rest of the
+// string as one token.
+func splitQuery(query string) []string {
+	var tokens []string
+	i := 0
+	n := len(query)
+	for i < n {
+		// Skip whitespace.
+		if query[i] == ' ' || query[i] == '\t' {
+			i++
+			continue
+		}
+		if query[i] == '"' {
+			// Quoted phrase — find closing quote.
+			i++ // skip opening quote
+			start := i
+			for i < n && query[i] != '"' {
+				i++
+			}
+			tok := strings.TrimSpace(query[start:i])
+			if tok != "" {
+				tokens = append(tokens, strings.ToLower(tok))
+			}
+			if i < n {
+				i++ // skip closing quote
+			}
+		} else {
+			// Unquoted word — scan until whitespace or quote.
+			start := i
+			for i < n && query[i] != ' ' && query[i] != '\t' && query[i] != '"' {
+				i++
+			}
+			tokens = append(tokens, strings.ToLower(query[start:i]))
+		}
+	}
+	return tokens
 }
 
 func (t *toolSearchTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
@@ -68,7 +108,7 @@ func (t *toolSearchTool) Execute(ctx context.Context, args json.RawMessage, tc *
 		return Result{}, err
 	}
 
-	tokens := strings.Fields(strings.ToLower(query))
+	tokens := splitQuery(query)
 	// Search the full registry (including deferred tools not yet in Tools[]).
 	schemas := t.reg.Schemas()
 	var matches []string
