@@ -41,6 +41,11 @@ type CreateOptions struct {
 	ProjectKey      string // same key as history/memory (canonical project root)
 }
 
+// listCacheTTL is how long Manager.List reuses an in-memory snapshot before
+// falling through to disk. Invalidation happens on any mutation (Create,
+// Delete, Rename, Close, Fork/ForkAt).
+const listCacheTTL = 5 * time.Second
+
 // Manager coordinates concurrent open session stores under a directory and
 // inventories durable sessions on disk. It is safe for concurrent use.
 // Engine ownership and per-session interrupt remain outside this package.
@@ -49,6 +54,9 @@ type Manager struct {
 
 	mu       sync.Mutex
 	sessions map[string]*managed
+
+	listCache    []Info
+	listCachedAt time.Time
 }
 
 type managed struct {
@@ -124,6 +132,7 @@ func (m *Manager) Create(opts CreateOptions) (Info, error) {
 		PRState:         NormalizePRState(meta.PRState),
 	}
 	m.sessions[id] = &managed{store: store, info: info}
+	m.invalidateListCache()
 	return info, nil
 }
 
@@ -195,6 +204,7 @@ func (m *Manager) Rename(id, title string) (Info, error) {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.invalidateListCache()
 	if e, ok := m.sessions[id]; ok {
 		e.info.Title = meta.Title
 		return e.info, nil
@@ -225,6 +235,7 @@ func (m *Manager) delete(id string, force bool) error {
 	}
 	m.mu.Lock()
 	_, open := m.sessions[id]
+	m.invalidateListCache()
 	m.mu.Unlock()
 	if open && !force {
 		return fmt.Errorf("session %q is open; force required to delete", id)
@@ -350,6 +361,7 @@ func (m *Manager) Close(id string) error {
 		return nil
 	}
 	delete(m.sessions, id)
+	m.invalidateListCache()
 	store := e.store
 	m.mu.Unlock()
 	return store.Close()
@@ -462,9 +474,24 @@ func rootMoreRecent(a, b Info) bool {
 	return a.ID > b.ID
 }
 
+// invalidateListCache clears the List result cache. Call from any method that
+// mutates the session set (create, delete, rename, close, fork).
+func (m *Manager) invalidateListCache() {
+	m.listCache = nil
+	m.listCachedAt = time.Time{}
+}
+
 // List returns all durable sessions under the manager directory (open + closed).
 // Newest UpdatedAt first. Open sessions reflect live title/updated state.
 func (m *Manager) List() ([]Info, error) {
+	m.mu.Lock()
+	if time.Since(m.listCachedAt) < listCacheTTL && m.listCache != nil {
+		out := m.listCache
+		m.mu.Unlock()
+		return out, nil
+	}
+	m.mu.Unlock()
+
 	entries, err := os.ReadDir(m.dir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -508,6 +535,10 @@ func (m *Manager) List() ([]Info, error) {
 		out = append(out, info)
 	}
 	sortInfos(out)
+	if len(out) > 0 {
+		m.listCache = out
+		m.listCachedAt = time.Now()
+	}
 	return out, nil
 }
 
