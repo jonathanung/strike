@@ -12,6 +12,8 @@ const backendBwrap = "bwrap"
 
 var bwrapPath string // absolute path from LookPath when probe succeeds
 
+func clearLauncherForTest() { bwrapPath = "" }
+
 func probePlatform() availInfo {
 	path, err := exec.LookPath(backendBwrap)
 	if err != nil {

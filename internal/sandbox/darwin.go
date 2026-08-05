@@ -22,6 +22,8 @@ var (
 	seatbeltResolved string                // absolute launcher from successful probe
 )
 
+func clearLauncherForTest() { seatbeltResolved = "" }
+
 func probePlatform() availInfo {
 	// Prefer the system binary; a PATH hijack of sandbox-exec would be root-equivalent.
 	path := seatbeltPath

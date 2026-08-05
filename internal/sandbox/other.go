@@ -2,6 +2,8 @@
 
 package sandbox
 
+func clearLauncherForTest() {}
+
 func probePlatform() availInfo {
 	return availInfo{
 		warn: "OS process sandbox is not supported on this platform; bash runs unsandboxed",

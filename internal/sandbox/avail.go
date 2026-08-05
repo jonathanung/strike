@@ -29,6 +29,7 @@ func resetAvailabilityForTest() {
 	defer availMu.Unlock()
 	availOnce = sync.Once{}
 	availCached = availInfo{}
+	clearLauncherForTest()
 }
 
 // forceSetAvailabilityForTest pins the probe result without running the backend.
