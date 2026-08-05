@@ -54,7 +54,8 @@ func wrapPlatform(argv []string, policy Policy) []string {
 	}
 	launcher := bwrapPath
 	if launcher == "" {
-		// Probe should have set this; fall back to LookPath absolute.
+		// Probe normally pins an absolute path. Fall back to LookPath, then the
+		// bare name (unit tests that force Available without a real probe).
 		if p, err := exec.LookPath(backendBwrap); err == nil {
 			if abs, err := filepath.Abs(p); err == nil {
 				launcher = abs
@@ -62,7 +63,7 @@ func wrapPlatform(argv []string, policy Policy) []string {
 				launcher = p
 			}
 		} else {
-			return nil
+			launcher = backendBwrap
 		}
 	}
 	out := []string{
