@@ -61,10 +61,11 @@ make build
 Details: [docs/nix.md](docs/nix.md).
 
 In the TUI: `/provider`, `/model`, `/auth`, `/theme`, `/session`, `/init`,
-`/help`, `/upgrade`. `/init` bootstraps project `AGENTS.md` (confirms before
-overwrite). Enter sends; Shift+Enter newline; `esc` interrupts; `ctrl+t` jumps
-to latest output; `ctrl+c` quits. `@path` attaches project files. See
-[docs/keybinds.md](docs/keybinds.md) and [docs/usage.md](docs/usage.md).
+`/ftue`, `/help`, `/upgrade`. `/init` bootstraps project `AGENTS.md` (confirms
+before overwrite). `/ftue` opens the setup wizard (provider, model, optional
+init, first prompt). Enter sends; Shift+Enter newline; `esc` interrupts;
+`ctrl+t` jumps to latest output; `ctrl+c` quits. `@path` attaches project
+files. See [docs/keybinds.md](docs/keybinds.md) and [docs/usage.md](docs/usage.md).
 
 ## Experimental web cockpit (`strike serve`)
 

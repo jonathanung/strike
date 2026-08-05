@@ -176,6 +176,10 @@ func (m *Model) promoteModalQueue() tea.Cmd {
 	if len(m.modalQueue) == 0 {
 		m.modalQueue = nil
 	}
+	// Refresh parked setup wizard with live provider/model before showing it.
+	if f, ok := mod.(*ftueModal); ok {
+		f.syncFrom(m.providerName, m.modelName)
+	}
 	m.modal = mod
 	return m.armVisibleBlocking(mod)
 }

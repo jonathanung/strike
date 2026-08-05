@@ -69,6 +69,7 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		{ID: "command:cost", Label: "/cost", Description: "session token and cost totals", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/cost"}},
 		{ID: "command:upgrade", Label: "/upgrade", Description: "install the latest release and restart", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/upgrade"}},
 		{ID: "command:init", Label: "/init", Description: "create or update project AGENTS.md", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/init"}},
+		{ID: "command:ftue", Label: "/ftue", Description: "setup wizard: provider, model, optional init, first prompt", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/ftue"}},
 		{ID: "command:mcp", Label: "/mcp", Description: "MCP servers: status, retry, disable", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/mcp"}},
 		{ID: "command:exit", Label: "/exit", Description: "quit strike", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/exit"}},
 		{ID: "command:quit", Label: "/quit", Description: "quit strike", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/quit"}},
