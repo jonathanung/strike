@@ -297,8 +297,9 @@ Two different mechanisms, depending on whether it needs Go code:
    See `keybindSlashPrimary` in `internal/tui/keybind_slash.go` for the full
    keybind→slash map. `/init` is a builtin that writes project
    `AGENTS.md` via `host.ProjectInit` (confirm before overwrite). `/ftue` opens
-   the setup wizard (provider → model → optional init → first prompt) without
-   writing settings on open. PR URLs from successful `gh pr` bash
+   the setup wizard (provider → model → optional init → feature tour → first
+   prompt) without writing settings on open. The feature tour is read-only,
+   uses live keybind labels, and omits unavailable surfaces. PR URLs from successful `gh pr` bash
    output are stored via `protocol.SessionMeta` and `session` sidecar
    metadata. `/vim` embeds nvim/vim/nano in the right-pane `editor` window by
    default (PTY + vt10x via `internal/tui/term`). Config key `vimMode`

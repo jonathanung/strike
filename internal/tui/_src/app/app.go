@@ -936,6 +936,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reflow()
 		return m, cmd
 
+	case tourClosedMsg:
+		cmd := m.applyTourClosed(msg)
+		m.reflow()
+		return m, cmd
+
 	case initResultMsg:
 		return m.applyInitResult(msg)
 
