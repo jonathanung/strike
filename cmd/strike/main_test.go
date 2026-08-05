@@ -31,6 +31,8 @@ Options:
   --model <model>                    model id; overrides config
   --effort <level>                   reasoning effort (off|low|medium|high|xhigh|max); overrides config
   --auto, --dangerously-skip-permissions skip configured permission prompts (agent profile denies still apply)
+  --sandbox <mode>                   OS process sandbox for bash (off|read-only|workspace-write); overrides config
+  --i-know                           allow permissionMode yolo when sandbox is off (explicit override)
   --continue                         resume the most recent root session (model history + selections)
   --session <id>                     resume a specific session by id (model history + selections)
   --worktree                         run this session in an isolated git worktree under .strike/worktrees/
@@ -177,6 +179,34 @@ func TestParseCLIOptionsDangerousBooleanForms(t *testing.T) {
 		if opts.dangerouslySkipPermissions != tt.want {
 			t.Errorf("parseCLIOptions(%q) dangerouslySkipPermissions = %t, want %t", tt.args, opts.dangerouslySkipPermissions, tt.want)
 		}
+	}
+}
+
+func TestParseCLIOptionsSandboxAndIKnow(t *testing.T) {
+	opts, err := parseCLIOptions([]string{"--sandbox", "read-only", "--i-know"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.sandbox != "read-only" {
+		t.Errorf("sandbox = %q", opts.sandbox)
+	}
+	if !opts.iKnow {
+		t.Error("want iKnow true")
+	}
+	if _, err := parseCLIOptions([]string{"--sandbox", "nope"}); err == nil {
+		t.Fatal("want unknown sandbox error")
+	}
+	mode, err := resolveSandboxMode("off", "workspace-write")
+	if err != nil || mode != "workspace-write" {
+		t.Fatalf("CLI overrides config: mode=%q err=%v", mode, err)
+	}
+	mode, err = resolveSandboxMode("read-only", "")
+	if err != nil || mode != "read-only" {
+		t.Fatalf("config only: mode=%q err=%v", mode, err)
+	}
+	mode, err = resolveSandboxMode("", "")
+	if err != nil || mode != "workspace-write" {
+		t.Fatalf("default: mode=%q err=%v", mode, err)
 	}
 }
 

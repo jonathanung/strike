@@ -107,6 +107,11 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 			ops <- protocol.SetPermissionMode{Mode: mode}
 			return nil
 		}
+	case "/sandbox":
+		m.resetComposer()
+		m.clearNotice()
+		m.setNotice(m.sandboxStatusNotice(), false)
+		return m, nil
 	case "/auth":
 		m.resetComposer()
 		return m.handleAuth(fields[1:])
@@ -1405,4 +1410,30 @@ func permissionModeChoices() string {
 		names = append(names, string(mode))
 	}
 	return strings.Join(names, "|")
+}
+
+// sandboxStatusNotice formats the effective OS sandbox policy for /sandbox.
+// Two-dial model: sandbox = what is possible; permissionMode = when asked.
+func (m Model) sandboxStatusNotice() string {
+	mode := strings.TrimSpace(m.sandboxMode)
+	if mode == "" {
+		mode = "workspace-write"
+	}
+	ic := m.themeIcons()
+	dot := " " + ic.Dot + " "
+	var b strings.Builder
+	fmt.Fprintf(&b, "sandbox: %s", mode)
+	switch {
+	case mode == "off":
+		b.WriteString(" (OS isolation disabled)")
+	case m.sandboxAvailable && m.sandboxBackend != "":
+		fmt.Fprintf(&b, "%sbackend %s", dot, m.sandboxBackend)
+	case m.sandboxAvailable:
+		b.WriteString(dot + "backend available")
+	default:
+		b.WriteString(dot + "backend unavailable (bash unsandboxed)")
+	}
+	fmt.Fprintf(&b, "%spermissionMode: %s", dot, m.permMode.Normalize())
+	b.WriteString(" " + ic.DetailSeparator + " sandbox=what is possible, permissionMode=when asked")
+	return b.String()
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/project"
 	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike-cli/internal/sandbox"
 	"github.com/jonathanung/strike-cli/internal/session"
 	"github.com/jonathanung/strike-cli/internal/tui"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -316,6 +317,9 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 			NanoMode:                     nanoMode,
 			MdReadMode:                   mdReadMode,
 			NotifyMode:                   notifyMode,
+			SandboxMode:                  a.sandboxMode,
+			SandboxBackend:               sandbox.BackendName(),
+			SandboxAvailable:             sandbox.Available(),
 			PermissionAutoApproveSeconds: a.cfg.PermissionAutoApproveSeconds,
 			PermissionAutoApproveExclude: a.cfg.PermissionAutoApproveExclude,
 			Replay:                       a.replay,

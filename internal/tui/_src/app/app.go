@@ -134,6 +134,14 @@ type Options struct {
 	// NotifyMode selects desktop notifications: on, off, or unfocused-only
 	// (default). Wired from config.notify.
 	NotifyMode NotifyMode
+	// SandboxMode is the resolved OS sandbox dial (off|read-only|workspace-write).
+	// Empty means workspace-write. Displayed by /sandbox; not mid-session mutable.
+	SandboxMode string
+	// SandboxBackend is the platform launcher name ("bwrap", "sandbox-exec") or
+	// empty when unavailable. Displayed by /sandbox.
+	SandboxBackend string
+	// SandboxAvailable reports whether the OS sandbox backend can run.
+	SandboxAvailable bool
 	// Replay is a prior session event log for --continue / --session. Seeded
 	// via cellsFromEvents + silent selection/child state — never fed through
 	// applyEvent (avoids stuck turns, zombie permission modals, orphan children).
@@ -246,6 +254,12 @@ type Model struct {
 	autonomy protocol.Autonomy
 	// permMode is the session tool-permission posture dial; default default.
 	permMode protocol.PermissionMode
+	// sandboxMode is the process OS sandbox dial (config/CLI); default workspace-write.
+	sandboxMode string
+	// sandboxBackend is bwrap|sandbox-exec|"" for /sandbox status.
+	sandboxBackend string
+	// sandboxAvailable is whether the OS backend can apply isolation.
+	sandboxAvailable bool
 	// fastEnabled is the session priority-tier preference from /fast.
 	fastEnabled bool
 	// showThinking shows reasoning/CoT cells in the transcript (/think).
@@ -441,6 +455,7 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		detectedDark:        true, // until BackgroundColorMsg; matches lipgloss default
 		autonomy:            protocol.AutonomySupervised,
 		permMode:            protocol.PermissionModeDefault,
+		sandboxMode:         "workspace-write",
 	}
 	m.applyAppearance()
 	var replay []protocol.Event
@@ -469,6 +484,13 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		}
 		if option.NotifyMode != "" {
 			m.notifyMode = option.NotifyMode
+		}
+		if option.SandboxMode != "" {
+			// Apply backend/availability with mode so a later partial Options
+			// (e.g. WorkDir-only) cannot clear a prior sandbox wiring.
+			m.sandboxMode = option.SandboxMode
+			m.sandboxBackend = option.SandboxBackend
+			m.sandboxAvailable = option.SandboxAvailable
 		}
 		if option.PermissionAutoApproveSeconds != 0 {
 			m.permissionAutoApproveSeconds = option.PermissionAutoApproveSeconds

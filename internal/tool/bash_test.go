@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jonathanung/strike-cli/internal/sandbox"
 )
 
 func TestExtractSessionPR(t *testing.T) {
@@ -211,6 +213,39 @@ func TestBashWorkspaceWriteInsideSandbox(t *testing.T) {
 	}
 	if string(body) != "x" {
 		t.Fatalf("file = %q", body)
+	}
+}
+
+func TestBashSandboxModeOff(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	root := t.TempDir()
+	tc := allowAll(root)
+	tc.SandboxMode = "off"
+	res, err := NewBash().Execute(context.Background(), mustJSON(t, map[string]any{
+		"command": "echo off-mode-ok",
+	}), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Output, "off-mode-ok") {
+		t.Fatalf("output = %q", res.Output)
+	}
+}
+
+func TestBashSandboxMode(t *testing.T) {
+	if got := bashSandboxMode(nil); got != sandbox.DefaultMode {
+		t.Fatalf("nil tc = %v", got)
+	}
+	if got := bashSandboxMode(&Context{}); got != sandbox.ModeWorkspaceWrite {
+		t.Fatalf("empty = %v", got)
+	}
+	if got := bashSandboxMode(&Context{SandboxMode: "off"}); got != sandbox.ModeOff {
+		t.Fatalf("off = %v", got)
+	}
+	if got := bashSandboxMode(&Context{SandboxMode: "read-only"}); got != sandbox.ModeReadOnly {
+		t.Fatalf("read-only = %v", got)
 	}
 }
 

@@ -96,8 +96,8 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 
 	// Fresh process each call: Dir is always the session workdir so shell cd
 	// cannot stick across tool invocations. OS sandbox (bwrap / seatbelt)
-	// confines the shell when the platform backend is available; E1.4 will
-	// expose a config dial over this policy.
+	// confines the shell when the platform backend is available and mode is
+	// not off (config/CLI sandbox dial via tc.SandboxMode).
 	proc, err := RunProcess(ctx, ProcessSpec{
 		Argv:      []string{"bash", "-c", a.Command},
 		Dir:       tc.WorkDir,
@@ -105,7 +105,7 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 		MaxOutput: bashMaxOutput,
 		Combine:   true,
 		Sandbox: sandbox.Policy{
-			Mode:    sandbox.ModeWorkspaceWrite,
+			Mode:    bashSandboxMode(tc),
 			WorkDir: tc.WorkDir,
 		},
 	}, obs)
@@ -152,6 +152,15 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	}
 	meta, _ := json.Marshal(metaFields)
 	return Result{Title: a.Command, Output: output, Metadata: meta}, nil
+}
+
+// bashSandboxMode resolves the OS sandbox dial from tool context.
+// Empty/unset defaults to workspace-write (product default).
+func bashSandboxMode(tc *Context) sandbox.Mode {
+	if tc == nil {
+		return sandbox.DefaultMode
+	}
+	return sandbox.ResolveMode(tc.SandboxMode)
 }
 
 // githubPRURLRe matches common GitHub pull request URLs in gh CLI output.

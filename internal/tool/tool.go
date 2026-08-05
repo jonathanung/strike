@@ -300,7 +300,11 @@ type SessionPR struct {
 // RecordSessionPR, when non-nil, persists a PR URL/number on the session
 // (used when bash captures gh pr create/view output).
 type Context struct {
-	WorkDir     string
+	WorkDir string
+	// SandboxMode is the OS process sandbox dial for bash
+	// (off|read-only|workspace-write). Empty means workspace-write (default).
+	// Wired from config/CLI; see internal/sandbox.ParseMode.
+	SandboxMode string
 	Ask         func(ctx context.Context, req AskRequest) error
 	SpawnTask   func(ctx context.Context, req TaskRequest) (TaskResult, error)
 	TaskStatus  func(ctx context.Context, req TaskStatusRequest) (TaskStatusResult, error)
