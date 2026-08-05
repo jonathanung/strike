@@ -43,10 +43,12 @@ var ErrUnknownPool = errors.New("unknown scheduler pool")
 // Config configures named pool capacities.
 //
 // Capacity <= 0 means unlimited (no admission wait for that pool alone).
-// Unknown names are rejected at construction; Acquire only accepts configured pools.
+// Empty pool names are rejected at construction. Acquire only accepts pools
+// present in Pools (or the default name set when Pools is empty).
 type Config struct {
 	// Pools maps pool name → capacity. Nil or empty yields DefaultPoolNames
-	// each with unlimited capacity.
+	// each with unlimited capacity. A non-empty map is the full pool set
+	// (defaults are not merged in).
 	Pools map[string]int
 }
 
