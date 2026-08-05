@@ -46,6 +46,6 @@ func (m *alertModal) view(width int, th theme.Theme) string {
 // startupAlertMsg opens Options.StartupAlert once after Init.
 type startupAlertMsg struct{}
 
-// alertDismissedMsg is delivered when alertModal closes so first-run setup
+// alertDismissedMsg is delivered when alertModal closes so first-run /ftue
 // can still open if it was deferred behind the alert.
 type alertDismissedMsg struct{}

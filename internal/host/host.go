@@ -179,6 +179,20 @@ type Settings interface {
 	SaveKeybinds(overrides map[string][]string) error
 }
 
+// Onboarding is global first-time setup state (installation-scoped, not
+// per-project). Interactive TUI may auto-open /ftue while unacknowledged;
+// exec/auth/serve/version/upgrade must not call this interface.
+type Onboarding interface {
+	// ShouldAutoOpen reports whether an interactive TUI launch should open
+	// the setup wizard once. Established installs (sessions or real
+	// credentials) migrate to acknowledged without returning true. Safe to
+	// call repeatedly; may persist migration on first call.
+	ShouldAutoOpen() bool
+	// Acknowledge marks onboarding complete (finish or dismiss). Idempotent
+	// and safe under concurrent in-process callers.
+	Acknowledge() error
+}
+
 // History is project-scoped prompt history. Enqueue is async; the channel
 // yields the persistence result exactly once.
 type History interface {
@@ -566,21 +580,22 @@ type Shell interface {
 // may be nil/empty when a capability is absent (tests, future frontends);
 // frontends must degrade gracefully.
 type Services struct {
-	Auth      Auth
-	Catalog   Catalog
-	Settings  Settings
-	History   History
-	Files     Files
-	Shell     Shell // composer ! bang; nil when unsupported
-	Memory    Memory
-	Issues    Issues
-	Goals     Goals     // loop harness; nil when unsupported
-	Sessions  Sessions  // durable session list/replay; nil when unsupported
-	Roots     Roots     // concurrent parent sessions; nil when single-root only
-	Providers Providers // custom/self-hosted provider CRUD; nil when unsupported
-	Init      ProjectInit
-	MCP       MCP       // external MCP server status; nil when unsupported
-	Telemetry Telemetry // local CPU/RAM/disk; nil when unsupported
-	Agents    []string  // selectable agent names, default first
-	Skills    []Skill
+	Auth       Auth
+	Catalog    Catalog
+	Settings   Settings
+	Onboarding Onboarding // global FTUE state; nil when unsupported
+	History    History
+	Files      Files
+	Shell      Shell // composer ! bang; nil when unsupported
+	Memory     Memory
+	Issues     Issues
+	Goals      Goals     // loop harness; nil when unsupported
+	Sessions   Sessions  // durable session list/replay; nil when unsupported
+	Roots      Roots     // concurrent parent sessions; nil when single-root only
+	Providers  Providers // custom/self-hosted provider CRUD; nil when unsupported
+	Init       ProjectInit
+	MCP        MCP       // external MCP server status; nil when unsupported
+	Telemetry  Telemetry // local CPU/RAM/disk; nil when unsupported
+	Agents     []string  // selectable agent names, default first
+	Skills     []Skill
 }

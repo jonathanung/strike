@@ -17,8 +17,11 @@ import (
 // so the engine's bash tool blocks on admission, then interrupts the turn.
 // A canceled waiter must never emit process.started.
 func TestEngineBashSchedulerCancelQueuedNoProcessStarted(t *testing.T) {
+	// Include model so the engine's stream admission (SCHED.5) can run while
+	// we hold the process pool for bash queueing.
 	s, err := scheduler.New(scheduler.Config{Pools: map[string]int{
 		scheduler.PoolProcess: 1,
+		scheduler.PoolModel:   4,
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -129,6 +132,7 @@ func TestEngineBashSchedulerSharedPolicyClassifies(t *testing.T) {
 		scheduler.PoolProcess: 4,
 		scheduler.PoolBuild:   4,
 		scheduler.PoolTest:    4,
+		scheduler.PoolModel:   4,
 	}})
 	if err != nil {
 		t.Fatal(err)

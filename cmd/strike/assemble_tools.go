@@ -51,7 +51,6 @@ type assembled struct {
 	// sandboxExplain is the multi-line /sandbox explain text (config layers).
 	sandboxExplain string
 	services       host.Services
-	firstRun       bool
 	historyClose   func() error
 	memoryClose    func() error
 	issuesClose    func() error
@@ -413,8 +412,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		return n
 	}
 
-	// One scheduler for the launch project — shared by every root and child
-	// in this Strike process. Omitted limits stay unlimited (no wait).
+	// Process-local scheduler shared by every root and child engine so model
+	// and bash (process/build/test) pools cap aggregate concurrency inside
+	// this OS process. Omitted limits stay unlimited (no wait).
 	schedEff, err := cfg.SchedulerEffective()
 	if err != nil {
 		_ = goalStore.Close()
@@ -542,6 +542,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			SystemPrompt:            cfg.SystemPrompt,
 			LeanCode:                cfg.LeanCode,
 			HarnessRegistry:         harnessRegistry,
+			Scheduler:               sched,
+			SchedulerPolicy:         schedEff,
 			MaxChildDepth:           cfg.MaxChildDepth,
 			InitialProvider:         initialProvider,
 			InitialModel:            initialModel,
@@ -550,8 +552,6 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			InitialPermissionMode:   initialPermMode,
 			SandboxMode:             sandboxMode,
 			AllowYoloWithoutSandbox: opts.iKnow,
-			Scheduler:               sched,
-			SchedulerPolicy:         schedEff,
 			Agents:                  agents,
 			InitialAgent:            initialAgent,
 			InitialMessages:         initialMessages,
@@ -711,7 +711,6 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		sandboxMode:    sandboxMode,
 		sandboxExplain: sandboxExplain,
 		services:       services,
-		firstRun:       isFreshStrikeHome(authStore),
 		historyClose: func() error {
 			return historyStore.Close()
 		},

@@ -24,9 +24,9 @@ cmd/strike session_lifecycle.go (`run`) — composition root
 ├── builds host.Services via internal/host/local.New(authStore, historyStore,
 │     memoryStore, issueStore, agentNames, skills) — wraps internal/{auth,config,
 │     models,history,memory,issue} into host.Services{Auth, Catalog, Settings,
-│     History, Memory, Issues, Agents, Skills}, then attaches host.Files
-│     (local.NewFiles(workDir)) for frontend file reads and diff-viewer
-│     apply writes (ApplyEdit / ApplyPatch)
+│     Onboarding, History, Memory, Issues, Agents, Skills}, then attaches
+│     host.Files (local.NewFiles(workDir)) for frontend file reads and
+│     diff-viewer apply writes (ApplyEdit / ApplyPatch)
 │
 └── tui.New(eng.Ops(), events, services, tui.Options{...})
       internal/tui's entire view of the world: two protocol channels plus
@@ -49,7 +49,7 @@ event stream the TUI rendered from (see `internal/protocol/codec.go`).
 | `internal/version` | Build-time Version/Commit stamped via `-ldflags` | stdlib |
 | `internal/update` | GitHub Releases self-update (check, download, sha256, atomic replace, re-exec) | `version`, stdlib, net/http |
 | `internal/protocol` | Op/Event seam between engine and frontends; the JSONL envelope (`codec.go`) is the session persistence format | stdlib only |
-| `internal/engine` | Headless agent runtime: built-in turn loop, task-subagent function harnesses, tool dispatch, permission/question integration, deferred agent switch; implicit session-scoped agent **team** (lead + children roster + shared task board in `team.go` / `team_board.go`); shares process-local `scheduler` for bash admission | `protocol`, `provider`, `harness`, `tool`, `permission`, `question`, `memory`, `config`, `sandbox`, `scheduler` |
+| `internal/engine` | Headless agent runtime: built-in turn loop, task-subagent function harnesses, tool dispatch, permission/question integration, deferred agent switch; implicit session-scoped agent **team** (lead + children roster + shared task board in `team.go` / `team_board.go`); model-stream and bash admission via shared `scheduler` | `protocol`, `provider`, `harness`, `tool`, `permission`, `question`, `memory`, `config`, `sandbox`, `scheduler` |
 | `internal/harness` | Function-harness contract and named function registry; model calls return completed responses | `provider`, stdlib |
 | `internal/harness/external` | Private JSONL subprocess adapter from configured commands to `harness.Func` | `harness`, `provider`, stdlib, os/exec |
 | `internal/provider` | LLM provider abstraction: `Provider` interface, normalized `StreamEvent`s | stdlib |
@@ -299,7 +299,9 @@ Two different mechanisms, depending on whether it needs Go code:
    `AGENTS.md` via `host.ProjectInit` (confirm before overwrite). `/ftue` opens
    the setup wizard (provider → model → optional init → feature tour → first
    prompt) without writing settings on open. The feature tour is read-only,
-   uses live keybind labels, and omits unavailable surfaces. PR URLs from successful `gh pr` bash
+   uses live keybind labels, and omits unavailable surfaces. Finish/dismiss
+   acknowledge `host.Onboarding` (`~/.strike/onboarding.json`) so interactive
+   TUI auto-opens once for clean installs. PR URLs from successful `gh pr` bash
    output are stored via `protocol.SessionMeta` and `session` sidecar
    metadata. `/vim` embeds nvim/vim/nano in the right-pane `editor` window by
    default (PTY + vt10x via `internal/tui/term`). Config key `vimMode`

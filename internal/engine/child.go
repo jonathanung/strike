@@ -183,6 +183,8 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		SystemPrompt:            e.opts.SystemPrompt,
 		LeanCode:                e.opts.LeanCode,
 		HarnessRegistry:         e.opts.HarnessRegistry,
+		Scheduler:               e.opts.Scheduler,       // share process-local pools
+		SchedulerPolicy:         e.opts.SchedulerPolicy, // bash classification rules
 		Agents:                  e.opts.Agents,
 		InitialAgent:            agentName,
 		InitialProvider:         e.provName,
@@ -191,8 +193,6 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		InitialTitled:           title != "",
 		SandboxMode:             e.opts.SandboxMode,
 		AllowYoloWithoutSandbox: e.opts.AllowYoloWithoutSandbox,
-		Scheduler:               e.opts.Scheduler,       // share process-local pools
-		SchedulerPolicy:         e.opts.SchedulerPolicy, // same classification rules
 		MaxTokens:               e.opts.MaxTokens,
 		MaxStreamAttempts:       e.opts.MaxStreamAttempts,
 		StreamRetryBackoff:      e.opts.StreamRetryBackoff,

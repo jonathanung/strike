@@ -9,6 +9,28 @@ issues and before writing config. A file symlink at `~/.strike/config` (for
 example stow/dotfiles) is preserved on save — the referent is updated, not
 replaced by a plain file.
 
+## First-time onboarding state
+
+Global (not per-project) acknowledgement lives at
+`~/.strike/onboarding.json`:
+
+```json
+{
+  "version": 1,
+  "acknowledged": true
+}
+```
+
+Interactive TUI launches auto-open `/ftue` while `acknowledged` is false or
+the file is missing on a clean install. Finish or dismiss (esc) sets
+`acknowledged: true` atomically. An interrupted session that never finishes
+or dismisses leaves the file unacknowledged so the wizard can reopen next
+launch. Established installs (existing session logs or real provider
+credentials) migrate to acknowledged without showing the modal. Precreated
+empty `~/.strike` directories alone do not suppress first launch.
+`strike exec`, `auth`, `serve`, `version`, and `upgrade` neither display nor
+write this file. Manual `/ftue` remains available after acknowledgement.
+
 ```json
 {
   "provider": "anthropic",
@@ -191,12 +213,19 @@ considered in order; the last match's class wins. When nothing matches, the
 class is `general`. Multiple matches are therefore resolved by rule order
 (project rules append after global, so a later project rule can reclassify).
 
-Admission wiring uses the compiled policy: every agent **bash** invocation
-acquires `process` after permission approval and before process start (command
-timeout begins after admission). `build` / `test` classes acquire those pools
-in addition via the scheduler's multi-pool path. Omitted limits stay unlimited
-(no wait — same as pre-scheduler behavior). Model-stream gating is separate.
-Inspect the effective policy via `Config.SchedulerEffective()` /
+Admission wiring uses the compiled policy:
+
+- **Model streams** (ordinary turns, child turns, concurrent roots, harness
+  calls, and compaction summarize) acquire the `model` pool for the duration of
+  each `Provider.Stream` attempt. The lease is released when the stream is
+  fully drained, before retry backoff, and reacquired fairly on the next
+  attempt. Omitted/`unlimited` model capacity preserves pre-scheduler behavior.
+- **Bash** acquires `process` after permission approval and before process
+  start (command timeout begins after admission). `build` / `test` classes
+  acquire those pools in addition via the scheduler's multi-pool path.
+  Omitted limits stay unlimited (no wait — same as pre-scheduler behavior).
+
+Inspect the compiled policy via `Config.SchedulerEffective()` /
 `Effective.Report()`.
 
 Example — global caps with a project test override:

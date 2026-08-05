@@ -82,15 +82,6 @@ type Options struct {
 	// AllowYoloWithoutSandbox permits permissionMode yolo when SandboxMode is
 	// off. Set only from CLI --i-know after an explicit operator override.
 	AllowYoloWithoutSandbox bool
-	// Scheduler is the shared in-process admission controller for agent bash
-	// (process/build/test pools). nil disables pool gating. One instance is
-	// constructed per launch project and shared across roots and children.
-	// Model-stream gating is separate (#710) and must not use this field's
-	// bash path alone — leave model admission to that wiring.
-	Scheduler *scheduler.Scheduler
-	// SchedulerPolicy is the compiled classification policy for bash commands.
-	// nil treats all commands as general (process only). Shared with Scheduler.
-	SchedulerPolicy *scheduler.Effective
 	// Agents are the selectable personas; the first is the default unless
 	// InitialAgent names another.
 	Agents       []Agent
@@ -236,6 +227,15 @@ type Options struct {
 	// HarnessRegistry maps task-subagent Agent.Harness names to complete agent-run
 	// functions. nil means every child uses the built-in loop.
 	HarnessRegistry *harness.Registry
+	// Scheduler is the process-local admission controller shared across
+	// concurrent roots and children. Model streams acquire the model pool;
+	// agent bash acquires process (+ build/test when classified). nil disables
+	// admission (unlimited; preserves pre-scheduler behavior).
+	Scheduler *scheduler.Scheduler
+	// SchedulerPolicy is the compiled classification policy for bash commands.
+	// nil treats all commands as general (process only). Used only when
+	// Scheduler is non-nil.
+	SchedulerPolicy *scheduler.Effective
 }
 
 // beginAck reports whether ToolCallBegin was actually written to Events.

@@ -11,7 +11,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/jonathanung/strike-cli/internal/auth"
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/project"
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -314,7 +313,6 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 			ThemeID:                      themeID,
 			SessionID:                    a.sessionID,
 			WorkDir:                      a.workDir,
-			FirstRun:                     a.firstRun,
 			StartupAlert:                 a.worktreeNotice,
 			VimMode:                      vimMode,
 			NanoMode:                     nanoMode,
@@ -415,21 +413,4 @@ func runExec(opts cliOptions, prompt string, stdout, stderr io.Writer) (runErr e
 	return runSession(context.Background(), a.eng.Run, a.eng.Events(), a.store, func(events <-chan protocol.Event) error {
 		return runHeadlessFrontend(a.eng.Ops(), events, prompt, stdout, stderr)
 	})
-}
-
-// isFreshStrikeHome reports a first-run install: no global config file and no
-// real credentials for anthropic/openai/xai/kimi/deepseek. echo does not
-// count as configured.
-func isFreshStrikeHome(store *auth.Store) bool {
-	if path := config.GlobalPath(); path != "" {
-		if _, err := os.Stat(path); err == nil {
-			return false
-		}
-	}
-	for _, provider := range []string{"anthropic", "openai", "xai", "kimi", "deepseek"} {
-		if auth.Describe(provider, store) != "none" {
-			return false
-		}
-	}
-	return true
 }
