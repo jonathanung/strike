@@ -56,8 +56,10 @@ func checkBashCommand(command string, rootReal string, cwd *string, depth int) e
 		return nil
 	}
 	// Recurse into $(...) and backticks so outer command name cannot hide work.
+	// Subs run in a subshell — do not let their cd mutate the parent cwd.
 	for _, sub := range extractCommandSubstitutions(command) {
-		if err := checkBashCommand(sub, rootReal, cwd, depth+1); err != nil {
+		subCwd := *cwd
+		if err := checkBashCommand(sub, rootReal, &subCwd, depth+1); err != nil {
 			return err
 		}
 	}
@@ -96,6 +98,9 @@ func checkBashStatement(stmt string, rootReal string, cwd *string, depth int) er
 }
 
 func checkBashWords(words []string, rootReal string, cwd *string, depth int) error {
+	if depth > checkBashMaxDepth {
+		return fmt.Errorf("destructive command guard: nesting too deep to verify workspace binding")
+	}
 	if len(words) == 0 {
 		return nil
 	}
@@ -122,25 +127,25 @@ func checkBashWords(words []string, rootReal string, cwd *string, depth int) err
 		return nil
 
 	case "sh", "bash", "zsh", "dash":
-		return checkShellCWrapper(args, rootReal, cwd, depth)
+		return checkShellCWrapper(args, rootReal, cwd, depth+1)
 
 	case "env":
-		return checkEnvWrapper(args, rootReal, cwd, depth)
+		return checkEnvWrapper(args, rootReal, cwd, depth+1)
 
 	case "eval":
 		return checkBashCommand(strings.Join(args, " "), rootReal, cwd, depth+1)
 
 	case "nohup", "nice", "time":
-		return checkBashWords(stripLeadingWrapperFlags(cmd, args), rootReal, cwd, depth)
+		return checkBashWords(stripLeadingWrapperFlags(cmd, args), rootReal, cwd, depth+1)
 
 	case "timeout":
-		return checkTimeoutWrapper(args, rootReal, cwd, depth)
+		return checkTimeoutWrapper(args, rootReal, cwd, depth+1)
 
 	case "xargs":
-		return checkXargsWrapper(args, rootReal, cwd, depth)
+		return checkXargsWrapper(args, rootReal, cwd, depth+1)
 
 	case "find":
-		return checkFindCommand(args, rootReal, cwd, depth)
+		return checkFindCommand(args, rootReal, cwd, depth+1)
 
 	case "sed":
 		if sedInPlace(args) {
@@ -197,6 +202,7 @@ func unboundedInterpreterError(cmd string) error {
 }
 
 // checkShellCWrapper handles sh/bash/zsh -c 'script' [args].
+// depth is already incremented by the caller for this nesting level.
 func checkShellCWrapper(args []string, rootReal string, cwd *string, depth int) error {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -205,10 +211,10 @@ func checkShellCWrapper(args []string, rootReal string, cwd *string, depth int) 
 			if i+1 >= len(args) {
 				return nil
 			}
-			return checkBashCommand(args[i+1], rootReal, cwd, depth+1)
+			return checkBashCommand(args[i+1], rootReal, cwd, depth)
 		case strings.HasPrefix(a, "-c") && a != "-c" && !strings.HasPrefix(a, "--"):
 			// bash -c'script' combined form (rare)
-			return checkBashCommand(a[2:], rootReal, cwd, depth+1)
+			return checkBashCommand(a[2:], rootReal, cwd, depth)
 		case a == "--":
 			continue
 		case strings.HasPrefix(a, "-"):
@@ -850,9 +856,14 @@ func peelRedirections(stmt string) (paths []string, rest string) {
 		}
 
 		// Optional leading fd digits before > / >> (e.g. 2>/tmp/x).
+		// Only at a word boundary so "file2>out" is word "file2" + ">out",
+		// not fd 2 on a truncated "file".
 		j := i
-		for j < len(stmt) && stmt[j] >= '0' && stmt[j] <= '9' {
-			j++
+		atWordStart := j == 0 || stmt[j-1] == ' ' || stmt[j-1] == '\t' || stmt[j-1] == '\n' || stmt[j-1] == '\r'
+		if atWordStart {
+			for j < len(stmt) && stmt[j] >= '0' && stmt[j] <= '9' {
+				j++
+			}
 		}
 		if j < len(stmt) && stmt[j] == '>' {
 			ps, _, newI, ok := consumeRedirTarget(stmt, j)

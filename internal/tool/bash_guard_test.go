@@ -427,3 +427,49 @@ func TestExtractCommandSubstitutions(t *testing.T) {
 		t.Fatalf("single-quoted sub should be ignored: %v", got)
 	}
 }
+
+func TestCheckBashGuardSubshellCdDoesNotPoisonParentCwd(t *testing.T) {
+	// Command substitutions run in a subshell; a cd inside must not make a
+	// later parent-statement relative path resolve under the subshell cwd.
+	root := t.TempDir()
+	outside := t.TempDir()
+	// After real `cd outside`, `rm secret.txt` would delete outside/secret.txt.
+	// A poisoned cwd pointing back at root would false-allow that rm.
+	cmd := "cd " + outside + "; echo $(cd " + root + " && echo hi); rm secret.txt"
+	err := checkBashWorkspaceBoundary(cmd, root)
+	if err == nil {
+		t.Fatal("expected rm after cd outside to block; subshell cd must not reset parent cwd")
+	}
+}
+
+func TestCheckBashGuardWrapperDepthCap(t *testing.T) {
+	root := t.TempDir()
+	// Pathological wrapper chains must not stack-overflow; depth cap fails closed.
+	var b strings.Builder
+	for i := 0; i < 32; i++ {
+		b.WriteString("nohup ")
+	}
+	b.WriteString("rm a.txt")
+	err := checkBashWorkspaceBoundary(b.String(), root)
+	if err == nil {
+		t.Fatal("expected depth-cap error on deep nohup chain")
+	}
+	if !strings.Contains(err.Error(), "nesting too deep") {
+		t.Fatalf("got %v, want nesting too deep", err)
+	}
+}
+
+func TestPeelRedirectionsWordBoundary(t *testing.T) {
+	// "file2>out" is word file2 + redir out, not fd-2 on "file".
+	paths, rest := peelRedirections(`echo file2>out`)
+	if len(paths) != 1 || paths[0] != "out" {
+		t.Fatalf("paths=%v", paths)
+	}
+	if !strings.Contains(rest, "file2") {
+		t.Fatalf("rest lost file2: %q", rest)
+	}
+	paths, _ = peelRedirections(`echo 2>out`)
+	if len(paths) != 1 || paths[0] != "out" {
+		t.Fatalf("fd2 paths=%v", paths)
+	}
+}
