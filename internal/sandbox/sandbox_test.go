@@ -117,8 +117,14 @@ func TestWrapLinuxArgvShape(t *testing.T) {
 	}
 	argv := res.Argv
 	// bwrap --ro-bind / / --bind WD WD --dev /dev --proc /proc --unshare-net --die-with-parent -- bash -c echo hi
-	wantPrefix := []string{
-		"bwrap",
+	// Launcher may be absolute (preferred) or bare "bwrap".
+	if len(argv) < 14 {
+		t.Fatalf("argv too short: %#v", argv)
+	}
+	if base := filepath.Base(argv[0]); base != "bwrap" {
+		t.Fatalf("launcher = %q", argv[0])
+	}
+	wantRest := []string{
 		"--ro-bind", "/", "/",
 		"--bind", realWD, realWD,
 		"--dev", "/dev",
@@ -128,12 +134,12 @@ func TestWrapLinuxArgvShape(t *testing.T) {
 		"--",
 		"bash", "-c", "echo hi",
 	}
-	if len(argv) != len(wantPrefix) {
-		t.Fatalf("argv len=%d\ngot  %#v\nwant %#v", len(argv), argv, wantPrefix)
+	if len(argv) != 1+len(wantRest) {
+		t.Fatalf("argv len=%d\ngot  %#v", len(argv), argv)
 	}
-	for i := range wantPrefix {
-		if argv[i] != wantPrefix[i] {
-			t.Fatalf("argv[%d]=%q want %q\nfull=%#v", i, argv[i], wantPrefix[i], argv)
+	for i, w := range wantRest {
+		if argv[i+1] != w {
+			t.Fatalf("argv[%d]=%q want %q\nfull=%#v", i+1, argv[i+1], w, argv)
 		}
 	}
 
@@ -143,7 +149,7 @@ func TestWrapLinuxArgvShape(t *testing.T) {
 	if strings.Contains(joined, "\x00--bind\x00") {
 		t.Fatalf("read-only must not --bind workdir: %#v", ro)
 	}
-	if ro[0] != "bwrap" || ro[len(ro)-1] != "true" {
+	if filepath.Base(ro[0]) != "bwrap" || ro[len(ro)-1] != "true" {
 		t.Fatalf("ro argv = %#v", ro)
 	}
 }

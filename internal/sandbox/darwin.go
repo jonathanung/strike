@@ -17,8 +17,9 @@ const (
 )
 
 var (
-	profileMu    sync.Mutex
-	profileCache = map[string]string{} // key -> profile file path
+	profileMu        sync.Mutex
+	profileCache     = map[string]string{} // key -> profile file path
+	seatbeltResolved string                // absolute launcher from successful probe
 )
 
 func probePlatform() availInfo {
@@ -63,6 +64,7 @@ func probePlatform() availInfo {
 			warn: "sandbox-exec is present but cannot apply a seatbelt profile; bash runs unsandboxed",
 		}
 	}
+	seatbeltResolved = path
 	return availInfo{ok: true, name: backendSeatbelt}
 }
 
@@ -76,10 +78,15 @@ func wrapPlatform(argv []string, policy Policy) []string {
 	if err != nil || profilePath == "" {
 		return nil
 	}
-	path := seatbeltPath
-	if st, err := os.Stat(path); err != nil || st.IsDir() {
-		if p, err := exec.LookPath(backendSeatbelt); err == nil {
-			path = p
+	path := seatbeltResolved
+	if path == "" {
+		path = seatbeltPath
+		if st, err := os.Stat(path); err != nil || st.IsDir() {
+			if p, err := exec.LookPath(backendSeatbelt); err == nil {
+				path = p
+			} else {
+				return nil
+			}
 		}
 	}
 	out := make([]string, 0, 3+len(argv))

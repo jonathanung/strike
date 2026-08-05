@@ -10,12 +10,18 @@ import (
 
 const backendBwrap = "bwrap"
 
+var bwrapPath string // absolute path from LookPath when probe succeeds
+
 func probePlatform() availInfo {
 	path, err := exec.LookPath(backendBwrap)
 	if err != nil {
 		return availInfo{
 			warn: "bwrap not found on PATH; bash runs unsandboxed",
 		}
+	}
+	// Prefer absolute path so later exec does not re-resolve via a caller PATH.
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
 	}
 	// Probe the same flag shape Wrap emits (minus workdir bind) so locked-down
 	// environments (no user namespaces) degrade at startup, not mid-command.
@@ -32,6 +38,7 @@ func probePlatform() availInfo {
 			warn: "bwrap is present but cannot run (user namespaces or bubblewrap blocked); bash runs unsandboxed",
 		}
 	}
+	bwrapPath = path
 	return availInfo{ok: true, name: backendBwrap}
 }
 
@@ -43,8 +50,21 @@ func wrapPlatform(argv []string, policy Policy) []string {
 	if len(argv) == 0 {
 		return nil
 	}
+	launcher := bwrapPath
+	if launcher == "" {
+		// Probe should have set this; fall back to LookPath absolute.
+		if p, err := exec.LookPath(backendBwrap); err == nil {
+			if abs, err := filepath.Abs(p); err == nil {
+				launcher = abs
+			} else {
+				launcher = p
+			}
+		} else {
+			return nil
+		}
+	}
 	out := []string{
-		backendBwrap,
+		launcher,
 		"--ro-bind", "/", "/",
 	}
 	if policy.Mode == ModeWorkspaceWrite {

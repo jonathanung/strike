@@ -106,8 +106,15 @@ func WrapResult(argv []string, policy Policy) Result {
 	}
 	wrapped := wrapPlatform(argv, policy)
 	if len(wrapped) == 0 {
-		// Platform refused (e.g. empty workdir edge); treat as no-op.
-		return Result{Argv: cloneArgv(argv)}
+		// Platform refused after a successful probe (e.g. profile write failure).
+		// Surface the same one-shot warning path as an unavailable backend.
+		warnUnavailable(availInfo{
+			warn: "OS process sandbox failed to build launcher argv; bash runs unsandboxed",
+		})
+		return Result{
+			Argv:     cloneArgv(argv),
+			Degraded: true,
+		}
 	}
 	return Result{
 		Argv:    wrapped,
