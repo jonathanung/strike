@@ -18,6 +18,7 @@ const (
 	ftueStepProvider ftueStep = iota
 	ftueStepModel
 	ftueStepInit
+	ftueStepTour
 	ftueStepReady
 	ftueStepCount
 )
@@ -29,6 +30,7 @@ const (
 	ftueChildProvider ftueChildKind = iota
 	ftueChildModel
 	ftueChildInit
+	ftueChildTour
 )
 
 // ftueSpawnChildMsg parks the wizard on the modal queue and opens a child flow
@@ -55,6 +57,10 @@ type ftueModal struct {
 
 	// initSkipped is session-local (not persisted); optional project init.
 	initSkipped bool
+	// tourSkipped / tourDone are session-local; the feature tour never writes
+	// settings. Done is set when the user finishes the tour modal.
+	tourSkipped bool
+	tourDone    bool
 	// flash is a one-line status under the steps (child cancel, unavailable, …).
 	flash string
 }
@@ -120,10 +126,17 @@ func (m *ftueModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 		m.flash = ""
 		return m, nil
 	case "s":
-		// Skip optional project init only.
-		if ftueStep(m.cursor) == ftueStepInit {
+		// Skip optional steps (project init, feature tour).
+		switch ftueStep(m.cursor) {
+		case ftueStepInit:
 			m.initSkipped = true
 			m.flash = "project init skipped"
+			if m.cursor < int(ftueStepCount)-1 {
+				m.cursor++
+			}
+		case ftueStepTour:
+			m.tourSkipped = true
+			m.flash = "feature tour skipped"
 			if m.cursor < int(ftueStepCount)-1 {
 				m.cursor++
 			}
@@ -171,6 +184,10 @@ func (m *ftueModal) activate() (modal, tea.Cmd) {
 		return nil, func() tea.Msg {
 			return ftueSpawnChildMsg{resume: m, kind: ftueChildInit}
 		}
+	case ftueStepTour:
+		return nil, func() tea.Msg {
+			return ftueSpawnChildMsg{resume: m, kind: ftueChildTour}
+		}
 	case ftueStepReady:
 		return m.finish()
 	default:
@@ -186,6 +203,8 @@ func (m *ftueModal) stepComplete(step ftueStep) bool {
 		return m.modelReady()
 	case ftueStepInit:
 		return m.initReady()
+	case ftueStepTour:
+		return m.tourReady()
 	case ftueStepReady:
 		// Ready is complete when the user can send (provider+model).
 		return m.providerReady() && m.modelReady()
@@ -240,6 +259,8 @@ func (m *ftueModal) stepTitle(step ftueStep) string {
 		return "Choose a model"
 	case ftueStepInit:
 		return "Project setup (optional)"
+	case ftueStepTour:
+		return "Feature tour (optional)"
 	case ftueStepReady:
 		return "Send your first prompt"
 	default:
@@ -255,6 +276,8 @@ func (m *ftueModal) stepDetail(step ftueStep) string {
 		return m.modelDetail()
 	case ftueStepInit:
 		return m.initDetail()
+	case ftueStepTour:
+		return m.tourDetail()
 	case ftueStepReady:
 		if m.providerReady() && m.modelReady() {
 			return "type below, enter to send"
@@ -262,6 +285,21 @@ func (m *ftueModal) stepDetail(step ftueStep) string {
 		return "finish provider and model first"
 	default:
 		return ""
+	}
+}
+
+func (m *ftueModal) tourReady() bool {
+	return m.tourSkipped || m.tourDone
+}
+
+func (m *ftueModal) tourDetail() string {
+	switch {
+	case m.tourDone:
+		return "complete"
+	case m.tourSkipped:
+		return "skipped"
+	default:
+		return "panes, agents, permissions, keys"
 	}
 }
 
@@ -343,7 +381,7 @@ func (m *ftueModal) view(width int, th theme.Theme) string {
 	inner := max(1, ui.PanelInnerWidth(th, width))
 	m.clampCursor()
 
-	intro := st.Muted.Render("Setup guide — open steps to reuse /provider, /model, and /init. Opening this wizard does not change settings.")
+	intro := st.Muted.Render("Setup guide — open steps to reuse /provider, /model, /init, and the feature tour. Opening this wizard does not change settings.")
 	items := make([]ui.ListItem, 0, int(ftueStepCount))
 	for i := 0; i < int(ftueStepCount); i++ {
 		step := ftueStep(i)
@@ -372,7 +410,7 @@ func (m *ftueModal) view(width int, th theme.Theme) string {
 			wrapToWidth(st.Muted.Render(m.flash), inner)
 	}
 
-	hints := []string{"↑/↓ move", "enter open step", "s skip init", "f finish", "esc cancel"}
+	hints := []string{"↑/↓ move", "enter open step", "s skip optional", "f finish", "esc cancel"}
 	return ui.Dialog(th, ui.DialogOpts{
 		Title: "setup",
 		Hint:  dotJoin(th, hints...),
@@ -404,6 +442,11 @@ func (m *Model) applyFTUESpawnChild(msg ftueSpawnChildMsg) tea.Cmd {
 		return loadModelsCmd(m.services.Catalog, providers, m.providerName)
 	case ftueChildInit:
 		return m.openInitFromFTUE(msg.resume)
+	case ftueChildTour:
+		// Read-only tour; park wizard and open without mutating settings/focus
+		// permanently (tour restores focus on close).
+		m.modal = m.openTourModal()
+		return nil
 	default:
 		m.modal = nil
 		return m.afterModalClosed()

@@ -46,6 +46,9 @@ func TestFTUEInCommandCatalog(t *testing.T) {
 			if !strings.Contains(spec.Description, "setup wizard") {
 				t.Fatalf("description = %q", spec.Description)
 			}
+			if !strings.Contains(spec.Description, "feature tour") {
+				t.Fatalf("description missing feature tour: %q", spec.Description)
+			}
 			break
 		}
 	}
@@ -402,8 +405,8 @@ func TestFTUESkipInit(t *testing.T) {
 	if fi.writeN != 0 {
 		t.Fatal("skip must not write")
 	}
-	if fm.cursor != int(ftueStepReady) {
-		t.Fatalf("cursor after skip = %d, want ready", fm.cursor)
+	if fm.cursor != int(ftueStepTour) {
+		t.Fatalf("cursor after skip = %d, want tour", fm.cursor)
 	}
 }
 
@@ -417,8 +420,96 @@ func TestFTUEEstablishedUserShowsComplete(t *testing.T) {
 	if !fm.providerReady() || !fm.modelReady() || !fm.initReady() {
 		t.Fatalf("established user incomplete: p=%v m=%v i=%v", fm.providerReady(), fm.modelReady(), fm.initReady())
 	}
+	// Tour is optional and incomplete until visited/skipped — land there so
+	// established users can revisit the feature tour via /ftue.
+	if fm.cursor != int(ftueStepTour) {
+		t.Fatalf("cursor = %d, want tour", fm.cursor)
+	}
+	fm.tourDone = true
+	fm.focusFirstIncomplete()
 	if fm.cursor != int(ftueStepReady) {
-		t.Fatalf("cursor = %d, want ready", fm.cursor)
+		t.Fatalf("cursor after tour done = %d, want ready", fm.cursor)
+	}
+}
+
+func TestFTUESkipTour(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	fm := newFTUEModal(m.services, "echo", "echo", m.th)
+	fm.cursor = int(ftueStepTour)
+	next, _ := fm.update(tea.KeyPressMsg{Code: 's', Text: "s"})
+	fm = next.(*ftueModal)
+	if !fm.tourSkipped || !fm.tourReady() {
+		t.Fatalf("skip failed: skipped=%v ready=%v", fm.tourSkipped, fm.tourReady())
+	}
+	if fm.cursor != int(ftueStepReady) {
+		t.Fatalf("cursor after skip = %d, want ready", fm.cursor)
+	}
+}
+
+func TestFTUETourChildOpensAndReturns(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m.width, m.height, m.ready = 100, 40, true
+	m.focus = focusRight
+
+	next, _ := m.handleCommand("/ftue")
+	m = next.(Model)
+	fm := m.modal.(*ftueModal)
+	fm.cursor = int(ftueStepTour)
+	wantCursor := fm.cursor
+
+	m = updateAppDrain(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	tm, ok := m.modal.(*tourModal)
+	if !ok {
+		t.Fatalf("child modal = %T, want *tourModal", m.modal)
+	}
+	if len(m.modalQueue) != 1 {
+		t.Fatalf("queue len = %d, want 1", len(m.modalQueue))
+	}
+	if !tm.restoreFocusSet || tm.restoreFocus != focusRight {
+		t.Fatalf("restore focus = %v set=%v, want right", tm.restoreFocus, tm.restoreFocusSet)
+	}
+
+	// Cancel tour → wizard returns; tour not marked done.
+	m = updateAppDrain(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	fm, ok = m.modal.(*ftueModal)
+	if !ok {
+		t.Fatalf("after tour esc modal = %T", m.modal)
+	}
+	if fm.cursor != wantCursor {
+		t.Fatalf("cursor after return = %d, want %d", fm.cursor, wantCursor)
+	}
+	if fm.tourDone {
+		t.Fatal("cancel must not mark tour done")
+	}
+	if m.focus != focusRight {
+		t.Fatalf("focus after cancel = %v, want right (restored)", m.focus)
+	}
+}
+
+func TestFTUETourFinishMarksStep(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m.width, m.height, m.ready = 100, 40, true
+
+	next, _ := m.handleCommand("/ftue")
+	m = next.(Model)
+	fm := m.modal.(*ftueModal)
+	fm.cursor = int(ftueStepTour)
+
+	m = updateAppDrain(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if _, ok := m.modal.(*tourModal); !ok {
+		t.Fatalf("modal = %T", m.modal)
+	}
+	// Finish tour with f.
+	m = updateAppDrain(t, m, tea.KeyPressMsg{Code: 'f', Text: "f"})
+	fm, ok := m.modal.(*ftueModal)
+	if !ok {
+		t.Fatalf("after tour finish modal = %T", m.modal)
+	}
+	if !fm.tourDone {
+		t.Fatal("tour should be marked done")
+	}
+	if !strings.Contains(fm.flash, "tour") {
+		t.Fatalf("flash = %q", fm.flash)
 	}
 }
 
