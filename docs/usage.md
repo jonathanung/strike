@@ -217,7 +217,9 @@ Resume restores the session log, not the config default.
 `sandbox` in [config.md](config.md) (or `--sandbox`) sets OS process isolation
 for bash: `off` | `read-only` | `workspace-write` (default). This is **what is
 possible**; `permissionMode` is **when you get asked**. `/sandbox` prints the
-effective policy and backend. `yolo` with `sandbox: off` requires `--i-know`.
+effective policy and backend; `/sandbox explain` shows the generated profile
+(including write-deny globs and network posture compiled from permissions).
+`yolo` with `sandbox: off` requires `--i-know`.
 
 Built-in skills also appear as slash commands: `/commit`, `/push`, `/pr`,
 `/ship`, `/review`, `/learn`, `/deslop`, `/verify` (plus custom skills under
