@@ -29,7 +29,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/effort":           {"set how much reasoning the model spends", "[level]", commandSourceBuiltin},
 		"/autonomy":         {"set exit-gate policy (supervised/agent/checks)", "[mode]", commandSourceBuiltin},
 		"/mode":             {"set permission posture (default/plan/accept-edits/yolo)", "[mode]", commandSourceBuiltin},
-		"/sandbox":          {"show OS sandbox policy (what is possible vs permissionMode)", "", commandSourceBuiltin},
+		"/sandbox":          {"show OS sandbox policy; /sandbox explain for generated profile", "", commandSourceBuiltin},
 		"/auth":             {"manage provider authentication", "[provider]", commandSourceBuiltin},
 		"/agent":            {"select an agent", "[name]", commandSourceBuiltin},
 		"/agents":           {"focus the agents right pane", "", commandSourceBuiltin},
@@ -201,7 +201,7 @@ func TestSandboxStatusNotice(t *testing.T) {
 		th:               theme.Default(),
 	}
 	got := m.sandboxStatusNotice()
-	for _, want := range []string{"sandbox: workspace-write", "bwrap", "permissionMode: default", "what is possible"} {
+	for _, want := range []string{"sandbox: workspace-write", "bwrap", "permissionMode: default", "what is possible", "explain"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("notice = %q, want substring %q", got, want)
 		}
@@ -212,6 +212,13 @@ func TestSandboxStatusNotice(t *testing.T) {
 	got = m.sandboxStatusNotice()
 	if !strings.Contains(got, "OS isolation disabled") {
 		t.Errorf("off notice = %q", got)
+	}
+	m.sandboxExplain = "sandbox mode: workspace-write\nnetwork: false\nprofile:\nbwrap …\n"
+	got = m.sandboxExplainNotice()
+	for _, want := range []string{"sandbox mode: workspace-write", "network: false", "agent/phase"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("explain = %q, want substring %q", got, want)
+		}
 	}
 }
 

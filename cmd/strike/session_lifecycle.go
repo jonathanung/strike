@@ -320,6 +320,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 			SandboxMode:                  a.sandboxMode,
 			SandboxBackend:               sandbox.BackendName(),
 			SandboxAvailable:             sandbox.Available(),
+			SandboxExplain:               a.sandboxExplain,
 			PermissionAutoApproveSeconds: a.cfg.PermissionAutoApproveSeconds,
 			PermissionAutoApproveExclude: a.cfg.PermissionAutoApproveExclude,
 			Replay:                       a.replay,

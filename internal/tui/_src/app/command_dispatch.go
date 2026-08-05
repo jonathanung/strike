@@ -110,6 +110,15 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 	case "/sandbox":
 		m.resetComposer()
 		m.clearNotice()
+		if len(fields) > 1 {
+			switch strings.ToLower(fields[1]) {
+			case "explain":
+				m.setNotice(m.sandboxExplainNotice(), false)
+			default:
+				m.setNotice("usage: /sandbox [explain]", true)
+			}
+			return m, nil
+		}
 		m.setNotice(m.sandboxStatusNotice(), false)
 		return m, nil
 	case "/auth":
@@ -1435,5 +1444,20 @@ func (m Model) sandboxStatusNotice() string {
 	}
 	fmt.Fprintf(&b, "%spermissionMode: %s", dot, m.permMode.Normalize())
 	b.WriteString(" " + ic.DetailSeparator + " sandbox=what is possible, permissionMode=when asked")
+	b.WriteString(dot + "/sandbox explain for generated profile")
 	return b.String()
+}
+
+// sandboxExplainNotice returns the generated OS profile for /sandbox explain.
+func (m Model) sandboxExplainNotice() string {
+	text := strings.TrimSpace(m.sandboxExplain)
+	if text == "" {
+		mode := strings.TrimSpace(m.sandboxMode)
+		if mode == "" {
+			mode = "workspace-write"
+		}
+		return "sandbox explain unavailable (no compiled profile)\nmode: " + mode
+	}
+	note := "\n(note: config/base layers; active agent/phase/session layers apply at bash exec)"
+	return text + note
 }
