@@ -56,11 +56,11 @@ func (e *Engine) harnessEnvironment(ctx context.Context, corr protocol.Correlati
 			requestCorr := corr
 			requestCorr.ProviderRequestID = rand.Text()
 			requestCorr.Attempt = attempt
-			stream, err := e.prov.Stream(ctx, req)
+			stream, err := e.admitModelStream(ctx, req)
 			if err == nil {
 				response := harness.ModelResponse{}
 				var text strings.Builder
-				for ev := range provider.NormalizeStream(stream) {
+				for ev := range stream {
 					switch ev.Type {
 					case provider.EventTextDelta:
 						text.WriteString(ev.Text)

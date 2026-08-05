@@ -382,7 +382,7 @@ func (e *Engine) consumeStream(ctx context.Context, reqCorr protocol.Correlation
 	system := joinPromptLayerTexts(layers)
 	tools, _ := e.effectiveToolSchemas()
 	e.recordStreamEffective(layers, system, tools)
-	stream, err := e.prov.Stream(ctx, provider.Request{
+	stream, err := e.admitModelStream(ctx, provider.Request{
 		Model:     e.model,
 		System:    system,
 		Messages:  e.messages,
@@ -395,7 +395,6 @@ func (e *Engine) consumeStream(ctx context.Context, reqCorr protocol.Correlation
 	if err != nil {
 		return streamOutcome{}, err
 	}
-	stream = provider.NormalizeStream(stream)
 
 	var textBuf strings.Builder
 	var calls []provider.ToolCall
