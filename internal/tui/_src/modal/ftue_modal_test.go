@@ -49,6 +49,9 @@ func TestFTUEInCommandCatalog(t *testing.T) {
 			if !strings.Contains(spec.Description, "feature tour") {
 				t.Fatalf("description missing feature tour: %q", spec.Description)
 			}
+			if !strings.Contains(spec.Description, "scheduler presets") {
+				t.Fatalf("description missing scheduler presets: %q", spec.Description)
+			}
 			break
 		}
 	}
@@ -427,8 +430,14 @@ func TestFTUEEstablishedUserShowsComplete(t *testing.T) {
 	}
 	fm.tourDone = true
 	fm.focusFirstIncomplete()
+	// Scheduler presets follow the tour as another optional step.
+	if fm.cursor != int(ftueStepScheduler) {
+		t.Fatalf("cursor after tour done = %d, want scheduler", fm.cursor)
+	}
+	fm.schedulerDone = true
+	fm.focusFirstIncomplete()
 	if fm.cursor != int(ftueStepReady) {
-		t.Fatalf("cursor after tour done = %d, want ready", fm.cursor)
+		t.Fatalf("cursor after scheduler done = %d, want ready", fm.cursor)
 	}
 }
 
@@ -441,8 +450,8 @@ func TestFTUESkipTour(t *testing.T) {
 	if !fm.tourSkipped || !fm.tourReady() {
 		t.Fatalf("skip failed: skipped=%v ready=%v", fm.tourSkipped, fm.tourReady())
 	}
-	if fm.cursor != int(ftueStepReady) {
-		t.Fatalf("cursor after skip = %d, want ready", fm.cursor)
+	if fm.cursor != int(ftueStepScheduler) {
+		t.Fatalf("cursor after skip = %d, want scheduler", fm.cursor)
 	}
 }
 

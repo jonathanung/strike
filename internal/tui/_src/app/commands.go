@@ -152,7 +152,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandCost, Name: "/cost", Description: "session token and cost totals", Source: commandSourceBuiltin},
 	{ID: commandUpgrade, Name: "/upgrade", Description: "install the latest release and restart", Source: commandSourceBuiltin},
 	{ID: commandInit, Name: "/init", Description: "create or update project AGENTS.md", Source: commandSourceBuiltin},
-	{ID: commandFTUE, Name: "/ftue", Description: "setup wizard: provider, model, optional init, feature tour, first prompt", Source: commandSourceBuiltin},
+	{ID: commandFTUE, Name: "/ftue", Description: "setup wizard: provider, model, optional init, feature tour, scheduler presets, first prompt", Source: commandSourceBuiltin},
 	{ID: commandMCP, Name: "/mcp", Description: "MCP servers: status, retry, disable", ArgsHint: "[retry [name]|disable <name>]", Source: commandSourceBuiltin},
 	{ID: commandExit, Name: "/exit", Description: "quit strike", Source: commandSourceBuiltin},
 	{ID: commandQuit, Name: "/quit", Description: "quit strike", Source: commandSourceBuiltin},

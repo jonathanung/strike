@@ -960,6 +960,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reflow()
 		return m, cmd
 
+	case schedulerPresetsAppliedMsg:
+		cmd := m.applySchedulerPresetsApplied(msg)
+		m.reflow()
+		return m, cmd
+
 	case initResultMsg:
 		return m.applyInitResult(msg)
 

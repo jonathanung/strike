@@ -16,6 +16,7 @@ materially affect the shipped product.
 
 ### Added
 
+- **FTUE scheduler presets** — optional `/ftue` step with checkbox selection over the shipped build-system catalog (CMake, Ninja, Gradle, Bazel, Maven, Cargo, npm/yarn/pnpm/bun). Preview shows limits and command rules; apply writes global `scheduler.presets` atomically and preserves custom limits/rules; skip leaves config unchanged; re-runs are idempotent ([#705](https://github.com/jonathanung/strike/issues/705)).
 - **Global onboarding state + auto-open** — interactive TUI opens `/ftue` once for clean installs until finish or dismiss; state is versioned in `~/.strike/onboarding.json`. Established installs (sessions or credentials) migrate without a surprise modal; `exec`/`auth`/`serve` do not touch onboarding ([#703](https://github.com/jonathanung/strike/issues/703)).
 - **`/ftue` setup wizard** — manually invokable onboarding that guides provider connection, model selection, optional `/init`, and the first prompt by reusing existing host services and modals. Opening does not change settings; Finish focuses the composer; esc cancels. Child pickers preserve wizard step ([#702](https://github.com/jonathanung/strike/issues/702)).
 - **Contextual TUI feature tour** — skippable `/ftue` step covering pane navigation, agents/subagents, permissions, autonomy, key help, and command discovery. Copy uses live keybinds, omits unavailable surfaces, stays readable at 80×24, and never mutates settings or arms timers; established users revisit via `/ftue` ([#704](https://github.com/jonathanung/strike/issues/704)).

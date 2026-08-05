@@ -222,7 +222,9 @@ Shipped preset IDs: `cmake`, `ninja`, `gradle`, `bazel`, `maven`, `cargo`,
 `npm` (covers npm/yarn/pnpm/bun). Each has a stable ID, display name,
 rationale, default class, and inspectable generated rules (see
 `scheduler.Catalog` / host `SchedulerPresets`). Expanded rule provenance is
-`preset:<id>@v<version>` in `Effective.Report()`.
+`preset:<id>@v<version>` in `Effective.Report()`. The `/ftue` setup wizard can
+checkbox-select these presets and write the global `presets` list atomically
+(custom `limits`/`commands` are preserved; skip leaves config unchanged).
 
 **Command classification:** each rule's `pattern` is a full-string glob over
 the submitted shell command (`*` = any run of runes, `?` = one rune, `\`
