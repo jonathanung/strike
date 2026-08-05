@@ -48,7 +48,6 @@ type assembled struct {
 	// sandboxMode is the resolved OS sandbox dial (canonical token).
 	sandboxMode  string
 	services     host.Services
-	firstRun     bool
 	historyClose func() error
 	memoryClose  func() error
 	issuesClose  func() error
@@ -674,7 +673,6 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		cfg:         cfg,
 		sandboxMode: sandboxMode,
 		services:    services,
-		firstRun:    isFreshStrikeHome(authStore),
 		historyClose: func() error {
 			return historyStore.Close()
 		},

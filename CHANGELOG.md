@@ -16,6 +16,7 @@ materially affect the shipped product.
 
 ### Added
 
+- **Global onboarding state + auto-open** — interactive TUI opens `/ftue` once for clean installs until finish or dismiss; state is versioned in `~/.strike/onboarding.json`. Established installs (sessions or credentials) migrate without a surprise modal; `exec`/`auth`/`serve` do not touch onboarding ([#703](https://github.com/jonathanung/strike/issues/703)).
 - **`/ftue` setup wizard** — manually invokable onboarding that guides provider connection, model selection, optional `/init`, and the first prompt by reusing existing host services and modals. Opening does not change settings; Finish focuses the composer; esc cancels. Child pickers preserve wizard step ([#702](https://github.com/jonathanung/strike/issues/702)).
 - Config/CLI **sandbox dial** (`sandbox`: `off` | `read-only` | `workspace-write`, default `workspace-write`; `--sandbox`, `/sandbox`) for OS isolation of bash, documented as a two-dial model with `permissionMode`. `yolo` with `sandbox: off` requires `--i-know` ([#552](https://github.com/jonathanung/strike/issues/552)).
 

@@ -101,6 +101,29 @@ func TestFTUECancelLeavesSettingsUntouched(t *testing.T) {
 	}
 }
 
+func TestFTUEManualRemainsAfterAcknowledge(t *testing.T) {
+	// After global ack, /ftue must still open (manual re-run).
+	m, _ := newAppTestModel(nil, nil)
+	ob := &fakeOnboarding{autoOpen: false}
+	m.services.Onboarding = ob
+	m.firstRun = false
+	next, _ := m.handleCommand("/ftue")
+	m = next.(Model)
+	if _, ok := m.modal.(*ftueModal); !ok {
+		t.Fatalf("modal = %T, want *ftueModal", m.modal)
+	}
+	m = updateAppDrain(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if ob.acks != 1 {
+		t.Fatalf("manual dismiss should still ack (idempotent): acks=%d", ob.acks)
+	}
+	// Open again after ack.
+	next, _ = m.handleCommand("/ftue")
+	m = next.(Model)
+	if _, ok := m.modal.(*ftueModal); !ok {
+		t.Fatalf("re-open after ack = %T, want *ftueModal", m.modal)
+	}
+}
+
 func TestFTUEFinishFocusesComposer(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m.providerName = "echo"
