@@ -164,7 +164,7 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 
 // acquireBashLease acquires process (+ build/test when classified) pools.
 // When Scheduler is nil, returns a no-op lease (unlimited / current behavior).
-// Multi-pool grants use Scheduler.Acquire's deadlock-free atomic path.
+// Multi-pool grants use Scheduler.Acquire's deadlock-free atomic path (FIFO).
 func acquireBashLease(ctx context.Context, tc *Context, command string) (*scheduler.Lease, error) {
 	if tc == nil || tc.Scheduler == nil {
 		return nil, nil // Lease.Release is nil-safe
