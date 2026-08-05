@@ -290,13 +290,15 @@ Two different mechanisms, depending on whether it needs Go code:
    `visualizer`, `system`, `telemetry`, `fast`, `vim`, `nano`, `md-read`,
    `theme`, `layout`, `split`, `compact`, `fork`, `undo`, `rewind`, `session`,
    `export`, `copy`, `help`, `keys`, `legend`, `memory`, `issues`, `goal`, `loop`, `context`,
-   `effective-prompt`, `cost`, `upgrade`, `init`, `mcp`, `exit`, `quit`, and
+   `effective-prompt`, `cost`, `upgrade`, `init`, `ftue`, `mcp`, `exit`, `quit`, and
    keybind-backed action mirrors such as `focus-left`, `palette`,
    `interrupt`, `agent-next`, `tool-copy`, `subagent`, `root-new`, …) are
    rejected by `config.ValidateSkillName` before they ever reach the frontend.
    See `keybindSlashPrimary` in `internal/tui/keybind_slash.go` for the full
    keybind→slash map. `/init` is a builtin that writes project
-   `AGENTS.md` via `host.ProjectInit` (confirm before overwrite). PR URLs from successful `gh pr` bash
+   `AGENTS.md` via `host.ProjectInit` (confirm before overwrite). `/ftue` opens
+   the setup wizard (provider → model → optional init → first prompt) without
+   writing settings on open. PR URLs from successful `gh pr` bash
    output are stored via `protocol.SessionMeta` and `session` sidecar
    metadata. `/vim` embeds nvim/vim/nano in the right-pane `editor` window by
    default (PTY + vt10x via `internal/tui/term`). Config key `vimMode`
