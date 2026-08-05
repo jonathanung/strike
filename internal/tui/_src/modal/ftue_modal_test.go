@@ -80,6 +80,33 @@ func TestFTUEOpenDoesNotWriteSettings(t *testing.T) {
 	}
 }
 
+func TestFTUEOpenDoesNotAcknowledgeOnboarding(t *testing.T) {
+	// Opening (manual or auto) must not consume onboarding state — only
+	// finish/dismiss do, so an interrupted flow can reopen next launch.
+	m, _ := newAppTestModel(nil, nil)
+	ob := &fakeOnboarding{autoOpen: true}
+	m.services.Onboarding = ob
+	m.firstRun = true
+
+	next, cmd := m.handleCommand("/ftue")
+	if cmd != nil {
+		t.Fatal("open must not schedule acknowledge cmd")
+	}
+	m = next.(Model)
+	if ob.acks != 0 {
+		t.Fatalf("open acknowledged: acks=%d", ob.acks)
+	}
+	if !ob.autoOpen {
+		t.Fatal("open cleared autoOpen")
+	}
+
+	m = updateApp(t, m, firstRunSetupMsg{})
+	// Already opened via /ftue; firstRunSetup should no-op (modal open / flag).
+	if ob.acks != 0 {
+		t.Fatalf("firstRunSetup acknowledged: acks=%d", ob.acks)
+	}
+}
+
 func TestFTUECancelLeavesSettingsUntouched(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	fs := &fakeSettings{defaults: host.UserDefaults{Provider: "echo", Model: "echo"}}
