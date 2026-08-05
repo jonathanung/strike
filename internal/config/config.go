@@ -147,23 +147,32 @@ type Config struct {
 	// Harnesses configures named external function harnesses. Project
 	// definitions replace global definitions with the same name.
 	Harnesses map[string]HarnessConfig `json:"harnesses,omitempty"`
-	// Scheduler holds in-process resource pool limits and command
-	// classification rules. Project limits override global per pool (omitted
-	// keys preserve lower layers / unlimited). Command rules concatenate
-	// (global then project); last match wins. See docs/config.md.
+	// Scheduler holds in-process resource pool limits, optional shipped
+	// build-system presets, and command classification rules. Project limits
+	// override global per pool (omitted keys preserve lower layers /
+	// unlimited). Preset IDs and command rules concatenate (global then
+	// project; presets expand before user rules). Last match wins. See
+	// docs/config.md.
 	Scheduler SchedulerConfig `json:"scheduler,omitempty"`
 }
 
 // SchedulerConfig is the JSON "scheduler" object.
 //
-// Limits and command rules are process-local only — separate Strike OS
-// processes do not coordinate. Compile via SchedulerEffective / scheduler.Compile.
+// Limits, presets, and command rules are process-local only — separate Strike
+// OS processes do not coordinate. Compile via SchedulerEffective /
+// scheduler.CompileWithPresets (presets expand into ordinary limits/rules).
 type SchedulerConfig struct {
+	// Presets lists shipped build-system preset IDs (cmake, ninja, gradle,
+	// bazel, maven, cargo, npm). Expanded at compile time into suggested
+	// limits and command rules before user Limits/Commands apply.
+	Presets []string `json:"presets,omitempty"`
 	// Limits maps pool name (process|build|test|model|container) → positive
 	// capacity. Omitted pools stay unlimited. Explicit 0 or negative fails load.
+	// User limits overlay preset-suggested capacities per pool.
 	Limits scheduler.Limits `json:"limits,omitempty"`
 	// Commands are ordered classification rules (pattern glob → class).
-	// Empty list means every command is general.
+	// Appended after expanded preset rules; last match wins. Empty list with
+	// no presets means every command is general.
 	Commands []scheduler.CommandRule `json:"commands,omitempty"`
 }
 
@@ -598,11 +607,23 @@ func read(path string) (Config, error) {
 	return c, nil
 }
 
-// normalizeSchedulerLayer validates scheduler limits and command rules for one
-// config file and stamps each rule's Source with path for startup reports.
+// normalizeSchedulerLayer validates scheduler presets, limits, and command
+// rules for one config file and stamps each rule's Source with path for
+// startup reports.
 func normalizeSchedulerLayer(sc *SchedulerConfig, path string) error {
 	if sc == nil {
 		return nil
+	}
+	if err := scheduler.ValidatePresetIDs(sc.Presets, path); err != nil {
+		return err
+	}
+	// Normalize preset id whitespace; drop empties already rejected above.
+	if len(sc.Presets) > 0 {
+		out := make([]string, 0, len(sc.Presets))
+		for _, id := range sc.Presets {
+			out = append(out, strings.TrimSpace(id))
+		}
+		sc.Presets = out
 	}
 	if err := scheduler.ValidateLimits(sc.Limits, path); err != nil {
 		return err
@@ -929,11 +950,12 @@ func merge(base, layer Config) Config {
 	return base
 }
 
-// mergeScheduler overlays limits per pool and appends command rules (later
-// layers win under last-match-wins classification).
+// mergeScheduler merges preset IDs (deduped), overlays limits per pool, and
+// appends command rules (later layers win under last-match-wins classification).
 func mergeScheduler(base, layer SchedulerConfig) SchedulerConfig {
 	return SchedulerConfig{
-		Limits: scheduler.MergeLimits(base.Limits, layer.Limits),
+		Presets: scheduler.MergePresetIDs(base.Presets, layer.Presets),
+		Limits:  scheduler.MergeLimits(base.Limits, layer.Limits),
 		Commands: append(
 			scheduler.CloneCommandRules(base.Commands),
 			scheduler.CloneCommandRules(layer.Commands)...,
@@ -942,9 +964,11 @@ func mergeScheduler(base, layer SchedulerConfig) SchedulerConfig {
 }
 
 // SchedulerEffective compiles the loaded scheduler policy for admission wiring.
-// Safe when Scheduler is empty (unlimited defaults, no command rules).
+// Shipped presets expand into ordinary limits and command rules first; user
+// limits overlay suggested capacities and user commands append after preset
+// rules. Safe when Scheduler is empty (unlimited defaults, no command rules).
 func (c Config) SchedulerEffective() (*scheduler.Effective, error) {
-	return scheduler.Compile(c.Scheduler.Limits, c.Scheduler.Commands, "")
+	return scheduler.CompileWithPresets(c.Scheduler.Presets, c.Scheduler.Limits, c.Scheduler.Commands, "")
 }
 
 func mergeHarnesses(base, layer map[string]HarnessConfig) map[string]HarnessConfig {
