@@ -98,8 +98,8 @@ strike launches without any provider configured. Pick one inside the TUI:
 /upgrade                       # install latest GitHub Release and restart
 /init                          # create or update project AGENTS.md (confirm
                                # before replacing an existing file)
-/ftue                          # setup wizard: provider, model, optional
-                               # /init, first prompt (manual; no auto-open)
+ /ftue                          # setup wizard: provider, model, optional
+                               # /init, feature tour, first prompt (manual)
 /mcp                           # MCP status; retry/disable servers
 /exit                          # quit strike (same as ctrl+c)
 /quit                          # alias of /exit
@@ -147,7 +147,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/context` | context doctor modal: system-prompt layer sizes, history msg count, **request token attribution** (system / tools / messages / tool_results; local ~4 chars/token estimate, labeled `estimated`), oversized warnings (previews redacted) |
 | `/cost` | session input/output/cache totals from usage events; est. USD when catalog rates known; unknown stays explicit |
 | `/init` | light local scan → write `AGENTS.md`; confirms before overwrite |
-| `/ftue` | setup wizard composing provider connect, model pick, optional `/init`, and first-prompt guidance; opening does not change settings; Finish focuses the composer; esc cancels. Child pickers return to the same wizard step |
+| `/ftue` | setup wizard composing provider connect, model pick, optional `/init`, a skippable feature tour (panes, agents, permissions, autonomy, keys, commands), and first-prompt guidance; opening does not change settings; tour copy uses live keybinds and omits unavailable surfaces; Finish focuses the composer; esc cancels. Child pickers/tour return to the same wizard step |
 | `/mcp` | MCP status (`up`/`down`/`error`/`disabled`); `/mcp retry [name]`, `/mcp disable <name>` (see [config.md](config.md#mcp-servers-stdio--http)) |
 
 ### Agent teams
@@ -381,7 +381,7 @@ shows keybindings. It shows get-started provider rows only when no provider is
 selected or the selected provider needs authentication, with provider rows
 bounded to fit (and a `/init` CTA when `AGENTS.md` is missing); first-run
 onboarding also mentions `/init`. Re-run the full guided setup anytime with
-`/ftue` (provider → model → optional project init → first prompt). Agents and
+`/ftue` (provider → model → optional project init → feature tour → first prompt). Agents and
 skills appear only when valid configured entries exist; recent prompts only
 when prompt history exists. It repacks to fit the terminal on resize and
 collapses to a single column when narrow.
