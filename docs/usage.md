@@ -219,7 +219,7 @@ Prefix a line with `!` to run a local bash command in the session work
 directory without starting a model turn (for example `!pwd`, `!git status`).
 Output appears in the transcript as a bash tool cell. Empty `!` is ignored
 with a notice. Destructive commands that target paths outside the workspace
-are blocked by the same sandbox as the bash tool.
+are checked by the same best-effort path guard as the bash tool.
 
 ### Composer: `@file` / `@folder` mentions
 

@@ -104,7 +104,8 @@ func TestCheckBashWorkspaceBoundaryBlocksVariables(t *testing.T) {
 
 func TestCheckBashWorkspaceBoundaryYoloStillBlocked(t *testing.T) {
 	// allowAll Ask is the yolo / --dangerously-skip-permissions analogue at
-	// the tool layer; boundary check must run before execution regardless.
+	// the tool layer; the static path guard still runs before execution for
+	// known destructive forms (incomplete — not a security boundary).
 	root := t.TempDir()
 	outside := t.TempDir()
 	marker := filepath.Join(outside, "keep-me")
@@ -119,7 +120,7 @@ func TestCheckBashWorkspaceBoundaryYoloStillBlocked(t *testing.T) {
 		t.Fatal("yolo bash rm outside: want error")
 	}
 	if _, statErr := os.Stat(marker); statErr != nil {
-		t.Fatalf("outside marker removed despite sandbox: %v", statErr)
+		t.Fatalf("outside marker removed despite path guard: %v", statErr)
 	}
 }
 
