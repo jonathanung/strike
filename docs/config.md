@@ -62,6 +62,7 @@ write this file. Manual `/ftue` remains available after acknowledgement.
     "worktreeCleanup": "keep"
   },
   "scheduler": {
+    "presets": ["cargo", "npm"],
     "limits": {
       "process": 8,
       "build": 2,
@@ -192,6 +193,7 @@ each process applies its own effective limits independently.
 
 | Field | Meaning |
 |---|---|
+| `presets` | Ordered list of shipped build-system preset IDs (see below) |
 | `limits` | Map of pool name → positive integer capacity |
 | `commands` | Ordered list of `{ "pattern", "class" }` classification rules |
 
@@ -201,9 +203,26 @@ the lower config layer's value; when no layer sets a pool, that pool is
 **fails config load** with the file path — use omission for unlimited, not
 zero.
 
-**Layering:** project `limits` override global **per pool**. `commands`
-concatenate (global then project). Malformed patterns or unknown classes fail
-load before the engine starts and name the source file and rule index.
+**Layering:** project `limits` override global **per pool**. `presets` and
+`commands` concatenate (global then project; duplicate preset IDs keep the
+first). Malformed patterns, unknown classes, or unknown/duplicate preset IDs
+in one file fail load before the engine starts and name the source file and
+index.
+
+**Presets:** versioned bundles for common resource-heavy tools. At compile
+time each selected ID expands into ordinary suggested `limits` and `commands`
+(no second runtime matcher). Expansion order follows the shipped catalog
+order among the selected IDs (not the order written in config). Then:
+
+1. User/project `limits` overlay preset-suggested capacities per pool.
+2. User/project `commands` append after expanded preset rules (last-match-wins,
+   so a later user rule can reclassify a preset pattern).
+
+Shipped preset IDs: `cmake`, `ninja`, `gradle`, `bazel`, `maven`, `cargo`,
+`npm` (covers npm/yarn/pnpm/bun). Each has a stable ID, display name,
+rationale, default class, and inspectable generated rules (see
+`scheduler.Catalog` / host `SchedulerPresets`). Expanded rule provenance is
+`preset:<id>@v<version>` in `Effective.Report()`.
 
 **Command classification:** each rule's `pattern` is a full-string glob over
 the submitted shell command (`*` = any run of runes, `?` = one rune, `\`
@@ -227,12 +246,13 @@ Admission wiring uses the compiled policy:
 Inspect the compiled policy via `Config.SchedulerEffective()` /
 `Effective.Report()`.
 
-Example — global caps with a project test override:
+Example — cargo preset plus global caps with a project test override:
 
 ```json
 // ~/.strike/config
 {
   "scheduler": {
+    "presets": ["cargo"],
     "limits": { "process": 8, "build": 2 },
     "commands": [
       { "pattern": "go *", "class": "build" }
@@ -245,14 +265,17 @@ Example — global caps with a project test override:
   "scheduler": {
     "limits": { "build": 4, "test": 2 },
     "commands": [
-      { "pattern": "go test *", "class": "test" }
+      { "pattern": "go test *", "class": "test" },
+      { "pattern": "cargo test *", "class": "general" }
     ]
   }
 }
 ```
 
-Effective: `process=8`, `build=4`, `test=2`, other pools unlimited.
-`go test ./...` → `test` (project rule wins over global `go *`);
+Effective: `process=8`, `build=4` (project overlays preset/global), `test=2`
+(from project; cargo preset also suggests test capacity when not overridden),
+other pools unlimited. `cargo build` → `build` (preset); `cargo test --lib` →
+`general` (project rule wins over preset); `go test ./...` → `test`;
 `go build .` → `build`.
 
 ## Session worktrees

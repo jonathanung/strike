@@ -38,12 +38,13 @@ func New(store *auth.Store, hist *history.Store, mem *memory.Store, issues *issu
 		customs = config.NewCustomStore(nil, workDir)
 	}
 	services := host.Services{
-		Auth:       authAdapter{store: store, customs: customs},
-		Catalog:    NewCatalog(customs),
-		Settings:   settingsAdapter{},
-		Onboarding: newOnboardingAdapter(store),
-		Providers:  providersAdapter{store: customs},
-		Agents:     agents,
+		Auth:             authAdapter{store: store, customs: customs},
+		Catalog:          NewCatalog(customs),
+		Settings:         settingsAdapter{},
+		Onboarding:       newOnboardingAdapter(store),
+		Providers:        providersAdapter{store: customs},
+		SchedulerPresets: schedulerPresetCatalog{},
+		Agents:           agents,
 	}
 	// A typed nil *history.Store would satisfy the interface but panic on
 	// use, so only wire history when it is really present.

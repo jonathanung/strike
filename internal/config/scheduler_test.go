@@ -220,10 +220,12 @@ func TestLoadSchedulerUnknownPoolFails(t *testing.T) {
 
 func TestMergeSchedulerUnit(t *testing.T) {
 	base := SchedulerConfig{
+		Presets:  []string{"cargo"},
 		Limits:   scheduler.Limits{scheduler.PoolProcess: 4},
 		Commands: []scheduler.CommandRule{{Pattern: "a *", Class: scheduler.ClassBuild, Source: "g"}},
 	}
 	layer := SchedulerConfig{
+		Presets:  []string{"cargo", "npm"},
 		Limits:   scheduler.Limits{scheduler.PoolProcess: 8, scheduler.PoolTest: 1},
 		Commands: []scheduler.CommandRule{{Pattern: "b *", Class: scheduler.ClassTest, Source: "p"}},
 	}
@@ -234,8 +236,142 @@ func TestMergeSchedulerUnit(t *testing.T) {
 	if len(got.Commands) != 2 {
 		t.Fatalf("commands=%v", got.Commands)
 	}
+	if len(got.Presets) != 2 || got.Presets[0] != "cargo" || got.Presets[1] != "npm" {
+		t.Fatalf("presets=%v", got.Presets)
+	}
 	// base not mutated via shared slice header growth issues
 	if len(base.Commands) != 1 {
 		t.Fatalf("base commands mutated: %v", base.Commands)
+	}
+	if len(base.Presets) != 1 {
+		t.Fatalf("base presets mutated: %v", base.Presets)
+	}
+}
+
+func TestLoadSchedulerPresetsExpand(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(global, []byte(`{
+		"scheduler": {
+			"presets": ["cargo"],
+			"limits": { "process": 6 },
+			"commands": [
+				{ "pattern": "cargo bench *", "class": "build" }
+			]
+		}
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	project := filepath.Join(work, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(project), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(project, []byte(`{
+		"scheduler": {
+			"presets": ["npm"],
+			"limits": { "build": 1 },
+			"commands": [
+				{ "pattern": "cargo test *", "class": "general" }
+			]
+		}
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Scheduler.Presets) != 2 || cfg.Scheduler.Presets[0] != "cargo" || cfg.Scheduler.Presets[1] != "npm" {
+		t.Fatalf("presets=%v", cfg.Scheduler.Presets)
+	}
+
+	eff, err := cfg.SchedulerEffective()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// User process=6; cargo/npm suggest build=2 then project build=1 overlays.
+	if eff.Limits[scheduler.PoolProcess] != 6 {
+		t.Fatalf("process=%d", eff.Limits[scheduler.PoolProcess])
+	}
+	if eff.Limits[scheduler.PoolBuild] != 1 {
+		t.Fatalf("build=%d want project overlay 1", eff.Limits[scheduler.PoolBuild])
+	}
+	if eff.Classify("cargo build") != scheduler.ClassBuild {
+		t.Fatal("cargo build from preset")
+	}
+	if eff.Classify("cargo test --all") != scheduler.ClassGeneral {
+		t.Fatal("project rule should override preset cargo test")
+	}
+	if eff.Classify("npm test") != scheduler.ClassTest {
+		t.Fatal("npm preset test")
+	}
+	if eff.Classify("cargo bench x") != scheduler.ClassBuild {
+		t.Fatal("global user command")
+	}
+	rep := eff.Report()
+	if !strings.Contains(rep, "preset:cargo@v") || !strings.Contains(rep, "preset:npm@v") {
+		t.Fatalf("report missing preset sources:\n%s", rep)
+	}
+	if !strings.Contains(rep, project) {
+		t.Fatalf("report missing project source:\n%s", rep)
+	}
+}
+
+func TestLoadSchedulerUnknownPresetFails(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	project := filepath.Join(work, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(project), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(project, []byte(`{
+		"scheduler": { "presets": ["msbuild"] }
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(work)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), project) {
+		t.Fatalf("err should name file: %v", err)
+	}
+	if !strings.Contains(err.Error(), "unknown preset") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestLoadSchedulerDuplicatePresetFails(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(global, []byte(`{
+		"scheduler": { "presets": ["cargo", "cargo"] }
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(work)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("err=%v", err)
 	}
 }
