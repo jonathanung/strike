@@ -191,11 +191,13 @@ considered in order; the last match's class wins. When nothing matches, the
 class is `general`. Multiple matches are therefore resolved by rule order
 (project rules append after global, so a later project rule can reclassify).
 
-Admission wiring (bash/model gates) uses the compiled policy: every bash
-command still consumes `process`; `build` / `test` classes acquire those pools
-in addition. Until those gates land, configuring `scheduler` only validates and
-compiles the effective policy (inspect via `Config.SchedulerEffective()` /
-`Effective.Report()`).
+Admission wiring uses the compiled policy: every agent **bash** invocation
+acquires `process` after permission approval and before process start (command
+timeout begins after admission). `build` / `test` classes acquire those pools
+in addition via the scheduler's multi-pool path. Omitted limits stay unlimited
+(no wait — same as pre-scheduler behavior). Model-stream gating is separate.
+Inspect the effective policy via `Config.SchedulerEffective()` /
+`Effective.Report()`.
 
 Example — global caps with a project test override:
 

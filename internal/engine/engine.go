@@ -15,6 +15,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
 	"github.com/jonathanung/strike-cli/internal/question"
+	"github.com/jonathanung/strike-cli/internal/scheduler"
 	"github.com/jonathanung/strike-cli/internal/tool"
 )
 
@@ -81,6 +82,15 @@ type Options struct {
 	// AllowYoloWithoutSandbox permits permissionMode yolo when SandboxMode is
 	// off. Set only from CLI --i-know after an explicit operator override.
 	AllowYoloWithoutSandbox bool
+	// Scheduler is the shared in-process admission controller for agent bash
+	// (process/build/test pools). nil disables pool gating. One instance is
+	// constructed per launch project and shared across roots and children.
+	// Model-stream gating is separate (#710) and must not use this field's
+	// bash path alone — leave model admission to that wiring.
+	Scheduler *scheduler.Scheduler
+	// SchedulerPolicy is the compiled classification policy for bash commands.
+	// nil treats all commands as general (process only). Shared with Scheduler.
+	SchedulerPolicy *scheduler.Effective
 	// Agents are the selectable personas; the first is the default unless
 	// InitialAgent names another.
 	Agents       []Agent

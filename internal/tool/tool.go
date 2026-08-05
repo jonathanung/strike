@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 
 	"github.com/jonathanung/strike-cli/internal/sandbox"
+	"github.com/jonathanung/strike-cli/internal/scheduler"
 )
 
 // Result separates what the model sees (Output) from what the UI renders
@@ -312,12 +313,20 @@ type Context struct {
 	// Sandbox is the full OS policy for bash (mode, workdir, write denials,
 	// network). When non-zero extras are present or WorkDir is set on the
 	// policy, bash uses it directly; otherwise SandboxMode is resolved.
-	Sandbox     sandbox.Policy
-	Ask         func(ctx context.Context, req AskRequest) error
-	SpawnTask   func(ctx context.Context, req TaskRequest) (TaskResult, error)
-	TaskStatus  func(ctx context.Context, req TaskStatusRequest) (TaskStatusResult, error)
-	TaskRead    func(ctx context.Context, req TaskReadRequest) (TaskReadResult, error)
-	TaskMessage func(ctx context.Context, req TaskMessageRequest) (TaskMessageResult, error)
+	Sandbox sandbox.Policy
+	// Scheduler, when non-nil, gates bash via named pools after permission
+	// approval and before process start. Shared across roots/children in one
+	// Strike process. nil preserves unlimited (no admission wait).
+	Scheduler *scheduler.Scheduler
+	// SchedulerPolicy classifies bash commands into process/build/test pools.
+	// nil treats every command as general (process only). Used only when
+	// Scheduler is non-nil.
+	SchedulerPolicy *scheduler.Effective
+	Ask             func(ctx context.Context, req AskRequest) error
+	SpawnTask       func(ctx context.Context, req TaskRequest) (TaskResult, error)
+	TaskStatus      func(ctx context.Context, req TaskStatusRequest) (TaskStatusResult, error)
+	TaskRead        func(ctx context.Context, req TaskReadRequest) (TaskReadResult, error)
+	TaskMessage     func(ctx context.Context, req TaskMessageRequest) (TaskMessageResult, error)
 	// TaskInterrupt cancels an owned running child by session id.
 	TaskInterrupt func(ctx context.Context, req TaskInterruptRequest) (TaskInterruptResult, error)
 	// AgentRoster lists lead + teammates on the implicit session team.

@@ -30,6 +30,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/provider/google"
 	"github.com/jonathanung/strike-cli/internal/provider/openaicompat"
 	"github.com/jonathanung/strike-cli/internal/sandbox"
+	"github.com/jonathanung/strike-cli/internal/scheduler"
 	"github.com/jonathanung/strike-cli/internal/session"
 	"github.com/jonathanung/strike-cli/internal/tool"
 )
@@ -61,6 +62,8 @@ type assembled struct {
 	worktreeNotice string
 	// mcpClose stops MCP server sessions (stdio/HTTP; process-scoped).
 	mcpClose func() error
+	// schedulerClose shuts down the shared in-process admission controller.
+	schedulerClose func()
 	// spawnRoot creates additional concurrent root engines (interactive multi-root).
 	// resumeID empty = new session; non-empty opens that durable root.
 	spawnRoot rootSpawner
@@ -410,6 +413,25 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		return n
 	}
 
+	// One scheduler for the launch project — shared by every root and child
+	// in this Strike process. Omitted limits stay unlimited (no wait).
+	schedEff, err := cfg.SchedulerEffective()
+	if err != nil {
+		_ = goalStore.Close()
+		_ = issueStore.Close()
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, fmt.Errorf("scheduler policy: %w", err)
+	}
+	sched, err := scheduler.New(schedEff.SchedulerConfig())
+	if err != nil {
+		_ = goalStore.Close()
+		_ = issueStore.Close()
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, fmt.Errorf("scheduler: %w", err)
+	}
+
 	// openRoot builds one live root engine. resumeID empty creates a fresh
 	// session; non-empty opens that durable root (subagents rejected).
 	// applyCLI pins: only the process's first root applies --provider/--model/--effort.
@@ -528,6 +550,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			InitialPermissionMode:   initialPermMode,
 			SandboxMode:             sandboxMode,
 			AllowYoloWithoutSandbox: opts.iKnow,
+			Scheduler:               sched,
+			SchedulerPolicy:         schedEff,
 			Agents:                  agents,
 			InitialAgent:            initialAgent,
 			InitialMessages:         initialMessages,
@@ -607,6 +631,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	if opts.continueSession {
 		info, err := sessions.LatestRoot(projectIdentity.Key)
 		if err != nil {
+			sched.Close()
 			_ = goalStore.Close()
 			_ = issueStore.Close()
 			_ = memoryStore.Close()
@@ -617,6 +642,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	}
 	first, replay, err := openRoot(resumeID, true)
 	if err != nil {
+		sched.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
 		_ = memoryStore.Close()
@@ -703,8 +729,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		mcpClose: func() error {
 			return mcpMgr.Close()
 		},
-		spawnRoot: spawn,
-		firstSlot: first,
+		schedulerClose: sched.Close,
+		spawnRoot:      spawn,
+		firstSlot:      first,
 	}, nil
 }
 

@@ -256,6 +256,9 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 					runErr = fmt.Errorf("closing mcp servers: %w", err)
 				}
 			}
+			if a.schedulerClose != nil {
+				a.schedulerClose()
+			}
 			if a.goalsClose != nil {
 				if err := a.goalsClose(); err != nil && runErr == nil {
 					runErr = fmt.Errorf("closing project goals: %w", err)
@@ -372,6 +375,9 @@ func runExec(opts cliOptions, prompt string, stdout, stderr io.Writer) (runErr e
 			if err := a.mcpClose(); err != nil && runErr == nil {
 				runErr = fmt.Errorf("closing mcp servers: %w", err)
 			}
+		}
+		if a.schedulerClose != nil {
+			a.schedulerClose()
 		}
 		if a.worktreeClose != nil {
 			if err := a.worktreeClose(); err != nil && runErr == nil {
