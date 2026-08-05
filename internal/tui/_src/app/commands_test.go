@@ -66,6 +66,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/cost":             {"session token and cost totals", "", commandSourceBuiltin},
 		"/upgrade":          {"install the latest release and restart", "", commandSourceBuiltin},
 		"/init":             {"create or update project AGENTS.md", "", commandSourceBuiltin},
+		"/ftue":             {"setup wizard: provider, model, optional init, first prompt", "", commandSourceBuiltin},
 		"/mcp":              {"MCP servers: status, retry, disable", "[retry [name]|disable <name>]", commandSourceBuiltin},
 		"/exit":             {"quit strike", "", commandSourceBuiltin},
 		"/quit":             {"quit strike", "", commandSourceBuiltin},

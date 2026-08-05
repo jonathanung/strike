@@ -926,6 +926,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case ftueSpawnChildMsg:
+		cmd := m.applyFTUESpawnChild(msg)
+		m.reflow()
+		return m, cmd
+
+	case ftueFinishedMsg:
+		cmd := m.applyFTUEFinished()
+		m.reflow()
+		return m, cmd
+
 	case initResultMsg:
 		return m.applyInitResult(msg)
 

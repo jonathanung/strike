@@ -182,6 +182,7 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 			m.clearNotice()
 		}
 		m.providerName, m.modelName = ev.Provider, ev.Model
+		m.syncFTUEState()
 		m.clearUsage()
 		m.refreshOpenPalette()
 		cmd = tea.Batch(m.fetchContextLimitsCmd(), m.broadcastContextState(), m.authExpiryNoticeCmd())
