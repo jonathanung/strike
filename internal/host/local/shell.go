@@ -13,7 +13,7 @@ import (
 
 // shellService runs user-initiated bash (composer !) via the bash tool with
 // allow-all Ask so interactive permission prompts are skipped. The tool still
-// enforces the workspace destructive-path sandbox.
+// enforces the workspace destructive-path guard.
 type shellService struct {
 	mu      sync.Mutex
 	workDir string

@@ -8,8 +8,9 @@ import (
 	"unicode"
 )
 
-// Destructive shell builtins/commands whose path operands must stay inside the
-// workspace even when permission mode is yolo / --dangerously-skip-permissions.
+// Destructive shell builtins/commands whose path operands are checked against
+// the workspace by checkBashWorkspaceBoundary. Best-effort static text guard
+// only — not an OS sandbox; many command forms are not inspected.
 var destructiveBashCmds = map[string]struct{}{
 	"rm":     {},
 	"rmdir":  {},
@@ -21,9 +22,9 @@ var destructiveBashCmds = map[string]struct{}{
 	"chgrp":  {},
 }
 
-// checkBashWorkspaceBoundary rejects destructive filesystem ops that target
-// paths outside workDir. This is a hard execution-layer guard, not a
-// permission prompt — allow-all / yolo cannot bypass it.
+// checkBashWorkspaceBoundary rejects known destructive filesystem ops that
+// target paths outside workDir when those paths are statically parseable.
+// Best-effort guard only: not a security boundary and not a full shell parser.
 func checkBashWorkspaceBoundary(command, workDir string) error {
 	command = strings.TrimSpace(command)
 	if command == "" {

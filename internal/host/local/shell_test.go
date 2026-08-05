@@ -68,7 +68,7 @@ func TestShellSandboxBlocksOutsideRm(t *testing.T) {
 		t.Fatalf("outside rm: want error, got %#v", res)
 	}
 	if _, statErr := os.Stat(marker); statErr != nil {
-		t.Fatalf("outside marker removed despite sandbox: %v", statErr)
+		t.Fatalf("outside marker removed despite path guard: %v", statErr)
 	}
 	if !strings.Contains(err.Error(), "escapes workspace") && !strings.Contains(res.Output, "escapes workspace") {
 		t.Fatalf("err/output should mention workspace escape: err=%v out=%q", err, res.Output)

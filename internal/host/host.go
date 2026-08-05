@@ -553,9 +553,9 @@ type ShellResult struct {
 
 // Shell runs local bash commands for frontend bang-escape (!cmd). Nil means
 // the capability is absent; frontends must degrade gracefully. Implementations
-// must apply the same workspace destructive-path sandbox as the bash tool.
-// Permission prompts are omitted — the user typed the command — but sandbox
-// blocks still apply even under yolo / skip-permissions.
+// must apply the same workspace destructive-path guard as the bash tool.
+// Permission prompts are omitted — the user typed the command — but the
+// destructive-path guard still runs (best-effort; not a security boundary).
 type Shell interface {
 	// Run executes command with bash in the session work directory. Empty
 	// command returns an error. Respects ctx cancellation/timeout.

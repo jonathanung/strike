@@ -48,6 +48,14 @@ replaced by a plain file.
 Rules concatenate across layers; the last matching rule wins, so project
 config overrides global, and session "always" grants override both.
 
+**Not a security boundary:** permission rules and modes (including `yolo` /
+`--auto` / `--dangerously-skip-permissions`) only control whether the agent is
+*asked* before a tool runs. They are not an OS sandbox and do not isolate the
+process. The bash tool applies a separate best-effort static path guard on a
+small set of destructive command forms; that guard is incomplete and must not
+be treated as isolation. Real process boundaries are tracked under the
+execution-sandboxing epic.
+
 **Permission mode dial:** `permissionMode` sets the default tool-permission
 posture for **new** sessions: `default` | `plan` | `soft-approve` |
 `accept-edits` | `yolo` (see [usage.md](usage.md)). Session changes via

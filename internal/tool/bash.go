@@ -67,8 +67,8 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	if fields := strings.Fields(a.Command); len(fields) > 1 {
 		always = []string{fields[0] + " *"}
 	}
-	// Hard workspace boundary for destructive ops — runs before Ask so yolo /
-	// --dangerously-skip-permissions cannot remove paths outside WorkDir.
+	// Best-effort workspace path guard for known destructive ops — runs before
+	// Ask. Incomplete static parse only; not a security boundary.
 	if err := checkBashWorkspaceBoundary(a.Command, tc.WorkDir); err != nil {
 		return Result{}, err
 	}
