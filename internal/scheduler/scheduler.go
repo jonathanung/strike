@@ -204,9 +204,19 @@ func (s *Scheduler) Acquire(ctx context.Context, names ...string) (*Lease, error
 	}
 
 	// Fast path: grant immediately when no one is waiting ahead and capacity allows.
+	// Honor an already-canceled ctx so we never consume capacity for a dead caller.
+	if err := ctx.Err(); err != nil {
+		s.mu.Unlock()
+		return nil, err
+	}
 	if s.canGrantLocked(need, nil) {
 		lease := s.grantLocked(need)
 		s.mu.Unlock()
+		// ctx may have canceled between the check and grant; free the slot.
+		if err := ctx.Err(); err != nil {
+			lease.Release()
+			return nil, err
+		}
 		return lease, nil
 	}
 
@@ -227,20 +237,30 @@ func (s *Scheduler) Acquire(ctx context.Context, names ...string) (*Lease, error
 		if w.err != nil {
 			return nil, w.err
 		}
+		// Both ready and ctx.Done may be selectable; never hand out a lease
+		// when the caller already canceled.
+		if err := ctx.Err(); err != nil {
+			w.lease.Release()
+			return nil, err
+		}
 		return w.lease, nil
 	case <-ctx.Done():
 		s.cancelWaiter(w, ctx.Err())
-		// If grant raced with cancel, prefer the lease (capacity already held).
-		select {
-		case <-w.ready:
-			if w.err != nil {
-				// Canceled (or closed) after we lost the race the other way.
-				return nil, w.err
-			}
-			return w.lease, nil
-		default:
+		// cancelWaiter always settles ready (cancel, prior grant, or Close).
+		<-w.ready
+		if w.lease != nil {
+			// Grant won the race: free capacity so a canceled caller never holds a slot.
+			w.lease.Release()
 			return nil, ctx.Err()
 		}
+		if w.err != nil {
+			// Prefer Close over a racy cancel when the scheduler is gone.
+			if errors.Is(w.err, ErrClosed) {
+				return nil, ErrClosed
+			}
+			return nil, w.err
+		}
+		return nil, ctx.Err()
 	}
 }
 

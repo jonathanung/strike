@@ -297,6 +297,26 @@ func TestFIFODeterministicSequentialEnqueue(t *testing.T) {
 	}
 }
 
+func TestAcquireRejectedWhenContextAlreadyCanceled(t *testing.T) {
+	s, err := New(Config{Pools: map[string]int{PoolModel: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	l, err := s.Acquire(ctx, PoolModel)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err=%v want context.Canceled", err)
+	}
+	if l != nil {
+		t.Fatal("lease must be nil when ctx already canceled")
+	}
+	assertPool(t, s, PoolModel, 0, 0)
+}
+
 func TestCancelLeavesPromptlyWithoutCapacity(t *testing.T) {
 	s, err := New(Config{Pools: map[string]int{PoolTest: 1}})
 	if err != nil {
