@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -132,7 +131,7 @@ func (applyPatchTool) Execute(ctx context.Context, args json.RawMessage, tc *Con
 	for abs := range originals {
 		tc.SnapshotPath(abs)
 	}
-	if err := commitPatchOps(planned, originals); err != nil {
+	if err := commitPatchOps(tc.WorkDir, planned, originals); err != nil {
 		return Result{}, err
 	}
 
@@ -152,7 +151,7 @@ func ApplyPatchToWorkDir(workDir, patch string) (summary string, err error) {
 	if err != nil {
 		return "", err
 	}
-	if err := commitPatchOps(planned, originals); err != nil {
+	if err := commitPatchOps(workDir, planned, originals); err != nil {
 		return "", err
 	}
 	return patchSuccessSummary(planned), nil
@@ -588,22 +587,16 @@ func indexExactLines(haystack, needle []string, from int) int {
 	return -1
 }
 
-func commitOnePatchOp(op plannedOp) error {
+func commitOnePatchOp(workDir string, op plannedOp) error {
 	switch op.Type {
-	case "add":
-		if err := os.MkdirAll(filepath.Dir(op.AbsPath), 0o755); err != nil {
-			return err
-		}
-		return os.WriteFile(op.AbsPath, []byte(op.Content), 0o644)
+	case "add", "update":
+		// Re-validate + O_NOFOLLOW at commit (TOCTOU vs plan-time resolve).
+		return workspaceWriteFile(workDir, op.AbsPath, []byte(op.Content))
 	case "delete":
+		// os.Remove unlinks the final component (does not follow a leaf symlink).
 		return os.Remove(op.AbsPath)
-	case "update":
-		return os.WriteFile(op.AbsPath, []byte(op.Content), 0o644)
 	case "move":
-		if err := os.MkdirAll(filepath.Dir(op.AbsMove), 0o755); err != nil {
-			return err
-		}
-		if err := os.WriteFile(op.AbsMove, []byte(op.Content), 0o644); err != nil {
+		if err := workspaceWriteFile(workDir, op.AbsMove, []byte(op.Content)); err != nil {
 			return err
 		}
 		return os.Remove(op.AbsPath)
@@ -613,38 +606,35 @@ func commitOnePatchOp(op plannedOp) error {
 }
 
 // restorePath writes original bytes back, or removes the path if it did not exist.
-func restorePath(abs string, orig pathOriginal) error {
+func restorePath(workDir, abs string, orig pathOriginal) error {
 	if !orig.exists {
 		if err := os.Remove(abs); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(abs, orig.data, 0o644)
+	return workspaceWriteFile(workDir, abs, orig.data)
 }
 
-func rollbackPatchOps(applied []plannedOp, originals map[string]pathOriginal) error {
+func rollbackPatchOps(workDir string, applied []plannedOp, originals map[string]pathOriginal) error {
 	var errs []error
 	for i := len(applied) - 1; i >= 0; i-- {
 		op := applied[i]
 		switch op.Type {
 		case "add":
-			if err := restorePath(op.AbsPath, originals[op.AbsPath]); err != nil {
+			if err := restorePath(workDir, op.AbsPath, originals[op.AbsPath]); err != nil {
 				errs = append(errs, err)
 			}
 		case "delete", "update":
-			if err := restorePath(op.AbsPath, originals[op.AbsPath]); err != nil {
+			if err := restorePath(workDir, op.AbsPath, originals[op.AbsPath]); err != nil {
 				errs = append(errs, err)
 			}
 		case "move":
 			// Remove dest first, then restore source.
-			if err := restorePath(op.AbsMove, originals[op.AbsMove]); err != nil {
+			if err := restorePath(workDir, op.AbsMove, originals[op.AbsMove]); err != nil {
 				errs = append(errs, err)
 			}
-			if err := restorePath(op.AbsPath, originals[op.AbsPath]); err != nil {
+			if err := restorePath(workDir, op.AbsPath, originals[op.AbsPath]); err != nil {
 				errs = append(errs, err)
 			}
 		}
@@ -652,16 +642,16 @@ func rollbackPatchOps(applied []plannedOp, originals map[string]pathOriginal) er
 	return errors.Join(errs...)
 }
 
-func commitPatchOps(ops []plannedOp, originals map[string]pathOriginal) error {
+func commitPatchOps(workDir string, ops []plannedOp, originals map[string]pathOriginal) error {
 	var applied []plannedOp
 	for _, op := range ops {
-		if err := commitOnePatchOp(op); err != nil {
+		if err := commitOnePatchOp(workDir, op); err != nil {
 			// Include the failed op so partial effects (e.g. move wrote dest
 			// but failed to remove source) are best-effort undone too.
 			toRoll := make([]plannedOp, len(applied)+1)
 			copy(toRoll, applied)
 			toRoll[len(applied)] = op
-			if rbErr := rollbackPatchOps(toRoll, originals); rbErr != nil {
+			if rbErr := rollbackPatchOps(workDir, toRoll, originals); rbErr != nil {
 				return fmt.Errorf("apply_patch: commit failed: %v; rollback also failed: %v (partial state)", err, rbErr)
 			}
 			return fmt.Errorf("apply_patch: commit failed: %w (rolled back)", err)

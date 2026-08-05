@@ -88,7 +88,12 @@ func (editTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 		updated = strings.Replace(content, a.OldString, a.NewString, 1)
 	}
 	tc.SnapshotPath(path)
-	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
+	// Re-validate + O_NOFOLLOW at exec time (TOCTOU: symlink planted after resolve).
+	if err := workspaceWriteFile(tc.WorkDir, a.FilePath, []byte(updated)); err != nil {
+		return Result{}, err
+	}
+	path, _, err = resolveInWorkspace(tc.WorkDir, a.FilePath)
+	if err != nil {
 		return Result{}, err
 	}
 	if info, statErr := os.Stat(path); statErr == nil {

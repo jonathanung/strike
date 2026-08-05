@@ -68,6 +68,12 @@ func resolveInWorkspace(root, path string) (resolved, rel string, err error) {
 		if !os.IsNotExist(err) {
 			return "", "", &WorkspaceEscapeError{Path: path, Root: rootReal}
 		}
+		// EvalSymlinks reports NotExist for dangling symlinks too. A final
+		// component that is a symlink must still be checked — otherwise
+		// os.WriteFile would follow it outside the workspace.
+		if fi, lerr := os.Lstat(candidate); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
+			return resolveDanglingSymlink(rootReal, path, candidate)
+		}
 		if err := ensureWorkspacePrefix(rootReal, candidate); err != nil {
 			return "", "", err
 		}
@@ -82,6 +88,60 @@ func resolveInWorkspace(root, path string) (resolved, rel string, err error) {
 		return "", "", &WorkspaceEscapeError{Path: path, Root: rootReal}
 	}
 	return real, filepath.ToSlash(rel), nil
+}
+
+// resolveDanglingSymlink checks a final-component symlink whose target does not
+// exist yet. The link target (absolute or relative to the link's parent) must
+// stay inside rootReal; mutation tools never write through the symlink itself.
+func resolveDanglingSymlink(rootReal, userPath, candidate string) (resolved, rel string, err error) {
+	target, err := os.Readlink(candidate)
+	if err != nil {
+		return "", "", &WorkspaceEscapeError{Path: userPath, Root: rootReal}
+	}
+	var absTarget string
+	if filepath.IsAbs(target) {
+		absTarget = filepath.Clean(target)
+	} else {
+		absTarget = filepath.Join(filepath.Dir(candidate), target)
+	}
+	// Re-enter resolve for the target path (may itself be missing). Cap depth
+	// by rejecting if the target path lexically escapes before recursion.
+	if err := ensureWorkspacePrefix(rootReal, absTarget); err != nil {
+		return "", "", &WorkspaceEscapeError{Path: userPath, Root: rootReal}
+	}
+	// Target is still missing: accept the cleaned target only if under root.
+	rel, relErr := filepath.Rel(rootReal, absTarget)
+	if relErr != nil || !relInside(rel) {
+		return "", "", &WorkspaceEscapeError{Path: userPath, Root: rootReal}
+	}
+	// Return the physical target path (not the symlink) so writers open the
+	// in-workspace leaf with O_NOFOLLOW rather than following the link.
+	return absTarget, filepath.ToSlash(rel), nil
+}
+
+// workspaceWriteFile re-validates path under root immediately before writing and
+// opens the leaf with O_NOFOLLOW (Unix) so a symlink planted after the initial
+// resolve cannot redirect the write outside the workspace.
+func workspaceWriteFile(root, path string, data []byte) error {
+	resolved, _, err := resolveInWorkspace(root, path)
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(resolved)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	// MkdirAll can race with a parent→symlink swap; re-resolve before open.
+	resolved, _, err = resolveInWorkspace(root, path)
+	if err != nil {
+		return err
+	}
+	// If the leaf is still a symlink after resolve (should not happen when
+	// resolve returns the target), refuse rather than follow.
+	if fi, lerr := os.Lstat(resolved); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
+		return &WorkspaceEscapeError{Path: path, Root: root}
+	}
+	return writeFileNoFollow(resolved, data, 0o644)
 }
 
 // ensureWorkspacePrefix checks that every existing prefix of candidate stays
