@@ -486,12 +486,12 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 			m.notifyMode = option.NotifyMode
 		}
 		if option.SandboxMode != "" {
+			// Apply backend/availability with mode so a later partial Options
+			// (e.g. WorkDir-only) cannot clear a prior sandbox wiring.
 			m.sandboxMode = option.SandboxMode
+			m.sandboxBackend = option.SandboxBackend
+			m.sandboxAvailable = option.SandboxAvailable
 		}
-		// Backend/availability are process facts from the host; always take the
-		// last Options value (including empty backend / false available).
-		m.sandboxBackend = option.SandboxBackend
-		m.sandboxAvailable = option.SandboxAvailable
 		if option.PermissionAutoApproveSeconds != 0 {
 			m.permissionAutoApproveSeconds = option.PermissionAutoApproveSeconds
 		}

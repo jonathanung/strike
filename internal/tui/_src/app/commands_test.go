@@ -214,3 +214,13 @@ func TestSandboxStatusNotice(t *testing.T) {
 		t.Errorf("off notice = %q", got)
 	}
 }
+
+func TestSandboxOptionsNotClobberedByPartialOptions(t *testing.T) {
+	m := New(nil, nil, host.Services{},
+		Options{SandboxMode: "read-only", SandboxBackend: "bwrap", SandboxAvailable: true},
+		Options{WorkDir: t.TempDir()},
+	)
+	if m.sandboxMode != "read-only" || m.sandboxBackend != "bwrap" || !m.sandboxAvailable {
+		t.Fatalf("sandbox wiring clobbered: mode=%q backend=%q avail=%v", m.sandboxMode, m.sandboxBackend, m.sandboxAvailable)
+	}
+}
