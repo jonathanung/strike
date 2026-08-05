@@ -30,6 +30,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/provider/google"
 	"github.com/jonathanung/strike-cli/internal/provider/openaicompat"
 	"github.com/jonathanung/strike-cli/internal/sandbox"
+	"github.com/jonathanung/strike-cli/internal/scheduler"
 	"github.com/jonathanung/strike-cli/internal/session"
 	"github.com/jonathanung/strike-cli/internal/tool"
 )
@@ -410,6 +411,25 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		return n
 	}
 
+	// Process-local scheduler shared by every root and child engine so model
+	// (and later bash) pools cap aggregate concurrency inside this OS process.
+	schedEff, err := cfg.SchedulerEffective()
+	if err != nil {
+		_ = goalStore.Close()
+		_ = issueStore.Close()
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, fmt.Errorf("scheduler policy: %w", err)
+	}
+	processSched, err := scheduler.New(schedEff.SchedulerConfig())
+	if err != nil {
+		_ = goalStore.Close()
+		_ = issueStore.Close()
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, fmt.Errorf("scheduler: %w", err)
+	}
+
 	// openRoot builds one live root engine. resumeID empty creates a fresh
 	// session; non-empty opens that durable root (subagents rejected).
 	// applyCLI pins: only the process's first root applies --provider/--model/--effort.
@@ -520,6 +540,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			SystemPrompt:            cfg.SystemPrompt,
 			LeanCode:                cfg.LeanCode,
 			HarnessRegistry:         harnessRegistry,
+			Scheduler:               processSched,
 			MaxChildDepth:           cfg.MaxChildDepth,
 			InitialProvider:         initialProvider,
 			InitialModel:            initialModel,

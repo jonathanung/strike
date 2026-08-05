@@ -281,7 +281,7 @@ func (e *Engine) summarizeHistory(ctx context.Context, dropped []provider.Messag
 	if m := strings.TrimSpace(e.opts.CompactionModel); m != "" {
 		model = m
 	}
-	stream, err := e.prov.Stream(ctx, provider.Request{
+	stream, err := e.admitModelStream(ctx, provider.Request{
 		Model:  model,
 		System: summarizeSystemPrompt,
 		Messages: []provider.Message{{
@@ -294,7 +294,6 @@ func (e *Engine) summarizeHistory(ctx context.Context, dropped []provider.Messag
 	if err != nil {
 		return "", err
 	}
-	stream = provider.NormalizeStream(stream)
 	var text strings.Builder
 	var streamErr error
 	terminated := false

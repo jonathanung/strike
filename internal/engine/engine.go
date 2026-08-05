@@ -15,6 +15,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
 	"github.com/jonathanung/strike-cli/internal/question"
+	"github.com/jonathanung/strike-cli/internal/scheduler"
 	"github.com/jonathanung/strike-cli/internal/tool"
 )
 
@@ -226,6 +227,11 @@ type Options struct {
 	// HarnessRegistry maps task-subagent Agent.Harness names to complete agent-run
 	// functions. nil means every child uses the built-in loop.
 	HarnessRegistry *harness.Registry
+	// Scheduler is the process-local admission controller for model streams
+	// (and later bash/process pools). Shared across concurrent roots and
+	// child engines so the model pool caps aggregate in-process concurrency.
+	// nil disables admission (unlimited; preserves pre-scheduler behavior).
+	Scheduler *scheduler.Scheduler
 }
 
 // beginAck reports whether ToolCallBegin was actually written to Events.

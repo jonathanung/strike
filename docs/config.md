@@ -191,11 +191,19 @@ considered in order; the last match's class wins. When nothing matches, the
 class is `general`. Multiple matches are therefore resolved by rule order
 (project rules append after global, so a later project rule can reclassify).
 
-Admission wiring (bash/model gates) uses the compiled policy: every bash
-command still consumes `process`; `build` / `test` classes acquire those pools
-in addition. Until those gates land, configuring `scheduler` only validates and
-compiles the effective policy (inspect via `Config.SchedulerEffective()` /
-`Effective.Report()`).
+Admission wiring uses the compiled policy:
+
+- **Model streams** (ordinary turns, child turns, concurrent roots, harness
+  calls, and compaction summarize) acquire the `model` pool for the duration of
+  each `Provider.Stream` attempt. The lease is released when the stream is
+  fully drained, before retry backoff, and reacquired fairly on the next
+  attempt. Omitted/`unlimited` model capacity preserves pre-scheduler behavior.
+- **Bash** still does not admit yet (process/build/test gates land separately):
+  every bash command will consume `process`; `build` / `test` classes will
+  acquire those pools in addition.
+
+Inspect the compiled policy via `Config.SchedulerEffective()` /
+`Effective.Report()`.
 
 Example — global caps with a project test override:
 
