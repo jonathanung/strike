@@ -423,7 +423,7 @@ func (m *tourModal) permissionsBody(st theme.Styles, keys keyMap) string {
 	b.WriteString("\n")
 	modeKey := bindingKey(keys.PermissionMode)
 	b.WriteString(st.Muted.Render(fmt.Sprintf(
-		"Cycle permission posture with %s (or /mode). Postures: default, plan, accept-edits, yolo.",
+		"Cycle permission posture with %s (or /mode). Postures: default, plan, soft-approve, accept-edits, yolo.",
 		modeKey,
 	)))
 	if mode := strings.TrimSpace(m.ctx.permMode); mode != "" {
