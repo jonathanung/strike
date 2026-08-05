@@ -39,6 +39,20 @@ replaced by a plain file.
     "worktree": "off",
     "worktreeCleanup": "keep"
   },
+  "scheduler": {
+    "limits": {
+      "process": 8,
+      "build": 2,
+      "test": 4,
+      "model": 3,
+      "container": 1
+    },
+    "commands": [
+      { "pattern": "go test *", "class": "test" },
+      { "pattern": "go *", "class": "build" },
+      { "pattern": "make *", "class": "build" }
+    ]
+  },
   "permissions": [
     { "permission": "bash", "pattern": "go *", "action": "allow" },
     { "permission": "write", "pattern": "**/*.env", "action": "deny" }
@@ -147,6 +161,69 @@ paths, prompts, or secrets.
 | `off` | never notify |
 
 Unknown values are ignored at load time.
+
+## Scheduler (in-process resource limits)
+
+`scheduler` bounds concurrent agent work **inside one Strike OS process**.
+Separate `strike` programs do **not** coordinate leases or share capacity —
+each process applies its own effective limits independently.
+
+| Field | Meaning |
+|---|---|
+| `limits` | Map of pool name → positive integer capacity |
+| `commands` | Ordered list of `{ "pattern", "class" }` classification rules |
+
+**Pools:** `process`, `build`, `test`, `model`, `container`. Omitted keys keep
+the lower config layer's value; when no layer sets a pool, that pool is
+**unlimited** (same as today's default). An explicit `0` or negative capacity
+**fails config load** with the file path — use omission for unlimited, not
+zero.
+
+**Layering:** project `limits` override global **per pool**. `commands`
+concatenate (global then project). Malformed patterns or unknown classes fail
+load before the engine starts and name the source file and rule index.
+
+**Command classification:** each rule's `pattern` is a full-string glob over
+the submitted shell command (`*` = any run of runes, `?` = one rune, `\`
+escapes the next byte). Matching is case-sensitive. `class` is `general` |
+`build` | `test`. Evaluation is **last-match-wins**: every matching rule is
+considered in order; the last match's class wins. When nothing matches, the
+class is `general`. Multiple matches are therefore resolved by rule order
+(project rules append after global, so a later project rule can reclassify).
+
+Admission wiring (bash/model gates) uses the compiled policy: every bash
+command still consumes `process`; `build` / `test` classes acquire those pools
+in addition. Until those gates land, configuring `scheduler` only validates and
+compiles the effective policy (inspect via `Config.SchedulerEffective()` /
+`Effective.Report()`).
+
+Example — global caps with a project test override:
+
+```json
+// ~/.strike/config
+{
+  "scheduler": {
+    "limits": { "process": 8, "build": 2 },
+    "commands": [
+      { "pattern": "go *", "class": "build" }
+    ]
+  }
+}
+
+// ./.strike/config
+{
+  "scheduler": {
+    "limits": { "build": 4, "test": 2 },
+    "commands": [
+      { "pattern": "go test *", "class": "test" }
+    ]
+  }
+}
+```
+
+Effective: `process=8`, `build=4`, `test=2`, other pools unlimited.
+`go test ./...` → `test` (project rule wins over global `go *`);
+`go build .` → `build`.
 
 ## Session worktrees
 
