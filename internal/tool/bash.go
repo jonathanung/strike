@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/jonathanung/strike-cli/internal/sandbox"
 )
 
 const (
@@ -93,13 +95,19 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	}
 
 	// Fresh process each call: Dir is always the session workdir so shell cd
-	// cannot stick across tool invocations.
+	// cannot stick across tool invocations. OS sandbox (bwrap / seatbelt)
+	// confines the shell when the platform backend is available; E1.4 will
+	// expose a config dial over this policy.
 	proc, err := RunProcess(ctx, ProcessSpec{
 		Argv:      []string{"bash", "-c", a.Command},
 		Dir:       tc.WorkDir,
 		Timeout:   timeout,
 		MaxOutput: bashMaxOutput,
 		Combine:   true,
+		Sandbox: sandbox.Policy{
+			Mode:    sandbox.ModeWorkspaceWrite,
+			WorkDir: tc.WorkDir,
+		},
 	}, obs)
 	if err != nil {
 		return Result{}, err

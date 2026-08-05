@@ -189,6 +189,31 @@ func TestBashRecordsSessionPRFromGH(t *testing.T) {
 	}
 }
 
+func TestBashWorkspaceWriteInsideSandbox(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	root := t.TempDir()
+	tc := allowAll(root)
+	marker := filepath.Join(root, "sandboxed.txt")
+	res, err := NewBash().Execute(context.Background(), mustJSON(t, map[string]any{
+		"command": "printf x > sandboxed.txt && cat sandboxed.txt",
+	}), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Output, "x") {
+		t.Fatalf("output = %q", res.Output)
+	}
+	body, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "x" {
+		t.Fatalf("file = %q", body)
+	}
+}
+
 func TestBashDoesNotRecordPROnFailure(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")
