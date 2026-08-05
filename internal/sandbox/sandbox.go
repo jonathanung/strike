@@ -5,13 +5,15 @@
 // namespaces), Wrap returns the original argv and emits a one-shot warning.
 //
 // Policy.Mode is the config/CLI sandbox dial (off|read-only|workspace-write).
-// E1.5 will compile permission rules into the generated profile.
+// Permission rules compile into DenyWrite* / Network / NoWorkspaceWrite via
+// permission.CompileSandbox (E1.5).
 package sandbox
 
 import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -106,6 +108,95 @@ type Policy struct {
 	// WorkDir is the session workspace root. Required for ModeWorkspaceWrite
 	// writable bind / seatbelt subpath; ignored when empty or Mode is Off.
 	WorkDir string
+	// NoWorkspaceWrite suppresses the writable workdir bind/subpath even when
+	// Mode is ModeWorkspaceWrite (e.g. plan mode or write/edit deny *).
+	NoWorkspaceWrite bool
+	// DenyWritePaths are absolute file/directory paths remounted read-only
+	// after the workspace bind (bwrap) or denied for file-write* (seatbelt).
+	// Missing paths are skipped at wrap time (bwrap requires existing targets).
+	DenyWritePaths []string
+	// DenyWriteGlobs are original permission patterns (e.g. "**/*.env") kept
+	// for seatbelt regex denials and /sandbox explain. Linux also uses
+	// DenyWritePaths expanded from these globs at compile time.
+	DenyWriteGlobs []string
+	// Network enables outbound/inbound network in the OS profile. Default
+	// false preserves --unshare-net / no network-* (current product default).
+	// Compiled from webfetch/mcp permission Allow on "*".
+	Network bool
+}
+
+// WorkspaceWritable reports whether the policy grants a writable workspace bind.
+func (p Policy) WorkspaceWritable() bool {
+	return p.Mode == ModeWorkspaceWrite && !p.NoWorkspaceWrite && strings.TrimSpace(p.WorkDir) != ""
+}
+
+// Explain returns a multi-line human description of the effective policy and
+// generated profile (for /sandbox explain).
+func Explain(p Policy) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "sandbox mode: %s\n", p.Mode)
+	if wd := strings.TrimSpace(p.WorkDir); wd != "" {
+		fmt.Fprintf(&b, "workdir: %s\n", wd)
+	}
+	if p.Mode == ModeOff {
+		b.WriteString("OS isolation: disabled\n")
+		return b.String()
+	}
+	fmt.Fprintf(&b, "workspace-write: %v\n", p.WorkspaceWritable())
+	fmt.Fprintf(&b, "network: %v\n", p.Network)
+	if len(p.DenyWriteGlobs) > 0 {
+		fmt.Fprintf(&b, "deny-write globs: %s\n", strings.Join(p.DenyWriteGlobs, ", "))
+	}
+	if len(p.DenyWritePaths) > 0 {
+		fmt.Fprintf(&b, "deny-write paths: %s\n", strings.Join(p.DenyWritePaths, ", "))
+	}
+	backend := BackendName()
+	if backend == "" {
+		backend = "(unavailable)"
+	}
+	fmt.Fprintf(&b, "backend: %s\n", backend)
+	b.WriteString("profile:\n")
+	b.WriteString(ProfileText(p))
+	return b.String()
+}
+
+// ProfileText returns the generated launcher profile text for p.
+// Linux: bwrap flag plan. macOS: seatbelt SBPL. Other: logical summary.
+func ProfileText(p Policy) string {
+	return profileText(p)
+}
+
+// existingDenyPaths returns absolute existing paths from p.DenyWritePaths
+// (deduped, cleaned). Used by platform wrappers.
+func existingDenyPaths(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(paths))
+	var out []string
+	for _, raw := range paths {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		clean := filepath.Clean(raw)
+		abs, err := filepath.Abs(clean)
+		if err != nil {
+			abs = clean
+		}
+		if real, err := filepath.EvalSymlinks(abs); err == nil && real != "" {
+			abs = real
+		}
+		if _, ok := seen[abs]; ok {
+			continue
+		}
+		if st, err := os.Stat(abs); err != nil || st == nil {
+			continue
+		}
+		seen[abs] = struct{}{}
+		out = append(out, abs)
+	}
+	return out
 }
 
 // Result is the outcome of Wrap.

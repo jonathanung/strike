@@ -86,7 +86,18 @@ the OS sandbox; setting `sandbox: off` does not skip permission asks.
 shell) via Linux `bwrap` / macOS `sandbox-exec`. When the backend is missing
 or blocked, bash degrades to unsandboxed with a one-shot startup warning
 (unless `sandbox` is `off`). Override per invocation with `--sandbox <mode>`.
-Inspect the effective policy with `/sandbox`.
+Inspect the effective policy with `/sandbox`; `/sandbox explain` prints the
+generated OS profile (bwrap flags or seatbelt SBPL) compiled from permission
+rules.
+
+**Permission → sandbox profile:** hard `write`/`edit` deny rules are compiled
+into OS filesystem denials inside the bash sandbox (globs become seatbelt
+regexes and, when paths exist, bwrap `--ro-bind` remounts). A deny on
+`write`/`edit` `*` (including plan mode) suppresses the writable workspace
+bind. Network inside the sandbox stays off unless `webfetch` or `mcp` is
+effectively **allow** on `*` (patterned allows do not open full bash network).
+Ask/yolo posture does not widen the OS profile. Composer `!` uses the
+config-layer compile; agent bash uses live layers (agent/phase/session).
 
 **Yolo + sandbox off:** `permissionMode: yolo` (or a resumed session in yolo)
 combined with `sandbox: off` **refuses to start** unless you pass `--i-know`.
@@ -100,8 +111,9 @@ agent is *asked* before a tool runs. Prefer keeping `sandbox` at
 `workspace-write` (or `read-only`) so OS isolation still applies. The bash
 tool also applies a separate best-effort static path guard on a small set of
 destructive command forms; that guard is incomplete and must not be treated as
-isolation. Further profile compilation is tracked under the
-execution-sandboxing epic (E1.5+).
+isolation. Linux glob denials expand existing paths at compile time (new files
+matching a deny glob are covered on the next compile / seatbelt regex on
+macOS).
 
 **Permission mode dial:** `permissionMode` sets the default tool-permission
 posture for **new** sessions: `default` | `plan` | `soft-approve` |

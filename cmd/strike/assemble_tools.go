@@ -46,12 +46,14 @@ type assembled struct {
 	workDir string // tool CWD (session worktree when bound, else launch cwd)
 	cfg     config.Config
 	// sandboxMode is the resolved OS sandbox dial (canonical token).
-	sandboxMode  string
-	services     host.Services
-	historyClose func() error
-	memoryClose  func() error
-	issuesClose  func() error
-	goalsClose   func() error
+	sandboxMode string
+	// sandboxExplain is the multi-line /sandbox explain text (config layers).
+	sandboxExplain string
+	services       host.Services
+	historyClose   func() error
+	memoryClose    func() error
+	issuesClose    func() error
+	goalsClose     func() error
 	// worktreeClose removes a strike-managed worktree when cleanup=delete.
 	worktreeClose func() error
 	// worktreeNotice is a user-visible soft-fail message (e.g. non-git cwd).
@@ -651,7 +653,15 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// the TUI never sees auth/config/models/history/memory/issues directly.
 	services := local.New(authStore, historyStore, memoryStore, issueStore, agentNames, skills, customStore, workDir)
 	services.Files = local.NewFiles(workDir)
-	services.Shell = local.NewShell(workDir, sandboxMode)
+	// Compile base sandbox profile from defaults + config (+ optional dangerous
+	// allow-all). Engine recompiles per bash call with live agent/phase layers.
+	sandboxPolicy := permission.CompileSandbox(
+		sandbox.ResolveMode(sandboxMode),
+		workDir,
+		permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions)...,
+	)
+	sandboxExplain := sandbox.Explain(sandboxPolicy)
+	services.Shell = local.NewShell(workDir, sandboxPolicy)
 	services.Goals = local.NewGoals(goalStore, workDir)
 	services.Sessions = local.NewSessions(sessions, projectIdentity.Key)
 	services.Init = local.NewProjectInit(workDir)
@@ -664,15 +674,16 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	})
 
 	return &assembled{
-		eng:         first.eng,
-		sessions:    sessions,
-		store:       first.bound,
-		sessionID:   first.id,
-		replay:      replay,
-		workDir:     workDir,
-		cfg:         cfg,
-		sandboxMode: sandboxMode,
-		services:    services,
+		eng:            first.eng,
+		sessions:       sessions,
+		store:          first.bound,
+		sessionID:      first.id,
+		replay:         replay,
+		workDir:        workDir,
+		cfg:            cfg,
+		sandboxMode:    sandboxMode,
+		sandboxExplain: sandboxExplain,
+		services:       services,
 		historyClose: func() error {
 			return historyStore.Close()
 		},

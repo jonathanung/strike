@@ -144,6 +144,9 @@ type Options struct {
 	SandboxBackend string
 	// SandboxAvailable reports whether the OS sandbox backend can run.
 	SandboxAvailable bool
+	// SandboxExplain is the multi-line generated profile text for /sandbox explain.
+	// Compiled from config permission layers at process start.
+	SandboxExplain string
 	// Replay is a prior session event log for --continue / --session. Seeded
 	// via cellsFromEvents + silent selection/child state — never fed through
 	// applyEvent (avoids stuck turns, zombie permission modals, orphan children).
@@ -267,6 +270,8 @@ type Model struct {
 	sandboxBackend string
 	// sandboxAvailable is whether the OS backend can apply isolation.
 	sandboxAvailable bool
+	// sandboxExplain is /sandbox explain body (config-compiled profile).
+	sandboxExplain string
 	// fastEnabled is the session priority-tier preference from /fast.
 	fastEnabled bool
 	// showThinking shows reasoning/CoT cells in the transcript (/think).
@@ -498,6 +503,7 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 			m.sandboxMode = option.SandboxMode
 			m.sandboxBackend = option.SandboxBackend
 			m.sandboxAvailable = option.SandboxAvailable
+			m.sandboxExplain = option.SandboxExplain
 		}
 		if option.PermissionAutoApproveSeconds != 0 {
 			m.permissionAutoApproveSeconds = option.PermissionAutoApproveSeconds
