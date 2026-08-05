@@ -18,6 +18,7 @@ import (
 
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike-cli/internal/sandbox"
 )
 
 type Config struct {
@@ -64,9 +65,14 @@ type Config struct {
 	// PermissionMode is the default tool-permission posture dial for new
 	// sessions (default|plan|soft-approve|accept-edits|yolo). Empty means
 	// default. Session changes via Shift+Tab or /mode persist in the JSONL
-	// log, not here.
+	// log, not here. Distinct from Sandbox (what OS isolation allows).
 	PermissionMode protocol.PermissionMode `json:"permissionMode,omitempty"`
-	Permissions    permission.Ruleset      `json:"permissions,omitempty"`
+	// Sandbox is the OS process sandbox dial for bash: off|read-only|
+	// workspace-write. Empty means workspace-write (default). This controls
+	// what the OS isolation layer makes possible; permissionMode controls
+	// when the agent is asked. See docs/config.md (two-dial model).
+	Sandbox     string             `json:"sandbox,omitempty"`
+	Permissions permission.Ruleset `json:"permissions,omitempty"`
 	// Hooks mixes declarative rules (action) and shell commands (command).
 	// Global then project layers concatenate. Invalid entries are dropped.
 	Hooks []Hook `json:"hooks,omitempty"`
@@ -532,6 +538,13 @@ func read(path string) (Config, error) {
 		}
 		c.PermissionMode = mode
 	}
+	if strings.TrimSpace(c.Sandbox) != "" {
+		mode, ok := sandbox.ParseMode(c.Sandbox)
+		if !ok {
+			return Config{}, fmt.Errorf("%s: unknown sandbox %q (want %s)", path, c.Sandbox, sandbox.ModeNames())
+		}
+		c.Sandbox = mode.String()
+	}
 	c.CompactionStrategy = NormalizeCompactionStrategy(c.CompactionStrategy)
 	c.CompactionModel = strings.TrimSpace(c.CompactionModel)
 	c.CompactionThreshold = ClampCompactionThreshold(c.CompactionThreshold)
@@ -810,6 +823,9 @@ func merge(base, layer Config) Config {
 	}
 	if layer.PermissionMode != "" {
 		base.PermissionMode = layer.PermissionMode
+	}
+	if layer.Sandbox != "" {
+		base.Sandbox = layer.Sandbox
 	}
 	if layer.CompactionStrategy != "" {
 		base.CompactionStrategy = layer.CompactionStrategy

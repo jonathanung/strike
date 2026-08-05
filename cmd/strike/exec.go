@@ -18,9 +18,9 @@ Usage:
   strike exec [options] <prompt...>
   strike exec [options] -              read prompt from stdin
 
-Options are the same as strike ( --provider, --model, --effort,
---auto / --dangerously-skip-permissions ). Permission and question prompts cannot be
-answered interactively; asks are rejected unless --auto or
+Options are the same as strike ( --provider, --model, --effort, --sandbox,
+--i-know, --auto / --dangerously-skip-permissions ). Permission and question
+prompts cannot be answered interactively; asks are rejected unless --auto or
 --dangerously-skip-permissions is set (configured/agent denies still apply).`
 
 const (
@@ -68,12 +68,12 @@ func parseExecArgs(args []string, stdin io.Reader) (cliOptions, string, error) {
 				continue
 			}
 			switch name {
-			case "provider", "model", "effort":
+			case "provider", "model", "effort", "sandbox":
 				if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 					i++
 					flagArgs = append(flagArgs, args[i])
 				}
-			case "auto", "dangerously-skip-permissions":
+			case "auto", "dangerously-skip-permissions", "i-know":
 				// bool; optional =value already handled via '=' branch
 			}
 			continue

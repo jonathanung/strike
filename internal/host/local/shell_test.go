@@ -17,7 +17,7 @@ func TestShellRunPwd(t *testing.T) {
 		t.Skip("bash not available")
 	}
 	root := t.TempDir()
-	sh := NewShell(root)
+	sh := NewShell(root, "")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	res, err := sh.Run(ctx, "pwd")
@@ -45,7 +45,7 @@ func TestShellRunPwd(t *testing.T) {
 }
 
 func TestShellRunEmpty(t *testing.T) {
-	sh := NewShell(t.TempDir())
+	sh := NewShell(t.TempDir(), "")
 	_, err := sh.Run(context.Background(), "   ")
 	if err == nil {
 		t.Fatal("empty command: want error")
@@ -62,7 +62,7 @@ func TestShellGuardBlocksOutsideRm(t *testing.T) {
 	if err := os.WriteFile(marker, []byte("safe"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sh := NewShell(root)
+	sh := NewShell(root, "")
 	res, err := sh.Run(context.Background(), "rm -rf "+outside)
 	if err == nil {
 		t.Fatalf("outside rm: want error, got %#v", res)
@@ -84,7 +84,7 @@ func TestSetShellWorkDir(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(b, "marker"), []byte("b"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sh := NewShell(a)
+	sh := NewShell(a, "")
 	SetShellWorkDir(sh, b)
 	res, err := sh.Run(context.Background(), "cat marker")
 	if err != nil {

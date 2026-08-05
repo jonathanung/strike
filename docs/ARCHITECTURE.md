@@ -49,7 +49,7 @@ event stream the TUI rendered from (see `internal/protocol/codec.go`).
 | `internal/version` | Build-time Version/Commit stamped via `-ldflags` | stdlib |
 | `internal/update` | GitHub Releases self-update (check, download, sha256, atomic replace, re-exec) | `version`, stdlib, net/http |
 | `internal/protocol` | Op/Event seam between engine and frontends; the JSONL envelope (`codec.go`) is the session persistence format | stdlib only |
-| `internal/engine` | Headless agent runtime: built-in turn loop, task-subagent function harnesses, tool dispatch, permission/question integration, deferred agent switch; implicit session-scoped agent **team** (lead + children roster + shared task board in `team.go` / `team_board.go`) | `protocol`, `provider`, `harness`, `tool`, `permission`, `question`, `memory`, `config` |
+| `internal/engine` | Headless agent runtime: built-in turn loop, task-subagent function harnesses, tool dispatch, permission/question integration, deferred agent switch; implicit session-scoped agent **team** (lead + children roster + shared task board in `team.go` / `team_board.go`) | `protocol`, `provider`, `harness`, `tool`, `permission`, `question`, `memory`, `config`, `sandbox` |
 | `internal/harness` | Function-harness contract and named function registry; model calls return completed responses | `provider`, stdlib |
 | `internal/harness/external` | Private JSONL subprocess adapter from configured commands to `harness.Func` | `harness`, `provider`, stdlib, os/exec |
 | `internal/provider` | LLM provider abstraction: `Provider` interface, normalized `StreamEvent`s | stdlib |
@@ -66,7 +66,7 @@ event stream the TUI rendered from (see `internal/protocol/codec.go`).
 | `internal/permission` | Ordered allow/ask/deny rulesets, last-match-wins; the ask service that suspends a tool call for user input | `protocol`, `tool` (for `AskRequest`), stdlib |
 | `internal/session` | JSONL event-log persistence (append/replay) + concurrent Manager (multi-session open, durable list, event mux). Sidecar `*.meta.json` stores `projectKey` (workspace folder) first for `/session` scoping | `protocol`, stdlib |
 | `internal/auth` | Credential store (0600 `auth.json`) + OAuth/PKCE/device flows | stdlib, net/http |
-| `internal/config` | Layered JSON config (defaults → global → project) + agents/skills markdown loading | `permission` (Ruleset is a config field), stdlib |
+| `internal/config` | Layered JSON config (defaults → global → project) + agents/skills markdown loading | `permission` (Ruleset is a config field), `protocol`, `sandbox` (sandbox dial parse), stdlib |
 | `internal/models` | models.dev catalog client, 24h cache with stale fallback | stdlib, net/http |
 | `internal/history` | Project-scoped prompt history | stdlib |
 | `internal/project` | Stable filesystem identity + optional per-session git worktrees under `.strike/worktrees/` | stdlib, os/exec |

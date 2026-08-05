@@ -189,7 +189,8 @@ Full coordination semantics: [agents-skills.md](agents-skills.md#agent-teams).
 ### Permission mode dial
 
 `/mode` (or **Shift+Tab**) cycles the session **tool-permission posture**. This
-is distinct from `/autonomy` (exit gates). The header always shows `mode …`;
+is distinct from `/autonomy` (exit gates) and from the **sandbox** dial (OS
+isolation — what bash is allowed to touch). The header always shows `mode …`;
 yolo also paints a danger banner. Mode changes are accepted **mid-turn**: the
 new posture applies to subsequent tool permission checks in the same turn
 (in-flight permission asks are rejected so the model retries under the new
@@ -207,6 +208,13 @@ Persists per session in the JSONL log. Optional default for **new** sessions:
 `permissionMode` in [config.md](config.md), or **ctrl+d** in the `/mode`
 picker (and global ctrl+d) to save the current posture as that default.
 Resume restores the session log, not the config default.
+
+### OS sandbox dial
+
+`sandbox` in [config.md](config.md) (or `--sandbox`) sets OS process isolation
+for bash: `off` | `read-only` | `workspace-write` (default). This is **what is
+possible**; `permissionMode` is **when you get asked**. `/sandbox` prints the
+effective policy and backend. `yolo` with `sandbox: off` requires `--i-know`.
 
 Built-in skills also appear as slash commands: `/commit`, `/push`, `/pr`,
 `/ship`, `/review`, `/learn`, `/deslop`, `/verify` (plus custom skills under
