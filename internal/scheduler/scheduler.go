@@ -2,9 +2,10 @@
 // for in-process Strike work (shell processes, builds, tests, model streams,
 // eval containers).
 //
-// Limits apply only inside one Strike OS process; separate processes do not
-// coordinate. Configuration layering and command classification are out of
-// scope (see later SCHED issues).
+// Limits apply only inside one Strike OS process; separate Strike programs do
+// not coordinate leases or share capacity. Layered global/project limits and
+// ordered command classification rules are compiled via Compile into an
+// Effective policy (see limits.go, classify.go, effective.go).
 package scheduler
 
 import (

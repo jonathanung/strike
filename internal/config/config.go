@@ -19,6 +19,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/sandbox"
+	"github.com/jonathanung/strike-cli/internal/scheduler"
 )
 
 type Config struct {
@@ -146,6 +147,24 @@ type Config struct {
 	// Harnesses configures named external function harnesses. Project
 	// definitions replace global definitions with the same name.
 	Harnesses map[string]HarnessConfig `json:"harnesses,omitempty"`
+	// Scheduler holds in-process resource pool limits and command
+	// classification rules. Project limits override global per pool (omitted
+	// keys preserve lower layers / unlimited). Command rules concatenate
+	// (global then project); last match wins. See docs/config.md.
+	Scheduler SchedulerConfig `json:"scheduler,omitempty"`
+}
+
+// SchedulerConfig is the JSON "scheduler" object.
+//
+// Limits and command rules are process-local only — separate Strike OS
+// processes do not coordinate. Compile via SchedulerEffective / scheduler.Compile.
+type SchedulerConfig struct {
+	// Limits maps pool name (process|build|test|model|container) → positive
+	// capacity. Omitted pools stay unlimited. Explicit 0 or negative fails load.
+	Limits scheduler.Limits `json:"limits,omitempty"`
+	// Commands are ordered classification rules (pattern glob → class).
+	// Empty list means every command is general.
+	Commands []scheduler.CommandRule `json:"commands,omitempty"`
 }
 
 // HarnessConfig is one named external subprocess harness command. Embedded Go
@@ -572,7 +591,37 @@ func read(path string) (Config, error) {
 			return Config{}, fmt.Errorf("%s: harness %q command is empty", path, name)
 		}
 	}
+	// Scheduler: validate limits/rules and stamp command provenance with path.
+	if err := normalizeSchedulerLayer(&c.Scheduler, path); err != nil {
+		return Config{}, err
+	}
 	return c, nil
+}
+
+// normalizeSchedulerLayer validates scheduler limits and command rules for one
+// config file and stamps each rule's Source with path for startup reports.
+func normalizeSchedulerLayer(sc *SchedulerConfig, path string) error {
+	if sc == nil {
+		return nil
+	}
+	if err := scheduler.ValidateLimits(sc.Limits, path); err != nil {
+		return err
+	}
+	if len(sc.Commands) == 0 {
+		return nil
+	}
+	out := make([]scheduler.CommandRule, 0, len(sc.Commands))
+	for i, r := range sc.Commands {
+		r.Source = path
+		if err := scheduler.ValidateCommandRule(r, i, path); err != nil {
+			return err
+		}
+		// Normalize class whitespace for stable effective output.
+		r.Class = scheduler.Class(strings.TrimSpace(string(r.Class)))
+		out = append(out, r)
+	}
+	sc.Commands = out
+	return nil
 }
 
 // ClampPermissionAutoApproveSeconds maps config values: ≤0 → 0 (off), >60 → 60.
@@ -869,6 +918,7 @@ func merge(base, layer Config) Config {
 	base.Keybinds = MergeKeybinds(base.Keybinds, layer.Keybinds)
 	base.MCP = mergeMCP(base.MCP, layer.MCP)
 	base.Harnesses = mergeHarnesses(base.Harnesses, layer.Harnesses)
+	base.Scheduler = mergeScheduler(base.Scheduler, layer.Scheduler)
 	if layer.disableDefaultProvidersSet {
 		base.DisableDefaultProviders = layer.DisableDefaultProviders
 		base.disableDefaultProvidersSet = true
@@ -877,6 +927,24 @@ func merge(base, layer Config) Config {
 		base.DisableDefaultPer = mergeDisableDefaultPer(base.DisableDefaultPer, layer.DisableDefaultPer)
 	}
 	return base
+}
+
+// mergeScheduler overlays limits per pool and appends command rules (later
+// layers win under last-match-wins classification).
+func mergeScheduler(base, layer SchedulerConfig) SchedulerConfig {
+	return SchedulerConfig{
+		Limits: scheduler.MergeLimits(base.Limits, layer.Limits),
+		Commands: append(
+			scheduler.CloneCommandRules(base.Commands),
+			scheduler.CloneCommandRules(layer.Commands)...,
+		),
+	}
+}
+
+// SchedulerEffective compiles the loaded scheduler policy for admission wiring.
+// Safe when Scheduler is empty (unlimited defaults, no command rules).
+func (c Config) SchedulerEffective() (*scheduler.Effective, error) {
+	return scheduler.Compile(c.Scheduler.Limits, c.Scheduler.Commands, "")
 }
 
 func mergeHarnesses(base, layer map[string]HarnessConfig) map[string]HarnessConfig {
