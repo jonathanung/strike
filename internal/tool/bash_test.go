@@ -249,6 +249,29 @@ func TestBashSandboxMode(t *testing.T) {
 	}
 }
 
+func TestBashSandboxPolicyCompiled(t *testing.T) {
+	wd := t.TempDir()
+	p := bashSandboxPolicy(&Context{
+		WorkDir:     wd,
+		SandboxMode: "workspace-write",
+		Sandbox: sandbox.Policy{
+			Mode:             sandbox.ModeWorkspaceWrite,
+			WorkDir:          wd,
+			NoWorkspaceWrite: true,
+			DenyWriteGlobs:   []string{"**/*.env"},
+			Network:          true,
+		},
+	})
+	if !p.NoWorkspaceWrite || !p.Network || len(p.DenyWriteGlobs) != 1 {
+		t.Fatalf("compiled policy = %+v", p)
+	}
+	// Fallback when only SandboxMode is set.
+	p2 := bashSandboxPolicy(&Context{WorkDir: wd, SandboxMode: "read-only"})
+	if p2.Mode != sandbox.ModeReadOnly || p2.WorkDir != wd {
+		t.Fatalf("fallback = %+v", p2)
+	}
+}
+
 func TestBashDoesNotRecordPROnFailure(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")

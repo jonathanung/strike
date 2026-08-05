@@ -197,6 +197,66 @@ func TestWrapLinuxArgvShape(t *testing.T) {
 	if filepath.Base(ro[0]) != "bwrap" || ro[len(ro)-1] != "true" {
 		t.Fatalf("ro argv = %#v", ro)
 	}
+
+	// Network on: no --unshare-net.
+	netArgv := Wrap([]string{"true"}, Policy{Mode: ModeReadOnly, WorkDir: wd, Network: true})
+	if strings.Contains(strings.Join(netArgv, "\x00"), "\x00--unshare-net\x00") {
+		t.Fatalf("network policy must omit --unshare-net: %#v", netArgv)
+	}
+
+	// Deny path remounted read-only after workspace bind.
+	deny := filepath.Join(wd, "secret")
+	if err := os.Mkdir(deny, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	realDeny, err := filepath.EvalSymlinks(deny)
+	if err != nil {
+		realDeny = deny
+	}
+	realDeny, _ = filepath.Abs(realDeny)
+	denyArgv := Wrap([]string{"true"}, Policy{
+		Mode:           ModeWorkspaceWrite,
+		WorkDir:        wd,
+		DenyWritePaths: []string{deny},
+	})
+	joined = strings.Join(denyArgv, "\x00")
+	if !strings.Contains(joined, "\x00--ro-bind\x00"+realDeny+"\x00"+realDeny) &&
+		!strings.Contains(joined, "\x00--ro-bind\x00"+deny+"\x00"+deny) {
+		t.Fatalf("deny path missing ro-bind: %#v", denyArgv)
+	}
+
+	// NoWorkspaceWrite: no --bind workdir.
+	nw := Wrap([]string{"true"}, Policy{
+		Mode:             ModeWorkspaceWrite,
+		WorkDir:          wd,
+		NoWorkspaceWrite: true,
+	})
+	if strings.Contains(strings.Join(nw, "\x00"), "\x00--bind\x00") {
+		t.Fatalf("NoWorkspaceWrite must not --bind: %#v", nw)
+	}
+}
+
+func TestExplainAndProfileText(t *testing.T) {
+	wd := t.TempDir()
+	text := Explain(Policy{
+		Mode:           ModeWorkspaceWrite,
+		WorkDir:        wd,
+		DenyWriteGlobs: []string{"**/*.env"},
+		Network:        false,
+	})
+	for _, want := range []string{"sandbox mode: workspace-write", "network: false", "deny-write globs: **/*.env", "profile:"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("Explain missing %q:\n%s", want, text)
+		}
+	}
+	off := Explain(Policy{Mode: ModeOff})
+	if !strings.Contains(off, "disabled") {
+		t.Fatalf("off explain = %q", off)
+	}
+	prof := ProfileText(Policy{Mode: ModeReadOnly, WorkDir: wd, Network: true})
+	if prof == "" {
+		t.Fatal("empty ProfileText")
+	}
 }
 
 func TestWrapDarwinArgvShape(t *testing.T) {

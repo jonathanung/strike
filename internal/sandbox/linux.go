@@ -46,8 +46,8 @@ func probePlatform() availInfo {
 
 // wrapPlatform builds:
 //
-//	bwrap --ro-bind / / [--bind $WORKDIR $WORKDIR] --dev /dev --proc /proc \
-//	      --unshare-net --die-with-parent -- <argv...>
+//	bwrap --ro-bind / / [--bind $WORKDIR $WORKDIR] [--ro-bind $DENY $DENY ...] \
+//	      --dev /dev --proc /proc [--unshare-net] --die-with-parent -- <argv...>
 func wrapPlatform(argv []string, policy Policy) []string {
 	if len(argv) == 0 {
 		return nil
@@ -70,20 +70,60 @@ func wrapPlatform(argv []string, policy Policy) []string {
 		launcher,
 		"--ro-bind", "/", "/",
 	}
-	if policy.Mode == ModeWorkspaceWrite {
+	if policy.WorkspaceWritable() {
 		if wd := absWorkDir(policy.WorkDir); wd != "" {
 			out = append(out, "--bind", wd, wd)
 		}
 	}
+	// Remount deny paths read-only over the writable workspace bind.
+	for _, d := range existingDenyPaths(policy.DenyWritePaths) {
+		out = append(out, "--ro-bind", d, d)
+	}
 	out = append(out,
 		"--dev", "/dev",
 		"--proc", "/proc",
-		"--unshare-net",
-		"--die-with-parent",
-		"--",
 	)
+	if !policy.Network {
+		out = append(out, "--unshare-net")
+	}
+	out = append(out, "--die-with-parent", "--")
 	out = append(out, argv...)
 	return out
+}
+
+func profileText(policy Policy) string {
+	if policy.Mode == ModeOff {
+		return "(none — sandbox off)\n"
+	}
+	var b strings.Builder
+	b.WriteString("bwrap \\\n")
+	b.WriteString("  --ro-bind / / \\\n")
+	if policy.WorkspaceWritable() {
+		wd := absWorkDir(policy.WorkDir)
+		if wd == "" {
+			wd = "$WORKDIR"
+		}
+		b.WriteString("  --bind " + wd + " " + wd + " \\\n")
+	}
+	for _, d := range existingDenyPaths(policy.DenyWritePaths) {
+		b.WriteString("  --ro-bind " + d + " " + d + " \\\n")
+	}
+	for _, g := range policy.DenyWriteGlobs {
+		// Globs without expanded paths still appear as comments for explain.
+		if g = strings.TrimSpace(g); g != "" {
+			b.WriteString("  # deny-write glob (expanded paths above when present): " + g + "\n")
+		}
+	}
+	b.WriteString("  --dev /dev \\\n")
+	b.WriteString("  --proc /proc \\\n")
+	if !policy.Network {
+		b.WriteString("  --unshare-net \\\n")
+	} else {
+		b.WriteString("  # network shared with host\n")
+	}
+	b.WriteString("  --die-with-parent \\\n")
+	b.WriteString("  -- <command>\n")
+	return b.String()
 }
 
 func absWorkDir(workDir string) string {
