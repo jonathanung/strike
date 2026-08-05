@@ -310,3 +310,21 @@ func TestWriteAndEditRejectOutsideWorkspace(t *testing.T) {
 		t.Fatalf("symlink escape mutated outside: %q", data)
 	}
 }
+
+func TestWorkspaceWriteFilePreservesExistingMode(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "script.sh")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := workspaceWriteFile(root, "script.sh", []byte("#!/bin/sh\necho hi\n")); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0o755 {
+		t.Fatalf("mode = %o, want 755 (os.WriteFile must not strip exec)", fi.Mode().Perm())
+	}
+}

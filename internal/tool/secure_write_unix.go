@@ -16,6 +16,7 @@ func writeFileNoFollow(path string, data []byte, perm os.FileMode) error {
 	if perm == 0 {
 		perm = 0o644
 	}
+	// Match os.WriteFile: mode applies only on create; existing files keep mode.
 	flags := unix.O_WRONLY | unix.O_CREAT | unix.O_TRUNC | unix.O_NOFOLLOW | unix.O_CLOEXEC
 	fd, err := unix.Open(path, flags, uint32(perm.Perm()))
 	if err != nil {
@@ -26,9 +27,6 @@ func writeFileNoFollow(path string, data []byte, perm os.FileMode) error {
 	}
 	f := os.NewFile(uintptr(fd), path)
 	defer f.Close()
-	if err := f.Chmod(perm); err != nil {
-		return err
-	}
 	n, err := f.Write(data)
 	if err != nil {
 		return err
@@ -36,5 +34,5 @@ func writeFileNoFollow(path string, data []byte, perm os.FileMode) error {
 	if n < len(data) {
 		return fmt.Errorf("short write to %s: %d/%d bytes", path, n, len(data))
 	}
-	return f.Sync()
+	return nil
 }
