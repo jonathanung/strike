@@ -52,7 +52,7 @@ func TestShellRunEmpty(t *testing.T) {
 	}
 }
 
-func TestShellSandboxBlocksOutsideRm(t *testing.T) {
+func TestShellGuardBlocksOutsideRm(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")
 	}
