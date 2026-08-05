@@ -149,6 +149,12 @@ func (m *schedulerPresetsModal) apply() (modal, tea.Cmd) {
 		m.flash = "scheduler presets unavailable"
 		return m, nil
 	}
+	// Refuse write when we could not load the current global snapshot — an
+	// empty selection would otherwise clear presets the user never saw.
+	if m.loadErr != "" {
+		m.flash = "cannot apply: current settings failed to load"
+		return m, nil
+	}
 	ids := m.selectedIDs()
 	cat := m.catalog
 	// Keep the modal until the host write completes; success closes via

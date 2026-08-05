@@ -120,6 +120,27 @@ func TestSchedulerPresetsModalApplyWrites(t *testing.T) {
 	}
 }
 
+func TestSchedulerPresetsModalApplyBlockedWhenLoadFails(t *testing.T) {
+	cat := newFakeSchedulerPresets()
+	cat.globalErr = errors.New("read failed")
+	cat.global.Presets = []string{"cargo"} // on disk, but Global() errors
+	sm := newSchedulerPresetsModal(cat, theme.Default())
+	if sm.loadErr == "" {
+		t.Fatal("want loadErr")
+	}
+	next, cmd := sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	sm = next.(*schedulerPresetsModal)
+	if cmd != nil {
+		t.Fatal("apply must not schedule write when load failed")
+	}
+	if !strings.Contains(sm.flash, "failed to load") {
+		t.Fatalf("flash=%q", sm.flash)
+	}
+	if len(cat.applied) != 0 {
+		t.Fatalf("wrote despite load error: %v", cat.applied)
+	}
+}
+
 func TestSchedulerPresetsModalApplyErrorKeepsModal(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m.width, m.height, m.ready = 100, 40, true
