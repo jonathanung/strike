@@ -74,6 +74,13 @@ type Options struct {
 	// InitialPermissionMode is the tool-permission posture at startup. Empty
 	// becomes PermissionModeDefault so the dial is always explicit.
 	InitialPermissionMode protocol.PermissionMode
+	// SandboxMode is the OS process sandbox dial for bash
+	// (off|read-only|workspace-write). Empty means workspace-write.
+	// Distinct from InitialPermissionMode (when the agent is asked).
+	SandboxMode string
+	// AllowYoloWithoutSandbox permits permissionMode yolo when SandboxMode is
+	// off. Set only from CLI --i-know after an explicit operator override.
+	AllowYoloWithoutSandbox bool
 	// Agents are the selectable personas; the first is the default unless
 	// InitialAgent names another.
 	Agents       []Agent

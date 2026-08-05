@@ -14,6 +14,10 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+### Added
+
+- Config/CLI **sandbox dial** (`sandbox`: `off` | `read-only` | `workspace-write`, default `workspace-write`; `--sandbox`, `/sandbox`) for OS isolation of bash, documented as a two-dial model with `permissionMode`. `yolo` with `sandbox: off` requires `--i-know` ([#552](https://github.com/jonathanung/strike/issues/552)).
+
 ## [v0.1.2] - 2026-08-05
 
 Patch release focused on TUI composer input and live subagent transcript stability.

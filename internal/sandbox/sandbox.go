@@ -4,14 +4,15 @@
 // When the backend is missing or cannot run (e.g. locked-down user
 // namespaces), Wrap returns the original argv and emits a one-shot warning.
 //
-// E1.4 will expose a config dial over Policy.Mode; E1.5 will compile
-// permission rules into the generated profile. This package is the plumbing.
+// Policy.Mode is the config/CLI sandbox dial (off|read-only|workspace-write).
+// E1.5 will compile permission rules into the generated profile.
 package sandbox
 
 import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 )
 
@@ -26,6 +27,77 @@ const (
 	// ModeWorkspaceWrite mounts the host read-only and re-binds WorkDir writable.
 	ModeWorkspaceWrite
 )
+
+// DefaultMode is the product default when config/CLI omit sandbox.
+const DefaultMode = ModeWorkspaceWrite
+
+// String returns the canonical config/CLI token for m.
+func (m Mode) String() string {
+	switch m {
+	case ModeOff:
+		return "off"
+	case ModeReadOnly:
+		return "read-only"
+	case ModeWorkspaceWrite:
+		return "workspace-write"
+	default:
+		return "off"
+	}
+}
+
+// ParseMode resolves a user/config sandbox dial value.
+// Empty input yields DefaultMode (workspace-write). Unrecognized values report false.
+func ParseMode(value string) (Mode, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	normalized = strings.ReplaceAll(normalized, "_", "-")
+	normalized = strings.ReplaceAll(normalized, " ", "")
+	switch normalized {
+	case "":
+		return DefaultMode, true
+	case "off", "none", "disable", "disabled", "false", "0", "no":
+		return ModeOff, true
+	case "read-only", "readonly", "ro", "read":
+		return ModeReadOnly, true
+	case "workspace-write", "workspacewrite", "write", "ws-write", "workspace":
+		return ModeWorkspaceWrite, true
+	default:
+		return 0, false
+	}
+}
+
+// ResolveMode returns ParseMode(value) or DefaultMode when value is empty/invalid.
+// Prefer ParseMode when rejecting unknown config tokens.
+func ResolveMode(value string) Mode {
+	if m, ok := ParseMode(value); ok {
+		return m
+	}
+	return DefaultMode
+}
+
+// ModeNames is the pipe-joined list of canonical mode tokens for error text.
+func ModeNames() string {
+	return "off|read-only|workspace-write"
+}
+
+// YoloWithoutSandboxError is returned when permissionMode yolo is combined with
+// sandbox off without an explicit --i-know override.
+const YoloWithoutSandboxError = "permissionMode yolo with sandbox off requires --i-know (OS isolation disabled)"
+
+// CheckYoloSandbox reports an error when yolo is requested while the OS sandbox
+// dial is off and iKnow is false. permMode should be a normalized permission
+// mode string (e.g. "yolo"); other modes always pass.
+func CheckYoloSandbox(permMode, sandboxMode string, iKnow bool) error {
+	if strings.ToLower(strings.TrimSpace(permMode)) != "yolo" {
+		return nil
+	}
+	if ResolveMode(sandboxMode) != ModeOff {
+		return nil
+	}
+	if iKnow {
+		return nil
+	}
+	return fmt.Errorf("%s", YoloWithoutSandboxError)
+}
 
 // Policy describes how Wrap should isolate a subprocess.
 type Policy struct {

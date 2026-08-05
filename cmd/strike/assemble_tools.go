@@ -42,9 +42,11 @@ type assembled struct {
 	store     session.Bound
 	sessionID string
 	// replay is prior transcript events for --continue (UI only; not re-appended).
-	replay       []protocol.Event
-	workDir      string // tool CWD (session worktree when bound, else launch cwd)
-	cfg          config.Config
+	replay  []protocol.Event
+	workDir string // tool CWD (session worktree when bound, else launch cwd)
+	cfg     config.Config
+	// sandboxMode is the resolved OS sandbox dial (canonical token).
+	sandboxMode  string
 	services     host.Services
 	firstRun     bool
 	historyClose func() error
@@ -70,9 +72,6 @@ type assembled struct {
 // The caller must invoke historyClose and, if it never hands store to
 // runSession, store.Close.
 func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
-	// Loud once when OS sandbox backend is missing/blocked (bash degrades).
-	sandbox.WarnUnavailable()
-
 	launchDir, err := os.Getwd()
 	if err != nil {
 		return nil, err
@@ -117,6 +116,19 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		_ = memoryStore.Close()
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("loading config: %w", err)
+	}
+	sandboxMode, err := resolveSandboxMode(cfg.Sandbox, opts.sandbox)
+	if err != nil {
+		_ = goalStore.Close()
+		_ = issueStore.Close()
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, err
+	}
+	// Loud once when OS sandbox backend is missing/blocked (bash degrades).
+	// Skip when the dial is off — operator chose no isolation.
+	if sandbox.ResolveMode(sandboxMode) != sandbox.ModeOff {
+		sandbox.WarnUnavailable()
 	}
 	if opts.providerSet && opts.provider != "" {
 		cfg.Provider = config.CanonicalProviderID(opts.provider)
@@ -481,48 +493,63 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			return nil, nil, err
 		}
 
+		// Refuse yolo + sandbox off without --i-know (startup gate).
+		if err := sandbox.CheckYoloSandbox(string(initialPermMode.Normalize()), sandboxMode, opts.iKnow); err != nil {
+			if !resuming {
+				_ = sessions.Destroy(sessionID)
+			} else {
+				_ = bound.Close()
+			}
+			if wtClose != nil {
+				_ = wtClose()
+			}
+			return nil, nil, err
+		}
+
 		sid := sessionID
 		eng := engine.New(engine.Options{
-			SessionID:             sid,
-			Select:                selectProvider,
-			Registry:              registry,
-			WorkDir:               toolDir,
-			ProjectRoot:           projectIdentity.Root,
-			Instructions:          instructions,
-			Memory:                memoryStore,
-			SystemPrompt:          cfg.SystemPrompt,
-			LeanCode:              cfg.LeanCode,
-			HarnessRegistry:       harnessRegistry,
-			MaxChildDepth:         cfg.MaxChildDepth,
-			InitialProvider:       initialProvider,
-			InitialModel:          initialModel,
-			InitialEffort:         initialEffort,
-			InitialAutonomy:       initialAutonomy,
-			InitialPermissionMode: initialPermMode,
-			Agents:                agents,
-			InitialAgent:          initialAgent,
-			InitialMessages:       initialMessages,
-			InitialPriority:       initialPriority,
-			InitialTitled:         initialTitled,
-			InitialPhaseWorkflow:  initialPhaseWF,
-			InitialPhaseIndex:     initialPhaseIndex,
-			InitialAlwaysGrants:   initialAlways,
-			QuietStartup:          quietStartup,
-			Workflows:             workflows,
-			Rules:                 permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),
-			Hooks:                 hookDefs,
-			HookRules:             cfg.HookRules(),
-			CompactionStrategy:    cfg.CompactionStrategy,
-			CompactionModel:       cfg.CompactionModel,
-			CompactionThreshold:   cfg.CompactionThreshold,
-			CompactionBuffer:      cfg.CompactionBuffer,
-			KeepUserTurns:         cfg.KeepUserTurns,
-			PruneProtectTokens:    cfg.PruneProtectTokens,
-			PruneMinimumTokens:    cfg.PruneMinimumTokens,
-			PruneKeepUserTurns:    cfg.PruneKeepUserTurns,
-			PruneProtectTools:     cfg.PruneProtectTools,
-			LookupContextWindow:   lookupContextWindow,
-			ListModels:            listModels,
+			SessionID:               sid,
+			Select:                  selectProvider,
+			Registry:                registry,
+			WorkDir:                 toolDir,
+			ProjectRoot:             projectIdentity.Root,
+			Instructions:            instructions,
+			Memory:                  memoryStore,
+			SystemPrompt:            cfg.SystemPrompt,
+			LeanCode:                cfg.LeanCode,
+			HarnessRegistry:         harnessRegistry,
+			MaxChildDepth:           cfg.MaxChildDepth,
+			InitialProvider:         initialProvider,
+			InitialModel:            initialModel,
+			InitialEffort:           initialEffort,
+			InitialAutonomy:         initialAutonomy,
+			InitialPermissionMode:   initialPermMode,
+			SandboxMode:             sandboxMode,
+			AllowYoloWithoutSandbox: opts.iKnow,
+			Agents:                  agents,
+			InitialAgent:            initialAgent,
+			InitialMessages:         initialMessages,
+			InitialPriority:         initialPriority,
+			InitialTitled:           initialTitled,
+			InitialPhaseWorkflow:    initialPhaseWF,
+			InitialPhaseIndex:       initialPhaseIndex,
+			InitialAlwaysGrants:     initialAlways,
+			QuietStartup:            quietStartup,
+			Workflows:               workflows,
+			Rules:                   permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),
+			Hooks:                   hookDefs,
+			HookRules:               cfg.HookRules(),
+			CompactionStrategy:      cfg.CompactionStrategy,
+			CompactionModel:         cfg.CompactionModel,
+			CompactionThreshold:     cfg.CompactionThreshold,
+			CompactionBuffer:        cfg.CompactionBuffer,
+			KeepUserTurns:           cfg.KeepUserTurns,
+			PruneProtectTokens:      cfg.PruneProtectTokens,
+			PruneMinimumTokens:      cfg.PruneMinimumTokens,
+			PruneKeepUserTurns:      cfg.PruneKeepUserTurns,
+			PruneProtectTools:       cfg.PruneProtectTools,
+			LookupContextWindow:     lookupContextWindow,
+			ListModels:              listModels,
 			PersistProjectRule: func(rule permission.Rule) error {
 				return config.AppendProjectPermission(launchDir, rule)
 			},
@@ -625,7 +652,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// the TUI never sees auth/config/models/history/memory/issues directly.
 	services := local.New(authStore, historyStore, memoryStore, issueStore, agentNames, skills, customStore, workDir)
 	services.Files = local.NewFiles(workDir)
-	services.Shell = local.NewShell(workDir)
+	services.Shell = local.NewShell(workDir, sandboxMode)
 	services.Goals = local.NewGoals(goalStore, workDir)
 	services.Sessions = local.NewSessions(sessions, projectIdentity.Key)
 	services.Init = local.NewProjectInit(workDir)
@@ -638,15 +665,16 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	})
 
 	return &assembled{
-		eng:       first.eng,
-		sessions:  sessions,
-		store:     first.bound,
-		sessionID: first.id,
-		replay:    replay,
-		workDir:   workDir,
-		cfg:       cfg,
-		services:  services,
-		firstRun:  isFreshStrikeHome(authStore),
+		eng:         first.eng,
+		sessions:    sessions,
+		store:       first.bound,
+		sessionID:   first.id,
+		replay:      replay,
+		workDir:     workDir,
+		cfg:         cfg,
+		sandboxMode: sandboxMode,
+		services:    services,
+		firstRun:    isFreshStrikeHome(authStore),
 		historyClose: func() error {
 			return historyStore.Close()
 		},

@@ -655,9 +655,10 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 		}
 		callID := call.ID
 		tc := &tool.Context{
-			WorkDir:    e.opts.WorkDir,
-			Files:      e.files,
-			Checkpoint: e.checkpoints.Snapshot,
+			WorkDir:     e.opts.WorkDir,
+			SandboxMode: e.opts.SandboxMode,
+			Files:       e.files,
+			Checkpoint:  e.checkpoints.Snapshot,
 			Ask: func(ctx context.Context, req tool.AskRequest) error {
 				return e.perms.AskWithCorrelation(ctx, req, corr)
 			},

@@ -10,6 +10,51 @@ import (
 	"testing"
 )
 
+func TestParseMode(t *testing.T) {
+	cases := []struct {
+		in   string
+		want Mode
+		ok   bool
+	}{
+		{"", DefaultMode, true},
+		{"off", ModeOff, true},
+		{"OFF", ModeOff, true},
+		{"read-only", ModeReadOnly, true},
+		{"readonly", ModeReadOnly, true},
+		{"workspace-write", ModeWorkspaceWrite, true},
+		{"write", ModeWorkspaceWrite, true},
+		{"nope", 0, false},
+		{"  read_only ", ModeReadOnly, true},
+	}
+	for _, tc := range cases {
+		got, ok := ParseMode(tc.in)
+		if ok != tc.ok || (ok && got != tc.want) {
+			t.Errorf("ParseMode(%q) = (%v, %v), want (%v, %v)", tc.in, got, ok, tc.want, tc.ok)
+		}
+	}
+	if ModeOff.String() != "off" || ModeReadOnly.String() != "read-only" || ModeWorkspaceWrite.String() != "workspace-write" {
+		t.Fatalf("String() mismatch: %q %q %q", ModeOff, ModeReadOnly, ModeWorkspaceWrite)
+	}
+}
+
+func TestCheckYoloSandbox(t *testing.T) {
+	if err := CheckYoloSandbox("yolo", "off", false); err == nil {
+		t.Fatal("expected error for yolo+off without iKnow")
+	}
+	if err := CheckYoloSandbox("yolo", "off", true); err != nil {
+		t.Fatalf("iKnow should allow: %v", err)
+	}
+	if err := CheckYoloSandbox("yolo", "workspace-write", false); err != nil {
+		t.Fatalf("sandboxed yolo ok: %v", err)
+	}
+	if err := CheckYoloSandbox("default", "off", false); err != nil {
+		t.Fatalf("non-yolo ok: %v", err)
+	}
+	if err := CheckYoloSandbox("yolo", "", false); err != nil {
+		t.Fatalf("empty sandbox defaults to workspace-write: %v", err)
+	}
+}
+
 func TestWrapModeOffUnchanged(t *testing.T) {
 	ResetWarnForTest()
 	forceSetAvailabilityForTest(availInfo{ok: true, name: "bwrap"})

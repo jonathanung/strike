@@ -13,15 +13,18 @@ import (
 
 // shellService runs user-initiated bash (composer !) via the bash tool with
 // allow-all Ask so interactive permission prompts are skipped. The tool still
-// enforces the workspace destructive-path guard.
+// enforces the workspace destructive-path guard and the OS sandbox dial.
 type shellService struct {
-	mu      sync.Mutex
-	workDir string
+	mu          sync.Mutex
+	workDir     string
+	sandboxMode string // off|read-only|workspace-write; empty = workspace-write
 }
 
 // NewShell returns a host.Shell bound to workDir.
-func NewShell(workDir string) host.Shell {
-	return &shellService{workDir: workDir}
+// sandboxMode is the OS sandbox dial (off|read-only|workspace-write); empty
+// defaults to workspace-write inside the bash tool.
+func NewShell(workDir string, sandboxMode string) host.Shell {
+	return &shellService{workDir: workDir, sandboxMode: sandboxMode}
 }
 
 // SetShellWorkDir updates the CWD for subsequent Run calls (multi-root switch).
@@ -52,8 +55,9 @@ func (s *shellService) Run(ctx context.Context, command string) (host.ShellResul
 		return host.ShellResult{Command: command}, err
 	}
 	tc := &tool.Context{
-		WorkDir: workDir,
-		Ask:     func(context.Context, tool.AskRequest) error { return nil },
+		WorkDir:     workDir,
+		SandboxMode: s.sandboxMode,
+		Ask:         func(context.Context, tool.AskRequest) error { return nil },
 	}
 	res, err := tool.NewBash().Execute(ctx, args, tc)
 	out := host.ShellResult{Command: command, Output: res.Output}

@@ -87,6 +87,48 @@ func TestSetPermissionModeRejectsUnknown(t *testing.T) {
 	}
 }
 
+func TestSetPermissionModeYoloRejectedWhenSandboxOff(t *testing.T) {
+	eng, _, cancel := newRecordingEngine(t, engine.Options{
+		SandboxMode: "off",
+	})
+	defer cancel()
+	waitForEvent(t, eng, func(ev protocol.Event) bool {
+		_, ok := ev.(protocol.PermissionModeSelected)
+		return ok
+	})
+
+	eng.Ops() <- protocol.SetPermissionMode{Mode: protocol.PermissionModeYolo}
+	event := waitForEvent(t, eng, func(ev protocol.Event) bool {
+		_, ok := ev.(protocol.EngineError)
+		return ok
+	})
+	msg := event.(protocol.EngineError).Message
+	if !strings.Contains(msg, "--i-know") {
+		t.Fatalf("error = %q, want --i-know mention", msg)
+	}
+}
+
+func TestSetPermissionModeYoloAllowedWithIKnowWhenSandboxOff(t *testing.T) {
+	eng, _, cancel := newRecordingEngine(t, engine.Options{
+		SandboxMode:             "off",
+		AllowYoloWithoutSandbox: true,
+	})
+	defer cancel()
+	waitForEvent(t, eng, func(ev protocol.Event) bool {
+		_, ok := ev.(protocol.PermissionModeSelected)
+		return ok
+	})
+
+	eng.Ops() <- protocol.SetPermissionMode{Mode: protocol.PermissionModeYolo}
+	event := waitForEvent(t, eng, func(ev protocol.Event) bool {
+		sel, ok := ev.(protocol.PermissionModeSelected)
+		return ok && sel.Mode == protocol.PermissionModeYolo
+	})
+	if event.(protocol.PermissionModeSelected).Mode != protocol.PermissionModeYolo {
+		t.Fatalf("got %#v", event)
+	}
+}
+
 func TestSetPermissionModeAcceptedWhileTurnRunning(t *testing.T) {
 	const sessionID = "session-perm-mode-active"
 	prov := &blockingFastProvider{requests: make(chan provider.Request, 1)}

@@ -23,6 +23,7 @@ replaced by a plain file.
   "mdReadMode": "embedded",
   "notify": "unfocused-only",
   "permissionMode": "default",
+  "sandbox": "workspace-write",
   "permissionAutoApproveSeconds": 0,
   "permissionAutoApproveExclude": ["bash"],
   "compactionStrategy": "trim",
@@ -48,19 +49,44 @@ replaced by a plain file.
 Rules concatenate across layers; the last matching rule wins, so project
 config overrides global, and session "always" grants override both.
 
-**Not a security boundary:** permission rules and modes (including `yolo` /
-`--auto` / `--dangerously-skip-permissions`) only control whether the agent is
-*asked* before a tool runs. They are not an OS sandbox and do not isolate the
-process. The bash tool applies a separate best-effort static path guard on a
-small set of destructive command forms; that guard is incomplete and must not
-be treated as isolation. Real process boundaries are tracked under the
-execution-sandboxing epic.
+**Two-dial model (Codex mental model):**
+
+| Dial | Config / CLI | Controls |
+|---|---|---|
+| **sandbox** | `sandbox`, `--sandbox` | What OS isolation makes *possible* for bash (`off` \| `read-only` \| `workspace-write`) |
+| **permissionMode** | `permissionMode`, `/mode`, Shift+Tab | *When* the agent is asked before a tool runs |
+
+They are independent. Turning off permission prompts (`yolo`) does not disable
+the OS sandbox; setting `sandbox: off` does not skip permission asks.
+
+**OS sandbox dial:** `sandbox` is `off` | `read-only` | `workspace-write`
+(default **`workspace-write`**). Applies to the bash tool (and composer `!`
+shell) via Linux `bwrap` / macOS `sandbox-exec`. When the backend is missing
+or blocked, bash degrades to unsandboxed with a one-shot startup warning
+(unless `sandbox` is `off`). Override per invocation with `--sandbox <mode>`.
+Inspect the effective policy with `/sandbox`.
+
+**Yolo + sandbox off:** `permissionMode: yolo` (or a resumed session in yolo)
+combined with `sandbox: off` **refuses to start** unless you pass `--i-know`.
+Mid-session `/mode yolo` is also rejected while sandbox is off without that
+startup override. This is the only supported way to run with neither OS
+isolation nor permission prompts.
+
+**Not a security boundary alone:** permission rules and modes (including
+`yolo` / `--auto` / `--dangerously-skip-permissions`) only control whether the
+agent is *asked* before a tool runs. Prefer keeping `sandbox` at
+`workspace-write` (or `read-only`) so OS isolation still applies. The bash
+tool also applies a separate best-effort static path guard on a small set of
+destructive command forms; that guard is incomplete and must not be treated as
+isolation. Further profile compilation is tracked under the
+execution-sandboxing epic (E1.5+).
 
 **Permission mode dial:** `permissionMode` sets the default tool-permission
 posture for **new** sessions: `default` | `plan` | `soft-approve` |
 `accept-edits` | `yolo` (see [usage.md](usage.md)). Session changes via
 Shift+Tab or `/mode` persist in the session JSONL, not back into this file.
-Distinct from `/autonomy` (workflow exit gates).
+Distinct from `/autonomy` (workflow exit gates) and from `sandbox` (OS
+isolation).
 
 **Lean code:** `leanCode` is `off` | `lite` (default) | `full`. Injects
 agent-scoped efficiency guidance into the system prompt (strict ladder for
