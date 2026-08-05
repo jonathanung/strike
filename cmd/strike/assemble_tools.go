@@ -50,7 +50,6 @@ type assembled struct {
 	// sandboxExplain is the multi-line /sandbox explain text (config layers).
 	sandboxExplain string
 	services       host.Services
-	firstRun       bool
 	historyClose   func() error
 	memoryClose    func() error
 	issuesClose    func() error
@@ -685,7 +684,6 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		sandboxMode:    sandboxMode,
 		sandboxExplain: sandboxExplain,
 		services:       services,
-		firstRun:       isFreshStrikeHome(authStore),
 		historyClose: func() error {
 			return historyStore.Close()
 		},
