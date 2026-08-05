@@ -562,6 +562,35 @@ type Shell interface {
 	Run(ctx context.Context, command string) (ShellResult, error)
 }
 
+// SchedulerPresetRule is one inspectable command classification rule from a
+// shipped scheduler preset (pattern glob → class).
+type SchedulerPresetRule struct {
+	Pattern string
+	Class   string // general | build | test
+}
+
+// SchedulerPreset is FTUE/settings metadata for one shipped build-system
+// preset. IDs are stable config keys; Rules/Limits are the values expansion
+// would inject (ordinary scheduler fields — not a second runtime path).
+type SchedulerPreset struct {
+	ID           string
+	Version      int
+	Name         string
+	Rationale    string
+	DefaultClass string // general | build | test
+	Limits       map[string]int
+	Rules        []SchedulerPresetRule
+}
+
+// SchedulerPresets is a read-only catalog of shipped scheduler presets for
+// onboarding and future settings UIs. Nil means the capability is absent.
+type SchedulerPresets interface {
+	// List returns every shipped preset in stable display order.
+	List() []SchedulerPreset
+	// Get returns one preset by stable ID.
+	Get(id string) (SchedulerPreset, bool)
+}
+
 // Services bundles everything a frontend receives from its host. Any field
 // may be nil/empty when a capability is absent (tests, future frontends);
 // frontends must degrade gracefully.
@@ -581,6 +610,8 @@ type Services struct {
 	Init      ProjectInit
 	MCP       MCP       // external MCP server status; nil when unsupported
 	Telemetry Telemetry // local CPU/RAM/disk; nil when unsupported
-	Agents    []string  // selectable agent names, default first
-	Skills    []Skill
+	// SchedulerPresets is the shipped build-system preset catalog (FTUE #705).
+	SchedulerPresets SchedulerPresets
+	Agents           []string // selectable agent names, default first
+	Skills           []Skill
 }
