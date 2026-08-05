@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/sandbox"
+	"github.com/jonathanung/strike-cli/internal/scheduler"
 )
 
 const (
@@ -78,6 +79,15 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 		return Result{}, err
 	}
 
+	// Admit after permission approval and before process start so a canceled
+	// waiter never emits process-started or starts an OS process. Command
+	// timeout begins only after admission (RunProcess applies Timeout).
+	lease, err := acquireBashLease(ctx, tc, a.Command)
+	if err != nil {
+		return Result{}, err
+	}
+	defer lease.Release() // start failure, exit, timeout, cancel, panic-safe
+
 	timeout := bashDefaultTimeout
 	if a.TimeoutMs > 0 {
 		timeout = min(time.Duration(a.TimeoutMs)*time.Millisecond, bashMaxTimeout)
@@ -98,6 +108,7 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	// cannot stick across tool invocations. OS sandbox (bwrap / seatbelt)
 	// confines the shell when the platform backend is available and mode is
 	// not off (config/CLI dial + permission-compiled denials/network).
+	// Sandbox wrap stays inside RunProcess; the pool lease wraps the whole run.
 	proc, err := RunProcess(ctx, ProcessSpec{
 		Argv:      []string{"bash", "-c", a.Command},
 		Dir:       tc.WorkDir,
@@ -149,6 +160,29 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	}
 	meta, _ := json.Marshal(metaFields)
 	return Result{Title: a.Command, Output: output, Metadata: meta}, nil
+}
+
+// acquireBashLease acquires process (+ build/test when classified) pools.
+// When Scheduler is nil, returns a no-op lease (unlimited / current behavior).
+// Multi-pool grants use Scheduler.Acquire's deadlock-free atomic path (FIFO).
+func acquireBashLease(ctx context.Context, tc *Context, command string) (*scheduler.Lease, error) {
+	if tc == nil || tc.Scheduler == nil {
+		return nil, nil // Lease.Release is nil-safe
+	}
+	pools := bashPoolsForCommand(tc, command)
+	lease, err := tc.Scheduler.Acquire(ctx, pools...)
+	if err != nil {
+		return nil, fmt.Errorf("scheduler: %w", err)
+	}
+	return lease, nil
+}
+
+// bashPoolsForCommand returns admission pool names for a bash command.
+func bashPoolsForCommand(tc *Context, command string) []string {
+	if tc != nil && tc.SchedulerPolicy != nil {
+		return tc.SchedulerPolicy.PoolsForCommand(command)
+	}
+	return scheduler.PoolsForClass(scheduler.ClassGeneral)
 }
 
 // bashSandboxMode resolves the OS sandbox dial from tool context.

@@ -227,11 +227,15 @@ type Options struct {
 	// HarnessRegistry maps task-subagent Agent.Harness names to complete agent-run
 	// functions. nil means every child uses the built-in loop.
 	HarnessRegistry *harness.Registry
-	// Scheduler is the process-local admission controller for model streams
-	// (and later bash/process pools). Shared across concurrent roots and
-	// child engines so the model pool caps aggregate in-process concurrency.
-	// nil disables admission (unlimited; preserves pre-scheduler behavior).
+	// Scheduler is the process-local admission controller shared across
+	// concurrent roots and children. Model streams acquire the model pool;
+	// agent bash acquires process (+ build/test when classified). nil disables
+	// admission (unlimited; preserves pre-scheduler behavior).
 	Scheduler *scheduler.Scheduler
+	// SchedulerPolicy is the compiled classification policy for bash commands.
+	// nil treats all commands as general (process only). Used only when
+	// Scheduler is non-nil.
+	SchedulerPolicy *scheduler.Effective
 }
 
 // beginAck reports whether ToolCallBegin was actually written to Events.

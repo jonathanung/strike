@@ -241,9 +241,10 @@ Admission wiring uses the compiled policy:
   each `Provider.Stream` attempt. The lease is released when the stream is
   fully drained, before retry backoff, and reacquired fairly on the next
   attempt. Omitted/`unlimited` model capacity preserves pre-scheduler behavior.
-- **Bash** still does not admit yet (process/build/test gates land separately):
-  every bash command will consume `process`; `build` / `test` classes will
-  acquire those pools in addition.
+- **Bash** acquires `process` after permission approval and before process
+  start (command timeout begins after admission). `build` / `test` classes
+  acquire those pools in addition via the scheduler's multi-pool path.
+  Omitted limits stay unlimited (no wait — same as pre-scheduler behavior).
 
 Inspect the compiled policy via `Config.SchedulerEffective()` /
 `Effective.Report()`.

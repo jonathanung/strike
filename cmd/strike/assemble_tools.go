@@ -61,6 +61,8 @@ type assembled struct {
 	worktreeNotice string
 	// mcpClose stops MCP server sessions (stdio/HTTP; process-scoped).
 	mcpClose func() error
+	// schedulerClose shuts down the shared in-process admission controller.
+	schedulerClose func()
 	// spawnRoot creates additional concurrent root engines (interactive multi-root).
 	// resumeID empty = new session; non-empty opens that durable root.
 	spawnRoot rootSpawner
@@ -411,7 +413,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	}
 
 	// Process-local scheduler shared by every root and child engine so model
-	// (and later bash) pools cap aggregate concurrency inside this OS process.
+	// and bash (process/build/test) pools cap aggregate concurrency inside
+	// this OS process. Omitted limits stay unlimited (no wait).
 	schedEff, err := cfg.SchedulerEffective()
 	if err != nil {
 		_ = goalStore.Close()
@@ -420,7 +423,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("scheduler policy: %w", err)
 	}
-	processSched, err := scheduler.New(schedEff.SchedulerConfig())
+	sched, err := scheduler.New(schedEff.SchedulerConfig())
 	if err != nil {
 		_ = goalStore.Close()
 		_ = issueStore.Close()
@@ -539,7 +542,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			SystemPrompt:            cfg.SystemPrompt,
 			LeanCode:                cfg.LeanCode,
 			HarnessRegistry:         harnessRegistry,
-			Scheduler:               processSched,
+			Scheduler:               sched,
+			SchedulerPolicy:         schedEff,
 			MaxChildDepth:           cfg.MaxChildDepth,
 			InitialProvider:         initialProvider,
 			InitialModel:            initialModel,
@@ -627,6 +631,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	if opts.continueSession {
 		info, err := sessions.LatestRoot(projectIdentity.Key)
 		if err != nil {
+			sched.Close()
 			_ = goalStore.Close()
 			_ = issueStore.Close()
 			_ = memoryStore.Close()
@@ -637,6 +642,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	}
 	first, replay, err := openRoot(resumeID, true)
 	if err != nil {
+		sched.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
 		_ = memoryStore.Close()
@@ -722,8 +728,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		mcpClose: func() error {
 			return mcpMgr.Close()
 		},
-		spawnRoot: spawn,
-		firstSlot: first,
+		schedulerClose: sched.Close,
+		spawnRoot:      spawn,
+		firstSlot:      first,
 	}, nil
 }
 
