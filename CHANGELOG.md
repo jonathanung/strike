@@ -14,6 +14,20 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+## [v0.1.2] - 2026-08-05
+
+Patch release focused on TUI composer input and live subagent transcript stability.
+
+### Changed
+
+- **Upgrade note:** Default tool-apply keybind is now `alt+a` (was bare `a`/`A`). Override `nav.tool-apply` in `keybinds.jsonc` to restore the previous binding ([#693](https://github.com/jonathanung/strike/issues/693), [#694](https://github.com/jonathanung/strike/pull/694)).
+
+### Fixed
+
+- Fixed bare `a`/`A` being captured as tool-apply instead of typing in the chat composer when a tool cell was selected ([#693](https://github.com/jonathanung/strike/issues/693), [#694](https://github.com/jonathanung/strike/pull/694)).
+- Fixed focusing a running subagent corrupting the live transcript and multi-pane layout while the child continued streaming ([#692](https://github.com/jonathanung/strike/issues/692), [#695](https://github.com/jonathanung/strike/pull/695)).
+- Reduced repeated disk I/O when listing sessions via a short-lived in-memory cache ([#619](https://github.com/jonathanung/strike/issues/619), [#696](https://github.com/jonathanung/strike/pull/696)).
+
 ## [v0.1.1] - 2026-08-01
 
 Patch release focused on TUI layout stability and launch-screen usability.
@@ -325,7 +339,8 @@ Initial public release.
 
 **Full changelog:** [commits through v0.0.1](https://github.com/jonathanung/strike/commits/v0.0.1)
 
-[Unreleased]: https://github.com/jonathanung/strike/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/jonathanung/strike/compare/v0.1.2...HEAD
+[v0.1.2]: https://github.com/jonathanung/strike/compare/v0.1.1...v0.1.2
 [v0.1.1]: https://github.com/jonathanung/strike/compare/v0.1.0...v0.1.1
 [v0.1.0]: https://github.com/jonathanung/strike/compare/v0.0.14...v0.1.0
 [v0.0.14]: https://github.com/jonathanung/strike/compare/v0.0.12...v0.0.14
