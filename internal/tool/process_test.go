@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/jonathanung/strike-cli/internal/sandbox"
 )
 
 func TestRunProcessStdoutExitZero(t *testing.T) {
@@ -349,5 +351,37 @@ func TestRunProcessWorkDir(t *testing.T) {
 	}
 	if !strings.Contains(res.Output, dir) {
 		t.Fatalf("pwd output = %q, want contain %q", res.Output, dir)
+	}
+}
+
+func TestRunProcessSandboxPolicyDegradesOrRuns(t *testing.T) {
+	// Sandbox ModeWorkspaceWrite must not break RunProcess when the OS backend
+	// is missing/blocked (graceful degrade) and must still succeed when applied.
+	dir := t.TempDir()
+	var started []string
+	res, err := RunProcess(context.Background(), ProcessSpec{
+		Argv: []string{"bash", "-c", "printf hi"},
+		Dir:  dir,
+		Sandbox: sandbox.Policy{
+			Mode:    sandbox.ModeWorkspaceWrite,
+			WorkDir: dir,
+		},
+	}, ProcessObserver{
+		Started: func(_ string, argv []string) {
+			started = append([]string(nil), argv...)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != ProcessStatusExited || res.ExitCode != 0 {
+		t.Fatalf("status=%s exit=%d out=%q", res.Status, res.ExitCode, res.Output)
+	}
+	if res.Output != "hi" && res.Stdout != "hi" {
+		t.Fatalf("output = %q", res.Output)
+	}
+	// Observer sees pre-wrap argv (not bwrap/sandbox-exec).
+	if len(started) < 1 || started[0] != "bash" {
+		t.Fatalf("Started argv = %#v, want original bash", started)
 	}
 }

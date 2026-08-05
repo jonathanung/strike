@@ -29,6 +29,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/provider/echo"
 	"github.com/jonathanung/strike-cli/internal/provider/google"
 	"github.com/jonathanung/strike-cli/internal/provider/openaicompat"
+	"github.com/jonathanung/strike-cli/internal/sandbox"
 	"github.com/jonathanung/strike-cli/internal/session"
 	"github.com/jonathanung/strike-cli/internal/tool"
 )
@@ -69,6 +70,9 @@ type assembled struct {
 // The caller must invoke historyClose and, if it never hands store to
 // runSession, store.Close.
 func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
+	// Loud once when OS sandbox backend is missing/blocked (bash degrades).
+	sandbox.WarnUnavailable()
+
 	launchDir, err := os.Getwd()
 	if err != nil {
 		return nil, err

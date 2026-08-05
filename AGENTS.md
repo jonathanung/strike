@@ -51,6 +51,7 @@ service/theme token).
 | `internal/engine` | Turn loop, tool dispatch, interrupts |
 | `internal/harness` | Function harness contract, registry, external process adapter |
 | `internal/provider` | LLM adapters (+ `base`, `echo`, anthropic, openai, xai, google, chatgpt) |
+| `internal/sandbox` | OS process sandbox (`Wrap` via bwrap / sandbox-exec) for bash |
 | `internal/tool` | read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/task_message/task_interrupt/agent_roster/agent_message/agent_broadcast/team_task/webfetch/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/toolsearch |
 | `internal/mcp` | MCP client (stdio + streamable HTTP); bridges external tools onto the registry |
 | `internal/question` | user-question ask service (suspend tool until QuestionReply) |
