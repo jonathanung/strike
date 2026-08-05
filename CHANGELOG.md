@@ -17,6 +17,7 @@ materially affect the shipped product.
 ### Added
 
 - **`/ftue` setup wizard** — manually invokable onboarding that guides provider connection, model selection, optional `/init`, and the first prompt by reusing existing host services and modals. Opening does not change settings; Finish focuses the composer; esc cancels. Child pickers preserve wizard step ([#702](https://github.com/jonathanung/strike/issues/702)).
+- **Contextual TUI feature tour** — skippable `/ftue` step covering pane navigation, agents/subagents, permissions, autonomy, key help, and command discovery. Copy uses live keybinds, omits unavailable surfaces, stays readable at 80×24, and never mutates settings or arms timers; established users revisit via `/ftue` ([#704](https://github.com/jonathanung/strike/issues/704)).
 - Config/CLI **sandbox dial** (`sandbox`: `off` | `read-only` | `workspace-write`, default `workspace-write`; `--sandbox`, `/sandbox`) for OS isolation of bash, documented as a two-dial model with `permissionMode`. `yolo` with `sandbox: off` requires `--i-know` ([#552](https://github.com/jonathanung/strike/issues/552)).
 - **Permission → sandbox profile:** `write`/`edit` deny globs compile into OS filesystem denials; bash network follows `webfetch`/`mcp` allow-on-`*`; `/sandbox explain` shows the generated profile ([#553](https://github.com/jonathanung/strike/issues/553)).
 
