@@ -262,6 +262,29 @@ type fakeSettings struct {
 	themeErr      error
 }
 
+// fakeOnboarding tracks global FTUE acknowledgement for tests.
+type fakeOnboarding struct {
+	autoOpen bool
+	acks     int
+	err      error
+}
+
+func (f *fakeOnboarding) ShouldAutoOpen() bool {
+	if f == nil {
+		return false
+	}
+	return f.autoOpen
+}
+
+func (f *fakeOnboarding) Acknowledge() error {
+	if f == nil {
+		return nil
+	}
+	f.acks++
+	f.autoOpen = false
+	return f.err
+}
+
 func (s *fakeSettings) Defaults() host.UserDefaults {
 	return s.defaults
 }

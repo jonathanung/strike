@@ -476,7 +476,8 @@ func formatSessionRewound(ev protocol.SessionRewound) string {
 }
 
 // handleFTUECommand opens the setup wizard. Opening never writes settings;
-// Finish focuses the composer; esc cancels without side effects.
+// Finish focuses the composer; esc/finish acknowledge global onboarding state
+// (idempotent after the first time) so auto-open does not repeat.
 func (m Model) handleFTUECommand() (tea.Model, tea.Cmd) {
 	m.resetComposer()
 	m.clearNotice()

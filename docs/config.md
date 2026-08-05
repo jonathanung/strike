@@ -9,6 +9,28 @@ issues and before writing config. A file symlink at `~/.strike/config` (for
 example stow/dotfiles) is preserved on save — the referent is updated, not
 replaced by a plain file.
 
+## First-time onboarding state
+
+Global (not per-project) acknowledgement lives at
+`~/.strike/onboarding.json`:
+
+```json
+{
+  "version": 1,
+  "acknowledged": true
+}
+```
+
+Interactive TUI launches auto-open `/ftue` while `acknowledged` is false or
+the file is missing on a clean install. Finish or dismiss (esc) sets
+`acknowledged: true` atomically. An interrupted session that never finishes
+or dismisses leaves the file unacknowledged so the wizard can reopen next
+launch. Established installs (existing session logs or real provider
+credentials) migrate to acknowledged without showing the modal. Precreated
+empty `~/.strike` directories alone do not suppress first launch.
+`strike exec`, `auth`, `serve`, `version`, and `upgrade` neither display nor
+write this file. Manual `/ftue` remains available after acknowledgement.
+
 ```json
 {
   "provider": "anthropic",

@@ -107,8 +107,9 @@ func (m *ftueModal) clampCursor() {
 
 func (m *ftueModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	if isEscape(msg) || msg.String() == "q" {
-		// Cancel: close without writing settings or emitting finish.
-		return nil, nil
+		// Dismiss: close without writing provider/model settings, but acknowledge
+		// global onboarding so auto-open does not loop on the next launch.
+		return nil, acknowledgeOnboardingCmd(m.services)
 	}
 	m.clampCursor()
 	switch msg.String() {
@@ -151,7 +152,22 @@ func (m *ftueModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 }
 
 func (m *ftueModal) finish() (modal, tea.Cmd) {
-	return nil, func() tea.Msg { return ftueFinishedMsg{} }
+	return nil, tea.Batch(
+		func() tea.Msg { return ftueFinishedMsg{} },
+		acknowledgeOnboardingCmd(m.services),
+	)
+}
+
+// acknowledgeOnboardingCmd persists global onboarding acknowledgement when the
+// host exposes Onboarding. Nil service is a no-op (tests without the capability).
+func acknowledgeOnboardingCmd(services host.Services) tea.Cmd {
+	if services.Onboarding == nil {
+		return nil
+	}
+	ob := services.Onboarding
+	return func() tea.Msg {
+		return onboardingAckMsg{err: ob.Acknowledge()}
+	}
 }
 
 func (m *ftueModal) activate() (modal, tea.Cmd) {

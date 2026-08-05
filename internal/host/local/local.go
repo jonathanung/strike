@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/jonathanung/strike-cli/internal/auth"
 	"github.com/jonathanung/strike-cli/internal/config"
@@ -37,11 +38,12 @@ func New(store *auth.Store, hist *history.Store, mem *memory.Store, issues *issu
 		customs = config.NewCustomStore(nil, workDir)
 	}
 	services := host.Services{
-		Auth:      authAdapter{store: store, customs: customs},
-		Catalog:   NewCatalog(customs),
-		Settings:  settingsAdapter{},
-		Providers: providersAdapter{store: customs},
-		Agents:    agents,
+		Auth:       authAdapter{store: store, customs: customs},
+		Catalog:    NewCatalog(customs),
+		Settings:   settingsAdapter{},
+		Onboarding: newOnboardingAdapter(store),
+		Providers:  providersAdapter{store: customs},
+		Agents:     agents,
 	}
 	// A typed nil *history.Store would satisfy the interface but panic on
 	// use, so only wire history when it is really present.
@@ -507,6 +509,90 @@ func modelDefToInfo(def config.ModelDef, source string) host.ModelInfo {
 		info.Output = def.Limit.Output
 	}
 	return info
+}
+
+// onboardingAdapter implements host.Onboarding against ~/.strike/onboarding.json.
+// Migration of established installs (sessions or real credentials) runs once
+// on the first ShouldAutoOpen call so exec/auth/serve never touch the file.
+type onboardingAdapter struct {
+	store *auth.Store
+
+	mu       sync.Mutex
+	resolved bool
+	autoOpen bool
+}
+
+func newOnboardingAdapter(store *auth.Store) *onboardingAdapter {
+	return &onboardingAdapter{store: store}
+}
+
+// establishedProviders are real credential-backed providers. echo does not
+// count — matching the former isFreshStrikeHome heuristic.
+var establishedProviders = []string{
+	"anthropic", "openai", "xai", "google", "kimi", "deepseek",
+}
+
+func (o *onboardingAdapter) ShouldAutoOpen() bool {
+	if o == nil {
+		return false
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.resolved {
+		return o.autoOpen
+	}
+	st, err := config.LoadOnboarding()
+	if err == nil && (st.Version > 0 || st.Acknowledged) {
+		o.resolved = true
+		o.autoOpen = !st.Acknowledged
+		return o.autoOpen
+	}
+	// Missing or unreadable: migrate established installs without a surprise modal.
+	if o.established() {
+		if err := config.AcknowledgeOnboarding(); err != nil {
+			// Still suppress auto-open so existing users are not blocked; next
+			// launch retries migration.
+			o.resolved = true
+			o.autoOpen = false
+			return false
+		}
+		o.resolved = true
+		o.autoOpen = false
+		return false
+	}
+	// Clean install (including precreated empty ~/.strike dirs): auto-open.
+	o.resolved = true
+	o.autoOpen = true
+	return true
+}
+
+func (o *onboardingAdapter) Acknowledge() error {
+	if o == nil {
+		return nil
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if err := config.AcknowledgeOnboarding(); err != nil {
+		return err
+	}
+	o.resolved = true
+	o.autoOpen = false
+	return nil
+}
+
+func (o *onboardingAdapter) established() bool {
+	if config.HasDurableSessions() {
+		return true
+	}
+	if o.store == nil {
+		return false
+	}
+	for _, provider := range establishedProviders {
+		if auth.Describe(provider, o.store) != "none" {
+			return true
+		}
+	}
+	return false
 }
 
 // settingsAdapter adapts global config persistence to host.Settings.

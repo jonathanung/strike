@@ -67,14 +67,14 @@ func TestStartupAlertDefersFirstRunUntilDismiss(t *testing.T) {
 	if _, ok := m.modal.(*alertModal); !ok {
 		t.Fatalf("alert should remain, got %T", m.modal)
 	}
-	// Dismiss alert → first-run provider picker via alertDismissedMsg.
+	// Dismiss alert → first-run /ftue wizard via alertDismissedMsg.
 	m.modal = nil
 	m = updateApp(t, m, alertDismissedMsg{})
 	if m.modal == nil {
-		t.Fatal("expected first-run provider modal after alert dismiss")
+		t.Fatal("expected first-run /ftue modal after alert dismiss")
 	}
-	if _, ok := m.modal.(*providerModal); !ok {
-		t.Fatalf("modal after dismiss = %T, want *providerModal", m.modal)
+	if _, ok := m.modal.(*ftueModal); !ok {
+		t.Fatalf("modal after dismiss = %T, want *ftueModal", m.modal)
 	}
 }
 

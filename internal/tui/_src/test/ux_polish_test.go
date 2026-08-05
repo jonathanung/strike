@@ -233,15 +233,15 @@ func TestFirstRunWelcomeCard(t *testing.T) {
 	}
 }
 
-func TestFirstRunOpensProviderModalOnce(t *testing.T) {
+func TestFirstRunOpensFTUEModalOnce(t *testing.T) {
 	m, _ := newAppTestModelWithOptions(Options{FirstRun: true})
 	if !m.firstRun {
 		t.Fatal("Options{FirstRun:true} did not set firstRun")
 	}
 
 	m = updateApp(t, m, firstRunSetupMsg{})
-	if _, ok := m.modal.(*providerModal); !ok {
-		t.Fatalf("first setup modal = %T, want *providerModal", m.modal)
+	if _, ok := m.modal.(*ftueModal); !ok {
+		t.Fatalf("first setup modal = %T, want *ftueModal", m.modal)
 	}
 	if !m.firstRunModalOpened {
 		t.Fatal("firstRunModalOpened not set")
@@ -252,6 +252,63 @@ func TestFirstRunOpensProviderModalOnce(t *testing.T) {
 	m = updateApp(t, m, firstRunSetupMsg{})
 	if m.modal != nil {
 		t.Fatalf("second firstRunSetupMsg reopened modal: %T", m.modal)
+	}
+}
+
+func TestOnboardingServiceDrivesFirstRun(t *testing.T) {
+	ops := make(chan protocol.Op, 8)
+	events := make(chan protocol.Event)
+	svc := testServices(nil, nil)
+	ob := &fakeOnboarding{autoOpen: true}
+	svc.Onboarding = ob
+	m := New(ops, events, svc)
+	if !m.firstRun {
+		t.Fatal("ShouldAutoOpen should set firstRun")
+	}
+	m = updateApp(t, m, firstRunSetupMsg{})
+	if _, ok := m.modal.(*ftueModal); !ok {
+		t.Fatalf("modal = %T, want *ftueModal", m.modal)
+	}
+}
+
+func TestFTUEDismissAcknowledgesOnboarding(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	ob := &fakeOnboarding{autoOpen: true}
+	m.services.Onboarding = ob
+	m.firstRun = true
+	next, _ := m.handleCommand("/ftue")
+	m = next.(Model)
+	m = updateAppDrain(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if m.modal != nil {
+		t.Fatalf("modal after esc = %T", m.modal)
+	}
+	if ob.acks != 1 {
+		t.Fatalf("acks = %d, want 1", ob.acks)
+	}
+	if m.firstRun {
+		t.Fatal("firstRun should clear after ack msg")
+	}
+	if ob.autoOpen {
+		t.Fatal("autoOpen should be false after ack")
+	}
+}
+
+func TestFTUEFinishAcknowledgesOnboarding(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	ob := &fakeOnboarding{autoOpen: true}
+	m.services.Onboarding = ob
+	m.firstRun = true
+	m.providerName = "echo"
+	m.modelName = "echo"
+	m.width, m.height, m.ready = 100, 40, true
+	next, _ := m.handleCommand("/ftue")
+	m = next.(Model)
+	m = updateAppDrain(t, m, tea.KeyPressMsg{Code: 'f', Text: "f"})
+	if ob.acks != 1 {
+		t.Fatalf("acks = %d, want 1", ob.acks)
+	}
+	if m.firstRun {
+		t.Fatal("firstRun should clear after finish ack")
 	}
 }
 
