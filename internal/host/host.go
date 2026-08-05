@@ -596,13 +596,38 @@ type SchedulerPreset struct {
 	Rules        []SchedulerPresetRule
 }
 
-// SchedulerPresets is a read-only catalog of shipped scheduler presets for
-// onboarding and future settings UIs. Nil means the capability is absent.
+// SchedulerCommandRule is one user-authored (or otherwise stored) command
+// classification rule from the global scheduler config layer.
+type SchedulerCommandRule struct {
+	Pattern string
+	Class   string // general | build | test
+	Source  string // optional provenance stamp; empty for plain user rules
+}
+
+// SchedulerGlobalState is the global config layer's scheduler section for
+// FTUE/settings. Custom Limits/Commands are distinct from preset expansion.
+type SchedulerGlobalState struct {
+	Presets  []string // enabled shipped preset IDs
+	Limits   map[string]int
+	Commands []SchedulerCommandRule
+}
+
+// SchedulerPresets is the shipped build-system preset catalog plus global
+// apply for onboarding and future settings UIs. Nil means the capability is
+// absent.
 type SchedulerPresets interface {
 	// List returns every shipped preset in stable display order.
 	List() []SchedulerPreset
 	// Get returns one preset by stable ID.
 	Get(id string) (SchedulerPreset, bool)
+	// Global returns the current global-layer scheduler snapshot. Missing
+	// config yields zero values and a nil error.
+	Global() (SchedulerGlobalState, error)
+	// ApplyGlobalPresets validates ids and atomically replaces the global
+	// presets list. Custom limits and commands are preserved unchanged.
+	// Unknown or duplicate ids error without writing. An empty slice clears
+	// global presets only.
+	ApplyGlobalPresets(ids []string) error
 }
 
 // Services bundles everything a frontend receives from its host. Any field
@@ -625,7 +650,8 @@ type Services struct {
 	Init       ProjectInit
 	MCP        MCP       // external MCP server status; nil when unsupported
 	Telemetry  Telemetry // local CPU/RAM/disk; nil when unsupported
-	// SchedulerPresets is the shipped build-system preset catalog (FTUE #705).
+	// SchedulerPresets is the shipped build-system preset catalog and global
+	// apply surface (FTUE #705).
 	SchedulerPresets SchedulerPresets
 	Agents           []string // selectable agent names, default first
 	Skills           []Skill

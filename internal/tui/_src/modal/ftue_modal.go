@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -19,6 +20,7 @@ const (
 	ftueStepModel
 	ftueStepInit
 	ftueStepTour
+	ftueStepScheduler
 	ftueStepReady
 	ftueStepCount
 )
@@ -31,6 +33,7 @@ const (
 	ftueChildModel
 	ftueChildInit
 	ftueChildTour
+	ftueChildScheduler
 )
 
 // ftueSpawnChildMsg parks the wizard on the modal queue and opens a child flow
@@ -61,6 +64,11 @@ type ftueModal struct {
 	// settings. Done is set when the user finishes the tour modal.
 	tourSkipped bool
 	tourDone    bool
+	// schedulerSkipped / schedulerDone are session-local. Done is set after a
+	// successful apply (or when the step is unavailable). Skip leaves global
+	// scheduler config unchanged.
+	schedulerSkipped bool
+	schedulerDone    bool
 	// flash is a one-line status under the steps (child cancel, unavailable, …).
 	flash string
 }
@@ -126,7 +134,7 @@ func (m *ftueModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 		m.flash = ""
 		return m, nil
 	case "s":
-		// Skip optional steps (project init, feature tour).
+		// Skip optional steps (project init, feature tour, scheduler presets).
 		switch ftueStep(m.cursor) {
 		case ftueStepInit:
 			m.initSkipped = true
@@ -137,6 +145,12 @@ func (m *ftueModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 		case ftueStepTour:
 			m.tourSkipped = true
 			m.flash = "feature tour skipped"
+			if m.cursor < int(ftueStepCount)-1 {
+				m.cursor++
+			}
+		case ftueStepScheduler:
+			m.schedulerSkipped = true
+			m.flash = "scheduler presets skipped"
 			if m.cursor < int(ftueStepCount)-1 {
 				m.cursor++
 			}
@@ -188,6 +202,10 @@ func (m *ftueModal) activate() (modal, tea.Cmd) {
 		return nil, func() tea.Msg {
 			return ftueSpawnChildMsg{resume: m, kind: ftueChildTour}
 		}
+	case ftueStepScheduler:
+		return nil, func() tea.Msg {
+			return ftueSpawnChildMsg{resume: m, kind: ftueChildScheduler}
+		}
 	case ftueStepReady:
 		return m.finish()
 	default:
@@ -205,6 +223,8 @@ func (m *ftueModal) stepComplete(step ftueStep) bool {
 		return m.initReady()
 	case ftueStepTour:
 		return m.tourReady()
+	case ftueStepScheduler:
+		return m.schedulerReady()
 	case ftueStepReady:
 		// Ready is complete when the user can send (provider+model).
 		return m.providerReady() && m.modelReady()
@@ -261,6 +281,8 @@ func (m *ftueModal) stepTitle(step ftueStep) string {
 		return "Project setup (optional)"
 	case ftueStepTour:
 		return "Feature tour (optional)"
+	case ftueStepScheduler:
+		return "Scheduler presets (optional)"
 	case ftueStepReady:
 		return "Send your first prompt"
 	default:
@@ -278,6 +300,8 @@ func (m *ftueModal) stepDetail(step ftueStep) string {
 		return m.initDetail()
 	case ftueStepTour:
 		return m.tourDetail()
+	case ftueStepScheduler:
+		return m.schedulerDetail()
 	case ftueStepReady:
 		if m.providerReady() && m.modelReady() {
 			return "type below, enter to send"
@@ -300,6 +324,34 @@ func (m *ftueModal) tourDetail() string {
 		return "skipped"
 	default:
 		return "panes, agents, permissions, keys"
+	}
+}
+
+func (m *ftueModal) schedulerReady() bool {
+	if m.schedulerSkipped || m.schedulerDone {
+		return true
+	}
+	// Unavailable: optional step is satisfied (cannot run).
+	return m.services.SchedulerPresets == nil
+}
+
+func (m *ftueModal) schedulerDetail() string {
+	switch {
+	case m.schedulerDone:
+		return "saved"
+	case m.schedulerSkipped:
+		return "skipped"
+	case m.services.SchedulerPresets == nil:
+		return "unavailable"
+	default:
+		n := 0
+		if st, err := m.services.SchedulerPresets.Global(); err == nil {
+			n = len(st.Presets)
+		}
+		if n > 0 {
+			return fmt.Sprintf("%d enabled — cmake, cargo, npm, …", n)
+		}
+		return "cmake, ninja, gradle, cargo, npm, …"
 	}
 }
 
@@ -381,7 +433,7 @@ func (m *ftueModal) view(width int, th theme.Theme) string {
 	inner := max(1, ui.PanelInnerWidth(th, width))
 	m.clampCursor()
 
-	intro := st.Muted.Render("Setup guide — open steps to reuse /provider, /model, /init, and the feature tour. Opening this wizard does not change settings.")
+	intro := st.Muted.Render("Setup guide — open steps to reuse /provider, /model, /init, the feature tour, and scheduler presets. Opening this wizard does not change settings.")
 	items := make([]ui.ListItem, 0, int(ftueStepCount))
 	for i := 0; i < int(ftueStepCount); i++ {
 		step := ftueStep(i)
@@ -447,10 +499,27 @@ func (m *Model) applyFTUESpawnChild(msg ftueSpawnChildMsg) tea.Cmd {
 		// permanently (tour restores focus on close).
 		m.modal = m.openTourModal()
 		return nil
+	case ftueChildScheduler:
+		return m.openSchedulerPresetsFromFTUE(msg.resume)
 	default:
 		m.modal = nil
 		return m.afterModalClosed()
 	}
+}
+
+// openSchedulerPresetsFromFTUE parks the wizard and opens the preset picker.
+// Nil catalog degrades with a flash; opening never writes settings.
+func (m *Model) openSchedulerPresetsFromFTUE(resume *ftueModal) tea.Cmd {
+	if m.services.SchedulerPresets == nil {
+		if resume != nil {
+			resume.flash = "scheduler presets unavailable"
+			resume.schedulerDone = true // optional step satisfied
+		}
+		m.modal = nil
+		return m.afterModalClosed()
+	}
+	m.modal = newSchedulerPresetsModal(m.services.SchedulerPresets, m.th)
+	return nil
 }
 
 // openInitFromFTUE runs the same confirmation-before-overwrite path as /init

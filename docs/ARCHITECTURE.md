@@ -70,7 +70,7 @@ event stream the TUI rendered from (see `internal/protocol/codec.go`).
 | `internal/models` | models.dev catalog client, 24h cache with stale fallback | stdlib, net/http |
 | `internal/history` | Project-scoped prompt history | stdlib |
 | `internal/project` | Stable filesystem identity + optional per-session git worktrees under `.strike/worktrees/` | stdlib, os/exec |
-| `internal/host` | **Frozen contract**: the services a frontend needs from its host process (includes read-only `SchedulerPresets` catalog) | stdlib only — enforced by the boundary test |
+| `internal/host` | **Frozen contract**: the services a frontend needs from its host process (includes `SchedulerPresets` catalog + global apply) | stdlib only — enforced by the boundary test |
 | `internal/host/local` | Real `host.Services` implementation; wraps auth/config/models/history/memory/issue/files/mcp/scheduler presets for the frontend | `auth`, `config`, `history`, `host`, `issue`, `mcp`, `memory`, `models`, `sandbox`, `scheduler`, `tool` (composer `!` shell) |
 | `internal/tui` | Bubble Tea frontend: app model, layout, cells, modals, composer. Sources under `_src/<group>/`, flattened by `go generate` | `protocol`, `host`, `tui/...` only — enforced by the boundary test |
 | `internal/tui/theme` | Resolved design tokens: adaptive color roles, surfaces, chrome mode (soft\|solid\|bordered), terminal background, glyphs, border/spacing tokens, and precomputed styles | lipgloss, stdlib |
@@ -297,9 +297,11 @@ Two different mechanisms, depending on whether it needs Go code:
    See `keybindSlashPrimary` in `internal/tui/keybind_slash.go` for the full
    keybind→slash map. `/init` is a builtin that writes project
    `AGENTS.md` via `host.ProjectInit` (confirm before overwrite). `/ftue` opens
-   the setup wizard (provider → model → optional init → feature tour → first
-   prompt) without writing settings on open. The feature tour is read-only,
-   uses live keybind labels, and omits unavailable surfaces. Finish/dismiss
+   the setup wizard (provider → model → optional init → feature tour →
+   optional scheduler presets → first prompt) without writing settings on
+   open. The feature tour is read-only, uses live keybind labels, and omits
+   unavailable surfaces. Scheduler presets use `host.SchedulerPresets` (catalog
+   + atomic global apply; custom limits/commands preserved). Finish/dismiss
    acknowledge `host.Onboarding` (`~/.strike/onboarding.json`) so interactive
    TUI auto-opens once for clean installs. PR URLs from successful `gh pr` bash
    output are stored via `protocol.SessionMeta` and `session` sidecar

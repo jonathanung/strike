@@ -10,6 +10,7 @@ import (
 
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike-cli/internal/scheduler"
 )
 
 func TestConcurrentSetGlobalDefaults(t *testing.T) {
@@ -351,5 +352,106 @@ func TestSetGlobalDefaultsThroughGlobalRootDirSymlink(t *testing.T) {
 	}
 	if got.Provider != "xai" || got.Model != "grok-test" || got.DefaultAgent != "build" {
 		t.Errorf("got %+v", got)
+	}
+}
+
+func TestSetGlobalSchedulerPresetsAtomicAndPreservesCustom(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Seed global config with custom limits/commands and unrelated fields.
+	if err := SetGlobalDefaults("openai", "gpt-test", "build", "", ""); err != nil {
+		t.Fatalf("seed defaults: %v", err)
+	}
+	path := GlobalPath()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg Config
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Scheduler = SchedulerConfig{
+		Presets: []string{"npm"},
+		Limits:  scheduler.Limits{"process": 4},
+		Commands: []scheduler.CommandRule{
+			{Pattern: "go test *", Class: scheduler.ClassTest},
+		},
+	}
+	out, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(out, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Apply cargo+cmake out of catalog order; store should reorder.
+	if err := SetGlobalSchedulerPresets([]string{"cargo", "cmake", "cargo"}); err == nil {
+		t.Fatal("duplicate should be rejected")
+	}
+	if err := SetGlobalSchedulerPresets([]string{"cargo", "cmake"}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	got, err := ReadGlobalDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Provider != "openai" || got.Model != "gpt-test" {
+		t.Fatalf("unrelated fields clobbered: %+v", got)
+	}
+	// Catalog order: cmake before cargo.
+	if len(got.Scheduler.Presets) != 2 || got.Scheduler.Presets[0] != "cmake" || got.Scheduler.Presets[1] != "cargo" {
+		t.Fatalf("presets=%v", got.Scheduler.Presets)
+	}
+	if got.Scheduler.Limits["process"] != 4 {
+		t.Fatalf("custom limits lost: %+v", got.Scheduler.Limits)
+	}
+	if len(got.Scheduler.Commands) != 1 || got.Scheduler.Commands[0].Pattern != "go test *" {
+		t.Fatalf("custom commands lost: %+v", got.Scheduler.Commands)
+	}
+
+	// Idempotent re-apply.
+	if err := SetGlobalSchedulerPresets([]string{"cmake", "cargo"}); err != nil {
+		t.Fatalf("re-apply: %v", err)
+	}
+	got2, err := ReadGlobalDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got2.Scheduler.Presets) != 2 {
+		t.Fatalf("re-apply duplicated: %v", got2.Scheduler.Presets)
+	}
+
+	// Clear presets only.
+	if err := SetGlobalSchedulerPresets(nil); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	got3, err := ReadGlobalDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got3.Scheduler.Presets) != 0 {
+		t.Fatalf("clear left presets: %v", got3.Scheduler.Presets)
+	}
+	if got3.Scheduler.Limits["process"] != 4 || len(got3.Scheduler.Commands) != 1 {
+		t.Fatalf("clear clobbered custom: %+v", got3.Scheduler)
+	}
+}
+
+func TestSetGlobalSchedulerPresetsRejectsUnknown(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := SetGlobalSchedulerPresets([]string{"msbuild"}); err == nil {
+		t.Fatal("unknown preset accepted")
+	}
+	got, err := ReadGlobalDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Scheduler.Presets) != 0 {
+		t.Fatalf("failed write still mutated: %v", got.Scheduler.Presets)
 	}
 }

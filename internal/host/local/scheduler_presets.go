@@ -1,11 +1,13 @@
 package local
 
 import (
+	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/scheduler"
 )
 
-// schedulerPresetCatalog adapts scheduler.Catalog to host.SchedulerPresets.
+// schedulerPresetCatalog adapts scheduler.Catalog + global config to
+// host.SchedulerPresets.
 type schedulerPresetCatalog struct{}
 
 func (schedulerPresetCatalog) List() []host.SchedulerPreset {
@@ -23,6 +25,42 @@ func (schedulerPresetCatalog) Get(id string) (host.SchedulerPreset, bool) {
 		return host.SchedulerPreset{}, false
 	}
 	return presetToHost(p), true
+}
+
+func (schedulerPresetCatalog) Global() (host.SchedulerGlobalState, error) {
+	cfg, err := config.ReadGlobalDefaults()
+	if err != nil {
+		return host.SchedulerGlobalState{}, err
+	}
+	return schedulerConfigToHost(cfg.Scheduler), nil
+}
+
+func (schedulerPresetCatalog) ApplyGlobalPresets(ids []string) error {
+	return config.SetGlobalSchedulerPresets(ids)
+}
+
+func schedulerConfigToHost(sc config.SchedulerConfig) host.SchedulerGlobalState {
+	out := host.SchedulerGlobalState{}
+	if len(sc.Presets) > 0 {
+		out.Presets = append([]string(nil), sc.Presets...)
+	}
+	if len(sc.Limits) > 0 {
+		out.Limits = make(map[string]int, len(sc.Limits))
+		for k, v := range sc.Limits {
+			out.Limits[k] = v
+		}
+	}
+	if len(sc.Commands) > 0 {
+		out.Commands = make([]host.SchedulerCommandRule, len(sc.Commands))
+		for i, r := range sc.Commands {
+			out.Commands[i] = host.SchedulerCommandRule{
+				Pattern: r.Pattern,
+				Class:   string(r.Class),
+				Source:  r.Source,
+			}
+		}
+	}
+	return out
 }
 
 func presetToHost(p scheduler.Preset) host.SchedulerPreset {
