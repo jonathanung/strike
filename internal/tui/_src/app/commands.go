@@ -54,6 +54,7 @@ const (
 	commandCost            commandID = "cost"
 	commandUpgrade         commandID = "upgrade"
 	commandInit            commandID = "init"
+	commandFTUE            commandID = "ftue"
 	commandMCP             commandID = "mcp"
 	commandExit            commandID = "exit"
 	commandQuit            commandID = "quit"
@@ -113,7 +114,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandEffort, Name: "/effort", Description: "set how much reasoning the model spends", ArgsHint: "[level]", Source: commandSourceBuiltin},
 	{ID: commandAutonomy, Name: "/autonomy", Description: "set exit-gate policy (supervised/agent/checks)", ArgsHint: "[mode]", Source: commandSourceBuiltin},
 	{ID: commandMode, Name: "/mode", Description: "set permission posture (default/plan/accept-edits/yolo)", ArgsHint: "[mode]", Source: commandSourceBuiltin},
-	{ID: commandSandbox, Name: "/sandbox", Description: "show OS sandbox policy (what is possible vs permissionMode)", Source: commandSourceBuiltin},
+	{ID: commandSandbox, Name: "/sandbox", Description: "show OS sandbox policy; /sandbox explain for generated profile", Source: commandSourceBuiltin},
 	{ID: commandAuth, Name: "/auth", Description: "manage provider authentication", ArgsHint: "[provider]", Source: commandSourceBuiltin},
 	{ID: commandSettings, Name: "/settings", Description: "defaults (theme, editor, mode) and custom providers", Source: commandSourceBuiltin},
 	{ID: commandAgent, Name: "/agent", Description: "select an agent", ArgsHint: "[name]", Source: commandSourceBuiltin},
@@ -151,6 +152,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandCost, Name: "/cost", Description: "session token and cost totals", Source: commandSourceBuiltin},
 	{ID: commandUpgrade, Name: "/upgrade", Description: "install the latest release and restart", Source: commandSourceBuiltin},
 	{ID: commandInit, Name: "/init", Description: "create or update project AGENTS.md", Source: commandSourceBuiltin},
+	{ID: commandFTUE, Name: "/ftue", Description: "setup wizard: provider, model, optional init, first prompt", Source: commandSourceBuiltin},
 	{ID: commandMCP, Name: "/mcp", Description: "MCP servers: status, retry, disable", ArgsHint: "[retry [name]|disable <name>]", Source: commandSourceBuiltin},
 	{ID: commandExit, Name: "/exit", Description: "quit strike", Source: commandSourceBuiltin},
 	{ID: commandQuit, Name: "/quit", Description: "quit strike", Source: commandSourceBuiltin},
@@ -253,6 +255,7 @@ var reservedCommandNames = map[string]struct{}{
 	"cost":             {},
 	"upgrade":          {},
 	"init":             {},
+	"ftue":             {},
 	"mcp":              {},
 	"exit":             {},
 	"quit":             {},

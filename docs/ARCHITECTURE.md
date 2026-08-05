@@ -55,15 +55,14 @@ event stream the TUI rendered from (see `internal/protocol/codec.go`).
 | `internal/provider` | LLM provider abstraction: `Provider` interface, normalized `StreamEvent`s | stdlib |
 | `internal/provider/base` | Shared HTTP/JSON/SSE/auth client concrete adapters embed | `provider`, stdlib, net/http |
 | `internal/provider/{anthropic,openaicompat,chatgpt,google,echo}` | Concrete adapters (openaicompat covers OpenAI platform API, xAI, Kimi, DeepSeek; chatgpt is the ChatGPT-subscription backend; google is Google AI Studio generateContent; echo is the offline dev provider) | `provider`, `provider/base` (all but echo), stdlib |
-| `internal/sandbox` | OS-primitive process sandbox: `Wrap(argv, Policy)` via Linux `bwrap` / macOS `sandbox-exec`; graceful degrade + startup warning when unavailable | stdlib only |
-| `internal/scheduler` | Fair cancellable named-pool admission (process/build/test/model/container): context-aware acquire, atomic multi-pool leases, observer snapshots; layered limits + ordered command classification (`Compile` → `Effective`) | stdlib only |
-| `internal/tool` | Tool contract (`Tool`, `Context`, `Result`) + built-ins: read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/task_message/task_interrupt/agent_roster/agent_message/agent_broadcast/team_task/webfetch/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/phase_done/toolsearch | `provider` (for `ToolSchema`), `memory`, `issue`, `sandbox`, stdlib |
+| `internal/sandbox` | OS-primitive process sandbox: `Wrap(argv, Policy)` via Linux `bwrap` / macOS `sandbox-exec`; Policy carries mode, write denials, network; `Explain`/`ProfileText` for `/sandbox explain`; graceful degrade + startup warning when unavailable | stdlib only |
+| `internal/scheduler` | Fair cancellable named-pool admission (process/build/test/model/container): context-aware acquire, atomic multi-pool leases, observer snapshots; layered limits + ordered command classification (`Compile` → `Effective`) | stdlib only || `internal/tool` | Tool contract (`Tool`, `Context`, `Result`) + built-ins: read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/task_message/task_interrupt/agent_roster/agent_message/agent_broadcast/team_task/webfetch/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/phase_done/toolsearch | `provider` (for `ToolSchema`), `memory`, `issue`, `sandbox`, stdlib |
 | `internal/mcp` | MCP client (stdio + streamable HTTP) + session manager; bridges tools onto `tool.Registry` as `mcp_<server>_<tool>`; retry/disable | `tool`, stdlib, net/http |
 | `internal/memory` | Project-scoped durable key/value memory (JSON under `~/.strike/memory/`) | stdlib |
 | `internal/issue` | Project-scoped durable issues (JSON under `~/.strike/issues/`) | stdlib |
 | `internal/goal` | Loop harness: goals, JSONL iterations/events, guards, critic, hooks | stdlib |
 | `internal/question` | User-question ask service: suspends a tool call until `QuestionReply` (1–4 prompts per batch; TUI walks them, one reply with all answers) | `protocol`, stdlib |
-| `internal/permission` | Ordered allow/ask/deny rulesets, last-match-wins; the ask service that suspends a tool call for user input | `protocol`, `tool` (for `AskRequest`), stdlib |
+| `internal/permission` | Ordered allow/ask/deny rulesets, last-match-wins; the ask service that suspends a tool call for user input; `CompileSandbox` maps write/edit denials + webfetch/mcp allow into `sandbox.Policy` | `protocol`, `tool` (for `AskRequest`), `sandbox`, stdlib |
 | `internal/session` | JSONL event-log persistence (append/replay) + concurrent Manager (multi-session open, durable list, event mux). Sidecar `*.meta.json` stores `projectKey` (workspace folder) first for `/session` scoping | `protocol`, stdlib |
 | `internal/auth` | Credential store (0600 `auth.json`) + OAuth/PKCE/device flows | stdlib, net/http |
 | `internal/config` | Layered JSON config (defaults → global → project) + agents/skills markdown loading | `permission` (Ruleset is a config field), `protocol`, `sandbox` (sandbox dial parse), `scheduler` (limits + command rules), stdlib |
@@ -71,7 +70,7 @@ event stream the TUI rendered from (see `internal/protocol/codec.go`).
 | `internal/history` | Project-scoped prompt history | stdlib |
 | `internal/project` | Stable filesystem identity + optional per-session git worktrees under `.strike/worktrees/` | stdlib, os/exec |
 | `internal/host` | **Frozen contract**: the services a frontend needs from its host process | stdlib only — enforced by the boundary test |
-| `internal/host/local` | Real `host.Services` implementation; wraps auth/config/models/history/memory/issue/files/mcp for the frontend | `auth`, `config`, `history`, `host`, `issue`, `mcp`, `memory`, `models` |
+| `internal/host/local` | Real `host.Services` implementation; wraps auth/config/models/history/memory/issue/files/mcp for the frontend | `auth`, `config`, `history`, `host`, `issue`, `mcp`, `memory`, `models`, `sandbox`, `tool` (composer `!` shell) |
 | `internal/tui` | Bubble Tea frontend: app model, layout, cells, modals, composer. Sources under `_src/<group>/`, flattened by `go generate` | `protocol`, `host`, `tui/...` only — enforced by the boundary test |
 | `internal/tui/theme` | Resolved design tokens: adaptive color roles, surfaces, chrome mode (soft\|solid\|bordered), terminal background, glyphs, border/spacing tokens, and precomputed styles | lipgloss, stdlib |
 | `internal/tui/common` | Pure formatting helpers (ThemedSpace, DotJoin, compact durations) | `tui/theme`, stdlib |
@@ -290,13 +289,15 @@ Two different mechanisms, depending on whether it needs Go code:
    `visualizer`, `system`, `telemetry`, `fast`, `vim`, `nano`, `md-read`,
    `theme`, `layout`, `split`, `compact`, `fork`, `undo`, `rewind`, `session`,
    `export`, `copy`, `help`, `keys`, `legend`, `memory`, `issues`, `goal`, `loop`, `context`,
-   `effective-prompt`, `cost`, `upgrade`, `init`, `mcp`, `exit`, `quit`, and
+   `effective-prompt`, `cost`, `upgrade`, `init`, `ftue`, `mcp`, `exit`, `quit`, and
    keybind-backed action mirrors such as `focus-left`, `palette`,
    `interrupt`, `agent-next`, `tool-copy`, `subagent`, `root-new`, …) are
    rejected by `config.ValidateSkillName` before they ever reach the frontend.
    See `keybindSlashPrimary` in `internal/tui/keybind_slash.go` for the full
    keybind→slash map. `/init` is a builtin that writes project
-   `AGENTS.md` via `host.ProjectInit` (confirm before overwrite). PR URLs from successful `gh pr` bash
+   `AGENTS.md` via `host.ProjectInit` (confirm before overwrite). `/ftue` opens
+   the setup wizard (provider → model → optional init → first prompt) without
+   writing settings on open. PR URLs from successful `gh pr` bash
    output are stored via `protocol.SessionMeta` and `session` sidecar
    metadata. `/vim` embeds nvim/vim/nano in the right-pane `editor` window by
    default (PTY + vt10x via `internal/tui/term`). Config key `vimMode`

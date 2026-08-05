@@ -13,6 +13,8 @@ package tool
 import (
 	"context"
 	"encoding/json"
+
+	"github.com/jonathanung/strike-cli/internal/sandbox"
 )
 
 // Result separates what the model sees (Output) from what the UI renders
@@ -304,7 +306,13 @@ type Context struct {
 	// SandboxMode is the OS process sandbox dial for bash
 	// (off|read-only|workspace-write). Empty means workspace-write (default).
 	// Wired from config/CLI; see internal/sandbox.ParseMode.
+	// Prefer Sandbox when set (permission-compiled policy); Mode zero with
+	// empty WorkDir falls back to SandboxMode + WorkDir.
 	SandboxMode string
+	// Sandbox is the full OS policy for bash (mode, workdir, write denials,
+	// network). When non-zero extras are present or WorkDir is set on the
+	// policy, bash uses it directly; otherwise SandboxMode is resolved.
+	Sandbox     sandbox.Policy
 	Ask         func(ctx context.Context, req AskRequest) error
 	SpawnTask   func(ctx context.Context, req TaskRequest) (TaskResult, error)
 	TaskStatus  func(ctx context.Context, req TaskStatusRequest) (TaskStatusResult, error)

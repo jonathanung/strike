@@ -97,17 +97,14 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	// Fresh process each call: Dir is always the session workdir so shell cd
 	// cannot stick across tool invocations. OS sandbox (bwrap / seatbelt)
 	// confines the shell when the platform backend is available and mode is
-	// not off (config/CLI sandbox dial via tc.SandboxMode).
+	// not off (config/CLI dial + permission-compiled denials/network).
 	proc, err := RunProcess(ctx, ProcessSpec{
 		Argv:      []string{"bash", "-c", a.Command},
 		Dir:       tc.WorkDir,
 		Timeout:   timeout,
 		MaxOutput: bashMaxOutput,
 		Combine:   true,
-		Sandbox: sandbox.Policy{
-			Mode:    bashSandboxMode(tc),
-			WorkDir: tc.WorkDir,
-		},
+		Sandbox:   bashSandboxPolicy(tc),
 	}, obs)
 	if err != nil {
 		return Result{}, err
@@ -161,6 +158,36 @@ func bashSandboxMode(tc *Context) sandbox.Mode {
 		return sandbox.DefaultMode
 	}
 	return sandbox.ResolveMode(tc.SandboxMode)
+}
+
+// bashSandboxPolicy returns the OS policy for a bash invocation.
+// When tc.Sandbox carries a compiled policy (WorkDir and/or denial/network
+// fields, or a non-off Mode), that policy is used (WorkDir filled from tc
+// when empty). Otherwise Mode/WorkDir are derived from SandboxMode + WorkDir.
+func bashSandboxPolicy(tc *Context) sandbox.Policy {
+	if tc == nil {
+		return sandbox.Policy{Mode: sandbox.DefaultMode}
+	}
+	p := tc.Sandbox
+	if compiledSandboxPolicy(p) {
+		if strings.TrimSpace(p.WorkDir) == "" {
+			p.WorkDir = tc.WorkDir
+		}
+		return p
+	}
+	return sandbox.Policy{
+		Mode:    bashSandboxMode(tc),
+		WorkDir: tc.WorkDir,
+	}
+}
+
+func compiledSandboxPolicy(p sandbox.Policy) bool {
+	return p.Mode != sandbox.ModeOff ||
+		strings.TrimSpace(p.WorkDir) != "" ||
+		p.NoWorkspaceWrite ||
+		p.Network ||
+		len(p.DenyWritePaths) > 0 ||
+		len(p.DenyWriteGlobs) > 0
 }
 
 // githubPRURLRe matches common GitHub pull request URLs in gh CLI output.
