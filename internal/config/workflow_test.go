@@ -609,4 +609,15 @@ func TestValidateWorkflowName(t *testing.T) {
 	if err := ValidateWorkflowName(" x"); err == nil {
 		t.Fatal("leading space")
 	}
+	for _, bad := range []string{"../escape", "a/b", `a\b`, "..", "."} {
+		if err := ValidateWorkflowName(bad); err == nil {
+			t.Fatalf("expected reject %q", bad)
+		}
+	}
+}
+
+func TestScaffoldRejectsPathTraversalName(t *testing.T) {
+	if _, err := ScaffoldWorkflow("../evil"); err == nil {
+		t.Fatal("expected path traversal name rejected")
+	}
 }

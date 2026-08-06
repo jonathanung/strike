@@ -265,8 +265,9 @@ func runWorkflowValidate(args []string, stdout, stderr io.Writer) int {
 		errCount int
 		okCount  int
 	)
-	// Track names across files for duplicate reporting within this validate run.
-	seenName := map[string]string{}
+	// Track names per directory only. Cross-layer overrides (global vs project)
+	// are intentional and must not be reported as duplicates under --all.
+	seenName := map[string]string{} // key: dir + "\x00" + name → path
 	for _, path := range files {
 		w, err := config.LoadWorkflowFile(path)
 		if err != nil {
@@ -278,14 +279,15 @@ func runWorkflowValidate(args []string, stdout, stderr io.Writer) int {
 		if err := config.ValidateWorkflowAgents(w, known); err != nil {
 			errs = append(errs, asWFErrors(err)...)
 		}
-		if prev, ok := seenName[w.Name]; ok {
+		layerKey := filepath.Dir(path) + "\x00" + w.Name
+		if prev, ok := seenName[layerKey]; ok {
 			errs = append(errs, config.WorkflowError{
 				Source: path,
 				Path:   "name",
 				Msg:    fmt.Sprintf("duplicate workflow %q (also %s)", w.Name, prev),
 			})
 		} else {
-			seenName[w.Name] = path
+			seenName[layerKey] = path
 		}
 		if len(errs) > 0 {
 			fmt.Fprintln(stderr, errs.Error())

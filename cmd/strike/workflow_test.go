@@ -226,6 +226,49 @@ func TestWorkflowValidateBothScopesRejected(t *testing.T) {
 	}
 }
 
+func TestWorkflowValidateAllAllowsCrossLayerOverride(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+	t.Chdir(work)
+	body := `{"name":"shared","phases":[{"name":"a","exit":{"type":"agent"}}]}`
+	for _, dir := range []string{
+		filepath.Join(home, ".strike", "workflows"),
+		filepath.Join(work, ".strike", "workflows"),
+	} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "shared.json"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	code := runWorkflowCLI([]string{"validate", "--all"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%q stdout=%q", code, stderr.String(), stdout.String())
+	}
+	if strings.Contains(stderr.String(), "duplicate") {
+		t.Fatalf("cross-layer override flagged as duplicate: %q", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "validated 2") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
+func TestWorkflowScaffoldRejectsTraversalName(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	var stdout, stderr bytes.Buffer
+	code := runWorkflowCLI([]string{"scaffold", "--global", "../evil"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "path separator") && !strings.Contains(stderr.String(), "path segment") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
 func TestMainUsageListsWorkflow(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := runCLI([]string{"--help"}, &stdout, &stderr)

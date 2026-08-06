@@ -225,12 +225,17 @@ func ScaffoldWorkflow(name string) (Workflow, error) {
 }
 
 // ValidateWorkflowName rejects empty or unsafe workflow identifiers.
+// Names must be single path segments (no slashes or ".." ) so scaffold
+// filenames cannot escape the workflows directory.
 func ValidateWorkflowName(name string) error {
 	if err := validateConfigIdentifier(name, "workflow"); err != nil {
 		return err
 	}
 	if strings.TrimSpace(name) != name {
 		return fmt.Errorf("workflow name %q has leading or trailing whitespace", name)
+	}
+	if err := validateWorkflowPathSegment(name, "workflow"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -242,6 +247,25 @@ func ValidatePhaseName(name string) error {
 	}
 	if strings.TrimSpace(name) != name {
 		return fmt.Errorf("phase name %q has leading or trailing whitespace", name)
+	}
+	// Phases are not used as filenames, but keep the same identifier hygiene.
+	if strings.ContainsAny(name, `/\`) {
+		return fmt.Errorf("phase name %q contains a path separator", name)
+	}
+	return nil
+}
+
+func validateWorkflowPathSegment(name, kind string) error {
+	if name == "." || name == ".." {
+		return fmt.Errorf("%s name %q is not a valid path segment", kind, name)
+	}
+	if strings.ContainsAny(name, `/\`) {
+		return fmt.Errorf("%s name %q contains a path separator", kind, name)
+	}
+	// Reject Windows drive-ish and reserved device names only when they would
+	// be the whole segment; keep the check cheap and portable.
+	if filepath.Base(name) != name {
+		return fmt.Errorf("%s name %q is not a single path segment", kind, name)
 	}
 	return nil
 }
