@@ -619,8 +619,10 @@ func (s *Service) ask(ctx context.Context, req tool.AskRequest, corr protocol.Co
 	ex := s.explainWorstLocked(req.Permission, req.Patterns)
 	switch action {
 	case Allow:
+		// Skip audit on synchronous allow — high-frequency tools (read/glob)
+		// would flood session JSONL. Deny, ask suspend, and user replies still
+		// emit permission.decided for the timeline audit trail.
 		s.mu.Unlock()
-		s.emitDecided(corr, req, action, "", "", ex)
 		return nil
 	case Deny:
 		s.mu.Unlock()

@@ -133,10 +133,12 @@ grant that would override a parent **Deny** is rejected (does not silently
 widen). Session always / project decisions remain the TUI reply path;
 programmatic `Service.Grant` is the scoped+TTL API.
 
-**Audit trail:** every allow/deny/ask outcome emits `permission.decided`
-(plus `permission.asked` / `permission.resolved` when the user is prompted).
-`/timeline` folds these into `kind: permission` entries with redacted
-patterns (see [secrets.md](secrets.md) / `pkg/redact`).
+**Audit trail:** hard **deny**, **ask** suspend, and user **reply** outcomes
+emit `permission.decided` (plus `permission.asked` / `permission.resolved`
+when the user is prompted). Synchronous allows are not audited (avoids
+flooding session JSONL on high-frequency read/search tools). `/timeline`
+folds audit events into `kind: permission` entries with redacted patterns
+(see [secrets.md](secrets.md) / `pkg/redact`).
 
 **Two-dial model (Codex mental model):**
 

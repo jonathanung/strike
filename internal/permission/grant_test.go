@@ -117,12 +117,28 @@ func TestScopedGrantAskUsesGrant(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Ask = %v", err)
 	}
-	// Auto-allow emits PermissionDecided audit only (not PermissionAsked).
+	// Synchronous allow from a scoped grant does not emit (avoid log flood);
+	// deny/ask/reply still audit.
+	if len(events) != 0 {
+		t.Fatalf("events = %#v, want none on grant allow", events)
+	}
+}
+
+func TestDenyEmitsPermissionDecided(t *testing.T) {
+	var events []protocol.Event
+	svc := New(func(ev protocol.Event) { events = append(events, ev) }, Defaults(), Ruleset{
+		{Permission: "bash", Pattern: "*", Action: Deny},
+	})
+	err := svc.Ask(context.Background(), tool.AskRequest{Permission: "bash", Patterns: []string{"rm"}})
+	var denied *DeniedError
+	if !errors.As(err, &denied) {
+		t.Fatalf("err = %v", err)
+	}
 	if len(events) != 1 {
-		t.Fatalf("events = %#v, want 1 decided", events)
+		t.Fatalf("events = %#v", events)
 	}
 	dec, ok := events[0].(protocol.PermissionDecided)
-	if !ok || dec.Action != "allow" {
-		t.Fatalf("event = %#v, want PermissionDecided allow", events[0])
+	if !ok || dec.Action != "deny" {
+		t.Fatalf("got %#v", events[0])
 	}
 }
