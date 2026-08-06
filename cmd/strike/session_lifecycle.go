@@ -263,6 +263,11 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 			if a.schedulerClose != nil {
 				a.schedulerClose()
 			}
+			if a.plansClose != nil {
+				if err := a.plansClose(); err != nil && runErr == nil {
+					runErr = fmt.Errorf("closing project plans: %w", err)
+				}
+			}
 			if a.goalsClose != nil {
 				if err := a.goalsClose(); err != nil && runErr == nil {
 					runErr = fmt.Errorf("closing project goals: %w", err)
@@ -400,6 +405,11 @@ func runExecContext(ctx context.Context, opts cliOptions, prompt string, format 
 		if a.worktreeClose != nil {
 			if err := a.worktreeClose(); err != nil && runErr == nil {
 				runErr = fmt.Errorf("removing session worktree: %w", err)
+			}
+		}
+		if a.plansClose != nil {
+			if err := a.plansClose(); err != nil && runErr == nil {
+				runErr = fmt.Errorf("closing project plans: %w", err)
 			}
 		}
 		if a.goalsClose != nil {

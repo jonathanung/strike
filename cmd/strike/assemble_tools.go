@@ -22,6 +22,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/memory"
 	"github.com/jonathanung/strike-cli/internal/models"
 	"github.com/jonathanung/strike-cli/internal/permission"
+	"github.com/jonathanung/strike-cli/internal/plan"
 	"github.com/jonathanung/strike-cli/internal/project"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
@@ -56,6 +57,7 @@ type assembled struct {
 	memoryClose    func() error
 	issuesClose    func() error
 	goalsClose     func() error
+	plansClose     func() error
 	// worktreeClose removes a strike-managed worktree when cleanup=delete.
 	worktreeClose func() error
 	// worktreeNotice is a user-visible soft-fail message (e.g. non-git cwd).
@@ -116,8 +118,17 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("opening project goals: %w", err)
 	}
+	planStore, err := plan.Open(globalRoot, projectIdentity.Key)
+	if err != nil {
+		_ = goalStore.Close()
+		_ = issueStore.Close()
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, fmt.Errorf("opening project plans: %w", err)
+	}
 	cfg, err := config.Load(workDir)
 	if err != nil {
+		_ = planStore.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
 		_ = memoryStore.Close()
@@ -126,6 +137,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	}
 	sandboxMode, err := resolveSandboxMode(cfg.Sandbox, opts.sandbox)
 	if err != nil {
+		_ = planStore.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
 		_ = memoryStore.Close()
@@ -149,6 +161,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	if opts.effort != "" {
 		level, ok := protocol.ParseEffort(opts.effort)
 		if !ok || level == protocol.EffortDefault {
+			_ = planStore.Close()
 			_ = goalStore.Close()
 			_ = issueStore.Close()
 			_ = memoryStore.Close()
@@ -160,6 +173,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 
 	authStore, err := auth.OpenStore(auth.DefaultPath())
 	if err != nil {
+		_ = planStore.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
 		_ = memoryStore.Close()
@@ -255,6 +269,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// /provider otherwise). Headless exec always requires a usable provider.
 	if requireProvider || (opts.providerSet && opts.provider != "") {
 		if cfg.Provider == "" {
+			_ = planStore.Close()
 			_ = goalStore.Close()
 			_ = issueStore.Close()
 			_ = memoryStore.Close()
@@ -262,6 +277,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			return nil, fmt.Errorf("no provider configured (pass --provider or set provider in config)")
 		}
 		if _, _, err := selectProvider(cfg.Provider); err != nil {
+			_ = planStore.Close()
 			_ = goalStore.Close()
 			_ = issueStore.Close()
 			_ = memoryStore.Close()
@@ -274,6 +290,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// available names in its description at construction time.
 	skills, err := config.LoadSkillsWithError(workDir)
 	if err != nil {
+		_ = planStore.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
 		_ = memoryStore.Close()
@@ -330,6 +347,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// other personas supply a body that becomes the persona layer.
 	loadedAgents, err := config.LoadAgentsWithError(workDir)
 	if err != nil {
+		_ = planStore.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
 		_ = memoryStore.Close()
@@ -367,6 +385,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	instructions := config.LoadInstructions(workDir, projectIdentity.Root)
 	workflows, err := config.LoadWorkflows(workDir)
 	if err != nil {
+		_ = planStore.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
 		_ = memoryStore.Close()
@@ -421,6 +440,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// this OS process. Omitted limits stay unlimited (no wait).
 	schedEff, err := cfg.SchedulerEffective()
 	if err != nil {
+		_ = planStore.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
 		_ = memoryStore.Close()
@@ -429,6 +449,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	}
 	sched, err := scheduler.New(schedEff.SchedulerConfig())
 	if err != nil {
+		_ = planStore.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
 		_ = memoryStore.Close()
@@ -648,6 +669,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		info, err := sessions.LatestRoot(projectIdentity.Key)
 		if err != nil {
 			sched.Close()
+			_ = planStore.Close()
 			_ = goalStore.Close()
 			_ = issueStore.Close()
 			_ = memoryStore.Close()
@@ -659,6 +681,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	first, replay, err := openRoot(resumeID, true)
 	if err != nil {
 		sched.Close()
+		_ = planStore.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
 		_ = memoryStore.Close()
@@ -724,9 +747,11 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	sandboxExplain := sandbox.Explain(sandboxPolicy)
 	services.Shell = local.NewShell(workDir, sandboxPolicy)
 	services.Goals = local.NewGoals(goalStore, workDir)
+	services.Plans = local.NewPlans(planStore)
 	services.Sessions = local.NewSessions(sessions, projectIdentity.Key)
 	services.Init = local.NewProjectInit(workDir)
 	services.MCP = local.NewMCP(mcpMgr)
+	services.LSP = local.NewLSP(lspMgr)
 	services.Telemetry = local.NewTelemetry()
 
 	spawn := rootSpawner(func(id string) (*rootSlot, error) {
@@ -756,6 +781,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		},
 		goalsClose: func() error {
 			return goalStore.Close()
+		},
+		plansClose: func() error {
+			return planStore.Close()
 		},
 		worktreeClose:  first.wtClose,
 		worktreeNotice: first.wtNotice,

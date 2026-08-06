@@ -114,6 +114,11 @@ func runACP(opts cliOptions, stdin io.Reader, stdout, stderr io.Writer) (runErr 
 				runErr = fmt.Errorf("removing session worktree: %w", err)
 			}
 		}
+		if a.plansClose != nil {
+			if err := a.plansClose(); err != nil && runErr == nil {
+				runErr = fmt.Errorf("closing project plans: %w", err)
+			}
+		}
 		if a.goalsClose != nil {
 			if err := a.goalsClose(); err != nil && runErr == nil {
 				runErr = fmt.Errorf("closing project goals: %w", err)

@@ -292,7 +292,8 @@ func effortNames() string {
 }
 
 // setAutonomy records the session exit-gate policy and confirms it. Empty
-// normalizes to supervised; unrecognized values are rejected.
+// normalizes to supervised; unrecognized values are rejected. When a workflow
+// phase is active, re-emits PhaseChanged so Gate matches the new dial.
 func (e *Engine) setAutonomy(mode protocol.Autonomy) {
 	parsed, ok := protocol.ParseAutonomy(string(mode))
 	if !ok {
@@ -307,6 +308,15 @@ func (e *Engine) setAutonomy(mode protocol.Autonomy) {
 		Correlation: e.sessionCorr(),
 		Mode:        parsed,
 	})
+	if phase, ok := e.currentPhase(); ok {
+		e.emitSelected(protocol.PhaseChanged{
+			Correlation: e.sessionCorr(),
+			Workflow:    e.workflow.Name,
+			Phase:       phase.Name,
+			Index:       e.phaseIndex,
+			Gate:        e.effectiveGateLabel(),
+		})
+	}
 }
 
 func autonomyNames() string {

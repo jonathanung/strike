@@ -65,6 +65,7 @@ write this file. Manual `/ftue` remains available after acknowledgement.
   },
   "permissionAutoApproveSeconds": 0,
   "permissionAutoApproveExclude": ["bash"],
+  "maxChildDepth": 0,
   "compactionStrategy": "trim",
   "compactionModel": "",
   "compactionThreshold": 0.70,
@@ -227,6 +228,14 @@ count down or auto-approve. Disabled by default (mode `default`, seconds `0`).
 duration without selecting soft-approve mode; when soft-approve is active and
 seconds is unset/`0`, the default is **15**. Names in
 `permissionAutoApproveExclude` (case-insensitive) never auto-approve.
+Both are editable under `/settings` → Defaults (auto-approve applies to the
+current session immediately).
+
+**Max child depth:** `maxChildDepth` bounds nested `task` tool spawns (root
+depth 0). Zero/unset means the engine default (**1**: children cannot spawn
+further tasks). Values above **8** clamp to 8. Editable under `/settings` →
+Defaults; takes effect for **new** sessions (already-running engines keep their
+bound).
 
 ## Desktop notifications (`notify`)
 
@@ -414,13 +423,15 @@ provider + model; in the effort picker it saves the highlighted level; in
 the theme picker it saves the highlighted theme id.
 
 **/settings Defaults**: interactive editor for theme, vimMode, nanoMode,
-mdReadMode, **permissionMode**, **sandbox**, **notify**, **leanCode**,
-**deferTools**, **session.worktree**, and effort (plus a read-only view of
-provider/model/agent). Changes write `~/.strike/config`. Theme, editor/reader
-presentation, and notify apply to the current session immediately;
-permissionMode, sandbox, leanCode, deferTools, and session.worktree affect
-**new** sessions (use `/mode` / Shift+Tab for the live permission dial, and
-`/sandbox` to inspect the OS dial already bound for this process).
+mdReadMode, **permissionMode**, **permissionAutoApproveSeconds**,
+**permissionAutoApproveExclude**, **sandbox**, **notify**, **leanCode**,
+**deferTools**, **session.worktree**, **maxChildDepth**, and effort (plus a
+read-only view of provider/model/agent). Changes write `~/.strike/config`.
+Theme, editor/reader presentation, notify, and auto-approve countdown/exclude
+apply to the current session immediately; permissionMode, sandbox, leanCode,
+deferTools, session.worktree, and maxChildDepth affect **new** sessions (use
+`/mode` / Shift+Tab for the live permission dial, and `/sandbox` to inspect
+the OS dial already bound for this process).
 
 Peer settings inventory (Claude Code / OpenCode → strike): see
 [peer-ecosystem.md](peer-ecosystem.md#settings-inventory).
@@ -492,6 +503,12 @@ Configure stdio language servers so file tool mutations (`write` / `edit` /
 per URI. A dead language server degrades to no diagnostics and never takes
 down the session (same crash isolation as MCP).
 
+By default strike ships a server map for **Go** (`gopls`), **TypeScript**
+(`typescript-language-server --stdio`), **Python** (`pylsp`), and **Rust**
+(`rust-analyzer`). Missing binaries degrade to per-server `error` status and
+never take down the session. Clear the map with `"servers": {}`, or replace it
+entirely by setting `lsp.servers` in config.
+
 ```json
 // ~/.strike/config or ./.strike/config
 {
@@ -505,6 +522,14 @@ down the session (same crash isolation as MCP).
         "command": "typescript-language-server",
         "args": ["--stdio"],
         "extensions": [".ts", ".tsx", ".js", ".jsx"]
+      },
+      "python": {
+        "command": "pylsp",
+        "extensions": [".py"]
+      },
+      "rust": {
+        "command": "rust-analyzer",
+        "extensions": [".rs"]
       }
     }
   }
@@ -551,7 +576,12 @@ per file). A dead language server degrades to no injection.
 }
 ```
 
-The `/lsp` UI is a separate follow-up (epic E2.3).
+### `/lsp` and the diagnostics pane
+
+- `/lsp` — status (`up` / `down` / `error` / `disabled`); command, extensions, open docs
+- `/lsp retry [name]` — reconnect one server, or every non-up server
+- `/lsp disable <name>` — stop a server for the session
+- `/diagnostics` — focus the right-pane diagnostics browser (findings from live servers; Enter opens the file)
 
 ## MCP servers (stdio + HTTP)
 
