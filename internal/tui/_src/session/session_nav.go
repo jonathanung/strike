@@ -526,6 +526,13 @@ func seedFromReplay(m *Model, events []protocol.Event) {
 	if m == nil || len(events) == 0 {
 		return
 	}
+	// Rebuild structured timeline from the durable log (synthetic 1ms steps
+	// when envelope times are unavailable — live Observe uses wall clock).
+	m.resetRunTimeline()
+	base := time.Unix(0, 0).UTC()
+	for i, ev := range events {
+		m.observeTimeline(ev, base.Add(time.Duration(i)*time.Millisecond))
+	}
 	m.cells, m.toolByID = cellsFromEvents(events)
 	// Incomplete assistant/tool streams stay visible but are marked complete
 	// so resume never looks mid-stream.

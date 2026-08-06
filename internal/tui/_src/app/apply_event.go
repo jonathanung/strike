@@ -11,6 +11,9 @@ import (
 )
 
 func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
+	// Fold every event that reaches the UI into the structured run timeline
+	// before child filtering so parent-visible child lifecycle still lands.
+	m.observeTimeline(ev, time.Now())
 	// Defense-in-depth: child-session events should only surface permissions,
 	// questions, and child lifecycle (activity pane). Primary filtering is in
 	// the engine; ChildStarted/Completed must reach the TUI for subagent UI.
