@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"bytes"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -391,8 +392,19 @@ func TestWrapDarwinArgvShape(t *testing.T) {
 	if !strings.Contains(text, "file-write*") || !strings.Contains(text, "subpath") {
 		t.Fatalf("profile missing workspace write:\n%s", text)
 	}
-	if !strings.Contains(text, `(global-name "com.apple.securityd.xpc")`) {
-		t.Errorf("profile missing Keychain service:\n%s", text)
+	for _, rule := range []string{
+		`(global-name "com.apple.SecurityServer")`,
+		`(global-name "com.apple.securityd.xpc")`,
+		`(global-name "com.apple.trustd.agent")`,
+		`(global-name "com.apple.TrustEvaluationAgent")`,
+		`(global-name "com.apple.ocspd")`,
+		`(ipc-posix-name "com.apple.AppleDatabaseChanged")`,
+		`(preference-domain "com.apple.security")`,
+		`(preference-domain "com.apple.security_common")`,
+	} {
+		if !strings.Contains(text, rule) {
+			t.Errorf("profile missing Keychain rule %q:\n%s", rule, text)
+		}
 	}
 	// Workdir (or its real path) must appear.
 	realWD, _ := filepath.EvalSymlinks(wd)
@@ -417,6 +429,75 @@ func TestWrapDarwinArgvShape(t *testing.T) {
 		if strings.Contains(string(roBody), `subpath "`+realWD) || strings.Contains(string(roBody), `subpath "`+filepath.Clean(wd)) {
 			t.Fatalf("read-only profile must not allow write to workdir:\n%s", roBody)
 		}
+	}
+}
+
+func TestDarwinSandboxHTTPSHelper(t *testing.T) {
+	if os.Getenv("STRIKE_SANDBOX_HTTPS_HELPER") == "" {
+		t.Skip("helper process")
+	}
+	resp, err := http.Get("https://api.github.com/zen")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %s", resp.Status)
+	}
+}
+
+func TestDarwinIntegrationAllowsKeychainRead(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("darwin seatbelt integration")
+	}
+	ResetWarnForTest()
+	resetAvailabilityForTest()
+	if !Available() {
+		if os.Getenv("CI") != "" {
+			t.Fatal("sandbox-exec unavailable or blocked in macOS CI")
+		}
+		t.Skip("sandbox-exec unavailable or blocked in this environment")
+	}
+
+	wd := t.TempDir()
+	keychain := filepath.Join(wd, "test.keychain-db")
+	const password = "strike-sandbox-test"
+	for _, args := range [][]string{
+		{"create-keychain", "-p", password, keychain},
+		{"unlock-keychain", "-p", password, keychain},
+		{"add-generic-password", "-s", "strike-sandbox-test", "-a", "test", "-w", password, keychain},
+	} {
+		if out, err := exec.Command("/usr/bin/security", args...).CombinedOutput(); err != nil {
+			t.Fatalf("security %s: %v: %s", args[0], err, out)
+		}
+	}
+
+	listArgv := Wrap([]string{"/usr/bin/security", "list-keychains"}, Policy{
+		Mode: ModeWorkspaceWrite, WorkDir: wd,
+	})
+	if out, err := exec.Command(listArgv[0], listArgv[1:]...).CombinedOutput(); err != nil {
+		t.Fatalf("sandboxed Keychain search list: %v: %s", err, out)
+	}
+
+	argv := Wrap([]string{
+		"/usr/bin/security", "find-generic-password",
+		"-s", "strike-sandbox-test", "-a", "test", "-w", keychain,
+	}, Policy{Mode: ModeWorkspaceWrite, WorkDir: wd})
+	out, err := exec.Command(argv[0], argv[1:]...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("sandboxed Keychain read: %v: %s", err, out)
+	}
+	if strings.TrimSpace(string(out)) != password {
+		t.Fatalf("sandboxed Keychain read = %q", out)
+	}
+
+	httpsArgv := Wrap([]string{
+		os.Args[0], "-test.run=^TestDarwinSandboxHTTPSHelper$", "-test.count=1",
+	}, Policy{Mode: ModeWorkspaceWrite, WorkDir: wd})
+	httpsCmd := exec.Command(httpsArgv[0], httpsArgv[1:]...)
+	httpsCmd.Env = append(os.Environ(), "STRIKE_SANDBOX_HTTPS_HELPER=1")
+	if out, err := httpsCmd.CombinedOutput(); err != nil {
+		t.Fatalf("sandboxed Go HTTPS trust evaluation: %v: %s", err, out)
 	}
 }
 

@@ -5,7 +5,24 @@ optional **managed/MDM** system config (highest). User and project files
 accept **JSON or JSONC** (`//` line comments and `/* block comments */`, same
 stripper as `mcp.jsonc` / `providers.jsonc` / `keybinds.jsonc`). An optional
 top-level `"$schema"` key is **ignored** at load (editor autocomplete only;
-Strike does not ship or fetch a schema URL).
+Strike never fetches a schema URL at runtime).
+
+**Published JSON Schema (editor DX):** point `$schema` at the versioned file in
+this repo (stable `main` raw URL):
+
+```text
+https://raw.githubusercontent.com/jonathanung/strike/main/schemas/strike-config.schema.json
+```
+
+Local path (clone/checkout): `schemas/strike-config.schema.json`. The schema
+documents high-traffic main-config keys (dials, permissions, hooks, sandbox,
+compaction/prune, session, scheduler, MCP/LSP shapes, …). Root and nested
+objects use **`additionalProperties: true`** so unknown/future keys and
+editor-only fields stay valid — matching runtime `encoding/json` (unknown keys
+ignored). Alignment with Go structs is best-effort via
+`TestStrikeConfigSchemaAlign` (not full codegen). Sidecar files
+(`mcp.jsonc` / `providers.jsonc` / `keybinds.jsonc`) are **not** fully schema'd
+here yet.
 
 **Load order (later wins for scalars; permission rules concatenate):**
 
@@ -117,8 +134,8 @@ write this file. Manual `/ftue` remains available after acknowledgement.
 ```jsonc
 // ~/.strike/config or ./.strike/config — JSONC comments allowed
 {
-  // Optional editor hint; ignored by Strike at load
-  "$schema": "https://example.invalid/strike-config.schema.json",
+  // Optional editor hint; ignored by Strike at load (no network fetch)
+  "$schema": "https://raw.githubusercontent.com/jonathanung/strike/main/schemas/strike-config.schema.json",
   "provider": "anthropic",
   "model": "claude-sonnet-5",
   "effort": "high",
@@ -859,21 +876,28 @@ per file). A dead language server degrades to no injection.
 - `/lsp disable <name>` — stop a server for the session
 - `/diagnostics` — focus the right-pane diagnostics browser (findings from live servers; Enter opens the file)
 
-### Navigation tools (optional)
+### Navigation and diagnostics tools (optional)
 
-Three read-only tools call the language server for code navigation. They are
-**not** core tools: when `deferTools` is `on`, their schemas stay out of the
-hot provider Tools array until `toolsearch` discovers them (or the model calls
-them by name).
+Read-only tools call the language server for code navigation and diagnostics
+queries. They are **not** core tools: when `deferTools` is `on`, their schemas
+stay out of the hot provider Tools array until `toolsearch` discovers them (or
+the model calls them by name).
 
-| Tool | LSP method | Args |
+| Tool | LSP method / source | Args |
 |---|---|---|
 | `definition` | `textDocument/definition` | `filePath`, `line` (1-based), optional `character` (0-based) |
 | `references` | `textDocument/references` | same position args; includes declaration |
 | `symbols` | `textDocument/documentSymbol` or `workspace/symbol` | `filePath` and/or `query` |
+| `diagnostics` | cached `publishDiagnostics` from live servers | optional `path` (file or directory; omit = workspace), optional `severity` (`error` default, `warning`, `info`, `hint`), optional `maxResults` (default 100, max 500) |
 
-A missing or dead language server returns a soft message in the tool result
-(never takes down the session). Default permission is Allow (read-only).
+`diagnostics` returns a stable JSON payload: `file`, `range` (1-based
+line/character start+end), `severity`, `source`, `code`, `message`, plus
+server status, counts, and a `truncated` flag. Results are sorted
+deterministically. Paths stay workspace-scoped.
+
+A missing or dead language server returns structured status / a soft message in
+the tool result (never hangs or takes down the session). Default permission is
+Allow (read-only).
 
 ## External harnesses (`harnesses`)
 
@@ -1311,6 +1335,67 @@ project **concatenate**). Each entry is either a **declarative rule**
 
 Invalid rows are dropped at load. Peer event-name mapping (CC/OpenCode/Crush):
 [peer-ecosystem.md](peer-ecosystem.md#hooks-alignment).
+
+### Shell hook stdin payload
+
+Shell hooks (`command`) receive one JSON object on stdin (not env vars):
+
+| Field | When | Notes |
+|---|---|---|
+| `event` | always | `pre_tool_use` or `post_tool_use` |
+| `session_id` | always | session id |
+| `cwd` | always | engine workdir |
+| `tool_name` | tool events | e.g. `edit`, `write` |
+| `tool_call_id` | tool events | call id |
+| `tool_input` | tool events | raw tool args object (`filePath` for `edit`/`write`) |
+| `tool_output` | `post_tool_use` | tool result text |
+| `is_error` | `post_tool_use` | `true` when the tool failed |
+
+Exit **0** allows; non-zero **blocks** (pre: deny tool; post: mark the completed call blocked and replace feedback). Timeouts and start failures **fail-open**. Prefer always-exit-0 recipes for non-blocking side effects (formatters, notify).
+
+### Post-edit formatters (recipe)
+
+Strike has **no** first-class `formatters` map (OpenCode-style plugin host is out of scope). Run formatters with `post_tool_use` shell hooks after successful `edit` / `write`. Requires `jq` on `PATH` for the snippets below.
+
+**Non-blocking Go format** (recommended default — formatter failure does not fail the tool):
+
+```json
+{
+  "hooks": [
+    {
+      "event": "post_tool_use",
+      "matcher": "{edit,write}",
+      "timeoutMs": 15000,
+      "command": "payload=$(cat); echo \"$payload\" | jq -e '.is_error == true' >/dev/null 2>&1 && exit 0; f=$(echo \"$payload\" | jq -r '.tool_input.filePath // empty'); [ -n \"$f\" ] || exit 0; case \"$f\" in *.go) gofmt -w \"$f\" 2>/dev/null || true ;; esac; exit 0"
+    }
+  ]
+}
+```
+
+**Multi-language sketch** (still non-blocking; adjust tools to taste):
+
+```json
+{
+  "hooks": [
+    {
+      "event": "post_tool_use",
+      "matcher": "{edit,write}",
+      "timeoutMs": 30000,
+      "command": "payload=$(cat); echo \"$payload\" | jq -e '.is_error == true' >/dev/null 2>&1 && exit 0; f=$(echo \"$payload\" | jq -r '.tool_input.filePath // empty'); [ -n \"$f\" ] || exit 0; case \"$f\" in *.go) gofmt -w \"$f\" 2>/dev/null || true ;; *.ts|*.tsx|*.js|*.jsx|*.json|*.css|*.md) command -v prettier >/dev/null && prettier --write \"$f\" 2>/dev/null || true ;; *.py) command -v ruff >/dev/null && ruff format \"$f\" 2>/dev/null || true ;; esac; exit 0"
+    }
+  ]
+}
+```
+
+**Blocking format** (rare): omit the trailing `|| true` / `exit 0` so a non-zero formatter exit marks the tool result blocked. Prefer non-blocking unless you intentionally gate the agent on format success.
+
+Notes:
+
+- Matcher is doublestar on **tool name** (`{edit,write}` is fine); it does not filter by file extension — do that in the shell `case`.
+- `apply_patch` and other mutators are not covered by this matcher; add separate rows if you format those paths.
+- Project hooks concatenate after global hooks; put team formatters in `./.strike/config` (or your project config path).
+- Editor/`$EDITOR` format-on-save remains a valid alternative outside the agent loop.
+- Peer inventory: [peer-ecosystem.md](peer-ecosystem.md#settings-inventory) (Formatters → hooks recipe).
 
 ## History compaction
 
