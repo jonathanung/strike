@@ -26,6 +26,7 @@ const expectedUsage = `Usage:
   strike mcp-serve [options]
   strike auth <command> [arguments]
   strike restore [options]
+  strike workflow <command> [arguments]
   strike version
   strike upgrade
 
