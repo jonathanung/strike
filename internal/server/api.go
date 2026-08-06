@@ -699,7 +699,7 @@ func (s *Server) writeWSRange(ctx context.Context, ws wsTextWriter, path string,
 		if len(line) > 0 && line[len(line)-1] == '\n' {
 			offset += int64(len(line))
 			payload := bytes.TrimSpace(line)
-			if len(payload) > 0 && json.Valid(payload) {
+			if len(payload) > 0 && json.Valid(payload) && !isSessionLogHeader(payload) {
 				if err := ws.WriteText(string(payload)); err != nil {
 					return offset, err
 				}

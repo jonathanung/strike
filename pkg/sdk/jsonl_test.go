@@ -158,3 +158,20 @@ func TestConnectJSONLSendWritesEnvelope(t *testing.T) {
 		t.Fatalf("op = %#v", op)
 	}
 }
+
+func TestEventDecoderSkipsSessionHeader(t *testing.T) {
+	raw := `{"type":"session.header","schemaVersion":1,"time":"2020-01-01T00:00:00Z"}` + "\n" +
+		`{"type":"user.message","time":"2020-01-01T00:00:01Z","v":"1.4.0","data":{"text":"hi"}}` + "\n"
+	dec := sdk.NewEventDecoder(strings.NewReader(raw))
+	ev, err := dec.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	um, ok := ev.(protocol.UserMessage)
+	if !ok || um.Text != "hi" {
+		t.Fatalf("ev = %#v", ev)
+	}
+	if _, err := dec.Decode(); err != io.EOF {
+		t.Fatalf("err = %v", err)
+	}
+}

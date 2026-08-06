@@ -302,6 +302,25 @@ func TestDecodeSessionJSONLSkipsTrailingPartialLine(t *testing.T) {
 	}
 }
 
+func TestDecodeSessionJSONLSkipsSchemaHeader(t *testing.T) {
+	body := mustSessionJSONL(t,
+		protocol.UserMessage{Text: "hi"},
+		protocol.TextDelta{Text: "there"},
+	)
+	hdr := []byte(`{"type":"session.header","schemaVersion":1,"time":"2020-01-01T00:00:00Z"}` + "\n")
+	events, err := decodeSessionJSONL(append(hdr, body...))
+	if err != nil {
+		t.Fatalf("decode with header: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("events = %d, want 2", len(events))
+	}
+	future := []byte(`{"type":"session.header","schemaVersion":99,"time":"2020-01-01T00:00:00Z"}` + "\n")
+	if _, err := decodeSessionJSONL(append(future, body...)); err == nil {
+		t.Fatal("expected error for newer schema header")
+	}
+}
+
 func TestCellsFromEventsLiveKeepsTrailingStreamIncomplete(t *testing.T) {
 	// Trailing TextDelta with no TurnCompleted: finished path force-completes;
 	// live path leaves the assistant incomplete (no glamour on partial md).

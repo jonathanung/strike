@@ -568,6 +568,10 @@ func (s *Server) writeEventsRangeFile(ctx context.Context, w http.ResponseWriter
 				// Skip malformed lines rather than killing the stream.
 				continue
 			}
+			// Skip session log schema header (#803); clients expect protocol events.
+			if isSessionLogHeader(payload) {
+				continue
+			}
 			if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {
 				return offset, err
 			}
@@ -581,6 +585,18 @@ func (s *Server) writeEventsRangeFile(ctx context.Context, w http.ResponseWriter
 		}
 	}
 	return offset, nil
+}
+
+// isSessionLogHeader reports whether payload is the optional first-line
+// session.header schema marker written by internal/session (#803).
+func isSessionLogHeader(payload []byte) bool {
+	var probe struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(payload, &probe); err != nil {
+		return false
+	}
+	return probe.Type == "session.header"
 }
 
 func validateSessionID(id string) error {
