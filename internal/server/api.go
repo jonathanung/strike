@@ -71,6 +71,8 @@ type capabilities struct {
 	// Permissions is true when host.Services.Permissions is set (explain + presets).
 	Permissions bool `json:"permissions"`
 	Sandbox     bool `json:"sandbox"`
+	// Diag is true when a live engine can build a prompt/config diagnostic bundle.
+	Diag bool `json:"diag"`
 }
 
 type bootstrapResponse struct {

@@ -29,6 +29,34 @@ export const sendOp = (type: string, data?: unknown, rootID?: string) => {
   return request<{ ok: boolean }>(`/v1/ops${qs}`, { method: "POST", body: JSON.stringify({ type, ...(data === undefined ? {} : { data }) }) });
 };
 
+/** Download a redacted prompt/config diagnostic bundle (live host only). */
+export async function downloadDiagnostics(rootID?: string): Promise<void> {
+  const qs = rootID ? `?root=${encodeURIComponent(rootID)}` : "";
+  const headers = new Headers();
+  if (queryToken) headers.set("Authorization", `Bearer ${queryToken}`);
+  const response = await fetch(`/v1/diag${qs}`, { credentials: "same-origin", headers });
+  if (!response.ok) {
+    const err = await response.json().catch(() => null) as { error?: string } | null;
+    throw new Error(err?.error || `${response.status} ${response.statusText}`);
+  }
+  const blob = await response.blob();
+  const cd = response.headers.get("Content-Disposition") || "";
+  const match = /filename="?([^";]+)"?/i.exec(cd);
+  const filename = match?.[1] || `strike-diag-${Date.now()}.json`;
+  const url = URL.createObjectURL(blob);
+  try {
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.rel = "noopener";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 // --- root API ---
 export const roots = () => request<RootsResponse>("/v1/roots");
 export const createRoot = () => request<RootCreateResult>("/v1/roots", { method: "POST" });

@@ -11,8 +11,9 @@ describe("App", () => {
   beforeEach(() => {
     FakeEventSource.instances = []; FakeWebSocket.instances = [];
     vi.stubGlobal("EventSource", FakeEventSource); vi.stubGlobal("WebSocket", FakeWebSocket);
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input).includes("bootstrap") ? response({ version: "test", authRequired: false, attachOnly: false, capabilities: { live: true, files: false, memory: false, issues: false, roots: false }, protocolOps: ["user.input", "compact", "rewind"], status: { sessionId: "live", provider: "echo", busy: false }, agents: [{ name: "build" }], skills: [{ name: "ship", description: "Ship changes" }] }) : String(input).includes("sessions") ? response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" }) : response({ ok: true })));
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input).includes("bootstrap") ? response({ version: "test", authRequired: false, attachOnly: false, capabilities: { live: true, diag: true, files: false, memory: false, issues: false, roots: false }, protocolOps: ["user.input", "compact", "rewind"], status: { sessionId: "live", provider: "echo", busy: false }, agents: [{ name: "build" }], skills: [{ name: "ship", description: "Ship changes" }] }) : String(input).includes("sessions") ? response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" }) : response({ ok: true })));
     Element.prototype.scrollIntoView = vi.fn();
+    vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn(() => "blob:diag"), revokeObjectURL: vi.fn() });
   });
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
@@ -287,8 +288,44 @@ describe("App", () => {
     render(<App />);
     await screen.findByText("Current");
     fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
-    expect(screen.getByRole("dialog", { name: "Workspace settings" })).toHaveTextContent("Provider authentication unavailable");
-    expect(screen.getByRole("dialog", { name: "Workspace settings" })).toHaveTextContent("Saved defaults unavailable");
+    const dialog = screen.getByRole("dialog", { name: "Workspace settings" });
+    expect(dialog).toHaveTextContent("Provider authentication unavailable");
+    expect(dialog).toHaveTextContent("Saved defaults unavailable");
+    expect(dialog.querySelector('[aria-label="Download diagnostics"]')).not.toBeDisabled();
+  });
+
+  it("downloads diagnostics from the context inspector when live diag is available", async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) return response({ version: "test", authRequired: false, attachOnly: false, capabilities: { live: true, diag: true, roots: false }, protocolOps: ["user.input"], status: { sessionId: "live", provider: "echo", busy: false }, agents: [], skills: [] });
+      if (url.includes("sessions")) return response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" });
+      if (url.includes("/v1/diag")) {
+        return Promise.resolve(new Response(JSON.stringify({ schemaVersion: "1.0.0", redacted: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json", "Content-Disposition": 'attachment; filename="strike-diag-live-test.json"' },
+        }));
+      }
+      return response({ ok: true });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    await screen.findByText("Current");
+    fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
+    const button = screen.getByRole("button", { name: "Download diagnostics" });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/v1/diag"), expect.objectContaining({ credentials: "same-origin" })));
+    expect(URL.createObjectURL).toHaveBeenCalled();
+    expect(URL.revokeObjectURL).toHaveBeenCalled();
+  });
+
+  it("disables diagnostic download when diag capability is absent", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input).includes("bootstrap") ? response({ version: "test", authRequired: false, attachOnly: true, capabilities: { live: false, diag: false }, protocolOps: null, agents: [], skills: [] }) : String(input).includes("sessions") ? response({ sessions: [{ id: "saved", title: "Saved" }] }) : String(input).includes("roots") ? Promise.resolve(new Response("multi-root unavailable", { status: 503 })) : response({ ok: true })));
+    render(<App />);
+    await screen.findByText("Saved");
+    fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
+    expect(screen.getByRole("button", { name: "Download diagnostics" })).toBeDisabled();
+    expect(screen.getByText(/Unavailable on this host/)).toBeInTheDocument();
   });
 
   it("keeps secondary runtime controls behind disclosure and issues set ops", async () => {
