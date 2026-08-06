@@ -47,6 +47,9 @@ const minSessionIDPrefixLen = 8
 //
 // Path ownership (see tool.PathOwnership) is shared across lead + children so
 // concurrent writers detect overlap. Cleared on Dissolve.
+//
+// Coordination contracts (see contract.go) layer threads + require-ack TTL on
+// the mailbox plane. Cleared on Dissolve with timers stopped.
 type Team struct {
 	mu          sync.Mutex
 	leadID      string
@@ -57,6 +60,8 @@ type Team struct {
 	delegations map[string]Delegation     // delegation id → item
 	delegSeq    int                       // monotonic id allocator (d1, d2, …)
 	ownership   *tool.PathOwnership
+	threads     map[string][]threadEntry // task/delegation id → thread ring
+	pendingAcks map[string]*pendingAck   // message id → require-ack tracker
 }
 
 // TeamMember is one roster entry (lead or child).
@@ -434,10 +439,11 @@ func (t *Team) SetPersona(sessionID, persona string) {
 	t.members[id] = m
 }
 
-// Dissolve clears the roster, shared task board, delegations, and path
-// ownership (team ends with the lead session). After Dissolve, Contains is
-// false for everyone, Roster is empty, and Board/Delegations are empty. The
-// Team value should not be reused; callers may replace the pointer.
+// Dissolve clears the roster, shared task board, delegations, coordination
+// contracts, and path ownership (team ends with the lead session). After
+// Dissolve, Contains is false for everyone, Roster is empty, and
+// Board/Delegations/threads are empty. The Team value should not be reused;
+// callers may replace the pointer.
 func (t *Team) Dissolve() {
 	if t == nil {
 		return
@@ -448,6 +454,7 @@ func (t *Team) Dissolve() {
 	t.live = make(map[string]*mailboxTarget)
 	t.clearBoardLocked()
 	t.clearDelegationsLocked()
+	t.clearContractsLocked()
 	if t.ownership != nil {
 		t.ownership.Clear()
 	}

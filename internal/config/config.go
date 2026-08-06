@@ -270,6 +270,23 @@ type SessionConfig struct {
 	// (default warn). warn surfaces tool warnings + path.overlap events;
 	// block refuses conflicting writes; off tracks without signaling.
 	OverlapPolicy string `json:"overlapPolicy,omitempty"`
+	// AgentBudget is the default per-child resource limit for task spawns
+	// (#774). Spawn-time task.budget fields overlay non-zero values. Zero
+	// means unlimited for that dimension (soft stall/loop signals still
+	// apply). Distinct from future session maxSessionCostUSD (#577), which
+	// remains the outer cost envelope when configured.
+	AgentBudget AgentBudgetConfig `json:"agentBudget,omitempty"`
+}
+
+// AgentBudgetConfig is JSON for session.agentBudget (camelCase).
+type AgentBudgetConfig struct {
+	MaxWallClockS     int     `json:"maxWallClockS,omitempty"`
+	MaxTokens         int     `json:"maxTokens,omitempty"`
+	MaxCostUSD        float64 `json:"maxCostUsd,omitempty"`
+	MaxToolCalls      int     `json:"maxToolCalls,omitempty"`
+	MaxDangerousTools int     `json:"maxDangerousTools,omitempty"`
+	StallAfterS       int     `json:"stallAfterS,omitempty"`
+	LoopDetectN       int     `json:"loopDetectN,omitempty"`
 }
 
 // Hook is one lifecycle hook entry. Exactly one of Action or Command should
@@ -765,6 +782,32 @@ func ClampPermissionAutoApproveSeconds(n int) int {
 	return n
 }
 
+// mergeAgentBudgetConfig overlays non-zero layer fields onto base.
+func mergeAgentBudgetConfig(base, layer AgentBudgetConfig) AgentBudgetConfig {
+	if layer.MaxWallClockS != 0 {
+		base.MaxWallClockS = layer.MaxWallClockS
+	}
+	if layer.MaxTokens != 0 {
+		base.MaxTokens = layer.MaxTokens
+	}
+	if layer.MaxCostUSD != 0 {
+		base.MaxCostUSD = layer.MaxCostUSD
+	}
+	if layer.MaxToolCalls != 0 {
+		base.MaxToolCalls = layer.MaxToolCalls
+	}
+	if layer.MaxDangerousTools != 0 {
+		base.MaxDangerousTools = layer.MaxDangerousTools
+	}
+	if layer.StallAfterS != 0 {
+		base.StallAfterS = layer.StallAfterS
+	}
+	if layer.LoopDetectN != 0 {
+		base.LoopDetectN = layer.LoopDetectN
+	}
+	return base
+}
+
 // ClampMaxChildDepth maps config values: <0 → 0 (engine default),
 // >MaxChildDepthCeiling → MaxChildDepthCeiling.
 func ClampMaxChildDepth(n int) int {
@@ -1067,6 +1110,7 @@ func merge(base, layer Config) Config {
 	if layer.Session.OverlapPolicy != "" {
 		base.Session.OverlapPolicy = layer.Session.OverlapPolicy
 	}
+	base.Session.AgentBudget = mergeAgentBudgetConfig(base.Session.AgentBudget, layer.Session.AgentBudget)
 	base.Permissions = append(base.Permissions, layer.Permissions...)
 	base.Hooks = append(base.Hooks, layer.Hooks...)
 	base.Providers = mergeProviders(base.Providers, layer.Providers)

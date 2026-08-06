@@ -3683,7 +3683,7 @@ func TestPaletteHelpInvocationOpensHelpModal(t *testing.T) {
 
 	}
 
-	for _, want := range []string{"/session", "/rename", "/export", "/timeline", "/copy", "/theme", "/memory", "/queue", "/issues", "/plan", "/compact", "/fast", "/think", "/layout", "/md-read", "/keys", "/legend", "/settings", "/exit", "/quit", "/palette", "/interrupt", "/agent-next", "/focus-left"} {
+	for _, want := range []string{"/session", "/rename", "/export", "/timeline", "/diag", "/copy", "/theme", "/memory", "/queue", "/issues", "/plan", "/compact", "/fast", "/think", "/layout", "/md-read", "/keys", "/legend", "/settings", "/exit", "/quit", "/palette", "/interrupt", "/agent-next", "/focus-left"} {
 
 		found := false
 

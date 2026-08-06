@@ -32,6 +32,7 @@ package protocol
 import (
 	"encoding/json"
 	"strings"
+	"time"
 )
 
 // Effort is the reasoning dial as the user sees it: how much internal
@@ -407,6 +408,13 @@ type Compact struct {
 // carries raw API keys — previews are redacted by the engine.
 type InspectEffectivePrompt struct{}
 
+// InspectDiagnosticBundle requests a versioned prompt/config diagnostic
+// bundle (layer map + effective dials + digests). Prefer the last Stream
+// composition when one exists; otherwise the current composition. Never
+// carries raw API keys — previews and paths are redacted by the engine.
+// See pkg/diag for the export document schema.
+type InspectDiagnosticBundle struct{}
+
 // Rewind removes the last completed user↔assistant turn from model-facing
 // history. When RestoreFiles is true, also restores per-file checkpoints
 // captured before mutating tools in that turn (never git reset --hard).
@@ -416,22 +424,23 @@ type Rewind struct {
 	RestoreFiles bool `json:"restoreFiles,omitempty"`
 }
 
-func (UserInput) isOp()              {}
-func (PermissionReply) isOp()        {}
-func (QuestionReply) isOp()          {}
-func (Interrupt) isOp()              {}
-func (SelectModel) isOp()            {}
-func (SelectAgent) isOp()            {}
-func (SetEffort) isOp()              {}
-func (SetAutonomy) isOp()            {}
-func (SetPermissionMode) isOp()      {}
-func (SetFast) isOp()                {}
-func (StartWorkflow) isOp()          {}
-func (StopWorkflow) isOp()           {}
-func (FilesChanged) isOp()           {}
-func (Compact) isOp()                {}
-func (InspectEffectivePrompt) isOp() {}
-func (Rewind) isOp()                 {}
+func (UserInput) isOp()               {}
+func (PermissionReply) isOp()         {}
+func (QuestionReply) isOp()           {}
+func (Interrupt) isOp()               {}
+func (SelectModel) isOp()             {}
+func (SelectAgent) isOp()             {}
+func (SetEffort) isOp()               {}
+func (SetAutonomy) isOp()             {}
+func (SetPermissionMode) isOp()       {}
+func (SetFast) isOp()                 {}
+func (StartWorkflow) isOp()           {}
+func (StopWorkflow) isOp()            {}
+func (FilesChanged) isOp()            {}
+func (Compact) isOp()                 {}
+func (InspectEffectivePrompt) isOp()  {}
+func (InspectDiagnosticBundle) isOp() {}
+func (Rewind) isOp()                  {}
 
 // Event is an engine -> client notification.
 type Event interface{ isEvent() }
@@ -516,6 +525,42 @@ type TeamRosterMember struct {
 	Role            string   `json:"role,omitempty"` // "lead" or "member"
 	QueuePools      []string `json:"queuePools,omitempty"`
 	QueueLabel      string   `json:"queueLabel,omitempty"`
+	// Live observability (#774). Optional; empty when unknown.
+	Objective    string   `json:"objective,omitempty"`
+	LastAction   string   `json:"lastAction,omitempty"`
+	BlockReason  string   `json:"blockReason,omitempty"`
+	FilesTouched []string `json:"filesTouched,omitempty"`
+	// Budget remaining / usage (camelCase wire). Omitted when no tracking.
+	Budget *AgentBudgetView `json:"budget,omitempty"`
+}
+
+// AgentBudgetView is the protocol wire shape for per-agent budget remaining.
+// Nested under TeamRosterMember and ChildEscalated. Zero limits mean unlimited.
+// Session-level maxSessionCostUSD (#577) is the outer envelope when configured;
+// per-agent maxCostUSD nests inside it.
+type AgentBudgetView struct {
+	MaxWallClockS       int      `json:"maxWallClockS,omitempty"`
+	MaxTokens           int      `json:"maxTokens,omitempty"`
+	MaxCostUSD          float64  `json:"maxCostUsd,omitempty"`
+	MaxToolCalls        int      `json:"maxToolCalls,omitempty"`
+	MaxDangerousTools   int      `json:"maxDangerousTools,omitempty"`
+	StallAfterS         int      `json:"stallAfterS,omitempty"`
+	LoopDetectN         int      `json:"loopDetectN,omitempty"`
+	ElapsedS            int      `json:"elapsedS,omitempty"`
+	TokensUsed          int      `json:"tokensUsed,omitempty"`
+	CostUSDUsed         float64  `json:"costUsdUsed,omitempty"`
+	ToolCalls           int      `json:"toolCalls,omitempty"`
+	DangerousTools      int      `json:"dangerousTools,omitempty"`
+	WallClockRemainingS *int     `json:"wallClockRemainingS,omitempty"`
+	TokensRemaining     *int     `json:"tokensRemaining,omitempty"`
+	ToolCallsRemaining  *int     `json:"toolCallsRemaining,omitempty"`
+	DangerousRemaining  *int     `json:"dangerousRemaining,omitempty"`
+	CostUSDRemaining    *float64 `json:"costUsdRemaining,omitempty"`
+	Stall               bool     `json:"stall,omitempty"`
+	Loop                bool     `json:"loop,omitempty"`
+	Escalated           bool     `json:"escalated,omitempty"`
+	EscalateKind        string   `json:"escalateKind,omitempty"`
+	EscalateReason      string   `json:"escalateReason,omitempty"`
 }
 
 // TeamRoster is a full snapshot of the implicit session team roster.
@@ -624,6 +669,32 @@ type ChildCompleted struct {
 	Verification *VerificationReport `json:"verification,omitempty"`
 }
 
+// ChildEscalated reports a per-child budget/stall/loop trip (#774).
+// Emitted on the parent stream before interrupt. Action is "interrupted"
+// (hard kill in flight) or "signaled" (soft observability only — unused in v1
+// hard path). Kind is wall_clock|tokens|cost_usd|tool_calls|dangerous_tools|
+// stall|loop. Correlation is the child session.
+//
+// Soft stall/loop flags also appear on task_status / team.roster without this
+// event; hard limits always emit ChildEscalated and stop the child.
+// Stale-child detection (#517) is the stall kind, not a separate mechanism.
+type ChildEscalated struct {
+	Correlation
+	// Name is the stable teammate alias when one was assigned at spawn.
+	Name string `json:"name,omitempty"`
+	// Kind is the trip class (wall_clock, tokens, stall, loop, …).
+	Kind string `json:"kind"`
+	// Reason is a human/agent-readable explanation.
+	Reason string `json:"reason"`
+	// Action is interrupted|signaled.
+	Action string `json:"action"`
+	// TerminalStatus is the intended ChildCompleted status after shutdown
+	// (failed for hard resource budgets, blocked for stall/loop).
+	TerminalStatus ChildStatus `json:"terminalStatus,omitempty"`
+	// Budget is the snapshot at escalation time when known.
+	Budget *AgentBudgetView `json:"budget,omitempty"`
+}
+
 // DelegationState is the orchestration lifecycle of a first-class delegation
 // (task spawn with optional criteria/deps/subscriptions). Distinct from live
 // child session pulses (starting|working|needs_attention) and terminal
@@ -700,11 +771,30 @@ type WaitResolved struct {
 	HasHandoff      bool              `json:"hasHandoff,omitempty"`
 }
 
+// Agent message urgency levels (coordination contracts).
+const (
+	AgentUrgencyNormal  = "normal"
+	AgentUrgencyHigh    = "high"
+	AgentUrgencyBlocker = "blocker"
+)
+
+// Agent message kinds (coordination contracts on the mailbox plane).
+const (
+	AgentMessageKindMessage    = "message"
+	AgentMessageKindRequest    = "request"
+	AgentMessageKindAck        = "ack"
+	AgentMessageKindTimeout    = "timeout"
+	AgentMessageKindEscalation = "escalation"
+)
+
 // AgentMessage records a peer/team mailbox delivery for UI and debugging.
 // Correlation is the recipient session. Body is the message text; From/To are
 // session ids; TeamID is the lead session id (team identity).
 // Emitted on the recipient engine at boundary injection (tool-round / idle
 // nudge), never mid-tool-call.
+//
+// Optional coordination-contract fields (task binding, urgency, ack/request
+// kinds) are additive; empty values preserve pre-contract plain messages.
 type AgentMessage struct {
 	Correlation
 	From string `json:"from"`
@@ -715,6 +805,35 @@ type AgentMessage struct {
 	TeamID  string `json:"teamId,omitempty"`
 	// MessageID is a stable id for ack/dedup within the session.
 	MessageID string `json:"messageId,omitempty"`
+	// TaskID binds the message to a team_task or delegation id (thread key).
+	TaskID string `json:"taskId,omitempty"`
+	// Urgency is normal|high|blocker (empty = normal).
+	Urgency string `json:"urgency,omitempty"`
+	// Kind is message|request|ack|timeout|escalation (empty = message).
+	Kind string `json:"kind,omitempty"`
+	// RequireAck is true when the sender requested an explicit ack.
+	RequireAck bool `json:"requireAck,omitempty"`
+	// InReplyTo is the message id being acked (kind=ack) or related.
+	InReplyTo string `json:"inReplyTo,omitempty"`
+	// EscalateTo is the session id that receives timeout escalation (default lead).
+	EscalateTo string `json:"escalateTo,omitempty"`
+	// AckStatus is pending|acked|timed_out when tracked on a request-ack message.
+	AckStatus string `json:"ackStatus,omitempty"`
+}
+
+// AgentContractTimeout reports that a require-ack peer message was not acked
+// before its TTL. Correlation is the original sender session. An escalation
+// mailbox delivery to EscalateTo (default lead) is also enqueued when live.
+type AgentContractTimeout struct {
+	Correlation
+	MessageID  string `json:"messageId"`
+	From       string `json:"from"`
+	To         string `json:"to"`
+	TaskID     string `json:"taskId,omitempty"`
+	TeamID     string `json:"teamId,omitempty"`
+	Urgency    string `json:"urgency,omitempty"`
+	EscalateTo string `json:"escalateTo,omitempty"`
+	Detail     string `json:"detail,omitempty"`
 }
 
 // UserMessage echoes accepted user input into the event stream so the
@@ -1332,6 +1451,85 @@ type EffectivePrompt struct {
 	Attribution RequestTokenAttribution `json:"attribution"`
 }
 
+// DiagnosticSession is session lineage on a DiagnosticBundle (solo + child).
+type DiagnosticSession struct {
+	SessionID       string `json:"sessionId,omitempty"`
+	ParentSessionID string `json:"parentSessionId,omitempty"`
+	RootSessionID   string `json:"rootSessionId,omitempty"`
+	Depth           int    `json:"depth"`
+	IsChild         bool   `json:"isChild,omitempty"`
+}
+
+// DiagnosticPrompt is the ordered layer map section of a DiagnosticBundle.
+type DiagnosticPrompt struct {
+	Precedence     []string                `json:"precedence"`
+	Layers         []PromptLayerInfo       `json:"layers"`
+	LayerCount     int                     `json:"layerCount"`
+	SystemChars    int                     `json:"systemChars"`
+	MessageCount   int                     `json:"messageCount"`
+	FromLastStream bool                    `json:"fromLastStream,omitempty"`
+	Attribution    RequestTokenAttribution `json:"attribution"`
+}
+
+// DiagnosticCompaction holds effective compaction/prune dials on a bundle.
+type DiagnosticCompaction struct {
+	Strategy           string   `json:"strategy,omitempty"`
+	Model              string   `json:"model,omitempty"`
+	Threshold          float64  `json:"threshold,omitempty"`
+	Buffer             int      `json:"buffer,omitempty"`
+	KeepUserTurns      int      `json:"keepUserTurns,omitempty"`
+	PruneProtectTokens int      `json:"pruneProtectTokens,omitempty"`
+	PruneMinimumTokens int      `json:"pruneMinimumTokens,omitempty"`
+	PruneKeepUserTurns int      `json:"pruneKeepUserTurns,omitempty"`
+	PruneProtectTools  []string `json:"pruneProtectTools,omitempty"`
+}
+
+// DiagnosticScheduler holds scheduler pool limits on a bundle.
+type DiagnosticScheduler struct {
+	Limits map[string]int `json:"limits,omitempty"`
+}
+
+// DiagnosticConfig is the effective dial snapshot + digests (no secrets).
+type DiagnosticConfig struct {
+	Provider       string `json:"provider,omitempty"`
+	Model          string `json:"model,omitempty"`
+	Agent          string `json:"agent,omitempty"`
+	Effort         string `json:"effort,omitempty"`
+	Autonomy       string `json:"autonomy,omitempty"`
+	PermissionMode string `json:"permissionMode,omitempty"`
+	Sandbox        string `json:"sandbox,omitempty"`
+	LeanCode       string `json:"leanCode,omitempty"`
+	Fast           bool   `json:"fast,omitempty"`
+	MaxTokens      int    `json:"maxTokens,omitempty"`
+	MaxChildDepth  int    `json:"maxChildDepth,omitempty"`
+	ContextWindow  int    `json:"contextWindow,omitempty"`
+	WorkDir        string `json:"workDir,omitempty"`
+	ProjectRoot    string `json:"projectRoot,omitempty"`
+
+	Compaction DiagnosticCompaction `json:"compaction"`
+	Scheduler  DiagnosticScheduler  `json:"scheduler"`
+	// Digests maps stable names → hex SHA-256 of canonical non-secret JSON.
+	Digests map[string]string `json:"digests,omitempty"`
+}
+
+// DiagnosticBundle is the inspectable prompt/config diagnostic document for
+// the last Stream (or current composition). Field layout matches pkg/diag.Bundle
+// JSON so frontends can export the event payload directly. Never carries raw
+// API keys — engine redacts previews and paths before emit.
+type DiagnosticBundle struct {
+	Correlation
+	SchemaVersion   string            `json:"schemaVersion"`
+	ProtocolVersion string            `json:"protocolVersion,omitempty"`
+	StrikeVersion   string            `json:"strikeVersion,omitempty"`
+	ExportedAt      time.Time         `json:"exportedAt"`
+	Redacted        bool              `json:"redacted"`
+	Note            string            `json:"note,omitempty"`
+	Session         DiagnosticSession `json:"session"`
+	Prompt          DiagnosticPrompt  `json:"prompt"`
+	Config          DiagnosticConfig  `json:"config"`
+	Warnings        []string          `json:"warnings,omitempty"`
+}
+
 func (UserMessage) isEvent()            {}
 func (SessionTitled) isEvent()          {}
 func (TurnStarted) isEvent()            {}
@@ -1366,10 +1564,12 @@ func (PathOverlap) isEvent()            {}
 func (EngineError) isEvent()            {}
 func (ChildStarted) isEvent()           {}
 func (ChildCompleted) isEvent()         {}
+func (ChildEscalated) isEvent()         {}
 func (DelegationChanged) isEvent()      {}
 func (WaitStarted) isEvent()            {}
 func (WaitResolved) isEvent()           {}
 func (AgentMessage) isEvent()           {}
+func (AgentContractTimeout) isEvent()   {}
 func (TeamRoster) isEvent()             {}
 func (UsageReported) isEvent()          {}
 func (ProviderRetrying) isEvent()       {}
@@ -1382,3 +1582,4 @@ func (SessionMeta) isEvent()            {}
 func (SessionRewound) isEvent()         {}
 func (HookMatched) isEvent()            {}
 func (EffectivePrompt) isEvent()        {}
+func (DiagnosticBundle) isEvent()       {}

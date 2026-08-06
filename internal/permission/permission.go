@@ -42,9 +42,9 @@ var knownPermissions = map[string]struct{}{
 	"*": {}, "read": {}, "glob": {}, "grep": {}, "edit": {}, "write": {},
 	"bash": {}, "task": {}, "task_status": {}, "task_read": {}, "task_message": {},
 	"task_interrupt": {}, "wait": {}, "agent_roster": {}, "agent_ownership": {},
-	"agent_message": {}, "agent_broadcast": {},
-	"team_task": {},
-	"webfetch":  {}, "todowrite": {}, "todoread": {},
+	"agent_message": {}, "agent_broadcast": {}, "agent_thread": {},
+	"team_task": {}, "delegate": {},
+	"webfetch": {}, "todowrite": {}, "todoread": {},
 	"memory_write": {}, "memory_read": {}, "issue_write": {}, "issue_read": {},
 	"plan_write": {}, "plan_read": {}, "plan_delegate": {},
 	"sleep": {}, "skill": {}, "question": {}, "toolsearch": {}, "hook": {},
@@ -114,8 +114,12 @@ func Defaults() Ruleset {
 		// rejects out-of-team targets. Users may deny via rules.
 		{Permission: "agent_message", Pattern: "*", Action: Allow},
 		{Permission: "agent_broadcast", Pattern: "*", Action: Allow},
+		// Task/delegation-bound message threads (team-scoped read).
+		{Permission: "agent_thread", Pattern: "*", Action: Allow},
 		// Shared team board (claim/assign); transport is team-scoped in engine.
 		{Permission: "team_task", Pattern: "*", Action: Allow},
+		// First-class delegation lifecycle (create/get/list/transition).
+		{Permission: "delegate", Pattern: "*", Action: Allow},
 		{Permission: "webfetch", Pattern: "*", Action: Ask},
 		{Permission: "todowrite", Pattern: "*", Action: Allow},
 		{Permission: "todoread", Pattern: "*", Action: Allow},

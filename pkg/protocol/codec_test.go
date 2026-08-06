@@ -92,6 +92,23 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 			Summary:     "handoff",
 			TeamID:      "session-1",
 			MessageID:   "msg-1",
+			TaskID:      "d1",
+			Urgency:     AgentUrgencyHigh,
+			Kind:        AgentMessageKindRequest,
+			RequireAck:  true,
+			EscalateTo:  "session-1",
+			AckStatus:   "pending",
+		},
+		AgentContractTimeout{
+			Correlation: childCorr,
+			MessageID:   "msg-1",
+			From:        "session-1",
+			To:          "child-1",
+			TaskID:      "d1",
+			TeamID:      "session-1",
+			Urgency:     AgentUrgencyHigh,
+			EscalateTo:  "session-1",
+			Detail:      "ack timed out",
 		},
 		TeamRoster{
 			Correlation: Correlation{SessionID: "session-1"},
@@ -133,6 +150,26 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 				ToolResults: KnownTokens(5),
 				Total:       KnownTokens(80),
 				Source:      UsageSourceEstimated,
+			},
+		},
+		DiagnosticBundle{
+			Correlation:     corr,
+			SchemaVersion:   "1.0.0",
+			ProtocolVersion: Version,
+			ExportedAt:      time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC),
+			Redacted:        true,
+			Session: DiagnosticSession{
+				SessionID: "session-1", RootSessionID: "session-1", Depth: 0,
+			},
+			Prompt: DiagnosticPrompt{
+				Precedence:  []string{PromptLayerShared},
+				Layers:      []PromptLayerInfo{{Kind: PromptLayerShared, Source: "builtin:shared", Mode: PromptLayerAppend, Chars: 12}},
+				LayerCount:  1,
+				SystemChars: 12,
+			},
+			Config: DiagnosticConfig{
+				Provider: "echo", Model: "echo", Agent: "build",
+				Digests: map[string]string{"effective": "abc"},
 			},
 		},
 	}
@@ -379,6 +416,46 @@ func TestChildCompletedHandoffRoundTrip(t *testing.T) {
 	}
 }
 
+func TestChildEscalatedRoundTrip(t *testing.T) {
+	rem := 3
+	want := ChildEscalated{
+		Correlation:    Correlation{SessionID: "c9", ParentSessionID: "p1", Depth: 1},
+		Name:           "worker",
+		Kind:           "tool_calls",
+		Reason:         "tool-call budget exhausted (3/3)",
+		Action:         "interrupted",
+		TerminalStatus: ChildStatusFailed,
+		Budget: &AgentBudgetView{
+			MaxToolCalls:       3,
+			ToolCalls:          3,
+			ToolCallsRemaining: &rem,
+			Escalated:          true,
+			EscalateKind:       "tool_calls",
+		},
+	}
+	env, err := Wrap(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.Type != "child.escalated" {
+		t.Fatalf("type=%q", env.Type)
+	}
+	gotEv, err := env.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := gotEv.(ChildEscalated)
+	if !ok {
+		t.Fatalf("type %T", gotEv)
+	}
+	if got.Kind != "tool_calls" || got.Action != "interrupted" || got.Name != "worker" {
+		t.Fatalf("got %#v", got)
+	}
+	if got.Budget == nil || got.Budget.MaxToolCalls != 3 || !got.Budget.Escalated {
+		t.Fatalf("budget %#v", got.Budget)
+	}
+}
+
 func TestVerificationEventsAndTurnCompletedRoundTrip(t *testing.T) {
 	corr := Correlation{SessionID: "s1", TurnID: "t1"}
 	rep := VerificationReport{
@@ -572,10 +649,12 @@ func TestEventTypeCoverage(t *testing.T) {
 		"engine.error":           EngineError{},
 		"child.started":          ChildStarted{},
 		"child.completed":        ChildCompleted{},
+		"child.escalated":        ChildEscalated{},
 		"delegation.changed":     DelegationChanged{},
 		"wait.started":           WaitStarted{},
 		"wait.resolved":          WaitResolved{},
 		"agent.message":          AgentMessage{},
+		"agent.contract.timeout": AgentContractTimeout{},
 		"team.roster":            TeamRoster{},
 		"usage.reported":         UsageReported{},
 		"provider.retrying":      ProviderRetrying{},
@@ -588,6 +667,7 @@ func TestEventTypeCoverage(t *testing.T) {
 		"session.rewound":        SessionRewound{},
 		"hook.matched":           HookMatched{},
 		"prompt.effective":       EffectivePrompt{},
+		"diagnostic.bundle":      DiagnosticBundle{},
 	}
 	for typ, ev := range want {
 		env, err := Wrap(ev)

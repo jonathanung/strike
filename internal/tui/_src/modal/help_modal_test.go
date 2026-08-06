@@ -17,7 +17,7 @@ func TestHelpModalListsCatalogAndFilters(t *testing.T) {
 	if len(m.entries) != len(catalog)+1 {
 		t.Fatalf("entries = %d, want catalog+tab tip (%d)", len(m.entries), len(catalog)+1)
 	}
-	for _, want := range []string{"/session [id]", "/rename [title]", "/export [path] [--open]", "/timeline [export [path]]", "/copy", "/theme [name|dark|light|auto]", "/memory [list|get|set|rm|export|import] ...", "/issues [list|add|get|close|export|import] ...", "/plan [list|create|get|approve|close|reopen] ...", "/compact", "/fork", "/undo [chat|files]", "/rewind [turn]", "/fast [on|off]", "/think [on|off]", "/layout", "/md-read <path|@path>", "/keys [reset]", "/legend", "/settings", "/exit", "/quit", "/palette", "/interrupt", "/agent-next", "/focus-left", "/review $ARGUMENTS", "tab"} {
+	for _, want := range []string{"/session [id]", "/rename [title]", "/export [path] [--open]", "/timeline [export [path]]", "/diag [export [path]]", "/copy", "/theme [name|dark|light|auto]", "/memory [list|get|set|rm|export|import] ...", "/issues [list|add|get|close|export|import] ...", "/plan [list|create|get|approve|close|reopen] ...", "/compact", "/fork", "/undo [chat|files]", "/rewind [turn]", "/fast [on|off]", "/think [on|off]", "/layout", "/md-read <path|@path>", "/keys [reset]", "/legend", "/settings", "/exit", "/quit", "/palette", "/interrupt", "/agent-next", "/focus-left", "/review $ARGUMENTS", "tab"} {
 		found := false
 		for _, entry := range m.entries {
 			if entry.Label == want {

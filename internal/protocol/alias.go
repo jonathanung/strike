@@ -90,6 +90,11 @@ type (
 	QuestionPrompt          = pub.QuestionPrompt
 	PromptLayerInfo         = pub.PromptLayerInfo
 	RequestTokenAttribution = pub.RequestTokenAttribution
+	DiagnosticSession       = pub.DiagnosticSession
+	DiagnosticPrompt        = pub.DiagnosticPrompt
+	DiagnosticCompaction    = pub.DiagnosticCompaction
+	DiagnosticScheduler     = pub.DiagnosticScheduler
+	DiagnosticConfig        = pub.DiagnosticConfig
 	RewindPoint             = pub.RewindPoint
 	Envelope                = pub.Envelope
 	OpEnvelope              = pub.OpEnvelope
@@ -97,22 +102,23 @@ type (
 
 // Ops.
 type (
-	UserInput              = pub.UserInput
-	PermissionReply        = pub.PermissionReply
-	QuestionReply          = pub.QuestionReply
-	Interrupt              = pub.Interrupt
-	SelectModel            = pub.SelectModel
-	SelectAgent            = pub.SelectAgent
-	SetEffort              = pub.SetEffort
-	SetAutonomy            = pub.SetAutonomy
-	SetPermissionMode      = pub.SetPermissionMode
-	SetFast                = pub.SetFast
-	StartWorkflow          = pub.StartWorkflow
-	StopWorkflow           = pub.StopWorkflow
-	FilesChanged           = pub.FilesChanged
-	Compact                = pub.Compact
-	InspectEffectivePrompt = pub.InspectEffectivePrompt
-	Rewind                 = pub.Rewind
+	UserInput               = pub.UserInput
+	PermissionReply         = pub.PermissionReply
+	QuestionReply           = pub.QuestionReply
+	Interrupt               = pub.Interrupt
+	SelectModel             = pub.SelectModel
+	SelectAgent             = pub.SelectAgent
+	SetEffort               = pub.SetEffort
+	SetAutonomy             = pub.SetAutonomy
+	SetPermissionMode       = pub.SetPermissionMode
+	SetFast                 = pub.SetFast
+	StartWorkflow           = pub.StartWorkflow
+	StopWorkflow            = pub.StopWorkflow
+	FilesChanged            = pub.FilesChanged
+	Compact                 = pub.Compact
+	InspectEffectivePrompt  = pub.InspectEffectivePrompt
+	InspectDiagnosticBundle = pub.InspectDiagnosticBundle
+	Rewind                  = pub.Rewind
 )
 
 // Events.
@@ -154,10 +160,13 @@ type (
 	EngineError            = pub.EngineError
 	ChildStarted           = pub.ChildStarted
 	ChildCompleted         = pub.ChildCompleted
+	ChildEscalated         = pub.ChildEscalated
+	AgentBudgetView        = pub.AgentBudgetView
 	DelegationChanged      = pub.DelegationChanged
 	WaitStarted            = pub.WaitStarted
 	WaitResolved           = pub.WaitResolved
 	AgentMessage           = pub.AgentMessage
+	AgentContractTimeout   = pub.AgentContractTimeout
 	TeamRoster             = pub.TeamRoster
 	UsageReported          = pub.UsageReported
 	ProviderRetrying       = pub.ProviderRetrying
@@ -170,6 +179,7 @@ type (
 	SessionRewound         = pub.SessionRewound
 	HookMatched            = pub.HookMatched
 	EffectivePrompt        = pub.EffectivePrompt
+	DiagnosticBundle       = pub.DiagnosticBundle
 )
 
 // Status / label constants.
@@ -192,6 +202,16 @@ const (
 	WaitOutcomeMatched  = pub.WaitOutcomeMatched
 	WaitOutcomeTimeout  = pub.WaitOutcomeTimeout
 	WaitOutcomeCanceled = pub.WaitOutcomeCanceled
+
+	AgentUrgencyNormal  = pub.AgentUrgencyNormal
+	AgentUrgencyHigh    = pub.AgentUrgencyHigh
+	AgentUrgencyBlocker = pub.AgentUrgencyBlocker
+
+	AgentMessageKindMessage    = pub.AgentMessageKindMessage
+	AgentMessageKindRequest    = pub.AgentMessageKindRequest
+	AgentMessageKindAck        = pub.AgentMessageKindAck
+	AgentMessageKindTimeout    = pub.AgentMessageKindTimeout
+	AgentMessageKindEscalation = pub.AgentMessageKindEscalation
 
 	TeamMemberRunning   = pub.TeamMemberRunning
 	TeamMemberCompleted = pub.TeamMemberCompleted

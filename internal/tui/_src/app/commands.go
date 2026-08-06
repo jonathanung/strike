@@ -47,6 +47,8 @@ const (
 	commandRename          commandID = "rename"
 	commandExport          commandID = "export"
 	commandTimeline        commandID = "timeline"
+	commandDiag            commandID = "diag"
+	commandDiagnostic      commandID = "diagnostic"
 	commandCopy            commandID = "copy"
 	commandMemory          commandID = "memory"
 	commandQueue           commandID = "queue"
@@ -150,6 +152,8 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandRename, Name: "/rename", Description: "rename the current session", ArgsHint: "[title]", Source: commandSourceBuiltin},
 	{ID: commandExport, Name: "/export", Description: "export the conversation to markdown", ArgsHint: "[path] [--open]", Source: commandSourceBuiltin},
 	{ID: commandTimeline, Name: "/timeline", Description: "structured run timeline (collapsed view or JSON export)", ArgsHint: "[export [path]]", Source: commandSourceBuiltin},
+	{ID: commandDiag, Name: "/diag", Description: "export prompt/config diagnostic bundle (JSON)", ArgsHint: "[export [path]]", Source: commandSourceBuiltin},
+	{ID: commandDiagnostic, Name: "/diagnostic", Description: "alias of /diag", ArgsHint: "[export [path]]", Source: commandSourceBuiltin},
 	{ID: commandCopy, Name: "/copy", Description: "copy the last assistant response to the clipboard", Source: commandSourceBuiltin},
 	{ID: commandHelp, Name: "/help", Description: "show available commands", Source: commandSourceBuiltin},
 	{ID: commandKeys, Name: "/keys", Description: "show keyboard shortcuts", ArgsHint: "[reset]", Source: commandSourceBuiltin},
@@ -261,6 +265,8 @@ var reservedCommandNames = map[string]struct{}{
 	"rename":           {},
 	"export":           {},
 	"timeline":         {},
+	"diag":             {},
+	"diagnostic":       {},
 	"copy":             {},
 	"help":             {},
 	"keys":             {},

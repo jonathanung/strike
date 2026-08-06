@@ -411,6 +411,20 @@ func (b *Builder) Observe(ev protocol.Event, t time.Time) {
 			ent.OutputPreview = clip(redact.String(e.Handoff.Summary), b.opts.OutputPreviewMax)
 		}
 		b.finish(ent, t)
+	case protocol.ChildEscalated:
+		// Budget/stall/loop trip (#774): annotate running child; terminal
+		// still comes from ChildCompleted.
+		b.noteSession(e.ParentSessionID)
+		if e.SessionID == "" {
+			return
+		}
+		ent := b.ensureChild(e.SessionID, e.ParentSessionID, e.TurnID, t)
+		if e.Name != "" && ent.Name == "" {
+			ent.Name = e.Name
+		}
+		if e.Reason != "" {
+			ent.Error = clip(redact.String(e.Kind+": "+e.Reason), b.opts.ErrorPreviewMax)
+		}
 	case protocol.VerificationStarted:
 		b.noteSession(e.SessionID)
 		ent := b.ensureVerify(e.SessionID, e.TurnID, e.Scope, t)

@@ -91,6 +91,7 @@ as before.
 | Tool / event | Role |
 |--------------|------|
 | `agent_message` / `agent_broadcast` | Mid-flight peer coordination (any teammate: child↔child, child↔lead) |
+| `agent_thread` | Read task/delegation-bound message thread |
 | `team_task` | Shared claim/assign board (create/list/update/claim/complete; CAS) |
 | `[child.completed]` | Finished work product — structured handoff JSON when a child ends |
 | `task_message` | Parent→owned-child steer only (not team chat) |
@@ -99,13 +100,17 @@ as before.
 | `task_interrupt` | Cancel an owned child |
 | `todowrite` / `todoread` | Solo session todo list (full-replace) — **not** multi-agent claim |
 
-**Semantics:** prefer **messages** for mid-flight blockers/handoffs/questions;
-prefer **completion handoff JSON** for finished deliverables. Lead should not
-busy-poll `task_status` — use completion events + inbox. Children should message
-the lead early when blocked. Avoid chatty loops (no status ping-pong). Mid-flight
-message bodies stay plain text (optional conventions: `blocker` / `handoff` /
-`question`). **Completion** is structured: every terminal child emits a handoff
-with `summary`, `files_changed`, `verification`, `findings`, `blockers`, and
+**Semantics:** prefer **coordination contracts** on `agent_message` over chatty
+status loops: bind `task_id` (team_task or delegation id) and read the thread
+with `agent_thread`; set `urgency` (`normal` \| `high` \| `blocker`); use
+`kind=request` / `require_ack` with `ack_timeout_seconds` so un-acked peers
+emit `agent.contract.timeout` and escalate to the lead (or `escalate_to`);
+ack with `kind=ack` + `in_reply_to`. Prefer **completion handoff JSON** for
+finished deliverables. Lead should not busy-poll `task_status` — use `wait`,
+completion events, inbox, and contracts. Children should message the lead early
+when blocked. Mid-flight bodies stay plain text plus optional contract fields.
+**Completion** is structured: every terminal child emits a handoff with
+`summary`, `files_changed`, `verification`, `findings`, `blockers`, and
 `recommended_next_action` (empty arrays/strings allowed). The engine merges
 tool-tracked file mutations into `files_changed` and sets `incomplete` when the
 child did not supply parseable structured fields. Messages inject at tool-round /

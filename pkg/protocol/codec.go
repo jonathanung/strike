@@ -88,6 +88,8 @@ func eventType(ev Event) string {
 		return "child.started"
 	case ChildCompleted:
 		return "child.completed"
+	case ChildEscalated:
+		return "child.escalated"
 	case DelegationChanged:
 		return "delegation.changed"
 	case WaitStarted:
@@ -96,6 +98,8 @@ func eventType(ev Event) string {
 		return "wait.resolved"
 	case AgentMessage:
 		return "agent.message"
+	case AgentContractTimeout:
+		return "agent.contract.timeout"
 	case TeamRoster:
 		return "team.roster"
 	case UsageReported:
@@ -120,6 +124,8 @@ func eventType(ev Event) string {
 		return "hook.matched"
 	case EffectivePrompt:
 		return "prompt.effective"
+	case DiagnosticBundle:
+		return "diagnostic.bundle"
 	default:
 		return ""
 	}
@@ -219,6 +225,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &ChildStarted{}
 	case "child.completed":
 		ev = &ChildCompleted{}
+	case "child.escalated":
+		ev = &ChildEscalated{}
 	case "delegation.changed":
 		ev = &DelegationChanged{}
 	case "wait.started":
@@ -227,6 +235,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &WaitResolved{}
 	case "agent.message":
 		ev = &AgentMessage{}
+	case "agent.contract.timeout":
+		ev = &AgentContractTimeout{}
 	case "team.roster":
 		ev = &TeamRoster{}
 	case "usage.reported":
@@ -251,6 +261,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &HookMatched{}
 	case "prompt.effective":
 		ev = &EffectivePrompt{}
+	case "diagnostic.bundle":
+		ev = &DiagnosticBundle{}
 	default:
 		return nil, fmt.Errorf("protocol: unknown envelope type %q", e.Type)
 	}
@@ -330,6 +342,8 @@ func deref(ev Event) Event {
 		return *v
 	case *ChildCompleted:
 		return *v
+	case *ChildEscalated:
+		return *v
 	case *DelegationChanged:
 		return *v
 	case *WaitStarted:
@@ -337,6 +351,8 @@ func deref(ev Event) Event {
 	case *WaitResolved:
 		return *v
 	case *AgentMessage:
+		return *v
+	case *AgentContractTimeout:
 		return *v
 	case *TeamRoster:
 		return *v
@@ -361,6 +377,8 @@ func deref(ev Event) Event {
 	case *HookMatched:
 		return *v
 	case *EffectivePrompt:
+		return *v
+	case *DiagnosticBundle:
 		return *v
 	default:
 		return ev
