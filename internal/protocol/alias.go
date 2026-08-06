@@ -30,6 +30,7 @@ const (
 	AutonomySupervised = pub.AutonomySupervised
 	AutonomyAgent      = pub.AutonomyAgent
 	AutonomyChecks     = pub.AutonomyChecks
+	AutonomySkipAll    = pub.AutonomySkipAll
 )
 
 // Permission posture dial.

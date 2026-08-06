@@ -100,21 +100,26 @@ func (e Effort) Describe() string {
 // Autonomy is the per-session exit-gate policy dial: who clears phase
 // progression. Unlike Effort, the zero value is not "unset" — Normalize maps
 // it to AutonomySupervised so the mode is always explicit in the status line.
-// Distinct from PermissionMode (tool-permission posture).
+// Distinct from PermissionMode (tool-permission posture) and from --auto.
+// Runtime phase exits honor this dial via one shared resolver — workflow
+// Exit.Type is not authoritative.
 type Autonomy string
 
 const (
-	// AutonomySupervised requires a human to clear user gates (safest default).
+	// AutonomySupervised requires a human to clear every phase exit (safest default).
 	AutonomySupervised Autonomy = "supervised"
 	// AutonomyAgent lets the agent self-affirm phase completion (phase_done).
 	AutonomyAgent Autonomy = "agent"
 	// AutonomyChecks advances when configured check commands exit 0.
 	AutonomyChecks Autonomy = "checks"
+	// AutonomySkipAll bypasses workflow/plan approval gates only. It does not
+	// grant or bypass tool permissions.
+	AutonomySkipAll Autonomy = "skip-all"
 )
 
 // Autonomies lists selectable modes from most to least human oversight.
 func Autonomies() []Autonomy {
-	return []Autonomy{AutonomySupervised, AutonomyAgent, AutonomyChecks}
+	return []Autonomy{AutonomySupervised, AutonomyAgent, AutonomyChecks, AutonomySkipAll}
 }
 
 // ParseAutonomy resolves a user-typed mode, case- and space-insensitively.
@@ -147,6 +152,8 @@ func (a Autonomy) Describe() string {
 		return "agent clears phase gates itself — less interruption"
 	case AutonomyChecks:
 		return "commands must pass before a phase advances"
+	case AutonomySkipAll:
+		return "skip workflow/plan approval — tool perms unchanged"
 	default:
 		return "you approve phase gates — safest default"
 	}
@@ -159,6 +166,8 @@ func (a Autonomy) Short() string {
 		return "agent"
 	case AutonomyChecks:
 		return "checks"
+	case AutonomySkipAll:
+		return "skip"
 	default:
 		return "sup"
 	}
@@ -794,7 +803,7 @@ type PhaseChanged struct {
 	Workflow string `json:"workflow,omitempty"`
 	Phase    string `json:"phase,omitempty"`
 	Index    int    `json:"index,omitempty"`
-	Gate     string `json:"gate,omitempty"` // agent | check | user
+	Gate     string `json:"gate,omitempty"` // agent | check | user | skip (effective; from autonomy)
 }
 
 // EffortSelected confirms the active reasoning level, at startup and after

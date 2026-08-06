@@ -52,8 +52,9 @@ Right-pane **stack groups** (related panes shown together when space allows):
 |---|---|
 | Session | `context` + `activity` (+ `telemetry` when enabled) |
 | Agents | `agents` + `visualizer` |
+| Files | `files` + `diagnostics` |
 | Project | `memory` + `issues` |
-| Singles | `files`, `markdown`, `editor` (full height each) |
+| Singles | `markdown`, `editor` (full height each) |
 
 Focus cycle order is deterministic: top→bottom (or left→right in a bottom-bar
 split) inside the group, then the next group. Narrow/compact terminals collapse
