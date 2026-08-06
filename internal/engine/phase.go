@@ -45,7 +45,7 @@ func (e *Engine) startWorkflow(name string) error {
 }
 
 // stopWorkflow clears the active workflow phase and phase permissions.
-// Alias for clearPhase; used by the StopWorkflow op and recovery recovery.
+// Alias for clearPhase; used by the StopWorkflow op and recovery cleanup.
 func (e *Engine) stopWorkflow() {
 	e.clearPhase()
 }

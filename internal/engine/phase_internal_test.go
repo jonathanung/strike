@@ -389,7 +389,7 @@ func TestResumeFingerprintMatchAndMismatch(t *testing.T) {
 		Workflows: []config.Workflow{w},
 	})
 
-	// Match: healthy restore.
+	// Match: healthy restore applies phase denies.
 	e.restoreWorkflowPhase("bound", 0, "only", w.Fingerprint)
 	if !e.activeWorkflowHealthy() || e.phaseRecovery != "" {
 		t.Fatalf("match recovery=%q healthy=%v", e.phaseRecovery, e.activeWorkflowHealthy())
@@ -398,10 +398,13 @@ func TestResumeFingerprintMatchAndMismatch(t *testing.T) {
 	if p := ev.(protocol.PhaseChanged); p.Status != "" || p.Fingerprint != w.Fingerprint {
 		t.Fatalf("match event = %#v", p)
 	}
+	if got := e.perms.Peek("write", "x.go"); got != permission.Deny {
+		t.Fatalf("healthy restore write peek = %v, want deny", got)
+	}
 	e.stopWorkflow()
 	drainPhaseEvents(e)
 
-	// Mismatch fingerprint.
+	// Mismatch fingerprint: fail-closed — no phase permission profile.
 	e.restoreWorkflowPhase("bound", 0, "only", "deadbeef")
 	if e.phaseRecovery != protocol.PhaseStatusMismatch {
 		t.Fatalf("recovery = %q", e.phaseRecovery)
@@ -413,6 +416,9 @@ func TestResumeFingerprintMatchAndMismatch(t *testing.T) {
 	p := ev.(protocol.PhaseChanged)
 	if p.Status != protocol.PhaseStatusMismatch || p.Workflow != "bound" {
 		t.Fatalf("mismatch event = %#v", p)
+	}
+	if got := e.perms.Peek("write", "x.go"); got == permission.Deny {
+		t.Fatalf("mismatch recovery must not apply phase write deny, got %v", got)
 	}
 	// Advance fail-closed.
 	err := e.advancePhase(context.Background())
