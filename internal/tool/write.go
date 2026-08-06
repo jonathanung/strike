@@ -77,6 +77,7 @@ func (writeTool) Execute(ctx context.Context, args json.RawMessage, tc *Context)
 	if info, statErr := os.Stat(path); statErr == nil {
 		tc.Files.Record(path, info)
 	}
+	tc.NotifyFileSync(path, a.Content, false)
 	verb := "Created"
 	if readErr == nil {
 		verb = "Overwrote"

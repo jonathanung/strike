@@ -17,6 +17,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/host/local"
 	"github.com/jonathanung/strike-cli/internal/issue"
+	"github.com/jonathanung/strike-cli/internal/lsp"
 	"github.com/jonathanung/strike-cli/internal/mcp"
 	"github.com/jonathanung/strike-cli/internal/memory"
 	"github.com/jonathanung/strike-cli/internal/models"
@@ -61,6 +62,8 @@ type assembled struct {
 	worktreeNotice string
 	// mcpClose stops MCP server sessions (stdio/HTTP; process-scoped).
 	mcpClose func() error
+	// lspClose stops language server sessions (stdio; process-scoped).
+	lspClose func() error
 	// schedulerClose shuts down the shared in-process admission controller.
 	schedulerClose func()
 	// spawnRoot creates additional concurrent root engines (interactive multi-root).
@@ -432,6 +435,11 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		return nil, fmt.Errorf("scheduler: %w", err)
 	}
 
+	// Language servers (stdio): process-scoped, shared by all roots via FileSync.
+	// StartAll runs after the first root opens; NotifyFile no-ops until then and
+	// when a server is dead (crash isolation).
+	lspMgr := lsp.NewManager(launchDir)
+
 	// openRoot builds one live root engine. resumeID empty creates a fresh
 	// session; non-empty opens that durable root (subagents rejected).
 	// applyCLI pins: only the process's first root applies --provider/--model/--effort.
@@ -532,18 +540,22 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 
 		sid := sessionID
 		eng := engine.New(engine.Options{
-			SessionID:               sid,
-			Select:                  selectProvider,
-			Registry:                registry,
-			WorkDir:                 toolDir,
-			ProjectRoot:             projectIdentity.Root,
-			Instructions:            instructions,
-			Memory:                  memoryStore,
-			SystemPrompt:            cfg.SystemPrompt,
-			LeanCode:                cfg.LeanCode,
-			HarnessRegistry:         harnessRegistry,
-			Scheduler:               sched,
-			SchedulerPolicy:         schedEff,
+			SessionID:       sid,
+			Select:          selectProvider,
+			Registry:        registry,
+			WorkDir:         toolDir,
+			ProjectRoot:     projectIdentity.Root,
+			Instructions:    instructions,
+			Memory:          memoryStore,
+			SystemPrompt:    cfg.SystemPrompt,
+			LeanCode:        cfg.LeanCode,
+			HarnessRegistry: harnessRegistry,
+			Scheduler:       sched,
+			SchedulerPolicy: schedEff,
+			FileSync: func(absPath, content string, deleted bool) {
+				// Background context: document sync must not be canceled with the tool call.
+				lspMgr.NotifyFile(context.Background(), absPath, content, deleted)
+			},
 			MaxChildDepth:           cfg.MaxChildDepth,
 			InitialProvider:         initialProvider,
 			InitialModel:            initialModel,
@@ -673,6 +685,23 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		mcpCancel()
 	}
 
+	// External language servers (stdio JSON-RPC). RootDir/CWD is the launch
+	// tree. Per-server failures are recorded and do not abort assemble.
+	if len(cfg.LSP.Servers) > 0 {
+		fields := make(map[string]lsp.ServerConfigFields, len(cfg.LSP.Servers))
+		for name, s := range cfg.LSP.Servers {
+			fields[name] = lsp.ServerConfigFields{
+				Command:    s.Command,
+				Args:       s.Args,
+				Env:        s.Env,
+				Extensions: s.Extensions,
+			}
+		}
+		lspCtx, lspCancel := context.WithTimeout(context.Background(), 45*time.Second)
+		lspMgr.StartAll(lspCtx, lsp.ConfigsFromMap(fields, launchDir))
+		lspCancel()
+	}
+
 	agentNames := make([]string, len(agents))
 	for i, a := range agents {
 		agentNames[i] = a.Name
@@ -729,6 +758,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		worktreeNotice: first.wtNotice,
 		mcpClose: func() error {
 			return mcpMgr.Close()
+		},
+		lspClose: func() error {
+			return lspMgr.Close()
 		},
 		schedulerClose: sched.Close,
 		spawnRoot:      spawn,
