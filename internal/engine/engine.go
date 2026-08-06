@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -30,6 +31,9 @@ type sessionTempState struct {
 	owned bool
 	// failed is true after a permanent allocation failure (do not retry).
 	failed bool
+	// lastTouch is the last mtime refresh (keeps long-lived sessions off the
+	// peer stale-cleanup list).
+	lastTouch time.Time
 }
 
 // defaultMaxStreamAttempts is how many times one logical model request may
@@ -626,13 +630,19 @@ func (e *Engine) SessionTempDir() string {
 
 // ensureSessionTemp lazily creates os.TempDir()/strike/<session-id>/ once.
 // Safe for concurrent first-use from tool dispatch and prompt composition.
+// Refreshes directory mtime periodically so peer stale-cleanup cannot reap a
+// still-running session after defaultStaleSessionTempAge.
 func (e *Engine) ensureSessionTemp() string {
 	if e == nil {
 		return ""
 	}
 	e.sessionTempMu.Lock()
 	defer e.sessionTempMu.Unlock()
-	if e.sessionTemp.dir != "" || e.sessionTemp.failed {
+	if e.sessionTemp.failed {
+		return ""
+	}
+	if e.sessionTemp.dir != "" {
+		e.touchSessionTempLocked()
 		return e.sessionTemp.dir
 	}
 	dir, err := tool.EnsureSessionTemp(e.opts.SessionID)
@@ -640,8 +650,24 @@ func (e *Engine) ensureSessionTemp() string {
 		e.sessionTemp.failed = true
 		return ""
 	}
-	e.sessionTemp = sessionTempState{dir: dir, owned: true}
+	e.sessionTemp = sessionTempState{dir: dir, owned: true, lastTouch: time.Now()}
 	return dir
+}
+
+// touchSessionTempLocked refreshes the scratch dir mtime at most once per hour.
+// Caller must hold sessionTempMu.
+func (e *Engine) touchSessionTempLocked() {
+	const touchEvery = time.Hour
+	dir := e.sessionTemp.dir
+	if dir == "" {
+		return
+	}
+	now := time.Now()
+	if !e.sessionTemp.lastTouch.IsZero() && now.Sub(e.sessionTemp.lastTouch) < touchEvery {
+		return
+	}
+	_ = os.Chtimes(dir, now, now)
+	e.sessionTemp.lastTouch = now
 }
 
 func (e *Engine) cleanupSessionTemp() {
