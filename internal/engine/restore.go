@@ -33,6 +33,9 @@ type Restored struct {
 	PhaseSource      string
 	PhaseFingerprint string
 	PhaseStatus      string // empty | missing | mismatch
+	// PhaseGrant is the last PhaseGrantApproved that still matches the active
+	// phase (cleared when the phase ends or switches without a new approval).
+	PhaseGrant PhaseGrantApproval
 	// AlwaysGrants are session DecisionAlways rules still in force after the
 	// last agent switch (SetAgentRules clears grants).
 	AlwaysGrants permission.Ruleset
@@ -184,6 +187,26 @@ func Restore(events []protocol.Event) Restored {
 				r.PhaseSource = ""
 				r.PhaseFingerprint = ""
 				r.PhaseStatus = ""
+				r.PhaseGrant = PhaseGrantApproval{}
+			} else if r.PhaseGrant.Workflow != e.Workflow || r.PhaseGrant.Phase != e.Phase || r.PhaseGrant.Index != e.Index {
+				// Phase moved without a matching grant event yet.
+				r.PhaseGrant = PhaseGrantApproval{}
+			}
+		case protocol.PhaseGrantApproved:
+			grants := make(permission.Ruleset, 0, len(e.Grants))
+			for _, g := range e.Grants {
+				grants = append(grants, permission.Rule{
+					Permission: g.Permission,
+					Pattern:    g.Pattern,
+					Action:     permission.Action(g.Action),
+				})
+			}
+			r.PhaseGrant = PhaseGrantApproval{
+				Workflow:    e.Workflow,
+				Phase:       e.Phase,
+				Index:       e.Index,
+				Fingerprint: e.Fingerprint,
+				Grants:      grants,
 			}
 		case protocol.SessionTitled:
 			if e.Title != "" {
@@ -264,6 +287,8 @@ func restoreCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	case protocol.PermissionModeSelected:
 		return e.Correlation, true
 	case protocol.PhaseChanged:
+		return e.Correlation, true
+	case protocol.PhaseGrantApproved:
 		return e.Correlation, true
 	case protocol.SessionTitled:
 		return e.Correlation, true

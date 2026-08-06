@@ -292,6 +292,17 @@ above).
 | `checks` | phase `exit.command` exits 0 (permission `phase_check`) |
 | `skip-all` | immediately (workflow/plan approval only; tool perms unchanged) |
 
+**Permission widening review:** phase profiles are evaluated last, so a phase
+`allow` can open an earlier config or agent `deny`. Before activation and every
+phase transition, strike computes the effective grant delta and requires
+explicit approval (question prompt). Rejection leaves the current phase,
+permissions, and context unchanged. `--auto` / `--dangerously-skip-permissions`
+auto-accepts widening without a prompt but does not bypass hard sandbox or path
+protections. Approved decisions are session-persisted (`phase.grant_approved`)
+and restored on resume when the workflow fingerprint and grants are unchanged;
+edited workflow content invalidates prior approval. Child engines inherit the
+parent’s approved phase ceiling and cannot introduce additional widening.
+
 Authored gate types remain useful documentation and supply `command` for
 checks mode:
 

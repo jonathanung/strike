@@ -487,6 +487,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			initialPhaseIndex int
 			initialPhaseName  string
 			initialPhaseFP    string
+			initialPhaseGrant engine.PhaseGrantApproval
 			initialAlways     permission.Ruleset
 			quietStartup      bool
 			resuming          bool
@@ -511,6 +512,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			initialPhaseIndex = restored.PhaseIndex
 			initialPhaseName = restored.PhaseName
 			initialPhaseFP = restored.PhaseFingerprint
+			initialPhaseGrant = restored.PhaseGrant
 			initialAlways = restored.AlwaysGrants
 			if !(applyCLI && opts.providerSet) && restored.Provider != "" {
 				initialProvider = restored.Provider
@@ -585,43 +587,45 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 				// Background context: document sync must not be canceled with the tool call.
 				lspMgr.NotifyFile(context.Background(), absPath, content, deleted)
 			},
-			CollectDiagnostics:      makeLSPCollectDiagnostics(lspMgr, toolDir, cfg.LSP),
-			MaxChildDepth:           cfg.MaxChildDepth,
-			OverlapPolicy:           cfg.Session.OverlapPolicy,
-			InitialProvider:         initialProvider,
-			InitialModel:            initialModel,
-			InitialEffort:           initialEffort,
-			InitialAutonomy:         initialAutonomy,
-			InitialPermissionMode:   initialPermMode,
-			SandboxMode:             sandboxMode,
-			NetworkAllow:            sandbox.CloneNetworkAllow(cfg.Network.Allow),
-			AllowYoloWithoutSandbox: opts.iKnow,
-			Agents:                  agents,
-			InitialAgent:            initialAgent,
-			InitialMessages:         initialMessages,
-			InitialPriority:         initialPriority,
-			InitialTitled:           initialTitled,
-			InitialPhaseWorkflow:    initialPhaseWF,
-			InitialPhaseIndex:       initialPhaseIndex,
-			InitialPhaseName:        initialPhaseName,
-			InitialPhaseFingerprint: initialPhaseFP,
-			InitialAlwaysGrants:     initialAlways,
-			QuietStartup:            quietStartup,
-			Workflows:               workflows,
-			Rules:                   permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),
-			Hooks:                   hookDefs,
-			HookRules:               cfg.HookRules(),
-			CompactionStrategy:      cfg.CompactionStrategy,
-			CompactionModel:         cfg.CompactionModel,
-			CompactionThreshold:     cfg.CompactionThreshold,
-			CompactionBuffer:        cfg.CompactionBuffer,
-			KeepUserTurns:           cfg.KeepUserTurns,
-			PruneProtectTokens:      cfg.PruneProtectTokens,
-			PruneMinimumTokens:      cfg.PruneMinimumTokens,
-			PruneKeepUserTurns:      cfg.PruneKeepUserTurns,
-			PruneProtectTools:       cfg.PruneProtectTools,
-			LookupContextWindow:     lookupContextWindow,
-			ListModels:              listModels,
+			CollectDiagnostics:         makeLSPCollectDiagnostics(lspMgr, toolDir, cfg.LSP),
+			MaxChildDepth:              cfg.MaxChildDepth,
+			OverlapPolicy:              cfg.Session.OverlapPolicy,
+			InitialProvider:            initialProvider,
+			InitialModel:               initialModel,
+			InitialEffort:              initialEffort,
+			InitialAutonomy:            initialAutonomy,
+			InitialPermissionMode:      initialPermMode,
+			SandboxMode:                sandboxMode,
+			NetworkAllow:               sandbox.CloneNetworkAllow(cfg.Network.Allow),
+			AllowYoloWithoutSandbox:    opts.iKnow,
+			Agents:                     agents,
+			InitialAgent:               initialAgent,
+			InitialMessages:            initialMessages,
+			InitialPriority:            initialPriority,
+			InitialTitled:              initialTitled,
+			InitialPhaseWorkflow:       initialPhaseWF,
+			InitialPhaseIndex:          initialPhaseIndex,
+			InitialPhaseName:           initialPhaseName,
+			InitialPhaseFingerprint:    initialPhaseFP,
+			InitialPhaseGrantApproval:  initialPhaseGrant,
+			InitialAlwaysGrants:        initialAlways,
+			QuietStartup:               quietStartup,
+			DangerouslySkipPermissions: opts.dangerouslySkipPermissions,
+			Workflows:                  workflows,
+			Rules:                      permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),
+			Hooks:                      hookDefs,
+			HookRules:                  cfg.HookRules(),
+			CompactionStrategy:         cfg.CompactionStrategy,
+			CompactionModel:            cfg.CompactionModel,
+			CompactionThreshold:        cfg.CompactionThreshold,
+			CompactionBuffer:           cfg.CompactionBuffer,
+			KeepUserTurns:              cfg.KeepUserTurns,
+			PruneProtectTokens:         cfg.PruneProtectTokens,
+			PruneMinimumTokens:         cfg.PruneMinimumTokens,
+			PruneKeepUserTurns:         cfg.PruneKeepUserTurns,
+			PruneProtectTools:          cfg.PruneProtectTools,
+			LookupContextWindow:        lookupContextWindow,
+			ListModels:                 listModels,
 			PersistProjectRule: func(rule permission.Rule) error {
 				return config.AppendProjectPermission(launchDir, rule)
 			},

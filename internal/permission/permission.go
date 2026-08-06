@@ -147,6 +147,71 @@ func DenyOnly(rs Ruleset) Ruleset {
 	return out
 }
 
+// ActionRank returns relative permissiveness (higher = more open).
+// Unknown actions rank as Ask.
+func ActionRank(a Action) int {
+	switch a {
+	case Deny:
+		return 0
+	case Allow:
+		return 2
+	default:
+		return 1
+	}
+}
+
+// WideningDelta returns phase rules that make evaluation more permissive than
+// baseline alone for their permission/pattern. Deny phase rules never widen.
+// Each returned rule uses a normalized pattern and the effective post-phase
+// action. Duplicate permission/pattern pairs are collapsed (first wins).
+func WideningDelta(baseline []Ruleset, phase Ruleset) Ruleset {
+	if len(phase) == 0 {
+		return nil
+	}
+	withPhase := make([]Ruleset, 0, len(baseline)+1)
+	withPhase = append(withPhase, baseline...)
+	withPhase = append(withPhase, phase)
+	var out Ruleset
+	seen := make(map[string]struct{})
+	for _, rule := range phase {
+		if rule.Action == Deny {
+			continue
+		}
+		pat := rule.Pattern
+		if pat == "" {
+			pat = "*"
+		}
+		key := rule.Permission + "\x00" + pat
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		before := Evaluate(rule.Permission, pat, baseline...)
+		after := Evaluate(rule.Permission, pat, withPhase...)
+		if ActionRank(after) > ActionRank(before) {
+			seen[key] = struct{}{}
+			out = append(out, Rule{
+				Permission: rule.Permission,
+				Pattern:    pat,
+				Action:     after,
+			})
+		}
+	}
+	return out
+}
+
+// RulesEqual reports whether a and b contain the same rules in order.
+func RulesEqual(a, b Ruleset) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Permission != b[i].Permission || a[i].Pattern != b[i].Pattern || a[i].Action != b[i].Action {
+			return false
+		}
+	}
+	return true
+}
+
 // ChildAgentRules returns the subset of a child agent profile that is safe to
 // apply under a parent permission ceiling (AG3).
 //
@@ -353,6 +418,46 @@ func (s *Service) SetPhaseRules(rs Ruleset) {
 	s.replaceProfileLocked(func() {
 		s.phase = append(Ruleset(nil), rs...)
 	}, "phase changed")
+}
+
+// PhaseRules returns a defensive copy of the active workflow phase profile.
+func (s *Service) PhaseRules() Ruleset {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append(Ruleset(nil), s.phase...)
+}
+
+// BaselineLayers returns the non-phase evaluation layers in order (base,
+// project, agent, granted, modeLate). Used to compute phase widening deltas.
+func (s *Service) BaselineLayers() []Ruleset {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]Ruleset, 0, len(s.base)+4)
+	for _, layer := range s.base {
+		out = append(out, append(Ruleset(nil), layer...))
+	}
+	out = append(out,
+		append(Ruleset(nil), s.project...),
+		append(Ruleset(nil), s.agent...),
+		append(Ruleset(nil), s.granted...),
+		append(Ruleset(nil), s.modeLate...),
+	)
+	return out
+}
+
+// WideningFromPhase returns grants the phase profile would open relative to
+// the current non-phase layers. See WideningDelta.
+func (s *Service) WideningFromPhase(phase Ruleset) Ruleset {
+	if s == nil {
+		return WideningDelta(nil, phase)
+	}
+	return WideningDelta(s.BaselineLayers(), phase)
 }
 
 // SetPermissionMode installs the tool-permission posture for mode.
