@@ -181,10 +181,17 @@ func (m *Manager) liveClients() []*Client {
 	return out
 }
 
+func clientUnavailable(c *Client) error {
+	if c == nil {
+		return fmt.Errorf("lsp server unavailable")
+	}
+	return c.deadErr()
+}
+
 // Definition calls textDocument/definition (0-based position).
 func (c *Client) Definition(ctx context.Context, path string, line, character int) ([]Location, error) {
 	if c == nil || c.Closed() {
-		return nil, c.deadErr()
+		return nil, clientUnavailable(c)
 	}
 	var raw json.RawMessage
 	if err := c.call(ctx, "textDocument/definition", textDocumentPositionParams{
@@ -199,7 +206,7 @@ func (c *Client) Definition(ctx context.Context, path string, line, character in
 // References calls textDocument/references (0-based position).
 func (c *Client) References(ctx context.Context, path string, line, character int, includeDeclaration bool) ([]Location, error) {
 	if c == nil || c.Closed() {
-		return nil, c.deadErr()
+		return nil, clientUnavailable(c)
 	}
 	var raw json.RawMessage
 	if err := c.call(ctx, "textDocument/references", referenceParams{
@@ -215,7 +222,7 @@ func (c *Client) References(ctx context.Context, path string, line, character in
 // DocumentSymbols calls textDocument/documentSymbol.
 func (c *Client) DocumentSymbols(ctx context.Context, path string) ([]Symbol, error) {
 	if c == nil || c.Closed() {
-		return nil, c.deadErr()
+		return nil, clientUnavailable(c)
 	}
 	var raw json.RawMessage
 	if err := c.call(ctx, "textDocument/documentSymbol", documentSymbolParams{
@@ -229,7 +236,7 @@ func (c *Client) DocumentSymbols(ctx context.Context, path string) ([]Symbol, er
 // WorkspaceSymbols calls workspace/symbol.
 func (c *Client) WorkspaceSymbols(ctx context.Context, query string) ([]Symbol, error) {
 	if c == nil || c.Closed() {
-		return nil, c.deadErr()
+		return nil, clientUnavailable(c)
 	}
 	var raw json.RawMessage
 	if err := c.call(ctx, "workspace/symbol", workspaceSymbolParams{Query: query}, &raw); err != nil {

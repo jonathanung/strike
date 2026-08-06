@@ -202,3 +202,20 @@ func TestSymbolKindName(t *testing.T) {
 		t.Fatal(SymbolKindName(99))
 	}
 }
+
+func TestClientNavNilReceiver(t *testing.T) {
+	var c *Client
+	ctx := context.Background()
+	if _, err := c.Definition(ctx, "/x.go", 0, 0); err == nil {
+		t.Fatal("nil Definition want error")
+	}
+	if _, err := c.References(ctx, "/x.go", 0, 0, true); err == nil {
+		t.Fatal("nil References want error")
+	}
+	if _, err := c.DocumentSymbols(ctx, "/x.go"); err == nil {
+		t.Fatal("nil DocumentSymbols want error")
+	}
+	if _, err := c.WorkspaceSymbols(ctx, "q"); err == nil {
+		t.Fatal("nil WorkspaceSymbols want error")
+	}
+}
