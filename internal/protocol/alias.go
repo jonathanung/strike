@@ -138,6 +138,8 @@ type (
 	AgentSelected          = pub.AgentSelected
 	PhaseChanged           = pub.PhaseChanged
 	PlanHandoff            = pub.PlanHandoff
+	PhaseGrantApproved     = pub.PhaseGrantApproved
+	PhaseGrantRule         = pub.PhaseGrantRule
 	EffortSelected         = pub.EffortSelected
 	AutonomySelected       = pub.AutonomySelected
 	PermissionModeSelected = pub.PermissionModeSelected
@@ -148,6 +150,8 @@ type (
 	EngineError            = pub.EngineError
 	ChildStarted           = pub.ChildStarted
 	ChildCompleted         = pub.ChildCompleted
+	WaitStarted            = pub.WaitStarted
+	WaitResolved           = pub.WaitResolved
 	AgentMessage           = pub.AgentMessage
 	TeamRoster             = pub.TeamRoster
 	UsageReported          = pub.UsageReported
@@ -169,6 +173,10 @@ const (
 	ChildStatusFailed    = pub.ChildStatusFailed
 	ChildStatusCanceled  = pub.ChildStatusCanceled
 	ChildStatusBlocked   = pub.ChildStatusBlocked
+
+	WaitOutcomeMatched  = pub.WaitOutcomeMatched
+	WaitOutcomeTimeout  = pub.WaitOutcomeTimeout
+	WaitOutcomeCanceled = pub.WaitOutcomeCanceled
 
 	TeamMemberRunning   = pub.TeamMemberRunning
 	TeamMemberCompleted = pub.TeamMemberCompleted
@@ -248,7 +256,13 @@ func ToolFeedbackUnstarted() string            { return pub.ToolFeedbackUnstarte
 func ToolFeedbackError(msg string) string      { return pub.ToolFeedbackError(msg) }
 
 const (
-	ErrorCodeCanceled  = pub.ErrorCodeCanceled
-	ErrorCodeTimeout   = pub.ErrorCodeTimeout
-	ErrorCodeQueueFull = pub.ErrorCodeQueueFull
+	ErrorCodePermissionDenied   = pub.ErrorCodePermissionDenied
+	ErrorCodeInvalidArgs        = pub.ErrorCodeInvalidArgs
+	ErrorCodePreconditionFailed = pub.ErrorCodePreconditionFailed
+	ErrorCodeCanceled           = pub.ErrorCodeCanceled
+	ErrorCodeTimeout            = pub.ErrorCodeTimeout
+	ErrorCodeTransient          = pub.ErrorCodeTransient
+	ErrorCodeInternal           = pub.ErrorCodeInternal
+	ErrorCodeBlocked            = pub.ErrorCodeBlocked
+	ErrorCodeQueueFull          = pub.ErrorCodeQueueFull
 )

@@ -46,6 +46,10 @@ The skill name must match one of the available skills. Optional arguments are su
 
 func (t *skillTool) Name() string { return "skill" }
 
+func (t *skillTool) Contract() Contract {
+	return staticContract(SideEffectRead, IdempotencySafeRetry)
+}
+
 func (t *skillTool) Description() string { return t.desc }
 
 func (t *skillTool) Schema() json.RawMessage {

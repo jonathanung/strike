@@ -31,6 +31,10 @@ func NewWebFetch() Tool { return webFetchTool{} }
 
 func (webFetchTool) Name() string { return "webfetch" }
 
+func (webFetchTool) Contract() Contract {
+	return staticContract(SideEffectNetwork, IdempotencySafeRetry)
+}
+
 func (webFetchTool) Description() string {
 	return `Fetches content from a specified URL.
 

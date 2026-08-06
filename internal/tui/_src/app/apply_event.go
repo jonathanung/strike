@@ -200,6 +200,17 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 	case protocol.PhaseChanged:
 		m.phaseName = ev.Phase
 		m.phaseWorkflow = ev.Workflow
+		m.phaseGate = ev.Gate
+		m.phaseSource = ev.Source
+		m.phaseFingerprint = ev.Fingerprint
+		m.phaseStatus = ev.Status
+		if ev.Phase == "" && ev.Workflow == "" {
+			// Cleared — drop identity so chrome does not stale-show grants.
+			m.phaseGate = ""
+			m.phaseSource = ""
+			m.phaseFingerprint = ""
+			m.phaseStatus = ""
+		}
 		cmd = m.broadcastContextState()
 	case protocol.EffortSelected:
 		m.effort = ev.Level
@@ -546,6 +557,10 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	case protocol.ChildStarted:
 		return e.Correlation, true
 	case protocol.ChildCompleted:
+		return e.Correlation, true
+	case protocol.WaitStarted:
+		return e.Correlation, true
+	case protocol.WaitResolved:
 		return e.Correlation, true
 	case protocol.AgentMessage:
 		return e.Correlation, true

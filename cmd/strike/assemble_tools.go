@@ -316,6 +316,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tool.NewTaskRead(),
 		tool.NewTaskMessage(),
 		tool.NewTaskInterrupt(),
+		tool.NewWait(),
 		tool.NewAgentRoster(),
 		tool.NewAgentOwnership(),
 		tool.NewAgentMessage(),
@@ -463,6 +464,11 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// StartAll runs after the first root opens; NotifyFile no-ops until then and
 	// when a server is dead (crash isolation).
 	lspMgr := lsp.NewManager(launchDir)
+	// Optional LSP navigation tools (definition/references/symbols). Not core —
+	// omitted from provider Tools when deferTools is on until toolsearch/direct call.
+	registry.Register(tool.NewDefinition(lspMgr))
+	registry.Register(tool.NewReferences(lspMgr))
+	registry.Register(tool.NewSymbols(lspMgr))
 
 	// openRoot builds one live root engine. resumeID empty creates a fresh
 	// session; non-empty opens that durable root (subagents rejected).
@@ -486,6 +492,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			initialPhaseIndex  int
 			initialPhaseName   string
 			initialPhaseFP     string
+			initialPhaseGrant  engine.PhaseGrantApproval
 			initialAlways      permission.Ruleset
 			initialPlanHandoff engine.PlanHandoffState
 			quietStartup       bool
@@ -511,6 +518,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			initialPhaseIndex = restored.PhaseIndex
 			initialPhaseName = restored.PhaseName
 			initialPhaseFP = restored.PhaseFingerprint
+			initialPhaseGrant = restored.PhaseGrant
 			initialAlways = restored.AlwaysGrants
 			initialPlanHandoff = restored.PlanHandoff
 			if !(applyCLI && opts.providerSet) && restored.Provider != "" {
@@ -586,45 +594,47 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 				// Background context: document sync must not be canceled with the tool call.
 				lspMgr.NotifyFile(context.Background(), absPath, content, deleted)
 			},
-			CollectDiagnostics:      makeLSPCollectDiagnostics(lspMgr, toolDir, cfg.LSP),
-			MaxChildDepth:           cfg.MaxChildDepth,
-			OverlapPolicy:           cfg.Session.OverlapPolicy,
-			InitialProvider:         initialProvider,
-			InitialModel:            initialModel,
-			InitialEffort:           initialEffort,
-			InitialAutonomy:         initialAutonomy,
-			InitialPermissionMode:   initialPermMode,
-			SandboxMode:             sandboxMode,
-			NetworkAllow:            sandbox.CloneNetworkAllow(cfg.Network.Allow),
-			AllowYoloWithoutSandbox: opts.iKnow,
-			Agents:                  agents,
-			InitialAgent:            initialAgent,
-			InitialMessages:         initialMessages,
-			InitialPriority:         initialPriority,
-			InitialTitled:           initialTitled,
-			InitialPhaseWorkflow:    initialPhaseWF,
-			InitialPhaseIndex:       initialPhaseIndex,
-			InitialPhaseName:        initialPhaseName,
-			InitialPhaseFingerprint: initialPhaseFP,
-			InitialAlwaysGrants:     initialAlways,
-			InitialPlanHandoff:      initialPlanHandoff,
-			PlanStore:               planStore,
-			QuietStartup:            quietStartup,
-			Workflows:               workflows,
-			Rules:                   permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),
-			Hooks:                   hookDefs,
-			HookRules:               cfg.HookRules(),
-			CompactionStrategy:      cfg.CompactionStrategy,
-			CompactionModel:         cfg.CompactionModel,
-			CompactionThreshold:     cfg.CompactionThreshold,
-			CompactionBuffer:        cfg.CompactionBuffer,
-			KeepUserTurns:           cfg.KeepUserTurns,
-			PruneProtectTokens:      cfg.PruneProtectTokens,
-			PruneMinimumTokens:      cfg.PruneMinimumTokens,
-			PruneKeepUserTurns:      cfg.PruneKeepUserTurns,
-			PruneProtectTools:       cfg.PruneProtectTools,
-			LookupContextWindow:     lookupContextWindow,
-			ListModels:              listModels,
+			CollectDiagnostics:         makeLSPCollectDiagnostics(lspMgr, toolDir, cfg.LSP),
+			MaxChildDepth:              cfg.MaxChildDepth,
+			OverlapPolicy:              cfg.Session.OverlapPolicy,
+			InitialProvider:            initialProvider,
+			InitialModel:               initialModel,
+			InitialEffort:              initialEffort,
+			InitialAutonomy:            initialAutonomy,
+			InitialPermissionMode:      initialPermMode,
+			SandboxMode:                sandboxMode,
+			NetworkAllow:               sandbox.CloneNetworkAllow(cfg.Network.Allow),
+			AllowYoloWithoutSandbox:    opts.iKnow,
+			Agents:                     agents,
+			InitialAgent:               initialAgent,
+			InitialMessages:            initialMessages,
+			InitialPriority:            initialPriority,
+			InitialTitled:              initialTitled,
+			InitialPhaseWorkflow:       initialPhaseWF,
+			InitialPhaseIndex:          initialPhaseIndex,
+			InitialPhaseName:           initialPhaseName,
+			InitialPhaseFingerprint:    initialPhaseFP,
+			InitialPhaseGrantApproval:  initialPhaseGrant,
+			InitialAlwaysGrants:        initialAlways,
+			InitialPlanHandoff:         initialPlanHandoff,
+			PlanStore:                  planStore,
+			QuietStartup:               quietStartup,
+			DangerouslySkipPermissions: opts.dangerouslySkipPermissions,
+			Workflows:                  workflows,
+			Rules:                      permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),
+			Hooks:                      hookDefs,
+			HookRules:                  cfg.HookRules(),
+			CompactionStrategy:         cfg.CompactionStrategy,
+			CompactionModel:            cfg.CompactionModel,
+			CompactionThreshold:        cfg.CompactionThreshold,
+			CompactionBuffer:           cfg.CompactionBuffer,
+			KeepUserTurns:              cfg.KeepUserTurns,
+			PruneProtectTokens:         cfg.PruneProtectTokens,
+			PruneMinimumTokens:         cfg.PruneMinimumTokens,
+			PruneKeepUserTurns:         cfg.PruneKeepUserTurns,
+			PruneProtectTools:          cfg.PruneProtectTools,
+			LookupContextWindow:        lookupContextWindow,
+			ListModels:                 listModels,
 			PersistProjectRule: func(rule permission.Rule) error {
 				return config.AppendProjectPermission(launchDir, rule)
 			},
@@ -765,6 +775,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	services.MCP = local.NewMCP(mcpMgr)
 	services.LSP = local.NewLSP(lspMgr)
 	services.Telemetry = local.NewTelemetry()
+	services.Workflows = local.NewWorkflows(workflows)
 
 	spawn := rootSpawner(func(id string) (*rootSlot, error) {
 		slot, _, err := openRoot(id, false)

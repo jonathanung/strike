@@ -96,6 +96,10 @@ strike launches without any provider configured. Pick one inside the TUI:
 /loop <interval> <job>         # recurring LLM job (session-only; see loop.md)
 /loop list                     # list active loops
 /loop stop [id]                # stop one loop or all
+/workflow                      # list loaded workflows (source · valid · phases)
+/workflow inspect <name>       # phases, gates, fingerprint, grants
+/workflow start <name>         # preview phase grants, then activate
+/workflow stop                 # clear active phase (keeps session history)
 /context                       # context doctor (layers + request token slices)
 /effective-prompt              # alias of /context
 /cost                          # session token totals and estimated USD cost
@@ -156,6 +160,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/agents` `/activity` `/files` `/diagnostics` `/visualizer` `/system` `/pets` | jump focus to the named right pane (`/agent` remains persona select; `/system` needs telemetry on; `/pets [name]` picks cat/dog/panda/fish) |
 | `/telemetry [on\|off\|status]` | local system metrics pane (CPU/RAM/disk); **on by default** (~1 Hz sampler). Disable with `/telemetry off` |
 | `/loop` | schedule a recurring prompt (`15m`, `2h`, …); session-only; `/loop list`, `/loop stop [id]` — see [loop.md](loop.md). Distinct from [`/goal`](goal.md) |
+| `/workflow` | list/inspect/start/stop loaded workflows; start previews phase permission grants; palette expands actions |
 | `/context` | context doctor modal: system-prompt layer sizes, history msg count, **request token attribution** (system / tools / messages / tool_results; local ~4 chars/token estimate, labeled `estimated`), oversized warnings (previews redacted) |
 | `/cost` | session input/output/cache totals from usage events; est. USD when catalog rates known; unknown stays explicit |
 | `/init` | light local scan → write `AGENTS.md`; confirms before overwrite |
@@ -194,6 +199,13 @@ apply. Parent-only flows that never call `agent_*` tools are unchanged.
 Full coordination semantics: [agents-skills.md](agents-skills.md#agent-teams).
 
 ### Autonomy & workflows
+
+`/workflow` lists, inspects, starts, and stops loaded workflows (builtin,
+global `~/.strike/workflows`, project `.strike/workflows`, and plugin sources).
+Bare `/workflow` lists the catalog with source and validation state. Start
+always previews phase-0 permission grants before mutating engine state; only
+validated workflows can activate. Stop clears phase state without rewriting
+session history. The command palette expands list/start/stop/inspect actions.
 
 `/autonomy` sets the session exit-gate policy for multi-phase workflows
 (see [agents-skills.md](agents-skills.md)). The dial is **authoritative** for

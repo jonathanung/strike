@@ -27,7 +27,7 @@ const childActivityCap = 12
 // team_task) must NOT be listed here — depth-capped leaves still coordinate.
 // task_message is parent-control and is stripped with the other task_* tools.
 var leafTaskTools = []string{
-	"task", "task_status", "task_read", "task_message", "task_interrupt",
+	"task", "task_status", "task_read", "task_message", "task_interrupt", "wait",
 }
 
 // childHandle tracks one non-blocking child engine while it runs.
@@ -169,65 +169,71 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 	}
 
 	// Parent effective ceiling: configured layers plus the active parent
-	// agent profile. Session always-grants are intentionally omitted so the
-	// child starts with an empty granted set. Child agent Allows that would
-	// override a parent Deny are dropped (AG3); Ask→Allow is kept so personas
-	// like general (bash allow) work as task subagents.
+	// agent profile and approved workflow phase profile. Session always-grants
+	// are intentionally omitted so the child starts with an empty granted set.
+	// Child agent Allows that would override a parent Deny are dropped (AG3);
+	// Ask→Allow is kept so personas like general (bash allow) work as task
+	// subagents. Phase rules propagate so children cannot widen beyond the
+	// parent’s approved phase ceiling.
 	parentLayers := append([]permission.Ruleset(nil), e.opts.Rules...)
 	if len(e.agent.Permissions) > 0 {
 		parentLayers = append(parentLayers, append(permission.Ruleset(nil), e.agent.Permissions...))
 	}
+	if phaseRules := e.perms.PhaseRules(); len(phaseRules) > 0 {
+		parentLayers = append(parentLayers, phaseRules)
+	}
 	child := New(Options{
-		SessionID:               childID,
-		ParentSessionID:         e.opts.SessionID,
-		RootSessionID:           e.rootSessionID(),
-		Depth:                   childDepth,
-		MaxChildDepth:           maxDepth,
-		TaskOneShot:             true,
-		Team:                    e.team, // share lead roster; nested enrolls on same team
-		Select:                  e.opts.Select,
-		Registry:                childReg,
-		WorkDir:                 e.opts.WorkDir,
-		ProjectRoot:             e.opts.ProjectRoot,
-		Instructions:            e.opts.Instructions,
-		Memory:                  e.opts.Memory,
-		SystemPrompt:            e.opts.SystemPrompt,
-		LeanCode:                e.opts.LeanCode,
-		HarnessRegistry:         e.opts.HarnessRegistry,
-		Scheduler:               e.opts.Scheduler,          // share process-local pools
-		SchedulerPolicy:         e.opts.SchedulerPolicy,    // bash classification rules
-		FileSync:                e.opts.FileSync,           // share LSP document sync
-		CollectDiagnostics:      e.opts.CollectDiagnostics, // share LSP result injection
-		Agents:                  e.opts.Agents,
-		InitialAgent:            agentName,
-		InitialProvider:         e.provName,
-		InitialModel:            e.model,
-		InitialEffort:           childEffort,
-		InitialTitled:           title != "",
-		SandboxMode:             e.opts.SandboxMode,
-		NetworkAllow:            e.opts.NetworkAllow,
-		AllowYoloWithoutSandbox: e.opts.AllowYoloWithoutSandbox,
-		MaxTokens:               e.opts.MaxTokens,
-		MaxStreamAttempts:       e.opts.MaxStreamAttempts,
-		StreamRetryBackoff:      e.opts.StreamRetryBackoff,
-		ContextWindow:           e.contextWindow(),
-		LookupContextWindow:     e.opts.LookupContextWindow,
-		ListModels:              e.opts.ListModels,
-		LockModel:               modelPin.lock,
-		LockEffort:              effortPin.lock,
-		CompactionThreshold:     e.opts.CompactionThreshold,
-		CompactionBuffer:        e.opts.CompactionBuffer,
-		KeepUserTurns:           e.opts.KeepUserTurns,
-		PruneProtectTokens:      e.opts.PruneProtectTokens,
-		PruneMinimumTokens:      e.opts.PruneMinimumTokens,
-		PruneKeepUserTurns:      e.opts.PruneKeepUserTurns,
-		PruneProtectTools:       e.opts.PruneProtectTools,
-		CompactionStrategy:      e.opts.CompactionStrategy,
-		CompactionModel:         e.opts.CompactionModel,
-		Rules:                   permission.DeriveChildRules(parentLayers, childDepth >= maxDepth, childAgent.Permissions),
-		Hooks:                   e.opts.Hooks,
-		HookRules:               e.opts.HookRules,
-		PersistProjectRule:      e.opts.PersistProjectRule,
+		SessionID:                  childID,
+		ParentSessionID:            e.opts.SessionID,
+		RootSessionID:              e.rootSessionID(),
+		Depth:                      childDepth,
+		MaxChildDepth:              maxDepth,
+		TaskOneShot:                true,
+		Team:                       e.team, // share lead roster; nested enrolls on same team
+		Select:                     e.opts.Select,
+		Registry:                   childReg,
+		WorkDir:                    e.opts.WorkDir,
+		ProjectRoot:                e.opts.ProjectRoot,
+		Instructions:               e.opts.Instructions,
+		Memory:                     e.opts.Memory,
+		SystemPrompt:               e.opts.SystemPrompt,
+		LeanCode:                   e.opts.LeanCode,
+		HarnessRegistry:            e.opts.HarnessRegistry,
+		Scheduler:                  e.opts.Scheduler,          // share process-local pools
+		SchedulerPolicy:            e.opts.SchedulerPolicy,    // bash classification rules
+		FileSync:                   e.opts.FileSync,           // share LSP document sync
+		CollectDiagnostics:         e.opts.CollectDiagnostics, // share LSP result injection
+		Agents:                     e.opts.Agents,
+		InitialAgent:               agentName,
+		InitialProvider:            e.provName,
+		InitialModel:               e.model,
+		InitialEffort:              childEffort,
+		InitialTitled:              title != "",
+		SandboxMode:                e.opts.SandboxMode,
+		NetworkAllow:               e.opts.NetworkAllow,
+		AllowYoloWithoutSandbox:    e.opts.AllowYoloWithoutSandbox,
+		MaxTokens:                  e.opts.MaxTokens,
+		MaxStreamAttempts:          e.opts.MaxStreamAttempts,
+		StreamRetryBackoff:         e.opts.StreamRetryBackoff,
+		ContextWindow:              e.contextWindow(),
+		LookupContextWindow:        e.opts.LookupContextWindow,
+		ListModels:                 e.opts.ListModels,
+		LockModel:                  modelPin.lock,
+		LockEffort:                 effortPin.lock,
+		CompactionThreshold:        e.opts.CompactionThreshold,
+		CompactionBuffer:           e.opts.CompactionBuffer,
+		KeepUserTurns:              e.opts.KeepUserTurns,
+		PruneProtectTokens:         e.opts.PruneProtectTokens,
+		PruneMinimumTokens:         e.opts.PruneMinimumTokens,
+		PruneKeepUserTurns:         e.opts.PruneKeepUserTurns,
+		PruneProtectTools:          e.opts.PruneProtectTools,
+		CompactionStrategy:         e.opts.CompactionStrategy,
+		CompactionModel:            e.opts.CompactionModel,
+		Rules:                      permission.DeriveChildRules(parentLayers, childDepth >= maxDepth, childAgent.Permissions),
+		Hooks:                      e.opts.Hooks,
+		HookRules:                  e.opts.HookRules,
+		PersistProjectRule:         e.opts.PersistProjectRule,
+		DangerouslySkipPermissions: e.opts.DangerouslySkipPermissions,
 	})
 	child.taskHarness = childHarness
 	child.taskHarnessName = childHarnessName
@@ -327,10 +333,12 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 			switch ev := ev.(type) {
 			case protocol.PermissionAsked:
 				e.emit(ev)
+				e.notifyWaitersBlocked(childID, memberName)
 			case protocol.PermissionResolved:
 				e.emit(ev)
 			case protocol.QuestionAsked:
 				e.emit(ev)
+				e.notifyWaitersBlocked(childID, memberName)
 			case protocol.QuestionResolved:
 				e.emit(ev)
 			case protocol.ChildStarted:
@@ -472,6 +480,9 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		e.persistChildEvent(childID, completed)
 		h.noteEvent(completed)
 		e.finishChild(h, completed)
+		// Wake wait-tool subscribers before the model-facing notice path so
+		// mid-turn wait + complete races resolve without busy-polling.
+		e.notifyWaitersFromCompleted(completed)
 		// Wake Run so the parent can inject a model-visible summary (and
 		// auto-nudge when idle). Non-blocking: drop if Run is shutting down.
 		select {

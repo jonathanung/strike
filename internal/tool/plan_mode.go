@@ -50,6 +50,10 @@ func NewEnterPlanMode() Tool { return enterPlanModeTool{} }
 
 func (enterPlanModeTool) Name() string { return "enter_plan_mode" }
 
+func (enterPlanModeTool) Contract() Contract {
+	return staticContract(SideEffectNone, IdempotencyConditional)
+}
+
 func (enterPlanModeTool) Description() string {
 	return `Switch the session into plan mode (the "plan" agent) and start the plan→implement workflow.
 
@@ -94,6 +98,10 @@ type exitPlanModeTool struct{}
 func NewExitPlanMode() Tool { return exitPlanModeTool{} }
 
 func (exitPlanModeTool) Name() string { return "exit_plan_mode" }
+
+func (exitPlanModeTool) Contract() Contract {
+	return staticContract(SideEffectNone, IdempotencyConditional)
+}
 
 func (exitPlanModeTool) Description() string {
 	return `Leave plan mode via the unified approval and handoff path.

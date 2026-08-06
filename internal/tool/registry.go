@@ -190,6 +190,31 @@ func (r *Registry) Schemas() []provider.ToolSchema {
 	return out
 }
 
+// Contract returns the static contract for a registered tool.
+func (r *Registry) Contract(name string) (Contract, bool) {
+	if r == nil {
+		return Contract{}, false
+	}
+	t, ok := r.tools[name]
+	if !ok {
+		return Contract{}, false
+	}
+	return LookupContract(t), true
+}
+
+// Contracts returns name → contract for every registered tool in registration
+// order as a map. Used by tests and diagnostics; not sent to the model.
+func (r *Registry) Contracts() map[string]Contract {
+	if r == nil {
+		return nil
+	}
+	out := make(map[string]Contract, len(r.order))
+	for _, name := range r.order {
+		out[name] = LookupContract(r.tools[name])
+	}
+	return out
+}
+
 // SchemasForProvider returns schemas for provider Request.Tools: full set
 // when defer is off; core + discovered when on.
 func (r *Registry) SchemasForProvider() []provider.ToolSchema {

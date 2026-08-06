@@ -292,6 +292,17 @@ above).
 | `checks` | phase `exit.command` exits 0 (permission `phase_check`) |
 | `skip-all` | immediately (workflow/plan approval only; tool perms unchanged) |
 
+**Permission widening review:** phase profiles are evaluated last, so a phase
+`allow` can open an earlier config or agent `deny`. Before activation and every
+phase transition, strike computes the effective grant delta and requires
+explicit approval (question prompt). Rejection leaves the current phase,
+permissions, and context unchanged. `--auto` / `--dangerously-skip-permissions`
+auto-accepts widening without a prompt but does not bypass hard sandbox or path
+protections. Approved decisions are session-persisted (`phase.grant_approved`)
+and restored on resume when the workflow fingerprint and grants are unchanged;
+edited workflow content invalidates prior approval. Child engines inherit the
+parent’s approved phase ceiling and cannot introduce additional widening.
+
 Authored gate types remain useful documentation and supply `command` for
 checks mode:
 
@@ -345,8 +356,18 @@ dials cannot bypass this path. After handoff, `exit_plan_mode` switches to
 **build** (simple) or **orchestrator** (complex): pass `agent`, or omit and
 supply `steps` / `areas` / `multi_agent` (heuristic: steps ≥ 4, areas ≥ 3, or
 multi_agent → orchestrator). The implementer sees the approved plan on the next
-request. The active phase shows as a badge in the TUI header. Example custom
-file:
+request. The active phase shows as a badge in the TUI header (workflow name,
+phase, effective gate, and recovery status when resume fails closed).
+
+Use `/workflow list`, `/workflow inspect <name>`, `/workflow start <name>`, and
+`/workflow stop` (also in the command palette) to discover and activate any
+loaded definition. Sources are labeled `builtin`, `global`, `project`, or
+`plugin`. Start always shows phase-0 permission grants before the engine
+mutates state; invalid definitions are listed but cannot be activated. Stop
+clears phase context and phase permissions without interrupting unrelated
+session history.
+
+Example custom file:
 
 ```json
 {

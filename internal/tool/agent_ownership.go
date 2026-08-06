@@ -13,6 +13,10 @@ func NewAgentOwnership() Tool { return agentOwnershipTool{} }
 
 func (agentOwnershipTool) Name() string { return "agent_ownership" }
 
+func (agentOwnershipTool) Contract() Contract {
+	return staticContract(SideEffectExternal, IdempotencyConditional)
+}
+
 func (agentOwnershipTool) Description() string {
 	return `Query or manage multi-agent file ownership for the session team.
 

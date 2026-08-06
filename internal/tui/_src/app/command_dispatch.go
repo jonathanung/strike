@@ -258,10 +258,14 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "/issues":
 		return m.handleIssuesCommand(fields[1:])
+	case "/plan":
+		return m.handlePlanCommand(fields[1:])
 	case "/goal":
 		return m.handleGoalCommand(fields[1:])
 	case "/loop":
 		return m.handleLoopCommand(text, fields[1:])
+	case "/workflow":
+		return m.handleWorkflowCommand(fields[1:])
 	case "/context", "/effective-prompt":
 		m.resetComposer()
 		m.clearNotice()
@@ -874,6 +878,119 @@ func (m Model) handleIssuesCommand(args []string) (tea.Model, tea.Cmd) {
 		}
 		m.setNotice(fmt.Sprintf("issues: imported %d issues (%s)", n, mode), false)
 		return m, nil
+	default:
+		m.setNotice(usage, true)
+		return m, nil
+	}
+}
+
+func (m Model) handlePlanCommand(args []string) (tea.Model, tea.Cmd) {
+	m.resetComposer()
+	if m.services.Plans == nil {
+		m.setNotice("project plans are unavailable", true)
+		return m, nil
+	}
+	usage := "usage: /plan [list|create <title>|get <id>|approve [id]|close [id]|reopen [id]]"
+	if len(args) == 0 {
+		return m.openPlansBrowser(false)
+	}
+	switch args[0] {
+	case "list", "ls":
+		if _, err := m.services.Plans.List(); err != nil {
+			m.setNotice("plans: "+err.Error(), true)
+			return m, nil
+		}
+		return m.openPlansBrowser(true)
+	case "create", "new", "add":
+		if len(args) < 2 {
+			m.setNotice(usage, true)
+			return m, nil
+		}
+		if m.sessionID == "" {
+			m.setNotice("plans: no active root session", true)
+			return m, nil
+		}
+		title := strings.Join(args[1:], " ")
+		p, err := m.services.Plans.Create(m.sessionID, title, nil)
+		if err != nil {
+			m.setNotice("plans: "+err.Error(), true)
+			return m, nil
+		}
+		m.windows = refreshProjectDataWindows(m.windows)
+		next, cmd := m.openPlanByID(p.ID)
+		if mm, ok := next.(Model); ok {
+			mm.setNotice(fmt.Sprintf("plans: created %s", p.Title), false)
+			return mm, cmd
+		}
+		return next, cmd
+	case "get", "show", "open":
+		if len(args) < 2 {
+			m.setNotice(usage, true)
+			return m, nil
+		}
+		id := strings.TrimSpace(args[1])
+		p, ok, err := m.services.Plans.Get(id)
+		if err != nil {
+			m.setNotice("plans: "+err.Error(), true)
+			return m, nil
+		}
+		if !ok {
+			m.setNotice("plans: not found", true)
+			return m, nil
+		}
+		_ = p
+		return m.openPlanByID(id)
+	case "approve", "close", "reopen":
+		id := ""
+		if len(args) > 1 {
+			id = strings.TrimSpace(args[1])
+		}
+		if id == "" {
+			// Prefer the plan currently open in the pane.
+			for _, w := range m.windows.windows {
+				if pw, ok := w.(plansWindow); ok && pw.plan.ID != "" {
+					id = pw.plan.ID
+					break
+				}
+			}
+		}
+		if id == "" {
+			m.setNotice("plans: id required (or open a plan first)", true)
+			return m, nil
+		}
+		if m.sessionID == "" {
+			m.setNotice("plans: no active root session", true)
+			return m, nil
+		}
+		p, ok, err := m.services.Plans.Get(id)
+		if err != nil {
+			m.setNotice("plans: "+err.Error(), true)
+			return m, nil
+		}
+		if !ok {
+			m.setNotice("plans: not found", true)
+			return m, nil
+		}
+		var updated host.Plan
+		switch args[0] {
+		case "approve":
+			updated, err = m.services.Plans.SetStatus(id, m.sessionID, "approved", p.Version)
+		case "close":
+			updated, err = m.services.Plans.SetStatus(id, m.sessionID, "closed", p.Version)
+		case "reopen":
+			updated, err = m.services.Plans.Reopen(id, m.sessionID, p.Version)
+		}
+		if err != nil {
+			m.setNotice("plans: "+err.Error(), true)
+			return m, nil
+		}
+		m.windows = refreshProjectDataWindows(m.windows)
+		next, cmd := m.openPlanByID(updated.ID)
+		if mm, ok := next.(Model); ok {
+			mm.setNotice(fmt.Sprintf("plans: %s %s", args[0], updated.Title), false)
+			return mm, cmd
+		}
+		return next, cmd
 	default:
 		m.setNotice(usage, true)
 		return m, nil

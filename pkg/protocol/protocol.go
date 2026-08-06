@@ -616,6 +616,42 @@ type ChildCompleted struct {
 	Verification *VerificationReport `json:"verification,omitempty"`
 }
 
+// Wait outcome labels on WaitResolved.
+const (
+	WaitOutcomeMatched  = "matched"
+	WaitOutcomeTimeout  = "timeout"
+	WaitOutcomeCanceled = "canceled"
+)
+
+// WaitStarted marks an orchestration wait subscription (wait tool).
+// Correlation is the waiting agent. TargetSessionID is an optional filter
+// (empty = any owned child). Events lists canonical kinds
+// (task.done|task.failed|task.canceled|task.blocked).
+type WaitStarted struct {
+	Correlation
+	WaitID          string   `json:"waitId"`
+	Events          []string `json:"events"`
+	TargetSessionID string   `json:"targetSessionId,omitempty"`
+	TimeoutMs       int      `json:"timeoutMs,omitempty"`
+}
+
+// WaitResolved is the outcome of a wait subscription.
+// Outcome is matched|timeout|canceled. On matched, Event is the canonical
+// kind and TargetSessionID/Status identify the child; Handoff is set for
+// terminal task.* outcomes when available.
+type WaitResolved struct {
+	Correlation
+	WaitID          string            `json:"waitId"`
+	Outcome         string            `json:"outcome"` // matched | timeout | canceled
+	Event           string            `json:"event,omitempty"`
+	TargetSessionID string            `json:"targetSessionId,omitempty"`
+	TargetName      string            `json:"targetName,omitempty"`
+	Status          string            `json:"status,omitempty"`
+	Summary         string            `json:"summary,omitempty"`
+	Handoff         CompletionHandoff `json:"handoff,omitempty"`
+	HasHandoff      bool              `json:"hasHandoff,omitempty"`
+}
+
 // AgentMessage records a peer/team mailbox delivery for UI and debugging.
 // Correlation is the recipient session. Body is the message text; From/To are
 // session ids; TeamID is the lead session id (team identity).
@@ -847,7 +883,7 @@ type PhaseChanged struct {
 	Phase       string `json:"phase,omitempty"`
 	Index       int    `json:"index,omitempty"`
 	Gate        string `json:"gate,omitempty"`        // agent | check | user | skip (effective; from autonomy)
-	Source      string `json:"source,omitempty"`      // builtin | global | project
+	Source      string `json:"source,omitempty"`      // builtin | global | project | plugin
 	Fingerprint string `json:"fingerprint,omitempty"` // canonical SHA-256 of formatted def
 	Status      string `json:"status,omitempty"`      // empty | missing | mismatch
 }
@@ -883,6 +919,26 @@ type PlanHandoff struct {
 	// LegacyText is a bounded pre-feature text plan when PlanID is empty.
 	// Omitted for structured and skip-all-empty handoffs.
 	LegacyText string `json:"legacyText,omitempty"`
+}
+
+// PhaseGrantRule is one effective permission widening approved for a phase.
+type PhaseGrantRule struct {
+	Permission string `json:"permission"`
+	Pattern    string `json:"pattern"`
+	Action     string `json:"action"` // allow | ask
+}
+
+// PhaseGrantApproved records acceptance of workflow phase permission
+// widenings (user review or --auto / --dangerously-skip-permissions).
+// Resume skips re-prompt when Fingerprint and Grants still match.
+type PhaseGrantApproved struct {
+	Correlation
+	Workflow    string           `json:"workflow"`
+	Phase       string           `json:"phase"`
+	Index       int              `json:"index"`
+	Fingerprint string           `json:"fingerprint"`
+	Grants      []PhaseGrantRule `json:"grants"`
+	Auto        bool             `json:"auto,omitempty"`
 }
 
 // EffortSelected confirms the active reasoning level, at startup and after
@@ -1195,6 +1251,7 @@ func (ModelSelected) isEvent()          {}
 func (AgentSelected) isEvent()          {}
 func (PhaseChanged) isEvent()           {}
 func (PlanHandoff) isEvent()            {}
+func (PhaseGrantApproved) isEvent()     {}
 func (EffortSelected) isEvent()         {}
 func (AutonomySelected) isEvent()       {}
 func (PermissionModeSelected) isEvent() {}
@@ -1204,6 +1261,8 @@ func (PathOverlap) isEvent()            {}
 func (EngineError) isEvent()            {}
 func (ChildStarted) isEvent()           {}
 func (ChildCompleted) isEvent()         {}
+func (WaitStarted) isEvent()            {}
+func (WaitResolved) isEvent()           {}
 func (AgentMessage) isEvent()           {}
 func (TeamRoster) isEvent()             {}
 func (UsageReported) isEvent()          {}

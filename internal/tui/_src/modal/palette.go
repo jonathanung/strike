@@ -5,6 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 	"github.com/jonathanung/strike-cli/internal/tui/ui"
 )
@@ -14,8 +15,10 @@ const paletteMaxRows = 10
 // paletteAvailability is the state needed to determine whether palette
 // actions can currently be invoked.
 type paletteAvailability struct {
-	HasProvider bool
-	TurnRunning bool
+	HasProvider     bool
+	TurnRunning     bool
+	ActiveWorkflow  string // non-empty when a phase is active (enables stop)
+	WorkflowCatalog []host.WorkflowSummary
 }
 
 type paletteEntry struct {
@@ -54,6 +57,66 @@ type paletteModal struct {
 
 func newPaletteModal(specs []commandSpec, agents []string, availability paletteAvailability) *paletteModal {
 	return &paletteModal{entries: buildPaletteEntries(specs, agents, availability)}
+}
+
+// workflowPaletteEntries builds list/start/stop palette rows for /workflow.
+func workflowPaletteEntries(availability paletteAvailability) []paletteEntry {
+	var out []paletteEntry
+	out = append(out, paletteEntry{
+		ID:          "workflow:list",
+		Label:       "/workflow list",
+		Description: "list loaded workflows by source",
+		Action:      paletteAction{Kind: paletteActionBuiltin, Value: "/workflow list"},
+	})
+	if availability.ActiveWorkflow != "" {
+		stop := paletteEntry{
+			ID:          "workflow:stop",
+			Label:       "/workflow stop",
+			Description: "clear active workflow phase (keeps session history)",
+			Action:      paletteAction{Kind: paletteActionBuiltin, Value: "/workflow stop"},
+		}
+		if availability.TurnRunning {
+			stop.DisabledReason = "unavailable while a turn is running"
+		}
+		out = append(out, stop)
+	}
+	for _, w := range availability.WorkflowCatalog {
+		name := strings.TrimSpace(w.Name)
+		if name == "" {
+			continue
+		}
+		display := sanitizeDisplayData(name)
+		src := sanitizeDisplayData(w.Source)
+		if src == "" {
+			src = host.WorkflowSourceBuiltin
+		}
+		entry := paletteEntry{
+			ID:          "workflow:start:" + name,
+			Label:       "/workflow start " + display,
+			Description: "start " + src + " workflow",
+			Action:      paletteAction{Kind: paletteActionBuiltin, Value: "/workflow start " + name},
+		}
+		if !w.Valid {
+			entry.DisabledReason = "invalid workflow"
+			if w.ValidationError != "" {
+				entry.DisabledReason = "invalid: " + sanitizeDisplayData(truncateRunes(w.ValidationError, 48))
+			}
+		} else if availability.TurnRunning {
+			entry.DisabledReason = "unavailable while a turn is running"
+		}
+		if w.Description != "" && entry.DisabledReason == "" {
+			entry.Description = sanitizeDisplayData(truncateRunes(w.Description, 60))
+		}
+		out = append(out, entry)
+		// Inspect stays available mid-turn.
+		out = append(out, paletteEntry{
+			ID:          "workflow:inspect:" + name,
+			Label:       "/workflow inspect " + display,
+			Description: "inspect " + src + " workflow phases and grants",
+			Action:      paletteAction{Kind: paletteActionBuiltin, Value: "/workflow inspect " + name},
+		})
+	}
+	return out
 }
 
 func (m *paletteModal) refresh(entries []paletteEntry) {
@@ -118,6 +181,11 @@ func buildPaletteEntries(specs []commandSpec, agents []string, availability pale
 			}
 			continue
 		}
+		if builtin.ID == commandWorkflow {
+			// Expand into list / start / stop / inspect actions.
+			entries = append(entries, workflowPaletteEntries(availability)...)
+			continue
+		}
 		entry := paletteEntry{
 			ID:          "command:" + string(builtin.ID),
 			Label:       sanitizeDisplayData(spec.Name),
@@ -176,7 +244,10 @@ func paletteBuiltinDisabled(id commandID, availability paletteAvailability) stri
 		commandSubagent, commandParent, commandSubagentNext, commandSubagentPrev,
 		commandRootFilter,
 		// Permission mode dial is live mid-turn (engine accepts SetPermissionMode).
-		commandMode, commandModeNext:
+		commandMode, commandModeNext,
+		// Catalog inspect/list stay available mid-turn; start/stop are gated
+		// per expanded palette entry.
+		commandWorkflow:
 		return ""
 	case commandModel:
 		if availability.TurnRunning {
