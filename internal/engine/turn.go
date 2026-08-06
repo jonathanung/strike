@@ -821,10 +821,11 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 					SessionID:     entry.AuthorSession,
 				})
 			},
-			MemberName:    e.ownershipMemberName(),
-			ContextBundle: engineContextBundlePtr(e),
-			Checkpoint:    e.checkpoints.Snapshot,
-			TurnDiff:      e.turnDiff,
+			MemberName:          e.ownershipMemberName(),
+			ContextBundle:       engineContextBundlePtr(e),
+			Checkpoint:          e.checkpoints.Snapshot,
+			CheckpointUncovered: e.checkpoints.MarkUncovered,
+			TurnDiff:            e.turnDiff,
 			// Record successful mutations only (post-write), not pre-mutation
 			// snapshots — failed tools must not appear in handoff files_changed.
 			FileSync: func(absPath string, content string, deleted bool) {
@@ -1257,16 +1258,19 @@ func (e *Engine) completeTurn(ctx context.Context, finishing chan struct{}, corr
 	close(finishing)
 	files := turnFileChanges(e.turnDiff.Snapshot())
 	e.checkpoints.CommitTurn()
+	peek := e.checkpoints.Peek()
 	e.fireHookRules(corr, permission.HookEventTurnEnd, "", "")
 	var verification *protocol.VerificationReport
 	if stopReason == "end_turn" && len(e.opts.Verify) > 0 {
 		verification = e.runSoloVerification(ctx, corr)
 	}
 	e.emit(protocol.TurnCompleted{
-		Correlation:  corr,
-		StopReason:   stopReason,
-		Files:        files,
-		Verification: verification,
+		Correlation:       corr,
+		StopReason:        stopReason,
+		Files:             files,
+		CheckpointSkipped: peek.Skipped,
+		Uncovered:         peek.Uncovered,
+		Verification:      verification,
 	})
 	e.applyPendingAgent()
 }

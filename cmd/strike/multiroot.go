@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 
@@ -37,6 +36,9 @@ type multiRootHub struct {
 	mu     sync.Mutex
 	active string
 	slots  map[string]*rootSlot
+	// order is spawn/open insertion order for LiveIDs. Activate must not
+	// reorder so the agents pane stays stable when switching sessions (#865).
+	order []string
 
 	ops    chan protocol.Op
 	events chan protocol.Event
@@ -99,24 +101,15 @@ func (h *multiRootHub) workDirLocked(id string) string {
 func (h *multiRootHub) LiveIDs() []string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if len(h.slots) == 0 {
+	if len(h.order) == 0 {
 		return nil
 	}
-	active := h.active
-	rest := make([]string, 0, len(h.slots))
-	for id := range h.slots {
-		if id != active {
-			rest = append(rest, id)
+	out := make([]string, 0, len(h.order))
+	for _, id := range h.order {
+		if _, ok := h.slots[id]; ok {
+			out = append(out, id)
 		}
 	}
-	sort.Strings(rest)
-	out := make([]string, 0, len(h.slots))
-	if active != "" {
-		if _, ok := h.slots[active]; ok {
-			out = append(out, active)
-		}
-	}
-	out = append(out, rest...)
 	return out
 }
 
@@ -254,6 +247,7 @@ func (h *multiRootHub) Close() error {
 		slots = append(slots, s)
 	}
 	h.slots = map[string]*rootSlot{}
+	h.order = nil
 	h.mu.Unlock()
 
 	h.cancel()
@@ -299,6 +293,9 @@ func (h *multiRootHub) startSlotLocked(slot *rootSlot) {
 	slotCtx, slotCancel := context.WithCancel(h.ctx)
 	slot.cancel = slotCancel
 	slot.done = make(chan struct{})
+	if _, exists := h.slots[slot.id]; !exists {
+		h.order = append(h.order, slot.id)
+	}
 	h.slots[slot.id] = slot
 
 	eng := slot.eng

@@ -358,8 +358,8 @@ func (m Model) handleUndoCommand(args []string) (tea.Model, tea.Cmd) {
 			m.setNotice("usage: /undo [chat|files]", false)
 			return m, nil
 		}
-		// Bare /undo opens the choice modal.
-		m.modal = newUndoModal(m.ops)
+		// Bare /undo opens the choice modal with path preview / coverage warn.
+		m.modal = newUndoModal(m.ops, m.lastUndoPreview())
 		m.reflow()
 		return m, nil
 	case "chat", "history":
@@ -378,6 +378,27 @@ func (m Model) handleUndoCommand(args []string) (tea.Model, tea.Cmd) {
 		m.setNotice("usage: /undo [chat|files]", true)
 		return m, nil
 	}
+}
+
+// lastUndoPreview returns the most recent turn's undo preview, or zero.
+func (m Model) lastUndoPreview() undoPreview {
+	if len(m.undoStack) == 0 {
+		return undoPreview{}
+	}
+	return m.undoStack[len(m.undoStack)-1]
+}
+
+// pushUndoPreview records a completed turn for /undo preview.
+func (m *Model) pushUndoPreview(p undoPreview) {
+	m.undoStack = append(m.undoStack, p)
+}
+
+// popUndoPreview drops the most recent turn preview after SessionRewound.
+func (m *Model) popUndoPreview() {
+	if len(m.undoStack) == 0 {
+		return
+	}
+	m.undoStack = m.undoStack[:len(m.undoStack)-1]
 }
 
 func (m Model) handleRewindCommand(args []string) (tea.Model, tea.Cmd) {
@@ -485,6 +506,13 @@ func formatSessionRewound(ev protocol.SessionRewound) string {
 			msg = fmt.Sprintf("%s; no files restored (%d skipped)", msg, ev.FilesSkipped)
 		default:
 			msg += "; no file changes to restore"
+		}
+		if n := len(ev.Files); n > 0 && n <= 4 {
+			msg = fmt.Sprintf("%s [%s]", msg, strings.Join(ev.Files, ", "))
+		}
+		if len(ev.Uncovered) > 0 {
+			// Never present file restore as silent full success when bash/etc ran.
+			msg = fmt.Sprintf("%s; warning: uncovered (%s) not restored", msg, strings.Join(ev.Uncovered, ", "))
 		}
 	}
 	return msg

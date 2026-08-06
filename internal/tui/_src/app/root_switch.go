@@ -44,6 +44,7 @@ type rootPane struct {
 	queueLabel        string
 	turnStartedAt     time.Time
 	toolCallsThisTurn int
+	undoStack         []undoPreview
 
 	usageInput, usageOutput, usageUsed protocol.TokenCount
 	usageSource                        string
@@ -110,6 +111,7 @@ func (m *Model) stashActiveRoot() {
 		queueLabel:         m.queueLabel,
 		turnStartedAt:      m.turnStartedAt,
 		toolCallsThisTurn:  m.toolCallsThisTurn,
+		undoStack:          append([]undoPreview(nil), m.undoStack...),
 		usageInput:         m.usageInput,
 		usageOutput:        m.usageOutput,
 		usageUsed:          m.usageUsed,
@@ -174,6 +176,7 @@ func (m *Model) loadRootPane(p *rootPane) {
 	m.queueLabel = p.queueLabel
 	m.turnStartedAt = p.turnStartedAt
 	m.toolCallsThisTurn = p.toolCallsThisTurn
+	m.undoStack = append([]undoPreview(nil), p.undoStack...)
 	m.usageInput = p.usageInput
 	m.usageOutput = p.usageOutput
 	m.usageUsed = p.usageUsed
@@ -375,8 +378,18 @@ func applyEventToPane(p *rootPane, ev protocol.Event) {
 		completeAssistantCellsIn(p.cells)
 		p.turnRunning = false
 		p.awaitingPermission = false
+		p.undoStack = append(p.undoStack, undoPreview{
+			files:     append([]protocol.TurnFileChange(nil), e.Files...),
+			skipped:   e.CheckpointSkipped,
+			uncovered: append([]string(nil), e.Uncovered...),
+		})
 		if e.StopReason == "error" {
 			p.sessionErrored = true
+		}
+	case protocol.SessionRewound:
+		p.cells, p.toolByID = dropLastUserTurnCells(p.cells, p.toolByID)
+		if len(p.undoStack) > 0 {
+			p.undoStack = p.undoStack[:len(p.undoStack)-1]
 		}
 	case protocol.EngineError:
 		if !p.turnRunning {
@@ -764,6 +777,8 @@ func seedPaneFromReplay(p *rootPane, events []protocol.Event) {
 	p.usageUsed = tmp.usageUsed
 	p.usageSource = tmp.usageSource
 	p.usageSession = tmp.usageSession
+	// seedFromReplay already marks checkpointsGone on undoStack.
+	p.undoStack = append([]undoPreview(nil), tmp.undoStack...)
 	p.turnRunning = false
 	p.awaitingPermission = false
 }

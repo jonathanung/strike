@@ -1203,7 +1203,15 @@ type TurnCompleted struct {
 	StopReason string `json:"stopReason,omitempty"`
 	// Files lists harness edit/write/apply_patch/notebook_edit paths touched
 	// this turn with change kind. Omitempty keeps legacy readers happy.
+	// Used by /undo preview (#801) together with CheckpointSkipped/Uncovered.
 	Files []TurnFileChange `json:"files,omitempty"`
+	// CheckpointSkipped is how many harness-touched paths could not be
+	// snapshotted for undo (oversized/unreadable/special). Zero when unknown
+	// or none. Additive for undo UX (#801); full bash coverage remains #572.
+	CheckpointSkipped int `json:"checkpointSkipped,omitempty"`
+	// Uncovered lists stable reasons this turn may have disk mutations outside
+	// per-file checkpoints (e.g. "bash"). Empty when fully covered or unknown.
+	Uncovered []string `json:"uncovered,omitempty"`
 	// Verification is set when solo/harness Options.Verify gates ran for this
 	// turn. Claimed reflects a successful model claim (typically stopReason
 	// end_turn); Verified/Passed are harness-owned and independent of model
@@ -1635,6 +1643,14 @@ type SessionRewound struct {
 	// FilesSkipped is how many checkpointed paths could not be restored
 	// (oversized/unreadable originals).
 	FilesSkipped int `json:"filesSkipped,omitempty"`
+	// Files lists workspace-relative paths successfully restored when
+	// RestoreFiles was true (sorted). Empty when chat-only or nothing restored.
+	// Preview/confirm UX and tests use this for multi-file restore ordering (#801).
+	Files []string `json:"files,omitempty"`
+	// Uncovered lists stable reasons the undone turn may still have disk
+	// mutations outside restored paths (e.g. "bash"). Present so clients never
+	// treat a partial undo as silent full success (#801; bash coverage #572).
+	Uncovered []string `json:"uncovered,omitempty"`
 }
 
 // HookMatched records that a declarative config hook rule fired (log/block/

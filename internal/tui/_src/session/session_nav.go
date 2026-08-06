@@ -566,6 +566,14 @@ func seedFromReplay(m *Model, events []protocol.Event) {
 		m.observeTimeline(ev, base.Add(time.Duration(i)*time.Millisecond))
 	}
 	m.cells, m.toolByID = cellsFromEvents(events)
+	// Rebuild /undo preview stack from durable TurnCompleted / SessionRewound
+	// so resume still shows path preview. Checkpoint bytes do not survive
+	// process restart (#573) — mark previews so the modal does not imply
+	// disk restore will work.
+	m.undoStack = undoStackFromEvents(events)
+	for i := range m.undoStack {
+		m.undoStack[i].checkpointsGone = true
+	}
 	// Incomplete assistant/tool streams stay visible but are marked complete
 	// so resume never looks mid-stream.
 	for _, c := range m.cells {
@@ -748,6 +756,34 @@ func childrenFromEvents(events []protocol.Event) []childActivity {
 		out = out[len(out)-maxChildActivity:]
 	}
 	return out
+}
+
+// undoStackFromEvents rebuilds the /undo preview stack from a session log.
+// Mirrors live TurnCompleted push / SessionRewound pop. Child-lineage events
+// are ignored (same filter as live applyEvent correlation checks).
+func undoStackFromEvents(events []protocol.Event) []undoPreview {
+	var stack []undoPreview
+	for _, ev := range events {
+		switch e := ev.(type) {
+		case protocol.TurnCompleted:
+			if e.ParentSessionID != "" || e.Depth > 0 {
+				continue
+			}
+			stack = append(stack, undoPreview{
+				files:     append([]protocol.TurnFileChange(nil), e.Files...),
+				skipped:   e.CheckpointSkipped,
+				uncovered: append([]string(nil), e.Uncovered...),
+			})
+		case protocol.SessionRewound:
+			if e.ParentSessionID != "" || e.Depth > 0 {
+				continue
+			}
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		}
+	}
+	return stack
 }
 
 // cellsFromEvents rebuilds transcript cells from a finished session event log
