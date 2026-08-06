@@ -644,6 +644,11 @@ type PlanSection struct {
 	ID    string
 	Title string
 	Body  string
+	// Delegate* surface section→child correlation for plan progress UI.
+	DelegateStatus    string
+	DelegateChildID   string
+	DelegateChildName string
+	DelegateDetail    string
 }
 
 // Plan is a root-session-owned structured planning artifact.
