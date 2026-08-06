@@ -1,16 +1,16 @@
 package engine
 
 import (
-	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/question"
+	"github.com/jonathanung/strike-cli/internal/tool"
 )
 
 const phaseCheckTimeout = 30 * time.Second
@@ -63,16 +63,12 @@ func (e *Engine) enterPhaseOpts(w config.Workflow, index int, pinAgent bool) err
 	e.phaseIndex = index
 	e.perms.SetPhaseRules(phase.Permissions)
 
-	gate := string(phase.Exit.Type)
-	if gate == "" {
-		gate = string(config.GateAgent)
-	}
 	e.emitSelected(protocol.PhaseChanged{
 		Correlation: e.sessionCorr(),
 		Workflow:    w.Name,
 		Phase:       phase.Name,
 		Index:       index,
-		Gate:        gate,
+		Gate:        e.effectiveGateLabel(),
 	})
 
 	if !pinAgent {
@@ -110,64 +106,130 @@ func (e *Engine) advancePhase(ctx context.Context) error {
 	return e.enterPhase(e.workflow, next)
 }
 
-func (e *Engine) runExitGate(ctx context.Context, phase config.Phase) error {
-	gate := phase.Exit.Type
-	if gate == "" {
-		gate = config.GateAgent
-	}
-	switch gate {
-	case config.GateAgent:
-		return nil
-	case config.GateUser:
-		if e.questions == nil {
-			// No UI: treat as approved (headless / tests without questions).
-			return nil
-		}
-		prompts := []protocol.QuestionPrompt{{
-			ID:       "phase_exit",
-			Header:   "Advance phase",
-			Question: fmt.Sprintf("Leave phase %q and continue?", phase.Name),
-			Options: []protocol.QuestionOption{
-				{Label: "Yes", Description: "Clear the exit gate and load the next phase"},
-				{Label: "No", Description: "Stay in the current phase"},
-			},
-		}}
-		answers, err := e.questions.Ask(ctx, e.sessionCorr(), prompts)
-		if err != nil {
-			return err
-		}
-		answer := ""
-		if len(answers) > 0 {
-			answer = strings.TrimSpace(answers[0])
-		}
-		if !isYesGateAnswer(answer) {
-			return &question.RejectedError{
-				Message: fmt.Sprintf("User declined leaving phase %q.", phase.Name),
-			}
-		}
-		return nil
-	case config.GateCheck:
-		cmd := strings.TrimSpace(phase.Exit.Command)
-		if cmd == "" {
-			return fmt.Errorf("phase %q check gate has empty command", phase.Name)
-		}
-		cctx, cancel := context.WithTimeout(ctx, phaseCheckTimeout)
-		defer cancel()
-		c := exec.CommandContext(cctx, "bash", "-c", cmd)
-		c.Dir = e.opts.WorkDir
-		var stderr bytes.Buffer
-		c.Stderr = &stderr
-		if err := c.Run(); err != nil {
-			msg := strings.TrimSpace(stderr.String())
-			if msg == "" {
-				msg = err.Error()
-			}
-			return fmt.Errorf("phase %q check failed: %s", phase.Name, msg)
-		}
-		return nil
+// effectiveGateLabel is the PhaseChanged.Gate value for the session autonomy
+// dial. Autonomy is authoritative for every exit path.
+func (e *Engine) effectiveGateLabel() string {
+	switch e.autonomy.Normalize() {
+	case protocol.AutonomyAgent:
+		return string(config.GateAgent)
+	case protocol.AutonomyChecks:
+		return string(config.GateCheck)
+	case protocol.AutonomySkipAll:
+		return "skip"
 	default:
-		return fmt.Errorf("phase %q: unknown gate type %q", phase.Name, gate)
+		return string(config.GateUser)
 	}
+}
+
+// runExitGate applies the session autonomy policy for one phase exit.
+// Every caller (phase_done, exit_plan_mode) shares this resolver.
+func (e *Engine) runExitGate(ctx context.Context, phase config.Phase) error {
+	switch e.autonomy.Normalize() {
+	case protocol.AutonomySkipAll:
+		// Bypass workflow/plan approval only — tool permissions are untouched.
+		return nil
+	case protocol.AutonomyAgent:
+		// phase_done / exit_plan_mode is the explicit self-affirmation.
+		return nil
+	case protocol.AutonomyChecks:
+		return e.runCheckGate(ctx, phase)
+	default:
+		return e.runUserGate(ctx, phase)
+	}
+}
+
+func (e *Engine) runUserGate(ctx context.Context, phase config.Phase) error {
+	if e.questions == nil {
+		// Fail closed: supervised mode requires a real approval path.
+		return fmt.Errorf("phase %q: supervised autonomy requires a question service", phase.Name)
+	}
+	prompts := []protocol.QuestionPrompt{{
+		ID:       "phase_exit",
+		Header:   "Advance phase",
+		Question: fmt.Sprintf("Leave phase %q and continue?", phase.Name),
+		Options: []protocol.QuestionOption{
+			{Label: "Yes", Description: "Clear the exit gate and load the next phase"},
+			{Label: "No", Description: "Stay in the current phase"},
+		},
+	}}
+	answers, err := e.questions.Ask(ctx, e.sessionCorr(), prompts)
+	if err != nil {
+		return err
+	}
+	answer := ""
+	if len(answers) > 0 {
+		answer = strings.TrimSpace(answers[0])
+	}
+	if !isYesGateAnswer(answer) {
+		return &question.RejectedError{
+			Message: fmt.Sprintf("User declined leaving phase %q.", phase.Name),
+		}
+	}
+	return nil
+}
+
+func (e *Engine) runCheckGate(ctx context.Context, phase config.Phase) error {
+	cmd := strings.TrimSpace(phase.Exit.Command)
+	if cmd == "" {
+		return fmt.Errorf("phase %q check gate has empty command", phase.Name)
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("phase %q check canceled: %w", phase.Name, err)
+	}
+
+	// Source-aware trust: phase check commands are not free bash — ask under
+	// permission "phase_check" with workflow/phase metadata before exec.
+	meta, _ := json.Marshal(map[string]string{
+		"source":   "workflow_phase_check",
+		"workflow": e.workflow.Name,
+		"phase":    phase.Name,
+	})
+	if err := e.perms.AskWithCorrelation(ctx, tool.AskRequest{
+		Permission: "phase_check",
+		Patterns:   []string{cmd},
+		Always:     []string{cmd},
+		Metadata:   meta,
+	}, e.sessionCorr()); err != nil {
+		return fmt.Errorf("phase %q check trust denied: %w", phase.Name, err)
+	}
+
+	res, err := tool.RunProcess(ctx, tool.ProcessSpec{
+		Argv:    []string{"bash", "-c", cmd},
+		Dir:     e.opts.WorkDir,
+		Timeout: phaseCheckTimeout,
+		Combine: false,
+	}, tool.ProcessObserver{})
+	if err != nil {
+		return fmt.Errorf("phase %q check failed to start: %v", phase.Name, err)
+	}
+	switch res.Status {
+	case tool.ProcessStatusTimeout:
+		// Parent ctx may deadline sooner than phaseCheckTimeout; do not claim
+		// a fixed duration that may not match the deadline that fired.
+		return fmt.Errorf("phase %q check timed out", phase.Name)
+	case tool.ProcessStatusCanceled:
+		return fmt.Errorf("phase %q check canceled", phase.Name)
+	case tool.ProcessStatusError:
+		msg := strings.TrimSpace(res.Stderr)
+		if msg == "" {
+			msg = strings.TrimSpace(res.Output)
+		}
+		if msg == "" {
+			msg = "process error"
+		}
+		return fmt.Errorf("phase %q check failed: %s", phase.Name, msg)
+	}
+	if res.ExitCode != 0 {
+		msg := strings.TrimSpace(res.Stderr)
+		if msg == "" {
+			msg = strings.TrimSpace(res.Stdout)
+		}
+		if msg == "" {
+			msg = fmt.Sprintf("exit %d", res.ExitCode)
+		}
+		return fmt.Errorf("phase %q check failed: %s", phase.Name, msg)
+	}
+	return nil
 }
 
 func isYesGateAnswer(s string) bool {

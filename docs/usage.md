@@ -19,7 +19,7 @@ strike launches without any provider configured. Pick one inside the TUI:
                                # (active level shows on the top status bar)
 /effort xhigh                  # off | low | medium | high | xhigh | max
 /autonomy                      # exit-gate policy picker
-/autonomy supervised           # supervised | agent | checks
+/autonomy supervised           # supervised | agent | checks | skip-all
 /mode                          # permission posture picker (Shift+Tab cycles)
 /mode soft-approve             # default | plan | soft-approve | accept-edits | yolo
 /agent                         # centered agent picker
@@ -191,13 +191,16 @@ Full coordination semantics: [agents-skills.md](agents-skills.md#agent-teams).
 ### Autonomy & workflows
 
 `/autonomy` sets the session exit-gate policy for multi-phase workflows
-(see [agents-skills.md](agents-skills.md)):
+(see [agents-skills.md](agents-skills.md)). The dial is **authoritative** for
+every phase exit (`phase_done`, `exit_plan_mode`); workflow-authored exit
+types are not. Distinct from `/mode` (tool permissions) and from `--auto`.
 
 | Mode | Behavior |
 |---|---|
-| `supervised` (default) | you approve phase gates |
-| `agent` | model clears gates via `phase_done` |
-| `checks` | configured check commands must exit 0 |
+| `supervised` (default) | you approve every phase exit |
+| `agent` | model clears gates via `phase_done` / `exit_plan_mode` |
+| `checks` | phase check commands must exit 0 (trust-gated `phase_check`) |
+| `skip-all` | bypass workflow/plan approval only — tool permissions unchanged |
 
 ### Permission mode dial
 
