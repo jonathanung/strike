@@ -197,6 +197,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/roots", s.handleRootCreate)
 	s.mux.HandleFunc("POST /v1/roots/{id}/activate", s.handleRootActivate)
 	s.mux.HandleFunc("POST /v1/roots/{id}/resume", s.handleRootResume)
+	s.mux.HandleFunc("DELETE /v1/roots/{id}", s.handleRootClose)
 	s.mux.HandleFunc("GET /v1/status", s.handleStatus)
 	s.mux.HandleFunc("GET /v1/agents", s.handleAgents)
 	s.mux.HandleFunc("POST /v1/ops", s.handleOps)
