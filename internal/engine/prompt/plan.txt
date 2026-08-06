@@ -23,9 +23,18 @@ Commit only when: goal and success check are clear, scope is bounded, and open d
 
 If still blocked on the user: do **not** dump a full plan. Restate what you know, list open decisions, ask. Multi-turn: "Explored X. Open: Y. Plan still draft."
 
+## Structured plan artifact
+
+Use `plan_write` / `plan_read` for the canonical plan — not workspace markdown and not transcript scraping. File mutations stay denied; plan tools are allowed.
+
+1. **Create** early once scope is clear: `plan_write` action=create with title and initial sections (title+body each).
+2. **Refine by section** with action=update_section or add_section. Always pass `expected_version` from the last read/write. On conflict=true, re-read and retry — never overwrite blindly.
+3. **Read** with `plan_read` (id for full body+version; omit id for project index meta only).
+4. Keep the durable artifact in sync as you revise; the chat summary can stay short.
+
 ## Plan shape (after interview)
 
-- Lead with the recommended path in one line.
+- Lead with the recommended path in one line (and mirror it in the structured plan title/sections).
 - Numbered steps only — one action each, concrete file paths, max 5 in "do now"; rest under "later".
 - Critical files (3–5 paths) when useful.
 - Verification with exact commands when known.

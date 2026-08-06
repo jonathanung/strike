@@ -328,6 +328,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tool.NewMemoryRead(memoryStore),
 		tool.NewIssueWrite(issueStore),
 		tool.NewIssueRead(issueStore),
+		tool.NewPlanWrite(planStore),
+		tool.NewPlanRead(planStore),
 		tool.NewNotebookEdit(),
 		tool.NewSleep(),
 		tool.NewSkill(skillInfos),
