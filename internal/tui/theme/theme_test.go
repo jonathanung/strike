@@ -568,6 +568,18 @@ func TestStylesDrawFromThemeRoles(t *testing.T) {
 	if got := s.DiffRemoved.GetForeground(); !sameColor(got, th.DiffRemoved) {
 		t.Errorf("DiffRemoved style foreground = %v, want %v", got, th.DiffRemoved)
 	}
+	if !s.DiffAddedStrong.GetBold() || !sameColor(s.DiffAddedStrong.GetForeground(), th.DiffAdded) {
+		t.Errorf("DiffAddedStrong = %+v, want bold DiffAdded", s.DiffAddedStrong)
+	}
+	if !s.DiffRemovedStrong.GetBold() || !sameColor(s.DiffRemovedStrong.GetForeground(), th.DiffRemoved) {
+		t.Errorf("DiffRemovedStrong = %+v, want bold DiffRemoved", s.DiffRemovedStrong)
+	}
+	if !sameColor(s.DiffAddedLine.GetForeground(), th.DiffAdded) || !sameColor(s.DiffAddedLine.GetBackground(), th.SurfaceMuted) {
+		t.Errorf("DiffAddedLine = %+v, want DiffAdded on SurfaceMuted", s.DiffAddedLine)
+	}
+	if !sameColor(s.DiffRemovedLine.GetForeground(), th.DiffRemoved) || !sameColor(s.DiffRemovedLine.GetBackground(), th.SurfaceMuted) {
+		t.Errorf("DiffRemovedLine = %+v, want DiffRemoved on SurfaceMuted", s.DiffRemovedLine)
+	}
 }
 
 func TestAdaptiveColorRGBARespectsCompatHasDarkBackground(t *testing.T) {

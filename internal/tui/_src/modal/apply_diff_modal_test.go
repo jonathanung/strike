@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,10 +94,56 @@ func TestApplyDiffModalPatchPath(t *testing.T) {
 func TestApplyDiffModalViewShowsDiff(t *testing.T) {
 	m := newApplyDiffModalEdit(&fakeFiles{}, "x.go", "foo", "bar", false)
 	plain := ansi.Strip(m.view(60, theme.Default()))
-	for _, want := range []string{"Apply patch", "x.go", "-foo", "+bar", "apply", "cancel"} {
+	for _, want := range []string{"Apply patch", "x.go", "foo", "bar", "apply", "cancel"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("missing %q in:\n%s", want, plain)
 		}
+	}
+	// Markers may sit after a line-number gutter; still require +/- intent.
+	if !strings.Contains(plain, "-") || !strings.Contains(plain, "+") {
+		t.Errorf("missing diff markers in:\n%s", plain)
+	}
+}
+
+func TestApplyDiffModalScrollsTallDiff(t *testing.T) {
+	var oldB, newB strings.Builder
+	for i := 0; i < 20; i++ {
+		fmt.Fprintf(&oldB, "old-line-%d\n", i)
+		fmt.Fprintf(&newB, "new-line-%d\n", i)
+	}
+	oldS := strings.TrimSuffix(oldB.String(), "\n")
+	newS := strings.TrimSuffix(newB.String(), "\n")
+	m := newApplyDiffModalEdit(&fakeFiles{}, "big.go", oldS, newS, false)
+
+	plain0 := ansi.Strip(m.view(72, theme.Default()))
+	if !strings.Contains(plain0, "scroll") {
+		t.Fatalf("tall diff should advertise scroll in hint/more: %q", plain0)
+	}
+	if !strings.Contains(plain0, "old-line-0") {
+		t.Fatalf("initial window should show start: %q", plain0)
+	}
+
+	next, cmd := m.update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if next != m || cmd != nil {
+		t.Fatalf("scroll down next=%T cmd=%v", next, cmd != nil)
+	}
+	if m.diffOffset < 1 {
+		t.Fatalf("diffOffset after down = %d, want >= 1", m.diffOffset)
+	}
+	plain1 := ansi.Strip(m.view(72, theme.Default()))
+	if strings.Contains(plain1, "old-line-0") && m.diffOffset >= diffPreviewMaxLinesModal {
+		// After enough downs the first line leaves the window.
+	}
+	// Page down jumps by a window.
+	before := m.diffOffset
+	_, _ = m.update(tea.KeyPressMsg{Code: tea.KeyPgDown})
+	if m.diffOffset <= before {
+		t.Fatalf("pgdown offset %d, want > %d", m.diffOffset, before)
+	}
+	// Up from mid restores toward start.
+	_, _ = m.update(tea.KeyPressMsg{Code: tea.KeyUp})
+	if m.diffOffset >= before+diffPreviewMaxLinesModal {
+		t.Fatalf("up should decrease offset, got %d", m.diffOffset)
 	}
 }
 

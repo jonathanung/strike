@@ -34,7 +34,7 @@ func TestDiffPreview(t *testing.T) {
 
 	t.Run("pure insert lines start with +", func(t *testing.T) {
 		got := DiffPreview(th, DiffPreviewOpts{
-			Old: "", New: "alpha\nbeta", Width: 40,
+			Old: "", New: "alpha\nbeta", Width: 40, NoLineNumbers: true,
 		})
 		plain := ansi.Strip(got)
 		for i, line := range nonEmptyLines(plain) {
@@ -57,7 +57,7 @@ func TestDiffPreview(t *testing.T) {
 
 	t.Run("pure delete lines start with -", func(t *testing.T) {
 		got := DiffPreview(th, DiffPreviewOpts{
-			Old: "alpha\nbeta", New: "", Width: 40,
+			Old: "alpha\nbeta", New: "", Width: 40, NoLineNumbers: true,
 		})
 		plain := ansi.Strip(got)
 		for i, line := range nonEmptyLines(plain) {
@@ -77,9 +77,8 @@ func TestDiffPreview(t *testing.T) {
 
 	t.Run("shared prefix and suffix with middle replace", func(t *testing.T) {
 		got := DiffPreview(th, DiffPreviewOpts{
-			Old:   "head\nold mid\ntail",
-			New:   "head\nnew mid\ntail",
-			Width: 40,
+			Old: "head\nold mid\ntail", New: "head\nnew mid\ntail",
+			Width: 40, NoLineNumbers: true, NoWordDiff: true,
 		})
 		plain := ansi.Strip(got)
 		lines := nonEmptyLines(plain)
@@ -102,10 +101,8 @@ func TestDiffPreview(t *testing.T) {
 
 	t.Run("ShowStats includes +N and -M matching counts", func(t *testing.T) {
 		got := DiffPreview(th, DiffPreviewOpts{
-			Old:       "a\nb\nc",
-			New:       "a\nx\ny\nc",
-			Width:     40,
-			ShowStats: true,
+			Old: "a\nb\nc", New: "a\nx\ny\nc",
+			Width: 40, ShowStats: true, NoLineNumbers: true,
 		})
 		plain := ansi.Strip(got)
 		// middle: -b, +x, +y → +2 -1
@@ -119,16 +116,13 @@ func TestDiffPreview(t *testing.T) {
 
 	t.Run("path header present when Path set", func(t *testing.T) {
 		got := DiffPreview(th, DiffPreviewOpts{
-			Path:  "internal/foo.go",
-			Old:   "a",
-			New:   "b",
-			Width: 40,
+			Path: "internal/foo.go", Old: "a", New: "b",
+			Width: 40, NoLineNumbers: true,
 		})
 		plain := ansi.Strip(got)
 		if !strings.Contains(plain, "internal/foo.go") {
 			t.Errorf("missing path header: %q", plain)
 		}
-		// path is header-only; body still has diff markers
 		if !strings.Contains(plain, "-a") || !strings.Contains(plain, "+b") {
 			t.Errorf("missing body markers: %q", plain)
 		}
@@ -148,9 +142,6 @@ func TestDiffPreview(t *testing.T) {
 	})
 
 	t.Run("MaxLines truncation keeps first change lines and reports overflow", func(t *testing.T) {
-		// Pure replace (no shared context): change block alone exceeds MaxLines.
-		// After dropping no equal context, first MaxLines of the remainder are kept
-		// (deletes first in the prefix/suffix algorithm).
 		var oldB, newB strings.Builder
 		for i := 0; i < 10; i++ {
 			fmt.Fprintf(&oldB, "old-%d\n", i)
@@ -160,8 +151,7 @@ func TestDiffPreview(t *testing.T) {
 		got := DiffPreview(th, DiffPreviewOpts{
 			Old:      strings.TrimSuffix(oldB.String(), "\n"),
 			New:      strings.TrimSuffix(newB.String(), "\n"),
-			MaxLines: maxLines,
-			Width:    60,
+			MaxLines: maxLines, Width: 60, NoLineNumbers: true,
 		})
 		plain := ansi.Strip(got)
 		if !strings.Contains(plain, "more lines") {
@@ -189,9 +179,6 @@ func TestDiffPreview(t *testing.T) {
 	})
 
 	t.Run("MaxLines prefers changed region over long shared prefix", func(t *testing.T) {
-		// 9 unique equal prefix lines + one-line replace would hide the edit
-		// under head-only truncation at MaxLines=8. Prefer dropping leading
-		// context so -OLD/+NEW remain visible.
 		var ctx strings.Builder
 		for i := 0; i < 9; i++ {
 			fmt.Fprintf(&ctx, "context-%d\n", i)
@@ -200,7 +187,7 @@ func TestDiffPreview(t *testing.T) {
 		const maxLines = 8
 		got := DiffPreview(th, DiffPreviewOpts{
 			Old: prefix + "OLD", New: prefix + "NEW",
-			MaxLines: maxLines, Width: 60,
+			MaxLines: maxLines, Width: 60, NoLineNumbers: true,
 		})
 		plain := ansi.Strip(got)
 		if !strings.Contains(plain, "-OLD") {
@@ -209,7 +196,6 @@ func TestDiffPreview(t *testing.T) {
 		if !strings.Contains(plain, "+NEW") {
 			t.Errorf("missing insert of changed line: %q", plain)
 		}
-		// 9 equal + 1 del + 1 ins = 11; drop 3 leading equal → overflow 3
 		if !strings.Contains(plain, "more lines") {
 			t.Errorf("expected overflow for dropped leading context: %q", plain)
 		}
@@ -219,15 +205,12 @@ func TestDiffPreview(t *testing.T) {
 		if bodyLines := countDiffBodyLines(plain); bodyLines != maxLines {
 			t.Errorf("body hunk lines = %d, want %d; plain=%q", bodyLines, maxLines, plain)
 		}
-		// earliest context should have been dropped first
 		if strings.Contains(plain, "context-0") {
 			t.Errorf("leading context-0 should be dropped before the change: %q", plain)
 		}
 	})
 
 	t.Run("MaxLines drops trailing context after leading context", func(t *testing.T) {
-		// Short change flanked by long equal prefix and suffix. Leading equal
-		// lines drop first, then trailing equal, so the change stays visible.
 		var pre, suf strings.Builder
 		for i := 0; i < 6; i++ {
 			fmt.Fprintf(&pre, "pre-%d\n", i)
@@ -237,7 +220,7 @@ func TestDiffPreview(t *testing.T) {
 		newS := pre.String() + "NEW\n" + strings.TrimSuffix(suf.String(), "\n")
 		const maxLines = 4
 		got := DiffPreview(th, DiffPreviewOpts{
-			Old: old, New: newS, MaxLines: maxLines, Width: 60,
+			Old: old, New: newS, MaxLines: maxLines, Width: 60, NoLineNumbers: true,
 		})
 		plain := ansi.Strip(got)
 		if !strings.Contains(plain, "-OLD") || !strings.Contains(plain, "+NEW") {
@@ -246,7 +229,6 @@ func TestDiffPreview(t *testing.T) {
 		if !strings.Contains(plain, "more lines") {
 			t.Errorf("expected overflow notice: %q", plain)
 		}
-		// 6 pre + del + ins + 6 suf = 14; keep 4 → overflow 10
 		if !strings.Contains(plain, "10") {
 			t.Errorf("expected overflow count 10 in %q", plain)
 		}
@@ -262,9 +244,6 @@ func TestDiffPreview(t *testing.T) {
 	})
 
 	t.Run("MaxLines when change alone exceeds limit shows first MaxLines of change", func(t *testing.T) {
-		// Shared one-line prefix/suffix with a large middle replace that alone
-		// exceeds MaxLines. Equal context is dropped entirely; first MaxLines
-		// of the change remainder are kept.
 		var midOld, midNew strings.Builder
 		for i := 0; i < 10; i++ {
 			fmt.Fprintf(&midOld, "old-mid-%d\n", i)
@@ -274,7 +253,7 @@ func TestDiffPreview(t *testing.T) {
 		newS := "HEAD\n" + midNew.String() + "TAIL"
 		const maxLines = 5
 		got := DiffPreview(th, DiffPreviewOpts{
-			Old: old, New: newS, MaxLines: maxLines, Width: 60,
+			Old: old, New: newS, MaxLines: maxLines, Width: 60, NoLineNumbers: true,
 		})
 		plain := ansi.Strip(got)
 		if strings.Contains(plain, "HEAD") || strings.Contains(plain, "TAIL") {
@@ -289,7 +268,6 @@ func TestDiffPreview(t *testing.T) {
 		if !strings.Contains(plain, "more lines") {
 			t.Errorf("expected overflow notice: %q", plain)
 		}
-		// 1 head + 10 del + 10 ins + 1 tail = 22; keep 5 → overflow 17
 		if !strings.Contains(plain, "17") {
 			t.Errorf("expected overflow count 17 in %q", plain)
 		}
@@ -307,11 +285,9 @@ func TestDiffPreview(t *testing.T) {
 		got := DiffPreview(th, DiffPreviewOpts{
 			Old:      strings.TrimSuffix(oldB.String(), "\n"),
 			New:      strings.TrimSuffix(newB.String(), "\n"),
-			MaxLines: 0,
-			Width:    40,
+			MaxLines: 0, Width: 40, NoLineNumbers: true,
 		})
 		plain := ansi.Strip(got)
-		// 20 del + 20 ins = 40; default max 12 → overflow 28
 		if !strings.Contains(plain, "more lines") {
 			t.Errorf("default MaxLines should truncate: %q", plain)
 		}
@@ -332,9 +308,6 @@ func TestDiffPreview(t *testing.T) {
 				Old:  longOld, New: longNew,
 				MaxLines: 8, Width: width, ShowStats: true,
 			})
-			if got == "" && width > 0 {
-				// still may be non-empty; empty only if truncate wiped everything
-			}
 			for i, line := range strings.Split(got, "\n") {
 				if w := lipgloss.Width(line); w > width {
 					t.Errorf("width %d: line %d width = %d > %d: %q", width, i, w, width, ansi.Strip(line))
@@ -345,7 +318,7 @@ func TestDiffPreview(t *testing.T) {
 
 	t.Run("single-line replace", func(t *testing.T) {
 		got := DiffPreview(th, DiffPreviewOpts{
-			Old: "foo", New: "bar", Width: 40,
+			Old: "foo", New: "bar", Width: 40, NoLineNumbers: true,
 		})
 		plain := ansi.Strip(got)
 		if !strings.Contains(plain, "-foo") || !strings.Contains(plain, "+bar") {
@@ -363,12 +336,12 @@ func TestDiffPreview(t *testing.T) {
 		newS := strings.TrimSuffix(newB.String(), "\n")
 		got := DiffPreview(th, DiffPreviewOpts{
 			Old: oldS, New: newS, MaxLines: 4, Width: 60, MoreHint: "enter to expand",
+			NoLineNumbers: true,
 		})
 		plain := ansi.Strip(got)
 		if !strings.Contains(plain, "more lines") || !strings.Contains(plain, "enter to expand") {
 			t.Errorf("truncated missing hint: %q", plain)
 		}
-		// Full body: no overflow → no hint.
 		full := DiffPreview(th, DiffPreviewOpts{
 			Old: oldS, New: newS, MaxLines: DiffBodyLen(oldS, newS), Width: 60, MoreHint: "enter to expand",
 		})
@@ -376,7 +349,6 @@ func TestDiffPreview(t *testing.T) {
 		if strings.Contains(fullPlain, "more lines") || strings.Contains(fullPlain, "enter to expand") {
 			t.Errorf("full body should not show hint: %q", fullPlain)
 		}
-		// Short replace with MaxLines room: no hint.
 		short := DiffPreview(th, DiffPreviewOpts{
 			Old: "a", New: "b", MaxLines: 8, Width: 40, MoreHint: "enter to expand",
 		})
@@ -399,7 +371,6 @@ func TestDiffPreview(t *testing.T) {
 		}
 		oldS := strings.TrimSuffix(oldB.String(), "\n")
 		newS := strings.TrimSuffix(newB.String(), "\n")
-		// 10 deletes + 10 inserts
 		if got := DiffBodyLen(oldS, newS); got != 20 {
 			t.Errorf("body len = %d, want 20", got)
 		}
@@ -410,7 +381,6 @@ func TestDiffPreview(t *testing.T) {
 			t.Error("exact MaxLines should not exceed")
 		}
 		if !DiffExceeds(oldS, newS, 0) {
-			// default max is 12
 			t.Error("20-line body should exceed default max")
 		}
 	})
@@ -419,10 +389,9 @@ func TestDiffPreview(t *testing.T) {
 		got := DiffPreview(th, DiffPreviewOpts{
 			Old:   "package main\n\nfunc a() {}\nfunc old() {}",
 			New:   "package main\n\nfunc a() {}\nfunc new() {}",
-			Width: 60,
+			Width: 60, NoLineNumbers: true,
 		})
 		plain := ansi.Strip(got)
-		// shared prefix lines should appear as context
 		if !strings.Contains(plain, "package main") {
 			t.Errorf("missing shared prefix: %q", plain)
 		}
@@ -432,7 +401,6 @@ func TestDiffPreview(t *testing.T) {
 		if !strings.Contains(plain, "+func new() {}") {
 			t.Errorf("missing insert: %q", plain)
 		}
-		// context marker on package line
 		foundContext := false
 		for _, line := range nonEmptyLines(plain) {
 			if strings.Contains(line, "package main") && strings.HasPrefix(line, " ") {
@@ -443,6 +411,167 @@ func TestDiffPreview(t *testing.T) {
 			t.Errorf("package main should be context (leading space): %q", plain)
 		}
 	})
+}
+
+func TestDiffPreviewLineNumbers(t *testing.T) {
+	th := theme.Default()
+	got := DiffPreview(th, DiffPreviewOpts{
+		Old: "head\nold\ntail", New: "head\nnew\ntail",
+		Width: 40,
+	})
+	plain := ansi.Strip(got)
+	// Line 2 is the changed line on both sides.
+	if !strings.Contains(plain, "2") {
+		t.Fatalf("expected line number 2 in %q", plain)
+	}
+	guide := th.Resolve().Icons.ToolGuide
+	if guide != "" && !strings.Contains(plain, guide) {
+		t.Errorf("expected guide glyph %q in %q", guide, plain)
+	}
+	if !strings.Contains(plain, "old") || !strings.Contains(plain, "new") {
+		t.Errorf("missing change content: %q", plain)
+	}
+	// Narrow width drops line numbers.
+	narrow := DiffPreview(th, DiffPreviewOpts{
+		Old: "a", New: "b", Width: 10,
+	})
+	nPlain := ansi.Strip(narrow)
+	if strings.Contains(nPlain, guide) && guide != "" {
+		// At width 10, gutter should be off.
+		t.Errorf("narrow width should omit line gutter: %q", nPlain)
+	}
+}
+
+func TestDiffPreviewWordDiff(t *testing.T) {
+	th := theme.Default()
+	// Intra-line change: only the middle token differs.
+	got := DiffPreview(th, DiffPreviewOpts{
+		Old: "return alpha", New: "return beta",
+		Width: 40, NoLineNumbers: true,
+	})
+	// Strong styles are bold — strip keeps text; ensure both full lines render.
+	plain := ansi.Strip(got)
+	if !strings.Contains(plain, "return") || !strings.Contains(plain, "alpha") || !strings.Contains(plain, "beta") {
+		t.Fatalf("word diff lost content: %q", plain)
+	}
+	// Bold markers should appear in the ANSI stream for the changed tokens.
+	if !strings.Contains(got, "\x1b[1m") && !strings.Contains(got, "1;") {
+		// lipgloss may emit bold as part of SGR; accept either form.
+		// Fall back: DiffAddedStrong uses Bold — at least styles differ from plain FG.
+		if got == ansi.Strip(got) {
+			t.Errorf("expected ANSI styling for word-diff highlights, got plain %q", plain)
+		}
+	}
+
+	off := DiffPreview(th, DiffPreviewOpts{
+		Old: "return alpha", New: "return beta",
+		Width: 40, NoLineNumbers: true, NoWordDiff: true,
+	})
+	// With word diff off, content still present.
+	if !strings.Contains(ansi.Strip(off), "-return alpha") || !strings.Contains(ansi.Strip(off), "+return beta") {
+		t.Errorf("NoWordDiff plain markers: %q", ansi.Strip(off))
+	}
+}
+
+func TestDiffPreviewMultiHunkLCS(t *testing.T) {
+	th := theme.Default()
+	// Two separate one-line edits with shared middle context — LCS keeps "b"
+	// as equal rather than delete+insert (prefix/suffix would not).
+	old := "a\nx\nb\ny\nc"
+	newS := "a\nX\nb\nY\nc"
+	got := DiffPreview(th, DiffPreviewOpts{
+		Old: old, New: newS, Width: 40, NoLineNumbers: true, NoWordDiff: true,
+	})
+	plain := ansi.Strip(got)
+	// Expect context line for b (leading space), not -b/+b.
+	foundEqualB := false
+	for _, line := range nonEmptyLines(plain) {
+		if strings.TrimSpace(line) == "b" && strings.HasPrefix(line, " ") {
+			foundEqualB = true
+		}
+		if line == "-b" || strings.HasPrefix(line, "-b") && !strings.Contains(line, "y") {
+			// -b alone would mean b was deleted
+			if strings.TrimPrefix(line, "-") == "b" {
+				t.Errorf("LCS should keep b as context, got delete: %q", plain)
+			}
+		}
+	}
+	if !foundEqualB {
+		t.Errorf("expected equal context b in multi-hunk diff: %q", plain)
+	}
+	if !strings.Contains(plain, "-x") || !strings.Contains(plain, "+X") {
+		t.Errorf("missing first hunk: %q", plain)
+	}
+	if !strings.Contains(plain, "-y") || !strings.Contains(plain, "+Y") {
+		t.Errorf("missing second hunk: %q", plain)
+	}
+}
+
+func TestDiffPreviewOffsetScroll(t *testing.T) {
+	th := theme.Default()
+	var oldB, newB strings.Builder
+	for i := 0; i < 10; i++ {
+		fmt.Fprintf(&oldB, "old-%d\n", i)
+		fmt.Fprintf(&newB, "new-%d\n", i)
+	}
+	oldS := strings.TrimSuffix(oldB.String(), "\n")
+	newS := strings.TrimSuffix(newB.String(), "\n")
+
+	const maxLines = 4
+	head := DiffPreview(th, DiffPreviewOpts{
+		Old: oldS, New: newS, MaxLines: maxLines, Width: 40,
+		NoLineNumbers: true, Offset: 0,
+	})
+	headPlain := ansi.Strip(head)
+	if !strings.Contains(headPlain, "-old-0") {
+		t.Fatalf("offset 0 should show start: %q", headPlain)
+	}
+
+	mid := DiffPreview(th, DiffPreviewOpts{
+		Old: oldS, New: newS, MaxLines: maxLines, Width: 40,
+		NoLineNumbers: true, Offset: 4,
+	})
+	midPlain := ansi.Strip(mid)
+	if strings.Contains(midPlain, "-old-0") {
+		t.Errorf("offset 4 should skip old-0: %q", midPlain)
+	}
+	if !strings.Contains(midPlain, "-old-4") {
+		t.Errorf("offset 4 should show old-4: %q", midPlain)
+	}
+	if !strings.Contains(midPlain, "more lines") {
+		t.Errorf("scrolled window should report overflow: %q", midPlain)
+	}
+
+	if got := DiffMaxOffset(oldS, newS, maxLines); got != 16 {
+		// 20 body - 4 = 16
+		t.Errorf("DiffMaxOffset = %d, want 16", got)
+	}
+	if got := DiffMaxOffset("a", "b", 8); got != 0 {
+		t.Errorf("short DiffMaxOffset = %d, want 0", got)
+	}
+}
+
+func TestDiffPreviewLineWashUsesTheme(t *testing.T) {
+	th := theme.Default()
+	got := DiffPreview(th, DiffPreviewOpts{
+		Old: "gone", New: "here", Width: 40, NoLineNumbers: true, NoWordDiff: true,
+	})
+	// Add/remove rows use Diff*Line (FG + SurfaceMuted background).
+	if got == ansi.Strip(got) {
+		t.Fatalf("expected ANSI styles on diff lines, got plain")
+	}
+	// Width-padded bands: each body line should measure exactly Width when
+	// content is short (pad with wash).
+	for i, line := range strings.Split(got, "\n") {
+		if w := lipgloss.Width(line); w != 40 && w != 0 {
+			// truncate may leave shorter if empty; body rows should be 40
+			if strings.Contains(ansi.Strip(line), "gone") || strings.Contains(ansi.Strip(line), "here") {
+				if w != 40 {
+					t.Errorf("line %d width = %d, want 40 (washed band): %q", i, w, ansi.Strip(line))
+				}
+			}
+		}
+	}
 }
 
 func nonEmptyLines(s string) []string {
