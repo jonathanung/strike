@@ -95,7 +95,7 @@ var browserProtocolOps = []string{
 
 func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	// Timeline is host-safe and derived from SessionDir JSONL (always available).
-	c := capabilities{Live: s.hasLive(), Roots: s.opts.LiveHub != nil, Timeline: true, Sandbox: s.hasSandbox()}
+	c := capabilities{Live: s.hasLive(), Roots: s.opts.LiveHub != nil, Timeline: true, Sandbox: s.hasSandbox(), Diag: s.hasLive()}
 	var skills []map[string]any
 	if h := s.opts.Services; h != nil {
 		c.Auth, c.Catalog, c.Settings, c.History = h.Auth != nil, h.Catalog != nil, h.Settings != nil, h.History != nil
