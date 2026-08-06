@@ -18,10 +18,12 @@ const filesWindowID = "files"
 // filesRefreshInterval caps idle directory rescans (~1 Hz).
 const filesRefreshInterval = time.Second
 
-// filesOpenMsg requests opening a workspace-relative path from the files explorer.
-// .md paths route to /md-read; everything else uses /vim plumbing.
+// filesOpenMsg requests opening a workspace-relative path from the files
+// explorer or diagnostics pane. .md paths route to /md-read; everything else
+// uses /vim plumbing. Line is 1-based when set (0 = no line jump).
 type filesOpenMsg struct {
 	path string
+	line int
 }
 
 // filesRefreshMsg triggers a cheap re-list of expanded directories.
@@ -438,7 +440,8 @@ func configureFilesWindow(r windowRegistry, root string, files host.Files) windo
 }
 
 // openFilesExplorerPath opens a tree leaf: markdown via /md-read, else /vim.
-func (m Model) openFilesExplorerPath(path string) (tea.Model, tea.Cmd) {
+// line is 1-based when > 0 (diagnostics jump); ignored for markdown.
+func (m Model) openFilesExplorerPath(path string, line int) (tea.Model, tea.Cmd) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return m, nil
@@ -446,5 +449,5 @@ func (m Model) openFilesExplorerPath(path string) (tea.Model, tea.Cmd) {
 	if strings.EqualFold(filepath.Ext(path), ".md") {
 		return m.handleMDRead("/md-read "+path, []string{"/md-read"})
 	}
-	return m.openFileRef(fileRef{Path: path})
+	return m.openFileRef(fileRef{Path: path, Line: line})
 }

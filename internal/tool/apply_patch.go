@@ -128,6 +128,35 @@ func (applyPatchTool) Execute(ctx context.Context, args json.RawMessage, tc *Con
 		return Result{}, err
 	}
 
+	// Claim every path before commit so block policy can refuse the whole patch.
+	var overlapWarns []string
+	seenClaim := make(map[string]struct{})
+	claim := func(abs, rel string) error {
+		if abs == "" {
+			return nil
+		}
+		if _, ok := seenClaim[abs]; ok {
+			return nil
+		}
+		seenClaim[abs] = struct{}{}
+		w, err := tc.ClaimWrite(abs, rel)
+		if err != nil {
+			return err
+		}
+		if w != "" {
+			overlapWarns = append(overlapWarns, w)
+		}
+		return nil
+	}
+	for _, op := range planned {
+		if err := claim(op.AbsPath, op.RelPath); err != nil {
+			return Result{}, err
+		}
+		if err := claim(op.AbsMove, op.RelMove); err != nil {
+			return Result{}, err
+		}
+	}
+
 	for abs := range originals {
 		tc.SnapshotPath(abs)
 	}
@@ -138,6 +167,9 @@ func (applyPatchTool) Execute(ctx context.Context, args json.RawMessage, tc *Con
 	diagPaths := notifyPatchFileSync(tc, planned)
 
 	out := patchSuccessSummary(planned)
+	for _, w := range overlapWarns {
+		out = AppendOverlapWarning(out, w)
+	}
 	res := Result{
 		Title:    fmt.Sprintf("%d file(s)", len(planned)),
 		Output:   out,

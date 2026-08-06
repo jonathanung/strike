@@ -56,15 +56,15 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `pkg/timeline` | **Public** structured run timeline builder + versioned redacted JSON/JSONL export derived from protocol events (complements session JSONL and #774 roster/budget; not a second transcript) | `pkg/protocol`, `pkg/redact`, stdlib |
 | `pkg/sdk` | **Public** thin Go client over `pkg/protocol`: in-process channel client, JSONL encode/decode, `RunTurn`, session JSONL replay. Does not embed the engine (engine stays `internal/`). Consumer docs: [sdk.md](sdk.md) | `pkg/protocol`, stdlib only |
 | `internal/protocol` | Compatibility re-export of `pkg/protocol` (type aliases + thin forwards). Prefer `pkg/protocol` for new code | `pkg/protocol` only |
-| `internal/engine` | Headless agent runtime: built-in turn loop, task-subagent function harnesses, tool dispatch, permission/question integration, deferred agent switch; implicit session-scoped agent **team** (lead + children roster + shared task board in `team.go` / `team_board.go`); model-stream and bash admission via shared `scheduler` | `protocol`, `provider`, `harness`, `tool`, `permission`, `question`, `memory`, `config`, `sandbox`, `scheduler` |
+| `internal/engine` | Headless agent runtime: built-in turn loop, task-subagent function harnesses, tool dispatch, permission/question integration, deferred agent switch; implicit session-scoped agent **team** (lead + children roster + shared task board + path ownership/overlap in `team.go` / `team_board.go` / `ownership.go`); model-stream and bash admission via shared `scheduler` | `protocol`, `provider`, `harness`, `tool`, `permission`, `question`, `memory`, `config`, `sandbox`, `scheduler` |
 | `internal/harness` | Function-harness contract and named function registry; model calls return completed responses | `provider`, stdlib |
 | `internal/harness/external` | Private JSONL subprocess adapter from configured commands to `harness.Func` | `harness`, `provider`, stdlib, os/exec |
 | `internal/provider` | LLM provider abstraction: `Provider` interface, normalized `StreamEvent`s | stdlib |
 | `internal/provider/base` | Shared HTTP/JSON/SSE/auth client concrete adapters embed | `provider`, stdlib, net/http |
 | `internal/provider/{anthropic,openaicompat,chatgpt,google,echo}` | Concrete adapters (openaicompat covers OpenAI platform API, xAI, Kimi, DeepSeek; chatgpt is the ChatGPT-subscription backend; google is Google AI Studio generateContent; echo is the offline dev provider) | `provider`, `provider/base` (all but echo), stdlib |
-| `internal/sandbox` | OS-primitive process sandbox: `Wrap(argv, Policy)` via Linux `bwrap` / macOS `sandbox-exec`; Policy carries mode, write denials, network on/off, and optional `NetworkAllow` host/CIDR list (webfetch; shared shape for future container net); `Explain`/`ProfileText` for `/sandbox explain`; graceful degrade + startup warning when unavailable | stdlib only |
+| `internal/sandbox` | OS-primitive process sandbox: `Wrap(argv, Policy)` via Linux `bwrap` / macOS `sandbox-exec`; Policy carries mode, write denials, `NoNetwork` (host net on by default), and optional `NetworkAllow` host/CIDR list (webfetch; shared shape for future container net); `Explain`/`ProfileText` for `/sandbox explain`; graceful degrade + startup warning when unavailable | stdlib only |
 | `internal/scheduler` | Fair cancellable named-pool admission (process/build/test/model/container): context-aware acquire, atomic multi-pool leases, observer snapshots; layered limits + ordered command classification (`Compile` / `CompileWithPresets` → `Effective`); versioned build-system presets (`Catalog`, expand into ordinary limits/rules) | stdlib only |
-| `internal/tool` | Tool contract (`Tool`, `Context`, `Result`) + built-ins: read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/task_message/task_interrupt/agent_roster/agent_message/agent_broadcast/team_task/webfetch/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/phase_done/toolsearch; bash acquires scheduler pools after Ask; file tools call `FileSync` + `CollectDiagnostics` after mutations | `provider` (for `ToolSchema`), `memory`, `issue`, `sandbox`, `scheduler`, stdlib |
+| `internal/tool` | Tool contract (`Tool`, `Context`, `Result`) + built-ins: read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/task_message/task_interrupt/agent_roster/agent_ownership/agent_message/agent_broadcast/team_task/webfetch/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/phase_done/toolsearch; `PathOwnership` multi-agent path claims; bash acquires scheduler pools after Ask; file tools call `FileSync` + `CollectDiagnostics` after mutations | `provider` (for `ToolSchema`), `memory`, `issue`, `sandbox`, `scheduler`, stdlib |
 | `internal/mcp` | MCP client (stdio + streamable HTTP) + session manager; bridges tools onto `tool.Registry` as `mcp_<server>_<tool>`; retry/disable; tools-only stdio **server** (`Server`) for `strike mcp-serve` | `tool`, stdlib, net/http |
 | `internal/lsp` | LSP client (JSON-RPC 2.0 over stdio, Content-Length framing) + manager; extension→server registry; didOpen/didChange/didClose from file tools; collect `publishDiagnostics`; inject formatted diagnostics into file-tool Results (`CollectForPaths`); crash isolation | stdlib, os/exec |
 | `internal/memory` | Project-scoped durable key/value memory (JSON under `~/.strike/memory/`) | stdlib |
@@ -123,10 +123,12 @@ state. The registry holds right-pane windows: named session panes (`context` for
 setup summary and `activity` for subagent status, recent parent tools, or an
 empty-state line), an `agents` multi-root tree, a `visualizer` for the selected node's
 status/tokens/cost/tokens-per-turn sparkline, a `files` explorer (lazy tree via
-`host.Files.ListDir`), `memory` and `issues` browsers, a `markdown` reader
+`host.Files.ListDir`), a `diagnostics` browser (live language-server findings
+via `host.LSP`), `memory` and `issues` browsers, a `markdown` reader
 opened via `/md-read`, and an `editor` PTY window for `/vim`/`/nano`. Windows are
 organized into stack **groups** (session: context+activity; agents:
-agents+visualizer; project: memory+issues; singles: files/markdown/editor).
+agents+visualizer; files: files+diagnostics; project: memory+issues; singles:
+markdown/editor).
 When the right pane is large enough, multi-member groups render as a paired
 split (vertical in a side column, horizontal when the body split is a bottom
 bar); otherwise only the focused member is shown. Focus cycle walks members

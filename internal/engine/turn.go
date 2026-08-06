@@ -666,6 +666,8 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 				return e.acquireScheduler(ctx, corr, label, pools...)
 			},
 			Files:      e.files,
+			SessionID:  e.opts.SessionID,
+			MemberName: e.ownershipMemberName(),
 			Checkpoint: e.checkpoints.Snapshot,
 			// Record successful mutations only (post-write), not pre-mutation
 			// snapshots — failed tools must not appear in handoff files_changed.
@@ -758,6 +760,11 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			tc.AgentMessage = e.agentMessage
 			tc.AgentBroadcast = e.agentBroadcast
 			tc.TeamTask = e.teamTask
+			tc.Ownership = e.team.Ownership()
+			tc.OnOverlap = e.emitPathOverlap
+			tc.OwnershipQuery = e.ownershipQuery
+			tc.OwnershipLease = e.ownershipLease
+			tc.OwnershipReleaseLease = e.ownershipReleaseLease
 		}
 		tc.ChildWake = e.childWakeCh()
 		tc.HasChildNotice = e.hasPendingChildNotices
@@ -985,13 +992,13 @@ func (e *Engine) toolNames() string {
 // bashSandboxPolicy compiles the live permission layers into an OS sandbox
 // Policy for bash (write denials, network posture, plan hard-denies).
 // Attaches config network.allow for /sandbox explain (webfetch enforces it
-// separately; bash OS network stays all-or-nothing via Policy.Network).
+// separately; bash OS network stays all-or-nothing via NetworkEnabled).
 func (e *Engine) bashSandboxPolicy() sandbox.Policy {
 	mode := sandbox.ResolveMode(e.opts.SandboxMode)
 	var p sandbox.Policy
 	if e.perms == nil {
-		// No permission service: keep host networking (same as Defaults Ask).
-		p = sandbox.Policy{Mode: mode, WorkDir: e.opts.WorkDir, Network: true}
+		// No permission service: host networking on (Policy.NoNetwork zero value).
+		p = sandbox.Policy{Mode: mode, WorkDir: e.opts.WorkDir}
 	} else {
 		p = e.perms.CompileSandbox(mode, e.opts.WorkDir)
 	}

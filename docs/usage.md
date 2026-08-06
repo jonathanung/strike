@@ -106,7 +106,9 @@ strike launches without any provider configured. Pick one inside the TUI:
  /ftue                          # setup wizard: provider, model, optional
                                # /init, feature tour, scheduler presets,
                                # first prompt (manual)
-/mcp                           # MCP status; retry/disable servers
+ /mcp                           # MCP status; retry/disable servers
+ /lsp                           # language server status; retry/disable
+ /diagnostics                   # focus the diagnostics right pane
 /exit                          # quit strike (same as ctrl+c)
 /quit                          # alias of /exit
 # Keybind mirrors (same actions as chords; see keybinds.md and /keys):
@@ -149,7 +151,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/memory` | bare = list browser (focuses memory pane); `list [tag]`, `get <key>`, `set <key> <value>`, `rm <key>`, `export [path]`, `import <path> [--replace]` (portable JSON; relative paths stay under project root) |
 | `/queue` | browse prompts buffered while a turn runs: reorder (`shift+↑/↓` or `K`/`J`), promote (`p`), in-place edit (`enter`), load into composer (`e`), delete (`d`), clear (`c`), or interrupt and run the FIFO head next (`x`). Empty-composer `bksp` still pops the last item; idle `esc` clears the whole queue |
 | `/issues` | bare = list browser (focuses issues pane); `list [open\|closed]`, `add <title>`, `get <id>`, `close <id>`, `export [path]`, `import <path> [--replace]` (same portable rules as memory) |
-| `/agents` `/activity` `/files` `/visualizer` `/system` | jump focus to the named right pane (`/agent` remains persona select; `/system` needs telemetry on) |
+| `/agents` `/activity` `/files` `/diagnostics` `/visualizer` `/system` | jump focus to the named right pane (`/agent` remains persona select; `/system` needs telemetry on) |
 | `/telemetry [on\|off\|status]` | local system metrics pane (CPU/RAM/disk); **on by default** (~1 Hz sampler). Disable with `/telemetry off` |
 | `/loop` | schedule a recurring prompt (`15m`, `2h`, …); session-only; `/loop list`, `/loop stop [id]` — see [loop.md](loop.md). Distinct from [`/goal`](goal.md) |
 | `/context` | context doctor modal: system-prompt layer sizes, history msg count, **request token attribution** (system / tools / messages / tool_results; local ~4 chars/token estimate, labeled `estimated`), oversized warnings (previews redacted) |
@@ -157,6 +159,8 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/init` | light local scan → write `AGENTS.md`; confirms before overwrite |
 | `/ftue` | setup wizard composing provider connect, model pick, optional `/init`, a skippable feature tour (panes, agents, permissions, autonomy, keys, commands), optional scheduler build-system presets (checkbox catalog with rule/limit preview; apply writes global `scheduler.presets` atomically and preserves custom limits/rules), and first-prompt guidance; opening does not change settings; tour copy uses live keybinds and omits unavailable surfaces; Finish focuses the composer; esc dismisses. Finish/dismiss acknowledge global onboarding so auto-open does not repeat; manual `/ftue` stays available. Child pickers/tour/presets return to the same wizard step |
 | `/mcp` | MCP status (`up`/`down`/`error`/`disabled`); `/mcp retry [name]`, `/mcp disable <name>` (see [config.md](config.md#mcp-servers-stdio--http)) |
+| `/lsp` | language server status; `/lsp retry [name]`, `/lsp disable <name>` (see [config.md](config.md#language-servers-lsp)) |
+| `/diagnostics` | focus the diagnostics right pane (live language-server findings) |
 
 ### Agent teams
 
