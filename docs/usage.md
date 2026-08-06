@@ -282,6 +282,7 @@ or config `providers` — see [config.md](config.md).
 ./strike exec --output-format stream-json "…"  # protocol Event envelopes (JSONL)
 ./strike rpc --provider echo     # stdio JSON-RPC Op/Event bridge (NDJSON)
 ./strike acp --provider echo     # Agent Client Protocol agent (Zed / Devin)
+./strike mcp-serve --provider echo --auto   # MCP server (stdio) for hosts
 ```
 
 System telemetry (local host CPU/RAM/disk only — not cloud analytics) is **on
@@ -318,6 +319,26 @@ so editors like Zed and Devin Desktop can embed strike as an ACP agent. It maps
 (`user.input`, `interrupt`, tool and text events as `session/update`, permission
 asks as `session/request_permission`). Stdout is pure ACP JSON-RPC; diagnostics
 on stderr. See `strike acp --help`.
+
+### MCP server mode (`strike mcp-serve`)
+
+Exposes strike as a tools-only [MCP](https://modelcontextprotocol.io) server on
+stdio so hosts (Claude Code, Codex, …) can delegate work via a `strike_task`
+tool. Each call runs one headless turn (same engine path as `strike exec`) and
+returns the assistant summary. Wire traffic is stdout; diagnostics go to
+stderr. Same provider/model/effort/sandbox/`--auto` flags as exec. Example host
+config:
+
+```json
+{
+  "mcpServers": {
+    "strike": {
+      "command": "strike",
+      "args": ["mcp-serve", "--provider", "anthropic", "--auto"]
+    }
+  }
+}
+```
 
 ## UI
 

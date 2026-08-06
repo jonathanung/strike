@@ -23,6 +23,7 @@ const expectedUsage = `Usage:
   strike rpc [options]
   strike acp [options]
   strike serve [options]
+  strike mcp-serve [options]
   strike auth <command> [arguments]
   strike restore [options]
   strike version
