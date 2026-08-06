@@ -353,10 +353,11 @@ Two different mechanisms, depending on whether it needs Go code:
   `/<name>` on the next launch automatically, through
    `host.Services.Skills`. Reserved names (`provider`, `model`, `effort`,
    `autonomy`, `auth`, `settings`, `agent`, `agents`, `activity`, `files`,
-   `visualizer`, `system`, `telemetry`, `pets`, `fast`, `vim`, `nano`, `md-read`,
+   `visualizer`, `system`, `telemetry`, `fast`, `vim`, `nano`, `md-read`,
    `theme`, `layout`, `split`, `compact`, `fork`, `undo`, `rewind`, `session`,
-   `export`, `timeline`, `copy`, `help`, `keys`, `legend`, `memory`, `issues`, `goal`, `loop`, `context`,
-   `effective-prompt`, `cost`, `upgrade`, `init`, `ftue`, `mcp`, `exit`, `quit`, and
+   `export`, `copy`, `help`, `keys`, `legend`, `memory`, `issues`, `goal`, `loop`,
+   `workflow`, `context`,
+   `effective-prompt`, `cost`, `upgrade`, `init`, `mcp`, `exit`, `quit`, and
    keybind-backed action mirrors such as `focus-left`, `palette`,
    `interrupt`, `agent-next`, `tool-copy`, `subagent`, `root-new`, …) are
    rejected by `config.ValidateSkillName` before they ever reach the frontend.
@@ -431,7 +432,7 @@ Same package `internal/tui`; split for reviewability only (no subpackages).
    `internal/host/host.go`. This package is a stdlib-only contract — no
    importing `auth`, `config`, `models`, or `history` here, even for a type
    reference (the boundary test fails the build otherwise). Look at
-    `Auth`/`Catalog`/`Settings`/`History`/`Memory`/`Issues`/`Plans`/`Goals`/`Files` for the shape: small,
+    `Auth`/`Catalog`/`Settings`/`History`/`Memory`/`Issues`/`Plans`/`Goals`/`Workflows`/`Files` for the shape: small,
   frontend-facing, `context`-aware when it may block.
 2. Implement it in `internal/host/local/` (e.g. `local.go`, `files.go`),
   wrapping the real backend package. This package is the seam that is allowed

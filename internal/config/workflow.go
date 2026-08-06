@@ -41,6 +41,9 @@ const (
 	WorkflowSourceGlobal WorkflowSource = "global"
 	// WorkflowSourceProject is <project>/.strike/workflows.
 	WorkflowSourceProject WorkflowSource = "project"
+	// WorkflowSourcePlugin is a plugin-contributed definition (reserved for
+	// plugin loaders; distinguishable in catalog UX).
+	WorkflowSourcePlugin WorkflowSource = "plugin"
 )
 
 // ExitGate declares how a phase is cleared before the next phase loads.
@@ -72,7 +75,7 @@ type Workflow struct {
 	Description   string  `json:"description,omitempty"`
 	Phases        []Phase `json:"phases"`
 
-	// Source is builtin|global|project after LoadWorkflows / LoadWorkflowFile.
+	// Source is builtin|global|project|plugin after LoadWorkflows / LoadWorkflowFile.
 	Source WorkflowSource `json:"-"`
 	// Path is the absolute file path for disk-backed workflows.
 	Path string `json:"-"`

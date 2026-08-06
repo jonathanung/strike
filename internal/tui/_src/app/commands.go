@@ -52,6 +52,7 @@ const (
 	commandIssues          commandID = "issues"
 	commandGoal            commandID = "goal"
 	commandLoop            commandID = "loop"
+	commandWorkflow        commandID = "workflow"
 	commandContext         commandID = "context"
 	commandEffectivePrompt commandID = "effective-prompt"
 	commandCost            commandID = "cost"
@@ -155,6 +156,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandIssues, Name: "/issues", Description: "list, add, get, close, export, or import project issues", ArgsHint: "[list|add|get|close|export|import] ...", Source: commandSourceBuiltin},
 	{ID: commandGoal, Name: "/goal", Description: "loop harness: set, run, status, pause, resume, abort, log, list", ArgsHint: "[set|run|status|pause|resume|abort|log|list] ...", Source: commandSourceBuiltin},
 	{ID: commandLoop, Name: "/loop", Description: "schedule a recurring LLM job (session-only)", ArgsHint: "[interval job|list|stop [id]]", Source: commandSourceBuiltin},
+	{ID: commandWorkflow, Name: "/workflow", Description: "list, inspect, start, or stop loaded workflows", ArgsHint: "[list|inspect|start|stop] ...", Source: commandSourceBuiltin},
 	{ID: commandContext, Name: "/context", Description: "context doctor: system-prompt layer breakdown", Source: commandSourceBuiltin},
 	{ID: commandEffectivePrompt, Name: "/effective-prompt", Description: "context doctor: system-prompt layer breakdown", Source: commandSourceBuiltin},
 	{ID: commandCost, Name: "/cost", Description: "session token and cost totals", Source: commandSourceBuiltin},
@@ -262,6 +264,7 @@ var reservedCommandNames = map[string]struct{}{
 	"issues":           {},
 	"goal":             {},
 	"loop":             {},
+	"workflow":         {},
 	"context":          {},
 	"effective-prompt": {},
 	"cost":             {},

@@ -262,6 +262,8 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		return m.handleGoalCommand(fields[1:])
 	case "/loop":
 		return m.handleLoopCommand(text, fields[1:])
+	case "/workflow":
+		return m.handleWorkflowCommand(fields[1:])
 	case "/context", "/effective-prompt":
 		m.resetComposer()
 		m.clearNotice()

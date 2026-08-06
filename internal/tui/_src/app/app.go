@@ -260,7 +260,14 @@ type Model struct {
 	// phaseName is the active workflow phase (empty = none); shown in header.
 	phaseName     string
 	phaseWorkflow string
-	effort        protocol.Effort
+	// phaseGate is the effective exit-gate label from PhaseChanged (autonomy).
+	phaseGate string
+	// phaseSource / phaseFingerprint bind the active definition identity.
+	phaseSource      string
+	phaseFingerprint string
+	// phaseStatus is empty while healthy; missing|mismatch for resume recovery.
+	phaseStatus string
+	effort      protocol.Effort
 	// autonomy is the session exit-gate policy; default supervised.
 	autonomy protocol.Autonomy
 	// permMode is the session tool-permission posture dial; default default.
@@ -994,6 +1001,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case initResultMsg:
 		return m.applyInitResult(msg)
+
+	case workflowStartResultMsg:
+		return m.handleWorkflowStartResult(msg)
 
 	case bangResultMsg:
 		return m.applyBangResult(msg)
