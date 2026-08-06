@@ -107,12 +107,17 @@ err = sdk.WriteSession(path, events) // fixtures / offline tooling
 
 ## Stability
 
-- Wire schema version: `protocol.Version` (see `pkg/protocol` package doc).
+- Wire schema version: `protocol.Version` (see `pkg/protocol` package doc and
+  [protocol.md](protocol.md)).
+- Compatibility: additive optional fields OK; renames need a major bump.
+  Unknown **event** type strings decode as `protocol.UnknownEvent` (skip in
+  type switches; `protocol.IsUnknown`). Unknown **ops** still fail decode.
 - `pkg/sdk` APIs follow the strike-cli Go module version; prefer additive
   changes. Do not fork envelope type strings here — change `pkg/protocol`.
 
 ## Related
 
+- [Protocol wire schema](protocol.md) — envelopes, harness events, extensions
 - [Architecture](ARCHITECTURE.md) — dataflow and package table
 - [Web cockpit](web.md) — live ops over HTTP/WebSocket
 - [Harnesses](harnesses.md) — task function harnesses (`sdk/go/harness`, …)

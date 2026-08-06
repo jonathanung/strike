@@ -5,7 +5,7 @@
 ```
 cmd/strike/            main.go: flags/usage/auth/exec/rpc/acp/serve subcommands;
                        wire.go: composition root (engine + host + tui wiring)
-pkg/protocol/          public Op/Event wire schema (semver Version)
+pkg/protocol/          public Op/Event wire schema (semver Version; docs/protocol.md)
 pkg/sdk/               public Go client over pkg/protocol (see docs/sdk.md)
 internal/protocol/     compatibility re-export of pkg/protocol
 internal/rpc/          stdio JSON-RPC 2.0 transport (strike rpc; ops in, events out)

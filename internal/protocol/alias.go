@@ -192,6 +192,7 @@ type (
 	DiagnosticBundle        = pub.DiagnosticBundle
 	ContextFitWarning       = pub.ContextFitWarning
 	ContextControlsSelected = pub.ContextControlsSelected
+	UnknownEvent            = pub.UnknownEvent
 )
 
 // Status / label constants.
@@ -290,6 +291,7 @@ func UnknownTokens() TokenCount                 { return pub.UnknownTokens() }
 func Wrap(ev Event) (Envelope, error)           { return pub.Wrap(ev) }
 func WrapOp(op Op) (OpEnvelope, error)          { return pub.WrapOp(op) }
 func RewindPoints(events []Event) []RewindPoint { return pub.RewindPoints(events) }
+func IsUnknown(ev Event) bool                   { return pub.IsUnknown(ev) }
 
 func ToolFeedbackPermissionDenied(reason string) string {
 	return pub.ToolFeedbackPermissionDenied(reason)
