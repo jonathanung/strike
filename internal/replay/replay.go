@@ -1,6 +1,7 @@
 // Package replay provides deterministic session replay against the offline
 // echo provider for eval and regression harnesses (epic E3), plus run
-// recording, branch-from-event, and structured compare (#791).
+// recording, branch-from-event, structured compare (#791), and multi-agent
+// run snapshots (#782).
 //
 // A golden JSONL session is a recorded protocol event log. Replay extracts
 // user inputs, re-runs them through the engine with echo, and diffs the
@@ -9,9 +10,15 @@
 //
 // Recording (recording.go) derives a versioned, secret-redacted artifact with
 // settings digests, tool results, provider attempts, handoff/gate fields, and
-// nondeterministic markers. Schema concepts are shared with multi-agent run
-// snapshots (#782). CompareRecordings produces structured deltas; BranchFromEvent
-// forks a session JSONL prefix without replaying live side effects.
+// nondeterministic markers. CompareRecordings produces structured deltas;
+// BranchFromEvent forks a session JSONL prefix without replaying live side effects.
+//
+// RunSnapshot (snapshot.go) is the multi-agent counterpart: a compact spawn +
+// optional completion capture (prompt, context bundle, model/tools/permissions,
+// repo identity, config digests, handoff/gates) that complements session JSONL
+// rather than duplicating the full transcript. Persist under ~/.strike/runs/,
+// load for offline echo replay (ReplayRunSnapshot), and diff with
+// CompareRunSnapshots. Field concepts are shared with Recording.
 //
 // Prompt regression (E3.2) builds on the same harness: CollectMetrics reports
 // tool-call count, turn count, and token/system-prompt deltas per scenario.
