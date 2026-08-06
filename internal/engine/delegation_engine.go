@@ -44,16 +44,17 @@ func (e *Engine) delegate(ctx context.Context, req tool.DelegateRequest) (tool.D
 
 	case "create":
 		res, err := e.spawnChild(ctx, tool.TaskRequest{
-			Prompt:    req.Prompt,
-			Name:      req.Name,
-			Agent:     req.Agent,
-			Model:     req.Model,
-			Effort:    req.Effort,
-			Criteria:  req.Criteria,
-			Deps:      req.Deps,
-			Subscribe: req.Subscribe,
-			Assignee:  req.Assignee,
-			Verify:    req.Verify,
+			Prompt:        req.Prompt,
+			Name:          req.Name,
+			Agent:         req.Agent,
+			Model:         req.Model,
+			Effort:        req.Effort,
+			Criteria:      req.Criteria,
+			Deps:          req.Deps,
+			Subscribe:     req.Subscribe,
+			Assignee:      req.Assignee,
+			Verify:        req.Verify,
+			ContextBundle: req.ContextBundle,
 		})
 		if err != nil {
 			return tool.DelegateResult{}, err
@@ -188,6 +189,7 @@ func (e *Engine) createDelegationForTask(req tool.TaskRequest) (Delegation, bool
 		Name:           req.Name,
 		Verify:         req.Verify,
 		Budget:         budget,
+		ContextBundle:  req.ContextBundle,
 	})
 	if err != nil {
 		return Delegation{}, false, err

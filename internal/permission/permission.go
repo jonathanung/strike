@@ -47,7 +47,8 @@ var knownPermissions = map[string]struct{}{
 	"memory_write": {}, "memory_read": {}, "issue_write": {}, "issue_read": {},
 	"plan_write": {}, "plan_read": {}, "plan_delegate": {},
 	"artifact_write": {}, "artifact_read": {},
-	"sleep": {}, "skill": {}, "question": {}, "toolsearch": {}, "hook": {},
+	"context_bundle": {},
+	"sleep":          {}, "skill": {}, "question": {}, "toolsearch": {}, "hook": {},
 	"phase_check":     {},
 	"enter_plan_mode": {}, "exit_plan_mode": {}, "phase_done": {},
 	// LSP navigation (read-only; deferred tools when deferTools is on).
@@ -137,6 +138,8 @@ func Defaults() Ruleset {
 		// owner vs team access separately from these permission rules.
 		{Permission: "artifact_write", Pattern: "*", Action: Allow},
 		{Permission: "artifact_read", Pattern: "*", Action: Allow},
+		// Sealed spawn context package (children read goal/paths/artifacts).
+		{Permission: "context_bundle", Pattern: "*", Action: Allow},
 		{Permission: "sleep", Pattern: "*", Action: Allow},
 		{Permission: "skill", Pattern: "*", Action: Allow},
 		{Permission: "question", Pattern: "*", Action: Allow},

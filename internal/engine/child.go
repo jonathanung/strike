@@ -117,17 +117,18 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 // spawnChildForDelegation starts a child for an existing queued delegation.
 func (e *Engine) spawnChildForDelegation(ctx context.Context, d Delegation) (tool.TaskResult, error) {
 	req := tool.TaskRequest{
-		Prompt:    d.Prompt,
-		Name:      d.Name,
-		Agent:     d.Agent,
-		Model:     d.Model,
-		Effort:    d.Effort,
-		Criteria:  d.Criteria,
-		Deps:      d.Deps,
-		Subscribe: d.Subscribe,
-		Assignee:  d.Assignee,
-		Verify:    append([]tool.VerifyGate(nil), d.Verify...),
-		Budget:    d.Budget,
+		Prompt:        d.Prompt,
+		Name:          d.Name,
+		Agent:         d.Agent,
+		Model:         d.Model,
+		Effort:        d.Effort,
+		Criteria:      d.Criteria,
+		Deps:          d.Deps,
+		Subscribe:     d.Subscribe,
+		Assignee:      d.Assignee,
+		Verify:        append([]tool.VerifyGate(nil), d.Verify...),
+		Budget:        d.Budget,
+		ContextBundle: d.ContextBundle.Clone(),
 	}
 	return e.spawnChildInner(ctx, req, d.ID)
 }
@@ -172,6 +173,12 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 	childEffort := e.effort
 	if effortPin.lock {
 		childEffort = effortPin.level
+	}
+
+	// Normalize sealed context bundle before side effects.
+	childBundle, err := tool.NormalizeContextBundle(req.ContextBundle)
+	if err != nil {
+		return tool.TaskResult{}, err
 	}
 
 	// Optional stable teammate alias: validate + uniqueness before side effects.
@@ -288,6 +295,10 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 	if phaseRules := e.perms.PhaseRules(); len(phaseRules) > 0 {
 		parentLayers = append(parentLayers, phaseRules)
 	}
+	// Bundle allowed_paths scopes child FS tools when sealed at spawn.
+	if scope := bundlePathScopeRules(childBundle.AllowedPaths); len(scope) > 0 {
+		parentLayers = append(parentLayers, scope)
+	}
 	child := New(Options{
 		SessionID:                  childID,
 		ParentSessionID:            e.opts.SessionID,
@@ -295,6 +306,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		Depth:                      childDepth,
 		MaxChildDepth:              maxDepth,
 		TaskOneShot:                true,
+		ContextBundle:              childBundle,
 		Team:                       e.team, // share lead roster; nested enrolls on same team
 		Select:                     e.opts.Select,
 		Registry:                   childReg,
@@ -443,10 +455,11 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 	}
 
 	startedEv := protocol.ChildStarted{
-		Correlation: childCorr,
-		Agent:       agentName,
-		Prompt:      req.Prompt,
-		Name:        memberName,
+		Correlation:   childCorr,
+		Agent:         agentName,
+		Prompt:        req.Prompt,
+		Name:          memberName,
+		ContextBundle: protocolContextBundle(childBundle),
 	}
 	e.emit(startedEv)
 	e.persistChildEvent(childID, startedEv)
@@ -589,6 +602,9 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		if strings.TrimSpace(handoff.Summary) == "" {
 			handoff.Summary = defaultHandoffSummary(status)
 		}
+
+		// Missing sealed context → blocked (do not treat as successful done).
+		status = applyMissingContextStatus(status, &handoff)
 
 		// Independent verification gates: implementer-done ≠ harness-verified.
 		// Only when the child claimed a successful completion and gates were
@@ -1191,6 +1207,20 @@ func toolHandoff(h protocol.CompletionHandoff) tool.CompletionHandoff {
 	if blockers == nil {
 		blockers = []string{}
 	}
+	var missing []tool.MissingContextEntry
+	if len(h.MissingContext) > 0 {
+		missing = make([]tool.MissingContextEntry, 0, len(h.MissingContext))
+		for _, e := range h.MissingContext {
+			missing = append(missing, tool.MissingContextEntry{
+				Kind:       e.Kind,
+				Path:       e.Path,
+				Question:   e.Question,
+				ArtifactID: e.ArtifactID,
+				ItemID:     e.ItemID,
+				Detail:     e.Detail,
+			})
+		}
+	}
 	return tool.CompletionHandoff{
 		Summary:               h.Summary,
 		FilesChanged:          files,
@@ -1198,6 +1228,8 @@ func toolHandoff(h protocol.CompletionHandoff) tool.CompletionHandoff {
 		Findings:              findings,
 		Blockers:              blockers,
 		RecommendedNextAction: h.RecommendedNextAction,
+		MissingContext:        missing,
+		Provenance:            append([]string(nil), h.Provenance...),
 		Incomplete:            h.Incomplete,
 	}
 }

@@ -50,6 +50,9 @@ func (taskTool) Description() string {
   Exceeding a hard limit interrupts the child, emits child.escalated, and notifies the owner.
   Session defaults come from config session.agentBudget; spawn fields overlay non-zero values.
   Session maxSessionCostUSD (when configured) remains the outer cost envelope.
+- Optional context_bundle seals goal, acceptance, allowed/required paths, artifact refs,
+  constraints, addressable items, and file pins. The child reads it via context_bundle;
+  missing_context on the completion handoff blocks rather than hallucinating.
 - Creates a delegation lifecycle object (id dN) even for plain spawns; see also delegate tool.
 - Nested task depth is bounded by MaxChildDepth (default 1: children cannot nest). Bound fan-out.
 - Parent→owned-child control: task_status / task_read / task_message / task_interrupt
@@ -113,6 +116,64 @@ func (taskTool) Schema() json.RawMessage {
 					"loop_detect_n": {"type": "integer", "description": "Hard-escalate (block) when the same tool name repeats N times; soft loop signal defaults to 6"}
 				},
 				"additionalProperties": false
+			},
+			"context_bundle": {
+				"type": "object",
+				"description": "Optional sealed context package: goal, acceptance, allowed/required paths, artifact refs, constraints, items, file_pins. Child reads via context_bundle tool",
+				"properties": {
+					"goal": {"type": "string"},
+					"acceptance": {"type": "array", "items": {"type": "string"}},
+					"allowed_paths": {"type": "array", "items": {"type": "string"}, "description": "When set, scopes child read/edit/write to these workspace-relative globs"},
+					"required_paths": {"type": "array", "items": {"type": "string"}},
+					"artifacts": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"id": {"type": "string"},
+								"version": {"type": "integer"},
+								"type": {"type": "string"}
+							},
+							"required": ["id"]
+						}
+					},
+					"constraints": {"type": "array", "items": {"type": "string"}},
+					"items": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"id": {"type": "string"},
+								"kind": {"type": "string"},
+								"title": {"type": "string"},
+								"text": {"type": "string"},
+								"path": {"type": "string"},
+								"hash": {"type": "string"},
+								"artifact": {
+									"type": "object",
+									"properties": {
+										"id": {"type": "string"},
+										"version": {"type": "integer"},
+										"type": {"type": "string"}
+									}
+								}
+							},
+							"required": ["id"]
+						}
+					},
+					"file_pins": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"path": {"type": "string"},
+								"hash": {"type": "string"},
+								"text": {"type": "string"}
+							},
+							"required": ["path"]
+						}
+					}
+				}
 			}
 		},
 		"required": ["prompt"]
@@ -120,17 +181,18 @@ func (taskTool) Schema() json.RawMessage {
 }
 
 type taskArgs struct {
-	Prompt    string            `json:"prompt"`
-	Name      string            `json:"name"`
-	Agent     string            `json:"agent"`
-	Model     string            `json:"model"`
-	Effort    string            `json:"effort"`
-	Criteria  []string          `json:"criteria"`
-	Deps      []string          `json:"deps"`
-	Subscribe []string          `json:"subscribe"`
-	Assignee  string            `json:"assignee"`
-	Verify    []VerifyGate      `json:"verify"`
-	Budget    AgentBudgetLimits `json:"budget"`
+	Prompt        string            `json:"prompt"`
+	Name          string            `json:"name"`
+	Agent         string            `json:"agent"`
+	Model         string            `json:"model"`
+	Effort        string            `json:"effort"`
+	Criteria      []string          `json:"criteria"`
+	Deps          []string          `json:"deps"`
+	Subscribe     []string          `json:"subscribe"`
+	Assignee      string            `json:"assignee"`
+	Verify        []VerifyGate      `json:"verify"`
+	Budget        AgentBudgetLimits `json:"budget"`
+	ContextBundle ContextBundle     `json:"context_bundle"`
 }
 
 func (taskTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
@@ -145,6 +207,10 @@ func (taskTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	if err != nil {
 		return Result{}, err
 	}
+	bundle, err := NormalizeContextBundle(a.ContextBundle)
+	if err != nil {
+		return Result{}, err
+	}
 	if err := tc.Ask(ctx, AskRequest{Permission: "task", Patterns: []string{"*"}, Always: []string{"*"}}); err != nil {
 		return Result{}, err
 	}
@@ -152,17 +218,18 @@ func (taskTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 		return Result{}, fmt.Errorf("task is not available")
 	}
 	res, err := tc.SpawnTask(ctx, TaskRequest{
-		Prompt:    a.Prompt,
-		Name:      a.Name,
-		Agent:     a.Agent,
-		Model:     a.Model,
-		Effort:    a.Effort,
-		Criteria:  a.Criteria,
-		Deps:      a.Deps,
-		Subscribe: a.Subscribe,
-		Assignee:  a.Assignee,
-		Verify:    gates,
-		Budget:    a.Budget,
+		Prompt:        a.Prompt,
+		Name:          a.Name,
+		Agent:         a.Agent,
+		Model:         a.Model,
+		Effort:        a.Effort,
+		Criteria:      a.Criteria,
+		Deps:          a.Deps,
+		Subscribe:     a.Subscribe,
+		Assignee:      a.Assignee,
+		Verify:        gates,
+		Budget:        a.Budget,
+		ContextBundle: bundle,
 	})
 	if err != nil {
 		return Result{}, err

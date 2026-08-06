@@ -54,6 +54,13 @@ func RedactEvent(ev protocol.Event) protocol.Event {
 		e.Body = redact.String(e.Body)
 		e.Summary = redact.String(e.Summary)
 		return e
+	case protocol.ChildStarted:
+		e.Prompt = redact.String(e.Prompt)
+		if e.ContextBundle != nil {
+			b := redactContextBundle(*e.ContextBundle)
+			e.ContextBundle = &b
+		}
+		return e
 	case protocol.ChildCompleted:
 		e.Summary = redact.String(e.Summary)
 		e.Handoff = redactHandoff(e.Handoff)
@@ -137,6 +144,7 @@ func redactHandoff(h protocol.CompletionHandoff) protocol.CompletionHandoff {
 	h.Findings = redactStrings(h.Findings)
 	h.Blockers = redactStrings(h.Blockers)
 	h.FilesChanged = redactStrings(h.FilesChanged)
+	h.Provenance = redactStrings(h.Provenance)
 	if len(h.ArtifactRefs) > 0 {
 		refs := make([]protocol.ArtifactRef, len(h.ArtifactRefs))
 		copy(refs, h.ArtifactRefs)
@@ -146,7 +154,67 @@ func redactHandoff(h protocol.CompletionHandoff) protocol.CompletionHandoff {
 		}
 		h.ArtifactRefs = refs
 	}
+	if len(h.MissingContext) > 0 {
+		mc := make([]protocol.MissingContextEntry, len(h.MissingContext))
+		copy(mc, h.MissingContext)
+		for i := range mc {
+			mc[i].Kind = redact.String(mc[i].Kind)
+			mc[i].Path = redact.String(mc[i].Path)
+			mc[i].Question = redact.String(mc[i].Question)
+			mc[i].ArtifactID = redact.String(mc[i].ArtifactID)
+			mc[i].ItemID = redact.String(mc[i].ItemID)
+			mc[i].Detail = redact.String(mc[i].Detail)
+		}
+		h.MissingContext = mc
+	}
 	return h
+}
+
+func redactContextBundle(b protocol.ContextBundle) protocol.ContextBundle {
+	b.Goal = redact.String(b.Goal)
+	b.Acceptance = redactStrings(b.Acceptance)
+	b.AllowedPaths = redactStrings(b.AllowedPaths)
+	b.RequiredPaths = redactStrings(b.RequiredPaths)
+	b.Constraints = redactStrings(b.Constraints)
+	if len(b.Artifacts) > 0 {
+		refs := make([]protocol.ArtifactRef, len(b.Artifacts))
+		copy(refs, b.Artifacts)
+		for i := range refs {
+			refs[i].ID = redact.String(refs[i].ID)
+			refs[i].Type = redact.String(refs[i].Type)
+		}
+		b.Artifacts = refs
+	}
+	if len(b.Items) > 0 {
+		items := make([]protocol.ContextBundleItem, len(b.Items))
+		copy(items, b.Items)
+		for i := range items {
+			items[i].ID = redact.String(items[i].ID)
+			items[i].Kind = redact.String(items[i].Kind)
+			items[i].Title = redact.String(items[i].Title)
+			items[i].Text = redact.String(items[i].Text)
+			items[i].Path = redact.String(items[i].Path)
+			items[i].Hash = redact.String(items[i].Hash)
+			if items[i].Artifact != nil {
+				ref := *items[i].Artifact
+				ref.ID = redact.String(ref.ID)
+				ref.Type = redact.String(ref.Type)
+				items[i].Artifact = &ref
+			}
+		}
+		b.Items = items
+	}
+	if len(b.FilePins) > 0 {
+		pins := make([]protocol.ContextFilePin, len(b.FilePins))
+		copy(pins, b.FilePins)
+		for i := range pins {
+			pins[i].Path = redact.String(pins[i].Path)
+			pins[i].Hash = redact.String(pins[i].Hash)
+			pins[i].Text = redact.String(pins[i].Text)
+		}
+		b.FilePins = pins
+	}
+	return b
 }
 
 func redactVerification(r protocol.VerificationReport) protocol.VerificationReport {

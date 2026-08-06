@@ -219,6 +219,10 @@ type Options struct {
 	// passes the resolved root so nested children keep a stable owner id for
 	// plan tools and similar root-owned artifacts.
 	RootSessionID string
+	// ContextBundle is the sealed context package attached at spawn for this
+	// engine (children only). Exposed on tool.Context and via context_bundle;
+	// empty means no bundle. Root engines leave this zero.
+	ContextBundle tool.ContextBundle
 	// Team is the implicit session-scoped agent team (lead + children).
 	// Root engines create one in New when nil. Child engines receive the
 	// lead's shared pointer from spawnChild so nested descendants enroll on

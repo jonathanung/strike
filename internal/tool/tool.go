@@ -114,6 +114,10 @@ type TaskRequest struct {
 	// engine applies structured handoff fields to that section only.
 	PlanID    string
 	SectionID string
+	// ContextBundle is an optional sealed context package (goal, paths,
+	// artifact refs, constraints, file pins). Attached at spawn for the child
+	// to read via context_bundle; included on child.started for snapshots.
+	ContextBundle ContextBundle
 }
 
 // AgentBudgetLimits are optional per-child resource bounds.
@@ -186,13 +190,15 @@ type TaskStatusRequest struct {
 // CompletionHandoff is the structured child completion payload exposed on
 // task_status (mirrors protocol.CompletionHandoff; snake_case on the wire).
 type CompletionHandoff struct {
-	Summary               string   `json:"summary"`
-	FilesChanged          []string `json:"files_changed"`
-	Verification          string   `json:"verification,omitempty"`
-	Findings              []string `json:"findings"`
-	Blockers              []string `json:"blockers"`
-	RecommendedNextAction string   `json:"recommended_next_action,omitempty"`
-	Incomplete            bool     `json:"incomplete,omitempty"`
+	Summary               string                `json:"summary"`
+	FilesChanged          []string              `json:"files_changed"`
+	Verification          string                `json:"verification,omitempty"`
+	Findings              []string              `json:"findings"`
+	Blockers              []string              `json:"blockers"`
+	RecommendedNextAction string                `json:"recommended_next_action,omitempty"`
+	MissingContext        []MissingContextEntry `json:"missing_context,omitempty"`
+	Provenance            []string              `json:"provenance,omitempty"`
+	Incomplete            bool                  `json:"incomplete,omitempty"`
 }
 
 // VerificationReport is the harness gate report on task_status (snake_case).
@@ -500,6 +506,7 @@ type DelegateRequest struct {
 	Deps            []string
 	Subscribe       []string
 	Verify          []VerifyGate
+	ContextBundle   ContextBundle
 	State           string // target lifecycle state for transition
 	Reason          string
 	ExpectedVersion int // 0 = skip CAS
@@ -710,6 +717,10 @@ type Context struct {
 	// create/update so the engine can emit protocol.ArtifactUpdated.
 	// op is "create" or "update". Nil disables the event.
 	NotifyArtifact ArtifactNotify
+	// ContextBundle is the sealed spawn context for this agent (children only
+	// when the lead attached one). Read via the context_bundle tool. Nil/empty
+	// means no bundle was attached.
+	ContextBundle *ContextBundle
 	// MemberName is an optional stable teammate alias for ownership messages.
 	MemberName string
 	// OnOverlap is invoked when ClaimWrite/lease detects an active conflict

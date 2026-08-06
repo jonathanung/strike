@@ -79,6 +79,10 @@ type (
 	ChildStatus             = pub.ChildStatus
 	CompletionHandoff       = pub.CompletionHandoff
 	ArtifactRef             = pub.ArtifactRef
+	ContextBundle           = pub.ContextBundle
+	ContextBundleItem       = pub.ContextBundleItem
+	ContextFilePin          = pub.ContextFilePin
+	MissingContextEntry     = pub.MissingContextEntry
 	DelegationState         = pub.DelegationState
 	VerificationReport      = pub.VerificationReport
 	VerificationCheck       = pub.VerificationCheck

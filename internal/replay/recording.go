@@ -91,7 +91,27 @@ type HandoffSnapshot struct {
 	Findings              []string `json:"findings,omitempty"`
 	Blockers              []string `json:"blockers,omitempty"`
 	RecommendedNextAction string   `json:"recommendedNextAction,omitempty"`
-	Incomplete            bool     `json:"incomplete,omitempty"`
+	// MissingContextKinds lists missing_context entry kinds (#779).
+	MissingContextKinds []string `json:"missingContextKinds,omitempty"`
+	// Provenance lists bundle item ids cited on the handoff (#779).
+	Provenance []string `json:"provenance,omitempty"`
+	Incomplete bool     `json:"incomplete,omitempty"`
+}
+
+// ContextBundleSnapshot is a redacted spawn-time context bundle for #782
+// reproducible-run snapshots (forward-compat from #779).
+type ContextBundleSnapshot struct {
+	ChildSessionID string   `json:"childSessionId,omitempty"`
+	Goal           string   `json:"goal,omitempty"`
+	Acceptance     []string `json:"acceptance,omitempty"`
+	AllowedPaths   []string `json:"allowedPaths,omitempty"`
+	RequiredPaths  []string `json:"requiredPaths,omitempty"`
+	ArtifactIDs    []string `json:"artifactIds,omitempty"`
+	Constraints    []string `json:"constraints,omitempty"`
+	ItemIDs        []string `json:"itemIds,omitempty"`
+	FilePinPaths   []string `json:"filePinPaths,omitempty"`
+	// Digest is sha256 of a stable JSON projection (ids/paths/goal; no pin bodies).
+	Digest string `json:"digest,omitempty"`
 }
 
 // VerificationSnapshot is a redacted VerificationReport for compare (#780).
@@ -151,7 +171,9 @@ type Recording struct {
 	ProviderAttempts []ProviderAttempt      `json:"providerAttempts,omitempty"`
 	Handoffs         []HandoffSnapshot      `json:"handoffs,omitempty"`
 	Verifications    []VerificationSnapshot `json:"verifications,omitempty"`
-	FilesChanged     []string               `json:"filesChanged,omitempty"`
+	// ContextBundles captures sealed spawn packages from child.started (#779/#782).
+	ContextBundles []ContextBundleSnapshot `json:"contextBundles,omitempty"`
+	FilesChanged   []string                `json:"filesChanged,omitempty"`
 
 	// ParentSessionID / DelegationID support #782 multi-agent identity.
 	ParentSessionID string `json:"parentSessionId,omitempty"`
@@ -197,6 +219,7 @@ func BuildRecording(events []protocol.Event, opts RecordingOptions) Recording {
 	rec.Markers = labelNondeterministic(redacted)
 	rec.ProviderAttempts = extractProviderAttempts(redacted)
 	rec.Handoffs, rec.Verifications = extractHandoffsAndGates(redacted)
+	rec.ContextBundles = extractContextBundles(redacted)
 	rec.FilesChanged = extractFilesChanged(redacted)
 	rec.ExitStatus, rec.Turns = extractExitAndTurns(redacted)
 
@@ -578,6 +601,12 @@ func extractHandoffsAndGates(events []protocol.Event) ([]HandoffSnapshot, []Veri
 			continue
 		}
 		h := cc.Handoff
+		var mcKinds []string
+		for _, e := range h.MissingContext {
+			if k := strings.TrimSpace(e.Kind); k != "" {
+				mcKinds = append(mcKinds, k)
+			}
+		}
 		handoffs = append(handoffs, HandoffSnapshot{
 			SessionID:             cc.ParentSessionID,
 			ChildSessionID:        cc.SessionID,
@@ -588,6 +617,8 @@ func extractHandoffsAndGates(events []protocol.Event) ([]HandoffSnapshot, []Veri
 			Findings:              redactStringSlice(h.Findings),
 			Blockers:              redactStringSlice(h.Blockers),
 			RecommendedNextAction: redact.String(h.RecommendedNextAction),
+			MissingContextKinds:   mcKinds,
+			Provenance:            redactStringSlice(h.Provenance),
 			Incomplete:            h.Incomplete,
 		})
 		if cc.Verification != nil {
@@ -614,6 +645,72 @@ func extractHandoffsAndGates(events []protocol.Event) ([]HandoffSnapshot, []Veri
 		}
 	}
 	return handoffs, verifs
+}
+
+func extractContextBundles(events []protocol.Event) []ContextBundleSnapshot {
+	var out []ContextBundleSnapshot
+	for _, ev := range events {
+		cs, ok := ev.(protocol.ChildStarted)
+		if !ok || cs.ContextBundle == nil {
+			continue
+		}
+		b := cs.ContextBundle
+		snap := ContextBundleSnapshot{
+			ChildSessionID: cs.SessionID,
+			Goal:           redact.String(b.Goal),
+			Acceptance:     redactStringSlice(b.Acceptance),
+			AllowedPaths:   append([]string(nil), b.AllowedPaths...),
+			RequiredPaths:  append([]string(nil), b.RequiredPaths...),
+			Constraints:    redactStringSlice(b.Constraints),
+		}
+		for _, a := range b.Artifacts {
+			if id := strings.TrimSpace(a.ID); id != "" {
+				snap.ArtifactIDs = append(snap.ArtifactIDs, id)
+			}
+		}
+		for _, it := range b.Items {
+			if id := strings.TrimSpace(it.ID); id != "" {
+				snap.ItemIDs = append(snap.ItemIDs, id)
+			}
+		}
+		for _, p := range b.FilePins {
+			if path := strings.TrimSpace(p.Path); path != "" {
+				snap.FilePinPaths = append(snap.FilePinPaths, path)
+			}
+		}
+		snap.Digest = contextBundleDigest(snap)
+		out = append(out, snap)
+	}
+	return out
+}
+
+func contextBundleDigest(s ContextBundleSnapshot) string {
+	// Stable projection without child session id (compare-friendly).
+	type proj struct {
+		Goal          string   `json:"goal,omitempty"`
+		Acceptance    []string `json:"acceptance,omitempty"`
+		AllowedPaths  []string `json:"allowedPaths,omitempty"`
+		RequiredPaths []string `json:"requiredPaths,omitempty"`
+		ArtifactIDs   []string `json:"artifactIds,omitempty"`
+		Constraints   []string `json:"constraints,omitempty"`
+		ItemIDs       []string `json:"itemIds,omitempty"`
+		FilePinPaths  []string `json:"filePinPaths,omitempty"`
+	}
+	raw, err := json.Marshal(proj{
+		Goal:          s.Goal,
+		Acceptance:    s.Acceptance,
+		AllowedPaths:  s.AllowedPaths,
+		RequiredPaths: s.RequiredPaths,
+		ArtifactIDs:   s.ArtifactIDs,
+		Constraints:   s.Constraints,
+		ItemIDs:       s.ItemIDs,
+		FilePinPaths:  s.FilePinPaths,
+	})
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
 }
 
 func extractFilesChanged(events []protocol.Event) []string {

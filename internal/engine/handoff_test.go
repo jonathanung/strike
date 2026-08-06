@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
 
@@ -82,6 +83,86 @@ func TestParseCompletionHandoffRejectsArbitraryJSON(t *testing.T) {
 	}
 	if _, ok := parseCompletionHandoff("just prose, no json"); ok {
 		t.Fatal("prose should not parse")
+	}
+}
+
+func TestParseCompletionHandoffMissingContextAndProvenance(t *testing.T) {
+	raw := `{
+		"summary": "blocked: need more",
+		"files_changed": [],
+		"findings": [],
+		"blockers": ["need spec"],
+		"missing_context": [
+			{"kind": "path", "path": "docs/spec.md", "detail": "not attached"},
+			{"kind": "question", "question": "Which API?"},
+			{"artifact_id": "ab12", "detail": "infer kind"}
+		],
+		"provenance": ["goal", "constraint-1"]
+	}`
+	h, ok := parseCompletionHandoff(raw)
+	if !ok {
+		t.Fatal("expected parse ok")
+	}
+	if len(h.MissingContext) != 3 {
+		t.Fatalf("missing = %#v", h.MissingContext)
+	}
+	if h.MissingContext[0].Kind != "path" || h.MissingContext[0].Path != "docs/spec.md" {
+		t.Fatalf("mc0 = %#v", h.MissingContext[0])
+	}
+	if h.MissingContext[2].Kind != "artifact" || h.MissingContext[2].ArtifactID != "ab12" {
+		t.Fatalf("mc2 inferred = %#v", h.MissingContext[2])
+	}
+	if len(h.Provenance) != 2 || h.Provenance[0] != "goal" {
+		t.Fatalf("provenance = %#v", h.Provenance)
+	}
+
+	// camelCase keys
+	h2, ok := parseCompletionHandoff(`{"summary":"x","missingContext":[{"kind":"item","itemId":"c1"}],"provenance":["c1"]}`)
+	if !ok {
+		t.Fatal("camelCase parse")
+	}
+	if len(h2.MissingContext) != 1 || h2.MissingContext[0].ItemID != "c1" {
+		t.Fatalf("camel = %#v", h2.MissingContext)
+	}
+}
+
+func TestApplyMissingContextStatus(t *testing.T) {
+	h := protocol.CompletionHandoff{
+		Summary:        "task completed",
+		MissingContext: []protocol.MissingContextEntry{{Kind: "path", Path: "a.go"}},
+	}
+	st := applyMissingContextStatus(protocol.ChildStatusCompleted, &h)
+	if st != protocol.ChildStatusBlocked {
+		t.Fatalf("status = %q", st)
+	}
+	if h.Summary != "blocked: missing context" {
+		t.Fatalf("summary = %q", h.Summary)
+	}
+	// failed stays failed
+	h2 := protocol.CompletionHandoff{MissingContext: []protocol.MissingContextEntry{{Kind: "other"}}}
+	if got := applyMissingContextStatus(protocol.ChildStatusFailed, &h2); got != protocol.ChildStatusFailed {
+		t.Fatalf("failed → %q", got)
+	}
+}
+
+func TestBundlePathScopeRules(t *testing.T) {
+	rules := bundlePathScopeRules([]string{"internal/foo"})
+	if len(rules) == 0 {
+		t.Fatal("expected rules")
+	}
+	// Outside scope denied
+	if act := permission.Evaluate("read", "other/x.go", rules); act != permission.Deny {
+		t.Fatalf("outside read = %v", act)
+	}
+	// Inside allowed
+	if act := permission.Evaluate("read", "internal/foo/bar.go", rules); act != permission.Allow {
+		t.Fatalf("inside read = %v", act)
+	}
+	if act := permission.Evaluate("edit", "internal/foo/bar.go", rules); act != permission.Allow {
+		t.Fatalf("inside edit = %v", act)
+	}
+	if act := permission.Evaluate("write", "secret.txt", rules); act != permission.Deny {
+		t.Fatalf("outside write = %v", act)
 	}
 }
 
