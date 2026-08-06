@@ -172,8 +172,6 @@ func WriteMetricsBaseline(path string, rows []Metrics) error {
 	sort.Strings(names)
 	var buf bytes.Buffer
 	buf.WriteByte('{')
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
 	for i, name := range names {
 		if i > 0 {
 			buf.WriteByte(',')
@@ -203,13 +201,15 @@ func WriteMetricsBaseline(path string, rows []Metrics) error {
 }
 
 // FormatMetricsReport renders a human-readable table of metrics and deltas.
-// When baseline is nil or missing a scenario, delta columns show "n/a".
+// Delta columns cover StableZero fields only (cwd/date-sensitive system totals
+// are shown as absolute values, not deltas, so CI noise is not mistaken for
+// regressions). When baseline is nil or missing a scenario, deltas show "n/a".
 func FormatMetricsReport(rows []Metrics, baseline map[string]Metrics) string {
 	var buf strings.Builder
 	w := tabwriter.NewWriter(&buf, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "scenario\ttools\tturns\tin\tout\tused\tpromptCh\tsysTok\ttoolsTok\tΔtools\tΔturns\tΔused\tΔpromptCh\tΔsysTok")
+	fmt.Fprintln(w, "scenario\ttools\tturns\tin\tout\tused\tpromptCh\ttoolsTok\tsysTok\tΔtools\tΔturns\tΔused\tΔpromptCh\tΔtoolsTok")
 	for _, row := range rows {
-		dTools, dTurns, dUsed, dPrompt, dSys := "n/a", "n/a", "n/a", "n/a", "n/a"
+		dTools, dTurns, dUsed, dPrompt, dToolsTok := "n/a", "n/a", "n/a", "n/a", "n/a"
 		if baseline != nil {
 			if want, ok := baseline[row.Scenario]; ok {
 				d := DiffMetrics(want, row)
@@ -217,15 +217,15 @@ func FormatMetricsReport(rows []Metrics, baseline map[string]Metrics) string {
 				dTurns = fmt.Sprintf("%+d", d.Turns)
 				dUsed = fmt.Sprintf("%+d", d.UsedTokens)
 				dPrompt = fmt.Sprintf("%+d", d.PromptChars)
-				dSys = fmt.Sprintf("%+d", d.SystemTokens)
+				dToolsTok = fmt.Sprintf("%+d", d.ToolsTokens)
 			}
 		}
 		fmt.Fprintf(w, "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%s\t%s\t%s\t%s\t%s\n",
 			row.Scenario,
 			row.ToolCallCount, row.Turns,
 			row.InputTokens, row.OutputTokens, row.UsedTokens,
-			row.PromptChars, row.SystemTokens, row.ToolsTokens,
-			dTools, dTurns, dUsed, dPrompt, dSys,
+			row.PromptChars, row.ToolsTokens, row.SystemTokens,
+			dTools, dTurns, dUsed, dPrompt, dToolsTok,
 		)
 	}
 	_ = w.Flush()
