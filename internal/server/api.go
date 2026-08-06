@@ -47,20 +47,22 @@ type opOKResponse struct {
 const maxHTTPPayload = 8 << 20
 
 type capabilities struct {
-	Live        bool `json:"live"`
-	Auth        bool `json:"auth"`
-	Catalog     bool `json:"catalog"`
-	Settings    bool `json:"settings"`
-	History     bool `json:"history"`
-	Files       bool `json:"files"`
-	Memory      bool `json:"memory"`
-	Issues      bool `json:"issues"`
-	Sessions    bool `json:"sessions"`
-	Roots       bool `json:"roots"`
-	Providers   bool `json:"providers"`
-	ProjectInit bool `json:"projectInit"`
-	MCP         bool `json:"mcp"`
-	Telemetry   bool `json:"telemetry"`
+	Live           bool `json:"live"`
+	Auth           bool `json:"auth"`
+	Catalog        bool `json:"catalog"`
+	Settings       bool `json:"settings"`
+	History        bool `json:"history"`
+	Files          bool `json:"files"`
+	Memory         bool `json:"memory"`
+	Issues         bool `json:"issues"`
+	Sessions       bool `json:"sessions"`
+	Roots          bool `json:"roots"`
+	Providers      bool `json:"providers"`
+	ProjectInit    bool `json:"projectInit"`
+	MCP            bool `json:"mcp"`
+	Telemetry      bool `json:"telemetry"`
+	Workflows      bool `json:"workflows"`
+	WorkflowDrafts bool `json:"workflowDrafts"`
 }
 
 type bootstrapResponse struct {
@@ -78,6 +80,7 @@ var browserProtocolOps = []string{
 	"compact", "inspect.prompt", "interrupt", "permission.reply", "question.reply",
 	"rewind", "select.agent", "select.model", "set.autonomy", "set.effort",
 	"set.fast", "set.permission_mode", "user.input",
+	"workflow.start", "workflow.stop",
 }
 
 func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
@@ -86,7 +89,9 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	if h := s.opts.Services; h != nil {
 		c.Auth, c.Catalog, c.Settings, c.History = h.Auth != nil, h.Catalog != nil, h.Settings != nil, h.History != nil
 		c.Files, c.Memory, c.Issues, c.Sessions = h.Files != nil, h.Memory != nil, h.Issues != nil, h.Sessions != nil
-		// Capabilities describe browser workflows, not merely host interfaces.
+		// Workflow authoring is exposed via /v1/workflows* and /v1/workflow-drafts*.
+		c.Workflows, c.WorkflowDrafts = h.Workflows != nil, h.WorkflowDrafts != nil
+		// Capabilities describe browser surfaces, not merely host interfaces.
 		// Roots, custom providers, project init, MCP, and telemetry remain false
 		// until this server exposes their service operations.
 		for _, skill := range h.Skills {
@@ -694,7 +699,7 @@ func (s *Server) writeWSRange(ctx context.Context, ws wsTextWriter, path string,
 		if len(line) > 0 && line[len(line)-1] == '\n' {
 			offset += int64(len(line))
 			payload := bytes.TrimSpace(line)
-			if len(payload) > 0 && json.Valid(payload) {
+			if len(payload) > 0 && json.Valid(payload) && !isSessionLogHeader(payload) {
 				if err := ws.WriteText(string(payload)); err != nil {
 					return offset, err
 				}

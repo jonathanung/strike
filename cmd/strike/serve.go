@@ -54,6 +54,12 @@ Endpoints:
   GET  /v1/agents                   selectable agents
   GET  /v1/sessions                 session list (+ liveId)
   GET  /v1/sessions/{id}/events     SSE tail of a session JSONL log
+  GET  /v1/workflows                workflow catalog
+  POST /v1/workflows/save           save document (never activates)
+  POST /v1/workflows/{name}/start   start after confirm (rejects invalid)
+  POST /v1/workflows/stop           stop active workflow
+  POST /v1/workflow-drafts/review   draft review (checks + widening)
+  POST /v1/workflow-drafts/save     save draft JSON with confirm
 
 Auth: loopback is unauthenticated by default. Under --auth, use
 Authorization: Bearer <token>, the strike_serve_token cookie (set by opening

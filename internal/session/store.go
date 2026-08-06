@@ -3,15 +3,26 @@
 // transcript, so resume/replay is re-reading the log. cmd/strike is the only
 // importer: it tees engine events through a store (or Manager) on their way to
 // the frontend. internal/tui never imports this package directly.
+//
+// Durability (#803): each Append writes a complete JSON line then fsyncs so a
+// crash cannot leave a half-record that poisons the log. Replay skips a
+// trailing incomplete line (crash residue) and fails closed on interior
+// corruption or an unsupported newer log schema version. See also export/
+// import packages, Fork lineage, and retention hooks in this package.
+// Checkpoint stack persistence across --continue is #573; human-readable
+// markdown transcript export is #221 (/export) — complementary, not replacements.
 package session
 
 import (
 	"bufio"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,10 +31,28 @@ import (
 	"github.com/jonathanung/strike-cli/internal/secret"
 )
 
+// LogSchemaVersion is the on-disk session JSONL format version written in the
+// optional first-line session.header. Bump on breaking log layout changes.
+// Unknown newer versions fail open/replay with an upgrade message.
+const LogSchemaVersion = 1
+
+// headerType is the JSON "type" of the optional first-line schema header.
+const headerType = "session.header"
+
+// Store is an open append-only session JSONL writer.
 type Store struct {
-	mu  sync.Mutex
-	f   *os.File
-	enc *json.Encoder
+	mu sync.Mutex
+	f  *os.File
+	// appendDisabled is set after a short/partial write so callers cannot
+	// compound corruption; the process should reopen or recover.
+	appendDisabled bool
+}
+
+// logHeader is the optional first line of a session JSONL log.
+type logHeader struct {
+	Type          string    `json:"type"`
+	SchemaVersion int       `json:"schemaVersion"`
+	Time          time.Time `json:"time"`
 }
 
 // DefaultDir is ~/.strike/sessions — ~/.strike is strike's home for all
@@ -66,16 +95,55 @@ func LogPath(dir, id string) string {
 	return filepath.Join(dir, id+".jsonl")
 }
 
+// Open creates or opens a session log for append. New empty files receive a
+// schema header line before any events.
 func Open(dir, id string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
 	path := LogPath(dir, id)
+	st, statErr := os.Stat(path)
+	needHeader := false
+	switch {
+	case statErr == nil && st.Size() == 0:
+		needHeader = true
+	case statErr != nil && errors.Is(statErr, os.ErrNotExist):
+		needHeader = true
+	case statErr != nil:
+		return nil, statErr
+	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return nil, err
 	}
-	return &Store{f: f, enc: json.NewEncoder(f)}, nil
+	s := &Store{f: f}
+	if needHeader {
+		if err := s.writeHeaderLocked(); err != nil {
+			_ = f.Close()
+			return nil, err
+		}
+	}
+	return s, nil
+}
+
+func (s *Store) writeHeaderLocked() error {
+	h := logHeader{
+		Type:          headerType,
+		SchemaVersion: LogSchemaVersion,
+		Time:          time.Now().UTC(),
+	}
+	line, err := json.Marshal(h)
+	if err != nil {
+		return err
+	}
+	line = append(line, '\n')
+	if _, err := s.f.Write(line); err != nil {
+		return fmt.Errorf("write session header: %w", err)
+	}
+	if err := s.f.Sync(); err != nil {
+		return fmt.Errorf("sync session header: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) Path() string {
@@ -91,9 +159,36 @@ func (s *Store) Append(ev protocol.Event) error {
 	if err != nil {
 		return err
 	}
+	line, err := json.Marshal(env)
+	if err != nil {
+		return err
+	}
+	line = append(line, '\n')
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.enc.Encode(env)
+	if s.appendDisabled {
+		return errors.New("session: cannot append after a partial write; reopen or recover the log")
+	}
+	if s.f == nil {
+		return errors.New("session: store is closed")
+	}
+	n, err := s.f.Write(line)
+	if err != nil {
+		if n != 0 {
+			s.appendDisabled = true
+		}
+		return fmt.Errorf("session append: %w", err)
+	}
+	if n != len(line) {
+		s.appendDisabled = true
+		return fmt.Errorf("session append: %w", io.ErrShortWrite)
+	}
+	// fsync so a crash cannot leave a torn last record on stable storage.
+	if err := s.f.Sync(); err != nil {
+		return fmt.Errorf("session sync: %w", err)
+	}
+	return nil
 }
 
 // Sync flushes the underlying JSONL file so concurrent readers see all
@@ -110,7 +205,12 @@ func (s *Store) Sync() error {
 func (s *Store) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.f.Close()
+	if s.f == nil {
+		return nil
+	}
+	err := s.f.Close()
+	s.f = nil
+	return err
 }
 
 // idCreatedAt parses the UTC timestamp prefix of a NewID value when present.
@@ -134,6 +234,49 @@ type TimedEvent struct {
 	Event protocol.Event
 }
 
+// CorruptError describes an unreadable interior session log record.
+type CorruptError struct {
+	Path    string
+	Line    int
+	Message string
+	Err     error
+}
+
+func (e *CorruptError) Error() string {
+	if e == nil {
+		return "session: corrupt log"
+	}
+	msg := e.Message
+	if msg == "" && e.Err != nil {
+		msg = e.Err.Error()
+	}
+	if e.Path == "" {
+		return fmt.Sprintf("session log line %d: %s (repair: restore from a session package export, or fork a known-good prefix)", e.Line, msg)
+	}
+	return fmt.Sprintf("session log %q line %d: %s (repair: restore from a session package export, or fork a known-good prefix)", e.Path, e.Line, msg)
+}
+
+func (e *CorruptError) Unwrap() error { return e.Err }
+
+// SchemaVersionError is returned when a log header declares a newer schema
+// than this binary supports.
+type SchemaVersionError struct {
+	Path    string
+	Found   int
+	Support int
+}
+
+func (e *SchemaVersionError) Error() string {
+	if e == nil {
+		return "session: unsupported schema version"
+	}
+	p := e.Path
+	if p == "" {
+		p = "session log"
+	}
+	return fmt.Sprintf("%s: schema version %d is newer than supported %d; upgrade strike to read this session", p, e.Found, e.Support)
+}
+
 // Replay reads all events back from a session log.
 func Replay(path string) ([]protocol.Event, error) {
 	timed, err := ReplayTimed(path)
@@ -148,30 +291,239 @@ func Replay(path string) ([]protocol.Event, error) {
 }
 
 // ReplayTimed reads all events with envelope timestamps from a session log.
+// A trailing incomplete line without a terminating newline (crash mid-append)
+// is skipped. Interior corrupt lines, complete-but-invalid final lines, and
+// unsupported newer schema versions return actionable errors.
 func ReplayTimed(path string) ([]TimedEvent, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	var events []TimedEvent
-	scanner := bufio.NewScanner(f)
+
+	st, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	var endsWithNL bool
+	if st.Size() > 0 {
+		if _, err := f.Seek(-1, io.SeekEnd); err == nil {
+			var b [1]byte
+			if _, err := f.Read(b[:]); err == nil {
+				endsWithNL = b[0] == '\n'
+			}
+		}
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			return nil, err
+		}
+	} else {
+		endsWithNL = true
+	}
+
+	lines, err := readLogLines(f)
+	if err != nil {
+		return nil, fmt.Errorf("session log %q: %w", path, err)
+	}
+	return decodeLogLines(path, lines, endsWithNL)
+}
+
+// InspectSchemaVersion reads the log header (or infers legacy v1) without a
+// full event decode. Returns LogSchemaVersion for empty/legacy logs.
+func InspectSchemaVersion(path string) (int, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+	lines, err := readLogLines(f)
+	if err != nil {
+		return 0, err
+	}
+	if len(lines) == 0 {
+		return LogSchemaVersion, nil
+	}
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(lines[0], &probe); err != nil {
+		return 0, &CorruptError{Path: path, Line: 1, Message: "invalid JSON", Err: err}
+	}
+	typ, _ := jsonString(probe["type"])
+	if typ != headerType {
+		return LogSchemaVersion, nil // legacy log without header
+	}
+	ver, err := jsonInt(probe["schemaVersion"])
+	if err != nil {
+		return 0, &CorruptError{Path: path, Line: 1, Message: "session.header missing schemaVersion", Err: err}
+	}
+	if ver > LogSchemaVersion {
+		return ver, &SchemaVersionError{Path: path, Found: ver, Support: LogSchemaVersion}
+	}
+	if ver < 1 {
+		return 0, &CorruptError{Path: path, Line: 1, Message: fmt.Sprintf("invalid schemaVersion %d", ver)}
+	}
+	return ver, nil
+}
+
+func readLogLines(r io.Reader) ([][]byte, error) {
+	scanner := bufio.NewScanner(r)
 	// Multimodal user.message lines can carry multi-MiB base64 images.
 	scanner.Buffer(make([]byte, 0, 64*1024), 32<<20)
-	line := 0
+	var lines [][]byte
 	for scanner.Scan() {
-		line++
+		raw := bytesTrimSpace(scanner.Bytes())
+		if len(raw) == 0 {
+			continue
+		}
+		// Scanner reuses its buffer; copy each line.
+		lines = append(lines, append([]byte(nil), raw...))
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return lines, nil
+}
+
+func decodeLogLines(path string, lines [][]byte, endsWithNL bool) ([]TimedEvent, error) {
+	if len(lines) == 0 {
+		return nil, nil
+	}
+	start := 0
+	// Optional schema header on line 1.
+	if ver, ok, err := parseHeaderLine(lines[0]); err != nil {
+		// Torn first line (no trailing newline) → empty readable log.
+		if len(lines) == 1 && !endsWithNL {
+			return nil, nil
+		}
+		return nil, &CorruptError{Path: path, Line: 1, Message: "invalid JSON", Err: err}
+	} else if ok {
+		if ver > LogSchemaVersion {
+			return nil, &SchemaVersionError{Path: path, Found: ver, Support: LogSchemaVersion}
+		}
+		if ver < 1 {
+			return nil, &CorruptError{Path: path, Line: 1, Message: fmt.Sprintf("invalid schemaVersion %d", ver)}
+		}
+		start = 1
+	}
+
+	var events []TimedEvent
+	for i := start; i < len(lines); i++ {
+		lineNo := i + 1
+		last := i == len(lines)-1
+		// Crash mid-append leaves a partial final record without '\n'.
+		softTail := last && !endsWithNL
 		var env protocol.Envelope
-		if err := json.Unmarshal(scanner.Bytes(), &env); err != nil {
-			return nil, fmt.Errorf("line %d: %w", line, err)
+		if err := json.Unmarshal(lines[i], &env); err != nil {
+			if softTail {
+				break
+			}
+			return nil, &CorruptError{Path: path, Line: lineNo, Message: "invalid JSON", Err: err}
+		}
+		if env.Type == headerType {
+			return nil, &CorruptError{Path: path, Line: lineNo, Message: "unexpected session.header mid-log"}
+		}
+		if err := checkEnvelopeVersion(env); err != nil {
+			if softTail {
+				break
+			}
+			return nil, &CorruptError{Path: path, Line: lineNo, Message: err.Error(), Err: err}
 		}
 		ev, err := env.Decode()
 		if err != nil {
-			return nil, fmt.Errorf("line %d: %w", line, err)
+			if softTail {
+				break
+			}
+			return nil, &CorruptError{Path: path, Line: lineNo, Message: "decode event", Err: err}
 		}
 		events = append(events, TimedEvent{Time: env.Time.UTC(), Event: ev})
 	}
-	return events, scanner.Err()
+	return events, nil
+}
+
+func parseHeaderLine(raw []byte) (version int, isHeader bool, err error) {
+	var probe struct {
+		Type          string `json:"type"`
+		SchemaVersion int    `json:"schemaVersion"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return 0, false, err
+	}
+	if probe.Type != headerType {
+		return 0, false, nil
+	}
+	return probe.SchemaVersion, true, nil
+}
+
+func checkEnvelopeVersion(env protocol.Envelope) error {
+	v := env.SchemaVersion()
+	if v == "" {
+		return nil
+	}
+	foundMajor, err := semverMajor(v)
+	if err != nil {
+		// Non-semver tags: ignore (legacy / test fixtures).
+		return nil
+	}
+	supportMajor, err := semverMajor(protocol.Version)
+	if err != nil {
+		return nil
+	}
+	if foundMajor > supportMajor {
+		return fmt.Errorf("envelope schema version %q is newer than supported %s; upgrade strike", v, protocol.Version)
+	}
+	return nil
+}
+
+func semverMajor(v string) (int, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0, fmt.Errorf("empty")
+	}
+	if i := strings.IndexByte(v, '.'); i >= 0 {
+		v = v[:i]
+	}
+	return strconv.Atoi(v)
+}
+
+func jsonString(raw json.RawMessage) (string, bool) {
+	if len(raw) == 0 {
+		return "", false
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return "", false
+	}
+	return s, true
+}
+
+func jsonInt(raw json.RawMessage) (int, error) {
+	if len(raw) == 0 {
+		return 0, fmt.Errorf("missing")
+	}
+	var n int
+	if err := json.Unmarshal(raw, &n); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func bytesTrimSpace(b []byte) []byte {
+	// Avoid strings.TrimSpace alloc for hot path; match unicode.IsSpace lightly
+	// for ASCII whitespace used in JSONL.
+	start, end := 0, len(b)
+	for start < end {
+		c := b[start]
+		if c != ' ' && c != '\t' && c != '\r' && c != '\n' {
+			break
+		}
+		start++
+	}
+	for end > start {
+		c := b[end-1]
+		if c != ' ' && c != '\t' && c != '\r' && c != '\n' {
+			break
+		}
+		end--
+	}
+	return b[start:end]
 }
 
 // ReplaySlice returns a bounded ordered slice of events from a session log.
@@ -185,33 +537,19 @@ func ReplaySlice(path string, offset, limit int) (events []protocol.Event, total
 	if limit <= 0 {
 		return nil, 0, fmt.Errorf("limit must be > 0")
 	}
-	f, err := os.Open(path)
+	all, err := Replay(path)
 	if err != nil {
 		return nil, 0, err
 	}
-	defer f.Close()
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 32<<20)
-	line := 0
-	for scanner.Scan() {
-		line++
-		if total >= offset && len(events) < limit {
-			var env protocol.Envelope
-			if err := json.Unmarshal(scanner.Bytes(), &env); err != nil {
-				return nil, 0, fmt.Errorf("line %d: %w", line, err)
-			}
-			ev, err := env.Decode()
-			if err != nil {
-				return nil, 0, fmt.Errorf("line %d: %w", line, err)
-			}
-			events = append(events, ev)
-		}
-		total++
+	total = len(all)
+	if offset >= total {
+		return nil, total, nil
 	}
-	if err := scanner.Err(); err != nil {
-		return nil, 0, err
+	end := offset + limit
+	if end > total {
+		end = total
 	}
-	return events, total, nil
+	return all[offset:end], total, nil
 }
 
 // ReplayLast returns up to n trailing events from a session log (bounded).
@@ -220,36 +558,16 @@ func ReplayLast(path string, n int) (events []protocol.Event, total int, err err
 	if n <= 0 {
 		return nil, 0, fmt.Errorf("n must be > 0")
 	}
-	// Ring of the last n events while counting total.
-	f, err := os.Open(path)
+	all, err := Replay(path)
 	if err != nil {
 		return nil, 0, err
 	}
-	defer f.Close()
-	ring := make([]protocol.Event, 0, n)
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 32<<20)
-	line := 0
-	for scanner.Scan() {
-		line++
-		var env protocol.Envelope
-		if err := json.Unmarshal(scanner.Bytes(), &env); err != nil {
-			return nil, 0, fmt.Errorf("line %d: %w", line, err)
-		}
-		ev, err := env.Decode()
-		if err != nil {
-			return nil, 0, fmt.Errorf("line %d: %w", line, err)
-		}
-		if len(ring) < n {
-			ring = append(ring, ev)
-		} else {
-			copy(ring, ring[1:])
-			ring[n-1] = ev
-		}
-		total++
+	total = len(all)
+	if total == 0 {
+		return nil, 0, nil
 	}
-	if err := scanner.Err(); err != nil {
-		return nil, 0, err
+	if n >= total {
+		return all, total, nil
 	}
-	return ring, total, nil
+	return all[total-n:], total, nil
 }
