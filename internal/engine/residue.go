@@ -461,6 +461,31 @@ func writeResidueSection(b *strings.Builder, title string, items []protocol.Resi
 	}
 }
 
+// residueForMarker returns the residue used in the model-facing compact marker.
+// When the decision_ledger system layer will still compose, ledger-sourced
+// items are omitted from the marker to avoid double-injecting the same
+// statements (they remain on CompactionCompleted.Residue for rebuild/export).
+func residueForMarker(r *protocol.CompactionResidue, ledgerLayerActive bool) *protocol.CompactionResidue {
+	if r == nil {
+		return nil
+	}
+	if !ledgerLayerActive {
+		return r
+	}
+	out := *r
+	out.Decisions = nil
+	for _, d := range r.Decisions {
+		if d.LedgerID != "" {
+			continue
+		}
+		out.Decisions = append(out.Decisions, d)
+	}
+	if residueEmpty(&out) {
+		return nil
+	}
+	return &out
+}
+
 // residueCompactMarker builds the model-facing replacement for dropped history
 // when a structured residue is available.
 func residueCompactMarker(removed int, r *protocol.CompactionResidue) string {

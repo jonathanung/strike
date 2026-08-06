@@ -878,21 +878,26 @@ drainControls:
 		t.Fatalf("pinned kinds = %v", res.PinnedKinds)
 	}
 
-	// Rebuild skeleton is usable for continue.
+	// Rebuild skeleton (full residue, including ledger) is usable for continue.
 	skel := engine.RebuildPromptSkeleton(res)
 	if !strings.Contains(skel, "structured residue") {
 		t.Fatalf("rebuild missing decision: %q", skel)
 	}
 
-	// Next turn: marker carries residue; pin layer still in system prompt.
+	// Next turn: marker carries chat residue (not ledger — still in system
+	// decision_ledger layer); pin layer still in system prompt.
 	eng.Ops() <- protocol.UserInput{Text: "third"}
 	req := waitCompactTurnRequest(t, eng, prov)
 	foundMarker := false
 	for _, m := range req.Messages {
 		if m.Role == provider.RoleUser && strings.HasPrefix(m.Text, "[Prior conversation compacted") {
 			foundMarker = true
-			if !strings.Contains(m.Text, "structured residue") {
-				t.Fatalf("compact marker missing ledger decision: %q", m.Text)
+			if !strings.Contains(m.Text, "versioned") && !strings.Contains(m.Text, "source ids") {
+				t.Fatalf("compact marker missing chat residue: %q", m.Text)
+			}
+			// Ledger stays on the event + system layer; marker must not double-inject.
+			if strings.Contains(m.Text, "structured residue") {
+				t.Fatalf("compact marker double-injected ledger decision: %q", m.Text)
 			}
 		}
 	}
@@ -901,6 +906,9 @@ drainControls:
 	}
 	if !strings.Contains(req.System, "PINNED_MEMORY_MARKER") {
 		t.Fatal("pinned memory layer must survive compaction")
+	}
+	if !strings.Contains(req.System, "structured residue") {
+		t.Fatal("ledger decision must remain in system decision_ledger layer after compact")
 	}
 }
 

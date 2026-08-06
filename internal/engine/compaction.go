@@ -237,10 +237,13 @@ func (e *Engine) applyCompaction(ctx context.Context, reason string, corr protoc
 		sortedKindKeys(e.pinnedKinds),
 		e.collectActiveLedgerEntries(),
 	)
-	if residue != nil {
+	// Ledger layer still composes after compact unless user-excluded; omit
+	// ledger-sourced rows from the marker to avoid double-injecting them.
+	ledgerLayerActive := e.opts.Ledger != nil && !e.kindExcluded(protocol.PromptLayerLedger)
+	if markerRes := residueForMarker(residue, ledgerLayerActive); markerRes != nil {
 		// Prefer residue marker (includes summary section when present) so
 		// continue sees structured provenance, not only a free-text summary.
-		marker = residueCompactMarker(removed, residue)
+		marker = residueCompactMarker(removed, markerRes)
 	}
 
 	out := make([]provider.Message, 0, 1+keptTail)

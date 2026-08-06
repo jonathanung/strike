@@ -134,6 +134,46 @@ func TestResidueCompactMarkerAndRebuildRoundTrip(t *testing.T) {
 	}
 }
 
+func TestResidueForMarkerOmitsLedgerWhenLayerActive(t *testing.T) {
+	r := &protocol.CompactionResidue{
+		SchemaVersion: protocol.CompactionResidueSchemaVersion,
+		Decisions: []protocol.ResidueItem{
+			{ID: "l1", Kind: protocol.ResidueKindDecision, Text: "from ledger", LedgerID: "abc", SourceIDs: []string{"ledger:abc"}},
+			{ID: "c1", Kind: protocol.ResidueKindDecision, Text: "from chat", SourceIDs: []string{"hist:0"}},
+		},
+		Facts: []protocol.ResidueItem{
+			{ID: "f1", Kind: protocol.ResidueKindFact, Text: "a fact", SourceIDs: []string{"hist:1"}},
+		},
+	}
+	got := residueForMarker(r, true)
+	if got == nil {
+		t.Fatal("expected marker residue")
+	}
+	if len(got.Decisions) != 1 || got.Decisions[0].Text != "from chat" {
+		t.Fatalf("decisions = %#v", got.Decisions)
+	}
+	if len(got.Facts) != 1 {
+		t.Fatalf("facts = %#v", got.Facts)
+	}
+	// Full residue unchanged for event/export.
+	if len(r.Decisions) != 2 {
+		t.Fatalf("source residue mutated: %#v", r.Decisions)
+	}
+	// When ledger layer is off, keep ledger rows in the marker.
+	keep := residueForMarker(r, false)
+	if keep == nil || len(keep.Decisions) != 2 {
+		t.Fatalf("ledger inactive marker = %#v", keep)
+	}
+	// Ledger-only residue → nil marker when layer active (system still has it).
+	onlyLed := &protocol.CompactionResidue{
+		SchemaVersion: protocol.CompactionResidueSchemaVersion,
+		Decisions:     []protocol.ResidueItem{{ID: "l", Text: "only", LedgerID: "x"}},
+	}
+	if residueForMarker(onlyLed, true) != nil {
+		t.Fatal("expected nil marker residue when only ledger items remain")
+	}
+}
+
 func TestBuildResidueEmptyWithoutContent(t *testing.T) {
 	r := buildCompactionResidue([]provider.Message{
 		{Role: provider.RoleUser, Text: "hello"},
