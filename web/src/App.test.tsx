@@ -29,10 +29,43 @@ describe("App", () => {
   it("renders and resolves a blocking permission dialog", async () => {
     render(<App />);
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
-    FakeWebSocket.instances[0].onmessage?.({ data: JSON.stringify({ type: "permission.asked", data: { requestId: "p1", tool: "bash" } }) } as MessageEvent);
-    expect(await screen.findByRole("dialog", { name: "Permission required" })).toBeInTheDocument();
+    FakeWebSocket.instances[0].onmessage?.({ data: JSON.stringify({ type: "permission.asked", data: { requestId: "p1", tool: "bash", patterns: ["echo hi"], reason: "run shell" } }) } as MessageEvent);
+    // Accessible name is the title only — not the raw JSON payload.
+    const dialog = await screen.findByRole("dialog", { name: "Permission required" });
+    expect(dialog).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("bash");
+    expect(dialog).toHaveTextContent("run shell");
+    // Raw JSON lives behind collapsed Technical details, not the default body.
+    const tech = dialog.querySelector("details.technical-details") as HTMLDetailsElement | null;
+    expect(tech).toBeTruthy();
+    expect(tech?.open).toBe(false);
+    expect(tech?.querySelector("summary")?.textContent).toMatch(/Technical details/i);
+    const raw = tech?.querySelector("pre");
+    expect(raw?.textContent).toContain('"requestId"');
+    expect(raw?.textContent).toContain("p1");
+    fireEvent.click(screen.getByText("Technical details"));
+    expect(tech?.open).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
-    await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(expect.stringContaining("/v1/ops"), expect.objectContaining({ body: expect.stringContaining("permission.reply") })));
+    await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(expect.stringContaining("/v1/ops"), expect.objectContaining({
+      body: expect.stringMatching(/"type"\s*:\s*"permission\.reply"/),
+    })));
+    const body = JSON.parse(String((fetch as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1]?.body));
+    expect(body).toMatchObject({ type: "permission.reply", data: { requestId: "p1", decision: "once" } });
+  });
+
+  it("permission dialog keeps reject and allow-session ops unchanged", async () => {
+    render(<App />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    FakeWebSocket.instances[0].onmessage?.({ data: JSON.stringify({ type: "permission.asked", data: { requestId: "p2", permission: "edit", patterns: ["web/src/App.tsx"] } }) } as MessageEvent);
+    const dialog = await screen.findByRole("dialog", { name: "Permission required" });
+    expect(dialog).toHaveTextContent("edit");
+    expect(dialog).toHaveTextContent("web/src/App.tsx");
+    expect((dialog.querySelector("details.technical-details") as HTMLDetailsElement | null)?.open).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Allow session" }));
+    await waitFor(() => {
+      const body = JSON.parse(String((fetch as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1]?.body));
+      expect(body).toMatchObject({ type: "permission.reply", data: { requestId: "p2", decision: "always" } });
+    });
   });
 
   it("queues a prompt while busy and exposes slash and skill completion", async () => {
