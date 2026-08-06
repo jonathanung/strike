@@ -78,7 +78,7 @@ func TestSetAutonomyRejectsUnknownMode(t *testing.T) {
 		return ok
 	})
 	msg := event.(protocol.EngineError).Message
-	for _, want := range []string{"yolo", "supervised", "agent", "checks"} {
+	for _, want := range []string{"yolo", "supervised", "agent", "checks", "skip-all"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error = %q, want it to mention %q", msg, want)
 		}

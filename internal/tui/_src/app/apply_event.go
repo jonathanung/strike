@@ -122,6 +122,7 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 			}
 			if isWorkspaceFSTool(tc.name) {
 				m.windows = refreshFilesWindows(m.windows)
+				m.windows = refreshDiagnosticsWindows(m.windows)
 			}
 		}
 		cmd = m.broadcastVisualizerState()
@@ -212,6 +213,7 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		m.setNotice(m.fastNotice(ev.Enabled), false)
 	case protocol.FilesInvalidated:
 		m.windows = refreshFilesWindows(m.windows)
+		m.windows = refreshDiagnosticsWindows(m.windows)
 		if len(ev.Paths) == 0 {
 			break
 		}

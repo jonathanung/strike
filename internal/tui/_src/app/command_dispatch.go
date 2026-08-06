@@ -149,6 +149,8 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		return m.focusRightWindow("activity")
 	case "/files":
 		return m.focusRightWindow(filesWindowID)
+	case "/diagnostics":
+		return m.focusRightWindow(diagnosticsWindowID)
 	case "/visualizer":
 		return m.focusRightWindow(visualizerWindowID)
 	case "/system":
@@ -294,6 +296,8 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		return m.handleFTUECommand()
 	case "/mcp":
 		return m.handleMCPCommand(fields[1:])
+	case "/lsp":
+		return m.handleLSPCommand(fields[1:])
 	case "/exit", "/quit":
 		// Same graceful shutdown as the global quit keybinding (ctrl+c).
 		return m, tea.Quit

@@ -68,6 +68,7 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `internal/memory` | Project-scoped durable key/value memory (JSON under `~/.strike/memory/`) | stdlib |
 | `internal/issue` | Project-scoped durable issues (JSON under `~/.strike/issues/`) | stdlib |
 | `internal/goal` | Loop harness: goals, JSONL iterations/events, guards, critic, hooks | stdlib |
+| `internal/plan` | Project-scoped root-session-owned structured plans (sections, lifecycle, CAS versions; JSON under `~/.strike/plans/`) | stdlib |
 | `internal/question` | User-question ask service: suspends a tool call until `QuestionReply` (1–4 prompts per batch; TUI walks them, one reply with all answers) | `protocol`, stdlib |
 | `internal/permission` | Ordered allow/ask/deny rulesets, last-match-wins; the ask service that suspends a tool call for user input; `CompileSandbox` maps write/edit denials + webfetch/mcp network posture into `sandbox.Policy` | `protocol`, `tool` (for `AskRequest`), `sandbox`, stdlib |
 | `internal/session` | JSONL event-log persistence (append/replay) + concurrent Manager (multi-session open, durable list, event mux). Sidecar `*.meta.json` stores `projectKey` (workspace folder) first for `/session` scoping | `protocol`, stdlib |
@@ -78,7 +79,7 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `internal/history` | Project-scoped prompt history | stdlib |
 | `internal/project` | Stable filesystem identity + optional per-session git worktrees under `.strike/worktrees/` | stdlib, os/exec |
 | `internal/host` | **Frozen contract**: the services a frontend needs from its host process (includes `SchedulerPresets` catalog + global apply) | stdlib only — enforced by the boundary test |
-| `internal/host/local` | Real `host.Services` implementation; wraps auth/config/models/history/memory/issue/files/mcp/scheduler presets for the frontend | `auth`, `config`, `history`, `host`, `issue`, `mcp`, `memory`, `models`, `sandbox`, `scheduler`, `tool` (composer `!` shell) |
+| `internal/host/local` | Real `host.Services` implementation; wraps auth/config/models/history/memory/issue/plan/goal/files/mcp/scheduler presets for the frontend | `auth`, `config`, `history`, `host`, `issue`, `plan`, `goal`, `mcp`, `memory`, `models`, `sandbox`, `scheduler`, `tool` (composer `!` shell) |
 | `internal/tui` | Bubble Tea frontend: app model, layout, cells, modals, composer. Sources under `_src/<group>/`, flattened by `go generate` | `protocol`, `host`, `tui/...` only — enforced by the boundary test |
 | `internal/tui/theme` | Resolved design tokens: adaptive color roles, surfaces, chrome mode (soft\|solid\|bordered), terminal background, glyphs, border/spacing tokens, and precomputed styles | lipgloss, stdlib |
 | `internal/tui/common` | Pure formatting helpers (ThemedSpace, DotJoin, compact durations) | `tui/theme`, stdlib |
@@ -119,10 +120,12 @@ state. The registry holds right-pane windows: named session panes (`context` for
 setup summary and `activity` for subagent status, recent parent tools, or an
 empty-state line), an `agents` multi-root tree, a `visualizer` for the selected node's
 status/tokens/cost/tokens-per-turn sparkline, a `files` explorer (lazy tree via
-`host.Files.ListDir`), `memory` and `issues` browsers, a `markdown` reader
+`host.Files.ListDir`), a `diagnostics` browser (live language-server findings
+via `host.LSP`), `memory` and `issues` browsers, a `markdown` reader
 opened via `/md-read`, and an `editor` PTY window for `/vim`/`/nano`. Windows are
 organized into stack **groups** (session: context+activity; agents:
-agents+visualizer; project: memory+issues; singles: files/markdown/editor).
+agents+visualizer; files: files+diagnostics; project: memory+issues; singles:
+markdown/editor).
 When the right pane is large enough, multi-member groups render as a paired
 split (vertical in a side column, horizontal when the body split is a bottom
 bar); otherwise only the focused member is shown. Focus cycle walks members
@@ -374,7 +377,7 @@ Same package `internal/tui`; split for reviewability only (no subpackages).
    `internal/host/host.go`. This package is a stdlib-only contract — no
    importing `auth`, `config`, `models`, or `history` here, even for a type
    reference (the boundary test fails the build otherwise). Look at
-   `Auth`/`Catalog`/`Settings`/`History`/`Memory`/`Issues`/`Goals`/`Files` for the shape: small,
+    `Auth`/`Catalog`/`Settings`/`History`/`Memory`/`Issues`/`Plans`/`Goals`/`Files` for the shape: small,
   frontend-facing, `context`-aware when it may block.
 2. Implement it in `internal/host/local/` (e.g. `local.go`, `files.go`),
   wrapping the real backend package. This package is the seam that is allowed

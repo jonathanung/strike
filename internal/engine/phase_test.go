@@ -393,7 +393,8 @@ func TestCheckGateCommand(t *testing.T) {
 			{
 				Name:  "prep",
 				Agent: "build",
-				Exit:  config.ExitGate{Type: config.GateCheck, Command: "touch ok"},
+				// Authored type is ignored at runtime; autonomy=checks drives the gate.
+				Exit: config.ExitGate{Type: config.GateAgent, Command: "touch ok"},
 			},
 			{
 				Name:  "done",
@@ -412,16 +413,20 @@ func TestCheckGateCommand(t *testing.T) {
 		toolCallStep(doneCall),
 		completedStep("done"),
 	)
+	allowCheck := permission.Ruleset{
+		{Permission: "phase_check", Pattern: "*", Action: permission.Allow},
+	}
 	eng := engine.New(engine.Options{
 		SessionID:       "phase-check",
 		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		InitialProvider: "scripted",
+		InitialAutonomy: protocol.AutonomyChecks,
 		Registry:        tool.NewRegistry(tool.NewPhaseDone(), tool.NewEnterPlanMode()),
 		WorkDir:         dir,
 		Agents:          []engine.Agent{{Name: "build"}, {Name: "plan"}},
 		Workflows:       []config.Workflow{wf, config.BuiltinPlanImplement()},
 		DefaultWorkflow: "checked",
-		Rules:           []permission.Ruleset{permission.Defaults()},
+		Rules:           []permission.Ruleset{permission.Defaults(), allowCheck},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -434,19 +439,297 @@ func TestCheckGateCommand(t *testing.T) {
 
 	eng.Ops() <- protocol.UserInput{Text: "run gates"}
 	var sawDone bool
+	var prepGate string
 	deadline := time.After(10 * time.Second)
 	for !sawDone {
 		select {
 		case <-deadline:
 			t.Fatal("timeout waiting for done phase")
 		case ev := <-eng.Events():
-			if p, ok := ev.(protocol.PhaseChanged); ok && p.Phase == "done" {
-				sawDone = true
+			if p, ok := ev.(protocol.PhaseChanged); ok {
+				if p.Phase == "prep" {
+					prepGate = p.Gate
+				}
+				if p.Phase == "done" {
+					sawDone = true
+				}
 			}
 		}
 	}
+	if prepGate != "check" {
+		t.Fatalf("prep gate = %q, want check (autonomy authoritative)", prepGate)
+	}
 	if _, err := os.Stat(marker); err != nil {
 		t.Fatalf("check command did not create marker: %v", err)
+	}
+}
+
+// TestAutonomyAgentAdvancesWithoutUserPrompt: agent mode self-affirms via
+// phase_done even when the workflow authors a user exit gate.
+func TestAutonomyAgentAdvancesWithoutUserPrompt(t *testing.T) {
+	wf := config.Workflow{
+		Name: "user-authored",
+		Phases: []config.Phase{
+			{Name: "a", Agent: "build", Exit: config.ExitGate{Type: config.GateUser}},
+			{Name: "b", Agent: "build", Exit: config.ExitGate{Type: config.GateUser}},
+		},
+	}
+	args, _ := json.Marshal(map[string]any{})
+	enterCall := provider.ToolCall{ID: "en-agent", Name: "enter_plan_mode", Args: args}
+	doneCall := provider.ToolCall{ID: "pd-agent", Name: "phase_done", Args: args}
+	prov := newScriptedProvider(
+		toolCallStep(enterCall),
+		toolCallStep(doneCall),
+		completedStep("on b"),
+	)
+	eng := engine.New(engine.Options{
+		SessionID:       "phase-autonomy-agent",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		InitialAutonomy: protocol.AutonomyAgent,
+		Registry:        tool.NewRegistry(tool.NewPhaseDone(), tool.NewEnterPlanMode()),
+		Agents:          []engine.Agent{{Name: "build"}, {Name: "plan"}},
+		Workflows:       []config.Workflow{wf, config.BuiltinPlanImplement()},
+		DefaultWorkflow: "user-authored",
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	waitForEvent(t, eng, func(ev protocol.Event) bool {
+		_, ok := ev.(protocol.AgentSelected)
+		return ok
+	})
+
+	eng.Ops() <- protocol.UserInput{Text: "advance under agent autonomy"}
+	var sawB bool
+	deadline := time.After(10 * time.Second)
+	for !sawB {
+		select {
+		case <-deadline:
+			t.Fatal("timeout waiting for phase b")
+		case ev := <-eng.Events():
+			switch e := ev.(type) {
+			case protocol.QuestionAsked:
+				t.Fatalf("agent autonomy must not prompt user: %#v", e)
+			case protocol.PhaseChanged:
+				if e.Phase == "a" && e.Gate != "agent" {
+					t.Fatalf("phase a gate = %q, want agent", e.Gate)
+				}
+				if e.Phase == "b" {
+					sawB = true
+				}
+			case protocol.EngineError:
+				t.Fatalf("engine error: %s", e.Message)
+			}
+		}
+	}
+}
+
+// TestAutonomySkipAllAdvancesWithoutApproval: skip-all bypasses workflow gates
+// without touching tool permissions (write still denied under plan phase).
+func TestAutonomySkipAllAdvancesWithoutApproval(t *testing.T) {
+	args, _ := json.Marshal(map[string]any{})
+	exitCall := provider.ToolCall{ID: "ex-skip", Name: "exit_plan_mode", Args: args}
+	prov := newScriptedProvider(
+		toolCallStep(exitCall),
+		completedStep("implementing"),
+	)
+	eng := engine.New(engine.Options{
+		SessionID:       "phase-autonomy-skip",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		InitialAutonomy: protocol.AutonomySkipAll,
+		Registry:        tool.NewRegistry(tool.NewExitPlanMode()),
+		Agents: []engine.Agent{
+			{Name: "build"},
+			{Name: "plan"},
+		},
+		InitialAgent: "plan",
+		Workflows:    []config.Workflow{config.BuiltinPlanImplement()},
+		Rules:        []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	waitForEvent(t, eng, func(ev protocol.Event) bool {
+		p, ok := ev.(protocol.PhaseChanged)
+		return ok && p.Phase == "plan" && p.Gate == "skip"
+	})
+
+	eng.Ops() <- protocol.UserInput{Text: "exit plan under skip-all"}
+	var sawImplement bool
+	deadline := time.After(10 * time.Second)
+	for !sawImplement {
+		select {
+		case <-deadline:
+			t.Fatal("timeout waiting for implement under skip-all")
+		case ev := <-eng.Events():
+			switch e := ev.(type) {
+			case protocol.QuestionAsked:
+				t.Fatalf("skip-all must not prompt: %#v", e)
+			case protocol.PhaseChanged:
+				if e.Phase == "implement" {
+					sawImplement = true
+				}
+			case protocol.ToolCallEnd:
+				if e.CallID == "ex-skip" && e.IsError {
+					t.Fatalf("exit_plan_mode error under skip-all: %s", e.Output)
+				}
+			case protocol.EngineError:
+				t.Fatalf("engine error: %s", e.Message)
+			}
+		}
+	}
+}
+
+// TestAutonomyChecksEmptyCommandFailsClosed: checks mode without a command
+// refuses to advance.
+func TestAutonomyChecksEmptyCommandFailsClosed(t *testing.T) {
+	wf := config.Workflow{
+		Name: "no-cmd",
+		Phases: []config.Phase{
+			{Name: "a", Agent: "build", Exit: config.ExitGate{Type: config.GateAgent}},
+			{Name: "b", Agent: "build", Exit: config.ExitGate{Type: config.GateAgent}},
+		},
+	}
+	args, _ := json.Marshal(map[string]any{})
+	enterCall := provider.ToolCall{ID: "en-empty", Name: "enter_plan_mode", Args: args}
+	doneCall := provider.ToolCall{ID: "pd-empty", Name: "phase_done", Args: args}
+	prov := newScriptedProvider(
+		toolCallStep(enterCall),
+		toolCallStep(doneCall),
+		completedStep("still a"),
+	)
+	eng := engine.New(engine.Options{
+		SessionID:       "phase-checks-empty",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		InitialAutonomy: protocol.AutonomyChecks,
+		Registry:        tool.NewRegistry(tool.NewPhaseDone(), tool.NewEnterPlanMode()),
+		Agents:          []engine.Agent{{Name: "build"}, {Name: "plan"}},
+		Workflows:       []config.Workflow{wf, config.BuiltinPlanImplement()},
+		DefaultWorkflow: "no-cmd",
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	waitForEvent(t, eng, func(ev protocol.Event) bool {
+		_, ok := ev.(protocol.AgentSelected)
+		return ok
+	})
+
+	eng.Ops() <- protocol.UserInput{Text: "try advance"}
+	var (
+		toolErr  string
+		advanced bool
+		turnDone bool
+	)
+	deadline := time.After(10 * time.Second)
+	for !turnDone {
+		select {
+		case <-deadline:
+			t.Fatal("timeout")
+		case ev := <-eng.Events():
+			switch e := ev.(type) {
+			case protocol.PhaseChanged:
+				if e.Phase == "b" {
+					advanced = true
+				}
+			case protocol.ToolCallEnd:
+				if e.CallID == "pd-empty" {
+					if !e.IsError {
+						t.Fatal("phase_done should error on empty check command")
+					}
+					toolErr = e.Output
+				}
+			case protocol.TurnCompleted:
+				turnDone = true
+			}
+		}
+	}
+	if advanced {
+		t.Fatal("phase advanced despite empty check command")
+	}
+	if !strings.Contains(strings.ToLower(toolErr), "empty") {
+		t.Fatalf("tool error = %q, want empty command mention", toolErr)
+	}
+}
+
+// TestAutonomyChecksFailingCommandReportsFailure.
+func TestAutonomyChecksFailingCommandReportsFailure(t *testing.T) {
+	wf := config.Workflow{
+		Name: "fail-cmd",
+		Phases: []config.Phase{
+			{Name: "a", Agent: "build", Exit: config.ExitGate{Command: "echo boom >&2; exit 7"}},
+			{Name: "b", Agent: "build", Exit: config.ExitGate{Type: config.GateAgent}},
+		},
+	}
+	args, _ := json.Marshal(map[string]any{})
+	enterCall := provider.ToolCall{ID: "en-fail", Name: "enter_plan_mode", Args: args}
+	doneCall := provider.ToolCall{ID: "pd-fail", Name: "phase_done", Args: args}
+	prov := newScriptedProvider(
+		toolCallStep(enterCall),
+		toolCallStep(doneCall),
+		completedStep("still a"),
+	)
+	allowCheck := permission.Ruleset{
+		{Permission: "phase_check", Pattern: "*", Action: permission.Allow},
+	}
+	eng := engine.New(engine.Options{
+		SessionID:       "phase-checks-fail",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		InitialAutonomy: protocol.AutonomyChecks,
+		Registry:        tool.NewRegistry(tool.NewPhaseDone(), tool.NewEnterPlanMode()),
+		Agents:          []engine.Agent{{Name: "build"}, {Name: "plan"}},
+		Workflows:       []config.Workflow{wf, config.BuiltinPlanImplement()},
+		DefaultWorkflow: "fail-cmd",
+		Rules:           []permission.Ruleset{permission.Defaults(), allowCheck},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	waitForEvent(t, eng, func(ev protocol.Event) bool {
+		_, ok := ev.(protocol.AgentSelected)
+		return ok
+	})
+
+	eng.Ops() <- protocol.UserInput{Text: "try advance"}
+	var toolErr string
+	var advanced bool
+	deadline := time.After(10 * time.Second)
+	for toolErr == "" && !advanced {
+		select {
+		case <-deadline:
+			t.Fatal("timeout")
+		case ev := <-eng.Events():
+			switch e := ev.(type) {
+			case protocol.PhaseChanged:
+				if e.Phase == "b" {
+					advanced = true
+				}
+			case protocol.ToolCallEnd:
+				if e.CallID == "pd-fail" {
+					if !e.IsError {
+						t.Fatal("phase_done should error on failing check")
+					}
+					toolErr = e.Output
+				}
+			}
+		}
+	}
+	if advanced {
+		t.Fatal("phase advanced despite failing check")
+	}
+	if !strings.Contains(strings.ToLower(toolErr), "check failed") &&
+		!strings.Contains(toolErr, "boom") {
+		t.Fatalf("tool error = %q, want check failure detail", toolErr)
 	}
 }
 
@@ -651,6 +934,8 @@ func TestPhaseDoneAdvanceKeepsSessionModel(t *testing.T) {
 		Select:          multiProviderSelect(providers, defaults),
 		InitialProvider: "session",
 		InitialModel:    sessionModel,
+		// Agent autonomy: phase_done self-affirms without a user prompt.
+		InitialAutonomy: protocol.AutonomyAgent,
 		Registry:        tool.NewRegistry(tool.NewEnterPlanMode(), tool.NewPhaseDone()),
 		Agents: []engine.Agent{
 			{Name: "build"},

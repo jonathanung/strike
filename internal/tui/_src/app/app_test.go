@@ -3940,6 +3940,9 @@ func TestIdleSpinnerDoesNotArmOrContinue(t *testing.T) {
 }
 
 func TestWorkingSpinnerArmsAndContinues(t *testing.T) {
+	if staticWorkingChrome() {
+		t.Skip("static working chrome disables spinner ticks (#497)")
+	}
 
 	m, _ := newAppTestModel(nil, nil)
 
@@ -3982,6 +3985,9 @@ func TestWorkingSpinnerArmsAndContinues(t *testing.T) {
 }
 
 func TestTurnStartedArmsSpinner(t *testing.T) {
+	if staticWorkingChrome() {
+		t.Skip("static working chrome disables spinner ticks (#497)")
+	}
 
 	m, _ := newAppTestModel(nil, nil)
 

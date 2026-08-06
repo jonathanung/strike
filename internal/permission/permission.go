@@ -46,6 +46,7 @@ var knownPermissions = map[string]struct{}{
 	"webfetch":  {}, "todowrite": {}, "todoread": {},
 	"memory_write": {}, "memory_read": {}, "issue_write": {}, "issue_read": {},
 	"sleep": {}, "skill": {}, "question": {}, "toolsearch": {}, "hook": {},
+	"phase_check":     {},
 	"enter_plan_mode": {}, "exit_plan_mode": {}, "phase_done": {},
 	"mcp": {},
 }
@@ -94,6 +95,8 @@ func Defaults() Ruleset {
 		{Permission: "bash", Pattern: "*", Action: Ask},
 		// Project-local shell hooks execute arbitrary code — gate first run.
 		{Permission: "hook", Pattern: "*", Action: Ask},
+		// Workflow phase check commands (autonomy=checks) — source-aware trust.
+		{Permission: "phase_check", Pattern: "*", Action: Ask},
 		{Permission: "task", Pattern: "*", Action: Allow},
 		{Permission: "task_status", Pattern: "*", Action: Allow},
 		{Permission: "task_read", Pattern: "*", Action: Allow},

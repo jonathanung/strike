@@ -290,7 +290,7 @@ type Engine struct {
 	provName string
 	model    string
 	effort   protocol.Effort
-	// autonomy is the session exit-gate policy (supervised|agent|checks).
+	// autonomy is the session exit-gate policy (supervised|agent|checks|skip-all).
 	autonomy protocol.Autonomy
 	// permMode is the session tool-permission posture dial.
 	permMode protocol.PermissionMode

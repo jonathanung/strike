@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"net/url"
+	"strconv"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -39,16 +40,25 @@ const (
 	settingsFieldNano
 	settingsFieldMdRead
 	settingsFieldPerm
+	settingsFieldAutoApproveSecs
+	settingsFieldAutoApproveExclude
 	settingsFieldSandbox
 	settingsFieldNotify
 	settingsFieldLeanCode
 	settingsFieldDeferTools
 	settingsFieldWorktree
+	settingsFieldMaxChildDepth
 	settingsFieldProvider // display-only
 	settingsFieldModel    // display-only
 	settingsFieldAgent    // display-only
 	settingsFieldEffort
 )
+
+// settingsAutoApproveExcludeChoices are high-traffic permission names users
+// commonly pin out of auto-allow. Enter toggles membership and saves.
+var settingsAutoApproveExcludeChoices = []string{
+	"bash", "write", "edit", "webfetch", "task", "skill",
+}
 
 // settingsModal is the /settings UI: defaults editor + custom provider CRUD.
 type settingsModal struct {
@@ -190,11 +200,14 @@ func (m *settingsModal) defaultsFields() []settingsField {
 		settingsFieldNano,
 		settingsFieldMdRead,
 		settingsFieldPerm,
+		settingsFieldAutoApproveSecs,
+		settingsFieldAutoApproveExclude,
 		settingsFieldSandbox,
 		settingsFieldNotify,
 		settingsFieldLeanCode,
 		settingsFieldDeferTools,
 		settingsFieldWorktree,
+		settingsFieldMaxChildDepth,
 		settingsFieldProvider,
 		settingsFieldModel,
 		settingsFieldAgent,
@@ -225,8 +238,10 @@ func (m *settingsModal) updateDefaults(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 func settingsFieldEditable(f settingsField) bool {
 	switch f {
 	case settingsFieldTheme, settingsFieldVim, settingsFieldNano, settingsFieldMdRead,
-		settingsFieldPerm, settingsFieldSandbox, settingsFieldNotify, settingsFieldLeanCode,
-		settingsFieldDeferTools, settingsFieldWorktree, settingsFieldEffort:
+		settingsFieldPerm, settingsFieldAutoApproveSecs, settingsFieldAutoApproveExclude,
+		settingsFieldSandbox, settingsFieldNotify, settingsFieldLeanCode,
+		settingsFieldDeferTools, settingsFieldWorktree, settingsFieldMaxChildDepth,
+		settingsFieldEffort:
 		return true
 	default:
 		return false
@@ -238,6 +253,21 @@ func (m *settingsModal) openPick(field settingsField) {
 	m.pickOptions = m.pickOptionsFor(field)
 	m.pickCursor = 0
 	current := m.fieldValue(field)
+	if field == settingsFieldAutoApproveExclude {
+		// Start on clear when empty, else first excluded name.
+		if current == "" {
+			m.pickCursor = 0
+		} else {
+			for i, opt := range m.pickOptions {
+				if opt.value != "__clear__" && settingsExcludeContains(m.defaults.PermissionAutoApproveExclude, opt.value) {
+					m.pickCursor = i
+					break
+				}
+			}
+		}
+		m.page = settingsPagePick
+		return
+	}
 	for i, opt := range m.pickOptions {
 		if opt.value == current || (current == "" && i == 0) {
 			m.pickCursor = i
@@ -357,6 +387,46 @@ func (m *settingsModal) pickOptionsFor(field settingsField) []settingsPickOption
 			{value: "auto", label: "auto", detail: "worktree when a second root opens"},
 			{value: "always", label: "always", detail: "every new root gets a worktree"},
 		}
+	case settingsFieldAutoApproveSecs:
+		return []settingsPickOption{
+			{value: "off", label: "off", detail: "disabled (default) — soft-approve mode still uses 15s"},
+			{value: "5", label: "5s", detail: "countdown auto-allow once"},
+			{value: "10", label: "10s", detail: "countdown auto-allow once"},
+			{value: "15", label: "15s", detail: "same as soft-approve default"},
+			{value: "30", label: "30s", detail: "countdown auto-allow once"},
+			{value: "45", label: "45s", detail: "countdown auto-allow once"},
+			{value: "60", label: "60s", detail: "max countdown"},
+		}
+	case settingsFieldAutoApproveExclude:
+		out := make([]settingsPickOption, 0, len(settingsAutoApproveExcludeChoices)+1)
+		out = append(out, settingsPickOption{
+			value: "__clear__", label: "(none)", detail: "clear exclude list — all permissions may auto-allow",
+		})
+		for _, name := range settingsAutoApproveExcludeChoices {
+			detail := "enter toggles — excluded permissions never auto-allow"
+			if settingsExcludeContains(m.defaults.PermissionAutoApproveExclude, name) {
+				detail = "excluded — enter to allow auto-approve again"
+			}
+			out = append(out, settingsPickOption{value: name, label: name, detail: detail})
+		}
+		return out
+	case settingsFieldMaxChildDepth:
+		out := []settingsPickOption{
+			{value: "default", label: "default", detail: "engine default (1 — children cannot nest tasks)"},
+		}
+		for n := 1; n <= 8; n++ {
+			detail := "nested task spawn ceiling"
+			switch n {
+			case 1:
+				detail = "children cannot spawn further tasks"
+			case 8:
+				detail = "hard ceiling"
+			}
+			out = append(out, settingsPickOption{
+				value: strconv.Itoa(n), label: strconv.Itoa(n), detail: detail,
+			})
+		}
+		return out
 	case settingsFieldEffort:
 		levels := protocol.Efforts()
 		out := make([]settingsPickOption, len(levels))
@@ -367,6 +437,43 @@ func (m *settingsModal) pickOptionsFor(field settingsField) []settingsPickOption
 	default:
 		return nil
 	}
+}
+
+func settingsExcludeContains(list []string, name string) bool {
+	want := strings.ToLower(strings.TrimSpace(name))
+	for _, n := range list {
+		if strings.ToLower(strings.TrimSpace(n)) == want {
+			return true
+		}
+	}
+	return false
+}
+
+func settingsToggleExclude(list []string, name string) []string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return nil
+	}
+	out := make([]string, 0, len(list)+1)
+	found := false
+	for _, n := range list {
+		n = strings.ToLower(strings.TrimSpace(n))
+		if n == "" {
+			continue
+		}
+		if n == name {
+			found = true
+			continue
+		}
+		out = append(out, n)
+	}
+	if !found {
+		out = append(out, name)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (m *settingsModal) fieldValue(field settingsField) string {
@@ -382,6 +489,16 @@ func (m *settingsModal) fieldValue(field settingsField) string {
 		return d.MdReadMode
 	case settingsFieldPerm:
 		return d.PermissionMode
+	case settingsFieldAutoApproveSecs:
+		if d.PermissionAutoApproveSeconds <= 0 {
+			return "off"
+		}
+		return strconv.Itoa(d.PermissionAutoApproveSeconds)
+	case settingsFieldAutoApproveExclude:
+		if len(d.PermissionAutoApproveExclude) == 0 {
+			return ""
+		}
+		return strings.Join(d.PermissionAutoApproveExclude, ", ")
 	case settingsFieldSandbox:
 		return d.Sandbox
 	case settingsFieldNotify:
@@ -392,6 +509,11 @@ func (m *settingsModal) fieldValue(field settingsField) string {
 		return d.DeferTools
 	case settingsFieldWorktree:
 		return d.SessionWorktree
+	case settingsFieldMaxChildDepth:
+		if d.MaxChildDepth <= 0 {
+			return "default"
+		}
+		return strconv.Itoa(d.MaxChildDepth)
 	case settingsFieldProvider:
 		return d.Provider
 	case settingsFieldModel:
@@ -417,6 +539,10 @@ func (m *settingsModal) fieldLabel(field settingsField) string {
 		return "Md-read mode"
 	case settingsFieldPerm:
 		return "Permission mode"
+	case settingsFieldAutoApproveSecs:
+		return "Auto-approve"
+	case settingsFieldAutoApproveExclude:
+		return "Auto-approve exclude"
 	case settingsFieldSandbox:
 		return "Sandbox"
 	case settingsFieldNotify:
@@ -427,6 +553,8 @@ func (m *settingsModal) fieldLabel(field settingsField) string {
 		return "Defer tools"
 	case settingsFieldWorktree:
 		return "Session worktree"
+	case settingsFieldMaxChildDepth:
+		return "Max child depth"
 	case settingsFieldProvider:
 		return "Provider"
 	case settingsFieldModel:
@@ -463,6 +591,16 @@ func (m *settingsModal) fieldDisplay(field settingsField) (value, detail string)
 			return "default", "when asked (new sessions)"
 		}
 		return raw, "when asked (new sessions)"
+	case settingsFieldAutoApproveSecs:
+		if raw == "" || raw == "off" {
+			return "off", "permission countdown (live)"
+		}
+		return raw + "s", "permission countdown (live)"
+	case settingsFieldAutoApproveExclude:
+		if raw == "" {
+			return "(none)", "never auto-allow these (live)"
+		}
+		return raw, "never auto-allow these (live)"
 	case settingsFieldSandbox:
 		if raw == "" {
 			return "workspace-write", "what is possible (new sessions)"
@@ -488,6 +626,11 @@ func (m *settingsModal) fieldDisplay(field settingsField) (value, detail string)
 			return "off", "new root sessions"
 		}
 		return raw, "new root sessions"
+	case settingsFieldMaxChildDepth:
+		if raw == "" || raw == "default" {
+			return "default", "task nesting (new sessions)"
+		}
+		return raw, "task nesting (new sessions)"
 	case settingsFieldEffort:
 		if raw == "" {
 			return "(unset)", "provider default"
@@ -545,6 +688,7 @@ func (m *settingsModal) savePickCmd(opt settingsPickOption) tea.Cmd {
 	settings := m.services.Settings
 	field := m.pickField
 	workDir := m.workDir
+	excludeSnapshot := append([]string(nil), m.defaults.PermissionAutoApproveExclude...)
 	return func() tea.Msg {
 		if settings == nil {
 			return settingsSavedMsg{err: errNoSettings}
@@ -586,6 +730,32 @@ func (m *settingsModal) savePickCmd(opt settingsPickOption) tea.Cmd {
 			}
 		case settingsFieldPerm:
 			err = settings.SaveDefaults("", "", "", "", opt.value)
+		case settingsFieldAutoApproveSecs:
+			err = settings.SaveAutoApproveDials(opt.value, nil, "")
+			if err == nil {
+				secs := 0
+				if opt.value != "off" && opt.value != "0" {
+					secs, _ = strconv.Atoi(opt.value)
+				}
+				apply.autoApproveSecs = secs
+				apply.hasAutoApproveSecs = true
+			}
+		case settingsFieldAutoApproveExclude:
+			var next []string
+			if opt.value == "__clear__" {
+				next = nil
+			} else {
+				// Toggle against the snapshot captured when the cmd was built.
+				// Re-read is not available here; caller passes via closure below.
+				next = settingsToggleExclude(excludeSnapshot, opt.value)
+			}
+			err = settings.SaveAutoApproveDials("", &next, "")
+			if err == nil {
+				apply.autoApproveExclude = next
+				apply.hasAutoApproveExclude = true
+			}
+		case settingsFieldMaxChildDepth:
+			err = settings.SaveAutoApproveDials("", nil, opt.value)
 		case settingsFieldSandbox:
 			err = settings.SaveConfigDials(opt.value, "", "", "", "")
 		case settingsFieldNotify:
@@ -617,16 +787,20 @@ func (m *settingsModal) savePickCmd(opt settingsPickOption) tea.Cmd {
 
 // settingsApply carries live session updates after a successful defaults save.
 type settingsApply struct {
-	themeID    string
-	theme      *theme.Entry
-	vimMode    VimMode
-	hasVim     bool
-	nanoMode   NanoMode
-	hasNano    bool
-	mdReadMode SurfacePresentation
-	hasMd      bool
-	notifyMode NotifyMode
-	hasNotify  bool
+	themeID               string
+	theme                 *theme.Entry
+	vimMode               VimMode
+	hasVim                bool
+	nanoMode              NanoMode
+	hasNano               bool
+	mdReadMode            SurfacePresentation
+	hasMd                 bool
+	notifyMode            NotifyMode
+	hasNotify             bool
+	autoApproveSecs       int
+	hasAutoApproveSecs    bool
+	autoApproveExclude    []string
+	hasAutoApproveExclude bool
 }
 
 // settingsSavedMsg reports a /settings defaults write.
@@ -707,6 +881,21 @@ func (m *settingsModal) afterSettingsSaved(msg settingsSavedMsg) {
 		return
 	}
 	m.reloadDefaults()
+	// Exclude is a multi-toggle list: stay on the pick page so users can flip
+	// several names without re-opening the row.
+	if msg.field == settingsFieldAutoApproveExclude {
+		m.page = settingsPagePick
+		m.pickField = settingsFieldAutoApproveExclude
+		m.pickOptions = m.pickOptionsFor(settingsFieldAutoApproveExclude)
+		// Keep cursor on the toggled option when possible.
+		for i, opt := range m.pickOptions {
+			if opt.value == msg.value {
+				m.pickCursor = i
+				break
+			}
+		}
+		return
+	}
 	m.page = settingsPageDefaults
 	m.cursor = int(msg.field)
 }
@@ -776,13 +965,20 @@ func (m *settingsModal) viewPick(width int, th theme.Theme) string {
 		items[i] = ui.ListItem{
 			Label:   opt.label,
 			Detail:  opt.detail,
-			Current: settingsValuesEqual(m.pickField, opt.value, current) || (current == "" && i == 0 && m.pickField != settingsFieldTheme),
+			Current: settingsValuesEqual(m.pickField, opt.value, current) || (current == "" && i == 0 && m.pickField != settingsFieldTheme && m.pickField != settingsFieldAutoApproveExclude),
 		}
 		if m.pickField == settingsFieldTheme && opt.value == current {
 			items[i].Current = true
 		}
 		if m.pickField == settingsFieldTheme && current == "" && opt.value == theme.BuiltinID {
 			items[i].Current = true
+		}
+		if m.pickField == settingsFieldAutoApproveExclude {
+			if opt.value == "__clear__" {
+				items[i].Current = len(m.defaults.PermissionAutoApproveExclude) == 0
+			} else {
+				items[i].Current = settingsExcludeContains(m.defaults.PermissionAutoApproveExclude, opt.value)
+			}
 		}
 	}
 	body := ui.List(th, ui.ListOpts{

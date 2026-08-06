@@ -238,20 +238,68 @@ Look at the uncommitted changes and commit them: $ARGUMENTS
 
 ## Workflows
 
-**Workflows** are ordered phase sequences loaded from
-`~/.strike/workflows/*.json` and `./.strike/workflows/*.json` (project
-overrides global by name). Strike ships built-in workflows that may be
-overridden by the same name.
+**Workflows** are ordered (linear) phase sequences. Schema version
+`schemaVersion: 1` is the current contract. Documents load from:
+
+| Precedence | Source | Path |
+|---|---|---|
+| 1 (lowest) | builtin | shipped (`plan-implement`, `review-fix`) |
+| 2 | global | `~/.strike/workflows/*.json` |
+| 3 (highest) | project | `./.strike/workflows/*.json` |
+
+Project overrides global/builtin by **workflow name**. Same-layer duplicate
+names fail closed. Each loaded definition keeps runtime diagnostics: `Source`,
+absolute `Path` (disk-backed), and a canonical SHA-256 `Fingerprint` of the
+formatted document (for resume/diagnostics — not written to disk).
+
+Decoding is **strict**: unknown JSON fields are rejected. Validation checks
+identifiers, phase uniqueness, permission rules, exit gates, and (when agents
+are loaded) agent references — reporting every actionable error in one pass.
+
+Scaffolding / formatting / validating never activates a workflow. Activation
+is a separate catalog or tool step (`enter_plan_mode`, future `/workflow`).
+
+### CLI
+
+```text
+strike workflow scaffold --global|--project <name> [--force]
+strike workflow format [--write] <path>...
+strike workflow validate <path|dir>...
+strike workflow validate --global|--project|--all
+```
+
+- **scaffold** requires explicit `--global` or `--project`. Refuses overwrite
+  unless `--force`. Writes `<scope>/workflows/<name>.json` only.
+- **format** emits deterministic pretty JSON (always includes
+  `schemaVersion`). `--write` rewrites in place.
+- **validate** strict-decodes, runs structural checks, resolves agent pins
+  against loaded agents, and prints short fingerprints on success.
+
+### Phase fields
 
 Each phase may pin an agent, extra prompt context, a permission ruleset, and
-an exit gate. Phase agent pins change persona/permissions only — the session
-provider/model stays put (see Agents above).
+an exit gate (authored default / check command). Phase agent pins change
+persona/permissions only — the session provider/model stays put (see Agents
+above).
 
-| Gate `type` | Clears when |
+**Runtime exit policy** is the session `/autonomy` dial (authoritative for
+`phase_done` and `exit_plan_mode`), not the phase's authored `exit.type`:
+
+| Autonomy | Clears when |
 |---|---|
-| `agent` (default) | the model calls `phase_done` |
-| `user` | the user approves (e.g. leave plan mode) |
-| `check` | `command` exits 0 |
+| `supervised` (default) | the user approves |
+| `agent` | the model calls `phase_done` / `exit_plan_mode` |
+| `checks` | phase `exit.command` exits 0 (permission `phase_check`) |
+| `skip-all` | immediately (workflow/plan approval only; tool perms unchanged) |
+
+Authored gate types remain useful documentation and supply `command` for
+checks mode:
+
+| Gate `type` (authored) | Meaning |
+|---|---|
+| `agent` (default) | intended model self-affirmation |
+| `user` | intended human approval |
+| `check` | intended command gate (`command` required) |
 
 Built-in `plan-implement`:
 
@@ -272,6 +320,7 @@ file:
 
 ```json
 {
+  "schemaVersion": 1,
   "name": "review-fix",
   "description": "Review then fix",
   "phases": [
