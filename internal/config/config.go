@@ -306,6 +306,26 @@ type SessionConfig struct {
 	RetentionMaxAgeDays int `json:"retentionMaxAgeDays,omitempty"`
 	// RetentionMaxBytes caps total closed session log+meta bytes (0 = off).
 	RetentionMaxBytes int64 `json:"retentionMaxBytes,omitempty"`
+	// TimelineMaxEntries caps in-memory structured run timeline entries
+	// (0 = pkg/timeline default 10000; negative in API disables — JSON 0 keeps default).
+	// Oldest terminal entries are pruned first (#810).
+	TimelineMaxEntries int `json:"timelineMaxEntries,omitempty"`
+	// TimelineArgsPreviewMax / TimelineOutputPreviewMax override inline payload
+	// preview rune caps (0 = library defaults 512 / 2048). Oversized payloads
+	// truncate; with TimelineBlobSpill they also spill to content-addressed blobs.
+	TimelineArgsPreviewMax   int `json:"timelineArgsPreviewMax,omitempty"`
+	TimelineOutputPreviewMax int `json:"timelineOutputPreviewMax,omitempty"`
+	// TimelineBlobSpill enables spilling oversized redacted tool payloads under
+	// ~/.strike/traces/<sessionId>/blobs/ (blob:sha256: refs on timeline entries).
+	// Spill writes do not fsync — session JSONL remains the durability boundary.
+	TimelineBlobSpill bool `json:"timelineBlobSpill,omitempty"`
+	// TraceRetentionMaxFiles/AgeDays/Bytes bound ~/.strike/traces and
+	// ~/.strike/runs session trees (0 = unlimited). Applied via
+	// session.ApplyTraceRetention / ApplyRetentionWithSidecars — coordinates
+	// with session.retention* (#803); not automatic on every launch.
+	TraceRetentionMaxFiles   int   `json:"traceRetentionMaxFiles,omitempty"`
+	TraceRetentionMaxAgeDays int   `json:"traceRetentionMaxAgeDays,omitempty"`
+	TraceRetentionMaxBytes   int64 `json:"traceRetentionMaxBytes,omitempty"`
 	// AgentBudget is the default per-child resource limit for task spawns
 	// (#774). Spawn-time task.budget fields overlay non-zero values. Zero
 	// means unlimited for that dimension (soft stall/loop signals still
@@ -1182,6 +1202,27 @@ func merge(base, layer Config) Config {
 	}
 	if layer.Session.RetentionMaxBytes != 0 {
 		base.Session.RetentionMaxBytes = layer.Session.RetentionMaxBytes
+	}
+	if layer.Session.TimelineMaxEntries != 0 {
+		base.Session.TimelineMaxEntries = layer.Session.TimelineMaxEntries
+	}
+	if layer.Session.TimelineArgsPreviewMax != 0 {
+		base.Session.TimelineArgsPreviewMax = layer.Session.TimelineArgsPreviewMax
+	}
+	if layer.Session.TimelineOutputPreviewMax != 0 {
+		base.Session.TimelineOutputPreviewMax = layer.Session.TimelineOutputPreviewMax
+	}
+	if layer.Session.TimelineBlobSpill {
+		base.Session.TimelineBlobSpill = true
+	}
+	if layer.Session.TraceRetentionMaxFiles != 0 {
+		base.Session.TraceRetentionMaxFiles = layer.Session.TraceRetentionMaxFiles
+	}
+	if layer.Session.TraceRetentionMaxAgeDays != 0 {
+		base.Session.TraceRetentionMaxAgeDays = layer.Session.TraceRetentionMaxAgeDays
+	}
+	if layer.Session.TraceRetentionMaxBytes != 0 {
+		base.Session.TraceRetentionMaxBytes = layer.Session.TraceRetentionMaxBytes
 	}
 	base.Session.AgentBudget = mergeAgentBudgetConfig(base.Session.AgentBudget, layer.Session.AgentBudget)
 	base.Permissions = append(base.Permissions, layer.Permissions...)
