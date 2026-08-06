@@ -120,8 +120,9 @@ type Policy struct {
 	// DenyWritePaths expanded from these globs at compile time.
 	DenyWriteGlobs []string
 	// Network enables outbound/inbound network in the OS profile. Default
-	// false preserves --unshare-net / no network-* (current product default).
-	// Compiled from webfetch/mcp permission Allow on "*".
+	// true (permission compile) so bash keeps host networking; false adds
+	// --unshare-net / omits network-* (seatbelt). Compiled off only when
+	// both webfetch and mcp are hard-Deny on "*".
 	Network bool
 }
 
