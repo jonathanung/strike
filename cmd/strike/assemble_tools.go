@@ -786,7 +786,10 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	services.MCP = local.NewMCP(mcpMgr)
 	services.LSP = local.NewLSP(lspMgr)
 	services.Telemetry = local.NewTelemetry()
-	services.Workflows = local.NewWorkflows(workflows)
+	services.Workflows = local.NewWorkflowsWithOpts(workflows, nil, local.WorkflowsOpts{
+		WorkDir: workDir,
+		Agents:  agentNames,
+	})
 	services.WorkflowDrafts = local.NewWorkflowDrafts(workDir)
 
 	spawn := rootSpawner(func(id string) (*rootSlot, error) {
