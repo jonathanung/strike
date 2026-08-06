@@ -772,7 +772,7 @@ Compatibility:
 
 ## 14. Web mapping (frontend-neutral)
 
-|#732 must not import TUI packages.* Mapping rules:
+**#732 must not import TUI packages.** Mapping rules:
 
 | ABI concept | TUI host (#731) | Web host (#732) |
 |---|---|---|

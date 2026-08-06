@@ -135,7 +135,8 @@ workflows). Optional `$schema` key is ignored (editor only), matching config.
     "skills",
     "workflows",
     "themes",
-    "mcp.stdio"
+    "mcp.stdio",
+    "panes"
   ],
   "contributions": {
     "agents": [
@@ -363,7 +364,7 @@ when any of the following change:
 - Source identity (different remote, commit, catalog version, or local path
   replacement)
 - New or changed executable contribution entries (command, args, env keys,
-  hook command, MCP URL/headers keys)
+  hook command, MCP URL/headers keys, process-pane command/args/env)
 - `schemaVersion` increase that the running Strike does not implement
 - Plugin `version` change that alters executable capability tags
 
