@@ -91,7 +91,6 @@ func TestRedactEventPreservesNonSensitive(t *testing.T) {
 	}
 }
 
-
 func TestRedactEventArtifactUpdated(t *testing.T) {
 	key := "sk-abcdefghijklmnopqrstuvwxyz0123456789"
 	ev := secret.RedactEvent(protocol.ArtifactUpdated{
