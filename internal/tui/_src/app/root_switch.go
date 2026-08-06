@@ -129,6 +129,17 @@ func (m *Model) loadRootPane(p *rootPane) {
 	m.sessionID = p.sessionID
 	m.workDir = p.workDir
 	m.titleTopic = p.titleTopic
+	// Rebuild timeline for the activated root (live builder is per-active model).
+	m.resetRunTimeline()
+	if m.services.Sessions != nil && strings.TrimSpace(p.sessionID) != "" {
+		if data, err := m.services.Sessions.ReplayJSONL(p.sessionID); err == nil {
+			if events, err := timedEventsFromJSONL(data); err == nil {
+				for _, te := range events {
+					m.observeTimeline(te.Event, te.Time)
+				}
+			}
+		}
+	}
 	m.cells = append([]cell(nil), p.cells...)
 	m.toolByID = map[string]*toolCell{}
 	for k, v := range p.toolByID {

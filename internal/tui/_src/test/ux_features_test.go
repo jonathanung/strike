@@ -562,7 +562,7 @@ func TestHelpCommandOpensFilterableCatalogModal(t *testing.T) {
 		t.Errorf("/help set notice %q, want empty (modal is unclipped)", m.notice)
 	}
 	wantLabels := []string{
-		"/provider", "/model", "/settings", "/session", "/rename", "/export", "/copy", "/theme", "/memory",
+		"/provider", "/model", "/settings", "/session", "/rename", "/export", "/timeline", "/copy", "/theme", "/memory",
 		"/issues", "/compact", "/fork", "/undo", "/rewind", "/fast", "/think", "/layout", "/md-read", "/keys", "/legend", "/exit", "/quit", "/palette", "/interrupt", "/agent-next", "/focus-left", "/review", "tab",
 	}
 	for _, want := range wantLabels {

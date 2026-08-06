@@ -109,9 +109,78 @@ func defaultHandoffSummary(status protocol.ChildStatus) string {
 		return "task canceled"
 	case protocol.ChildStatusFailed:
 		return "task failed"
+	case protocol.ChildStatusBlocked:
+		return "task blocked (verification failed)"
 	default:
 		return "task completed"
 	}
+}
+
+// marshalVerificationModelJSON is the snake_case verification report for notices.
+func marshalVerificationModelJSON(v protocol.VerificationReport) string {
+	type checkView struct {
+		Name       string `json:"name,omitempty"`
+		Kind       string `json:"kind"`
+		Value      string `json:"value,omitempty"`
+		Passed     bool   `json:"passed"`
+		ExitCode   int    `json:"exit_code,omitempty"`
+		Output     string `json:"output,omitempty"`
+		Error      string `json:"error,omitempty"`
+		DurationMs int64  `json:"duration_ms,omitempty"`
+	}
+	type envView struct {
+		WorkDir    string `json:"work_dir,omitempty"`
+		SessionID  string `json:"session_id,omitempty"`
+		WorktreeID string `json:"worktree_id,omitempty"`
+		ModelID    string `json:"model_id,omitempty"`
+		StartedAt  string `json:"started_at,omitempty"`
+		FinishedAt string `json:"finished_at,omitempty"`
+	}
+	type view struct {
+		Passed     bool        `json:"passed"`
+		Claimed    bool        `json:"claimed"`
+		Verified   bool        `json:"verified"`
+		Checks     []checkView `json:"checks"`
+		Env        envView     `json:"env"`
+		Summary    string      `json:"summary,omitempty"`
+		DurationMs int64       `json:"duration_ms,omitempty"`
+	}
+	checks := make([]checkView, 0, len(v.Checks))
+	for _, c := range v.Checks {
+		checks = append(checks, checkView{
+			Name:       c.Name,
+			Kind:       c.Kind,
+			Value:      c.Value,
+			Passed:     c.Passed,
+			ExitCode:   c.ExitCode,
+			Output:     c.Output,
+			Error:      c.Error,
+			DurationMs: c.DurationMs,
+		})
+	}
+	if checks == nil {
+		checks = []checkView{}
+	}
+	b, err := json.Marshal(view{
+		Passed:   v.Passed,
+		Claimed:  v.Claimed,
+		Verified: v.Verified,
+		Checks:   checks,
+		Env: envView{
+			WorkDir:    v.Env.WorkDir,
+			SessionID:  v.Env.SessionID,
+			WorktreeID: v.Env.WorktreeID,
+			ModelID:    v.Env.ModelID,
+			StartedAt:  v.Env.StartedAt,
+			FinishedAt: v.Env.FinishedAt,
+		},
+		Summary:    v.Summary,
+		DurationMs: v.DurationMs,
+	})
+	if err != nil {
+		return `{"passed":false,"claimed":true,"verified":false,"checks":[]}`
+	}
+	return string(b)
 }
 
 // parseCompletionHandoff extracts a structured handoff from assistant text.

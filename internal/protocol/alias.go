@@ -70,6 +70,9 @@ type (
 	Correlation             = pub.Correlation
 	ChildStatus             = pub.ChildStatus
 	CompletionHandoff       = pub.CompletionHandoff
+	VerificationReport      = pub.VerificationReport
+	VerificationCheck       = pub.VerificationCheck
+	VerificationEnv         = pub.VerificationEnv
 	TeamMemberState         = pub.TeamMemberState
 	TeamRosterMember        = pub.TeamRosterMember
 	ProcessStatus           = pub.ProcessStatus
@@ -155,11 +158,13 @@ const (
 	ChildStatusCompleted = pub.ChildStatusCompleted
 	ChildStatusFailed    = pub.ChildStatusFailed
 	ChildStatusCanceled  = pub.ChildStatusCanceled
+	ChildStatusBlocked   = pub.ChildStatusBlocked
 
 	TeamMemberRunning   = pub.TeamMemberRunning
 	TeamMemberCompleted = pub.TeamMemberCompleted
 	TeamMemberFailed    = pub.TeamMemberFailed
 	TeamMemberCanceled  = pub.TeamMemberCanceled
+	TeamMemberBlocked   = pub.TeamMemberBlocked
 
 	ProcessStreamStdout = pub.ProcessStreamStdout
 	ProcessStreamStderr = pub.ProcessStreamStderr
