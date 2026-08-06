@@ -2,6 +2,7 @@ package swebench
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -41,6 +42,12 @@ type Config struct {
 	// DryRun materializes nothing and does not call docker/agent; writes a
 	// skipped report for wiring checks.
 	DryRun bool
+	// ExtraExecArgs are appended to strike exec before the prompt (config
+	// sweeps / sandbox flags).
+	ExtraExecArgs []string
+	// ProjectConfig is raw JSON written to workDir/.strike/config before the
+	// agent runs (parameter sweeps — compaction/leanCode/deferTools/…).
+	ProjectConfig []byte
 }
 
 // Runner executes the SWE-bench subset.
@@ -228,6 +235,12 @@ func (r *Runner) runOne(
 		defer os.RemoveAll(instDir)
 	}
 
+	if len(cfg.ProjectConfig) > 0 {
+		if err := writeProjectConfig(mat.WorkDir, cfg.ProjectConfig); err != nil {
+			return finish(StatusError, "project config: "+err.Error())
+		}
+	}
+
 	prompt := BuildAgentPrompt(in)
 	agentTimeout := cfg.AgentTimeout
 	if agentTimeout <= 0 {
@@ -235,11 +248,12 @@ func (r *Runner) runOne(
 	}
 	agentStart := nowFn()
 	execRes, agentErr := agent.Run(ctx, mat.WorkDir, prompt, AgentOpts{
-		Strike:   cfg.StrikeBin,
-		Provider: cfg.Provider,
-		Model:    cfg.Model,
-		Effort:   cfg.Effort,
-		Timeout:  agentTimeout,
+		Strike:    cfg.StrikeBin,
+		Provider:  cfg.Provider,
+		Model:     cfg.Model,
+		Effort:    cfg.Effort,
+		Timeout:   agentTimeout,
+		ExtraArgs: cfg.ExtraExecArgs,
 	})
 	row.AgentMs = nowFn().Sub(agentStart).Milliseconds()
 	row.SessionID = execRes.SessionID
@@ -377,4 +391,27 @@ func ResolveInstances(ctx context.Context, datasetPath string, ids []string, cli
 		return nil, err
 	}
 	return FilterSubset(all, ids)
+}
+
+// writeProjectConfig materializes a project-layer .strike/config for dial overrides.
+func writeProjectConfig(workDir string, raw []byte) error {
+	if workDir == "" {
+		return fmt.Errorf("swebench: empty workDir")
+	}
+	if len(raw) == 0 {
+		return nil
+	}
+	var probe any
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return fmt.Errorf("swebench: project config json: %w", err)
+	}
+	dir := filepath.Join(workDir, ".strike")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	out := append([]byte(nil), raw...)
+	if len(out) > 0 && out[len(out)-1] != '\n' {
+		out = append(out, '\n')
+	}
+	return os.WriteFile(filepath.Join(dir, "config"), out, 0o644)
 }

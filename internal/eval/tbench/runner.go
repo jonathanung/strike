@@ -2,6 +2,7 @@ package tbench
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,6 +32,9 @@ type Config struct {
 	// ExtraExecArgs are appended to strike exec before the prompt (config
 	// overrides for sweeps — e.g. future --config flags).
 	ExtraExecArgs []string
+	// ProjectConfig is raw JSON written to workDir/.strike/config before the
+	// agent runs (parameter sweeps).
+	ProjectConfig []byte
 }
 
 // Runner executes the Terminal-Bench subset.
@@ -200,6 +204,12 @@ func (r *Runner) runOne(
 	}
 	row.Image = mat.Image
 
+	if len(cfg.ProjectConfig) > 0 {
+		if err := writeProjectConfig(mat.WorkDir, cfg.ProjectConfig); err != nil {
+			return finish(StatusError, "project config: "+err.Error())
+		}
+	}
+
 	prompt := BuildAgentPrompt(in)
 	agentTimeout := AgentTimeout(in, cfg.AgentTimeout)
 	agentStart := nowFn()
@@ -318,4 +328,27 @@ func ResolveInstances(tasksDir, datasetPath string, ids []string) ([]Instance, e
 		return nil, fmt.Errorf("tbench: provide --tasks-dir (clone of %s) or --dataset JSONL", DatasetRepo)
 	}
 	return LoadTaskPack(tasksDir, ids)
+}
+
+// writeProjectConfig materializes a project-layer .strike/config for dial overrides.
+func writeProjectConfig(workDir string, raw []byte) error {
+	if workDir == "" {
+		return fmt.Errorf("tbench: empty workDir")
+	}
+	if len(raw) == 0 {
+		return nil
+	}
+	var probe any
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return fmt.Errorf("tbench: project config json: %w", err)
+	}
+	dir := filepath.Join(workDir, ".strike")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	out := append([]byte(nil), raw...)
+	if len(out) > 0 && out[len(out)-1] != '\n' {
+		out = append(out, '\n')
+	}
+	return os.WriteFile(filepath.Join(dir, "config"), out, 0o644)
 }

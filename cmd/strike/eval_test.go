@@ -15,7 +15,7 @@ func TestRunEvalCLIHelp(t *testing.T) {
 		t.Fatalf("code %d stderr=%s", code, stderr.String())
 	}
 	out := stdout.String()
-	if !strings.Contains(out, "swebench") || !strings.Contains(out, "tbench") {
+	if !strings.Contains(out, "swebench") || !strings.Contains(out, "tbench") || !strings.Contains(out, "sweep") {
 		t.Fatalf("usage: %s", out)
 	}
 }
@@ -120,6 +120,59 @@ func TestRunEvalTBenchWithTasksDir(t *testing.T) {
 func TestRunEvalUnknown(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := runEvalCLI([]string{"nope"}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("code %d", code)
+	}
+}
+
+func TestRunEvalSweepListPoints(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runEvalCLI([]string{"sweep", "--matrix", "leanCode", "--list-points"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code %d stderr=%s", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, id := range []string{"leanCode-off", "leanCode-lite", "leanCode-full"} {
+		if !strings.Contains(out, id) {
+			t.Fatalf("missing %s in %s", id, out)
+		}
+	}
+}
+
+func TestRunEvalSweepDryRun(t *testing.T) {
+	dir := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	code := runEvalCLI([]string{
+		"sweep",
+		"--benchmark", "swebench",
+		"--matrix", "deferTools",
+		"--dry-run",
+		"--limit", "1",
+		"--out", dir,
+		"--run-id", "sweep-dry",
+		"--grader", "none",
+		"--provider", "echo",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "summary.json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "deferTools-off", "report.json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "deferTools-on", "report.json")); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "deferTools-off") {
+		t.Fatalf("stdout: %s", stdout.String())
+	}
+}
+
+func TestRunEvalSweepUnknownMatrix(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runEvalCLI([]string{"sweep", "--matrix", "nope"}, &stdout, &stderr)
 	if code != 2 {
 		t.Fatalf("code %d", code)
 	}
