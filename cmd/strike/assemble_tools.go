@@ -322,6 +322,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tool.NewAgentOwnership(),
 		tool.NewAgentMessage(),
 		tool.NewAgentBroadcast(),
+		tool.NewAgentThread(),
 		tool.NewTeamTask(),
 		tool.NewWebFetch(),
 		tool.NewTodoWrite(todoStore),

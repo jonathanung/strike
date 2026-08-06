@@ -859,6 +859,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			tc.AgentRoster = e.agentRoster
 			tc.AgentMessage = e.agentMessage
 			tc.AgentBroadcast = e.agentBroadcast
+			tc.AgentThread = e.agentThread
 			tc.TeamTask = e.teamTask
 			tc.Delegate = e.delegate
 			tc.Ownership = e.team.Ownership()

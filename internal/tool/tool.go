@@ -327,26 +327,73 @@ type AgentRosterResult struct {
 
 // AgentMessageRequest sends one peer message to a teammate.
 // To is a session id (or stable name when aliases are set).
+// Optional coordination-contract fields bind threads, urgency, and ack TTL.
 type AgentMessageRequest struct {
-	To      string
-	Body    string
-	Summary string // optional short UI label
+	To                string
+	Body              string
+	Summary           string  // optional short UI label
+	TaskID            string  // team_task or delegation id (thread key)
+	Urgency           string  // normal|high|blocker
+	Kind              string  // message|request|ack
+	RequireAck        bool    // request explicit ack (implied by kind=request)
+	AckTimeoutSeconds float64 // TTL when require_ack (default 60, max 300)
+	InReplyTo         string  // required for kind=ack
+	EscalateTo        string  // ack-timeout target (default lead)
 }
 
 // AgentMessageResult acknowledges peer delivery (mailbox status vocabulary).
 // Status is queued|accepted|rejected.
 type AgentMessageResult struct {
-	To        string `json:"to"`
-	Status    string `json:"status"`
-	Detail    string `json:"detail,omitempty"`
-	MessageID string `json:"message_id,omitempty"`
-	Dropped   bool   `json:"dropped,omitempty"`
+	To                string  `json:"to"`
+	Status            string  `json:"status"`
+	Detail            string  `json:"detail,omitempty"`
+	MessageID         string  `json:"message_id,omitempty"`
+	Dropped           bool    `json:"dropped,omitempty"`
+	TaskID            string  `json:"task_id,omitempty"`
+	Urgency           string  `json:"urgency,omitempty"`
+	Kind              string  `json:"kind,omitempty"`
+	RequireAck        bool    `json:"require_ack,omitempty"`
+	AckStatus         string  `json:"ack_status,omitempty"` // pending|acked|timed_out
+	AckTimeoutSeconds float64 `json:"ack_timeout_seconds,omitempty"`
+	InReplyTo         string  `json:"in_reply_to,omitempty"`
+	EscalateTo        string  `json:"escalate_to,omitempty"`
 }
 
 // AgentBroadcastRequest sends one body to every other teammate.
 type AgentBroadcastRequest struct {
 	Body    string
 	Summary string
+	TaskID  string // optional thread binding on each copy
+	Urgency string // normal|high|blocker
+}
+
+// AgentThreadRequest reads a task/delegation-bound message thread.
+type AgentThreadRequest struct {
+	TaskID string
+	Limit  int // default 20, max 64
+}
+
+// AgentThreadMessage is one entry in an agent_thread listing.
+type AgentThreadMessage struct {
+	MessageID  string `json:"message_id"`
+	From       string `json:"from"`
+	To         string `json:"to"`
+	Body       string `json:"body"`
+	Summary    string `json:"summary,omitempty"`
+	TaskID     string `json:"task_id,omitempty"`
+	Urgency    string `json:"urgency,omitempty"`
+	Kind       string `json:"kind,omitempty"`
+	RequireAck bool   `json:"require_ack,omitempty"`
+	InReplyTo  string `json:"in_reply_to,omitempty"`
+	EscalateTo string `json:"escalate_to,omitempty"`
+	AckStatus  string `json:"ack_status,omitempty"`
+	CreatedAt  string `json:"created_at,omitempty"` // RFC3339
+}
+
+// AgentThreadResult is the agent_thread tool payload.
+type AgentThreadResult struct {
+	TaskID   string               `json:"task_id"`
+	Messages []AgentThreadMessage `json:"messages"`
 }
 
 // AgentBroadcastDelivery is one recipient outcome from agent_broadcast.
@@ -554,6 +601,8 @@ type Context struct {
 	AgentMessage func(ctx context.Context, req AgentMessageRequest) (AgentMessageResult, error)
 	// AgentBroadcast sends a peer mailbox message to all other teammates.
 	AgentBroadcast func(ctx context.Context, req AgentBroadcastRequest) (AgentBroadcastResult, error)
+	// AgentThread lists messages bound to a task_id / delegation id on the team.
+	AgentThread func(ctx context.Context, req AgentThreadRequest) (AgentThreadResult, error)
 	// TeamTask creates/lists/updates/claims/completes shared team board items.
 	TeamTask func(ctx context.Context, req TeamTaskRequest) (TeamTaskResult, error)
 	// Delegate creates/lists/transitions first-class delegation lifecycle objects.
