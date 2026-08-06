@@ -126,6 +126,25 @@ func TestScrubToolOutputPreservesShortIDs(t *testing.T) {
 	}
 }
 
+func TestScrubToolOutputPreservesGitSHA(t *testing.T) {
+	// 40-char hex (git SHA-1).
+	sha := "a1b2c3d4e5f6789012345678abcdef0123456789"
+	if len(sha) != 40 {
+		t.Fatalf("fixture len %d", len(sha))
+	}
+	in := "HEAD is now at " + sha
+	got := secret.ScrubToolOutput(in)
+	if got != in {
+		t.Fatalf("git SHA redacted: %q → %q", in, got)
+	}
+	// Non-hex mixed token still scrubbed (contains g–z outside hex).
+	tok := "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2"
+	got = secret.ScrubToolOutput("x " + tok)
+	if strings.Contains(got, tok) {
+		t.Fatalf("expected high-entropy scrub of non-hex: %q", got)
+	}
+}
+
 func TestRedactError(t *testing.T) {
 	if got := secret.RedactError(nil); got != "" {
 		t.Fatalf("nil = %q", got)

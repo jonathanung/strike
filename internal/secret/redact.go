@@ -10,7 +10,6 @@ package secret
 import (
 	"regexp"
 	"strings"
-	"unicode"
 )
 
 // Placeholder is the generic stand-in for a redacted secret span.
@@ -164,30 +163,43 @@ func ScrubToolOutput(s string) string {
 }
 
 // looksHighEntropy is a cheap digit/letter mix check — not cryptographic.
-// Requires both letters and digits (or mixed case + symbols already in class)
-// so prose words and pure hex short ids are less likely to trip.
+// Skips pure hex (git SHAs, UUIDs without dashes) and pure alpha/numeric runs.
 func looksHighEntropy(tok string) bool {
 	if len(tok) < 40 {
 		return false
 	}
 	var letters, digits, upper, lower int
+	hexOnly := true
 	for _, r := range tok {
 		switch {
-		case unicode.IsLetter(r):
-			letters++
-			if unicode.IsUpper(r) {
-				upper++
-			} else {
-				lower++
-			}
-		case unicode.IsDigit(r):
+		case r >= '0' && r <= '9':
 			digits++
+		case r >= 'a' && r <= 'f':
+			letters++
+			lower++
+		case r >= 'A' && r <= 'F':
+			letters++
+			upper++
+		case r >= 'g' && r <= 'z':
+			letters++
+			lower++
+			hexOnly = false
+		case r >= 'G' && r <= 'Z':
+			letters++
+			upper++
+			hexOnly = false
+		case r == '_' || r == '-':
+			hexOnly = false
+		default:
+			hexOnly = false
 		}
 	}
+	// Git SHAs / hex digests: preserve for debugging.
+	if hexOnly {
+		return false
+	}
 	if letters == 0 || digits == 0 {
-		// Pure alpha or pure numeric long runs are usually not API keys.
-		// Exception: base64 often has both; JWT-like segments may be pure.
-		// Require mixed case for pure-alpha long tokens.
+		// Pure alpha long tokens need mixed case (JWT-ish); pure digits stay.
 		if digits == 0 && upper > 0 && lower > 0 && letters >= 40 {
 			return true
 		}
