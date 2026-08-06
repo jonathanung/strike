@@ -149,7 +149,7 @@ does not skip asks. `yolo` + `sandbox: off` requires `--i-know`.
 | Instructions globs | OC `instructions` | AGENTS.md + discovery roots | shipped (different model) |
 | Autoupdate | OC `autoupdate` | `strike upgrade` | partial (manual) |
 | Formatters | OC `formatter` | gap (use hooks / editor) | gap |
-| LSP servers | OC `lsp` | gap — tracked #555 | gap / out of this epic |
+| LSP servers | OC `lsp` | shipped (`internal/lsp`, `/lsp`, diagnostics pane) | gap / out of this epic |
 | Network allowlist | OC network / CC | gap — tracked #527 | gap / coordinate |
 | Managed / MDM settings | CC/OC enterprise | gap | gap (later) |
 | JSON schema `$schema` | both | gap | gap (nice DX) |

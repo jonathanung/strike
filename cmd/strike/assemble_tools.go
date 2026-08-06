@@ -725,6 +725,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	services.Sessions = local.NewSessions(sessions, projectIdentity.Key)
 	services.Init = local.NewProjectInit(workDir)
 	services.MCP = local.NewMCP(mcpMgr)
+	services.LSP = local.NewLSP(lspMgr)
 	services.Telemetry = local.NewTelemetry()
 
 	spawn := rootSpawner(func(id string) (*rootSlot, error) {

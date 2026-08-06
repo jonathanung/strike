@@ -549,6 +549,7 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		m.entries = services.History.Entries()
 	}
 	m.windows = configureFilesWindow(m.windows, m.workDir, m.services.Files)
+	m.windows = configureDiagnosticsWindow(m.windows, m.workDir, m.services.LSP)
 	m.windows = configureMemoryWindow(m.windows, m.services.Memory)
 	m.windows = configureIssuesWindow(m.windows, m.services.Issues)
 	m.windows = configureTelemetryWindow(m.windows, m.workDir, m.services.Telemetry)
@@ -678,7 +679,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd == nil {
 			return m, nil
 		}
-		return m, tea.Batch(cmd, filesPollCmd(m.windows))
+		return m, tea.Batch(cmd, rightPanePollCmd(m.windows))
 
 	case rewindForkMsg:
 		return m.applyRewindFork(msg.keepEvents)
@@ -1030,6 +1031,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.focused = true
 		m.focusKnown = true
 		m.windows = refreshFilesWindows(m.windows)
+		m.windows = refreshDiagnosticsWindows(m.windows)
 		return m, nil
 
 	case tea.BlurMsg:
@@ -1045,6 +1047,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.windows = refreshFilesWindows(m.windows)
 		return m, filesRefreshCmd()
+
+	case diagnosticsRefreshMsg:
+		if !diagnosticsWindowActive(m.windows) {
+			return m, nil
+		}
+		m.windows = refreshDiagnosticsWindows(m.windows)
+		return m, diagnosticsRefreshCmd()
 
 	case telemetryTickMsg, telemetrySampleMsg:
 		var cmd tea.Cmd
