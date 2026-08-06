@@ -202,8 +202,11 @@ func TestCatalogPluginThemes(t *testing.T) {
 	if !ok {
 		t.Fatal("plugin theme missing from catalog")
 	}
-	if e.Source != "plugin" || e.Name != "Plug Theme" {
+	if e.Source != SourcePlugin || e.Name != "Plug Theme" || e.PluginID != "acme.themes" {
 		t.Fatalf("entry=%+v", e)
+	}
+	if e.Provenance() != "plugin:acme.themes" {
+		t.Fatalf("provenance=%q", e.Provenance())
 	}
 
 	// Disable and ensure it disappears on next catalog (no process cache in theme).
@@ -214,6 +217,89 @@ func TestCatalogPluginThemes(t *testing.T) {
 	cat2 := Catalog(work)
 	if _, ok := Lookup(cat2, "plug-theme"); ok {
 		t.Fatal("disabled plugin theme must not appear")
+	}
+}
+
+func TestCatalogPluginThemeCollisionAndInvalidSkipped(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	// Builtin-ish id "dracula" contributed by plugin should win over builtin
+	// when loaded later (project plugin layer is highest).
+	plug := filepath.Join(work, ".strike", "plugins", "acme.override")
+	if err := os.MkdirAll(filepath.Join(plug, "themes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+  "schemaVersion": 1,
+  "id": "acme.override",
+  "version": "1.0.0",
+  "name": "Override",
+  "strike": { "min": "0.1.0" },
+  "contributions": { "themes": [
+    { "path": "themes/dracula.json" },
+    { "path": "themes/bad.json" }
+  ] }
+}`
+	if err := os.WriteFile(filepath.Join(plug, "plugin.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	good := `{"name":"Plugin Dracula","id":"dracula","colors":{"accent":{"dark":"#abcdef","light":"#abcdef"}}}`
+	if err := os.WriteFile(filepath.Join(plug, "themes", "dracula.json"), []byte(good), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plug, "themes", "bad.json"), []byte(`{not json`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Staging dir must be ignored.
+	staging := filepath.Join(work, ".strike", "plugins", ".staging-install-xyz")
+	if err := os.MkdirAll(filepath.Join(staging, "themes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(staging, "plugin.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cat := Catalog(work)
+	// Startup still has builtins.
+	if cat[0].ID != BuiltinID {
+		t.Fatalf("first = %s", cat[0].ID)
+	}
+	e, ok := Lookup(cat, "dracula")
+	if !ok {
+		t.Fatal("dracula missing")
+	}
+	if e.Source != SourcePlugin || e.PluginID != "acme.override" {
+		t.Fatalf("dracula = %+v", e)
+	}
+	if e.Overrode == "" {
+		t.Fatal("expected Overrode provenance for collision")
+	}
+	if e.Theme.Accent.Dark != "#abcdef" {
+		t.Fatalf("accent = %q", e.Theme.Accent.Dark)
+	}
+	// Invalid theme path must not appear as a separate id.
+	if _, ok := Lookup(cat, "bad"); ok {
+		t.Fatal("invalid theme must be skipped")
+	}
+}
+
+func TestCatalogInvalidPluginDoesNotBreakStartup(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+	// Malformed plugin.json
+	bad := filepath.Join(work, ".strike", "plugins", "broken.pack")
+	if err := os.MkdirAll(bad, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bad, "plugin.json"), []byte(`{}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cat := Catalog(work)
+	if len(cat) < 2 || cat[0].ID != BuiltinID {
+		t.Fatalf("catalog broken by bad plugin: n=%d first=%v", len(cat), cat)
 	}
 }
 

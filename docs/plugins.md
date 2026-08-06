@@ -21,7 +21,8 @@ must not weaken these rules.
 | **Lifecycle CLI (#727)** | `strike plugin` install/list/inspect/enable/disable/remove/doctor for local + Git sources. |
 | **Catalog / updates (#729)** | Remote `catalog.json`, search, catalog install, outdated, update with review; digest verify + zip-slip guards. |
 | **TUI manager (#730)** | `/plugin` modal over `host.Plugins` (browse, install, trust, update, remove). |
-| **Not implemented yet** | Pane host (#731) / web parity (#732); theme packaging as contributions (#511). |
+| **Theme contributions (#511)** | Plugin themes load via `theme.Catalog`; `/theme` preview/apply/revert + provenance. |
+| **Not implemented yet** | Pane host (#731) / web parity (#732). |
 | **Out of scope forever (v1 model)** | In-process Go `plugin` packages, OpenCode-style Node plugin hosts, arbitrary provider/auth/streaming adapters, silent executable startup from an untrusted bundle. |
 
 Related: [agents-skills.md](agents-skills.md), [config.md](config.md),
@@ -727,7 +728,7 @@ announces removal in CHANGELOG **Upgrade note**.
 | Executable activation | #728 (`trust`/`untrust`, `CompileExecutables`, assemble wiring) | §5, §7.6–7.8 |
 | Catalog / updates | #729 (`internal/plugin` catalog/archive + CLI) | §6.3–6.4, digest verify |
 | TUI manager | #730 (`/plugin` modal + `host.Plugins`) | UX over enablement + trust |
-| Themes packaging | #511 | §7.4 |
+| Themes packaging | #511 (`theme.Catalog` + `/theme` preview) | §7.4 |
 | Pane ABI | #522 | §7.9 + [plugin-panes.md](plugin-panes.md) |
 | Pane host / web | #731 #732 | implement [plugin-panes.md](plugin-panes.md); no TUI type leakage to web |
 

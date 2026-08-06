@@ -14,12 +14,36 @@ import (
 var builtinFS embed.FS
 
 // Entry is one selectable theme: stable id, display name, resolved palette,
-// and where it was loaded from (builtin, user, or project).
+// and where it was loaded from (builtin, user, project, or plugin).
 type Entry struct {
 	ID     string
 	Name   string
 	Theme  Theme
-	Source string // "builtin" | "user" | "project"
+	Source string // "builtin" | "user" | "project" | "plugin"
+	// PluginID is set when Source is "plugin" (manifest id for provenance).
+	PluginID string
+	// Overrode is the previous source label when this entry won an id collision
+	// (deterministic §4.1 precedence). Empty when no collision.
+	Overrode string
+}
+
+// Source labels for Entry.Source.
+const (
+	SourceBuiltin = "builtin"
+	SourceUser    = "user"
+	SourceProject = "project"
+	SourcePlugin  = "plugin"
+)
+
+// Provenance returns a short display label including plugin id when present.
+func (e Entry) Provenance() string {
+	if e.Source == SourcePlugin && e.PluginID != "" {
+		return SourcePlugin + ":" + e.PluginID
+	}
+	if e.Source == "" {
+		return SourceBuiltin
+	}
+	return e.Source
 }
 
 // BuiltinID is the stock strike palette id.
@@ -31,7 +55,7 @@ func Builtin() []Entry {
 		ID:     BuiltinID,
 		Name:   "Strike",
 		Theme:  Default(),
-		Source: "builtin",
+		Source: SourceBuiltin,
 	}}
 	entries, err := fs.ReadDir(builtinFS, "themes")
 	if err != nil {
@@ -55,7 +79,7 @@ func Builtin() []Entry {
 		if err != nil || entry.ID == BuiltinID {
 			continue
 		}
-		entry.Source = "builtin"
+		entry.Source = SourceBuiltin
 		out = append(out, entry)
 	}
 	return out
@@ -86,16 +110,25 @@ func ProjectThemesDir(workDir string) string {
 // Catalog merges builtins, user themes, global plugin themes, project themes,
 // then project plugin themes (docs/plugins.md §4.1). Later sources override
 // earlier ones with the same id. workDir may be empty (skips project layers).
-// Invalid files and disabled/malformed plugins are skipped.
+// Invalid files, staging dirs, and disabled/malformed plugins are skipped so
+// bad contributions cannot break startup or silently shadow winners.
 //
 // Plugin discovery is duplicated here with stdlib only so the TUI boundary
 // (no internal/plugin import) still surfaces plugin themes in /theme.
+// Catalog install/update of theme plugins uses the same lockfile path as other
+// plugins (host.Plugins / strike plugin); this loader only reads contributions.
 func Catalog(workDir string) []Entry {
 	byID := map[string]Entry{}
 	order := []string{}
 	add := func(list []Entry) {
 		for _, e := range list {
-			if _, seen := byID[e.ID]; !seen {
+			if e.ID == "" {
+				continue
+			}
+			if prev, seen := byID[e.ID]; seen {
+				// Record what this winner replaced (visible collision).
+				e.Overrode = prev.Provenance()
+			} else {
 				order = append(order, e.ID)
 			}
 			byID[e.ID] = e
@@ -103,7 +136,7 @@ func Catalog(workDir string) []Entry {
 	}
 	add(Builtin())
 	if dir := UserThemesDir(); dir != "" {
-		add(loadDir(dir, "user"))
+		add(loadDir(dir, SourceUser))
 	}
 	// Project lockfile can disable global plugins too.
 	var projectDisabled map[string]bool
@@ -116,7 +149,7 @@ func Catalog(workDir string) []Entry {
 	}
 	add(loadPluginThemeLayer(globalRoot(), projectDisabled))
 	if dir := ProjectThemesDir(workDir); dir != "" {
-		add(loadDir(dir, "project"))
+		add(loadDir(dir, SourceProject))
 	}
 	if workDir != "" {
 		add(loadPluginThemeLayer(filepath.Join(workDir, ".strike"), nil))
@@ -155,9 +188,15 @@ func loadPluginThemeLayer(strikeRoot string, extraDisabled map[string]bool) []En
 	}
 	var names []string
 	for _, e := range entries {
-		if e.IsDir() {
-			names = append(names, e.Name())
+		if !e.IsDir() {
+			continue
 		}
+		name := e.Name()
+		// Skip lifecycle staging/backup dirs (must not load partial installs).
+		if strings.HasPrefix(name, ".") || strings.HasPrefix(name, ".staging") {
+			continue
+		}
+		names = append(names, name)
 	}
 	sort.Strings(names)
 	var out []Entry
@@ -190,9 +229,11 @@ func loadPluginThemeLayer(strikeRoot string, extraDisabled map[string]bool) []En
 			stem := strings.TrimSuffix(filepath.Base(abs), filepath.Ext(abs))
 			entry, err := Parse(data, strings.ToLower(stem))
 			if err != nil {
+				// Invalid theme JSON must not break catalog/startup.
 				continue
 			}
-			entry.Source = "plugin"
+			entry.Source = SourcePlugin
+			entry.PluginID = id
 			themes = append(themes, entry)
 		}
 		if len(themes) > 0 {
