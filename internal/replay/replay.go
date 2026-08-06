@@ -101,8 +101,7 @@ func DiffToolCalls(want, got []ToolCall) error {
 
 // Options configures an echo replay run.
 type Options struct {
-	// WorkDir is the engine workspace. Empty uses a caller-supplied temp dir
-	// requirement — Run returns an error when WorkDir is empty.
+	// WorkDir is the engine workspace. Required; Run errors when empty.
 	WorkDir string
 	// Registry supplies tools. nil registers bash only (echo "run " path).
 	Registry *tool.Registry
@@ -163,9 +162,17 @@ func Run(ctx context.Context, inputs []string, opts Options) (Result, error) {
 				events = append(events, ev)
 				switch e := ev.(type) {
 				case protocol.TurnCompleted:
+					// Child/subagent completions share the event stream; only
+					// the root turn ends the user-input wait.
+					if e.ParentSessionID != "" || e.Depth > 0 {
+						continue
+					}
 					turns++
 					completed = true
 				case protocol.EngineError:
+					if e.ParentSessionID != "" || e.Depth > 0 {
+						continue
+					}
 					return Result{Events: events, UserInputs: inputs, Turns: turns}, fmt.Errorf("replay: turn %d (%q): engine error: %s", i, text, e.Message)
 				}
 			}

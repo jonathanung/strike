@@ -176,6 +176,31 @@ func TestRunRequiresWorkDir(t *testing.T) {
 	}
 }
 
+func TestExtractAndDiffIgnoreChildToolNoise(t *testing.T) {
+	// Simulates a parent log that also recorded a child tool.begin: extractors
+	// must keep only root calls so DiffToolCalls stays stable for multi-agent
+	// goldens (#560).
+	events := []protocol.Event{
+		protocol.UserMessage{Text: "run echo parent-only"},
+		protocol.ToolCallBegin{Name: "bash", Args: json.RawMessage(`{"command":"echo parent-only"}`)},
+		protocol.ToolCallBegin{
+			Correlation: protocol.Correlation{ParentSessionID: "root", Depth: 1},
+			Name:        "bash",
+			Args:        json.RawMessage(`{"command":"echo child"}`),
+		},
+		protocol.TurnCompleted{Correlation: protocol.Correlation{ParentSessionID: "root", Depth: 1}},
+		protocol.TurnCompleted{},
+	}
+	got := replay.ExtractToolCalls(events)
+	want := []replay.ToolCall{{Name: "bash", Args: json.RawMessage(`{"command":"echo parent-only"}`)}}
+	if err := replay.DiffToolCalls(want, got); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(replay.ExtractUserInputs(events)); n != 1 {
+		t.Fatalf("user inputs = %d, want 1", n)
+	}
+}
+
 func TestRunEmptyInputs(t *testing.T) {
 	res, err := replay.Run(context.Background(), nil, replay.Options{WorkDir: t.TempDir()})
 	if err != nil {
