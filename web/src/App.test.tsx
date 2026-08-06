@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 
@@ -250,6 +250,34 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
     expect(screen.getByRole("dialog", { name: "Workspace settings" })).toHaveTextContent("Provider authentication unavailable");
     expect(screen.getByRole("dialog", { name: "Workspace settings" })).toHaveTextContent("Saved defaults unavailable");
+  });
+
+  it("keeps secondary runtime controls behind disclosure and issues set ops", async () => {
+    render(<App />);
+    await screen.findByText("Current");
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(0));
+    const runtime = screen.getByLabelText("Runtime controls");
+    expect(runtime.querySelectorAll("select")).toHaveLength(3);
+    expect(screen.queryByLabelText("Effort")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Autonomy")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Permission")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/FAST/i)).not.toBeInTheDocument();
+    const ws = FakeWebSocket.instances.at(-1)!;
+    await act(async () => {
+      ws.onmessage?.({ data: JSON.stringify({ type: "effort.selected", data: { level: "high" } }) } as MessageEvent);
+      ws.onmessage?.({ data: JSON.stringify({ type: "autonomy.selected", data: { mode: "agent" } }) } as MessageEvent);
+      ws.onmessage?.({ data: JSON.stringify({ type: "permission.mode", data: { mode: "default" } }) } as MessageEvent);
+    });
+    expect(screen.getByRole("button", { name: /Runtime/ })).toHaveTextContent("high · agent · default");
+    fireEvent.click(screen.getByRole("button", { name: /Runtime/ }));
+    expect(screen.getByRole("button", { name: /Runtime/ })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByLabelText("Secondary runtime controls")).toBeInTheDocument();
+    expect(screen.getByLabelText("Effort")).toHaveValue("high");
+    fireEvent.change(screen.getByLabelText("Effort"), { target: { value: "low" } });
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/v1/ops"), expect.objectContaining({ body: expect.stringContaining('"type":"set.effort"') })));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/v1/ops"), expect.objectContaining({ body: expect.stringContaining('"level":"low"') })));
+    fireEvent.click(screen.getByLabelText(/FAST/i));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/v1/ops"), expect.objectContaining({ body: expect.stringContaining('"type":"set.fast"') })));
   });
 
   it("keeps question options blocking and associated with their request", async () => {
