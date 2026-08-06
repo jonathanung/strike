@@ -23,6 +23,11 @@ materially affect the shipped product.
   `apiKeyEnv`, optional `baseURL`); missing backend returns structured setup
   guidance. Default permission is ask; read-only preset denies it
   ([#882](https://github.com/jonathanung/strike/issues/882)).
+- **Plugin lifecycle CLI** — `strike plugin` list/inspect/install/enable/disable/remove/doctor
+  for local paths and Git sources. Atomic install into global or project scope,
+  pinned Git commits in `plugins.lock.json` (source + digest, never credentials),
+  disable preserves files, remove requires `--yes`, doctor reports paths without
+  secrets or env values ([#727](https://github.com/jonathanung/strike/issues/727)).
 - **Delegation-worthiness policy** — before `task` / `delegate` create, a deterministic gate prefers local execution for bare tiny or path-overlapping work and denies fan-out past hard ceilings (depth, optional max live children, delegation count, session budget hook). Config `session.delegationPolicy` (`mode` off|soft|enforce, thresholds). Soft local is overridable with `force_delegate`; decisions expose `policyReason` on tool metadata and `child.started`. Orchestrator guidance has a single pre-spawn decision table ([#876](https://github.com/jonathanung/strike/issues/876)).
 - **Passive plugin load** — enabled bundles under `~/.strike/plugins/<id>/` and
   `./.strike/plugins/<id>/` contribute agents, skills, workflows, themes, and

@@ -173,6 +173,9 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "workflow" {
 		return runWorkflowCLI(args[1:], stdout, stderr)
 	}
+	if len(args) > 0 && args[0] == "plugin" {
+		return runPluginCLI(args[1:], stdout, stderr)
+	}
 	if len(args) > 0 && (args[0] == "version" || args[0] == "--version" || args[0] == "-version") {
 		fmt.Fprintln(stdout, version.String())
 		return 0
@@ -332,6 +335,7 @@ func writeUsage(w io.Writer) {
 	fmt.Fprintln(w, "  strike serve [options]")
 	fmt.Fprintln(w, "  strike mcp-serve [options]")
 	fmt.Fprintln(w, "  strike auth <command> [arguments]")
+	fmt.Fprintln(w, "  strike plugin <command> [arguments]")
 	fmt.Fprintln(w, "  strike restore [options]")
 	fmt.Fprintln(w, "  strike workflow <command> [arguments]")
 	fmt.Fprintln(w, "  strike version")
