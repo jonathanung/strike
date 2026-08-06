@@ -50,3 +50,14 @@ Keep the sample fixture for schema reference; replace with real runs as needed.
 Today the runner shells out to the Docker CLI (`internal/eval/swebench.Runtime`).
 [#592](https://github.com/jonathanung/strike/issues/592) wires the same runner
 onto `internal/container` + the scheduler container pool.
+
+## Config overlays (E3.5)
+
+Pass dials without editing code:
+
+```bash
+strike eval swebench --config-json '{"leanCode":"full","deferTools":"on"}' ...
+strike eval swebench --exec-arg '--sandbox=off' ...
+```
+
+Or run a full matrix via `strike eval sweep` (see `evals/sweep/README.md`).

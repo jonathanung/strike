@@ -1,0 +1,64 @@
+{
+  "schemaVersion": "1.0.0",
+  "benchmark": "swebench",
+  "matrix": "deferTools",
+  "runId": "sample-fixture",
+  "generatedAt": "2026-08-06T00:00:00Z",
+  "provider": "echo",
+  "model": "echo",
+  "grader": "none",
+  "dryRun": true,
+  "note": "Internal regression signal only. Do not publish pass rates in product README.",
+  "points": [
+    {
+      "point": {
+        "id": "deferTools-off",
+        "label": "deferTools=off",
+        "group": "deferTools",
+        "overlay": {
+          "deferTools": "off"
+        }
+      },
+      "metrics": {
+        "attempted": 2,
+        "resolved": 0,
+        "unresolved": 0,
+        "errors": 0,
+        "skipped": 2,
+        "passRate": 0,
+        "totalTokensIn": 0,
+        "totalTokensOut": 0,
+        "totalCostUsd": 0,
+        "totalWallMs": 0
+      },
+      "reportPath": "deferTools-off/report.json",
+      "outDir": "deferTools-off",
+      "durationMs": 1
+    },
+    {
+      "point": {
+        "id": "deferTools-on",
+        "label": "deferTools=on",
+        "group": "deferTools",
+        "overlay": {
+          "deferTools": "on"
+        }
+      },
+      "metrics": {
+        "attempted": 2,
+        "resolved": 0,
+        "unresolved": 0,
+        "errors": 0,
+        "skipped": 2,
+        "passRate": 0,
+        "totalTokensIn": 0,
+        "totalTokensOut": 0,
+        "totalCostUsd": 0,
+        "totalWallMs": 0
+      },
+      "reportPath": "deferTools-on/report.json",
+      "outDir": "deferTools-on",
+      "durationMs": 1
+    }
+  ]
+}

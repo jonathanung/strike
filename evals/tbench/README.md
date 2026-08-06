@@ -65,3 +65,12 @@ Keep the sample fixture for schema reference.
 
 Container backend is the Docker CLI (`swebench.Runtime`). #592 may swap in
 `internal/container` without changing this runner.
+
+## Config overlays (E3.5)
+
+```bash
+strike eval tbench --config-json '{"compactionThreshold":0.5}' --tasks-dir /path/to/tb2 ...
+strike eval tbench --exec-arg '--sandbox=off' ...
+```
+
+Matrix driver: `strike eval sweep --benchmark tbench` (see `evals/sweep/README.md`).

@@ -489,3 +489,59 @@ func combinedOutput(dir, name string, args ...string) ([]byte, error) {
 	cmd.Dir = dir
 	return cmd.CombinedOutput()
 }
+
+func TestExtractPatchExcludesStrikeConfig(t *testing.T) {
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := execCommand(dir, args...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+	}
+	run("git", "init")
+	run("git", "config", "user.email", "t@example.com")
+	run("git", "config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("git", "add", "a.txt")
+	run("git", "commit", "-m", "init")
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".strike"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".strike", "config"), []byte(`{"leanCode":"full"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patch, err := ExtractPatch(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(patch, "a.txt") {
+		t.Fatalf("expected a.txt in patch: %s", patch)
+	}
+	if strings.Contains(patch, ".strike") || strings.Contains(patch, "leanCode") {
+		t.Fatalf("project config leaked into patch: %s", patch)
+	}
+}
+
+func TestWriteProjectConfigHelper(t *testing.T) {
+	dir := t.TempDir()
+	raw := []byte(`{"deferTools":"on","compactionThreshold":0.5}`)
+	if err := writeProjectConfig(dir, raw); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, ".strike", "config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "deferTools") {
+		t.Fatalf("got %s", got)
+	}
+	if err := writeProjectConfig(dir, []byte(`not-json`)); err == nil {
+		t.Fatal("expected invalid json error")
+	}
+}
