@@ -17,7 +17,8 @@ must not weaken these rules.
 | Status | Meaning |
 |---|---|
 | **Contract (this doc)** | Normative. Loaders and CLI must conform. |
-| **Not implemented yet** | Discovery, install, activation, catalog, TUI manager — later issues. |
+| **Passive load (#726)** | Discovery + load of agents, skills, workflows, themes, and provider profiles from enabled local plugin trees. |
+| **Not implemented yet** | Install/lifecycle CLI, executable activation, catalog, TUI manager — later issues. |
 | **Out of scope forever (v1 model)** | In-process Go `plugin` packages, OpenCode-style Node plugin hosts, arbitrary provider/auth/streaming adapters, silent executable startup from an untrusted bundle. |
 
 Related: [agents-skills.md](agents-skills.md), [config.md](config.md),
@@ -80,18 +81,30 @@ Rules:
    private key material MUST NOT ship inside a plugin bundle. Use secret refs
    and the auth store ([secrets.md](secrets.md), [auth.md](auth.md)).
 
-### Planned install roots (loaders #726 / lifecycle #727)
+### Install roots (passive load #726 / lifecycle #727)
 
 | Scope | Directory | Precedence |
 |---|---|---|
 | Global | `~/.strike/plugins/<plugin-id>/` | lower |
 | Project | `./.strike/plugins/<plugin-id>/` | higher |
 
-Lockfile (lifecycle): `~/.strike/plugins.lock.json` and/or
-`./.strike/plugins.lock.json` record source identity, pinned version, digest,
-and enablement — **never** credentials. Exact lockfile schema is owned by
-[#727](https://github.com/jonathanung/strike/issues/727); this contract only
-requires that provenance fields above exist.
+Lockfile: `~/.strike/plugins.lock.json` and/or `./.strike/plugins.lock.json`.
+Passive load (#726) honors per-plugin `enabled` (default **true** when absent).
+Full source identity, pinned version, digest, and install records are owned by
+[#727](https://github.com/jonathanung/strike/issues/727) — **never** credentials.
+
+```json
+{
+  "schemaVersion": 1,
+  "plugins": {
+    "acme.review-pack": { "enabled": false }
+  }
+}
+```
+
+Drop a validated bundle under a plugins root (directory name need not match
+`id`; the manifest `id` is authoritative). Restart Strike to pick up changes
+(hot reload is a non-goal).
 
 ---
 
@@ -259,7 +272,7 @@ activation is [#728](https://github.com/jonathanung/strike/issues/728).
 
 ## 4. Discovery, precedence, namespacing, collisions, enablement
 
-### 4.1 Discovery order (planned)
+### 4.1 Discovery order
 
 Deterministic merge order for **enabled** plugins (later wins where noted):
 
@@ -617,7 +630,7 @@ announces removal in CHANGELOG **Upgrade note**.
 | Stage | Issue | Contract touchpoints |
 |---|---|---|
 | Contract | #725 (this doc) | Manifest, matrix, trust, schema |
-| Passive load | #726 | §3–4, §7.1–7.5, §8–10 |
+| Passive load | #726 (`internal/plugin` + config/theme wiring) | §3–4, §7.1–7.5, §8–10 |
 | Local/Git CLI | #727 | §2, §6.1–6.2, enablement, doctor |
 | Executable activation | #728 | §5, §7.6–7.8 |
 | Catalog / updates | #729 | §6.3–6.4, digest verify |
@@ -630,13 +643,12 @@ announces removal in CHANGELOG **Upgrade note**.
 
 ## 12. Non-goals (restated)
 
-- Implementing loaders, CLI, or TUI in this change.
+- Install/update CLI and catalog (later issues).
+- Executable MCP/harness/hook activation without trust (#728).
 - A generic arbitrary-code plugin ABI or in-process extension mechanism.
 - Automatic unattended updates.
 - Replacing stock `mcp.jsonc` / config hooks / harnesses (plugins are additive
   packages with stronger trust for executables).
-
----
 
 ## 13. Acceptance mapping (#725)
 
@@ -647,3 +659,14 @@ announces removal in CHANGELOG **Upgrade note**.
 | Trust binds to source + content digest; invalidation on relevant changes | §5 |
 | Path confinement + secret-handling explicit | §9, §10 |
 | Forward/backward schema-version behavior | §8 |
+
+## 14. Acceptance mapping (#726)
+
+| AC | Implementation |
+|---|---|
+| Valid fixtures appear on agent/skill/workflow/theme/provider surfaces | `internal/plugin.Discover` + `config` loaders + `theme.Catalog` |
+| Unsupported versions, duplicates, traversal, malformed, collisions → diagnostics | `Diagnostic` codes: `schema_version`, `strike_version`, `duplicate_id`, `path`, `malformed`, `collision`, `digest` |
+| Malformed plugin cannot silently shadow | Skip plugin; other sources unchanged |
+| Disabled plugins contribute nothing | `plugins.lock.json` `enabled: false` |
+| No arbitrary provider/auth/streaming code | Provider profiles via `ParseProvidersFile` / shipped `WireAPI` only; secret literals rejected |
+| Tests: precedence, namespacing, disablement, path confinement | `internal/plugin/*_test.go`, `internal/config/plugins_test.go`, theme catalog tests |

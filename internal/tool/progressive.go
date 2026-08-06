@@ -58,6 +58,8 @@ type progressiveArgs struct {
 	Verify        []VerifyGate      `json:"verify"`
 	Budget        AgentBudgetLimits `json:"budget"`
 	ContextBundle ContextBundle     `json:"context_bundle"`
+	// ForceDelegate overrides soft local-prefer policy (#876).
+	ForceDelegate bool `json:"force_delegate"`
 
 	// Identity for get/status/read/message/transition/cancel/wait.
 	// id accepts delegation id, session id, or name; session_id is an alias.
@@ -268,6 +270,7 @@ func progressiveCreate(ctx context.Context, source, permission string, a progres
 		Verify:        gates,
 		Budget:        a.Budget,
 		ContextBundle: bundle,
+		ForceDelegate: a.ForceDelegate,
 	})
 	if err != nil {
 		return Result{}, err
@@ -283,11 +286,13 @@ func progressiveCreate(ctx context.Context, source, permission string, a progres
 	}
 	if res.Lifecycle != "" {
 		title += " " + res.Lifecycle
+	} else if res.Status == "local" {
+		title += " local"
 	}
 	meta := taskMetadata(res)
 	var result Result
 	switch res.Status {
-	case "started", "completed", "queued":
+	case "started", "completed", "queued", "local":
 		result = Result{Title: title, Output: out, Metadata: meta}
 	case "failed", "canceled":
 		if out == "" {
@@ -336,6 +341,7 @@ func progressiveLifecycle(ctx context.Context, source, permission, action string
 		Verify:          gates,
 		Budget:          a.Budget,
 		ContextBundle:   bundle,
+		ForceDelegate:   a.ForceDelegate,
 		State:           strings.TrimSpace(a.State),
 		Reason:          a.Reason,
 		ExpectedVersion: a.ExpectedVersion,

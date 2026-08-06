@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/jonathanung/strike-cli/internal/permission"
+	"github.com/jonathanung/strike-cli/internal/plugin"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/sandbox"
 	"github.com/jonathanung/strike-cli/internal/scheduler"
@@ -391,6 +392,26 @@ type SessionConfig struct {
 	// apply). Distinct from future session maxSessionCostUSD (#577), which
 	// remains the outer cost envelope when configured.
 	AgentBudget AgentBudgetConfig `json:"agentBudget,omitempty"`
+	// DelegationPolicy is the pre-spawn worthiness gate (#876): whether to
+	// fan out vs run locally. See docs/config.md.
+	DelegationPolicy DelegationPolicyConfig `json:"delegationPolicy,omitempty"`
+}
+
+// DelegationPolicyConfig is JSON for session.delegationPolicy (camelCase).
+type DelegationPolicyConfig struct {
+	// Mode is off|advise|enforce. Empty is treated as off inside the engine
+	// Options zero-value; the CLI composition root defaults omitted config to
+	// enforce (product default).
+	// off: always allow spawn. advise: record preferred action but spawn.
+	// enforce: soft-local returns status local; hard ceilings deny.
+	Mode string `json:"mode,omitempty"`
+	// TinyPromptRunes: bare prompts at or below this prefer local (0 → 280).
+	TinyPromptRunes int `json:"tinyPromptRunes,omitempty"`
+	// MaxPathsLocal: bare tasks with ≤N scoped paths prefer local (0 → 1).
+	// Negative disables the path-count soft rule.
+	MaxPathsLocal int `json:"maxPathsLocal,omitempty"`
+	// MaxLiveChildren hard-denies when live children reach this count (0 = off).
+	MaxLiveChildren int `json:"maxLiveChildren,omitempty"`
 }
 
 // AgentBudgetConfig is JSON for session.agentBudget (camelCase).
@@ -583,16 +604,18 @@ func resolveExisting(path string) string {
 // Load merges:
 //
 //	default → ~/.strike/config → ~/.strike/mcp.jsonc → ~/.strike/providers.jsonc
-//	→ ~/.strike/keybinds.jsonc → ./.strike/config → ./.strike/mcp.jsonc
-//	→ ./.strike/providers.jsonc → ./.strike/keybinds.jsonc
-//	→ managed/MDM (system managed-config + managed-config.d; highest)
+//	→ ~/.strike/keybinds.jsonc → global plugin providers → ./.strike/config
+//	→ ./.strike/mcp.jsonc → ./.strike/providers.jsonc → ./.strike/keybinds.jsonc
+//	→ project plugin providers → managed/MDM (highest)
 //
 // mcp.jsonc/json is preferred for MCP servers (see ReadMCPFile); the legacy
 // mcp object in config still works. providers.jsonc is OpenCode-compatible
 // (see ReadProvidersFile); the legacy providers array in config still works.
 // Dedicated keybinds.jsonc/json overrides the config keybinds object in the
-// same root (last-wins per id). Managed scalars and permission rules override
-// user/project; see ManagedInfo and docs/config.md (enterprise).
+// same root (last-wins per id). Plugin provider profiles follow docs/plugins.md
+// §4.1 (global plugins before project non-plugin; project plugins highest user
+// layer). Managed scalars and permission rules override user/project; see
+// ManagedInfo and docs/config.md (enterprise).
 func Load(workDir string) (Config, error) {
 	cfg := Default()
 	// Global config JSON (optional).
@@ -625,6 +648,14 @@ func Load(workDir string) (Config, error) {
 	} else if len(kb) > 0 {
 		cfg.Keybinds = MergeKeybinds(cfg.Keybinds, kb)
 	}
+	// Global plugin provider profiles (passive; before project non-plugin).
+	{
+		var pdiags []plugin.Diagnostic
+		cfg, pdiags = applyPluginProviders(workDir, cfg, plugin.ScopeGlobal)
+		for _, d := range pdiags {
+			fmt.Fprintf(os.Stderr, "plugin: %s\n", d.String())
+		}
+	}
 	// Project config JSON (optional).
 	if workDir != "" {
 		path := filepath.Join(projectRoot(workDir), "config")
@@ -653,6 +684,22 @@ func Load(workDir string) (Config, error) {
 			cfg.Keybinds = MergeKeybinds(cfg.Keybinds, kb)
 		}
 	}
+	// Project plugin provider profiles (highest user layer before managed).
+	{
+		var pdiags []plugin.Diagnostic
+		cfg, pdiags = applyPluginProviders(workDir, cfg, plugin.ScopeProject)
+		for _, d := range pdiags {
+			fmt.Fprintf(os.Stderr, "plugin: %s\n", d.String())
+		}
+		// Surface discovery diagnostics once (agents/skills also Discover).
+		for _, d := range DiscoverPlugins(workDir).Diagnostics {
+			if d.Severity == plugin.SeverityInfo && (d.Code == "shadowed" || d.Code == "executable_inactive") {
+				continue
+			}
+			fmt.Fprintf(os.Stderr, "plugin: %s\n", d.String())
+		}
+	}
+
 	// Managed/MDM last: system policy overrides global and project.
 	managed, info, err := LoadManaged()
 	if err != nil {
@@ -965,6 +1012,23 @@ func mergeAgentBudgetConfig(base, layer AgentBudgetConfig) AgentBudgetConfig {
 	}
 	if layer.LoopDetectN != 0 {
 		base.LoopDetectN = layer.LoopDetectN
+	}
+	return base
+}
+
+// mergeDelegationPolicyConfig overlays non-empty/non-zero layer fields onto base.
+func mergeDelegationPolicyConfig(base, layer DelegationPolicyConfig) DelegationPolicyConfig {
+	if layer.Mode != "" {
+		base.Mode = layer.Mode
+	}
+	if layer.TinyPromptRunes != 0 {
+		base.TinyPromptRunes = layer.TinyPromptRunes
+	}
+	if layer.MaxPathsLocal != 0 {
+		base.MaxPathsLocal = layer.MaxPathsLocal
+	}
+	if layer.MaxLiveChildren != 0 {
+		base.MaxLiveChildren = layer.MaxLiveChildren
 	}
 	return base
 }
@@ -1358,6 +1422,7 @@ func merge(base, layer Config) Config {
 		base.Session.TraceRetentionMaxBytes = layer.Session.TraceRetentionMaxBytes
 	}
 	base.Session.AgentBudget = mergeAgentBudgetConfig(base.Session.AgentBudget, layer.Session.AgentBudget)
+	base.Session.DelegationPolicy = mergeDelegationPolicyConfig(base.Session.DelegationPolicy, layer.Session.DelegationPolicy)
 	base.Permissions = append(base.Permissions, layer.Permissions...)
 	base.Hooks = append(base.Hooks, layer.Hooks...)
 	base.Providers = mergeProviders(base.Providers, layer.Providers)

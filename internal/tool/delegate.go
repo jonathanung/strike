@@ -111,6 +111,10 @@ func (delegateTool) Schema() json.RawMessage {
 				"type": "object",
 				"description": "Optional sealed context package (same shape as task.context_bundle)"
 			},
+			"force_delegate": {
+				"type": "boolean",
+				"description": "Override soft local-prefer policy on create (same as task.force_delegate)"
+			},
 			"state": {
 				"type": "string",
 				"enum": ["queued", "working", "blocked", "review", "done", "failed", "canceled"],

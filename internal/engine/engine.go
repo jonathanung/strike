@@ -272,6 +272,15 @@ type Options struct {
 	// unlimited (soft stall/loop signals still apply). Nested under any future
 	// session maxSessionCostUSD (#577) outer envelope.
 	DefaultChildBudget tool.AgentBudgetLimits
+	// DelegationPolicy is the pre-spawn worthiness gate (#876). Empty mode
+	// stays off (legacy always-spawn for tests/embedders); the CLI sets
+	// enforce when config omits the block. Soft "local" refuses bare
+	// tiny/overlap spawns unless force_delegate; hard ceilings never override.
+	DelegationPolicy DelegationPolicyConfig
+	// SessionBudgetExhausted, when set, is consulted by the delegation policy
+	// hard ceiling (budget_exhausted). Intended for session cost envelope
+	// (#577); nil means cost does not block fan-out.
+	SessionBudgetExhausted func() bool
 	// PersistSessionMeta, when set, writes durable session metadata (sidecar).
 	// The engine emits protocol.SessionMeta after a successful persist.
 	PersistSessionMeta func(meta protocol.SessionMeta) error
@@ -410,6 +419,10 @@ type Engine struct {
 	// uses it so parent cancellation can drop an accepted begin without
 	// treating turn Interrupt as a failed emission.
 	runCtx context.Context
+
+	// policyMetrics counts delegation-worthiness decisions (#876) for
+	// elapsed/cost comparison with policy on vs off.
+	policyMetrics DelegationPolicyMetrics
 
 	// children tracks non-blocking child engines. Permission/question replies
 	// fan out to every child plus the parent; request IDs are session-scoped
@@ -660,6 +673,7 @@ func New(opts Options) *Engine {
 	} else if opts.MaxChildDepth > absoluteMaxChildDepth {
 		opts.MaxChildDepth = absoluteMaxChildDepth
 	}
+	opts.DelegationPolicy = NormalizeDelegationPolicy(opts.DelegationPolicy)
 	if len(opts.Workflows) == 0 {
 		opts.Workflows = []config.Workflow{config.BuiltinPlanImplement()}
 	}
