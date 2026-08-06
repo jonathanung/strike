@@ -317,5 +317,6 @@ const (
 	ErrorCodeTransient          = pub.ErrorCodeTransient
 	ErrorCodeInternal           = pub.ErrorCodeInternal
 	ErrorCodeBlocked            = pub.ErrorCodeBlocked
+	ErrorCodeSandboxDenied      = pub.ErrorCodeSandboxDenied
 	ErrorCodeQueueFull          = pub.ErrorCodeQueueFull
 )
