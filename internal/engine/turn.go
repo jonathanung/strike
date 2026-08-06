@@ -977,7 +977,8 @@ func (e *Engine) toolNames() string {
 func (e *Engine) bashSandboxPolicy() sandbox.Policy {
 	mode := sandbox.ResolveMode(e.opts.SandboxMode)
 	if e.perms == nil {
-		return sandbox.Policy{Mode: mode, WorkDir: e.opts.WorkDir}
+		// No permission service: keep host networking (same as Defaults Ask).
+		return sandbox.Policy{Mode: mode, WorkDir: e.opts.WorkDir, Network: true}
 	}
 	return e.perms.CompileSandbox(mode, e.opts.WorkDir)
 }
