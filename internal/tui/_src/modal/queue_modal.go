@@ -14,11 +14,6 @@ import (
 
 const queueModalVisible = 10
 
-// inputQueueReplaceMsg replaces the app input queue with items (copy owned by msg).
-type inputQueueReplaceMsg struct {
-	items []queuedInput
-}
-
 // inputQueueRunNextMsg closes the queue browser and either interrupts the
 // running turn (next item drains on TurnCompleted) or drains immediately when idle.
 type inputQueueRunNextMsg struct{}
@@ -88,28 +83,19 @@ func (m *queueModal) updateList(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 			m.cursor++
 		}
 	case "shift+up", "K":
-		if m.moveSelected(-1) {
-			return m, m.replaceCmd()
-		}
+		m.moveSelected(-1)
 	case "shift+down", "J":
-		if m.moveSelected(1) {
-			return m, m.replaceCmd()
-		}
+		m.moveSelected(1)
 	case "p":
-		if m.promoteSelected() {
-			return m, m.replaceCmd()
-		}
+		m.promoteSelected()
 	case "d", "delete", "backspace":
-		if m.removeSelected() {
-			return m, m.replaceCmd()
-		}
+		m.removeSelected()
 	case "c":
 		if n == 0 {
 			return m, nil
 		}
 		m.items = nil
 		m.cursor = 0
-		return m, m.replaceCmd()
 	case "enter":
 		if n == 0 || m.cursor < 0 || m.cursor >= n {
 			return m, nil
@@ -120,9 +106,15 @@ func (m *queueModal) updateList(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 			return m, nil
 		}
 		// Load into composer and close (text only; matches pop-last).
+		// handleKeyMsg syncs the live queue from items before close; remaining
+		// is computed here so the edit msg is self-contained.
 		item := m.items[m.cursor]
 		remaining := append([]queuedInput(nil), m.items[:m.cursor]...)
 		remaining = append(remaining, m.items[m.cursor+1:]...)
+		m.items = remaining
+		if m.cursor >= len(m.items) {
+			m.cursor = max(0, len(m.items)-1)
+		}
 		text := item.displayPrompt
 		if text == "" {
 			text = item.modelText
@@ -160,7 +152,8 @@ func (m *queueModal) updateEdit(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 		}
 		m.edit = false
 		m.input.Blur()
-		return m, m.replaceCmd()
+		// handleKeyMsg syncs live queue from items when leaving edit.
+		return m, nil
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
@@ -222,13 +215,6 @@ func (m *queueModal) removeSelected() bool {
 		m.cursor = len(m.items) - 1
 	}
 	return true
-}
-
-func (m *queueModal) replaceCmd() tea.Cmd {
-	items := cloneQueuedInputs(m.items)
-	return func() tea.Msg {
-		return inputQueueReplaceMsg{items: items}
-	}
 }
 
 func (m *queueModal) view(width int, th theme.Theme) string {

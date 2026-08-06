@@ -984,11 +984,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := m.applyApplyDiffResult(msg)
 		return m, cmd
 
-	case inputQueueReplaceMsg:
-		m.applyInputQueueReplace(msg.items)
-		m.reflow()
-		return m, nil
-
 	case inputQueueRunNextMsg:
 		if _, ok := m.modal.(*queueModal); ok {
 			m.modal = nil
