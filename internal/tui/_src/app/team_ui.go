@@ -306,8 +306,24 @@ func applyChildEscalatedToChildren(children *[]childActivity, index map[string]i
 	return true
 }
 
+// pathOverlapEntry builds a bounded childPathOverlap from a wire event.
+func pathOverlapEntry(ev protocol.PathOverlap) (childPathOverlap, bool) {
+	entry := childPathOverlap{
+		path:    truncateRunes(strings.TrimSpace(ev.Path), maxChildObsFieldRunes),
+		policy:  strings.TrimSpace(ev.Policy),
+		blocked: ev.Blocked,
+		warning: truncateRunes(strings.TrimSpace(ev.Warning), maxChildObsWarningRunes),
+	}
+	if entry.path == "" && entry.warning == "" {
+		return childPathOverlap{}, false
+	}
+	return entry, true
+}
+
 // applyPathOverlapToChildren retains a bounded path-overlap warning on the
-// claiming session's child row. Returns true when applied.
+// claiming session's child row. Returns true when applied. Does not create a
+// row for root/lead claims (ParentSessionID empty and Depth 0) — those belong
+// on the root-side cache so we never invent a fake child for the lead.
 func applyPathOverlapToChildren(children *[]childActivity, index map[string]int, ev protocol.PathOverlap) bool {
 	if children == nil {
 		return false
@@ -316,13 +332,8 @@ func applyPathOverlapToChildren(children *[]childActivity, index map[string]int,
 	if id == "" {
 		return false
 	}
-	entry := childPathOverlap{
-		path:    truncateRunes(strings.TrimSpace(ev.Path), maxChildObsFieldRunes),
-		policy:  strings.TrimSpace(ev.Policy),
-		blocked: ev.Blocked,
-		warning: truncateRunes(strings.TrimSpace(ev.Warning), maxChildObsWarningRunes),
-	}
-	if entry.path == "" && entry.warning == "" {
+	entry, ok := pathOverlapEntry(ev)
+	if !ok {
 		return false
 	}
 	parentID := strings.TrimSpace(ev.ParentSessionID)
@@ -334,6 +345,11 @@ func applyPathOverlapToChildren(children *[]childActivity, index map[string]int,
 		}
 		ch.pathOverlaps = appendPathOverlap(ch.pathOverlaps, entry)
 		return true
+	}
+	// Only spawn a child row when correlation clearly identifies a non-root
+	// session. Root claims are handled by the caller's root-side cache.
+	if parentID == "" && ev.Depth <= 0 {
+		return false
 	}
 	ch := childActivity{
 		sessionID:    id,
@@ -416,9 +432,28 @@ func (m *Model) onChildEscalated(ev protocol.ChildEscalated) {
 }
 
 func (m *Model) onPathOverlap(ev protocol.PathOverlap) {
+	id := strings.TrimSpace(ev.SessionID)
+	if id == "" {
+		return
+	}
+	// Root/lead claim: retain on the active root cache, never as a fake child.
+	if lead := strings.TrimSpace(m.sessionID); lead != "" && id == lead {
+		if entry, ok := pathOverlapEntry(ev); ok {
+			m.pathOverlaps = appendPathOverlap(m.pathOverlaps, entry)
+		}
+		return
+	}
 	index := childIndex(m.children)
 	if applyPathOverlapToChildren(&m.children, index, ev) {
 		m.trimChildren()
+		return
+	}
+	// Unknown id with root-like correlation still lands on the root cache when
+	// it matches no child (defensive; engine normally sets child ParentSessionID).
+	if strings.TrimSpace(ev.ParentSessionID) == "" && ev.Depth <= 0 {
+		if entry, ok := pathOverlapEntry(ev); ok {
+			m.pathOverlaps = appendPathOverlap(m.pathOverlaps, entry)
+		}
 	}
 }
 
@@ -452,9 +487,25 @@ func applyPathOverlapToPane(p *rootPane, ev protocol.PathOverlap) {
 	if p == nil {
 		return
 	}
+	id := strings.TrimSpace(ev.SessionID)
+	if id == "" {
+		return
+	}
+	if lead := strings.TrimSpace(p.sessionID); lead != "" && id == lead {
+		if entry, ok := pathOverlapEntry(ev); ok {
+			p.pathOverlaps = appendPathOverlap(p.pathOverlaps, entry)
+		}
+		return
+	}
 	index := childIndex(p.children)
 	if applyPathOverlapToChildren(&p.children, index, ev) {
 		trimPaneChildren(p)
+		return
+	}
+	if strings.TrimSpace(ev.ParentSessionID) == "" && ev.Depth <= 0 {
+		if entry, ok := pathOverlapEntry(ev); ok {
+			p.pathOverlaps = appendPathOverlap(p.pathOverlaps, entry)
+		}
 	}
 }
 

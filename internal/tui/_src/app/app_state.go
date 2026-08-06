@@ -176,6 +176,7 @@ func (m Model) visualizerStateSnapshot() visualizerStateMsg {
 		if m.lastVerification != nil {
 			msg.Verification = visualizerVerificationFrom(m.lastVerification)
 		}
+		msg.PathOverlaps = visualizerPathOverlapsFrom(m.pathOverlaps)
 		return msg
 	}
 
@@ -195,6 +196,7 @@ func (m Model) visualizerStateSnapshot() visualizerStateMsg {
 					msg.CostUSD, msg.CostOK, msg.CostPartial = usd, true, partial
 				}
 			}
+			msg.PathOverlaps = visualizerPathOverlapsFrom(p.pathOverlaps)
 		}
 	}
 	return msg
@@ -216,18 +218,24 @@ func fillVisualizerChildObs(msg *visualizerStateMsg, ch childActivity) {
 	msg.EscalateKind = ch.escalateKind
 	msg.EscalateReason = ch.escalateReason
 	msg.EscalateAction = ch.escalateAction
-	if len(ch.pathOverlaps) > 0 {
-		msg.PathOverlaps = make([]visualizerPathOverlap, len(ch.pathOverlaps))
-		for i, po := range ch.pathOverlaps {
-			msg.PathOverlaps[i] = visualizerPathOverlap{
-				Path:    po.path,
-				Policy:  po.policy,
-				Blocked: po.blocked,
-				Warning: po.warning,
-			}
+	msg.PathOverlaps = visualizerPathOverlapsFrom(ch.pathOverlaps)
+	msg.Verification = visualizerVerificationFromSummary(ch.verification)
+}
+
+func visualizerPathOverlapsFrom(list []childPathOverlap) []visualizerPathOverlap {
+	if len(list) == 0 {
+		return nil
+	}
+	out := make([]visualizerPathOverlap, len(list))
+	for i, po := range list {
+		out[i] = visualizerPathOverlap{
+			Path:    po.path,
+			Policy:  po.policy,
+			Blocked: po.blocked,
+			Warning: po.warning,
 		}
 	}
-	msg.Verification = visualizerVerificationFromSummary(ch.verification)
+	return out
 }
 
 func visualizerVerificationFrom(rep *protocol.VerificationReport) *visualizerVerification {
