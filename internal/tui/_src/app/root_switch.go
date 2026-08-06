@@ -534,9 +534,16 @@ func applyEventToPane(p *rootPane, ev protocol.Event) {
 				break
 			}
 		}
+		if e.Verification != nil {
+			_ = applyChildVerification(&p.children, childIndex(p.children), id, e.Verification)
+		}
 		applyChildCompletedToTaskCells(p.toolByID, e)
 		agent, elapsed := lookupChildMeta(p.children, e.SessionID)
 		p.cells = appendSubagentResultCell(p.cells, e, agent, elapsed)
+	case protocol.ChildEscalated:
+		applyChildEscalatedToPane(p, e)
+	case protocol.PathOverlap:
+		applyPathOverlapToPane(p, e)
 	case protocol.TeamRoster:
 		applyTeamRosterToPane(p, e)
 	case protocol.AgentMessage:

@@ -142,6 +142,7 @@ func (m Model) visualizerStateSnapshot() visualizerStateMsg {
 		msg.State = childAgentState(ch.status)
 		// Child token/cost stay unknown unless we later track per-child usage.
 		// Never fabricate zeros from absence.
+		fillVisualizerChildObs(&msg, ch)
 		return msg
 	}
 
@@ -162,6 +163,10 @@ func (m Model) visualizerStateSnapshot() visualizerStateMsg {
 		msg.Tools = recentVisualizerTools(m.cells, 6)
 		if usd, ok, partial := estimateUSD(m.usageSession, m.modelInputCost, m.modelOutputCost, m.modelHasCost); ok {
 			msg.CostUSD, msg.CostOK, msg.CostPartial = usd, true, partial
+		}
+		// Root may carry last verification report when gates ran (#922 shape).
+		if m.lastVerification != nil {
+			msg.Verification = visualizerVerificationFrom(m.lastVerification)
 		}
 		return msg
 	}
@@ -185,6 +190,60 @@ func (m Model) visualizerStateSnapshot() visualizerStateMsg {
 		}
 	}
 	return msg
+}
+
+// fillVisualizerChildObs copies multi-agent observability onto a viz snapshot.
+// Empty/nil fields stay unknown — never invent token/budget/verified success.
+func fillVisualizerChildObs(msg *visualizerStateMsg, ch childActivity) {
+	if msg == nil {
+		return
+	}
+	msg.Objective = ch.objective
+	msg.LastAction = ch.lastAction
+	msg.BlockReason = ch.blockReason
+	if len(ch.filesTouched) > 0 {
+		msg.FilesTouched = append([]string(nil), ch.filesTouched...)
+	}
+	msg.Budget = cloneAgentBudgetView(ch.budget)
+	msg.EscalateKind = ch.escalateKind
+	msg.EscalateReason = ch.escalateReason
+	msg.EscalateAction = ch.escalateAction
+	if len(ch.pathOverlaps) > 0 {
+		msg.PathOverlaps = make([]visualizerPathOverlap, len(ch.pathOverlaps))
+		for i, po := range ch.pathOverlaps {
+			msg.PathOverlaps[i] = visualizerPathOverlap{
+				Path:    po.path,
+				Policy:  po.policy,
+				Blocked: po.blocked,
+				Warning: po.warning,
+			}
+		}
+	}
+	msg.Verification = visualizerVerificationFromSummary(ch.verification)
+}
+
+func visualizerVerificationFrom(rep *protocol.VerificationReport) *visualizerVerification {
+	if rep == nil {
+		return nil
+	}
+	return &visualizerVerification{
+		Claimed:  rep.Claimed,
+		Verified: rep.Verified,
+		Passed:   rep.Passed,
+		Summary:  rep.Summary,
+	}
+}
+
+func visualizerVerificationFromSummary(sum *childVerificationSummary) *visualizerVerification {
+	if sum == nil {
+		return nil
+	}
+	return &visualizerVerification{
+		Claimed:  sum.claimed,
+		Verified: sum.verified,
+		Passed:   sum.passed,
+		Summary:  sum.summary,
+	}
 }
 
 // findChildActivity looks up a subagent row across the active root and stashes.
