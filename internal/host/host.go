@@ -644,6 +644,11 @@ type PlanSection struct {
 	ID    string
 	Title string
 	Body  string
+	// Delegate* surface section→child correlation for plan progress UI.
+	DelegateStatus    string
+	DelegateChildID   string
+	DelegateChildName string
+	DelegateDetail    string
 }
 
 // Plan is a root-session-owned structured planning artifact.
@@ -817,6 +822,9 @@ type Services struct {
 	// Workflows is the loaded workflow catalog (builtin/global/project/plugin).
 	// Nil when unsupported; frontends must degrade without panic.
 	Workflows Workflows
-	Agents    []string // selectable agent names, default first
-	Skills    []Skill
+	// WorkflowDrafts reviews/saves in-memory model or editor drafts without
+	// activation. Nil when unsupported; frontends must degrade without panic.
+	WorkflowDrafts WorkflowDrafts
+	Agents         []string // selectable agent names, default first
+	Skills         []Skill
 }
