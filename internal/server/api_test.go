@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -589,5 +590,25 @@ func TestSandboxPatchYoloOffRequiresIKnow(t *testing.T) {
 	srv2.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "/v1/sandbox", strings.NewReader(`{"mode":"read-only"}`)))
 	if res.Code != http.StatusNotImplemented || !strings.Contains(res.Body.String(), "settings capability unavailable") {
 		t.Fatalf("patch without settings = %d %s", res.Code, res.Body.String())
+	}
+}
+
+func TestSettingsGETReturnsDefaults(t *testing.T) {
+	ts := &testSettings{defaults: host.UserDefaults{Provider: "echo", Model: "dev", Sandbox: "workspace-write"}}
+	srv, err := New(Options{SessionDir: t.TempDir(), Services: &host.Services{Settings: ts}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/v1/settings", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("GET status %d body %s", res.Code, res.Body.String())
+	}
+	var got map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got["provider"] != "echo" || got["model"] != "dev" {
+		t.Fatalf("unexpected payload %#v", got)
 	}
 }
