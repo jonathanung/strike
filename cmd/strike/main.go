@@ -356,14 +356,34 @@ func writeUsage(w io.Writer) {
 }
 
 func permissionLayers(configured permission.Ruleset, dangerouslySkip bool) []permission.Ruleset {
-	layers := []permission.Ruleset{
-		permission.Defaults(),
-		append(permission.Ruleset(nil), configured...),
+	return permissionLayersWithPreset(configured, "", dangerouslySkip)
+}
+
+// permissionLayersWithPreset builds evaluation layers:
+// defaults → optional preset → config permissions → optional dangerous allow-all.
+func permissionLayersWithPreset(configured permission.Ruleset, presetID string, dangerouslySkip bool) []permission.Ruleset {
+	layers := []permission.Ruleset{permission.Defaults()}
+	if p, ok := permission.PresetByID(presetID); ok && len(p.Rules) > 0 {
+		layers = append(layers, append(permission.Ruleset(nil), p.Rules...))
 	}
+	layers = append(layers, append(permission.Ruleset(nil), configured...))
 	if dangerouslySkip {
 		layers = append(layers, permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.Allow}})
 	}
 	return layers
+}
+
+// permissionLayerNames returns stable explain names parallel to permissionLayersWithPreset.
+func permissionLayerNames(presetID string, dangerouslySkip bool) []string {
+	names := []string{permission.LayerDefaults}
+	if _, ok := permission.PresetByID(presetID); ok {
+		names = append(names, permission.LayerPreset)
+	}
+	names = append(names, permission.LayerConfig)
+	if dangerouslySkip {
+		names = append(names, permission.LayerDangerous)
+	}
+	return names
 }
 
 func writeDangerousPermissionsWarning(w io.Writer, enabled bool) {

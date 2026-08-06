@@ -32,6 +32,7 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		{ID: "command:autonomy", Label: "/autonomy", Description: "set exit-gate policy (supervised/agent/checks/skip-all)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/autonomy"}},
 		{ID: "command:mode", Label: "/mode", Description: "set permission posture (default/plan/accept-edits/yolo)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/mode"}},
 		{ID: "command:sandbox", Label: "/sandbox", Description: "show OS sandbox policy; /sandbox explain for generated profile", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/sandbox"}},
+		{ID: "command:permission", Label: "/permission", Description: "explain a tool permission or list presets", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/permission"}},
 		{ID: "command:auth", Label: "/auth", Description: "manage provider authentication", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/auth"}},
 		{ID: "command:settings", Label: "/settings", Description: "defaults (theme, sandbox, notify, mode) and custom providers", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/settings"}},
 		{ID: "agent:build", Label: "/agent build", Description: "select an agent", Action: paletteAction{Kind: paletteActionAgent, Value: "build"}},
