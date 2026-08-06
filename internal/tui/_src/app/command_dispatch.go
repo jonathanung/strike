@@ -131,6 +131,8 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		m.clearNotice()
 		m.modal = newSettingsModal(m.services, m.ops, m.th, m.workDir)
 		return m, nil
+	case "/config":
+		return m.handleConfigCommand(fields[1:])
 	case "/agent":
 		if len(fields) < 2 {
 			// Bare /agent opens the centered picker (tab still cycles).
@@ -301,6 +303,8 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		return m.handleFTUECommand()
 	case "/mcp":
 		return m.handleMCPCommand(fields[1:])
+	case "/plugin":
+		return m.handlePluginCommand(fields[1:])
 	case "/lsp":
 		return m.handleLSPCommand(fields[1:])
 	case "/exit", "/quit":

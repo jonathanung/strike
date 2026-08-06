@@ -20,6 +20,7 @@ const (
 	commandPermission      commandID = "permission"
 	commandAuth            commandID = "auth"
 	commandSettings        commandID = "settings"
+	commandConfig          commandID = "config"
 	commandAgent           commandID = "agent"
 	commandAgents          commandID = "agents"
 	commandActivity        commandID = "activity"
@@ -64,6 +65,7 @@ const (
 	commandInit            commandID = "init"
 	commandFTUE            commandID = "ftue"
 	commandMCP             commandID = "mcp"
+	commandPlugin          commandID = "plugin"
 	commandLSP             commandID = "lsp"
 	commandDiagnostics     commandID = "diagnostics"
 	commandExit            commandID = "exit"
@@ -128,6 +130,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandPermission, Name: "/permission", Description: "explain a tool permission or list presets", ArgsHint: "[explain <tool> [pattern]|presets]", Source: commandSourceBuiltin},
 	{ID: commandAuth, Name: "/auth", Description: "manage provider authentication", ArgsHint: "[provider]", Source: commandSourceBuiltin},
 	{ID: commandSettings, Name: "/settings", Description: "defaults (theme, sandbox, notify, autoupdate, mode) and custom providers", Source: commandSourceBuiltin},
+	{ID: commandConfig, Name: "/config", Description: "open .strike config files in the embedded editor (picker or slot)", ArgsHint: "[nano] [global|project] [config|mcp|providers|keybinds]", Source: commandSourceBuiltin},
 	{ID: commandAgent, Name: "/agent", Description: "select an agent", ArgsHint: "[name]", Source: commandSourceBuiltin},
 	{ID: commandAgents, Name: "/agents", Description: "focus the agents right pane", Source: commandSourceBuiltin},
 	{ID: commandActivity, Name: "/activity", Description: "focus the activity right pane", Source: commandSourceBuiltin},
@@ -172,6 +175,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandInit, Name: "/init", Description: "create or update project AGENTS.md", Source: commandSourceBuiltin},
 	{ID: commandFTUE, Name: "/ftue", Description: "setup wizard: provider, model, optional init, feature tour, scheduler presets, first prompt", Source: commandSourceBuiltin},
 	{ID: commandMCP, Name: "/mcp", Description: "MCP servers: status, retry, disable", ArgsHint: "[retry [name]|disable <name>]", Source: commandSourceBuiltin},
+	{ID: commandPlugin, Name: "/plugin", Description: "plugin manager: browse, install, trust, update, remove", Source: commandSourceBuiltin},
 	{ID: commandLSP, Name: "/lsp", Description: "language servers: status, retry, disable", ArgsHint: "[retry [name]|disable <name>]", Source: commandSourceBuiltin},
 	{ID: commandDiagnostics, Name: "/diagnostics", Description: "focus the diagnostics right pane", Source: commandSourceBuiltin},
 	{ID: commandExit, Name: "/exit", Description: "quit strike", Source: commandSourceBuiltin},
@@ -241,6 +245,7 @@ var reservedCommandNames = map[string]struct{}{
 	"permission":       {},
 	"auth":             {},
 	"settings":         {},
+	"config":           {},
 	"agent":            {},
 	"agents":           {},
 	"activity":         {},
@@ -285,6 +290,7 @@ var reservedCommandNames = map[string]struct{}{
 	"init":             {},
 	"ftue":             {},
 	"mcp":              {},
+	"plugin":           {},
 	"lsp":              {},
 	"diagnostics":      {},
 	"exit":             {},

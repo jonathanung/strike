@@ -34,3 +34,10 @@ describe("Transcript", () => {
     expect(card?.querySelector("pre")?.textContent).toContain('"path"');
   });
 });
+
+  it("hides reasoning when showThinking is false", () => {
+    const { rerender } = render(<Transcript item={{ id: "r", kind: "reasoning", title: "Reasoning", text: "hidden thoughts" }} showThinking={false} />);
+    expect(screen.queryByText("hidden thoughts")).not.toBeInTheDocument();
+    rerender(<Transcript item={{ id: "r", kind: "reasoning", title: "Reasoning", text: "hidden thoughts" }} showThinking />);
+    expect(screen.getByText("hidden thoughts")).toBeInTheDocument();
+  });

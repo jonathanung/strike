@@ -1,4 +1,4 @@
-import type { Bootstrap, Envelope, RootsResponse, RootCreateResult, RootResumeResult, Session } from "./types";
+import type { Bootstrap, Envelope, RootsResponse, RootCreateResult, RootResumeResult, SandboxInfo, Session } from "./types";
 
 // Token may arrive via ?token= before the server handoff redirect strips it and
 // sets an HttpOnly cookie. After handoff, same-origin cookies authenticate
@@ -16,10 +16,46 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
 }
 export const bootstrap = () => request<Bootstrap>("/v1/bootstrap");
 export const sessions = () => request<{ sessions: Session[]; liveId?: string }>("/v1/sessions");
+export const getSandbox = (rootID?: string) => {
+  const qs = rootID ? `?root=${encodeURIComponent(rootID)}` : "";
+  return request<SandboxInfo>(`/v1/sandbox${qs}`);
+};
+export const patchSandbox = (mode: string, iKnow = false, rootID?: string) => {
+  const qs = rootID ? `?root=${encodeURIComponent(rootID)}` : "";
+  return request<SandboxInfo>(`/v1/sandbox${qs}`, { method: "PATCH", body: JSON.stringify({ mode, iKnow }) });
+};
 export const sendOp = (type: string, data?: unknown, rootID?: string) => {
   const qs = rootID ? `?root=${encodeURIComponent(rootID)}` : "";
   return request<{ ok: boolean }>(`/v1/ops${qs}`, { method: "POST", body: JSON.stringify({ type, ...(data === undefined ? {} : { data }) }) });
 };
+
+/** Download a redacted prompt/config diagnostic bundle (live host only). */
+export async function downloadDiagnostics(rootID?: string): Promise<void> {
+  const qs = rootID ? `?root=${encodeURIComponent(rootID)}` : "";
+  const headers = new Headers();
+  if (queryToken) headers.set("Authorization", `Bearer ${queryToken}`);
+  const response = await fetch(`/v1/diag${qs}`, { credentials: "same-origin", headers });
+  if (!response.ok) {
+    const err = await response.json().catch(() => null) as { error?: string } | null;
+    throw new Error(err?.error || `${response.status} ${response.statusText}`);
+  }
+  const blob = await response.blob();
+  const cd = response.headers.get("Content-Disposition") || "";
+  const match = /filename="?([^";]+)"?/i.exec(cd);
+  const filename = match?.[1] || `strike-diag-${Date.now()}.json`;
+  const url = URL.createObjectURL(blob);
+  try {
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.rel = "noopener";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
 
 // --- root API ---
 export const roots = () => request<RootsResponse>("/v1/roots");
@@ -43,7 +79,15 @@ export function liveConnection(rootID: string, onEvent: (event: Envelope) => voi
     socket.onclose = () => { if (!closed) { onState("reconnecting"); setTimeout(connect, Math.min(500 * 2 ** retry++, 8000)); } };
   };
   connect();
-  return { send: (type: string, data?: unknown) => socket?.readyState === WebSocket.OPEN && socket.send(JSON.stringify({ type, ...(data === undefined ? {} : { data }) })), close: () => { closed = true; socket?.close(); } };
+  return { send: (type: string, data?: unknown) => socket?.readyState === WebSocket.OPEN && socket.send(JSON.stringify({ type, ...(data === undefined ? {} : { data }) })), close: () => {
+      closed = true;
+      if (socket) {
+        socket.onmessage = null;
+        socket.onerror = null;
+        socket.onclose = null;
+        socket.close();
+      }
+    } };
 }
 
 export function historicalConnection(id: string, onEvent: (event: Envelope) => void, onError: (message: string) => void = () => {}) {
@@ -53,3 +97,6 @@ export function historicalConnection(id: string, onEvent: (event: Envelope) => v
   source.onerror = () => onError("history reconnecting");
   return () => source.close();
 }
+
+export const sessionChildren = (id: string) =>
+  request<{ sessions: Array<Record<string, unknown>> }>(`/v1/sessions/${encodeURIComponent(id)}/children`);

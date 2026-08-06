@@ -620,17 +620,33 @@ func (m Model) finishEditorSession(path, display string, before fileMeta, hadPat
 		}
 		return m, nil
 	}
+	if display == "" {
+		display = path
+	}
 	if !fileChangedSince(path, before) {
 		m.setNotice("editor closed - "+display+" unchanged", false)
 		return m, nil
 	}
-	if display == "" {
-		display = path
+	notice := "edited " + display
+	if extra := m.reloadAfterConfigEdit(path); extra != "" {
+		notice += extra
+	}
+	m.setNotice(notice, false)
+	// Emit FilesChanged for workdir-relative paths (tool filestate). Paths
+	// outside the session workDir still get the notice above.
+	emitPath := display
+	if path != "" && m.workDir != "" {
+		if rel, err := filepath.Rel(m.workDir, path); err == nil && !strings.HasPrefix(rel, "..") {
+			emitPath = rel
+		} else {
+			// Outside workDir (e.g. ~/.strike/config): skip FilesChanged.
+			return m, nil
+		}
 	}
 	ops := m.ops
 	return m, func() tea.Msg {
 		ops <- protocol.FilesChanged{
-			Paths:  []string{display},
+			Paths:  []string{emitPath},
 			Reason: editorReasonExternal,
 		}
 		return nil

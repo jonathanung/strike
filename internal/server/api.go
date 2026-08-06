@@ -61,9 +61,18 @@ type capabilities struct {
 	Providers      bool `json:"providers"`
 	ProjectInit    bool `json:"projectInit"`
 	MCP            bool `json:"mcp"`
+	LSP            bool `json:"lsp"`
 	Telemetry      bool `json:"telemetry"`
 	Workflows      bool `json:"workflows"`
 	WorkflowDrafts bool `json:"workflowDrafts"`
+	// Timeline is the redacted run-timeline snapshot/export surface
+	// (GET /v1/sessions/{id}/timeline[+ /export]). Always on when SessionDir is set.
+	Timeline bool `json:"timeline"`
+	// Permissions is true when host.Services.Permissions is set (explain + presets).
+	Permissions bool `json:"permissions"`
+	Sandbox     bool `json:"sandbox"`
+	// Diag is true when a live engine can build a prompt/config diagnostic bundle.
+	Diag bool `json:"diag"`
 }
 
 type bootstrapResponse struct {
@@ -85,7 +94,8 @@ var browserProtocolOps = []string{
 }
 
 func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
-	c := capabilities{Live: s.hasLive(), Roots: s.opts.LiveHub != nil}
+	// Timeline is host-safe and derived from SessionDir JSONL (always available).
+	c := capabilities{Live: s.hasLive(), Roots: s.opts.LiveHub != nil, Timeline: true, Sandbox: s.hasSandbox(), Diag: s.hasLive()}
 	var skills []map[string]any
 	if h := s.opts.Services; h != nil {
 		c.Auth, c.Catalog, c.Settings, c.History = h.Auth != nil, h.Catalog != nil, h.Settings != nil, h.History != nil
@@ -93,8 +103,14 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		c.Sessions = h.Sessions != nil
 		// Workflow authoring is exposed via /v1/workflows* and /v1/workflow-drafts*.
 		c.Workflows, c.WorkflowDrafts = h.Workflows != nil, h.WorkflowDrafts != nil
+		// LSP status + diagnostics are exposed via /v1/lsp and /v1/diagnostics.
+		c.LSP = h.LSP != nil
+		// Permission explain/presets via /v1/permissions/* (#926).
+		c.Permissions = h.Permissions != nil
+		// MCP status/control is exposed via /v1/mcp*.
+		c.MCP = h.MCP != nil
 		// Capabilities describe browser surfaces, not merely host interfaces.
-		// Roots, custom providers, project init, MCP, and telemetry remain false
+		// Roots, custom providers, project init, and telemetry remain false
 		// until this server exposes their service operations.
 		for _, skill := range h.Skills {
 			skills = append(skills, map[string]any{"name": skill.Name, "description": skill.Description})
@@ -237,6 +253,13 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		Agent    string `json:"agent"`
 		Effort   string `json:"effort"`
 		Mode     string `json:"mode"`
+		// Sandbox is the OS sandbox dial default (off|read-only|workspace-write).
+		// Empty leaves the stored default unchanged. Prefer PATCH /v1/sandbox when
+		// also sending iKnow for the yolo+off safety gate.
+		Sandbox string `json:"sandbox"`
+		// IKnow is the --i-know equivalent when sandbox is set to off while
+		// permission mode default (or live) is yolo.
+		IKnow bool `json:"iKnow"`
 	}
 	if err := decodeBody(w, r, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
@@ -246,7 +269,163 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
+	if strings.TrimSpace(body.Sandbox) != "" {
+		if err := s.saveSandboxDefault(body.Sandbox, body.IKnow, r); err != nil {
+			writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+			return
+		}
+	}
 	writeJSON(w, http.StatusOK, opOKResponse{OK: true})
+}
+
+func (s *Server) hasSandbox() bool {
+	if s.opts.Sandbox != nil {
+		return true
+	}
+	// Live roots may carry sandbox chrome even when Options.Sandbox is unset.
+	if s.opts.LiveHub != nil {
+		if live := s.opts.LiveHub.Active(); live != nil && strings.TrimSpace(live.Status().Sandbox) != "" {
+			return true
+		}
+	}
+	if s.opts.Live != nil && strings.TrimSpace(s.opts.Live.Status().Sandbox) != "" {
+		return true
+	}
+	return false
+}
+
+func (s *Server) handleSandboxGet(w http.ResponseWriter, r *http.Request) {
+	if !s.hasSandbox() {
+		capabilityUnavailable(w, "sandbox")
+		return
+	}
+	writeJSON(w, http.StatusOK, s.sandboxSnapshot(r))
+}
+
+func (s *Server) handleSandboxPatch(w http.ResponseWriter, r *http.Request) {
+	if !s.hasSandbox() {
+		capabilityUnavailable(w, "sandbox")
+		return
+	}
+	if s.opts.Services == nil || s.opts.Services.Settings == nil {
+		capabilityUnavailable(w, "settings")
+		return
+	}
+	var body struct {
+		Mode  string `json:"mode"`
+		IKnow bool   `json:"iKnow"`
+	}
+	if err := decodeBody(w, r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	if strings.TrimSpace(body.Mode) == "" {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "mode is required (off|read-only|workspace-write)"})
+		return
+	}
+	if err := s.saveSandboxDefault(body.Mode, body.IKnow, r); err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.sandboxSnapshot(r))
+}
+
+// sandboxModes is the canonical dial list for cockpit UIs.
+var sandboxModes = []string{"off", "read-only", "workspace-write"}
+
+func (s *Server) sandboxSnapshot(r *http.Request) SandboxSnapshot {
+	out := SandboxSnapshot{
+		Modes:            append([]string(nil), sandboxModes...),
+		CanChangeDefault: s.opts.Services != nil && s.opts.Services.Settings != nil,
+		Note:             "Active mode is session-scoped (config/CLI at start). Changing the default applies to new sessions only — same as TUI /settings.",
+	}
+	if base := s.opts.Sandbox; base != nil {
+		out.Mode = base.Mode
+		out.Backend = base.Backend
+		out.Available = base.Available
+		out.NetworkAllow = append([]string(nil), base.NetworkAllow...)
+		out.Explain = base.Explain
+	}
+	// Prefer live root chrome when present (per-root seed via Live.SetSandbox).
+	if live := s.liveForRequest(r); live != nil {
+		st := live.Status()
+		if st.Sandbox != "" {
+			out.Mode = st.Sandbox
+			out.Backend = st.SandboxBackend
+			out.Available = st.SandboxAvailable
+			out.NetworkAllow = append([]string(nil), st.NetworkAllow...)
+		}
+		if expl := live.SandboxExplain(); expl != "" {
+			out.Explain = expl
+		}
+		out.PermissionMode = st.PermissionMode
+	}
+	if out.Mode == "" {
+		out.Mode = "workspace-write"
+	}
+	if s.opts.Services != nil && s.opts.Services.Settings != nil {
+		d := s.opts.Services.Settings.Defaults()
+		if d.Sandbox != "" {
+			out.DefaultMode = d.Sandbox
+		} else {
+			out.DefaultMode = "workspace-write"
+		}
+		if out.PermissionMode == "" && d.PermissionMode != "" {
+			out.PermissionMode = d.PermissionMode
+		}
+	}
+	if out.Explain == "" {
+		out.Explain = "sandbox explain unavailable (no compiled profile)\nmode: " + out.Mode
+	}
+	return out
+}
+
+func (s *Server) liveForRequest(r *http.Request) *Live {
+	if s.opts.LiveHub != nil {
+		return s.opts.LiveHub.LiveFor(rootParam(r))
+	}
+	return s.opts.Live
+}
+
+// saveSandboxDefault persists the OS sandbox dial default. When mode is off and
+// the effective permission posture is yolo, iKnow must be true (--i-know gate).
+func (s *Server) saveSandboxDefault(mode string, iKnow bool, r *http.Request) error {
+	mode = strings.TrimSpace(mode)
+	canonical := ""
+	for _, want := range sandboxModes {
+		if strings.EqualFold(mode, want) {
+			canonical = want
+			break
+		}
+	}
+	// Accept common aliases via a small normalize (match config ParseMode tokens).
+	if canonical == "" {
+		switch strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(mode, "_", "-"), " ", "")) {
+		case "off", "none", "disable", "disabled", "false", "0", "no":
+			canonical = "off"
+		case "read-only", "readonly", "ro", "read":
+			canonical = "read-only"
+		case "workspace-write", "workspacewrite", "write", "ws-write", "workspace":
+			canonical = "workspace-write"
+		default:
+			return fmt.Errorf("unknown sandbox %q (want %s)", mode, strings.Join(sandboxModes, "|"))
+		}
+	}
+	// Gate when live posture or persisted default is yolo (startup CheckYoloSandbox).
+	yolo := false
+	if live := s.liveForRequest(r); live != nil {
+		yolo = strings.EqualFold(strings.TrimSpace(live.Status().PermissionMode), "yolo")
+	}
+	if !yolo && s.opts.Services != nil && s.opts.Services.Settings != nil {
+		yolo = strings.EqualFold(strings.TrimSpace(s.opts.Services.Settings.Defaults().PermissionMode), "yolo")
+	}
+	if canonical == "off" && yolo && !iKnow {
+		return fmt.Errorf("permissionMode yolo with sandbox off requires iKnow (OS isolation disabled)")
+	}
+	if s.opts.Services == nil || s.opts.Services.Settings == nil {
+		return fmt.Errorf("settings capability unavailable on this host")
+	}
+	return s.opts.Services.Settings.SaveConfigDials(canonical, "", "", "", "", "")
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -478,6 +657,33 @@ func (s *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"issues": items})
+}
+
+// handlePermissionExplain returns last-match-wins detail for a sample tool call.
+// Query: permission (required), pattern (optional; empty means "*").
+// Host-safe DTO only — no TUI types cross this boundary.
+func (s *Server) handlePermissionExplain(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Services == nil || s.opts.Services.Permissions == nil {
+		capabilityUnavailable(w, "permissions")
+		return
+	}
+	perm := strings.TrimSpace(r.URL.Query().Get("permission"))
+	if perm == "" {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "permission is required"})
+		return
+	}
+	pattern := strings.TrimSpace(r.URL.Query().Get("pattern"))
+	ex := s.opts.Services.Permissions.Explain(perm, pattern)
+	writeJSON(w, http.StatusOK, ex)
+}
+
+// handlePermissionPresets lists shipped named permission rulesets.
+func (s *Server) handlePermissionPresets(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Services == nil || s.opts.Services.Permissions == nil {
+		capabilityUnavailable(w, "permissions")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"presets": s.opts.Services.Permissions.Presets()})
 }
 
 func capabilityUnavailable(w http.ResponseWriter, name string) {

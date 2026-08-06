@@ -1,7 +1,7 @@
 // Package host defines the services a strike frontend needs from its host
 // process, beyond the engine protocol: credentials, model catalog, saved
 // defaults, prompt history, project memory/issues/plans, workflow catalog,
-// local telemetry, and static agent/skill listings. Contract only:
+// plugin lifecycle, local telemetry, and static agent/skill listings. Contract only:
 // this package imports nothing outside the standard library so frontends
 // can be developed and tested against fakes. Implementations live in
 // internal/host/local.
@@ -247,6 +247,51 @@ type Settings interface {
 	// Unknown ids are silently dropped; callers should pre-filter. A nil
 	// map deletes the file (reset to defaults).
 	SaveKeybinds(overrides map[string][]string) error
+}
+
+// ConfigFileScope is global (~/.strike) or project (./.strike).
+type ConfigFileScope string
+
+const (
+	ConfigScopeGlobal  ConfigFileScope = "global"
+	ConfigScopeProject ConfigFileScope = "project"
+)
+
+// ConfigFileRef is one /config picker row (primary slot or existing extra file).
+type ConfigFileRef struct {
+	// Slot is a primary id: config|mcp|providers|keybinds. Empty for extras.
+	Slot string
+	// Kind groups extras: agents|skills|themes|workflows. Empty for primary.
+	Kind string
+	// Scope is global or project.
+	Scope ConfigFileScope
+	// Label is the short display name (e.g. "Main config", "agents/foo.md").
+	Label string
+	// Path is the absolute path to open or create.
+	Path string
+	// Display is a user-facing path (~/.strike/config or ./.strike/…).
+	Display string
+	// Exists is true when Path is present on disk.
+	Exists bool
+	// CanCreate is true for primary slots that may be stub-created on select.
+	CanCreate bool
+}
+
+// ConfigFiles enumerates and prepares user-editable .strike config surfaces
+// for the /config picker. Never includes auth.json, sessions, managed/MDM,
+// or other non-user-edit roots.
+type ConfigFiles interface {
+	// List returns picker rows for global + project (workDir) scopes.
+	// workDir may be empty (skips project rows that need a root).
+	List(workDir string) []ConfigFileRef
+	// Ensure creates a missing primary-slot stub when CanCreate is true.
+	// Returns the absolute path to open. created is true when a new file was
+	// written. Rejects paths outside global/project .strike roots.
+	Ensure(ref ConfigFileRef) (path string, created bool, err error)
+	// LoadKeybinds returns merged keybind overrides from disk (global then
+	// project) for live TUI apply. Invalid JSON yields an error; missing
+	// files yield an empty map.
+	LoadKeybinds(workDir string) (map[string][]string, error)
 }
 
 // Onboarding is global first-time setup state (installation-scoped, not
@@ -504,15 +549,15 @@ type Roots interface {
 	WorkDir(id string) string
 }
 
-// MCPServerStatus is one configured external MCP server for /mcp.
+// MCPServerStatus is one configured external MCP server for /mcp and web.
 type MCPServerStatus struct {
-	Name      string
-	Command   string // non-secret endpoint label (command or URL)
-	Transport string // stdio|http
-	State     string // "up", "down", "error", "disabled"
-	ToolCount int
-	Error     string
-	Tools     []string
+	Name      string   `json:"name"`
+	Command   string   `json:"command,omitempty"`   // non-secret endpoint label (command or URL)
+	Transport string   `json:"transport,omitempty"` // stdio|http
+	State     string   `json:"state"`               // "up", "down", "error", "disabled"
+	ToolCount int      `json:"toolCount"`
+	Error     string   `json:"error,omitempty"`
+	Tools     []string `json:"tools,omitempty"`
 }
 
 // MCP reports external Model Context Protocol server status and control.
@@ -835,24 +880,26 @@ type Permissions interface {
 // may be nil/empty when a capability is absent (tests, future frontends);
 // frontends must degrade gracefully.
 type Services struct {
-	Auth       Auth
-	Catalog    Catalog
-	Settings   Settings
-	Onboarding Onboarding // global FTUE state; nil when unsupported
-	History    History
-	Files      Files
-	Shell      Shell // composer ! bang; nil when unsupported
-	Memory     Memory
-	Issues     Issues
-	Plans      Plans     // structured root-owned plans; nil when unsupported
-	Goals      Goals     // loop harness; nil when unsupported
-	Sessions   Sessions  // durable session list/replay; nil when unsupported
-	Roots      Roots     // concurrent parent sessions; nil when single-root only
-	Providers  Providers // custom/self-hosted provider CRUD; nil when unsupported
-	Init       ProjectInit
-	MCP        MCP       // external MCP server status; nil when unsupported
-	LSP        LSP       // language server status + diagnostics; nil when unsupported
-	Telemetry  Telemetry // local CPU/RAM/disk; nil when unsupported
+	Auth        Auth
+	Catalog     Catalog
+	Settings    Settings
+	ConfigFiles ConfigFiles // /config picker paths; nil when unsupported
+	Onboarding  Onboarding  // global FTUE state; nil when unsupported
+	History     History
+	Files       Files
+	Shell       Shell // composer ! bang; nil when unsupported
+	Memory      Memory
+	Issues      Issues
+	Plans       Plans     // structured root-owned plans; nil when unsupported
+	Goals       Goals     // loop harness; nil when unsupported
+	Sessions    Sessions  // durable session list/replay; nil when unsupported
+	Roots       Roots     // concurrent parent sessions; nil when single-root only
+	Providers   Providers // custom/self-hosted provider CRUD; nil when unsupported
+	Init        ProjectInit
+	MCP         MCP       // external MCP server status; nil when unsupported
+	LSP         LSP       // language server status + diagnostics; nil when unsupported
+	Plugins     Plugins   // plugin lifecycle manager; nil when unsupported
+	Telemetry   Telemetry // local CPU/RAM/disk; nil when unsupported
 	// SchedulerPresets is the shipped build-system preset catalog and global
 	// apply surface (FTUE #705).
 	SchedulerPresets SchedulerPresets

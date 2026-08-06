@@ -77,7 +77,26 @@ make cover         # statement coverage → coverage.out + total %
 make cover-check   # cover + enforce COVER_MIN (default 75)
 make prompt-reg    # E3.2 prompt metrics report (soft deltas by default)
 make harness-eval  # #807 harness regression pack + report (offline)
+make swebench-eval # #561 SWE-bench subset package tests (offline)
 ```
+
+### SWE-bench Verified subset (#561)
+
+External-bench runner under `internal/eval/swebench` + `strike eval swebench`.
+Fixed 50-instance subset, Docker per instance, driven by `strike exec --json`.
+Writes `report.json` + `predictions.jsonl` (see `evals/swebench/`). **Internal
+regression only — do not put pass rates in the README.**
+
+```sh
+make swebench-eval
+./strike eval swebench --subset-only
+./strike eval swebench --dry-run --grader none --out /tmp/swe-dry
+# Real run (Docker daemon + provider credentials + large images):
+./strike eval swebench --provider anthropic --model <id> --out evals/swebench/results/<run-id>
+```
+
+Container backend is the Docker CLI today; [#592](https://github.com/jonathanung/strike/issues/592)
+wires the same runner onto `internal/container` later.
 
 ### Harness evaluation suite (#807)
 
