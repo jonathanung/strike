@@ -339,7 +339,7 @@ func safeExecJSONLine(raw json.RawMessage) string {
 		"event=" + getStr("event"),
 		"matcher=" + getStr("matcher"),
 		"mode=" + getStr("mode"),
-		"url=" + getStr("url"), // URL path only is still ok; redact userinfo at print time if needed
+		"url=" + scrubURL(getStr("url")),
 		"args=" + strings.Join(getStrs("args"), ","),
 		"envKeys=" + strings.Join(getKeys("env"), ","),
 		"headerKeys=" + strings.Join(getKeys("headers"), ","),

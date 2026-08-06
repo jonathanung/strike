@@ -3,6 +3,7 @@ package plugin
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 )
 
@@ -276,8 +277,9 @@ func clearTrust(id string, scope Scope, opts UpdateOptions) error {
 	})
 }
 
-// PreviewUpdate builds an UpdateReview without installing (downloads artifact to temp? no —
-// uses catalog metadata + installed manifest only; executable diffs may be incomplete).
+// PreviewUpdate builds a full UpdateReview without installing. It downloads and
+// extracts the candidate artifact into a temp directory so contribution and
+// executable diffs are accurate before the user confirms (--yes).
 func PreviewUpdate(ctx context.Context, opts UpdateOptions) (UpdateReview, CatalogVersion, error) {
 	ip, err := Inspect(EnableOptions{
 		ID:          opts.ID,
@@ -310,19 +312,6 @@ func PreviewUpdate(ctx context.Context, opts UpdateOptions) (UpdateReview, Catal
 	if err != nil {
 		return UpdateReview{}, CatalogVersion{}, err
 	}
-	newMan := Manifest{
-		ID:           ip.ID,
-		Version:      ver.Version,
-		Capabilities: ver.Capabilities,
-	}
-	if ip.Manifest != nil {
-		newMan.Name = ip.Manifest.Name
-		// Without downloading we cannot know new contributions; keep old for baseline
-		// and rely on capability tags from catalog when present.
-		if len(ver.Capabilities) == 0 {
-			newMan.Capabilities = ip.Manifest.Capabilities
-		}
-	}
 	src := SourceIdentity{
 		Type:     SourceCatalog,
 		Registry: cat.Registry,
@@ -331,7 +320,46 @@ func PreviewUpdate(ctx context.Context, opts UpdateOptions) (UpdateReview, Catal
 		URL:      ver.URL,
 		Digest:   ver.Digest,
 	}
-	review := BuildUpdateReview(ip, newMan, src, ver.ContentDigest)
+
+	// Download + extract to temp for accurate contribution/executable review.
+	// Does not touch the install root or lockfile.
+	tmp, err := os.MkdirTemp("", "strike-plugin-preview-*")
+	if err != nil {
+		return UpdateReview{}, CatalogVersion{}, err
+	}
+	defer func() { _ = os.RemoveAll(tmp) }()
+
+	maxBytes := int64(maxArtifactBytes)
+	if ver.Size > 0 && ver.Size <= maxBytes {
+		maxBytes = ver.Size
+	}
+	data, err := downloadBytes(ctx, opts.HTTPClient, ver.URL, maxBytes)
+	if err != nil {
+		return UpdateReview{}, CatalogVersion{}, fmt.Errorf("download artifact for review: %w", err)
+	}
+	got := artifactDigest(data)
+	if !digestsEqual(got, ver.Digest) {
+		return UpdateReview{}, CatalogVersion{}, fmt.Errorf("artifact digest mismatch: got %s want %s", got, ver.Digest)
+	}
+	if err := extractArchive(data, tmp); err != nil {
+		return UpdateReview{}, CatalogVersion{}, fmt.Errorf("extract artifact for review: %w", err)
+	}
+	newMan, _, err := ReadManifest(tmp)
+	if err != nil {
+		return UpdateReview{}, CatalogVersion{}, fmt.Errorf("preview manifest: %w", err)
+	}
+	if newMan.ID != ip.ID && newMan.ID != pkg {
+		return UpdateReview{}, CatalogVersion{}, fmt.Errorf("catalog package %q does not match manifest id %q", pkg, newMan.ID)
+	}
+	contentDig, err := ComputeDigest(tmp)
+	if err != nil {
+		return UpdateReview{}, CatalogVersion{}, err
+	}
+	if ver.ContentDigest != "" && !digestsEqual(ver.ContentDigest, contentDig) {
+		return UpdateReview{}, CatalogVersion{}, fmt.Errorf("content digest mismatch: catalog %s computed %s", ver.ContentDigest, contentDig)
+	}
+
+	review := BuildUpdateReview(ip, newMan, src, contentDig)
 	// Version bump with prior trust always invalidates (fail closed).
 	if review.HadTrust && review.OldVersion != review.NewVersion {
 		review.TrustInvalidated = true
