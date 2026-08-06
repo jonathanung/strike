@@ -276,11 +276,23 @@ func TestPermissionRejectShowsExplain(t *testing.T) {
 		RequestID: "req-1",
 		Decision:  protocol.DecisionReject,
 	})
+	// Engine also emits PermissionDecided{deny, DecisionReject} after resolve.
+	m = runEvent(t, m, protocol.PermissionDecided{
+		RequestID:  "req-1",
+		Permission: "edit",
+		Patterns:   []string{"/tmp/x"},
+		Action:     "deny",
+		Decision:   protocol.DecisionReject,
+		Layer:      "session",
+	})
 	if m.lastDenial.Permission != "edit" {
 		t.Fatalf("lastDenial = %+v", m.lastDenial)
 	}
 	if !strings.Contains(m.notice, "rejected") {
-		t.Errorf("notice = %q", m.notice)
+		t.Errorf("notice = %q, want rejected (not overwritten by decided deny)", m.notice)
+	}
+	if strings.Contains(m.notice, "permission denied") {
+		t.Errorf("notice overwritten by hard-deny path: %q", m.notice)
 	}
 	if !strings.Contains(m.notice, "/permission explain edit") {
 		t.Errorf("notice missing explain: %q", m.notice)

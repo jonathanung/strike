@@ -167,9 +167,10 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		m.refreshAwaitingPermission()
 		cmd = tea.Batch(cmd, m.broadcastContextState())
 	case protocol.PermissionDecided:
-		// Audit event for every allow/deny/ask. UI only reacts to hard deny
-		// (auto ruleset) — interactive reject is handled on PermissionResolved.
-		if strings.EqualFold(ev.Action, "deny") {
+		// Audit event for every allow/deny/ask. UI only reacts to hard ruleset
+		// deny. Interactive reject emits PermissionDecided{deny, DecisionReject}
+		// after PermissionResolved — skip so the reject notice is not overwritten.
+		if strings.EqualFold(ev.Action, "deny") && ev.Decision != protocol.DecisionReject {
 			m.notePermissionDecidedDeny(ev)
 		}
 	case protocol.QuestionAsked:
