@@ -48,6 +48,7 @@ service/theme token).
 | `cmd/strike` | CLI flags + auth/exec/serve subcommands (`main.go`), composition root wiring (`wire.go`) |
 | `internal/server` | Experimental read-only HTTP attach (`strike serve`: /health, SSE events, attach page) |
 | `pkg/protocol` | Public Ops/Events wire schema; JSONL envelopes (semver `Version`) |
+| `pkg/sdk` | Thin Go client over `pkg/protocol` (channel/JSONL client, RunTurn, session replay) |
 | `internal/protocol` | Compatibility re-export of `pkg/protocol` |
 | `internal/engine` | Turn loop, tool dispatch, interrupts |
 | `internal/harness` | Function harness contract, registry, external process adapter |

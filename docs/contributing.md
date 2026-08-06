@@ -6,6 +6,7 @@
 cmd/strike/            main.go: flags/usage/auth/exec/serve subcommands;
                        wire.go: composition root (engine + host + tui wiring)
 pkg/protocol/          public Op/Event wire schema (semver Version)
+pkg/sdk/               public Go client over pkg/protocol (see docs/sdk.md)
 internal/protocol/     compatibility re-export of pkg/protocol
 internal/engine/       turn loop & tool dispatch
 internal/auth/         credential store + OAuth (PKCE, device) flows
