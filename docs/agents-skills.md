@@ -349,8 +349,18 @@ Tools `enter_plan_mode` / `exit_plan_mode` start and advance the default plan
 workflow. After plan completes, `exit_plan_mode` switches to **build** (simple)
 or **orchestrator** (complex): pass `agent`, or omit and supply `steps` /
 `areas` / `multi_agent` (heuristic: steps ≥ 4, areas ≥ 3, or multi_agent →
-orchestrator). The active phase shows as a badge in the TUI header. Example custom
-file:
+orchestrator). The active phase shows as a badge in the TUI header (workflow
+name, phase, effective gate, and recovery status when resume fails closed).
+
+Use `/workflow list`, `/workflow inspect <name>`, `/workflow start <name>`, and
+`/workflow stop` (also in the command palette) to discover and activate any
+loaded definition. Sources are labeled `builtin`, `global`, `project`, or
+`plugin`. Start always shows phase-0 permission grants before the engine
+mutates state; invalid definitions are listed but cannot be activated. Stop
+clears phase context and phase permissions without interrupting unrelated
+session history.
+
+Example custom file:
 
 ```json
 {

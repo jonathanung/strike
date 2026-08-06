@@ -601,6 +601,16 @@ func seedFromReplay(m *Model, events []protocol.Event) {
 		case protocol.PhaseChanged:
 			m.phaseName = e.Phase
 			m.phaseWorkflow = e.Workflow
+			m.phaseGate = e.Gate
+			m.phaseSource = e.Source
+			m.phaseFingerprint = e.Fingerprint
+			m.phaseStatus = e.Status
+			if e.Phase == "" && e.Workflow == "" {
+				m.phaseGate = ""
+				m.phaseSource = ""
+				m.phaseFingerprint = ""
+				m.phaseStatus = ""
+			}
 		case protocol.EffortSelected:
 			m.effort = e.Level
 		case protocol.AutonomySelected:
