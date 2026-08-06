@@ -70,6 +70,8 @@ strike launches without any provider configured. Pick one inside the TUI:
                                # the file to $EDITOR / $VISUAL
 /timeline                      # collapsed structured run timeline
 /timeline export [path]        # versioned redacted JSON/JSONL trace export
+/diag [export [path]]          # prompt/config diagnostic bundle (JSON)
+/diagnostic …                  # alias of /diag
 /copy                          # copy last assistant response to clipboard
                                # (OSC52; also alt+y)
 /vim [path|@path[:line]]       # open file in editor (embedded/modal/takeover)
@@ -152,6 +154,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/rewind` | fork a **new** session from a completed turn (idle only); original session stays listable; bare opens turn picker; `/rewind n` keeps turns 1..n. Workspace file revert is not part of rewind (use `/undo files` on the live session) |
 | `/export` | dump the visible transcript to markdown (user/assistant/tool summaries); redacts credentials via `pkg/redact` (see [secrets.md](secrets.md)); default path under `.strike/exports/` or tmp; `--open` launches `$EDITOR` |
 | `/timeline` | collapsed structured run timeline (turns/tools/provider attempts/children with durations); `/timeline export [path]` writes versioned redacted JSON (or `.jsonl`). Complements session JSONL and agent roster/budget fields — not a second full transcript |
+| `/diag` | export a **versioned prompt/config diagnostic bundle** (JSON): ordered system-prompt layers with source ids/sizes (same map as `/context`), instruction precedence, effective dials (model, effort, leanCode, permission mode, sandbox, compaction, scheduler limits), and config digests — never full secret-bearing files. Default path under `.strike/exports/` or tmp. `/diagnostic` is an alias. Works for solo and child sessions (lineage on the bundle). See [secrets.md](secrets.md) |
 | `/copy` | copy plain text of the last assistant response (not tool output) to the system clipboard via OSC52; same as `alt+y`; notice on success/failure |
 | `/compact` | ask the engine to compact model history |
 | `/memory` | bare = list browser (focuses memory pane); `list [tag]`, `get <key>`, `set <key> <value>`, `rm <key>`, `export [path]`, `import <path> [--replace]` (portable JSON; relative paths stay under project root) |
@@ -161,7 +164,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/telemetry [on\|off\|status]` | local system metrics pane (CPU/RAM/disk); **on by default** (~1 Hz sampler). Disable with `/telemetry off` |
 | `/loop` | schedule a recurring prompt (`15m`, `2h`, …); session-only; `/loop list`, `/loop stop [id]` — see [loop.md](loop.md). Distinct from [`/goal`](goal.md) |
 | `/workflow` | list/inspect/start/stop loaded workflows; start previews phase permission grants; palette expands actions |
-| `/context` | context doctor modal: system-prompt layer sizes, history msg count, **request token attribution** (system / tools / messages / tool_results; local ~4 chars/token estimate, labeled `estimated`), oversized warnings (previews redacted) |
+| `/context` | context doctor modal: system-prompt layer sizes, history msg count, **request token attribution** (system / tools / messages / tool_results; local ~4 chars/token estimate, labeled `estimated`), oversized warnings (previews redacted). Layer order (instruction precedence): shared → tools → config_system\|persona\|provider → phase → plan → lean_code → environment → instruction (AGENTS.md) → project_memory. Skills are user-turn content, not system layers. For a file export of the same map plus config digests, use `/diag` |
 | `/cost` | session input/output/cache totals from usage events; est. USD when catalog rates known; unknown stays explicit |
 | `/init` | light local scan → write `AGENTS.md`; confirms before overwrite |
 | `/ftue` | setup wizard composing provider connect, model pick, optional `/init`, a skippable feature tour (panes, agents, permissions, autonomy, keys, commands), optional scheduler build-system presets (checkbox catalog with rule/limit preview; apply writes global `scheduler.presets` atomically and preserves custom limits/rules), and first-prompt guidance; opening does not change settings; tour copy uses live keybinds and omits unavailable surfaces; Finish focuses the composer; esc dismisses. Finish/dismiss acknowledge global onboarding so auto-open does not repeat; manual `/ftue` stays available. Child pickers/tour/presets return to the same wizard step |

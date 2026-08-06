@@ -152,6 +152,26 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 				Source:      UsageSourceEstimated,
 			},
 		},
+		DiagnosticBundle{
+			Correlation:     corr,
+			SchemaVersion:   "1.0.0",
+			ProtocolVersion: Version,
+			ExportedAt:      time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC),
+			Redacted:        true,
+			Session: DiagnosticSession{
+				SessionID: "session-1", RootSessionID: "session-1", Depth: 0,
+			},
+			Prompt: DiagnosticPrompt{
+				Precedence:  []string{PromptLayerShared},
+				Layers:      []PromptLayerInfo{{Kind: PromptLayerShared, Source: "builtin:shared", Mode: PromptLayerAppend, Chars: 12}},
+				LayerCount:  1,
+				SystemChars: 12,
+			},
+			Config: DiagnosticConfig{
+				Provider: "echo", Model: "echo", Agent: "build",
+				Digests: map[string]string{"effective": "abc"},
+			},
+		},
 	}
 	for _, want := range events {
 		env, err := Wrap(want)
@@ -646,6 +666,7 @@ func TestEventTypeCoverage(t *testing.T) {
 		"session.rewound":        SessionRewound{},
 		"hook.matched":           HookMatched{},
 		"prompt.effective":       EffectivePrompt{},
+		"diagnostic.bundle":      DiagnosticBundle{},
 	}
 	for typ, ev := range want {
 		env, err := Wrap(ev)

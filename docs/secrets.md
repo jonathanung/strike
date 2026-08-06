@@ -5,7 +5,7 @@ results, and diagnostic bundles.
 
 | Package | Role |
 |---|---|
-| **`pkg/redact`** | Shared string scrubbing (`String`, `ScrubToolOutput`, `JSON`, `Error`, `Bytes`) — used by timeline export (#790), TUI `/export`, engine inspect previews |
+| **`pkg/redact`** | Shared string scrubbing (`String`, `ScrubToolOutput`, `JSON`, `Error`, `Bytes`) — used by timeline export (#790), diagnostic bundles (#792), TUI `/export`, engine inspect previews |
 | **`internal/secret`** | Secret-ref env indirection + `RedactEvent` for session JSONL; thin wrappers over `pkg/redact` |
 
 Auth material itself stays in `~/.strike/auth.json` (0600) and process env;
@@ -18,6 +18,7 @@ see [auth.md](auth.md).
 | **Session JSONL** | `Append` runs `secret.RedactEvent` before encode |
 | **Engine tool results** | `secret.ScrubToolOutput` on settle + streaming tool/process tails |
 | **Timeline export** (`/timeline export`) | `pkg/redact.String` on previews (#790) |
+| **Diagnostic bundle** (`/diag`) | `pkg/diag` + `pkg/redact` on layer previews, paths, and dial strings (#792); digests only — never full secret-bearing config files |
 | **TUI `/export`** | `pkg/redact.String` on markdown bodies |
 | **Context doctor previews** | Engine layer previews use `pkg/redact` |
 | **MCP status errors** | `secret.RedactError` → `pkg/redact.Error` |
@@ -91,4 +92,5 @@ host process and are not written into session events.
 
 - #796 — secret refs + session/engine scrub wiring
 - #790 — structured timeline / trace export (`pkg/redact` + `pkg/timeline`)
+- #792 — prompt/config diagnostic bundle (`pkg/diag` + `/diag`)
 - [auth.md](auth.md) — credential store and login

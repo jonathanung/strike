@@ -208,6 +208,8 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		return m.handleExportCommand(fields[1:])
 	case "/timeline":
 		return m.handleTimelineCommand(fields[1:])
+	case "/diag", "/diagnostic":
+		return m.handleDiagCommand(fields[1:])
 	case "/copy":
 		m.resetComposer()
 		m.clearNotice()

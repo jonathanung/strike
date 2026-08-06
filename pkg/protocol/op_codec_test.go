@@ -21,6 +21,7 @@ func TestWrapOpDecodeRoundTrip(t *testing.T) {
 		StopWorkflow{},
 		Compact{Strategy: "trim"},
 		InspectEffectivePrompt{},
+		InspectDiagnosticBundle{},
 		Rewind{RestoreFiles: true},
 	}
 	for _, op := range cases {

@@ -26,7 +26,9 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 			// correlation; keep them for team UI (issue #614).
 			protocol.AgentMessage, protocol.AgentContractTimeout, protocol.TeamRoster,
 			// Queue lifecycle for children: show constrained pool, not idle.
-			protocol.SchedulerQueued, protocol.SchedulerAdmitted, protocol.SchedulerCanceled:
+			protocol.SchedulerQueued, protocol.SchedulerAdmitted, protocol.SchedulerCanceled,
+			// Diagnostic bundle inspect may target a child session (rpc /diag).
+			protocol.DiagnosticBundle:
 		default:
 			return nil
 		}
@@ -244,6 +246,8 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		} else {
 			m.cells = append(m.cells, &infoCell{text: formatEffectivePrompt(ev)})
 		}
+	case protocol.DiagnosticBundle:
+		cmd = m.applyDiagnosticBundle(ev)
 	case protocol.CompactionCompleted:
 		strategy := ev.Strategy
 		if strategy == "" {
@@ -575,6 +579,8 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	case protocol.CompactionCompleted:
 		return e.Correlation, true
 	case protocol.EffectivePrompt:
+		return e.Correlation, true
+	case protocol.DiagnosticBundle:
 		return e.Correlation, true
 	case protocol.EngineError:
 		return e.Correlation, true
