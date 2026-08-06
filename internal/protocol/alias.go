@@ -39,6 +39,14 @@ const (
 	PhaseStatusMismatch = pub.PhaseStatusMismatch
 )
 
+// Plan handoff approval sources.
+const (
+	PlanApprovalUser    = pub.PlanApprovalUser
+	PlanApprovalAgent   = pub.PlanApprovalAgent
+	PlanApprovalChecks  = pub.PlanApprovalChecks
+	PlanApprovalSkipAll = pub.PlanApprovalSkipAll
+)
+
 // Permission posture dial.
 type PermissionMode = pub.PermissionMode
 
@@ -129,6 +137,7 @@ type (
 	ModelSelected          = pub.ModelSelected
 	AgentSelected          = pub.AgentSelected
 	PhaseChanged           = pub.PhaseChanged
+	PlanHandoff            = pub.PlanHandoff
 	PhaseGrantApproved     = pub.PhaseGrantApproved
 	PhaseGrantRule         = pub.PhaseGrantRule
 	EffortSelected         = pub.EffortSelected

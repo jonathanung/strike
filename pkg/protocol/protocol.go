@@ -888,6 +888,39 @@ type PhaseChanged struct {
 	Status      string `json:"status,omitempty"`      // empty | missing | mismatch
 }
 
+// Plan approval sources recorded on PlanHandoff.ApprovalSource.
+const (
+	// PlanApprovalUser: supervised autonomy — human cleared the exit gate.
+	PlanApprovalUser = "user"
+	// PlanApprovalAgent: agent autonomy — exit_plan_mode was the self-affirmation.
+	PlanApprovalAgent = "agent"
+	// PlanApprovalChecks: checks autonomy — phase check command passed.
+	PlanApprovalChecks = "checks"
+	// PlanApprovalSkipAll: skip-all autonomy — approval bypassed (tool perms unchanged).
+	PlanApprovalSkipAll = "skip-all"
+)
+
+// PlanHandoff records that plan mode handed an exact plan identity (or a
+// bounded legacy text plan) to the implementer. Emitted once per successful
+// unified approval+handoff. Resume restores this so the implementer still
+// sees the approved artifact after --continue.
+type PlanHandoff struct {
+	Correlation
+	// PlanID is the structured plan id when handing off a canonical plan.
+	PlanID string `json:"planId,omitempty"`
+	// PlanVersion is the CAS version approved at handoff time.
+	PlanVersion int `json:"planVersion,omitempty"`
+	// ApprovalSource is user|agent|checks|skip-all.
+	ApprovalSource string `json:"approvalSource"`
+	// Title is a short label (structured plan title or "legacy plan").
+	Title string `json:"title,omitempty"`
+	// Agent is the implementer routed to (build|orchestrator).
+	Agent string `json:"agent,omitempty"`
+	// LegacyText is a bounded pre-feature text plan when PlanID is empty.
+	// Omitted for structured and skip-all-empty handoffs.
+	LegacyText string `json:"legacyText,omitempty"`
+}
+
 // PhaseGrantRule is one effective permission widening approved for a phase.
 type PhaseGrantRule struct {
 	Permission string `json:"permission"`
@@ -1217,6 +1250,7 @@ func (HarnessProgress) isEvent()        {}
 func (ModelSelected) isEvent()          {}
 func (AgentSelected) isEvent()          {}
 func (PhaseChanged) isEvent()           {}
+func (PlanHandoff) isEvent()            {}
 func (PhaseGrantApproved) isEvent()     {}
 func (EffortSelected) isEvent()         {}
 func (AutonomySelected) isEvent()       {}
