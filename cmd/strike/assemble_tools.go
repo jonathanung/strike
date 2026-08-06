@@ -556,6 +556,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 				// Background context: document sync must not be canceled with the tool call.
 				lspMgr.NotifyFile(context.Background(), absPath, content, deleted)
 			},
+			CollectDiagnostics:      makeLSPCollectDiagnostics(lspMgr, toolDir, cfg.LSP),
 			MaxChildDepth:           cfg.MaxChildDepth,
 			InitialProvider:         initialProvider,
 			InitialModel:            initialModel,
@@ -766,6 +767,29 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		spawnRoot:      spawn,
 		firstSlot:      first,
 	}, nil
+}
+
+// makeLSPCollectDiagnostics wires Manager.CollectForPaths into tool.Context
+// using config severity / max-chars / wait knobs. Nil manager → nil callback.
+func makeLSPCollectDiagnostics(mgr *lsp.Manager, workDir string, cfg config.LSPConfig) func(context.Context, []string) string {
+	if mgr == nil {
+		return nil
+	}
+	opts := lsp.InjectOptions{WorkDir: workDir}
+	if sev, err := lsp.ParseSeverityName(cfg.DiagnosticsSeverity); err == nil {
+		opts.MinSeverity = sev
+	}
+	if cfg.DiagnosticsMaxChars > 0 {
+		opts.MaxChars = cfg.DiagnosticsMaxChars
+	}
+	if cfg.DiagnosticsWaitMs > 0 {
+		opts.Wait = time.Duration(cfg.DiagnosticsWaitMs) * time.Millisecond
+	} else if cfg.DiagnosticsWaitMs < 0 {
+		opts.Wait = -1 // snapshot immediately
+	}
+	return func(ctx context.Context, absPaths []string) string {
+		return mgr.CollectForPaths(ctx, absPaths, opts)
+	}
 }
 
 // buildCustomProvider maps a config custom provider onto the openaicompat or

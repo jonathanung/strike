@@ -5,6 +5,10 @@
 // user inputs, re-runs them through the engine with echo, and diffs the
 // normalized tool-call sequence (name + canonical args). Call IDs,
 // timestamps, and tool outputs are ignored so runs stay comparable.
+//
+// Prompt regression (E3.2) builds on the same harness: CollectMetrics reports
+// tool-call count, turn count, and token/system-prompt deltas per scenario.
+// See metrics.go and TestPromptRegressionReport.
 package replay
 
 import (
@@ -40,6 +44,8 @@ type Result struct {
 	Turns int
 	// UserInputs is the ordered user text fed into the engine.
 	UserInputs []string
+	// Effective is the last EffectivePrompt snapshot when InspectPrompt was set.
+	Effective *protocol.EffectivePrompt
 }
 
 // LoadJSONL reads a session event log (one protocol envelope per line).
@@ -109,16 +115,28 @@ type Options struct {
 	Timeout time.Duration
 	// SessionID stamps emitted events. Empty lets the engine mint one.
 	SessionID string
+	// Agents overrides engine personas. nil uses the engine default (build).
+	Agents []engine.Agent
+	// InitialAgent selects a persona from Agents (or the engine default list).
+	InitialAgent string
+	// LeanCode is off|lite|full for prompt composition. Empty → engine default (lite).
+	LeanCode string
+	// InspectPrompt, when true, requests EffectivePrompt after inputs complete
+	// so Result.Effective carries system/layer attribution for metrics.
+	InspectPrompt bool
 }
 
 // Run feeds user inputs through the engine with the echo provider and
 // collects the resulting event stream. Permissions allow all tools so the
 // harness never blocks on asks. Sandbox is off for portable offline runs.
+//
+// When inputs is empty and InspectPrompt is true, the engine still starts so
+// the composed system prompt can be inspected (prompt-only scenarios).
 func Run(ctx context.Context, inputs []string, opts Options) (Result, error) {
 	if opts.WorkDir == "" {
 		return Result{}, fmt.Errorf("replay: WorkDir is required")
 	}
-	if len(inputs) == 0 {
+	if len(inputs) == 0 && !opts.InspectPrompt {
 		return Result{UserInputs: inputs}, nil
 	}
 	timeout := opts.Timeout
@@ -135,7 +153,7 @@ func Run(ctx context.Context, inputs []string, opts Options) (Result, error) {
 	allowAll := permission.Ruleset{
 		{Permission: "*", Pattern: "*", Action: permission.Allow},
 	}
-	eng := engine.New(engine.Options{
+	engOpts := engine.Options{
 		SessionID:       opts.SessionID,
 		Select:          selectEcho,
 		InitialProvider: "echo",
@@ -143,7 +161,13 @@ func Run(ctx context.Context, inputs []string, opts Options) (Result, error) {
 		WorkDir:         opts.WorkDir,
 		Rules:           []permission.Ruleset{permission.Defaults(), allowAll},
 		SandboxMode:     "off",
-	})
+		LeanCode:        opts.LeanCode,
+		InitialAgent:    opts.InitialAgent,
+	}
+	if len(opts.Agents) > 0 {
+		engOpts.Agents = append([]engine.Agent(nil), opts.Agents...)
+	}
+	eng := engine.New(engOpts)
 	go eng.Run(runCtx)
 
 	var events []protocol.Event
@@ -179,12 +203,46 @@ func Run(ctx context.Context, inputs []string, opts Options) (Result, error) {
 		}
 	}
 
-	return Result{
+	res := Result{
 		Events:     events,
 		ToolCalls:  ExtractToolCalls(events),
 		Turns:      turns,
 		UserInputs: append([]string(nil), inputs...),
-	}, nil
+	}
+
+	if opts.InspectPrompt {
+		eff, err := inspectEffective(runCtx, eng, &res.Events)
+		if err != nil {
+			return res, err
+		}
+		res.Effective = eff
+	}
+
+	return res, nil
+}
+
+// inspectEffective sends InspectEffectivePrompt and waits for the snapshot.
+// Startup events may still be draining; non-matching events are appended.
+func inspectEffective(ctx context.Context, eng *engine.Engine, events *[]protocol.Event) (*protocol.EffectivePrompt, error) {
+	eng.Ops() <- protocol.InspectEffectivePrompt{}
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("replay: inspect effective prompt: %w", ctx.Err())
+		case ev, ok := <-eng.Events():
+			if !ok {
+				return nil, fmt.Errorf("replay: inspect effective prompt: engine events closed")
+			}
+			*events = append(*events, ev)
+			if ep, ok := ev.(protocol.EffectivePrompt); ok {
+				cp := ep
+				return &cp, nil
+			}
+			if e, ok := ev.(protocol.EngineError); ok && e.ParentSessionID == "" && e.Depth == 0 {
+				return nil, fmt.Errorf("replay: inspect effective prompt: engine error: %s", e.Message)
+			}
+		}
+	}
 }
 
 // WriteJSONL persists events as a session JSONL log (protocol envelopes).

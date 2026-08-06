@@ -1478,3 +1478,54 @@ func TestLoadLSPMergeReplace(t *testing.T) {
 		t.Fatalf("py = %#v", cfg.LSP.Servers["py"])
 	}
 }
+
+func TestLoadLSPDiagnosticsOverlay(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(global, []byte(`{
+		"lsp": {
+			"diagnosticsSeverity": "error",
+			"diagnosticsMaxChars": 4000,
+			"diagnosticsWaitMs": 400,
+			"servers": {"go": {"command": "gopls", "extensions": [".go"]}}
+		}
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(work, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(project), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Overlay severity/max without replacing servers.
+	if err := os.WriteFile(project, []byte(`{
+		"lsp": {
+			"diagnosticsSeverity": "warning",
+			"diagnosticsMaxChars": 8000
+		}
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.LSP.DiagnosticsSeverity != "warning" {
+		t.Fatalf("severity = %q", cfg.LSP.DiagnosticsSeverity)
+	}
+	if cfg.LSP.DiagnosticsMaxChars != 8000 {
+		t.Fatalf("maxChars = %d", cfg.LSP.DiagnosticsMaxChars)
+	}
+	if cfg.LSP.DiagnosticsWaitMs != 400 {
+		t.Fatalf("waitMs = %d (base should remain)", cfg.LSP.DiagnosticsWaitMs)
+	}
+	if cfg.LSP.Servers["go"].Command != "gopls" {
+		t.Fatalf("servers should remain from global: %#v", cfg.LSP.Servers)
+	}
+}

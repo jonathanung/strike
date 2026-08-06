@@ -82,9 +82,10 @@ func (writeTool) Execute(ctx context.Context, args json.RawMessage, tc *Context)
 	if readErr == nil {
 		verb = "Overwrote"
 	}
-	return Result{
+	res := Result{
 		Title:    rel,
 		Output:   fmt.Sprintf("%s %s (%d bytes)", verb, rel, len(a.Content)),
 		Metadata: meta,
-	}, nil
+	}
+	return tc.AppendDiagnostics(ctx, res, path), nil
 }

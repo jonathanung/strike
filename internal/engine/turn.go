@@ -675,6 +675,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 					e.opts.FileSync(absPath, content, deleted)
 				}
 			},
+			CollectDiagnostics: e.opts.CollectDiagnostics,
 			Ask: func(ctx context.Context, req tool.AskRequest) error {
 				return e.perms.AskWithCorrelation(ctx, req, corr)
 			},

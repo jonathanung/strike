@@ -100,9 +100,10 @@ func (editTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 		tc.Files.Record(path, info)
 	}
 	tc.NotifyFileSync(path, updated, false)
-	return Result{
+	res := Result{
 		Title:    rel,
 		Output:   fmt.Sprintf("Edited %s (%d replacement(s))", rel, replaced),
 		Metadata: meta,
-	}, nil
+	}
+	return tc.AppendDiagnostics(ctx, res, path), nil
 }
