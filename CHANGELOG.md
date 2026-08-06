@@ -22,6 +22,14 @@ materially affect the shipped product.
   versioned `report.json` / predictions JSONL under `evals/swebench/results/`.
   Internal signal only — do not publish pass rates in the README
   ([#561](https://github.com/jonathanung/strike/issues/561)).
+- **Plugin catalog and updates** — remote catalog format (`catalog.json`),
+  `strike plugin search` / `install catalog:pkg[@ver] --registry` / `outdated` /
+  `update --yes`. Installs pin immutable version + verified artifact digest;
+  lockfile records registry/package/version/URL/digests for reproduce; archive
+  extract guards zip-slip/tar traversal; failed download/verify/validate keeps
+  the prior version; contribution/capability review before update; executable
+  changes clear prior trust. Catalog metadata cannot enable execution
+  ([#729](https://github.com/jonathanung/strike/issues/729)).
 - **`websearch` tool** — permissioned, provider-neutral web search with
   citation-ready titles/URLs/snippets, domain filters, result limits, and
   network allowlist / redaction / audit controls. Separate from `webfetch`

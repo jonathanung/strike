@@ -116,20 +116,219 @@ func TestVisualizerActivityMetricLabels(t *testing.T) {
 func TestVisualizerWindowWidthSafe(t *testing.T) {
 	w := newVisualizerWindow()
 	msg := visualizerStateMsg{
-		SessionID: "s",
-		Label:     "node-with-a-very-long-label-that-must-truncate",
-		State:     theme.AgentStateReady,
-		Input:     protocol.KnownTokens(99),
-		Output:    protocol.KnownTokens(1),
-		Activity:  []float64{1, 2, 3, 4, 5, 6, 7, 8},
-		Tools:     []visualizerTool{{Name: "tool-with-long-name", Done: true, IsError: true}},
+		SessionID:    "s",
+		Label:        "node-with-a-very-long-label-that-must-truncate",
+		Kind:         "child",
+		State:        theme.AgentStateAttention,
+		StatusLabel:  "needs you",
+		Objective:    "investigate a very long objective that must not blow the layout at narrow widths",
+		LastAction:   "grep for something-with-an-extremely-long-pattern-name",
+		BlockReason:  "waiting on permission for a long shell command that exceeds the pane",
+		FilesTouched: []string{"internal/tui/_src/window/visualizer_window.go", "pkg/protocol/protocol.go", "a/b/c/d/e/f/g/h/i/j/k/long.go"},
+		Input:        protocol.KnownTokens(99),
+		Output:       protocol.KnownTokens(1),
+		Activity:     []float64{1, 2, 3, 4, 5, 6, 7, 8},
+		Tools:        []visualizerTool{{Name: "tool-with-long-name", Done: true, IsError: true}},
 	}
-	for _, width := range []int{8, 16, 24, 40} {
-		updated, _ := w.resize(width, 20).update(msg)
+	for _, width := range []int{8, 16, 24, 40, 80} {
+		updated, _ := w.resize(width, 24).update(msg)
 		view := updated.view(theme.Default())
 		for i, line := range strings.Split(view, "\n") {
 			if got := lipgloss.Width(line); got > width {
 				t.Errorf("width %d line %d width %d: %q", width, i, got, ansi.Strip(line))
+			}
+		}
+	}
+}
+
+func TestVisualizerChildDetailFields(t *testing.T) {
+	w := newVisualizerWindow().resize(40, 24).(visualizerWindow)
+	updated, _ := w.update(visualizerStateMsg{
+		SessionID:   "child-1",
+		Label:       "explore",
+		Kind:        "child",
+		State:       theme.AgentStateWorking,
+		StatusLabel: "working",
+		Objective:   "map auth flow",
+		LastAction:  "read config.go",
+		FilesTouched: []string{
+			"internal/auth/store.go",
+			"internal/auth/oauth.go",
+			"cmd/strike/main.go",
+			"docs/auth.md",
+			"pkg/protocol/protocol.go",
+			"extra/overflow.go",
+		},
+	})
+	plain := ansi.Strip(updated.view(theme.Default()))
+	for _, want := range []string{
+		"objective", "map auth flow",
+		"action", "read config.go",
+		"files (6)", "internal/auth/store.go", "+1 more",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("missing %q:\n%s", want, plain)
+		}
+	}
+	// Overflow path must not appear once bounded to visualizerMaxFilesShown.
+	if strings.Contains(plain, "extra/overflow.go") {
+		t.Errorf("unbounded file list leaked overflow path:\n%s", plain)
+	}
+	// No fabricated block row when not blocked and reason empty.
+	if strings.Contains(plain, "blocked") {
+		t.Errorf("unexpected blocked row:\n%s", plain)
+	}
+}
+
+func TestVisualizerBlockReasonAndEmptyPlaceholders(t *testing.T) {
+	w := newVisualizerWindow().resize(36, 20).(visualizerWindow)
+	// Needs-attention with reason.
+	updated, _ := w.update(visualizerStateMsg{
+		SessionID:   "c1",
+		Label:       "build",
+		Kind:        "child",
+		State:       theme.AgentStateAttention,
+		StatusLabel: "needs you",
+		BlockReason: "permission: bash",
+	})
+	plain := ansi.Strip(updated.view(theme.Default()))
+	if !strings.Contains(plain, "blocked") || !strings.Contains(plain, "permission: bash") {
+		t.Fatalf("block reason missing:\n%s", plain)
+	}
+	// Child with empty objective/action shows muted unknown marker, not fake text.
+	dash := theme.Default().Resolve().Icons.DetailSeparator
+	updated, _ = w.update(visualizerStateMsg{
+		SessionID:   "c2",
+		Label:       "scout",
+		Kind:        "child",
+		State:       theme.AgentStateWorking,
+		StatusLabel: "working",
+	})
+	plain = ansi.Strip(updated.view(theme.Default()))
+	if !strings.Contains(plain, "objective") || !strings.Contains(plain, "action") {
+		t.Fatalf("child should show objective/action rows:\n%s", plain)
+	}
+	if !strings.Contains(plain, dash) {
+		t.Fatalf("empty child detail should use unknown marker %q:\n%s", dash, plain)
+	}
+	// Objective/action values must stay the unknown marker — not invented copy.
+	if strings.Contains(plain, "unknown objective") || strings.Contains(plain, "TODO") {
+		t.Errorf("fabricated detail copy:\n%s", plain)
+	}
+	// Ensure the objective row value is only the dash (not a prose placeholder).
+	for _, line := range strings.Split(plain, "\n") {
+		if !strings.Contains(line, "objective") {
+			continue
+		}
+		if strings.Contains(line, "n/a") || strings.Contains(line, "none") {
+			t.Errorf("fabricated objective placeholder on %q", line)
+		}
+	}
+	// Root omits empty detail rows (tokens stay primary).
+	updated, _ = w.update(visualizerStateMsg{
+		SessionID:   "root",
+		Label:       "main",
+		Kind:        "root",
+		State:       theme.AgentStateReady,
+		StatusLabel: "ready",
+	})
+	plain = ansi.Strip(updated.view(theme.Default()))
+	if strings.Contains(plain, "objective") || strings.Contains(plain, "action") {
+		t.Fatalf("root should omit empty detail rows:\n%s", plain)
+	}
+	// Files section omitted when unknown — never a fake path list.
+	if strings.Contains(plain, "files") {
+		t.Fatalf("root should omit empty files section:\n%s", plain)
+	}
+}
+
+func TestVisualizerFailedChildOmitsEmptyBlockRow(t *testing.T) {
+	// Failed/error without blockReason must not look "blocked".
+	w := newVisualizerWindow().resize(32, 16).(visualizerWindow)
+	updated, _ := w.update(visualizerStateMsg{
+		SessionID:   "c",
+		Label:       "x",
+		Kind:        "child",
+		State:       theme.AgentStateError,
+		StatusLabel: "failed",
+	})
+	plain := ansi.Strip(updated.view(theme.Default()))
+	if strings.Contains(plain, "blocked") {
+		t.Fatalf("failed child should not show empty blocked row:\n%s", plain)
+	}
+	// Explicit reason still surfaces even on failed.
+	updated, _ = w.update(visualizerStateMsg{
+		SessionID:   "c",
+		Label:       "x",
+		Kind:        "child",
+		State:       theme.AgentStateError,
+		StatusLabel: "failed",
+		BlockReason: "verifier rejected",
+	})
+	plain = ansi.Strip(updated.view(theme.Default()))
+	if !strings.Contains(plain, "blocked") || !strings.Contains(plain, "verifier rejected") {
+		t.Fatalf("explicit blockReason missing on failed child:\n%s", plain)
+	}
+}
+
+func TestVisualizerLastActionFallsBackToTool(t *testing.T) {
+	w := newVisualizerWindow().resize(32, 16).(visualizerWindow)
+	updated, _ := w.update(visualizerStateMsg{
+		SessionID: "c",
+		Label:     "x",
+		Kind:      "child",
+		State:     theme.AgentStateWorking,
+		Tools: []visualizerTool{
+			{Name: "bash", Done: false},
+			{Name: "read", Done: true},
+		},
+	})
+	plain := ansi.Strip(updated.view(theme.Default()))
+	if !strings.Contains(plain, "action") || !strings.Contains(plain, "bash") {
+		t.Fatalf("expected in-flight tool as action hint:\n%s", plain)
+	}
+}
+
+func TestVisualizerDetailAtGalleryWidths(t *testing.T) {
+	// ~80×24 and narrow panes used by the gallery matrix.
+	msg := visualizerStateMsg{
+		SessionID:    "child-g",
+		Label:        "implementer",
+		Kind:         "child",
+		State:        theme.AgentStateAttention,
+		StatusLabel:  "needs you",
+		Objective:    "fix flaky test",
+		LastAction:   "edit foo_test.go",
+		BlockReason:  "awaiting review",
+		FilesTouched: []string{"foo_test.go", "foo.go"},
+		Activity:     []float64{10, 20},
+		Tools:        []visualizerTool{{Name: "edit", Done: true}},
+	}
+	for _, tc := range []struct {
+		w, h int
+	}{
+		{8, 24},
+		{16, 24},
+		{24, 20},
+		{32, 24},
+		{80, 24},
+	} {
+		updated, _ := newVisualizerWindow().resize(tc.w, tc.h).update(msg)
+		view := updated.view(theme.Default())
+		plain := ansi.Strip(view)
+		if plain == "" && tc.w > 0 {
+			t.Errorf("%dx%d empty view", tc.w, tc.h)
+		}
+		for i, line := range strings.Split(view, "\n") {
+			if got := lipgloss.Width(line); got > tc.w {
+				t.Errorf("%dx%d line %d width %d: %q", tc.w, tc.h, i, got, ansi.Strip(line))
+			}
+		}
+		if tc.w >= 24 {
+			for _, want := range []string{"objective", "fix flaky", "blocked", "awaiting review", "files"} {
+				if !strings.Contains(plain, want) {
+					t.Errorf("%dx%d missing %q:\n%s", tc.w, tc.h, want, plain)
+				}
 			}
 		}
 	}
@@ -167,6 +366,111 @@ func TestVisualizerFollowsAgentsHighlightAndUsage(t *testing.T) {
 	plain = ansi.Strip(viz.view(theme.Default()))
 	if !strings.Contains(plain, "50") || !strings.Contains(plain, "10") {
 		t.Fatalf("root usage missing after highlight switch:\n%s", plain)
+	}
+}
+
+func TestVisualizerDetailUpdatesOnStateBroadcast(t *testing.T) {
+	// Selecting different nodes pushes a new visualizerStateMsg; detail must
+	// refresh without restart.
+	m, _ := newAppTestModel(nil, nil)
+	m.sessionID = "root-a"
+	m.windows = m.windows.resize(48, 28)
+	if reg, ok := m.windows.activate(visualizerWindowID); ok {
+		m.windows = reg
+	}
+	m.windows, _ = m.windows.broadcast(visualizerStateMsg{
+		SessionID:    "child-1",
+		Label:        "scout",
+		Kind:         "child",
+		State:        theme.AgentStateAttention,
+		StatusLabel:  "needs you",
+		Objective:    "trace login",
+		LastAction:   "grep Session",
+		BlockReason:  "needs you: confirm scope",
+		FilesTouched: []string{"auth.go", "session.go"},
+	})
+	plain := ansi.Strip(mustVisualizer(t, m).view(theme.Default()))
+	for _, want := range []string{
+		"objective", "trace login",
+		"action", "grep Session",
+		"blocked", "needs you: confirm scope",
+		"files", "auth.go", "session.go",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("missing %q:\n%s", want, plain)
+		}
+	}
+
+	m.windows, _ = m.windows.broadcast(visualizerStateMsg{
+		SessionID:   "child-2",
+		Label:       "builder",
+		Kind:        "child",
+		State:       theme.AgentStateWorking,
+		StatusLabel: "working",
+		Objective:   "ship patch",
+		LastAction:  "edit app.go",
+	})
+	plain = ansi.Strip(mustVisualizer(t, m).view(theme.Default()))
+	if !strings.Contains(plain, "ship patch") || !strings.Contains(plain, "edit app.go") {
+		t.Fatalf("child-2 detail missing after reselect:\n%s", plain)
+	}
+	if strings.Contains(plain, "trace login") || strings.Contains(plain, "confirm scope") {
+		t.Fatalf("stale child-1 detail after reselect:\n%s", plain)
+	}
+}
+
+func TestVisualizerRosterDetailOnChildSelect(t *testing.T) {
+	// End-to-end with VIZ.1 plumbing: roster → snapshot → visualizer.
+	m, _ := newAppTestModel(nil, nil)
+	m.sessionID = "root-a"
+	m.windows = m.windows.resize(48, 28)
+	m.onTeamRoster(protocol.TeamRoster{
+		LeadID: "root-a",
+		Members: []protocol.TeamRosterMember{
+			{
+				SessionID: "child-1", Role: "member", Name: "scout", Agent: "explore",
+				State: "needs_attention", ParentSessionID: "root-a",
+				Objective: "trace login", LastAction: "grep Session",
+				BlockReason:  "needs you: confirm scope",
+				FilesTouched: []string{"auth.go", "session.go"},
+			},
+			{
+				SessionID: "child-2", Role: "member", Name: "builder", Agent: "general",
+				State: "working", ParentSessionID: "root-a",
+				Objective: "ship patch", LastAction: "edit app.go",
+			},
+		},
+	})
+	m = updateApp(t, m, agentsHighlightMsg{sessionID: "child-1"})
+	snap := m.visualizerStateSnapshot()
+	if snap.Kind != "child" || snap.Objective != "trace login" || snap.LastAction != "grep Session" {
+		t.Fatalf("snapshot = %+v", snap)
+	}
+	if snap.BlockReason != "needs you: confirm scope" {
+		t.Fatalf("blockReason = %q", snap.BlockReason)
+	}
+	if snap.State != theme.AgentStateAttention && snap.StatusLabel != "needs you" {
+		t.Fatalf("attention status not plumbed: state=%v label=%q", snap.State, snap.StatusLabel)
+	}
+	plain := ansi.Strip(mustVisualizer(t, m).view(theme.Default()))
+	for _, want := range []string{
+		"objective", "trace login",
+		"action", "grep Session",
+		"blocked", "needs you: confirm scope",
+		"files", "auth.go",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("missing %q:\n%s", want, plain)
+		}
+	}
+
+	m = updateApp(t, m, agentsHighlightMsg{sessionID: "child-2"})
+	plain = ansi.Strip(mustVisualizer(t, m).view(theme.Default()))
+	if !strings.Contains(plain, "ship patch") || !strings.Contains(plain, "edit app.go") {
+		t.Fatalf("child-2 detail missing after reselect:\n%s", plain)
+	}
+	if strings.Contains(plain, "trace login") || strings.Contains(plain, "confirm scope") {
+		t.Fatalf("stale child-1 detail after reselect:\n%s", plain)
 	}
 }
 
