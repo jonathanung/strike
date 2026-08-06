@@ -884,6 +884,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.apply.hasNotify {
 			m.notifyMode = msg.apply.notifyMode
 		}
+		if msg.apply.hasAutoApproveSecs {
+			m.permissionAutoApproveSeconds = msg.apply.autoApproveSecs
+		}
+		if msg.apply.hasAutoApproveExclude {
+			m.permissionAutoApproveExclude = append([]string(nil), msg.apply.autoApproveExclude...)
+		}
 		label := msg.label
 		if label == "" {
 			label = msg.value
@@ -1054,6 +1060,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.windows = refreshDiagnosticsWindows(m.windows)
 		return m, diagnosticsRefreshCmd()
+
+	case petsTickMsg:
+		// Animate only while the pets pane is active so idle sessions stay
+		// event-driven (same pattern as filesRefreshMsg).
+		if !petsWindowActive(m.windows) {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.windows, cmd = applyPetsTick(m.windows, msg)
+		return m, tea.Batch(cmd, petsAnimCmd(m.windows))
 
 	case telemetryTickMsg, telemetrySampleMsg:
 		var cmd tea.Cmd

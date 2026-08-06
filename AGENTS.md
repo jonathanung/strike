@@ -68,8 +68,9 @@ service/theme token).
 | `internal/memory` | project-scoped durable key/value memory |
 | `internal/issue` | project-scoped durable issue tracker |
 | `internal/goal` | loop harness: goals, guards, critic, hooks, JSONL state |
-| `internal/host` | frozen stdlib-only contract: what a frontend needs from its host (auth, catalog, settings, history, memory, issues, goals, agents, skills) |
-| `internal/host/local` | real `host.Services` impl, wraps auth/config/models/history/memory/issue/goal |
+| `internal/plan` | project-scoped root-owned structured plans (sections, lifecycle, CAS) |
+| `internal/host` | frozen stdlib-only contract: what a frontend needs from its host (auth, catalog, settings, history, memory, issues, plans, goals, agents, skills) |
+| `internal/host/local` | real `host.Services` impl, wraps auth/config/models/history/memory/issue/plan/goal |
 | `internal/tui` | Bubble Tea UI: app model, layout, cells, modals |
 | `internal/tui/theme` | design tokens: adaptive colors, `Icons`, precomputed `Styles` |
 | `internal/tui/ui` | reusable component library (Panel, Dialog, Badge, List, Bento, …) |

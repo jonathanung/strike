@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -291,6 +292,75 @@ func SetGlobalConfigDials(sandboxMode, notify, leanCode, deferTools, sessionWork
 		cfg.Session.Worktree = wt
 	}
 	return writeGlobal(cfg, unlock)
+}
+
+// SetGlobalAutoApproveDials persists permission auto-approve countdown/exclude
+// and maxChildDepth into ~/.strike/config. Empty scalar strings leave the
+// corresponding field unchanged. exclude nil leaves the list unchanged; a
+// non-nil pointer (including to an empty slice) replaces the stored list.
+//
+//	seconds        — "off"|"0" disables; "1"–"60" (clamped); aliases off/false/no/disabled
+//	maxChildDepth  — "0"|"default" → engine default; "1"–"8" (clamped to MaxChildDepthCeiling)
+func SetGlobalAutoApproveDials(seconds string, exclude *[]string, maxChildDepth string) error {
+	globalMu.Lock()
+	defer globalMu.Unlock()
+
+	cfg, unlock, err := readGlobalForWrite()
+	if err != nil {
+		return err
+	}
+	if seconds != "" {
+		n, ok := parseAutoApproveSeconds(seconds)
+		if !ok {
+			unlock()
+			return fmt.Errorf("unknown permissionAutoApproveSeconds %q (want off|0|1-60)", seconds)
+		}
+		cfg.PermissionAutoApproveSeconds = n
+	}
+	if exclude != nil {
+		cfg.PermissionAutoApproveExclude = normalizePermissionAutoApproveExclude(*exclude)
+	}
+	if maxChildDepth != "" {
+		n, ok := parseMaxChildDepth(maxChildDepth)
+		if !ok {
+			unlock()
+			return fmt.Errorf("unknown maxChildDepth %q (want default|0|1-%d)", maxChildDepth, MaxChildDepthCeiling)
+		}
+		cfg.MaxChildDepth = n
+	}
+	return writeGlobal(cfg, unlock)
+}
+
+func parseAutoApproveSeconds(s string) (int, bool) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	switch s {
+	case "off", "0", "false", "no", "disabled", "none":
+		return 0, true
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, false
+	}
+	if n < 0 {
+		return 0, false
+	}
+	return ClampPermissionAutoApproveSeconds(n), true
+}
+
+func parseMaxChildDepth(s string) (int, bool) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	switch s {
+	case "default", "0", "off", "unset":
+		return 0, true
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, false
+	}
+	if n < 0 {
+		return 0, false
+	}
+	return ClampMaxChildDepth(n), true
 }
 
 // parseSessionWorktree accepts only canonical off|auto|always (strict; no
