@@ -859,21 +859,28 @@ per file). A dead language server degrades to no injection.
 - `/lsp disable <name>` — stop a server for the session
 - `/diagnostics` — focus the right-pane diagnostics browser (findings from live servers; Enter opens the file)
 
-### Navigation tools (optional)
+### Navigation and diagnostics tools (optional)
 
-Three read-only tools call the language server for code navigation. They are
-**not** core tools: when `deferTools` is `on`, their schemas stay out of the
-hot provider Tools array until `toolsearch` discovers them (or the model calls
-them by name).
+Read-only tools call the language server for code navigation and diagnostics
+queries. They are **not** core tools: when `deferTools` is `on`, their schemas
+stay out of the hot provider Tools array until `toolsearch` discovers them (or
+the model calls them by name).
 
-| Tool | LSP method | Args |
+| Tool | LSP method / source | Args |
 |---|---|---|
 | `definition` | `textDocument/definition` | `filePath`, `line` (1-based), optional `character` (0-based) |
 | `references` | `textDocument/references` | same position args; includes declaration |
 | `symbols` | `textDocument/documentSymbol` or `workspace/symbol` | `filePath` and/or `query` |
+| `diagnostics` | cached `publishDiagnostics` from live servers | optional `path` (file or directory; omit = workspace), optional `severity` (`error` default, `warning`, `info`, `hint`), optional `maxResults` (default 100, max 500) |
 
-A missing or dead language server returns a soft message in the tool result
-(never takes down the session). Default permission is Allow (read-only).
+`diagnostics` returns a stable JSON payload: `file`, `range` (1-based
+line/character start+end), `severity`, `source`, `code`, `message`, plus
+server status, counts, and a `truncated` flag. Results are sorted
+deterministically. Paths stay workspace-scoped.
+
+A missing or dead language server returns structured status / a soft message in
+the tool result (never hangs or takes down the session). Default permission is
+Allow (read-only).
 
 ## MCP servers (stdio + HTTP)
 
