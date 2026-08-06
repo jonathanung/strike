@@ -5,7 +5,8 @@
 ```
 cmd/strike/            main.go: flags/usage/auth/exec/serve subcommands;
                        wire.go: composition root (engine + host + tui wiring)
-internal/protocol/     Op/Event types — the seam between engine and frontends
+pkg/protocol/          public Op/Event wire schema (semver Version)
+internal/protocol/     compatibility re-export of pkg/protocol
 internal/engine/       turn loop & tool dispatch
 internal/auth/         credential store + OAuth (PKCE, device) flows
 internal/provider/     provider interface; base/ (embeddable client: HTTP,
@@ -40,22 +41,23 @@ edit them.
 ## Architecture in one paragraph
 
 The TUI and the agent engine are separate halves connected only by
-`internal/protocol` — frontends submit **Ops** (`UserInput`,
-`PermissionReply`, `Interrupt`), the engine emits **Events** (`TextDelta`,
-`ToolCallBegin/End`, `PermissionAsked`, `TurnCompleted`, …) — codex's SQ/EQ
-pattern, in-process over Go channels for now. The event stream *is* the
-transcript: every session is persisted as a JSONL event log
-(`~/.strike/sessions/`). Everything else the TUI needs from its host
-process — credentials, the model catalog, saved defaults, prompt history,
-agent/skill listings — arrives through a second, narrower seam,
-`internal/host` (implemented by `internal/host/local`); the TUI never
-imports `internal/auth`, `config`, `models`, or `history` directly, and a
-boundary test enforces it, so the backend can add a host service without
-touching the UI and the UI can be developed against fakes. Tools return
-`{Title, Output, Metadata}` separating model-facing text from UI rendering
-data (opencode's contract). Permissions are ordered allow/ask/deny rulesets
-with last-match-wins evaluation; an "ask" suspends the tool goroutine until
-the user answers, and rejections carry feedback back to the model.
+`pkg/protocol` (in-tree call sites may still import the `internal/protocol`
+re-export) — frontends submit **Ops** (`UserInput`, `PermissionReply`,
+`Interrupt`), the engine emits **Events** (`TextDelta`, `ToolCallBegin/End`,
+`PermissionAsked`, `TurnCompleted`, …) — codex's SQ/EQ pattern, in-process
+over Go channels for now. The event stream *is* the transcript: every
+session is persisted as a JSONL event log (`~/.strike/sessions/`). Everything
+else the TUI needs from its host process — credentials, the model catalog,
+saved defaults, prompt history, agent/skill listings — arrives through a
+second, narrower seam, `internal/host` (implemented by `internal/host/local`);
+the TUI never imports `internal/auth`, `config`, `models`, or `history`
+directly, and a boundary test enforces it, so the backend can add a host
+service without touching the UI and the UI can be developed against fakes.
+Tools return `{Title, Output, Metadata}` separating model-facing text from UI
+rendering data (opencode's contract). Permissions are ordered allow/ask/deny
+rulesets with last-match-wins evaluation; an "ask" suspends the tool
+goroutine until the user answers, and rejections carry feedback back to the
+model.
 
 ## Verification
 
