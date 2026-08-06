@@ -350,10 +350,6 @@ func progressiveLifecycle(ctx context.Context, source, permission, action string
 		if action == ProgressiveTransition && req.State == "" {
 			return Result{}, fmt.Errorf("state is required for transition")
 		}
-	case ProgressiveCreate:
-		if strings.TrimSpace(req.Prompt) == "" {
-			return Result{}, fmt.Errorf("prompt is required for create")
-		}
 	}
 
 	perm := permission
@@ -370,7 +366,7 @@ func progressiveLifecycle(ctx context.Context, source, permission, action string
 		return Result{}, err
 	}
 	if tc.Delegate == nil {
-		return Result{}, fmt.Errorf("delegate is not available")
+		return Result{}, fmt.Errorf("lifecycle ops are not available")
 	}
 	res, err := tc.Delegate(ctx, req)
 	if err != nil {
@@ -380,10 +376,11 @@ func progressiveLifecycle(ctx context.Context, source, permission, action string
 	if err != nil {
 		return Result{}, err
 	}
-	title := "task " + action
+	prefix := "task"
 	if source != "" && source != "task" {
-		title = source + " " + action
+		prefix = source
 	}
+	title := prefix + " " + action
 	if res.Conflict {
 		title += " conflict"
 	} else if res.Item != nil && res.Item.ID != "" {
@@ -392,12 +389,7 @@ func progressiveLifecycle(ctx context.Context, source, permission, action string
 			title += " " + res.Item.State
 		}
 	} else if action == ProgressiveList {
-		title = fmt.Sprintf("%s list %d", strings.TrimPrefix(title, "task "), len(res.Items))
-		if source == "task" || source == "" {
-			title = fmt.Sprintf("task list %d", len(res.Items))
-		} else {
-			title = fmt.Sprintf("%s list %d", source, len(res.Items))
-		}
+		title = fmt.Sprintf("%s list %d", prefix, len(res.Items))
 	}
 	return attachCompatMeta(Result{Title: title, Output: string(out)}, source), nil
 }
@@ -415,7 +407,7 @@ func progressiveStatus(ctx context.Context, source, permission string, a progres
 		return Result{}, err
 	}
 	if tc.TaskStatus == nil {
-		return Result{}, fmt.Errorf("task_status is not available")
+		return Result{}, fmt.Errorf("task status is not available")
 	}
 	res, err := tc.TaskStatus(ctx, TaskStatusRequest{SessionID: id, IncludeRecent: a.IncludeRecent})
 	if err != nil {
@@ -495,7 +487,7 @@ func progressiveRead(ctx context.Context, source, permission string, a progressi
 		return Result{}, err
 	}
 	if tc.TaskRead == nil {
-		return Result{}, fmt.Errorf("task_read is not available")
+		return Result{}, fmt.Errorf("task read is not available")
 	}
 	includeTools := true
 	if a.IncludeTools != nil {
@@ -537,7 +529,7 @@ func progressiveMessage(ctx context.Context, source, permission string, a progre
 		return Result{}, err
 	}
 	if tc.TaskMessage == nil {
-		return Result{}, fmt.Errorf("task_message is not available")
+		return Result{}, fmt.Errorf("task message is not available")
 	}
 	res, err := tc.TaskMessage(ctx, TaskMessageRequest{SessionID: id, Text: text})
 	if err != nil {
@@ -573,7 +565,7 @@ func progressiveCancel(ctx context.Context, source, permission string, a progres
 		return Result{}, err
 	}
 	if tc.TaskInterrupt == nil {
-		return Result{}, fmt.Errorf("task_interrupt is not available")
+		return Result{}, fmt.Errorf("task cancel is not available")
 	}
 	res, err := tc.TaskInterrupt(ctx, TaskInterruptRequest{SessionID: id})
 	if err != nil {
