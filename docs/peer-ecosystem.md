@@ -155,7 +155,7 @@ does not skip asks. `yolo` + `sandbox: off` requires `--i-know`.
 | LSP servers | OC `lsp` | shipped (`internal/lsp`, `/lsp`, diagnostics pane) | gap / out of this epic |
 | Network allowlist | OC network / CC | gap — tracked #527 | gap / coordinate |
 | Managed / MDM settings | CC/OC enterprise | shipped (`managed-config` + deny ceiling; #764) | shipped |
-| JSON schema `$schema` | both | gap | gap (nice DX) |
+| JSON schema `$schema` | both | shipped (main config; `schemas/strike-config.schema.json`, runtime ignores/`no fetch`) | shipped (main); sidecars later |
 | Main config JSONC | OC | partial (`mcp`/`providers`/`keybinds` JSONC; main `config` is JSON) | gap |
 | Plugins / Node hosts | OC plugins | **out of scope** | wont |
 

@@ -5,7 +5,24 @@ optional **managed/MDM** system config (highest). User and project files
 accept **JSON or JSONC** (`//` line comments and `/* block comments */`, same
 stripper as `mcp.jsonc` / `providers.jsonc` / `keybinds.jsonc`). An optional
 top-level `"$schema"` key is **ignored** at load (editor autocomplete only;
-Strike does not ship or fetch a schema URL).
+Strike never fetches a schema URL at runtime).
+
+**Published JSON Schema (editor DX):** point `$schema` at the versioned file in
+this repo (stable `main` raw URL):
+
+```text
+https://raw.githubusercontent.com/jonathanung/strike/main/schemas/strike-config.schema.json
+```
+
+Local path (clone/checkout): `schemas/strike-config.schema.json`. The schema
+documents high-traffic main-config keys (dials, permissions, hooks, sandbox,
+compaction/prune, session, scheduler, MCP/LSP shapes, …). Root and nested
+objects use **`additionalProperties: true`** so unknown/future keys and
+editor-only fields stay valid — matching runtime `encoding/json` (unknown keys
+ignored). Alignment with Go structs is best-effort via
+`TestStrikeConfigSchemaAlign` (not full codegen). Sidecar files
+(`mcp.jsonc` / `providers.jsonc` / `keybinds.jsonc`) are **not** fully schema'd
+here yet.
 
 **Load order (later wins for scalars; permission rules concatenate):**
 
@@ -117,8 +134,8 @@ write this file. Manual `/ftue` remains available after acknowledgement.
 ```jsonc
 // ~/.strike/config or ./.strike/config — JSONC comments allowed
 {
-  // Optional editor hint; ignored by Strike at load
-  "$schema": "https://example.invalid/strike-config.schema.json",
+  // Optional editor hint; ignored by Strike at load (no network fetch)
+  "$schema": "https://raw.githubusercontent.com/jonathanung/strike/main/schemas/strike-config.schema.json",
   "provider": "anthropic",
   "model": "claude-sonnet-5",
   "effort": "high",
