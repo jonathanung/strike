@@ -131,13 +131,11 @@ func TestDenyRuleAgentMessageBlocks(t *testing.T) {
 	if !errors.As(err, &denied) {
 		t.Fatalf("Ask agent_message = %v, want DeniedError", err)
 	}
-	if len(events) != 0 {
-		t.Errorf("deny must not emit permission events, got %#v", events)
-	}
+	assertNoPermissionAsked(t, events)
 }
 
 func TestDefaultsTeamMessagingNoPrompt(t *testing.T) {
-	// Default allow: Ask succeeds with zero PermissionAsked events.
+	// Default allow: Ask succeeds with zero PermissionAsked events (audit OK).
 	var events []protocol.Event
 	svc := New(func(ev protocol.Event) { events = append(events, ev) }, Defaults())
 	for _, perm := range []string{"agent_message", "agent_broadcast", "agent_thread", "agent_roster", "agent_ownership"} {
@@ -148,9 +146,7 @@ func TestDefaultsTeamMessagingNoPrompt(t *testing.T) {
 			t.Fatalf("Ask %s: %v", perm, err)
 		}
 	}
-	if len(events) != 0 {
-		t.Errorf("default team messaging must not prompt, got %#v", events)
-	}
+	assertNoPermissionAsked(t, events)
 }
 
 func TestValidateRulesetAcceptsTeamMessaging(t *testing.T) {
@@ -397,8 +393,20 @@ func TestAskAllowAndDeny(t *testing.T) {
 	if !strings.Contains(err.Error(), "Permission denied") {
 		t.Errorf("deny err text = %q, want Permission denied", err)
 	}
-	if len(events) != 0 {
-		t.Errorf("expected no ask events for allow/deny, got %#v", events)
+	assertNoPermissionAsked(t, events)
+}
+
+func assertNoPermissionAsked(t *testing.T, events []protocol.Event) {
+	t.Helper()
+	for _, ev := range events {
+		switch ev.(type) {
+		case protocol.PermissionAsked, protocol.PermissionResolved:
+			t.Errorf("unexpected prompt event %T: %#v", ev, ev)
+		case protocol.PermissionDecided:
+			// audit trail is expected for allow/deny
+		default:
+			t.Errorf("unexpected event %T: %#v", ev, ev)
+		}
 	}
 }
 
@@ -451,7 +459,7 @@ func TestAskOnceReply(t *testing.T) {
 }
 
 func TestAskWithCorrelationRetainsPendingCorrelationAndRoutesByPermissionRequestID(t *testing.T) {
-	events := make(chan protocol.Event, 2)
+	events := make(chan protocol.Event, 16)
 	svc := New(func(ev protocol.Event) { events <- ev }, Ruleset{{Permission: "bash", Pattern: "*", Action: Ask}})
 	wantCorr := protocol.Correlation{
 		SessionID:         "session-1",
@@ -466,17 +474,7 @@ func TestAskWithCorrelationRetainsPendingCorrelationAndRoutesByPermissionRequest
 		}, wantCorr)
 	}()
 
-	var asked protocol.PermissionAsked
-	select {
-	case ev := <-events:
-		var ok bool
-		asked, ok = ev.(protocol.PermissionAsked)
-		if !ok {
-			t.Fatalf("first event = %T, want PermissionAsked", ev)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for PermissionAsked")
-	}
+	asked := receivePermissionAskedEvent(t, events)
 	if asked.Correlation != wantCorr {
 		t.Errorf("asked correlation = %#v, want %#v", asked.Correlation, wantCorr)
 	}
@@ -490,7 +488,11 @@ func TestAskWithCorrelationRetainsPendingCorrelationAndRoutesByPermissionRequest
 	case err := <-errCh:
 		t.Fatalf("AskWithCorrelation returned after reply using provider request ID: %v", err)
 	case ev := <-events:
-		t.Fatalf("event emitted after reply using provider request ID: %#v", ev)
+		if _, ok := ev.(protocol.PermissionDecided); ok {
+			// audit for ask suspend may still be draining; ignore
+		} else {
+			t.Fatalf("event emitted after reply using provider request ID: %#v", ev)
+		}
 	case <-time.After(25 * time.Millisecond):
 	}
 
@@ -791,6 +793,24 @@ func receivePermissionAsked(t *testing.T, events <-chan protocol.PermissionAsked
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for PermissionAsked")
 		return protocol.PermissionAsked{}
+	}
+}
+
+// receivePermissionAskedEvent skips audit PermissionDecided events.
+func receivePermissionAskedEvent(t *testing.T, events <-chan protocol.Event) protocol.PermissionAsked {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case ev := <-events:
+			if a, ok := ev.(protocol.PermissionAsked); ok {
+				return a
+			}
+			// skip PermissionDecided and other audit noise
+		case <-deadline:
+			t.Fatal("timed out waiting for PermissionAsked")
+			return protocol.PermissionAsked{}
+		}
 	}
 }
 
@@ -1284,9 +1304,7 @@ func TestSetAgentRulesDenyBeatsBaseAllow(t *testing.T) {
 	if !errors.As(err, &denied) {
 		t.Fatalf("Ask = %v, want DeniedError", err)
 	}
-	if len(events) != 0 {
-		t.Errorf("expected no permission events on hard deny, got %#v", events)
-	}
+	assertNoPermissionAsked(t, events)
 }
 
 func TestSetAgentRulesClearsAlwaysGrants(t *testing.T) {
@@ -1378,9 +1396,7 @@ func TestSetAgentRulesEmptyClearsAgentLayer(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Ask after clearing agent layer: %v", err)
 	}
-	if len(events) != 0 {
-		t.Errorf("expected no ask events for allow/deny paths, got %#v", events)
-	}
+	assertNoPermissionAsked(t, events)
 }
 
 func TestSetAgentRulesRejectsPending(t *testing.T) {

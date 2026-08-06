@@ -686,7 +686,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			QuietStartup:               quietStartup,
 			DangerouslySkipPermissions: opts.dangerouslySkipPermissions,
 			Workflows:                  workflows,
-			Rules:                      permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),
+			Rules:                      permissionLayersWithPreset(cfg.Permissions, cfg.PermissionPreset, opts.dangerouslySkipPermissions),
+			RuleLayerNames:             permissionLayerNames(cfg.PermissionPreset, opts.dangerouslySkipPermissions),
 			Hooks:                      hookDefs,
 			HookRules:                  cfg.HookRules(),
 			CompactionStrategy:         cfg.CompactionStrategy,
@@ -829,14 +830,28 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	services.Files = local.NewFiles(workDir)
 	// Compile base sandbox profile from defaults + config (+ optional dangerous
 	// allow-all). Engine recompiles per bash call with live agent/phase layers.
+	basePermLayers := permissionLayersWithPreset(cfg.Permissions, cfg.PermissionPreset, opts.dangerouslySkipPermissions)
 	sandboxPolicy := permission.CompileSandbox(
 		sandbox.ResolveMode(sandboxMode),
 		workDir,
-		permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions)...,
+		basePermLayers...,
 	)
 	sandboxPolicy.NetworkAllow = sandbox.CloneNetworkAllow(cfg.Network.Allow)
 	sandboxExplain := sandbox.Explain(sandboxPolicy)
 	services.Shell = local.NewShell(workDir, sandboxPolicy)
+	// Permission explain/presets for /permission. Live explain binds to the
+	// first root engine; base layers cover startup before Run.
+	permHost := local.NewPermissions(
+		basePermLayers,
+		permissionLayerNames(cfg.PermissionPreset, opts.dangerouslySkipPermissions),
+	)
+	if first != nil && first.eng != nil {
+		eng := first.eng
+		permHost.SetLive(func(perm, pat string) permission.Explanation {
+			return eng.ExplainPermission(perm, pat)
+		})
+	}
+	services.Permissions = permHost
 	services.Goals = local.NewGoals(goalStore, workDir)
 	services.Plans = local.NewPlans(planStore)
 	services.Sessions = local.NewSessions(sessions, projectIdentity.Key)

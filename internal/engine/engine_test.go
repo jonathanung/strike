@@ -578,6 +578,9 @@ complete:
 				t.Errorf("PermissionResolved requestId = %q, want %q", ev.RequestID, permissionID)
 			}
 			assertCorrelationFields(t, ev, corr, true, true)
+		case protocol.PermissionDecided:
+			counts["decided"]++
+			assertCorrelationFields(t, ev, corr, true, true)
 		case protocol.ToolCallEnd:
 			counts["end"]++
 			assertCorrelationFields(t, ev, corr, true, true)
@@ -1402,6 +1405,12 @@ func eventCorrelation(t *testing.T, ev protocol.Event) protocol.Correlation {
 	case protocol.PermissionAsked:
 		return ev.Correlation
 	case protocol.PermissionResolved:
+		return ev.Correlation
+	case protocol.PermissionDecided:
+		return ev.Correlation
+	case protocol.VerificationStarted:
+		return ev.Correlation
+	case protocol.VerificationCompleted:
 		return ev.Correlation
 	case protocol.TurnCompleted:
 		return ev.Correlation

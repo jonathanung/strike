@@ -1007,6 +1007,28 @@ type PermissionResolved struct {
 	Decision  Decision `json:"decision"`
 }
 
+// PermissionDecided is a non-blocking audit event for every permission
+// evaluation outcome (auto-allow, auto-deny, ask suspended, or user reply).
+// Patterns and rule fields are redacted by timeline export; session JSONL
+// consumers should treat them as potentially sensitive paths/commands.
+type PermissionDecided struct {
+	Correlation
+	// RequestID is set when this decision is tied to a PermissionAsked
+	// (ask suspend or user reply). Empty for synchronous allow/deny.
+	RequestID  string   `json:"requestId,omitempty"`
+	Permission string   `json:"permission"`
+	Patterns   []string `json:"patterns,omitempty"`
+	// Action is allow|deny|ask (effective outcome).
+	Action string `json:"action"`
+	// Decision is the user reply when resolving an ask (once|always|project|reject).
+	Decision Decision `json:"decision,omitempty"`
+	// Matched rule summary for explain/audit (layer + rule identity).
+	Layer          string `json:"layer,omitempty"`
+	RulePermission string `json:"rulePermission,omitempty"`
+	RulePattern    string `json:"rulePattern,omitempty"`
+	RuleAction     string `json:"ruleAction,omitempty"`
+}
+
 // QuestionOption is one selectable choice on a QuestionPrompt.
 type QuestionOption struct {
 	Label       string `json:"label"`
@@ -1594,6 +1616,7 @@ func (ProcessOutput) isEvent()          {}
 func (ProcessExited) isEvent()          {}
 func (PermissionAsked) isEvent()        {}
 func (PermissionResolved) isEvent()     {}
+func (PermissionDecided) isEvent()      {}
 func (QuestionAsked) isEvent()          {}
 func (QuestionResolved) isEvent()       {}
 func (TurnCompleted) isEvent()          {}
