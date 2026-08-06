@@ -1,0 +1,2 @@
+{"instance_id":"fixture-task","instruction":"Create /app/hello.txt with hello terminal-bench","docker_image":"fixture/tbench-task:test","category":"file-operations","difficulty":"easy","agent_timeout_sec":120,"verifier_timeout_sec":60}
+{"instance_id":"fixture-other","instruction":"No-op second fixture row","docker_image":"fixture/other:test","category":"debugging","difficulty":"medium"}
