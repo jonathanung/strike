@@ -146,8 +146,22 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 
 	// Capability-aware routing (#778): pins win; route=auto picks specialty + load fallback.
 	// Decision is recorded on ChildStarted / TaskResult / delegation for debug.
+	// Deferred spawns (existingDelegationID) already chose agent/model at create —
+	// do not re-route (would rewrite reason as a pin).
 	var routeDec RouteDecision
-	req, routeDec = e.routeTaskRequest(req)
+	if existingDelegationID == "" {
+		req, routeDec = e.routeTaskRequest(req)
+	} else if e.team != nil {
+		if d, ok := e.team.GetDelegation(existingDelegationID); ok {
+			routeDec = RouteDecision{
+				Agent:  d.Agent,
+				Model:  d.Model,
+				Effort: d.Effort,
+				Reason: d.RouteReason,
+				Mode:   "deferred",
+			}
+		}
+	}
 
 	agentName := strings.TrimSpace(req.Agent)
 	if agentName == "" {
