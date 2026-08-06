@@ -14,9 +14,15 @@ import (
 
 const maxLineBytes = 1 << 20
 
-// Run serves one harness invocation over stdin and stdout.
+// Run serves one harness invocation over stdin and stdout (oneshot).
 func Run(fn Func) error {
 	return serve(os.Stdin, os.Stdout, fn)
+}
+
+// RunWorker serves multiple harness.start messages until EOF or harness.shutdown.
+// Use this when Strike config sets mode: "persistent" for the harness command.
+func RunWorker(fn Func) error {
+	return serveWorker(os.Stdin, os.Stdout, fn)
 }
 
 type envelope struct {
@@ -46,6 +52,7 @@ type toolCallResult struct {
 
 type processRuntime struct {
 	ctx          context.Context
+	cancel       context.CancelCauseFunc
 	invocationID string
 	write        func(any) error
 	sequence     atomic.Uint64
@@ -168,6 +175,38 @@ func (p *processRuntime) removeTool(callID string) {
 	p.waitMu.Unlock()
 }
 
+func (p *processRuntime) rejectAll(err error) {
+	p.waitMu.Lock()
+	providers := p.providerWait
+	tools := p.toolWait
+	p.providerWait = make(map[string]chan callResult)
+	p.toolWait = make(map[string]chan toolCallResult)
+	p.waitMu.Unlock()
+	for _, w := range providers {
+		w <- callResult{err: err}
+	}
+	for _, w := range tools {
+		w <- toolCallResult{err: err}
+	}
+}
+
+func newWriteFunc(stdout io.Writer) func(any) error {
+	var writeMu sync.Mutex
+	return func(value any) error {
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		line, err := json.Marshal(value)
+		if err != nil {
+			return err
+		}
+		if len(line) > maxLineBytes {
+			return errors.New("strike harness: outbound line exceeds limit")
+		}
+		_, err = stdout.Write(append(line, '\n'))
+		return err
+	}
+}
+
 func serve(stdin io.Reader, stdout io.Writer, fn Func) error {
 	if fn == nil {
 		return errors.New("strike harness: function is required")
@@ -188,25 +227,12 @@ func serve(stdin io.Reader, stdout io.Writer, fn Func) error {
 		return errors.New("strike harness: invalid harness.start")
 	}
 
-	var writeMu sync.Mutex
-	write := func(value any) error {
-		writeMu.Lock()
-		defer writeMu.Unlock()
-		line, err := json.Marshal(value)
-		if err != nil {
-			return err
-		}
-		if len(line) > maxLineBytes {
-			return errors.New("strike harness: outbound line exceeds limit")
-		}
-		_, err = stdout.Write(append(line, '\n'))
-		return err
-	}
-
+	write := newWriteFunc(stdout)
 	ctx, cancel := context.WithCancelCause(context.Background())
 	defer cancel(context.Canceled)
 	runtime := &processRuntime{
 		ctx:          ctx,
+		cancel:       cancel,
 		invocationID: start.InvocationID,
 		write:        write,
 		providerWait: make(map[string]chan callResult),
@@ -244,6 +270,10 @@ func serve(stdin io.Reader, stdout io.Writer, fn Func) error {
 		}
 	}()
 
+	return runOne(fn, runtime, start, write)
+}
+
+func runOne(fn Func, runtime *processRuntime, start envelope, write func(any) error) error {
 	emit := func(payload any) error {
 		return write(struct {
 			Version      int    `json:"version"`
@@ -252,7 +282,7 @@ func serve(stdin io.Reader, stdout io.Writer, fn Func) error {
 			Payload      any    `json:"payload"`
 		}{1, "progress.emit", start.InvocationID, payload})
 	}
-	result, err := fn(Input{Context: ctx, Request: *start.Request, Tools: runtime}, runtime, emit)
+	result, err := fn(Input{Context: runtime.ctx, Request: *start.Request, Tools: runtime}, runtime, emit)
 	if err != nil {
 		if writeErr := write(struct {
 			Version      int    `json:"version"`
@@ -270,4 +300,133 @@ func serve(stdin io.Reader, stdout io.Writer, fn Func) error {
 		InvocationID string `json:"invocationId"`
 		Result
 	}{1, "harness.complete", start.InvocationID, result})
+}
+
+// serveWorker multiplexes harness.start / cancel / results until shutdown or EOF.
+func serveWorker(stdin io.Reader, stdout io.Writer, fn Func) error {
+	if fn == nil {
+		return errors.New("strike harness: function is required")
+	}
+	write := newWriteFunc(stdout)
+	// Optional readiness signal for hosts that wait on it.
+	_ = write(struct {
+		Version int    `json:"version"`
+		Type    string `json:"type"`
+	}{1, "harness.ready"})
+
+	var (
+		mu       sync.Mutex
+		runtimes = map[string]*processRuntime{}
+		wg       sync.WaitGroup
+		seq      atomic.Uint64 // shared call-id space across invocations
+	)
+
+	lookup := func(id string) *processRuntime {
+		mu.Lock()
+		defer mu.Unlock()
+		return runtimes[id]
+	}
+	register := func(id string, rt *processRuntime) {
+		mu.Lock()
+		runtimes[id] = rt
+		mu.Unlock()
+	}
+	unregister := func(id string) {
+		mu.Lock()
+		delete(runtimes, id)
+		mu.Unlock()
+	}
+	cancelAll := func(err error) {
+		mu.Lock()
+		snapshot := make([]*processRuntime, 0, len(runtimes))
+		for _, rt := range runtimes {
+			snapshot = append(snapshot, rt)
+		}
+		mu.Unlock()
+		for _, rt := range snapshot {
+			rt.cancel(err)
+			rt.rejectAll(err)
+		}
+	}
+
+	scanner := bufio.NewScanner(stdin)
+	scanner.Buffer(make([]byte, 64*1024), maxLineBytes)
+	for scanner.Scan() {
+		var message envelope
+		if err := json.Unmarshal(scanner.Bytes(), &message); err != nil {
+			cancelAll(fmt.Errorf("strike harness: decode message: %w", err))
+			wg.Wait()
+			return fmt.Errorf("strike harness: decode message: %w", err)
+		}
+		if message.Version != 1 {
+			cancelAll(errors.New("strike harness: invalid version"))
+			wg.Wait()
+			return errors.New("strike harness: invalid version")
+		}
+		switch message.Type {
+		case "harness.shutdown":
+			cancelAll(errors.New("harness shutdown"))
+			wg.Wait()
+			return nil
+		case "harness.start":
+			if message.InvocationID == "" || message.Request == nil {
+				cancelAll(errors.New("strike harness: invalid harness.start"))
+				wg.Wait()
+				return errors.New("strike harness: invalid harness.start")
+			}
+			if lookup(message.InvocationID) != nil {
+				cancelAll(fmt.Errorf("strike harness: duplicate invocationId %q", message.InvocationID))
+				wg.Wait()
+				return fmt.Errorf("strike harness: duplicate invocationId %q", message.InvocationID)
+			}
+			ctx, cancel := context.WithCancelCause(context.Background())
+			rt := &processRuntime{
+				ctx:          ctx,
+				cancel:       cancel,
+				invocationID: message.InvocationID,
+				write:        write,
+				providerWait: make(map[string]chan callResult),
+				toolWait:     make(map[string]chan toolCallResult),
+			}
+			// Offset sequence so concurrent invocations never collide on callId.
+			rt.sequence.Store(seq.Add(1_000_000))
+			register(message.InvocationID, rt)
+			start := message
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer unregister(start.InvocationID)
+				defer cancel(context.Canceled)
+				_ = runOne(fn, rt, start, write)
+			}()
+		case "provider.result":
+			if rt := lookup(message.InvocationID); rt != nil {
+				rt.resolveProvider(message)
+			}
+		case "tool.result":
+			if rt := lookup(message.InvocationID); rt != nil {
+				rt.resolveTool(message)
+			}
+		case "harness.cancel":
+			if rt := lookup(message.InvocationID); rt != nil {
+				reason := message.Reason
+				if reason == "" {
+					reason = "harness canceled"
+				}
+				err := errors.New(reason)
+				rt.cancel(err)
+				rt.rejectAll(err)
+			}
+		default:
+			// Ignore unknown host→worker messages for forward compatibility.
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		cancelAll(err)
+		wg.Wait()
+		return err
+	}
+	cancelAll(io.EOF)
+	wg.Wait()
+	return nil
 }

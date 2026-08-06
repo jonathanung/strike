@@ -106,6 +106,11 @@ func runACP(opts cliOptions, stdin io.Reader, stdout, stderr io.Writer) (runErr 
 				runErr = fmt.Errorf("closing mcp servers: %w", err)
 			}
 		}
+		if a.harnessClose != nil {
+			if err := a.harnessClose(); err != nil && runErr == nil {
+				runErr = fmt.Errorf("closing harness workers: %w", err)
+			}
+		}
 		if a.schedulerClose != nil {
 			a.schedulerClose()
 		}

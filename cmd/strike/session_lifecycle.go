@@ -261,6 +261,11 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 					runErr = fmt.Errorf("closing language servers: %w", err)
 				}
 			}
+			if a.harnessClose != nil {
+				if err := a.harnessClose(); err != nil && runErr == nil {
+					runErr = fmt.Errorf("closing harness workers: %w", err)
+				}
+			}
 			if a.schedulerClose != nil {
 				a.schedulerClose()
 			}
@@ -410,6 +415,11 @@ func runExecContext(ctx context.Context, opts cliOptions, prompt string, format 
 		if a.lspClose != nil {
 			if err := a.lspClose(); err != nil && runErr == nil {
 				runErr = fmt.Errorf("closing language servers: %w", err)
+			}
+		}
+		if a.harnessClose != nil {
+			if err := a.harnessClose(); err != nil && runErr == nil {
+				runErr = fmt.Errorf("closing harness workers: %w", err)
 			}
 		}
 		if a.schedulerClose != nil {

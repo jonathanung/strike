@@ -1836,3 +1836,58 @@ func TestDefaultLSPServers(t *testing.T) {
 		t.Fatalf("empty servers should clear defaults: %#v", loaded.LSP.Servers)
 	}
 }
+
+func TestHarnessPersistentModeConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{
+  "harnesses": {
+    "heavy": {
+      "command": "./bin/worker",
+      "mode": "persistent",
+      "maxConcurrent": 2,
+      "idleTimeoutMs": 120000,
+      "maxRestarts": 5
+    },
+    "light": {
+      "command": "./bin/once"
+    }
+  }
+}`
+	if err := os.WriteFile(global, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := cfg.Harnesses["heavy"]
+	if !IsPersistentHarness(h) {
+		t.Fatalf("heavy mode = %q, want persistent", h.Mode)
+	}
+	if h.MaxConcurrent != 2 || h.IdleTimeoutMs != 120000 || h.MaxRestarts != 5 {
+		t.Fatalf("heavy = %#v", h)
+	}
+	if IsPersistentHarness(cfg.Harnesses["light"]) {
+		t.Fatalf("light should be oneshot: %#v", cfg.Harnesses["light"])
+	}
+}
+
+func TestHarnessInvalidModeRejected(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(global, []byte(`{"harnesses":{"x":{"command":"c","mode":"nope"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(t.TempDir()); err == nil || !strings.Contains(err.Error(), "mode") {
+		t.Fatalf("err = %v, want mode error", err)
+	}
+}
