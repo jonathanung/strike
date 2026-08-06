@@ -315,26 +315,28 @@ func TestForegroundTaskIndependentHistory(t *testing.T) {
 	var childReq, parentFinal *provider.Request
 	for i := range reqs {
 		r := &reqs[i]
-		// Skip auto-nudge streams (they also contain prior tool results).
-		isNudge := false
-		for _, msg := range r.Messages {
-			if msg.Role == provider.RoleUser && strings.Contains(msg.Text, "[child.completed") {
-				isNudge = true
-				break
-			}
-		}
-		if isNudge {
-			continue
-		}
 		if len(r.Messages) > 0 && r.Messages[0].Role == provider.RoleUser && r.Messages[0].Text == taskPrompt {
 			childReq = r
 			continue
 		}
-		// Parent final includes the original user turn plus a tool result.
+		hasTaskResult := false
+		hasChildNotice := false
 		for _, msg := range r.Messages {
 			if msg.Role == provider.RoleTool && msg.ToolResult != nil && msg.ToolResult.CallID == "task-1" {
-				parentFinal = r
+				hasTaskResult = true
 			}
+			if msg.Role == provider.RoleUser && strings.Contains(msg.Text, "[child.completed") {
+				hasChildNotice = true
+			}
+		}
+		if !hasTaskResult {
+			continue
+		}
+		// Prefer the tool-loop stream (task result, no idle nudge). Fall back to
+		// a stream that also carries [child.completed] when that is the only
+		// observation (mid-turn inject raced ahead of the next parent Stream).
+		if parentFinal == nil || !hasChildNotice {
+			parentFinal = r
 		}
 	}
 	if childReq == nil {
@@ -354,11 +356,16 @@ func TestForegroundTaskIndependentHistory(t *testing.T) {
 	}
 	userTurns := 0
 	for _, msg := range parentFinal.Messages {
-		if msg.Role == provider.RoleUser {
-			userTurns++
-			if msg.Text == taskPrompt {
-				t.Errorf("parent history has child prompt as user turn: %#v", parentFinal.Messages)
-			}
+		if msg.Role != provider.RoleUser {
+			continue
+		}
+		// Engine-injected child notices are not original user turns.
+		if strings.Contains(msg.Text, "[child.completed") {
+			continue
+		}
+		userTurns++
+		if msg.Text == taskPrompt {
+			t.Errorf("parent history has child prompt as user turn: %#v", parentFinal.Messages)
 		}
 	}
 	if userTurns != 1 {
