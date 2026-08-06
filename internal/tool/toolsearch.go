@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -50,37 +51,47 @@ type toolSearchArgs struct {
 
 // splitQuery splits a tool search query into tokens. Quoted segments ("...")
 // are treated as single literal tokens with spaces preserved. Unquoted segments
-// are split on whitespace. An unmatched opening quote treats the rest of the
-// string as one token.
+// are split on all Unicode whitespace (same set as strings.Fields). An unmatched
+// opening quote treats the rest of the string as one token.
 func splitQuery(query string) []string {
 	var tokens []string
 	i := 0
 	n := len(query)
 	for i < n {
-		// Skip whitespace.
-		if query[i] == ' ' || query[i] == '\t' {
-			i++
+		r, size := utf8.DecodeRuneInString(query[i:])
+		// Skip whitespace (space, tab, newline, CR, and other unicode.IsSpace).
+		if unicode.IsSpace(r) {
+			i += size
 			continue
 		}
-		if query[i] == '"' {
+		if r == '"' {
 			// Quoted phrase — find closing quote.
-			i++ // skip opening quote
+			i += size // skip opening quote
 			start := i
-			for i < n && query[i] != '"' {
-				i++
+			for i < n {
+				qr, qsize := utf8.DecodeRuneInString(query[i:])
+				if qr == '"' {
+					break
+				}
+				i += qsize
 			}
 			tok := strings.TrimSpace(query[start:i])
 			if tok != "" {
 				tokens = append(tokens, strings.ToLower(tok))
 			}
 			if i < n {
-				i++ // skip closing quote
+				_, qsize := utf8.DecodeRuneInString(query[i:])
+				i += qsize // skip closing quote
 			}
 		} else {
 			// Unquoted word — scan until whitespace or quote.
 			start := i
-			for i < n && query[i] != ' ' && query[i] != '\t' && query[i] != '"' {
-				i++
+			for i < n {
+				wr, wsize := utf8.DecodeRuneInString(query[i:])
+				if unicode.IsSpace(wr) || wr == '"' {
+					break
+				}
+				i += wsize
 			}
 			tokens = append(tokens, strings.ToLower(query[start:i]))
 		}

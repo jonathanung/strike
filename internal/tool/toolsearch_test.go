@@ -27,6 +27,11 @@ func TestSplitQuery(t *testing.T) {
 		{name: "unmatched quote", query: `"read file`, expect: []string{"read file"}},
 		{name: "empty string", query: "", expect: nil},
 		{name: "tab separator", query: "read\tfile", expect: []string{"read", "file"}},
+		{name: "newline separator", query: "read\nfile", expect: []string{"read", "file"}},
+		{name: "cr separator", query: "read\rfile", expect: []string{"read", "file"}},
+		{name: "crlf separator", query: "read\r\nfile", expect: []string{"read", "file"}},
+		{name: "mixed whitespace", query: "read \t\n\r file", expect: []string{"read", "file"}},
+		{name: "quoted with surrounding newlines", query: "\n\"read file\"\nwrite\n", expect: []string{"read file", "write"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
