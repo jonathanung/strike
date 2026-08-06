@@ -153,6 +153,8 @@ type (
 	EngineError            = pub.EngineError
 	ChildStarted           = pub.ChildStarted
 	ChildCompleted         = pub.ChildCompleted
+	ChildEscalated         = pub.ChildEscalated
+	AgentBudgetView        = pub.AgentBudgetView
 	DelegationChanged      = pub.DelegationChanged
 	WaitStarted            = pub.WaitStarted
 	WaitResolved           = pub.WaitResolved

@@ -49,6 +49,10 @@ type childHandle struct {
 	name      string // optional stable teammate alias
 	// gates are independent completion conditions declared at spawn.
 	gates []tool.VerifyGate
+	// parent is the spawning engine (for budget escalation emit/notify).
+	parent *Engine
+	// budgetWatchCancel stops the per-child budget ticker.
+	budgetWatchCancel context.CancelFunc
 	// planID/sectionID correlate this child to a plan section (plan_delegate).
 	planID    string
 	sectionID string
@@ -66,6 +70,8 @@ type childHandle struct {
 	activity       []string
 	events         []tool.TaskTranscriptEntry // absolute index preserved in entry.Index
 	nextEventIndex int
+	// budget tracks per-child limits, usage, stall/loop, and escalation (#774).
+	budget *childBudget
 }
 
 // childRecord retains terminal state + bounded transcript after a child exits
@@ -83,6 +89,12 @@ type childRecord struct {
 	verification *protocol.VerificationReport
 	activity     []string
 	events       []tool.TaskTranscriptEntry
+	// Observability retained after exit (#774).
+	objective    string
+	lastAction   string
+	filesTouched []string
+	budgetSnap   tool.AgentBudgetSnapshot
+	hasBudget    bool
 }
 
 // spawnChild starts a non-blocking child engine for the task tool and returns
@@ -115,6 +127,7 @@ func (e *Engine) spawnChildForDelegation(ctx context.Context, d Delegation) (too
 		Subscribe: d.Subscribe,
 		Assignee:  d.Assignee,
 		Verify:    append([]tool.VerifyGate(nil), d.Verify...),
+		Budget:    d.Budget,
 	}
 	return e.spawnChildInner(ctx, req, d.ID)
 }
@@ -327,6 +340,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		HookRules:                  e.opts.HookRules,
 		PersistProjectRule:         e.opts.PersistProjectRule,
 		DangerouslySkipPermissions: e.opts.DangerouslySkipPermissions,
+		DefaultChildBudget:         e.opts.DefaultChildBudget,
 	})
 	child.taskHarness = childHarness
 	child.taskHarnessName = childHarnessName
@@ -350,6 +364,17 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		Depth:           childDepth,
 	}
 
+	startedAt := time.Now()
+	// Prefer delegation-stored budget (already merged) when present.
+	budgetLimits := MergeAgentBudget(e.opts.DefaultChildBudget, req.Budget)
+	if delegID != "" && e.team != nil {
+		if d, ok := e.team.GetDelegation(delegID); ok {
+			// Non-zero stored budget wins as the full merged snapshot.
+			if d.Budget != (tool.AgentBudgetLimits{}) {
+				budgetLimits = NormalizeAgentBudget(d.Budget)
+			}
+		}
+	}
 	h := &childHandle{
 		id:        childID,
 		ops:       child.Ops(),
@@ -358,11 +383,13 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		permReply: child.perms.Reply,
 		qReply:    child.questions.Reply,
 		eng:       child,
-		startedAt: time.Now(),
+		startedAt: startedAt,
 		agent:     agentName,
 		prompt:    req.Prompt,
 		name:      memberName,
 		gates:     append([]tool.VerifyGate(nil), req.Verify...),
+		parent:    e,
+		budget:    newChildBudget(budgetLimits, req.Prompt, startedAt),
 		planID:    strings.TrimSpace(req.PlanID),
 		sectionID: strings.TrimSpace(req.SectionID),
 	}
@@ -515,7 +542,12 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		assistantText := lastAssistantText(child.messages)
 		var status protocol.ChildStatus
 		var errText string
+		// Budget escalation may race interrupt: prefer structured budget terminal.
+		budgetStatus, budgetReason := h.budgetTerminal()
 		switch {
+		case budgetStatus != "":
+			status = budgetStatus
+			errText = budgetReason
 		case (childCtx.Err() != nil && !gotStop) || (gotStop && stopReason == "interrupted"):
 			status = protocol.ChildStatusCanceled
 		case !gotStop || stopReason == "error":
@@ -606,6 +638,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 	}()
 
 	go child.Run(childCtx)
+	e.startChildBudgetWatch(h)
 
 	// Deliver the subtask prompt unless the parent turn context is already done.
 	select {
@@ -663,11 +696,15 @@ func (e *Engine) finishChild(h *childHandle, completed protocol.ChildCompleted) 
 	if h == nil {
 		return
 	}
+	if h.budgetWatchCancel != nil {
+		h.budgetWatchCancel()
+	}
+	now := time.Now()
 	h.mu.Lock()
 	rec := &childRecord{
 		id:           h.id,
 		startedAt:    h.startedAt,
-		endedAt:      time.Now(),
+		endedAt:      now,
 		agent:        h.agent,
 		prompt:       h.prompt,
 		name:         h.name,
@@ -678,7 +715,14 @@ func (e *Engine) finishChild(h *childHandle, completed protocol.ChildCompleted) 
 		activity:     append([]string(nil), h.activity...),
 		events:       append([]tool.TaskTranscriptEntry(nil), h.events...),
 	}
+	if h.budget != nil {
+		rec.objective = h.budget.objective
+		rec.lastAction = h.budget.lastAction
+		rec.budgetSnap = h.budget.snapshot(now, h.startedAt)
+		rec.hasBudget = true
+	}
 	h.mu.Unlock()
+	rec.filesTouched = e.childFilesTouched(h.id)
 
 	// Stop accepting peer mail before the handle leaves the live map.
 	if e.team != nil {
@@ -728,6 +772,7 @@ func (h *childHandle) noteEvent(ev protocol.Event) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	now := time.Now()
 	switch ev := ev.(type) {
 	case protocol.TurnStarted:
 		h.turnRunning = true
@@ -735,15 +780,24 @@ func (h *childHandle) noteEvent(ev protocol.Event) {
 		h.awaitingQ = false
 		h.currentTool = ""
 		h.pushActivityLocked("turn started")
+		if h.budget != nil {
+			h.budget.noteProgress(now, "turn started")
+		}
 	case protocol.TurnCompleted:
 		h.turnRunning = false
 		h.awaitingPerm = false
 		h.awaitingQ = false
 		h.currentTool = ""
 		h.pushActivityLocked("turn completed (" + ev.StopReason + ")")
+		if h.budget != nil {
+			h.budget.noteProgress(now, "turn completed")
+		}
 	case protocol.ToolCallBegin:
 		h.currentTool = ev.Name
 		h.pushActivityLocked("tool " + ev.Name)
+		if h.budget != nil {
+			h.budget.noteTool(ev.Name, now)
+		}
 	case protocol.ToolCallEnd:
 		prev := h.currentTool
 		h.currentTool = ""
@@ -757,18 +811,49 @@ func (h *childHandle) noteEvent(ev protocol.Event) {
 			label += " (error)"
 		}
 		h.pushActivityLocked(label)
+		if h.budget != nil {
+			h.budget.noteProgress(now, label)
+		}
+	case protocol.UsageReported:
+		// Accumulate stream usage toward token budget (#774).
+		tokens := 0
+		if ev.Used.Known {
+			tokens = ev.Used.N
+		} else {
+			if ev.Input.Known {
+				tokens += ev.Input.N
+			}
+			if ev.Output.Known {
+				tokens += ev.Output.N
+			}
+			if ev.CacheRead.Known {
+				tokens += ev.CacheRead.N
+			}
+			if ev.CacheCreation.Known {
+				tokens += ev.CacheCreation.N
+			}
+		}
+		if h.budget != nil && tokens > 0 {
+			h.budget.noteUsage(tokens, now)
+		}
 	case protocol.PermissionAsked:
 		h.awaitingPerm = true
 		h.pushActivityLocked("needs permission: " + ev.Permission)
 	case protocol.PermissionResolved:
 		h.awaitingPerm = false
 		h.pushActivityLocked("permission resolved")
+		if h.budget != nil {
+			h.budget.noteProgress(now, "permission resolved")
+		}
 	case protocol.QuestionAsked:
 		h.awaitingQ = true
 		h.pushActivityLocked("needs user question")
 	case protocol.QuestionResolved:
 		h.awaitingQ = false
 		h.pushActivityLocked("question resolved")
+		if h.budget != nil {
+			h.budget.noteProgress(now, "question resolved")
+		}
 	case protocol.ChildStarted:
 		h.pushActivityLocked("started")
 	case protocol.ChildCompleted:
@@ -776,12 +861,18 @@ func (h *childHandle) noteEvent(ev protocol.Event) {
 	case protocol.UserMessage:
 		if t := strings.TrimSpace(ev.Text); t != "" {
 			h.pushActivityLocked(truncateRunes(t, 80))
+			if h.budget != nil {
+				h.budget.noteProgress(now, "user message")
+			}
 		}
 	case protocol.TextDelta:
 		// skip high-frequency deltas in activity
 	case protocol.HarnessProgress:
 		summary := strings.TrimSpace(ev.Name + ": " + string(ev.Payload))
 		h.pushActivityLocked(truncateRunes(strings.TrimSuffix(summary, ":"), 80))
+		if h.budget != nil {
+			h.budget.noteProgress(now, "harness progress")
+		}
 	case protocol.EngineError:
 		if msg := strings.TrimSpace(ev.Message); msg != "" {
 			h.pushActivityLocked("error: " + truncateRunes(msg, 80))
@@ -807,12 +898,47 @@ func (h *childHandle) noteEvent(ev protocol.Event) {
 		h.pushActivityLocked(queueActivityLine("queue canceled", ev.Label, ev.Pools))
 	}
 
+	// Hard budget check after usage/tool notes (same lock). Defer parent-side
+	// escalate until after we finish locked bookkeeping so we never double-Unlock.
+	var (
+		escParent   *Engine
+		escID       string
+		escName     string
+		escKind     string
+		escReason   string
+		escTerminal protocol.ChildStatus
+		escSnap     tool.AgentBudgetSnapshot
+		doEscalate  bool
+	)
+	if h.budget != nil && !h.budget.escalated {
+		if trip, kind, reason, terminal := h.budget.evaluate(now, h.startedAt); trip {
+			if h.budget.markEscalatedLocked(kind, reason, terminal) {
+				h.pushActivityLocked("escalated: " + kind)
+				escParent = h.parent
+				escID = h.id
+				escName = h.name
+				escKind = kind
+				escReason = reason
+				escTerminal = terminal
+				escSnap = h.budget.snapshot(now, h.startedAt)
+				doEscalate = true
+			}
+		}
+	}
+
 	if entry, ok := summarizeChildEvent(h.nextEventIndex, ev); ok {
 		h.events = append(h.events, entry)
 		if len(h.events) > childEventCap {
 			h.events = h.events[len(h.events)-childEventCap:]
 		}
 		h.nextEventIndex++
+	}
+
+	if doEscalate && escParent != nil {
+		// Unlock for emit/interrupt; re-lock so deferred Unlock is balanced.
+		h.mu.Unlock()
+		escParent.escalateChildBudget(escID, escName, escKind, escReason, escTerminal, escSnap, h)
+		h.mu.Lock()
 	}
 }
 
@@ -911,6 +1037,7 @@ func (e *Engine) childStatus(ctx context.Context, req tool.TaskStatusRequest) (t
 
 	if h != nil {
 		res := h.statusSnapshot(req.IncludeRecent)
+		res.FilesTouched = e.childFilesTouched(id)
 		e.applyDelegationLifecycle(&res, id)
 		// Sync blocked ↔ needs_attention for live children.
 		if e.team != nil {
@@ -929,6 +1056,9 @@ func (e *Engine) childStatus(ctx context.Context, req tool.TaskStatusRequest) (t
 	}
 	if rec != nil {
 		res := rec.statusSnapshot(req.IncludeRecent)
+		if len(res.FilesTouched) == 0 {
+			res.FilesTouched = e.childFilesTouched(id)
+		}
 		e.applyDelegationLifecycle(&res, id)
 		return res, nil
 	}
@@ -952,8 +1082,17 @@ func (e *Engine) resolveOwnedChildRef(ref string) string {
 func (h *childHandle) statusSnapshot(includeRecent bool) tool.TaskStatusResult {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	now := time.Now()
+	// Refresh soft stall/loop flags for live pulse.
+	if h.budget != nil {
+		_, _, _, _ = h.budget.evaluate(now, h.startedAt)
+	}
 	state := "starting"
 	switch {
+	case h.budget != nil && h.budget.escalated && h.budget.terminal == protocol.ChildStatusBlocked:
+		state = "blocked"
+	case h.budget != nil && h.budget.escalated:
+		state = "failed"
 	case h.awaitingPerm || h.awaitingQ:
 		state = "needs_attention"
 	case len(h.queuePools) > 0:
@@ -967,13 +1106,22 @@ func (h *childHandle) statusSnapshot(includeRecent bool) tool.TaskStatusResult {
 	out := tool.TaskStatusResult{
 		SessionID:   h.id,
 		State:       state,
-		Elapsed:     formatElapsed(time.Since(h.startedAt)),
+		Elapsed:     formatElapsed(now.Sub(h.startedAt)),
 		CurrentTool: h.currentTool,
 		QueuePools:  append([]string(nil), h.queuePools...),
 		QueueLabel:  h.queueLabel,
 	}
 	if includeRecent && len(h.activity) > 0 {
 		out.LatestActivity = append([]string(nil), h.activity...)
+	}
+	if h.budget != nil {
+		out.Objective = h.budget.objective
+		out.LastAction = h.budget.lastAction
+		if h.budget.escalated && h.budget.reason != "" {
+			out.BlockReason = h.budget.reason
+		}
+		out.Budget = h.budget.snapshot(now, h.startedAt)
+		out.HasBudget = true
 	}
 	return out
 }
@@ -1006,6 +1154,9 @@ func (r *childRecord) statusSnapshot(includeRecent bool) tool.TaskStatusResult {
 		TerminalSummary: r.summary,
 		Handoff:         toolHandoff(r.handoff),
 		HasHandoff:      true,
+		Objective:       r.objective,
+		LastAction:      r.lastAction,
+		FilesTouched:    append([]string(nil), r.filesTouched...),
 	}
 	if r.verification != nil {
 		out.Verification = toolVerification(*r.verification)
@@ -1013,6 +1164,13 @@ func (r *childRecord) statusSnapshot(includeRecent bool) tool.TaskStatusResult {
 	}
 	if includeRecent && len(r.activity) > 0 {
 		out.LatestActivity = append([]string(nil), r.activity...)
+	}
+	if r.hasBudget {
+		out.Budget = r.budgetSnap
+		out.HasBudget = true
+		if r.budgetSnap.EscalateReason != "" && out.BlockReason == "" {
+			out.BlockReason = r.budgetSnap.EscalateReason
+		}
 	}
 	return out
 }
@@ -1222,6 +1380,14 @@ func (e *Engine) childMessage(ctx context.Context, req tool.TaskMessageRequest) 
 			Detail:    "child ops channel blocked",
 		}, nil
 	}
+
+	// Steer updates live objective for roster/status observability (#774).
+	h.mu.Lock()
+	if h.budget != nil {
+		h.budget.setObjective(text)
+		h.budget.noteProgress(time.Now(), "steer")
+	}
+	h.mu.Unlock()
 
 	status := "accepted"
 	detail := "delivered to child"

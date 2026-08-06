@@ -178,11 +178,13 @@ team-create step. Concurrent roots are independent teams.
 | Capability | How |
 |---|---|
 | Spawn teammates | `task` with optional `name` (stable alias) and `agent` persona |
-| List roster | `agent_roster` |
+| List roster | `agent_roster` (includes objective, last action, files, budget remaining) |
 | Peer message | `agent_message` (`to` = `session_id` or `name`) |
 | Contracts | `agent_message` with `task_id` / `urgency` / `kind=request`+`require_ack`; read via `agent_thread`; ack with `kind=ack` |
 | Fan-out | `agent_broadcast` (all other teammates; use sparingly) |
 | Parent steer only | `task_message` (owned child; not peer chat) |
+| Per-child budgets | `task`/`delegate` `budget` or config `session.agentBudget`; hard exceed → `child.escalated` + interrupt |
+| Live pulse | `task_status` (objective, last_action, files_touched, budget, stall/loop) |
 | Finish signal | `[child.completed]` on the lead (structured handoff JSON) |
 
 Messages land at tool-round / idle boundaries (safe injection). Defaults allow

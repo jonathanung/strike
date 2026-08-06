@@ -396,6 +396,46 @@ func TestChildCompletedHandoffRoundTrip(t *testing.T) {
 	}
 }
 
+func TestChildEscalatedRoundTrip(t *testing.T) {
+	rem := 3
+	want := ChildEscalated{
+		Correlation:    Correlation{SessionID: "c9", ParentSessionID: "p1", Depth: 1},
+		Name:           "worker",
+		Kind:           "tool_calls",
+		Reason:         "tool-call budget exhausted (3/3)",
+		Action:         "interrupted",
+		TerminalStatus: ChildStatusFailed,
+		Budget: &AgentBudgetView{
+			MaxToolCalls:       3,
+			ToolCalls:          3,
+			ToolCallsRemaining: &rem,
+			Escalated:          true,
+			EscalateKind:       "tool_calls",
+		},
+	}
+	env, err := Wrap(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.Type != "child.escalated" {
+		t.Fatalf("type=%q", env.Type)
+	}
+	gotEv, err := env.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := gotEv.(ChildEscalated)
+	if !ok {
+		t.Fatalf("type %T", gotEv)
+	}
+	if got.Kind != "tool_calls" || got.Action != "interrupted" || got.Name != "worker" {
+		t.Fatalf("got %#v", got)
+	}
+	if got.Budget == nil || got.Budget.MaxToolCalls != 3 || !got.Budget.Escalated {
+		t.Fatalf("budget %#v", got.Budget)
+	}
+}
+
 func TestVerificationEventsAndTurnCompletedRoundTrip(t *testing.T) {
 	corr := Correlation{SessionID: "s1", TurnID: "t1"}
 	rep := VerificationReport{
@@ -588,6 +628,7 @@ func TestEventTypeCoverage(t *testing.T) {
 		"engine.error":           EngineError{},
 		"child.started":          ChildStarted{},
 		"child.completed":        ChildCompleted{},
+		"child.escalated":        ChildEscalated{},
 		"delegation.changed":     DelegationChanged{},
 		"wait.started":           WaitStarted{},
 		"wait.resolved":          WaitResolved{},

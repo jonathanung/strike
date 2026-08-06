@@ -516,6 +516,42 @@ type TeamRosterMember struct {
 	Role            string   `json:"role,omitempty"` // "lead" or "member"
 	QueuePools      []string `json:"queuePools,omitempty"`
 	QueueLabel      string   `json:"queueLabel,omitempty"`
+	// Live observability (#774). Optional; empty when unknown.
+	Objective    string   `json:"objective,omitempty"`
+	LastAction   string   `json:"lastAction,omitempty"`
+	BlockReason  string   `json:"blockReason,omitempty"`
+	FilesTouched []string `json:"filesTouched,omitempty"`
+	// Budget remaining / usage (camelCase wire). Omitted when no tracking.
+	Budget *AgentBudgetView `json:"budget,omitempty"`
+}
+
+// AgentBudgetView is the protocol wire shape for per-agent budget remaining.
+// Nested under TeamRosterMember and ChildEscalated. Zero limits mean unlimited.
+// Session-level maxSessionCostUSD (#577) is the outer envelope when configured;
+// per-agent maxCostUSD nests inside it.
+type AgentBudgetView struct {
+	MaxWallClockS       int      `json:"maxWallClockS,omitempty"`
+	MaxTokens           int      `json:"maxTokens,omitempty"`
+	MaxCostUSD          float64  `json:"maxCostUsd,omitempty"`
+	MaxToolCalls        int      `json:"maxToolCalls,omitempty"`
+	MaxDangerousTools   int      `json:"maxDangerousTools,omitempty"`
+	StallAfterS         int      `json:"stallAfterS,omitempty"`
+	LoopDetectN         int      `json:"loopDetectN,omitempty"`
+	ElapsedS            int      `json:"elapsedS,omitempty"`
+	TokensUsed          int      `json:"tokensUsed,omitempty"`
+	CostUSDUsed         float64  `json:"costUsdUsed,omitempty"`
+	ToolCalls           int      `json:"toolCalls,omitempty"`
+	DangerousTools      int      `json:"dangerousTools,omitempty"`
+	WallClockRemainingS *int     `json:"wallClockRemainingS,omitempty"`
+	TokensRemaining     *int     `json:"tokensRemaining,omitempty"`
+	ToolCallsRemaining  *int     `json:"toolCallsRemaining,omitempty"`
+	DangerousRemaining  *int     `json:"dangerousRemaining,omitempty"`
+	CostUSDRemaining    *float64 `json:"costUsdRemaining,omitempty"`
+	Stall               bool     `json:"stall,omitempty"`
+	Loop                bool     `json:"loop,omitempty"`
+	Escalated           bool     `json:"escalated,omitempty"`
+	EscalateKind        string   `json:"escalateKind,omitempty"`
+	EscalateReason      string   `json:"escalateReason,omitempty"`
 }
 
 // TeamRoster is a full snapshot of the implicit session team roster.
@@ -622,6 +658,32 @@ type ChildCompleted struct {
 	// were configured, Status is completed only if Verification.Passed;
 	// otherwise Status is blocked (gate failure) with this report attached.
 	Verification *VerificationReport `json:"verification,omitempty"`
+}
+
+// ChildEscalated reports a per-child budget/stall/loop trip (#774).
+// Emitted on the parent stream before interrupt. Action is "interrupted"
+// (hard kill in flight) or "signaled" (soft observability only — unused in v1
+// hard path). Kind is wall_clock|tokens|cost_usd|tool_calls|dangerous_tools|
+// stall|loop. Correlation is the child session.
+//
+// Soft stall/loop flags also appear on task_status / team.roster without this
+// event; hard limits always emit ChildEscalated and stop the child.
+// Stale-child detection (#517) is the stall kind, not a separate mechanism.
+type ChildEscalated struct {
+	Correlation
+	// Name is the stable teammate alias when one was assigned at spawn.
+	Name string `json:"name,omitempty"`
+	// Kind is the trip class (wall_clock, tokens, stall, loop, …).
+	Kind string `json:"kind"`
+	// Reason is a human/agent-readable explanation.
+	Reason string `json:"reason"`
+	// Action is interrupted|signaled.
+	Action string `json:"action"`
+	// TerminalStatus is the intended ChildCompleted status after shutdown
+	// (failed for hard resource budgets, blocked for stall/loop).
+	TerminalStatus ChildStatus `json:"terminalStatus,omitempty"`
+	// Budget is the snapshot at escalation time when known.
+	Budget *AgentBudgetView `json:"budget,omitempty"`
 }
 
 // DelegationState is the orchestration lifecycle of a first-class delegation
@@ -1391,6 +1453,7 @@ func (PathOverlap) isEvent()            {}
 func (EngineError) isEvent()            {}
 func (ChildStarted) isEvent()           {}
 func (ChildCompleted) isEvent()         {}
+func (ChildEscalated) isEvent()         {}
 func (DelegationChanged) isEvent()      {}
 func (WaitStarted) isEvent()            {}
 func (WaitResolved) isEvent()           {}

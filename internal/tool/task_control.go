@@ -39,11 +39,8 @@ func (taskStatusTool) Description() string {
   verification, findings, blockers, recommended_next_action; incomplete may be true
   when the child did not supply structured fields), and when tracked as a delegation:
   delegation_id, lifecycle (queued|working|blocked|review|done|failed|canceled),
-  criteria, deps, version, block_reason.
-- One-off pulse only — do not busy-poll. Prefer [child.completed] handoff JSON for
-  finished work and the peer inbox (agent_message) for mid-flight updates.
-  agent_roster lists who is live.
-  when the child did not supply structured fields).
+  criteria, deps, version, block_reason, plus observability fields: objective,
+  last_action, files_touched, and budget (usage/remaining, stall/loop signals).
 - One-off pulse only — do not busy-poll. Prefer wait (task.done/task.blocked/…) or
   [child.completed] handoff JSON for finished work and the peer inbox (agent_message)
   for mid-flight updates. agent_roster lists who is live.
@@ -121,6 +118,18 @@ func (taskStatusTool) Execute(ctx context.Context, args json.RawMessage, tc *Con
 	}
 	if res.BlockReason != "" {
 		payload["block_reason"] = res.BlockReason
+	}
+	if res.Objective != "" {
+		payload["objective"] = res.Objective
+	}
+	if res.LastAction != "" {
+		payload["last_action"] = res.LastAction
+	}
+	if len(res.FilesTouched) > 0 {
+		payload["files_touched"] = res.FilesTouched
+	}
+	if res.HasBudget {
+		payload["budget"] = res.Budget
 	}
 	out, _ := json.Marshal(payload)
 	title := "task_status " + shortID(id) + " " + res.State
