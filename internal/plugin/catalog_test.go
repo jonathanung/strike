@@ -285,7 +285,7 @@ func TestCatalogInstall_FailedValidationPreservesPrior(t *testing.T) {
 	// Seed trust on lockfile to ensure failed replace keeps it.
 	_ = WithLockfileLock(filepath.Join(global, "plugins.lock.json"), func(lf Lockfile) (Lockfile, bool, error) {
 		e := lf.Plugins["acme.pack"]
-		e.Trust = &TrustBinding{Digest: priorDigest, GrantedAt: "2026-01-01T00:00:00Z"}
+		e.Trust = &TrustRecord{Digest: priorDigest, TrustedAt: "2026-01-01T00:00:00Z"}
 		return setLockEntry(lf, "acme.pack", e), false, nil
 	})
 
@@ -411,7 +411,7 @@ func TestUpdate_InvalidatesTrustOnExecutableChange(t *testing.T) {
 	// Grant trust as #728 would.
 	_ = WithLockfileLock(filepath.Join(global, "plugins.lock.json"), func(lf Lockfile) (Lockfile, bool, error) {
 		e := lf.Plugins["acme.tools"]
-		e.Trust = &TrustBinding{Digest: res.Digest, Capabilities: []string{"mcp.stdio"}, GrantedAt: nowRFC3339()}
+		e.Trust = &TrustRecord{Digest: res.Digest, Capabilities: []string{"mcp.stdio"}, TrustedAt: nowRFC3339()}
 		return setLockEntry(lf, "acme.tools", e), false, nil
 	})
 
@@ -451,7 +451,7 @@ func TestBuildUpdateReview_ExecutableDiffNoSecrets(t *testing.T) {
 		ID:      "acme.tools",
 		Version: "1.0.0",
 		Digest:  "sha256:" + strings.Repeat("a", 64),
-		Trust:   &TrustBinding{Digest: "sha256:" + strings.Repeat("a", 64)},
+		Trust:   &TrustRecord{Digest: "sha256:" + strings.Repeat("a", 64)},
 		Manifest: &Manifest{
 			ID: "acme.tools", Version: "1.0.0",
 			Contributions: Contributions{

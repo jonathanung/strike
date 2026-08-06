@@ -130,10 +130,13 @@ changes digest, source identity, or executable contributions (#728/#729).
 | `search <query> --registry <url>` | Search a remote catalog index. |
 | `outdated [--registry]` | List catalog-sourced installs with a newer published version. |
 | `update <id> --yes` | Show contribution/capability review, then install newer catalog version (rollback-safe). |
-| `list` / `inspect <id>` | Show installed plugins (including disabled) with scope, digest, source. |
-| `enable` / `disable <id>` | Toggle lockfile `enabled`. Disable **preserves** source files. |
+| `list` / `inspect <id>` | Show installed plugins (including disabled) with scope, digest, source, trust state. |
+| `enable` / `disable <id>` | Toggle lockfile `enabled`. Disable **preserves** source files; disabled plugins contribute nothing (passive or executable) on next launch. |
+| `trust <id>` | Record executable trust for the current content digest + source identity + capability set. Required before MCP/harness/shell-hook activation. |
+| `untrust <id>` | Remove the trust grant; executables stay inactive on next launch. Passive load is unaffected. |
+
 | `remove <id> --yes` | Delete install directory and lockfile entry (confirmation required). |
-| `doctor [id]` | Paths, provenance, contribution summary, collisions, trust state. Never prints secrets or MCP/harness env values (keys only). |
+| `doctor [id]` | Paths, provenance, contribution summary, collisions, trust state (`none` / `trusted` / `stale` / `n/a-passive-only`). Never prints secrets or MCP/harness env values (keys only). |
 
 Flags: `--scope global|project` (install defaults to global), git `--ref` /
 `--commit` / `--subdir`, catalog `--registry` / `--version`, install `--force`
@@ -720,7 +723,7 @@ announces removal in CHANGELOG **Upgrade note**.
 | Contract | #725 (this doc) | Manifest, matrix, trust, schema |
 | Passive load | #726 (`internal/plugin` + config/theme wiring) | §3–4, §7.1–7.5, §8–10 |
 | Local/Git CLI | #727 | §2, §6.1–6.2, enablement, doctor |
-| Executable activation | #728 | §5, §7.6–7.8 |
+| Executable activation | #728 (`trust`/`untrust`, `CompileExecutables`, assemble wiring) | §5, §7.6–7.8 |
 | Catalog / updates | #729 (`internal/plugin` catalog/archive + CLI) | §6.3–6.4, digest verify |
 | TUI manager | #730 | UX over enablement + trust |
 | Themes packaging | #511 | §7.4 |
@@ -733,7 +736,6 @@ announces removal in CHANGELOG **Upgrade note**.
 
 - Automatic unattended updates (catalog update requires explicit `--yes`).
 - Paid marketplace infrastructure.
-- Executable MCP/harness/hook activation without trust (#728).
 - TUI plugin manager (#730).
 - A generic arbitrary-code plugin ABI or in-process extension mechanism.
 - Hot reload of plugin trees.

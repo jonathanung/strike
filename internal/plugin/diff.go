@@ -379,21 +379,3 @@ func diffExecutableSnapshots(old, new execSnap) []string {
 	return out
 }
 
-func sourceIdentityEqual(a *SourceIdentity, b *SourceIdentity) bool {
-	if a == nil && b == nil {
-		return true
-	}
-	if a == nil || b == nil {
-		return false
-	}
-	return a.Type == b.Type &&
-		a.Path == b.Path &&
-		a.URL == b.URL &&
-		a.Ref == b.Ref &&
-		a.Commit == b.Commit &&
-		a.Subdir == b.Subdir &&
-		a.Registry == b.Registry &&
-		a.Package == b.Package &&
-		a.Version == b.Version &&
-		digestsEqual(a.Digest, b.Digest)
-}

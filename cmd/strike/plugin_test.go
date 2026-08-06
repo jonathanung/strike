@@ -120,6 +120,87 @@ func TestRunPluginLifecycleCLI(t *testing.T) {
 	}
 }
 
+func TestRunPluginTrustCLI(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(work); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+
+	src := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(src, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "bin", "mcp.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	man := `{
+  "schemaVersion": 1,
+  "id": "acme.exec",
+  "version": "1.0.0",
+  "name": "Exec",
+  "strike": { "min": "0.1.0" },
+  "contributions": {
+    "mcp": [{ "name": "x", "transport": "stdio", "command": "bin/mcp.sh" }]
+  }
+}`
+	if err := os.WriteFile(filepath.Join(src, "plugin.json"), []byte(man), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errBuf bytes.Buffer
+	code := runPluginCLI([]string{"install", src, "--scope", "global"}, &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("install: %s %s", errBuf.String(), out.String())
+	}
+
+	// Passive-only trust should fail.
+	out.Reset()
+	errBuf.Reset()
+	// Install a passive-only plugin and ensure trust fails.
+	passive := writeTestPluginBundle(t, t.TempDir(), "acme.passive")
+	code = runPluginCLI([]string{"install", passive, "--scope", "global"}, &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("install passive: %s", errBuf.String())
+	}
+	out.Reset()
+	errBuf.Reset()
+	code = runPluginCLI([]string{"trust", "acme.passive"}, &out, &errBuf)
+	if code == 0 {
+		t.Fatal("trust on passive-only should fail")
+	}
+
+	out.Reset()
+	errBuf.Reset()
+	code = runPluginCLI([]string{"trust", "acme.exec"}, &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("trust: code=%d err=%s out=%s", code, errBuf.String(), out.String())
+	}
+	if !strings.Contains(out.String(), "Trusted acme.exec") {
+		t.Fatalf("trust out: %s", out.String())
+	}
+
+	out.Reset()
+	errBuf.Reset()
+	code = runPluginCLI([]string{"inspect", "acme.exec"}, &out, &errBuf)
+	if code != 0 || !strings.Contains(out.String(), "trust:") || !strings.Contains(out.String(), "trusted") {
+		t.Fatalf("inspect trust: out=%s err=%s", out.String(), errBuf.String())
+	}
+
+	out.Reset()
+	errBuf.Reset()
+	code = runPluginCLI([]string{"untrust", "acme.exec"}, &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("untrust: %s", errBuf.String())
+	}
+}
+
 func TestRunCLIDispatchesPlugin(t *testing.T) {
 	var out, errBuf bytes.Buffer
 	code := runCLI([]string{"plugin", "help"}, &out, &errBuf)

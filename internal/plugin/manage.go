@@ -31,7 +31,7 @@ type InstalledPlugin struct {
 	Enabled   bool
 	Digest    string
 	Source    *SourceIdentity
-	Trust     *TrustBinding
+	Trust     *TrustRecord
 	Manifest  *Manifest
 	LoadError string // non-empty when manifest/load failed
 }
