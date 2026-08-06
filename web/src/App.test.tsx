@@ -118,6 +118,14 @@ describe("App", () => {
     fireEvent.keyDown(editor, { key: "Enter" });
     expect(list).toHaveTextContent("second-edited");
 
+    fireEvent.click(screen.getByRole("button", { name: "Edit queued prompt 1" }));
+    const editor2 = screen.getByLabelText("Queued prompt text 1");
+    fireEvent.change(editor2, { target: { value: "should-not-stick" } });
+    fireEvent.keyDown(editor2, { key: "Escape" });
+    fireEvent.blur(editor2);
+    expect(list).toHaveTextContent("second-edited");
+    expect(list).not.toHaveTextContent("should-not-stick");
+
     fireEvent.click(screen.getByRole("button", { name: "Remove queued prompt 3" }));
     expect(list).not.toHaveTextContent("third");
 
