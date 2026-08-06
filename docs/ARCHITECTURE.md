@@ -52,6 +52,8 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `internal/version` | Build-time Version/Commit stamped via `-ldflags` | stdlib |
 | `internal/update` | GitHub Releases self-update (check, download, sha256, atomic replace, re-exec) | `version`, stdlib, net/http |
 | `pkg/protocol` | **Public** Op/Event wire schema between engine and frontends; JSONL envelopes (`codec.go` / `op_codec.go`) are the session persistence + transport format (includes `scheduler.queued` / `admitted` / `canceled`). Semver via `Version` | stdlib only |
+| `pkg/redact` | **Public** shared credential-shaped string scrubbing for exports, inspect, and timeline traces (coordinate with secret-handling #796) | stdlib only |
+| `pkg/timeline` | **Public** structured run timeline builder + versioned redacted JSON/JSONL export derived from protocol events (complements session JSONL and #774 roster/budget; not a second transcript) | `pkg/protocol`, `pkg/redact`, stdlib |
 | `pkg/sdk` | **Public** thin Go client over `pkg/protocol`: in-process channel client, JSONL encode/decode, `RunTurn`, session JSONL replay. Does not embed the engine (engine stays `internal/`). Consumer docs: [sdk.md](sdk.md) | `pkg/protocol`, stdlib only |
 | `internal/protocol` | Compatibility re-export of `pkg/protocol` (type aliases + thin forwards). Prefer `pkg/protocol` for new code | `pkg/protocol` only |
 | `internal/engine` | Headless agent runtime: built-in turn loop, task-subagent function harnesses, tool dispatch, permission/question integration, deferred agent switch; implicit session-scoped agent **team** (lead + children roster + shared task board + path ownership/overlap in `team.go` / `team_board.go` / `ownership.go`); model-stream and bash admission via shared `scheduler` | `protocol`, `provider`, `harness`, `tool`, `permission`, `question`, `memory`, `config`, `sandbox`, `scheduler` |
@@ -62,13 +64,14 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `internal/provider/{anthropic,openaicompat,chatgpt,google,echo}` | Concrete adapters (openaicompat covers OpenAI platform API, xAI, Kimi, DeepSeek; chatgpt is the ChatGPT-subscription backend; google is Google AI Studio generateContent; echo is the offline dev provider) | `provider`, `provider/base` (all but echo), stdlib |
 | `internal/sandbox` | OS-primitive process sandbox: `Wrap(argv, Policy)` via Linux `bwrap` / macOS `sandbox-exec`; Policy carries mode, write denials, `NoNetwork` (host net on by default), and optional `NetworkAllow` host/CIDR list (webfetch; shared shape for future container net); `Explain`/`ProfileText` for `/sandbox explain`; graceful degrade + startup warning when unavailable | stdlib only |
 | `internal/scheduler` | Fair cancellable named-pool admission (process/build/test/model/container): context-aware acquire, atomic multi-pool leases, observer snapshots; layered limits + ordered command classification (`Compile` / `CompileWithPresets` → `Effective`); versioned build-system presets (`Catalog`, expand into ordinary limits/rules) | stdlib only |
-| `internal/tool` | Tool contract (`Tool`, `Context`, `Result`) + built-ins: read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/task_message/task_interrupt/wait/agent_roster/agent_ownership/agent_message/agent_broadcast/team_task/webfetch/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/phase_done/toolsearch; `PathOwnership` multi-agent path claims; bash acquires scheduler pools after Ask; file tools call `FileSync` + `CollectDiagnostics` after mutations | `provider` (for `ToolSchema`), `memory`, `issue`, `sandbox`, `scheduler`, stdlib |
+| `internal/tool` | Tool contract (`Tool`, `Context`, `Result`, `CodedError`) + built-ins: read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/task_message/task_interrupt/wait/agent_roster/agent_ownership/agent_message/agent_broadcast/team_task/webfetch/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/phase_done/toolsearch; FS tx safety (`FileState` freshness + optional `baseHash`, atomic temp+rename writes, `TurnDiff` create/update/delete); `PathOwnership` multi-agent path claims; bash acquires scheduler pools after Ask; file tools call `FileSync` + `CollectDiagnostics` after mutations | `provider` (for `ToolSchema`), `memory`, `issue`, `sandbox`, `scheduler`, stdlib |
 | `internal/mcp` | MCP client (stdio + streamable HTTP) + session manager; bridges tools onto `tool.Registry` as `mcp_<server>_<tool>`; retry/disable; tools-only stdio **server** (`Server`) for `strike mcp-serve` | `tool`, stdlib, net/http |
 | `internal/lsp` | LSP client (JSON-RPC 2.0 over stdio, Content-Length framing) + manager; extension→server registry; didOpen/didChange/didClose from file tools; collect `publishDiagnostics`; inject formatted diagnostics into file-tool Results (`CollectForPaths`); crash isolation | stdlib, os/exec |
 | `internal/memory` | Project-scoped durable key/value memory (JSON under `~/.strike/memory/`) | stdlib |
 | `internal/issue` | Project-scoped durable issues (JSON under `~/.strike/issues/`) | stdlib |
 | `internal/goal` | Loop harness: goals, JSONL iterations/events, guards, critic, hooks | stdlib |
 | `internal/plan` | Project-scoped root-session-owned structured plans (sections, lifecycle, CAS versions; JSON under `~/.strike/plans/`) | stdlib |
+| `internal/verify` | Independent completion gates (cmd/schema/path) and claim-vs-verified result type shared by delegation (#780) and solo/harness paths (#806); implementer cannot self-certify | stdlib |
 | `internal/question` | User-question ask service: suspends a tool call until `QuestionReply` (1–4 prompts per batch; TUI walks them, one reply with all answers) | `protocol`, stdlib |
 | `internal/permission` | Ordered allow/ask/deny rulesets, last-match-wins; the ask service that suspends a tool call for user input; `CompileSandbox` maps write/edit denials + webfetch/mcp network posture into `sandbox.Policy` | `protocol`, `tool` (for `AskRequest`), `sandbox`, stdlib |
 | `internal/session` | JSONL event-log persistence (append/replay) + concurrent Manager (multi-session open, durable list, event mux). Sidecar `*.meta.json` stores `projectKey` (workspace folder) first for `/session` scoping | `protocol`, stdlib |
@@ -95,6 +98,8 @@ Verbatim from the refactor spec (`.plan/refactor-agents-ui.md`):
   `tui/...`. (`pkg/protocol` is also allowed — it is not under `internal/`.)
 - No backend package imports `internal/tui/...`.
 - `pkg/protocol`: stdlib only (public wire surface).
+- `pkg/redact`: stdlib only (public scrubbing helper).
+- `pkg/timeline`: stdlib + `pkg/protocol` + `pkg/redact` only.
 - `pkg/sdk`: stdlib + `pkg/protocol` only (public client over the wire schema).
 
 These are enforced mechanically, not just by convention: `internal/tui/boundary_test.go`
@@ -301,7 +306,7 @@ Two different mechanisms, depending on whether it needs Go code:
    `autonomy`, `auth`, `settings`, `agent`, `agents`, `activity`, `files`,
    `visualizer`, `system`, `telemetry`, `pets`, `fast`, `vim`, `nano`, `md-read`,
    `theme`, `layout`, `split`, `compact`, `fork`, `undo`, `rewind`, `session`,
-   `export`, `copy`, `help`, `keys`, `legend`, `memory`, `issues`, `goal`, `loop`, `context`,
+   `export`, `timeline`, `copy`, `help`, `keys`, `legend`, `memory`, `issues`, `goal`, `loop`, `context`,
    `effective-prompt`, `cost`, `upgrade`, `init`, `ftue`, `mcp`, `exit`, `quit`, and
    keybind-backed action mirrors such as `focus-left`, `palette`,
    `interrupt`, `agent-next`, `tool-copy`, `subagent`, `root-new`, …) are
@@ -422,6 +427,23 @@ reduces protocol events into that state in `applyAgentStateEvent` /
 tree nodes should reuse the same mapping when M5 lands; do not add a second
 palette.
 
+
+## Filesystem transaction safety (tools)
+
+Mutating file tools (`edit` / `write` / `apply_patch` / `notebook_edit`) share one
+stack — do not fork a second file-state system:
+
+| Layer | Package | Role |
+|---|---|---|
+| Freshness / base hash | `tool.FileState`, `CheckBaseHash`, `CheckContentUnchanged` | Per-agent read snapshots (mtime/size/hash); optional `baseHash` / `baseHashes` args fail closed with `precondition_failed` (#793 codes) |
+| Atomic commit | `workspaceWriteFile` → `atomicWriteFile` | Same-dir temp + `rename` on local POSIX; refuses symlink leaves |
+| Per-turn diff | `tool.TurnDiff` → `protocol.TurnCompleted.Files` | create/update/delete summary for timeline/UI |
+| Undo snapshots | `tool.CheckpointStore` (#540) | Pre-mutation bytes per turn for `/undo` restore |
+| Multi-agent overlap | `tool.PathOwnership` (#772) | Cross-agent path claims / leases; orthogonal to per-tool freshness |
+
+`FileState` answers “did *this* agent re-read after an external change?”;
+ownership answers “is another active worker claiming this path?”; checkpoints
+answer “what bytes do we restore on undo?”.
 
 ## Engine source map (selected)
 

@@ -196,6 +196,7 @@ func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.Ima
 	turnCorr := e.baseCorr()
 	turnCorr.TurnID = turnID
 	e.checkpoints.BeginTurn(turnID)
+	e.turnDiff.Reset()
 	e.emit(protocol.UserMessage{Correlation: turnCorr, Text: text, Images: images})
 	e.maybeTitleSession(text)
 	e.emit(protocol.TurnStarted{Correlation: turnCorr})
@@ -540,6 +541,7 @@ func modelFacingToolOutput(res tool.Result, err error) (output string, isError b
 	var permRejected *permission.RejectedError
 	var qRejected *question.RejectedError
 	var toolRejected *tool.UserRejectedError
+	var coded *tool.CodedError
 	switch {
 	case errors.As(err, &permDenied):
 		return permDenied.Error(), true
@@ -549,6 +551,9 @@ func modelFacingToolOutput(res tool.Result, err error) (output string, isError b
 		return qRejected.Error(), true
 	case errors.As(err, &toolRejected):
 		return protocol.ToolFeedbackUserRejected(toolRejected.Message), true
+	case errors.As(err, &coded):
+		// Stable codes (#793 / #797): surface "code: message" to the model.
+		return protocol.ToolFeedbackError(coded.Error()), true
 	default:
 		return protocol.ToolFeedbackError(err.Error()), true
 	}
@@ -669,6 +674,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			SessionID:  e.opts.SessionID,
 			MemberName: e.ownershipMemberName(),
 			Checkpoint: e.checkpoints.Snapshot,
+			TurnDiff:   e.turnDiff,
 			// Record successful mutations only (post-write), not pre-mutation
 			// snapshots — failed tools must not appear in handoff files_changed.
 			FileSync: func(absPath string, content string, deleted bool) {
@@ -905,10 +911,23 @@ func (e *Engine) failTurn(err error, corr protocol.Correlation, finishing chan s
 // post-tool-batch apply in runTurn).
 func (e *Engine) completeTurn(finishing chan struct{}, corr protocol.Correlation, stopReason string) {
 	close(finishing)
+	files := turnFileChanges(e.turnDiff.Snapshot())
 	e.checkpoints.CommitTurn()
 	e.fireHookRules(corr, permission.HookEventTurnEnd, "", "")
-	e.emit(protocol.TurnCompleted{Correlation: corr, StopReason: stopReason})
+	e.emit(protocol.TurnCompleted{Correlation: corr, StopReason: stopReason, Files: files})
 	e.applyPendingAgent()
+}
+
+// turnFileChanges maps tool.FileChange → protocol.TurnFileChange.
+func turnFileChanges(in []tool.FileChange) []protocol.TurnFileChange {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]protocol.TurnFileChange, len(in))
+	for i, c := range in {
+		out[i] = protocol.TurnFileChange{Path: c.Path, Kind: string(c.Kind)}
+	}
+	return out
 }
 
 // fireHookRules evaluates declarative config rules and emits HookMatched for

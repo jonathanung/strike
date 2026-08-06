@@ -369,6 +369,57 @@ func TestSaveConfigDialsWritesGlobalConfig(t *testing.T) {
 	}
 }
 
+func TestSaveCompactionDialsWritesGlobalConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	svc := New(nil, nil, nil, nil, nil, nil, nil, "")
+
+	if err := svc.Settings.SaveCompactionDials(host.CompactionDials{
+		Strategy:           "summarize",
+		Model:              "compact-model",
+		Threshold:          "0.65",
+		Buffer:             "1024",
+		KeepUserTurns:      "4",
+		PruneProtectTokens: "20000",
+		PruneMinimumTokens: "10000",
+		PruneKeepUserTurns: "3",
+		PruneProtectTools:  "webfetch,memory_read",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	d := svc.Settings.Defaults()
+	if d.CompactionStrategy != "summarize" || d.CompactionModel != "compact-model" {
+		t.Fatalf("strategy/model = %q %q", d.CompactionStrategy, d.CompactionModel)
+	}
+	if d.CompactionThreshold != 0.65 || d.CompactionBuffer != 1024 || d.KeepUserTurns != 4 {
+		t.Fatalf("compact nums = thr=%v buf=%d keep=%d", d.CompactionThreshold, d.CompactionBuffer, d.KeepUserTurns)
+	}
+	if d.PruneProtectTokens != 20000 || d.PruneMinimumTokens != 10000 || d.PruneKeepUserTurns != 3 {
+		t.Fatalf("prune nums = %#v", d)
+	}
+	if len(d.PruneProtectTools) != 2 || d.PruneProtectTools[0] != "webfetch" || d.PruneProtectTools[1] != "memory_read" {
+		t.Fatalf("tools = %#v", d.PruneProtectTools)
+	}
+
+	if err := svc.Settings.SaveCompactionDials(host.CompactionDials{Strategy: "nope"}); err == nil {
+		t.Fatal("unknown strategy accepted")
+	}
+	// Failed write must not clear prior dials.
+	d = svc.Settings.Defaults()
+	if d.CompactionStrategy != "summarize" || d.CompactionBuffer != 1024 {
+		t.Fatalf("reject cleared compaction: %#v", d)
+	}
+
+	// Clear model + tools.
+	if err := svc.Settings.SaveCompactionDials(host.CompactionDials{Model: "-", PruneProtectTools: "-"}); err != nil {
+		t.Fatal(err)
+	}
+	d = svc.Settings.Defaults()
+	if d.CompactionModel != "" || d.PruneProtectTools != nil {
+		t.Fatalf("clear failed: model=%q tools=%#v", d.CompactionModel, d.PruneProtectTools)
+	}
+}
+
 func TestHistoryNilTolerated(t *testing.T) {
 	svc := New(nil, nil, nil, nil, nil, nil, nil, "")
 	if svc.History != nil {

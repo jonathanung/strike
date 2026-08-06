@@ -51,7 +51,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 /auth anthropic                # masked API-key input (also: /auth <p> key)
 /auth status                   # anthropic: none · openai: oauth+key · …
 /auth logout <provider>
-/settings                      # defaults (theme, editor, mode) + custom providers
+/settings                      # defaults, compaction/prune dials, custom providers
 /theme                         # centered color-theme picker (bundled +
                                # ~/.strike/themes + ./.strike/themes)
 /theme <id>                    # apply a theme by id
@@ -68,6 +68,8 @@ strike launches without any provider configured. Pick one inside the TUI:
 /export [path] [--open]        # write the transcript to markdown (default
                                # .strike/exports/… or $TMPDIR); --open hands
                                # the file to $EDITOR / $VISUAL
+/timeline                      # collapsed structured run timeline
+/timeline export [path]        # versioned redacted JSON/JSONL trace export
 /copy                          # copy last assistant response to clipboard
                                # (OSC52; also alt+y)
 /vim [path|@path[:line]]       # open file in editor (embedded/modal/takeover)
@@ -145,6 +147,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/undo` | undo last turn in place (idle only); bare opens picker; `chat` keeps disk; `files` restores per-file checkpoints from that turn (never `git reset --hard`) |
 | `/rewind` | fork a **new** session from a completed turn (idle only); original session stays listable; bare opens turn picker; `/rewind n` keeps turns 1..n. Workspace file revert is not part of rewind (use `/undo files` on the live session) |
 | `/export` | dump the visible transcript to markdown (user/assistant/tool summaries); redacts common API-key shapes; default path under `.strike/exports/` or tmp; `--open` launches `$EDITOR` |
+| `/timeline` | collapsed structured run timeline (turns/tools/provider attempts/children with durations); `/timeline export [path]` writes versioned redacted JSON (or `.jsonl`). Complements session JSONL and agent roster/budget fields — not a second full transcript |
 | `/copy` | copy plain text of the last assistant response (not tool output) to the system clipboard via OSC52; same as `alt+y`; notice on success/failure |
 | `/compact` | ask the engine to compact model history |
 | `/memory` | bare = list browser (focuses memory pane); `list [tag]`, `get <key>`, `set <key> <value>`, `rm <key>`, `export [path]`, `import <path> [--replace]` (portable JSON; relative paths stay under project root) |

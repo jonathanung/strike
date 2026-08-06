@@ -171,6 +171,40 @@ type UserDefaults struct {
 	VimMode       string
 	NanoMode      string
 	MdReadMode    string
+	// Compaction / prune dials (history compaction). Zero/empty means unset
+	// → engine defaults at load (see docs/config.md).
+	CompactionStrategy  string
+	CompactionModel     string
+	CompactionThreshold float64
+	CompactionBuffer    int
+	KeepUserTurns       int
+	PruneProtectTokens  int
+	PruneMinimumTokens  int
+	PruneKeepUserTurns  int
+	PruneProtectTools   []string
+}
+
+// CompactionDials is a partial update for history compaction and continuous
+// prune knobs. Empty string fields leave the corresponding stored value
+// unchanged. Vocabulary:
+//
+//	Strategy           — trim|summarize
+//	Model              — model id; "-" clears (use session model)
+//	Threshold          — occupancy fraction string (e.g. "0.70"); "default"/"0"
+//	                     resets to engine default; ">=1" disables threshold
+//	Buffer / KeepUserTurns / Prune*Tokens / PruneKeepUserTurns —
+//	                     non-negative integer strings; "default"/"0" resets
+//	PruneProtectTools  — comma-separated tool names; "-" clears extras
+type CompactionDials struct {
+	Strategy           string
+	Model              string
+	Threshold          string
+	Buffer             string
+	KeepUserTurns      string
+	PruneProtectTokens string
+	PruneMinimumTokens string
+	PruneKeepUserTurns string
+	PruneProtectTools  string
 }
 
 // Settings persists user-chosen defaults. Empty fields mean "leave as is".
@@ -203,6 +237,10 @@ type Settings interface {
 	// non-nil pointer (including to an empty slice) replaces it.
 	// seconds: off|0|1-60; maxChildDepth: default|0|1-8. Unknown values error.
 	SaveAutoApproveDials(seconds string, exclude *[]string, maxChildDepth string) error
+	// SaveCompactionDials persists non-empty compaction/prune dials into
+	// ~/.strike/config. See CompactionDials for field vocabulary. Unknown or
+	// unparseable values are rejected without writing.
+	SaveCompactionDials(d CompactionDials) error
 	// SaveKeybinds persists binding-id overrides to ~/.strike/keybinds.jsonc.
 	// Unknown ids are silently dropped; callers should pre-filter. A nil
 	// map deletes the file (reset to defaults).

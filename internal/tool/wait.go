@@ -41,7 +41,8 @@ func (waitTool) Description() string {
 - timeout_seconds is required (0 < t ≤ 300). Returns structured outcome:
   matched | timeout | canceled — never hangs past the timeout or parent interrupt.
 - On matched terminal events, includes handoff when available (same schema as task_status).
-- task.blocked fires when a child needs_attention (permission or user question).
+- task.blocked fires when a child needs_attention (permission or user question)
+  or reaches terminal blocked (e.g. independent verification gates failed).
 - Only owned children are observable; unknown/foreign sessions are rejected.
 - Emits wait.started / wait.resolved on the session event stream for UI/debug.
 - Does not replace [child.completed] injection — that still arrives for the model;

@@ -295,6 +295,9 @@ func waitKindFromChildStatus(status protocol.ChildStatus) string {
 		return tool.WaitEventTaskFailed
 	case protocol.ChildStatusCanceled:
 		return tool.WaitEventTaskCanceled
+	case protocol.ChildStatusBlocked:
+		// Independent verification gate failure (or other terminal blocked).
+		return tool.WaitEventTaskBlocked
 	default:
 		return ""
 	}
