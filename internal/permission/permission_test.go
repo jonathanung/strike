@@ -1670,3 +1670,114 @@ func TestPeekNilService(t *testing.T) {
 		t.Fatalf("nil Peek = %q, want ask", got)
 	}
 }
+
+func TestWideningDeltaDenyToAllow(t *testing.T) {
+	baseline := []Ruleset{
+		Defaults(),
+		{{Permission: "bash", Pattern: "*", Action: Deny}},
+	}
+	phase := Ruleset{{Permission: "bash", Pattern: "*", Action: Allow}}
+	got := WideningDelta(baseline, phase)
+	if len(got) != 1 {
+		t.Fatalf("delta = %#v, want 1 grant", got)
+	}
+	if got[0].Permission != "bash" || got[0].Action != Allow || got[0].Pattern != "*" {
+		t.Fatalf("grant = %#v", got[0])
+	}
+}
+
+func TestWideningDeltaAskToAllow(t *testing.T) {
+	baseline := []Ruleset{Defaults()}
+	phase := Ruleset{{Permission: "bash", Pattern: "*", Action: Allow}}
+	got := WideningDelta(baseline, phase)
+	if len(got) != 1 || got[0].Action != Allow {
+		t.Fatalf("delta = %#v, want bash allow", got)
+	}
+}
+
+func TestWideningDeltaDenyOnlyNoWiden(t *testing.T) {
+	baseline := []Ruleset{
+		Defaults(),
+		{{Permission: "write", Pattern: "*", Action: Allow}},
+	}
+	phase := Ruleset{
+		{Permission: "write", Pattern: "*", Action: Deny},
+		{Permission: "edit", Pattern: "*", Action: Deny},
+	}
+	if got := WideningDelta(baseline, phase); len(got) != 0 {
+		t.Fatalf("deny-only phase should not widen: %#v", got)
+	}
+}
+
+func TestWideningDeltaNoChangeWhenAlreadyAllow(t *testing.T) {
+	baseline := []Ruleset{
+		Defaults(),
+		{{Permission: "bash", Pattern: "*", Action: Allow}},
+	}
+	phase := Ruleset{{Permission: "bash", Pattern: "*", Action: Allow}}
+	if got := WideningDelta(baseline, phase); len(got) != 0 {
+		t.Fatalf("already-allow should not widen: %#v", got)
+	}
+}
+
+func TestWideningDeltaEmptyPhase(t *testing.T) {
+	if got := WideningDelta([]Ruleset{Defaults()}, nil); got != nil {
+		t.Fatalf("empty phase = %#v", got)
+	}
+}
+
+func TestServiceWideningFromPhaseUsesBaseline(t *testing.T) {
+	svc := New(func(protocol.Event) {}, Defaults(), Ruleset{
+		{Permission: "bash", Pattern: "*", Action: Deny},
+	})
+	svc.SetAgentRules(Ruleset{
+		{Permission: "write", Pattern: "*", Action: Deny},
+	})
+	phase := Ruleset{
+		{Permission: "bash", Pattern: "*", Action: Allow},
+		{Permission: "write", Pattern: "*", Action: Allow},
+		{Permission: "edit", Pattern: "*", Action: Deny}, // tighten only
+	}
+	got := svc.WideningFromPhase(phase)
+	if len(got) != 2 {
+		t.Fatalf("delta = %#v, want bash+write", got)
+	}
+	// Phase not applied yet.
+	if err := svc.Ask(context.Background(), tool.AskRequest{Permission: "bash", Patterns: []string{"ls"}}); err == nil {
+		t.Fatal("bash should still be denied before SetPhaseRules")
+	}
+}
+
+func TestActionRank(t *testing.T) {
+	if ActionRank(Deny) >= ActionRank(Ask) || ActionRank(Ask) >= ActionRank(Allow) {
+		t.Fatalf("rank order deny < ask < allow broken")
+	}
+}
+
+func TestRulesEqual(t *testing.T) {
+	a := Ruleset{{Permission: "bash", Pattern: "*", Action: Allow}}
+	b := Ruleset{{Permission: "bash", Pattern: "*", Action: Allow}}
+	c := Ruleset{{Permission: "bash", Pattern: "*", Action: Ask}}
+	if !RulesEqual(a, b) {
+		t.Fatal("equal rules should match")
+	}
+	if RulesEqual(a, c) {
+		t.Fatal("different action should not match")
+	}
+	if RulesEqual(a, nil) {
+		t.Fatal("nil should not match non-empty")
+	}
+}
+
+func TestPhaseRulesCopy(t *testing.T) {
+	svc := New(func(protocol.Event) {}, Defaults())
+	svc.SetPhaseRules(Ruleset{{Permission: "write", Pattern: "*", Action: Deny}})
+	got := svc.PhaseRules()
+	if len(got) != 1 || got[0].Permission != "write" {
+		t.Fatalf("PhaseRules = %#v", got)
+	}
+	got[0].Action = Allow
+	if svc.PhaseRules()[0].Action != Deny {
+		t.Fatal("PhaseRules must return a copy")
+	}
+}

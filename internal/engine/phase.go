@@ -8,12 +8,23 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/config"
+	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/question"
 	"github.com/jonathanung/strike-cli/internal/tool"
 )
 
 const phaseCheckTimeout = 30 * time.Second
+
+// PhaseGrantApproval is a persisted decision that a workflow phase may apply
+// permission rules that widen earlier config/agent denies (or ask→allow).
+type PhaseGrantApproval struct {
+	Workflow    string
+	Phase       string
+	Index       int
+	Fingerprint string
+	Grants      permission.Ruleset
+}
 
 // enterWorkflow starts workflow at phase index 0 (or re-enters if already active).
 func (e *Engine) enterWorkflow(name string) error {
@@ -40,6 +51,7 @@ func (e *Engine) clearPhase() {
 	}
 	e.workflow = config.Workflow{}
 	e.phaseIndex = -1
+	e.phaseGrantApproval = PhaseGrantApproval{}
 	e.perms.SetPhaseRules(nil)
 	e.emitSelected(protocol.PhaseChanged{
 		Correlation: e.sessionCorr(),
@@ -47,20 +59,40 @@ func (e *Engine) clearPhase() {
 }
 
 // enterPhase applies phase index of w: permissions, optional agent pin, event.
+// Permission widenings relative to config/agent layers require approval first;
+// rejection leaves the current phase, permissions, and context unchanged.
 func (e *Engine) enterPhase(w config.Workflow, index int) error {
-	return e.enterPhaseOpts(w, index, true)
+	return e.enterPhaseOpts(e.phaseReviewCtx(nil), w, index, true)
 }
 
 // enterPhaseOpts is enterPhase with optional phase.Agent pin. pinAgent false
 // keeps the current persona (used when the user/tool already chose build or
 // orchestrator while leaving plan).
-func (e *Engine) enterPhaseOpts(w config.Workflow, index int, pinAgent bool) error {
+func (e *Engine) enterPhaseOpts(ctx context.Context, w config.Workflow, index int, pinAgent bool) error {
 	if index < 0 || index >= len(w.Phases) {
 		return fmt.Errorf("workflow %q: phase index %d out of range", w.Name, index)
 	}
 	phase := w.Phases[index]
+	delta := e.perms.WideningFromPhase(phase.Permissions)
+	if len(delta) > 0 {
+		if err := e.approvePhaseWidening(ctx, w, phase, index, delta); err != nil {
+			return err
+		}
+	}
+
 	e.workflow = w
 	e.phaseIndex = index
+	if len(delta) > 0 {
+		e.phaseGrantApproval = PhaseGrantApproval{
+			Workflow:    w.Name,
+			Phase:       phase.Name,
+			Index:       index,
+			Fingerprint: w.Fingerprint,
+			Grants:      append(permission.Ruleset(nil), delta...),
+		}
+	} else {
+		e.phaseGrantApproval = PhaseGrantApproval{}
+	}
 	e.perms.SetPhaseRules(phase.Permissions)
 
 	e.emitSelected(protocol.PhaseChanged{
@@ -103,7 +135,114 @@ func (e *Engine) advancePhase(ctx context.Context) error {
 		e.clearPhase()
 		return nil
 	}
-	return e.enterPhase(e.workflow, next)
+	return e.enterPhaseOpts(ctx, e.workflow, next, true)
+}
+
+// phaseReviewCtx prefers an explicit ctx, then Run's parent context.
+func (e *Engine) phaseReviewCtx(ctx context.Context) context.Context {
+	if ctx != nil {
+		return ctx
+	}
+	if e.runCtx != nil {
+		return e.runCtx
+	}
+	return context.Background()
+}
+
+// approvePhaseWidening requires explicit acceptance of delta before phase
+// rules that open earlier denies/asks may apply. --auto accepts without a
+// prompt. Resume restores a matching prior decision without re-prompting.
+func (e *Engine) approvePhaseWidening(ctx context.Context, w config.Workflow, phase config.Phase, index int, delta permission.Ruleset) error {
+	ctx = e.phaseReviewCtx(ctx)
+	if e.phaseGrantMatches(w, phase, index, delta) {
+		return nil
+	}
+	if e.opts.DangerouslySkipPermissions {
+		e.emitPhaseGrantApproved(w, phase, index, delta, true)
+		return nil
+	}
+	if e.questions == nil {
+		return fmt.Errorf("phase %q: permission widening requires a question service (or --auto)", phase.Name)
+	}
+	body := formatPhaseGrantDelta(delta)
+	prompts := []protocol.QuestionPrompt{{
+		ID:     "phase_grant",
+		Header: "Permission widening",
+		Question: fmt.Sprintf(
+			"Workflow %q phase %q would widen effective permissions:\n%s\nAllow these grants for this phase?",
+			w.Name, phase.Name, body,
+		),
+		Options: []protocol.QuestionOption{
+			{Label: "Yes", Description: "Apply the widened grants with this phase"},
+			{Label: "No", Description: "Keep the current phase and permissions unchanged"},
+		},
+	}}
+	answers, err := e.questions.Ask(ctx, e.sessionCorr(), prompts)
+	if err != nil {
+		return err
+	}
+	answer := ""
+	if len(answers) > 0 {
+		answer = strings.TrimSpace(answers[0])
+	}
+	if !isYesGateAnswer(answer) {
+		return &question.RejectedError{
+			Message: fmt.Sprintf("User declined permission widening for phase %q.", phase.Name),
+		}
+	}
+	e.emitPhaseGrantApproved(w, phase, index, delta, false)
+	return nil
+}
+
+func (e *Engine) phaseGrantMatches(w config.Workflow, phase config.Phase, index int, delta permission.Ruleset) bool {
+	candidates := []PhaseGrantApproval{e.phaseGrantApproval, e.opts.InitialPhaseGrantApproval}
+	for _, a := range candidates {
+		if a.Workflow != w.Name || a.Phase != phase.Name || a.Index != index {
+			continue
+		}
+		if a.Fingerprint == "" || w.Fingerprint == "" || a.Fingerprint != w.Fingerprint {
+			continue
+		}
+		if permission.RulesEqual(a.Grants, delta) {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *Engine) emitPhaseGrantApproved(w config.Workflow, phase config.Phase, index int, delta permission.Ruleset, auto bool) {
+	grants := make([]protocol.PhaseGrantRule, 0, len(delta))
+	for _, r := range delta {
+		grants = append(grants, protocol.PhaseGrantRule{
+			Permission: r.Permission,
+			Pattern:    r.Pattern,
+			Action:     string(r.Action),
+		})
+	}
+	e.emitSelected(protocol.PhaseGrantApproved{
+		Correlation: e.sessionCorr(),
+		Workflow:    w.Name,
+		Phase:       phase.Name,
+		Index:       index,
+		Fingerprint: w.Fingerprint,
+		Grants:      grants,
+		Auto:        auto,
+	})
+}
+
+func formatPhaseGrantDelta(delta permission.Ruleset) string {
+	var b strings.Builder
+	for i, r := range delta {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		pat := r.Pattern
+		if pat == "" {
+			pat = "*"
+		}
+		fmt.Fprintf(&b, "  • %s %s → %s", r.Permission, pat, r.Action)
+	}
+	return b.String()
 }
 
 // effectiveGateLabel is the PhaseChanged.Gate value for the session autonomy
@@ -280,7 +419,7 @@ func (e *Engine) syncPhaseWithAgent(agentName string) {
 			w := e.workflow
 			for i, p := range w.Phases {
 				if p.Name == "implement" || p.Agent == "build" || p.Agent == "orchestrator" {
-					_ = e.enterPhaseOpts(w, i, false)
+					_ = e.enterPhaseOpts(e.phaseReviewCtx(nil), w, i, false)
 					return
 				}
 			}

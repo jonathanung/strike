@@ -117,6 +117,8 @@ type (
 	ModelSelected          = pub.ModelSelected
 	AgentSelected          = pub.AgentSelected
 	PhaseChanged           = pub.PhaseChanged
+	PhaseGrantApproved     = pub.PhaseGrantApproved
+	PhaseGrantRule         = pub.PhaseGrantRule
 	EffortSelected         = pub.EffortSelected
 	AutonomySelected       = pub.AutonomySelected
 	PermissionModeSelected = pub.PermissionModeSelected

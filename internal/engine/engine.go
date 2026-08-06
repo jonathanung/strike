@@ -223,9 +223,17 @@ type Options struct {
 	// phase after agent selection at startup. Empty workflow skips restore.
 	InitialPhaseWorkflow string
 	InitialPhaseIndex    int
+	// InitialPhaseGrantApproval restores a prior phase-widening decision so
+	// resume does not re-prompt when workflow content is unchanged.
+	InitialPhaseGrantApproval PhaseGrantApproval
 	// InitialAlwaysGrants restores session DecisionAlways rules after the
 	// initial agent profile is applied (SetAgentRules clears grants).
 	InitialAlwaysGrants permission.Ruleset
+	// DangerouslySkipPermissions mirrors --auto / --dangerously-skip-permissions:
+	// workflow phase permission widening is accepted without a review prompt.
+	// Hard sandbox and path protections are unchanged. Agent denies still apply
+	// via normal evaluation order.
+	DangerouslySkipPermissions bool
 	// QuietStartup applies Initial* provider/model/effort/autonomy/
 	// permission-mode/agent/phase without emitting *Selected or PhaseChanged.
 	// Durable resume sets this: the JSONL already has those events and the TUI
@@ -364,6 +372,9 @@ type Engine struct {
 	// workflow/phaseIndex track the active workflow phase (-1 = none).
 	workflow   config.Workflow
 	phaseIndex int
+	// phaseGrantApproval is the last accepted widening decision for the
+	// active phase (empty when no widening was needed or phase cleared).
+	phaseGrantApproval PhaseGrantApproval
 
 	// files tracks tool read snapshots so external edits (FilesChanged / /vim)
 	// force the model to re-read before edit/write.
