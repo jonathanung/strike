@@ -33,6 +33,12 @@ const (
 	AutonomySkipAll    = pub.AutonomySkipAll
 )
 
+// Phase resume recovery statuses.
+const (
+	PhaseStatusMissing  = pub.PhaseStatusMissing
+	PhaseStatusMismatch = pub.PhaseStatusMismatch
+)
+
 // Permission posture dial.
 type PermissionMode = pub.PermissionMode
 
@@ -89,6 +95,8 @@ type (
 	SetAutonomy            = pub.SetAutonomy
 	SetPermissionMode      = pub.SetPermissionMode
 	SetFast                = pub.SetFast
+	StartWorkflow          = pub.StartWorkflow
+	StopWorkflow           = pub.StopWorkflow
 	FilesChanged           = pub.FilesChanged
 	Compact                = pub.Compact
 	InspectEffectivePrompt = pub.InspectEffectivePrompt

@@ -760,3 +760,89 @@ rewound:
 		}
 	}
 }
+
+func TestRestorePhaseIdentityFields(t *testing.T) {
+	corr := protocol.Correlation{SessionID: "s1"}
+	events := []protocol.Event{
+		protocol.PhaseChanged{
+			Correlation: corr,
+			Workflow:    "custom",
+			Phase:       "step-a",
+			Index:       0,
+			Gate:        "user",
+			Source:      "project",
+			Fingerprint: "fp-abc",
+		},
+	}
+	got := engine.Restore(events)
+	if got.PhaseWorkflow != "custom" || got.PhaseName != "step-a" || got.PhaseIndex != 0 {
+		t.Fatalf("phase = %q/%q/%d", got.PhaseWorkflow, got.PhaseName, got.PhaseIndex)
+	}
+	if got.PhaseSource != "project" || got.PhaseFingerprint != "fp-abc" || got.PhaseStatus != "" {
+		t.Fatalf("identity = source=%q fp=%q status=%q", got.PhaseSource, got.PhaseFingerprint, got.PhaseStatus)
+	}
+}
+
+func TestRestorePhaseRecoveryStatus(t *testing.T) {
+	corr := protocol.Correlation{SessionID: "s1"}
+	events := []protocol.Event{
+		protocol.PhaseChanged{
+			Correlation: corr,
+			Workflow:    "custom",
+			Phase:       "step-a",
+			Index:       0,
+			Fingerprint: "old",
+			Status:      protocol.PhaseStatusMismatch,
+		},
+	}
+	got := engine.Restore(events)
+	if got.PhaseStatus != protocol.PhaseStatusMismatch || got.PhaseFingerprint != "old" {
+		t.Fatalf("recovery restore = %#v", got)
+	}
+}
+
+func TestRestoreInitialPhaseFingerprintMismatchOnRun(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	w := config.Workflow{
+		SchemaVersion: config.WorkflowSchemaVersion,
+		Name:          "bound",
+		Source:        config.WorkflowSourceProject,
+		Phases: []config.Phase{{
+			Name: "only",
+			Exit: config.ExitGate{Type: config.GateAgent},
+		}},
+	}
+	w.Fingerprint = config.MustWorkflowFingerprint(w)
+
+	eng := engine.New(engine.Options{
+		SessionID:               "resume-mismatch-run",
+		Select:                  func(string) (provider.Provider, string, error) { return echo.New(), "echo", nil },
+		InitialProvider:         "echo",
+		InitialModel:            "echo",
+		Agents:                  []engine.Agent{{Name: "build"}},
+		Workflows:               []config.Workflow{w},
+		InitialPhaseWorkflow:    "bound",
+		InitialPhaseIndex:       0,
+		InitialPhaseName:        "only",
+		InitialPhaseFingerprint: "stale-fingerprint",
+		QuietStartup:            true,
+		Rules:                   []permission.Ruleset{permission.Defaults()},
+	})
+	go eng.Run(ctx)
+
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("timeout waiting for recovery PhaseChanged")
+		case ev := <-eng.Events():
+			if p, ok := ev.(protocol.PhaseChanged); ok {
+				if p.Status == protocol.PhaseStatusMismatch && p.Workflow == "bound" {
+					return
+				}
+			}
+		}
+	}
+}
