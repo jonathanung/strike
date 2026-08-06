@@ -195,7 +195,7 @@ a process supervisor). Strike does not spawn Vite as a child.
 | `internal/server` | HTTP/SSE/WS handlers, live hub, bind/CIDR helpers |
 | `internal/server/static` | embedded cockpit page |
 | `web/` | optional Vite dev proxy + `npm run build` |
-| `internal/protocol` | Event + Op JSON envelopes |
+| `pkg/protocol` | Event + Op JSON envelopes (public; `internal/protocol` re-exports) |
 
 ## Manual checklist
 

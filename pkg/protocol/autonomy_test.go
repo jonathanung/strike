@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike-cli/pkg/protocol"
 )
 
 func TestParseAutonomyAcceptsEveryModeCaseInsensitively(t *testing.T) {
