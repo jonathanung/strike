@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -129,12 +130,15 @@ func (m Model) applyConfigFileOpen(msg configFileOpenMsg) (tea.Model, tea.Cmd) {
 }
 
 // reloadAfterConfigEdit applies best-effort live reloads after a config file
-// change. Returns an extra notice suffix (may be empty).
+// change under a .strike root. Returns an extra notice suffix (may be empty).
+// Non-.strike paths (ordinary /vim targets) are ignored even when basenames
+// collide (e.g. a project file named "config").
 func (m *Model) reloadAfterConfigEdit(absPath string) string {
-	if absPath == "" {
+	if absPath == "" || !pathUnderStrikeRoot(absPath, m.workDir) {
 		return ""
 	}
 	base := strings.ToLower(filepath.Base(absPath))
+	slash := filepath.ToSlash(absPath)
 
 	switch base {
 	case "keybinds.jsonc", "keybinds.json":
@@ -155,12 +159,34 @@ func (m *Model) reloadAfterConfigEdit(absPath string) string {
 	case "providers.jsonc", "providers.json":
 		return " - provider catalog refresh may need restart"
 	default:
-		// agents/skills/themes/workflows - theme JSON may apply if under themes/.
-		if strings.Contains(filepath.ToSlash(absPath), "/themes/") && strings.HasSuffix(base, ".json") {
+		// Theme JSON under .strike/themes: re-apply current theme id if it
+		// matches the edited stem (catalog reload picks up file bytes).
+		if strings.Contains(slash, "/themes/") && strings.HasSuffix(base, ".json") {
 			return m.reloadPresentationFromSettings()
 		}
 		return ""
 	}
+}
+
+// pathUnderStrikeRoot reports whether abs is under ~/.strike or <workDir>/.strike.
+func pathUnderStrikeRoot(abs, workDir string) bool {
+	abs = filepath.Clean(abs)
+	sep := string(os.PathSeparator)
+	marker := sep + ".strike" + sep
+	if strings.Contains(abs, marker) || strings.HasSuffix(abs, sep+".strike") {
+		return true
+	}
+	// Also accept exact file under a resolved .strike when marker was symlink-collapsed.
+	if workDir != "" {
+		root := filepath.Clean(filepath.Join(workDir, ".strike"))
+		if resolved, err := filepath.EvalSymlinks(root); err == nil {
+			root = resolved
+		}
+		if abs == root || strings.HasPrefix(abs, root+sep) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Model) reloadPresentationFromSettings() string {

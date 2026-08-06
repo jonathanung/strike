@@ -243,7 +243,11 @@ func TestSettingsMenuOpenConfigFiles(t *testing.T) {
 
 func TestFinishEditorSessionConfigReloadKeybinds(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "keybinds.jsonc")
+	strike := filepath.Join(dir, ".strike")
+	if err := os.MkdirAll(strike, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(strike, "keybinds.jsonc")
 	if err := os.WriteFile(path, []byte(`{"nav.jump-bottom":["ctrl+b"]}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -257,13 +261,31 @@ func TestFinishEditorSessionConfigReloadKeybinds(t *testing.T) {
 	m.services.ConfigFiles = &fakeConfigFiles{
 		keybinds: map[string][]string{"nav.jump-bottom": {"ctrl+x"}},
 	}
-	next, _ := m.finishEditorSession(path, "keybinds.jsonc", before, true, nil)
+	next, _ := m.finishEditorSession(path, ".strike/keybinds.jsonc", before, true, nil)
 	nm := next.(Model)
 	if !strings.Contains(nm.notice, "edited") || !strings.Contains(nm.notice, "keybinds") {
 		t.Fatalf("notice = %q", nm.notice)
 	}
 	if got := nm.keyOverrides["nav.jump-bottom"]; len(got) != 1 || got[0] != "ctrl+x" {
 		t.Fatalf("keyOverrides = %#v", nm.keyOverrides)
+	}
+}
+
+func TestReloadAfterConfigEditIgnoresNonStrikeBasename(t *testing.T) {
+	dir := t.TempDir()
+	// Ordinary project file named "config" must not trigger presentation reload.
+	path := filepath.Join(dir, "config")
+	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, _ := newAppTestModel(nil, nil)
+	m.workDir = dir
+	m.vimMode = VimModePane
+	if extra := m.reloadAfterConfigEdit(path); extra != "" {
+		t.Fatalf("unexpected reload for non-strike path: %q", extra)
+	}
+	if m.vimMode != VimModePane {
+		t.Fatalf("vimMode mutated")
 	}
 }
 
