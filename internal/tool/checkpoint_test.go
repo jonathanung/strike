@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -191,12 +192,117 @@ func TestCheckpointNilSafe(t *testing.T) {
 	var s *CheckpointStore
 	s.BeginTurn("t")
 	s.Snapshot("/x")
+	s.MarkUncovered("bash")
 	s.CommitTurn()
 	if _, err := s.Pop(true); err != nil {
 		t.Fatal(err)
 	}
 	if s.PeekHasFiles() {
 		t.Fatal("nil PeekHasFiles")
+	}
+	if !s.Peek().Empty {
+		t.Fatal("nil Peek should be empty")
+	}
+}
+
+func TestCheckpointMultiFileRestoreOrder(t *testing.T) {
+	dir := t.TempDir()
+	// Lexically reverse create order so restore sort is observable.
+	paths := []string{
+		filepath.Join(dir, "z.txt"),
+		filepath.Join(dir, "m.txt"),
+		filepath.Join(dir, "a.txt"),
+	}
+	for i, p := range paths {
+		if err := os.WriteFile(p, []byte(fmt.Sprintf("v0-%d\n", i)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := NewCheckpointStore()
+	s.BeginTurn("t-multi")
+	for _, p := range paths {
+		s.Snapshot(p)
+	}
+	for i, p := range paths {
+		if err := os.WriteFile(p, []byte(fmt.Sprintf("v1-%d\n", i)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.CommitTurn()
+
+	peek := s.Peek()
+	if peek.Empty || peek.TurnID != "t-multi" || len(peek.Restorable) != 3 {
+		t.Fatalf("Peek = %+v", peek)
+	}
+	wantOrder := []string{
+		filepath.Join(dir, "a.txt"),
+		filepath.Join(dir, "m.txt"),
+		filepath.Join(dir, "z.txt"),
+	}
+	for i, p := range wantOrder {
+		if peek.Restorable[i] != p {
+			t.Fatalf("Peek.Restorable[%d] = %q, want %q", i, peek.Restorable[i], p)
+		}
+	}
+
+	res, err := s.Pop(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.RestoredN != 3 {
+		t.Fatalf("RestoredN = %d", res.RestoredN)
+	}
+	for i, p := range wantOrder {
+		if res.Restored[i] != p {
+			t.Fatalf("Restored[%d] = %q, want %q (stable path order)", i, res.Restored[i], p)
+		}
+		got, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Original content was written in reverse index order.
+		origIdx := map[string]int{
+			filepath.Join(dir, "z.txt"): 0,
+			filepath.Join(dir, "m.txt"): 1,
+			filepath.Join(dir, "a.txt"): 2,
+		}[p]
+		want := fmt.Sprintf("v0-%d\n", origIdx)
+		if string(got) != want {
+			t.Fatalf("%s = %q, want %q", p, got, want)
+		}
+	}
+}
+
+func TestCheckpointMarkUncovered(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.txt")
+	if err := os.WriteFile(path, []byte("v0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := NewCheckpointStore()
+	s.BeginTurn("t1")
+	s.Snapshot(path)
+	s.MarkUncovered("bash")
+	s.MarkUncovered("bash") // collapse
+	s.MarkUncovered("  ")
+	if err := os.WriteFile(path, []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.CommitTurn()
+
+	peek := s.Peek()
+	if len(peek.Uncovered) != 1 || peek.Uncovered[0] != "bash" {
+		t.Fatalf("Peek.Uncovered = %#v", peek.Uncovered)
+	}
+	res, err := s.Pop(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.RestoredN != 1 {
+		t.Fatalf("RestoredN = %d", res.RestoredN)
+	}
+	if len(res.Uncovered) != 1 || res.Uncovered[0] != "bash" {
+		t.Fatalf("Pop.Uncovered = %#v", res.Uncovered)
 	}
 }
 
@@ -209,12 +315,18 @@ func TestContextSnapshotHelper(t *testing.T) {
 	store := NewCheckpointStore()
 	store.BeginTurn("t")
 	tc := &Context{
-		WorkDir:    dir,
-		Checkpoint: store.Snapshot,
+		WorkDir:             dir,
+		Checkpoint:          store.Snapshot,
+		CheckpointUncovered: store.MarkUncovered,
 	}
 	tc.SnapshotPath(path)
+	tc.MarkUncovered("bash")
 	store.CommitTurn()
 	if !store.PeekHasFiles() {
 		t.Fatal("expected snapshot via Context")
+	}
+	peek := store.Peek()
+	if len(peek.Uncovered) != 1 || peek.Uncovered[0] != "bash" {
+		t.Fatalf("Peek.Uncovered = %#v", peek.Uncovered)
 	}
 }

@@ -374,6 +374,10 @@ type Model struct {
 	// turnStartedAt / toolCallsThisTurn power the working-status elapsed label.
 	turnStartedAt     time.Time
 	toolCallsThisTurn int
+	// undoStack tracks per-turn harness file previews for /undo UX (#801).
+	// Appended on TurnCompleted; popped on SessionRewound. Last entry is the
+	// turn that /undo would reverse.
+	undoStack []undoPreview
 	// lastStopReason is the most recent TurnCompleted.StopReason (e.g.
 	// "interrupted"). Cleared on the next TurnStarted so canceled chrome is
 	// sticky but not permanent (#809).
