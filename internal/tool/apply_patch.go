@@ -16,6 +16,10 @@ func NewApplyPatch() Tool { return applyPatchTool{} }
 
 func (applyPatchTool) Name() string { return "apply_patch" }
 
+func (applyPatchTool) Contract() Contract {
+	return staticContract(SideEffectWorkspaceMutative, IdempotencyConditional)
+}
+
 func (applyPatchTool) Description() string {
 	return `Apply a multi-file patch in a stripped-down, file-oriented diff format.
 
@@ -92,10 +96,10 @@ type plannedOp struct {
 func (applyPatchTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
 	var a applyPatchArgs
 	if err := json.Unmarshal(args, &a); err != nil {
-		return Result{}, fmt.Errorf("invalid arguments: %w", err)
+		return Result{}, ErrInvalidArgs(fmt.Sprintf("invalid arguments: %v", err))
 	}
 	if strings.TrimSpace(a.Patch) == "" {
-		return Result{}, fmt.Errorf("patch is required")
+		return Result{}, ErrInvalidArgs("patch is required")
 	}
 
 	planned, originals, err := preparePatch(tc.WorkDir, a.Patch)

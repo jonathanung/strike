@@ -20,6 +20,10 @@ func NewGlob() Tool { return globTool{} }
 
 func (globTool) Name() string { return "glob" }
 
+func (globTool) Contract() Contract {
+	return staticContract(SideEffectRead, IdempotencySafeRetry)
+}
+
 func (globTool) Description() string {
 	return `Fast file pattern matching tool that works with any codebase size.
 

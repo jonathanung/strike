@@ -13,6 +13,10 @@ func NewTask() Tool { return taskTool{} }
 
 func (taskTool) Name() string { return "task" }
 
+func (taskTool) Contract() Contract {
+	return staticContract(SideEffectProcess, IdempotencyUnsafe)
+}
+
 func (taskTool) Description() string {
 	return `Delegate a bounded subtask to a child agent with its own context.
 

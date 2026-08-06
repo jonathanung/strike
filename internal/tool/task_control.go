@@ -24,6 +24,10 @@ func NewTaskInterrupt() Tool { return taskInterruptTool{} }
 
 func (taskStatusTool) Name() string { return "task_status" }
 
+func (taskStatusTool) Contract() Contract {
+	return staticContract(SideEffectNone, IdempotencySafeRetry)
+}
+
 func (taskStatusTool) Description() string {
 	return `Inspect live or terminal status of an owned child session started by task.
 
@@ -107,6 +111,10 @@ func (taskStatusTool) Execute(ctx context.Context, args json.RawMessage, tc *Con
 
 func (taskReadTool) Name() string { return "task_read" }
 
+func (taskReadTool) Contract() Contract {
+	return staticContract(SideEffectRead, IdempotencySafeRetry)
+}
+
 func (taskReadTool) Description() string {
 	return `Read a bounded recent slice of an owned child's transcript/events.
 
@@ -177,6 +185,10 @@ func (taskReadTool) Execute(ctx context.Context, args json.RawMessage, tc *Conte
 
 func (taskMessageTool) Name() string { return "task_message" }
 
+func (taskMessageTool) Contract() Contract {
+	return staticContract(SideEffectExternal, IdempotencyUnsafe)
+}
+
 func (taskMessageTool) Description() string {
 	return `Send additional guidance to a running owned child session (parent→child steer).
 
@@ -241,6 +253,11 @@ func (taskMessageTool) Execute(ctx context.Context, args json.RawMessage, tc *Co
 }
 
 func (taskInterruptTool) Name() string { return "task_interrupt" }
+
+func (taskInterruptTool) Contract() Contract {
+	// Interrupt is idempotent once the child is already stopping/stopped.
+	return staticContract(SideEffectProcess, IdempotencyConditional)
+}
 
 func (taskInterruptTool) Description() string {
 	return `Cancel a running owned child session by id.

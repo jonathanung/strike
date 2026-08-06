@@ -14,6 +14,10 @@ func NewEdit() Tool { return editTool{} }
 
 func (editTool) Name() string { return "edit" }
 
+func (editTool) Contract() Contract {
+	return staticContract(SideEffectWorkspaceMutative, IdempotencyConditional)
+}
+
 func (editTool) Description() string {
 	return `Performs exact string replacements in files.
 
@@ -52,10 +56,10 @@ type editArgs struct {
 func (editTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
 	var a editArgs
 	if err := json.Unmarshal(args, &a); err != nil {
-		return Result{}, fmt.Errorf("invalid arguments: %w", err)
+		return Result{}, ErrInvalidArgs(fmt.Sprintf("invalid arguments: %v", err))
 	}
 	if a.OldString == a.NewString {
-		return Result{}, fmt.Errorf("oldString and newString are identical")
+		return Result{}, ErrInvalidArgs("oldString and newString are identical")
 	}
 	path, rel, err := resolveInWorkspace(tc.WorkDir, a.FilePath)
 	if err != nil {
@@ -74,10 +78,10 @@ func (editTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	content := string(data)
 	count := strings.Count(content, a.OldString)
 	if count == 0 {
-		return Result{}, fmt.Errorf("oldString not found in %s; read the file and match the content exactly", rel)
+		return Result{}, ErrPrecondition(fmt.Sprintf("oldString not found in %s; read the file and match the content exactly", rel))
 	}
 	if count > 1 && !a.ReplaceAll {
-		return Result{}, fmt.Errorf("oldString matches %d locations in %s; provide more surrounding context to make it unique, or set replaceAll", count, rel)
+		return Result{}, ErrPrecondition(fmt.Sprintf("oldString matches %d locations in %s; provide more surrounding context to make it unique, or set replaceAll", count, rel))
 	}
 	// Metadata carries the change for UI diff rendering, independent of the
 	// model-facing output.

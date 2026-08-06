@@ -23,6 +23,10 @@ func NewRead() Tool { return readTool{} }
 
 func (readTool) Name() string { return "read" }
 
+func (readTool) Contract() Contract {
+	return staticContract(SideEffectRead, IdempotencySafeRetry)
+}
+
 func (readTool) Description() string {
 	return `Read a file from the local filesystem. If the path does not exist, an error is returned.
 

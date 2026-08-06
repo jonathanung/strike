@@ -33,6 +33,9 @@ type Restored struct {
 	PhaseSource      string
 	PhaseFingerprint string
 	PhaseStatus      string // empty | missing | mismatch
+	// PhaseGrant is the last PhaseGrantApproved that still matches the active
+	// phase (cleared when the phase ends or switches without a new approval).
+	PhaseGrant PhaseGrantApproval
 	// AlwaysGrants are session DecisionAlways rules still in force after the
 	// last agent switch (SetAgentRules clears grants).
 	AlwaysGrants permission.Ruleset
@@ -48,8 +51,10 @@ type reqAccum struct {
 }
 
 type toolEnd struct {
-	output  string
-	isError bool
+	output    string
+	isError   bool
+	errorCode string
+	retryable bool
 }
 
 // pendingAsk remembers PermissionAsked fields until PermissionResolved.
@@ -84,11 +89,20 @@ func Restore(events []protocol.Event) Restored {
 			for _, c := range cur.calls {
 				end, ok := cur.results[c.ID]
 				if !ok {
-					end = toolEnd{output: unstartedToolOutput, isError: true}
+					end = toolEnd{
+						output:    unstartedToolOutput,
+						isError:   true,
+						errorCode: protocol.ErrorCodeCanceled,
+					}
+				}
+				tr := &provider.ToolResult{CallID: c.ID, Output: end.output, IsError: end.isError}
+				if end.isError && end.errorCode != "" {
+					tr.ErrorCode = end.errorCode
+					tr.Retryable = end.retryable
 				}
 				msgs = append(msgs, provider.Message{
 					Role:       provider.RoleTool,
-					ToolResult: &provider.ToolResult{CallID: c.ID, Output: end.output, IsError: end.isError},
+					ToolResult: tr,
 				})
 			}
 		}
@@ -131,7 +145,11 @@ func Restore(events []protocol.Event) Restored {
 			})
 		case protocol.ToolCallEnd:
 			ensure(e.ProviderRequestID)
-			cur.results[e.CallID] = toolEnd{output: e.Output, isError: e.IsError}
+			cur.results[e.CallID] = toolEnd{
+				output:    e.Output,
+				isError:   e.IsError,
+				errorCode: e.ErrorCode,
+			}
 		case protocol.TurnCompleted, protocol.EngineError:
 			flush()
 		case protocol.CompactionCompleted:
@@ -169,6 +187,26 @@ func Restore(events []protocol.Event) Restored {
 				r.PhaseSource = ""
 				r.PhaseFingerprint = ""
 				r.PhaseStatus = ""
+				r.PhaseGrant = PhaseGrantApproval{}
+			} else if r.PhaseGrant.Workflow != e.Workflow || r.PhaseGrant.Phase != e.Phase || r.PhaseGrant.Index != e.Index {
+				// Phase moved without a matching grant event yet.
+				r.PhaseGrant = PhaseGrantApproval{}
+			}
+		case protocol.PhaseGrantApproved:
+			grants := make(permission.Ruleset, 0, len(e.Grants))
+			for _, g := range e.Grants {
+				grants = append(grants, permission.Rule{
+					Permission: g.Permission,
+					Pattern:    g.Pattern,
+					Action:     permission.Action(g.Action),
+				})
+			}
+			r.PhaseGrant = PhaseGrantApproval{
+				Workflow:    e.Workflow,
+				Phase:       e.Phase,
+				Index:       e.Index,
+				Fingerprint: e.Fingerprint,
+				Grants:      grants,
 			}
 		case protocol.SessionTitled:
 			if e.Title != "" {
@@ -249,6 +287,8 @@ func restoreCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	case protocol.PermissionModeSelected:
 		return e.Correlation, true
 	case protocol.PhaseChanged:
+		return e.Correlation, true
+	case protocol.PhaseGrantApproved:
 		return e.Correlation, true
 	case protocol.SessionTitled:
 		return e.Correlation, true
