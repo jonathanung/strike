@@ -41,6 +41,7 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		{ID: "command:visualizer", Label: "/visualizer", Description: "focus the visualizer right pane", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/visualizer"}},
 		{ID: "command:system", Label: "/system", Description: "focus the system right pane (requires telemetry on)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/system"}},
 		{ID: "command:telemetry", Label: "/telemetry", Description: "show or hide local system metrics (CPU/RAM/disk)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/telemetry"}},
+		{ID: "command:pets", Label: "/pets", Description: "focus the pets right pane (ASCII companions)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/pets"}},
 		{ID: "command:fast", Label: "/fast", Description: "toggle OpenAI priority tier (faster, ~2× cost)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/fast"}},
 		{ID: "command:think", Label: "/think", Description: "show or hide model chain-of-thought", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/think"}},
 		{ID: "command:vim", Label: "/vim", Description: "open a file in the editor (embedded/modal/takeover; see vimMode)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/vim"}},
@@ -56,6 +57,7 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		{ID: "command:session", Label: "/session", Description: "browse and resume a past session", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/session"}},
 		{ID: "command:rename", Label: "/rename", Description: "rename the current session", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/rename"}},
 		{ID: "command:export", Label: "/export", Description: "export the conversation to markdown", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/export"}},
+		{ID: "command:timeline", Label: "/timeline", Description: "structured run timeline (collapsed view or JSON export)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/timeline"}},
 		{ID: "command:copy", Label: "/copy", Description: "copy the last assistant response to the clipboard", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/copy"}},
 		{ID: "command:help", Label: "/help", Description: "show available commands", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/help"}},
 		{ID: "command:keys", Label: "/keys", Description: "show keyboard shortcuts", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/keys"}},
@@ -154,6 +156,8 @@ func TestPaletteAvailabilityAndDisabledSelection(t *testing.T) {
 		assertPaletteInvoke(t, m, "/md-read", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/md-read"}})
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
 		assertPaletteInvoke(t, m, "/export", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/export"}})
+		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
+		assertPaletteInvoke(t, m, "/timeline", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/timeline"}})
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
 		assertPaletteInvoke(t, m, "/copy", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/copy"}})
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})

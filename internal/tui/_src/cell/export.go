@@ -14,7 +14,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/jonathanung/strike-cli/internal/secret"
+	"github.com/jonathanung/strike-cli/pkg/redact"
 )
 
 const (
@@ -39,10 +39,10 @@ type exportFinishedMsg struct {
 	open bool
 }
 
-// redactSecrets replaces common credential shapes with placeholders via the
-// shared internal/secret helper (session persist, engine tool scrub, #790).
+// redactSecrets replaces common credential shapes with placeholders via
+// pkg/redact (shared with timeline export, session scrub, and #796).
 func redactSecrets(s string) string {
-	return secret.Redact(s)
+	return redact.String(s)
 }
 
 // parseExportArgs accepts: [path] | [path] --open | --open [path] | --open

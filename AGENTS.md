@@ -50,6 +50,8 @@ service/theme token).
 | `internal/acp` | Agent Client Protocol adapter (`strike acp`: ACP session/prompt ↔ Op/Event for Zed/Devin) |
 | `internal/server` | Experimental read-only HTTP attach (`strike serve`: /health, SSE events, attach page) |
 | `pkg/protocol` | Public Ops/Events wire schema; JSONL envelopes (semver `Version`) |
+| `pkg/redact` | Shared credential-shaped string scrubbing (exports, inspect, traces) |
+| `pkg/timeline` | Structured run timeline builder + redacted JSON/JSONL export |
 | `pkg/sdk` | Thin Go client over `pkg/protocol` (channel/JSONL client, RunTurn, session replay) |
 | `internal/protocol` | Compatibility re-export of `pkg/protocol` |
 | `internal/engine` | Turn loop, tool dispatch, interrupts |
@@ -61,7 +63,7 @@ service/theme token).
 | `internal/lsp` | LSP client (JSON-RPC over stdio); extension registry; diagnostics collection |
 | `internal/question` | user-question ask service (suspend tool until QuestionReply) |
 | `internal/permission` | last-match-wins allow/ask/deny + ask service |
-| `internal/secret` | shared redaction + secret-ref env indirection (session/engine/TUI export; see docs/secrets.md) |
+| `internal/secret` | secret-ref env indirection + protocol event redaction on top of pkg/redact (see docs/secrets.md) |
 | `internal/auth` | credentials, OAuth/PKCE/device, env precedence |
 | `internal/config` | global/project JSON + agents/skills markdown |
 | `internal/session` | JSONL event log append/replay + concurrent Manager |
@@ -94,11 +96,11 @@ service/theme token).
   `internal/tui/_src/<group>/` and are flattened by `go generate ./internal/tui`
   (make/CI run this first). Flattened `internal/tui/*.go` are gitignored —
   edit `_src/` only; editing flattened files is silently reverted.
-- `internal/tui` may import only `internal/protocol`, `internal/host`,
-  `internal/secret`, and `internal/tui/...` among `internal/*` packages —
-  enforced by `internal/tui/boundary_test.go` (`TestArchitectureBoundaries`).
-  Prefer `pkg/protocol` for the public wire schema (also allowed; not under
-  `internal/`). Charm paths: v1 `github.com/charmbracelet/…` or v2
+- `internal/tui` may import only `internal/protocol`, `internal/host`, and
+  `internal/tui/...` among `internal/*` packages — enforced by
+  `internal/tui/boundary_test.go` (`TestArchitectureBoundaries`). Prefer
+  `pkg/protocol` / `pkg/redact` for public wire/scrub helpers (also allowed;
+  not under `internal/`). Charm paths: v1 `github.com/charmbracelet/…` or v2
   `charm.land/…`; never `github.com/charmbracelet/…/v2`
   (`TestCharmImportPaths`).
 

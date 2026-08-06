@@ -17,12 +17,15 @@ const modulePath = "github.com/jonathanung/strike-cli"
 // the module with go/parser and checking its imports:
 //
 //   - internal/tui/** may import no internal/* package other than protocol,
-//     host, secret, and tui/... (so the frontend never touches auth/config/
-//     models/history directly and can be developed against fakes). secret is
-//     a pure stdlib redaction helper shared with session/engine egress.
+//     host, and tui/... (so the frontend never touches auth/config/models/
+//     history directly and can be developed against fakes). String redaction
+//     uses pkg/redact (not under internal/).
 //   - internal/host (the contract package, not host/local) imports the
 //     standard library only.
 //   - pkg/protocol imports the standard library only.
+//   - pkg/redact imports the standard library only.
+//   - pkg/timeline may import only the standard library, pkg/protocol, and
+//     pkg/redact.
 //   - pkg/sdk may import only the standard library and pkg/protocol.
 //   - no backend package (internal/* except internal/tui/**) imports
 //     internal/tui/**.
@@ -136,11 +139,10 @@ func boundaryViolation(pkgDir, imp string) string {
 			return "" // stdlib or third-party is fine (Charm paths: TestCharmImportPaths)
 		}
 		suffix := strings.TrimPrefix(imp, internal)
-		if suffix == "protocol" || suffix == "host" || suffix == "secret" ||
-			suffix == "tui" || strings.HasPrefix(suffix, "tui/") {
+		if suffix == "protocol" || suffix == "host" || suffix == "tui" || strings.HasPrefix(suffix, "tui/") {
 			return ""
 		}
-		return "internal/tui may only import internal/{protocol,host,secret,tui/...}"
+		return "internal/tui may only import internal/{protocol,host,tui/...}"
 
 	case pkgDir == "internal/host":
 		if strings.Contains(imp, ".") {
@@ -153,6 +155,24 @@ func boundaryViolation(pkgDir, imp string) string {
 			return "pkg/protocol is a stdlib-only public wire package"
 		}
 		return ""
+
+	case pkgDir == "pkg/redact" || strings.HasPrefix(pkgDir, "pkg/redact/"):
+		if strings.Contains(imp, ".") {
+			return "pkg/redact is a stdlib-only public package"
+		}
+		return ""
+
+	case pkgDir == "pkg/timeline" || strings.HasPrefix(pkgDir, "pkg/timeline/"):
+		if !strings.Contains(imp, ".") {
+			return "" // stdlib
+		}
+		if imp == modulePath+"/pkg/protocol" || strings.HasPrefix(imp, modulePath+"/pkg/protocol/") {
+			return ""
+		}
+		if imp == modulePath+"/pkg/redact" || strings.HasPrefix(imp, modulePath+"/pkg/redact/") {
+			return ""
+		}
+		return "pkg/timeline may only import stdlib, pkg/protocol, and pkg/redact"
 
 	case pkgDir == "pkg/sdk" || strings.HasPrefix(pkgDir, "pkg/sdk/"):
 		if !strings.Contains(imp, ".") {

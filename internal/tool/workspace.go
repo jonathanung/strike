@@ -119,9 +119,11 @@ func resolveDanglingSymlink(rootReal, userPath, candidate string) (resolved, rel
 	return absTarget, filepath.ToSlash(rel), nil
 }
 
-// workspaceWriteFile re-validates path under root immediately before writing and
-// opens the leaf with O_NOFOLLOW (Unix) so a symlink planted after the initial
-// resolve cannot redirect the write outside the workspace.
+// workspaceWriteFile re-validates path under root immediately before writing,
+// refuses a symlink leaf, and commits via temp+rename (atomic on local POSIX)
+// so readers never see a partial file. Pair with resolveInWorkspace so a
+// symlink planted after the initial resolve cannot redirect the write outside
+// the workspace.
 func workspaceWriteFile(root, path string, data []byte) error {
 	resolved, _, err := resolveInWorkspace(root, path)
 	if err != nil {
@@ -141,7 +143,7 @@ func workspaceWriteFile(root, path string, data []byte) error {
 	if fi, lerr := os.Lstat(resolved); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
 		return &WorkspaceEscapeError{Path: path, Root: root}
 	}
-	return writeFileNoFollow(resolved, data, 0o644)
+	return atomicWriteFile(resolved, data, 0o644)
 }
 
 // ensureWorkspacePrefix checks that every existing prefix of candidate stays

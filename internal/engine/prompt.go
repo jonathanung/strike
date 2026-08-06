@@ -13,7 +13,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/memory"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
-	"github.com/jonathanung/strike-cli/internal/secret"
+	"github.com/jonathanung/strike-cli/pkg/redact"
 )
 
 // MemorySource is the engine-facing surface for auto-loading tagged project
@@ -504,12 +504,12 @@ func layerPreview(text string) string {
 }
 
 // RedactSecrets replaces credential-shaped substrings with a placeholder.
-// Delegates to internal/secret (shared with session persist, TUI export, #790).
+// Delegates to pkg/redact (shared with timeline export, session scrub, #796).
 // Exported for tests.
 func RedactSecrets(s string) string {
-	return secret.Redact(s)
+	return redact.String(s)
 }
 
 func redactSecrets(s string) string {
-	return secret.Redact(s)
+	return redact.String(s)
 }

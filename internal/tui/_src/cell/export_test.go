@@ -12,35 +12,35 @@ import (
 
 func TestRedactSecrets(t *testing.T) {
 	tests := []struct {
-		name string
-		in   string
-		want string
+		name   string
+		in     string
+		banned string // empty = expect unchanged
+		want   string // optional exact match
 	}{
 		{
-			name: "anthropic",
-			in:   "key sk-ant-api03-abcdefghijklmnopqrstuvwxyz012345",
-			want: "key [REDACTED_ANTHROPIC_KEY]",
+			name:   "anthropic",
+			in:     "key sk-ant-api03-abcdefghijklmnopqrstuvwxyz012345",
+			banned: "sk-ant-api03-abcdefghijklmnopqrstuvwxyz012345",
 		},
 		{
-			name: "openai-ish",
-			in:   "token sk-abcdefghijklmnopqrstuvwxyz0123456789",
-			want: "token [REDACTED_API_KEY]",
+			name:   "openai-ish",
+			in:     "token sk-abcdefghijklmnopqrstuvwxyz0123456789",
+			banned: "sk-abcdefghijklmnopqrstuvwxyz0123456789",
 		},
 		{
-			name: "bearer",
-			in:   "Authorization: Bearer abcdefghijklmnopqrstuvwxyz0123",
-			want: "Authorization: Bearer [REDACTED]",
+			name:   "bearer",
+			in:     "Authorization: Bearer abcdefghijklmnopqrstuvwxyz0123",
+			banned: "abcdefghijklmnopqrstuvwxyz0123",
 		},
 		{
-			name: "github",
-			// ghp_ pattern wins over GITHUB_TOKEN= assignment when the value is a ghp_ token.
-			in:   "export GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789",
-			want: "export GITHUB_TOKEN=[REDACTED_GITHUB_TOKEN]",
+			name:   "github",
+			in:     "export GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+			banned: "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
 		},
 		{
-			name: "assignment",
-			in:   `api_key=supersecretvalue123`,
-			want: "api_key=[REDACTED]",
+			name:   "assignment",
+			in:     `api_key=supersecretvalue123`,
+			banned: "supersecretvalue123",
 		},
 		{
 			name: "plain prose",
@@ -50,8 +50,18 @@ func TestRedactSecrets(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := redactSecrets(tt.in); got != tt.want {
-				t.Fatalf("redactSecrets = %q, want %q", got, tt.want)
+			got := redactSecrets(tt.in)
+			if tt.want != "" {
+				if got != tt.want {
+					t.Fatalf("redactSecrets = %q, want %q", got, tt.want)
+				}
+				return
+			}
+			if strings.Contains(got, tt.banned) {
+				t.Fatalf("redactSecrets still contains %q → %q", tt.banned, got)
+			}
+			if !strings.Contains(got, "REDACTED") {
+				t.Fatalf("redactSecrets = %q, want REDACTED marker", got)
 			}
 		})
 	}

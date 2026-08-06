@@ -1,50 +1,49 @@
 # Secrets: detection, redaction, and refs
 
 Strike keeps credentials out of session logs, exports, model-facing tool
-results, and diagnostic bundles. The shared implementation lives in
-`internal/secret` and is used by:
+results, and diagnostic bundles.
+
+| Package | Role |
+|---|---|
+| **`pkg/redact`** | Shared string scrubbing (`String`, `ScrubToolOutput`, `JSON`, `Error`, `Bytes`) — used by timeline export (#790), TUI `/export`, engine inspect previews |
+| **`internal/secret`** | Secret-ref env indirection + `RedactEvent` for session JSONL; thin wrappers over `pkg/redact` |
+
+Auth material itself stays in `~/.strike/auth.json` (0600) and process env;
+see [auth.md](auth.md).
+
+## Egress paths
 
 | Path | What happens |
 |---|---|
-| **Session JSONL** (`internal/session`) | Every `Append` runs `secret.RedactEvent` before encode |
-| **Engine tool results** | `ScrubToolOutput` on settle + streaming tool/process tails |
-| **TUI `/export`** | Markdown transcript runs `secret.Redact` on text/args |
-| **Context doctor previews** | Engine layer previews use `secret.Redact` |
-| **MCP status errors** | `secret.RedactError` collapses token-bearing messages |
-| **Timeline / trace export (#790)** | Import `internal/secret` (`Redact`, `RedactEvent`, `ScrubToolOutput`) |
-
-Auth material itself stays in `~/.strike/auth.json` (0600) and process env;
-see [auth.md](auth.md). This document covers **egress** scrubbing and
-**secret refs**, not the credential store.
+| **Session JSONL** | `Append` runs `secret.RedactEvent` before encode |
+| **Engine tool results** | `secret.ScrubToolOutput` on settle + streaming tool/process tails |
+| **Timeline export** (`/timeline export`) | `pkg/redact.String` on previews (#790) |
+| **TUI `/export`** | `pkg/redact.String` on markdown bodies |
+| **Context doctor previews** | Engine layer previews use `pkg/redact` |
+| **MCP status errors** | `secret.RedactError` → `pkg/redact.Error` |
 
 ## What is redacted
 
 Best-effort patterns (prefer false negatives over mangling ordinary prose):
 
 - Provider API key shapes: `sk-…`, `sk-ant-…`, `xai-…`
-- GitHub tokens: `ghp_` / `gho_` / `ghu_` / `ghs_` / `ghr_` / `github_pat_…`
+- GitHub tokens: `ghp_` / `gho_` / … / `github_pat_…`
 - Slack-style `xox[baprs]-…`, AWS access key ids `AKIA…`
 - PEM private key blocks
 - `Bearer <token>` headers
-- Assignments: `api_key=`, `password=`, `OPENAI_API_KEY=`, …
+- Assignments: `api_key=`, `password=`, `OPENAI_API_KEY=`, `TOKEN=`, …
 - JSON credential fields: `apiKey`, `access`, `refresh`, `idToken`, …
-- **Tool results only:** long high-entropy tokens (mixed letters+digits, ≥40
-  chars) → `[REDACTED_HIGH_ENTROPY]`
-
-Placeholders look like `[REDACTED]`, `[REDACTED_API_KEY]`,
-`[REDACTED_GITHUB_TOKEN]`, etc.
+- **Tool results only (`ScrubToolOutput`):** long high-entropy tokens (mixed
+  letters+digits outside pure hex, ≥40 chars) → `[REDACTED_HIGH_ENTROPY]`
 
 ## What is preserved (for debugging)
 
 - Structural event fields: call IDs, session/turn IDs, tool names, stop
   reasons, exit codes, permission decisions
 - File paths and ordinary prose (unless they embed a matching token shape)
-- Short hex/ids (commit SHAs, UUIDs under the high-entropy threshold)
+- Pure hex digests (git SHAs) and short ids
 - Secret **refs** themselves (`secret://env/NAME`) — the wire form is not a
   secret; only the resolved value is
-
-Redaction is not a substitute for filesystem permissions on
-`~/.strike/auth.json` or for avoiding pasting live keys into chat.
 
 ## Secret refs (v1: env-key indirection)
 
@@ -66,7 +65,6 @@ Go API (`internal/secret`):
 ref, ok := secret.ParseRef("secret://env/OPENAI_API_KEY")
 val, err := secret.Resolve(ref) // os.LookupEnv; fail closed if unset/empty
 
-// Inject into a subprocess without showing values to the model:
 env, err := secret.MergeEnv(nil /* os.Environ */, map[string]secret.Ref{
     "OPENAI_API_KEY": ref,
 })
@@ -81,8 +79,7 @@ tool args or results.
 
 Config provider options still use `{env:NAME}` / `$NAME` expansion (see
 [config.md](config.md)); those expand at provider select time inside the
-host process and are not written into session events. Secret refs are the
-explicit “never embed resolved value on egress” form for tools/harness.
+host process and are not written into session events.
 
 ### Non-goals (v1)
 
@@ -90,16 +87,8 @@ explicit “never embed resolved value on egress” form for tools/harness.
 - Encrypting session JSONL at rest
 - Guaranteeing zero false negatives on novel token formats
 
-## Bypass resistance
-
-Tier C tests cover nested tool output (tool result wrapping a bearer token,
-JSON args with `apiKey` fields, session append of fake credentials). New
-egress paths should call `secret.Redact` / `RedactEvent` / `ScrubToolOutput`
-rather than copying regexes.
-
 ## Related
 
-- #796 — this feature
-- #790 — structured timeline / trace export (consumes the same package)
+- #796 — secret refs + session/engine scrub wiring
+- #790 — structured timeline / trace export (`pkg/redact` + `pkg/timeline`)
 - [auth.md](auth.md) — credential store and login
-- [usage.md](usage.md) — `/export` redacts common API-key shapes
