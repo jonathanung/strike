@@ -62,6 +62,13 @@ Config and sessions under `~/.strike` are never deleted. If the binary is not
 writable (e.g. installed system-wide), re-run the install script or use your
 package manager.
 
+**Autoupdate notify:** config `autoupdate` (`notify` default, or `off` / `auto`)
+runs a non-blocking GitHub Releases check at TUI startup (at most once per 24h).
+When a newer release exists, the status bar nudges you toward `/upgrade` (and
+may desktop-notify per the `notify` dial). `auto` is opt-in and only replaces a
+writable non-Nix binary; Nix installs always get a lock/input hint instead.
+See [config.md](config.md#autoupdate-autoupdate).
+
 Windows self-update is unsupported in v1; re-download from Releases.
 
 ## Nix
@@ -113,7 +120,8 @@ Then install it in a Home Manager module:
 ```
 
 When the package is installed through Nix, upgrade it by updating the lockfile
-that pins the `strike` input rather than using `strike --upgrade`.
+that pins the `strike` input rather than using `strike --upgrade`. Startup
+autoupdate detects `/nix/store` binaries and never attempts binary replace.
 
 ## Domain / DNS (ops)
 

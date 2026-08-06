@@ -34,6 +34,7 @@ license-incompatible copy-paste, default product stays lean.
 | Security review pack | CC security-review | gap (use `/review` + focus args) | gap |
 | Changelog / translate packs | OpenCode commands | gap (user skills) | gap |
 | Node plugin hosts | OpenCode plugins | **out of scope** | wont |
+| Versioned contribution bundles | — | Strike plugin packages (manifest + trust; no Node/Go in-process ABI) | contract [plugins.md](plugins.md) (#725); pane ABI [plugin-panes.md](plugin-panes.md) (#522); loaders later |
 | Full IDE extensions | peers | **out of scope** | wont |
 
 ## Built-in skills (this wave)
@@ -150,21 +151,22 @@ does not skip asks. `yolo` + `sandbox: off` requires `--i-know`.
 | Lean / efficiency guidance | — (strike) | `leanCode` | shipped (+ `/settings`) |
 | Deferred tool schemas | OC tools gating-ish | `deferTools` + `toolsearch` | shipped (+ `/settings`) |
 | Instructions globs | OC `instructions` | AGENTS.md + discovery roots | shipped (different model) |
-| Autoupdate | OC `autoupdate` | `strike upgrade` | partial (manual) |
+| Autoupdate | OC `autoupdate` | `autoupdate` (`off`\|`notify`\|`auto`) + `strike upgrade` | shipped (+ `/settings`) |
 | Formatters | OC `formatter` | `hooks[]` post-edit recipe ([config.md](config.md#post-edit-formatters-recipe)); editor/`$EDITOR` | wont (hooks recipe) |
 | LSP servers | OC `lsp` | shipped (`internal/lsp`, `/lsp`, diagnostics pane) | gap / out of this epic |
 | Network allowlist | OC network / CC | gap — tracked #527 | gap / coordinate |
 | Managed / MDM settings | CC/OC enterprise | shipped (`managed-config` + deny ceiling; #764) | shipped |
-| JSON schema `$schema` | both | gap | gap (nice DX) |
+| JSON schema `$schema` | both | shipped (main config; `schemas/strike-config.schema.json`, runtime ignores/`no fetch`) | shipped (main); sidecars later |
 | Main config JSONC | OC | partial (`mcp`/`providers`/`keybinds` JSONC; main `config` is JSON) | gap |
-| Plugins / Node hosts | OC plugins | **out of scope** | wont |
+| Plugins / Node hosts | OC plugins | **out of scope** (Node host); Strike contribution bundles: [plugins.md](plugins.md) | wont / contract |
 
 ### `/settings` coverage
 
 **Defaults** editable: theme, vimMode, nanoMode, mdReadMode, permissionMode,
 **permissionAutoApproveSeconds**, **permissionAutoApproveExclude**, **sandbox**,
-**notify**, **leanCode**, **deferTools**, **session.worktree**, **maxChildDepth**,
-effort. Read-only (set via pickers + ctrl+d): provider, model, agent.
+**notify**, **autoupdate**, **leanCode**, **deferTools**, **session.worktree**,
+**maxChildDepth**, effort. Read-only (set via pickers + ctrl+d): provider, model,
+agent.
 
 **Compaction** editable: `compactionStrategy`, `compactionModel`,
 `compactionThreshold`, `compactionBuffer`, `keepUserTurns`,

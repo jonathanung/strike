@@ -287,18 +287,26 @@ func TestSettingsModalSaveLeanDeferWorktree(t *testing.T) {
 		{settingsFieldLeanCode, "full", func(d savedConfigDials) bool { return d.leanCode == "full" }},
 		{settingsFieldDeferTools, "on", func(d savedConfigDials) bool { return d.deferTools == "on" }},
 		{settingsFieldWorktree, "always", func(d savedConfigDials) bool { return d.sessionWorktree == "always" }},
+		{settingsFieldAutoupdate, "off", func(d savedConfigDials) bool { return d.autoupdate == "off" }},
 	}
 	for _, tc := range cases {
-		sm.cursor = int(tc.field)
-		next, _ := sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
-		sm = next.(*settingsModal)
+		sm.page = settingsPageDefaults
+		sm.openPick(tc.field, settingsPageDefaults)
+		found := false
 		for i, opt := range sm.pickOptions {
 			if opt.value == tc.value {
 				sm.pickCursor = i
+				found = true
 				break
 			}
 		}
+		if !found {
+			t.Fatalf("%v: pick option %q missing in %#v", tc.field, tc.value, sm.pickOptions)
+		}
 		_, cmd := sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		if cmd == nil {
+			t.Fatalf("%v: expected save cmd (page=%v opts=%d)", tc.field, sm.page, len(sm.pickOptions))
+		}
 		msg := cmd().(settingsSavedMsg)
 		if msg.err != nil {
 			t.Fatalf("%v: %v", tc.field, msg.err)
@@ -308,7 +316,7 @@ func TestSettingsModalSaveLeanDeferWorktree(t *testing.T) {
 		}
 		sm.afterSettingsSaved(msg)
 	}
-	if sm.defaults.LeanCode != "full" || sm.defaults.DeferTools != "on" || sm.defaults.SessionWorktree != "always" {
+	if sm.defaults.LeanCode != "full" || sm.defaults.DeferTools != "on" || sm.defaults.SessionWorktree != "always" || sm.defaults.Autoupdate != "off" {
 		t.Fatalf("defaults after dials = %#v", sm.defaults)
 	}
 }
@@ -321,6 +329,7 @@ func TestSettingsModalDefaultsListsPeerDials(t *testing.T) {
 	for _, want := range []string{
 		"Sandbox", "workspace-write",
 		"Notify", "unfocused-only",
+		"Autoupdate", "notify",
 		"Lean code", "lite",
 		"Defer tools", "off",
 		"Session worktree",

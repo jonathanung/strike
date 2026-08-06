@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 )
 
 const (
@@ -29,23 +28,14 @@ func (taskStatusTool) Contract() Contract {
 }
 
 func (taskStatusTool) Description() string {
-	return `Inspect live or terminal status of an owned child session started by task.
+	return `Compatibility shim: inspect live or terminal status of an owned child.
 
-- Input session_id from a prior task result (or child.completed notice), or the
-  child's stable name alias when one was set at spawn.
-- Returns state (starting|working|needs_attention|completed|failed|canceled|queued|unknown),
-  elapsed time, current tool, optional recent activity, terminal_summary when done,
-  a structured handoff object on terminal states (summary, files_changed,
-  verification, findings, blockers, recommended_next_action; incomplete may be true
-  when the child did not supply structured fields), and when tracked as a delegation:
-  delegation_id, lifecycle (queued|working|blocked|review|done|failed|canceled),
-  criteria, deps, version, block_reason, plus observability fields: objective,
-  last_action, files_touched, and budget (usage/remaining, stall/loop signals).
-- One-off pulse only — do not busy-poll. Prefer wait (task.done/task.blocked/…) or
-  [child.completed] handoff JSON for finished work and the peer inbox (agent_message)
-  for mid-flight updates. agent_roster lists who is live.
-- Cannot access sessions you do not own (parent→child ownership). For peer chat use
-  agent_message / agent_broadcast.`
+Prefer progressive task:
+  task({action:"status", id:"…" | session_id:"…", include_recent?: bool})
+
+Same payload (state, handoff, verification, lifecycle, budget, …). One-off
+pulse only — do not busy-poll; prefer task action=wait or [child.completed].
+Usage is telemetry-counted toward deprecation.`
 }
 
 func (taskStatusTool) Schema() json.RawMessage {
@@ -60,86 +50,13 @@ func (taskStatusTool) Schema() json.RawMessage {
 }
 
 func (taskStatusTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
-	var a struct {
-		SessionID     string `json:"session_id"`
-		IncludeRecent bool   `json:"include_recent"`
-	}
+	var a progressiveArgs
 	if err := json.Unmarshal(args, &a); err != nil {
 		return Result{}, fmt.Errorf("invalid arguments: %w", err)
 	}
-	id := strings.TrimSpace(a.SessionID)
-	if id == "" {
-		return Result{}, fmt.Errorf("session_id is required")
-	}
-	if err := tc.Ask(ctx, AskRequest{Permission: "task_status", Patterns: []string{id}, Always: []string{"*"}}); err != nil {
-		return Result{}, err
-	}
-	if tc.TaskStatus == nil {
-		return Result{}, fmt.Errorf("task_status is not available")
-	}
-	res, err := tc.TaskStatus(ctx, TaskStatusRequest{SessionID: id, IncludeRecent: a.IncludeRecent})
-	if err != nil {
-		return Result{}, err
-	}
-	payload := map[string]any{
-		"session_id":       res.SessionID,
-		"state":            res.State,
-		"elapsed":          res.Elapsed,
-		"current_tool":     res.CurrentTool,
-		"latest_activity":  res.LatestActivity,
-		"terminal_summary": nullIfEmpty(res.TerminalSummary),
-	}
-	if res.HasHandoff {
-		payload["handoff"] = res.Handoff
-	}
-	if res.HasVerification {
-		payload["verification"] = res.Verification
-	}
-	if len(res.QueuePools) > 0 {
-		payload["queue_pools"] = res.QueuePools
-	}
-	if res.QueueLabel != "" {
-		payload["queue_label"] = res.QueueLabel
-	}
-	if res.DelegationID != "" {
-		payload["delegation_id"] = res.DelegationID
-	}
-	if res.Lifecycle != "" {
-		payload["lifecycle"] = res.Lifecycle
-	}
-	if len(res.Criteria) > 0 {
-		payload["criteria"] = res.Criteria
-	}
-	if len(res.Deps) > 0 {
-		payload["deps"] = res.Deps
-	}
-	if res.Version > 0 {
-		payload["version"] = res.Version
-	}
-	if res.BlockReason != "" {
-		payload["block_reason"] = res.BlockReason
-	}
-	if res.Objective != "" {
-		payload["objective"] = res.Objective
-	}
-	if res.LastAction != "" {
-		payload["last_action"] = res.LastAction
-	}
-	if len(res.FilesTouched) > 0 {
-		payload["files_touched"] = res.FilesTouched
-	}
-	if res.HasBudget {
-		payload["budget"] = res.Budget
-	}
-	out, _ := json.Marshal(payload)
-	title := "task_status " + shortID(id) + " " + res.State
-	if res.QueueLabel != "" {
-		title += " queued:" + res.QueueLabel
-	}
-	return Result{
-		Title:  title,
-		Output: string(out),
-	}, nil
+	a.Action = ProgressiveStatus
+	// Keep historical permission name.
+	return executeProgressive(ctx, CompatToolTaskStatus, "task_status", a, tc)
 }
 
 func (taskReadTool) Name() string { return "task_read" }
@@ -149,12 +66,13 @@ func (taskReadTool) Contract() Contract {
 }
 
 func (taskReadTool) Description() string {
-	return `Read a bounded recent slice of an owned child's transcript/events.
+	return `Compatibility shim: read a bounded recent slice of an owned child's transcript.
 
-- Never dumps an unbounded JSONL log. Default last/limit is small (max 100).
-- Use offset+limit for forward pages, or last=N for the newest N entries.
-- include_tools (default true) and include_reasoning control row kinds.
-- Prefer task_status for a quick pulse; use task_read when you need content.`
+Prefer progressive task:
+  task({action:"read", id:"…", offset?, limit?, last?, include_tools?, include_reasoning?})
+
+Never dumps an unbounded JSONL log. Default last/limit is small (max 100).
+Usage is telemetry-counted toward deprecation.`
 }
 
 func (taskReadTool) Schema() json.RawMessage {
@@ -173,47 +91,12 @@ func (taskReadTool) Schema() json.RawMessage {
 }
 
 func (taskReadTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
-	var a struct {
-		SessionID        string `json:"session_id"`
-		Offset           int    `json:"offset"`
-		Limit            int    `json:"limit"`
-		Last             int    `json:"last"`
-		IncludeTools     *bool  `json:"include_tools"`
-		IncludeReasoning bool   `json:"include_reasoning"`
-	}
+	var a progressiveArgs
 	if err := json.Unmarshal(args, &a); err != nil {
 		return Result{}, fmt.Errorf("invalid arguments: %w", err)
 	}
-	id := strings.TrimSpace(a.SessionID)
-	if id == "" {
-		return Result{}, fmt.Errorf("session_id is required")
-	}
-	if err := tc.Ask(ctx, AskRequest{Permission: "task_read", Patterns: []string{id}, Always: []string{"*"}}); err != nil {
-		return Result{}, err
-	}
-	if tc.TaskRead == nil {
-		return Result{}, fmt.Errorf("task_read is not available")
-	}
-	includeTools := true
-	if a.IncludeTools != nil {
-		includeTools = *a.IncludeTools
-	}
-	res, err := tc.TaskRead(ctx, TaskReadRequest{
-		SessionID:        id,
-		Offset:           a.Offset,
-		Limit:            a.Limit,
-		Last:             a.Last,
-		IncludeTools:     includeTools,
-		IncludeReasoning: a.IncludeReasoning,
-	})
-	if err != nil {
-		return Result{}, err
-	}
-	out, _ := json.Marshal(res)
-	return Result{
-		Title:  fmt.Sprintf("task_read %s %d/%d", shortID(id), len(res.Entries), res.Total),
-		Output: string(out),
-	}, nil
+	a.Action = ProgressiveRead
+	return executeProgressive(ctx, CompatToolTaskRead, "task_read", a, tc)
 }
 
 func (taskMessageTool) Name() string { return "task_message" }
@@ -223,16 +106,13 @@ func (taskMessageTool) Contract() Contract {
 }
 
 func (taskMessageTool) Description() string {
-	return `Send additional guidance to a running owned child session (parent→child steer).
+	return `Compatibility shim: send guidance to a running owned child (parent→child steer).
 
-- session_id may be the child session id or its stable name alias from task spawn.
-- Delivered at a safe boundary: accepted immediately when the child is idle,
-  or queued until the active child turn finishes (does not corrupt the live request).
-- Returns status queued|accepted|rejected with the child's current state.
-- Cannot widen child permissions. Unknown/closed children are rejected.
-- Parent→owned-child only — not the team chat plane. For peer messaging (any teammate,
-  including child→child and child→lead mid-flight), use agent_message / agent_broadcast.
-  Prefer [child.completed] when you only need the child's finished deliverable.`
+Prefer progressive task:
+  task({action:"message", id:"…", text:"…"})
+
+Delivered at a safe boundary. Parent→owned-child only — for peer messaging use
+agent_message / agent_broadcast. Usage is telemetry-counted toward deprecation.`
 }
 
 func (taskMessageTool) Schema() json.RawMessage {
@@ -247,42 +127,12 @@ func (taskMessageTool) Schema() json.RawMessage {
 }
 
 func (taskMessageTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
-	var a struct {
-		SessionID string `json:"session_id"`
-		Text      string `json:"text"`
-	}
+	var a progressiveArgs
 	if err := json.Unmarshal(args, &a); err != nil {
 		return Result{}, fmt.Errorf("invalid arguments: %w", err)
 	}
-	id := strings.TrimSpace(a.SessionID)
-	text := strings.TrimSpace(a.Text)
-	if id == "" {
-		return Result{}, fmt.Errorf("session_id is required")
-	}
-	if text == "" {
-		return Result{}, fmt.Errorf("text is required")
-	}
-	if err := tc.Ask(ctx, AskRequest{Permission: "task_message", Patterns: []string{id}, Always: []string{"*"}}); err != nil {
-		return Result{}, err
-	}
-	if tc.TaskMessage == nil {
-		return Result{}, fmt.Errorf("task_message is not available")
-	}
-	res, err := tc.TaskMessage(ctx, TaskMessageRequest{SessionID: id, Text: text})
-	if err != nil {
-		return Result{}, err
-	}
-	out, _ := json.Marshal(map[string]any{
-		"session_id": res.SessionID,
-		"status":     res.Status,
-		"state":      res.State,
-		"detail":     res.Detail,
-	})
-	title := "task_message " + shortID(id) + " " + res.Status
-	if res.Status == "rejected" {
-		return Result{Title: title, Output: string(out)}, fmt.Errorf("%s", res.Detail)
-	}
-	return Result{Title: title, Output: string(out)}, nil
+	a.Action = ProgressiveMessage
+	return executeProgressive(ctx, CompatToolTaskMessage, "task_message", a, tc)
 }
 
 func (taskInterruptTool) Name() string { return "task_interrupt" }
@@ -293,11 +143,12 @@ func (taskInterruptTool) Contract() Contract {
 }
 
 func (taskInterruptTool) Description() string {
-	return `Cancel a running owned child session by id.
+	return `Compatibility shim: cancel a running owned child session by id.
 
-- Idempotent: repeating on an already finished child returns its terminal state.
-- Only affects that child (not siblings or unrelated sessions).
-- Prefer this over killing processes from bash.`
+Prefer progressive task:
+  task({action:"cancel", id:"…"})
+
+Idempotent. Only affects that child. Usage is telemetry-counted toward deprecation.`
 }
 
 func (taskInterruptTool) Schema() json.RawMessage {
@@ -311,35 +162,12 @@ func (taskInterruptTool) Schema() json.RawMessage {
 }
 
 func (taskInterruptTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
-	var a struct {
-		SessionID string `json:"session_id"`
-	}
+	var a progressiveArgs
 	if err := json.Unmarshal(args, &a); err != nil {
 		return Result{}, fmt.Errorf("invalid arguments: %w", err)
 	}
-	id := strings.TrimSpace(a.SessionID)
-	if id == "" {
-		return Result{}, fmt.Errorf("session_id is required")
-	}
-	if err := tc.Ask(ctx, AskRequest{Permission: "task_interrupt", Patterns: []string{id}, Always: []string{"*"}}); err != nil {
-		return Result{}, err
-	}
-	if tc.TaskInterrupt == nil {
-		return Result{}, fmt.Errorf("task_interrupt is not available")
-	}
-	res, err := tc.TaskInterrupt(ctx, TaskInterruptRequest{SessionID: id})
-	if err != nil {
-		return Result{}, err
-	}
-	out, _ := json.Marshal(map[string]any{
-		"session_id": res.SessionID,
-		"state":      res.State,
-		"detail":     res.Detail,
-	})
-	return Result{
-		Title:  "task_interrupt " + shortID(id) + " " + res.State,
-		Output: string(out),
-	}, nil
+	a.Action = ProgressiveCancel
+	return executeProgressive(ctx, CompatToolTaskInterrupt, "task_interrupt", a, tc)
 }
 
 func nullIfEmpty(s string) any {

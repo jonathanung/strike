@@ -24,14 +24,16 @@ var shortPurposes = map[string]string{
 	"edit":            "exact string replacement in a file",
 	"write":           "create or overwrite a file",
 	"apply_patch":     "coordinated multi-file patch",
+	"move":            "rename or move a file within allowed roots",
+	"delete":          "delete a file or directory within allowed roots",
 	"bash":            "run a shell command",
-	"task":            "delegate a bounded subtask to a child agent (optional agent/model/criteria/deps)",
-	"task_status":     "check status of a delegated child task",
-	"task_read":       "read a bounded child transcript slice",
-	"task_message":    "send guidance to a running child task",
-	"task_interrupt":  "cancel a running child task",
-	"delegate":        "first-class delegation lifecycle (create/get/list/transition)",
-	"wait":            "wait for owned child task events (done/blocked) with timeout",
+	"task":            "progressive delegation: spawn (prompt-only or advanced) + get/status/message/wait/transition/cancel",
+	"task_status":     "compat: check child status (prefer task action=status)",
+	"task_read":       "compat: read child transcript slice (prefer task action=read)",
+	"task_message":    "compat: steer a running child (prefer task action=message)",
+	"task_interrupt":  "compat: cancel a child (prefer task action=cancel)",
+	"delegate":        "compat: lifecycle create/get/list/transition (prefer progressive task)",
+	"wait":            "compat: wait for child events (prefer task action=wait)",
 	"agent_roster":    "list lead and teammate agents on the session team",
 	"agent_ownership": "query path ownership/overlaps; lease path prefixes",
 	"agent_message":   "peer message with optional task thread/ack/urgency contracts",
@@ -57,6 +59,10 @@ var shortPurposes = map[string]string{
 	"exit_plan_mode":  "leave plan mode for build or orchestrator",
 	"phase_done":      "advance the active workflow phase gate",
 	"toolsearch":      "search registered tool names/descriptions",
+	"definition":      "go to definition via language server",
+	"references":      "find references via language server",
+	"symbols":         "list document or workspace symbols via language server",
+	"diagnostics":     "query language-server diagnostics for workspace/path",
 }
 
 // BuiltinShortPurposes returns a copy of the built-in name→purpose map.
@@ -71,7 +77,9 @@ func BuiltinShortPurposes() map[string]string {
 // PermissionName maps a tool name to the permission.Ruleset key used at Ask.
 func PermissionName(toolName string) string {
 	switch toolName {
-	case "apply_patch", "notebook_edit":
+	case "apply_patch", "notebook_edit", "move", "delete":
+		// File mutations share the edit permission so plan mode, accept-edits,
+		// and write/edit deny rules cover them without separate config keys.
 		return "edit"
 	default:
 		if strings.HasPrefix(toolName, "mcp_") {
@@ -253,6 +261,8 @@ func recommendedGuidance(entries []GuidanceEntry) string {
 		"Use `edit` for exact in-place replacements.")
 	add(has("write") && !has("edit") && !has("apply_patch"),
 		"Use `write` only when creating or fully replacing a file.")
+	add(has("move") || has("delete"),
+		"Prefer `move`/`delete` over bash `mv`/`rm` for ordinary renames and deletions (workspace-scoped, freshness, TurnDiff).")
 	add(has("webfetch") && has("bash"),
 		"Prefer `webfetch` over curl/wget in bash for ordinary page fetches.")
 	add(has("webfetch") && !has("bash"),
@@ -263,16 +273,14 @@ func recommendedGuidance(entries []GuidanceEntry) string {
 		"Use `websearch` to discover public web sources; cite result URLs in answers.")
 	add(has("question"),
 		"Use `question` when a decision genuinely belongs to the user.")
-	add(has("task") && has("task_status", "task_read") && has("wait"),
-		"Use `task` for bounded non-blocking delegation (optional `agent`/`model`/`name`/`criteria`/`deps`/`subscribe`). Do not busy-poll `task_status` — prefer `wait` (task.done/task.blocked/…) with timeout, `[child.completed]` structured handoff JSON (summary, files_changed, verification, findings, blockers, recommended_next_action), and the peer inbox. One-off `task_status`/`task_read` only when needed (`task_status` also returns `handoff` + lifecycle fields when tracked). `task_message` steers owned children; `task_interrupt` cancels. Bound fan-out (MaxChildDepth).")
-	add(has("task") && has("task_status", "task_read") && !has("wait"),
-		"Use `task` for bounded non-blocking delegation (optional `agent`/`model`/`name`/`criteria`/`deps`/`subscribe`). Do not busy-poll `task_status` — prefer `[child.completed]` structured handoff JSON (summary, files_changed, verification, findings, blockers, recommended_next_action) and the peer inbox. One-off `task_status`/`task_read` only when needed (`task_status` also returns `handoff` + lifecycle fields when tracked). `task_message` steers owned children; `task_interrupt` cancels. Bound fan-out (MaxChildDepth).")
-	add(has("task") && !has("task_status", "task_read"),
-		"Use `task` for bounded non-blocking delegation (self-contained prompt). A later `[child.completed]` delivers a structured handoff JSON — never sleep-poll for task completion.")
-	add(has("delegate"),
-		"Use `delegate` for first-class lifecycle control (create/get/list/transition) with acceptance criteria, deps, subscriptions, and CAS `expected_version`. States: queued→working→blocked→review→done (+failed/canceled). Plain `task` remains a thin compatible spawn path.")
-	add(has("wait"),
-		"Prefer `wait` over sleep-polling `task_status` when you must synchronize on owned child completion or blockers (`task.done`/`task.failed`/`task.canceled`/`task.blocked` with timeout). Structured outcomes: matched|timeout|canceled.")
+	add(has("task"),
+		"Use progressive `task` for all delegation: simple `task({prompt})`, advanced create fields (`criteria`/`deps`/`subscribe`/`route`/`budget`/`verify`/`context_bundle`/…), and actions get|list|status|read|message|transition|cancel|wait. Same lifecycle runtime and handoff semantics on every entry path. Do not busy-poll status — prefer `task` action=wait or `[child.completed]` structured handoff JSON. Peer mid-flight: `agent_message`. Bound fan-out (MaxChildDepth).")
+	add(has("task") && has("delegate", "task_status", "task_read", "task_message", "task_interrupt", "wait"),
+		"`delegate`, `task_status`, `task_read`, `task_message`, `task_interrupt`, and `wait` are compatibility shims over progressive `task` (telemetry-counted). Prefer `task` on the parent; at depth ceiling leaves may still use `delegate` get/list/transition for self-report.")
+	add(has("delegate") && !has("task"),
+		"Use `delegate` for lifecycle create/get/list/transition (acceptance criteria, deps, subscriptions, CAS). Prefer progressive `task` when available.")
+	add(has("wait") && !has("task"),
+		"Prefer `wait` over sleep-polling status when synchronizing on owned child completion (`task.done`/`task.failed`/`task.canceled`/`task.blocked` with timeout). Outcomes: matched|timeout|canceled.")
 	add(has("agent_roster"),
 		"Use `agent_roster` to list the lead and teammates (session ids, personas, states) on the implicit session team — prefer over status polling when you only need who is live.")
 	add(has("agent_ownership"),

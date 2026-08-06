@@ -17,9 +17,9 @@ internal/provider/     provider interface; base/ (embeddable client: HTTP,
                        openaicompat (openai platform + xai), chatgpt
                        (subscription backend), google; echo dev adapter
 internal/tool/         tool contract + registry (read/glob/grep/edit/write/
-                       apply_patch/bash/task/webfetch/todo*/memory_*/issue_*/
-                       notebook_edit/sleep/skill/question/plan_mode/phase_done/
-                       toolsearch — full list: ARCHITECTURE.md)
+                       apply_patch/move/delete/bash/task/webfetch/todo*/memory_*/
+                       issue_*/notebook_edit/sleep/skill/question/plan_mode/
+                       phase_done/toolsearch — full list: ARCHITECTURE.md)
 internal/permission/   rulesets + suspend/resume ask service
 internal/session/      JSONL event-log persistence
 internal/server/       experimental read-only HTTP attach (strike serve)
@@ -144,6 +144,8 @@ matching paths (and keep relative links valid):
 | CLI flags / `exec` | `cmd/strike` + `strike --help` | [install.md](install.md), [usage.md](usage.md) |
 | Config / custom providers / `vimMode`/`nanoMode` | `internal/config` | [config.md](config.md) |
 | Agents, skills, workflows | `internal/config` builtins + loaders | [agents-skills.md](agents-skills.md) |
+| Plugin bundles (contract) | docs only until loaders (#726+) | [plugins.md](plugins.md) |
+| Plugin panes (ABI) | docs only until TUI/web hosts (#731/#732) | [plugin-panes.md](plugin-panes.md) |
 | Tool inventory | `internal/tool` + `cmd/strike/wire.go` | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Index | — | [README.md](../README.md) |
 

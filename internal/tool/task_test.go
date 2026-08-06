@@ -264,25 +264,21 @@ func TestTaskDescriptionCoordinationSemantics(t *testing.T) {
 	for _, needle := range []string{
 		"agent_message",
 		"child.completed",
-		"busy-loop",
-		"task_status",
-		"not a parent-only control plane",
+		"busy-poll",
+		"Progressive",
 		"mid-flight",
 		"MaxChildDepth",
+		"compatibility",
 	} {
 		if !strings.Contains(d, needle) {
 			t.Errorf("task description missing %q:\n%s", needle, d)
 		}
 	}
-	// Must not frame control as parent-only without the peer path.
-	if strings.Contains(d, "intermediate control") && !strings.Contains(d, "agent_message") {
-		t.Errorf("task description still implies parent-only intermediate control:\n%s", d)
-	}
 }
 
 func TestTaskStatusDescriptionDiscouragesBusyPoll(t *testing.T) {
 	d := NewTaskStatus().Description()
-	for _, needle := range []string{"busy-poll", "child.completed", "agent_message"} {
+	for _, needle := range []string{"busy-poll", "action:\"status\"", "Compatibility"} {
 		if !strings.Contains(d, needle) {
 			t.Errorf("task_status description missing %q:\n%s", needle, d)
 		}
@@ -371,7 +367,7 @@ func TestTaskPassesRouteFields(t *testing.T) {
 
 func TestTaskDescriptionMentionsRoute(t *testing.T) {
 	d := NewTask().Description()
-	for _, needle := range []string{"route=auto", "specialty", "pins always win"} {
+	for _, needle := range []string{"route", "specialty", "budget", "verify"} {
 		if !strings.Contains(d, needle) {
 			t.Errorf("task description missing %q", needle)
 		}

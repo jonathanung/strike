@@ -24,6 +24,8 @@ func fullToolRegistry(t *testing.T) *tool.Registry {
 		tool.NewEdit(),
 		tool.NewWrite(),
 		tool.NewApplyPatch(),
+		tool.NewMove(),
+		tool.NewDelete(),
 		tool.NewBash(),
 		tool.NewTask(),
 		tool.NewWebFetch(),

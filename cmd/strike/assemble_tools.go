@@ -70,6 +70,8 @@ type assembled struct {
 	mcpClose func() error
 	// lspClose stops language server sessions (stdio; process-scoped).
 	lspClose func() error
+	// harnessClose stops persistent external harness workers.
+	harnessClose func() error
 	// schedulerClose shuts down the shared in-process admission controller.
 	schedulerClose func()
 	// spawnRoot creates additional concurrent root engines (interactive multi-root).
@@ -347,6 +349,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tool.NewEdit(),
 		tool.NewWrite(),
 		tool.NewApplyPatch(),
+		tool.NewMove(),
+		tool.NewDelete(),
 		tool.NewBash(),
 		tool.NewTask(),
 		tool.NewTaskStatus(),
@@ -418,14 +422,34 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	harnessRegistry := harness.NewRegistry()
 	// Config only creates external subprocess harnesses. A custom Strike binary
 	// may register embedded Go functions here before validating agent references.
+	var harnessClosers []func() error
 	for name, hc := range cfg.Harnesses {
 		adapter, err := external.Command(external.Config{Command: hc.Command, Args: hc.Args, Env: hc.Env})
 		if err != nil {
 			return nil, fmt.Errorf("configuring harness %q: %w", name, err)
 		}
-		h, err := external.New(name, adapter)
-		if err != nil {
-			return nil, fmt.Errorf("configuring harness %q: %w", name, err)
+		var h harness.Func
+		if config.IsPersistentHarness(hc) {
+			opts := external.WorkerOptions{
+				MaxConcurrent: hc.MaxConcurrent,
+				MaxRestarts:   hc.MaxRestarts,
+			}
+			if hc.IdleTimeoutMs != 0 {
+				opts.IdleTimeout = time.Duration(hc.IdleTimeoutMs) * time.Millisecond
+			}
+			var closeFn func() error
+			h, closeFn, err = external.NewPersistent(name, adapter, opts)
+			if err != nil {
+				return nil, fmt.Errorf("configuring harness %q: %w", name, err)
+			}
+			if closeFn != nil {
+				harnessClosers = append(harnessClosers, closeFn)
+			}
+		} else {
+			h, err = external.New(name, adapter)
+			if err != nil {
+				return nil, fmt.Errorf("configuring harness %q: %w", name, err)
+			}
 		}
 		harnessRegistry.Register(name, h)
 	}
@@ -519,11 +543,12 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// StartAll runs after the first root opens; NotifyFile no-ops until then and
 	// when a server is dead (crash isolation).
 	lspMgr := lsp.NewManager(launchDir)
-	// Optional LSP navigation tools (definition/references/symbols). Not core —
+	// Optional LSP tools (definition/references/symbols/diagnostics). Not core —
 	// omitted from provider Tools when deferTools is on until toolsearch/direct call.
 	registry.Register(tool.NewDefinition(lspMgr))
 	registry.Register(tool.NewReferences(lspMgr))
 	registry.Register(tool.NewSymbols(lspMgr))
+	registry.Register(tool.NewDiagnostics(lspMgr))
 
 	// openRoot builds one live root engine. resumeID empty creates a fresh
 	// session; non-empty opens that durable root (subagents rejected).
@@ -922,6 +947,15 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		},
 		lspClose: func() error {
 			return lspMgr.Close()
+		},
+		harnessClose: func() error {
+			var first error
+			for i := len(harnessClosers) - 1; i >= 0; i-- {
+				if err := harnessClosers[i](); err != nil && first == nil {
+					first = err
+				}
+			}
+			return first
 		},
 		schedulerClose: sched.Close,
 		spawnRoot:      spawn,

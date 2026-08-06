@@ -22,6 +22,9 @@ from several trees; **later roots override earlier ones by name**.
 - Markdown only — no OpenCode plugin JS/TS execution.
 - OpenCode-style `model: provider/id` splits into provider + model when `provider` is unset.
 - Nested Claude/OpenCode `permission:` maps map to strike permission rules (best-effort).
+- Future **plugin bundles** package agents/skills (and other surfaces) under a
+  versioned manifest + trust contract — see [plugins.md](plugins.md). Peer
+  trees above stay separate from that system.
 
 ## Project process skills (`.claude/skills`)
 
@@ -84,20 +87,28 @@ parent + children already are the team. Concurrent root sessions stay separate
 teams. Depth and fan-out stay bounded (`MaxChildDepth`; orchestrator prefers a
 few sequential or small parallel slices).
 
+**Progressive `task`** is the one decision path for delegation: prompt-only
+spawn, optional advanced fields (criteria/deps/subscribe/route/budget/verify/
+context_bundle), and actions get|list|status|read|message|transition|cancel|wait.
+Status and terminal handoff semantics are identical regardless of entry path.
+Legacy `delegate` / `task_*` / `wait` tools are compatibility shims (telemetry-
+counted). At MaxChildDepth, `task` is stripped from leaves; leaves may still use
+`delegate` get/list/transition for ownership-gated self-report.
+
 Parent-only workflows are unchanged: if you never call `agent_*` tools,
-`task` / `task_message` / `task_status` / `task_read` / `task_interrupt` behave
-as before.
+progressive `task` (and its compat shims) behave as before.
 
 | Tool / event | Role |
 |--------------|------|
+| `task` | Progressive delegation API (create + lifecycle/control actions) |
 | `agent_message` / `agent_broadcast` | Mid-flight peer coordination (any teammate: child↔child, child↔lead) |
 | `agent_thread` | Read task/delegation-bound message thread |
 | `team_task` | Shared claim/assign board (create/list/update/claim/complete; CAS) |
 | `[child.completed]` | Finished work product — structured handoff JSON when a child ends |
-| `task_message` | Parent→owned-child steer only (not team chat) |
-| `task_status` / `task_read` | Rare one-off pulse / transcript slice — **not** busy-poll (`task_status` includes `handoff` when terminal) |
+| `task` action=`message` (compat `task_message`) | Parent→owned-child steer only (not team chat) |
+| `task` action=`status`/`read` (compat `task_status`/`task_read`) | Rare one-off pulse / transcript slice — **not** busy-poll (includes `handoff` when terminal) |
 | `agent_roster` | Who is on the team and live state |
-| `task_interrupt` | Cancel an owned child |
+| `task` action=`cancel` (compat `task_interrupt`) | Cancel an owned child |
 | `todowrite` / `todoread` | Solo session todo list (full-replace) — **not** multi-agent claim |
 
 **Semantics:** prefer **coordination contracts** on `agent_message` over chatty
@@ -106,7 +117,7 @@ with `agent_thread`; set `urgency` (`normal` \| `high` \| `blocker`); use
 `kind=request` / `require_ack` with `ack_timeout_seconds` so un-acked peers
 emit `agent.contract.timeout` and escalate to the lead (or `escalate_to`);
 ack with `kind=ack` + `in_reply_to`. Prefer **completion handoff JSON** for
-finished deliverables. Lead should not busy-poll `task_status` — use `wait`,
+finished deliverables. Lead should not busy-poll status — use `task` action=`wait`,
 completion events, inbox, and contracts. Children should message the lead early
 when blocked. Mid-flight bodies stay plain text plus optional contract fields.
 **Completion** is structured: every terminal child emits a handoff with

@@ -1533,6 +1533,76 @@ func TestNormalizeNotify(t *testing.T) {
 	}
 }
 
+func TestNormalizeAutoupdate(t *testing.T) {
+	cases := map[string]string{
+		"":        "",
+		"off":     AutoupdateOff,
+		"never":   AutoupdateOff,
+		"notify":  AutoupdateNotify,
+		"CHECK":   AutoupdateNotify,
+		"auto":    AutoupdateAuto,
+		"upgrade": AutoupdateAuto,
+		"nope":    "",
+	}
+	for in, want := range cases {
+		if got := NormalizeAutoupdate(in); got != want {
+			t.Errorf("NormalizeAutoupdate(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if got := EffectiveAutoupdate(""); got != AutoupdateNotify {
+		t.Errorf("EffectiveAutoupdate(\"\") = %q, want notify", got)
+	}
+	if got := EffectiveAutoupdate("off"); got != AutoupdateOff {
+		t.Errorf("EffectiveAutoupdate(off) = %q", got)
+	}
+}
+
+func TestLoadAutoupdateMerge(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(global, []byte(`{"autoupdate": "notify"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Autoupdate != AutoupdateNotify {
+		t.Fatalf("Autoupdate = %q, want notify", cfg.Autoupdate)
+	}
+	project := filepath.Join(work, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(project), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(project, []byte(`{"autoupdate": "OFF"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Autoupdate != AutoupdateOff {
+		t.Fatalf("project autoupdate = %q, want off", cfg.Autoupdate)
+	}
+	// Unknown project value is dropped; global remains after re-load of global only.
+	if err := os.WriteFile(project, []byte(`{"autoupdate": "maybe"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Autoupdate != AutoupdateNotify {
+		t.Fatalf("unknown project should keep global notify, got %q", cfg.Autoupdate)
+	}
+}
+
 func TestLoadLeanCodeMerge(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -1886,5 +1956,60 @@ func TestDefaultLSPServers(t *testing.T) {
 	}
 	if len(loaded.LSP.Servers) != 0 {
 		t.Fatalf("empty servers should clear defaults: %#v", loaded.LSP.Servers)
+	}
+}
+
+func TestHarnessPersistentModeConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{
+  "harnesses": {
+    "heavy": {
+      "command": "./bin/worker",
+      "mode": "persistent",
+      "maxConcurrent": 2,
+      "idleTimeoutMs": 120000,
+      "maxRestarts": 5
+    },
+    "light": {
+      "command": "./bin/once"
+    }
+  }
+}`
+	if err := os.WriteFile(global, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := cfg.Harnesses["heavy"]
+	if !IsPersistentHarness(h) {
+		t.Fatalf("heavy mode = %q, want persistent", h.Mode)
+	}
+	if h.MaxConcurrent != 2 || h.IdleTimeoutMs != 120000 || h.MaxRestarts != 5 {
+		t.Fatalf("heavy = %#v", h)
+	}
+	if IsPersistentHarness(cfg.Harnesses["light"]) {
+		t.Fatalf("light should be oneshot: %#v", cfg.Harnesses["light"])
+	}
+}
+
+func TestHarnessInvalidModeRejected(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(global, []byte(`{"harnesses":{"x":{"command":"c","mode":"nope"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(t.TempDir()); err == nil || !strings.Contains(err.Error(), "mode") {
+		t.Fatalf("err = %v, want mode error", err)
 	}
 }

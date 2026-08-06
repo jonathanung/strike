@@ -20,7 +20,7 @@ var errNoProviders = errors.New("custom providers are unavailable")
 // settingsModalVisible is the Defaults/Providers/Compaction list viewport height.
 // Keep ≥ len(defaultsFields) so provider/model/agent rows stay reachable
 // without scrolling on a typical dialog.
-const settingsModalVisible = 14
+const settingsModalVisible = 18
 
 // settingsPage is which list /settings is showing.
 type settingsPage int
@@ -48,6 +48,7 @@ const (
 	settingsFieldAutoApproveExclude
 	settingsFieldSandbox
 	settingsFieldNotify
+	settingsFieldAutoupdate
 	settingsFieldLeanCode
 	settingsFieldDeferTools
 	settingsFieldWorktree
@@ -246,6 +247,7 @@ func (m *settingsModal) defaultsFields() []settingsField {
 		settingsFieldAutoApproveExclude,
 		settingsFieldSandbox,
 		settingsFieldNotify,
+		settingsFieldAutoupdate,
 		settingsFieldLeanCode,
 		settingsFieldDeferTools,
 		settingsFieldWorktree,
@@ -543,6 +545,12 @@ func (m *settingsModal) pickOptionsFor(field settingsField) []settingsPickOption
 			{value: "on", label: "on", detail: "always notify (attention + long turns)"},
 			{value: "off", label: "off", detail: "never notify"},
 		}
+	case settingsFieldAutoupdate:
+		return []settingsPickOption{
+			{value: "notify", label: "notify", detail: "default — check GitHub Releases; nudge when newer"},
+			{value: "off", label: "off", detail: "no startup release check"},
+			{value: "auto", label: "auto", detail: "opt-in — download+replace when binary is writable"},
+		}
 	case settingsFieldLeanCode:
 		return []settingsPickOption{
 			{value: "lite", label: "lite", detail: "default — YAGNI ladder guidance"},
@@ -730,6 +738,8 @@ func (m *settingsModal) fieldValue(field settingsField) string {
 		return d.Sandbox
 	case settingsFieldNotify:
 		return d.Notify
+	case settingsFieldAutoupdate:
+		return d.Autoupdate
 	case settingsFieldLeanCode:
 		return d.LeanCode
 	case settingsFieldDeferTools:
@@ -841,6 +851,8 @@ func (m *settingsModal) fieldLabel(field settingsField) string {
 		return "Sandbox"
 	case settingsFieldNotify:
 		return "Notify"
+	case settingsFieldAutoupdate:
+		return "Autoupdate"
 	case settingsFieldLeanCode:
 		return "Lean code"
 	case settingsFieldDeferTools:
@@ -923,6 +935,11 @@ func (m *settingsModal) fieldDisplay(field settingsField) (value, detail string)
 			return "unfocused-only", "desktop notifications"
 		}
 		return raw, "desktop notifications"
+	case settingsFieldAutoupdate:
+		if raw == "" {
+			return "notify", "startup release check"
+		}
+		return raw, "startup release check"
 	case settingsFieldLeanCode:
 		if raw == "" {
 			return "lite", "new sessions"
@@ -1162,21 +1179,23 @@ func (m *settingsModal) savePickCmd(opt settingsPickOption) tea.Cmd {
 		case settingsFieldMaxChildDepth:
 			err = settings.SaveAutoApproveDials("", nil, opt.value)
 		case settingsFieldSandbox:
-			err = settings.SaveConfigDials(opt.value, "", "", "", "")
+			err = settings.SaveConfigDials(opt.value, "", "", "", "", "")
 		case settingsFieldNotify:
-			err = settings.SaveConfigDials("", opt.value, "", "", "")
+			err = settings.SaveConfigDials("", opt.value, "", "", "", "")
 			if err == nil {
 				if mode, ok := ParseNotifyMode(opt.value); ok {
 					apply.notifyMode = mode
 					apply.hasNotify = true
 				}
 			}
+		case settingsFieldAutoupdate:
+			err = settings.SaveConfigDials("", "", "", "", "", opt.value)
 		case settingsFieldLeanCode:
-			err = settings.SaveConfigDials("", "", opt.value, "", "")
+			err = settings.SaveConfigDials("", "", opt.value, "", "", "")
 		case settingsFieldDeferTools:
-			err = settings.SaveConfigDials("", "", "", opt.value, "")
+			err = settings.SaveConfigDials("", "", "", opt.value, "", "")
 		case settingsFieldWorktree:
-			err = settings.SaveConfigDials("", "", "", "", opt.value)
+			err = settings.SaveConfigDials("", "", "", "", opt.value, "")
 		case settingsFieldEffort:
 			err = settings.SaveDefaults("", "", "", opt.value, "")
 		case settingsFieldCompactionStrategy:
@@ -1350,7 +1369,7 @@ func (m *settingsModal) view(width int, th theme.Theme) string {
 
 func (m *settingsModal) viewMenu(width int, th theme.Theme) string {
 	items := []ui.ListItem{
-		{Label: "Defaults", Detail: "theme, sandbox, permission mode, notify, …"},
+		{Label: "Defaults", Detail: "theme, sandbox, permission mode, notify, autoupdate, …"},
 		{Label: "Compaction", Detail: "history compact + prune dials"},
 		{Label: "Custom providers", Detail: "OpenAI-/Anthropic-compatible endpoints"},
 	}

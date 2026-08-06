@@ -5,7 +5,24 @@ optional **managed/MDM** system config (highest). User and project files
 accept **JSON or JSONC** (`//` line comments and `/* block comments */`, same
 stripper as `mcp.jsonc` / `providers.jsonc` / `keybinds.jsonc`). An optional
 top-level `"$schema"` key is **ignored** at load (editor autocomplete only;
-Strike does not ship or fetch a schema URL).
+Strike never fetches a schema URL at runtime).
+
+**Published JSON Schema (editor DX):** point `$schema` at the versioned file in
+this repo (stable `main` raw URL):
+
+```text
+https://raw.githubusercontent.com/jonathanung/strike/main/schemas/strike-config.schema.json
+```
+
+Local path (clone/checkout): `schemas/strike-config.schema.json`. The schema
+documents high-traffic main-config keys (dials, permissions, hooks, sandbox,
+compaction/prune, session, scheduler, MCP/LSP shapes, …). Root and nested
+objects use **`additionalProperties: true`** so unknown/future keys and
+editor-only fields stay valid — matching runtime `encoding/json` (unknown keys
+ignored). Alignment with Go structs is best-effort via
+`TestStrikeConfigSchemaAlign` (not full codegen). Sidecar files
+(`mcp.jsonc` / `providers.jsonc` / `keybinds.jsonc`) are **not** fully schema'd
+here yet.
 
 **Load order (later wins for scalars; permission rules concatenate):**
 
@@ -117,8 +134,8 @@ write this file. Manual `/ftue` remains available after acknowledgement.
 ```jsonc
 // ~/.strike/config or ./.strike/config — JSONC comments allowed
 {
-  // Optional editor hint; ignored by Strike at load
-  "$schema": "https://example.invalid/strike-config.schema.json",
+  // Optional editor hint; ignored by Strike at load (no network fetch)
+  "$schema": "https://raw.githubusercontent.com/jonathanung/strike/main/schemas/strike-config.schema.json",
   "provider": "anthropic",
   "model": "claude-sonnet-5",
   "effort": "high",
@@ -130,6 +147,7 @@ write this file. Manual `/ftue` remains available after acknowledgement.
   "nanoMode": "pane",
   "mdReadMode": "embedded",
   "notify": "unfocused-only",
+  "autoupdate": "notify",
   "permissionMode": "default",
   "sandbox": "workspace-write",
   "network": {
@@ -447,6 +465,27 @@ paths, prompts, or secrets.
 
 Unknown values are ignored at load time.
 
+## Autoupdate (`autoupdate`)
+
+Startup (and at most once per 24h) GitHub Releases check that reuses the same
+release metadata path as `strike upgrade` / `/upgrade`. The probe is async and
+time-bounded so TUI startup is not blocked on the network. Offline, rate-limit,
+and API failures stay silent.
+
+| Value | Behavior |
+|---|---|
+| `notify` (default) | when a newer release exists, show status chrome + optional desktop notify; path is `/upgrade` or `strike upgrade` |
+| `off` | no startup release check |
+| `auto` | opt-in: when the binary is writable, download+replace in place (no re-exec); otherwise same as `notify` with a Nix/package-manager hint |
+
+**Default never replaces the binary** — only `auto` may. Nix store installs and
+other non-writable binaries never attempt replace; the notice tells you to
+update the flake/lock input or re-run the install script. Windows self-update
+remains unsupported (same as manual upgrade).
+
+Probe state is cached under `~/.strike/cache/update-check.json`. Editable under
+`/settings` → Defaults.
+
 ## Scheduler (in-process resource limits)
 
 `scheduler` bounds concurrent agent work **inside one Strike OS process**.
@@ -720,14 +759,15 @@ the theme picker it saves the highlighted theme id.
 
 **/settings Defaults**: interactive editor for theme, vimMode, nanoMode,
 mdReadMode, **permissionMode**, **permissionAutoApproveSeconds**,
-**permissionAutoApproveExclude**, **sandbox**, **notify**, **leanCode**,
-**deferTools**, **session.worktree**, **maxChildDepth**, and effort (plus a
-read-only view of provider/model/agent). Changes write `~/.strike/config`.
-Theme, editor/reader presentation, notify, and auto-approve countdown/exclude
-apply to the current session immediately; permissionMode, sandbox, leanCode,
-deferTools, session.worktree, and maxChildDepth affect **new** sessions (use
-`/mode` / Shift+Tab for the live permission dial, and `/sandbox` to inspect
-the OS dial already bound for this process).
+**permissionAutoApproveExclude**, **sandbox**, **notify**, **autoupdate**,
+**leanCode**, **deferTools**, **session.worktree**, **maxChildDepth**, and
+effort (plus a read-only view of provider/model/agent). Changes write
+`~/.strike/config`. Theme, editor/reader presentation, notify, and auto-approve
+countdown/exclude apply to the current session immediately; permissionMode,
+sandbox, leanCode, deferTools, session.worktree, autoupdate, and maxChildDepth
+affect **new** sessions (use `/mode` / Shift+Tab for the live permission dial,
+and `/sandbox` to inspect the OS dial already bound for this process).
+Autoupdate probes run at process start from the config loaded at launch.
 
 **/settings Compaction**: editor for history compaction and continuous prune
 dials (`compactionStrategy`, `compactionModel`, `compactionThreshold`,
@@ -887,21 +927,65 @@ per file). A dead language server degrades to no injection.
 - `/lsp disable <name>` — stop a server for the session
 - `/diagnostics` — focus the right-pane diagnostics browser (findings from live servers; Enter opens the file)
 
-### Navigation tools (optional)
+### Navigation and diagnostics tools (optional)
 
-Three read-only tools call the language server for code navigation. They are
-**not** core tools: when `deferTools` is `on`, their schemas stay out of the
-hot provider Tools array until `toolsearch` discovers them (or the model calls
-them by name).
+Read-only tools call the language server for code navigation and diagnostics
+queries. They are **not** core tools: when `deferTools` is `on`, their schemas
+stay out of the hot provider Tools array until `toolsearch` discovers them (or
+the model calls them by name).
 
-| Tool | LSP method | Args |
+| Tool | LSP method / source | Args |
 |---|---|---|
 | `definition` | `textDocument/definition` | `filePath`, `line` (1-based), optional `character` (0-based) |
 | `references` | `textDocument/references` | same position args; includes declaration |
 | `symbols` | `textDocument/documentSymbol` or `workspace/symbol` | `filePath` and/or `query` |
+| `diagnostics` | cached `publishDiagnostics` from live servers | optional `path` (file or directory; omit = workspace), optional `severity` (`error` default, `warning`, `info`, `hint`), optional `maxResults` (default 100, max 500) |
 
-A missing or dead language server returns a soft message in the tool result
-(never takes down the session). Default permission is Allow (read-only).
+`diagnostics` returns a stable JSON payload: `file`, `range` (1-based
+line/character start+end), `severity`, `source`, `code`, `message`, plus
+server status, counts, and a `truncated` flag. Results are sorted
+deterministically. Paths stay workspace-scoped.
+
+A missing or dead language server returns structured status / a soft message in
+the tool result (never hangs or takes down the session). Default permission is
+Allow (read-only).
+
+## External harnesses (`harnesses`)
+
+Named subprocess harnesses used by agent frontmatter `harness: <name>`. See
+[harnesses.md](harnesses.md) for the full protocol and SDK notes.
+
+```json
+{
+  "harnesses": {
+    "choose-best-js": {
+      "command": "node",
+      "args": ["./examples/harnesses/choose-best.mjs"]
+    },
+    "heavy-runtime": {
+      "command": "./bin/my-harness-worker",
+      "mode": "persistent",
+      "maxConcurrent": 2,
+      "idleTimeoutMs": 120000,
+      "maxRestarts": 3
+    }
+  }
+}
+```
+
+| Field | Default | Notes |
+|---|---|---|
+| `command` | required | Executable |
+| `args` | `[]` | Argv tail |
+| `env` | `{}` | Env overlay (never logged) |
+| `mode` | `oneshot` | `oneshot` or `persistent` |
+| `maxConcurrent` | `1` | Persistent only; in-flight invocation cap |
+| `idleTimeoutMs` | `60000` | Persistent idle shutdown; negative disables |
+| `maxRestarts` | `3` | Persistent crash recovery budget; negative unlimited |
+
+Project definitions replace global entries with the same name. Unknown `mode`
+fails config load. Persistent workers are still trusted native commands (not
+OS-sandboxed); brokered tools keep normal permission/sandbox policy.
 
 ## MCP servers (stdio + HTTP)
 

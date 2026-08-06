@@ -62,6 +62,11 @@ type Config struct {
 	// question asks and long turn completion: "on", "off", or
 	// "unfocused-only" (default). Unknown values are ignored at load time.
 	Notify string `json:"notify,omitempty"`
+	// Autoupdate controls startup GitHub Releases checks: "off", "notify"
+	// (default), or "auto" (opt-in download+replace when the binary is
+	// writable). Unknown values are ignored at load time. Never auto-replaces
+	// on the default (notify) setting.
+	Autoupdate string `json:"autoupdate,omitempty"`
 	// PermissionAutoApproveSeconds enables permission-modal auto-allow once
 	// after N seconds (yolo-lite). Zero disables (default). Clamped to 1–60
 	// when positive.
@@ -255,6 +260,42 @@ type HarnessConfig struct {
 	Command string            `json:"command"`
 	Args    []string          `json:"args,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
+	// Mode selects process lifecycle: empty/"oneshot" (default) starts a new
+	// process per invocation; "persistent" reuses one worker across invocations.
+	Mode string `json:"mode,omitempty"`
+	// MaxConcurrent bounds in-flight invocations on one persistent worker.
+	// Zero means default (1). Only applies when Mode is persistent.
+	MaxConcurrent int `json:"maxConcurrent,omitempty"`
+	// IdleTimeoutMs shuts down an idle persistent worker. Zero means default
+	// (60000). Negative disables idle eviction. Ignored for oneshot.
+	IdleTimeoutMs int `json:"idleTimeoutMs,omitempty"`
+	// MaxRestarts bounds crash/start recovery for a persistent worker before
+	// it is disabled for the process lifetime. Zero means default (3).
+	// Negative means unlimited. Ignored for oneshot.
+	MaxRestarts int `json:"maxRestarts,omitempty"`
+}
+
+// HarnessModeOneshot is the default: one process per invocation.
+const HarnessModeOneshot = "oneshot"
+
+// HarnessModePersistent reuses one subprocess across invocations.
+const HarnessModePersistent = "persistent"
+
+// NormalizeHarnessMode returns the canonical mode token.
+func NormalizeHarnessMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", HarnessModeOneshot:
+		return HarnessModeOneshot
+	case HarnessModePersistent, "worker":
+		return HarnessModePersistent
+	default:
+		return strings.ToLower(strings.TrimSpace(mode))
+	}
+}
+
+// IsPersistentHarness reports whether cfg requests persistent-worker mode.
+func IsPersistentHarness(cfg HarnessConfig) bool {
+	return NormalizeHarnessMode(cfg.Mode) == HarnessModePersistent
 }
 
 // MCPConfig is the JSON "mcp" object.
@@ -795,6 +836,7 @@ func read(path string) (Config, error) {
 	c.PruneKeepUserTurns = ClampPruneKeepUserTurns(c.PruneKeepUserTurns)
 	c.PruneProtectTools = NormalizePruneProtectTools(c.PruneProtectTools)
 	c.Notify = NormalizeNotify(c.Notify)
+	c.Autoupdate = NormalizeAutoupdate(c.Autoupdate)
 	c.LeanCode = NormalizeLeanCode(c.LeanCode)
 	c.DeferTools = NormalizeDeferTools(c.DeferTools)
 	// Keybinds: unknown ids / invalid chords fail the layer (and thus Load).
@@ -811,6 +853,19 @@ func read(path string) (Config, error) {
 		if strings.TrimSpace(harness.Command) == "" {
 			return Config{}, fmt.Errorf("%s: harness %q command is empty", path, name)
 		}
+		mode := NormalizeHarnessMode(harness.Mode)
+		if mode != HarnessModeOneshot && mode != HarnessModePersistent {
+			return Config{}, fmt.Errorf("%s: harness %q mode %q is invalid (want oneshot or persistent)", path, name, harness.Mode)
+		}
+		if harness.MaxConcurrent < 0 {
+			return Config{}, fmt.Errorf("%s: harness %q maxConcurrent must be >= 0", path, name)
+		}
+		// Normalize mode token in the loaded layer for stable merge/clone.
+		harness.Mode = mode
+		if mode == HarnessModeOneshot {
+			harness.Mode = ""
+		}
+		c.Harnesses[name] = harness
 	}
 	// Scheduler: validate limits/rules and stamp command provenance with path.
 	if err := normalizeSchedulerLayer(&c.Scheduler, path); err != nil {
@@ -1072,6 +1127,36 @@ func NormalizeNotify(s string) string {
 	}
 }
 
+// Autoupdate mode values for Config.Autoupdate / startup release checks.
+const (
+	AutoupdateOff    = "off"
+	AutoupdateNotify = "notify"
+	AutoupdateAuto   = "auto"
+)
+
+// NormalizeAutoupdate maps config aliases to off|notify|auto.
+// Empty and unknown values become "" (product default = notify at use sites).
+func NormalizeAutoupdate(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "off", "false", "0", "no", "never", "disabled", "none":
+		return AutoupdateOff
+	case "notify", "check", "prompt", "ask":
+		return AutoupdateNotify
+	case "auto", "automatic", "upgrade", "install":
+		return AutoupdateAuto
+	default:
+		return ""
+	}
+}
+
+// EffectiveAutoupdate returns the runtime mode: empty/unknown → notify.
+func EffectiveAutoupdate(s string) string {
+	if n := NormalizeAutoupdate(s); n != "" {
+		return n
+	}
+	return AutoupdateNotify
+}
+
 // LeanCode intensity values for Config.LeanCode / engine lean-code overlays.
 const (
 	LeanCodeOff  = "off"
@@ -1172,6 +1257,9 @@ func merge(base, layer Config) Config {
 	}
 	if layer.Notify != "" {
 		base.Notify = layer.Notify
+	}
+	if layer.Autoupdate != "" {
+		base.Autoupdate = layer.Autoupdate
 	}
 	if layer.PermissionAutoApproveSeconds != 0 {
 		base.PermissionAutoApproveSeconds = layer.PermissionAutoApproveSeconds
@@ -1350,7 +1438,14 @@ func cloneHarnesses(in map[string]HarnessConfig) map[string]HarnessConfig {
 }
 
 func cloneHarnessConfig(in HarnessConfig) HarnessConfig {
-	out := HarnessConfig{Command: in.Command, Args: append([]string(nil), in.Args...)}
+	out := HarnessConfig{
+		Command:       in.Command,
+		Args:          append([]string(nil), in.Args...),
+		Mode:          in.Mode,
+		MaxConcurrent: in.MaxConcurrent,
+		IdleTimeoutMs: in.IdleTimeoutMs,
+		MaxRestarts:   in.MaxRestarts,
+	}
 	if in.Env != nil {
 		out.Env = make(map[string]string, len(in.Env))
 		for name, value := range in.Env {

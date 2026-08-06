@@ -112,13 +112,14 @@ paths that can contribute observability or gates:
 | **Lifecycle hooks** | Config `hooks[]` → `hook.matched` (+ allow/block side effects). See [config.md](config.md), [peer-ecosystem.md](peer-ecosystem.md) | Shell hooks are executable; treat project hooks like local scripts |
 | **MCP tools** | Config MCP servers → tools on the registry; normal `tool.*` events | Stdio MCP runs local commands |
 | **Verification gates** | Engine/harness options → `verification.*` + optional `TurnCompleted.verification` | Harness-owned; model self-report is never evidence |
-| **Future plugin bundles** | Manifest + trusted activation (MCP / harness / hook entries) | Tracked under plugin epic: contract [#725](https://github.com/jonathanung/strike/issues/725), trusted activation [#728](https://github.com/jonathanung/strike/issues/728) |
+| **Plugin bundles** | Versioned manifest + contribution matrix; passive load vs trusted executable activation | Normative contract: [plugins.md](plugins.md) ([#725](https://github.com/jonathanung/strike/issues/725)); passive load [#726](https://github.com/jonathanung/strike/issues/726); trusted activation [#728](https://github.com/jonathanung/strike/issues/728) |
+| **Plugin panes** | Declarative view trees (`static`) or supervised JSONL subprocess (`process`); bounded primitives; no private Go `window` ABI | Normative: [plugin-panes.md](plugin-panes.md) ([#522](https://github.com/jonathanung/strike/issues/522)); TUI host [#731](https://github.com/jonathanung/strike/issues/731); web [#732](https://github.com/jonathanung/strike/issues/732) |
 
-**Trusted harness contributions (#728):** executable plugin contributions
-(MCP startup, harness commands, shell hooks) must not run until source +
-content-digest trust is recorded; trust invalidates on relevant content
-change. Until that lands, only stock config paths above apply — do not assume
-silent project-plugin execution.
+**Trusted executable contributions (#728):** plugin MCP startup, harness
+commands, and shell hooks must not run until source + content-digest trust is
+recorded; trust invalidates on relevant content change (see
+[plugins.md](plugins.md#5-trust-model)). Until loaders land, only stock config
+paths above apply — do not assume silent project-plugin execution.
 
 **Contributing new spans or gates**
 
@@ -138,4 +139,6 @@ silent project-plugin execution.
 - [harnesses.md](harnesses.md) — function harness subprocess ABI
 - [web.md](web.md) — cockpit SSE/WebSocket envelopes
 - [config.md](config.md) — hooks, harnesses, MCP, session durability
+- [plugins.md](plugins.md) — versioned plugin bundle contract (manifest, trust)
+- [plugin-panes.md](plugin-panes.md) — user pane contribution ABI (static + process)
 - [peer-ecosystem.md](peer-ecosystem.md) — hooks alignment with peers
