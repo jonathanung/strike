@@ -718,7 +718,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 				APIKeyEnv: cfg.WebSearch.APIKeyEnv,
 				BaseURL:   cfg.WebSearch.BaseURL,
 			},
-			AllowYoloWithoutSandbox: opts.iKnow,
+			AllowYoloWithoutSandbox:    opts.iKnow,
 			Agents:                     agents,
 			InitialAgent:               initialAgent,
 			InitialMessages:            initialMessages,
