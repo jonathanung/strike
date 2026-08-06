@@ -1,4 +1,4 @@
-import type { ChildAgent, ClientState, Envelope, TranscriptItem, WorkspaceComposer, WorkspaceSlice, WorkspaceState } from "./types";
+import type { ChildAgent, ClientState, Envelope, Status, TranscriptItem, WorkspaceComposer, WorkspaceSlice, WorkspaceState } from "./types";
 import { isRootLineage, parseUndoPreview, type UndoPreview } from "./undoPreview";
 
 export const initialState = (): WorkspaceState => ({
@@ -8,6 +8,54 @@ export const initialState = (): WorkspaceState => ({
 const fingerprint = (env: Envelope) => JSON.stringify([env.type, env.time, env.data]);
 const text = (data: Record<string, unknown> | undefined, key: string) => String(data?.[key] ?? "");
 const correlation = (d?: Record<string, unknown>) => String(d?.turnId ?? d?.sessionId ?? "root");
+
+
+/** Parse protocol.TokenCount wire shape ({n, known}) or a bare number. */
+export function tokenCount(value: unknown): { n: number; known: boolean } {
+  if (typeof value === "number" && Number.isFinite(value)) return { n: value, known: true };
+  if (value && typeof value === "object") {
+    const obj = value as { n?: unknown; known?: unknown };
+    if (obj.known === true && typeof obj.n === "number" && Number.isFinite(obj.n)) return { n: obj.n, known: true };
+  }
+  return { n: 0, known: false };
+}
+
+function addKnown(current: number | undefined, part: { n: number; known: boolean }): number | undefined {
+  if (!part.known) return current;
+  return (current ?? 0) + part.n;
+}
+
+function usageSourceLabel(prev: string | undefined, source: string): string {
+  const next = source.trim();
+  if (!next) return prev || "";
+  if (!prev || prev === next) return next;
+  if (prev === "mixed (actual + estimated)") return prev;
+  if ((prev === "actual" && next === "estimated") || (prev === "estimated" && next === "actual")) {
+    return "mixed (actual + estimated)";
+  }
+  return next;
+}
+
+/** Accumulate one usage.reported payload into status totals (never invent zeros). */
+export function applyUsageReported(status: Status, data: Record<string, unknown>): Status {
+  const input = tokenCount(data.input);
+  const output = tokenCount(data.output);
+  const cacheRead = tokenCount(data.cacheRead);
+  const cacheCreation = tokenCount(data.cacheCreation);
+  const used = tokenCount(data.used);
+  const next: Status = {
+    ...status,
+    usageReports: (status.usageReports ?? 0) + 1,
+    inputTokens: addKnown(status.inputTokens, input),
+    outputTokens: addKnown(status.outputTokens, output),
+    cacheReadTokens: addKnown(status.cacheReadTokens, cacheRead),
+    cacheCreationTokens: addKnown(status.cacheCreationTokens, cacheCreation),
+    usageSource: usageSourceLabel(status.usageSource, text(data, "source")) || status.usageSource,
+  };
+  if (used.known) next.contextUsed = used.n;
+  return next;
+}
+
 
 function append(items: TranscriptItem[], item: TranscriptItem, merge = false) {
   if (merge) {
@@ -78,7 +126,7 @@ export function reduceEvent(state: WorkspaceState, env: Envelope): WorkspaceStat
   let undoStack = state.undoStack;
   const id = correlation(d);
   switch (env.type) {
-    case "status": status = d; break;
+    case "status": status = { ...status, ...(d as Status) }; break;
     case "user.message": items = append(items, { id: `${id}:user:${items.length}`, kind: "user", text: text(d, "text"), data: d }); break;
     case "text.delta": items = append(items, { id: `${id}:assistant`, kind: "assistant", text: text(d, "text") }, true); break;
     case "reasoning.delta": items = append(items, { id: `${id}:reasoning`, kind: "reasoning", title: "Reasoning", text: text(d, "text") }, true); break;
@@ -111,6 +159,7 @@ export function reduceEvent(state: WorkspaceState, env: Envelope): WorkspaceStat
     case "agent.selected": status = { ...status, agent: text(d, "name") }; break;
     case "effort.selected": status = { ...status, effort: text(d, "level") }; break;
     case "autonomy.selected": status = { ...status, autonomy: text(d, "mode") }; break;
+    case "usage.reported": status = applyUsageReported(status, d); break;
     case "permission.mode": status = { ...status, permissionMode: text(d, "mode") }; break;
     case "phase.changed": status = { ...status, phase: text(d, "phase"), workflow: text(d, "workflow") }; break;
     case "files.invalidated": changedFiles = Array.from(new Set([...changedFiles, ...((d.paths as string[]) || [])])); break;

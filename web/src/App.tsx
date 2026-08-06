@@ -33,7 +33,56 @@ const availableInspectorTabs = (caps?: Capabilities): InspectorTab[] =>
     return Boolean(caps?.[tab]);
   });
 type UndoDialogState = { preferFiles: boolean };
-const runtimeValues = { effort: ["low", "medium", "high", "xhigh"], autonomy: ["supervised", "agent", "checks"], permission: ["default", "plan", "soft-approve", "accept-edits", "yolo"], sandbox: ["off", "read-only", "workspace-write"] };
+const runtimeValues = { effort: ["low", "medium", "high", "xhigh"], autonomy: ["supervised", "agent", "checks", "skip-all"], permission: ["default", "plan", "soft-approve", "accept-edits", "yolo"], sandbox: ["off", "read-only", "workspace-write"] };
+
+const THINK_STORAGE_KEY = "strike.web.showThinking";
+const readShowThinking = (): boolean => {
+  try {
+    const raw = sessionStorage.getItem(THINK_STORAGE_KEY);
+    if (raw === null) return true;
+    return raw === "1" || raw === "true";
+  } catch {
+    return true;
+  }
+};
+const writeShowThinking = (value: boolean) => {
+  try { sessionStorage.setItem(THINK_STORAGE_KEY, value ? "1" : "0"); } catch { /* private mode */ }
+};
+
+/** Format session token/cost chrome for the context inspector. */
+export function formatContextLabel(status: Status): string {
+  if (status.contextUsed !== undefined && status.contextLimit !== undefined) {
+    return `${status.contextUsed.toLocaleString()} / ${status.contextLimit.toLocaleString()}`;
+  }
+  if (status.contextUsed !== undefined) return `${status.contextUsed.toLocaleString()} used`;
+  return "not reported";
+}
+
+export function formatCostLabel(status: Status, rates?: { inputPerM: number; outputPerM: number; hasCost: boolean }): string {
+  const parts: string[] = [];
+  if (status.inputTokens !== undefined) parts.push(`in ${status.inputTokens.toLocaleString()}`);
+  if (status.outputTokens !== undefined) parts.push(`out ${status.outputTokens.toLocaleString()}`);
+  if (status.cacheReadTokens !== undefined) parts.push(`cache ${status.cacheReadTokens.toLocaleString()}`);
+  if (!parts.length) return "not reported";
+  let usd = "";
+  if (rates?.hasCost) {
+    let total = 0;
+    let ok = false;
+    if (status.inputTokens !== undefined) { total += status.inputTokens * rates.inputPerM / 1_000_000; ok = true; }
+    if (status.outputTokens !== undefined) { total += status.outputTokens * rates.outputPerM / 1_000_000; ok = true; }
+    if (ok) {
+      if (total > 0 && total < 0.01) usd = "<$0.01";
+      else {
+        let s = total.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+        if (!s || s === "-") s = "0";
+        usd = `$${s}`;
+      }
+      if (status.inputTokens === undefined || status.outputTokens === undefined) usd += " partial";
+      if (status.usageSource === "estimated" || status.usageSource?.startsWith("mixed")) usd += " est.";
+    }
+  }
+  return usd ? `${usd} · ${parts.join(" · ")}` : parts.join(" · ");
+}
 const slashCommands: Completion[] = WEB_SLASH_COMMANDS;
 
 const op = (type: string, data?: unknown, rootID?: string) => sendOp(type, data, rootID).catch((error) => window.alert(error.message));
@@ -101,6 +150,8 @@ export default function App() {
   const [history, setHistory] = useState<string[]>([]);
   const [runtimeOpen, setRuntimeOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [showThinking, setShowThinking] = useState(readShowThinking);
+  const [modelRates, setModelRates] = useState<{ inputPerM: number; outputPerM: number; hasCost: boolean; context?: number }>();
   const [sandboxInfo, setSandboxInfo] = useState<SandboxInfo>();
   const [sandboxExplainOpen, setSandboxExplainOpen] = useState(false);
   const [selectedChildId, setSelectedChildId] = useState<string>();
@@ -298,8 +349,43 @@ export default function App() {
   const attach = async (files: FileList | null) => { if (!files) return; try { const added = await Promise.all([...files].map(readAttachment)); setImages((old) => [...old, ...added]); } catch (error) { window.alert((error as Error).message); } };
   const selectProvider = async (provider: string) => {
     void op("select.model", { provider }, selectedID);
-    if (boot?.capabilities.catalog) request<{ models: Array<{ ID?: string; id?: string }> }>(`/v1/models?provider=${encodeURIComponent(provider)}`).then((v) => setModels(v.models.map((m) => m.ID || m.id || "").filter(Boolean))).catch(() => setModels([]));
+    if (boot?.capabilities.catalog) {
+      request<{ models: Array<Record<string, unknown>> }>(`/v1/models?provider=${encodeURIComponent(provider)}`)
+        .then((v) => {
+          const list = v.models || [];
+          setModels(list.map((m) => String(m.ID || m.id || "")).filter(Boolean));
+          const current = state.status.model;
+          const match = list.find((m) => String(m.ID || m.id || "") === current) || list[0];
+          if (match) {
+            setModelRates({
+              inputPerM: Number(match.InputCost ?? match.inputCost ?? 0),
+              outputPerM: Number(match.OutputCost ?? match.outputCost ?? 0),
+              hasCost: Boolean(match.HasCost ?? match.hasCost),
+              context: Number(match.Context ?? match.context ?? 0) || undefined,
+            });
+          } else setModelRates(undefined);
+        })
+        .catch(() => { setModels([]); setModelRates(undefined); });
+    }
   };
+
+  useEffect(() => {
+    if (!boot?.capabilities.catalog || !state.status.provider) return;
+    request<{ models: Array<Record<string, unknown>> }>(`/v1/models?provider=${encodeURIComponent(state.status.provider)}`)
+      .then((v) => {
+        const list = v.models || [];
+        setModels(list.map((m) => String(m.ID || m.id || "")).filter(Boolean));
+        const match = list.find((m) => String(m.ID || m.id || "") === state.status.model);
+        if (!match) return;
+        setModelRates({
+          inputPerM: Number(match.InputCost ?? match.inputCost ?? 0),
+          outputPerM: Number(match.OutputCost ?? match.outputCost ?? 0),
+          hasCost: Boolean(match.HasCost ?? match.hasCost),
+          context: Number(match.Context ?? match.context ?? 0) || undefined,
+        });
+      })
+      .catch(() => {});
+  }, [boot?.capabilities.catalog, state.status.provider, state.status.model]);
   const inspectProject = async (tab: InspectorTab, opts?: { open?: boolean }) => {
     setInspector(tab);
     if (opts?.open !== false) setInspectorOpen(true);
@@ -346,6 +432,7 @@ export default function App() {
   const selectWorkspace = async (id: string, isLive: boolean) => {
     dispatch({ type: "client.ensure", id });
     setSelectedIsLive(isLive);
+    setModelRates(undefined);
     if (!isLive || !boot?.capabilities.roots || boot.attachOnly) return;
     try {
       await activateRoot(id);
@@ -435,14 +522,14 @@ export default function App() {
               <Field label="Effort" value={state.status.effort} values={runtimeValues.effort} disabled={runtimeBusy} onChange={(level) => void op("set.effort", { level }, selectedID)} />
               <Field label="Autonomy" value={state.status.autonomy} values={runtimeValues.autonomy} disabled={runtimeBusy} onChange={(mode) => void op("set.autonomy", { mode }, selectedID)} />
               <Field label="Permission" value={state.status.permissionMode} values={runtimeValues.permission} disabled={runtimeBusy} onChange={(mode) => void op("set.permission_mode", { mode }, selectedID)} />
-              {boot?.capabilities.sandbox && <Field label="Sandbox" value={state.status.sandbox || sandboxInfo?.mode} values={sandboxInfo?.modes || runtimeValues.sandbox} disabled={!isLive || state.status.busy || !sandboxInfo?.canChangeDefault} onChange={(mode) => void changeSandboxDefault(mode)} />}{boot?.capabilities.sandbox && <button type="button" className="runtime-explain" onClick={() => void openSandboxExplain()}>Explain</button>}<label className="fast-toggle"><input type="checkbox" checked={fast} disabled={runtimeBusy} onChange={(event) => { setFast(event.target.checked); void op("set.fast", { enabled: event.target.checked }, selectedID); }} />FAST</label>
+              {boot?.capabilities.sandbox && <Field label="Sandbox" value={state.status.sandbox || sandboxInfo?.mode} values={sandboxInfo?.modes || runtimeValues.sandbox} disabled={!isLive || state.status.busy || !sandboxInfo?.canChangeDefault} onChange={(mode) => void changeSandboxDefault(mode)} />}{boot?.capabilities.sandbox && <button type="button" className="runtime-explain" onClick={() => void openSandboxExplain()}>Explain</button>}<label className="fast-toggle"><input type="checkbox" checked={fast} disabled={runtimeBusy} onChange={(event) => { setFast(event.target.checked); void op("set.fast", { enabled: event.target.checked }, selectedID); }} />FAST</label><label className="fast-toggle"><input type="checkbox" aria-label="Show thinking" checked={showThinking} onChange={(event) => { const next = event.target.checked; setShowThinking(next); writeShowThinking(next); }} />THINK</label>
             </div>
           )}
         </div>
       </section>
-      <RuntimeStatus status={state.status} />
+      <RuntimeStatus status={state.status} modelRates={modelRates} />
       </div>
-      <section className="transcript" aria-live="polite" aria-label="Conversation transcript">{!boot && transport !== "connecting" ? <div className="empty-state" role="alert"><span>ERROR</span><h1>{transport}</h1><p>Failed to load cockpit. Open the URL printed by <code>strike serve</code> (includes <code>?token=</code>), or pass a valid bearer token.</p></div> : !state.items.length && <div className="empty-state"><span>01 / READY</span><h1>{boot?.attachOnly ? "Inspect the record." : "Direct the work."}</h1><p>{boot?.attachOnly ? "Select a durable session from the rail." : "Describe an outcome. Strike will plan, act, and report through the live engine seam."}</p></div>}{state.items.map((item) => <Transcript key={item.id} item={item} />)}<div ref={endRef} /></section>
+      <section className="transcript" aria-live="polite" aria-label="Conversation transcript">{!boot && transport !== "connecting" ? <div className="empty-state" role="alert"><span>ERROR</span><h1>{transport}</h1><p>Failed to load cockpit. Open the URL printed by <code>strike serve</code> (includes <code>?token=</code>), or pass a valid bearer token.</p></div> : !state.items.length && <div className="empty-state"><span>01 / READY</span><h1>{boot?.attachOnly ? "Inspect the record." : "Direct the work."}</h1><p>{boot?.attachOnly ? "Select a durable session from the rail." : "Describe an outcome. Strike will plan, act, and report through the live engine seam."}</p></div>}{state.items.map((item) => <Transcript key={item.id} item={item} showThinking={showThinking} />)}<div ref={endRef} /></section>
       <form className="composer" onSubmit={submit}><label htmlFor="prompt">Instruction {state.status.busy && "— send to queue"}</label><textarea aria-label="Instruction" id="prompt" value={draft} disabled={!isLive} placeholder={isLive ? "Describe the next outcome…  / command" : "Historical session — read only"} onPaste={(event) => void attach(event.clipboardData.files)} onDrop={(event) => { event.preventDefault(); void attach(event.dataTransfer.files); }} onDragOver={(event) => event.preventDefault()} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !completions.length) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} />{completions.length > 0 && <div className="completion" role="listbox" aria-label="Composer completions">{completions.slice(0, 8).map((item) => <button type="button" role="option" key={item.label} onClick={() => selectCompletion(item)}><strong>{item.label}</strong><span>{item.detail}</span></button>)}</div>}{images.length > 0 && <div className="attachments">{images.map((image, index) => <button type="button" key={`${image.name}-${index}`} onClick={() => setImages((list) => list.filter((_, i) => i !== index))}>{image.name} ×</button>)}</div>}{queue.length > 0 && <div className="prompt-queue-wrap"><ol ref={queueRef} className="prompt-queue" aria-label="Queued prompts">{queue.map((item, index) => <li key={index}>{queueEdit?.index === index ? <input className="queue-edit" aria-label={`Queued prompt text ${index + 1}`} value={queueEdit.text} autoFocus onChange={(event) => setQueueEdit({ index, text: event.target.value })} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); queueEditCancel.current = false; setQueue((list) => editQueuedText(list, index, queueEdit.text)); setQueueEdit(null); } if (event.key === "Escape") { event.preventDefault(); queueEditCancel.current = true; setQueueEdit(null); } }} onBlur={() => { if (!queueEditCancel.current) setQueue((list) => editQueuedText(list, index, queueEdit.text)); queueEditCancel.current = false; setQueueEdit(null); }} /> : <span>{item.text}{item.images.length > 0 ? ` (${item.images.length} img)` : ""}</span>}<span className="queue-actions"><button type="button" aria-label={`Move queued prompt ${index + 1} up`} disabled={index === 0} onClick={() => setQueue((list) => moveQueuedAt(list, index, -1))}>↑</button><button type="button" aria-label={`Move queued prompt ${index + 1} down`} disabled={index === queue.length - 1} onClick={() => setQueue((list) => moveQueuedAt(list, index, 1))}>↓</button><button type="button" aria-label={`Edit queued prompt ${index + 1}`} onClick={() => { queueEditCancel.current = false; setQueueEdit({ index, text: item.text }); }}>✎</button><button type="button" aria-label={`Remove queued prompt ${index + 1}`} onClick={() => { setQueue((list) => removeQueuedAt(list, index)); setQueueEdit((cur) => cur?.index === index ? null : cur); }}>×</button></span></li>)}</ol><div className="queue-toolbar"><button type="button" onClick={() => { setQueue(clearQueue()); setQueueEdit(null); }}>Clear queue</button></div></div>}<div><span><kbd>↵</kbd> send · <kbd>⇧↵</kbd> newline</span><span><input ref={fileRef} hidden type="file" accept="image/*" multiple onChange={(event) => void attach(event.target.files)} /><button type="button" onClick={() => fileRef.current?.click()}>Attach</button>{history.length > 0 && <button type="button" onClick={() => setDraft(history.at(-1) || "")}>History</button>}<button type="button" onClick={() => exportSession()} disabled={!state.items.length}>Export</button>{state.status.busy && <button type="button" className="stop" onClick={() => void op("interrupt")}>Interrupt</button>}<button type="submit" disabled={!draft.trim() || !isLive}>{state.status.busy ? "Queue" : "Send"}</button></span></div></form>
     </main>
     <aside className={`inspector ${inspectorOpen ? "open" : "collapsed"}`} aria-label="Inspector"><PanelResize label="Resize inspector panel" value={inspectorWidth} min={240} max={520} onChange={setInspectorWidth} side="inspector" /><div className="inspector-tabs" role="tablist">{inspectorTabs.map((tab) => <button role="tab" aria-selected={inspector === tab} key={tab} onClick={() => void inspectProject(tab)}>{tab}</button>)}</div><div className="inspector-body">{inspectorTabs.length ? <InspectorBody tab={inspectorTabs.includes(inspector) ? inspector : inspectorTabs[0]} boot={boot} status={state.status} data={projectData} loading={projectLoading} expandedDiffs={expandedDiffs} toggleDiff={toggleDiff} isLive={isLive} selectedID={selectedID} sandbox={sandboxInfo} onExplainSandbox={() => void openSandboxExplain()} /> : <p className="muted">No inspector panels available for this host.</p>}</div></aside>
@@ -580,13 +667,22 @@ function HistoryNav({ sessions, activeRoots, selectedID, selectedIsLive, history
   return <><input className="history-search" type="search" placeholder="Search sessions…" aria-label="Search sessions" value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} /><nav>{sessions.filter((s) => !historySearch || s.title?.toLowerCase().includes(historySearch.toLowerCase()) || s.id.toLowerCase().includes(historySearch.toLowerCase())).map((session) => { const isActiveWorkspace = activeRoots.some((r) => r.id === session.id); return <button key={session.id} type="button" className={session.id === selectedID ? "session active" : "session"} onClick={() => void selectWorkspace(session.id, isActiveWorkspace)} title={session.id}><span className="session-title">{session.title || shortID(session.id)}</span>{isActiveWorkspace && <small className="live-badge">LIVE</small>}</button>; })}</nav><div className="session-actions">{!selectedIsLive && !boot?.attachOnly && <button type="button" disabled={!hasSelection || !boot?.capabilities.roots} onClick={() => void handleResume(selectedID)}>Resume as workspace</button>}{canSessions && hasSelection && <SessionMenu onAction={(action) => void sessionAction(action)} />}</div></>;
 }
 
-function RuntimeStatus({ status }: { status: Status }) {
+function RuntimeStatus({ status, modelRates }: { status: Status; modelRates?: { inputPerM: number; outputPerM: number; hasCost: boolean; context?: number } }) {
+  const contextStatus = status.contextLimit === undefined && modelRates?.context
+    ? { ...status, contextLimit: modelRates.context }
+    : status;
   const bits: string[] = [];
+  if (status.agent) bits.push(`Agent ${status.agent}`);
+  if (status.effort) bits.push(`Effort ${status.effort}`);
+  if (status.autonomy) bits.push(`Autonomy ${status.autonomy}`);
+  if (status.permissionMode) bits.push(`Permission ${status.permissionMode}`);
   if (status.phase) bits.push(`Phase ${status.phase}`);
   if (status.workflow) bits.push(`Workflow ${status.workflow}`);
-  if (status.contextUsed !== undefined && status.contextLimit !== undefined) {
-    bits.push(`Context ${status.contextUsed.toLocaleString()} / ${status.contextLimit.toLocaleString()}`);
-  }
+  if (status.cwd) bits.push(`CWD ${status.cwd}`);
+  const ctx = formatContextLabel(contextStatus);
+  if (ctx !== "not reported") bits.push(`Context ${ctx}`);
+  const cost = formatCostLabel(status, modelRates);
+  if (cost !== "not reported") bits.push(`Cost ${cost}`);
   if (!bits.length) return null;
   return <div className="runtime-status" aria-label="Session status">{bits.map((bit) => <span key={bit}>{bit}</span>)}</div>;
 }
