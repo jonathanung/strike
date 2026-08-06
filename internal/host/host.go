@@ -822,6 +822,9 @@ type Services struct {
 	// Workflows is the loaded workflow catalog (builtin/global/project/plugin).
 	// Nil when unsupported; frontends must degrade without panic.
 	Workflows Workflows
-	Agents    []string // selectable agent names, default first
-	Skills    []Skill
+	// WorkflowDrafts reviews/saves in-memory model or editor drafts without
+	// activation. Nil when unsupported; frontends must degrade without panic.
+	WorkflowDrafts WorkflowDrafts
+	Agents         []string // selectable agent names, default first
+	Skills         []Skill
 }

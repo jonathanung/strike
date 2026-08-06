@@ -11,18 +11,21 @@ import (
 	"github.com/jonathanung/strike-cli/internal/config"
 )
 
-const workflowUsage = `Manage workflow definitions (schema, scaffold, format, validate).
+const workflowUsage = `Manage workflow definitions (schema, scaffold, format, validate, generate).
 
 Usage:
   strike workflow scaffold --global|--project <name> [--force]
   strike workflow format [--write] <path>...
   strike workflow validate [path|dir]...
   strike workflow validate --global|--project|--all
+  strike workflow generate [--name <hint>] [--provider p] [--model m] <intent...>
+  strike workflow generate --save --global|--project [--force] [--yes] ...
+  strike workflow save-draft --global|--project [--force] [--yes] [path|-]
   strike workflow help
 
-Workflows are linear phase sequences (schemaVersion 1). Scaffolding and
-formatting only write files — they never activate a workflow. Activation is a
-separate catalog/runtime step.
+Workflows are linear phase sequences (schemaVersion 1). Scaffolding, formatting,
+generation, and save-draft only write files when explicitly confirmed — they
+never activate a workflow. Activation is a separate catalog/runtime step.
 
 Scaffold:
   Requires exactly one of --global or --project. Writes
@@ -38,6 +41,18 @@ Validate:
   reference resolution against loaded agents. Reports every actionable error
   in one pass. With no paths, use --global, --project, or --all to validate
   installed workflow directories. Paths may be files or directories of *.json.
+
+Generate:
+  Asks the model for a workflow JSON draft from <intent>, prints a structured
+  review (phases, context, executable checks, effective permission widening).
+  Does not save or run unless --save is passed with --yes (explicit confirm)
+  and exactly one of --global/--project. Invalid model output stays an editable
+  draft with diagnostics (exit 1); use save-draft after correction.
+
+Save-draft:
+  Validates JSON from path or stdin (-) and writes only with --yes. Overwrite
+  requires --force. Prior file is preserved when save is refused or fails.
+  Never activates.
 `
 
 func runWorkflowCLI(args []string, stdout, stderr io.Writer) int {
@@ -52,6 +67,10 @@ func runWorkflowCLI(args []string, stdout, stderr io.Writer) int {
 		return runWorkflowFormat(args[1:], stdout, stderr)
 	case "validate":
 		return runWorkflowValidate(args[1:], stdout, stderr)
+	case "generate":
+		return runWorkflowGenerate(args[1:], stdout, stderr)
+	case "save-draft":
+		return runWorkflowSaveDraft(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "strike workflow: unknown command %q\n", args[0])
 		fmt.Fprint(stderr, workflowUsage)

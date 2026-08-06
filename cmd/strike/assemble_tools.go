@@ -778,6 +778,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	services.LSP = local.NewLSP(lspMgr)
 	services.Telemetry = local.NewTelemetry()
 	services.Workflows = local.NewWorkflows(workflows)
+	services.WorkflowDrafts = local.NewWorkflowDrafts(workDir)
 
 	spawn := rootSpawner(func(id string) (*rootSlot, error) {
 		slot, _, err := openRoot(id, false)
