@@ -187,6 +187,9 @@ func (w plansWindow) viewDetail(th theme.Theme) string {
 		if detail == "" {
 			detail = "(empty)"
 		}
+		if d := sectionDelegateLabel(sec); d != "" {
+			detail = detailJoin(th, d, detail)
+		}
 		items[i] = ui.ListItem{
 			Label:  sanitizeDisplayData(sec.Title),
 			Detail: detail,
@@ -218,6 +221,21 @@ func (w plansWindow) viewSection(th theme.Theme) string {
 	lines := []string{
 		st.Accent.Render(sanitizeDisplayData(sec.Title)),
 		st.Muted.Render(detailJoin(th, sanitizeDisplayData(w.plan.Title), detailJoin(th, fmt.Sprintf("v%d", w.plan.Version), sec.ID))),
+	}
+	if d := sectionDelegateLabel(sec); d != "" {
+		style := st.Muted
+		switch sec.DelegateStatus {
+		case "in_flight":
+			style = st.Accent
+		case "failed", "canceled", "malformed", "conflict":
+			style = st.Warning
+		case "applied":
+			style = st.Success
+		}
+		lines = append(lines, style.Render(d))
+		if sec.DelegateDetail != "" {
+			lines = append(lines, st.Muted.Render(sanitizeDisplayData(sec.DelegateDetail)))
+		}
 	}
 	if w.err != "" {
 		lines = append(lines, st.Error.Render(welcomeTruncate(w.err, w.width, th.Icons.Ellipsis)))
@@ -936,6 +954,38 @@ func isPlanConflict(err error) bool {
 		return false
 	}
 	return strings.Contains(err.Error(), "version conflict")
+}
+
+// sectionDelegateLabel is a short plan-progress badge for section list/detail.
+// Generic agent/activity panes remain the live subagent focus surface.
+func sectionDelegateLabel(sec host.PlanSection) string {
+	st := strings.TrimSpace(sec.DelegateStatus)
+	if st == "" {
+		return ""
+	}
+	who := strings.TrimSpace(sec.DelegateChildName)
+	if who == "" {
+		who = shortSessionID(sec.DelegateChildID)
+	}
+	switch st {
+	case "in_flight":
+		if who != "" {
+			return "delegating → " + who
+		}
+		return "delegating"
+	case "applied":
+		return "delegate applied"
+	case "failed":
+		return "delegate failed"
+	case "canceled":
+		return "delegate canceled"
+	case "conflict":
+		return "delegate conflict"
+	case "malformed":
+		return "delegate malformed"
+	default:
+		return "delegate " + st
+	}
 }
 
 func clampViewHeight(body string, height int) string {

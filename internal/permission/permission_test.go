@@ -63,7 +63,7 @@ func TestDefaultsIncludesTeamMessagingAllow(t *testing.T) {
 
 func TestDefaultsIncludesPlanToolsAllow(t *testing.T) {
 	// Independent of write/edit so plan mode can revise structured plans.
-	for _, perm := range []string{"plan_write", "plan_read"} {
+	for _, perm := range []string{"plan_write", "plan_read", "plan_delegate"} {
 		if got := Evaluate(perm, "*", Defaults()); got != Allow {
 			t.Errorf("Defaults %s = %q, want allow", perm, got)
 		}
