@@ -21,6 +21,8 @@ const modulePath = "github.com/jonathanung/strike-cli"
 //     history directly and can be developed against fakes).
 //   - internal/host (the contract package, not host/local) imports the
 //     standard library only.
+//   - pkg/protocol imports the standard library only.
+//   - pkg/sdk may import only the standard library and pkg/protocol.
 //   - no backend package (internal/* except internal/tui/**) imports
 //     internal/tui/**.
 //
@@ -143,6 +145,21 @@ func boundaryViolation(pkgDir, imp string) string {
 			return "internal/host is a stdlib-only contract package"
 		}
 		return ""
+
+	case pkgDir == "pkg/protocol" || strings.HasPrefix(pkgDir, "pkg/protocol/"):
+		if strings.Contains(imp, ".") {
+			return "pkg/protocol is a stdlib-only public wire package"
+		}
+		return ""
+
+	case pkgDir == "pkg/sdk" || strings.HasPrefix(pkgDir, "pkg/sdk/"):
+		if !strings.Contains(imp, ".") {
+			return "" // stdlib
+		}
+		if imp == modulePath+"/pkg/protocol" || strings.HasPrefix(imp, modulePath+"/pkg/protocol/") {
+			return ""
+		}
+		return "pkg/sdk may only import stdlib and pkg/protocol"
 
 	case strings.HasPrefix(pkgDir, "internal/") && !isTUIDir(pkgDir):
 		if imp == tuiPrefix || strings.HasPrefix(imp, tuiPrefix+"/") {

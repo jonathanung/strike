@@ -1,7 +1,18 @@
-# Harness SDKs
+# SDKs
 
-These packages help external programs implement Strike's JSONL harness
-protocol:
+## Protocol client (Go)
+
+For driving or inspecting Strike sessions from Go, use the module packages:
+
+- [`pkg/protocol`](../pkg/protocol) — public Op/Event wire schema
+- [`pkg/sdk`](../pkg/sdk) — thin client (channels, JSONL, `RunTurn`, session replay)
+
+Consumer guide: [docs/sdk.md](../docs/sdk.md).
+
+## Harness SDKs
+
+These packages help external programs implement Strike's JSONL **task harness**
+protocol (a different wire from Op/Event):
 
 - `go/harness` provides a Go subprocess runtime.
 - `typescript` provides a typed Node runtime.
