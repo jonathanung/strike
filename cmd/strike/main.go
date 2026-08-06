@@ -154,8 +154,14 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "exec" {
 		return runExecCLI(args[1:], stdout, stderr)
 	}
+	if len(args) > 0 && args[0] == "rpc" {
+		return runRPCCLI(args[1:], os.Stdin, stdout, stderr)
+	}
 	if len(args) > 0 && args[0] == "serve" {
 		return runServeCLI(args[1:], stdout, stderr)
+	}
+	if len(args) > 0 && args[0] == "mcp-serve" {
+		return runMCPServeCLI(args[1:], os.Stdin, stdout, stderr)
 	}
 	if len(args) > 0 && args[0] == "restore" {
 		return runRestoreCLI(args[1:], stdout, stderr)
@@ -312,7 +318,9 @@ func writeUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  strike [options]")
 	fmt.Fprintln(w, "  strike exec [options] <prompt>")
+	fmt.Fprintln(w, "  strike rpc [options]")
 	fmt.Fprintln(w, "  strike serve [options]")
+	fmt.Fprintln(w, "  strike mcp-serve [options]")
 	fmt.Fprintln(w, "  strike auth <command> [arguments]")
 	fmt.Fprintln(w, "  strike restore [options]")
 	fmt.Fprintln(w, "  strike version")
