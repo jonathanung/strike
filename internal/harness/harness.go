@@ -1,6 +1,6 @@
 // Package harness defines function-based agent control flow. A harness receives
-// its input, a model provider capability, and a progress callback, owns the
-// complete run, and returns one final result.
+// its input, a model provider capability, a brokered tools capability, and a
+// progress callback, owns the complete run, and returns one final result.
 package harness
 
 import (
@@ -14,7 +14,9 @@ import (
 	"github.com/jonathanung/strike-cli/internal/provider"
 )
 
-// Result is the harness's final response.
+// Result is the harness's final response. Only this value is committed as the
+// assistant message. Tool calls must be executed via Input.Tools during the run;
+// returning Calls or stopReason "tool_use" fails the child turn.
 type Result struct {
 	Text       string
 	Calls      []provider.ToolCall
@@ -32,11 +34,24 @@ type ModelResponse struct {
 	Usage      *provider.Usage
 }
 
+// Tools brokers tool execution through the Strike runtime (registry,
+// permissions, hooks, sandbox, scheduler, redaction, protocol events, and
+// cancellation). Results are returned to the harness only and are not committed
+// to conversation history. Concurrent Execute calls are serialized by the host.
+type Tools struct {
+	// Execute runs one tool call. Denied, unknown, and malformed calls return a
+	// structured ToolResult (IsError + ErrorCode) with a nil error. A non-nil
+	// error is reserved for host/transport failure. Execute is nil only when a
+	// test omits the capability; engine-hosted runs always set it.
+	Execute func(provider.ToolCall) (provider.ToolResult, error)
+}
+
 // Input describes one harness invocation independently of the model provider it
 // may use.
 type Input struct {
 	Context context.Context
 	Request provider.Request
+	Tools   Tools
 }
 
 // Provider performs complete model requests without committing their responses
@@ -50,8 +65,8 @@ type Emit func(json.RawMessage)
 
 // Func is the complete agent run. Go applications may register a Func compiled
 // into their binary; external.Adapter also exposes subprocesses as Func values.
-// The function owns all control flow, may make provider calls concurrently,
-// emits optional progress, and returns one result.
+// The function owns all control flow, may make provider and tool calls
+// concurrently, emits optional progress, and returns one result.
 type Func func(Input, Provider, Emit) (Result, error)
 
 // Registry maps names to already constructed harness functions. It does not

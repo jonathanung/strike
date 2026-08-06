@@ -40,9 +40,11 @@ type ToolCall struct {
 }
 
 type ToolResult struct {
-	CallID  string `json:"callId"`
-	Output  string `json:"output"`
-	IsError bool   `json:"isError,omitempty"`
+	CallID    string `json:"callId"`
+	Output    string `json:"output"`
+	IsError   bool   `json:"isError,omitempty"`
+	ErrorCode string `json:"errorCode,omitempty"`
+	Retryable bool   `json:"retryable,omitempty"`
 }
 
 type ToolSchema struct {
@@ -51,10 +53,16 @@ type ToolSchema struct {
 	InputSchema json.RawMessage `json:"inputSchema"`
 }
 
+// Tools brokers tool execution through the Strike runtime.
+type Tools interface {
+	Execute(ToolCall) (ToolResult, error)
+}
+
 // Input describes one harness invocation independently of the model provider.
 type Input struct {
 	Context context.Context
 	Request Request
+	Tools   Tools
 }
 
 // ModelResponse is one completed speculative provider call.
@@ -67,6 +75,7 @@ type ModelResponse struct {
 }
 
 // Result is the only assistant response committed by Strike.
+// Tool calls must be executed via Input.Tools during the run, not returned here.
 type Result struct {
 	Text       string            `json:"text,omitempty"`
 	Reasoning  []json.RawMessage `json:"reasoning,omitempty"`

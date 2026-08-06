@@ -3,8 +3,10 @@
 A harness is one ordinary function used to implement a task subagent. When the
 parent delegates to that agent, Strike calls the function once with an input,
 a provider capability, and a progress callback. The input contains the subtask
-request and abort signal; the provider only performs additional model calls.
-The function owns the complete subagent run and returns its final response.
+request, abort signal, and a brokered tools capability; the provider only
+performs additional model calls. Tool execution goes through Strike's registry,
+permissions, hooks, sandbox, scheduler, redaction, and protocol events. The
+function owns the complete subagent run and returns its final response.
 
 ## Integration modes
 
@@ -130,9 +132,10 @@ The integration path is deliberately small:
 3. When `task` starts that agent, the child engine resolves the name. With no
    custom name it runs the built-in child model/tool loop; otherwise the
    complete subagent run is one function call. Root turns never invoke harnesses.
-4. `internal/engine/harness.go` constructs the input, provider capability, and
-   progress callback. Only the function's returned `harness.Result` is committed
-   as the assistant response.
+4. `internal/engine/harness.go` constructs the input (including tools broker),
+   provider capability, and progress callback. Only the function's returned
+   `harness.Result` is committed as the assistant response. Mid-run tool
+   results are returned to the harness only and are not written into history.
 
 `sdk/typescript` and `sdk/lean` hide the subprocess JSONL protocol. Harness code
 does not manage invocation IDs, call IDs, protocol messages, or process
@@ -187,19 +190,30 @@ loop.
 type Harness = (input: {
 	request: ProviderRequest;
 	signal: AbortSignal;
+	tools: {
+		execute: (call: ToolCall) => Promise<ToolResult>;
+	};
 }, provider: {
 	call: (request: ProviderRequest) => Promise<ModelResponse>;
 }, emit: (progress: ProgressEvent) => void) => Promise<Response>;
 ```
 
 - `input.request` is the initial normalized request, including messages and
-  tools.
+  tool schemas the harness may execute.
 - `provider.call` performs a complete Strike-managed model call. Calls may run
 	concurrently and do not enter conversation history. Provider streaming and
 	retries remain internal to Strike.
+- `input.tools.execute` runs one tool through the same safety and audit path as
+  the built-in engine loop (permissions, hooks, sandbox, scheduler, redaction,
+  begin/end events). Concurrent execute requests are serialized by Strike.
+  Denied, unknown, and malformed calls return structured `{ isError, errorCode,
+  output }` results rather than crashing the harness process.
 - `emit` publishes structured progress to the UI and session log.
-- `input.signal` is aborted when the user interrupts the agent run.
+- `input.signal` is aborted when the user interrupts the agent run; in-flight
+  tool execution is canceled with the turn.
 - The returned `Response` is the only assistant response committed to history.
+  Do not return unresolved tool calls from the final response — execute them
+  via `tools.execute` during the run.
 
 ## Private transport
 
@@ -213,14 +227,19 @@ objects with `version: 1`, a `type`, and the active `invocationId`. Harness stdo
 reserved for protocol messages; diagnostics should use stderr.
 
 Strike serializes writes to the process. A harness may issue multiple
-`provider.call` requests concurrently by assigning each a unique `callId`.
-Provider calls are speculative: their output does not enter Strike's
-conversation history. Only the response supplied by `harness.complete` becomes
-the final assistant message.
+`provider.call` and `tool.execute` requests concurrently by assigning each a
+unique `callId` (shared ID space). Provider calls are speculative: their output
+does not enter Strike's conversation history. Tool results are returned only to
+the harness; begin/end events still appear on the session timeline. Only the
+response supplied by `harness.complete` becomes the final assistant message.
 
 Strike rejects malformed messages, unsupported versions, duplicate request
 IDs, lines over 1 MiB, and aggregate output over 16 MiB. These are reliability
 limits, not security boundaries.
+
+The external ABI is versioned additively under `version: 1`. Older harnesses
+that only use `provider.call` remain compatible; hosts advertise
+`tool.execute` in `harness.start` capabilities when available.
 
 ### Messages
 
@@ -241,8 +260,9 @@ Strike sends the initial request and active selection:
     "maxOutputTokens": 8192,
     "effort": "high"
   },
-	"capabilities": [
+  "capabilities": [
 	  "provider.call",
+	  "tool.execute",
 	  "progress.emit",
 	  "harness.cancel"
   ]
@@ -276,6 +296,44 @@ once with the same `callId`:
 ```json
 {"version":1,"type":"provider.result","invocationId":"invocation-id","callId":"candidate-1","text":"candidate","stopReason":"end_turn"}
 ```
+
+#### `tool.execute`
+
+The harness requests brokered execution of one tool exposed in
+`harness.start.request.tools`:
+
+```json
+{
+  "version": 1,
+  "type": "tool.execute",
+  "invocationId": "invocation-id",
+  "callId": "tool-1",
+  "toolCallId": "optional-event-id",
+  "name": "read",
+  "arguments": {"filePath": "README.md"}
+}
+```
+
+`callId` correlates the request with `tool.result` (unique across provider and
+tool requests). `toolCallId` is the id stamped on protocol `tool.call.begin` /
+`tool.call.end` events; when omitted it defaults to `callId`.
+
+Strike replies once:
+
+```json
+{
+  "version": 1,
+  "type": "tool.result",
+  "invocationId": "invocation-id",
+  "callId": "tool-1",
+  "output": "file contents",
+  "isError": false
+}
+```
+
+Denied, unknown, canceled, and malformed calls set `isError` and a stable
+`errorCode` (`permission_denied`, `invalid_args`, `canceled`, `internal`, …)
+with a model-facing `output` string. Transport failures may set `error` instead.
 
 #### `progress.emit`
 

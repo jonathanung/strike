@@ -52,6 +52,91 @@ func TestExternalHappyConcurrentProviderCalls(t *testing.T) {
 	}
 }
 
+func TestExternalToolExecute(t *testing.T) {
+	t.Setenv("GO_WANT_HARNESS_HELPER", "tool-execute")
+	adapter, err := external.Command(external.Config{Command: os.Args[0], Args: []string{"-test.run=TestHarnessHelperProcess"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := external.New("fixture", adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawCall provider.ToolCall
+	result, err := h(harness.Input{
+		Context: context.Background(),
+		Request: provider.Request{Model: "selected"},
+		Tools: harness.Tools{
+			Execute: func(call provider.ToolCall) (provider.ToolResult, error) {
+				sawCall = call
+				return provider.ToolResult{CallID: call.ID, Output: "tool-body"}, nil
+			},
+		},
+	}, harness.Provider{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Text != "tool-body" || result.StopReason != "end_turn" {
+		t.Fatalf("result = %#v", result)
+	}
+	if sawCall.Name != "read" || string(sawCall.Args) != `{"filePath":"x"}` {
+		t.Fatalf("tool call = %#v", sawCall)
+	}
+}
+
+func TestExternalToolExecuteStructuredError(t *testing.T) {
+	t.Setenv("GO_WANT_HARNESS_HELPER", "tool-execute")
+	adapter, err := external.Command(external.Config{Command: os.Args[0], Args: []string{"-test.run=TestHarnessHelperProcess"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := external.New("fixture", adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := h(harness.Input{
+		Context: context.Background(),
+		Tools: harness.Tools{
+			Execute: func(call provider.ToolCall) (provider.ToolResult, error) {
+				return provider.ToolResult{
+					CallID:    call.ID,
+					Output:    "Permission denied.",
+					IsError:   true,
+					ErrorCode: "permission_denied",
+				}, nil
+			},
+		},
+	}, harness.Provider{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Text != "err:permission_denied" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestGoSDKToolExecute(t *testing.T) {
+	fn := newFixture(t, "go-sdk-tool")
+	result, err := fn(harness.Input{
+		Context: context.Background(),
+		Request: provider.Request{Model: "fixture"},
+		Tools: harness.Tools{
+			Execute: func(call provider.ToolCall) (provider.ToolResult, error) {
+				if call.Name != "read" {
+					t.Fatalf("name = %q", call.Name)
+				}
+				return provider.ToolResult{CallID: call.ID, Output: "sdk-tool-ok"}, nil
+			},
+		},
+	}, harness.Provider{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Text != "sdk-tool-ok" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
 func TestSDKExampleChooseBest(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
@@ -239,14 +324,70 @@ func TestHarnessHelperProcess(t *testing.T) {
 		}
 		return
 	}
+	if mode == "go-sdk-tool" {
+		err := gosdk.Run(func(input gosdk.Input, _ gosdk.Provider, _ gosdk.Emit) (gosdk.Result, error) {
+			if input.Tools == nil {
+				return gosdk.Result{}, errors.New("tools unavailable")
+			}
+			res, err := input.Tools.Execute(gosdk.ToolCall{
+				Name:      "read",
+				Arguments: json.RawMessage(`{"filePath":"x"}`),
+			})
+			if err != nil {
+				return gosdk.Result{}, err
+			}
+			if res.IsError {
+				return gosdk.Result{Text: "err:" + res.ErrorCode, StopReason: "end_turn"}, nil
+			}
+			return gosdk.Result{Text: res.Output, StopReason: "end_turn"}, nil
+		})
+		if err != nil {
+			os.Exit(2)
+		}
+		return
+	}
 	scanner := bufio.NewScanner(os.Stdin)
 	if !scanner.Scan() {
 		os.Exit(2)
 	}
 	var start struct {
-		InvocationID string `json:"invocationId"`
+		InvocationID string   `json:"invocationId"`
+		Capabilities []string `json:"capabilities"`
 	}
 	if json.Unmarshal(scanner.Bytes(), &start) != nil || start.InvocationID == "" {
+		os.Exit(2)
+	}
+	if mode == "tool-execute" {
+		// Require additive capability advertisement.
+		hasTool := false
+		for _, c := range start.Capabilities {
+			if c == "tool.execute" {
+				hasTool = true
+				break
+			}
+		}
+		if !hasTool {
+			fmt.Printf(`{"version":1,"type":"harness.error","invocationId":%q,"error":"missing tool.execute capability"}`+"\n", start.InvocationID)
+			return
+		}
+		fmt.Printf(`{"version":1,"type":"tool.execute","invocationId":%q,"callId":"t1","name":"read","arguments":{"filePath":"x"}}`+"\n", start.InvocationID)
+		for scanner.Scan() {
+			var m struct {
+				Type      string `json:"type"`
+				Output    string `json:"output"`
+				IsError   bool   `json:"isError"`
+				ErrorCode string `json:"errorCode"`
+			}
+			if json.Unmarshal(scanner.Bytes(), &m) != nil || m.Type != "tool.result" {
+				continue
+			}
+			text := m.Output
+			if m.IsError {
+				text = "err:" + m.ErrorCode
+			}
+			fmt.Printf(`{"version":1,"type":"harness.complete","invocationId":%q,"text":%q,"stopReason":"end_turn"}`+"\n", start.InvocationID, text)
+			return
+		}
 		os.Exit(2)
 	}
 	if mode == "malformed" {

@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -323,4 +325,531 @@ func countText(events []protocol.Event, text string) int {
 		}
 	}
 	return count
+}
+
+func TestTaskChildHarnessExecutesTool(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "note.txt")
+	if err := os.WriteFile(target, []byte("hello-from-disk"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	registry := harness.NewRegistry()
+	registry.Register("reader", func(input harness.Input, _ harness.Provider, _ harness.Emit) (harness.Result, error) {
+		if input.Tools.Execute == nil {
+			return harness.Result{}, errors.New("tools.execute unavailable")
+		}
+		res, err := input.Tools.Execute(provider.ToolCall{
+			ID:   "read-1",
+			Name: "read",
+			Args: json.RawMessage(`{"filePath":"note.txt"}`),
+		})
+		if err != nil {
+			return harness.Result{}, err
+		}
+		if res.IsError {
+			return harness.Result{}, fmt.Errorf("tool error: %s (%s)", res.Output, res.ErrorCode)
+		}
+		if !strings.Contains(res.Output, "hello-from-disk") {
+			return harness.Result{}, fmt.Errorf("unexpected tool output %q", res.Output)
+		}
+		return harness.Result{Text: "read ok", StopReason: "end_turn"}, nil
+	})
+	prov := newScriptedProvider(
+		toolCallStep(taskToolCallWithAgent("task-read", "read file", "worker")),
+		func() streamStep {
+			s := completedStep("parent finished")
+			s.match = matchToolResult("task-read")
+			return s
+		}(),
+		childCompletedNudgeStep("parent saw completion"),
+	)
+	childEvents := make(chan protocol.Event, 32)
+	eng := engine.New(engine.Options{
+		SessionID:       "parent",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		InitialAgent:    "parent",
+		Agents: []engine.Agent{
+			{Name: "parent"},
+			{Name: "worker", Harness: "reader"},
+		},
+		HarnessRegistry: registry,
+		Registry:        tool.NewRegistry(tool.NewTask(), tool.NewRead()),
+		WorkDir:         dir,
+		Rules:           []permission.Ruleset{permission.Defaults()},
+		AppendChildEvent: func(_ string, event protocol.Event) error {
+			select {
+			case childEvents <- event:
+			default:
+			}
+			return nil
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+	eng.Ops() <- protocol.UserInput{Text: "delegate"}
+	events := drainAndReply(t, eng, 10*time.Second)
+
+	var began, ended, completed bool
+	for _, ev := range events {
+		if c, ok := ev.(protocol.ChildCompleted); ok {
+			if c.Status != protocol.ChildStatusCompleted || c.Summary != "read ok" {
+				t.Fatalf("ChildCompleted = %#v", c)
+			}
+			completed = true
+		}
+	}
+	if !completed {
+		t.Fatalf("missing ChildCompleted; events=%#v", events)
+	}
+	// Drain child session timeline events (tool begin/end live there).
+	deadline := time.After(2 * time.Second)
+	for !began || !ended {
+		select {
+		case ev := <-childEvents:
+			switch e := ev.(type) {
+			case protocol.ToolCallBegin:
+				if e.CallID == "read-1" && e.Name == "read" {
+					began = true
+				}
+			case protocol.ToolCallEnd:
+				if e.CallID == "read-1" && !e.IsError && strings.Contains(e.Output, "hello-from-disk") {
+					ended = true
+				}
+			}
+		case <-deadline:
+			t.Fatalf("tool events missing begin=%v end=%v", began, ended)
+		}
+	}
+}
+
+func TestTaskChildHarnessToolDenial(t *testing.T) {
+	registry := harness.NewRegistry()
+	registry.Register("denied", func(input harness.Input, _ harness.Provider, _ harness.Emit) (harness.Result, error) {
+		res, err := input.Tools.Execute(provider.ToolCall{
+			ID:   "bash-1",
+			Name: "bash",
+			Args: json.RawMessage(`{"command":"echo hi"}`),
+		})
+		if err != nil {
+			return harness.Result{}, err
+		}
+		if !res.IsError || res.ErrorCode != protocol.ErrorCodePermissionDenied {
+			return harness.Result{}, fmt.Errorf("want permission_denied, got %#v", res)
+		}
+		return harness.Result{Text: "denied-ok", StopReason: "end_turn"}, nil
+	})
+	denyBash := permission.Ruleset{
+		{Permission: "bash", Pattern: "*", Action: permission.Deny},
+	}
+	prov := newScriptedProvider(
+		toolCallStep(taskToolCallWithAgent("task-deny", "try bash", "worker")),
+		func() streamStep {
+			s := completedStep("parent finished")
+			s.match = matchToolResult("task-deny")
+			return s
+		}(),
+		childCompletedNudgeStep("parent saw completion"),
+	)
+	eng := engine.New(engine.Options{
+		SessionID:       "parent",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		InitialAgent:    "parent",
+		Agents: []engine.Agent{
+			{Name: "parent"},
+			{Name: "worker", Harness: "denied"},
+		},
+		HarnessRegistry: registry,
+		Registry:        tool.NewRegistry(tool.NewTask(), tool.NewBash()),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults(), denyBash},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+	eng.Ops() <- protocol.UserInput{Text: "delegate"}
+	events := drainAndReply(t, eng, 10*time.Second)
+	for _, ev := range events {
+		if c, ok := ev.(protocol.ChildCompleted); ok {
+			if c.Status != protocol.ChildStatusCompleted || c.Summary != "denied-ok" {
+				t.Fatalf("ChildCompleted = %#v", c)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing ChildCompleted; events=%#v", events)
+}
+
+func TestTaskChildHarnessUnknownAndMalformedTool(t *testing.T) {
+	registry := harness.NewRegistry()
+	registry.Register("bad-tools", func(input harness.Input, _ harness.Provider, _ harness.Emit) (harness.Result, error) {
+		unknown, err := input.Tools.Execute(provider.ToolCall{ID: "u1", Name: "no_such_tool", Args: json.RawMessage(`{}`)})
+		if err != nil {
+			return harness.Result{}, err
+		}
+		if !unknown.IsError {
+			return harness.Result{}, fmt.Errorf("unknown tool should error: %#v", unknown)
+		}
+		malformed, err := input.Tools.Execute(provider.ToolCall{ID: "m1", Name: "", Args: json.RawMessage(`{}`)})
+		if err != nil {
+			return harness.Result{}, err
+		}
+		if !malformed.IsError || malformed.ErrorCode != protocol.ErrorCodeInvalidArgs {
+			return harness.Result{}, fmt.Errorf("malformed want invalid_args, got %#v", malformed)
+		}
+		badJSON, err := input.Tools.Execute(provider.ToolCall{ID: "j1", Name: "read", Args: json.RawMessage(`not-json`)})
+		if err != nil {
+			return harness.Result{}, err
+		}
+		if !badJSON.IsError || badJSON.ErrorCode != protocol.ErrorCodeInvalidArgs {
+			return harness.Result{}, fmt.Errorf("bad json want invalid_args, got %#v", badJSON)
+		}
+		return harness.Result{Text: "validated", StopReason: "end_turn"}, nil
+	})
+	prov := newScriptedProvider(
+		toolCallStep(taskToolCallWithAgent("task-bad", "validate", "worker")),
+		func() streamStep {
+			s := completedStep("parent finished")
+			s.match = matchToolResult("task-bad")
+			return s
+		}(),
+		childCompletedNudgeStep("parent saw completion"),
+	)
+	eng := engine.New(engine.Options{
+		SessionID:       "parent",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		InitialAgent:    "parent",
+		Agents: []engine.Agent{
+			{Name: "parent"},
+			{Name: "worker", Harness: "bad-tools"},
+		},
+		HarnessRegistry: registry,
+		Registry:        tool.NewRegistry(tool.NewTask(), tool.NewRead()),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+	eng.Ops() <- protocol.UserInput{Text: "delegate"}
+	events := drainAndReply(t, eng, 10*time.Second)
+	for _, ev := range events {
+		if c, ok := ev.(protocol.ChildCompleted); ok {
+			if c.Status != protocol.ChildStatusCompleted || c.Summary != "validated" {
+				t.Fatalf("ChildCompleted = %#v", c)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing ChildCompleted; events=%#v", events)
+}
+
+func TestTaskChildHarnessToolCancellation(t *testing.T) {
+	registry := harness.NewRegistry()
+	registry.Register("sleeper", func(input harness.Input, _ harness.Provider, _ harness.Emit) (harness.Result, error) {
+		res, err := input.Tools.Execute(provider.ToolCall{
+			ID:   "sleep-1",
+			Name: "sleep",
+			Args: json.RawMessage(`{"seconds":60}`),
+		})
+		if err != nil {
+			return harness.Result{}, err
+		}
+		if res.IsError && res.ErrorCode == protocol.ErrorCodeCanceled {
+			return harness.Result{}, context.Canceled
+		}
+		if input.Context.Err() != nil {
+			return harness.Result{}, input.Context.Err()
+		}
+		return harness.Result{Text: "should-not-complete", StopReason: "end_turn"}, nil
+	})
+
+	var childMu sync.Mutex
+	var childSession string
+	setChild := func(id string) {
+		childMu.Lock()
+		childSession = id
+		childMu.Unlock()
+	}
+	getChild := func() string {
+		childMu.Lock()
+		defer childMu.Unlock()
+		return childSession
+	}
+
+	prov := newScriptedProvider(
+		toolCallStep(taskToolCallWithAgent("task-sleep", "sleep", "worker")),
+		streamStep{
+			match: matchToolResult("task-sleep"),
+			stream: func(ctx context.Context) <-chan provider.StreamEvent {
+				// ChildStarted is emitted before task returns; wait briefly if needed.
+				deadline := time.After(5 * time.Second)
+				for getChild() == "" {
+					select {
+					case <-ctx.Done():
+						ch := make(chan provider.StreamEvent)
+						close(ch)
+						return ch
+					case <-deadline:
+						ch := make(chan provider.StreamEvent, 1)
+						ch <- provider.StreamEvent{Type: provider.EventError, Err: errors.New("child session id not observed")}
+						close(ch)
+						return ch
+					case <-time.After(5 * time.Millisecond):
+					}
+				}
+				args, _ := json.Marshal(map[string]any{"session_id": getChild()})
+				ch := make(chan provider.StreamEvent, 2)
+				ch <- provider.StreamEvent{Type: provider.EventToolCall, ToolCall: &provider.ToolCall{
+					ID: "int-1", Name: "task_interrupt", Args: args,
+				}}
+				ch <- provider.StreamEvent{Type: provider.EventDone, StopReason: "tool_use"}
+				close(ch)
+				return ch
+			},
+		},
+		func() streamStep {
+			s := completedStep("parent finished")
+			s.match = matchToolResult("int-1")
+			return s
+		}(),
+	)
+	childEvents := make(chan protocol.Event, 32)
+	eng := engine.New(engine.Options{
+		SessionID:       "parent",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		InitialAgent:    "parent",
+		Agents: []engine.Agent{
+			{Name: "parent"},
+			{Name: "worker", Harness: "sleeper"},
+		},
+		HarnessRegistry: registry,
+		Registry:        tool.NewRegistry(tool.NewTask(), tool.NewTaskInterrupt(), tool.NewSleep()),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+		AppendChildEvent: func(_ string, event protocol.Event) error {
+			select {
+			case childEvents <- event:
+			default:
+			}
+			return nil
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+	eng.Ops() <- protocol.UserInput{Text: "delegate"}
+
+	deadline := time.After(10 * time.Second)
+	var sawBegin, sawChildDone bool
+	for !sawChildDone {
+		select {
+		case ev := <-eng.Events():
+			switch e := ev.(type) {
+			case protocol.ChildStarted:
+				setChild(e.Correlation.SessionID)
+			case protocol.ChildCompleted:
+				sawChildDone = true
+				if e.Status == protocol.ChildStatusCompleted {
+					t.Fatalf("expected interrupted child, got %#v", e)
+				}
+			case protocol.PermissionAsked:
+				eng.Ops() <- protocol.PermissionReply{RequestID: e.RequestID, Decision: protocol.DecisionOnce}
+			}
+		case ev := <-childEvents:
+			if b, ok := ev.(protocol.ToolCallBegin); ok && b.CallID == "sleep-1" {
+				sawBegin = true
+			}
+			if e, ok := ev.(protocol.ToolCallEnd); ok && e.CallID == "sleep-1" && !e.IsError {
+				t.Fatalf("sleep ToolCallEnd = %#v, want canceled error", e)
+			}
+		case <-deadline:
+			t.Fatalf("timed out begin=%v childSession=%q", sawBegin, getChild())
+		}
+	}
+	if !sawBegin {
+		t.Fatal("sleep tool never began before cancel")
+	}
+}
+
+type holdTool struct {
+	mu        sync.Mutex
+	active    int
+	maxActive int
+	entered   chan struct{}
+	release   chan struct{}
+}
+
+func (h *holdTool) Name() string            { return "hold" }
+func (h *holdTool) Description() string     { return "test hold tool" }
+func (h *holdTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (h *holdTool) Execute(ctx context.Context, _ json.RawMessage, _ *tool.Context) (tool.Result, error) {
+	h.mu.Lock()
+	h.active++
+	if h.active > h.maxActive {
+		h.maxActive = h.active
+	}
+	h.mu.Unlock()
+	defer func() {
+		h.mu.Lock()
+		h.active--
+		h.mu.Unlock()
+	}()
+	select {
+	case h.entered <- struct{}{}:
+	default:
+	}
+	select {
+	case <-h.release:
+		return tool.Result{Output: "released"}, nil
+	case <-ctx.Done():
+		return tool.Result{}, ctx.Err()
+	}
+}
+
+func TestTaskChildHarnessConcurrentToolsSerialized(t *testing.T) {
+	hold := &holdTool{
+		entered: make(chan struct{}, 2),
+		release: make(chan struct{}),
+	}
+	registry := harness.NewRegistry()
+	registry.Register("parallel", func(input harness.Input, _ harness.Provider, _ harness.Emit) (harness.Result, error) {
+		type outcome struct {
+			err error
+		}
+		done := make(chan outcome, 2)
+		for i := 0; i < 2; i++ {
+			id := fmt.Sprintf("hold-%d", i)
+			go func() {
+				_, err := input.Tools.Execute(provider.ToolCall{
+					ID:   id,
+					Name: "hold",
+					Args: json.RawMessage(`{}`),
+				})
+				done <- outcome{err: err}
+			}()
+		}
+		// First tool should enter; second must wait on the host mutex.
+		select {
+		case <-hold.entered:
+		case <-time.After(3 * time.Second):
+			return harness.Result{}, errors.New("first hold did not start")
+		}
+		time.Sleep(50 * time.Millisecond)
+		hold.mu.Lock()
+		peakDuringHold := hold.maxActive
+		hold.mu.Unlock()
+		close(hold.release)
+		for range 2 {
+			if o := <-done; o.err != nil {
+				return harness.Result{}, o.err
+			}
+		}
+		if peakDuringHold != 1 {
+			return harness.Result{}, fmt.Errorf("overlapping Execute peak = %d, want 1", peakDuringHold)
+		}
+		return harness.Result{Text: "serialized", StopReason: "end_turn"}, nil
+	})
+	prov := newScriptedProvider(
+		toolCallStep(taskToolCallWithAgent("task-par", "parallel tools", "worker")),
+		func() streamStep {
+			s := completedStep("parent finished")
+			s.match = matchToolResult("task-par")
+			return s
+		}(),
+		childCompletedNudgeStep("parent saw completion"),
+	)
+	eng := engine.New(engine.Options{
+		SessionID:       "parent",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		InitialAgent:    "parent",
+		Agents: []engine.Agent{
+			{Name: "parent"},
+			{Name: "worker", Harness: "parallel"},
+		},
+		HarnessRegistry: registry,
+		Registry:        tool.NewRegistry(tool.NewTask(), hold),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+	eng.Ops() <- protocol.UserInput{Text: "delegate"}
+	events := drainAndReply(t, eng, 10*time.Second)
+	for _, ev := range events {
+		if c, ok := ev.(protocol.ChildCompleted); ok {
+			if c.Status != protocol.ChildStatusCompleted || c.Summary != "serialized" {
+				t.Fatalf("ChildCompleted = %#v", c)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing ChildCompleted; events=%#v", events)
+}
+
+func TestTaskChildHarnessExternalToolExecute(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "data.txt")
+	if err := os.WriteFile(target, []byte("external-tool-body"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Embedded harness using Tools.Execute (external JSONL path covered in
+	// internal/harness/external).
+	registry := harness.NewRegistry()
+	registry.Register("ext-like", func(input harness.Input, _ harness.Provider, _ harness.Emit) (harness.Result, error) {
+		res, err := input.Tools.Execute(provider.ToolCall{
+			Name: "read",
+			Args: json.RawMessage(`{"filePath":"data.txt"}`),
+		})
+		if err != nil {
+			return harness.Result{}, err
+		}
+		if res.IsError || !strings.Contains(res.Output, "external-tool-body") {
+			return harness.Result{}, fmt.Errorf("tool result = %#v", res)
+		}
+		return harness.Result{Text: res.Output, StopReason: "end_turn"}, nil
+	})
+	prov := newScriptedProvider(
+		toolCallStep(taskToolCallWithAgent("task-ext-tool", "read", "worker")),
+		func() streamStep {
+			s := completedStep("parent finished")
+			s.match = matchToolResult("task-ext-tool")
+			return s
+		}(),
+		childCompletedNudgeStep("parent saw completion"),
+	)
+	eng := engine.New(engine.Options{
+		SessionID:       "parent",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		InitialAgent:    "parent",
+		Agents: []engine.Agent{
+			{Name: "parent"},
+			{Name: "worker", Harness: "ext-like"},
+		},
+		HarnessRegistry: registry,
+		Registry:        tool.NewRegistry(tool.NewTask(), tool.NewRead()),
+		WorkDir:         dir,
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+	eng.Ops() <- protocol.UserInput{Text: "delegate"}
+	events := drainAndReply(t, eng, 10*time.Second)
+	for _, ev := range events {
+		if c, ok := ev.(protocol.ChildCompleted); ok {
+			if c.Status != protocol.ChildStatusCompleted || !strings.Contains(c.Summary, "external-tool-body") {
+				t.Fatalf("ChildCompleted = %#v", c)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing ChildCompleted; events=%#v", events)
 }
