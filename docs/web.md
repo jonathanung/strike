@@ -627,3 +627,43 @@ a one-time handoff: valid tokens become a `SameSite=Strict` HttpOnly cookie so
 subsequent same-origin `fetch` / EventSource / WebSocket calls succeed without
 leaving the secret in the address bar.
 
+
+| `GET` | `/v1/goals` | **yes** | List loop-harness goals (host-safe DTOs) |
+| `POST` | `/v1/goals` | **yes** | Set (create) a pending goal |
+| `GET` | `/v1/goals/{id}` | **yes** | One goal with criteria matrix + spend |
+| `POST` | `/v1/goals/{id}/run` | **yes** | Run/resume loop until terminal or pause (live) |
+| `POST` | `/v1/goals/{id}/pause` | **yes** | Pause an active goal (live) |
+| `POST` | `/v1/goals/{id}/resume` | **yes** | Mark paused/pending active without running (live) |
+| `POST` | `/v1/goals/{id}/abort` | **yes** | Abort a non-terminal goal (live) |
+| `GET` | `/v1/goals/{id}/log` | **yes** | Committed iteration log (`?iter=N` optional) |
+`POST /v1/goals` (`description`, `criteria[]` CheckSpec strings, optional
+
+### Goals / loop harness
+
+Bootstrap capability `goals` is true when the host exposes `host.Goals`. The
+inspector **goals** tab lists project goals (status, cost, criteria matrix),
+opens detail with the iteration log, and can create a pending goal via
+`POST /v1/goals` (`description`, `criteria[]` CheckSpec strings, optional
+budgets). **Run / pause / resume / abort** require a live session
+(`503` when attach-only); list/get/log/set work whenever the capability is on.
+
+Default host run path is evaluate-only (empty tool allowlist) — same safety
+default as `/goal run` in the TUI. Wire JSON is camelCase host-safe DTOs only.
+
+Events use the same envelopes as session JSONL (`type` + `time` + `data`).
+
+Example — full echo turn via HTTP:
+
+```sh
+TOKEN=...
+# stream live events
+curl -N -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8787/v1/live/events &
+# send a prompt
+curl -s -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"type":"user.input","data":{"text":"hello"}}' \
+  http://127.0.0.1:8787/v1/ops
+```
+
+Permission asks appear as `permission.asked` events; resolve with
+`permission.reply` (UI modal or `POST /v1/ops`).
+
