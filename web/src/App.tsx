@@ -1,13 +1,15 @@
 import { FormEvent, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { activateRoot, bootstrap, closeRoot, createRoot, historicalConnection, liveConnection, request, resumeRoot, roots as loadRoots, sendOp, sessions as loadSessions , sessionChildren} from "./api";
+import { activateRoot, bootstrap, closeRoot, createRoot, historicalConnection, liveConnection, request, resumeRoot, roots as loadRoots, sendOp, sessions as loadSessions, sessionChildren, getSandbox, patchSandbox, downloadDiagnostics } from "./api";
 import { ChildAgentsPanel } from "./ChildAgents";
 import { buildExportMarkdown, defaultExportFilename, downloadTextFile } from "./exportMarkdown";
 import { clearQueue, editQueuedText, moveQueuedAt, removeQueuedAt, type QueuedPrompt } from "./queueOps";
-import { initialState, reduceEvent } from "./reducer";
+import { initialClientState, reduceClient, selectedSlice } from "./reducer";
 import { formatCostNotice, formatSlashHelp, resolveSlash, WEB_SLASH_COMMANDS } from "./slash";
 import { Transcript } from "./Transcript";
-import type { ActiveRoot, Bootstrap, Capabilities, ImageAttachment, Session, Status } from "./types";
+import type { SandboxInfo,  ActiveRoot, Bootstrap, Capabilities, ImageAttachment, Session, Status } from "./types";
 import { MCPPanel } from "./MCP";
+import { TimelinePanel } from "./Timeline";
+import { DiagnosticsPanel } from "./Diagnostics";
 import { PlansPanel } from "./Plans";
 import {
   defaultRestoreFiles,
@@ -19,16 +21,19 @@ import {
 import { WorkflowsPanel } from "./Workflows";
 import "./styles.css";
 
-type InspectorTab = "files" | "memory" | "issues" | "plans" | "workflows" | "mcp";
+type InspectorTab = "files" | "memory" | "issues" | "plans" | "workflows" | "mcp" | "timeline" | "diagnostics";
 type Completion = { label: string; detail: string; insert: string };
 type ChangedFile = { path: string; added: number; deleted: number; diff: string };
 type MemoryEntry = { Key?: string; key?: string; Value?: string; value?: string; Tags?: string[]; tags?: string[] };
 type IssueEntry = { ID?: number; id?: number; Title?: string; title?: string; Body?: string; body?: string; Status?: string; status?: string };
-const inspectorTabOrder: InspectorTab[] = ["files", "memory", "issues", "plans", "workflows", "mcp"];
+const inspectorTabOrder: InspectorTab[] = ["files", "memory", "issues", "plans", "workflows", "mcp", "timeline", "diagnostics"];
 const availableInspectorTabs = (caps?: Capabilities): InspectorTab[] =>
-  inspectorTabOrder.filter((tab) => Boolean(caps?.[tab]));
+  inspectorTabOrder.filter((tab) => {
+    if (tab === "diagnostics") return Boolean(caps?.lsp);
+    return Boolean(caps?.[tab]);
+  });
 type UndoDialogState = { preferFiles: boolean };
-const runtimeValues = { effort: ["low", "medium", "high", "xhigh"], autonomy: ["supervised", "agent", "checks"], permission: ["default", "plan", "soft-approve", "accept-edits", "yolo"] };
+const runtimeValues = { effort: ["low", "medium", "high", "xhigh"], autonomy: ["supervised", "agent", "checks"], permission: ["default", "plan", "soft-approve", "accept-edits", "yolo"], sandbox: ["off", "read-only", "workspace-write"] };
 const slashCommands: Completion[] = WEB_SLASH_COMMANDS;
 
 const op = (type: string, data?: unknown, rootID?: string) => sendOp(type, data, rootID).catch((error) => window.alert(error.message));
@@ -37,15 +42,13 @@ const shortID = (id: string) => id.slice(0, 12);
 const rootTitle = (root: ActiveRoot, sessions: Session[]) => root.title || sessions.find((s) => s.id === root.id)?.title || shortID(root.id);
 const relativeActivity = (ms?: number) => {
   if (!ms) return "";
-  // mtime from sessions is unix seconds; root activeAt is millis.
-  const t = ms < 1e12 ? ms * 1000 : ms;
-  const sec = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  const tms = ms < 1e12 ? ms * 1000 : ms;
+  const sec = Math.max(0, Math.floor((Date.now() - tms) / 1000));
   if (sec < 60) return "just now";
   if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
   if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
   return `${Math.floor(sec / 86400)}d ago`;
 };
-/** Deep-link target from cockpit URL. Token handoff strips ?token= server-side and keeps root/session. */
 const deepLinkID = () => {
   try {
     const q = new URLSearchParams(location.search);
@@ -79,19 +82,21 @@ export default function App() {
   const [activeRoots, setActiveRoots] = useState<ActiveRoot[]>([]);
   const [liveID, setLiveID] = useState("");
   const [activeRootID, setActiveRootID] = useState("");
-  const [selectedID, setSelectedID] = useState("");
   const [selectedIsLive, setSelectedIsLive] = useState(false);
   const [navTab, setNavTab] = useState<"active" | "history">("active");
   const [historySearch, setHistorySearch] = useState("");
-  const [state, dispatch] = useReducer(reduceEvent, undefined, initialState);
+  const [client, dispatch] = useReducer(reduceClient, undefined, initialClientState);
+  const selectedID = client.selectedID;
+  const state = selectedSlice(client);
+  const draft = state.draft;
+  const queue = state.queue;
+  const images = state.images;
+  const fast = state.fast;
   const [transport, setTransport] = useState("connecting");
-  const [draft, setDraft] = useState("");
-  const [queue, setQueue] = useState<QueuedPrompt[]>([]);
   const [queueEdit, setQueueEdit] = useState<{ index: number; text: string } | null>(null);
   const queueRef = useRef<HTMLOListElement>(null);
   const queueEditCancel = useRef(false);
   const [undoDialog, setUndoDialog] = useState<UndoDialogState | null>(null);
-  const [images, setImages] = useState<ImageAttachment[]>([]);
   const [inspector, setInspector] = useState<InspectorTab>("files");
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(true);
@@ -103,12 +108,33 @@ export default function App() {
   const [providers, setProviders] = useState<string[]>([]);
   const [models, setModels] = useState<string[]>([]);
   const [history, setHistory] = useState<string[]>([]);
-  const [fast, setFast] = useState(false);
   const [runtimeOpen, setRuntimeOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sandboxInfo, setSandboxInfo] = useState<SandboxInfo>();
+  const [sandboxExplainOpen, setSandboxExplainOpen] = useState(false);
   const [selectedChildId, setSelectedChildId] = useState<string>();
   const endRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const setDraft = (value: string | ((prev: string) => string)) => {
+    if (!selectedID) return;
+    const next = typeof value === "function" ? value(draft) : value;
+    dispatch({ type: "client.composer", id: selectedID, patch: { draft: next } });
+  };
+  const setImages = (value: ImageAttachment[] | ((prev: ImageAttachment[]) => ImageAttachment[])) => {
+    if (!selectedID) return;
+    const next = typeof value === "function" ? value(images) : value;
+    dispatch({ type: "client.composer", id: selectedID, patch: { images: next } });
+  };
+  const setQueue = (value: typeof queue | ((prev: typeof queue) => typeof queue)) => {
+    if (!selectedID) return;
+    const next = typeof value === "function" ? value(queue) : value;
+    dispatch({ type: "client.composer", id: selectedID, patch: { queue: next } });
+  };
+  const setFast = (value: boolean | ((prev: boolean) => boolean)) => {
+    if (!selectedID) return;
+    const next = typeof value === "function" ? value(fast) : value;
+    dispatch({ type: "client.composer", id: selectedID, patch: { fast: next } });
+  };
 
   const refreshSessions = () => loadSessions().then((list) => { setSessions(list.sessions || []); setLiveID(list.liveId || ""); return list; });
   const refreshRoots = () => loadRoots().then((r) => { setActiveRoots(r.roots || []); setActiveRootID(r.activeId || ""); return r; }).catch(() => undefined);
@@ -121,7 +147,6 @@ export default function App() {
     ]).then(([nextBoot, list, r]) => {
       setBoot(nextBoot);
       setTransport("connected");
-      if (nextBoot.status) dispatch({ type: "status", data: nextBoot.status });
       setSessions(list.sessions || []);
       const hasRoots = Boolean(nextBoot.capabilities.roots && r.roots?.length);
       setLiveID(list.liveId || nextBoot.status?.sessionId || "");
@@ -136,15 +161,15 @@ export default function App() {
       let pickLive = Boolean(firstLive && firstID === firstLive);
       if (want) {
         if (liveIDs.has(want) || (!nextBoot.capabilities.roots && want === (list.liveId || ""))) {
-          firstID = want;
-          firstLive = want;
-          pickLive = true;
+          firstID = want; firstLive = want; pickLive = true;
         } else if (sessionsArr.some((s) => s.id === want)) {
-          firstID = want;
-          pickLive = false;
+          firstID = want; pickLive = false;
         }
       }
-      setSelectedID(firstID);
+      if (firstID) {
+        dispatch({ type: "client.ensure", id: firstID });
+        if (nextBoot.status && pickLive) dispatch({ type: "client.event", id: firstID, envelope: { type: "status", data: nextBoot.status } });
+      }
       setSelectedIsLive(pickLive);
       setNavTab(pickLive ? "active" : "history");
       if (pickLive && want && nextBoot.capabilities.roots && !nextBoot.attachOnly) {
@@ -152,15 +177,21 @@ export default function App() {
       }
       if (nextBoot.capabilities.auth) request<{ providers: Array<{ Name?: string; name?: string }> }>("/v1/providers").then((v) => setProviders(v.providers.map((p) => p.Name || p.name || "").filter(Boolean))).catch(() => {});
       if (nextBoot.capabilities.history) request<{ entries: string[] }>("/v1/history").then((v) => setHistory(v.entries || [])).catch(() => {});
+      if (nextBoot.capabilities.sandbox) getSandbox().then(setSandboxInfo).catch(() => {});
     }).catch((error) => setTransport(error.message));
   }, []);
 
   useEffect(() => {
     if (!selectedID) return;
-    dispatch({ type: "workspace.reset", data: { sessionId: selectedID } });
+    dispatch({ type: "client.ensure", id: selectedID });
     setSelectedChildId(undefined);
-    if (!selectedIsLive) return historicalConnection(selectedID, dispatch, (message) => setTransport(message));
-    const live = liveConnection(selectedID, dispatch, setTransport);
+    const id = selectedID;
+    // One WS (or SSE) for the *viewed* root only. Background attention (#919) may
+    // add multiplexed subscriptions later without changing this viewed-root path.
+    if (!selectedIsLive) {
+      return historicalConnection(id, (envelope) => dispatch({ type: "client.event", id, envelope }), (message) => setTransport(message));
+    }
+    const live = liveConnection(id, (envelope) => dispatch({ type: "client.event", id, envelope }), setTransport);
     return () => live.close();
   }, [selectedID, selectedIsLive]);
   useEffect(() => {
@@ -168,15 +199,17 @@ export default function App() {
     let cancelled = false;
     void sessionChildren(selectedID)
       .then((res) => {
-        if (!cancelled) dispatch({ type: "children.seed", time: `seed:${selectedID}`, data: { sessions: res.sessions || [] } });
+        if (!cancelled) dispatch({ type: "client.event", id: selectedID, envelope: { type: "children.seed", time: `seed:${selectedID}`, data: { sessions: res.sessions || [] } } });
       })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [selectedID, boot?.capabilities.sessions]);
   useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, [state.items]);
   useEffect(() => {
-    if (state.status.busy || !queue.length || !selectedIsLive) return;
-    const [next, ...rest] = queue; setQueue(rest); void op("user.input", { text: next.text, images: next.images.map(({ mime, data }) => ({ mime, data })) }, selectedID);
+    if (!selectedID || state.status.busy || !queue.length || !selectedIsLive) return;
+    const [next, ...rest] = queue;
+    dispatch({ type: "client.composer", id: selectedID, patch: { queue: rest } });
+    void op("user.input", { text: next.text, images: next.images.map(({ mime, data }) => ({ mime, data })) }, selectedID);
   }, [state.status.busy, queue, selectedIsLive, selectedID]);
 
   const isLive = Boolean(selectedIsLive && selectedID && !boot?.attachOnly);
@@ -191,7 +224,7 @@ export default function App() {
     return [];
   }, [draft, boot]);
 
-  const notice = (title: string, body: string) => dispatch({ type: "local.system", time: String(Date.now()), data: { title, text: body } });
+  const notice = (title: string, body: string) => { if (!selectedID) return; dispatch({ type: "client.event", id: selectedID, envelope: { type: "local.system", time: String(Date.now()), data: { title, text: body } } }); };
   const exportSession = () => {
     const md = buildExportMarkdown(state.items, {
       sessionId: selectedID || state.status.sessionId,
@@ -298,7 +331,7 @@ export default function App() {
       if (tab === "files") setProjectData(boot?.capabilities.files ? await request(`/v1/changed-files${selectedID ? `?root=${encodeURIComponent(selectedID)}` : ""}`).catch((error) => ({ error: error.message })) : undefined);
       if (tab === "memory") setProjectData(boot?.capabilities.memory ? await request("/v1/memory").catch((error) => ({ error: error.message })) : undefined);
       if (tab === "issues") setProjectData(boot?.capabilities.issues ? await request("/v1/issues").catch((error) => ({ error: error.message })) : undefined);
-      if (tab === "plans" || tab === "workflows" || tab === "mcp") setProjectData(undefined);
+      if (tab === "plans" || tab === "workflows" || tab === "mcp" || tab === "timeline" || tab === "diagnostics") setProjectData(undefined);
     } finally { setProjectLoading(false); }
   };
   // Prefer files, else first capability-backed tab; hydrate data without forcing inspector open (#912 density).
@@ -312,31 +345,43 @@ export default function App() {
   }, [boot]);
   const sessionAction = async (action: "fork" | "rename" | "delete") => {
     if (!boot?.capabilities.sessions || !selectedID) return;
+    const id = selectedID;
     try {
       if (action === "fork") {
         // Default: stay on current selection; new fork appears in HISTORY (contract #916).
-        await request(`/v1/sessions/${encodeURIComponent(selectedID)}/fork`, { method: "POST" });
+        await request(`/v1/sessions/${encodeURIComponent(id)}/fork`, { method: "POST" });
         await Promise.all([refreshSessions(), refreshRoots()]);
         return;
       }
       if (action === "rename") {
         const title = window.prompt("Session title");
         if (title === null) return;
-        await request(`/v1/sessions/${encodeURIComponent(selectedID)}`, { method: "PATCH", body: JSON.stringify({ title }) });
+        await request(`/v1/sessions/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ title }) });
       }
       if (action === "delete") {
         if (!window.confirm("Delete this durable session?")) return;
-        await request(`/v1/sessions/${encodeURIComponent(selectedID)}`, { method: "DELETE" });
+        await request(`/v1/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
+        dispatch({ type: "client.drop", id });
+        const list = await refreshSessions();
+        await refreshRoots();
+        const next = (list?.sessions || []).find((s) => s.id !== id)?.id || "";
+        if (next) {
+          dispatch({ type: "client.ensure", id: next });
+          const live = Boolean((list?.liveId && next === list.liveId) || activeRoots.some((r) => r.id === next));
+          setSelectedIsLive(live);
+          setNavTab(live ? "active" : "history");
+        }
+        return;
       }
       await Promise.all([refreshSessions(), refreshRoots()]);
     } catch (error) {
       window.alert((error as Error).message);
     }
   };
-  const handleCreateWorkspace = async () => { if (!boot?.capabilities.roots || boot.attachOnly) return; try { const result = await createRoot(); await refreshRoots(); setSelectedID(result.id); setSelectedIsLive(true); setNavTab("active"); } catch (error) { window.alert((error as Error).message); } };
-  const handleResume = async (id: string) => { if (!boot?.capabilities.roots || boot.attachOnly) return; try { const result = await resumeRoot(id); await refreshRoots(); setSelectedID(result.id); setSelectedIsLive(true); setNavTab("active"); } catch (error) { window.alert((error as Error).message); } };
+  const handleCreateWorkspace = async () => { if (!boot?.capabilities.roots || boot.attachOnly) return; try { const result = await createRoot(); await refreshRoots(); dispatch({ type: "client.ensure", id: result.id }); setSelectedIsLive(true); setNavTab("active"); } catch (error) { window.alert((error as Error).message); } };
+  const handleResume = async (id: string) => { if (!boot?.capabilities.roots || boot.attachOnly) return; try { const result = await resumeRoot(id); await refreshRoots(); dispatch({ type: "client.ensure", id: result.id }); setSelectedIsLive(true); setNavTab("active"); } catch (error) { window.alert((error as Error).message); } };
   const selectWorkspace = async (id: string, isLive: boolean) => {
-    setSelectedID(id);
+    dispatch({ type: "client.ensure", id });
     setSelectedIsLive(isLive);
     if (!isLive || !boot?.capabilities.roots || boot.attachOnly) return;
     try {
@@ -356,12 +401,12 @@ export default function App() {
       const [rootsResult, sessionsResult] = await Promise.all([refreshRoots(), refreshSessions()]);
       const nextLive = rootsResult?.activeId || rootsResult?.roots?.[0]?.id || "";
       if (nextLive) {
-        setSelectedID(nextLive);
+        dispatch({ type: "client.ensure", id: nextLive });
         setSelectedIsLive(true);
         setNavTab("active");
       } else {
         const first = sessionsResult?.sessions?.[0]?.id || "";
-        setSelectedID(first);
+        if (first) dispatch({ type: "client.ensure", id: first });
         setSelectedIsLive(false);
         setNavTab("history");
       }
@@ -375,7 +420,7 @@ export default function App() {
       const idx = Math.max(0, sessions.findIndex((s) => s.id === selectedID));
       const next = sessions[(idx + delta + sessions.length) % sessions.length];
       if (next) {
-        setSelectedID(next.id);
+        dispatch({ type: "client.ensure", id: next.id });
         setSelectedIsLive(next.id === liveID && !boot?.attachOnly);
       }
       return;
@@ -396,6 +441,34 @@ export default function App() {
     }
   };
   const openChildTranscript = (id: string) => { setSelectedChildId(undefined); void selectWorkspace(id, false); setNavTab("history"); };
+  const changeSandboxDefault = async (mode: string) => {
+    if (!boot?.capabilities.sandbox || !sandboxInfo?.canChangeDefault) return;
+    const perm = String(state.status.permissionMode || sandboxInfo.permissionMode || "");
+    let iKnow = false;
+    if (mode === "off" && perm === "yolo") {
+      iKnow = window.confirm("permissionMode is yolo and sandbox off disables OS isolation. Continue only if you understand the risk (equivalent to --i-know).");
+      if (!iKnow) return;
+    } else if (mode !== (sandboxInfo.defaultMode || state.status.sandbox)) {
+      if (!window.confirm(`Save sandbox default "${mode}" for new sessions? Active session stays "${state.status.sandbox || sandboxInfo.mode || "workspace-write"}".`)) return;
+    }
+    try {
+      const next = await patchSandbox(mode, iKnow, selectedID || undefined);
+      setSandboxInfo(next);
+      window.alert(`Sandbox default saved as ${next.defaultMode || mode}. Active session mode is unchanged until a new session starts.`);
+    } catch (error) {
+      window.alert((error as Error).message);
+    }
+  };
+  const openSandboxExplain = async () => {
+    if (!boot?.capabilities.sandbox) return;
+    try {
+      const next = await getSandbox(selectedID || undefined);
+      setSandboxInfo(next);
+      setSandboxExplainOpen(true);
+    } catch (error) {
+      window.alert((error as Error).message);
+    }
+  };
   const toggleDiff = (path: string) => setExpandedDiffs((old) => { const next = new Set(old); next.has(path) ? next.delete(path) : next.add(path); return next; });
 
   return <div className="app-shell" style={shellStyle}>
@@ -415,7 +488,7 @@ export default function App() {
                 })}</nav>{!boot?.attachOnly && <div className="session-actions"><button type="button" onClick={() => void handleCreateWorkspace()}>+ New workspace</button><button type="button" disabled={!selectedIsLive || !selectedID} onClick={() => void handleCloseWorkspace()}>Close workspace</button></div>}</>}{navTab === "history" && <HistoryNav sessions={sessions} activeRoots={activeRoots} selectedID={selectedID} selectedIsLive={selectedIsLive} historySearch={historySearch} setHistorySearch={setHistorySearch} selectWorkspace={selectWorkspace} handleResume={handleResume} boot={boot} sessionAction={sessionAction} />}</> : <><div className="aside-heading"><span>SESSIONS</span></div><nav>{sessions.map((session) => {
                   const live = session.id === liveID && !boot?.attachOnly;
                   const age = relativeActivity(session.mtime);
-                  return <button key={session.id} type="button" className={session.id === selectedID ? "session active history-row" : "session history-row"} onClick={() => { setSelectedID(session.id); setSelectedIsLive(live); }} title={session.id}>
+                  return <button key={session.id} type="button" className={session.id === selectedID ? "session active history-row" : "session history-row"} onClick={() => { dispatch({ type: "client.ensure", id: session.id }); setSelectedIsLive(live); }} title={session.id}>
                     <span className="session-main"><span className="session-title">{session.title || shortID(session.id)}</span><span className="session-meta">{[shortID(session.id), age].filter(Boolean).join(" · ")}</span></span>
                     <span className="session-flags">{live && <small className="live-badge">LIVE</small>}</span>
                   </button>;
@@ -436,7 +509,7 @@ export default function App() {
               <Field label="Effort" value={state.status.effort} values={runtimeValues.effort} disabled={runtimeBusy} onChange={(level) => void op("set.effort", { level }, selectedID)} />
               <Field label="Autonomy" value={state.status.autonomy} values={runtimeValues.autonomy} disabled={runtimeBusy} onChange={(mode) => void op("set.autonomy", { mode }, selectedID)} />
               <Field label="Permission" value={state.status.permissionMode} values={runtimeValues.permission} disabled={runtimeBusy} onChange={(mode) => void op("set.permission_mode", { mode }, selectedID)} />
-              <label className="fast-toggle"><input type="checkbox" checked={fast} disabled={runtimeBusy} onChange={(event) => { setFast(event.target.checked); void op("set.fast", { enabled: event.target.checked }, selectedID); }} />FAST</label>
+              {boot?.capabilities.sandbox && <Field label="Sandbox" value={state.status.sandbox || sandboxInfo?.mode} values={sandboxInfo?.modes || runtimeValues.sandbox} disabled={!isLive || state.status.busy || !sandboxInfo?.canChangeDefault} onChange={(mode) => void changeSandboxDefault(mode)} />}{boot?.capabilities.sandbox && <button type="button" className="runtime-explain" onClick={() => void openSandboxExplain()}>Explain</button>}<label className="fast-toggle"><input type="checkbox" checked={fast} disabled={runtimeBusy} onChange={(event) => { setFast(event.target.checked); void op("set.fast", { enabled: event.target.checked }, selectedID); }} />FAST</label>
             </div>
           )}
         </div>
@@ -446,8 +519,9 @@ export default function App() {
       <section className="transcript" aria-live="polite" aria-label="Conversation transcript">{!boot && transport !== "connecting" ? <div className="empty-state" role="alert"><span>ERROR</span><h1>{transport}</h1><p>Failed to load cockpit. Open the URL printed by <code>strike serve</code> (includes <code>?token=</code>), or pass a valid bearer token.</p></div> : !state.items.length && <div className="empty-state"><span>01 / READY</span><h1>{boot?.attachOnly ? "Inspect the record." : "Direct the work."}</h1><p>{boot?.attachOnly ? "Select a durable session from the rail." : "Describe an outcome. Strike will plan, act, and report through the live engine seam."}</p></div>}{state.items.map((item) => <Transcript key={item.id} item={item} />)}<div ref={endRef} /></section>
       <form className="composer" onSubmit={submit}><label htmlFor="prompt">Instruction {state.status.busy && "— send to queue"}</label><textarea aria-label="Instruction" id="prompt" value={draft} disabled={!isLive} placeholder={isLive ? "Describe the next outcome…  / command" : "Historical session — read only"} onPaste={(event) => void attach(event.clipboardData.files)} onDrop={(event) => { event.preventDefault(); void attach(event.dataTransfer.files); }} onDragOver={(event) => event.preventDefault()} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !completions.length) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} />{completions.length > 0 && <div className="completion" role="listbox" aria-label="Composer completions">{completions.slice(0, 8).map((item) => <button type="button" role="option" key={item.label} onClick={() => selectCompletion(item)}><strong>{item.label}</strong><span>{item.detail}</span></button>)}</div>}{images.length > 0 && <div className="attachments">{images.map((image, index) => <button type="button" key={`${image.name}-${index}`} onClick={() => setImages((list) => list.filter((_, i) => i !== index))}>{image.name} ×</button>)}</div>}{queue.length > 0 && <div className="prompt-queue-wrap"><ol ref={queueRef} className="prompt-queue" aria-label="Queued prompts">{queue.map((item, index) => <li key={index}>{queueEdit?.index === index ? <input className="queue-edit" aria-label={`Queued prompt text ${index + 1}`} value={queueEdit.text} autoFocus onChange={(event) => setQueueEdit({ index, text: event.target.value })} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); queueEditCancel.current = false; setQueue((list) => editQueuedText(list, index, queueEdit.text)); setQueueEdit(null); } if (event.key === "Escape") { event.preventDefault(); queueEditCancel.current = true; setQueueEdit(null); } }} onBlur={() => { if (!queueEditCancel.current) setQueue((list) => editQueuedText(list, index, queueEdit.text)); queueEditCancel.current = false; setQueueEdit(null); }} /> : <span>{item.text}{item.images.length > 0 ? ` (${item.images.length} img)` : ""}</span>}<span className="queue-actions"><button type="button" aria-label={`Move queued prompt ${index + 1} up`} disabled={index === 0} onClick={() => setQueue((list) => moveQueuedAt(list, index, -1))}>↑</button><button type="button" aria-label={`Move queued prompt ${index + 1} down`} disabled={index === queue.length - 1} onClick={() => setQueue((list) => moveQueuedAt(list, index, 1))}>↓</button><button type="button" aria-label={`Edit queued prompt ${index + 1}`} onClick={() => { queueEditCancel.current = false; setQueueEdit({ index, text: item.text }); }}>✎</button><button type="button" aria-label={`Remove queued prompt ${index + 1}`} onClick={() => { setQueue((list) => removeQueuedAt(list, index)); setQueueEdit((cur) => cur?.index === index ? null : cur); }}>×</button></span></li>)}</ol><div className="queue-toolbar"><button type="button" onClick={() => { setQueue(clearQueue()); setQueueEdit(null); }}>Clear queue</button></div></div>}<div><span><kbd>↵</kbd> send · <kbd>⇧↵</kbd> newline</span><span><input ref={fileRef} hidden type="file" accept="image/*" multiple onChange={(event) => void attach(event.target.files)} /><button type="button" onClick={() => fileRef.current?.click()}>Attach</button>{history.length > 0 && <button type="button" onClick={() => setDraft(history.at(-1) || "")}>History</button>}<button type="button" onClick={() => exportSession()} disabled={!state.items.length}>Export</button>{state.status.busy && <button type="button" className="stop" onClick={() => void op("interrupt")}>Interrupt</button>}<button type="submit" disabled={!draft.trim() || !isLive}>{state.status.busy ? "Queue" : "Send"}</button></span></div></form>
     </main>
-    <aside className={`inspector ${inspectorOpen ? "open" : "collapsed"}`} aria-label="Inspector"><PanelResize label="Resize inspector panel" value={inspectorWidth} min={240} max={520} onChange={setInspectorWidth} side="inspector" /><div className="inspector-tabs" role="tablist">{inspectorTabs.map((tab) => <button role="tab" aria-selected={inspector === tab} key={tab} onClick={() => void inspectProject(tab)}>{tab}</button>)}</div><div className="inspector-body">{inspectorTabs.length ? <InspectorBody tab={inspectorTabs.includes(inspector) ? inspector : inspectorTabs[0]} boot={boot} status={state.status} data={projectData} loading={projectLoading} expandedDiffs={expandedDiffs} toggleDiff={toggleDiff} isLive={isLive} selectedID={selectedID} /> : <p className="muted">No inspector panels available for this host.</p>}</div></aside>
-    {settingsOpen && <SettingsDialog boot={boot} status={state.status} providers={providers} onClose={() => setSettingsOpen(false)} />}
+    <aside className={`inspector ${inspectorOpen ? "open" : "collapsed"}`} aria-label="Inspector"><PanelResize label="Resize inspector panel" value={inspectorWidth} min={240} max={520} onChange={setInspectorWidth} side="inspector" /><div className="inspector-tabs" role="tablist">{inspectorTabs.map((tab) => <button role="tab" aria-selected={inspector === tab} key={tab} onClick={() => void inspectProject(tab)}>{tab}</button>)}</div><div className="inspector-body">{inspectorTabs.length ? <InspectorBody tab={inspectorTabs.includes(inspector) ? inspector : inspectorTabs[0]} boot={boot} status={state.status} data={projectData} loading={projectLoading} expandedDiffs={expandedDiffs} toggleDiff={toggleDiff} isLive={isLive} selectedID={selectedID} sandbox={sandboxInfo} onExplainSandbox={() => void openSandboxExplain()} /> : <p className="muted">No inspector panels available for this host.</p>}</div></aside>
+    {settingsOpen && <SettingsDialog boot={boot} status={state.status} providers={providers} sandbox={sandboxInfo} onSandboxChange={(mode) => void changeSandboxDefault(mode)} rootID={selectedID} isLive={isLive} onClose={() => setSettingsOpen(false)} />}
+    {sandboxExplainOpen && sandboxInfo && <SandboxExplainDialog info={sandboxInfo} status={state.status} onClose={() => setSandboxExplainOpen(false)} />}
 {undoDialog && <UndoPreviewDialog preview={lastUndoPreview} preferFiles={undoDialog.preferFiles} onCancel={() => setUndoDialog(null)} onConfirm={confirmUndo} />}
     {state.permission && <PermissionDialog permission={state.permission} rootID={selectedID} canExplain={Boolean(boot?.capabilities.permissions)} />}
     {state.question && <QuestionDialog question={state.question} rootID={selectedID} />}
@@ -473,6 +547,13 @@ function permissionPatterns(data: Record<string, unknown>): string[] {
   return [];
 }
 
+
+function SandboxExplainDialog({ info, status, onClose }: { info: SandboxInfo; status: Status; onClose: () => void }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => { ref.current?.showModal(); }, []);
+  const network = status.networkAllow || info.networkAllow || [];
+  return <dialog ref={ref} className="sandbox-explain-dialog" aria-labelledby="sandbox-explain-title" onClose={onClose}><div className="dialog-rule" /><h2 id="sandbox-explain-title">Sandbox explain</h2><dl className="sandbox-summary"><dt>Active mode</dt><dd>{status.sandbox || info.mode}</dd><dt>Default mode</dt><dd>{info.defaultMode || "—"}</dd><dt>Backend</dt><dd>{status.sandboxBackend || info.backend || (info.available ? "available" : "unavailable")}</dd><dt>Network allow</dt><dd>{network.length ? network.join(", ") : "(none — unrestricted public)"}</dd><dt>Permission mode</dt><dd>{status.permissionMode || info.permissionMode || "—"}</dd></dl><pre className="sandbox-explain">{info.explain || "No profile text."}</pre>{info.note && <p className="muted">{info.note}</p>}<div className="dialog-actions"><button autoFocus onClick={onClose}>Close</button></div></dialog>;
+}
 function PermissionDialog({ permission, rootID, canExplain }: { permission: Record<string, unknown>; rootID: string; canExplain: boolean }) {
   const name = permissionName(permission);
   const patterns = permissionPatterns(permission);
@@ -594,7 +675,7 @@ function RuntimeStatus({ status }: { status: Status }) {
   return <div className="runtime-status" aria-label="Session status">{bits.map((bit) => <span key={bit}>{bit}</span>)}</div>;
 }
 
-function InspectorBody({ tab, boot, status, data, loading, expandedDiffs, toggleDiff, isLive, selectedID }: { tab: InspectorTab; boot?: Bootstrap; status: Status; data: unknown; loading: boolean; expandedDiffs: Set<string>; toggleDiff: (path: string) => void; isLive: boolean; selectedID: string }) {
+function InspectorBody({ tab, boot, status, data, loading, expandedDiffs, toggleDiff, isLive, selectedID, sandbox, onExplainSandbox }: { tab: InspectorTab; boot?: Bootstrap; status: Status; data: unknown; loading: boolean; expandedDiffs: Set<string>; toggleDiff: (path: string) => void; isLive: boolean; selectedID: string; sandbox?: SandboxInfo; onExplainSandbox?: () => void }) {
   if (tab === "workflows") {
     return <WorkflowsPanel
       available={Boolean(boot?.capabilities.workflows)}
@@ -611,6 +692,12 @@ function InspectorBody({ tab, boot, status, data, loading, expandedDiffs, toggle
   }
   if (tab === "mcp") {
     return <MCPPanel available={Boolean(boot?.capabilities.mcp)} />;
+  }
+  if (tab === "timeline") {
+    return <TimelinePanel available={Boolean(boot?.capabilities.timeline)} sessionID={selectedID} />;
+  }
+  if (tab === "diagnostics") {
+    return <DiagnosticsPanel available={Boolean(boot?.capabilities.lsp)} />;
   }
   if (loading) return <section className="unavailable" role="status"><strong>Loading {tab}</strong></section>;
   if (tab === "files") return <FilesPanel boot={boot} data={data} expandedDiffs={expandedDiffs} toggleDiff={toggleDiff} />;
@@ -639,7 +726,7 @@ function IssuesPanel({ boot, data }: { boot?: Bootstrap; data: unknown }) {
   return <><h2>Issues</h2>{issues.length ? <div className="project-list">{issues.map((issue) => { const id = issue.ID ?? issue.id ?? 0; const title = issue.Title || issue.title || "Untitled issue"; const body = issue.Body || issue.body || ""; const status = issue.Status || issue.status || "open"; return <article key={id}><h3>#{id} {title}</h3><small>{status}</small>{body && <p>{body}</p>}</article>; })}</div> : <p className="muted">No project issues.</p>}</>;
 }
 
-function SettingsDialog({ boot, status, providers, onClose }: { boot?: Bootstrap; status: Status; providers: string[]; onClose: () => void }) { const ref = useRef<HTMLDialogElement>(null); const [provider, setProvider] = useState(String(status.provider || providers[0] || "")); const [key, setKey] = useState(""); useEffect(() => { ref.current?.showModal(); }, []); const save = async () => { if (boot?.capabilities.settings) await request("/v1/settings", { method: "PATCH", body: JSON.stringify({ provider: String(status.provider || ""), model: String(status.model || ""), agent: String(status.agent || ""), effort: String(status.effort || ""), mode: String(status.permissionMode || "") }) }); onClose(); }; return <dialog ref={ref} aria-labelledby="settings-title" onClose={onClose}><div className="dialog-rule" /><h2 id="settings-title">Workspace settings</h2>{boot?.capabilities.auth ? <fieldset><legend>Provider authentication</legend><label>Provider<select value={provider} onChange={(event) => setProvider(event.target.value)}>{providers.map((name) => <option key={name}>{name}</option>)}</select></label><label>API key<input value={key} onChange={(event) => setKey(event.target.value)} placeholder="Stored locally by strike" /></label><button disabled={!provider || !key} onClick={() => void request("/v1/auth/key", { method: "POST", body: JSON.stringify({ provider, key }) }).then(() => setKey(""))}>Save key</button></fieldset> : <CapabilityUnavailable name="Provider authentication" />}{boot?.capabilities.settings ? <p className="muted">Current defaults can be saved from the live runtime controls.</p> : <CapabilityUnavailable name="Saved defaults" />}<div className="dialog-actions"><button onClick={onClose}>Close</button><button onClick={() => void save()}>Save defaults</button></div></dialog>; }
+function SettingsDialog({ boot, status, providers, sandbox: sandboxInfo, onSandboxChange, onClose , rootID, isLive}: { boot?: Bootstrap; status: Status; providers: string[]; sandbox?: SandboxInfo; onSandboxChange?: (mode: string) => void; onClose: () => void ; rootID?: string; isLive?: boolean }) { const ref = useRef<HTMLDialogElement>(null); const [provider, setProvider] = useState(String(status.provider || providers[0] || "")); const [key, setKey] = useState(""); useEffect(() => { ref.current?.showModal(); }, []); const save = async () => { if (boot?.capabilities.settings) await request("/v1/settings", { method: "PATCH", body: JSON.stringify({ provider: String(status.provider || ""), model: String(status.model || ""), agent: String(status.agent || ""), effort: String(status.effort || ""), mode: String(status.permissionMode || "") }) }); onClose(); }; return <dialog ref={ref} aria-labelledby="settings-title" onClose={onClose}><div className="dialog-rule" /><h2 id="settings-title">Workspace settings</h2>{boot?.capabilities.auth ? <fieldset><legend>Provider authentication</legend><label>Provider<select value={provider} onChange={(event) => setProvider(event.target.value)}>{providers.map((name) => <option key={name}>{name}</option>)}</select></label><label>API key<input value={key} onChange={(event) => setKey(event.target.value)} placeholder="Stored locally by strike" /></label><button disabled={!provider || !key} onClick={() => void request("/v1/auth/key", { method: "POST", body: JSON.stringify({ provider, key }) }).then(() => setKey(""))}>Save key</button></fieldset> : <CapabilityUnavailable name="Provider authentication" />}{boot?.capabilities.sandbox ? <fieldset><legend>OS sandbox default</legend><label>Sandbox<select aria-label="Sandbox default" value={String(sandboxInfo?.defaultMode || status.sandbox || "workspace-write")} disabled={!sandboxInfo?.canChangeDefault} onChange={(event) => onSandboxChange?.(event.target.value)}>{(sandboxInfo?.modes || runtimeValues.sandbox).map((mode) => <option key={mode}>{mode}</option>)}</select></label><p className="muted">Active session: <strong>{status.sandbox || sandboxInfo?.mode || "unknown"}</strong>. Defaults apply to new sessions only.</p></fieldset> : null}{boot?.capabilities.settings ? <p className="muted">Current defaults can be saved from the live runtime controls.</p> : <CapabilityUnavailable name="Saved defaults" />}<fieldset><legend>Support</legend><p className="muted">Export a redacted prompt/config diagnostic bundle (same scrubbing as TUI <code>/diag</code>).</p><button type="button" disabled={!Boolean(boot?.capabilities.diag && isLive)} aria-label="Download diagnostics" onClick={() => void downloadDiagnostics(rootID || "").catch((error) => window.alert((error as Error).message))}>Download diagnostics</button>{!boot?.capabilities.diag && <p className="muted">Unavailable on this host (no live engine).</p>}</fieldset><div className="dialog-actions"><button onClick={onClose}>Close</button><button onClick={() => void save()}>Save defaults</button></div></dialog>; }
 function CapabilityUnavailable({ name }: { name: string }) { return <section className="unavailable" role="status"><strong>{name} unavailable</strong><p>The configured host did not provide this capability. No action was attempted.</p></section>; }
 function CapabilityError({ error }: { error: string }) { return <section className="unavailable" role="status"><strong>Unable to load</strong><p>{error}</p></section>; }
 

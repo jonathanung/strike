@@ -290,6 +290,31 @@ main {
   background: var(--rule);
   overflow: auto;
 }
+.runtime-explain {
+  align-self: end;
+  padding: 6px 10px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.sandbox-explain-dialog {
+  width: min(640px, calc(100vw - 24px));
+}
+.sandbox-summary {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  margin: 0 0 14px;
+  font-size: 12px;
+}
+.sandbox-summary dt { color: var(--muted); margin: 0; }
+.sandbox-summary dd { margin: 0; color: var(--ink); }
+.sandbox-explain {
+  max-height: min(50vh, 360px);
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .runtime-field {
   display: grid;
   gap: 3px;
@@ -562,6 +587,50 @@ main {
 .project-list h3 { margin: 0 0 8px; font-size: 12px; overflow-wrap: anywhere; }
 .project-list p { margin: 0 0 8px; color: var(--muted); font-size: 11px; line-height: 1.5; white-space: pre-wrap; }
 .project-list small { color: var(--acid); text-transform: uppercase; font-size: 8px; letter-spacing: .12em; }
+
+.diagnostics-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+.diagnostics-heading h2 { margin: 8px 0 16px; }
+.diagnostics-subhead {
+  margin: 18px 0 10px;
+  font-size: 9px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.diagnostics-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.diagnostics-actions button {
+  border: 1px solid var(--rule);
+  background: var(--surface-muted);
+  color: var(--ink);
+  padding: 5px 8px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.diagnostics-actions button:disabled { opacity: .45; }
+.lsp-server header, .diagnostic-item header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.lsp-server header h3, .diagnostic-item header code { margin: 0; }
+.lsp-state, .diag-severity {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border: 1px solid var(--rule);
+  font-size: 8px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.lsp-state.state-up, .diag-severity.sev-info { color: var(--success); border-color: color-mix(in srgb, var(--success) 50%, var(--rule)); }
+.lsp-state.state-error, .diag-severity.sev-error { color: var(--signal); border-color: color-mix(in srgb, var(--signal) 50%, var(--rule)); }
+.lsp-state.state-down, .diag-severity.sev-warning { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 50%, var(--rule)); }
+.lsp-state.state-disabled, .diag-severity.sev-hint { color: var(--muted); }
+.lsp-error { color: var(--signal) !important; }
+.diagnostic-item header code { font-size: 11px; overflow-wrap: anywhere; }
+.diagnostics-list .diagnostic-item p { margin-bottom: 4px; color: var(--ink); }
 
 dialog {
   width: min(560px, calc(100vw - 32px));
@@ -1201,3 +1270,94 @@ dialog fieldset small { color: var(--muted); }
 }
 .plans-create button { justify-self: start; font-size: 10px; padding: 4px 8px; }
 .plans-sections { margin-top: 4px; }
+
+/* Run timeline inspector tab */
+.timeline-panel { display: grid; gap: 10px; }
+.timeline-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.timeline-head h2 { margin: 0; font-size: 13px; }
+.timeline-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.timeline-actions button {
+  font-size: 10px;
+  padding: 4px 8px;
+}
+.timeline-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+.timeline-summary div {
+  border: 1px solid var(--rule);
+  background: var(--surface-muted);
+  padding: 8px;
+}
+.timeline-summary dt {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 8px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.timeline-summary dd { margin: 0; font-size: 12px; }
+.timeline-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  max-height: min(60vh, 480px);
+  overflow: auto;
+}
+.timeline-entry {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1.4fr) 72px 48px;
+  gap: 6px 8px;
+  align-items: baseline;
+  border: 1px solid var(--border-muted);
+  background: var(--surface-muted);
+  padding: 6px 8px;
+  font-size: 10px;
+}
+.timeline-state {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--muted);
+}
+.timeline-state.state-completed { color: var(--success); }
+.timeline-state.state-failed { color: var(--signal); }
+.timeline-state.state-canceled { color: var(--warning); }
+.timeline-state.state-running,
+.timeline-state.state-waiting,
+.timeline-state.state-queued { color: var(--accent-alt); }
+.timeline-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+.timeline-id {
+  color: var(--muted);
+  font-size: 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.timeline-dur { color: var(--muted); text-align: right; }
+.timeline-code {
+  grid-column: 1 / -1;
+  color: var(--warning);
+  font-size: 9px;
+}
+.timeline-err {
+  grid-column: 1 / -1;
+  color: var(--signal);
+  font-size: 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

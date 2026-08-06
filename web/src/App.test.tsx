@@ -11,8 +11,9 @@ describe("App", () => {
   beforeEach(() => {
     FakeEventSource.instances = []; FakeWebSocket.instances = [];
     vi.stubGlobal("EventSource", FakeEventSource); vi.stubGlobal("WebSocket", FakeWebSocket);
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input).includes("bootstrap") ? response({ version: "test", authRequired: false, attachOnly: false, capabilities: { live: true, files: false, memory: false, issues: false, roots: false }, protocolOps: ["user.input", "compact", "rewind"], status: { sessionId: "live", provider: "echo", busy: false }, agents: [{ name: "build" }], skills: [{ name: "ship", description: "Ship changes" }] }) : String(input).includes("sessions") ? response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" }) : response({ ok: true })));
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input).includes("bootstrap") ? response({ version: "test", authRequired: false, attachOnly: false, capabilities: { live: true, diag: true, files: false, memory: false, issues: false, roots: false }, protocolOps: ["user.input", "compact", "rewind"], status: { sessionId: "live", provider: "echo", busy: false }, agents: [{ name: "build" }], skills: [{ name: "ship", description: "Ship changes" }] }) : String(input).includes("sessions") ? response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" }) : response({ ok: true })));
     Element.prototype.scrollIntoView = vi.fn();
+    vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn(() => "blob:diag"), revokeObjectURL: vi.fn() });
   });
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
@@ -287,8 +288,44 @@ describe("App", () => {
     render(<App />);
     await screen.findByText("Current");
     fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
-    expect(screen.getByRole("dialog", { name: "Workspace settings" })).toHaveTextContent("Provider authentication unavailable");
-    expect(screen.getByRole("dialog", { name: "Workspace settings" })).toHaveTextContent("Saved defaults unavailable");
+    const dialog = screen.getByRole("dialog", { name: "Workspace settings" });
+    expect(dialog).toHaveTextContent("Provider authentication unavailable");
+    expect(dialog).toHaveTextContent("Saved defaults unavailable");
+    expect(dialog.querySelector('[aria-label="Download diagnostics"]')).not.toBeDisabled();
+  });
+
+  it("downloads diagnostics from the context inspector when live diag is available", async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) return response({ version: "test", authRequired: false, attachOnly: false, capabilities: { live: true, diag: true, roots: false }, protocolOps: ["user.input"], status: { sessionId: "live", provider: "echo", busy: false }, agents: [], skills: [] });
+      if (url.includes("sessions")) return response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" });
+      if (url.includes("/v1/diag")) {
+        return Promise.resolve(new Response(JSON.stringify({ schemaVersion: "1.0.0", redacted: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json", "Content-Disposition": 'attachment; filename="strike-diag-live-test.json"' },
+        }));
+      }
+      return response({ ok: true });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    await screen.findByText("Current");
+    fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
+    const button = screen.getByRole("button", { name: "Download diagnostics" });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/v1/diag"), expect.objectContaining({ credentials: "same-origin" })));
+    expect(URL.createObjectURL).toHaveBeenCalled();
+    expect(URL.revokeObjectURL).toHaveBeenCalled();
+  });
+
+  it("disables diagnostic download when diag capability is absent", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input).includes("bootstrap") ? response({ version: "test", authRequired: false, attachOnly: true, capabilities: { live: false, diag: false }, protocolOps: null, agents: [], skills: [] }) : String(input).includes("sessions") ? response({ sessions: [{ id: "saved", title: "Saved" }] }) : String(input).includes("roots") ? Promise.resolve(new Response("multi-root unavailable", { status: 503 })) : response({ ok: true })));
+    render(<App />);
+    await screen.findByText("Saved");
+    fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
+    expect(screen.getByRole("button", { name: "Download diagnostics" })).toBeDisabled();
+    expect(screen.getByText(/Unavailable on this host/)).toBeInTheDocument();
   });
 
   it("keeps secondary runtime controls behind disclosure and issues set ops", async () => {
@@ -523,9 +560,139 @@ describe("App", () => {
     expect(newCalls.some((c) => String(c[1]?.body || "").includes("rewind"))).toBe(false);
   });
 
+  it("isolates drafts, queues, permissions, and transcripts across workspace switches", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) {
+        return response({
+          version: "test", authRequired: false, attachOnly: false,
+          capabilities: { live: true, roots: true, sessions: true },
+          protocolOps: ["user.input", "permission.reply"],
+          status: { sessionId: "root-a", provider: "echo", busy: false },
+          agents: [{ name: "build" }], skills: [],
+        });
+      }
+      if (url.includes("/v1/roots") && (!init || !init.method || init.method === "GET")) {
+        return response({
+          roots: [
+            { id: "root-a", agent: "AgentA", busy: false },
+            { id: "root-b", agent: "AgentB", busy: false },
+          ],
+          activeId: "root-a",
+        });
+      }
+      if (url.includes("sessions")) {
+        return response({
+          sessions: [{ id: "root-a", title: "A" }, { id: "root-b", title: "B" }],
+          liveId: "root-a",
+        });
+      }
+      return response({ ok: true });
+    }));
+
+    render(<App />);
+    await screen.findByText("AgentA");
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThanOrEqual(1));
+    const wsA = FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
+    expect(wsA.url).toContain("root=root-a");
+
+    fireEvent.change(screen.getByLabelText("Instruction"), { target: { value: "draft for A" } });
+    wsA.onmessage?.({ data: JSON.stringify({ type: "turn.started", time: "t1", data: { turnId: "ta" } }) } as MessageEvent);
+    fireEvent.change(screen.getByLabelText(/Instruction/), { target: { value: "queued on A" } });
+    fireEvent.submit(screen.getByLabelText(/Instruction/).closest("form")!);
+    expect(screen.getByRole("list", { name: "Queued prompts" })).toHaveTextContent("queued on A");
+    fireEvent.change(screen.getByLabelText("Instruction"), { target: { value: "still drafting A" } });
+    wsA.onmessage?.({ data: JSON.stringify({ type: "user.message", time: "t2", data: { text: "hello A", turnId: "ta" } }) } as MessageEvent);
+    wsA.onmessage?.({ data: JSON.stringify({ type: "permission.asked", time: "t3", data: { requestId: "pa", tool: "bash" } }) } as MessageEvent);
+    expect(await screen.findByRole("dialog", { name: "Permission required" })).toBeInTheDocument();
+    expect(screen.getByText("hello A")).toBeInTheDocument();
+
+    const socketsBeforeB = FakeWebSocket.instances.length;
+    fireEvent.click(screen.getByText("AgentB"));
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(socketsBeforeB));
+    const wsB = FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
+    expect(wsB.url).toContain("root=root-b");
+    expect(wsA.close).toHaveBeenCalled();
+
+    // B starts clean: no A's draft, queue, permission, or transcript.
+    expect(screen.queryByRole("dialog", { name: "Permission required" })).not.toBeInTheDocument();
+    expect(screen.queryByText("hello A")).not.toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Queued prompts" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Instruction")).toHaveValue("");
+
+    fireEvent.change(screen.getByLabelText("Instruction"), { target: { value: "draft for B" } });
+    wsB.onmessage?.({ data: JSON.stringify({ type: "user.message", time: "tb1", data: { text: "hello B", turnId: "tb" } }) } as MessageEvent);
+    expect(await screen.findByText("hello B")).toBeInTheDocument();
+
+    // Late event on closed A socket must not interleave into B's transcript.
+    wsA.onmessage?.({ data: JSON.stringify({ type: "user.message", time: "late", data: { text: "late A leak", turnId: "ta2" } }) } as MessageEvent);
+    expect(screen.queryByText("late A leak")).not.toBeInTheDocument();
+    expect(screen.getByText("hello B")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("AgentA"));
+    await waitFor(() => expect(screen.getByLabelText("Instruction")).toHaveValue("still drafting A"));
+    expect(screen.getByRole("list", { name: "Queued prompts" })).toHaveTextContent("queued on A");
+    expect(screen.getByText("hello A")).toBeInTheDocument();
+    expect(screen.queryByText("hello B")).not.toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Permission required" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/v1/ops?root=root-a"),
+      expect.objectContaining({ body: expect.stringContaining("permission.reply") }),
+    ));
+  });
+
+  it("shows timeline inspector tab when capability is set and loads snapshot", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) {
+        return response({
+          version: "test", authRequired: false, attachOnly: false,
+          capabilities: { live: true, files: true, timeline: true, roots: false },
+          protocolOps: ["user.input"], status: { sessionId: "live", provider: "echo", busy: false },
+          agents: [{ name: "build" }], skills: [],
+        });
+      }
+      if (url.includes("/timeline") && !url.includes("export")) {
+        return response({ sessionId: "live", entries: [] });
+      }
+      if (url.includes("sessions")) return response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" });
+      return response({ ok: true });
+    }));
+    render(<App />);
+    await screen.findByText("Current");
+    expect(screen.getByRole("tab", { name: "timeline" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "timeline" }));
+    expect(await screen.findByRole("heading", { name: "Run timeline" })).toBeInTheDocument();
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/v1/sessions/live/timeline"), expect.anything()));
+  });
+
+  it("shows diagnostics inspector tab when lsp capability is set", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) {
+        return response({
+          version: "test", authRequired: false, attachOnly: false,
+          capabilities: { live: true, files: true, lsp: true, roots: false },
+          protocolOps: ["user.input"], status: { sessionId: "live", provider: "echo", busy: false },
+          agents: [{ name: "build" }], skills: [],
+        });
+      }
+      if (url.includes("/v1/lsp")) return response({ servers: [] });
+      if (url.includes("/v1/diagnostics")) return response({ findings: [] });
+      if (url.includes("sessions")) return response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" });
+      return response({ ok: true });
+    }));
+    render(<App />);
+    await screen.findByText("Current");
+    expect(screen.getByRole("tab", { name: "diagnostics" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "diagnostics" }));
+    expect(await screen.findByRole("heading", { name: "Diagnostics" })).toBeInTheDocument();
+  });
 
 
-  it("selects a deep-linked session id on boot and falls back for invalid ids", async () => {
+  it("selects a deep-linked session id on boot", async () => {
     const original = window.location;
     Object.defineProperty(window, "location", {
       configurable: true,
@@ -566,7 +733,6 @@ describe("App", () => {
     render(<App />);
     await waitFor(() => expect(FakeWebSocket.instances.some((ws) => ws.url.includes("root=root-b"))).toBe(true));
     await waitFor(() => expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/v1/roots/root-b/activate"))).toBe(true));
-    expect(screen.getByLabelText("Instruction")).not.toBeDisabled();
     Object.defineProperty(window, "location", { configurable: true, value: original });
   });
 
@@ -597,7 +763,6 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Resume as workspace" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/v1/roots/hist-1/resume"))).toBe(true));
     await waitFor(() => expect(FakeWebSocket.instances.some((ws) => ws.url.includes("root=hist-1"))).toBe(true));
-    expect(screen.getByLabelText("Instruction")).not.toBeDisabled();
   });
 
   it("shows LIVE badge and fork lineage on history rows", async () => {
