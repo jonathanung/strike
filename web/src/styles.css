@@ -898,6 +898,53 @@ dialog fieldset label {
 dialog fieldset small { color: var(--muted); }
 
 /* Workflow authoring (inspector tab + dialogs) */
+.mcp-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+.mcp-head h2 { margin: 0; font-size: 13px; }
+.mcp-actions, .mcp-card-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.mcp-list { display: grid; gap: 8px; }
+.mcp-card {
+  border: 1px solid var(--rule);
+  background: var(--surface-muted);
+  padding: 10px;
+  display: grid;
+  gap: 6px;
+}
+.mcp-card header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: baseline;
+}
+.mcp-card h3 { margin: 0; font-size: 12px; }
+.mcp-card p { margin: 0; color: var(--muted); font-size: 10px; }
+.mcp-card code {
+  background: var(--code-bg);
+  border: 1px solid var(--border-muted);
+  padding: 1px 4px;
+  font-size: 9px;
+}
+.mcp-state {
+  text-transform: uppercase;
+  font-size: 8px;
+  letter-spacing: .12em;
+  color: var(--muted);
+}
+.mcp-state.up { color: var(--success); }
+.mcp-state.error { color: var(--signal); }
+.mcp-state.down { color: var(--warning); }
+.mcp-state.disabled { color: var(--overlay); }
+.mcp-error { color: var(--signal) !important; font-size: 10px; }
+.mcp-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
 .workflow-head {
   display: flex;
   align-items: center;

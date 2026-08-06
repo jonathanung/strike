@@ -101,6 +101,9 @@ ssh -L 8787:127.0.0.1:8787 user@strike-host
 | `POST` | `/v1/roots/{id}/activate` | **yes** | Set hub active root (must already be live) |
 | `POST` | `/v1/roots/{id}/resume` | **yes** | Resume durable root as live workspace |
 | `DELETE` | `/v1/roots/{id}` | **yes** | Close/stop a live workspace (hub remove) |
+| `GET` | `/v1/mcp` | **yes** | MCP server status list (`{servers:[…]}`) |
+| `POST` | `/v1/mcp/retry` | **yes** | Retry one server (`{name?}`) or all non-up |
+| `POST` | `/v1/mcp/disable` | **yes** | Disable server and unregister tools (`{name}`) |
 | `GET` | `/v1/workflows` | **yes** | Workflow catalog (host-safe summaries) |
 | `GET` | `/v1/workflows/{name}` | **yes** | One catalog entry |
 | `GET` | `/v1/workflows/{name}/document` | **yes** | Editable document for builder |
@@ -172,6 +175,15 @@ Queue state is UI-local (same as TUI input buffer) — not a server queue API.
 
 **Markdown export** is client-side from the in-memory transcript (header + You /
 Strike / tools). No separate export HTTP endpoint.
+
+### MCP status and control
+
+Bootstrap capability `mcp` is true when the host exposes `Services.MCP`. The
+cockpit inspector **mcp** tab lists configured servers (state, transport,
+endpoint label, tools, non-secret errors) and offers **Retry** / **Disable**
+actions matching TUI `/mcp`. Empty configuration still reports the capability
+when the host service is present; the panel shows a configure hint. Secrets
+(headers/env) are never returned on the wire.
 
 ### Workflow authoring (web parity)
 
