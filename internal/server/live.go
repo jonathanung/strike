@@ -424,6 +424,32 @@ func (l *Live) Submit(ctx context.Context, op protocol.Op) error {
 	}
 }
 
+// RequestDiagnostic submits inspect.diagnostic and waits for the matching
+// DiagnosticBundle event. Subscribe before Submit so the response is not missed.
+func (l *Live) RequestDiagnostic(ctx context.Context) (protocol.DiagnosticBundle, error) {
+	var zero protocol.DiagnosticBundle
+	if l == nil {
+		return zero, errors.New("live session unavailable")
+	}
+	sub := l.Subscribe(ctx)
+	if err := l.Submit(ctx, protocol.InspectDiagnosticBundle{}); err != nil {
+		return zero, err
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return zero, ctx.Err()
+		case ev, ok := <-sub:
+			if !ok {
+				return zero, errors.New("live session closed")
+			}
+			if b, ok := ev.(protocol.DiagnosticBundle); ok {
+				return b, nil
+			}
+		}
+	}
+}
+
 // Publish fans an engine event out to subscribers and updates status. A
 // subscriber that cannot keep up is disconnected rather than blocking the
 // engine event drain or other subscribers.
