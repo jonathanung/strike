@@ -25,6 +25,23 @@ type visualizerTool struct {
 // Remaining count is summarized as "+N more" so layout stays width-safe.
 const visualizerMaxFilesShown = 5
 
+// visualizerPathOverlap is one path-overlap warning on a selected node.
+type visualizerPathOverlap struct {
+	Path    string
+	Policy  string
+	Blocked bool
+	Warning string
+}
+
+// visualizerVerification is claim-vs-verified state when a report was observed.
+// Nil on the parent msg means unknown (no report) — never invent success.
+type visualizerVerification struct {
+	Claimed  bool
+	Verified bool
+	Passed   bool
+	Summary  string
+}
+
 // visualizerStateMsg is a snapshot of the selected session/agent node for the
 // right-pane visualizer. Model owns live stats; the window only renders.
 type visualizerStateMsg struct {
@@ -46,11 +63,19 @@ type visualizerStateMsg struct {
 	// Activity samples for the sparkline; empty means no known activity.
 	Activity []float64
 	Tools    []visualizerTool
-	// Live multi-agent detail (roster / observability). Empty means unknown.
-	Objective    string
-	LastAction   string
-	BlockReason  string
-	FilesTouched []string
+
+	// Multi-agent observability (#922). Empty/nil = unknown; do not invent zeros.
+	// VIZ.2 (#923) renders Objective/LastAction/BlockReason/FilesTouched.
+	Objective      string
+	LastAction     string
+	BlockReason    string
+	FilesTouched   []string
+	Budget         *protocol.AgentBudgetView
+	EscalateKind   string
+	EscalateReason string
+	EscalateAction string
+	PathOverlaps   []visualizerPathOverlap
+	Verification   *visualizerVerification
 }
 
 // visualizerWindow shows status glyphs, token/cost (when known), an activity

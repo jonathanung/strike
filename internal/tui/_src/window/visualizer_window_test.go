@@ -371,7 +371,7 @@ func TestVisualizerFollowsAgentsHighlightAndUsage(t *testing.T) {
 
 func TestVisualizerDetailUpdatesOnStateBroadcast(t *testing.T) {
 	// Selecting different nodes pushes a new visualizerStateMsg; detail must
-	// refresh without restart. (Roster→snapshot plumbing is #922 / VIZ.1.)
+	// refresh without restart.
 	m, _ := newAppTestModel(nil, nil)
 	m.sessionID = "root-a"
 	m.windows = m.windows.resize(48, 28)
@@ -410,6 +410,61 @@ func TestVisualizerDetailUpdatesOnStateBroadcast(t *testing.T) {
 		Objective:   "ship patch",
 		LastAction:  "edit app.go",
 	})
+	plain = ansi.Strip(mustVisualizer(t, m).view(theme.Default()))
+	if !strings.Contains(plain, "ship patch") || !strings.Contains(plain, "edit app.go") {
+		t.Fatalf("child-2 detail missing after reselect:\n%s", plain)
+	}
+	if strings.Contains(plain, "trace login") || strings.Contains(plain, "confirm scope") {
+		t.Fatalf("stale child-1 detail after reselect:\n%s", plain)
+	}
+}
+
+func TestVisualizerRosterDetailOnChildSelect(t *testing.T) {
+	// End-to-end with VIZ.1 plumbing: roster → snapshot → visualizer.
+	m, _ := newAppTestModel(nil, nil)
+	m.sessionID = "root-a"
+	m.windows = m.windows.resize(48, 28)
+	m.onTeamRoster(protocol.TeamRoster{
+		LeadID: "root-a",
+		Members: []protocol.TeamRosterMember{
+			{
+				SessionID: "child-1", Role: "member", Name: "scout", Agent: "explore",
+				State: "needs_attention", ParentSessionID: "root-a",
+				Objective: "trace login", LastAction: "grep Session",
+				BlockReason:  "needs you: confirm scope",
+				FilesTouched: []string{"auth.go", "session.go"},
+			},
+			{
+				SessionID: "child-2", Role: "member", Name: "builder", Agent: "general",
+				State: "working", ParentSessionID: "root-a",
+				Objective: "ship patch", LastAction: "edit app.go",
+			},
+		},
+	})
+	m = updateApp(t, m, agentsHighlightMsg{sessionID: "child-1"})
+	snap := m.visualizerStateSnapshot()
+	if snap.Kind != "child" || snap.Objective != "trace login" || snap.LastAction != "grep Session" {
+		t.Fatalf("snapshot = %+v", snap)
+	}
+	if snap.BlockReason != "needs you: confirm scope" {
+		t.Fatalf("blockReason = %q", snap.BlockReason)
+	}
+	if snap.State != theme.AgentStateAttention && snap.StatusLabel != "needs you" {
+		t.Fatalf("attention status not plumbed: state=%v label=%q", snap.State, snap.StatusLabel)
+	}
+	plain := ansi.Strip(mustVisualizer(t, m).view(theme.Default()))
+	for _, want := range []string{
+		"objective", "trace login",
+		"action", "grep Session",
+		"blocked", "needs you: confirm scope",
+		"files", "auth.go",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("missing %q:\n%s", want, plain)
+		}
+	}
+
+	m = updateApp(t, m, agentsHighlightMsg{sessionID: "child-2"})
 	plain = ansi.Strip(mustVisualizer(t, m).view(theme.Default()))
 	if !strings.Contains(plain, "ship patch") || !strings.Contains(plain, "edit app.go") {
 		t.Fatalf("child-2 detail missing after reselect:\n%s", plain)

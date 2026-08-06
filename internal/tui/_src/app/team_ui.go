@@ -14,6 +14,14 @@ const maxTeamMessages = 24
 // maxTeamMessageBodyRunes truncates stored body text for UI labels/detail.
 const maxTeamMessageBodyRunes = 280
 
+// Bounds for multi-agent observability fields on childActivity (#922).
+const (
+	maxChildFilesTouched    = 12
+	maxChildPathOverlaps    = 8
+	maxChildObsFieldRunes   = 280
+	maxChildObsWarningRunes = 160
+)
+
 // teamMessage is one peer/team mailbox delivery surfaced for the lead UI.
 type teamMessage struct {
 	id      string
@@ -146,6 +154,7 @@ func applyTeamRosterMembers(children *[]childActivity, index map[string]int, mem
 					ch.startedAt = t
 				}
 			}
+			mergeChildObservabilityFromRoster(ch, mem)
 			continue
 		}
 		ch := childActivity{
@@ -166,6 +175,7 @@ func applyTeamRosterMembers(children *[]childActivity, index map[string]int, mem
 				ch.startedAt = t
 			}
 		}
+		mergeChildObservabilityFromRoster(&ch, mem)
 		if index != nil {
 			index[id] = len(*children)
 		}
@@ -173,19 +183,243 @@ func applyTeamRosterMembers(children *[]childActivity, index map[string]int, mem
 	}
 }
 
+// mergeChildObservabilityFromRoster copies live observability fields from a
+// roster member. Wire-present strings/lists replace prior values; budget is
+// cloned when non-nil and cleared when the snapshot omits tracking. Does not
+// invent zeros or verified-success flags.
+func mergeChildObservabilityFromRoster(ch *childActivity, mem protocol.TeamRosterMember) {
+	if ch == nil {
+		return
+	}
+	ch.objective = truncateRunes(strings.TrimSpace(mem.Objective), maxChildObsFieldRunes)
+	ch.lastAction = truncateRunes(strings.TrimSpace(mem.LastAction), maxChildObsFieldRunes)
+	ch.blockReason = truncateRunes(strings.TrimSpace(mem.BlockReason), maxChildObsFieldRunes)
+	ch.filesTouched = boundStringList(mem.FilesTouched, maxChildFilesTouched)
+	ch.budget = cloneAgentBudgetView(mem.Budget)
+}
+
+// cloneAgentBudgetView deep-copies a protocol budget snapshot (nil-safe).
+func cloneAgentBudgetView(b *protocol.AgentBudgetView) *protocol.AgentBudgetView {
+	if b == nil {
+		return nil
+	}
+	cp := *b
+	if b.WallClockRemainingS != nil {
+		v := *b.WallClockRemainingS
+		cp.WallClockRemainingS = &v
+	}
+	if b.TokensRemaining != nil {
+		v := *b.TokensRemaining
+		cp.TokensRemaining = &v
+	}
+	if b.ToolCallsRemaining != nil {
+		v := *b.ToolCallsRemaining
+		cp.ToolCallsRemaining = &v
+	}
+	if b.DangerousRemaining != nil {
+		v := *b.DangerousRemaining
+		cp.DangerousRemaining = &v
+	}
+	if b.CostUSDRemaining != nil {
+		v := *b.CostUSDRemaining
+		cp.CostUSDRemaining = &v
+	}
+	return &cp
+}
+
+// boundStringList copies and caps a string slice for render-storm safety.
+func boundStringList(in []string, maxN int) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	if maxN <= 0 {
+		return nil
+	}
+	if len(in) > maxN {
+		in = in[len(in)-maxN:]
+	}
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		out = append(out, truncateRunes(s, maxChildObsFieldRunes))
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// applyChildEscalatedToChildren updates escalation + budget on the matching
+// child row. Returns true when a row was updated or created.
+func applyChildEscalatedToChildren(children *[]childActivity, index map[string]int, ev protocol.ChildEscalated) bool {
+	if children == nil {
+		return false
+	}
+	id := strings.TrimSpace(ev.SessionID)
+	if id == "" {
+		return false
+	}
+	kind := strings.TrimSpace(ev.Kind)
+	reason := truncateRunes(strings.TrimSpace(ev.Reason), maxChildObsFieldRunes)
+	action := strings.TrimSpace(ev.Action)
+	parentID := strings.TrimSpace(ev.ParentSessionID)
+
+	if i, ok := index[id]; ok && i >= 0 && i < len(*children) {
+		ch := &(*children)[i]
+		if ev.Name != "" {
+			ch.name = ev.Name
+		}
+		if parentID != "" && ch.parentID == "" {
+			ch.parentID = parentID
+		}
+		ch.escalateKind = kind
+		ch.escalateReason = reason
+		ch.escalateAction = action
+		if reason != "" && ch.blockReason == "" {
+			ch.blockReason = reason
+		}
+		if ev.Budget != nil {
+			ch.budget = cloneAgentBudgetView(ev.Budget)
+		}
+		return true
+	}
+	// Escalation without a prior start still surfaces a row so viz can show it.
+	ch := childActivity{
+		sessionID:      id,
+		parentID:       parentID,
+		name:           ev.Name,
+		status:         "running",
+		escalateKind:   kind,
+		escalateReason: reason,
+		escalateAction: action,
+		blockReason:    reason,
+		budget:         cloneAgentBudgetView(ev.Budget),
+		startedAt:      time.Now(),
+	}
+	if index != nil {
+		index[id] = len(*children)
+	}
+	*children = append(*children, ch)
+	return true
+}
+
+// applyPathOverlapToChildren retains a bounded path-overlap warning on the
+// claiming session's child row. Returns true when applied.
+func applyPathOverlapToChildren(children *[]childActivity, index map[string]int, ev protocol.PathOverlap) bool {
+	if children == nil {
+		return false
+	}
+	id := strings.TrimSpace(ev.SessionID)
+	if id == "" {
+		return false
+	}
+	entry := childPathOverlap{
+		path:    truncateRunes(strings.TrimSpace(ev.Path), maxChildObsFieldRunes),
+		policy:  strings.TrimSpace(ev.Policy),
+		blocked: ev.Blocked,
+		warning: truncateRunes(strings.TrimSpace(ev.Warning), maxChildObsWarningRunes),
+	}
+	if entry.path == "" && entry.warning == "" {
+		return false
+	}
+	parentID := strings.TrimSpace(ev.ParentSessionID)
+
+	if i, ok := index[id]; ok && i >= 0 && i < len(*children) {
+		ch := &(*children)[i]
+		if parentID != "" && ch.parentID == "" {
+			ch.parentID = parentID
+		}
+		ch.pathOverlaps = appendPathOverlap(ch.pathOverlaps, entry)
+		return true
+	}
+	ch := childActivity{
+		sessionID:    id,
+		parentID:     parentID,
+		status:       "running",
+		pathOverlaps: []childPathOverlap{entry},
+		startedAt:    time.Now(),
+	}
+	if index != nil {
+		index[id] = len(*children)
+	}
+	*children = append(*children, ch)
+	return true
+}
+
+func appendPathOverlap(list []childPathOverlap, entry childPathOverlap) []childPathOverlap {
+	// Dedup identical path+policy+blocked rows; keep newest warning text.
+	for i := range list {
+		if list[i].path == entry.path && list[i].policy == entry.policy && list[i].blocked == entry.blocked {
+			list[i] = entry
+			return list
+		}
+	}
+	list = append(list, entry)
+	if len(list) > maxChildPathOverlaps {
+		list = append([]childPathOverlap(nil), list[len(list)-maxChildPathOverlaps:]...)
+	}
+	return list
+}
+
+// applyChildVerification stores a verification summary on the matching child.
+// rep nil is a no-op (unknown stays unknown).
+func applyChildVerification(children *[]childActivity, index map[string]int, sessionID string, rep *protocol.VerificationReport) bool {
+	if children == nil || rep == nil {
+		return false
+	}
+	id := strings.TrimSpace(sessionID)
+	if id == "" {
+		return false
+	}
+	sum := &childVerificationSummary{
+		claimed:  rep.Claimed,
+		verified: rep.Verified,
+		passed:   rep.Passed,
+		summary:  truncateRunes(strings.TrimSpace(rep.Summary), maxChildObsFieldRunes),
+	}
+	if i, ok := index[id]; ok && i >= 0 && i < len(*children) {
+		(*children)[i].verification = sum
+		return true
+	}
+	return false
+}
+
+// childIndex builds sessionID → slice index for children.
+func childIndex(children []childActivity) map[string]int {
+	index := make(map[string]int, len(children))
+	for i, ch := range children {
+		if ch.sessionID != "" {
+			index[ch.sessionID] = i
+		}
+	}
+	return index
+}
+
 func (m *Model) onTeamRoster(ev protocol.TeamRoster) {
 	leadID := strings.TrimSpace(ev.LeadID)
 	if leadID == "" {
 		leadID = strings.TrimSpace(ev.SessionID)
 	}
-	index := make(map[string]int, len(m.children))
-	for i, ch := range m.children {
-		if ch.sessionID != "" {
-			index[ch.sessionID] = i
-		}
-	}
+	index := childIndex(m.children)
 	applyTeamRosterMembers(&m.children, index, ev.Members, leadID)
 	m.trimChildren()
+}
+
+func (m *Model) onChildEscalated(ev protocol.ChildEscalated) {
+	index := childIndex(m.children)
+	if applyChildEscalatedToChildren(&m.children, index, ev) {
+		m.trimChildren()
+	}
+}
+
+func (m *Model) onPathOverlap(ev protocol.PathOverlap) {
+	index := childIndex(m.children)
+	if applyPathOverlapToChildren(&m.children, index, ev) {
+		m.trimChildren()
+	}
 }
 
 func applyTeamRosterToPane(p *rootPane, ev protocol.TeamRoster) {
@@ -199,28 +433,48 @@ func applyTeamRosterToPane(p *rootPane, ev protocol.TeamRoster) {
 	if leadID == "" {
 		leadID = p.sessionID
 	}
-	index := make(map[string]int, len(p.children))
-	for i, ch := range p.children {
-		if ch.sessionID != "" {
-			index[ch.sessionID] = i
-		}
-	}
+	index := childIndex(p.children)
 	applyTeamRosterMembers(&p.children, index, ev.Members, leadID)
-	if len(p.children) > maxChildActivity {
-		// Drop oldest non-running first (same spirit as Model.trimChildren).
-		for len(p.children) > maxChildActivity {
-			drop := -1
-			for i, ch := range p.children {
-				if ch.status != "running" {
-					drop = i
-					break
-				}
+	trimPaneChildren(p)
+}
+
+func applyChildEscalatedToPane(p *rootPane, ev protocol.ChildEscalated) {
+	if p == nil {
+		return
+	}
+	index := childIndex(p.children)
+	if applyChildEscalatedToChildren(&p.children, index, ev) {
+		trimPaneChildren(p)
+	}
+}
+
+func applyPathOverlapToPane(p *rootPane, ev protocol.PathOverlap) {
+	if p == nil {
+		return
+	}
+	index := childIndex(p.children)
+	if applyPathOverlapToChildren(&p.children, index, ev) {
+		trimPaneChildren(p)
+	}
+}
+
+func trimPaneChildren(p *rootPane) {
+	if p == nil || len(p.children) <= maxChildActivity {
+		return
+	}
+	// Drop oldest non-running first (same spirit as Model.trimChildren).
+	for len(p.children) > maxChildActivity {
+		drop := -1
+		for i, ch := range p.children {
+			if ch.status != "running" {
+				drop = i
+				break
 			}
-			if drop < 0 {
-				drop = 0
-			}
-			p.children = append(p.children[:drop], p.children[drop+1:]...)
 		}
+		if drop < 0 {
+			drop = 0
+		}
+		p.children = append(p.children[:drop], p.children[drop+1:]...)
 	}
 }
 
