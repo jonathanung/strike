@@ -18,6 +18,7 @@ var coreToolNames = map[string]struct{}{
 	"team_task":       {},
 	"plan_write":      {},
 	"plan_read":       {},
+	"plan_delegate":   {},
 	"toolsearch":      {},
 	"question":        {},
 	"enter_plan_mode": {}, "exit_plan_mode": {}, "phase_done": {},

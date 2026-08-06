@@ -2,7 +2,7 @@
 // (read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/
 // task_message/task_interrupt/wait/agent_roster/agent_ownership/agent_message/agent_broadcast/
 // team_task/webfetch/todowrite/todoread/
-// memory_write/memory_read/issue_write/issue_read/plan_write/plan_read/notebook_edit/sleep/skill/question/enter_plan_mode/
+// memory_write/memory_read/issue_write/issue_read/plan_write/plan_read/plan_delegate/notebook_edit/sleep/skill/question/enter_plan_mode/
 // exit_plan_mode/phase_done/toolsearch).
 // Used by internal/engine (dispatch), internal/permission (AskRequest, for the
 // Context.Ask signature), and cmd/strike (registry construction); internal/tui
@@ -90,6 +90,11 @@ type TaskRequest struct {
 	// completion alone does not yield final completed status — the harness runs
 	// these gates and only promotes to completed on pass (else blocked).
 	Verify []VerifyGate
+	// PlanID/SectionID correlate this child to a plan section refinement
+	// (plan_delegate). Empty for ordinary task spawns. On terminal status the
+	// engine applies structured handoff fields to that section only.
+	PlanID    string
+	SectionID string
 }
 
 // TaskResult is the outcome of spawning a child session.

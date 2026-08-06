@@ -13,6 +13,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/harness"
 	"github.com/jonathanung/strike-cli/internal/permission"
+	"github.com/jonathanung/strike-cli/internal/plan"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
 	"github.com/jonathanung/strike-cli/internal/question"
@@ -270,6 +271,16 @@ type Options struct {
 	// touched absolute paths after file mutations (one call per tool result).
 	// Empty disables injection. Must not panic the tool path (callers recover).
 	CollectDiagnostics func(ctx context.Context, absPaths []string) string
+	// PlanStore, when set, receives section-delegate completion applies from
+	// finishChild (plan_delegate correlation). nil disables auto-apply.
+	// *plan.Store satisfies PlanSectionStore.
+	PlanStore PlanSectionStore
+}
+
+// PlanSectionStore is the engine-facing plan surface for section delegation.
+// *plan.Store implements this interface.
+type PlanSectionStore interface {
+	FinishSectionDelegate(id, actorRoot, sectionID, childID string, outcome plan.DelegateOutcome) (plan.Plan, error)
 }
 
 // beginAck reports whether ToolCallBegin was actually written to Events.
