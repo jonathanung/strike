@@ -25,6 +25,15 @@ type MailboxMessage struct {
 	Summary   string // optional short UI label
 	TeamID    string
 	CreatedAt time.Time
+	// Coordination contract fields (optional; plain messages leave zero).
+	TaskID     string    // team_task or delegation id (thread key)
+	Urgency    string    // normal|high|blocker
+	Kind       string    // message|request|ack|timeout|escalation
+	RequireAck bool      // sender requested explicit ack
+	InReplyTo  string    // message id (ack / timeout / escalation)
+	EscalateTo string    // ack-timeout escalation target (session id)
+	AckStatus  string    // pending|acked|timed_out
+	Deadline   time.Time // ack TTL deadline when RequireAck
 }
 
 // Mailbox is a bounded FIFO of unread peer messages for one session.
@@ -100,6 +109,8 @@ func (m *Mailbox) PeekUnread() []MailboxMessage {
 }
 
 // TakePending removes and returns all unread messages (may be nil).
+// Higher urgency is delivered first (blocker > high > normal); equal urgency
+// keeps FIFO order.
 func (m *Mailbox) TakePending() []MailboxMessage {
 	if m == nil {
 		return nil
@@ -111,7 +122,23 @@ func (m *Mailbox) TakePending() []MailboxMessage {
 	}
 	out := m.pending
 	m.pending = nil
+	sortMailboxByUrgency(out)
 	return out
+}
+
+// sortMailboxByUrgency is a stable urgency sort (blocker first).
+func sortMailboxByUrgency(msgs []MailboxMessage) {
+	if len(msgs) < 2 {
+		return
+	}
+	// Insertion sort keeps equal-urgency FIFO and avoids import sort for tiny N.
+	for i := 1; i < len(msgs); i++ {
+		j := i
+		for j > 0 && urgencyRank(msgs[j].Urgency) < urgencyRank(msgs[j-1].Urgency) {
+			msgs[j], msgs[j-1] = msgs[j-1], msgs[j]
+			j--
+		}
+	}
 }
 
 // MailboxStatus is the result of EnqueueTeamMessage / Team.Deliver.
@@ -221,16 +248,49 @@ func (t *Team) DeliverMessage(msg MailboxMessage) MailboxStatus {
 	if msgID == "" {
 		msgID = rand.Text()
 	}
+	urgency := normalizeUrgency(msg.Urgency)
+	if urgency == "" {
+		// Unknown non-empty urgency rejected below after lock-free checks.
+		if strings.TrimSpace(msg.Urgency) != "" {
+			st.Status = "rejected"
+			st.Detail = "urgency must be normal, high, or blocker"
+			return st
+		}
+		urgency = protocol.AgentUrgencyNormal
+	}
+	kind := normalizeMessageKind(msg.Kind)
+	if kind == "" {
+		if strings.TrimSpace(msg.Kind) != "" {
+			st.Status = "rejected"
+			st.Detail = "kind must be message, request, ack, timeout, or escalation"
+			return st
+		}
+		kind = protocol.AgentMessageKindMessage
+	}
 	out := MailboxMessage{
-		ID:        msgID,
-		From:      from,
-		To:        to,
-		Body:      body,
-		Summary:   summary,
-		CreatedAt: msg.CreatedAt,
+		ID:         msgID,
+		From:       from,
+		To:         to,
+		Body:       body,
+		Summary:    summary,
+		CreatedAt:  msg.CreatedAt,
+		TaskID:     strings.TrimSpace(msg.TaskID),
+		Urgency:    urgency,
+		Kind:       kind,
+		RequireAck: msg.RequireAck,
+		InReplyTo:  strings.TrimSpace(msg.InReplyTo),
+		EscalateTo: strings.TrimSpace(msg.EscalateTo),
+		AckStatus:  strings.TrimSpace(msg.AckStatus),
+		Deadline:   msg.Deadline,
 	}
 	if out.CreatedAt.IsZero() {
 		out.CreatedAt = time.Now().UTC()
+	}
+	if out.RequireAck && out.AckStatus == "" {
+		out.AckStatus = "pending"
+	}
+	if out.RequireAck && out.Deadline.IsZero() {
+		out.Deadline = out.CreatedAt.Add(time.Duration(defaultAckTimeoutSec * float64(time.Second)))
 	}
 
 	// Hold team lock through live lookup + enqueue so DetachMailbox cannot
@@ -255,6 +315,15 @@ func (t *Team) DeliverMessage(msg MailboxMessage) MailboxStatus {
 		st.Detail = "recipient is closed (" + string(member.State) + ")"
 		return st
 	}
+	// Default escalate target to lead; validate when set.
+	if out.EscalateTo == "" {
+		out.EscalateTo = t.leadID
+	} else if _, ok := t.members[out.EscalateTo]; !ok {
+		t.mu.Unlock()
+		st.Status = "rejected"
+		st.Detail = "escalate_to is not on this team"
+		return st
+	}
 	target := t.live[to]
 	if target == nil || target.eng == nil || target.box == nil {
 		t.mu.Unlock()
@@ -269,6 +338,10 @@ func (t *Team) DeliverMessage(msg MailboxMessage) MailboxStatus {
 		st.Status = "rejected"
 		st.Detail = "enqueue failed"
 		return st
+	}
+	t.recordThreadLocked(out)
+	if out.RequireAck {
+		t.registerPendingAckLocked(out)
 	}
 	st.MessageID = out.ID
 	st.Dropped = target.box.Dropped() > beforeDrop
@@ -422,6 +495,13 @@ func (e *Engine) emitAgentMessages(msgs []MailboxMessage) {
 			Summary:     m.Summary,
 			TeamID:      m.TeamID,
 			MessageID:   m.ID,
+			TaskID:      m.TaskID,
+			Urgency:     m.Urgency,
+			Kind:        m.Kind,
+			RequireAck:  m.RequireAck,
+			InReplyTo:   m.InReplyTo,
+			EscalateTo:  m.EscalateTo,
+			AckStatus:   m.AckStatus,
 		})
 	}
 }
@@ -445,6 +525,24 @@ func formatMailboxNotice(m MailboxMessage) string {
 		fmt.Fprintf(&b, "[agent.message from=%s]", short)
 	} else {
 		b.WriteString("[agent.message]")
+	}
+	if u := normalizeUrgency(m.Urgency); u != "" && u != protocol.AgentUrgencyNormal {
+		fmt.Fprintf(&b, " urgency=%s", u)
+	}
+	if k := normalizeMessageKind(m.Kind); k != "" && k != protocol.AgentMessageKindMessage {
+		fmt.Fprintf(&b, " kind=%s", k)
+	}
+	if tid := strings.TrimSpace(m.TaskID); tid != "" {
+		fmt.Fprintf(&b, " task=%s", tid)
+	}
+	if m.RequireAck {
+		b.WriteString(" require_ack=true")
+		if as := strings.TrimSpace(m.AckStatus); as != "" {
+			fmt.Fprintf(&b, " ack=%s", as)
+		}
+	}
+	if ir := strings.TrimSpace(m.InReplyTo); ir != "" {
+		fmt.Fprintf(&b, " in_reply_to=%s", ir)
 	}
 	if s := compactMailboxSummary(m.Summary); s != "" {
 		fmt.Fprintf(&b, " summary=%s", s)

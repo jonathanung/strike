@@ -228,6 +228,11 @@ type Options struct {
 	// (session.overlapPolicy). Empty defaults to warn. Applied to Team
 	// ownership when the root team is created or inherited.
 	OverlapPolicy string
+	// DefaultChildBudget is the session default for per-child limits (#774).
+	// Spawn-time task budget fields overlay non-zero values. Zero fields mean
+	// unlimited (soft stall/loop signals still apply). Nested under any future
+	// session maxSessionCostUSD (#577) outer envelope.
+	DefaultChildBudget tool.AgentBudgetLimits
 	// PersistSessionMeta, when set, writes durable session metadata (sidecar).
 	// The engine emits protocol.SessionMeta after a successful persist.
 	PersistSessionMeta func(meta protocol.SessionMeta) error

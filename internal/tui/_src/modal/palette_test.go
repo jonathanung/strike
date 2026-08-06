@@ -58,6 +58,8 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		{ID: "command:rename", Label: "/rename", Description: "rename the current session", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/rename"}},
 		{ID: "command:export", Label: "/export", Description: "export the conversation to markdown", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/export"}},
 		{ID: "command:timeline", Label: "/timeline", Description: "structured run timeline (collapsed view or JSON export)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/timeline"}},
+		{ID: "command:diag", Label: "/diag", Description: "export prompt/config diagnostic bundle (JSON)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/diag"}},
+		{ID: "command:diagnostic", Label: "/diagnostic", Description: "alias of /diag", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/diagnostic"}},
 		{ID: "command:copy", Label: "/copy", Description: "copy the last assistant response to the clipboard", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/copy"}},
 		{ID: "command:help", Label: "/help", Description: "show available commands", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/help"}},
 		{ID: "command:keys", Label: "/keys", Description: "show keyboard shortcuts", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/keys"}},
@@ -161,6 +163,8 @@ func TestPaletteAvailabilityAndDisabledSelection(t *testing.T) {
 		assertPaletteInvoke(t, m, "/export", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/export"}})
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
 		assertPaletteInvoke(t, m, "/timeline", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/timeline"}})
+		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
+		assertPaletteInvoke(t, m, "/diag", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/diag"}})
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
 		assertPaletteInvoke(t, m, "/copy", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/copy"}})
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})

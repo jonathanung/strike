@@ -24,9 +24,11 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 			protocol.ChildStarted, protocol.ChildCompleted,
 			// Parent re-emits child peer mail + nested roster with child
 			// correlation; keep them for team UI (issue #614).
-			protocol.AgentMessage, protocol.TeamRoster,
+			protocol.AgentMessage, protocol.AgentContractTimeout, protocol.TeamRoster,
 			// Queue lifecycle for children: show constrained pool, not idle.
-			protocol.SchedulerQueued, protocol.SchedulerAdmitted, protocol.SchedulerCanceled:
+			protocol.SchedulerQueued, protocol.SchedulerAdmitted, protocol.SchedulerCanceled,
+			// Diagnostic bundle inspect may target a child session (rpc /diag).
+			protocol.DiagnosticBundle:
 		default:
 			return nil
 		}
@@ -244,6 +246,8 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		} else {
 			m.cells = append(m.cells, &infoCell{text: formatEffectivePrompt(ev)})
 		}
+	case protocol.DiagnosticBundle:
+		cmd = m.applyDiagnosticBundle(ev)
 	case protocol.CompactionCompleted:
 		strategy := ev.Strategy
 		if strategy == "" {
@@ -301,6 +305,23 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		cmd = m.broadcastAgentsState()
 	case protocol.AgentMessage:
 		m.onAgentMessage(ev)
+	case protocol.AgentContractTimeout:
+		// Surface timeout on the same activity ring as peer mail (minimal).
+		m.onAgentMessage(protocol.AgentMessage{
+			Correlation: ev.Correlation,
+			From:        ev.From,
+			To:          ev.To,
+			Body:        ev.Detail,
+			Summary:     "ack timeout",
+			TeamID:      ev.TeamID,
+			MessageID:   "timeout-" + ev.MessageID,
+			TaskID:      ev.TaskID,
+			Urgency:     ev.Urgency,
+			Kind:        protocol.AgentMessageKindTimeout,
+			InReplyTo:   ev.MessageID,
+			EscalateTo:  ev.EscalateTo,
+			AckStatus:   "timed_out",
+		})
 	case protocol.SchedulerQueued:
 		m.onSchedulerQueued(ev)
 		cmd = m.broadcastAgentsState()
@@ -559,6 +580,8 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 		return e.Correlation, true
 	case protocol.EffectivePrompt:
 		return e.Correlation, true
+	case protocol.DiagnosticBundle:
+		return e.Correlation, true
 	case protocol.EngineError:
 		return e.Correlation, true
 	case protocol.ChildStarted:
@@ -570,6 +593,8 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	case protocol.WaitResolved:
 		return e.Correlation, true
 	case protocol.AgentMessage:
+		return e.Correlation, true
+	case protocol.AgentContractTimeout:
 		return e.Correlation, true
 	case protocol.TeamRoster:
 		return e.Correlation, true

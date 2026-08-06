@@ -138,6 +138,28 @@ func TestPathOwnershipOffPolicySilent(t *testing.T) {
 	}
 }
 
+func TestPathOwnershipPathsForSession(t *testing.T) {
+	o := NewPathOwnership(OverlapWarn)
+	o.Touch("s1", "alice", "/proj/a.go", "a.go")
+	o.Touch("s1", "alice", "/proj/b.go", "b.go")
+	o.Touch("s2", "bob", "/proj/c.go", "c.go")
+	o.AcquireLease("s1", "alice", "/proj/pkg", "pkg", false)
+	got := o.PathsForSession("s1")
+	if len(got) != 3 {
+		t.Fatalf("paths=%v want 3", got)
+	}
+	// Sorted absolute paths.
+	want := []string{"/proj/a.go", "/proj/b.go", "/proj/pkg"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got[%d]=%q want %q (full %v)", i, got[i], want[i], got)
+		}
+	}
+	if n := o.PathsForSession("missing"); len(n) != 0 {
+		t.Fatalf("missing session: %v", n)
+	}
+}
+
 func TestPathOwnershipDeactivateStopsOverlap(t *testing.T) {
 	o := NewPathOwnership(OverlapWarn)
 	o.Touch("s1", "alice", "/proj/a.go", "a.go")

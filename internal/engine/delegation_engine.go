@@ -174,6 +174,7 @@ func (e *Engine) createDelegationForTask(req tool.TaskRequest) (Delegation, bool
 		return Delegation{}, true, nil // no team → spawn without tracking
 	}
 	owner := strings.TrimSpace(e.opts.SessionID)
+	budget := MergeAgentBudget(e.opts.DefaultChildBudget, req.Budget)
 	item, err := e.team.CreateDelegation(CreateDelegationSpec{
 		Prompt:         req.Prompt,
 		Criteria:       req.Criteria,
@@ -186,6 +187,7 @@ func (e *Engine) createDelegationForTask(req tool.TaskRequest) (Delegation, bool
 		Effort:         req.Effort,
 		Name:           req.Name,
 		Verify:         req.Verify,
+		Budget:         budget,
 	})
 	if err != nil {
 		return Delegation{}, false, err

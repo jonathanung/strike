@@ -112,6 +112,8 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 		e.handleCompact(ctx, op)
 	case protocol.InspectEffectivePrompt:
 		e.handleInspectEffectivePrompt()
+	case protocol.InspectDiagnosticBundle:
+		e.handleInspectDiagnosticBundle()
 	case protocol.Rewind:
 		e.handleRewind(op)
 	}
@@ -129,6 +131,13 @@ func (e *Engine) handleInspectEffectivePrompt() {
 		FromLastStream: snap.FromLastStream,
 		Attribution:    snap.Attribution,
 	})
+}
+
+// handleInspectDiagnosticBundle emits a versioned prompt/config diagnostic
+// bundle (layer map + effective dials + digests). Solo and child engines both
+// answer with their own session lineage.
+func (e *Engine) handleInspectDiagnosticBundle() {
+	e.emit(e.buildDiagnosticBundleEvent())
 }
 
 // handleFilesChanged invalidates read snapshots for the reported paths and
