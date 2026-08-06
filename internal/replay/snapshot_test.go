@@ -162,12 +162,14 @@ func TestCompleteRunSnapshotHandoffAndRecording(t *testing.T) {
 			},
 		},
 	}
+	// Real child JSONL stamps ParentSessionID/Depth — recording must still extract tools.
+	childCorr := protocol.Correlation{SessionID: "c", ParentSessionID: "p", Depth: 1, TurnID: "t1"}
 	childEvs := []protocol.Event{
-		protocol.ModelSelected{Correlation: protocol.Correlation{SessionID: "c"}, Provider: "echo", Model: "echo"},
-		protocol.UserMessage{Correlation: protocol.Correlation{SessionID: "c", TurnID: "t1"}, Text: "do work"},
-		protocol.ToolCallBegin{Correlation: protocol.Correlation{SessionID: "c", TurnID: "t1"}, CallID: "x", Name: "bash", Args: json.RawMessage(`{"command":"echo hi"}`)},
-		protocol.ToolCallEnd{Correlation: protocol.Correlation{SessionID: "c", TurnID: "t1"}, CallID: "x", Title: "bash", Output: "hi\n"},
-		protocol.TurnCompleted{Correlation: protocol.Correlation{SessionID: "c", TurnID: "t1"}, StopReason: "end_turn"},
+		protocol.ModelSelected{Correlation: protocol.Correlation{SessionID: "c", ParentSessionID: "p", Depth: 1}, Provider: "echo", Model: "echo"},
+		protocol.UserMessage{Correlation: childCorr, Text: "do work"},
+		protocol.ToolCallBegin{Correlation: childCorr, CallID: "x", Name: "bash", Args: json.RawMessage(`{"command":"echo hi"}`)},
+		protocol.ToolCallEnd{Correlation: childCorr, CallID: "x", Title: "bash", Output: "hi\n"},
+		protocol.TurnCompleted{Correlation: childCorr, StopReason: "end_turn"},
 	}
 
 	done := replay.CompleteRunSnapshot(start, completed, childEvs, replay.SnapshotOptions{Clock: fixedClock(fixed)})
@@ -184,7 +186,13 @@ func TestCompleteRunSnapshotHandoffAndRecording(t *testing.T) {
 		t.Fatalf("verification = %+v", done.Verification)
 	}
 	if done.Recording == nil || len(done.Recording.ToolCalls) != 1 {
-		t.Fatalf("recording = %+v", done.Recording)
+		t.Fatalf("recording tools empty (child lineage not promoted?): %+v", done.Recording)
+	}
+	if done.Recording.ToolCalls[0].Name != "bash" {
+		t.Fatalf("tool = %+v", done.Recording.ToolCalls)
+	}
+	if len(done.Recording.UserInputs) != 1 || done.Recording.UserInputs[0] != "do work" {
+		t.Fatalf("inputs = %v", done.Recording.UserInputs)
 	}
 	if done.Settings.Provider != "echo" {
 		t.Fatalf("settings merged = %+v", done.Settings)

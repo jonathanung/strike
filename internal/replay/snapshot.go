@@ -228,12 +228,13 @@ func CompleteRunSnapshot(start RunSnapshot, completed protocol.ChildCompleted, c
 	if len(vs) > 0 {
 		v := vs[0]
 		out.Verification = &v
-	} else if completed.Verification != nil {
-		// extract only when ChildCompleted has Verification; already handled.
 	}
 
 	if len(childEvents) > 0 {
-		rec := BuildRecording(childEvents, RecordingOptions{
+		// Child session JSONL stamps ParentSessionID/Depth; BuildRecording's
+		// extractors only keep root correlation. Promote so tools/settings
+		// extract from a real child log.
+		rec := BuildRecording(promoteChildLogToRoot(childEvents), RecordingOptions{
 			SessionID:       out.ChildSessionID,
 			ParentSessionID: out.ParentSessionID,
 			DelegationID:    out.DelegationID,
@@ -765,4 +766,41 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// promoteChildLogToRoot clears ParentSessionID/Depth on events so BuildRecording
+// extractors (root-only) work on a child session JSONL. SessionID is preserved.
+// Events that fail wrap/decode are kept unchanged.
+func promoteChildLogToRoot(events []protocol.Event) []protocol.Event {
+	if len(events) == 0 {
+		return nil
+	}
+	out := make([]protocol.Event, 0, len(events))
+	for _, ev := range events {
+		env, err := protocol.Wrap(ev)
+		if err != nil {
+			out = append(out, ev)
+			continue
+		}
+		var m map[string]json.RawMessage
+		if err := json.Unmarshal(env.Data, &m); err != nil {
+			out = append(out, ev)
+			continue
+		}
+		delete(m, "parentSessionId")
+		delete(m, "depth")
+		raw, err := json.Marshal(m)
+		if err != nil {
+			out = append(out, ev)
+			continue
+		}
+		env.Data = raw
+		promoted, err := env.Decode()
+		if err != nil {
+			out = append(out, ev)
+			continue
+		}
+		out = append(out, promoted)
+	}
+	return out
 }

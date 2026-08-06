@@ -110,10 +110,11 @@ func CompareRunSnapshots(want, got RunSnapshot, opts CompareOptions) CompareRepo
 		addDiv(path, "verification/gate mismatch", d.Want, d.Got)
 	}
 
-	// Embedded recordings (tool sequence etc.)
-	if want.Recording != nil || got.Recording != nil {
-		wr := RecordingFromSnapshot(want)
-		gr := RecordingFromSnapshot(got)
+	// Embedded recordings (tool sequence etc.). Only when both sides captured a
+	// child Recording — synthetic completion-only sides would false-diverge on tools.
+	if want.Recording != nil && got.Recording != nil {
+		wr := *want.Recording
+		gr := *got.Recording
 		sub := CompareRecordings(wr, gr, opts)
 		// Merge tool sequence / recording-level divergences; skip fields already
 		// covered at snapshot level (exit, handoff, gates, settings).
