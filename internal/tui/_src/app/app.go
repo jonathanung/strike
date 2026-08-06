@@ -883,6 +883,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.apply.hasNotify {
 			m.notifyMode = msg.apply.notifyMode
 		}
+		if msg.apply.hasAutoApproveSecs {
+			m.permissionAutoApproveSeconds = msg.apply.autoApproveSecs
+		}
+		if msg.apply.hasAutoApproveExclude {
+			m.permissionAutoApproveExclude = append([]string(nil), msg.apply.autoApproveExclude...)
+		}
 		label := msg.label
 		if label == "" {
 			label = msg.value
