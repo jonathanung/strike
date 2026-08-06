@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -308,6 +309,7 @@ func TestHarnessHelperProcess(t *testing.T) {
 	if mode == "" {
 		return
 	}
+	bumpStartCount()
 	if mode == "go-sdk" {
 		err := gosdk.Run(func(input gosdk.Input, p gosdk.Provider, emit gosdk.Emit) (gosdk.Result, error) {
 			response, err := p.Call(input.Request)
@@ -344,6 +346,41 @@ func TestHarnessHelperProcess(t *testing.T) {
 		if err != nil {
 			os.Exit(2)
 		}
+		return
+	}
+	if mode == "go-sdk-worker" {
+		err := gosdk.RunWorker(func(input gosdk.Input, p gosdk.Provider, _ gosdk.Emit) (gosdk.Result, error) {
+			response, err := p.Call(input.Request)
+			if err != nil {
+				return gosdk.Result{}, err
+			}
+			return gosdk.Result{Text: response.Text, StopReason: response.StopReason}, nil
+		})
+		if err != nil {
+			os.Exit(2)
+		}
+		return
+	}
+	if mode == "count-start" {
+		// Oneshot-compatible: no harness.ready prologue.
+		scanner := bufio.NewScanner(os.Stdin)
+		if !scanner.Scan() {
+			os.Exit(2)
+		}
+		var start struct {
+			InvocationID string `json:"invocationId"`
+			Request      *struct {
+				Model string `json:"model"`
+			} `json:"request"`
+		}
+		if json.Unmarshal(scanner.Bytes(), &start) != nil || start.InvocationID == "" || start.Request == nil {
+			os.Exit(2)
+		}
+		fmt.Printf(`{"version":1,"type":"harness.complete","invocationId":%q,"text":%q,"stopReason":"end_turn"}`+"\n", start.InvocationID, start.Request.Model)
+		return
+	}
+	if mode == "persistent-echo" || mode == "persistent-block" || mode == "persistent-crash" {
+		runPersistentHelper(mode)
 		return
 	}
 	scanner := bufio.NewScanner(os.Stdin)
@@ -440,6 +477,103 @@ func TestHarnessHelperProcess(t *testing.T) {
 				fmt.Printf(`{"version":1,"type":"harness.complete","invocationId":%q,"text":"final","stopReason":"end_turn"}`+"\n", start.InvocationID)
 				return
 			}
+		}
+	}
+}
+
+func bumpStartCount() {
+	path := os.Getenv("GO_HARNESS_START_COUNT_FILE")
+	if path == "" {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	_, _ = f.WriteString("1\n")
+	_ = f.Close()
+}
+
+func runPersistentHelper(mode string) {
+	fmt.Printf(`{"version":1,"type":"harness.ready"}` + "\n")
+	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Buffer(make([]byte, 64*1024), 1<<20)
+	type invState struct {
+		cancel chan struct{}
+	}
+	var mu sync.Mutex
+	active := map[string]*invState{}
+	for scanner.Scan() {
+		var m struct {
+			Type         string `json:"type"`
+			InvocationID string `json:"invocationId"`
+			Reason       string `json:"reason"`
+			Request      *struct {
+				Model  string `json:"model"`
+				System string `json:"system"`
+			} `json:"request"`
+		}
+		if json.Unmarshal(scanner.Bytes(), &m) != nil {
+			os.Exit(2)
+		}
+		switch m.Type {
+		case "harness.shutdown":
+			return
+		case "harness.cancel":
+			mu.Lock()
+			st := active[m.InvocationID]
+			if st != nil {
+				select {
+				case <-st.cancel:
+				default:
+					close(st.cancel)
+				}
+				delete(active, m.InvocationID)
+			}
+			mu.Unlock()
+			// Best-effort error so host unblocks without killing when we cooperate.
+			fmt.Printf(`{"version":1,"type":"harness.error","invocationId":%q,"code":"canceled","error":%q}`+"\n", m.InvocationID, m.Reason)
+		case "harness.start":
+			if m.InvocationID == "" || m.Request == nil {
+				os.Exit(2)
+			}
+			if mode == "persistent-crash" {
+				os.Exit(3)
+			}
+			st := &invState{cancel: make(chan struct{})}
+			mu.Lock()
+			active[m.InvocationID] = st
+			mu.Unlock()
+			id := m.InvocationID
+			model := m.Request.Model
+			system := m.Request.System
+			go func() {
+				defer func() {
+					mu.Lock()
+					delete(active, id)
+					mu.Unlock()
+				}()
+				if mode == "persistent-block" && system != "quick" {
+					select {
+					case <-st.cancel:
+						return
+					case <-time.After(time.Hour):
+					}
+				}
+				if system == "slow" {
+					select {
+					case <-st.cancel:
+						return
+					case <-time.After(50 * time.Millisecond):
+					}
+				}
+				select {
+				case <-st.cancel:
+					return
+				default:
+					fmt.Printf(`{"version":1,"type":"harness.complete","invocationId":%q,"text":%q,"stopReason":"end_turn"}`+"\n", id, model)
+				}
+			}()
 		}
 	}
 }

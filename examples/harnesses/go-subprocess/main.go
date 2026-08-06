@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 
@@ -33,7 +34,15 @@ func chooseBest(input strikeharness.Input, provider strikeharness.Provider, emit
 }
 
 func main() {
-	if err := strikeharness.Run(chooseBest); err != nil {
+	persistent := flag.Bool("persistent", false, "serve multiple invocations (Strike mode: persistent)")
+	flag.Parse()
+	var err error
+	if *persistent {
+		err = strikeharness.RunWorker(chooseBest)
+	} else {
+		err = strikeharness.Run(chooseBest)
+	}
+	if err != nil {
 		log.Fatal(err)
 	}
 }

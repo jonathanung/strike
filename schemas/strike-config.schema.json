@@ -65,6 +65,11 @@
       "description": "Desktop notifications (OSC 9 + bell). Empty means unfocused-only.",
       "enum": ["on", "off", "unfocused-only"]
     },
+    "autoupdate": {
+      "type": "string",
+      "description": "Startup GitHub Releases check. Empty means notify. auto is opt-in binary replace when writable; never the default.",
+      "enum": ["off", "notify", "auto"]
+    },
     "permissionAutoApproveSeconds": {
       "type": "integer",
       "description": "Auto-allow permission asks after N seconds (1–60). Zero disables.",
@@ -495,6 +500,24 @@
         "env": {
           "type": "object",
           "additionalProperties": { "type": "string" }
+        },
+        "mode": {
+          "type": "string",
+          "description": "Process lifecycle: oneshot (default) or persistent worker reuse.",
+          "enum": ["oneshot", "persistent", "worker"]
+        },
+        "maxConcurrent": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Max in-flight invocations on one persistent worker (default 1)."
+        },
+        "idleTimeoutMs": {
+          "type": "integer",
+          "description": "Idle shutdown for persistent workers in ms (default 60000; negative disables)."
+        },
+        "maxRestarts": {
+          "type": "integer",
+          "description": "Crash recovery budget for persistent workers (default 3; negative unlimited)."
         }
       }
     },

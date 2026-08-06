@@ -53,4 +53,9 @@ export type Harness = (
   emit: Emit,
 ) => Promise<HarnessResult>;
 
-export function runHarness(harness: Harness): void;
+export interface RunHarnessOptions {
+  /** Serve multiple harness.start messages until EOF or harness.shutdown. */
+  persistent?: boolean;
+}
+
+export function runHarness(harness: Harness, options?: RunHarnessOptions): void;

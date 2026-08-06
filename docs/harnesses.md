@@ -21,8 +21,10 @@ to construct one:
 Go, JavaScript, and Lean can all use the external-process mode through
 `sdk/go/harness`, `sdk/typescript`, and `sdk/lean`. These SDKs only help build a
 compatible program; they do not add language-specific linkage to Strike. The
-stock CLI reads configured commands in `cmd/strike`, starts one process per
-invocation, and communicates through the language-neutral protocol.
+stock CLI reads configured commands in `cmd/strike`, starts a process per
+invocation by default (oneshot), and communicates through the language-neutral
+protocol. Config may opt a harness into **persistent-worker** mode so one
+process serves multiple invocations.
 
 An embedded Go harness is available only in binaries whose source explicitly
 imports and registers that function. Go harnesses are not discovered from the
@@ -162,13 +164,33 @@ JSON configuration is for subprocess harnesses. Define their commands in
     "choose-best-lean": {
       "command": "lake",
       "args": ["--dir", "./examples/harnesses", "exe", "choose_best_lean"]
+    },
+    "heavy-runtime": {
+      "command": "./bin/my-harness-worker",
+      "mode": "persistent",
+      "maxConcurrent": 2,
+      "idleTimeoutMs": 120000,
+      "maxRestarts": 3
     }
   }
 }
 ```
 
+| Field | Default | Meaning |
+|---|---|---|
+| `command` / `args` / `env` | required command | Subprocess argv and env overlay |
+| `mode` | `oneshot` | `oneshot` = new process per invocation; `persistent` = reuse one worker |
+| `maxConcurrent` | `1` | Max in-flight invocations on one persistent worker |
+| `idleTimeoutMs` | `60000` | Shut down idle persistent workers; negative disables eviction |
+| `maxRestarts` | `3` | Crash/start recoveries before the worker is disabled for the process; negative = unlimited |
+
 Global and project definitions merge by name. A project definition replaces a
 global definition with the same name.
+
+Persistent workers still run the configured command with the same trust model
+as oneshot harnesses (trusted native executables; no OS sandbox). Tool
+execution continues through Strike's registry, permissions, hooks, sandbox,
+scheduler, and redaction — the worker only brokers `tool.execute` / `provider.call`.
 
 Select the external harness in frontmatter for an agent intended to run through
 `task`:
@@ -222,24 +244,53 @@ Harness functions should use `runHarness` rather than producing these messages.
 
 ### Process model
 
-Strike starts one harness process per invocation. Messages are single-line JSON
-objects with `version: 1`, a `type`, and the active `invocationId`. Harness stdout is
+**Oneshot (default):** Strike starts one harness process per invocation and
+tears it down after `harness.complete`, `harness.error`, or cancel.
+
+**Persistent (`mode: "persistent"`):** Strike keeps one worker process per
+configured harness name. Each invocation still gets a unique `invocationId`.
+The host multiplexes messages by `invocationId` and advertises `persistent` in
+`harness.start` capabilities. Workers must loop on `harness.start` (Go:
+`RunWorker`; TypeScript: `runHarness(fn, { persistent: true })`) instead of
+exiting after one completion.
+
+Messages are single-line JSON objects with `version: 1`, a `type`, and (for
+invocation-scoped messages) the active `invocationId`. Harness stdout is
 reserved for protocol messages; diagnostics should use stderr.
 
 Strike serializes writes to the process. A harness may issue multiple
 `provider.call` and `tool.execute` requests concurrently by assigning each a
-unique `callId` (shared ID space). Provider calls are speculative: their output
+unique `callId` (shared ID space per invocation). Provider calls are speculative: their output
 does not enter Strike's conversation history. Tool results are returned only to
 the harness; begin/end events still appear on the session timeline. Only the
 response supplied by `harness.complete` becomes the final assistant message.
 
-Strike rejects malformed messages, unsupported versions, duplicate request
-IDs, lines over 1 MiB, and aggregate output over 16 MiB. These are reliability
-limits, not security boundaries.
+**Cancellation (persistent):** `harness.cancel` targets one `invocationId`.
+Other in-flight invocations keep running. If the worker does not finish that
+invocation within the cancel grace period, Strike kills the whole worker and
+fails remaining invocations (then may restart per policy).
 
-The external ABI is versioned additively under `version: 1`. Older harnesses
-that only use `provider.call` remain compatible; hosts advertise
-`tool.execute` in `harness.start` capabilities when available.
+**Crash recovery:** A dead or protocol-violating worker fails in-flight
+invocations. The next invoke may start a fresh process until `maxRestarts` is
+exceeded, after which the harness is disabled for the Strike process lifetime.
+
+**Idle eviction:** When no invocations are active, Strike sends
+`harness.shutdown` after `idleTimeoutMs` and closes the process. The next
+invoke starts a new worker. Session teardown also shuts workers down.
+
+**Readiness / health:** Process start success is the readiness gate. Workers
+may optionally emit `harness.ready` after boot. Health is observed via I/O and
+process exit; there is no separate ping RPC in v1.
+
+Strike rejects malformed messages, unsupported versions, unknown
+`invocationId`s (persistent), duplicate request IDs, lines over 1 MiB, and
+aggregate output over 16 MiB. These are reliability limits, not security
+boundaries.
+
+The external ABI is versioned additively under `version: 1`. Older oneshot
+harnesses that only use `provider.call` remain compatible; hosts advertise
+`tool.execute` (and `persistent` when applicable) in `harness.start`
+capabilities.
 
 ### Messages
 
@@ -264,13 +315,35 @@ Strike sends the initial request and active selection:
 	  "provider.call",
 	  "tool.execute",
 	  "progress.emit",
-	  "harness.cancel"
+	  "harness.cancel",
+	  "persistent"
   ]
 }
 ```
 
-The request contains normalized provider messages and the currently available
-Strike tool schemas. Strike retains provider selection and authentication.
+The `persistent` capability is present only when the host is running this
+harness in persistent-worker mode. The request contains normalized provider
+messages and the currently available Strike tool schemas. Strike retains
+provider selection and authentication.
+
+#### `harness.ready` (optional, worker → host)
+
+A persistent worker may emit readiness after process start:
+
+```json
+{"version":1,"type":"harness.ready"}
+```
+
+#### `harness.shutdown` (host → worker)
+
+Strike asks a persistent worker to exit cleanly (idle eviction or session end):
+
+```json
+{"version":1,"type":"harness.shutdown"}
+```
+
+The worker should cancel in-flight work and exit. Strike kills an unresponsive
+process after a short grace period.
 
 #### `provider.call`
 
