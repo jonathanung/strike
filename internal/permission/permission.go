@@ -43,7 +43,7 @@ var knownPermissions = map[string]struct{}{
 	"bash": {}, "task": {}, "task_status": {}, "task_read": {}, "task_message": {},
 	"task_interrupt": {}, "wait": {}, "agent_roster": {}, "agent_ownership": {},
 	"agent_message": {}, "agent_broadcast": {}, "agent_thread": {},
-	"team_task": {}, "delegate": {},
+	"team_task": {}, "patch_collab": {}, "delegate": {},
 	"webfetch": {}, "todowrite": {}, "todoread": {},
 	"memory_write": {}, "memory_read": {}, "issue_write": {}, "issue_read": {},
 	"plan_write": {}, "plan_read": {}, "plan_delegate": {},
@@ -120,6 +120,8 @@ func Defaults() Ruleset {
 		{Permission: "agent_thread", Pattern: "*", Action: Allow},
 		// Shared team board (claim/assign); transport is team-scoped in engine.
 		{Permission: "team_task", Pattern: "*", Action: Allow},
+		// Patch-level collaboration (submit/preview/reject); apply uses edit.
+		{Permission: "patch_collab", Pattern: "*", Action: Allow},
 		// First-class delegation lifecycle (create/get/list/transition).
 		{Permission: "delegate", Pattern: "*", Action: Allow},
 		{Permission: "webfetch", Pattern: "*", Action: Ask},

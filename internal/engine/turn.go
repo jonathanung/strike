@@ -924,6 +924,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			tc.AgentBroadcast = e.agentBroadcast
 			tc.AgentThread = e.agentThread
 			tc.TeamTask = e.teamTask
+			tc.PatchCollab = e.patchCollab
 			tc.Delegate = e.delegate
 			tc.Ownership = e.team.Ownership()
 			tc.OnOverlap = e.emitPathOverlap
