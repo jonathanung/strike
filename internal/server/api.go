@@ -93,8 +93,10 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		c.Sessions = h.Sessions != nil
 		// Workflow authoring is exposed via /v1/workflows* and /v1/workflow-drafts*.
 		c.Workflows, c.WorkflowDrafts = h.Workflows != nil, h.WorkflowDrafts != nil
+		// MCP status/control is exposed via /v1/mcp*.
+		c.MCP = h.MCP != nil
 		// Capabilities describe browser surfaces, not merely host interfaces.
-		// Roots, custom providers, project init, MCP, and telemetry remain false
+		// Roots, custom providers, project init, and telemetry remain false
 		// until this server exposes their service operations.
 		for _, skill := range h.Skills {
 			skills = append(skills, map[string]any{"name": skill.Name, "description": skill.Description})

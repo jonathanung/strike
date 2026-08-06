@@ -176,6 +176,7 @@ describe("App", () => {
     expect(screen.queryByRole("tab", { name: "issues" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "plans" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "workflows" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "mcp" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "activity" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "project" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "capabilities" })).not.toBeInTheDocument();
@@ -214,6 +215,7 @@ describe("App", () => {
     expect(await screen.findByText("No project issues.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "workflows" }));
     expect(await screen.findByText("No workflows loaded.")).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "mcp" })).not.toBeInTheDocument();
   });
 
   it("uses historical SSE in attach-only mode", async () => {
@@ -508,4 +510,6 @@ describe("App", () => {
     const newCalls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.slice(callsBefore);
     expect(newCalls.some((c) => String(c[1]?.body || "").includes("rewind"))).toBe(false);
   });
+
+
 });
