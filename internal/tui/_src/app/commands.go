@@ -50,6 +50,7 @@ const (
 	commandMemory          commandID = "memory"
 	commandQueue           commandID = "queue"
 	commandIssues          commandID = "issues"
+	commandPlan            commandID = "plan"
 	commandGoal            commandID = "goal"
 	commandLoop            commandID = "loop"
 	commandContext         commandID = "context"
@@ -153,6 +154,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandMemory, Name: "/memory", Description: "list, get, set, delete, export, or import project memory", ArgsHint: "[list|get|set|rm|export|import] ...", Source: commandSourceBuiltin},
 	{ID: commandQueue, Name: "/queue", Description: "browse and edit prompts queued while a turn runs", Source: commandSourceBuiltin},
 	{ID: commandIssues, Name: "/issues", Description: "list, add, get, close, export, or import project issues", ArgsHint: "[list|add|get|close|export|import] ...", Source: commandSourceBuiltin},
+	{ID: commandPlan, Name: "/plan", Description: "browse and edit root-owned structured plans", ArgsHint: "[list|create|get|approve|close|reopen] ...", Source: commandSourceBuiltin},
 	{ID: commandGoal, Name: "/goal", Description: "loop harness: set, run, status, pause, resume, abort, log, list", ArgsHint: "[set|run|status|pause|resume|abort|log|list] ...", Source: commandSourceBuiltin},
 	{ID: commandLoop, Name: "/loop", Description: "schedule a recurring LLM job (session-only)", ArgsHint: "[interval job|list|stop [id]]", Source: commandSourceBuiltin},
 	{ID: commandContext, Name: "/context", Description: "context doctor: system-prompt layer breakdown", Source: commandSourceBuiltin},
@@ -253,6 +255,7 @@ var reservedCommandNames = map[string]struct{}{
 	"session":          {},
 	"rename":           {},
 	"export":           {},
+	"timeline":         {},
 	"copy":             {},
 	"help":             {},
 	"keys":             {},
@@ -260,6 +263,7 @@ var reservedCommandNames = map[string]struct{}{
 	"memory":           {},
 	"queue":            {},
 	"issues":           {},
+	"plan":             {},
 	"goal":             {},
 	"loop":             {},
 	"context":          {},
