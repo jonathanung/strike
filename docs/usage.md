@@ -118,6 +118,7 @@ strike launches without any provider configured. Pick one inside the TUI:
                                # /init, feature tour, scheduler presets,
                                # first prompt (manual)
  /mcp                           # MCP status; retry/disable servers
+ /plugin                        # plugin manager (install, trust, update, remove)
  /lsp                           # language server status; retry/disable
  /diagnostics                   # focus the diagnostics right pane
 /exit                          # quit strike (same as ctrl+c)
@@ -175,6 +176,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/init` | light local scan → write `AGENTS.md`; confirms before overwrite |
 | `/ftue` | setup wizard composing provider connect, model pick, optional `/init`, a skippable feature tour (panes, agents, permissions, autonomy, keys, commands), optional scheduler build-system presets (checkbox catalog with rule/limit preview; apply writes global `scheduler.presets` atomically and preserves custom limits/rules), and first-prompt guidance; opening does not change settings; tour copy uses live keybinds and omits unavailable surfaces; Finish focuses the composer; esc dismisses. Finish/dismiss acknowledge global onboarding so auto-open does not repeat; manual `/ftue` stays available. Child pickers/tour/presets return to the same wizard step |
 | `/mcp` | MCP status (`up`/`down`/`error`/`disabled`); `/mcp retry [name]`, `/mcp disable <name>` (see [config.md](config.md#mcp-servers-stdio--http)) |
+| `/plugin` | TUI plugin manager: browse installed/remote plugins, inspect capabilities, install/update/enable/disable/remove/trust with confirmation (see [plugins.md](plugins.md)) |
 | `/lsp` | language server status; `/lsp retry [name]`, `/lsp disable <name>` (see [config.md](config.md#language-servers-lsp)) |
 | `/diagnostics` | focus the diagnostics right pane (live language-server findings) |
 

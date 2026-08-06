@@ -301,6 +301,8 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		return m.handleFTUECommand()
 	case "/mcp":
 		return m.handleMCPCommand(fields[1:])
+	case "/plugin":
+		return m.handlePluginCommand(fields[1:])
 	case "/lsp":
 		return m.handleLSPCommand(fields[1:])
 	case "/exit", "/quit":

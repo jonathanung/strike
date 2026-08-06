@@ -20,7 +20,8 @@ must not weaken these rules.
 | **Passive load (#726)** | Discovery + load of agents, skills, workflows, themes, and provider profiles from enabled local plugin trees. |
 | **Lifecycle CLI (#727)** | `strike plugin` install/list/inspect/enable/disable/remove/doctor for local + Git sources. |
 | **Catalog / updates (#729)** | Remote `catalog.json`, search, catalog install, outdated, update with review; digest verify + zip-slip guards. |
-| **Not implemented yet** | Executable activation (#728), TUI manager (#730). |
+| **TUI manager (#730)** | `/plugin` modal over `host.Plugins` (browse, install, trust, update, remove). |
+| **Not implemented yet** | Pane host (#731) / web parity (#732); theme packaging as contributions (#511). |
 | **Out of scope forever (v1 model)** | In-process Go `plugin` packages, OpenCode-style Node plugin hosts, arbitrary provider/auth/streaming adapters, silent executable startup from an untrusted bundle. |
 
 Related: [agents-skills.md](agents-skills.md), [config.md](config.md),
@@ -725,7 +726,7 @@ announces removal in CHANGELOG **Upgrade note**.
 | Local/Git CLI | #727 | §2, §6.1–6.2, enablement, doctor |
 | Executable activation | #728 (`trust`/`untrust`, `CompileExecutables`, assemble wiring) | §5, §7.6–7.8 |
 | Catalog / updates | #729 (`internal/plugin` catalog/archive + CLI) | §6.3–6.4, digest verify |
-| TUI manager | #730 | UX over enablement + trust |
+| TUI manager | #730 (`/plugin` modal + `host.Plugins`) | UX over enablement + trust |
 | Themes packaging | #511 | §7.4 |
 | Pane ABI | #522 | §7.9 + [plugin-panes.md](plugin-panes.md) |
 | Pane host / web | #731 #732 | implement [plugin-panes.md](plugin-panes.md); no TUI type leakage to web |
@@ -736,7 +737,6 @@ announces removal in CHANGELOG **Upgrade note**.
 
 - Automatic unattended updates (catalog update requires explicit `--yes`).
 - Paid marketplace infrastructure.
-- TUI plugin manager (#730).
 - A generic arbitrary-code plugin ABI or in-process extension mechanism.
 - Hot reload of plugin trees.
 - Replacing stock `mcp.jsonc` / config hooks / harnesses (plugins are additive

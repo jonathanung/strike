@@ -1,7 +1,7 @@
 // Package host defines the services a strike frontend needs from its host
 // process, beyond the engine protocol: credentials, model catalog, saved
 // defaults, prompt history, project memory/issues/plans, workflow catalog,
-// local telemetry, and static agent/skill listings. Contract only:
+// plugin lifecycle, local telemetry, and static agent/skill listings. Contract only:
 // this package imports nothing outside the standard library so frontends
 // can be developed and tested against fakes. Implementations live in
 // internal/host/local.
@@ -852,6 +852,7 @@ type Services struct {
 	Init       ProjectInit
 	MCP        MCP       // external MCP server status; nil when unsupported
 	LSP        LSP       // language server status + diagnostics; nil when unsupported
+	Plugins    Plugins   // plugin lifecycle manager; nil when unsupported
 	Telemetry  Telemetry // local CPU/RAM/disk; nil when unsupported
 	// SchedulerPresets is the shipped build-system preset catalog and global
 	// apply surface (FTUE #705).

@@ -64,6 +64,7 @@ const (
 	commandInit            commandID = "init"
 	commandFTUE            commandID = "ftue"
 	commandMCP             commandID = "mcp"
+	commandPlugin          commandID = "plugin"
 	commandLSP             commandID = "lsp"
 	commandDiagnostics     commandID = "diagnostics"
 	commandExit            commandID = "exit"
@@ -172,6 +173,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandInit, Name: "/init", Description: "create or update project AGENTS.md", Source: commandSourceBuiltin},
 	{ID: commandFTUE, Name: "/ftue", Description: "setup wizard: provider, model, optional init, feature tour, scheduler presets, first prompt", Source: commandSourceBuiltin},
 	{ID: commandMCP, Name: "/mcp", Description: "MCP servers: status, retry, disable", ArgsHint: "[retry [name]|disable <name>]", Source: commandSourceBuiltin},
+	{ID: commandPlugin, Name: "/plugin", Description: "plugin manager: browse, install, trust, update, remove", Source: commandSourceBuiltin},
 	{ID: commandLSP, Name: "/lsp", Description: "language servers: status, retry, disable", ArgsHint: "[retry [name]|disable <name>]", Source: commandSourceBuiltin},
 	{ID: commandDiagnostics, Name: "/diagnostics", Description: "focus the diagnostics right pane", Source: commandSourceBuiltin},
 	{ID: commandExit, Name: "/exit", Description: "quit strike", Source: commandSourceBuiltin},
@@ -285,6 +287,7 @@ var reservedCommandNames = map[string]struct{}{
 	"init":             {},
 	"ftue":             {},
 	"mcp":              {},
+	"plugin":           {},
 	"lsp":              {},
 	"diagnostics":      {},
 	"exit":             {},

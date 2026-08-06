@@ -960,6 +960,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case pluginOpDoneMsg, pluginTrustPreviewMsg, pluginUpdatePreviewMsg, pluginCatalogMsg, pluginOutdatedMsg:
+		if pm, ok := m.modal.(*pluginModal); ok {
+			cmd := pm.applyMsg(msg)
+			m.reflow()
+			return m, cmd
+		}
+		return m, nil
+
 	case effortChoicesLoadedMsg:
 		if msg.modal != nil {
 			m.modal = msg.modal
