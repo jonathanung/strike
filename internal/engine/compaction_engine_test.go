@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/engine"
+	"github.com/jonathanung/strike-cli/internal/ledger"
+	"github.com/jonathanung/strike-cli/internal/memory"
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
@@ -742,6 +744,250 @@ func TestOverflowWithoutCompactableHistoryFailsOnce(t *testing.T) {
 	}
 	if prov.callCount() != 1 {
 		t.Fatalf("Stream calls = %d, want 1 (no retry loop)", prov.callCount())
+	}
+}
+
+func TestCompactEmitsResidueWithMarkedDecisionAndPins(t *testing.T) {
+	dir := t.TempDir()
+	store, err := ledger.Open(dir, "proj-residue")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	if _, err := store.Append(ledger.AppendInput{
+		Kind:          ledger.KindDecision,
+		Statement:     "prefer structured residue over free-text-only compact markers",
+		Confidence:    ledger.ConfidenceHigh,
+		AuthorSession: "session-residue",
+		AuthorRoot:    "session-residue",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	mem := openTestMemory(t)
+	if err := mem.Put("pref.pin", "PINNED_MEMORY_MARKER", []string{memory.TagPreference}); err != nil {
+		t.Fatal(err)
+	}
+
+	prov := newScriptedProvider(
+		streamStep{events: []provider.StreamEvent{
+			{Type: provider.EventTextDelta, Text: "DECISION: keep source ids on every residual item"},
+			{Type: provider.EventDone, StopReason: "end_turn", Usage: &provider.Usage{InputTokens: 100, OutputTokens: 10}},
+		}},
+		streamStep{events: []provider.StreamEvent{
+			{Type: provider.EventTextDelta, Text: "r2"},
+			{Type: provider.EventDone, StopReason: "end_turn", Usage: &provider.Usage{InputTokens: 200, OutputTokens: 10}},
+		}},
+		streamStep{events: []provider.StreamEvent{
+			{Type: provider.EventTextDelta, Text: "r3"},
+			{Type: provider.EventDone, StopReason: "end_turn"},
+		}},
+	)
+	eng := engine.New(engine.Options{
+		SessionID:       "session-residue",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+		KeepUserTurns:   1,
+		Ledger:          store,
+		Memory:          mem,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.SetContextControls{
+		PinKinds: []string{protocol.PromptLayerMemory},
+		SetPin:   true,
+	}
+	// Drain controls event.
+	deadline := time.After(2 * time.Second)
+drainControls:
+	for {
+		select {
+		case ev := <-eng.Events():
+			if _, ok := ev.(protocol.ContextControlsSelected); ok {
+				break drainControls
+			}
+		case <-deadline:
+			t.Fatal("timeout waiting for context controls")
+		}
+	}
+
+	eng.Ops() <- protocol.UserInput{Text: "first\nFACT: residue schema is versioned"}
+	waitCompactTurn(t, eng)
+	eng.Ops() <- protocol.UserInput{Text: "second"}
+	waitCompactTurn(t, eng)
+
+	eng.Ops() <- protocol.Compact{}
+	var completed protocol.CompactionCompleted
+	deadline = time.After(3 * time.Second)
+	for completed.Reason == "" {
+		select {
+		case ev := <-eng.Events():
+			switch ev := ev.(type) {
+			case protocol.CompactionCompleted:
+				completed = ev
+			case protocol.EngineError:
+				t.Fatalf("unexpected EngineError: %s", ev.Message)
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for compaction")
+		}
+	}
+	if completed.Residue == nil {
+		t.Fatal("expected residue on CompactionCompleted")
+	}
+	res := completed.Residue
+	if res.SchemaVersion != protocol.CompactionResidueSchemaVersion {
+		t.Fatalf("schema = %q", res.SchemaVersion)
+	}
+	// Ledger decision must not be silently discarded.
+	foundLedger := false
+	for _, d := range res.Decisions {
+		if strings.Contains(d.Text, "structured residue") {
+			foundLedger = true
+			if d.LedgerID == "" || !stringSliceContains(d.SourceIDs, "ledger:"+d.LedgerID) {
+				t.Fatalf("ledger decision missing provenance: %#v", d)
+			}
+		}
+		if strings.Contains(d.Text, "source ids") {
+			if !stringSliceContains(d.SourceIDs, "hist:1") && len(d.SourceIDs) == 0 {
+				t.Fatalf("marked decision missing source ids: %#v", d)
+			}
+		}
+	}
+	if !foundLedger {
+		t.Fatalf("ledger decision missing from residue: %#v", res.Decisions)
+	}
+	foundFact := false
+	for _, f := range res.Facts {
+		if strings.Contains(f.Text, "versioned") {
+			foundFact = true
+			if !stringSliceContains(f.SourceIDs, "hist:0") {
+				t.Fatalf("fact sources = %v", f.SourceIDs)
+			}
+		}
+	}
+	if !foundFact {
+		t.Fatalf("fact missing: %#v", res.Facts)
+	}
+	if !stringSliceContains(res.PinnedKinds, protocol.PromptLayerMemory) {
+		t.Fatalf("pinned kinds = %v", res.PinnedKinds)
+	}
+
+	// Rebuild skeleton is usable for continue.
+	skel := engine.RebuildPromptSkeleton(res)
+	if !strings.Contains(skel, "structured residue") {
+		t.Fatalf("rebuild missing decision: %q", skel)
+	}
+
+	// Next turn: marker carries residue; pin layer still in system prompt.
+	eng.Ops() <- protocol.UserInput{Text: "third"}
+	req := waitCompactTurnRequest(t, eng, prov)
+	foundMarker := false
+	for _, m := range req.Messages {
+		if m.Role == provider.RoleUser && strings.HasPrefix(m.Text, "[Prior conversation compacted") {
+			foundMarker = true
+			if !strings.Contains(m.Text, "structured residue") {
+				t.Fatalf("compact marker missing ledger decision: %q", m.Text)
+			}
+		}
+	}
+	if !foundMarker {
+		t.Fatalf("compact marker missing in %#v", req.Messages)
+	}
+	if !strings.Contains(req.System, "PINNED_MEMORY_MARKER") {
+		t.Fatal("pinned memory layer must survive compaction")
+	}
+}
+
+func TestSummarizeCompactIncludesResidueSummary(t *testing.T) {
+	matchSummarize := func(req provider.Request) bool {
+		if len(req.Tools) != 0 {
+			return false
+		}
+		for _, m := range req.Messages {
+			if m.Role == provider.RoleUser && strings.Contains(m.Text, "Summarize this conversation history") {
+				return true
+			}
+		}
+		return false
+	}
+	prov := newScriptedProvider(
+		streamStep{events: []provider.StreamEvent{
+			{Type: provider.EventTextDelta, Text: "DECISION: measure summarize vs trim"},
+			{Type: provider.EventDone, StopReason: "end_turn"},
+		}},
+		streamStep{events: []provider.StreamEvent{
+			{Type: provider.EventTextDelta, Text: "r2"},
+			{Type: provider.EventDone, StopReason: "end_turn"},
+		}},
+		streamStep{
+			match: matchSummarize,
+			events: []provider.StreamEvent{
+				{Type: provider.EventTextDelta, Text: "SUMMARY_BODY_xyz"},
+				{Type: provider.EventDone, StopReason: "end_turn"},
+			},
+		},
+	)
+	eng := engine.New(engine.Options{
+		SessionID:          "session-residue-sum",
+		Select:             func(string) (provider.Provider, string, error) { return prov, "cheap-model", nil },
+		InitialProvider:    "scripted",
+		Registry:           tool.NewRegistry(),
+		WorkDir:            t.TempDir(),
+		Rules:              []permission.Ruleset{permission.Defaults()},
+		KeepUserTurns:      1,
+		CompactionStrategy: protocol.CompactionStrategySummarize,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "first"}
+	waitCompactTurn(t, eng)
+	eng.Ops() <- protocol.UserInput{Text: "second"}
+	waitCompactTurn(t, eng)
+
+	eng.Ops() <- protocol.Compact{}
+	var completed protocol.CompactionCompleted
+	deadline := time.After(5 * time.Second)
+	for completed.Reason == "" {
+		select {
+		case ev := <-eng.Events():
+			switch ev := ev.(type) {
+			case protocol.CompactionCompleted:
+				completed = ev
+			case protocol.EngineError:
+				// summarize fallback noise is ok only if we still get completed
+				if !strings.Contains(ev.Message, "summarize") {
+					t.Fatalf("EngineError: %s", ev.Message)
+				}
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for summarize compaction")
+		}
+	}
+	if completed.Strategy != protocol.CompactionStrategySummarize {
+		t.Fatalf("strategy = %q", completed.Strategy)
+	}
+	if completed.Residue == nil {
+		t.Fatal("expected residue")
+	}
+	if completed.Residue.Summary != "SUMMARY_BODY_xyz" && completed.Summary != "SUMMARY_BODY_xyz" {
+		t.Fatalf("summary missing: completed=%#v residue=%#v", completed.Summary, completed.Residue)
+	}
+	found := false
+	for _, d := range completed.Residue.Decisions {
+		if strings.Contains(d.Text, "summarize vs trim") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("decision missing under summarize: %#v", completed.Residue.Decisions)
 	}
 }
 

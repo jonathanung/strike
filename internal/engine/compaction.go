@@ -225,6 +225,24 @@ func (e *Engine) applyCompaction(ctx context.Context, reason string, corr protoc
 		}
 	}
 
+	// Structured residue with provenance (facts/decisions/open questions).
+	// Built for both trim and summarize; summarize also carries model summary.
+	// baseIndex 0: dropped is always the prefix e.messages[:split].
+	residue := buildCompactionResidue(
+		dropped,
+		0,
+		applied,
+		reason,
+		summary,
+		sortedKindKeys(e.pinnedKinds),
+		e.collectActiveLedgerEntries(),
+	)
+	if residue != nil {
+		// Prefer residue marker (includes summary section when present) so
+		// continue sees structured provenance, not only a free-text summary.
+		marker = residueCompactMarker(removed, residue)
+	}
+
 	out := make([]provider.Message, 0, 1+keptTail)
 	out = append(out, provider.Message{Role: provider.RoleUser, Text: marker})
 	out = append(out, tail...)
@@ -238,6 +256,7 @@ func (e *Engine) applyCompaction(ctx context.Context, reason string, corr protoc
 		Removed:     removed,
 		Kept:        keptTail + 1,
 		Summary:     summary,
+		Residue:     residue,
 	})
 	return true
 }

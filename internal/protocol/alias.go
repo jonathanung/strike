@@ -185,6 +185,8 @@ type (
 	SchedulerCanceled       = pub.SchedulerCanceled
 	CompactionStarted       = pub.CompactionStarted
 	CompactionCompleted     = pub.CompactionCompleted
+	CompactionResidue       = pub.CompactionResidue
+	ResidueItem             = pub.ResidueItem
 	SessionMeta             = pub.SessionMeta
 	SessionRewound          = pub.SessionRewound
 	HookMatched             = pub.HookMatched
@@ -254,6 +256,13 @@ const (
 
 	CompactionStrategyTrim      = pub.CompactionStrategyTrim
 	CompactionStrategySummarize = pub.CompactionStrategySummarize
+
+	CompactionResidueSchemaVersion = pub.CompactionResidueSchemaVersion
+	ResidueKindFact                = pub.ResidueKindFact
+	ResidueKindDecision            = pub.ResidueKindDecision
+	ResidueKindOpenQuestion        = pub.ResidueKindOpenQuestion
+	ResidueKindAssumption          = pub.ResidueKindAssumption
+	ResidueKindConstraint          = pub.ResidueKindConstraint
 
 	PromptLayerShared      = pub.PromptLayerShared
 	PromptLayerTools       = pub.PromptLayerTools
