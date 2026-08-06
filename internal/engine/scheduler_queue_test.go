@@ -334,3 +334,41 @@ func TestMultiRootQueueCorrelation(t *testing.T) {
 	holder.Release()
 	close(hold)
 }
+
+func TestImmediateAdmitEmitsNoQueueEvents(t *testing.T) {
+	// Unlimited model pool: acquire never blocks → no protocol queue events.
+	s := scheduler.NewDefault()
+	defer s.Close()
+
+	hold := make(chan struct{})
+	close(hold)
+	eng := engine.New(engine.Options{
+		SessionID: "quiet",
+		Select: func(string) (provider.Provider, string, error) {
+			return &holdStreamProvider{hold: hold}, "hold", nil
+		},
+		InitialProvider: "hold",
+		Scheduler:       s,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "hi"}
+
+	// Wait for turn completion; assert no scheduler.* events.
+	events := drainUntil(t, eng, 5*time.Second, func(evs []protocol.Event) bool {
+		for _, ev := range evs {
+			if _, ok := ev.(protocol.TurnCompleted); ok {
+				return true
+			}
+		}
+		return false
+	})
+	for _, ev := range events {
+		switch ev.(type) {
+		case protocol.SchedulerQueued, protocol.SchedulerAdmitted, protocol.SchedulerCanceled:
+			t.Fatalf("unexpected queue event on unlimited pool: %T %+v", ev, ev)
+		}
+	}
+}

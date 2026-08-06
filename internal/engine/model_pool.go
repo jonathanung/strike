@@ -65,9 +65,11 @@ func holdModelLease(in <-chan provider.StreamEvent, lease *scheduler.Lease) <-ch
 // acquireScheduler acquires named pools and emits durable queue lifecycle
 // events correlated to the caller's session/turn. Nil scheduler is a no-op.
 //
-// Guarantees for one RequestID:
-//   - scheduler.queued only when the caller blocks on capacity
-//   - exactly one of scheduler.admitted or scheduler.canceled after any queued
+// Protocol events are emitted only when the caller actually blocks on capacity
+// (unlimited/immediate grants stay silent so default JSONL is not bloated).
+//
+// Guarantees for one RequestID after a queue wait:
+//   - scheduler.queued then exactly one of scheduler.admitted or scheduler.canceled
 //   - admitted is never emitted after canceled for the same RequestID
 func (e *Engine) acquireScheduler(ctx context.Context, corr protocol.Correlation, label string, pools ...string) (*scheduler.Lease, error) {
 	if e == nil || e.opts.Scheduler == nil {
@@ -78,8 +80,9 @@ func (e *Engine) acquireScheduler(ctx context.Context, corr protocol.Correlation
 	}
 	reqID := rand.Text()
 	var mu sync.Mutex
-	// terminal is set once admitted or canceled is emitted so a racy second
-	// notify cannot produce admitted after canceled (or double terminal).
+	// queued is set when PhaseQueued fires; terminal after admitted/canceled.
+	// Immediate grants never set queued, so they emit nothing.
+	queued := false
 	terminal := false
 	lease, err := e.opts.Scheduler.AcquireNotify(ctx, func(ev scheduler.AcquireEvent) {
 		mu.Lock()
@@ -89,6 +92,7 @@ func (e *Engine) acquireScheduler(ctx context.Context, corr protocol.Correlation
 			if terminal {
 				return
 			}
+			queued = true
 			e.emit(protocol.SchedulerQueued{
 				Correlation: corr,
 				RequestID:   reqID,
@@ -96,7 +100,7 @@ func (e *Engine) acquireScheduler(ctx context.Context, corr protocol.Correlation
 				Label:       label,
 			})
 		case scheduler.PhaseAdmitted:
-			if terminal {
+			if terminal || !queued {
 				return
 			}
 			terminal = true
@@ -108,7 +112,7 @@ func (e *Engine) acquireScheduler(ctx context.Context, corr protocol.Correlation
 				WaitMs:      ev.Wait.Milliseconds(),
 			})
 		case scheduler.PhaseCanceled:
-			if terminal {
+			if terminal || !queued {
 				return
 			}
 			terminal = true

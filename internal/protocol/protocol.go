@@ -804,9 +804,10 @@ type SchedulerQueued struct {
 	Label     string   `json:"label,omitempty"`
 }
 
-// SchedulerAdmitted marks that capacity was granted for a prior or immediate
-// acquire. WaitMs is time spent waiting (0 when granted without queueing).
-// After SchedulerCanceled for the same RequestID, Admitted must not appear.
+// SchedulerAdmitted marks that capacity was granted after a SchedulerQueued
+// wait. WaitMs is time spent waiting. Engine emitters skip admitted when the
+// acquire never blocked (unlimited/free capacity). After SchedulerCanceled for
+// the same RequestID, Admitted must not appear.
 type SchedulerAdmitted struct {
 	Correlation
 	RequestID string   `json:"requestId"`
