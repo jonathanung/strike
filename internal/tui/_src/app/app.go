@@ -938,6 +938,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case configFileOpenMsg:
+		return m.applyConfigFileOpen(msg)
+
 	case themeSelectedMsg:
 		m.applyThemeEntry(msg.entry)
 		m.setNotice("theme: "+msg.entry.ID, false)

@@ -20,6 +20,7 @@ const (
 	commandPermission      commandID = "permission"
 	commandAuth            commandID = "auth"
 	commandSettings        commandID = "settings"
+	commandConfig          commandID = "config"
 	commandAgent           commandID = "agent"
 	commandAgents          commandID = "agents"
 	commandActivity        commandID = "activity"
@@ -128,6 +129,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandPermission, Name: "/permission", Description: "explain a tool permission or list presets", ArgsHint: "[explain <tool> [pattern]|presets]", Source: commandSourceBuiltin},
 	{ID: commandAuth, Name: "/auth", Description: "manage provider authentication", ArgsHint: "[provider]", Source: commandSourceBuiltin},
 	{ID: commandSettings, Name: "/settings", Description: "defaults (theme, sandbox, notify, autoupdate, mode) and custom providers", Source: commandSourceBuiltin},
+	{ID: commandConfig, Name: "/config", Description: "open .strike config files in the embedded editor (picker or slot)", ArgsHint: "[nano] [global|project] [config|mcp|providers|keybinds]", Source: commandSourceBuiltin},
 	{ID: commandAgent, Name: "/agent", Description: "select an agent", ArgsHint: "[name]", Source: commandSourceBuiltin},
 	{ID: commandAgents, Name: "/agents", Description: "focus the agents right pane", Source: commandSourceBuiltin},
 	{ID: commandActivity, Name: "/activity", Description: "focus the activity right pane", Source: commandSourceBuiltin},
