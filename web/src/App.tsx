@@ -90,14 +90,26 @@ const slashCommands: Completion[] = WEB_SLASH_COMMANDS;
 const op = (type: string, data?: unknown, rootID?: string) => sendOp(type, data, rootID).catch((error) => window.alert(error.message));
 
 const shortID = (id: string) => id.slice(0, 12);
+/** Lightweight multi-root attention poll interval (documented for #919). */
+const ROOTS_POLL_MS = 2000;
+const rootNeedsYou = (root: ActiveRoot) => Boolean(root.permissionPending || root.questionPending);
 const rootTitle = (root: ActiveRoot, sessions: Session[]) => root.title || sessions.find((s) => s.id === root.id)?.title || shortID(root.id);
 const relativeActivity = (ms?: number) => {
   if (!ms) return "";
-  const sec = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  const tms = ms < 1e12 ? ms * 1000 : ms;
+  const sec = Math.max(0, Math.floor((Date.now() - tms) / 1000));
   if (sec < 60) return "just now";
   if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
   if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
   return `${Math.floor(sec / 86400)}d ago`;
+};
+const deepLinkID = () => {
+  try {
+    const q = new URLSearchParams(location.search);
+    return (q.get("root") || q.get("session") || "").trim();
+  } catch {
+    return "";
+  }
 };
 
 function Field({ label, value, values, disabled, onChange }: { label: string; value?: string; values: string[]; disabled?: boolean; onChange: (value: string) => void }) {
@@ -198,19 +210,42 @@ export default function App() {
       const rootsArr = hasRoots ? (r.roots || []) : [];
       setActiveRoots(rootsArr);
       setActiveRootID(r.activeId || list.liveId || nextBoot.status?.sessionId || "");
-      const firstLive = rootsArr[0]?.id || (nextBoot.capabilities.roots ? "" : list.liveId) || "";
-      const firstID = firstLive || list.sessions?.[0]?.id || "";
+      const sessionsArr = list.sessions || [];
+      const want = deepLinkID();
+      const liveIDs = new Set(rootsArr.map((r) => r.id));
+      let firstLive = rootsArr[0]?.id || (nextBoot.capabilities.roots ? "" : list.liveId) || "";
+      let firstID = firstLive || sessionsArr[0]?.id || "";
+      let pickLive = Boolean(firstLive && firstID === firstLive);
+      if (want) {
+        if (liveIDs.has(want) || (!nextBoot.capabilities.roots && want === (list.liveId || ""))) {
+          firstID = want; firstLive = want; pickLive = true;
+        } else if (sessionsArr.some((s) => s.id === want)) {
+          firstID = want; pickLive = false;
+        }
+      }
       if (firstID) {
         dispatch({ type: "client.ensure", id: firstID });
-        if (nextBoot.status) dispatch({ type: "client.event", id: firstID, envelope: { type: "status", data: nextBoot.status } });
+        if (nextBoot.status && pickLive) dispatch({ type: "client.event", id: firstID, envelope: { type: "status", data: nextBoot.status } });
       }
-      setSelectedIsLive(Boolean(firstLive && firstID === firstLive));
-      setNavTab(firstLive ? "active" : "history");
+      setSelectedIsLive(pickLive);
+      setNavTab(pickLive ? "active" : "history");
+      if (pickLive && want && nextBoot.capabilities.roots && !nextBoot.attachOnly) {
+        void activateRoot(want).then(() => refreshRoots()).catch(() => {});
+      }
       if (nextBoot.capabilities.auth) request<{ providers: Array<{ Name?: string; name?: string }> }>("/v1/providers").then((v) => setProviders(v.providers.map((p) => p.Name || p.name || "").filter(Boolean))).catch(() => {});
       if (nextBoot.capabilities.history) request<{ entries: string[] }>("/v1/history").then((v) => setHistory(v.entries || [])).catch(() => {});
       if (nextBoot.capabilities.sandbox) getSandbox().then(setSandboxInfo).catch(() => {});
     }).catch((error) => setTransport(error.message));
   }, []);
+
+  // Background attention: poll GET /v1/roots (busy / hasRecentEvent / pending asks).
+  // Does not open secondary WS streams — selected transcript stays isolated.
+  useEffect(() => {
+    if (!boot?.capabilities.roots || boot.attachOnly) return;
+    const tick = () => { void refreshRoots(); };
+    const id = window.setInterval(tick, ROOTS_POLL_MS);
+    return () => window.clearInterval(id);
+  }, [boot?.capabilities.roots, boot?.attachOnly]);
 
   useEffect(() => {
     if (!selectedID) return;
@@ -412,23 +447,37 @@ export default function App() {
   const sessionAction = async (action: "fork" | "rename" | "delete") => {
     if (!boot?.capabilities.sessions || !selectedID) return;
     const id = selectedID;
-    if (action === "fork") await request(`/v1/sessions/${encodeURIComponent(id)}/fork`, { method: "POST" });
-    if (action === "rename") { const title = window.prompt("Session title"); if (title === null) return; await request(`/v1/sessions/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ title }) }); }
-    if (action === "delete") {
-      if (!window.confirm("Delete this durable session?")) return;
-      await request(`/v1/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
-      dispatch({ type: "client.drop", id });
-      const list = await refreshSessions();
-      await refreshRoots();
-      const next = (list?.sessions || []).find((s) => s.id !== id)?.id || "";
-      if (next) {
-        dispatch({ type: "client.ensure", id: next });
-        setSelectedIsLive(false);
-        setNavTab("history");
+    try {
+      if (action === "fork") {
+        // Default: stay on current selection; new fork appears in HISTORY (contract #916).
+        await request(`/v1/sessions/${encodeURIComponent(id)}/fork`, { method: "POST" });
+        await Promise.all([refreshSessions(), refreshRoots()]);
+        return;
       }
-      return;
+      if (action === "rename") {
+        const title = window.prompt("Session title");
+        if (title === null) return;
+        await request(`/v1/sessions/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ title }) });
+      }
+      if (action === "delete") {
+        if (!window.confirm("Delete this durable session?")) return;
+        await request(`/v1/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
+        dispatch({ type: "client.drop", id });
+        const list = await refreshSessions();
+        await refreshRoots();
+        const next = (list?.sessions || []).find((s) => s.id !== id)?.id || "";
+        if (next) {
+          dispatch({ type: "client.ensure", id: next });
+          const live = Boolean((list?.liveId && next === list.liveId) || activeRoots.some((r) => r.id === next));
+          setSelectedIsLive(live);
+          setNavTab(live ? "active" : "history");
+        }
+        return;
+      }
+      await Promise.all([refreshSessions(), refreshRoots()]);
+    } catch (error) {
+      window.alert((error as Error).message);
     }
-    await Promise.all([refreshSessions(), refreshRoots()]);
   };
   const handleCreateWorkspace = async () => { if (!boot?.capabilities.roots || boot.attachOnly) return; try { const result = await createRoot(); await refreshRoots(); dispatch({ type: "client.ensure", id: result.id }); setSelectedIsLive(true); setNavTab("active"); } catch (error) { window.alert((error as Error).message); } };
   const handleResume = async (id: string) => { if (!boot?.capabilities.roots || boot.attachOnly) return; try { const result = await resumeRoot(id); await refreshRoots(); dispatch({ type: "client.ensure", id: result.id }); setSelectedIsLive(true); setNavTab("active"); } catch (error) { window.alert((error as Error).message); } };
@@ -467,6 +516,32 @@ export default function App() {
       window.alert((error as Error).message);
     }
   };
+  const cycleWorkspace = (delta: number) => {
+    if (!boot?.capabilities.roots) {
+      if (!sessions.length) return;
+      const idx = Math.max(0, sessions.findIndex((s) => s.id === selectedID));
+      const next = sessions[(idx + delta + sessions.length) % sessions.length];
+      if (next) {
+        dispatch({ type: "client.ensure", id: next.id });
+        setSelectedIsLive(next.id === liveID && !boot?.attachOnly);
+      }
+      return;
+    }
+    if (navTab === "active" && activeRoots.length) {
+      const idx = Math.max(0, activeRoots.findIndex((r) => r.id === selectedID && selectedIsLive));
+      const next = activeRoots[(idx + delta + activeRoots.length) % activeRoots.length];
+      if (next) void selectWorkspace(next.id, true);
+      return;
+    }
+    if (sessions.length) {
+      const idx = Math.max(0, sessions.findIndex((s) => s.id === selectedID));
+      const next = sessions[(idx + delta + sessions.length) % sessions.length];
+      if (next) {
+        const live = activeRoots.some((r) => r.id === next.id);
+        void selectWorkspace(next.id, live);
+      }
+    }
+  };
   const openChildTranscript = (id: string) => { setSelectedChildId(undefined); void selectWorkspace(id, false); setNavTab("history"); };
   const changeSandboxDefault = async (mode: string) => {
     if (!boot?.capabilities.sandbox || !sandboxInfo?.canChangeDefault) return;
@@ -497,18 +572,35 @@ export default function App() {
     }
   };
   const toggleDiff = (path: string) => setExpandedDiffs((old) => { const next = new Set(old); next.has(path) ? next.delete(path) : next.add(path); return next; });
+  const needsYouRoots = activeRoots.filter((r) => rootNeedsYou(r) && !(r.id === selectedID && selectedIsLive));
+  const attentionCount = needsYouRoots.length;
+  const headerAttention = attentionCount > 0
+    ? `${attentionCount} need${attentionCount === 1 ? "s" : ""} you`
+    : "";
 
   return <div className="app-shell" style={shellStyle}>
-    <header><button className="icon-button" aria-label="Toggle agents panel" aria-pressed={navOpen} onClick={() => setNavOpen((open) => !open)}>☰</button><div className="wordmark"><span className="mark">S</span><strong>STRIKE</strong><small>workspace</small></div><div className="session-line"><span className={state.status.busy ? "pulse busy" : "pulse"} />{state.status.busy ? "agent working" : transport}</div><button className="icon-button" aria-label="Export markdown" title="Export markdown" onClick={() => exportSession()}>↓</button><button className="icon-button" aria-label="Open settings" onClick={() => setSettingsOpen(true)}>⚙</button><button className="icon-button" aria-label="Toggle inspector" aria-pressed={inspectorOpen} onClick={() => setInspectorOpen((open) => !open)}>◫</button></header>
-    <aside className={`navigation ${navOpen ? "open" : "collapsed"}`} aria-label="Agents panel"><PanelResize label="Resize agents panel" value={navWidth} min={180} max={420} onChange={setNavWidth} side="nav" />{boot?.capabilities.roots ? <><div className="aside-heading"><button className={`nav-tab ${navTab === "active" ? "active" : ""}`} onClick={() => setNavTab("active")}>ACTIVE</button><button className={`nav-tab ${navTab === "history" ? "active" : ""}`} onClick={() => setNavTab("history")}>HISTORY</button></div>{navTab === "active" && <><nav>{activeRoots.map((root) => {
+    <header><button className="icon-button" aria-label="Toggle agents panel" aria-pressed={navOpen} onClick={() => setNavOpen((open) => !open)}>☰</button><div className="wordmark"><span className="mark">S</span><strong>STRIKE</strong><small>workspace</small></div><div className="session-line" aria-live="polite"><span className={state.status.busy ? "pulse busy" : "pulse"} />{state.status.busy ? "agent working" : transport}{headerAttention && <button type="button" className="attention-summary" aria-label={headerAttention} onClick={() => { const target = needsYouRoots[0]; if (target) void selectWorkspace(target.id, true); }}>{headerAttention}</button>}</div><button className="icon-button" aria-label="Export markdown" title="Export markdown" onClick={() => exportSession()}>↓</button><button className="icon-button" aria-label="Open settings" onClick={() => setSettingsOpen(true)}>⚙</button><button className="icon-button" aria-label="Toggle inspector" aria-pressed={inspectorOpen} onClick={() => setInspectorOpen((open) => !open)}>◫</button></header>
+    <aside className={`navigation ${navOpen ? "open" : "collapsed"}`} aria-label="Agents panel" tabIndex={0} onKeyDown={(event) => {
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+      if (event.key === "ArrowDown" || event.key === "j") { event.preventDefault(); cycleWorkspace(1); }
+      if (event.key === "ArrowUp" || event.key === "k") { event.preventDefault(); cycleWorkspace(-1); }
+    }}><PanelResize label="Resize agents panel" value={navWidth} min={180} max={420} onChange={setNavWidth} side="nav" />{boot?.capabilities.roots ? <><div className="aside-heading"><button className={`nav-tab ${navTab === "active" ? "active" : ""}`} onClick={() => setNavTab("active")}>ACTIVE</button><button className={`nav-tab ${navTab === "history" ? "active" : ""}`} onClick={() => setNavTab("history")}>HISTORY</button></div>{navTab === "active" && <><nav>{activeRoots.map((root) => {
                   const label = rootTitle(root, sessions);
                   const activity = relativeActivity(root.activeAt);
-                  return <button key={root.id} type="button" className={root.id === selectedID && selectedIsLive ? "session active" : "session"} onClick={() => void selectWorkspace(root.id, true)} title={root.id}>
-                    <span className={root.busy ? "root-busy" : "root-idle"} aria-hidden />
-                    <span className="session-main"><span className="session-title">{label}</span><span className="session-meta">{root.agent || "—"}{activity ? ` · ${activity}` : ""}</span></span>
-                    <span className="session-flags">{root.id === activeRootID && <small>ACTIVE</small>}<small>{root.busy ? "BUSY" : "IDLE"}</small></span>
+                  const needsYou = rootNeedsYou(root);
+                  return <button key={root.id} type="button" className={root.id === selectedID && selectedIsLive ? "session active" : "session"} onClick={() => void selectWorkspace(root.id, true)} title={root.id} aria-label={`${label}${needsYou ? ", needs attention" : ""}`}>
+                    <span className={needsYou ? "root-attention" : root.busy ? "root-busy" : "root-idle"} aria-hidden />
+                    <span className="session-main"><span className="session-title">{label}</span><span className="session-meta">{root.agent || "—"}{activity ? ` · ${activity}` : ""}{root.hasRecentEvent && !root.busy && !needsYou ? " · recent" : ""}</span></span>
+                    <span className="session-flags">{root.id === activeRootID && <small>ACTIVE</small>}{needsYou ? <small className="needs-you">NEEDS YOU</small> : <small>{root.busy ? "BUSY" : "IDLE"}</small>}</span>
                   </button>;
-                })}</nav>{!boot?.attachOnly && <div className="session-actions"><button type="button" onClick={() => void handleCreateWorkspace()}>+ New workspace</button><button type="button" disabled={!selectedIsLive || !selectedID} onClick={() => void handleCloseWorkspace()}>Close workspace</button></div>}</>}{navTab === "history" && <HistoryNav sessions={sessions} activeRoots={activeRoots} selectedID={selectedID} selectedIsLive={selectedIsLive} historySearch={historySearch} setHistorySearch={setHistorySearch} selectWorkspace={selectWorkspace} handleResume={handleResume} boot={boot} sessionAction={sessionAction} />}</> : <><div className="aside-heading"><span>SESSIONS</span></div><nav>{sessions.map((session) => <button key={session.id} className={session.id === selectedID ? "session active" : "session"} onClick={() => { dispatch({ type: "client.ensure", id: session.id }); setSelectedIsLive(session.id === liveID && !boot?.attachOnly); }}><span>{session.title || session.id.slice(0, 12)}</span>{session.id === liveID && <small>LIVE</small>}</button>)}</nav>{boot?.capabilities.sessions && selectedID && <div className="session-actions" aria-label="Session actions"><SessionMenu onAction={(action) => void sessionAction(action)} /></div>}</>}<ChildAgentsPanel children={children} selectedId={selectedChildId} onSelect={setSelectedChildId} onOpenTranscript={openChildTranscript} /><details className="workspace-meta"><summary>Workspace</summary><span>ROOT</span><code>{state.status.cwd || "unavailable"}</code><span>BUILD</span><code>{boot?.version || "…"}</code></details></aside>
+                })}</nav>{!boot?.attachOnly && <div className="session-actions"><button type="button" onClick={() => void handleCreateWorkspace()}>+ New workspace</button><button type="button" disabled={!selectedIsLive || !selectedID} onClick={() => void handleCloseWorkspace()}>Close workspace</button></div>}</>}{navTab === "history" && <HistoryNav sessions={sessions} activeRoots={activeRoots} selectedID={selectedID} selectedIsLive={selectedIsLive} historySearch={historySearch} setHistorySearch={setHistorySearch} selectWorkspace={selectWorkspace} handleResume={handleResume} boot={boot} sessionAction={sessionAction} />}</> : <><div className="aside-heading"><span>SESSIONS</span></div><nav>{sessions.map((session) => {
+                  const live = session.id === liveID && !boot?.attachOnly;
+                  const age = relativeActivity(session.mtime);
+                  return <button key={session.id} type="button" className={session.id === selectedID ? "session active history-row" : "session history-row"} onClick={() => { dispatch({ type: "client.ensure", id: session.id }); setSelectedIsLive(live); }} title={session.id}>
+                    <span className="session-main"><span className="session-title">{session.title || shortID(session.id)}</span><span className="session-meta">{[shortID(session.id), age].filter(Boolean).join(" · ")}</span></span>
+                    <span className="session-flags">{live && <small className="live-badge">LIVE</small>}</span>
+                  </button>;
+                })}</nav>{boot?.capabilities.sessions && selectedID && <div className="session-actions" aria-label="Session actions"><SessionMenu onAction={(action) => void sessionAction(action)} /></div>}</>}<ChildAgentsPanel children={children} selectedId={selectedChildId} onSelect={setSelectedChildId} onOpenTranscript={openChildTranscript} /><details className="workspace-meta"><summary>Workspace</summary><span>ROOT</span><code>{state.status.cwd || "unavailable"}</code><span>BUILD</span><code>{boot?.version || "…"}</code></details></aside>
     <main>
       <div className="runtime-stack">
       <section className="runtime" aria-label="Runtime controls">
@@ -667,7 +759,17 @@ function SessionMenu({ onAction }: { onAction: (action: "fork" | "rename" | "del
 function HistoryNav({ sessions, activeRoots, selectedID, selectedIsLive, historySearch, setHistorySearch, selectWorkspace, handleResume, boot, sessionAction }: { sessions: Session[]; activeRoots: ActiveRoot[]; selectedID: string; selectedIsLive: boolean; historySearch: string; setHistorySearch: (value: string) => void; selectWorkspace: (id: string, isLive: boolean) => void | Promise<void>; handleResume: (id: string) => Promise<void>; boot?: Bootstrap; sessionAction: (action: "fork" | "rename" | "delete") => Promise<void> }) {
   const canSessions = Boolean(boot?.capabilities.sessions);
   const hasSelection = Boolean(selectedID);
-  return <><input className="history-search" type="search" placeholder="Search sessions…" aria-label="Search sessions" value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} /><nav>{sessions.filter((s) => !historySearch || s.title?.toLowerCase().includes(historySearch.toLowerCase()) || s.id.toLowerCase().includes(historySearch.toLowerCase())).map((session) => { const isActiveWorkspace = activeRoots.some((r) => r.id === session.id); return <button key={session.id} type="button" className={session.id === selectedID ? "session active" : "session"} onClick={() => void selectWorkspace(session.id, isActiveWorkspace)} title={session.id}><span className="session-title">{session.title || shortID(session.id)}</span>{isActiveWorkspace && <small className="live-badge">LIVE</small>}</button>; })}</nav><div className="session-actions">{!selectedIsLive && !boot?.attachOnly && <button type="button" disabled={!hasSelection || !boot?.capabilities.roots} onClick={() => void handleResume(selectedID)}>Resume as workspace</button>}{canSessions && hasSelection && <SessionMenu onAction={(action) => void sessionAction(action)} />}</div></>;
+  const filtered = sessions.filter((s) => !historySearch || s.title?.toLowerCase().includes(historySearch.toLowerCase()) || s.id.toLowerCase().includes(historySearch.toLowerCase()));
+  return <><input className="history-search" type="search" placeholder="Search sessions…" aria-label="Search sessions" value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} /><nav aria-label="Session history">{filtered.map((session) => {
+    const isActiveWorkspace = activeRoots.some((r) => r.id === session.id);
+    const age = relativeActivity(session.mtime);
+    const forkHint = session.forkedFrom ? `fork of ${shortID(session.forkedFrom)}` : "";
+    const meta = [shortID(session.id), age, forkHint].filter(Boolean).join(" · ");
+    return <button key={session.id} type="button" className={session.id === selectedID ? "session active history-row" : "session history-row"} onClick={() => void selectWorkspace(session.id, isActiveWorkspace)} title={session.id}>
+      <span className="session-main"><span className="session-title">{session.title || shortID(session.id)}</span><span className="session-meta">{meta}</span></span>
+      <span className="session-flags">{isActiveWorkspace && <small className="live-badge">LIVE</small>}</span>
+    </button>;
+  })}</nav><div className="session-actions">{!selectedIsLive && !boot?.attachOnly && <button type="button" disabled={!hasSelection || !boot?.capabilities.roots} onClick={() => void handleResume(selectedID)}>Resume as workspace</button>}{canSessions && hasSelection && <SessionMenu onAction={(action) => void sessionAction(action)} />}</div></>;
 }
 
 function RuntimeStatus({ status, modelRates }: { status: Status; modelRates?: { inputPerM: number; outputPerM: number; hasCost: boolean; context?: number } }) {

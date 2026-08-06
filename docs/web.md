@@ -375,10 +375,9 @@ Behavior:
 3. Header "agent working" / transport line reflects the **selected** root;
    aggregate attention (e.g. count of needs-you) may appear beside it.
 4. Avoid false-positive storms: idle roots clear busy; recent is soft (informational).
-5. Observation strategy (pick one in #919; document interval if polling):
-   - lightweight poll of `GET /v1/roots` (busy / hasRecentEvent), and/or
-   - secondary subscriptions for non-selected roots that **do not** merge events
-     into the selected transcript (depends on #918 isolation).
+5. Observation strategy (**implemented**): lightweight poll of `GET /v1/roots`
+   every **2s** while multi-root is enabled (busy / hasRecentEvent /
+   permissionPending / questionPending). No secondary WS for background roots.
 
 ### Lifecycle flows
 
@@ -457,17 +456,27 @@ Stop the live engine for a root **without** necessarily deleting durable JSONL.
 | **Ops without live** | Composer disabled; no queue drain |
 | **Token / auth failure** | Existing bootstrap error empty-state |
 
-### Deep links (#920)
+### Deep links
 
-On cockpit load, after token cookie handoff:
+On cockpit load, after token cookie handoff (server strips `?token=` and keeps
+other query params):
 
-- Support `?root=<id>` and/or `?session=<id>` (document final param in #920).
-- If id is an active root → select live + activate.
-- Else if durable session exists → select historical (SSE).
-- Invalid id → safe fallback (first live, else first session); do not break `?token=` handoff.
+| Query | Behavior |
+|---|---|
+| `?root=<id>` | If id is a live workspace → select it, call activate, open WS `?root=`. |
+| `?session=<id>` | Same resolution order: live root first, else durable HISTORY (SSE). |
+| both present | `root` wins over `session`. |
+| invalid id | Safe fallback: first live root, else first HISTORY row; no error page. |
 
-Optional: keyboard next/prev workspace when rail focused — document shortcuts;
-must not steal keys from the composer.
+Shareable example (after auth handoff): `/attach?session=<durableId>` or
+`/attach?root=<liveId>`.
+
+**Keyboard (rail focused):** `j` / `ArrowDown` next workspace, `k` / `ArrowUp`
+previous. Ignored while focus is in an input/textarea (composer safe).
+
+**Fork default:** stay on the current selection; the new durable id appears in
+HISTORY (resume separately). Parent lineage is `forkedFrom` on the session list
+DTO when present.
 
 ### API map and gaps
 
@@ -475,16 +484,16 @@ must not steal keys from the composer.
 |---|---|---|
 | List live workspaces | `GET /v1/roots` | — |
 | Create workspace | `POST /v1/roots` | — |
-| Activate on select | `POST /v1/roots/{id}/activate` | Client must call (#917) |
+| Activate on select | `POST /v1/roots/{id}/activate` (client on select) | — |
 | Resume history → live | `POST /v1/roots/{id}/resume` | — |
 | Scoped ops/events | `?root=` on ops/ws/status/files | — |
 | List / fork / rename / delete durable | `/v1/sessions*` | — |
 | Children listing | `GET /v1/sessions/{id}/children` | Not in root switcher (by design) |
-| Close/stop live workspace | `LiveHub.Remove` in-process only | **Hard gap:** no `DELETE /v1/roots/{id}` (or equivalent). #917 owns exposing minimal HTTP if required |
-| Permission/question pending per root | Not on `RootSummary` | **Soft gap for #919:** may poll status per root, subscribe off-screen, or add additive fields (`permissionPending`, `questionPending`) — prefer existing data first |
-| `parentId` on session list | Filtered children; list item has id/title/mtime only | **Soft gap for #920:** fork parent hint may need `parentId` on list DTO or omit UI hint |
+| Close/stop live workspace | `DELETE /v1/roots/{id}` | — |
+| Permission/question pending per root | `RootSummary.permissionPending` / `questionPending` + 2s roots poll | — |
+| `forkedFrom` on session list | List item includes `forkedFrom` when session was created via Fork | — |
 | Live title after rename | Rename hits durable meta | **Soft gap:** confirm hub title refresh path |
-| Deep link query | Not implemented | #920 client-only if ids already addressable |
+| Deep link query | `?root=` / `?session=` on cockpit load | — |
 
 Do **not** invent parallel protocols (second WS multiplex schema, ad-hoc event
 buses) unless a child issue records a hard gap and updates this section.

@@ -20,6 +20,7 @@ type Info struct {
 	ParentSessionID string
 	LeadSessionID   string // team lead; empty on roots (self is lead)
 	Title           string
+	ForkedFrom      string // source id when created via Fork; empty otherwise
 	ProjectKey      string // launch project identity; empty on legacy sessions
 	WorktreePath    string // strike-managed git worktree; empty = launch cwd
 	WorktreeBranch  string
@@ -714,12 +715,15 @@ func (m *Manager) ForkAt(sourceID string, keepEvents int) (Info, error) {
 		_ = os.Remove(MetaPath(m.dir, info.ID))
 		return Info{}, fmt.Errorf("fork: meta: %w", err)
 	}
-	// Refresh in-memory title (Create already set it; ForkedFrom is sidecar-only).
+	// Refresh in-memory title + fork lineage after sidecar update.
 	m.mu.Lock()
 	if e, ok := m.sessions[info.ID]; ok {
 		e.info.Title = forkTitle
+		e.info.ForkedFrom = sourceID
 	}
 	m.mu.Unlock()
+	info.Title = forkTitle
+	info.ForkedFrom = sourceID
 
 	for _, ev := range events {
 		if err := m.Append(info.ID, ev); err != nil {
@@ -940,6 +944,7 @@ func (m *Manager) infoFromDiskLocked(id string, st os.FileInfo) (Info, error) {
 		ParentSessionID: meta.ParentSessionID,
 		LeadSessionID:   meta.LeadSessionID,
 		Title:           title,
+		ForkedFrom:      meta.ForkedFrom,
 		ProjectKey:      meta.ProjectKey,
 		WorktreePath:    meta.WorktreePath,
 		WorktreeBranch:  meta.WorktreeBranch,

@@ -28,9 +28,10 @@ type sessionsResponse struct {
 }
 
 type sessionListItem struct {
-	ID    string `json:"id"`
-	Title string `json:"title,omitempty"`
-	Mtime int64  `json:"mtime,omitempty"`
+	ID         string `json:"id"`
+	Title      string `json:"title,omitempty"`
+	Mtime      int64  `json:"mtime,omitempty"`
+	ForkedFrom string `json:"forkedFrom,omitempty"`
 }
 
 type agentsResponse struct {
@@ -623,9 +624,10 @@ func listSessionFiles(dir string) ([]sessionListItem, error) {
 			continue // roots only in switcher
 		}
 		out = append(out, sessionListItem{
-			ID:    info.ID,
-			Title: info.Title,
-			Mtime: info.UpdatedAt.Unix(),
+			ID:         info.ID,
+			Title:      info.Title,
+			Mtime:      info.UpdatedAt.Unix(),
+			ForkedFrom: info.ForkedFrom,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {

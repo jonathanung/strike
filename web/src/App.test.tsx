@@ -780,6 +780,168 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { name: "Diagnostics" })).toBeInTheDocument();
   });
 
+
+  it("selects a deep-linked session id on boot", async () => {
+    const original = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...original, search: "?session=hist-1", pathname: "/attach", href: "http://localhost/attach?session=hist-1" },
+    });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) return response({ version: "test", authRequired: false, attachOnly: false, capabilities: { live: true, roots: true, sessions: true }, protocolOps: ["user.input"], status: { sessionId: "root-a", provider: "echo", busy: false }, agents: [{ name: "build" }], skills: [] });
+      if (url.includes("/v1/roots")) return response({ roots: [{ id: "root-a", title: "A", agent: "build", busy: false }], activeId: "root-a" });
+      if (url.includes("sessions")) return response({ sessions: [{ id: "hist-1", title: "Deep history", mtime: Math.floor(Date.now() / 1000) }, { id: "root-a", title: "Live root" }], liveId: "root-a" });
+      return response({ ok: true });
+    }));
+    render(<App />);
+    expect(await screen.findByText("Deep history")).toBeInTheDocument();
+    await waitFor(() => expect(FakeEventSource.instances.length).toBeGreaterThan(0));
+    expect(FakeEventSource.instances[0].url).toContain("/v1/sessions/hist-1/events");
+    expect(screen.getByLabelText("Instruction")).toBeDisabled();
+    Object.defineProperty(window, "location", { configurable: true, value: original });
+  });
+
+  it("selects a deep-linked live root and activates it", async () => {
+    const original = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...original, search: "?root=root-b", pathname: "/attach", href: "http://localhost/attach?root=root-b" },
+    });
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) return response({ version: "test", authRequired: false, attachOnly: false, capabilities: { live: true, roots: true, sessions: true }, protocolOps: ["user.input"], status: { sessionId: "root-a", provider: "echo", busy: false }, agents: [{ name: "build" }], skills: [] });
+      if (url.includes("/v1/roots") && (!init || !init.method || init.method === "GET")) {
+        return response({ roots: [{ id: "root-a", title: "A", agent: "build", busy: false }, { id: "root-b", title: "B", agent: "build", busy: true }], activeId: "root-a" });
+      }
+      if (url.includes("/activate")) return response({ ok: true });
+      if (url.includes("sessions")) return response({ sessions: [{ id: "root-a", title: "A" }, { id: "root-b", title: "B" }], liveId: "root-a" });
+      return response({ ok: true });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    await waitFor(() => expect(FakeWebSocket.instances.some((ws) => ws.url.includes("root=root-b"))).toBe(true));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/v1/roots/root-b/activate"))).toBe(true));
+    Object.defineProperty(window, "location", { configurable: true, value: original });
+  });
+
+  it("resumes a historical session into a live workspace", async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = (init?.method || "GET").toUpperCase();
+      if (url.includes("bootstrap")) return response({ version: "test", authRequired: false, attachOnly: false, capabilities: { live: true, roots: true, sessions: true }, protocolOps: ["user.input"], status: { sessionId: "root-a", provider: "echo", busy: false }, agents: [{ name: "build" }], skills: [] });
+      if (url.includes("/resume")) return response({ id: "hist-1", sessionId: "hist-1", resumedId: "hist-1", wasActive: false });
+      if (url.includes("/v1/roots") && method === "GET") {
+        const resumed = fetchMock.mock.calls.some(([u]) => String(u).includes("/resume"));
+        return response({
+          roots: resumed
+            ? [{ id: "root-a", title: "A", agent: "build", busy: false }, { id: "hist-1", title: "Saved work", agent: "build", busy: false }]
+            : [{ id: "root-a", title: "A", agent: "build", busy: false }],
+          activeId: resumed ? "hist-1" : "root-a",
+        });
+      }
+      if (url.includes("sessions")) return response({ sessions: [{ id: "hist-1", title: "Saved work", mtime: 1 }, { id: "root-a", title: "A" }], liveId: "root-a" });
+      if (url.includes("/activate")) return response({ ok: true });
+      return response({ ok: true });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole("button", { name: "HISTORY" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Saved work/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Resume as workspace" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/v1/roots/hist-1/resume"))).toBe(true));
+    await waitFor(() => expect(FakeWebSocket.instances.some((ws) => ws.url.includes("root=hist-1"))).toBe(true));
+  });
+
+  it("shows LIVE badge and fork lineage on history rows", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) return response({ version: "test", authRequired: false, attachOnly: false, capabilities: { live: true, roots: true, sessions: true }, protocolOps: ["user.input"], agents: [], skills: [] });
+      if (url.includes("/v1/roots")) return response({ roots: [{ id: "live-1", title: "Live one", agent: "build", busy: false }], activeId: "live-1" });
+      if (url.includes("sessions")) return response({ sessions: [{ id: "live-1", title: "Live one", mtime: 1 }, { id: "old", title: "Old", mtime: 1, forkedFrom: "live-1" }], liveId: "live-1" });
+      return response({ ok: true });
+    }));
+    render(<App />);
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole("button", { name: "HISTORY" }));
+    expect(await screen.findByRole("button", { name: /Old/i })).toBeInTheDocument();
+    expect(screen.getByText("LIVE")).toBeInTheDocument();
+    expect(screen.getByText(/fork of live-1/i)).toBeInTheDocument();
+  });
+
+
+
+  it("boots multi-root ACTIVE/HISTORY tabs and isolates drafts across workspaces", async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = (init?.method || "GET").toUpperCase();
+      if (url.includes("bootstrap")) return response({ version: "test", authRequired: false, attachOnly: false, capabilities: { live: true, roots: true, sessions: true }, protocolOps: ["user.input"], status: { sessionId: "root-a", provider: "echo", busy: false }, agents: [{ name: "build" }], skills: [] });
+      if (url.includes("/v1/roots") && method === "GET") return response({ roots: [{ id: "root-a", title: "Alpha", agent: "build", busy: false }, { id: "root-b", title: "Beta", agent: "build", busy: false }], activeId: "root-a" });
+      if (url.includes("/activate")) return response({ ok: true });
+      if (url.includes("sessions")) return response({ sessions: [{ id: "root-a", title: "Alpha" }, { id: "root-b", title: "Beta" }], liveId: "root-a" });
+      return response({ ok: true });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    expect(await screen.findByRole("button", { name: "ACTIVE" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "HISTORY" })).toBeInTheDocument();
+    const alpha = await screen.findByRole("button", { name: /Alpha/i });
+    expect(alpha).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Instruction"), { target: { value: "draft-a" } });
+    fireEvent.click(screen.getByRole("button", { name: /Beta/i }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/v1/roots/root-b/activate"))).toBe(true));
+    expect(screen.getByLabelText("Instruction")).toHaveValue("");
+    fireEvent.change(screen.getByLabelText("Instruction"), { target: { value: "draft-b" } });
+    fireEvent.click(screen.getByRole("button", { name: /Alpha/i }));
+    await waitFor(() => expect(screen.getByLabelText("Instruction")).toHaveValue("draft-a"));
+  });
+
+  it("surfaces background permission attention on the rail and header within the poll window", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let roots = [
+      { id: "root-a", title: "Alpha", agent: "build", busy: false, permissionPending: false },
+      { id: "root-b", title: "Beta", agent: "build", busy: false, permissionPending: false },
+    ];
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = (init?.method || "GET").toUpperCase();
+      if (url.includes("bootstrap")) return response({ version: "test", authRequired: false, attachOnly: false, capabilities: { live: true, roots: true, sessions: true }, protocolOps: ["user.input"], status: { sessionId: "root-a", provider: "echo", busy: false }, agents: [{ name: "build" }], skills: [] });
+      if (url.includes("/v1/roots") && method === "GET") return response({ roots, activeId: "root-a" });
+      if (url.includes("/activate")) return response({ ok: true });
+      if (url.includes("sessions")) return response({ sessions: [{ id: "root-a", title: "Alpha" }, { id: "root-b", title: "Beta" }], liveId: "root-a" });
+      return response({ ok: true });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    await screen.findByText("Alpha");
+    roots = [
+      { id: "root-a", title: "Alpha", agent: "build", busy: false, permissionPending: false },
+      { id: "root-b", title: "Beta", agent: "build", busy: true, permissionPending: true },
+    ];
+    await vi.advanceTimersByTimeAsync(2100);
+    expect(await screen.findByText("NEEDS YOU")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /1 needs you/i }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/v1/roots/root-b/activate"))).toBe(true));
+    vi.useRealTimers();
+  });
+
+  it("keeps attach-only single-session fallback without multi-root chrome", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) return response({ version: "test", authRequired: false, attachOnly: true, capabilities: { live: false, roots: false, sessions: true }, protocolOps: null, agents: [], skills: [] });
+      if (url.includes("sessions")) return response({ sessions: [{ id: "saved", title: "Saved" }] });
+      if (url.includes("roots")) return Promise.resolve(new Response("multi-root unavailable", { status: 503 }));
+      return response({ ok: true });
+    }));
+    render(<App />);
+    await screen.findByText("Saved");
+    expect(screen.queryByRole("button", { name: "ACTIVE" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "+ New workspace" })).not.toBeInTheDocument();
+    expect(screen.queryByText("NEEDS YOU")).not.toBeInTheDocument();
+  });
+
+
 });
 
 describe("formatCostLabel / formatContextLabel", () => {
