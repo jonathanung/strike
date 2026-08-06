@@ -46,6 +46,7 @@ const (
 	commandExport          commandID = "export"
 	commandCopy            commandID = "copy"
 	commandMemory          commandID = "memory"
+	commandQueue           commandID = "queue"
 	commandIssues          commandID = "issues"
 	commandGoal            commandID = "goal"
 	commandLoop            commandID = "loop"
@@ -144,6 +145,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandKeys, Name: "/keys", Description: "show keyboard shortcuts", ArgsHint: "[reset]", Source: commandSourceBuiltin},
 	{ID: commandLegend, Name: "/legend", Description: "explain UI icons, status glyphs, and chrome", Source: commandSourceBuiltin},
 	{ID: commandMemory, Name: "/memory", Description: "list, get, set, delete, export, or import project memory", ArgsHint: "[list|get|set|rm|export|import] ...", Source: commandSourceBuiltin},
+	{ID: commandQueue, Name: "/queue", Description: "browse and edit prompts queued while a turn runs", Source: commandSourceBuiltin},
 	{ID: commandIssues, Name: "/issues", Description: "list, add, get, close, export, or import project issues", ArgsHint: "[list|add|get|close|export|import] ...", Source: commandSourceBuiltin},
 	{ID: commandGoal, Name: "/goal", Description: "loop harness: set, run, status, pause, resume, abort, log, list", ArgsHint: "[set|run|status|pause|resume|abort|log|list] ...", Source: commandSourceBuiltin},
 	{ID: commandLoop, Name: "/loop", Description: "schedule a recurring LLM job (session-only)", ArgsHint: "[interval job|list|stop [id]]", Source: commandSourceBuiltin},
@@ -247,6 +249,7 @@ var reservedCommandNames = map[string]struct{}{
 	"keys":             {},
 	"legend":           {},
 	"memory":           {},
+	"queue":            {},
 	"issues":           {},
 	"goal":             {},
 	"loop":             {},

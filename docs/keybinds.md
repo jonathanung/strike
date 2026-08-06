@@ -96,6 +96,23 @@ and jumps to the first pane of the next/previous group. See [usage.md](usage.md)
 | `ctrl+y` | yank |
 | `↑` / `↓` | prompt history (when composer has no multiline cursor motion) |
 
+## Input queue (prompts typed while a turn runs)
+
+| Key / command | Action |
+|---|---|
+| `/queue` | open queue browser (reorder, edit, delete, promote, run next) |
+| empty composer + `bksp` | pop last queued prompt into the composer |
+| idle `esc` | clear the whole queue (when no turn is running) |
+| queue modal `↑`/`↓` / `j`/`k` | move selection |
+| queue modal `shift+↑`/`shift+↓` or `K`/`J` | reorder selected item |
+| queue modal `enter` | edit selected prompt text in place |
+| queue modal `e` | load selected into composer and close |
+| queue modal `p` | promote selected to next (FIFO head) |
+| queue modal `d` / `delete` / `bksp` | remove selected |
+| queue modal `c` | clear all |
+| queue modal `x` | interrupt running turn (if any) and run the FIFO head next |
+| queue modal `esc` / `q` | close |
+
 ## Agents pane (concurrent roots)
 
 When the `agents` right pane is focused (or shown in the agents stack group),
