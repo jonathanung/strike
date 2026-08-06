@@ -524,4 +524,53 @@ describe("App", () => {
   });
 
 
+
+  it("surfaces background permission attention on the rail and header within the poll window", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let roots = [
+      { id: "root-a", title: "Alpha", agent: "build", busy: false, permissionPending: false },
+      { id: "root-b", title: "Beta", agent: "build", busy: false, permissionPending: false },
+    ];
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = (init?.method || "GET").toUpperCase();
+      if (url.includes("bootstrap")) return response({ version: "test", authRequired: false, attachOnly: false, capabilities: { live: true, roots: true, sessions: true }, protocolOps: ["user.input"], status: { sessionId: "root-a", provider: "echo", busy: false }, agents: [{ name: "build" }], skills: [] });
+      if (url.includes("/v1/roots") && method === "GET") return response({ roots, activeId: "root-a" });
+      if (url.includes("/activate")) return response({ ok: true });
+      if (url.includes("sessions")) return response({ sessions: [{ id: "root-a", title: "Alpha" }, { id: "root-b", title: "Beta" }], liveId: "root-a" });
+      return response({ ok: true });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    await screen.findByText("Alpha");
+    // Background root gains a permission ask — next poll should badge it.
+    roots = [
+      { id: "root-a", title: "Alpha", agent: "build", busy: false, permissionPending: false },
+      { id: "root-b", title: "Beta", agent: "build", busy: true, permissionPending: true },
+    ];
+    await vi.advanceTimersByTimeAsync(2100);
+    expect(await screen.findByText("NEEDS YOU")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /needs you/i })).toBeInTheDocument();
+    // Clicking the header summary switches to the badged root and activates it.
+    fireEvent.click(screen.getByRole("button", { name: /1 needs you/i }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/v1/roots/root-b/activate"))).toBe(true));
+    vi.useRealTimers();
+  });
+
+  it("does not show attention badges when all roots are idle", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) return response({ version: "test", authRequired: false, attachOnly: false, capabilities: { live: true, roots: true, sessions: true }, protocolOps: ["user.input"], agents: [], skills: [] });
+      if (url.includes("/v1/roots")) return response({ roots: [{ id: "root-a", title: "Alpha", agent: "build", busy: false }, { id: "root-b", title: "Beta", agent: "build", busy: false }], activeId: "root-a" });
+      if (url.includes("sessions")) return response({ sessions: [{ id: "root-a", title: "Alpha" }, { id: "root-b", title: "Beta" }] });
+      return response({ ok: true });
+    }));
+    render(<App />);
+    await screen.findByText("Alpha");
+    expect(screen.queryByText("NEEDS YOU")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /needs you/i })).not.toBeInTheDocument();
+    expect(screen.getAllByText("IDLE").length).toBeGreaterThan(0);
+  });
+
+
 });

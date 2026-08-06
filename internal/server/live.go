@@ -14,13 +14,15 @@ import (
 
 // RootSummary is a public response payload for one active root.
 type RootSummary struct {
-	ID             string `json:"id"`
-	Title          string `json:"title,omitempty"`
-	Agent          string `json:"agent,omitempty"`
-	Busy           bool   `json:"busy"`
-	ActiveAt       int64  `json:"activeAt,omitempty"` // unix millis of last activity
-	CreatedAt      int64  `json:"createdAt,omitempty"`
-	HasRecentEvent bool   `json:"hasRecentEvent"`
+	ID                string `json:"id"`
+	Title             string `json:"title,omitempty"`
+	Agent             string `json:"agent,omitempty"`
+	Busy              bool   `json:"busy"`
+	ActiveAt          int64  `json:"activeAt,omitempty"` // unix millis of last activity
+	CreatedAt         int64  `json:"createdAt,omitempty"`
+	HasRecentEvent    bool   `json:"hasRecentEvent"`
+	PermissionPending bool   `json:"permissionPending,omitempty"`
+	QuestionPending   bool   `json:"questionPending,omitempty"`
 }
 
 // RootCreateResult is returned after creating a new root.
@@ -156,13 +158,15 @@ func (h *LiveHub) List() []RootSummary {
 	for id, e := range h.entries {
 		s := e.live.Status()
 		out = append(out, RootSummary{
-			ID:             id,
-			Title:          e.title,
-			Agent:          s.Agent,
-			Busy:           s.Busy,
-			ActiveAt:       e.activeAt.UnixMilli(),
-			CreatedAt:      e.created.UnixMilli(),
-			HasRecentEvent: time.Since(e.activeAt) < 5*time.Minute,
+			ID:                id,
+			Title:             e.title,
+			Agent:             s.Agent,
+			Busy:              s.Busy,
+			ActiveAt:          e.activeAt.UnixMilli(),
+			CreatedAt:         e.created.UnixMilli(),
+			HasRecentEvent:    time.Since(e.activeAt) < 5*time.Minute,
+			PermissionPending: s.PermissionPending,
+			QuestionPending:   s.QuestionPending,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -272,19 +276,21 @@ type AgentInfo struct {
 
 // StatusSnapshot is the live cockpit chrome state.
 type StatusSnapshot struct {
-	SessionID      string `json:"sessionId"`
-	Provider       string `json:"provider,omitempty"`
-	Model          string `json:"model,omitempty"`
-	Agent          string `json:"agent,omitempty"`
-	Effort         string `json:"effort,omitempty"`
-	Autonomy       string `json:"autonomy,omitempty"`
-	PermissionMode string `json:"permissionMode,omitempty"`
-	Phase          string `json:"phase,omitempty"`
-	Workflow       string `json:"workflow,omitempty"`
-	CWD            string `json:"cwd,omitempty"`
-	Busy           bool   `json:"busy"`
-	ContextUsed    int    `json:"contextUsed,omitempty"`
-	ContextLimit   int    `json:"contextLimit,omitempty"`
+	SessionID         string `json:"sessionId"`
+	Provider          string `json:"provider,omitempty"`
+	Model             string `json:"model,omitempty"`
+	Agent             string `json:"agent,omitempty"`
+	Effort            string `json:"effort,omitempty"`
+	Autonomy          string `json:"autonomy,omitempty"`
+	PermissionMode    string `json:"permissionMode,omitempty"`
+	Phase             string `json:"phase,omitempty"`
+	Workflow          string `json:"workflow,omitempty"`
+	CWD               string `json:"cwd,omitempty"`
+	Busy              bool   `json:"busy"`
+	ContextUsed       int    `json:"contextUsed,omitempty"`
+	ContextLimit      int    `json:"contextLimit,omitempty"`
+	PermissionPending bool   `json:"permissionPending,omitempty"`
+	QuestionPending   bool   `json:"questionPending,omitempty"`
 }
 
 // Live bridges a running engine to HTTP/WebSocket clients.
@@ -456,6 +462,14 @@ func (l *Live) applyStatus(ev protocol.Event) {
 		l.status.Busy = true
 	case protocol.TurnCompleted:
 		l.status.Busy = false
+	case protocol.PermissionAsked:
+		l.status.PermissionPending = true
+	case protocol.PermissionResolved:
+		l.status.PermissionPending = false
+	case protocol.QuestionAsked:
+		l.status.QuestionPending = true
+	case protocol.QuestionResolved:
+		l.status.QuestionPending = false
 	case protocol.UsageReported:
 		if e.Used.Known {
 			l.status.ContextUsed = e.Used.N

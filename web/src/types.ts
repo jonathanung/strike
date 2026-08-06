@@ -46,6 +46,7 @@ export type WorkspaceState = {
 export type ActiveRoot = {
   id: string; title?: string; agent?: string; busy: boolean;
   activeAt?: number; createdAt?: number; hasRecentEvent?: boolean;
+  permissionPending?: boolean; questionPending?: boolean;
 };
 export type RootsResponse = { roots: ActiveRoot[]; activeId?: string };
 export type RootCreateResult = { id: string; sessionId: string };

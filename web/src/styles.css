@@ -799,6 +799,32 @@ dialog input { padding: 12px; color: var(--ink); }
   background: var(--idle);
   margin-right: 8px;
 }
+.root-attention {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warn, #f5a623);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--warn, #f5a623) 35%, transparent);
+  flex-shrink: 0;
+}
+.needs-you {
+  color: var(--warn, #f5a623) !important;
+  font-weight: 700;
+}
+.attention-summary {
+  margin-left: 8px;
+  border: 1px solid color-mix(in srgb, var(--warn, #f5a623) 50%, transparent);
+  background: color-mix(in srgb, var(--warn, #f5a623) 12%, transparent);
+  color: var(--warn, #f5a623);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.attention-summary:hover { filter: brightness(1.1); }
+
 .root-busy {
   display: inline-block;
   width: 7px;
