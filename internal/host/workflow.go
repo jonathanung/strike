@@ -50,3 +50,55 @@ type Workflows interface {
 	// Get returns one summary by name.
 	Get(name string) (WorkflowSummary, bool)
 }
+
+// WorkflowPhaseDraftReview is one phase in a host-safe draft review.
+type WorkflowPhaseDraftReview struct {
+	Name             string
+	Description      string
+	Agent            string
+	Context          string
+	Gate             string // agent | user | check
+	GateCommand      string
+	CheckHighlighted bool
+	Permissions      []WorkflowPermission
+	// Widening is effective grant delta vs the host baseline (allow/ask upgrades).
+	Widening []WorkflowPermission
+}
+
+// WorkflowDraftReview is a structured review of an in-memory workflow draft.
+// Frontends must not treat a draft as activated configuration.
+type WorkflowDraftReview struct {
+	Name            string
+	Description     string
+	SourceLabel     string
+	Valid           bool
+	ValidationError string
+	Fingerprint     string
+	HasChecks       bool
+	HasWidening     bool
+	Phases          []WorkflowPhaseDraftReview
+	// CanonicalJSON is pretty-printed JSON when Valid; otherwise raw input.
+	CanonicalJSON string
+}
+
+// WorkflowDraftSave is the result of an accepted draft save.
+type WorkflowDraftSave struct {
+	Path string
+	// Activated is always false — saves never start a workflow.
+	Activated bool
+}
+
+// WorkflowDrafts reviews and saves in-memory workflow drafts without activating
+// them. Nil means the capability is absent; frontends must degrade without panic.
+// Model generation may live in the CLI; this surface is the shared validate /
+// review / save contract for TUI and web (#718/#719).
+type WorkflowDrafts interface {
+	// Review parses JSON into a draft and returns a structured review.
+	// Invalid input still returns a review with Valid=false and diagnostics.
+	Review(jsonDocument string) WorkflowDraftReview
+	// Save validates and atomically writes a draft to scope ("global" or
+	// "project"). confirm must be true. force is required to overwrite.
+	// Invalid drafts and missing confirmation return an error without writing.
+	// On failure the prior file (if any) is preserved. Never activates.
+	Save(jsonDocument string, scope string, confirm, force bool) (WorkflowDraftSave, error)
+}

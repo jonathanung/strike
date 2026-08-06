@@ -46,6 +46,7 @@ var shortPurposes = map[string]string{
 	"issue_read":      "read project issues",
 	"plan_write":      "create or revise a structured plan",
 	"plan_read":       "read structured plans",
+	"plan_delegate":   "delegate plan section refinement to a child",
 	"notebook_edit":   "edit a Jupyter notebook cell",
 	"sleep":           "pause for a number of seconds",
 	"skill":           "load a named skill into context",
@@ -293,6 +294,8 @@ func recommendedGuidance(entries []GuidanceEntry) string {
 		"Use `plan_write`/`plan_read` for the root-owned structured plan artifact (section CAS via expected_version). Prefer over workspace files while planning; write/edit may stay denied.")
 	add(has("plan_read") && !has("plan_write"),
 		"Use `plan_read` for root-owned structured plans (list meta or full plan by id).")
+	add(has("plan_delegate"),
+		"Use `plan_delegate` to refine plan sections via the existing task/team runtime (concurrent sections ok; in_flight rejects double dispatch). Child handoff must include section_body; completion applies only the correlated section with content CAS. Implementation task boundaries stay independent of plan sections.")
 	add(has("todowrite", "todoread") && has("team_task"),
 		"Use `todowrite`/`todoread` for solo multi-step tracking (full list on each write). Use `team_task` when teammates must claim shared work items.")
 	add(has("todowrite", "todoread") && !has("team_task"),
