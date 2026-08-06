@@ -91,7 +91,7 @@ func (p *pool) Close() error {
 	}
 	p.closed = true
 	live := p.live
-	p.live = nil
+	// Leave p.live set until shutdown retires it so concurrent failAll can see stopping.
 	p.mu.Unlock()
 	if live != nil {
 		live.shutdown()
@@ -501,6 +501,7 @@ func (lw *liveWorker) failAll(err error) {
 	}
 	lw.dead = true
 	lw.deadErr = err
+	stopping := lw.stopping
 	invs := make([]*invocation, 0, len(lw.invocations))
 	for _, inv := range lw.invocations {
 		invs = append(invs, inv)
@@ -520,6 +521,14 @@ func (lw *liveWorker) failAll(err error) {
 	case <-time.After(cancelGrace):
 		_ = lw.pipe.Kill()
 		<-lw.processDone
+	}
+	// Intentional shutdown/idle eviction must not burn restart budget when the
+	// reader observes EOF during teardown.
+	if stopping {
+		lw.pool.mu.Lock()
+		lw.pool.retireLocked(lw, false, err)
+		lw.pool.mu.Unlock()
+		return
 	}
 	lw.pool.noteCrash(lw, err)
 }
