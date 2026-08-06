@@ -161,37 +161,39 @@ func TestWrapLinuxArgvShape(t *testing.T) {
 		t.Fatalf("result = %+v", res)
 	}
 	argv := res.Argv
-	// bwrap --ro-bind / / --bind WD WD --dev /dev --proc /proc --unshare-net --die-with-parent -- bash -c echo hi
-	// Launcher may be absolute (preferred) or bare "bwrap".
+	// bwrap --ro-bind / / --bind WD WD [--bind shared...] --dev /dev --proc /proc --unshare-net --die-with-parent -- bash -c echo hi
+	// Launcher may be absolute (preferred) or bare "bwrap". Shared temp/cache
+	// binds are host-dependent so assert structure, not a fixed argv length.
 	if len(argv) < 14 {
 		t.Fatalf("argv too short: %#v", argv)
 	}
 	if base := filepath.Base(argv[0]); base != "bwrap" {
 		t.Fatalf("launcher = %q", argv[0])
 	}
-	wantRest := []string{
-		"--ro-bind", "/", "/",
-		"--bind", realWD, realWD,
-		"--dev", "/dev",
-		"--proc", "/proc",
-		"--unshare-net",
-		"--die-with-parent",
-		"--",
-		"bash", "-c", "echo hi",
+	joined := strings.Join(argv, "\x00")
+	if !strings.HasPrefix(joined, argv[0]+"\x00--ro-bind\x00/\x00/\x00") {
+		t.Fatalf("missing ro-bind /: %#v", argv)
 	}
-	if len(argv) != 1+len(wantRest) {
-		t.Fatalf("argv len=%d\ngot  %#v", len(argv), argv)
+	if !strings.Contains(joined, "\x00--bind\x00"+realWD+"\x00"+realWD+"\x00") {
+		t.Fatalf("missing workspace bind: %#v", argv)
 	}
-	for i, w := range wantRest {
-		if argv[i+1] != w {
-			t.Fatalf("argv[%d]=%q want %q\nfull=%#v", i+1, argv[i+1], w, argv)
+	// At least one shared temp bind when /tmp exists.
+	if st, err := os.Stat("/tmp"); err == nil && st.IsDir() {
+		if !strings.Contains(joined, "\x00--bind\x00/tmp\x00/tmp\x00") {
+			t.Fatalf("workspace-write should bind /tmp: %#v", argv)
 		}
 	}
+	if !strings.Contains(joined, "\x00--dev\x00/dev\x00--proc\x00/proc\x00") {
+		t.Fatalf("missing dev/proc: %#v", argv)
+	}
+	if !strings.Contains(joined, "\x00--unshare-net\x00--die-with-parent\x00--\x00bash\x00-c\x00echo hi") {
+		t.Fatalf("missing trailer: %#v", argv)
+	}
 
-	// Read-only: no workdir bind.
+	// Read-only: no workdir bind; temp shared binds still allowed.
 	ro := Wrap([]string{"true"}, Policy{Mode: ModeReadOnly, WorkDir: wd})
-	joined := strings.Join(ro, "\x00")
-	if strings.Contains(joined, "\x00--bind\x00") {
+	joined = strings.Join(ro, "\x00")
+	if strings.Contains(joined, "\x00--bind\x00"+realWD+"\x00") {
 		t.Fatalf("read-only must not --bind workdir: %#v", ro)
 	}
 	if filepath.Base(ro[0]) != "bwrap" || ro[len(ro)-1] != "true" {
@@ -225,14 +227,89 @@ func TestWrapLinuxArgvShape(t *testing.T) {
 		t.Fatalf("deny path missing ro-bind: %#v", denyArgv)
 	}
 
-	// NoWorkspaceWrite: no --bind workdir.
+	// NoWorkspaceWrite: no --bind workdir (shared temp binds may remain).
 	nw := Wrap([]string{"true"}, Policy{
 		Mode:             ModeWorkspaceWrite,
 		WorkDir:          wd,
 		NoWorkspaceWrite: true,
 	})
-	if strings.Contains(strings.Join(nw, "\x00"), "\x00--bind\x00") {
-		t.Fatalf("NoWorkspaceWrite must not --bind: %#v", nw)
+	nwJoined := strings.Join(nw, "\x00")
+	if strings.Contains(nwJoined, "\x00--bind\x00"+realWD+"\x00") {
+		t.Fatalf("NoWorkspaceWrite must not --bind workdir: %#v", nw)
+	}
+}
+
+func TestSharedWritablePathsAndIsShared(t *testing.T) {
+	if !IsSharedWritablePath("/dev/null") {
+		t.Fatal("/dev/null should be shared writable")
+	}
+	if !IsSharedWritablePath("/tmp/foo") {
+		t.Fatal("/tmp/foo should be shared writable")
+	}
+	if IsSharedWritablePath("/etc/passwd") {
+		t.Fatal("/etc/passwd must not be shared writable")
+	}
+	// Fixture home must not sit under /tmp (which is itself shared-writable).
+	realHome, err := os.UserHomeDir()
+	if err != nil || realHome == "" || IsSharedWritablePath(realHome) {
+		t.Skip("need a non-shared-writable real home for over-broad root tests")
+	}
+	home, err := os.MkdirTemp(realHome, ".strike-sandbox-home-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(home) })
+	t.Setenv("HOME", home)
+	// Create workspace before rewriting TMPDIR (t.TempDir follows TMPDIR).
+	wd := t.TempDir()
+	// Over-broad env roots must not open the whole home tree.
+	t.Setenv("TMPDIR", home)
+	t.Setenv("XDG_CACHE_HOME", home)
+	if IsSharedWritablePath(filepath.Join(home, "Documents", "secret")) {
+		t.Fatal("TMPDIR/XDG_CACHE_HOME=$HOME must not make home contents shared-writable")
+	}
+	tmpUnderHome := filepath.Join(home, "tmpdir")
+	if err := os.MkdirAll(tmpUnderHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".cache"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+	t.Setenv("TMPDIR", tmpUnderHome)
+	cacheFile := filepath.Join(home, ".cache", "go-build", "x")
+	if !IsSharedWritablePath(cacheFile) {
+		t.Fatalf("cache path %q should be shared writable", cacheFile)
+	}
+	if !isSafeSharedRoot("/tmp", home) || isSafeSharedRoot(home, home) || isSafeSharedRoot("/", home) {
+		t.Fatal("isSafeSharedRoot basic cases")
+	}
+	if parent := filepath.Dir(home); parent != "/" && isSafeSharedRoot(parent, home) {
+		t.Fatalf("ancestor %q of home should be rejected", parent)
+	}
+	paths := SharedWritablePaths(wd, true)
+	foundCache := false
+	wantCache := filepath.Join(home, ".cache")
+	if real, err := filepath.EvalSymlinks(wantCache); err == nil {
+		wantCache = real
+	}
+	for _, p := range paths {
+		if p == wantCache {
+			foundCache = true
+		}
+		if p == wd {
+			t.Fatalf("SharedWritablePaths must not include workdir %q: %v", wd, paths)
+		}
+	}
+	if !foundCache {
+		t.Fatalf("expected cache in SharedWritablePaths: %v", paths)
+	}
+	// Caches omitted when includeCaches=false.
+	temps := SharedWritablePaths(wd, false)
+	for _, p := range temps {
+		if p == wantCache {
+			t.Fatalf("temp-only list has cache %q: %v", p, temps)
+		}
 	}
 }
 
@@ -241,13 +318,24 @@ func TestExplainAndProfileText(t *testing.T) {
 	text := Explain(Policy{
 		Mode:           ModeWorkspaceWrite,
 		WorkDir:        wd,
-		DenyWriteGlobs: []string{"**/*.env"},
 		Network:        false,
+		NetworkAllow:   []string{"api.github.com", "10.0.0.0/8"},
+		DenyWriteGlobs: []string{"**/*.env"},
 	})
-	for _, want := range []string{"sandbox mode: workspace-write", "network: false", "deny-write globs: **/*.env", "profile:"} {
+	for _, want := range []string{
+		"sandbox mode: workspace-write",
+		"network: false",
+		"network allowlist: api.github.com, 10.0.0.0/8",
+		"deny-write globs: **/*.env",
+		"profile:",
+	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("Explain missing %q:\n%s", want, text)
 		}
+	}
+	unrestricted := Explain(Policy{Mode: ModeReadOnly, WorkDir: wd, Network: true})
+	if !strings.Contains(unrestricted, "network allowlist: (none — unrestricted public)") {
+		t.Errorf("Explain unrestricted allowlist:\n%s", unrestricted)
 	}
 	off := Explain(Policy{Mode: ModeOff})
 	if !strings.Contains(off, "disabled") {
@@ -332,11 +420,19 @@ func TestLinuxIntegrationEnforcesFS(t *testing.T) {
 		t.Skipf("bwrap unavailable or blocked in this environment")
 	}
 	wd := t.TempDir()
-	outside, err := os.MkdirTemp("", "strike-sandbox-outside-*")
+	// Outside must not sit under shared writable roots (/tmp, ~/.cache, …).
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" || IsSharedWritablePath(home) {
+		t.Skip("need a non-shared-writable home for outside fixture")
+	}
+	outside, err := os.MkdirTemp(home, ".strike-sandbox-outside-*")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(outside) })
+	if IsSharedWritablePath(outside) {
+		t.Skipf("outside fixture %q is shared-writable", outside)
+	}
 
 	argv := Wrap([]string{"bash", "-c",
 		"echo in > '" + filepath.Join(wd, "ok.txt") + "' && " +
@@ -355,5 +451,32 @@ func TestLinuxIntegrationEnforcesFS(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(outside, "nope.txt")); err == nil {
 		t.Fatal("outside write must be blocked by bwrap")
+	}
+}
+
+func TestLinuxIntegrationAllowsSharedTemp(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("linux bwrap integration")
+	}
+	ResetWarnForTest()
+	resetAvailabilityForTest()
+	if !Available() {
+		t.Skipf("bwrap unavailable or blocked in this environment")
+	}
+	wd := t.TempDir()
+	marker := filepath.Join("/tmp", "strike-sandbox-shared-"+filepath.Base(wd))
+	t.Cleanup(func() { os.Remove(marker) })
+	argv := Wrap([]string{"bash", "-c", "echo shared > '" + marker + "'"}, Policy{
+		Mode:    ModeWorkspaceWrite,
+		WorkDir: wd,
+	})
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Dir = wd
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("shared /tmp write should succeed: err=%v out=%s", err, out)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("marker missing after shared write: %v", err)
 	}
 }

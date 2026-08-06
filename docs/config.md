@@ -46,6 +46,9 @@ write this file. Manual `/ftue` remains available after acknowledgement.
   "notify": "unfocused-only",
   "permissionMode": "default",
   "sandbox": "workspace-write",
+  "network": {
+    "allow": ["api.github.com", "*.npmjs.org", "10.0.0.0/8"]
+  },
   "permissionAutoApproveSeconds": 0,
   "permissionAutoApproveExclude": ["bash"],
   "compactionStrategy": "trim",
@@ -105,6 +108,17 @@ Inspect the effective policy with `/sandbox`; `/sandbox explain` prints the
 generated OS profile (bwrap flags or seatbelt SBPL) compiled from permission
 rules.
 
+**Shared writable roots (default usability):** under any non-`off` mode the
+sandbox keeps common scratch dirs writable (`/tmp`, `/var/tmp`, `$TMPDIR`,
+and on Linux `/dev/shm`). In **`workspace-write`** it also binds user/tool
+caches when present (`$XDG_CACHE_HOME` or `~/.cache`, `$GOCACHE` /
+`$GOMODCACHE`, `~/.npm`, `~/.cargo`, `~/.rustup`, …) so `go build`, package
+managers, and `2>/dev/null` redirections work without disabling isolation.
+The bash static path guard allows the same roots (and safe devices like
+`/dev/null`) outside the workspace; critical targets (`/`, `/tmp` as a whole,
+`$HOME`, …) stay blocked. The rest of the host filesystem remains read-only
+aside from the session workdir.
+
 **Permission → sandbox profile:** hard `write`/`edit` deny rules are compiled
 into OS filesystem denials inside the bash sandbox (globs become seatbelt
 regexes and, when paths exist, bwrap `--ro-bind` remounts). A deny on
@@ -112,9 +126,36 @@ regexes and, when paths exist, bwrap `--ro-bind` remounts). A deny on
 bind. Network inside the sandbox stays **on** by default (so bash can run
 `gh`, `git`, package managers, etc.). It turns **off** only when both
 `webfetch` and `mcp` are hard-**deny** on `*` (patterned rules do not flip
-full-network posture). Host/CIDR allowlists are tracked in #527. Ask/yolo
-posture does not widen the OS profile. Composer `!` uses the config-layer
-compile; agent bash uses live layers (agent/phase/session).
+full-network posture). Ask/yolo posture does not widen the OS profile.
+Composer `!` uses the config-layer compile; agent bash uses live layers
+(agent/phase/session).
+
+**Network allowlist (`network.allow`):** optional host/CIDR whitelist for
+**application-layer** web egress (`webfetch`). Entries may be hostnames
+(`api.github.com`), a single leading wildcard label (`*.example.com`), IP
+literals, or CIDRs (`10.0.0.0/8`). Empty or omitted means unrestricted
+**public** hosts (existing SSRF blocks for private/loopback/link-local/CGNAT
+still apply and cannot be opened by the allowlist). When non-empty, the
+request host must match an entry: hostname/wildcard on the name, or IP/CIDR
+on the literal host or (when the list includes IP/CIDR entries) a resolved
+address. Redirects and dial-time resolution are re-checked. Global and
+project layers: when a layer sets `network.allow` (including `[]`), it
+**replaces** the previous list so a project can tighten or clear a global
+whitelist.
+
+This is the same policy **shape** as future container network filters. It is
+**not** a third independent system:
+
+| Surface | What applies today |
+|---|---|
+| `webfetch` | `network.allow` host/CIDR allowlist + SSRF private blocks |
+| bash OS profile | `sandbox.Policy.Network` on by default; off only when both `webfetch` and `mcp` are hard-deny on `*` (all-or-nothing; no per-host filter inside bwrap/seatbelt) |
+| permission rules | `webfetch` ask/allow/deny patterns (prompt posture), independent of the hard allowlist |
+| container net | deferred — reuse `network.allow` shape |
+
+`/sandbox explain` prints the effective allowlist next to bash `network: on/off`.
+Prefer `webfetch` over `curl`/`wget` in bash when you need allowlist enforcement;
+bash egress is not host-filtered at the OS layer.
 
 **Yolo + sandbox off:** `permissionMode: yolo` (or a resumed session in yolo)
 combined with `sandbox: off` **refuses to start** unless you pass `--i-know`.

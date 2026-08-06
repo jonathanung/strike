@@ -411,6 +411,118 @@ func TestWebFetchAskPatterns(t *testing.T) {
 	}
 }
 
+func TestWebFetchNetworkAllowlist(t *testing.T) {
+	srv := webfetchServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("ok"))
+	})
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := u.Hostname()
+	allowAll := func(_ context.Context, _ AskRequest) error { return nil }
+
+	t.Run("empty allow permits", func(t *testing.T) {
+		tc := &Context{WorkDir: t.TempDir(), Ask: allowAll}
+		res, err := NewWebFetch().Execute(context.Background(), mustJSON(t, map[string]any{
+			"url": srv.URL, "format": "text",
+		}), tc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(res.Output, "ok") {
+			t.Fatalf("output = %q", res.Output)
+		}
+	})
+
+	t.Run("host on list permits", func(t *testing.T) {
+		tc := &Context{
+			WorkDir:      t.TempDir(),
+			Ask:          allowAll,
+			NetworkAllow: []string{host, "example.com"},
+		}
+		if _, err := NewWebFetch().Execute(context.Background(), mustJSON(t, map[string]any{
+			"url": srv.URL, "format": "text",
+		}), tc); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("host not on list denies", func(t *testing.T) {
+		tc := &Context{
+			WorkDir:      t.TempDir(),
+			Ask:          allowAll,
+			NetworkAllow: []string{"example.com", "api.github.com"},
+		}
+		_, err := NewWebFetch().Execute(context.Background(), mustJSON(t, map[string]any{
+			"url": srv.URL, "format": "text",
+		}), tc)
+		if err == nil {
+			t.Fatal("want allowlist error")
+		}
+		if !strings.Contains(err.Error(), "allowlist") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+
+	t.Run("redirect off allowlist denies", func(t *testing.T) {
+		// First hop is allowlisted test host; redirect target is not.
+		redir := webfetchServer(t, func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "https://evil.example/path", http.StatusFound)
+		})
+		ru, err := url.Parse(redir.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tc := &Context{
+			WorkDir:      t.TempDir(),
+			Ask:          allowAll,
+			NetworkAllow: []string{ru.Hostname()},
+		}
+		_, err = NewWebFetch().Execute(context.Background(), mustJSON(t, map[string]any{
+			"url": redir.URL, "format": "text",
+		}), tc)
+		if err == nil {
+			t.Fatal("want redirect allowlist error")
+		}
+		// May fail on allowlist or on SSRF/resolve of evil.example — either is deny.
+		if !strings.Contains(err.Error(), "allowlist") &&
+			!strings.Contains(err.Error(), "evil.example") &&
+			!strings.Contains(err.Error(), "resolving") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+}
+
+func TestWebfetchSafeTransportDialAllowlist(t *testing.T) {
+	// Public IP not on allowlist must fail at dial even if SSRF would pass.
+	tr := newWebfetchSafeTransport([]string{"1.1.1.1"})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	conn, err := tr.DialContext(ctx, "tcp", "8.8.8.8:53")
+	if conn != nil {
+		_ = conn.Close()
+	}
+	if err == nil {
+		t.Fatal("want allowlist dial deny")
+	}
+	if !strings.Contains(err.Error(), "allowlist") {
+		t.Fatalf("err = %v", err)
+	}
+	// Exact IP on list: dial may still fail to connect, but not allowlist/SSRF.
+	conn, err = tr.DialContext(ctx, "tcp", "1.1.1.1:9")
+	if conn != nil {
+		_ = conn.Close()
+	}
+	if err != nil && strings.Contains(err.Error(), "allowlist") {
+		t.Fatalf("allowlisted IP rejected by allowlist: %v", err)
+	}
+	if err != nil && (strings.Contains(err.Error(), "private") || strings.Contains(err.Error(), "local")) {
+		t.Fatalf("public allowlisted IP treated as private: %v", err)
+	}
+}
+
 func TestResolvePublicDialAddr(t *testing.T) {
 	ctx := context.Background()
 
@@ -452,7 +564,7 @@ func TestResolvePublicDialAddr(t *testing.T) {
 }
 
 func TestNewWebfetchSafeTransportDialBlocksPrivate(t *testing.T) {
-	tr := newWebfetchSafeTransport()
+	tr := newWebfetchSafeTransport(nil)
 	if tr == nil || tr.DialContext == nil {
 		t.Fatal("expected transport with DialContext")
 	}
@@ -498,7 +610,7 @@ func TestWebfetchSafeTransportDialIgnoresTestAllowHost(t *testing.T) {
 		t.Fatalf("allowlist should pass assertPublicHTTPHost: %v", err)
 	}
 
-	tr := newWebfetchSafeTransport()
+	tr := newWebfetchSafeTransport(nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	conn, err := tr.DialContext(ctx, "tcp", "127.0.0.1:9")

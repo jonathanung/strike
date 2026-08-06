@@ -63,7 +63,19 @@ func TestShellGuardBlocksOutsideRm(t *testing.T) {
 		t.Skip("bash not available")
 	}
 	root := t.TempDir()
-	outside := t.TempDir()
+	// Outside must not sit under shared writable roots (/tmp, ~/.cache, …).
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" || sandbox.IsSharedWritablePath(home) {
+		t.Skip("need a non-shared-writable home for outside fixture")
+	}
+	outside, err := os.MkdirTemp(home, ".strike-shell-guard-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(outside) })
+	if sandbox.IsSharedWritablePath(outside) {
+		t.Skipf("outside fixture %q is shared-writable", outside)
+	}
 	marker := filepath.Join(outside, "keep-me")
 	if err := os.WriteFile(marker, []byte("safe"), 0o644); err != nil {
 		t.Fatal(err)

@@ -551,6 +551,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			InitialAutonomy:         initialAutonomy,
 			InitialPermissionMode:   initialPermMode,
 			SandboxMode:             sandboxMode,
+			NetworkAllow:            sandbox.CloneNetworkAllow(cfg.Network.Allow),
 			AllowYoloWithoutSandbox: opts.iKnow,
 			Agents:                  agents,
 			InitialAgent:            initialAgent,
@@ -687,6 +688,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		workDir,
 		permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions)...,
 	)
+	sandboxPolicy.NetworkAllow = sandbox.CloneNetworkAllow(cfg.Network.Allow)
 	sandboxExplain := sandbox.Explain(sandboxPolicy)
 	services.Shell = local.NewShell(workDir, sandboxPolicy)
 	services.Goals = local.NewGoals(goalStore, workDir)

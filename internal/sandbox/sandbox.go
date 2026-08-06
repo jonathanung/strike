@@ -124,6 +124,11 @@ type Policy struct {
 	// --unshare-net / omits network-* (seatbelt). Compiled off only when
 	// both webfetch and mcp are hard-Deny on "*".
 	Network bool
+	// NetworkAllow is an optional host/CIDR allowlist for application-layer
+	// egress (webfetch). Empty means unrestricted public hosts (SSRF blocks
+	// still apply). Populated from config network.allow — not enforced by
+	// OS bash networking (Policy.Network remains all-or-nothing).
+	NetworkAllow []string
 }
 
 // WorkspaceWritable reports whether the policy grants a writable workspace bind.
@@ -139,12 +144,20 @@ func Explain(p Policy) string {
 	if wd := strings.TrimSpace(p.WorkDir); wd != "" {
 		fmt.Fprintf(&b, "workdir: %s\n", wd)
 	}
+	if len(p.NetworkAllow) > 0 {
+		fmt.Fprintf(&b, "network allowlist: %s\n", strings.Join(p.NetworkAllow, ", "))
+	} else {
+		b.WriteString("network allowlist: (none — unrestricted public)\n")
+	}
 	if p.Mode == ModeOff {
 		b.WriteString("OS isolation: disabled\n")
 		return b.String()
 	}
 	fmt.Fprintf(&b, "workspace-write: %v\n", p.WorkspaceWritable())
 	fmt.Fprintf(&b, "network: %v\n", p.Network)
+	if shared := SharedWritablePaths(p.WorkDir, p.WorkspaceWritable()); len(shared) > 0 {
+		fmt.Fprintf(&b, "shared-writable: %s\n", strings.Join(shared, ", "))
+	}
 	if len(p.DenyWriteGlobs) > 0 {
 		fmt.Fprintf(&b, "deny-write globs: %s\n", strings.Join(p.DenyWriteGlobs, ", "))
 	}
