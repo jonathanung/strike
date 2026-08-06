@@ -45,7 +45,8 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 
 | Package | Role | May import |
 |---|---|---|
-| `cmd/strike` | CLI entry (`main.go`) + composition root (`wire.go` stub; `assemble_tools.go`, `session_lifecycle.go`, `exec.go`, `serve.go`, `multiroot.go`) | anything — the only package that wires the whole tree |
+| `cmd/strike` | CLI entry (`main.go`) + composition root (`wire.go` stub; `assemble_tools.go`, `session_lifecycle.go`, `exec.go`, `rpc.go`, `serve.go`, `multiroot.go`) | anything — the only package that wires the whole tree |
+| `internal/rpc` | Stdio JSON-RPC 2.0 bridge for Op/Event (`strike rpc`: NDJSON ops in, event envelopes out) | `protocol`, stdlib |
 | `internal/server` | Experimental read-only HTTP attach: `/health`, SSE session event tail, minimal attach page (`strike serve`) | `session`, `version`, `protocol` (via session JSONL), stdlib |
 | `internal/version` | Build-time Version/Commit stamped via `-ldflags` | stdlib |
 | `internal/update` | GitHub Releases self-update (check, download, sha256, atomic replace, re-exec) | `version`, stdlib, net/http |
@@ -61,7 +62,7 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `internal/sandbox` | OS-primitive process sandbox: `Wrap(argv, Policy)` via Linux `bwrap` / macOS `sandbox-exec`; Policy carries mode, write denials, network on/off, and optional `NetworkAllow` host/CIDR list (webfetch; shared shape for future container net); `Explain`/`ProfileText` for `/sandbox explain`; graceful degrade + startup warning when unavailable | stdlib only |
 | `internal/scheduler` | Fair cancellable named-pool admission (process/build/test/model/container): context-aware acquire, atomic multi-pool leases, observer snapshots; layered limits + ordered command classification (`Compile` / `CompileWithPresets` → `Effective`); versioned build-system presets (`Catalog`, expand into ordinary limits/rules) | stdlib only |
 | `internal/tool` | Tool contract (`Tool`, `Context`, `Result`) + built-ins: read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/task_message/task_interrupt/agent_roster/agent_message/agent_broadcast/team_task/webfetch/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/phase_done/toolsearch; bash acquires scheduler pools after Ask | `provider` (for `ToolSchema`), `memory`, `issue`, `sandbox`, `scheduler`, stdlib |
-| `internal/mcp` | MCP client (stdio + streamable HTTP) + session manager; bridges tools onto `tool.Registry` as `mcp_<server>_<tool>`; retry/disable | `tool`, stdlib, net/http |
+| `internal/mcp` | MCP client (stdio + streamable HTTP) + session manager; bridges tools onto `tool.Registry` as `mcp_<server>_<tool>`; retry/disable; tools-only stdio **server** (`Server`) for `strike mcp-serve` | `tool`, stdlib, net/http |
 | `internal/lsp` | LSP client (JSON-RPC 2.0 over stdio, Content-Length framing) + manager; extension→server registry; didOpen/didChange/didClose from file tools; collect `publishDiagnostics`; crash isolation | stdlib, os/exec |
 | `internal/memory` | Project-scoped durable key/value memory (JSON under `~/.strike/memory/`) | stdlib |
 | `internal/issue` | Project-scoped durable issues (JSON under `~/.strike/issues/`) | stdlib |
@@ -442,7 +443,7 @@ Same package `internal/engine`; split for reviewability only.
 | `assemble_tools.go` | `assemble`: providers, tools, MCP, hooks, host services |
 | `session_lifecycle.go` | `run` / `runSession` / resume / worktree bind / `runExec` |
 | `main.go` | flags, usage, subcommand dispatch |
-| `exec.go` / `serve.go` / `multiroot.go` / `auth.go` | already-split surfaces |
+| `exec.go` / `serve.go` / `mcp_serve.go` / `multiroot.go` / `auth.go` | already-split surfaces |
 
 ## TUI theme and style boundary
 

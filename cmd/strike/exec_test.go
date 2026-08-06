@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -248,7 +249,7 @@ func TestRunHeadlessFrontendStreamsTextAndCompletes(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- runHeadlessFrontend(ops, events, "hello", &stdout, io.Discard, headlessOpts{})
+		done <- runHeadlessFrontend(context.Background(), ops, events, "hello", &stdout, io.Discard, headlessOpts{})
 	}()
 
 	select {
@@ -287,7 +288,7 @@ func TestRunHeadlessFrontendJSONResult(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- runHeadlessFrontend(ops, events, "hello", &stdout, io.Discard, headlessOpts{
+		done <- runHeadlessFrontend(context.Background(), ops, events, "hello", &stdout, io.Discard, headlessOpts{
 			Format:    execFormatJSON,
 			SessionID: "sess-1",
 		})
@@ -351,7 +352,7 @@ func TestRunHeadlessFrontendJSONIncompleteNotOK(t *testing.T) {
 	var stdout bytes.Buffer
 	done := make(chan error, 1)
 	go func() {
-		done <- runHeadlessFrontend(ops, events, "hi", &stdout, io.Discard, headlessOpts{Format: execFormatJSON})
+		done <- runHeadlessFrontend(context.Background(), ops, events, "hi", &stdout, io.Discard, headlessOpts{Format: execFormatJSON})
 	}()
 	select {
 	case <-ops:
@@ -386,7 +387,7 @@ func TestRunHeadlessFrontendJSONError(t *testing.T) {
 	var stdout bytes.Buffer
 	done := make(chan error, 1)
 	go func() {
-		done <- runHeadlessFrontend(ops, events, "hi", &stdout, io.Discard, headlessOpts{Format: execFormatJSON})
+		done <- runHeadlessFrontend(context.Background(), ops, events, "hi", &stdout, io.Discard, headlessOpts{Format: execFormatJSON})
 	}()
 	select {
 	case <-ops:
@@ -419,7 +420,7 @@ func TestRunHeadlessFrontendStreamJSON(t *testing.T) {
 	var stdout bytes.Buffer
 	done := make(chan error, 1)
 	go func() {
-		done <- runHeadlessFrontend(ops, events, "hello", &stdout, io.Discard, headlessOpts{Format: execFormatStreamJSON})
+		done <- runHeadlessFrontend(context.Background(), ops, events, "hello", &stdout, io.Discard, headlessOpts{Format: execFormatStreamJSON})
 	}()
 	select {
 	case <-ops:
@@ -473,7 +474,7 @@ func TestRunHeadlessFrontendRejectsPermissionAsks(t *testing.T) {
 	events := make(chan protocol.Event, 8)
 	done := make(chan error, 1)
 	go func() {
-		done <- runHeadlessFrontend(ops, events, "run true", io.Discard, io.Discard, headlessOpts{})
+		done <- runHeadlessFrontend(context.Background(), ops, events, "run true", io.Discard, io.Discard, headlessOpts{})
 	}()
 
 	select {
@@ -517,7 +518,7 @@ func TestRunHeadlessFrontendRejectsQuestions(t *testing.T) {
 	var stderr bytes.Buffer
 	done := make(chan error, 1)
 	go func() {
-		done <- runHeadlessFrontend(ops, events, "ask me", io.Discard, &stderr, headlessOpts{})
+		done <- runHeadlessFrontend(context.Background(), ops, events, "ask me", io.Discard, &stderr, headlessOpts{})
 	}()
 
 	select {
@@ -560,7 +561,7 @@ func TestRunHeadlessFrontendEngineError(t *testing.T) {
 	events := make(chan protocol.Event, 4)
 	done := make(chan error, 1)
 	go func() {
-		done <- runHeadlessFrontend(ops, events, "hi", io.Discard, io.Discard, headlessOpts{})
+		done <- runHeadlessFrontend(context.Background(), ops, events, "hi", io.Discard, io.Discard, headlessOpts{})
 	}()
 	select {
 	case <-ops:
