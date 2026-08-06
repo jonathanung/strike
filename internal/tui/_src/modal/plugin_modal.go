@@ -844,7 +844,7 @@ func (m *pluginModal) viewDetail(width int, th theme.Theme, inner int) string {
 		visible = lines[m.detailScroll:end]
 	}
 	body := wrapToWidth(strings.Join(visible, "\n"), inner)
-	hint := dotJoin(th, "↑/↓ scroll", "ctrl+e/t/x · U actions", "enter back", "esc back")
+	hint := dotJoin(th, "↑/↓ scroll", "ctrl+e/t/x"+themedSpace(th.Spacing.XS)+th.Icons.Dot+themedSpace(th.Spacing.XS)+"U actions", "enter back", "esc back")
 	return ui.Dialog(th, ui.DialogOpts{
 		Title: "Plugin " + sanitizeDisplayData(p.ID),
 		Hint:  hint,
