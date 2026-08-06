@@ -992,6 +992,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setNotice("theme: "+msg.entry.ID, false)
 		return m, nil
 
+	case themePreviewMsg:
+		// Live preview while /theme picker is open — session only, never SaveTheme.
+		m.applyThemeEntry(msg.entry)
+		return m, nil
+
+	case themeRevertMsg:
+		// Esc/q from picker restores the theme active when the modal opened.
+		m.applyThemeEntry(msg.entry)
+		return m, nil
+
 	case themeSavedMsg:
 		if msg.err != nil {
 			m.setNotice("saving theme failed: "+msg.err.Error(), true)

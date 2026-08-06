@@ -29,19 +29,21 @@ func TestThemeModalUpdateKeys(t *testing.T) {
 		wantCursor int
 		wantFilter string
 		wantClose  bool
-		wantCmd    string // "select" | "save" | ""
+		wantCmd    string // "select" | "save" | "revert" | "preview" | ""
 	}{
 		{
 			name:       "down moves cursor",
 			current:    "strike",
 			keys:       []tea.KeyPressMsg{{Code: tea.KeyDown}},
 			wantCursor: 1,
+			wantCmd:    "preview",
 		},
 		{
 			name:       "j moves cursor",
 			current:    "strike",
 			keys:       []tea.KeyPressMsg{{Text: "j"}},
 			wantCursor: 1,
+			wantCmd:    "preview",
 		},
 		{
 			name:       "up at top stays",
@@ -57,6 +59,7 @@ func TestThemeModalUpdateKeys(t *testing.T) {
 			},
 			keys:       []tea.KeyPressMsg{{Code: tea.KeyUp}},
 			wantCursor: 1,
+			wantCmd:    "preview",
 		},
 		{
 			name:    "k moves cursor up",
@@ -66,12 +69,14 @@ func TestThemeModalUpdateKeys(t *testing.T) {
 			},
 			keys:       []tea.KeyPressMsg{{Text: "k"}},
 			wantCursor: 1,
+			wantCmd:    "preview",
 		},
 		{
 			name:       "ctrl+n moves down",
 			current:    "strike",
 			keys:       []tea.KeyPressMsg{{Code: 'n', Mod: tea.ModCtrl}},
 			wantCursor: 1,
+			wantCmd:    "preview",
 		},
 		{
 			name:    "ctrl+p moves up",
@@ -81,12 +86,14 @@ func TestThemeModalUpdateKeys(t *testing.T) {
 			},
 			keys:       []tea.KeyPressMsg{{Code: 'p', Mod: tea.ModCtrl}},
 			wantCursor: 1,
+			wantCmd:    "preview",
 		},
 		{
 			name:       "tab moves down",
 			current:    "strike",
 			keys:       []tea.KeyPressMsg{{Code: tea.KeyTab}},
 			wantCursor: 1,
+			wantCmd:    "preview",
 		},
 		{
 			name:    "down at bottom stays",
@@ -104,6 +111,7 @@ func TestThemeModalUpdateKeys(t *testing.T) {
 			keys:       []tea.KeyPressMsg{{Text: "d"}, {Text: "r"}},
 			wantCursor: 0,
 			wantFilter: "dr",
+			// Final key may not re-preview when the sole match is unchanged.
 		},
 		{
 			name: "backspace trims filter",
@@ -124,16 +132,18 @@ func TestThemeModalUpdateKeys(t *testing.T) {
 			wantFilter: "",
 		},
 		{
-			name:      "esc closes",
+			name:      "esc closes and reverts",
 			current:   "strike",
 			keys:      []tea.KeyPressMsg{{Code: tea.KeyEsc}},
 			wantClose: true,
+			wantCmd:   "revert",
 		},
 		{
-			name:      "q closes",
+			name:      "q closes and reverts",
 			current:   "strike",
 			keys:      []tea.KeyPressMsg{{Text: "q"}},
 			wantClose: true,
+			wantCmd:   "revert",
 		},
 		{
 			name:      "enter selects and closes",
@@ -212,14 +222,36 @@ func TestThemeModalUpdateKeys(t *testing.T) {
 				if cmd == nil {
 					t.Fatal("expected save cmd")
 				}
-				if _, ok := cmd().(themeSavedMsg); !ok {
+				// May be a Batch(preview, save); drain until themeSavedMsg.
+				if !cmdYields(cmd, func(msg tea.Msg) bool {
+					_, ok := msg.(themeSavedMsg)
+					return ok
+				}) {
+					t.Fatalf("expected themeSavedMsg in cmd batch")
+				}
+			case "revert":
+				if cmd == nil {
+					t.Fatal("expected revert cmd")
+				}
+				if _, ok := cmd().(themeRevertMsg); !ok {
+					t.Fatalf("cmd msg type unexpected")
+				}
+			case "preview":
+				if cmd == nil {
+					t.Fatal("expected preview cmd")
+				}
+				if _, ok := cmd().(themePreviewMsg); !ok {
 					t.Fatalf("cmd msg type unexpected")
 				}
 			case "":
 				if cmd != nil && next != nil {
-					// empty filtered enter/ctrl+d return nil cmd
 					msg := cmd()
-					t.Fatalf("unexpected cmd msg %T", msg)
+					// No-op moves may still emit nil; reject unexpected types.
+					if msg != nil {
+						if _, ok := msg.(themePreviewMsg); !ok {
+							t.Fatalf("unexpected cmd msg %T", msg)
+						}
+					}
 				}
 			}
 		})
@@ -236,7 +268,7 @@ func TestThemeModalRefilterByIDAndName(t *testing.T) {
 		{"drac", []string{"dracula"}},
 		{"custom", []string{"custom-dark"}},
 		{"Dark", []string{"custom-dark"}},
-		{"user", []string{}},
+		{"user", []string{"custom-dark"}}, // matches Source provenance
 		{"zzz", []string{}},
 	}
 	for _, tt := range tests {
@@ -338,6 +370,30 @@ func TestThemeModalEnterSelectsEntry(t *testing.T) {
 	}
 }
 
+// cmdYields runs a tea.Cmd (including Batch) and reports whether any produced
+// message matches want.
+func cmdYields(cmd tea.Cmd, want func(tea.Msg) bool) bool {
+	if cmd == nil {
+		return false
+	}
+	msg := cmd()
+	if msg == nil {
+		return false
+	}
+	if want(msg) {
+		return true
+	}
+	// tea.BatchMsg is a slice of Cmd in bubbletea v2.
+	if b, ok := msg.(tea.BatchMsg); ok {
+		for _, c := range b {
+			if cmdYields(c, want) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func TestThemeModalCtrlDSavesDefault(t *testing.T) {
 	settings := &fakeSettings{}
 	m := newThemeModal(testThemeEntries(), "strike", settings)
@@ -354,9 +410,18 @@ func TestThemeModalCtrlDSavesDefault(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected save cmd")
 	}
-	msg, ok := cmd().(themeSavedMsg)
-	if !ok || msg.err != nil || msg.id != "custom-dark" {
-		t.Fatalf("msg = %#v", msg)
+	var saved themeSavedMsg
+	if !cmdYields(cmd, func(msg tea.Msg) bool {
+		s, ok := msg.(themeSavedMsg)
+		if ok {
+			saved = s
+		}
+		return ok
+	}) {
+		t.Fatal("expected themeSavedMsg")
+	}
+	if saved.err != nil || saved.id != "custom-dark" {
+		t.Fatalf("msg = %#v", saved)
 	}
 	if len(settings.savedThemes) != 1 || settings.savedThemes[0] != "custom-dark" {
 		t.Fatalf("savedThemes = %v", settings.savedThemes)
@@ -381,5 +446,60 @@ func TestNewThemeModalCursorOnCurrent(t *testing.T) {
 	m := newThemeModal(testThemeEntries(), "custom-dark", nil)
 	if m.filtered[m.cursor].ID != "custom-dark" {
 		t.Errorf("cursor on %q, want custom-dark", m.filtered[m.cursor].ID)
+	}
+}
+
+func TestThemeModalEscRevertsOriginal(t *testing.T) {
+	entries := testThemeEntries()
+	m := newThemeModal(entries, "dracula", nil)
+	// Move to a different theme so preview fires.
+	for i, e := range m.filtered {
+		if e.ID == "custom-dark" {
+			m.cursor = i - 1 // one above so down lands on custom-dark
+			if m.cursor < 0 {
+				m.cursor = 0
+			}
+			break
+		}
+	}
+	// Force cursor onto custom-dark via down from strike.
+	m.cursor = 0
+	m.previewed = "dracula"
+	_, cmd := m.update(tea.KeyPressMsg{Code: tea.KeyDown}) // -> dracula, same as previewed
+	// Second down -> custom-dark
+	_, cmd = m.update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if cmd == nil {
+		t.Fatal("expected preview")
+	}
+	prev, ok := cmd().(themePreviewMsg)
+	if !ok || prev.entry.ID != "custom-dark" {
+		t.Fatalf("preview = %#v", prev)
+	}
+	// Esc restores original (dracula).
+	next, cmd := m.update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	if next != nil {
+		t.Fatalf("want closed, got %T", next)
+	}
+	msg, ok := cmd().(themeRevertMsg)
+	if !ok || msg.entry.ID != "dracula" {
+		t.Fatalf("revert = %#v", msg)
+	}
+}
+
+func TestThemeModalViewShowsPluginProvenance(t *testing.T) {
+	entries := []theme.Entry{
+		{ID: "strike", Name: "Strike", Source: theme.SourceBuiltin},
+		{ID: "plug-theme", Name: "Plug", Source: theme.SourcePlugin, PluginID: "acme.themes", Overrode: "user"},
+	}
+	m := newThemeModal(entries, "strike", nil)
+	plain := ansi.Strip(m.view(80, theme.Default()))
+	if !strings.Contains(plain, "plugin:acme.themes") {
+		t.Fatalf("missing provenance:\n%s", plain)
+	}
+	if !strings.Contains(plain, "over user") {
+		t.Fatalf("missing collision:\n%s", plain)
+	}
+	if !strings.Contains(plain, "esc revert") {
+		t.Fatalf("missing revert hint:\n%s", plain)
 	}
 }

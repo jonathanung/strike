@@ -342,10 +342,27 @@ func TestThemePickerSelectAndSave(t *testing.T) {
 	if saveCmd == nil {
 		t.Fatal("ctrl+d produced no cmd")
 	}
-	msg := saveCmd()
-	saved, ok := msg.(themeSavedMsg)
-	if !ok || saved.err != nil || saved.id != "dracula" {
-		t.Fatalf("themeSavedMsg = %#v", msg)
+	// ctrl+d may Batch a live preview with the save cmd.
+	var saved themeSavedMsg
+	found := false
+	var drain func(tea.Cmd)
+	drain = func(c tea.Cmd) {
+		if c == nil {
+			return
+		}
+		msg := c()
+		switch m := msg.(type) {
+		case themeSavedMsg:
+			saved, found = m, true
+		case tea.BatchMsg:
+			for _, sub := range m {
+				drain(sub)
+			}
+		}
+	}
+	drain(saveCmd)
+	if !found || saved.err != nil || saved.id != "dracula" {
+		t.Fatalf("themeSavedMsg = %#v found=%v", saved, found)
 	}
 	if len(settings.savedThemes) != 1 || settings.savedThemes[0] != "dracula" {
 		t.Fatalf("savedThemes = %v", settings.savedThemes)

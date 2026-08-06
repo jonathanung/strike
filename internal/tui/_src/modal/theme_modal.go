@@ -12,19 +12,31 @@ import (
 
 const themeModalVisible = 10
 
-// themeModal is the centered /theme picker: bundled JSON themes plus any
-// user/project files under ~/.strike/themes and ./.strike/themes.
+// themeModal is the centered /theme picker: bundled JSON themes, user/project
+// dirs, and plugin contributions (docs/plugins.md §7.4). Cursor movement
+// previews without persisting; esc always reverts to the theme active when the
+// modal opened; enter applies the session theme; ctrl+d saves the default.
 type themeModal struct {
 	entries  []theme.Entry
 	filtered []theme.Entry
 	cursor   int
 	filter   string
-	current  string
+	current  string // session theme id when opened / last applied
+	// original is the palette to restore on cancel (esc/q).
+	original theme.Entry
 	settings host.Settings
+	// previewed tracks the last live-preview id to avoid redundant cmds.
+	previewed string
 }
 
 func newThemeModal(entries []theme.Entry, current string, settings host.Settings) *themeModal {
 	m := &themeModal{entries: entries, current: current, settings: settings}
+	// Capture original for revert — prefer catalog entry, else bare id.
+	if e, ok := theme.Lookup(entries, current); ok {
+		m.original = e
+	} else {
+		m.original = theme.Entry{ID: current, Name: current, Theme: theme.Default(), Source: theme.SourceBuiltin}
+	}
 	m.refilter()
 	for i, e := range m.filtered {
 		if e.ID == current {
@@ -32,6 +44,7 @@ func newThemeModal(entries []theme.Entry, current string, settings host.Settings
 			break
 		}
 	}
+	m.previewed = current
 	return m
 }
 
@@ -43,7 +56,10 @@ func (m *themeModal) refilter() {
 	}
 	out := make([]theme.Entry, 0, len(m.entries))
 	for _, e := range m.entries {
-		if strings.Contains(strings.ToLower(e.ID), q) || strings.Contains(strings.ToLower(e.Name), q) {
+		if strings.Contains(strings.ToLower(e.ID), q) ||
+			strings.Contains(strings.ToLower(e.Name), q) ||
+			strings.Contains(strings.ToLower(e.Provenance()), q) ||
+			strings.Contains(strings.ToLower(e.PluginID), q) {
 			out = append(out, e)
 		}
 	}
@@ -53,45 +69,70 @@ func (m *themeModal) refilter() {
 	}
 }
 
+func (m *themeModal) selected() (theme.Entry, bool) {
+	if m.cursor < 0 || m.cursor >= len(m.filtered) {
+		return theme.Entry{}, false
+	}
+	return m.filtered[m.cursor], true
+}
+
+func (m *themeModal) previewCmd() tea.Cmd {
+	e, ok := m.selected()
+	if !ok || e.ID == m.previewed {
+		return nil
+	}
+	m.previewed = e.ID
+	return func() tea.Msg { return themePreviewMsg{entry: e} }
+}
+
 func (m *themeModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	if isEscape(msg) || msg.String() == "q" {
-		return nil, nil
+		// Always revert to the theme that was active when the modal opened.
+		orig := m.original
+		return nil, func() tea.Msg { return themeRevertMsg{entry: orig} }
 	}
 	switch msg.String() {
 	case "up", "k", "ctrl+p":
 		if m.cursor > 0 {
 			m.cursor--
 		}
-		return m, nil
+		return m, m.previewCmd()
 	case "down", "j", "ctrl+n", "tab":
 		if m.cursor < len(m.filtered)-1 {
 			m.cursor++
 		}
-		return m, nil
+		return m, m.previewCmd()
 	case "backspace":
 		if m.filter != "" {
 			m.filter = m.filter[:len(m.filter)-1]
 			m.cursor = 0
 			m.refilter()
+			return m, m.previewCmd()
 		}
 		return m, nil
 	case "enter":
-		if m.cursor < 0 || m.cursor >= len(m.filtered) {
+		e, ok := m.selected()
+		if !ok {
 			return m, nil
 		}
-		e := m.filtered[m.cursor]
+		// Apply session theme (already previewed); does not persist default.
 		return nil, func() tea.Msg { return themeSelectedMsg{entry: e} }
 	case "ctrl+d":
-		if m.cursor < 0 || m.cursor >= len(m.filtered) {
+		e, ok := m.selected()
+		if !ok {
 			return m, nil
 		}
-		id := m.filtered[m.cursor].ID
-		return m, saveThemeThroughCmd(m.settings, id)
+		// Persist default; keep modal open so user can still cancel preview.
+		return m, tea.Batch(
+			m.previewCmd(),
+			saveThemeThroughCmd(m.settings, e.ID),
+		)
 	default:
 		if len(msg.Text) > 0 {
 			m.filter += msg.Text
 			m.cursor = 0
 			m.refilter()
+			return m, m.previewCmd()
 		}
 		return m, nil
 	}
@@ -102,9 +143,12 @@ func (m *themeModal) view(width int, th theme.Theme) string {
 	inner := max(1, ui.PanelInnerWidth(th, width))
 	items := make([]ui.ListItem, len(m.filtered))
 	for i, e := range m.filtered {
-		detail := e.Source
+		detail := e.Provenance()
 		if e.Name != e.ID {
-			detail = e.ID + themedSpace(th.Spacing.XS) + th.Icons.Dot + themedSpace(th.Spacing.XS) + e.Source
+			detail = e.ID + themedSpace(th.Spacing.XS) + th.Icons.Dot + themedSpace(th.Spacing.XS) + e.Provenance()
+		}
+		if e.Overrode != "" {
+			detail = detail + themedSpace(th.Spacing.XS) + th.Icons.Dot + themedSpace(th.Spacing.XS) + "over " + e.Overrode
 		}
 		items[i] = ui.ListItem{
 			Label:   e.Name,
@@ -124,13 +168,24 @@ func (m *themeModal) view(width int, th theme.Theme) string {
 	})
 	return ui.Dialog(th, ui.DialogOpts{
 		Title: "Select theme",
-		Hint:  dotJoin(th, "up/down/j/k move", "type to filter", "enter select", "ctrl+d set default", "esc close"),
+		Hint:  dotJoin(th, "↑/↓ preview", "type filter", "enter apply", "ctrl+d default", "esc revert"),
 		Width: width,
 	}, body)
 }
 
-// themeSelectedMsg applies a catalog entry to the root model.
+// themeSelectedMsg applies a catalog entry to the root model (session only).
 type themeSelectedMsg struct {
+	entry theme.Entry
+}
+
+// themePreviewMsg live-previews a theme while the picker stays open.
+// Must not persist settings.
+type themePreviewMsg struct {
+	entry theme.Entry
+}
+
+// themeRevertMsg restores the theme that was active when the picker opened.
+type themeRevertMsg struct {
 	entry theme.Entry
 }
 
