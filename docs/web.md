@@ -163,6 +163,7 @@ Status includes `sandbox`, `sandboxBackend`, `sandboxAvailable`, and `networkAll
 |---|---|---|---|
 | `GET` | `/v1/sandbox` | — | Active mode + compiled explain text (no browser shell-out) |
 | `PATCH` | `/v1/sandbox` | `{ "mode", "iKnow?" }` | Saves **default** via `host.Settings.SaveConfigDials` (TUI `/settings` parity). Active session dial is fixed at start. |
+| `GET` | `/v1/settings` | mode† | Persisted defaults snapshot |
 | `PATCH` | `/v1/settings` | `…, "sandbox", "iKnow?"` | Same default write path when `sandbox` is non-empty |
 
 Safety gate: `mode=off` while live or default `permissionMode` is `yolo` requires `iKnow: true` (CLI `--i-know` equivalent). Invalid modes return 400. Missing capability returns 501.
@@ -595,3 +596,34 @@ a process supervisor). Strike does not spawn Vite as a child.
 7. `./strike serve --auth --expose --token test` → WARNING on stderr; phone on LAN loads
    printed cockpit URL; `/health` and live stream work with token.
 8. `./strike serve --addr 0.0.0.0:8787` without `--expose` → error.
+
+### Settings dials (`GET`/`PATCH /v1/settings`)
+
+Wire fields match `host.UserDefaults` / TUI `/settings` vocabulary. `PATCH` is
+partial: omit or send empty string to leave a field unchanged.
+
+| Group | PATCH fields | Notes |
+|---|---|---|
+| Runtime defaults | `provider`, `model`, `agent`, `effort`, `mode` | `mode` is permission mode (`default`\|`plan`\|`soft-approve`\|`accept-edits`\|`yolo`) |
+| Theme | `theme` | TUI theme id stem |
+| Config dials | `sandbox`, `notify`, `leanCode`, `deferTools`, `sessionWorktree`, `autoupdate` | Same tokens as config JSON |
+| Auto-approve | `permissionAutoApproveSeconds`, `permissionAutoApproveExclude`, `maxChildDepth` | Seconds/depth are **strings** on PATCH (`off`\|`0`\|`1-60`; `default`\|`0`\|`1-8`). Exclude: omit = unchanged; `[]` clears; non-empty replaces |
+| Compaction | `compactionStrategy`, `compactionModel`, `compactionThreshold`, `compactionBuffer`, `keepUserTurns`, `pruneProtectTokens`, `pruneMinimumTokens`, `pruneKeepUserTurns`, `pruneProtectTools` | String dials (`trim`\|`summarize`; threshold/buffer ints as strings; `default`/`0` resets; model/tools `-` clears) |
+
+Successful `PATCH` returns the updated defaults snapshot (same shape as `GET`).
+The cockpit Settings dialog loads `GET`, edits sections, and saves via `PATCH`.
+Browser color scheme (auto/dark/light) is local-only (`data-appearance` +
+`localStorage`), not a host config key.
+
+With `--auth`, authenticate `/v1/*` using any of:
+
+- `Authorization: Bearer <token>`
+- HttpOnly `strike_serve_token` cookie (set automatically when you open
+  `/attach?token=…` or `/?token=…` — the server redirects to a token-free URL)
+- `?token=<token>` (EventSource / WebSocket query fallback)
+
+Opening the cockpit URL printed by `strike serve` (includes `?token=`) performs
+a one-time handoff: valid tokens become a `SameSite=Strict` HttpOnly cookie so
+subsequent same-origin `fetch` / EventSource / WebSocket calls succeed without
+leaving the secret in the address bar.
+

@@ -164,6 +164,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /v1/auth/{provider}", s.handleAuthLogout)
 	s.mux.HandleFunc("GET /v1/models", s.handleModels)
 	s.mux.HandleFunc("GET /v1/history", s.handleHistory)
+	s.mux.HandleFunc("GET /v1/settings", s.handleSettings)
 	s.mux.HandleFunc("PATCH /v1/settings", s.handleSettings)
 	s.mux.HandleFunc("GET /v1/sandbox", s.handleSandboxGet)
 	s.mux.HandleFunc("PATCH /v1/sandbox", s.handleSandboxPatch)

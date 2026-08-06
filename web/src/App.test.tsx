@@ -282,6 +282,43 @@ describe("App", () => {
     expect(screen.queryByRole("tab", { name: "mcp" })).not.toBeInTheDocument();
   });
 
+
+  it("loads and saves settings dials when capability is present", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) {
+        return response({
+          version: "test", authRequired: false, attachOnly: false,
+          capabilities: { live: true, settings: true, auth: false, roots: false },
+          protocolOps: ["user.input"], status: { sessionId: "live", provider: "echo", busy: false },
+          agents: [{ name: "build" }], skills: [],
+        });
+      }
+      if (url.includes("sessions")) return response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" });
+      if (url.includes("/v1/settings") && (!init || !init.method || init.method === "GET")) {
+        return response({
+          provider: "echo", model: "dev", sandbox: "workspace-write",
+          permissionAutoApproveSeconds: 10, maxChildDepth: 1, compactionStrategy: "trim",
+        });
+      }
+      if (url.includes("/v1/settings") && init?.method === "PATCH") {
+        return response({ sandbox: "read-only" });
+      }
+      return response({ ok: true });
+    }));
+    render(<App />);
+    await screen.findByText("Current");
+    fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
+    expect(await screen.findByLabelText("Sandbox")).toHaveValue("workspace-write");
+    expect(screen.getByLabelText("Countdown seconds")).toHaveValue("10");
+    fireEvent.change(screen.getByLabelText("Sandbox"), { target: { value: "read-only" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/v1/settings"),
+      expect.objectContaining({ method: "PATCH", body: expect.stringContaining('"sandbox":"read-only"') }),
+    ));
+  });
+
   it("uses historical SSE in attach-only mode", async () => {
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input).includes("bootstrap") ? response({ version: "test", authRequired: false, attachOnly: true, capabilities: { live: false, memory: true }, protocolOps: null, agents: [], skills: [] }) : String(input).includes("sessions") ? response({ sessions: [{ id: "saved", title: "Saved" }] }) : String(input).includes("roots") ? Promise.resolve(new Response("multi-root unavailable", { status: 503 })) : String(input).includes("memory") ? response({ entries: [] }) : response({ ok: true })));
     render(<App />);
