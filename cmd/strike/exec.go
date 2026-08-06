@@ -222,18 +222,23 @@ type headlessOpts struct {
 
 // runHeadlessFrontend submits one user prompt, writes output per Format,
 // auto-rejects interactive asks, and returns when the turn completes.
+// parent is combined with os.Interrupt; cancel either to interrupt the turn.
 func runHeadlessFrontend(
+	parent context.Context,
 	ops chan<- protocol.Op,
 	events <-chan protocol.Event,
 	prompt string,
 	stdout, stderr io.Writer,
 	opts headlessOpts,
 ) error {
+	if parent == nil {
+		parent = context.Background()
+	}
 	if opts.Format == "" {
 		opts.Format = execFormatText
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(parent, os.Interrupt)
 	defer stop()
 
 	interrupted := make(chan struct{})
