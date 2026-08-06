@@ -287,6 +287,8 @@ type settingsPatchBody struct {
 
 	Theme           string `json:"theme"`
 	Sandbox         string `json:"sandbox"`
+	// IKnow acknowledges yolo+sandbox-off (same gate as PATCH /v1/sandbox).
+	IKnow           bool   `json:"iKnow"`
 	Notify          string `json:"notify"`
 	LeanCode        string `json:"leanCode"`
 	DeferTools      string `json:"deferTools"`
@@ -357,6 +359,14 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	if err := decodeBody(w, r, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
+	}
+	// Sandbox dial uses the same yolo+off iKnow gate as PATCH /v1/sandbox.
+	if body.Sandbox != "" {
+		if err := s.saveSandboxDefault(body.Sandbox, body.IKnow, r); err != nil {
+			writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+			return
+		}
+		body.Sandbox = "" // already persisted; avoid double-write in applySettingsPatch
 	}
 	if err := applySettingsPatch(settings, body); err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
