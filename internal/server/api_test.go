@@ -126,7 +126,7 @@ func TestServiceAPIsUnavailableWithoutConfiguredHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"/v1/providers", "/v1/models?provider=echo", "/v1/history", "/v1/files", "/v1/memory", "/v1/issues"} {
+	for _, path := range []string{"/v1/providers", "/v1/models?provider=echo", "/v1/history", "/v1/files", "/v1/memory", "/v1/issues", "/v1/lsp", "/v1/diagnostics"} {
 		res := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodGet, path, nil))
 		if res.Code != http.StatusNotImplemented || !strings.Contains(res.Body.String(), "capability unavailable") {

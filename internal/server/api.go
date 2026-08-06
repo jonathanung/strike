@@ -60,6 +60,7 @@ type capabilities struct {
 	Providers      bool `json:"providers"`
 	ProjectInit    bool `json:"projectInit"`
 	MCP            bool `json:"mcp"`
+	LSP            bool `json:"lsp"`
 	Telemetry      bool `json:"telemetry"`
 	Workflows      bool `json:"workflows"`
 	WorkflowDrafts bool `json:"workflowDrafts"`
@@ -91,6 +92,8 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		c.Files, c.Memory, c.Issues, c.Sessions = h.Files != nil, h.Memory != nil, h.Issues != nil, h.Sessions != nil
 		// Workflow authoring is exposed via /v1/workflows* and /v1/workflow-drafts*.
 		c.Workflows, c.WorkflowDrafts = h.Workflows != nil, h.WorkflowDrafts != nil
+		// LSP status + diagnostics are exposed via /v1/lsp and /v1/diagnostics.
+		c.LSP = h.LSP != nil
 		// Capabilities describe browser surfaces, not merely host interfaces.
 		// Roots, custom providers, project init, MCP, and telemetry remain false
 		// until this server exposes their service operations.
