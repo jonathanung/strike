@@ -59,7 +59,7 @@ func presetReadOnly() Preset {
 	return Preset{
 		ID:   PresetIDReadOnly,
 		Name: "Read-only",
-		Description: "Allow read/search tools; deny write, edit, bash, webfetch, and mcp. " +
+		Description: "Allow read/search tools; deny write, edit, bash, webfetch, websearch, and mcp. " +
 			"Safe for review and exploration without mutating the workspace.",
 		Rules: Ruleset{
 			{Permission: "read", Pattern: "*", Action: Allow},
@@ -72,6 +72,7 @@ func presetReadOnly() Preset {
 			{Permission: "edit", Pattern: "*", Action: Deny},
 			{Permission: "bash", Pattern: "*", Action: Deny},
 			{Permission: "webfetch", Pattern: "*", Action: Deny},
+			{Permission: "websearch", Pattern: "*", Action: Deny},
 			{Permission: "mcp", Pattern: "*", Action: Deny},
 			{Permission: "hook", Pattern: "*", Action: Deny},
 			{Permission: "phase_check", Pattern: "*", Action: Deny},

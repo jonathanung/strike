@@ -819,6 +819,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			SandboxMode:     e.opts.SandboxMode,
 			Sandbox:         e.bashSandboxPolicy(),
 			NetworkAllow:    e.opts.NetworkAllow,
+			WebSearch:       e.opts.WebSearch,
 			Scheduler:       e.opts.Scheduler,
 			SchedulerPolicy: e.opts.SchedulerPolicy,
 			SchedulerAcquire: func(ctx context.Context, label string, pools ...string) (*scheduler.Lease, error) {

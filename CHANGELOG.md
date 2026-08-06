@@ -14,6 +14,16 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+### Added
+
+- **`websearch` tool** — permissioned, provider-neutral web search with
+  citation-ready titles/URLs/snippets, domain filters, result limits, and
+  network allowlist / redaction / audit controls. Separate from `webfetch`
+  (discover vs retrieve). Configure via `webSearch` (`provider: brave`,
+  `apiKeyEnv`, optional `baseURL`); missing backend returns structured setup
+  guidance. Default permission is ask; read-only preset denies it
+  ([#882](https://github.com/jonathanung/strike/issues/882)).
+
 ## [v0.2.0] - 2026-08-06
 
 Minor milestone: OS sandbox and scheduler, first-run onboarding, public protocol/SDK surfaces, LSP, multi-agent orchestration harness, plans and workflows, and enterprise settings.

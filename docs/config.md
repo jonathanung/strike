@@ -222,7 +222,7 @@ Inspect with `/permission presets`.
 
 | ID | Behavior |
 |---|---|
-| `read-only` | Allow read/search/LSP; **deny** write, edit, bash, webfetch, mcp, hooks |
+| `read-only` | Allow read/search/LSP; **deny** write, edit, bash, webfetch, websearch, mcp, hooks |
 | `dev` | Allow common local-dev bash (`go *`, `git status/diff/log/show`, `make test*`); deny force-push and `.env` writes; other mutations stay ask |
 | `yolo-with-sandbox` | Rule-level allow-all (`* *` allow). Does **not** turn off OS sandbox — keep `sandbox` at `workspace-write` or `read-only`. Later deny rules still win. Distinct from `permissionMode: yolo` |
 
@@ -282,23 +282,23 @@ regexes and, when paths exist, bwrap `--ro-bind` remounts). A deny on
 `write`/`edit` `*` (including plan mode) suppresses the writable workspace
 bind. Network inside the sandbox stays **on** by default (so bash can run
 `gh`, `git`, package managers, etc.). It turns **off** only when both
-`webfetch` and `mcp` are hard-**deny** on `*` (patterned rules do not flip
-full-network posture). Ask/yolo posture does not widen the OS profile.
-Composer `!` uses the config-layer compile; agent bash uses live layers
-(agent/phase/session).
+`webfetch`, `websearch`, and `mcp` are all hard-**deny** on `*` (patterned
+rules do not flip full-network posture). Ask/yolo posture does not widen the
+OS profile. Composer `!` uses the config-layer compile; agent bash uses live
+layers (agent/phase/session).
 
 **Network allowlist (`network.allow`):** optional host/CIDR whitelist for
-**application-layer** web egress (`webfetch`). Entries may be hostnames
-(`api.github.com`), a single leading wildcard label (`*.example.com`), IP
-literals, or CIDRs (`10.0.0.0/8`). Empty or omitted means unrestricted
-**public** hosts (existing SSRF blocks for private/loopback/link-local/CGNAT
-still apply and cannot be opened by the allowlist). When non-empty, the
-request host must match an entry: hostname/wildcard on the name, or IP/CIDR
-on the literal host or (when the list includes IP/CIDR entries) a resolved
-address. Redirects and dial-time resolution are re-checked. Global and
-project layers: when a layer sets `network.allow` (including `[]`), it
-**replaces** the previous list so a project can tighten or clear a global
-whitelist.
+**application-layer** web egress (`webfetch` target hosts and `websearch` API
+hosts). Entries may be hostnames (`api.github.com`), a single leading wildcard
+label (`*.example.com`), IP literals, or CIDRs (`10.0.0.0/8`). Empty or omitted
+means unrestricted **public** hosts (existing SSRF blocks for
+private/loopback/link-local/CGNAT still apply and cannot be opened by the
+allowlist). When non-empty, the request host must match an entry:
+hostname/wildcard on the name, or IP/CIDR on the literal host or (when the list
+includes IP/CIDR entries) a resolved address. Redirects and dial-time
+resolution are re-checked. Global and project layers: when a layer sets
+`network.allow` (including `[]`), it **replaces** the previous list so a
+project can tighten or clear a global whitelist.
 
 This is the same policy **shape** as future container network filters. It is
 **not** a third independent system:
@@ -306,13 +306,41 @@ This is the same policy **shape** as future container network filters. It is
 | Surface | What applies today |
 |---|---|
 | `webfetch` | `network.allow` host/CIDR allowlist + SSRF private blocks |
-| bash OS profile | host networking on by default (`Policy.NoNetwork` zero value / `NetworkEnabled()`); off only when both `webfetch` and `mcp` are hard-deny on `*` (all-or-nothing; no per-host filter inside bwrap/seatbelt) |
-| permission rules | `webfetch` ask/allow/deny patterns (prompt posture), independent of the hard allowlist |
+| `websearch` | `network.allow` on the search API host + SSRF private blocks; result domain filters are separate tool args |
+| bash OS profile | host networking on by default (`Policy.NoNetwork` zero value / `NetworkEnabled()`); off only when `webfetch`, `websearch`, and `mcp` are all hard-deny on `*` (all-or-nothing; no per-host filter inside bwrap/seatbelt) |
+| permission rules | `webfetch` / `websearch` ask/allow/deny patterns (prompt posture), independent of the hard allowlist |
 | container net | deferred — reuse `network.allow` shape |
 
 `/sandbox explain` prints the effective allowlist next to bash `network: on/off`.
 Prefer `webfetch` over `curl`/`wget` in bash when you need allowlist enforcement;
 bash egress is not host-filtered at the OS layer.
+
+**Web search (`webSearch`):** configures the `websearch` tool backend. Search
+discovers titles/URLs/snippets; use `webfetch` to retrieve a selected page.
+Provider-neutral shape:
+
+```jsonc
+{
+  "webSearch": {
+    "provider": "brave",           // currently "brave"; empty = auto
+    "apiKeyEnv": "BRAVE_API_KEY",  // env var holding the API key
+    "baseURL": ""                  // optional API base override (tests/proxies)
+  }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `provider` | Backend id. `brave` is supported. Empty auto-selects brave when its key env is set. |
+| `apiKeyEnv` | Environment variable for the API key (default `BRAVE_API_KEY` for brave). |
+| `baseURL` | Optional API origin override (default `https://api.search.brave.com`). |
+
+When no backend is configured (no provider/key), `websearch` returns a
+structured `precondition_failed` error with setup steps — it does not scrape
+the open web as a silent fallback. Project layers replace the whole
+`webSearch` object when any field is set. Permission default is **ask** (same
+family as `webfetch`). Queries and snippets pass through the usual tool-args /
+tool-output redaction and session audit paths.
 
 **Yolo + sandbox off:** `permissionMode: yolo` (or a resumed session in yolo)
 combined with `sandbox: off` **refuses to start** unless you pass `--i-know`.
@@ -350,8 +378,8 @@ Details: [agents-skills.md](agents-skills.md#lean-code-ponytail-lite).
 tools stay always available: `read`/`glob`/`grep`/`edit`/`write`/
 `apply_patch`/`bash`, the `task*` family, `toolsearch`, `question`, and plan
 workflow tools. Deferred surface includes optional built-ins (`webfetch`,
-todo/memory/issue, `sleep`, `skill`, `notebook_edit`, …) and all `mcp_*`
-tools. Discovery lives on the process registry: matches from `toolsearch`
+`websearch`, todo/memory/issue, `sleep`, `skill`, `notebook_edit`, …) and all
+`mcp_*` tools. Discovery lives on the process registry: matches from `toolsearch`
 load full schemas on the **next** model request (including the next
 iteration of the same turn’s tool loop). Tools already present as assistant
 tool calls in history are re-promoted on each stream (so `--continue` keeps

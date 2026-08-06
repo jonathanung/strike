@@ -107,6 +107,8 @@ func toolKind(name string) string {
 		return "search"
 	case n == "webfetch" || n == "fetch":
 		return "fetch"
+	case n == "websearch" || n == "web_search":
+		return "search"
 	case n == "todowrite" || n == "todoread" || n == "enter_plan_mode" || n == "exit_plan_mode":
 		return "think"
 	default:

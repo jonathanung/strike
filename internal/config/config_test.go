@@ -307,6 +307,58 @@ func TestLoadNetworkAllowRejectsInvalid(t *testing.T) {
 	}
 }
 
+func TestLoadWebSearch(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(global, []byte(`{
+		"webSearch": {"provider": "BRAVE", "apiKeyEnv": " MY_BRAVE_KEY "}
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.WebSearch.Provider != "brave" || cfg.WebSearch.APIKeyEnv != "MY_BRAVE_KEY" {
+		t.Fatalf("webSearch = %#v", cfg.WebSearch)
+	}
+
+	// Project replaces whole object when any field is set.
+	project := filepath.Join(work, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(project), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(project, []byte(`{
+		"webSearch": {"baseURL": "https://proxy.example/search"}
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.WebSearch.Provider != "" || cfg.WebSearch.APIKeyEnv != "" ||
+		cfg.WebSearch.BaseURL != "https://proxy.example/search" {
+		t.Fatalf("project replace: %#v", cfg.WebSearch)
+	}
+
+	// Unknown provider rejected.
+	if err := os.WriteFile(global, []byte(`{"webSearch": {"provider": "acme"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(project, []byte(`{}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(work); err == nil {
+		t.Fatal("want unknown provider error")
+	}
+}
+
 func TestLoadSurfacePresentationMerge(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
