@@ -56,3 +56,18 @@ export type ActiveRoot = {
 export type RootsResponse = { roots: ActiveRoot[]; activeId?: string };
 export type RootCreateResult = { id: string; sessionId: string };
 export type RootResumeResult = { id: string; sessionId: string; resumedId: string; wasActive: boolean };
+
+/** Per-workspace composer + runtime mirrors kept while switching roots. */
+export type WorkspaceComposer = {
+  draft: string;
+  queue: Array<{ text: string; images: ImageAttachment[] }>;
+  images: ImageAttachment[];
+  fast: boolean;
+};
+export type WorkspaceSlice = WorkspaceState & WorkspaceComposer;
+/** Client cache keyed by workspace/root (or historical session) id. */
+export type ClientState = {
+  selectedID: string;
+  byID: Record<string, WorkspaceSlice>;
+};
+
