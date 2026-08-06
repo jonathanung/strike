@@ -72,6 +72,8 @@ type childHandle struct {
 	nextEventIndex int
 	// budget tracks per-child limits, usage, stall/loop, and escalation (#774).
 	budget *childBudget
+	// artifacts tracks typed artifacts written by this child for handoff merge (#879).
+	artifacts []protocol.ArtifactRef
 }
 
 // childRecord retains terminal state + bounded transcript after a child exits
@@ -611,7 +613,14 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		}
 		// Structured handoff: parse model JSON from assistant text first (before
 		// appending engine error suffixes), then merge engine file tracking.
-		handoff := buildCompletionHandoff(status, assistantText, child.mutatedPathsSnapshot())
+		trackedFiles := child.mutatedPathsSnapshot()
+		handoff, handoffParsed := buildCompletionHandoffParsed(status, assistantText, trackedFiles)
+		// Merge engine-tracked artifact writes so typed artifacts survive
+		// budget termination even when the model omits artifact_refs (#879).
+		h.mu.Lock()
+		trackedArts := append([]protocol.ArtifactRef(nil), h.artifacts...)
+		h.mu.Unlock()
+		mergeArtifactRefsIntoHandoff(&handoff, trackedArts)
 		if errText != "" {
 			if strings.TrimSpace(handoff.Summary) == "" || handoff.Summary == defaultHandoffSummary(status) {
 				handoff.Summary = errText
@@ -662,6 +671,24 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 			}
 		}
 
+		// Budget metadata + handoff quality (#879).
+		budgetKind, finalization := h.budgetTerminalMeta()
+		if budgetKind != "" && finalization != protocol.FinalizationSkippedHard {
+			// Soft path: structured parse means finalization succeeded (even when
+			// the model marks incomplete:true for honest partial work).
+			if handoffParsed {
+				finalization = protocol.FinalizationSucceeded
+			} else if finalization != protocol.FinalizationNone {
+				finalization = protocol.FinalizationFailed
+			}
+			h.mu.Lock()
+			if h.budget != nil {
+				h.budget.markFinalizationOutcomeLocked(finalization)
+			}
+			h.mu.Unlock()
+		}
+		applyHandoffQuality(&handoff, handoffParsed)
+
 		completed := protocol.ChildCompleted{
 			Correlation:  childCorr,
 			Status:       status,
@@ -670,6 +697,8 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 			Handoff:      handoff,
 			DelegationID: delegID,
 			Verification: verification,
+			BudgetKind:   budgetKind,
+			Finalization: finalization,
 		}
 		// Prefer verification summary on blocked terminal Summary field.
 		if status == protocol.ChildStatusBlocked && verification != nil && verification.Summary != "" {
@@ -954,6 +983,33 @@ func (h *childHandle) noteEvent(ev protocol.Event) {
 			h.queueLabel = ""
 		}
 		h.pushActivityLocked(queueActivityLine("queue canceled", ev.Label, ev.Pools))
+	case protocol.ArtifactUpdated:
+		// Preserve typed artifacts written before budget termination (#879).
+		id := strings.TrimSpace(ev.ID)
+		if id != "" {
+			found := false
+			for i := range h.artifacts {
+				if h.artifacts[i].ID == id {
+					h.artifacts[i].Version = ev.Version
+					if t := strings.TrimSpace(ev.Type); t != "" {
+						h.artifacts[i].Type = t
+					}
+					found = true
+					break
+				}
+			}
+			if !found {
+				h.artifacts = append(h.artifacts, protocol.ArtifactRef{
+					ID:      id,
+					Version: ev.Version,
+					Type:    strings.TrimSpace(ev.Type),
+				})
+			}
+			h.pushActivityLocked("artifact " + id)
+			if h.budget != nil {
+				h.budget.noteProgress(now, "artifact "+id)
+			}
+		}
 	}
 
 	// Hard budget check after usage/tool notes (same lock). Defer parent-side
@@ -1270,6 +1326,7 @@ func toolHandoff(h protocol.CompletionHandoff) tool.CompletionHandoff {
 		MissingContext:        missing,
 		Provenance:            append([]string(nil), h.Provenance...),
 		Incomplete:            h.Incomplete,
+		Quality:               h.Quality,
 	}
 }
 
@@ -1706,6 +1763,16 @@ func formatChildCompletedNotice(c protocol.ChildCompleted) string {
 		fmt.Fprintf(&b, "[child.completed name=%s status=%s]", name, status)
 	default:
 		fmt.Fprintf(&b, "[child.completed status=%s]", status)
+	}
+	// Budget termination + handoff quality for lead visibility (#879).
+	if k := strings.TrimSpace(c.BudgetKind); k != "" {
+		fmt.Fprintf(&b, " budget=%s", k)
+	}
+	if f := strings.TrimSpace(c.Finalization); f != "" && f != protocol.FinalizationNone {
+		fmt.Fprintf(&b, " finalization=%s", f)
+	}
+	if q := strings.TrimSpace(c.Handoff.Quality); q != "" {
+		fmt.Fprintf(&b, " handoff_quality=%s", q)
 	}
 	// Prefer structured handoff JSON for the lead; fall back to free-form summary.
 	handoff := c.Handoff

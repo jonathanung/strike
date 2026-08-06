@@ -213,6 +213,8 @@ func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.Ima
 		e.toolLoop.reset()
 	}
 	e.toolLoopStop = ""
+	// Promote soft-budget finalization armed → active for this turn (#879).
+	e.noteBudgetFinalizationTurnStart()
 	e.emit(protocol.UserMessage{Correlation: turnCorr, Text: text, Images: images})
 	e.maybeTitleSession(text)
 	e.emit(protocol.TurnStarted{Correlation: turnCorr})
@@ -271,6 +273,16 @@ func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.Ima
 		})
 		if len(outcome.calls) == 0 {
 			e.completeTurn(ctx, finishing, reqCorr, outcome.stopReason)
+			return
+		}
+		// Soft-budget finalization: refuse tools and end the turn so the
+		// reserved handoff cannot burn more budget (#879). Assistant text
+		// (if any) is kept for structured handoff parse.
+		if e.isBudgetFinalizing() {
+			for _, call := range outcome.calls {
+				e.messages = append(e.messages, e.blockedBudgetFinalizationTool(call, reqCorr))
+			}
+			e.completeTurn(ctx, finishing, reqCorr, "end_turn")
 			return
 		}
 		for i, call := range outcome.calls {
@@ -533,6 +545,26 @@ type toolFeedback struct {
 	Title     string
 	Metadata  json.RawMessage
 	EmitEnd   bool
+}
+
+// blockedBudgetFinalizationTool emits begin+blocked end for a tool refused
+// during soft-budget finalization (tools disabled; handoff text only).
+func (e *Engine) blockedBudgetFinalizationTool(call provider.ToolCall, corr protocol.Correlation) provider.Message {
+	e.emit(protocol.ToolCallBegin{
+		Correlation: corr,
+		CallID:      call.ID,
+		Name:        call.Name,
+		Args:        secret.RedactJSON(call.Args),
+	})
+	return e.settleToolFeedback(toolFeedback{
+		Corr:      corr,
+		CallID:    call.ID,
+		Output:    protocol.ToolFeedbackBlocked("budget finalization: tools disabled; emit structured handoff JSON only"),
+		IsError:   true,
+		EmitEnd:   true,
+		ErrorCode: protocol.ErrorCodeBlocked,
+		Title:     call.Name,
+	})
 }
 
 // settleToolFeedback is the formal tool-result feedback path: one place that

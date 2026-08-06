@@ -192,7 +192,7 @@ team-create step. Concurrent roots are independent teams.
 | Contracts | `agent_message` with `task_id` / `urgency` / `kind=request`+`require_ack`; read via `agent_thread`; ack with `kind=ack` |
 | Fan-out | `agent_broadcast` (all other teammates; use sparingly) |
 | Parent steer only | `task_message` (owned child; not peer chat) |
-| Per-child budgets | `task`/`delegate` `budget` or config `session.agentBudget`; hard exceed → `child.escalated` + interrupt |
+| Per-child budgets | `task`/`delegate` `budget` or config `session.agentBudget`; soft exceed → `child.escalated` (`action=finalizing`) + one reserved structured handoff turn, then stop; hard cancel skips finalization |
 | Live pulse | `task_status` (objective, last_action, files_touched, budget, stall/loop) |
 | Finish signal | `[child.completed]` on the lead (structured handoff JSON) |
 

@@ -649,10 +649,22 @@ unlimited for that dimension.
 | `stallAfterS` | Hard block after this many seconds without progress |
 | `loopDetectN` | Hard block when the same tool name repeats N times |
 
-On hard exceed the engine emits `child.escalated`, interrupts the child, marks
-the delegation `failed` or `blocked`, and delivers a structured lead/owner
-mailbox notice. Soft stall (default 300s idle) and loop (default 6 identical
-tools) flags always appear on `task_status` / `agent_roster` without killing.
+On hard exceed the engine emits `child.escalated` and stops the child. Soft
+resource budgets (`wall_clock`, `tokens`, `cost_usd`, `tool_calls`,
+`dangerous_tools`, and hard `stall`/`loop`) first attempt **one reserved
+finalization turn** (tools disabled, ~45s wall ceiling) so the child can return
+a structured partial handoff before termination (#879). `child.escalated`
+`action` is `finalizing` then the child ends with `ChildCompleted.budgetKind` +
+`finalization` (`succeeded`|`failed`) and handoff `quality`
+(`complete`|`partial`|`unavailable`). Hard cancel, parent shutdown, and trust
+boundary failures skip finalization (`finalization=skipped_hard`,
+`action=interrupted`). Already-written typed artifacts and engine-tracked
+`files_changed` are always merged into the terminal handoff.
+
+Delegation is marked `failed` or `blocked`, and a structured lead/owner mailbox
+notice is delivered. Soft stall (default 300s idle) and loop (default 6
+identical tools) flags always appear on `task_status` / `agent_roster` without
+killing when no hard threshold is set.
 
 **Stale children (#517):** folded into stall — same `stall` signal and optional
 `stallAfterS` hard threshold; not a second detector.
