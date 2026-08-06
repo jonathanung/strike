@@ -250,19 +250,23 @@ func baseHashFor(m map[string]string, rel, abs string) string {
 	if m == nil {
 		return ""
 	}
+	// Exact relative (slash-normalized) or absolute keys only — never basename
+	// alone, which would cross-apply hashes across same-named paths in different dirs.
 	if v, ok := m[rel]; ok {
 		return v
 	}
-	if v, ok := m[filepath.ToSlash(rel)]; ok {
-		return v
+	if slash := filepath.ToSlash(rel); slash != rel {
+		if v, ok := m[slash]; ok {
+			return v
+		}
 	}
 	if v, ok := m[abs]; ok {
 		return v
 	}
-	// Also try path as provided without workdir prefix variants.
-	base := filepath.Base(rel)
-	if v, ok := m[base]; ok {
-		return v
+	if clean := filepath.Clean(abs); clean != abs {
+		if v, ok := m[clean]; ok {
+			return v
+		}
 	}
 	return ""
 }
@@ -276,8 +280,7 @@ func checkPatchContentUnchanged(originals map[string]pathOriginal) error {
 			}
 			continue
 		}
-		display := abs
-		if err := CheckContentUnchanged(abs, orig.data, display); err != nil {
+		if err := CheckContentUnchanged(abs, orig.data, filepath.Base(abs)); err != nil {
 			return err
 		}
 	}
