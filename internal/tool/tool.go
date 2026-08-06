@@ -560,8 +560,9 @@ type PatchCollabResult struct {
 
 // DelegateRequest mutates or inspects first-class delegation lifecycle objects.
 // Action is create|get|list|transition.
-// Create mirrors task spawn fields (prompt/agent/…) plus criteria/deps/subscribe.
+// Create mirrors the progressive task spawn fields (prompt/agent/route/budget/…).
 // Transition moves state with optional expected_version CAS.
+// Compat: the delegate tool and task action=get|list|transition share this type.
 type DelegateRequest struct {
 	Action          string
 	ID              string
@@ -570,11 +571,18 @@ type DelegateRequest struct {
 	Agent           string
 	Model           string
 	Effort          string
+	Route           string
+	Specialty       string
+	Capabilities    []string
+	MaxCostClass    string
+	Models          []string
+	MaxConcurrent   int
 	Assignee        string
 	Criteria        []string
 	Deps            []string
 	Subscribe       []string
 	Verify          []VerifyGate
+	Budget          AgentBudgetLimits
 	ContextBundle   ContextBundle
 	State           string // target lifecycle state for transition
 	Reason          string

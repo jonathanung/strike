@@ -31,22 +31,18 @@ func NewWait() Tool { return waitTool{} }
 func (waitTool) Name() string { return "wait" }
 
 func (waitTool) Description() string {
-	return `Block until an owned child task event matches, or until timeout.
+	return `Compatibility shim: block until an owned child task event matches, or until timeout.
 
-- Prefer wait over sleep-polling task_status for subagent completion or blockers.
+Prefer progressive task:
+  task({action:"wait", events:[…], timeout_seconds:N, id?: "…"})
+
 - events: one or more of task.done, task.failed, task.canceled, task.blocked
   (aliases: task.completed→done, needs_attention→blocked). Wait-any: first match wins.
 - optional session_id limits the wait to one owned child (session id or name alias).
-  Omit to match any owned child.
-- timeout_seconds is required (0 < t ≤ 300). Returns structured outcome:
-  matched | timeout | canceled — never hangs past the timeout or parent interrupt.
-- On matched terminal events, includes handoff when available (same schema as task_status).
-- task.blocked fires when a child needs_attention (permission or user question)
-  or reaches terminal blocked (e.g. independent verification gates failed).
-- Only owned children are observable; unknown/foreign sessions are rejected.
-- Emits wait.started / wait.resolved on the session event stream for UI/debug.
-- Does not replace [child.completed] injection — that still arrives for the model;
-  wait is the explicit orchestration primitive when you must synchronize mid-turn.`
+- timeout_seconds is required (0 < t ≤ 300). Outcomes: matched | timeout | canceled.
+- On matched terminal events, includes handoff when available.
+- Only owned children; emits wait.started / wait.resolved.
+- Does not replace [child.completed] injection. Usage is telemetry-counted toward deprecation.`
 }
 
 func (waitTool) Schema() json.RawMessage {
@@ -71,52 +67,14 @@ func (waitTool) Schema() json.RawMessage {
 	}`)
 }
 
-type waitArgs struct {
-	Events         []string `json:"events"`
-	SessionID      string   `json:"session_id"`
-	TimeoutSeconds float64  `json:"timeout_seconds"`
-}
-
 func (waitTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
-	var a waitArgs
+	var a progressiveArgs
 	if err := json.Unmarshal(args, &a); err != nil {
 		return Result{}, fmt.Errorf("invalid arguments: %w", err)
 	}
-	if a.TimeoutSeconds <= 0 || a.TimeoutSeconds > waitMaxSeconds {
-		return Result{}, fmt.Errorf("timeout_seconds must be in (0, 300]")
-	}
-	canonical, err := NormalizeWaitEvents(a.Events)
-	if err != nil {
-		return Result{}, err
-	}
-	id := strings.TrimSpace(a.SessionID)
-	pat := id
-	if pat == "" {
-		pat = "*"
-	}
-	if err := tc.Ask(ctx, AskRequest{Permission: "wait", Patterns: []string{pat}, Always: []string{"*"}}); err != nil {
-		return Result{}, err
-	}
-	if tc.Wait == nil {
-		return Result{}, fmt.Errorf("wait is not available")
-	}
-	res, err := tc.Wait(ctx, WaitRequest{
-		Events:         canonical,
-		SessionID:      id,
-		TimeoutSeconds: a.TimeoutSeconds,
-	})
-	if err != nil {
-		return Result{}, err
-	}
-	out, _ := json.Marshal(res)
-	title := "wait " + res.Outcome
-	if res.Event != "" {
-		title += " " + res.Event
-	}
-	if res.SessionID != "" {
-		title += " " + shortID(res.SessionID)
-	}
-	return Result{Title: title, Output: string(out)}, nil
+	a.Action = ProgressiveWait
+	// Keep historical permission name "wait".
+	return executeProgressive(ctx, CompatToolWait, "wait", a, tc)
 }
 
 // NormalizeWaitEvents maps aliases to canonical kinds and rejects unknowns.

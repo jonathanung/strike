@@ -160,19 +160,28 @@ func TestBuildGuidanceTaskStatusPreferred(t *testing.T) {
 	if !strings.Contains(text, "busy-poll") && !strings.Contains(text, "Do not busy-poll") {
 		t.Fatalf("task guidance should discourage busy-poll:\n%s", text)
 	}
-	if !strings.Contains(text, "`wait`") {
-		t.Fatalf("task+wait guidance should mention wait:\n%s", text)
+	if !strings.Contains(text, "progressive `task`") {
+		t.Fatalf("task guidance should recommend progressive task:\n%s", text)
+	}
+	if !strings.Contains(text, "compatibility shims") {
+		t.Fatalf("expected compat shim note:\n%s", text)
 	}
 }
 
 func TestBuildGuidanceWaitPreferred(t *testing.T) {
+	// With progressive task present, wait is a compat shim — prefer task action=wait.
 	text := BuildGuidance([]GuidanceEntry{
 		{Name: "wait"},
 		{Name: "task"},
 		{Name: "task_status"},
 	})
-	if !strings.Contains(text, "Prefer `wait`") && !strings.Contains(text, "prefer `wait`") {
-		t.Fatalf("expected wait preference guidance:\n%s", text)
+	if !strings.Contains(text, "action=wait") && !strings.Contains(text, "compatibility shims") {
+		t.Fatalf("expected progressive wait guidance:\n%s", text)
+	}
+	// Without task, standalone wait keeps its preference line.
+	solo := BuildGuidance([]GuidanceEntry{{Name: "wait"}})
+	if !strings.Contains(solo, "Prefer `wait`") && !strings.Contains(solo, "prefer `wait`") {
+		t.Fatalf("expected standalone wait preference:\n%s", solo)
 	}
 }
 
