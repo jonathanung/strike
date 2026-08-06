@@ -144,6 +144,13 @@ func (webSearchTool) Execute(ctx context.Context, args json.RawMessage, tc *Cont
 		}
 	}
 
+	settings := webSearchSettingsFrom(tc)
+	// Fail closed on missing/unknown backend before Ask so operators are not
+	// prompted for a tool that cannot run.
+	if err := ensureWebSearchConfigured(settings); err != nil {
+		return Result{}, err
+	}
+
 	if err := tc.Ask(ctx, AskRequest{
 		Permission: "websearch",
 		Patterns:   []string{query},
@@ -163,7 +170,6 @@ func (webSearchTool) Execute(ctx context.Context, args json.RawMessage, tc *Cont
 		Timeout:        timeout,
 	}
 
-	settings := webSearchSettingsFrom(tc)
 	searcher, provider, err := resolveWebSearchBackend(settings, timeout, networkAllowFrom(tc))
 	if err != nil {
 		return Result{}, err
@@ -219,8 +225,43 @@ func webSearchSettingsFrom(tc *Context) WebSearchSettings {
 	return tc.WebSearch
 }
 
+// ensureWebSearchConfigured reports missing/unknown backend setup without
+// touching the network (so Ask is not required for config guidance).
+func ensureWebSearchConfigured(s WebSearchSettings) error {
+	if s.Searcher != nil {
+		return nil
+	}
+	provider := strings.ToLower(strings.TrimSpace(s.Provider))
+	apiKeyEnv := strings.TrimSpace(s.APIKeyEnv)
+	switch provider {
+	case "":
+		env := apiKeyEnv
+		if env == "" {
+			env = braveDefaultAPIKeyEnv
+		}
+		if strings.TrimSpace(os.Getenv(env)) == "" {
+			return missingWebSearchBackendError(websearchProviderBrave, env)
+		}
+		return nil
+	case websearchProviderBrave:
+		if apiKeyEnv == "" {
+			apiKeyEnv = braveDefaultAPIKeyEnv
+		}
+		if strings.TrimSpace(os.Getenv(apiKeyEnv)) == "" {
+			return missingWebSearchBackendError(websearchProviderBrave, apiKeyEnv)
+		}
+		return nil
+	default:
+		return ErrPrecondition(fmt.Sprintf(
+			"unknown webSearch.provider %q (supported: brave). Set webSearch.provider in config or omit it for auto-detect.",
+			provider,
+		))
+	}
+}
+
 // resolveWebSearchBackend picks a searcher and provider id from settings/env.
 // allow is the config network.allow list applied to the search API host.
+// Callers should run ensureWebSearchConfigured first.
 func resolveWebSearchBackend(s WebSearchSettings, timeout time.Duration, allow []string) (WebSearchFunc, string, error) {
 	if s.Searcher != nil {
 		provider := strings.TrimSpace(s.Provider)

@@ -88,14 +88,24 @@ func TestWebSearchHappyPathCitations(t *testing.T) {
 
 func TestWebSearchMissingBackendGuidance(t *testing.T) {
 	t.Setenv("BRAVE_API_KEY", "")
-	tc := allowAll(t.TempDir())
-	// Explicit empty settings, no searcher, no env key.
-	tc.WebSearch = WebSearchSettings{}
+	asked := false
+	tc := &Context{
+		WorkDir: t.TempDir(),
+		Ask: func(context.Context, AskRequest) error {
+			asked = true
+			return nil
+		},
+		// Explicit empty settings, no searcher, no env key.
+		WebSearch: WebSearchSettings{},
+	}
 	_, err := NewWebSearch().Execute(context.Background(), mustJSON(t, map[string]any{
 		"query": "anything",
 	}), tc)
 	if err == nil {
 		t.Fatal("expected missing backend error")
+	}
+	if asked {
+		t.Fatal("must not Ask when backend is unconfigured")
 	}
 	msg := err.Error()
 	for _, want := range []string{
