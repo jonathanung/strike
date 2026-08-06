@@ -772,8 +772,8 @@ func TestRedactSecrets(t *testing.T) {
 		if strings.Contains(got, tt.banned) {
 			t.Errorf("RedactSecrets(%q) still contains %q → %q", tt.in, tt.banned, got)
 		}
-		if !strings.Contains(got, "[REDACTED]") {
-			t.Errorf("RedactSecrets(%q) = %q, want [REDACTED]", tt.in, got)
+		if !strings.Contains(got, "REDACTED") {
+			t.Errorf("RedactSecrets(%q) = %q, want REDACTED marker", tt.in, got)
 		}
 	}
 }

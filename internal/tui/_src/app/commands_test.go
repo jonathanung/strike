@@ -53,6 +53,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/session":          {"browse and resume a past session", "[id]", commandSourceBuiltin},
 		"/rename":           {"rename the current session", "[title]", commandSourceBuiltin},
 		"/export":           {"export the conversation to markdown", "[path] [--open]", commandSourceBuiltin},
+		"/timeline":         {"structured run timeline (collapsed view or JSON export)", "[export [path]]", commandSourceBuiltin},
 		"/copy":             {"copy the last assistant response to the clipboard", "", commandSourceBuiltin},
 		"/help":             {"show available commands", "", commandSourceBuiltin},
 		"/keys":             {"show keyboard shortcuts", "[reset]", commandSourceBuiltin},

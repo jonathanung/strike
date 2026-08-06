@@ -44,6 +44,7 @@ const (
 	commandSession         commandID = "session"
 	commandRename          commandID = "rename"
 	commandExport          commandID = "export"
+	commandTimeline        commandID = "timeline"
 	commandCopy            commandID = "copy"
 	commandMemory          commandID = "memory"
 	commandQueue           commandID = "queue"
@@ -140,6 +141,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandSession, Name: "/session", Description: "browse and resume a past session", ArgsHint: "[id]", Source: commandSourceBuiltin},
 	{ID: commandRename, Name: "/rename", Description: "rename the current session", ArgsHint: "[title]", Source: commandSourceBuiltin},
 	{ID: commandExport, Name: "/export", Description: "export the conversation to markdown", ArgsHint: "[path] [--open]", Source: commandSourceBuiltin},
+	{ID: commandTimeline, Name: "/timeline", Description: "structured run timeline (collapsed view or JSON export)", ArgsHint: "[export [path]]", Source: commandSourceBuiltin},
 	{ID: commandCopy, Name: "/copy", Description: "copy the last assistant response to the clipboard", Source: commandSourceBuiltin},
 	{ID: commandHelp, Name: "/help", Description: "show available commands", Source: commandSourceBuiltin},
 	{ID: commandKeys, Name: "/keys", Description: "show keyboard shortcuts", ArgsHint: "[reset]", Source: commandSourceBuiltin},
