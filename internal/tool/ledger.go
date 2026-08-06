@@ -253,7 +253,7 @@ func (t *ledgerWriteTool) Execute(ctx context.Context, args json.RawMessage, tc 
 
 	switch action {
 	case "append":
-		return t.append(in.Kind, in.Statement, in.Confidence, in.EvidenceRefs, in.ScopePaths, in.ScopeTaskIDs, in.Supersedes, in.ID, sessionID, rootID, agent, tc)
+		return t.append(in.Kind, in.Statement, in.Confidence, in.EvidenceRefs, in.ScopePaths, in.ScopeTaskIDs, in.Supersedes, sessionID, rootID, agent, tc)
 	case "invalidate":
 		return t.invalidate(in.ID, in.Reason, in.Evidence, tc)
 	case "supersede":
@@ -263,11 +263,9 @@ func (t *ledgerWriteTool) Execute(ctx context.Context, args json.RawMessage, tc 
 	}
 }
 
-func (t *ledgerWriteTool) append(kind, statement, confidence string, evidence, paths, tasks []string, supersedes, idField, sessionID, rootID, agent string, tc *Context) (Result, error) {
+func (t *ledgerWriteTool) append(kind, statement, confidence string, evidence, paths, tasks []string, supersedes, sessionID, rootID, agent string, tc *Context) (Result, error) {
+	// Only explicit supersedes on append (id is reserved for invalidate/supersede actions).
 	sup := strings.TrimSpace(supersedes)
-	if sup == "" {
-		sup = strings.TrimSpace(idField)
-	}
 	e, err := t.store.Append(ledger.AppendInput{
 		Kind:          kind,
 		Statement:     statement,
