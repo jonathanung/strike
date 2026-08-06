@@ -68,8 +68,12 @@ func timedEventsFromJSONL(data []byte) ([]timeline.TimedEvent, error) {
 	line := 0
 	for sc.Scan() {
 		line++
-		raw := sc.Bytes()
-		if len(bytes.TrimSpace(raw)) == 0 {
+		raw := bytes.TrimSpace(sc.Bytes())
+		if len(raw) == 0 {
+			continue
+		}
+		// Skip session.header schema marker (#803); not a protocol event.
+		if isSessionLogHeaderLine(raw) {
 			continue
 		}
 		var env protocol.Envelope
