@@ -110,6 +110,7 @@ Optional Vite dev proxy lives in `web/`. Details and threat model:
 | [Config](docs/config.md) | JSON, permissions, custom providers, `vimMode`/`nanoMode` |
 | [Agents & skills](docs/agents-skills.md) | personas, skills, workflows / autonomy |
 | [Web cockpit](docs/web.md) | experimental `strike serve` (live + RO) |
+| [Go SDK](docs/sdk.md) | `pkg/sdk` client over `pkg/protocol` |
 | [Architecture](docs/ARCHITECTURE.md) | packages, seams, recipes |
 | [Contributing](docs/contributing.md) | layout, verification, doc check |
 

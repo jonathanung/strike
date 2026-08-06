@@ -45,11 +45,13 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 
 | Package | Role | May import |
 |---|---|---|
-| `cmd/strike` | CLI entry (`main.go`) + composition root (`wire.go` stub; `assemble_tools.go`, `session_lifecycle.go`, `exec.go`, `serve.go`, `multiroot.go`) | anything — the only package that wires the whole tree |
+| `cmd/strike` | CLI entry (`main.go`) + composition root (`wire.go` stub; `assemble_tools.go`, `session_lifecycle.go`, `exec.go`, `rpc.go`, `serve.go`, `multiroot.go`) | anything — the only package that wires the whole tree |
+| `internal/rpc` | Stdio JSON-RPC 2.0 bridge for Op/Event (`strike rpc`: NDJSON ops in, event envelopes out) | `protocol`, stdlib |
 | `internal/server` | Experimental read-only HTTP attach: `/health`, SSE session event tail, minimal attach page (`strike serve`) | `session`, `version`, `protocol` (via session JSONL), stdlib |
 | `internal/version` | Build-time Version/Commit stamped via `-ldflags` | stdlib |
 | `internal/update` | GitHub Releases self-update (check, download, sha256, atomic replace, re-exec) | `version`, stdlib, net/http |
 | `pkg/protocol` | **Public** Op/Event wire schema between engine and frontends; JSONL envelopes (`codec.go` / `op_codec.go`) are the session persistence + transport format (includes `scheduler.queued` / `admitted` / `canceled`). Semver via `Version` | stdlib only |
+| `pkg/sdk` | **Public** thin Go client over `pkg/protocol`: in-process channel client, JSONL encode/decode, `RunTurn`, session JSONL replay. Does not embed the engine (engine stays `internal/`). Consumer docs: [sdk.md](sdk.md) | `pkg/protocol`, stdlib only |
 | `internal/protocol` | Compatibility re-export of `pkg/protocol` (type aliases + thin forwards). Prefer `pkg/protocol` for new code | `pkg/protocol` only |
 | `internal/engine` | Headless agent runtime: built-in turn loop, task-subagent function harnesses, tool dispatch, permission/question integration, deferred agent switch; implicit session-scoped agent **team** (lead + children roster + shared task board in `team.go` / `team_board.go`); model-stream and bash admission via shared `scheduler` | `protocol`, `provider`, `harness`, `tool`, `permission`, `question`, `memory`, `config`, `sandbox`, `scheduler` |
 | `internal/harness` | Function-harness contract and named function registry; model calls return completed responses | `provider`, stdlib |
@@ -90,6 +92,7 @@ Verbatim from the refactor spec (`.plan/refactor-agents-ui.md`):
   `tui/...`. (`pkg/protocol` is also allowed — it is not under `internal/`.)
 - No backend package imports `internal/tui/...`.
 - `pkg/protocol`: stdlib only (public wire surface).
+- `pkg/sdk`: stdlib + `pkg/protocol` only (public client over the wire schema).
 
 These are enforced mechanically, not just by convention: `internal/tui/boundary_test.go`
 (`TestArchitectureBoundaries`) walks every non-test `.go` file in the module
