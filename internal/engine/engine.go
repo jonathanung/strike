@@ -483,6 +483,17 @@ type Engine struct {
 	// Stream composition. Written by the turn worker; read by inspect on Run.
 	effectiveMu   sync.Mutex
 	lastEffective effectiveSnapshot
+
+	// excludedKinds / pinnedKinds are session context source controls
+	// (SetContextControls). Exclude omits layers; pin retains optional layers
+	// under fit-pressure auto-shed. Keys are PromptLayer* kind strings.
+	excludedKinds map[string]struct{}
+	pinnedKinds   map[string]struct{}
+
+	// fitWarnedTurnID/Level debounce ContextFitWarning to once per turn
+	// (allow escalate warn→critical only).
+	fitWarnedTurnID string
+	fitWarnedLevel  string
 }
 
 func New(opts Options) *Engine {

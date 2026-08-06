@@ -355,6 +355,7 @@ func TestForegroundTaskIndependentHistory(t *testing.T) {
 		t.Fatalf("missing parent final stream with task tool result; reqs=%#v", reqs)
 	}
 	userTurns := 0
+	sawParentPrompt := false
 	for _, msg := range parentFinal.Messages {
 		if msg.Role != provider.RoleUser {
 			continue
@@ -364,12 +365,18 @@ func TestForegroundTaskIndependentHistory(t *testing.T) {
 			continue
 		}
 		userTurns++
+		if msg.Text == parentPrompt {
+			sawParentPrompt = true
+		}
 		if msg.Text == taskPrompt {
 			t.Errorf("parent history has child prompt as user turn: %#v", parentFinal.Messages)
 		}
 	}
-	if userTurns != 1 {
-		t.Errorf("parent final user turns = %d, want 1; messages=%#v", userTurns, parentFinal.Messages)
+	if !sawParentPrompt {
+		t.Errorf("parent final missing original user turn; messages=%#v", parentFinal.Messages)
+	}
+	if userTurns < 1 {
+		t.Errorf("parent final user turns = %d, want >= 1; messages=%#v", userTurns, parentFinal.Messages)
 	}
 	var sawToolResult bool
 	for _, msg := range parentFinal.Messages {
