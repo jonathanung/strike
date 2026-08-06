@@ -546,7 +546,8 @@ func removeProviderFromProvidersFile(path, name string) error {
 	return os.WriteFile(path, append(out, '\n'), 0o644)
 }
 
-// removeProviderFromConfigFile drops name from a strike config JSON's providers array.
+// removeProviderFromConfigFile drops name from a strike config file's providers
+// array. Accepts JSONC; rewrite is pure JSON (comments / $schema dropped).
 func removeProviderFromConfigFile(path, name string) error {
 	if path == "" {
 		return nil
@@ -559,9 +560,9 @@ func removeProviderFromConfigFile(path, name string) error {
 	if err != nil {
 		return err
 	}
-	var cfg Config
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return fmt.Errorf("%s is not valid JSON: %w", path, err)
+	cfg, err := unmarshalConfigJSONC(data)
+	if err != nil {
+		return fmt.Errorf("%s is not valid JSON/JSONC: %w", path, err)
 	}
 	if len(cfg.Providers) == 0 {
 		return nil

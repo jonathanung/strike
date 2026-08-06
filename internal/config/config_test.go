@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jonathanung/strike-cli/internal/permission"
@@ -508,6 +509,275 @@ func TestLoadMalformed(t *testing.T) {
 	}
 	if _, err := Load(t.TempDir()); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestLoadJSONCCommentsAndSchema(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Line + block comments, $schema ignored, disable-default still parsed.
+	globalBody := []byte(`{
+  // editor DX only
+  "$schema": "https://example.invalid/strike-config.schema.json",
+  "provider": "openai", // preferred
+  "model": "gpt-5.5",
+  /* block comment */
+  "disable-default-anthropic": true,
+  "leanCode": "full"
+}
+`)
+	if err := os.WriteFile(global, globalBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	work := t.TempDir()
+	project := filepath.Join(work, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(project), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	projectBody := []byte(`// project overlay
+{
+  "$schema": "https://example.invalid/other.json",
+  "model": "gpt-5",
+  "theme": "nord"
+}
+`)
+	if err := os.WriteFile(project, projectBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Provider != "openai" {
+		t.Errorf("Provider = %q, want openai", cfg.Provider)
+	}
+	if cfg.Model != "gpt-5" {
+		t.Errorf("Model = %q, want gpt-5 (project overlay)", cfg.Model)
+	}
+	if cfg.Theme != "nord" {
+		t.Errorf("Theme = %q, want nord", cfg.Theme)
+	}
+	if cfg.LeanCode != "full" {
+		t.Errorf("LeanCode = %q, want full", cfg.LeanCode)
+	}
+	if !cfg.IsBuiltinProviderDisabled("anthropic") {
+		t.Error("expected anthropic disabled via disable-default-anthropic in JSONC")
+	}
+}
+
+func TestLoadJSONCUnterminatedBlockComment(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{ /* never closed`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(""); err == nil {
+		t.Fatal("expected error for unterminated block comment")
+	}
+}
+
+func TestReadGlobalDefaultsJSONC(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := GlobalPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`// defaults
+{
+  "$schema": "https://example.invalid/s.json",
+  "provider": "xai",
+  "model": "grok-4.5"
+}
+`)
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := ReadGlobalDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Provider != "xai" || cfg.Model != "grok-4.5" {
+		t.Fatalf("got provider=%q model=%q", cfg.Provider, cfg.Model)
+	}
+}
+
+func TestSetGlobalDefaultsRewritesJSONCToJSON(t *testing.T) {
+	// Programmatic save reads JSONC then rewrites pure JSON (comments/$schema dropped).
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := GlobalPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	seed := []byte(`// keep until save
+{
+  "$schema": "https://example.invalid/s.json",
+  "provider": "anthropic",
+  "model": "old",
+  "systemPrompt": "keep me"
+}
+`)
+	if err := os.WriteFile(path, seed, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetGlobalDefaults("openai", "new-model", "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !json.Valid(data) {
+		t.Fatalf("after save, config must be pure JSON: %s", data)
+	}
+	text := string(data)
+	if strings.Contains(text, "//") || strings.Contains(text, "$schema") {
+		t.Fatalf("save must drop comments and $schema, got:\n%s", text)
+	}
+	var got Config
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Provider != "openai" || got.Model != "new-model" {
+		t.Errorf("provider/model = %q/%q", got.Provider, got.Model)
+	}
+	if got.SystemPrompt != "keep me" {
+		t.Errorf("SystemPrompt = %q, want preserved", got.SystemPrompt)
+	}
+}
+
+func TestAppendProjectPermissionRewritesJSONCToJSON(t *testing.T) {
+	work := t.TempDir()
+	path := ProjectPath(work)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	seed := []byte(`/* project */
+{
+  "$schema": "https://example.invalid/p.json",
+  "theme": "dracula"
+}
+`)
+	if err := os.WriteFile(path, seed, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rule := permission.Rule{Permission: "bash", Pattern: "go *", Action: permission.Allow}
+	if err := AppendProjectPermission(work, rule); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !json.Valid(data) {
+		t.Fatalf("after append, config must be pure JSON: %s", data)
+	}
+	if strings.Contains(string(data), "/*") || strings.Contains(string(data), "$schema") {
+		t.Fatalf("append must drop comments and $schema, got:\n%s", data)
+	}
+	var got Config
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Theme != "dracula" {
+		t.Errorf("Theme = %q, want preserved", got.Theme)
+	}
+	if len(got.Permissions) != 1 || got.Permissions[0].Permission != "bash" {
+		t.Fatalf("permissions = %+v", got.Permissions)
+	}
+}
+
+func TestSaveGlobalProvidersJSONC(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := GlobalPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	seed := []byte(`// providers live here too
+{
+  "$schema": "https://example.invalid/s.json",
+  "provider": "openai",
+  "theme": "nord"
+}
+`)
+	if err := os.WriteFile(path, seed, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	items := []CustomProvider{{
+		Name:    "local",
+		BaseURL: "http://127.0.0.1:8080/v1",
+		API:     "openai",
+		Models:  []string{"local-model"},
+	}}
+	if err := saveGlobalProviders(items); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !json.Valid(data) {
+		t.Fatalf("after provider save, config must be pure JSON: %s", data)
+	}
+	var got Config
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Theme != "nord" || got.Provider != "openai" {
+		t.Errorf("unrelated fields lost: theme=%q provider=%q", got.Theme, got.Provider)
+	}
+	if len(got.Providers) != 1 || got.Providers[0].Name != "local" {
+		t.Fatalf("providers = %+v", got.Providers)
+	}
+}
+
+func TestRemoveProviderFromConfigFileJSONC(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config")
+	seed := []byte(`// drop one provider
+{
+  "$schema": "https://example.invalid/s.json",
+  "theme": "dracula",
+  "providers": [
+    {"name": "keep", "baseURL": "http://127.0.0.1:1/v1", "api": "openai", "models": ["a"]},
+    {"name": "drop", "baseURL": "http://127.0.0.1:2/v1", "api": "openai", "models": ["b"]}
+  ]
+}
+`)
+	if err := os.WriteFile(path, seed, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeProviderFromConfigFile(path, "drop"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !json.Valid(data) {
+		t.Fatalf("after remove, config must be pure JSON: %s", data)
+	}
+	var got Config
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Theme != "dracula" {
+		t.Errorf("Theme = %q, want preserved", got.Theme)
+	}
+	if len(got.Providers) != 1 || got.Providers[0].Name != "keep" {
+		t.Fatalf("providers = %+v", got.Providers)
 	}
 }
 
@@ -1527,5 +1797,42 @@ func TestLoadLSPDiagnosticsOverlay(t *testing.T) {
 	}
 	if cfg.LSP.Servers["go"].Command != "gopls" {
 		t.Fatalf("servers should remain from global: %#v", cfg.LSP.Servers)
+	}
+}
+
+func TestDefaultLSPServers(t *testing.T) {
+	cfg := Default()
+	want := []string{"go", "typescript", "python", "rust"}
+	for _, name := range want {
+		s, ok := cfg.LSP.Servers[name]
+		if !ok {
+			t.Fatalf("missing default server %q in %#v", name, cfg.LSP.Servers)
+		}
+		if strings.TrimSpace(s.Command) == "" || len(s.Extensions) == 0 {
+			t.Fatalf("%s = %#v", name, s)
+		}
+	}
+	if cfg.LSP.Servers["go"].Command != "gopls" {
+		t.Fatalf("go command = %q", cfg.LSP.Servers["go"].Command)
+	}
+	if len(cfg.LSP.Servers["typescript"].Args) != 1 || cfg.LSP.Servers["typescript"].Args[0] != "--stdio" {
+		t.Fatalf("typescript args = %#v", cfg.LSP.Servers["typescript"].Args)
+	}
+	// Empty servers map in a layer clears defaults (replace semantics).
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(global, []byte(`{"lsp":{"servers":{}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.LSP.Servers) != 0 {
+		t.Fatalf("empty servers should clear defaults: %#v", loaded.LSP.Servers)
 	}
 }
