@@ -5,7 +5,7 @@
 // namespaces), Wrap returns the original argv and emits a one-shot warning.
 //
 // Policy.Mode is the config/CLI sandbox dial (off|read-only|workspace-write).
-// Permission rules compile into DenyWrite* / Network / NoWorkspaceWrite via
+// Permission rules compile into DenyWrite* / NoNetwork / NoWorkspaceWrite via
 // permission.CompileSandbox (E1.5).
 package sandbox
 
@@ -119,21 +119,28 @@ type Policy struct {
 	// for seatbelt regex denials and /sandbox explain. Linux also uses
 	// DenyWritePaths expanded from these globs at compile time.
 	DenyWriteGlobs []string
-	// Network enables outbound/inbound network in the OS profile. Default
-	// true (permission compile) so bash keeps host networking; false adds
-	// --unshare-net / omits network-* (seatbelt). Compiled off only when
-	// both webfetch and mcp are hard-Deny on "*".
-	Network bool
+	// NoNetwork disables host networking in the OS profile (--unshare-net on
+	// Linux; omit network-* on seatbelt). Zero value keeps host networking —
+	// the product default so bare Policy{Mode, WorkDir} and coding workflows
+	// (gh, git, npm) work under workspace-write. CompileSandbox sets this only
+	// when both webfetch and mcp are hard-Deny on "*".
+	NoNetwork bool
 	// NetworkAllow is an optional host/CIDR allowlist for application-layer
 	// egress (webfetch). Empty means unrestricted public hosts (SSRF blocks
 	// still apply). Populated from config network.allow — not enforced by
-	// OS bash networking (Policy.Network remains all-or-nothing).
+	// OS bash networking (NetworkEnabled remains all-or-nothing).
 	NetworkAllow []string
 }
 
 // WorkspaceWritable reports whether the policy grants a writable workspace bind.
 func (p Policy) WorkspaceWritable() bool {
 	return p.Mode == ModeWorkspaceWrite && !p.NoWorkspaceWrite && strings.TrimSpace(p.WorkDir) != ""
+}
+
+// NetworkEnabled reports whether the OS profile shares host networking.
+// Inverse of NoNetwork; zero-value Policy keeps networking on.
+func (p Policy) NetworkEnabled() bool {
+	return !p.NoNetwork
 }
 
 // Explain returns a multi-line human description of the effective policy and
@@ -154,7 +161,7 @@ func Explain(p Policy) string {
 		return b.String()
 	}
 	fmt.Fprintf(&b, "workspace-write: %v\n", p.WorkspaceWritable())
-	fmt.Fprintf(&b, "network: %v\n", p.Network)
+	fmt.Fprintf(&b, "network: %v\n", p.NetworkEnabled())
 	if shared := SharedWritablePaths(p.WorkDir, p.WorkspaceWritable()); len(shared) > 0 {
 		fmt.Fprintf(&b, "shared-writable: %s\n", strings.Join(shared, ", "))
 	}

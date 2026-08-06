@@ -259,19 +259,26 @@ func TestBashSandboxPolicyCompiled(t *testing.T) {
 			WorkDir:          wd,
 			NoWorkspaceWrite: true,
 			DenyWriteGlobs:   []string{"**/*.env"},
-			Network:          true,
 		},
 	})
-	if !p.NoWorkspaceWrite || !p.Network || len(p.DenyWriteGlobs) != 1 {
+	if !p.NoWorkspaceWrite || !p.NetworkEnabled() || len(p.DenyWriteGlobs) != 1 {
 		t.Fatalf("compiled policy = %+v", p)
 	}
 	// Fallback when only SandboxMode is set — network on (product default).
 	p2 := bashSandboxPolicy(&Context{WorkDir: wd, SandboxMode: "read-only"})
-	if p2.Mode != sandbox.ModeReadOnly || p2.WorkDir != wd || !p2.Network {
+	if p2.Mode != sandbox.ModeReadOnly || p2.WorkDir != wd || !p2.NetworkEnabled() {
 		t.Fatalf("fallback = %+v", p2)
 	}
-	if pNil := bashSandboxPolicy(nil); !pNil.Network || pNil.Mode != sandbox.DefaultMode {
+	if pNil := bashSandboxPolicy(nil); !pNil.NetworkEnabled() || pNil.Mode != sandbox.DefaultMode {
 		t.Fatalf("nil context = %+v", pNil)
+	}
+	// Explicit air-gap is preserved when compiled.
+	pOff := bashSandboxPolicy(&Context{
+		WorkDir: wd,
+		Sandbox: sandbox.Policy{Mode: sandbox.ModeWorkspaceWrite, WorkDir: wd, NoNetwork: true},
+	})
+	if pOff.NetworkEnabled() || !pOff.NoNetwork {
+		t.Fatalf("NoNetwork compiled = %+v", pOff)
 	}
 }
 
