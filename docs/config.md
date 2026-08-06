@@ -8,11 +8,11 @@ Strike does not ship or fetch a schema URL).
 
 **Round-trip / save policy:** hand-edited comments and `$schema` are kept on
 disk until a **programmatic write** runs (`SetGlobalDefaults`, theme /
-presentation / dials / scheduler presets, `AppendProjectPermission`, etc.).
-Those paths read JSONC, then rewrite **pretty-printed pure JSON** via
-`encoding/json` — comments and `$schema` are dropped. Prefer keeping durable
-commentary in a sibling note, or avoid `/settings`-style writers if you need
-comments to survive.
+presentation / dials / scheduler presets, custom provider upsert/remove,
+`AppendProjectPermission`, etc.). Those paths read JSONC, then rewrite
+**pretty-printed pure JSON** via `encoding/json` — comments and `$schema` are
+dropped. Prefer keeping durable commentary in a sibling note, or avoid
+`/settings`-style writers if you need comments to survive.
 
 **Symlinks:** `~/.strike` and `<project>/.strike` may be directory symlinks
 (state lives elsewhere). Strike resolves them before opening history/memory/

@@ -698,6 +698,89 @@ func TestAppendProjectPermissionRewritesJSONCToJSON(t *testing.T) {
 	}
 }
 
+func TestSaveGlobalProvidersJSONC(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := GlobalPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	seed := []byte(`// providers live here too
+{
+  "$schema": "https://example.invalid/s.json",
+  "provider": "openai",
+  "theme": "nord"
+}
+`)
+	if err := os.WriteFile(path, seed, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	items := []CustomProvider{{
+		Name:    "local",
+		BaseURL: "http://127.0.0.1:8080/v1",
+		API:     "openai",
+		Models:  []string{"local-model"},
+	}}
+	if err := saveGlobalProviders(items); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !json.Valid(data) {
+		t.Fatalf("after provider save, config must be pure JSON: %s", data)
+	}
+	var got Config
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Theme != "nord" || got.Provider != "openai" {
+		t.Errorf("unrelated fields lost: theme=%q provider=%q", got.Theme, got.Provider)
+	}
+	if len(got.Providers) != 1 || got.Providers[0].Name != "local" {
+		t.Fatalf("providers = %+v", got.Providers)
+	}
+}
+
+func TestRemoveProviderFromConfigFileJSONC(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config")
+	seed := []byte(`// drop one provider
+{
+  "$schema": "https://example.invalid/s.json",
+  "theme": "dracula",
+  "providers": [
+    {"name": "keep", "baseURL": "http://127.0.0.1:1/v1", "api": "openai", "models": ["a"]},
+    {"name": "drop", "baseURL": "http://127.0.0.1:2/v1", "api": "openai", "models": ["b"]}
+  ]
+}
+`)
+	if err := os.WriteFile(path, seed, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeProviderFromConfigFile(path, "drop"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !json.Valid(data) {
+		t.Fatalf("after remove, config must be pure JSON: %s", data)
+	}
+	var got Config
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Theme != "dracula" {
+		t.Errorf("Theme = %q, want preserved", got.Theme)
+	}
+	if len(got.Providers) != 1 || got.Providers[0].Name != "keep" {
+		t.Fatalf("providers = %+v", got.Providers)
+	}
+}
+
 func TestSetGlobalDefaultsPreserves(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
