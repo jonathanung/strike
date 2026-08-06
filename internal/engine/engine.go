@@ -21,6 +21,15 @@ import (
 	"github.com/jonathanung/strike-cli/internal/tool"
 )
 
+// sessionTemp holds the absolute private scratch dir for this engine session
+// (os.TempDir()/strike/<session-id>/). Empty when allocation failed or was
+// skipped. Cleaned up when Run returns.
+type sessionTempState struct {
+	dir string
+	// owned is true when this engine created/ensured the dir and should remove it.
+	owned bool
+}
+
 // defaultMaxStreamAttempts is how many times one logical model request may
 // call Provider.Stream on retryable failure before the turn fails.
 const (
@@ -510,6 +519,9 @@ type Engine struct {
 	// (allow escalate warn→critical only).
 	fitWarnedTurnID string
 	fitWarnedLevel  string
+
+	// sessionTemp is the private OS temp scratch dir for path tools.
+	sessionTemp sessionTempState
 }
 
 func New(opts Options) *Engine {
@@ -596,7 +608,28 @@ func New(opts Options) *Engine {
 		e.perms.SetProjectPersister(opts.PersistProjectRule)
 	}
 	e.questions = question.New(e.emit)
+	// Allocate session-scoped scratch under os.TempDir() for path tools.
+	// Failure is non-fatal: tools simply keep the workspace-only boundary.
+	if dir, err := tool.EnsureSessionTemp(opts.SessionID); err == nil && dir != "" {
+		e.sessionTemp = sessionTempState{dir: dir, owned: true}
+	}
 	return e
+}
+
+// SessionTempDir returns the absolute session scratch directory when allocated.
+func (e *Engine) SessionTempDir() string {
+	if e == nil {
+		return ""
+	}
+	return e.sessionTemp.dir
+}
+
+func (e *Engine) cleanupSessionTemp() {
+	if e == nil || !e.sessionTemp.owned {
+		return
+	}
+	_ = tool.CleanupSessionTemp(e.opts.SessionID)
+	e.sessionTemp = sessionTempState{}
 }
 
 // ExplainPermission returns last-match-wins detail for a sample tool call
@@ -713,6 +746,7 @@ func (e *Engine) Run(ctx context.Context) {
 	defer e.dissolveTeamIfLead()
 	defer e.detachMailbox()
 	defer e.shutdownChildren()
+	defer e.cleanupSessionTemp()
 	if e.team != nil {
 		e.team.AttachMailbox(e)
 	}

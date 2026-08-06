@@ -27,6 +27,7 @@ Usage:
 - ALWAYS prefer editing existing files in the codebase. NEVER write new files unless explicitly required.
 - NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the user.
 - Only use emojis if the user explicitly requests it.
+- Paths must stay inside the workspace root, or inside the session temporary directory shown in the environment block (absolute paths only for temp). Use the session temp dir for short-lived scratch, request bodies, or command interchange files — not for durable project output.
 - Optional baseHash (sha256 hex of expected current content when overwriting) fails closed with precondition_failed on mismatch.
 - Writes are atomic (temp + rename) on local POSIX filesystems.`
 }
@@ -54,7 +55,11 @@ func (writeTool) Execute(ctx context.Context, args json.RawMessage, tc *Context)
 	if err := json.Unmarshal(args, &a); err != nil {
 		return Result{}, ErrInvalidArgs(fmt.Sprintf("invalid arguments: %v", err))
 	}
-	path, rel, err := resolveInWorkspace(tc.WorkDir, a.FilePath)
+	tempDir := ""
+	if tc != nil {
+		tempDir = tc.SessionTempDir
+	}
+	path, rel, err := resolveAllowedPath(tc.WorkDir, tempDir, a.FilePath)
 	if err != nil {
 		return Result{}, err
 	}
@@ -96,11 +101,11 @@ func (writeTool) Execute(ctx context.Context, args json.RawMessage, tc *Context)
 	}
 	tc.SnapshotPath(path)
 	// Re-validate + atomic temp/rename at exec time.
-	if err := workspaceWriteFile(tc.WorkDir, a.FilePath, []byte(a.Content)); err != nil {
+	if err := allowedWriteFile(tc.WorkDir, tempDir, a.FilePath, []byte(a.Content)); err != nil {
 		return Result{}, err
 	}
 	// Refresh path after secure write (may differ if a prior symlink was resolved).
-	path, _, err = resolveInWorkspace(tc.WorkDir, a.FilePath)
+	path, _, err = resolveAllowedPath(tc.WorkDir, tempDir, a.FilePath)
 	if err != nil {
 		return Result{}, err
 	}

@@ -695,6 +695,11 @@ type SessionPR struct {
 // (used when bash captures gh pr create/view output).
 type Context struct {
 	WorkDir string
+	// SessionTempDir is the absolute private scratch directory for this
+	// session (os.TempDir()/strike/<session-id>/). When set, path tools may
+	// read/write absolute paths under it in addition to WorkDir. Empty
+	// disables the allowance. Allocated by the engine; cleaned up on shutdown.
+	SessionTempDir string
 	// SandboxMode is the OS process sandbox dial for bash
 	// (off|read-only|workspace-write). Empty means workspace-write (default).
 	// Wired from config/CLI; see internal/sandbox.ParseMode.

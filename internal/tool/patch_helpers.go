@@ -27,7 +27,7 @@ type PatchPreview struct {
 
 // PreviewPatch parses and plans patch against workDir without writing.
 func PreviewPatch(workDir, patch string) PatchPreview {
-	planned, _, err := preparePatch(workDir, patch)
+	planned, _, err := preparePatch(workDir, "", patch)
 	if err != nil {
 		return PatchPreview{Valid: false, Error: err.Error(), Ops: []PatchOp{}, Files: []string{}}
 	}
