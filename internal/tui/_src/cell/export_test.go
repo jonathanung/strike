@@ -33,6 +33,7 @@ func TestRedactSecrets(t *testing.T) {
 		},
 		{
 			name: "github",
+			// ghp_ pattern wins over GITHUB_TOKEN= assignment when the value is a ghp_ token.
 			in:   "export GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789",
 			want: "export GITHUB_TOKEN=[REDACTED_GITHUB_TOKEN]",
 		},

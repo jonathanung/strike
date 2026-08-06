@@ -17,8 +17,9 @@ const modulePath = "github.com/jonathanung/strike-cli"
 // the module with go/parser and checking its imports:
 //
 //   - internal/tui/** may import no internal/* package other than protocol,
-//     host, and tui/... (so the frontend never touches auth/config/models/
-//     history directly and can be developed against fakes).
+//     host, secret, and tui/... (so the frontend never touches auth/config/
+//     models/history directly and can be developed against fakes). secret is
+//     a pure stdlib redaction helper shared with session/engine egress.
 //   - internal/host (the contract package, not host/local) imports the
 //     standard library only.
 //   - pkg/protocol imports the standard library only.
@@ -135,10 +136,11 @@ func boundaryViolation(pkgDir, imp string) string {
 			return "" // stdlib or third-party is fine (Charm paths: TestCharmImportPaths)
 		}
 		suffix := strings.TrimPrefix(imp, internal)
-		if suffix == "protocol" || suffix == "host" || suffix == "tui" || strings.HasPrefix(suffix, "tui/") {
+		if suffix == "protocol" || suffix == "host" || suffix == "secret" ||
+			suffix == "tui" || strings.HasPrefix(suffix, "tui/") {
 			return ""
 		}
-		return "internal/tui may only import internal/{protocol,host,tui/...}"
+		return "internal/tui may only import internal/{protocol,host,secret,tui/...}"
 
 	case pkgDir == "internal/host":
 		if strings.Contains(imp, ".") {

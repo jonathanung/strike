@@ -140,7 +140,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/fork` | copy the current session JSONL into a new id (idle only) |
 | `/undo` | undo last turn in place (idle only); bare opens picker; `chat` keeps disk; `files` restores per-file checkpoints from that turn (never `git reset --hard`) |
 | `/rewind` | fork a **new** session from a completed turn (idle only); original session stays listable; bare opens turn picker; `/rewind n` keeps turns 1..n. Workspace file revert is not part of rewind (use `/undo files` on the live session) |
-| `/export` | dump the visible transcript to markdown (user/assistant/tool summaries); redacts common API-key shapes; default path under `.strike/exports/` or tmp; `--open` launches `$EDITOR` |
+| `/export` | dump the visible transcript to markdown (user/assistant/tool summaries); redacts credentials via shared `internal/secret` (see [secrets.md](secrets.md)); default path under `.strike/exports/` or tmp; `--open` launches `$EDITOR` |
 | `/copy` | copy plain text of the last assistant response (not tool output) to the system clipboard via OSC52; same as `alt+y`; notice on success/failure |
 | `/compact` | ask the engine to compact model history |
 | `/memory` | bare = list browser (focuses memory pane); `list [tag]`, `get <key>`, `set <key> <value>`, `rm <key>`, `export [path]`, `import <path> [--replace]` (portable JSON; relative paths stay under project root) |

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike-cli/internal/secret"
 )
 
 type Store struct {
@@ -84,7 +85,9 @@ func (s *Store) Path() string {
 }
 
 func (s *Store) Append(ev protocol.Event) error {
-	env, err := protocol.Wrap(ev)
+	// Scrub credentials before JSONL persist so session logs, timeline export
+	// consumers, and diagnostic bundles never retain raw secrets.
+	env, err := protocol.Wrap(secret.RedactEvent(ev))
 	if err != nil {
 		return err
 	}
