@@ -174,11 +174,12 @@ func (notebookEditTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 		return Result{}, err
 	}
 	tc.NotifyFileSync(path, string(out), false)
-	return Result{
+	res := Result{
 		Title:    rel,
 		Output:   outMsg,
 		Metadata: meta,
-	}, nil
+	}
+	return tc.AppendDiagnostics(ctx, res, path), nil
 }
 
 func resolveNotebookCellIndex(cells []any, cellID, mode string) (int, error) {

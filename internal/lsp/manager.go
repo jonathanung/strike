@@ -60,6 +60,9 @@ type Manager struct {
 	// diagnostics is a manager-level cache (uri path → diags) updated by clients.
 	diagMu      sync.Mutex
 	diagnostics map[string][]Diagnostic // keyed by absolute path
+	// pending marks paths awaiting a fresh publishDiagnostics after NotifyFile
+	// (so CollectForPaths can wait once for multi-file patches).
+	pending map[string]struct{}
 }
 
 // NewManager returns an empty manager. rootDir is the workspace root for initialize.
@@ -72,6 +75,7 @@ func NewManager(rootDir string) *Manager {
 		extIndex:    make(map[string]string),
 		rootDir:     rootDir,
 		diagnostics: make(map[string][]Diagnostic),
+		pending:     make(map[string]struct{}),
 	}
 }
 
@@ -139,6 +143,7 @@ func (m *Manager) cacheDiagnostics(uri string, diags []Diagnostic) {
 		return
 	}
 	m.diagMu.Lock()
+	delete(m.pending, path) // server spoke — CollectForPaths may proceed
 	if len(diags) == 0 {
 		delete(m.diagnostics, path)
 	} else {
@@ -194,6 +199,7 @@ func (m *Manager) clearClientDiagnostics(client *Client) {
 	m.diagMu.Lock()
 	for p := range paths {
 		delete(m.diagnostics, p)
+		delete(m.pending, p)
 	}
 	m.diagMu.Unlock()
 }
@@ -213,14 +219,19 @@ func (m *Manager) NotifyFile(ctx context.Context, absPath, content string, delet
 		if deleted {
 			m.diagMu.Lock()
 			delete(m.diagnostics, absPath)
+			delete(m.pending, absPath)
 			m.diagMu.Unlock()
 		}
 		return
 	}
 	if deleted {
+		m.clearPending(absPath)
 		_ = client.DidClose(ctx, absPath)
 		return
 	}
+	// Drop stale diagnostics and mark pending so CollectForPaths waits for a
+	// fresh publish (or times out to empty — never inject pre-edit errors).
+	m.invalidatePath(absPath)
 	_ = client.DidOpenOrChange(ctx, absPath, content)
 }
 

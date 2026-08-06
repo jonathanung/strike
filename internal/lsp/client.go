@@ -297,12 +297,21 @@ func (c *Client) AllDiagnostics() map[string][]Diagnostic {
 }
 
 func (c *Client) clearDiagnostics(uri string) {
-	c.diagMu.Lock()
-	delete(c.diagnostics, uri)
-	c.diagMu.Unlock()
+	c.clearDiagnosticsLocal(uri)
 	if c.onDiagnostic != nil {
 		c.onDiagnostic(uri, nil)
 	}
+}
+
+// clearDiagnosticsLocal drops the client store entry without notifying the
+// manager (used when invalidating before didOpen/didChange so pending stays set).
+func (c *Client) clearDiagnosticsLocal(uri string) {
+	if c == nil {
+		return
+	}
+	c.diagMu.Lock()
+	delete(c.diagnostics, uri)
+	c.diagMu.Unlock()
 }
 
 func (c *Client) storeDiagnostics(uri string, diags []Diagnostic) {

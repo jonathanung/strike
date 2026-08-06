@@ -556,6 +556,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 				// Background context: document sync must not be canceled with the tool call.
 				lspMgr.NotifyFile(context.Background(), absPath, content, deleted)
 			},
+			CollectDiagnostics:      makeLSPCollectDiagnostics(lspMgr, toolDir, cfg.LSP),
 			MaxChildDepth:           cfg.MaxChildDepth,
 			InitialProvider:         initialProvider,
 			InitialModel:            initialModel,
@@ -772,6 +773,29 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 // anthropic adapter with the declared base URL and auth-store credentials.
 // Env placeholders in baseURL/headers/apiKeyEnv are expanded from the process env.
 // When apiKeyEnv is set, a missing key fails clearly at select time.
+// makeLSPCollectDiagnostics wires Manager.CollectForPaths into tool.Context
+// using config severity / max-chars / wait knobs. Nil manager → nil callback.
+func makeLSPCollectDiagnostics(mgr *lsp.Manager, workDir string, cfg config.LSPConfig) func(context.Context, []string) string {
+	if mgr == nil {
+		return nil
+	}
+	opts := lsp.InjectOptions{WorkDir: workDir}
+	if sev, err := lsp.ParseSeverityName(cfg.DiagnosticsSeverity); err == nil {
+		opts.MinSeverity = sev
+	}
+	if cfg.DiagnosticsMaxChars > 0 {
+		opts.MaxChars = cfg.DiagnosticsMaxChars
+	}
+	if cfg.DiagnosticsWaitMs > 0 {
+		opts.Wait = time.Duration(cfg.DiagnosticsWaitMs) * time.Millisecond
+	} else if cfg.DiagnosticsWaitMs < 0 {
+		opts.Wait = -1 // snapshot immediately
+	}
+	return func(ctx context.Context, absPaths []string) string {
+		return mgr.CollectForPaths(ctx, absPaths, opts)
+	}
+}
+
 func buildCustomProvider(cp config.CustomProvider, store *auth.Store) (provider.Provider, string, error) {
 	cp = config.ResolveCustom(cp)
 	if err := config.ValidateBaseURL(cp.BaseURL); err != nil {

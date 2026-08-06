@@ -379,6 +379,11 @@ type Context struct {
 	// absPath is absolute; content is the full new text; deleted is true for
 	// removals (content may be empty). Nil disables. Must not panic the tool.
 	FileSync func(absPath string, content string, deleted bool)
+	// CollectDiagnostics, when non-nil, returns model-facing diagnostic text
+	// for the given absolute paths after file mutations (one call per tool
+	// result so multi-file patches produce a single block). Empty string means
+	// none. Nil disables. Must not panic the tool.
+	CollectDiagnostics func(ctx context.Context, absPaths []string) string
 	// ChildWake is closed when a background child completes. Sleep selects on
 	// it so poll-loops return promptly. Nil disables early wake.
 	ChildWake <-chan struct{}
@@ -405,6 +410,37 @@ func (tc *Context) NotifyFileSync(absPath, content string, deleted bool) {
 	}
 	defer func() { _ = recover() }()
 	tc.FileSync(absPath, content, deleted)
+}
+
+// AppendDiagnostics appends CollectDiagnostics output for absPaths onto res.Output.
+// Multi-file tools pass every touched path in one call (one diagnostic block).
+// Safe on a nil receiver or nil CollectDiagnostics. Recovers panics (returns res).
+func (tc *Context) AppendDiagnostics(ctx context.Context, res Result, absPaths ...string) (out Result) {
+	out = res
+	if tc == nil || tc.CollectDiagnostics == nil || len(absPaths) == 0 {
+		return out
+	}
+	defer func() { _ = recover() }()
+	// Filter empties without allocating when already clean.
+	paths := make([]string, 0, len(absPaths))
+	for _, p := range absPaths {
+		if p != "" {
+			paths = append(paths, p)
+		}
+	}
+	if len(paths) == 0 {
+		return out
+	}
+	block := tc.CollectDiagnostics(ctx, paths)
+	if block == "" {
+		return out
+	}
+	if out.Output == "" {
+		out.Output = block
+	} else {
+		out.Output = out.Output + "\n\n" + block
+	}
+	return out
 }
 
 type Tool interface {
