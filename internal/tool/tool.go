@@ -20,11 +20,23 @@ import (
 
 // Result separates what the model sees (Output) from what the UI renders
 // (Title for the one-line summary, Metadata for rich views like diffs).
+//
+// ErrorCode, when non-empty, is a stable failure class (canceled, timeout, …)
+// matching protocol.ErrorCode*. The engine settles IsError=true and stamps
+// ToolCallEnd.ErrorCode. Empty means success unless Execute returns a non-nil
+// error.
 type Result struct {
-	Title    string
-	Output   string
-	Metadata json.RawMessage
+	Title     string
+	Output    string
+	Metadata  json.RawMessage
+	ErrorCode string
 }
+
+// Stable tool result error codes (keep in lockstep with protocol.ErrorCode*).
+const (
+	ErrorCodeCanceled = "canceled"
+	ErrorCodeTimeout  = "timeout"
+)
 
 // UserRejectedError is returned when the user declines an interactive
 // approval that is not a permission ask (e.g. exit_plan_mode "No"). The

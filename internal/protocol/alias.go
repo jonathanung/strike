@@ -223,5 +223,15 @@ func ToolFeedbackUserRejected(feedback string) string {
 }
 func ToolFeedbackBlocked(reason string) string { return pub.ToolFeedbackBlocked(reason) }
 func ToolFeedbackCanceled() string             { return pub.ToolFeedbackCanceled() }
+func ToolFeedbackCanceledPartial(partial string) string {
+	return pub.ToolFeedbackCanceledPartial(partial)
+}
+func ToolFeedbackTimeout(detail string) string { return pub.ToolFeedbackTimeout(detail) }
 func ToolFeedbackUnstarted() string            { return pub.ToolFeedbackUnstarted() }
 func ToolFeedbackError(msg string) string      { return pub.ToolFeedbackError(msg) }
+
+const (
+	ErrorCodeCanceled  = pub.ErrorCodeCanceled
+	ErrorCodeTimeout   = pub.ErrorCodeTimeout
+	ErrorCodeQueueFull = pub.ErrorCodeQueueFull
+)

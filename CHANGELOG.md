@@ -16,6 +16,7 @@ materially affect the shipped product.
 
 ### Added
 
+- **Cancellation, deadlines, and backpressure** — stable `tool.end` / `EngineError` codes (`canceled`, `timeout`, `queue_full`); bash/process cancel preserves partial stdout with an incomplete marker; per-turn `TurnTimeout` ends with `stopReason=timeout`; unix external harness process-group kill; docs for interrupt vs `task_interrupt` vs scheduler pool cancel. Protocol wire version `1.2.0` ([#794](https://github.com/jonathanung/strike/issues/794)).
 - **Structured completion handoffs** — delegated `task` children always emit a machine-parseable handoff on `[child.completed]` and terminal `task_status` (`summary`, `files_changed`, `verification`, `findings`, `blockers`, `recommended_next_action`). Engine merges tool-tracked file mutations into `files_changed` and flags `incomplete` when the child did not supply structured JSON. Protocol wire version `1.1.0` ([#771](https://github.com/jonathanung/strike/issues/771)).
 
 ### Changed

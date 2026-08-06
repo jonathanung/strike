@@ -108,6 +108,55 @@ with `go/parser` and fails, naming the offending file and import, on any
 violation. Run it like any other test (`go test ./internal/tui/...`); there
 is no way to silently cross the boundary.
 
+## Cancellation, deadlines, and backpressure
+
+Harness-wide cancel/deadline behavior (see also #794). Compose with the
+scheduler pools — do not invent a second admission system.
+
+### Cancel propagation
+
+```
+Interrupt op / Run parent ctx / turn deadline
+        │
+        ▼
+  turnCtx cancel  ──► provider Stream select on ctx.Done (drain leftover)
+        │
+        ├── execToolCall: skip Execute or settle ToolCallEnd
+        │     errorCode=canceled|timeout; partial stdout preserved + incomplete marker
+        ▼
+  tool.Execute(ctx) ──► bash RunProcess (process-group SIGKILL on unix)
+                    ──► scheduler Acquire (waiter → scheduler.canceled)
+                    ──► task_interrupt → child Ops Interrupt (child turn only)
+```
+
+| Path | Behavior |
+|---|---|
+| **User `interrupt`** | Cancels the **parent** turn only. Non-blocking children keep running until they finish or receive `task_interrupt`. |
+| **`task_interrupt`** | Sends `Interrupt` to one owned child session; parent turn is unaffected. Child tools/processes observe the child turn ctx. |
+| **Scheduler pool cancel** | Waiting `Acquire` returns `ctx.Err()`; engine emits `scheduler.canceled` (`reason` `canceled`\|`closed`). In-flight leases are released on tool/stream exit (defer), not force-revoked mid-critical-section. |
+| **Bash / `RunProcess`** | Unix: own process group + `SIGKILL` on the group within `WaitDelay` (~2s) so grandchildren cannot hang `Wait`. Partial stdout/stderr retained; `ToolCallEnd.errorCode` = `canceled` or `timeout`. |
+| **External harness** | Same process-group kill on cancel as `RunProcess` (unix). |
+| **Provider stream** | `consumeStream` selects on `ctx.Done`, drains the stream in the background, ends the turn with `stopReason=interrupted` (user cancel) or `timeout` (turn deadline). |
+
+### Deadlines
+
+| Scope | Mechanism | Timeline / codes |
+|---|---|---|
+| Per-tool (bash) | `timeoutMs` (default 120s, max 600s); starts **after** scheduler admission | `process.exited` status `timeout`; `tool.end` `errorCode=timeout`, `IsError` |
+| Per-turn | `engine.Options.TurnTimeout` (zero = off) | `EngineError` code `timeout` + `turn.completed` `stopReason=timeout` |
+| Provider HTTP | request ctx only (no separate client timeout on streaming adapters) | surfaces as stream/turn cancel |
+
+### Backpressure (bounded queues)
+
+| Queue | Capacity | Full behavior |
+|---|---|---|
+| `Ops` channel | 16 | **Block** sender (TUI/host should not spin unbounded ops). |
+| `Events` channel | 256 | **Block** `emit`. `ToolCallBegin` is emitted from `Run` so `Interrupt` stays serviceable while the buffer is full. |
+| Mid-turn user input | 32 (`maxPendingUserInputs`) | **Reject** with `EngineError` `code=queue_full` (does not block Ops). Survives Interrupt; drained FIFO when idle. |
+| Scheduler waiters | unbounded waiter list per pool | Cancel via ctx → `scheduler.canceled`; capacity is the pool limit, not a second queue cap. |
+
+Stable codes used here: `canceled`, `timeout`, `queue_full` (`pkg/protocol` `ErrorCode*`). Broader tool contract codes land with #793 on the same vocabulary.
+
 ## TUI pane routing and layout
 
 Key routing is deliberately ordered: quit, then modal, then completion-owned

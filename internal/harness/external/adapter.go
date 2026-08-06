@@ -46,6 +46,7 @@ func (a commandAdapter) Start(ctx context.Context) (Pipe, error) {
 		return nil, err
 	}
 	cmd := exec.Command(a.cfg.Command, a.cfg.Args...)
+	configureHarnessCmd(cmd)
 	cmd.Env = os.Environ()
 	for k, v := range a.cfg.Env {
 		cmd.Env = append(cmd.Env, k+"="+v)
@@ -77,9 +78,4 @@ type commandPipe struct {
 
 func (p *commandPipe) CloseWrite() error { return p.stdin.Close() }
 func (p *commandPipe) Wait() error       { return p.cmd.Wait() }
-func (p *commandPipe) Kill() error {
-	if p.cmd.Process == nil {
-		return nil
-	}
-	return p.cmd.Process.Kill()
-}
+func (p *commandPipe) Kill() error       { return killHarnessProcess(p.cmd) }
