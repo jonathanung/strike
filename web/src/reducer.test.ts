@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { emptySlice, initialClientState, initialState, reduceClient, reduceEvent, selectedSlice } from "./reducer";
+import { emptySlice, initialClientState, initialState, reduceClient, reduceEvent, selectedSlice , applyUsageReported, tokenCount } from "./reducer";
 
 describe("reduceEvent", () => {
   it("merges streamed text and deduplicates replayed envelopes", () => {
@@ -237,5 +237,66 @@ describe("reduceClient workspace isolation", () => {
     expect(state.byID.A).toBeUndefined();
     expect(state.byID.B).toEqual(emptySlice("B"));
     expect(state.selectedID).toBe("B");
+  });
+});
+
+describe("usage.reported accumulation", () => {
+
+  it("records autonomy.selected on status for set.autonomy confirmations", () => {
+    const state = reduceEvent(initialState(), { type: "autonomy.selected", data: { mode: "skip-all" } });
+    expect(state.status.autonomy).toBe("skip-all");
+  });
+
+  it("accumulates known usage.reported parts and updates context used", () => {
+    let state = reduceEvent(initialState(), {
+      type: "usage.reported",
+      time: "1",
+      data: {
+        input: { n: 100, known: true },
+        output: { n: 40, known: true },
+        cacheRead: { known: false },
+        used: { n: 140, known: true },
+        source: "actual",
+      },
+    });
+    state = reduceEvent(state, {
+      type: "usage.reported",
+      time: "2",
+      data: {
+        input: { n: 50, known: true },
+        output: { known: false },
+        used: { n: 200, known: true },
+        source: "estimated",
+      },
+    });
+    expect(state.status.usageReports).toBe(2);
+    expect(state.status.inputTokens).toBe(150);
+    expect(state.status.outputTokens).toBe(40);
+    expect(state.status.contextUsed).toBe(200);
+    expect(state.status.usageSource).toBe("mixed (actual + estimated)");
+  });
+
+  it("merges chrome status without wiping client usage totals", () => {
+    let state = reduceEvent(initialState(), {
+      type: "usage.reported",
+      data: { input: { n: 10, known: true }, output: { n: 2, known: true }, source: "actual" },
+    });
+    state = reduceEvent(state, { type: "status", data: { provider: "echo", busy: false } });
+    expect(state.status.provider).toBe("echo");
+    expect(state.status.inputTokens).toBe(10);
+    expect(state.status.outputTokens).toBe(2);
+  });
+
+});
+
+describe("tokenCount / applyUsageReported", () => {
+  it("treats unknown token parts as absent", () => {
+    expect(tokenCount(undefined)).toEqual({ n: 0, known: false });
+    expect(tokenCount({ known: false })).toEqual({ n: 0, known: false });
+    expect(tokenCount({ n: 0, known: true })).toEqual({ n: 0, known: true });
+    const status = applyUsageReported({}, { input: { known: false }, output: { n: 0, known: true } });
+    expect(status.inputTokens).toBeUndefined();
+    expect(status.outputTokens).toBe(0);
+    expect(status.usageReports).toBe(1);
   });
 });
