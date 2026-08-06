@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
@@ -132,7 +131,7 @@ func (s *Server) handleWorkflowDocument(w http.ResponseWriter, r *http.Request) 
 
 func summaryToWorkflowDocument(sum host.WorkflowSummary) host.WorkflowDocument {
 	doc := host.WorkflowDocument{
-		SchemaVersion: config.WorkflowSchemaVersion,
+		SchemaVersion: 1,
 		Name:          sum.Name,
 		Description:   sum.Description,
 	}
@@ -248,15 +247,16 @@ func (s *Server) handleWorkflowSave(w http.ResponseWriter, r *http.Request) {
 }
 
 func writeWorkflowSaveError(w http.ResponseWriter, err error) {
+	msg := err.Error()
 	switch {
-	case errors.Is(err, host.ErrWorkflowInvalid), errors.Is(err, config.ErrDraftInvalid):
-		writeJSON(w, http.StatusUnprocessableEntity, opErrorResponse{Error: err.Error()})
-	case errors.Is(err, host.ErrWorkflowExists), errors.Is(err, config.ErrWorkflowExists):
-		writeJSON(w, http.StatusConflict, opErrorResponse{Error: err.Error()})
-	case errors.Is(err, config.ErrSaveNotConfirmed):
-		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+	case errors.Is(err, host.ErrWorkflowInvalid), strings.Contains(msg, "draft is invalid"), strings.Contains(msg, "workflow is invalid"):
+		writeJSON(w, http.StatusUnprocessableEntity, opErrorResponse{Error: msg})
+	case errors.Is(err, host.ErrWorkflowExists), strings.Contains(msg, "already exists"):
+		writeJSON(w, http.StatusConflict, opErrorResponse{Error: msg})
+	case strings.Contains(msg, "requires explicit confirmation"):
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: msg})
 	default:
-		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: msg})
 	}
 }
 
