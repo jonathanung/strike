@@ -277,8 +277,12 @@ func (m Model) memberPreferredSizes(g windowGroup, outerW, outerH int, compact, 
 			// Activity is the flex feed: grow into leftover space.
 			pref[i] = 0
 		default:
-			// Agents/files/etc. share space equally (flex) unless sparse.
-			pref[i] = 0
+			if pw, ok := w.(pluginPaneWindow); ok && pw.prefHeight > 0 {
+				pref[i] = min(maxPref, chrome+max(1, pw.prefHeight))
+			} else {
+				// Agents/files/etc. share space equally (flex) unless sparse.
+				pref[i] = 0
+			}
 		}
 	}
 	// Ensure at least one flex member so remainder has a home.

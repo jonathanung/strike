@@ -932,6 +932,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	services.MCP = local.NewMCP(mcpMgr)
 	services.LSP = local.NewLSP(lspMgr)
 	services.Plugins = local.NewPlugins(workDir)
+	services.Panes = local.NewPanes(workDir)
 	services.Telemetry = local.NewTelemetry()
 	services.Workflows = local.NewWorkflowsWithOpts(workflows, nil, local.WorkflowsOpts{
 		WorkDir: workDir,

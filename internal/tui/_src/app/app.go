@@ -659,6 +659,8 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 	m.windows = configureIssuesWindow(m.windows, m.services.Issues)
 	m.windows = configurePlansWindow(m.windows, m.services.Plans, m.sessionID)
 	m.windows = configureTelemetryWindow(m.windows, m.workDir, m.services.Telemetry)
+	// Plugin panes (docs/plugin-panes.md / #731): register enabled contributions.
+	m.windows, _ = syncPluginPanes(m.windows, m.services.Panes)
 	// Telemetry is on by default (newTelemetryWindow). Options.Telemetry only
 	// forces on when callers pass it; Init() arms the sampler via windows.init().
 	for _, option := range options {
@@ -963,11 +965,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case pluginOpDoneMsg, pluginTrustPreviewMsg, pluginUpdatePreviewMsg, pluginCatalogMsg, pluginOutdatedMsg:
+		var extra tea.Cmd
 		if pm, ok := m.modal.(*pluginModal); ok {
-			cmd := pm.applyMsg(msg)
-			m.reflow()
-			return m, cmd
+			extra = pm.applyMsg(msg)
 		}
+		// Lifecycle ops may enable/disable/trust/remove pane contributions.
+		if _, isDone := msg.(pluginOpDoneMsg); isDone {
+			var paneCmd tea.Cmd
+			m.windows, paneCmd = syncPluginPanes(m.windows, m.services.Panes)
+			m.reflow()
+			return m, tea.Batch(extra, paneCmd)
+		}
+		m.reflow()
+		return m, extra
+
+	case pluginPaneWakeMsg:
+		var cmd tea.Cmd
+		m.windows, cmd = m.windows.broadcast(msg)
+		return m, cmd
+
+	case pluginPaneNotifyMsg:
+		m.setNotice(msg.text, msg.err)
 		return m, nil
 
 	case effortChoicesLoadedMsg:

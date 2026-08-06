@@ -204,8 +204,14 @@ func doctorPluginToInfo(dp plugin.DoctorPlugin) host.PluginInfo {
 			Args:    append([]string(nil), h.Args...),
 		})
 	}
-	info.HasExecutable = len(info.MCP) > 0 || len(info.Harnesses) > 0 || info.Hooks > 0
-	if info.HasExecutable {
+	hasProcessPanes := false
+	if info.Panes > 0 && dp.Root != "" {
+		if mm, _, err := plugin.ReadManifest(dp.Root); err == nil {
+			hasProcessPanes = plugin.HasProcessPanes(mm, dp.Root)
+		}
+	}
+	info.HasExecutable = len(info.MCP) > 0 || len(info.Harnesses) > 0 || info.Hooks > 0 || hasProcessPanes
+	if info.HasExecutable || info.Panes > 0 {
 		var caps []string
 		for _, m := range info.MCP {
 			switch strings.ToLower(strings.TrimSpace(m.Transport)) {
@@ -221,6 +227,12 @@ func doctorPluginToInfo(dp plugin.DoctorPlugin) host.PluginInfo {
 		if info.Hooks > 0 {
 			// Doctor counts all hooks; shell hooks are the trust-relevant subset.
 			caps = append(caps, plugin.CapHooksCommand)
+		}
+		if info.Panes > 0 {
+			caps = append(caps, plugin.CapPanes)
+		}
+		if hasProcessPanes {
+			caps = append(caps, plugin.CapPanesProcess)
 		}
 		info.Capabilities = uniqueSorted(caps)
 	}
@@ -300,7 +312,7 @@ func (a pluginsAdapter) TrustPreview(id, scope string) (host.PluginTrustPreview,
 	}
 	caps := info.Capabilities
 	if ip.Manifest != nil {
-		caps = plugin.InferCapabilities(*ip.Manifest)
+		caps = plugin.InferCapabilitiesAt(*ip.Manifest, ip.Root)
 	}
 	prev := host.PluginTrustPreview{
 		ID:           info.ID,

@@ -899,6 +899,7 @@ type Services struct {
 	MCP         MCP       // external MCP server status; nil when unsupported
 	LSP         LSP       // language server status + diagnostics; nil when unsupported
 	Plugins     Plugins   // plugin lifecycle manager; nil when unsupported
+	Panes       Panes     // enabled pane contributions; nil when unsupported
 	Telemetry   Telemetry // local CPU/RAM/disk; nil when unsupported
 	// SchedulerPresets is the shipped build-system preset catalog and global
 	// apply surface (FTUE #705).

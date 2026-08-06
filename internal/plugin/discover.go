@@ -358,7 +358,7 @@ func loadOne(root string, scope Scope, strikeVer string) (*Plugin, []Diagnostic)
 
 	// Note executable contributions when present. CompileExecutables refines
 	// this with trust match (trusted vs untrusted); Discover stays passive-only.
-	if HasExecutableContributions(m) {
+	if HasExecutableContributionsAt(m, root) {
 		d := base
 		d.Severity = SeverityInfo
 		d.Code = "executable_inactive"

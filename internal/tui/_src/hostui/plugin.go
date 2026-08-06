@@ -24,3 +24,23 @@ func (m Model) handlePluginCommand(args []string) (tea.Model, tea.Cmd) {
 	m.reflow()
 	return m, nil
 }
+
+func (m Model) handlePaneCommand(args []string) (tea.Model, tea.Cmd) {
+	m.resetComposer()
+	m.clearNotice()
+	ids := pluginPaneIDs(m.windows)
+	if len(args) == 0 {
+		if len(ids) == 0 {
+			m.setNotice("no plugin panes loaded — enable a pane plugin via /plugin", true)
+			return m, nil
+		}
+		m.setNotice("plugin panes: "+strings.Join(ids, ", ")+" — /pane <id>", false)
+		return m, nil
+	}
+	id := strings.TrimSpace(args[0])
+	if id == "" {
+		m.setNotice("usage: /pane <id>", true)
+		return m, nil
+	}
+	return m.focusRightWindow(id)
+}

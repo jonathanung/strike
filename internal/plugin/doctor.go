@@ -207,8 +207,8 @@ func doctorOne(ip InstalledPlugin, strikeVer string) DoctorPlugin {
 	dp.Contributions.Harnesses = harnesses
 	dp.Contributions.Hooks = hooks
 	dp.Contributions.Panes = panes
-	if HasExecutableContributions(*m) {
-		caps := InferCapabilities(*m)
+	if HasExecutableContributionsAt(*m, ip.Root) {
+		caps := InferCapabilitiesAt(*m, ip.Root)
 		match := MatchTrust(ip.Trust, dp.Digest, ip.Source, caps)
 		dp.TrustState = match.State
 		if match.OK {

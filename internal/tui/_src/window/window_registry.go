@@ -95,6 +95,18 @@ func defaultWindowGroups(windows []window) []windowGroup {
 		{id: "editor", members: required("editor")},
 		{id: "pets", members: required("pets")},
 	}
+	// Plugin panes (§9.3): shared "plugin" stack group; never inject into built-ins.
+	var pluginIDs []string
+	for _, w := range windows {
+		if _, ok := w.(pluginPaneWindow); ok {
+			pluginIDs = append(pluginIDs, w.id())
+		}
+	}
+	if len(pluginIDs) > 0 {
+		if members := optional(pluginIDs...); len(members) > 0 {
+			groups = append(groups, windowGroup{id: pluginWindowGroupID, members: members})
+		}
+	}
 	out := make([]windowGroup, 0, len(groups))
 	for _, g := range groups {
 		if len(g.members) == 0 {
