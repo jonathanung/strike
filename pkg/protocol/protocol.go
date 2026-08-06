@@ -1543,17 +1543,67 @@ type CompactionStarted struct {
 	Strategy string `json:"strategy,omitempty"` // trim | summarize (requested)
 }
 
+// Compaction residue item kinds (facts / decisions / open questions).
+const (
+	ResidueKindFact         = "fact"
+	ResidueKindDecision     = "decision"
+	ResidueKindOpenQuestion = "open_question"
+	ResidueKindAssumption   = "assumption"
+	ResidueKindConstraint   = "constraint"
+)
+
+// CompactionResidueSchemaVersion is the versioned residue document schema.
+// Bump on breaking residue layout changes.
+const CompactionResidueSchemaVersion = "1"
+
+// ResidueItem is one structured residual fact, decision, or open question
+// retained when older history is compacted. SourceIDs cite pre-compaction
+// history indices (hist:N), tool call ids (tool:ID), ledger entry ids
+// (ledger:ID), or file paths (file:path).
+type ResidueItem struct {
+	ID         string   `json:"id"`
+	Kind       string   `json:"kind"` // fact | decision | open_question | assumption | constraint
+	Text       string   `json:"text"`
+	Confidence string   `json:"confidence,omitempty"` // low | medium | high
+	Freshness  string   `json:"freshness,omitempty"`  // fresh | stale | unknown
+	SourceIDs  []string `json:"sourceIds,omitempty"`
+	FileRefs   []string `json:"fileRefs,omitempty"`
+	// LedgerID is set when the item was imported from the decision ledger.
+	LedgerID string `json:"ledgerId,omitempty"`
+}
+
+// CompactionResidue is a schema-versioned structured residual produced by
+// history compaction. It is not lossless; rebuild yields a usable prompt
+// skeleton for continue, not the full dropped transcript.
+type CompactionResidue struct {
+	SchemaVersion string        `json:"schemaVersion"`
+	Strategy      string        `json:"strategy,omitempty"` // trim | summarize (applied)
+	Reason        string        `json:"reason,omitempty"`
+	Removed       int           `json:"removed,omitempty"`
+	Facts         []ResidueItem `json:"facts,omitempty"`
+	Decisions     []ResidueItem `json:"decisions,omitempty"`
+	OpenQuestions []ResidueItem `json:"openQuestions,omitempty"`
+	// PinnedKinds are session pin controls that survive compaction (system
+	// layers are not history; recorded so rebuild/inspect stay aligned).
+	PinnedKinds []string `json:"pinnedKinds,omitempty"`
+	// Summary is the model-authored text when strategy is summarize.
+	Summary string `json:"summary,omitempty"`
+}
+
 // CompactionCompleted records that model-facing history was replaced.
 // Removed/Kept count provider messages (not transcript events).
 // Strategy is the strategy actually applied (may fall back from summarize to trim).
 // Summary is the model-authored text when Strategy is summarize (for restore).
+// Residue is the structured provenance document when extraction found items
+// (or pins/summary); nil when empty.
 type CompactionCompleted struct {
 	Correlation
-	Reason   string `json:"reason"`
-	Strategy string `json:"strategy,omitempty"` // trim | summarize (applied)
-	Removed  int    `json:"removed"`
-	Kept     int    `json:"kept"`
-	Summary  string `json:"summary,omitempty"`
+	Reason   string             `json:"reason"`
+	Strategy string             `json:"strategy,omitempty"` // trim | summarize (applied)
+	Removed  int                `json:"removed"`
+	Kept     int                `json:"kept"`
+	Summary  string             `json:"summary,omitempty"`
+	Residue  *CompactionResidue `json:"residue,omitempty"`
 }
 
 // SessionMeta records durable session-level metadata (e.g. a PR opened while
