@@ -110,27 +110,56 @@ func ExtractWorkflowJSON(text string) ([]byte, error) {
 	// Fenced code block (```json ... ``` or ``` ... ```).
 	if i := strings.Index(text, "```"); i >= 0 {
 		rest := text[i+3:]
-		// Optional language tag on the opening fence line.
+		// Optional language tag on the opening fence line (json, JSON, etc.).
+		// Always strip a single-token first line so ```python\n{...} still works.
 		if nl := strings.IndexByte(rest, '\n'); nl >= 0 {
-			lang := strings.TrimSpace(rest[:nl])
-			if lang == "" || strings.EqualFold(lang, "json") || strings.EqualFold(lang, "jsonc") {
+			first := strings.TrimSpace(rest[:nl])
+			if first == "" || isFenceLanguageTag(first) {
 				rest = rest[nl+1:]
 			}
 		}
 		if end := strings.Index(rest, "```"); end >= 0 {
 			body := strings.TrimSpace(rest[:end])
 			if body != "" {
+				// Prefer a JSON object inside the fence if prose/lang leaked in.
+				if raw, err := extractJSONObject(body); err == nil {
+					return raw, nil
+				}
 				return []byte(body), nil
 			}
 		}
 	}
 	// Bare JSON object: first { to last }.
+	if raw, err := extractJSONObject(text); err == nil {
+		return raw, nil
+	}
+	return nil, fmt.Errorf("no JSON object found in model output")
+}
+
+func isFenceLanguageTag(s string) bool {
+	if s == "" || strings.ContainsAny(s, " \t{[(]") {
+		return false
+	}
+	// Common fence labels; also accept any short alphanumeric token.
+	if len(s) > 24 {
+		return false
+	}
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '+' || r == '-' || r == '_' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func extractJSONObject(text string) ([]byte, error) {
 	start := strings.IndexByte(text, '{')
 	end := strings.LastIndexByte(text, '}')
 	if start >= 0 && end > start {
 		return []byte(strings.TrimSpace(text[start : end+1])), nil
 	}
-	return nil, fmt.Errorf("no JSON object found in model output")
+	return nil, fmt.Errorf("no JSON object")
 }
 
 // Revalidate re-runs structural validation and optional agent resolution on

@@ -84,6 +84,12 @@ func TestDraftFromModelTextFencedAndBare(t *testing.T) {
 	if !d.Valid() {
 		t.Fatalf("fenced: %v", d.Diagnostics)
 	}
+	// Non-json fence language must still yield the object.
+	altFence := "```python\n" + inner + "\n```"
+	dAlt := DraftFromModelText(altFence, "model")
+	if !dAlt.Valid() {
+		t.Fatalf("alt fence: %v", dAlt.Diagnostics)
+	}
 	bare := "Sure.\n" + inner + "\nThanks."
 	d2 := DraftFromModelText(bare, "model")
 	if !d2.Valid() {
