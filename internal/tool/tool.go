@@ -1,6 +1,6 @@
 // Package tool defines the tool contract and the built-in tool set
 // (read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/
-// task_message/task_interrupt/agent_roster/agent_message/agent_broadcast/
+// task_message/task_interrupt/agent_roster/agent_ownership/agent_message/agent_broadcast/
 // team_task/webfetch/todowrite/todoread/
 // memory_write/memory_read/issue_write/issue_read/notebook_edit/sleep/skill/question/enter_plan_mode/
 // exit_plan_mode/phase_done/toolsearch).
@@ -387,6 +387,23 @@ type Context struct {
 	// Files optionally tracks read snapshots for stale-edit detection after
 	// external changes (FilesChanged / /vim). Nil disables the checks.
 	Files *FileState
+	// Ownership, when non-nil, tracks multi-agent path claims for overlap
+	// detection (shared across the session team). Nil disables (solo / no team).
+	Ownership *PathOwnership
+	// SessionID identifies the calling agent for ownership claims.
+	SessionID string
+	// MemberName is an optional stable teammate alias for ownership messages.
+	MemberName string
+	// OnOverlap is invoked when ClaimWrite/lease detects an active conflict
+	// (engine emits protocol.path.overlap). Nil skips the callback.
+	OnOverlap OverlapNotify
+	// OwnershipQuery, when non-nil, returns the team ownership/overlap map
+	// (agent_ownership list). Nil means the tool is unavailable.
+	OwnershipQuery func(ctx context.Context) (OwnershipSnapshot, error)
+	// OwnershipLease, when non-nil, acquires a path-prefix lease for this session.
+	OwnershipLease func(ctx context.Context, path string, exclusive bool) (TouchResult, error)
+	// OwnershipReleaseLease, when non-nil, drops a lease (or all when path empty).
+	OwnershipReleaseLease func(ctx context.Context, path string) error
 	// Checkpoint, when non-nil, records pre-mutation file state for undo
 	// restore (first touch per turn). Absolute path. Nil disables checkpoints.
 	Checkpoint func(absPath string)

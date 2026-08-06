@@ -131,7 +131,7 @@ func profileFile(policy Policy) (string, error) {
 
 func policyCacheKey(policy Policy, wd string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%d|%s|%t|%t", policy.Mode, wd, policy.NoWorkspaceWrite, policy.Network)
+	fmt.Fprintf(&b, "%d|%s|%t|%t", policy.Mode, wd, policy.NoWorkspaceWrite, policy.NoNetwork)
 	for _, g := range policy.DenyWriteGlobs {
 		b.WriteByte('|')
 		b.WriteString(g)
@@ -200,15 +200,22 @@ func buildSeatbeltProfile(policy Policy, workDir string) string {
 		}
 		fmt.Fprintf(&b, "(allow file-write* (subpath \"%s\"))\n", seatbeltEscape(p))
 	}
-	if policy.Network {
+	if policy.NetworkEnabled() {
 		b.WriteString(`
 ; Network (host networking; off only when webfetch+mcp deny *)
 (allow network-outbound)
 (allow network-inbound)
 (allow system-socket)
+; DNS via mDNSResponder (required for name resolution under seatbelt)
+(allow mach-lookup
+  (global-name "com.apple.SystemConfiguration.DNSConfiguration")
+  (global-name "com.apple.networkd")
+  (global-name "com.apple.mDNSResponder")
+  (global-name "com.apple.mDNSResponder.server")
+)
 `)
 	}
-	// When Network is false, deny-default omits network-* (no outbound/inbound).
+	// When NoNetwork, deny-default omits network-* (no outbound/inbound).
 	if mode == ModeWorkspaceWrite && !policy.NoWorkspaceWrite && workDir != "" {
 		// Seatbelt subpath match; escape " and \ in the path literal.
 		escaped := seatbeltEscape(workDir)

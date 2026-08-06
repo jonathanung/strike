@@ -165,7 +165,7 @@ type Config struct {
 
 // NetworkConfig is the JSON "network" object — shared allowlist shape for
 // application-layer web egress (webfetch). Bash OS networking stays
-// all-or-nothing via sandbox.Policy.Network; container net can reuse this
+// all-or-nothing via sandbox.Policy.NetworkEnabled; container net can reuse this
 // shape later.
 type NetworkConfig struct {
 	// Allow lists hostnames (example.com), single-label wildcards
@@ -259,6 +259,10 @@ type SessionConfig struct {
 	Worktree string `json:"worktree,omitempty"`
 	// WorktreeCleanup is keep (default) or delete on session close.
 	WorktreeCleanup string `json:"worktreeCleanup,omitempty"`
+	// OverlapPolicy is off|warn|block for multi-agent path conflicts
+	// (default warn). warn surfaces tool warnings + path.overlap events;
+	// block refuses conflicting writes; off tracks without signaling.
+	OverlapPolicy string `json:"overlapPolicy,omitempty"`
 }
 
 // Hook is one lifecycle hook entry. Exactly one of Action or Command should
@@ -994,6 +998,9 @@ func merge(base, layer Config) Config {
 	}
 	if layer.Session.WorktreeCleanup != "" {
 		base.Session.WorktreeCleanup = layer.Session.WorktreeCleanup
+	}
+	if layer.Session.OverlapPolicy != "" {
+		base.Session.OverlapPolicy = layer.Session.OverlapPolicy
 	}
 	base.Permissions = append(base.Permissions, layer.Permissions...)
 	base.Hooks = append(base.Hooks, layer.Hooks...)
