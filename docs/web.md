@@ -93,6 +93,8 @@ ssh -L 8787:127.0.0.1:8787 user@strike-host
 | `PATCH` | `/v1/sandbox` | **yes** | Persist sandbox default (`mode`, optional `iKnow`); new sessions only |
 | `GET` | `/v1/agents` | **yes** | Selectable agent names |
 | `GET` | `/v1/sessions` | **yes** | Durable session list (roots only) + `liveId` |
+| `GET`/`POST` | `/v1/diag` | **yes** | Redacted prompt/config diagnostic bundle (JSON download; live only; `?root=` when multi-root). Bootstrap capability `diag`. **503** when unsupported (attach-only / no live). |
+| `GET` | `/v1/sessions` | **yes** | Session list + `liveId` |
 | `GET` | `/v1/sessions/{id}/events` | **yes** | SSE tail of a session JSONL log |
 | `GET` | `/v1/sessions/{id}/children` | **yes** | Child/subagent sessions under a root |
 | `POST` | `/v1/sessions/{id}/fork` | **yes** | Fork durable session → new id |
@@ -216,6 +218,16 @@ Start requires a grant-review dialog and `POST .../start` with
 `{"confirm":true}`. Invalid catalog entries cannot be activated (422). The web
 surface uses only host-safe JSON DTOs — no TUI types cross the boundary.
 
+### Diagnostic bundle export
+
+When bootstrap capability `diag` is true (live engine present), the cockpit
+**context** inspector and **settings** dialog expose **Download diagnostics**.
+That calls `GET /v1/diag` (optional `?root=<id>`), which submits
+`inspect.diagnostic` to the live engine, re-scrubs the payload with `pkg/diag`
+(same redaction as TUI `/diag`), and returns pretty JSON with
+`Content-Disposition: attachment`. Attach-only / no-live hosts return **503**
+and leave the control disabled. Complements timeline export (WEB.4); not a full
+transcript dump.
 ### Run timeline (web)
 
 Bootstrap capability `timeline` is always true. The inspector **timeline** tab

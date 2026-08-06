@@ -70,6 +70,8 @@ type capabilities struct {
 	// Permissions is true when host.Services.Permissions is set (explain + presets).
 	Permissions bool `json:"permissions"`
 	Sandbox     bool `json:"sandbox"`
+	// Diag is true when a live engine can build a prompt/config diagnostic bundle.
+	Diag bool `json:"diag"`
 }
 
 type bootstrapResponse struct {
@@ -92,8 +94,7 @@ var browserProtocolOps = []string{
 
 func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	// Timeline is host-safe and derived from SessionDir JSONL (always available).
-	c := capabilities{Live: s.hasLive(), Roots: s.opts.LiveHub != nil, Timeline: true}
-	c := capabilities{Live: s.hasLive(), Roots: s.opts.LiveHub != nil, Sandbox: s.hasSandbox()}
+	c := capabilities{Live: s.hasLive(), Roots: s.opts.LiveHub != nil, Sandbox: s.hasSandbox(), Diag: s.hasLive(), Timeline: true}
 	var skills []map[string]any
 	if h := s.opts.Services; h != nil {
 		c.Auth, c.Catalog, c.Settings, c.History = h.Auth != nil, h.Catalog != nil, h.Settings != nil, h.History != nil
