@@ -595,9 +595,18 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 				// Background context: document sync must not be canceled with the tool call.
 				lspMgr.NotifyFile(context.Background(), absPath, content, deleted)
 			},
-			CollectDiagnostics:         makeLSPCollectDiagnostics(lspMgr, toolDir, cfg.LSP),
-			MaxChildDepth:              cfg.MaxChildDepth,
-			OverlapPolicy:              cfg.Session.OverlapPolicy,
+			CollectDiagnostics: makeLSPCollectDiagnostics(lspMgr, toolDir, cfg.LSP),
+			MaxChildDepth:      cfg.MaxChildDepth,
+			OverlapPolicy:      cfg.Session.OverlapPolicy,
+			DefaultChildBudget: tool.AgentBudgetLimits{
+				MaxWallClockS:     cfg.Session.AgentBudget.MaxWallClockS,
+				MaxTokens:         cfg.Session.AgentBudget.MaxTokens,
+				MaxCostUSD:        cfg.Session.AgentBudget.MaxCostUSD,
+				MaxToolCalls:      cfg.Session.AgentBudget.MaxToolCalls,
+				MaxDangerousTools: cfg.Session.AgentBudget.MaxDangerousTools,
+				StallAfterS:       cfg.Session.AgentBudget.StallAfterS,
+				LoopDetectN:       cfg.Session.AgentBudget.LoopDetectN,
+			},
 			InitialProvider:            initialProvider,
 			InitialModel:               initialModel,
 			InitialEffort:              initialEffort,

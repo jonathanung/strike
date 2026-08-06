@@ -76,6 +76,14 @@ func (e *Engine) agentRoster(ctx context.Context, _ tool.AgentRosterRequest) (to
 			entry.State = st.State
 			entry.QueuePools = append([]string(nil), st.QueuePools...)
 			entry.QueueLabel = st.QueueLabel
+			entry.Objective = st.Objective
+			entry.LastAction = st.LastAction
+			entry.BlockReason = st.BlockReason
+			if st.HasBudget {
+				entry.Budget = st.Budget
+				entry.HasBudget = true
+			}
+			entry.FilesTouched = e.childFilesTouched(m.SessionID)
 			if entry.StartedAt == "" && !h.startedAt.IsZero() {
 				entry.StartedAt = h.startedAt.UTC().Format(time.RFC3339)
 			}
@@ -85,6 +93,17 @@ func (e *Engine) agentRoster(ctx context.Context, _ tool.AgentRosterRequest) (to
 		} else if rec := snap.rec; rec != nil {
 			st := rec.statusSnapshot(false)
 			entry.State = st.State
+			entry.Objective = st.Objective
+			entry.LastAction = st.LastAction
+			entry.BlockReason = st.BlockReason
+			entry.FilesTouched = append([]string(nil), st.FilesTouched...)
+			if len(entry.FilesTouched) == 0 {
+				entry.FilesTouched = e.childFilesTouched(m.SessionID)
+			}
+			if st.HasBudget {
+				entry.Budget = st.Budget
+				entry.HasBudget = true
+			}
 			if entry.TerminalSummary == "" {
 				entry.TerminalSummary = st.TerminalSummary
 			}
@@ -140,7 +159,7 @@ func (e *Engine) emitTeamRoster() {
 	}
 	members := make([]protocol.TeamRosterMember, 0, len(res.Members))
 	for _, m := range res.Members {
-		members = append(members, protocol.TeamRosterMember{
+		row := protocol.TeamRosterMember{
 			SessionID:       m.SessionID,
 			Name:            m.Name,
 			Agent:           m.Agent,
@@ -152,7 +171,15 @@ func (e *Engine) emitTeamRoster() {
 			Role:            m.Role,
 			QueuePools:      append([]string(nil), m.QueuePools...),
 			QueueLabel:      m.QueueLabel,
-		})
+			Objective:       m.Objective,
+			LastAction:      m.LastAction,
+			BlockReason:     m.BlockReason,
+			FilesTouched:    append([]string(nil), m.FilesTouched...),
+		}
+		if m.HasBudget {
+			row.Budget = budgetSnapshotToProtocol(m.Budget)
+		}
+		members = append(members, row)
 	}
 	e.emit(protocol.TeamRoster{
 		Correlation: protocol.Correlation{SessionID: res.LeadID},

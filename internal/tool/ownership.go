@@ -376,6 +376,45 @@ func (o *PathOwnership) Clear() {
 	o.leases = make(map[string]map[string]leaseMeta)
 }
 
+// PathsForSession returns absolute paths touched or leased by sessionID
+// (active or inactive). Sorted and de-duplicated. Callers may relativize
+// under the workspace root for model-facing output (#774 files_touched).
+func (o *PathOwnership) PathsForSession(sessionID string) []string {
+	if o == nil {
+		return nil
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	seen := make(map[string]struct{})
+	var out []string
+	add := func(abs string) {
+		if abs == "" {
+			return
+		}
+		if _, ok := seen[abs]; ok {
+			return
+		}
+		seen[abs] = struct{}{}
+		out = append(out, abs)
+	}
+	for abs, m := range o.touches {
+		if _, ok := m[sessionID]; ok {
+			add(abs)
+		}
+	}
+	for abs, m := range o.leases {
+		if _, ok := m[sessionID]; ok {
+			add(abs)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // Snapshot returns a stable ownership map (paths sorted).
 func (o *PathOwnership) Snapshot() OwnershipSnapshot {
 	if o == nil {

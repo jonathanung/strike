@@ -78,7 +78,16 @@ write this file. Manual `/ftue` remains available after acknowledgement.
   "session": {
     "worktree": "off",
     "worktreeCleanup": "keep",
-    "overlapPolicy": "warn"
+    "overlapPolicy": "warn",
+    "agentBudget": {
+      "maxWallClockS": 0,
+      "maxTokens": 0,
+      "maxCostUsd": 0,
+      "maxToolCalls": 0,
+      "maxDangerousTools": 0,
+      "stallAfterS": 0,
+      "loopDetectN": 0
+    }
   },
   "scheduler": {
     "presets": ["cargo", "npm"],
@@ -414,6 +423,36 @@ Lead and children can query the map with `agent_ownership` (`list`), and claim
 path prefixes with `lease` / `release` (exclusive or shared). Finished children
 are deactivated so they no longer cause overlap. Structured handoff
 `files_changed` (when available) can be merged via the same tracker.
+
+### Per-agent budgets (`session.agentBudget`)
+
+Optional defaults for every `task` / `delegate` child in a session. Spawn-time
+`budget` fields on the tool call overlay any non-zero dimension. Zero means
+unlimited for that dimension.
+
+| Field | Meaning |
+|---|---|
+| `maxWallClockS` | Wall-clock seconds before fail + interrupt |
+| `maxTokens` | Accumulated stream tokens before fail |
+| `maxCostUsd` | USD before fail (enforced when cost pricing lands; see below) |
+| `maxToolCalls` | Tool invocations before fail |
+| `maxDangerousTools` | bash/write/edit/apply_patch/notebook_edit calls before fail |
+| `stallAfterS` | Hard block after this many seconds without progress |
+| `loopDetectN` | Hard block when the same tool name repeats N times |
+
+On hard exceed the engine emits `child.escalated`, interrupts the child, marks
+the delegation `failed` or `blocked`, and delivers a structured lead/owner
+mailbox notice. Soft stall (default 300s idle) and loop (default 6 identical
+tools) flags always appear on `task_status` / `agent_roster` without killing.
+
+**Stale children (#517):** folded into stall — same `stall` signal and optional
+`stallAfterS` hard threshold; not a second detector.
+
+**Session cost envelope (#577 / #542):** when `maxSessionCostUSD` is configured
+it remains the **outer** cost cap for the whole session. Per-agent
+`maxCostUsd` nests inside that envelope and never raises the session ceiling.
+Until session cost pricing ships, `maxCostUsd` is accepted and exposed but not
+enforced (usage stays 0).
 
 **Isolated worktree path (explicit apply):** for true filesystem isolation,
 prefer separate root sessions with `session.worktree=always` (or

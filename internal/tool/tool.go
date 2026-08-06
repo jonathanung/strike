@@ -104,6 +104,52 @@ type TaskRequest struct {
 	// completion alone does not yield final completed status — the harness runs
 	// these gates and only promotes to completed on pass (else blocked).
 	Verify []VerifyGate
+	// Budget is an optional per-child limit set at spawn. Zero fields inherit
+	// session defaults (engine Options.DefaultChildBudget / config session.agentBudget).
+	// Hard exceed interrupts the child and notifies the owner (#774).
+	Budget AgentBudgetLimits
+}
+
+// AgentBudgetLimits are optional per-child resource bounds.
+// Zero means unlimited / inherit (soft stall/loop signals still apply).
+// Session maxSessionCostUSD (#577), when present, remains the outer envelope;
+// per-agent MaxCostUSD nests inside it and is only enforced once cost pricing
+// is wired.
+type AgentBudgetLimits struct {
+	MaxWallClockS     int     `json:"max_wall_clock_s,omitempty"`
+	MaxTokens         int     `json:"max_tokens,omitempty"`
+	MaxCostUSD        float64 `json:"max_cost_usd,omitempty"`
+	MaxToolCalls      int     `json:"max_tool_calls,omitempty"`
+	MaxDangerousTools int     `json:"max_dangerous_tools,omitempty"`
+	// StallAfterS hard-escalates after this many seconds without progress.
+	// Zero keeps soft stale signaling only (default 300s observability).
+	StallAfterS int `json:"stall_after_s,omitempty"`
+	// LoopDetectN hard-escalates when the same tool name repeats N times.
+	// Zero keeps soft loop signaling only (default 6).
+	LoopDetectN int `json:"loop_detect_n,omitempty"`
+}
+
+// AgentBudgetSnapshot is the live budget + signal view for task_status / roster.
+type AgentBudgetSnapshot struct {
+	Limits              AgentBudgetLimits `json:"limits,omitempty"`
+	ElapsedS            int               `json:"elapsed_s"`
+	TokensUsed          int               `json:"tokens_used"`
+	CostUSDUsed         float64           `json:"cost_usd_used,omitempty"`
+	ToolCalls           int               `json:"tool_calls"`
+	DangerousTools      int               `json:"dangerous_tools"`
+	WallClockRemainingS *int              `json:"wall_clock_remaining_s,omitempty"`
+	TokensRemaining     *int              `json:"tokens_remaining,omitempty"`
+	ToolCallsRemaining  *int              `json:"tool_calls_remaining,omitempty"`
+	DangerousRemaining  *int              `json:"dangerous_remaining,omitempty"`
+	CostUSDRemaining    *float64          `json:"cost_usd_remaining,omitempty"`
+	// Stall is true when no progress for the stall threshold (soft or hard).
+	// Folds stale-child detection (#517) into the same signal.
+	Stall bool `json:"stall,omitempty"`
+	// Loop is true when the recent tool pattern looks stuck.
+	Loop           bool   `json:"loop,omitempty"`
+	Escalated      bool   `json:"escalated,omitempty"`
+	EscalateKind   string `json:"escalate_kind,omitempty"`
+	EscalateReason string `json:"escalate_reason,omitempty"`
 }
 
 // TaskResult is the outcome of spawning a child session.
@@ -209,6 +255,12 @@ type TaskStatusResult struct {
 	Deps         []string `json:"deps,omitempty"`
 	Version      int      `json:"version,omitempty"`
 	BlockReason  string   `json:"block_reason,omitempty"`
+	// Observability (#774): objective, last action, files, budget remaining.
+	Objective    string              `json:"objective,omitempty"`
+	LastAction   string              `json:"last_action,omitempty"`
+	FilesTouched []string            `json:"files_touched,omitempty"`
+	Budget       AgentBudgetSnapshot `json:"budget,omitempty"`
+	HasBudget    bool                `json:"-"` // omit empty budget object when unset
 }
 
 // TaskReadRequest loads a bounded transcript slice from a child session.
@@ -312,6 +364,13 @@ type AgentRosterMember struct {
 	IsSelf          bool     `json:"is_self"`
 	QueuePools      []string `json:"queue_pools,omitempty"`
 	QueueLabel      string   `json:"queue_label,omitempty"`
+	// Live observability (#774).
+	Objective    string              `json:"objective,omitempty"`
+	LastAction   string              `json:"last_action,omitempty"`
+	BlockReason  string              `json:"block_reason,omitempty"`
+	FilesTouched []string            `json:"files_touched,omitempty"`
+	Budget       AgentBudgetSnapshot `json:"budget,omitempty"`
+	HasBudget    bool                `json:"-"`
 }
 
 // AgentRosterResult is the full team snapshot for agent_roster.
