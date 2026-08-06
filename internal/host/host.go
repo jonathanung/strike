@@ -1,7 +1,7 @@
 // Package host defines the services a strike frontend needs from its host
 // process, beyond the engine protocol: credentials, model catalog, saved
-// defaults, prompt history, project memory/issues, local telemetry, and static
-// agent/skill listings. Contract only:
+// defaults, prompt history, project memory/issues/plans, local telemetry, and
+// static agent/skill listings. Contract only:
 // this package imports nothing outside the standard library so frontends
 // can be developed and tested against fakes. Implementations live in
 // internal/host/local.
@@ -554,6 +554,62 @@ type GoalIteration struct {
 	Summary string
 }
 
+// PlanSection is one ordered block inside a host.Plan.
+type PlanSection struct {
+	ID    string
+	Title string
+	Body  string
+}
+
+// Plan is a root-session-owned structured planning artifact.
+type Plan struct {
+	ID        string
+	OwnerRoot string // owning root session id
+	Title     string
+	Status    string // draft|approved|closed
+	Sections  []PlanSection
+	Version   int // CAS token; increments on every accepted mutation
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// PlanMeta is project-index metadata (no section bodies) visible to every root.
+type PlanMeta struct {
+	ID           string
+	OwnerRoot    string
+	Title        string
+	Status       string
+	Version      int
+	SectionCount int
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+// Plans is project-scoped durable structured plans for the plan window and tools.
+// Nil means the capability is absent; frontends must degrade gracefully.
+// Mutations require the owning root session id and an expected Version for CAS.
+// List returns index metadata for the whole project; Get returns full bodies.
+type Plans interface {
+	// List returns project-wide index metadata newest-UpdatedAt first.
+	List() ([]PlanMeta, error)
+	// Get returns one full plan by id (deep copy).
+	Get(id string) (Plan, bool, error)
+	// Create inserts a draft plan owned by ownerRoot. Section IDs are assigned.
+	Create(ownerRoot, title string, sections []PlanSection) (Plan, error)
+	// UpdateTitle CAS-updates the title. Only the owning root may mutate.
+	UpdateTitle(id, ownerRoot, title string, expectedVersion int) (Plan, error)
+	// UpdateSection CAS-updates one section by stable id. Nil pointers leave
+	// fields unchanged. Only the owning root may mutate.
+	UpdateSection(id, ownerRoot, sectionID string, title, body *string, expectedVersion int) (Plan, error)
+	// AddSection appends a section with a new stable id. Owner + CAS.
+	AddSection(id, ownerRoot, title, body string, expectedVersion int) (Plan, error)
+	// SetStatus CAS-transitions lifecycle (draft↔approved, either→closed).
+	// Closed plans reopen only via Reopen.
+	SetStatus(id, ownerRoot, status string, expectedVersion int) (Plan, error)
+	// Reopen CAS-moves a closed plan back to draft. Owner-only.
+	Reopen(id, ownerRoot string, expectedVersion int) (Plan, error)
+}
+
 // Goals is project-scoped loop-harness control for /goal.
 // Nil means the capability is absent; frontends must degrade gracefully.
 type Goals interface {
@@ -661,6 +717,7 @@ type Services struct {
 	Shell      Shell // composer ! bang; nil when unsupported
 	Memory     Memory
 	Issues     Issues
+	Plans      Plans     // structured root-owned plans; nil when unsupported
 	Goals      Goals     // loop harness; nil when unsupported
 	Sessions   Sessions  // durable session list/replay; nil when unsupported
 	Roots      Roots     // concurrent parent sessions; nil when single-root only
