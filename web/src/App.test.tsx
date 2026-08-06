@@ -166,42 +166,67 @@ describe("App", () => {
     expect(screen.queryByRole("list", { name: "Queued prompts" })).not.toBeInTheDocument();
   });
 
-  it("shows the refactored inspector tabs and unavailable project workflows", async () => {
+  it("omits context and capability-gated inspector tabs, surfaces live status only when present", async () => {
     render(<App />);
     await screen.findByText("Current");
-    expect(screen.getAllByText("not reported")).toHaveLength(2);
-    expect(screen.getByRole("tab", { name: "context" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "files" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "memory" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "issues" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "plans" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "workflows" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "mcp" })).toBeInTheDocument();
+    expect(screen.queryByText("not reported")).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "context" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "files" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "memory" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "issues" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "plans" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "workflows" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "mcp" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "activity" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "project" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "capabilities" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: "files" }));
-    expect(screen.getByRole("status")).toHaveTextContent("Changed files unavailable");
-    fireEvent.click(screen.getByRole("tab", { name: "memory" }));
-    expect(screen.getByRole("status")).toHaveTextContent("Memory unavailable");
+    expect(screen.getByText("No inspector panels available for this host.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Session status")).not.toBeInTheDocument();
+  });
+
+  it("lists only capability-backed inspector tabs and defaults to files", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) return response({ version: "test", authRequired: false, attachOnly: false, capabilities: { live: true, files: true, memory: false, issues: true, workflows: true, roots: false }, protocolOps: ["user.input"], status: { sessionId: "live", provider: "echo", busy: false }, agents: [{ name: "build" }], skills: [] });
+      if (url.includes("sessions")) return response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" });
+      if (url.includes("changed-files")) return response({ files: [] });
+      if (url.includes("issues")) return response({ issues: [] });
+      if (url.includes("workflows")) return response({ workflows: [] });
+      return response({ ok: true });
+    }));
+    render(<App />);
+    await screen.findByText("Current");
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    expect(screen.getByRole("tab", { name: "files" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "issues" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "workflows" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "memory" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "plans" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "context" })).not.toBeInTheDocument();
+    expect(await screen.findByText("No changed files reported.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Session status")).not.toBeInTheDocument();
+    FakeWebSocket.instances[0].onmessage?.({ data: JSON.stringify({ type: "phase.changed", data: { phase: "act", workflow: "plan-implement" } }) } as MessageEvent);
+    FakeWebSocket.instances[0].onmessage?.({ data: JSON.stringify({ type: "status", data: { sessionId: "live", provider: "echo", phase: "act", workflow: "plan-implement", contextUsed: 1200, contextLimit: 8000, busy: false } }) } as MessageEvent);
+    const status = await screen.findByLabelText("Session status");
+    expect(status).toHaveTextContent("Phase act");
+    expect(status).toHaveTextContent("Workflow plan-implement");
+    expect(status).toHaveTextContent("Context 1,200 / 8,000");
     fireEvent.click(screen.getByRole("tab", { name: "issues" }));
-    expect(screen.getByRole("status")).toHaveTextContent("Issues unavailable");
-    fireEvent.click(screen.getByRole("tab", { name: "plans" }));
-    expect(screen.getByRole("status")).toHaveTextContent("Plans unavailable");
+    expect(await screen.findByText("No project issues.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "workflows" }));
-    expect(screen.getByRole("status")).toHaveTextContent("Workflows unavailable");
-    fireEvent.click(screen.getByRole("tab", { name: "mcp" }));
-    expect(screen.getByRole("status")).toHaveTextContent("MCP unavailable");
+    expect(await screen.findByText("No workflows loaded.")).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "mcp" })).not.toBeInTheDocument();
   });
 
   it("uses historical SSE in attach-only mode", async () => {
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input).includes("bootstrap") ? response({ version: "test", authRequired: false, attachOnly: true, capabilities: { live: false }, protocolOps: null, agents: [], skills: [] }) : String(input).includes("sessions") ? response({ sessions: [{ id: "saved", title: "Saved" }] }) : String(input).includes("roots") ? Promise.resolve(new Response("multi-root unavailable", { status: 503 })) : response({ ok: true })));
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input).includes("bootstrap") ? response({ version: "test", authRequired: false, attachOnly: true, capabilities: { live: false, memory: true }, protocolOps: null, agents: [], skills: [] }) : String(input).includes("sessions") ? response({ sessions: [{ id: "saved", title: "Saved" }] }) : String(input).includes("roots") ? Promise.resolve(new Response("multi-root unavailable", { status: 503 })) : String(input).includes("memory") ? response({ entries: [] }) : response({ ok: true })));
     render(<App />);
     await screen.findByText("Saved");
     await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
     expect(FakeEventSource.instances[0].url).toContain("/v1/sessions/saved/events");
     expect(FakeWebSocket.instances).toHaveLength(0);
     expect(screen.getByRole("tab", { name: "memory" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "files" })).not.toBeInTheDocument();
   });
 
   it("shows a cockpit load error when bootstrap is forbidden", async () => {
