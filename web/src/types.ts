@@ -11,7 +11,7 @@ export type Bootstrap = {
   skills: { name: string; description: string }[];
   protocolOps: string[];
 };
-export type Session = { id: string; title?: string; mtime?: number; parentId?: string; open?: boolean };
+export type Session = { id: string; title?: string; mtime?: number; parentId?: string; forkedFrom?: string; open?: boolean };
 export type TranscriptItem = {
   id: string; kind: "user" | "assistant" | "reasoning" | "tool" | "system" | "error";
   title?: string; text: string; requestId?: string; data?: Record<string, unknown>;

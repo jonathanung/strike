@@ -397,17 +397,27 @@ Stop the live engine for a root **without** necessarily deleting durable JSONL.
 | **Ops without live** | Composer disabled; no queue drain |
 | **Token / auth failure** | Existing bootstrap error empty-state |
 
-### Deep links (#920)
+### Deep links
 
-On cockpit load, after token cookie handoff:
+On cockpit load, after token cookie handoff (server strips `?token=` and keeps
+other query params):
 
-- Support `?root=<id>` and/or `?session=<id>` (document final param in #920).
-- If id is an active root → select live + activate.
-- Else if durable session exists → select historical (SSE).
-- Invalid id → safe fallback (first live, else first session); do not break `?token=` handoff.
+| Query | Behavior |
+|---|---|
+| `?root=<id>` | If id is a live workspace → select it, call activate, open WS `?root=`. |
+| `?session=<id>` | Same resolution order: live root first, else durable HISTORY (SSE). |
+| both present | `root` wins over `session`. |
+| invalid id | Safe fallback: first live root, else first HISTORY row; no error page. |
 
-Optional: keyboard next/prev workspace when rail focused — document shortcuts;
-must not steal keys from the composer.
+Shareable example (after auth handoff): `/attach?session=<durableId>` or
+`/attach?root=<liveId>`.
+
+**Keyboard (rail focused):** `j` / `ArrowDown` next workspace, `k` / `ArrowUp`
+previous. Ignored while focus is in an input/textarea (composer safe).
+
+**Fork default:** stay on the current selection; the new durable id appears in
+HISTORY (resume separately). Parent lineage is `forkedFrom` on the session list
+DTO when present.
 
 ### API map and gaps
 
@@ -422,9 +432,9 @@ must not steal keys from the composer.
 | Children listing | `GET /v1/sessions/{id}/children` | Not in root switcher (by design) |
 | Close/stop live workspace | `LiveHub.Remove` in-process only | **Hard gap:** no `DELETE /v1/roots/{id}` (or equivalent). #917 owns exposing minimal HTTP if required |
 | Permission/question pending per root | Not on `RootSummary` | **Soft gap for #919:** may poll status per root, subscribe off-screen, or add additive fields (`permissionPending`, `questionPending`) — prefer existing data first |
-| `parentId` on session list | Filtered children; list item has id/title/mtime only | **Soft gap for #920:** fork parent hint may need `parentId` on list DTO or omit UI hint |
+| `forkedFrom` on session list | List item includes `forkedFrom` when session was created via Fork | — |
 | Live title after rename | Rename hits durable meta | **Soft gap:** confirm hub title refresh path |
-| Deep link query | Not implemented | #920 client-only if ids already addressable |
+| Deep link query | `?root=` / `?session=` on cockpit load | — |
 
 Do **not** invent parallel protocols (second WS multiplex schema, ad-hoc event
 buses) unless a child issue records a hard gap and updates this section.

@@ -179,7 +179,7 @@ header {
   width: 100%;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 6px;
   text-align: left;
   border: 0;
   border-left: 2px solid transparent;
@@ -193,6 +193,38 @@ header {
   color: var(--acid);
 }
 .session small { font-size: 8px; color: var(--acid); }
+.session-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.session-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-meta {
+  font-size: 9px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-flags {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.session.history-row {
+  gap: 6px;
+}
+.session.history-row .live-badge {
+  color: var(--accent-alt);
+}
 .children { font-size: 11px; padding: 0 9px; }
 .children div {
   display: grid;

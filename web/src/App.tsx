@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { bootstrap, createRoot, historicalConnection, liveConnection, request, resumeRoot, roots as loadRoots, sendOp, sessions as loadSessions } from "./api";
+import { activateRoot, bootstrap, createRoot, historicalConnection, liveConnection, request, resumeRoot, roots as loadRoots, sendOp, sessions as loadSessions } from "./api";
 import { buildExportMarkdown, defaultExportFilename, downloadTextFile } from "./exportMarkdown";
 import { clearQueue, editQueuedText, moveQueuedAt, removeQueuedAt, type QueuedPrompt } from "./queueOps";
 import { initialState, reduceEvent } from "./reducer";
@@ -19,6 +19,27 @@ const runtimeValues = { effort: ["low", "medium", "high", "xhigh"], autonomy: ["
 const slashCommands: Completion[] = WEB_SLASH_COMMANDS;
 
 const op = (type: string, data?: unknown, rootID?: string) => sendOp(type, data, rootID).catch((error) => window.alert(error.message));
+
+const shortID = (id: string) => id.slice(0, 12);
+const relativeAge = (ms?: number) => {
+  if (!ms) return "";
+  // mtime from server is unix seconds; activeAt is millis — normalize.
+  const t = ms < 1e12 ? ms * 1000 : ms;
+  const sec = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (sec < 60) return "just now";
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
+  return `${Math.floor(sec / 86400)}d ago`;
+};
+/** Deep-link target from cockpit URL. Token handoff strips ?token= server-side and keeps root/session. */
+const deepLinkID = () => {
+  try {
+    const q = new URLSearchParams(location.search);
+    return (q.get("root") || q.get("session") || "").trim();
+  } catch {
+    return "";
+  }
+};
 
 function Field({ label, value, values, disabled, onChange }: { label: string; value?: string; values: string[]; disabled?: boolean; onChange: (value: string) => void }) {
   return <label className="runtime-field"><span>{label}</span><select aria-label={label} value={value || ""} disabled={disabled} onChange={(event) => onChange(event.target.value)}><option value="">—</option>{values.map((item) => <option key={item}>{item}</option>)}</select></label>;
@@ -90,11 +111,29 @@ export default function App() {
       const rootsArr = hasRoots ? (r.roots || []) : [];
       setActiveRoots(rootsArr);
       setActiveRootID(r.activeId || list.liveId || nextBoot.status?.sessionId || "");
-      const firstLive = rootsArr[0]?.id || (nextBoot.capabilities.roots ? "" : list.liveId) || "";
-      const firstID = firstLive || list.sessions?.[0]?.id || "";
+      const sessionsArr = list.sessions || [];
+      const want = deepLinkID();
+      const liveIDs = new Set(rootsArr.map((r) => r.id));
+      // Prefer ?root= / ?session= when the id exists; invalid ids fall back safely.
+      let firstLive = rootsArr[0]?.id || (nextBoot.capabilities.roots ? "" : list.liveId) || "";
+      let firstID = firstLive || sessionsArr[0]?.id || "";
+      let pickLive = Boolean(firstLive && firstID === firstLive);
+      if (want) {
+        if (liveIDs.has(want) || (!nextBoot.capabilities.roots && want === (list.liveId || ""))) {
+          firstID = want;
+          firstLive = want;
+          pickLive = true;
+        } else if (sessionsArr.some((s) => s.id === want)) {
+          firstID = want;
+          pickLive = false;
+        }
+      }
       setSelectedID(firstID);
-      setSelectedIsLive(Boolean(firstLive && firstID === firstLive));
-      setNavTab(firstLive ? "active" : "history");
+      setSelectedIsLive(pickLive);
+      setNavTab(pickLive ? "active" : "history");
+      if (pickLive && want && nextBoot.capabilities.roots && !nextBoot.attachOnly) {
+        void activateRoot(want).then(() => refreshRoots()).catch(() => {});
+      }
       if (nextBoot.capabilities.auth) request<{ providers: Array<{ Name?: string; name?: string }> }>("/v1/providers").then((v) => setProviders(v.providers.map((p) => p.Name || p.name || "").filter(Boolean))).catch(() => {});
       if (nextBoot.capabilities.history) request<{ entries: string[] }>("/v1/history").then((v) => setHistory(v.entries || [])).catch(() => {});
     }).catch((error) => setTransport(error.message));
@@ -220,20 +259,83 @@ export default function App() {
     } finally { setProjectLoading(false); }
   };
   const sessionAction = async (action: "fork" | "rename" | "delete") => {
-    if (!boot?.capabilities.sessions) return;
-    if (action === "fork") await request(`/v1/sessions/${encodeURIComponent(selectedID)}/fork`, { method: "POST" });
-    if (action === "rename") { const title = window.prompt("Session title"); if (title === null) return; await request(`/v1/sessions/${encodeURIComponent(selectedID)}`, { method: "PATCH", body: JSON.stringify({ title }) }); }
-    if (action === "delete" && window.confirm("Delete this durable session?")) await request(`/v1/sessions/${encodeURIComponent(selectedID)}`, { method: "DELETE" });
-    await refreshSessions();
+    if (!boot?.capabilities.sessions || !selectedID) return;
+    try {
+      if (action === "fork") {
+        // Default: stay on current selection; new fork appears in HISTORY (contract #916).
+        await request(`/v1/sessions/${encodeURIComponent(selectedID)}/fork`, { method: "POST" });
+        await refreshSessions();
+        return;
+      }
+      if (action === "rename") {
+        const title = window.prompt("Session title");
+        if (title === null) return;
+        await request(`/v1/sessions/${encodeURIComponent(selectedID)}`, { method: "PATCH", body: JSON.stringify({ title }) });
+      }
+      if (action === "delete") {
+        if (!window.confirm("Delete this durable session?")) return;
+        await request(`/v1/sessions/${encodeURIComponent(selectedID)}`, { method: "DELETE" });
+      }
+      await refreshSessions();
+    } catch (error) {
+      window.alert((error as Error).message);
+    }
   };
   const handleCreateWorkspace = async () => { if (!boot?.capabilities.roots) return; try { const result = await createRoot(); await refreshRoots(); setSelectedID(result.id); setSelectedIsLive(true); setNavTab("active"); } catch (error) { window.alert((error as Error).message); } };
   const handleResume = async (id: string) => { if (!boot?.capabilities.roots) return; try { const result = await resumeRoot(id); await refreshRoots(); setSelectedID(result.id); setSelectedIsLive(true); setNavTab("active"); } catch (error) { window.alert((error as Error).message); } };
-  const selectWorkspace = (id: string, isLive: boolean) => { setSelectedID(id); setSelectedIsLive(isLive); };
+  const selectWorkspace = async (id: string, isLive: boolean) => {
+    setSelectedID(id);
+    setSelectedIsLive(isLive);
+    if (!isLive || !boot?.capabilities.roots || boot.attachOnly) return;
+    try {
+      await activateRoot(id);
+      await refreshRoots();
+    } catch (error) {
+      window.alert((error as Error).message);
+    }
+  };
+  const cycleWorkspace = (delta: number) => {
+    if (!boot?.capabilities.roots) {
+      if (!sessions.length) return;
+      const idx = Math.max(0, sessions.findIndex((s) => s.id === selectedID));
+      const next = sessions[(idx + delta + sessions.length) % sessions.length];
+      if (next) {
+        setSelectedID(next.id);
+        setSelectedIsLive(next.id === liveID && !boot?.attachOnly);
+      }
+      return;
+    }
+    if (navTab === "active" && activeRoots.length) {
+      const idx = Math.max(0, activeRoots.findIndex((r) => r.id === selectedID && selectedIsLive));
+      const next = activeRoots[(idx + delta + activeRoots.length) % activeRoots.length];
+      if (next) void selectWorkspace(next.id, true);
+      return;
+    }
+    if (sessions.length) {
+      const idx = Math.max(0, sessions.findIndex((s) => s.id === selectedID));
+      const next = sessions[(idx + delta + sessions.length) % sessions.length];
+      if (next) {
+        const live = activeRoots.some((r) => r.id === next.id);
+        void selectWorkspace(next.id, live);
+      }
+    }
+  };
   const toggleDiff = (path: string) => setExpandedDiffs((old) => { const next = new Set(old); next.has(path) ? next.delete(path) : next.add(path); return next; });
 
   return <div className="app-shell" style={shellStyle}>
     <header><button className="icon-button" aria-label="Toggle agents panel" aria-pressed={navOpen} onClick={() => setNavOpen((open) => !open)}>☰</button><div className="wordmark"><span className="mark">S</span><strong>STRIKE</strong><small>workspace</small></div><div className="session-line"><span className={state.status.busy ? "pulse busy" : "pulse"} />{state.status.busy ? "agent working" : transport}</div><button className="icon-button" aria-label="Export markdown" title="Export markdown" onClick={() => exportSession()}>↓</button><button className="icon-button" aria-label="Open settings" onClick={() => setSettingsOpen(true)}>⚙</button><button className="icon-button" aria-label="Toggle inspector" aria-pressed={inspectorOpen} onClick={() => setInspectorOpen((open) => !open)}>◫</button></header>
-    <aside className={`navigation ${navOpen ? "open" : "collapsed"}`} aria-label="Agents panel"><PanelResize label="Resize agents panel" value={navWidth} min={180} max={420} onChange={setNavWidth} />{boot?.capabilities.roots ? <><div className="aside-heading"><button className={`nav-tab ${navTab === "active" ? "active" : ""}`} onClick={() => setNavTab("active")}>ACTIVE</button><button className={`nav-tab ${navTab === "history" ? "active" : ""}`} onClick={() => setNavTab("history")}>HISTORY</button></div>{navTab === "active" && <><nav>{activeRoots.map((root) => <button key={root.id} className={root.id === selectedID && selectedIsLive ? "session active" : "session"} onClick={() => selectWorkspace(root.id, true)}><span className={root.busy ? "root-busy" : "root-idle"} />{root.agent || root.id.slice(0, 12)}{root.id === activeRootID && <small>ACTIVE</small>}{root.busy && <small>BUSY</small>}</button>)}</nav>{!boot?.attachOnly && <div className="session-actions"><button onClick={() => void handleCreateWorkspace()}>+ New workspace</button></div>}</>}{navTab === "history" && <HistoryNav sessions={sessions} activeRoots={activeRoots} selectedID={selectedID} selectedIsLive={selectedIsLive} historySearch={historySearch} setHistorySearch={setHistorySearch} selectWorkspace={selectWorkspace} handleResume={handleResume} boot={boot} sessionAction={sessionAction} />}</> : <><div className="aside-heading"><span>SESSIONS</span></div><nav>{sessions.map((session) => <button key={session.id} className={session.id === selectedID ? "session active" : "session"} onClick={() => { setSelectedID(session.id); setSelectedIsLive(session.id === liveID && !boot?.attachOnly); }}><span>{session.title || session.id.slice(0, 12)}</span>{session.id === liveID && <small>LIVE</small>}</button>)}</nav><div className="session-actions" aria-label="Session actions"><button disabled={!boot?.capabilities.sessions} onClick={() => void sessionAction("fork")}>Fork</button><button disabled={!boot?.capabilities.sessions} onClick={() => void sessionAction("rename")}>Rename</button><button disabled={!boot?.capabilities.sessions} onClick={() => void sessionAction("delete")}>Delete</button></div></>}<div className="aside-heading">CHILD AGENTS</div><div className="children">{children.length ? children.map(([id, child]) => <div key={id}><span className={`child-state ${child.status}`} />{child.agent || id.slice(0, 8)}<small>{child.status}</small></div>) : <p>None dispatched</p>}</div><div className="workspace-meta"><span>ROOT</span><code>{state.status.cwd || "unavailable"}</code><span>BUILD</span><code>{boot?.version || "…"}</code></div></aside>
+    <aside className={`navigation ${navOpen ? "open" : "collapsed"}`} aria-label="Agents panel" tabIndex={0} onKeyDown={(event) => {
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+      if (event.key === "ArrowDown" || event.key === "j") { event.preventDefault(); cycleWorkspace(1); }
+      if (event.key === "ArrowUp" || event.key === "k") { event.preventDefault(); cycleWorkspace(-1); }
+    }}><PanelResize label="Resize agents panel" value={navWidth} min={180} max={420} onChange={setNavWidth} />{boot?.capabilities.roots ? <><div className="aside-heading"><button className={`nav-tab ${navTab === "active" ? "active" : ""}`} onClick={() => setNavTab("active")}>ACTIVE</button><button className={`nav-tab ${navTab === "history" ? "active" : ""}`} onClick={() => setNavTab("history")}>HISTORY</button></div>{navTab === "active" && <><nav>{activeRoots.map((root) => <button key={root.id} className={root.id === selectedID && selectedIsLive ? "session active" : "session"} onClick={() => void selectWorkspace(root.id, true)}><span className={root.busy ? "root-busy" : "root-idle"} />{root.agent || root.id.slice(0, 12)}{root.id === activeRootID && <small>ACTIVE</small>}{root.busy && <small>BUSY</small>}</button>)}</nav>{!boot?.attachOnly && <div className="session-actions"><button onClick={() => void handleCreateWorkspace()}>+ New workspace</button></div>}</>}{navTab === "history" && <HistoryNav sessions={sessions} activeRoots={activeRoots} selectedID={selectedID} selectedIsLive={selectedIsLive} historySearch={historySearch} setHistorySearch={setHistorySearch} selectWorkspace={selectWorkspace} handleResume={handleResume} boot={boot} sessionAction={sessionAction} />}</> : <><div className="aside-heading"><span>SESSIONS</span></div><nav>{sessions.map((session) => {
+                  const live = session.id === liveID && !boot?.attachOnly;
+                  const age = relativeAge(session.mtime);
+                  return <button key={session.id} type="button" className={session.id === selectedID ? "session active history-row" : "session history-row"} onClick={() => { setSelectedID(session.id); setSelectedIsLive(live); }} title={session.id}>
+                    <span className="session-main"><span className="session-title">{session.title || shortID(session.id)}</span><span className="session-meta">{[shortID(session.id), age].filter(Boolean).join(" · ")}</span></span>
+                    <span className="session-flags">{live && <small className="live-badge">LIVE</small>}</span>
+                  </button>;
+                })}</nav><div className="session-actions" aria-label="Session actions"><button disabled={!boot?.capabilities.sessions} onClick={() => void sessionAction("fork")}>Fork</button><button disabled={!boot?.capabilities.sessions} onClick={() => void sessionAction("rename")}>Rename</button><button disabled={!boot?.capabilities.sessions} onClick={() => void sessionAction("delete")}>Delete</button></div></>}<div className="aside-heading">CHILD AGENTS</div><div className="children">{children.length ? children.map(([id, child]) => <div key={id}><span className={`child-state ${child.status}`} />{child.agent || id.slice(0, 8)}<small>{child.status}</small></div>) : <p>None dispatched</p>}</div><div className="workspace-meta"><span>ROOT</span><code>{state.status.cwd || "unavailable"}</code><span>BUILD</span><code>{boot?.version || "…"}</code></div></aside>
     <main>
       <section className="runtime" aria-label="Runtime controls"><Field label="Provider" value={state.status.provider} values={providers.length ? providers : state.status.provider ? [state.status.provider] : []} disabled={!isLive || state.status.busy || !boot?.capabilities.auth} onChange={(name) => void selectProvider(name)} /><Field label="Model" value={state.status.model} values={models.length ? models : state.status.model ? [state.status.model] : []} disabled={!isLive || state.status.busy || !boot?.capabilities.catalog} onChange={(model) => void op("select.model", { provider: state.status.provider, model }, selectedID)} /><Field label="Agent" value={state.status.agent} values={boot?.agents.map((agent) => agent.name) || []} disabled={!isLive || state.status.busy} onChange={(name) => void op("select.agent", { name }, selectedID)} /><Field label="Effort" value={state.status.effort} values={runtimeValues.effort} disabled={!isLive || state.status.busy} onChange={(level) => void op("set.effort", { level }, selectedID)} /><Field label="Autonomy" value={state.status.autonomy} values={runtimeValues.autonomy} disabled={!isLive || state.status.busy} onChange={(mode) => void op("set.autonomy", { mode }, selectedID)} /><Field label="Permission" value={state.status.permissionMode} values={runtimeValues.permission} disabled={!isLive || state.status.busy} onChange={(mode) => void op("set.permission_mode", { mode }, selectedID)} /><label className="fast-toggle"><input type="checkbox" checked={fast} disabled={!isLive || state.status.busy} onChange={(event) => { setFast(event.target.checked); void op("set.fast", { enabled: event.target.checked }, selectedID); }} />FAST</label></section>
       <section className="transcript" aria-live="polite" aria-label="Conversation transcript">{!boot && transport !== "connecting" ? <div className="empty-state" role="alert"><span>ERROR</span><h1>{transport}</h1><p>Failed to load cockpit. Open the URL printed by <code>strike serve</code> (includes <code>?token=</code>), or pass a valid bearer token.</p></div> : !state.items.length && <div className="empty-state"><span>01 / READY</span><h1>{boot?.attachOnly ? "Inspect the record." : "Direct the work."}</h1><p>{boot?.attachOnly ? "Select a durable session from the rail." : "Describe an outcome. Strike will plan, act, and report through the live engine seam."}</p></div>}{state.items.map((item) => <Transcript key={item.id} item={item} />)}<div ref={endRef} /></section>
@@ -249,8 +351,20 @@ function PanelResize({ label, value, min, max, onChange }: { label: string; valu
   return <label className="panel-resize"><span>{label}</span><input aria-label={label} type="range" min={min} max={max} value={value} onChange={(event) => onChange(Number(event.target.value))} /></label>;
 }
 
-function HistoryNav({ sessions, activeRoots, selectedID, selectedIsLive, historySearch, setHistorySearch, selectWorkspace, handleResume, boot, sessionAction }: { sessions: Session[]; activeRoots: ActiveRoot[]; selectedID: string; selectedIsLive: boolean; historySearch: string; setHistorySearch: (value: string) => void; selectWorkspace: (id: string, isLive: boolean) => void; handleResume: (id: string) => Promise<void>; boot?: Bootstrap; sessionAction: (action: "fork" | "rename" | "delete") => Promise<void> }) {
-  return <><input className="history-search" type="search" placeholder="Search sessions…" aria-label="Search sessions" value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} /><nav>{sessions.filter((s) => !historySearch || s.title?.toLowerCase().includes(historySearch.toLowerCase()) || s.id.toLowerCase().includes(historySearch.toLowerCase())).map((session) => { const isActiveWorkspace = activeRoots.some((r) => r.id === session.id); return <button key={session.id} className={session.id === selectedID ? "session active" : "session"} onClick={() => selectWorkspace(session.id, isActiveWorkspace)}><span>{session.title || session.id.slice(0, 12)}</span>{isActiveWorkspace && <small className="live-badge">LIVE</small>}</button>; })}</nav><div className="session-actions">{!selectedIsLive && !boot?.attachOnly && <button onClick={() => void handleResume(selectedID)}>Resume as workspace</button>}{boot?.capabilities.sessions && <><button disabled={!boot?.capabilities.sessions} onClick={() => void sessionAction("fork")}>Fork</button><button disabled={!boot?.capabilities.sessions} onClick={() => void sessionAction("rename")}>Rename</button><button disabled={!boot?.capabilities.sessions} onClick={() => void sessionAction("delete")}>Delete</button></>}</div></>;
+function HistoryNav({ sessions, activeRoots, selectedID, selectedIsLive, historySearch, setHistorySearch, selectWorkspace, handleResume, boot, sessionAction }: { sessions: Session[]; activeRoots: ActiveRoot[]; selectedID: string; selectedIsLive: boolean; historySearch: string; setHistorySearch: (value: string) => void; selectWorkspace: (id: string, isLive: boolean) => void | Promise<void>; handleResume: (id: string) => Promise<void>; boot?: Bootstrap; sessionAction: (action: "fork" | "rename" | "delete") => Promise<void> }) {
+  const canSessions = Boolean(boot?.capabilities.sessions);
+  const hasSelection = Boolean(selectedID);
+  const filtered = sessions.filter((s) => !historySearch || s.title?.toLowerCase().includes(historySearch.toLowerCase()) || s.id.toLowerCase().includes(historySearch.toLowerCase()));
+  return <><input className="history-search" type="search" placeholder="Search sessions…" aria-label="Search sessions" value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} /><nav aria-label="Session history">{filtered.map((session) => {
+    const isActiveWorkspace = activeRoots.some((r) => r.id === session.id);
+    const age = relativeAge(session.mtime);
+    const forkHint = session.forkedFrom ? `fork of ${shortID(session.forkedFrom)}` : "";
+    const meta = [shortID(session.id), age, forkHint].filter(Boolean).join(" · ");
+    return <button key={session.id} type="button" className={session.id === selectedID ? "session active history-row" : "session history-row"} onClick={() => void selectWorkspace(session.id, isActiveWorkspace)} title={session.id}>
+      <span className="session-main"><span className="session-title">{session.title || shortID(session.id)}</span><span className="session-meta">{meta}</span></span>
+      <span className="session-flags">{isActiveWorkspace && <small className="live-badge">LIVE</small>}</span>
+    </button>;
+  })}</nav><div className="session-actions">{!selectedIsLive && !boot?.attachOnly && <button type="button" disabled={!hasSelection || !boot?.capabilities.roots} onClick={() => void handleResume(selectedID)}>Resume as workspace</button>}{canSessions && <><button type="button" disabled={!hasSelection} onClick={() => void sessionAction("fork")}>Fork</button><button type="button" disabled={!hasSelection} onClick={() => void sessionAction("rename")}>Rename</button><button type="button" disabled={!hasSelection} onClick={() => void sessionAction("delete")}>Delete</button></>}</div></>;
 }
 
 function InspectorBody({ tab, boot, status, data, loading, expandedDiffs, toggleDiff, isLive, selectedID }: { tab: InspectorTab; boot?: Bootstrap; status: Status; data: unknown; loading: boolean; expandedDiffs: Set<string>; toggleDiff: (path: string) => void; isLive: boolean; selectedID: string }) {
