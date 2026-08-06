@@ -483,7 +483,9 @@ func timelineOptionsFromConfig(cfg config.Config, sessionID string) timeline.Opt
 		opts.OutputPreviewMax = cfg.Session.TimelineOutputPreviewMax
 	}
 	if cfg.Session.TimelineBlobSpill {
-		opts.BlobDir = timeline.SessionBlobDir(session.DefaultTracesDir(), sessionID)
+		// Traces root only — TUI expands to <root>/<sessionID>/blobs on build/reset
+		// so root switches do not keep a stale session path.
+		opts.BlobDir = session.DefaultTracesDir()
 	}
 	return opts
 }

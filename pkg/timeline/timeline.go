@@ -216,8 +216,9 @@ func NewBuilder(opts Options) *Builder {
 
 // Observe records one event at time t (typically the JSONL envelope time).
 // Unknown event types are ignored. Zero t uses opts.Clock().
-// Observe does not fsync; optional blob spill uses plain file writes so the
-// caller (UI/export path) is not blocked on durability beyond session JSONL.
+// Observe does not fsync; optional blob spill uses plain file writes outside the
+// builder lock so concurrent Observe/Snapshot are not blocked on disk I/O.
+// Session JSONL remains the durability boundary.
 func (b *Builder) Observe(ev protocol.Event, t time.Time) {
 	if ev == nil {
 		return
@@ -227,6 +228,31 @@ func (b *Builder) Observe(ev protocol.Event, t time.Time) {
 		t = b.opts.Clock()
 	}
 	t = t.UTC()
+
+	// Spill/truncate large payloads before taking mu (opts are immutable post-New).
+	type bound struct {
+		preview, ref string
+		trunc, spill bool
+	}
+	var argsB, outB bound
+	switch e := ev.(type) {
+	case protocol.ToolCallBegin:
+		argsB.preview, argsB.ref, argsB.trunc, argsB.spill = boundPayload(string(e.Args), b.opts.ArgsPreviewMax, b.opts.BlobDir, b.opts.MaxSpillBytes)
+	case protocol.ToolCallEnd:
+		outB.preview, outB.ref, outB.trunc, outB.spill = boundPayload(e.Output, b.opts.OutputPreviewMax, b.opts.BlobDir, b.opts.MaxSpillBytes)
+	case protocol.ChildStarted:
+		if e.Prompt != "" {
+			argsB.preview, argsB.ref, argsB.trunc, argsB.spill = boundPayload(e.Prompt, b.opts.ArgsPreviewMax, b.opts.BlobDir, b.opts.MaxSpillBytes)
+		}
+	case protocol.ChildCompleted:
+		summary := e.Summary
+		if summary == "" {
+			summary = e.Handoff.Summary
+		}
+		if summary != "" {
+			outB.preview, outB.ref, outB.trunc, outB.spill = boundPayload(summary, b.opts.OutputPreviewMax, b.opts.BlobDir, b.opts.MaxSpillBytes)
+		}
+	}
 
 	b.mu.Lock()
 	defer func() {
@@ -272,16 +298,15 @@ func (b *Builder) Observe(ev protocol.Event, t time.Time) {
 		if ent.StartedAt == "" {
 			ent.StartedAt = formatTime(t)
 		}
-		preview, ref, trunc, spilled := boundPayload(string(e.Args), b.opts.ArgsPreviewMax, b.opts.BlobDir, b.opts.MaxSpillBytes)
-		ent.ArgsPreview = preview
-		if ref != "" {
-			ent.ArgsRef = ref
+		ent.ArgsPreview = argsB.preview
+		if argsB.ref != "" {
+			ent.ArgsRef = argsB.ref
 		}
-		if trunc {
+		if argsB.trunc {
 			ent.Truncated = true
 			b.truncations++
 		}
-		if spilled {
+		if argsB.spill {
 			b.spills++
 		}
 		if e.TurnID != "" {
@@ -304,16 +329,15 @@ func (b *Builder) Observe(ev protocol.Event, t time.Time) {
 		} else {
 			ent.State = StateCompleted
 		}
-		preview, ref, trunc, spilled := boundPayload(out, b.opts.OutputPreviewMax, b.opts.BlobDir, b.opts.MaxSpillBytes)
-		ent.OutputPreview = preview
-		if ref != "" {
-			ent.OutputRef = ref
+		ent.OutputPreview = outB.preview
+		if outB.ref != "" {
+			ent.OutputRef = outB.ref
 		}
-		if trunc {
+		if outB.trunc {
 			ent.Truncated = true
 			b.truncations++
 		}
-		if spilled {
+		if outB.spill {
 			b.spills++
 		}
 		b.finish(ent, t)
@@ -474,16 +498,15 @@ func (b *Builder) Observe(ev protocol.Event, t time.Time) {
 			ent.StartedAt = formatTime(t)
 		}
 		if e.Prompt != "" {
-			preview, ref, trunc, spilled := boundPayload(e.Prompt, b.opts.ArgsPreviewMax, b.opts.BlobDir, b.opts.MaxSpillBytes)
-			ent.ArgsPreview = preview
-			if ref != "" {
-				ent.ArgsRef = ref
+			ent.ArgsPreview = argsB.preview
+			if argsB.ref != "" {
+				ent.ArgsRef = argsB.ref
 			}
-			if trunc {
+			if argsB.trunc {
 				ent.Truncated = true
 				b.truncations++
 			}
-			if spilled {
+			if argsB.spill {
 				b.spills++
 			}
 		}
@@ -507,16 +530,15 @@ func (b *Builder) Observe(ev protocol.Event, t time.Time) {
 			summary = e.Handoff.Summary
 		}
 		if summary != "" {
-			preview, ref, trunc, spilled := boundPayload(summary, b.opts.OutputPreviewMax, b.opts.BlobDir, b.opts.MaxSpillBytes)
-			ent.OutputPreview = preview
-			if ref != "" {
-				ent.OutputRef = ref
+			ent.OutputPreview = outB.preview
+			if outB.ref != "" {
+				ent.OutputRef = outB.ref
 			}
-			if trunc {
+			if outB.trunc {
 				ent.Truncated = true
 				b.truncations++
 			}
-			if spilled {
+			if outB.spill {
 				b.spills++
 			}
 		}

@@ -517,9 +517,7 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 			m.sessionID = option.SessionID
 		}
 		if option.SessionID != "" || option.TimelineSet {
-			opts := m.timelineOpts
-			opts.SessionID = m.sessionID
-			m.runTimeline = timeline.NewBuilder(opts)
+			m.runTimeline = timeline.NewBuilder(m.timelineBuilderOpts())
 		}
 		if option.WorkDir != "" {
 			m.workDir = option.WorkDir
