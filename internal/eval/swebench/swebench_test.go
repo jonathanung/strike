@@ -354,6 +354,86 @@ func TestBuildTestCommandDjango(t *testing.T) {
 	}
 }
 
+func TestDockerGraderAppliesTestPatchFirst(t *testing.T) {
+	var execScripts []string
+	var copied []string
+	rt := &recordingRuntime{
+		onCopyTo: func(src, dst string) {
+			copied = append(copied, dst)
+		},
+		onExec: func(cmd []string) (string, string, int, error) {
+			if len(cmd) >= 2 && cmd[0] == "bash" {
+				execScripts = append(execScripts, cmd[1])
+			}
+			return "ok", "", 0, nil
+		},
+	}
+	g := &DockerGrader{RT: rt, WorkRoot: t.TempDir(), Pull: false, Timeout: time.Minute}
+	in := Instance{
+		InstanceID: "fixture__repo-1",
+		Repo:       "fixture/repo",
+		TestPatch:  "diff --git a/test_add.py b/test_add.py\n+def test_add():\n+  pass\n",
+		FailToPass: []string{"test_add.py::test_add"},
+	}
+	gr, err := g.Grade(context.Background(), in, "diff --git a/x b/x\n+fix\n", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !gr.Resolved {
+		t.Fatalf("expected resolved: %+v", gr)
+	}
+	// test.patch must be copied before model patch.diff
+	ti, pi := -1, -1
+	for i, c := range copied {
+		if c == "/tmp/test.patch" {
+			ti = i
+		}
+		if c == "/tmp/patch.diff" {
+			pi = i
+		}
+	}
+	if ti < 0 || pi < 0 || ti > pi {
+		t.Fatalf("copy order test=%d model=%d all=%v", ti, pi, copied)
+	}
+	// apply scripts: test_patch then model_patch
+	if len(execScripts) < 2 {
+		t.Fatalf("execs %v", execScripts)
+	}
+	if !strings.Contains(execScripts[0], "test_patch") || !strings.Contains(execScripts[1], "model_patch") {
+		t.Fatalf("apply order %v", execScripts)
+	}
+}
+
+type recordingRuntime struct {
+	onCopyTo func(src, dst string)
+	onExec   func(cmd []string) (string, string, int, error)
+}
+
+func (r *recordingRuntime) Available(context.Context) error { return nil }
+func (r *recordingRuntime) Pull(context.Context, string) error {
+	return nil
+}
+func (r *recordingRuntime) Create(context.Context, string, CreateOpts) (string, error) {
+	return "cid", nil
+}
+func (r *recordingRuntime) Start(context.Context, string) error { return nil }
+func (r *recordingRuntime) CopyFrom(context.Context, string, string, string) error {
+	return nil
+}
+func (r *recordingRuntime) CopyTo(_ context.Context, _ string, src, dst string) error {
+	if r.onCopyTo != nil {
+		r.onCopyTo(src, dst)
+	}
+	return nil
+}
+func (r *recordingRuntime) Exec(_ context.Context, _ string, cmd []string, _ ExecOpts) (string, string, int, error) {
+	if r.onExec != nil {
+		return r.onExec(cmd)
+	}
+	return "", "", 0, nil
+}
+func (r *recordingRuntime) Remove(context.Context, string) error { return nil }
+
 func loadFixture(t *testing.T) []Instance {
 	t.Helper()
 	all, err := LoadInstancesJSONL(filepath.Join("testdata", "instances_fixture.jsonl"))

@@ -96,6 +96,26 @@ func (g *DockerGrader) Grade(ctx context.Context, in Instance, patch string, _ s
 	}
 	defer os.RemoveAll(tmpDir)
 
+	// Official harness order: apply test_patch (adds FAIL_TO_PASS tests), then
+	// the model patch. Without test_patch the FAIL_TO_PASS selectors often
+	// do not exist in the base checkout.
+	if tp := strings.TrimSpace(in.TestPatch); tp != "" {
+		tpPath := filepath.Join(tmpDir, "test.patch")
+		if err := os.WriteFile(tpPath, []byte(NormalizePatch(tp)), 0o600); err != nil {
+			return GradeResult{}, err
+		}
+		if err := g.RT.CopyTo(ctx, id, tpPath, "/tmp/test.patch"); err != nil {
+			return GradeResult{}, err
+		}
+		if err := g.applyInContainer(ctx, id, tmpDir, "/tmp/test.patch", "test_patch"); err != nil {
+			return GradeResult{
+				Resolved: false,
+				Detail:   err.Error(),
+				Duration: time.Since(start),
+			}, nil
+		}
+	}
+
 	patchPath := filepath.Join(tmpDir, "patch.diff")
 	if err := os.WriteFile(patchPath, []byte(NormalizePatch(patch)), 0o600); err != nil {
 		return GradeResult{}, err
@@ -103,32 +123,10 @@ func (g *DockerGrader) Grade(ctx context.Context, in Instance, patch string, _ s
 	if err := g.RT.CopyTo(ctx, id, patchPath, "/tmp/patch.diff"); err != nil {
 		return GradeResult{}, err
 	}
-
-	// Apply patch with the same fallback chain as the official harness.
-	applyScript := `set -e
-cd /testbed
-git config --global --add safe.directory /testbed 2>/dev/null || true
-if git apply --verbose /tmp/patch.diff; then exit 0; fi
-if git apply --verbose --reject /tmp/patch.diff; then exit 0; fi
-if patch --batch --fuzz=5 -p1 -i /tmp/patch.diff; then exit 0; fi
-echo "APPLY_PATCH_FAIL" >&2
-exit 1
-`
-	applyPath := filepath.Join(tmpDir, "apply.sh")
-	if err := os.WriteFile(applyPath, []byte(applyScript), 0o700); err != nil {
-		return GradeResult{}, err
-	}
-	if err := g.RT.CopyTo(ctx, id, applyPath, "/tmp/apply.sh"); err != nil {
-		return GradeResult{}, err
-	}
-	_, applyErrOut, applyCode, err := g.RT.Exec(ctx, id, []string{"bash", "/tmp/apply.sh"}, ExecOpts{Timeout: 2 * time.Minute})
-	if err != nil {
-		return GradeResult{}, err
-	}
-	if applyCode != 0 {
+	if err := g.applyInContainer(ctx, id, tmpDir, "/tmp/patch.diff", "model_patch"); err != nil {
 		return GradeResult{
 			Resolved: false,
-			Detail:   "patch apply failed: " + truncate(applyErrOut, 400),
+			Detail:   err.Error(),
 			Duration: time.Since(start),
 		}, nil
 	}
@@ -178,6 +176,37 @@ fi
 		gr.Detail = fmt.Sprintf("tests exit %d", code)
 	}
 	return gr, nil
+}
+
+// applyInContainer applies a unified diff inside the container using the same
+// fallback chain as the official SWE-bench harness.
+func (g *DockerGrader) applyInContainer(ctx context.Context, id, tmpDir, containerPatch, label string) error {
+	applyScript := `set -e
+cd /testbed
+git config --global --add safe.directory /testbed 2>/dev/null || true
+PATCH_FILE=` + shellQuote(containerPatch) + `
+if git apply --verbose "$PATCH_FILE"; then exit 0; fi
+if git apply --verbose --reject "$PATCH_FILE"; then exit 0; fi
+if patch --batch --fuzz=5 -p1 -i "$PATCH_FILE"; then exit 0; fi
+echo "APPLY_PATCH_FAIL" >&2
+exit 1
+`
+	applyPath := filepath.Join(tmpDir, "apply-"+label+".sh")
+	if err := os.WriteFile(applyPath, []byte(applyScript), 0o700); err != nil {
+		return err
+	}
+	dest := "/tmp/apply-" + label + ".sh"
+	if err := g.RT.CopyTo(ctx, id, applyPath, dest); err != nil {
+		return err
+	}
+	_, applyErrOut, applyCode, err := g.RT.Exec(ctx, id, []string{"bash", dest}, ExecOpts{Timeout: 2 * time.Minute})
+	if err != nil {
+		return err
+	}
+	if applyCode != 0 {
+		return fmt.Errorf("%s apply failed: %s", label, truncate(applyErrOut, 400))
+	}
+	return nil
 }
 
 // buildTestCommand picks a repo-appropriate command for the given node ids/paths.

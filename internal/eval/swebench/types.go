@@ -16,13 +16,16 @@ const DatasetName = "SWE-bench/SWE-bench_Verified"
 
 // Instance is one SWE-bench task (fields needed to run + grade).
 type Instance struct {
-	InstanceID       string   `json:"instance_id"`
-	Repo             string   `json:"repo"`
-	BaseCommit       string   `json:"base_commit"`
-	Version          string   `json:"version,omitempty"`
-	ProblemStatement string   `json:"problem_statement"`
-	FailToPass       []string `json:"FAIL_TO_PASS"`
-	PassToPass       []string `json:"PASS_TO_PASS"`
+	InstanceID       string `json:"instance_id"`
+	Repo             string `json:"repo"`
+	BaseCommit       string `json:"base_commit"`
+	Version          string `json:"version,omitempty"`
+	ProblemStatement string `json:"problem_statement"`
+	// TestPatch adds the FAIL_TO_PASS tests (and related fixtures). Must be
+	// applied before grading; the agent does not see it during the run.
+	TestPatch  string   `json:"test_patch,omitempty"`
+	FailToPass []string `json:"FAIL_TO_PASS"`
+	PassToPass []string `json:"PASS_TO_PASS"`
 }
 
 // UnmarshalJSON accepts FAIL_TO_PASS / PASS_TO_PASS as JSON arrays or as
@@ -34,6 +37,7 @@ func (in *Instance) UnmarshalJSON(data []byte) error {
 		BaseCommit       string          `json:"base_commit"`
 		Version          string          `json:"version"`
 		ProblemStatement string          `json:"problem_statement"`
+		TestPatch        string          `json:"test_patch"`
 		FailToPass       json.RawMessage `json:"FAIL_TO_PASS"`
 		PassToPass       json.RawMessage `json:"PASS_TO_PASS"`
 	}
@@ -46,6 +50,7 @@ func (in *Instance) UnmarshalJSON(data []byte) error {
 	in.BaseCommit = r.BaseCommit
 	in.Version = r.Version
 	in.ProblemStatement = r.ProblemStatement
+	in.TestPatch = r.TestPatch
 	var err error
 	if in.FailToPass, err = parseStringList(r.FailToPass); err != nil {
 		return err
