@@ -353,7 +353,6 @@ export default function App() {
     </main>
     <aside className={`inspector ${inspectorOpen ? "open" : "collapsed"}`} aria-label="Inspector"><PanelResize label="Resize inspector panel" value={inspectorWidth} min={240} max={520} onChange={setInspectorWidth} side="inspector" /><div className="inspector-tabs" role="tablist">{inspectorTabs.map((tab) => <button role="tab" aria-selected={inspector === tab} key={tab} onClick={() => void inspectProject(tab)}>{tab}</button>)}</div><div className="inspector-body">{inspectorTabs.length ? <InspectorBody tab={inspectorTabs.includes(inspector) ? inspector : inspectorTabs[0]} boot={boot} status={state.status} data={projectData} loading={projectLoading} expandedDiffs={expandedDiffs} toggleDiff={toggleDiff} isLive={isLive} selectedID={selectedID} /> : <p className="muted">No inspector panels available for this host.</p>}</div></aside>
     {settingsOpen && <SettingsDialog boot={boot} status={state.status} providers={providers} onClose={() => setSettingsOpen(false)} />}
-    {undoDialog && <UndoPreviewDialog preview={lastUndoPreview} preferFiles={undoDialog.preferFiles} onCancel={() => setUndoDialog(null)} onConfirm={confirmUndo} />}
     {state.permission && <PermissionDialog permission={state.permission} rootID={selectedID} />}{state.question && <QuestionDialog question={state.question} rootID={selectedID} />}
   </div>;
 }
@@ -498,7 +497,15 @@ function UndoPreviewDialog({ preview, preferFiles, onCancel, onConfirm }: {
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const [restoreFiles, setRestoreFiles] = useState(() => defaultRestoreFiles(preview, preferFiles));
-  useEffect(() => { ref.current?.showModal(); }, []);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    if (typeof node.showModal === "function" && !node.open) {
+      try { node.showModal(); } catch { node.setAttribute("open", ""); }
+    } else if (!node.open) {
+      node.setAttribute("open", "");
+    }
+  }, []);
   const lines = formatUndoPreviewLines(preview);
   const choices = [
     { id: "chat", label: "chat only", detail: "drop the last turn from history; keep disk changes", value: false },
