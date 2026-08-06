@@ -14,6 +14,10 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+### Added
+
+- **Delegation-worthiness policy** — before `task` / `delegate` create, a deterministic gate prefers local execution for bare tiny or path-overlapping work and denies fan-out past hard ceilings (depth, optional max live children, delegation count, session budget hook). Config `session.delegationPolicy` (`mode` off|advise|enforce, thresholds). Soft local is overridable with `force_delegate`; decisions expose `policyReason` on tool metadata and `child.started`. Orchestrator guidance has a single pre-spawn decision table ([#876](https://github.com/jonathanung/strike/issues/876)).
+
 ## [v0.2.2] - 2026-08-06
 
 Patch release: session scratch temp, harness tool broker, and partial child handoffs on soft budget stop. Protocol wire `1.12.0`.

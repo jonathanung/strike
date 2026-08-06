@@ -56,6 +56,11 @@ func (taskTool) Description() string {
 - Optional context_bundle seals goal, acceptance, allowed/required paths, artifact refs,
   constraints, addressable items, and file pins. The child reads it via context_bundle;
   missing_context on the completion handoff blocks rather than hallucinating.
+- Delegation-worthiness policy (#876) runs before spawn: bare tiny or path-overlapping
+  work returns status "local" (do it yourself) unless force_delegate=true. Hard ceilings
+  (depth, max live children, delegation count, session budget) always deny and cannot
+  be forced. Intentional signals (agent/specialty/criteria/deps/verify) prefer fan-out.
+  Decision reason is in tool metadata (policyReason) and child.started.
 - Creates a delegation lifecycle object (id dN) even for plain spawns; see also delegate tool.
 - Nested task depth is bounded by MaxChildDepth (default 1: children cannot nest). Bound fan-out.
 - Parent→owned-child control: task_status / task_read / task_message / task_interrupt
@@ -133,6 +138,10 @@ func (taskTool) Schema() json.RawMessage {
 					"loop_detect_n": {"type": "integer", "description": "Hard-escalate (block) when the same tool name repeats N times; soft loop signal defaults to 6"}
 				},
 				"additionalProperties": false
+			},
+			"force_delegate": {
+				"type": "boolean",
+				"description": "Override soft local-prefer policy and spawn anyway. Hard ceilings (depth, live children, budget) still apply"
 			},
 			"context_bundle": {
 				"type": "object",
@@ -216,6 +225,7 @@ type taskArgs struct {
 	Verify        []VerifyGate      `json:"verify"`
 	Budget        AgentBudgetLimits `json:"budget"`
 	ContextBundle ContextBundle     `json:"context_bundle"`
+	ForceDelegate bool              `json:"force_delegate"`
 }
 
 func (taskTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
@@ -259,6 +269,7 @@ func (taskTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 		Verify:        gates,
 		Budget:        a.Budget,
 		ContextBundle: bundle,
+		ForceDelegate: a.ForceDelegate,
 	})
 	if err != nil {
 		return Result{}, err
@@ -274,10 +285,12 @@ func (taskTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	}
 	if res.Lifecycle != "" {
 		title += " " + res.Lifecycle
+	} else if res.Status == "local" {
+		title += " local"
 	}
 	meta := taskMetadata(res)
 	switch res.Status {
-	case "started", "completed", "queued":
+	case "started", "completed", "queued", "local":
 		return Result{Title: title, Output: out, Metadata: meta}, nil
 	case "failed", "canceled":
 		if out == "" {
@@ -338,7 +351,7 @@ func shortID(id string) string {
 }
 
 func taskMetadata(res TaskResult) json.RawMessage {
-	if res.SessionID == "" && res.Status == "" && res.Name == "" && res.DelegationID == "" && res.RouteReason == "" {
+	if res.SessionID == "" && res.Status == "" && res.Name == "" && res.DelegationID == "" && res.RouteReason == "" && res.PolicyReason == "" {
 		return nil
 	}
 	meta := map[string]string{
@@ -356,6 +369,9 @@ func taskMetadata(res TaskResult) json.RawMessage {
 	}
 	if rr := strings.TrimSpace(res.RouteReason); rr != "" {
 		meta["routeReason"] = rr
+	}
+	if pr := strings.TrimSpace(res.PolicyReason); pr != "" {
+		meta["policyReason"] = pr
 	}
 	b, err := json.Marshal(meta)
 	if err != nil {

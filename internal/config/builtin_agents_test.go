@@ -71,6 +71,8 @@ func TestBuiltinAgentsCatalog(t *testing.T) {
 		t.Errorf("orchestrator prompt missing delegate/MaxChildDepth duties: %q", o.Prompt)
 	}
 	for _, needle := range []string{
+		"Pre-spawn delegation decision",
+		"force_delegate",
 		"agent_message",
 		"child.completed",
 		"busy-poll",

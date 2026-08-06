@@ -136,6 +136,10 @@ type TaskRequest struct {
 	// artifact refs, constraints, file pins). Attached at spawn for the child
 	// to read via context_bundle; included on child.started for snapshots.
 	ContextBundle ContextBundle
+	// ForceDelegate overrides soft "prefer local" policy decisions (#876).
+	// Hard ceilings (depth, live-child count, delegation count, session budget)
+	// still apply.
+	ForceDelegate bool
 }
 
 // AgentBudgetLimits are optional per-child resource bounds.
@@ -197,6 +201,9 @@ type TaskResult struct {
 	Lifecycle string
 	// RouteReason is the structured capability-routing decision when routing ran (#778).
 	RouteReason string
+	// PolicyReason is the structured delegation-worthiness decision (#876).
+	// Present on started/queued/local outcomes when the policy ran.
+	PolicyReason string
 }
 
 // Task control request/result types for parent inspection of owned children.
@@ -577,6 +584,7 @@ type DelegateRequest struct {
 	Subscribe       []string
 	Verify          []VerifyGate
 	ContextBundle   ContextBundle
+	ForceDelegate   bool
 	State           string // target lifecycle state for transition
 	Reason          string
 	ExpectedVersion int // 0 = skip CAS

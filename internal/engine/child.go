@@ -147,6 +147,27 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		return tool.TaskResult{}, fmt.Errorf("task depth limit reached")
 	}
 
+	// Delegation-worthiness policy (#876): decide whether fan-out is worthwhile
+	// before routing/spawn. Deferred spawns already passed policy at create.
+	var policyDec PolicyDecision
+	if existingDelegationID == "" {
+		policyDec = e.evaluateDelegationPolicy(req)
+		switch policyDec.Action {
+		case PolicyActionDeny:
+			return tool.TaskResult{}, fmt.Errorf("delegation denied: %s", policyDec.Reason)
+		case PolicyActionLocal:
+			out := "Delegation policy prefers local execution (no child started). " +
+				"Do the work with your own tools, or retry with force_delegate=true " +
+				"if fan-out is still required (hard ceilings still apply). Policy: " +
+				policyDec.Reason
+			return tool.TaskResult{
+				Output:       out,
+				Status:       "local",
+				PolicyReason: policyDec.Reason,
+			}, nil
+		}
+	}
+
 	// Capability-aware routing (#778): pins win; route=auto picks specialty + load fallback.
 	// Decision is recorded on ChildStarted / TaskResult / delegation for debug.
 	// Deferred spawns (existingDelegationID) already chose agent/model at create —
@@ -267,6 +288,9 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 			if rr := strings.TrimSpace(routeDec.Reason); rr != "" {
 				out += " Route: " + rr + "."
 			}
+			if pr := strings.TrimSpace(policyDec.Reason); pr != "" {
+				out += " Policy: " + pr + "."
+			}
 			return tool.TaskResult{
 				Output:       out,
 				Status:       "queued",
@@ -274,6 +298,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 				Lifecycle:    string(item.State),
 				Name:         item.Name,
 				RouteReason:  routeDec.Reason,
+				PolicyReason: policyDec.Reason,
 			}, nil
 		}
 	}
@@ -392,6 +417,8 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		PersistProjectRule:         e.opts.PersistProjectRule,
 		DangerouslySkipPermissions: e.opts.DangerouslySkipPermissions,
 		DefaultChildBudget:         e.opts.DefaultChildBudget,
+		DelegationPolicy:           e.opts.DelegationPolicy,
+		SessionBudgetExhausted:     e.opts.SessionBudgetExhausted,
 	})
 	child.taskHarness = childHarness
 	child.taskHarnessName = childHarnessName
@@ -496,6 +523,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		Prompt:        req.Prompt,
 		Name:          memberName,
 		RouteReason:   routeDec.Reason,
+		PolicyReason:  policyDec.Reason,
 		ContextBundle: protocolContextBundle(childBundle),
 	}
 	e.emit(startedEv)
@@ -753,6 +781,9 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 	if rr := strings.TrimSpace(routeDec.Reason); rr != "" {
 		out += " Route: " + rr + "."
 	}
+	if pr := strings.TrimSpace(policyDec.Reason); pr != "" {
+		out += " Policy: " + pr + "."
+	}
 	lifecycle := string(deleg.State)
 	if lifecycle == "" && delegID != "" {
 		lifecycle = string(protocol.DelegationWorking)
@@ -765,6 +796,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		DelegationID: delegID,
 		Lifecycle:    lifecycle,
 		RouteReason:  routeDec.Reason,
+		PolicyReason: policyDec.Reason,
 	}, nil
 }
 

@@ -88,6 +88,10 @@ func (delegateTool) Schema() json.RawMessage {
 				"type": "object",
 				"description": "Optional sealed context package (same shape as task.context_bundle)"
 			},
+			"force_delegate": {
+				"type": "boolean",
+				"description": "Override soft local-prefer policy on create (same as task.force_delegate)"
+			},
 			"state": {
 				"type": "string",
 				"enum": ["queued", "working", "blocked", "review", "done", "failed", "canceled"],
@@ -118,6 +122,7 @@ func (delegateTool) Execute(ctx context.Context, args json.RawMessage, tc *Conte
 		Subscribe       []string      `json:"subscribe"`
 		Verify          []VerifyGate  `json:"verify"`
 		ContextBundle   ContextBundle `json:"context_bundle"`
+		ForceDelegate   bool          `json:"force_delegate"`
 		State           string        `json:"state"`
 		Reason          string        `json:"reason"`
 		ExpectedVersion int           `json:"expected_version"`
@@ -151,6 +156,7 @@ func (delegateTool) Execute(ctx context.Context, args json.RawMessage, tc *Conte
 		Subscribe:       a.Subscribe,
 		Verify:          gates,
 		ContextBundle:   bundle,
+		ForceDelegate:   a.ForceDelegate,
 		State:           strings.TrimSpace(a.State),
 		Reason:          a.Reason,
 		ExpectedVersion: a.ExpectedVersion,

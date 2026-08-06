@@ -332,6 +332,24 @@ type SessionConfig struct {
 	// apply). Distinct from future session maxSessionCostUSD (#577), which
 	// remains the outer cost envelope when configured.
 	AgentBudget AgentBudgetConfig `json:"agentBudget,omitempty"`
+	// DelegationPolicy is the pre-spawn worthiness gate (#876): whether to
+	// fan out vs run locally. See docs/config.md.
+	DelegationPolicy DelegationPolicyConfig `json:"delegationPolicy,omitempty"`
+}
+
+// DelegationPolicyConfig is JSON for session.delegationPolicy (camelCase).
+type DelegationPolicyConfig struct {
+	// Mode is off|advise|enforce (empty → enforce).
+	// off: always allow spawn. advise: record preferred action but spawn.
+	// enforce: soft-local returns status local; hard ceilings deny.
+	Mode string `json:"mode,omitempty"`
+	// TinyPromptRunes: bare prompts at or below this prefer local (0 → 280).
+	TinyPromptRunes int `json:"tinyPromptRunes,omitempty"`
+	// MaxPathsLocal: bare tasks with ≤N scoped paths prefer local (0 → 1).
+	// Negative disables the path-count soft rule.
+	MaxPathsLocal int `json:"maxPathsLocal,omitempty"`
+	// MaxLiveChildren hard-denies when live children reach this count (0 = off).
+	MaxLiveChildren int `json:"maxLiveChildren,omitempty"`
 }
 
 // AgentBudgetConfig is JSON for session.agentBudget (camelCase).
@@ -892,6 +910,23 @@ func mergeAgentBudgetConfig(base, layer AgentBudgetConfig) AgentBudgetConfig {
 	return base
 }
 
+// mergeDelegationPolicyConfig overlays non-empty/non-zero layer fields onto base.
+func mergeDelegationPolicyConfig(base, layer DelegationPolicyConfig) DelegationPolicyConfig {
+	if layer.Mode != "" {
+		base.Mode = layer.Mode
+	}
+	if layer.TinyPromptRunes != 0 {
+		base.TinyPromptRunes = layer.TinyPromptRunes
+	}
+	if layer.MaxPathsLocal != 0 {
+		base.MaxPathsLocal = layer.MaxPathsLocal
+	}
+	if layer.MaxLiveChildren != 0 {
+		base.MaxLiveChildren = layer.MaxLiveChildren
+	}
+	return base
+}
+
 // ClampMaxChildDepth maps config values: <0 → 0 (engine default),
 // >MaxChildDepthCeiling → MaxChildDepthCeiling.
 func ClampMaxChildDepth(n int) int {
@@ -1225,6 +1260,7 @@ func merge(base, layer Config) Config {
 		base.Session.TraceRetentionMaxBytes = layer.Session.TraceRetentionMaxBytes
 	}
 	base.Session.AgentBudget = mergeAgentBudgetConfig(base.Session.AgentBudget, layer.Session.AgentBudget)
+	base.Session.DelegationPolicy = mergeDelegationPolicyConfig(base.Session.DelegationPolicy, layer.Session.DelegationPolicy)
 	base.Permissions = append(base.Permissions, layer.Permissions...)
 	base.Hooks = append(base.Hooks, layer.Hooks...)
 	base.Providers = mergeProviders(base.Providers, layer.Providers)

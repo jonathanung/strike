@@ -630,6 +630,9 @@ type ChildStarted struct {
 	// RouteReason is the structured capability-routing decision when routing
 	// ran at spawn (#778). Empty when route=off / legacy pin-or-inherit.
 	RouteReason string `json:"routeReason,omitempty"`
+	// PolicyReason is the structured delegation-worthiness decision when the
+	// policy ran at spawn (#876). Empty when policy=off or deferred re-spawn.
+	PolicyReason string `json:"policyReason,omitempty"`
 	// ContextBundle is the sealed context package attached at spawn when set.
 	// Included so reproducible-run snapshots (#782) can capture prompt+bundle
 	// without re-deriving from tool args. Omitted when the spawn had no bundle.

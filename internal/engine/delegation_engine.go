@@ -55,6 +55,7 @@ func (e *Engine) delegate(ctx context.Context, req tool.DelegateRequest) (tool.D
 			Assignee:      req.Assignee,
 			Verify:        req.Verify,
 			ContextBundle: req.ContextBundle,
+			ForceDelegate: req.ForceDelegate,
 		})
 		if err != nil {
 			return tool.DelegateResult{}, err
