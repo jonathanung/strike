@@ -25,6 +25,9 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 			// Parent re-emits child peer mail + nested roster with child
 			// correlation; keep them for team UI (issue #614).
 			protocol.AgentMessage, protocol.AgentContractTimeout, protocol.TeamRoster,
+			// Multi-agent observability on child correlation (#922).
+			protocol.ChildEscalated, protocol.PathOverlap,
+			protocol.VerificationStarted, protocol.VerificationCompleted,
 			// Queue lifecycle for children: show constrained pool, not idle.
 			protocol.SchedulerQueued, protocol.SchedulerAdmitted, protocol.SchedulerCanceled,
 			// Diagnostic bundle inspect may target a child session (rpc /diag).
@@ -231,6 +234,15 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 	case protocol.VerificationCompleted:
 		m.applyVerificationReport(ev.Report, true)
 		cmd = m.broadcastContextState()
+		// Child-scoped gates also land on the matching child row (#922 / #780).
+		if strings.EqualFold(strings.TrimSpace(ev.Scope), protocol.VerificationScopeChild) ||
+			(ev.ParentSessionID != "" || ev.Depth > 0) {
+			rep := ev.Report
+			idx := childIndex(m.children)
+			if applyChildVerification(&m.children, idx, ev.SessionID, &rep) {
+				cmd = tea.Batch(cmd, m.broadcastAgentsState())
+			}
+		}
 	case protocol.HarnessProgress:
 		// Surface harness progress as an info cell in the transcript.
 		if m.turnRunning {
@@ -388,6 +400,12 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 				cmd = tea.Batch(cmd, refresh)
 			}
 		}
+	case protocol.ChildEscalated:
+		m.onChildEscalated(ev)
+		cmd = m.broadcastAgentsState()
+	case protocol.PathOverlap:
+		m.onPathOverlap(ev)
+		cmd = m.broadcastAgentsState()
 	case protocol.TeamRoster:
 		m.onTeamRoster(ev)
 		cmd = m.broadcastAgentsState()
@@ -579,6 +597,15 @@ func (m *Model) onChildCompleted(ev protocol.ChildCompleted) {
 			endedAt:   now,
 		})
 		m.trimChildren()
+	}
+	// Store verification on the child row for visualizer plumbing (#922).
+	if ev.Verification != nil {
+		idx := childIndex(m.children)
+		sid := id
+		if sid == "" {
+			sid = ev.SessionID
+		}
+		_ = applyChildVerification(&m.children, idx, sid, ev.Verification)
 	}
 	agent, elapsed := lookupChildMeta(m.children, ev.SessionID)
 	m.cells = appendSubagentResultCell(m.cells, ev, agent, elapsed)
@@ -805,6 +832,10 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	case protocol.ChildStarted:
 		return e.Correlation, true
 	case protocol.ChildCompleted:
+		return e.Correlation, true
+	case protocol.ChildEscalated:
+		return e.Correlation, true
+	case protocol.PathOverlap:
 		return e.Correlation, true
 	case protocol.WaitStarted:
 		return e.Correlation, true
