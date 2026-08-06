@@ -12,12 +12,15 @@ import (
 	"github.com/jonathanung/strike-cli/internal/plugin"
 )
 
-const pluginUsage = `Manage local and Git plugin installs (lifecycle).
+const pluginUsage = `Manage plugin installs (local, Git, and remote catalog).
 
 Usage:
   strike plugin list [--scope global|project]
   strike plugin inspect <id> [--scope global|project]
-  strike plugin install <path-or-git-url> [options]
+  strike plugin install <path-or-git-url|catalog:pkg[@ver]> [options]
+  strike plugin search <query> --registry <url>
+  strike plugin outdated [--registry <url>] [--scope global|project]
+  strike plugin update <id> --yes [--registry <url>] [--version <ver>] [--scope global|project]
   strike plugin enable <id> [--scope global|project]
   strike plugin disable <id> [--scope global|project]
   strike plugin remove <id> --yes [--scope global|project]
@@ -29,7 +32,16 @@ Install options:
   --ref <branch|tag>       Git ref used only to resolve the pin (stored; not followed later)
   --commit <sha>           Pin an explicit git commit (full or unique prefix)
   --subdir <path>          Plugin root inside the git repository
+  --registry <url>         Catalog base or catalog.json URL (required for catalog: installs)
+  --version <semver>       Pin catalog package version (default: latest)
   --force                  Replace an existing install of the same id
+
+Update options:
+  --yes                    Confirm after review (required; no unattended updates)
+  --registry <url>         Catalog registry override
+  --version <semver>       Target version (default: latest newer)
+  --force                  Allow reinstall when not strictly newer
+  --scope global|project
 
 Scopes:
   global   ~/.strike/plugins/<id>/  + ~/.strike/plugins.lock.json
@@ -38,9 +50,13 @@ Scopes:
 Notes:
   - Install is atomic: failed validation leaves no partially enabled plugin.
   - Git installs always pin a full commit SHA in the lockfile.
+  - Catalog installs pin immutable version + verified artifact digest; lockfile
+    records registry, package, version, artifact URL/digest, and content digest.
+  - Catalog metadata cannot enable or execute content; trust is separate (#728).
+  - Updates that change digest/source/executable contributions clear prior trust.
+  - Failed download, verification, validation, or activation preserves the prior version.
   - disable keeps files; remove deletes files and lockfile entry (--yes required).
   - doctor prints paths and provenance; never secrets or env values.
-  - Executable MCP/harness/hook activation is not performed here (see #728).
   - Changes apply on next Strike launch (no hot reload).
 `
 
@@ -56,6 +72,12 @@ func runPluginCLI(args []string, stdout, stderr io.Writer) int {
 		return runPluginInspect(args[1:], stdout, stderr)
 	case "install":
 		return runPluginInstall(args[1:], stdout, stderr)
+	case "search":
+		return runPluginSearch(args[1:], stdout, stderr)
+	case "outdated":
+		return runPluginOutdated(args[1:], stdout, stderr)
+	case "update":
+		return runPluginUpdate(args[1:], stdout, stderr)
 	case "enable":
 		return runPluginEnable(args[1:], stdout, stderr, true)
 	case "disable":
@@ -184,6 +206,28 @@ func runPluginInspect(args []string, stdout, stderr io.Writer) int {
 		if p.Source.Type == plugin.SourceGit && p.Source.Commit != "" {
 			fmt.Fprintf(stdout, "commit:   %s\n", p.Source.Commit)
 		}
+		if p.Source.Type == plugin.SourceCatalog {
+			if p.Source.Registry != "" {
+				fmt.Fprintf(stdout, "registry: %s\n", p.Source.Registry)
+			}
+			if p.Source.Package != "" {
+				fmt.Fprintf(stdout, "package:  %s\n", p.Source.Package)
+			}
+			if p.Source.Version != "" {
+				fmt.Fprintf(stdout, "pinned:   %s\n", p.Source.Version)
+			}
+			if p.Source.URL != "" {
+				fmt.Fprintf(stdout, "artifact: %s\n", p.Source.URL)
+			}
+			if p.Source.Digest != "" {
+				fmt.Fprintf(stdout, "artifactDigest: %s\n", p.Source.Digest)
+			}
+		}
+	}
+	if p.Trust != nil && p.Trust.Digest != "" {
+		fmt.Fprintf(stdout, "trust:    granted digest=%s\n", p.Trust.Digest)
+	} else {
+		fmt.Fprintf(stdout, "trust:    none\n")
 	}
 	if p.LoadError != "" {
 		fmt.Fprintf(stdout, "error:    %s\n", p.LoadError)
@@ -205,15 +249,18 @@ func runPluginInstall(args []string, stdout, stderr io.Writer) int {
 	ref := fs.String("ref", "", "git branch or tag to resolve")
 	commit := fs.String("commit", "", "git commit SHA to pin")
 	subdir := fs.String("subdir", "", "subdirectory inside git repo")
+	registry := fs.String("registry", "", "catalog base or catalog.json URL")
+	version := fs.String("version", "", "catalog package version pin")
 	force := fs.Bool("force", false, "replace existing install")
 	flagArgs, pos := splitPluginArgs(args, map[string]bool{
 		"scope": true, "ref": true, "commit": true, "subdir": true,
+		"registry": true, "version": true,
 	})
 	if err := fs.Parse(flagArgs); err != nil {
 		return 2
 	}
 	if len(pos) < 1 {
-		fmt.Fprintln(stderr, "usage: strike plugin install <path-or-git-url> [--scope global|project] [--ref] [--commit] [--subdir] [--force]")
+		fmt.Fprintln(stderr, "usage: strike plugin install <path|git-url|catalog:pkg[@ver]> [--scope] [--registry] [--version] [--ref] [--commit] [--subdir] [--force]")
 		return 2
 	}
 	scope, err := scopeFromFlag(*scopeFlag)
@@ -224,23 +271,36 @@ func runPluginInstall(args []string, stdout, stderr io.Writer) int {
 	if scope == "" {
 		scope = plugin.ScopeGlobal
 	}
-	localPath, gitURL, err := plugin.ParseInstallSource(pos[0])
+	localPath, gitURL, catPkg, catVer, err := plugin.ParseInstallSource(pos[0])
 	if err != nil {
 		fmt.Fprintln(stderr, "strike plugin install:", err)
+		return 2
+	}
+	if catVer == "" {
+		catVer = strings.TrimSpace(*version)
+	} else if strings.TrimSpace(*version) != "" && catVer != strings.TrimSpace(*version) {
+		fmt.Fprintln(stderr, "strike plugin install: conflicting versions in catalog: ref and --version")
+		return 2
+	}
+	if catPkg != "" && strings.TrimSpace(*registry) == "" {
+		fmt.Fprintln(stderr, "strike plugin install: catalog installs require --registry <url>")
 		return 2
 	}
 	opts := pluginDiscoverOpts()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	res, err := plugin.Install(ctx, plugin.InstallOptions{
-		Scope:     scope,
-		WorkDir:   opts.WorkDir,
-		LocalPath: localPath,
-		GitURL:    gitURL,
-		GitRef:    *ref,
-		GitCommit: *commit,
-		GitSubdir: *subdir,
-		Force:     *force,
+		Scope:           scope,
+		WorkDir:         opts.WorkDir,
+		LocalPath:       localPath,
+		GitURL:          gitURL,
+		GitRef:          *ref,
+		GitCommit:       *commit,
+		GitSubdir:       *subdir,
+		CatalogRegistry: strings.TrimSpace(*registry),
+		CatalogPackage:  catPkg,
+		CatalogVersion:  catVer,
+		Force:           *force,
 	})
 	if err != nil {
 		fmt.Fprintln(stderr, "strike plugin install:", err)
@@ -253,7 +313,147 @@ func runPluginInstall(args []string, stdout, stderr io.Writer) int {
 	if res.Source.Type == plugin.SourceGit {
 		fmt.Fprintf(stdout, "  commit:  %s\n", res.Source.Commit)
 	}
+	if res.Source.Type == plugin.SourceCatalog {
+		fmt.Fprintf(stdout, "  artifactDigest: %s\n", res.Source.Digest)
+	}
 	fmt.Fprintln(stdout, "  enabled: true (passive contributions load on next launch)")
+	fmt.Fprintln(stdout, "  trust:   none (catalog/install metadata cannot enable execution)")
+	return 0
+}
+
+func runPluginSearch(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("plugin search", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	registry := fs.String("registry", "", "catalog base or catalog.json URL")
+	flagArgs, pos := splitPluginArgs(args, map[string]bool{"registry": true})
+	if err := fs.Parse(flagArgs); err != nil {
+		return 2
+	}
+	if strings.TrimSpace(*registry) == "" {
+		fmt.Fprintln(stderr, "usage: strike plugin search <query> --registry <url>")
+		return 2
+	}
+	query := strings.Join(pos, " ")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	cat, _, err := plugin.FetchCatalog(ctx, nil, *registry)
+	if err != nil {
+		fmt.Fprintln(stderr, "strike plugin search:", err)
+		return 1
+	}
+	hits := cat.Search(query)
+	if len(hits) == 0 {
+		fmt.Fprintln(stdout, "No packages matched.")
+		return 0
+	}
+	for _, h := range hits {
+		fmt.Fprintf(stdout, "%s\t%s\t%s", h.ID, h.Version.Version, h.Name)
+		if h.Description != "" {
+			fmt.Fprintf(stdout, "\t%s", h.Description)
+		}
+		fmt.Fprintln(stdout)
+	}
+	return 0
+}
+
+func runPluginOutdated(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("plugin outdated", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	scopeFlag := parsePluginScope(fs)
+	registry := fs.String("registry", "", "default catalog registry when lock entry lacks one")
+	flagArgs, _ := splitPluginArgs(args, map[string]bool{"scope": true, "registry": true})
+	if err := fs.Parse(flagArgs); err != nil {
+		return 2
+	}
+	scope, err := scopeFromFlag(*scopeFlag)
+	if err != nil {
+		fmt.Fprintln(stderr, "strike plugin outdated:", err)
+		return 2
+	}
+	opts := pluginDiscoverOpts()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	items, err := plugin.CheckOutdated(ctx, plugin.OutdatedOptions{
+		WorkDir:  opts.WorkDir,
+		Scope:    scope,
+		Registry: strings.TrimSpace(*registry),
+	})
+	if err != nil {
+		fmt.Fprintln(stderr, "strike plugin outdated:", err)
+		return 1
+	}
+	if len(items) == 0 {
+		fmt.Fprintln(stdout, "All catalog-sourced plugins are up to date.")
+		return 0
+	}
+	for _, it := range items {
+		cur := it.Installed.Version
+		if it.Installed.Source != nil && it.Installed.Source.Version != "" {
+			cur = it.Installed.Source.Version
+		}
+		fmt.Fprintf(stdout, "%s\t%s → %s\t%s\n", it.Installed.ID, cur, it.Latest.Version, it.Registry)
+	}
+	return 0
+}
+
+func runPluginUpdate(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("plugin update", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	scopeFlag := parsePluginScope(fs)
+	registry := fs.String("registry", "", "catalog registry override")
+	version := fs.String("version", "", "target catalog version")
+	yes := fs.Bool("yes", false, "confirm update after review")
+	force := fs.Bool("force", false, "allow reinstall when not newer")
+	flagArgs, pos := splitPluginArgs(args, map[string]bool{
+		"scope": true, "registry": true, "version": true,
+	})
+	if err := fs.Parse(flagArgs); err != nil {
+		return 2
+	}
+	if len(pos) < 1 {
+		fmt.Fprintln(stderr, "usage: strike plugin update <id> --yes [--registry] [--version] [--scope] [--force]")
+		return 2
+	}
+	scope, err := scopeFromFlag(*scopeFlag)
+	if err != nil {
+		fmt.Fprintln(stderr, "strike plugin update:", err)
+		return 2
+	}
+	opts := pluginDiscoverOpts()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	uo := plugin.UpdateOptions{
+		ID:       pos[0],
+		Scope:    scope,
+		WorkDir:  opts.WorkDir,
+		Registry: strings.TrimSpace(*registry),
+		Version:  strings.TrimSpace(*version),
+		Confirm:  *yes,
+		Force:    *force,
+	}
+	// Always show review first (even when --yes is set).
+	review, ver, err := plugin.PreviewUpdate(ctx, uo)
+	if err != nil {
+		fmt.Fprintln(stderr, "strike plugin update:", err)
+		return 1
+	}
+	fmt.Fprint(stdout, review.Format())
+	fmt.Fprintf(stdout, "  catalog:  %s@%s\n", review.ID, ver.Version)
+	if !*yes {
+		fmt.Fprintln(stderr, "strike plugin update: re-run with --yes to apply after reviewing the diff")
+		return 2
+	}
+	res, err := plugin.Update(ctx, uo)
+	if err != nil {
+		fmt.Fprintln(stderr, "strike plugin update:", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "Updated %s@%s\n", res.Install.ID, res.Install.Version)
+	fmt.Fprintf(stdout, "  root:   %s\n", res.Install.Root)
+	fmt.Fprintf(stdout, "  digest: %s\n", res.Install.Digest)
+	if res.Review.TrustInvalidated {
+		fmt.Fprintln(stdout, "  trust:  invalidated (re-review required for executable activation)")
+	}
 	return 0
 }
 

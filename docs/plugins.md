@@ -19,7 +19,8 @@ must not weaken these rules.
 | **Contract (this doc)** | Normative. Loaders and CLI must conform. |
 | **Passive load (#726)** | Discovery + load of agents, skills, workflows, themes, and provider profiles from enabled local plugin trees. |
 | **Lifecycle CLI (#727)** | `strike plugin` install/list/inspect/enable/disable/remove/doctor for local + Git sources. |
-| **Not implemented yet** | Executable activation, catalog, TUI manager — later issues. |
+| **Catalog / updates (#729)** | Remote `catalog.json`, search, catalog install, outdated, update with review; digest verify + zip-slip guards. |
+| **Not implemented yet** | Executable activation (#728), TUI manager (#730). |
 | **Out of scope forever (v1 model)** | In-process Go `plugin` packages, OpenCode-style Node plugin hosts, arbitrary provider/auth/streaming adapters, silent executable startup from an untrusted bundle. |
 
 Related: [agents-skills.md](agents-skills.md), [config.md](config.md),
@@ -116,23 +117,31 @@ and enablement — **never** credentials.
 
 Local source identity uses `"type":"local"` and `"path"` (absolute path supplied
 at install time). Git installs **must** pin `commit` (full SHA); mutable branches
-are never followed silently on later launches.
+are never followed silently on later launches. Catalog installs use
+`"type":"catalog"` with `registry`, `package`, `version`, artifact `url`, and
+artifact `digest` (see §6.3). Optional lockfile `trust` is cleared when an update
+changes digest, source identity, or executable contributions (#728/#729).
 
-### Lifecycle CLI (`strike plugin`, #727)
+### Lifecycle CLI (`strike plugin`, #727 / #729)
 
 | Command | Behavior |
 |---|---|
-| `install <path\|git-url>` | Validate, copy/clone into scope root, write lockfile. Atomic: failed validation leaves no partially enabled plugin. |
+| `install <path\|git-url\|catalog:pkg[@ver]>` | Validate, copy/clone/download into scope root, write lockfile. Atomic: failed validation leaves no partially enabled plugin. |
+| `search <query> --registry <url>` | Search a remote catalog index. |
+| `outdated [--registry]` | List catalog-sourced installs with a newer published version. |
+| `update <id> --yes` | Show contribution/capability review, then install newer catalog version (rollback-safe). |
 | `list` / `inspect <id>` | Show installed plugins (including disabled) with scope, digest, source. |
 | `enable` / `disable <id>` | Toggle lockfile `enabled`. Disable **preserves** source files. |
 | `remove <id> --yes` | Delete install directory and lockfile entry (confirmation required). |
 | `doctor [id]` | Paths, provenance, contribution summary, collisions, trust state. Never prints secrets or MCP/harness env values (keys only). |
 
 Flags: `--scope global|project` (install defaults to global), git `--ref` /
-`--commit` / `--subdir`, install `--force` to replace. Project scope uses the
-process working directory's `./.strike`. Install destinations cannot escape the
-configured plugins roots. Lockfile updates use an exclusive advisory lock plus
-atomic rename so concurrent lifecycle ops are safe.
+`--commit` / `--subdir`, catalog `--registry` / `--version`, install `--force`
+to replace. Project scope uses the process working directory's `./.strike`.
+Install destinations cannot escape the configured plugins roots. Lockfile
+updates use an exclusive advisory lock plus atomic rename so concurrent
+lifecycle ops are safe. Updates are never unattended (`--yes` required after
+review).
 
 Drop a validated bundle under a plugins root manually if needed (directory name
 need not match `id`; the manifest `id` is authoritative). Restart Strike to pick
@@ -465,16 +474,60 @@ checked-out plugin subtree.
 | Field | Meaning |
 |---|---|
 | `type` | `catalog` |
-| `registry` | Catalog base identity (URL or named registry id) |
-| `package` | Package slug in the catalog |
+| `registry` | Catalog base identity (URL) |
+| `package` | Package slug in the catalog (matches plugin `id`) |
 | `version` | Immutable published version |
-| `url` | Artifact URL |
-| `digest` | Expected artifact/package digest from catalog metadata |
+| `url` | Artifact URL (`.tar.gz` or `.zip`) |
+| `digest` | Expected **artifact** digest (`sha256:<hex>`) from catalog metadata |
 
-Catalog format and transport are owned by
-[#729](https://github.com/jonathanung/strike/issues/729). Contract requirement:
-remote install pins version + verified digest; catalog rows cannot execute
-content by themselves.
+Lockfile `digest` (entry-level) remains the **content-tree** digest after extract.
+Both are recorded so an install is reproducible.
+
+#### Remote catalog format (`schemaVersion: 1`)
+
+Index URL: `<registry>/catalog.json` when `registry` is a base directory, or a
+direct `.json` URL. Strict JSON; unknown fields rejected. Metadata **cannot**
+enable plugins or grant trust.
+
+```json
+{
+  "schemaVersion": 1,
+  "registry": "https://example.com/strike-plugins",
+  "packages": [
+    {
+      "id": "acme.review-pack",
+      "name": "Acme Review Pack",
+      "description": "…",
+      "versions": [
+        {
+          "version": "1.2.0",
+          "url": "https://cdn.example.com/acme.review-pack-1.2.0.tar.gz",
+          "digest": "sha256:…",
+          "contentDigest": "sha256:…",
+          "capabilities": ["agents", "skills", "mcp.stdio"],
+          "strike": { "min": "0.2.0" },
+          "manifestSchema": 1,
+          "size": 12345
+        }
+      ]
+    }
+  ]
+}
+```
+
+| Field | Rules |
+|---|---|
+| `digest` | **Required.** SHA-256 of artifact bytes; install fails on mismatch. |
+| `contentDigest` | Optional. Must match `ComputeDigest` of extracted tree when set. |
+| `signature` | Reserved; v1 verifies digests only. Presence does not grant trust. |
+| `size` | Optional upper bound on artifact bytes (also globally capped). |
+
+Transport: HTTP(S) only, bounded body sizes, limited redirects. Extraction
+rejects absolute paths, `..`, symlinks, and oversized payloads (zip-slip / tar
+traversal fail closed).
+
+CLI: `strike plugin search`, `install catalog:pkg[@ver] --registry`, `outdated`,
+`update --yes` (`internal/plugin` catalog client).
 
 ### 6.4 Update capability review
 
@@ -483,13 +536,16 @@ local replace), the lifecycle UX MUST show:
 
 - Old → new `version` and content digest
 - Added/removed/changed contribution types
-- Executable command/args/env/URL diffs
+- Executable command/args/env/URL diffs (env/header **keys** only — never values)
 - Capability tag diffs (`capabilities` and inferred executable kinds)
 
-User confirmation creates a **new** trust record; the previous working version
-remains until the update commits atomically
+User confirmation (`--yes`) applies the update. Prior trust is **invalidated**
+when digest, source identity, or executable contributions change (lockfile
+`trust` cleared). The previous working version remains until the update commits
+atomically; failed download, verification, validation, or activation rolls back
 ([#727](https://github.com/jonathanung/strike/issues/727),
 [#729](https://github.com/jonathanung/strike/issues/729)).
+No automatic unattended updates.
 
 ---
 
@@ -665,7 +721,7 @@ announces removal in CHANGELOG **Upgrade note**.
 | Passive load | #726 (`internal/plugin` + config/theme wiring) | §3–4, §7.1–7.5, §8–10 |
 | Local/Git CLI | #727 | §2, §6.1–6.2, enablement, doctor |
 | Executable activation | #728 | §5, §7.6–7.8 |
-| Catalog / updates | #729 | §6.3–6.4, digest verify |
+| Catalog / updates | #729 (`internal/plugin` catalog/archive + CLI) | §6.3–6.4, digest verify |
 | TUI manager | #730 | UX over enablement + trust |
 | Themes packaging | #511 | §7.4 |
 | Pane ABI | #522 | §7.9 + [plugin-panes.md](plugin-panes.md) |
@@ -675,8 +731,10 @@ announces removal in CHANGELOG **Upgrade note**.
 
 ## 12. Non-goals (restated)
 
-- Remote catalog discovery and automatic updates (#729).
+- Automatic unattended updates (catalog update requires explicit `--yes`).
+- Paid marketplace infrastructure.
 - Executable MCP/harness/hook activation without trust (#728).
+- TUI plugin manager (#730).
 - A generic arbitrary-code plugin ABI or in-process extension mechanism.
 - Hot reload of plugin trees.
 - Replacing stock `mcp.jsonc` / config hooks / harnesses (plugins are additive
@@ -714,3 +772,15 @@ announces removal in CHANGELOG **Upgrade note**.
 | Project/global scopes explicit; no root escape | `--scope`; `Roots.ConfinePath` |
 | Safe under concurrent lockfile writes | `WithLockfileLock` (flock) + atomic rename |
 | CLI | `strike plugin list\|inspect\|install\|enable\|disable\|remove\|doctor` |
+
+## 16. Acceptance mapping (#729)
+
+| AC | Implementation |
+|---|---|
+| Remote installs pin immutable version + verified digest | `SourceIdentity` catalog fields + artifact `sha256` check before extract; lockfile pins version/URL/digests |
+| Catalog metadata cannot silently enable or execute | No trust from catalog; install sets `enabled` for passive only; `trust` never set from metadata; unknown catalog fields rejected |
+| Updates changing executable content invalidate prior trust | `BuildUpdateReview` + lockfile `trust` cleared on digest/source/executable change |
+| Failed download/verify/validate/activation preserves prior | Stage under plugins root; validate before rename; backup restore on failure |
+| Lockfile provenance enough to reproduce | `registry`, `package`, `version`, artifact `url`/`digest`, content `digest` |
+| Network + archive paths bounded; traversal tested | `downloadBytes` caps; `sanitizeArchivePath` / zip-slip tests in `catalog_test.go` |
+| Search / install / outdated / update CLI | `strike plugin search\|install catalog:…\|outdated\|update` |

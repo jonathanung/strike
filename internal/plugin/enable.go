@@ -26,9 +26,20 @@ type Lockfile struct {
 type LockfileEntry struct {
 	Enabled     *bool           `json:"enabled,omitempty"`
 	Version     string          `json:"version,omitempty"`
-	Digest      string          `json:"digest,omitempty"`
+	Digest      string          `json:"digest,omitempty"` // content-tree digest
 	Source      *SourceIdentity `json:"source,omitempty"`
 	InstalledAt string          `json:"installedAt,omitempty"` // RFC3339
+	// Trust is an optional executable-trust binding (#728). Catalog/local updates
+	// that change digest, source identity, or executable contributions clear it.
+	Trust *TrustBinding `json:"trust,omitempty"`
+}
+
+// TrustBinding is a durable grant for executable contributions (docs/plugins.md §5).
+// Catalog metadata alone must never populate this; only explicit user review does.
+type TrustBinding struct {
+	Digest       string   `json:"digest,omitempty"`       // content digest at grant time
+	Capabilities []string `json:"capabilities,omitempty"` // granted capability set
+	GrantedAt    string   `json:"grantedAt,omitempty"`    // RFC3339
 }
 
 // ReadLockfile loads path; missing or empty file yields an empty lockfile.

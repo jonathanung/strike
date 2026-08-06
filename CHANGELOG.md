@@ -16,6 +16,14 @@ materially affect the shipped product.
 
 ### Added
 
+- **Plugin catalog and updates** — remote catalog format (`catalog.json`),
+  `strike plugin search` / `install catalog:pkg[@ver] --registry` / `outdated` /
+  `update --yes`. Installs pin immutable version + verified artifact digest;
+  lockfile records registry/package/version/URL/digests for reproduce; archive
+  extract guards zip-slip/tar traversal; failed download/verify/validate keeps
+  the prior version; contribution/capability review before update; executable
+  changes clear prior trust. Catalog metadata cannot enable execution
+  ([#729](https://github.com/jonathanung/strike/issues/729)).
 - **Plugin lifecycle CLI** — `strike plugin` list/inspect/install/enable/disable/remove/doctor
   for local paths and Git sources. Atomic install into global or project scope,
   pinned Git commits in `plugins.lock.json` (source + digest, never credentials),
