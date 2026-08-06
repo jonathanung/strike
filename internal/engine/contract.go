@@ -299,8 +299,16 @@ func (t *Team) fireAckTimeout(messageID string) {
 		t.mu.Unlock()
 		return
 	}
-	// Only fire if deadline reached (spurious stop/restart races).
-	if time.Now().Before(p.Deadline.Add(-5 * time.Millisecond)) {
+	// Timer may fire slightly early; reschedule remaining TTL so we never
+	// drop a pending ack without a future fire (Stop+return would stick).
+	if rem := time.Until(p.Deadline); rem > 5*time.Millisecond {
+		if p.timer != nil {
+			p.timer.Stop()
+		}
+		msgID := id
+		p.timer = time.AfterFunc(rem, func() {
+			t.fireAckTimeout(msgID)
+		})
 		t.mu.Unlock()
 		return
 	}

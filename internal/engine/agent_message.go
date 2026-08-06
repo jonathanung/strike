@@ -94,10 +94,13 @@ func (e *Engine) agentMessage(ctx context.Context, req tool.AgentMessageRequest)
 			InReplyTo: inReplyTo,
 			AckStatus: "acked",
 		})
-		return tool.AgentMessageResult{
-			To:         st.To,
-			Status:     st.Status,
-			Detail:     st.Detail,
+		// Pending ack is already settled; do not surface delivery failure as a
+		// hard reject (retry would see "unknown pending"). Report accepted with
+		// delivery detail when the original sender is not live.
+		res := tool.AgentMessageResult{
+			To:         toID,
+			Status:     "accepted",
+			Detail:     "ack recorded",
 			MessageID:  st.MessageID,
 			Dropped:    st.Dropped,
 			TaskID:     taskID,
@@ -106,7 +109,21 @@ func (e *Engine) agentMessage(ctx context.Context, req tool.AgentMessageRequest)
 			InReplyTo:  inReplyTo,
 			AckStatus:  "acked",
 			RequireAck: false,
-		}, nil
+		}
+		if st.Status != "accepted" && st.Status != "queued" {
+			res.Detail = "ack recorded; delivery to sender failed: " + st.Detail
+			res.To = toID
+			if st.To != "" {
+				res.To = st.To
+			}
+		} else {
+			res.Detail = st.Detail
+			if res.Detail == "" {
+				res.Detail = "ack recorded"
+			}
+			res.To = st.To
+		}
+		return res, nil
 	}
 
 	toAddr := strings.TrimSpace(req.To)
