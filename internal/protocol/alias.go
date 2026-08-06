@@ -158,6 +158,8 @@ type (
 	TeamRoster             = pub.TeamRoster
 	UsageReported          = pub.UsageReported
 	ProviderRetrying       = pub.ProviderRetrying
+	ToolRetrying           = pub.ToolRetrying
+	ToolLoopDetected       = pub.ToolLoopDetected
 	SchedulerQueued        = pub.SchedulerQueued
 	SchedulerAdmitted      = pub.SchedulerAdmitted
 	SchedulerCanceled      = pub.SchedulerCanceled
