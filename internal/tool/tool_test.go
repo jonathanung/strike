@@ -407,3 +407,113 @@ func TestToolNames(t *testing.T) {
 		}
 	}
 }
+
+func TestAppendDiagnostics(t *testing.T) {
+	tc := allowAll(t.TempDir())
+	res := Result{Output: "Edited a.go (1 replacement(s))"}
+	// nil CollectDiagnostics is a no-op
+	got := tc.AppendDiagnostics(context.Background(), res, "/tmp/a.go")
+	if got.Output != res.Output {
+		t.Fatalf("nil collect changed output: %q", got.Output)
+	}
+
+	var saw []string
+	tc.CollectDiagnostics = func(ctx context.Context, absPaths []string) string {
+		saw = append([]string(nil), absPaths...)
+		return "--- diagnostics ---\na.go:1:1: error: boom"
+	}
+	got = tc.AppendDiagnostics(context.Background(), res, "/abs/a.go", "", "/abs/b.go")
+	if len(saw) != 2 || saw[0] != "/abs/a.go" || saw[1] != "/abs/b.go" {
+		t.Fatalf("paths = %#v", saw)
+	}
+	if !strings.Contains(got.Output, "Edited a.go") || !strings.Contains(got.Output, "--- diagnostics ---") {
+		t.Fatalf("output = %q", got.Output)
+	}
+	if !strings.Contains(got.Output, "\n\n--- diagnostics ---") {
+		t.Fatalf("want blank line before block: %q", got.Output)
+	}
+
+	// Panic must not fail the tool path.
+	tc.CollectDiagnostics = func(context.Context, []string) string { panic("boom") }
+	got = tc.AppendDiagnostics(context.Background(), res, "/x")
+	if got.Output != res.Output {
+		t.Fatalf("panic changed output: %q", got.Output)
+	}
+}
+
+func TestWriteEditInjectDiagnostics(t *testing.T) {
+	dir := t.TempDir()
+	tc := allowAll(dir)
+	var collectCalls int
+	var collectPaths [][]string
+	tc.CollectDiagnostics = func(ctx context.Context, absPaths []string) string {
+		collectCalls++
+		collectPaths = append(collectPaths, append([]string(nil), absPaths...))
+		return "--- diagnostics ---\nx:1:1: error: e"
+	}
+	tc.FileSync = func(string, string, bool) {} // present but no-op
+
+	res, err := NewWrite().Execute(context.Background(), mustJSON(t, map[string]any{
+		"filePath": "a.go",
+		"content":  "package a\n",
+	}), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if collectCalls != 1 {
+		t.Fatalf("collectCalls=%d", collectCalls)
+	}
+	if !strings.Contains(res.Output, "Created a.go") || !strings.Contains(res.Output, "--- diagnostics ---") {
+		t.Fatalf("write output = %q", res.Output)
+	}
+
+	res, err = NewEdit().Execute(context.Background(), mustJSON(t, map[string]any{
+		"filePath":  "a.go",
+		"oldString": "package a\n",
+		"newString": "package b\n",
+	}), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if collectCalls != 2 {
+		t.Fatalf("collectCalls=%d after edit", collectCalls)
+	}
+	if !strings.Contains(res.Output, "Edited a.go") || !strings.Contains(res.Output, "error: e") {
+		t.Fatalf("edit output = %q", res.Output)
+	}
+}
+
+func TestApplyPatchDiagnosticsSingleCollect(t *testing.T) {
+	dir := t.TempDir()
+	tc := allowAll(dir)
+	var collectCalls int
+	var nPaths int
+	tc.CollectDiagnostics = func(ctx context.Context, absPaths []string) string {
+		collectCalls++
+		nPaths = len(absPaths)
+		return "--- diagnostics ---\nmulti"
+	}
+	tc.FileSync = func(string, string, bool) {}
+
+	patch := strings.Join([]string{
+		"*** Begin Patch",
+		"*** Add File: a.go",
+		"+package a",
+		"*** Add File: b.go",
+		"+package b",
+		"*** End Patch",
+	}, "\n")
+	res, err := NewApplyPatch().Execute(context.Background(), mustJSON(t, map[string]any{"patch": patch}), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if collectCalls != 1 {
+		t.Fatalf("collectCalls=%d, want 1 (debounced)", collectCalls)
+	}
+	if nPaths != 2 {
+		t.Fatalf("nPaths=%d, want 2", nPaths)
+	}
+	if strings.Count(res.Output, "--- diagnostics ---") != 1 {
+		t.Fatalf("output = %q", res.Output)
+	}
+}

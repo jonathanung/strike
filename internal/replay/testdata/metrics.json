@@ -1,0 +1,9 @@
+{
+"bash-run": {"scenario":"bash-run","toolCallCount":1,"turns":1,"inputTokens":13,"outputTokens":11,"usedTokens":24,"systemChars":5595,"promptChars":5063,"systemTokens":1409,"toolsTokens":70,"totalTokens":1508},
+"multi-turn": {"scenario":"multi-turn","toolCallCount":1,"turns":2,"inputTokens":70,"outputTokens":38,"usedTokens":108,"systemChars":5595,"promptChars":5063,"systemTokens":1409,"toolsTokens":70,"totalTokens":1535},
+"plain-echo": {"scenario":"plain-echo","toolCallCount":0,"turns":1,"inputTokens":3,"outputTokens":29,"usedTokens":32,"systemChars":5595,"promptChars":5063,"systemTokens":1409,"toolsTokens":70,"totalTokens":1481},
+"prompt-agent-persona": {"scenario":"prompt-agent-persona","toolCallCount":0,"turns":0,"inputTokens":0,"outputTokens":0,"usedTokens":0,"systemChars":4600,"promptChars":4070,"systemTokens":1159,"toolsTokens":70,"totalTokens":1228},
+"prompt-build-full": {"scenario":"prompt-build-full","toolCallCount":0,"turns":0,"inputTokens":0,"outputTokens":0,"usedTokens":0,"systemChars":5784,"promptChars":5252,"systemTokens":1457,"toolsTokens":70,"totalTokens":1527},
+"prompt-build-lite": {"scenario":"prompt-build-lite","toolCallCount":0,"turns":0,"inputTokens":0,"outputTokens":0,"usedTokens":0,"systemChars":5595,"promptChars":5063,"systemTokens":1409,"toolsTokens":70,"totalTokens":1478},
+"prompt-plan": {"scenario":"prompt-plan","toolCallCount":0,"turns":0,"inputTokens":0,"outputTokens":0,"usedTokens":0,"systemChars":8765,"promptChars":8231,"systemTokens":2209,"toolsTokens":70,"totalTokens":2279}
+}

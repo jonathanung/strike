@@ -665,11 +665,12 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			SchedulerAcquire: func(ctx context.Context, label string, pools ...string) (*scheduler.Lease, error) {
 				return e.acquireScheduler(ctx, corr, label, pools...)
 			},
-			Files:      e.files,
-			SessionID:  e.opts.SessionID,
-			MemberName: e.ownershipMemberName(),
-			Checkpoint: e.checkpoints.Snapshot,
-			FileSync:   e.opts.FileSync,
+			Files:              e.files,
+			SessionID:          e.opts.SessionID,
+			MemberName:         e.ownershipMemberName(),
+			Checkpoint:         e.checkpoints.Snapshot,
+			FileSync:           e.opts.FileSync,
+			CollectDiagnostics: e.opts.CollectDiagnostics,
 			Ask: func(ctx context.Context, req tool.AskRequest) error {
 				return e.perms.AskWithCorrelation(ctx, req, corr)
 			},

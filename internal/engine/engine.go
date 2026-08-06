@@ -249,6 +249,10 @@ type Options struct {
 	// document sync. absPath is absolute; deleted marks removals.
 	// Nil disables. Must not panic the tool path (callers recover).
 	FileSync func(absPath string, content string, deleted bool)
+	// CollectDiagnostics, when set, returns model-facing diagnostic text for
+	// touched absolute paths after file mutations (one call per tool result).
+	// Empty disables injection. Must not panic the tool path (callers recover).
+	CollectDiagnostics func(ctx context.Context, absPaths []string) string
 }
 
 // beginAck reports whether ToolCallBegin was actually written to Events.

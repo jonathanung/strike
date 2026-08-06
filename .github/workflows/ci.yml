@@ -60,6 +60,14 @@ jobs:
       - name: Test
         run: go test -race ./...
 
+      # E3.2 prompt regression: verbose report of tool/turn/token deltas.
+      # Non-blocking for now (test itself soft-fails metric drift unless
+      # PROMPT_REGRESSION_STRICT=1). continue-on-error keeps the step visible
+      # if the harness errors while the main Test job stays the hard gate.
+      - name: Prompt regression report (soft)
+        continue-on-error: true
+        run: make prompt-reg
+
       # Soft coverage report only — do not hard-fail CI on the floor yet.
       # Local gate: make cover-check (COVER_MIN in Makefile).
       - name: Coverage (soft)

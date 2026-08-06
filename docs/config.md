@@ -506,10 +506,38 @@ down the session (same crash isolation as MCP).
 
 **Layering:** when a config layer sets `lsp.servers` (including `{}`), it
 **replaces** the previous layer's server map entirely (same as MCP). Omitted
-`lsp` leaves the lower layer unchanged.
+`servers` leaves the lower layer's map. Scalar diagnostics knobs
+(`diagnosticsSeverity`, `diagnosticsMaxChars`, `diagnosticsWaitMs`) overlay
+last-wins when set. Omitted `lsp` leaves the lower layer unchanged.
 
-Diagnostics injection into tool results and the `/lsp` UI are separate
-follow-ups (epic E2.2 / E2.3). This client only collects diagnostics in-process.
+### Diagnostics in tool results
+
+After a successful `write` / `edit` / `apply_patch` / `notebook_edit`, strike
+waits briefly for `publishDiagnostics` on the touched paths and appends a
+single `--- diagnostics ---` block to the tool `Result` the model sees.
+Multi-file `apply_patch` shares one wait window and one block (not one block
+per file). A dead language server degrades to no injection.
+
+| Field | Default | Notes |
+|---|---|---|
+| `diagnosticsSeverity` | `error` | Minimum severity to inject: `error`, `warning`, `info`, or `hint`. Errors-only by default; set `warning` to opt in to warnings. |
+| `diagnosticsMaxChars` | `4000` | Cap on injected text (runes). Excess lines become `… (N more diagnostic(s) truncated)`. |
+| `diagnosticsWaitMs` | `400` | Max wait for `publishDiagnostics` after a mutation. Negative skips the wait (snapshot immediately). |
+
+```json
+{
+  "lsp": {
+    "diagnosticsSeverity": "warning",
+    "diagnosticsMaxChars": 6000,
+    "diagnosticsWaitMs": 600,
+    "servers": {
+      "go": { "command": "gopls", "extensions": [".go"] }
+    }
+  }
+}
+```
+
+The `/lsp` UI is a separate follow-up (epic E2.3).
 
 ## MCP servers (stdio + HTTP)
 

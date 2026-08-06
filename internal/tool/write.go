@@ -89,9 +89,10 @@ func (writeTool) Execute(ctx context.Context, args json.RawMessage, tc *Context)
 	}
 	out := fmt.Sprintf("%s %s (%d bytes)", verb, rel, len(a.Content))
 	out = AppendOverlapWarning(out, overlapWarn)
-	return Result{
+	res := Result{
 		Title:    rel,
 		Output:   out,
 		Metadata: meta,
-	}, nil
+	}
+	return tc.AppendDiagnostics(ctx, res, path), nil
 }

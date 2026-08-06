@@ -107,9 +107,10 @@ func (editTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	tc.NotifyFileSync(path, updated, false)
 	out := fmt.Sprintf("Edited %s (%d replacement(s))", rel, replaced)
 	out = AppendOverlapWarning(out, overlapWarn)
-	return Result{
+	res := Result{
 		Title:    rel,
 		Output:   out,
 		Metadata: meta,
-	}, nil
+	}
+	return tc.AppendDiagnostics(ctx, res, path), nil
 }
