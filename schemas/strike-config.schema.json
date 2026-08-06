@@ -65,6 +65,11 @@
       "description": "Desktop notifications (OSC 9 + bell). Empty means unfocused-only.",
       "enum": ["on", "off", "unfocused-only"]
     },
+    "autoupdate": {
+      "type": "string",
+      "description": "Startup GitHub Releases check. Empty means notify. auto is opt-in binary replace when writable; never the default.",
+      "enum": ["off", "notify", "auto"]
+    },
     "permissionAutoApproveSeconds": {
       "type": "integer",
       "description": "Auto-allow permission asks after N seconds (1–60). Zero disables.",

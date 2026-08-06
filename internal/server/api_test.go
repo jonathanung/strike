@@ -50,7 +50,7 @@ func (s testSettings) SaveDefaults(provider, model, agent, effort, mode string) 
 }
 func (testSettings) SaveTheme(string) error                        { return nil }
 func (testSettings) SavePresentation(string, string, string) error { return nil }
-func (testSettings) SaveConfigDials(string, string, string, string, string) error {
+func (testSettings) SaveConfigDials(string, string, string, string, string, string) error {
 	return nil
 }
 func (testSettings) SaveAutoApproveDials(string, *[]string, string) error { return nil }
