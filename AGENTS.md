@@ -58,7 +58,7 @@ service/theme token).
 | `internal/harness` | Function harness contract, registry, external process adapter |
 | `internal/provider` | LLM adapters (+ `base`, `echo`, anthropic, openai, xai, google, chatgpt) |
 | `internal/sandbox` | OS process sandbox (`Wrap` via bwrap / sandbox-exec) for bash |
-| `internal/tool` | read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/task_message/task_interrupt/wait/agent_roster/agent_message/agent_broadcast/team_task/webfetch/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/plan_write/plan_read/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/toolsearch/definition/references/symbols |
+| `internal/tool` | read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/task_message/task_interrupt/delegate/wait/agent_roster/agent_message/agent_broadcast/team_task/webfetch/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/plan_write/plan_read/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/toolsearch |
 | `internal/mcp` | MCP client (stdio + streamable HTTP); bridges external tools onto the registry |
 | `internal/lsp` | LSP client (JSON-RPC over stdio); extension registry; diagnostics collection |
 | `internal/question` | user-question ask service (suspend tool until QuestionReply) |

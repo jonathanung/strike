@@ -33,10 +33,16 @@ func (taskStatusTool) Description() string {
 
 - Input session_id from a prior task result (or child.completed notice), or the
   child's stable name alias when one was set at spawn.
-- Returns state (starting|working|needs_attention|completed|failed|canceled|unknown),
+- Returns state (starting|working|needs_attention|completed|failed|canceled|queued|unknown),
   elapsed time, current tool, optional recent activity, terminal_summary when done,
-  and a structured handoff object on terminal states (summary, files_changed,
+  a structured handoff object on terminal states (summary, files_changed,
   verification, findings, blockers, recommended_next_action; incomplete may be true
+  when the child did not supply structured fields), and when tracked as a delegation:
+  delegation_id, lifecycle (queued|working|blocked|review|done|failed|canceled),
+  criteria, deps, version, block_reason.
+- One-off pulse only — do not busy-poll. Prefer [child.completed] handoff JSON for
+  finished work and the peer inbox (agent_message) for mid-flight updates.
+  agent_roster lists who is live.
   when the child did not supply structured fields).
 - One-off pulse only — do not busy-poll. Prefer wait (task.done/task.blocked/…) or
   [child.completed] handoff JSON for finished work and the peer inbox (agent_message)
@@ -97,6 +103,24 @@ func (taskStatusTool) Execute(ctx context.Context, args json.RawMessage, tc *Con
 	}
 	if res.QueueLabel != "" {
 		payload["queue_label"] = res.QueueLabel
+	}
+	if res.DelegationID != "" {
+		payload["delegation_id"] = res.DelegationID
+	}
+	if res.Lifecycle != "" {
+		payload["lifecycle"] = res.Lifecycle
+	}
+	if len(res.Criteria) > 0 {
+		payload["criteria"] = res.Criteria
+	}
+	if len(res.Deps) > 0 {
+		payload["deps"] = res.Deps
+	}
+	if res.Version > 0 {
+		payload["version"] = res.Version
+	}
+	if res.BlockReason != "" {
+		payload["block_reason"] = res.BlockReason
 	}
 	out, _ := json.Marshal(payload)
 	title := "task_status " + shortID(id) + " " + res.State

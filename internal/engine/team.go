@@ -41,16 +41,22 @@ const minSessionIDPrefixLen = 8
 // session id). Claim uses exclusive owner + optional CAS version. Board is
 // cleared on Dissolve with the rest of team lifecycle GC.
 //
+// Delegation lifecycle objects (see delegation.go) track task spawns with
+// criteria, deps, subscriptions, and a validated state machine. Cleared on
+// Dissolve with the board.
+//
 // Path ownership (see tool.PathOwnership) is shared across lead + children so
 // concurrent writers detect overlap. Cleared on Dissolve.
 type Team struct {
-	mu        sync.Mutex
-	leadID    string
-	members   map[string]TeamMember     // session id → member
-	live      map[string]*mailboxTarget // session id → live engine mailbox
-	board     map[string]BoardTask      // task id → item
-	boardSeq  int                       // monotonic id allocator (t1, t2, …)
-	ownership *tool.PathOwnership
+	mu          sync.Mutex
+	leadID      string
+	members     map[string]TeamMember     // session id → member
+	live        map[string]*mailboxTarget // session id → live engine mailbox
+	board       map[string]BoardTask      // task id → item
+	boardSeq    int                       // monotonic id allocator (t1, t2, …)
+	delegations map[string]Delegation     // delegation id → item
+	delegSeq    int                       // monotonic id allocator (d1, d2, …)
+	ownership   *tool.PathOwnership
 }
 
 // TeamMember is one roster entry (lead or child).
@@ -428,10 +434,10 @@ func (t *Team) SetPersona(sessionID, persona string) {
 	t.members[id] = m
 }
 
-// Dissolve clears the roster, shared task board, and path ownership (team ends
-// with the lead session). After Dissolve, Contains is false for everyone,
-// Roster is empty, and Board is empty. The Team value should not be reused;
-// callers may replace the pointer.
+// Dissolve clears the roster, shared task board, delegations, and path
+// ownership (team ends with the lead session). After Dissolve, Contains is
+// false for everyone, Roster is empty, and Board/Delegations are empty. The
+// Team value should not be reused; callers may replace the pointer.
 func (t *Team) Dissolve() {
 	if t == nil {
 		return
@@ -441,6 +447,7 @@ func (t *Team) Dissolve() {
 	t.members = make(map[string]TeamMember)
 	t.live = make(map[string]*mailboxTarget)
 	t.clearBoardLocked()
+	t.clearDelegationsLocked()
 	if t.ownership != nil {
 		t.ownership.Clear()
 	}

@@ -296,6 +296,16 @@ func (e *Engine) systemLayers() []promptLayer {
 		})
 	}
 
+	// After plan handoff, inject the exact approved plan for the implementer.
+	if handoff := e.planHandoffPrompt(); handoff != "" {
+		layers = append(layers, promptLayer{
+			Kind:   protocol.PromptLayerPlan,
+			Source: "plan:handoff",
+			Mode:   protocol.PromptLayerAppend,
+			Text:   handoff,
+		})
+	}
+
 	if text, source := leanCodeLayer(e.opts.LeanCode, e.agent.Name); text != "" {
 		layers = append(layers, promptLayer{
 			Kind:   protocol.PromptLayerLean,

@@ -39,6 +39,14 @@ const (
 	PhaseStatusMismatch = pub.PhaseStatusMismatch
 )
 
+// Plan handoff approval sources.
+const (
+	PlanApprovalUser    = pub.PlanApprovalUser
+	PlanApprovalAgent   = pub.PlanApprovalAgent
+	PlanApprovalChecks  = pub.PlanApprovalChecks
+	PlanApprovalSkipAll = pub.PlanApprovalSkipAll
+)
+
 // Permission posture dial.
 type PermissionMode = pub.PermissionMode
 
@@ -70,6 +78,7 @@ type (
 	Correlation             = pub.Correlation
 	ChildStatus             = pub.ChildStatus
 	CompletionHandoff       = pub.CompletionHandoff
+	DelegationState         = pub.DelegationState
 	VerificationReport      = pub.VerificationReport
 	VerificationCheck       = pub.VerificationCheck
 	VerificationEnv         = pub.VerificationEnv
@@ -129,6 +138,7 @@ type (
 	ModelSelected          = pub.ModelSelected
 	AgentSelected          = pub.AgentSelected
 	PhaseChanged           = pub.PhaseChanged
+	PlanHandoff            = pub.PlanHandoff
 	PhaseGrantApproved     = pub.PhaseGrantApproved
 	PhaseGrantRule         = pub.PhaseGrantRule
 	EffortSelected         = pub.EffortSelected
@@ -141,6 +151,7 @@ type (
 	EngineError            = pub.EngineError
 	ChildStarted           = pub.ChildStarted
 	ChildCompleted         = pub.ChildCompleted
+	DelegationChanged      = pub.DelegationChanged
 	WaitStarted            = pub.WaitStarted
 	WaitResolved           = pub.WaitResolved
 	AgentMessage           = pub.AgentMessage
@@ -165,6 +176,13 @@ const (
 	ChildStatusCanceled  = pub.ChildStatusCanceled
 	ChildStatusBlocked   = pub.ChildStatusBlocked
 
+	DelegationQueued    = pub.DelegationQueued
+	DelegationWorking   = pub.DelegationWorking
+	DelegationBlocked   = pub.DelegationBlocked
+	DelegationReview    = pub.DelegationReview
+	DelegationDone      = pub.DelegationDone
+	DelegationFailed    = pub.DelegationFailed
+	DelegationCanceled  = pub.DelegationCanceled
 	WaitOutcomeMatched  = pub.WaitOutcomeMatched
 	WaitOutcomeTimeout  = pub.WaitOutcomeTimeout
 	WaitOutcomeCanceled = pub.WaitOutcomeCanceled

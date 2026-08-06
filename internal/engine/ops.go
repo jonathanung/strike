@@ -381,10 +381,13 @@ func (e *Engine) applyPermissionMode(mode protocol.PermissionMode, alignPlan boo
 		case parsed == protocol.PermissionModePlan:
 			_ = e.enterPlanPhase()
 		case prev == protocol.PermissionModePlan && parsed != protocol.PermissionModePlan:
-			// Leaving plan posture via the dial: drop plan phase hard-denies and
-			// return to build when still on the plan agent.
+			// Leaving plan posture via the dial abandons plan workflow without
+			// recording a plan handoff (cannot bypass unified approval).
+			// When handoff already completed, keep implement phase if active.
 			if phase, ok := e.currentPhase(); ok && phase.Name == "plan" {
-				e.clearPhase()
+				if !e.planHandoff.Active {
+					e.clearPhase()
+				}
 				if e.agent.Name == "plan" {
 					if _, ok := e.findAgent("build"); ok {
 						if e.turnActive() {
