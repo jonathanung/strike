@@ -352,10 +352,15 @@ func (s *Server) handleSessionRename(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
-	item, err := s.opts.Services.Sessions.Rename(r.PathValue("id"), body.Title)
+	id := r.PathValue("id")
+	item, err := s.opts.Services.Sessions.Rename(id, body.Title)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
+	}
+	// Keep ACTIVE rail identity in sync when the renamed session is live.
+	if s.opts.LiveHub != nil {
+		s.opts.LiveHub.SetTitle(id, body.Title)
 	}
 	writeJSON(w, http.StatusOK, item)
 }
@@ -776,4 +781,22 @@ func (s *Server) handleRootResume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleRootClose(w http.ResponseWriter, r *http.Request) {
+	if s.opts.LiveHub == nil {
+		http.Error(w, "multi-root unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "root id is empty"})
+		return
+	}
+	if s.opts.LiveHub.LiveFor(id) == nil {
+		writeJSON(w, http.StatusNotFound, opErrorResponse{Error: fmt.Sprintf("root %q is not active", id)})
+		return
+	}
+	s.opts.LiveHub.Remove(id)
+	writeJSON(w, http.StatusOK, opOKResponse{OK: true})
 }

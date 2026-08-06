@@ -26,6 +26,7 @@ export const roots = () => request<RootsResponse>("/v1/roots");
 export const createRoot = () => request<RootCreateResult>("/v1/roots", { method: "POST" });
 export const activateRoot = (id: string) => request<{ ok: boolean }>(`/v1/roots/${encodeURIComponent(id)}/activate`, { method: "POST" });
 export const resumeRoot = (sessionID: string) => request<RootResumeResult>(`/v1/roots/${encodeURIComponent(sessionID)}/resume`, { method: "POST" });
+export const closeRoot = (id: string) => request<{ ok: boolean }>(`/v1/roots/${encodeURIComponent(id)}`, { method: "DELETE" });
 
 export function liveConnection(rootID: string, onEvent: (event: Envelope) => void, onState: (state: string) => void) {
   let socket: WebSocket | undefined;
