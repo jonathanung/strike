@@ -197,7 +197,7 @@ func (w diagnosticsWindow) handleKey(msg tea.KeyPressMsg) (diagnosticsWindow, te
 			}
 		}
 		return w, func() tea.Msg {
-			return filesOpenMsg{path: path}
+			return filesOpenMsg{path: path, line: d.Line}
 		}
 	}
 	return w, nil

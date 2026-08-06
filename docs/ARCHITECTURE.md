@@ -119,7 +119,7 @@ state. The registry holds right-pane windows: named session panes (`context` for
 setup summary and `activity` for subagent status, recent parent tools, or an
 empty-state line), an `agents` multi-root tree, a `visualizer` for the selected node's
 status/tokens/cost/tokens-per-turn sparkline, a `files` explorer (lazy tree via
-  `host.Files.ListDir`), a `diagnostics` browser (live language-server findings
+`host.Files.ListDir`), a `diagnostics` browser (live language-server findings
 via `host.LSP`), `memory` and `issues` browsers, a `markdown` reader
 opened via `/md-read`, and an `editor` PTY window for `/vim`/`/nano`. Windows are
 organized into stack **groups** (session: context+activity; agents:

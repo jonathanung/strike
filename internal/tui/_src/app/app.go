@@ -1153,7 +1153,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case filesOpenMsg:
-		return m.openFilesExplorerPath(msg.path)
+		return m.openFilesExplorerPath(msg.path, msg.line)
 
 	case agentsOpenMsg:
 		if id := strings.TrimSpace(msg.sessionID); id != "" {

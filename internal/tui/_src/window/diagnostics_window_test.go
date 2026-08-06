@@ -32,8 +32,8 @@ func TestDiagnosticsWindowListsAndOpens(t *testing.T) {
 	}
 	msg := runAppCmd(t, cmd)
 	open, ok := msg.(filesOpenMsg)
-	if !ok || open.path != "a.go" {
-		t.Fatalf("open = %#v, want a.go", msg)
+	if !ok || open.path != "a.go" || open.line != 3 {
+		t.Fatalf("open = %#v, want a.go:3", msg)
 	}
 
 	next, _ = w.update(tea.KeyPressMsg{Code: 'j'})
