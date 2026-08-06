@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode"
+
+	"github.com/jonathanung/strike-cli/internal/sandbox"
 )
 
 // Destructive shell builtins/commands whose path operands are checked against
@@ -672,13 +674,21 @@ func assertDestructivePathInWorkspace(rootReal, cwd, raw string) error {
 	if isDangerousRemovalPath(abs) {
 		return fmt.Errorf("destructive command refused: %q is a critical system path", abs)
 	}
-	if _, _, err := resolveInWorkspace(rootReal, abs); err != nil {
-		if esc, ok := err.(*WorkspaceEscapeError); ok {
-			return fmt.Errorf("destructive command path %q escapes workspace root %q", esc.Path, esc.Root)
-		}
-		return fmt.Errorf("destructive command path %q escapes workspace root %q", abs, rootReal)
+	// Workspace membership first (symlink escapes must not be masked when the
+	// logical path sits under a shared root like /tmp from t.TempDir()).
+	if _, _, err := resolveInWorkspace(rootReal, abs); err == nil {
+		return nil
 	}
-	return nil
+	// Outside the workspace: allow shared scratch/cache and safe devices so
+	// normal shell idioms (2>/dev/null, go build caches) keep working.
+	check := abs
+	if real, err := filepath.EvalSymlinks(abs); err == nil && real != "" {
+		check = real
+	}
+	if sandbox.IsSharedWritablePath(check) {
+		return nil
+	}
+	return fmt.Errorf("destructive command path %q escapes workspace root %q", abs, rootReal)
 }
 
 // destructivePathArgs extracts path operands for known destructive commands.

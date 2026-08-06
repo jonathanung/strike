@@ -105,6 +105,17 @@ Inspect the effective policy with `/sandbox`; `/sandbox explain` prints the
 generated OS profile (bwrap flags or seatbelt SBPL) compiled from permission
 rules.
 
+**Shared writable roots (default usability):** under any non-`off` mode the
+sandbox keeps common scratch dirs writable (`/tmp`, `/var/tmp`, `$TMPDIR`,
+and on Linux `/dev/shm`). In **`workspace-write`** it also binds user/tool
+caches when present (`$XDG_CACHE_HOME` or `~/.cache`, `$GOCACHE` /
+`$GOMODCACHE`, `~/.npm`, `~/.cargo`, `~/.rustup`, …) so `go build`, package
+managers, and `2>/dev/null` redirections work without disabling isolation.
+The bash static path guard allows the same roots (and safe devices like
+`/dev/null`) outside the workspace; critical targets (`/`, `/tmp` as a whole,
+`$HOME`, …) stay blocked. The rest of the host filesystem remains read-only
+aside from the session workdir.
+
 **Permission → sandbox profile:** hard `write`/`edit` deny rules are compiled
 into OS filesystem denials inside the bash sandbox (globs become seatbelt
 regexes and, when paths exist, bwrap `--ro-bind` remounts). A deny on

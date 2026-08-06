@@ -145,6 +145,9 @@ func Explain(p Policy) string {
 	}
 	fmt.Fprintf(&b, "workspace-write: %v\n", p.WorkspaceWritable())
 	fmt.Fprintf(&b, "network: %v\n", p.Network)
+	if shared := SharedWritablePaths(p.WorkDir, p.WorkspaceWritable()); len(shared) > 0 {
+		fmt.Fprintf(&b, "shared-writable: %s\n", strings.Join(shared, ", "))
+	}
 	if len(p.DenyWriteGlobs) > 0 {
 		fmt.Fprintf(&b, "deny-write globs: %s\n", strings.Join(p.DenyWriteGlobs, ", "))
 	}

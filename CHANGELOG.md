@@ -21,6 +21,7 @@ materially affect the shipped product.
 
 ### Fixed
 
+- Fixed default OS sandbox / bash path guard blocking normal shell use: `2>/dev/null`, temp-dir writes, and tool caches (`~/.cache`, Go/npm/cargo) are shared-writable while the workspace stays isolated ([#752](https://github.com/jonathanung/strike/issues/752)).
 - Fixed bash under the default OS sandbox failing DNS/network (`gh auth status`, `git push`, etc.) because network was off unless `webfetch`/`mcp` were allow-on-`*` ([#750](https://github.com/jonathanung/strike/issues/750)).
 
 ### Added
