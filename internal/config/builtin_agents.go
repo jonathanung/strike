@@ -69,13 +69,14 @@ func loadEmbeddedAgents() []Agent {
 		}
 		provider, model := resolveAgentModel(meta["provider"], meta["model"])
 		agents = append(agents, Agent{
-			Name:        name,
-			Description: meta["description"],
-			Provider:    provider,
-			Model:       model,
-			Effort:      effort,
-			Prompt:      body,
-			Permissions: perms,
+			Name:         name,
+			Description:  meta["description"],
+			Capabilities: parseAgentCapabilities(meta),
+			Provider:     provider,
+			Model:        model,
+			Effort:       effort,
+			Prompt:       body,
+			Permissions:  perms,
 		})
 	}
 	return agents

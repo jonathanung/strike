@@ -7,7 +7,7 @@ package protocol
 //   - major: breaking JSON tags, type strings, or field meaning
 //   - minor: additive ops/events/optional fields
 //   - patch: non-wire changes
-const Version = "1.8.0"
+const Version = "1.9.0"
 
 // LegacyVersion is the schema version assumed when an envelope omits "v"
 // (sessions written before pkg/protocol published Version on the wire).

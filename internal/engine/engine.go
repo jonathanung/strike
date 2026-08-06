@@ -49,10 +49,13 @@ type SelectFunc func(name string) (provider.Provider, string, error)
 type Agent struct {
 	Name        string
 	Description string
-	Provider    string
-	Model       string
-	Effort      protocol.Effort
-	Prompt      string
+	// Capabilities are optional specialty tags for capability-aware routing
+	// (#778). The agent name is always an implicit capability.
+	Capabilities []string
+	Provider     string
+	Model        string
+	Effort       protocol.Effort
+	Prompt       string
 	// Harness selects the function used when this agent runs as a task subagent.
 	// Empty and "default" use the built-in child model/tool loop.
 	// An unknown name falls back to default with a startup error.
@@ -485,6 +488,17 @@ type Engine struct {
 	// Stream composition. Written by the turn worker; read by inspect on Run.
 	effectiveMu   sync.Mutex
 	lastEffective effectiveSnapshot
+
+	// excludedKinds / pinnedKinds are session context source controls
+	// (SetContextControls). Exclude omits layers; pin retains optional layers
+	// under fit-pressure auto-shed. Keys are PromptLayer* kind strings.
+	excludedKinds map[string]struct{}
+	pinnedKinds   map[string]struct{}
+
+	// fitWarnedTurnID/Level debounce ContextFitWarning to once per turn
+	// (allow escalate warn→critical only).
+	fitWarnedTurnID string
+	fitWarnedLevel  string
 }
 
 func New(opts Options) *Engine {

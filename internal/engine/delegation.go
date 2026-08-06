@@ -42,6 +42,8 @@ type Delegation struct {
 	State          protocol.DelegationState `json:"state"`
 	Version        int                      `json:"version"`
 	BlockReason    string                   `json:"block_reason,omitempty"`
+	// RouteReason records the capability-routing decision at create (#778).
+	RouteReason string `json:"route_reason,omitempty"`
 	// SpawnPending is true when deps are satisfied and the owner engine should
 	// start the child (or a deferred release is in flight).
 	SpawnPending bool `json:"spawn_pending,omitempty"`
@@ -219,6 +221,8 @@ type CreateDelegationSpec struct {
 	Model          string
 	Effort         string
 	Name           string
+	// RouteReason is the structured routing decision at create (#778).
+	RouteReason string
 	// SessionID when already spawning (immediate start).
 	SessionID string
 	// StartState overrides initial state when non-empty (working when session set).
@@ -321,6 +325,7 @@ func (t *Team) CreateDelegation(spec CreateDelegationSpec) (Delegation, error) {
 		Model:          strings.TrimSpace(spec.Model),
 		Effort:         strings.TrimSpace(spec.Effort),
 		Name:           name,
+		RouteReason:    strings.TrimSpace(spec.RouteReason),
 		SessionID:      strings.TrimSpace(spec.SessionID),
 		State:          state,
 		Version:        1,

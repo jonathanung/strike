@@ -154,7 +154,7 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 		EffectivePrompt{
 			Correlation: corr,
 			Layers: []PromptLayerInfo{
-				{Kind: PromptLayerShared, Source: "builtin:shared", Mode: PromptLayerAppend, Chars: 12, Preview: "You are strike"},
+				{Kind: PromptLayerShared, Source: "builtin:shared", Mode: PromptLayerAppend, Chars: 12, EstTokens: 3, Preview: "You are strike"},
 			},
 			SystemChars:    100,
 			MessageCount:   2,
@@ -167,6 +167,22 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 				Total:       KnownTokens(80),
 				Source:      UsageSourceEstimated,
 			},
+			ExcludedKinds: []string{PromptLayerMemory},
+			PinnedKinds:   []string{PromptLayerPersona},
+			ShedKinds:     []string{PromptLayerLean},
+		},
+		ContextFitWarning{
+			Correlation:     corr,
+			EstimatedTokens: 180_000,
+			ContextLimit:    200_000,
+			Level:           ContextFitWarn,
+			Message:         "projected prompt ~180k tok is ≥80% of the 200k context window",
+			Source:          UsageSourceEstimated,
+		},
+		ContextControlsSelected{
+			Correlation:   corr,
+			ExcludedKinds: []string{PromptLayerMemory},
+			PinnedKinds:   []string{PromptLayerPersona},
 		},
 		DiagnosticBundle{
 			Correlation:     corr,
@@ -779,6 +795,8 @@ func TestEventTypeCoverage(t *testing.T) {
 		"hook.matched":           HookMatched{},
 		"prompt.effective":       EffectivePrompt{},
 		"diagnostic.bundle":      DiagnosticBundle{},
+		"context.fit_warning":    ContextFitWarning{},
+		"context.controls":       ContextControlsSelected{},
 	}
 	for typ, ev := range want {
 		env, err := Wrap(ev)

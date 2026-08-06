@@ -256,6 +256,7 @@ func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.Ima
 		e.injectPendingMailbox()
 		e.maybePruneToolResults()
 		e.maybeThresholdCompact(ctx, turnID)
+		e.maybeEmitFitWarning(turnID)
 		outcome, reqCorr, err := e.streamModel(ctx, turnID)
 		if err != nil {
 			e.failTurn(ctx, err, reqCorr, finishing)
@@ -401,10 +402,10 @@ func (e *Engine) streamRetryDelay(nextAttempt int) time.Duration {
 // contract. On success, history-ready text/tool/reasoning are returned and
 // usage is emitted; nothing is appended to e.messages here.
 func (e *Engine) consumeStream(ctx context.Context, reqCorr protocol.Correlation) (streamOutcome, error) {
-	layers := e.systemLayers()
+	layers, shed := e.systemLayersWithMeta()
 	system := joinPromptLayerTexts(layers)
 	tools, _ := e.effectiveToolSchemas()
-	e.recordStreamEffective(layers, system, tools)
+	e.recordStreamEffective(layers, system, tools, shed)
 	stream, err := e.admitModelStream(ctx, reqCorr, provider.Request{
 		Model:     e.model,
 		System:    system,

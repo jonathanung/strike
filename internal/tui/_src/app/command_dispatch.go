@@ -271,14 +271,7 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 	case "/workflow":
 		return m.handleWorkflowCommand(fields[1:])
 	case "/context", "/effective-prompt":
-		m.resetComposer()
-		m.clearNotice()
-		m.pendingContextDoctor = true
-		ops := m.ops
-		return m, func() tea.Msg {
-			ops <- protocol.InspectEffectivePrompt{}
-			return nil
-		}
+		return m.handleContextCommand(fields[1:])
 	case "/cost":
 		m.resetComposer()
 		m.clearNotice()
@@ -1627,6 +1620,119 @@ func (m Model) sandboxExplainNotice() string {
 	}
 	note := "\n(note: config/base layers; active agent/phase/session layers apply at bash exec)"
 	return text + note
+}
+
+// handleContextCommand opens the context doctor or updates pin/exclude sets.
+// Bare /context and /effective-prompt inspect; subcommands mutate controls.
+func (m Model) handleContextCommand(args []string) (tea.Model, tea.Cmd) {
+	m.resetComposer()
+	m.clearNotice()
+	if len(args) == 0 {
+		m.pendingContextDoctor = true
+		ops := m.ops
+		return m, func() tea.Msg {
+			ops <- protocol.InspectEffectivePrompt{}
+			return nil
+		}
+	}
+	action := strings.ToLower(strings.TrimSpace(args[0]))
+	switch action {
+	case "clear", "reset":
+		ops := m.ops
+		return m, func() tea.Msg {
+			ops <- protocol.SetContextControls{
+				SetExclude: true,
+				SetPin:     true,
+			}
+			return nil
+		}
+	case "pin", "unpin", "exclude", "include":
+		if len(args) < 2 {
+			m.setNotice("usage: /context "+action+" <layer-kind>", true)
+			return m, nil
+		}
+		kind := normalizeContextLayerKind(args[1])
+		if kind == "" {
+			m.setNotice("unknown layer kind "+args[1]+" (try project_memory, lean_code, instruction, persona, …)", true)
+			return m, nil
+		}
+		excl := append([]string(nil), m.contextExcluded...)
+		pin := append([]string(nil), m.contextPinned...)
+		switch action {
+		case "exclude":
+			excl = stringSetAdd(excl, kind)
+		case "include":
+			excl = stringSetRemove(excl, kind)
+		case "pin":
+			pin = stringSetAdd(pin, kind)
+		case "unpin":
+			pin = stringSetRemove(pin, kind)
+		}
+		ops := m.ops
+		return m, func() tea.Msg {
+			ops <- protocol.SetContextControls{
+				ExcludeKinds: excl,
+				SetExclude:   true,
+				PinKinds:     pin,
+				SetPin:       true,
+			}
+			return nil
+		}
+	default:
+		m.setNotice("usage: /context [pin|unpin|exclude|include|clear] [kind]", true)
+		return m, nil
+	}
+}
+
+func normalizeContextLayerKind(raw string) string {
+	k := strings.ToLower(strings.TrimSpace(raw))
+	k = strings.ReplaceAll(k, "-", "_")
+	aliases := map[string]string{
+		"memory":       protocol.PromptLayerMemory,
+		"project_mem":  protocol.PromptLayerMemory,
+		"lean":         protocol.PromptLayerLean,
+		"instructions": protocol.PromptLayerInstruction,
+		"inst":         protocol.PromptLayerInstruction,
+		"env":          protocol.PromptLayerEnvironment,
+		"system":       protocol.PromptLayerShared,
+		"base":         protocol.PromptLayerShared,
+		"config":       protocol.PromptLayerConfig,
+		"agent":        protocol.PromptLayerPersona,
+	}
+	if canon, ok := aliases[k]; ok {
+		k = canon
+	}
+	switch k {
+	case protocol.PromptLayerShared, protocol.PromptLayerTools, protocol.PromptLayerProvider,
+		protocol.PromptLayerConfig, protocol.PromptLayerPersona, protocol.PromptLayerPhase,
+		protocol.PromptLayerPlan, protocol.PromptLayerLean, protocol.PromptLayerEnvironment,
+		protocol.PromptLayerInstruction, protocol.PromptLayerMemory:
+		return k
+	default:
+		return ""
+	}
+}
+
+func stringSetAdd(ss []string, v string) []string {
+	for _, s := range ss {
+		if s == v {
+			return ss
+		}
+	}
+	return append(ss, v)
+}
+
+func stringSetRemove(ss []string, v string) []string {
+	out := ss[:0]
+	for _, s := range ss {
+		if s != v {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // handlePermissionCommand implements /permission [explain|presets].

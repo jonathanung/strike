@@ -221,8 +221,9 @@ type promptLayer struct {
 	Text   string
 }
 
-// systemLayers returns the ordered composition for the next provider request.
-func (e *Engine) systemLayers() []promptLayer {
+// composeSystemLayers returns the ordered raw composition before pin/exclude
+// filters. Callers that need the model-facing set should use systemLayers.
+func (e *Engine) composeSystemLayers() []promptLayer {
 	layers := make([]promptLayer, 0, 8)
 	layers = append(layers, promptLayer{
 		Kind:   protocol.PromptLayerShared,
@@ -485,20 +486,23 @@ type effectiveSnapshot struct {
 	MessageCount   int
 	FromLastStream bool
 	Attribution    protocol.RequestTokenAttribution
+	ExcludedKinds  []string
+	PinnedKinds    []string
+	ShedKinds      []string
 }
 
-func (e *Engine) recordStreamEffective(layers []promptLayer, system string, tools []provider.ToolSchema) {
-	snap := buildEffectiveSnapshot(layers, system, tools, e.messages, true)
+func (e *Engine) recordStreamEffective(layers []promptLayer, system string, tools []provider.ToolSchema, shedKinds []string) {
+	snap := e.buildEffectiveSnapshot(layers, system, tools, e.messages, true, shedKinds)
 	e.effectiveMu.Lock()
 	e.lastEffective = snap
 	e.effectiveMu.Unlock()
 }
 
 func (e *Engine) currentEffectiveSnapshot() effectiveSnapshot {
-	layers := e.systemLayers()
+	layers, shed := e.systemLayersWithMeta()
 	system := joinPromptLayerTexts(layers)
 	tools, _ := e.effectiveToolSchemas()
-	return buildEffectiveSnapshot(layers, system, tools, e.messages, false)
+	return e.buildEffectiveSnapshot(layers, system, tools, e.messages, false, shed)
 }
 
 func (e *Engine) lastOrCurrentEffective() effectiveSnapshot {
@@ -511,16 +515,19 @@ func (e *Engine) lastOrCurrentEffective() effectiveSnapshot {
 	return e.currentEffectiveSnapshot()
 }
 
-func buildEffectiveSnapshot(layers []promptLayer, system string, tools []provider.ToolSchema, msgs []provider.Message, fromStream bool) effectiveSnapshot {
+func (e *Engine) buildEffectiveSnapshot(layers []promptLayer, system string, tools []provider.ToolSchema, msgs []provider.Message, fromStream bool, shedKinds []string) effectiveSnapshot {
 	infos := make([]protocol.PromptLayerInfo, 0, len(layers))
 	for _, layer := range layers {
 		text := strings.TrimSpace(layer.Text)
+		chars := utf8.RuneCountInString(text)
 		infos = append(infos, protocol.PromptLayerInfo{
-			Kind:    layer.Kind,
-			Source:  redactSecrets(layer.Source),
-			Mode:    layer.Mode,
-			Chars:   utf8.RuneCountInString(text),
-			Preview: layerPreview(text),
+			Kind:      layer.Kind,
+			Source:    redactSecrets(layer.Source),
+			Mode:      layer.Mode,
+			Chars:     chars,
+			EstTokens: estTokensFromChars(chars),
+			Pinned:    e.kindPinned(layer.Kind),
+			Preview:   layerPreview(text),
 		})
 	}
 	return effectiveSnapshot{
@@ -530,6 +537,9 @@ func buildEffectiveSnapshot(layers []promptLayer, system string, tools []provide
 		MessageCount:   len(msgs),
 		FromLastStream: fromStream,
 		Attribution:    estimateRequestAttribution(system, tools, msgs),
+		ExcludedKinds:  sortedKindKeys(e.excludedKinds),
+		PinnedKinds:    sortedKindKeys(e.pinnedKinds),
+		ShedKinds:      append([]string(nil), shedKinds...),
 	}
 }
 

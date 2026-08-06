@@ -134,6 +134,10 @@ func eventType(ev Event) string {
 		return "prompt.effective"
 	case DiagnosticBundle:
 		return "diagnostic.bundle"
+	case ContextFitWarning:
+		return "context.fit_warning"
+	case ContextControlsSelected:
+		return "context.controls"
 	default:
 		return ""
 	}
@@ -279,6 +283,10 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &EffectivePrompt{}
 	case "diagnostic.bundle":
 		ev = &DiagnosticBundle{}
+	case "context.fit_warning":
+		ev = &ContextFitWarning{}
+	case "context.controls":
+		ev = &ContextControlsSelected{}
 	default:
 		return nil, fmt.Errorf("protocol: unknown envelope type %q", e.Type)
 	}
@@ -403,6 +411,10 @@ func deref(ev Event) Event {
 	case *EffectivePrompt:
 		return *v
 	case *DiagnosticBundle:
+		return *v
+	case *ContextFitWarning:
+		return *v
+	case *ContextControlsSelected:
 		return *v
 	default:
 		return ev
