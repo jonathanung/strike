@@ -378,4 +378,3 @@ func diffExecutableSnapshots(old, new execSnap) []string {
 	sort.Strings(out)
 	return out
 }
-
