@@ -1067,6 +1067,279 @@ func (f *fakeIssues) Import(path string, replace bool) (int, error) {
 	return n, nil
 }
 
+// --- fakePlans: an in-memory host.Plans -----------------------------------
+
+type fakePlans struct {
+	mu     sync.Mutex
+	next   int
+	plans  map[string]host.Plan
+	err    error
+	secSeq map[string]int
+}
+
+func newFakePlans(plans ...host.Plan) *fakePlans {
+	f := &fakePlans{
+		next:   1,
+		plans:  make(map[string]host.Plan),
+		secSeq: make(map[string]int),
+	}
+	for _, p := range plans {
+		if p.ID == "" {
+			p.ID = fmt.Sprintf("p%d", f.next)
+			f.next++
+		}
+		if p.Status == "" {
+			p.Status = "draft"
+		}
+		if p.Version == 0 {
+			p.Version = 1
+		}
+		// Ensure section IDs.
+		for i := range p.Sections {
+			if p.Sections[i].ID == "" {
+				f.secSeq[p.ID]++
+				p.Sections[i].ID = fmt.Sprintf("s%d", f.secSeq[p.ID])
+			}
+		}
+		f.plans[p.ID] = cloneHostPlan(p)
+		// Keep next above numeric suffixes when possible.
+		var n int
+		if _, err := fmt.Sscanf(p.ID, "p%d", &n); err == nil && n >= f.next {
+			f.next = n + 1
+		}
+	}
+	return f
+}
+
+func cloneHostPlan(p host.Plan) host.Plan {
+	out := p
+	if p.Sections != nil {
+		out.Sections = make([]host.PlanSection, len(p.Sections))
+		copy(out.Sections, p.Sections)
+	}
+	return out
+}
+
+func (f *fakePlans) List() ([]host.PlanMeta, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := make([]host.PlanMeta, 0, len(f.plans))
+	for _, p := range f.plans {
+		out = append(out, host.PlanMeta{
+			ID:           p.ID,
+			OwnerRoot:    p.OwnerRoot,
+			Title:        p.Title,
+			Status:       p.Status,
+			Version:      p.Version,
+			SectionCount: len(p.Sections),
+			CreatedAt:    p.CreatedAt,
+			UpdatedAt:    p.UpdatedAt,
+		})
+	}
+	// Newest UpdatedAt first; stable by id.
+	for i := 0; i < len(out); i++ {
+		for j := i + 1; j < len(out); j++ {
+			if out[j].UpdatedAt.After(out[i].UpdatedAt) ||
+				(out[j].UpdatedAt.Equal(out[i].UpdatedAt) && out[j].ID > out[i].ID) {
+				out[i], out[j] = out[j], out[i]
+			}
+		}
+	}
+	return out, nil
+}
+
+func (f *fakePlans) Get(id string) (host.Plan, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return host.Plan{}, false, f.err
+	}
+	p, ok := f.plans[id]
+	if !ok {
+		return host.Plan{}, false, nil
+	}
+	return cloneHostPlan(p), true, nil
+}
+
+func (f *fakePlans) Create(ownerRoot, title string, sections []host.PlanSection) (host.Plan, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return host.Plan{}, f.err
+	}
+	if ownerRoot == "" {
+		return host.Plan{}, fmt.Errorf("plan: owner root session id is required")
+	}
+	if strings.TrimSpace(title) == "" {
+		return host.Plan{}, fmt.Errorf("plan: title is required")
+	}
+	id := fmt.Sprintf("p%d", f.next)
+	f.next++
+	now := time.Now()
+	secs := make([]host.PlanSection, len(sections))
+	for i, s := range sections {
+		f.secSeq[id]++
+		secs[i] = host.PlanSection{
+			ID:    fmt.Sprintf("s%d", f.secSeq[id]),
+			Title: s.Title,
+			Body:  s.Body,
+		}
+	}
+	p := host.Plan{
+		ID:        id,
+		OwnerRoot: ownerRoot,
+		Title:     title,
+		Status:    "draft",
+		Sections:  secs,
+		Version:   1,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	f.plans[id] = cloneHostPlan(p)
+	return cloneHostPlan(p), nil
+}
+
+func (f *fakePlans) checkMutate(id, ownerRoot string, expectedVersion int) (host.Plan, error) {
+	p, ok := f.plans[id]
+	if !ok {
+		return host.Plan{}, fmt.Errorf("plan: not found")
+	}
+	if p.OwnerRoot != ownerRoot {
+		return host.Plan{}, fmt.Errorf("plan: only the owning root may mutate this plan")
+	}
+	if p.Version != expectedVersion {
+		return host.Plan{}, fmt.Errorf("plan: version conflict: have %d, expected %d", p.Version, expectedVersion)
+	}
+	return p, nil
+}
+
+func (f *fakePlans) UpdateTitle(id, ownerRoot, title string, expectedVersion int) (host.Plan, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return host.Plan{}, f.err
+	}
+	p, err := f.checkMutate(id, ownerRoot, expectedVersion)
+	if err != nil {
+		return host.Plan{}, err
+	}
+	if p.Status == "closed" {
+		return host.Plan{}, fmt.Errorf("plan: plan is closed")
+	}
+	if strings.TrimSpace(title) == "" {
+		return host.Plan{}, fmt.Errorf("plan: title is required")
+	}
+	p.Title = title
+	p.Version++
+	p.UpdatedAt = time.Now()
+	f.plans[id] = cloneHostPlan(p)
+	return cloneHostPlan(p), nil
+}
+
+func (f *fakePlans) UpdateSection(id, ownerRoot, sectionID string, title, body *string, expectedVersion int) (host.Plan, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return host.Plan{}, f.err
+	}
+	p, err := f.checkMutate(id, ownerRoot, expectedVersion)
+	if err != nil {
+		return host.Plan{}, err
+	}
+	if p.Status == "closed" {
+		return host.Plan{}, fmt.Errorf("plan: plan is closed")
+	}
+	found := false
+	for i := range p.Sections {
+		if p.Sections[i].ID != sectionID {
+			continue
+		}
+		found = true
+		if title != nil {
+			p.Sections[i].Title = *title
+		}
+		if body != nil {
+			p.Sections[i].Body = *body
+		}
+		break
+	}
+	if !found {
+		return host.Plan{}, fmt.Errorf("plan: not found")
+	}
+	p.Version++
+	p.UpdatedAt = time.Now()
+	f.plans[id] = cloneHostPlan(p)
+	return cloneHostPlan(p), nil
+}
+
+func (f *fakePlans) AddSection(id, ownerRoot, title, body string, expectedVersion int) (host.Plan, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return host.Plan{}, f.err
+	}
+	p, err := f.checkMutate(id, ownerRoot, expectedVersion)
+	if err != nil {
+		return host.Plan{}, err
+	}
+	if p.Status == "closed" {
+		return host.Plan{}, fmt.Errorf("plan: plan is closed")
+	}
+	f.secSeq[id]++
+	p.Sections = append(p.Sections, host.PlanSection{
+		ID:    fmt.Sprintf("s%d", f.secSeq[id]),
+		Title: title,
+		Body:  body,
+	})
+	p.Version++
+	p.UpdatedAt = time.Now()
+	f.plans[id] = cloneHostPlan(p)
+	return cloneHostPlan(p), nil
+}
+
+func (f *fakePlans) SetStatus(id, ownerRoot, status string, expectedVersion int) (host.Plan, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return host.Plan{}, f.err
+	}
+	p, err := f.checkMutate(id, ownerRoot, expectedVersion)
+	if err != nil {
+		return host.Plan{}, err
+	}
+	if p.Status == "closed" && status != "closed" {
+		return host.Plan{}, fmt.Errorf("plan: invalid status")
+	}
+	p.Status = status
+	p.Version++
+	p.UpdatedAt = time.Now()
+	f.plans[id] = cloneHostPlan(p)
+	return cloneHostPlan(p), nil
+}
+
+func (f *fakePlans) Reopen(id, ownerRoot string, expectedVersion int) (host.Plan, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return host.Plan{}, f.err
+	}
+	p, err := f.checkMutate(id, ownerRoot, expectedVersion)
+	if err != nil {
+		return host.Plan{}, err
+	}
+	if p.Status != "closed" {
+		return host.Plan{}, fmt.Errorf("plan: invalid status")
+	}
+	p.Status = "draft"
+	p.Version++
+	p.UpdatedAt = time.Now()
+	f.plans[id] = cloneHostPlan(p)
+	return cloneHostPlan(p), nil
+}
+
 // --- fakeSessions: scriptable host.Sessions ------------------------------
 
 // fakeSessions is an in-memory host.Sessions for transcript navigation tests.

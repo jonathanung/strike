@@ -29,6 +29,7 @@ func newWindowRegistry() windowRegistry {
 		newDiagnosticsWindow(),
 		newMemoryWindow(),
 		newIssuesWindow(),
+		newPlansWindow(),
 		newMarkdownWindow(),
 		newTerminalWindow(),
 	}
@@ -88,7 +89,7 @@ func defaultWindowGroups(windows []window) []windowGroup {
 		{id: "session", members: optional("context", "activity", "telemetry")},
 		{id: "agents", members: required("agents", "visualizer")},
 		{id: "files", members: required("files", "diagnostics")},
-		{id: "project", members: required("memory", "issues")},
+		{id: "project", members: required("memory", "issues", "plans")},
 		{id: "markdown", members: required("markdown")},
 		{id: "editor", members: required("editor")},
 	}
