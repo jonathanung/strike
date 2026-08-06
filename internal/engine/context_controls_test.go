@@ -185,6 +185,56 @@ loop:
 	}
 }
 
+func TestInspectAfterExcludeUsesCurrentComposition(t *testing.T) {
+	store := openTestMemory(t)
+	if err := store.Put("pref.one", "MEMORY_AFTER_STREAM", []string{memory.TagPreference}); err != nil {
+		t.Fatal(err)
+	}
+	prov := newScriptedProvider(streamStep{
+		events: []provider.StreamEvent{
+			{Type: provider.EventTextDelta, Text: "ok"},
+			{Type: provider.EventDone, StopReason: "end_turn"},
+		},
+	})
+	eng := engine.New(engine.Options{
+		SessionID:       "s-inspect-live",
+		WorkDir:         t.TempDir(),
+		Memory:          store,
+		Agents:          []engine.Agent{{Name: "build", Prompt: "PERSONA"}},
+		InitialProvider: "scripted",
+		InitialModel:    "m",
+		Registry:        tool.NewRegistry(),
+		Select: func(string) (provider.Provider, string, error) {
+			return prov, "m", nil
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "hi"}
+	_ = waitStreamRequest(t, eng, prov)
+	waitTurnCompleted(t, eng)
+
+	eng.Ops() <- protocol.SetContextControls{
+		ExcludeKinds: []string{protocol.PromptLayerMemory},
+		SetExclude:   true,
+	}
+	waitContextControls(t, eng)
+
+	eng.Ops() <- protocol.InspectEffectivePrompt{}
+	ev := waitEffectivePrompt(t, eng)
+	if ev.FromLastStream {
+		t.Fatal("inspect after control change should use current composition, not stale last stream")
+	}
+	if layerKindsContain(ev.Layers, protocol.PromptLayerMemory) {
+		t.Fatalf("memory still in layers after exclude: %+v", kindsOf(ev.Layers))
+	}
+	if !stringSliceContains(ev.ExcludedKinds, protocol.PromptLayerMemory) {
+		t.Fatalf("ExcludedKinds = %v", ev.ExcludedKinds)
+	}
+}
+
 func TestChildSessionInspectsOwnEffectiveContext(t *testing.T) {
 	// Child engines compose their own layers (depth>0 adds handoff guidance).
 	// Inspect on the child must reflect child composition, not the parent.

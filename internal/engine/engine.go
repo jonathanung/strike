@@ -452,6 +452,11 @@ type Engine struct {
 	// under fit-pressure auto-shed. Keys are PromptLayer* kind strings.
 	excludedKinds map[string]struct{}
 	pinnedKinds   map[string]struct{}
+
+	// fitWarnedTurnID/Level debounce ContextFitWarning to once per turn
+	// (allow escalate warn→critical only).
+	fitWarnedTurnID string
+	fitWarnedLevel  string
 }
 
 func New(opts Options) *Engine {

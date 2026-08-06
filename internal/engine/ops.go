@@ -120,9 +120,16 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 }
 
 // handleInspectEffectivePrompt emits the last Stream layer map when available,
-// otherwise the current composition for the next request.
+// otherwise the current composition for the next request. When session pin/
+// exclude controls changed since the last stream, prefer the current
+// composition so inspect matches the next turn.
 func (e *Engine) handleInspectEffectivePrompt() {
 	snap := e.lastOrCurrentEffective()
+	liveExcl := sortedKindKeys(e.excludedKinds)
+	livePin := sortedKindKeys(e.pinnedKinds)
+	if !stringSlicesEqual(liveExcl, snap.ExcludedKinds) || !stringSlicesEqual(livePin, snap.PinnedKinds) {
+		snap = e.currentEffectiveSnapshot()
+	}
 	e.emit(protocol.EffectivePrompt{
 		Correlation:    e.sessionCorr(),
 		Layers:         snap.Layers,
@@ -134,6 +141,18 @@ func (e *Engine) handleInspectEffectivePrompt() {
 		PinnedKinds:    snap.PinnedKinds,
 		ShedKinds:      snap.ShedKinds,
 	})
+}
+
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // handleFilesChanged invalidates read snapshots for the reported paths and

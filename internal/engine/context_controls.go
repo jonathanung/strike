@@ -164,10 +164,15 @@ func (e *Engine) shouldShedOptional(layers []promptLayer) bool {
 
 // maybeEmitFitWarning emits a timeline ContextFitWarning when projected
 // occupancy crosses soft budgets. Uses pre-shed composition so auto-shed
-// does not hide the pressure signal. Called after prune/compact, before Stream.
+// does not hide the pressure signal. At most one warning per turn (highest
+// level seen). Called after prune/compact, before Stream.
 func (e *Engine) maybeEmitFitWarning(turnID string) {
 	window := e.contextWindow()
 	if window <= 0 {
+		return
+	}
+	// Already warned at critical this turn — nothing higher to emit.
+	if e.fitWarnedTurnID == turnID && e.fitWarnedLevel == protocol.ContextFitCritical {
 		return
 	}
 	// Pre-shed (user excludes only) — warn on true pressure before optional drop.
@@ -194,6 +199,16 @@ func (e *Engine) maybeEmitFitWarning(turnID string) {
 	default:
 		return
 	}
+	// Skip duplicate same-or-lower level within the turn.
+	if e.fitWarnedTurnID == turnID {
+		if e.fitWarnedLevel == level || e.fitWarnedLevel == protocol.ContextFitCritical {
+			return
+		}
+		// Only escalate warn → critical.
+		if e.fitWarnedLevel == protocol.ContextFitWarn && level != protocol.ContextFitCritical {
+			return
+		}
+	}
 	corr := e.baseCorr()
 	corr.TurnID = turnID
 	pct := int(fitWarnRatio * 100)
@@ -206,6 +221,8 @@ func (e *Engine) maybeEmitFitWarning(turnID string) {
 	if _, shed := e.filterContextLayers(raw, true); len(shed) > 0 && e.shouldShedOptional(preShed) {
 		msg += "; shedding " + strings.Join(shed, ", ")
 	}
+	e.fitWarnedTurnID = turnID
+	e.fitWarnedLevel = level
 	e.emit(protocol.ContextFitWarning{
 		Correlation:     corr,
 		EstimatedTokens: used,
