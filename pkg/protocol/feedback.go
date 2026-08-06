@@ -38,9 +38,35 @@ func ToolFeedbackBlocked(reason string) string {
 	return "Tool call blocked: " + reason
 }
 
-// ToolFeedbackCanceled is used when a started tool call is interrupted.
+// ToolFeedbackCanceled is used when a started tool call is interrupted
+// with no captured partial output.
 func ToolFeedbackCanceled() string {
 	return "Tool call canceled because the turn was interrupted."
+}
+
+// ToolFeedbackCanceledPartial preserves captured stdout/stderr when a tool
+// is interrupted mid-run. partial is the tool's incomplete output; empty
+// falls back to ToolFeedbackCanceled.
+func ToolFeedbackCanceledPartial(partial string) string {
+	partial = strings.TrimRight(partial, "\n")
+	if strings.TrimSpace(partial) == "" || partial == "(no output)" {
+		return ToolFeedbackCanceled()
+	}
+	const marker = "(incomplete: tool call canceled because the turn was interrupted.)"
+	if strings.Contains(partial, marker) || strings.Contains(partial, ToolFeedbackCanceled()) {
+		return partial
+	}
+	return partial + "\n" + marker
+}
+
+// ToolFeedbackTimeout is used when a tool or turn hits its deadline.
+// detail is optional (e.g. "after 2m0s").
+func ToolFeedbackTimeout(detail string) string {
+	detail = strings.TrimSpace(detail)
+	if detail == "" {
+		return "Tool call timed out."
+	}
+	return "Tool call timed out " + detail + "."
 }
 
 // ToolFeedbackUnstarted is used when a tool call never began execution

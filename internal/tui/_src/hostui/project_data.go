@@ -20,9 +20,7 @@ func isProjectDataTool(name string) bool {
 	switch name {
 	case "memory_write", "memory_read", "issue_write", "issue_read",
 		// Plan tools (#721): refresh the plans pane when agents mutate artifacts.
-		"plan_write", "plan_read", "plan_create", "plan_list",
-		"plan_update", "plan_update_section", "plan_update_title",
-		"plan_set_status", "plan_reopen":
+		"plan_write", "plan_read":
 		return true
 	default:
 		return false

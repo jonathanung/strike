@@ -345,7 +345,7 @@ func TestPlansWindowRefreshAfterToolWrite(t *testing.T) {
 	if _, err := store.Create("root-a", "After tool", nil); err != nil {
 		t.Fatal(err)
 	}
-	m.applyEvent(protocol.ToolCallBegin{CallID: "c1", Name: "plan_create", Args: []byte(`{}`)})
+	m.applyEvent(protocol.ToolCallBegin{CallID: "c1", Name: "plan_write", Args: []byte(`{}`)})
 	m.applyEvent(protocol.ToolCallEnd{CallID: "c1", Output: "ok"})
 	pw := plansWin(t, m)
 	if len(pw.items) != 2 {

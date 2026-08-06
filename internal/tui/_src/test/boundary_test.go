@@ -18,7 +18,8 @@ const modulePath = "github.com/jonathanung/strike-cli"
 //
 //   - internal/tui/** may import no internal/* package other than protocol,
 //     host, and tui/... (so the frontend never touches auth/config/models/
-//     history directly and can be developed against fakes).
+//     history directly and can be developed against fakes). String redaction
+//     uses pkg/redact (not under internal/).
 //   - internal/host (the contract package, not host/local) imports the
 //     standard library only.
 //   - pkg/protocol imports the standard library only.
