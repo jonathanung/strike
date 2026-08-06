@@ -83,9 +83,9 @@ Strike config uses a flat `hooks` array (global then project concatenate).
     },
     {
       "event": "post_tool_use",
-      "matcher": "edit",
-      "command": "gofmt -w \"$STRIKE_TOOL_FILE\" 2>/dev/null || true",
-      "timeoutMs": 15000
+      "matcher": "{edit,write}",
+      "timeoutMs": 15000,
+      "command": "payload=$(cat); echo \"$payload\" | jq -e '.is_error == true' >/dev/null 2>&1 && exit 0; f=$(echo \"$payload\" | jq -r '.tool_input.filePath // empty'); case \"$f\" in *.go) gofmt -w \"$f\" 2>/dev/null || true ;; esac; exit 0"
     }
   ]
 }
@@ -102,10 +102,11 @@ Strike config uses a flat `hooks` array (global then project concatenate).
 ### Mapping notes (not auto-translated)
 
 - Peer **PascalCase** event names → strike **snake_case** (`PreToolUse` → `pre_tool_use`).
-- Peer **regex matchers** on tool name → strike **doublestar** (`^bash$` → `bash`, `Edit|Write` → separate entries or `*{edit,write}*` only if that glob fits — prefer explicit rows).
-- Crush/CC **env-var rich** payloads differ; strike shell hooks receive JSON on stdin (see engine/tool hook runner). Do not assume `CLAUDE_*` / `CRUSH_*` env names.
+- Peer **regex matchers** on tool name → strike **doublestar** (`^bash$` → `bash`, `Edit|Write` → `{edit,write}` or separate rows).
+- Crush/CC **env-var rich** payloads differ; strike shell hooks receive JSON on stdin (`tool_input.filePath` for `edit`/`write` — there is no `$STRIKE_TOOL_FILE` env). Do not assume `CLAUDE_*` / `CRUSH_*` env names.
 - Peer hook **trees** under `.claude/hooks` are not executed as Node hosts — re-express as strike `hooks` JSON or a small shell script.
 - Invalid hook rows are **dropped at load** (startup stays up).
+- **Formatters:** OpenCode `formatter` map → strike **hooks recipe** (no dedicated config key). Canonical post-edit `gofmt`/`prettier`/etc. patterns: [config.md](config.md#post-edit-formatters-recipe).
 
 ## Settings inventory
 
@@ -150,7 +151,7 @@ does not skip asks. `yolo` + `sandbox: off` requires `--i-know`.
 | Deferred tool schemas | OC tools gating-ish | `deferTools` + `toolsearch` | shipped (+ `/settings`) |
 | Instructions globs | OC `instructions` | AGENTS.md + discovery roots | shipped (different model) |
 | Autoupdate | OC `autoupdate` | `autoupdate` (`off`\|`notify`\|`auto`) + `strike upgrade` | shipped (+ `/settings`) |
-| Formatters | OC `formatter` | gap (use hooks / editor) | gap |
+| Formatters | OC `formatter` | `hooks[]` post-edit recipe ([config.md](config.md#post-edit-formatters-recipe)); editor/`$EDITOR` | wont (hooks recipe) |
 | LSP servers | OC `lsp` | shipped (`internal/lsp`, `/lsp`, diagnostics pane) | gap / out of this epic |
 | Network allowlist | OC network / CC | gap — tracked #527 | gap / coordinate |
 | Managed / MDM settings | CC/OC enterprise | shipped (`managed-config` + deny ceiling; #764) | shipped |
