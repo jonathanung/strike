@@ -668,4 +668,27 @@ describe("App", () => {
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/v1/sessions/live/timeline"), expect.anything()));
   });
 
+  it("shows diagnostics inspector tab when lsp capability is set", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) {
+        return response({
+          version: "test", authRequired: false, attachOnly: false,
+          capabilities: { live: true, files: true, lsp: true, roots: false },
+          protocolOps: ["user.input"], status: { sessionId: "live", provider: "echo", busy: false },
+          agents: [{ name: "build" }], skills: [],
+        });
+      }
+      if (url.includes("/v1/lsp")) return response({ servers: [] });
+      if (url.includes("/v1/diagnostics")) return response({ findings: [] });
+      if (url.includes("sessions")) return response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" });
+      return response({ ok: true });
+    }));
+    render(<App />);
+    await screen.findByText("Current");
+    expect(screen.getByRole("tab", { name: "diagnostics" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "diagnostics" }));
+    expect(await screen.findByRole("heading", { name: "Diagnostics" })).toBeInTheDocument();
+  });
+
 });
