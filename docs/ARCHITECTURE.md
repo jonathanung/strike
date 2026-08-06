@@ -195,10 +195,14 @@ When the right pane is large enough, multi-member groups render as a paired
 split (vertical in a side column, horizontal when the body split is a bottom
 bar); otherwise only the focused member is shown. Focus cycle walks members
 within the active group, then the next group. The registry exposes the active
-window index and has no close state or plugin mechanism. File bytes and
-directory listings reach the markdown and files windows through `host.Files`,
-not direct disk I/O from the TUI. Window input and resize updates stay inside
-`internal/tui`: no protocol Op or Event was added for this pane infrastructure.
+window index and has no close state. **Plugin user panes** are a separate,
+frontend-neutral ABI ([plugin-panes.md](plugin-panes.md)): declarative view
+trees and optional supervised JSONL processes — they must not expose this
+private `window` interface or load in-process Go plugins (host work: #731 /
+#732). File bytes and directory listings reach the markdown and files windows
+through `host.Files`, not direct disk I/O from the TUI. Built-in window input
+and resize updates stay inside `internal/tui`: no protocol Op or Event was
+added for built-in pane infrastructure.
 Composer input treats Enter as send and `ctrl+j` / Shift+Enter / Alt+Enter
 as newline (Shift+Enter CSI normalizes to Alt+Enter; enhanced ctrl+j to
 Alt+j via a stdin wrapper). Bare LF (`KeyCtrlJ`) is also newline. Pane focus is `ctrl+h`/`ctrl+l`
