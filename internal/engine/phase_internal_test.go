@@ -103,6 +103,72 @@ func TestSupervisedFailsClosedWithoutQuestionService(t *testing.T) {
 	}
 }
 
+func TestCheckGateCanceledContext(t *testing.T) {
+	e := New(Options{
+		SessionID: "check-cancel",
+		WorkDir:   t.TempDir(),
+		Rules: []permission.Ruleset{
+			permission.Defaults(),
+			{{Permission: "phase_check", Pattern: "*", Action: permission.Allow}},
+		},
+	})
+	e.autonomy = protocol.AutonomyChecks
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := e.runCheckGate(ctx, config.Phase{
+		Name: "a",
+		Exit: config.ExitGate{Command: "true"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "canceled") {
+		t.Fatalf("error = %v, want canceled", err)
+	}
+}
+
+func TestCheckGateTimeout(t *testing.T) {
+	e := New(Options{
+		SessionID: "check-timeout",
+		WorkDir:   t.TempDir(),
+		Rules: []permission.Ruleset{
+			permission.Defaults(),
+			{{Permission: "phase_check", Pattern: "*", Action: permission.Allow}},
+		},
+	})
+	e.autonomy = protocol.AutonomyChecks
+	// Short parent deadline forces RunProcess timeout/cancel path without
+	// waiting the full phaseCheckTimeout.
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	err := e.runCheckGate(ctx, config.Phase{
+		Name: "slow",
+		Exit: config.ExitGate{Command: "sleep 5"},
+	})
+	if err == nil {
+		t.Fatal("expected timeout or cancel error")
+	}
+	msg := strings.ToLower(err.Error())
+	if !strings.Contains(msg, "timed out") && !strings.Contains(msg, "canceled") {
+		t.Fatalf("error = %q, want timed out or canceled", err.Error())
+	}
+}
+
+func TestCheckGateTrustDenied(t *testing.T) {
+	e := New(Options{
+		SessionID: "check-deny",
+		WorkDir:   t.TempDir(),
+		Rules: []permission.Ruleset{
+			{{Permission: "phase_check", Pattern: "*", Action: permission.Deny}},
+		},
+	})
+	e.autonomy = protocol.AutonomyChecks
+	err := e.runCheckGate(context.Background(), config.Phase{
+		Name: "a",
+		Exit: config.ExitGate{Command: "touch pwned"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "trust denied") {
+		t.Fatalf("error = %v, want trust denied", err)
+	}
+}
+
 func TestSetAutonomyReemitsPhaseGate(t *testing.T) {
 	e := New(Options{
 		SessionID: "auto-reemit",
