@@ -17,12 +17,23 @@ export type TranscriptItem = {
   title?: string; text: string; requestId?: string; data?: Record<string, unknown>;
 };
 export type ImageAttachment = { name: string; mime: string; data: string };
+export type { TurnFileChange, UndoPreview } from "./undoPreview";
+
 export type WorkspaceState = {
   items: TranscriptItem[]; seen: Set<string>; status: Status;
   permission?: Record<string, unknown>; question?: Record<string, unknown>;
   children: Record<string, { agent?: string; status: string; summary?: string }>;
   changedFiles: string[];
+  /** Stack of last-turn harness previews; top is current /rewind target (TUI undoStack). */
+  undoStack: import("./undoPreview").UndoPreview[];
 };
+export type ActiveRoot = {
+  id: string; title?: string; agent?: string; busy: boolean;
+  activeAt?: number; createdAt?: number; hasRecentEvent?: boolean;
+};
+export type RootsResponse = { roots: ActiveRoot[]; activeId?: string };
+export type RootCreateResult = { id: string; sessionId: string };
+export type RootResumeResult = { id: string; sessionId: string; resumedId: string; wasActive: boolean };
 /** Per-workspace composer + runtime mirrors kept while switching roots. */
 export type WorkspaceComposer = {
   draft: string;
@@ -36,10 +47,3 @@ export type ClientState = {
   selectedID: string;
   byID: Record<string, WorkspaceSlice>;
 };
-export type ActiveRoot = {
-  id: string; title?: string; agent?: string; busy: boolean;
-  activeAt?: number; createdAt?: number; hasRecentEvent?: boolean;
-};
-export type RootsResponse = { roots: ActiveRoot[]; activeId?: string };
-export type RootCreateResult = { id: string; sessionId: string };
-export type RootResumeResult = { id: string; sessionId: string; resumedId: string; wasActive: boolean };

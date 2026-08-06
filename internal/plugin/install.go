@@ -10,7 +10,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/version"
 )
 
-// InstallOptions controls local or git plugin installation.
+// InstallOptions controls local, git, or catalog plugin installation.
 type InstallOptions struct {
 	// Scope is global or project (required).
 	Scope Scope
@@ -33,8 +33,19 @@ type InstallOptions struct {
 	// GitSubdir is an optional subdirectory inside the repo containing plugin.json.
 	GitSubdir string
 
+	// CatalogRegistry is the catalog base URL or index URL (catalog install).
+	CatalogRegistry string
+	// CatalogPackage is the package id/slug in the catalog.
+	CatalogPackage string
+	// CatalogVersion pins an immutable published version; empty selects latest.
+	CatalogVersion string
+	// HTTPClient optional for tests (catalog download).
+	HTTPClient httpDoer
+
 	// Force replaces an existing install of the same id.
 	Force bool
+	// PreserveEnabled keeps prior lockfile enablement when Force-replacing (updates).
+	PreserveEnabled bool
 }
 
 // InstallResult is the outcome of a successful install.
@@ -48,8 +59,9 @@ type InstallResult struct {
 	Enabled bool
 }
 
-// Install validates and atomically installs a plugin from a local path or git source.
-// Failed validation leaves no partially enabled plugin (staging cleaned; lockfile unchanged).
+// Install validates and atomically installs a plugin from a local path, git, or catalog.
+// Failed validation/download/verification leaves no partially enabled plugin and
+// preserves any prior working version (staging cleaned; lockfile unchanged on failure).
 func Install(ctx context.Context, opts InstallOptions) (InstallResult, error) {
 	if opts.Scope == "" {
 		opts.Scope = ScopeGlobal
@@ -89,6 +101,7 @@ func Install(ctx context.Context, opts InstallOptions) (InstallResult, error) {
 	}()
 
 	var source SourceIdentity
+	var catalogContentDigest string // optional expected tree digest from catalog
 	switch {
 	case strings.TrimSpace(opts.LocalPath) != "":
 		srcPath, err := filepath.Abs(opts.LocalPath)
@@ -123,8 +136,15 @@ func Install(ctx context.Context, opts InstallOptions) (InstallResult, error) {
 			Commit: commit,
 			Subdir: strings.TrimSpace(opts.GitSubdir),
 		}
+	case strings.TrimSpace(opts.CatalogRegistry) != "" || strings.TrimSpace(opts.CatalogPackage) != "":
+		src, contentDig, err := catalogMaterialize(ctx, staging, opts)
+		if err != nil {
+			return InstallResult{}, err
+		}
+		source = src
+		catalogContentDigest = contentDig
 	default:
-		return InstallResult{}, fmt.Errorf("install requires a local path or git URL")
+		return InstallResult{}, fmt.Errorf("install requires a local path, git URL, or catalog package")
 	}
 
 	if err := source.Validate(); err != nil {
@@ -136,6 +156,14 @@ func Install(ctx context.Context, opts InstallOptions) (InstallResult, error) {
 	if err != nil {
 		return InstallResult{}, fmt.Errorf("validate manifest: %w", err)
 	}
+	// Catalog package id must match manifest id (reproducible identity).
+	if source.Type == SourceCatalog && source.Package != "" && m.ID != source.Package {
+		return InstallResult{}, fmt.Errorf("catalog package %q does not match manifest id %q", source.Package, m.ID)
+	}
+	if source.Type == SourceCatalog && source.Version != "" && m.Version != source.Version {
+		return InstallResult{}, fmt.Errorf("catalog version %q does not match manifest version %q", source.Version, m.Version)
+	}
+
 	p, diags := loadOne(staging, opts.Scope, strikeVer)
 	if p == nil {
 		return InstallResult{}, fmt.Errorf("validation failed: %s", formatDiagSummary(diags))
@@ -151,6 +179,9 @@ func Install(ctx context.Context, opts InstallOptions) (InstallResult, error) {
 	if m.Digest != "" && strings.TrimSpace(m.Digest) != digest {
 		return InstallResult{}, fmt.Errorf("content digest mismatch: manifest %s computed %s", m.Digest, digest)
 	}
+	if catalogContentDigest != "" && !digestsEqual(catalogContentDigest, digest) {
+		return InstallResult{}, fmt.Errorf("content digest mismatch: catalog %s computed %s", catalogContentDigest, digest)
+	}
 
 	dest := roots.InstallDir(p.ID)
 	if err := roots.ConfinePath(dest); err != nil {
@@ -165,7 +196,7 @@ func Install(ctx context.Context, opts InstallOptions) (InstallResult, error) {
 	var backup string // hidden under plugins root; restored if lock write fails after swap
 	err = WithLockfileLock(roots.LockPath, func(lf Lockfile) (Lockfile, bool, error) {
 		_, onDisk := os.Stat(dest)
-		_, inLock := lf.Plugins[p.ID]
+		prev, inLock := lf.Plugins[p.ID]
 		if !opts.Force && (onDisk == nil || inLock) {
 			return lf, true, fmt.Errorf("plugin %q already installed in %s scope (use --force to replace)", p.ID, opts.Scope)
 		}
@@ -190,6 +221,9 @@ func Install(ctx context.Context, opts InstallOptions) (InstallResult, error) {
 		stagingOK = true
 
 		enabled := true
+		if opts.PreserveEnabled && inLock {
+			enabled = EntryEnabled(prev)
+		}
 		entry := LockfileEntry{
 			Enabled:     boolPtr(enabled),
 			Version:     p.Version,
@@ -197,6 +231,16 @@ func Install(ctx context.Context, opts InstallOptions) (InstallResult, error) {
 			Source:      &source,
 			InstalledAt: nowRFC3339(),
 		}
+		// Invalidate prior trust on replace when digest/source/executable change.
+		if inLock && prev.Trust != nil {
+			if !digestsEqual(prev.Digest, digest) || !sourceIdentityEqual(prev.Source, &source) {
+				entry.Trust = nil // cleared
+			} else {
+				// Same digest+source: preserve trust binding.
+				entry.Trust = prev.Trust
+			}
+		}
+		// Fresh install: never copy trust from catalog metadata.
 		lf = setLockEntry(lf, p.ID, entry)
 		result = InstallResult{
 			ID:      p.ID,
@@ -232,6 +276,56 @@ func Install(ctx context.Context, opts InstallOptions) (InstallResult, error) {
 	return result, nil
 }
 
+// catalogMaterialize fetches catalog metadata, downloads the artifact, verifies
+// the artifact digest, and extracts into destDir. Returns source identity and
+// optional expected content digest from catalog metadata.
+func catalogMaterialize(ctx context.Context, destDir string, opts InstallOptions) (SourceIdentity, string, error) {
+	reg := strings.TrimSpace(opts.CatalogRegistry)
+	pkg := strings.TrimSpace(opts.CatalogPackage)
+	if reg == "" {
+		return SourceIdentity{}, "", fmt.Errorf("catalog install requires --registry")
+	}
+	if pkg == "" {
+		return SourceIdentity{}, "", fmt.Errorf("catalog install requires a package id")
+	}
+	cat, _, err := FetchCatalog(ctx, opts.HTTPClient, reg)
+	if err != nil {
+		return SourceIdentity{}, "", err
+	}
+	_, ver, err := cat.FindVersion(pkg, opts.CatalogVersion)
+	if err != nil {
+		return SourceIdentity{}, "", err
+	}
+	// Bound download by catalog size hint when present (never above global cap).
+	maxBytes := int64(maxArtifactBytes)
+	if ver.Size > 0 && ver.Size <= maxBytes {
+		maxBytes = ver.Size
+	}
+	data, err := downloadBytes(ctx, opts.HTTPClient, ver.URL, maxBytes)
+	if err != nil {
+		return SourceIdentity{}, "", fmt.Errorf("download artifact: %w", err)
+	}
+	got := artifactDigest(data)
+	if !digestsEqual(got, ver.Digest) {
+		return SourceIdentity{}, "", fmt.Errorf("artifact digest mismatch: got %s want %s", got, ver.Digest)
+	}
+	// Signature field is reserved; presence must not grant trust or skip digest checks.
+	_ = ver.Signature
+
+	if err := extractArchive(data, destDir); err != nil {
+		return SourceIdentity{}, "", fmt.Errorf("extract artifact: %w", err)
+	}
+	src := SourceIdentity{
+		Type:     SourceCatalog,
+		Registry: cat.Registry,
+		Package:  pkg,
+		Version:  strings.TrimSpace(ver.Version),
+		URL:      strings.TrimSpace(ver.URL),
+		Digest:   strings.TrimSpace(ver.Digest),
+	}
+	return src, strings.TrimSpace(ver.ContentDigest), nil
+}
+
 func formatDiagSummary(diags []Diagnostic) string {
 	if len(diags) == 0 {
 		return "unknown validation error"
@@ -251,19 +345,39 @@ func formatDiagSummary(diags []Diagnostic) string {
 	return strings.Join(parts, "; ")
 }
 
-// ParseInstallSource interprets a single CLI argument as local path or git URL.
-func ParseInstallSource(arg string) (localPath, gitURL string, err error) {
+// ParseInstallSource interprets a single CLI argument as local path, git URL, or catalog:pkg[@ver].
+func ParseInstallSource(arg string) (localPath, gitURL, catalogPackage, catalogVersion string, err error) {
 	arg = strings.TrimSpace(arg)
 	if arg == "" {
-		return "", "", fmt.Errorf("install source is required")
+		return "", "", "", "", fmt.Errorf("install source is required")
+	}
+	if strings.HasPrefix(strings.ToLower(arg), "catalog:") {
+		rest := strings.TrimSpace(arg[len("catalog:"):])
+		if rest == "" {
+			return "", "", "", "", fmt.Errorf("catalog: requires package id")
+		}
+		pkg, ver := splitPackageVersion(rest)
+		if err := ValidatePluginID(pkg); err != nil {
+			return "", "", "", "", fmt.Errorf("catalog package: %w", err)
+		}
+		return "", "", pkg, ver, nil
 	}
 	if isGitURL(arg) {
-		return "", arg, nil
+		return "", arg, "", "", nil
 	}
 	// git-scp form already handled; plain paths and relative dirs are local.
 	// Also accept explicit file://
 	if strings.HasPrefix(arg, "file://") {
-		return strings.TrimPrefix(arg, "file://"), "", nil
+		return strings.TrimPrefix(arg, "file://"), "", "", "", nil
 	}
-	return arg, "", nil
+	return arg, "", "", "", nil
+}
+
+func splitPackageVersion(s string) (pkg, version string) {
+	s = strings.TrimSpace(s)
+	// package ids use dots; version follows last @ when present.
+	if i := strings.LastIndex(s, "@"); i > 0 {
+		return s[:i], s[i+1:]
+	}
+	return s, ""
 }

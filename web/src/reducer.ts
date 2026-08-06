@@ -1,7 +1,8 @@
 import type { ClientState, Envelope, TranscriptItem, WorkspaceComposer, WorkspaceSlice, WorkspaceState } from "./types";
+import { isRootLineage, parseUndoPreview, type UndoPreview } from "./undoPreview";
 
 export const initialState = (): WorkspaceState => ({
-  items: [], seen: new Set(), status: {}, children: {}, changedFiles: [],
+  items: [], seen: new Set(), status: {}, children: {}, changedFiles: [], undoStack: [],
 });
 
 export const emptyComposer = (): WorkspaceComposer => ({
@@ -31,6 +32,15 @@ function append(items: TranscriptItem[], item: TranscriptItem, merge = false) {
   return [...items, item];
 }
 
+function pushUndo(stack: UndoPreview[], preview: UndoPreview): UndoPreview[] {
+  return [...stack, preview];
+}
+
+function popUndo(stack: UndoPreview[]): UndoPreview[] {
+  if (!stack.length) return stack;
+  return stack.slice(0, -1);
+}
+
 function asWorkspaceState(slice: WorkspaceSlice): WorkspaceState {
   return {
     items: slice.items,
@@ -40,11 +50,25 @@ function asWorkspaceState(slice: WorkspaceSlice): WorkspaceState {
     question: slice.question,
     children: slice.children,
     changedFiles: slice.changedFiles,
+    undoStack: slice.undoStack,
   };
 }
 
 export function reduceEvent(state: WorkspaceState, env: Envelope): WorkspaceState {
   if (env.type === "workspace.reset") return { ...initialState(), status: { sessionId: String(env.data?.sessionId || "") } };
+  // Client-only notices (slash help/unknown/cost) — not part of the wire protocol.
+  if (env.type === "local.system") {
+    const d = env.data || {};
+    return {
+      ...state,
+      items: append(state.items, {
+        id: `system:${state.items.length}:${env.time || Date.now()}`,
+        kind: "system",
+        title: text(d, "title") || "Notice",
+        text: text(d, "text"),
+      }),
+    };
+  }
   const key = fingerprint(env);
   if (state.seen.has(key)) return state;
   const seen = new Set(state.seen).add(key);
@@ -55,6 +79,7 @@ export function reduceEvent(state: WorkspaceState, env: Envelope): WorkspaceStat
   let question = state.question;
   const children = { ...state.children };
   let changedFiles = state.changedFiles;
+  let undoStack = state.undoStack;
   const id = correlation(d);
   switch (env.type) {
     case "status": status = d; break;
@@ -78,7 +103,13 @@ export function reduceEvent(state: WorkspaceState, env: Envelope): WorkspaceStat
     case "question.asked": question = d; break;
     case "question.resolved": if (!d.requestId || d.requestId === question?.requestId) question = undefined; break;
     case "turn.started": status = { ...status, busy: true }; break;
-    case "turn.completed": status = { ...status, busy: false }; break;
+    case "turn.completed":
+      status = { ...status, busy: false };
+      if (isRootLineage(d)) undoStack = pushUndo(undoStack, parseUndoPreview(d));
+      break;
+    case "session.rewound":
+      if (isRootLineage(d)) undoStack = popUndo(undoStack);
+      break;
     case "model.selected": status = { ...status, provider: text(d, "provider"), model: text(d, "model") }; break;
     case "agent.selected": status = { ...status, agent: text(d, "name") }; break;
     case "effort.selected": status = { ...status, effort: text(d, "level") }; break;
@@ -91,7 +122,7 @@ export function reduceEvent(state: WorkspaceState, env: Envelope): WorkspaceStat
     case "engine.error": items = append(items, { id: `error:${items.length}`, kind: "error", text: text(d, "message") }); break;
     case "provider.retrying": items = append(items, { id: `retry:${items.length}`, kind: "system", title: "Retrying provider", text: text(d, "error") }); break;
   }
-  return { ...state, seen, items, status, permission, question, children, changedFiles };
+  return { ...state, seen, items, status, permission, question, children, changedFiles, undoStack };
 }
 
 export type ClientAction =
@@ -120,7 +151,6 @@ export function reduceClient(state: ClientState, action: ClientAction): ClientSt
     case "client.reset": {
       const prev = state.byID[action.id];
       const next = emptySlice(action.id);
-      // Preserve in-progress composer when reconnecting the same root.
       if (prev) {
         next.draft = prev.draft;
         next.queue = prev.queue;
@@ -139,6 +169,7 @@ export function reduceClient(state: ClientState, action: ClientAction): ClientSt
         cleared.fast = current.fast;
         return { ...state, byID: { ...state.byID, [action.id]: cleared } };
       }
+      // local.system and wire events both go through reduceEvent
       const reduced = reduceEvent(asWorkspaceState(current), action.envelope);
       return {
         ...state,

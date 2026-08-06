@@ -41,6 +41,7 @@ func New(store *auth.Store, hist *history.Store, mem *memory.Store, issues *issu
 		Auth:             authAdapter{store: store, customs: customs},
 		Catalog:          NewCatalog(customs),
 		Settings:         settingsAdapter{},
+		ConfigFiles:      configFilesAdapter{},
 		Onboarding:       newOnboardingAdapter(store),
 		Providers:        providersAdapter{store: customs},
 		SchedulerPresets: schedulerPresetCatalog{},
