@@ -109,7 +109,11 @@ func (m *timelineModal) bodyLines(th theme.Theme) []string {
 		lines = append(lines, st.Text.Render(line))
 	}
 	lines = append(lines, "")
-	lines = append(lines, st.Muted.Render(dotJoin(th, "export: /timeline export [path]", "redacted JSON")))
+	lines = append(lines, st.Muted.Render(dotJoin(th,
+		"export: /timeline export [path]",
+		"diag: /diag [export [path]]",
+		"redacted JSON",
+	)))
 	return lines
 }
 

@@ -121,7 +121,7 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		}
 	case protocol.ToolCallEnd:
 		if tc, ok := m.toolByID[ev.CallID]; ok {
-			applyToolCallEnd(tc, ev.Title, ev.Output, ev.Metadata, ev.IsError)
+			applyToolCallEnd(tc, ev.Title, ev.Output, ev.Metadata, ev.IsError, ev.ErrorCode)
 			if isProjectDataTool(tc.name) {
 				m.windows = refreshProjectDataWindows(m.windows)
 			}
@@ -129,9 +129,17 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 				m.windows = refreshFilesWindows(m.windows)
 				m.windows = refreshDiagnosticsWindows(m.windows)
 			}
+			// Hard deny / reject: surface explain entry point on the tool row
+			// and sticky notice when the engine tagged permission_denied (#809).
+			if ev.IsError && ev.ErrorCode == protocol.ErrorCodePermissionDenied {
+				m.notePermissionDeniedFromTool(tc)
+			}
 		}
 		cmd = m.broadcastVisualizerState()
 	case protocol.PermissionAsked:
+		m.lastPermissionAsk.RequestID = ev.RequestID
+		m.lastPermissionAsk.Permission = ev.Permission
+		m.lastPermissionAsk.Patterns = append([]string(nil), ev.Patterns...)
 		pm := newPermissionModal(ev, m.ops, m.th)
 		showCmd := m.presentBlockingModal(pm)
 		m.refreshAwaitingPermission()
@@ -142,11 +150,29 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		// Static message only — never include paths, args, or secrets.
 		cmd = tea.Batch(cmd, m.desktopNotifyCmd("strike: permission required", true))
 	case protocol.PermissionResolved:
+		// Modal is often already closed (user dismissed); use cached ask meta.
+		if ev.Decision == protocol.DecisionReject {
+			m.notePermissionReject(ev.RequestID)
+		}
+		if m.lastPermissionAsk.RequestID == ev.RequestID {
+			m.lastPermissionAsk = struct {
+				RequestID  string
+				Permission string
+				Patterns   []string
+			}{}
+		}
 		if promote := m.resolveBlockingRequest(ev.RequestID); promote != nil {
 			cmd = promote
 		}
 		m.refreshAwaitingPermission()
 		cmd = tea.Batch(cmd, m.broadcastContextState())
+	case protocol.PermissionDecided:
+		// Audit event for every allow/deny/ask. UI only reacts to hard ruleset
+		// deny. Interactive reject emits PermissionDecided{deny, DecisionReject}
+		// after PermissionResolved — skip so the reject notice is not overwritten.
+		if strings.EqualFold(ev.Action, "deny") && ev.Decision != protocol.DecisionReject {
+			m.notePermissionDecidedDeny(ev)
+		}
 	case protocol.QuestionAsked:
 		qm := newQuestionModal(ev, m.ops, m.th)
 		showCmd := m.presentBlockingModal(qm)
@@ -172,10 +198,33 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		m.toolCallsThisTurn = 0
 		m.refreshOpenPalette()
 		if ev.StopReason == "interrupted" {
+			// Notice keeps the historical "interrupted" token (tests + muscle
+			// memory); transcript row makes the canceled state durable (#809).
 			m.setNotice("interrupted", false)
+			m.cells = append(m.cells, &infoCell{text: "turn canceled"})
+		}
+		// Solo gates emit VerificationCompleted before TurnCompleted; only
+		// attach from the terminal event when that path was skipped (replay
+		// or older engines that only set TurnCompleted.Verification).
+		if ev.Verification != nil && m.lastVerification == nil {
+			m.applyVerificationReport(*ev.Verification, true)
+		} else if ev.Verification != nil {
+			cp := *ev.Verification
+			m.lastVerification = &cp
 		}
 		// turnRunning is already false via applyAgentStateEvent; drain next prompt.
 		cmd = tea.Batch(m.broadcastContextState(), notify, m.tryDrainInputQueue())
+	case protocol.VerificationStarted:
+		n := ev.GateCount
+		if n > 0 {
+			m.setNotice(fmt.Sprintf("verifying %d gate(s)…", n), false)
+		} else {
+			m.setNotice("verifying…", false)
+		}
+		cmd = m.broadcastContextState()
+	case protocol.VerificationCompleted:
+		m.applyVerificationReport(ev.Report, true)
+		cmd = m.broadcastContextState()
 	case protocol.HarnessProgress:
 		// Surface harness progress as an info cell in the transcript.
 		if m.turnRunning {
@@ -526,9 +575,135 @@ func (m *Model) onChildCompleted(ev protocol.ChildCompleted) {
 	}
 	agent, elapsed := lookupChildMeta(m.children, ev.SessionID)
 	m.cells = appendSubagentResultCell(m.cells, ev, agent, elapsed)
+	// Delegation gates: claim vs verified on the subagent row (#809 / #780).
+	if ev.Verification != nil {
+		applySubagentVerification(m.cells, ev.SessionID, ev.Verification)
+		// Sticky notice only when gates failed or claimed-without-verify so
+		// successful verified children stay quiet in the parent chrome.
+		if !ev.Verification.Passed || (ev.Verification.Claimed && !ev.Verification.Verified) {
+			m.applyVerificationReport(*ev.Verification, false)
+		} else if ev.Verification.Verified && ev.Verification.Passed {
+			// Still record for header badge without a second transcript cell.
+			cp := *ev.Verification
+			m.lastVerification = &cp
+		}
+	}
 	// plan_delegate may have applied section CAS on finish — refresh plan progress
 	// without touching agents/activity focus state.
 	m.windows = refreshProjectDataWindows(m.windows)
+}
+
+// applyVerificationReport stores claim-vs-verified state, optional transcript
+// row, and notice. addCell false updates chrome only (child already has a row).
+func (m *Model) applyVerificationReport(rep protocol.VerificationReport, addCell bool) {
+	cp := rep
+	m.lastVerification = &cp
+	text, isErr := formatVerificationNotice(rep)
+	m.setNotice(text, isErr)
+	if addCell {
+		m.cells = append(m.cells, &infoCell{text: formatVerificationCell(rep)})
+	}
+}
+
+// notePermissionDecidedDeny surfaces hard ruleset denials with an explain path.
+func (m *Model) notePermissionDecidedDeny(ev protocol.PermissionDecided) {
+	info := lastDenialInfo{
+		Permission: ev.Permission,
+		Pattern:    firstDenialPattern(ev.Patterns),
+		Layer:      ev.Layer,
+		RuleAction: ev.RuleAction,
+		Source:     "deny",
+	}
+	m.lastDenial = info
+	reason := ""
+	if ev.Layer != "" {
+		reason = strings.TrimSpace(ev.Layer + " " + ev.RuleAction)
+	}
+	// Prefer live explain summary when the host can evaluate the same sample.
+	if m.services.Permissions != nil {
+		ex := m.services.Permissions.Explain(info.Permission, info.Pattern)
+		if s := strings.TrimSpace(ex.Summary); s != "" {
+			// First line of summary + explain command trailer.
+			first := s
+			if i := strings.IndexByte(s, '\n'); i >= 0 {
+				first = strings.TrimSpace(s[:i])
+			}
+			m.setNotice(first+"\n"+permissionExplainHint(info.Permission, info.Pattern), true)
+			return
+		}
+	}
+	m.setNotice(formatDenialNotice(info, reason), true)
+}
+
+// notePermissionReject records an interactive reject from the permission modal.
+func (m *Model) notePermissionReject(requestID string) {
+	perm, patterns := m.permissionAskMeta(requestID)
+	if perm == "" && m.lastPermissionAsk.RequestID == requestID {
+		perm = m.lastPermissionAsk.Permission
+		patterns = m.lastPermissionAsk.Patterns
+	}
+	if perm == "" {
+		// Still surface a generic explain path when request meta was lost.
+		m.setNotice("permission rejected\n/permission explain <tool> [pattern]", true)
+		return
+	}
+	info := lastDenialInfo{
+		Permission: perm,
+		Pattern:    firstDenialPattern(patterns),
+		Source:     "reject",
+	}
+	m.lastDenial = info
+	m.setNotice(formatDenialNotice(info, "user rejected"), true)
+}
+
+// notePermissionDeniedFromTool tags a tool cell and notice after a
+// permission_denied ToolCallEnd (covers paths that skip PermissionDecided UI).
+func (m *Model) notePermissionDeniedFromTool(tc *toolCell) {
+	if tc == nil {
+		return
+	}
+	pat := toolCommandArg(tc.args)
+	if pat == "" {
+		pat = "*"
+	}
+	info := lastDenialInfo{
+		Permission: tc.name,
+		Pattern:    pat,
+		Source:     "tool",
+	}
+	// Prefer richer metadata from a prior deny event for the same tool.
+	if m.lastDenial.Permission == tc.name && m.lastDenial.Pattern != "" {
+		info = m.lastDenial
+		info.Source = "tool"
+	} else {
+		m.lastDenial = info
+	}
+	hint := permissionExplainHint(info.Permission, info.Pattern)
+	// Append explain trailer to the tool body once (visible when expanded).
+	if tc.output == "" || !strings.Contains(tc.output, "/permission explain") {
+		if tc.output != "" && !strings.HasSuffix(tc.output, "\n") {
+			tc.output += "\n"
+		}
+		tc.output += hint
+	}
+	// Notice only when we do not already show a deny notice this turn.
+	if m.notice == "" || !strings.Contains(m.notice, "permission") {
+		m.setNotice(formatDenialNotice(info, strings.TrimSpace(firstLine(tc.output))), true)
+	}
+}
+
+// permissionAskMeta finds permission + patterns for a request still on the
+// modal stack (active or queued).
+func (m Model) permissionAskMeta(requestID string) (permission string, patterns []string) {
+	if pm, ok := m.modal.(*permissionModal); ok && pm.req.RequestID == requestID {
+		return pm.req.Permission, pm.req.Patterns
+	}
+	for _, mod := range m.modalQueue {
+		if pm, ok := mod.(*permissionModal); ok && pm.req.RequestID == requestID {
+			return pm.req.Permission, pm.req.Patterns
+		}
+	}
+	return "", nil
 }
 
 func (m *Model) trimChildren() {

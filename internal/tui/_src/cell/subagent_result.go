@@ -14,14 +14,18 @@ import (
 // subagentResultCell is one child/subagent completion in the parent transcript.
 // Collapsed by default to a single summary row; expand shows the full result.
 type subagentResultCell struct {
-	sessionID   string
-	agent       string
-	status      string // completed | failed | canceled
-	summary     string
-	elapsed     time.Duration // 0 when unknown (e.g. replay without timestamps)
-	expanded    bool
-	selected    bool
-	copiedFlash bool
+	sessionID string
+	agent     string
+	status    string // completed | failed | canceled | blocked
+	summary   string
+	elapsed   time.Duration // 0 when unknown (e.g. replay without timestamps)
+	// verificationLabel is claim-vs-verified chip text when gates ran (#809).
+	verificationLabel string
+	// verificationOK distinguishes verified (success tone) from claimed/failed.
+	verificationOK bool
+	expanded       bool
+	selected       bool
+	copiedFlash    bool
 }
 
 func (c *subagentResultCell) collapsible() bool {
@@ -85,6 +89,15 @@ func (c *subagentResultCell) render(width int, th theme.Theme) string {
 		parts = append(parts, labelStyle.Render(short))
 	}
 	parts = append(parts, statusStyle.Render(statusLabel))
+	if v := strings.TrimSpace(c.verificationLabel); v != "" {
+		vStyle := st.Warning
+		if c.verificationOK {
+			vStyle = st.Success
+		} else if c.status == string(protocol.ChildStatusFailed) {
+			vStyle = st.Error
+		}
+		parts = append(parts, vStyle.Render(v))
+	}
 	if c.elapsed > 0 {
 		parts = append(parts, st.Muted.Render(formatCompactDuration(c.elapsed)))
 	}
@@ -191,11 +204,50 @@ func appendSubagentResultCell(cells []cell, ev protocol.ChildCompleted, agent st
 				if elapsed > 0 {
 					sc.elapsed = elapsed
 				}
+				if ev.Verification != nil {
+					applyVerificationToSubagent(sc, ev.Verification)
+				}
 				return cells
 			}
 		}
 	}
-	return append(cells, newSubagentResultCell(ev, agent, elapsed))
+	sc := newSubagentResultCell(ev, agent, elapsed)
+	if ev.Verification != nil {
+		applyVerificationToSubagent(sc, ev.Verification)
+	}
+	return append(cells, sc)
+}
+
+// applySubagentVerification stamps claim-vs-verified labels onto an existing
+// subagent row (or no-ops when the session is missing).
+func applySubagentVerification(cells []cell, sessionID string, rep *protocol.VerificationReport) {
+	if rep == nil {
+		return
+	}
+	id := strings.TrimSpace(sessionID)
+	for _, c := range cells {
+		sc, ok := c.(*subagentResultCell)
+		if !ok {
+			continue
+		}
+		if id != "" && sc.sessionID != id {
+			continue
+		}
+		applyVerificationToSubagent(sc, rep)
+		return
+	}
+}
+
+func applyVerificationToSubagent(sc *subagentResultCell, rep *protocol.VerificationReport) {
+	if sc == nil || rep == nil {
+		return
+	}
+	label, _, ok := verificationBadgeLabel(rep)
+	if !ok {
+		return
+	}
+	sc.verificationLabel = label
+	sc.verificationOK = rep.Verified && rep.Passed
 }
 
 // lookupChildMeta finds agent name and elapsed duration for a child session.
