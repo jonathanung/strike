@@ -971,10 +971,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Lifecycle ops may enable/disable/trust/remove pane contributions.
 		if _, isDone := msg.(pluginOpDoneMsg); isDone {
-			var paneCmd tea.Cmd
+			var paneCmd, focusCmd tea.Cmd
 			m.windows, paneCmd = syncPluginPanes(m.windows, m.services.Panes)
+			m.windows, focusCmd = notifyPluginPaneFocus(m.windows)
 			m.reflow()
-			return m, tea.Batch(extra, paneCmd)
+			return m, tea.Batch(extra, paneCmd, focusCmd)
 		}
 		m.reflow()
 		return m, extra

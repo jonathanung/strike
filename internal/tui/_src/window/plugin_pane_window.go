@@ -105,18 +105,8 @@ func (w pluginPaneWindow) title() string {
 }
 
 func (w pluginPaneWindow) init() tea.Cmd {
-	if w.rt == nil || w.errState != "" {
-		return nil
-	}
-	// Eager-start process panes so hello/render can complete before focus.
-	if err := w.rt.start(w.width, w.height); err != nil {
-		// errState on value won't stick through registry.init; store on runtime.
-		w.rt.mu.Lock()
-		w.rt.errState = err.Error()
-		w.rt.mu.Unlock()
-		return nil
-	}
-	return w.rt.listenCmd()
+	// Process panes start on first mount/focus (ABI §12), not at registry init.
+	return nil
 }
 
 func (w pluginPaneWindow) update(msg tea.Msg) (window, tea.Cmd) {
@@ -124,6 +114,19 @@ func (w pluginPaneWindow) update(msg tea.Msg) (window, tea.Cmd) {
 	case contextStateMsg:
 		w.applyContext(msg)
 		return w, w.maybePushFeeds()
+	case agentsStateMsg:
+		w.applyAgents(msg)
+		return w, w.maybePushFeeds()
+	case pluginPaneFocusMsg:
+		if msg.paneID != w.info.ID {
+			return w, nil
+		}
+		w = w.setFocused(msg.focused)
+		var cmd tea.Cmd
+		if msg.focused && w.rt != nil && w.rt.mounted {
+			cmd = w.rt.listenCmd()
+		}
+		return w, cmd
 	case pluginPaneWakeMsg:
 		if msg.paneID != w.info.ID || w.rt == nil {
 			return w, nil
@@ -365,6 +368,44 @@ func (w *pluginPaneWindow) applyContext(s contextStateMsg) {
 	}
 }
 
+func (w *pluginPaneWindow) applyAgents(s agentsStateMsg) {
+	if w.data == nil {
+		w.data = paneDataStore{}
+	}
+	roots := make([]any, 0, len(s.roots))
+	for _, r := range s.roots {
+		children := make([]any, 0, len(r.Children))
+		for _, c := range r.Children {
+			title := c.title
+			if title == "" {
+				title = c.name
+			}
+			if title == "" {
+				title = c.agent
+			}
+			state := c.status
+			if c.rosterState != "" {
+				state = c.rosterState
+			}
+			children = append(children, map[string]any{
+				"id":    c.sessionID,
+				"title": title,
+				"state": state,
+			})
+		}
+		roots = append(roots, map[string]any{
+			"id":       r.ID,
+			"title":    r.Title,
+			"state":    r.State.Label(),
+			"children": children,
+		})
+	}
+	w.data["agents.roster"] = map[string]any{
+		"activeId": s.activeID,
+		"roots":    roots,
+	}
+}
+
 func (w pluginPaneWindow) maybePushFeeds() tea.Cmd {
 	if w.rt == nil || !w.rt.mounted || w.errState != "" {
 		return nil
@@ -406,17 +447,20 @@ func paneHostGranted(hostFeeds []string, feed string) bool {
 }
 
 func (w pluginPaneWindow) setFocused(focused bool) pluginPaneWindow {
-	if w.focused == focused {
-		return w
-	}
+	was := w.focused
 	w.focused = focused
-	if w.rt != nil && w.rt.mounted {
+	if w.rt != nil && w.rt.mounted && was != focused {
 		w.rt.sendFocus(focused)
 	}
-	// Mount process on first focus if not yet started.
+	// Mount process on first focus (ABI: start on mount).
 	if focused && w.rt != nil && !w.rt.mounted && w.errState == "" {
 		if err := w.rt.start(w.width, w.height); err != nil {
+			w.rt.mu.Lock()
+			w.rt.errState = err.Error()
+			w.rt.mu.Unlock()
 			w.errState = err.Error()
+		} else if was != focused {
+			w.rt.sendFocus(true)
 		}
 	}
 	return w
@@ -433,6 +477,12 @@ func (w pluginPaneWindow) shutdown(reason string) pluginPaneWindow {
 type pluginPaneNotifyMsg struct {
 	text string
 	err  bool
+}
+
+// pluginPaneFocusMsg tells one plugin pane whether it is the active right window.
+type pluginPaneFocusMsg struct {
+	paneID  string
+	focused bool
 }
 
 // isPluginPane reports whether w is a plugin contribution window.

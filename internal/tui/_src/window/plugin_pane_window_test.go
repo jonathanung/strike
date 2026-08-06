@@ -171,7 +171,12 @@ func TestPluginPaneProcessHelloRenderShutdown(t *testing.T) {
 		PluginRoot: root, DefinitionJSON: raw,
 	}
 	w := newPluginPaneWindow(info).resize(40, 10).(pluginPaneWindow)
-	cmd := w.init()
+	// Process starts on first focus (mount), not registry init.
+	w = w.setFocused(true)
+	if w.rt == nil || !w.rt.mounted {
+		t.Fatal("expected process started on focus")
+	}
+	cmd := w.rt.listenCmd()
 	if cmd == nil {
 		t.Fatal("expected listen cmd")
 	}

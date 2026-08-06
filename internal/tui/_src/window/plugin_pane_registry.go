@@ -163,3 +163,36 @@ func pluginPaneIDs(r windowRegistry) []string {
 	}
 	return out
 }
+
+// notifyPluginPaneFocus marks the active plugin pane focused and others unfocused,
+// starting process panes on first focus (ABI mount).
+func notifyPluginPaneFocus(r windowRegistry) (windowRegistry, tea.Cmd) {
+	activeID := ""
+	if a := r.active(); a != nil {
+		activeID = a.id()
+	}
+	windows := append([]window(nil), r.windows...)
+	var cmds []tea.Cmd
+	changed := false
+	for i, w := range windows {
+		pw, ok := w.(pluginPaneWindow)
+		if !ok {
+			continue
+		}
+		want := pw.info.ID == activeID
+		if pw.focused == want && !(want && pw.rt != nil && !pw.rt.mounted && pw.errState == "") {
+			continue
+		}
+		next := pw.setFocused(want)
+		windows[i] = next
+		changed = true
+		if want && next.rt != nil && next.rt.mounted {
+			cmds = append(cmds, next.rt.listenCmd())
+		}
+	}
+	if !changed {
+		return r, nil
+	}
+	r.windows = windows
+	return r, tea.Batch(cmds...)
+}
