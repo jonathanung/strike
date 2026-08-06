@@ -666,6 +666,8 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 				return e.acquireScheduler(ctx, corr, label, pools...)
 			},
 			Files:      e.files,
+			SessionID:  e.opts.SessionID,
+			MemberName: e.ownershipMemberName(),
 			Checkpoint: e.checkpoints.Snapshot,
 			// Record successful mutations only (post-write), not pre-mutation
 			// snapshots — failed tools must not appear in handoff files_changed.
@@ -758,6 +760,11 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			tc.AgentMessage = e.agentMessage
 			tc.AgentBroadcast = e.agentBroadcast
 			tc.TeamTask = e.teamTask
+			tc.Ownership = e.team.Ownership()
+			tc.OnOverlap = e.emitPathOverlap
+			tc.OwnershipQuery = e.ownershipQuery
+			tc.OwnershipLease = e.ownershipLease
+			tc.OwnershipReleaseLease = e.ownershipReleaseLease
 		}
 		tc.ChildWake = e.childWakeCh()
 		tc.HasChildNotice = e.hasPendingChildNotices

@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike-cli/internal/tool"
 )
 
 // maxTeamMemberNameLen bounds optional teammate aliases.
@@ -39,13 +40,17 @@ const minSessionIDPrefixLen = 8
 // The shared task board (see team_board.go) is keyed by this Team (lead
 // session id). Claim uses exclusive owner + optional CAS version. Board is
 // cleared on Dissolve with the rest of team lifecycle GC.
+//
+// Path ownership (see tool.PathOwnership) is shared across lead + children so
+// concurrent writers detect overlap. Cleared on Dissolve.
 type Team struct {
-	mu       sync.Mutex
-	leadID   string
-	members  map[string]TeamMember     // session id → member
-	live     map[string]*mailboxTarget // session id → live engine mailbox
-	board    map[string]BoardTask      // task id → item
-	boardSeq int                       // monotonic id allocator (t1, t2, …)
+	mu        sync.Mutex
+	leadID    string
+	members   map[string]TeamMember     // session id → member
+	live      map[string]*mailboxTarget // session id → live engine mailbox
+	board     map[string]BoardTask      // task id → item
+	boardSeq  int                       // monotonic id allocator (t1, t2, …)
+	ownership *tool.PathOwnership
 }
 
 // TeamMember is one roster entry (lead or child).
@@ -91,8 +96,9 @@ func NewTeam(leadID, persona string) *Team {
 		return nil
 	}
 	t := &Team{
-		leadID:  leadID,
-		members: make(map[string]TeamMember, 4),
+		leadID:    leadID,
+		members:   make(map[string]TeamMember, 4),
+		ownership: tool.NewPathOwnership(tool.OverlapWarn),
 	}
 	t.members[leadID] = TeamMember{
 		SessionID: leadID,
@@ -102,6 +108,29 @@ func NewTeam(leadID, persona string) *Team {
 		StartedAt: time.Now(),
 	}
 	return t
+}
+
+// Ownership returns the shared multi-agent path claim tracker (nil-safe).
+func (t *Team) Ownership() *tool.PathOwnership {
+	if t == nil {
+		return nil
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.ownership
+}
+
+// SetOverlapPolicy updates ownership conflict handling (off|warn|block).
+func (t *Team) SetOverlapPolicy(policy string) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	own := t.ownership
+	t.mu.Unlock()
+	if own != nil {
+		own.SetPolicy(policy)
+	}
 }
 
 // LeadID is the team identity (lead session id).
@@ -399,10 +428,10 @@ func (t *Team) SetPersona(sessionID, persona string) {
 	t.members[id] = m
 }
 
-// Dissolve clears the roster and shared task board (team ends with the lead
-// session). After Dissolve, Contains is false for everyone, Roster is empty,
-// and Board is empty. The Team value should not be reused; callers may replace
-// the pointer.
+// Dissolve clears the roster, shared task board, and path ownership (team ends
+// with the lead session). After Dissolve, Contains is false for everyone,
+// Roster is empty, and Board is empty. The Team value should not be reused;
+// callers may replace the pointer.
 func (t *Team) Dissolve() {
 	if t == nil {
 		return
@@ -412,6 +441,9 @@ func (t *Team) Dissolve() {
 	t.members = make(map[string]TeamMember)
 	t.live = make(map[string]*mailboxTarget)
 	t.clearBoardLocked()
+	if t.ownership != nil {
+		t.ownership.Clear()
+	}
 }
 
 // Len returns the number of roster entries (including the lead while active).

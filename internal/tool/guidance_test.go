@@ -247,7 +247,7 @@ func TestBuiltinShortPurposesCoversCoreTools(t *testing.T) {
 		"toolsearch", "question", "apply_patch", "enter_plan_mode",
 		"exit_plan_mode", "phase_done", "task",
 		"task_status", "task_read", "task_message", "task_interrupt",
-		"agent_roster", "agent_message", "agent_broadcast", "team_task",
+		"agent_roster", "agent_ownership", "agent_message", "agent_broadcast", "team_task",
 	}
 	m := BuiltinShortPurposes()
 	for _, name := range core {

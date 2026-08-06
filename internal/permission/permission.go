@@ -40,7 +40,8 @@ type Ruleset []Rule
 var knownPermissions = map[string]struct{}{
 	"*": {}, "read": {}, "glob": {}, "grep": {}, "edit": {}, "write": {},
 	"bash": {}, "task": {}, "task_status": {}, "task_read": {}, "task_message": {},
-	"task_interrupt": {}, "agent_roster": {}, "agent_message": {}, "agent_broadcast": {},
+	"task_interrupt": {}, "agent_roster": {}, "agent_ownership": {},
+	"agent_message": {}, "agent_broadcast": {},
 	"team_task": {},
 	"webfetch":  {}, "todowrite": {}, "todoread": {},
 	"memory_write": {}, "memory_read": {}, "issue_write": {}, "issue_read": {},
@@ -102,6 +103,8 @@ func Defaults() Ruleset {
 		{Permission: "task_message", Pattern: "*", Action: Allow},
 		{Permission: "task_interrupt", Pattern: "*", Action: Allow},
 		{Permission: "agent_roster", Pattern: "*", Action: Allow},
+		// Path ownership/overlap map for the session team (read + leases).
+		{Permission: "agent_ownership", Pattern: "*", Action: Allow},
 		// Peer messaging is allow-by-default within a team; Deliver still
 		// rejects out-of-team targets. Users may deny via rules.
 		{Permission: "agent_message", Pattern: "*", Action: Allow},
