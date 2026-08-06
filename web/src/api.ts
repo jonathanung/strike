@@ -26,6 +26,7 @@ export const roots = () => request<RootsResponse>("/v1/roots");
 export const createRoot = () => request<RootCreateResult>("/v1/roots", { method: "POST" });
 export const activateRoot = (id: string) => request<{ ok: boolean }>(`/v1/roots/${encodeURIComponent(id)}/activate`, { method: "POST" });
 export const resumeRoot = (sessionID: string) => request<RootResumeResult>(`/v1/roots/${encodeURIComponent(sessionID)}/resume`, { method: "POST" });
+export const closeRoot = (id: string) => request<{ ok: boolean }>(`/v1/roots/${encodeURIComponent(id)}`, { method: "DELETE" });
 
 export function liveConnection(rootID: string, onEvent: (event: Envelope) => void, onState: (state: string) => void) {
   let socket: WebSocket | undefined;
@@ -42,7 +43,15 @@ export function liveConnection(rootID: string, onEvent: (event: Envelope) => voi
     socket.onclose = () => { if (!closed) { onState("reconnecting"); setTimeout(connect, Math.min(500 * 2 ** retry++, 8000)); } };
   };
   connect();
-  return { send: (type: string, data?: unknown) => socket?.readyState === WebSocket.OPEN && socket.send(JSON.stringify({ type, ...(data === undefined ? {} : { data }) })), close: () => { closed = true; socket?.close(); } };
+  return { send: (type: string, data?: unknown) => socket?.readyState === WebSocket.OPEN && socket.send(JSON.stringify({ type, ...(data === undefined ? {} : { data }) })), close: () => {
+      closed = true;
+      if (socket) {
+        socket.onmessage = null;
+        socket.onerror = null;
+        socket.onclose = null;
+        socket.close();
+      }
+    } };
 }
 
 export function historicalConnection(id: string, onEvent: (event: Envelope) => void, onError: (message: string) => void = () => {}) {
@@ -52,3 +61,6 @@ export function historicalConnection(id: string, onEvent: (event: Envelope) => v
   source.onerror = () => onError("history reconnecting");
   return () => source.close();
 }
+
+export const sessionChildren = (id: string) =>
+  request<{ sessions: Array<Record<string, unknown>> }>(`/v1/sessions/${encodeURIComponent(id)}/children`);

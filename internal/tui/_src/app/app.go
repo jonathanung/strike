@@ -424,6 +424,9 @@ type Model struct {
 	// children tracks active/recent subagent sessions for the activity pane.
 	// Lifecycle never appends transcript cells.
 	children []childActivity
+	// pathOverlaps is a bounded root-side cache of PathOverlap warnings for the
+	// active lead session (#922). Child claims live on childActivity instead.
+	pathOverlaps []childPathOverlap
 	// teamMessages is a bounded ring of recent peer mailbox deliveries for the
 	// lead activity pane (agent.message). Oldest drop under broadcast storms.
 	teamMessages []teamMessage
@@ -484,6 +487,39 @@ type childActivity struct {
 	queueLabel     string
 	startedAt      time.Time
 	endedAt        time.Time
+
+	// Live multi-agent observability (#922 / #774 / #772 / #780). Optional;
+	// empty/nil means unknown — never fabricate token/budget/verified success.
+	objective    string
+	lastAction   string
+	blockReason  string
+	filesTouched []string // bounded; see maxChildFilesTouched
+	budget       *protocol.AgentBudgetView
+	// Escalation from ChildEscalated (kind/reason/action + optional budget).
+	escalateKind   string
+	escalateReason string
+	escalateAction string
+	// Latest path-overlap warnings for this node (bounded).
+	pathOverlaps []childPathOverlap
+	// Verification summary when present on child completion / verification events.
+	verification *childVerificationSummary
+}
+
+// childPathOverlap is one retained PathOverlap warning for a child node.
+type childPathOverlap struct {
+	path    string
+	policy  string
+	blocked bool
+	warning string
+}
+
+// childVerificationSummary is claim-vs-verified state for a child session.
+// Presence of the pointer means a report was observed; bools are wire values.
+type childVerificationSummary struct {
+	claimed  bool
+	verified bool
+	passed   bool
+	summary  string
 }
 
 // New builds the frontend model. services supplies every host capability; any
@@ -937,6 +973,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setNotice("saved as default: "+msg.text, false)
 		}
 		return m, nil
+
+	case configFileOpenMsg:
+		return m.applyConfigFileOpen(msg)
 
 	case themeSelectedMsg:
 		m.applyThemeEntry(msg.entry)

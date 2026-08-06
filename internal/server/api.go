@@ -55,6 +55,7 @@ type capabilities struct {
 	Files          bool `json:"files"`
 	Memory         bool `json:"memory"`
 	Issues         bool `json:"issues"`
+	Plans          bool `json:"plans"`
 	Sessions       bool `json:"sessions"`
 	Roots          bool `json:"roots"`
 	Providers      bool `json:"providers"`
@@ -66,6 +67,8 @@ type capabilities struct {
 	// Timeline is the redacted run-timeline snapshot/export surface
 	// (GET /v1/sessions/{id}/timeline[+ /export]). Always on when SessionDir is set.
 	Timeline bool `json:"timeline"`
+	// Permissions is true when host.Services.Permissions is set (explain + presets).
+	Permissions bool `json:"permissions"`
 }
 
 type bootstrapResponse struct {
@@ -92,11 +95,16 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	var skills []map[string]any
 	if h := s.opts.Services; h != nil {
 		c.Auth, c.Catalog, c.Settings, c.History = h.Auth != nil, h.Catalog != nil, h.Settings != nil, h.History != nil
-		c.Files, c.Memory, c.Issues, c.Sessions = h.Files != nil, h.Memory != nil, h.Issues != nil, h.Sessions != nil
+		c.Files, c.Memory, c.Issues, c.Plans = h.Files != nil, h.Memory != nil, h.Issues != nil, h.Plans != nil
+		c.Sessions = h.Sessions != nil
 		// Workflow authoring is exposed via /v1/workflows* and /v1/workflow-drafts*.
 		c.Workflows, c.WorkflowDrafts = h.Workflows != nil, h.WorkflowDrafts != nil
+		// Permission explain/presets via /v1/permissions/* (#926).
+		c.Permissions = h.Permissions != nil
+		// MCP status/control is exposed via /v1/mcp*.
+		c.MCP = h.MCP != nil
 		// Capabilities describe browser surfaces, not merely host interfaces.
-		// Roots, custom providers, project init, MCP, and telemetry remain false
+		// Roots, custom providers, project init, and telemetry remain false
 		// until this server exposes their service operations.
 		for _, skill := range h.Skills {
 			skills = append(skills, map[string]any{"name": skill.Name, "description": skill.Description})
@@ -354,10 +362,15 @@ func (s *Server) handleSessionRename(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
-	item, err := s.opts.Services.Sessions.Rename(r.PathValue("id"), body.Title)
+	id := r.PathValue("id")
+	item, err := s.opts.Services.Sessions.Rename(id, body.Title)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
+	}
+	// Keep ACTIVE rail identity in sync when the renamed session is live.
+	if s.opts.LiveHub != nil {
+		s.opts.LiveHub.SetTitle(id, body.Title)
 	}
 	writeJSON(w, http.StatusOK, item)
 }
@@ -475,6 +488,33 @@ func (s *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"issues": items})
+}
+
+// handlePermissionExplain returns last-match-wins detail for a sample tool call.
+// Query: permission (required), pattern (optional; empty means "*").
+// Host-safe DTO only — no TUI types cross this boundary.
+func (s *Server) handlePermissionExplain(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Services == nil || s.opts.Services.Permissions == nil {
+		capabilityUnavailable(w, "permissions")
+		return
+	}
+	perm := strings.TrimSpace(r.URL.Query().Get("permission"))
+	if perm == "" {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "permission is required"})
+		return
+	}
+	pattern := strings.TrimSpace(r.URL.Query().Get("pattern"))
+	ex := s.opts.Services.Permissions.Explain(perm, pattern)
+	writeJSON(w, http.StatusOK, ex)
+}
+
+// handlePermissionPresets lists shipped named permission rulesets.
+func (s *Server) handlePermissionPresets(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Services == nil || s.opts.Services.Permissions == nil {
+		capabilityUnavailable(w, "permissions")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"presets": s.opts.Services.Permissions.Presets()})
 }
 
 func capabilityUnavailable(w http.ResponseWriter, name string) {
@@ -778,4 +818,22 @@ func (s *Server) handleRootResume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleRootClose(w http.ResponseWriter, r *http.Request) {
+	if s.opts.LiveHub == nil {
+		http.Error(w, "multi-root unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "root id is empty"})
+		return
+	}
+	if s.opts.LiveHub.LiveFor(id) == nil {
+		writeJSON(w, http.StatusNotFound, opErrorResponse{Error: fmt.Sprintf("root %q is not active", id)})
+		return
+	}
+	s.opts.LiveHub.Remove(id)
+	writeJSON(w, http.StatusOK, opOKResponse{OK: true})
 }
