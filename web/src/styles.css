@@ -290,6 +290,31 @@ main {
   background: var(--rule);
   overflow: auto;
 }
+.runtime-explain {
+  align-self: end;
+  padding: 6px 10px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.sandbox-explain-dialog {
+  width: min(640px, calc(100vw - 24px));
+}
+.sandbox-summary {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  margin: 0 0 14px;
+  font-size: 12px;
+}
+.sandbox-summary dt { color: var(--muted); margin: 0; }
+.sandbox-summary dd { margin: 0; color: var(--ink); }
+.sandbox-explain {
+  max-height: min(50vh, 360px);
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .runtime-field {
   display: grid;
   gap: 3px;

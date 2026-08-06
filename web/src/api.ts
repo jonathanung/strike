@@ -1,4 +1,4 @@
-import type { Bootstrap, Envelope, RootsResponse, RootCreateResult, RootResumeResult, Session } from "./types";
+import type { Bootstrap, Envelope, RootsResponse, RootCreateResult, RootResumeResult, SandboxInfo, Session } from "./types";
 
 // Token may arrive via ?token= before the server handoff redirect strips it and
 // sets an HttpOnly cookie. After handoff, same-origin cookies authenticate
@@ -16,6 +16,14 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
 }
 export const bootstrap = () => request<Bootstrap>("/v1/bootstrap");
 export const sessions = () => request<{ sessions: Session[]; liveId?: string }>("/v1/sessions");
+export const getSandbox = (rootID?: string) => {
+  const qs = rootID ? `?root=${encodeURIComponent(rootID)}` : "";
+  return request<SandboxInfo>(`/v1/sandbox${qs}`);
+};
+export const patchSandbox = (mode: string, iKnow = false, rootID?: string) => {
+  const qs = rootID ? `?root=${encodeURIComponent(rootID)}` : "";
+  return request<SandboxInfo>(`/v1/sandbox${qs}`, { method: "PATCH", body: JSON.stringify({ mode, iKnow }) });
+};
 export const sendOp = (type: string, data?: unknown, rootID?: string) => {
   const qs = rootID ? `?root=${encodeURIComponent(rootID)}` : "";
   return request<{ ok: boolean }>(`/v1/ops${qs}`, { method: "POST", body: JSON.stringify({ type, ...(data === undefined ? {} : { data }) }) });
