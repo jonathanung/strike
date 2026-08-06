@@ -54,17 +54,47 @@ describe("MCPPanel", () => {
     expect(screen.getByLabelText("MCP servers")).toBeInTheDocument();
   });
 
-  it("retries a named server", async () => {
+  it("retries a named non-up server and keeps retry available when disabled", async () => {
     render(<MCPPanel available />);
     await screen.findByText("docs");
-    fireEvent.click(screen.getAllByRole("button", { name: "Retry" })[0]);
+    // docs is up — Retry disabled; remote is error — Retry enabled
+    const retries = screen.getAllByRole("button", { name: "Retry" });
+    expect(retries[0]).toBeDisabled();
+    expect(retries[1]).not.toBeDisabled();
+    fireEvent.click(retries[1]);
     await waitFor(() =>
       expect(fetch).toHaveBeenCalledWith(
         expect.stringContaining("/v1/mcp/retry"),
-        expect.objectContaining({ method: "POST", body: JSON.stringify({ name: "docs" }) }),
+        expect.objectContaining({ method: "POST", body: JSON.stringify({ name: "remote" }) }),
       ),
     );
-    expect(await screen.findByText(/Retried docs/)).toBeInTheDocument();
+    expect(await screen.findByText(/Retried remote/)).toBeInTheDocument();
+  });
+
+  it("allows retry on disabled servers (re-enable)", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = (init?.method || "GET").toUpperCase();
+      if (url.endsWith("/v1/mcp") && method === "GET") {
+        return response({
+          servers: [{ name: "off", state: "disabled", toolCount: 0, transport: "stdio" }],
+        });
+      }
+      if (url.includes("/v1/mcp/retry")) return response({ ok: true });
+      return response({ error: "not found" }, 404);
+    }));
+    render(<MCPPanel available />);
+    await screen.findByText("off");
+    const retry = screen.getByRole("button", { name: "Retry" });
+    expect(retry).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Disable" })).toBeDisabled();
+    fireEvent.click(retry);
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringContaining("/v1/mcp/retry"),
+        expect.objectContaining({ body: JSON.stringify({ name: "off" }) }),
+      ),
+    );
   });
 
   it("retries all non-up servers", async () => {

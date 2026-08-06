@@ -140,8 +140,9 @@ export function MCPPanel({ available }: { available: boolean }) {
               <div className="mcp-card-actions">
                 <button
                   type="button"
-                  disabled={acting || server.state === "disabled"}
+                  disabled={acting || server.state === "up"}
                   onClick={() => void onRetry(server.name)}
+                  title={server.state === "up" ? "Server is already up" : "Reconnect (also re-enables disabled)"}
                 >
                   Retry
                 </button>
