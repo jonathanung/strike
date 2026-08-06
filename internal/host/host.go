@@ -485,8 +485,8 @@ type ProjectInit interface {
 type Roots interface {
 	// ActiveID is the root currently receiving composer ops.
 	ActiveID() string
-	// LiveIDs lists in-process root session ids (stable order: active first,
-	// then remaining by id).
+	// LiveIDs lists in-process root session ids in stable spawn/open order.
+	// Activate must not reorder the slice (agents pane / numbered shortcuts).
 	LiveIDs() []string
 	// Activate switches the ops target to an already-live root id.
 	Activate(id string) error
