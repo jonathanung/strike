@@ -9,8 +9,8 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -68,6 +68,8 @@ type capabilities struct {
 	Workflows      bool `json:"workflows"`
 	WorkflowDrafts bool `json:"workflowDrafts"`
 	Goals          bool `json:"goals"`
+	Plugins        bool `json:"plugins"`
+	Panes          bool `json:"panes"`
 	// Timeline is the redacted run-timeline snapshot/export surface
 	// (GET /v1/sessions/{id}/timeline[+ /export]). Always on when SessionDir is set.
 	Timeline bool `json:"timeline"`
@@ -113,6 +115,9 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		c.Permissions = h.Permissions != nil
 		// MCP status/control is exposed via /v1/mcp*.
 		c.MCP = h.MCP != nil
+		// Plugin lifecycle + pane contributions via /v1/plugins* and /v1/panes* (#732).
+		c.Plugins = h.Plugins != nil
+		c.Panes = h.Panes != nil
 		// Capabilities describe browser surfaces, not merely host interfaces.
 		// Roots, custom providers, project init, and telemetry remain false
 		// until this server exposes their service operations.
@@ -289,8 +294,8 @@ type settingsPatchBody struct {
 	Effort   string `json:"effort"`
 	Mode     string `json:"mode"`
 
-	Theme           string `json:"theme"`
-	Sandbox         string `json:"sandbox"`
+	Theme   string `json:"theme"`
+	Sandbox string `json:"sandbox"`
 	// IKnow acknowledges yolo+sandbox-off (same gate as PATCH /v1/sandbox).
 	IKnow           bool   `json:"iKnow"`
 	Notify          string `json:"notify"`

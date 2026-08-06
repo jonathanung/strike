@@ -68,6 +68,9 @@ type Server struct {
 	mux    *http.ServeMux
 	http   *http.Server
 	static fs.FS
+
+	// paneHost supervises process panes for the web cockpit (#732).
+	paneHost *paneHost
 }
 
 // New validates options and builds a Server. Does not listen.
@@ -206,6 +209,29 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/mcp", s.handleMCPList)
 	s.mux.HandleFunc("POST /v1/mcp/retry", s.handleMCPRetry)
 	s.mux.HandleFunc("POST /v1/mcp/disable", s.handleMCPDisable)
+	// Plugin lifecycle + pane contributions (web parity #732).
+	// Action paths are body-id based (POST /v1/plugins/disable) so static
+	// segments never collide with plugin ids that contain dots/slashes.
+	s.mux.HandleFunc("GET /v1/plugins/outdated", s.handlePluginOutdated)
+	s.mux.HandleFunc("POST /v1/plugins/search", s.handlePluginSearch)
+	s.mux.HandleFunc("POST /v1/plugins/install", s.handlePluginInstall)
+	s.mux.HandleFunc("POST /v1/plugins/enable", s.handlePluginEnable)
+	s.mux.HandleFunc("POST /v1/plugins/disable", s.handlePluginDisable)
+	s.mux.HandleFunc("POST /v1/plugins/remove", s.handlePluginRemove)
+	s.mux.HandleFunc("POST /v1/plugins/trust", s.handlePluginTrust)
+	s.mux.HandleFunc("POST /v1/plugins/untrust", s.handlePluginUntrust)
+	s.mux.HandleFunc("POST /v1/plugins/preview-update", s.handlePluginPreviewUpdate)
+	s.mux.HandleFunc("POST /v1/plugins/update", s.handlePluginUpdate)
+	s.mux.HandleFunc("GET /v1/plugins", s.handlePluginsList)
+	s.mux.HandleFunc("GET /v1/plugins/{id}/trust-preview", s.handlePluginTrustPreview)
+	s.mux.HandleFunc("GET /v1/plugins/{id}", s.handlePluginGet)
+	s.mux.HandleFunc("GET /v1/panes", s.handlePanesList)
+	s.mux.HandleFunc("GET /v1/panes/{id}/snapshot", s.handlePaneSnapshot)
+	s.mux.HandleFunc("POST /v1/panes/{id}/mount", s.handlePaneMount)
+	s.mux.HandleFunc("POST /v1/panes/{id}/unmount", s.handlePaneUnmount)
+	s.mux.HandleFunc("POST /v1/panes/{id}/input", s.handlePaneInput)
+	s.mux.HandleFunc("POST /v1/panes/{id}/resize", s.handlePaneResize)
+	s.mux.HandleFunc("GET /v1/panes/{id}", s.handlePaneGet)
 	s.mux.HandleFunc("GET /v1/lsp", s.handleLSP)
 	s.mux.HandleFunc("POST /v1/lsp/retry", s.handleLSPRetry)
 	s.mux.HandleFunc("POST /v1/lsp/{name}/disable", s.handleLSPDisable)

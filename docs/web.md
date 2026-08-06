@@ -108,6 +108,26 @@ ssh -L 8787:127.0.0.1:8787 user@strike-host
 | `GET` | `/v1/mcp` | **yes** | MCP server status list (`{servers:[…]}`) |
 | `POST` | `/v1/mcp/retry` | **yes** | Retry one server (`{name?}`) or all non-up |
 | `POST` | `/v1/mcp/disable` | **yes** | Disable server and unregister tools (`{name}`) |
+| `GET` | `/v1/plugins` | **yes** | Installed plugins (host-safe; env keys only) |
+| `GET` | `/v1/plugins/outdated` | **yes** | Catalog-sourced installs with newer versions (`?registry=`) |
+| `GET` | `/v1/plugins/{id}` | **yes** | Inspect one plugin (`?scope=`) |
+| `GET` | `/v1/plugins/{id}/trust-preview` | **yes** | Capability review before trust (no secrets) |
+| `POST` | `/v1/plugins/enable` | **yes** | `{id, scope?}` |
+| `POST` | `/v1/plugins/disable` | **yes** | `{id, scope?}` |
+| `POST` | `/v1/plugins/remove` | **yes** | `{id, scope?, confirm:true}` |
+| `POST` | `/v1/plugins/trust` | **yes** | `{id, scope?}` after trust-preview |
+| `POST` | `/v1/plugins/untrust` | **yes** | `{id, scope?}` |
+| `POST` | `/v1/plugins/search` | **yes** | `{registry, query}` → catalog hits |
+| `POST` | `/v1/plugins/install` | **yes** | `{source, scope?, registry?}` path/git/catalog |
+| `POST` | `/v1/plugins/preview-update` | **yes** | `{id, scope?, registry?}` update review |
+| `POST` | `/v1/plugins/update` | **yes** | `{id, scope?, registry?, confirm:true}` |
+| `GET` | `/v1/panes` | **yes** | Enabled pane/1 contributions (no PluginRoot) |
+| `GET` | `/v1/panes/{id}` | **yes** | One pane descriptor + sanitized definition |
+| `GET` | `/v1/panes/{id}/snapshot` | **yes** | Current view tree + host feeds |
+| `POST` | `/v1/panes/{id}/mount` | **yes** | Mount static or start process pane |
+| `POST` | `/v1/panes/{id}/unmount` | **yes** | Shutdown process pane |
+| `POST` | `/v1/panes/{id}/input` | **yes** | `{event}` → `pane.input` |
+| `POST` | `/v1/panes/{id}/resize` | **yes** | `{width, height}` cell-equivalent size |
 | `GET` | `/v1/permissions/explain` | **yes** | Last-match-wins explain (`permission`, optional `pattern`) |
 | `GET` | `/v1/permissions/presets` | **yes** | Shipped permission preset catalog |
 | `GET` | `/v1/sessions/{id}/timeline` | **yes** | Redacted structured run timeline (JSON snapshot) |
@@ -550,6 +570,29 @@ Run after #917+ land; checklist expanded in #921:
 6. Fork → new HISTORY id; rename; delete unused historical.
 7. Close/stop one workspace → leaves ACTIVE without crashing.
 8. `./strike serve --attach-only --session-dir …` → no create/close; SSE only.
+
+### Plugin manager and panes (web parity)
+
+Bootstrap capabilities `plugins` / `panes` are true when `Services.Plugins` /
+`Services.Panes` are wired (live `strike serve`). The inspector **plugins** and
+**panes** tabs provide TUI `/plugin` lifecycle parity and pane/1 rendering
+without importing TUI types ([plugin-panes.md](plugin-panes.md) §14).
+
+When `capabilities.plugins` / `capabilities.panes` are true, the inspector exposes:
+
+- **plugins** — list/install/enable/disable/remove/trust/update with the same
+  capability review posture as TUI `/plugin` (trust-preview before trust;
+  `confirm:true` before remove/update; env **keys** only — never values).
+- **panes** — list enabled pane/1 contributions; mount static views (client
+  resolves `valueFrom` against host feeds) or process panes (server-supervised
+  JSONL subprocess; browser receives view trees / errors only).
+- **Forbidden on the wire:** `PluginRoot`, resolved secret env values, Go
+  `window` / `tea.Msg` / lipgloss / terminal escape passthrough.
+- **panes** — mount enabled `pane/1` contributions; static views bind host feeds
+  client-side; process panes are supervised by the strike server and the browser
+  only receives view trees / errors (no `PluginRoot`, no TUI types).
+
+Mutations that change trust or install state require a live host (not attach-only).
 
 ## Vite dev / production web toolchain
 
