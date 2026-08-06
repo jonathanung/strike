@@ -19,10 +19,26 @@ export type TranscriptItem = {
 export type ImageAttachment = { name: string; mime: string; data: string };
 export type { TurnFileChange, UndoPreview } from "./undoPreview";
 
+/** Child agent row derived from child.* events (+ optional children API seed). */
+export type ChildAgent = {
+  agent?: string;
+  name?: string;
+  status: string;
+  summary?: string;
+  /** Handoff quality: complete | partial | unavailable (#879). */
+  quality?: string;
+  budgetKind?: string;
+  finalization?: string;
+  prompt?: string;
+  escalateKind?: string;
+  escalateReason?: string;
+  escalateAction?: string;
+};
+
 export type WorkspaceState = {
   items: TranscriptItem[]; seen: Set<string>; status: Status;
   permission?: Record<string, unknown>; question?: Record<string, unknown>;
-  children: Record<string, { agent?: string; status: string; summary?: string }>;
+  children: Record<string, ChildAgent>;
   changedFiles: string[];
   /** Stack of last-turn harness previews; top is current /rewind target (TUI undoStack). */
   undoStack: import("./undoPreview").UndoPreview[];

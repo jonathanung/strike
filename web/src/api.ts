@@ -53,3 +53,6 @@ export function historicalConnection(id: string, onEvent: (event: Envelope) => v
   source.onerror = () => onError("history reconnecting");
   return () => source.close();
 }
+
+export const sessionChildren = (id: string) =>
+  request<{ sessions: Array<Record<string, unknown>> }>(`/v1/sessions/${encodeURIComponent(id)}/children`);
