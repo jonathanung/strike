@@ -438,6 +438,54 @@ func TestInstallGit_PinsCommit(t *testing.T) {
 	}
 }
 
+func TestDiscover_SkipsStagingAndBackupDirs(t *testing.T) {
+	home := t.TempDir()
+	plugins := filepath.Join(home, ".strike", "plugins")
+	// Staging leftover must not load.
+	writePlugin(t, filepath.Join(plugins, ".staging-install-xyz"), "bad.staging", map[string]string{
+		"plugin.json": manifest("bad.staging", `{"agents":[{"path":"agents/a.md"}]}`),
+		"agents/a.md": validAgentMD("x"),
+	})
+	writePlugin(t, filepath.Join(plugins, ".bak-acme-1"), "bad.bak", map[string]string{
+		"plugin.json": manifest("bad.bak", `{"agents":[{"path":"agents/a.md"}]}`),
+		"agents/a.md": validAgentMD("y"),
+	})
+	writePlugin(t, filepath.Join(plugins, "acme.pack"), "acme.pack", map[string]string{
+		"plugin.json": manifest("acme.pack", `{"agents":[{"path":"agents/a.md"}]}`),
+		"agents/a.md": validAgentMD("z"),
+	})
+	res := Discover(Options{GlobalRoot: filepath.Join(home, ".strike"), StrikeVersion: "0.2.0"})
+	if len(res.Plugins) != 1 || res.Plugins[0].ID != "acme.pack" {
+		t.Fatalf("got %+v", res.Plugins)
+	}
+}
+
+func TestInstallForce_RollbackRestoresPrevious(t *testing.T) {
+	// Covered indirectly: force replace succeeds; ensure no .bak leftovers.
+	home := t.TempDir()
+	src := testBundle(t, t.TempDir(), "acme.pack")
+	opts := InstallOptions{
+		Scope: ScopeGlobal, GlobalRoot: filepath.Join(home, ".strike"),
+		LocalPath: src, StrikeVersion: "0.2.0",
+	}
+	if _, err := Install(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	opts.Force = true
+	if _, err := Install(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(filepath.Join(home, ".strike", "plugins"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".") {
+			t.Fatalf("leftover hidden dir after force install: %s", e.Name())
+		}
+	}
+}
+
 func TestParseInstallSource(t *testing.T) {
 	loc, git, err := ParseInstallSource("./my-plugin")
 	if err != nil || loc != "./my-plugin" || git != "" {

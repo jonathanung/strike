@@ -162,6 +162,7 @@ func Install(ctx context.Context, opts InstallOptions) (InstallResult, error) {
 
 	// Atomic commit under lockfile lock: swap staging into place + write lock entry.
 	var result InstallResult
+	var backup string // hidden under plugins root; restored if lock write fails after swap
 	err = WithLockfileLock(roots.LockPath, func(lf Lockfile) (Lockfile, bool, error) {
 		_, onDisk := os.Stat(dest)
 		_, inLock := lf.Plugins[p.ID]
@@ -170,24 +171,23 @@ func Install(ctx context.Context, opts InstallOptions) (InstallResult, error) {
 		}
 
 		// Replace destination atomically: rename old aside, rename staging in, remove old.
-		var backup string
+		// Backup uses a leading-dot name so Discover/List skip it.
 		if onDisk == nil {
-			backup = dest + ".bak-" + sanitizeDirComponent(p.ID)
+			backup = filepath.Join(roots.PluginsDir, ".bak-"+sanitizeDirComponent(p.ID)+"-"+fmt.Sprintf("%d", os.Getpid()))
 			_ = os.RemoveAll(backup)
 			if err := os.Rename(dest, backup); err != nil {
+				backup = ""
 				return lf, true, fmt.Errorf("replace existing install: %w", err)
 			}
 		}
 		if err := os.Rename(staging, dest); err != nil {
 			if backup != "" {
 				_ = os.Rename(backup, dest)
+				backup = ""
 			}
 			return lf, true, fmt.Errorf("activate install: %w", err)
 		}
 		stagingOK = true
-		if backup != "" {
-			_ = roots.removeAllUnderPlugins(backup)
-		}
 
 		enabled := true
 		entry := LockfileEntry{
@@ -210,13 +210,24 @@ func Install(ctx context.Context, opts InstallOptions) (InstallResult, error) {
 		return lf, false, nil
 	})
 	if err != nil {
-		// If rename succeeded but lock write failed, roll back dest so we leave
-		// nothing partially enabled.
+		// If rename succeeded but lock write failed, roll back: restore previous
+		// install when we had a backup; otherwise remove the partial dest.
 		if stagingOK {
 			_ = roots.removeAllUnderPlugins(dest)
+			if backup != "" {
+				_ = os.Rename(backup, dest)
+				backup = ""
+			}
 			stagingOK = false
 		}
+		if backup != "" {
+			_ = roots.removeAllUnderPlugins(backup)
+		}
 		return InstallResult{}, err
+	}
+	// Success: drop backup of previous install.
+	if backup != "" {
+		_ = roots.removeAllUnderPlugins(backup)
 	}
 	return result, nil
 }
