@@ -1,25 +1,35 @@
 import { FormEvent, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { bootstrap, createRoot, historicalConnection, liveConnection, request, resumeRoot, roots as loadRoots, sendOp, sessions as loadSessions } from "./api";
+import { activateRoot, bootstrap, closeRoot, createRoot, historicalConnection, liveConnection, request, resumeRoot, roots as loadRoots, sendOp, sessions as loadSessions } from "./api";
+import { buildExportMarkdown, defaultExportFilename, downloadTextFile } from "./exportMarkdown";
+import { clearQueue, editQueuedText, moveQueuedAt, removeQueuedAt, type QueuedPrompt } from "./queueOps";
 import { initialState, reduceEvent } from "./reducer";
+import { formatCostNotice, formatSlashHelp, resolveSlash, WEB_SLASH_COMMANDS } from "./slash";
 import { Transcript } from "./Transcript";
 import type { ActiveRoot, Bootstrap, ImageAttachment, Session, Status } from "./types";
+import { PlansPanel } from "./Plans";
 import { WorkflowsPanel } from "./Workflows";
 import "./styles.css";
 
-type InspectorTab = "context" | "files" | "memory" | "issues" | "workflows";
+type InspectorTab = "context" | "files" | "memory" | "issues" | "plans" | "workflows";
 type Completion = { label: string; detail: string; insert: string };
 type ChangedFile = { path: string; added: number; deleted: number; diff: string };
 type MemoryEntry = { Key?: string; key?: string; Value?: string; value?: string; Tags?: string[]; tags?: string[] };
 type IssueEntry = { ID?: number; id?: number; Title?: string; title?: string; Body?: string; body?: string; Status?: string; status?: string };
 const runtimeValues = { effort: ["low", "medium", "high", "xhigh"], autonomy: ["supervised", "agent", "checks"], permission: ["default", "plan", "soft-approve", "accept-edits", "yolo"] };
-const slashCommands: Completion[] = [
-  { label: "/compact", detail: "Compact model history", insert: "/compact" },
-  { label: "/prompt", detail: "Inspect effective prompt", insert: "/prompt" },
-  { label: "/rewind", detail: "Rewind the last completed turn", insert: "/rewind" },
-  { label: "/rewind-files", detail: "Rewind turn and file checkpoints", insert: "/rewind-files" },
-];
+const slashCommands: Completion[] = WEB_SLASH_COMMANDS;
 
 const op = (type: string, data?: unknown, rootID?: string) => sendOp(type, data, rootID).catch((error) => window.alert(error.message));
+
+const shortID = (id: string) => id.slice(0, 12);
+const rootTitle = (root: ActiveRoot, sessions: Session[]) => root.title || sessions.find((s) => s.id === root.id)?.title || shortID(root.id);
+const relativeActivity = (ms?: number) => {
+  if (!ms) return "";
+  const sec = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  if (sec < 60) return "just now";
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
+  return `${Math.floor(sec / 86400)}d ago`;
+};
 
 function Field({ label, value, values, disabled, onChange }: { label: string; value?: string; values: string[]; disabled?: boolean; onChange: (value: string) => void }) {
   return <label className="runtime-field"><span>{label}</span><select aria-label={label} value={value || ""} disabled={disabled} onChange={(event) => onChange(event.target.value)}><option value="">—</option>{values.map((item) => <option key={item}>{item}</option>)}</select></label>;
@@ -52,7 +62,10 @@ export default function App() {
   const [state, dispatch] = useReducer(reduceEvent, undefined, initialState);
   const [transport, setTransport] = useState("connecting");
   const [draft, setDraft] = useState("");
-  const [queue, setQueue] = useState<Array<{ text: string; images: ImageAttachment[] }>>([]);
+  const [queue, setQueue] = useState<QueuedPrompt[]>([]);
+  const [queueEdit, setQueueEdit] = useState<{ index: number; text: string } | null>(null);
+  const queueRef = useRef<HTMLOListElement>(null);
+  const queueEditCancel = useRef(false);
   const [images, setImages] = useState<ImageAttachment[]>([]);
   const [inspector, setInspector] = useState<InspectorTab>("context");
   const [inspectorOpen, setInspectorOpen] = useState(true);
@@ -71,7 +84,7 @@ export default function App() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const refreshSessions = () => loadSessions().then((list) => { setSessions(list.sessions || []); setLiveID(list.liveId || ""); return list; });
-  const refreshRoots = () => loadRoots().then((r) => { setActiveRoots(r.roots || []); setActiveRootID(r.activeId || ""); return r; }).catch(() => {});
+  const refreshRoots = () => loadRoots().then((r) => { setActiveRoots(r.roots || []); setActiveRootID(r.activeId || ""); return r; }).catch(() => undefined);
   useEffect(() => {
     // roots is optional (attach-only returns 503) — do not fail the whole boot.
     Promise.all([
@@ -120,13 +133,82 @@ export default function App() {
     return [];
   }, [draft, boot]);
 
+  const notice = (title: string, body: string) => dispatch({ type: "local.system", time: String(Date.now()), data: { title, text: body } });
+  const exportSession = () => {
+    const md = buildExportMarkdown(state.items, {
+      sessionId: selectedID || state.status.sessionId,
+      title: sessions.find((s) => s.id === selectedID)?.title,
+      provider: state.status.provider,
+      model: state.status.model,
+      agent: state.status.agent,
+    });
+    downloadTextFile(defaultExportFilename(selectedID || state.status.sessionId), md);
+  };
   const execute = (text: string, attached: ImageAttachment[]) => {
     const command = text.trim();
-    if (command === "/compact") return void op("compact", { strategy: "summarize" }, selectedID);
-    if (command === "/prompt") return void op("inspect.prompt", undefined, selectedID);
-    if (command === "/rewind") return void op("rewind", {}, selectedID);
-    if (command === "/rewind-files") return void op("rewind", { restoreFiles: true }, selectedID);
-    void op("user.input", { text: command, images: attached.map(({ mime, data }) => ({ mime, data })) }, selectedID);
+    const skillNames = (boot?.skills || []).map((s) => s.name);
+    const resolved = resolveSlash(command, skillNames);
+    switch (resolved.kind) {
+      case "pass":
+        void op("user.input", { text: command, images: attached.map(({ mime, data }) => ({ mime, data })) }, selectedID);
+        return;
+      case "unknown":
+        notice("Unknown command", `${resolved.command} is not available in the web cockpit. Type /help for the list.`);
+        return;
+      case "usage":
+        notice("Usage", resolved.message);
+        return;
+      case "help":
+        notice("Help", formatSlashHelp(boot?.skills || []));
+        return;
+      case "export":
+        exportSession();
+        return;
+      case "queue":
+        queueRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        notice("Queue", queue.length ? `${queue.length} prompt(s) queued — reorder, edit, or clear below the composer.` : "Queue is empty. Prompts sent while the agent is busy land here.");
+        return;
+      case "cost":
+        notice("Cost", formatCostNotice(state.status));
+        return;
+      case "copy": {
+        const last = [...state.items].reverse().find((item) => item.kind === "assistant" && item.text.trim());
+        if (!last) { notice("Copy", "No assistant reply to copy."); return; }
+        void navigator.clipboard?.writeText(last.text).then(
+          () => notice("Copy", "Last assistant reply copied to clipboard."),
+          () => notice("Copy", "Clipboard unavailable in this browser."),
+        );
+        return;
+      }
+      case "fork":
+        void sessionAction("fork");
+        return;
+      case "rename": {
+        if (resolved.title) {
+          if (!boot?.capabilities.sessions) { notice("Rename", "Sessions capability unavailable."); return; }
+          void request(`/v1/sessions/${encodeURIComponent(selectedID)}`, { method: "PATCH", body: JSON.stringify({ title: resolved.title }) }).then(() => refreshSessions()).catch((error) => window.alert(error.message));
+          return;
+        }
+        void sessionAction("rename");
+        return;
+      }
+      case "fast": {
+        const enabled = resolved.enabled === undefined ? !fast : resolved.enabled;
+        setFast(enabled);
+        void op("set.fast", { enabled }, selectedID);
+        return;
+      }
+      case "op": {
+        let data = resolved.data;
+        if (resolved.type === "select.model" && data && typeof data === "object") {
+          const body = { ...(data as Record<string, unknown>) };
+          if (!body.provider) body.provider = state.status.provider;
+          data = body;
+        }
+        void op(resolved.type, data, selectedID);
+        return;
+      }
+    }
   };
   const submit = (event: FormEvent) => {
     event.preventDefault(); const text = draft.trim(); if (!text || !isLive) return;
@@ -145,30 +227,71 @@ export default function App() {
       if (tab === "files") setProjectData(boot?.capabilities.files ? await request(`/v1/changed-files${selectedID ? `?root=${encodeURIComponent(selectedID)}` : ""}`).catch((error) => ({ error: error.message })) : undefined);
       if (tab === "memory") setProjectData(boot?.capabilities.memory ? await request("/v1/memory").catch((error) => ({ error: error.message })) : undefined);
       if (tab === "issues") setProjectData(boot?.capabilities.issues ? await request("/v1/issues").catch((error) => ({ error: error.message })) : undefined);
-      if (tab === "workflows") setProjectData(undefined);
+      if (tab === "plans" || tab === "workflows") setProjectData(undefined);
     } finally { setProjectLoading(false); }
   };
   const sessionAction = async (action: "fork" | "rename" | "delete") => {
-    if (!boot?.capabilities.sessions) return;
+    if (!boot?.capabilities.sessions || !selectedID) return;
     if (action === "fork") await request(`/v1/sessions/${encodeURIComponent(selectedID)}/fork`, { method: "POST" });
     if (action === "rename") { const title = window.prompt("Session title"); if (title === null) return; await request(`/v1/sessions/${encodeURIComponent(selectedID)}`, { method: "PATCH", body: JSON.stringify({ title }) }); }
     if (action === "delete" && window.confirm("Delete this durable session?")) await request(`/v1/sessions/${encodeURIComponent(selectedID)}`, { method: "DELETE" });
-    await refreshSessions();
+    await Promise.all([refreshSessions(), refreshRoots()]);
   };
-  const handleCreateWorkspace = async () => { if (!boot?.capabilities.roots) return; try { const result = await createRoot(); await refreshRoots(); setSelectedID(result.id); setSelectedIsLive(true); setNavTab("active"); } catch (error) { window.alert((error as Error).message); } };
-  const handleResume = async (id: string) => { if (!boot?.capabilities.roots) return; try { const result = await resumeRoot(id); await refreshRoots(); setSelectedID(result.id); setSelectedIsLive(true); setNavTab("active"); } catch (error) { window.alert((error as Error).message); } };
-  const selectWorkspace = (id: string, isLive: boolean) => { setSelectedID(id); setSelectedIsLive(isLive); };
+  const handleCreateWorkspace = async () => { if (!boot?.capabilities.roots || boot.attachOnly) return; try { const result = await createRoot(); await refreshRoots(); setSelectedID(result.id); setSelectedIsLive(true); setNavTab("active"); } catch (error) { window.alert((error as Error).message); } };
+  const handleResume = async (id: string) => { if (!boot?.capabilities.roots || boot.attachOnly) return; try { const result = await resumeRoot(id); await refreshRoots(); setSelectedID(result.id); setSelectedIsLive(true); setNavTab("active"); } catch (error) { window.alert((error as Error).message); } };
+  const selectWorkspace = async (id: string, isLive: boolean) => {
+    setSelectedID(id);
+    setSelectedIsLive(isLive);
+    if (!isLive || !boot?.capabilities.roots || boot.attachOnly) return;
+    try {
+      await activateRoot(id);
+      await refreshRoots();
+    } catch (error) {
+      window.alert((error as Error).message);
+    }
+  };
+  const handleCloseWorkspace = async () => {
+    if (!boot?.capabilities.roots || boot.attachOnly || !selectedIsLive || !selectedID) return;
+    const root = activeRoots.find((r) => r.id === selectedID);
+    const prompt = root?.busy ? "This workspace is busy. Close/stop it anyway?" : "Close this workspace?";
+    if (!window.confirm(prompt)) return;
+    try {
+      await closeRoot(selectedID);
+      const [rootsResult, sessionsResult] = await Promise.all([refreshRoots(), refreshSessions()]);
+      const nextLive = rootsResult?.activeId || rootsResult?.roots?.[0]?.id || "";
+      if (nextLive) {
+        setSelectedID(nextLive);
+        setSelectedIsLive(true);
+        setNavTab("active");
+      } else {
+        const first = sessionsResult?.sessions?.[0]?.id || "";
+        setSelectedID(first);
+        setSelectedIsLive(false);
+        setNavTab("history");
+      }
+    } catch (error) {
+      window.alert((error as Error).message);
+    }
+  };
   const toggleDiff = (path: string) => setExpandedDiffs((old) => { const next = new Set(old); next.has(path) ? next.delete(path) : next.add(path); return next; });
 
   return <div className="app-shell" style={shellStyle}>
-    <header><button className="icon-button" aria-label="Toggle agents panel" aria-pressed={navOpen} onClick={() => setNavOpen((open) => !open)}>☰</button><div className="wordmark"><span className="mark">S</span><strong>STRIKE</strong><small>workspace</small></div><div className="session-line"><span className={state.status.busy ? "pulse busy" : "pulse"} />{state.status.busy ? "agent working" : transport}</div><button className="icon-button" aria-label="Open settings" onClick={() => setSettingsOpen(true)}>⚙</button><button className="icon-button" aria-label="Toggle inspector" aria-pressed={inspectorOpen} onClick={() => setInspectorOpen((open) => !open)}>◫</button></header>
-    <aside className={`navigation ${navOpen ? "open" : "collapsed"}`} aria-label="Agents panel"><PanelResize label="Resize agents panel" value={navWidth} min={180} max={420} onChange={setNavWidth} />{boot?.capabilities.roots ? <><div className="aside-heading"><button className={`nav-tab ${navTab === "active" ? "active" : ""}`} onClick={() => setNavTab("active")}>ACTIVE</button><button className={`nav-tab ${navTab === "history" ? "active" : ""}`} onClick={() => setNavTab("history")}>HISTORY</button></div>{navTab === "active" && <><nav>{activeRoots.map((root) => <button key={root.id} className={root.id === selectedID && selectedIsLive ? "session active" : "session"} onClick={() => selectWorkspace(root.id, true)}><span className={root.busy ? "root-busy" : "root-idle"} />{root.agent || root.id.slice(0, 12)}{root.id === activeRootID && <small>ACTIVE</small>}{root.busy && <small>BUSY</small>}</button>)}</nav>{!boot?.attachOnly && <div className="session-actions"><button onClick={() => void handleCreateWorkspace()}>+ New workspace</button></div>}</>}{navTab === "history" && <HistoryNav sessions={sessions} activeRoots={activeRoots} selectedID={selectedID} selectedIsLive={selectedIsLive} historySearch={historySearch} setHistorySearch={setHistorySearch} selectWorkspace={selectWorkspace} handleResume={handleResume} boot={boot} sessionAction={sessionAction} />}</> : <><div className="aside-heading"><span>SESSIONS</span></div><nav>{sessions.map((session) => <button key={session.id} className={session.id === selectedID ? "session active" : "session"} onClick={() => { setSelectedID(session.id); setSelectedIsLive(session.id === liveID && !boot?.attachOnly); }}><span>{session.title || session.id.slice(0, 12)}</span>{session.id === liveID && <small>LIVE</small>}</button>)}</nav><div className="session-actions" aria-label="Session actions"><button disabled={!boot?.capabilities.sessions} onClick={() => void sessionAction("fork")}>Fork</button><button disabled={!boot?.capabilities.sessions} onClick={() => void sessionAction("rename")}>Rename</button><button disabled={!boot?.capabilities.sessions} onClick={() => void sessionAction("delete")}>Delete</button></div></>}<div className="aside-heading">CHILD AGENTS</div><div className="children">{children.length ? children.map(([id, child]) => <div key={id}><span className={`child-state ${child.status}`} />{child.agent || id.slice(0, 8)}<small>{child.status}</small></div>) : <p>None dispatched</p>}</div><div className="workspace-meta"><span>ROOT</span><code>{state.status.cwd || "unavailable"}</code><span>BUILD</span><code>{boot?.version || "…"}</code></div></aside>
+    <header><button className="icon-button" aria-label="Toggle agents panel" aria-pressed={navOpen} onClick={() => setNavOpen((open) => !open)}>☰</button><div className="wordmark"><span className="mark">S</span><strong>STRIKE</strong><small>workspace</small></div><div className="session-line"><span className={state.status.busy ? "pulse busy" : "pulse"} />{state.status.busy ? "agent working" : transport}</div><button className="icon-button" aria-label="Export markdown" title="Export markdown" onClick={() => exportSession()}>↓</button><button className="icon-button" aria-label="Open settings" onClick={() => setSettingsOpen(true)}>⚙</button><button className="icon-button" aria-label="Toggle inspector" aria-pressed={inspectorOpen} onClick={() => setInspectorOpen((open) => !open)}>◫</button></header>
+    <aside className={`navigation ${navOpen ? "open" : "collapsed"}`} aria-label="Agents panel"><PanelResize label="Resize agents panel" value={navWidth} min={180} max={420} onChange={setNavWidth} />{boot?.capabilities.roots ? <><div className="aside-heading"><button className={`nav-tab ${navTab === "active" ? "active" : ""}`} onClick={() => setNavTab("active")}>ACTIVE</button><button className={`nav-tab ${navTab === "history" ? "active" : ""}`} onClick={() => setNavTab("history")}>HISTORY</button></div>{navTab === "active" && <><nav>{activeRoots.map((root) => {
+                  const label = rootTitle(root, sessions);
+                  const activity = relativeActivity(root.activeAt);
+                  return <button key={root.id} type="button" className={root.id === selectedID && selectedIsLive ? "session active" : "session"} onClick={() => void selectWorkspace(root.id, true)} title={root.id}>
+                    <span className={root.busy ? "root-busy" : "root-idle"} aria-hidden />
+                    <span className="session-main"><span className="session-title">{label}</span><span className="session-meta">{root.agent || "—"}{activity ? ` · ${activity}` : ""}</span></span>
+                    <span className="session-flags">{root.id === activeRootID && <small>ACTIVE</small>}<small>{root.busy ? "BUSY" : "IDLE"}</small></span>
+                  </button>;
+                })}</nav>{!boot?.attachOnly && <div className="session-actions"><button type="button" onClick={() => void handleCreateWorkspace()}>+ New workspace</button><button type="button" disabled={!selectedIsLive || !selectedID} onClick={() => void handleCloseWorkspace()}>Close workspace</button></div>}</>}{navTab === "history" && <HistoryNav sessions={sessions} activeRoots={activeRoots} selectedID={selectedID} selectedIsLive={selectedIsLive} historySearch={historySearch} setHistorySearch={setHistorySearch} selectWorkspace={selectWorkspace} handleResume={handleResume} boot={boot} sessionAction={sessionAction} />}</> : <><div className="aside-heading"><span>SESSIONS</span></div><nav>{sessions.map((session) => <button key={session.id} className={session.id === selectedID ? "session active" : "session"} onClick={() => { setSelectedID(session.id); setSelectedIsLive(session.id === liveID && !boot?.attachOnly); }}><span>{session.title || session.id.slice(0, 12)}</span>{session.id === liveID && <small>LIVE</small>}</button>)}</nav><div className="session-actions" aria-label="Session actions"><button disabled={!boot?.capabilities.sessions} onClick={() => void sessionAction("fork")}>Fork</button><button disabled={!boot?.capabilities.sessions} onClick={() => void sessionAction("rename")}>Rename</button><button disabled={!boot?.capabilities.sessions} onClick={() => void sessionAction("delete")}>Delete</button></div></>}<div className="aside-heading">CHILD AGENTS</div><div className="children">{children.length ? children.map(([id, child]) => <div key={id}><span className={`child-state ${child.status}`} />{child.agent || id.slice(0, 8)}<small>{child.status}</small></div>) : <p>None dispatched</p>}</div><div className="workspace-meta"><span>ROOT</span><code>{state.status.cwd || "unavailable"}</code><span>BUILD</span><code>{boot?.version || "…"}</code></div></aside>
     <main>
       <section className="runtime" aria-label="Runtime controls"><Field label="Provider" value={state.status.provider} values={providers.length ? providers : state.status.provider ? [state.status.provider] : []} disabled={!isLive || state.status.busy || !boot?.capabilities.auth} onChange={(name) => void selectProvider(name)} /><Field label="Model" value={state.status.model} values={models.length ? models : state.status.model ? [state.status.model] : []} disabled={!isLive || state.status.busy || !boot?.capabilities.catalog} onChange={(model) => void op("select.model", { provider: state.status.provider, model }, selectedID)} /><Field label="Agent" value={state.status.agent} values={boot?.agents.map((agent) => agent.name) || []} disabled={!isLive || state.status.busy} onChange={(name) => void op("select.agent", { name }, selectedID)} /><Field label="Effort" value={state.status.effort} values={runtimeValues.effort} disabled={!isLive || state.status.busy} onChange={(level) => void op("set.effort", { level }, selectedID)} /><Field label="Autonomy" value={state.status.autonomy} values={runtimeValues.autonomy} disabled={!isLive || state.status.busy} onChange={(mode) => void op("set.autonomy", { mode }, selectedID)} /><Field label="Permission" value={state.status.permissionMode} values={runtimeValues.permission} disabled={!isLive || state.status.busy} onChange={(mode) => void op("set.permission_mode", { mode }, selectedID)} /><label className="fast-toggle"><input type="checkbox" checked={fast} disabled={!isLive || state.status.busy} onChange={(event) => { setFast(event.target.checked); void op("set.fast", { enabled: event.target.checked }, selectedID); }} />FAST</label></section>
       <section className="transcript" aria-live="polite" aria-label="Conversation transcript">{!boot && transport !== "connecting" ? <div className="empty-state" role="alert"><span>ERROR</span><h1>{transport}</h1><p>Failed to load cockpit. Open the URL printed by <code>strike serve</code> (includes <code>?token=</code>), or pass a valid bearer token.</p></div> : !state.items.length && <div className="empty-state"><span>01 / READY</span><h1>{boot?.attachOnly ? "Inspect the record." : "Direct the work."}</h1><p>{boot?.attachOnly ? "Select a durable session from the rail." : "Describe an outcome. Strike will plan, act, and report through the live engine seam."}</p></div>}{state.items.map((item) => <Transcript key={item.id} item={item} />)}<div ref={endRef} /></section>
-      <form className="composer" onSubmit={submit}><label htmlFor="prompt">Instruction {state.status.busy && "— send to queue"}</label><textarea aria-label="Instruction" id="prompt" value={draft} disabled={!isLive} placeholder={isLive ? "Describe the next outcome…  / command" : "Historical session — read only"} onPaste={(event) => void attach(event.clipboardData.files)} onDrop={(event) => { event.preventDefault(); void attach(event.dataTransfer.files); }} onDragOver={(event) => event.preventDefault()} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !completions.length) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} />{completions.length > 0 && <div className="completion" role="listbox" aria-label="Composer completions">{completions.slice(0, 8).map((item) => <button type="button" role="option" key={item.label} onClick={() => selectCompletion(item)}><strong>{item.label}</strong><span>{item.detail}</span></button>)}</div>}{images.length > 0 && <div className="attachments">{images.map((image, index) => <button type="button" key={`${image.name}-${index}`} onClick={() => setImages((list) => list.filter((_, i) => i !== index))}>{image.name} ×</button>)}</div>}{queue.length > 0 && <ol className="prompt-queue" aria-label="Queued prompts">{queue.map((item, index) => <li key={index}><span>{item.text}</span><button type="button" aria-label={`Remove queued prompt ${index + 1}`} onClick={() => setQueue((list) => list.filter((_, i) => i !== index))}>×</button></li>)}</ol>}<div><span><kbd>↵</kbd> send · <kbd>⇧↵</kbd> newline</span><span><input ref={fileRef} hidden type="file" accept="image/*" multiple onChange={(event) => void attach(event.target.files)} /><button type="button" onClick={() => fileRef.current?.click()}>Attach</button>{history.length > 0 && <button type="button" onClick={() => setDraft(history.at(-1) || "")}>History</button>}{state.status.busy && <button type="button" className="stop" onClick={() => void op("interrupt")}>Interrupt</button>}<button type="submit" disabled={!draft.trim() || !isLive}>{state.status.busy ? "Queue" : "Send"}</button></span></div></form>
+      <form className="composer" onSubmit={submit}><label htmlFor="prompt">Instruction {state.status.busy && "— send to queue"}</label><textarea aria-label="Instruction" id="prompt" value={draft} disabled={!isLive} placeholder={isLive ? "Describe the next outcome…  / command" : "Historical session — read only"} onPaste={(event) => void attach(event.clipboardData.files)} onDrop={(event) => { event.preventDefault(); void attach(event.dataTransfer.files); }} onDragOver={(event) => event.preventDefault()} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !completions.length) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} />{completions.length > 0 && <div className="completion" role="listbox" aria-label="Composer completions">{completions.slice(0, 8).map((item) => <button type="button" role="option" key={item.label} onClick={() => selectCompletion(item)}><strong>{item.label}</strong><span>{item.detail}</span></button>)}</div>}{images.length > 0 && <div className="attachments">{images.map((image, index) => <button type="button" key={`${image.name}-${index}`} onClick={() => setImages((list) => list.filter((_, i) => i !== index))}>{image.name} ×</button>)}</div>}{queue.length > 0 && <div className="prompt-queue-wrap"><ol ref={queueRef} className="prompt-queue" aria-label="Queued prompts">{queue.map((item, index) => <li key={index}>{queueEdit?.index === index ? <input className="queue-edit" aria-label={`Queued prompt text ${index + 1}`} value={queueEdit.text} autoFocus onChange={(event) => setQueueEdit({ index, text: event.target.value })} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); queueEditCancel.current = false; setQueue((list) => editQueuedText(list, index, queueEdit.text)); setQueueEdit(null); } if (event.key === "Escape") { event.preventDefault(); queueEditCancel.current = true; setQueueEdit(null); } }} onBlur={() => { if (!queueEditCancel.current) setQueue((list) => editQueuedText(list, index, queueEdit.text)); queueEditCancel.current = false; setQueueEdit(null); }} /> : <span>{item.text}{item.images.length > 0 ? ` (${item.images.length} img)` : ""}</span>}<span className="queue-actions"><button type="button" aria-label={`Move queued prompt ${index + 1} up`} disabled={index === 0} onClick={() => setQueue((list) => moveQueuedAt(list, index, -1))}>↑</button><button type="button" aria-label={`Move queued prompt ${index + 1} down`} disabled={index === queue.length - 1} onClick={() => setQueue((list) => moveQueuedAt(list, index, 1))}>↓</button><button type="button" aria-label={`Edit queued prompt ${index + 1}`} onClick={() => { queueEditCancel.current = false; setQueueEdit({ index, text: item.text }); }}>✎</button><button type="button" aria-label={`Remove queued prompt ${index + 1}`} onClick={() => { setQueue((list) => removeQueuedAt(list, index)); setQueueEdit((cur) => cur?.index === index ? null : cur); }}>×</button></span></li>)}</ol><div className="queue-toolbar"><button type="button" onClick={() => { setQueue(clearQueue()); setQueueEdit(null); }}>Clear queue</button></div></div>}<div><span><kbd>↵</kbd> send · <kbd>⇧↵</kbd> newline</span><span><input ref={fileRef} hidden type="file" accept="image/*" multiple onChange={(event) => void attach(event.target.files)} /><button type="button" onClick={() => fileRef.current?.click()}>Attach</button>{history.length > 0 && <button type="button" onClick={() => setDraft(history.at(-1) || "")}>History</button>}<button type="button" onClick={() => exportSession()} disabled={!state.items.length}>Export</button>{state.status.busy && <button type="button" className="stop" onClick={() => void op("interrupt")}>Interrupt</button>}<button type="submit" disabled={!draft.trim() || !isLive}>{state.status.busy ? "Queue" : "Send"}</button></span></div></form>
     </main>
-    <aside className={`inspector ${inspectorOpen ? "open" : "collapsed"}`} aria-label="Inspector"><PanelResize label="Resize inspector panel" value={inspectorWidth} min={240} max={520} onChange={setInspectorWidth} /><div className="inspector-tabs" role="tablist">{(["context", "files", "memory", "issues", "workflows"] as InspectorTab[]).map((tab) => <button role="tab" aria-selected={inspector === tab} key={tab} onClick={() => void inspectProject(tab)}>{tab}</button>)}</div><div className="inspector-body"><InspectorBody tab={inspector} boot={boot} status={state.status} data={projectData} loading={projectLoading} expandedDiffs={expandedDiffs} toggleDiff={toggleDiff} isLive={isLive} selectedID={selectedID} /></div></aside>
+    <aside className={`inspector ${inspectorOpen ? "open" : "collapsed"}`} aria-label="Inspector"><PanelResize label="Resize inspector panel" value={inspectorWidth} min={240} max={520} onChange={setInspectorWidth} /><div className="inspector-tabs" role="tablist">{(["context", "files", "memory", "issues", "plans", "workflows"] as InspectorTab[]).map((tab) => <button role="tab" aria-selected={inspector === tab} key={tab} onClick={() => void inspectProject(tab)}>{tab}</button>)}</div><div className="inspector-body"><InspectorBody tab={inspector} boot={boot} status={state.status} data={projectData} loading={projectLoading} expandedDiffs={expandedDiffs} toggleDiff={toggleDiff} isLive={isLive} selectedID={selectedID} /></div></aside>
     {settingsOpen && <SettingsDialog boot={boot} status={state.status} providers={providers} onClose={() => setSettingsOpen(false)} />}
     {state.permission && <PermissionDialog permission={state.permission} rootID={selectedID} canExplain={Boolean(boot?.capabilities.permissions)} />}
     {state.question && <QuestionDialog question={state.question} rootID={selectedID} />}
@@ -258,8 +381,10 @@ function PanelResize({ label, value, min, max, onChange }: { label: string; valu
   return <label className="panel-resize"><span>{label}</span><input aria-label={label} type="range" min={min} max={max} value={value} onChange={(event) => onChange(Number(event.target.value))} /></label>;
 }
 
-function HistoryNav({ sessions, activeRoots, selectedID, selectedIsLive, historySearch, setHistorySearch, selectWorkspace, handleResume, boot, sessionAction }: { sessions: Session[]; activeRoots: ActiveRoot[]; selectedID: string; selectedIsLive: boolean; historySearch: string; setHistorySearch: (value: string) => void; selectWorkspace: (id: string, isLive: boolean) => void; handleResume: (id: string) => Promise<void>; boot?: Bootstrap; sessionAction: (action: "fork" | "rename" | "delete") => Promise<void> }) {
-  return <><input className="history-search" type="search" placeholder="Search sessions…" aria-label="Search sessions" value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} /><nav>{sessions.filter((s) => !historySearch || s.title?.toLowerCase().includes(historySearch.toLowerCase()) || s.id.toLowerCase().includes(historySearch.toLowerCase())).map((session) => { const isActiveWorkspace = activeRoots.some((r) => r.id === session.id); return <button key={session.id} className={session.id === selectedID ? "session active" : "session"} onClick={() => selectWorkspace(session.id, isActiveWorkspace)}><span>{session.title || session.id.slice(0, 12)}</span>{isActiveWorkspace && <small className="live-badge">LIVE</small>}</button>; })}</nav><div className="session-actions">{!selectedIsLive && !boot?.attachOnly && <button onClick={() => void handleResume(selectedID)}>Resume as workspace</button>}{boot?.capabilities.sessions && <><button disabled={!boot?.capabilities.sessions} onClick={() => void sessionAction("fork")}>Fork</button><button disabled={!boot?.capabilities.sessions} onClick={() => void sessionAction("rename")}>Rename</button><button disabled={!boot?.capabilities.sessions} onClick={() => void sessionAction("delete")}>Delete</button></>}</div></>;
+function HistoryNav({ sessions, activeRoots, selectedID, selectedIsLive, historySearch, setHistorySearch, selectWorkspace, handleResume, boot, sessionAction }: { sessions: Session[]; activeRoots: ActiveRoot[]; selectedID: string; selectedIsLive: boolean; historySearch: string; setHistorySearch: (value: string) => void; selectWorkspace: (id: string, isLive: boolean) => void | Promise<void>; handleResume: (id: string) => Promise<void>; boot?: Bootstrap; sessionAction: (action: "fork" | "rename" | "delete") => Promise<void> }) {
+  const canSessions = Boolean(boot?.capabilities.sessions);
+  const hasSelection = Boolean(selectedID);
+  return <><input className="history-search" type="search" placeholder="Search sessions…" aria-label="Search sessions" value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} /><nav>{sessions.filter((s) => !historySearch || s.title?.toLowerCase().includes(historySearch.toLowerCase()) || s.id.toLowerCase().includes(historySearch.toLowerCase())).map((session) => { const isActiveWorkspace = activeRoots.some((r) => r.id === session.id); return <button key={session.id} type="button" className={session.id === selectedID ? "session active" : "session"} onClick={() => void selectWorkspace(session.id, isActiveWorkspace)} title={session.id}><span className="session-title">{session.title || shortID(session.id)}</span>{isActiveWorkspace && <small className="live-badge">LIVE</small>}</button>; })}</nav><div className="session-actions">{!selectedIsLive && !boot?.attachOnly && <button type="button" disabled={!hasSelection || !boot?.capabilities.roots} onClick={() => void handleResume(selectedID)}>Resume as workspace</button>}{canSessions && <><button type="button" disabled={!hasSelection} onClick={() => void sessionAction("fork")}>Fork</button><button type="button" disabled={!hasSelection} onClick={() => void sessionAction("rename")}>Rename</button><button type="button" disabled={!hasSelection} onClick={() => void sessionAction("delete")}>Delete</button></>}</div></>;
 }
 
 function InspectorBody({ tab, boot, status, data, loading, expandedDiffs, toggleDiff, isLive, selectedID }: { tab: InspectorTab; boot?: Bootstrap; status: Status; data: unknown; loading: boolean; expandedDiffs: Set<string>; toggleDiff: (path: string) => void; isLive: boolean; selectedID: string }) {
@@ -274,6 +399,9 @@ function InspectorBody({ tab, boot, status, data, loading, expandedDiffs, toggle
       agents={boot?.agents.map((a) => a.name) || []}
       busy={Boolean(status.busy)}
     />;
+  }
+  if (tab === "plans") {
+    return <PlansPanel available={Boolean(boot?.capabilities.plans)} live={isLive} rootID={selectedID} />;
   }
   if (loading) return <section className="unavailable" role="status"><strong>Loading {tab}</strong></section>;
   if (tab === "files") return <FilesPanel boot={boot} data={data} expandedDiffs={expandedDiffs} toggleDiff={toggleDiff} />;

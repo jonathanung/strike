@@ -128,7 +128,8 @@ func TestServiceAPIsUnavailableWithoutConfiguredHost(t *testing.T) {
 	}
 	for _, path := range []string{
 		"/v1/providers", "/v1/models?provider=echo", "/v1/history", "/v1/files",
-		"/v1/memory", "/v1/issues", "/v1/permissions/explain?permission=bash", "/v1/permissions/presets",
+		"/v1/memory", "/v1/issues", "/v1/plans",
+		"/v1/permissions/explain?permission=bash", "/v1/permissions/presets",
 	} {
 		res := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodGet, path, nil))

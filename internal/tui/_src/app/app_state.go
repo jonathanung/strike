@@ -135,13 +135,22 @@ func (m Model) visualizerStateSnapshot() visualizerStateMsg {
 		if msg.Label == "" {
 			msg.Label = shortSessionID(id)
 		}
-		msg.StatusLabel = ch.status
+		// Prefer roster chip (e.g. "needs you") over coarse running/completed so
+		// VIZ.2 can surface attention/block rows from status alone.
+		msg.StatusLabel = strings.TrimSpace(ch.rosterState)
+		if msg.StatusLabel == "" {
+			msg.StatusLabel = ch.status
+		}
 		if msg.StatusLabel == "" {
 			msg.StatusLabel = "unknown"
 		}
-		msg.State = childAgentState(ch.status)
+		msg.State = childAgentState(msg.StatusLabel)
+		if msg.State == theme.AgentStateReady {
+			msg.State = childAgentState(ch.status)
+		}
 		// Child token/cost stay unknown unless we later track per-child usage.
 		// Never fabricate zeros from absence.
+		fillVisualizerChildObs(&msg, ch)
 		return msg
 	}
 
@@ -163,6 +172,11 @@ func (m Model) visualizerStateSnapshot() visualizerStateMsg {
 		if usd, ok, partial := estimateUSD(m.usageSession, m.modelInputCost, m.modelOutputCost, m.modelHasCost); ok {
 			msg.CostUSD, msg.CostOK, msg.CostPartial = usd, true, partial
 		}
+		// Root may carry last verification report when gates ran (#922 shape).
+		if m.lastVerification != nil {
+			msg.Verification = visualizerVerificationFrom(m.lastVerification)
+		}
+		msg.PathOverlaps = visualizerPathOverlapsFrom(m.pathOverlaps)
 		return msg
 	}
 
@@ -182,9 +196,70 @@ func (m Model) visualizerStateSnapshot() visualizerStateMsg {
 					msg.CostUSD, msg.CostOK, msg.CostPartial = usd, true, partial
 				}
 			}
+			msg.PathOverlaps = visualizerPathOverlapsFrom(p.pathOverlaps)
 		}
 	}
 	return msg
+}
+
+// fillVisualizerChildObs copies multi-agent observability onto a viz snapshot.
+// Empty/nil fields stay unknown — never invent token/budget/verified success.
+func fillVisualizerChildObs(msg *visualizerStateMsg, ch childActivity) {
+	if msg == nil {
+		return
+	}
+	msg.Objective = ch.objective
+	msg.LastAction = ch.lastAction
+	msg.BlockReason = ch.blockReason
+	if len(ch.filesTouched) > 0 {
+		msg.FilesTouched = append([]string(nil), ch.filesTouched...)
+	}
+	msg.Budget = cloneAgentBudgetView(ch.budget)
+	msg.EscalateKind = ch.escalateKind
+	msg.EscalateReason = ch.escalateReason
+	msg.EscalateAction = ch.escalateAction
+	msg.PathOverlaps = visualizerPathOverlapsFrom(ch.pathOverlaps)
+	msg.Verification = visualizerVerificationFromSummary(ch.verification)
+}
+
+func visualizerPathOverlapsFrom(list []childPathOverlap) []visualizerPathOverlap {
+	if len(list) == 0 {
+		return nil
+	}
+	out := make([]visualizerPathOverlap, len(list))
+	for i, po := range list {
+		out[i] = visualizerPathOverlap{
+			Path:    po.path,
+			Policy:  po.policy,
+			Blocked: po.blocked,
+			Warning: po.warning,
+		}
+	}
+	return out
+}
+
+func visualizerVerificationFrom(rep *protocol.VerificationReport) *visualizerVerification {
+	if rep == nil {
+		return nil
+	}
+	return &visualizerVerification{
+		Claimed:  rep.Claimed,
+		Verified: rep.Verified,
+		Passed:   rep.Passed,
+		Summary:  rep.Summary,
+	}
+}
+
+func visualizerVerificationFromSummary(sum *childVerificationSummary) *visualizerVerification {
+	if sum == nil {
+		return nil
+	}
+	return &visualizerVerification{
+		Claimed:  sum.claimed,
+		Verified: sum.verified,
+		Passed:   sum.passed,
+		Summary:  sum.summary,
+	}
 }
 
 // findChildActivity looks up a subagent row across the active root and stashes.
