@@ -883,7 +883,7 @@ type PhaseChanged struct {
 	Phase       string `json:"phase,omitempty"`
 	Index       int    `json:"index,omitempty"`
 	Gate        string `json:"gate,omitempty"`        // agent | check | user | skip (effective; from autonomy)
-	Source      string `json:"source,omitempty"`      // builtin | global | project
+	Source      string `json:"source,omitempty"`      // builtin | global | project | plugin
 	Fingerprint string `json:"fingerprint,omitempty"` // canonical SHA-256 of formatted def
 	Status      string `json:"status,omitempty"`      // empty | missing | mismatch
 }

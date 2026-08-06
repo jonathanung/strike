@@ -22,14 +22,18 @@ type rootPane struct {
 	children     []childActivity
 	teamMessages []teamMessage
 
-	providerName  string
-	modelName     string
-	agentName     string
-	phaseName     string
-	phaseWorkflow string
-	effort        protocol.Effort
-	autonomy      protocol.Autonomy
-	fastEnabled   bool
+	providerName     string
+	modelName        string
+	agentName        string
+	phaseName        string
+	phaseWorkflow    string
+	phaseGate        string
+	phaseSource      string
+	phaseFingerprint string
+	phaseStatus      string
+	effort           protocol.Effort
+	autonomy         protocol.Autonomy
+	fastEnabled      bool
 
 	turnRunning        bool
 	awaitingPermission bool
@@ -91,6 +95,10 @@ func (m *Model) stashActiveRoot() {
 		agentName:          m.agentName,
 		phaseName:          m.phaseName,
 		phaseWorkflow:      m.phaseWorkflow,
+		phaseGate:          m.phaseGate,
+		phaseSource:        m.phaseSource,
+		phaseFingerprint:   m.phaseFingerprint,
+		phaseStatus:        m.phaseStatus,
 		effort:             m.effort,
 		autonomy:           m.autonomy,
 		fastEnabled:        m.fastEnabled,
@@ -152,7 +160,10 @@ func (m *Model) loadRootPane(p *rootPane) {
 	m.agentName = p.agentName
 	m.phaseName = p.phaseName
 	m.phaseWorkflow = p.phaseWorkflow
-	m.effort = p.effort
+	m.phaseGate = p.phaseGate
+	m.phaseSource = p.phaseSource
+	m.phaseFingerprint = p.phaseFingerprint
+	m.phaseStatus = p.phaseStatus
 	m.autonomy = p.autonomy
 	m.fastEnabled = p.fastEnabled
 	m.turnRunning = p.turnRunning
@@ -432,6 +443,16 @@ func applyEventToPane(p *rootPane, ev protocol.Event) {
 	case protocol.PhaseChanged:
 		p.phaseName = e.Phase
 		p.phaseWorkflow = e.Workflow
+		p.phaseGate = e.Gate
+		p.phaseSource = e.Source
+		p.phaseFingerprint = e.Fingerprint
+		p.phaseStatus = e.Status
+		if e.Phase == "" && e.Workflow == "" {
+			p.phaseGate = ""
+			p.phaseSource = ""
+			p.phaseFingerprint = ""
+			p.phaseStatus = ""
+		}
 	case protocol.EffortSelected:
 		p.effort = e.Level
 	case protocol.AutonomySelected:
@@ -715,6 +736,10 @@ func seedPaneFromReplay(p *rootPane, events []protocol.Event) {
 	p.agentName = tmp.agentName
 	p.phaseName = tmp.phaseName
 	p.phaseWorkflow = tmp.phaseWorkflow
+	p.phaseGate = tmp.phaseGate
+	p.phaseSource = tmp.phaseSource
+	p.phaseFingerprint = tmp.phaseFingerprint
+	p.phaseStatus = tmp.phaseStatus
 	p.effort = tmp.effort
 	p.autonomy = tmp.autonomy
 	p.fastEnabled = tmp.fastEnabled

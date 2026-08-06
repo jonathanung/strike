@@ -75,6 +75,39 @@ func (m Model) contextPaneBody(width, height int) string {
 			return st.Text.Render(s)
 		},
 	})
+	if m.phaseName != "" || m.phaseWorkflow != "" {
+		phaseVal := sanitizeDisplayData(m.phaseName)
+		if m.phaseWorkflow != "" && m.phaseName != "" {
+			phaseVal = sanitizeDisplayData(m.phaseWorkflow) + "/" + sanitizeDisplayData(m.phaseName)
+		} else if m.phaseWorkflow != "" {
+			phaseVal = sanitizeDisplayData(m.phaseWorkflow)
+		}
+		if m.phaseGate != "" {
+			phaseVal += " / " + sanitizeDisplayData(m.phaseGate)
+		}
+		if m.phaseStatus != "" {
+			phaseVal += " / " + sanitizeDisplayData(m.phaseStatus)
+		}
+		rows = append(rows, row{
+			label: "phase",
+			value: phaseVal,
+			valueStyle: func(s string) string {
+				if m.phaseStatus != "" {
+					return st.Warning.Render(s)
+				}
+				return st.AccentAlt.Render(s)
+			},
+		})
+		if grants := m.activePhaseGrantsLabel(); grants != "" {
+			rows = append(rows, row{
+				label: "grants",
+				value: grants,
+				valueStyle: func(s string) string {
+					return st.Warning.Render(s)
+				},
+			})
+		}
+	}
 	if m.fastEnabled {
 		rows = append(rows, row{
 			label: "fast",
@@ -155,6 +188,12 @@ func (m Model) contextPaneContentRows() int {
 		n++
 	}
 	n++ // autonomy
+	if m.phaseName != "" || m.phaseWorkflow != "" {
+		n++ // phase
+		if m.activePhaseGrantsLabel() != "" {
+			n++ // grants
+		}
+	}
 	if m.fastEnabled {
 		n++
 	}
@@ -176,6 +215,31 @@ func (m Model) contextPaneContentRows() int {
 		n++
 	}
 	return n
+}
+
+// activePhaseGrantsLabel summarizes pending effective phase permission grants
+// from the host catalog for the active phase. Empty when none or unavailable.
+func (m Model) activePhaseGrantsLabel() string {
+	if m.phaseStatus != "" {
+		return "none (recovery)"
+	}
+	if m.services.Workflows == nil || m.phaseWorkflow == "" || m.phaseName == "" {
+		return ""
+	}
+	w, ok := m.services.Workflows.Get(m.phaseWorkflow)
+	if !ok {
+		return ""
+	}
+	for _, p := range w.Phases {
+		if p.Name != m.phaseName {
+			continue
+		}
+		if len(p.Permissions) == 0 {
+			return ""
+		}
+		return sanitizeDisplayData(formatPhaseGrantsShort(p.Permissions))
+	}
+	return ""
 }
 
 // memberPreferredSizes returns per-member outer size hints for stack flex

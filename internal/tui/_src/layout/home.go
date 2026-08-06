@@ -77,6 +77,18 @@ func (m Model) homeContextParts(th theme.Theme) []string {
 		parts = append(parts, sanitizeDisplayData(m.agentName)+" agent")
 	}
 	parts = append(parts, string(m.autonomy.Normalize()))
+	if m.phaseName != "" || m.phaseWorkflow != "" {
+		phase := m.phaseName
+		if m.phaseWorkflow != "" && m.phaseName != "" {
+			phase = m.phaseWorkflow + "/" + m.phaseName
+		} else if m.phaseWorkflow != "" {
+			phase = m.phaseWorkflow
+		}
+		if m.phaseGate != "" {
+			phase += "/" + m.phaseGate
+		}
+		parts = append(parts, "phase "+sanitizeDisplayData(phase))
+	}
 	if m.services.Auth != nil && m.providerName != "" {
 		if d := strings.TrimSpace(m.services.Auth.Describe(m.providerName)); d != "" {
 			parts = append(parts, sanitizeDisplayData(d))
