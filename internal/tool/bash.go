@@ -221,11 +221,12 @@ func bashSandboxMode(tc *Context) sandbox.Mode {
 // bashSandboxPolicy returns the OS policy for a bash invocation.
 // When tc.Sandbox carries a compiled policy (WorkDir and/or denial/network
 // fields, or a non-off Mode), that policy is used (WorkDir filled from tc
-// when empty). Otherwise Mode/WorkDir are derived from SandboxMode + WorkDir
-// with Network on (matches CompileSandbox default under Ask permissions).
+// when empty). Otherwise Mode/WorkDir are derived from SandboxMode + WorkDir.
+// Host networking stays on unless the compiled policy sets NoNetwork
+// (zero-value Policy keeps network — product default).
 func bashSandboxPolicy(tc *Context) sandbox.Policy {
 	if tc == nil {
-		return sandbox.Policy{Mode: sandbox.DefaultMode, Network: true}
+		return sandbox.Policy{Mode: sandbox.DefaultMode}
 	}
 	p := tc.Sandbox
 	if compiledSandboxPolicy(p) {
@@ -237,7 +238,6 @@ func bashSandboxPolicy(tc *Context) sandbox.Policy {
 	return sandbox.Policy{
 		Mode:    bashSandboxMode(tc),
 		WorkDir: tc.WorkDir,
-		Network: true,
 	}
 }
 
@@ -245,7 +245,7 @@ func compiledSandboxPolicy(p sandbox.Policy) bool {
 	return p.Mode != sandbox.ModeOff ||
 		strings.TrimSpace(p.WorkDir) != "" ||
 		p.NoWorkspaceWrite ||
-		p.Network ||
+		p.NoNetwork ||
 		len(p.DenyWritePaths) > 0 ||
 		len(p.DenyWriteGlobs) > 0
 }
