@@ -36,8 +36,9 @@ type Result struct {
 
 // Stable tool result error codes (keep in lockstep with protocol.ErrorCode*).
 const (
-	ErrorCodeCanceled = "canceled"
-	ErrorCodeTimeout  = "timeout"
+	ErrorCodeCanceled      = "canceled"
+	ErrorCodeTimeout       = "timeout"
+	ErrorCodeSandboxDenied = "sandbox_denied"
 )
 
 // UserRejectedError is returned when the user declines an interactive

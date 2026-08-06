@@ -81,6 +81,9 @@ type Entry struct {
 	StopReason        string `json:"stopReason,omitempty"`
 	ChildStatus       string `json:"childStatus,omitempty"`
 	Error             string `json:"error,omitempty"`
+	// ErrorCode is a stable machine code from ToolCallEnd / EngineError when set
+	// (e.g. sandbox_denied, permission_denied, timeout).
+	ErrorCode string `json:"errorCode,omitempty"`
 	// Token fields when known (from usage.reported).
 	InputTokens         *int   `json:"inputTokens,omitempty"`
 	OutputTokens        *int   `json:"outputTokens,omitempty"`
@@ -219,6 +222,9 @@ func (b *Builder) Observe(ev protocol.Event, t time.Time) {
 			ent := b.ensureTurn(e.TurnID, e.SessionID, t)
 			ent.State = StateFailed
 			ent.Error = clip(redact.String(e.Message), b.opts.ErrorPreviewMax)
+			if e.Code != "" {
+				ent.ErrorCode = e.Code
+			}
 			b.finish(ent, t)
 		}
 	case protocol.ToolCallBegin:
@@ -242,6 +248,9 @@ func (b *Builder) Observe(ev protocol.Event, t time.Time) {
 		ent := b.ensureTool(e.CallID, e.SessionID, e.TurnID, t)
 		// Name comes from ToolCallBegin; Title is a UI label only.
 		out := e.Output
+		if e.ErrorCode != "" {
+			ent.ErrorCode = e.ErrorCode
+		}
 		if e.IsError {
 			if isCanceledOutput(out) {
 				ent.State = StateCanceled
@@ -742,6 +751,9 @@ func formatEntryLine(e Entry) string {
 			out = *e.OutputTokens
 		}
 		extra = fmt.Sprintf(" tokens=%d/%d", in, out)
+	}
+	if e.ErrorCode != "" {
+		extra += " code=" + e.ErrorCode
 	}
 	if e.Error != "" {
 		extra += " err=" + clip(redact.String(e.Error), 40)

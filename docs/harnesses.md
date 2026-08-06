@@ -295,7 +295,9 @@ The harness may publish structured progress:
 }
 ```
 
-Strike records this as `harness.progress` in the session event log.
+Strike records this as `harness.progress` in the session event log. Wire
+compatibility and other harness-related protocol events (verification,
+permission audit, hooks): [protocol.md](protocol.md).
 
 #### `harness.complete` and `harness.error`
 

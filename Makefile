@@ -1,4 +1,4 @@
-.PHONY: build run run-echo serve serve-expose web-build web-test web-check test vet cover cover-check clean setup restore tui-gen prompt-reg
+.PHONY: build run run-echo serve serve-expose web-build web-test web-check test vet cover cover-check clean setup restore tui-gen prompt-reg harness-eval
 
 # Overall statement-coverage floor for `make cover-check` (local / optional CI).
 # Soft baseline ~77%; keep below measured total so the gate does not flake.
@@ -67,6 +67,17 @@ test: tui-gen
 #   PROMPT_REGRESSION_STRICT=1 make prompt-reg  # fail on deltas (future gate)
 prompt-reg:
 	go test ./internal/replay/ -run TestPromptRegressionReport -v -count=1
+
+# Harness regression pack (#807): correctness/safety/recovery/latency-cost
+# scenarios plus #791/#782 recording consumption. Offline (echo/fixtures).
+# Scenario failures are hard errors (also under `make test`). The verbose
+# report is non-blocking in CI (continue-on-error). Path to blocking:
+# drop continue-on-error on the CI "Harness eval report" step, and/or set
+# HARNESS_EVAL_STRICT=1 for report-write failures.
+#   HARNESS_EVAL_REPORT=path make harness-eval   # write JSON artifact
+#   UPDATE_HARNESS_EVAL=1 make harness-eval      # refresh testdata sample
+harness-eval:
+	go test ./internal/replay/ -run 'TestHarnessEvalSuite|TestBuildEvalReport' -v -count=1
 
 vet: tui-gen
 	go vet ./...

@@ -23,13 +23,16 @@ const (
 	CodeInternal           ErrorCode = "internal"
 	// CodeBlocked is a non-permission policy block (hooks, phase gates).
 	CodeBlocked ErrorCode = "blocked"
+	// CodeSandboxDenied is an OS sandbox capability block (bwrap/seatbelt).
+	CodeSandboxDenied ErrorCode = "sandbox_denied"
 )
 
 // ValidErrorCode reports whether c is a known stable error code.
 func ValidErrorCode(c ErrorCode) bool {
 	switch c {
 	case CodePermissionDenied, CodeInvalidArgs, CodePreconditionFailed,
-		CodeCanceled, CodeTimeout, CodeTransient, CodeInternal, CodeBlocked:
+		CodeCanceled, CodeTimeout, CodeTransient, CodeInternal, CodeBlocked,
+		CodeSandboxDenied:
 		return true
 	}
 	return false
@@ -126,6 +129,11 @@ func ErrInternal(msg string) *CodedError {
 // ErrBlocked returns a non-retryable blocked error (hooks/policy).
 func ErrBlocked(msg string) *CodedError {
 	return &CodedError{Code: CodeBlocked, Message: strings.TrimSpace(msg), Retryable: false}
+}
+
+// ErrSandboxDenied returns a non-retryable sandbox_denied error (OS isolation).
+func ErrSandboxDenied(msg string) *CodedError {
+	return &CodedError{Code: CodeSandboxDenied, Message: strings.TrimSpace(msg), Retryable: false}
 }
 
 // Classify maps an arbitrary error onto a structured *CodedError.

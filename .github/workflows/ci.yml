@@ -68,6 +68,14 @@ jobs:
         continue-on-error: true
         run: make prompt-reg
 
+      # #807 harness eval: correctness/safety/recovery/latency-cost report.
+      # Scenarios also run hard under Test above. This step is the verbose
+      # artifact path (non-blocking first). Path to blocking: remove
+      # continue-on-error once the pack is stable on main.
+      - name: Harness eval report (soft)
+        continue-on-error: true
+        run: HARNESS_EVAL_REPORT=$RUNNER_TEMP/harness-eval-report.json make harness-eval
+
       # Soft coverage report only — do not hard-fail CI on the floor yet.
       # Local gate: make cover-check (COVER_MIN in Makefile).
       - name: Coverage (soft)

@@ -872,7 +872,7 @@ func cellsFromEventsOpts(events []protocol.Event, live bool) ([]cell, map[string
 			}
 		case protocol.ToolCallEnd:
 			if tc, ok := toolByID[ev.CallID]; ok {
-				applyToolCallEnd(tc, ev.Title, ev.Output, ev.Metadata, ev.IsError)
+				applyToolCallEnd(tc, ev.Title, ev.Output, ev.Metadata, ev.IsError, ev.ErrorCode)
 			}
 		case protocol.ChildStarted:
 			id := strings.TrimSpace(ev.SessionID)

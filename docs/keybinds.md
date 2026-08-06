@@ -21,7 +21,7 @@ Registry: `keybindSlashPrimary` / `keybindNoSlashReason` in
 |---|---|---|
 | `enter` | send prompt | — |
 | `ctrl+j` / `shift+enter` / `alt+enter` | newline (shift+enter CSI rewrites to `alt+enter`; enhanced ctrl+j → `alt+j`; bare LF is also `ctrl+j`; empty-composer `alt+enter` expands a tool cell instead) | — |
-| `esc` | interrupt turn (cancels tools/LLM; shows “interrupted”) / reject permission / close modal | `/interrupt` |
+| `esc` | interrupt turn (cancels tools/LLM; notice “interrupted”, header **canceled**, transcript row) / reject permission / close modal | `/interrupt` |
 | `ctrl+c` | quit | `/exit`, `/quit` |
 | `ctrl+k` | command palette (when kill-to-end does not delete) | `/palette` |
 | `f1` | keybind cheatsheet | `/keys` |

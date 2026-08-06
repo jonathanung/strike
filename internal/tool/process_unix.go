@@ -39,3 +39,6 @@ func configureProcessCmd(cmd *exec.Cmd) {
 	}
 	cmd.WaitDelay = processWaitDelay
 }
+
+// applyProcessResourceLimits is implemented per-OS (linux uses prlimit;
+// other unix builds no-op — see process_rlimit_*.go).

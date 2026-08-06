@@ -372,6 +372,25 @@ type Model struct {
 	// Appended on TurnCompleted; popped on SessionRewound. Last entry is the
 	// turn that /undo would reverse.
 	undoStack []undoPreview
+	// lastStopReason is the most recent TurnCompleted.StopReason (e.g.
+	// "interrupted"). Cleared on the next TurnStarted so canceled chrome is
+	// sticky but not permanent (#809).
+	lastStopReason string
+	// verifying is true between VerificationStarted and VerificationCompleted
+	// (or TurnCompleted) so header chrome stays Working during gates (#809).
+	verifying bool
+	// lastVerification is the latest harness VerificationReport for claim vs
+	// verified badges. Cleared on the next TurnStarted (#809 / #806).
+	lastVerification *protocol.VerificationReport
+	// lastDenial remembers the latest hard deny / user reject for explain UX.
+	lastDenial lastDenialInfo
+	// lastPermissionAsk caches the open ask so reject notices still know the
+	// tool/pattern after the modal has already closed (#809).
+	lastPermissionAsk struct {
+		RequestID  string
+		Permission string
+		Patterns   []string
+	}
 	// runTimeline folds harness events into a structured, exportable trace
 	// (/timeline). Complements session JSONL; not a second transcript.
 	runTimeline       *timeline.Builder
