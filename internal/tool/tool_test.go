@@ -394,9 +394,10 @@ func TestToolNames(t *testing.T) {
 		"agent_message":   NewAgentMessage(),
 		"agent_broadcast": NewAgentBroadcast(),
 		"team_task":       NewTeamTask(),
+		"delegate":        NewDelegate(),
 	}
-	if len(want) != 31 {
-		t.Fatalf("expected 31 tools, got %d", len(want))
+	if len(want) != 32 {
+		t.Fatalf("expected 32 tools, got %d", len(want))
 	}
 	for name, tool := range want {
 		if tool.Name() != name {

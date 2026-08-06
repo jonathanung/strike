@@ -23,8 +23,10 @@ const childActivityCap = 12
 
 // leafTaskTools are stripped from registries that cannot nest further.
 // Team tools (agent_roster, agent_ownership, agent_message, agent_broadcast,
-// team_task) must NOT be listed here — depth-capped leaves still coordinate.
-// task_message is parent-control and is stripped with the other task_* tools.
+// team_task, delegate) must NOT be listed here — depth-capped leaves still
+// coordinate. task_message is parent-control and is stripped with task_*.
+// delegate create/spawn is parent-side; list/get/transition stay available so
+// leaves can self-report blocked/review (ownership-gated in engine).
 var leafTaskTools = []string{
 	"task", "task_status", "task_read", "task_message", "task_interrupt",
 }
@@ -84,7 +86,31 @@ type childRecord struct {
 // finishes. PermissionAsked/PermissionResolved, QuestionAsked/QuestionResolved,
 // and nested ChildStarted/ChildCompleted are re-emitted from the child onto the
 // parent event stream; optional ChildSession hooks persist the full child log.
+//
+// When the session team is present, a first-class delegation lifecycle object
+// is created (criteria/deps/subscribe optional). Unmet deps return status
+// "queued" without starting a child; dependents auto-spawn when deps reach done.
 func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.TaskResult, error) {
+	return e.spawnChildInner(ctx, req, "")
+}
+
+// spawnChildForDelegation starts a child for an existing queued delegation.
+func (e *Engine) spawnChildForDelegation(ctx context.Context, d Delegation) (tool.TaskResult, error) {
+	req := tool.TaskRequest{
+		Prompt:    d.Prompt,
+		Name:      d.Name,
+		Agent:     d.Agent,
+		Model:     d.Model,
+		Effort:    d.Effort,
+		Criteria:  d.Criteria,
+		Deps:      d.Deps,
+		Subscribe: d.Subscribe,
+		Assignee:  d.Assignee,
+	}
+	return e.spawnChildInner(ctx, req, d.ID)
+}
+
+func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, existingDelegationID string) (tool.TaskResult, error) {
 	if err := ctx.Err(); err != nil {
 		return tool.TaskResult{}, err
 	}
@@ -137,11 +163,73 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		}
 	}
 
+	// Delegation lifecycle: create (or reuse) before side effects so unmet deps
+	// never open a child session.
+	var (
+		delegID string
+		deleg   Delegation
+	)
+	if existingDelegationID != "" && e.team != nil {
+		d, ok := e.team.GetDelegation(existingDelegationID)
+		if !ok {
+			return tool.TaskResult{}, fmt.Errorf("delegation %q not found", existingDelegationID)
+		}
+		if d.SessionID != "" {
+			return tool.TaskResult{
+				Output:       fmt.Sprintf("Delegation %s already linked to session %s", d.ID, d.SessionID),
+				Status:       "started",
+				SessionID:    d.SessionID,
+				Name:         d.Name,
+				DelegationID: d.ID,
+				Lifecycle:    string(d.State),
+			}, nil
+		}
+		// Ensure deps still satisfied.
+		if unmet := unmetDepsFor(e.team, d.Deps); len(unmet) > 0 {
+			return tool.TaskResult{
+				Output:       fmt.Sprintf("Delegation %s still waiting on deps: %s", d.ID, strings.Join(unmet, ", ")),
+				Status:       "queued",
+				DelegationID: d.ID,
+				Lifecycle:    string(protocol.DelegationQueued),
+				Name:         d.Name,
+			}, nil
+		}
+		delegID = d.ID
+		deleg = d
+	} else if e.team != nil {
+		item, shouldSpawn, err := e.createDelegationForTask(req)
+		if err != nil {
+			return tool.TaskResult{}, err
+		}
+		delegID = item.ID
+		deleg = item
+		if !shouldSpawn {
+			out := fmt.Sprintf(
+				"Queued delegation %s (waiting on deps). No child started yet. Use delegate get/list or task_status with id %q; it will auto-start when dependencies reach done.",
+				item.ID, item.ID,
+			)
+			if len(item.Deps) > 0 {
+				out = fmt.Sprintf(
+					"Queued delegation %s waiting on deps %v. No child started yet. It auto-starts when dependencies reach done; track via delegate get %s or task_status.",
+					item.ID, item.Deps, item.ID,
+				)
+			}
+			return tool.TaskResult{
+				Output:       out,
+				Status:       "queued",
+				DelegationID: item.ID,
+				Lifecycle:    string(item.State),
+				Name:         item.Name,
+			}, nil
+		}
+	}
+
 	childID := rand.Text()
 	title := briefAgentSessionTitle(agentName, childID)
 	if e.opts.OpenChildSession != nil {
 		id, err := e.opts.OpenChildSession(e.opts.SessionID, childID, title)
 		if err != nil {
+			e.failDelegationSpawn(delegID, "open child session: "+err.Error())
 			return tool.TaskResult{}, fmt.Errorf("open child session: %w", err)
 		}
 		if strings.TrimSpace(id) != "" {
@@ -284,10 +372,24 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 			e.childMu.Unlock()
 			cancel()
 			e.closeChildSession(childID)
+			e.failDelegationSpawn(delegID, "failed to enroll child on team")
 			if memberName != "" {
 				return tool.TaskResult{}, fmt.Errorf("name %q is already used on this team", memberName)
 			}
 			return tool.TaskResult{}, fmt.Errorf("failed to enroll child on team")
+		}
+	}
+
+	// Link delegation → session and move to working.
+	if delegID != "" && e.team != nil {
+		prev := deleg.State
+		linked, err := e.team.LinkDelegationSession(delegID, childID)
+		if err != nil {
+			// Child already running — keep going but surface link failure in output later.
+			deleg.SessionID = childID
+		} else {
+			deleg = linked
+			e.emitDelegationChanged(deleg, prev, "spawned")
 		}
 	}
 
@@ -429,16 +531,18 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 			handoff.Summary = defaultHandoffSummary(status)
 		}
 		completed := protocol.ChildCompleted{
-			Correlation: childCorr,
-			Status:      status,
-			Summary:     handoff.Summary,
-			Name:        memberName,
-			Handoff:     handoff,
+			Correlation:  childCorr,
+			Status:       status,
+			Summary:      handoff.Summary,
+			Name:         memberName,
+			Handoff:      handoff,
+			DelegationID: delegID,
 		}
 		e.emit(completed)
 		e.persistChildEvent(childID, completed)
 		h.noteEvent(completed)
 		e.finishChild(h, completed)
+		e.onChildDelegationTerminal(childID, status)
 		// Wake Run so the parent can inject a model-visible summary (and
 		// auto-nudge when idle). Non-blocking: drop if Run is shutting down.
 		select {
@@ -473,12 +577,31 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 			childID, agentName,
 		)
 	}
+	if delegID != "" {
+		out += fmt.Sprintf(" Delegation %s lifecycle=%s.", delegID, deleg.State)
+	}
+	lifecycle := string(deleg.State)
+	if lifecycle == "" && delegID != "" {
+		lifecycle = string(protocol.DelegationWorking)
+	}
 	return tool.TaskResult{
-		Output:    out,
-		Status:    "started",
-		SessionID: childID,
-		Name:      memberName,
+		Output:       out,
+		Status:       "started",
+		SessionID:    childID,
+		Name:         memberName,
+		DelegationID: delegID,
+		Lifecycle:    lifecycle,
 	}, nil
+}
+
+// unmetDepsFor returns dependency ids that are not yet done (exported helper for spawn).
+func unmetDepsFor(t *Team, deps []string) []string {
+	if t == nil || len(deps) == 0 {
+		return nil
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return unmetDepsLocked(t, deps)
 }
 
 // finishChild moves a live handle into childHistory with terminal state.
@@ -708,6 +831,20 @@ func (e *Engine) childStatus(ctx context.Context, req tool.TaskStatusRequest) (t
 	if id == "" {
 		return tool.TaskStatusResult{}, fmt.Errorf("session_id is required")
 	}
+	// Delegation id (dN) with no child yet: return lifecycle snapshot.
+	if e.team != nil {
+		if d, ok := e.team.GetDelegation(id); ok && d.SessionID == "" {
+			res := tool.TaskStatusResult{
+				State:     string(d.State),
+				SessionID: d.SessionID,
+				Elapsed:   formatElapsed(time.Since(d.CreatedAt)),
+			}
+			return attachLifecycleFields(res, d), nil
+		}
+		if d, ok := e.team.GetDelegation(id); ok && d.SessionID != "" {
+			id = d.SessionID
+		}
+	}
 	id = e.resolveOwnedChildRef(id)
 
 	e.childMu.Lock()
@@ -716,10 +853,27 @@ func (e *Engine) childStatus(ctx context.Context, req tool.TaskStatusRequest) (t
 	e.childMu.Unlock()
 
 	if h != nil {
-		return h.statusSnapshot(req.IncludeRecent), nil
+		res := h.statusSnapshot(req.IncludeRecent)
+		e.applyDelegationLifecycle(&res, id)
+		// Sync blocked ↔ needs_attention for live children.
+		if e.team != nil {
+			if res.State == "needs_attention" {
+				if d, ok := e.team.SetDelegationBlocked(id, "needs_attention"); ok && d.State == protocol.DelegationBlocked {
+					e.applyDelegationLifecycle(&res, id)
+				}
+			} else if res.Lifecycle == string(protocol.DelegationBlocked) && res.BlockReason == "needs_attention" {
+				if d, ok := e.team.SetDelegationWorking(id); ok {
+					e.applyDelegationLifecycle(&res, id)
+					_ = d
+				}
+			}
+		}
+		return res, nil
 	}
 	if rec != nil {
-		return rec.statusSnapshot(req.IncludeRecent), nil
+		res := rec.statusSnapshot(req.IncludeRecent)
+		e.applyDelegationLifecycle(&res, id)
+		return res, nil
 	}
 	return tool.TaskStatusResult{}, fmt.Errorf("unknown or inaccessible child session %q", id)
 }
@@ -983,6 +1137,26 @@ func (e *Engine) childInterrupt(ctx context.Context, req tool.TaskInterruptReque
 	id := strings.TrimSpace(req.SessionID)
 	if id == "" {
 		return tool.TaskInterruptResult{}, fmt.Errorf("session_id is required")
+	}
+	// Cancel a queued delegation that never spawned.
+	if e.team != nil {
+		if d, ok := e.team.GetDelegation(id); ok && d.SessionID == "" {
+			actor := strings.TrimSpace(e.opts.SessionID)
+			prev := d.State
+			item, err := e.team.TransitionDelegation(d.ID, actor, protocol.DelegationCanceled, "interrupted", 0)
+			if err != nil {
+				return tool.TaskInterruptResult{}, err
+			}
+			e.emitDelegationChanged(item, prev, "interrupted")
+			return tool.TaskInterruptResult{
+				SessionID: d.ID,
+				State:     string(protocol.DelegationCanceled),
+				Detail:    "queued delegation canceled",
+			}, nil
+		}
+		if d, ok := e.team.GetDelegation(id); ok && d.SessionID != "" {
+			id = d.SessionID
+		}
 	}
 	id = e.resolveOwnedChildRef(id)
 

@@ -16,6 +16,7 @@ materially affect the shipped product.
 
 ### Added
 
+- **Atomic delegation lifecycle** — first-class delegation objects on the session team with states `queued → working → blocked → review → done` (+ `failed` / `canceled`), acceptance criteria, task dependencies, create-time subscriptions, and CAS `expected_version`. `task` accepts optional `criteria`/`deps`/`subscribe` (plain spawn remains compatible); new `delegate` tool for create/get/list/transition. Unmet deps stay queued until upstream `done`; criteria send successful completion to `review` (not final `done`). Protocol event `delegation.changed`; wire version `1.2.0` ([#770](https://github.com/jonathanung/strike/issues/770)).
 - **Structured completion handoffs** — delegated `task` children always emit a machine-parseable handoff on `[child.completed]` and terminal `task_status` (`summary`, `files_changed`, `verification`, `findings`, `blockers`, `recommended_next_action`). Engine merges tool-tracked file mutations into `files_changed` and flags `incomplete` when the child did not supply structured JSON. Protocol wire version `1.1.0` ([#771](https://github.com/jonathanung/strike/issues/771)).
 
 ### Changed

@@ -63,6 +63,7 @@ type (
 	Correlation             = pub.Correlation
 	ChildStatus             = pub.ChildStatus
 	CompletionHandoff       = pub.CompletionHandoff
+	DelegationState         = pub.DelegationState
 	TeamMemberState         = pub.TeamMemberState
 	TeamRosterMember        = pub.TeamRosterMember
 	ProcessStatus           = pub.ProcessStatus
@@ -126,6 +127,7 @@ type (
 	EngineError            = pub.EngineError
 	ChildStarted           = pub.ChildStarted
 	ChildCompleted         = pub.ChildCompleted
+	DelegationChanged      = pub.DelegationChanged
 	AgentMessage           = pub.AgentMessage
 	TeamRoster             = pub.TeamRoster
 	UsageReported          = pub.UsageReported
@@ -146,6 +148,14 @@ const (
 	ChildStatusCompleted = pub.ChildStatusCompleted
 	ChildStatusFailed    = pub.ChildStatusFailed
 	ChildStatusCanceled  = pub.ChildStatusCanceled
+
+	DelegationQueued   = pub.DelegationQueued
+	DelegationWorking  = pub.DelegationWorking
+	DelegationBlocked  = pub.DelegationBlocked
+	DelegationReview   = pub.DelegationReview
+	DelegationDone     = pub.DelegationDone
+	DelegationFailed   = pub.DelegationFailed
+	DelegationCanceled = pub.DelegationCanceled
 
 	TeamMemberRunning   = pub.TeamMemberRunning
 	TeamMemberCompleted = pub.TeamMemberCompleted

@@ -33,6 +33,11 @@ func (taskTool) Description() string {
   Must be a catalog id for that provider (same list as /model). Omit to inherit the parent model.
 - Optional effort pins the child's reasoning effort (off|low|medium|high|xhigh|max).
   Omit to inherit the parent dial (agent effort pins still apply). When set, wins over agent pins.
+- Optional criteria[] records acceptance criteria on a first-class delegation object.
+  When set, successful completion enters lifecycle review (not final done) for verification.
+- Optional deps[] (delegation or session ids) keep the task queued until upstream deps are done.
+- Optional subscribe[] notifies the owner on lifecycle states (blocked|review|done|…).
+- Creates a delegation lifecycle object (id dN) even for plain spawns; see also delegate tool.
 - Nested task depth is bounded by MaxChildDepth (default 1: children cannot nest). Bound fan-out.
 - Parent→owned-child control: task_status / task_read / task_message / task_interrupt
   (session id or name). Peer/team chat (any teammate, including child→lead and child→child):
@@ -52,18 +57,38 @@ func (taskTool) Schema() json.RawMessage {
 			"name": {"type": "string", "description": "Optional stable teammate alias unique on this session team (e.g. explorer). Addressable in roster/messaging; omit to use session id only"},
 			"agent": {"type": "string", "description": "Optional agent persona: explore, general, commit, reviewer, tester, debugger, build, plan, or a user-defined name (default: current agent)"},
 			"model": {"type": "string", "description": "Optional model id for the child (bare id on the current provider, or provider/model). Must be in the shared model catalog; omit to inherit the parent model"},
-			"effort": {"type": "string", "description": "Optional reasoning effort for the child: off, low, medium, high, xhigh, or max. Omit to inherit the parent dial"}
+			"effort": {"type": "string", "description": "Optional reasoning effort for the child: off, low, medium, high, xhigh, or max. Omit to inherit the parent dial"},
+			"criteria": {
+				"type": "array",
+				"items": {"type": "string"},
+				"description": "Optional acceptance criteria on the delegation lifecycle object; non-empty → completion enters review"
+			},
+			"deps": {
+				"type": "array",
+				"items": {"type": "string"},
+				"description": "Optional upstream delegation or session ids that must reach done before spawn"
+			},
+			"subscribe": {
+				"type": "array",
+				"items": {"type": "string"},
+				"description": "Optional lifecycle states to notify on: blocked|review|done|failed|canceled|working|queued"
+			},
+			"assignee": {"type": "string", "description": "Optional assignee label for the delegation"}
 		},
 		"required": ["prompt"]
 	}`)
 }
 
 type taskArgs struct {
-	Prompt string `json:"prompt"`
-	Name   string `json:"name"`
-	Agent  string `json:"agent"`
-	Model  string `json:"model"`
-	Effort string `json:"effort"`
+	Prompt    string   `json:"prompt"`
+	Name      string   `json:"name"`
+	Agent     string   `json:"agent"`
+	Model     string   `json:"model"`
+	Effort    string   `json:"effort"`
+	Criteria  []string `json:"criteria"`
+	Deps      []string `json:"deps"`
+	Subscribe []string `json:"subscribe"`
+	Assignee  string   `json:"assignee"`
 }
 
 func (taskTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
@@ -80,7 +105,17 @@ func (taskTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	if tc.SpawnTask == nil {
 		return Result{}, fmt.Errorf("task is not available")
 	}
-	res, err := tc.SpawnTask(ctx, TaskRequest{Prompt: a.Prompt, Name: a.Name, Agent: a.Agent, Model: a.Model, Effort: a.Effort})
+	res, err := tc.SpawnTask(ctx, TaskRequest{
+		Prompt:    a.Prompt,
+		Name:      a.Name,
+		Agent:     a.Agent,
+		Model:     a.Model,
+		Effort:    a.Effort,
+		Criteria:  a.Criteria,
+		Deps:      a.Deps,
+		Subscribe: a.Subscribe,
+		Assignee:  a.Assignee,
+	})
 	if err != nil {
 		return Result{}, err
 	}
@@ -88,12 +123,17 @@ func (taskTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	title := "task"
 	if n := strings.TrimSpace(res.Name); n != "" {
 		title = "task " + n
+	} else if res.DelegationID != "" {
+		title = "task " + res.DelegationID
 	} else if res.SessionID != "" {
 		title = "task " + shortID(res.SessionID)
 	}
+	if res.Lifecycle != "" {
+		title += " " + res.Lifecycle
+	}
 	meta := taskMetadata(res)
 	switch res.Status {
-	case "started", "completed":
+	case "started", "completed", "queued":
 		return Result{Title: title, Output: out, Metadata: meta}, nil
 	case "failed", "canceled":
 		if out == "" {
@@ -117,7 +157,7 @@ func shortID(id string) string {
 }
 
 func taskMetadata(res TaskResult) json.RawMessage {
-	if res.SessionID == "" && res.Status == "" && res.Name == "" {
+	if res.SessionID == "" && res.Status == "" && res.Name == "" && res.DelegationID == "" {
 		return nil
 	}
 	meta := map[string]string{
@@ -126,6 +166,12 @@ func taskMetadata(res TaskResult) json.RawMessage {
 	}
 	if n := strings.TrimSpace(res.Name); n != "" {
 		meta["name"] = n
+	}
+	if id := strings.TrimSpace(res.DelegationID); id != "" {
+		meta["delegationId"] = id
+	}
+	if lc := strings.TrimSpace(res.Lifecycle); lc != "" {
+		meta["lifecycle"] = lc
 	}
 	b, err := json.Marshal(meta)
 	if err != nil {

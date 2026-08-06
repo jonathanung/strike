@@ -241,3 +241,42 @@ func TestTaskStatusDescriptionDiscouragesBusyPoll(t *testing.T) {
 		}
 	}
 }
+
+func TestTaskPassesLifecycleFields(t *testing.T) {
+	tc := allowAll(t.TempDir())
+	var gotReq TaskRequest
+	tc.SpawnTask = func(_ context.Context, req TaskRequest) (TaskResult, error) {
+		gotReq = req
+		return TaskResult{
+			Output:       "queued",
+			Status:       "queued",
+			DelegationID: "d2",
+			Lifecycle:    "queued",
+		}, nil
+	}
+	res, err := NewTask().Execute(context.Background(), mustJSON(t, map[string]any{
+		"prompt":    "after deps",
+		"criteria":  []string{"tests pass"},
+		"deps":      []string{"d1"},
+		"subscribe": []string{"done"},
+		"assignee":  "worker",
+	}), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gotReq.Criteria) != 1 || gotReq.Criteria[0] != "tests pass" {
+		t.Fatalf("criteria = %#v", gotReq.Criteria)
+	}
+	if len(gotReq.Deps) != 1 || gotReq.Deps[0] != "d1" {
+		t.Fatalf("deps = %#v", gotReq.Deps)
+	}
+	if gotReq.Assignee != "worker" {
+		t.Fatalf("assignee = %q", gotReq.Assignee)
+	}
+	if res.Title != "task d2 queued" {
+		t.Fatalf("title = %q", res.Title)
+	}
+	if !strings.Contains(string(res.Metadata), `"delegationId":"d2"`) {
+		t.Fatalf("metadata = %s", res.Metadata)
+	}
+}
