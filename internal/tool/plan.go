@@ -38,9 +38,14 @@ type planView struct {
 }
 
 type planSectionView struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
-	Body  string `json:"body,omitempty"`
+	ID                string `json:"id"`
+	Title             string `json:"title"`
+	Body              string `json:"body,omitempty"`
+	DelegateStatus    string `json:"delegate_status,omitempty"`
+	DelegateChildID   string `json:"delegate_child_id,omitempty"`
+	DelegateChildName string `json:"delegate_child_name,omitempty"`
+	DelegateDetail    string `json:"delegate_detail,omitempty"`
+	DelegateBaseVer   int    `json:"delegate_base_version,omitempty"`
 }
 
 type planMetaView struct {
@@ -67,7 +72,16 @@ func toPlanView(p plan.Plan) planView {
 	if len(p.Sections) > 0 {
 		out.Sections = make([]planSectionView, len(p.Sections))
 		for i, s := range p.Sections {
-			out.Sections[i] = planSectionView{ID: s.ID, Title: s.Title, Body: s.Body}
+			out.Sections[i] = planSectionView{
+				ID:                s.ID,
+				Title:             s.Title,
+				Body:              s.Body,
+				DelegateStatus:    s.DelegateStatus,
+				DelegateChildID:   s.DelegateChildID,
+				DelegateChildName: s.DelegateChildName,
+				DelegateDetail:    s.DelegateDetail,
+				DelegateBaseVer:   s.DelegateBaseVersion,
+			}
 		}
 	} else {
 		out.Sections = []planSectionView{}
