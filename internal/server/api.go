@@ -65,6 +65,7 @@ type capabilities struct {
 	Telemetry      bool `json:"telemetry"`
 	Workflows      bool `json:"workflows"`
 	WorkflowDrafts bool `json:"workflowDrafts"`
+	Goals          bool `json:"goals"`
 	// Timeline is the redacted run-timeline snapshot/export surface
 	// (GET /v1/sessions/{id}/timeline[+ /export]). Always on when SessionDir is set.
 	Timeline bool `json:"timeline"`
@@ -103,6 +104,7 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		c.Sessions = h.Sessions != nil
 		// Workflow authoring is exposed via /v1/workflows* and /v1/workflow-drafts*.
 		c.Workflows, c.WorkflowDrafts = h.Workflows != nil, h.WorkflowDrafts != nil
+		c.Goals = h.Goals != nil
 		// LSP status + diagnostics are exposed via /v1/lsp and /v1/diagnostics.
 		c.LSP = h.LSP != nil
 		// Permission explain/presets via /v1/permissions/* (#926).

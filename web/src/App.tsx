@@ -19,15 +19,16 @@ import {
   formatUndoPreviewLines,
   type UndoPreview,
 } from "./undoPreview";
+import { GoalsPanel } from "./Goals";
 import { WorkflowsPanel } from "./Workflows";
 import "./styles.css";
 
-type InspectorTab = "files" | "memory" | "issues" | "plans" | "workflows" | "mcp" | "timeline" | "diagnostics";
+type InspectorTab = "files" | "memory" | "issues" | "plans" | "workflows" | "mcp" | "timeline" | "diagnostics" | "goals";
 type Completion = { label: string; detail: string; insert: string };
 type ChangedFile = { path: string; added: number; deleted: number; diff: string };
 type MemoryEntry = { Key?: string; key?: string; Value?: string; value?: string; Tags?: string[]; tags?: string[] };
 type IssueEntry = { ID?: number; id?: number; Title?: string; title?: string; Body?: string; body?: string; Status?: string; status?: string };
-const inspectorTabOrder: InspectorTab[] = ["files", "memory", "issues", "plans", "workflows", "mcp", "timeline", "diagnostics"];
+const inspectorTabOrder: InspectorTab[] = ["files", "memory", "issues", "plans", "workflows", "mcp", "timeline", "diagnostics", "goals"];
 const availableInspectorTabs = (caps?: Capabilities): InspectorTab[] =>
   inspectorTabOrder.filter((tab) => {
     if (tab === "diagnostics") return Boolean(caps?.lsp);
@@ -700,6 +701,9 @@ function InspectorBody({ tab, boot, status, data, loading, expandedDiffs, toggle
       agents={boot?.agents.map((a) => a.name) || []}
       busy={Boolean(status.busy)}
     />;
+  }
+    if (tab === "goals") {
+    return <GoalsPanel available={Boolean(boot?.capabilities.goals)} live={isLive} />;
   }
   if (tab === "plans") {
     return <PlansPanel available={Boolean(boot?.capabilities.plans)} live={isLive} rootID={selectedID} />;
