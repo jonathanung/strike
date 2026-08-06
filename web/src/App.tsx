@@ -3,7 +3,7 @@ import { activateRoot, bootstrap, closeRoot, createRoot, historicalConnection, l
 import { ChildAgentsPanel } from "./ChildAgents";
 import { buildExportMarkdown, defaultExportFilename, downloadTextFile } from "./exportMarkdown";
 import { clearQueue, editQueuedText, moveQueuedAt, removeQueuedAt, type QueuedPrompt } from "./queueOps";
-import { initialState, reduceEvent } from "./reducer";
+import { initialClientState, reduceClient, selectedSlice } from "./reducer";
 import { formatCostNotice, formatSlashHelp, resolveSlash, WEB_SLASH_COMMANDS } from "./slash";
 import { Transcript } from "./Transcript";
 import type { ActiveRoot, Bootstrap, Capabilities, ImageAttachment, Session, Status } from "./types";
@@ -68,19 +68,21 @@ export default function App() {
   const [activeRoots, setActiveRoots] = useState<ActiveRoot[]>([]);
   const [liveID, setLiveID] = useState("");
   const [activeRootID, setActiveRootID] = useState("");
-  const [selectedID, setSelectedID] = useState("");
   const [selectedIsLive, setSelectedIsLive] = useState(false);
   const [navTab, setNavTab] = useState<"active" | "history">("active");
   const [historySearch, setHistorySearch] = useState("");
-  const [state, dispatch] = useReducer(reduceEvent, undefined, initialState);
+  const [client, dispatch] = useReducer(reduceClient, undefined, initialClientState);
+  const selectedID = client.selectedID;
+  const state = selectedSlice(client);
+  const draft = state.draft;
+  const queue = state.queue;
+  const images = state.images;
+  const fast = state.fast;
   const [transport, setTransport] = useState("connecting");
-  const [draft, setDraft] = useState("");
-  const [queue, setQueue] = useState<QueuedPrompt[]>([]);
   const [queueEdit, setQueueEdit] = useState<{ index: number; text: string } | null>(null);
   const queueRef = useRef<HTMLOListElement>(null);
   const queueEditCancel = useRef(false);
   const [undoDialog, setUndoDialog] = useState<UndoDialogState | null>(null);
-  const [images, setImages] = useState<ImageAttachment[]>([]);
   const [inspector, setInspector] = useState<InspectorTab>("files");
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(true);
@@ -92,12 +94,31 @@ export default function App() {
   const [providers, setProviders] = useState<string[]>([]);
   const [models, setModels] = useState<string[]>([]);
   const [history, setHistory] = useState<string[]>([]);
-  const [fast, setFast] = useState(false);
   const [runtimeOpen, setRuntimeOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [selectedChildId, setSelectedChildId] = useState<string>();
   const endRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const setDraft = (value: string | ((prev: string) => string)) => {
+    if (!selectedID) return;
+    const next = typeof value === "function" ? value(draft) : value;
+    dispatch({ type: "client.composer", id: selectedID, patch: { draft: next } });
+  };
+  const setImages = (value: ImageAttachment[] | ((prev: ImageAttachment[]) => ImageAttachment[])) => {
+    if (!selectedID) return;
+    const next = typeof value === "function" ? value(images) : value;
+    dispatch({ type: "client.composer", id: selectedID, patch: { images: next } });
+  };
+  const setQueue = (value: typeof queue | ((prev: typeof queue) => typeof queue)) => {
+    if (!selectedID) return;
+    const next = typeof value === "function" ? value(queue) : value;
+    dispatch({ type: "client.composer", id: selectedID, patch: { queue: next } });
+  };
+  const setFast = (value: boolean | ((prev: boolean) => boolean)) => {
+    if (!selectedID) return;
+    const next = typeof value === "function" ? value(fast) : value;
+    dispatch({ type: "client.composer", id: selectedID, patch: { fast: next } });
+  };
 
   const refreshSessions = () => loadSessions().then((list) => { setSessions(list.sessions || []); setLiveID(list.liveId || ""); return list; });
   const refreshRoots = () => loadRoots().then((r) => { setActiveRoots(r.roots || []); setActiveRootID(r.activeId || ""); return r; }).catch(() => undefined);
@@ -110,7 +131,6 @@ export default function App() {
     ]).then(([nextBoot, list, r]) => {
       setBoot(nextBoot);
       setTransport("connected");
-      if (nextBoot.status) dispatch({ type: "status", data: nextBoot.status });
       setSessions(list.sessions || []);
       const hasRoots = Boolean(nextBoot.capabilities.roots && r.roots?.length);
       setLiveID(list.liveId || nextBoot.status?.sessionId || "");
@@ -119,7 +139,10 @@ export default function App() {
       setActiveRootID(r.activeId || list.liveId || nextBoot.status?.sessionId || "");
       const firstLive = rootsArr[0]?.id || (nextBoot.capabilities.roots ? "" : list.liveId) || "";
       const firstID = firstLive || list.sessions?.[0]?.id || "";
-      setSelectedID(firstID);
+      if (firstID) {
+        dispatch({ type: "client.ensure", id: firstID });
+        if (nextBoot.status) dispatch({ type: "client.event", id: firstID, envelope: { type: "status", data: nextBoot.status } });
+      }
       setSelectedIsLive(Boolean(firstLive && firstID === firstLive));
       setNavTab(firstLive ? "active" : "history");
       if (nextBoot.capabilities.auth) request<{ providers: Array<{ Name?: string; name?: string }> }>("/v1/providers").then((v) => setProviders(v.providers.map((p) => p.Name || p.name || "").filter(Boolean))).catch(() => {});
@@ -129,10 +152,15 @@ export default function App() {
 
   useEffect(() => {
     if (!selectedID) return;
-    dispatch({ type: "workspace.reset", data: { sessionId: selectedID } });
+    dispatch({ type: "client.ensure", id: selectedID });
     setSelectedChildId(undefined);
-    if (!selectedIsLive) return historicalConnection(selectedID, dispatch, (message) => setTransport(message));
-    const live = liveConnection(selectedID, dispatch, setTransport);
+    const id = selectedID;
+    // One WS (or SSE) for the *viewed* root only. Background attention (#919) may
+    // add multiplexed subscriptions later without changing this viewed-root path.
+    if (!selectedIsLive) {
+      return historicalConnection(id, (envelope) => dispatch({ type: "client.event", id, envelope }), (message) => setTransport(message));
+    }
+    const live = liveConnection(id, (envelope) => dispatch({ type: "client.event", id, envelope }), setTransport);
     return () => live.close();
   }, [selectedID, selectedIsLive]);
   useEffect(() => {
@@ -140,15 +168,17 @@ export default function App() {
     let cancelled = false;
     void sessionChildren(selectedID)
       .then((res) => {
-        if (!cancelled) dispatch({ type: "children.seed", time: `seed:${selectedID}`, data: { sessions: res.sessions || [] } });
+        if (!cancelled) dispatch({ type: "client.event", id: selectedID, envelope: { type: "children.seed", time: `seed:${selectedID}`, data: { sessions: res.sessions || [] } } });
       })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [selectedID, boot?.capabilities.sessions]);
   useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, [state.items]);
   useEffect(() => {
-    if (state.status.busy || !queue.length || !selectedIsLive) return;
-    const [next, ...rest] = queue; setQueue(rest); void op("user.input", { text: next.text, images: next.images.map(({ mime, data }) => ({ mime, data })) }, selectedID);
+    if (!selectedID || state.status.busy || !queue.length || !selectedIsLive) return;
+    const [next, ...rest] = queue;
+    dispatch({ type: "client.composer", id: selectedID, patch: { queue: rest } });
+    void op("user.input", { text: next.text, images: next.images.map(({ mime, data }) => ({ mime, data })) }, selectedID);
   }, [state.status.busy, queue, selectedIsLive, selectedID]);
 
   const isLive = Boolean(selectedIsLive && selectedID && !boot?.attachOnly);
@@ -163,7 +193,7 @@ export default function App() {
     return [];
   }, [draft, boot]);
 
-  const notice = (title: string, body: string) => dispatch({ type: "local.system", time: String(Date.now()), data: { title, text: body } });
+  const notice = (title: string, body: string) => { if (!selectedID) return; dispatch({ type: "client.event", id: selectedID, envelope: { type: "local.system", time: String(Date.now()), data: { title, text: body } } }); };
   const exportSession = () => {
     const md = buildExportMarkdown(state.items, {
       sessionId: selectedID || state.status.sessionId,
@@ -284,15 +314,29 @@ export default function App() {
   }, [boot]);
   const sessionAction = async (action: "fork" | "rename" | "delete") => {
     if (!boot?.capabilities.sessions || !selectedID) return;
-    if (action === "fork") await request(`/v1/sessions/${encodeURIComponent(selectedID)}/fork`, { method: "POST" });
-    if (action === "rename") { const title = window.prompt("Session title"); if (title === null) return; await request(`/v1/sessions/${encodeURIComponent(selectedID)}`, { method: "PATCH", body: JSON.stringify({ title }) }); }
-    if (action === "delete" && window.confirm("Delete this durable session?")) await request(`/v1/sessions/${encodeURIComponent(selectedID)}`, { method: "DELETE" });
+    const id = selectedID;
+    if (action === "fork") await request(`/v1/sessions/${encodeURIComponent(id)}/fork`, { method: "POST" });
+    if (action === "rename") { const title = window.prompt("Session title"); if (title === null) return; await request(`/v1/sessions/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ title }) }); }
+    if (action === "delete") {
+      if (!window.confirm("Delete this durable session?")) return;
+      await request(`/v1/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
+      dispatch({ type: "client.drop", id });
+      const list = await refreshSessions();
+      await refreshRoots();
+      const next = (list?.sessions || []).find((s) => s.id !== id)?.id || "";
+      if (next) {
+        dispatch({ type: "client.ensure", id: next });
+        setSelectedIsLive(false);
+        setNavTab("history");
+      }
+      return;
+    }
     await Promise.all([refreshSessions(), refreshRoots()]);
   };
-  const handleCreateWorkspace = async () => { if (!boot?.capabilities.roots || boot.attachOnly) return; try { const result = await createRoot(); await refreshRoots(); setSelectedID(result.id); setSelectedIsLive(true); setNavTab("active"); } catch (error) { window.alert((error as Error).message); } };
-  const handleResume = async (id: string) => { if (!boot?.capabilities.roots || boot.attachOnly) return; try { const result = await resumeRoot(id); await refreshRoots(); setSelectedID(result.id); setSelectedIsLive(true); setNavTab("active"); } catch (error) { window.alert((error as Error).message); } };
+  const handleCreateWorkspace = async () => { if (!boot?.capabilities.roots || boot.attachOnly) return; try { const result = await createRoot(); await refreshRoots(); dispatch({ type: "client.ensure", id: result.id }); setSelectedIsLive(true); setNavTab("active"); } catch (error) { window.alert((error as Error).message); } };
+  const handleResume = async (id: string) => { if (!boot?.capabilities.roots || boot.attachOnly) return; try { const result = await resumeRoot(id); await refreshRoots(); dispatch({ type: "client.ensure", id: result.id }); setSelectedIsLive(true); setNavTab("active"); } catch (error) { window.alert((error as Error).message); } };
   const selectWorkspace = async (id: string, isLive: boolean) => {
-    setSelectedID(id);
+    dispatch({ type: "client.ensure", id });
     setSelectedIsLive(isLive);
     if (!isLive || !boot?.capabilities.roots || boot.attachOnly) return;
     try {
@@ -312,12 +356,12 @@ export default function App() {
       const [rootsResult, sessionsResult] = await Promise.all([refreshRoots(), refreshSessions()]);
       const nextLive = rootsResult?.activeId || rootsResult?.roots?.[0]?.id || "";
       if (nextLive) {
-        setSelectedID(nextLive);
+        dispatch({ type: "client.ensure", id: nextLive });
         setSelectedIsLive(true);
         setNavTab("active");
       } else {
         const first = sessionsResult?.sessions?.[0]?.id || "";
-        setSelectedID(first);
+        if (first) dispatch({ type: "client.ensure", id: first });
         setSelectedIsLive(false);
         setNavTab("history");
       }
@@ -338,7 +382,7 @@ export default function App() {
                     <span className="session-main"><span className="session-title">{label}</span><span className="session-meta">{root.agent || "—"}{activity ? ` · ${activity}` : ""}</span></span>
                     <span className="session-flags">{root.id === activeRootID && <small>ACTIVE</small>}<small>{root.busy ? "BUSY" : "IDLE"}</small></span>
                   </button>;
-                })}</nav>{!boot?.attachOnly && <div className="session-actions"><button type="button" onClick={() => void handleCreateWorkspace()}>+ New workspace</button><button type="button" disabled={!selectedIsLive || !selectedID} onClick={() => void handleCloseWorkspace()}>Close workspace</button></div>}</>}{navTab === "history" && <HistoryNav sessions={sessions} activeRoots={activeRoots} selectedID={selectedID} selectedIsLive={selectedIsLive} historySearch={historySearch} setHistorySearch={setHistorySearch} selectWorkspace={selectWorkspace} handleResume={handleResume} boot={boot} sessionAction={sessionAction} />}</> : <><div className="aside-heading"><span>SESSIONS</span></div><nav>{sessions.map((session) => <button key={session.id} className={session.id === selectedID ? "session active" : "session"} onClick={() => { setSelectedID(session.id); setSelectedIsLive(session.id === liveID && !boot?.attachOnly); }}><span>{session.title || session.id.slice(0, 12)}</span>{session.id === liveID && <small>LIVE</small>}</button>)}</nav>{boot?.capabilities.sessions && selectedID && <div className="session-actions" aria-label="Session actions"><SessionMenu onAction={(action) => void sessionAction(action)} /></div>}</>}<ChildAgentsPanel children={children} selectedId={selectedChildId} onSelect={setSelectedChildId} onOpenTranscript={openChildTranscript} /><details className="workspace-meta"><summary>Workspace</summary><span>ROOT</span><code>{state.status.cwd || "unavailable"}</code><span>BUILD</span><code>{boot?.version || "…"}</code></details></aside>
+                })}</nav>{!boot?.attachOnly && <div className="session-actions"><button type="button" onClick={() => void handleCreateWorkspace()}>+ New workspace</button><button type="button" disabled={!selectedIsLive || !selectedID} onClick={() => void handleCloseWorkspace()}>Close workspace</button></div>}</>}{navTab === "history" && <HistoryNav sessions={sessions} activeRoots={activeRoots} selectedID={selectedID} selectedIsLive={selectedIsLive} historySearch={historySearch} setHistorySearch={setHistorySearch} selectWorkspace={selectWorkspace} handleResume={handleResume} boot={boot} sessionAction={sessionAction} />}</> : <><div className="aside-heading"><span>SESSIONS</span></div><nav>{sessions.map((session) => <button key={session.id} className={session.id === selectedID ? "session active" : "session"} onClick={() => { dispatch({ type: "client.ensure", id: session.id }); setSelectedIsLive(session.id === liveID && !boot?.attachOnly); }}><span>{session.title || session.id.slice(0, 12)}</span>{session.id === liveID && <small>LIVE</small>}</button>)}</nav>{boot?.capabilities.sessions && selectedID && <div className="session-actions" aria-label="Session actions"><SessionMenu onAction={(action) => void sessionAction(action)} /></div>}</>}<ChildAgentsPanel children={children} selectedId={selectedChildId} onSelect={setSelectedChildId} onOpenTranscript={openChildTranscript} /><details className="workspace-meta"><summary>Workspace</summary><span>ROOT</span><code>{state.status.cwd || "unavailable"}</code><span>BUILD</span><code>{boot?.version || "…"}</code></details></aside>
     <main>
       <div className="runtime-stack">
       <section className="runtime" aria-label="Runtime controls">
