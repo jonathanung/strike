@@ -1098,3 +1098,32 @@ func TestCatalogCustomNestedModelsDTO(t *testing.T) {
 		t.Errorf("source/variants = %+v", got)
 	}
 }
+
+func TestSaveAutoApproveDialsWritesGlobalConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	svc := New(nil, nil, nil, nil, nil, nil, nil, "")
+
+	exclude := []string{"bash", "write"}
+	if err := svc.Settings.SaveAutoApproveDials("10", &exclude, "3"); err != nil {
+		t.Fatal(err)
+	}
+	d := svc.Settings.Defaults()
+	if d.PermissionAutoApproveSeconds != 10 {
+		t.Fatalf("seconds = %d", d.PermissionAutoApproveSeconds)
+	}
+	if len(d.PermissionAutoApproveExclude) != 2 || d.PermissionAutoApproveExclude[0] != "bash" {
+		t.Fatalf("exclude = %#v", d.PermissionAutoApproveExclude)
+	}
+	if d.MaxChildDepth != 3 {
+		t.Fatalf("maxChildDepth = %d", d.MaxChildDepth)
+	}
+
+	if err := svc.Settings.SaveAutoApproveDials("nope", nil, ""); err == nil {
+		t.Fatal("unknown seconds accepted")
+	}
+	d = svc.Settings.Defaults()
+	if d.PermissionAutoApproveSeconds != 10 {
+		t.Fatalf("reject cleared seconds: %#v", d)
+	}
+}

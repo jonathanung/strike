@@ -261,17 +261,24 @@ type savedConfigDials struct {
 	sessionWorktree string
 }
 
+type savedAutoApproveDials struct {
+	seconds       string
+	exclude       *[]string
+	maxChildDepth string
+}
+
 type fakeSettings struct {
-	defaults        host.UserDefaults
-	saved           []savedDefaults
-	savedThemes     []string
-	savedPres       []savedPresentation
-	savedDials      []savedConfigDials
-	savedCompaction []host.CompactionDials
-	savedKeybinds   []map[string][]string
-	err             error
-	themeErr        error
-	compactionErr   error
+	defaults         host.UserDefaults
+	saved            []savedDefaults
+	savedThemes      []string
+	savedPres        []savedPresentation
+	savedDials       []savedConfigDials
+	savedAutoApprove []savedAutoApproveDials
+	savedCompaction  []host.CompactionDials
+	savedKeybinds    []map[string][]string
+	err              error
+	themeErr         error
+	compactionErr    error
 }
 
 // fakeOnboarding tracks global FTUE acknowledgement for tests.
@@ -468,6 +475,56 @@ func (s *fakeSettings) SaveConfigDials(sandboxMode, notify, leanCode, deferTools
 	}
 	if sessionWorktree != "" {
 		s.defaults.SessionWorktree = sessionWorktree
+	}
+	return s.err
+}
+
+func (s *fakeSettings) SaveAutoApproveDials(seconds string, exclude *[]string, maxChildDepth string) error {
+	rec := savedAutoApproveDials{seconds: seconds, maxChildDepth: maxChildDepth}
+	if exclude != nil {
+		cp := append([]string(nil), (*exclude)...)
+		rec.exclude = &cp
+	}
+	s.savedAutoApprove = append(s.savedAutoApprove, rec)
+	if seconds != "" {
+		// Mirror config parse for tests: off/0 → 0, else Atoi.
+		switch seconds {
+		case "off", "0", "false", "no", "disabled", "none":
+			s.defaults.PermissionAutoApproveSeconds = 0
+		default:
+			n := 0
+			for _, ch := range seconds {
+				if ch < '0' || ch > '9' {
+					return s.err
+				}
+				n = n*10 + int(ch-'0')
+			}
+			if n > 60 {
+				n = 60
+			}
+			s.defaults.PermissionAutoApproveSeconds = n
+		}
+	}
+	if exclude != nil {
+		s.defaults.PermissionAutoApproveExclude = append([]string(nil), (*exclude)...)
+	}
+	if maxChildDepth != "" {
+		switch maxChildDepth {
+		case "default", "0", "off", "unset":
+			s.defaults.MaxChildDepth = 0
+		default:
+			n := 0
+			for _, ch := range maxChildDepth {
+				if ch < '0' || ch > '9' {
+					return s.err
+				}
+				n = n*10 + int(ch-'0')
+			}
+			if n > 8 {
+				n = 8
+			}
+			s.defaults.MaxChildDepth = n
+		}
 	}
 	return s.err
 }

@@ -650,3 +650,119 @@ func TestSetGlobalCompactionDialsRejectsUnknown(t *testing.T) {
 		t.Fatalf("reject mutated config: strategy=%q buffer=%d", got.CompactionStrategy, got.CompactionBuffer)
 	}
 }
+
+func TestSetGlobalAutoApproveDials(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := SetGlobalDefaults("echo", "echo", "build", protocol.EffortHigh, "default"); err != nil {
+		t.Fatal(err)
+	}
+
+	exclude := []string{" Bash ", "bash", "write", ""}
+	if err := SetGlobalAutoApproveDials("15", &exclude, "2"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadGlobalDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PermissionAutoApproveSeconds != 15 {
+		t.Errorf("seconds = %d", got.PermissionAutoApproveSeconds)
+	}
+	if len(got.PermissionAutoApproveExclude) != 2 || got.PermissionAutoApproveExclude[0] != "bash" || got.PermissionAutoApproveExclude[1] != "write" {
+		t.Errorf("exclude = %#v", got.PermissionAutoApproveExclude)
+	}
+	if got.MaxChildDepth != 2 {
+		t.Errorf("maxChildDepth = %d", got.MaxChildDepth)
+	}
+	if got.Provider != "echo" {
+		t.Errorf("clobbered provider = %q", got.Provider)
+	}
+
+	// Partial: seconds only; exclude nil leaves list; depth empty leaves.
+	if err := SetGlobalAutoApproveDials("off", nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	got, err = ReadGlobalDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PermissionAutoApproveSeconds != 0 {
+		t.Errorf("seconds after off = %d", got.PermissionAutoApproveSeconds)
+	}
+	if len(got.PermissionAutoApproveExclude) != 2 {
+		t.Errorf("exclude cleared unexpectedly: %#v", got.PermissionAutoApproveExclude)
+	}
+	if got.MaxChildDepth != 2 {
+		t.Errorf("depth cleared unexpectedly: %d", got.MaxChildDepth)
+	}
+
+	// Clear exclude with empty slice pointer.
+	empty := []string{}
+	if err := SetGlobalAutoApproveDials("", &empty, "default"); err != nil {
+		t.Fatal(err)
+	}
+	got, err = ReadGlobalDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PermissionAutoApproveExclude != nil {
+		t.Errorf("exclude not cleared: %#v", got.PermissionAutoApproveExclude)
+	}
+	if got.MaxChildDepth != 0 {
+		t.Errorf("depth default = %d", got.MaxChildDepth)
+	}
+
+	// Clamp high values.
+	if err := SetGlobalAutoApproveDials("99", nil, "20"); err != nil {
+		t.Fatal(err)
+	}
+	got, err = ReadGlobalDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PermissionAutoApproveSeconds != 60 {
+		t.Errorf("seconds clamp = %d", got.PermissionAutoApproveSeconds)
+	}
+	if got.MaxChildDepth != MaxChildDepthCeiling {
+		t.Errorf("depth clamp = %d", got.MaxChildDepth)
+	}
+}
+
+func TestSetGlobalAutoApproveDialsRejectsUnknown(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := SetGlobalAutoApproveDials("maybe", nil, ""); err == nil {
+		t.Fatal("accepted unknown seconds")
+	}
+	if err := SetGlobalAutoApproveDials("", nil, "deep"); err == nil {
+		t.Fatal("accepted unknown depth")
+	}
+	got, err := ReadGlobalDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PermissionAutoApproveSeconds != 0 || got.MaxChildDepth != 0 {
+		t.Fatalf("reject mutated config: %+v", got)
+	}
+}
+
+func TestClampMaxChildDepth(t *testing.T) {
+	cases := []struct {
+		in, want int
+	}{
+		{-1, 0},
+		{0, 0},
+		{1, 1},
+		{8, 8},
+		{9, 8},
+		{100, 8},
+	}
+	for _, tt := range cases {
+		if got := ClampMaxChildDepth(tt.in); got != tt.want {
+			t.Errorf("ClampMaxChildDepth(%d) = %d, want %d", tt.in, got, tt.want)
+		}
+	}
+}

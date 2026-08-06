@@ -56,7 +56,8 @@ later discovery roots.
 | `review-fix` | review (`reviewer`, user gate) → fix (`build`, `make test` check) |
 
 `enter_plan_mode` / `exit_plan_mode` drive the default plan workflow. Custom
-and extra builtins load from `~/.strike/workflows` and `./.strike/workflows`.
+workflows load from `~/.strike/workflows` and `./.strike/workflows` (schema
+v1; `strike workflow scaffold|format|validate`). Scaffolding never activates.
 
 ## Hooks alignment
 
@@ -142,14 +143,15 @@ does not skip asks. `yolo` + `sandbox: off` requires `--i-know`.
 | Custom providers | OC `provider` | `providers.jsonc` + `/settings` Providers | shipped |
 | Disable default providers | OC `disabled_providers` | `disable-default-*` | shipped |
 | Hooks | both | `hooks[]` | shipped (lean schema) |
-| Subagent depth | OC `subagent_depth` | `maxChildDepth` | shipped (config) |
+| Subagent depth | OC `subagent_depth` | `maxChildDepth` | shipped (+ `/settings`) |
+| Permission auto-approve | CC/OC soft auto | `permissionAutoApproveSeconds` / `Exclude` | shipped (+ `/settings`) |
 | Session worktree isolation | OC snapshot-ish / CC worktrees | `session.worktree` | shipped (+ `/settings`) |
 | Lean / efficiency guidance | — (strike) | `leanCode` | shipped (+ `/settings`) |
 | Deferred tool schemas | OC tools gating-ish | `deferTools` + `toolsearch` | shipped (+ `/settings`) |
 | Instructions globs | OC `instructions` | AGENTS.md + discovery roots | shipped (different model) |
 | Autoupdate | OC `autoupdate` | `strike upgrade` | partial (manual) |
 | Formatters | OC `formatter` | gap (use hooks / editor) | gap |
-| LSP servers | OC `lsp` | gap — tracked #555 | gap / out of this epic |
+| LSP servers | OC `lsp` | shipped (`internal/lsp`, `/lsp`, diagnostics pane) | gap / out of this epic |
 | Network allowlist | OC network / CC | gap — tracked #527 | gap / coordinate |
 | Managed / MDM settings | CC/OC enterprise | gap | gap (later) |
 | JSON schema `$schema` | both | gap | gap (nice DX) |
@@ -159,7 +161,8 @@ does not skip asks. `yolo` + `sandbox: off` requires `--i-know`.
 ### `/settings` coverage
 
 **Defaults** editable: theme, vimMode, nanoMode, mdReadMode, permissionMode,
-**sandbox**, **notify**, **leanCode**, **deferTools**, **session.worktree**,
+**permissionAutoApproveSeconds**, **permissionAutoApproveExclude**, **sandbox**,
+**notify**, **leanCode**, **deferTools**, **session.worktree**, **maxChildDepth**,
 effort. Read-only (set via pickers + ctrl+d): provider, model, agent.
 
 **Compaction** editable: `compactionStrategy`, `compactionModel`,
@@ -170,8 +173,7 @@ effort. Read-only (set via pickers + ctrl+d): provider, model, agent.
 Providers CRUD: custom OpenAI-/Anthropic-compatible endpoints.
 
 Remaining config-only dials (edit JSON or future `/settings` pages): scheduler,
-hooks, MCP, permissions rules, maxChildDepth, permissionAutoApprove*,
-harnesses.
+hooks, MCP, permissions rules, harnesses.
 
 ## Attribution
 

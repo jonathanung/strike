@@ -198,22 +198,22 @@ func (m Model) handleKeybindSlashCommand(name string) (tea.Model, tea.Cmd) {
 		m.windows = m.windows.cycleBy(1)
 		m.windows = refreshProjectDataWindows(m.windows)
 		m.reflow()
-		return m, filesPollCmd(m.windows)
+		return m, rightPanePollCmd(m.windows)
 	case "/window-prev":
 		m.windows = m.windows.cycleBy(-1)
 		m.windows = refreshProjectDataWindows(m.windows)
 		m.reflow()
-		return m, filesPollCmd(m.windows)
+		return m, rightPanePollCmd(m.windows)
 	case "/group-next":
 		m.windows = m.windows.cycleGroupBy(1)
 		m.windows = refreshProjectDataWindows(m.windows)
 		m.reflow()
-		return m, filesPollCmd(m.windows)
+		return m, rightPanePollCmd(m.windows)
 	case "/group-prev":
 		m.windows = m.windows.cycleGroupBy(-1)
 		m.windows = refreshProjectDataWindows(m.windows)
 		m.reflow()
-		return m, filesPollCmd(m.windows)
+		return m, rightPanePollCmd(m.windows)
 	case "/scroll-up":
 		m.viewport.HalfPageUp()
 		return m, nil

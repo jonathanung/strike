@@ -584,7 +584,7 @@ func (m Model) activateRootByIndex(idx int) (tea.Model, tea.Cmd) {
 	if cmd == nil {
 		return m, nil
 	}
-	pollCmd := filesPollCmd(m.windows)
+	pollCmd := rightPanePollCmd(m.windows)
 	return m, tea.Batch(cmd, pollCmd)
 }
 

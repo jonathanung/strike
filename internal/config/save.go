@@ -294,6 +294,75 @@ func SetGlobalConfigDials(sandboxMode, notify, leanCode, deferTools, sessionWork
 	return writeGlobal(cfg, unlock)
 }
 
+// SetGlobalAutoApproveDials persists permission auto-approve countdown/exclude
+// and maxChildDepth into ~/.strike/config. Empty scalar strings leave the
+// corresponding field unchanged. exclude nil leaves the list unchanged; a
+// non-nil pointer (including to an empty slice) replaces the stored list.
+//
+//	seconds        — "off"|"0" disables; "1"–"60" (clamped); aliases off/false/no/disabled
+//	maxChildDepth  — "0"|"default" → engine default; "1"–"8" (clamped to MaxChildDepthCeiling)
+func SetGlobalAutoApproveDials(seconds string, exclude *[]string, maxChildDepth string) error {
+	globalMu.Lock()
+	defer globalMu.Unlock()
+
+	cfg, unlock, err := readGlobalForWrite()
+	if err != nil {
+		return err
+	}
+	if seconds != "" {
+		n, ok := parseAutoApproveSeconds(seconds)
+		if !ok {
+			unlock()
+			return fmt.Errorf("unknown permissionAutoApproveSeconds %q (want off|0|1-60)", seconds)
+		}
+		cfg.PermissionAutoApproveSeconds = n
+	}
+	if exclude != nil {
+		cfg.PermissionAutoApproveExclude = normalizePermissionAutoApproveExclude(*exclude)
+	}
+	if maxChildDepth != "" {
+		n, ok := parseMaxChildDepth(maxChildDepth)
+		if !ok {
+			unlock()
+			return fmt.Errorf("unknown maxChildDepth %q (want default|0|1-%d)", maxChildDepth, MaxChildDepthCeiling)
+		}
+		cfg.MaxChildDepth = n
+	}
+	return writeGlobal(cfg, unlock)
+}
+
+func parseAutoApproveSeconds(s string) (int, bool) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	switch s {
+	case "off", "0", "false", "no", "disabled", "none":
+		return 0, true
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, false
+	}
+	if n < 0 {
+		return 0, false
+	}
+	return ClampPermissionAutoApproveSeconds(n), true
+}
+
+func parseMaxChildDepth(s string) (int, bool) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	switch s {
+	case "default", "0", "off", "unset":
+		return 0, true
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, false
+	}
+	if n < 0 {
+		return 0, false
+	}
+	return ClampMaxChildDepth(n), true
+}
+
 // parseSessionWorktree accepts only canonical off|auto|always (strict; no
 // silent fallback to off for unknown tokens).
 func parseSessionWorktree(s string) (string, bool) {
@@ -513,7 +582,8 @@ func normalizeSchedulerPresetIDs(ids []string) ([]string, error) {
 }
 
 // ReadGlobalDefaults returns the global config file contents used as user
-// defaults. Missing file yields a zero Config and nil error.
+// defaults. Missing file yields a zero Config and nil error. Accepts JSONC
+// (comments) and ignores unknown keys including "$schema".
 func ReadGlobalDefaults() (Config, error) {
 	globalMu.Lock()
 	defer globalMu.Unlock()
@@ -531,12 +601,26 @@ func ReadGlobalDefaults() (Config, error) {
 	case len(data) == 0:
 		return Config{}, nil
 	default:
-		var cfg Config
-		if err := json.Unmarshal(data, &cfg); err != nil {
-			return Config{}, fmt.Errorf("%s is not valid JSON: %w", path, err)
+		cfg, err := unmarshalConfigJSONC(data)
+		if err != nil {
+			return Config{}, fmt.Errorf("%s is not valid JSON/JSONC: %w", path, err)
 		}
 		return cfg, nil
 	}
+}
+
+// unmarshalConfigJSONC strips JSONC comments then decodes into Config.
+// Unknown keys (including "$schema") are ignored.
+func unmarshalConfigJSONC(data []byte) (Config, error) {
+	stripped, err := stripJSONC(data)
+	if err != nil {
+		return Config{}, err
+	}
+	var cfg Config
+	if err := json.Unmarshal(stripped, &cfg); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
 }
 
 func validEditorMode(v string) bool {
@@ -597,20 +681,21 @@ func readGlobalForWrite() (Config, func() error, error) {
 			unlock()
 		}
 	}()
-	var cfg Config
 	data, err := os.ReadFile(path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return cfg, unlock, nil
+		return Config{}, unlock, nil
 	case err != nil:
 		readErr = err
 		return Config{}, nil, err
 	case len(data) == 0:
 		// Lock created the file; treat empty as not existing.
-		return cfg, unlock, nil
+		return Config{}, unlock, nil
 	default:
-		if err := json.Unmarshal(data, &cfg); err != nil {
-			readErr = fmt.Errorf("existing %s is not valid JSON (%v) — fix it before saving defaults", path, err)
+		// JSONC load; writeGlobal rewrites pure JSON (comments / $schema dropped).
+		cfg, err := unmarshalConfigJSONC(data)
+		if err != nil {
+			readErr = fmt.Errorf("existing %s is not valid JSON/JSONC (%v) — fix it before saving defaults", path, err)
 			return Config{}, nil, readErr
 		}
 		return cfg, unlock, nil
@@ -686,7 +771,7 @@ func resolveWritePath(path string) (string, error) {
 	return real, nil
 }
 
-// ProjectPath is the project config file, <workDir>/.strike/config (JSON).
+// ProjectPath is the project config file, <workDir>/.strike/config (JSON or JSONC).
 func ProjectPath(workDir string) string {
 	if workDir == "" {
 		return ""
@@ -719,9 +804,12 @@ func AppendProjectPermission(workDir string, rule permission.Rule) error {
 	case err != nil:
 		return err
 	default:
-		if err := json.Unmarshal(data, &cfg); err != nil {
-			return fmt.Errorf("existing %s is not valid JSON (%v) — fix it before saving permissions", path, err)
+		// JSONC load; WriteFile below rewrites pure JSON (comments / $schema dropped).
+		parsed, err := unmarshalConfigJSONC(data)
+		if err != nil {
+			return fmt.Errorf("existing %s is not valid JSON/JSONC (%v) — fix it before saving permissions", path, err)
 		}
+		cfg = parsed
 	}
 	cfg.Permissions = append(cfg.Permissions, rule)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

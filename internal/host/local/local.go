@@ -605,29 +605,32 @@ func (settingsAdapter) Defaults() host.UserDefaults {
 		return host.UserDefaults{}
 	}
 	return host.UserDefaults{
-		Provider:            config.CanonicalProviderID(cfg.Provider),
-		Model:               cfg.Model,
-		Agent:               cfg.DefaultAgent,
-		Effort:              string(cfg.Effort),
-		PermissionMode:      string(cfg.PermissionMode),
-		Sandbox:             cfg.Sandbox,
-		Notify:              cfg.Notify,
-		LeanCode:            cfg.LeanCode,
-		DeferTools:          cfg.DeferTools,
-		SessionWorktree:     cfg.Session.Worktree,
-		Theme:               cfg.Theme,
-		VimMode:             cfg.VimMode,
-		NanoMode:            cfg.NanoMode,
-		MdReadMode:          cfg.MdReadMode,
-		CompactionStrategy:  cfg.CompactionStrategy,
-		CompactionModel:     cfg.CompactionModel,
-		CompactionThreshold: cfg.CompactionThreshold,
-		CompactionBuffer:    cfg.CompactionBuffer,
-		KeepUserTurns:       cfg.KeepUserTurns,
-		PruneProtectTokens:  cfg.PruneProtectTokens,
-		PruneMinimumTokens:  cfg.PruneMinimumTokens,
-		PruneKeepUserTurns:  cfg.PruneKeepUserTurns,
-		PruneProtectTools:   append([]string(nil), cfg.PruneProtectTools...),
+		Provider:                     config.CanonicalProviderID(cfg.Provider),
+		Model:                        cfg.Model,
+		Agent:                        cfg.DefaultAgent,
+		Effort:                       string(cfg.Effort),
+		PermissionMode:               string(cfg.PermissionMode),
+		Sandbox:                      cfg.Sandbox,
+		Notify:                       cfg.Notify,
+		LeanCode:                     cfg.LeanCode,
+		DeferTools:                   cfg.DeferTools,
+		SessionWorktree:              cfg.Session.Worktree,
+		PermissionAutoApproveSeconds: cfg.PermissionAutoApproveSeconds,
+		PermissionAutoApproveExclude: append([]string(nil), cfg.PermissionAutoApproveExclude...),
+		MaxChildDepth:                cfg.MaxChildDepth,
+		Theme:                        cfg.Theme,
+		VimMode:                      cfg.VimMode,
+		NanoMode:                     cfg.NanoMode,
+		MdReadMode:                   cfg.MdReadMode,
+		CompactionStrategy:           cfg.CompactionStrategy,
+		CompactionModel:              cfg.CompactionModel,
+		CompactionThreshold:          cfg.CompactionThreshold,
+		CompactionBuffer:             cfg.CompactionBuffer,
+		KeepUserTurns:                cfg.KeepUserTurns,
+		PruneProtectTokens:           cfg.PruneProtectTokens,
+		PruneMinimumTokens:           cfg.PruneMinimumTokens,
+		PruneKeepUserTurns:           cfg.PruneKeepUserTurns,
+		PruneProtectTools:            append([]string(nil), cfg.PruneProtectTools...),
 	}
 }
 
@@ -649,6 +652,10 @@ func (settingsAdapter) SavePresentation(vimMode, nanoMode, mdReadMode string) er
 
 func (settingsAdapter) SaveConfigDials(sandboxMode, notify, leanCode, deferTools, sessionWorktree string) error {
 	return config.SetGlobalConfigDials(sandboxMode, notify, leanCode, deferTools, sessionWorktree)
+}
+
+func (settingsAdapter) SaveAutoApproveDials(seconds string, exclude *[]string, maxChildDepth string) error {
+	return config.SetGlobalAutoApproveDials(seconds, exclude, maxChildDepth)
 }
 
 func (settingsAdapter) SaveCompactionDials(d host.CompactionDials) error {

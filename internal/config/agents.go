@@ -63,6 +63,7 @@ var reservedSkillNames = map[string]struct{}{
 	"visualizer":       {},
 	"system":           {},
 	"telemetry":        {},
+	"pets":             {},
 	"fast":             {},
 	"vim":              {},
 	"nano":             {},
@@ -92,6 +93,8 @@ var reservedSkillNames = map[string]struct{}{
 	"init":             {},
 	"ftue":             {},
 	"mcp":              {},
+	"lsp":              {},
+	"diagnostics":      {},
 	"exit":             {},
 	"quit":             {},
 	// Keybind-backed action mirrors (internal/tui keybind_slash.go).

@@ -29,7 +29,7 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		{ID: "command:provider", Label: "/provider", Description: "select a provider and model", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/provider"}},
 		{ID: "command:model", Label: "/model", Description: "select a model from authenticated providers", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/model"}},
 		{ID: "command:effort", Label: "/effort", Description: "set how much reasoning the model spends", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/effort"}},
-		{ID: "command:autonomy", Label: "/autonomy", Description: "set exit-gate policy (supervised/agent/checks)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/autonomy"}},
+		{ID: "command:autonomy", Label: "/autonomy", Description: "set exit-gate policy (supervised/agent/checks/skip-all)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/autonomy"}},
 		{ID: "command:mode", Label: "/mode", Description: "set permission posture (default/plan/accept-edits/yolo)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/mode"}},
 		{ID: "command:sandbox", Label: "/sandbox", Description: "show OS sandbox policy; /sandbox explain for generated profile", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/sandbox"}},
 		{ID: "command:auth", Label: "/auth", Description: "manage provider authentication", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/auth"}},
@@ -41,6 +41,7 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		{ID: "command:visualizer", Label: "/visualizer", Description: "focus the visualizer right pane", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/visualizer"}},
 		{ID: "command:system", Label: "/system", Description: "focus the system right pane (requires telemetry on)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/system"}},
 		{ID: "command:telemetry", Label: "/telemetry", Description: "show or hide local system metrics (CPU/RAM/disk)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/telemetry"}},
+		{ID: "command:pets", Label: "/pets", Description: "focus the pets right pane (ASCII companions)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/pets"}},
 		{ID: "command:fast", Label: "/fast", Description: "toggle OpenAI priority tier (faster, ~2× cost)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/fast"}},
 		{ID: "command:think", Label: "/think", Description: "show or hide model chain-of-thought", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/think"}},
 		{ID: "command:vim", Label: "/vim", Description: "open a file in the editor (embedded/modal/takeover; see vimMode)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/vim"}},
@@ -72,6 +73,8 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		{ID: "command:init", Label: "/init", Description: "create or update project AGENTS.md", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/init"}},
 		{ID: "command:ftue", Label: "/ftue", Description: "setup wizard: provider, model, optional init, feature tour, scheduler presets, first prompt", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/ftue"}},
 		{ID: "command:mcp", Label: "/mcp", Description: "MCP servers: status, retry, disable", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/mcp"}},
+		{ID: "command:lsp", Label: "/lsp", Description: "language servers: status, retry, disable", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/lsp"}},
+		{ID: "command:diagnostics", Label: "/diagnostics", Description: "focus the diagnostics right pane", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/diagnostics"}},
 		{ID: "command:exit", Label: "/exit", Description: "quit strike", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/exit"}},
 		{ID: "command:quit", Label: "/quit", Description: "quit strike", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/quit"}},
 		{ID: "command:focus-left", Label: "/focus-left", Description: "focus left pane", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/focus-left"}},
@@ -162,7 +165,9 @@ func TestPaletteAvailabilityAndDisabledSelection(t *testing.T) {
 		assertPaletteInvoke(t, m, "/cost", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/cost"}})
 		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
 		assertPaletteInvoke(t, m, "/mcp", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/mcp"}})
-		for _, pane := range []string{"/agents", "/activity", "/files", "/visualizer", "/system"} {
+		m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
+		assertPaletteInvoke(t, m, "/lsp", paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: "/lsp"}})
+		for _, pane := range []string{"/agents", "/activity", "/files", "/diagnostics", "/visualizer", "/system"} {
 			m = newPaletteModal(paletteTestSpecs(), []string{"build"}, paletteAvailability{HasProvider: true, TurnRunning: true})
 			assertPaletteInvoke(t, m, pane, paletteInvokeMsg{Action: paletteAction{Kind: paletteActionBuiltin, Value: pane}})
 		}

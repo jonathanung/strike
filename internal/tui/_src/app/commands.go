@@ -26,6 +26,7 @@ const (
 	commandVisualizer      commandID = "visualizer"
 	commandSystem          commandID = "system"
 	commandTelemetry       commandID = "telemetry"
+	commandPets            commandID = "pets"
 	commandFast            commandID = "fast"
 	commandThink           commandID = "think"
 	commandVim             commandID = "vim"
@@ -57,6 +58,8 @@ const (
 	commandInit            commandID = "init"
 	commandFTUE            commandID = "ftue"
 	commandMCP             commandID = "mcp"
+	commandLSP             commandID = "lsp"
+	commandDiagnostics     commandID = "diagnostics"
 	commandExit            commandID = "exit"
 	commandQuit            commandID = "quit"
 
@@ -113,7 +116,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandProvider, Name: "/provider", Description: "select a provider and model", ArgsHint: "[name [model]]", Source: commandSourceBuiltin},
 	{ID: commandModel, Name: "/model", Description: "select a model from authenticated providers", ArgsHint: "[model|provider/model]", Source: commandSourceBuiltin},
 	{ID: commandEffort, Name: "/effort", Description: "set how much reasoning the model spends", ArgsHint: "[level]", Source: commandSourceBuiltin},
-	{ID: commandAutonomy, Name: "/autonomy", Description: "set exit-gate policy (supervised/agent/checks)", ArgsHint: "[mode]", Source: commandSourceBuiltin},
+	{ID: commandAutonomy, Name: "/autonomy", Description: "set exit-gate policy (supervised/agent/checks/skip-all)", ArgsHint: "[mode]", Source: commandSourceBuiltin},
 	{ID: commandMode, Name: "/mode", Description: "set permission posture (default/plan/accept-edits/yolo)", ArgsHint: "[mode]", Source: commandSourceBuiltin},
 	{ID: commandSandbox, Name: "/sandbox", Description: "show OS sandbox policy; /sandbox explain for generated profile", Source: commandSourceBuiltin},
 	{ID: commandAuth, Name: "/auth", Description: "manage provider authentication", ArgsHint: "[provider]", Source: commandSourceBuiltin},
@@ -125,6 +128,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandVisualizer, Name: "/visualizer", Description: "focus the visualizer right pane", Source: commandSourceBuiltin},
 	{ID: commandSystem, Name: "/system", Description: "focus the system right pane (requires telemetry on)", Source: commandSourceBuiltin},
 	{ID: commandTelemetry, Name: "/telemetry", Description: "show or hide local system metrics (CPU/RAM/disk)", ArgsHint: "[on|off|status]", Source: commandSourceBuiltin},
+	{ID: commandPets, Name: "/pets", Description: "focus the pets right pane (ASCII companions)", ArgsHint: "[name]", Source: commandSourceBuiltin},
 	{ID: commandFast, Name: "/fast", Description: "toggle OpenAI priority tier (faster, ~2× cost)", ArgsHint: "[on|off]", Source: commandSourceBuiltin},
 	{ID: commandThink, Name: "/think", Description: "show or hide model chain-of-thought", ArgsHint: "[on|off]", Source: commandSourceBuiltin},
 	{ID: commandVim, Name: "/vim", Description: "open a file in the editor (embedded/modal/takeover; see vimMode)", ArgsHint: "[path|@path[:line]]", Source: commandSourceBuiltin},
@@ -156,6 +160,8 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandInit, Name: "/init", Description: "create or update project AGENTS.md", Source: commandSourceBuiltin},
 	{ID: commandFTUE, Name: "/ftue", Description: "setup wizard: provider, model, optional init, feature tour, scheduler presets, first prompt", Source: commandSourceBuiltin},
 	{ID: commandMCP, Name: "/mcp", Description: "MCP servers: status, retry, disable", ArgsHint: "[retry [name]|disable <name>]", Source: commandSourceBuiltin},
+	{ID: commandLSP, Name: "/lsp", Description: "language servers: status, retry, disable", ArgsHint: "[retry [name]|disable <name>]", Source: commandSourceBuiltin},
+	{ID: commandDiagnostics, Name: "/diagnostics", Description: "focus the diagnostics right pane", Source: commandSourceBuiltin},
 	{ID: commandExit, Name: "/exit", Description: "quit strike", Source: commandSourceBuiltin},
 	{ID: commandQuit, Name: "/quit", Description: "quit strike", Source: commandSourceBuiltin},
 }
@@ -229,6 +235,7 @@ var reservedCommandNames = map[string]struct{}{
 	"visualizer":       {},
 	"system":           {},
 	"telemetry":        {},
+	"pets":             {},
 	"fast":             {},
 	"think":            {},
 	"vim":              {},
@@ -260,6 +267,8 @@ var reservedCommandNames = map[string]struct{}{
 	"init":             {},
 	"ftue":             {},
 	"mcp":              {},
+	"lsp":              {},
+	"diagnostics":      {},
 	"exit":             {},
 	"quit":             {},
 	// Keybind-backed action mirrors.

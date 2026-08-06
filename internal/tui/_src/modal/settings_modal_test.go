@@ -485,3 +485,144 @@ func TestSettingsModalCompactionEscNavigation(t *testing.T) {
 func themeDefaultForTest() theme.Theme {
 	return theme.Default()
 }
+
+func TestSettingsModalSaveAutoApproveAndMaxChildDepth(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	fs := m.services.Settings.(*fakeSettings)
+	sm := newSettingsModal(m.services, m.ops, m.th, m.workDir)
+	sm.page = settingsPageDefaults
+
+	// Auto-approve seconds → 15 (live apply).
+	sm.cursor = int(settingsFieldAutoApproveSecs)
+	next, _ := sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	sm = next.(*settingsModal)
+	for i, opt := range sm.pickOptions {
+		if opt.value == "15" {
+			sm.pickCursor = i
+			break
+		}
+	}
+	_, cmd := sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	msg := cmd().(settingsSavedMsg)
+	if msg.err != nil {
+		t.Fatal(msg.err)
+	}
+	if len(fs.savedAutoApprove) != 1 || fs.savedAutoApprove[0].seconds != "15" {
+		t.Fatalf("savedAutoApprove = %#v", fs.savedAutoApprove)
+	}
+	if !msg.apply.hasAutoApproveSecs || msg.apply.autoApproveSecs != 15 {
+		t.Fatalf("apply secs = %#v", msg.apply)
+	}
+	m.modal = sm
+	m = updateApp(t, m, msg)
+	if m.permissionAutoApproveSeconds != 15 {
+		t.Fatalf("session auto-approve = %d", m.permissionAutoApproveSeconds)
+	}
+	sm, ok := m.modal.(*settingsModal)
+	if !ok {
+		t.Fatalf("modal = %T", m.modal)
+	}
+	if sm.defaults.PermissionAutoApproveSeconds != 15 {
+		t.Fatalf("defaults secs = %d", sm.defaults.PermissionAutoApproveSeconds)
+	}
+
+	// Exclude toggle bash, stay on pick.
+	sm.cursor = int(settingsFieldAutoApproveExclude)
+	next, _ = sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	sm = next.(*settingsModal)
+	for i, opt := range sm.pickOptions {
+		if opt.value == "bash" {
+			sm.pickCursor = i
+			break
+		}
+	}
+	_, cmd = sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	msg = cmd().(settingsSavedMsg)
+	if msg.err != nil {
+		t.Fatal(msg.err)
+	}
+	if msg.apply.hasAutoApproveExclude == false || len(msg.apply.autoApproveExclude) != 1 || msg.apply.autoApproveExclude[0] != "bash" {
+		t.Fatalf("apply exclude = %#v", msg.apply)
+	}
+	sm.afterSettingsSaved(msg)
+	if sm.page != settingsPagePick {
+		t.Fatalf("page after exclude toggle = %v, want pick", sm.page)
+	}
+	if len(sm.defaults.PermissionAutoApproveExclude) != 1 || sm.defaults.PermissionAutoApproveExclude[0] != "bash" {
+		t.Fatalf("defaults exclude = %#v", sm.defaults.PermissionAutoApproveExclude)
+	}
+	m.modal = sm
+	m = updateApp(t, m, msg)
+	if len(m.permissionAutoApproveExclude) != 1 || m.permissionAutoApproveExclude[0] != "bash" {
+		t.Fatalf("session exclude = %#v", m.permissionAutoApproveExclude)
+	}
+
+	// Max child depth → 2 (new sessions only).
+	sm = m.modal.(*settingsModal)
+	// Leave exclude pick.
+	next, _ = sm.update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	sm = next.(*settingsModal)
+	sm.cursor = int(settingsFieldMaxChildDepth)
+	next, _ = sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	sm = next.(*settingsModal)
+	for i, opt := range sm.pickOptions {
+		if opt.value == "2" {
+			sm.pickCursor = i
+			break
+		}
+	}
+	_, cmd = sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	msg = cmd().(settingsSavedMsg)
+	if msg.err != nil {
+		t.Fatal(msg.err)
+	}
+	last := fs.savedAutoApprove[len(fs.savedAutoApprove)-1]
+	if last.maxChildDepth != "2" {
+		t.Fatalf("saved depth = %#v", fs.savedAutoApprove)
+	}
+	sm.afterSettingsSaved(msg)
+	if sm.defaults.MaxChildDepth != 2 {
+		t.Fatalf("defaults depth = %d", sm.defaults.MaxChildDepth)
+	}
+}
+
+func TestSettingsModalDefaultsListsAutoApproveDials(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	fs := m.services.Settings.(*fakeSettings)
+	fs.defaults = host.UserDefaults{
+		PermissionAutoApproveSeconds: 10,
+		PermissionAutoApproveExclude: []string{"bash"},
+		MaxChildDepth:                2,
+	}
+	sm := newSettingsModal(m.services, m.ops, m.th, m.workDir)
+	sm.page = settingsPageDefaults
+	view := ansi.Strip(sm.view(100, m.th))
+	for _, want := range []string{
+		"Auto-approve", "10s",
+		"Auto-approve exclude", "bash",
+		"Max child depth", "2",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("defaults view missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestSettingsToggleExclude(t *testing.T) {
+	got := settingsToggleExclude(nil, "bash")
+	if len(got) != 1 || got[0] != "bash" {
+		t.Fatalf("add = %#v", got)
+	}
+	got = settingsToggleExclude(got, "write")
+	if len(got) != 2 {
+		t.Fatalf("add write = %#v", got)
+	}
+	got = settingsToggleExclude(got, "bash")
+	if len(got) != 1 || got[0] != "write" {
+		t.Fatalf("remove bash = %#v", got)
+	}
+	got = settingsToggleExclude(got, "write")
+	if got != nil {
+		t.Fatalf("clear = %#v", got)
+	}
+}

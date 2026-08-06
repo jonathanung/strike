@@ -593,6 +593,9 @@ func TestFormatStatuses(t *testing.T) {
 	if !strings.Contains(s, "gopls") || !strings.Contains(s, ".go") {
 		t.Fatalf("s = %q", s)
 	}
+	if !strings.Contains(s, "/lsp retry") || !strings.Contains(s, "/diagnostics") {
+		t.Fatalf("missing hints: %q", s)
+	}
 }
 
 func TestDisableAndRetry(t *testing.T) {
