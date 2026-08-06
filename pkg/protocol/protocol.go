@@ -20,13 +20,24 @@
 //   - Major: breaking JSON field renames/removals, changed envelope type
 //     strings, or changed meaning of an existing field.
 //   - Minor: new Op/Event types, new optional JSON fields, new type-string
-//     cases (unknown types still fail Decode — callers must tolerate forward
-//     growth by ignoring or upgrading).
+//     cases. Unknown event type strings decode as [UnknownEvent] (not an
+//     error) so older TUI/web/session consumers keep working; type-switch
+//     defaults must ignore them. Ops stay strict: unknown op types still
+//     fail [OpEnvelope.Decode].
 //   - Patch: docs, helpers, and bug fixes that do not change encoded JSON.
+//
+// Compatibility policy (harness and all other events):
+//
+//   - Additive optional JSON fields are always OK (encoding/json ignores
+//     extras on decode; omitempty keeps old writers valid).
+//   - Renames, removals, or meaning changes of existing fields require a
+//     major Version bump and a migration note in CHANGELOG / docs/protocol.md.
+//   - New event type strings are a minor bump; older builds surface them as
+//     UnknownEvent and must not crash.
 //
 // Legacy session JSONL without an envelope "v" field is treated as compatible
 // with the 1.x line. Additive optional fields use omitempty so old readers
-// keep working.
+// keep working. Normative consumer notes: docs/protocol.md.
 package protocol
 
 import (
@@ -461,6 +472,25 @@ func (Rewind) isOp()                  {}
 
 // Event is an engine -> client notification.
 type Event interface{ isEvent() }
+
+// UnknownEvent is a forward-compatible placeholder for an envelope type string
+// this build does not recognize. [Envelope.Decode] returns it instead of an
+// error so session replay, TUI, SDK, and timeline consumers can skip unknown
+// harness/extension events without failing the whole log.
+//
+// Type is the wire envelope "type" (not inside data). Data is the raw JSON
+// object from the envelope. [Wrap] re-encodes Type and Data unchanged.
+// Consumers must ignore UnknownEvent in type switches (default branch).
+type UnknownEvent struct {
+	Type string
+	Data json.RawMessage
+}
+
+// IsUnknown reports whether ev is an [UnknownEvent] (forward-compat skip).
+func IsUnknown(ev Event) bool {
+	_, ok := ev.(UnknownEvent)
+	return ok
+}
 
 // Correlation identifies the session, turn, and provider request that
 // produced an event. Embedded anonymously so JSON stays flat; omitempty
@@ -1805,3 +1835,4 @@ func (EffectivePrompt) isEvent()         {}
 func (DiagnosticBundle) isEvent()        {}
 func (ContextFitWarning) isEvent()       {}
 func (ContextControlsSelected) isEvent() {}
+func (UnknownEvent) isEvent()            {}

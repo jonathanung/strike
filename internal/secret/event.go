@@ -143,6 +143,10 @@ func RedactEvent(ev protocol.Event) protocol.Event {
 	case protocol.HarnessProgress:
 		e.Payload = redact.JSON(e.Payload)
 		return e
+	case protocol.UnknownEvent:
+		// Preserve type string; scrub credential-shaped spans inside raw data.
+		e.Data = redact.JSON(e.Data)
+		return e
 	default:
 		return ev
 	}
