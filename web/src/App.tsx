@@ -3,6 +3,13 @@ import { bootstrap, createRoot, historicalConnection, liveConnection, request, r
 import { initialState, reduceEvent } from "./reducer";
 import { Transcript } from "./Transcript";
 import type { ActiveRoot, Bootstrap, ImageAttachment, Session, Status } from "./types";
+import {
+  defaultRestoreFiles,
+  emptyUndoPreview,
+  filesChoiceDetail,
+  formatUndoPreviewLines,
+  type UndoPreview,
+} from "./undoPreview";
 import { WorkflowsPanel } from "./Workflows";
 import "./styles.css";
 
@@ -11,12 +18,13 @@ type Completion = { label: string; detail: string; insert: string };
 type ChangedFile = { path: string; added: number; deleted: number; diff: string };
 type MemoryEntry = { Key?: string; key?: string; Value?: string; value?: string; Tags?: string[]; tags?: string[] };
 type IssueEntry = { ID?: number; id?: number; Title?: string; title?: string; Body?: string; body?: string; Status?: string; status?: string };
+type UndoDialogState = { preferFiles: boolean };
 const runtimeValues = { effort: ["low", "medium", "high", "xhigh"], autonomy: ["supervised", "agent", "checks"], permission: ["default", "plan", "soft-approve", "accept-edits", "yolo"] };
 const slashCommands: Completion[] = [
   { label: "/compact", detail: "Compact model history", insert: "/compact" },
   { label: "/prompt", detail: "Inspect effective prompt", insert: "/prompt" },
-  { label: "/rewind", detail: "Rewind the last completed turn", insert: "/rewind" },
-  { label: "/rewind-files", detail: "Rewind turn and file checkpoints", insert: "/rewind-files" },
+  { label: "/rewind", detail: "Undo last turn — chat only or chat and files", insert: "/rewind" },
+  { label: "/rewind-files", detail: "Undo last turn with file restore preview", insert: "/rewind-files" },
 ];
 
 const op = (type: string, data?: unknown, rootID?: string) => sendOp(type, data, rootID).catch((error) => window.alert(error.message));
@@ -67,6 +75,7 @@ export default function App() {
   const [history, setHistory] = useState<string[]>([]);
   const [fast, setFast] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [undoDialog, setUndoDialog] = useState<UndoDialogState | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -120,13 +129,19 @@ export default function App() {
     return [];
   }, [draft, boot]);
 
+  const lastUndoPreview = state.undoStack.at(-1) || emptyUndoPreview();
   const execute = (text: string, attached: ImageAttachment[]) => {
     const command = text.trim();
     if (command === "/compact") return void op("compact", { strategy: "summarize" }, selectedID);
     if (command === "/prompt") return void op("inspect.prompt", undefined, selectedID);
-    if (command === "/rewind") return void op("rewind", {}, selectedID);
-    if (command === "/rewind-files") return void op("rewind", { restoreFiles: true }, selectedID);
+    // Preview before destructive rewind (TUI /undo parity — WEB.12).
+    if (command === "/rewind") return void setUndoDialog({ preferFiles: false });
+    if (command === "/rewind-files") return void setUndoDialog({ preferFiles: true });
     void op("user.input", { text: command, images: attached.map(({ mime, data }) => ({ mime, data })) }, selectedID);
+  };
+  const confirmUndo = (restoreFiles: boolean) => {
+    setUndoDialog(null);
+    void op("rewind", restoreFiles ? { restoreFiles: true } : {}, selectedID);
   };
   const submit = (event: FormEvent) => {
     event.preventDefault(); const text = draft.trim(); if (!text || !isLive) return;
@@ -170,8 +185,65 @@ export default function App() {
     </main>
     <aside className={`inspector ${inspectorOpen ? "open" : "collapsed"}`} aria-label="Inspector"><PanelResize label="Resize inspector panel" value={inspectorWidth} min={240} max={520} onChange={setInspectorWidth} /><div className="inspector-tabs" role="tablist">{(["context", "files", "memory", "issues", "workflows"] as InspectorTab[]).map((tab) => <button role="tab" aria-selected={inspector === tab} key={tab} onClick={() => void inspectProject(tab)}>{tab}</button>)}</div><div className="inspector-body"><InspectorBody tab={inspector} boot={boot} status={state.status} data={projectData} loading={projectLoading} expandedDiffs={expandedDiffs} toggleDiff={toggleDiff} isLive={isLive} selectedID={selectedID} /></div></aside>
     {settingsOpen && <SettingsDialog boot={boot} status={state.status} providers={providers} onClose={() => setSettingsOpen(false)} />}
+    {undoDialog && <UndoPreviewDialog preview={lastUndoPreview} preferFiles={undoDialog.preferFiles} onCancel={() => setUndoDialog(null)} onConfirm={confirmUndo} />}
     {state.permission && <BlockingDialog title="Permission required"><p><strong>{String(state.permission.tool || state.permission.name || "Tool request")}</strong></p><pre>{JSON.stringify(state.permission, null, 2)}</pre><div className="dialog-actions"><button onClick={() => void op("permission.reply", { requestId: state.permission?.requestId, decision: "reject" }, selectedID)}>Reject</button><button onClick={() => void op("permission.reply", { requestId: state.permission?.requestId, decision: "always" }, selectedID)}>Allow session</button><button autoFocus onClick={() => void op("permission.reply", { requestId: state.permission?.requestId, decision: "once" }, selectedID)}>Allow once</button></div></BlockingDialog>}{state.question && <QuestionDialog question={state.question} rootID={selectedID} />}
   </div>;
+}
+
+function UndoPreviewDialog({ preview, preferFiles, onCancel, onConfirm }: {
+  preview: UndoPreview;
+  preferFiles: boolean;
+  onCancel: () => void;
+  onConfirm: (restoreFiles: boolean) => void;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const [restoreFiles, setRestoreFiles] = useState(() => defaultRestoreFiles(preview, preferFiles));
+  useEffect(() => { ref.current?.showModal(); }, []);
+  const lines = formatUndoPreviewLines(preview);
+  const choices = [
+    { id: "chat", label: "chat only", detail: "drop the last turn from history; keep disk changes", value: false },
+    { id: "files", label: "chat and files", detail: filesChoiceDetail(preview), value: true },
+  ] as const;
+  return (
+    <dialog
+      ref={ref}
+      className="undo-dialog"
+      aria-labelledby="undo-title"
+      onClose={onCancel}
+      onCancel={(event) => { event.preventDefault(); onCancel(); }}
+    >
+      <div className="dialog-rule" />
+      <h2 id="undo-title">Undo last turn</h2>
+      {lines.length > 0 && (
+        <div className="undo-preview" role="region" aria-label="Undo preview">
+          {lines.map((line, index) => (
+            <p key={index} className={line.tone === "warn" ? "undo-warn" : undefined}>{line.text}</p>
+          ))}
+        </div>
+      )}
+      <div className="undo-choices" role="radiogroup" aria-label="Undo mode">
+        {choices.map((choice) => (
+          <label key={choice.id} className={restoreFiles === choice.value ? "undo-choice active" : "undo-choice"}>
+            <input
+              type="radio"
+              name="undo-mode"
+              value={choice.id}
+              checked={restoreFiles === choice.value}
+              onChange={() => setRestoreFiles(choice.value)}
+            />
+            <span>
+              <strong>{choice.label}</strong>
+              <small>{choice.detail}</small>
+            </span>
+          </label>
+        ))}
+      </div>
+      <div className="dialog-actions">
+        <button type="button" onClick={onCancel}>Cancel</button>
+        <button type="button" autoFocus onClick={() => onConfirm(restoreFiles)}>Confirm undo</button>
+      </div>
+    </dialog>
+  );
 }
 
 function PanelResize({ label, value, min, max, onChange }: { label: string; value: number; min: number; max: number; onChange: (value: number) => void }) {

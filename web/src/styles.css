@@ -445,6 +445,42 @@ dialog label { display: grid; gap: 7px; color: var(--muted); font-size: 10px; }
 dialog input { padding: 12px; color: var(--ink); }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
 .dialog-actions button { padding: 9px 14px; }
+
+/* Undo / rewind preview (WEB.12 — TUI /undo parity) */
+.undo-dialog { width: min(560px, calc(100vw - 32px)); }
+.undo-preview {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--rule);
+  background: color-mix(in srgb, var(--surface) 88%, var(--ink));
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.undo-preview p { margin: 0; color: var(--muted); }
+.undo-preview .undo-warn { color: var(--acid); }
+.undo-choices { display: grid; gap: 8px; }
+.undo-choice {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--rule);
+  cursor: pointer;
+  color: var(--ink);
+  font-size: 12px;
+}
+.undo-choice.active { border-color: var(--acid); background: color-mix(in srgb, var(--acid) 8%, transparent); }
+.undo-choice strong { display: block; text-transform: lowercase; letter-spacing: .02em; }
+.undo-choice small { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.4; font-weight: 400; }
+.undo-choice input { margin-top: 3px; }
+
 .mobile-only { display: none; }
 
 @keyframes pulse { 50% { opacity: .4; } }

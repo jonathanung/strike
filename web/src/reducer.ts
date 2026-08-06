@@ -1,7 +1,8 @@
 import type { Envelope, TranscriptItem, WorkspaceState } from "./types";
+import { isRootLineage, parseUndoPreview, type UndoPreview } from "./undoPreview";
 
 export const initialState = (): WorkspaceState => ({
-  items: [], seen: new Set(), status: {}, children: {}, changedFiles: [],
+  items: [], seen: new Set(), status: {}, children: {}, changedFiles: [], undoStack: [],
 });
 
 const fingerprint = (env: Envelope) => JSON.stringify([env.type, env.time, env.data]);
@@ -16,6 +17,15 @@ function append(items: TranscriptItem[], item: TranscriptItem, merge = false) {
   return [...items, item];
 }
 
+function pushUndo(stack: UndoPreview[], preview: UndoPreview): UndoPreview[] {
+  return [...stack, preview];
+}
+
+function popUndo(stack: UndoPreview[]): UndoPreview[] {
+  if (!stack.length) return stack;
+  return stack.slice(0, -1);
+}
+
 export function reduceEvent(state: WorkspaceState, env: Envelope): WorkspaceState {
   if (env.type === "workspace.reset") return { ...initialState(), status: { sessionId: String(env.data?.sessionId || "") } };
   const key = fingerprint(env);
@@ -28,6 +38,7 @@ export function reduceEvent(state: WorkspaceState, env: Envelope): WorkspaceStat
   let question = state.question;
   const children = { ...state.children };
   let changedFiles = state.changedFiles;
+  let undoStack = state.undoStack;
   const id = correlation(d);
   switch (env.type) {
     case "status": status = d; break;
@@ -51,7 +62,14 @@ export function reduceEvent(state: WorkspaceState, env: Envelope): WorkspaceStat
     case "question.asked": question = d; break;
     case "question.resolved": if (!d.requestId || d.requestId === question?.requestId) question = undefined; break;
     case "turn.started": status = { ...status, busy: true }; break;
-    case "turn.completed": status = { ...status, busy: false }; break;
+    case "turn.completed":
+      status = { ...status, busy: false };
+      // Stack undo preview for /rewind path list + uncovered warn (TUI #801 / WEB.12).
+      if (isRootLineage(d)) undoStack = pushUndo(undoStack, parseUndoPreview(d));
+      break;
+    case "session.rewound":
+      if (isRootLineage(d)) undoStack = popUndo(undoStack);
+      break;
     case "model.selected": status = { ...status, provider: text(d, "provider"), model: text(d, "model") }; break;
     case "agent.selected": status = { ...status, agent: text(d, "name") }; break;
     case "effort.selected": status = { ...status, effort: text(d, "level") }; break;
@@ -64,5 +82,5 @@ export function reduceEvent(state: WorkspaceState, env: Envelope): WorkspaceStat
     case "engine.error": items = append(items, { id: `error:${items.length}`, kind: "error", text: text(d, "message") }); break;
     case "provider.retrying": items = append(items, { id: `retry:${items.length}`, kind: "system", title: "Retrying provider", text: text(d, "error") }); break;
   }
-  return { ...state, seen, items, status, permission, question, children, changedFiles };
+  return { ...state, seen, items, status, permission, question, children, changedFiles, undoStack };
 }
