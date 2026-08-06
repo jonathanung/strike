@@ -171,13 +171,10 @@ func Trust(opts TrustOptions) (TrustResult, error) {
 		return TrustResult{}, fmt.Errorf("plugin %q has no executable contributions to trust", id)
 	}
 
-	digest := ip.Digest
-	if digest == "" {
-		d, err := ComputeDigest(ip.Root)
-		if err != nil {
-			return TrustResult{}, fmt.Errorf("compute digest: %w", err)
-		}
-		digest = d
+	// Always bind trust to the live tree so grants cannot target a stale lock digest.
+	digest, err := ComputeDigest(ip.Root)
+	if err != nil {
+		return TrustResult{}, fmt.Errorf("compute digest: %w", err)
 	}
 	// Prefer live lockfile source; fall back to install identity on disk entry.
 	var source *SourceIdentity

@@ -203,7 +203,11 @@ func runPluginInspect(args []string, stdout, stderr io.Writer) int {
 			len(c.MCP), len(c.Harnesses), len(c.Hooks), len(c.Panes))
 		if plugin.HasExecutableContributions(*p.Manifest) {
 			caps := plugin.InferCapabilities(*p.Manifest)
-			match := plugin.MatchTrust(p.Trust, p.Digest, p.Source, caps)
+			digest := p.Digest
+			if live, err := plugin.ComputeDigest(p.Root); err == nil {
+				digest = live
+			}
+			match := plugin.MatchTrust(p.Trust, digest, p.Source, caps)
 			fmt.Fprintf(stdout, "trust:    %s", match.State)
 			if !match.OK && match.Reason != "" {
 				fmt.Fprintf(stdout, " (%s)", match.Reason)
