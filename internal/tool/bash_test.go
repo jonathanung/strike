@@ -94,6 +94,27 @@ func TestExtractSessionPR(t *testing.T) {
 	}
 }
 
+func TestBashMarksCheckpointUncovered(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	dir := t.TempDir()
+	store := NewCheckpointStore()
+	store.BeginTurn("t")
+	tc := allowAll(dir)
+	tc.CheckpointUncovered = store.MarkUncovered
+	if _, err := NewBash().Execute(context.Background(), mustJSON(t, map[string]any{
+		"command": "true",
+	}), tc); err != nil {
+		t.Fatal(err)
+	}
+	store.CommitTurn()
+	peek := store.Peek()
+	if len(peek.Uncovered) != 1 || peek.Uncovered[0] != "bash" {
+		t.Fatalf("after bash Peek.Uncovered = %#v", peek.Uncovered)
+	}
+}
+
 func TestBashCWDResetsBetweenCalls(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")

@@ -812,6 +812,10 @@ type Context struct {
 	// Composes with TurnDiff (per-turn create/update/delete summary) and
 	// PathOwnership (#772); do not fork a second file-state system.
 	Checkpoint func(absPath string)
+	// CheckpointUncovered, when non-nil, marks the active turn as having
+	// possible disk mutations outside per-file snapshots (e.g. bash). Reason
+	// is a short stable token. Nil disables. See CheckpointStore.MarkUncovered.
+	CheckpointUncovered func(reason string)
 	// TurnDiff, when non-nil, records harness file change kinds for the
 	// active turn (timeline/UI). Nil disables. Tools call NoteTurnChange.
 	TurnDiff *TurnDiff
@@ -841,6 +845,15 @@ func (tc *Context) SnapshotPath(absPath string) {
 		return
 	}
 	tc.Checkpoint(absPath)
+}
+
+// MarkUncovered records that this turn may have disk mutations outside
+// per-file checkpoints (e.g. bash). Safe on a nil receiver or nil callback.
+func (tc *Context) MarkUncovered(reason string) {
+	if tc == nil || tc.CheckpointUncovered == nil || reason == "" {
+		return
+	}
+	tc.CheckpointUncovered(reason)
 }
 
 // NoteTurnChange records a harness file mutation on TurnDiff when set.

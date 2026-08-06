@@ -38,7 +38,7 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 		TurnCompleted{Correlation: corr, StopReason: "end_turn", Files: []TurnFileChange{
 			{Path: "a.go", Kind: "create"},
 			{Path: "b.go", Kind: "update"},
-		}},
+		}, CheckpointSkipped: 1, Uncovered: []string{"bash"}},
 		ModelSelected{Correlation: corr, Provider: "echo", Model: "echo"},
 		AgentSelected{Correlation: corr, Name: "build"},
 		PhaseChanged{Correlation: corr, Workflow: "plan-implement", Phase: "plan", Index: 0, Gate: "user", Source: "builtin", Fingerprint: "abc123"},
@@ -150,7 +150,7 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 		CompactionStarted{Correlation: corr, Reason: CompactionReasonManual, Strategy: CompactionStrategySummarize},
 		CompactionCompleted{Correlation: corr, Reason: CompactionReasonThreshold, Strategy: CompactionStrategyTrim, Removed: 4, Kept: 3, Summary: "prior work on foo"},
 		SessionMeta{Correlation: corr, PRURL: "https://github.com/acme/repo/pull/7", PRNumber: 7, PRState: "open"},
-		SessionRewound{Correlation: corr, Removed: 2, TurnID: "turn-9", RestoreFiles: true, FilesRestored: 3, FilesSkipped: 1},
+		SessionRewound{Correlation: corr, Removed: 2, TurnID: "turn-9", RestoreFiles: true, FilesRestored: 3, FilesSkipped: 1, Files: []string{"a.go", "b.go"}, Uncovered: []string{"bash"}},
 		EffectivePrompt{
 			Correlation: corr,
 			Layers: []PromptLayerInfo{

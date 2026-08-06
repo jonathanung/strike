@@ -167,6 +167,12 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		if exp, ok := lastCell[*exploreCell](m.cells); ok {
 			exp.accepting = false
 		}
+		// Stack undo preview for /undo path list + uncovered warn (#801).
+		m.pushUndoPreview(undoPreview{
+			files:     append([]protocol.TurnFileChange(nil), ev.Files...),
+			skipped:   ev.CheckpointSkipped,
+			uncovered: append([]string(nil), ev.Uncovered...),
+		})
 		notify := m.desktopNotifyCmd("strike: turn complete", false)
 		m.turnStartedAt = time.Time{}
 		m.toolCallsThisTurn = 0
@@ -296,6 +302,7 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		m.cells, m.toolByID = dropLastUserTurnCells(m.cells, m.toolByID)
 		m.selectedCell = -1
 		m.selectedFileRef = -1
+		m.popUndoPreview()
 		m.setNotice(formatSessionRewound(ev), false)
 		cmd = m.broadcastContextState()
 	case protocol.EngineError:

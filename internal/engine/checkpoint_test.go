@@ -216,6 +216,107 @@ func TestRewindEmptyTurnDoesNotRestorePrior(t *testing.T) {
 	}
 }
 
+func TestRewindMultiFileRestoreOrderAndBashUncovered(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"z.txt", "a.txt"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(name+"-v0\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	editZ, _ := json.Marshal(map[string]any{
+		"filePath": "z.txt", "oldString": "z.txt-v0", "newString": "z.txt-v1",
+	})
+	editA, _ := json.Marshal(map[string]any{
+		"filePath": "a.txt", "oldString": "a.txt-v0", "newString": "a.txt-v1",
+	})
+	bashArgs, _ := json.Marshal(map[string]any{"command": "true"})
+	prov := newScriptedProvider(
+		streamStep{events: []provider.StreamEvent{
+			{Type: provider.EventToolCall, ToolCall: &provider.ToolCall{ID: "e1", Name: "edit", Args: editZ}},
+			{Type: provider.EventToolCall, ToolCall: &provider.ToolCall{ID: "e2", Name: "edit", Args: editA}},
+			{Type: provider.EventToolCall, ToolCall: &provider.ToolCall{ID: "b1", Name: "bash", Args: bashArgs}},
+			{Type: provider.EventDone, StopReason: "tool_use"},
+		}},
+		streamStep{events: []provider.StreamEvent{
+			{Type: provider.EventDone, StopReason: "end_turn"},
+		}},
+	)
+	eng := engine.New(engine.Options{
+		SessionID:       "ckpt-multi",
+		InitialProvider: "scripted",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		Registry:        tool.NewRegistry(tool.NewEdit(), tool.NewBash()),
+		WorkDir:         dir,
+		Rules: []permission.Ruleset{{
+			{Permission: "edit", Pattern: "*", Action: permission.Allow},
+			{Permission: "bash", Pattern: "*", Action: permission.Allow},
+		}},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "edit both + bash"}
+	var completed protocol.TurnCompleted
+	deadline := time.After(5 * time.Second)
+	for completed.StopReason == "" {
+		select {
+		case ev := <-eng.Events():
+			switch e := ev.(type) {
+			case protocol.TurnCompleted:
+				completed = e
+			case protocol.EngineError:
+				t.Fatalf("EngineError: %s", e.Message)
+			}
+		case <-deadline:
+			t.Fatal("timeout turn")
+		}
+	}
+	if len(completed.Uncovered) != 1 || completed.Uncovered[0] != "bash" {
+		t.Fatalf("TurnCompleted.Uncovered = %#v", completed.Uncovered)
+	}
+	if len(completed.Files) != 2 {
+		t.Fatalf("TurnCompleted.Files = %#v", completed.Files)
+	}
+
+	eng.Ops() <- protocol.Rewind{RestoreFiles: true}
+	var rewound protocol.SessionRewound
+	deadline = time.After(3 * time.Second)
+	for rewound.Removed == 0 {
+		select {
+		case ev := <-eng.Events():
+			switch e := ev.(type) {
+			case protocol.SessionRewound:
+				rewound = e
+			case protocol.EngineError:
+				t.Fatalf("EngineError: %s", e.Message)
+			}
+		case <-deadline:
+			t.Fatal("timeout rewind")
+		}
+	}
+	if rewound.FilesRestored != 2 {
+		t.Fatalf("SessionRewound = %+v", rewound)
+	}
+	if len(rewound.Uncovered) != 1 || rewound.Uncovered[0] != "bash" {
+		t.Fatalf("SessionRewound.Uncovered = %#v", rewound.Uncovered)
+	}
+	// Restored paths are workspace-relative and sorted.
+	if len(rewound.Files) != 2 || rewound.Files[0] != "a.txt" || rewound.Files[1] != "z.txt" {
+		t.Fatalf("SessionRewound.Files = %#v, want sorted a.txt,z.txt", rewound.Files)
+	}
+	for _, name := range []string{"a.txt", "z.txt"} {
+		got, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := name + "-v0\n"
+		if string(got) != want {
+			t.Fatalf("%s = %q, want %q", name, got, want)
+		}
+	}
+}
+
 func initTempGitRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()

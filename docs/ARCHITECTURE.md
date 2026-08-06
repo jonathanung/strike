@@ -504,13 +504,15 @@ stack — do not fork a second file-state system:
 |---|---|---|
 | Freshness / base hash | `tool.FileState`, `CheckBaseHash`, `CheckContentUnchanged` | Per-agent read snapshots (mtime/size/hash); optional `baseHash` / `baseHashes` args fail closed with `precondition_failed` (#793 codes) |
 | Atomic commit | `workspaceWriteFile` → `atomicWriteFile` | Same-dir temp + `rename` on local POSIX; refuses symlink leaves |
-| Per-turn diff | `tool.TurnDiff` → `protocol.TurnCompleted.Files` | create/update/delete summary for timeline/UI |
-| Undo snapshots | `tool.CheckpointStore` (#540) | Pre-mutation bytes per turn for `/undo` restore |
+| Per-turn diff | `tool.TurnDiff` → `protocol.TurnCompleted.Files` | create/update/delete summary for timeline/UI + `/undo` path preview |
+| Undo snapshots | `tool.CheckpointStore` (#540) | Pre-mutation bytes per turn for `/undo` restore; multi-file restore is path-sorted |
+| Uncovered mutations | `CheckpointStore.MarkUncovered` → `TurnCompleted.Uncovered` / `SessionRewound.Uncovered` | bash (and similar) mark the turn so undo warns instead of silent full success (#801); full bash snapshot coverage remains #572 |
 | Multi-agent overlap | `tool.PathOwnership` (#772) | Cross-agent path claims / leases; orthogonal to per-tool freshness |
 
 `FileState` answers “did *this* agent re-read after an external change?”;
 ownership answers “is another active worker claiming this path?”; checkpoints
-answer “what bytes do we restore on undo?”.
+answer “what bytes do we restore on undo?”. Checkpoint stack is process-lifetime
+only today (`--continue` does not reload bytes — #573).
 
 ## Engine source map (selected)
 

@@ -438,15 +438,16 @@ func (e *Engine) handleRewind(op protocol.Rewind) {
 			Message:     "rewind file restore: " + popErr.Error(),
 		})
 	}
+	var restoredDisplay []string
 	if op.RestoreFiles && len(pop.Restored) > 0 {
 		e.files.MarkDirty(pop.Restored...)
-		display := make([]string, len(pop.Restored))
+		restoredDisplay = make([]string, len(pop.Restored))
 		for i, p := range pop.Restored {
-			display[i] = relDisplayPath(e.opts.WorkDir, p)
+			restoredDisplay[i] = relDisplayPath(e.opts.WorkDir, p)
 		}
 		e.emit(protocol.FilesInvalidated{
 			Correlation: e.sessionCorr(),
-			Paths:       display,
+			Paths:       restoredDisplay,
 			Reason:      "undo_restore",
 		})
 	}
@@ -457,6 +458,8 @@ func (e *Engine) handleRewind(op protocol.Rewind) {
 		RestoreFiles:  op.RestoreFiles,
 		FilesRestored: pop.RestoredN,
 		FilesSkipped:  pop.Skipped,
+		Files:         restoredDisplay,
+		Uncovered:     pop.Uncovered,
 	})
 }
 

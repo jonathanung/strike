@@ -368,6 +368,10 @@ type Model struct {
 	// turnStartedAt / toolCallsThisTurn power the working-status elapsed label.
 	turnStartedAt     time.Time
 	toolCallsThisTurn int
+	// undoStack tracks per-turn harness file previews for /undo UX (#801).
+	// Appended on TurnCompleted; popped on SessionRewound. Last entry is the
+	// turn that /undo would reverse.
+	undoStack []undoPreview
 	// runTimeline folds harness events into a structured, exportable trace
 	// (/timeline). Complements session JSONL; not a second transcript.
 	runTimeline       *timeline.Builder
