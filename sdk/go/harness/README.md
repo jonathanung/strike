@@ -30,12 +30,18 @@ func chooseBest(
 }
 
 func main() {
+	// Oneshot (default): one process per Strike invocation.
 	if err := strikeharness.Run(chooseBest); err != nil {
 		log.Fatal(err)
 	}
+	// Persistent worker (config mode: "persistent"):
+	// if err := strikeharness.RunWorker(chooseBest); err != nil {
+	// 	log.Fatal(err)
+	// }
 }
 ```
 
 Compile the program and configure its executable under `harnesses` in Strike
 config. This is a subprocess integration and does not link the function into
-the Strike binary.
+the Strike binary. Use `RunWorker` when the harness entry sets
+`"mode": "persistent"` so Strike can reuse the process across invocations.

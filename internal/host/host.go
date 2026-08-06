@@ -155,6 +155,8 @@ type UserDefaults struct {
 	Sandbox string
 	// Notify is desktop notification gating: on|off|unfocused-only.
 	Notify string
+	// Autoupdate is startup release check: off|notify|auto.
+	Autoupdate string
 	// LeanCode is lean-code guidance intensity: off|lite|full.
 	LeanCode string
 	// DeferTools is toolsearch-backed schema deferral: on|off.
@@ -228,9 +230,9 @@ type Settings interface {
 	// SaveConfigDials persists non-empty peer-ported behavior dials into
 	// ~/.strike/config: sandbox (off|read-only|workspace-write), notify
 	// (on|off|unfocused-only), leanCode (off|lite|full), deferTools (on|off),
-	// and sessionWorktree (off|auto|always). Empty leaves the stored value
-	// unchanged; unknown values are rejected.
-	SaveConfigDials(sandbox, notify, leanCode, deferTools, sessionWorktree string) error
+	// sessionWorktree (off|auto|always), and autoupdate (off|notify|auto).
+	// Empty leaves the stored value unchanged; unknown values are rejected.
+	SaveConfigDials(sandbox, notify, leanCode, deferTools, sessionWorktree, autoupdate string) error
 	// SaveAutoApproveDials persists permissionAutoApproveSeconds, optional
 	// exclude list, and maxChildDepth. Empty scalar strings leave the
 	// corresponding field unchanged. exclude nil leaves the list unchanged; a

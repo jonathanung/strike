@@ -11,6 +11,14 @@
     "choose-best-lean": {
       "command": "lake",
       "args": ["--dir", "./examples/harnesses", "exe", "choose_best_lean"]
+    },
+    "choose-best-go-persistent": {
+      "command": "go",
+      "args": ["run", "./examples/harnesses/go-subprocess", "-persistent"],
+      "mode": "persistent",
+      "maxConcurrent": 1,
+      "idleTimeoutMs": 60000,
+      "maxRestarts": 3
     }
   }
 }

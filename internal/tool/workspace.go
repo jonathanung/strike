@@ -243,6 +243,30 @@ func relInside(rel string) bool {
 	return !filepath.IsAbs(rel)
 }
 
+// isSymlinkLeaf reports whether the user-named path's final component is a
+// symlink (Lstat, no follow). Used by move/delete to refuse operating through
+// a symlink leaf after resolveAllowedPath would otherwise return the target.
+func isSymlinkLeaf(workDir, tempDir, path string) bool {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return false
+	}
+	candidates := make([]string, 0, 2)
+	if filepath.IsAbs(path) {
+		candidates = append(candidates, filepath.Clean(path))
+	} else if strings.TrimSpace(workDir) != "" {
+		candidates = append(candidates, filepath.Join(workDir, filepath.Clean(path)))
+	}
+	// Absolute session-temp paths are already covered; relative never uses temp.
+	for _, c := range candidates {
+		if fi, err := os.Lstat(c); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+			return true
+		}
+	}
+	_ = tempDir // reserved for future dual-root leaf checks
+	return false
+}
+
 // workspaceRootReal returns the physical absolute workspace root.
 func workspaceRootReal(root string) (string, error) {
 	root = strings.TrimSpace(root)

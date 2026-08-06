@@ -261,6 +261,11 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 					runErr = fmt.Errorf("closing language servers: %w", err)
 				}
 			}
+			if a.harnessClose != nil {
+				if err := a.harnessClose(); err != nil && runErr == nil {
+					runErr = fmt.Errorf("closing harness workers: %w", err)
+				}
+			}
 			if a.schedulerClose != nil {
 				a.schedulerClose()
 			}
@@ -339,6 +344,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 			NanoMode:                     nanoMode,
 			MdReadMode:                   mdReadMode,
 			NotifyMode:                   notifyMode,
+			CheckUpdate:                  autoupdateCheckFn(a.cfg.Autoupdate),
 			SandboxMode:                  a.sandboxMode,
 			SandboxBackend:               sandbox.BackendName(),
 			SandboxAvailable:             sandbox.Available(),
@@ -410,6 +416,11 @@ func runExecContext(ctx context.Context, opts cliOptions, prompt string, format 
 		if a.lspClose != nil {
 			if err := a.lspClose(); err != nil && runErr == nil {
 				runErr = fmt.Errorf("closing language servers: %w", err)
+			}
+		}
+		if a.harnessClose != nil {
+			if err := a.harnessClose(); err != nil && runErr == nil {
+				runErr = fmt.Errorf("closing harness workers: %w", err)
 			}
 		}
 		if a.schedulerClose != nil {
@@ -488,4 +499,21 @@ func timelineOptionsFromConfig(cfg config.Config, sessionID string) timeline.Opt
 		opts.BlobDir = session.DefaultTracesDir()
 	}
 	return opts
+}
+
+// autoupdateCheckFn returns a TUI CheckUpdate callback for config.autoupdate.
+// off → nil (no probe). notify|auto (default notify) → StartupProbe with a
+// short timeout; failures stay silent.
+func autoupdateCheckFn(rawMode string) func(context.Context) string {
+	mode := config.EffectiveAutoupdate(rawMode)
+	if !update.ShouldProbe(mode) {
+		return nil
+	}
+	return func(ctx context.Context) string {
+		res, err := update.StartupProbe(ctx, update.ProbeOptions{Mode: mode})
+		if err != nil || res.Skipped {
+			return ""
+		}
+		return res.Message
+	}
 }

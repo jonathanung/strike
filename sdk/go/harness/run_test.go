@@ -2,6 +2,7 @@ package harness
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -217,6 +218,113 @@ func TestServeCancellationReachesInputContext(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("serve did not stop after cancellation")
+	}
+}
+
+func TestServeWorkerSequentialInvocations(t *testing.T) {
+	stdin, writeInput := io.Pipe()
+	defer writeInput.Close()
+	readOutput, stdout := io.Pipe()
+	done := make(chan error, 1)
+	go func() {
+		done <- serveWorker(stdin, stdout, func(input Input, _ Provider, _ Emit) (Result, error) {
+			return Result{Text: input.Request.Model, StopReason: "end_turn"}, nil
+		})
+	}()
+
+	scanner := bufio.NewScanner(readOutput)
+	// harness.ready
+	if !scanner.Scan() {
+		t.Fatal("missing ready")
+	}
+	for _, id := range []string{"a", "b"} {
+		writeJSONLine(t, writeInput, map[string]any{
+			"version": 1, "type": "harness.start", "invocationId": id,
+			"request": map[string]any{"model": "m-" + id, "messages": []any{}},
+		})
+		if !scanner.Scan() {
+			t.Fatalf("missing complete for %s: %v", id, scanner.Err())
+		}
+		var message struct {
+			Type         string `json:"type"`
+			InvocationID string `json:"invocationId"`
+			Text         string `json:"text"`
+		}
+		if err := json.Unmarshal(scanner.Bytes(), &message); err != nil {
+			t.Fatal(err)
+		}
+		if message.Type != "harness.complete" || message.InvocationID != id || message.Text != "m-"+id {
+			t.Fatalf("message = %#v", message)
+		}
+	}
+	writeJSONLine(t, writeInput, map[string]any{"version": 1, "type": "harness.shutdown"})
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker did not exit after shutdown")
+	}
+}
+
+func TestServeWorkerCancelOneInvocation(t *testing.T) {
+	stdin, writeInput := io.Pipe()
+	defer writeInput.Close()
+	readOutput, stdout := io.Pipe()
+	done := make(chan error, 1)
+	started := make(chan struct{})
+	go func() {
+		done <- serveWorker(stdin, stdout, func(input Input, _ Provider, _ Emit) (Result, error) {
+			if input.Request.Model == "block" {
+				close(started)
+				<-input.Context.Done()
+				return Result{}, context.Cause(input.Context)
+			}
+			return Result{Text: "ok", StopReason: "end_turn"}, nil
+		})
+	}()
+	scanner := bufio.NewScanner(readOutput)
+	if !scanner.Scan() { // ready
+		t.Fatal("missing ready")
+	}
+	writeJSONLine(t, writeInput, map[string]any{
+		"version": 1, "type": "harness.start", "invocationId": "block",
+		"request": map[string]any{"model": "block", "messages": []any{}},
+	})
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("block did not start")
+	}
+	writeJSONLine(t, writeInput, map[string]any{
+		"version": 1, "type": "harness.cancel", "invocationId": "block", "reason": "stop-one",
+	})
+	if !scanner.Scan() {
+		t.Fatal("missing error")
+	}
+	var message struct {
+		Type  string `json:"type"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(scanner.Bytes(), &message); err != nil {
+		t.Fatal(err)
+	}
+	if message.Type != "harness.error" || message.Error != "stop-one" {
+		t.Fatalf("message = %#v", message)
+	}
+	writeJSONLine(t, writeInput, map[string]any{
+		"version": 1, "type": "harness.start", "invocationId": "next",
+		"request": map[string]any{"model": "next", "messages": []any{}},
+	})
+	if !scanner.Scan() {
+		t.Fatal("missing next complete")
+	}
+	_ = writeInput.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker hang")
 	}
 }
 
