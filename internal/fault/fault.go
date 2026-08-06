@@ -50,14 +50,22 @@ type arm struct {
 }
 
 var (
-	mu   sync.Mutex
-	arms = map[Point]*arm{}
+	mu sync.Mutex
+	// arms is only consulted when armedCount > 0 so production Check is a
+	// single atomic load on the hot session/process paths.
+	arms       = map[Point]*arm{}
+	armedCount atomic.Int64
 )
+
+func noteArmedLocked() {
+	armedCount.Store(int64(len(arms)))
+}
 
 // Arm schedules the next n successful Check hits of p to return err.
 // When err is nil, Check returns a point-tagged wrap of Err.
 // n <= 0 is treated as 1. The returned disarm clears the arm; call via
 // t.Cleanup. Concurrent Arm on the same point replaces the previous arm.
+// Do not combine Arm with t.Parallel in the same package — global process state.
 func Arm(p Point, n int, err error) (disarm func()) {
 	if n <= 0 {
 		n = 1
@@ -66,6 +74,7 @@ func Arm(p Point, n int, err error) (disarm func()) {
 	a.remaining.Store(int64(n))
 	mu.Lock()
 	arms[p] = a
+	noteArmedLocked()
 	mu.Unlock()
 	var once sync.Once
 	return func() {
@@ -73,6 +82,7 @@ func Arm(p Point, n int, err error) (disarm func()) {
 			mu.Lock()
 			if cur, ok := arms[p]; ok && cur == a {
 				delete(arms, p)
+				noteArmedLocked()
 			}
 			mu.Unlock()
 		})
@@ -80,8 +90,11 @@ func Arm(p Point, n int, err error) (disarm func()) {
 }
 
 // Check returns a non-nil error when p is armed, consuming one hit.
-// Unarmed points always return nil.
+// Unarmed points always return nil (fast path: one atomic load).
 func Check(p Point) error {
+	if armedCount.Load() == 0 {
+		return nil
+	}
 	mu.Lock()
 	a, ok := arms[p]
 	mu.Unlock()
@@ -98,6 +111,7 @@ func Check(p Point) error {
 				mu.Lock()
 				if cur, ok := arms[p]; ok && cur == a {
 					delete(arms, p)
+					noteArmedLocked()
 				}
 				mu.Unlock()
 			}
@@ -111,6 +125,9 @@ func Check(p Point) error {
 
 // Remaining reports how many hits are left for p (0 if unarmed).
 func Remaining(p Point) int {
+	if armedCount.Load() == 0 {
+		return 0
+	}
 	mu.Lock()
 	a := arms[p]
 	mu.Unlock()
@@ -129,6 +146,7 @@ func Remaining(p Point) int {
 func Reset() {
 	mu.Lock()
 	clear(arms)
+	noteArmedLocked()
 	mu.Unlock()
 }
 

@@ -86,11 +86,11 @@ func TestChaosProviderStreamDrop(t *testing.T) {
 	if failure.Message == "" {
 		t.Fatal("expected EngineError")
 	}
-	if !strings.Contains(failure.Message, "stream") && !errors.Is(errors.New(failure.Message), provider.ErrIncompleteStream) {
-		// Message should reference incomplete stream wording.
-		if failure.Message != provider.ErrIncompleteStream.Error() && !strings.Contains(failure.Message, "closed") {
-			t.Logf("EngineError message = %q (acceptable if classified)", failure.Message)
-		}
+	// Exhausted incomplete streams surface ErrIncompleteStream (or wording).
+	if failure.Message != provider.ErrIncompleteStream.Error() &&
+		!strings.Contains(failure.Message, "stream") &&
+		!strings.Contains(failure.Message, "closed") {
+		t.Fatalf("EngineError message = %q, want incomplete-stream wording", failure.Message)
 	}
 	if err := mgr.Close(info.ID); err != nil {
 		t.Fatal(err)
