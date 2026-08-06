@@ -124,10 +124,6 @@ func (notebookEditTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 	}); err != nil {
 		return Result{}, err
 	}
-	overlapWarn, err := tc.ClaimWrite(path, rel)
-	if err != nil {
-		return Result{}, err
-	}
 
 	var outMsg string
 	switch mode {
@@ -172,6 +168,11 @@ func (notebookEditTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 		return Result{}, err
 	}
 	out = append(out, '\n')
+	// Claim after in-memory mutation validates so failed parses do not claim.
+	overlapWarn, err := tc.ClaimWrite(path, rel)
+	if err != nil {
+		return Result{}, err
+	}
 	tc.SnapshotPath(path)
 	// Re-validate + O_NOFOLLOW at exec time (TOCTOU: symlink planted after resolve).
 	if err := workspaceWriteFile(tc.WorkDir, a.NotebookPath, out); err != nil {

@@ -61,10 +61,6 @@ func (editTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	if err := tc.Files.CheckFresh(path, rel); err != nil {
 		return Result{}, err
 	}
-	overlapWarn, err := tc.ClaimWrite(path, rel)
-	if err != nil {
-		return Result{}, err
-	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Result{}, err
@@ -81,6 +77,11 @@ func (editTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	// model-facing output.
 	meta, _ := json.Marshal(map[string]any{"oldString": a.OldString, "newString": a.NewString, "count": count})
 	if err := tc.Ask(ctx, AskRequest{Permission: "edit", Patterns: []string{rel}, Always: []string{"*"}, Metadata: meta}); err != nil {
+		return Result{}, err
+	}
+	// Claim after validation + permission so failed matches do not pollute ownership.
+	overlapWarn, err := tc.ClaimWrite(path, rel)
+	if err != nil {
 		return Result{}, err
 	}
 	var updated string

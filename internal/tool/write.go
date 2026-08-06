@@ -54,10 +54,6 @@ func (writeTool) Execute(ctx context.Context, args json.RawMessage, tc *Context)
 			return Result{}, err
 		}
 	}
-	overlapWarn, err := tc.ClaimWrite(path, rel)
-	if err != nil {
-		return Result{}, err
-	}
 
 	existing, readErr := os.ReadFile(path)
 	meta, _ := json.Marshal(map[string]any{
@@ -66,6 +62,11 @@ func (writeTool) Execute(ctx context.Context, args json.RawMessage, tc *Context)
 		"newSize": len(a.Content),
 	})
 	if err := tc.Ask(ctx, AskRequest{Permission: "write", Patterns: []string{rel}, Always: []string{"*"}, Metadata: meta}); err != nil {
+		return Result{}, err
+	}
+	// Claim after permission so denied writes do not pollute ownership.
+	overlapWarn, err := tc.ClaimWrite(path, rel)
+	if err != nil {
 		return Result{}, err
 	}
 	tc.SnapshotPath(path)
