@@ -141,6 +141,7 @@ func TestStrikeConfigSchemaAlign(t *testing.T) {
 		note string
 	}{
 		{"network", NetworkConfig{}, ""},
+		{"webSearch", WebSearchConfig{}, ""},
 		{"session", SessionConfig{}, ""},
 		{"agentBudget", AgentBudgetConfig{}, ""},
 		{"toolRetry", ToolRetryConfig{}, ""},

@@ -94,6 +94,9 @@
     "network": {
       "$ref": "#/$defs/network"
     },
+    "webSearch": {
+      "$ref": "#/$defs/webSearch"
+    },
     "permissions": {
       "type": "array",
       "description": "Ordered permission rules (last-match-wins within the config layer stack).",
@@ -206,12 +209,32 @@
     "network": {
       "type": "object",
       "additionalProperties": true,
-      "description": "Application-layer egress allowlist for webfetch (not bash OS network).",
+      "description": "Application-layer egress allowlist for webfetch/websearch API hosts (not bash OS network).",
       "properties": {
         "allow": {
           "type": "array",
           "description": "Hostnames, *.wildcard single-label, IP literals, or CIDRs. Empty/omitted = unrestricted public hosts (SSRF private blocks still apply).",
           "items": { "type": "string" }
+        }
+      }
+    },
+    "webSearch": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Backend for the websearch tool (discover titles/URLs/snippets; use webfetch for full pages). Empty provider auto-selects brave when its API key env is set.",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "description": "Search backend id. Currently brave. Empty = auto-detect from API key env.",
+          "enum": ["brave"]
+        },
+        "apiKeyEnv": {
+          "type": "string",
+          "description": "Environment variable holding the API key (default BRAVE_API_KEY for brave)."
+        },
+        "baseURL": {
+          "type": "string",
+          "description": "Optional API origin override (default https://api.search.brave.com for brave)."
         }
       }
     },
