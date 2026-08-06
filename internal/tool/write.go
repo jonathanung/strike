@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 )
 
 type writeTool struct{}
@@ -21,7 +22,9 @@ Usage:
 - If this is an existing file, you MUST use the read tool first. Prefer the edit tool for modifying existing files.
 - ALWAYS prefer editing existing files in the codebase. NEVER write new files unless explicitly required.
 - NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the user.
-- Only use emojis if the user explicitly requests it.`
+- Only use emojis if the user explicitly requests it.
+- Optional baseHash (sha256 hex of expected current content when overwriting) fails closed with precondition_failed on mismatch.
+- Writes are atomic (temp + rename) on local POSIX filesystems.`
 }
 
 func (writeTool) Schema() json.RawMessage {
@@ -29,7 +32,8 @@ func (writeTool) Schema() json.RawMessage {
 		"type": "object",
 		"properties": {
 			"filePath": {"type": "string", "description": "Path to the file to write"},
-			"content": {"type": "string", "description": "Full content to write"}
+			"content": {"type": "string", "description": "Full content to write"},
+			"baseHash": {"type": "string", "description": "Optional sha256 hex of expected current content when overwriting; fails with precondition_failed on mismatch"}
 		},
 		"required": ["filePath", "content"]
 	}`)
@@ -38,6 +42,7 @@ func (writeTool) Schema() json.RawMessage {
 type writeArgs struct {
 	FilePath string `json:"filePath"`
 	Content  string `json:"content"`
+	BaseHash string `json:"baseHash"`
 }
 
 func (writeTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
@@ -49,10 +54,17 @@ func (writeTool) Execute(ctx context.Context, args json.RawMessage, tc *Context)
 	if err != nil {
 		return Result{}, err
 	}
-	if _, statErr := os.Stat(path); statErr == nil {
+	existed := FileExisted(path)
+	if existed {
 		if err := tc.Files.CheckFresh(path, rel); err != nil {
 			return Result{}, err
 		}
+		if err := CheckBaseHash(path, a.BaseHash, rel); err != nil {
+			return Result{}, err
+		}
+	} else if strings.TrimSpace(a.BaseHash) != "" {
+		// baseHash on a missing file is a failed precondition (expected content absent).
+		return Result{}, PreconditionFailed(fmt.Sprintf("%s: baseHash precondition failed (file missing)", rel))
 	}
 
 	existing, readErr := os.ReadFile(path)
@@ -69,8 +81,17 @@ func (writeTool) Execute(ctx context.Context, args json.RawMessage, tc *Context)
 	if err != nil {
 		return Result{}, err
 	}
+	// Re-check freshness / content race before commit when overwriting.
+	if readErr == nil {
+		if err := CheckContentUnchanged(path, existing, rel); err != nil {
+			return Result{}, err
+		}
+		if err := tc.Files.CheckFresh(path, rel); err != nil {
+			return Result{}, err
+		}
+	}
 	tc.SnapshotPath(path)
-	// Re-validate + O_NOFOLLOW at exec time (TOCTOU: symlink planted after resolve).
+	// Re-validate + atomic temp/rename at exec time.
 	if err := workspaceWriteFile(tc.WorkDir, a.FilePath, []byte(a.Content)); err != nil {
 		return Result{}, err
 	}
@@ -80,8 +101,9 @@ func (writeTool) Execute(ctx context.Context, args json.RawMessage, tc *Context)
 		return Result{}, err
 	}
 	if info, statErr := os.Stat(path); statErr == nil {
-		tc.Files.Record(path, info)
+		tc.Files.RecordBytes(path, info, []byte(a.Content))
 	}
+	tc.NoteTurnChange(path, existed, false)
 	tc.NotifyFileSync(path, a.Content, false)
 	verb := "Created"
 	if readErr == nil {

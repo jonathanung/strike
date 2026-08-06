@@ -37,7 +37,7 @@ func TestParseAutonomyEmptyIsSupervisedAndUnknownIsRejected(t *testing.T) {
 func TestAutonomiesAreOrderedAndDescribed(t *testing.T) {
 	modes := protocol.Autonomies()
 	want := []protocol.Autonomy{
-		protocol.AutonomySupervised, protocol.AutonomyAgent, protocol.AutonomyChecks,
+		protocol.AutonomySupervised, protocol.AutonomyAgent, protocol.AutonomyChecks, protocol.AutonomySkipAll,
 	}
 	if len(modes) != len(want) {
 		t.Fatalf("Autonomies() = %v, want %v", modes, want)
@@ -61,6 +61,9 @@ func TestAutonomiesAreOrderedAndDescribed(t *testing.T) {
 	}
 	if got, want := protocol.AutonomyChecks.Short(), "checks"; got != want {
 		t.Errorf("checks Short = %q, want %q", got, want)
+	}
+	if got, want := protocol.AutonomySkipAll.Short(), "skip"; got != want {
+		t.Errorf("skip-all Short = %q, want %q", got, want)
 	}
 }
 

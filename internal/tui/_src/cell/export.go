@@ -8,12 +8,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/jonathanung/strike-cli/pkg/redact"
 )
 
 const (
@@ -38,33 +39,10 @@ type exportFinishedMsg struct {
 	open bool
 }
 
-// secretRes best-effort redacts credentials that may appear in prompts or tool
-// output. Patterns prefer false negatives over mangling ordinary prose.
-var secretRes = []struct {
-	re   *regexp.Regexp
-	repl string
-}{
-	{regexp.MustCompile(`-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----`), "[REDACTED_PRIVATE_KEY]"},
-	{regexp.MustCompile(`(?i)\bsk-ant-api\d{2}-[A-Za-z0-9_-]{16,}`), "[REDACTED_ANTHROPIC_KEY]"},
-	{regexp.MustCompile(`\bsk-[A-Za-z0-9]{20,}`), "[REDACTED_API_KEY]"},
-	{regexp.MustCompile(`\bxai-[A-Za-z0-9_]{20,}`), "[REDACTED_XAI_KEY]"},
-	{regexp.MustCompile(`\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{20,}`), "[REDACTED_GITHUB_TOKEN]"},
-	{regexp.MustCompile(`\bgithub_pat_[A-Za-z0-9_]{20,}`), "[REDACTED_GITHUB_TOKEN]"},
-	{regexp.MustCompile(`\bAKIA[A-Z0-9]{16}\b`), "[REDACTED_AWS_KEY]"},
-	{regexp.MustCompile(`(?i)(Bearer\s+)[A-Za-z0-9._\-+/=]{16,}`), "${1}[REDACTED]"},
-	{regexp.MustCompile(`(?i)\b(api[_-]?key|api[_-]?secret|access[_-]?token|refresh[_-]?token|secret[_-]?key|client[_-]?secret|password|passwd)\s*[=:]\s*["']?[^\s"'\\]{8,}`), "${1}=[REDACTED]"},
-}
-
-// redactSecrets replaces common credential shapes with placeholders.
+// redactSecrets replaces common credential shapes with placeholders via
+// pkg/redact (shared with timeline export and engine inspect).
 func redactSecrets(s string) string {
-	if s == "" {
-		return s
-	}
-	out := s
-	for _, p := range secretRes {
-		out = p.re.ReplaceAllString(out, p.repl)
-	}
-	return out
+	return redact.String(s)
 }
 
 // parseExportArgs accepts: [path] | [path] --open | --open [path] | --open

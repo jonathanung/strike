@@ -32,6 +32,7 @@ func newWindowRegistry() windowRegistry {
 		newPlansWindow(),
 		newMarkdownWindow(),
 		newTerminalWindow(),
+		newPetsWindow(),
 	}
 	r := windowRegistry{windows: windows}
 	r.groups = defaultWindowGroups(windows)
@@ -92,6 +93,7 @@ func defaultWindowGroups(windows []window) []windowGroup {
 		{id: "project", members: required("memory", "issues", "plans")},
 		{id: "markdown", members: required("markdown")},
 		{id: "editor", members: required("editor")},
+		{id: "pets", members: required("pets")},
 	}
 	out := make([]windowGroup, 0, len(groups))
 	for _, g := range groups {

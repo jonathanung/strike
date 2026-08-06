@@ -27,7 +27,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/model":            {"select a model from authenticated providers", "[model|provider/model]", commandSourceBuiltin},
 		"/settings":         {"defaults (theme, sandbox, notify, mode) and custom providers", "", commandSourceBuiltin},
 		"/effort":           {"set how much reasoning the model spends", "[level]", commandSourceBuiltin},
-		"/autonomy":         {"set exit-gate policy (supervised/agent/checks)", "[mode]", commandSourceBuiltin},
+		"/autonomy":         {"set exit-gate policy (supervised/agent/checks/skip-all)", "[mode]", commandSourceBuiltin},
 		"/mode":             {"set permission posture (default/plan/accept-edits/yolo)", "[mode]", commandSourceBuiltin},
 		"/sandbox":          {"show OS sandbox policy; /sandbox explain for generated profile", "", commandSourceBuiltin},
 		"/auth":             {"manage provider authentication", "[provider]", commandSourceBuiltin},
@@ -38,6 +38,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/visualizer":       {"focus the visualizer right pane", "", commandSourceBuiltin},
 		"/system":           {"focus the system right pane (requires telemetry on)", "", commandSourceBuiltin},
 		"/telemetry":        {"show or hide local system metrics (CPU/RAM/disk)", "[on|off|status]", commandSourceBuiltin},
+		"/pets":             {"focus the pets right pane (ASCII companions)", "[name]", commandSourceBuiltin},
 		"/fast":             {"toggle OpenAI priority tier (faster, ~2× cost)", "[on|off]", commandSourceBuiltin},
 		"/think":            {"show or hide model chain-of-thought", "[on|off]", commandSourceBuiltin},
 		"/vim":              {"open a file in the editor (embedded/modal/takeover; see vimMode)", "[path|@path[:line]]", commandSourceBuiltin},
@@ -53,6 +54,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/session":          {"browse and resume a past session", "[id]", commandSourceBuiltin},
 		"/rename":           {"rename the current session", "[title]", commandSourceBuiltin},
 		"/export":           {"export the conversation to markdown", "[path] [--open]", commandSourceBuiltin},
+		"/timeline":         {"structured run timeline (collapsed view or JSON export)", "[export [path]]", commandSourceBuiltin},
 		"/copy":             {"copy the last assistant response to the clipboard", "", commandSourceBuiltin},
 		"/help":             {"show available commands", "", commandSourceBuiltin},
 		"/keys":             {"show keyboard shortcuts", "[reset]", commandSourceBuiltin},
@@ -131,7 +133,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 }
 
 func TestValidSkillNameRejectsReservedBuiltinsIncludingMDRead(t *testing.T) {
-	for _, name := range []string{"provider", "model", "effort", "autonomy", "mode", "auth", "agent", "agents", "activity", "files", "visualizer", "system", "telemetry", "fast", "vim", "nano", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "rename", "export", "copy", "help", "keys", "legend", "memory", "issues", "plan", "goal", "loop", "context", "effective-prompt", "cost", "upgrade", "init", "mcp", "lsp", "diagnostics", "exit", "quit", "focus-left", "focus-right", "window-next", "window-prev", "group-next", "group-prev", "scroll-up", "scroll-down", "jump-bottom", "palette", "interrupt", "save-defaults", "leave-editor", "edit-prompt", "agent-next", "mode-next", "tool-prev", "tool-next", "tool-expand", "tool-copy", "tool-review", "tool-apply", "subagent", "parent", "subagent-next", "subagent-prev", "root-new", "root-open", "root-interrupt", "root-hide", "root-filter"} {
+	for _, name := range []string{"provider", "model", "effort", "autonomy", "mode", "auth", "agent", "agents", "activity", "files", "visualizer", "system", "telemetry", "pets", "fast", "vim", "nano", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "rename", "export", "timeline", "copy", "help", "keys", "legend", "memory", "issues", "plan", "goal", "loop", "context", "effective-prompt", "cost", "upgrade", "init", "mcp", "lsp", "diagnostics", "exit", "quit", "focus-left", "focus-right", "window-next", "window-prev", "group-next", "group-prev", "scroll-up", "scroll-down", "jump-bottom", "palette", "interrupt", "save-defaults", "leave-editor", "edit-prompt", "agent-next", "mode-next", "tool-prev", "tool-next", "tool-expand", "tool-copy", "tool-review", "tool-apply", "subagent", "parent", "subagent-next", "subagent-prev", "root-new", "root-open", "root-interrupt", "root-hide", "root-filter"} {
 		if validSkillName(name) {
 			t.Errorf("validSkillName(%q) = true, want false for reserved builtin", name)
 		}

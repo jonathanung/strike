@@ -78,7 +78,7 @@ func TestAutonomyCommandRejectsUnknownModeWithoutSendingAnOp(t *testing.T) {
 	if !m.noticeErr {
 		t.Fatal("unknown autonomy produced no error notice")
 	}
-	for _, want := range []string{"yolo", "supervised", "agent", "checks"} {
+	for _, want := range []string{"yolo", "supervised", "agent", "checks", "skip-all"} {
 		if !strings.Contains(m.notice, want) {
 			t.Errorf("notice = %q, want it to mention %q", m.notice, want)
 		}

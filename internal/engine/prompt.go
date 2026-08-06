@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/memory"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
+	"github.com/jonathanung/strike-cli/pkg/redact"
 )
 
 // MemorySource is the engine-facing surface for auto-loading tagged project
@@ -503,40 +503,13 @@ func layerPreview(text string) string {
 	return string(runes[:layerPreviewRunes]) + "…"
 }
 
-// secretPatterns scrub credential-shaped spans from inspect output.
-var secretPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)\b(sk-[a-z0-9_-]{8,})\b`),
-	regexp.MustCompile(`(?i)\b(sk-ant-[a-z0-9_-]{8,})\b`),
-	regexp.MustCompile(`(?i)\b(xai-[a-z0-9_-]{8,})\b`),
-	regexp.MustCompile(`(?i)\b(ghp_[a-z0-9_]{20,})\b`),
-	regexp.MustCompile(`(?i)\b(gho_[a-z0-9_]{20,})\b`),
-	regexp.MustCompile(`(?i)\b(github_pat_[a-z0-9_]{20,})\b`),
-	regexp.MustCompile(`(?i)\b(xox[baprs]-[a-z0-9-]{10,})\b`),
-	regexp.MustCompile(`(?i)\b(Bearer\s+)([a-z0-9._\-+/=]{12,})`),
-	regexp.MustCompile(`(?i)\b((?:api[_-]?key|access[_-]?token|secret[_-]?key|password)\s*[=:]\s*)(\S+)`),
-	regexp.MustCompile(`(?i)\b((?:ANTHROPIC|OPENAI|XAI|OPENROUTER)_(?:API_)?KEY\s*[=:]\s*)(\S+)`),
-}
-
 // RedactSecrets replaces credential-shaped substrings with a placeholder.
+// Delegates to pkg/redact (shared with timeline export and markdown dump).
 // Exported for tests.
 func RedactSecrets(s string) string {
-	return redactSecrets(s)
+	return redact.String(s)
 }
 
 func redactSecrets(s string) string {
-	if s == "" {
-		return s
-	}
-	out := s
-	for _, re := range secretPatterns {
-		out = re.ReplaceAllStringFunc(out, func(match string) string {
-			sub := re.FindStringSubmatch(match)
-			if len(sub) >= 3 {
-				// Keep label/prefix groups; redact the secret group.
-				return sub[1] + "[REDACTED]"
-			}
-			return "[REDACTED]"
-		})
-	}
-	return out
+	return redact.String(s)
 }

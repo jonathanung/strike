@@ -3683,7 +3683,7 @@ func TestPaletteHelpInvocationOpensHelpModal(t *testing.T) {
 
 	}
 
-	for _, want := range []string{"/session", "/rename", "/export", "/copy", "/theme", "/memory", "/queue", "/issues", "/plan", "/compact", "/fast", "/think", "/layout", "/md-read", "/keys", "/legend", "/settings", "/exit", "/quit", "/palette", "/interrupt", "/agent-next", "/focus-left"} {
+	for _, want := range []string{"/session", "/rename", "/export", "/timeline", "/copy", "/theme", "/memory", "/queue", "/issues", "/plan", "/compact", "/fast", "/think", "/layout", "/md-read", "/keys", "/legend", "/settings", "/exit", "/quit", "/palette", "/interrupt", "/agent-next", "/focus-left"} {
 
 		found := false
 
@@ -3940,83 +3940,52 @@ func TestIdleSpinnerDoesNotArmOrContinue(t *testing.T) {
 }
 
 func TestWorkingSpinnerArmsAndContinues(t *testing.T) {
-	if staticWorkingChrome() {
-		t.Skip("static working chrome disables spinner ticks (#497)")
-	}
+	// Force animated chrome so SSH/static env does not skip the tick chain (#497).
+	t.Setenv("SSH_CONNECTION", "")
+	t.Setenv("SSH_TTY", "")
+	t.Setenv("STRIKE_WORKING_CHROME", "animate")
 
 	m, _ := newAppTestModel(nil, nil)
-
 	m.turnRunning = true
-
 	if cmd := m.spinTickCmd(); cmd == nil {
-
 		t.Fatal("spinTickCmd must arm while Working")
-
 	}
-
 	// Drive one tick through Update so the spinner schedules its follow-up.
-
 	tick := m.spin.Tick()
-
 	updated, cmd := m.Update(tick)
-
 	m = updated.(Model)
-
 	if cmd == nil {
-
 		t.Fatal("working spinner.TickMsg must continue the tick chain")
-
 	}
-
 	// Turn complete drops the chain on the next tick.
-
 	m.turnRunning = false
-
 	updated, cmd = m.Update(spinner.TickMsg{})
-
 	_ = updated
-
 	if cmd != nil {
-
 		t.Fatal("spinner must stop after leaving Working")
-
 	}
-
 }
 
 func TestTurnStartedArmsSpinner(t *testing.T) {
-	if staticWorkingChrome() {
-		t.Skip("static working chrome disables spinner ticks (#497)")
-	}
+	// Force animated chrome so SSH/static env does not skip the tick chain (#497).
+	t.Setenv("SSH_CONNECTION", "")
+	t.Setenv("SSH_TTY", "")
+	t.Setenv("STRIKE_WORKING_CHROME", "animate")
 
 	m, _ := newAppTestModel(nil, nil)
-
 	cmd := m.applyEvent(protocol.TurnStarted{})
-
 	if !m.turnRunning {
-
 		t.Fatal("TurnStarted should set turnRunning")
-
 	}
-
 	foundSpin := false
-
 	for _, msg := range runAllAppCmds(t, cmd) {
-
 		if _, ok := msg.(spinner.TickMsg); ok {
-
 			foundSpin = true
-
 		}
-
 	}
-
 	if !foundSpin {
-
 		t.Fatal("TurnStarted must arm spinner.Tick while Working")
-
 	}
-
 }
 
 func TestRootSwitcherOpensModal(t *testing.T) {

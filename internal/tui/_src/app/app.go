@@ -22,6 +22,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 	"github.com/jonathanung/strike-cli/internal/tui/ui"
+	"github.com/jonathanung/strike-cli/pkg/timeline"
 )
 
 const (
@@ -353,6 +354,9 @@ type Model struct {
 	// turnStartedAt / toolCallsThisTurn power the working-status elapsed label.
 	turnStartedAt     time.Time
 	toolCallsThisTurn int
+	// runTimeline folds harness events into a structured, exportable trace
+	// (/timeline). Complements session JSONL; not a second transcript.
+	runTimeline       *timeline.Builder
 	authExpiryNoticed bool
 	focused           bool // terminal focus; default true until BlurMsg
 	focusKnown        bool // true after first FocusMsg/BlurMsg from the terminal
@@ -477,6 +481,7 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		autonomy:            protocol.AutonomySupervised,
 		permMode:            protocol.PermissionModeDefault,
 		sandboxMode:         "workspace-write",
+		runTimeline:         timeline.NewBuilder(timeline.Options{}),
 	}
 	m.applyAppearance()
 	var replay []protocol.Event
@@ -484,6 +489,7 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		m.dangerouslySkipPermissions = option.DangerouslySkipPermissions
 		if option.SessionID != "" {
 			m.sessionID = option.SessionID
+			m.runTimeline = timeline.NewBuilder(timeline.Options{SessionID: option.SessionID})
 		}
 		if option.WorkDir != "" {
 			m.workDir = option.WorkDir
@@ -926,6 +932,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case exportFinishedMsg:
 		return m.applyExportFinished(msg)
+	case timelineFinishedMsg:
+		return m.applyTimelineFinished(msg)
 
 	case terminalOutputMsg:
 		return m.applyTerminalOutput()
@@ -1061,6 +1069,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.windows = refreshDiagnosticsWindows(m.windows)
 		return m, diagnosticsRefreshCmd()
+
+	case petsTickMsg:
+		// Animate only while the pets pane is active so idle sessions stay
+		// event-driven (same pattern as filesRefreshMsg).
+		if !petsWindowActive(m.windows) {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.windows, cmd = applyPetsTick(m.windows, msg)
+		return m, tea.Batch(cmd, petsAnimCmd(m.windows))
 
 	case telemetryTickMsg, telemetrySampleMsg:
 		var cmd tea.Cmd
