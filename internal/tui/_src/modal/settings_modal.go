@@ -15,7 +15,10 @@ import (
 
 var errNoProviders = errors.New("custom providers are unavailable")
 
-const settingsModalVisible = 10
+// settingsModalVisible is the Defaults/Providers list viewport height.
+// Keep ≥ len(defaultsFields) so provider/model/agent rows stay reachable
+// without scrolling on a typical dialog.
+const settingsModalVisible = 14
 
 // settingsPage is which list /settings is showing.
 type settingsPage int
@@ -36,6 +39,11 @@ const (
 	settingsFieldNano
 	settingsFieldMdRead
 	settingsFieldPerm
+	settingsFieldSandbox
+	settingsFieldNotify
+	settingsFieldLeanCode
+	settingsFieldDeferTools
+	settingsFieldWorktree
 	settingsFieldProvider // display-only
 	settingsFieldModel    // display-only
 	settingsFieldAgent    // display-only
@@ -182,6 +190,11 @@ func (m *settingsModal) defaultsFields() []settingsField {
 		settingsFieldNano,
 		settingsFieldMdRead,
 		settingsFieldPerm,
+		settingsFieldSandbox,
+		settingsFieldNotify,
+		settingsFieldLeanCode,
+		settingsFieldDeferTools,
+		settingsFieldWorktree,
 		settingsFieldProvider,
 		settingsFieldModel,
 		settingsFieldAgent,
@@ -211,7 +224,9 @@ func (m *settingsModal) updateDefaults(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 
 func settingsFieldEditable(f settingsField) bool {
 	switch f {
-	case settingsFieldTheme, settingsFieldVim, settingsFieldNano, settingsFieldMdRead, settingsFieldPerm, settingsFieldEffort:
+	case settingsFieldTheme, settingsFieldVim, settingsFieldNano, settingsFieldMdRead,
+		settingsFieldPerm, settingsFieldSandbox, settingsFieldNotify, settingsFieldLeanCode,
+		settingsFieldDeferTools, settingsFieldWorktree, settingsFieldEffort:
 		return true
 	default:
 		return false
@@ -312,6 +327,36 @@ func (m *settingsModal) pickOptionsFor(field settingsField) []settingsPickOption
 			out[i] = settingsPickOption{value: string(mode), label: string(mode), detail: mode.Describe()}
 		}
 		return out
+	case settingsFieldSandbox:
+		// Two-dial model: sandbox = what OS isolation makes possible.
+		return []settingsPickOption{
+			{value: "workspace-write", label: "workspace-write", detail: "default — host ro + workspace writable"},
+			{value: "read-only", label: "read-only", detail: "no writable workspace bind"},
+			{value: "off", label: "off", detail: "no OS sandbox (yolo needs --i-know)"},
+		}
+	case settingsFieldNotify:
+		return []settingsPickOption{
+			{value: "unfocused-only", label: "unfocused-only", detail: "default — when terminal unfocused"},
+			{value: "on", label: "on", detail: "always notify (attention + long turns)"},
+			{value: "off", label: "off", detail: "never notify"},
+		}
+	case settingsFieldLeanCode:
+		return []settingsPickOption{
+			{value: "lite", label: "lite", detail: "default — YAGNI ladder guidance"},
+			{value: "full", label: "full", detail: "stronger lean-code overlays"},
+			{value: "off", label: "off", detail: "no lean-code guidance"},
+		}
+	case settingsFieldDeferTools:
+		return []settingsPickOption{
+			{value: "off", label: "off", detail: "default — full tools[] schemas"},
+			{value: "on", label: "on", detail: "defer non-core tools until toolsearch"},
+		}
+	case settingsFieldWorktree:
+		return []settingsPickOption{
+			{value: "off", label: "off", detail: "default — shared launch cwd"},
+			{value: "auto", label: "auto", detail: "worktree when a second root opens"},
+			{value: "always", label: "always", detail: "every new root gets a worktree"},
+		}
 	case settingsFieldEffort:
 		levels := protocol.Efforts()
 		out := make([]settingsPickOption, len(levels))
@@ -337,6 +382,16 @@ func (m *settingsModal) fieldValue(field settingsField) string {
 		return d.MdReadMode
 	case settingsFieldPerm:
 		return d.PermissionMode
+	case settingsFieldSandbox:
+		return d.Sandbox
+	case settingsFieldNotify:
+		return d.Notify
+	case settingsFieldLeanCode:
+		return d.LeanCode
+	case settingsFieldDeferTools:
+		return d.DeferTools
+	case settingsFieldWorktree:
+		return d.SessionWorktree
 	case settingsFieldProvider:
 		return d.Provider
 	case settingsFieldModel:
@@ -362,6 +417,16 @@ func (m *settingsModal) fieldLabel(field settingsField) string {
 		return "Md-read mode"
 	case settingsFieldPerm:
 		return "Permission mode"
+	case settingsFieldSandbox:
+		return "Sandbox"
+	case settingsFieldNotify:
+		return "Notify"
+	case settingsFieldLeanCode:
+		return "Lean code"
+	case settingsFieldDeferTools:
+		return "Defer tools"
+	case settingsFieldWorktree:
+		return "Session worktree"
 	case settingsFieldProvider:
 		return "Provider"
 	case settingsFieldModel:
@@ -395,9 +460,34 @@ func (m *settingsModal) fieldDisplay(field settingsField) (value, detail string)
 		return normalizeMdPick(raw), mdModeDetail(raw)
 	case settingsFieldPerm:
 		if raw == "" {
-			return "default", "new sessions"
+			return "default", "when asked (new sessions)"
+		}
+		return raw, "when asked (new sessions)"
+	case settingsFieldSandbox:
+		if raw == "" {
+			return "workspace-write", "what is possible (new sessions)"
+		}
+		return raw, "what is possible (new sessions)"
+	case settingsFieldNotify:
+		if raw == "" {
+			return "unfocused-only", "desktop notifications"
+		}
+		return raw, "desktop notifications"
+	case settingsFieldLeanCode:
+		if raw == "" {
+			return "lite", "new sessions"
 		}
 		return raw, "new sessions"
+	case settingsFieldDeferTools:
+		if raw == "" {
+			return "off", "new sessions"
+		}
+		return raw, "new sessions"
+	case settingsFieldWorktree:
+		if raw == "" {
+			return "off", "new root sessions"
+		}
+		return raw, "new root sessions"
 	case settingsFieldEffort:
 		if raw == "" {
 			return "(unset)", "provider default"
@@ -496,6 +586,22 @@ func (m *settingsModal) savePickCmd(opt settingsPickOption) tea.Cmd {
 			}
 		case settingsFieldPerm:
 			err = settings.SaveDefaults("", "", "", "", opt.value)
+		case settingsFieldSandbox:
+			err = settings.SaveConfigDials(opt.value, "", "", "", "")
+		case settingsFieldNotify:
+			err = settings.SaveConfigDials("", opt.value, "", "", "")
+			if err == nil {
+				if mode, ok := ParseNotifyMode(opt.value); ok {
+					apply.notifyMode = mode
+					apply.hasNotify = true
+				}
+			}
+		case settingsFieldLeanCode:
+			err = settings.SaveConfigDials("", "", opt.value, "", "")
+		case settingsFieldDeferTools:
+			err = settings.SaveConfigDials("", "", "", opt.value, "")
+		case settingsFieldWorktree:
+			err = settings.SaveConfigDials("", "", "", "", opt.value)
 		case settingsFieldEffort:
 			err = settings.SaveDefaults("", "", "", opt.value, "")
 		default:
@@ -519,6 +625,8 @@ type settingsApply struct {
 	hasNano    bool
 	mdReadMode SurfacePresentation
 	hasMd      bool
+	notifyMode NotifyMode
+	hasNotify  bool
 }
 
 // settingsSavedMsg reports a /settings defaults write.
@@ -621,7 +729,7 @@ func (m *settingsModal) view(width int, th theme.Theme) string {
 
 func (m *settingsModal) viewMenu(width int, th theme.Theme) string {
 	items := []ui.ListItem{
-		{Label: "Defaults", Detail: "theme, editor presentation, permission mode, …"},
+		{Label: "Defaults", Detail: "theme, sandbox, permission mode, notify, …"},
 		{Label: "Custom providers", Detail: "OpenAI-/Anthropic-compatible endpoints"},
 	}
 	body := ui.List(th, ui.ListOpts{

@@ -880,6 +880,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.apply.hasMd {
 			m.mdReadMode = msg.apply.mdReadMode
 		}
+		if msg.apply.hasNotify {
+			m.notifyMode = msg.apply.notifyMode
+		}
 		label := msg.label
 		if label == "" {
 			label = msg.value

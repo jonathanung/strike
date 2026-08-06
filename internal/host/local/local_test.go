@@ -347,6 +347,28 @@ func TestDefaultsAndSavePresentation(t *testing.T) {
 	}
 }
 
+func TestSaveConfigDialsWritesGlobalConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	svc := New(nil, nil, nil, nil, nil, nil, nil, "")
+
+	if err := svc.Settings.SaveConfigDials("workspace-write", "unfocused-only", "lite", "off", "always"); err != nil {
+		t.Fatal(err)
+	}
+	d := svc.Settings.Defaults()
+	if d.Sandbox != "workspace-write" || d.Notify != "unfocused-only" || d.LeanCode != "lite" || d.DeferTools != "off" || d.SessionWorktree != "always" {
+		t.Fatalf("defaults dials = %#v", d)
+	}
+	if err := svc.Settings.SaveConfigDials("nope", "", "", "", ""); err == nil {
+		t.Fatal("unknown sandbox accepted")
+	}
+	// Failed write must not clear prior dials.
+	d = svc.Settings.Defaults()
+	if d.Sandbox != "workspace-write" {
+		t.Fatalf("reject cleared sandbox: %#v", d)
+	}
+}
+
 func TestHistoryNilTolerated(t *testing.T) {
 	svc := New(nil, nil, nil, nil, nil, nil, nil, "")
 	if svc.History != nil {

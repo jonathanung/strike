@@ -252,11 +252,20 @@ type savedPresentation struct {
 	mdReadMode string
 }
 
+type savedConfigDials struct {
+	sandbox         string
+	notify          string
+	leanCode        string
+	deferTools      string
+	sessionWorktree string
+}
+
 type fakeSettings struct {
 	defaults      host.UserDefaults
 	saved         []savedDefaults
 	savedThemes   []string
 	savedPres     []savedPresentation
+	savedDials    []savedConfigDials
 	savedKeybinds []map[string][]string
 	err           error
 	themeErr      error
@@ -433,6 +442,29 @@ func (s *fakeSettings) SavePresentation(vimMode, nanoMode, mdReadMode string) er
 	}
 	if mdReadMode != "" {
 		s.defaults.MdReadMode = mdReadMode
+	}
+	return s.err
+}
+
+func (s *fakeSettings) SaveConfigDials(sandboxMode, notify, leanCode, deferTools, sessionWorktree string) error {
+	s.savedDials = append(s.savedDials, savedConfigDials{
+		sandbox: sandboxMode, notify: notify, leanCode: leanCode,
+		deferTools: deferTools, sessionWorktree: sessionWorktree,
+	})
+	if sandboxMode != "" {
+		s.defaults.Sandbox = sandboxMode
+	}
+	if notify != "" {
+		s.defaults.Notify = notify
+	}
+	if leanCode != "" {
+		s.defaults.LeanCode = leanCode
+	}
+	if deferTools != "" {
+		s.defaults.DeferTools = deferTools
+	}
+	if sessionWorktree != "" {
+		s.defaults.SessionWorktree = sessionWorktree
 	}
 	return s.err
 }
