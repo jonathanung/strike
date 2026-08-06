@@ -230,6 +230,17 @@ type LSPConfig struct {
 	// Servers maps a short name to a language server entry. Extensions on each
 	// entry build the runtime registry (first server claiming an extension wins).
 	Servers map[string]LSPServer `json:"servers,omitempty"`
+	// DiagnosticsSeverity is the minimum severity injected into file-tool
+	// results: error (default), warning, info, or hint. Errors-only by default;
+	// set warning (or lower importance) to opt in to warnings.
+	DiagnosticsSeverity string `json:"diagnosticsSeverity,omitempty"`
+	// DiagnosticsMaxChars caps injected diagnostic text in tool results
+	// (default 4000). Prevents a broken project from blowing the context window.
+	DiagnosticsMaxChars int `json:"diagnosticsMaxChars,omitempty"`
+	// DiagnosticsWaitMs is how long file tools wait for publishDiagnostics
+	// after a mutation before snapshotting (default 400). Multi-file patches
+	// share one wait window.
+	DiagnosticsWaitMs int `json:"diagnosticsWaitMs,omitempty"`
 }
 
 // LSPServer is one language server entry (stdio command + file extensions).
@@ -1118,16 +1129,29 @@ func cloneMCPServers(in map[string]MCPServer) map[string]MCPServer {
 	return out
 }
 
-// mergeLSP: when layer sets Servers (including empty map), it replaces base.
-// Omitted lsp / nil servers leaves base unchanged.
+// mergeLSP: when layer sets Servers (including empty map), it replaces base
+// servers. Omitted servers leaves base servers. Scalar diagnostics knobs
+// overlay last-wins when the layer sets a non-zero/non-empty value.
 func mergeLSP(base, layer LSPConfig) LSPConfig {
+	out := LSPConfig{}
 	if layer.Servers != nil {
-		return LSPConfig{Servers: cloneLSPServers(layer.Servers)}
+		out.Servers = cloneLSPServers(layer.Servers)
+	} else if base.Servers != nil {
+		out.Servers = cloneLSPServers(base.Servers)
 	}
-	if base.Servers != nil {
-		return LSPConfig{Servers: cloneLSPServers(base.Servers)}
+	out.DiagnosticsSeverity = base.DiagnosticsSeverity
+	if strings.TrimSpace(layer.DiagnosticsSeverity) != "" {
+		out.DiagnosticsSeverity = strings.TrimSpace(layer.DiagnosticsSeverity)
 	}
-	return LSPConfig{}
+	out.DiagnosticsMaxChars = base.DiagnosticsMaxChars
+	if layer.DiagnosticsMaxChars != 0 {
+		out.DiagnosticsMaxChars = layer.DiagnosticsMaxChars
+	}
+	out.DiagnosticsWaitMs = base.DiagnosticsWaitMs
+	if layer.DiagnosticsWaitMs != 0 {
+		out.DiagnosticsWaitMs = layer.DiagnosticsWaitMs
+	}
+	return out
 }
 
 func cloneLSPServers(in map[string]LSPServer) map[string]LSPServer {

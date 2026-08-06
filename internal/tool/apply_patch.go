@@ -134,21 +134,25 @@ func (applyPatchTool) Execute(ctx context.Context, args json.RawMessage, tc *Con
 	if err := commitPatchOps(tc.WorkDir, planned, originals); err != nil {
 		return Result{}, err
 	}
-	notifyPatchFileSync(tc, planned)
+	// Sync all files first, then one diagnostics collect (single block, not N).
+	diagPaths := notifyPatchFileSync(tc, planned)
 
 	out := patchSuccessSummary(planned)
-	return Result{
+	res := Result{
 		Title:    fmt.Sprintf("%d file(s)", len(planned)),
 		Output:   out,
 		Metadata: meta,
-	}, nil
+	}
+	return tc.AppendDiagnostics(ctx, res, diagPaths...), nil
 }
 
 // notifyPatchFileSync drives LSP (or similar) document sync after a successful patch.
-func notifyPatchFileSync(tc *Context, planned []plannedOp) {
+// Returns absolute paths of non-deleted files for a single diagnostics collect.
+func notifyPatchFileSync(tc *Context, planned []plannedOp) []string {
 	if tc == nil {
-		return
+		return nil
 	}
+	var diagPaths []string
 	for _, op := range planned {
 		switch op.Type {
 		case "delete":
@@ -157,6 +161,7 @@ func notifyPatchFileSync(tc *Context, planned []plannedOp) {
 			tc.NotifyFileSync(op.AbsPath, "", true)
 			if op.AbsMove != "" {
 				tc.NotifyFileSync(op.AbsMove, op.Content, false)
+				diagPaths = append(diagPaths, op.AbsMove)
 			}
 		default:
 			// add / update
@@ -165,8 +170,10 @@ func notifyPatchFileSync(tc *Context, planned []plannedOp) {
 				path = op.AbsMove
 			}
 			tc.NotifyFileSync(path, op.Content, false)
+			diagPaths = append(diagPaths, path)
 		}
 	}
+	return diagPaths
 }
 
 // ApplyPatchToWorkDir validates and commits a multi-file patch under workDir
