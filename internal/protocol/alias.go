@@ -155,6 +155,7 @@ type (
 	WaitStarted            = pub.WaitStarted
 	WaitResolved           = pub.WaitResolved
 	AgentMessage           = pub.AgentMessage
+	AgentContractTimeout   = pub.AgentContractTimeout
 	TeamRoster             = pub.TeamRoster
 	UsageReported          = pub.UsageReported
 	ProviderRetrying       = pub.ProviderRetrying
@@ -186,6 +187,16 @@ const (
 	WaitOutcomeMatched  = pub.WaitOutcomeMatched
 	WaitOutcomeTimeout  = pub.WaitOutcomeTimeout
 	WaitOutcomeCanceled = pub.WaitOutcomeCanceled
+
+	AgentUrgencyNormal  = pub.AgentUrgencyNormal
+	AgentUrgencyHigh    = pub.AgentUrgencyHigh
+	AgentUrgencyBlocker = pub.AgentUrgencyBlocker
+
+	AgentMessageKindMessage    = pub.AgentMessageKindMessage
+	AgentMessageKindRequest    = pub.AgentMessageKindRequest
+	AgentMessageKindAck        = pub.AgentMessageKindAck
+	AgentMessageKindTimeout    = pub.AgentMessageKindTimeout
+	AgentMessageKindEscalation = pub.AgentMessageKindEscalation
 
 	TeamMemberRunning   = pub.TeamMemberRunning
 	TeamMemberCompleted = pub.TeamMemberCompleted

@@ -16,6 +16,7 @@ var coreToolNames = map[string]struct{}{
 	"agent_ownership": {},
 	"agent_message":   {},
 	"agent_broadcast": {},
+	"agent_thread":    {},
 	"team_task":       {},
 	"plan_write":      {},
 	"plan_read":       {},

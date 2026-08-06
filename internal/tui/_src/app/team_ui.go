@@ -22,6 +22,9 @@ type teamMessage struct {
 	body    string
 	summary string
 	teamID  string
+	taskID  string
+	urgency string
+	kind    string
 	at      time.Time
 }
 
@@ -245,6 +248,9 @@ func teamMessageFromEvent(ev protocol.AgentMessage) teamMessage {
 		body:    trimTeamMessageBody(ev.Body),
 		summary: strings.TrimSpace(ev.Summary),
 		teamID:  strings.TrimSpace(ev.TeamID),
+		taskID:  strings.TrimSpace(ev.TaskID),
+		urgency: strings.ToLower(strings.TrimSpace(ev.Urgency)),
+		kind:    strings.ToLower(strings.TrimSpace(ev.Kind)),
 		at:      time.Now(),
 	}
 }
@@ -334,6 +340,18 @@ func teamMsgActivityLabel(msg teamMessage, resolveName func(id string) string) s
 		to = "?"
 	}
 	label := "msg " + from + "→" + to
+	switch msg.urgency {
+	case "blocker":
+		label = "!! " + label
+	case "high":
+		label = "! " + label
+	}
+	if k := strings.TrimSpace(msg.kind); k != "" && k != "message" {
+		label = label + " [" + k + "]"
+	}
+	if tid := strings.TrimSpace(msg.taskID); tid != "" {
+		label = label + " #" + shortSessionID(tid)
+	}
 	snippet := strings.TrimSpace(msg.summary)
 	if snippet == "" {
 		snippet = msg.body

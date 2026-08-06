@@ -694,11 +694,30 @@ type WaitResolved struct {
 	HasHandoff      bool              `json:"hasHandoff,omitempty"`
 }
 
+// Agent message urgency levels (coordination contracts).
+const (
+	AgentUrgencyNormal  = "normal"
+	AgentUrgencyHigh    = "high"
+	AgentUrgencyBlocker = "blocker"
+)
+
+// Agent message kinds (coordination contracts on the mailbox plane).
+const (
+	AgentMessageKindMessage    = "message"
+	AgentMessageKindRequest    = "request"
+	AgentMessageKindAck        = "ack"
+	AgentMessageKindTimeout    = "timeout"
+	AgentMessageKindEscalation = "escalation"
+)
+
 // AgentMessage records a peer/team mailbox delivery for UI and debugging.
 // Correlation is the recipient session. Body is the message text; From/To are
 // session ids; TeamID is the lead session id (team identity).
 // Emitted on the recipient engine at boundary injection (tool-round / idle
 // nudge), never mid-tool-call.
+//
+// Optional coordination-contract fields (task binding, urgency, ack/request
+// kinds) are additive; empty values preserve pre-contract plain messages.
 type AgentMessage struct {
 	Correlation
 	From string `json:"from"`
@@ -709,6 +728,35 @@ type AgentMessage struct {
 	TeamID  string `json:"teamId,omitempty"`
 	// MessageID is a stable id for ack/dedup within the session.
 	MessageID string `json:"messageId,omitempty"`
+	// TaskID binds the message to a team_task or delegation id (thread key).
+	TaskID string `json:"taskId,omitempty"`
+	// Urgency is normal|high|blocker (empty = normal).
+	Urgency string `json:"urgency,omitempty"`
+	// Kind is message|request|ack|timeout|escalation (empty = message).
+	Kind string `json:"kind,omitempty"`
+	// RequireAck is true when the sender requested an explicit ack.
+	RequireAck bool `json:"requireAck,omitempty"`
+	// InReplyTo is the message id being acked (kind=ack) or related.
+	InReplyTo string `json:"inReplyTo,omitempty"`
+	// EscalateTo is the session id that receives timeout escalation (default lead).
+	EscalateTo string `json:"escalateTo,omitempty"`
+	// AckStatus is pending|acked|timed_out when tracked on a request-ack message.
+	AckStatus string `json:"ackStatus,omitempty"`
+}
+
+// AgentContractTimeout reports that a require-ack peer message was not acked
+// before its TTL. Correlation is the original sender session. An escalation
+// mailbox delivery to EscalateTo (default lead) is also enqueued when live.
+type AgentContractTimeout struct {
+	Correlation
+	MessageID  string `json:"messageId"`
+	From       string `json:"from"`
+	To         string `json:"to"`
+	TaskID     string `json:"taskId,omitempty"`
+	TeamID     string `json:"teamId,omitempty"`
+	Urgency    string `json:"urgency,omitempty"`
+	EscalateTo string `json:"escalateTo,omitempty"`
+	Detail     string `json:"detail,omitempty"`
 }
 
 // UserMessage echoes accepted user input into the event stream so the
@@ -1307,6 +1355,7 @@ func (DelegationChanged) isEvent()      {}
 func (WaitStarted) isEvent()            {}
 func (WaitResolved) isEvent()           {}
 func (AgentMessage) isEvent()           {}
+func (AgentContractTimeout) isEvent()   {}
 func (TeamRoster) isEvent()             {}
 func (UsageReported) isEvent()          {}
 func (ProviderRetrying) isEvent()       {}
