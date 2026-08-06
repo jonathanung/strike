@@ -167,13 +167,13 @@ const (
 	ChildStatusCanceled  = pub.ChildStatusCanceled
 	ChildStatusBlocked   = pub.ChildStatusBlocked
 
-	DelegationQueued   = pub.DelegationQueued
-	DelegationWorking  = pub.DelegationWorking
-	DelegationBlocked  = pub.DelegationBlocked
-	DelegationReview   = pub.DelegationReview
-	DelegationDone     = pub.DelegationDone
-	DelegationFailed   = pub.DelegationFailed
-	DelegationCanceled = pub.DelegationCanceled
+	DelegationQueued    = pub.DelegationQueued
+	DelegationWorking   = pub.DelegationWorking
+	DelegationBlocked   = pub.DelegationBlocked
+	DelegationReview    = pub.DelegationReview
+	DelegationDone      = pub.DelegationDone
+	DelegationFailed    = pub.DelegationFailed
+	DelegationCanceled  = pub.DelegationCanceled
 	WaitOutcomeMatched  = pub.WaitOutcomeMatched
 	WaitOutcomeTimeout  = pub.WaitOutcomeTimeout
 	WaitOutcomeCanceled = pub.WaitOutcomeCanceled

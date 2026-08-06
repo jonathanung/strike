@@ -81,9 +81,25 @@ func (m Model) headerView(width int) string {
 	if m.agentName != "" && validAgentName(m.agentName) {
 		chips = append(chips, headerChip{90, ui.Badge(th, stateTone, ic.Agent+inlineGap+sanitizeDisplayData(m.agentName))})
 	}
-	if m.phaseName != "" {
-		label := "phase" + inlineGap + sanitizeDisplayData(m.phaseName)
-		chips = append(chips, headerChip{30, ui.Badge(th, ui.ToneAccentAlt, label)})
+	if m.phaseName != "" || m.phaseWorkflow != "" {
+		label := "phase" + inlineGap
+		if m.phaseWorkflow != "" && m.phaseName != "" {
+			label += sanitizeDisplayData(m.phaseWorkflow) + "/" + sanitizeDisplayData(m.phaseName)
+		} else if m.phaseName != "" {
+			label += sanitizeDisplayData(m.phaseName)
+		} else {
+			label += sanitizeDisplayData(m.phaseWorkflow)
+		}
+		if m.phaseGate != "" {
+			label += inlineGap + sanitizeDisplayData(m.phaseGate)
+		}
+		tone := ui.ToneAccentAlt
+		if m.phaseStatus != "" {
+			// Resume recovery: fail-closed, no phase grants applied.
+			tone = ui.ToneWarning
+			label += inlineGap + sanitizeDisplayData(m.phaseStatus)
+		}
+		chips = append(chips, headerChip{30, ui.Badge(th, tone, label)})
 	}
 	if m.effort != protocol.EffortDefault {
 		chips = append(chips, headerChip{20, ui.Badge(th, ui.ToneMuted, "effort"+inlineGap+string(m.effort))})

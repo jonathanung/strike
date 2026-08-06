@@ -82,6 +82,7 @@ var reservedSkillNames = map[string]struct{}{
 	"issues":           {},
 	"goal":             {},
 	"loop":             {},
+	"workflow":         {},
 	"session":          {},
 	"rename":           {},
 	"export":           {},

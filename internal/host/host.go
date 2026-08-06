@@ -1,7 +1,7 @@
 // Package host defines the services a strike frontend needs from its host
 // process, beyond the engine protocol: credentials, model catalog, saved
-// defaults, prompt history, project memory/issues/plans, local telemetry, and
-// static agent/skill listings. Contract only:
+// defaults, prompt history, project memory/issues/plans, workflow catalog,
+// local telemetry, and static agent/skill listings. Contract only:
 // this package imports nothing outside the standard library so frontends
 // can be developed and tested against fakes. Implementations live in
 // internal/host/local.
@@ -814,6 +814,9 @@ type Services struct {
 	// SchedulerPresets is the shipped build-system preset catalog and global
 	// apply surface (FTUE #705).
 	SchedulerPresets SchedulerPresets
-	Agents           []string // selectable agent names, default first
-	Skills           []Skill
+	// Workflows is the loaded workflow catalog (builtin/global/project/plugin).
+	// Nil when unsupported; frontends must degrade without panic.
+	Workflows Workflows
+	Agents    []string // selectable agent names, default first
+	Skills    []Skill
 }
