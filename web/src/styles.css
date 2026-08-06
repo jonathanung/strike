@@ -157,7 +157,7 @@ header {
 }
 .icon-button { border: 0; background: transparent; font-size: 18px; padding: 8px; }
 
-.navigation, .inspector { min-height: 0; background: var(--surface); transition: width .16s ease, opacity .16s ease; }
+.navigation, .inspector { position: relative; min-height: 0; background: var(--surface); transition: width .16s ease, opacity .16s ease; }
 .navigation {
   border-right: 1px solid var(--rule);
   min-width: 0;
@@ -204,15 +204,27 @@ header {
 .child-state { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-alt); }
 .workspace-meta {
   margin-top: auto;
-  display: grid;
-  gap: 7px;
   border-top: 1px solid var(--rule);
-  padding: 14px 8px 0;
+  padding: 8px 8px 0;
   overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
 }
-.workspace-meta span { color: var(--muted); font-size: 9px; }
+.workspace-meta summary {
+  cursor: pointer;
+  list-style: none;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  padding: 6px 0;
+  user-select: none;
+}
+.workspace-meta summary::-webkit-details-marker { display: none; }
+.workspace-meta[open] summary { margin-bottom: 6px; }
+.workspace-meta span { display: block; color: var(--muted); font-size: 9px; margin-top: 6px; }
 .workspace-meta code {
+  display: block;
   font-size: 10px;
+  color: var(--ink);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -359,8 +371,44 @@ main {
 
 .inspector { border-left: 1px solid var(--rule); min-width: 0; overflow: hidden; }
 .navigation.collapsed, .inspector.collapsed { opacity: 0; pointer-events: none; }
-.panel-resize { display: grid; gap: 6px; padding: 0 8px 10px; color: var(--muted); font-size: 8px; text-transform: uppercase; letter-spacing: .14em; }
-.panel-resize input { width: 100%; accent-color: var(--acid); }
+.panel-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  z-index: 2;
+  display: flex;
+  align-items: stretch;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: transparent;
+}
+.panel-resize-nav { right: -5px; cursor: col-resize; }
+.panel-resize-inspector { left: -5px; cursor: col-resize; }
+.panel-resize-handle {
+  flex: 1;
+  min-width: 4px;
+  background: transparent;
+  transition: background .12s ease;
+}
+.panel-resize:hover .panel-resize-handle,
+.panel-resize:focus-within .panel-resize-handle {
+  background: color-mix(in srgb, var(--acid) 55%, transparent);
+}
+.panel-resize-range {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
 .inspector-tabs { display: flex; overflow: auto; border-bottom: 1px solid var(--rule); }
 .inspector-tabs button {
   flex: 1;
@@ -462,7 +510,8 @@ dialog input { padding: 12px; color: var(--ink); }
     transition: transform .2s ease;
     box-shadow: -20px 0 50px var(--shadow);
   }
-  .inspector.open { transform: translateX(0); }
+  .inspector.open { transform: translateX(0); opacity: 1; pointer-events: auto; }
+  .inspector.collapsed { transform: translateX(100%); opacity: 0; pointer-events: none; }
 }
 
 @media (max-width: 720px) {
@@ -510,12 +559,48 @@ dialog input { padding: 12px; color: var(--ink); }
 .fast-toggle input { accent-color: var(--acid); }
 
 .session-actions {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   padding: 0 8px;
 }
-.session-actions button { padding: 6px 2px; font-size: 8px; text-transform: uppercase; }
+.session-actions > button { padding: 6px 8px; font-size: 9px; text-transform: uppercase; width: 100%; }
+.session-overflow { position: relative; width: 100%; }
+.session-overflow > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 6px 8px;
+  border: 1px solid var(--rule);
+  background: var(--surface);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  text-align: center;
+  user-select: none;
+}
+.session-overflow > summary::-webkit-details-marker { display: none; }
+.session-overflow > summary:hover,
+.session-overflow > summary:focus-visible { border-color: var(--acid); color: var(--acid); }
+.session-overflow-menu {
+  display: grid;
+  gap: 2px;
+  margin-top: 4px;
+  border: 1px solid var(--rule);
+  background: var(--raised);
+  padding: 4px;
+}
+.session-overflow-menu button {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 7px 8px;
+  font-size: 9px;
+  text-transform: uppercase;
+  text-align: left;
+}
+.session-overflow-menu button:hover,
+.session-overflow-menu button:focus-visible { background: var(--surface); color: var(--acid); }
+.workspace-settings-meta code { color: var(--ink); font-size: 11px; }
 
 .nav-tab {
   border: 0;
