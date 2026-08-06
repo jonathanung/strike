@@ -238,10 +238,44 @@ Look at the uncommitted changes and commit them: $ARGUMENTS
 
 ## Workflows
 
-**Workflows** are ordered phase sequences loaded from
-`~/.strike/workflows/*.json` and `./.strike/workflows/*.json` (project
-overrides global by name). Strike ships built-in workflows that may be
-overridden by the same name.
+**Workflows** are ordered (linear) phase sequences. Schema version
+`schemaVersion: 1` is the current contract. Documents load from:
+
+| Precedence | Source | Path |
+|---|---|---|
+| 1 (lowest) | builtin | shipped (`plan-implement`, `review-fix`) |
+| 2 | global | `~/.strike/workflows/*.json` |
+| 3 (highest) | project | `./.strike/workflows/*.json` |
+
+Project overrides global/builtin by **workflow name**. Same-layer duplicate
+names fail closed. Each loaded definition keeps runtime diagnostics: `Source`,
+absolute `Path` (disk-backed), and a canonical SHA-256 `Fingerprint` of the
+formatted document (for resume/diagnostics — not written to disk).
+
+Decoding is **strict**: unknown JSON fields are rejected. Validation checks
+identifiers, phase uniqueness, permission rules, exit gates, and (when agents
+are loaded) agent references — reporting every actionable error in one pass.
+
+Scaffolding / formatting / validating never activates a workflow. Activation
+is a separate catalog or tool step (`enter_plan_mode`, future `/workflow`).
+
+### CLI
+
+```text
+strike workflow scaffold --global|--project <name> [--force]
+strike workflow format [--write] <path>...
+strike workflow validate <path|dir>...
+strike workflow validate --global|--project|--all
+```
+
+- **scaffold** requires explicit `--global` or `--project`. Refuses overwrite
+  unless `--force`. Writes `<scope>/workflows/<name>.json` only.
+- **format** emits deterministic pretty JSON (always includes
+  `schemaVersion`). `--write` rewrites in place.
+- **validate** strict-decodes, runs structural checks, resolves agent pins
+  against loaded agents, and prints short fingerprints on success.
+
+### Phase fields
 
 Each phase may pin an agent, extra prompt context, a permission ruleset, and
 an exit gate. Phase agent pins change persona/permissions only — the session
@@ -272,6 +306,7 @@ file:
 
 ```json
 {
+  "schemaVersion": 1,
   "name": "review-fix",
   "description": "Review then fix",
   "phases": [
