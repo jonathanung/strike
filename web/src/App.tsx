@@ -70,9 +70,6 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const clientRef = useRef(client);
-  clientRef.current = client;
-
   const setDraft = (value: string | ((prev: string) => string)) => {
     if (!selectedID) return;
     const next = typeof value === "function" ? value(draft) : value;
@@ -130,12 +127,9 @@ export default function App() {
     const id = selectedID;
     // One WS (or SSE) for the *viewed* root only. Background attention (#919) may
     // add multiplexed subscriptions later without changing this viewed-root path.
+    // Historical SSE always reconnects; reduceEvent seen-set dedupes replay so a
+    // mid-stream switch away cannot leave a permanently truncated transcript.
     if (!selectedIsLive) {
-      const cached = clientRef.current.byID[id];
-      if (cached && cached.items.length > 0) {
-        setTransport("connected");
-        return;
-      }
       return historicalConnection(id, (envelope) => dispatch({ type: "client.event", id, envelope }), (message) => setTransport(message));
     }
     const live = liveConnection(id, (envelope) => dispatch({ type: "client.event", id, envelope }), setTransport);
@@ -193,11 +187,20 @@ export default function App() {
   };
   const sessionAction = async (action: "fork" | "rename" | "delete") => {
     if (!boot?.capabilities.sessions || !selectedID) return;
-    if (action === "fork") await request(`/v1/sessions/${encodeURIComponent(selectedID)}/fork`, { method: "POST" });
-    if (action === "rename") { const title = window.prompt("Session title"); if (title === null) return; await request(`/v1/sessions/${encodeURIComponent(selectedID)}`, { method: "PATCH", body: JSON.stringify({ title }) }); }
+    const target = selectedID;
+    if (action === "fork") await request(`/v1/sessions/${encodeURIComponent(target)}/fork`, { method: "POST" });
+    if (action === "rename") { const title = window.prompt("Session title"); if (title === null) return; await request(`/v1/sessions/${encodeURIComponent(target)}`, { method: "PATCH", body: JSON.stringify({ title }) }); }
     if (action === "delete" && window.confirm("Delete this durable session?")) {
-      await request(`/v1/sessions/${encodeURIComponent(selectedID)}`, { method: "DELETE" });
-      dispatch({ type: "client.drop", id: selectedID });
+      await request(`/v1/sessions/${encodeURIComponent(target)}`, { method: "DELETE" });
+      dispatch({ type: "client.drop", id: target });
+      const list = await refreshSessions();
+      const next = (list.sessions || []).find((s) => s.id !== target);
+      if (next) {
+        const live = Boolean(list.liveId && next.id === list.liveId && !boot?.attachOnly);
+        dispatch({ type: "client.ensure", id: next.id });
+        setSelectedIsLive(live);
+      }
+      return;
     }
     await refreshSessions();
   };
