@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/jonathanung/strike-cli/internal/permission"
+	"github.com/jonathanung/strike-cli/internal/plugin"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/sandbox"
 	"github.com/jonathanung/strike-cli/internal/scheduler"
@@ -594,6 +595,25 @@ func Load(workDir string) (Config, error) {
 			cfg.Keybinds = MergeKeybinds(cfg.Keybinds, kb)
 		}
 	}
+	// Plugin provider profiles (passive): after user global/project providers,
+	// before managed. Global plugins then project plugins (Discover order).
+	// Cannot register arbitrary provider code — configuration for shipped
+	// wire adapters only (see docs/plugins.md §7.5).
+	{
+		var pdiags []plugin.Diagnostic
+		cfg, pdiags = applyPluginProviders(workDir, cfg)
+		for _, d := range pdiags {
+			fmt.Fprintf(os.Stderr, "plugin: %s\n", d.String())
+		}
+		// Surface discovery diagnostics once here (agents/skills also Discover).
+		for _, d := range DiscoverPlugins(workDir).Diagnostics {
+			if d.Severity == plugin.SeverityInfo && (d.Code == "shadowed" || d.Code == "executable_inactive") {
+				continue
+			}
+			fmt.Fprintf(os.Stderr, "plugin: %s\n", d.String())
+		}
+	}
+
 	// Managed/MDM last: system policy overrides global and project.
 	managed, info, err := LoadManaged()
 	if err != nil {

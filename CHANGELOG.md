@@ -14,6 +14,15 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+### Added
+
+- **Passive plugin load** — enabled bundles under `~/.strike/plugins/<id>/` and
+  `./.strike/plugins/<id>/` contribute agents, skills, workflows, themes, and
+  provider profiles through existing surfaces. Manifest validation, path
+  confinement, strike/schema version checks, collision diagnostics, and
+  `plugins.lock.json` disablement; executable MCP/harness/hook entries stay
+  inactive until trusted activation ([#726](https://github.com/jonathanung/strike/issues/726)).
+
 ## [v0.2.2] - 2026-08-06
 
 Patch release: session scratch temp, harness tool broker, partial child handoffs on soft budget stop, diagnostics tool, config JSON Schema, and plugin contract docs. Protocol wire `1.12.0`.

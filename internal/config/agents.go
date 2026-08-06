@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jonathanung/strike-cli/internal/permission"
+	"github.com/jonathanung/strike-cli/internal/plugin"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
 
@@ -213,12 +214,16 @@ func LoadAgentsWithError(workDir string) ([]Agent, error) {
 func loadDiskAgents(workDir string) ([]Agent, error) {
 	byName := map[string]Agent{}
 	var order []string
-	for _, src := range agentDiscoveryRoots(workDir) {
+	// Merge order (docs/plugins.md §4.1):
+	//   global non-plugin → global plugins → project non-plugin → project plugins
+	globalRoots, projectRoots := splitAgentRoots(workDir)
+
+	loadRoot := func(src agentSource) error {
 		for _, path := range markdownFiles(src.dir) {
 			agent, err := parseAgentFile(path)
 			if err != nil {
 				if src.strict {
-					return nil, err
+					return err
 				}
 				fmt.Fprintf(os.Stderr, "loading agents: skip %s: %v\n", path, err)
 				continue
@@ -231,12 +236,64 @@ func loadDiskAgents(workDir string) ([]Agent, error) {
 			}
 			byName[agent.Name] = *agent
 		}
+		return nil
 	}
+
+	for _, src := range globalRoots {
+		if err := loadRoot(src); err != nil {
+			return nil, err
+		}
+	}
+	pres := DiscoverPlugins(workDir)
+	for _, d := range applyPluginAgentLayer(pres.Plugins, plugin.ScopeGlobal, byName, &order) {
+		fmt.Fprintf(os.Stderr, "plugin: %s\n", d.String())
+	}
+	for _, src := range projectRoots {
+		if err := loadRoot(src); err != nil {
+			return nil, err
+		}
+	}
+	for _, d := range applyPluginAgentLayer(pres.Plugins, plugin.ScopeProject, byName, &order) {
+		fmt.Fprintf(os.Stderr, "plugin: %s\n", d.String())
+	}
+
 	agents := make([]Agent, 0, len(order))
 	for _, name := range order {
 		agents = append(agents, byName[name])
 	}
 	return agents, nil
+}
+
+// splitAgentRoots partitions agentDiscoveryRoots into global vs project bands.
+func splitAgentRoots(workDir string) (global, project []agentSource) {
+	roots := agentDiscoveryRoots(workDir)
+	if workDir == "" {
+		return roots, nil
+	}
+	workClean := filepath.Clean(workDir)
+	projRoot := projectRoot(workDir)
+	for _, src := range roots {
+		if isProjectScopedDir(src.dir, workClean, projRoot) {
+			project = append(project, src)
+		} else {
+			global = append(global, src)
+		}
+	}
+	return global, project
+}
+
+func isProjectScopedDir(dir, workClean, projRoot string) bool {
+	dir = filepath.Clean(dir)
+	if projRoot != "" {
+		pr := filepath.Clean(projRoot)
+		if dir == pr || strings.HasPrefix(dir, pr+string(os.PathSeparator)) {
+			return true
+		}
+	}
+	if workClean == "" {
+		return false
+	}
+	return dir == workClean || strings.HasPrefix(dir, workClean+string(os.PathSeparator))
 }
 
 func parseAgentFile(path string) (*Agent, error) {
@@ -345,18 +402,20 @@ func LoadSkills(workDir string) []Skill {
 
 // LoadSkillsWithError merges built-in shipping skills with disk skills from
 // all discovery roots. Later layers override earlier ones with the same name
-// (builtins < global strike < global claude/opencode < project strike <
-// project claude/opencode). Strike-native roots fail hard on invalid files;
-// external trees warn and skip.
+// (builtins < global strike < global claude/opencode < global plugins <
+// project strike < project claude/opencode < project plugins). Strike-native
+// roots fail hard on invalid files; external trees warn and skip.
 func LoadSkillsWithError(workDir string) ([]Skill, error) {
 	byName := map[string]Skill{}
 	var order []string
-	for _, src := range skillDiscoveryRoots(workDir) {
+	globalRoots, projectRoots := splitSkillRoots(workDir)
+
+	loadRoot := func(src skillSource) error {
 		for _, path := range markdownSkillFiles(src.dir) {
 			skill, err := parseSkillFile(path)
 			if err != nil {
 				if src.strict {
-					return nil, err
+					return err
 				}
 				fmt.Fprintf(os.Stderr, "loading skills: skip %s: %v\n", path, err)
 				continue
@@ -369,12 +428,49 @@ func LoadSkillsWithError(workDir string) ([]Skill, error) {
 			}
 			byName[skill.Name] = *skill
 		}
+		return nil
 	}
+
+	for _, src := range globalRoots {
+		if err := loadRoot(src); err != nil {
+			return nil, err
+		}
+	}
+	pres := DiscoverPlugins(workDir)
+	for _, d := range applyPluginSkillLayer(pres.Plugins, plugin.ScopeGlobal, byName, &order) {
+		fmt.Fprintf(os.Stderr, "plugin: %s\n", d.String())
+	}
+	for _, src := range projectRoots {
+		if err := loadRoot(src); err != nil {
+			return nil, err
+		}
+	}
+	for _, d := range applyPluginSkillLayer(pres.Plugins, plugin.ScopeProject, byName, &order) {
+		fmt.Fprintf(os.Stderr, "plugin: %s\n", d.String())
+	}
+
 	disk := make([]Skill, 0, len(order))
 	for _, name := range order {
 		disk = append(disk, byName[name])
 	}
 	return mergeSkills(BuiltinSkills(), disk), nil
+}
+
+func splitSkillRoots(workDir string) (global, project []skillSource) {
+	roots := skillDiscoveryRoots(workDir)
+	if workDir == "" {
+		return roots, nil
+	}
+	workClean := filepath.Clean(workDir)
+	projRoot := projectRoot(workDir)
+	for _, src := range roots {
+		if isProjectScopedDir(src.dir, workClean, projRoot) {
+			project = append(project, src)
+		} else {
+			global = append(global, src)
+		}
+	}
+	return global, project
 }
 
 func parseSkillFile(path string) (*Skill, error) {
