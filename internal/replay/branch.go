@@ -78,6 +78,9 @@ func BranchFromEvent(m *session.Manager, sourceID string, sel BranchSelector) (B
 		return BranchResult{}, fmt.Errorf("replay: BranchFromEvent: empty source session id")
 	}
 
+	// Flush open source so keep resolution matches ForkAt's view of the log.
+	_ = m.Sync(sourceID)
+
 	events, err := m.Replay(sourceID)
 	if err != nil {
 		return BranchResult{}, fmt.Errorf("replay: BranchFromEvent: replay source: %w", err)
@@ -93,7 +96,12 @@ func BranchFromEvent(m *session.Manager, sourceID string, sel BranchSelector) (B
 		return BranchResult{}, fmt.Errorf("replay: BranchFromEvent: fork: %w", err)
 	}
 
-	prefix := events[:keep]
+	// Prefer the durable fork log (post-ForkAt) so the recording matches what
+	// was actually copied (keep was resolved against the synced source above).
+	prefix, err := m.Replay(info.ID)
+	if err != nil {
+		return BranchResult{}, fmt.Errorf("replay: BranchFromEvent: replay fork: %w", err)
+	}
 	at := keep - 1
 	if keep == 0 {
 		at = -1

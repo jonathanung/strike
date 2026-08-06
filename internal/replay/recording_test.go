@@ -224,6 +224,18 @@ func TestCompareIgnoresNondeterministicTools(t *testing.T) {
 	if !ignore.Equal() {
 		t.Fatalf("ignore nondeterministic should pass:\n%s", replay.FormatCompareReport(ignore))
 	}
+
+	// Drop webfetch entirely on got: toolsDigest differs but ignore mode must
+	// still pass when remaining deterministic tools match.
+	b2 := a
+	b2.ToolCalls = a.ToolCalls[:1:1]
+	b2.ToolResults = a.ToolResults[:1:1]
+	b2.Settings.ToolsDigest = "different"
+	// Keep markers so tool index 1 is still known nondeterministic on want.
+	ignoreDrop := replay.CompareRecordings(a, b2, replay.CompareOptions{IgnoreNondeterministic: true})
+	if !ignoreDrop.Equal() {
+		t.Fatalf("ignore should pass when only nondeterministic tools differ:\n%s", replay.FormatCompareReport(ignoreDrop))
+	}
 }
 
 func TestCompareHandoffAndGateFields(t *testing.T) {

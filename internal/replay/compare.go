@@ -273,7 +273,11 @@ func diffSettings(want, got SettingsDigest, opts CompareOptions, markers []Marke
 	add("settings.effort", want.Effort, got.Effort)
 	add("settings.autonomy", want.Autonomy, got.Autonomy)
 	add("settings.permissionMode", want.PermissionMode, got.PermissionMode)
-	add("settings.toolsDigest", want.ToolsDigest, got.ToolsDigest)
+	// toolsDigest includes nondeterministic tool names (webfetch/sleep). When
+	// ignoring those steps, skip digest compare so sequence-only equality works.
+	if !opts.IgnoreNondeterministic {
+		add("settings.toolsDigest", want.ToolsDigest, got.ToolsDigest)
+	}
 
 	// Prompt digest drifts with environment; ignore when requested or env-marked.
 	hasEnv := false
