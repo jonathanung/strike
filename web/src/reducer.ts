@@ -1,4 +1,4 @@
-import type { ChildAgent,  Envelope, TranscriptItem, WorkspaceState } from "./types";
+import type { ChildAgent, ClientState, Envelope, TranscriptItem, WorkspaceComposer, WorkspaceSlice, WorkspaceState } from "./types";
 import { isRootLineage, parseUndoPreview, type UndoPreview } from "./undoPreview";
 
 export const initialState = (): WorkspaceState => ({
@@ -174,4 +174,104 @@ export function reduceEvent(state: WorkspaceState, env: Envelope): WorkspaceStat
     case "provider.retrying": items = append(items, { id: `retry:${items.length}`, kind: "system", title: "Retrying provider", text: text(d, "error") }); break;
   }
   return { ...state, seen, items, status, permission, question, children, changedFiles, undoStack };
+}
+
+export const emptyComposer = (): WorkspaceComposer => ({
+  draft: "", queue: [], images: [], fast: false,
+});
+
+export const emptySlice = (sessionId = ""): WorkspaceSlice => ({
+  ...initialState(),
+  status: sessionId ? { sessionId } : {},
+  ...emptyComposer(),
+});
+
+export const initialClientState = (): ClientState => ({
+  selectedID: "",
+  byID: {},
+});
+
+function asWorkspaceState(slice: WorkspaceSlice): WorkspaceState {
+  return {
+    items: slice.items,
+    seen: slice.seen,
+    status: slice.status,
+    permission: slice.permission,
+    question: slice.question,
+    children: slice.children,
+    changedFiles: slice.changedFiles,
+    undoStack: slice.undoStack,
+  };
+}
+
+export type ClientAction =
+  | { type: "client.select"; id: string }
+  | { type: "client.ensure"; id: string }
+  | { type: "client.reset"; id: string }
+  | { type: "client.event"; id: string; envelope: Envelope }
+  | { type: "client.composer"; id: string; patch: Partial<WorkspaceComposer> }
+  | { type: "client.drop"; id: string };
+
+/** Partition engine + composer UI by workspace id. Switching never wipes peers. */
+export function reduceClient(state: ClientState, action: ClientAction): ClientState {
+  switch (action.type) {
+    case "client.select":
+      return { ...state, selectedID: action.id };
+    case "client.ensure": {
+      if (state.byID[action.id]) {
+        return state.selectedID === action.id ? state : { ...state, selectedID: action.id };
+      }
+      return {
+        ...state,
+        selectedID: action.id,
+        byID: { ...state.byID, [action.id]: emptySlice(action.id) },
+      };
+    }
+    case "client.reset": {
+      const prev = state.byID[action.id];
+      const next = emptySlice(action.id);
+      if (prev) {
+        next.draft = prev.draft;
+        next.queue = prev.queue;
+        next.images = prev.images;
+        next.fast = prev.fast;
+      }
+      return { ...state, byID: { ...state.byID, [action.id]: next } };
+    }
+    case "client.event": {
+      const current = state.byID[action.id] || emptySlice(action.id);
+      if (action.envelope.type === "workspace.reset") {
+        const cleared = emptySlice(action.id);
+        cleared.draft = current.draft;
+        cleared.queue = current.queue;
+        cleared.images = current.images;
+        cleared.fast = current.fast;
+        return { ...state, byID: { ...state.byID, [action.id]: cleared } };
+      }
+      const reduced = reduceEvent(asWorkspaceState(current), action.envelope);
+      return {
+        ...state,
+        byID: { ...state.byID, [action.id]: { ...current, ...reduced } },
+      };
+    }
+    case "client.composer": {
+      const current = state.byID[action.id] || emptySlice(action.id);
+      return {
+        ...state,
+        byID: { ...state.byID, [action.id]: { ...current, ...action.patch } },
+      };
+    }
+    case "client.drop": {
+      const { [action.id]: _removed, ...rest } = state.byID;
+      return {
+        selectedID: state.selectedID === action.id ? "" : state.selectedID,
+        byID: rest,
+      };
+    }
+  }
+}
+
+export function selectedSlice(state: ClientState): WorkspaceSlice {
+  if (!state.selectedID) return emptySlice();
+  return state.byID[state.selectedID] || emptySlice(state.selectedID);
 }
