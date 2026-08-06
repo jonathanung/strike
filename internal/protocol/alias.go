@@ -116,6 +116,7 @@ type (
 	QuestionAsked          = pub.QuestionAsked
 	QuestionResolved       = pub.QuestionResolved
 	TurnCompleted          = pub.TurnCompleted
+	TurnFileChange         = pub.TurnFileChange
 	HarnessProgress        = pub.HarnessProgress
 	ModelSelected          = pub.ModelSelected
 	AgentSelected          = pub.AgentSelected

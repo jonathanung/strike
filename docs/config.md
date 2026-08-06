@@ -433,6 +433,14 @@ deferTools, session.worktree, and maxChildDepth affect **new** sessions (use
 `/mode` / Shift+Tab for the live permission dial, and `/sandbox` to inspect
 the OS dial already bound for this process).
 
+**/settings Compaction**: editor for history compaction and continuous prune
+dials (`compactionStrategy`, `compactionModel`, `compactionThreshold`,
+`compactionBuffer`, `keepUserTurns`, `pruneProtectTokens`,
+`pruneMinimumTokens`, `pruneKeepUserTurns`, `pruneProtectTools`). Writes
+`~/.strike/config`; values apply to **new** sessions (the running engine keeps
+the dials it was started with). Pick lists cover common ranges; summarize
+model and prune-protect tools use free-text input (empty clears).
+
 Peer settings inventory (Claude Code / OpenCode → strike): see
 [peer-ecosystem.md](peer-ecosystem.md#settings-inventory).
 
@@ -1004,7 +1012,8 @@ Invalid rows are dropped at load. Peer event-name mapping (CC/OpenCode/Crush):
 `/compact` and automatic threshold/overflow compaction shrink model-facing
 history while keeping a recent tail. Continuous tool-result prune
 (`internal/engine/prune.go`) blanks older tool bodies under that ceiling;
-threshold compaction is the coarser whole-history rewrite.
+threshold compaction is the coarser whole-history rewrite. Edit these dials in
+JSON or interactively via **`/settings` → Compaction**.
 
 | Field | Values | Default |
 |---|---|---|

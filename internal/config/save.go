@@ -378,6 +378,154 @@ func parseSessionWorktree(s string) (string, bool) {
 	}
 }
 
+// CompactionDials is a partial update for history compaction / prune knobs
+// written to ~/.strike/config. Empty strings leave the stored value unchanged.
+// See host.CompactionDials for the shared vocabulary (duplicated here so
+// config stays free of a host import).
+type CompactionDials struct {
+	Strategy           string
+	Model              string
+	Threshold          string
+	Buffer             string
+	KeepUserTurns      string
+	PruneProtectTokens string
+	PruneMinimumTokens string
+	PruneKeepUserTurns string
+	PruneProtectTools  string
+}
+
+// SetGlobalCompactionDials persists non-empty compaction/prune dials into
+// ~/.strike/config. Empty fields are left unchanged. Rejects unknown strategy
+// tokens and unparseable numbers without writing.
+//
+//	Strategy           — trim|summarize
+//	Model              — model id; "-" clears (session model)
+//	Threshold          — float string; "default"/"0" → engine default (0);
+//	                     values >=1 disable threshold compaction
+//	Buffer / Keep* / Prune*Tokens — non-negative int strings; "default"/"0" → 0
+//	PruneProtectTools  — comma-separated names; "-" clears extras
+func SetGlobalCompactionDials(d CompactionDials) error {
+	globalMu.Lock()
+	defer globalMu.Unlock()
+
+	cfg, unlock, err := readGlobalForWrite()
+	if err != nil {
+		return err
+	}
+
+	if d.Strategy != "" {
+		s := NormalizeCompactionStrategy(d.Strategy)
+		if s == "" {
+			unlock()
+			return fmt.Errorf("unknown compactionStrategy %q (want trim|summarize)", d.Strategy)
+		}
+		cfg.CompactionStrategy = s
+	}
+	if d.Model != "" {
+		if isClearToken(d.Model) {
+			cfg.CompactionModel = ""
+		} else {
+			cfg.CompactionModel = strings.TrimSpace(d.Model)
+		}
+	}
+	if d.Threshold != "" {
+		v, err := parseCompactionFloat(d.Threshold, "compactionThreshold")
+		if err != nil {
+			unlock()
+			return err
+		}
+		cfg.CompactionThreshold = ClampCompactionThreshold(v)
+	}
+	if d.Buffer != "" {
+		n, err := parseCompactionInt(d.Buffer, "compactionBuffer")
+		if err != nil {
+			unlock()
+			return err
+		}
+		cfg.CompactionBuffer = ClampCompactionBuffer(n)
+	}
+	if d.KeepUserTurns != "" {
+		n, err := parseCompactionInt(d.KeepUserTurns, "keepUserTurns")
+		if err != nil {
+			unlock()
+			return err
+		}
+		cfg.KeepUserTurns = ClampKeepUserTurns(n)
+	}
+	if d.PruneProtectTokens != "" {
+		n, err := parseCompactionInt(d.PruneProtectTokens, "pruneProtectTokens")
+		if err != nil {
+			unlock()
+			return err
+		}
+		cfg.PruneProtectTokens = ClampPruneProtectTokens(n)
+	}
+	if d.PruneMinimumTokens != "" {
+		n, err := parseCompactionInt(d.PruneMinimumTokens, "pruneMinimumTokens")
+		if err != nil {
+			unlock()
+			return err
+		}
+		cfg.PruneMinimumTokens = ClampPruneMinimumTokens(n)
+	}
+	if d.PruneKeepUserTurns != "" {
+		n, err := parseCompactionInt(d.PruneKeepUserTurns, "pruneKeepUserTurns")
+		if err != nil {
+			unlock()
+			return err
+		}
+		cfg.PruneKeepUserTurns = ClampPruneKeepUserTurns(n)
+	}
+	if d.PruneProtectTools != "" {
+		if isClearToken(d.PruneProtectTools) {
+			cfg.PruneProtectTools = nil
+		} else {
+			parts := strings.Split(d.PruneProtectTools, ",")
+			cfg.PruneProtectTools = NormalizePruneProtectTools(parts)
+		}
+	}
+	return writeGlobal(cfg, unlock)
+}
+
+func isClearToken(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "-", "clear", "none", "default", "session", "unset":
+		return true
+	default:
+		return false
+	}
+}
+
+func parseCompactionFloat(raw, field string) (float64, error) {
+	s := strings.ToLower(strings.TrimSpace(raw))
+	if s == "default" {
+		return 0, nil
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s %q", field, raw)
+	}
+	if v < 0 {
+		return 0, fmt.Errorf("invalid %s %q (want >= 0)", field, raw)
+	}
+	return v, nil
+}
+
+func parseCompactionInt(raw, field string) (int, error) {
+	s := strings.ToLower(strings.TrimSpace(raw))
+	if s == "default" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s %q", field, raw)
+	}
+	if n < 0 {
+		return 0, fmt.Errorf("invalid %s %q (want >= 0)", field, raw)
+	}
+	return n, nil
+}
+
 // SetGlobalSchedulerPresets validates and persists the global scheduler
 // presets list into ~/.strike/config. Custom scheduler limits and command
 // rules are preserved. Unknown or duplicate ids are rejected without writing.
