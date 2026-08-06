@@ -11,11 +11,13 @@ import (
 	"github.com/jonathanung/strike-cli/internal/tool"
 )
 
-// PlanStore is the engine-facing surface for plan handoff validation and
-// approval. *plan.Store satisfies this.
+// PlanStore is the engine-facing surface for plan handoff validation/approval
+// and section-delegate completion apply. *plan.Store satisfies this.
 type PlanStore interface {
 	Get(id string) (plan.Plan, bool, error)
 	SetStatus(id, actorRoot, status string, expectedVersion int) (plan.Plan, error)
+	// FinishSectionDelegate settles plan_delegate correlation on child terminal.
+	FinishSectionDelegate(id, actorRoot, sectionID, childID string, outcome plan.DelegateOutcome) (plan.Plan, error)
 }
 
 // PlanHandoffState is the in-memory record of the last successful plan handoff.
