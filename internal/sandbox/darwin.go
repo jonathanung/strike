@@ -170,8 +170,17 @@ func buildSeatbeltProfile(policy Policy, workDir string) string {
   (global-name "com.apple.corefoundation.cfprefsd.server")
   (global-name "com.apple.cfprefsd.daemon")
   (global-name "com.apple.cfprefsd.agent")
+  (global-name "com.apple.SecurityServer")
   (global-name "com.apple.securityd.xpc")
+  (global-name "com.apple.trustd.agent")
+  (global-name "com.apple.TrustEvaluationAgent")
+  (global-name "com.apple.ocspd")
 )
+(allow ipc-posix-shm-read* ipc-posix-shm-write-create ipc-posix-shm-write-data
+  (ipc-posix-name "com.apple.AppleDatabaseChanged"))
+(allow user-preference-read
+  (preference-domain "com.apple.security")
+  (preference-domain "com.apple.security_common"))
 
 ; Read the filesystem; writes are scoped below.
 (allow file-read*)
