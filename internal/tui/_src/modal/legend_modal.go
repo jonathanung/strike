@@ -72,9 +72,13 @@ func buildLegendEntries(th theme.Theme) []legendEntry {
 		{"Status", ic.OK, "success / completed", legendPaintSuccess},
 		{"Status", ic.Err, "error / failed", legendPaintError},
 		{"Status", ic.Info, "informational", legendPaintWarning},
+		{"Status", "verified", "harness gates passed (claim ≠ evidence)", legendPaintSuccess},
+		{"Status", "claimed", "model claimed done; not harness-verified", legendPaintWarning},
+		{"Status", "unverified", "gates failed or incomplete", legendPaintError},
+		{"Status", "canceled", "turn interrupted (esc)", legendPaintWarning},
 		// Agent runtime chrome (words + color roles)
 		{"Agent state", theme.AgentStateReady.Label(), "idle, awaiting input (success color)", legendPaintAgentReady},
-		{"Agent state", theme.AgentStateWorking.Label(), "turn or tool loop in flight (accent)", legendPaintAgentWorking},
+		{"Agent state", theme.AgentStateWorking.Label(), "turn or tool loop in flight; also verification gates (accent)", legendPaintAgentWorking},
 		{"Agent state", theme.AgentStateAttention.Label(), "permission, gate, or prompt (yellow)", legendPaintAgentAttention},
 		{"Agent state", theme.AgentStateError.Label(), "failed turn, tool, or provider (error color)", legendPaintAgentError},
 		// Navigation / input

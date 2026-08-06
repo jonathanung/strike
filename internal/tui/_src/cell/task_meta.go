@@ -62,7 +62,7 @@ func taskSpawnPending(meta json.RawMessage, isError bool) bool {
 	return ok && m.Status == "started"
 }
 
-func applyToolCallEnd(tc *toolCell, title, output string, meta json.RawMessage, isError bool) {
+func applyToolCallEnd(tc *toolCell, title, output string, meta json.RawMessage, isError bool, errorCode ...string) {
 	if tc == nil {
 		return
 	}
@@ -70,6 +70,11 @@ func applyToolCallEnd(tc *toolCell, title, output string, meta json.RawMessage, 
 	tc.output = output
 	tc.metadata = meta
 	tc.isError = isError
+	if len(errorCode) > 0 {
+		tc.errorCode = errorCode[0]
+	} else {
+		tc.errorCode = ""
+	}
 	// Async task: keep the cell in-progress until ChildCompleted.
 	tc.done = !taskSpawnPending(meta, isError)
 }
