@@ -161,12 +161,18 @@ func TestPluginModalBrowseAndDetail(t *testing.T) {
 	if m.phase != pluginPhaseBrowse || len(m.all) != 2 {
 		t.Fatalf("init: phase=%v n=%d", m.phase, len(m.all))
 	}
-	// Filter
+	// Plain letters filter; actions use ctrl+ chords.
 	nm, _ := m.update(keyMsg("e"))
 	m = nm.(*pluginModal)
-	// 'e' on enabled plugin starts disable confirm
+	if m.filter != "e" || m.phase != pluginPhaseBrowse {
+		t.Fatalf("plain e should filter, got filter=%q phase=%v", m.filter, m.phase)
+	}
+	m.filter = ""
+	m.cursor = 0
+	nm, _ = m.update(ctrlKey('e'))
+	m = nm.(*pluginModal)
+	// first plugin is enabled — ctrl+e toggles to disable confirm
 	if m.phase != pluginPhaseConfirm || m.confirmKind != pluginConfirmDisable {
-		// first plugin is enabled — e toggles to disable confirm
 		t.Fatalf("phase=%v kind=%v", m.phase, m.confirmKind)
 	}
 	// cancel
@@ -201,7 +207,7 @@ func TestPluginModalBrowseAndDetail(t *testing.T) {
 func TestPluginModalRemoveRequiresConfirm(t *testing.T) {
 	fp := &fakePlugins{list: samplePlugins()}
 	m := newPluginModal(fp)
-	nm, _ := m.update(keyMsg("x"))
+	nm, _ := m.update(ctrlKey('x'))
 	m = nm.(*pluginModal)
 	if m.phase != pluginPhaseConfirm || m.confirmKind != pluginConfirmRemove {
 		t.Fatalf("phase=%v kind=%v", m.phase, m.confirmKind)
@@ -232,7 +238,7 @@ func TestPluginModalTrustShowsCapabilityReview(t *testing.T) {
 	// select exec plugin
 	nm, _ := m.update(keyMsg("down"))
 	m = nm.(*pluginModal)
-	nm, cmd := m.update(keyMsg("t"))
+	nm, cmd := m.update(ctrlKey('t'))
 	m = nm.(*pluginModal)
 	if m.phase != pluginPhaseBusy || cmd == nil {
 		t.Fatalf("phase=%v", m.phase)
@@ -351,6 +357,10 @@ func keyMsg(s string) tea.KeyPressMsg {
 		}
 		return tea.KeyPressMsg{Text: s}
 	}
+}
+
+func ctrlKey(r rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: r, Mod: tea.ModCtrl}
 }
 
 func stripANSI(s string) string { return ansi.Strip(s) }

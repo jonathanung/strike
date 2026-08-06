@@ -200,29 +200,28 @@ func (m *pluginModal) updateBrowse(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 		m.phase = pluginPhaseDetail
 		m.detailScroll = 0
 		m.status = ""
-	case "e":
+	// Action chords use ctrl/shift so plain typing still filters (session modal pattern).
+	case "ctrl+e":
 		return m.toggleEnable()
-	case "d":
-		return m.beginDisableConfirm()
-	case "t":
+	case "ctrl+t":
 		return m.beginTrustConfirm()
-	case "u":
+	case "ctrl+u":
 		return m.beginUntrustConfirm()
-	case "ctrl+x", "x":
+	case "ctrl+x":
 		return m.beginRemoveConfirm()
-	case "U", "ctrl+u":
+	case "U", "ctrl+shift+u":
 		return m.beginUpdatePreview()
-	case "i":
+	case "ctrl+i":
 		m.phase = pluginPhaseInput
 		m.inputKind = pluginInputInstall
 		m.inputBuf = ""
 		m.inputHint = "path | git URL | catalog:pkg[@ver]"
 		m.status = ""
-	case "c", "/":
+	case "ctrl+s":
 		return m.beginCatalog()
-	case "o":
+	case "ctrl+o":
 		return m.beginOutdated()
-	case "r":
+	case "ctrl+r":
 		m.reload()
 		m.status = "refreshed"
 	default:
@@ -247,17 +246,15 @@ func (m *pluginModal) updateDetail(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 		}
 	case "down", "j", "ctrl+n":
 		m.detailScroll++
-	case "e":
+	case "ctrl+e":
 		return m.toggleEnable()
-	case "d":
-		return m.beginDisableConfirm()
-	case "t":
+	case "ctrl+t":
 		return m.beginTrustConfirm()
-	case "u":
+	case "ctrl+u":
 		return m.beginUntrustConfirm()
-	case "ctrl+x", "x":
+	case "ctrl+x":
 		return m.beginRemoveConfirm()
-	case "U", "ctrl+u":
+	case "U", "ctrl+shift+u":
 		return m.beginUpdatePreview()
 	}
 	return m, nil
@@ -794,7 +791,7 @@ func (m *pluginModal) viewBrowse(width int, th theme.Theme, inner int) string {
 	}
 	return ui.Dialog(th, ui.DialogOpts{
 		Title: "Plugins",
-		Hint:  dotJoin(th, "↑/↓", "enter detail", "e enable", "t trust", "x remove", "U update", "i install", "c catalog", "esc"),
+		Hint:  dotJoin(th, "↑/↓", "enter detail", "ctrl+e enable", "ctrl+t trust", "ctrl+x remove", "U update", "ctrl+i install", "ctrl+s catalog", "esc"),
 		Width: width,
 	}, body)
 }
@@ -847,7 +844,7 @@ func (m *pluginModal) viewDetail(width int, th theme.Theme, inner int) string {
 		visible = lines[m.detailScroll:end]
 	}
 	body := wrapToWidth(strings.Join(visible, "\n"), inner)
-	hint := dotJoin(th, "↑/↓ scroll", "e/t/x/U actions", "enter back", "esc back")
+	hint := dotJoin(th, "↑/↓ scroll", "ctrl+e/t/x · U actions", "enter back", "esc back")
 	return ui.Dialog(th, ui.DialogOpts{
 		Title: "Plugin " + sanitizeDisplayData(p.ID),
 		Hint:  hint,
