@@ -155,7 +155,7 @@ func (w agentsWindow) update(msg tea.Msg) (window, tea.Cmd) {
 		w.activeID = msg.activeID
 		w.viewingID = msg.viewingID
 		w.roots = append([]agentsRootSnap(nil), msg.roots...)
-		w.nodes = w.buildNodes()
+		w.nodes = w.buildNodes(theme.Default())
 		// Keep cursor on the same id when possible.
 		rows := ui.FlattenTree(w.nodes)
 		if id := w.selectedID(rows); id != "" {
@@ -191,7 +191,7 @@ func (w agentsWindow) view(th theme.Theme) string {
 		visible = 0
 	}
 	// Rebuild so viewFilter/textFilter always match the rendered tree.
-	w.nodes = w.buildNodes()
+	w.nodes = w.buildNodes(th)
 	rows := ui.FlattenTree(w.nodes)
 	empty := agentsEmptyLabel(w.viewFilter, w.textFilter)
 	showFilter := w.filterEdit || w.textFilter != ""
@@ -281,7 +281,7 @@ func (w agentsWindow) handleKey(msg tea.KeyPressMsg) (agentsWindow, tea.Cmd) {
 		return w.handleFilterEditKey(msg)
 	}
 	if len(w.nodes) == 0 {
-		w.nodes = w.buildNodes()
+		w.nodes = w.buildNodes(theme.Default())
 	}
 	rows := ui.FlattenTree(w.nodes)
 	w.cursor = clampAgentsCursor(w.cursor, len(rows))
@@ -298,7 +298,7 @@ func (w agentsWindow) handleKey(msg tea.KeyPressMsg) (agentsWindow, tea.Cmd) {
 		return w, w.highlightCmd()
 	case "f":
 		w.viewFilter = w.viewFilter.next()
-		w.nodes = w.buildNodes()
+		w.nodes = w.buildNodes(theme.Default())
 		rows = ui.FlattenTree(w.nodes)
 		w.cursor = clampAgentsCursor(w.cursor, len(rows))
 		return w, w.highlightCmd()
@@ -339,7 +339,7 @@ func (w agentsWindow) handleKey(msg tea.KeyPressMsg) (agentsWindow, tea.Cmd) {
 			} else {
 				w.collapsed[row.ID] = true
 			}
-			w.nodes = w.buildNodes()
+			w.nodes = w.buildNodes(theme.Default())
 			rows = ui.FlattenTree(w.nodes)
 			w.cursor = clampAgentsCursor(w.cursor, len(rows))
 			return w, w.highlightCmd()
@@ -360,7 +360,7 @@ func (w agentsWindow) handleKey(msg tea.KeyPressMsg) (agentsWindow, tea.Cmd) {
 // highlightCmd emits the current cursor session id for the visualizer.
 func (w agentsWindow) highlightCmd() tea.Cmd {
 	if len(w.nodes) == 0 {
-		w.nodes = w.buildNodes()
+		w.nodes = w.buildNodes(theme.Default())
 	}
 	id := w.selectedID(ui.FlattenTree(w.nodes))
 	return func() tea.Msg { return agentsHighlightMsg{sessionID: id} }
@@ -371,7 +371,7 @@ func (w agentsWindow) handleFilterEditKey(msg tea.KeyPressMsg) (agentsWindow, te
 	case "esc":
 		w.filterEdit = false
 		w.textFilter = ""
-		w.nodes = w.buildNodes()
+		w.nodes = w.buildNodes(theme.Default())
 		w.cursor = clampAgentsCursor(w.cursor, len(ui.FlattenTree(w.nodes)))
 	case "enter":
 		w.filterEdit = false
@@ -379,17 +379,17 @@ func (w agentsWindow) handleFilterEditKey(msg tea.KeyPressMsg) (agentsWindow, te
 		if w.textFilter != "" {
 			runes := []rune(w.textFilter)
 			w.textFilter = string(runes[:len(runes)-1])
-			w.nodes = w.buildNodes()
+			w.nodes = w.buildNodes(theme.Default())
 			w.cursor = clampAgentsCursor(w.cursor, len(ui.FlattenTree(w.nodes)))
 		}
 	case "ctrl+u":
 		w.textFilter = ""
-		w.nodes = w.buildNodes()
+		w.nodes = w.buildNodes(theme.Default())
 		w.cursor = clampAgentsCursor(w.cursor, len(ui.FlattenTree(w.nodes)))
 	default:
 		if len(msg.Text) > 0 {
 			w.textFilter += msg.Text
-			w.nodes = w.buildNodes()
+			w.nodes = w.buildNodes(theme.Default())
 			w.cursor = clampAgentsCursor(w.cursor, len(ui.FlattenTree(w.nodes)))
 		}
 	}
@@ -404,7 +404,8 @@ func (w agentsWindow) selectedID(rows []ui.TreeRow) string {
 	return rows[i].ID
 }
 
-func (w agentsWindow) buildNodes() []ui.TreeNode {
+func (w agentsWindow) buildNodes(th theme.Theme) []ui.TreeNode {
+	th = th.Resolve()
 	if len(w.roots) == 0 {
 		return nil
 	}
@@ -455,7 +456,7 @@ func (w agentsWindow) buildNodes() []ui.TreeNode {
 		kids := listableChildActivities(root.Children)
 		var childNodes []ui.TreeNode
 		if len(kids) > 0 {
-			childNodes = w.filterChildTree(kids, q)
+			childNodes = w.filterChildTree(th, kids, q)
 		}
 		includeRoot := false
 		switch {
@@ -490,7 +491,8 @@ func (w agentsWindow) buildNodes() []ui.TreeNode {
 	return out
 }
 
-func (w agentsWindow) filterChildTree(kids []childActivity, q string) []ui.TreeNode {
+func (w agentsWindow) filterChildTree(th theme.Theme, kids []childActivity, q string) []ui.TreeNode {
+	th = th.Resolve()
 	byParent := map[string][]childActivity{}
 	ids := map[string]bool{}
 	for _, ch := range kids {
@@ -527,9 +529,11 @@ func (w agentsWindow) filterChildTree(kids []childActivity, q string) []ui.TreeN
 			detail = q
 		}
 		node := ui.TreeNode{
-			ID:      ch.sessionID,
-			Label:   label,
-			Detail:  detail,
+			ID:     ch.sessionID,
+			Label:  label,
+			Detail: detail,
+			// Orchestration chips (blocked/conflict/budget/verify) — additive.
+			Suffix:  agentsOrchSuffix(th, ch),
 			Current: w.viewingID == ch.sessionID,
 			Tone:    childStatusTone(detail),
 		}
@@ -611,6 +615,163 @@ func childQueueDetail(ch childActivity) string {
 		return ""
 	}
 	return queueDetailLabel(strings.Join(ch.queuePools, ","))
+}
+
+// agentsMaxOrchChips bounds suffix badges per row so narrow widths stay readable.
+// Tree drops the whole suffix when it cannot fit; we also pre-bound count.
+const agentsMaxOrchChips = 3
+
+// agentsOrchSuffix builds compact orchestration chips for a child tree row.
+// Additive to existing status Detail coloring. Empty when no flags apply.
+// Priority (highest first): blocked → conflict → escalated/over-budget →
+// claimed/unverified. Verified-success stays quiet (detail pane owns it).
+func agentsOrchSuffix(th theme.Theme, ch childActivity) string {
+	th = th.Resolve()
+	type chip struct {
+		label string
+		tone  ui.Tone
+	}
+	var chips []chip
+
+	if agentsChildBlocked(ch) {
+		chips = append(chips, chip{"blocked", ui.ToneWarning})
+	}
+	if len(ch.pathOverlaps) > 0 {
+		tone := ui.ToneWarning
+		label := "conflict"
+		for _, po := range ch.pathOverlaps {
+			if po.blocked || strings.EqualFold(po.policy, "block") {
+				tone = ui.ToneError
+				label = "conflict"
+				break
+			}
+		}
+		chips = append(chips, chip{label, tone})
+	}
+	if label, tone, ok := agentsChildBudgetChip(ch); ok {
+		chips = append(chips, chip{label, tone})
+	}
+	if label, tone, ok := agentsChildVerifyChip(ch); ok {
+		chips = append(chips, chip{label, tone})
+	}
+
+	if len(chips) == 0 {
+		return ""
+	}
+	if len(chips) > agentsMaxOrchChips {
+		chips = chips[:agentsMaxOrchChips]
+	}
+	parts := make([]string, 0, len(chips))
+	for _, c := range chips {
+		parts = append(parts, ui.Badge(th, c.tone, c.label))
+	}
+	return strings.Join(parts, themedSpace(th.Spacing.XS))
+}
+
+func agentsChildBlocked(ch childActivity) bool {
+	// Explicit block reason always counts (needs-you with a block).
+	if strings.TrimSpace(ch.blockReason) != "" {
+		return true
+	}
+	// Wire blocked status only — bare "needs you" already has Detail coloring
+	// and is not necessarily a path/permission block.
+	status := strings.ToLower(strings.TrimSpace(ch.status))
+	roster := strings.ToLower(strings.TrimSpace(ch.rosterState))
+	if status == string(protocol.ChildStatusBlocked) || status == "blocked" {
+		return true
+	}
+	if roster == "blocked" {
+		return true
+	}
+	return false
+}
+
+func agentsChildBudgetChip(ch childActivity) (label string, tone ui.Tone, ok bool) {
+	if k := strings.TrimSpace(ch.escalateKind); k != "" {
+		switch {
+		case strings.EqualFold(k, "stall"):
+			return "stall", ui.ToneWarning, true
+		case strings.EqualFold(k, "loop"):
+			return "loop", ui.ToneWarning, true
+		default:
+			return "escalated", ui.ToneWarning, true
+		}
+	}
+	if strings.TrimSpace(ch.escalateReason) != "" || strings.TrimSpace(ch.escalateAction) != "" {
+		return "escalated", ui.ToneWarning, true
+	}
+	b := ch.budget
+	if b == nil {
+		return "", ui.ToneMuted, false
+	}
+	if b.Stall {
+		return "stall", ui.ToneWarning, true
+	}
+	if b.Loop {
+		return "loop", ui.ToneWarning, true
+	}
+	if b.Escalated || strings.TrimSpace(b.EscalateKind) != "" {
+		return "escalated", ui.ToneWarning, true
+	}
+	// Over-budget: any limited dimension at/over max.
+	if agentsBudgetOver(b) {
+		return "over budget", ui.ToneError, true
+	}
+	return "", ui.ToneMuted, false
+}
+
+func agentsBudgetOver(b *protocol.AgentBudgetView) bool {
+	if b == nil {
+		return false
+	}
+	if b.MaxToolCalls > 0 && b.ToolCalls >= b.MaxToolCalls {
+		return true
+	}
+	if b.MaxDangerousTools > 0 && b.DangerousTools >= b.MaxDangerousTools {
+		return true
+	}
+	if b.MaxTokens > 0 && b.TokensUsed >= b.MaxTokens {
+		return true
+	}
+	if b.MaxWallClockS > 0 && b.ElapsedS >= b.MaxWallClockS {
+		return true
+	}
+	if b.MaxCostUSD > 0 && b.CostUSDUsed >= b.MaxCostUSD {
+		return true
+	}
+	// Remaining pointers at zero also count.
+	if b.ToolCallsRemaining != nil && b.MaxToolCalls > 0 && *b.ToolCallsRemaining <= 0 {
+		return true
+	}
+	if b.TokensRemaining != nil && b.MaxTokens > 0 && *b.TokensRemaining <= 0 {
+		return true
+	}
+	if b.WallClockRemainingS != nil && b.MaxWallClockS > 0 && *b.WallClockRemainingS <= 0 {
+		return true
+	}
+	if b.CostUSDRemaining != nil && b.MaxCostUSD > 0 && *b.CostUSDRemaining <= 0 {
+		return true
+	}
+	return false
+}
+
+// agentsChildVerifyChip surfaces claimed/unverified when a report exists.
+// Quiet on verified success so the tree stays glanceable for problems.
+func agentsChildVerifyChip(ch childActivity) (label string, tone ui.Tone, ok bool) {
+	v := ch.verification
+	if v == nil {
+		return "", ui.ToneMuted, false
+	}
+	switch {
+	case v.verified && v.passed:
+		return "", ui.ToneMuted, false
+	case v.claimed && !v.verified:
+		return "claimed", ui.ToneWarning, true
+	case !v.passed:
+		return "unverified", ui.ToneError, true
+	default:
+		return "unverified", ui.ToneError, true
+	}
 }
 
 // queueDetailLabel formats a short "queued: <pool>" chip without promising position.
