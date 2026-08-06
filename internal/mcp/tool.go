@@ -169,14 +169,14 @@ func formatContent(blocks []contentBlock) string {
 	return strings.Join(parts, "\n")
 }
 
-// mapMCPError maps transport/client failures onto stable tool.Error codes.
+// mapMCPError maps transport/client failures onto stable tool.CodedError codes.
 // Unknown errors become CodeInternal without panicking.
 func mapMCPError(err error) error {
 	if err == nil {
 		return nil
 	}
 	// Already structured (e.g. permission deny from Ask) — pass through.
-	var te *tool.Error
+	var te *tool.CodedError
 	if errors.As(err, &te) && te != nil {
 		return te
 	}

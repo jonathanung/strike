@@ -471,9 +471,9 @@ func TestBridgeContractAndErrorMapping(t *testing.T) {
 		Ask:     func(context.Context, tool.AskRequest) error { return nil },
 	}
 	_, err = bridge.Execute(ctx, json.RawMessage(`{}`), tc)
-	var te *tool.Error
+	var te *tool.CodedError
 	if !errors.As(err, &te) {
-		t.Fatalf("boom err = %v (%T), want *tool.Error", err, err)
+		t.Fatalf("boom err = %v (%T), want *tool.CodedError", err, err)
 	}
 	// Free-text MCP isError → internal fallback (never panic).
 	if te.Code != tool.CodeInternal {
@@ -485,7 +485,7 @@ func TestMapMCPErrorFallbackNoPanic(t *testing.T) {
 	t.Parallel()
 	// Unknown errors map to internal without panicking.
 	err := mapMCPError(fmt.Errorf("totally novel failure mode"))
-	var te *tool.Error
+	var te *tool.CodedError
 	if !errors.As(err, &te) || te.Code != tool.CodeInternal {
 		t.Fatalf("got %v", err)
 	}

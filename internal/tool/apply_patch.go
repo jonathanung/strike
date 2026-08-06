@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -53,14 +54,16 @@ func (applyPatchTool) Schema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
-			"patch": {"type": "string", "description": "Full patch text including *** Begin Patch / *** End Patch markers"}
+			"patch": {"type": "string", "description": "Full patch text including *** Begin Patch / *** End Patch markers"},
+			"baseHashes": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Optional map of path → sha256 hex of expected content before apply; fails with precondition_failed on mismatch"}
 		},
 		"required": ["patch"]
 	}`)
 }
 
 type applyPatchArgs struct {
-	Patch string `json:"patch"`
+	Patch      string            `json:"patch"`
+	BaseHashes map[string]string `json:"baseHashes"`
 }
 
 // patchHunk is one parsed file operation from the patch envelope.
@@ -101,6 +104,11 @@ func (applyPatchTool) Execute(ctx context.Context, args json.RawMessage, tc *Con
 
 	planned, originals, err := preparePatch(tc.WorkDir, a.Patch)
 	if err != nil {
+		return Result{}, err
+	}
+
+	// Freshness + optional baseHash preconditions before permission/claim.
+	if err := checkPatchPreconditions(tc, planned, originals, a.BaseHashes); err != nil {
 		return Result{}, err
 	}
 
@@ -161,12 +169,31 @@ func (applyPatchTool) Execute(ctx context.Context, args json.RawMessage, tc *Con
 		}
 	}
 
+	// Re-check content race immediately before commit (plan-time originals).
+	if err := checkPatchContentUnchanged(originals); err != nil {
+		return Result{}, err
+	}
+	if err := checkPatchPreconditions(tc, planned, originals, a.BaseHashes); err != nil {
+		return Result{}, err
+	}
+
 	for abs := range originals {
 		tc.SnapshotPath(abs)
+	}
+	// Capture existence before commit for turn-diff kinds.
+	existed := make(map[string]bool, len(planned)*2)
+	for _, op := range planned {
+		if op.AbsPath != "" {
+			existed[op.AbsPath] = FileExisted(op.AbsPath)
+		}
+		if op.AbsMove != "" {
+			existed[op.AbsMove] = FileExisted(op.AbsMove)
+		}
 	}
 	if err := commitPatchOps(tc.WorkDir, planned, originals); err != nil {
 		return Result{}, err
 	}
+	notePatchTurnChanges(tc, planned, existed)
 	// Sync all files first, then one diagnostics collect (single block, not N).
 	diagPaths := notifyPatchFileSync(tc, planned)
 
@@ -180,6 +207,109 @@ func (applyPatchTool) Execute(ctx context.Context, args json.RawMessage, tc *Con
 		Metadata: meta,
 	}
 	return tc.AppendDiagnostics(ctx, res, diagPaths...), nil
+}
+
+// checkPatchPreconditions enforces FileState freshness and optional baseHashes
+// for every path the patch will mutate.
+func checkPatchPreconditions(tc *Context, planned []plannedOp, originals map[string]pathOriginal, baseHashes map[string]string) error {
+	if tc == nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	checkPath := func(abs, rel string) error {
+		if abs == "" {
+			return nil
+		}
+		if _, ok := seen[abs]; ok {
+			return nil
+		}
+		seen[abs] = struct{}{}
+		if orig, ok := originals[abs]; ok && orig.exists {
+			if err := tc.Files.CheckFresh(abs, rel); err != nil {
+				return err
+			}
+		}
+		if len(baseHashes) == 0 {
+			return nil
+		}
+		// Match baseHashes by relative path (slash) or basename keys.
+		want := baseHashFor(baseHashes, rel, abs)
+		if want == "" {
+			return nil
+		}
+		return CheckBaseHash(abs, want, rel)
+	}
+	for _, op := range planned {
+		if err := checkPath(op.AbsPath, op.RelPath); err != nil {
+			return err
+		}
+		if err := checkPath(op.AbsMove, op.RelMove); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func baseHashFor(m map[string]string, rel, abs string) string {
+	if m == nil {
+		return ""
+	}
+	// Exact relative (slash-normalized) or absolute keys only — never basename
+	// alone, which would cross-apply hashes across same-named paths in different dirs.
+	if v, ok := m[rel]; ok {
+		return v
+	}
+	if slash := filepath.ToSlash(rel); slash != rel {
+		if v, ok := m[slash]; ok {
+			return v
+		}
+	}
+	if v, ok := m[abs]; ok {
+		return v
+	}
+	if clean := filepath.Clean(abs); clean != abs {
+		if v, ok := m[clean]; ok {
+			return v
+		}
+	}
+	return ""
+}
+
+func checkPatchContentUnchanged(originals map[string]pathOriginal) error {
+	for abs, orig := range originals {
+		if !orig.exists {
+			// Must still be missing (not created by a concurrent writer).
+			if FileExisted(abs) {
+				return PreconditionFailed(fmt.Sprintf("%s changed concurrently (appeared before apply); re-read before editing", abs))
+			}
+			continue
+		}
+		if err := CheckContentUnchanged(abs, orig.data, filepath.Base(abs)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func notePatchTurnChanges(tc *Context, planned []plannedOp, existed map[string]bool) {
+	if tc == nil {
+		return
+	}
+	for _, op := range planned {
+		switch op.Type {
+		case "delete":
+			tc.NoteTurnChange(op.AbsPath, true, true)
+		case "move":
+			tc.NoteTurnChange(op.AbsPath, true, true)
+			if op.AbsMove != "" {
+				tc.NoteTurnChange(op.AbsMove, existed[op.AbsMove], false)
+			}
+		case "add":
+			tc.NoteTurnChange(op.AbsPath, existed[op.AbsPath], false)
+		default: // update
+			tc.NoteTurnChange(op.AbsPath, true, false)
+		}
+	}
 }
 
 // notifyPatchFileSync drives LSP (or similar) document sync after a successful patch.

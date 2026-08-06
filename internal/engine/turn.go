@@ -196,6 +196,7 @@ func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.Ima
 	turnCorr := e.baseCorr()
 	turnCorr.TurnID = turnID
 	e.checkpoints.BeginTurn(turnID)
+	e.turnDiff.Reset()
 	e.emit(protocol.UserMessage{Correlation: turnCorr, Text: text, Images: images})
 	e.maybeTitleSession(text)
 	e.emit(protocol.TurnStarted{Correlation: turnCorr})
@@ -583,7 +584,7 @@ func classifyToolFailure(err error) classifiedToolFailure {
 	var permRejected *permission.RejectedError
 	var qRejected *question.RejectedError
 	var toolRejected *tool.UserRejectedError
-	var te *tool.Error
+	var coded *tool.CodedError
 	switch {
 	case errors.As(err, &permDenied):
 		return classifiedToolFailure{
@@ -609,33 +610,19 @@ func classifyToolFailure(err error) classifiedToolFailure {
 			Code:      tool.CodePermissionDenied,
 			Retryable: false,
 		}
-	case errors.As(err, &te) && te != nil:
-		msg := te.Message
-		if strings.TrimSpace(msg) == "" {
-			msg = te.Error()
-		}
-		// Preserve structured codes; wrap free-form internal messages like other errors.
-		out := msg
-		if te.Code == tool.CodeInternal || te.Code == "" {
-			out = protocol.ToolFeedbackError(msg)
-		} else if te.Code != tool.CodePermissionDenied && te.Code != tool.CodeBlocked &&
-			te.Code != tool.CodeCanceled && !strings.HasPrefix(msg, "Error:") {
-			// invalid_args / precondition / timeout / transient keep tool message;
-			// still prefix generic ones that look bare.
-			if te.Code == tool.CodeInvalidArgs || te.Code == tool.CodePreconditionFailed ||
-				te.Code == tool.CodeTimeout || te.Code == tool.CodeTransient {
-				out = protocol.ToolFeedbackError(msg)
-			}
-		}
-		code := te.Code
+	case errors.As(err, &coded) && coded != nil:
+		// Structured codes (#793 / #797): greppable "code: message" in Output
+		// plus Code/Retryable on timeline and provider.ToolResult.
+		out := protocol.ToolFeedbackError(coded.Error())
+		code := coded.Code
 		if code == "" || !tool.ValidErrorCode(code) {
 			code = tool.CodeInternal
 		}
 		return classifiedToolFailure{
 			Output:    out,
 			Code:      code,
-			Retryable: te.Retryable,
-			Details:   te.Details,
+			Retryable: coded.Retryable,
+			Details:   coded.Details,
 		}
 	default:
 		classified := tool.Classify(err)
@@ -775,6 +762,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			SessionID:  e.opts.SessionID,
 			MemberName: e.ownershipMemberName(),
 			Checkpoint: e.checkpoints.Snapshot,
+			TurnDiff:   e.turnDiff,
 			// Record successful mutations only (post-write), not pre-mutation
 			// snapshots — failed tools must not appear in handoff files_changed.
 			FileSync: func(absPath string, content string, deleted bool) {
@@ -1025,10 +1013,23 @@ func (e *Engine) failTurn(err error, corr protocol.Correlation, finishing chan s
 // post-tool-batch apply in runTurn).
 func (e *Engine) completeTurn(finishing chan struct{}, corr protocol.Correlation, stopReason string) {
 	close(finishing)
+	files := turnFileChanges(e.turnDiff.Snapshot())
 	e.checkpoints.CommitTurn()
 	e.fireHookRules(corr, permission.HookEventTurnEnd, "", "")
-	e.emit(protocol.TurnCompleted{Correlation: corr, StopReason: stopReason})
+	e.emit(protocol.TurnCompleted{Correlation: corr, StopReason: stopReason, Files: files})
 	e.applyPendingAgent()
+}
+
+// turnFileChanges maps tool.FileChange → protocol.TurnFileChange.
+func turnFileChanges(in []tool.FileChange) []protocol.TurnFileChange {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]protocol.TurnFileChange, len(in))
+	for i, c := range in {
+		out[i] = protocol.TurnFileChange{Path: c.Path, Kind: string(c.Kind)}
+	}
+	return out
 }
 
 // fireHookRules evaluates declarative config rules and emits HookMatched for

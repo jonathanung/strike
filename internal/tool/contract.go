@@ -1,15 +1,11 @@
 package tool
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"strings"
 )
 
 // ContractVersion is the current built-in tool contract schema version.
-// Bump when Contract fields or ErrorCode vocabulary change meaning.
+// Bump when Contract fields change meaning.
 const ContractVersion = 1
 
 // SideEffect classifies what a tool may do outside pure computation.
@@ -39,21 +35,6 @@ const (
 	IdempotencyUnsafe Idempotency = "unsafe"
 )
 
-// ErrorCode is a stable machine-readable failure class on the tool result path.
-type ErrorCode string
-
-const (
-	CodePermissionDenied   ErrorCode = "permission_denied"
-	CodeInvalidArgs        ErrorCode = "invalid_args"
-	CodePreconditionFailed ErrorCode = "precondition_failed"
-	CodeCanceled           ErrorCode = "canceled"
-	CodeTimeout            ErrorCode = "timeout"
-	CodeTransient          ErrorCode = "transient"
-	CodeInternal           ErrorCode = "internal"
-	// CodeBlocked is a non-permission policy block (hooks, phase gates).
-	CodeBlocked ErrorCode = "blocked"
-)
-
 // ValidSideEffect reports whether s is a known side-effect class.
 func ValidSideEffect(s SideEffect) bool {
 	switch s {
@@ -68,16 +49,6 @@ func ValidSideEffect(s SideEffect) bool {
 func ValidIdempotency(i Idempotency) bool {
 	switch i {
 	case IdempotencySafeRetry, IdempotencyConditional, IdempotencyUnsafe:
-		return true
-	}
-	return false
-}
-
-// ValidErrorCode reports whether c is a known stable error code.
-func ValidErrorCode(c ErrorCode) bool {
-	switch c {
-	case CodePermissionDenied, CodeInvalidArgs, CodePreconditionFailed,
-		CodeCanceled, CodeTimeout, CodeTransient, CodeInternal, CodeBlocked:
 		return true
 	}
 	return false
@@ -136,141 +107,4 @@ func LookupContract(t Tool) Contract {
 // staticContract builds a v1 contract (shared by built-in Contract methods).
 func staticContract(se SideEffect, id Idempotency) Contract {
 	return Contract{Version: ContractVersion, SideEffect: se, Idempotency: id}
-}
-
-// Error is a structured tool failure with a stable code for orchestrators
-// and model-facing settlement. Message remains human-readable; Code is the
-// machine token. Implements error.
-type Error struct {
-	Code      ErrorCode
-	Message   string
-	Retryable bool
-	Details   json.RawMessage
-}
-
-func (e *Error) Error() string {
-	if e == nil {
-		return string(CodeInternal)
-	}
-	if strings.TrimSpace(e.Message) != "" {
-		return e.Message
-	}
-	if e.Code != "" {
-		return string(e.Code)
-	}
-	return string(CodeInternal)
-}
-
-// IsRetryable reports whether e may be retried (false on nil).
-func (e *Error) IsRetryable() bool {
-	return e != nil && e.Retryable
-}
-
-// ErrInvalidArgs returns a non-retryable invalid_args error.
-func ErrInvalidArgs(msg string) *Error {
-	return &Error{Code: CodeInvalidArgs, Message: strings.TrimSpace(msg), Retryable: false}
-}
-
-// ErrPrecondition returns a non-retryable precondition_failed error.
-func ErrPrecondition(msg string) *Error {
-	return &Error{Code: CodePreconditionFailed, Message: strings.TrimSpace(msg), Retryable: false}
-}
-
-// ErrPermissionDenied returns a non-retryable permission_denied error.
-func ErrPermissionDenied(msg string) *Error {
-	return &Error{Code: CodePermissionDenied, Message: strings.TrimSpace(msg), Retryable: false}
-}
-
-// ErrTimeout returns a retryable timeout error.
-func ErrTimeout(msg string) *Error {
-	return &Error{Code: CodeTimeout, Message: strings.TrimSpace(msg), Retryable: true}
-}
-
-// ErrTransient returns a retryable transient error.
-func ErrTransient(msg string) *Error {
-	return &Error{Code: CodeTransient, Message: strings.TrimSpace(msg), Retryable: true}
-}
-
-// ErrCanceled returns a non-retryable canceled error.
-func ErrCanceled(msg string) *Error {
-	return &Error{Code: CodeCanceled, Message: strings.TrimSpace(msg), Retryable: false}
-}
-
-// ErrInternal returns a non-retryable internal error (fallback).
-func ErrInternal(msg string) *Error {
-	return &Error{Code: CodeInternal, Message: strings.TrimSpace(msg), Retryable: false}
-}
-
-// ErrBlocked returns a non-retryable blocked error (hooks/policy).
-func ErrBlocked(msg string) *Error {
-	return &Error{Code: CodeBlocked, Message: strings.TrimSpace(msg), Retryable: false}
-}
-
-// Classify maps an arbitrary error onto a structured *Error.
-// Already-structured *Error values are returned as-is (cloned message only).
-// Unknown errors become CodeInternal (non-retryable) so callers never panic.
-func Classify(err error) *Error {
-	if err == nil {
-		return nil
-	}
-	var te *Error
-	if errors.As(err, &te) && te != nil {
-		return te
-	}
-	var escape *WorkspaceEscapeError
-	if errors.As(err, &escape) {
-		return ErrPrecondition(err.Error())
-	}
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errTimeoutSentinel) {
-		return ErrTimeout(err.Error())
-	}
-	if errors.Is(err, context.Canceled) {
-		return ErrCanceled(err.Error())
-	}
-	// Heuristic for unmigrated tools that still use fmt.Errorf("invalid arguments: …").
-	msg := err.Error()
-	lower := strings.ToLower(msg)
-	if strings.Contains(lower, "invalid argument") || strings.HasPrefix(lower, "invalid arguments") {
-		return ErrInvalidArgs(msg)
-	}
-	return ErrInternal(msg)
-}
-
-// errTimeoutSentinel lets callers mark timeouts without importing net/http.
-// time.ErrNoDeadline is not right; use errors.Is with context or wrap with Timeout.
-var errTimeoutSentinel = errors.New("tool: timeout sentinel")
-
-// AsTimeout wraps err as a timeout-class failure for Classify (optional helper).
-func AsTimeout(err error) error {
-	if err == nil {
-		return nil
-	}
-	return fmt.Errorf("%w: %w", errTimeoutSentinel, err)
-}
-
-// IsTimeout reports whether err is a deadline/timeout class (context or marked).
-func IsTimeout(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errTimeoutSentinel) {
-		return true
-	}
-	var te *Error
-	if errors.As(err, &te) && te != nil && te.Code == CodeTimeout {
-		return true
-	}
-	// net.Error Timeout() without importing net: message heuristic only as last resort.
-	lower := strings.ToLower(err.Error())
-	return strings.Contains(lower, "timed out") || strings.Contains(lower, "deadline exceeded")
-}
-
-// RetryableForCode returns the default retryability for a stable code.
-func RetryableForCode(code ErrorCode) bool {
-	switch code {
-	case CodeTimeout, CodeTransient:
-		return true
-	default:
-		return false
-	}
 }

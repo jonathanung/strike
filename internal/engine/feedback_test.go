@@ -57,7 +57,7 @@ func TestModelFacingToolOutput(t *testing.T) {
 		{
 			name:     "invalid args structured",
 			err:      tool.ErrInvalidArgs("oldString and newString are identical"),
-			wantOut:  protocol.ToolFeedbackError("oldString and newString are identical"),
+			wantOut:  protocol.ToolFeedbackError("invalid_args: oldString and newString are identical"),
 			wantErr:  true,
 			wantCode: tool.CodeInvalidArgs,
 		},

@@ -73,7 +73,9 @@ func (readTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 		return Result{}, err
 	}
 	if info, statErr := os.Stat(path); statErr == nil {
-		tc.Files.Record(path, info)
+		tc.Files.RecordBytes(path, info, data)
+	} else {
+		tc.Files.RecordBytes(path, nil, data)
 	}
 	lines := strings.Split(string(data), "\n")
 	total := len(lines)

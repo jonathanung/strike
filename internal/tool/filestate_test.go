@@ -47,6 +47,9 @@ func TestEditRejectsStaleReadAfterExternalChange(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "modified externally") {
 		t.Fatalf("want stale error, got %v", err)
 	}
+	if CodeOf(err) != string(CodePreconditionFailed) {
+		t.Fatalf("code = %q, want %s", CodeOf(err), CodePreconditionFailed)
+	}
 
 	// MarkDirty (as FilesChanged would) then re-read and edit succeeds.
 	state.MarkDirty(path)

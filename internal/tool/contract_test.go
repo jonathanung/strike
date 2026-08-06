@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strings"
 	"testing"
 )
 
@@ -181,17 +180,16 @@ func TestEditInvalidArgsVsPermissionShape(t *testing.T) {
 	dir := t.TempDir()
 	// Invalid JSON → invalid_args.
 	_, err := NewEdit().Execute(context.Background(), json.RawMessage(`{`), allowAll(dir))
-	var te *Error
+	var te *CodedError
 	if !errors.As(err, &te) || te.Code != CodeInvalidArgs {
 		t.Fatalf("bad json err = %v (%T)", err, err)
 	}
-	// Permission deny passes through as non-tool.Error (engine classifies).
+	// Permission deny passes through as non-CodedError (engine classifies).
 	tc := &Context{
 		WorkDir: dir,
 		Ask:     func(context.Context, AskRequest) error { return errors.New("denied-by-test") },
 		Files:   &FileState{},
 	}
-	// Need a real file + matching strings to reach Ask — or fail earlier.
 	// Empty old==new is invalid_args before Ask.
 	_, err = NewEdit().Execute(context.Background(), mustJSON(t, map[string]any{
 		"filePath":  "a.txt",
@@ -203,21 +201,5 @@ func TestEditInvalidArgsVsPermissionShape(t *testing.T) {
 	}
 	if te.Code == CodePermissionDenied {
 		t.Fatal("invalid_args must not be permission_denied")
-	}
-}
-
-func TestErrorHelpers(t *testing.T) {
-	t.Parallel()
-	if !ErrTimeout("t").Retryable || ErrTimeout("t").Code != CodeTimeout {
-		t.Fatal("timeout")
-	}
-	if !ErrTransient("t").Retryable {
-		t.Fatal("transient")
-	}
-	if ErrInternal("x").Retryable || !strings.Contains(ErrInternal("x").Error(), "x") {
-		t.Fatal("internal")
-	}
-	if RetryableForCode(CodeTransient) != true || RetryableForCode(CodeInvalidArgs) != false {
-		t.Fatal("RetryableForCode")
 	}
 }
