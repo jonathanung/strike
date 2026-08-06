@@ -583,3 +583,160 @@ func TestVisualizerInDefaultRegistry(t *testing.T) {
 		t.Fatalf("activate visualizer failed ok=%v id=%q", ok, next.active().id())
 	}
 }
+
+func TestVisualizerBudgetMetersLimited(t *testing.T) {
+	remTools := 1
+	remTok := 500
+	w := newVisualizerWindow().resize(40, 28).(visualizerWindow)
+	updated, _ := w.update(visualizerStateMsg{
+		SessionID:   "c1",
+		Label:       "worker",
+		Kind:        "child",
+		State:       theme.AgentStateWorking,
+		StatusLabel: "working",
+		Budget: &protocol.AgentBudgetView{
+			MaxToolCalls:       3,
+			ToolCalls:          2,
+			ToolCallsRemaining: &remTools,
+			MaxTokens:          1000,
+			TokensUsed:         500,
+			TokensRemaining:    &remTok,
+			// Unlimited cost/wall — must not appear as 0% meters.
+			MaxCostUSD:    0,
+			MaxWallClockS: 0,
+		},
+	})
+	plain := ansi.Strip(updated.view(theme.Default()))
+	for _, want := range []string{"budget", "tools", "2/3", "1 left", "tok", "500/1k"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("missing %q:\n%s", want, plain)
+		}
+	}
+	// Unlimited dimensions must not fabricate meters.
+	if strings.Contains(plain, "wall") || strings.Contains(plain, "danger") {
+		t.Errorf("unlimited dims should be omitted:\n%s", plain)
+	}
+	// Agent budget cost meter absent when MaxCostUSD==0; session cost row may still show dash.
+	for _, line := range strings.Split(plain, "\n") {
+		if strings.Contains(line, "cost") && strings.Contains(line, "/") && strings.Contains(line, "$") {
+			t.Errorf("unexpected agent cost meter on unlimited budget:\n%s", line)
+		}
+	}
+}
+
+func TestVisualizerBudgetUnlimitedOmitsSection(t *testing.T) {
+	w := newVisualizerWindow().resize(36, 20).(visualizerWindow)
+	// Nil budget, no escalation → no budget section.
+	updated, _ := w.update(visualizerStateMsg{
+		SessionID:   "c",
+		Label:       "x",
+		Kind:        "child",
+		State:       theme.AgentStateWorking,
+		StatusLabel: "working",
+	})
+	plain := ansi.Strip(updated.view(theme.Default()))
+	if strings.Contains(plain, "budget") || strings.Contains(plain, "escalat") {
+		t.Fatalf("nil budget should omit section:\n%s", plain)
+	}
+	// Zero limits only — still omit (unlimited, not 0%).
+	updated, _ = w.update(visualizerStateMsg{
+		SessionID: "c",
+		Label:     "x",
+		Kind:      "child",
+		State:     theme.AgentStateWorking,
+		Budget:    &protocol.AgentBudgetView{ToolCalls: 5, TokensUsed: 100},
+	})
+	plain = ansi.Strip(updated.view(theme.Default()))
+	if strings.Contains(plain, "budget") {
+		t.Fatalf("zero-limit budget must not draw meters:\n%s", plain)
+	}
+	if visualizerBudgetHasLimits(nil) {
+		t.Fatal("nil budget should report no limits")
+	}
+	if visualizerBudgetHasLimits(&protocol.AgentBudgetView{}) {
+		t.Fatal("empty view should report no limits")
+	}
+	if !visualizerBudgetHasLimits(&protocol.AgentBudgetView{MaxToolCalls: 1}) {
+		t.Fatal("MaxToolCalls should count as a limit")
+	}
+}
+
+func TestVisualizerEscalationChrome(t *testing.T) {
+	w := newVisualizerWindow().resize(56, 24).(visualizerWindow)
+	updated, _ := w.update(visualizerStateMsg{
+		SessionID:      "c",
+		Label:          "looped",
+		Kind:           "child",
+		State:          theme.AgentStateAttention,
+		StatusLabel:    "needs you",
+		EscalateKind:   "tool_calls",
+		EscalateReason: "hit max tool calls",
+		EscalateAction: protocol.EscalateActionFinalizing,
+		Budget: &protocol.AgentBudgetView{
+			MaxToolCalls: 3,
+			ToolCalls:    3,
+			Escalated:    true,
+			EscalateKind: "tool_calls",
+		},
+	})
+	plain := ansi.Strip(updated.view(theme.Default()))
+	for _, want := range []string{"escalation", "tool_calls", "hit max tool calls", "budget", "tools", "3/3"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("missing %q:\n%s", want, plain)
+		}
+	}
+	// Stall-only via budget flags (no top-level escalate fields).
+	updated, _ = w.update(visualizerStateMsg{
+		SessionID: "c2",
+		Label:     "stalled",
+		Kind:      "child",
+		State:     theme.AgentStateWorking,
+		Budget: &protocol.AgentBudgetView{
+			Stall:         true,
+			StallAfterS:   30,
+			MaxWallClockS: 120,
+			ElapsedS:      45,
+		},
+	})
+	plain = ansi.Strip(updated.view(theme.Default()))
+	if !strings.Contains(plain, "stall") {
+		t.Fatalf("stall flag missing:\n%s", plain)
+	}
+	if !strings.Contains(plain, "wall") {
+		t.Fatalf("wall meter missing when limited:\n%s", plain)
+	}
+}
+
+func TestVisualizerBudgetWidthSafe(t *testing.T) {
+	rem := 0
+	msg := visualizerStateMsg{
+		SessionID:      "c",
+		Label:          "worker-with-long-name",
+		Kind:           "child",
+		State:          theme.AgentStateWorking,
+		EscalateKind:   "tokens",
+		EscalateReason: "a very long escalation reason that must truncate safely at narrow widths without blowing layout",
+		EscalateAction: protocol.EscalateActionInterrupted,
+		Budget: &protocol.AgentBudgetView{
+			MaxToolCalls:       10,
+			ToolCalls:          10,
+			ToolCallsRemaining: &rem,
+			MaxTokens:          8000,
+			TokensUsed:         8000,
+			MaxCostUSD:         1.5,
+			CostUSDUsed:        1.5,
+			MaxWallClockS:      600,
+			ElapsedS:           600,
+			Escalated:          true,
+		},
+	}
+	for _, width := range []int{8, 16, 24, 40, 80} {
+		updated, _ := newVisualizerWindow().resize(width, 28).update(msg)
+		view := updated.view(theme.Default())
+		for i, line := range strings.Split(view, "\n") {
+			if got := lipgloss.Width(line); got > width {
+				t.Errorf("width %d line %d width %d: %q", width, i, got, ansi.Strip(line))
+			}
+		}
+	}
+}
