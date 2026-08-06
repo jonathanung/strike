@@ -34,6 +34,18 @@ const (
 // Kept in lockstep with bashMaxOutput for consistent shell/tool process budgets.
 const processDefaultMaxOutput = 16_000
 
+// ProcessLimits are optional OS resource caps applied to the child process.
+// Zero fields are omitted. Enforcement is platform-specific (see
+// applyProcessResourceLimits); unsupported platforms leave limits unset.
+type ProcessLimits struct {
+	// MemoryBytes, when > 0, caps address-space (RLIMIT_AS) on Linux.
+	// Other platforms document the limit as unsupported (no-op).
+	MemoryBytes uint64
+	// CPUSeconds, when > 0, caps CPU time (RLIMIT_CPU) on Linux.
+	// Other platforms document the limit as unsupported (no-op).
+	CPUSeconds uint64
+}
+
 // ProcessSpec describes a bounded subprocess.
 type ProcessSpec struct {
 	Argv []string
@@ -55,6 +67,8 @@ type ProcessSpec struct {
 	// (bwrap / sandbox-exec). Observer.Started still receives the original Argv.
 	// Zero value leaves the process unsandboxed (hooks, probes).
 	Sandbox sandbox.Policy
+	// Limits are optional OS resource caps (memory/CPU). Wall time uses Timeout.
+	Limits ProcessLimits
 }
 
 // ProcessResult is the terminal outcome of RunProcess.
@@ -69,6 +83,12 @@ type ProcessResult struct {
 	BytesSeen int
 	Truncated bool
 	Status    ProcessStatus
+	// SandboxApplied is true when an OS sandbox launcher prefixed the exec argv.
+	SandboxApplied bool
+	// SandboxBackend is "bwrap", "sandbox-exec", or empty when not applied.
+	SandboxBackend string
+	// SandboxDegraded is true when a sandbox was requested but not applied.
+	SandboxDegraded bool
 }
 
 // ProcessObserver receives lifecycle notifications while a subprocess runs.
@@ -101,7 +121,8 @@ func RunProcess(ctx context.Context, spec ProcessSpec, obs ProcessObserver) (Pro
 
 	// Apply OS sandbox at the exec seam (process_unix SysProcAttr still owns
 	// process-group kill). Started observers see the pre-wrap argv.
-	execArgv := sandbox.Wrap(spec.Argv, spec.Sandbox)
+	wrap := sandbox.WrapResult(spec.Argv, spec.Sandbox)
+	execArgv := wrap.Argv
 	if len(execArgv) == 0 || execArgv[0] == "" {
 		return ProcessResult{}, fmt.Errorf("empty argv")
 	}
@@ -138,12 +159,23 @@ func RunProcess(ctx context.Context, spec ProcessSpec, obs ProcessObserver) (Pro
 	if err := cmd.Start(); err != nil {
 		return ProcessResult{ID: id, Status: ProcessStatusError}, err
 	}
+	// Best-effort resource caps after Start (Linux prlimit). Failures are
+	// non-fatal so a missing capability does not abort an otherwise healthy run.
+	if cmd.Process != nil {
+		_ = applyProcessResourceLimits(cmd.Process.Pid, spec.Limits)
+	}
 	if obs.Started != nil {
 		obs.Started(id, append([]string(nil), spec.Argv...))
 	}
 
 	waitErr := cmd.Wait()
-	res := ProcessResult{ID: id, Status: ProcessStatusExited}
+	res := ProcessResult{
+		ID:              id,
+		Status:          ProcessStatusExited,
+		SandboxApplied:  wrap.Applied,
+		SandboxBackend:  wrap.Backend,
+		SandboxDegraded: wrap.Degraded,
+	}
 	if spec.Combine {
 		res.Output, res.BytesSeen, res.Truncated = combinedW.result()
 		res.Stdout = res.Output

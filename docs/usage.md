@@ -264,6 +264,11 @@ effective policy and backend; `/sandbox explain` shows the generated profile
 (including write-deny globs and network posture compiled from permissions).
 `yolo` with `sandbox: off` requires `--i-know`.
 
+OS capability blocks (read-only FS, seatbelt deny, …) surface on bash as
+`errorCode=sandbox_denied` with a human reason (timeline + model tool result).
+See the isolation matrix: [isolation.md](isolation.md) (sandbox vs worktrees vs
+planned containers).
+
 Built-in skills also appear as slash commands: `/commit`, `/push`, `/pr`,
 `/ship`, `/review`, `/learn`, `/deslop`, `/verify` (plus custom skills under
 discovery roots). See [agents-skills.md](agents-skills.md) and

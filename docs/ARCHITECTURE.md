@@ -149,6 +149,8 @@ Interrupt op / Run parent ctx / turn deadline
 | Scope | Mechanism | Timeline / codes |
 |---|---|---|
 | Per-tool (bash) | `timeoutMs` (default 120s, max 600s); starts **after** scheduler admission | `process.exited` status `timeout`; `tool.end` `errorCode=timeout`, `IsError` |
+| Per-tool mem/CPU | optional `ProcessSpec.Limits` (`RLIMIT_AS` / `RLIMIT_CPU` via prlimit) | **Linux only**; no-op elsewhere — see [isolation.md](isolation.md) |
+| Per-tool OS sandbox deny | bwrap/seatbelt blocks classified after exit | `tool.end` `errorCode=sandbox_denied` + reason; timeline `errorCode` |
 | Per-turn | `engine.Options.TurnTimeout` (zero = off) | `EngineError` code `timeout` + `turn.completed` `stopReason=timeout` |
 | Provider HTTP | request ctx only (no separate client timeout on streaming adapters) | surfaces as stream/turn cancel |
 
@@ -161,7 +163,9 @@ Interrupt op / Run parent ctx / turn deadline
 | Mid-turn user input | 32 (`maxPendingUserInputs`) | **Reject** with `EngineError` `code=queue_full` (does not block Ops). Survives Interrupt; drained FIFO when idle. |
 | Scheduler waiters | unbounded waiter list per pool | Cancel via ctx → `scheduler.canceled`; capacity is the pool limit, not a second queue cap. |
 
-Stable codes used here: `canceled`, `timeout`, `queue_full` (`pkg/protocol` `ErrorCode*`). Broader tool contract codes land with #793 on the same vocabulary.
+Stable codes used here: `canceled`, `timeout`, `queue_full`, `sandbox_denied`
+(`pkg/protocol` `ErrorCode*`). Broader tool contract codes (#793) share the same
+vocabulary. Isolation layers: [isolation.md](isolation.md).
 
 ## TUI pane routing and layout
 
