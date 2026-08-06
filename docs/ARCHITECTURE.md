@@ -64,7 +64,7 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `internal/provider/{anthropic,openaicompat,chatgpt,google,echo}` | Concrete adapters (openaicompat covers OpenAI platform API, xAI, Kimi, DeepSeek; chatgpt is the ChatGPT-subscription backend; google is Google AI Studio generateContent; echo is the offline dev provider) | `provider`, `provider/base` (all but echo), stdlib |
 | `internal/sandbox` | OS-primitive process sandbox: `Wrap(argv, Policy)` via Linux `bwrap` / macOS `sandbox-exec`; Policy carries mode, write denials, `NoNetwork` (host net on by default), and optional `NetworkAllow` host/CIDR list (webfetch; shared shape for future container net); `Explain`/`ProfileText` for `/sandbox explain`; graceful degrade + startup warning when unavailable | stdlib only |
 | `internal/scheduler` | Fair cancellable named-pool admission (process/build/test/model/container): context-aware acquire, atomic multi-pool leases, observer snapshots; layered limits + ordered command classification (`Compile` / `CompileWithPresets` → `Effective`); versioned build-system presets (`Catalog`, expand into ordinary limits/rules) | stdlib only |
-| `internal/tool` | Tool contract (`Tool`, `Context`, `Result`, `CodedError`) + built-ins: read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/task_message/task_interrupt/agent_roster/agent_ownership/agent_message/agent_broadcast/team_task/webfetch/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/phase_done/toolsearch/definition/references/symbols; FS tx safety (`FileState` freshness + optional `baseHash`, atomic temp+rename writes, `TurnDiff` create/update/delete); `PathOwnership` multi-agent path claims; bash acquires scheduler pools after Ask; file tools call `FileSync` + `CollectDiagnostics` after mutations; LSP nav tools use `LSPNavigator` | `provider` (for `ToolSchema`), `memory`, `issue`, `lsp`, `sandbox`, `scheduler`, stdlib |
+| `internal/tool` | Tool contract (`Tool`, `Context`, `Result`, `CodedError`) + built-ins: read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/task_message/task_interrupt/agent_roster/agent_ownership/agent_message/agent_broadcast/team_task/webfetch/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/plan_write/plan_read/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/phase_done/toolsearch/definition/references/symbols; FS tx safety (`FileState` freshness + optional `baseHash`, atomic temp+rename writes, `TurnDiff` create/update/delete); `PathOwnership` multi-agent path claims; bash acquires scheduler pools after Ask; file tools call `FileSync` + `CollectDiagnostics` after mutations; plan tools use `RootSessionID` for ownership; LSP nav tools use `LSPNavigator` | `provider` (for `ToolSchema`), `memory`, `issue`, `plan`, `lsp`, `sandbox`, `scheduler`, stdlib |
 | `internal/mcp` | MCP client (stdio + streamable HTTP) + session manager; bridges tools onto `tool.Registry` as `mcp_<server>_<tool>`; retry/disable; tools-only stdio **server** (`Server`) for `strike mcp-serve` | `tool`, stdlib, net/http |
 | `internal/lsp` | LSP client (JSON-RPC 2.0 over stdio, Content-Length framing) + manager; extension→server registry; didOpen/didChange/didClose from file tools; collect `publishDiagnostics`; inject formatted diagnostics into file-tool Results (`CollectForPaths`); navigation requests (definition/references/document+workspace symbols) for deferred tools; crash isolation | stdlib, os/exec |
 | `internal/memory` | Project-scoped durable key/value memory (JSON under `~/.strike/memory/`) | stdlib |
@@ -107,6 +107,55 @@ These are enforced mechanically, not just by convention: `internal/tui/boundary_
 with `go/parser` and fails, naming the offending file and import, on any
 violation. Run it like any other test (`go test ./internal/tui/...`); there
 is no way to silently cross the boundary.
+
+## Cancellation, deadlines, and backpressure
+
+Harness-wide cancel/deadline behavior (see also #794). Compose with the
+scheduler pools — do not invent a second admission system.
+
+### Cancel propagation
+
+```
+Interrupt op / Run parent ctx / turn deadline
+        │
+        ▼
+  turnCtx cancel  ──► provider Stream select on ctx.Done (drain leftover)
+        │
+        ├── execToolCall: skip Execute or settle ToolCallEnd
+        │     errorCode=canceled|timeout; partial stdout preserved + incomplete marker
+        ▼
+  tool.Execute(ctx) ──► bash RunProcess (process-group SIGKILL on unix)
+                    ──► scheduler Acquire (waiter → scheduler.canceled)
+                    ──► task_interrupt → child Ops Interrupt (child turn only)
+```
+
+| Path | Behavior |
+|---|---|
+| **User `interrupt`** | Cancels the **parent** turn only. Non-blocking children keep running until they finish or receive `task_interrupt`. |
+| **`task_interrupt`** | Sends `Interrupt` to one owned child session; parent turn is unaffected. Child tools/processes observe the child turn ctx. |
+| **Scheduler pool cancel** | Waiting `Acquire` returns `ctx.Err()`; engine emits `scheduler.canceled` (`reason` `canceled`\|`closed`). In-flight leases are released on tool/stream exit (defer), not force-revoked mid-critical-section. |
+| **Bash / `RunProcess`** | Unix: own process group + `SIGKILL` on the group within `WaitDelay` (~2s) so grandchildren cannot hang `Wait`. Partial stdout/stderr retained; `ToolCallEnd.errorCode` = `canceled` or `timeout`. |
+| **External harness** | Same process-group kill on cancel as `RunProcess` (unix). |
+| **Provider stream** | `consumeStream` selects on `ctx.Done`, drains the stream in the background, ends the turn with `stopReason=interrupted` (user cancel) or `timeout` (turn deadline). |
+
+### Deadlines
+
+| Scope | Mechanism | Timeline / codes |
+|---|---|---|
+| Per-tool (bash) | `timeoutMs` (default 120s, max 600s); starts **after** scheduler admission | `process.exited` status `timeout`; `tool.end` `errorCode=timeout`, `IsError` |
+| Per-turn | `engine.Options.TurnTimeout` (zero = off) | `EngineError` code `timeout` + `turn.completed` `stopReason=timeout` |
+| Provider HTTP | request ctx only (no separate client timeout on streaming adapters) | surfaces as stream/turn cancel |
+
+### Backpressure (bounded queues)
+
+| Queue | Capacity | Full behavior |
+|---|---|---|
+| `Ops` channel | 16 | **Block** sender (TUI/host should not spin unbounded ops). |
+| `Events` channel | 256 | **Block** `emit`. `ToolCallBegin` is emitted from `Run` so `Interrupt` stays serviceable while the buffer is full. |
+| Mid-turn user input | 32 (`maxPendingUserInputs`) | **Reject** with `EngineError` `code=queue_full` (does not block Ops). Survives Interrupt; drained FIFO when idle. |
+| Scheduler waiters | unbounded waiter list per pool | Cancel via ctx → `scheduler.canceled`; capacity is the pool limit, not a second queue cap. |
+
+Stable codes used here: `canceled`, `timeout`, `queue_full` (`pkg/protocol` `ErrorCode*`). Broader tool contract codes land with #793 on the same vocabulary.
 
 ## TUI pane routing and layout
 
