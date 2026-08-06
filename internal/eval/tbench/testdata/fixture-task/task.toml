@@ -1,0 +1,20 @@
+schema_version = "1.1"
+
+[task]
+name = "strike/fixture-task"
+description = "Offline fixture for strike eval tbench unit tests."
+
+[metadata]
+difficulty = "easy"
+category = "file-operations"
+
+[verifier]
+timeout_sec = 60.0
+
+[agent]
+timeout_sec = 120.0
+
+[environment]
+docker_image = "fixture/tbench-task:test"
+cpus = 1
+memory_mb = 512

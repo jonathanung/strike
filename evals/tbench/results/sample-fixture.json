@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "1.0.0",
+  "benchmark": "terminal-bench-2-subset",
+  "datasetPin": "terminal-bench-2@20251031",
+  "subsetSize": 25,
+  "runId": "sample-fixture",
+  "generatedAt": "2026-08-06T00:00:00Z",
+  "provider": "echo",
+  "model": "echo",
+  "grader": "none",
+  "strikeVersion": "dev",
+  "attempted": 2,
+  "resolved": 0,
+  "unresolved": 0,
+  "errors": 0,
+  "skipped": 2,
+  "passRate": 0,
+  "totalTokensIn": 0,
+  "totalTokensOut": 0,
+  "totalCostUsd": 0,
+  "totalWallMs": 0,
+  "note": "Internal regression signal only. Do not publish pass rates in product README.",
+  "results": [
+    {
+      "instanceId": "fixture-task",
+      "status": "skipped",
+      "wallClockMs": 0,
+      "gradeDetail": "sample fixture — not a real run"
+    },
+    {
+      "instanceId": "fixture-other",
+      "status": "skipped",
+      "wallClockMs": 0,
+      "gradeDetail": "sample fixture — not a real run"
+    }
+  ]
+}
