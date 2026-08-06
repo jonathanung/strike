@@ -55,6 +55,7 @@ type capabilities struct {
 	Files          bool `json:"files"`
 	Memory         bool `json:"memory"`
 	Issues         bool `json:"issues"`
+	Plans          bool `json:"plans"`
 	Sessions       bool `json:"sessions"`
 	Roots          bool `json:"roots"`
 	Providers      bool `json:"providers"`
@@ -88,7 +89,8 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	var skills []map[string]any
 	if h := s.opts.Services; h != nil {
 		c.Auth, c.Catalog, c.Settings, c.History = h.Auth != nil, h.Catalog != nil, h.Settings != nil, h.History != nil
-		c.Files, c.Memory, c.Issues, c.Sessions = h.Files != nil, h.Memory != nil, h.Issues != nil, h.Sessions != nil
+		c.Files, c.Memory, c.Issues, c.Plans = h.Files != nil, h.Memory != nil, h.Issues != nil, h.Plans != nil
+		c.Sessions = h.Sessions != nil
 		// Workflow authoring is exposed via /v1/workflows* and /v1/workflow-drafts*.
 		c.Workflows, c.WorkflowDrafts = h.Workflows != nil, h.WorkflowDrafts != nil
 		// Capabilities describe browser surfaces, not merely host interfaces.
