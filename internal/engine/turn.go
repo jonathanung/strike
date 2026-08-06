@@ -223,11 +223,11 @@ func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.Ima
 		input, providerObject, emit := e.harnessEnvironment(ctx, turnCorr, e.taskHarnessName)
 		result, err := e.taskHarness(input, providerObject, emit)
 		if err != nil {
-			e.failTurn(err, turnCorr, finishing)
+			e.failTurn(ctx, err, turnCorr, finishing)
 			return
 		}
 		if len(result.Calls) != 0 || result.StopReason == "tool_use" {
-			e.failTurn(errors.New("task harness returned tool calls that it cannot execute"), turnCorr, finishing)
+			e.failTurn(ctx, errors.New("task harness returned tool calls that it cannot execute"), turnCorr, finishing)
 			return
 		}
 		for _, raw := range result.Reasoning {
@@ -239,7 +239,7 @@ func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.Ima
 			e.emit(protocol.TextDelta{Correlation: turnCorr, Text: result.Text})
 		}
 		e.messages = append(e.messages, provider.Message{Role: provider.RoleAssistant, Text: result.Text, Reasoning: result.Reasoning})
-		e.completeTurn(finishing, turnCorr, result.StopReason)
+		e.completeTurn(ctx, finishing, turnCorr, result.StopReason)
 		return
 	}
 
@@ -252,7 +252,7 @@ func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.Ima
 		e.maybeThresholdCompact(ctx, turnID)
 		outcome, reqCorr, err := e.streamModel(ctx, turnID)
 		if err != nil {
-			e.failTurn(err, reqCorr, finishing)
+			e.failTurn(ctx, err, reqCorr, finishing)
 			return
 		}
 
@@ -263,21 +263,21 @@ func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.Ima
 			Reasoning: outcome.reasoning,
 		})
 		if len(outcome.calls) == 0 {
-			e.completeTurn(finishing, reqCorr, outcome.stopReason)
+			e.completeTurn(ctx, finishing, reqCorr, outcome.stopReason)
 			return
 		}
 		for i, call := range outcome.calls {
 			// Unstarted calls: history-only synthetic results, no begin/end/Execute.
 			if ctx.Err() != nil {
 				e.appendUnstartedToolResults(outcome.calls[i:])
-				e.failTurn(ctx.Err(), reqCorr, finishing)
+				e.failTurn(ctx, ctx.Err(), reqCorr, finishing)
 				return
 			}
 			e.messages = append(e.messages, e.execToolCall(ctx, call, reqCorr))
 			if ctx.Err() != nil {
 				// Current call was started (and canceled); remaining are unstarted.
 				e.appendUnstartedToolResults(outcome.calls[i+1:])
-				e.failTurn(ctx.Err(), reqCorr, finishing)
+				e.failTurn(ctx, ctx.Err(), reqCorr, finishing)
 				return
 			}
 		}
@@ -1049,22 +1049,22 @@ func (e *Engine) canceledOrTimeoutToolResult(ctx context.Context, callID string,
 	})
 }
 
-func (e *Engine) failTurn(err error, corr protocol.Correlation, finishing chan struct{}) {
+func (e *Engine) failTurn(ctx context.Context, err error, corr protocol.Correlation, finishing chan struct{}) {
 	if errors.Is(err, context.DeadlineExceeded) {
 		e.emit(protocol.EngineError{
 			Correlation: corr,
 			Message:     "turn deadline exceeded",
 			Code:        protocol.ErrorCodeTimeout,
 		})
-		e.completeTurn(finishing, corr, "timeout")
+		e.completeTurn(ctx, finishing, corr, "timeout")
 		return
 	}
 	if errors.Is(err, context.Canceled) {
-		e.completeTurn(finishing, corr, "interrupted")
+		e.completeTurn(ctx, finishing, corr, "interrupted")
 		return
 	}
 	e.emit(protocol.EngineError{Correlation: corr, Message: err.Error()})
-	e.completeTurn(finishing, corr, "error")
+	e.completeTurn(ctx, finishing, corr, "error")
 }
 
 // completeTurn closes finishing then emits the terminal TurnCompleted. Call
@@ -1075,15 +1075,16 @@ func (e *Engine) failTurn(err error, corr protocol.Correlation, finishing chan s
 //
 // When Options.Verify is set and the model claimed a successful completion
 // (stopReason end_turn), independent gates run before TurnCompleted so the
-// report attaches on the same terminal event (claim ≠ verified).
-func (e *Engine) completeTurn(finishing chan struct{}, corr protocol.Correlation, stopReason string) {
+// report attaches on the same terminal event (claim ≠ verified). Gates honor
+// ctx so cancelAndJoinTurn / turn timeout can abort a hung cmd gate.
+func (e *Engine) completeTurn(ctx context.Context, finishing chan struct{}, corr protocol.Correlation, stopReason string) {
 	close(finishing)
 	files := turnFileChanges(e.turnDiff.Snapshot())
 	e.checkpoints.CommitTurn()
 	e.fireHookRules(corr, permission.HookEventTurnEnd, "", "")
 	var verification *protocol.VerificationReport
 	if stopReason == "end_turn" && len(e.opts.Verify) > 0 {
-		verification = e.runSoloVerification(corr)
+		verification = e.runSoloVerification(ctx, corr)
 	}
 	e.emit(protocol.TurnCompleted{
 		Correlation:  corr,

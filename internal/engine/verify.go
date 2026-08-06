@@ -12,8 +12,9 @@ import (
 
 // runSoloVerification executes Options.Verify gates for a claimed solo/root
 // turn. Emits verification.started/completed for timeline audit. Returns a
-// non-nil report whenever gates were configured.
-func (e *Engine) runSoloVerification(corr protocol.Correlation) *protocol.VerificationReport {
+// non-nil report whenever gates were configured. ctx should be the turn
+// context so cancel/timeout aborts hung cmd gates.
+func (e *Engine) runSoloVerification(ctx context.Context, corr protocol.Correlation) *protocol.VerificationReport {
 	if e == nil || len(e.opts.Verify) == 0 {
 		return nil
 	}
@@ -22,7 +23,7 @@ func (e *Engine) runSoloVerification(corr protocol.Correlation) *protocol.Verifi
 	if modelID == "" {
 		modelID = strings.TrimSpace(e.opts.InitialModel)
 	}
-	return e.runVerification(corr, protocol.VerificationScopeTurn, e.opts.Verify, verify.Input{
+	return e.runVerification(ctx, corr, protocol.VerificationScopeTurn, e.opts.Verify, verify.Input{
 		Claimed: true,
 		Env: verify.EnvMetadata{
 			WorkDir:   workDir,
@@ -69,7 +70,8 @@ func (e *Engine) runChildVerification(h *childHandle, child *Engine, handoff pro
 	if child != nil {
 		corr.Depth = child.opts.Depth
 	}
-	return e.runVerification(corr, protocol.VerificationScopeChild, h.gates, verify.Input{
+	// Child exit already canceled the child turn ctx; use a detached budget.
+	return e.runVerification(context.Background(), corr, protocol.VerificationScopeChild, h.gates, verify.Input{
 		Claimed: true,
 		Handoff: hv,
 		Env: verify.EnvMetadata{
@@ -82,9 +84,13 @@ func (e *Engine) runChildVerification(h *childHandle, child *Engine, handoff pro
 
 // runVerification is the shared gate runner for solo and child paths.
 // Emits verification.started before gates and verification.completed after.
-func (e *Engine) runVerification(corr protocol.Correlation, scope string, gates []tool.VerifyGate, in verify.Input, workDir string) *protocol.VerificationReport {
+// parent is the cancel scope (turn ctx for solo; Background for child exit).
+func (e *Engine) runVerification(parent context.Context, corr protocol.Correlation, scope string, gates []tool.VerifyGate, in verify.Input, workDir string) *protocol.VerificationReport {
 	if len(gates) == 0 {
 		return nil
+	}
+	if parent == nil {
+		parent = context.Background()
 	}
 	vgates := make([]verify.Gate, 0, len(gates))
 	for _, g := range gates {
@@ -103,8 +109,8 @@ func (e *Engine) runVerification(corr protocol.Correlation, scope string, gates 
 		})
 	}
 
-	// Detached timeout: caller context may already be canceled (child exit).
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	// Bound total gate wall time; parent cancel (solo turn interrupt) aborts early.
+	ctx, cancel := context.WithTimeout(parent, 30*time.Minute)
 	defer cancel()
 
 	runner := &verify.Runner{WorkDir: workDir}
