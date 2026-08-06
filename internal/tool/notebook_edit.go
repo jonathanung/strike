@@ -84,7 +84,11 @@ func (notebookEditTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 		return Result{}, fmt.Errorf("cell_id is required for edit_mode=%s", mode)
 	}
 
-	path, rel, err := resolveInWorkspace(tc.WorkDir, a.NotebookPath)
+	tempDir := ""
+	if tc != nil {
+		tempDir = tc.SessionTempDir
+	}
+	path, rel, err := resolveAllowedPath(tc.WorkDir, tempDir, a.NotebookPath)
 	if err != nil {
 		return Result{}, err
 	}
@@ -180,7 +184,7 @@ func (notebookEditTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 	existed := FileExisted(path)
 	tc.SnapshotPath(path)
 	// Re-validate + atomic temp/rename at exec time.
-	if err := workspaceWriteFile(tc.WorkDir, a.NotebookPath, out); err != nil {
+	if err := allowedWriteFile(tc.WorkDir, tempDir, a.NotebookPath, out); err != nil {
 		return Result{}, err
 	}
 	tc.NoteTurnChange(path, existed, false)

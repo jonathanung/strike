@@ -102,7 +102,11 @@ func (applyPatchTool) Execute(ctx context.Context, args json.RawMessage, tc *Con
 		return Result{}, ErrInvalidArgs("patch is required")
 	}
 
-	planned, originals, err := preparePatch(tc.WorkDir, a.Patch)
+	tempDir := ""
+	if tc != nil {
+		tempDir = tc.SessionTempDir
+	}
+	planned, originals, err := preparePatch(tc.WorkDir, tempDir, a.Patch)
 	if err != nil {
 		return Result{}, err
 	}
@@ -190,7 +194,7 @@ func (applyPatchTool) Execute(ctx context.Context, args json.RawMessage, tc *Con
 			existed[op.AbsMove] = FileExisted(op.AbsMove)
 		}
 	}
-	if err := commitPatchOps(tc.WorkDir, planned, originals); err != nil {
+	if err := commitPatchOps(tc.WorkDir, tempDir, planned, originals); err != nil {
 		return Result{}, err
 	}
 	notePatchTurnChanges(tc, planned, existed)
@@ -346,17 +350,17 @@ func notifyPatchFileSync(tc *Context, planned []plannedOp) []string {
 // without permission prompts. Used by host-side diff-viewer apply. On commit
 // failure, rolls back so partial state is avoided when possible.
 func ApplyPatchToWorkDir(workDir, patch string) (summary string, err error) {
-	planned, originals, err := preparePatch(workDir, patch)
+	planned, originals, err := preparePatch(workDir, "", patch)
 	if err != nil {
 		return "", err
 	}
-	if err := commitPatchOps(workDir, planned, originals); err != nil {
+	if err := commitPatchOps(workDir, "", planned, originals); err != nil {
 		return "", err
 	}
 	return patchSuccessSummary(planned), nil
 }
 
-func preparePatch(workDir, patch string) ([]plannedOp, map[string]pathOriginal, error) {
+func preparePatch(workDir, tempDir, patch string) ([]plannedOp, map[string]pathOriginal, error) {
 	if strings.TrimSpace(patch) == "" {
 		return nil, nil, fmt.Errorf("patch is required")
 	}
@@ -367,7 +371,7 @@ func preparePatch(workDir, patch string) ([]plannedOp, map[string]pathOriginal, 
 	if len(hunks) == 0 {
 		return nil, nil, fmt.Errorf("apply_patch: no file operations in patch")
 	}
-	return planPatchOps(workDir, hunks)
+	return planPatchOps(workDir, tempDir, hunks)
 }
 
 func patchSuccessSummary(planned []plannedOp) string {
@@ -573,7 +577,7 @@ type pathOriginal struct {
 	data   []byte
 }
 
-func planPatchOps(workDir string, hunks []patchHunk) ([]plannedOp, map[string]pathOriginal, error) {
+func planPatchOps(workDir, tempDir string, hunks []patchHunk) ([]plannedOp, map[string]pathOriginal, error) {
 	out := make([]plannedOp, 0, len(hunks))
 	// working holds the latest planned content per abs path so multiple Update
 	// ops on the same file chain rather than re-reading disk each time.
@@ -597,7 +601,7 @@ func planPatchOps(workDir string, hunks []patchHunk) ([]plannedOp, map[string]pa
 	}
 
 	for _, h := range hunks {
-		abs, rel, err := resolveInWorkspace(workDir, h.Path)
+		abs, rel, err := resolveAllowedPath(workDir, tempDir, h.Path)
 		if err != nil {
 			return nil, nil, fmt.Errorf("apply_patch: %w", err)
 		}
@@ -656,7 +660,7 @@ func planPatchOps(workDir string, hunks []patchHunk) ([]plannedOp, map[string]pa
 			if h.MoveTo != "" {
 				opType = "move"
 				var moveErr error
-				absMove, relMove, moveErr = resolveInWorkspace(workDir, h.MoveTo)
+				absMove, relMove, moveErr = resolveAllowedPath(workDir, tempDir, h.MoveTo)
 				if moveErr != nil {
 					return nil, nil, fmt.Errorf("apply_patch: %w", moveErr)
 				}
@@ -786,16 +790,16 @@ func indexExactLines(haystack, needle []string, from int) int {
 	return -1
 }
 
-func commitOnePatchOp(workDir string, op plannedOp) error {
+func commitOnePatchOp(workDir, tempDir string, op plannedOp) error {
 	switch op.Type {
 	case "add", "update":
 		// Re-validate + O_NOFOLLOW at commit (TOCTOU vs plan-time resolve).
-		return workspaceWriteFile(workDir, op.AbsPath, []byte(op.Content))
+		return allowedWriteFile(workDir, tempDir, op.AbsPath, []byte(op.Content))
 	case "delete":
 		// os.Remove unlinks the final component (does not follow a leaf symlink).
 		return os.Remove(op.AbsPath)
 	case "move":
-		if err := workspaceWriteFile(workDir, op.AbsMove, []byte(op.Content)); err != nil {
+		if err := allowedWriteFile(workDir, tempDir, op.AbsMove, []byte(op.Content)); err != nil {
 			return err
 		}
 		return os.Remove(op.AbsPath)
@@ -805,35 +809,35 @@ func commitOnePatchOp(workDir string, op plannedOp) error {
 }
 
 // restorePath writes original bytes back, or removes the path if it did not exist.
-func restorePath(workDir, abs string, orig pathOriginal) error {
+func restorePath(workDir, tempDir, abs string, orig pathOriginal) error {
 	if !orig.exists {
 		if err := os.Remove(abs); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 		return nil
 	}
-	return workspaceWriteFile(workDir, abs, orig.data)
+	return allowedWriteFile(workDir, tempDir, abs, orig.data)
 }
 
-func rollbackPatchOps(workDir string, applied []plannedOp, originals map[string]pathOriginal) error {
+func rollbackPatchOps(workDir, tempDir string, applied []plannedOp, originals map[string]pathOriginal) error {
 	var errs []error
 	for i := len(applied) - 1; i >= 0; i-- {
 		op := applied[i]
 		switch op.Type {
 		case "add":
-			if err := restorePath(workDir, op.AbsPath, originals[op.AbsPath]); err != nil {
+			if err := restorePath(workDir, tempDir, op.AbsPath, originals[op.AbsPath]); err != nil {
 				errs = append(errs, err)
 			}
 		case "delete", "update":
-			if err := restorePath(workDir, op.AbsPath, originals[op.AbsPath]); err != nil {
+			if err := restorePath(workDir, tempDir, op.AbsPath, originals[op.AbsPath]); err != nil {
 				errs = append(errs, err)
 			}
 		case "move":
 			// Remove dest first, then restore source.
-			if err := restorePath(workDir, op.AbsMove, originals[op.AbsMove]); err != nil {
+			if err := restorePath(workDir, tempDir, op.AbsMove, originals[op.AbsMove]); err != nil {
 				errs = append(errs, err)
 			}
-			if err := restorePath(workDir, op.AbsPath, originals[op.AbsPath]); err != nil {
+			if err := restorePath(workDir, tempDir, op.AbsPath, originals[op.AbsPath]); err != nil {
 				errs = append(errs, err)
 			}
 		}
@@ -841,16 +845,16 @@ func rollbackPatchOps(workDir string, applied []plannedOp, originals map[string]
 	return errors.Join(errs...)
 }
 
-func commitPatchOps(workDir string, ops []plannedOp, originals map[string]pathOriginal) error {
+func commitPatchOps(workDir, tempDir string, ops []plannedOp, originals map[string]pathOriginal) error {
 	var applied []plannedOp
 	for _, op := range ops {
-		if err := commitOnePatchOp(workDir, op); err != nil {
+		if err := commitOnePatchOp(workDir, tempDir, op); err != nil {
 			// Include the failed op so partial effects (e.g. move wrote dest
 			// but failed to remove source) are best-effort undone too.
 			toRoll := make([]plannedOp, len(applied)+1)
 			copy(toRoll, applied)
 			toRoll[len(applied)] = op
-			if rbErr := rollbackPatchOps(workDir, toRoll, originals); rbErr != nil {
+			if rbErr := rollbackPatchOps(workDir, tempDir, toRoll, originals); rbErr != nil {
 				return fmt.Errorf("apply_patch: commit failed: %v; rollback also failed: %v (partial state)", err, rbErr)
 			}
 			return fmt.Errorf("apply_patch: commit failed: %w (rolled back)", err)

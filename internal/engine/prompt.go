@@ -481,16 +481,20 @@ func (e *Engine) environmentPrompt() string {
 		}
 		modelLine = fmt.Sprintf("You are powered by the model named %s. The exact model ID is %s", e.model, id)
 	}
+	tempLine := ""
+	if td := strings.TrimSpace(e.ensureSessionTemp()); td != "" {
+		tempLine = fmt.Sprintf("\n  Session temporary directory: %s", td)
+	}
 	return strings.TrimSpace(fmt.Sprintf(`%s
 Here is some useful information about the environment you are running in:
 <env>
   Working directory: %s
-  Workspace root folder: %s
+  Workspace root folder: %s%s
   Is directory a git repo: %s
   Platform: %s
   Today's date: %s
 </env>
-Each bash and path-based tool call starts in the working directory above. Shell cd inside one bash invocation does not persist to later tool calls.`, modelLine, workDir, root, isGit, runtime.GOOS, time.Now().Format("Mon Jan 2 2006")))
+Each bash and path-based tool call starts in the working directory above. Shell cd inside one bash invocation does not persist to later tool calls. Path tools may also write absolute paths under the session temporary directory (scratch only; cleaned up when the session ends).`, modelLine, workDir, root, tempLine, isGit, runtime.GOOS, time.Now().Format("Mon Jan 2 2006")))
 }
 
 // effectiveSnapshot is a redacted inspect view of system composition plus
