@@ -64,6 +64,39 @@ export const activateRoot = (id: string) => request<{ ok: boolean }>(`/v1/roots/
 export const resumeRoot = (sessionID: string) => request<RootResumeResult>(`/v1/roots/${encodeURIComponent(sessionID)}/resume`, { method: "POST" });
 export const closeRoot = (id: string) => request<{ ok: boolean }>(`/v1/roots/${encodeURIComponent(id)}`, { method: "DELETE" });
 
+// --- memory / issues (project-scoped; mutations blocked in attach-only) ---
+export type MemoryEntryDTO = { Key?: string; key?: string; Value?: string; value?: string; Tags?: string[]; tags?: string[] };
+export type IssueDTO = { ID?: number; id?: number; Title?: string; title?: string; Body?: string; body?: string; Status?: string; status?: string };
+
+export const listMemory = (tag = "") => request<{ entries: MemoryEntryDTO[] }>(`/v1/memory${tag ? `?tag=${encodeURIComponent(tag)}` : ""}`);
+export const putMemory = (key: string, value: string, tags: string[] = []) =>
+  request<MemoryEntryDTO>(`/v1/memory/${encodeURIComponent(key)}`, { method: "PUT", body: JSON.stringify({ value, tags }) });
+export const deleteMemory = (key: string) => request<void>(`/v1/memory/${encodeURIComponent(key)}`, { method: "DELETE" });
+export const listIssues = (status = "") => request<{ issues: IssueDTO[] }>(`/v1/issues${status ? `?status=${encodeURIComponent(status)}` : ""}`);
+export const createIssue = (title: string, body = "") =>
+  request<IssueDTO>("/v1/issues", { method: "POST", body: JSON.stringify({ title, body }) });
+export const closeIssue = (id: number) => request<IssueDTO>(`/v1/issues/${id}/close`, { method: "POST", body: JSON.stringify({}) });
+
+/** Download portable export (same format as TUI). Uses cookie/bearer auth. */
+export async function downloadExport(path: string, filename: string): Promise<void> {
+  const headers = new Headers();
+  if (queryToken) headers.set("Authorization", `Bearer ${queryToken}`);
+  const response = await fetch(path, { credentials: "same-origin", headers });
+  if (!response.ok) {
+    const err = await response.json().catch(() => null);
+    throw new Error(err?.error || `${response.status} ${response.statusText}`);
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+export const exportMemory = () => downloadExport("/v1/memory/export", "strike-memory.json");
+export const exportIssues = () => downloadExport("/v1/issues/export", "strike-issues.json");
+
 export function liveConnection(rootID: string, onEvent: (event: Envelope) => void, onState: (state: string) => void) {
   let socket: WebSocket | undefined;
   let retry = 0;
