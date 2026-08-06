@@ -28,8 +28,13 @@ Simple path (prompt only):
 
 Advanced create fields (all optional): name, agent, model, effort, route/specialty/
 capabilities, criteria[], deps[], subscribe[], assignee, verify[], budget,
-context_bundle (goal/paths/artifacts/constraints). Same lifecycle runtime as
-plain spawn — no second path.
+context_bundle (goal/paths/artifacts/constraints), force_delegate. Same lifecycle
+runtime as plain spawn — no second path.
+
+Delegation-worthiness policy (#876) runs before create: bare tiny or path-overlapping
+work returns status "local" unless force_delegate=true. Hard ceilings (depth, max
+live children, delegation count, session budget) always deny. policyReason is in
+tool metadata and child.started.
 
 Actions (optional action=; omit + prompt ⇒ create):
   create     — spawn (default). Nested depth bounded by MaxChildDepth.
@@ -125,6 +130,10 @@ func (taskTool) Schema() json.RawMessage {
 					"loop_detect_n": {"type": "integer"}
 				},
 				"additionalProperties": false
+			},
+			"force_delegate": {
+				"type": "boolean",
+				"description": "Override soft local-prefer policy and spawn anyway. Hard ceilings (depth, live children, budget) still apply"
 			},
 			"context_bundle": {
 				"type": "object",
@@ -262,7 +271,7 @@ func shortID(id string) string {
 }
 
 func taskMetadata(res TaskResult) json.RawMessage {
-	if res.SessionID == "" && res.Status == "" && res.Name == "" && res.DelegationID == "" && res.RouteReason == "" {
+	if res.SessionID == "" && res.Status == "" && res.Name == "" && res.DelegationID == "" && res.RouteReason == "" && res.PolicyReason == "" {
 		return nil
 	}
 	meta := map[string]string{
@@ -280,6 +289,9 @@ func taskMetadata(res TaskResult) json.RawMessage {
 	}
 	if rr := strings.TrimSpace(res.RouteReason); rr != "" {
 		meta["routeReason"] = rr
+	}
+	if pr := strings.TrimSpace(res.PolicyReason); pr != "" {
+		meta["policyReason"] = pr
 	}
 	b, err := json.Marshal(meta)
 	if err != nil {

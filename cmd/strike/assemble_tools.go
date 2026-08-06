@@ -692,6 +692,19 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 				StallAfterS:       cfg.Session.AgentBudget.StallAfterS,
 				LoopDetectN:       cfg.Session.AgentBudget.LoopDetectN,
 			},
+			DelegationPolicy: func() engine.DelegationPolicyConfig {
+				// Product default is enforce when config omits the block.
+				p := engine.DelegationPolicyConfig{
+					Mode:            cfg.Session.DelegationPolicy.Mode,
+					TinyPromptRunes: cfg.Session.DelegationPolicy.TinyPromptRunes,
+					MaxPathsLocal:   cfg.Session.DelegationPolicy.MaxPathsLocal,
+					MaxLiveChildren: cfg.Session.DelegationPolicy.MaxLiveChildren,
+				}
+				if strings.TrimSpace(p.Mode) == "" {
+					p.Mode = engine.PolicyEnforce
+				}
+				return p
+			}(),
 			InitialProvider:            initialProvider,
 			InitialModel:               initialModel,
 			InitialEffort:              initialEffort,

@@ -269,11 +269,11 @@ func recommendedGuidance(entries []GuidanceEntry) string {
 	add(has("question"),
 		"Use `question` when a decision genuinely belongs to the user.")
 	add(has("task"),
-		"Use progressive `task` for all delegation: simple `task({prompt})`, advanced create fields (`criteria`/`deps`/`subscribe`/`route`/`budget`/`verify`/`context_bundle`/…), and actions get|list|status|read|message|transition|cancel|wait. Same lifecycle runtime and handoff semantics on every entry path. Do not busy-poll status — prefer `task` action=wait or `[child.completed]` structured handoff JSON. Peer mid-flight: `agent_message`. Bound fan-out (MaxChildDepth).")
+		"Use progressive `task` for all delegation after a worthiness check (tiny/overlap stays local; status `local` + `policyReason`; `force_delegate` overrides soft local): simple `task({prompt})`, advanced create fields (`criteria`/`deps`/`subscribe`/`route`/`budget`/`verify`/`context_bundle`/…), and actions get|list|status|read|message|transition|cancel|wait. Same lifecycle runtime and handoff semantics on every entry path. Do not busy-poll status — prefer `task` action=wait or `[child.completed]` structured handoff JSON. Peer mid-flight: `agent_message`. Bound fan-out (MaxChildDepth).")
 	add(has("task") && has("delegate", "task_status", "task_read", "task_message", "task_interrupt", "wait"),
 		"`delegate`, `task_status`, `task_read`, `task_message`, `task_interrupt`, and `wait` are compatibility shims over progressive `task` (telemetry-counted). Prefer `task` on the parent; at depth ceiling leaves may still use `delegate` get/list/transition for self-report.")
 	add(has("delegate") && !has("task"),
-		"Use `delegate` for lifecycle create/get/list/transition (acceptance criteria, deps, subscriptions, CAS). Prefer progressive `task` when available.")
+		"Use `delegate` for lifecycle create/get/list/transition (acceptance criteria, deps, subscriptions, CAS; same worthiness policy / `force_delegate` on create). Prefer progressive `task` when available.")
 	add(has("wait") && !has("task"),
 		"Prefer `wait` over sleep-polling status when synchronizing on owned child completion (`task.done`/`task.failed`/`task.canceled`/`task.blocked` with timeout). Outcomes: matched|timeout|canceled.")
 	add(has("agent_roster"),

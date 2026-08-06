@@ -63,7 +63,7 @@ Effort pins still apply on phase switches unless locked. Shipping built-ins
 | **tester** | run `make test` / vet / build; report only |
 | **debugger** | root-cause investigation |
 | **validator** | goal-backward requirements check; PASS/FAIL/UNVERIFIED only |
-| **orchestrator** | plan → delegate via `task` to specialists → synthesize (not solo bulk impl) |
+| **orchestrator** | plan → pre-spawn worthiness decision → `task` to specialists → synthesize (tiny/coupled work stays local) |
 | **pr-babysitter** | own an open PR through CI/review (watch, fix branch failures, push); overlap with issue-handler skill (skill = full issue→merge; agent = in-session PR watch) |
 
 **Tab cycles agents**; bare `/agent` opens a picker; `/agent [name]` selects
@@ -85,7 +85,11 @@ messaging).
 live/terminal children in that tree. No `TeamCreate` step and no opt-in flag —
 parent + children already are the team. Concurrent root sessions stay separate
 teams. Depth and fan-out stay bounded (`MaxChildDepth`; orchestrator prefers a
-few sequential or small parallel slices).
+few sequential or small parallel slices). A delegation-worthiness policy
+(`session.delegationPolicy`, default `enforce`) runs before spawn: bare tiny or
+path-overlapping work returns status `local` unless `force_delegate`; hard
+ceilings (depth, optional max live children, budget) never override. See
+[config.md](config.md#delegation-worthiness-policy-sessiondelegationpolicy).
 
 **Progressive `task`** is the one decision path for delegation: prompt-only
 spawn, optional advanced fields (criteria/deps/subscribe/route/budget/verify/
