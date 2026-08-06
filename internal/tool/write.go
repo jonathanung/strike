@@ -64,6 +64,11 @@ func (writeTool) Execute(ctx context.Context, args json.RawMessage, tc *Context)
 	if err := tc.Ask(ctx, AskRequest{Permission: "write", Patterns: []string{rel}, Always: []string{"*"}, Metadata: meta}); err != nil {
 		return Result{}, err
 	}
+	// Claim after permission so denied writes do not pollute ownership.
+	overlapWarn, err := tc.ClaimWrite(path, rel)
+	if err != nil {
+		return Result{}, err
+	}
 	tc.SnapshotPath(path)
 	// Re-validate + O_NOFOLLOW at exec time (TOCTOU: symlink planted after resolve).
 	if err := workspaceWriteFile(tc.WorkDir, a.FilePath, []byte(a.Content)); err != nil {
@@ -82,9 +87,11 @@ func (writeTool) Execute(ctx context.Context, args json.RawMessage, tc *Context)
 	if readErr == nil {
 		verb = "Overwrote"
 	}
+	out := fmt.Sprintf("%s %s (%d bytes)", verb, rel, len(a.Content))
+	out = AppendOverlapWarning(out, overlapWarn)
 	res := Result{
 		Title:    rel,
-		Output:   fmt.Sprintf("%s %s (%d bytes)", verb, rel, len(a.Content)),
+		Output:   out,
 		Metadata: meta,
 	}
 	return tc.AppendDiagnostics(ctx, res, path), nil
