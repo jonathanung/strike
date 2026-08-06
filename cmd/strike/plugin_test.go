@@ -207,8 +207,16 @@ func TestRunCLIDispatchesPlugin(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code=%d err=%s", code, errBuf.String())
 	}
-	if !strings.Contains(out.String(), "Manage local and Git plugin") {
+	if !strings.Contains(out.String(), "Manage plugin installs") {
 		t.Fatalf("out=%s", out.String())
+	}
+}
+
+func TestRunPluginSearchRequiresRegistry(t *testing.T) {
+	var out, errBuf bytes.Buffer
+	code := runPluginCLI([]string{"search", "acme"}, &out, &errBuf)
+	if code == 0 {
+		t.Fatal("expected failure without --registry")
 	}
 }
 

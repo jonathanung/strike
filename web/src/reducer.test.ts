@@ -36,4 +36,16 @@ describe("reduceEvent", () => {
     expect(next.items).toEqual(base.items);
     expect(next.seen.size).toBe(base.seen.size + 1);
   });
+
+  it("appends local.system notices without touching seen", () => {
+    const base = initialState();
+    const next = reduceEvent(base, {
+      type: "local.system",
+      time: "1",
+      data: { title: "Help", text: "/export downloads markdown" },
+    });
+    expect(next.items).toHaveLength(1);
+    expect(next.items[0]).toMatchObject({ kind: "system", title: "Help", text: "/export downloads markdown" });
+    expect(next.seen.size).toBe(0);
+  });
 });

@@ -26,11 +26,13 @@ type Lockfile struct {
 type LockfileEntry struct {
 	Enabled     *bool           `json:"enabled,omitempty"`
 	Version     string          `json:"version,omitempty"`
-	Digest      string          `json:"digest,omitempty"`
+	Digest      string          `json:"digest,omitempty"` // content-tree digest
 	Source      *SourceIdentity `json:"source,omitempty"`
 	InstalledAt string          `json:"installedAt,omitempty"` // RFC3339
 	// Trust is the explicit executable grant (docs/plugins.md §5). Absent means
-	// passive-only load; MCP/harness/shell hooks stay inactive.
+	// passive-only load; MCP/harness/shell hooks stay inactive. Catalog/local
+	// updates that change digest, source identity, or executable contributions
+	// clear it (#728/#729). Catalog metadata alone must never populate this.
 	Trust *TrustRecord `json:"trust,omitempty"`
 }
 
