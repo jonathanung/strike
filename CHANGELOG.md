@@ -17,6 +17,12 @@ materially affect the shipped product.
 ### Added
 
 - **Delegation-worthiness policy** — before `task` / `delegate` create, a deterministic gate prefers local execution for bare tiny or path-overlapping work and denies fan-out past hard ceilings (depth, optional max live children, delegation count, session budget hook). Config `session.delegationPolicy` (`mode` off|advise|enforce, thresholds). Soft local is overridable with `force_delegate`; decisions expose `policyReason` on tool metadata and `child.started`. Orchestrator guidance has a single pre-spawn decision table ([#876](https://github.com/jonathanung/strike/issues/876)).
+- **Passive plugin load** — enabled bundles under `~/.strike/plugins/<id>/` and
+  `./.strike/plugins/<id>/` contribute agents, skills, workflows, themes, and
+  provider profiles through existing surfaces. Manifest validation, path
+  confinement, strike/schema version checks, collision diagnostics, and
+  `plugins.lock.json` disablement; executable MCP/harness/hook entries stay
+  inactive until trusted activation ([#726](https://github.com/jonathanung/strike/issues/726)).
 
 ## [v0.2.2] - 2026-08-06
 

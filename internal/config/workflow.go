@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/jonathanung/strike-cli/internal/permission"
+	"github.com/jonathanung/strike-cli/internal/plugin"
 )
 
 // WorkflowSchemaVersion is the current on-disk workflow document version.
@@ -496,14 +497,15 @@ func LoadWorkflowFileSource(path string, source WorkflowSource) (Workflow, error
 	return w, nil
 }
 
-// LoadWorkflows reads workflows/*.json from global then project .strike roots.
-// Project entries override global ones with the same name. Built-in workflows
-// (plan-implement, review-fix) are always present and may be overridden by name.
-// Each entry carries Source, Path (when disk-backed), and Fingerprint.
+// LoadWorkflows reads workflows from builtin, global, global plugins, project,
+// and project plugins (docs/plugins.md §4.1). Project entries override global
+// ones with the same name. Built-in workflows (plan-implement, review-fix) are
+// always present and may be overridden by name. Each entry carries Source, Path
+// (when disk-backed), and Fingerprint.
 //
 // Same-layer duplicate names (two files defining the same workflow name under
 // one directory) fail closed with a multi-error. Cross-layer overrides are
-// intentional and silent.
+// intentional; plugin collisions emit diagnostics on stderr.
 //
 // Loading never activates a workflow — activation is a separate runtime step.
 func LoadWorkflows(workDir string) ([]Workflow, error) {
@@ -514,27 +516,10 @@ func LoadWorkflows(workDir string) ([]Workflow, error) {
 		order = append(order, w.Name)
 	}
 
-	type layer struct {
-		dir    string
-		source WorkflowSource
-	}
-	var layers []layer
-	if root := GlobalRoot(); root != "" {
-		layers = append(layers, layer{filepath.Join(root, "workflows"), WorkflowSourceGlobal})
-	}
-	if workDir != "" {
-		if root := projectRoot(workDir); root != "" {
-			layers = append(layers, layer{filepath.Join(root, "workflows"), WorkflowSourceProject})
-		}
-	}
-
 	var allErrs WorkflowErrors
-	for _, lay := range layers {
-		loaded, errs := readWorkflowDir(lay.dir, lay.source)
+	applyDir := func(dir string, source WorkflowSource) {
+		loaded, errs := readWorkflowDir(dir, source)
 		allErrs = append(allErrs, errs...)
-		// Apply successful loads even when some files in the dir failed, so
-		// callers that only care about valid defs still see them — but if any
-		// error occurred we still return the multi-error at the end.
 		for _, w := range loaded {
 			if _, exists := byName[w.Name]; !exists {
 				order = append(order, w.Name)
@@ -542,6 +527,23 @@ func LoadWorkflows(workDir string) ([]Workflow, error) {
 			byName[w.Name] = w
 		}
 	}
+
+	if root := GlobalRoot(); root != "" {
+		applyDir(filepath.Join(root, "workflows"), WorkflowSourceGlobal)
+	}
+	pres := DiscoverPlugins(workDir)
+	for _, d := range applyPluginWorkflowLayer(pres.Plugins, plugin.ScopeGlobal, byName, &order) {
+		fmt.Fprintf(os.Stderr, "plugin: %s\n", d.String())
+	}
+	if workDir != "" {
+		if root := projectRoot(workDir); root != "" {
+			applyDir(filepath.Join(root, "workflows"), WorkflowSourceProject)
+		}
+	}
+	for _, d := range applyPluginWorkflowLayer(pres.Plugins, plugin.ScopeProject, byName, &order) {
+		fmt.Fprintf(os.Stderr, "plugin: %s\n", d.String())
+	}
+
 	if len(allErrs) > 0 {
 		return nil, allErrs
 	}

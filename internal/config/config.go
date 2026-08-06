@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/jonathanung/strike-cli/internal/permission"
+	"github.com/jonathanung/strike-cli/internal/plugin"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/sandbox"
 	"github.com/jonathanung/strike-cli/internal/scheduler"
@@ -585,16 +586,18 @@ func resolveExisting(path string) string {
 // Load merges:
 //
 //	default → ~/.strike/config → ~/.strike/mcp.jsonc → ~/.strike/providers.jsonc
-//	→ ~/.strike/keybinds.jsonc → ./.strike/config → ./.strike/mcp.jsonc
-//	→ ./.strike/providers.jsonc → ./.strike/keybinds.jsonc
-//	→ managed/MDM (system managed-config + managed-config.d; highest)
+//	→ ~/.strike/keybinds.jsonc → global plugin providers → ./.strike/config
+//	→ ./.strike/mcp.jsonc → ./.strike/providers.jsonc → ./.strike/keybinds.jsonc
+//	→ project plugin providers → managed/MDM (highest)
 //
 // mcp.jsonc/json is preferred for MCP servers (see ReadMCPFile); the legacy
 // mcp object in config still works. providers.jsonc is OpenCode-compatible
 // (see ReadProvidersFile); the legacy providers array in config still works.
 // Dedicated keybinds.jsonc/json overrides the config keybinds object in the
-// same root (last-wins per id). Managed scalars and permission rules override
-// user/project; see ManagedInfo and docs/config.md (enterprise).
+// same root (last-wins per id). Plugin provider profiles follow docs/plugins.md
+// §4.1 (global plugins before project non-plugin; project plugins highest user
+// layer). Managed scalars and permission rules override user/project; see
+// ManagedInfo and docs/config.md (enterprise).
 func Load(workDir string) (Config, error) {
 	cfg := Default()
 	// Global config JSON (optional).
@@ -627,6 +630,14 @@ func Load(workDir string) (Config, error) {
 	} else if len(kb) > 0 {
 		cfg.Keybinds = MergeKeybinds(cfg.Keybinds, kb)
 	}
+	// Global plugin provider profiles (passive; before project non-plugin).
+	{
+		var pdiags []plugin.Diagnostic
+		cfg, pdiags = applyPluginProviders(workDir, cfg, plugin.ScopeGlobal)
+		for _, d := range pdiags {
+			fmt.Fprintf(os.Stderr, "plugin: %s\n", d.String())
+		}
+	}
 	// Project config JSON (optional).
 	if workDir != "" {
 		path := filepath.Join(projectRoot(workDir), "config")
@@ -655,6 +666,22 @@ func Load(workDir string) (Config, error) {
 			cfg.Keybinds = MergeKeybinds(cfg.Keybinds, kb)
 		}
 	}
+	// Project plugin provider profiles (highest user layer before managed).
+	{
+		var pdiags []plugin.Diagnostic
+		cfg, pdiags = applyPluginProviders(workDir, cfg, plugin.ScopeProject)
+		for _, d := range pdiags {
+			fmt.Fprintf(os.Stderr, "plugin: %s\n", d.String())
+		}
+		// Surface discovery diagnostics once (agents/skills also Discover).
+		for _, d := range DiscoverPlugins(workDir).Diagnostics {
+			if d.Severity == plugin.SeverityInfo && (d.Code == "shadowed" || d.Code == "executable_inactive") {
+				continue
+			}
+			fmt.Fprintf(os.Stderr, "plugin: %s\n", d.String())
+		}
+	}
+
 	// Managed/MDM last: system policy overrides global and project.
 	managed, info, err := LoadManaged()
 	if err != nil {
