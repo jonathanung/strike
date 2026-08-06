@@ -1,13 +1,16 @@
 // Package config loads strike configuration and user extensions. Layers:
-// defaults, then global (~/.strike/config), then project (./.strike/config)
-// — JSON or JSONC (// and /* */ comments). Optional "$schema" is ignored
-// (editor DX only). Scalar fields override; permission rules concatenate so
-// later layers win under last-match-wins evaluation. The same two .strike
-// roots also hold agents/ and skills/ folders (see agents.go). Loaded by
-// cmd/strike at startup and wrapped by internal/host/local (Settings, and
-// the agent/skill listings); internal/tui never imports it directly.
-// Programmatic saves (SetGlobal*, AppendProjectPermission) rewrite pure
-// JSON and drop comments / $schema — see docs/config.md.
+// defaults, then global (~/.strike/config), then project (./.strike/config),
+// then managed/MDM (system path; see managed.go) — JSON or JSONC (// and
+// /* */ comments). Optional "$schema" is ignored (editor DX only). Scalar
+// fields override; permission rules concatenate so later layers win under
+// last-match-wins evaluation. Managed is highest for scalars and contributes
+// a deny ceiling the permission service enforces after session grants.
+// The same two .strike roots also hold agents/ and skills/ folders (see
+// agents.go). Loaded by cmd/strike at startup and wrapped by
+// internal/host/local (Settings, and the agent/skill listings); internal/tui
+// never imports it directly. Programmatic saves (SetGlobal*,
+// AppendProjectPermission) rewrite pure JSON and drop comments / $schema —
+// see docs/config.md.
 package config
 
 import (
@@ -171,6 +174,9 @@ type Config struct {
 	// ToolRetry is the harness error-recovery / retry policy for tool
 	// dispatch (error code × idempotency). See docs/config.md.
 	ToolRetry ToolRetryConfig `json:"toolRetry,omitempty"`
+	// Managed is provenance for the enterprise/MDM layer (not serialized).
+	// Populated by Load when system managed-config is present.
+	Managed ManagedInfo `json:"-"`
 }
 
 // ToolRetryConfig is the JSON "toolRetry" object — auto-retry and loop
@@ -500,12 +506,14 @@ func resolveExisting(path string) string {
 //	default → ~/.strike/config → ~/.strike/mcp.jsonc → ~/.strike/providers.jsonc
 //	→ ~/.strike/keybinds.jsonc → ./.strike/config → ./.strike/mcp.jsonc
 //	→ ./.strike/providers.jsonc → ./.strike/keybinds.jsonc
+//	→ managed/MDM (system managed-config + managed-config.d; highest)
 //
 // mcp.jsonc/json is preferred for MCP servers (see ReadMCPFile); the legacy
 // mcp object in config still works. providers.jsonc is OpenCode-compatible
 // (see ReadProvidersFile); the legacy providers array in config still works.
 // Dedicated keybinds.jsonc/json overrides the config keybinds object in the
-// same root (last-wins per id).
+// same root (last-wins per id). Managed scalars and permission rules override
+// user/project; see ManagedInfo and docs/config.md (enterprise).
 func Load(workDir string) (Config, error) {
 	cfg := Default()
 	// Global config JSON (optional).
@@ -565,6 +573,15 @@ func Load(workDir string) (Config, error) {
 		} else if len(kb) > 0 {
 			cfg.Keybinds = MergeKeybinds(cfg.Keybinds, kb)
 		}
+	}
+	// Managed/MDM last: system policy overrides global and project.
+	managed, info, err := LoadManaged()
+	if err != nil {
+		return cfg, err
+	}
+	if info.Active() {
+		cfg = merge(cfg, managed)
+		cfg.Managed = info
 	}
 	cfg.Provider = CanonicalProviderID(cfg.Provider)
 	return cfg, nil

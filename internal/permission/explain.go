@@ -20,6 +20,7 @@ const (
 	LayerScopedGrant   = "scoped-grant"
 	LayerModeLate      = "mode-late"
 	LayerPhase         = "phase"
+	LayerManaged       = "managed"
 	LayerModeUpgrade   = "mode-upgrade"
 	LayerDefaultAction = "default"
 )
@@ -203,6 +204,7 @@ func (s *Service) labeledLayersLocked() []LabeledLayer {
 		LabeledLayer{Name: LayerScopedGrant, Rules: s.scopedRulesLocked()},
 		LabeledLayer{Name: LayerModeLate, Rules: s.modeLate},
 		LabeledLayer{Name: LayerPhase, Rules: s.phase},
+		LabeledLayer{Name: LayerManaged, Rules: s.managed},
 	)
 	return out
 }

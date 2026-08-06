@@ -208,10 +208,11 @@ func (s *Service) scopedRulesLocked() Ruleset {
 
 // baselineForGrantLocked is layers that define the non-widening ceiling for
 // new scoped grants: everything except session always-grants and scoped grants.
+// Includes managed so MDM denies cannot be widened by Grant().
 func (s *Service) baselineForGrantLocked() []Ruleset {
-	out := make([]Ruleset, 0, len(s.base)+4)
+	out := make([]Ruleset, 0, len(s.base)+5)
 	out = append(out, s.base...)
-	out = append(out, s.project, s.agent, s.modeLate, s.phase)
+	out = append(out, s.project, s.agent, s.modeLate, s.phase, s.managed)
 	return out
 }
 

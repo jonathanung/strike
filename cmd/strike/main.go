@@ -270,8 +270,10 @@ func parseSandboxFlag(value string) (string, error) {
 }
 
 // resolveSandboxMode picks CLI --sandbox over config, defaulting to workspace-write.
-func resolveSandboxMode(cfgValue, cliValue string) (string, error) {
-	if strings.TrimSpace(cliValue) != "" {
+// When managedLocked is true (MDM set sandbox), the CLI flag is ignored so
+// operators cannot loosen enterprise policy from the command line.
+func resolveSandboxMode(cfgValue, cliValue string, managedLocked bool) (string, error) {
+	if !managedLocked && strings.TrimSpace(cliValue) != "" {
 		return parseSandboxFlag(cliValue)
 	}
 	if strings.TrimSpace(cfgValue) == "" {

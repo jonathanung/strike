@@ -1857,3 +1857,69 @@ func TestPhaseRulesCopy(t *testing.T) {
 		t.Fatal("PhaseRules must return a copy")
 	}
 }
+
+func TestManagedDenyCeilingBeatsSessionAndDangerous(t *testing.T) {
+	// Base includes dangerous allow-all (simulates --auto).
+	svc := New(func(protocol.Event) {}, Defaults(), Ruleset{
+		{Permission: "*", Pattern: "*", Action: Allow},
+	})
+	svc.SetManagedRules(Ruleset{
+		{Permission: "bash", Pattern: "curl *", Action: Deny},
+	})
+	// Session always grant must not widen managed deny.
+	// Pattern uses a space-separated arg without '/' so doublestar '*' matches.
+	svc.SeedAlwaysGrants(Ruleset{
+		{Permission: "bash", Pattern: "curl *", Action: Allow},
+	})
+	if got := svc.Peek("bash", "curl evil.example"); got != Deny {
+		t.Fatalf("managed ceiling: got %s, want deny", got)
+	}
+	// Unrelated bash still allowed via dangerous layer.
+	if got := svc.Peek("bash", "echo hi"); got != Allow {
+		t.Fatalf("unrelated bash = %s, want allow", got)
+	}
+}
+
+func TestManagedExplainLayer(t *testing.T) {
+	svc := New(func(protocol.Event) {}, Defaults())
+	svc.SetManagedRules(Ruleset{
+		{Permission: "write", Pattern: "**/.env", Action: Deny},
+	})
+	ex := svc.Explain("write", "app/.env")
+	if ex.Action != Deny {
+		t.Fatalf("action = %s", ex.Action)
+	}
+	if ex.Matched == nil || ex.Matched.Layer != LayerManaged {
+		t.Fatalf("matched = %+v, want layer managed", ex.Matched)
+	}
+}
+
+func TestGrantRejectsManagedDenyWiden(t *testing.T) {
+	svc := New(func(protocol.Event) {}, Defaults())
+	svc.SetManagedRules(Ruleset{
+		{Permission: "bash", Pattern: "rm *", Action: Deny},
+	})
+	err := svc.Grant(ScopedGrant{
+		Permission: "bash",
+		Pattern:    "rm *",
+		Scope:      ScopeSession,
+	}, time.Now())
+	if err == nil || !errors.Is(err, ErrGrantWidens) {
+		t.Fatalf("err = %v, want ErrGrantWidens", err)
+	}
+}
+
+func TestSetManagedRulesClears(t *testing.T) {
+	svc := New(func(protocol.Event) {}, Defaults())
+	svc.SetManagedRules(Ruleset{{Permission: "bash", Pattern: "*", Action: Deny}})
+	if got := svc.Peek("bash", "x"); got != Deny {
+		t.Fatal(got)
+	}
+	svc.SetManagedRules(nil)
+	if got := svc.Peek("bash", "x"); got != Ask {
+		t.Fatalf("after clear = %s, want ask", got)
+	}
+	if len(svc.ManagedRules()) != 0 {
+		t.Fatalf("ManagedRules = %#v", svc.ManagedRules())
+	}
+}

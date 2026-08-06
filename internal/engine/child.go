@@ -310,7 +310,8 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 	// Child agent Allows that would override a parent Deny are dropped (AG3);
 	// Ask→Allow is kept so personas like general (bash allow) work as task
 	// subagents. Phase rules propagate so children cannot widen beyond the
-	// parent’s approved phase ceiling.
+	// parent’s approved phase ceiling. Managed denies are a separate late
+	// ceiling on the child service (not folded into DeriveChildRules).
 	parentLayers := append([]permission.Ruleset(nil), e.opts.Rules...)
 	if len(e.agent.Permissions) > 0 {
 		parentLayers = append(parentLayers, append(permission.Ruleset(nil), e.agent.Permissions...))
@@ -323,34 +324,36 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		parentLayers = append(parentLayers, scope)
 	}
 	child := New(Options{
-		SessionID:                  childID,
-		ParentSessionID:            e.opts.SessionID,
-		RootSessionID:              e.rootSessionID(),
-		Depth:                      childDepth,
-		MaxChildDepth:              maxDepth,
-		TaskOneShot:                true,
-		ContextBundle:              childBundle,
-		Team:                       e.team, // share lead roster; nested enrolls on same team
-		Select:                     e.opts.Select,
-		Registry:                   childReg,
-		WorkDir:                    e.opts.WorkDir,
-		ProjectRoot:                e.opts.ProjectRoot,
-		Instructions:               e.opts.Instructions,
-		Memory:                     e.opts.Memory,
-		Ledger:                     e.opts.Ledger,
-		SystemPrompt:               e.opts.SystemPrompt,
-		LeanCode:                   e.opts.LeanCode,
-		HarnessRegistry:            e.opts.HarnessRegistry,
-		Scheduler:                  e.opts.Scheduler,          // share process-local pools
-		SchedulerPolicy:            e.opts.SchedulerPolicy,    // bash classification rules
-		FileSync:                   e.opts.FileSync,           // share LSP document sync
-		CollectDiagnostics:         e.opts.CollectDiagnostics, // share LSP result injection
-		Agents:                     e.opts.Agents,
-		InitialAgent:               agentName,
-		InitialProvider:            e.provName,
-		InitialModel:               e.model,
-		InitialEffort:              childEffort,
-		InitialTitled:              title != "",
+		SessionID:          childID,
+		ParentSessionID:    e.opts.SessionID,
+		RootSessionID:      e.rootSessionID(),
+		Depth:              childDepth,
+		MaxChildDepth:      maxDepth,
+		TaskOneShot:        true,
+		ContextBundle:      childBundle,
+		Team:               e.team, // share lead roster; nested enrolls on same team
+		Select:             e.opts.Select,
+		Registry:           childReg,
+		WorkDir:            e.opts.WorkDir,
+		ProjectRoot:        e.opts.ProjectRoot,
+		Instructions:       e.opts.Instructions,
+		Memory:             e.opts.Memory,
+		Ledger:             e.opts.Ledger,
+		SystemPrompt:       e.opts.SystemPrompt,
+		LeanCode:           e.opts.LeanCode,
+		HarnessRegistry:    e.opts.HarnessRegistry,
+		Scheduler:          e.opts.Scheduler,          // share process-local pools
+		SchedulerPolicy:    e.opts.SchedulerPolicy,    // bash classification rules
+		FileSync:           e.opts.FileSync,           // share LSP document sync
+		CollectDiagnostics: e.opts.CollectDiagnostics, // share LSP result injection
+		Agents:             e.opts.Agents,
+		InitialAgent:       agentName,
+		InitialProvider:    e.provName,
+		InitialModel:       e.model,
+		InitialEffort:      childEffort,
+		InitialTitled:      title != "",
+		// Inherit live posture; when MDM locks the dial, keep the managed mode.
+		InitialPermissionMode:      e.permMode,
 		SandboxMode:                e.opts.SandboxMode,
 		NetworkAllow:               e.opts.NetworkAllow,
 		AllowYoloWithoutSandbox:    e.opts.AllowYoloWithoutSandbox,
@@ -375,6 +378,8 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		CompactionStrategy:         e.opts.CompactionStrategy,
 		CompactionModel:            e.opts.CompactionModel,
 		Rules:                      permission.DeriveChildRules(parentLayers, childDepth >= maxDepth, childAgent.Permissions),
+		ManagedRules:               append(permission.Ruleset(nil), e.opts.ManagedRules...),
+		LockPermissionMode:         e.opts.LockPermissionMode,
 		Hooks:                      e.opts.Hooks,
 		HookRules:                  e.opts.HookRules,
 		PersistProjectRule:         e.opts.PersistProjectRule,

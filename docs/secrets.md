@@ -84,7 +84,8 @@ host process and are not written into session events.
 
 ### Non-goals (v1)
 
-- Enterprise secret managers / MDM (#764)
+- Enterprise secret managers (vault/KMS integration) — managed **config**
+  policy is separate (#764 / [config.md](config.md#managed--mdm-config-enterprise))
 - Encrypting session JSONL at rest
 - Guaranteeing zero false negatives on novel token formats
 
