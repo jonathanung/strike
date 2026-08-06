@@ -54,6 +54,10 @@ func (writeTool) Execute(ctx context.Context, args json.RawMessage, tc *Context)
 			return Result{}, err
 		}
 	}
+	overlapWarn, err := tc.ClaimWrite(path, rel)
+	if err != nil {
+		return Result{}, err
+	}
 
 	existing, readErr := os.ReadFile(path)
 	meta, _ := json.Marshal(map[string]any{
@@ -82,9 +86,11 @@ func (writeTool) Execute(ctx context.Context, args json.RawMessage, tc *Context)
 	if readErr == nil {
 		verb = "Overwrote"
 	}
+	out := fmt.Sprintf("%s %s (%d bytes)", verb, rel, len(a.Content))
+	out = AppendOverlapWarning(out, overlapWarn)
 	return Result{
 		Title:    rel,
-		Output:   fmt.Sprintf("%s %s (%d bytes)", verb, rel, len(a.Content)),
+		Output:   out,
 		Metadata: meta,
 	}, nil
 }

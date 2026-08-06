@@ -190,6 +190,10 @@ type Options struct {
 	// lead's shared pointer from spawnChild so nested descendants enroll on
 	// the same roster. See team.go for nested membership policy.
 	Team *Team
+	// OverlapPolicy is off|warn|block for multi-agent path conflicts
+	// (session.overlapPolicy). Empty defaults to warn. Applied to Team
+	// ownership when the root team is created or inherited.
+	OverlapPolicy string
 	// PersistSessionMeta, when set, writes durable session metadata (sidecar).
 	// The engine emits protocol.SessionMeta after a successful persist.
 	PersistSessionMeta func(meta protocol.SessionMeta) error
@@ -415,6 +419,9 @@ func New(opts Options) *Engine {
 			persona = opts.Agents[0].Name
 		}
 		team = NewTeam(opts.SessionID, persona)
+	}
+	if team != nil && opts.OverlapPolicy != "" {
+		team.SetOverlapPolicy(opts.OverlapPolicy)
 	}
 	opts.Team = team
 

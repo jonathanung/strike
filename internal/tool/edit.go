@@ -61,6 +61,10 @@ func (editTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	if err := tc.Files.CheckFresh(path, rel); err != nil {
 		return Result{}, err
 	}
+	overlapWarn, err := tc.ClaimWrite(path, rel)
+	if err != nil {
+		return Result{}, err
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Result{}, err
@@ -100,9 +104,11 @@ func (editTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 		tc.Files.Record(path, info)
 	}
 	tc.NotifyFileSync(path, updated, false)
+	out := fmt.Sprintf("Edited %s (%d replacement(s))", rel, replaced)
+	out = AppendOverlapWarning(out, overlapWarn)
 	return Result{
 		Title:    rel,
-		Output:   fmt.Sprintf("Edited %s (%d replacement(s))", rel, replaced),
+		Output:   out,
 		Metadata: meta,
 	}, nil
 }

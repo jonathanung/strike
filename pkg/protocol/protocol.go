@@ -756,6 +756,27 @@ type FilesInvalidated struct {
 	Reason string   `json:"reason,omitempty"`
 }
 
+// PathOverlapHolder is one other active claimant on a PathOverlap event.
+type PathOverlapHolder struct {
+	SessionID string `json:"sessionId"`
+	Name      string `json:"name,omitempty"`
+	Source    string `json:"source,omitempty"` // touch | lease
+	Mode      string `json:"mode,omitempty"`   // exclusive | shared (leases)
+}
+
+// PathOverlap reports concurrent multi-agent claims on the same path.
+// Emitted when a write touch or lease hits another active holder under
+// session.overlapPolicy warn|block. Correlation is the claiming session.
+type PathOverlap struct {
+	Correlation
+	Path    string              `json:"path"`
+	Policy  string              `json:"policy"` // warn | block
+	Blocked bool                `json:"blocked,omitempty"`
+	Holders []PathOverlapHolder `json:"holders,omitempty"`
+	// Warning is the human/agent-facing message (also appended to tool output).
+	Warning string `json:"warning,omitempty"`
+}
+
 type EngineError struct {
 	Correlation
 	Message string `json:"message"`
@@ -1011,6 +1032,7 @@ func (AutonomySelected) isEvent()       {}
 func (PermissionModeSelected) isEvent() {}
 func (FastSelected) isEvent()           {}
 func (FilesInvalidated) isEvent()       {}
+func (PathOverlap) isEvent()            {}
 func (EngineError) isEvent()            {}
 func (ChildStarted) isEvent()           {}
 func (ChildCompleted) isEvent()         {}

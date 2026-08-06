@@ -22,8 +22,8 @@ const childEventCap = 256
 const childActivityCap = 12
 
 // leafTaskTools are stripped from registries that cannot nest further.
-// Team tools (agent_roster, agent_message, agent_broadcast, team_task) must
-// NOT be listed here — depth-capped leaves still coordinate mid-turn.
+// Team tools (agent_roster, agent_ownership, agent_message, agent_broadcast,
+// team_task) must NOT be listed here — depth-capped leaves still coordinate.
 // task_message is parent-control and is stripped with the other task_* tools.
 var leafTaskTools = []string{
 	"task", "task_status", "task_read", "task_message", "task_interrupt",
@@ -337,6 +337,10 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 			case protocol.TeamRoster:
 				// Nested engines share the lead team; bubble roster snapshots.
 				e.emit(ev)
+			case protocol.PathOverlap:
+				// Multi-agent path conflicts from child writers surface on the
+				// parent stream for lead/UI visibility.
+				e.emit(ev)
 			case protocol.SchedulerQueued, protocol.SchedulerAdmitted, protocol.SchedulerCanceled:
 				// Surface queue lifecycle so parent TUI/task_status can show
 				// which pool a child is waiting on (not idle).
@@ -493,6 +497,13 @@ func (e *Engine) finishChild(h *childHandle, completed protocol.ChildCompleted) 
 	// Terminal members remain listable on the team until lead Dissolve.
 	if e.team != nil {
 		e.team.SetTerminal(h.id, protocol.TeamMemberStateFromChild(completed.Status), completed.Summary)
+		// Inactive ownership so finished children no longer cause overlap.
+		if own := e.team.Ownership(); own != nil {
+			own.DeactivateSession(h.id)
+			// Merge handoff-style files_changed when present on the summary
+			// payload is owned by #771; RecordFilesChanged accepts paths when
+			// callers supply them via Ownership.RecordFilesChanged.
+		}
 	}
 	e.childMu.Unlock()
 	e.emitTeamRoster()

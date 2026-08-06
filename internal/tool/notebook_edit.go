@@ -124,6 +124,10 @@ func (notebookEditTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 	}); err != nil {
 		return Result{}, err
 	}
+	overlapWarn, err := tc.ClaimWrite(path, rel)
+	if err != nil {
+		return Result{}, err
+	}
 
 	var outMsg string
 	switch mode {
@@ -174,6 +178,7 @@ func (notebookEditTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 		return Result{}, err
 	}
 	tc.NotifyFileSync(path, string(out), false)
+	outMsg = AppendOverlapWarning(outMsg, overlapWarn)
 	return Result{
 		Title:    rel,
 		Output:   outMsg,

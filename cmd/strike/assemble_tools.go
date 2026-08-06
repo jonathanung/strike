@@ -300,6 +300,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tool.NewTaskMessage(),
 		tool.NewTaskInterrupt(),
 		tool.NewAgentRoster(),
+		tool.NewAgentOwnership(),
 		tool.NewAgentMessage(),
 		tool.NewAgentBroadcast(),
 		tool.NewTeamTask(),
@@ -557,6 +558,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 				lspMgr.NotifyFile(context.Background(), absPath, content, deleted)
 			},
 			MaxChildDepth:           cfg.MaxChildDepth,
+			OverlapPolicy:           cfg.Session.OverlapPolicy,
 			InitialProvider:         initialProvider,
 			InitialModel:            initialModel,
 			InitialEffort:           initialEffort,

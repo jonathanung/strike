@@ -62,7 +62,8 @@ write this file. Manual `/ftue` remains available after acknowledgement.
   "pruneProtectTools": [],
   "session": {
     "worktree": "off",
-    "worktreeCleanup": "keep"
+    "worktreeCleanup": "keep",
+    "overlapPolicy": "warn"
   },
   "scheduler": {
     "presets": ["cargo", "npm"],
@@ -365,6 +366,32 @@ Each `bash` invocation is a fresh process whose cwd is that session workdir
 (workspace root, or the bound git worktree root). A `cd` inside one command
 does not affect later bash calls or other tools; chain with `&&` or
 `(cd subdir && …)` when a single command needs a subdirectory.
+
+### Parallel children and path overlap
+
+Within one session team, `task` children share the lead's tool CWD. Write tools
+(`edit`, `write`, `apply_patch`, `notebook_edit`) register path touches on a
+shared ownership map. When two **active** agents claim the same path:
+
+| `session.overlapPolicy` | Behavior |
+|---|---|
+| `warn` (default) | write proceeds; tool output gets a warning; engine emits `path.overlap` |
+| `block` | conflicting write is refused |
+| `off` | track only (no warning/event) |
+
+Lead and children can query the map with `agent_ownership` (`list`), and claim
+path prefixes with `lease` / `release` (exclusive or shared). Finished children
+are deactivated so they no longer cause overlap. Structured handoff
+`files_changed` (when available) can be merged via the same tracker.
+
+**Isolated worktree path (explicit apply):** for true filesystem isolation,
+prefer separate root sessions with `session.worktree=always` (or
+`strike --worktree`), or dogfood sibling checkouts (e.g. under
+`strike-cli-worktrees/`). Apply back to the primary tree with an explicit
+`git merge` / `cherry-pick` / patch apply from the child branch or worktree —
+never silent clobber of the shared primary checkout. Per-child worktrees inside
+one `task` fan-out remain a follow-up; overlap detection is the in-session
+safety rail today.
 
 **ctrl+d saves defaults**: on the main screen it persists the current
 provider/model/agent/effort/theme to `~/.strike/config`; in the provider
