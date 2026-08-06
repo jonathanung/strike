@@ -221,18 +221,17 @@ func endFileMentionAttachment(s string) int {
 		return -1
 	}
 	bodyStart := headerEnd + len(" ---\n")
+	// Prefer the last matching close mark so a body that documents the fence
+	// format (contains "--- end file: path ---") does not truncate early.
 	closeMark := "\n--- end " + kind + ": " + path + " ---"
-	// Body may omit the leading newline when content already ended with \n
-	// before the close mark was written without an extra blank line — match
-	// either "\n--- end …" or a close mark flush against bodyStart.
-	if rel := strings.Index(s[bodyStart:], closeMark); rel >= 0 {
+	if rel := strings.LastIndex(s[bodyStart:], closeMark); rel >= 0 {
 		return bodyStart + rel + len(closeMark)
 	}
 	alt := "--- end " + kind + ": " + path + " ---"
 	if strings.HasPrefix(s[bodyStart:], alt) {
 		return bodyStart + len(alt)
 	}
-	if rel := strings.Index(s[bodyStart:], "\n"+alt); rel >= 0 {
+	if rel := strings.LastIndex(s[bodyStart:], "\n"+alt); rel >= 0 {
 		return bodyStart + rel + 1 + len(alt)
 	}
 	return -1

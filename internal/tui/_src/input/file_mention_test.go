@@ -167,6 +167,12 @@ func TestStripFileMentionAttachments(t *testing.T) {
 	if got := stripFileMentionAttachments(folderExpanded); got != "list @pkg/" {
 		t.Fatalf("folder strip = %q", got)
 	}
+
+	// Body that documents the fence must not truncate at the inner close mark.
+	nested := "see @doc.md\n\n--- file: doc.md ---\nexample:\n--- end file: doc.md ---\nstill body\n--- end file: doc.md ---"
+	if got := stripFileMentionAttachments(nested); got != "see @doc.md" {
+		t.Fatalf("nested close strip = %q", got)
+	}
 }
 
 func TestUserMessageCellStripsFileAttachments(t *testing.T) {
