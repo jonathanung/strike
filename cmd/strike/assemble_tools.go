@@ -18,6 +18,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/host/local"
 	"github.com/jonathanung/strike-cli/internal/issue"
+	"github.com/jonathanung/strike-cli/internal/ledger"
 	"github.com/jonathanung/strike-cli/internal/lsp"
 	"github.com/jonathanung/strike-cli/internal/mcp"
 	"github.com/jonathanung/strike-cli/internal/memory"
@@ -60,6 +61,7 @@ type assembled struct {
 	goalsClose     func() error
 	plansClose     func() error
 	artifactsClose func() error
+	ledgerClose    func() error
 	// worktreeClose removes a strike-managed worktree when cleanup=delete.
 	worktreeClose func() error
 	// worktreeNotice is a user-visible soft-fail message (e.g. non-git cwd).
@@ -137,8 +139,19 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("opening project artifacts: %w", err)
 	}
+	ledgerStore, err := ledger.Open(globalRoot, projectIdentity.Key)
+	if err != nil {
+		_ = artifactStore.Close()
+		_ = planStore.Close()
+		_ = goalStore.Close()
+		_ = issueStore.Close()
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, fmt.Errorf("opening project ledger: %w", err)
+	}
 	cfg, err := config.Load(workDir)
 	if err != nil {
+		_ = ledgerStore.Close()
 		_ = artifactStore.Close()
 		_ = planStore.Close()
 		_ = goalStore.Close()
@@ -149,6 +162,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	}
 	sandboxMode, err := resolveSandboxMode(cfg.Sandbox, opts.sandbox)
 	if err != nil {
+		_ = ledgerStore.Close()
 		_ = artifactStore.Close()
 		_ = planStore.Close()
 		_ = goalStore.Close()
@@ -174,6 +188,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	if opts.effort != "" {
 		level, ok := protocol.ParseEffort(opts.effort)
 		if !ok || level == protocol.EffortDefault {
+			_ = ledgerStore.Close()
 			_ = artifactStore.Close()
 			_ = planStore.Close()
 			_ = goalStore.Close()
@@ -187,6 +202,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 
 	authStore, err := auth.OpenStore(auth.DefaultPath())
 	if err != nil {
+		_ = ledgerStore.Close()
 		_ = artifactStore.Close()
 		_ = planStore.Close()
 		_ = goalStore.Close()
@@ -284,6 +300,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// /provider otherwise). Headless exec always requires a usable provider.
 	if requireProvider || (opts.providerSet && opts.provider != "") {
 		if cfg.Provider == "" {
+			_ = ledgerStore.Close()
 			_ = artifactStore.Close()
 			_ = planStore.Close()
 			_ = goalStore.Close()
@@ -293,6 +310,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			return nil, fmt.Errorf("no provider configured (pass --provider or set provider in config)")
 		}
 		if _, _, err := selectProvider(cfg.Provider); err != nil {
+			_ = ledgerStore.Close()
 			_ = artifactStore.Close()
 			_ = planStore.Close()
 			_ = goalStore.Close()
@@ -307,6 +325,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// available names in its description at construction time.
 	skills, err := config.LoadSkillsWithError(workDir)
 	if err != nil {
+		_ = ledgerStore.Close()
 		_ = artifactStore.Close()
 		_ = planStore.Close()
 		_ = goalStore.Close()
@@ -354,6 +373,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tool.NewPlanDelegate(planStore),
 		tool.NewArtifactWrite(artifactStore),
 		tool.NewArtifactRead(artifactStore),
+		tool.NewLedgerWrite(ledgerStore),
+		tool.NewLedgerRead(ledgerStore),
 		tool.NewNotebookEdit(),
 		tool.NewSleep(),
 		tool.NewSkill(skillInfos),
@@ -373,6 +394,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// other personas supply a body that becomes the persona layer.
 	loadedAgents, err := config.LoadAgentsWithError(workDir)
 	if err != nil {
+		_ = ledgerStore.Close()
 		_ = artifactStore.Close()
 		_ = planStore.Close()
 		_ = goalStore.Close()
@@ -412,6 +434,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	instructions := config.LoadInstructions(workDir, projectIdentity.Root)
 	workflows, err := config.LoadWorkflows(workDir)
 	if err != nil {
+		_ = ledgerStore.Close()
 		_ = artifactStore.Close()
 		_ = planStore.Close()
 		_ = goalStore.Close()
@@ -468,6 +491,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// this OS process. Omitted limits stay unlimited (no wait).
 	schedEff, err := cfg.SchedulerEffective()
 	if err != nil {
+		_ = ledgerStore.Close()
 		_ = artifactStore.Close()
 		_ = planStore.Close()
 		_ = goalStore.Close()
@@ -478,6 +502,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	}
 	sched, err := scheduler.New(schedEff.SchedulerConfig())
 	if err != nil {
+		_ = ledgerStore.Close()
 		_ = artifactStore.Close()
 		_ = planStore.Close()
 		_ = goalStore.Close()
@@ -612,6 +637,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			ProjectRoot:     projectIdentity.Root,
 			Instructions:    instructions,
 			Memory:          memoryStore,
+			Ledger:          ledgerStore,
 			SystemPrompt:    cfg.SystemPrompt,
 			LeanCode:        cfg.LeanCode,
 			HarnessRegistry: harnessRegistry,
@@ -730,6 +756,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		info, err := sessions.LatestRoot(projectIdentity.Key)
 		if err != nil {
 			sched.Close()
+			_ = ledgerStore.Close()
 			_ = artifactStore.Close()
 			_ = planStore.Close()
 			_ = goalStore.Close()
@@ -743,6 +770,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	first, replay, err := openRoot(resumeID, true)
 	if err != nil {
 		sched.Close()
+		_ = ledgerStore.Close()
 		_ = artifactStore.Close()
 		_ = planStore.Close()
 		_ = goalStore.Close()
@@ -855,6 +883,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		},
 		artifactsClose: func() error {
 			return artifactStore.Close()
+		},
+		ledgerClose: func() error {
+			return ledgerStore.Close()
 		},
 		worktreeClose:  first.wtClose,
 		worktreeNotice: first.wtNotice,

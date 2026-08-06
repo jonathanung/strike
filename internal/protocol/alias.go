@@ -149,6 +149,7 @@ type (
 	PhaseChanged           = pub.PhaseChanged
 	PlanHandoff            = pub.PlanHandoff
 	ArtifactUpdated        = pub.ArtifactUpdated
+	LedgerUpdated          = pub.LedgerUpdated
 	PhaseGrantApproved     = pub.PhaseGrantApproved
 	PhaseGrantRule         = pub.PhaseGrantRule
 	EffortSelected         = pub.EffortSelected
@@ -254,6 +255,7 @@ const (
 	PromptLayerEnvironment = pub.PromptLayerEnvironment
 	PromptLayerInstruction = pub.PromptLayerInstruction
 	PromptLayerMemory      = pub.PromptLayerMemory
+	PromptLayerLedger      = pub.PromptLayerLedger
 
 	PromptLayerAppend  = pub.PromptLayerAppend
 	PromptLayerReplace = pub.PromptLayerReplace

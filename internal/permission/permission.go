@@ -47,6 +47,7 @@ var knownPermissions = map[string]struct{}{
 	"memory_write": {}, "memory_read": {}, "issue_write": {}, "issue_read": {},
 	"plan_write": {}, "plan_read": {}, "plan_delegate": {},
 	"artifact_write": {}, "artifact_read": {},
+	"ledger_write": {}, "ledger_read": {},
 	"sleep": {}, "skill": {}, "question": {}, "toolsearch": {}, "hook": {},
 	"phase_check":     {},
 	"enter_plan_mode": {}, "exit_plan_mode": {}, "phase_done": {},
@@ -137,6 +138,9 @@ func Defaults() Ruleset {
 		// owner vs team access separately from these permission rules.
 		{Permission: "artifact_write", Pattern: "*", Action: Allow},
 		{Permission: "artifact_read", Pattern: "*", Action: Allow},
+		// Decision/assumption ledger (append/invalidate/supersede + read).
+		{Permission: "ledger_write", Pattern: "*", Action: Allow},
+		{Permission: "ledger_read", Pattern: "*", Action: Allow},
 		{Permission: "sleep", Pattern: "*", Action: Allow},
 		{Permission: "skill", Pattern: "*", Action: Allow},
 		{Permission: "question", Pattern: "*", Action: Allow},

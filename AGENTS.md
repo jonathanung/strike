@@ -59,7 +59,7 @@ service/theme token).
 | `internal/harness` | Function harness contract, registry, external process adapter |
 | `internal/provider` | LLM adapters (+ `base`, `echo`, anthropic, openai, xai, google, chatgpt) |
 | `internal/sandbox` | OS process sandbox (`Wrap` via bwrap / sandbox-exec) for bash |
-| `internal/tool` | read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/task_message/task_interrupt/delegate/wait/agent_roster/agent_message/agent_broadcast/agent_thread/team_task/webfetch/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/plan_write/plan_read/plan_delegate/artifact_write/artifact_read/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/toolsearch |
+| `internal/tool` | read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/task_message/task_interrupt/delegate/wait/agent_roster/agent_message/agent_broadcast/agent_thread/team_task/webfetch/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/plan_write/plan_read/plan_delegate/artifact_write/artifact_read/ledger_write/ledger_read/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/toolsearch |
 | `internal/mcp` | MCP client (stdio + streamable HTTP); bridges external tools onto the registry |
 | `internal/lsp` | LSP client (JSON-RPC over stdio); extension registry; diagnostics collection |
 | `internal/question` | user-question ask service (suspend tool until QuestionReply) |
@@ -74,6 +74,7 @@ service/theme token).
 | `internal/goal` | loop harness: goals, guards, critic, hooks, JSONL state |
 | `internal/plan` | project-scoped root-owned structured plans (sections, lifecycle, CAS) |
 | `internal/artifact` | shared typed multi-agent artifacts (findings/patch/test_report/…; CAS, owner\|team) |
+| `internal/ledger` | shared decision/assumption/constraint ledger (append/invalidate/supersede; active slice in context) |
 | `internal/host` | frozen stdlib-only contract: what a frontend needs from its host (auth, catalog, settings, history, memory, issues, plans, goals, agents, skills) |
 | `internal/host/local` | real `host.Services` impl, wraps auth/config/models/history/memory/issue/plan/goal |
 | `internal/tui` | Bubble Tea UI: app model, layout, cells, modals |

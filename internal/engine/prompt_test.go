@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/engine"
+	"github.com/jonathanung/strike-cli/internal/ledger"
 	"github.com/jonathanung/strike-cli/internal/memory"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
@@ -503,6 +504,43 @@ func TestSystemPromptNoMemoryLayerWhenEmpty(t *testing.T) {
 	if strings.Contains(sys, "# Project memory (untrusted)") {
 		t.Fatal("empty auto-load set must omit project memory layer")
 	}
+}
+
+func TestSystemPromptLedgerAutoload(t *testing.T) {
+	dir := t.TempDir()
+	store, err := ledger.Open(dir, "proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	if _, err := store.Append(ledger.AppendInput{
+		Kind:          ledger.KindAssumption,
+		Statement:     "LEDGER_ACTIVE_ASSUMPTION",
+		AuthorSession: "s1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sys := captureSystemPrompt(t, engine.Options{
+		WorkDir: dir,
+		Ledger:  store,
+		Agents:  []engine.Agent{{Name: "build"}},
+	}, "scripted", "model-a")
+	for _, want := range []string{
+		"# Decision ledger (active, untrusted)",
+		"LEDGER_ACTIVE_ASSUMPTION",
+		"ledger_write",
+	} {
+		if !strings.Contains(sys, want) {
+			t.Errorf("system missing %q\n---\n%s", want, sys)
+		}
+	}
+	memIdx := strings.Index(sys, "# Project memory")
+	ledIdx := strings.Index(sys, "# Decision ledger")
+	if ledIdx < 0 {
+		t.Fatal("missing ledger layer")
+	}
+	// Ledger follows memory when both present; memory absent here so just ensure present.
+	_ = memIdx
 }
 
 func TestAgentSwitchReplacesPersonaLayer(t *testing.T) {

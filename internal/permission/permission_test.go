@@ -94,6 +94,18 @@ func TestDefaultsIncludesArtifactToolsAllow(t *testing.T) {
 	}
 }
 
+func TestDefaultsIncludesLedgerToolsAllow(t *testing.T) {
+	for _, perm := range []string{"ledger_write", "ledger_read"} {
+		if got := Evaluate(perm, "*", Defaults()); got != Allow {
+			t.Errorf("Defaults %s = %q, want allow", perm, got)
+		}
+	}
+	deny := Ruleset{{Permission: "ledger_write", Pattern: "*", Action: Deny}}
+	if got := Evaluate("ledger_write", "*", Defaults(), deny); got != Deny {
+		t.Errorf("ledger_write with deny = %q, want deny", got)
+	}
+}
+
 func TestDenyRuleAgentMessageBlocks(t *testing.T) {
 	// Config/agent deny must hard-block agent_message without prompting.
 	base := Defaults()

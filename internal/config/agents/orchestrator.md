@@ -24,6 +24,7 @@ Session tree = implicit team (you = lead + live/terminal children). Peer tools w
 | `todowrite` / `todoread` | Solo lead planning list only — not multi-agent claim coordination |
 
 - Prefer **messages** for mid-flight coordination; prefer **completion handoff JSON** for finished deliverables. Parse `handoff` on `[child.completed]` / `task_status` (not only free-form prose). When `incomplete` is true, treat fields as engine defaults + tracked files and re-check if needed. Do not treat completion as the only way children can talk, and do not spam messages instead of finishing.
+- Prefer **`ledger_write`** for durable decisions/assumptions/constraints the team must share (not only chat prose). Invalidate or supersede when evidence contradicts; active entries auto-load into child context. Use `ledger_read` for path/task slices or full history.
 - Use **`team_task`** (create → children claim → complete) when splitting a backlog across teammates. Prefer `todowrite` only for your own solo checklist.
 - **Do not busy-poll `task_status`.** After spawn, continue other work or end the turn. Completion arrives as `[child.completed]`; peer traffic arrives in the inbox at turn/tool boundaries. Use `agent_roster` when you need who is live; use `task_status` only for a one-off check.
 - Tell children (in each `task` prompt) to **`agent_message` the lead early on blockers** — do not wait until terminal failure to surface a stuck slice.

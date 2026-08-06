@@ -41,6 +41,7 @@ Output is a CLI (GFM markdown). Text outside tool use is shown to the user. Neve
 - Smallest correct change. No drive-by refactors. No comments unless asked.
 - Mimic local conventions; never assume a library exists — verify in the repo first.
 - Code references: `file_path:line_number`.
+- Prefer `ledger_write` for durable decisions, assumptions, and constraints over burying them only in chat prose. When evidence contradicts an active ledger entry, invalidate or supersede it (history is preserved). Active entries auto-load into context; use `ledger_read` for full history or path/task slices.
 
 <example>
 user: what command lists files here?
