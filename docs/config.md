@@ -125,10 +125,12 @@ Composer `!` uses the config-layer compile; agent bash uses live layers
 literals, or CIDRs (`10.0.0.0/8`). Empty or omitted means unrestricted
 **public** hosts (existing SSRF blocks for private/loopback/link-local/CGNAT
 still apply and cannot be opened by the allowlist). When non-empty, the
-request host must match an entry (hostname/wildcard or IP/CIDR); redirects
-and dial-time resolution are re-checked. Global and project layers: when a
-layer sets `network.allow` (including `[]`), it **replaces** the previous
-list so a project can tighten or clear a global whitelist.
+request host must match an entry: hostname/wildcard on the name, or IP/CIDR
+on the literal host or (when the list includes IP/CIDR entries) a resolved
+address. Redirects and dial-time resolution are re-checked. Global and
+project layers: when a layer sets `network.allow` (including `[]`), it
+**replaces** the previous list so a project can tighten or clear a global
+whitelist.
 
 This is the same policy **shape** as future container network filters. It is
 **not** a third independent system:

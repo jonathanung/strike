@@ -178,16 +178,43 @@ func IPAllowed(ip net.IP, allow []string) bool {
 }
 
 // CheckNetworkAllow returns nil when host is permitted by allow.
-// Empty allow is unrestricted. Does not resolve hostnames for CIDR checks —
-// use CheckNetworkAllowIP at dial time for resolved addresses.
+// Empty allow is unrestricted. Hostname patterns match without DNS; when the
+// allowlist has IP/CIDR entries and host is not an IP literal, host is resolved
+// and any non-matching-only result is accepted if an address hits a CIDR/IP
+// entry. Dial-time CheckNetworkDialAllow still re-validates the concrete IP.
 func CheckNetworkAllow(host string, allow []string) error {
 	if len(allow) == 0 {
 		return nil
 	}
+	host = normalizeLookupHost(host)
+	if host == "" {
+		return fmt.Errorf("host %q is not on the network allowlist", host)
+	}
 	if HostAllowed(host, allow) {
 		return nil
 	}
-	return fmt.Errorf("host %q is not on the network allowlist", normalizeLookupHost(host))
+	// Hostname did not match name patterns; try DNS against IP/CIDR entries.
+	if net.ParseIP(host) == nil && allowHasIPOrCIDR(allow) {
+		ips, err := net.LookupIP(host)
+		if err != nil {
+			return fmt.Errorf("resolving host %q for network allowlist: %w", host, err)
+		}
+		for _, ip := range ips {
+			if IPAllowed(ip, allow) {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("host %q is not on the network allowlist", host)
+}
+
+func allowHasIPOrCIDR(allow []string) bool {
+	for _, entry := range allow {
+		if strings.Contains(entry, "/") || net.ParseIP(entry) != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // CheckNetworkDialAllow validates a concrete dial target. Hostname pattern

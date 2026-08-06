@@ -140,6 +140,20 @@ func TestCheckNetworkAllow(t *testing.T) {
 	}
 }
 
+func TestCheckNetworkAllowHostnameViaCIDR(t *testing.T) {
+	// localhost resolves to loopback; allowlist CIDR must match resolved IP.
+	allow := []string{"127.0.0.0/8", "::1/128"}
+	if err := CheckNetworkAllow("localhost", allow); err != nil {
+		t.Fatalf("localhost via CIDR: %v", err)
+	}
+	// Hostname-only allowlist must not require DNS for unrelated hosts.
+	if err := CheckNetworkAllow("no-such-host.invalid", []string{"example.com"}); err == nil {
+		t.Fatal("want deny without needing successful DNS")
+	} else if strings.Contains(err.Error(), "resolving") {
+		t.Fatalf("hostname-only allow should not resolve: %v", err)
+	}
+}
+
 func TestCloneNetworkAllow(t *testing.T) {
 	if CloneNetworkAllow(nil) != nil {
 		t.Fatal("nil")
