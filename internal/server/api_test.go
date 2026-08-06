@@ -40,17 +40,30 @@ func (h testHistory) Enqueue(string) <-chan error {
 	return ch
 }
 
-type testSettings struct{ saved chan [5]string }
+type testSettings struct {
+	saved     chan [5]string
+	defaults  host.UserDefaults
+	savedDial chan string
+	dialErr   error
+}
 
-func (testSettings) Defaults() host.UserDefaults { return host.UserDefaults{} }
+func (s testSettings) Defaults() host.UserDefaults { return s.defaults }
 
 func (s testSettings) SaveDefaults(provider, model, agent, effort, mode string) error {
-	s.saved <- [5]string{provider, model, agent, effort, mode}
+	if s.saved != nil {
+		s.saved <- [5]string{provider, model, agent, effort, mode}
+	}
 	return nil
 }
 func (testSettings) SaveTheme(string) error                        { return nil }
 func (testSettings) SavePresentation(string, string, string) error { return nil }
-func (testSettings) SaveConfigDials(string, string, string, string, string, string) error {
+func (s testSettings) SaveConfigDials(sandboxMode, notify, leanCode, deferTools, sessionWorktree, autoupdate string) error {
+	if s.dialErr != nil {
+		return s.dialErr
+	}
+	if s.savedDial != nil && sandboxMode != "" {
+		s.savedDial <- sandboxMode
+	}
 	return nil
 }
 func (testSettings) SaveAutoApproveDials(string, *[]string, string) error { return nil }
@@ -425,5 +438,156 @@ func TestSettingsRejectsUnknownAndOversizePayloads(t *testing.T) {
 				t.Fatalf("status = %d, want 400", res.Code)
 			}
 		})
+	}
+}
+
+func TestSandboxCapabilityDenyAndExplain(t *testing.T) {
+	// Deny path: no sandbox capability.
+	srv, err := New(Options{SessionDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/v1/sandbox", nil))
+	if res.Code != http.StatusNotImplemented || !strings.Contains(res.Body.String(), "sandbox capability unavailable") {
+		t.Fatalf("deny GET = %d %s", res.Code, res.Body.String())
+	}
+	res = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "/v1/sandbox", strings.NewReader(`{"mode":"read-only"}`)))
+	if res.Code != http.StatusNotImplemented {
+		t.Fatalf("deny PATCH = %d %s", res.Code, res.Body.String())
+	}
+
+	// Bootstrap advertises sandbox when Options.Sandbox is set.
+	ops := make(chan protocol.Op, 1)
+	live := NewLive("s1", t.TempDir(), nil, ops)
+	live.SetSandbox("read-only", "bwrap", true, []string{"github.com"}, "sandbox mode: read-only\nprofile:\ntest\n")
+	dials := make(chan string, 1)
+	settings := testSettings{
+		defaults:  host.UserDefaults{Sandbox: "workspace-write", PermissionMode: "default"},
+		savedDial: dials,
+	}
+	srv, err = New(Options{
+		SessionDir: t.TempDir(),
+		Live:       live,
+		Services:   &host.Services{Settings: settings},
+		Sandbox: &SandboxSnapshot{
+			Mode:         "read-only",
+			Backend:      "bwrap",
+			Available:    true,
+			NetworkAllow: []string{"github.com"},
+			Explain:      "sandbox mode: read-only\nprofile:\ntest\n",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	boot := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(boot, httptest.NewRequest(http.MethodGet, "/v1/bootstrap", nil))
+	if boot.Code != http.StatusOK || !strings.Contains(boot.Body.String(), `"sandbox":true`) {
+		t.Fatalf("bootstrap sandbox cap = %d %s", boot.Code, boot.Body.String())
+	}
+	if !strings.Contains(boot.Body.String(), `"sandbox":"read-only"`) {
+		t.Fatalf("bootstrap status missing sandbox: %s", boot.Body.String())
+	}
+
+	get := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/v1/sandbox", nil))
+	if get.Code != http.StatusOK {
+		t.Fatalf("GET sandbox = %d %s", get.Code, get.Body.String())
+	}
+	body := get.Body.String()
+	for _, want := range []string{
+		`"mode":"read-only"`,
+		`"backend":"bwrap"`,
+		`"available":true`,
+		`"github.com"`,
+		`sandbox mode: read-only`,
+		`"defaultMode":"workspace-write"`,
+		`"canChangeDefault":true`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("GET sandbox missing %s: %s", want, body)
+		}
+	}
+
+	// Status carries sandbox chrome.
+	st := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(st, httptest.NewRequest(http.MethodGet, "/v1/status", nil))
+	if st.Code != http.StatusOK || !strings.Contains(st.Body.String(), `"sandbox":"read-only"`) {
+		t.Fatalf("status = %d %s", st.Code, st.Body.String())
+	}
+
+	// PATCH default mode.
+	patch := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(patch, httptest.NewRequest(http.MethodPatch, "/v1/sandbox", strings.NewReader(`{"mode":"workspace-write"}`)))
+	if patch.Code != http.StatusOK {
+		t.Fatalf("PATCH sandbox = %d %s", patch.Code, patch.Body.String())
+	}
+	if got := <-dials; got != "workspace-write" {
+		t.Fatalf("saved dial = %q", got)
+	}
+}
+
+func TestSandboxPatchYoloOffRequiresIKnow(t *testing.T) {
+	dials := make(chan string, 1)
+	settings := testSettings{
+		defaults:  host.UserDefaults{PermissionMode: "yolo", Sandbox: "workspace-write"},
+		savedDial: dials,
+	}
+	srv, err := New(Options{
+		SessionDir: t.TempDir(),
+		Services:   &host.Services{Settings: settings},
+		Sandbox:    &SandboxSnapshot{Mode: "workspace-write", Available: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Deny without iKnow.
+	res := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "/v1/sandbox", strings.NewReader(`{"mode":"off"}`)))
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "iKnow") {
+		t.Fatalf("yolo+off without iKnow = %d %s", res.Code, res.Body.String())
+	}
+	select {
+	case got := <-dials:
+		t.Fatalf("unexpected save without iKnow: %q", got)
+	default:
+	}
+
+	// Allow with iKnow.
+	res = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "/v1/sandbox", strings.NewReader(`{"mode":"off","iKnow":true}`)))
+	if res.Code != http.StatusOK {
+		t.Fatalf("yolo+off with iKnow = %d %s", res.Code, res.Body.String())
+	}
+	if got := <-dials; got != "off" {
+		t.Fatalf("saved = %q", got)
+	}
+
+	// Settings PATCH also gates sandbox.
+	res = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "/v1/settings", strings.NewReader(`{"sandbox":"off"}`)))
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "iKnow") {
+		t.Fatalf("settings yolo+off = %d %s", res.Code, res.Body.String())
+	}
+
+	// Unknown mode rejected.
+	res = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "/v1/sandbox", strings.NewReader(`{"mode":"nope"}`)))
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "unknown sandbox") {
+		t.Fatalf("unknown mode = %d %s", res.Code, res.Body.String())
+	}
+
+	// PATCH without settings capability.
+	srv2, err := New(Options{SessionDir: t.TempDir(), Sandbox: &SandboxSnapshot{Mode: "off"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res = httptest.NewRecorder()
+	srv2.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "/v1/sandbox", strings.NewReader(`{"mode":"read-only"}`)))
+	if res.Code != http.StatusNotImplemented || !strings.Contains(res.Body.String(), "settings capability unavailable") {
+		t.Fatalf("patch without settings = %d %s", res.Code, res.Body.String())
 	}
 }

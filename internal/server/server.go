@@ -57,6 +57,9 @@ type Options struct {
 	AllowCIDRs []*net.IPNet
 	// Services exposes optional frontend host capabilities.
 	Services *host.Services
+	// Sandbox enables the sandbox capability and seeds live roots that do not
+	// call Live.SetSandbox themselves. Nil keeps capabilities.sandbox false.
+	Sandbox *SandboxSnapshot
 }
 
 // Server is an HTTP server for session attach and optional live cockpit.
@@ -162,6 +165,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/models", s.handleModels)
 	s.mux.HandleFunc("GET /v1/history", s.handleHistory)
 	s.mux.HandleFunc("PATCH /v1/settings", s.handleSettings)
+	s.mux.HandleFunc("GET /v1/sandbox", s.handleSandboxGet)
+	s.mux.HandleFunc("PATCH /v1/sandbox", s.handleSandboxPatch)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/children", s.handleSessionChildren)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/fork", s.handleSessionFork)
 	s.mux.HandleFunc("PATCH /v1/sessions/{id}", s.handleSessionRename)
