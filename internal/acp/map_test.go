@@ -101,6 +101,17 @@ func TestEventUpdatesTextAndTool(t *testing.T) {
 	}
 }
 
+func TestEventUpdatesEngineError(t *testing.T) {
+	ups := eventUpdates(protocol.EngineError{Message: "boom"})
+	if len(ups) != 1 || ups[0]["sessionUpdate"] != "agent_message_chunk" {
+		t.Fatalf("engine error = %#v", ups)
+	}
+	c, _ := ups[0]["content"].(map[string]any)
+	if !strings.Contains(c["text"].(string), "boom") {
+		t.Fatalf("text = %#v", c)
+	}
+}
+
 func TestDecisionFromOption(t *testing.T) {
 	if got := decisionFromOption("allow-once"); got != protocol.DecisionOnce {
 		t.Fatalf("once = %v", got)

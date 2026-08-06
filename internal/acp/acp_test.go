@@ -276,6 +276,63 @@ func TestServerPermissionAsk(t *testing.T) {
 	}
 }
 
+func TestServerQuestionAskedDismisses(t *testing.T) {
+	opsCh := make(chan protocol.Op, 8)
+	submit := func(ctx context.Context, op protocol.Op) error {
+		select {
+		case opsCh <- op:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	events := make(chan protocol.Event, 8)
+	pr, pw := io.Pipe()
+	out := &safeBuffer{}
+	srv := New(pr, out, submit, Options{SessionID: "s1", CWD: "/tmp"})
+
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(context.Background(), events) }()
+
+	writeLine(t, pw, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}`)
+	waitForID(t, out, float64(1), 2*time.Second)
+	writeLine(t, pw, `{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/tmp","mcpServers":[]}}`)
+	waitForID(t, out, float64(2), 2*time.Second)
+	writeLine(t, pw, `{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"s1","prompt":[{"type":"text","text":"q"}]}}`)
+	select {
+	case <-opsCh: // UserInput
+	case <-time.After(2 * time.Second):
+		t.Fatal("no user input")
+	}
+
+	events <- protocol.QuestionAsked{RequestID: "q-1", Questions: []protocol.QuestionPrompt{{Question: "ok?"}}}
+	select {
+	case op := <-opsCh:
+		qr, ok := op.(protocol.QuestionReply)
+		if !ok || qr.RequestID != "q-1" {
+			t.Fatalf("op = %#v", op)
+		}
+		if len(qr.Answers) != 0 {
+			t.Fatalf("want empty dismiss answers, got %#v", qr.Answers)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no question reply")
+	}
+
+	events <- protocol.TurnCompleted{StopReason: "end_turn"}
+	waitForID(t, out, float64(3), 3*time.Second)
+	writeLine(t, pw, `{"jsonrpc":"2.0","id":9,"method":"shutdown"}`)
+	_ = pw.Close()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("hang")
+	}
+}
+
 func TestServerUnknownMethod(t *testing.T) {
 	submit := func(ctx context.Context, op protocol.Op) error { return nil }
 	in := strings.NewReader(

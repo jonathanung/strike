@@ -262,6 +262,11 @@ func eventUpdates(ev protocol.Event) []map[string]any {
 			"size":          e.Used.N, // full window size not always on this event
 		}
 		return []map[string]any{u}
+	case protocol.EngineError:
+		if strings.TrimSpace(e.Message) == "" {
+			return nil
+		}
+		return []map[string]any{contentChunk("agent_message_chunk", "error: "+e.Message)}
 	default:
 		return nil
 	}

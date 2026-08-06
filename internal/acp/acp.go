@@ -81,8 +81,9 @@ type Server struct {
 	sessionReady bool // session/new completed
 	promptActive bool
 	cancelPrompt context.CancelFunc
-	turnDone     chan string // stop reason from TurnCompleted
-	// lastPermissionCallID ties PermissionAsked to a tool call when metadata has it.
+	promptCtx    context.Context // cancelled on session/cancel; used for client RPCs
+	turnDone     chan string     // stop reason from TurnCompleted
+	// lastToolCallID ties PermissionAsked to a tool call when metadata has it.
 	lastToolCallID string
 }
 
@@ -425,6 +426,7 @@ func (s *Server) startPrompt(ctx context.Context, id json.RawMessage, params jso
 	s.mu.Lock()
 	s.promptActive = true
 	s.cancelPrompt = cancel
+	s.promptCtx = promptCtx
 	s.turnDone = turnDone
 	s.mu.Unlock()
 
@@ -436,6 +438,7 @@ func (s *Server) startPrompt(ctx context.Context, id json.RawMessage, params jso
 		s.mu.Lock()
 		s.promptActive = false
 		s.cancelPrompt = nil
+		s.promptCtx = nil
 		s.turnDone = nil
 		s.mu.Unlock()
 		if errors.Is(err, context.Canceled) {
@@ -452,6 +455,7 @@ func (s *Server) startPrompt(ctx context.Context, id json.RawMessage, params jso
 			s.mu.Lock()
 			s.promptActive = false
 			s.cancelPrompt = nil
+			s.promptCtx = nil
 			s.turnDone = nil
 			s.mu.Unlock()
 		}()
@@ -515,6 +519,9 @@ func (s *Server) handleEvent(ctx context.Context, ev protocol.Event) error {
 		}
 	case protocol.PermissionAsked:
 		return s.handlePermissionAsked(ctx, e)
+	case protocol.QuestionAsked:
+		// No ACP elicitation mapping yet — dismiss so the turn cannot hang.
+		return s.handleQuestionAsked(ctx, e)
 	}
 
 	s.mu.Lock()
@@ -539,18 +546,48 @@ func (s *Server) handleEvent(ctx context.Context, ev protocol.Event) error {
 	return nil
 }
 
+func (s *Server) handleQuestionAsked(ctx context.Context, e protocol.QuestionAsked) error {
+	// Empty answers = dismiss (engine interrupts/settles the question tool).
+	submitCtx, cancel := context.WithTimeout(ctx, s.opts.SubmitTimeout)
+	defer cancel()
+	if err := s.submit(submitCtx, protocol.QuestionReply{RequestID: e.RequestID}); err != nil {
+		return nil // best-effort; turn may still complete via cancel
+	}
+	s.mu.Lock()
+	sid := s.opts.SessionID
+	ready := s.sessionReady
+	s.mu.Unlock()
+	if !ready {
+		return nil
+	}
+	if sid == "" {
+		sid = "strike"
+	}
+	// Surface a short note so the client UI is not silent.
+	return s.notify("session/update", SessionUpdateNotification{
+		SessionID: sid,
+		Update: contentChunk("agent_thought_chunk",
+			"question tool dismissed (ACP adapter does not map elicitation yet)"),
+	})
+}
+
 func (s *Server) handlePermissionAsked(ctx context.Context, e protocol.PermissionAsked) error {
 	s.mu.Lock()
 	sid := s.opts.SessionID
 	toolID := s.lastToolCallID
 	active := s.promptActive
+	promptCtx := s.promptCtx
 	s.mu.Unlock()
 	if sid == "" {
 		sid = "strike"
 	}
+	waitCtx := ctx
+	if promptCtx != nil {
+		waitCtx = promptCtx
+	}
 	if !active {
 		// No prompt waiter — auto-reject so the engine does not hang forever.
-		return s.submitPermission(ctx, e.RequestID, protocol.DecisionReject)
+		return s.submitPermission(waitCtx, e.RequestID, protocol.DecisionReject)
 	}
 
 	// Prefer call id from metadata when present.
@@ -585,23 +622,23 @@ func (s *Server) handlePermissionAsked(ctx context.Context, e protocol.Permissio
 		Options: defaultPermissionOptions(),
 	}
 
-	res, err := s.callClient(ctx, "session/request_permission", params, s.opts.PermissionTimeout)
+	res, err := s.callClient(waitCtx, "session/request_permission", params, s.opts.PermissionTimeout)
 	if err != nil {
 		// On timeout/cancel, reject so the turn can finish.
-		_ = s.submitPermission(ctx, e.RequestID, protocol.DecisionReject)
+		_ = s.submitPermission(context.Background(), e.RequestID, protocol.DecisionReject)
 		return nil
 	}
 	var result RequestPermissionResult
 	if err := json.Unmarshal(res, &result); err != nil {
-		_ = s.submitPermission(ctx, e.RequestID, protocol.DecisionReject)
+		_ = s.submitPermission(context.Background(), e.RequestID, protocol.DecisionReject)
 		return nil
 	}
 	if result.Outcome.Outcome == "cancelled" {
-		_ = s.submitPermission(ctx, e.RequestID, protocol.DecisionReject)
+		_ = s.submitPermission(context.Background(), e.RequestID, protocol.DecisionReject)
 		return nil
 	}
 	dec := decisionFromOption(result.Outcome.OptionID)
-	return s.submitPermission(ctx, e.RequestID, dec)
+	return s.submitPermission(context.Background(), e.RequestID, dec)
 }
 
 func (s *Server) submitPermission(ctx context.Context, requestID string, dec protocol.Decision) error {
