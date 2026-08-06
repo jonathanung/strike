@@ -1,7 +1,18 @@
 # Config
 
-`~/.strike/config` (global) merged with `./.strike/config` (project), both
-JSON.
+`~/.strike/config` (global) merged with `./.strike/config` (project). Both
+accept **JSON or JSONC** (`//` line comments and `/* block comments */`, same
+stripper as `mcp.jsonc` / `providers.jsonc` / `keybinds.jsonc`). An optional
+top-level `"$schema"` key is **ignored** at load (editor autocomplete only;
+Strike does not ship or fetch a schema URL).
+
+**Round-trip / save policy:** hand-edited comments and `$schema` are kept on
+disk until a **programmatic write** runs (`SetGlobalDefaults`, theme /
+presentation / dials / scheduler presets, `AppendProjectPermission`, etc.).
+Those paths read JSONC, then rewrite **pretty-printed pure JSON** via
+`encoding/json` — comments and `$schema` are dropped. Prefer keeping durable
+commentary in a sibling note, or avoid `/settings`-style writers if you need
+comments to survive.
 
 **Symlinks:** `~/.strike` and `<project>/.strike` may be directory symlinks
 (state lives elsewhere). Strike resolves them before opening history/memory/
@@ -31,8 +42,11 @@ empty `~/.strike` directories alone do not suppress first launch.
 `strike exec`, `auth`, `serve`, `version`, and `upgrade` neither display nor
 write this file. Manual `/ftue` remains available after acknowledgement.
 
-```json
+```jsonc
+// ~/.strike/config or ./.strike/config — JSONC comments allowed
 {
+  // Optional editor hint; ignored by Strike at load
+  "$schema": "https://example.invalid/strike-config.schema.json",
   "provider": "anthropic",
   "model": "claude-sonnet-5",
   "effort": "high",

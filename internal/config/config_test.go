@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jonathanung/strike-cli/internal/permission"
@@ -508,6 +509,192 @@ func TestLoadMalformed(t *testing.T) {
 	}
 	if _, err := Load(t.TempDir()); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestLoadJSONCCommentsAndSchema(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Line + block comments, $schema ignored, disable-default still parsed.
+	globalBody := []byte(`{
+  // editor DX only
+  "$schema": "https://example.invalid/strike-config.schema.json",
+  "provider": "openai", // preferred
+  "model": "gpt-5.5",
+  /* block comment */
+  "disable-default-anthropic": true,
+  "leanCode": "full"
+}
+`)
+	if err := os.WriteFile(global, globalBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	work := t.TempDir()
+	project := filepath.Join(work, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(project), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	projectBody := []byte(`// project overlay
+{
+  "$schema": "https://example.invalid/other.json",
+  "model": "gpt-5",
+  "theme": "nord"
+}
+`)
+	if err := os.WriteFile(project, projectBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Provider != "openai" {
+		t.Errorf("Provider = %q, want openai", cfg.Provider)
+	}
+	if cfg.Model != "gpt-5" {
+		t.Errorf("Model = %q, want gpt-5 (project overlay)", cfg.Model)
+	}
+	if cfg.Theme != "nord" {
+		t.Errorf("Theme = %q, want nord", cfg.Theme)
+	}
+	if cfg.LeanCode != "full" {
+		t.Errorf("LeanCode = %q, want full", cfg.LeanCode)
+	}
+	if !cfg.IsBuiltinProviderDisabled("anthropic") {
+		t.Error("expected anthropic disabled via disable-default-anthropic in JSONC")
+	}
+}
+
+func TestLoadJSONCUnterminatedBlockComment(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{ /* never closed`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(""); err == nil {
+		t.Fatal("expected error for unterminated block comment")
+	}
+}
+
+func TestReadGlobalDefaultsJSONC(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := GlobalPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`// defaults
+{
+  "$schema": "https://example.invalid/s.json",
+  "provider": "xai",
+  "model": "grok-4.5"
+}
+`)
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := ReadGlobalDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Provider != "xai" || cfg.Model != "grok-4.5" {
+		t.Fatalf("got provider=%q model=%q", cfg.Provider, cfg.Model)
+	}
+}
+
+func TestSetGlobalDefaultsRewritesJSONCToJSON(t *testing.T) {
+	// Programmatic save reads JSONC then rewrites pure JSON (comments/$schema dropped).
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := GlobalPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	seed := []byte(`// keep until save
+{
+  "$schema": "https://example.invalid/s.json",
+  "provider": "anthropic",
+  "model": "old",
+  "systemPrompt": "keep me"
+}
+`)
+	if err := os.WriteFile(path, seed, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetGlobalDefaults("openai", "new-model", "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !json.Valid(data) {
+		t.Fatalf("after save, config must be pure JSON: %s", data)
+	}
+	text := string(data)
+	if strings.Contains(text, "//") || strings.Contains(text, "$schema") {
+		t.Fatalf("save must drop comments and $schema, got:\n%s", text)
+	}
+	var got Config
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Provider != "openai" || got.Model != "new-model" {
+		t.Errorf("provider/model = %q/%q", got.Provider, got.Model)
+	}
+	if got.SystemPrompt != "keep me" {
+		t.Errorf("SystemPrompt = %q, want preserved", got.SystemPrompt)
+	}
+}
+
+func TestAppendProjectPermissionRewritesJSONCToJSON(t *testing.T) {
+	work := t.TempDir()
+	path := ProjectPath(work)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	seed := []byte(`/* project */
+{
+  "$schema": "https://example.invalid/p.json",
+  "theme": "dracula"
+}
+`)
+	if err := os.WriteFile(path, seed, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rule := permission.Rule{Permission: "bash", Pattern: "go *", Action: permission.Allow}
+	if err := AppendProjectPermission(work, rule); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !json.Valid(data) {
+		t.Fatalf("after append, config must be pure JSON: %s", data)
+	}
+	if strings.Contains(string(data), "/*") || strings.Contains(string(data), "$schema") {
+		t.Fatalf("append must drop comments and $schema, got:\n%s", data)
+	}
+	var got Config
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Theme != "dracula" {
+		t.Errorf("Theme = %q, want preserved", got.Theme)
+	}
+	if len(got.Permissions) != 1 || got.Permissions[0].Permission != "bash" {
+		t.Fatalf("permissions = %+v", got.Permissions)
 	}
 }
 
