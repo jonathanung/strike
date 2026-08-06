@@ -278,6 +278,7 @@ or config `providers` — see [config.md](config.md).
 ./strike --telemetry             # ensure local system metrics pane (on by default)
 ./strike exec "fix the flaky test"   # one-shot headless turn → stdout
 ./strike exec -                  # read prompt from stdin
+./strike mcp-serve --provider echo --auto   # MCP server (stdio) for hosts
 ```
 
 System telemetry (local host CPU/RAM/disk only — not cloud analytics) is **on
@@ -291,6 +292,26 @@ question prompts cannot be answered interactively in exec; asks are rejected
 unless `--auto` or `--dangerously-skip-permissions` is set
 (configured/agent denies still apply). Full flag list:
 [install.md](install.md) or `strike --help`.
+
+### MCP server mode (`strike mcp-serve`)
+
+Exposes strike as a tools-only [MCP](https://modelcontextprotocol.io) server on
+stdio so hosts (Claude Code, Codex, …) can delegate work via a `strike_task`
+tool. Each call runs one headless turn (same engine path as `strike exec`) and
+returns the assistant summary. Wire traffic is stdout; diagnostics go to
+stderr. Same provider/model/effort/sandbox/`--auto` flags as exec. Example host
+config:
+
+```json
+{
+  "mcpServers": {
+    "strike": {
+      "command": "strike",
+      "args": ["mcp-serve", "--provider", "anthropic", "--auto"]
+    }
+  }
+}
+```
 
 ## UI
 
