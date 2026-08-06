@@ -18,9 +18,9 @@ import (
 //   - write/edit deny "*" → NoWorkspaceWrite (no writable workspace bind)
 //   - write/edit deny globs → DenyWriteGlobs + expanded DenyWritePaths
 //   - Host networking on by default (Policy.NoNetwork zero value). Opt into
-//     OS network isolation only when both webfetch and mcp are hard-Deny on
-//     "*" (patterned rules do not flip full-network posture). Host/CIDR
-//     allowlists remain #527.
+//     OS network isolation only when webfetch, websearch, and mcp are all
+//     hard-Deny on "*" (patterned rules do not flip full-network posture).
+//     Host/CIDR allowlists remain #527.
 //
 // Mode upgrades (yolo / accept-edits) are not applied: the OS boundary is
 // independent of ask-prompt posture. ModeOff returns a minimal policy.
@@ -34,11 +34,12 @@ func CompileSandbox(mode sandbox.Mode, workDir string, sets ...Ruleset) sandbox.
 	}
 
 	// Zero-value Policy keeps host networking (gh, git push, package managers).
-	// Opt into --unshare-net / seatbelt network deny only with an explicit dual
-	// deny on the network-capable tool families.
+	// Opt into --unshare-net / seatbelt network deny only with an explicit
+	// deny on every network-capable tool family.
 	wf := Evaluate("webfetch", "*", sets...)
+	ws := Evaluate("websearch", "*", sets...)
 	mcp := Evaluate("mcp", "*", sets...)
-	p.NoNetwork = wf == Deny && mcp == Deny
+	p.NoNetwork = wf == Deny && ws == Deny && mcp == Deny
 
 	if Evaluate("write", "*", sets...) == Deny || Evaluate("edit", "*", sets...) == Deny {
 		p.NoWorkspaceWrite = true

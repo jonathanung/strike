@@ -44,7 +44,7 @@ var knownPermissions = map[string]struct{}{
 	"task_interrupt": {}, "wait": {}, "agent_roster": {}, "agent_ownership": {},
 	"agent_message": {}, "agent_broadcast": {}, "agent_thread": {},
 	"team_task": {}, "patch_collab": {}, "delegate": {},
-	"webfetch": {}, "todowrite": {}, "todoread": {},
+	"webfetch": {}, "websearch": {}, "todowrite": {}, "todoread": {},
 	"memory_write": {}, "memory_read": {}, "issue_write": {}, "issue_read": {},
 	"plan_write": {}, "plan_read": {}, "plan_delegate": {},
 	"artifact_write": {}, "artifact_read": {},
@@ -126,6 +126,7 @@ func Defaults() Ruleset {
 		// First-class delegation lifecycle (create/get/list/transition).
 		{Permission: "delegate", Pattern: "*", Action: Allow},
 		{Permission: "webfetch", Pattern: "*", Action: Ask},
+		{Permission: "websearch", Pattern: "*", Action: Ask},
 		{Permission: "todowrite", Pattern: "*", Action: Allow},
 		{Permission: "todoread", Pattern: "*", Action: Allow},
 		{Permission: "memory_write", Pattern: "*", Action: Allow},

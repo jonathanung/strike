@@ -98,7 +98,7 @@ func TestCompileSandboxNetworkDefaultOn(t *testing.T) {
 	}
 }
 
-func TestCompileSandboxNetworkOffOnlyOnDualDeny(t *testing.T) {
+func TestCompileSandboxNetworkOffOnlyOnAllNetworkToolDeny(t *testing.T) {
 	wd := t.TempDir()
 	// Single-family deny must not air-gap bash (webfetch tool deny ≠ no git).
 	pWF := CompileSandbox(sandbox.ModeWorkspaceWrite, wd, Defaults(), Ruleset{
@@ -113,23 +113,33 @@ func TestCompileSandboxNetworkOffOnlyOnDualDeny(t *testing.T) {
 	if !pMCP.NetworkEnabled() {
 		t.Fatal("mcp deny alone must keep bash network on")
 	}
-	// Both hard-deny on * → --unshare-net / no network-*.
-	pBoth := CompileSandbox(sandbox.ModeWorkspaceWrite, wd, Defaults(), Ruleset{
+	// webfetch+mcp deny without websearch still keeps network (websearch Ask).
+	pTwo := CompileSandbox(sandbox.ModeWorkspaceWrite, wd, Defaults(), Ruleset{
 		{Permission: "webfetch", Pattern: "*", Action: Deny},
 		{Permission: "mcp", Pattern: "*", Action: Deny},
 	})
-	if pBoth.NetworkEnabled() || !pBoth.NoNetwork {
-		t.Fatal("webfetch+mcp deny * should disable bash network")
+	if !pTwo.NetworkEnabled() {
+		t.Fatal("webfetch+mcp deny without websearch must keep bash network on")
 	}
-	// Patterned deny must not flip full-network posture after dual deny on *.
+	// All three hard-deny on * → --unshare-net / no network-*.
+	pAll := CompileSandbox(sandbox.ModeWorkspaceWrite, wd, Defaults(), Ruleset{
+		{Permission: "webfetch", Pattern: "*", Action: Deny},
+		{Permission: "websearch", Pattern: "*", Action: Deny},
+		{Permission: "mcp", Pattern: "*", Action: Deny},
+	})
+	if pAll.NetworkEnabled() || !pAll.NoNetwork {
+		t.Fatal("webfetch+websearch+mcp deny * should disable bash network")
+	}
+	// Patterned allow must not flip full-network posture after triple deny on *.
 	// (Evaluate("*") stays Deny; patterned rules do not match subject "*".)
 	pPat := CompileSandbox(sandbox.ModeWorkspaceWrite, wd, Defaults(), Ruleset{
 		{Permission: "webfetch", Pattern: "*", Action: Deny},
+		{Permission: "websearch", Pattern: "*", Action: Deny},
 		{Permission: "mcp", Pattern: "*", Action: Deny},
 		{Permission: "webfetch", Pattern: "https://example.com/*", Action: Allow},
 	})
 	if pPat.NetworkEnabled() {
-		t.Fatal("patterned webfetch allow must not re-open full bash network after dual deny")
+		t.Fatal("patterned webfetch allow must not re-open full bash network after triple deny")
 	}
 }
 
@@ -155,15 +165,16 @@ func TestCompileSandboxDefaultNetworkOmitsUnshareNet(t *testing.T) {
 	if strings.Contains(bareJoined, "\x00--unshare-net\x00") {
 		t.Fatalf("bare Policy must omit --unshare-net (NoNetwork zero value): %#v", bare)
 	}
-	// Dual deny still gets isolation.
+	// Triple network-tool deny still gets isolation.
 	off := CompileSandbox(sandbox.ModeWorkspaceWrite, wd, Defaults(), Ruleset{
 		{Permission: "webfetch", Pattern: "*", Action: Deny},
+		{Permission: "websearch", Pattern: "*", Action: Deny},
 		{Permission: "mcp", Pattern: "*", Action: Deny},
 	})
 	offArgv := sandbox.Wrap([]string{"true"}, off)
 	offJoined := "\x00" + strings.Join(offArgv, "\x00") + "\x00"
 	if !strings.Contains(offJoined, "\x00--unshare-net\x00") {
-		t.Fatalf("dual-deny policy must include --unshare-net: %#v", offArgv)
+		t.Fatalf("triple-deny policy must include --unshare-net: %#v", offArgv)
 	}
 }
 

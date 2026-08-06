@@ -1,7 +1,7 @@
 // Package tool defines the tool contract and the built-in tool set
 // (read/glob/grep/edit/write/apply_patch/move/delete/bash/task/task_status/task_read/
 // task_message/task_interrupt/delegate/wait/agent_roster/agent_ownership/agent_message/
-// agent_broadcast/agent_thread/team_task/webfetch/todowrite/todoread/
+// agent_broadcast/agent_thread/team_task/webfetch/websearch/todowrite/todoread/
 // memory_write/memory_read/issue_write/issue_read/plan_write/plan_read/plan_delegate/
 // artifact_write/artifact_read/notebook_edit/sleep/skill/question/enter_plan_mode/
 // exit_plan_mode/phase_done/toolsearch/definition/references/symbols/diagnostics).
@@ -727,10 +727,14 @@ type Context struct {
 	// network). When non-zero extras are present or WorkDir is set on the
 	// policy, bash uses it directly; otherwise SandboxMode is resolved.
 	Sandbox sandbox.Policy
-	// NetworkAllow is the optional host/CIDR allowlist for webfetch (from
-	// config network.allow). Empty means unrestricted public hosts; SSRF
+	// NetworkAllow is the optional host/CIDR allowlist for webfetch/websearch
+	// (from config network.allow). Empty means unrestricted public hosts; SSRF
 	// private/loopback blocks still apply. Nil/empty Context is unrestricted.
 	NetworkAllow []string
+	// WebSearch holds backend settings from config webSearch (provider, API
+	// key env, optional base URL). Empty means auto-detect from the
+	// environment; missing setup returns structured guidance from websearch.
+	WebSearch WebSearchSettings
 	// Scheduler, when non-nil, gates bash via named pools after permission
 	// approval and before process start. Shared across roots/children in one
 	// Strike process. nil preserves unlimited (no admission wait).
