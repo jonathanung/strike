@@ -70,6 +70,8 @@ type assembled struct {
 	mcpClose func() error
 	// lspClose stops language server sessions (stdio; process-scoped).
 	lspClose func() error
+	// harnessClose stops persistent external harness workers.
+	harnessClose func() error
 	// schedulerClose shuts down the shared in-process admission controller.
 	schedulerClose func()
 	// spawnRoot creates additional concurrent root engines (interactive multi-root).
@@ -417,14 +419,34 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	harnessRegistry := harness.NewRegistry()
 	// Config only creates external subprocess harnesses. A custom Strike binary
 	// may register embedded Go functions here before validating agent references.
+	var harnessClosers []func() error
 	for name, hc := range cfg.Harnesses {
 		adapter, err := external.Command(external.Config{Command: hc.Command, Args: hc.Args, Env: hc.Env})
 		if err != nil {
 			return nil, fmt.Errorf("configuring harness %q: %w", name, err)
 		}
-		h, err := external.New(name, adapter)
-		if err != nil {
-			return nil, fmt.Errorf("configuring harness %q: %w", name, err)
+		var h harness.Func
+		if config.IsPersistentHarness(hc) {
+			opts := external.WorkerOptions{
+				MaxConcurrent: hc.MaxConcurrent,
+				MaxRestarts:   hc.MaxRestarts,
+			}
+			if hc.IdleTimeoutMs != 0 {
+				opts.IdleTimeout = time.Duration(hc.IdleTimeoutMs) * time.Millisecond
+			}
+			var closeFn func() error
+			h, closeFn, err = external.NewPersistent(name, adapter, opts)
+			if err != nil {
+				return nil, fmt.Errorf("configuring harness %q: %w", name, err)
+			}
+			if closeFn != nil {
+				harnessClosers = append(harnessClosers, closeFn)
+			}
+		} else {
+			h, err = external.New(name, adapter)
+			if err != nil {
+				return nil, fmt.Errorf("configuring harness %q: %w", name, err)
+			}
 		}
 		harnessRegistry.Register(name, h)
 	}
@@ -916,6 +938,15 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		},
 		lspClose: func() error {
 			return lspMgr.Close()
+		},
+		harnessClose: func() error {
+			var first error
+			for i := len(harnessClosers) - 1; i >= 0; i-- {
+				if err := harnessClosers[i](); err != nil && first == nil {
+					first = err
+				}
+			}
+			return first
 		},
 		schedulerClose: sched.Close,
 		spawnRoot:      spawn,

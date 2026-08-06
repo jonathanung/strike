@@ -237,6 +237,42 @@ type HarnessConfig struct {
 	Command string            `json:"command"`
 	Args    []string          `json:"args,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
+	// Mode selects process lifecycle: empty/"oneshot" (default) starts a new
+	// process per invocation; "persistent" reuses one worker across invocations.
+	Mode string `json:"mode,omitempty"`
+	// MaxConcurrent bounds in-flight invocations on one persistent worker.
+	// Zero means default (1). Only applies when Mode is persistent.
+	MaxConcurrent int `json:"maxConcurrent,omitempty"`
+	// IdleTimeoutMs shuts down an idle persistent worker. Zero means default
+	// (60000). Negative disables idle eviction. Ignored for oneshot.
+	IdleTimeoutMs int `json:"idleTimeoutMs,omitempty"`
+	// MaxRestarts bounds crash/start recovery for a persistent worker before
+	// it is disabled for the process lifetime. Zero means default (3).
+	// Negative means unlimited. Ignored for oneshot.
+	MaxRestarts int `json:"maxRestarts,omitempty"`
+}
+
+// HarnessModeOneshot is the default: one process per invocation.
+const HarnessModeOneshot = "oneshot"
+
+// HarnessModePersistent reuses one subprocess across invocations.
+const HarnessModePersistent = "persistent"
+
+// NormalizeHarnessMode returns the canonical mode token.
+func NormalizeHarnessMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", HarnessModeOneshot:
+		return HarnessModeOneshot
+	case HarnessModePersistent, "worker":
+		return HarnessModePersistent
+	default:
+		return strings.ToLower(strings.TrimSpace(mode))
+	}
+}
+
+// IsPersistentHarness reports whether cfg requests persistent-worker mode.
+func IsPersistentHarness(cfg HarnessConfig) bool {
+	return NormalizeHarnessMode(cfg.Mode) == HarnessModePersistent
 }
 
 // MCPConfig is the JSON "mcp" object.
@@ -789,6 +825,19 @@ func read(path string) (Config, error) {
 		if strings.TrimSpace(harness.Command) == "" {
 			return Config{}, fmt.Errorf("%s: harness %q command is empty", path, name)
 		}
+		mode := NormalizeHarnessMode(harness.Mode)
+		if mode != HarnessModeOneshot && mode != HarnessModePersistent {
+			return Config{}, fmt.Errorf("%s: harness %q mode %q is invalid (want oneshot or persistent)", path, name, harness.Mode)
+		}
+		if harness.MaxConcurrent < 0 {
+			return Config{}, fmt.Errorf("%s: harness %q maxConcurrent must be >= 0", path, name)
+		}
+		// Normalize mode token in the loaded layer for stable merge/clone.
+		harness.Mode = mode
+		if mode == HarnessModeOneshot {
+			harness.Mode = ""
+		}
+		c.Harnesses[name] = harness
 	}
 	// Scheduler: validate limits/rules and stamp command provenance with path.
 	if err := normalizeSchedulerLayer(&c.Scheduler, path); err != nil {
@@ -1305,7 +1354,14 @@ func cloneHarnesses(in map[string]HarnessConfig) map[string]HarnessConfig {
 }
 
 func cloneHarnessConfig(in HarnessConfig) HarnessConfig {
-	out := HarnessConfig{Command: in.Command, Args: append([]string(nil), in.Args...)}
+	out := HarnessConfig{
+		Command:       in.Command,
+		Args:          append([]string(nil), in.Args...),
+		Mode:          in.Mode,
+		MaxConcurrent: in.MaxConcurrent,
+		IdleTimeoutMs: in.IdleTimeoutMs,
+		MaxRestarts:   in.MaxRestarts,
+	}
 	if in.Env != nil {
 		out.Env = make(map[string]string, len(in.Env))
 		for name, value := range in.Env {

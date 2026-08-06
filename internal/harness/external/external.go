@@ -120,6 +120,12 @@ func (w wireRequest) providerRequest() provider.Request {
 	return r
 }
 
+// terminal is one finished invocation outcome (oneshot or persistent).
+type terminal struct {
+	result harness.Result
+	err    error
+}
+
 func (e *runner) run(input harness.Input, p harness.Provider, emit harness.Emit) (harness.Result, error) {
 	ctx := input.Context
 	if ctx == nil {
@@ -162,10 +168,6 @@ func (e *runner) run(input harness.Input, p harness.Provider, emit harness.Emit)
 		return harness.Result{}, err
 	}
 
-	type terminal struct {
-		result harness.Result
-		err    error
-	}
 	done := make(chan terminal, 1)
 	go func() {
 		s := bufio.NewScanner(pipe)

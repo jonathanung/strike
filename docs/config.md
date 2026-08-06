@@ -875,6 +875,43 @@ them by name).
 A missing or dead language server returns a soft message in the tool result
 (never takes down the session). Default permission is Allow (read-only).
 
+## External harnesses (`harnesses`)
+
+Named subprocess harnesses used by agent frontmatter `harness: <name>`. See
+[harnesses.md](harnesses.md) for the full protocol and SDK notes.
+
+```json
+{
+  "harnesses": {
+    "choose-best-js": {
+      "command": "node",
+      "args": ["./examples/harnesses/choose-best.mjs"]
+    },
+    "heavy-runtime": {
+      "command": "./bin/my-harness-worker",
+      "mode": "persistent",
+      "maxConcurrent": 2,
+      "idleTimeoutMs": 120000,
+      "maxRestarts": 3
+    }
+  }
+}
+```
+
+| Field | Default | Notes |
+|---|---|---|
+| `command` | required | Executable |
+| `args` | `[]` | Argv tail |
+| `env` | `{}` | Env overlay (never logged) |
+| `mode` | `oneshot` | `oneshot` or `persistent` |
+| `maxConcurrent` | `1` | Persistent only; in-flight invocation cap |
+| `idleTimeoutMs` | `60000` | Persistent idle shutdown; negative disables |
+| `maxRestarts` | `3` | Persistent crash recovery budget; negative unlimited |
+
+Project definitions replace global entries with the same name. Unknown `mode`
+fails config load. Persistent workers are still trusted native commands (not
+OS-sandboxed); brokered tools keep normal permission/sandbox policy.
+
 ## MCP servers (stdio + HTTP)
 
 Connect external [Model Context Protocol](https://modelcontextprotocol.io)
