@@ -32,10 +32,14 @@ import (
 type Agent struct {
 	Name        string
 	Description string
-	Provider    string
-	Model       string
-	Effort      protocol.Effort
-	Prompt      string
+	// Capabilities are optional specialty tags for capability-aware routing
+	// (#778). Parsed from frontmatter "capabilities: a, b" or "specialty: a".
+	// The agent name is always an implicit capability at route time.
+	Capabilities []string
+	Provider     string
+	Model        string
+	Effort       protocol.Effort
+	Prompt       string
 	// Harness selects the function used when this agent runs through task.
 	// Empty and "default" use the built-in child model/tool loop.
 	Harness     string
@@ -267,15 +271,52 @@ func parseAgentFile(path string) (*Agent, error) {
 	}
 	provider, model := resolveAgentModel(meta["provider"], meta["model"])
 	return &Agent{
-		Name:        name,
-		Description: meta["description"],
-		Provider:    provider,
-		Model:       model,
-		Effort:      effort,
-		Harness:     harness,
-		Prompt:      body,
-		Permissions: perms,
+		Name:         name,
+		Description:  meta["description"],
+		Capabilities: parseAgentCapabilities(meta),
+		Provider:     provider,
+		Model:        model,
+		Effort:       effort,
+		Harness:      harness,
+		Prompt:       body,
+		Permissions:  perms,
 	}, nil
+}
+
+// parseAgentCapabilities reads frontmatter capabilities/specialty tags.
+// Accepts "capabilities: explore, search" and/or "specialty: explore".
+func parseAgentCapabilities(meta map[string]string) []string {
+	if meta == nil {
+		return nil
+	}
+	var raw []string
+	if c := strings.TrimSpace(meta["capabilities"]); c != "" {
+		raw = append(raw, c)
+	}
+	if s := strings.TrimSpace(meta["specialty"]); s != "" {
+		raw = append(raw, s)
+	}
+	if len(raw) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, 4)
+	out := make([]string, 0, 4)
+	for _, chunk := range raw {
+		for _, part := range strings.FieldsFunc(chunk, func(r rune) bool {
+			return r == ',' || r == ';' || r == '|'
+		}) {
+			p := strings.ToLower(strings.TrimSpace(part))
+			if p == "" {
+				continue
+			}
+			if _, ok := seen[p]; ok {
+				continue
+			}
+			seen[p] = struct{}{}
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // resolveAgentModel maps strike provider+model pins and OpenCode-style

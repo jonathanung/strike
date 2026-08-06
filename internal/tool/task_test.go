@@ -327,3 +327,53 @@ func TestTaskPassesLifecycleFields(t *testing.T) {
 		t.Fatalf("metadata = %s", res.Metadata)
 	}
 }
+
+func TestTaskPassesRouteFields(t *testing.T) {
+	tc := allowAll(t.TempDir())
+	var gotReq TaskRequest
+	tc.SpawnTask = func(_ context.Context, req TaskRequest) (TaskResult, error) {
+		gotReq = req
+		return TaskResult{
+			Output:      "started",
+			Status:      "started",
+			SessionID:   "s1",
+			RouteReason: "route=auto specialty=explore agent=explore primary model=inherit",
+		}, nil
+	}
+	res, err := NewTask().Execute(context.Background(), mustJSON(t, map[string]any{
+		"prompt":         "find the entrypoint",
+		"route":          "auto",
+		"specialty":      "explore",
+		"capabilities":   []string{"search"},
+		"max_cost_class": "low",
+		"models":         []string{"haiku"},
+		"max_concurrent": 2,
+	}), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotReq.Route != "auto" || gotReq.Specialty != "explore" {
+		t.Fatalf("route fields = %#v", gotReq)
+	}
+	if len(gotReq.Capabilities) != 1 || gotReq.Capabilities[0] != "search" {
+		t.Fatalf("capabilities = %#v", gotReq.Capabilities)
+	}
+	if gotReq.MaxCostClass != "low" || gotReq.MaxConcurrent != 2 {
+		t.Fatalf("constraints = %#v", gotReq)
+	}
+	if len(gotReq.Models) != 1 || gotReq.Models[0] != "haiku" {
+		t.Fatalf("models = %#v", gotReq.Models)
+	}
+	if !strings.Contains(string(res.Metadata), `"routeReason":`) {
+		t.Fatalf("metadata missing routeReason: %s", res.Metadata)
+	}
+}
+
+func TestTaskDescriptionMentionsRoute(t *testing.T) {
+	d := NewTask().Description()
+	for _, needle := range []string{"route=auto", "specialty", "pins always win"} {
+		if !strings.Contains(d, needle) {
+			t.Errorf("task description missing %q", needle)
+		}
+	}
+}

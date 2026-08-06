@@ -88,6 +88,23 @@ type TaskRequest struct {
 	// (off|low|medium|high|xhigh|max). Empty inherits the parent's dial
 	// (subject to agent effort pins). When set, it wins over agent pins.
 	Effort string
+	// Route enables capability-aware routing when "auto". Empty/off keeps
+	// legacy pin-or-inherit behavior (#778). Specialty/capabilities without
+	// an explicit route also enable auto.
+	Route string
+	// Specialty is a single required capability tag for route=auto
+	// (e.g. explore, test, review, debug).
+	Specialty string
+	// Capabilities are required capability tags for route=auto (all must match).
+	// Merged with Specialty when both are set.
+	Capabilities []string
+	// MaxCostClass optionally filters auto-route candidates: low|medium|high.
+	MaxCostClass string
+	// Models is an optional model allow-list for auto-route (bare id or provider/model).
+	Models []string
+	// MaxConcurrent is the per-persona live-child limit before fallback when
+	// route=auto. Zero uses the engine default (1).
+	MaxConcurrent int
 	// Criteria are optional acceptance criteria recorded on the delegation
 	// lifecycle object. When non-empty, successful child completion enters
 	// lifecycle state "review" instead of "done" (verification gates / #780).
@@ -177,6 +194,8 @@ type TaskResult struct {
 	DelegationID string
 	// Lifecycle is the delegation state (queued|working|blocked|review|done|…).
 	Lifecycle string
+	// RouteReason is the structured capability-routing decision when routing ran (#778).
+	RouteReason string
 }
 
 // Task control request/result types for parent inspection of owned children.

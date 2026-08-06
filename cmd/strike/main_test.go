@@ -432,9 +432,23 @@ func TestDangerousPermissionServiceAllowsAllPatternsSynchronouslyWithoutEvents(t
 			t.Errorf("Ask(%q, %q) = %v, want nil", req.Permission, req.Patterns, err)
 		}
 	}
-	if len(events) != 0 {
-		t.Fatalf("dangerous allows emitted %d permission events, want zero", len(events))
+	// Audit PermissionDecided is OK; must not emit PermissionAsked/Resolved.
+	for {
+		select {
+		case ev := <-events:
+			switch ev.(type) {
+			case protocol.PermissionAsked, protocol.PermissionResolved:
+				t.Fatalf("dangerous allow emitted prompt event %T", ev)
+			case protocol.PermissionDecided:
+				// ok
+			default:
+				t.Fatalf("unexpected event %T", ev)
+			}
+		default:
+			goto doneDangerous
+		}
 	}
+doneDangerous:
 }
 
 func TestNormalPermissionLayersStillAskAndDeny(t *testing.T) {
@@ -450,15 +464,27 @@ func TestNormalPermissionLayersStillAskAndDeny(t *testing.T) {
 		t.Errorf("configured bash action = %q, want deny", got)
 	}
 
-	events := make(chan protocol.Event, 1)
+	events := make(chan protocol.Event, 4)
 	service := permission.New(func(event protocol.Event) { events <- event }, layers...)
 	err := askWithin(t, service, tool.AskRequest{Permission: "bash", Patterns: []string{"rm -rf build"}})
 	var denied *permission.DeniedError
 	if !errors.As(err, &denied) {
 		t.Errorf("denied Ask error = %v, want *permission.DeniedError", err)
 	}
-	if len(events) != 0 {
-		t.Errorf("rule-denied Ask emitted %d events, want zero", len(events))
+	for {
+		select {
+		case ev := <-events:
+			switch ev.(type) {
+			case protocol.PermissionAsked, protocol.PermissionResolved:
+				t.Errorf("rule-denied Ask emitted prompt event %T", ev)
+			case protocol.PermissionDecided:
+				// audit ok
+			default:
+				t.Errorf("unexpected event %T", ev)
+			}
+		default:
+			return
+		}
 	}
 }
 

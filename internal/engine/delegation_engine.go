@@ -170,7 +170,8 @@ func delegationsToTool(items []Delegation) []tool.DelegationItem {
 
 // createDelegationForTask registers a lifecycle object for a task spawn.
 // Returns the item and whether the caller should spawn immediately.
-func (e *Engine) createDelegationForTask(req tool.TaskRequest) (Delegation, bool, error) {
+// routeReason is the capability-routing decision string (#778), when any.
+func (e *Engine) createDelegationForTask(req tool.TaskRequest, routeReason string) (Delegation, bool, error) {
 	if e == nil || e.team == nil {
 		return Delegation{}, true, nil // no team → spawn without tracking
 	}
@@ -187,6 +188,7 @@ func (e *Engine) createDelegationForTask(req tool.TaskRequest) (Delegation, bool
 		Model:          req.Model,
 		Effort:         req.Effort,
 		Name:           req.Name,
+		RouteReason:    routeReason,
 		Verify:         req.Verify,
 		Budget:         budget,
 		ContextBundle:  req.ContextBundle,

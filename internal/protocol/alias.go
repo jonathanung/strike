@@ -141,6 +141,7 @@ type (
 	ProcessExited          = pub.ProcessExited
 	PermissionAsked        = pub.PermissionAsked
 	PermissionResolved     = pub.PermissionResolved
+	PermissionDecided      = pub.PermissionDecided
 	QuestionAsked          = pub.QuestionAsked
 	QuestionResolved       = pub.QuestionResolved
 	TurnCompleted          = pub.TurnCompleted
