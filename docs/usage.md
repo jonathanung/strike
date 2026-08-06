@@ -278,6 +278,8 @@ or config `providers` — see [config.md](config.md).
 ./strike --telemetry             # ensure local system metrics pane (on by default)
 ./strike exec "fix the flaky test"   # one-shot headless turn → stdout
 ./strike exec -                  # read prompt from stdin
+./strike exec --json "…"         # single result object on stdout
+./strike exec --output-format stream-json "…"  # protocol Event envelopes (JSONL)
 ./strike rpc --provider echo     # stdio JSON-RPC Op/Event bridge (NDJSON)
 ```
 
@@ -287,9 +289,19 @@ by default** (~1 Hz sampler). Disable with `/telemetry off`; re-enable with
 
 `--continue` and `--session` cannot be combined. `strike exec` accepts the
 same `--provider` / `--model` / `--effort` /
-`--auto` / `--dangerously-skip-permissions` flags as the TUI. Permission and
-question prompts cannot be answered interactively in exec; asks are rejected
-unless `--auto` or `--dangerously-skip-permissions` is set
+`--auto` / `--dangerously-skip-permissions` flags as the TUI, plus
+`--output-format text|json|stream-json` (default `text`) and `--json`
+(shorthand for `json`). Formats:
+
+| Format | Stdout |
+|---|---|
+| `text` | plain assistant text (default) |
+| `json` | one `{"type":"result",…}` object when the turn ends |
+| `stream-json` | one `pkg/protocol` Event envelope per line (same shape as session JSONL) |
+
+Exit codes: `0` turn ok, `1` turn/runtime error, `2` usage error. Permission
+and question prompts cannot be answered interactively in exec; asks are
+rejected unless `--auto` or `--dangerously-skip-permissions` is set
 (configured/agent denies still apply). Full flag list:
 [install.md](install.md) or `strike --help`.
 
