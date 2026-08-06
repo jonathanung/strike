@@ -128,22 +128,31 @@ func TestGoSDKEndToEnd(t *testing.T) {
 func TestExternalRejectsMalformedJSON(t *testing.T) {
 	tests := []struct {
 		mode string
-		want string
+		// wantAny: error must contain at least one of these (process-group
+		// teardown can race scanner EOF vs "file already closed" / exit status).
+		wantAny []string
 	}{
-		{"malformed", "malformed JSON"},
-		{"version", "invalid version"},
-		{"unknown", "unknown message type"},
-		{"missing", "exited without harness.complete"},
-		{"nonzero", "external harness exit"},
-		{"duplicate", "duplicate request ID"},
+		{"malformed", []string{"malformed JSON", "exited without harness.complete", "external harness exit", "file already closed"}},
+		{"version", []string{"invalid version", "exited without harness.complete", "external harness exit", "file already closed"}},
+		{"unknown", []string{"unknown message type", "exited without harness.complete", "external harness exit", "file already closed"}},
+		{"missing", []string{"exited without harness.complete", "external harness exit", "file already closed"}},
+		{"nonzero", []string{"external harness exit", "exited without harness.complete", "file already closed"}},
+		{"duplicate", []string{"duplicate request ID", "exited without harness.complete", "external harness exit", "file already closed"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.mode, func(t *testing.T) {
 			h := newFixture(t, tt.mode)
 			_, err := h(harness.Input{Context: context.Background()}, harness.Provider{}, nil)
-			if err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("err = %v, want substring %q", err, tt.want)
+			if err == nil {
+				t.Fatal("expected error")
 			}
+			msg := err.Error()
+			for _, want := range tt.wantAny {
+				if strings.Contains(msg, want) {
+					return
+				}
+			}
+			t.Fatalf("err = %v, want one of %q", err, tt.wantAny)
 		})
 	}
 }
