@@ -13,6 +13,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
 	"github.com/jonathanung/strike-cli/internal/tool"
+	"github.com/jonathanung/strike-cli/internal/verify"
 )
 
 // childEventCap bounds in-memory transcript rows retained per child for task_read.
@@ -43,6 +44,8 @@ type childHandle struct {
 	agent     string
 	prompt    string
 	name      string // optional stable teammate alias
+	// gates are independent completion conditions declared at spawn.
+	gates []tool.VerifyGate
 
 	mu           sync.Mutex
 	currentTool  string
@@ -62,17 +65,18 @@ type childHandle struct {
 // childRecord retains terminal state + bounded transcript after a child exits
 // so task_status/task_read still work without spawning a new child.
 type childRecord struct {
-	id        string
-	startedAt time.Time
-	endedAt   time.Time
-	agent     string
-	prompt    string
-	name      string
-	status    protocol.ChildStatus
-	summary   string
-	handoff   protocol.CompletionHandoff
-	activity  []string
-	events    []tool.TaskTranscriptEntry
+	id           string
+	startedAt    time.Time
+	endedAt      time.Time
+	agent        string
+	prompt       string
+	name         string
+	status       protocol.ChildStatus
+	summary      string
+	handoff      protocol.CompletionHandoff
+	verification *protocol.VerificationReport
+	activity     []string
+	events       []tool.TaskTranscriptEntry
 }
 
 // spawnChild starts a non-blocking child engine for the task tool and returns
@@ -264,6 +268,7 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		agent:     agentName,
 		prompt:    req.Prompt,
 		name:      memberName,
+		gates:     append([]tool.VerifyGate(nil), req.Verify...),
 	}
 
 	e.childMu.Lock()
@@ -434,12 +439,39 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		if strings.TrimSpace(handoff.Summary) == "" {
 			handoff.Summary = defaultHandoffSummary(status)
 		}
+
+		// Independent verification gates: implementer-done ≠ harness-verified.
+		// Only when the child claimed a successful completion and gates were
+		// configured at spawn. Model handoff.Verification text is never evidence.
+		var verification *protocol.VerificationReport
+		if status == protocol.ChildStatusCompleted && len(h.gates) > 0 {
+			verification = e.runChildVerification(h, child, handoff)
+			if verification != nil && !verification.Passed {
+				status = protocol.ChildStatusBlocked
+				// Surface gate failures as actionable blockers for the lead.
+				for _, line := range verify.FailedCheckLines(protocolReportToVerifyResult(verification)) {
+					handoff.Blockers = appendUniqueString(handoff.Blockers, line)
+				}
+				if verification.Summary != "" {
+					// Keep model summary; prefix blocked reason for terminal Summary.
+					if strings.TrimSpace(handoff.Summary) == "" || handoff.Summary == defaultHandoffSummary(protocol.ChildStatusCompleted) {
+						handoff.Summary = verification.Summary
+					}
+				}
+			}
+		}
+
 		completed := protocol.ChildCompleted{
-			Correlation: childCorr,
-			Status:      status,
-			Summary:     handoff.Summary,
-			Name:        memberName,
-			Handoff:     handoff,
+			Correlation:  childCorr,
+			Status:       status,
+			Summary:      handoff.Summary,
+			Name:         memberName,
+			Handoff:      handoff,
+			Verification: verification,
+		}
+		// Prefer verification summary on blocked terminal Summary field.
+		if status == protocol.ChildStatusBlocked && verification != nil && verification.Summary != "" {
+			completed.Summary = verification.Summary
 		}
 		e.emit(completed)
 		e.persistChildEvent(childID, completed)
@@ -494,17 +526,18 @@ func (e *Engine) finishChild(h *childHandle, completed protocol.ChildCompleted) 
 	}
 	h.mu.Lock()
 	rec := &childRecord{
-		id:        h.id,
-		startedAt: h.startedAt,
-		endedAt:   time.Now(),
-		agent:     h.agent,
-		prompt:    h.prompt,
-		name:      h.name,
-		status:    completed.Status,
-		summary:   completed.Summary,
-		handoff:   completed.Handoff,
-		activity:  append([]string(nil), h.activity...),
-		events:    append([]tool.TaskTranscriptEntry(nil), h.events...),
+		id:           h.id,
+		startedAt:    h.startedAt,
+		endedAt:      time.Now(),
+		agent:        h.agent,
+		prompt:       h.prompt,
+		name:         h.name,
+		status:       completed.Status,
+		summary:      completed.Summary,
+		handoff:      completed.Handoff,
+		verification: completed.Verification,
+		activity:     append([]string(nil), h.activity...),
+		events:       append([]tool.TaskTranscriptEntry(nil), h.events...),
 	}
 	h.mu.Unlock()
 
@@ -802,6 +835,10 @@ func (r *childRecord) statusSnapshot(includeRecent bool) tool.TaskStatusResult {
 		Handoff:         toolHandoff(r.handoff),
 		HasHandoff:      true,
 	}
+	if r.verification != nil {
+		out.Verification = toolVerification(*r.verification)
+		out.HasVerification = true
+	}
 	if includeRecent && len(r.activity) > 0 {
 		out.LatestActivity = append([]string(nil), r.activity...)
 	}
@@ -830,6 +867,182 @@ func toolHandoff(h protocol.CompletionHandoff) tool.CompletionHandoff {
 		RecommendedNextAction: h.RecommendedNextAction,
 		Incomplete:            h.Incomplete,
 	}
+}
+
+func toolVerification(v protocol.VerificationReport) tool.VerificationReport {
+	checks := make([]tool.VerificationCheck, 0, len(v.Checks))
+	for _, c := range v.Checks {
+		checks = append(checks, tool.VerificationCheck{
+			Name:       c.Name,
+			Kind:       c.Kind,
+			Value:      c.Value,
+			Passed:     c.Passed,
+			ExitCode:   c.ExitCode,
+			Output:     c.Output,
+			Error:      c.Error,
+			DurationMs: c.DurationMs,
+		})
+	}
+	if checks == nil {
+		checks = []tool.VerificationCheck{}
+	}
+	return tool.VerificationReport{
+		Passed:   v.Passed,
+		Claimed:  v.Claimed,
+		Verified: v.Verified,
+		Checks:   checks,
+		Env: tool.VerificationEnv{
+			WorkDir:    v.Env.WorkDir,
+			SessionID:  v.Env.SessionID,
+			WorktreeID: v.Env.WorktreeID,
+			ModelID:    v.Env.ModelID,
+			StartedAt:  v.Env.StartedAt,
+			FinishedAt: v.Env.FinishedAt,
+		},
+		Summary:    v.Summary,
+		DurationMs: v.DurationMs,
+	}
+}
+
+// runChildVerification executes spawn-time gates against the claimed handoff.
+// Returns a non-nil report whenever gates were configured.
+func (e *Engine) runChildVerification(h *childHandle, child *Engine, handoff protocol.CompletionHandoff) *protocol.VerificationReport {
+	if h == nil || len(h.gates) == 0 {
+		return nil
+	}
+	gates := make([]verify.Gate, 0, len(h.gates))
+	for _, g := range h.gates {
+		gates = append(gates, verify.Gate{
+			Kind:        g.Kind,
+			Value:       g.Value,
+			Description: g.Description,
+		})
+	}
+	// Detached timeout: child context is already canceled at this point.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	workDir := ""
+	modelID := ""
+	if e != nil {
+		workDir = e.opts.WorkDir
+	}
+	if child != nil {
+		if child.opts.WorkDir != "" {
+			workDir = child.opts.WorkDir
+		}
+		modelID = strings.TrimSpace(child.model)
+		if modelID == "" {
+			modelID = strings.TrimSpace(child.opts.InitialModel)
+		}
+	}
+
+	// HasStructured: engine set Incomplete=false only when parse succeeded.
+	hv := &verify.HandoffView{
+		Summary:       handoff.Summary,
+		Incomplete:    handoff.Incomplete,
+		HasStructured: !handoff.Incomplete,
+	}
+	// If incomplete but summary is only the default, still not structured.
+	if handoff.Incomplete {
+		hv.HasStructured = false
+	}
+
+	runner := &verify.Runner{WorkDir: workDir}
+	res := runner.Run(ctx, gates, verify.Input{
+		Claimed: true,
+		Handoff: hv,
+		Env: verify.EnvMetadata{
+			WorkDir:   workDir,
+			SessionID: h.id,
+			ModelID:   modelID,
+		},
+	})
+	rep := verifyResultToProtocol(res)
+	return &rep
+}
+
+func verifyResultToProtocol(res verify.Result) protocol.VerificationReport {
+	checks := make([]protocol.VerificationCheck, 0, len(res.Checks))
+	for _, c := range res.Checks {
+		checks = append(checks, protocol.VerificationCheck{
+			Name:       c.Name,
+			Kind:       c.Kind,
+			Value:      c.Value,
+			Passed:     c.Passed,
+			ExitCode:   c.ExitCode,
+			Output:     c.Output,
+			Error:      c.Error,
+			DurationMs: c.DurationMs,
+		})
+	}
+	if checks == nil {
+		checks = []protocol.VerificationCheck{}
+	}
+	return protocol.VerificationReport{
+		Passed:   res.Passed,
+		Claimed:  res.Claimed,
+		Verified: res.Verified,
+		Checks:   checks,
+		Env: protocol.VerificationEnv{
+			WorkDir:    res.Env.WorkDir,
+			SessionID:  res.Env.SessionID,
+			WorktreeID: res.Env.WorktreeID,
+			ModelID:    res.Env.ModelID,
+			StartedAt:  res.Env.StartedAt,
+			FinishedAt: res.Env.FinishedAt,
+		},
+		Summary:    res.Summary,
+		DurationMs: res.DurationMs,
+	}
+}
+
+func protocolReportToVerifyResult(rep *protocol.VerificationReport) verify.Result {
+	if rep == nil {
+		return verify.Result{}
+	}
+	checks := make([]verify.CheckResult, 0, len(rep.Checks))
+	for _, c := range rep.Checks {
+		checks = append(checks, verify.CheckResult{
+			Name:       c.Name,
+			Kind:       c.Kind,
+			Value:      c.Value,
+			Passed:     c.Passed,
+			ExitCode:   c.ExitCode,
+			Output:     c.Output,
+			Error:      c.Error,
+			DurationMs: c.DurationMs,
+		})
+	}
+	return verify.Result{
+		Passed:   rep.Passed,
+		Claimed:  rep.Claimed,
+		Verified: rep.Verified,
+		Checks:   checks,
+		Env: verify.EnvMetadata{
+			WorkDir:    rep.Env.WorkDir,
+			SessionID:  rep.Env.SessionID,
+			WorktreeID: rep.Env.WorktreeID,
+			ModelID:    rep.Env.ModelID,
+			StartedAt:  rep.Env.StartedAt,
+			FinishedAt: rep.Env.FinishedAt,
+		},
+		Summary:    rep.Summary,
+		DurationMs: rep.DurationMs,
+	}
+}
+
+func appendUniqueString(in []string, s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return in
+	}
+	for _, x := range in {
+		if x == s {
+			return in
+		}
+	}
+	return append(in, s)
 }
 
 func (e *Engine) childRead(ctx context.Context, req tool.TaskReadRequest) (tool.TaskReadResult, error) {
@@ -1214,6 +1427,14 @@ func formatChildCompletedNotice(c protocol.ChildCompleted) string {
 	b.WriteString(marshalHandoffModelJSON(handoff))
 	if handoff.Incomplete {
 		b.WriteString("\n(note: handoff.incomplete=true — child did not supply structured fields; engine filled defaults + tracked files)")
+	}
+	if c.Verification != nil {
+		b.WriteByte('\n')
+		b.WriteString("verification: ")
+		b.WriteString(marshalVerificationModelJSON(*c.Verification))
+		if !c.Verification.Passed {
+			b.WriteString("\n(note: independent verification gates failed — status is blocked, not harness-verified done. Address gate output and re-delegate or fix.)")
+		}
 	}
 	b.WriteString("\nDo not sleep-poll for subagents; this is the terminal result. Prefer the handoff JSON over free-form prose.")
 	return b.String()

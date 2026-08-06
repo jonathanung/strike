@@ -114,6 +114,8 @@ func teamStateToTaskVocab(s protocol.TeamMemberState) string {
 		return "failed"
 	case protocol.TeamMemberCanceled:
 		return "canceled"
+	case protocol.TeamMemberBlocked:
+		return "blocked"
 	case "":
 		return "unknown"
 	default:

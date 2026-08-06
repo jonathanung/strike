@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -25,6 +26,12 @@ import (
 	"github.com/jonathanung/strike-cli/internal/session"
 	"github.com/jonathanung/strike-cli/internal/tool"
 )
+
+// eventEqual compares protocol events; TurnCompleted gained a slice field and
+// is no longer comparable with ==.
+func eventEqual(a, b protocol.Event) bool {
+	return reflect.DeepEqual(a, b)
+}
 
 func TestRunSessionClosesStoreAfterEngineCleanupAndFinalAppend(t *testing.T) {
 	engineEvents := make(chan protocol.Event)
@@ -99,7 +106,7 @@ func TestRunSessionClosesStoreAfterEngineCleanupAndFinalAppend(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(appended) != 1 || appended[0] != terminal {
+	if len(appended) != 1 || !eventEqual(appended[0], terminal) {
 		t.Errorf("appended events = %#v, want terminal event %#v", appended, terminal)
 	}
 }

@@ -173,11 +173,13 @@ func (notebookEditTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 	if err != nil {
 		return Result{}, err
 	}
+	existed := FileExisted(path)
 	tc.SnapshotPath(path)
-	// Re-validate + O_NOFOLLOW at exec time (TOCTOU: symlink planted after resolve).
+	// Re-validate + atomic temp/rename at exec time.
 	if err := workspaceWriteFile(tc.WorkDir, a.NotebookPath, out); err != nil {
 		return Result{}, err
 	}
+	tc.NoteTurnChange(path, existed, false)
 	tc.NotifyFileSync(path, string(out), false)
 	outMsg = AppendOverlapWarning(outMsg, overlapWarn)
 	res := Result{

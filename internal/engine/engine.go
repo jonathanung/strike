@@ -380,8 +380,14 @@ type Engine struct {
 	// force the model to re-read before edit/write.
 	files *tool.FileState
 
-	// checkpoints snapshot pre-mutation file bytes per turn for /undo restore.
+	// checkpoints snapshot pre-mutation file bytes per turn for /undo restore
+	// (#540). Composes with turnDiff (per-turn create/update/delete summary)
+	// and PathOwnership (#772 overlap leases) — one file-state stack, not forks.
 	checkpoints *tool.CheckpointStore
+
+	// turnDiff records harness file change kinds for the active turn
+	// (emitted on TurnCompleted.Files for timeline/UI).
+	turnDiff *tool.TurnDiff
 
 	// mutatedFiles tracks workspace-relative paths touched by mutating tools
 	// this session (for structured child completion handoffs).
@@ -452,6 +458,7 @@ func New(opts Options) *Engine {
 		beginReqs:           make(chan beginReq),
 		files:               &tool.FileState{},
 		checkpoints:         tool.NewCheckpointStore(),
+		turnDiff:            &tool.TurnDiff{},
 		children:            make(map[string]*childHandle),
 		childHistory:        make(map[string]*childRecord),
 		team:                team,
