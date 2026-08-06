@@ -151,11 +151,13 @@ func applyPluginWorkflowLayer(plugins []plugin.Plugin, scope plugin.Scope, byNam
 	return diags
 }
 
-func applyPluginProviders(workDir string, cfg Config) (Config, []plugin.Diagnostic) {
+func applyPluginProviders(workDir string, cfg Config, scope plugin.Scope) (Config, []plugin.Diagnostic) {
 	res := DiscoverPlugins(workDir)
 	var diags []plugin.Diagnostic
-	// Apply global then project plugin providers (Discover order).
 	for _, p := range res.Plugins {
+		if p.Source != scope {
+			continue
+		}
 		for _, ref := range p.Providers {
 			pf, err := ReadProvidersFile(ref.AbsPath)
 			if err != nil {

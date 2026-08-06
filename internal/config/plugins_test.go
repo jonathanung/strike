@@ -268,6 +268,63 @@ func TestPluginPassiveLoad_ProviderRejectsSecretLiteral(t *testing.T) {
 	}
 }
 
+func TestPluginPassiveLoad_ProviderPrecedenceProjectOverGlobalPlugin(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	t.Setenv("HOME", home)
+	ResetPluginCache()
+
+	// Global plugin registers shared-proxy.
+	gPlug := filepath.Join(home, ".strike", "plugins", "acme.gprov")
+	writeTree(t, gPlug, map[string]string{
+		"plugin.json": `{
+  "schemaVersion": 1, "id": "acme.gprov", "version": "1.0.0", "name": "G",
+  "strike": { "min": "0.1.0" },
+  "contributions": { "providers": [{ "path": "providers/p.json", "profileName": "shared-proxy" }] }
+}`,
+		"providers/p.json": `{
+  "shared-proxy": {
+    "api": "openai",
+    "baseURL": "https://global-plugin.example.com/v1",
+    "apiKeyEnv": "G_KEY",
+    "models": ["g1"]
+  }
+}`,
+	})
+	// Project non-plugin providers.jsonc should win over global plugin.
+	if err := os.MkdirAll(filepath.Join(work, ".strike"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, ".strike", "providers.jsonc"), []byte(`{
+  "shared-proxy": {
+    "api": "openai",
+    "baseURL": "https://project.example.com/v1",
+    "apiKeyEnv": "P_KEY",
+    "models": ["p1"]
+  }
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *CustomProvider
+	for i := range cfg.Providers {
+		if cfg.Providers[i].Name == "shared-proxy" {
+			found = &cfg.Providers[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("missing shared-proxy")
+	}
+	if !strings.Contains(found.BaseURL, "project.example.com") {
+		t.Fatalf("project providers should beat global plugin: %s", found.BaseURL)
+	}
+}
+
 func TestPluginPassiveLoad_ProviderWireOnly(t *testing.T) {
 	home := t.TempDir()
 	work := t.TempDir()
