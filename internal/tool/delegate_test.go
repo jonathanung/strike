@@ -58,18 +58,22 @@ func TestDelegateList(t *testing.T) {
 	if !strings.Contains(res.Output, `"id":"d1"`) {
 		t.Fatalf("output = %s", res.Output)
 	}
+	if !strings.Contains(string(res.Metadata), `"deprecatedTool":"delegate"`) {
+		t.Fatalf("expected deprecation metadata: %s", res.Metadata)
+	}
 }
 
 func TestDelegateCreatePassesLifecycleFields(t *testing.T) {
 	tc := allowAll(t.TempDir())
-	var got DelegateRequest
-	tc.Delegate = func(_ context.Context, req DelegateRequest) (DelegateResult, error) {
+	// Compat create shares progressive spawn path (SpawnTask), not Delegate handler.
+	var got TaskRequest
+	tc.SpawnTask = func(_ context.Context, req TaskRequest) (TaskResult, error) {
 		got = req
-		return DelegateResult{
-			Action: "create",
-			Status: "queued",
-			Item:   &DelegationItem{ID: "d2", State: "queued", Version: 1},
-			Detail: "queued",
+		return TaskResult{
+			Output:       "queued",
+			Status:       "queued",
+			DelegationID: "d2",
+			Lifecycle:    "queued",
 		}, nil
 	}
 	res, err := NewDelegate().Execute(context.Background(), mustJSON(t, map[string]any{
@@ -88,6 +92,9 @@ func TestDelegateCreatePassesLifecycleFields(t *testing.T) {
 	}
 	if len(got.Deps) != 1 || got.Deps[0] != "d1" {
 		t.Fatalf("deps = %#v", got.Deps)
+	}
+	if got.Agent != "build" {
+		t.Fatalf("agent = %q", got.Agent)
 	}
 	if !strings.Contains(res.Title, "d2") {
 		t.Fatalf("title = %q", res.Title)
@@ -123,9 +130,40 @@ func TestDelegatePermissionDenied(t *testing.T) {
 
 func TestDelegateDescriptionMentionsLifecycle(t *testing.T) {
 	d := NewDelegate().Description()
-	for _, want := range []string{"queued", "review", "criteria", "deps", "expected_version"} {
+	for _, want := range []string{"queued", "review", "criteria", "deps", "expected_version", "Prefer", "progressive"} {
 		if !strings.Contains(d, want) {
 			t.Errorf("description missing %q", want)
 		}
+	}
+}
+
+func TestDelegateCreatePassesRouteBudget(t *testing.T) {
+	tc := allowAll(t.TempDir())
+	var got TaskRequest
+	tc.SpawnTask = func(_ context.Context, req TaskRequest) (TaskResult, error) {
+		got = req
+		return TaskResult{Status: "started", SessionID: "s", DelegationID: "d1", Lifecycle: "working", Output: "ok"}, nil
+	}
+	_, err := NewDelegate().Execute(context.Background(), mustJSON(t, map[string]any{
+		"action":         "create",
+		"prompt":         "routed",
+		"route":          "auto",
+		"specialty":      "explore",
+		"capabilities":   []string{"search"},
+		"max_cost_class": "low",
+		"max_concurrent": 3,
+		"budget":         map[string]any{"max_wall_clock_s": 60},
+	}), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Route != "auto" || got.Specialty != "explore" || got.MaxConcurrent != 3 {
+		t.Fatalf("route fields = %#v", got)
+	}
+	if got.Budget.MaxWallClockS != 60 {
+		t.Fatalf("budget = %#v", got.Budget)
+	}
+	if len(got.Capabilities) != 1 || got.Capabilities[0] != "search" {
+		t.Fatalf("capabilities = %#v", got.Capabilities)
 	}
 }
