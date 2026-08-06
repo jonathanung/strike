@@ -17,9 +17,11 @@ type rootPane struct {
 	workDir    string
 	titleTopic string
 
-	cells        []cell
-	toolByID     map[string]*toolCell
-	children     []childActivity
+	cells    []cell
+	toolByID map[string]*toolCell
+	children []childActivity
+	// pathOverlaps retains root-session PathOverlap warnings while stashed (#922).
+	pathOverlaps []childPathOverlap
 	teamMessages []teamMessage
 
 	providerName     string
@@ -82,6 +84,7 @@ func (m *Model) stashActiveRoot() {
 		viewTools[k] = v
 	}
 	children := append([]childActivity(nil), m.children...)
+	pathOverlaps := append([]childPathOverlap(nil), m.pathOverlaps...)
 	teamMsgs := append([]teamMessage(nil), m.teamMessages...)
 	m.roots[m.sessionID] = &rootPane{
 		sessionID:          m.sessionID,
@@ -90,6 +93,7 @@ func (m *Model) stashActiveRoot() {
 		cells:              append([]cell(nil), m.cells...),
 		toolByID:           toolByID,
 		children:           children,
+		pathOverlaps:       pathOverlaps,
 		teamMessages:       teamMsgs,
 		providerName:       m.providerName,
 		modelName:          m.modelName,
@@ -156,6 +160,7 @@ func (m *Model) loadRootPane(p *rootPane) {
 		m.toolByID[k] = v
 	}
 	m.children = append([]childActivity(nil), p.children...)
+	m.pathOverlaps = append([]childPathOverlap(nil), p.pathOverlaps...)
 	m.teamMessages = append([]teamMessage(nil), p.teamMessages...)
 	m.providerName = p.providerName
 	m.modelName = p.modelName
@@ -534,9 +539,16 @@ func applyEventToPane(p *rootPane, ev protocol.Event) {
 				break
 			}
 		}
+		if e.Verification != nil {
+			_ = applyChildVerification(&p.children, childIndex(p.children), id, e.Verification)
+		}
 		applyChildCompletedToTaskCells(p.toolByID, e)
 		agent, elapsed := lookupChildMeta(p.children, e.SessionID)
 		p.cells = appendSubagentResultCell(p.cells, e, agent, elapsed)
+	case protocol.ChildEscalated:
+		applyChildEscalatedToPane(p, e)
+	case protocol.PathOverlap:
+		applyPathOverlapToPane(p, e)
 	case protocol.TeamRoster:
 		applyTeamRosterToPane(p, e)
 	case protocol.AgentMessage:
