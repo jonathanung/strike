@@ -81,6 +81,11 @@ Until shipped:
 Non-Linux builds leave mem/CPU rlimits unset (no error). Callers that need hard
 caps on macOS should use wall time and/or external container isolation (#547).
 
+`prlimit` targets the **direct child** PID after `Start`. When bash runs under
+`bwrap`/`sandbox-exec`, that PID is the launcher; the inner command may already
+have forked, so mem/CPU caps are best-effort for sandboxed runs. Wall-time
+`Timeout` still kills the process group reliably.
+
 ## Related docs
 
 - [config.md](config.md) — sandbox dial, scheduler, worktrees, network.allow

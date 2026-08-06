@@ -7,6 +7,8 @@ import (
 
 // sandboxDenialPattern maps OS/sandbox stderr/stdout fragments to a stable
 // human reason. Matching is case-insensitive substring search.
+// Longer / more specific substrings first so seatbelt "deny file-write-create"
+// is not classified only as generic file-write.
 var sandboxDenialPatterns = []struct {
 	sub    string
 	reason string
@@ -15,11 +17,10 @@ var sandboxDenialPatterns = []struct {
 	{"readonly file system", "write blocked: filesystem is read-only under OS sandbox"},
 	{"operation not permitted", "operation not permitted by OS sandbox"},
 	{"permission denied", "permission denied by OS sandbox"},
-	{"not permitted", "operation not permitted by OS sandbox"},
-	// macOS seatbelt / sandboxd style messages
-	{"deny file-write", "file write denied by OS sandbox (seatbelt)"},
+	// macOS seatbelt / sandboxd style messages (specific before generic deny file-write)
 	{"deny file-write-create", "file create denied by OS sandbox (seatbelt)"},
 	{"deny file-write-data", "file write denied by OS sandbox (seatbelt)"},
+	{"deny file-write", "file write denied by OS sandbox (seatbelt)"},
 	{"deny network", "network denied by OS sandbox"},
 	{"sandbox: ", "blocked by OS sandbox profile"},
 }
@@ -58,8 +59,6 @@ func formatSandboxDenial(reason, output string) string {
 	}
 	head := fmt.Sprintf("%s: %s", CodeSandboxDenied, reason)
 	body := strings.TrimSpace(output)
-	// Strip a trailing bare "(exit code N)" line so we can re-append after the
-	// structured header without duplicating noise; keep other output.
 	if body == "" || body == "(no output)" {
 		return head
 	}

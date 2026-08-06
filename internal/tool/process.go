@@ -68,6 +68,10 @@ type ProcessSpec struct {
 	// Zero value leaves the process unsandboxed (hooks, probes).
 	Sandbox sandbox.Policy
 	// Limits are optional OS resource caps (memory/CPU). Wall time uses Timeout.
+	// Applied to the direct child PID after Start (Linux prlimit). When an OS
+	// sandbox launcher is the direct child, the inner command may already have
+	// forked — prefer Limits on unsandboxed runs, or wall-time Timeout under
+	// sandbox. See docs/isolation.md.
 	Limits ProcessLimits
 }
 
