@@ -783,16 +783,25 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 	}
 
 	// Normalize cancellation/deadline after Execute (including permission-wait
-	// cancel). Prefer tool-reported ErrorCode and preserve partial output.
-	if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
-		res.ErrorCode == tool.ErrorCodeCanceled || res.ErrorCode == protocol.ErrorCodeCanceled ||
-		res.ErrorCode == tool.ErrorCodeTimeout || res.ErrorCode == protocol.ErrorCodeTimeout {
+	// cancel). Preserve partial output from the tool when present.
+	// Tool-reported timeout/canceled without a dead ctx settles below so
+	// post-tool hooks still observe the completed call.
+	if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return e.canceledOrTimeoutToolResult(ctx, call.ID, corr, res)
 	}
 
 	output, isError := modelFacingToolOutput(res, err)
 	errCode := res.ErrorCode
-	if errCode != "" {
+	if errCode == tool.ErrorCodeCanceled || errCode == protocol.ErrorCodeCanceled {
+		// Tool finished with cancel code while ctx is still live (unusual);
+		// mark incomplete for the model without treating it as a turn interrupt.
+		output = protocol.ToolFeedbackCanceledPartial(output)
+		isError = true
+		errCode = protocol.ErrorCodeCanceled
+	} else if errCode == tool.ErrorCodeTimeout || errCode == protocol.ErrorCodeTimeout {
+		isError = true
+		errCode = protocol.ErrorCodeTimeout
+	} else if errCode != "" {
 		isError = true
 	}
 	if pre.Inject != "" {
