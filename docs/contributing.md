@@ -17,9 +17,9 @@ internal/provider/     provider interface; base/ (embeddable client: HTTP,
                        openaicompat (openai platform + xai), chatgpt
                        (subscription backend), google; echo dev adapter
 internal/tool/         tool contract + registry (read/glob/grep/edit/write/
-                       apply_patch/bash/task/webfetch/todo*/memory_*/issue_*/
-                       notebook_edit/sleep/skill/question/plan_mode/phase_done/
-                       toolsearch — full list: ARCHITECTURE.md)
+                       apply_patch/move/delete/bash/task/webfetch/todo*/memory_*/
+                       issue_*/notebook_edit/sleep/skill/question/plan_mode/
+                       phase_done/toolsearch — full list: ARCHITECTURE.md)
 internal/permission/   rulesets + suspend/resume ask service
 internal/session/      JSONL event-log persistence
 internal/server/       experimental read-only HTTP attach (strike serve)

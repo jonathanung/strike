@@ -24,6 +24,8 @@ var shortPurposes = map[string]string{
 	"edit":            "exact string replacement in a file",
 	"write":           "create or overwrite a file",
 	"apply_patch":     "coordinated multi-file patch",
+	"move":            "rename or move a file within allowed roots",
+	"delete":          "delete a file or directory within allowed roots",
 	"bash":            "run a shell command",
 	"task":            "delegate a bounded subtask to a child agent (optional agent/model/criteria/deps)",
 	"task_status":     "check status of a delegated child task",
@@ -70,7 +72,9 @@ func BuiltinShortPurposes() map[string]string {
 // PermissionName maps a tool name to the permission.Ruleset key used at Ask.
 func PermissionName(toolName string) string {
 	switch toolName {
-	case "apply_patch", "notebook_edit":
+	case "apply_patch", "notebook_edit", "move", "delete":
+		// File mutations share the edit permission so plan mode, accept-edits,
+		// and write/edit deny rules cover them without separate config keys.
 		return "edit"
 	default:
 		if strings.HasPrefix(toolName, "mcp_") {
@@ -252,6 +256,8 @@ func recommendedGuidance(entries []GuidanceEntry) string {
 		"Use `edit` for exact in-place replacements.")
 	add(has("write") && !has("edit") && !has("apply_patch"),
 		"Use `write` only when creating or fully replacing a file.")
+	add(has("move") || has("delete"),
+		"Prefer `move`/`delete` over bash `mv`/`rm` for ordinary renames and deletions (workspace-scoped, freshness, TurnDiff).")
 	add(has("webfetch") && has("bash"),
 		"Prefer `webfetch` over curl/wget in bash for ordinary page fetches.")
 	add(has("webfetch") && !has("bash"),
