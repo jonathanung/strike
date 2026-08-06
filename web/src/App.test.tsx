@@ -14,7 +14,7 @@ describe("App", () => {
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input).includes("bootstrap") ? response({ version: "test", authRequired: false, attachOnly: false, capabilities: { live: true, files: false, memory: false, issues: false, roots: false }, protocolOps: ["user.input", "compact", "rewind"], status: { sessionId: "live", provider: "echo", busy: false }, agents: [{ name: "build" }], skills: [{ name: "ship", description: "Ship changes" }] }) : String(input).includes("sessions") ? response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" }) : response({ ok: true })));
     Element.prototype.scrollIntoView = vi.fn();
   });
-  afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
   it("uses only the live transport for the live session and sends prompts", async () => {
     render(<App />);
@@ -77,6 +77,93 @@ describe("App", () => {
     expect(screen.getByRole("list", { name: "Queued prompts" })).toHaveTextContent("next task");
     fireEvent.change(screen.getByLabelText(/Instruction/), { target: { value: "/sh" } });
     expect(screen.getByRole("option", { name: /ship/ })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/Instruction/), { target: { value: "/ex" } });
+    expect(screen.getByRole("option", { name: /export/ })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/Instruction/), { target: { value: "/he" } });
+    expect(screen.getByRole("option", { name: /help/ })).toBeInTheDocument();
+  });
+
+  it("rejects unknown slash commands with feedback and runs /help", async () => {
+    render(<App />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    fireEvent.change(screen.getByLabelText(/Instruction/), { target: { value: "/pets" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(await screen.findByText(/not available in the web cockpit/i)).toBeInTheDocument();
+    const opsCalls = vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).includes("/v1/ops") && (init as RequestInit | undefined)?.method === "POST");
+    expect(opsCalls.some(([, init]) => String((init as RequestInit).body || "").includes("/pets"))).toBe(false);
+
+    fireEvent.change(screen.getByLabelText(/Instruction/), { target: { value: "/help" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(await screen.findByText(/Web slash commands/i)).toBeInTheDocument();
+    expect(screen.getByText(/\/export/)).toBeInTheDocument();
+  });
+
+  it("exports session markdown from the header control", async () => {
+    let downloaded: Blob | undefined;
+    const createObjectURL = vi.fn((blob: Blob) => {
+      downloaded = blob;
+      return "blob:export";
+    });
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
+
+    render(<App />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    FakeWebSocket.instances[0].onmessage?.({ data: JSON.stringify({ type: "user.message", time: "1", data: { text: "hi there", turnId: "t1" } }) } as MessageEvent);
+    FakeWebSocket.instances[0].onmessage?.({ data: JSON.stringify({ type: "text.delta", time: "2", data: { text: "hello back", turnId: "t1" } }) } as MessageEvent);
+
+    // Prevent navigation side-effects from the download anchor in jsdom.
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    fireEvent.click(await screen.findByRole("button", { name: "Export markdown" }));
+    await waitFor(() => expect(createObjectURL).toHaveBeenCalled());
+    expect(clickSpy).toHaveBeenCalled();
+    expect(downloaded).toBeInstanceOf(Blob);
+    const text = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(downloaded!);
+    });
+    expect(text).toContain("# Strike session export");
+    expect(text).toContain("hi there");
+    expect(text).toContain("hello back");
+  });
+
+  it("supports queue reorder, edit, remove, and clear", async () => {
+    render(<App />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    FakeWebSocket.instances[0].onmessage?.({ data: JSON.stringify({ type: "turn.started", data: { turnId: "t" } }) } as MessageEvent);
+    for (const value of ["first", "second", "third"]) {
+      fireEvent.change(screen.getByLabelText(/Instruction/), { target: { value } });
+      fireEvent.submit(screen.getByLabelText(/Instruction/).closest("form")!);
+    }
+    const list = screen.getByRole("list", { name: "Queued prompts" });
+    expect(list).toHaveTextContent("first");
+    expect(list).toHaveTextContent("second");
+    expect(list).toHaveTextContent("third");
+
+    fireEvent.click(screen.getByRole("button", { name: "Move queued prompt 1 down" }));
+    expect(list.textContent?.indexOf("second")).toBeLessThan(list.textContent!.indexOf("first"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit queued prompt 1" }));
+    const editor = screen.getByLabelText("Queued prompt text 1");
+    fireEvent.change(editor, { target: { value: "second-edited" } });
+    fireEvent.keyDown(editor, { key: "Enter" });
+    expect(list).toHaveTextContent("second-edited");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit queued prompt 1" }));
+    const editor2 = screen.getByLabelText("Queued prompt text 1");
+    fireEvent.change(editor2, { target: { value: "should-not-stick" } });
+    fireEvent.keyDown(editor2, { key: "Escape" });
+    fireEvent.blur(editor2);
+    expect(list).toHaveTextContent("second-edited");
+    expect(list).not.toHaveTextContent("should-not-stick");
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove queued prompt 3" }));
+    expect(list).not.toHaveTextContent("third");
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear queue" }));
+    expect(screen.queryByRole("list", { name: "Queued prompts" })).not.toBeInTheDocument();
   });
 
   it("shows the refactored inspector tabs and unavailable project workflows", async () => {
