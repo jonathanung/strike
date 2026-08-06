@@ -62,7 +62,7 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `internal/provider/{anthropic,openaicompat,chatgpt,google,echo}` | Concrete adapters (openaicompat covers OpenAI platform API, xAI, Kimi, DeepSeek; chatgpt is the ChatGPT-subscription backend; google is Google AI Studio generateContent; echo is the offline dev provider) | `provider`, `provider/base` (all but echo), stdlib |
 | `internal/sandbox` | OS-primitive process sandbox: `Wrap(argv, Policy)` via Linux `bwrap` / macOS `sandbox-exec`; Policy carries mode, write denials, `NoNetwork` (host net on by default), and optional `NetworkAllow` host/CIDR list (webfetch; shared shape for future container net); `Explain`/`ProfileText` for `/sandbox explain`; graceful degrade + startup warning when unavailable | stdlib only |
 | `internal/scheduler` | Fair cancellable named-pool admission (process/build/test/model/container): context-aware acquire, atomic multi-pool leases, observer snapshots; layered limits + ordered command classification (`Compile` / `CompileWithPresets` → `Effective`); versioned build-system presets (`Catalog`, expand into ordinary limits/rules) | stdlib only |
-| `internal/tool` | Tool contract (`Tool`, `Context`, `Result`) + built-ins: read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/task_message/task_interrupt/agent_roster/agent_ownership/agent_message/agent_broadcast/team_task/webfetch/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/phase_done/toolsearch; `PathOwnership` multi-agent path claims; bash acquires scheduler pools after Ask; file tools call `FileSync` + `CollectDiagnostics` after mutations | `provider` (for `ToolSchema`), `memory`, `issue`, `sandbox`, `scheduler`, stdlib |
+| `internal/tool` | Tool contract (`Tool`, `Context`, `Result`, `CodedError`) + built-ins: read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/task_message/task_interrupt/agent_roster/agent_ownership/agent_message/agent_broadcast/team_task/webfetch/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/phase_done/toolsearch; FS tx safety (`FileState` freshness + optional `baseHash`, atomic temp+rename writes, `TurnDiff` create/update/delete); `PathOwnership` multi-agent path claims; bash acquires scheduler pools after Ask; file tools call `FileSync` + `CollectDiagnostics` after mutations | `provider` (for `ToolSchema`), `memory`, `issue`, `sandbox`, `scheduler`, stdlib |
 | `internal/mcp` | MCP client (stdio + streamable HTTP) + session manager; bridges tools onto `tool.Registry` as `mcp_<server>_<tool>`; retry/disable; tools-only stdio **server** (`Server`) for `strike mcp-serve` | `tool`, stdlib, net/http |
 | `internal/lsp` | LSP client (JSON-RPC 2.0 over stdio, Content-Length framing) + manager; extension→server registry; didOpen/didChange/didClose from file tools; collect `publishDiagnostics`; inject formatted diagnostics into file-tool Results (`CollectForPaths`); crash isolation | stdlib, os/exec |
 | `internal/memory` | Project-scoped durable key/value memory (JSON under `~/.strike/memory/`) | stdlib |
@@ -419,6 +419,23 @@ reduces protocol events into that state in `applyAgentStateEvent` /
 tree nodes should reuse the same mapping when M5 lands; do not add a second
 palette.
 
+
+## Filesystem transaction safety (tools)
+
+Mutating file tools (`edit` / `write` / `apply_patch` / `notebook_edit`) share one
+stack — do not fork a second file-state system:
+
+| Layer | Package | Role |
+|---|---|---|
+| Freshness / base hash | `tool.FileState`, `CheckBaseHash`, `CheckContentUnchanged` | Per-agent read snapshots (mtime/size/hash); optional `baseHash` / `baseHashes` args fail closed with `precondition_failed` (#793 codes) |
+| Atomic commit | `workspaceWriteFile` → `atomicWriteFile` | Same-dir temp + `rename` on local POSIX; refuses symlink leaves |
+| Per-turn diff | `tool.TurnDiff` → `protocol.TurnCompleted.Files` | create/update/delete summary for timeline/UI |
+| Undo snapshots | `tool.CheckpointStore` (#540) | Pre-mutation bytes per turn for `/undo` restore |
+| Multi-agent overlap | `tool.PathOwnership` (#772) | Cross-agent path claims / leases; orthogonal to per-tool freshness |
+
+`FileState` answers “did *this* agent re-read after an external change?”;
+ownership answers “is another active worker claiming this path?”; checkpoints
+answer “what bytes do we restore on undo?”.
 
 ## Engine source map (selected)
 

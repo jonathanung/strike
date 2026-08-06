@@ -406,7 +406,12 @@ type Context struct {
 	OwnershipReleaseLease func(ctx context.Context, path string) error
 	// Checkpoint, when non-nil, records pre-mutation file state for undo
 	// restore (first touch per turn). Absolute path. Nil disables checkpoints.
+	// Composes with TurnDiff (per-turn create/update/delete summary) and
+	// PathOwnership (#772); do not fork a second file-state system.
 	Checkpoint func(absPath string)
+	// TurnDiff, when non-nil, records harness file change kinds for the
+	// active turn (timeline/UI). Nil disables. Tools call NoteTurnChange.
+	TurnDiff *TurnDiff
 	// FileSync, when non-nil, is invoked after a successful file mutation so
 	// hosts can drive LSP document sync (didOpen/didChange/didClose).
 	// absPath is absolute; content is the full new text; deleted is true for
@@ -433,6 +438,17 @@ func (tc *Context) SnapshotPath(absPath string) {
 		return
 	}
 	tc.Checkpoint(absPath)
+}
+
+// NoteTurnChange records a harness file mutation on TurnDiff when set.
+// existedBefore should reflect disk state before the mutation; deleted marks
+// removals. Safe on a nil receiver or nil TurnDiff.
+func (tc *Context) NoteTurnChange(absPath string, existedBefore, deleted bool) {
+	if tc == nil || tc.TurnDiff == nil || absPath == "" {
+		return
+	}
+	rel := RelPathForDiff(tc.WorkDir, absPath)
+	tc.TurnDiff.Note(rel, existedBefore, deleted)
 }
 
 // NotifyFileSync tells optional listeners (e.g. LSP) about a successful mutation.
