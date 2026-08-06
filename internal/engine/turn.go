@@ -18,6 +18,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/question"
 	"github.com/jonathanung/strike-cli/internal/sandbox"
 	"github.com/jonathanung/strike-cli/internal/scheduler"
+	"github.com/jonathanung/strike-cli/internal/secret"
 	"github.com/jonathanung/strike-cli/internal/tool"
 )
 
@@ -524,7 +525,10 @@ type toolFeedback struct {
 // pairs model history with (when EmitEnd) a ToolCallEnd event. Permission
 // denials, user rejects, hook blocks, interrupts, and ordinary results all
 // settle here so future phase bounces and hook messages share the same shape.
+// Output is scrubbed so secrets never reach the model, TUI, or session tee.
 func (e *Engine) settleToolFeedback(fb toolFeedback) provider.Message {
+	fb.Output = secret.ScrubToolOutput(fb.Output)
+	fb.Title = secret.Redact(fb.Title)
 	if fb.EmitEnd {
 		e.emit(protocol.ToolCallEnd{
 			Correlation: fb.Corr,
@@ -595,11 +599,12 @@ func isUserTurnInterrupt(err error) bool {
 // canceled output; it does not invent PermissionResolved. If begin was
 // never emitted, only a history-only unstarted result is returned.
 func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr protocol.Correlation) provider.Message {
+	// Redact args on the emitted begin only — Execute still receives call.Args.
 	begin := protocol.ToolCallBegin{
 		Correlation: corr,
 		CallID:      call.ID,
 		Name:        call.Name,
-		Args:        call.Args,
+		Args:        secret.RedactJSON(call.Args),
 	}
 	// Ask Run to emit begin so Interrupt can be applied while Events is full.
 	result := make(chan beginAck, 1)
@@ -731,16 +736,20 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 				e.emit(protocol.ToolCallOutput{
 					Correlation: corr,
 					CallID:      callID,
-					Data:        data,
+					Data:        secret.ScrubToolOutput(data),
 				})
 			},
 			Process: tool.ProcessObserver{
 				Started: func(id string, argv []string) {
+					safeArgv := make([]string, len(argv))
+					for i, a := range argv {
+						safeArgv[i] = secret.Redact(a)
+					}
 					e.emit(protocol.ProcessStarted{
 						Correlation: corr,
 						ProcessID:   id,
 						CallID:      callID,
-						Argv:        argv,
+						Argv:        safeArgv,
 						Cwd:         e.opts.WorkDir,
 					})
 				},
@@ -752,7 +761,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 						Correlation: corr,
 						ProcessID:   id,
 						Stream:      stream,
-						Data:        data,
+						Data:        secret.ScrubToolOutput(data),
 					})
 				},
 				Exited: func(id string, exitCode int, status tool.ProcessStatus) {

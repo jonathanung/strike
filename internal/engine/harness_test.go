@@ -253,8 +253,12 @@ func testTaskChildHarnessEndToEnd(t *testing.T, fn harness.Func) {
 			t.Fatalf("HarnessProgress.Name = %q", event.Name)
 		}
 	}
-	if calls := prov.callCount(); calls != 6 {
-		t.Fatalf("provider calls = %d, want 6", calls)
+	// 5 = parent tool + 3 harness candidates + parent finish with mid-turn
+	// child.completed inject (no idle nudge stream). 6 = same plus idle
+	// auto-nudge after the parent turn. Both are valid; race/CPU timing
+	// (e.g. tool-output redaction) picks the path.
+	if calls := prov.callCount(); calls != 5 && calls != 6 {
+		t.Fatalf("provider calls = %d, want 5 (inject) or 6 (nudge)", calls)
 	}
 }
 

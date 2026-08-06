@@ -276,28 +276,41 @@ func TestForegroundTaskIndependentHistory(t *testing.T) {
 		t.Errorf("task output = %q, want session id %q", taskEnds[0].Output, started[0].SessionID)
 	}
 
-	// Four Stream calls: parent tool-use, parent final, child final, parent
-	// child.completed nudge (order of middle calls may race).
-	if prov.callCount() != 4 {
-		t.Fatalf("Stream calls = %d, want 4", prov.callCount())
+	// 3 = parent tool-use + parent final + child final (mid-turn inject).
+	// 4 = same plus idle auto-nudge stream. Order of middle calls may race.
+	calls := prov.callCount()
+	if calls != 3 && calls != 4 {
+		t.Fatalf("Stream calls = %d, want 3 (inject) or 4 (nudge)", calls)
 	}
 	var reqs []provider.Request
-	for i := 0; i < 4; i++ {
+	for i := 0; i < calls; i++ {
 		reqs = append(reqs, receiveRequest(t, prov.requests))
 	}
-	var sawNudge bool
+	var sawNotice bool
 	for _, r := range reqs {
 		for _, msg := range r.Messages {
 			if msg.Role == provider.RoleUser && strings.Contains(msg.Text, "[child.completed") {
-				sawNudge = true
+				sawNotice = true
 				if !strings.Contains(msg.Text, "child finished work") {
-					t.Errorf("nudge missing child summary: %q", msg.Text)
+					t.Errorf("notice missing child summary: %q", msg.Text)
 				}
 			}
 		}
 	}
-	if !sawNudge {
-		t.Fatal("missing parent auto-nudge with child.completed")
+	// Mid-turn inject emits UserMessage without a dedicated nudge Stream.
+	if !sawNotice {
+		for _, ev := range events {
+			if um, ok := ev.(protocol.UserMessage); ok && strings.Contains(um.Text, "[child.completed") {
+				sawNotice = true
+				if !strings.Contains(um.Text, "child finished work") {
+					t.Errorf("notice missing child summary: %q", um.Text)
+				}
+				break
+			}
+		}
+	}
+	if !sawNotice {
+		t.Fatal("missing child.completed notice (inject or nudge)")
 	}
 	var childReq, parentFinal *provider.Request
 	for i := range reqs {
@@ -1228,9 +1241,10 @@ func TestTaskChildInheritsParentProvider(t *testing.T) {
 	if n := selectCalls.Load(); n != 1 {
 		t.Errorf("Select calls = %d, want 1 (child must inherit live provider)", n)
 	}
-	// Four Stream calls: parent tool-use, parent final, child final, nudge.
-	if prov.callCount() != 4 {
-		t.Fatalf("Stream calls = %d, want 4", prov.callCount())
+	// 3 = parent tool-use + parent final + child final with mid-turn
+	// child.completed inject. 4 = same plus idle auto-nudge. Both valid.
+	if n := prov.callCount(); n != 3 && n != 4 {
+		t.Fatalf("Stream calls = %d, want 3 (inject) or 4 (nudge)", n)
 	}
 }
 

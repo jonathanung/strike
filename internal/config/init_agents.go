@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/jonathanung/strike-cli/internal/secret"
 )
 
 // ErrAgentsExists is returned by WriteAgentsMD when AGENTS.md already exists
@@ -436,55 +438,7 @@ func fileExists(dir, name string) bool {
 }
 
 // scrubSecretSpans redacts credential-shaped spans from free text used in the
-// generated template (README summary). Conservative patterns only.
+// generated template (README summary) via the shared secret helper.
 func scrubSecretSpans(s string) string {
-	// Longer prefixes first so sk-ant- is not double-eaten by a shorter token.
-	prefixes := []string{"sk-ant-", "sk-proj-", "sk-live-", "ghp_", "gho_", "ghs_", "xoxb-", "xoxp-"}
-	lines := strings.Split(s, "\n")
-	for i, line := range lines {
-		for _, prefix := range prefixes {
-			line = redactPrefixedTokens(line, prefix)
-		}
-		lower := strings.ToLower(line)
-		for _, key := range []string{"api_key=", "api-key=", "password=", "secret=", "token="} {
-			if j := strings.Index(lower, key); j >= 0 {
-				start := j + len(key)
-				end := start
-				for end < len(line) && line[end] != ' ' && line[end] != '"' && line[end] != '\'' {
-					end++
-				}
-				if end > start {
-					line = line[:start] + "…" + line[end:]
-					lower = strings.ToLower(line)
-				}
-			}
-		}
-		lines[i] = line
-	}
-	return strings.Join(lines, "\n")
-}
-
-func redactPrefixedTokens(line, prefix string) string {
-	var b strings.Builder
-	rest := line
-	for {
-		idx := strings.Index(rest, prefix)
-		if idx < 0 {
-			b.WriteString(rest)
-			return b.String()
-		}
-		b.WriteString(rest[:idx])
-		b.WriteString(prefix)
-		b.WriteString("…")
-		end := idx + len(prefix)
-		for end < len(rest) {
-			c := rest[end]
-			if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' {
-				end++
-				continue
-			}
-			break
-		}
-		rest = rest[end:]
-	}
+	return secret.Redact(s)
 }

@@ -63,6 +63,7 @@ service/theme token).
 | `internal/lsp` | LSP client (JSON-RPC over stdio); extension registry; diagnostics collection |
 | `internal/question` | user-question ask service (suspend tool until QuestionReply) |
 | `internal/permission` | last-match-wins allow/ask/deny + ask service |
+| `internal/secret` | secret-ref env indirection + protocol event redaction on top of pkg/redact (see docs/secrets.md) |
 | `internal/auth` | credentials, OAuth/PKCE/device, env precedence |
 | `internal/config` | global/project JSON + agents/skills markdown |
 | `internal/session` | JSONL event log append/replay + concurrent Manager |
@@ -98,8 +99,8 @@ service/theme token).
 - `internal/tui` may import only `internal/protocol`, `internal/host`, and
   `internal/tui/...` among `internal/*` packages — enforced by
   `internal/tui/boundary_test.go` (`TestArchitectureBoundaries`). Prefer
-  `pkg/protocol` for the public wire schema (also allowed; not under
-  `internal/`). Charm paths: v1 `github.com/charmbracelet/…` or v2
+  `pkg/protocol` / `pkg/redact` for public wire/scrub helpers (also allowed;
+  not under `internal/`). Charm paths: v1 `github.com/charmbracelet/…` or v2
   `charm.land/…`; never `github.com/charmbracelet/…/v2`
   (`TestCharmImportPaths`).
 
