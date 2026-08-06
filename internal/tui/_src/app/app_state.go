@@ -135,11 +135,19 @@ func (m Model) visualizerStateSnapshot() visualizerStateMsg {
 		if msg.Label == "" {
 			msg.Label = shortSessionID(id)
 		}
-		msg.StatusLabel = ch.status
+		// Prefer roster chip (e.g. "needs you") over coarse running/completed so
+		// VIZ.2 can surface attention/block rows from status alone.
+		msg.StatusLabel = strings.TrimSpace(ch.rosterState)
+		if msg.StatusLabel == "" {
+			msg.StatusLabel = ch.status
+		}
 		if msg.StatusLabel == "" {
 			msg.StatusLabel = "unknown"
 		}
-		msg.State = childAgentState(ch.status)
+		msg.State = childAgentState(msg.StatusLabel)
+		if msg.State == theme.AgentStateReady {
+			msg.State = childAgentState(ch.status)
+		}
 		// Child token/cost stay unknown unless we later track per-child usage.
 		// Never fabricate zeros from absence.
 		fillVisualizerChildObs(&msg, ch)
