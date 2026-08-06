@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { activateRoot, bootstrap, closeRoot, createRoot, historicalConnection, liveConnection, request, resumeRoot, roots as loadRoots, sendOp, sessions as loadSessions, sessionChildren, getSandbox, patchSandbox, downloadDiagnostics } from "./api";
+import { activateRoot, bootstrap, closeRoot, createRoot, historicalConnection, liveConnection, request, resumeRoot, roots as loadRoots, sendOp, sessions as loadSessions, sessionChildren, getSandbox, patchSandbox, downloadDiagnostics, closeIssue, createIssue, deleteMemory, exportIssues, exportMemory, putMemory } from "./api";
 import { ChildAgentsPanel } from "./ChildAgents";
 import { buildExportMarkdown, defaultExportFilename, downloadTextFile } from "./exportMarkdown";
 import { clearQueue, editQueuedText, moveQueuedAt, removeQueuedAt, type QueuedPrompt } from "./queueOps";
@@ -535,7 +535,7 @@ export default function App() {
       <section className="transcript" aria-live="polite" aria-label="Conversation transcript">{!boot && transport !== "connecting" ? <div className="empty-state" role="alert"><span>ERROR</span><h1>{transport}</h1><p>Failed to load cockpit. Open the URL printed by <code>strike serve</code> (includes <code>?token=</code>), or pass a valid bearer token.</p></div> : !state.items.length && <div className="empty-state"><span>01 / READY</span><h1>{boot?.attachOnly ? "Inspect the record." : "Direct the work."}</h1><p>{boot?.attachOnly ? "Select a durable session from the rail." : "Describe an outcome. Strike will plan, act, and report through the live engine seam."}</p></div>}{state.items.map((item) => <Transcript key={item.id} item={item} showThinking={showThinking} />)}<div ref={endRef} /></section>
       <form className="composer" onSubmit={submit}><label htmlFor="prompt">Instruction {state.status.busy && "— send to queue"}</label><textarea aria-label="Instruction" id="prompt" value={draft} disabled={!isLive} placeholder={isLive ? "Describe the next outcome…  / command" : "Historical session — read only"} onPaste={(event) => void attach(event.clipboardData.files)} onDrop={(event) => { event.preventDefault(); void attach(event.dataTransfer.files); }} onDragOver={(event) => event.preventDefault()} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !completions.length) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} />{completions.length > 0 && <div className="completion" role="listbox" aria-label="Composer completions">{completions.slice(0, 8).map((item) => <button type="button" role="option" key={item.label} onClick={() => selectCompletion(item)}><strong>{item.label}</strong><span>{item.detail}</span></button>)}</div>}{images.length > 0 && <div className="attachments">{images.map((image, index) => <button type="button" key={`${image.name}-${index}`} onClick={() => setImages((list) => list.filter((_, i) => i !== index))}>{image.name} ×</button>)}</div>}{queue.length > 0 && <div className="prompt-queue-wrap"><ol ref={queueRef} className="prompt-queue" aria-label="Queued prompts">{queue.map((item, index) => <li key={index}>{queueEdit?.index === index ? <input className="queue-edit" aria-label={`Queued prompt text ${index + 1}`} value={queueEdit.text} autoFocus onChange={(event) => setQueueEdit({ index, text: event.target.value })} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); queueEditCancel.current = false; setQueue((list) => editQueuedText(list, index, queueEdit.text)); setQueueEdit(null); } if (event.key === "Escape") { event.preventDefault(); queueEditCancel.current = true; setQueueEdit(null); } }} onBlur={() => { if (!queueEditCancel.current) setQueue((list) => editQueuedText(list, index, queueEdit.text)); queueEditCancel.current = false; setQueueEdit(null); }} /> : <span>{item.text}{item.images.length > 0 ? ` (${item.images.length} img)` : ""}</span>}<span className="queue-actions"><button type="button" aria-label={`Move queued prompt ${index + 1} up`} disabled={index === 0} onClick={() => setQueue((list) => moveQueuedAt(list, index, -1))}>↑</button><button type="button" aria-label={`Move queued prompt ${index + 1} down`} disabled={index === queue.length - 1} onClick={() => setQueue((list) => moveQueuedAt(list, index, 1))}>↓</button><button type="button" aria-label={`Edit queued prompt ${index + 1}`} onClick={() => { queueEditCancel.current = false; setQueueEdit({ index, text: item.text }); }}>✎</button><button type="button" aria-label={`Remove queued prompt ${index + 1}`} onClick={() => { setQueue((list) => removeQueuedAt(list, index)); setQueueEdit((cur) => cur?.index === index ? null : cur); }}>×</button></span></li>)}</ol><div className="queue-toolbar"><button type="button" onClick={() => { setQueue(clearQueue()); setQueueEdit(null); }}>Clear queue</button></div></div>}<div><span><kbd>↵</kbd> send · <kbd>⇧↵</kbd> newline</span><span><input ref={fileRef} hidden type="file" accept="image/*" multiple onChange={(event) => void attach(event.target.files)} /><button type="button" onClick={() => fileRef.current?.click()}>Attach</button>{history.length > 0 && <button type="button" onClick={() => setDraft(history.at(-1) || "")}>History</button>}<button type="button" onClick={() => exportSession()} disabled={!state.items.length}>Export</button>{state.status.busy && <button type="button" className="stop" onClick={() => void op("interrupt")}>Interrupt</button>}<button type="submit" disabled={!draft.trim() || !isLive}>{state.status.busy ? "Queue" : "Send"}</button></span></div></form>
     </main>
-    <aside className={`inspector ${inspectorOpen ? "open" : "collapsed"}`} aria-label="Inspector"><PanelResize label="Resize inspector panel" value={inspectorWidth} min={240} max={520} onChange={setInspectorWidth} side="inspector" /><div className="inspector-tabs" role="tablist">{inspectorTabs.map((tab) => <button role="tab" aria-selected={inspector === tab} key={tab} onClick={() => void inspectProject(tab)}>{tab}</button>)}</div><div className="inspector-body">{inspectorTabs.length ? <InspectorBody tab={inspectorTabs.includes(inspector) ? inspector : inspectorTabs[0]} boot={boot} status={state.status} data={projectData} loading={projectLoading} expandedDiffs={expandedDiffs} toggleDiff={toggleDiff} isLive={isLive} selectedID={selectedID} sandbox={sandboxInfo} onExplainSandbox={() => void openSandboxExplain()} /> : <p className="muted">No inspector panels available for this host.</p>}</div></aside>
+    <aside className={`inspector ${inspectorOpen ? "open" : "collapsed"}`} aria-label="Inspector"><PanelResize label="Resize inspector panel" value={inspectorWidth} min={240} max={520} onChange={setInspectorWidth} side="inspector" /><div className="inspector-tabs" role="tablist">{inspectorTabs.map((tab) => <button role="tab" aria-selected={inspector === tab} key={tab} onClick={() => void inspectProject(tab)}>{tab}</button>)}</div><div className="inspector-body">{inspectorTabs.length ? <InspectorBody tab={inspectorTabs.includes(inspector) ? inspector : inspectorTabs[0]} boot={boot} status={state.status} data={projectData} loading={projectLoading} expandedDiffs={expandedDiffs} toggleDiff={toggleDiff} isLive={isLive} selectedID={selectedID} onRefresh={() => void inspectProject(inspector)} sandbox={sandboxInfo} onExplainSandbox={() => void openSandboxExplain()} /> : <p className="muted">No inspector panels available for this host.</p>}</div></aside>
     {settingsOpen && <SettingsDialog boot={boot} status={state.status} providers={providers} rootID={selectedID} isLive={isLive} onClose={() => setSettingsOpen(false)} />}
     {sandboxExplainOpen && sandboxInfo && <SandboxExplainDialog info={sandboxInfo} status={state.status} onClose={() => setSandboxExplainOpen(false)} />}
 {undoDialog && <UndoPreviewDialog preview={lastUndoPreview} preferFiles={undoDialog.preferFiles} onCancel={() => setUndoDialog(null)} onConfirm={confirmUndo} />}
@@ -690,7 +690,7 @@ function RuntimeStatus({ status, modelRates }: { status: Status; modelRates?: { 
   return <div className="runtime-status" aria-label="Session status">{bits.map((bit) => <span key={bit}>{bit}</span>)}</div>;
 }
 
-function InspectorBody({ tab, boot, status, data, loading, expandedDiffs, toggleDiff, isLive, selectedID, sandbox, onExplainSandbox }: { tab: InspectorTab; boot?: Bootstrap; status: Status; data: unknown; loading: boolean; expandedDiffs: Set<string>; toggleDiff: (path: string) => void; isLive: boolean; selectedID: string; sandbox?: SandboxInfo; onExplainSandbox?: () => void }) {
+function InspectorBody({ tab, boot, status, data, loading, expandedDiffs, toggleDiff, isLive, selectedID, onRefresh, sandbox, onExplainSandbox }: { tab: InspectorTab; boot?: Bootstrap; status: Status; data: unknown; loading: boolean; expandedDiffs: Set<string>; toggleDiff: (path: string) => void; isLive: boolean; selectedID: string; onRefresh?: () => void; sandbox?: SandboxInfo; onExplainSandbox?: () => void }) {
   if (tab === "workflows") {
     return <WorkflowsPanel
       available={Boolean(boot?.capabilities.workflows)}
@@ -719,8 +719,8 @@ function InspectorBody({ tab, boot, status, data, loading, expandedDiffs, toggle
   }
   if (loading) return <section className="unavailable" role="status"><strong>Loading {tab}</strong></section>;
   if (tab === "files") return <FilesPanel boot={boot} data={data} expandedDiffs={expandedDiffs} toggleDiff={toggleDiff} />;
-  if (tab === "memory") return <MemoryPanel boot={boot} data={data} />;
-  return <IssuesPanel boot={boot} data={data} />;
+  if (tab === "memory") return <MemoryPanel boot={boot} data={data} onRefresh={onRefresh || (() => {})} />;
+  return <IssuesPanel boot={boot} data={data} onRefresh={onRefresh || (() => {})} />;
 }
 
 function FilesPanel({ boot, data, expandedDiffs, toggleDiff }: { boot?: Bootstrap; data: unknown; expandedDiffs: Set<string>; toggleDiff: (path: string) => void }) {
@@ -730,18 +730,115 @@ function FilesPanel({ boot, data, expandedDiffs, toggleDiff }: { boot?: Bootstra
   return <><h2>Changed files</h2>{files.length ? <div className="changed-files">{files.map((file) => <article key={file.path} className="changed-file"><button onClick={() => toggleDiff(file.path)} aria-expanded={expandedDiffs.has(file.path)}><code>{file.path}</code><span className="diff-stat"><b>+{file.added}</b><b>-{file.deleted}</b></span></button>{expandedDiffs.has(file.path) && <pre className="diff-view">{file.diff || "No textual diff available."}</pre>}</article>)}</div> : <p className="muted">No changed files reported.</p>}</>;
 }
 
-function MemoryPanel({ boot, data }: { boot?: Bootstrap; data: unknown }) {
+function MemoryPanel({ boot, data, onRefresh }: { boot?: Bootstrap; data: unknown; onRefresh: () => void }) {
+  const canWrite = Boolean(boot?.capabilities.memory && !boot.attachOnly);
+  const [key, setKey] = useState("");
+  const [value, setValue] = useState("");
+  const [tags, setTags] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [editKey, setEditKey] = useState<string | null>(null);
   if (!boot?.capabilities.memory) return <CapabilityUnavailable name="Memory" />;
   if ((data as { error?: string } | undefined)?.error) return <CapabilityError error={(data as { error: string }).error} />;
   const entries = ((data as { entries?: MemoryEntry[] } | undefined)?.entries || []);
-  return <><h2>Memory</h2>{entries.length ? <div className="project-list">{entries.map((entry) => { const key = entry.Key || entry.key || ""; const value = entry.Value || entry.value || ""; const tags = entry.Tags || entry.tags || []; return <article key={key}><h3>{key}</h3><p>{value}</p>{tags.length > 0 && <small>{tags.join(", ")}</small>}</article>; })}</div> : <p className="muted">No project memory entries.</p>}</>;
+  const run = async (action: () => Promise<unknown>) => {
+    setBusy(true);
+    try { await action(); onRefresh(); } catch (error) { window.alert((error as Error).message); } finally { setBusy(false); }
+  };
+  const startEdit = (entry: MemoryEntry) => {
+    const nextKey = entry.Key || entry.key || "";
+    setEditKey(nextKey);
+    setKey(nextKey);
+    setValue(entry.Value || entry.value || "");
+    setTags((entry.Tags || entry.tags || []).join(", "));
+  };
+  const save = () => {
+    const nextKey = key.trim();
+    if (!nextKey) return window.alert("Key is required");
+    const tagList = tags.split(",").map((t) => t.trim()).filter(Boolean);
+    void run(async () => {
+      await putMemory(nextKey, value, tagList);
+      setKey(""); setValue(""); setTags(""); setEditKey(null);
+    });
+  };
+  return <>
+    <div className="panel-heading">
+      <h2>Memory</h2>
+      <div className="panel-actions">
+        <button type="button" disabled={busy} aria-label="Export memory" onClick={() => void run(() => exportMemory())}>Export</button>
+      </div>
+    </div>
+    {canWrite && <form className="project-form" aria-label={editKey ? "Edit memory entry" : "Add memory entry"} onSubmit={(event) => { event.preventDefault(); save(); }}>
+      <label>Key<input aria-label="Memory key" value={key} disabled={busy || Boolean(editKey)} onChange={(event) => setKey(event.target.value)} placeholder="convention" /></label>
+      <label>Value<textarea aria-label="Memory value" value={value} disabled={busy} onChange={(event) => setValue(event.target.value)} placeholder="Prefer table-driven tests" rows={3} /></label>
+      <label>Tags<input aria-label="Memory tags" value={tags} disabled={busy} onChange={(event) => setTags(event.target.value)} placeholder="project, style" /></label>
+      <div className="panel-actions">
+        {editKey && <button type="button" disabled={busy} onClick={() => { setEditKey(null); setKey(""); setValue(""); setTags(""); }}>Cancel</button>}
+        <button type="submit" disabled={busy}>{editKey ? "Save" : "Add"}</button>
+      </div>
+    </form>}
+    {!canWrite && <p className="muted">Attach-only mode is read-only. Export remains available.</p>}
+    {entries.length ? <div className="project-list">{entries.map((entry) => {
+      const entryKey = entry.Key || entry.key || "";
+      const entryValue = entry.Value || entry.value || "";
+      const entryTags = entry.Tags || entry.tags || [];
+      return <article key={entryKey}>
+        <h3>{entryKey}</h3>
+        <p>{entryValue}</p>
+        {entryTags.length > 0 && <small>{entryTags.join(", ")}</small>}
+        {canWrite && <div className="panel-actions">
+          <button type="button" disabled={busy} onClick={() => startEdit(entry)}>Edit</button>
+          <button type="button" disabled={busy} onClick={() => { if (window.confirm(`Delete memory key “${entryKey}”?`)) void run(() => deleteMemory(entryKey)); }}>Delete</button>
+        </div>}
+      </article>;
+    })}</div> : <p className="muted">No project memory entries.</p>}
+  </>;
 }
 
-function IssuesPanel({ boot, data }: { boot?: Bootstrap; data: unknown }) {
+function IssuesPanel({ boot, data, onRefresh }: { boot?: Bootstrap; data: unknown; onRefresh: () => void }) {
+  const canWrite = Boolean(boot?.capabilities.issues && !boot.attachOnly);
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [busy, setBusy] = useState(false);
   if (!boot?.capabilities.issues) return <CapabilityUnavailable name="Issues" />;
   if ((data as { error?: string } | undefined)?.error) return <CapabilityError error={(data as { error: string }).error} />;
   const issues = ((data as { issues?: IssueEntry[] } | undefined)?.issues || []);
-  return <><h2>Issues</h2>{issues.length ? <div className="project-list">{issues.map((issue) => { const id = issue.ID ?? issue.id ?? 0; const title = issue.Title || issue.title || "Untitled issue"; const body = issue.Body || issue.body || ""; const status = issue.Status || issue.status || "open"; return <article key={id}><h3>#{id} {title}</h3><small>{status}</small>{body && <p>{body}</p>}</article>; })}</div> : <p className="muted">No project issues.</p>}</>;
+  const run = async (action: () => Promise<unknown>) => {
+    setBusy(true);
+    try { await action(); onRefresh(); } catch (error) { window.alert((error as Error).message); } finally { setBusy(false); }
+  };
+  return <>
+    <div className="panel-heading">
+      <h2>Issues</h2>
+      <div className="panel-actions">
+        <button type="button" disabled={busy} aria-label="Export issues" onClick={() => void run(() => exportIssues())}>Export</button>
+      </div>
+    </div>
+    {canWrite && <form className="project-form" aria-label="Add issue" onSubmit={(event) => {
+      event.preventDefault();
+      const nextTitle = title.trim();
+      if (!nextTitle) return window.alert("Title is required");
+      void run(async () => { await createIssue(nextTitle, body); setTitle(""); setBody(""); });
+    }}>
+      <label>Title<input aria-label="Issue title" value={title} disabled={busy} onChange={(event) => setTitle(event.target.value)} placeholder="Fix inspector resize" /></label>
+      <label>Body<textarea aria-label="Issue body" value={body} disabled={busy} onChange={(event) => setBody(event.target.value)} placeholder="Optional details" rows={3} /></label>
+      <div className="panel-actions"><button type="submit" disabled={busy}>Add</button></div>
+    </form>}
+    {!canWrite && <p className="muted">Attach-only mode is read-only. Export remains available.</p>}
+    {issues.length ? <div className="project-list">{issues.map((issue) => {
+      const id = issue.ID ?? issue.id ?? 0;
+      const issueTitle = issue.Title || issue.title || "Untitled issue";
+      const issueBody = issue.Body || issue.body || "";
+      const status = issue.Status || issue.status || "open";
+      return <article key={id}>
+        <h3>#{id} {issueTitle}</h3>
+        <small>{status}</small>
+        {issueBody && <p>{issueBody}</p>}
+        {canWrite && status === "open" && <div className="panel-actions">
+          <button type="button" disabled={busy} onClick={() => void run(() => closeIssue(id))}>Close</button>
+        </div>}
+      </article>;
+    })}</div> : <p className="muted">No project issues.</p>}
+  </>;
 }
 
 function CapabilityUnavailable({ name }: { name: string }) { return <section className="unavailable" role="status"><strong>{name} unavailable</strong><p>The configured host did not provide this capability. No action was attempted.</p></section>; }

@@ -667,3 +667,15 @@ curl -s -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
 Permission asks appear as `permission.asked` events; resolve with
 `permission.reply` (UI modal or `POST /v1/ops`).
 
+
+
+### Memory & issues write/export
+
+| `PUT` | `/v1/memory/{key}` | **yes** | Put/replace entry (`{value,tags?}`); blocked in attach-only |
+| `DELETE` | `/v1/memory/{key}` | **yes** | Delete entry; blocked in attach-only |
+| `GET` | `/v1/memory/export` | mode | Download portable `strike-memory.json` (TUI format) |
+| `POST` | `/v1/memory/import` | **yes** | Import (`{path}` or `{data}`, `replace?`); blocked in attach-only |
+| `POST` | `/v1/issues` | **yes** | Create issue (`{title,body?}`); blocked in attach-only |
+| `POST` | `/v1/issues/{id}/close` | **yes** | Close issue; blocked in attach-only |
+| `GET` | `/v1/issues/export` | mode | Download portable `strike-issues.json` (TUI format) |
+| `POST` | `/v1/issues/import` | **yes** | Import (`{path}` or `{data}`, `replace?`); blocked in attach-only |
