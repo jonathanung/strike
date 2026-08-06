@@ -161,10 +161,16 @@ type UserDefaults struct {
 	DeferTools string
 	// SessionWorktree is session.worktree: off|auto|always.
 	SessionWorktree string
-	Theme           string
-	VimMode         string
-	NanoMode        string
-	MdReadMode      string
+	// PermissionAutoApproveSeconds is the permission-modal countdown (0 = off).
+	PermissionAutoApproveSeconds int
+	// PermissionAutoApproveExclude lists permission names that never auto-allow.
+	PermissionAutoApproveExclude []string
+	// MaxChildDepth bounds nested task spawns (0 = engine default).
+	MaxChildDepth int
+	Theme         string
+	VimMode       string
+	NanoMode      string
+	MdReadMode    string
 }
 
 // Settings persists user-chosen defaults. Empty fields mean "leave as is".
@@ -191,6 +197,12 @@ type Settings interface {
 	// and sessionWorktree (off|auto|always). Empty leaves the stored value
 	// unchanged; unknown values are rejected.
 	SaveConfigDials(sandbox, notify, leanCode, deferTools, sessionWorktree string) error
+	// SaveAutoApproveDials persists permissionAutoApproveSeconds, optional
+	// exclude list, and maxChildDepth. Empty scalar strings leave the
+	// corresponding field unchanged. exclude nil leaves the list unchanged; a
+	// non-nil pointer (including to an empty slice) replaces it.
+	// seconds: off|0|1-60; maxChildDepth: default|0|1-8. Unknown values error.
+	SaveAutoApproveDials(seconds string, exclude *[]string, maxChildDepth string) error
 	// SaveKeybinds persists binding-id overrides to ~/.strike/keybinds.jsonc.
 	// Unknown ids are silently dropped; callers should pre-filter. A nil
 	// map deletes the file (reset to defaults).

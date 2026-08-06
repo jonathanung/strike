@@ -646,6 +646,7 @@ func read(path string) (Config, error) {
 	}
 	c.PermissionAutoApproveSeconds = ClampPermissionAutoApproveSeconds(c.PermissionAutoApproveSeconds)
 	c.PermissionAutoApproveExclude = normalizePermissionAutoApproveExclude(c.PermissionAutoApproveExclude)
+	c.MaxChildDepth = ClampMaxChildDepth(c.MaxChildDepth)
 	if c.PermissionMode != "" {
 		mode, ok := protocol.ParsePermissionMode(string(c.PermissionMode))
 		if !ok {
@@ -739,6 +740,10 @@ func normalizeSchedulerLayer(sc *SchedulerConfig, path string) error {
 	return nil
 }
 
+// MaxChildDepthCeiling is the hard upper bound for nested task spawns
+// (matches engine absoluteMaxChildDepth).
+const MaxChildDepthCeiling = 8
+
 // ClampPermissionAutoApproveSeconds maps config values: ≤0 → 0 (off), >60 → 60.
 func ClampPermissionAutoApproveSeconds(n int) int {
 	if n <= 0 {
@@ -746,6 +751,18 @@ func ClampPermissionAutoApproveSeconds(n int) int {
 	}
 	if n > 60 {
 		return 60
+	}
+	return n
+}
+
+// ClampMaxChildDepth maps config values: <0 → 0 (engine default),
+// >MaxChildDepthCeiling → MaxChildDepthCeiling.
+func ClampMaxChildDepth(n int) int {
+	if n < 0 {
+		return 0
+	}
+	if n > MaxChildDepthCeiling {
+		return MaxChildDepthCeiling
 	}
 	return n
 }
