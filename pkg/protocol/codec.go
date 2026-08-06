@@ -82,6 +82,8 @@ func eventType(ev Event) string {
 		return "child.started"
 	case ChildCompleted:
 		return "child.completed"
+	case DelegationChanged:
+		return "delegation.changed"
 	case WaitStarted:
 		return "wait.started"
 	case WaitResolved:
@@ -205,6 +207,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &ChildStarted{}
 	case "child.completed":
 		ev = &ChildCompleted{}
+	case "delegation.changed":
+		ev = &DelegationChanged{}
 	case "wait.started":
 		ev = &WaitStarted{}
 	case "wait.resolved":
@@ -307,6 +311,8 @@ func deref(ev Event) Event {
 	case *ChildStarted:
 		return *v
 	case *ChildCompleted:
+		return *v
+	case *DelegationChanged:
 		return *v
 	case *WaitStarted:
 		return *v

@@ -610,10 +610,52 @@ type ChildCompleted struct {
 	Name string `json:"name,omitempty"`
 	// Handoff is the structured completion payload (always set by the engine).
 	Handoff CompletionHandoff `json:"handoff"`
+	// DelegationID links this child to its orchestration lifecycle object when set.
+	DelegationID string `json:"delegationId,omitempty"`
 	// Verification is set when independent completion gates ran. When gates
 	// were configured, Status is completed only if Verification.Passed;
 	// otherwise Status is blocked (gate failure) with this report attached.
 	Verification *VerificationReport `json:"verification,omitempty"`
+}
+
+// DelegationState is the orchestration lifecycle of a first-class delegation
+// (task spawn with optional criteria/deps/subscriptions). Distinct from live
+// child session pulses (starting|working|needs_attention) and terminal
+// ChildStatus values; engines map between them.
+type DelegationState string
+
+const (
+	DelegationQueued   DelegationState = "queued"
+	DelegationWorking  DelegationState = "working"
+	DelegationBlocked  DelegationState = "blocked"
+	DelegationReview   DelegationState = "review"
+	DelegationDone     DelegationState = "done"
+	DelegationFailed   DelegationState = "failed"
+	DelegationCanceled DelegationState = "canceled"
+)
+
+// DelegationChanged reports a lifecycle transition on a delegation object.
+// Correlation is the owner (creator) session. Emitted for UI/debug and for
+// event-wait consumers (#775). Subscribe hooks on create may also notify the
+// lead via mailbox when State matches a subscribed kind.
+type DelegationChanged struct {
+	Correlation
+	// ID is the stable delegation id (d1, d2, …).
+	ID string `json:"id"`
+	// State is the new lifecycle state after the transition.
+	State DelegationState `json:"state"`
+	// Prev is the prior state (empty on create).
+	Prev DelegationState `json:"prev,omitempty"`
+	// Version is the CAS token after the transition.
+	Version int `json:"version"`
+	// SessionID is the child session when one is linked (may be empty while queued).
+	SessionID string `json:"sessionId,omitempty"`
+	// Name is the optional teammate alias.
+	Name string `json:"name,omitempty"`
+	// Reason is an optional human/agent-readable cause (block reason, cancel, …).
+	Reason string `json:"reason,omitempty"`
+	// OwnerSessionID is the creator session id.
+	OwnerSessionID string `json:"ownerSessionId,omitempty"`
 }
 
 // Wait outcome labels on WaitResolved.
@@ -1261,6 +1303,7 @@ func (PathOverlap) isEvent()            {}
 func (EngineError) isEvent()            {}
 func (ChildStarted) isEvent()           {}
 func (ChildCompleted) isEvent()         {}
+func (DelegationChanged) isEvent()      {}
 func (WaitStarted) isEvent()            {}
 func (WaitResolved) isEvent()           {}
 func (AgentMessage) isEvent()           {}

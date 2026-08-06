@@ -316,6 +316,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tool.NewTaskRead(),
 		tool.NewTaskMessage(),
 		tool.NewTaskInterrupt(),
+		tool.NewDelegate(),
 		tool.NewWait(),
 		tool.NewAgentRoster(),
 		tool.NewAgentOwnership(),

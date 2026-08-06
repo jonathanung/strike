@@ -523,6 +523,7 @@ func TestEventTypeCoverage(t *testing.T) {
 		"engine.error":         EngineError{},
 		"child.started":        ChildStarted{},
 		"child.completed":      ChildCompleted{},
+		"delegation.changed":   DelegationChanged{},
 		"wait.started":         WaitStarted{},
 		"wait.resolved":        WaitResolved{},
 		"agent.message":        AgentMessage{},
