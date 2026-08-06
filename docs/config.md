@@ -90,6 +90,14 @@ write this file. Manual `/ftue` remains available after acknowledgement.
     "retentionMaxSessions": 0,
     "retentionMaxAgeDays": 0,
     "retentionMaxBytes": 0,
+    // Timeline / trace storage bounds (#810). Coordinates with retention* above.
+    "timelineMaxEntries": 0,
+    "timelineArgsPreviewMax": 0,
+    "timelineOutputPreviewMax": 0,
+    "timelineBlobSpill": false,
+    "traceRetentionMaxFiles": 0,
+    "traceRetentionMaxAgeDays": 0,
+    "traceRetentionMaxBytes": 0,
     "agentBudget": {
       "maxWallClockS": 0,
       "maxTokens": 0,
@@ -510,10 +518,37 @@ id with `meta.forkedFrom` lineage.
 | `session.retentionMaxSessions` | Cap closed sessions retained (0 = unlimited) |
 | `session.retentionMaxAgeDays` | Drop closed sessions older than N days (0 = off) |
 | `session.retentionMaxBytes` | Cap total closed log+meta bytes (0 = off) |
+| `session.timelineMaxEntries` | Cap in-memory run timeline entries (0 = library default 10000) |
+| `session.timelineArgsPreviewMax` | Inline tool-args preview rune cap (0 = 512) |
+| `session.timelineOutputPreviewMax` | Inline tool-output preview rune cap (0 = 2048) |
+| `session.timelineBlobSpill` | Spill oversized redacted payloads to `~/.strike/traces/<id>/blobs/` with `blob:sha256:` refs |
+| `session.traceRetentionMaxFiles` | Cap top-level trees under traces + runs (0 = unlimited) |
+| `session.traceRetentionMaxAgeDays` | Drop trace/run session trees older than N days (0 = off) |
+| `session.traceRetentionMaxBytes` | Cap total bytes under traces + runs trees (0 = off) |
 
 Build a policy with `session.RetentionFromConfig` and run
 `Manager.ApplyRetention` from tooling or a maintenance path. Open sessions are
 never deleted. Project config overrides global per field when non-zero.
+
+**Trace storage (#810):** the structured run timeline (`pkg/timeline`, `/timeline`)
+keeps bounded inline previews. With `timelineBlobSpill`, full redacted payloads
+that exceed the preview caps are written under
+`~/.strike/traces/<sessionId>/blobs/` (content-addressed; **no fsync** — session
+JSONL remains the durability boundary so the turn/UI loop is not blocked on
+observability I/O). Entries carry `argsRef` / `outputRef` (`blob:sha256:<hex>`)
+and `truncated: true`. In-memory builders prune oldest **terminal** entries when
+over `timelineMaxEntries`. `Builder.Metrics()` exposes Observe latency and
+spill/truncate/prune counters.
+
+Sidecar retention uses the same count/age/size axes as session retention:
+
+- `session.ApplyTraceRetention(tracesDir, runsDir, policy)` — caps
+  `~/.strike/traces` and `~/.strike/runs` (recordings / run snapshots)
+- `Manager.ApplyRetentionWithSidecars` — session JSONL retention then deletes
+  matching trace/run trees for each removed session id
+
+Build the sidecar policy with `session.TraceRetentionFromConfig` from
+`traceRetentionMax*`. Not automatic on launch.
 
 Lead and children can query the map with `agent_ownership` (`list`), and claim
 path prefixes with `lease` / `release` (exclusive or shared). Finished children

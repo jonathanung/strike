@@ -26,7 +26,18 @@ func (m *Model) resetRunTimeline() {
 	if m == nil {
 		return
 	}
-	m.runTimeline = timeline.NewBuilder(timeline.Options{SessionID: m.sessionID})
+	opts := m.timelineOpts
+	opts.SessionID = m.sessionID
+	// Refresh session-scoped blob dir when spill is enabled via BlobDir template
+	// or a traces root was configured without a session suffix.
+	if opts.BlobDir != "" && m.sessionID != "" {
+		// If BlobDir already points at .../blobs, keep it; otherwise treat as traces root.
+		base := filepath.Base(opts.BlobDir)
+		if base != "blobs" {
+			opts.BlobDir = timeline.SessionBlobDir(opts.BlobDir, m.sessionID)
+		}
+	}
+	m.runTimeline = timeline.NewBuilder(opts)
 }
 
 func (m *Model) observeTimeline(ev protocol.Event, t time.Time) {

@@ -127,6 +127,12 @@ type Options struct {
 	// NanoMode selects pane/overlay/takeover for /nano (aliases embedded/modal).
 	// Empty defaults to pane. Same vocabulary as VimMode.
 	NanoMode NanoMode
+	// Timeline carries pkg/timeline builder bounds from session config (#810).
+	// Zero-value Options use library defaults (entry cap, preview sizes).
+	Timeline timeline.Options
+	// TimelineSet is true when Timeline was intentionally provided (Options
+	// contains a func field and is not comparable with ==).
+	TimelineSet bool
 	// MdReadMode selects embedded|modal for /md-read. Empty defaults to embedded.
 	MdReadMode SurfacePresentation
 	// PermissionAutoApproveSeconds arms permission-modal auto-allow once after
@@ -371,6 +377,7 @@ type Model struct {
 	// runTimeline folds harness events into a structured, exportable trace
 	// (/timeline). Complements session JSONL; not a second transcript.
 	runTimeline       *timeline.Builder
+	timelineOpts      timeline.Options // builder bounds from session config (#810)
 	authExpiryNoticed bool
 	focused           bool // terminal focus; default true until BlurMsg
 	focusKnown        bool // true after first FocusMsg/BlurMsg from the terminal
@@ -495,15 +502,24 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		autonomy:            protocol.AutonomySupervised,
 		permMode:            protocol.PermissionModeDefault,
 		sandboxMode:         "workspace-write",
+		timelineOpts:        timeline.Options{},
 		runTimeline:         timeline.NewBuilder(timeline.Options{}),
 	}
 	m.applyAppearance()
 	var replay []protocol.Event
 	for _, option := range options {
 		m.dangerouslySkipPermissions = option.DangerouslySkipPermissions
+		// Merge timeline bounds before (re)building the live builder.
+		if option.TimelineSet {
+			m.timelineOpts = option.Timeline
+		}
 		if option.SessionID != "" {
 			m.sessionID = option.SessionID
-			m.runTimeline = timeline.NewBuilder(timeline.Options{SessionID: option.SessionID})
+		}
+		if option.SessionID != "" || option.TimelineSet {
+			opts := m.timelineOpts
+			opts.SessionID = m.sessionID
+			m.runTimeline = timeline.NewBuilder(opts)
 		}
 		if option.WorkDir != "" {
 			m.workDir = option.WorkDir
