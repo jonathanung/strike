@@ -297,6 +297,26 @@ func TestFormatSessionRewoundWarnsUncovered(t *testing.T) {
 	if !strings.Contains(msg, "uncovered") || !strings.Contains(msg, "bash") {
 		t.Fatalf("missing uncovered warn: %q", msg)
 	}
+	// Chat-only must not scare about uncovered disk restore.
+	chat := formatSessionRewound(protocol.SessionRewound{
+		Removed: 2, RestoreFiles: false, Uncovered: []string{"bash"},
+	})
+	if strings.Contains(chat, "uncovered") {
+		t.Fatalf("chat-only should omit uncovered warn: %q", chat)
+	}
+}
+
+func TestUndoModalWarnsCheckpointsGoneAfterResume(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m.undoStack = []undoPreview{{
+		files:           []protocol.TurnFileChange{{Path: "a.go", Kind: "update"}},
+		checkpointsGone: true,
+	}}
+	next, _ := m.handleCommand("/undo")
+	view := next.(Model).modal.(*undoModal).view(100, next.(Model).th)
+	if !strings.Contains(view, "resume") && !strings.Contains(view, "#573") {
+		t.Fatalf("missing resume/continue checkpoint warning:\n%s", view)
+	}
 }
 
 func TestUndoStackFromEvents(t *testing.T) {

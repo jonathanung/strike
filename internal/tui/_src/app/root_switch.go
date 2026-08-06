@@ -777,6 +777,7 @@ func seedPaneFromReplay(p *rootPane, events []protocol.Event) {
 	p.usageUsed = tmp.usageUsed
 	p.usageSource = tmp.usageSource
 	p.usageSession = tmp.usageSession
+	// seedFromReplay already marks checkpointsGone on undoStack.
 	p.undoStack = append([]undoPreview(nil), tmp.undoStack...)
 	p.turnRunning = false
 	p.awaitingPermission = false

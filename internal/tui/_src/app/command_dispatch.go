@@ -510,10 +510,10 @@ func formatSessionRewound(ev protocol.SessionRewound) string {
 		if n := len(ev.Files); n > 0 && n <= 4 {
 			msg = fmt.Sprintf("%s [%s]", msg, strings.Join(ev.Files, ", "))
 		}
-	}
-	if len(ev.Uncovered) > 0 {
-		// Never present file restore as silent full success when bash/etc ran.
-		msg = fmt.Sprintf("%s; warning: uncovered (%s) not restored", msg, strings.Join(ev.Uncovered, ", "))
+		if len(ev.Uncovered) > 0 {
+			// Never present file restore as silent full success when bash/etc ran.
+			msg = fmt.Sprintf("%s; warning: uncovered (%s) not restored", msg, strings.Join(ev.Uncovered, ", "))
+		}
 	}
 	return msg
 }

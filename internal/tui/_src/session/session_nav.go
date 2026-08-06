@@ -567,9 +567,13 @@ func seedFromReplay(m *Model, events []protocol.Event) {
 	}
 	m.cells, m.toolByID = cellsFromEvents(events)
 	// Rebuild /undo preview stack from durable TurnCompleted / SessionRewound
-	// so resume still shows path preview (checkpoint bytes themselves do not
-	// survive process restart — #573).
+	// so resume still shows path preview. Checkpoint bytes do not survive
+	// process restart (#573) — mark previews so the modal does not imply
+	// disk restore will work.
 	m.undoStack = undoStackFromEvents(events)
+	for i := range m.undoStack {
+		m.undoStack[i].checkpointsGone = true
+	}
 	// Incomplete assistant/tool streams stay visible but are marked complete
 	// so resume never looks mid-stream.
 	for _, c := range m.cells {
