@@ -129,6 +129,7 @@ const (
 	settingsMenuDefaults settingsMenuKind = iota
 	settingsMenuCompaction
 	settingsMenuProviders
+	settingsMenuOpenConfig
 )
 
 func newSettingsModal(services host.Services, ops chan<- protocol.Op, th theme.Theme, workDir string) *settingsModal {
@@ -211,7 +212,7 @@ func (m *settingsModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 }
 
 func (m *settingsModal) updateMenu(msg tea.KeyPressMsg) (modal, tea.Cmd) {
-	const n = 3
+	const n = 4
 	switch msg.String() {
 	case "up", "k":
 		m.cursor = (m.cursor + n - 1) % n
@@ -231,6 +232,8 @@ func (m *settingsModal) updateMenu(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 			m.page = settingsPageProviders
 			m.reloadProviders()
 			m.cursor = 0
+		case settingsMenuOpenConfig:
+			return newConfigModal(m.services, m.ops, m.th, m.workDir, false, true), nil
 		}
 	}
 	return m, nil
@@ -1372,6 +1375,7 @@ func (m *settingsModal) viewMenu(width int, th theme.Theme) string {
 		{Label: "Defaults", Detail: "theme, sandbox, permission mode, notify, autoupdate, …"},
 		{Label: "Compaction", Detail: "history compact + prune dials"},
 		{Label: "Custom providers", Detail: "OpenAI-/Anthropic-compatible endpoints"},
+		{Label: "Open config files…", Detail: "raw .strike edit (preserves JSONC comments; /config)"},
 	}
 	body := ui.List(th, ui.ListOpts{
 		Items:   items,

@@ -17,11 +17,15 @@ export type TranscriptItem = {
   title?: string; text: string; requestId?: string; data?: Record<string, unknown>;
 };
 export type ImageAttachment = { name: string; mime: string; data: string };
+export type { TurnFileChange, UndoPreview } from "./undoPreview";
+
 export type WorkspaceState = {
   items: TranscriptItem[]; seen: Set<string>; status: Status;
   permission?: Record<string, unknown>; question?: Record<string, unknown>;
   children: Record<string, { agent?: string; status: string; summary?: string }>;
   changedFiles: string[];
+  /** Stack of last-turn harness previews; top is current /rewind target (TUI undoStack). */
+  undoStack: import("./undoPreview").UndoPreview[];
 };
 export type ActiveRoot = {
   id: string; title?: string; agent?: string; busy: boolean;

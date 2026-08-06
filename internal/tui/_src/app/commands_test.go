@@ -26,6 +26,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/provider":         {"select a provider and model", "[name [model]]", commandSourceBuiltin},
 		"/model":            {"select a model from authenticated providers", "[model|provider/model]", commandSourceBuiltin},
 		"/settings":         {"defaults (theme, sandbox, notify, autoupdate, mode) and custom providers", "", commandSourceBuiltin},
+		"/config":           {"open .strike config files in the embedded editor (picker or slot)", "[nano] [global|project] [config|mcp|providers|keybinds]", commandSourceBuiltin},
 		"/effort":           {"set how much reasoning the model spends", "[level]", commandSourceBuiltin},
 		"/autonomy":         {"set exit-gate policy (supervised/agent/checks/skip-all)", "[mode]", commandSourceBuiltin},
 		"/mode":             {"set permission posture (default/plan/accept-edits/yolo)", "[mode]", commandSourceBuiltin},

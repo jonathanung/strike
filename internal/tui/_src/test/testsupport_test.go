@@ -614,6 +614,52 @@ func (s *fakeSettings) SaveKeybinds(overrides map[string][]string) error {
 	return s.err
 }
 
+// --- fakeConfigFiles: in-memory host.ConfigFiles for /config tests --------
+
+type fakeConfigFiles struct {
+	refs         []host.ConfigFileRef
+	ensured      []host.ConfigFileRef
+	ensurePath   string
+	ensureCreate bool
+	ensureErr    error
+	keybinds     map[string][]string
+	keybindsErr  error
+}
+
+func (f *fakeConfigFiles) List(workDir string) []host.ConfigFileRef {
+	if f == nil {
+		return nil
+	}
+	out := make([]host.ConfigFileRef, len(f.refs))
+	copy(out, f.refs)
+	return out
+}
+
+func (f *fakeConfigFiles) Ensure(ref host.ConfigFileRef) (path string, created bool, err error) {
+	if f == nil {
+		return "", false, errors.New("config files unavailable")
+	}
+	f.ensured = append(f.ensured, ref)
+	if f.ensureErr != nil {
+		return "", false, f.ensureErr
+	}
+	path = f.ensurePath
+	if path == "" {
+		path = ref.Path
+	}
+	return path, f.ensureCreate, nil
+}
+
+func (f *fakeConfigFiles) LoadKeybinds(workDir string) (map[string][]string, error) {
+	if f == nil {
+		return nil, nil
+	}
+	if f.keybindsErr != nil {
+		return nil, f.keybindsErr
+	}
+	return cloneKeybindMap(f.keybinds), nil
+}
+
 // --- fakeHistory: an in-memory host.History ------------------------------
 
 var errFakeHistoryClosed = errors.New("history store is closed")
@@ -1653,6 +1699,7 @@ func testServices(agents []string, skills []host.Skill) host.Services {
 		Auth:             newFakeAuth(),
 		Catalog:          &fakeCatalog{ids: map[string][]string{"echo": {"echo-1"}, "openai": {"gpt-test"}}},
 		Settings:         &fakeSettings{},
+		ConfigFiles:      &fakeConfigFiles{},
 		Memory:           newFakeMemory(),
 		Providers:        &fakeProviders{},
 		SchedulerPresets: newFakeSchedulerPresets(),
