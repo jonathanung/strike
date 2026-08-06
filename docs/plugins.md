@@ -18,7 +18,8 @@ must not weaken these rules.
 |---|---|
 | **Contract (this doc)** | Normative. Loaders and CLI must conform. |
 | **Passive load (#726)** | Discovery + load of agents, skills, workflows, themes, and provider profiles from enabled local plugin trees. |
-| **Not implemented yet** | Install/lifecycle CLI, executable activation, catalog, TUI manager — later issues. |
+| **Lifecycle CLI (#727)** | `strike plugin` install/list/inspect/enable/disable/remove/doctor for local + Git sources. |
+| **Not implemented yet** | Executable activation, catalog, TUI manager — later issues. |
 | **Out of scope forever (v1 model)** | In-process Go `plugin` packages, OpenCode-style Node plugin hosts, arbitrary provider/auth/streaming adapters, silent executable startup from an untrusted bundle. |
 
 Related: [agents-skills.md](agents-skills.md), [config.md](config.md),
@@ -90,21 +91,52 @@ Rules:
 
 Lockfile: `~/.strike/plugins.lock.json` and/or `./.strike/plugins.lock.json`.
 Passive load (#726) honors per-plugin `enabled` (default **true** when absent).
-Full source identity, pinned version, digest, and install records are owned by
-[#727](https://github.com/jonathanung/strike/issues/727) — **never** credentials.
+Lifecycle commands (#727) record source identity, pinned version, content digest,
+and enablement — **never** credentials.
 
 ```json
 {
   "schemaVersion": 1,
   "plugins": {
-    "acme.review-pack": { "enabled": false }
+    "acme.review-pack": {
+      "enabled": true,
+      "version": "1.2.0",
+      "digest": "sha256:…",
+      "installedAt": "2026-08-06T12:00:00Z",
+      "source": {
+        "type": "git",
+        "url": "https://github.com/acme/review-pack.git",
+        "ref": "main",
+        "commit": "0123456789abcdef0123456789abcdef01234567"
+      }
+    }
   }
 }
 ```
 
-Drop a validated bundle under a plugins root (directory name need not match
-`id`; the manifest `id` is authoritative). Restart Strike to pick up changes
-(hot reload is a non-goal).
+Local source identity uses `"type":"local"` and `"path"` (absolute path supplied
+at install time). Git installs **must** pin `commit` (full SHA); mutable branches
+are never followed silently on later launches.
+
+### Lifecycle CLI (`strike plugin`, #727)
+
+| Command | Behavior |
+|---|---|
+| `install <path\|git-url>` | Validate, copy/clone into scope root, write lockfile. Atomic: failed validation leaves no partially enabled plugin. |
+| `list` / `inspect <id>` | Show installed plugins (including disabled) with scope, digest, source. |
+| `enable` / `disable <id>` | Toggle lockfile `enabled`. Disable **preserves** source files. |
+| `remove <id> --yes` | Delete install directory and lockfile entry (confirmation required). |
+| `doctor [id]` | Paths, provenance, contribution summary, collisions, trust state. Never prints secrets or MCP/harness env values (keys only). |
+
+Flags: `--scope global|project` (install defaults to global), git `--ref` /
+`--commit` / `--subdir`, install `--force` to replace. Project scope uses the
+process working directory's `./.strike`. Install destinations cannot escape the
+configured plugins roots. Lockfile updates use an exclusive advisory lock plus
+atomic rename so concurrent lifecycle ops are safe.
+
+Drop a validated bundle under a plugins root manually if needed (directory name
+need not match `id`; the manifest `id` is authoritative). Restart Strike to pick
+up changes (hot reload is a non-goal).
 
 ---
 
@@ -643,10 +675,10 @@ announces removal in CHANGELOG **Upgrade note**.
 
 ## 12. Non-goals (restated)
 
-- Install/update CLI and catalog (later issues).
+- Remote catalog discovery and automatic updates (#729).
 - Executable MCP/harness/hook activation without trust (#728).
 - A generic arbitrary-code plugin ABI or in-process extension mechanism.
-- Automatic unattended updates.
+- Hot reload of plugin trees.
 - Replacing stock `mcp.jsonc` / config hooks / harnesses (plugins are additive
   packages with stronger trust for executables).
 
@@ -670,3 +702,15 @@ announces removal in CHANGELOG **Upgrade note**.
 | Disabled plugins contribute nothing | `plugins.lock.json` `enabled: false` |
 | No arbitrary provider/auth/streaming code | Provider profiles via `ParseProvidersFile` / shipped `WireAPI` only; secret literals rejected |
 | Tests: precedence, namespacing, disablement, path confinement | `internal/plugin/*_test.go`, `internal/config/plugins_test.go`, theme catalog tests |
+
+## 15. Acceptance mapping (#727)
+
+| AC | Implementation |
+|---|---|
+| Install atomic; failed validation leaves nothing enabled | `plugin.Install` stages under plugins root, validates, then rename + lockfile under flock; rollback on lock write failure |
+| Git installs pinned (no silent mutable branch follow) | Lockfile `source.commit` full SHA; `ref` stored only as resolve hint |
+| Disable preserves files; remove confirms + updates lockfile | `Disable` / `Remove` (`--yes`) |
+| Doctor exact paths; no secrets or env values | `plugin.Doctor` + `FormatDoctorText`; env/header **keys** only; `pkg/redact` on URLs |
+| Project/global scopes explicit; no root escape | `--scope`; `Roots.ConfinePath` |
+| Safe under concurrent lockfile writes | `WithLockfileLock` (flock) + atomic rename |
+| CLI | `strike plugin list\|inspect\|install\|enable\|disable\|remove\|doctor` |

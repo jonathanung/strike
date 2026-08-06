@@ -16,6 +16,11 @@ materially affect the shipped product.
 
 ### Added
 
+- **Plugin lifecycle CLI** — `strike plugin` list/inspect/install/enable/disable/remove/doctor
+  for local paths and Git sources. Atomic install into global or project scope,
+  pinned Git commits in `plugins.lock.json` (source + digest, never credentials),
+  disable preserves files, remove requires `--yes`, doctor reports paths without
+  secrets or env values ([#727](https://github.com/jonathanung/strike/issues/727)).
 - **Passive plugin load** — enabled bundles under `~/.strike/plugins/<id>/` and
   `./.strike/plugins/<id>/` contribute agents, skills, workflows, themes, and
   provider profiles through existing surfaces. Manifest validation, path
