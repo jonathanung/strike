@@ -127,7 +127,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandSandbox, Name: "/sandbox", Description: "show OS sandbox policy; /sandbox explain for generated profile", Source: commandSourceBuiltin},
 	{ID: commandPermission, Name: "/permission", Description: "explain a tool permission or list presets", ArgsHint: "[explain <tool> [pattern]|presets]", Source: commandSourceBuiltin},
 	{ID: commandAuth, Name: "/auth", Description: "manage provider authentication", ArgsHint: "[provider]", Source: commandSourceBuiltin},
-	{ID: commandSettings, Name: "/settings", Description: "defaults (theme, sandbox, notify, mode) and custom providers", Source: commandSourceBuiltin},
+	{ID: commandSettings, Name: "/settings", Description: "defaults (theme, sandbox, notify, autoupdate, mode) and custom providers", Source: commandSourceBuiltin},
 	{ID: commandAgent, Name: "/agent", Description: "select an agent", ArgsHint: "[name]", Source: commandSourceBuiltin},
 	{ID: commandAgents, Name: "/agents", Description: "focus the agents right pane", Source: commandSourceBuiltin},
 	{ID: commandActivity, Name: "/activity", Description: "focus the activity right pane", Source: commandSourceBuiltin},

@@ -9,6 +9,7 @@
 package tui
 
 import (
+	"context"
 	"strings"
 	"time"
 
@@ -143,6 +144,10 @@ type Options struct {
 	// NotifyMode selects desktop notifications: on, off, or unfocused-only
 	// (default). Wired from config.notify.
 	NotifyMode NotifyMode
+	// CheckUpdate, when non-nil, runs once from Init as a background tea.Cmd
+	// (startup autoupdate probe). Return empty notice to stay silent.
+	// Wired by cmd/strike from config.autoupdate + internal/update.
+	CheckUpdate func(ctx context.Context) (notice string)
 	// SandboxMode is the resolved OS sandbox dial (off|read-only|workspace-write).
 	// Empty means workspace-write. Displayed by /sandbox; not mid-session mutable.
 	SandboxMode string
@@ -402,9 +407,11 @@ type Model struct {
 	runTimeline       *timeline.Builder
 	timelineOpts      timeline.Options // builder bounds from session config (#810)
 	authExpiryNoticed bool
+	updateProbeDone   bool
 	focused           bool // terminal focus; default true until BlurMsg
 	focusKnown        bool // true after first FocusMsg/BlurMsg from the terminal
 	notifyMode        NotifyMode
+	checkUpdate       func(ctx context.Context) (notice string)
 	titleTopic        string
 
 	// splitOrientation is horizontal (left|right) by default; vertical stacks
@@ -563,6 +570,9 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		if option.NotifyMode != "" {
 			m.notifyMode = option.NotifyMode
 		}
+		if option.CheckUpdate != nil {
+			m.checkUpdate = option.CheckUpdate
+		}
 		if option.SandboxMode != "" {
 			// Apply backend/availability with mode so a later partial Options
 			// (e.g. WorkDir-only) cannot clear a prior sandbox wiring.
@@ -648,6 +658,9 @@ func (m Model) Init() tea.Cmd {
 	if notice := m.authExpiryNoticeCmd(); notice != nil {
 		cmds = append(cmds, notice)
 	}
+	if probe := m.updateProbeCmd(); probe != nil {
+		cmds = append(cmds, probe)
+	}
 	return tea.Batch(cmds...)
 }
 
@@ -672,6 +685,25 @@ func (m Model) authExpiryNoticeCmd() tea.Cmd {
 
 // authExpiryNoticeMsg applies the auth-expiring notice on the update path.
 type authExpiryNoticeMsg struct{}
+
+// updateProbeMsg carries a startup autoupdate notice (empty = silent).
+type updateProbeMsg struct {
+	notice string
+}
+
+// updateProbeCmd runs Options.CheckUpdate once with a short timeout.
+func (m Model) updateProbeCmd() tea.Cmd {
+	if m.updateProbeDone || m.checkUpdate == nil {
+		return nil
+	}
+	fn := m.checkUpdate
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		notice := strings.TrimSpace(fn(ctx))
+		return updateProbeMsg{notice: notice}
+	}
+}
 
 // listen waits for the next engine event; re-issued after each delivery.
 func (m Model) listen() tea.Cmd {
@@ -1090,6 +1122,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.authExpiryNoticed = true
 		m.setNotice("auth expiring — run /auth", false)
 		return m, nil
+
+	case updateProbeMsg:
+		if m.updateProbeDone {
+			return m, nil
+		}
+		m.updateProbeDone = true
+		notice := strings.TrimSpace(msg.notice)
+		if notice == "" {
+			return m, nil
+		}
+		m.setNotice(notice, false)
+		// Attention-style desktop notify when the notify dial allows it.
+		return m, m.desktopNotifyCmd("strike: update available", true)
 
 	case clearCellCopiedFlashMsg:
 		if msg.gen != m.copyFlashGen {

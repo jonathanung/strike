@@ -62,6 +62,11 @@ type Config struct {
 	// question asks and long turn completion: "on", "off", or
 	// "unfocused-only" (default). Unknown values are ignored at load time.
 	Notify string `json:"notify,omitempty"`
+	// Autoupdate controls startup GitHub Releases checks: "off", "notify"
+	// (default), or "auto" (opt-in download+replace when the binary is
+	// writable). Unknown values are ignored at load time. Never auto-replaces
+	// on the default (notify) setting.
+	Autoupdate string `json:"autoupdate,omitempty"`
 	// PermissionAutoApproveSeconds enables permission-modal auto-allow once
 	// after N seconds (yolo-lite). Zero disables (default). Clamped to 1–60
 	// when positive.
@@ -773,6 +778,7 @@ func read(path string) (Config, error) {
 	c.PruneKeepUserTurns = ClampPruneKeepUserTurns(c.PruneKeepUserTurns)
 	c.PruneProtectTools = NormalizePruneProtectTools(c.PruneProtectTools)
 	c.Notify = NormalizeNotify(c.Notify)
+	c.Autoupdate = NormalizeAutoupdate(c.Autoupdate)
 	c.LeanCode = NormalizeLeanCode(c.LeanCode)
 	c.DeferTools = NormalizeDeferTools(c.DeferTools)
 	// Keybinds: unknown ids / invalid chords fail the layer (and thus Load).
@@ -1050,6 +1056,36 @@ func NormalizeNotify(s string) string {
 	}
 }
 
+// Autoupdate mode values for Config.Autoupdate / startup release checks.
+const (
+	AutoupdateOff    = "off"
+	AutoupdateNotify = "notify"
+	AutoupdateAuto   = "auto"
+)
+
+// NormalizeAutoupdate maps config aliases to off|notify|auto.
+// Empty and unknown values become "" (product default = notify at use sites).
+func NormalizeAutoupdate(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "off", "false", "0", "no", "never", "disabled", "none":
+		return AutoupdateOff
+	case "notify", "check", "prompt", "ask":
+		return AutoupdateNotify
+	case "auto", "automatic", "upgrade", "install":
+		return AutoupdateAuto
+	default:
+		return ""
+	}
+}
+
+// EffectiveAutoupdate returns the runtime mode: empty/unknown → notify.
+func EffectiveAutoupdate(s string) string {
+	if n := NormalizeAutoupdate(s); n != "" {
+		return n
+	}
+	return AutoupdateNotify
+}
+
 // LeanCode intensity values for Config.LeanCode / engine lean-code overlays.
 const (
 	LeanCodeOff  = "off"
@@ -1132,6 +1168,9 @@ func merge(base, layer Config) Config {
 	}
 	if layer.Notify != "" {
 		base.Notify = layer.Notify
+	}
+	if layer.Autoupdate != "" {
+		base.Autoupdate = layer.Autoupdate
 	}
 	if layer.PermissionAutoApproveSeconds != 0 {
 		base.PermissionAutoApproveSeconds = layer.PermissionAutoApproveSeconds

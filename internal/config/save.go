@@ -241,7 +241,8 @@ func SetGlobalPresentation(vimMode, nanoMode, mdReadMode string) error {
 //	leanCode         — off|lite|full
 //	deferTools       — on|off
 //	sessionWorktree  — off|auto|always (session.worktree)
-func SetGlobalConfigDials(sandboxMode, notify, leanCode, deferTools, sessionWorktree string) error {
+//	autoupdate       — off|notify|auto
+func SetGlobalConfigDials(sandboxMode, notify, leanCode, deferTools, sessionWorktree, autoupdate string) error {
 	globalMu.Lock()
 	defer globalMu.Unlock()
 
@@ -290,6 +291,14 @@ func SetGlobalConfigDials(sandboxMode, notify, leanCode, deferTools, sessionWork
 			return fmt.Errorf("unknown session.worktree %q (want off|auto|always)", sessionWorktree)
 		}
 		cfg.Session.Worktree = wt
+	}
+	if autoupdate != "" {
+		au := NormalizeAutoupdate(autoupdate)
+		if au == "" {
+			unlock()
+			return fmt.Errorf("unknown autoupdate %q (want off|notify|auto)", autoupdate)
+		}
+		cfg.Autoupdate = au
 	}
 	return writeGlobal(cfg, unlock)
 }

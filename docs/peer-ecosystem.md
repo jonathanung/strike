@@ -149,7 +149,7 @@ does not skip asks. `yolo` + `sandbox: off` requires `--i-know`.
 | Lean / efficiency guidance | — (strike) | `leanCode` | shipped (+ `/settings`) |
 | Deferred tool schemas | OC tools gating-ish | `deferTools` + `toolsearch` | shipped (+ `/settings`) |
 | Instructions globs | OC `instructions` | AGENTS.md + discovery roots | shipped (different model) |
-| Autoupdate | OC `autoupdate` | `strike upgrade` | partial (manual) |
+| Autoupdate | OC `autoupdate` | `autoupdate` (`off`\|`notify`\|`auto`) + `strike upgrade` | shipped (+ `/settings`) |
 | Formatters | OC `formatter` | gap (use hooks / editor) | gap |
 | LSP servers | OC `lsp` | shipped (`internal/lsp`, `/lsp`, diagnostics pane) | gap / out of this epic |
 | Network allowlist | OC network / CC | gap — tracked #527 | gap / coordinate |
@@ -162,8 +162,9 @@ does not skip asks. `yolo` + `sandbox: off` requires `--i-know`.
 
 **Defaults** editable: theme, vimMode, nanoMode, mdReadMode, permissionMode,
 **permissionAutoApproveSeconds**, **permissionAutoApproveExclude**, **sandbox**,
-**notify**, **leanCode**, **deferTools**, **session.worktree**, **maxChildDepth**,
-effort. Read-only (set via pickers + ctrl+d): provider, model, agent.
+**notify**, **autoupdate**, **leanCode**, **deferTools**, **session.worktree**,
+**maxChildDepth**, effort. Read-only (set via pickers + ctrl+d): provider, model,
+agent.
 
 **Compaction** editable: `compactionStrategy`, `compactionModel`,
 `compactionThreshold`, `compactionBuffer`, `keepUserTurns`,

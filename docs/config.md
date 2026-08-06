@@ -130,6 +130,7 @@ write this file. Manual `/ftue` remains available after acknowledgement.
   "nanoMode": "pane",
   "mdReadMode": "embedded",
   "notify": "unfocused-only",
+  "autoupdate": "notify",
   "permissionMode": "default",
   "sandbox": "workspace-write",
   "network": {
@@ -419,6 +420,27 @@ paths, prompts, or secrets.
 
 Unknown values are ignored at load time.
 
+## Autoupdate (`autoupdate`)
+
+Startup (and at most once per 24h) GitHub Releases check that reuses the same
+release metadata path as `strike upgrade` / `/upgrade`. The probe is async and
+time-bounded so TUI startup is not blocked on the network. Offline, rate-limit,
+and API failures stay silent.
+
+| Value | Behavior |
+|---|---|
+| `notify` (default) | when a newer release exists, show status chrome + optional desktop notify; path is `/upgrade` or `strike upgrade` |
+| `off` | no startup release check |
+| `auto` | opt-in: when the binary is writable, download+replace in place (no re-exec); otherwise same as `notify` with a Nix/package-manager hint |
+
+**Default never replaces the binary** — only `auto` may. Nix store installs and
+other non-writable binaries never attempt replace; the notice tells you to
+update the flake/lock input or re-run the install script. Windows self-update
+remains unsupported (same as manual upgrade).
+
+Probe state is cached under `~/.strike/cache/update-check.json`. Editable under
+`/settings` → Defaults.
+
 ## Scheduler (in-process resource limits)
 
 `scheduler` bounds concurrent agent work **inside one Strike OS process**.
@@ -692,14 +714,15 @@ the theme picker it saves the highlighted theme id.
 
 **/settings Defaults**: interactive editor for theme, vimMode, nanoMode,
 mdReadMode, **permissionMode**, **permissionAutoApproveSeconds**,
-**permissionAutoApproveExclude**, **sandbox**, **notify**, **leanCode**,
-**deferTools**, **session.worktree**, **maxChildDepth**, and effort (plus a
-read-only view of provider/model/agent). Changes write `~/.strike/config`.
-Theme, editor/reader presentation, notify, and auto-approve countdown/exclude
-apply to the current session immediately; permissionMode, sandbox, leanCode,
-deferTools, session.worktree, and maxChildDepth affect **new** sessions (use
-`/mode` / Shift+Tab for the live permission dial, and `/sandbox` to inspect
-the OS dial already bound for this process).
+**permissionAutoApproveExclude**, **sandbox**, **notify**, **autoupdate**,
+**leanCode**, **deferTools**, **session.worktree**, **maxChildDepth**, and
+effort (plus a read-only view of provider/model/agent). Changes write
+`~/.strike/config`. Theme, editor/reader presentation, notify, and auto-approve
+countdown/exclude apply to the current session immediately; permissionMode,
+sandbox, leanCode, deferTools, session.worktree, autoupdate, and maxChildDepth
+affect **new** sessions (use `/mode` / Shift+Tab for the live permission dial,
+and `/sandbox` to inspect the OS dial already bound for this process).
+Autoupdate probes run at process start from the config loaded at launch.
 
 **/settings Compaction**: editor for history compaction and continuous prune
 dials (`compactionStrategy`, `compactionModel`, `compactionThreshold`,

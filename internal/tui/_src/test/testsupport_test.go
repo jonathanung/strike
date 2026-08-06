@@ -259,6 +259,7 @@ type savedConfigDials struct {
 	leanCode        string
 	deferTools      string
 	sessionWorktree string
+	autoupdate      string
 }
 
 type savedAutoApproveDials struct {
@@ -456,10 +457,11 @@ func (s *fakeSettings) SavePresentation(vimMode, nanoMode, mdReadMode string) er
 	return s.err
 }
 
-func (s *fakeSettings) SaveConfigDials(sandboxMode, notify, leanCode, deferTools, sessionWorktree string) error {
+func (s *fakeSettings) SaveConfigDials(sandboxMode, notify, leanCode, deferTools, sessionWorktree, autoupdate string) error {
 	s.savedDials = append(s.savedDials, savedConfigDials{
 		sandbox: sandboxMode, notify: notify, leanCode: leanCode,
 		deferTools: deferTools, sessionWorktree: sessionWorktree,
+		autoupdate: autoupdate,
 	})
 	if sandboxMode != "" {
 		s.defaults.Sandbox = sandboxMode
@@ -475,6 +477,9 @@ func (s *fakeSettings) SaveConfigDials(sandboxMode, notify, leanCode, deferTools
 	}
 	if sessionWorktree != "" {
 		s.defaults.SessionWorktree = sessionWorktree
+	}
+	if autoupdate != "" {
+		s.defaults.Autoupdate = autoupdate
 	}
 	return s.err
 }
