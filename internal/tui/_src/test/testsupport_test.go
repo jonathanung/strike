@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -261,14 +262,16 @@ type savedConfigDials struct {
 }
 
 type fakeSettings struct {
-	defaults      host.UserDefaults
-	saved         []savedDefaults
-	savedThemes   []string
-	savedPres     []savedPresentation
-	savedDials    []savedConfigDials
-	savedKeybinds []map[string][]string
-	err           error
-	themeErr      error
+	defaults        host.UserDefaults
+	saved           []savedDefaults
+	savedThemes     []string
+	savedPres       []savedPresentation
+	savedDials      []savedConfigDials
+	savedCompaction []host.CompactionDials
+	savedKeybinds   []map[string][]string
+	err             error
+	themeErr        error
+	compactionErr   error
 }
 
 // fakeOnboarding tracks global FTUE acknowledgement for tests.
@@ -465,6 +468,81 @@ func (s *fakeSettings) SaveConfigDials(sandboxMode, notify, leanCode, deferTools
 	}
 	if sessionWorktree != "" {
 		s.defaults.SessionWorktree = sessionWorktree
+	}
+	return s.err
+}
+
+func (s *fakeSettings) SaveCompactionDials(d host.CompactionDials) error {
+	if s.compactionErr != nil {
+		return s.compactionErr
+	}
+	s.savedCompaction = append(s.savedCompaction, d)
+	if d.Strategy != "" {
+		s.defaults.CompactionStrategy = d.Strategy
+	}
+	if d.Model != "" {
+		if d.Model == "-" || d.Model == "session" || d.Model == "default" || d.Model == "clear" || d.Model == "none" || d.Model == "unset" {
+			s.defaults.CompactionModel = ""
+		} else {
+			s.defaults.CompactionModel = d.Model
+		}
+	}
+	if d.Threshold != "" {
+		if d.Threshold == "default" || d.Threshold == "0" {
+			s.defaults.CompactionThreshold = 0
+		} else if v, err := strconv.ParseFloat(d.Threshold, 64); err == nil {
+			s.defaults.CompactionThreshold = v
+		}
+	}
+	if d.Buffer != "" {
+		if d.Buffer == "default" || d.Buffer == "0" {
+			s.defaults.CompactionBuffer = 0
+		} else if n, err := strconv.Atoi(d.Buffer); err == nil {
+			s.defaults.CompactionBuffer = n
+		}
+	}
+	if d.KeepUserTurns != "" {
+		if d.KeepUserTurns == "default" || d.KeepUserTurns == "0" {
+			s.defaults.KeepUserTurns = 0
+		} else if n, err := strconv.Atoi(d.KeepUserTurns); err == nil {
+			s.defaults.KeepUserTurns = n
+		}
+	}
+	if d.PruneProtectTokens != "" {
+		if d.PruneProtectTokens == "default" || d.PruneProtectTokens == "0" {
+			s.defaults.PruneProtectTokens = 0
+		} else if n, err := strconv.Atoi(d.PruneProtectTokens); err == nil {
+			s.defaults.PruneProtectTokens = n
+		}
+	}
+	if d.PruneMinimumTokens != "" {
+		if d.PruneMinimumTokens == "default" || d.PruneMinimumTokens == "0" {
+			s.defaults.PruneMinimumTokens = 0
+		} else if n, err := strconv.Atoi(d.PruneMinimumTokens); err == nil {
+			s.defaults.PruneMinimumTokens = n
+		}
+	}
+	if d.PruneKeepUserTurns != "" {
+		if d.PruneKeepUserTurns == "default" || d.PruneKeepUserTurns == "0" {
+			s.defaults.PruneKeepUserTurns = 0
+		} else if n, err := strconv.Atoi(d.PruneKeepUserTurns); err == nil {
+			s.defaults.PruneKeepUserTurns = n
+		}
+	}
+	if d.PruneProtectTools != "" {
+		if d.PruneProtectTools == "-" || d.PruneProtectTools == "clear" || d.PruneProtectTools == "none" || d.PruneProtectTools == "default" || d.PruneProtectTools == "session" || d.PruneProtectTools == "unset" {
+			s.defaults.PruneProtectTools = nil
+		} else {
+			parts := strings.Split(d.PruneProtectTools, ",")
+			out := make([]string, 0, len(parts))
+			for _, p := range parts {
+				p = strings.ToLower(strings.TrimSpace(p))
+				if p != "" {
+					out = append(out, p)
+				}
+			}
+			s.defaults.PruneProtectTools = out
+		}
 	}
 	return s.err
 }

@@ -605,20 +605,29 @@ func (settingsAdapter) Defaults() host.UserDefaults {
 		return host.UserDefaults{}
 	}
 	return host.UserDefaults{
-		Provider:        config.CanonicalProviderID(cfg.Provider),
-		Model:           cfg.Model,
-		Agent:           cfg.DefaultAgent,
-		Effort:          string(cfg.Effort),
-		PermissionMode:  string(cfg.PermissionMode),
-		Sandbox:         cfg.Sandbox,
-		Notify:          cfg.Notify,
-		LeanCode:        cfg.LeanCode,
-		DeferTools:      cfg.DeferTools,
-		SessionWorktree: cfg.Session.Worktree,
-		Theme:           cfg.Theme,
-		VimMode:         cfg.VimMode,
-		NanoMode:        cfg.NanoMode,
-		MdReadMode:      cfg.MdReadMode,
+		Provider:            config.CanonicalProviderID(cfg.Provider),
+		Model:               cfg.Model,
+		Agent:               cfg.DefaultAgent,
+		Effort:              string(cfg.Effort),
+		PermissionMode:      string(cfg.PermissionMode),
+		Sandbox:             cfg.Sandbox,
+		Notify:              cfg.Notify,
+		LeanCode:            cfg.LeanCode,
+		DeferTools:          cfg.DeferTools,
+		SessionWorktree:     cfg.Session.Worktree,
+		Theme:               cfg.Theme,
+		VimMode:             cfg.VimMode,
+		NanoMode:            cfg.NanoMode,
+		MdReadMode:          cfg.MdReadMode,
+		CompactionStrategy:  cfg.CompactionStrategy,
+		CompactionModel:     cfg.CompactionModel,
+		CompactionThreshold: cfg.CompactionThreshold,
+		CompactionBuffer:    cfg.CompactionBuffer,
+		KeepUserTurns:       cfg.KeepUserTurns,
+		PruneProtectTokens:  cfg.PruneProtectTokens,
+		PruneMinimumTokens:  cfg.PruneMinimumTokens,
+		PruneKeepUserTurns:  cfg.PruneKeepUserTurns,
+		PruneProtectTools:   append([]string(nil), cfg.PruneProtectTools...),
 	}
 }
 
@@ -640,6 +649,20 @@ func (settingsAdapter) SavePresentation(vimMode, nanoMode, mdReadMode string) er
 
 func (settingsAdapter) SaveConfigDials(sandboxMode, notify, leanCode, deferTools, sessionWorktree string) error {
 	return config.SetGlobalConfigDials(sandboxMode, notify, leanCode, deferTools, sessionWorktree)
+}
+
+func (settingsAdapter) SaveCompactionDials(d host.CompactionDials) error {
+	return config.SetGlobalCompactionDials(config.CompactionDials{
+		Strategy:           d.Strategy,
+		Model:              d.Model,
+		Threshold:          d.Threshold,
+		Buffer:             d.Buffer,
+		KeepUserTurns:      d.KeepUserTurns,
+		PruneProtectTokens: d.PruneProtectTokens,
+		PruneMinimumTokens: d.PruneMinimumTokens,
+		PruneKeepUserTurns: d.PruneKeepUserTurns,
+		PruneProtectTools:  d.PruneProtectTools,
+	})
 }
 
 func (settingsAdapter) SaveKeybinds(overrides map[string][]string) error {

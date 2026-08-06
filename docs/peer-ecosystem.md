@@ -137,7 +137,7 @@ does not skip asks. `yolo` + `sandbox: off` requires `--i-know`.
 | Permission mode dial | CC modes / auto | `permissionMode` + `/mode` | shipped |
 | OS sandbox dial | Codex / CC sandbox | `sandbox` + `/sandbox` | shipped |
 | Desktop / attention notify | OC TUI attention, CC notify | `notify` (`on`\|`off`\|`unfocused-only`) | shipped (+ `/settings`) |
-| Compaction | OC `compaction`, CC autoCompact | `compaction*` / `prune*` keys | shipped (config; not all in `/settings`) |
+| Compaction | OC `compaction`, CC autoCompact | `compaction*` / `prune*` keys | shipped (+ `/settings` Compaction) |
 | MCP servers | both | `mcp.jsonc` + `/mcp` | shipped |
 | Custom providers | OC `provider` | `providers.jsonc` + `/settings` Providers | shipped |
 | Disable default providers | OC `disabled_providers` | `disable-default-*` | shipped |
@@ -156,16 +156,22 @@ does not skip asks. `yolo` + `sandbox: off` requires `--i-know`.
 | Main config JSONC | OC | partial (`mcp`/`providers`/`keybinds` JSONC; main `config` is JSON) | gap |
 | Plugins / Node hosts | OC plugins | **out of scope** | wont |
 
-### `/settings` Defaults coverage
+### `/settings` coverage
 
-Editable: theme, vimMode, nanoMode, mdReadMode, permissionMode, **sandbox**,
-**notify**, **leanCode**, **deferTools**, **session.worktree**, effort.
-Read-only (set via pickers + ctrl+d): provider, model, agent.
+**Defaults** editable: theme, vimMode, nanoMode, mdReadMode, permissionMode,
+**sandbox**, **notify**, **leanCode**, **deferTools**, **session.worktree**,
+effort. Read-only (set via pickers + ctrl+d): provider, model, agent.
+
+**Compaction** editable: `compactionStrategy`, `compactionModel`,
+`compactionThreshold`, `compactionBuffer`, `keepUserTurns`,
+`pruneProtectTokens`, `pruneMinimumTokens`, `pruneKeepUserTurns`,
+`pruneProtectTools`.
+
 Providers CRUD: custom OpenAI-/Anthropic-compatible endpoints.
 
-Remaining config-only dials (edit JSON or future `/settings` pages): compaction
-knobs, prune knobs, scheduler, hooks, MCP, permissions rules, maxChildDepth,
-permissionAutoApprove*, harnesses.
+Remaining config-only dials (edit JSON or future `/settings` pages): scheduler,
+hooks, MCP, permissions rules, maxChildDepth, permissionAutoApprove*,
+harnesses.
 
 ## Attribution
 

@@ -534,3 +534,119 @@ func TestSetGlobalConfigDialsRejectsUnknown(t *testing.T) {
 		t.Fatalf("reject mutated config: %+v", got)
 	}
 }
+
+func TestSetGlobalCompactionDials(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := SetGlobalDefaults("echo", "echo", "build", protocol.EffortHigh, "default"); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetGlobalCompactionDials(CompactionDials{
+		Strategy:           "summarize",
+		Model:              "gpt-compact",
+		Threshold:          "0.80",
+		Buffer:             "2048",
+		KeepUserTurns:      "3",
+		PruneProtectTokens: "10000",
+		PruneMinimumTokens: "5000",
+		PruneKeepUserTurns: "1",
+		PruneProtectTools:  "webfetch, Bash",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadGlobalDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.CompactionStrategy != "summarize" {
+		t.Errorf("strategy = %q", got.CompactionStrategy)
+	}
+	if got.CompactionModel != "gpt-compact" {
+		t.Errorf("model = %q", got.CompactionModel)
+	}
+	if got.CompactionThreshold != 0.80 {
+		t.Errorf("threshold = %v", got.CompactionThreshold)
+	}
+	if got.CompactionBuffer != 2048 {
+		t.Errorf("buffer = %d", got.CompactionBuffer)
+	}
+	if got.KeepUserTurns != 3 {
+		t.Errorf("keepUserTurns = %d", got.KeepUserTurns)
+	}
+	if got.PruneProtectTokens != 10000 || got.PruneMinimumTokens != 5000 || got.PruneKeepUserTurns != 1 {
+		t.Errorf("prune ints = protect=%d min=%d keep=%d", got.PruneProtectTokens, got.PruneMinimumTokens, got.PruneKeepUserTurns)
+	}
+	if len(got.PruneProtectTools) != 2 || got.PruneProtectTools[0] != "webfetch" || got.PruneProtectTools[1] != "bash" {
+		t.Errorf("tools = %#v", got.PruneProtectTools)
+	}
+	if got.Provider != "echo" {
+		t.Errorf("clobbered provider: %q", got.Provider)
+	}
+
+	// Partial update + clear tokens.
+	if err := SetGlobalCompactionDials(CompactionDials{
+		Strategy:          "trim",
+		Model:             "-",
+		Threshold:         "default",
+		PruneProtectTools: "-",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = ReadGlobalDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.CompactionStrategy != "trim" {
+		t.Errorf("strategy after partial = %q", got.CompactionStrategy)
+	}
+	if got.CompactionModel != "" {
+		t.Errorf("model clear = %q", got.CompactionModel)
+	}
+	if got.CompactionThreshold != 0 {
+		t.Errorf("threshold default = %v", got.CompactionThreshold)
+	}
+	if got.CompactionBuffer != 2048 {
+		t.Errorf("buffer should remain 2048, got %d", got.CompactionBuffer)
+	}
+	if got.PruneProtectTools != nil {
+		t.Errorf("tools clear = %#v", got.PruneProtectTools)
+	}
+}
+
+func TestSetGlobalCompactionDialsRejectsUnknown(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Seed a valid value so reject must not clobber.
+	if err := SetGlobalCompactionDials(CompactionDials{Strategy: "trim", Buffer: "4096"}); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name string
+		d    CompactionDials
+	}{
+		{"strategy", CompactionDials{Strategy: "nope"}},
+		{"threshold", CompactionDials{Threshold: "abc"}},
+		{"threshold-neg", CompactionDials{Threshold: "-1"}},
+		{"buffer", CompactionDials{Buffer: "x"}},
+		{"buffer-neg", CompactionDials{Buffer: "-4"}},
+		{"keep", CompactionDials{KeepUserTurns: "nope"}},
+		{"pruneProtect", CompactionDials{PruneProtectTokens: "bad"}},
+		{"pruneMin", CompactionDials{PruneMinimumTokens: "bad"}},
+		{"pruneKeep", CompactionDials{PruneKeepUserTurns: "bad"}},
+	}
+	for _, tc := range cases {
+		if err := SetGlobalCompactionDials(tc.d); err == nil {
+			t.Errorf("%s: accepted invalid", tc.name)
+		}
+	}
+	got, err := ReadGlobalDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.CompactionStrategy != "trim" || got.CompactionBuffer != 4096 {
+		t.Fatalf("reject mutated config: strategy=%q buffer=%d", got.CompactionStrategy, got.CompactionBuffer)
+	}
+}

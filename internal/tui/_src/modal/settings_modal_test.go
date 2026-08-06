@@ -28,7 +28,7 @@ func TestSettingsModalMenuAndDefaults(t *testing.T) {
 		t.Fatalf("modal = %T", m.modal)
 	}
 	view := ansi.Strip(sm.view(80, m.th))
-	if !strings.Contains(view, "Defaults") || !strings.Contains(view, "Custom providers") {
+	if !strings.Contains(view, "Defaults") || !strings.Contains(view, "Compaction") || !strings.Contains(view, "Custom providers") {
 		t.Fatalf("menu view = %q", view)
 	}
 
@@ -153,7 +153,7 @@ func TestSettingsModalSaveThemeApplies(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	fs := m.services.Settings.(*fakeSettings)
 	sm := newSettingsModal(m.services, m.ops, m.th, "")
-	sm.openPick(settingsFieldTheme)
+	sm.openPick(settingsFieldTheme, settingsPageDefaults)
 	// pick first non-strike if available, else strike
 	for i, opt := range sm.pickOptions {
 		if opt.value == "dracula" {
@@ -329,6 +329,156 @@ func TestSettingsModalDefaultsListsPeerDials(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Errorf("defaults view missing %q:\n%s", want, view)
 		}
+	}
+}
+
+func TestSettingsModalCompactionPageAndSave(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	fs := m.services.Settings.(*fakeSettings)
+	sm := newSettingsModal(m.services, m.ops, m.th, m.workDir)
+
+	// Menu → Compaction.
+	sm.page = settingsPageMenu
+	sm.cursor = int(settingsMenuCompaction)
+	next, _ := sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	sm = next.(*settingsModal)
+	if sm.page != settingsPageCompaction {
+		t.Fatalf("page = %v, want compaction", sm.page)
+	}
+	view := ansi.Strip(sm.view(100, m.th))
+	for _, want := range []string{
+		"Strategy", "trim",
+		"Threshold", "0.70",
+		"Buffer", "4096",
+		"Keep user turns",
+		"Prune protect tokens",
+		"Prune protect tools",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("compaction view missing %q:\n%s", want, view)
+		}
+	}
+
+	// Strategy → summarize.
+	sm.cursor = 0 // strategy is first
+	next, _ = sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	sm = next.(*settingsModal)
+	if sm.page != settingsPagePick {
+		t.Fatalf("page = %v, want pick", sm.page)
+	}
+	for i, opt := range sm.pickOptions {
+		if opt.value == "summarize" {
+			sm.pickCursor = i
+			break
+		}
+	}
+	_, cmd := sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	msg := cmd().(settingsSavedMsg)
+	if msg.err != nil {
+		t.Fatal(msg.err)
+	}
+	if len(fs.savedCompaction) != 1 || fs.savedCompaction[0].Strategy != "summarize" {
+		t.Fatalf("savedCompaction = %#v", fs.savedCompaction)
+	}
+	sm.afterSettingsSaved(msg)
+	if sm.page != settingsPageCompaction {
+		t.Fatalf("after save page = %v", sm.page)
+	}
+	if sm.defaults.CompactionStrategy != "summarize" {
+		t.Fatalf("strategy = %q", sm.defaults.CompactionStrategy)
+	}
+
+	// Threshold → off (1).
+	for i, f := range sm.compactionFields() {
+		if f == settingsFieldCompactionThreshold {
+			sm.cursor = i
+			break
+		}
+	}
+	next, _ = sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	sm = next.(*settingsModal)
+	for i, opt := range sm.pickOptions {
+		if opt.value == "1" {
+			sm.pickCursor = i
+			break
+		}
+	}
+	_, cmd = sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	msg = cmd().(settingsSavedMsg)
+	if msg.err != nil {
+		t.Fatal(msg.err)
+	}
+	if fs.savedCompaction[len(fs.savedCompaction)-1].Threshold != "1" {
+		t.Fatalf("threshold dial = %#v", fs.savedCompaction)
+	}
+	sm.afterSettingsSaved(msg)
+	if sm.defaults.CompactionThreshold != 1 {
+		t.Fatalf("threshold = %v", sm.defaults.CompactionThreshold)
+	}
+}
+
+func TestSettingsModalCompactionModelInput(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	fs := m.services.Settings.(*fakeSettings)
+	sm := newSettingsModal(m.services, m.ops, m.th, m.workDir)
+	sm.page = settingsPageCompaction
+	for i, f := range sm.compactionFields() {
+		if f == settingsFieldCompactionModel {
+			sm.cursor = i
+			break
+		}
+	}
+	next, _ := sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	sm = next.(*settingsModal)
+	if sm.page != settingsPageInput {
+		t.Fatalf("page = %v, want input", sm.page)
+	}
+	sm.input.SetValue("gpt-compact")
+	_, cmd := sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	msg := cmd().(settingsSavedMsg)
+	if msg.err != nil {
+		t.Fatal(msg.err)
+	}
+	if len(fs.savedCompaction) != 1 || fs.savedCompaction[0].Model != "gpt-compact" {
+		t.Fatalf("savedCompaction = %#v", fs.savedCompaction)
+	}
+	sm.afterSettingsSaved(msg)
+	if sm.defaults.CompactionModel != "gpt-compact" {
+		t.Fatalf("model = %q", sm.defaults.CompactionModel)
+	}
+
+	// Clear model via empty input.
+	sm.openInput(settingsFieldCompactionModel, settingsPageCompaction)
+	sm.input.SetValue("")
+	_, cmd = sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	msg = cmd().(settingsSavedMsg)
+	if msg.err != nil {
+		t.Fatal(msg.err)
+	}
+	if fs.savedCompaction[len(fs.savedCompaction)-1].Model != "-" {
+		t.Fatalf("clear model = %#v", fs.savedCompaction)
+	}
+	sm.afterSettingsSaved(msg)
+	if sm.defaults.CompactionModel != "" {
+		t.Fatalf("cleared model = %q", sm.defaults.CompactionModel)
+	}
+}
+
+func TestSettingsModalCompactionEscNavigation(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	sm := newSettingsModal(m.services, m.ops, m.th, m.workDir)
+	sm.page = settingsPagePick
+	sm.pickField = settingsFieldCompactionStrategy
+	sm.pickReturnPage = settingsPageCompaction
+	next, _ := sm.update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	sm = next.(*settingsModal)
+	if sm.page != settingsPageCompaction {
+		t.Fatalf("pick esc → %v, want compaction", sm.page)
+	}
+	next, _ = sm.update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	sm = next.(*settingsModal)
+	if sm.page != settingsPageMenu {
+		t.Fatalf("compaction esc → %v, want menu", sm.page)
 	}
 }
 

@@ -53,7 +53,8 @@ func (testSettings) SavePresentation(string, string, string) error { return nil 
 func (testSettings) SaveConfigDials(string, string, string, string, string) error {
 	return nil
 }
-func (testSettings) SaveKeybinds(map[string][]string) error { return nil }
+func (testSettings) SaveCompactionDials(host.CompactionDials) error { return nil }
+func (testSettings) SaveKeybinds(map[string][]string) error         { return nil }
 
 func TestAttachOnlyBootstrapDeclaresProtocolOpsUnavailable(t *testing.T) {
 	srv, err := New(Options{SessionDir: t.TempDir()})
