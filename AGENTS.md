@@ -45,8 +45,9 @@ service/theme token).
 
 | Package | Role |
 |---|---|
-| `cmd/strike` | CLI flags + auth/exec/rpc/serve subcommands (`main.go`), composition root wiring (`wire.go`) |
+| `cmd/strike` | CLI flags + auth/exec/rpc/acp/serve subcommands (`main.go`), composition root wiring (`wire.go`) |
 | `internal/rpc` | Stdio JSON-RPC 2.0 Op/Event bridge (`strike rpc`: NDJSON ops in, event envelopes out) |
+| `internal/acp` | Agent Client Protocol adapter (`strike acp`: ACP session/prompt ↔ Op/Event for Zed/Devin) |
 | `internal/server` | Experimental read-only HTTP attach (`strike serve`: /health, SSE events, attach page) |
 | `pkg/protocol` | Public Ops/Events wire schema; JSONL envelopes (semver `Version`) |
 | `pkg/sdk` | Thin Go client over `pkg/protocol` (channel/JSONL client, RunTurn, session replay) |

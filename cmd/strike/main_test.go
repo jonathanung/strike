@@ -21,6 +21,7 @@ const expectedUsage = `Usage:
   strike [options]
   strike exec [options] <prompt>
   strike rpc [options]
+  strike acp [options]
   strike serve [options]
   strike mcp-serve [options]
   strike auth <command> [arguments]

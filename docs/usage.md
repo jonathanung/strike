@@ -281,6 +281,7 @@ or config `providers` — see [config.md](config.md).
 ./strike exec --json "…"         # single result object on stdout
 ./strike exec --output-format stream-json "…"  # protocol Event envelopes (JSONL)
 ./strike rpc --provider echo     # stdio JSON-RPC Op/Event bridge (NDJSON)
+./strike acp --provider echo     # Agent Client Protocol agent (Zed / Devin)
 ./strike mcp-serve --provider echo --auto   # MCP server (stdio) for hosts
 ```
 
@@ -311,6 +312,13 @@ stdin/stdout (same Op/Event envelopes as `pkg/protocol` and the serve
 WebSocket). Ops go in (`user.input`, `permission.reply`, or method `op` with
 an OpEnvelope); events come out as `event` notifications. Diagnostics stay on
 stderr. See `strike rpc --help`.
+
+`strike acp` speaks the [Agent Client Protocol](https://agentclientprotocol.com/)
+so editors like Zed and Devin Desktop can embed strike as an ACP agent. It maps
+`session/new` / `session/prompt` / `session/cancel` onto Op/Event
+(`user.input`, `interrupt`, tool and text events as `session/update`, permission
+asks as `session/request_permission`). Stdout is pure ACP JSON-RPC; diagnostics
+on stderr. See `strike acp --help`.
 
 ### MCP server mode (`strike mcp-serve`)
 
