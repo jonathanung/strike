@@ -134,8 +134,35 @@ JSON objects with a `type` and optional `data`:
 | `set.permission_mode` | `{ "mode": "default\|plan\|accept-edits\|yolo" }` |
 | `set.autonomy` | `{ "mode": "supervised\|agent\|checks\|skip-all" }` |
 | `set.effort` | `{ "level": "..." }` |
+| `set.fast` | `{ "enabled": true\|false }` |
+| `compact` | `{ "strategy": "summarize" }` |
+| `inspect.prompt` | _(empty)_ |
+| `rewind` | `{ "restoreFiles"?: true }` |
 | `workflow.start` | `{ "name": "plan-implement" }` (prefer REST start after grant review) |
 | `workflow.stop` | _(empty)_ |
+
+### Cockpit slash commands & export
+
+The composer accepts a **web-safe** slash catalog (not full TUI parity). Type `/`
+for completions; `/help` lists builtins + skills. Unknown `/commands` are
+rejected with a transcript notice (they are **not** sent as prompts). Skills
+still pass through as `user.input`.
+
+| Command | Behavior |
+|---|---|
+| `/help` | List web commands + skills |
+| `/export` | Download the loaded transcript as markdown (also **Export** / header ↓) |
+| `/compact` `/prompt` `/rewind` `/rewind-files` `/interrupt` | Mapped protocol ops |
+| `/queue` | Focus the local prompt queue browser |
+| `/rename` `/fork` | Session REST when `capabilities.sessions` |
+| `/cost` `/copy` `/fast` | Client notices / clipboard / `set.fast` |
+| `/agent` `/effort` `/autonomy` `/mode` `/model` `/provider` | Runtime ops (args required) |
+
+**Prompt queue** (composer, while busy): remove, edit text, reorder ↑/↓, clear.
+Queue state is UI-local (same as TUI input buffer) — not a server queue API.
+
+**Markdown export** is client-side from the in-memory transcript (header + You /
+Strike / tools). No separate export HTTP endpoint.
 
 ### Workflow authoring (web parity)
 

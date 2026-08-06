@@ -629,15 +629,60 @@ dialog input { padding: 12px; color: var(--ink); }
   border-top: 1px solid var(--rule);
 }
 .attachments button { padding: 5px 8px; font-size: 9px; }
+.prompt-queue-wrap {
+  border-top: 1px solid var(--rule);
+}
 .prompt-queue {
   margin: 0;
   padding: 8px 12px 8px 34px;
-  border-top: 1px solid var(--rule);
   font-size: 10px;
   color: var(--muted);
+  list-style: decimal;
 }
-.prompt-queue li { padding: 3px; }
-.prompt-queue button { float: right; border: 0; background: transparent; }
+.prompt-queue li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: start;
+  padding: 4px 0;
+}
+.prompt-queue li span:first-child {
+  overflow-wrap: anywhere;
+}
+.queue-actions {
+  display: inline-flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.queue-actions button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 0 4px;
+  min-width: 1.4em;
+  cursor: pointer;
+}
+.queue-actions button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.queue-edit {
+  width: 100%;
+  font: inherit;
+  color: var(--text);
+  background: var(--raised);
+  border: 1px solid var(--rule);
+  padding: 4px 6px;
+}
+.queue-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 12px 8px;
+}
+.queue-toolbar button {
+  font-size: 9px;
+  padding: 4px 8px;
+}
 
 .unavailable {
   border-left: 3px solid var(--signal);
