@@ -29,8 +29,8 @@ Usage:
 - Paths must stay inside the workspace root, or inside the session temporary directory (absolute paths only for temp).
 - Regular files are deleted with os.Remove (unlinks the leaf; does not follow a leaf symlink — symlink leaves are refused).
 - Directories: empty directories may be deleted; non-empty directories require recursive=true. Never deletes the workspace or session-temp root itself.
-- Optional baseHash (sha256 hex of expected file content) fails closed with precondition_failed on mismatch (files only; ignored for directories).
-- Deletion of a single file is atomic at the inode level on local POSIX filesystems.`
+- Optional baseHash (sha256 hex of expected file content) fails closed with precondition_failed on mismatch (files only; rejected for directories).
+- Deletion of a single file is atomic at the inode level on local POSIX filesystems. Directory deletes are not fully covered by per-file undo checkpoints.`
 }
 
 func (deleteTool) Schema() json.RawMessage {
@@ -161,6 +161,11 @@ func (deleteTool) Execute(ctx context.Context, args json.RawMessage, tc *Context
 	}
 
 	tc.SnapshotPath(path)
+	// CheckpointStore only snapshots regular files; directory trees (especially
+	// recursive deletes) are outside per-file undo coverage.
+	if isDir {
+		tc.MarkUncovered("delete")
+	}
 
 	// Re-resolve + re-validate root immediately before unlink.
 	path, rel, err = resolveAllowedPath(tc.WorkDir, tempDir, a.Path)
@@ -172,6 +177,12 @@ func (deleteTool) Execute(ctx context.Context, args json.RawMessage, tc *Context
 	}
 	if fi, lerr := os.Lstat(path); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
 		return Result{}, ErrPrecondition(fmt.Sprintf("%s is a symlink; refuse to delete through symlinks", rel))
+	}
+	// Directory may have been replaced by a file (or vice versa) after plan.
+	if fi, lerr := os.Lstat(path); lerr == nil {
+		if fi.IsDir() != isDir {
+			return Result{}, ErrPrecondition(fmt.Sprintf("%s changed type concurrently; re-check before deleting", rel))
+		}
 	}
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
