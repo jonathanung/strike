@@ -90,3 +90,24 @@ func TestRedactEventPreservesNonSensitive(t *testing.T) {
 		t.Fatalf("stop reason changed: %q", tc.StopReason)
 	}
 }
+
+func TestRedactEventArtifactUpdated(t *testing.T) {
+	key := "sk-abcdefghijklmnopqrstuvwxyz0123456789"
+	ev := secret.RedactEvent(protocol.ArtifactUpdated{
+		ID:      "ab12",
+		Type:    "findings",
+		Version: 2,
+		Op:      "update",
+		Title:   "token " + key,
+	})
+	got, ok := ev.(protocol.ArtifactUpdated)
+	if !ok {
+		t.Fatalf("type %T", ev)
+	}
+	if strings.Contains(got.Title, key) {
+		t.Fatalf("title leaked key: %q", got.Title)
+	}
+	if got.ID != "ab12" || got.Type != "findings" || got.Version != 2 || got.Op != "update" {
+		t.Fatalf("structural fields changed: %+v", got)
+	}
+}
