@@ -646,6 +646,38 @@ func TestTokenCountKnownVsUnknown(t *testing.T) {
 	}
 }
 
+func TestLedgerUpdatedRoundTrip(t *testing.T) {
+	want := LedgerUpdated{
+		Correlation:   Correlation{SessionID: "s1", TurnID: "t1"},
+		ID:            "deadbeef",
+		Kind:          "assumption",
+		Status:        "invalidated",
+		Op:            "invalidate",
+		Statement:     "API X is dead",
+		Reason:        "still referenced",
+		AuthorSession: "s1",
+		SessionID:     "s1",
+	}
+	env, err := Wrap(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.Type != "ledger.updated" {
+		t.Fatalf("type = %q", env.Type)
+	}
+	gotEv, err := env.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := gotEv.(LedgerUpdated)
+	if !ok {
+		t.Fatalf("got %T", gotEv)
+	}
+	if got.ID != want.ID || got.Op != "invalidate" || got.Status != "invalidated" || got.Reason != want.Reason {
+		t.Fatalf("got = %#v", got)
+	}
+}
+
 func TestArtifactUpdatedAndHandoffRefsRoundTrip(t *testing.T) {
 	want := ArtifactUpdated{
 		Correlation: Correlation{SessionID: "s1"},
@@ -785,6 +817,8 @@ func TestEventTypeCoverage(t *testing.T) {
 		"agent.selected":         AgentSelected{},
 		"phase.changed":          PhaseChanged{},
 		"plan.handoff":           PlanHandoff{},
+		"artifact.updated":       ArtifactUpdated{},
+		"ledger.updated":         LedgerUpdated{},
 		"phase.grant_approved":   PhaseGrantApproved{},
 		"effort.selected":        EffortSelected{},
 		"autonomy.selected":      AutonomySelected{},

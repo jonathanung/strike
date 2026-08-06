@@ -186,8 +186,13 @@ type Options struct {
 	// Memory, when set, supplies project memory for the auto-loaded
 	// project_memory system layer each composition (tagged entries only).
 	// nil disables auto-load. Refreshed every turn so memory_write is visible
-	// in the same session.
+	// without restart.
 	Memory MemorySource
+	// Ledger, when set, supplies the decision/assumption ledger for the
+	// auto-loaded decision_ledger system layer (active entries, path-scoped
+	// to WorkDir). nil disables. Shared with child spawns so specialists see
+	// the same active slice. Refreshed every turn after ledger_write.
+	Ledger LedgerSource
 	// SystemPrompt, when set, replaces the provider overlay for the build
 	// agent only (shared baseline still applies). From config systemPrompt.
 	SystemPrompt string

@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/jonathanung/strike-cli/internal/ledger"
 	"github.com/jonathanung/strike-cli/internal/memory"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
@@ -20,6 +21,13 @@ import (
 // memory into the system prompt. *memory.Store satisfies this via List.
 type MemorySource interface {
 	List(tag string) ([]memory.Entry, error)
+}
+
+// LedgerSource is the engine-facing surface for auto-loading active decision
+// ledger entries into the system prompt. *ledger.Store satisfies this via
+// ActiveSlice.
+type LedgerSource interface {
+	ActiveSlice(path, taskID string) ([]ledger.Entry, error)
 }
 
 //go:embed prompt/shared.txt
@@ -89,11 +97,13 @@ var LeanStrategicSystemPrompt = normPrompt(leanStrategicPrompt)
 //  7. instructions      append   each AGENTS.md/CLAUDE.md block
 //  8. project memory    append   tagged entries (instruction|preference|
 //                                project-convention), capped; untrusted
+//  9. decision ledger   append   active decisions/assumptions/constraints,
+//                                capped; untrusted (prefer ledger over prose)
 //
 // Skills are user-turn content (slash render → UserInput), not system layers.
 // Untagged memory, other tags, and issues stay tool/turn-local (memory_read /
-// issue_read). @file attachments remain turn-local. Tool results live in
-// provider message history.
+// issue_read). Full ledger history stays on ledger_read. @file attachments
+// remain turn-local. Tool results live in provider message history.
 
 // ProviderSystemPrompt returns the provider-specific overlay for a strike
 // provider name and/or model id (opencode-style selection).
@@ -360,6 +370,14 @@ func (e *Engine) composeSystemLayers() []promptLayer {
 			Text:   text,
 		})
 	}
+	if text, source := e.decisionLedgerLayer(); text != "" {
+		layers = append(layers, promptLayer{
+			Kind:   protocol.PromptLayerLedger,
+			Source: source,
+			Mode:   protocol.PromptLayerAppend,
+			Text:   text,
+		})
+	}
 	return layers
 }
 
@@ -376,6 +394,26 @@ func (e *Engine) projectMemoryLayer() (text, source string) {
 	source = "memory:autoload"
 	if omitted > 0 {
 		source = fmt.Sprintf("memory:autoload+omitted:%d", omitted)
+	}
+	return text, source
+}
+
+// decisionLedgerLayer builds the auto-loaded active ledger segment (full
+// active slice; path/task filters stay on ledger_read). Empty when Ledger is
+// nil or no active entries fit the cap.
+func (e *Engine) decisionLedgerLayer() (text, source string) {
+	if e.opts.Ledger == nil {
+		return "", ""
+	}
+	// Empty path/task → all active entries (global + scoped). Callers that need
+	// a scoped slice use ledger_read with path/task_id.
+	text, omitted, err := ledger.AutoLoadLayer(e.opts.Ledger, "", "")
+	if err != nil || strings.TrimSpace(text) == "" {
+		return "", ""
+	}
+	source = "ledger:autoload"
+	if omitted > 0 {
+		source = fmt.Sprintf("ledger:autoload+omitted:%d", omitted)
 	}
 	return text, source
 }

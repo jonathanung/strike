@@ -182,6 +182,7 @@ func TestPrecedenceDocumentsKnownKinds(t *testing.T) {
 		protocol.PromptLayerEnvironment,
 		protocol.PromptLayerInstruction,
 		protocol.PromptLayerMemory,
+		protocol.PromptLayerLedger,
 	}
 	joined := strings.Join(diag.Precedence, ",")
 	for _, k := range want {

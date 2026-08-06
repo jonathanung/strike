@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jonathanung/strike-cli/internal/artifact"
+	"github.com/jonathanung/strike-cli/internal/ledger"
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
@@ -803,6 +804,21 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 					Title:       a.Title,
 					Op:          op,
 					SessionID:   a.SessionID,
+				})
+			},
+			NotifyLedger: func(op string, entry ledger.Entry) {
+				e.emit(protocol.LedgerUpdated{
+					Correlation:   corr,
+					ID:            entry.ID,
+					Kind:          entry.Kind,
+					Status:        entry.Status,
+					Op:            op,
+					Statement:     entry.Statement,
+					Reason:        entry.InvalidateReason,
+					Supersedes:    entry.Supersedes,
+					SupersededBy:  entry.SupersededBy,
+					AuthorSession: entry.AuthorSession,
+					SessionID:     entry.AuthorSession,
 				})
 			},
 			MemberName:    e.ownershipMemberName(),

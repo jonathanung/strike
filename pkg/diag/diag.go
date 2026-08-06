@@ -48,6 +48,7 @@ var Precedence = []string{
 	protocol.PromptLayerEnvironment,
 	protocol.PromptLayerInstruction, // AGENTS.md / CLAUDE.md blocks
 	protocol.PromptLayerMemory,      // project memory autoload
+	protocol.PromptLayerLedger,      // active decision/assumption ledger
 	// skills: rendered into UserInput on slash invoke (not a system layer)
 }
 

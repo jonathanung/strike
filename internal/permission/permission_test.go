@@ -94,6 +94,18 @@ func TestDefaultsIncludesArtifactToolsAllow(t *testing.T) {
 	}
 }
 
+func TestDefaultsIncludesLedgerToolsAllow(t *testing.T) {
+	for _, perm := range []string{"ledger_write", "ledger_read"} {
+		if got := Evaluate(perm, "*", Defaults()); got != Allow {
+			t.Errorf("Defaults %s = %q, want allow", perm, got)
+		}
+	}
+	deny := Ruleset{{Permission: "ledger_write", Pattern: "*", Action: Deny}}
+	if got := Evaluate("ledger_write", "*", Defaults(), deny); got != Deny {
+		t.Errorf("ledger_write with deny = %q, want deny", got)
+	}
+}
+
 func TestDefaultsIncludesPatchCollabAllow(t *testing.T) {
 	if got := Evaluate("patch_collab", "*", Defaults()); got != Allow {
 		t.Errorf("Defaults patch_collab = %q, want allow", got)

@@ -787,6 +787,10 @@ type Context struct {
 	// create/update so the engine can emit protocol.ArtifactUpdated.
 	// op is "create" or "update". Nil disables the event.
 	NotifyArtifact ArtifactNotify
+	// NotifyLedger, when non-nil, is invoked after a successful ledger
+	// append/invalidate/supersede so the engine can emit protocol.LedgerUpdated.
+	// op is "append", "invalidate", or "supersede". Nil disables the event.
+	NotifyLedger LedgerNotify
 	// ContextBundle is the sealed spawn context for this agent (children only
 	// when the lead attached one). Read via the context_bundle tool. Nil/empty
 	// means no bundle was attached.

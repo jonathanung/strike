@@ -747,6 +747,24 @@ type ArtifactUpdated struct {
 	SessionID string `json:"sessionId,omitempty"`
 }
 
+// LedgerUpdated is emitted after a successful ledger_write append/invalidate/
+// supersede so session JSONL and wait/subscribe consumers observe decision
+// trail mutations. Full statement is included (redacted on persist); tools
+// remain the source of truth for history queries.
+type LedgerUpdated struct {
+	Correlation
+	ID            string `json:"id"`
+	Kind          string `json:"kind"`   // decision | assumption | constraint
+	Status        string `json:"status"` // active | invalidated | superseded
+	Op            string `json:"op"`     // append | invalidate | supersede
+	Statement     string `json:"statement,omitempty"`
+	Reason        string `json:"reason,omitempty"` // invalidate reason when op=invalidate
+	Supersedes    string `json:"supersedes,omitempty"`
+	SupersededBy  string `json:"supersededBy,omitempty"`
+	AuthorSession string `json:"authorSession,omitempty"`
+	SessionID     string `json:"sessionId,omitempty"`
+}
+
 // VerificationCheck is one independent gate outcome inside a VerificationReport.
 type VerificationCheck struct {
 	Name       string `json:"name,omitempty"`
@@ -1565,6 +1583,7 @@ const (
 	PromptLayerEnvironment = "environment"
 	PromptLayerInstruction = "instruction"
 	PromptLayerMemory      = "project_memory"
+	PromptLayerLedger      = "decision_ledger"
 
 	PromptLayerAppend  = "append"
 	PromptLayerReplace = "replace"
@@ -1752,6 +1771,7 @@ func (AgentSelected) isEvent()           {}
 func (PhaseChanged) isEvent()            {}
 func (PlanHandoff) isEvent()             {}
 func (ArtifactUpdated) isEvent()         {}
+func (LedgerUpdated) isEvent()           {}
 func (PhaseGrantApproved) isEvent()      {}
 func (EffortSelected) isEvent()          {}
 func (AutonomySelected) isEvent()        {}

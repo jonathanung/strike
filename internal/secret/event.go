@@ -96,6 +96,10 @@ func RedactEvent(ev protocol.Event) protocol.Event {
 	case protocol.ArtifactUpdated:
 		e.Title = redact.String(e.Title)
 		return e
+	case protocol.LedgerUpdated:
+		e.Statement = redact.String(e.Statement)
+		e.Reason = redact.String(e.Reason)
+		return e
 	case protocol.CompactionCompleted:
 		e.Summary = redact.String(e.Summary)
 		return e
