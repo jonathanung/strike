@@ -29,7 +29,7 @@ func profileText(policy Policy) string {
 	b.WriteString("(logical profile — no OS backend on this platform)\n")
 	fmt.Fprintf(&b, "  mode: %s\n", policy.Mode)
 	fmt.Fprintf(&b, "  workspace-write: %v\n", policy.WorkspaceWritable())
-	fmt.Fprintf(&b, "  network: %v\n", policy.Network)
+	fmt.Fprintf(&b, "  network: %v\n", policy.NetworkEnabled())
 	if policy.NoWorkspaceWrite {
 		b.WriteString("  no-workspace-write: true\n")
 	}

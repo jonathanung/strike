@@ -149,7 +149,7 @@ This is the same policy **shape** as future container network filters. It is
 | Surface | What applies today |
 |---|---|
 | `webfetch` | `network.allow` host/CIDR allowlist + SSRF private blocks |
-| bash OS profile | `sandbox.Policy.Network` on by default; off only when both `webfetch` and `mcp` are hard-deny on `*` (all-or-nothing; no per-host filter inside bwrap/seatbelt) |
+| bash OS profile | host networking on by default (`Policy.NoNetwork` zero value / `NetworkEnabled()`); off only when both `webfetch` and `mcp` are hard-deny on `*` (all-or-nothing; no per-host filter inside bwrap/seatbelt) |
 | permission rules | `webfetch` ask/allow/deny patterns (prompt posture), independent of the hard allowlist |
 | container net | deferred — reuse `network.allow` shape |
 
