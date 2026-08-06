@@ -222,10 +222,21 @@ func TestRewindRejectsWhileTurnRunning(t *testing.T) {
 
 func TestUndoModalEnterSendsRestore(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)
+	// Seed a harness-file turn so the picker defaults to "chat and files".
+	m.applyEvent(protocol.TurnCompleted{
+		StopReason: "end_turn",
+		Files:      []protocol.TurnFileChange{{Path: "a.go", Kind: "update"}},
+	})
 	next, _ := m.handleCommand("/undo")
 	nm := next.(Model)
 	modal := nm.modal.(*undoModal)
-	// Default cursor is "chat and files".
+	if modal.cursor != 1 {
+		t.Fatalf("cursor = %d, want 1 (files) when paths present", modal.cursor)
+	}
+	view := modal.view(80, nm.th)
+	if !strings.Contains(view, "a.go") {
+		t.Fatalf("preview missing path:\n%s", view)
+	}
 	updated, cmd := modal.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if updated != nil {
 		t.Fatal("enter should close modal")
@@ -241,6 +252,88 @@ func TestUndoModalEnterSendsRestore(t *testing.T) {
 	}
 }
 
+func TestUndoModalWarnsUncoveredBash(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m.applyEvent(protocol.TurnCompleted{
+		StopReason:        "end_turn",
+		Files:             []protocol.TurnFileChange{{Path: "note.txt", Kind: "update"}},
+		Uncovered:         []string{"bash"},
+		CheckpointSkipped: 1,
+	})
+	next, _ := m.handleCommand("/undo")
+	modal := next.(Model).modal.(*undoModal)
+	view := modal.view(100, next.(Model).th)
+	if !strings.Contains(view, "note.txt") {
+		t.Fatalf("missing path preview:\n%s", view)
+	}
+	if !strings.Contains(strings.ToLower(view), "uncovered") || !strings.Contains(view, "bash") {
+		t.Fatalf("missing uncovered warning:\n%s", view)
+	}
+	if !strings.Contains(view, "skipped") {
+		t.Fatalf("missing skipped count:\n%s", view)
+	}
+}
+
+func TestUndoModalEmptyBiasesChatOnly(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	next, _ := m.handleCommand("/undo")
+	modal := next.(Model).modal.(*undoModal)
+	if modal.cursor != 0 {
+		t.Fatalf("cursor = %d, want 0 when no file preview", modal.cursor)
+	}
+}
+
+func TestFormatSessionRewoundWarnsUncovered(t *testing.T) {
+	msg := formatSessionRewound(protocol.SessionRewound{
+		Removed:       2,
+		RestoreFiles:  true,
+		FilesRestored: 1,
+		Files:         []string{"a.go"},
+		Uncovered:     []string{"bash"},
+	})
+	if !strings.Contains(msg, "restored") || !strings.Contains(msg, "a.go") {
+		t.Fatalf("msg = %q", msg)
+	}
+	if !strings.Contains(msg, "uncovered") || !strings.Contains(msg, "bash") {
+		t.Fatalf("missing uncovered warn: %q", msg)
+	}
+	// Chat-only must not scare about uncovered disk restore.
+	chat := formatSessionRewound(protocol.SessionRewound{
+		Removed: 2, RestoreFiles: false, Uncovered: []string{"bash"},
+	})
+	if strings.Contains(chat, "uncovered") {
+		t.Fatalf("chat-only should omit uncovered warn: %q", chat)
+	}
+}
+
+func TestUndoModalWarnsCheckpointsGoneAfterResume(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m.undoStack = []undoPreview{{
+		files:           []protocol.TurnFileChange{{Path: "a.go", Kind: "update"}},
+		checkpointsGone: true,
+	}}
+	next, _ := m.handleCommand("/undo")
+	view := next.(Model).modal.(*undoModal).view(100, next.(Model).th)
+	if !strings.Contains(view, "resume") && !strings.Contains(view, "#573") {
+		t.Fatalf("missing resume/continue checkpoint warning:\n%s", view)
+	}
+}
+
+func TestUndoStackFromEvents(t *testing.T) {
+	events := []protocol.Event{
+		protocol.TurnCompleted{Files: []protocol.TurnFileChange{{Path: "a", Kind: "create"}}},
+		protocol.TurnCompleted{Files: []protocol.TurnFileChange{{Path: "b", Kind: "update"}}, Uncovered: []string{"bash"}},
+		protocol.SessionRewound{Removed: 1},
+	}
+	stack := undoStackFromEvents(events)
+	if len(stack) != 1 {
+		t.Fatalf("stack len = %d, want 1", len(stack))
+	}
+	if len(stack[0].files) != 1 || stack[0].files[0].Path != "a" {
+		t.Fatalf("stack[0] = %+v", stack[0])
+	}
+}
+
 func TestSessionRewoundDropsTranscriptCells(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
@@ -249,14 +342,20 @@ func TestSessionRewoundDropsTranscriptCells(t *testing.T) {
 	m.applyEvent(protocol.TurnCompleted{StopReason: "end_turn"})
 	m.applyEvent(protocol.UserMessage{Text: "second"})
 	m.applyEvent(protocol.TextDelta{Text: "two"})
-	m.applyEvent(protocol.TurnCompleted{StopReason: "end_turn"})
+	m.applyEvent(protocol.TurnCompleted{StopReason: "end_turn", Files: []protocol.TurnFileChange{{Path: "x", Kind: "update"}}})
+	if len(m.undoStack) != 2 {
+		t.Fatalf("undoStack before = %d", len(m.undoStack))
+	}
 	if len(m.cells) < 4 {
 		t.Fatalf("cells before = %d", len(m.cells))
 	}
-	m.applyEvent(protocol.SessionRewound{Removed: 2, RestoreFiles: true, FilesRestored: 1})
+	m.applyEvent(protocol.SessionRewound{Removed: 2, RestoreFiles: true, FilesRestored: 1, Files: []string{"x"}})
 	// Should keep first user + assistant only.
 	if len(m.cells) != 2 {
 		t.Fatalf("cells after rewind = %d, want 2", len(m.cells))
+	}
+	if len(m.undoStack) != 1 {
+		t.Fatalf("undoStack after = %d, want 1", len(m.undoStack))
 	}
 	uc, ok := m.cells[0].(*userCell)
 	if !ok || uc.text != "first" {

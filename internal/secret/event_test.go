@@ -143,3 +143,21 @@ func TestRedactEventDiagnosticBundle(t *testing.T) {
 		t.Fatalf("structural fields changed: %+v", b)
 	}
 }
+
+func TestRedactEventUnknownEvent(t *testing.T) {
+	tok := "sk-ant-api03-UNKNOWNEVENTSECRET99"
+	ev := secret.RedactEvent(protocol.UnknownEvent{
+		Type: "harness.future_gate",
+		Data: json.RawMessage(`{"token":"` + tok + `","ok":true}`),
+	})
+	got, ok := ev.(protocol.UnknownEvent)
+	if !ok {
+		t.Fatalf("type %T", ev)
+	}
+	if got.Type != "harness.future_gate" {
+		t.Fatalf("type changed: %q", got.Type)
+	}
+	if strings.Contains(string(got.Data), tok) {
+		t.Fatalf("data leaked token: %s", got.Data)
+	}
+}

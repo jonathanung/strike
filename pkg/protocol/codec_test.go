@@ -38,7 +38,7 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 		TurnCompleted{Correlation: corr, StopReason: "end_turn", Files: []TurnFileChange{
 			{Path: "a.go", Kind: "create"},
 			{Path: "b.go", Kind: "update"},
-		}},
+		}, CheckpointSkipped: 1, Uncovered: []string{"bash"}},
 		ModelSelected{Correlation: corr, Provider: "echo", Model: "echo"},
 		AgentSelected{Correlation: corr, Name: "build"},
 		PhaseChanged{Correlation: corr, Workflow: "plan-implement", Phase: "plan", Index: 0, Gate: "user", Source: "builtin", Fingerprint: "abc123"},
@@ -148,9 +148,45 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 			Message:     "repeated identical failing tool calls",
 		},
 		CompactionStarted{Correlation: corr, Reason: CompactionReasonManual, Strategy: CompactionStrategySummarize},
-		CompactionCompleted{Correlation: corr, Reason: CompactionReasonThreshold, Strategy: CompactionStrategyTrim, Removed: 4, Kept: 3, Summary: "prior work on foo"},
+		CompactionCompleted{
+			Correlation: corr,
+			Reason:      CompactionReasonThreshold,
+			Strategy:    CompactionStrategyTrim,
+			Removed:     4,
+			Kept:        3,
+			Summary:     "prior work on foo",
+			Residue: &CompactionResidue{
+				SchemaVersion: CompactionResidueSchemaVersion,
+				Strategy:      CompactionStrategyTrim,
+				Reason:        CompactionReasonThreshold,
+				Removed:       4,
+				Decisions: []ResidueItem{{
+					ID:         "decision-use-api-hist-0",
+					Kind:       ResidueKindDecision,
+					Text:       "use API X",
+					Confidence: "high",
+					Freshness:  "fresh",
+					SourceIDs:  []string{"hist:0", "ledger:abc"},
+					LedgerID:   "abc",
+				}},
+				Facts: []ResidueItem{{
+					ID:        "fact-path-hist-1",
+					Kind:      ResidueKindFact,
+					Text:      "main entry is cmd/strike/main.go",
+					SourceIDs: []string{"hist:1"},
+					FileRefs:  []string{"cmd/strike/main.go"},
+				}},
+				OpenQuestions: []ResidueItem{{
+					ID:        "open_question-flaky-hist-2",
+					Kind:      ResidueKindOpenQuestion,
+					Text:      "are tests flaky on CI?",
+					SourceIDs: []string{"hist:2"},
+				}},
+				PinnedKinds: []string{"project_memory"},
+			},
+		},
 		SessionMeta{Correlation: corr, PRURL: "https://github.com/acme/repo/pull/7", PRNumber: 7, PRState: "open"},
-		SessionRewound{Correlation: corr, Removed: 2, TurnID: "turn-9", RestoreFiles: true, FilesRestored: 3, FilesSkipped: 1},
+		SessionRewound{Correlation: corr, Removed: 2, TurnID: "turn-9", RestoreFiles: true, FilesRestored: 3, FilesSkipped: 1, Files: []string{"a.go", "b.go"}, Uncovered: []string{"bash"}},
 		EffectivePrompt{
 			Correlation: corr,
 			Layers: []PromptLayerInfo{
@@ -578,14 +614,58 @@ func TestDecodeLiteralLegacyFastEnvelopeHasEmptyCorrelation(t *testing.T) {
 	}
 }
 
-func TestWrapUnknownEvent(t *testing.T) {
-	type unknown struct{}
-	// unknown does not implement Event; use a typed nil Event via empty interface cast workaround
-	// by wrapping a value that implements isEvent through a private type is not possible from tests.
-	// Instead verify Decode rejects unknown envelope types.
-	env := Envelope{Type: "not.a.real.type", Data: json.RawMessage(`{}`)}
+func TestDecodeUnknownEventForwardCompat(t *testing.T) {
+	payload := json.RawMessage(`{"span":"gate","ok":true,"extra":1}`)
+	env := Envelope{Type: "harness.future_gate", Time: time.Unix(0, 0).UTC(), Data: payload}
+	got, err := env.Decode()
+	if err != nil {
+		t.Fatalf("Decode unknown type: %v", err)
+	}
+	u, ok := got.(UnknownEvent)
+	if !ok {
+		t.Fatalf("got %T, want UnknownEvent", got)
+	}
+	if !IsUnknown(got) {
+		t.Fatal("IsUnknown = false")
+	}
+	if u.Type != "harness.future_gate" {
+		t.Fatalf("Type = %q", u.Type)
+	}
+	if string(u.Data) != string(payload) {
+		t.Fatalf("Data = %s, want %s", u.Data, payload)
+	}
+	// Round-trip preserves wire type + data for session rewrite / fork.
+	back, err := Wrap(u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.Type != "harness.future_gate" {
+		t.Fatalf("re-Wrap type = %q", back.Type)
+	}
+	if string(back.Data) != string(payload) {
+		t.Fatalf("re-Wrap data = %s", back.Data)
+	}
+	if back.Version != Version {
+		t.Fatalf("re-Wrap version = %q, want %q", back.Version, Version)
+	}
+}
+
+func TestDecodeEmptyEnvelopeType(t *testing.T) {
+	if _, err := (Envelope{Data: json.RawMessage(`{}`)}).Decode(); err == nil {
+		t.Fatal("expected error for empty envelope type")
+	}
+}
+
+func TestWrapUnknownEventEmptyType(t *testing.T) {
+	if _, err := Wrap(UnknownEvent{Data: json.RawMessage(`{}`)}); err == nil {
+		t.Fatal("expected error for UnknownEvent with empty type")
+	}
+}
+
+func TestDecodeUnknownEventInvalidJSON(t *testing.T) {
+	env := Envelope{Type: "future.event", Data: json.RawMessage(`{`)}
 	if _, err := env.Decode(); err == nil {
-		t.Fatal("expected error for unknown envelope type")
+		t.Fatal("expected error for invalid JSON in unknown envelope")
 	}
 }
 
@@ -943,6 +1023,168 @@ func TestToolRetryEventsRoundTrip(t *testing.T) {
 		rawGot, _ := json.Marshal(got)
 		if string(rawWant) != string(rawGot) {
 			t.Fatalf("round-trip mismatch\nwant %s\ngot  %s", rawWant, rawGot)
+		}
+	}
+}
+
+// Golden forward-compat: additive unknown JSON fields on known harness events
+// must decode without error and preserve known fields (#811).
+func TestGoldenAdditiveFieldsHarnessEvents(t *testing.T) {
+	fixed := time.Date(2026, 8, 6, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name  string
+		raw   string
+		check func(t *testing.T, ev Event)
+	}{
+		{
+			name: "verification.started additive",
+			raw: `{"type":"verification.started","time":"2026-08-06T12:00:00Z","v":"1.10.0","data":{` +
+				`"sessionId":"s1","turnId":"t1","scope":"turn","gateCount":2,` +
+				`"futureField":"ok","nested":{"x":1}}}`,
+			check: func(t *testing.T, ev Event) {
+				t.Helper()
+				got, ok := ev.(VerificationStarted)
+				if !ok {
+					t.Fatalf("%T", ev)
+				}
+				if got.SessionID != "s1" || got.TurnID != "t1" || got.Scope != VerificationScopeTurn || got.GateCount != 2 {
+					t.Fatalf("%+v", got)
+				}
+			},
+		},
+		{
+			name: "verification.completed additive",
+			raw: `{"type":"verification.completed","time":"2026-08-06T12:00:00Z","v":"1.10.0","data":{` +
+				`"sessionId":"s1","scope":"child","report":{"passed":true,"claimed":true,"verified":true,` +
+				`"checks":[{"name":"unit","passed":true}],"env":{"sessionId":"s1"},"futureScore":0.9}}}`,
+			check: func(t *testing.T, ev Event) {
+				t.Helper()
+				got, ok := ev.(VerificationCompleted)
+				if !ok {
+					t.Fatalf("%T", ev)
+				}
+				if got.Scope != VerificationScopeChild || !got.Report.Passed || !got.Report.Verified || len(got.Report.Checks) != 1 {
+					t.Fatalf("%+v", got)
+				}
+			},
+		},
+		{
+			name: "harness.progress additive",
+			raw: `{"type":"harness.progress","time":"2026-08-06T12:00:00Z","v":"1.10.0","data":{` +
+				`"sessionId":"s1","name":"choose_best","payload":{"kind":"iter","n":3},` +
+				`"traceSpanId":"span-9"}}`,
+			check: func(t *testing.T, ev Event) {
+				t.Helper()
+				got, ok := ev.(HarnessProgress)
+				if !ok {
+					t.Fatalf("%T", ev)
+				}
+				if got.Name != "choose_best" || !json.Valid(got.Payload) {
+					t.Fatalf("%+v", got)
+				}
+			},
+		},
+		{
+			name: "permission.decided additive",
+			raw: `{"type":"permission.decided","time":"2026-08-06T12:00:00Z","v":"1.10.0","data":{` +
+				`"permission":"bash","action":"allow","patterns":["echo *"],` +
+				`"layer":"project","auditId":"a1"}}`,
+			check: func(t *testing.T, ev Event) {
+				t.Helper()
+				got, ok := ev.(PermissionDecided)
+				if !ok {
+					t.Fatalf("%T", ev)
+				}
+				if got.Permission != "bash" || got.Action != "allow" || got.Layer != "project" {
+					t.Fatalf("%+v", got)
+				}
+			},
+		},
+		{
+			name: "turn.completed verification additive",
+			raw: `{"type":"turn.completed","time":"2026-08-06T12:00:00Z","v":"1.10.0","data":{` +
+				`"sessionId":"s1","stopReason":"end_turn","verification":{"passed":false,"claimed":true,` +
+				`"verified":false,"checks":[],"env":{},"reasonCode":"gate_failed"}}}`,
+			check: func(t *testing.T, ev Event) {
+				t.Helper()
+				got, ok := ev.(TurnCompleted)
+				if !ok {
+					t.Fatalf("%T", ev)
+				}
+				if got.StopReason != "end_turn" || got.Verification == nil || got.Verification.Passed || !got.Verification.Claimed {
+					t.Fatalf("%+v", got)
+				}
+			},
+		},
+		{
+			name: "diagnostic.bundle additive",
+			raw: `{"type":"diagnostic.bundle","time":"2026-08-06T12:00:00Z","v":"1.10.0","data":{` +
+				`"schemaVersion":"1.0.0","redacted":true,"session":{},"prompt":{},"config":{},` +
+				`"pluginNote":"future"}}`,
+			check: func(t *testing.T, ev Event) {
+				t.Helper()
+				got, ok := ev.(DiagnosticBundle)
+				if !ok {
+					t.Fatalf("%T", ev)
+				}
+				if got.SchemaVersion != "1.0.0" || !got.Redacted {
+					t.Fatalf("%+v", got)
+				}
+			},
+		},
+		{
+			name: "hook.matched additive",
+			raw: `{"type":"hook.matched","time":"2026-08-06T12:00:00Z","v":"1.10.0","data":{` +
+				`"event":"PreToolUse","action":"allow","tool":"bash","contribId":"plug.1"}}`,
+			check: func(t *testing.T, ev Event) {
+				t.Helper()
+				got, ok := ev.(HookMatched)
+				if !ok {
+					t.Fatalf("%T", ev)
+				}
+				if got.Event != "PreToolUse" || got.Action != "allow" || got.Tool != "bash" {
+					t.Fatalf("%+v", got)
+				}
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var env Envelope
+			if err := json.Unmarshal([]byte(tc.raw), &env); err != nil {
+				t.Fatal(err)
+			}
+			if !env.Time.Equal(fixed) {
+				t.Fatalf("time = %v", env.Time)
+			}
+			ev, err := env.Decode()
+			if err != nil {
+				t.Fatalf("Decode: %v", err)
+			}
+			tc.check(t, ev)
+		})
+	}
+}
+
+func TestGoldenUnknownHarnessExtensionTypes(t *testing.T) {
+	// Future harness/timeline extension type strings must not fail Decode.
+	lines := []string{
+		`{"type":"timeline.span","time":"2026-08-06T12:00:00Z","v":"9.0.0","data":{"id":"s1","kind":"verify"}}`,
+		`{"type":"harness.gate","time":"2026-08-06T12:00:00Z","data":{"name":"lint","passed":true}}`,
+		`{"type":"permission.audit","time":"2026-08-06T12:00:00Z","data":{"decision":"deny"}}`,
+		`{"type":"context.snapshot","time":"2026-08-06T12:00:00Z","data":{}}`,
+	}
+	for _, line := range lines {
+		var env Envelope
+		if err := json.Unmarshal([]byte(line), &env); err != nil {
+			t.Fatalf("unmarshal %s: %v", line, err)
+		}
+		ev, err := env.Decode()
+		if err != nil {
+			t.Fatalf("Decode %q: %v", env.Type, err)
+		}
+		if !IsUnknown(ev) {
+			t.Fatalf("%q: got %T, want UnknownEvent", env.Type, ev)
 		}
 	}
 }

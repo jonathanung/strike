@@ -20,13 +20,24 @@
 //   - Major: breaking JSON field renames/removals, changed envelope type
 //     strings, or changed meaning of an existing field.
 //   - Minor: new Op/Event types, new optional JSON fields, new type-string
-//     cases (unknown types still fail Decode — callers must tolerate forward
-//     growth by ignoring or upgrading).
+//     cases. Unknown event type strings decode as [UnknownEvent] (not an
+//     error) so older TUI/web/session consumers keep working; type-switch
+//     defaults must ignore them. Ops stay strict: unknown op types still
+//     fail [OpEnvelope.Decode].
 //   - Patch: docs, helpers, and bug fixes that do not change encoded JSON.
+//
+// Compatibility policy (harness and all other events):
+//
+//   - Additive optional JSON fields are always OK (encoding/json ignores
+//     extras on decode; omitempty keeps old writers valid).
+//   - Renames, removals, or meaning changes of existing fields require a
+//     major Version bump and a migration note in CHANGELOG / docs/protocol.md.
+//   - New event type strings are a minor bump; older builds surface them as
+//     UnknownEvent and must not crash.
 //
 // Legacy session JSONL without an envelope "v" field is treated as compatible
 // with the 1.x line. Additive optional fields use omitempty so old readers
-// keep working.
+// keep working. Normative consumer notes: docs/protocol.md.
 package protocol
 
 import (
@@ -461,6 +472,25 @@ func (Rewind) isOp()                  {}
 
 // Event is an engine -> client notification.
 type Event interface{ isEvent() }
+
+// UnknownEvent is a forward-compatible placeholder for an envelope type string
+// this build does not recognize. [Envelope.Decode] returns it instead of an
+// error so session replay, TUI, SDK, and timeline consumers can skip unknown
+// harness/extension events without failing the whole log.
+//
+// Type is the wire envelope "type" (not inside data). Data is the raw JSON
+// object from the envelope. [Wrap] re-encodes Type and Data unchanged.
+// Consumers must ignore UnknownEvent in type switches (default branch).
+type UnknownEvent struct {
+	Type string
+	Data json.RawMessage
+}
+
+// IsUnknown reports whether ev is an [UnknownEvent] (forward-compat skip).
+func IsUnknown(ev Event) bool {
+	_, ok := ev.(UnknownEvent)
+	return ok
+}
 
 // Correlation identifies the session, turn, and provider request that
 // produced an event. Embedded anonymously so JSON stays flat; omitempty
@@ -1173,7 +1203,15 @@ type TurnCompleted struct {
 	StopReason string `json:"stopReason,omitempty"`
 	// Files lists harness edit/write/apply_patch/notebook_edit paths touched
 	// this turn with change kind. Omitempty keeps legacy readers happy.
+	// Used by /undo preview (#801) together with CheckpointSkipped/Uncovered.
 	Files []TurnFileChange `json:"files,omitempty"`
+	// CheckpointSkipped is how many harness-touched paths could not be
+	// snapshotted for undo (oversized/unreadable/special). Zero when unknown
+	// or none. Additive for undo UX (#801); full bash coverage remains #572.
+	CheckpointSkipped int `json:"checkpointSkipped,omitempty"`
+	// Uncovered lists stable reasons this turn may have disk mutations outside
+	// per-file checkpoints (e.g. "bash"). Empty when fully covered or unknown.
+	Uncovered []string `json:"uncovered,omitempty"`
 	// Verification is set when solo/harness Options.Verify gates ran for this
 	// turn. Claimed reflects a successful model claim (typically stopReason
 	// end_turn); Verified/Passed are harness-owned and independent of model
@@ -1513,17 +1551,67 @@ type CompactionStarted struct {
 	Strategy string `json:"strategy,omitempty"` // trim | summarize (requested)
 }
 
+// Compaction residue item kinds (facts / decisions / open questions).
+const (
+	ResidueKindFact         = "fact"
+	ResidueKindDecision     = "decision"
+	ResidueKindOpenQuestion = "open_question"
+	ResidueKindAssumption   = "assumption"
+	ResidueKindConstraint   = "constraint"
+)
+
+// CompactionResidueSchemaVersion is the versioned residue document schema.
+// Bump on breaking residue layout changes.
+const CompactionResidueSchemaVersion = "1"
+
+// ResidueItem is one structured residual fact, decision, or open question
+// retained when older history is compacted. SourceIDs cite pre-compaction
+// history indices (hist:N), tool call ids (tool:ID), ledger entry ids
+// (ledger:ID), or file paths (file:path).
+type ResidueItem struct {
+	ID         string   `json:"id"`
+	Kind       string   `json:"kind"` // fact | decision | open_question | assumption | constraint
+	Text       string   `json:"text"`
+	Confidence string   `json:"confidence,omitempty"` // low | medium | high
+	Freshness  string   `json:"freshness,omitempty"`  // fresh | stale | unknown
+	SourceIDs  []string `json:"sourceIds,omitempty"`
+	FileRefs   []string `json:"fileRefs,omitempty"`
+	// LedgerID is set when the item was imported from the decision ledger.
+	LedgerID string `json:"ledgerId,omitempty"`
+}
+
+// CompactionResidue is a schema-versioned structured residual produced by
+// history compaction. It is not lossless; rebuild yields a usable prompt
+// skeleton for continue, not the full dropped transcript.
+type CompactionResidue struct {
+	SchemaVersion string        `json:"schemaVersion"`
+	Strategy      string        `json:"strategy,omitempty"` // trim | summarize (applied)
+	Reason        string        `json:"reason,omitempty"`
+	Removed       int           `json:"removed,omitempty"`
+	Facts         []ResidueItem `json:"facts,omitempty"`
+	Decisions     []ResidueItem `json:"decisions,omitempty"`
+	OpenQuestions []ResidueItem `json:"openQuestions,omitempty"`
+	// PinnedKinds are session pin controls that survive compaction (system
+	// layers are not history; recorded so rebuild/inspect stay aligned).
+	PinnedKinds []string `json:"pinnedKinds,omitempty"`
+	// Summary is the model-authored text when strategy is summarize.
+	Summary string `json:"summary,omitempty"`
+}
+
 // CompactionCompleted records that model-facing history was replaced.
 // Removed/Kept count provider messages (not transcript events).
 // Strategy is the strategy actually applied (may fall back from summarize to trim).
 // Summary is the model-authored text when Strategy is summarize (for restore).
+// Residue is the structured provenance document when extraction found items
+// (or pins/summary); nil when empty.
 type CompactionCompleted struct {
 	Correlation
-	Reason   string `json:"reason"`
-	Strategy string `json:"strategy,omitempty"` // trim | summarize (applied)
-	Removed  int    `json:"removed"`
-	Kept     int    `json:"kept"`
-	Summary  string `json:"summary,omitempty"`
+	Reason   string             `json:"reason"`
+	Strategy string             `json:"strategy,omitempty"` // trim | summarize (applied)
+	Removed  int                `json:"removed"`
+	Kept     int                `json:"kept"`
+	Summary  string             `json:"summary,omitempty"`
+	Residue  *CompactionResidue `json:"residue,omitempty"`
 }
 
 // SessionMeta records durable session-level metadata (e.g. a PR opened while
@@ -1555,6 +1643,14 @@ type SessionRewound struct {
 	// FilesSkipped is how many checkpointed paths could not be restored
 	// (oversized/unreadable originals).
 	FilesSkipped int `json:"filesSkipped,omitempty"`
+	// Files lists workspace-relative paths successfully restored when
+	// RestoreFiles was true (sorted). Empty when chat-only or nothing restored.
+	// Preview/confirm UX and tests use this for multi-file restore ordering (#801).
+	Files []string `json:"files,omitempty"`
+	// Uncovered lists stable reasons the undone turn may still have disk
+	// mutations outside restored paths (e.g. "bash"). Present so clients never
+	// treat a partial undo as silent full success (#801; bash coverage #572).
+	Uncovered []string `json:"uncovered,omitempty"`
 }
 
 // HookMatched records that a declarative config hook rule fired (log/block/
@@ -1805,3 +1901,4 @@ func (EffectivePrompt) isEvent()         {}
 func (DiagnosticBundle) isEvent()        {}
 func (ContextFitWarning) isEvent()       {}
 func (ContextControlsSelected) isEvent() {}
+func (UnknownEvent) isEvent()            {}

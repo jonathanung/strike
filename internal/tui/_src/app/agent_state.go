@@ -27,7 +27,8 @@ func (m Model) agentState() theme.AgentState {
 		return theme.AgentStateAttention
 	}
 	// Queued admission is live work on a constrained pool — not idle.
-	if m.turnRunning || len(m.queuePools) > 0 {
+	// Independent verification gates also keep Working chrome (#809).
+	if m.turnRunning || m.verifying || len(m.queuePools) > 0 {
 		return theme.AgentStateWorking
 	}
 	if m.sessionErrored {
@@ -44,6 +45,9 @@ func (m *Model) applyAgentStateEvent(ev protocol.Event) {
 	case protocol.TurnStarted:
 		m.turnRunning = true
 		m.sessionErrored = false
+		m.verifying = false
+		m.lastStopReason = ""
+		m.lastVerification = nil
 	case protocol.PermissionAsked:
 		m.awaitingPermission = true
 	case protocol.PermissionResolved:
@@ -53,16 +57,22 @@ func (m *Model) applyAgentStateEvent(ev protocol.Event) {
 		m.awaitingPermission = true
 	case protocol.QuestionResolved:
 		m.awaitingPermission = false
+	case protocol.VerificationStarted:
+		m.verifying = true
+	case protocol.VerificationCompleted:
+		m.verifying = false
 	case protocol.TurnCompleted:
 		m.turnRunning = false
 		m.awaitingPermission = false
+		m.verifying = false
+		m.lastStopReason = ev.StopReason
 		if ev.StopReason == "error" {
 			m.sessionErrored = true
 		}
 	case protocol.EngineError:
 		// Mid-turn failures stay Working until TurnCompleted (stopReason
 		// "error") arrives. Idle-state engine errors surface as Error.
-		if !m.turnRunning {
+		if !m.turnRunning && !m.verifying {
 			m.sessionErrored = true
 		}
 	case protocol.UserMessage:

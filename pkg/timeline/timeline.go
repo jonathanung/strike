@@ -49,6 +49,8 @@ const (
 )
 
 // Default payload preview limits for expandable fields in exports.
+// Oversized payloads are truncated inline and optionally spilled to BlobDir
+// (see Options and storage.go) so the live timeline stays bounded (#810).
 const (
 	DefaultArgsPreviewMax    = 512
 	DefaultOutputPreviewMax  = 2048
@@ -81,6 +83,9 @@ type Entry struct {
 	StopReason        string `json:"stopReason,omitempty"`
 	ChildStatus       string `json:"childStatus,omitempty"`
 	Error             string `json:"error,omitempty"`
+	// ErrorCode is a stable machine code from ToolCallEnd / EngineError when set
+	// (e.g. sandbox_denied, permission_denied, timeout).
+	ErrorCode string `json:"errorCode,omitempty"`
 	// Token fields when known (from usage.reported).
 	InputTokens         *int   `json:"inputTokens,omitempty"`
 	OutputTokens        *int   `json:"outputTokens,omitempty"`
@@ -90,6 +95,11 @@ type Entry struct {
 	// Redacted, size-limited expandable payloads (never raw secrets).
 	ArgsPreview   string `json:"argsPreview,omitempty"`
 	OutputPreview string `json:"outputPreview,omitempty"`
+	// Blob refs when full redacted payload was spilled (blob:sha256:<hex>).
+	ArgsRef   string `json:"argsRef,omitempty"`
+	OutputRef string `json:"outputRef,omitempty"`
+	// Truncated is true when a payload was clipped (with or without spill).
+	Truncated bool `json:"truncated,omitempty"`
 }
 
 // Summary rolls up a trace for quick inspection.
@@ -120,11 +130,21 @@ type Trace struct {
 	Warnings []string `json:"warnings,omitempty"`
 }
 
-// Options configure build/export limits.
+// Options configure build/export limits and storage bounds (#810).
 type Options struct {
 	ArgsPreviewMax   int
 	OutputPreviewMax int
 	ErrorPreviewMax  int
+	// MaxEntries caps in-memory timeline entries. 0 uses DefaultMaxEntries;
+	// negative disables the cap. Oldest terminal entries are pruned first;
+	// non-terminal (running/waiting/queued) entries are kept.
+	MaxEntries int
+	// BlobDir, when set, spills oversized redacted payloads to content-addressed
+	// files and records ArgsRef/OutputRef on the entry. Empty = truncate only.
+	// Writes do not fsync (session JSONL is the durability boundary).
+	BlobDir string
+	// MaxSpillBytes caps bytes written per blob (0 = DefaultMaxSpillBytes).
+	MaxSpillBytes int
 	// SessionID pins the root session id on the export when known.
 	SessionID string
 	// Clock overrides time.Now for tests (export timestamp only).
@@ -140,6 +160,12 @@ func (o Options) withDefaults() Options {
 	}
 	if o.ErrorPreviewMax <= 0 {
 		o.ErrorPreviewMax = DefaultErrorPreviewMax
+	}
+	if o.MaxEntries == 0 {
+		o.MaxEntries = DefaultMaxEntries
+	}
+	if o.MaxSpillBytes <= 0 {
+		o.MaxSpillBytes = DefaultMaxSpillBytes
 	}
 	if o.Clock == nil {
 		o.Clock = func() time.Time { return time.Now().UTC() }
@@ -165,6 +191,14 @@ type Builder struct {
 
 	sessionID string
 	seq       int
+
+	// metrics (updated under mu)
+	observes      int64
+	observeNanos  int64
+	lastObserveNs int64
+	spills        int64
+	truncations   int64
+	pruned        int64
 }
 
 // NewBuilder returns an empty concurrent-safe timeline builder.
@@ -185,17 +219,53 @@ func NewBuilder(opts Options) *Builder {
 
 // Observe records one event at time t (typically the JSONL envelope time).
 // Unknown event types are ignored. Zero t uses opts.Clock().
+// Observe does not fsync; optional blob spill uses plain file writes outside the
+// builder lock so concurrent Observe/Snapshot are not blocked on disk I/O.
+// Session JSONL remains the durability boundary.
 func (b *Builder) Observe(ev protocol.Event, t time.Time) {
 	if ev == nil {
 		return
 	}
+	start := time.Now()
 	if t.IsZero() {
 		t = b.opts.Clock()
 	}
 	t = t.UTC()
 
+	// Spill/truncate large payloads before taking mu (opts are immutable post-New).
+	type bound struct {
+		preview, ref string
+		trunc, spill bool
+	}
+	var argsB, outB bound
+	switch e := ev.(type) {
+	case protocol.ToolCallBegin:
+		argsB.preview, argsB.ref, argsB.trunc, argsB.spill = boundPayload(string(e.Args), b.opts.ArgsPreviewMax, b.opts.BlobDir, b.opts.MaxSpillBytes)
+	case protocol.ToolCallEnd:
+		outB.preview, outB.ref, outB.trunc, outB.spill = boundPayload(e.Output, b.opts.OutputPreviewMax, b.opts.BlobDir, b.opts.MaxSpillBytes)
+	case protocol.ChildStarted:
+		if e.Prompt != "" {
+			argsB.preview, argsB.ref, argsB.trunc, argsB.spill = boundPayload(e.Prompt, b.opts.ArgsPreviewMax, b.opts.BlobDir, b.opts.MaxSpillBytes)
+		}
+	case protocol.ChildCompleted:
+		summary := e.Summary
+		if summary == "" {
+			summary = e.Handoff.Summary
+		}
+		if summary != "" {
+			outB.preview, outB.ref, outB.trunc, outB.spill = boundPayload(summary, b.opts.OutputPreviewMax, b.opts.BlobDir, b.opts.MaxSpillBytes)
+		}
+	}
+
 	b.mu.Lock()
-	defer b.mu.Unlock()
+	defer func() {
+		elapsed := time.Since(start).Nanoseconds()
+		b.observes++
+		b.observeNanos += elapsed
+		b.lastObserveNs = elapsed
+		b.pruneLocked()
+		b.mu.Unlock()
+	}()
 
 	switch e := ev.(type) {
 	case protocol.TurnStarted:
@@ -219,6 +289,9 @@ func (b *Builder) Observe(ev protocol.Event, t time.Time) {
 			ent := b.ensureTurn(e.TurnID, e.SessionID, t)
 			ent.State = StateFailed
 			ent.Error = clip(redact.String(e.Message), b.opts.ErrorPreviewMax)
+			if e.Code != "" {
+				ent.ErrorCode = e.Code
+			}
 			b.finish(ent, t)
 		}
 	case protocol.ToolCallBegin:
@@ -231,7 +304,17 @@ func (b *Builder) Observe(ev protocol.Event, t time.Time) {
 		if ent.StartedAt == "" {
 			ent.StartedAt = formatTime(t)
 		}
-		ent.ArgsPreview = clip(redact.String(string(e.Args)), b.opts.ArgsPreviewMax)
+		ent.ArgsPreview = argsB.preview
+		if argsB.ref != "" {
+			ent.ArgsRef = argsB.ref
+		}
+		if argsB.trunc {
+			ent.Truncated = true
+			b.truncations++
+		}
+		if argsB.spill {
+			b.spills++
+		}
 		if e.TurnID != "" {
 			if turn := b.turns[e.TurnID]; turn != nil {
 				ent.ParentID = turn.ID
@@ -242,6 +325,9 @@ func (b *Builder) Observe(ev protocol.Event, t time.Time) {
 		ent := b.ensureTool(e.CallID, e.SessionID, e.TurnID, t)
 		// Name comes from ToolCallBegin; Title is a UI label only.
 		out := e.Output
+		if e.ErrorCode != "" {
+			ent.ErrorCode = e.ErrorCode
+		}
 		if e.IsError {
 			if isCanceledOutput(out) {
 				ent.State = StateCanceled
@@ -252,7 +338,17 @@ func (b *Builder) Observe(ev protocol.Event, t time.Time) {
 		} else {
 			ent.State = StateCompleted
 		}
-		ent.OutputPreview = clip(redact.String(out), b.opts.OutputPreviewMax)
+		ent.OutputPreview = outB.preview
+		if outB.ref != "" {
+			ent.OutputRef = outB.ref
+		}
+		if outB.trunc {
+			ent.Truncated = true
+			b.truncations++
+		}
+		if outB.spill {
+			b.spills++
+		}
 		b.finish(ent, t)
 	case protocol.PermissionAsked:
 		b.noteSession(e.SessionID)
@@ -411,7 +507,17 @@ func (b *Builder) Observe(ev protocol.Event, t time.Time) {
 			ent.StartedAt = formatTime(t)
 		}
 		if e.Prompt != "" {
-			ent.ArgsPreview = clip(redact.String(e.Prompt), b.opts.ArgsPreviewMax)
+			ent.ArgsPreview = argsB.preview
+			if argsB.ref != "" {
+				ent.ArgsRef = argsB.ref
+			}
+			if argsB.trunc {
+				ent.Truncated = true
+				b.truncations++
+			}
+			if argsB.spill {
+				b.spills++
+			}
 		}
 	case protocol.ChildCompleted:
 		b.noteSession(e.ParentSessionID)
@@ -428,10 +534,22 @@ func (b *Builder) Observe(ev protocol.Event, t time.Time) {
 		default:
 			ent.State = StateFailed
 		}
-		if e.Summary != "" {
-			ent.OutputPreview = clip(redact.String(e.Summary), b.opts.OutputPreviewMax)
-		} else if e.Handoff.Summary != "" {
-			ent.OutputPreview = clip(redact.String(e.Handoff.Summary), b.opts.OutputPreviewMax)
+		summary := e.Summary
+		if summary == "" {
+			summary = e.Handoff.Summary
+		}
+		if summary != "" {
+			ent.OutputPreview = outB.preview
+			if outB.ref != "" {
+				ent.OutputRef = outB.ref
+			}
+			if outB.trunc {
+				ent.Truncated = true
+				b.truncations++
+			}
+			if outB.spill {
+				b.spills++
+			}
 		}
 		b.finish(ent, t)
 	case protocol.ChildEscalated:
@@ -512,6 +630,99 @@ func (b *Builder) Snapshot() []Entry {
 		}
 	}
 	return out
+}
+
+// Metrics returns a snapshot of Observe latency and storage counters.
+func (b *Builder) Metrics() Metrics {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return Metrics{
+		Observes:      b.observes,
+		ObserveNanos:  b.observeNanos,
+		LastObserveNs: b.lastObserveNs,
+		Entries:       len(b.order),
+		Spills:        b.spills,
+		Truncations:   b.truncations,
+		Pruned:        b.pruned,
+	}
+}
+
+// pruneLocked drops oldest terminal entries when over MaxEntries.
+// Caller must hold b.mu. Non-terminal entries are never pruned.
+func (b *Builder) pruneLocked() {
+	max := b.opts.MaxEntries
+	if max <= 0 || len(b.order) <= max {
+		return
+	}
+	need := len(b.order) - max
+	if need <= 0 {
+		return
+	}
+	kept := make([]string, 0, max)
+	for _, id := range b.order {
+		ent := b.byID[id]
+		if ent == nil {
+			continue
+		}
+		if need > 0 && isTerminalState(ent.State) {
+			b.dropEntryLocked(ent)
+			need--
+			b.pruned++
+			continue
+		}
+		kept = append(kept, id)
+	}
+	b.order = kept
+	// If still over cap (all remaining non-terminal), drop oldest regardless.
+	for len(b.order) > max {
+		id := b.order[0]
+		b.order = b.order[1:]
+		if ent := b.byID[id]; ent != nil {
+			b.dropEntryLocked(ent)
+			b.pruned++
+		}
+	}
+}
+
+func isTerminalState(state string) bool {
+	switch state {
+	case StateCompleted, StateFailed, StateCanceled:
+		return true
+	default:
+		return false
+	}
+}
+
+func (b *Builder) dropEntryLocked(ent *Entry) {
+	if ent == nil {
+		return
+	}
+	delete(b.byID, ent.ID)
+	switch ent.Kind {
+	case KindTurn:
+		if ent.TurnID != "" {
+			delete(b.turns, ent.TurnID)
+		}
+	case KindTool:
+		key := ent.SessionID + "\x00" + ent.CallID
+		delete(b.tools, key)
+	case KindProvider:
+		if ent.ProviderRequestID != "" {
+			delete(b.providers, ent.ProviderRequestID)
+		}
+	case KindChild:
+		if ent.ChildSessionID != "" {
+			delete(b.children, ent.ChildSessionID)
+		}
+	case KindPermission:
+		key := ent.CallID
+		if key != "" {
+			delete(b.permissions, key)
+		}
+	case KindVerify:
+		key := ent.SessionID + "\x00" + ent.TurnID + "\x00" + ent.Name
+		delete(b.verifies, key)
+	}
 }
 
 // Trace builds a versioned export document from the current snapshot.
@@ -742,6 +953,9 @@ func formatEntryLine(e Entry) string {
 			out = *e.OutputTokens
 		}
 		extra = fmt.Sprintf(" tokens=%d/%d", in, out)
+	}
+	if e.ErrorCode != "" {
+		extra += " code=" + e.ErrorCode
 	}
 	if e.Error != "" {
 		extra += " err=" + clip(redact.String(e.Error), 40)

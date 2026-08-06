@@ -225,6 +225,27 @@ func (e *Engine) applyCompaction(ctx context.Context, reason string, corr protoc
 		}
 	}
 
+	// Structured residue with provenance (facts/decisions/open questions).
+	// Built for both trim and summarize; summarize also carries model summary.
+	// baseIndex 0: dropped is always the prefix e.messages[:split].
+	residue := buildCompactionResidue(
+		dropped,
+		0,
+		applied,
+		reason,
+		summary,
+		sortedKindKeys(e.pinnedKinds),
+		e.collectActiveLedgerEntries(),
+	)
+	// Ledger layer still composes after compact unless user-excluded; omit
+	// ledger-sourced rows from the marker to avoid double-injecting them.
+	ledgerLayerActive := e.opts.Ledger != nil && !e.kindExcluded(protocol.PromptLayerLedger)
+	if markerRes := residueForMarker(residue, ledgerLayerActive); markerRes != nil {
+		// Prefer residue marker (includes summary section when present) so
+		// continue sees structured provenance, not only a free-text summary.
+		marker = residueCompactMarker(removed, markerRes)
+	}
+
 	out := make([]provider.Message, 0, 1+keptTail)
 	out = append(out, provider.Message{Role: provider.RoleUser, Text: marker})
 	out = append(out, tail...)
@@ -238,6 +259,7 @@ func (e *Engine) applyCompaction(ctx context.Context, reason string, corr protoc
 		Removed:     removed,
 		Kept:        keptTail + 1,
 		Summary:     summary,
+		Residue:     residue,
 	})
 	return true
 }
@@ -438,15 +460,16 @@ func (e *Engine) handleRewind(op protocol.Rewind) {
 			Message:     "rewind file restore: " + popErr.Error(),
 		})
 	}
+	var restoredDisplay []string
 	if op.RestoreFiles && len(pop.Restored) > 0 {
 		e.files.MarkDirty(pop.Restored...)
-		display := make([]string, len(pop.Restored))
+		restoredDisplay = make([]string, len(pop.Restored))
 		for i, p := range pop.Restored {
-			display[i] = relDisplayPath(e.opts.WorkDir, p)
+			restoredDisplay[i] = relDisplayPath(e.opts.WorkDir, p)
 		}
 		e.emit(protocol.FilesInvalidated{
 			Correlation: e.sessionCorr(),
-			Paths:       display,
+			Paths:       restoredDisplay,
 			Reason:      "undo_restore",
 		})
 	}
@@ -457,6 +480,8 @@ func (e *Engine) handleRewind(op protocol.Rewind) {
 		RestoreFiles:  op.RestoreFiles,
 		FilesRestored: pop.RestoredN,
 		FilesSkipped:  pop.Skipped,
+		Files:         restoredDisplay,
+		Uncovered:     pop.Uncovered,
 	})
 }
 

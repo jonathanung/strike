@@ -23,6 +23,11 @@
 // Prompt regression (E3.2) builds on the same harness: CollectMetrics reports
 // tool-call count, turn count, and token/system-prompt deltas per scenario.
 // See metrics.go and TestPromptRegressionReport.
+//
+// Harness evaluation (#807) is the theme-oriented regression pack
+// (correctness/safety/recovery/latency-cost + recording consumption):
+// harness_eval.go and TestHarnessEvalSuite / make harness-eval. Soft CI
+// report first; composes with #459, does not own SWE-bench (#561).
 package replay
 
 import (

@@ -248,7 +248,10 @@ func (m *permissionModal) view(width int, th theme.Theme) string {
 		prompt := st.Text.Render("Optional feedback for the rejection:")
 		m.feedback.SetWidth(max(1, inner-ansi.StringWidth(m.feedback.Prompt)-cursorWidth))
 		m.feedback.SetValue(m.feedback.Value())
-		body := heading + "\n" + detail + diffSection + strings.Repeat("\n", max(1, th.Spacing.SM)) + prompt + "\n" + m.feedback.View()
+		// Explain entry point so denial UI links to /permission explain (#809).
+		explain := permissionExplainHint(m.req.Permission, firstDenialPattern(m.req.Patterns))
+		explainLine := wrapToWidth(st.Muted.Render("why: "+explain), inner)
+		body := heading + "\n" + detail + diffSection + strings.Repeat("\n", max(1, th.Spacing.SM)) + prompt + "\n" + m.feedback.View() + "\n" + explainLine
 		return ui.Dialog(th, ui.DialogOpts{
 			Title: "permission",
 			Hint:  dotJoin(th, "enter reject with feedback", "esc reject without feedback"),

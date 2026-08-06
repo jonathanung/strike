@@ -19,6 +19,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/tui"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 	"github.com/jonathanung/strike-cli/internal/update"
+	"github.com/jonathanung/strike-cli/pkg/timeline"
 )
 
 // sessionStore is the narrow persistence surface runSession needs from a
@@ -347,6 +348,8 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 			Replay:                       a.replay,
 			Keybinds:                     config.KeybindsMap(a.cfg.Keybinds),
 			Telemetry:                    opts.telemetry,
+			Timeline:                     timelineOptionsFromConfig(a.cfg, a.sessionID),
+			TimelineSet:                  true,
 		}), tea.WithOutput(stdout), tea.WithInput(tui.WrapInput(os.Stdin)))
 		final, runProgErr := program.Run()
 		restore()
@@ -464,4 +467,25 @@ func runExecContext(ctx context.Context, opts cliOptions, prompt string, format 
 	return runSession(ctx, a.eng.Run, a.eng.Events(), a.store, func(events <-chan protocol.Event) error {
 		return runHeadlessFrontend(ctx, a.eng.Ops(), events, prompt, stdout, stderr, hopts)
 	})
+}
+
+// timelineOptionsFromConfig maps session.* timeline/trace knobs (#810) onto
+// pkg/timeline.Options for the live TUI builder.
+func timelineOptionsFromConfig(cfg config.Config, sessionID string) timeline.Options {
+	opts := timeline.Options{SessionID: sessionID}
+	if cfg.Session.TimelineMaxEntries != 0 {
+		opts.MaxEntries = cfg.Session.TimelineMaxEntries
+	}
+	if cfg.Session.TimelineArgsPreviewMax > 0 {
+		opts.ArgsPreviewMax = cfg.Session.TimelineArgsPreviewMax
+	}
+	if cfg.Session.TimelineOutputPreviewMax > 0 {
+		opts.OutputPreviewMax = cfg.Session.TimelineOutputPreviewMax
+	}
+	if cfg.Session.TimelineBlobSpill {
+		// Traces root only — TUI expands to <root>/<sessionID>/blobs on build/reset
+		// so root switches do not keep a stale session path.
+		opts.BlobDir = session.DefaultTracesDir()
+	}
+	return opts
 }

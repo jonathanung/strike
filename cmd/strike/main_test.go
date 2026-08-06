@@ -200,17 +200,22 @@ func TestParseCLIOptionsSandboxAndIKnow(t *testing.T) {
 	if _, err := parseCLIOptions([]string{"--sandbox", "nope"}); err == nil {
 		t.Fatal("want unknown sandbox error")
 	}
-	mode, err := resolveSandboxMode("off", "workspace-write")
+	mode, err := resolveSandboxMode("off", "workspace-write", false)
 	if err != nil || mode != "workspace-write" {
 		t.Fatalf("CLI overrides config: mode=%q err=%v", mode, err)
 	}
-	mode, err = resolveSandboxMode("read-only", "")
+	mode, err = resolveSandboxMode("read-only", "", false)
 	if err != nil || mode != "read-only" {
 		t.Fatalf("config only: mode=%q err=%v", mode, err)
 	}
-	mode, err = resolveSandboxMode("", "")
+	mode, err = resolveSandboxMode("", "", false)
 	if err != nil || mode != "workspace-write" {
 		t.Fatalf("default: mode=%q err=%v", mode, err)
+	}
+	// Managed lock: CLI cannot loosen enterprise sandbox.
+	mode, err = resolveSandboxMode("read-only", "off", true)
+	if err != nil || mode != "read-only" {
+		t.Fatalf("managed lock: mode=%q err=%v", mode, err)
 	}
 }
 

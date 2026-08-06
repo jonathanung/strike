@@ -83,6 +83,10 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 		return Result{}, err
 	}
 
+	// Bash may mutate the workspace without per-file snapshots (#572). Mark
+	// the turn uncovered so /undo can warn instead of silent full success (#801).
+	tc.MarkUncovered("bash")
+
 	// Admit after permission approval and before process start so a canceled
 	// waiter never emits process-started or starts an OS process. Command
 	// timeout begins only after admission (RunProcess applies Timeout).
@@ -143,7 +147,15 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 		}
 		errCode = ErrorCodeCanceled
 	default:
-		if exitCode != 0 {
+		// OS sandbox capability blocks → structured sandbox_denied (not a bare
+		// non-zero exit the model might ignore). Wall-time/cancel already handled.
+		if reason, ok := detectSandboxDenial(proc); ok {
+			if exitCode != 0 {
+				output += fmt.Sprintf("\n(exit code %d)", exitCode)
+			}
+			output = formatSandboxDenial(reason, output)
+			errCode = ErrorCodeSandboxDenied
+		} else if exitCode != 0 {
 			output += fmt.Sprintf("\n(exit code %d)", exitCode)
 		}
 	}
@@ -151,9 +163,20 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 		output = "(no output)"
 	}
 	metaFields := map[string]any{"exitCode": exitCode}
+	if proc.SandboxApplied {
+		metaFields["sandboxApplied"] = true
+		if proc.SandboxBackend != "" {
+			metaFields["sandboxBackend"] = proc.SandboxBackend
+		}
+	}
+	if proc.SandboxDegraded {
+		metaFields["sandboxDegraded"] = true
+	}
 	if errCode != "" {
 		metaFields["errorCode"] = errCode
-		metaFields["incomplete"] = true
+		if errCode == ErrorCodeTimeout || errCode == ErrorCodeCanceled {
+			metaFields["incomplete"] = true
+		}
 	}
 	if exitCode == 0 && errCode == "" {
 		if pr, ok := extractSessionPR(a.Command, output); ok {

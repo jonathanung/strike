@@ -127,6 +127,12 @@ type Options struct {
 	// NanoMode selects pane/overlay/takeover for /nano (aliases embedded/modal).
 	// Empty defaults to pane. Same vocabulary as VimMode.
 	NanoMode NanoMode
+	// Timeline carries pkg/timeline builder bounds from session config (#810).
+	// Zero-value Options use library defaults (entry cap, preview sizes).
+	Timeline timeline.Options
+	// TimelineSet is true when Timeline was intentionally provided (Options
+	// contains a func field and is not comparable with ==).
+	TimelineSet bool
 	// MdReadMode selects embedded|modal for /md-read. Empty defaults to embedded.
 	MdReadMode SurfacePresentation
 	// PermissionAutoApproveSeconds arms permission-modal auto-allow once after
@@ -368,9 +374,33 @@ type Model struct {
 	// turnStartedAt / toolCallsThisTurn power the working-status elapsed label.
 	turnStartedAt     time.Time
 	toolCallsThisTurn int
+	// undoStack tracks per-turn harness file previews for /undo UX (#801).
+	// Appended on TurnCompleted; popped on SessionRewound. Last entry is the
+	// turn that /undo would reverse.
+	undoStack []undoPreview
+	// lastStopReason is the most recent TurnCompleted.StopReason (e.g.
+	// "interrupted"). Cleared on the next TurnStarted so canceled chrome is
+	// sticky but not permanent (#809).
+	lastStopReason string
+	// verifying is true between VerificationStarted and VerificationCompleted
+	// (or TurnCompleted) so header chrome stays Working during gates (#809).
+	verifying bool
+	// lastVerification is the latest harness VerificationReport for claim vs
+	// verified badges. Cleared on the next TurnStarted (#809 / #806).
+	lastVerification *protocol.VerificationReport
+	// lastDenial remembers the latest hard deny / user reject for explain UX.
+	lastDenial lastDenialInfo
+	// lastPermissionAsk caches the open ask so reject notices still know the
+	// tool/pattern after the modal has already closed (#809).
+	lastPermissionAsk struct {
+		RequestID  string
+		Permission string
+		Patterns   []string
+	}
 	// runTimeline folds harness events into a structured, exportable trace
 	// (/timeline). Complements session JSONL; not a second transcript.
 	runTimeline       *timeline.Builder
+	timelineOpts      timeline.Options // builder bounds from session config (#810)
 	authExpiryNoticed bool
 	focused           bool // terminal focus; default true until BlurMsg
 	focusKnown        bool // true after first FocusMsg/BlurMsg from the terminal
@@ -495,15 +525,22 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		autonomy:            protocol.AutonomySupervised,
 		permMode:            protocol.PermissionModeDefault,
 		sandboxMode:         "workspace-write",
+		timelineOpts:        timeline.Options{},
 		runTimeline:         timeline.NewBuilder(timeline.Options{}),
 	}
 	m.applyAppearance()
 	var replay []protocol.Event
 	for _, option := range options {
 		m.dangerouslySkipPermissions = option.DangerouslySkipPermissions
+		// Merge timeline bounds before (re)building the live builder.
+		if option.TimelineSet {
+			m.timelineOpts = option.Timeline
+		}
 		if option.SessionID != "" {
 			m.sessionID = option.SessionID
-			m.runTimeline = timeline.NewBuilder(timeline.Options{SessionID: option.SessionID})
+		}
+		if option.SessionID != "" || option.TimelineSet {
+			m.runTimeline = timeline.NewBuilder(m.timelineBuilderOpts())
 		}
 		if option.WorkDir != "" {
 			m.workDir = option.WorkDir

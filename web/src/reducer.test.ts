@@ -24,4 +24,16 @@ describe("reduceEvent", () => {
     expect(state.status.contextUsed).toBeUndefined();
     expect(state.status.contextLimit).toBeUndefined();
   });
+
+  it("ignores unknown harness extension event types without crashing", () => {
+    const base = reduceEvent(initialState(), { type: "turn.started", data: { turnId: "t" } });
+    const next = reduceEvent(base, {
+      type: "harness.future_gate",
+      time: "9",
+      data: { name: "lint", passed: true },
+    });
+    expect(next.status.busy).toBe(true);
+    expect(next.items).toEqual(base.items);
+    expect(next.seen.size).toBe(base.seen.size + 1);
+  });
 });

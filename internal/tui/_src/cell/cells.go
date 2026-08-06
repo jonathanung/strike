@@ -119,8 +119,11 @@ type toolCell struct {
 	metadata json.RawMessage
 	done     bool
 	isError  bool
-	expanded bool
-	selected bool // highlight while transcript selection is on this cell
+	// errorCode is the stable protocol.ErrorCode* when isError (e.g.
+	// permission_denied). Empty on success.
+	errorCode string
+	expanded  bool
+	selected  bool // highlight while transcript selection is on this cell
 	// copiedFlash is set after y-to-copy until clearCellCopiedFlashMsg.
 	copiedFlash bool
 }

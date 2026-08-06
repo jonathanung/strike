@@ -203,6 +203,13 @@ type Options struct {
 	Rules []permission.Ruleset
 	// RuleLayerNames are optional stable names parallel to Rules (explain/audit).
 	RuleLayerNames []string
+	// ManagedRules is the enterprise/MDM deny ceiling installed after phase
+	// (config.Managed.DenyRules). Empty disables. Propagated to child engines.
+	ManagedRules permission.Ruleset
+	// LockPermissionMode rejects SetPermissionMode when the dial is fixed by
+	// managed config (config.Managed.PermissionMode). Startup still applies
+	// InitialPermissionMode.
+	LockPermissionMode bool
 	// Hooks are shell-command lifecycle hooks (pre/post tool use). Empty disables.
 	Hooks []tool.HookDef
 	// HookRules are declarative config rules (event matcher → log/block/notify).
@@ -581,6 +588,9 @@ func New(opts Options) *Engine {
 	e.perms = permission.New(e.emit, opts.Rules...)
 	if len(opts.RuleLayerNames) > 0 {
 		e.perms.SetBaseLayerNames(opts.RuleLayerNames...)
+	}
+	if len(opts.ManagedRules) > 0 {
+		e.perms.SetManagedRules(opts.ManagedRules)
 	}
 	if opts.PersistProjectRule != nil {
 		e.perms.SetProjectPersister(opts.PersistProjectRule)

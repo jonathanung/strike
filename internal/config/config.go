@@ -1,13 +1,16 @@
 // Package config loads strike configuration and user extensions. Layers:
-// defaults, then global (~/.strike/config), then project (./.strike/config)
-// — JSON or JSONC (// and /* */ comments). Optional "$schema" is ignored
-// (editor DX only). Scalar fields override; permission rules concatenate so
-// later layers win under last-match-wins evaluation. The same two .strike
-// roots also hold agents/ and skills/ folders (see agents.go). Loaded by
-// cmd/strike at startup and wrapped by internal/host/local (Settings, and
-// the agent/skill listings); internal/tui never imports it directly.
-// Programmatic saves (SetGlobal*, AppendProjectPermission) rewrite pure
-// JSON and drop comments / $schema — see docs/config.md.
+// defaults, then global (~/.strike/config), then project (./.strike/config),
+// then managed/MDM (system path; see managed.go) — JSON or JSONC (// and
+// /* */ comments). Optional "$schema" is ignored (editor DX only). Scalar
+// fields override; permission rules concatenate so later layers win under
+// last-match-wins evaluation. Managed is highest for scalars and contributes
+// a deny ceiling the permission service enforces after session grants.
+// The same two .strike roots also hold agents/ and skills/ folders (see
+// agents.go). Loaded by cmd/strike at startup and wrapped by
+// internal/host/local (Settings, and the agent/skill listings); internal/tui
+// never imports it directly. Programmatic saves (SetGlobal*,
+// AppendProjectPermission) rewrite pure JSON and drop comments / $schema —
+// see docs/config.md.
 package config
 
 import (
@@ -171,6 +174,9 @@ type Config struct {
 	// ToolRetry is the harness error-recovery / retry policy for tool
 	// dispatch (error code × idempotency). See docs/config.md.
 	ToolRetry ToolRetryConfig `json:"toolRetry,omitempty"`
+	// Managed is provenance for the enterprise/MDM layer (not serialized).
+	// Populated by Load when system managed-config is present.
+	Managed ManagedInfo `json:"-"`
 }
 
 // ToolRetryConfig is the JSON "toolRetry" object — auto-retry and loop
@@ -300,6 +306,26 @@ type SessionConfig struct {
 	RetentionMaxAgeDays int `json:"retentionMaxAgeDays,omitempty"`
 	// RetentionMaxBytes caps total closed session log+meta bytes (0 = off).
 	RetentionMaxBytes int64 `json:"retentionMaxBytes,omitempty"`
+	// TimelineMaxEntries caps in-memory structured run timeline entries
+	// (0 = pkg/timeline default 10000; negative in API disables — JSON 0 keeps default).
+	// Oldest terminal entries are pruned first (#810).
+	TimelineMaxEntries int `json:"timelineMaxEntries,omitempty"`
+	// TimelineArgsPreviewMax / TimelineOutputPreviewMax override inline payload
+	// preview rune caps (0 = library defaults 512 / 2048). Oversized payloads
+	// truncate; with TimelineBlobSpill they also spill to content-addressed blobs.
+	TimelineArgsPreviewMax   int `json:"timelineArgsPreviewMax,omitempty"`
+	TimelineOutputPreviewMax int `json:"timelineOutputPreviewMax,omitempty"`
+	// TimelineBlobSpill enables spilling oversized redacted tool payloads under
+	// ~/.strike/traces/<sessionId>/blobs/ (blob:sha256: refs on timeline entries).
+	// Spill writes do not fsync — session JSONL remains the durability boundary.
+	TimelineBlobSpill bool `json:"timelineBlobSpill,omitempty"`
+	// TraceRetentionMaxFiles/AgeDays/Bytes bound ~/.strike/traces and
+	// ~/.strike/runs session trees (0 = unlimited). Applied via
+	// session.ApplyTraceRetention / ApplyRetentionWithSidecars — coordinates
+	// with session.retention* (#803); not automatic on every launch.
+	TraceRetentionMaxFiles   int   `json:"traceRetentionMaxFiles,omitempty"`
+	TraceRetentionMaxAgeDays int   `json:"traceRetentionMaxAgeDays,omitempty"`
+	TraceRetentionMaxBytes   int64 `json:"traceRetentionMaxBytes,omitempty"`
 	// AgentBudget is the default per-child resource limit for task spawns
 	// (#774). Spawn-time task.budget fields overlay non-zero values. Zero
 	// means unlimited for that dimension (soft stall/loop signals still
@@ -500,12 +526,14 @@ func resolveExisting(path string) string {
 //	default → ~/.strike/config → ~/.strike/mcp.jsonc → ~/.strike/providers.jsonc
 //	→ ~/.strike/keybinds.jsonc → ./.strike/config → ./.strike/mcp.jsonc
 //	→ ./.strike/providers.jsonc → ./.strike/keybinds.jsonc
+//	→ managed/MDM (system managed-config + managed-config.d; highest)
 //
 // mcp.jsonc/json is preferred for MCP servers (see ReadMCPFile); the legacy
 // mcp object in config still works. providers.jsonc is OpenCode-compatible
 // (see ReadProvidersFile); the legacy providers array in config still works.
 // Dedicated keybinds.jsonc/json overrides the config keybinds object in the
-// same root (last-wins per id).
+// same root (last-wins per id). Managed scalars and permission rules override
+// user/project; see ManagedInfo and docs/config.md (enterprise).
 func Load(workDir string) (Config, error) {
 	cfg := Default()
 	// Global config JSON (optional).
@@ -565,6 +593,15 @@ func Load(workDir string) (Config, error) {
 		} else if len(kb) > 0 {
 			cfg.Keybinds = MergeKeybinds(cfg.Keybinds, kb)
 		}
+	}
+	// Managed/MDM last: system policy overrides global and project.
+	managed, info, err := LoadManaged()
+	if err != nil {
+		return cfg, err
+	}
+	if info.Active() {
+		cfg = merge(cfg, managed)
+		cfg.Managed = info
 	}
 	cfg.Provider = CanonicalProviderID(cfg.Provider)
 	return cfg, nil
@@ -1165,6 +1202,27 @@ func merge(base, layer Config) Config {
 	}
 	if layer.Session.RetentionMaxBytes != 0 {
 		base.Session.RetentionMaxBytes = layer.Session.RetentionMaxBytes
+	}
+	if layer.Session.TimelineMaxEntries != 0 {
+		base.Session.TimelineMaxEntries = layer.Session.TimelineMaxEntries
+	}
+	if layer.Session.TimelineArgsPreviewMax != 0 {
+		base.Session.TimelineArgsPreviewMax = layer.Session.TimelineArgsPreviewMax
+	}
+	if layer.Session.TimelineOutputPreviewMax != 0 {
+		base.Session.TimelineOutputPreviewMax = layer.Session.TimelineOutputPreviewMax
+	}
+	if layer.Session.TimelineBlobSpill {
+		base.Session.TimelineBlobSpill = true
+	}
+	if layer.Session.TraceRetentionMaxFiles != 0 {
+		base.Session.TraceRetentionMaxFiles = layer.Session.TraceRetentionMaxFiles
+	}
+	if layer.Session.TraceRetentionMaxAgeDays != 0 {
+		base.Session.TraceRetentionMaxAgeDays = layer.Session.TraceRetentionMaxAgeDays
+	}
+	if layer.Session.TraceRetentionMaxBytes != 0 {
+		base.Session.TraceRetentionMaxBytes = layer.Session.TraceRetentionMaxBytes
 	}
 	base.Session.AgentBudget = mergeAgentBudgetConfig(base.Session.AgentBudget, layer.Session.AgentBudget)
 	base.Permissions = append(base.Permissions, layer.Permissions...)
