@@ -34,8 +34,12 @@ type rootPane struct {
 	turnRunning        bool
 	awaitingPermission bool
 	sessionErrored     bool
-	turnStartedAt      time.Time
-	toolCallsThisTurn  int
+	// queue* projects scheduler admission wait for this root.
+	queueRequestID    string
+	queuePools        []string
+	queueLabel        string
+	turnStartedAt     time.Time
+	toolCallsThisTurn int
 
 	usageInput, usageOutput, usageUsed protocol.TokenCount
 	usageSource                        string
@@ -93,6 +97,9 @@ func (m *Model) stashActiveRoot() {
 		turnRunning:        m.turnRunning,
 		awaitingPermission: m.awaitingPermission,
 		sessionErrored:     m.sessionErrored,
+		queueRequestID:     m.queueRequestID,
+		queuePools:         append([]string(nil), m.queuePools...),
+		queueLabel:         m.queueLabel,
 		turnStartedAt:      m.turnStartedAt,
 		toolCallsThisTurn:  m.toolCallsThisTurn,
 		usageInput:         m.usageInput,
@@ -140,6 +147,9 @@ func (m *Model) loadRootPane(p *rootPane) {
 	m.turnRunning = p.turnRunning
 	m.awaitingPermission = p.awaitingPermission
 	m.sessionErrored = p.sessionErrored
+	m.queueRequestID = p.queueRequestID
+	m.queuePools = append([]string(nil), p.queuePools...)
+	m.queueLabel = p.queueLabel
 	m.turnStartedAt = p.turnStartedAt
 	m.toolCallsThisTurn = p.toolCallsThisTurn
 	m.usageInput = p.usageInput
@@ -485,6 +495,37 @@ func applyEventToPane(p *rootPane, ev protocol.Event) {
 		applyTeamRosterToPane(p, e)
 	case protocol.AgentMessage:
 		applyAgentMessageToPane(p, e)
+	case protocol.SchedulerQueued:
+		if applySchedulerQueuedToChildren(&p.children, e) {
+			break
+		}
+		if e.SessionID == "" || e.SessionID == p.sessionID {
+			p.queueRequestID = e.RequestID
+			p.queuePools = append([]string(nil), e.Pools...)
+			p.queueLabel = e.Label
+		}
+	case protocol.SchedulerAdmitted:
+		if applySchedulerClearToChildren(&p.children, e.RequestID, e.SessionID) {
+			break
+		}
+		if e.SessionID == "" || e.SessionID == p.sessionID {
+			if p.queueRequestID == "" || p.queueRequestID == e.RequestID {
+				p.queueRequestID = ""
+				p.queuePools = nil
+				p.queueLabel = ""
+			}
+		}
+	case protocol.SchedulerCanceled:
+		if applySchedulerClearToChildren(&p.children, e.RequestID, e.SessionID) {
+			break
+		}
+		if e.SessionID == "" || e.SessionID == p.sessionID {
+			if p.queueRequestID == "" || p.queueRequestID == e.RequestID {
+				p.queueRequestID = ""
+				p.queuePools = nil
+				p.queueLabel = ""
+			}
+		}
 	}
 }
 
@@ -711,7 +752,7 @@ func (m Model) rootAgentState(id string) theme.AgentState {
 			if p.awaitingPermission {
 				return theme.AgentStateAttention
 			}
-			if p.turnRunning {
+			if p.turnRunning || len(p.queuePools) > 0 {
 				return theme.AgentStateWorking
 			}
 			if p.sessionErrored {
@@ -720,6 +761,25 @@ func (m Model) rootAgentState(id string) theme.AgentState {
 		}
 	}
 	return theme.AgentStateReady
+}
+
+// rootQueueLabel returns the short queue chip for a root (empty when not waiting).
+func (m Model) rootQueueLabel(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" || id == m.sessionID {
+		return strings.TrimSpace(m.queueLabel)
+	}
+	if m.roots != nil {
+		if p, ok := m.roots[id]; ok && p != nil {
+			if label := strings.TrimSpace(p.queueLabel); label != "" {
+				return label
+			}
+			if len(p.queuePools) > 0 {
+				return strings.Join(p.queuePools, ",")
+			}
+		}
+	}
+	return ""
 }
 
 // liveRootIDs returns concurrent root ids when Roots is available, else the

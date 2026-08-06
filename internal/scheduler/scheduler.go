@@ -15,6 +15,7 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // Well-known pool names used by Strike admission sites.
@@ -73,6 +74,34 @@ type pool struct {
 	waiters  []*waiter // FIFO
 }
 
+// AcquirePhase is a lifecycle stage for one Acquire attempt.
+type AcquirePhase string
+
+const (
+	// PhaseQueued means the caller is blocked waiting for capacity.
+	PhaseQueued AcquirePhase = "queued"
+	// PhaseAdmitted means a lease was granted to the caller.
+	PhaseAdmitted AcquirePhase = "admitted"
+	// PhaseCanceled means the waiter left without a lease (ctx cancel or Close).
+	PhaseCanceled AcquirePhase = "canceled"
+)
+
+// AcquireEvent notifies observers about one Acquire attempt.
+// Callbacks run without holding the scheduler lock.
+// For a single attempt: Queued (optional) then exactly one of Admitted or
+// Canceled. Admitted is never emitted after Canceled for that attempt.
+type AcquireEvent struct {
+	Phase AcquirePhase
+	// ID is the waiter id when queued/canceled from a wait, or the lease id
+	// when admitted. Zero when unused.
+	ID    uint64
+	Pools []string
+	// Wait is time spent blocked (set on admitted/canceled after a wait).
+	Wait time.Duration
+	// Err is set on canceled (context error or ErrClosed).
+	Err error
+}
+
 // waiter is a pending multi-pool acquisition.
 type waiter struct {
 	id    uint64
@@ -82,6 +111,8 @@ type waiter struct {
 	// outcome is set before ready is closed; guarded by Scheduler.mu until then.
 	err   error
 	lease *Lease
+	// enqueuedAt is set when the waiter joins the queues (for Wait duration).
+	enqueuedAt time.Time
 }
 
 // Lease is an acquired hold on one or more pool slots.
@@ -183,6 +214,12 @@ func NewDefault() *Scheduler {
 // unlimited). Waiters never hold partial capacity, so inconsistent lock
 // ordering cannot deadlock.
 func (s *Scheduler) Acquire(ctx context.Context, names ...string) (*Lease, error) {
+	return s.AcquireNotify(ctx, nil, names...)
+}
+
+// AcquireNotify is Acquire with optional lifecycle notifications.
+// notify may be nil. See AcquireEvent for phase guarantees.
+func (s *Scheduler) AcquireNotify(ctx context.Context, notify func(AcquireEvent), names ...string) (*Lease, error) {
 	if s == nil {
 		return nil, errors.New("scheduler: nil receiver")
 	}
@@ -192,6 +229,21 @@ func (s *Scheduler) Acquire(ctx context.Context, names ...string) (*Lease, error
 	need, err := normalizeNames(names)
 	if err != nil {
 		return nil, err
+	}
+	// Copy for notify so callers cannot mutate pool state via the slice.
+	poolsCopy := func() []string {
+		out := make([]string, len(need))
+		copy(out, need)
+		return out
+	}
+	fire := func(ev AcquireEvent) {
+		if notify == nil {
+			return
+		}
+		if ev.Pools == nil {
+			ev.Pools = poolsCopy()
+		}
+		notify(ev)
 	}
 
 	s.mu.Lock()
@@ -220,14 +272,16 @@ func (s *Scheduler) Acquire(ctx context.Context, names ...string) (*Lease, error
 			lease.Release()
 			return nil, err
 		}
+		fire(AcquireEvent{Phase: PhaseAdmitted, ID: lease.id, Pools: poolsCopy(), Wait: 0})
 		return lease, nil
 	}
 
 	s.seq++
 	w := &waiter{
-		id:    s.seq,
-		pools: need,
-		ready: make(chan struct{}),
+		id:         s.seq,
+		pools:      need,
+		ready:      make(chan struct{}),
+		enqueuedAt: time.Now(),
 	}
 	for _, n := range need {
 		p := s.pools[n]
@@ -235,34 +289,45 @@ func (s *Scheduler) Acquire(ctx context.Context, names ...string) (*Lease, error
 	}
 	s.mu.Unlock()
 
+	fire(AcquireEvent{Phase: PhaseQueued, ID: w.id, Pools: poolsCopy()})
+
 	select {
 	case <-w.ready:
+		wait := time.Since(w.enqueuedAt)
 		if w.err != nil {
+			fire(AcquireEvent{Phase: PhaseCanceled, ID: w.id, Pools: poolsCopy(), Wait: wait, Err: w.err})
 			return nil, w.err
 		}
 		// Both ready and ctx.Done may be selectable; never hand out a lease
 		// when the caller already canceled.
 		if err := ctx.Err(); err != nil {
 			w.lease.Release()
+			fire(AcquireEvent{Phase: PhaseCanceled, ID: w.id, Pools: poolsCopy(), Wait: wait, Err: err})
 			return nil, err
 		}
+		fire(AcquireEvent{Phase: PhaseAdmitted, ID: w.lease.id, Pools: poolsCopy(), Wait: wait})
 		return w.lease, nil
 	case <-ctx.Done():
 		s.cancelWaiter(w, ctx.Err())
 		// cancelWaiter always settles ready (cancel, prior grant, or Close).
 		<-w.ready
+		wait := time.Since(w.enqueuedAt)
 		if w.lease != nil {
 			// Grant won the race: free capacity so a canceled caller never holds a slot.
 			w.lease.Release()
+			fire(AcquireEvent{Phase: PhaseCanceled, ID: w.id, Pools: poolsCopy(), Wait: wait, Err: ctx.Err()})
 			return nil, ctx.Err()
 		}
 		if w.err != nil {
 			// Prefer Close over a racy cancel when the scheduler is gone.
+			err := w.err
 			if errors.Is(w.err, ErrClosed) {
-				return nil, ErrClosed
+				err = ErrClosed
 			}
-			return nil, w.err
+			fire(AcquireEvent{Phase: PhaseCanceled, ID: w.id, Pools: poolsCopy(), Wait: wait, Err: err})
+			return nil, err
 		}
+		fire(AcquireEvent{Phase: PhaseCanceled, ID: w.id, Pools: poolsCopy(), Wait: wait, Err: ctx.Err()})
 		return nil, ctx.Err()
 	}
 }

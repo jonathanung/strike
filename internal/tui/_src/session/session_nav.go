@@ -557,6 +557,10 @@ func seedFromReplay(m *Model, events []protocol.Event) {
 	}
 	m.turnRunning = false
 	m.awaitingPermission = false
+	// Resume never leaves sticky queue wait — the process is gone.
+	m.queueRequestID = ""
+	m.queuePools = nil
+	m.queueLabel = ""
 	m.turnStartedAt = time.Time{}
 	m.toolCallsThisTurn = 0
 	m.clearModalStack()
@@ -674,11 +678,21 @@ func childrenFromEvents(events []protocol.Event) []childActivity {
 				leadID = strings.TrimSpace(e.SessionID)
 			}
 			applyTeamRosterMembers(&out, index, e.Members, leadID)
+		case protocol.SchedulerQueued:
+			applySchedulerQueuedToChildren(&out, e)
+		case protocol.SchedulerAdmitted:
+			applySchedulerClearToChildren(&out, e.RequestID, e.SessionID)
+		case protocol.SchedulerCanceled:
+			applySchedulerClearToChildren(&out, e.RequestID, e.SessionID)
 		}
 	}
 	for i := range out {
 		if out[i].status == "running" {
 			out[i].status = string(protocol.ChildStatusCanceled)
+			// Child process is gone on resume — drop stale queue chips.
+			out[i].queueRequestID = ""
+			out[i].queuePools = nil
+			out[i].queueLabel = ""
 		}
 	}
 	if len(out) > maxChildActivity {

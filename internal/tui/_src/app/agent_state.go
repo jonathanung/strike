@@ -26,7 +26,8 @@ func (m Model) agentState() theme.AgentState {
 	if m.awaitingPermission {
 		return theme.AgentStateAttention
 	}
-	if m.turnRunning {
+	// Queued admission is live work on a constrained pool — not idle.
+	if m.turnRunning || len(m.queuePools) > 0 {
 		return theme.AgentStateWorking
 	}
 	if m.sessionErrored {

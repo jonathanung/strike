@@ -246,6 +246,19 @@ Admission wiring uses the compiled policy:
   acquire those pools in addition via the scheduler's multi-pool path.
   Omitted limits stay unlimited (no wait — same as pre-scheduler behavior).
 
+**Queue lifecycle (protocol / session JSONL):** when a caller **blocks** on
+capacity, the engine emits `scheduler.queued` with correlation, a stable
+`requestId`, the constrained `pools`, and a short `label` (`model`, `bash`,
+`bash:build`, …). Grant then emits `scheduler.admitted` (with `waitMs`); cancel
+or scheduler close emits `scheduler.canceled` (`reason` `canceled`|`closed`).
+Immediate grants (unlimited pools or free capacity) emit **no** queue events,
+so default sessions stay quiet. After `canceled` for a `requestId`, `admitted`
+never follows. Exact queue positions are **not** on the wire — FIFO is internal
+and may change; UIs show the pool and label only. Replay reconstructs
+queued→admitted or queued→canceled so waiting roots/children are not mistaken
+for idle. Task status, team roster, and the activity/agents panes project these
+events without importing scheduler internals.
+
 Inspect the compiled policy via `Config.SchedulerEffective()` /
 `Effective.Report()`.
 

@@ -410,6 +410,9 @@ func TestEventTypeCoverage(t *testing.T) {
 		"team.roster":          TeamRoster{},
 		"usage.reported":       UsageReported{},
 		"provider.retrying":    ProviderRetrying{},
+		"scheduler.queued":     SchedulerQueued{},
+		"scheduler.admitted":   SchedulerAdmitted{},
+		"scheduler.canceled":   SchedulerCanceled{},
 		"compaction.started":   CompactionStarted{},
 		"compaction.completed": CompactionCompleted{},
 		"session.meta":         SessionMeta{},
@@ -424,6 +427,45 @@ func TestEventTypeCoverage(t *testing.T) {
 		}
 		if env.Type != typ {
 			t.Errorf("type = %q, want %q", env.Type, typ)
+		}
+	}
+}
+
+func TestSchedulerQueueEventsRoundTrip(t *testing.T) {
+	corr := Correlation{SessionID: "s1", TurnID: "t1", ParentSessionID: "p", Depth: 1}
+	cases := []Event{
+		SchedulerQueued{Correlation: corr, RequestID: "r1", Pools: []string{"model"}, Label: "model"},
+		SchedulerAdmitted{Correlation: corr, RequestID: "r1", Pools: []string{"model"}, Label: "model", WaitMs: 42},
+		SchedulerCanceled{Correlation: corr, RequestID: "r2", Pools: []string{"process", "build"}, Label: "bash:build", WaitMs: 7, Reason: SchedulerReasonCanceled},
+	}
+	for _, ev := range cases {
+		env, err := Wrap(ev)
+		if err != nil {
+			t.Fatalf("Wrap %T: %v", ev, err)
+		}
+		got, err := env.Decode()
+		if err != nil {
+			t.Fatalf("Decode %s: %v", env.Type, err)
+		}
+		switch want := ev.(type) {
+		case SchedulerQueued:
+			g, ok := got.(SchedulerQueued)
+			if !ok || g.RequestID != want.RequestID || g.Label != want.Label || len(g.Pools) != 1 || g.Pools[0] != "model" {
+				t.Fatalf("queued got %#v want %#v", got, want)
+			}
+			if g.SessionID != "s1" || g.ParentSessionID != "p" || g.Depth != 1 {
+				t.Fatalf("queued correlation = %+v", g.Correlation)
+			}
+		case SchedulerAdmitted:
+			g, ok := got.(SchedulerAdmitted)
+			if !ok || g.RequestID != want.RequestID || g.WaitMs != 42 {
+				t.Fatalf("admitted got %#v want %#v", got, want)
+			}
+		case SchedulerCanceled:
+			g, ok := got.(SchedulerCanceled)
+			if !ok || g.Reason != SchedulerReasonCanceled || g.WaitMs != 7 || len(g.Pools) != 2 {
+				t.Fatalf("canceled got %#v want %#v", got, want)
+			}
 		}
 	}
 }

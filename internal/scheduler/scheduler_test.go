@@ -693,3 +693,136 @@ func waitForWaiting(t *testing.T, s *Scheduler, name string, n int) {
 	}
 	t.Fatalf("timeout waiting for %q Waiting>=%d (got %d)", name, n, poolSnap(t, s, name).Waiting)
 }
+
+func TestAcquireNotifyImmediateAdmittedOnly(t *testing.T) {
+	s := NewDefault()
+	defer s.Close()
+	var phases []AcquirePhase
+	lease, err := s.AcquireNotify(context.Background(), func(ev AcquireEvent) {
+		phases = append(phases, ev.Phase)
+	}, PoolModel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease.Release()
+	if len(phases) != 1 || phases[0] != PhaseAdmitted {
+		t.Fatalf("phases=%v want [admitted]", phases)
+	}
+}
+
+func TestAcquireNotifyQueuedThenAdmitted(t *testing.T) {
+	s, err := New(Config{Pools: map[string]int{PoolModel: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	holder, err := s.Acquire(context.Background(), PoolModel)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var mu sync.Mutex
+	var phases []AcquirePhase
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		lease, err := s.AcquireNotify(context.Background(), func(ev AcquireEvent) {
+			mu.Lock()
+			phases = append(phases, ev.Phase)
+			mu.Unlock()
+		}, PoolModel)
+		if err != nil {
+			t.Errorf("acquire: %v", err)
+			return
+		}
+		lease.Release()
+	}()
+	waitForWaiting(t, s, PoolModel, 1)
+	// Queued must fire before grant.
+	deadline := time.Now().Add(time.Second)
+	for {
+		mu.Lock()
+		n := len(phases)
+		mu.Unlock()
+		if n >= 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("queued never notified")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	holder.Release()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("waiter stuck")
+	}
+	mu.Lock()
+	got := append([]AcquirePhase(nil), phases...)
+	mu.Unlock()
+	if len(got) != 2 || got[0] != PhaseQueued || got[1] != PhaseAdmitted {
+		t.Fatalf("phases=%v want [queued admitted]", got)
+	}
+}
+
+func TestAcquireNotifyCancelNoAdmitted(t *testing.T) {
+	s, err := New(Config{Pools: map[string]int{PoolTest: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	holder, err := s.Acquire(context.Background(), PoolTest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Release()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var mu sync.Mutex
+	var phases []AcquirePhase
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := s.AcquireNotify(ctx, func(ev AcquireEvent) {
+			mu.Lock()
+			phases = append(phases, ev.Phase)
+			mu.Unlock()
+		}, PoolTest)
+		errCh <- err
+	}()
+	waitForWaiting(t, s, PoolTest, 1)
+	// Ensure queued observed.
+	deadline := time.Now().Add(time.Second)
+	for {
+		mu.Lock()
+		n := len(phases)
+		mu.Unlock()
+		if n >= 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("queued never notified")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err=%v want canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancel stuck")
+	}
+	mu.Lock()
+	got := append([]AcquirePhase(nil), phases...)
+	mu.Unlock()
+	if len(got) != 2 || got[0] != PhaseQueued || got[1] != PhaseCanceled {
+		t.Fatalf("phases=%v want [queued canceled]", got)
+	}
+	for _, p := range got {
+		if p == PhaseAdmitted {
+			t.Fatal("admitted after cancel")
+		}
+	}
+}

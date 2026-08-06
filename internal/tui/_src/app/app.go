@@ -283,6 +283,11 @@ type Model struct {
 	noticeErr    bool
 	noticeCause  noticeCause
 	turnRunning  bool
+	// queue* projects scheduler.queued/admitted/canceled for the active root
+	// so chrome/activity identify the constrained pool (not idle).
+	queueRequestID string
+	queuePools     []string
+	queueLabel     string
 	// inputQueue holds prompts typed while turnRunning. Drained FIFO on
 	// TurnCompleted; survives Interrupt until the user pops/clears it.
 	inputQueue []queuedInput
@@ -418,8 +423,12 @@ type childActivity struct {
 	status    string // running | completed | failed | canceled
 	// rosterState is a short display chip from team.roster (working, needs you, …).
 	rosterState string
-	startedAt   time.Time
-	endedAt     time.Time
+	// queue* projects scheduler.queued/admitted/canceled (constrained pool, not idle).
+	queueRequestID string
+	queuePools     []string
+	queueLabel     string
+	startedAt      time.Time
+	endedAt        time.Time
 }
 
 // New builds the frontend model. services supplies every host capability; any

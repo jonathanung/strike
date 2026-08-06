@@ -17,6 +17,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/provider"
 	"github.com/jonathanung/strike-cli/internal/question"
 	"github.com/jonathanung/strike-cli/internal/sandbox"
+	"github.com/jonathanung/strike-cli/internal/scheduler"
 	"github.com/jonathanung/strike-cli/internal/tool"
 )
 
@@ -382,7 +383,7 @@ func (e *Engine) consumeStream(ctx context.Context, reqCorr protocol.Correlation
 	system := joinPromptLayerTexts(layers)
 	tools, _ := e.effectiveToolSchemas()
 	e.recordStreamEffective(layers, system, tools)
-	stream, err := e.admitModelStream(ctx, provider.Request{
+	stream, err := e.admitModelStream(ctx, reqCorr, provider.Request{
 		Model:     e.model,
 		System:    system,
 		Messages:  e.messages,
@@ -660,8 +661,11 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			Sandbox:         e.bashSandboxPolicy(),
 			Scheduler:       e.opts.Scheduler,
 			SchedulerPolicy: e.opts.SchedulerPolicy,
-			Files:           e.files,
-			Checkpoint:      e.checkpoints.Snapshot,
+			SchedulerAcquire: func(ctx context.Context, label string, pools ...string) (*scheduler.Lease, error) {
+				return e.acquireScheduler(ctx, corr, label, pools...)
+			},
+			Files:      e.files,
+			Checkpoint: e.checkpoints.Snapshot,
 			Ask: func(ctx context.Context, req tool.AskRequest) error {
 				return e.perms.AskWithCorrelation(ctx, req, corr)
 			},
