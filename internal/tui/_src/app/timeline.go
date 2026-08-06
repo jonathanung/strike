@@ -39,9 +39,15 @@ func (m *Model) observeTimeline(ev protocol.Event, t time.Time) {
 	m.runTimeline.Observe(ev, t)
 }
 
-// timelineTrace returns the best available redacted trace: prefer durable
-// session JSONL (envelope timestamps) when Sessions is wired; else live builder.
+// timelineTrace returns the best available redacted trace.
+// Prefer the live builder (includes events not yet flushed to JSONL). Fall back
+// to durable session JSONL when the live builder is empty (cold root switch).
 func (m Model) timelineTrace() timeline.Trace {
+	if m.runTimeline != nil {
+		if tr := m.runTimeline.Trace(); len(tr.Entries) > 0 {
+			return tr
+		}
+	}
 	if m.services.Sessions != nil && strings.TrimSpace(m.sessionID) != "" {
 		if data, err := m.services.Sessions.ReplayJSONL(m.sessionID); err == nil && len(data) > 0 {
 			if events, err := timedEventsFromJSONL(data); err == nil && len(events) > 0 {
