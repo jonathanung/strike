@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/jonathanung/strike-cli/internal/sandbox"
 )
 
 const (
@@ -98,7 +100,12 @@ func (webFetchTool) Execute(ctx context.Context, args json.RawMessage, tc *Conte
 	if u.Host == "" {
 		return Result{}, fmt.Errorf("url must include a host")
 	}
-	if err := assertPublicHTTPHost(u.Hostname()); err != nil {
+	host := u.Hostname()
+	if err := assertPublicHTTPHost(host); err != nil {
+		return Result{}, err
+	}
+	allow := networkAllowFrom(tc)
+	if err := sandbox.CheckNetworkAllow(host, allow); err != nil {
 		return Result{}, err
 	}
 
@@ -123,7 +130,7 @@ func (webFetchTool) Execute(ctx context.Context, args json.RawMessage, tc *Conte
 
 	client := &http.Client{
 		Timeout:   timeout,
-		Transport: webfetchHTTPTransport(),
+		Transport: webfetchHTTPTransport(allow),
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {
 				return fmt.Errorf("too many redirects")
@@ -131,7 +138,11 @@ func (webFetchTool) Execute(ctx context.Context, args json.RawMessage, tc *Conte
 			if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
 				return fmt.Errorf("redirect to non-http(s) scheme %q blocked", req.URL.Scheme)
 			}
-			if err := assertPublicHTTPHost(req.URL.Hostname()); err != nil {
+			rh := req.URL.Hostname()
+			if err := assertPublicHTTPHost(rh); err != nil {
+				return err
+			}
+			if err := sandbox.CheckNetworkAllow(rh, allow); err != nil {
 				return err
 			}
 			return nil
@@ -216,18 +227,29 @@ var (
 	webfetchTestTransport http.RoundTripper
 )
 
+// networkAllowFrom returns the config allowlist from tc (nil-safe).
+func networkAllowFrom(tc *Context) []string {
+	if tc == nil {
+		return nil
+	}
+	return tc.NetworkAllow
+}
+
 // webfetchHTTPTransport returns the RoundTripper used for fetches.
 // Tests may inject webfetchTestTransport (e.g. TLS InsecureSkipVerify for httptest).
 // Production uses a transport whose DialContext resolves and filters blocked IPs
 // at connect time, closing the DNS-rebinding TOCTOU window of a separate LookupIP.
-func webfetchHTTPTransport() http.RoundTripper {
+// allow is the optional network.allow list (empty = unrestricted public).
+func webfetchHTTPTransport(allow []string) http.RoundTripper {
 	if webfetchTestTransport != nil {
+		// Test transports skip custom dial; allowlist is enforced pre-request
+		// and on redirects. Production dial re-checks for DNS rebinding.
 		return webfetchTestTransport
 	}
-	return newWebfetchSafeTransport()
+	return newWebfetchSafeTransport(allow)
 }
 
-func newWebfetchSafeTransport() *http.Transport {
+func newWebfetchSafeTransport(allow []string) *http.Transport {
 	base, ok := http.DefaultTransport.(*http.Transport)
 	var t *http.Transport
 	if ok {
@@ -235,6 +257,8 @@ func newWebfetchSafeTransport() *http.Transport {
 	} else {
 		t = &http.Transport{}
 	}
+	// Defensive copy so later mutation of the caller's slice cannot widen dial.
+	allow = sandbox.CloneNetworkAllow(allow)
 	dialer := &net.Dialer{
 		Timeout:   30 * time.Second,
 		KeepAlive: 30 * time.Second,
@@ -246,6 +270,9 @@ func newWebfetchSafeTransport() *http.Transport {
 		}
 		ipAddr, err := resolvePublicDialAddr(ctx, host)
 		if err != nil {
+			return nil, err
+		}
+		if err := sandbox.CheckNetworkDialAllow(host, ipAddr, allow); err != nil {
 			return nil, err
 		}
 		// Dial the filtered IP; http.Transport keeps TLS ServerName / Host as the

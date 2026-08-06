@@ -72,7 +72,10 @@ type Config struct {
 	// workspace-write. Empty means workspace-write (default). This controls
 	// what the OS isolation layer makes possible; permissionMode controls
 	// when the agent is asked. See docs/config.md (two-dial model).
-	Sandbox     string             `json:"sandbox,omitempty"`
+	Sandbox string `json:"sandbox,omitempty"`
+	// Network holds application-layer egress allowlists (webfetch host/CIDR).
+	// Distinct from Sandbox Network on/off (bash OS profile). See docs/config.md.
+	Network     NetworkConfig      `json:"network,omitempty"`
 	Permissions permission.Ruleset `json:"permissions,omitempty"`
 	// Hooks mixes declarative rules (action) and shell commands (command).
 	// Global then project layers concatenate. Invalid entries are dropped.
@@ -154,6 +157,19 @@ type Config struct {
 	// project; presets expand before user rules). Last match wins. See
 	// docs/config.md.
 	Scheduler SchedulerConfig `json:"scheduler,omitempty"`
+}
+
+// NetworkConfig is the JSON "network" object — shared allowlist shape for
+// application-layer web egress (webfetch). Bash OS networking stays
+// all-or-nothing via sandbox.Policy.Network; container net can reuse this
+// shape later.
+type NetworkConfig struct {
+	// Allow lists hostnames (example.com), single-label wildcards
+	// (*.example.com), IP literals, and CIDRs permitted for webfetch.
+	// Empty/omitted means unrestricted public hosts (SSRF private blocks
+	// still apply). When a layer sets allow (including []), it replaces the
+	// previous layer's list (project can tighten or clear global).
+	Allow []string `json:"allow,omitempty"`
 }
 
 // SchedulerConfig is the JSON "scheduler" object.
@@ -573,6 +589,13 @@ func read(path string) (Config, error) {
 		}
 		c.Sandbox = mode.String()
 	}
+	if c.Network.Allow != nil {
+		norm, err := sandbox.NormalizeNetworkAllow(c.Network.Allow)
+		if err != nil {
+			return Config{}, fmt.Errorf("%s: %w", path, err)
+		}
+		c.Network.Allow = norm
+	}
 	c.CompactionStrategy = NormalizeCompactionStrategy(c.CompactionStrategy)
 	c.CompactionModel = strings.TrimSpace(c.CompactionModel)
 	c.CompactionThreshold = ClampCompactionThreshold(c.CompactionThreshold)
@@ -896,6 +919,13 @@ func merge(base, layer Config) Config {
 	}
 	if layer.Sandbox != "" {
 		base.Sandbox = layer.Sandbox
+	}
+	// network.allow: non-nil layer slice replaces (including explicit []).
+	// make+copy so len-0 stays non-nil (append to nil yields nil).
+	if layer.Network.Allow != nil {
+		out := make([]string, len(layer.Network.Allow))
+		copy(out, layer.Network.Allow)
+		base.Network.Allow = out
 	}
 	if layer.CompactionStrategy != "" {
 		base.CompactionStrategy = layer.CompactionStrategy
