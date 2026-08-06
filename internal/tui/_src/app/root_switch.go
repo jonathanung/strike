@@ -434,7 +434,7 @@ func applyEventToPane(p *rootPane, ev protocol.Event) {
 		}
 	case protocol.ToolCallEnd:
 		if tc, ok := p.toolByID[e.CallID]; ok {
-			applyToolCallEnd(tc, e.Title, e.Output, e.Metadata, e.IsError)
+			applyToolCallEnd(tc, e.Title, e.Output, e.Metadata, e.IsError, e.ErrorCode)
 		}
 	case protocol.ModelSelected:
 		p.providerName, p.modelName = e.Provider, e.Model

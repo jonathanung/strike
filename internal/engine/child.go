@@ -310,7 +310,8 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 	// Child agent Allows that would override a parent Deny are dropped (AG3);
 	// Ask→Allow is kept so personas like general (bash allow) work as task
 	// subagents. Phase rules propagate so children cannot widen beyond the
-	// parent’s approved phase ceiling.
+	// parent’s approved phase ceiling. Managed denies are a separate late
+	// ceiling on the child service (not folded into DeriveChildRules).
 	parentLayers := append([]permission.Ruleset(nil), e.opts.Rules...)
 	if len(e.agent.Permissions) > 0 {
 		parentLayers = append(parentLayers, append(permission.Ruleset(nil), e.agent.Permissions...))
@@ -321,6 +322,12 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 	// Bundle allowed_paths scopes child FS tools when sealed at spawn.
 	if scope := bundlePathScopeRules(childBundle.AllowedPaths); len(scope) > 0 {
 		parentLayers = append(parentLayers, scope)
+	}
+	// Only pin InitialPermissionMode when MDM locked the dial; otherwise leave
+	// empty so children keep the historical default posture at startup.
+	var childPermMode protocol.PermissionMode
+	if e.opts.LockPermissionMode {
+		childPermMode = e.opts.InitialPermissionMode
 	}
 	child := New(Options{
 		SessionID:                  childID,
@@ -375,6 +382,9 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		CompactionStrategy:         e.opts.CompactionStrategy,
 		CompactionModel:            e.opts.CompactionModel,
 		Rules:                      permission.DeriveChildRules(parentLayers, childDepth >= maxDepth, childAgent.Permissions),
+		ManagedRules:               append(permission.Ruleset(nil), e.opts.ManagedRules...),
+		LockPermissionMode:         e.opts.LockPermissionMode,
+		InitialPermissionMode:      childPermMode,
 		Hooks:                      e.opts.Hooks,
 		HookRules:                  e.opts.HookRules,
 		PersistProjectRule:         e.opts.PersistProjectRule,

@@ -51,7 +51,7 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `internal/server` | Experimental read-only HTTP attach: `/health`, SSE session event tail, minimal attach page (`strike serve`) | `session`, `version`, `protocol` (via session JSONL), stdlib |
 | `internal/version` | Build-time Version/Commit stamped via `-ldflags` | stdlib |
 | `internal/update` | GitHub Releases self-update (check, download, sha256, atomic replace, re-exec) | `version`, stdlib, net/http |
-| `pkg/protocol` | **Public** Op/Event wire schema between engine and frontends; JSONL envelopes (`codec.go` / `op_codec.go`) are the session persistence + transport format (includes `scheduler.queued` / `admitted` / `canceled`). Semver via `Version` | stdlib only |
+| `pkg/protocol` | **Public** Op/Event wire schema between engine and frontends; JSONL envelopes (`codec.go` / `op_codec.go`) are the session persistence + transport format (includes harness/verification events and `scheduler.queued` / `admitted` / `canceled`). Semver via `Version`; unknown event types decode as `UnknownEvent` (forward-compat). Consumer contract: [protocol.md](protocol.md) | stdlib only |
 | `pkg/redact` | **Public** shared credential-shaped string scrubbing (`String`, `ScrubToolOutput`, `JSON`, `Error`) for exports, inspect, timeline traces, diagnostic bundles, and engine tool I/O | stdlib only |
 | `pkg/timeline` | **Public** structured run timeline builder + versioned redacted JSON/JSONL export derived from protocol events (complements session JSONL and #774 roster/budget; not a second transcript) | `pkg/protocol`, `pkg/redact`, stdlib |
 | `pkg/diag` | **Public** prompt/config diagnostic bundle builder + versioned redacted JSON export (layer map, effective dials, digests; complements `/context` and timeline) | `pkg/protocol`, `pkg/redact`, stdlib |
@@ -78,10 +78,10 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `internal/question` | User-question ask service: suspends a tool call until `QuestionReply` (1–4 prompts per batch; TUI walks them, one reply with all answers) | `protocol`, stdlib |
 | `internal/permission` | Ordered allow/ask/deny rulesets, last-match-wins; ask service; **Explain** (matched rule + layer); scoped grants with TTL; shipped presets (`read-only`/`dev`/`yolo-with-sandbox`); `permission.decided` audit events; `CompileSandbox` maps write/edit denials + webfetch/mcp network posture into `sandbox.Policy` | `protocol`, `tool` (for `AskRequest`), `sandbox`, stdlib |
 | `internal/session` | JSONL event-log persistence (append/replay) + concurrent Manager (multi-session open, durable list, event mux). Sidecar `*.meta.json` stores `projectKey` (workspace folder) first for `/session` scoping. `Append` redacts via `secret.RedactEvent`, writes a complete line + fsync, and prefixes new logs with a `session.header` schema version. Replay skips trailing crash residue and fails closed on interior corruption or newer schema. Portable redacted export/import packages, `Fork`/`ForkAt` lineage (`meta.forkedFrom`), and retention hooks (`ApplyRetention` / config `session.retention*`) live here. Complementary: markdown `/export` (#221), checkpoint stack across `--continue` (#573) | `protocol`, `secret`, stdlib |
-| `internal/replay` | Offline eval harness (E3) + #791 recording + #782 multi-agent run snapshots: golden JSONL echo replay, tool-sequence diffs, prompt-regression metrics (`make prompt-reg`), versioned run recordings (settings digests, nondeterministic markers, handoff/gate/bundle fields), **RunSnapshot** (spawn+completion identity for delegated runs; session-scoped under `~/.strike/runs/`; complements JSONL, does not replace it), structured compare (`CompareRecordings` / `CompareRunSnapshots`), branch-from-event (session.ForkAt, no live side effects), offline `ReplayRunSnapshot` via echo | `engine`, `session`, `protocol`, `provider`/`echo`, `tool`, `permission`, `secret`, `pkg/redact`, stdlib |
+| `internal/replay` | Offline eval harness (E3) + #791 recording + #782 multi-agent run snapshots + **#807 harness regression pack**: golden JSONL echo replay, tool-sequence diffs, prompt-regression metrics (`make prompt-reg`), harness eval themes correctness/safety/recovery/latency-cost (`make harness-eval`; CI report soft/non-blocking first; tests also exercise `sandbox`/`pkg/timeline`/`tool` contracts offline), versioned run recordings (settings digests, nondeterministic markers, handoff/gate/bundle fields), **RunSnapshot** (spawn+completion identity for delegated runs; session-scoped under `~/.strike/runs/`; complements JSONL, does not replace it), structured compare (`CompareRecordings` / `CompareRunSnapshots`), branch-from-event (session.ForkAt, no live side effects), offline `ReplayRunSnapshot` via echo. Composes with epic #459; does not own SWE-bench (#561) or chaos injection (#808) | `engine`, `session`, `protocol`, `provider`/`echo`, `tool`, `permission`, `secret`, `pkg/redact`, stdlib |
 | `internal/secret` | Secret-ref env indirection (`ParseRef`/`Resolve`/`MergeEnv`) + `RedactEvent` for session JSONL; string scrubbing delegates to `pkg/redact` | `protocol`, `pkg/redact`, stdlib |
 | `internal/auth` | Credential store (0600 `auth.json`) + OAuth/PKCE/device flows | stdlib, net/http |
-| `internal/config` | Layered JSON config (defaults → global → project) + agents/skills markdown loading | `permission` (Ruleset is a config field), `protocol`, `sandbox` (sandbox dial parse), `scheduler` (limits + presets + command rules), stdlib |
+| `internal/config` | Layered JSON config (defaults → global → project → managed/MDM) + agents/skills markdown loading; managed deny ceiling provenance on `Config.Managed` | `permission` (Ruleset is a config field), `protocol`, `sandbox` (sandbox dial parse), `scheduler` (limits + presets + command rules), stdlib |
 | `internal/models` | models.dev catalog client, 24h cache with stale fallback | stdlib, net/http |
 | `internal/history` | Project-scoped prompt history | stdlib |
 | `internal/project` | Stable filesystem identity + optional per-session git worktrees under `.strike/worktrees/` | stdlib, os/exec |
@@ -149,6 +149,8 @@ Interrupt op / Run parent ctx / turn deadline
 | Scope | Mechanism | Timeline / codes |
 |---|---|---|
 | Per-tool (bash) | `timeoutMs` (default 120s, max 600s); starts **after** scheduler admission | `process.exited` status `timeout`; `tool.end` `errorCode=timeout`, `IsError` |
+| Per-tool mem/CPU | optional `ProcessSpec.Limits` (`RLIMIT_AS` / `RLIMIT_CPU` via prlimit) | **Linux only**; no-op elsewhere — see [isolation.md](isolation.md) |
+| Per-tool OS sandbox deny | bwrap/seatbelt blocks classified after exit | `tool.end` `errorCode=sandbox_denied` + reason; timeline `errorCode` |
 | Per-turn | `engine.Options.TurnTimeout` (zero = off) | `EngineError` code `timeout` + `turn.completed` `stopReason=timeout` |
 | Provider HTTP | request ctx only (no separate client timeout on streaming adapters) | surfaces as stream/turn cancel |
 
@@ -161,7 +163,9 @@ Interrupt op / Run parent ctx / turn deadline
 | Mid-turn user input | 32 (`maxPendingUserInputs`) | **Reject** with `EngineError` `code=queue_full` (does not block Ops). Survives Interrupt; drained FIFO when idle. |
 | Scheduler waiters | unbounded waiter list per pool | Cancel via ctx → `scheduler.canceled`; capacity is the pool limit, not a second queue cap. |
 
-Stable codes used here: `canceled`, `timeout`, `queue_full` (`pkg/protocol` `ErrorCode*`). Broader tool contract codes land with #793 on the same vocabulary.
+Stable codes used here: `canceled`, `timeout`, `queue_full`, `sandbox_denied`
+(`pkg/protocol` `ErrorCode*`). Broader tool contract codes (#793) share the same
+vocabulary. Isolation layers: [isolation.md](isolation.md).
 
 ## TUI pane routing and layout
 

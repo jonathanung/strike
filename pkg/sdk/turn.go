@@ -221,6 +221,8 @@ func FormatEvent(ev protocol.Event) string {
 		return fmt.Sprintf("tool.begin %s", e.Name)
 	case protocol.ToolCallEnd:
 		return fmt.Sprintf("tool.end %s err=%v", e.Title, e.IsError)
+	case protocol.UnknownEvent:
+		return fmt.Sprintf("unknown %s", e.Type)
 	default:
 		return fmt.Sprintf("%T", ev)
 	}

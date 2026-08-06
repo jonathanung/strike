@@ -102,6 +102,15 @@ func RedactEvent(ev protocol.Event) protocol.Event {
 		return e
 	case protocol.CompactionCompleted:
 		e.Summary = redact.String(e.Summary)
+		if e.Residue != nil {
+			r := *e.Residue
+			r.Summary = redact.String(r.Summary)
+			r.Facts = redactResidueItems(r.Facts)
+			r.Decisions = redactResidueItems(r.Decisions)
+			r.OpenQuestions = redactResidueItems(r.OpenQuestions)
+			r.PinnedKinds = redactStrings(r.PinnedKinds)
+			e.Residue = &r
+		}
 		return e
 	case protocol.SessionTitled:
 		e.Title = redact.String(e.Title)
@@ -142,6 +151,10 @@ func RedactEvent(ev protocol.Event) protocol.Event {
 		return e
 	case protocol.HarnessProgress:
 		e.Payload = redact.JSON(e.Payload)
+		return e
+	case protocol.UnknownEvent:
+		// Preserve type string; scrub credential-shaped spans inside raw data.
+		e.Data = redact.JSON(e.Data)
 		return e
 	default:
 		return ev
@@ -243,6 +256,25 @@ func redactVerification(r protocol.VerificationReport) protocol.VerificationRepo
 	}
 	r.Checks = checks
 	return r
+}
+
+func redactResidueItems(in []protocol.ResidueItem) []protocol.ResidueItem {
+	if len(in) == 0 {
+		return in
+	}
+	out := make([]protocol.ResidueItem, len(in))
+	copy(out, in)
+	for i := range out {
+		out[i].ID = redact.String(out[i].ID)
+		out[i].Kind = redact.String(out[i].Kind)
+		out[i].Text = redact.String(out[i].Text)
+		out[i].Confidence = redact.String(out[i].Confidence)
+		out[i].Freshness = redact.String(out[i].Freshness)
+		out[i].LedgerID = redact.String(out[i].LedgerID)
+		out[i].SourceIDs = redactStrings(out[i].SourceIDs)
+		out[i].FileRefs = redactStrings(out[i].FileRefs)
+	}
+	return out
 }
 
 func redactStrings(in []string) []string {

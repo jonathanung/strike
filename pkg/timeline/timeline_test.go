@@ -101,6 +101,57 @@ func TestBuildTurnToolProvider(t *testing.T) {
 	}
 }
 
+func TestBuildSandboxDeniedErrorCode(t *testing.T) {
+	base := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	corr := protocol.Correlation{SessionID: "sess-sd", TurnID: "turn-sd"}
+	events := []timeline.TimedEvent{
+		{Time: base, Event: protocol.TurnStarted{Correlation: corr}},
+		{Time: base.Add(time.Millisecond), Event: protocol.ToolCallBegin{
+			Correlation: corr,
+			CallID:      "c-sd",
+			Name:        "bash",
+			Args:        json.RawMessage(`{"command":"echo x >/etc/x"}`),
+		}},
+		{Time: base.Add(2 * time.Millisecond), Event: protocol.ToolCallEnd{
+			Correlation: corr,
+			CallID:      "c-sd",
+			Title:       "echo x >/etc/x",
+			Output:      "sandbox_denied: write blocked: filesystem is read-only under OS sandbox\n(exit code 1)",
+			IsError:     true,
+			ErrorCode:   protocol.ErrorCodeSandboxDenied,
+		}},
+		{Time: base.Add(3 * time.Millisecond), Event: protocol.TurnCompleted{
+			Correlation: corr,
+			StopReason:  "end_turn",
+		}},
+	}
+	tr := timeline.Build(events, timeline.Options{SessionID: "sess-sd"})
+	var tool *timeline.Entry
+	for i := range tr.Entries {
+		if tr.Entries[i].Kind == timeline.KindTool {
+			tool = &tr.Entries[i]
+			break
+		}
+	}
+	if tool == nil {
+		t.Fatal("missing tool entry")
+	}
+	if tool.ErrorCode != protocol.ErrorCodeSandboxDenied {
+		t.Fatalf("ErrorCode = %q, want %q", tool.ErrorCode, protocol.ErrorCodeSandboxDenied)
+	}
+	if tool.State != timeline.StateFailed {
+		t.Fatalf("state = %q", tool.State)
+	}
+	if !strings.Contains(tool.Error, "sandbox_denied") {
+		t.Fatalf("error preview = %q", tool.Error)
+	}
+	// Collapsed line includes code= for greppable timeline exports.
+	collapsed := timeline.FormatCollapsed(tr.Entries, 0)
+	if !strings.Contains(collapsed, "code=sandbox_denied") {
+		t.Fatalf("collapsed missing code: %s", collapsed)
+	}
+}
+
 func TestBuildChildAndCancel(t *testing.T) {
 	base := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
 	events := []timeline.TimedEvent{

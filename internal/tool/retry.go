@@ -32,6 +32,7 @@ const (
 //	timeout          | retry      | fail        | fail
 //	precondition_*   | recover    | recover     | fail
 //	permission_*     | fail       | fail        | fail
+//	sandbox_denied   | fail       | fail        | fail
 //	invalid_args     | fail       | fail        | fail
 //	canceled         | fail       | fail        | fail
 //	blocked          | fail       | fail        | fail
@@ -60,7 +61,7 @@ func DecideRetry(code ErrorCode, id Idempotency) RetryDecision {
 			return DecisionRecover
 		}
 		return DecisionFail
-	case CodePermissionDenied, CodeInvalidArgs, CodeCanceled,
+	case CodePermissionDenied, CodeSandboxDenied, CodeInvalidArgs, CodeCanceled,
 		CodeBlocked, CodeInternal:
 		return DecisionFail
 	default:

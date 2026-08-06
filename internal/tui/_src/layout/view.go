@@ -124,18 +124,31 @@ func (m Model) headerView(width int) string {
 	if m.showThinking {
 		chips = append(chips, headerChip{10, ui.Badge(th, ui.ToneMuted, "think")})
 	}
+	// Claim vs verified chip when independent gates last ran (#809 / #806).
+	if chip, ok := verificationHeaderChip(th, m.lastVerification); ok {
+		chips = append(chips, chip)
+	}
 
 	statusStyle := th.AgentStateStyle(state)
 	var right string
 	switch state {
 	case theme.AgentStateWorking:
-		right = m.spin.View() + inlineGap + statusStyle.Render(m.workingStatusLabel(th))
+		if m.verifying && !m.turnRunning {
+			right = m.spin.View() + inlineGap + statusStyle.Render(detailJoin(th, "verifying", "gates"))
+		} else {
+			right = m.spin.View() + inlineGap + statusStyle.Render(m.workingStatusLabel(th))
+		}
 	case theme.AgentStateAttention:
 		right = statusStyle.Render(detailJoin(th, state.Label(), "respond to prompt"))
 	case theme.AgentStateError:
 		right = statusStyle.Render(state.Label())
 	default:
-		right = statusStyle.Render(state.Label())
+		// Sticky canceled chrome after interrupt until the next turn (#809).
+		if m.lastStopReason == "interrupted" {
+			right = th.S().Warning.Render("canceled")
+		} else {
+			right = statusStyle.Render(state.Label())
+		}
 	}
 
 	// Fit badges into width after brand + right + StatusBar mid gap.

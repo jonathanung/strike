@@ -315,6 +315,80 @@ func TestBashDoesNotRecordPROnFailure(t *testing.T) {
 	}
 }
 
+func TestBashSandboxDenialSetsErrorCode(t *testing.T) {
+	// Integration: OS sandbox applied + deny-write path inside the workspace
+	// (static bash guard allows in-workspace redirects; bwrap remounts RO).
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	if !sandbox.Available() {
+		t.Skip("OS sandbox backend unavailable")
+	}
+	root := t.TempDir()
+	denyPath := filepath.Join(root, "secret.env")
+	if err := os.WriteFile(denyPath, []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tc := allowAll(root)
+	tc.SandboxMode = "workspace-write"
+	tc.Sandbox = sandbox.Policy{
+		Mode:           sandbox.ModeWorkspaceWrite,
+		WorkDir:        root,
+		DenyWritePaths: []string{denyPath},
+	}
+	res, err := NewBash().Execute(context.Background(), mustJSON(t, map[string]any{
+		"command": "echo overwritten > secret.env",
+	}), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, readErr := os.ReadFile(denyPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(body) != "keep\n" {
+		t.Fatalf("deny-write path was mutated: %q", body)
+	}
+	if res.ErrorCode != ErrorCodeSandboxDenied {
+		low := strings.ToLower(res.Output)
+		if res.ErrorCode == "" && (strings.Contains(low, "permission denied") ||
+			strings.Contains(low, "read-only")) {
+			t.Fatalf("denial text present but ErrorCode=%q out=%q", res.ErrorCode, res.Output)
+		}
+		// Backend applied but message shape unexpected — still require block.
+		t.Logf("ErrorCode=%q out=%q (file intact)", res.ErrorCode, res.Output)
+		return
+	}
+	if !strings.Contains(res.Output, string(CodeSandboxDenied)) {
+		t.Fatalf("output missing code prefix: %q", res.Output)
+	}
+	if !strings.Contains(string(res.Metadata), `"errorCode":"sandbox_denied"`) {
+		t.Fatalf("metadata = %s", res.Metadata)
+	}
+	if !strings.Contains(string(res.Metadata), `"sandboxApplied":true`) {
+		t.Fatalf("metadata missing sandboxApplied: %s", res.Metadata)
+	}
+}
+
+func TestBashSandboxDenialClassificationUnit(t *testing.T) {
+	// Pure classification path without requiring bwrap: feed a synthetic
+	// ProcessResult through the same helpers bash uses.
+	proc := ProcessResult{
+		SandboxApplied: true,
+		ExitCode:       1,
+		Output:         "cannot create /etc/x: Read-only file system",
+		Status:         ProcessStatusExited,
+	}
+	reason, ok := detectSandboxDenial(proc)
+	if !ok {
+		t.Fatal("expected denial")
+	}
+	out := formatSandboxDenial(reason, proc.Output+"\n(exit code 1)")
+	if !strings.HasPrefix(out, string(CodeSandboxDenied)+":") {
+		t.Fatalf("out = %q", out)
+	}
+}
+
 func TestBashTimeoutSetsErrorCode(t *testing.T) {
 	tc := &Context{
 		WorkDir: t.TempDir(),

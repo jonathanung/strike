@@ -160,7 +160,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("loading config: %w", err)
 	}
-	sandboxMode, err := resolveSandboxMode(cfg.Sandbox, opts.sandbox)
+	sandboxMode, err := resolveSandboxMode(cfg.Sandbox, opts.sandbox, cfg.Managed.Sandbox)
 	if err != nil {
 		_ = ledgerStore.Close()
 		_ = artifactStore.Close()
@@ -567,7 +567,10 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			initialPriority = restored.Priority
 			initialTitled = restored.Titled
 			initialAutonomy = restored.Autonomy
-			initialPermMode = restored.PermissionMode
+			// Managed permissionMode wins over session resume (enterprise lock).
+			if !cfg.Managed.PermissionMode {
+				initialPermMode = restored.PermissionMode
+			}
 			initialPhaseWF = restored.PhaseWorkflow
 			initialPhaseIndex = restored.PhaseIndex
 			initialPhaseName = restored.PhaseName
@@ -690,6 +693,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			Workflows:                  workflows,
 			Rules:                      permissionLayersWithPreset(cfg.Permissions, cfg.PermissionPreset, opts.dangerouslySkipPermissions),
 			RuleLayerNames:             permissionLayerNames(cfg.PermissionPreset, opts.dangerouslySkipPermissions),
+			ManagedRules:               append(permission.Ruleset(nil), cfg.Managed.DenyRules...),
+			LockPermissionMode:         cfg.Managed.PermissionMode,
 			Hooks:                      hookDefs,
 			HookRules:                  cfg.HookRules(),
 			CompactionStrategy:         cfg.CompactionStrategy,

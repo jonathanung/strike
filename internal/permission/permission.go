@@ -378,14 +378,16 @@ type resolvedEmission struct {
 //	→ session always grants (DecisionAlways)
 //	→ mode late (plan hard-denies)
 //	→ active workflow phase profile
+//	→ managed/MDM deny ceiling (enterprise; cannot be widened)
 //	→ mode ask-upgrade (yolo / accept-edits): Ask→Allow only; never widens Deny
 //
 // Agent is evaluated after the optional dangerous allow-all, so role denies
 // still apply under --dangerously-skip-permissions (hard ceiling for personas).
-// Mode late and phase are last among rulesets so plan / workflow hard-denies
-// (e.g. write/edit) cannot be widened by session always-grants. Yolo and
-// accept-edits only upgrade remaining Ask results to Allow so explicit Deny
-// rules always hold.
+// Mode late and phase sit after session grants so plan / workflow hard-denies
+// (e.g. write/edit) cannot be widened by always-grants. Managed denies are
+// last among rulesets so MDM policy beats session grants, --auto allow-all,
+// and phase widens. Yolo and accept-edits only upgrade remaining Ask results
+// to Allow so explicit Deny rules always hold.
 type Service struct {
 	emit func(protocol.Event)
 
@@ -397,7 +399,8 @@ type Service struct {
 	granted   Ruleset       // session-scoped "always" grants (DecisionAlways)
 	scoped    []scopedGrant // TTL / path / tool / command-class grants
 	modeLate  Ruleset       // permission-mode hard-denies (plan); after granted, before phase
-	phase     Ruleset       // active workflow phase profile; last ruleset, hard ceiling
+	phase     Ruleset       // active workflow phase profile
+	managed   Ruleset       // MDM deny ceiling; last ruleset before mode upgrade
 	permMode  protocol.PermissionMode
 	pending   map[string]*pending
 	nextID    int
@@ -457,8 +460,9 @@ func (s *Service) SetAgentRules(rs Ruleset) {
 
 // SetPhaseRules replaces the active workflow phase permission profile.
 // An empty or nil ruleset clears the phase layer. Defensively copies rs.
-// Does not clear session grants; phase is evaluated last so its denies still
-// win. Rejects any pending asks (same hygiene as SetAgentRules).
+// Does not clear session grants; phase is evaluated after mode late and
+// before the managed ceiling. Rejects any pending asks (same hygiene as
+// SetAgentRules).
 func (s *Service) SetPhaseRules(rs Ruleset) {
 	s.replaceProfileLocked(func() {
 		s.phase = append(Ruleset(nil), rs...)
@@ -475,9 +479,30 @@ func (s *Service) PhaseRules() Ruleset {
 	return append(Ruleset(nil), s.phase...)
 }
 
+// SetManagedRules installs the enterprise/MDM deny ceiling (last ruleset
+// before mode ask-upgrade). Empty or nil clears. Defensively copies rs.
+// Callers should pass only action=deny rules; allows/asks belong in base
+// config layers via normal merge. Rejects pending asks.
+func (s *Service) SetManagedRules(rs Ruleset) {
+	s.replaceProfileLocked(func() {
+		s.managed = append(Ruleset(nil), rs...)
+	}, "managed policy changed")
+}
+
+// ManagedRules returns a defensive copy of the MDM deny ceiling.
+func (s *Service) ManagedRules() Ruleset {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append(Ruleset(nil), s.managed...)
+}
+
 // BaselineLayers returns the non-phase evaluation layers in order (base,
 // project, agent, granted, scoped grants, modeLate). Used to compute phase
-// widening deltas.
+// widening deltas. Managed is omitted so phase deltas are relative to
+// non-MDM policy; managed still applies at evaluate time after phase.
 func (s *Service) BaselineLayers() []Ruleset {
 	if s == nil {
 		return nil
@@ -875,7 +900,7 @@ func (s *Service) Reply(r protocol.PermissionReply) {
 // Caller must hold mu; expired scoped grants should already be pruned.
 func (s *Service) evaluateLocked(permission string, patterns []string) Action {
 	sets := append([]Ruleset{}, s.base...)
-	sets = append(sets, s.project, s.agent, s.granted, s.scopedRulesLocked(), s.modeLate, s.phase)
+	sets = append(sets, s.project, s.agent, s.granted, s.scopedRulesLocked(), s.modeLate, s.phase, s.managed)
 	worst := Allow
 	if len(patterns) == 0 {
 		patterns = []string{"*"}

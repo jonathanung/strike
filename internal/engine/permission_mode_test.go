@@ -87,6 +87,29 @@ func TestSetPermissionModeRejectsUnknown(t *testing.T) {
 	}
 }
 
+func TestSetPermissionModeLockedByManaged(t *testing.T) {
+	// Lock default (not plan) so startup does not enter the plan workflow.
+	eng, _, cancel := newRecordingEngine(t, engine.Options{
+		InitialPermissionMode: protocol.PermissionModeDefault,
+		LockPermissionMode:    true,
+	})
+	defer cancel()
+	waitForEvent(t, eng, func(ev protocol.Event) bool {
+		sel, ok := ev.(protocol.PermissionModeSelected)
+		return ok && sel.Mode == protocol.PermissionModeDefault
+	})
+
+	eng.Ops() <- protocol.SetPermissionMode{Mode: protocol.PermissionModeYolo}
+	event := waitForEvent(t, eng, func(ev protocol.Event) bool {
+		_, ok := ev.(protocol.EngineError)
+		return ok
+	})
+	msg := event.(protocol.EngineError).Message
+	if !strings.Contains(msg, "managed") || !strings.Contains(msg, "default") {
+		t.Fatalf("error = %q, want managed lock mention", msg)
+	}
+}
+
 func TestSetPermissionModeYoloRejectedWhenSandboxOff(t *testing.T) {
 	eng, _, cancel := newRecordingEngine(t, engine.Options{
 		SandboxMode: "off",

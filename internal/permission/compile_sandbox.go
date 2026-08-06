@@ -86,7 +86,7 @@ func (s *Service) CompileSandbox(mode sandbox.Mode, workDir string) sandbox.Poli
 	s.pruneExpiredLocked(s.now())
 	sets := make([]Ruleset, 0, len(s.base)+6)
 	sets = append(sets, s.base...)
-	sets = append(sets, s.project, s.agent, s.granted, s.scopedRulesLocked(), s.modeLate, s.phase)
+	sets = append(sets, s.project, s.agent, s.granted, s.scopedRulesLocked(), s.modeLate, s.phase, s.managed)
 	return CompileSandbox(mode, workDir, sets...)
 }
 
