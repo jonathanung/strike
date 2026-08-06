@@ -21,6 +21,23 @@ type visualizerTool struct {
 	IsError bool
 }
 
+// visualizerPathOverlap is one path-overlap warning on a selected node.
+type visualizerPathOverlap struct {
+	Path    string
+	Policy  string
+	Blocked bool
+	Warning string
+}
+
+// visualizerVerification is claim-vs-verified state when a report was observed.
+// Nil on the parent msg means unknown (no report) — never invent success.
+type visualizerVerification struct {
+	Claimed  bool
+	Verified bool
+	Passed   bool
+	Summary  string
+}
+
 // visualizerStateMsg is a snapshot of the selected session/agent node for the
 // right-pane visualizer. Model owns live stats; the window only renders.
 type visualizerStateMsg struct {
@@ -42,6 +59,18 @@ type visualizerStateMsg struct {
 	// Activity samples for the sparkline; empty means no known activity.
 	Activity []float64
 	Tools    []visualizerTool
+
+	// Multi-agent observability (#922). Empty/nil = unknown; do not invent zeros.
+	Objective      string
+	LastAction     string
+	BlockReason    string
+	FilesTouched   []string
+	Budget         *protocol.AgentBudgetView
+	EscalateKind   string
+	EscalateReason string
+	EscalateAction string
+	PathOverlaps   []visualizerPathOverlap
+	Verification   *visualizerVerification
 }
 
 // visualizerWindow shows status glyphs, token/cost (when known), an activity
