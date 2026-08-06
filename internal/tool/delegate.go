@@ -30,8 +30,8 @@ done) so verification gates can run. CAS via expected_version on transition.
 Actions:
   - create: prompt required; optional name/agent/model/effort/assignee,
     criteria[], deps[] (delegation or session ids), subscribe[]
-    (blocked|review|done|failed|canceled|working|queued). Spawns immediately
-    when deps are satisfied; otherwise status=queued.
+    (blocked|review|done|failed|canceled|working|queued), context_bundle.
+    Spawns immediately when deps are satisfied; otherwise status=queued.
   - get: id (delegation id, session id, or name)
   - list: full registry snapshot for this session team
   - transition: id + state; optional reason, expected_version (CAS)
@@ -84,6 +84,10 @@ func (delegateTool) Schema() json.RawMessage {
 					"required": ["kind", "value"]
 				}
 			},
+			"context_bundle": {
+				"type": "object",
+				"description": "Optional sealed context package (same shape as task.context_bundle)"
+			},
 			"state": {
 				"type": "string",
 				"enum": ["queued", "working", "blocked", "review", "done", "failed", "canceled"],
@@ -101,21 +105,22 @@ func (delegateTool) Schema() json.RawMessage {
 
 func (delegateTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
 	var a struct {
-		Action          string       `json:"action"`
-		ID              string       `json:"id"`
-		Prompt          string       `json:"prompt"`
-		Name            string       `json:"name"`
-		Agent           string       `json:"agent"`
-		Model           string       `json:"model"`
-		Effort          string       `json:"effort"`
-		Assignee        string       `json:"assignee"`
-		Criteria        []string     `json:"criteria"`
-		Deps            []string     `json:"deps"`
-		Subscribe       []string     `json:"subscribe"`
-		Verify          []VerifyGate `json:"verify"`
-		State           string       `json:"state"`
-		Reason          string       `json:"reason"`
-		ExpectedVersion int          `json:"expected_version"`
+		Action          string        `json:"action"`
+		ID              string        `json:"id"`
+		Prompt          string        `json:"prompt"`
+		Name            string        `json:"name"`
+		Agent           string        `json:"agent"`
+		Model           string        `json:"model"`
+		Effort          string        `json:"effort"`
+		Assignee        string        `json:"assignee"`
+		Criteria        []string      `json:"criteria"`
+		Deps            []string      `json:"deps"`
+		Subscribe       []string      `json:"subscribe"`
+		Verify          []VerifyGate  `json:"verify"`
+		ContextBundle   ContextBundle `json:"context_bundle"`
+		State           string        `json:"state"`
+		Reason          string        `json:"reason"`
+		ExpectedVersion int           `json:"expected_version"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return Result{}, fmt.Errorf("invalid arguments: %w", err)
@@ -125,6 +130,10 @@ func (delegateTool) Execute(ctx context.Context, args json.RawMessage, tc *Conte
 		return Result{}, fmt.Errorf("action is required")
 	}
 	gates, err := normalizeTaskVerify(a.Verify)
+	if err != nil {
+		return Result{}, err
+	}
+	bundle, err := NormalizeContextBundle(a.ContextBundle)
 	if err != nil {
 		return Result{}, err
 	}
@@ -141,6 +150,7 @@ func (delegateTool) Execute(ctx context.Context, args json.RawMessage, tc *Conte
 		Deps:            a.Deps,
 		Subscribe:       a.Subscribe,
 		Verify:          gates,
+		ContextBundle:   bundle,
 		State:           strings.TrimSpace(a.State),
 		Reason:          a.Reason,
 		ExpectedVersion: a.ExpectedVersion,

@@ -703,6 +703,60 @@ func TestArtifactUpdatedAndHandoffRefsRoundTrip(t *testing.T) {
 	if !strings.Contains(string(raw), `"artifactRefs"`) {
 		t.Fatalf("wire missing artifactRefs: %s", raw)
 	}
+
+	// Context bundle on ChildStarted + missingContext/provenance on handoff.
+	cs := ChildStarted{
+		Correlation: Correlation{SessionID: "c2", ParentSessionID: "p1", Depth: 1},
+		Agent:       "build",
+		Prompt:      "go",
+		ContextBundle: &ContextBundle{
+			Goal:         "ship",
+			AllowedPaths: []string{"internal/x"},
+			Items:        []ContextBundleItem{{ID: "goal", Kind: "goal", Text: "ship"}},
+		},
+	}
+	env3, err := Wrap(cs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got3, err := env3.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs2 := got3.(ChildStarted)
+	if cs2.ContextBundle == nil || cs2.ContextBundle.Goal != "ship" {
+		t.Fatalf("bundle = %#v", cs2.ContextBundle)
+	}
+	cc3 := ChildCompleted{
+		Correlation: Correlation{SessionID: "c2"},
+		Status:      ChildStatusBlocked,
+		Handoff: CompletionHandoff{
+			Summary: "blocked: missing context",
+			MissingContext: []MissingContextEntry{
+				{Kind: "path", Path: "docs/a.md"},
+			},
+			Provenance: []string{"goal"},
+		},
+	}
+	env4, err := Wrap(cc3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got4, err := env4.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cc4 := got4.(ChildCompleted)
+	if len(cc4.Handoff.MissingContext) != 1 || cc4.Handoff.MissingContext[0].Path != "docs/a.md" {
+		t.Fatalf("missing = %#v", cc4.Handoff.MissingContext)
+	}
+	if len(cc4.Handoff.Provenance) != 1 || cc4.Handoff.Provenance[0] != "goal" {
+		t.Fatalf("provenance = %#v", cc4.Handoff.Provenance)
+	}
+	rawH, _ := json.Marshal(cc4.Handoff)
+	if !strings.Contains(string(rawH), `"missingContext"`) || !strings.Contains(string(rawH), `"provenance"`) {
+		t.Fatalf("wire missing fields: %s", rawH)
+	}
 }
 
 func TestEventTypeCoverage(t *testing.T) {

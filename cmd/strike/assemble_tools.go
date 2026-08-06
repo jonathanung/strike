@@ -355,6 +355,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tool.NewPlanDelegate(planStore),
 		tool.NewArtifactWrite(artifactStore),
 		tool.NewArtifactRead(artifactStore),
+		tool.NewContextBundle(),
 		tool.NewNotebookEdit(),
 		tool.NewSleep(),
 		tool.NewSkill(skillInfos),

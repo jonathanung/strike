@@ -231,6 +231,22 @@ func (e *Engine) composeSystemLayers() []promptLayer {
 			Mode:   protocol.PromptLayerAppend,
 			Text:   childHandoffSystemPrompt,
 		})
+		if !e.opts.ContextBundle.Empty() {
+			layers = append(layers, promptLayer{
+				Kind:   protocol.PromptLayerTools,
+				Source: "builtin:context-bundle-guide",
+				Mode:   protocol.PromptLayerAppend,
+				Text:   childContextBundleSystemPrompt,
+			})
+			if body := formatContextBundlePromptLayer(e.opts.ContextBundle); body != "" {
+				layers = append(layers, promptLayer{
+					Kind:   protocol.PromptLayerTools,
+					Source: "builtin:context-bundle",
+					Mode:   protocol.PromptLayerAppend,
+					Text:   body,
+				})
+			}
+		}
 	}
 
 	switch {

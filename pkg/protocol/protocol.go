@@ -600,6 +600,10 @@ type ChildStarted struct {
 	// RouteReason is the structured capability-routing decision when routing
 	// ran at spawn (#778). Empty when route=off / legacy pin-or-inherit.
 	RouteReason string `json:"routeReason,omitempty"`
+	// ContextBundle is the sealed context package attached at spawn when set.
+	// Included so reproducible-run snapshots (#782) can capture prompt+bundle
+	// without re-deriving from tool args. Omitted when the spawn had no bundle.
+	ContextBundle *ContextBundle `json:"contextBundle,omitempty"`
 }
 
 // ArtifactRef points at a shared typed artifact (id + optional CAS version/type).
@@ -612,6 +616,79 @@ type ArtifactRef struct {
 	Version int `json:"version,omitempty"`
 	// Type is an optional hint (findings|patch|test_report|contract|plan).
 	Type string `json:"type,omitempty"`
+}
+
+// ContextBundle is a sealed context package attached at task/delegate spawn.
+// Children read it via the context_bundle tool and a system-prompt layer; leads
+// attach goal, paths, artifact refs, constraints, and optional file pins so
+// work is not "prompt-only by convention."
+//
+// Wire JSON uses camelCase. Tool args use snake_case (see internal/tool).
+type ContextBundle struct {
+	// Goal is the primary objective for the child (may complement the prompt).
+	Goal string `json:"goal,omitempty"`
+	// Acceptance lists acceptance criteria sealed into the bundle.
+	Acceptance []string `json:"acceptance,omitempty"`
+	// AllowedPaths, when non-empty, scopes child read/edit/write permissions
+	// to these workspace-relative globs (bundle-only path scope).
+	AllowedPaths []string `json:"allowedPaths,omitempty"`
+	// RequiredPaths are paths the child is expected to consult; missing ones
+	// should be reported via CompletionHandoff.MissingContext.
+	RequiredPaths []string `json:"requiredPaths,omitempty"`
+	// Artifacts are shared typed artifact refs the child may fetch.
+	Artifacts []ArtifactRef `json:"artifacts,omitempty"`
+	// Constraints are don'ts, budgets, ownership leases, and other hard limits.
+	Constraints []string `json:"constraints,omitempty"`
+	// Items are addressable bundle pieces for provenance citations.
+	Items []ContextBundleItem `json:"items,omitempty"`
+	// FilePins optionally seal path contents or content hashes.
+	FilePins []ContextFilePin `json:"filePins,omitempty"`
+}
+
+// ContextBundleItem is one addressable entry inside a ContextBundle.
+// Kind is goal|acceptance|path|artifact|constraint|note|file_pin|other.
+type ContextBundleItem struct {
+	// ID is stable within the bundle (e.g. "goal", "contract-1"). Required for
+	// provenance citations from handoffs/findings.
+	ID string `json:"id"`
+	// Kind classifies the item for consumers.
+	Kind string `json:"kind,omitempty"`
+	// Title is an optional short label.
+	Title string `json:"title,omitempty"`
+	// Text is optional inline content.
+	Text string `json:"text,omitempty"`
+	// Path is a workspace-relative path when kind is path/file_pin.
+	Path string `json:"path,omitempty"`
+	// Artifact points at a shared typed artifact when kind is artifact.
+	Artifact *ArtifactRef `json:"artifact,omitempty"`
+	// Hash is an optional content or path pin (e.g. sha256 hex).
+	Hash string `json:"hash,omitempty"`
+}
+
+// ContextFilePin seals a workspace path (optional hash and/or snapshot text).
+type ContextFilePin struct {
+	Path string `json:"path"`
+	Hash string `json:"hash,omitempty"`
+	// Text is an optional sealed snapshot of file contents at attach time.
+	Text string `json:"text,omitempty"`
+}
+
+// MissingContextEntry reports context the child needed but did not have.
+// Used on blocked completions so the lead can supply paths, answers, or
+// artifact ids instead of the child hallucinating.
+type MissingContextEntry struct {
+	// Kind is path|question|artifact|item|other.
+	Kind string `json:"kind"`
+	// Path when kind=path.
+	Path string `json:"path,omitempty"`
+	// Question when kind=question.
+	Question string `json:"question,omitempty"`
+	// ArtifactID when kind=artifact.
+	ArtifactID string `json:"artifactId,omitempty"`
+	// ItemID when kind=item (bundle item id the child needed).
+	ItemID string `json:"itemId,omitempty"`
+	// Detail is freeform clarification.
+	Detail string `json:"detail,omitempty"`
 }
 
 // CompletionHandoff is the structured work product for a delegated child at
@@ -638,6 +715,13 @@ type CompletionHandoff struct {
 	// ArtifactRefs points at shared typed artifacts (findings/patch/test_report/…).
 	// Prefer refs over inlining large bodies; peers fetch via artifact_read.
 	ArtifactRefs []ArtifactRef `json:"artifactRefs,omitempty"`
+	// MissingContext lists sealed-context gaps when the child cannot proceed
+	// honestly. Non-empty missing_context promotes status to blocked (unless
+	// already failed/canceled) so the lead can resupply context.
+	MissingContext []MissingContextEntry `json:"missingContext,omitempty"`
+	// Provenance lists ContextBundle item ids that supported conclusions in
+	// this handoff (audit trail for leads).
+	Provenance []string `json:"provenance,omitempty"`
 	// Incomplete is true when the engine could not parse a model-supplied
 	// structured handoff and filled defaults + tracked files only.
 	Incomplete bool `json:"incomplete,omitempty"`
