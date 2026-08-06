@@ -131,6 +131,22 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 			DelayMs:     200,
 			Message:     "rate limited",
 		},
+		ToolRetrying{
+			Correlation: corr,
+			CallID:      "c-retry",
+			Name:        "webfetch",
+			NextAttempt: 2,
+			DelayMs:     100,
+			ErrorCode:   ErrorCodeTransient,
+			Message:     "connection reset",
+		},
+		ToolLoopDetected{
+			Correlation: corr,
+			Reason:      "identical_calls",
+			ToolName:    "read",
+			Count:       3,
+			Message:     "repeated identical failing tool calls",
+		},
 		CompactionStarted{Correlation: corr, Reason: CompactionReasonManual, Strategy: CompactionStrategySummarize},
 		CompactionCompleted{Correlation: corr, Reason: CompactionReasonThreshold, Strategy: CompactionStrategyTrim, Removed: 4, Kept: 3, Summary: "prior work on foo"},
 		SessionMeta{Correlation: corr, PRURL: "https://github.com/acme/repo/pull/7", PRNumber: 7, PRState: "open"},
@@ -614,6 +630,65 @@ func TestTokenCountKnownVsUnknown(t *testing.T) {
 	}
 }
 
+func TestArtifactUpdatedAndHandoffRefsRoundTrip(t *testing.T) {
+	want := ArtifactUpdated{
+		Correlation: Correlation{SessionID: "s1"},
+		ID:          "ab12cd34",
+		Type:        "findings",
+		Version:     2,
+		Scope:       "project",
+		Title:       "Review",
+		Op:          "update",
+		SessionID:   "s1",
+	}
+	env, err := Wrap(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.Type != "artifact.updated" {
+		t.Fatalf("type = %q", env.Type)
+	}
+	gotEv, err := env.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := gotEv.(ArtifactUpdated)
+	if !ok {
+		t.Fatalf("type %T", gotEv)
+	}
+	if got.ID != want.ID || got.Version != 2 || got.Op != "update" {
+		t.Fatalf("got = %#v", got)
+	}
+
+	// CompletionHandoff.artifactRefs on the wire.
+	cc := ChildCompleted{
+		Correlation: Correlation{SessionID: "c1"},
+		Status:      ChildStatusCompleted,
+		Handoff: CompletionHandoff{
+			Summary: "done",
+			ArtifactRefs: []ArtifactRef{
+				{ID: "ab12cd34", Version: 2, Type: "findings"},
+			},
+		},
+	}
+	env2, err := Wrap(cc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got2, err := env2.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cc2 := got2.(ChildCompleted)
+	if len(cc2.Handoff.ArtifactRefs) != 1 || cc2.Handoff.ArtifactRefs[0].ID != "ab12cd34" {
+		t.Fatalf("refs = %#v", cc2.Handoff.ArtifactRefs)
+	}
+	raw, _ := json.Marshal(cc2.Handoff)
+	if !strings.Contains(string(raw), `"artifactRefs"`) {
+		t.Fatalf("wire missing artifactRefs: %s", raw)
+	}
+}
+
 func TestEventTypeCoverage(t *testing.T) {
 	// Ensure every known event maps to a stable type string used by sessions.
 	want := map[string]Event{
@@ -657,6 +732,8 @@ func TestEventTypeCoverage(t *testing.T) {
 		"team.roster":            TeamRoster{},
 		"usage.reported":         UsageReported{},
 		"provider.retrying":      ProviderRetrying{},
+		"tool.retrying":          ToolRetrying{},
+		"tool.loop_detected":     ToolLoopDetected{},
 		"scheduler.queued":       SchedulerQueued{},
 		"scheduler.admitted":     SchedulerAdmitted{},
 		"scheduler.canceled":     SchedulerCanceled{},
@@ -737,5 +814,28 @@ func TestUserMessageImagesRoundTrip(t *testing.T) {
 	}
 	if um.Text != "hi" || len(um.Images) != 1 || um.Images[0].MIME != "image/png" || um.Images[0].Data != "abc" {
 		t.Fatalf("got %#v", um)
+	}
+}
+
+func TestToolRetryEventsRoundTrip(t *testing.T) {
+	corr := Correlation{SessionID: "s1", TurnID: "t1", ProviderRequestID: "p1", Attempt: 1}
+	cases := []Event{
+		ToolRetrying{Correlation: corr, CallID: "c1", Name: "webfetch", NextAttempt: 2, DelayMs: 50, ErrorCode: ErrorCodeTransient, Message: "connection reset"},
+		ToolLoopDetected{Correlation: corr, Reason: "identical_calls", ToolName: "read", Count: 3, Message: "repeated identical failing tool calls"},
+	}
+	for _, ev := range cases {
+		env, err := Wrap(ev)
+		if err != nil {
+			t.Fatalf("Wrap: %v", err)
+		}
+		got, err := env.Decode()
+		if err != nil {
+			t.Fatalf("Decode: %v", err)
+		}
+		rawWant, _ := json.Marshal(ev)
+		rawGot, _ := json.Marshal(got)
+		if string(rawWant) != string(rawGot) {
+			t.Fatalf("round-trip mismatch\nwant %s\ngot  %s", rawWant, rawGot)
+		}
 	}
 }

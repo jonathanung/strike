@@ -29,54 +29,54 @@ var ErrWorkflowExists = errors.New("workflow file already exists")
 // WorkflowPermission is one phase permission rule for catalog display and
 // authoring. Action is allow|ask|deny.
 type WorkflowPermission struct {
-	Permission string
-	Pattern    string
-	Action     string
+	Permission string `json:"permission"`
+	Pattern    string `json:"pattern,omitempty"`
+	Action     string `json:"action"`
 }
 
 // WorkflowPhaseSummary is one phase of a catalogued workflow.
 type WorkflowPhaseSummary struct {
-	Name        string
-	Description string
-	Agent       string
-	Gate        string // agent | user | check
-	GateCommand string
-	Permissions []WorkflowPermission
+	Name        string               `json:"name"`
+	Description string               `json:"description,omitempty"`
+	Agent       string               `json:"agent,omitempty"`
+	Gate        string               `json:"gate,omitempty"` // agent | user | check
+	GateCommand string               `json:"gateCommand,omitempty"`
+	Permissions []WorkflowPermission `json:"permissions,omitempty"`
 }
 
 // WorkflowSummary is a host-safe catalog entry for one loaded workflow.
 // Invalid entries (Valid=false) are listed for inspection but must not be
 // activated by frontends.
 type WorkflowSummary struct {
-	Name            string
-	Description     string
-	Source          string // builtin | global | project | plugin
-	Fingerprint     string
-	Path            string // absolute path when disk-backed; empty for builtin
-	Valid           bool
-	ValidationError string
-	Phases          []WorkflowPhaseSummary
+	Name            string                 `json:"name"`
+	Description     string                 `json:"description,omitempty"`
+	Source          string                 `json:"source,omitempty"` // builtin | global | project | plugin
+	Fingerprint     string                 `json:"fingerprint,omitempty"`
+	Path            string                 `json:"path,omitempty"` // absolute path when disk-backed; empty for builtin
+	Valid           bool                   `json:"valid"`
+	ValidationError string                 `json:"validationError,omitempty"`
+	Phases          []WorkflowPhaseSummary `json:"phases,omitempty"`
 }
 
 // WorkflowPhaseDocument is the editable phase shape (includes context).
 type WorkflowPhaseDocument struct {
-	Name        string
-	Description string
-	Agent       string
-	Context     string
-	Permissions []WorkflowPermission
-	Gate        string // agent | user | check
-	GateCommand string
+	Name        string               `json:"name"`
+	Description string               `json:"description,omitempty"`
+	Agent       string               `json:"agent,omitempty"`
+	Context     string               `json:"context,omitempty"`
+	Permissions []WorkflowPermission `json:"permissions,omitempty"`
+	Gate        string               `json:"gate,omitempty"` // agent | user | check
+	GateCommand string               `json:"gateCommand,omitempty"`
 }
 
 // WorkflowDocument is the editable on-disk workflow shape for the TUI builder
 // and other frontends. Runtime diagnostics (source/path/fingerprint) are not
 // part of the document — Save writes only the canonical schema fields.
 type WorkflowDocument struct {
-	SchemaVersion int
-	Name          string
-	Description   string
-	Phases        []WorkflowPhaseDocument
+	SchemaVersion int                     `json:"schemaVersion,omitempty"`
+	Name          string                  `json:"name"`
+	Description   string                  `json:"description,omitempty"`
+	Phases        []WorkflowPhaseDocument `json:"phases"`
 }
 
 // Workflows is the catalog of loaded workflow definitions plus authoring
@@ -111,39 +111,39 @@ type Workflows interface {
 
 // WorkflowPhaseDraftReview is one phase in a host-safe draft review.
 type WorkflowPhaseDraftReview struct {
-	Name             string
-	Description      string
-	Agent            string
-	Context          string
-	Gate             string // agent | user | check
-	GateCommand      string
-	CheckHighlighted bool
-	Permissions      []WorkflowPermission
+	Name             string               `json:"name"`
+	Description      string               `json:"description,omitempty"`
+	Agent            string               `json:"agent,omitempty"`
+	Context          string               `json:"context,omitempty"`
+	Gate             string               `json:"gate,omitempty"` // agent | user | check
+	GateCommand      string               `json:"gateCommand,omitempty"`
+	CheckHighlighted bool                 `json:"checkHighlighted,omitempty"`
+	Permissions      []WorkflowPermission `json:"permissions,omitempty"`
 	// Widening is effective grant delta vs the host baseline (allow/ask upgrades).
-	Widening []WorkflowPermission
+	Widening []WorkflowPermission `json:"widening,omitempty"`
 }
 
 // WorkflowDraftReview is a structured review of an in-memory workflow draft.
 // Frontends must not treat a draft as activated configuration.
 type WorkflowDraftReview struct {
-	Name            string
-	Description     string
-	SourceLabel     string
-	Valid           bool
-	ValidationError string
-	Fingerprint     string
-	HasChecks       bool
-	HasWidening     bool
-	Phases          []WorkflowPhaseDraftReview
+	Name            string                     `json:"name"`
+	Description     string                     `json:"description,omitempty"`
+	SourceLabel     string                     `json:"sourceLabel,omitempty"`
+	Valid           bool                       `json:"valid"`
+	ValidationError string                     `json:"validationError,omitempty"`
+	Fingerprint     string                     `json:"fingerprint,omitempty"`
+	HasChecks       bool                       `json:"hasChecks,omitempty"`
+	HasWidening     bool                       `json:"hasWidening,omitempty"`
+	Phases          []WorkflowPhaseDraftReview `json:"phases,omitempty"`
 	// CanonicalJSON is pretty-printed JSON when Valid; otherwise raw input.
-	CanonicalJSON string
+	CanonicalJSON string `json:"canonicalJson,omitempty"`
 }
 
 // WorkflowDraftSave is the result of an accepted draft save.
 type WorkflowDraftSave struct {
-	Path string
+	Path string `json:"path"`
 	// Activated is always false — saves never start a workflow.
-	Activated bool
+	Activated bool `json:"activated"`
 }
 
 // WorkflowDrafts reviews and saves in-memory workflow drafts without activating

@@ -6,6 +6,7 @@ package engine
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +28,9 @@ const (
 	// absoluteMaxChildDepth is a hard ceiling against runaway nested task swarms.
 	absoluteMaxChildDepth = 8
 )
+
+// errToolLoopDetected ends the turn after the loop detector trips.
+var errToolLoopDetected = errors.New("tool loop detected")
 
 // Model-facing interrupt texts (aliases of protocol.ToolFeedback* helpers).
 var (
@@ -116,6 +120,17 @@ type Options struct {
 	// (1-based, >=2). nil uses a small exponential default. Tests may return
 	// 0 for instant retries.
 	StreamRetryBackoff func(nextAttempt int) time.Duration
+	// MaxToolRetryAttempts bounds auto-retries for one tool Execute under the
+	// error-code × idempotency policy (includes the first attempt). Zero
+	// defaults to 3; set to 1 to disable tool auto-retry. Only safe-retry
+	// tools retry on transient/timeout — mutative/unsafe never auto-retry.
+	MaxToolRetryAttempts int
+	// ToolRetryBackoff returns the wait before tool nextAttempt (1-based, >=2).
+	// nil uses exponential backoff with full jitter. Tests may return 0.
+	ToolRetryBackoff func(nextAttempt int) time.Duration
+	// ToolLoopThreshold is how many identical consecutive failing tool+args
+	// trip the loop detector (default 3). Values <1 use the default.
+	ToolLoopThreshold int
 	// ContextWindow is the selected model's context limit in tokens. Zero
 	// means unknown; threshold compaction stays off until LookupContextWindow
 	// or a later assignment provides a positive value. Overflow recovery does
@@ -438,6 +453,11 @@ type Engine struct {
 	// (emitted on TurnCompleted.Files for timeline/UI).
 	turnDiff *tool.TurnDiff
 
+	// toolLoop tracks repeated failing tool+args within the active turn.
+	toolLoop *toolLoopDetector
+	// toolLoopStop is set when the detector trips; runTurn ends the turn.
+	toolLoopStop string
+
 	// mutatedFiles tracks workspace-relative paths touched by mutating tools
 	// this session (for structured child completion handoffs).
 	mutatedMu    sync.Mutex
@@ -484,6 +504,12 @@ func New(opts Options) *Engine {
 	if opts.MaxStreamAttempts == 0 {
 		opts.MaxStreamAttempts = defaultMaxStreamAttempts
 	}
+	if opts.MaxToolRetryAttempts == 0 {
+		opts.MaxToolRetryAttempts = tool.DefaultToolRetryMaxAttempts
+	}
+	if opts.ToolLoopThreshold < 1 {
+		opts.ToolLoopThreshold = tool.DefaultToolLoopThreshold
+	}
 	if opts.MaxChildDepth == 0 {
 		opts.MaxChildDepth = 1
 	} else if opts.MaxChildDepth > absoluteMaxChildDepth {
@@ -516,6 +542,7 @@ func New(opts Options) *Engine {
 		files:               &tool.FileState{},
 		checkpoints:         tool.NewCheckpointStore(),
 		turnDiff:            &tool.TurnDiff{},
+		toolLoop:            newToolLoopDetector(opts.ToolLoopThreshold, 0),
 		children:            make(map[string]*childHandle),
 		childHistory:        make(map[string]*childRecord),
 		team:                team,

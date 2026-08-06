@@ -79,6 +79,9 @@ func RedactEvent(ev protocol.Event) protocol.Event {
 			e.Budget = &cp
 		}
 		return e
+	case protocol.ArtifactUpdated:
+		e.Title = redact.String(e.Title)
+		return e
 	case protocol.CompactionCompleted:
 		e.Summary = redact.String(e.Summary)
 		return e
@@ -134,6 +137,15 @@ func redactHandoff(h protocol.CompletionHandoff) protocol.CompletionHandoff {
 	h.Findings = redactStrings(h.Findings)
 	h.Blockers = redactStrings(h.Blockers)
 	h.FilesChanged = redactStrings(h.FilesChanged)
+	if len(h.ArtifactRefs) > 0 {
+		refs := make([]protocol.ArtifactRef, len(h.ArtifactRefs))
+		copy(refs, h.ArtifactRefs)
+		for i := range refs {
+			refs[i].ID = redact.String(refs[i].ID)
+			refs[i].Type = redact.String(refs[i].Type)
+		}
+		h.ArtifactRefs = refs
+	}
 	return h
 }
 

@@ -66,6 +66,8 @@ func eventType(ev Event) string {
 		return "phase.changed"
 	case PlanHandoff:
 		return "plan.handoff"
+	case ArtifactUpdated:
+		return "artifact.updated"
 	case PhaseGrantApproved:
 		return "phase.grant_approved"
 	case EffortSelected:
@@ -104,6 +106,10 @@ func eventType(ev Event) string {
 		return "usage.reported"
 	case ProviderRetrying:
 		return "provider.retrying"
+	case ToolRetrying:
+		return "tool.retrying"
+	case ToolLoopDetected:
+		return "tool.loop_detected"
 	case SchedulerQueued:
 		return "scheduler.queued"
 	case SchedulerAdmitted:
@@ -201,6 +207,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &PhaseChanged{}
 	case "plan.handoff":
 		ev = &PlanHandoff{}
+	case "artifact.updated":
+		ev = &ArtifactUpdated{}
 	case "phase.grant_approved":
 		ev = &PhaseGrantApproved{}
 	case "effort.selected":
@@ -239,6 +247,10 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &UsageReported{}
 	case "provider.retrying":
 		ev = &ProviderRetrying{}
+	case "tool.retrying":
+		ev = &ToolRetrying{}
+	case "tool.loop_detected":
+		ev = &ToolLoopDetected{}
 	case "scheduler.queued":
 		ev = &SchedulerQueued{}
 	case "scheduler.admitted":
@@ -316,6 +328,8 @@ func deref(ev Event) Event {
 		return *v
 	case *PlanHandoff:
 		return *v
+	case *ArtifactUpdated:
+		return *v
 	case *PhaseGrantApproved:
 		return *v
 	case *EffortSelected:
@@ -353,6 +367,10 @@ func deref(ev Event) Event {
 	case *UsageReported:
 		return *v
 	case *ProviderRetrying:
+		return *v
+	case *ToolRetrying:
+		return *v
+	case *ToolLoopDetected:
 		return *v
 	case *SchedulerQueued:
 		return *v

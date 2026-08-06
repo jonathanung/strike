@@ -91,6 +91,13 @@ pump to stop filling a full buffer and never blocks on a stuck read. Call
 ## Session files
 
 Strike persists each session as JSONL under `~/.strike/sessions/<id>.jsonl`.
+New logs may begin with a `session.header` line (`schemaVersion`); event lines
+are protocol envelopes (`type` / `time` / `v` / `data`). The stock CLI
+(`internal/session`) fsyncs each append, skips trailing crash residue on
+replay, and offers redacted portable packages (`strike.session`) plus fork/
+retention helpers — see [config.md](config.md) (session durability) and
+[ARCHITECTURE.md](ARCHITECTURE.md). Markdown `/export` (#221) and checkpoint
+resume (#573) are separate surfaces.
 
 ```go
 events, err := sdk.ReadSession(path)

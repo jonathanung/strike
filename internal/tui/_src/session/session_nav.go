@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -478,6 +479,10 @@ func loadSessionTranscriptOpts(sessions host.Sessions, id string, live bool) (ce
 	return cells, tools, title, parentID, nil
 }
 
+// sessionLogSchemaVersion is the session JSONL header schema this TUI understands
+// (must stay in sync with internal/session.LogSchemaVersion).
+const sessionLogSchemaVersion = 1
+
 func decodeSessionJSONL(data []byte) ([]protocol.Event, error) {
 	// Collect lines first so a trailing partial write (live child still
 	// appending) can be skipped without failing the whole transcript.
@@ -498,6 +503,13 @@ func decodeSessionJSONL(data []byte) ([]protocol.Event, error) {
 	}
 	var events []protocol.Event
 	for i, raw := range lines {
+		// Optional first-line session.header (#803); not a protocol event.
+		if isSessionLogHeaderLine(raw) {
+			if ver, ok := sessionHeaderSchemaVersion(raw); ok && ver > sessionLogSchemaVersion {
+				return nil, fmt.Errorf("session log schema version %d is newer than supported %d; upgrade strike", ver, sessionLogSchemaVersion)
+			}
+			continue
+		}
 		var env protocol.Envelope
 		if err := json.Unmarshal(raw, &env); err != nil {
 			// Last line may be mid-append while the child is still writing.
@@ -516,6 +528,26 @@ func decodeSessionJSONL(data []byte) ([]protocol.Event, error) {
 		events = append(events, ev)
 	}
 	return events, nil
+}
+
+func isSessionLogHeaderLine(raw []byte) bool {
+	var probe struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return false
+	}
+	return probe.Type == "session.header"
+}
+
+func sessionHeaderSchemaVersion(raw []byte) (int, bool) {
+	var probe struct {
+		SchemaVersion int `json:"schemaVersion"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return 0, false
+	}
+	return probe.SchemaVersion, true
 }
 
 // seedFromReplay rebuilds transcript cells and durable UI selection state from

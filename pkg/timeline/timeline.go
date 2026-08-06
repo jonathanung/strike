@@ -305,6 +305,29 @@ func (b *Builder) Observe(ev protocol.Event, t time.Time) {
 			ent.Error = clip(redact.String(e.Message), b.opts.ErrorPreviewMax)
 			b.finish(ent, t)
 		}
+	case protocol.ToolRetrying:
+		b.noteSession(e.SessionID)
+		if e.CallID != "" {
+			ent := b.ensureTool(e.CallID, e.SessionID, e.TurnID, t)
+			if e.Name != "" && ent.Name == "" {
+				ent.Name = e.Name
+			}
+			// Keep running; retry is in-flight. Annotate error preview.
+			if e.Message != "" {
+				ent.Error = clip(redact.String(e.Message), b.opts.ErrorPreviewMax)
+			}
+		}
+	case protocol.ToolLoopDetected:
+		b.noteSession(e.SessionID)
+		msg := e.Message
+		if msg == "" {
+			msg = "tool loop detected: " + e.Reason
+		}
+		if e.TurnID != "" {
+			ent := b.ensureTurn(e.TurnID, e.SessionID, t)
+			ent.State = StateFailed
+			ent.Error = clip(redact.String(msg), b.opts.ErrorPreviewMax)
+		}
 	case protocol.ChildStarted:
 		b.noteSession(e.ParentSessionID)
 		if e.SessionID == "" {

@@ -78,6 +78,7 @@ type (
 	Correlation             = pub.Correlation
 	ChildStatus             = pub.ChildStatus
 	CompletionHandoff       = pub.CompletionHandoff
+	ArtifactRef             = pub.ArtifactRef
 	DelegationState         = pub.DelegationState
 	VerificationReport      = pub.VerificationReport
 	VerificationCheck       = pub.VerificationCheck
@@ -147,6 +148,7 @@ type (
 	AgentSelected          = pub.AgentSelected
 	PhaseChanged           = pub.PhaseChanged
 	PlanHandoff            = pub.PlanHandoff
+	ArtifactUpdated        = pub.ArtifactUpdated
 	PhaseGrantApproved     = pub.PhaseGrantApproved
 	PhaseGrantRule         = pub.PhaseGrantRule
 	EffortSelected         = pub.EffortSelected
@@ -169,6 +171,8 @@ type (
 	TeamRoster             = pub.TeamRoster
 	UsageReported          = pub.UsageReported
 	ProviderRetrying       = pub.ProviderRetrying
+	ToolRetrying           = pub.ToolRetrying
+	ToolLoopDetected       = pub.ToolLoopDetected
 	SchedulerQueued        = pub.SchedulerQueued
 	SchedulerAdmitted      = pub.SchedulerAdmitted
 	SchedulerCanceled      = pub.SchedulerCanceled

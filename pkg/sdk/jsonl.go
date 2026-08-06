@@ -77,25 +77,42 @@ func NewEventDecoder(r io.Reader) *EventDecoder {
 }
 
 // Decode reads the next event. Returns io.EOF when the stream ends cleanly.
+// Lines with type "session.header" (session log schema marker) are skipped.
 func (d *EventDecoder) Decode() (protocol.Event, error) {
 	if d.err != nil {
 		return nil, d.err
 	}
-	if !d.sc.Scan() {
-		if err := d.sc.Err(); err != nil {
-			d.err = err
-			return nil, err
+	for {
+		if !d.sc.Scan() {
+			if err := d.sc.Err(); err != nil {
+				d.err = err
+				return nil, err
+			}
+			d.err = io.EOF
+			return nil, io.EOF
 		}
-		d.err = io.EOF
-		return nil, io.EOF
+		d.n++
+		raw := d.sc.Bytes()
+		if isSessionLogHeaderLine(raw) {
+			continue
+		}
+		ev, err := DecodeEventLine(raw)
+		if err != nil {
+			d.err = fmt.Errorf("sdk: event line %d: %w", d.n, err)
+			return nil, d.err
+		}
+		return ev, nil
 	}
-	d.n++
-	ev, err := DecodeEventLine(d.sc.Bytes())
-	if err != nil {
-		d.err = fmt.Errorf("sdk: event line %d: %w", d.n, err)
-		return nil, d.err
+}
+
+func isSessionLogHeaderLine(raw []byte) bool {
+	var probe struct {
+		Type string `json:"type"`
 	}
-	return ev, nil
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return false
+	}
+	return probe.Type == "session.header"
 }
 
 // Line is the 1-based index of the last successfully scanned line (0 before

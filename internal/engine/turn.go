@@ -12,6 +12,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/jonathanung/strike-cli/internal/artifact"
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
@@ -207,6 +208,10 @@ func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.Ima
 	turnCorr.TurnID = turnID
 	e.checkpoints.BeginTurn(turnID)
 	e.turnDiff.Reset()
+	if e.toolLoop != nil {
+		e.toolLoop.reset()
+	}
+	e.toolLoopStop = ""
 	e.emit(protocol.UserMessage{Correlation: turnCorr, Text: text, Images: images})
 	e.maybeTitleSession(text)
 	e.emit(protocol.TurnStarted{Correlation: turnCorr})
@@ -274,6 +279,11 @@ func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.Ima
 				return
 			}
 			e.messages = append(e.messages, e.execToolCall(ctx, call, reqCorr))
+			if e.toolLoopStop != "" {
+				e.appendUnstartedToolResults(outcome.calls[i+1:])
+				e.failTurn(ctx, errToolLoopDetected, reqCorr, finishing)
+				return
+			}
 			if ctx.Err() != nil {
 				// Current call was started (and canceled); remaining are unstarted.
 				e.appendUnstartedToolResults(outcome.calls[i+1:])
@@ -734,9 +744,34 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 	}
 
 	var res tool.Result
+	// err already declared from pre-tool hooks; reuse for Execute outcome.
+	err = nil
 	t, ok := e.opts.Registry.Get(call.Name)
 	if !ok {
 		err = fmt.Errorf("unknown tool %q; available tools: %s", call.Name, e.toolNames())
+	} else if e.toolLoop != nil && e.toolLoop.wouldTrip(call.Name, call.Args) {
+		// Short-circuit: model re-issued a looping call — do not Execute again.
+		tripped, reason, count := e.toolLoop.observe(call.Name, call.Args, false, protocol.ErrorCodeBlocked)
+		if !tripped {
+			// wouldTrip true implies observe will trip; force state.
+			reason = toolLoopIdentical
+			count = e.opts.ToolLoopThreshold
+			e.toolLoop.tripped = true
+			e.toolLoop.reason = reason
+			e.toolLoop.toolName = call.Name
+			e.toolLoop.count = count
+		}
+		e.noteToolLoop(corr, call.Name, reason, count)
+		return e.settleToolFeedback(toolFeedback{
+			Corr:      corr,
+			CallID:    call.ID,
+			Output:    protocol.ToolFeedbackBlocked(fmt.Sprintf("tool loop detected (%s) after %d identical failing calls; stopping turn", reason, count)),
+			IsError:   true,
+			EmitEnd:   true,
+			ErrorCode: protocol.ErrorCodeBlocked,
+			Retryable: false,
+			Title:     call.Name,
+		})
 	} else {
 		// Promote deferred tools called by name so subsequent streams include
 		// their schemas (mirrors toolsearch discovery).
@@ -757,9 +792,21 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			Files:         e.files,
 			SessionID:     e.opts.SessionID,
 			RootSessionID: e.rootSessionID(),
-			MemberName:    e.ownershipMemberName(),
-			Checkpoint:    e.checkpoints.Snapshot,
-			TurnDiff:      e.turnDiff,
+			NotifyArtifact: func(op string, a artifact.Artifact) {
+				e.emit(protocol.ArtifactUpdated{
+					Correlation: corr,
+					ID:          a.ID,
+					Type:        a.Type,
+					Version:     a.Version,
+					Scope:       a.Scope,
+					Title:       a.Title,
+					Op:          op,
+					SessionID:   a.SessionID,
+				})
+			},
+			MemberName: e.ownershipMemberName(),
+			Checkpoint: e.checkpoints.Snapshot,
+			TurnDiff:   e.turnDiff,
 			// Record successful mutations only (post-write), not pre-mutation
 			// snapshots — failed tools must not appear in handoff files_changed.
 			FileSync: func(absPath string, content string, deleted bool) {
@@ -869,7 +916,69 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 		}
 		tc.ChildWake = e.childWakeCh()
 		tc.HasChildNotice = e.hasPendingChildNotices
-		res, err = t.Execute(ctx, call.Args, tc)
+
+		// Auto-retry only when policy says retry (safe-retry × transient/timeout).
+		// Mutative/unsafe tools execute once — never blind double-apply.
+		contract := tool.LookupContract(t)
+		maxAttempts := e.opts.MaxToolRetryAttempts
+		if maxAttempts < 1 {
+			maxAttempts = 1
+		}
+		for attempt := 1; attempt <= maxAttempts; attempt++ {
+			res, err = t.Execute(ctx, call.Args, tc)
+			if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return e.canceledOrTimeoutToolResult(ctx, call.ID, corr, res)
+			}
+			// Success path (no error and no stamped error code).
+			if err == nil && res.ErrorCode == "" {
+				break
+			}
+			// Classify without settling yet.
+			_, isErr, fail := modelFacingToolOutput(res, err)
+			code := fail.Code
+			if res.ErrorCode == tool.ErrorCodeCanceled || res.ErrorCode == protocol.ErrorCodeCanceled {
+				code = protocol.ErrorCodeCanceled
+				isErr = true
+			} else if res.ErrorCode == tool.ErrorCodeTimeout || res.ErrorCode == protocol.ErrorCodeTimeout {
+				code = protocol.ErrorCodeTimeout
+				isErr = true
+			} else if res.ErrorCode != "" && code == "" {
+				code = res.ErrorCode
+				isErr = true
+			}
+			if !isErr {
+				break
+			}
+			// User rejects / permission interactive: never auto-retry.
+			if isUserTurnInterrupt(err) {
+				break
+			}
+			decision := tool.DecideRetry(tool.ErrorCode(code), contract.Idempotency)
+			if decision != tool.DecisionRetry || attempt >= maxAttempts {
+				break
+			}
+			delay := e.toolRetryDelay(attempt + 1)
+			e.emit(protocol.ToolRetrying{
+				Correlation: corr,
+				CallID:      call.ID,
+				Name:        call.Name,
+				NextAttempt: attempt + 1,
+				DelayMs:     int(delay / time.Millisecond),
+				ErrorCode:   code,
+				Message:     fail.Output,
+			})
+			if delay > 0 {
+				timer := time.NewTimer(delay)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return e.canceledOrTimeoutToolResult(ctx, call.ID, corr, res)
+				case <-timer.C:
+				}
+			}
+			// Reset result for next attempt (avoid carrying partial metadata).
+			res = tool.Result{}
+		}
 	}
 
 	// Normalize cancellation/deadline after Execute (including permission-wait
@@ -898,6 +1007,25 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 		isError = true
 		errCode = res.ErrorCode
 	}
+
+	// Recovery path: no auto-retry, but attach a structured replan hint.
+	if isError && errCode != "" {
+		decision := tool.DecisionFail
+		if ok {
+			decision = tool.DecideRetry(tool.ErrorCode(errCode), tool.LookupContract(t).Idempotency)
+		}
+		if decision == tool.DecisionRecover {
+			output = tool.AppendRecoveryHint(output, tool.ErrorCode(errCode), decision)
+			errRetry = false
+		} else if decision == tool.DecisionFail {
+			// Policy may mark Retryable=false even when the code is nominally retryable
+			// (e.g. transient on mutative tools) so the model does not re-issue blindly.
+			if tool.LookupContract(t).Idempotency != tool.IdempotencySafeRetry {
+				errRetry = false
+			}
+		}
+	}
+
 	if pre.Inject != "" {
 		if output == "" {
 			output = pre.Inject
@@ -934,6 +1062,21 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 
 	if isError && errCode == "" {
 		errCode = protocol.ErrorCodeInternal
+	}
+
+	// Loop detector: identical failing tool+args or oscillating failures.
+	if e.toolLoop != nil {
+		tripped, reason, count := e.toolLoop.observe(call.Name, call.Args, !isError, errCode)
+		if tripped {
+			e.noteToolLoop(corr, call.Name, reason, count)
+			if isError {
+				output = tool.AppendRecoveryHint(
+					output+"\n"+fmt.Sprintf("[loop: %s after %d calls; turn stopping]", reason, count),
+					tool.CodeBlocked,
+					tool.DecisionRecover,
+				)
+			}
+		}
 	}
 
 	msg := e.settleToolFeedback(toolFeedback{
@@ -1062,6 +1205,19 @@ func (e *Engine) failTurn(ctx context.Context, err error, corr protocol.Correlat
 	}
 	if errors.Is(err, context.Canceled) {
 		e.completeTurn(ctx, finishing, corr, "interrupted")
+		return
+	}
+	if errors.Is(err, errToolLoopDetected) {
+		reason := e.toolLoopStop
+		if reason == "" {
+			reason = toolLoopIdentical
+		}
+		e.emit(protocol.EngineError{
+			Correlation: corr,
+			Message:     "tool loop detected: " + reason,
+			Code:        protocol.ErrorCodeBlocked,
+		})
+		e.completeTurn(ctx, finishing, corr, "loop_detected")
 		return
 	}
 	e.emit(protocol.EngineError{Correlation: corr, Message: err.Error()})
