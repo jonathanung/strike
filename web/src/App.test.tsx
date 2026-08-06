@@ -345,6 +345,7 @@ describe("App", () => {
           agents: [{ name: "build" }], skills: [],
         });
       }
+      if (url.includes("/children") && method === "GET") return response({ sessions: [] });
       if (url.includes("/v1/sessions") && method === "GET") {
         return response({ sessions: [{ id: "root-a", title: "Alpha" }, { id: "root-b", title: "Beta" }, { id: "old", title: "Archived" }], liveId: activeId });
       }
