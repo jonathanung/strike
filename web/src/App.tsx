@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { activateRoot, bootstrap, closeRoot, createRoot, historicalConnection, liveConnection, request, resumeRoot, roots as loadRoots, sendOp, sessions as loadSessions } from "./api";
+import { activateRoot, bootstrap, closeRoot, createRoot, historicalConnection, liveConnection, request, resumeRoot, roots as loadRoots, sendOp, sessions as loadSessions , sessionChildren} from "./api";
+import { ChildAgentsPanel } from "./ChildAgents";
 import { buildExportMarkdown, defaultExportFilename, downloadTextFile } from "./exportMarkdown";
 import { clearQueue, editQueuedText, moveQueuedAt, removeQueuedAt, type QueuedPrompt } from "./queueOps";
 import { initialState, reduceEvent } from "./reducer";
@@ -105,6 +106,7 @@ export default function App() {
   const [fast, setFast] = useState(false);
   const [runtimeOpen, setRuntimeOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [selectedChildId, setSelectedChildId] = useState<string>();
   const endRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -156,10 +158,21 @@ export default function App() {
   useEffect(() => {
     if (!selectedID) return;
     dispatch({ type: "workspace.reset", data: { sessionId: selectedID } });
+    setSelectedChildId(undefined);
     if (!selectedIsLive) return historicalConnection(selectedID, dispatch, (message) => setTransport(message));
     const live = liveConnection(selectedID, dispatch, setTransport);
     return () => live.close();
   }, [selectedID, selectedIsLive]);
+  useEffect(() => {
+    if (!selectedID || !boot?.capabilities.sessions) return;
+    let cancelled = false;
+    void sessionChildren(selectedID)
+      .then((res) => {
+        if (!cancelled) dispatch({ type: "children.seed", time: `seed:${selectedID}`, data: { sessions: res.sessions || [] } });
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [selectedID, boot?.capabilities.sessions]);
   useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, [state.items]);
   useEffect(() => {
     if (state.status.busy || !queue.length || !selectedIsLive) return;
@@ -382,6 +395,7 @@ export default function App() {
       }
     }
   };
+  const openChildTranscript = (id: string) => { setSelectedChildId(undefined); void selectWorkspace(id, false); setNavTab("history"); };
   const toggleDiff = (path: string) => setExpandedDiffs((old) => { const next = new Set(old); next.has(path) ? next.delete(path) : next.add(path); return next; });
 
   return <div className="app-shell" style={shellStyle}>
@@ -405,7 +419,7 @@ export default function App() {
                     <span className="session-main"><span className="session-title">{session.title || shortID(session.id)}</span><span className="session-meta">{[shortID(session.id), age].filter(Boolean).join(" · ")}</span></span>
                     <span className="session-flags">{live && <small className="live-badge">LIVE</small>}</span>
                   </button>;
-                })}</nav>{boot?.capabilities.sessions && selectedID && <div className="session-actions" aria-label="Session actions"><SessionMenu onAction={(action) => void sessionAction(action)} /></div>}</>}{children.length > 0 && <><div className="aside-heading">CHILD AGENTS</div><div className="children" aria-label="Child agents">{children.map(([id, child]) => <div key={id}><span className={`child-state ${child.status}`} />{child.agent || id.slice(0, 8)}<small>{child.status}</small></div>)}</div></>}<details className="workspace-meta"><summary>Workspace</summary><span>ROOT</span><code>{state.status.cwd || "unavailable"}</code><span>BUILD</span><code>{boot?.version || "…"}</code></details></aside>
+                })}</nav>{boot?.capabilities.sessions && selectedID && <div className="session-actions" aria-label="Session actions"><SessionMenu onAction={(action) => void sessionAction(action)} /></div>}</>}<ChildAgentsPanel children={children} selectedId={selectedChildId} onSelect={setSelectedChildId} onOpenTranscript={openChildTranscript} /><details className="workspace-meta"><summary>Workspace</summary><span>ROOT</span><code>{state.status.cwd || "unavailable"}</code><span>BUILD</span><code>{boot?.version || "…"}</code></details></aside>
     <main>
       <div className="runtime-stack">
       <section className="runtime" aria-label="Runtime controls">
@@ -434,9 +448,89 @@ export default function App() {
     </main>
     <aside className={`inspector ${inspectorOpen ? "open" : "collapsed"}`} aria-label="Inspector"><PanelResize label="Resize inspector panel" value={inspectorWidth} min={240} max={520} onChange={setInspectorWidth} side="inspector" /><div className="inspector-tabs" role="tablist">{inspectorTabs.map((tab) => <button role="tab" aria-selected={inspector === tab} key={tab} onClick={() => void inspectProject(tab)}>{tab}</button>)}</div><div className="inspector-body">{inspectorTabs.length ? <InspectorBody tab={inspectorTabs.includes(inspector) ? inspector : inspectorTabs[0]} boot={boot} status={state.status} data={projectData} loading={projectLoading} expandedDiffs={expandedDiffs} toggleDiff={toggleDiff} isLive={isLive} selectedID={selectedID} /> : <p className="muted">No inspector panels available for this host.</p>}</div></aside>
     {settingsOpen && <SettingsDialog boot={boot} status={state.status} providers={providers} onClose={() => setSettingsOpen(false)} />}
-    {undoDialog && <UndoPreviewDialog preview={lastUndoPreview} preferFiles={undoDialog.preferFiles} onCancel={() => setUndoDialog(null)} onConfirm={confirmUndo} />}
-    {state.permission && <PermissionDialog permission={state.permission} rootID={selectedID} />}{state.question && <QuestionDialog question={state.question} rootID={selectedID} />}
+{undoDialog && <UndoPreviewDialog preview={lastUndoPreview} preferFiles={undoDialog.preferFiles} onCancel={() => setUndoDialog(null)} onConfirm={confirmUndo} />}
+    {state.permission && <PermissionDialog permission={state.permission} rootID={selectedID} canExplain={Boolean(boot?.capabilities.permissions)} />}
+    {state.question && <QuestionDialog question={state.question} rootID={selectedID} />}
   </div>;
+}
+
+type PermissionExplain = {
+  Permission?: string; permission?: string;
+  Pattern?: string; pattern?: string;
+  Action?: string; action?: string;
+  Layer?: string; layer?: string;
+  Summary?: string; summary?: string;
+};
+
+function permissionName(data: Record<string, unknown>): string {
+  return String(data.permission || data.tool || data.name || "tool");
+}
+
+function permissionPatterns(data: Record<string, unknown>): string[] {
+  const raw = data.patterns;
+  if (Array.isArray(raw)) return raw.map((p) => String(p)).filter(Boolean);
+  if (typeof raw === "string" && raw.trim()) return [raw];
+  return [];
+}
+
+function PermissionDialog({ permission, rootID, canExplain }: { permission: Record<string, unknown>; rootID: string; canExplain: boolean }) {
+  const name = permissionName(permission);
+  const patterns = permissionPatterns(permission);
+  const sample = patterns[0] || "*";
+  const [explain, setExplain] = useState<PermissionExplain | null>(null);
+  const [explainError, setExplainError] = useState("");
+  const [explainLoading, setExplainLoading] = useState(false);
+  const reply = (decision: "once" | "always" | "project" | "reject") =>
+    void op("permission.reply", { requestId: permission.requestId, decision }, rootID);
+  const loadExplain = async () => {
+    if (!canExplain || explainLoading) return;
+    setExplainLoading(true);
+    setExplainError("");
+    try {
+      const qs = new URLSearchParams({ permission: name, pattern: sample });
+      setExplain(await request<PermissionExplain>(`/v1/permissions/explain?${qs}`));
+    } catch (error) {
+      setExplainError((error as Error).message);
+      setExplain(null);
+    } finally {
+      setExplainLoading(false);
+    }
+  };
+  const summary = explain?.Summary || explain?.summary || "";
+  const action = explain?.Action || explain?.action || "";
+  const layer = explain?.Layer || explain?.layer || "";
+  return (
+    <BlockingDialog title="Permission required">
+      <p className="permission-tool"><strong>{name}</strong></p>
+      {patterns.length > 0 ? (
+        <ul className="permission-patterns" aria-label="Permission patterns">
+          {patterns.map((pattern) => <li key={pattern}><code>{pattern}</code></li>)}
+        </ul>
+      ) : (
+        <p className="muted">No pattern detail provided for this request.</p>
+      )}
+      {canExplain && (
+        <div className="permission-explain">
+          <button type="button" onClick={() => void loadExplain()} disabled={explainLoading}>
+            {explainLoading ? "Explaining…" : "Why is this asked?"}
+          </button>
+          {explainError && <p className="permission-explain-error" role="status">{explainError}</p>}
+          {summary && (
+            <pre className="permission-explain-body" aria-label="Permission explanation">
+              {summary}
+              {(action || layer) && `\n\nEffective: ${action || "unknown"}${layer ? ` (${layer})` : ""}`}
+            </pre>
+          )}
+        </div>
+      )}
+      <div className="dialog-actions">
+        <button type="button" onClick={() => reply("reject")}>Reject</button>
+        <button type="button" onClick={() => reply("project")}>Allow for project</button>
+        <button type="button" onClick={() => reply("always")}>Allow session</button>
+        <button type="button" autoFocus onClick={() => reply("once")}>Allow once</button>
+      </div>
+    </BlockingDialog>
+  );
 }
 
 function PanelResize({ label, value, min, max, onChange, side }: { label: string; value: number; min: number; max: number; onChange: (value: number) => void; side: "nav" | "inspector" }) {
@@ -548,36 +642,6 @@ function IssuesPanel({ boot, data }: { boot?: Bootstrap; data: unknown }) {
 function SettingsDialog({ boot, status, providers, onClose }: { boot?: Bootstrap; status: Status; providers: string[]; onClose: () => void }) { const ref = useRef<HTMLDialogElement>(null); const [provider, setProvider] = useState(String(status.provider || providers[0] || "")); const [key, setKey] = useState(""); useEffect(() => { ref.current?.showModal(); }, []); const save = async () => { if (boot?.capabilities.settings) await request("/v1/settings", { method: "PATCH", body: JSON.stringify({ provider: String(status.provider || ""), model: String(status.model || ""), agent: String(status.agent || ""), effort: String(status.effort || ""), mode: String(status.permissionMode || "") }) }); onClose(); }; return <dialog ref={ref} aria-labelledby="settings-title" onClose={onClose}><div className="dialog-rule" /><h2 id="settings-title">Workspace settings</h2>{boot?.capabilities.auth ? <fieldset><legend>Provider authentication</legend><label>Provider<select value={provider} onChange={(event) => setProvider(event.target.value)}>{providers.map((name) => <option key={name}>{name}</option>)}</select></label><label>API key<input value={key} onChange={(event) => setKey(event.target.value)} placeholder="Stored locally by strike" /></label><button disabled={!provider || !key} onClick={() => void request("/v1/auth/key", { method: "POST", body: JSON.stringify({ provider, key }) }).then(() => setKey(""))}>Save key</button></fieldset> : <CapabilityUnavailable name="Provider authentication" />}{boot?.capabilities.settings ? <p className="muted">Current defaults can be saved from the live runtime controls.</p> : <CapabilityUnavailable name="Saved defaults" />}<div className="dialog-actions"><button onClick={onClose}>Close</button><button onClick={() => void save()}>Save defaults</button></div></dialog>; }
 function CapabilityUnavailable({ name }: { name: string }) { return <section className="unavailable" role="status"><strong>{name} unavailable</strong><p>The configured host did not provide this capability. No action was attempted.</p></section>; }
 function CapabilityError({ error }: { error: string }) { return <section className="unavailable" role="status"><strong>Unable to load</strong><p>{error}</p></section>; }
-
-function permissionLabel(permission: Record<string, unknown>): string {
-  return String(permission.tool || permission.permission || permission.name || "Tool request");
-}
-
-function permissionDetail(permission: Record<string, unknown>): string {
-  if (typeof permission.reason === "string" && permission.reason.trim()) return permission.reason.trim();
-  if (typeof permission.path === "string" && permission.path.trim()) return permission.path.trim();
-  if (Array.isArray(permission.patterns) && permission.patterns.length) {
-    return permission.patterns.map(String).filter(Boolean).join(", ");
-  }
-  return "";
-}
-
-function PermissionDialog({ permission, rootID }: { permission: Record<string, unknown>; rootID: string }) {
-  const detail = permissionDetail(permission);
-  return <BlockingDialog title="Permission required">
-    <p><strong>{permissionLabel(permission)}</strong></p>
-    {detail && <p className="muted">{detail}</p>}
-    <details className="technical-details">
-      <summary>Technical details</summary>
-      <pre>{JSON.stringify(permission, null, 2)}</pre>
-    </details>
-    <div className="dialog-actions">
-      <button onClick={() => void op("permission.reply", { requestId: permission.requestId, decision: "reject" }, rootID)}>Reject</button>
-      <button onClick={() => void op("permission.reply", { requestId: permission.requestId, decision: "always" }, rootID)}>Allow session</button>
-      <button autoFocus onClick={() => void op("permission.reply", { requestId: permission.requestId, decision: "once" }, rootID)}>Allow once</button>
-    </div>
-  </BlockingDialog>;
-}
 
 function QuestionDialog({ question, rootID }: { question: Record<string, unknown>; rootID: string }) { const [answers, setAnswers] = useState<string[]>([]); const prompts = Array.isArray(question.questions) ? question.questions as Array<Record<string, unknown>> : [{ question: question.question }]; const update = (index: number, value: string) => setAnswers((old) => { const next = [...old]; next[index] = value; return next; }); return <BlockingDialog title={String(question.title || "Agent question")}>{prompts.map((prompt, index) => { const options = Array.isArray(prompt.options) ? prompt.options as Array<Record<string, unknown>> : []; return <fieldset key={index}><legend>{String(prompt.question || "A response is required to continue.")}</legend>{options.length ? options.map((option) => <label key={String(option.label)}><input type="radio" name={`question-${index}`} value={String(option.label)} checked={answers[index] === String(option.label)} onChange={(event) => update(index, event.target.value)} />{String(option.label)}<span>{String(option.description || "")}</span></label>) : <textarea aria-label={`Answer ${index + 1}`} value={answers[index] || ""} onChange={(event) => update(index, event.target.value)} />}</fieldset>; })}<div className="dialog-actions"><button autoFocus onClick={() => void op("question.reply", { requestId: question.requestId, answers }, rootID)}>Continue</button></div></BlockingDialog>; }
 

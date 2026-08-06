@@ -126,12 +126,115 @@ func TestServiceAPIsUnavailableWithoutConfiguredHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"/v1/providers", "/v1/models?provider=echo", "/v1/history", "/v1/files", "/v1/memory", "/v1/issues", "/v1/plans"} {
+	for _, path := range []string{
+		"/v1/providers", "/v1/models?provider=echo", "/v1/history", "/v1/files",
+		"/v1/memory", "/v1/issues", "/v1/plans",
+		"/v1/permissions/explain?permission=bash", "/v1/permissions/presets",
+	} {
 		res := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodGet, path, nil))
 		if res.Code != http.StatusNotImplemented || !strings.Contains(res.Body.String(), "capability unavailable") {
 			t.Errorf("GET %s = %d %q, want tested unavailable state", path, res.Code, res.Body.String())
 		}
+	}
+}
+
+type testPermissions struct {
+	lastPerm, lastPat string
+	presets           []host.PermissionPresetInfo
+}
+
+func (p *testPermissions) Explain(permission, pattern string) host.PermissionExplanation {
+	p.lastPerm, p.lastPat = permission, pattern
+	if pattern == "" {
+		pattern = "*"
+	}
+	return host.PermissionExplanation{
+		Permission: permission,
+		Pattern:    pattern,
+		Action:     "ask",
+		Layer:      "defaults",
+		Matched: host.PermissionMatch{
+			Layer:      "defaults",
+			Permission: permission,
+			Pattern:    "*",
+			Action:     "ask",
+		},
+		Summary: "bash * → ask (defaults)",
+	}
+}
+
+func (p *testPermissions) Presets() []host.PermissionPresetInfo {
+	if p.presets != nil {
+		return p.presets
+	}
+	return []host.PermissionPresetInfo{
+		{ID: "read-only", Name: "Read only", Description: "deny writes"},
+	}
+}
+
+func TestPermissionServiceAPIs(t *testing.T) {
+	perms := &testPermissions{
+		presets: []host.PermissionPresetInfo{
+			{ID: "dev", Name: "Dev", Description: "local development"},
+		},
+	}
+	services := &host.Services{Permissions: perms}
+	srv, err := New(Options{SessionDir: t.TempDir(), Services: services})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Bootstrap capability flag.
+	boot := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(boot, httptest.NewRequest(http.MethodGet, "/v1/bootstrap", nil))
+	if boot.Code != http.StatusOK || !strings.Contains(boot.Body.String(), `"permissions":true`) {
+		t.Fatalf("bootstrap permissions cap = %d %s", boot.Code, boot.Body.String())
+	}
+
+	// Explain requires permission query.
+	missing := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(missing, httptest.NewRequest(http.MethodGet, "/v1/permissions/explain", nil))
+	if missing.Code != http.StatusBadRequest {
+		t.Fatalf("explain missing perm = %d %s", missing.Code, missing.Body.String())
+	}
+
+	// Explain happy path.
+	ex := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(ex, httptest.NewRequest(http.MethodGet, "/v1/permissions/explain?permission=bash&pattern=git+status", nil))
+	if ex.Code != http.StatusOK {
+		t.Fatalf("explain = %d %s", ex.Code, ex.Body.String())
+	}
+	body := ex.Body.String()
+	for _, want := range []string{`"Permission":"bash"`, `"Pattern":"git status"`, `"Action":"ask"`, `"Summary":"bash * → ask (defaults)"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("explain missing %q: %s", want, body)
+		}
+	}
+	if perms.lastPerm != "bash" || perms.lastPat != "git status" {
+		t.Fatalf("explain args = %q %q", perms.lastPerm, perms.lastPat)
+	}
+
+	// Presets list.
+	presets := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(presets, httptest.NewRequest(http.MethodGet, "/v1/permissions/presets", nil))
+	if presets.Code != http.StatusOK || !strings.Contains(presets.Body.String(), `"ID":"dev"`) {
+		t.Fatalf("presets = %d %s", presets.Code, presets.Body.String())
+	}
+}
+
+func TestAttachOnlyBootstrapPermissionsFalse(t *testing.T) {
+	srv, err := New(Options{SessionDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/v1/bootstrap", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d", res.Code)
+	}
+	if !strings.Contains(res.Body.String(), `"permissions":false`) {
+		t.Errorf("attach-only should declare permissions false: %s", res.Body.String())
 	}
 }
 

@@ -104,6 +104,8 @@ ssh -L 8787:127.0.0.1:8787 user@strike-host
 | `GET` | `/v1/mcp` | **yes** | MCP server status list (`{servers:[…]}`) |
 | `POST` | `/v1/mcp/retry` | **yes** | Retry one server (`{name?}`) or all non-up |
 | `POST` | `/v1/mcp/disable` | **yes** | Disable server and unregister tools (`{name}`) |
+| `GET` | `/v1/permissions/explain` | **yes** | Last-match-wins explain (`permission`, optional `pattern`) |
+| `GET` | `/v1/permissions/presets` | **yes** | Shipped permission preset catalog |
 | `GET` | `/v1/workflows` | **yes** | Workflow catalog (host-safe summaries) |
 | `GET` | `/v1/workflows/{name}` | **yes** | One catalog entry |
 | `GET` | `/v1/workflows/{name}/document` | **yes** | Editable document for builder |
@@ -212,7 +214,12 @@ curl -s -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
 ```
 
 Permission asks appear as `permission.asked` events; resolve with
-`permission.reply` (UI modal or `POST /v1/ops`).
+`permission.reply` (UI modal or `POST /v1/ops`). The cockpit modal offers all
+four wire decisions (`once` | `always` | `project` | `reject`), shows the tool
+name and patterns (not raw JSON), and — when bootstrap capability
+`permissions` is true — can load host explain via
+`GET /v1/permissions/explain?permission=…&pattern=…`. Attach-only hosts without
+`Services.Permissions` keep the capability false and omit the explain control.
 
 ## Multi-session UX contract
 
