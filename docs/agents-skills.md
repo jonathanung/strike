@@ -271,6 +271,9 @@ strike workflow scaffold --global|--project <name> [--force]
 strike workflow format [--write] <path>...
 strike workflow validate <path|dir>...
 strike workflow validate --global|--project|--all
+strike workflow generate [--name hint] [--provider p] [--model m] <intent...>
+strike workflow generate --save --yes --global|--project [--force] <intent...>
+strike workflow save-draft --yes --global|--project [--force] [path|-]
 ```
 
 - **scaffold** requires explicit `--global` or `--project`. Refuses overwrite
@@ -279,6 +282,15 @@ strike workflow validate --global|--project|--all
   `schemaVersion`). `--write` rewrites in place.
 - **validate** strict-decodes, runs structural checks, resolves agent pins
   against loaded agents, and prints short fingerprints on success.
+- **generate** asks the model for a workflow JSON draft from natural-language
+  intent, then prints a structured review (phases, context, **executable check
+  gates**, **effective permission widening**). It never saves or activates
+  unless `--save --yes` plus `--global`/`--project` is passed after review.
+  Invalid model output stays an editable draft with diagnostics (use
+  **save-draft** after correction). Overwrite requires `--force`; failed saves
+  leave the prior file intact.
+- **save-draft** validates JSON from a path or stdin and writes only with
+  `--yes`. Same no-activation and overwrite rules as generate `--save`.
 
 ### Phase fields
 

@@ -49,6 +49,9 @@ type childHandle struct {
 	name      string // optional stable teammate alias
 	// gates are independent completion conditions declared at spawn.
 	gates []tool.VerifyGate
+	// planID/sectionID correlate this child to a plan section (plan_delegate).
+	planID    string
+	sectionID string
 
 	mu           sync.Mutex
 	currentTool  string
@@ -360,6 +363,8 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		prompt:    req.Prompt,
 		name:      memberName,
 		gates:     append([]tool.VerifyGate(nil), req.Verify...),
+		planID:    strings.TrimSpace(req.PlanID),
+		sectionID: strings.TrimSpace(req.SectionID),
 	}
 
 	e.childMu.Lock()
@@ -698,6 +703,8 @@ func (e *Engine) finishChild(h *childHandle, completed protocol.ChildCompleted) 
 	}
 	e.childMu.Unlock()
 	e.emitTeamRoster()
+	// Apply structured section refinement when this child was plan_delegate'd.
+	e.applyPlanSectionDelegate(h, completed)
 }
 
 // dissolveTeamIfLead clears the implicit team when this engine is the lead.

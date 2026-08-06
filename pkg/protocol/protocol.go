@@ -561,6 +561,12 @@ type CompletionHandoff struct {
 	// Incomplete is true when the engine could not parse a model-supplied
 	// structured handoff and filled defaults + tracked files only.
 	Incomplete bool `json:"incomplete,omitempty"`
+	// SectionTitle/SectionBody are optional plan-section refinement fields
+	// (plan_delegate). Present when the child refined a correlated section.
+	// SectionBodySet distinguishes omitted body from explicit empty string.
+	SectionTitle   string `json:"sectionTitle,omitempty"`
+	SectionBody    string `json:"sectionBody,omitempty"`
+	SectionBodySet bool   `json:"sectionBodySet,omitempty"`
 }
 
 // VerificationCheck is one independent gate outcome inside a VerificationReport.
