@@ -19,7 +19,9 @@ type Envelope struct {
 }
 
 func eventType(ev Event) string {
-	switch ev.(type) {
+	switch e := ev.(type) {
+	case UnknownEvent:
+		return e.Type
 	case UserMessage:
 		return "user.message"
 	case SessionTitled:
@@ -145,6 +147,16 @@ func eventType(ev Event) string {
 
 // Wrap encodes an event into a persistable envelope.
 func Wrap(ev Event) (Envelope, error) {
+	if u, ok := ev.(UnknownEvent); ok {
+		if u.Type == "" {
+			return Envelope{}, fmt.Errorf("protocol: UnknownEvent with empty type")
+		}
+		data := u.Data
+		if len(data) == 0 {
+			data = json.RawMessage(`{}`)
+		}
+		return Envelope{Type: u.Type, Time: time.Now().UTC(), Version: Version, Data: data}, nil
+	}
 	t := eventType(ev)
 	if t == "" {
 		return Envelope{}, fmt.Errorf("protocol: unknown event type %T", ev)
@@ -288,7 +300,21 @@ func (e Envelope) Decode() (Event, error) {
 	case "context.controls":
 		ev = &ContextControlsSelected{}
 	default:
-		return nil, fmt.Errorf("protocol: unknown envelope type %q", e.Type)
+		// Forward-compat: newer writers may emit type strings this build does
+		// not know. Preserve wire form so session round-trips and consumers
+		// can skip without treating the log as corrupt (#811).
+		if e.Type == "" {
+			return nil, fmt.Errorf("protocol: empty envelope type")
+		}
+		data := e.Data
+		if len(data) == 0 {
+			data = json.RawMessage(`{}`)
+		}
+		// Reject clearly non-object payloads so garbage still fails closed.
+		if !json.Valid(data) {
+			return nil, fmt.Errorf("protocol: invalid JSON in unknown envelope %q", e.Type)
+		}
+		return UnknownEvent{Type: e.Type, Data: append(json.RawMessage(nil), data...)}, nil
 	}
 	if err := json.Unmarshal(e.Data, ev); err != nil {
 		return nil, err

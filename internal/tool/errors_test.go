@@ -55,4 +55,7 @@ func TestErrorHelpers(t *testing.T) {
 	if !ValidErrorCode(CodeBlocked) {
 		t.Fatal("blocked")
 	}
+	if !ValidErrorCode(CodeSandboxDenied) || ErrSandboxDenied("x").Retryable {
+		t.Fatal("sandbox_denied")
+	}
 }

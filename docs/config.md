@@ -178,6 +178,9 @@ folds audit events into `kind: permission` entries with redacted patterns
 They are independent. Turning off permission prompts (`yolo`) does not disable
 the OS sandbox; setting `sandbox: off` does not skip permission asks.
 
+**Isolation matrix:** OS sandbox vs session worktrees vs planned containers and
+optional process mem/CPU caps — [isolation.md](isolation.md).
+
 **OS sandbox dial:** `sandbox` is `off` | `read-only` | `workspace-write`
 (default **`workspace-write`**). Applies to the bash tool (and composer `!`
 shell) via Linux `bwrap` / macOS `sandbox-exec`. When the backend is missing

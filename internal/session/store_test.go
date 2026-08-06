@@ -150,14 +150,26 @@ func TestReplayMalformedLine(t *testing.T) {
 	}
 }
 
-func TestReplayUnknownEventType(t *testing.T) {
+func TestReplayUnknownEventTypeForwardCompat(t *testing.T) {
+	// Newer harness/extension type strings must not corrupt session replay (#811).
 	path := filepath.Join(t.TempDir(), "unknown.jsonl")
-	line := `{"type":"nope","time":"2020-01-01T00:00:00Z","data":{}}` + "\n"
+	line := `{"type":"harness.future_gate","time":"2020-01-01T00:00:00Z","data":{"ok":true}}` + "\n"
 	if err := os.WriteFile(path, []byte(line), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Replay(path); err == nil {
-		t.Fatal("expected error for unknown event type")
+	got, err := Replay(path)
+	if err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("events = %d, want 1", len(got))
+	}
+	u, ok := got[0].(protocol.UnknownEvent)
+	if !ok {
+		t.Fatalf("got %T, want UnknownEvent", got[0])
+	}
+	if u.Type != "harness.future_gate" {
+		t.Fatalf("Type = %q", u.Type)
 	}
 }
 

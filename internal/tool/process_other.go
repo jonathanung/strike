@@ -16,3 +16,12 @@ func configureProcessCmd(cmd *exec.Cmd) {
 	// stay open after the direct child exits.
 	cmd.WaitDelay = processWaitDelay
 }
+
+// applyProcessResourceLimits is unsupported outside unix (documented no-op).
+func applyProcessResourceLimits(pid int, lim ProcessLimits) error {
+	_ = pid
+	_ = lim
+	return nil
+}
+
+func processRlimitEnforced() bool { return false }

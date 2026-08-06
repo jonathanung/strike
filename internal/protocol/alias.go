@@ -185,6 +185,8 @@ type (
 	SchedulerCanceled       = pub.SchedulerCanceled
 	CompactionStarted       = pub.CompactionStarted
 	CompactionCompleted     = pub.CompactionCompleted
+	CompactionResidue       = pub.CompactionResidue
+	ResidueItem             = pub.ResidueItem
 	SessionMeta             = pub.SessionMeta
 	SessionRewound          = pub.SessionRewound
 	HookMatched             = pub.HookMatched
@@ -192,6 +194,7 @@ type (
 	DiagnosticBundle        = pub.DiagnosticBundle
 	ContextFitWarning       = pub.ContextFitWarning
 	ContextControlsSelected = pub.ContextControlsSelected
+	UnknownEvent            = pub.UnknownEvent
 )
 
 // Status / label constants.
@@ -255,6 +258,13 @@ const (
 	CompactionStrategyTrim      = pub.CompactionStrategyTrim
 	CompactionStrategySummarize = pub.CompactionStrategySummarize
 
+	CompactionResidueSchemaVersion = pub.CompactionResidueSchemaVersion
+	ResidueKindFact                = pub.ResidueKindFact
+	ResidueKindDecision            = pub.ResidueKindDecision
+	ResidueKindOpenQuestion        = pub.ResidueKindOpenQuestion
+	ResidueKindAssumption          = pub.ResidueKindAssumption
+	ResidueKindConstraint          = pub.ResidueKindConstraint
+
 	PromptLayerShared      = pub.PromptLayerShared
 	PromptLayerTools       = pub.PromptLayerTools
 	PromptLayerProvider    = pub.PromptLayerProvider
@@ -290,6 +300,7 @@ func UnknownTokens() TokenCount                 { return pub.UnknownTokens() }
 func Wrap(ev Event) (Envelope, error)           { return pub.Wrap(ev) }
 func WrapOp(op Op) (OpEnvelope, error)          { return pub.WrapOp(op) }
 func RewindPoints(events []Event) []RewindPoint { return pub.RewindPoints(events) }
+func IsUnknown(ev Event) bool                   { return pub.IsUnknown(ev) }
 
 func ToolFeedbackPermissionDenied(reason string) string {
 	return pub.ToolFeedbackPermissionDenied(reason)
@@ -315,5 +326,6 @@ const (
 	ErrorCodeTransient          = pub.ErrorCodeTransient
 	ErrorCodeInternal           = pub.ErrorCodeInternal
 	ErrorCodeBlocked            = pub.ErrorCodeBlocked
+	ErrorCodeSandboxDenied      = pub.ErrorCodeSandboxDenied
 	ErrorCodeQueueFull          = pub.ErrorCodeQueueFull
 )

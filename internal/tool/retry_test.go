@@ -32,6 +32,8 @@ func TestDecideRetryPolicyTable(t *testing.T) {
 		{CodeInvalidArgs, IdempotencySafeRetry, DecisionFail},
 		{CodeCanceled, IdempotencySafeRetry, DecisionFail},
 		{CodeBlocked, IdempotencySafeRetry, DecisionFail},
+		{CodeSandboxDenied, IdempotencySafeRetry, DecisionFail},
+		{CodeSandboxDenied, IdempotencyUnsafe, DecisionFail},
 		{CodeInternal, IdempotencySafeRetry, DecisionFail},
 		{CodePermissionDenied, IdempotencyUnsafe, DecisionFail},
 		// unknown code
