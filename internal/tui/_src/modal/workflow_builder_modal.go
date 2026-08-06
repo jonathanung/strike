@@ -68,6 +68,7 @@ var (
 // scope without activation.
 type workflowBuilderModal struct {
 	workflows host.Workflows
+	drafts    host.WorkflowDrafts // optional; #717 review path for widening
 	agents    []string
 	th        theme.Theme
 
@@ -110,6 +111,7 @@ func newWorkflowBuilderModal(
 	scope string,
 	creating bool,
 	th theme.Theme,
+	drafts ...host.WorkflowDrafts,
 ) *workflowBuilderModal {
 	th = th.Resolve()
 	if doc.SchemaVersion == 0 {
@@ -128,6 +130,9 @@ func newWorkflowBuilderModal(
 		focus:       wfBuilderFocusPhases,
 		showPreview: true,
 		input:       newTextInput(th, ""),
+	}
+	if len(drafts) > 0 {
+		m.drafts = drafts[0]
 	}
 	if len(m.doc.Phases) == 0 {
 		m.doc.Phases = []host.WorkflowPhaseDocument{{
@@ -985,7 +990,7 @@ func (m *workflowBuilderModal) renderPreview(th theme.Theme, st theme.Styles, in
 		}
 	}
 
-	// Phase grants (activation-equivalent review surface)
+	// Phase grants + optional draft-path widening (#717) for CLI-equivalent review.
 	if m.phaseCursor >= 0 && m.phaseCursor < len(m.doc.Phases) && m.workflows != nil {
 		grants := m.workflows.PhaseGrants(m.doc, m.phaseCursor)
 		p := m.doc.Phases[m.phaseCursor]
@@ -1017,6 +1022,33 @@ func (m *workflowBuilderModal) renderPreview(th theme.Theme, st theme.Styles, in
 					tone = st.Warning
 				}
 				lines = append(lines, wrapToWidth(tone.Render(sanitizeDisplayData(line)), inner))
+			}
+		}
+		// Effective widening via WorkflowDrafts.Review when available.
+		if m.drafts != nil {
+			if raw, err := m.workflows.Format(m.doc); err == nil {
+				rev := m.drafts.Review(raw)
+				if m.phaseCursor < len(rev.Phases) {
+					w := rev.Phases[m.phaseCursor].Widening
+					if len(w) == 0 {
+						lines = append(lines, wrapToWidth(st.Muted.Render("Effective widening vs defaults: none"), inner))
+					} else {
+						lines = append(lines, wrapToWidth(st.Warning.Render("Effective widening vs defaults:"), inner))
+						for _, r := range w {
+							pat := r.Pattern
+							if pat == "" {
+								pat = "*"
+							}
+							line := fmt.Sprintf("  %s %s %s", r.Action, r.Permission, pat)
+							lines = append(lines, wrapToWidth(st.Warning.Render(sanitizeDisplayData(line)), inner))
+						}
+					}
+					if rev.Phases[m.phaseCursor].CheckHighlighted && p.GateCommand != "" {
+						lines = append(lines, wrapToWidth(st.AccentAlt.Render(
+							"check command: "+sanitizeDisplayData(p.GateCommand),
+						), inner))
+					}
+				}
 			}
 		}
 	}

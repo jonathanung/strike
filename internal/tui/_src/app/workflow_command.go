@@ -270,6 +270,7 @@ func (m Model) workflowNew(name string) (tea.Model, tea.Cmd) {
 		host.WorkflowScopeProject,
 		true,
 		m.th,
+		m.services.WorkflowDrafts,
 	)
 	return m, nil
 }
@@ -306,6 +307,7 @@ func (m Model) workflowEdit(name string) (tea.Model, tea.Cmd) {
 		scope,
 		false,
 		m.th,
+		m.services.WorkflowDrafts,
 	)
 	return m, nil
 }

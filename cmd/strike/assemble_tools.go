@@ -332,6 +332,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tool.NewIssueRead(issueStore),
 		tool.NewPlanWrite(planStore),
 		tool.NewPlanRead(planStore),
+		tool.NewPlanDelegate(planStore),
 		tool.NewNotebookEdit(),
 		tool.NewSleep(),
 		tool.NewSkill(skillInfos),
@@ -780,6 +781,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		WorkDir: workDir,
 		Agents:  agentNames,
 	})
+	services.WorkflowDrafts = local.NewWorkflowDrafts(workDir)
 
 	spawn := rootSpawner(func(id string) (*rootSlot, error) {
 		slot, _, err := openRoot(id, false)

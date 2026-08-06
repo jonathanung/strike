@@ -442,10 +442,10 @@ func TestPlanWriteWorkspaceMutationStillSeparate(t *testing.T) {
 }
 
 func TestPlanToolsCoreAndDeferred(t *testing.T) {
-	if !IsCoreTool("plan_write") || !IsCoreTool("plan_read") {
-		t.Fatal("plan_write/plan_read should be core so plan mode always sees them")
+	if !IsCoreTool("plan_write") || !IsCoreTool("plan_read") || !IsCoreTool("plan_delegate") {
+		t.Fatal("plan_write/plan_read/plan_delegate should be core so plan mode always sees them")
 	}
-	if IsDeferredTool("plan_write") || IsDeferredTool("plan_read") {
+	if IsDeferredTool("plan_write") || IsDeferredTool("plan_read") || IsDeferredTool("plan_delegate") {
 		t.Fatal("plan tools must not be deferred")
 	}
 	store := openPlan(t)
