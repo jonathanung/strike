@@ -546,6 +546,42 @@ type ChildCompleted struct {
 	Handoff CompletionHandoff `json:"handoff"`
 }
 
+// Wait outcome labels on WaitResolved.
+const (
+	WaitOutcomeMatched  = "matched"
+	WaitOutcomeTimeout  = "timeout"
+	WaitOutcomeCanceled = "canceled"
+)
+
+// WaitStarted marks an orchestration wait subscription (wait tool).
+// Correlation is the waiting agent. TargetSessionID is an optional filter
+// (empty = any owned child). Events lists canonical kinds
+// (task.done|task.failed|task.canceled|task.blocked).
+type WaitStarted struct {
+	Correlation
+	WaitID          string   `json:"waitId"`
+	Events          []string `json:"events"`
+	TargetSessionID string   `json:"targetSessionId,omitempty"`
+	TimeoutMs       int      `json:"timeoutMs,omitempty"`
+}
+
+// WaitResolved is the outcome of a wait subscription.
+// Outcome is matched|timeout|canceled. On matched, Event is the canonical
+// kind and TargetSessionID/Status identify the child; Handoff is set for
+// terminal task.* outcomes when available.
+type WaitResolved struct {
+	Correlation
+	WaitID          string            `json:"waitId"`
+	Outcome         string            `json:"outcome"` // matched | timeout | canceled
+	Event           string            `json:"event,omitempty"`
+	TargetSessionID string            `json:"targetSessionId,omitempty"`
+	TargetName      string            `json:"targetName,omitempty"`
+	Status          string            `json:"status,omitempty"`
+	Summary         string            `json:"summary,omitempty"`
+	Handoff         CompletionHandoff `json:"handoff,omitempty"`
+	HasHandoff      bool              `json:"hasHandoff,omitempty"`
+}
+
 // AgentMessage records a peer/team mailbox delivery for UI and debugging.
 // Correlation is the recipient session. Body is the message text; From/To are
 // session ids; TeamID is the lead session id (team identity).
@@ -1064,6 +1100,8 @@ func (PathOverlap) isEvent()            {}
 func (EngineError) isEvent()            {}
 func (ChildStarted) isEvent()           {}
 func (ChildCompleted) isEvent()         {}
+func (WaitStarted) isEvent()            {}
+func (WaitResolved) isEvent()           {}
 func (AgentMessage) isEvent()           {}
 func (TeamRoster) isEvent()             {}
 func (UsageReported) isEvent()          {}

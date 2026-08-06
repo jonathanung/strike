@@ -39,7 +39,10 @@ func TestEvaluateLastMatchWins(t *testing.T) {
 
 func TestDefaultsIncludesTaskAllow(t *testing.T) {
 	if got := Evaluate("task", "*", Defaults()); got != Allow {
-		t.Errorf("Defaults task = %q, want allow", got)
+		t.Errorf("task default = %s, want allow", got)
+	}
+	if got := Evaluate("wait", "*", Defaults()); got != Allow {
+		t.Errorf("wait default = %s, want allow", got)
 	}
 }
 

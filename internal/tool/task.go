@@ -21,8 +21,9 @@ func (taskTool) Description() string {
   handoff JSON (summary, files_changed, verification, findings, blockers,
   recommended_next_action) — the finished work product. Mid-flight coordination uses
   peer messages, not polling.
-- Do not sleep-poll or busy-loop task_status waiting for the child — continue other work
-  or end the turn; completion and peer inbox traffic are event-driven.
+- Do not sleep-poll or busy-loop task_status waiting for the child — prefer wait
+  (task.done/task.blocked/…) when you must synchronize mid-turn; otherwise continue
+  other work or end the turn. Completion and peer inbox traffic are event-driven.
 - Optional name is a stable teammate alias unique on the session team (e.g. explorer).
   Addressable in agent_roster and messaging tools; session_id still works when omitted.
 - Optional agent selects a persona (defaults to the current agent). Built-in names include:

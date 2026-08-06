@@ -752,6 +752,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			tc.TaskRead = e.childRead
 			tc.TaskMessage = e.childMessage
 			tc.TaskInterrupt = e.childInterrupt
+			tc.Wait = e.childWait
 		}
 		// Team tools are available on lead and children (shared team).
 		// Messaging is not stripped at depth ceiling (unlike nested task).

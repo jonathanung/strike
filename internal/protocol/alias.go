@@ -126,6 +126,8 @@ type (
 	EngineError            = pub.EngineError
 	ChildStarted           = pub.ChildStarted
 	ChildCompleted         = pub.ChildCompleted
+	WaitStarted            = pub.WaitStarted
+	WaitResolved           = pub.WaitResolved
 	AgentMessage           = pub.AgentMessage
 	TeamRoster             = pub.TeamRoster
 	UsageReported          = pub.UsageReported
@@ -146,6 +148,10 @@ const (
 	ChildStatusCompleted = pub.ChildStatusCompleted
 	ChildStatusFailed    = pub.ChildStatusFailed
 	ChildStatusCanceled  = pub.ChildStatusCanceled
+
+	WaitOutcomeMatched  = pub.WaitOutcomeMatched
+	WaitOutcomeTimeout  = pub.WaitOutcomeTimeout
+	WaitOutcomeCanceled = pub.WaitOutcomeCanceled
 
 	TeamMemberRunning   = pub.TeamMemberRunning
 	TeamMemberCompleted = pub.TeamMemberCompleted

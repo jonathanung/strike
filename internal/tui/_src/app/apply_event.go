@@ -542,6 +542,10 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 		return e.Correlation, true
 	case protocol.ChildCompleted:
 		return e.Correlation, true
+	case protocol.WaitStarted:
+		return e.Correlation, true
+	case protocol.WaitResolved:
+		return e.Correlation, true
 	case protocol.AgentMessage:
 		return e.Correlation, true
 	case protocol.TeamRoster:

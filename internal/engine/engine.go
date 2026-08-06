@@ -341,6 +341,11 @@ type Engine struct {
 	// in-flight sleep can return early instead of poll-looping.
 	childWake chan struct{}
 
+	// waitMu guards waitSubs — in-flight wait-tool subscriptions notified on
+	// child terminal / needs_attention transitions.
+	waitMu   sync.Mutex
+	waitSubs map[string]*waitSub
+
 	// pendingUserInputs holds UserInput accepted while a turn was active.
 	// Drained FIFO one-at-a-time after each turn ends. Survives Interrupt so
 	// follow-up prompts typed mid-turn are not lost.
