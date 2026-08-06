@@ -55,6 +55,7 @@ type capabilities struct {
 	Files          bool `json:"files"`
 	Memory         bool `json:"memory"`
 	Issues         bool `json:"issues"`
+	Plans          bool `json:"plans"`
 	Sessions       bool `json:"sessions"`
 	Roots          bool `json:"roots"`
 	Providers      bool `json:"providers"`
@@ -88,7 +89,8 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	var skills []map[string]any
 	if h := s.opts.Services; h != nil {
 		c.Auth, c.Catalog, c.Settings, c.History = h.Auth != nil, h.Catalog != nil, h.Settings != nil, h.History != nil
-		c.Files, c.Memory, c.Issues, c.Sessions = h.Files != nil, h.Memory != nil, h.Issues != nil, h.Sessions != nil
+		c.Files, c.Memory, c.Issues, c.Plans = h.Files != nil, h.Memory != nil, h.Issues != nil, h.Plans != nil
+		c.Sessions = h.Sessions != nil
 		// Workflow authoring is exposed via /v1/workflows* and /v1/workflow-drafts*.
 		c.Workflows, c.WorkflowDrafts = h.Workflows != nil, h.WorkflowDrafts != nil
 		// Capabilities describe browser surfaces, not merely host interfaces.
@@ -350,10 +352,15 @@ func (s *Server) handleSessionRename(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
-	item, err := s.opts.Services.Sessions.Rename(r.PathValue("id"), body.Title)
+	id := r.PathValue("id")
+	item, err := s.opts.Services.Sessions.Rename(id, body.Title)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
+	}
+	// Keep ACTIVE rail identity in sync when the renamed session is live.
+	if s.opts.LiveHub != nil {
+		s.opts.LiveHub.SetTitle(id, body.Title)
 	}
 	writeJSON(w, http.StatusOK, item)
 }
@@ -774,4 +781,22 @@ func (s *Server) handleRootResume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleRootClose(w http.ResponseWriter, r *http.Request) {
+	if s.opts.LiveHub == nil {
+		http.Error(w, "multi-root unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "root id is empty"})
+		return
+	}
+	if s.opts.LiveHub.LiveFor(id) == nil {
+		writeJSON(w, http.StatusNotFound, opErrorResponse{Error: fmt.Sprintf("root %q is not active", id)})
+		return
+	}
+	s.opts.LiveHub.Remove(id)
+	writeJSON(w, http.StatusOK, opOKResponse{OK: true})
 }

@@ -710,6 +710,9 @@ func childrenFromEvents(events []protocol.Event) []childActivity {
 					if e.ParentSessionID != "" && out[i].parentID == "" {
 						out[i].parentID = e.ParentSessionID
 					}
+					if e.Verification != nil {
+						_ = applyChildVerification(&out, index, id, e.Verification)
+					}
 					continue
 				}
 			} else if len(out) > 0 {
@@ -729,12 +732,25 @@ func childrenFromEvents(events []protocol.Event) []childActivity {
 				name:      e.Name,
 				status:    status,
 			})
+			if e.Verification != nil {
+				_ = applyChildVerification(&out, index, id, e.Verification)
+			}
+		case protocol.ChildEscalated:
+			applyChildEscalatedToChildren(&out, index, e)
+		case protocol.PathOverlap:
+			applyPathOverlapToChildren(&out, index, e)
 		case protocol.TeamRoster:
 			leadID := strings.TrimSpace(e.LeadID)
 			if leadID == "" {
 				leadID = strings.TrimSpace(e.SessionID)
 			}
 			applyTeamRosterMembers(&out, index, e.Members, leadID)
+		case protocol.VerificationCompleted:
+			if strings.EqualFold(strings.TrimSpace(e.Scope), protocol.VerificationScopeChild) ||
+				(e.ParentSessionID != "" || e.Depth > 0) {
+				rep := e.Report
+				_ = applyChildVerification(&out, index, e.SessionID, &rep)
+			}
 		case protocol.SchedulerQueued:
 			applySchedulerQueuedToChildren(&out, e)
 		case protocol.SchedulerAdmitted:

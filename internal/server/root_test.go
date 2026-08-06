@@ -21,17 +21,20 @@ func TestRootsUnavailableWithoutLiveHub(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"/v1/roots", "/v1/roots/r1/activate", "/v1/roots/r1/resume"} {
-		verb := http.MethodGet
-		if strings.Contains(path, "activate") || strings.Contains(path, "resume") {
-			verb = http.MethodPost
-		}
-		req := httptest.NewRequest(verb, path, nil)
+	for _, tc := range []struct {
+		method, path string
+	}{
+		{http.MethodGet, "/v1/roots"},
+		{http.MethodPost, "/v1/roots/r1/activate"},
+		{http.MethodPost, "/v1/roots/r1/resume"},
+		{http.MethodDelete, "/v1/roots/r1"},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, nil)
 		req.Header.Set("Authorization", "Bearer t")
 		res := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(res, req)
 		if res.Code != http.StatusServiceUnavailable {
-			t.Errorf("%s %s = %d, want 503", verb, path, res.Code)
+			t.Errorf("%s %s = %d, want 503", tc.method, tc.path, res.Code)
 		}
 	}
 }
@@ -214,6 +217,72 @@ func TestRootResume(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRootClose(t *testing.T) {
+	dir := t.TempDir()
+	live1 := NewLive("r1", "/a", nil, make(chan protocol.Op))
+	live2 := NewLive("r2", "/b", nil, make(chan protocol.Op))
+	defer live1.Close()
+	defer live2.Close()
+	hub := NewLiveHub(nil, nil)
+	hub.Add("r1", live1)
+	hub.Add("r2", live2)
+	if err := hub.Activate("r2"); err != nil {
+		t.Fatal(err)
+	}
+
+	srv, err := New(Options{Auth: true, Token: "t", SessionDir: dir, LiveHub: hub})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	// Unknown root → 404
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/v1/roots/missing", nil)
+	req.Header.Set("Authorization", "Bearer t")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusNotFound {
+		t.Fatalf("missing close = %d, want 404", res.StatusCode)
+	}
+
+	// Close active r2 → r1 becomes active
+	req, _ = http.NewRequest(http.MethodDelete, ts.URL+"/v1/roots/r2", nil)
+	req.Header.Set("Authorization", "Bearer t")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("close = %d", res.StatusCode)
+	}
+
+	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/v1/roots", nil)
+	req.Header.Set("Authorization", "Bearer t")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var rr rootsResponse
+	if err := json.NewDecoder(res.Body).Decode(&rr); err != nil {
+		t.Fatal(err)
+	}
+	if len(rr.Roots) != 1 || rr.Roots[0].ID != "r1" {
+		t.Fatalf("roots after close = %+v, want [r1]", rr.Roots)
+	}
+	if rr.ActiveID != "r1" {
+		t.Fatalf("activeId after close = %q, want r1", rr.ActiveID)
+	}
+	if hub.LiveFor("r2") != nil {
+		t.Fatal("r2 still in hub after close")
 	}
 }
 

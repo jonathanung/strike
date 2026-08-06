@@ -28,6 +28,19 @@ function popUndo(stack: UndoPreview[]): UndoPreview[] {
 
 export function reduceEvent(state: WorkspaceState, env: Envelope): WorkspaceState {
   if (env.type === "workspace.reset") return { ...initialState(), status: { sessionId: String(env.data?.sessionId || "") } };
+  // Client-only notices (slash help/unknown/cost) — not part of the wire protocol.
+  if (env.type === "local.system") {
+    const d = env.data || {};
+    return {
+      ...state,
+      items: append(state.items, {
+        id: `system:${state.items.length}:${env.time || Date.now()}`,
+        kind: "system",
+        title: text(d, "title") || "Notice",
+        text: text(d, "text"),
+      }),
+    };
+  }
   const key = fingerprint(env);
   if (state.seen.has(key)) return state;
   const seen = new Set(state.seen).add(key);

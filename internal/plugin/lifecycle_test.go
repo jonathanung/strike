@@ -487,13 +487,17 @@ func TestInstallForce_RollbackRestoresPrevious(t *testing.T) {
 }
 
 func TestParseInstallSource(t *testing.T) {
-	loc, git, err := ParseInstallSource("./my-plugin")
-	if err != nil || loc != "./my-plugin" || git != "" {
-		t.Fatalf("local: %v %q %q", err, loc, git)
+	loc, git, cat, ver, err := ParseInstallSource("./my-plugin")
+	if err != nil || loc != "./my-plugin" || git != "" || cat != "" {
+		t.Fatalf("local: %v %q %q %q", err, loc, git, cat)
 	}
-	loc, git, err = ParseInstallSource("https://github.com/acme/pack.git")
-	if err != nil || loc != "" || git == "" {
-		t.Fatalf("git: %v %q %q", err, loc, git)
+	loc, git, cat, ver, err = ParseInstallSource("https://github.com/acme/pack.git")
+	if err != nil || loc != "" || git == "" || cat != "" {
+		t.Fatalf("git: %v %q %q %q", err, loc, git, cat)
+	}
+	loc, git, cat, ver, err = ParseInstallSource("catalog:acme.pack@1.2.0")
+	if err != nil || loc != "" || git != "" || cat != "acme.pack" || ver != "1.2.0" {
+		t.Fatalf("catalog: %v %q %q %q %q", err, loc, git, cat, ver)
 	}
 }
 
@@ -505,6 +509,20 @@ func TestSourceIdentityValidate(t *testing.T) {
 		t.Fatal("git without commit")
 	}
 	if err := (SourceIdentity{Type: SourceGit, URL: "u", Commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}).Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if err := (SourceIdentity{Type: SourceCatalog}).Validate(); err == nil {
+		t.Fatal("catalog incomplete should fail")
+	}
+	cat := SourceIdentity{
+		Type:     SourceCatalog,
+		Registry: "https://example.com/plugins",
+		Package:  "acme.pack",
+		Version:  "1.0.0",
+		URL:      "https://example.com/acme.pack-1.0.0.tar.gz",
+		Digest:   "sha256:" + strings.Repeat("a", 64),
+	}
+	if err := cat.Validate(); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -179,7 +179,7 @@ header {
   width: 100%;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 6px;
   text-align: left;
   border: 0;
   border-left: 2px solid transparent;
@@ -193,6 +193,32 @@ header {
   color: var(--acid);
 }
 .session small { font-size: 8px; color: var(--acid); }
+.session-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.session-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-meta {
+  font-size: 9px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-flags {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  flex-shrink: 0;
+}
 .children { font-size: 11px; padding: 0 9px; }
 .children div {
   display: grid;
@@ -547,11 +573,12 @@ dialog input { padding: 12px; color: var(--ink); }
 
 .session-actions {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
   gap: 4px;
   padding: 0 8px;
 }
 .session-actions button { padding: 6px 2px; font-size: 8px; text-transform: uppercase; }
+.session-actions button:disabled { opacity: 0.4; }
 
 .nav-tab {
   border: 0;
@@ -665,15 +692,60 @@ dialog input { padding: 12px; color: var(--ink); }
   border-top: 1px solid var(--rule);
 }
 .attachments button { padding: 5px 8px; font-size: 9px; }
+.prompt-queue-wrap {
+  border-top: 1px solid var(--rule);
+}
 .prompt-queue {
   margin: 0;
   padding: 8px 12px 8px 34px;
-  border-top: 1px solid var(--rule);
   font-size: 10px;
   color: var(--muted);
+  list-style: decimal;
 }
-.prompt-queue li { padding: 3px; }
-.prompt-queue button { float: right; border: 0; background: transparent; }
+.prompt-queue li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: start;
+  padding: 4px 0;
+}
+.prompt-queue li span:first-child {
+  overflow-wrap: anywhere;
+}
+.queue-actions {
+  display: inline-flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.queue-actions button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 0 4px;
+  min-width: 1.4em;
+  cursor: pointer;
+}
+.queue-actions button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.queue-edit {
+  width: 100%;
+  font: inherit;
+  color: var(--text);
+  background: var(--raised);
+  border: 1px solid var(--rule);
+  padding: 4px 6px;
+}
+.queue-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 12px 8px;
+}
+.queue-toolbar button {
+  font-size: 9px;
+  padding: 4px 8px;
+}
 
 .unavailable {
   border-left: 3px solid var(--signal);
@@ -838,3 +910,54 @@ dialog fieldset small { color: var(--muted); }
   .perm-row { grid-template-columns: 1fr; }
   .workflow-dialog.wide { width: calc(100vw - 16px); }
 }
+
+/* Plans inspector tab */
+.plans-panel { display: grid; gap: 8px; }
+.plans-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 0;
+  font-size: 10px;
+  color: var(--muted);
+}
+.plans-meta small {
+  color: var(--acid);
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  font-size: 8px;
+}
+.plans-actions { flex-wrap: wrap; margin: 4px 0 8px; }
+.plans-section-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: baseline;
+}
+.plans-section-head h3 { margin: 0; }
+.plans-section-head button { font-size: 10px; padding: 2px 6px; }
+.plans-create {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--rule);
+  background: var(--surface-muted);
+  padding: 10px;
+  margin-bottom: 8px;
+}
+.plans-create label {
+  display: grid;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.plans-create input {
+  background: var(--ground);
+  color: var(--ink);
+  border: 1px solid var(--rule);
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 11px;
+}
+.plans-create button { justify-self: start; font-size: 10px; padding: 4px 8px; }
+.plans-sections { margin-top: 4px; }

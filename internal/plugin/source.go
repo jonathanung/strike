@@ -9,9 +9,8 @@ import (
 type SourceType string
 
 const (
-	SourceLocal SourceType = "local"
-	SourceGit   SourceType = "git"
-	// SourceCatalog is reserved for #729.
+	SourceLocal   SourceType = "local"
+	SourceGit     SourceType = "git"
 	SourceCatalog SourceType = "catalog"
 )
 
@@ -23,10 +22,18 @@ type SourceIdentity struct {
 	Path string `json:"path,omitempty"`
 
 	// Git
-	URL    string `json:"url,omitempty"`
+	URL    string `json:"url,omitempty"`    // git remote, or catalog artifact URL
 	Ref    string `json:"ref,omitempty"`    // branch/tag used at resolve time (optional)
 	Commit string `json:"commit,omitempty"` // required full SHA after git install
 	Subdir string `json:"subdir,omitempty"`
+
+	// Catalog (§6.3)
+	Registry string `json:"registry,omitempty"` // catalog base identity (URL)
+	Package  string `json:"package,omitempty"`  // package slug in the catalog
+	Version  string `json:"version,omitempty"`  // immutable published version pin
+	// Digest is the catalog-published artifact digest (sha256:<hex>) verified at install.
+	// LockfileEntry.Digest remains the installed content-tree digest.
+	Digest string `json:"digest,omitempty"`
 }
 
 // Validate checks source identity shape for lockfile persistence.
@@ -49,7 +56,25 @@ func (s SourceIdentity) Validate() error {
 		}
 		return nil
 	case SourceCatalog:
-		return fmt.Errorf("catalog source is not supported yet (#729)")
+		if strings.TrimSpace(s.Registry) == "" {
+			return fmt.Errorf("catalog source requires registry")
+		}
+		if strings.TrimSpace(s.Package) == "" {
+			return fmt.Errorf("catalog source requires package")
+		}
+		if strings.TrimSpace(s.Version) == "" {
+			return fmt.Errorf("catalog source requires pinned version")
+		}
+		if strings.TrimSpace(s.URL) == "" {
+			return fmt.Errorf("catalog source requires artifact url")
+		}
+		if strings.TrimSpace(s.Digest) == "" {
+			return fmt.Errorf("catalog source requires artifact digest")
+		}
+		if err := validateDigestString(s.Digest); err != nil {
+			return fmt.Errorf("catalog source digest: %w", err)
+		}
+		return nil
 	case "":
 		return fmt.Errorf("source type is required")
 	default:
@@ -82,6 +107,19 @@ func (s SourceIdentity) String() string {
 		if s.Subdir != "" {
 			b.WriteString(" subdir=")
 			b.WriteString(s.Subdir)
+		}
+		return b.String()
+	case SourceCatalog:
+		var b strings.Builder
+		b.WriteString("catalog:")
+		b.WriteString(s.Package)
+		if s.Version != "" {
+			b.WriteString("@")
+			b.WriteString(s.Version)
+		}
+		if s.Registry != "" {
+			b.WriteString(" registry=")
+			b.WriteString(s.Registry)
 		}
 		return b.String()
 	default:
