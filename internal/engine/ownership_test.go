@@ -248,6 +248,107 @@ func TestSoloWriteNoOwnershipRequired(t *testing.T) {
 	}
 }
 
+// TestHandoffFilesChangedMergesIntoOwnership ensures #771 structured handoff
+// files_changed is recorded on the team ownership graph at finishChild, and
+// the finished child is inactive (no longer causes overlap).
+func TestHandoffFilesChangedMergesIntoOwnership(t *testing.T) {
+	dir := t.TempDir()
+	const taskPrompt = "child-handoff-files-only"
+	handoffJSON := `{
+  "summary": "reported via handoff",
+  "files_changed": ["via-handoff.go"],
+  "findings": [],
+  "blockers": []
+}`
+	taskCall := taskToolCall("t-handoff-own", taskPrompt)
+	listOwn := controlToolCall("own-handoff", "agent_ownership", map[string]any{"action": "list"})
+
+	prov := newScriptedProvider(
+		toolCallStep(taskCall),
+		func() streamStep {
+			s := completedStep("spawned")
+			s.match = matchToolResult("t-handoff-own")
+			return s
+		}(),
+		// Child: no write tool — only model handoff files_changed.
+		func() streamStep {
+			s := completedStep(handoffJSON)
+			s.match = matchUserText(taskPrompt)
+			return s
+		}(),
+		// Lead nudge: list ownership after child.completed.
+		func() streamStep {
+			s := toolCallStep(listOwn)
+			s.match = matchUserTextContains("[child.completed")
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("listed")
+			s.match = matchToolResult("own-handoff")
+			return s
+		}(),
+	)
+
+	eng := engine.New(engine.Options{
+		SessionID:       "lead-handoff-own",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		Registry: tool.NewRegistry(
+			tool.NewTask(),
+			tool.NewAgentOwnership(),
+			tool.NewAgentRoster(),
+		),
+		WorkDir: dir,
+		Rules: []permission.Ruleset{
+			permission.Defaults(),
+			{{Permission: "*", Pattern: "*", Action: permission.Allow}},
+		},
+		Agents: []engine.Agent{{Name: "build"}},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "spawn handoff-only child"}
+	events := drainUntil(t, eng, 15*time.Second, func(evs []protocol.Event) bool {
+		if countEvents[protocol.ChildCompleted](evs) < 1 {
+			return false
+		}
+		for _, ev := range evs {
+			if end, ok := ev.(protocol.ToolCallEnd); ok && end.CallID == "own-handoff" && !end.IsError {
+				return true
+			}
+		}
+		return false
+	})
+
+	var listOut string
+	for _, ev := range events {
+		if end, ok := ev.(protocol.ToolCallEnd); ok && end.CallID == "own-handoff" && !end.IsError {
+			listOut = end.Output
+		}
+	}
+	if listOut == "" {
+		t.Fatalf("ownership list did not run; events=%v", summarizeEvents(events))
+	}
+	if !strings.Contains(listOut, "via-handoff.go") {
+		t.Fatalf("ownership list missing handoff path: %s", listOut)
+	}
+	// Finished child must not leave an active overlap on the handoff path.
+	if strings.Contains(listOut, `"overlaps":["via-handoff.go"]`) ||
+		strings.Contains(listOut, `"overlaps": ["via-handoff.go"]`) {
+		t.Fatalf("finished child still in active overlaps: %s", listOut)
+	}
+	// Holder should be present but inactive.
+	if !strings.Contains(listOut, `"active":false`) && !strings.Contains(listOut, `"active": false`) {
+		t.Fatalf("expected inactive holder after finishChild: %s", listOut)
+	}
+	// No PathOverlap from a solo finished child.
+	if n := countEvents[protocol.PathOverlap](events); n != 0 {
+		t.Fatalf("unexpected PathOverlap=%d for solo handoff child", n)
+	}
+}
+
 func matchUserTextContains(sub string) func(provider.Request) bool {
 	return func(req provider.Request) bool {
 		for _, m := range req.Messages {

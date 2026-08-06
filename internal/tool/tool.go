@@ -87,6 +87,18 @@ type TaskStatusRequest struct {
 	IncludeRecent bool
 }
 
+// CompletionHandoff is the structured child completion payload exposed on
+// task_status (mirrors protocol.CompletionHandoff; snake_case on the wire).
+type CompletionHandoff struct {
+	Summary               string   `json:"summary"`
+	FilesChanged          []string `json:"files_changed"`
+	Verification          string   `json:"verification,omitempty"`
+	Findings              []string `json:"findings"`
+	Blockers              []string `json:"blockers"`
+	RecommendedNextAction string   `json:"recommended_next_action,omitempty"`
+	Incomplete            bool     `json:"incomplete,omitempty"`
+}
+
 // TaskStatusResult is a model-facing snapshot of a child session.
 // State is one of starting|working|needs_attention|completed|failed|canceled|unknown.
 // QueuePools/QueueLabel are set while the child is waiting on scheduler admission
@@ -98,6 +110,10 @@ type TaskStatusResult struct {
 	LatestActivity  []string
 	TerminalSummary string
 	SessionID       string
+	// Handoff is the structured completion payload when the child is terminal.
+	// HasHandoff distinguishes "not terminal yet" from an empty handoff object.
+	Handoff    CompletionHandoff
+	HasHandoff bool
 	// QueuePools lists constrained pool names while waiting for admission.
 	QueuePools []string `json:"queue_pools,omitempty"`
 	// QueueLabel is a short human tag for the waiting work (e.g. "model").

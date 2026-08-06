@@ -62,6 +62,7 @@ type (
 	ImageAttachment         = pub.ImageAttachment
 	Correlation             = pub.Correlation
 	ChildStatus             = pub.ChildStatus
+	CompletionHandoff       = pub.CompletionHandoff
 	TeamMemberState         = pub.TeamMemberState
 	TeamRosterMember        = pub.TeamRosterMember
 	ProcessStatus           = pub.ProcessStatus

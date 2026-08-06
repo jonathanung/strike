@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -253,7 +254,17 @@ func TestCorrelationParentSessionIDAndDepthJSON(t *testing.T) {
 func TestChildCompletedStatusesRoundTrip(t *testing.T) {
 	corr := Correlation{SessionID: "child-1", ParentSessionID: "parent-1", Depth: 1}
 	for _, status := range []ChildStatus{ChildStatusCompleted, ChildStatusFailed, ChildStatusCanceled} {
-		want := ChildCompleted{Correlation: corr, Status: status, Summary: string(status)}
+		want := ChildCompleted{
+			Correlation: corr,
+			Status:      status,
+			Summary:     string(status),
+			Handoff: CompletionHandoff{
+				Summary:      string(status),
+				FilesChanged: []string{"a.go"},
+				Findings:     []string{},
+				Blockers:     []string{},
+			},
+		}
 		env, err := Wrap(want)
 		if err != nil {
 			t.Fatalf("Wrap(%s): %v", status, err)
@@ -270,6 +281,46 @@ func TestChildCompletedStatusesRoundTrip(t *testing.T) {
 		if string(wantJSON) != string(gotJSON) {
 			t.Errorf("%s: got %s, want %s", status, gotJSON, wantJSON)
 		}
+	}
+}
+
+func TestChildCompletedHandoffRoundTrip(t *testing.T) {
+	want := ChildCompleted{
+		Correlation: Correlation{SessionID: "c1", ParentSessionID: "p1", Depth: 1},
+		Status:      ChildStatusCompleted,
+		Summary:     "done",
+		Name:        "builder",
+		Handoff: CompletionHandoff{
+			Summary:               "done",
+			FilesChanged:          []string{"internal/x.go"},
+			Verification:          "make test",
+			Findings:              []string{"note"},
+			Blockers:              []string{},
+			RecommendedNextAction: "review PR",
+		},
+	}
+	env, err := Wrap(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotEv, err := env.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := gotEv.(ChildCompleted)
+	if !ok {
+		t.Fatalf("type %T", gotEv)
+	}
+	if got.Handoff.Summary != "done" || len(got.Handoff.FilesChanged) != 1 {
+		t.Fatalf("handoff = %#v", got.Handoff)
+	}
+	if got.Handoff.RecommendedNextAction != "review PR" {
+		t.Fatalf("next = %q", got.Handoff.RecommendedNextAction)
+	}
+	// Wire uses camelCase.
+	raw, _ := json.Marshal(got.Handoff)
+	if !strings.Contains(string(raw), `"filesChanged"`) {
+		t.Fatalf("wire JSON missing filesChanged: %s", raw)
 	}
 }
 

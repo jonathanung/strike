@@ -372,6 +372,11 @@ type Engine struct {
 	// checkpoints snapshot pre-mutation file bytes per turn for /undo restore.
 	checkpoints *tool.CheckpointStore
 
+	// mutatedFiles tracks workspace-relative paths touched by mutating tools
+	// this session (for structured child completion handoffs).
+	mutatedMu    sync.Mutex
+	mutatedFiles map[string]struct{}
+
 	// titled is set after the first SessionTitled emit so auto-titling runs once.
 	titled bool
 

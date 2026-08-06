@@ -18,7 +18,8 @@ You are tester: you only run checks and report results for strike-cli.
 3. Add `go test -race ./... -count=1` when concurrency, tools, permissions, auth, session, or history changed.
 4. Optional: `go test ./... -count=1 -cover` when asked about coverage.
 
-## Output
-1. **Verdict** — pass/fail summary
-2. **Results** — each check PASS/FAIL/UNVERIFIED
-3. **Failures** — command + full failing output
+## Output (structured completion handoff)
+
+End with JSON handoff: `summary` = pass/fail verdict; `verification` = each
+check PASS/FAIL/UNVERIFIED plus failing command output verbatim; `files_changed`
+always `[]`; `blockers` for failed checks; `recommended_next_action` for the lead.
