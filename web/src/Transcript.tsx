@@ -47,7 +47,7 @@ function Tool({ item }: { item: TranscriptItem }) {
   let parsed: unknown;
   try { parsed = JSON.parse(raw); } catch { parsed = undefined; }
   const diff = raw.includes("@@") && (/^\+\+\+/m.test(raw) || /^---/m.test(raw));
-  return <details className="tool-card" open><summary><span>{item.title || "tool"}</span><small>{parsed ? "structured data" : diff ? "diff" : "output"}</small></summary>{diff ? <pre className="diff">{raw.split("\n").map((line, i) => <span className={line.startsWith("+") ? "add" : line.startsWith("-") ? "del" : ""} key={i}>{line}{"\n"}</span>)}</pre> : <pre>{parsed ? JSON.stringify(parsed, null, 2) : raw}</pre>}</details>;
+  return <details className="tool-card"><summary><span>{item.title || "tool"}</span><small>{parsed ? "structured data" : diff ? "diff" : "output"}</small></summary>{diff ? <pre className="diff">{raw.split("\n").map((line, i) => <span className={line.startsWith("+") ? "add" : line.startsWith("-") ? "del" : ""} key={i}>{line}{"\n"}</span>)}</pre> : <pre>{parsed ? JSON.stringify(parsed, null, 2) : raw}</pre>}</details>;
 }
 
 export function Transcript({ item }: { item: TranscriptItem }) {
