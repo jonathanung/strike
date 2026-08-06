@@ -36,7 +36,10 @@ func TestSettingsModalMenuAndDefaults(t *testing.T) {
 	next, _ := sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	sm = next.(*settingsModal)
 	view = ansi.Strip(sm.view(80, m.th))
-	for _, want := range []string{"Theme", "dracula", "Vim mode", "Permission mode", "Provider", "echo"} {
+	for _, want := range []string{
+		"Theme", "dracula", "Vim mode", "Permission mode",
+		"Sandbox", "Notify", "Provider", "echo",
+	} {
 		if !strings.Contains(view, want) {
 			t.Errorf("defaults view missing %q:\n%s", want, view)
 		}
@@ -207,6 +210,125 @@ func TestSettingsModalDisplayOnlyRows(t *testing.T) {
 	next, cmd := sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if next != sm || cmd != nil {
 		t.Fatalf("provider row should not open picker: next=%T cmd=%v", next, cmd != nil)
+	}
+}
+
+func TestSettingsModalSaveSandboxAndNotify(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	fs := m.services.Settings.(*fakeSettings)
+	sm := newSettingsModal(m.services, m.ops, m.th, m.workDir)
+	sm.page = settingsPageDefaults
+
+	// Sandbox → read-only (new sessions only; no live apply).
+	sm.cursor = int(settingsFieldSandbox)
+	next, _ := sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	sm = next.(*settingsModal)
+	for i, opt := range sm.pickOptions {
+		if opt.value == "read-only" {
+			sm.pickCursor = i
+			break
+		}
+	}
+	_, cmd := sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	msg := cmd().(settingsSavedMsg)
+	if msg.err != nil {
+		t.Fatal(msg.err)
+	}
+	if len(fs.savedDials) != 1 || fs.savedDials[0].sandbox != "read-only" {
+		t.Fatalf("savedDials sandbox = %#v", fs.savedDials)
+	}
+	if msg.apply.hasNotify {
+		t.Fatal("sandbox save should not apply notify")
+	}
+	sm.afterSettingsSaved(msg)
+	if sm.defaults.Sandbox != "read-only" {
+		t.Fatalf("defaults sandbox = %q", sm.defaults.Sandbox)
+	}
+
+	// Notify → on (applies live to session).
+	sm.cursor = int(settingsFieldNotify)
+	next, _ = sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	sm = next.(*settingsModal)
+	for i, opt := range sm.pickOptions {
+		if opt.value == "on" {
+			sm.pickCursor = i
+			break
+		}
+	}
+	_, cmd = sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	msg = cmd().(settingsSavedMsg)
+	if msg.err != nil {
+		t.Fatal(msg.err)
+	}
+	if len(fs.savedDials) != 2 || fs.savedDials[1].notify != "on" {
+		t.Fatalf("savedDials notify = %#v", fs.savedDials)
+	}
+	if !msg.apply.hasNotify || msg.apply.notifyMode != NotifyOn {
+		t.Fatalf("apply notify = %#v", msg.apply)
+	}
+	m.modal = sm
+	m = updateApp(t, m, msg)
+	if m.notifyMode != NotifyOn {
+		t.Fatalf("session notifyMode = %q, want on", m.notifyMode)
+	}
+}
+
+func TestSettingsModalSaveLeanDeferWorktree(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	fs := m.services.Settings.(*fakeSettings)
+	sm := newSettingsModal(m.services, m.ops, m.th, m.workDir)
+	sm.page = settingsPageDefaults
+
+	cases := []struct {
+		field settingsField
+		value string
+		check func(savedConfigDials) bool
+	}{
+		{settingsFieldLeanCode, "full", func(d savedConfigDials) bool { return d.leanCode == "full" }},
+		{settingsFieldDeferTools, "on", func(d savedConfigDials) bool { return d.deferTools == "on" }},
+		{settingsFieldWorktree, "always", func(d savedConfigDials) bool { return d.sessionWorktree == "always" }},
+	}
+	for _, tc := range cases {
+		sm.cursor = int(tc.field)
+		next, _ := sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		sm = next.(*settingsModal)
+		for i, opt := range sm.pickOptions {
+			if opt.value == tc.value {
+				sm.pickCursor = i
+				break
+			}
+		}
+		_, cmd := sm.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		msg := cmd().(settingsSavedMsg)
+		if msg.err != nil {
+			t.Fatalf("%v: %v", tc.field, msg.err)
+		}
+		if len(fs.savedDials) == 0 || !tc.check(fs.savedDials[len(fs.savedDials)-1]) {
+			t.Fatalf("%v savedDials = %#v", tc.field, fs.savedDials)
+		}
+		sm.afterSettingsSaved(msg)
+	}
+	if sm.defaults.LeanCode != "full" || sm.defaults.DeferTools != "on" || sm.defaults.SessionWorktree != "always" {
+		t.Fatalf("defaults after dials = %#v", sm.defaults)
+	}
+}
+
+func TestSettingsModalDefaultsListsPeerDials(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	sm := newSettingsModal(m.services, m.ops, m.th, m.workDir)
+	sm.page = settingsPageDefaults
+	view := ansi.Strip(sm.view(100, m.th))
+	for _, want := range []string{
+		"Sandbox", "workspace-write",
+		"Notify", "unfocused-only",
+		"Lean code", "lite",
+		"Defer tools", "off",
+		"Session worktree",
+		"Permission mode",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("defaults view missing %q:\n%s", want, view)
+		}
 	}
 }
 

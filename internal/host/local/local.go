@@ -605,15 +605,20 @@ func (settingsAdapter) Defaults() host.UserDefaults {
 		return host.UserDefaults{}
 	}
 	return host.UserDefaults{
-		Provider:       config.CanonicalProviderID(cfg.Provider),
-		Model:          cfg.Model,
-		Agent:          cfg.DefaultAgent,
-		Effort:         string(cfg.Effort),
-		PermissionMode: string(cfg.PermissionMode),
-		Theme:          cfg.Theme,
-		VimMode:        cfg.VimMode,
-		NanoMode:       cfg.NanoMode,
-		MdReadMode:     cfg.MdReadMode,
+		Provider:        config.CanonicalProviderID(cfg.Provider),
+		Model:           cfg.Model,
+		Agent:           cfg.DefaultAgent,
+		Effort:          string(cfg.Effort),
+		PermissionMode:  string(cfg.PermissionMode),
+		Sandbox:         cfg.Sandbox,
+		Notify:          cfg.Notify,
+		LeanCode:        cfg.LeanCode,
+		DeferTools:      cfg.DeferTools,
+		SessionWorktree: cfg.Session.Worktree,
+		Theme:           cfg.Theme,
+		VimMode:         cfg.VimMode,
+		NanoMode:        cfg.NanoMode,
+		MdReadMode:      cfg.MdReadMode,
 	}
 }
 
@@ -631,6 +636,10 @@ func (settingsAdapter) SaveTheme(id string) error {
 
 func (settingsAdapter) SavePresentation(vimMode, nanoMode, mdReadMode string) error {
 	return config.SetGlobalPresentation(vimMode, nanoMode, mdReadMode)
+}
+
+func (settingsAdapter) SaveConfigDials(sandboxMode, notify, leanCode, deferTools, sessionWorktree string) error {
+	return config.SetGlobalConfigDials(sandboxMode, notify, leanCode, deferTools, sessionWorktree)
 }
 
 func (settingsAdapter) SaveKeybinds(overrides map[string][]string) error {

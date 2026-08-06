@@ -659,6 +659,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			WorkDir:         e.opts.WorkDir,
 			SandboxMode:     e.opts.SandboxMode,
 			Sandbox:         e.bashSandboxPolicy(),
+			NetworkAllow:    e.opts.NetworkAllow,
 			Scheduler:       e.opts.Scheduler,
 			SchedulerPolicy: e.opts.SchedulerPolicy,
 			SchedulerAcquire: func(ctx context.Context, label string, pools ...string) (*scheduler.Lease, error) {
@@ -666,6 +667,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			},
 			Files:      e.files,
 			Checkpoint: e.checkpoints.Snapshot,
+			FileSync:   e.opts.FileSync,
 			Ask: func(ctx context.Context, req tool.AskRequest) error {
 				return e.perms.AskWithCorrelation(ctx, req, corr)
 			},
@@ -974,11 +976,17 @@ func (e *Engine) toolNames() string {
 
 // bashSandboxPolicy compiles the live permission layers into an OS sandbox
 // Policy for bash (write denials, network posture, plan hard-denies).
+// Attaches config network.allow for /sandbox explain (webfetch enforces it
+// separately; bash OS network stays all-or-nothing via Policy.Network).
 func (e *Engine) bashSandboxPolicy() sandbox.Policy {
 	mode := sandbox.ResolveMode(e.opts.SandboxMode)
+	var p sandbox.Policy
 	if e.perms == nil {
 		// No permission service: keep host networking (same as Defaults Ask).
-		return sandbox.Policy{Mode: mode, WorkDir: e.opts.WorkDir, Network: true}
+		p = sandbox.Policy{Mode: mode, WorkDir: e.opts.WorkDir, Network: true}
+	} else {
+		p = e.perms.CompileSandbox(mode, e.opts.WorkDir)
 	}
-	return e.perms.CompileSandbox(mode, e.opts.WorkDir)
+	p.NetworkAllow = sandbox.CloneNetworkAllow(e.opts.NetworkAllow)
+	return p
 }

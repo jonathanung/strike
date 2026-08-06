@@ -46,8 +46,9 @@ func probePlatform() availInfo {
 
 // wrapPlatform builds:
 //
-//	bwrap --ro-bind / / [--bind $WORKDIR $WORKDIR] [--ro-bind $DENY $DENY ...] \
-//	      --dev /dev --proc /proc [--unshare-net] --die-with-parent -- <argv...>
+//	bwrap --ro-bind / / [--bind $WORKDIR $WORKDIR] [--bind $SHARED ...] \
+//	      [--ro-bind $DENY $DENY ...] --dev /dev --proc /proc [--unshare-net] \
+//	      --die-with-parent -- <argv...>
 func wrapPlatform(argv []string, policy Policy) []string {
 	if len(argv) == 0 {
 		return nil
@@ -75,7 +76,11 @@ func wrapPlatform(argv []string, policy Policy) []string {
 			out = append(out, "--bind", wd, wd)
 		}
 	}
-	// Remount deny paths read-only over the writable workspace bind.
+	// Temp always; caches only when workspace is writable (builds/package managers).
+	for _, p := range SharedWritablePaths(policy.WorkDir, policy.WorkspaceWritable()) {
+		out = append(out, "--bind", p, p)
+	}
+	// Remount deny paths read-only over the writable binds.
 	for _, d := range existingDenyPaths(policy.DenyWritePaths) {
 		out = append(out, "--ro-bind", d, d)
 	}
@@ -105,6 +110,9 @@ func profileText(policy Policy) string {
 		}
 		b.WriteString("  --bind " + wd + " " + wd + " \\\n")
 	}
+	for _, p := range SharedWritablePaths(policy.WorkDir, policy.WorkspaceWritable()) {
+		b.WriteString("  --bind " + p + " " + p + " \\\n")
+	}
 	for _, d := range existingDenyPaths(policy.DenyWritePaths) {
 		b.WriteString("  --ro-bind " + d + " " + d + " \\\n")
 	}
@@ -124,21 +132,4 @@ func profileText(policy Policy) string {
 	b.WriteString("  --die-with-parent \\\n")
 	b.WriteString("  -- <command>\n")
 	return b.String()
-}
-
-func absWorkDir(workDir string) string {
-	workDir = strings.TrimSpace(workDir)
-	if workDir == "" {
-		return ""
-	}
-	clean := filepath.Clean(workDir)
-	abs, err := filepath.Abs(clean)
-	if err != nil {
-		return clean
-	}
-	// Prefer the real path so the bind matches the process Dir after symlink eval.
-	if real, err := filepath.EvalSymlinks(abs); err == nil && real != "" {
-		return real
-	}
-	return abs
 }

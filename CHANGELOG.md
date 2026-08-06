@@ -21,10 +21,12 @@ materially affect the shipped product.
 
 ### Fixed
 
+- Fixed default OS sandbox / bash path guard blocking normal shell use: `2>/dev/null`, temp-dir writes, and tool caches (`~/.cache`, Go/npm/cargo) are shared-writable while the workspace stays isolated ([#752](https://github.com/jonathanung/strike/issues/752)).
 - Fixed bash under the default OS sandbox failing DNS/network (`gh auth status`, `git push`, etc.) because network was off unless `webfetch`/`mcp` were allow-on-`*` ([#750](https://github.com/jonathanung/strike/issues/750)).
 
 ### Added
 
+- **Network allowlist** — config `network.allow` (global/project) whitelists hosts, `*.suffix` wildcards, IPs, and CIDRs for `webfetch`. Empty means unrestricted public hosts (SSRF private blocks unchanged). Project `allow` replaces global when set. Same policy shape as sandbox `NetworkAllow` / future container net; bash OS network stays all-or-nothing via permission-compiled `Network`. Shown in `/sandbox explain` ([#527](https://github.com/jonathanung/strike/issues/527)).
 - **FTUE scheduler presets** — optional `/ftue` step with checkbox selection over the shipped build-system catalog (CMake, Ninja, Gradle, Bazel, Maven, Cargo, npm/yarn/pnpm/bun). Preview shows limits and command rules; apply writes global `scheduler.presets` atomically and preserves custom limits/rules; skip leaves config unchanged; re-runs are idempotent ([#705](https://github.com/jonathanung/strike/issues/705)).
 - **Global onboarding state + auto-open** — interactive TUI opens `/ftue` once for clean installs until finish or dismiss; state is versioned in `~/.strike/onboarding.json`. Established installs (sessions or credentials) migrate without a surprise modal; `exec`/`auth`/`serve` do not touch onboarding ([#703](https://github.com/jonathanung/strike/issues/703)).
 - **`/ftue` setup wizard** — manually invokable onboarding that guides provider connection, model selection, optional `/init`, and the first prompt by reusing existing host services and modals. Opening does not change settings; Finish focuses the composer; esc cancels. Child pickers preserve wizard step ([#702](https://github.com/jonathanung/strike/issues/702)).

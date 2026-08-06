@@ -80,6 +80,9 @@ strike launches without any provider configured. Pick one inside the TUI:
                                # export/import portable JSON (default path
                                # strike-memory.json). import merges by key;
                                # add --replace to wipe first
+/queue                         # browse/edit prompts queued while a turn runs
+                               # (reorder, promote, delete, edit text, or
+                               # interrupt to run the next item now)
  /issues [list|add|get|close|export|import] …
                                # project-scoped issue tracker; export/import
                                # portable JSON (default strike-issues.json).
@@ -141,6 +144,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/copy` | copy plain text of the last assistant response (not tool output) to the system clipboard via OSC52; same as `alt+y`; notice on success/failure |
 | `/compact` | ask the engine to compact model history |
 | `/memory` | bare = list browser (focuses memory pane); `list [tag]`, `get <key>`, `set <key> <value>`, `rm <key>`, `export [path]`, `import <path> [--replace]` (portable JSON; relative paths stay under project root) |
+| `/queue` | browse prompts buffered while a turn runs: reorder (`shift+↑/↓` or `K`/`J`), promote (`p`), in-place edit (`enter`), load into composer (`e`), delete (`d`), clear (`c`), or interrupt and run the FIFO head next (`x`). Empty-composer `bksp` still pops the last item; idle `esc` clears the whole queue |
 | `/issues` | bare = list browser (focuses issues pane); `list [open\|closed]`, `add <title>`, `get <id>`, `close <id>`, `export [path]`, `import <path> [--replace]` (same portable rules as memory) |
 | `/agents` `/activity` `/files` `/visualizer` `/system` | jump focus to the named right pane (`/agent` remains persona select; `/system` needs telemetry on) |
 | `/telemetry [on\|off\|status]` | local system metrics pane (CPU/RAM/disk); **on by default** (~1 Hz sampler). Disable with `/telemetry off` |

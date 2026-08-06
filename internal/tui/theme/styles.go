@@ -25,6 +25,10 @@ type Styles struct {
 	Border, BorderFocus, BorderMuted                           lipgloss.Style
 	Surface, SurfaceFocus, SurfaceMuted                        lipgloss.Style
 	DiffAdded, DiffRemoved                                     lipgloss.Style
+	// Diff*Strong bold the changed intra-line spans (word-diff highlights).
+	DiffAddedStrong, DiffRemovedStrong lipgloss.Style
+	// Diff*Line paint full add/remove rows: role FG on SurfaceMuted wash.
+	DiffAddedLine, DiffRemovedLine lipgloss.Style
 }
 
 // S returns the common styles for this theme. It allocates fresh styles on
@@ -44,5 +48,11 @@ func (t Theme) S() Styles {
 		Border: base.Foreground(t.Border), BorderFocus: base.Foreground(t.BorderFocus), BorderMuted: base.Foreground(t.BorderMuted),
 		Surface: base.Foreground(t.Text).Background(t.Surface), SurfaceFocus: base.Foreground(t.Text).Background(t.SurfaceFocus), SurfaceMuted: base.Foreground(t.TextMuted).Background(t.SurfaceMuted),
 		DiffAdded: base.Foreground(t.DiffAdded), DiffRemoved: base.Foreground(t.DiffRemoved),
+		// Strong spans share the line wash so bold islands do not punch holes
+		// in the SurfaceMuted band on add/remove rows.
+		DiffAddedStrong: base.Foreground(t.DiffAdded).Bold(true).Background(t.SurfaceMuted), DiffRemovedStrong: base.Foreground(t.DiffRemoved).Bold(true).Background(t.SurfaceMuted),
+		// Line washes share SurfaceMuted so add/remove rows read as tinted bands
+		// without new color roles.
+		DiffAddedLine: base.Foreground(t.DiffAdded).Background(t.SurfaceMuted), DiffRemovedLine: base.Foreground(t.DiffRemoved).Background(t.SurfaceMuted),
 	}
 }

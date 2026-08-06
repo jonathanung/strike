@@ -244,6 +244,12 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "/memory":
 		return m.handleMemoryCommand(fields[1:])
+	case "/queue":
+		m.resetComposer()
+		m.clearNotice()
+		m.openInputQueueModal()
+		m.reflow()
+		return m, nil
 	case "/issues":
 		return m.handleIssuesCommand(fields[1:])
 	case "/goal":

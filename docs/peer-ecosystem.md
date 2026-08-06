@@ -105,6 +105,67 @@ Strike config uses a flat `hooks` array (global then project concatenate).
 - Peer hook **trees** under `.claude/hooks` are not executed as Node hosts — re-express as strike `hooks` JSON or a small shell script.
 - Invalid hook rows are **dropped at load** (startup stays up).
 
+## Settings inventory
+
+Strike keeps a **lean** config surface (`~/.strike/config` + layered
+`mcp.jsonc` / `providers.jsonc` / `keybinds.jsonc`) rather than cloning every
+Claude Code `settings.json` or OpenCode `opencode.json` key. Interactive
+defaults live under `/settings` → Defaults (and ctrl+d on pickers).
+
+### Two-dial model (sandbox × permission)
+
+Codex-style separation, documented with both dials in [config.md](config.md):
+
+| Dial | Strike | Peer analogues | Meaning |
+|---|---|---|---|
+| **sandbox** | `sandbox`, `--sandbox`, `/sandbox` | Codex sandbox; CC sandboxing | What OS isolation makes *possible* for bash |
+| **permissionMode** | `permissionMode`, `/mode`, Shift+Tab | CC permission modes; OpenCode `permission` | *When* the agent is asked before a tool runs |
+
+They are independent. `yolo` does not disable the OS sandbox; `sandbox: off`
+does not skip asks. `yolo` + `sandbox: off` requires `--i-know`.
+
+### Peer → strike map (high-value)
+
+| Peer surface | Upstream | Strike | Status |
+|---|---|---|---|
+| Default model / provider | OC `model`, CC model | `provider` / `model`, `/provider` `/model`, ctrl+d | shipped |
+| Default agent | OC `default_agent` | `defaultAgent`, `/agent` | shipped |
+| Theme | OC `tui.json` theme, CC theme | `theme`, `/theme`, `/settings` | shipped |
+| Keybinds | OC/CC keybinds | `keybinds.jsonc`, `/keys` | shipped |
+| Permissions rules | CC allow/deny, OC `permission` | `permissions[]` last-match-wins | shipped |
+| Permission mode dial | CC modes / auto | `permissionMode` + `/mode` | shipped |
+| OS sandbox dial | Codex / CC sandbox | `sandbox` + `/sandbox` | shipped |
+| Desktop / attention notify | OC TUI attention, CC notify | `notify` (`on`\|`off`\|`unfocused-only`) | shipped (+ `/settings`) |
+| Compaction | OC `compaction`, CC autoCompact | `compaction*` / `prune*` keys | shipped (config; not all in `/settings`) |
+| MCP servers | both | `mcp.jsonc` + `/mcp` | shipped |
+| Custom providers | OC `provider` | `providers.jsonc` + `/settings` Providers | shipped |
+| Disable default providers | OC `disabled_providers` | `disable-default-*` | shipped |
+| Hooks | both | `hooks[]` | shipped (lean schema) |
+| Subagent depth | OC `subagent_depth` | `maxChildDepth` | shipped (config) |
+| Session worktree isolation | OC snapshot-ish / CC worktrees | `session.worktree` | shipped (+ `/settings`) |
+| Lean / efficiency guidance | — (strike) | `leanCode` | shipped (+ `/settings`) |
+| Deferred tool schemas | OC tools gating-ish | `deferTools` + `toolsearch` | shipped (+ `/settings`) |
+| Instructions globs | OC `instructions` | AGENTS.md + discovery roots | shipped (different model) |
+| Autoupdate | OC `autoupdate` | `strike upgrade` | partial (manual) |
+| Formatters | OC `formatter` | gap (use hooks / editor) | gap |
+| LSP servers | OC `lsp` | gap — tracked #555 | gap / out of this epic |
+| Network allowlist | OC network / CC | gap — tracked #527 | gap / coordinate |
+| Managed / MDM settings | CC/OC enterprise | gap | gap (later) |
+| JSON schema `$schema` | both | gap | gap (nice DX) |
+| Main config JSONC | OC | partial (`mcp`/`providers`/`keybinds` JSONC; main `config` is JSON) | gap |
+| Plugins / Node hosts | OC plugins | **out of scope** | wont |
+
+### `/settings` Defaults coverage
+
+Editable: theme, vimMode, nanoMode, mdReadMode, permissionMode, **sandbox**,
+**notify**, **leanCode**, **deferTools**, **session.worktree**, effort.
+Read-only (set via pickers + ctrl+d): provider, model, agent.
+Providers CRUD: custom OpenAI-/Anthropic-compatible endpoints.
+
+Remaining config-only dials (edit JSON or future `/settings` pages): compaction
+knobs, prune knobs, scheduler, hooks, MCP, permissions rules, maxChildDepth,
+permissionAutoApprove*, harnesses.
+
 ## Attribution
 
 Clean-room prompts inspired by common peer UX (Claude Code, OpenCode, Codex,

@@ -16,6 +16,12 @@ func (m Model) handleKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.modal != nil {
 		var cmd tea.Cmd
 		m.modal, cmd = m.modal.update(msg)
+		// Keep the live input queue aligned with an open queue browser after
+		// list mutations. Applying via async replaceCmd races TurnCompleted
+		// drain (stale snapshot can resurrect popped items).
+		if qm, ok := m.modal.(*queueModal); ok && !qm.edit {
+			m.applyInputQueueReplace(qm.items)
+		}
 		if m.modal == nil {
 			cmd = tea.Batch(cmd, m.afterModalClosed())
 			m.refreshAwaitingPermission()

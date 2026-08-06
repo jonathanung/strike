@@ -163,6 +163,150 @@ func TestInputQueueBadgeRendersInComposerTitle(t *testing.T) {
 	}
 }
 
+// updateQueue drains tea cmds so modal mutations (replace/run-next/edit) apply,
+// including nested cmds produced while handling those msgs (interrupt/drain).
+func updateQueue(t *testing.T, m Model, msg tea.Msg) Model {
+	t.Helper()
+	updated, cmd := m.Update(msg)
+	m = updated.(Model)
+	return drainQueueCmds(t, m, cmd)
+}
+
+func drainQueueCmds(t *testing.T, m Model, cmd tea.Cmd) Model {
+	t.Helper()
+	for _, out := range runAllAppCmds(t, cmd) {
+		if out == nil {
+			continue
+		}
+		updated, next := m.Update(out)
+		m = updated.(Model)
+		m = drainQueueCmds(t, m, next)
+	}
+	return m
+}
+
+func TestInputQueueOpenModalAndMutations(t *testing.T) {
+	m, ops := newAppTestModel(nil, nil)
+	m.providerName = "echo"
+	m.turnRunning = true
+	m.inputQueue = []queuedInput{
+		{modelText: "a", displayPrompt: "a"},
+		{modelText: "b", displayPrompt: "b"},
+		{modelText: "c", displayPrompt: "c"},
+	}
+
+	next, _ := m.handleCommand("/queue")
+	m = next.(Model)
+	qm, ok := m.modal.(*queueModal)
+	if !ok {
+		t.Fatalf("modal = %T, want *queueModal", m.modal)
+	}
+	if len(qm.items) != 3 {
+		t.Fatalf("modal items = %#v", qm.items)
+	}
+
+	// Promote c to front via modal keys.
+	m = updateQueue(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+	m = updateQueue(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+	m = updateQueue(t, m, tea.KeyPressMsg{Text: "p"})
+	if got := queueLabels(m.inputQueue); got != "c|a|b" {
+		t.Fatalf("after promote queue = %s", got)
+	}
+
+	// Delete head.
+	m = updateQueue(t, m, tea.KeyPressMsg{Text: "d"})
+	if got := queueLabels(m.inputQueue); got != "a|b" {
+		t.Fatalf("after delete queue = %s", got)
+	}
+
+	// Edit head text in place.
+	m = updateQueue(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	qm = m.modal.(*queueModal)
+	qm.input.SetValue("alpha")
+	m = updateQueue(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.inputQueue[0].modelText != "alpha" {
+		t.Fatalf("after edit = %#v", m.inputQueue[0])
+	}
+
+	// e → composer
+	m = updateQueue(t, m, tea.KeyPressMsg{Text: "e"})
+	if m.modal != nil {
+		t.Fatalf("modal still open: %T", m.modal)
+	}
+	if m.composer.Value() != "alpha" {
+		t.Fatalf("composer = %q", m.composer.Value())
+	}
+	if got := queueLabels(m.inputQueue); got != "b" {
+		t.Fatalf("queue after e = %s", got)
+	}
+	assertNoAppOp(t, ops)
+}
+
+func TestInputQueueRunNextInterruptsThenDrains(t *testing.T) {
+	m, ops := newAppTestModel(nil, nil)
+	m.providerName = "echo"
+	m.turnRunning = true
+	m.inputQueue = []queuedInput{
+		{modelText: "next-one", displayPrompt: "next-one"},
+		{modelText: "later", displayPrompt: "later"},
+	}
+	next, _ := m.handleCommand("/queue")
+	m = next.(Model)
+
+	m = updateQueue(t, m, tea.KeyPressMsg{Text: "x"})
+	if m.modal != nil {
+		t.Fatalf("modal still open after x: %T", m.modal)
+	}
+	if got := receiveAppOp(t, ops); got != (protocol.Interrupt{}) {
+		t.Fatalf("op = %#v, want Interrupt", got)
+	}
+	if got := queueLabels(m.inputQueue); got != "next-one|later" {
+		t.Fatalf("queue should survive interrupt: %s", got)
+	}
+
+	m = runEvent(t, m, protocol.TurnCompleted{StopReason: "interrupted"})
+	assertUserInputText(t, receiveAppOp(t, ops), "next-one")
+	if got := queueLabels(m.inputQueue); got != "later" {
+		t.Fatalf("after drain = %s", got)
+	}
+}
+
+func TestInputQueueRunNextDrainsWhenIdle(t *testing.T) {
+	m, ops := newAppTestModel(nil, nil)
+	m.providerName = "echo"
+	m.turnRunning = false
+	m.inputQueue = []queuedInput{
+		{modelText: "go", displayPrompt: "go"},
+	}
+	next, _ := m.handleCommand("/queue")
+	m = next.(Model)
+	m = updateQueue(t, m, tea.KeyPressMsg{Text: "x"})
+	assertUserInputText(t, receiveAppOp(t, ops), "go")
+	if len(m.inputQueue) != 0 {
+		t.Fatalf("queue = %#v", m.inputQueue)
+	}
+	if !m.turnRunning {
+		t.Fatal("want optimistic busy after drain")
+	}
+}
+
+func TestInputQueueNoticeMentionsSlashQueue(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m.inputQueue = []queuedInput{{modelText: "hi", displayPrompt: "hi"}}
+	m.setInputQueueNotice()
+	if !strings.Contains(m.notice, "/queue") {
+		t.Fatalf("notice = %q, want /queue hint", m.notice)
+	}
+}
+
+func queueLabels(items []queuedInput) string {
+	parts := make([]string, len(items))
+	for i, q := range items {
+		parts[i] = q.modelText
+	}
+	return strings.Join(parts, "|")
+}
+
 func TestInputQueueSkillEnqueuePreservesDisplayAndModelText(t *testing.T) {
 	skill := fakeSkill("review", "", "Rendered: $ARGUMENTS")
 	store := newFakeHistory()

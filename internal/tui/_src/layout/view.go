@@ -452,13 +452,17 @@ func (m Model) composerTitle(th theme.Theme, focused bool) string {
 }
 
 // composerFooter advertises send/newline when the panel has room for a footer.
-// When queueEdit is set, also advertise backspace to pop the last queued prompt.
+// When queueEdit is set, also advertise backspace to pop the last queued prompt
+// and /queue for the full browser.
 // width is the panel footer budget (PanelInnerWidth); always a single line.
 func composerFooter(th theme.Theme, keys keyMap, width int, queueEdit bool) string {
 	send, nl := keyHint(keys.Send), keyHint(keys.Newline)
 	hints := []ui.KeyHint{send, nl}
 	if queueEdit {
-		hints = append(hints, ui.KeyHint{Key: "bksp", Label: "edit queue"})
+		hints = append(hints,
+			ui.KeyHint{Key: "bksp", Label: "pop last"},
+			ui.KeyHint{Key: "/queue", Label: "manage"},
+		)
 	}
 	return ui.KeyHints(th, max(1, width), hints)
 }

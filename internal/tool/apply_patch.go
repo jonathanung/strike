@@ -134,6 +134,7 @@ func (applyPatchTool) Execute(ctx context.Context, args json.RawMessage, tc *Con
 	if err := commitPatchOps(tc.WorkDir, planned, originals); err != nil {
 		return Result{}, err
 	}
+	notifyPatchFileSync(tc, planned)
 
 	out := patchSuccessSummary(planned)
 	return Result{
@@ -141,6 +142,31 @@ func (applyPatchTool) Execute(ctx context.Context, args json.RawMessage, tc *Con
 		Output:   out,
 		Metadata: meta,
 	}, nil
+}
+
+// notifyPatchFileSync drives LSP (or similar) document sync after a successful patch.
+func notifyPatchFileSync(tc *Context, planned []plannedOp) {
+	if tc == nil {
+		return
+	}
+	for _, op := range planned {
+		switch op.Type {
+		case "delete":
+			tc.NotifyFileSync(op.AbsPath, "", true)
+		case "move":
+			tc.NotifyFileSync(op.AbsPath, "", true)
+			if op.AbsMove != "" {
+				tc.NotifyFileSync(op.AbsMove, op.Content, false)
+			}
+		default:
+			// add / update
+			path := op.AbsPath
+			if op.AbsMove != "" {
+				path = op.AbsMove
+			}
+			tc.NotifyFileSync(path, op.Content, false)
+		}
+	}
 }
 
 // ApplyPatchToWorkDir validates and commits a multi-file patch under workDir

@@ -79,6 +79,10 @@ type Options struct {
 	// (off|read-only|workspace-write). Empty means workspace-write.
 	// Distinct from InitialPermissionMode (when the agent is asked).
 	SandboxMode string
+	// NetworkAllow is the config network.allow host/CIDR list for webfetch.
+	// Empty means unrestricted public hosts. Copied onto tool.Context and
+	// sandbox.Policy.NetworkAllow for /sandbox explain.
+	NetworkAllow []string
 	// AllowYoloWithoutSandbox permits permissionMode yolo when SandboxMode is
 	// off. Set only from CLI --i-know after an explicit operator override.
 	AllowYoloWithoutSandbox bool
@@ -236,6 +240,11 @@ type Options struct {
 	// nil treats all commands as general (process only). Used only when
 	// Scheduler is non-nil.
 	SchedulerPolicy *scheduler.Effective
+	// FileSync, when set, is invoked after successful file tool mutations
+	// (write/edit/apply_patch/notebook_edit) so the host can drive LSP
+	// document sync. absPath is absolute; deleted marks removals.
+	// Nil disables. Must not panic the tool path (callers recover).
+	FileSync func(absPath string, content string, deleted bool)
 }
 
 // beginAck reports whether ToolCallBegin was actually written to Events.

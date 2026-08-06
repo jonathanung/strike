@@ -46,6 +46,9 @@ write this file. Manual `/ftue` remains available after acknowledgement.
   "notify": "unfocused-only",
   "permissionMode": "default",
   "sandbox": "workspace-write",
+  "network": {
+    "allow": ["api.github.com", "*.npmjs.org", "10.0.0.0/8"]
+  },
   "permissionAutoApproveSeconds": 0,
   "permissionAutoApproveExclude": ["bash"],
   "compactionStrategy": "trim",
@@ -105,6 +108,17 @@ Inspect the effective policy with `/sandbox`; `/sandbox explain` prints the
 generated OS profile (bwrap flags or seatbelt SBPL) compiled from permission
 rules.
 
+**Shared writable roots (default usability):** under any non-`off` mode the
+sandbox keeps common scratch dirs writable (`/tmp`, `/var/tmp`, `$TMPDIR`,
+and on Linux `/dev/shm`). In **`workspace-write`** it also binds user/tool
+caches when present (`$XDG_CACHE_HOME` or `~/.cache`, `$GOCACHE` /
+`$GOMODCACHE`, `~/.npm`, `~/.cargo`, `~/.rustup`, …) so `go build`, package
+managers, and `2>/dev/null` redirections work without disabling isolation.
+The bash static path guard allows the same roots (and safe devices like
+`/dev/null`) outside the workspace; critical targets (`/`, `/tmp` as a whole,
+`$HOME`, …) stay blocked. The rest of the host filesystem remains read-only
+aside from the session workdir.
+
 **Permission → sandbox profile:** hard `write`/`edit` deny rules are compiled
 into OS filesystem denials inside the bash sandbox (globs become seatbelt
 regexes and, when paths exist, bwrap `--ro-bind` remounts). A deny on
@@ -112,9 +126,36 @@ regexes and, when paths exist, bwrap `--ro-bind` remounts). A deny on
 bind. Network inside the sandbox stays **on** by default (so bash can run
 `gh`, `git`, package managers, etc.). It turns **off** only when both
 `webfetch` and `mcp` are hard-**deny** on `*` (patterned rules do not flip
-full-network posture). Host/CIDR allowlists are tracked in #527. Ask/yolo
-posture does not widen the OS profile. Composer `!` uses the config-layer
-compile; agent bash uses live layers (agent/phase/session).
+full-network posture). Ask/yolo posture does not widen the OS profile.
+Composer `!` uses the config-layer compile; agent bash uses live layers
+(agent/phase/session).
+
+**Network allowlist (`network.allow`):** optional host/CIDR whitelist for
+**application-layer** web egress (`webfetch`). Entries may be hostnames
+(`api.github.com`), a single leading wildcard label (`*.example.com`), IP
+literals, or CIDRs (`10.0.0.0/8`). Empty or omitted means unrestricted
+**public** hosts (existing SSRF blocks for private/loopback/link-local/CGNAT
+still apply and cannot be opened by the allowlist). When non-empty, the
+request host must match an entry: hostname/wildcard on the name, or IP/CIDR
+on the literal host or (when the list includes IP/CIDR entries) a resolved
+address. Redirects and dial-time resolution are re-checked. Global and
+project layers: when a layer sets `network.allow` (including `[]`), it
+**replaces** the previous list so a project can tighten or clear a global
+whitelist.
+
+This is the same policy **shape** as future container network filters. It is
+**not** a third independent system:
+
+| Surface | What applies today |
+|---|---|
+| `webfetch` | `network.allow` host/CIDR allowlist + SSRF private blocks |
+| bash OS profile | `sandbox.Policy.Network` on by default; off only when both `webfetch` and `mcp` are hard-deny on `*` (all-or-nothing; no per-host filter inside bwrap/seatbelt) |
+| permission rules | `webfetch` ask/allow/deny patterns (prompt posture), independent of the hard allowlist |
+| container net | deferred — reuse `network.allow` shape |
+
+`/sandbox explain` prints the effective allowlist next to bash `network: on/off`.
+Prefer `webfetch` over `curl`/`wget` in bash when you need allowlist enforcement;
+bash egress is not host-filtered at the OS layer.
 
 **Yolo + sandbox off:** `permissionMode: yolo` (or a resumed session in yolo)
 combined with `sandbox: off` **refuses to start** unless you pass `--i-know`.
@@ -332,9 +373,16 @@ provider + model; in the effort picker it saves the highlighted level; in
 the theme picker it saves the highlighted theme id.
 
 **/settings Defaults**: interactive editor for theme, vimMode, nanoMode,
-mdReadMode, permissionMode, and effort (plus a read-only view of
-provider/model/agent). Changes write `~/.strike/config` and apply theme/editor
-presentation to the current session immediately.
+mdReadMode, **permissionMode**, **sandbox**, **notify**, **leanCode**,
+**deferTools**, **session.worktree**, and effort (plus a read-only view of
+provider/model/agent). Changes write `~/.strike/config`. Theme, editor/reader
+presentation, and notify apply to the current session immediately;
+permissionMode, sandbox, leanCode, deferTools, and session.worktree affect
+**new** sessions (use `/mode` / Shift+Tab for the live permission dial, and
+`/sandbox` to inspect the OS dial already bound for this process).
+
+Peer settings inventory (Claude Code / OpenCode → strike): see
+[peer-ecosystem.md](peer-ecosystem.md#settings-inventory).
 
 ## Theme
 
@@ -394,6 +442,47 @@ object to persist defaults.
 
 List/permission modal conventions (`lists.*`, `perm.*`) and agents-pane local
 controls (`agents.*`) are not remappable.
+
+## Language servers (LSP)
+
+Configure stdio language servers so file tool mutations (`write` / `edit` /
+`apply_patch` / `notebook_edit`) drive `textDocument/didOpen` /
+`didChange` / `didClose`, and `publishDiagnostics` notifications are collected
+per URI. A dead language server degrades to no diagnostics and never takes
+down the session (same crash isolation as MCP).
+
+```json
+// ~/.strike/config or ./.strike/config
+{
+  "lsp": {
+    "servers": {
+      "go": {
+        "command": "gopls",
+        "extensions": [".go"]
+      },
+      "typescript": {
+        "command": "typescript-language-server",
+        "args": ["--stdio"],
+        "extensions": [".ts", ".tsx", ".js", ".jsx"]
+      }
+    }
+  }
+}
+```
+
+| Field | Required | Notes |
+|---|---|---|
+| `command` | yes | Executable on `PATH` or absolute path |
+| `args` | no | Extra argv after command |
+| `env` | no | Env overlay for the subprocess (never logged) |
+| `extensions` | yes | File extensions this server owns (with or without leading `.`). First server claiming an extension wins. Servers with no extensions are skipped. |
+
+**Layering:** when a config layer sets `lsp.servers` (including `{}`), it
+**replaces** the previous layer's server map entirely (same as MCP). Omitted
+`lsp` leaves the lower layer unchanged.
+
+Diagnostics injection into tool results and the `/lsp` UI are separate
+follow-ups (epic E2.2 / E2.3). This client only collects diagnostics in-process.
 
 ## MCP servers (stdio + HTTP)
 

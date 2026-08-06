@@ -173,6 +173,7 @@ func (notebookEditTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 	if err := workspaceWriteFile(tc.WorkDir, a.NotebookPath, out); err != nil {
 		return Result{}, err
 	}
+	tc.NotifyFileSync(path, string(out), false)
 	return Result{
 		Title:    rel,
 		Output:   outMsg,
