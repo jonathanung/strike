@@ -3,11 +3,15 @@ import { activateRoot, bootstrap, closeRoot, createRoot, historicalConnection, l
 import { ChildAgentsPanel } from "./ChildAgents";
 import { buildExportMarkdown, defaultExportFilename, downloadTextFile } from "./exportMarkdown";
 import { clearQueue, editQueuedText, moveQueuedAt, removeQueuedAt, type QueuedPrompt } from "./queueOps";
-import { initialClientState, reduceClient, selectedSlice } from "./reducer";
+import { initialClientState, reduceClient, selectedSlice, setAdd, setRemove } from "./reducer";
 import { formatCostNotice, formatSlashHelp, resolveSlash, WEB_SLASH_COMMANDS } from "./slash";
 import { applyAppearance, loadAppearance, SettingsDialog } from "./Settings";
 import { Transcript } from "./Transcript";
-import type { SandboxInfo,  ActiveRoot, Bootstrap, Capabilities, ImageAttachment, Session, Status } from "./types";
+import type {
+  SandboxInfo, ActiveRoot, Bootstrap, Capabilities, FitWarning, ImageAttachment,
+  RequestAttribution, Session, Status, TokenCount, WorkspaceState,
+} from "./types";
+import { LAYER_KINDS } from "./types";
 import { MCPPanel } from "./MCP";
 import { TimelinePanel } from "./Timeline";
 import { DiagnosticsPanel } from "./Diagnostics";
@@ -23,14 +27,16 @@ import { GoalsPanel } from "./Goals";
 import { WorkflowsPanel } from "./Workflows";
 import "./styles.css";
 
-type InspectorTab = "files" | "memory" | "issues" | "plans" | "workflows" | "mcp" | "timeline" | "diagnostics" | "goals";
+type InspectorTab = "context" | "files" | "memory" | "issues" | "plans" | "workflows" | "mcp" | "timeline" | "diagnostics" | "goals";
 type Completion = { label: string; detail: string; insert: string };
 type ChangedFile = { path: string; added: number; deleted: number; diff: string };
 type MemoryEntry = { Key?: string; key?: string; Value?: string; value?: string; Tags?: string[]; tags?: string[] };
 type IssueEntry = { ID?: number; id?: number; Title?: string; title?: string; Body?: string; body?: string; Status?: string; status?: string };
-const inspectorTabOrder: InspectorTab[] = ["files", "memory", "issues", "plans", "workflows", "mcp", "timeline", "diagnostics", "goals"];
+const inspectorTabOrder: InspectorTab[] = ["context", "files", "memory", "issues", "plans", "workflows", "mcp", "timeline", "diagnostics", "goals"];
 const availableInspectorTabs = (caps?: Capabilities): InspectorTab[] =>
   inspectorTabOrder.filter((tab) => {
+    // Context doctor is event-driven (always available); not a host capability.
+    if (tab === "context") return true;
     if (tab === "diagnostics") return Boolean(caps?.lsp);
     return Boolean(caps?.[tab]);
   });
@@ -397,15 +403,16 @@ export default function App() {
       if (tab === "files") setProjectData(boot?.capabilities.files ? await request(`/v1/changed-files${selectedID ? `?root=${encodeURIComponent(selectedID)}` : ""}`).catch((error) => ({ error: error.message })) : undefined);
       if (tab === "memory") setProjectData(boot?.capabilities.memory ? await request("/v1/memory").catch((error) => ({ error: error.message })) : undefined);
       if (tab === "issues") setProjectData(boot?.capabilities.issues ? await request("/v1/issues").catch((error) => ({ error: error.message })) : undefined);
-      if (tab === "plans" || tab === "workflows" || tab === "mcp" || tab === "timeline" || tab === "diagnostics") setProjectData(undefined);
+      if (tab === "context" || tab === "plans" || tab === "workflows" || tab === "mcp" || tab === "timeline" || tab === "diagnostics" || tab === "goals") setProjectData(undefined);
     } finally { setProjectLoading(false); }
   };
-  // Prefer files, else first capability-backed tab; hydrate data without forcing inspector open (#912 density).
+  // Prefer files when present, else first available tab (context is always listed); hydrate without forcing open (#912).
   useEffect(() => {
     if (!boot) return;
     const tabs = availableInspectorTabs(boot.capabilities);
     if (!tabs.length) return;
-    const tab = tabs.includes(inspector) ? inspector : tabs[0];
+    const preferred = tabs.includes("files") ? "files" : tabs[0];
+    const tab = tabs.includes(inspector) ? inspector : preferred;
     void inspectProject(tab, { open: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot when boot lands
   }, [boot]);
@@ -535,7 +542,7 @@ export default function App() {
       <section className="transcript" aria-live="polite" aria-label="Conversation transcript">{!boot && transport !== "connecting" ? <div className="empty-state" role="alert"><span>ERROR</span><h1>{transport}</h1><p>Failed to load cockpit. Open the URL printed by <code>strike serve</code> (includes <code>?token=</code>), or pass a valid bearer token.</p></div> : !state.items.length && <div className="empty-state"><span>01 / READY</span><h1>{boot?.attachOnly ? "Inspect the record." : "Direct the work."}</h1><p>{boot?.attachOnly ? "Select a durable session from the rail." : "Describe an outcome. Strike will plan, act, and report through the live engine seam."}</p></div>}{state.items.map((item) => <Transcript key={item.id} item={item} showThinking={showThinking} />)}<div ref={endRef} /></section>
       <form className="composer" onSubmit={submit}><label htmlFor="prompt">Instruction {state.status.busy && "— send to queue"}</label><textarea aria-label="Instruction" id="prompt" value={draft} disabled={!isLive} placeholder={isLive ? "Describe the next outcome…  / command" : "Historical session — read only"} onPaste={(event) => void attach(event.clipboardData.files)} onDrop={(event) => { event.preventDefault(); void attach(event.dataTransfer.files); }} onDragOver={(event) => event.preventDefault()} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !completions.length) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} />{completions.length > 0 && <div className="completion" role="listbox" aria-label="Composer completions">{completions.slice(0, 8).map((item) => <button type="button" role="option" key={item.label} onClick={() => selectCompletion(item)}><strong>{item.label}</strong><span>{item.detail}</span></button>)}</div>}{images.length > 0 && <div className="attachments">{images.map((image, index) => <button type="button" key={`${image.name}-${index}`} onClick={() => setImages((list) => list.filter((_, i) => i !== index))}>{image.name} ×</button>)}</div>}{queue.length > 0 && <div className="prompt-queue-wrap"><ol ref={queueRef} className="prompt-queue" aria-label="Queued prompts">{queue.map((item, index) => <li key={index}>{queueEdit?.index === index ? <input className="queue-edit" aria-label={`Queued prompt text ${index + 1}`} value={queueEdit.text} autoFocus onChange={(event) => setQueueEdit({ index, text: event.target.value })} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); queueEditCancel.current = false; setQueue((list) => editQueuedText(list, index, queueEdit.text)); setQueueEdit(null); } if (event.key === "Escape") { event.preventDefault(); queueEditCancel.current = true; setQueueEdit(null); } }} onBlur={() => { if (!queueEditCancel.current) setQueue((list) => editQueuedText(list, index, queueEdit.text)); queueEditCancel.current = false; setQueueEdit(null); }} /> : <span>{item.text}{item.images.length > 0 ? ` (${item.images.length} img)` : ""}</span>}<span className="queue-actions"><button type="button" aria-label={`Move queued prompt ${index + 1} up`} disabled={index === 0} onClick={() => setQueue((list) => moveQueuedAt(list, index, -1))}>↑</button><button type="button" aria-label={`Move queued prompt ${index + 1} down`} disabled={index === queue.length - 1} onClick={() => setQueue((list) => moveQueuedAt(list, index, 1))}>↓</button><button type="button" aria-label={`Edit queued prompt ${index + 1}`} onClick={() => { queueEditCancel.current = false; setQueueEdit({ index, text: item.text }); }}>✎</button><button type="button" aria-label={`Remove queued prompt ${index + 1}`} onClick={() => { setQueue((list) => removeQueuedAt(list, index)); setQueueEdit((cur) => cur?.index === index ? null : cur); }}>×</button></span></li>)}</ol><div className="queue-toolbar"><button type="button" onClick={() => { setQueue(clearQueue()); setQueueEdit(null); }}>Clear queue</button></div></div>}<div><span><kbd>↵</kbd> send · <kbd>⇧↵</kbd> newline</span><span><input ref={fileRef} hidden type="file" accept="image/*" multiple onChange={(event) => void attach(event.target.files)} /><button type="button" onClick={() => fileRef.current?.click()}>Attach</button>{history.length > 0 && <button type="button" onClick={() => setDraft(history.at(-1) || "")}>History</button>}<button type="button" onClick={() => exportSession()} disabled={!state.items.length}>Export</button>{state.status.busy && <button type="button" className="stop" onClick={() => void op("interrupt")}>Interrupt</button>}<button type="submit" disabled={!draft.trim() || !isLive}>{state.status.busy ? "Queue" : "Send"}</button></span></div></form>
     </main>
-    <aside className={`inspector ${inspectorOpen ? "open" : "collapsed"}`} aria-label="Inspector"><PanelResize label="Resize inspector panel" value={inspectorWidth} min={240} max={520} onChange={setInspectorWidth} side="inspector" /><div className="inspector-tabs" role="tablist">{inspectorTabs.map((tab) => <button role="tab" aria-selected={inspector === tab} key={tab} onClick={() => void inspectProject(tab)}>{tab}</button>)}</div><div className="inspector-body">{inspectorTabs.length ? <InspectorBody tab={inspectorTabs.includes(inspector) ? inspector : inspectorTabs[0]} boot={boot} status={state.status} data={projectData} loading={projectLoading} expandedDiffs={expandedDiffs} toggleDiff={toggleDiff} isLive={isLive} selectedID={selectedID} onRefresh={() => void inspectProject(inspector)} sandbox={sandboxInfo} onExplainSandbox={() => void openSandboxExplain()} /> : <p className="muted">No inspector panels available for this host.</p>}</div></aside>
+    <aside className={`inspector ${inspectorOpen ? "open" : "collapsed"}`} aria-label="Inspector"><PanelResize label="Resize inspector panel" value={inspectorWidth} min={240} max={520} onChange={setInspectorWidth} side="inspector" /><div className="inspector-tabs" role="tablist">{inspectorTabs.map((tab) => <button role="tab" aria-selected={inspector === tab} key={tab} onClick={() => void inspectProject(tab)}>{tab}</button>)}</div><div className="inspector-body">{inspectorTabs.length ? <InspectorBody tab={inspectorTabs.includes(inspector) ? inspector : inspectorTabs[0]} boot={boot} workspace={state} data={projectData} loading={projectLoading} expandedDiffs={expandedDiffs} toggleDiff={toggleDiff} isLive={isLive} selectedID={selectedID} onRefresh={() => void inspectProject(inspector)} sandbox={sandboxInfo} onExplainSandbox={() => void openSandboxExplain()} /> : <p className="muted">No inspector panels available for this host.</p>}</div></aside>
     {settingsOpen && <SettingsDialog boot={boot} status={state.status} providers={providers} rootID={selectedID} isLive={isLive} onClose={() => setSettingsOpen(false)} />}
     {sandboxExplainOpen && sandboxInfo && <SandboxExplainDialog info={sandboxInfo} status={state.status} onClose={() => setSandboxExplainOpen(false)} />}
 {undoDialog && <UndoPreviewDialog preview={lastUndoPreview} preferFiles={undoDialog.preferFiles} onCancel={() => setUndoDialog(null)} onConfirm={confirmUndo} />}
@@ -690,7 +697,176 @@ function RuntimeStatus({ status, modelRates }: { status: Status; modelRates?: { 
   return <div className="runtime-status" aria-label="Session status">{bits.map((bit) => <span key={bit}>{bit}</span>)}</div>;
 }
 
-function InspectorBody({ tab, boot, status, data, loading, expandedDiffs, toggleDiff, isLive, selectedID, onRefresh, sandbox, onExplainSandbox }: { tab: InspectorTab; boot?: Bootstrap; status: Status; data: unknown; loading: boolean; expandedDiffs: Set<string>; toggleDiff: (path: string) => void; isLive: boolean; selectedID: string; onRefresh?: () => void; sandbox?: SandboxInfo; onExplainSandbox?: () => void }) {
+function formatTok(tc?: TokenCount): string {
+  if (!tc?.known) return "—";
+  return `~${(tc.n ?? 0).toLocaleString()}`;
+}
+
+function contextPair(status: Status): string {
+  if (status.contextUsed !== undefined && status.contextLimit !== undefined) {
+    return `${status.contextUsed.toLocaleString()} / ${status.contextLimit.toLocaleString()}`;
+  }
+  if (status.contextUsed !== undefined) return `${status.contextUsed.toLocaleString()} / —`;
+  if (status.contextLimit !== undefined) return `— / ${status.contextLimit.toLocaleString()}`;
+  return "not reported";
+}
+
+function ContextDoctor({ workspace, isLive, selectedID }: { workspace: WorkspaceState; isLive: boolean; selectedID: string }) {
+  const {
+    status, attribution, layers, pinnedKinds, excludedKinds, shedKinds,
+    fitWarning, promptScope, systemChars, messageCount,
+  } = workspace;
+  const applyControls = (nextPin: string[], nextExcl: string[]) => {
+    if (!isLive) return;
+    void op("context.controls", {
+      pinKinds: nextPin, setPin: true,
+      excludeKinds: nextExcl, setExclude: true,
+    }, selectedID);
+  };
+  const pin = (kind: string) => applyControls(setAdd(pinnedKinds, kind), setRemove(excludedKinds, kind));
+  const unpin = (kind: string) => applyControls(setRemove(pinnedKinds, kind), excludedKinds);
+  const exclude = (kind: string) => applyControls(setRemove(pinnedKinds, kind), setAdd(excludedKinds, kind));
+  const include = (kind: string) => applyControls(pinnedKinds, setRemove(excludedKinds, kind));
+  const clearControls = () => applyControls([], []);
+  const refresh = () => { if (isLive) void op("inspect.prompt", undefined, selectedID); };
+
+  const controlKinds = Array.from(new Set([
+    ...LAYER_KINDS,
+    ...pinnedKinds,
+    ...excludedKinds,
+    ...layers.map((l) => l.kind),
+  ])).filter(Boolean);
+
+  return <>
+    <div className="context-doctor-head">
+      <h2>Context doctor</h2>
+      <div className="context-doctor-actions">
+        <button type="button" disabled={!isLive} onClick={refresh}>Refresh</button>
+        <button type="button" disabled={!isLive || (!pinnedKinds.length && !excludedKinds.length)} onClick={clearControls}>Clear pin/exclude</button>
+      </div>
+    </div>
+    {fitWarning && <FitWarningBanner warning={fitWarning} />}
+    <dl>
+      <dt>Provider</dt><dd>{status.provider || "unknown"}</dd>
+      <dt>Model</dt><dd>{status.model || "unknown"}</dd>
+      <dt>Phase</dt><dd>{status.phase || "idle"}</dd>
+      <dt>Workflow</dt><dd>{status.workflow || "none"}</dd>
+      <dt>Context</dt><dd>{contextPair(status)}</dd>
+      {status.usageSource && <><dt>Usage source</dt><dd>{status.usageSource}</dd></>}
+      {promptScope && <><dt>Prompt scope</dt><dd>{promptScope === "last" ? "last request" : "current composition"}</dd></>}
+      {systemChars !== undefined && <><dt>System chars</dt><dd>{systemChars.toLocaleString()}</dd></>}
+      {messageCount !== undefined && <><dt>History</dt><dd>{messageCount.toLocaleString()} msgs</dd></>}
+    </dl>
+
+    <AttributionTable attribution={attribution} />
+
+    {(pinnedKinds.length > 0 || excludedKinds.length > 0 || shedKinds.length > 0) && (
+      <section className="context-sets" aria-label="Context control sets">
+        <h3>Controls</h3>
+        {pinnedKinds.length > 0 && <p><strong>Pinned</strong> {pinnedKinds.join(", ")}</p>}
+        {excludedKinds.length > 0 && <p><strong>Excluded</strong> {excludedKinds.join(", ")}</p>}
+        {shedKinds.length > 0 && <p><strong>Shed</strong> {shedKinds.join(", ")}</p>}
+      </section>
+    )}
+
+    <section className="context-layers" aria-label="Prompt layers">
+      <h3>Layers</h3>
+      {layers.length === 0 ? (
+        <p className="muted">{isLive ? "No layer breakdown yet. Refresh to inspect the effective prompt." : "No layer breakdown in this session log."}</p>
+      ) : (
+        <table className="context-table">
+          <thead><tr><th>Kind</th><th>~tok</th><th>Chars</th><th>Source</th><th>Actions</th></tr></thead>
+          <tbody>
+            {layers.map((layer) => {
+              const isPinned = layer.pinned || pinnedKinds.includes(layer.kind);
+              const isExcluded = excludedKinds.includes(layer.kind);
+              const est = layer.estTokens ?? (layer.chars ? Math.ceil(layer.chars / 4) : undefined);
+              return <tr key={`${layer.kind}:${layer.source || ""}`}>
+                <td><code>{layer.kind}</code>{isPinned ? " · pin" : ""}{isExcluded ? " · excl" : ""}</td>
+                <td>{est !== undefined ? `~${est.toLocaleString()}` : "—"}</td>
+                <td>{layer.chars !== undefined ? layer.chars.toLocaleString() : "—"}</td>
+                <td className="muted">{layer.source || "—"}</td>
+                <td className="context-layer-actions">
+                  {isPinned
+                    ? <button type="button" disabled={!isLive} onClick={() => unpin(layer.kind)}>Unpin</button>
+                    : <button type="button" disabled={!isLive || isExcluded} onClick={() => pin(layer.kind)}>Pin</button>}
+                  {isExcluded
+                    ? <button type="button" disabled={!isLive} onClick={() => include(layer.kind)}>Include</button>
+                    : <button type="button" disabled={!isLive} onClick={() => exclude(layer.kind)}>Exclude</button>}
+                </td>
+              </tr>;
+            })}
+          </tbody>
+        </table>
+      )}
+    </section>
+
+    {isLive && (
+      <section className="context-kind-picker" aria-label="Pin or exclude layer kinds">
+        <h3>Layer kinds</h3>
+        <p className="muted">Pin retains a kind under fit pressure; exclude omits it from composition.</p>
+        <div className="context-kind-list">
+          {controlKinds.map((kind) => {
+            const isPinned = pinnedKinds.includes(kind);
+            const isExcluded = excludedKinds.includes(kind);
+            return <div key={kind} className="context-kind-row">
+              <code>{kind}</code>
+              <span>
+                {isPinned
+                  ? <button type="button" onClick={() => unpin(kind)}>Unpin</button>
+                  : <button type="button" disabled={isExcluded} onClick={() => pin(kind)}>Pin</button>}
+                {isExcluded
+                  ? <button type="button" onClick={() => include(kind)}>Include</button>
+                  : <button type="button" onClick={() => exclude(kind)}>Exclude</button>}
+              </span>
+            </div>;
+          })}
+        </div>
+      </section>
+    )}
+  </>;
+}
+
+function FitWarningBanner({ warning }: { warning: FitWarning }) {
+  const tone = warning.level === "critical" ? "critical" : "warn";
+  return <div className={`context-fit-warning ${tone}`} role="alert" aria-label="Context fit warning">
+    <strong>{warning.level === "critical" ? "Critical fit" : "Fit warning"}</strong>
+    <p>{warning.message}</p>
+    {(warning.estimatedTokens !== undefined || warning.contextLimit !== undefined) && (
+      <small>
+        {warning.estimatedTokens !== undefined ? `~${warning.estimatedTokens.toLocaleString()} tok` : "—"}
+        {" / "}
+        {warning.contextLimit !== undefined ? warning.contextLimit.toLocaleString() : "—"}
+        {warning.source ? ` (${warning.source})` : ""}
+      </small>
+    )}
+  </div>;
+}
+
+function AttributionTable({ attribution }: { attribution?: RequestAttribution }) {
+  if (!attribution) return null;
+  const rows: Array<[string, TokenCount | undefined]> = [
+    ["system", attribution.system],
+    ["tools", attribution.tools],
+    ["messages", attribution.messages],
+    ["tool_results", attribution.toolResults],
+    ["total", attribution.total],
+  ];
+  return <section className="context-attribution" aria-label="Token breakdown by source">
+    <h3>Tokens by source</h3>
+    <table className="context-table">
+      <thead><tr><th>Source</th><th>~Tokens</th></tr></thead>
+      <tbody>
+        {rows.map(([label, tc]) => <tr key={label}><td>{label}</td><td>{formatTok(tc)}</td></tr>)}
+      </tbody>
+    </table>
+    <p className="muted">Local ~4 chars/token estimates{attribution.source ? ` · source ${attribution.source}` : ""}. Not provider-measured billing.</p>
+  </section>;
+}
+
+function InspectorBody({ tab, boot, workspace, data, loading, expandedDiffs, toggleDiff, isLive, selectedID, onRefresh, sandbox, onExplainSandbox }: { tab: InspectorTab; boot?: Bootstrap; workspace: WorkspaceState; data: unknown; loading: boolean; expandedDiffs: Set<string>; toggleDiff: (path: string) => void; isLive: boolean; selectedID: string; onRefresh?: () => void; sandbox?: SandboxInfo; onExplainSandbox?: () => void }) {
+  const status = workspace.status;
+  if (tab === "context") return <ContextDoctor workspace={workspace} isLive={isLive} selectedID={selectedID} />;
   if (tab === "workflows") {
     return <WorkflowsPanel
       available={Boolean(boot?.capabilities.workflows)}
@@ -702,7 +878,7 @@ function InspectorBody({ tab, boot, status, data, loading, expandedDiffs, toggle
       busy={Boolean(status.busy)}
     />;
   }
-    if (tab === "goals") {
+  if (tab === "goals") {
     return <GoalsPanel available={Boolean(boot?.capabilities.goals)} live={isLive} />;
   }
   if (tab === "plans") {

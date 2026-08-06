@@ -19,6 +19,7 @@ describe("resolveSlash", () => {
   it("maps engine ops and client actions", () => {
     expect(resolveSlash("/compact")).toEqual({ kind: "op", type: "compact", data: { strategy: "summarize" } });
     expect(resolveSlash("/prompt")).toEqual({ kind: "op", type: "inspect.prompt" });
+    expect(resolveSlash("/context")).toEqual({ kind: "op", type: "inspect.prompt" });
     expect(resolveSlash("/rewind")).toEqual({ kind: "op", type: "rewind", data: {} });
     expect(resolveSlash("/rewind-files")).toEqual({ kind: "op", type: "rewind", data: { restoreFiles: true } });
     expect(resolveSlash("/interrupt")).toEqual({ kind: "op", type: "interrupt" });
