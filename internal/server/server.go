@@ -171,6 +171,18 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/file", s.handleFile)
 	s.mux.HandleFunc("GET /v1/memory", s.handleMemory)
 	s.mux.HandleFunc("GET /v1/issues", s.handleIssues)
+	s.mux.HandleFunc("GET /v1/workflows", s.handleWorkflows)
+	s.mux.HandleFunc("GET /v1/workflows/{name}", s.handleWorkflowGet)
+	s.mux.HandleFunc("GET /v1/workflows/{name}/document", s.handleWorkflowDocument)
+	s.mux.HandleFunc("POST /v1/workflows/{name}/start", s.handleWorkflowStart)
+	s.mux.HandleFunc("POST /v1/workflows/stop", s.handleWorkflowStop)
+	s.mux.HandleFunc("POST /v1/workflows/scaffold", s.handleWorkflowScaffold)
+	s.mux.HandleFunc("POST /v1/workflows/validate", s.handleWorkflowValidate)
+	s.mux.HandleFunc("POST /v1/workflows/format", s.handleWorkflowFormat)
+	s.mux.HandleFunc("POST /v1/workflows/phase-grants", s.handleWorkflowPhaseGrants)
+	s.mux.HandleFunc("POST /v1/workflows/save", s.handleWorkflowSave)
+	s.mux.HandleFunc("POST /v1/workflow-drafts/review", s.handleWorkflowDraftReview)
+	s.mux.HandleFunc("POST /v1/workflow-drafts/save", s.handleWorkflowDraftSave)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/events", s.handleSessionEvents)
 	s.mux.HandleFunc("GET /v1/sessions", s.handleSessions)
 	s.mux.HandleFunc("GET /v1/roots", s.handleRoots)
@@ -556,6 +568,10 @@ func (s *Server) writeEventsRangeFile(ctx context.Context, w http.ResponseWriter
 				// Skip malformed lines rather than killing the stream.
 				continue
 			}
+			// Skip session log schema header (#803); clients expect protocol events.
+			if isSessionLogHeader(payload) {
+				continue
+			}
 			if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {
 				return offset, err
 			}
@@ -569,6 +585,18 @@ func (s *Server) writeEventsRangeFile(ctx context.Context, w http.ResponseWriter
 		}
 	}
 	return offset, nil
+}
+
+// isSessionLogHeader reports whether payload is the optional first-line
+// session.header schema marker written by internal/session (#803).
+func isSessionLogHeader(payload []byte) bool {
+	var probe struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(payload, &probe); err != nil {
+		return false
+	}
+	return probe.Type == "session.header"
 }
 
 func validateSessionID(id string) error {

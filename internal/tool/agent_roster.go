@@ -22,8 +22,10 @@ func (agentRosterTool) Description() string {
 - Available on the lead and on children (children see lead + siblings).
 - Each row includes session_id, optional name, agent persona, state, role,
   started_at, and terminal_summary when finished.
+- Live rows also expose objective, last_action, block_reason, files_touched,
+  and budget remaining/usage with stall/loop signals (same fields as task_status).
 - State matches task_status vocabulary where possible
-  (starting|working|needs_attention|completed|failed|canceled|unknown).
+  (starting|working|needs_attention|completed|failed|canceled|blocked|unknown).
 - Solo lead returns a single self row. Not available outside a team session.`
 }
 

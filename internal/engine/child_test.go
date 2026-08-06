@@ -319,19 +319,24 @@ func TestForegroundTaskIndependentHistory(t *testing.T) {
 			childReq = r
 			continue
 		}
-		// Parent final includes the original user turn plus a tool result.
-		// Prefer that even when mid-turn inject already appended [child.completed]
-		// into the same Stream (not a pure idle auto-nudge).
 		hasTaskResult := false
+		hasChildNotice := false
 		for _, msg := range r.Messages {
 			if msg.Role == provider.RoleTool && msg.ToolResult != nil && msg.ToolResult.CallID == "task-1" {
 				hasTaskResult = true
-				break
+			}
+			if msg.Role == provider.RoleUser && strings.Contains(msg.Text, "[child.completed") {
+				hasChildNotice = true
 			}
 		}
-		if hasTaskResult {
-			parentFinal = r
+		if !hasTaskResult {
 			continue
+		}
+		// Prefer the tool-loop stream (task result, no idle nudge). Fall back to
+		// a stream that also carries [child.completed] when that is the only
+		// observation (mid-turn inject raced ahead of the next parent Stream).
+		if parentFinal == nil || !hasChildNotice {
+			parentFinal = r
 		}
 	}
 	if childReq == nil {
@@ -352,21 +357,24 @@ func TestForegroundTaskIndependentHistory(t *testing.T) {
 	userTurns := 0
 	sawParentPrompt := false
 	for _, msg := range parentFinal.Messages {
-		if msg.Role == provider.RoleUser {
-			userTurns++
-			if msg.Text == parentPrompt {
-				sawParentPrompt = true
-			}
-			if msg.Text == taskPrompt {
-				t.Errorf("parent history has child prompt as user turn: %#v", parentFinal.Messages)
-			}
+		if msg.Role != provider.RoleUser {
+			continue
+		}
+		// Engine-injected child notices are not original user turns.
+		if strings.Contains(msg.Text, "[child.completed") {
+			continue
+		}
+		userTurns++
+		if msg.Text == parentPrompt {
+			sawParentPrompt = true
+		}
+		if msg.Text == taskPrompt {
+			t.Errorf("parent history has child prompt as user turn: %#v", parentFinal.Messages)
 		}
 	}
 	if !sawParentPrompt {
 		t.Errorf("parent final missing original user turn; messages=%#v", parentFinal.Messages)
 	}
-	// userTurns may be >1 when [child.completed] was injected before the
-	// post-tool Stream (mid-turn inject); that is still the parent final.
 	if userTurns < 1 {
 		t.Errorf("parent final user turns = %d, want >= 1; messages=%#v", userTurns, parentFinal.Messages)
 	}

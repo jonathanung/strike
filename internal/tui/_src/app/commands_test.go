@@ -30,6 +30,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/autonomy":         {"set exit-gate policy (supervised/agent/checks/skip-all)", "[mode]", commandSourceBuiltin},
 		"/mode":             {"set permission posture (default/plan/accept-edits/yolo)", "[mode]", commandSourceBuiltin},
 		"/sandbox":          {"show OS sandbox policy; /sandbox explain for generated profile", "", commandSourceBuiltin},
+		"/permission":       {"explain a tool permission or list presets", "[explain <tool> [pattern]|presets]", commandSourceBuiltin},
 		"/auth":             {"manage provider authentication", "[provider]", commandSourceBuiltin},
 		"/agent":            {"select an agent", "[name]", commandSourceBuiltin},
 		"/agents":           {"focus the agents right pane", "", commandSourceBuiltin},
@@ -55,6 +56,8 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/rename":           {"rename the current session", "[title]", commandSourceBuiltin},
 		"/export":           {"export the conversation to markdown", "[path] [--open]", commandSourceBuiltin},
 		"/timeline":         {"structured run timeline (collapsed view or JSON export)", "[export [path]]", commandSourceBuiltin},
+		"/diag":             {"export prompt/config diagnostic bundle (JSON)", "[export [path]]", commandSourceBuiltin},
+		"/diagnostic":       {"alias of /diag", "[export [path]]", commandSourceBuiltin},
 		"/copy":             {"copy the last assistant response to the clipboard", "", commandSourceBuiltin},
 		"/help":             {"show available commands", "", commandSourceBuiltin},
 		"/keys":             {"show keyboard shortcuts", "[reset]", commandSourceBuiltin},
@@ -134,7 +137,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 }
 
 func TestValidSkillNameRejectsReservedBuiltinsIncludingMDRead(t *testing.T) {
-	for _, name := range []string{"provider", "model", "effort", "autonomy", "mode", "auth", "agent", "agents", "activity", "files", "visualizer", "system", "telemetry", "pets", "fast", "vim", "nano", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "rename", "export", "timeline", "copy", "help", "keys", "legend", "memory", "issues", "plan", "goal", "loop", "workflow", "context", "effective-prompt", "cost", "upgrade", "init", "mcp", "lsp", "diagnostics", "exit", "quit", "focus-left", "focus-right", "window-next", "window-prev", "group-next", "group-prev", "scroll-up", "scroll-down", "jump-bottom", "palette", "interrupt", "save-defaults", "leave-editor", "edit-prompt", "agent-next", "mode-next", "tool-prev", "tool-next", "tool-expand", "tool-copy", "tool-review", "tool-apply", "subagent", "parent", "subagent-next", "subagent-prev", "root-new", "root-open", "root-interrupt", "root-hide", "root-filter"} {
+	for _, name := range []string{"provider", "model", "effort", "autonomy", "mode", "sandbox", "permission", "auth", "agent", "agents", "activity", "files", "visualizer", "system", "telemetry", "pets", "fast", "vim", "nano", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "rename", "export", "timeline", "diag", "diagnostic", "copy", "help", "keys", "legend", "memory", "issues", "plan", "goal", "loop", "workflow", "context", "effective-prompt", "cost", "upgrade", "init", "mcp", "lsp", "diagnostics", "exit", "quit", "focus-left", "focus-right", "window-next", "window-prev", "group-next", "group-prev", "scroll-up", "scroll-down", "jump-bottom", "palette", "interrupt", "save-defaults", "leave-editor", "edit-prompt", "agent-next", "mode-next", "tool-prev", "tool-next", "tool-expand", "tool-copy", "tool-review", "tool-apply", "subagent", "parent", "subagent-next", "subagent-prev", "root-new", "root-open", "root-interrupt", "root-hide", "root-filter"} {
 		if validSkillName(name) {
 			t.Errorf("validSkillName(%q) = true, want false for reserved builtin", name)
 		}

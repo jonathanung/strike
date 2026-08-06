@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jonathanung/strike-cli/internal/artifact"
 	"github.com/jonathanung/strike-cli/internal/auth"
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/engine"
@@ -58,6 +59,7 @@ type assembled struct {
 	issuesClose    func() error
 	goalsClose     func() error
 	plansClose     func() error
+	artifactsClose func() error
 	// worktreeClose removes a strike-managed worktree when cleanup=delete.
 	worktreeClose func() error
 	// worktreeNotice is a user-visible soft-fail message (e.g. non-git cwd).
@@ -126,8 +128,18 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("opening project plans: %w", err)
 	}
+	artifactStore, err := artifact.Open(globalRoot, projectIdentity.Key)
+	if err != nil {
+		_ = planStore.Close()
+		_ = goalStore.Close()
+		_ = issueStore.Close()
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, fmt.Errorf("opening project artifacts: %w", err)
+	}
 	cfg, err := config.Load(workDir)
 	if err != nil {
+		_ = artifactStore.Close()
 		_ = planStore.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
@@ -137,6 +149,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	}
 	sandboxMode, err := resolveSandboxMode(cfg.Sandbox, opts.sandbox)
 	if err != nil {
+		_ = artifactStore.Close()
 		_ = planStore.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
@@ -161,6 +174,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	if opts.effort != "" {
 		level, ok := protocol.ParseEffort(opts.effort)
 		if !ok || level == protocol.EffortDefault {
+			_ = artifactStore.Close()
 			_ = planStore.Close()
 			_ = goalStore.Close()
 			_ = issueStore.Close()
@@ -173,6 +187,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 
 	authStore, err := auth.OpenStore(auth.DefaultPath())
 	if err != nil {
+		_ = artifactStore.Close()
 		_ = planStore.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
@@ -269,6 +284,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// /provider otherwise). Headless exec always requires a usable provider.
 	if requireProvider || (opts.providerSet && opts.provider != "") {
 		if cfg.Provider == "" {
+			_ = artifactStore.Close()
 			_ = planStore.Close()
 			_ = goalStore.Close()
 			_ = issueStore.Close()
@@ -277,6 +293,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			return nil, fmt.Errorf("no provider configured (pass --provider or set provider in config)")
 		}
 		if _, _, err := selectProvider(cfg.Provider); err != nil {
+			_ = artifactStore.Close()
 			_ = planStore.Close()
 			_ = goalStore.Close()
 			_ = issueStore.Close()
@@ -290,6 +307,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// available names in its description at construction time.
 	skills, err := config.LoadSkillsWithError(workDir)
 	if err != nil {
+		_ = artifactStore.Close()
 		_ = planStore.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
@@ -334,6 +352,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tool.NewPlanWrite(planStore),
 		tool.NewPlanRead(planStore),
 		tool.NewPlanDelegate(planStore),
+		tool.NewArtifactWrite(artifactStore),
+		tool.NewArtifactRead(artifactStore),
 		tool.NewNotebookEdit(),
 		tool.NewSleep(),
 		tool.NewSkill(skillInfos),
@@ -353,6 +373,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// other personas supply a body that becomes the persona layer.
 	loadedAgents, err := config.LoadAgentsWithError(workDir)
 	if err != nil {
+		_ = artifactStore.Close()
 		_ = planStore.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
@@ -391,6 +412,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	instructions := config.LoadInstructions(workDir, projectIdentity.Root)
 	workflows, err := config.LoadWorkflows(workDir)
 	if err != nil {
+		_ = artifactStore.Close()
 		_ = planStore.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
@@ -446,6 +468,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// this OS process. Omitted limits stay unlimited (no wait).
 	schedEff, err := cfg.SchedulerEffective()
 	if err != nil {
+		_ = artifactStore.Close()
 		_ = planStore.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
@@ -455,6 +478,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	}
 	sched, err := scheduler.New(schedEff.SchedulerConfig())
 	if err != nil {
+		_ = artifactStore.Close()
 		_ = planStore.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
@@ -597,9 +621,21 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 				// Background context: document sync must not be canceled with the tool call.
 				lspMgr.NotifyFile(context.Background(), absPath, content, deleted)
 			},
-			CollectDiagnostics:         makeLSPCollectDiagnostics(lspMgr, toolDir, cfg.LSP),
-			MaxChildDepth:              cfg.MaxChildDepth,
-			OverlapPolicy:              cfg.Session.OverlapPolicy,
+			CollectDiagnostics:   makeLSPCollectDiagnostics(lspMgr, toolDir, cfg.LSP),
+			MaxChildDepth:        cfg.MaxChildDepth,
+			MaxToolRetryAttempts: cfg.ToolRetry.MaxAttempts,
+			ToolLoopThreshold:    cfg.ToolRetry.LoopThreshold,
+			ToolRetryBackoff:     toolRetryBackoffFromConfig(cfg.ToolRetry),
+			OverlapPolicy:        cfg.Session.OverlapPolicy,
+			DefaultChildBudget: tool.AgentBudgetLimits{
+				MaxWallClockS:     cfg.Session.AgentBudget.MaxWallClockS,
+				MaxTokens:         cfg.Session.AgentBudget.MaxTokens,
+				MaxCostUSD:        cfg.Session.AgentBudget.MaxCostUSD,
+				MaxToolCalls:      cfg.Session.AgentBudget.MaxToolCalls,
+				MaxDangerousTools: cfg.Session.AgentBudget.MaxDangerousTools,
+				StallAfterS:       cfg.Session.AgentBudget.StallAfterS,
+				LoopDetectN:       cfg.Session.AgentBudget.LoopDetectN,
+			},
 			InitialProvider:            initialProvider,
 			InitialModel:               initialModel,
 			InitialEffort:              initialEffort,
@@ -624,7 +660,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			QuietStartup:               quietStartup,
 			DangerouslySkipPermissions: opts.dangerouslySkipPermissions,
 			Workflows:                  workflows,
-			Rules:                      permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),
+			Rules:                      permissionLayersWithPreset(cfg.Permissions, cfg.PermissionPreset, opts.dangerouslySkipPermissions),
+			RuleLayerNames:             permissionLayerNames(cfg.PermissionPreset, opts.dangerouslySkipPermissions),
 			Hooks:                      hookDefs,
 			HookRules:                  cfg.HookRules(),
 			CompactionStrategy:         cfg.CompactionStrategy,
@@ -694,6 +731,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		info, err := sessions.LatestRoot(projectIdentity.Key)
 		if err != nil {
 			sched.Close()
+			_ = artifactStore.Close()
 			_ = planStore.Close()
 			_ = goalStore.Close()
 			_ = issueStore.Close()
@@ -706,6 +744,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	first, replay, err := openRoot(resumeID, true)
 	if err != nil {
 		sched.Close()
+		_ = artifactStore.Close()
 		_ = planStore.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
@@ -763,14 +802,28 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	services.Files = local.NewFiles(workDir)
 	// Compile base sandbox profile from defaults + config (+ optional dangerous
 	// allow-all). Engine recompiles per bash call with live agent/phase layers.
+	basePermLayers := permissionLayersWithPreset(cfg.Permissions, cfg.PermissionPreset, opts.dangerouslySkipPermissions)
 	sandboxPolicy := permission.CompileSandbox(
 		sandbox.ResolveMode(sandboxMode),
 		workDir,
-		permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions)...,
+		basePermLayers...,
 	)
 	sandboxPolicy.NetworkAllow = sandbox.CloneNetworkAllow(cfg.Network.Allow)
 	sandboxExplain := sandbox.Explain(sandboxPolicy)
 	services.Shell = local.NewShell(workDir, sandboxPolicy)
+	// Permission explain/presets for /permission. Live explain binds to the
+	// first root engine; base layers cover startup before Run.
+	permHost := local.NewPermissions(
+		basePermLayers,
+		permissionLayerNames(cfg.PermissionPreset, opts.dangerouslySkipPermissions),
+	)
+	if first != nil && first.eng != nil {
+		eng := first.eng
+		permHost.SetLive(func(perm, pat string) permission.Explanation {
+			return eng.ExplainPermission(perm, pat)
+		})
+	}
+	services.Permissions = permHost
 	services.Goals = local.NewGoals(goalStore, workDir)
 	services.Plans = local.NewPlans(planStore)
 	services.Sessions = local.NewSessions(sessions, projectIdentity.Key)
@@ -814,6 +867,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		},
 		plansClose: func() error {
 			return planStore.Close()
+		},
+		artifactsClose: func() error {
+			return artifactStore.Close()
 		},
 		worktreeClose:  first.wtClose,
 		worktreeNotice: first.wtNotice,
@@ -1019,5 +1075,18 @@ func optionalBearer(name string, store *auth.Store, envName string) openaicompat
 			return key, nil
 		}
 		return "", nil
+	}
+}
+
+// toolRetryBackoffFromConfig builds the engine backoff func from config delays.
+// nil when both delays are zero (engine default jittered backoff).
+func toolRetryBackoffFromConfig(tr config.ToolRetryConfig) func(int) time.Duration {
+	if tr.BaseDelayMs == 0 && tr.MaxDelayMs == 0 {
+		return nil
+	}
+	base := time.Duration(tr.BaseDelayMs) * time.Millisecond
+	max := time.Duration(tr.MaxDelayMs) * time.Millisecond
+	return func(nextAttempt int) time.Duration {
+		return tool.ToolRetryDelay(nextAttempt, base, max)
 	}
 }

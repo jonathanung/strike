@@ -27,6 +27,7 @@ func TestWrapOpDecodeRoundTrip(t *testing.T) {
 			PinKinds:     []string{PromptLayerPersona},
 			SetPin:       true,
 		},
+		InspectDiagnosticBundle{},
 		Rewind{RestoreFiles: true},
 	}
 	for _, op := range cases {

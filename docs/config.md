@@ -66,6 +66,12 @@ write this file. Manual `/ftue` remains available after acknowledgement.
   "permissionAutoApproveSeconds": 0,
   "permissionAutoApproveExclude": ["bash"],
   "maxChildDepth": 0,
+  "toolRetry": {
+    "maxAttempts": 3,
+    "baseDelayMs": 200,
+    "maxDelayMs": 2000,
+    "loopThreshold": 3
+  },
   "compactionStrategy": "trim",
   "compactionModel": "",
   "compactionThreshold": 0.70,
@@ -78,7 +84,21 @@ write this file. Manual `/ftue` remains available after acknowledgement.
   "session": {
     "worktree": "off",
     "worktreeCleanup": "keep",
-    "overlapPolicy": "warn"
+    "overlapPolicy": "warn",
+    // Optional durability retention hooks (#803). Zero / omitted = unlimited.
+    // Applied via session.ApplyRetention (not automatic on every launch).
+    "retentionMaxSessions": 0,
+    "retentionMaxAgeDays": 0,
+    "retentionMaxBytes": 0,
+    "agentBudget": {
+      "maxWallClockS": 0,
+      "maxTokens": 0,
+      "maxCostUsd": 0,
+      "maxToolCalls": 0,
+      "maxDangerousTools": 0,
+      "stallAfterS": 0,
+      "loopDetectN": 0
+    }
   },
   "scheduler": {
     "presets": ["cargo", "npm"],
@@ -95,6 +115,7 @@ write this file. Manual `/ftue` remains available after acknowledgement.
       { "pattern": "make *", "class": "build" }
     ]
   },
+  "permissionPreset": "dev",
   "permissions": [
     { "permission": "bash", "pattern": "go *", "action": "allow" },
     { "permission": "write", "pattern": "**/*.env", "action": "deny" }
@@ -104,6 +125,40 @@ write this file. Manual `/ftue` remains available after acknowledgement.
 
 Rules concatenate across layers; the last matching rule wins, so project
 config overrides global, and session "always" grants override both.
+
+**Evaluation order (last-match-wins):** defaults → optional
+`permissionPreset` → `permissions[]` (global then project) → optional
+`--dangerously-skip-permissions` allow-all → project runtime grants → active
+agent profile → session always grants → scoped TTL grants → permission-mode
+late denies (plan) → workflow phase profile → mode ask-upgrade (yolo /
+accept-edits only upgrade remaining Ask→Allow; never widen Deny).
+
+**Permission presets (`permissionPreset`):** shipped named rulesets inserted
+after defaults and before `permissions[]`. Empty means no preset layer.
+Inspect with `/permission presets`.
+
+| ID | Behavior |
+|---|---|
+| `read-only` | Allow read/search/LSP; **deny** write, edit, bash, webfetch, mcp, hooks |
+| `dev` | Allow common local-dev bash (`go *`, `git status/diff/log/show`, `make test*`); deny force-push and `.env` writes; other mutations stay ask |
+| `yolo-with-sandbox` | Rule-level allow-all (`* *` allow). Does **not** turn off OS sandbox — keep `sandbox` at `workspace-write` or `read-only`. Later deny rules still win. Distinct from `permissionMode: yolo` |
+
+**Explain:** `/permission explain <tool> [pattern]` (or the
+`permission.Explain` / `Service.Explain` API) returns the effective action,
+matched rule, layer name, and match trail for a sample tool call.
+
+**Scoped approvals:** runtime grants may be bounded by scope and optional
+wall-clock TTL (`session`, `path-prefix`, `tool`, `command-class`). A scoped
+grant that would override a parent **Deny** is rejected (does not silently
+widen). Session always / project decisions remain the TUI reply path;
+programmatic `Service.Grant` is the scoped+TTL API.
+
+**Audit trail:** hard **deny**, **ask** suspend, and user **reply** outcomes
+emit `permission.decided` (plus `permission.asked` / `permission.resolved`
+when the user is prompted). Synchronous allows are not audited (avoids
+flooding session JSONL on high-frequency read/search tools). `/timeline`
+folds audit events into `kind: permission` entries with redacted patterns
+(see [secrets.md](secrets.md) / `pkg/redact`).
 
 **Two-dial model (Codex mental model):**
 
@@ -236,6 +291,32 @@ depth 0). Zero/unset means the engine default (**1**: children cannot spawn
 further tasks). Values above **8** clamp to 8. Editable under `/settings` →
 Defaults; takes effect for **new** sessions (already-running engines keep their
 bound).
+
+**Tool retry / error recovery:** `toolRetry` controls harness auto-retry and
+loop detection for tool dispatch (issue #795). Policy is **error code ×
+idempotency** (see `internal/tool/retry.go`):
+
+| | `safe-retry` | `conditional` | `unsafe` |
+|---|---|---|---|
+| `transient` / `timeout` | auto-retry + backoff | fail (no blind mutation retry) | fail |
+| `precondition_failed` | recover hint | recover hint | fail |
+| other codes | fail | fail | fail |
+
+Mutative tools (`edit` / `write` / `apply_patch` / `bash` / …) never
+auto-retry on generic or transient failure — that prevents double-apply.
+Provider stream retries remain separate (`MaxStreamAttempts` in the engine).
+
+| Key | Meaning | Default |
+|---|---|---|
+| `toolRetry.maxAttempts` | attempts per tool call including the first; `1` disables auto-retry | `3` |
+| `toolRetry.baseDelayMs` | first backoff step (full jitter applied) | `200` |
+| `toolRetry.maxDelayMs` | backoff cap | `2000` |
+| `toolRetry.loopThreshold` | identical consecutive failing tool+args before the turn stops with `loop_detected` | `3` |
+
+When the loop detector trips the engine emits `tool.loop_detected`, settles the
+tool as blocked, and ends the turn (`stopReason: loop_detected`). Auto-retries
+emit `tool.retrying` (timeline) before each backoff sleep.
+
 
 ## Desktop notifications (`notify`)
 
@@ -410,10 +491,64 @@ shared ownership map. When two **active** agents claim the same path:
 | `block` | conflicting write is refused |
 | `off` | track only (no warning/event) |
 
+### Session log durability and retention
+
+Session transcripts are JSONL under `~/.strike/sessions/<id>.jsonl` with a
+sidecar `<id>.meta.json`. New logs start with a `session.header` line carrying
+`schemaVersion` (currently `1`). Each event append writes a full JSON line and
+`fsync`s so a crash cannot leave an unreadable half-record; resume skips a
+trailing torn line and fails with an actionable error on interior corruption or
+an unsupported newer schema (upgrade strike). Secrets are scrubbed on append
+via `secret.RedactEvent` (see [secrets.md](secrets.md)).
+
+Portable **session packages** (`format: strike.session`) export/import the
+redacted event sequence + meta for support bundles — distinct from the
+human-readable markdown transcript (`/export`, #221) and from checkpoint stack
+persistence across `--continue` (#573). Live `/fork` / `/rewind` copy into a new
+id with `meta.forkedFrom` lineage.
+
+| `session.retentionMaxSessions` | Cap closed sessions retained (0 = unlimited) |
+| `session.retentionMaxAgeDays` | Drop closed sessions older than N days (0 = off) |
+| `session.retentionMaxBytes` | Cap total closed log+meta bytes (0 = off) |
+
+Build a policy with `session.RetentionFromConfig` and run
+`Manager.ApplyRetention` from tooling or a maintenance path. Open sessions are
+never deleted. Project config overrides global per field when non-zero.
+
 Lead and children can query the map with `agent_ownership` (`list`), and claim
 path prefixes with `lease` / `release` (exclusive or shared). Finished children
 are deactivated so they no longer cause overlap. Structured handoff
 `files_changed` (when available) can be merged via the same tracker.
+
+### Per-agent budgets (`session.agentBudget`)
+
+Optional defaults for every `task` / `delegate` child in a session. Spawn-time
+`budget` fields on the tool call overlay any non-zero dimension. Zero means
+unlimited for that dimension.
+
+| Field | Meaning |
+|---|---|
+| `maxWallClockS` | Wall-clock seconds before fail + interrupt |
+| `maxTokens` | Accumulated stream tokens before fail |
+| `maxCostUsd` | USD before fail (enforced when cost pricing lands; see below) |
+| `maxToolCalls` | Tool invocations before fail |
+| `maxDangerousTools` | bash/write/edit/apply_patch/notebook_edit calls before fail |
+| `stallAfterS` | Hard block after this many seconds without progress |
+| `loopDetectN` | Hard block when the same tool name repeats N times |
+
+On hard exceed the engine emits `child.escalated`, interrupts the child, marks
+the delegation `failed` or `blocked`, and delivers a structured lead/owner
+mailbox notice. Soft stall (default 300s idle) and loop (default 6 identical
+tools) flags always appear on `task_status` / `agent_roster` without killing.
+
+**Stale children (#517):** folded into stall — same `stall` signal and optional
+`stallAfterS` hard threshold; not a second detector.
+
+**Session cost envelope (#577 / #542):** when `maxSessionCostUSD` is configured
+it remains the **outer** cost cap for the whole session. Per-agent
+`maxCostUsd` nests inside that envelope and never raises the session ceiling.
+Until session cost pricing ships, `maxCostUsd` is accepted and exposed but not
+enforced (usage stays 0).
 
 **Isolated worktree path (explicit apply):** for true filesystem isolation,
 prefer separate root sessions with `session.worktree=always` (or

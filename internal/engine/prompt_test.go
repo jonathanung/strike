@@ -2,6 +2,7 @@ package engine_test
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -876,5 +877,248 @@ func waitEffectivePrompt(t *testing.T, eng *engine.Engine) protocol.EffectivePro
 		case <-deadline:
 			t.Fatal("timeout waiting for EffectivePrompt")
 		}
+	}
+}
+
+func waitDiagnosticBundle(t *testing.T, eng *engine.Engine) protocol.DiagnosticBundle {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case ev := <-eng.Events():
+			if b, ok := ev.(protocol.DiagnosticBundle); ok {
+				return b
+			}
+			if err, ok := ev.(protocol.EngineError); ok {
+				t.Fatalf("engine error: %s", err.Message)
+			}
+		case <-deadline:
+			t.Fatal("timeout waiting for DiagnosticBundle")
+		}
+	}
+}
+
+func TestInspectDiagnosticBundleMatchesStreamAndRedacts(t *testing.T) {
+	prov := newScriptedProvider(streamStep{
+		events: []provider.StreamEvent{
+			{Type: provider.EventTextDelta, Text: "ok"},
+			{Type: provider.EventDone, StopReason: "end_turn"},
+		},
+	})
+	secret := "sk-ant-api03-DIAGBUNDLESECRETKEY99"
+	eng := engine.New(engine.Options{
+		SessionID: "s-diag-root",
+		WorkDir:   t.TempDir(),
+		Agents: []engine.Agent{
+			{Name: "build"},
+			{Name: "reviewer", Prompt: "PERSONA_WITH_KEY " + secret},
+		},
+		InitialAgent:          "reviewer",
+		InitialProvider:       "anthropic",
+		InitialModel:          "claude-sonnet-5",
+		InitialEffort:         protocol.EffortHigh,
+		InitialPermissionMode: protocol.PermissionModeAcceptEdits,
+		SandboxMode:           "read-only",
+		LeanCode:              "full",
+		Instructions:          []string{"Instructions from: /tmp/AGENTS.md\nUse make test. key=" + secret},
+		CompactionStrategy:    "trim",
+		CompactionThreshold:   0.7,
+		MaxChildDepth:         2,
+		Registry:              tool.NewRegistry(),
+		Select: func(string) (provider.Provider, string, error) {
+			return prov, "claude-sonnet-5", nil
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "hi"}
+	req := waitStreamRequest(t, eng, prov)
+	waitTurnCompleted(t, eng)
+
+	eng.Ops() <- protocol.InspectDiagnosticBundle{}
+	ev := waitDiagnosticBundle(t, eng)
+
+	if ev.SchemaVersion == "" || !ev.Redacted {
+		t.Fatalf("bundle meta = schema=%q redacted=%v", ev.SchemaVersion, ev.Redacted)
+	}
+	if !ev.Prompt.FromLastStream {
+		t.Fatal("expected FromLastStream after Stream")
+	}
+	if ev.Session.SessionID != "s-diag-root" || ev.Session.IsChild {
+		t.Fatalf("session = %+v", ev.Session)
+	}
+	if len(ev.Prompt.Precedence) == 0 || ev.Prompt.LayerCount == 0 {
+		t.Fatalf("prompt = %+v", ev.Prompt)
+	}
+	// Layer sizes must describe the same system string Stream received.
+	if got := len([]rune(strings.TrimSpace(req.System))); got != ev.Prompt.SystemChars {
+		t.Fatalf("SystemChars = %d, stream system runes = %d", ev.Prompt.SystemChars, got)
+	}
+	if ev.Config.Provider != "anthropic" || ev.Config.Model != "claude-sonnet-5" {
+		t.Fatalf("model = %s/%s", ev.Config.Provider, ev.Config.Model)
+	}
+	if ev.Config.Agent != "reviewer" {
+		t.Fatalf("agent = %q", ev.Config.Agent)
+	}
+	if ev.Config.Effort != string(protocol.EffortHigh) {
+		t.Fatalf("effort = %q", ev.Config.Effort)
+	}
+	if ev.Config.PermissionMode != string(protocol.PermissionModeAcceptEdits) {
+		t.Fatalf("permissionMode = %q", ev.Config.PermissionMode)
+	}
+	if ev.Config.Sandbox != "read-only" || ev.Config.LeanCode != "full" {
+		t.Fatalf("sandbox/lean = %q/%q", ev.Config.Sandbox, ev.Config.LeanCode)
+	}
+	if ev.Config.Digests["effective"] == "" || ev.Config.Digests["layers"] == "" {
+		t.Fatalf("digests = %+v", ev.Config.Digests)
+	}
+	raw, err := json.Marshal(ev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), secret) || strings.Contains(string(raw), "sk-ant-api03-") {
+		t.Fatalf("secret leaked in diagnostic bundle:\n%s", raw)
+	}
+	for _, layer := range ev.Prompt.Layers {
+		if strings.Contains(layer.Source, secret) || strings.Contains(layer.Preview, secret) {
+			t.Fatalf("secret in layer: %+v", layer)
+		}
+	}
+}
+
+func TestInspectDiagnosticBundleChildSession(t *testing.T) {
+	eng := engine.New(engine.Options{
+		SessionID:       "child-diag",
+		ParentSessionID: "root-diag",
+		RootSessionID:   "root-diag",
+		Depth:           1,
+		WorkDir:         t.TempDir(),
+		Agents:          []engine.Agent{{Name: "explore", Prompt: "EXPLORE_ONLY"}},
+		InitialAgent:    "explore",
+		InitialProvider: "echo",
+		InitialModel:    "echo",
+		Registry:        tool.NewRegistry(),
+		Select: func(string) (provider.Provider, string, error) {
+			return newScriptedProvider(), "echo", nil
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	// Drain startup selection events.
+	deadline := time.After(2 * time.Second)
+drain:
+	for {
+		select {
+		case ev := <-eng.Events():
+			if _, ok := ev.(protocol.EngineError); ok {
+				t.Fatalf("engine error: %#v", ev)
+			}
+		case <-time.After(50 * time.Millisecond):
+			break drain
+		case <-deadline:
+			break drain
+		}
+	}
+
+	eng.Ops() <- protocol.InspectDiagnosticBundle{}
+	ev := waitDiagnosticBundle(t, eng)
+	if !ev.Session.IsChild || ev.Session.Depth != 1 {
+		t.Fatalf("session = %+v", ev.Session)
+	}
+	if ev.Session.ParentSessionID != "root-diag" || ev.Session.RootSessionID != "root-diag" {
+		t.Fatalf("lineage = %+v", ev.Session)
+	}
+	if ev.Config.Agent != "explore" {
+		t.Fatalf("agent = %q", ev.Config.Agent)
+	}
+	found := false
+	for _, layer := range ev.Prompt.Layers {
+		if layer.Kind == protocol.PromptLayerPersona && strings.Contains(layer.Source, "explore") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("persona layer missing: %+v", ev.Prompt.Layers)
+	}
+}
+
+func TestInspectDiagnosticBundleAgentSwitchMatchesStream(t *testing.T) {
+	// Regression on #167: after agent switch, bundle layers match Stream input.
+	prov := newScriptedProvider(
+		streamStep{
+			events: []provider.StreamEvent{
+				{Type: provider.EventTextDelta, Text: "a"},
+				{Type: provider.EventDone, StopReason: "end_turn"},
+			},
+		},
+		streamStep{
+			events: []provider.StreamEvent{
+				{Type: provider.EventTextDelta, Text: "b"},
+				{Type: provider.EventDone, StopReason: "end_turn"},
+			},
+		},
+	)
+	eng := engine.New(engine.Options{
+		SessionID: "s-diag-switch",
+		WorkDir:   t.TempDir(),
+		Agents: []engine.Agent{
+			{Name: "build", Prompt: "BUILD_PERSONA_MARKER"},
+			{Name: "plan", Prompt: "PLAN_PERSONA_MARKER"},
+		},
+		InitialAgent:    "build",
+		InitialProvider: "echo",
+		InitialModel:    "echo",
+		Registry:        tool.NewRegistry(),
+		Select: func(string) (provider.Provider, string, error) {
+			return prov, "echo", nil
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "first"}
+	req1 := waitStreamRequest(t, eng, prov)
+	waitTurnCompleted(t, eng)
+	if !strings.Contains(req1.System, "BUILD_PERSONA_MARKER") {
+		t.Fatalf("first stream missing build persona:\n%s", req1.System)
+	}
+
+	eng.Ops() <- protocol.SelectAgent{Name: "plan"}
+	waitAgentSelected(t, eng, "plan")
+
+	eng.Ops() <- protocol.UserInput{Text: "second"}
+	req2 := waitStreamRequest(t, eng, prov)
+	waitTurnCompleted(t, eng)
+	if !strings.Contains(req2.System, "PLAN_PERSONA_MARKER") {
+		t.Fatalf("second stream missing plan persona:\n%s", req2.System)
+	}
+	if strings.Contains(req2.System, "BUILD_PERSONA_MARKER") {
+		t.Fatal("build persona leaked after switch")
+	}
+
+	eng.Ops() <- protocol.InspectDiagnosticBundle{}
+	ev := waitDiagnosticBundle(t, eng)
+	if ev.Config.Agent != "plan" {
+		t.Fatalf("bundle agent = %q", ev.Config.Agent)
+	}
+	if got := len([]rune(strings.TrimSpace(req2.System))); got != ev.Prompt.SystemChars {
+		t.Fatalf("SystemChars = %d, stream = %d", ev.Prompt.SystemChars, got)
+	}
+	foundPlan := false
+	for _, layer := range ev.Prompt.Layers {
+		if layer.Kind == protocol.PromptLayerPersona && strings.Contains(layer.Source, "plan") {
+			foundPlan = true
+		}
+		if layer.Kind == protocol.PromptLayerPersona && strings.Contains(layer.Source, "build") {
+			t.Fatalf("stale build persona in bundle: %+v", layer)
+		}
+	}
+	if !foundPlan {
+		t.Fatalf("plan persona missing: %+v", ev.Prompt.Layers)
 	}
 }

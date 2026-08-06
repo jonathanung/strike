@@ -313,6 +313,7 @@ func decodeHandoffObject(raw string) (protocol.CompletionHandoff, bool) {
 		FilesChanged:          firstStringSlice(m, "files_changed", "filesChanged"),
 		Findings:              firstStringSlice(m, "findings"),
 		Blockers:              firstStringSlice(m, "blockers"),
+		ArtifactRefs:          firstArtifactRefs(m, "artifact_refs", "artifactRefs"),
 	}
 	if b, ok := firstBool(m, "incomplete"); ok {
 		h.Incomplete = b
@@ -335,6 +336,7 @@ func hasHandoffKey(m map[string]json.RawMessage) bool {
 		"summary", "files_changed", "filesChanged",
 		"verification", "findings", "blockers",
 		"recommended_next_action", "recommendedNextAction",
+		"artifact_refs", "artifactRefs",
 		// Plan section refinement (#724).
 		"section_body", "sectionBody", "section_title", "sectionTitle",
 		"plan_section", "planSection",
@@ -345,6 +347,71 @@ func hasHandoffKey(m map[string]json.RawMessage) bool {
 		}
 	}
 	return false
+}
+
+func firstArtifactRefs(m map[string]json.RawMessage, keys ...string) []protocol.ArtifactRef {
+	for _, k := range keys {
+		raw, ok := m[k]
+		if !ok {
+			continue
+		}
+		// Array of objects or strings.
+		var objs []map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &objs); err == nil {
+			out := make([]protocol.ArtifactRef, 0, len(objs))
+			for _, o := range objs {
+				ref := protocol.ArtifactRef{
+					ID:   firstString(o, "id"),
+					Type: firstString(o, "type"),
+				}
+				if v, ok := firstInt(o, "version"); ok {
+					ref.Version = v
+				}
+				if ref.ID == "" {
+					continue
+				}
+				out = append(out, ref)
+			}
+			return out
+		}
+		// Bare string ids.
+		var ss []string
+		if err := json.Unmarshal(raw, &ss); err == nil {
+			out := make([]protocol.ArtifactRef, 0, len(ss))
+			for _, id := range trimNonEmpty(ss) {
+				out = append(out, protocol.ArtifactRef{ID: id})
+			}
+			return out
+		}
+		// Single string id.
+		var s string
+		if err := json.Unmarshal(raw, &s); err == nil {
+			s = strings.TrimSpace(s)
+			if s == "" {
+				return []protocol.ArtifactRef{}
+			}
+			return []protocol.ArtifactRef{{ID: s}}
+		}
+	}
+	return nil
+}
+
+func firstInt(m map[string]json.RawMessage, keys ...string) (int, bool) {
+	for _, k := range keys {
+		raw, ok := m[k]
+		if !ok {
+			continue
+		}
+		var n int
+		if err := json.Unmarshal(raw, &n); err == nil {
+			return n, true
+		}
+		var f float64
+		if err := json.Unmarshal(raw, &f); err == nil {
+			return int(f), true
+		}
+	}
+	return 0, false
 }
 
 func firstString(m map[string]json.RawMessage, keys ...string) string {
@@ -439,13 +506,20 @@ func mergeUniquePaths(a, b []string) []string {
 // handoffModelView is the snake_case JSON shape for model-facing notices and
 // task_status (matches the issue schema / tool conventions).
 type handoffModelView struct {
-	Summary               string   `json:"summary"`
-	FilesChanged          []string `json:"files_changed"`
-	Verification          string   `json:"verification,omitempty"`
-	Findings              []string `json:"findings"`
-	Blockers              []string `json:"blockers"`
-	RecommendedNextAction string   `json:"recommended_next_action,omitempty"`
-	Incomplete            bool     `json:"incomplete,omitempty"`
+	Summary               string                   `json:"summary"`
+	FilesChanged          []string                 `json:"files_changed"`
+	Verification          string                   `json:"verification,omitempty"`
+	Findings              []string                 `json:"findings"`
+	Blockers              []string                 `json:"blockers"`
+	RecommendedNextAction string                   `json:"recommended_next_action,omitempty"`
+	ArtifactRefs          []handoffArtifactRefView `json:"artifact_refs,omitempty"`
+	Incomplete            bool                     `json:"incomplete,omitempty"`
+}
+
+type handoffArtifactRefView struct {
+	ID      string `json:"id"`
+	Version int    `json:"version,omitempty"`
+	Type    string `json:"type,omitempty"`
 }
 
 func handoffToModelView(h protocol.CompletionHandoff) handoffModelView {
@@ -461,6 +535,21 @@ func handoffToModelView(h protocol.CompletionHandoff) handoffModelView {
 	if blockers == nil {
 		blockers = []string{}
 	}
+	var refs []handoffArtifactRefView
+	if len(h.ArtifactRefs) > 0 {
+		refs = make([]handoffArtifactRefView, 0, len(h.ArtifactRefs))
+		for _, r := range h.ArtifactRefs {
+			id := strings.TrimSpace(r.ID)
+			if id == "" {
+				continue
+			}
+			refs = append(refs, handoffArtifactRefView{
+				ID:      id,
+				Version: r.Version,
+				Type:    strings.TrimSpace(r.Type),
+			})
+		}
+	}
 	return handoffModelView{
 		Summary:               h.Summary,
 		FilesChanged:          files,
@@ -468,6 +557,7 @@ func handoffToModelView(h protocol.CompletionHandoff) handoffModelView {
 		Findings:              findings,
 		Blockers:              blockers,
 		RecommendedNextAction: h.RecommendedNextAction,
+		ArtifactRefs:          refs,
 		Incomplete:            h.Incomplete,
 	}
 }
@@ -495,10 +585,13 @@ Success schema (empty arrays/strings allowed when honest):
   "verification": "what you ran and results",
   "findings": ["notable discovery or risk"],
   "blockers": [],
-  "recommended_next_action": "concrete next step for the lead"
+  "recommended_next_action": "concrete next step for the lead",
+  "artifact_refs": [{"id": "artifactId", "version": 1, "type": "findings"}]
 }
 
-On failure or cancel, still return summary, blockers, partial files_changed,
-and recommended_next_action when known. Prefer this JSON over free-form prose
-alone — the lead reads [child.completed] handoff JSON, not only chat text.
+Prefer artifact_refs (from artifact_write) over inlining large findings/patches/
+test reports. On failure or cancel, still return summary, blockers, partial
+files_changed, and recommended_next_action when known. Prefer this JSON over
+free-form prose alone — the lead reads [child.completed] handoff JSON, not
+only chat text.
 `

@@ -85,6 +85,41 @@ func TestParseCompletionHandoffRejectsArbitraryJSON(t *testing.T) {
 	}
 }
 
+func TestParseCompletionHandoffArtifactRefs(t *testing.T) {
+	raw := `{
+		"summary": "done",
+		"files_changed": [],
+		"artifact_refs": [
+			{"id": "abc123", "version": 3, "type": "findings"},
+			{"id": "def456", "type": "patch"}
+		]
+	}`
+	h, ok := parseCompletionHandoff(raw)
+	if !ok {
+		t.Fatal("expected parse ok")
+	}
+	if len(h.ArtifactRefs) != 2 {
+		t.Fatalf("refs = %#v", h.ArtifactRefs)
+	}
+	if h.ArtifactRefs[0].ID != "abc123" || h.ArtifactRefs[0].Version != 3 || h.ArtifactRefs[0].Type != "findings" {
+		t.Fatalf("ref0 = %#v", h.ArtifactRefs[0])
+	}
+	// camelCase key + bare string ids
+	raw2 := `{"summary":"ok","artifactRefs":["id1","id2"]}`
+	h2, ok := parseCompletionHandoff(raw2)
+	if !ok {
+		t.Fatal("expected camelCase parse")
+	}
+	if len(h2.ArtifactRefs) != 2 || h2.ArtifactRefs[0].ID != "id1" {
+		t.Fatalf("string refs = %#v", h2.ArtifactRefs)
+	}
+	// Model view includes snake_case artifact_refs.
+	js := marshalHandoffModelJSON(h)
+	if !strings.Contains(js, `"artifact_refs"`) || !strings.Contains(js, "abc123") {
+		t.Fatalf("model json = %s", js)
+	}
+}
+
 func TestBuildCompletionHandoffSuccessIncomplete(t *testing.T) {
 	h := buildCompletionHandoff(protocol.ChildStatusCompleted, "child finished work", []string{"a.go"})
 	if !h.Incomplete {

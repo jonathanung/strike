@@ -49,6 +49,8 @@ func opType(op Op) string {
 		return "inspect.prompt"
 	case SetContextControls:
 		return "context.controls"
+	case InspectDiagnosticBundle:
+		return "inspect.diagnostic"
 	case Rewind:
 		return "rewind"
 	default:
@@ -63,7 +65,7 @@ func WrapOp(op Op) (OpEnvelope, error) {
 		return OpEnvelope{}, fmt.Errorf("protocol: unknown op type %T", op)
 	}
 	switch op.(type) {
-	case Interrupt, InspectEffectivePrompt, StopWorkflow:
+	case Interrupt, InspectEffectivePrompt, InspectDiagnosticBundle, StopWorkflow:
 		return OpEnvelope{Type: t, Version: Version}, nil
 	}
 	data, err := json.Marshal(op)
@@ -118,6 +120,8 @@ func (e OpEnvelope) Decode() (Op, error) {
 		return InspectEffectivePrompt{}, nil
 	case "context.controls":
 		op = &SetContextControls{}
+	case "inspect.diagnostic":
+		return InspectDiagnosticBundle{}, nil
 	case "rewind":
 		op = &Rewind{}
 	default:

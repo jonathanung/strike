@@ -268,6 +268,11 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 					runErr = fmt.Errorf("closing project plans: %w", err)
 				}
 			}
+			if a.artifactsClose != nil {
+				if err := a.artifactsClose(); err != nil && runErr == nil {
+					runErr = fmt.Errorf("closing project artifacts: %w", err)
+				}
+			}
 			if a.goalsClose != nil {
 				if err := a.goalsClose(); err != nil && runErr == nil {
 					runErr = fmt.Errorf("closing project goals: %w", err)
@@ -410,6 +415,11 @@ func runExecContext(ctx context.Context, opts cliOptions, prompt string, format 
 		if a.plansClose != nil {
 			if err := a.plansClose(); err != nil && runErr == nil {
 				runErr = fmt.Errorf("closing project plans: %w", err)
+			}
+		}
+		if a.artifactsClose != nil {
+			if err := a.artifactsClose(); err != nil && runErr == nil {
+				runErr = fmt.Errorf("closing project artifacts: %w", err)
 			}
 		}
 		if a.goalsClose != nil {

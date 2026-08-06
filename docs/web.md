@@ -92,6 +92,18 @@ ssh -L 8787:127.0.0.1:8787 user@strike-host
 | `GET` | `/v1/agents` | **yes** | Selectable agent names |
 | `GET` | `/v1/sessions` | **yes** | Session list + `liveId` |
 | `GET` | `/v1/sessions/{id}/events` | **yes** | SSE tail of a session JSONL log |
+| `GET` | `/v1/workflows` | **yes** | Workflow catalog (host-safe summaries) |
+| `GET` | `/v1/workflows/{name}` | **yes** | One catalog entry |
+| `GET` | `/v1/workflows/{name}/document` | **yes** | Editable document for builder |
+| `POST` | `/v1/workflows/scaffold` | **yes** | Minimal valid draft (`{name}`) |
+| `POST` | `/v1/workflows/validate` | **yes** | Validate document (`{ok,error?}`) |
+| `POST` | `/v1/workflows/format` | **yes** | Canonical JSON for a document |
+| `POST` | `/v1/workflows/phase-grants` | **yes** | Phase permission grants preview |
+| `POST` | `/v1/workflows/save` | **yes** | Atomic save (`scope`, `force`); never activates |
+| `POST` | `/v1/workflows/{name}/start` | **yes** | Start after grant review (`confirm:true`); rejects invalid |
+| `POST` | `/v1/workflows/stop` | **yes** | Clear active workflow phase |
+| `POST` | `/v1/workflow-drafts/review` | **yes** | Structured draft review (checks + widening) |
+| `POST` | `/v1/workflow-drafts/save` | **yes** | Save draft JSON with explicit `confirm` |
 
 \*Still subject to `--allow-cidr` when set.
 
@@ -122,6 +134,20 @@ JSON objects with a `type` and optional `data`:
 | `set.permission_mode` | `{ "mode": "default\|plan\|accept-edits\|yolo" }` |
 | `set.autonomy` | `{ "mode": "supervised\|agent\|checks\|skip-all" }` |
 | `set.effort` | `{ "level": "..." }` |
+| `workflow.start` | `{ "name": "plan-implement" }` (prefer REST start after grant review) |
+| `workflow.stop` | _(empty)_ |
+
+### Workflow authoring (web parity)
+
+Bootstrap capabilities `workflows` / `workflowDrafts` are true when the host
+exposes catalog and draft services. The cockpit inspector **workflows** tab
+lists the catalog, opens a linear builder (create/edit phases, permissions,
+check commands), runs validate + draft review (widening / executable checks),
+and saves to an explicit `global` or `project` scope. **Save never activates.**
+
+Start requires a grant-review dialog and `POST .../start` with
+`{"confirm":true}`. Invalid catalog entries cannot be activated (422). The web
+surface uses only host-safe JSON DTOs — no TUI types cross the boundary.
 
 Events use the same envelopes as session JSONL (`type` + `time` + `data`).
 

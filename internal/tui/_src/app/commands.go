@@ -17,6 +17,7 @@ const (
 	commandAutonomy        commandID = "autonomy"
 	commandMode            commandID = "mode"
 	commandSandbox         commandID = "sandbox"
+	commandPermission      commandID = "permission"
 	commandAuth            commandID = "auth"
 	commandSettings        commandID = "settings"
 	commandAgent           commandID = "agent"
@@ -46,6 +47,8 @@ const (
 	commandRename          commandID = "rename"
 	commandExport          commandID = "export"
 	commandTimeline        commandID = "timeline"
+	commandDiag            commandID = "diag"
+	commandDiagnostic      commandID = "diagnostic"
 	commandCopy            commandID = "copy"
 	commandMemory          commandID = "memory"
 	commandQueue           commandID = "queue"
@@ -122,6 +125,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandAutonomy, Name: "/autonomy", Description: "set exit-gate policy (supervised/agent/checks/skip-all)", ArgsHint: "[mode]", Source: commandSourceBuiltin},
 	{ID: commandMode, Name: "/mode", Description: "set permission posture (default/plan/accept-edits/yolo)", ArgsHint: "[mode]", Source: commandSourceBuiltin},
 	{ID: commandSandbox, Name: "/sandbox", Description: "show OS sandbox policy; /sandbox explain for generated profile", Source: commandSourceBuiltin},
+	{ID: commandPermission, Name: "/permission", Description: "explain a tool permission or list presets", ArgsHint: "[explain <tool> [pattern]|presets]", Source: commandSourceBuiltin},
 	{ID: commandAuth, Name: "/auth", Description: "manage provider authentication", ArgsHint: "[provider]", Source: commandSourceBuiltin},
 	{ID: commandSettings, Name: "/settings", Description: "defaults (theme, sandbox, notify, mode) and custom providers", Source: commandSourceBuiltin},
 	{ID: commandAgent, Name: "/agent", Description: "select an agent", ArgsHint: "[name]", Source: commandSourceBuiltin},
@@ -148,6 +152,8 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandRename, Name: "/rename", Description: "rename the current session", ArgsHint: "[title]", Source: commandSourceBuiltin},
 	{ID: commandExport, Name: "/export", Description: "export the conversation to markdown", ArgsHint: "[path] [--open]", Source: commandSourceBuiltin},
 	{ID: commandTimeline, Name: "/timeline", Description: "structured run timeline (collapsed view or JSON export)", ArgsHint: "[export [path]]", Source: commandSourceBuiltin},
+	{ID: commandDiag, Name: "/diag", Description: "export prompt/config diagnostic bundle (JSON)", ArgsHint: "[export [path]]", Source: commandSourceBuiltin},
+	{ID: commandDiagnostic, Name: "/diagnostic", Description: "alias of /diag", ArgsHint: "[export [path]]", Source: commandSourceBuiltin},
 	{ID: commandCopy, Name: "/copy", Description: "copy the last assistant response to the clipboard", Source: commandSourceBuiltin},
 	{ID: commandHelp, Name: "/help", Description: "show available commands", Source: commandSourceBuiltin},
 	{ID: commandKeys, Name: "/keys", Description: "show keyboard shortcuts", ArgsHint: "[reset]", Source: commandSourceBuiltin},
@@ -232,6 +238,7 @@ var reservedCommandNames = map[string]struct{}{
 	"autonomy":         {},
 	"mode":             {},
 	"sandbox":          {},
+	"permission":       {},
 	"auth":             {},
 	"settings":         {},
 	"agent":            {},
@@ -258,6 +265,8 @@ var reservedCommandNames = map[string]struct{}{
 	"rename":           {},
 	"export":           {},
 	"timeline":         {},
+	"diag":             {},
+	"diagnostic":       {},
 	"copy":             {},
 	"help":             {},
 	"keys":             {},

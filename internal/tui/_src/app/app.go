@@ -346,7 +346,9 @@ type Model struct {
 	// for /context pin|exclude merge commands.
 	contextExcluded []string
 	contextPinned   []string
-
+	// pendingDiagExportPath, when set, writes the next DiagnosticBundle event
+	// to that path (from /diag or /diag export).
+	pendingDiagExportPath string
 	// vizFocusID is the agents-tree node the visualizer follows (cursor or
 	// last open). Empty falls back to viewingID / sessionID.
 	vizFocusID string
@@ -946,6 +948,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.applyExportFinished(msg)
 	case timelineFinishedMsg:
 		return m.applyTimelineFinished(msg)
+	case diagFinishedMsg:
+		return m.applyDiagFinished(msg)
 
 	case terminalOutputMsg:
 		return m.applyTerminalOutput()

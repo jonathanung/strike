@@ -325,6 +325,85 @@ func TestEngineErrorFailsTurn(t *testing.T) {
 	}
 }
 
+func TestPermissionAuditOnTimeline(t *testing.T) {
+	base := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	corr := protocol.Correlation{SessionID: "sess", TurnID: "turn-p"}
+	// Secret-shaped pattern must be redacted in export.
+	secretPat := "Authorization: Bearer sk-ant-api03-SECRETVALUE1234567890"
+	events := []timeline.TimedEvent{
+		{Time: base, Event: protocol.TurnStarted{Correlation: corr}},
+		{Time: base.Add(10 * time.Millisecond), Event: protocol.PermissionAsked{
+			Correlation: corr,
+			RequestID:   "perm_1",
+			Permission:  "bash",
+			Patterns:    []string{secretPat},
+		}},
+		{Time: base.Add(20 * time.Millisecond), Event: protocol.PermissionDecided{
+			Correlation:    corr,
+			RequestID:      "perm_1",
+			Permission:     "bash",
+			Patterns:       []string{secretPat},
+			Action:         "ask",
+			Layer:          "defaults",
+			RulePermission: "bash",
+			RulePattern:    "*",
+			RuleAction:     "ask",
+		}},
+		{Time: base.Add(50 * time.Millisecond), Event: protocol.PermissionResolved{
+			Correlation: corr,
+			RequestID:   "perm_1",
+			Decision:    protocol.DecisionOnce,
+		}},
+		{Time: base.Add(60 * time.Millisecond), Event: protocol.PermissionDecided{
+			Correlation: corr,
+			RequestID:   "perm_1",
+			Permission:  "bash",
+			Action:      "allow",
+			Decision:    protocol.DecisionOnce,
+			Layer:       "defaults",
+		}},
+		// Auto-deny without ask.
+		{Time: base.Add(70 * time.Millisecond), Event: protocol.PermissionDecided{
+			Correlation: corr,
+			Permission:  "write",
+			Patterns:    []string{".env"},
+			Action:      "deny",
+			Layer:       "config",
+			RuleAction:  "deny",
+		}},
+	}
+	tr := timeline.Build(events, timeline.Options{SessionID: "sess"})
+	if tr.Summary.Permissions < 2 {
+		t.Fatalf("permissions summary = %d, want >= 2; entries=%+v", tr.Summary.Permissions, tr.Entries)
+	}
+	var askEntry, denyEntry *timeline.Entry
+	for i := range tr.Entries {
+		e := &tr.Entries[i]
+		if e.Kind != timeline.KindPermission {
+			continue
+		}
+		if e.CallID == "perm_1" {
+			askEntry = e
+		}
+		if e.Name == "write" {
+			denyEntry = e
+		}
+	}
+	if askEntry == nil || askEntry.State != timeline.StateCompleted {
+		t.Fatalf("ask entry = %+v", askEntry)
+	}
+	if strings.Contains(askEntry.ArgsPreview, "sk-ant") || strings.Contains(askEntry.ArgsPreview, "SECRETVALUE") {
+		t.Fatalf("secret leaked in argsPreview: %q", askEntry.ArgsPreview)
+	}
+	if denyEntry == nil || denyEntry.State != timeline.StateFailed {
+		t.Fatalf("deny entry = %+v", denyEntry)
+	}
+	collapsed := timeline.FormatCollapsed(tr.Entries, 0)
+	if !strings.Contains(collapsed, "permission") {
+		t.Fatalf("collapsed missing permission: %s", collapsed)
+	}
+}
+
 func TestBuildVerificationSpan(t *testing.T) {
 	base := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
 	corr := protocol.Correlation{SessionID: "s", TurnID: "t-v"}

@@ -30,11 +30,12 @@ const SchemaVersion = "1.0.0"
 
 // Entry kinds on the timeline.
 const (
-	KindTurn     = "turn"
-	KindTool     = "tool"
-	KindProvider = "provider"
-	KindChild    = "child"
-	KindVerify   = "verify"
+	KindTurn       = "turn"
+	KindTool       = "tool"
+	KindProvider   = "provider"
+	KindChild      = "child"
+	KindPermission = "permission"
+	KindVerify     = "verify"
 )
 
 // Lifecycle states (queued → running → waiting → terminal).
@@ -93,16 +94,17 @@ type Entry struct {
 
 // Summary rolls up a trace for quick inspection.
 type Summary struct {
-	Turns      int   `json:"turns"`
-	Tools      int   `json:"tools"`
-	Providers  int   `json:"providers"`
-	Children   int   `json:"children"`
-	Verifies   int   `json:"verifies,omitempty"`
-	Failed     int   `json:"failed"`
-	Canceled   int   `json:"canceled"`
-	InputTok   int64 `json:"inputTokens,omitempty"`
-	OutputTok  int64 `json:"outputTokens,omitempty"`
-	DurationMs int64 `json:"durationMs,omitempty"`
+	Turns       int   `json:"turns"`
+	Tools       int   `json:"tools"`
+	Providers   int   `json:"providers"`
+	Children    int   `json:"children"`
+	Permissions int   `json:"permissions,omitempty"`
+	Verifies    int   `json:"verifies,omitempty"`
+	Failed      int   `json:"failed"`
+	Canceled    int   `json:"canceled"`
+	InputTok    int64 `json:"inputTokens,omitempty"`
+	OutputTok   int64 `json:"outputTokens,omitempty"`
+	DurationMs  int64 `json:"durationMs,omitempty"`
 }
 
 // Trace is the versioned machine-readable export document.
@@ -151,11 +153,12 @@ type Builder struct {
 	opts Options
 
 	// indexes
-	turns     map[string]*Entry // turnID
-	tools     map[string]*Entry // sessionID\0callID
-	providers map[string]*Entry // providerRequestID
-	children  map[string]*Entry // child sessionID
-	verifies  map[string]*Entry // sessionID\0turnID\0scope
+	turns       map[string]*Entry // turnID
+	tools       map[string]*Entry // sessionID\0callID
+	providers   map[string]*Entry // providerRequestID
+	children    map[string]*Entry // child sessionID
+	permissions map[string]*Entry // requestID or synthetic id
+	verifies    map[string]*Entry // sessionID\0turnID\0scope
 
 	order []string // entry ids in first-seen order
 	byID  map[string]*Entry
@@ -168,14 +171,15 @@ type Builder struct {
 func NewBuilder(opts Options) *Builder {
 	opts = opts.withDefaults()
 	return &Builder{
-		opts:      opts,
-		turns:     make(map[string]*Entry),
-		tools:     make(map[string]*Entry),
-		providers: make(map[string]*Entry),
-		children:  make(map[string]*Entry),
-		verifies:  make(map[string]*Entry),
-		byID:      make(map[string]*Entry),
-		sessionID: opts.SessionID,
+		opts:        opts,
+		turns:       make(map[string]*Entry),
+		tools:       make(map[string]*Entry),
+		providers:   make(map[string]*Entry),
+		children:    make(map[string]*Entry),
+		permissions: make(map[string]*Entry),
+		verifies:    make(map[string]*Entry),
+		byID:        make(map[string]*Entry),
+		sessionID:   opts.SessionID,
 	}
 }
 
@@ -259,11 +263,78 @@ func (b *Builder) Observe(ev protocol.Event, t time.Time) {
 				turn.State = StateWaiting
 			}
 		}
+		ent := b.ensurePermission(e.RequestID, e.SessionID, e.TurnID, t)
+		ent.Name = e.Permission
+		ent.State = StateWaiting
+		ent.ArgsPreview = clip(redact.String(strings.Join(e.Patterns, ", ")), b.opts.ArgsPreviewMax)
+		if e.TurnID != "" {
+			if turn := b.turns[e.TurnID]; turn != nil {
+				ent.ParentID = turn.ID
+			}
+		}
 	case protocol.PermissionResolved:
 		b.noteSession(e.SessionID)
 		if e.TurnID != "" {
 			if turn := b.turns[e.TurnID]; turn != nil && turn.State == StateWaiting {
 				turn.State = StateRunning
+			}
+		}
+		ent := b.ensurePermission(e.RequestID, e.SessionID, e.TurnID, t)
+		if e.Decision == protocol.DecisionReject {
+			ent.State = StateFailed
+			ent.Error = clip(redact.String("rejected"), b.opts.ErrorPreviewMax)
+		} else {
+			ent.State = StateCompleted
+		}
+		ent.OutputPreview = clip(redact.String(string(e.Decision)), b.opts.OutputPreviewMax)
+		b.finish(ent, t)
+	case protocol.PermissionDecided:
+		b.noteSession(e.SessionID)
+		// Prefer correlating with an existing ask entry when RequestID is set.
+		key := e.RequestID
+		if key == "" {
+			key = b.nextID("permdec")
+		}
+		ent := b.ensurePermission(key, e.SessionID, e.TurnID, t)
+		if ent.Name == "" {
+			ent.Name = e.Permission
+		}
+		if ent.ArgsPreview == "" && len(e.Patterns) > 0 {
+			ent.ArgsPreview = clip(redact.String(strings.Join(e.Patterns, ", ")), b.opts.ArgsPreviewMax)
+		}
+		// Build redacted decision summary for export.
+		summary := e.Action
+		if e.Decision != "" {
+			summary = e.Action + ":" + string(e.Decision)
+		}
+		if e.Layer != "" {
+			summary += " layer=" + e.Layer
+		}
+		if e.RulePermission != "" {
+			summary += " rule=" + e.RulePermission + " " + e.RulePattern + "→" + e.RuleAction
+		}
+		ent.OutputPreview = clip(redact.String(summary), b.opts.OutputPreviewMax)
+		switch e.Action {
+		case "ask":
+			if ent.State == "" || ent.State == StateQueued {
+				ent.State = StateWaiting
+			}
+			// Keep waiting until PermissionResolved / decided allow|deny.
+		case "deny":
+			ent.State = StateFailed
+			if ent.Error == "" {
+				ent.Error = clip(redact.String("denied"), b.opts.ErrorPreviewMax)
+			}
+			b.finish(ent, t)
+		default: // allow
+			ent.State = StateCompleted
+			b.finish(ent, t)
+		}
+		if e.TurnID != "" {
+			if turn := b.turns[e.TurnID]; turn != nil {
+				if ent.ParentID == "" {
+					ent.ParentID = turn.ID
+				}
 			}
 		}
 	case protocol.UsageReported:
@@ -305,6 +376,29 @@ func (b *Builder) Observe(ev protocol.Event, t time.Time) {
 			ent.Error = clip(redact.String(e.Message), b.opts.ErrorPreviewMax)
 			b.finish(ent, t)
 		}
+	case protocol.ToolRetrying:
+		b.noteSession(e.SessionID)
+		if e.CallID != "" {
+			ent := b.ensureTool(e.CallID, e.SessionID, e.TurnID, t)
+			if e.Name != "" && ent.Name == "" {
+				ent.Name = e.Name
+			}
+			// Keep running; retry is in-flight. Annotate error preview.
+			if e.Message != "" {
+				ent.Error = clip(redact.String(e.Message), b.opts.ErrorPreviewMax)
+			}
+		}
+	case protocol.ToolLoopDetected:
+		b.noteSession(e.SessionID)
+		msg := e.Message
+		if msg == "" {
+			msg = "tool loop detected: " + e.Reason
+		}
+		if e.TurnID != "" {
+			ent := b.ensureTurn(e.TurnID, e.SessionID, t)
+			ent.State = StateFailed
+			ent.Error = clip(redact.String(msg), b.opts.ErrorPreviewMax)
+		}
 	case protocol.ChildStarted:
 		b.noteSession(e.ParentSessionID)
 		if e.SessionID == "" {
@@ -340,6 +434,20 @@ func (b *Builder) Observe(ev protocol.Event, t time.Time) {
 			ent.OutputPreview = clip(redact.String(e.Handoff.Summary), b.opts.OutputPreviewMax)
 		}
 		b.finish(ent, t)
+	case protocol.ChildEscalated:
+		// Budget/stall/loop trip (#774): annotate running child; terminal
+		// still comes from ChildCompleted.
+		b.noteSession(e.ParentSessionID)
+		if e.SessionID == "" {
+			return
+		}
+		ent := b.ensureChild(e.SessionID, e.ParentSessionID, e.TurnID, t)
+		if e.Name != "" && ent.Name == "" {
+			ent.Name = e.Name
+		}
+		if e.Reason != "" {
+			ent.Error = clip(redact.String(e.Kind+": "+e.Reason), b.opts.ErrorPreviewMax)
+		}
 	case protocol.VerificationStarted:
 		b.noteSession(e.SessionID)
 		ent := b.ensureVerify(e.SessionID, e.TurnID, e.Scope, t)
@@ -433,7 +541,7 @@ func (b *Builder) Trace() Trace {
 		SessionID:     sessionID,
 		ExportedAt:    clock(),
 		Redacted:      true,
-		Note:          "Derived harness timeline (turns/tools/provider attempts/children). Complements session JSONL full transcript and #774 agent roster/budget fields; does not replace either.",
+		Note:          "Derived harness timeline (turns/tools/provider attempts/children/permission decisions/verification). Complements session JSONL full transcript and #774 agent roster/budget fields; does not replace either.",
 		Summary:       summarize(entries),
 		Entries:       entries,
 	}
@@ -612,6 +720,8 @@ func formatEntryLine(e Entry) string {
 		id = shortID(e.ProviderRequestID)
 	case KindChild:
 		id = shortID(e.ChildSessionID)
+	case KindPermission:
+		id = shortID(e.CallID)
 	case KindVerify:
 		id = shortID(e.TurnID)
 		if id == "-" {
@@ -764,6 +874,28 @@ func (b *Builder) ensureChild(childID, parentSessionID, turnID string, t time.Ti
 	return ent
 }
 
+func (b *Builder) ensurePermission(requestID, sessionID, turnID string, t time.Time) *Entry {
+	key := requestID
+	if key == "" {
+		key = b.nextID("permkey")
+	}
+	if ent, ok := b.permissions[key]; ok {
+		return ent
+	}
+	ent := &Entry{
+		ID:        b.nextID("perm"),
+		Kind:      KindPermission,
+		State:     StateQueued,
+		SessionID: sessionID,
+		TurnID:    turnID,
+		CallID:    requestID, // reuse CallID field for request correlation
+		StartedAt: formatTime(t),
+	}
+	b.permissions[key] = ent
+	b.track(ent)
+	return ent
+}
+
 func (b *Builder) ensureVerify(sessionID, turnID, scope string, t time.Time) *Entry {
 	key := sessionID + "\x00" + turnID + "\x00" + scope
 	if turnID == "" && scope == "" {
@@ -841,6 +973,8 @@ func summarize(entries []Entry) Summary {
 			s.Tools++
 		case KindProvider:
 			s.Providers++
+		case KindPermission:
+			s.Permissions++
 		case KindChild:
 			s.Children++
 		case KindVerify:

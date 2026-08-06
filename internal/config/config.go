@@ -80,6 +80,10 @@ type Config struct {
 	// Distinct from Sandbox Network on/off (bash OS profile). See docs/config.md.
 	Network     NetworkConfig      `json:"network,omitempty"`
 	Permissions permission.Ruleset `json:"permissions,omitempty"`
+	// PermissionPreset selects a shipped named ruleset (read-only|dev|
+	// yolo-with-sandbox) inserted after defaults and before permissions[].
+	// Empty means no preset layer. See permission.Presets / docs/config.md.
+	PermissionPreset string `json:"permissionPreset,omitempty"`
 	// Hooks mixes declarative rules (action) and shell commands (command).
 	// Global then project layers concatenate. Invalid entries are dropped.
 	Hooks []Hook `json:"hooks,omitempty"`
@@ -164,6 +168,28 @@ type Config struct {
 	// project; presets expand before user rules). Last match wins. See
 	// docs/config.md.
 	Scheduler SchedulerConfig `json:"scheduler,omitempty"`
+	// ToolRetry is the harness error-recovery / retry policy for tool
+	// dispatch (error code × idempotency). See docs/config.md.
+	ToolRetry ToolRetryConfig `json:"toolRetry,omitempty"`
+}
+
+// ToolRetryConfig is the JSON "toolRetry" object — auto-retry and loop
+// detection knobs for tool dispatch. Provider stream retries stay under
+// engine MaxStreamAttempts (not configured here).
+type ToolRetryConfig struct {
+	// MaxAttempts bounds auto-retries for one tool call including the first
+	// try. Zero means engine default (3). Set to 1 to disable tool auto-retry.
+	// Only safe-retry tools retry on transient/timeout; mutative/unsafe never
+	// auto-retry.
+	MaxAttempts int `json:"maxAttempts,omitempty"`
+	// BaseDelayMs is the first backoff step in milliseconds before attempt 2.
+	// Zero means engine default (200). Negatives clamp to 0 (instant).
+	BaseDelayMs int `json:"baseDelayMs,omitempty"`
+	// MaxDelayMs caps exponential backoff. Zero means engine default (2000).
+	MaxDelayMs int `json:"maxDelayMs,omitempty"`
+	// LoopThreshold is how many identical consecutive failing tool+args stop
+	// the turn. Zero means engine default (3).
+	LoopThreshold int `json:"loopThreshold,omitempty"`
 }
 
 // NetworkConfig is the JSON "network" object — shared allowlist shape for
@@ -266,6 +292,31 @@ type SessionConfig struct {
 	// (default warn). warn surfaces tool warnings + path.overlap events;
 	// block refuses conflicting writes; off tracks without signaling.
 	OverlapPolicy string `json:"overlapPolicy,omitempty"`
+	// RetentionMaxSessions caps closed durable sessions under
+	// ~/.strike/sessions (0 = unlimited). Applied via session.ApplyRetention
+	// / RetentionFromConfig — not automatic on every launch.
+	RetentionMaxSessions int `json:"retentionMaxSessions,omitempty"`
+	// RetentionMaxAgeDays deletes closed sessions older than N days (0 = off).
+	RetentionMaxAgeDays int `json:"retentionMaxAgeDays,omitempty"`
+	// RetentionMaxBytes caps total closed session log+meta bytes (0 = off).
+	RetentionMaxBytes int64 `json:"retentionMaxBytes,omitempty"`
+	// AgentBudget is the default per-child resource limit for task spawns
+	// (#774). Spawn-time task.budget fields overlay non-zero values. Zero
+	// means unlimited for that dimension (soft stall/loop signals still
+	// apply). Distinct from future session maxSessionCostUSD (#577), which
+	// remains the outer cost envelope when configured.
+	AgentBudget AgentBudgetConfig `json:"agentBudget,omitempty"`
+}
+
+// AgentBudgetConfig is JSON for session.agentBudget (camelCase).
+type AgentBudgetConfig struct {
+	MaxWallClockS     int     `json:"maxWallClockS,omitempty"`
+	MaxTokens         int     `json:"maxTokens,omitempty"`
+	MaxCostUSD        float64 `json:"maxCostUsd,omitempty"`
+	MaxToolCalls      int     `json:"maxToolCalls,omitempty"`
+	MaxDangerousTools int     `json:"maxDangerousTools,omitempty"`
+	StallAfterS       int     `json:"stallAfterS,omitempty"`
+	LoopDetectN       int     `json:"loopDetectN,omitempty"`
 }
 
 // Hook is one lifecycle hook entry. Exactly one of Action or Command should
@@ -647,12 +698,19 @@ func read(path string) (Config, error) {
 	c.PermissionAutoApproveSeconds = ClampPermissionAutoApproveSeconds(c.PermissionAutoApproveSeconds)
 	c.PermissionAutoApproveExclude = normalizePermissionAutoApproveExclude(c.PermissionAutoApproveExclude)
 	c.MaxChildDepth = ClampMaxChildDepth(c.MaxChildDepth)
+	c.ToolRetry = normalizeToolRetry(c.ToolRetry)
 	if c.PermissionMode != "" {
 		mode, ok := protocol.ParsePermissionMode(string(c.PermissionMode))
 		if !ok {
 			return Config{}, fmt.Errorf("%s: unknown permissionMode %q (want default|plan|soft-approve|accept-edits|yolo)", path, c.PermissionMode)
 		}
 		c.PermissionMode = mode
+	}
+	if c.PermissionPreset != "" {
+		c.PermissionPreset = strings.ToLower(strings.TrimSpace(c.PermissionPreset))
+		if !permission.ValidPresetID(c.PermissionPreset) {
+			return Config{}, fmt.Errorf("%s: unknown permissionPreset %q (want read-only|dev|yolo-with-sandbox)", path, c.PermissionPreset)
+		}
 	}
 	if strings.TrimSpace(c.Sandbox) != "" {
 		mode, ok := sandbox.ParseMode(c.Sandbox)
@@ -753,6 +811,48 @@ func ClampPermissionAutoApproveSeconds(n int) int {
 		return 60
 	}
 	return n
+}
+
+func normalizeToolRetry(tr ToolRetryConfig) ToolRetryConfig {
+	if tr.MaxAttempts < 0 {
+		tr.MaxAttempts = 0
+	}
+	if tr.BaseDelayMs < 0 {
+		tr.BaseDelayMs = 0
+	}
+	if tr.MaxDelayMs < 0 {
+		tr.MaxDelayMs = 0
+	}
+	if tr.LoopThreshold < 0 {
+		tr.LoopThreshold = 0
+	}
+	return tr
+}
+
+// mergeAgentBudgetConfig overlays non-zero layer fields onto base.
+func mergeAgentBudgetConfig(base, layer AgentBudgetConfig) AgentBudgetConfig {
+	if layer.MaxWallClockS != 0 {
+		base.MaxWallClockS = layer.MaxWallClockS
+	}
+	if layer.MaxTokens != 0 {
+		base.MaxTokens = layer.MaxTokens
+	}
+	if layer.MaxCostUSD != 0 {
+		base.MaxCostUSD = layer.MaxCostUSD
+	}
+	if layer.MaxToolCalls != 0 {
+		base.MaxToolCalls = layer.MaxToolCalls
+	}
+	if layer.MaxDangerousTools != 0 {
+		base.MaxDangerousTools = layer.MaxDangerousTools
+	}
+	if layer.StallAfterS != 0 {
+		base.StallAfterS = layer.StallAfterS
+	}
+	if layer.LoopDetectN != 0 {
+		base.LoopDetectN = layer.LoopDetectN
+	}
+	return base
 }
 
 // ClampMaxChildDepth maps config values: <0 → 0 (engine default),
@@ -1005,6 +1105,9 @@ func merge(base, layer Config) Config {
 	if layer.PermissionMode != "" {
 		base.PermissionMode = layer.PermissionMode
 	}
+	if layer.PermissionPreset != "" {
+		base.PermissionPreset = layer.PermissionPreset
+	}
 	if layer.Sandbox != "" {
 		base.Sandbox = layer.Sandbox
 	}
@@ -1054,6 +1157,16 @@ func merge(base, layer Config) Config {
 	if layer.Session.OverlapPolicy != "" {
 		base.Session.OverlapPolicy = layer.Session.OverlapPolicy
 	}
+	if layer.Session.RetentionMaxSessions != 0 {
+		base.Session.RetentionMaxSessions = layer.Session.RetentionMaxSessions
+	}
+	if layer.Session.RetentionMaxAgeDays != 0 {
+		base.Session.RetentionMaxAgeDays = layer.Session.RetentionMaxAgeDays
+	}
+	if layer.Session.RetentionMaxBytes != 0 {
+		base.Session.RetentionMaxBytes = layer.Session.RetentionMaxBytes
+	}
+	base.Session.AgentBudget = mergeAgentBudgetConfig(base.Session.AgentBudget, layer.Session.AgentBudget)
 	base.Permissions = append(base.Permissions, layer.Permissions...)
 	base.Hooks = append(base.Hooks, layer.Hooks...)
 	base.Providers = mergeProviders(base.Providers, layer.Providers)
@@ -1062,12 +1175,30 @@ func merge(base, layer Config) Config {
 	base.LSP = mergeLSP(base.LSP, layer.LSP)
 	base.Harnesses = mergeHarnesses(base.Harnesses, layer.Harnesses)
 	base.Scheduler = mergeScheduler(base.Scheduler, layer.Scheduler)
+	base.ToolRetry = mergeToolRetry(base.ToolRetry, layer.ToolRetry)
 	if layer.disableDefaultProvidersSet {
 		base.DisableDefaultProviders = layer.DisableDefaultProviders
 		base.disableDefaultProvidersSet = true
 	}
 	if len(layer.DisableDefaultPer) > 0 {
 		base.DisableDefaultPer = mergeDisableDefaultPer(base.DisableDefaultPer, layer.DisableDefaultPer)
+	}
+	return base
+}
+
+// mergeToolRetry overlays non-zero tool-retry knobs from layer onto base.
+func mergeToolRetry(base, layer ToolRetryConfig) ToolRetryConfig {
+	if layer.MaxAttempts != 0 {
+		base.MaxAttempts = layer.MaxAttempts
+	}
+	if layer.BaseDelayMs != 0 {
+		base.BaseDelayMs = layer.BaseDelayMs
+	}
+	if layer.MaxDelayMs != 0 {
+		base.MaxDelayMs = layer.MaxDelayMs
+	}
+	if layer.LoopThreshold != 0 {
+		base.LoopThreshold = layer.LoopThreshold
 	}
 	return base
 }

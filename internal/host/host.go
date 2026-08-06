@@ -794,6 +794,41 @@ type SchedulerPresets interface {
 	ApplyGlobalPresets(ids []string) error
 }
 
+// PermissionMatch is one rule that matched during permission explain.
+type PermissionMatch struct {
+	Layer      string
+	Permission string
+	Pattern    string
+	Action     string
+}
+
+// PermissionExplanation is the host-facing explain result for a sample tool call.
+type PermissionExplanation struct {
+	Permission string
+	Pattern    string
+	Action     string
+	Layer      string
+	Matched    PermissionMatch
+	Trail      []PermissionMatch
+	Summary    string // multi-line human text for notices
+}
+
+// PermissionPresetInfo is one shipped permission preset (read-only, dev, …).
+type PermissionPresetInfo struct {
+	ID          string
+	Name        string
+	Description string
+}
+
+// Permissions is the explain/preset surface for /permission. Nil when unsupported.
+type Permissions interface {
+	// Explain returns last-match-wins detail for permission + pattern.
+	// Empty pattern means "*".
+	Explain(permission, pattern string) PermissionExplanation
+	// Presets lists shipped named rulesets.
+	Presets() []PermissionPresetInfo
+}
+
 // Services bundles everything a frontend receives from its host. Any field
 // may be nil/empty when a capability is absent (tests, future frontends);
 // frontends must degrade gracefully.
@@ -819,6 +854,8 @@ type Services struct {
 	// SchedulerPresets is the shipped build-system preset catalog and global
 	// apply surface (FTUE #705).
 	SchedulerPresets SchedulerPresets
+	// Permissions is explain + shipped presets for /permission (#798).
+	Permissions Permissions
 	// Workflows is the loaded workflow catalog (builtin/global/project/plugin).
 	// Nil when unsupported; frontends must degrade without panic.
 	Workflows Workflows

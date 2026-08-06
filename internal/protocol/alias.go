@@ -78,6 +78,7 @@ type (
 	Correlation             = pub.Correlation
 	ChildStatus             = pub.ChildStatus
 	CompletionHandoff       = pub.CompletionHandoff
+	ArtifactRef             = pub.ArtifactRef
 	DelegationState         = pub.DelegationState
 	VerificationReport      = pub.VerificationReport
 	VerificationCheck       = pub.VerificationCheck
@@ -90,6 +91,11 @@ type (
 	QuestionPrompt          = pub.QuestionPrompt
 	PromptLayerInfo         = pub.PromptLayerInfo
 	RequestTokenAttribution = pub.RequestTokenAttribution
+	DiagnosticSession       = pub.DiagnosticSession
+	DiagnosticPrompt        = pub.DiagnosticPrompt
+	DiagnosticCompaction    = pub.DiagnosticCompaction
+	DiagnosticScheduler     = pub.DiagnosticScheduler
+	DiagnosticConfig        = pub.DiagnosticConfig
 	RewindPoint             = pub.RewindPoint
 	Envelope                = pub.Envelope
 	OpEnvelope              = pub.OpEnvelope
@@ -97,23 +103,24 @@ type (
 
 // Ops.
 type (
-	UserInput              = pub.UserInput
-	PermissionReply        = pub.PermissionReply
-	QuestionReply          = pub.QuestionReply
-	Interrupt              = pub.Interrupt
-	SelectModel            = pub.SelectModel
-	SelectAgent            = pub.SelectAgent
-	SetEffort              = pub.SetEffort
-	SetAutonomy            = pub.SetAutonomy
-	SetPermissionMode      = pub.SetPermissionMode
-	SetFast                = pub.SetFast
-	StartWorkflow          = pub.StartWorkflow
-	StopWorkflow           = pub.StopWorkflow
-	FilesChanged           = pub.FilesChanged
-	Compact                = pub.Compact
-	InspectEffectivePrompt = pub.InspectEffectivePrompt
-	SetContextControls     = pub.SetContextControls
-	Rewind                 = pub.Rewind
+	UserInput               = pub.UserInput
+	PermissionReply         = pub.PermissionReply
+	QuestionReply           = pub.QuestionReply
+	Interrupt               = pub.Interrupt
+	SelectModel             = pub.SelectModel
+	SelectAgent             = pub.SelectAgent
+	SetEffort               = pub.SetEffort
+	SetAutonomy             = pub.SetAutonomy
+	SetPermissionMode       = pub.SetPermissionMode
+	SetFast                 = pub.SetFast
+	StartWorkflow           = pub.StartWorkflow
+	StopWorkflow            = pub.StopWorkflow
+	FilesChanged            = pub.FilesChanged
+	Compact                 = pub.Compact
+	InspectEffectivePrompt  = pub.InspectEffectivePrompt
+	SetContextControls      = pub.SetContextControls
+	InspectDiagnosticBundle = pub.InspectDiagnosticBundle
+	Rewind                  = pub.Rewind
 )
 
 // Events.
@@ -131,6 +138,7 @@ type (
 	ProcessExited           = pub.ProcessExited
 	PermissionAsked         = pub.PermissionAsked
 	PermissionResolved      = pub.PermissionResolved
+	PermissionDecided       = pub.PermissionDecided
 	QuestionAsked           = pub.QuestionAsked
 	QuestionResolved        = pub.QuestionResolved
 	TurnCompleted           = pub.TurnCompleted
@@ -142,6 +150,7 @@ type (
 	AgentSelected           = pub.AgentSelected
 	PhaseChanged            = pub.PhaseChanged
 	PlanHandoff             = pub.PlanHandoff
+	ArtifactUpdated         = pub.ArtifactUpdated
 	PhaseGrantApproved      = pub.PhaseGrantApproved
 	PhaseGrantRule          = pub.PhaseGrantRule
 	EffortSelected          = pub.EffortSelected
@@ -154,6 +163,8 @@ type (
 	EngineError             = pub.EngineError
 	ChildStarted            = pub.ChildStarted
 	ChildCompleted          = pub.ChildCompleted
+	ChildEscalated          = pub.ChildEscalated
+	AgentBudgetView         = pub.AgentBudgetView
 	DelegationChanged       = pub.DelegationChanged
 	WaitStarted             = pub.WaitStarted
 	WaitResolved            = pub.WaitResolved
@@ -162,6 +173,8 @@ type (
 	TeamRoster              = pub.TeamRoster
 	UsageReported           = pub.UsageReported
 	ProviderRetrying        = pub.ProviderRetrying
+	ToolRetrying            = pub.ToolRetrying
+	ToolLoopDetected        = pub.ToolLoopDetected
 	SchedulerQueued         = pub.SchedulerQueued
 	SchedulerAdmitted       = pub.SchedulerAdmitted
 	SchedulerCanceled       = pub.SchedulerCanceled
@@ -171,6 +184,7 @@ type (
 	SessionRewound          = pub.SessionRewound
 	HookMatched             = pub.HookMatched
 	EffectivePrompt         = pub.EffectivePrompt
+	DiagnosticBundle        = pub.DiagnosticBundle
 	ContextFitWarning       = pub.ContextFitWarning
 	ContextControlsSelected = pub.ContextControlsSelected
 )

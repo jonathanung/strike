@@ -46,6 +46,8 @@ func eventType(ev Event) string {
 		return "permission.asked"
 	case PermissionResolved:
 		return "permission.resolved"
+	case PermissionDecided:
+		return "permission.decided"
 	case QuestionAsked:
 		return "question.asked"
 	case QuestionResolved:
@@ -66,6 +68,8 @@ func eventType(ev Event) string {
 		return "phase.changed"
 	case PlanHandoff:
 		return "plan.handoff"
+	case ArtifactUpdated:
+		return "artifact.updated"
 	case PhaseGrantApproved:
 		return "phase.grant_approved"
 	case EffortSelected:
@@ -86,6 +90,8 @@ func eventType(ev Event) string {
 		return "child.started"
 	case ChildCompleted:
 		return "child.completed"
+	case ChildEscalated:
+		return "child.escalated"
 	case DelegationChanged:
 		return "delegation.changed"
 	case WaitStarted:
@@ -102,6 +108,10 @@ func eventType(ev Event) string {
 		return "usage.reported"
 	case ProviderRetrying:
 		return "provider.retrying"
+	case ToolRetrying:
+		return "tool.retrying"
+	case ToolLoopDetected:
+		return "tool.loop_detected"
 	case SchedulerQueued:
 		return "scheduler.queued"
 	case SchedulerAdmitted:
@@ -120,6 +130,8 @@ func eventType(ev Event) string {
 		return "hook.matched"
 	case EffectivePrompt:
 		return "prompt.effective"
+	case DiagnosticBundle:
+		return "diagnostic.bundle"
 	case ContextFitWarning:
 		return "context.fit_warning"
 	case ContextControlsSelected:
@@ -181,6 +193,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &PermissionAsked{}
 	case "permission.resolved":
 		ev = &PermissionResolved{}
+	case "permission.decided":
+		ev = &PermissionDecided{}
 	case "question.asked":
 		ev = &QuestionAsked{}
 	case "question.resolved":
@@ -201,6 +215,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &PhaseChanged{}
 	case "plan.handoff":
 		ev = &PlanHandoff{}
+	case "artifact.updated":
+		ev = &ArtifactUpdated{}
 	case "phase.grant_approved":
 		ev = &PhaseGrantApproved{}
 	case "effort.selected":
@@ -221,6 +237,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &ChildStarted{}
 	case "child.completed":
 		ev = &ChildCompleted{}
+	case "child.escalated":
+		ev = &ChildEscalated{}
 	case "delegation.changed":
 		ev = &DelegationChanged{}
 	case "wait.started":
@@ -237,6 +255,10 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &UsageReported{}
 	case "provider.retrying":
 		ev = &ProviderRetrying{}
+	case "tool.retrying":
+		ev = &ToolRetrying{}
+	case "tool.loop_detected":
+		ev = &ToolLoopDetected{}
 	case "scheduler.queued":
 		ev = &SchedulerQueued{}
 	case "scheduler.admitted":
@@ -255,6 +277,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &HookMatched{}
 	case "prompt.effective":
 		ev = &EffectivePrompt{}
+	case "diagnostic.bundle":
+		ev = &DiagnosticBundle{}
 	case "context.fit_warning":
 		ev = &ContextFitWarning{}
 	case "context.controls":
@@ -296,6 +320,8 @@ func deref(ev Event) Event {
 		return *v
 	case *PermissionResolved:
 		return *v
+	case *PermissionDecided:
+		return *v
 	case *QuestionAsked:
 		return *v
 	case *QuestionResolved:
@@ -315,6 +341,8 @@ func deref(ev Event) Event {
 	case *PhaseChanged:
 		return *v
 	case *PlanHandoff:
+		return *v
+	case *ArtifactUpdated:
 		return *v
 	case *PhaseGrantApproved:
 		return *v
@@ -336,6 +364,8 @@ func deref(ev Event) Event {
 		return *v
 	case *ChildCompleted:
 		return *v
+	case *ChildEscalated:
+		return *v
 	case *DelegationChanged:
 		return *v
 	case *WaitStarted:
@@ -351,6 +381,10 @@ func deref(ev Event) Event {
 	case *UsageReported:
 		return *v
 	case *ProviderRetrying:
+		return *v
+	case *ToolRetrying:
+		return *v
+	case *ToolLoopDetected:
 		return *v
 	case *SchedulerQueued:
 		return *v
@@ -369,6 +403,8 @@ func deref(ev Event) Event {
 	case *HookMatched:
 		return *v
 	case *EffectivePrompt:
+		return *v
+	case *DiagnosticBundle:
 		return *v
 	case *ContextFitWarning:
 		return *v

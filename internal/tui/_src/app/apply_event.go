@@ -26,7 +26,9 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 			// correlation; keep them for team UI (issue #614).
 			protocol.AgentMessage, protocol.AgentContractTimeout, protocol.TeamRoster,
 			// Queue lifecycle for children: show constrained pool, not idle.
-			protocol.SchedulerQueued, protocol.SchedulerAdmitted, protocol.SchedulerCanceled:
+			protocol.SchedulerQueued, protocol.SchedulerAdmitted, protocol.SchedulerCanceled,
+			// Diagnostic bundle inspect may target a child session (rpc /diag).
+			protocol.DiagnosticBundle:
 		default:
 			return nil
 		}
@@ -276,6 +278,8 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 			m.setNotice(msg, ev.Level == protocol.ContextFitCritical)
 		}
 		cmd = m.broadcastContextState()
+	case protocol.DiagnosticBundle:
+		cmd = m.applyDiagnosticBundle(ev)
 	case protocol.CompactionCompleted:
 		strategy := ev.Strategy
 		if strategy == "" {
@@ -612,6 +616,8 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 		return e.Correlation, true
 	case protocol.ContextControlsSelected:
 		return e.Correlation, true
+	case protocol.DiagnosticBundle:
+		return e.Correlation, true
 	case protocol.EngineError:
 		return e.Correlation, true
 	case protocol.ChildStarted:
@@ -635,6 +641,10 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	case protocol.SchedulerCanceled:
 		return e.Correlation, true
 	case protocol.ProviderRetrying:
+		return e.Correlation, true
+	case protocol.ToolRetrying:
+		return e.Correlation, true
+	case protocol.ToolLoopDetected:
 		return e.Correlation, true
 	case protocol.PermissionModeSelected:
 		return e.Correlation, true

@@ -114,6 +114,8 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 		e.handleInspectEffectivePrompt()
 	case protocol.SetContextControls:
 		e.handleSetContextControls(op)
+	case protocol.InspectDiagnosticBundle:
+		e.handleInspectDiagnosticBundle()
 	case protocol.Rewind:
 		e.handleRewind(op)
 	}
@@ -153,6 +155,13 @@ func stringSlicesEqual(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// handleInspectDiagnosticBundle emits a versioned prompt/config diagnostic
+// bundle (layer map + effective dials + digests). Solo and child engines both
+// answer with their own session lineage.
+func (e *Engine) handleInspectDiagnosticBundle() {
+	e.emit(e.buildDiagnosticBundleEvent())
 }
 
 // handleFilesChanged invalidates read snapshots for the reported paths and
