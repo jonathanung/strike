@@ -391,6 +391,9 @@ func TestWrapDarwinArgvShape(t *testing.T) {
 	if !strings.Contains(text, "file-write*") || !strings.Contains(text, "subpath") {
 		t.Fatalf("profile missing workspace write:\n%s", text)
 	}
+	if !strings.Contains(text, `(global-name "com.apple.securityd.xpc")`) {
+		t.Errorf("profile missing Keychain service:\n%s", text)
+	}
 	// Workdir (or its real path) must appear.
 	realWD, _ := filepath.EvalSymlinks(wd)
 	if realWD == "" {

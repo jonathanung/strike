@@ -170,6 +170,7 @@ func buildSeatbeltProfile(policy Policy, workDir string) string {
   (global-name "com.apple.corefoundation.cfprefsd.server")
   (global-name "com.apple.cfprefsd.daemon")
   (global-name "com.apple.cfprefsd.agent")
+  (global-name "com.apple.securityd.xpc")
 )
 
 ; Read the filesystem; writes are scoped below.
