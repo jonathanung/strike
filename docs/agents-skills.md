@@ -346,11 +346,18 @@ tab sync) still drive the default plan workflow; core lifecycle APIs are
 workflow-name generic.
 
 Tools `enter_plan_mode` / `exit_plan_mode` start and advance the default plan
-workflow. After plan completes, `exit_plan_mode` switches to **build** (simple)
-or **orchestrator** (complex): pass `agent`, or omit and supply `steps` /
-`areas` / `multi_agent` (heuristic: steps ≥ 4, areas ≥ 3, or multi_agent →
-orchestrator). The active phase shows as a badge in the TUI header (workflow
-name, phase, effective gate, and recovery status when resume fails closed).
+workflow. Leaving plan mode uses a **unified approval + handoff**: pass
+`plan_id` + `expected_version` from `plan_write`/`plan_read` (required for new
+sessions unless autonomy is `skip-all`, or a bounded `legacy_text` for
+pre-feature recovery). The gate runs once under `/autonomy`, the plan is marked
+approved, and a `plan.handoff` event records identity + approval source
+(`user`|`agent`|`checks`|`skip-all`). `phase_done` and manual agent/permission
+dials cannot bypass this path. After handoff, `exit_plan_mode` switches to
+**build** (simple) or **orchestrator** (complex): pass `agent`, or omit and
+supply `steps` / `areas` / `multi_agent` (heuristic: steps ≥ 4, areas ≥ 3, or
+multi_agent → orchestrator). The implementer sees the approved plan on the next
+request. The active phase shows as a badge in the TUI header (workflow name,
+phase, effective gate, and recovery status when resume fails closed).
 
 Use `/workflow list`, `/workflow inspect <name>`, `/workflow start <name>`, and
 `/workflow stop` (also in the command palette) to discover and activate any

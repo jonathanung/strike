@@ -316,6 +316,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tool.NewTaskRead(),
 		tool.NewTaskMessage(),
 		tool.NewTaskInterrupt(),
+		tool.NewDelegate(),
 		tool.NewWait(),
 		tool.NewAgentRoster(),
 		tool.NewAgentOwnership(),
@@ -477,27 +478,28 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	openRoot := func(resumeID string, applyCLI bool) (*rootSlot, []protocol.Event, error) {
 		resumeID = strings.TrimSpace(resumeID)
 		var (
-			sessionID         string
-			bound             session.Bound
-			replay            []protocol.Event
-			initialProvider   = cfg.Provider
-			initialModel      = cfg.Model
-			initialEffort     = cfg.Effort
-			initialAgent      = cfg.DefaultAgent
-			initialMessages   []provider.Message
-			initialPriority   bool
-			initialTitled     bool
-			initialAutonomy   protocol.Autonomy
-			initialPermMode   = cfg.PermissionMode
-			initialPhaseWF    string
-			initialPhaseIndex int
-			initialPhaseName  string
-			initialPhaseFP    string
-			initialPhaseGrant engine.PhaseGrantApproval
-			initialAlways     permission.Ruleset
-			quietStartup      bool
-			resuming          bool
-			openRootsBefore   int
+			sessionID          string
+			bound              session.Bound
+			replay             []protocol.Event
+			initialProvider    = cfg.Provider
+			initialModel       = cfg.Model
+			initialEffort      = cfg.Effort
+			initialAgent       = cfg.DefaultAgent
+			initialMessages    []provider.Message
+			initialPriority    bool
+			initialTitled      bool
+			initialAutonomy    protocol.Autonomy
+			initialPermMode    = cfg.PermissionMode
+			initialPhaseWF     string
+			initialPhaseIndex  int
+			initialPhaseName   string
+			initialPhaseFP     string
+			initialPhaseGrant  engine.PhaseGrantApproval
+			initialAlways      permission.Ruleset
+			initialPlanHandoff engine.PlanHandoffState
+			quietStartup       bool
+			resuming           bool
+			openRootsBefore    int
 		)
 		if resumeID != "" {
 			resuming = true
@@ -520,6 +522,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			initialPhaseFP = restored.PhaseFingerprint
 			initialPhaseGrant = restored.PhaseGrant
 			initialAlways = restored.AlwaysGrants
+			initialPlanHandoff = restored.PlanHandoff
 			if !(applyCLI && opts.providerSet) && restored.Provider != "" {
 				initialProvider = restored.Provider
 			}
@@ -584,7 +587,6 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			ProjectRoot:     projectIdentity.Root,
 			Instructions:    instructions,
 			Memory:          memoryStore,
-			PlanStore:       planStore,
 			SystemPrompt:    cfg.SystemPrompt,
 			LeanCode:        cfg.LeanCode,
 			HarnessRegistry: harnessRegistry,
@@ -616,6 +618,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			InitialPhaseFingerprint:    initialPhaseFP,
 			InitialPhaseGrantApproval:  initialPhaseGrant,
 			InitialAlwaysGrants:        initialAlways,
+			InitialPlanHandoff:         initialPlanHandoff,
+			PlanStore:                  planStore,
 			QuietStartup:               quietStartup,
 			DangerouslySkipPermissions: opts.dangerouslySkipPermissions,
 			Workflows:                  workflows,

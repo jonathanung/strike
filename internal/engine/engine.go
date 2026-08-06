@@ -13,7 +13,6 @@ import (
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/harness"
 	"github.com/jonathanung/strike-cli/internal/permission"
-	"github.com/jonathanung/strike-cli/internal/plan"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
 	"github.com/jonathanung/strike-cli/internal/question"
@@ -216,6 +215,11 @@ type Options struct {
 	// DefaultWorkflow is entered by enter_plan_mode when set; empty means
 	// "plan-implement".
 	DefaultWorkflow string
+	// PlanStore backs unified plan-mode handoff (validate id/version, approve).
+	// nil rejects structured plan_id handoffs; legacy_text and skip-all still work.
+	PlanStore PlanStore
+	// InitialPlanHandoff restores a prior plan.handoff after session resume.
+	InitialPlanHandoff PlanHandoffState
 	// OpenChildSession, when set, opens a durable log for a spawned child.
 	// parentID and a suggested childID/title are provided; the returned id is
 	// used as the child SessionID when non-empty.
@@ -279,16 +283,6 @@ type Options struct {
 	// touched absolute paths after file mutations (one call per tool result).
 	// Empty disables injection. Must not panic the tool path (callers recover).
 	CollectDiagnostics func(ctx context.Context, absPaths []string) string
-	// PlanStore, when set, receives section-delegate completion applies from
-	// finishChild (plan_delegate correlation). nil disables auto-apply.
-	// *plan.Store satisfies PlanSectionStore.
-	PlanStore PlanSectionStore
-}
-
-// PlanSectionStore is the engine-facing plan surface for section delegation.
-// *plan.Store implements this interface.
-type PlanSectionStore interface {
-	FinishSectionDelegate(id, actorRoot, sectionID, childID string, outcome plan.DelegateOutcome) (plan.Plan, error)
 }
 
 // beginAck reports whether ToolCallBegin was actually written to Events.
@@ -411,6 +405,10 @@ type Engine struct {
 	// phaseGrantApproval is the last accepted widening decision for the
 	// active phase (empty when no widening was needed or phase cleared).
 	phaseGrantApproval PhaseGrantApproval
+
+	// planHandoff is the last successful unified plan approval + handoff.
+	// Active after exit_plan_mode succeeds; restored from protocol.PlanHandoff.
+	planHandoff PlanHandoffState
 
 	// files tracks tool read snapshots so external edits (FilesChanged / /vim)
 	// force the model to re-read before edit/write.
@@ -667,6 +665,10 @@ func (e *Engine) Run(ctx context.Context) {
 	// Then re-seed session always-grants (SetAgentRules cleared them).
 	if wf := e.opts.InitialPhaseWorkflow; wf != "" {
 		e.restoreWorkflowPhase(wf, e.opts.InitialPhaseIndex, e.opts.InitialPhaseName, e.opts.InitialPhaseFingerprint)
+	}
+	if e.opts.InitialPlanHandoff.Active || e.opts.InitialPlanHandoff.PlanID != "" ||
+		e.opts.InitialPlanHandoff.LegacyText != "" || e.opts.InitialPlanHandoff.ApprovalSource != "" {
+		e.restorePlanHandoff(e.opts.InitialPlanHandoff)
 	}
 	if len(e.opts.InitialAlwaysGrants) > 0 {
 		e.perms.SeedAlwaysGrants(e.opts.InitialAlwaysGrants)

@@ -39,6 +39,8 @@ type Restored struct {
 	// AlwaysGrants are session DecisionAlways rules still in force after the
 	// last agent switch (SetAgentRules clears grants).
 	AlwaysGrants permission.Ruleset
+	// PlanHandoff is the last protocol.PlanHandoff (approved plan identity).
+	PlanHandoff PlanHandoffState
 }
 
 // reqAccum collects one provider-request's stream into an assistant message
@@ -208,6 +210,16 @@ func Restore(events []protocol.Event) Restored {
 				Fingerprint: e.Fingerprint,
 				Grants:      grants,
 			}
+		case protocol.PlanHandoff:
+			r.PlanHandoff = PlanHandoffState{
+				Active:         true,
+				PlanID:         e.PlanID,
+				Version:        e.PlanVersion,
+				ApprovalSource: e.ApprovalSource,
+				Title:          e.Title,
+				Agent:          e.Agent,
+				LegacyText:     e.LegacyText,
+			}
 		case protocol.SessionTitled:
 			if e.Title != "" {
 				r.Titled = true
@@ -287,6 +299,8 @@ func restoreCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	case protocol.PermissionModeSelected:
 		return e.Correlation, true
 	case protocol.PhaseChanged:
+		return e.Correlation, true
+	case protocol.PlanHandoff:
 		return e.Correlation, true
 	case protocol.PhaseGrantApproved:
 		return e.Correlation, true

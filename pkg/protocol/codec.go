@@ -60,6 +60,8 @@ func eventType(ev Event) string {
 		return "agent.selected"
 	case PhaseChanged:
 		return "phase.changed"
+	case PlanHandoff:
+		return "plan.handoff"
 	case PhaseGrantApproved:
 		return "phase.grant_approved"
 	case EffortSelected:
@@ -80,6 +82,8 @@ func eventType(ev Event) string {
 		return "child.started"
 	case ChildCompleted:
 		return "child.completed"
+	case DelegationChanged:
+		return "delegation.changed"
 	case WaitStarted:
 		return "wait.started"
 	case WaitResolved:
@@ -181,6 +185,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &AgentSelected{}
 	case "phase.changed":
 		ev = &PhaseChanged{}
+	case "plan.handoff":
+		ev = &PlanHandoff{}
 	case "phase.grant_approved":
 		ev = &PhaseGrantApproved{}
 	case "effort.selected":
@@ -201,6 +207,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &ChildStarted{}
 	case "child.completed":
 		ev = &ChildCompleted{}
+	case "delegation.changed":
+		ev = &DelegationChanged{}
 	case "wait.started":
 		ev = &WaitStarted{}
 	case "wait.resolved":
@@ -282,6 +290,8 @@ func deref(ev Event) Event {
 		return *v
 	case *PhaseChanged:
 		return *v
+	case *PlanHandoff:
+		return *v
 	case *PhaseGrantApproved:
 		return *v
 	case *EffortSelected:
@@ -301,6 +311,8 @@ func deref(ev Event) Event {
 	case *ChildStarted:
 		return *v
 	case *ChildCompleted:
+		return *v
+	case *DelegationChanged:
 		return *v
 	case *WaitStarted:
 		return *v
