@@ -144,6 +144,10 @@ type Config struct {
 	// Prefer mcp.jsonc (see Load). When a layer sets servers (including {}),
 	// it replaces the previous layer's server map.
 	MCP MCPConfig `json:"mcp,omitempty"`
+	// LSP configures external language servers (JSON-RPC over stdio). When a
+	// layer sets servers (including {}), it replaces the previous layer's map.
+	// Registry is keyed by file extension via each server's extensions list.
+	LSP LSPConfig `json:"lsp,omitempty"`
 	// Harnesses configures named external function harnesses. Project
 	// definitions replace global definitions with the same name.
 	Harnesses map[string]HarnessConfig `json:"harnesses,omitempty"`
@@ -203,6 +207,23 @@ type MCPServer struct {
 	URL string `json:"url,omitempty"`
 	// Headers are sent on every HTTP request; never logged (e.g. Authorization).
 	Headers map[string]string `json:"headers,omitempty"`
+}
+
+// LSPConfig is the JSON "lsp" object.
+type LSPConfig struct {
+	// Servers maps a short name to a language server entry. Extensions on each
+	// entry build the runtime registry (first server claiming an extension wins).
+	Servers map[string]LSPServer `json:"servers,omitempty"`
+}
+
+// LSPServer is one language server entry (stdio command + file extensions).
+type LSPServer struct {
+	Command string            `json:"command,omitempty"`
+	Args    []string          `json:"args,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
+	// Extensions lists file extensions this server handles (e.g. ".go", "ts").
+	// Required — servers without extensions are ignored at start.
+	Extensions []string `json:"extensions,omitempty"`
 }
 
 // SessionConfig is the JSON "session" object in config.
@@ -938,6 +959,7 @@ func merge(base, layer Config) Config {
 	base.Providers = mergeProviders(base.Providers, layer.Providers)
 	base.Keybinds = MergeKeybinds(base.Keybinds, layer.Keybinds)
 	base.MCP = mergeMCP(base.MCP, layer.MCP)
+	base.LSP = mergeLSP(base.LSP, layer.LSP)
 	base.Harnesses = mergeHarnesses(base.Harnesses, layer.Harnesses)
 	base.Scheduler = mergeScheduler(base.Scheduler, layer.Scheduler)
 	if layer.disableDefaultProvidersSet {
@@ -1060,6 +1082,42 @@ func cloneMCPServers(in map[string]MCPServer) map[string]MCPServer {
 			for hk, hv := range v.Headers {
 				s.Headers[hk] = hv
 			}
+		}
+		out[k] = s
+	}
+	return out
+}
+
+// mergeLSP: when layer sets Servers (including empty map), it replaces base.
+// Omitted lsp / nil servers leaves base unchanged.
+func mergeLSP(base, layer LSPConfig) LSPConfig {
+	if layer.Servers != nil {
+		return LSPConfig{Servers: cloneLSPServers(layer.Servers)}
+	}
+	if base.Servers != nil {
+		return LSPConfig{Servers: cloneLSPServers(base.Servers)}
+	}
+	return LSPConfig{}
+}
+
+func cloneLSPServers(in map[string]LSPServer) map[string]LSPServer {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]LSPServer, len(in))
+	for k, v := range in {
+		s := LSPServer{
+			Command: strings.TrimSpace(v.Command),
+			Args:    append([]string(nil), v.Args...),
+		}
+		if len(v.Env) > 0 {
+			s.Env = make(map[string]string, len(v.Env))
+			for ek, ev := range v.Env {
+				s.Env[ek] = ev
+			}
+		}
+		if len(v.Extensions) > 0 {
+			s.Extensions = append([]string(nil), v.Extensions...)
 		}
 		out[k] = s
 	}

@@ -190,6 +190,7 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		HarnessRegistry:         e.opts.HarnessRegistry,
 		Scheduler:               e.opts.Scheduler,       // share process-local pools
 		SchedulerPolicy:         e.opts.SchedulerPolicy, // bash classification rules
+		FileSync:                e.opts.FileSync,        // share LSP document sync
 		Agents:                  e.opts.Agents,
 		InitialAgent:            agentName,
 		InitialProvider:         e.provName,

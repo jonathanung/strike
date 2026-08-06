@@ -393,6 +393,47 @@ object to persist defaults.
 List/permission modal conventions (`lists.*`, `perm.*`) and agents-pane local
 controls (`agents.*`) are not remappable.
 
+## Language servers (LSP)
+
+Configure stdio language servers so file tool mutations (`write` / `edit` /
+`apply_patch` / `notebook_edit`) drive `textDocument/didOpen` /
+`didChange` / `didClose`, and `publishDiagnostics` notifications are collected
+per URI. A dead language server degrades to no diagnostics and never takes
+down the session (same crash isolation as MCP).
+
+```json
+// ~/.strike/config or ./.strike/config
+{
+  "lsp": {
+    "servers": {
+      "go": {
+        "command": "gopls",
+        "extensions": [".go"]
+      },
+      "typescript": {
+        "command": "typescript-language-server",
+        "args": ["--stdio"],
+        "extensions": [".ts", ".tsx", ".js", ".jsx"]
+      }
+    }
+  }
+}
+```
+
+| Field | Required | Notes |
+|---|---|---|
+| `command` | yes | Executable on `PATH` or absolute path |
+| `args` | no | Extra argv after command |
+| `env` | no | Env overlay for the subprocess (never logged) |
+| `extensions` | yes | File extensions this server owns (with or without leading `.`). First server claiming an extension wins. Servers with no extensions are skipped. |
+
+**Layering:** when a config layer sets `lsp.servers` (including `{}`), it
+**replaces** the previous layer's server map entirely (same as MCP). Omitted
+`lsp` leaves the lower layer unchanged.
+
+Diagnostics injection into tool results and the `/lsp` UI are separate
+follow-ups (epic E2.2 / E2.3). This client only collects diagnostics in-process.
+
 ## MCP servers (stdio + HTTP)
 
 Connect external [Model Context Protocol](https://modelcontextprotocol.io)

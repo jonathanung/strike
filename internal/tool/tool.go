@@ -370,6 +370,11 @@ type Context struct {
 	// Checkpoint, when non-nil, records pre-mutation file state for undo
 	// restore (first touch per turn). Absolute path. Nil disables checkpoints.
 	Checkpoint func(absPath string)
+	// FileSync, when non-nil, is invoked after a successful file mutation so
+	// hosts can drive LSP document sync (didOpen/didChange/didClose).
+	// absPath is absolute; content is the full new text; deleted is true for
+	// removals (content may be empty). Nil disables. Must not panic the tool.
+	FileSync func(absPath string, content string, deleted bool)
 	// ChildWake is closed when a background child completes. Sleep selects on
 	// it so poll-loops return promptly. Nil disables early wake.
 	ChildWake <-chan struct{}
@@ -386,6 +391,16 @@ func (tc *Context) SnapshotPath(absPath string) {
 		return
 	}
 	tc.Checkpoint(absPath)
+}
+
+// NotifyFileSync tells optional listeners (e.g. LSP) about a successful mutation.
+// Safe on a nil receiver or nil FileSync. Recovers panics from the callback.
+func (tc *Context) NotifyFileSync(absPath, content string, deleted bool) {
+	if tc == nil || tc.FileSync == nil || absPath == "" {
+		return
+	}
+	defer func() { _ = recover() }()
+	tc.FileSync(absPath, content, deleted)
 }
 
 type Tool interface {

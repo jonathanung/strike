@@ -666,6 +666,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			},
 			Files:      e.files,
 			Checkpoint: e.checkpoints.Snapshot,
+			FileSync:   e.opts.FileSync,
 			Ask: func(ctx context.Context, req tool.AskRequest) error {
 				return e.perms.AskWithCorrelation(ctx, req, corr)
 			},
