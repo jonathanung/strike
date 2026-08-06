@@ -141,10 +141,12 @@ func (d *OpDecoder) Decode() (protocol.Op, error) {
 // ConnectJSONL returns a Client that writes ops as JSONL OpEnvelopes to opsOut
 // and reads event envelopes from eventsIn on a background goroutine.
 //
-// Call [Client.Close] to cancel the reader pump (it does not close opsOut or
-// eventsIn). The Events channel closes when eventsIn hits EOF, a decode error
-// occurs, or Close is called. After Close, pumpErr (if any decode failure)
-// is returned from Close.
+// The Events channel closes when eventsIn hits EOF or a decode error occurs.
+// Call [Client.Close] to stop accepting further pump deliveries into a full
+// buffer (it does not close opsOut or eventsIn). Close never blocks on a
+// stuck read: close eventsIn (or the underlying connection) so the pump can
+// finish, then optionally call Close again or range Events until it closes
+// to observe a decode error via Close's return value once the pump has exited.
 //
 // opsOut writes are serialized. Concurrent Send is safe.
 func ConnectJSONL(opsOut io.Writer, eventsIn io.Reader) *Client {
@@ -157,16 +159,15 @@ func ConnectJSONL(opsOut io.Writer, eventsIn io.Reader) *Client {
 
 	events := make(chan protocol.Event, 64)
 	var (
-		writeMu sync.Mutex
-		once    sync.Once
-		done    = make(chan struct{})
-		wg      sync.WaitGroup
-		pumpErr error
+		writeMu  sync.Mutex
+		once     sync.Once
+		done     = make(chan struct{})
+		pumpDone = make(chan struct{})
+		pumpErr  error
 	)
 
-	wg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer close(pumpDone)
 		defer close(events)
 		dec := NewEventDecoder(eventsIn)
 		for {
@@ -209,8 +210,14 @@ func ConnectJSONL(opsOut io.Writer, eventsIn io.Reader) *Client {
 	}
 	c.closer = func() error {
 		once.Do(func() { close(done) })
-		wg.Wait()
-		return pumpErr
+		// Non-blocking: only report pumpErr when the reader has already finished.
+		// Callers that need a hard stop must close eventsIn so Decode unblocks.
+		select {
+		case <-pumpDone:
+			return pumpErr
+		default:
+			return nil
+		}
 	}
 	return c
 }

@@ -152,6 +152,35 @@ func TestRunTurnPermissionHook(t *testing.T) {
 	}
 }
 
+func TestRunTurnQuestionHook(t *testing.T) {
+	ops := make(chan protocol.Op, 8)
+	events := make(chan protocol.Event, 8)
+	c := sdk.New(ops, events)
+
+	go func() {
+		<-ops
+		events <- protocol.QuestionAsked{
+			RequestID: "q1",
+			Questions: []protocol.QuestionPrompt{{ID: "p", Question: "ok?"}},
+		}
+		reply := <-ops
+		qr, ok := reply.(protocol.QuestionReply)
+		if !ok || qr.RequestID != "q1" || len(qr.Answers) != 1 || qr.Answers[0] != "yes" {
+			t.Errorf("reply = %#v", reply)
+		}
+		events <- protocol.TurnCompleted{StopReason: "end_turn"}
+	}()
+
+	if _, err := c.RunTurn(context.Background(), sdk.Turn{
+		Text: "ask",
+		OnQuestion: func(q protocol.QuestionAsked) protocol.QuestionReply {
+			return protocol.QuestionReply{Answers: []string{"yes"}}
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRunTurnEngineError(t *testing.T) {
 	ops := make(chan protocol.Op, 4)
 	events := make(chan protocol.Event, 4)

@@ -78,9 +78,11 @@ func (c *Client) Send(ctx context.Context, op protocol.Op) error {
 	}
 }
 
-// Close stops background pumps started by [ConnectJSONL]. It is a no-op for
-// channel-backed clients from [New]. Close does not close the caller's ops
-// channel.
+// Close signals background pumps started by [ConnectJSONL] to stop delivering
+// into a full Events buffer. It is a no-op for channel-backed clients from
+// [New]. Close does not close the caller's ops channel or the JSONL reader;
+// close the reader to unblock a pump stuck in Decode, then Close again (or
+// drain Events) to observe a terminal decode error if one occurred.
 func (c *Client) Close() error {
 	if c == nil || c.closer == nil {
 		return nil

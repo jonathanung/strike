@@ -83,8 +83,10 @@ Helpers:
 | `DecodeOpLine` / `DecodeEventLine` | parse one line |
 | `NewOpDecoder` / `NewEventDecoder` | streaming scanners (32 MiB line cap) |
 
-Close the underlying reader when tearing down so `ConnectJSONL`'s pump can
-exit; then call `client.Close()`.
+Tear-down: close the underlying `eventsIn` reader (or connection) so the
+pump's Decode unblocks and `Events` closes; `client.Close()` only signals the
+pump to stop filling a full buffer and never blocks on a stuck read. Call
+`Close` again after the pump exits if you need a decode error return.
 
 ## Session files
 
