@@ -175,12 +175,49 @@ func (t *planDelegateTool) dispatch(ctx context.Context, tc *Context, in struct 
 		})
 	}
 	if sec.DelegateStatus == plan.DelegateInFlight {
-		return planSoftError("section in flight", fmt.Sprintf("section %s already has in-flight child %s", secID, sec.DelegateChildID), map[string]any{
-			"id":         id,
-			"section_id": secID,
-			"child_id":   sec.DelegateChildID,
-			"in_flight":  true,
-		})
+		// Live child still running → reject. Stale correlation (process restart,
+		// unknown/terminal child) is reclaimed so dispatch is not stuck forever.
+		if liveSectionDelegate(ctx, tc, sec.DelegateChildID) {
+			return planSoftError("section in flight", fmt.Sprintf("section %s already has in-flight child %s", secID, sec.DelegateChildID), map[string]any{
+				"id":         id,
+				"section_id": secID,
+				"child_id":   sec.DelegateChildID,
+				"in_flight":  true,
+			})
+		}
+		if _, err := t.store.FinishSectionDelegate(id, ownerRoot, secID, sec.DelegateChildID, plan.DelegateOutcome{
+			Status: plan.DelegateCanceled,
+			Detail: "stale in_flight reclaimed (child not live); prior content preserved",
+		}); err != nil && !errors.Is(err, plan.ErrDelegateMismatch) {
+			// Race: another finish won — re-read and continue if no longer in_flight.
+			p2, ok2, gerr := t.store.Get(id)
+			if gerr != nil {
+				return Result{}, gerr
+			}
+			if !ok2 {
+				return planSoftError("plan miss", fmt.Sprintf("no plan %q", id), map[string]any{"id": id})
+			}
+			sec2, found2 := findSection(p2, secID)
+			if !found2 || sec2.DelegateStatus == plan.DelegateInFlight {
+				return planSoftError("section in flight", fmt.Sprintf("section %s still in_flight after reclaim attempt", secID), map[string]any{
+					"id": id, "section_id": secID, "in_flight": true,
+				})
+			}
+			p = p2
+			sec = sec2
+		} else {
+			// Refresh section snapshot after reclaim.
+			p2, ok2, gerr := t.store.Get(id)
+			if gerr != nil {
+				return Result{}, gerr
+			}
+			if ok2 {
+				p = p2
+				if s2, f2 := findSection(p2, secID); f2 {
+					sec = s2
+				}
+			}
+		}
 	}
 
 	agent := strings.TrimSpace(in.Agent)
@@ -254,6 +291,26 @@ func findSection(p plan.Plan, sectionID string) (plan.Section, bool) {
 		}
 	}
 	return plan.Section{}, false
+}
+
+// liveSectionDelegate reports whether childID still looks like a running
+// owned child. Unknown/missing TaskStatus or terminal states are not live.
+func liveSectionDelegate(ctx context.Context, tc *Context, childID string) bool {
+	childID = strings.TrimSpace(childID)
+	if childID == "" || tc == nil || tc.TaskStatus == nil {
+		return false
+	}
+	st, err := tc.TaskStatus(ctx, TaskStatusRequest{SessionID: childID})
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(st.State)) {
+	case "starting", "working", "needs_attention", "blocked":
+		return true
+	default:
+		// completed|failed|canceled|unknown|"" → not live
+		return false
+	}
 }
 
 func buildSectionDelegatePrompt(p plan.Plan, sec plan.Section, extra string) string {

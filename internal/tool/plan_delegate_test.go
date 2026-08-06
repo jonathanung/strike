@@ -177,6 +177,79 @@ func TestPlanDelegatePermissionAndCore(t *testing.T) {
 	}
 }
 
+func TestPlanDelegateReclaimsStaleInFlight(t *testing.T) {
+	store := openPlan(t)
+	p, err := store.Create("root-a", "Ship", []plan.SectionInput{{Title: "A", Body: "keep"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.BeginSectionDelegate(p.ID, "root-a", "s1", "dead-child", "old"); err != nil {
+		t.Fatal(err)
+	}
+
+	tc := rootTC(t, "root-a")
+	// Child is unknown → not live.
+	tc.TaskStatus = func(context.Context, TaskStatusRequest) (TaskStatusResult, error) {
+		return TaskStatusResult{}, errors.New("unknown child")
+	}
+	var spawned string
+	tc.SpawnTask = func(_ context.Context, req TaskRequest) (TaskResult, error) {
+		spawned = "new-child"
+		return TaskResult{Status: "started", SessionID: spawned, Name: "fresh", Output: "ok"}, nil
+	}
+
+	res, err := NewPlanDelegate(store).Execute(context.Background(), mustJSON(t, map[string]any{
+		"action": "dispatch", "id": p.ID, "section_id": "s1", "name": "fresh",
+	}), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spawned != "new-child" {
+		t.Fatal("expected spawn after reclaim")
+	}
+	if strings.Contains(res.Output, `"in_flight": true`) && !strings.Contains(res.Output, "new-child") {
+		t.Fatalf("still blocked: %s", res.Output)
+	}
+	got, ok, err := store.Get(p.ID)
+	if err != nil || !ok {
+		t.Fatal(err)
+	}
+	if got.Sections[0].Body != "keep" {
+		t.Fatalf("body mutated: %q", got.Sections[0].Body)
+	}
+	if got.Sections[0].DelegateStatus != plan.DelegateInFlight || got.Sections[0].DelegateChildID != "new-child" {
+		t.Fatalf("sec=%#v", got.Sections[0])
+	}
+}
+
+func TestPlanDelegateRejectsLiveInFlight(t *testing.T) {
+	store := openPlan(t)
+	p, err := store.Create("root-a", "Ship", []plan.SectionInput{{Title: "A", Body: "b"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.BeginSectionDelegate(p.ID, "root-a", "s1", "live-child", ""); err != nil {
+		t.Fatal(err)
+	}
+	tc := rootTC(t, "root-a")
+	tc.TaskStatus = func(context.Context, TaskStatusRequest) (TaskStatusResult, error) {
+		return TaskStatusResult{State: "working", SessionID: "live-child"}, nil
+	}
+	tc.SpawnTask = func(context.Context, TaskRequest) (TaskResult, error) {
+		t.Fatal("must not spawn while live")
+		return TaskResult{}, nil
+	}
+	res, err := NewPlanDelegate(store).Execute(context.Background(), mustJSON(t, map[string]any{
+		"action": "dispatch", "id": p.ID, "section_id": "s1",
+	}), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Output, "in_flight") && !strings.Contains(res.Output, "in flight") {
+		t.Fatalf("want in_flight: %s", res.Output)
+	}
+}
+
 func TestBuildSectionDelegatePrompt(t *testing.T) {
 	p := plan.Plan{ID: "abc", Title: "T", Status: "draft"}
 	sec := plan.Section{ID: "s1", Title: "Research", Body: " dig "}
