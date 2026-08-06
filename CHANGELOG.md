@@ -16,6 +16,12 @@ materially affect the shipped product.
 
 ### Added
 
+- **SWE-bench Verified subset runner (E3.3)** — `strike eval swebench` runs a
+  fixed 50-instance internal regression subset with Docker per instance and
+  `strike exec --json`, recording pass rate, tokens, cost, and wall-clock to
+  versioned `report.json` / predictions JSONL under `evals/swebench/results/`.
+  Internal signal only — do not publish pass rates in the README
+  ([#561](https://github.com/jonathanung/strike/issues/561)).
 - **`websearch` tool** — permissioned, provider-neutral web search with
   citation-ready titles/URLs/snippets, domain filters, result limits, and
   network allowlist / redaction / audit controls. Separate from `webfetch`
