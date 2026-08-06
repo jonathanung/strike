@@ -533,6 +533,10 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 		return e.Correlation, true
 	case protocol.TurnCompleted:
 		return e.Correlation, true
+	case protocol.VerificationStarted:
+		return e.Correlation, true
+	case protocol.VerificationCompleted:
+		return e.Correlation, true
 	case protocol.HarnessProgress:
 		return e.Correlation, true
 	case protocol.ModelSelected:
