@@ -75,7 +75,30 @@ make vet           # go vet ./...
 make build         # go build -o strike ./cmd/strike
 make cover         # statement coverage → coverage.out + total %
 make cover-check   # cover + enforce COVER_MIN (default 75)
+make prompt-reg    # E3.2 prompt metrics report (soft deltas by default)
+make harness-eval  # #807 harness regression pack + report (offline)
 ```
+
+### Harness evaluation suite (#807)
+
+Offline regression pack under `internal/replay` (`TestHarnessEvalSuite`) covering
+**correctness** (tool contracts, precondition fail-closed, golden echo replay),
+**safety** (secret redaction, permission deny, sandbox capability report),
+**recovery** (cancel error codes, no mutative double-retry), and
+**latency/cost** (timeline duration/token fields, budget wire + echo metrics).
+Also consumes #791 recordings and #782 run snapshots. Composes with epic #459
+E3 runners; does **not** replace SWE-bench (#561) or failure injection (#808).
+
+```sh
+make harness-eval
+HARNESS_EVAL_REPORT=/tmp/harness-eval.json make harness-eval
+```
+
+Scenario failures are hard errors (also under `make test` / CI Test). The CI
+"Harness eval report (soft)" step is **non-blocking** (`continue-on-error`) so
+the verbose artifact can land without gating merges. **Path to blocking:**
+remove `continue-on-error` on that step once the pack is stable on `main`.
+
 
 Stronger checks when touching concurrency, tools, permissions, auth, or
 session I/O (tier C):
