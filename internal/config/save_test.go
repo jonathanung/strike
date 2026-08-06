@@ -455,3 +455,82 @@ func TestSetGlobalSchedulerPresetsRejectsUnknown(t *testing.T) {
 		t.Fatalf("failed write still mutated: %v", got.Scheduler.Presets)
 	}
 }
+
+func TestSetGlobalConfigDials(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Seed unrelated fields so dials do not clobber them.
+	if err := SetGlobalDefaults("echo", "echo", "build", protocol.EffortHigh, "default"); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetGlobalTheme("dracula"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SetGlobalConfigDials("read-only", "on", "full", "on", "auto"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadGlobalDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Sandbox != "read-only" {
+		t.Errorf("sandbox = %q", got.Sandbox)
+	}
+	if got.Notify != NotifyOn {
+		t.Errorf("notify = %q", got.Notify)
+	}
+	if got.LeanCode != LeanCodeFull {
+		t.Errorf("leanCode = %q", got.LeanCode)
+	}
+	if got.DeferTools != DeferToolsOn {
+		t.Errorf("deferTools = %q", got.DeferTools)
+	}
+	if got.Session.Worktree != "auto" {
+		t.Errorf("session.worktree = %q", got.Session.Worktree)
+	}
+	if got.Provider != "echo" || got.Theme != "dracula" {
+		t.Errorf("clobbered unrelated: provider=%q theme=%q", got.Provider, got.Theme)
+	}
+
+	// Partial update leaves other dials.
+	if err := SetGlobalConfigDials("off", "", "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	got, err = ReadGlobalDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Sandbox != "off" || got.Notify != NotifyOn || got.Session.Worktree != "auto" {
+		t.Fatalf("partial dials = sandbox=%q notify=%q wt=%q", got.Sandbox, got.Notify, got.Session.Worktree)
+	}
+}
+
+func TestSetGlobalConfigDialsRejectsUnknown(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cases := []struct {
+		name string
+		fn   func() error
+	}{
+		{"sandbox", func() error { return SetGlobalConfigDials("nope", "", "", "", "") }},
+		{"notify", func() error { return SetGlobalConfigDials("", "sometimes", "", "", "") }},
+		{"leanCode", func() error { return SetGlobalConfigDials("", "", "maybe", "", "") }},
+		{"deferTools", func() error { return SetGlobalConfigDials("", "", "", "maybe", "") }},
+		{"worktree", func() error { return SetGlobalConfigDials("", "", "", "", "sometimes") }},
+	}
+	for _, tc := range cases {
+		if err := tc.fn(); err == nil {
+			t.Errorf("%s: accepted unknown", tc.name)
+		}
+	}
+	got, err := ReadGlobalDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Sandbox != "" || got.Notify != "" || got.LeanCode != "" || got.DeferTools != "" || got.Session.Worktree != "" {
+		t.Fatalf("reject mutated config: %+v", got)
+	}
+}

@@ -149,10 +149,22 @@ type UserDefaults struct {
 	Agent          string
 	Effort         string
 	PermissionMode string
-	Theme          string
-	VimMode        string
-	NanoMode       string
-	MdReadMode     string
+	// Sandbox is the OS process sandbox dial (off|read-only|workspace-write).
+	// Distinct from PermissionMode (when asked). Empty means unset → product
+	// default workspace-write at load.
+	Sandbox string
+	// Notify is desktop notification gating: on|off|unfocused-only.
+	Notify string
+	// LeanCode is lean-code guidance intensity: off|lite|full.
+	LeanCode string
+	// DeferTools is toolsearch-backed schema deferral: on|off.
+	DeferTools string
+	// SessionWorktree is session.worktree: off|auto|always.
+	SessionWorktree string
+	Theme           string
+	VimMode         string
+	NanoMode        string
+	MdReadMode      string
 }
 
 // Settings persists user-chosen defaults. Empty fields mean "leave as is".
@@ -173,6 +185,12 @@ type Settings interface {
 	// (pane|embedded|overlay|modal|takeover vocabulary). Empty leaves the
 	// stored value unchanged; unknown values are rejected.
 	SavePresentation(vimMode, nanoMode, mdReadMode string) error
+	// SaveConfigDials persists non-empty peer-ported behavior dials into
+	// ~/.strike/config: sandbox (off|read-only|workspace-write), notify
+	// (on|off|unfocused-only), leanCode (off|lite|full), deferTools (on|off),
+	// and sessionWorktree (off|auto|always). Empty leaves the stored value
+	// unchanged; unknown values are rejected.
+	SaveConfigDials(sandbox, notify, leanCode, deferTools, sessionWorktree string) error
 	// SaveKeybinds persists binding-id overrides to ~/.strike/keybinds.jsonc.
 	// Unknown ids are silently dropped; callers should pre-filter. A nil
 	// map deletes the file (reset to defaults).

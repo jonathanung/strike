@@ -33,7 +33,7 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		{ID: "command:mode", Label: "/mode", Description: "set permission posture (default/plan/accept-edits/yolo)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/mode"}},
 		{ID: "command:sandbox", Label: "/sandbox", Description: "show OS sandbox policy; /sandbox explain for generated profile", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/sandbox"}},
 		{ID: "command:auth", Label: "/auth", Description: "manage provider authentication", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/auth"}},
-		{ID: "command:settings", Label: "/settings", Description: "defaults (theme, editor, mode) and custom providers", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/settings"}},
+		{ID: "command:settings", Label: "/settings", Description: "defaults (theme, sandbox, notify, mode) and custom providers", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/settings"}},
 		{ID: "agent:build", Label: "/agent build", Description: "select an agent", Action: paletteAction{Kind: paletteActionAgent, Value: "build"}},
 		{ID: "command:agents", Label: "/agents", Description: "focus the agents right pane", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/agents"}},
 		{ID: "command:activity", Label: "/activity", Description: "focus the activity right pane", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/activity"}},

@@ -330,9 +330,16 @@ provider + model; in the effort picker it saves the highlighted level; in
 the theme picker it saves the highlighted theme id.
 
 **/settings Defaults**: interactive editor for theme, vimMode, nanoMode,
-mdReadMode, permissionMode, and effort (plus a read-only view of
-provider/model/agent). Changes write `~/.strike/config` and apply theme/editor
-presentation to the current session immediately.
+mdReadMode, **permissionMode**, **sandbox**, **notify**, **leanCode**,
+**deferTools**, **session.worktree**, and effort (plus a read-only view of
+provider/model/agent). Changes write `~/.strike/config`. Theme, editor/reader
+presentation, and notify apply to the current session immediately;
+permissionMode, sandbox, leanCode, deferTools, and session.worktree affect
+**new** sessions (use `/mode` / Shift+Tab for the live permission dial, and
+`/sandbox` to inspect the OS dial already bound for this process).
+
+Peer settings inventory (Claude Code / OpenCode → strike): see
+[peer-ecosystem.md](peer-ecosystem.md#settings-inventory).
 
 ## Theme
 
