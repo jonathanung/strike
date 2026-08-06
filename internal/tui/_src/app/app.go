@@ -987,6 +987,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := m.applyApplyDiffResult(msg)
 		return m, cmd
 
+	case inputQueueRunNextMsg:
+		if _, ok := m.modal.(*queueModal); ok {
+			m.modal = nil
+			promote := m.afterModalClosed()
+			cmd := m.interruptToNextQueued()
+			m.reflow()
+			return m, tea.Batch(promote, cmd)
+		}
+		cmd := m.interruptToNextQueued()
+		m.reflow()
+		return m, cmd
+
+	case inputQueueEditComposerMsg:
+		if _, ok := m.modal.(*queueModal); ok {
+			m.modal = nil
+			_ = m.afterModalClosed()
+		}
+		m.applyInputQueueEditComposer(msg.remaining, msg.text)
+		return m, m.setPaneFocus(focusLeft)
+
 	case authExpiryNoticeMsg:
 		if m.authExpiryNoticed {
 			return m, nil

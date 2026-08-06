@@ -61,6 +61,7 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		{ID: "command:keys", Label: "/keys", Description: "show keyboard shortcuts", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/keys"}},
 		{ID: "command:legend", Label: "/legend", Description: "explain UI icons, status glyphs, and chrome", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/legend"}},
 		{ID: "command:memory", Label: "/memory", Description: "list, get, set, delete, export, or import project memory", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/memory"}},
+		{ID: "command:queue", Label: "/queue", Description: "browse and edit prompts queued while a turn runs", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/queue"}},
 		{ID: "command:issues", Label: "/issues", Description: "list, add, get, close, export, or import project issues", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/issues"}},
 		{ID: "command:goal", Label: "/goal", Description: "loop harness: set, run, status, pause, resume, abort, log, list", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/goal"}},
 		{ID: "command:loop", Label: "/loop", Description: "schedule a recurring LLM job (session-only)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/loop"}},

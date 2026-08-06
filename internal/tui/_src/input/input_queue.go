@@ -39,6 +39,7 @@ func (m Model) enqueueUserInput(op protocol.UserInput, displayPrompt string) (te
 	})
 	m.resetComposer()
 	m.setInputQueueNotice()
+	m.refreshOpenQueueModal()
 	if m.services.History == nil {
 		return m, nil
 	}
@@ -95,6 +96,7 @@ func (m *Model) tryDrainInputQueue() tea.Cmd {
 	} else {
 		m.setInputQueueNotice()
 	}
+	m.refreshOpenQueueModal()
 	// Match dispatchUserInput: busy immediately so esc works before TurnStarted.
 	// Spinner arms on TurnStarted (spinTickCmd) so submit stays a single send
 	// cmd for callers that execute it directly (#481).
@@ -121,9 +123,58 @@ func (m *Model) setInputQueueNotice() {
 	msg := dotJoin(th,
 		fmt.Sprintf("queued (%d)", n),
 		"next: "+next,
+		"/queue manage",
 		"bksp edits last",
 	)
 	m.setNotice(msg, false)
+}
+
+// openInputQueueModal opens the queue browser overlay.
+func (m *Model) openInputQueueModal() {
+	m.modal = newQueueModal(m.inputQueue, m.th)
+}
+
+// refreshOpenQueueModal keeps a visible queue browser in sync after enqueue/drain.
+func (m *Model) refreshOpenQueueModal() {
+	if qm, ok := m.modal.(*queueModal); ok {
+		qm.syncFrom(m.inputQueue)
+	}
+}
+
+// applyInputQueueReplace sets the live queue from a modal mutation and refreshes chrome.
+func (m *Model) applyInputQueueReplace(items []queuedInput) {
+	m.inputQueue = cloneQueuedInputs(items)
+	if len(m.inputQueue) == 0 {
+		m.inputQueue = nil
+		m.clearNotice()
+	} else {
+		m.setInputQueueNotice()
+	}
+	m.refreshOpenQueueModal()
+}
+
+// interruptToNextQueued interrupts a running turn so the FIFO head drains on
+// TurnCompleted, or drains immediately when idle. No-op when the queue is empty.
+func (m *Model) interruptToNextQueued() tea.Cmd {
+	if len(m.inputQueue) == 0 {
+		m.setNotice("queue empty — nothing to run next", true)
+		return nil
+	}
+	if m.turnRunning {
+		m.setNotice("interrupting to run next…", false)
+		m.reflow()
+		return m.sendInterruptCmd()
+	}
+	return m.tryDrainInputQueue()
+}
+
+// applyInputQueueEditComposer drops the selected item from the queue and loads
+// its display text into the composer (same text-only restore as pop-last).
+func (m *Model) applyInputQueueEditComposer(remaining []queuedInput, text string) {
+	m.applyInputQueueReplace(remaining)
+	m.setComposerValueAt(text, len([]rune(text)))
+	m.recomputeCompletion()
+	m.reflow()
 }
 
 // popInputQueueToComposer moves the last queued item into the composer for
@@ -141,6 +192,7 @@ func (m *Model) popInputQueueToComposer() bool {
 	} else {
 		m.setInputQueueNotice()
 	}
+	m.refreshOpenQueueModal()
 	// Prefer display form so the user edits what they typed (incl. skills).
 	text := item.displayPrompt
 	if text == "" {
@@ -159,6 +211,7 @@ func (m *Model) clearInputQueue() bool {
 	}
 	m.inputQueue = nil
 	m.setNotice("cleared input queue", false)
+	m.refreshOpenQueueModal()
 	return true
 }
 
