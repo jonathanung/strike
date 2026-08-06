@@ -43,17 +43,25 @@ func (e *Engine) delegate(ctx context.Context, req tool.DelegateRequest) (tool.D
 		return out, nil
 
 	case "create":
+		// Same spawn path as progressive task create (field-parity; #875).
 		res, err := e.spawnChild(ctx, tool.TaskRequest{
 			Prompt:        req.Prompt,
 			Name:          req.Name,
 			Agent:         req.Agent,
 			Model:         req.Model,
 			Effort:        req.Effort,
+			Route:         req.Route,
+			Specialty:     req.Specialty,
+			Capabilities:  req.Capabilities,
+			MaxCostClass:  req.MaxCostClass,
+			Models:        req.Models,
+			MaxConcurrent: req.MaxConcurrent,
 			Criteria:      req.Criteria,
 			Deps:          req.Deps,
 			Subscribe:     req.Subscribe,
 			Assignee:      req.Assignee,
 			Verify:        req.Verify,
+			Budget:        req.Budget,
 			ContextBundle: req.ContextBundle,
 		})
 		if err != nil {

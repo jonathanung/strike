@@ -34,7 +34,7 @@ license-incompatible copy-paste, default product stays lean.
 | Security review pack | CC security-review | gap (use `/review` + focus args) | gap |
 | Changelog / translate packs | OpenCode commands | gap (user skills) | gap |
 | Node plugin hosts | OpenCode plugins | **out of scope** | wont |
-| Versioned contribution bundles | — | Strike plugin packages (manifest + trust; no Node/Go in-process ABI) | contract [plugins.md](plugins.md) (#725); loaders later |
+| Versioned contribution bundles | — | Strike plugin packages (manifest + trust; no Node/Go in-process ABI) | contract [plugins.md](plugins.md) (#725); pane ABI [plugin-panes.md](plugin-panes.md) (#522); loaders later |
 | Full IDE extensions | peers | **out of scope** | wont |
 
 ## Built-in skills (this wave)

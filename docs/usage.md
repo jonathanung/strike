@@ -184,16 +184,29 @@ strike launches without any provider configured. Pick one inside the TUI:
 children, those agents (lead + children) form an implicit team — no separate
 team-create step. Concurrent roots are independent teams.
 
+**Progressive `task` API** is the single model-facing delegation surface:
+
+| Call | Meaning |
+|---|---|
+| `task({prompt})` | Simple non-blocking spawn (lifecycle object created automatically) |
+| `task({prompt, criteria, deps, route, budget, verify, context_bundle, …})` | Advanced create — same runtime |
+| `task({action:"get"\|"list"\|"status"\|"read"\|"message"\|"transition"\|"cancel"\|"wait", …})` | Lifecycle + control ops |
+
+Legacy names (`delegate`, `task_status`, `task_read`, `task_message`,
+`task_interrupt`, `wait`) remain as compatibility shims over the same handlers
+(usage is telemetry-counted). `team_task` stays the shared claim board;
+`plan_delegate` stays the plan-section wrapper.
+
 | Capability | How |
 |---|---|
-| Spawn teammates | `task` with optional `name` (stable alias) and `agent` persona |
+| Spawn teammates | progressive `task` with optional `name` (stable alias) and `agent` persona |
 | List roster | `agent_roster` (includes objective, last action, files, budget remaining) |
 | Peer message | `agent_message` (`to` = `session_id` or `name`) |
 | Contracts | `agent_message` with `task_id` / `urgency` / `kind=request`+`require_ack`; read via `agent_thread`; ack with `kind=ack` |
 | Fan-out | `agent_broadcast` (all other teammates; use sparingly) |
-| Parent steer only | `task_message` (owned child; not peer chat) |
-| Per-child budgets | `task`/`delegate` `budget` or config `session.agentBudget`; soft exceed → `child.escalated` (`action=finalizing`) + one reserved structured handoff turn, then stop; hard cancel skips finalization |
-| Live pulse | `task_status` (objective, last_action, files_touched, budget, stall/loop) |
+| Parent steer only | `task` action=`message` (or compat `task_message`; not peer chat) |
+| Per-child budgets | `task` `budget` (or compat `delegate`) or config `session.agentBudget`; soft exceed → `child.escalated` (`action=finalizing`) + one reserved structured handoff turn, then stop; hard cancel skips finalization |
+| Live pulse | `task` action=`status` (objective, last_action, files_touched, budget, stall/loop) |
 | Finish signal | `[child.completed]` on the lead (structured handoff JSON) |
 
 Messages land at tool-round / idle boundaries (safe injection). Defaults allow

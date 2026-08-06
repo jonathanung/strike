@@ -6,7 +6,7 @@ Normative contract for **versioned plugin bundles** (epic
 
 A plugin is a **versioned contribution package** that reuses Strike's existing
 extension surfaces (agents, skills, workflows, provider profiles, MCP,
-harnesses, hooks, themes, and future panes). It is **not** a new runtime, a
+harnesses, hooks, themes, and panes). It is **not** a new runtime, a
 Node/Go host ABI, or a way to inject arbitrary provider code.
 
 This document freezes identity, manifest shape, contribution matrix, trust,
@@ -23,6 +23,7 @@ must not weaken these rules.
 
 Related: [agents-skills.md](agents-skills.md), [config.md](config.md),
 [harnesses.md](harnesses.md), [theme.md](theme.md), [secrets.md](secrets.md),
+[plugin-panes.md](plugin-panes.md) (pane ABI),
 [protocol.md](protocol.md#extension-points-plugins--hooks--harnesses),
 [peer-ecosystem.md](peer-ecosystem.md).
 
@@ -60,7 +61,7 @@ Related: [agents-skills.md](agents-skills.md), [config.md](config.md),
   mcp/                 # optional MCP server definitions (data only until trusted)
   harnesses/           # optional harness command definitions + binaries/scripts
   hooks/               # optional hook definition fragments
-  panes/               # reserved for pane ABI (#522); not activated by this contract alone
+  panes/               # optional pane definitions (ABI: plugin-panes.md / #522)
   bin/                 # optional executables referenced by relative paths
   assets/              # optional non-code assets (icons, fixtures)
 ```
@@ -147,7 +148,8 @@ workflows). Optional `$schema` key is ignored (editor only), matching config.
     "skills",
     "workflows",
     "themes",
-    "mcp.stdio"
+    "mcp.stdio",
+    "panes"
   ],
   "contributions": {
     "agents": [
@@ -195,7 +197,7 @@ workflows). Optional `$schema` key is ignored (editor only), matching config.
       {
         "id": "acme.status",
         "path": "panes/status.json",
-        "abi": "reserved"
+        "abi": "pane/1"
       }
     ]
   }
@@ -306,7 +308,7 @@ they continue to use existing discovery ([agents-skills.md](agents-skills.md)).
 | MCP servers | `contributions.mcp[].name` is the server slug (`mcp_<name>_…` tools). Must match existing MCP slug rules: `^[A-Za-z][A-Za-z0-9_-]*$`. |
 | Harnesses | `contributions.harnesses[].name` is the harness registry name referenced from agent frontmatter. |
 | Provider profiles | `profileName` (or object key) is the provider name in `/provider`. |
-| Panes | `contributions.panes[].id` — reserved; ABI in [#522](https://github.com/jonathanung/strike/issues/522). |
+| Panes | `contributions.panes[].id` — unique across enabled plugins; ABI in [plugin-panes.md](plugin-panes.md). |
 
 Diagnostics and `/context`-style provenance SHOULD show
 `plugin=<id>@<version> source=<…> path=<rel>`.
@@ -330,10 +332,9 @@ Diagnostics and `/context`-style provenance SHOULD show
 
 | Class | Applies to | Startup / invoke |
 |---|---|---|
-| **Passive** | agents, skills, workflows, themes, provider profiles | Load when plugin enabled + manifest valid + Strike version OK. No subprocess. |
-| **Executable** | MCP (stdio command), harnesses, shell hooks (`type: command`) | **Blocked** until a trust record matches current source identity + content digest + capability set. |
+| **Passive** | agents, skills, workflows, themes, provider profiles, **static panes** (`mode: static`) | Load when plugin enabled + manifest valid + Strike version OK. No subprocess. |
+| **Executable** | MCP (stdio command), harnesses, shell hooks (`type: command`), **process panes** (`mode: process`) | **Blocked** until a trust record matches current source identity + content digest + capability set. |
 | **Networked config** | MCP `transport: http` | Treated as executable-class for trust (may send headers/secrets to a URL) even without a local binary. |
-| **Reserved** | panes (`abi: reserved`) | Not activated by this contract; pane host issues define runtime trust. |
 
 Stock config paths (`~/.strike/mcp.jsonc`, config `hooks`, config `harnesses`)
 remain as today: project-local commands are trusted like other local scripts
@@ -376,7 +377,7 @@ when any of the following change:
 - Source identity (different remote, commit, catalog version, or local path
   replacement)
 - New or changed executable contribution entries (command, args, env keys,
-  hook command, MCP URL/headers keys)
+  hook command, MCP URL/headers keys, process-pane command/args/env)
 - `schemaVersion` increase that the running Strike does not implement
 - Plugin `version` change that alters executable capability tags
 
@@ -555,14 +556,17 @@ For each type: validation, naming, precedence, lifecycle, trust.
 
 ### 7.9 Panes (`contributions.panes`)
 
+Normative pane ABI: **[plugin-panes.md](plugin-panes.md)** (PLUGIN.8 / #522).
+Summary only — do not contradict that document.
+
 | Axis | Rule |
 |---|---|
-| **Entry** | `{ "id", "path", "abi": "reserved" }` for schemaVersion 1. |
-| **Validation** | Manifest accepts the entry for forward-compat; loaders **must not** execute pane code under this contract alone. |
-| **Naming** | Pane `id` unique across enabled plugins. |
-| **Precedence** | Defined by [#522](https://github.com/jonathanung/strike/issues/522) / [#731](https://github.com/jonathanung/strike/issues/731). |
-| **Lifecycle** | Reserved. |
-| **Trust** | Reserved; will not expose private Go `window` interfaces or in-process TUI plugins. |
+| **Entry** | `{ "id", "path", "abi": "pane/1" }`. `path` is a pane definition JSON/JSONC under the plugin root. Legacy `"abi": "reserved"` is not valid once pane loaders land. |
+| **Validation** | Definition `schemaVersion` 1; `mode` is `static` or `process`; path confinement; permissions default-deny ([plugin-panes.md](plugin-panes.md#8-permissions)). Unknown definition fields rejected. |
+| **Naming** | Pane `id` unique across enabled plugins; fail closed on collision. Built-in window ids are reserved and must not be claimed. |
+| **Precedence** | §4.1 for discovery; pane id collision fail closed (like MCP/harness names). Layout group placement is host UX ([#731](https://github.com/jonathanung/strike/issues/731)). |
+| **Lifecycle** | Descriptors register when the plugin is enabled (and trusted for process mode). Mount/focus starts static binding or process supervision; disable/remove tears down. Hosts: [#731](https://github.com/jonathanung/strike/issues/731) TUI, [#732](https://github.com/jonathanung/strike/issues/732) web. |
+| **Trust** | `mode: static` with `fs/network/command: none` → **passive**. `mode: process` → **executable** (`panes.process` capability). Never exposes the private Go `window` interface or in-process TUI/Go plugins; render trees are bounded primitives only. |
 
 ---
 
@@ -632,8 +636,8 @@ announces removal in CHANGELOG **Upgrade note**.
 | Catalog / updates | #729 | §6.3–6.4, digest verify |
 | TUI manager | #730 | UX over enablement + trust |
 | Themes packaging | #511 | §7.4 |
-| Pane ABI | #522 | §7.9 |
-| Pane host / web | #731 #732 | outside this freeze except reserved entries |
+| Pane ABI | #522 | §7.9 + [plugin-panes.md](plugin-panes.md) |
+| Pane host / web | #731 #732 | implement [plugin-panes.md](plugin-panes.md); no TUI type leakage to web |
 
 ---
 

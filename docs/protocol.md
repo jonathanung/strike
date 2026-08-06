@@ -113,12 +113,14 @@ paths that can contribute observability or gates:
 | **MCP tools** | Config MCP servers → tools on the registry; normal `tool.*` events | Stdio MCP runs local commands |
 | **Verification gates** | Engine/harness options → `verification.*` + optional `TurnCompleted.verification` | Harness-owned; model self-report is never evidence |
 | **Plugin bundles** | Versioned manifest + contribution matrix; passive load vs trusted executable activation | Normative contract: [plugins.md](plugins.md) ([#725](https://github.com/jonathanung/strike/issues/725)); passive load of agents/skills/workflows/themes/providers ([#726](https://github.com/jonathanung/strike/issues/726)); trusted executable activation [#728](https://github.com/jonathanung/strike/issues/728) |
+| **Plugin panes** | Declarative view trees (`static`) or supervised JSONL subprocess (`process`); bounded primitives; no private Go `window` ABI | Normative: [plugin-panes.md](plugin-panes.md) ([#522](https://github.com/jonathanung/strike/issues/522)); TUI host [#731](https://github.com/jonathanung/strike/issues/731); web [#732](https://github.com/jonathanung/strike/issues/732) |
 
 **Trusted executable contributions (#728):** plugin MCP startup, harness
 commands, and shell hooks must not run until source + content-digest trust is
 recorded; trust invalidates on relevant content change (see
-[plugins.md](plugins.md#5-trust-model)). Until loaders land, only stock config
-paths above apply — do not assume silent project-plugin execution.
+[plugins.md](plugins.md#5-trust-model)). Passive contributions load when enabled
+([#726](https://github.com/jonathanung/strike/issues/726)); do not assume silent
+project-plugin **executable** startup until trusted activation lands.
 
 **Contributing new spans or gates**
 
@@ -139,4 +141,5 @@ paths above apply — do not assume silent project-plugin execution.
 - [web.md](web.md) — cockpit SSE/WebSocket envelopes
 - [config.md](config.md) — hooks, harnesses, MCP, session durability
 - [plugins.md](plugins.md) — versioned plugin bundle contract (manifest, trust)
+- [plugin-panes.md](plugin-panes.md) — user pane contribution ABI (static + process)
 - [peer-ecosystem.md](peer-ecosystem.md) — hooks alignment with peers

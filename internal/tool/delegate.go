@@ -9,35 +9,30 @@ import (
 
 type delegateTool struct{}
 
-// NewDelegate builds the delegate tool (first-class delegation lifecycle).
+// NewDelegate builds the delegate compatibility tool (lifecycle create/get/list/transition).
+// Prefer the progressive task API; this tool remains for staged deprecation and
+// depth-capped leaves (task is stripped at MaxChildDepth; delegate stays for
+// get/list/transition self-report).
 func NewDelegate() Tool { return delegateTool{} }
 
 func (delegateTool) Name() string { return "delegate" }
 
 func (delegateTool) Description() string {
-	return `First-class delegation lifecycle (create/get/list/transition).
+	return `Compatibility shim for delegation lifecycle (create/get/list/transition).
 
-Prefer this when you need acceptance criteria, task dependencies, or
-subscriptions at create time. Plain task spawn remains supported and creates a
-compatible lifecycle object automatically.
+Prefer the progressive task API:
+  task({prompt})                         — simple spawn
+  task({prompt, criteria, deps, …})      — advanced create
+  task({action:"get"|"list"|"transition", id, …})
+
+This tool forwards to the same lifecycle runtime. create accepts the full
+advanced field set (route, budget, verify, context_bundle, …). At depth
+ceiling, task is unavailable — use delegate get/list/transition for leaf
+self-report (ownership-gated).
 
 States: queued → working → blocked → review → done (+ failed / canceled).
-Engine validates transitions; illegal moves return actionable errors.
-Dependencies keep a delegation queued until upstream deps reach done.
-When criteria are set, successful child completion enters review (not final
-done) so verification gates can run. CAS via expected_version on transition.
-
-Actions:
-  - create: prompt required; optional name/agent/model/effort/assignee,
-    criteria[], deps[] (delegation or session ids), subscribe[]
-    (blocked|review|done|failed|canceled|working|queued), context_bundle.
-    Spawns immediately when deps are satisfied; otherwise status=queued.
-  - get: id (delegation id, session id, or name)
-  - list: full registry snapshot for this session team
-  - transition: id + state; optional reason, expected_version (CAS)
-
-task_status / agent_roster / [child.completed] stay coherent with lifecycle
-states. Parent→child control remains task_message / task_interrupt.`
+CAS via expected_version on transition. Deprecated for new parent-side work;
+usage is telemetry-counted toward removal.`
 }
 
 func (delegateTool) Schema() json.RawMessage {
@@ -47,7 +42,7 @@ func (delegateTool) Schema() json.RawMessage {
 			"action": {
 				"type": "string",
 				"enum": ["create", "get", "list", "transition"],
-				"description": "Lifecycle operation"
+				"description": "Lifecycle operation (prefer task progressive API)"
 			},
 			"id": {"type": "string", "description": "Delegation id, session id, or name (get/transition)"},
 			"prompt": {"type": "string", "description": "Subtask instructions (create)"},
@@ -55,6 +50,20 @@ func (delegateTool) Schema() json.RawMessage {
 			"agent": {"type": "string", "description": "Optional agent persona (create)"},
 			"model": {"type": "string", "description": "Optional model pin (create)"},
 			"effort": {"type": "string", "description": "Optional effort pin (create)"},
+			"route": {"type": "string", "description": "Optional routing mode: auto (create)"},
+			"specialty": {"type": "string", "description": "Required specialty for route=auto (create)"},
+			"capabilities": {
+				"type": "array",
+				"items": {"type": "string"},
+				"description": "Required capability tags for route=auto (create)"
+			},
+			"max_cost_class": {"type": "string", "description": "Optional auto-route cost filter (create)"},
+			"models": {
+				"type": "array",
+				"items": {"type": "string"},
+				"description": "Optional model allow-list for auto-route (create)"
+			},
+			"max_concurrent": {"type": "integer", "description": "Optional per-persona concurrency before fallback (create)"},
 			"assignee": {"type": "string", "description": "Optional assignee label (create)"},
 			"criteria": {
 				"type": "array",
@@ -73,7 +82,7 @@ func (delegateTool) Schema() json.RawMessage {
 			},
 			"verify": {
 				"type": "array",
-				"description": "Optional independent completion gates (cmd|schema|path), same as task.verify",
+				"description": "Optional independent completion gates (cmd|schema|path)",
 				"items": {
 					"type": "object",
 					"properties": {
@@ -83,6 +92,20 @@ func (delegateTool) Schema() json.RawMessage {
 					},
 					"required": ["kind", "value"]
 				}
+			},
+			"budget": {
+				"type": "object",
+				"description": "Optional per-child resource limits (same as task.budget)",
+				"properties": {
+					"max_wall_clock_s": {"type": "integer"},
+					"max_tokens": {"type": "integer"},
+					"max_cost_usd": {"type": "number"},
+					"max_tool_calls": {"type": "integer"},
+					"max_dangerous_tools": {"type": "integer"},
+					"stall_after_s": {"type": "integer"},
+					"loop_detect_n": {"type": "integer"}
+				},
+				"additionalProperties": false
 			},
 			"context_bundle": {
 				"type": "object",
@@ -104,24 +127,7 @@ func (delegateTool) Schema() json.RawMessage {
 }
 
 func (delegateTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
-	var a struct {
-		Action          string        `json:"action"`
-		ID              string        `json:"id"`
-		Prompt          string        `json:"prompt"`
-		Name            string        `json:"name"`
-		Agent           string        `json:"agent"`
-		Model           string        `json:"model"`
-		Effort          string        `json:"effort"`
-		Assignee        string        `json:"assignee"`
-		Criteria        []string      `json:"criteria"`
-		Deps            []string      `json:"deps"`
-		Subscribe       []string      `json:"subscribe"`
-		Verify          []VerifyGate  `json:"verify"`
-		ContextBundle   ContextBundle `json:"context_bundle"`
-		State           string        `json:"state"`
-		Reason          string        `json:"reason"`
-		ExpectedVersion int           `json:"expected_version"`
-	}
+	var a progressiveArgs
 	if err := json.Unmarshal(args, &a); err != nil {
 		return Result{}, fmt.Errorf("invalid arguments: %w", err)
 	}
@@ -129,78 +135,12 @@ func (delegateTool) Execute(ctx context.Context, args json.RawMessage, tc *Conte
 	if action == "" {
 		return Result{}, fmt.Errorf("action is required")
 	}
-	gates, err := normalizeTaskVerify(a.Verify)
-	if err != nil {
-		return Result{}, err
-	}
-	bundle, err := NormalizeContextBundle(a.ContextBundle)
-	if err != nil {
-		return Result{}, err
-	}
-	req := DelegateRequest{
-		Action:          action,
-		ID:              strings.TrimSpace(a.ID),
-		Prompt:          a.Prompt,
-		Name:            a.Name,
-		Agent:           a.Agent,
-		Model:           a.Model,
-		Effort:          a.Effort,
-		Assignee:        a.Assignee,
-		Criteria:        a.Criteria,
-		Deps:            a.Deps,
-		Subscribe:       a.Subscribe,
-		Verify:          gates,
-		ContextBundle:   bundle,
-		State:           strings.TrimSpace(a.State),
-		Reason:          a.Reason,
-		ExpectedVersion: a.ExpectedVersion,
-	}
 	switch action {
-	case "create":
-		if strings.TrimSpace(req.Prompt) == "" {
-			return Result{}, fmt.Errorf("prompt is required for create")
-		}
-	case "list":
-		// no fields
-	case "get", "transition":
-		if req.ID == "" {
-			return Result{}, fmt.Errorf("id is required for %s", action)
-		}
-		if action == "transition" && req.State == "" {
-			return Result{}, fmt.Errorf("state is required for transition")
-		}
+	case ProgressiveCreate, ProgressiveGet, ProgressiveList, ProgressiveTransition:
+		// ok
 	default:
 		return Result{}, fmt.Errorf("action must be create, get, list, or transition")
 	}
-
-	if err := tc.Ask(ctx, AskRequest{
-		Permission: "delegate",
-		Patterns:   []string{action},
-		Always:     []string{"*"},
-	}); err != nil {
-		return Result{}, err
-	}
-	if tc.Delegate == nil {
-		return Result{}, fmt.Errorf("delegate is not available")
-	}
-	res, err := tc.Delegate(ctx, req)
-	if err != nil {
-		return Result{}, err
-	}
-	out, err := json.Marshal(res)
-	if err != nil {
-		return Result{}, err
-	}
-	title := "delegate " + action
-	if res.Conflict {
-		title += " conflict"
-	} else if res.Item != nil && res.Item.ID != "" {
-		title += " " + res.Item.ID
-		if res.Item.State != "" {
-			title += " " + res.Item.State
-		}
-	} else if action == "list" {
-		title = fmt.Sprintf("delegate list %d", len(res.Items))
-	}
-	return Result{Title: title, Output: string(out)}, nil
+	// Compat path keeps historical permission name "delegate".
+	return executeProgressive(ctx, CompatToolDelegate, "delegate", a, tc)
 }
