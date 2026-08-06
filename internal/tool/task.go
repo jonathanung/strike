@@ -35,9 +35,12 @@ func (taskTool) Description() string {
 - Optional name is a stable teammate alias unique on the session team (e.g. explorer).
   Addressable in agent_roster and messaging tools; session_id still works when omitted.
 - Optional agent selects a persona (defaults to the current agent). Built-in names include:
-  explore (read-only search), general (multi-step), commit (git commits only),
-  reviewer (read-only review), tester (run make test/vet/build), debugger (root-cause),
-  build (default coding), plan (read-only planning).
+   explore (read-only search), general (multi-step), commit (git commits only),
+   reviewer (read-only review), tester (run make test/vet/build), debugger (root-cause),
+   build (default coding), plan (read-only planning). Explicit agent/model pins always win.
+- Optional route=auto picks agent/model by specialty/capabilities with load-aware fallback
+  when the preferred persona is at concurrency or budget limit. Omit/off keeps inherit-parent
+  behavior. specialty or capabilities without route also enables auto.
 - Optional model pins the child's model (bare id on the current provider, or provider/model).
   Must be a catalog id for that provider (same list as /model). Omit to inherit the parent model.
 - Optional effort pins the child's reasoning effort (off|low|medium|high|xhigh|max).
@@ -68,9 +71,23 @@ func (taskTool) Schema() json.RawMessage {
 		"properties": {
 			"prompt": {"type": "string", "description": "The subtask instructions for the child agent"},
 			"name": {"type": "string", "description": "Optional stable teammate alias unique on this session team (e.g. explorer). Addressable in roster/messaging; omit to use session id only"},
-			"agent": {"type": "string", "description": "Optional agent persona: explore, general, commit, reviewer, tester, debugger, build, plan, or a user-defined name (default: current agent)"},
-			"model": {"type": "string", "description": "Optional model id for the child (bare id on the current provider, or provider/model). Must be in the shared model catalog; omit to inherit the parent model"},
+			"agent": {"type": "string", "description": "Optional agent persona pin: explore, general, commit, reviewer, tester, debugger, build, plan, or a user-defined name. Always wins over auto-route when set"},
+			"model": {"type": "string", "description": "Optional model id pin for the child (bare id on the current provider, or provider/model). Always wins over auto-route when set; omit to inherit the parent model"},
 			"effort": {"type": "string", "description": "Optional reasoning effort for the child: off, low, medium, high, xhigh, or max. Omit to inherit the parent dial"},
+			"route": {"type": "string", "description": "Optional routing mode: auto enables capability-aware agent/model selection; omit or off keeps pin-or-inherit defaults"},
+			"specialty": {"type": "string", "description": "Required specialty/capability for route=auto (e.g. explore, test, review, debug). Enables auto when route is omitted"},
+			"capabilities": {
+				"type": "array",
+				"items": {"type": "string"},
+				"description": "Required capability tags for route=auto (all must match). Merged with specialty when both set"
+			},
+			"max_cost_class": {"type": "string", "description": "Optional auto-route model cost filter: low, medium, or high"},
+			"models": {
+				"type": "array",
+				"items": {"type": "string"},
+				"description": "Optional model allow-list for auto-route (bare id or provider/model)"
+			},
+			"max_concurrent": {"type": "integer", "description": "Optional per-persona live-child limit before auto-route fallback (default 1 when routing)"},
 			"criteria": {
 				"type": "array",
 				"items": {"type": "string"},
@@ -120,17 +137,23 @@ func (taskTool) Schema() json.RawMessage {
 }
 
 type taskArgs struct {
-	Prompt    string            `json:"prompt"`
-	Name      string            `json:"name"`
-	Agent     string            `json:"agent"`
-	Model     string            `json:"model"`
-	Effort    string            `json:"effort"`
-	Criteria  []string          `json:"criteria"`
-	Deps      []string          `json:"deps"`
-	Subscribe []string          `json:"subscribe"`
-	Assignee  string            `json:"assignee"`
-	Verify    []VerifyGate      `json:"verify"`
-	Budget    AgentBudgetLimits `json:"budget"`
+	Prompt        string            `json:"prompt"`
+	Name          string            `json:"name"`
+	Agent         string            `json:"agent"`
+	Model         string            `json:"model"`
+	Effort        string            `json:"effort"`
+	Route         string            `json:"route"`
+	Specialty     string            `json:"specialty"`
+	Capabilities  []string          `json:"capabilities"`
+	MaxCostClass  string            `json:"max_cost_class"`
+	Models        []string          `json:"models"`
+	MaxConcurrent int               `json:"max_concurrent"`
+	Criteria      []string          `json:"criteria"`
+	Deps          []string          `json:"deps"`
+	Subscribe     []string          `json:"subscribe"`
+	Assignee      string            `json:"assignee"`
+	Verify        []VerifyGate      `json:"verify"`
+	Budget        AgentBudgetLimits `json:"budget"`
 }
 
 func (taskTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
@@ -152,17 +175,23 @@ func (taskTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 		return Result{}, fmt.Errorf("task is not available")
 	}
 	res, err := tc.SpawnTask(ctx, TaskRequest{
-		Prompt:    a.Prompt,
-		Name:      a.Name,
-		Agent:     a.Agent,
-		Model:     a.Model,
-		Effort:    a.Effort,
-		Criteria:  a.Criteria,
-		Deps:      a.Deps,
-		Subscribe: a.Subscribe,
-		Assignee:  a.Assignee,
-		Verify:    gates,
-		Budget:    a.Budget,
+		Prompt:        a.Prompt,
+		Name:          a.Name,
+		Agent:         a.Agent,
+		Model:         a.Model,
+		Effort:        a.Effort,
+		Route:         a.Route,
+		Specialty:     a.Specialty,
+		Capabilities:  a.Capabilities,
+		MaxCostClass:  a.MaxCostClass,
+		Models:        a.Models,
+		MaxConcurrent: a.MaxConcurrent,
+		Criteria:      a.Criteria,
+		Deps:          a.Deps,
+		Subscribe:     a.Subscribe,
+		Assignee:      a.Assignee,
+		Verify:        gates,
+		Budget:        a.Budget,
 	})
 	if err != nil {
 		return Result{}, err
@@ -242,7 +271,7 @@ func shortID(id string) string {
 }
 
 func taskMetadata(res TaskResult) json.RawMessage {
-	if res.SessionID == "" && res.Status == "" && res.Name == "" && res.DelegationID == "" {
+	if res.SessionID == "" && res.Status == "" && res.Name == "" && res.DelegationID == "" && res.RouteReason == "" {
 		return nil
 	}
 	meta := map[string]string{
@@ -257,6 +286,9 @@ func taskMetadata(res TaskResult) json.RawMessage {
 	}
 	if lc := strings.TrimSpace(res.Lifecycle); lc != "" {
 		meta["lifecycle"] = lc
+	}
+	if rr := strings.TrimSpace(res.RouteReason); rr != "" {
+		meta["routeReason"] = rr
 	}
 	b, err := json.Marshal(meta)
 	if err != nil {

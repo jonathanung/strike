@@ -144,6 +144,11 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		return tool.TaskResult{}, fmt.Errorf("task depth limit reached")
 	}
 
+	// Capability-aware routing (#778): pins win; route=auto picks specialty + load fallback.
+	// Decision is recorded on ChildStarted / TaskResult / delegation for debug.
+	var routeDec RouteDecision
+	req, routeDec = e.routeTaskRequest(req)
+
 	agentName := strings.TrimSpace(req.Agent)
 	if agentName == "" {
 		agentName = e.agent.Name
@@ -219,7 +224,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		delegID = d.ID
 		deleg = d
 	} else if e.team != nil {
-		item, shouldSpawn, err := e.createDelegationForTask(req)
+		item, shouldSpawn, err := e.createDelegationForTask(req, routeDec.Reason)
 		if err != nil {
 			return tool.TaskResult{}, err
 		}
@@ -236,12 +241,16 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 					item.ID, item.Deps, item.ID,
 				)
 			}
+			if rr := strings.TrimSpace(routeDec.Reason); rr != "" {
+				out += " Route: " + rr + "."
+			}
 			return tool.TaskResult{
 				Output:       out,
 				Status:       "queued",
 				DelegationID: item.ID,
 				Lifecycle:    string(item.State),
 				Name:         item.Name,
+				RouteReason:  routeDec.Reason,
 			}, nil
 		}
 	}
@@ -444,6 +453,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		Agent:       agentName,
 		Prompt:      req.Prompt,
 		Name:        memberName,
+		RouteReason: routeDec.Reason,
 	}
 	e.emit(startedEv)
 	e.persistChildEvent(childID, startedEv)
@@ -667,6 +677,9 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 	if delegID != "" {
 		out += fmt.Sprintf(" Delegation %s lifecycle=%s.", delegID, deleg.State)
 	}
+	if rr := strings.TrimSpace(routeDec.Reason); rr != "" {
+		out += " Route: " + rr + "."
+	}
 	lifecycle := string(deleg.State)
 	if lifecycle == "" && delegID != "" {
 		lifecycle = string(protocol.DelegationWorking)
@@ -678,6 +691,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		Name:         memberName,
 		DelegationID: delegID,
 		Lifecycle:    lifecycle,
+		RouteReason:  routeDec.Reason,
 	}, nil
 }
 
