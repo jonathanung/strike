@@ -257,7 +257,11 @@ func TestRunnerDryRunAndMock(t *testing.T) {
 
 func TestDockerGraderReadsReward(t *testing.T) {
 	var execCmds []string
+	var copyDsts []string
 	rt := &recordingRuntime{
+		onCopyTo: func(src, dst string) {
+			copyDsts = append(copyDsts, dst)
+		},
 		onExec: func(cmd []string) (string, string, int, error) {
 			joined := strings.Join(cmd, " ")
 			execCmds = append(execCmds, joined)
@@ -267,7 +271,7 @@ func TestDockerGraderReadsReward(t *testing.T) {
 			if strings.Contains(joined, "cat /logs/verifier/reward.txt") {
 				return "1\n", "", 0, nil
 			}
-			// test.sh run
+			// setup rm / test.sh run
 			return "ok", "", 0, nil
 		},
 	}
@@ -288,6 +292,45 @@ func TestDockerGraderReadsReward(t *testing.T) {
 	}
 	if !gr.Resolved || gr.Reward != 1 {
 		t.Fatalf("%+v cmds=%v", gr, execCmds)
+	}
+	// Destinations must be exact /app and /tests (not nested /tests/tests).
+	wantDst := map[string]bool{"/app": false, "/tests": false}
+	for _, d := range copyDsts {
+		if _, ok := wantDst[d]; ok {
+			wantDst[d] = true
+		}
+	}
+	for d, ok := range wantDst {
+		if !ok {
+			t.Fatalf("missing copy dest %s in %v", d, copyDsts)
+		}
+	}
+}
+
+func TestDockerGraderMissingRewardUnresolved(t *testing.T) {
+	rt := &recordingRuntime{
+		onExec: func(cmd []string) (string, string, int, error) {
+			joined := strings.Join(cmd, " ")
+			if strings.Contains(joined, "cat /logs/verifier/") {
+				return "", "missing", 1, nil
+			}
+			return "ok", "", 0, nil // test.sh exit 0 but no reward
+		},
+	}
+	g := &DockerGrader{RT: rt, WorkRoot: t.TempDir(), Pull: false, Timeout: time.Minute}
+	gr, err := g.Grade(context.Background(), Instance{
+		InstanceID:  "fixture-task",
+		DockerImage: "fixture/tbench-task:test",
+		TaskDir:     filepath.Join("testdata", "fixture-task"),
+	}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gr.Resolved || gr.Reward != 0 {
+		t.Fatalf("expected unresolved without reward: %+v", gr)
+	}
+	if !strings.Contains(gr.Detail, "reward") {
+		t.Fatalf("detail: %s", gr.Detail)
 	}
 }
 
@@ -340,7 +383,8 @@ func (fakeRuntime) Exec(context.Context, string, []string, swebench.ExecOpts) (s
 func (fakeRuntime) Remove(context.Context, string) error { return nil }
 
 type recordingRuntime struct {
-	onExec func(cmd []string) (string, string, int, error)
+	onExec   func(cmd []string) (string, string, int, error)
+	onCopyTo func(src, dst string)
 }
 
 func (r *recordingRuntime) Available(context.Context) error { return nil }
@@ -354,7 +398,10 @@ func (r *recordingRuntime) Start(context.Context, string) error { return nil }
 func (r *recordingRuntime) CopyFrom(context.Context, string, string, string) error {
 	return nil
 }
-func (r *recordingRuntime) CopyTo(context.Context, string, string, string) error {
+func (r *recordingRuntime) CopyTo(_ context.Context, _ string, src, dst string) error {
+	if r.onCopyTo != nil {
+		r.onCopyTo(src, dst)
+	}
 	return nil
 }
 func (r *recordingRuntime) Exec(_ context.Context, _ string, cmd []string, _ swebench.ExecOpts) (string, string, int, error) {

@@ -117,18 +117,17 @@ func (g *DockerGrader) Grade(ctx context.Context, in Instance, workDir string) (
 		return GradeResult{}, err
 	}
 
-	// Replace /app with the agent workspace. docker cp of a directory into an
-	// existing path nests; remove first then copy contents.
-	_, _, _, _ = g.RT.Exec(ctx, id, []string{"bash", "-lc", "rm -rf /app/* /app/.[!.]* /app/..?* 2>/dev/null; mkdir -p /app /tests /logs/verifier /logs/agent"}, swebench.ExecOpts{Timeout: 2 * time.Minute})
+	// Replace /app and /tests. docker cp of a directory into an existing path
+	// nests (e.g. /tests/tests); remove destinations first so cp creates them.
+	_, _, _, _ = g.RT.Exec(ctx, id, []string{"bash", "-lc",
+		"rm -rf /app /tests; mkdir -p /logs/verifier /logs/agent"},
+		swebench.ExecOpts{Timeout: 2 * time.Minute})
 
-	// Copy workspace: host workDir/. -> container:/app/
-	// docker cp requires trailing /. semantics; copy the directory then flatten if needed.
-	if err := g.RT.CopyTo(ctx, id, workDir+"/.", WorkDirInContainer+"/"); err != nil {
-		// Fallback without "/."
-		if err2 := g.RT.CopyTo(ctx, id, workDir, WorkDirInContainer); err2 != nil {
-			return GradeResult{}, fmt.Errorf("copy workspace: %v / %v", err, err2)
-		}
+	// Copy workspace directory onto /app (destination must not already exist).
+	if err := g.RT.CopyTo(ctx, id, workDir, WorkDirInContainer); err != nil {
+		return GradeResult{}, fmt.Errorf("copy workspace: %w", err)
 	}
+	// Copy host .../tests onto /tests (same non-nesting rule).
 	if err := g.RT.CopyTo(ctx, id, testsDir, "/tests"); err != nil {
 		return GradeResult{}, fmt.Errorf("copy tests: %w", err)
 	}
@@ -155,24 +154,20 @@ func (g *DockerGrader) Grade(ctx context.Context, in Instance, workDir string) (
 		detail = detail + "; " + rewardDetail
 	}
 	if rerr != nil {
-		// Fall back to exit code when reward file missing.
-		if code == 0 {
-			reward = 1
-			detail = detail + "; reward_missing_assume_pass"
-		} else {
-			detail = detail + "; reward: " + rerr.Error()
-			if stderr != "" {
-				detail = detail + "; stderr=" + truncate(stderr, 200)
-			} else if stdout != "" {
-				detail = detail + "; stdout=" + truncate(stdout, 200)
-			}
-			return GradeResult{
-				Resolved: false,
-				Reward:   0,
-				Detail:   detail,
-				Duration: time.Since(start),
-			}, nil
+		// Harbor tasks must write reward.txt|json. Missing reward is unresolved
+		// even if test.sh exited 0 (avoids false passes).
+		detail = detail + "; reward: " + rerr.Error()
+		if stderr != "" {
+			detail = detail + "; stderr=" + truncate(stderr, 200)
+		} else if stdout != "" {
+			detail = detail + "; stdout=" + truncate(stdout, 200)
 		}
+		return GradeResult{
+			Resolved: false,
+			Reward:   0,
+			Detail:   detail,
+			Duration: time.Since(start),
+		}, nil
 	}
 
 	resolved := reward > 0
