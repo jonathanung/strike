@@ -1,8 +1,32 @@
-// Package protocol defines the seam between the strike engine and its
-// frontends. Frontends submit Ops; the engine emits Events. The TUI and any
-// other frontend depend only on this package, never on engine internals.
-// The event stream is also the persistence format: a session transcript is a
-// JSONL log of events (see internal/session).
+// Package protocol is the public Op/Event wire schema for strike.
+//
+// Frontends submit Ops; the engine emits Events. The TUI and any other
+// frontend depend only on this package (or the internal/protocol re-export
+// shim), never on engine internals. The event stream is also the persistence
+// format: a session transcript is a JSONL log of Event envelopes (see
+// internal/session).
+//
+// # Import path
+//
+//	import "github.com/jonathanung/strike-cli/pkg/protocol"
+//
+// In-tree packages may still import internal/protocol, which re-exports this
+// package unchanged so existing call sites keep compiling.
+//
+// # Stability (semver)
+//
+// [Version] is the semantic version of this wire schema. Guarantees:
+//
+//   - Major: breaking JSON field renames/removals, changed envelope type
+//     strings, or changed meaning of an existing field.
+//   - Minor: new Op/Event types, new optional JSON fields, new type-string
+//     cases (unknown types still fail Decode — callers must tolerate forward
+//     growth by ignoring or upgrading).
+//   - Patch: docs, helpers, and bug fixes that do not change encoded JSON.
+//
+// Legacy session JSONL without an envelope "v" field is treated as compatible
+// with the 1.x line. Additive optional fields use omitempty so old readers
+// keep working.
 package protocol
 
 import (

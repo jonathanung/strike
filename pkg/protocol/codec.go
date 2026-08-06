@@ -8,10 +8,14 @@ import (
 
 // Envelope wraps an Event with a type tag and timestamp for JSONL
 // persistence and replay.
+//
+// Version is the wire schema version ([Version]) written by [Wrap]. Empty on
+// decode means a legacy record; treat it as [LegacyVersion].
 type Envelope struct {
-	Type string          `json:"type"`
-	Time time.Time       `json:"time"`
-	Data json.RawMessage `json:"data"`
+	Type    string          `json:"type"`
+	Time    time.Time       `json:"time"`
+	Version string          `json:"v,omitempty"`
+	Data    json.RawMessage `json:"data"`
 }
 
 func eventType(ev Event) string {
@@ -113,7 +117,16 @@ func Wrap(ev Event) (Envelope, error) {
 	if err != nil {
 		return Envelope{}, err
 	}
-	return Envelope{Type: t, Time: time.Now().UTC(), Data: data}, nil
+	return Envelope{Type: t, Time: time.Now().UTC(), Version: Version, Data: data}, nil
+}
+
+// SchemaVersion returns the envelope's wire schema version, defaulting empty
+// (legacy) records to [LegacyVersion].
+func (e Envelope) SchemaVersion() string {
+	if e.Version == "" {
+		return LegacyVersion
+	}
+	return e.Version
 }
 
 // Decode reverses Wrap.
