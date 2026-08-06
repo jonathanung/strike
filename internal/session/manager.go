@@ -113,6 +113,9 @@ func (m *Manager) Create(opts CreateOptions) (Info, error) {
 	}
 	if err := WriteMeta(m.dir, id, meta); err != nil {
 		_ = store.Close()
+		// Open may have written a schema header; remove the half-created log
+		// so a retry is not blocked by "already exists".
+		_ = os.Remove(LogPath(m.dir, id))
 		return Info{}, err
 	}
 	info := Info{

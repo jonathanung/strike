@@ -474,6 +474,55 @@ func TestRetentionFromConfig(t *testing.T) {
 	}
 }
 
+func TestRetentionMaxBytes(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager(dir)
+	var ids []string
+	for i := 0; i < 3; i++ {
+		info, err := m.Create(CreateOptions{Title: "b"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Pad log so each session is non-trivial.
+		for j := 0; j < 20; j++ {
+			if err := m.Append(info.ID, protocol.UserMessage{Text: strings.Repeat("x", 64)}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := m.Close(info.ID); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, info.ID)
+		time.Sleep(2 * time.Millisecond)
+	}
+	// Cap below total size so at least one session is evicted.
+	var total int64
+	for _, id := range ids {
+		total += sessionBytes(dir, id)
+	}
+	if total < 100 {
+		t.Fatalf("fixture too small: %d", total)
+	}
+	res, err := m.ApplyRetention(RetentionPolicy{MaxBytes: total / 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Deleted) == 0 {
+		t.Fatal("expected at least one deletion under MaxBytes")
+	}
+	list, err := m.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var remain int64
+	for _, info := range list {
+		remain += sessionBytes(dir, info.ID)
+	}
+	if remain > total/2 {
+		t.Fatalf("remaining bytes %d > cap %d", remain, total/2)
+	}
+}
+
 func TestReplaySliceIgnoresHeader(t *testing.T) {
 	dir := t.TempDir()
 	st, err := Open(dir, "slice-hdr")
