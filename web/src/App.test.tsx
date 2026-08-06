@@ -782,4 +782,75 @@ describe("App", () => {
   });
 
 
+
+  it("boots multi-root ACTIVE/HISTORY tabs and isolates drafts across workspaces", async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = (init?.method || "GET").toUpperCase();
+      if (url.includes("bootstrap")) return response({ version: "test", authRequired: false, attachOnly: false, capabilities: { live: true, roots: true, sessions: true }, protocolOps: ["user.input"], status: { sessionId: "root-a", provider: "echo", busy: false }, agents: [{ name: "build" }], skills: [] });
+      if (url.includes("/v1/roots") && method === "GET") return response({ roots: [{ id: "root-a", title: "Alpha", agent: "build", busy: false }, { id: "root-b", title: "Beta", agent: "build", busy: false }], activeId: "root-a" });
+      if (url.includes("/activate")) return response({ ok: true });
+      if (url.includes("sessions")) return response({ sessions: [{ id: "root-a", title: "Alpha" }, { id: "root-b", title: "Beta" }], liveId: "root-a" });
+      return response({ ok: true });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    expect(await screen.findByRole("button", { name: "ACTIVE" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "HISTORY" })).toBeInTheDocument();
+    const alpha = await screen.findByRole("button", { name: /Alpha/i });
+    expect(alpha).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Instruction"), { target: { value: "draft-a" } });
+    fireEvent.click(screen.getByRole("button", { name: /Beta/i }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/v1/roots/root-b/activate"))).toBe(true));
+    expect(screen.getByLabelText("Instruction")).toHaveValue("");
+    fireEvent.change(screen.getByLabelText("Instruction"), { target: { value: "draft-b" } });
+    fireEvent.click(screen.getByRole("button", { name: /Alpha/i }));
+    await waitFor(() => expect(screen.getByLabelText("Instruction")).toHaveValue("draft-a"));
+  });
+
+  it("surfaces background permission attention on the rail and header within the poll window", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let roots = [
+      { id: "root-a", title: "Alpha", agent: "build", busy: false, permissionPending: false },
+      { id: "root-b", title: "Beta", agent: "build", busy: false, permissionPending: false },
+    ];
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = (init?.method || "GET").toUpperCase();
+      if (url.includes("bootstrap")) return response({ version: "test", authRequired: false, attachOnly: false, capabilities: { live: true, roots: true, sessions: true }, protocolOps: ["user.input"], status: { sessionId: "root-a", provider: "echo", busy: false }, agents: [{ name: "build" }], skills: [] });
+      if (url.includes("/v1/roots") && method === "GET") return response({ roots, activeId: "root-a" });
+      if (url.includes("/activate")) return response({ ok: true });
+      if (url.includes("sessions")) return response({ sessions: [{ id: "root-a", title: "Alpha" }, { id: "root-b", title: "Beta" }], liveId: "root-a" });
+      return response({ ok: true });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    await screen.findByText("Alpha");
+    roots = [
+      { id: "root-a", title: "Alpha", agent: "build", busy: false, permissionPending: false },
+      { id: "root-b", title: "Beta", agent: "build", busy: true, permissionPending: true },
+    ];
+    await vi.advanceTimersByTimeAsync(2100);
+    expect(await screen.findByText("NEEDS YOU")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /1 needs you/i }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/v1/roots/root-b/activate"))).toBe(true));
+    vi.useRealTimers();
+  });
+
+  it("keeps attach-only single-session fallback without multi-root chrome", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) return response({ version: "test", authRequired: false, attachOnly: true, capabilities: { live: false, roots: false, sessions: true }, protocolOps: null, agents: [], skills: [] });
+      if (url.includes("sessions")) return response({ sessions: [{ id: "saved", title: "Saved" }] });
+      if (url.includes("roots")) return Promise.resolve(new Response("multi-root unavailable", { status: 503 }));
+      return response({ ok: true });
+    }));
+    render(<App />);
+    await screen.findByText("Saved");
+    expect(screen.queryByRole("button", { name: "ACTIVE" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "+ New workspace" })).not.toBeInTheDocument();
+    expect(screen.queryByText("NEEDS YOU")).not.toBeInTheDocument();
+  });
+
+
 });

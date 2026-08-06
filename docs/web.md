@@ -374,10 +374,9 @@ Behavior:
 3. Header "agent working" / transport line reflects the **selected** root;
    aggregate attention (e.g. count of needs-you) may appear beside it.
 4. Avoid false-positive storms: idle roots clear busy; recent is soft (informational).
-5. Observation strategy (pick one in #919; document interval if polling):
-   - lightweight poll of `GET /v1/roots` (busy / hasRecentEvent), and/or
-   - secondary subscriptions for non-selected roots that **do not** merge events
-     into the selected transcript (depends on #918 isolation).
+5. Observation strategy (**implemented**): lightweight poll of `GET /v1/roots`
+   every **2s** while multi-root is enabled (busy / hasRecentEvent /
+   permissionPending / questionPending). No secondary WS for background roots.
 
 ### Lifecycle flows
 
@@ -490,7 +489,7 @@ DTO when present.
 | List / fork / rename / delete durable | `/v1/sessions*` | — |
 | Children listing | `GET /v1/sessions/{id}/children` | Not in root switcher (by design) |
 | Close/stop live workspace | `DELETE /v1/roots/{id}` | — |
-| Permission/question pending per root | Not on `RootSummary` | **Soft gap for #919:** may poll status per root, subscribe off-screen, or add additive fields (`permissionPending`, `questionPending`) — prefer existing data first |
+| Permission/question pending per root | `RootSummary.permissionPending` / `questionPending` + 2s roots poll | — |
 | `forkedFrom` on session list | List item includes `forkedFrom` when session was created via Fork | — |
 | Live title after rename | Rename hits durable meta | **Soft gap:** confirm hub title refresh path |
 | Deep link query | `?root=` / `?session=` on cockpit load | — |
