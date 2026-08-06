@@ -16,6 +16,13 @@ materially affect the shipped product.
 
 ### Added
 
+- **TUI plugin manager** — `/plugin` opens a centered manager over
+  `host.Plugins`: browse installed plugins (version, source, status, trust,
+  contribution counts), inspect capabilities/findings, catalog search/install,
+  enable/disable, update with review, and remove/trust/untrust with explicit
+  confirmation. Executable trust review names commands and contribution types;
+  no secret or env values are rendered; failed ops preserve prior state
+  ([#730](https://github.com/jonathanung/strike/issues/730)).
 - **SWE-bench Verified subset runner (E3.3)** — `strike eval swebench` runs a
   fixed 50-instance internal regression subset with Docker per instance and
   `strike exec --json`, recording pass rate, tokens, cost, and wall-clock to

@@ -77,6 +77,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/init":             {"create or update project AGENTS.md", "", commandSourceBuiltin},
 		"/ftue":             {"setup wizard: provider, model, optional init, feature tour, scheduler presets, first prompt", "", commandSourceBuiltin},
 		"/mcp":              {"MCP servers: status, retry, disable", "[retry [name]|disable <name>]", commandSourceBuiltin},
+		"/plugin":           {"plugin manager: browse, install, trust, update, remove", "", commandSourceBuiltin},
 		"/lsp":              {"language servers: status, retry, disable", "[retry [name]|disable <name>]", commandSourceBuiltin},
 		"/diagnostics":      {"focus the diagnostics right pane", "", commandSourceBuiltin},
 		"/exit":             {"quit strike", "", commandSourceBuiltin},
@@ -138,7 +139,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 }
 
 func TestValidSkillNameRejectsReservedBuiltinsIncludingMDRead(t *testing.T) {
-	for _, name := range []string{"provider", "model", "effort", "autonomy", "mode", "sandbox", "permission", "auth", "agent", "agents", "activity", "files", "visualizer", "system", "telemetry", "pets", "fast", "vim", "nano", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "rename", "export", "timeline", "diag", "diagnostic", "copy", "help", "keys", "legend", "memory", "issues", "plan", "goal", "loop", "workflow", "context", "effective-prompt", "cost", "upgrade", "init", "mcp", "lsp", "diagnostics", "exit", "quit", "focus-left", "focus-right", "window-next", "window-prev", "group-next", "group-prev", "scroll-up", "scroll-down", "jump-bottom", "palette", "interrupt", "save-defaults", "leave-editor", "edit-prompt", "agent-next", "mode-next", "tool-prev", "tool-next", "tool-expand", "tool-copy", "tool-review", "tool-apply", "subagent", "parent", "subagent-next", "subagent-prev", "root-new", "root-open", "root-interrupt", "root-hide", "root-filter"} {
+	for _, name := range []string{"provider", "model", "effort", "autonomy", "mode", "sandbox", "permission", "auth", "settings", "config", "agent", "agents", "activity", "files", "visualizer", "system", "telemetry", "pets", "fast", "vim", "nano", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "rename", "export", "timeline", "diag", "diagnostic", "copy", "help", "keys", "legend", "memory", "issues", "plan", "goal", "loop", "workflow", "context", "effective-prompt", "cost", "upgrade", "init", "mcp", "plugin", "lsp", "diagnostics", "exit", "quit", "focus-left", "focus-right", "window-next", "window-prev", "group-next", "group-prev", "scroll-up", "scroll-down", "jump-bottom", "palette", "interrupt", "save-defaults", "leave-editor", "edit-prompt", "agent-next", "mode-next", "tool-prev", "tool-next", "tool-expand", "tool-copy", "tool-review", "tool-apply", "subagent", "parent", "subagent-next", "subagent-prev", "root-new", "root-open", "root-interrupt", "root-hide", "root-filter"} {
 		if validSkillName(name) {
 			t.Errorf("validSkillName(%q) = true, want false for reserved builtin", name)
 		}
