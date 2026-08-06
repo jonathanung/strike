@@ -180,6 +180,7 @@ func (e *Engine) createDelegationForTask(req tool.TaskRequest) (Delegation, bool
 		Model:          req.Model,
 		Effort:         req.Effort,
 		Name:           req.Name,
+		Verify:         req.Verify,
 	})
 	if err != nil {
 		return Delegation{}, false, err

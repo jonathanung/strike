@@ -81,6 +81,53 @@ func TestTaskPassesEffort(t *testing.T) {
 	}
 }
 
+func TestTaskPassesVerifyGates(t *testing.T) {
+	tc := allowAll(t.TempDir())
+	var gotReq TaskRequest
+	tc.SpawnTask = func(_ context.Context, req TaskRequest) (TaskResult, error) {
+		gotReq = req
+		return TaskResult{Output: "started", Status: "started", SessionID: "s1"}, nil
+	}
+	if _, err := NewTask().Execute(context.Background(), mustJSON(t, map[string]any{
+		"prompt": "with gates",
+		"verify": []map[string]any{
+			{"kind": "cmd", "value": "make test", "description": "unit"},
+			{"kind": "schema", "value": "Handoff"},
+			{"kind": "path", "value": "out/bin"},
+		},
+	}), tc); err != nil {
+		t.Fatal(err)
+	}
+	if len(gotReq.Verify) != 3 {
+		t.Fatalf("verify = %#v", gotReq.Verify)
+	}
+	if gotReq.Verify[0].Kind != "cmd" || gotReq.Verify[0].Value != "make test" || gotReq.Verify[0].Description != "unit" {
+		t.Fatalf("gate0 = %#v", gotReq.Verify[0])
+	}
+	if gotReq.Verify[1].Kind != "schema" || gotReq.Verify[1].Value != "handoff" {
+		t.Fatalf("gate1 = %#v", gotReq.Verify[1])
+	}
+}
+
+func TestTaskRejectsBadVerifyGates(t *testing.T) {
+	tc := allowAll(t.TempDir())
+	tc.SpawnTask = func(context.Context, TaskRequest) (TaskResult, error) {
+		t.Fatal("should not spawn")
+		return TaskResult{}, nil
+	}
+	cases := []map[string]any{
+		{"prompt": "x", "verify": []map[string]any{{"kind": "nope", "value": "x"}}},
+		{"prompt": "x", "verify": []map[string]any{{"kind": "cmd", "value": ""}}},
+		{"prompt": "x", "verify": []map[string]any{{"kind": "schema", "value": "other"}}},
+	}
+	for _, args := range cases {
+		_, err := NewTask().Execute(context.Background(), mustJSON(t, args), tc)
+		if err == nil || !strings.Contains(err.Error(), "verify") {
+			t.Errorf("args %#v: err=%v", args, err)
+		}
+	}
+}
+
 func TestTaskPassesName(t *testing.T) {
 	tc := allowAll(t.TempDir())
 	var gotReq TaskRequest

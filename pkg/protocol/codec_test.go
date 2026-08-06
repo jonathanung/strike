@@ -253,7 +253,7 @@ func TestCorrelationParentSessionIDAndDepthJSON(t *testing.T) {
 
 func TestChildCompletedStatusesRoundTrip(t *testing.T) {
 	corr := Correlation{SessionID: "child-1", ParentSessionID: "parent-1", Depth: 1}
-	for _, status := range []ChildStatus{ChildStatusCompleted, ChildStatusFailed, ChildStatusCanceled} {
+	for _, status := range []ChildStatus{ChildStatusCompleted, ChildStatusFailed, ChildStatusCanceled, ChildStatusBlocked} {
 		want := ChildCompleted{
 			Correlation: corr,
 			Status:      status,
@@ -298,6 +298,23 @@ func TestChildCompletedHandoffRoundTrip(t *testing.T) {
 			Blockers:              []string{},
 			RecommendedNextAction: "review PR",
 		},
+		Verification: &VerificationReport{
+			Passed:   true,
+			Claimed:  true,
+			Verified: true,
+			Checks: []VerificationCheck{{
+				Name:   "unit",
+				Kind:   "cmd",
+				Value:  "make test",
+				Passed: true,
+			}},
+			Env: VerificationEnv{
+				WorkDir:   "/tmp/ws",
+				SessionID: "c1",
+				ModelID:   "m1",
+			},
+			Summary: "verified: 1/1 gates passed",
+		},
 	}
 	env, err := Wrap(want)
 	if err != nil {
@@ -316,6 +333,12 @@ func TestChildCompletedHandoffRoundTrip(t *testing.T) {
 	}
 	if got.Handoff.RecommendedNextAction != "review PR" {
 		t.Fatalf("next = %q", got.Handoff.RecommendedNextAction)
+	}
+	if got.Verification == nil || !got.Verification.Passed || len(got.Verification.Checks) != 1 {
+		t.Fatalf("verification = %#v", got.Verification)
+	}
+	if got.Verification.Env.SessionID != "c1" {
+		t.Fatalf("env = %#v", got.Verification.Env)
 	}
 	// Wire uses camelCase.
 	raw, _ := json.Marshal(got.Handoff)

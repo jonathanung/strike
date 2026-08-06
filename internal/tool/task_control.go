@@ -87,6 +87,9 @@ func (taskStatusTool) Execute(ctx context.Context, args json.RawMessage, tc *Con
 	if res.HasHandoff {
 		payload["handoff"] = res.Handoff
 	}
+	if res.HasVerification {
+		payload["verification"] = res.Verification
+	}
 	if len(res.QueuePools) > 0 {
 		payload["queue_pools"] = res.QueuePools
 	}

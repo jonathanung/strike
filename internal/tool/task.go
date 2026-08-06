@@ -21,6 +21,10 @@ func (taskTool) Description() string {
   handoff JSON (summary, files_changed, verification, findings, blockers,
   recommended_next_action) — the finished work product. Mid-flight coordination uses
   peer messages, not polling.
+- Optional verify gates (cmd|schema|path) are independent harness checks run when the
+  child claims done. Implementer completion alone does not yield final completed when
+  gates are set — pass → completed, fail → blocked with a structured verification report.
+  The child's handoff "verification" string is never treated as gate evidence.
 - Do not sleep-poll or busy-loop task_status waiting for the child — continue other work
   or end the turn; completion and peer inbox traffic are event-driven.
 - Optional name is a stable teammate alias unique on the session team (e.g. explorer).
@@ -73,22 +77,36 @@ func (taskTool) Schema() json.RawMessage {
 				"items": {"type": "string"},
 				"description": "Optional lifecycle states to notify on: blocked|review|done|failed|canceled|working|queued"
 			},
-			"assignee": {"type": "string", "description": "Optional assignee label for the delegation"}
+			"assignee": {"type": "string", "description": "Optional assignee label for the delegation"},
+			"verify": {
+				"type": "array",
+				"description": "Optional independent completion gates (cmd exit 0, schema handoff validity, path exists). When set, implementer-done is not final completed until all pass; failures yield blocked + verification report",
+				"items": {
+					"type": "object",
+					"properties": {
+						"kind": {"type": "string", "description": "Gate kind: cmd, schema, or path"},
+						"value": {"type": "string", "description": "Command, schema name (handoff), or filesystem path"},
+						"description": {"type": "string", "description": "Optional label for the verification report"}
+					},
+					"required": ["kind", "value"]
+				}
+			}
 		},
 		"required": ["prompt"]
 	}`)
 }
 
 type taskArgs struct {
-	Prompt    string   `json:"prompt"`
-	Name      string   `json:"name"`
-	Agent     string   `json:"agent"`
-	Model     string   `json:"model"`
-	Effort    string   `json:"effort"`
-	Criteria  []string `json:"criteria"`
-	Deps      []string `json:"deps"`
-	Subscribe []string `json:"subscribe"`
-	Assignee  string   `json:"assignee"`
+	Prompt    string       `json:"prompt"`
+	Name      string       `json:"name"`
+	Agent     string       `json:"agent"`
+	Model     string       `json:"model"`
+	Effort    string       `json:"effort"`
+	Criteria  []string     `json:"criteria"`
+	Deps      []string     `json:"deps"`
+	Subscribe []string     `json:"subscribe"`
+	Assignee  string       `json:"assignee"`
+	Verify    []VerifyGate `json:"verify"`
 }
 
 func (taskTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
@@ -98,6 +116,10 @@ func (taskTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	}
 	if strings.TrimSpace(a.Prompt) == "" {
 		return Result{}, fmt.Errorf("prompt is empty")
+	}
+	gates, err := normalizeTaskVerify(a.Verify)
+	if err != nil {
+		return Result{}, err
 	}
 	if err := tc.Ask(ctx, AskRequest{Permission: "task", Patterns: []string{"*"}, Always: []string{"*"}}); err != nil {
 		return Result{}, err
@@ -115,6 +137,7 @@ func (taskTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 		Deps:      a.Deps,
 		Subscribe: a.Subscribe,
 		Assignee:  a.Assignee,
+		Verify:    gates,
 	})
 	if err != nil {
 		return Result{}, err
@@ -146,6 +169,43 @@ func (taskTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 		}
 		return Result{Title: title, Output: out, Metadata: meta}, fmt.Errorf("%s", out)
 	}
+}
+
+// normalizeTaskVerify validates optional completion gates at spawn time.
+// Empty/nil is fine (no independent gates).
+func normalizeTaskVerify(in []VerifyGate) ([]VerifyGate, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	const maxGates = 16
+	if len(in) > maxGates {
+		return nil, fmt.Errorf("verify: at most %d gates allowed (got %d)", maxGates, len(in))
+	}
+	out := make([]VerifyGate, 0, len(in))
+	for i, g := range in {
+		kind := strings.ToLower(strings.TrimSpace(g.Kind))
+		value := strings.TrimSpace(g.Value)
+		desc := strings.TrimSpace(g.Description)
+		if kind == "" {
+			return nil, fmt.Errorf("verify: gate %d: kind is required", i+1)
+		}
+		switch kind {
+		case "cmd", "schema", "path":
+		default:
+			return nil, fmt.Errorf("verify: gate %d: unknown kind %q (want cmd, schema, path)", i+1, g.Kind)
+		}
+		if value == "" {
+			return nil, fmt.Errorf("verify: gate %d: value is empty", i+1)
+		}
+		if kind == "schema" {
+			if strings.ToLower(value) != "handoff" {
+				return nil, fmt.Errorf("verify: gate %d: unknown schema %q (want handoff)", i+1, g.Value)
+			}
+			value = "handoff"
+		}
+		out = append(out, VerifyGate{Kind: kind, Value: value, Description: desc})
+	}
+	return out, nil
 }
 
 func shortID(id string) string {

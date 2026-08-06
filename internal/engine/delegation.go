@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike-cli/internal/tool"
 )
 
 // Delegation lifecycle limits.
@@ -43,9 +44,11 @@ type Delegation struct {
 	BlockReason    string                   `json:"block_reason,omitempty"`
 	// SpawnPending is true when deps are satisfied and the owner engine should
 	// start the child (or a deferred release is in flight).
-	SpawnPending bool      `json:"spawn_pending,omitempty"`
-	CreatedAt    time.Time `json:"created_at,omitempty"`
-	UpdatedAt    time.Time `json:"updated_at,omitempty"`
+	SpawnPending bool `json:"spawn_pending,omitempty"`
+	// Verify holds independent completion gates declared at create (for deferred spawn).
+	Verify    []tool.VerifyGate `json:"verify,omitempty"`
+	CreatedAt time.Time         `json:"created_at,omitempty"`
+	UpdatedAt time.Time         `json:"updated_at,omitempty"`
 }
 
 // DelegationConflictError is returned when CAS version or ownership fails.
@@ -218,6 +221,8 @@ type CreateDelegationSpec struct {
 	SessionID string
 	// StartState overrides initial state when non-empty (working when session set).
 	StartState protocol.DelegationState
+	// Verify gates to attach when the child eventually spawns.
+	Verify []tool.VerifyGate
 }
 
 // CreateDelegation appends a new lifecycle object. Initial state is queued when
@@ -316,6 +321,7 @@ func (t *Team) CreateDelegation(spec CreateDelegationSpec) (Delegation, error) {
 		State:          state,
 		Version:        1,
 		SpawnPending:   spawnPending,
+		Verify:         append([]tool.VerifyGate(nil), spec.Verify...),
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
@@ -671,6 +677,9 @@ func (t *Team) BindDelegationOnChildCompleted(sessionID string, status protocol.
 		} else {
 			to = protocol.DelegationDone
 		}
+	case protocol.ChildStatusBlocked:
+		// Gate failure or explicit block — not terminal done.
+		to = protocol.DelegationBlocked
 	case protocol.ChildStatusFailed:
 		to = protocol.DelegationFailed
 	case protocol.ChildStatusCanceled:
