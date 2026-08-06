@@ -18,124 +18,116 @@ func (taskTool) Contract() Contract {
 }
 
 func (taskTool) Description() string {
-	return `Delegate a bounded subtask to a child agent with its own context.
+	return `Progressive delegation API: spawn a child agent and manage its lifecycle.
 
-- Returns immediately after the child starts (does not block this turn).
-- Result includes the child session id; a later [child.completed] carries a structured
-  handoff JSON (summary, files_changed, verification, findings, blockers,
-  recommended_next_action) — the finished work product. Mid-flight coordination uses
-  peer messages, not polling.
-- Optional verify gates (cmd|schema|path) are independent harness checks run when the
-  child claims done. Implementer completion alone does not yield final completed when
-  gates are set — pass → completed, fail → blocked with a structured verification report.
-  The child's handoff "verification" string is never treated as gate evidence.
-- Do not sleep-poll or busy-loop task_status waiting for the child — prefer wait
-  (task.done/task.blocked/…) when you must synchronize mid-turn; otherwise continue
-  other work or end the turn. Completion and peer inbox traffic are event-driven.
-- Optional name is a stable teammate alias unique on the session team (e.g. explorer).
-  Addressable in agent_roster and messaging tools; session_id still works when omitted.
-- Optional agent selects a persona (defaults to the current agent). Built-in names include:
-   explore (read-only search), general (multi-step), commit (git commits only),
-   reviewer (read-only review), tester (run make test/vet/build), debugger (root-cause),
-   build (default coding), plan (read-only planning). Explicit agent/model pins always win.
-- Optional route=auto picks agent/model by specialty/capabilities with load-aware fallback
-  when the preferred persona is at concurrency or budget limit. Omit/off keeps inherit-parent
-  behavior. specialty or capabilities without route also enables auto.
-- Optional model pins the child's model (bare id on the current provider, or provider/model).
-  Must be a catalog id for that provider (same list as /model). Omit to inherit the parent model.
-- Optional effort pins the child's reasoning effort (off|low|medium|high|xhigh|max).
-  Omit to inherit the parent dial (agent effort pins still apply). When set, wins over agent pins.
-- Optional criteria[] records acceptance criteria on a first-class delegation object.
-  When set, successful completion enters lifecycle review (not final done) for verification.
-- Optional deps[] (delegation or session ids) keep the task queued until upstream deps are done.
-- Optional subscribe[] notifies the owner on lifecycle states (blocked|review|done|…).
-- Optional budget bounds the child (wall clock, tokens, tool calls, dangerous tools, stall/loop).
-  Exceeding a hard limit interrupts the child, emits child.escalated, and notifies the owner.
-  Session defaults come from config session.agentBudget; spawn fields overlay non-zero values.
-  Session maxSessionCostUSD (when configured) remains the outer cost envelope.
-- Optional context_bundle seals goal, acceptance, allowed/required paths, artifact refs,
-  constraints, addressable items, and file pins. The child reads it via context_bundle;
-  missing_context on the completion handoff blocks rather than hallucinating.
-- Delegation-worthiness policy (#876) runs before spawn: bare tiny or path-overlapping
-  work returns status "local" (do it yourself) unless force_delegate=true. Hard ceilings
-  (depth, max live children, delegation count, session budget) always deny and cannot
-  be forced. Intentional signals (agent/specialty/criteria/deps/verify) prefer fan-out.
-  Decision reason is in tool metadata (policyReason) and child.started.
-- Creates a delegation lifecycle object (id dN) even for plain spawns; see also delegate tool.
-- Nested task depth is bounded by MaxChildDepth (default 1: children cannot nest). Bound fan-out.
-- Parent→owned-child control: task_status / task_read / task_message / task_interrupt
-  (session id or name). Peer/team chat (any teammate, including child→lead and child→child):
-  agent_message / agent_broadcast — not a parent-only control plane.
-- Prefer agent_message for mid-flight blockers/handoffs; prefer [child.completed] handoff
-  for the finished deliverable. Avoid chatty status ping-pong.
-- Tell children (in the prompt) to end with the structured handoff schema. Engine also
-  tracks files_changed from mutating tools and merges them into the handoff.
-- Use for scoped work that benefits from a fresh message history.`
+Simple path (prompt only):
+  task({prompt: "…"})
+  Returns immediately after the child starts. A later [child.completed] carries
+  structured handoff JSON (summary, files_changed, verification, findings,
+  blockers, recommended_next_action). Mid-flight coordination uses peer messages.
+
+Advanced create fields (all optional): name, agent, model, effort, route/specialty/
+capabilities, criteria[], deps[], subscribe[], assignee, verify[], budget,
+context_bundle (goal/paths/artifacts/constraints), force_delegate. Same lifecycle
+runtime as plain spawn — no second path.
+
+Delegation-worthiness policy (#876) runs before create: bare tiny or path-overlapping
+work returns status "local" unless force_delegate=true. Hard ceilings (depth, max
+live children, delegation count, session budget) always deny. policyReason is in
+tool metadata and child.started.
+
+Actions (optional action=; omit + prompt ⇒ create):
+  create     — spawn (default). Nested depth bounded by MaxChildDepth.
+  get        — lifecycle snapshot by id (delegation id, session id, or name)
+  list       — all delegations on this session team
+  status     — live/terminal pulse + handoff/budget/lifecycle fields
+  read       — bounded child transcript slice
+  message    — parent→owned-child steer (not peer chat; use agent_message)
+  transition — lifecycle move with optional expected_version CAS
+  cancel     — interrupt owned child (idempotent)
+  wait       — block on task.done/failed/canceled/blocked with timeout
+
+States: queued → working → blocked → review → done (+ failed / canceled).
+When criteria or verify gates are set, implementer-done is not final completed
+until gates pass (else blocked/review). Do not busy-poll status — prefer wait
+or [child.completed]. Prefer agent_message for mid-flight blockers.
+
+Identity: id or session_id (delegation id, session id, or stable name alias).
+team_task remains the shared claim board; plan_delegate is the plan-section
+wrapper. Legacy tools (delegate, task_status, task_read, task_message,
+task_interrupt, wait) are compatibility shims over this API.`
 }
 
 func (taskTool) Schema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
-			"prompt": {"type": "string", "description": "The subtask instructions for the child agent"},
-			"name": {"type": "string", "description": "Optional stable teammate alias unique on this session team (e.g. explorer). Addressable in roster/messaging; omit to use session id only"},
-			"agent": {"type": "string", "description": "Optional agent persona pin: explore, general, commit, reviewer, tester, debugger, build, plan, or a user-defined name. Always wins over auto-route when set"},
-			"model": {"type": "string", "description": "Optional model id pin for the child (bare id on the current provider, or provider/model). Always wins over auto-route when set; omit to inherit the parent model"},
-			"effort": {"type": "string", "description": "Optional reasoning effort for the child: off, low, medium, high, xhigh, or max. Omit to inherit the parent dial"},
-			"route": {"type": "string", "description": "Optional routing mode: auto enables capability-aware agent/model selection; omit or off keeps pin-or-inherit defaults"},
-			"specialty": {"type": "string", "description": "Required specialty/capability for route=auto (e.g. explore, test, review, debug). Enables auto when route is omitted"},
+			"action": {
+				"type": "string",
+				"enum": ["create", "get", "list", "status", "read", "message", "transition", "cancel", "wait"],
+				"description": "Operation; omit with prompt for create (progressive default)"
+			},
+			"prompt": {"type": "string", "description": "Subtask instructions (create; required when action omitted)"},
+			"id": {"type": "string", "description": "Delegation id, session id, or name (get/status/read/message/transition/cancel/wait)"},
+			"session_id": {"type": "string", "description": "Alias for id (compat with task_* tools)"},
+			"name": {"type": "string", "description": "Optional stable teammate alias unique on this session team (e.g. explorer)"},
+			"agent": {"type": "string", "description": "Optional agent persona pin: explore, general, commit, reviewer, tester, debugger, build, plan, or user-defined. Wins over auto-route"},
+			"model": {"type": "string", "description": "Optional model id pin (bare id or provider/model). Wins over auto-route; omit to inherit"},
+			"effort": {"type": "string", "description": "Optional reasoning effort: off, low, medium, high, xhigh, or max"},
+			"route": {"type": "string", "description": "Optional routing: auto enables capability-aware selection; omit or off keeps pin-or-inherit"},
+			"specialty": {"type": "string", "description": "Required specialty for route=auto (e.g. explore, test, review, debug). Enables auto when route omitted"},
 			"capabilities": {
 				"type": "array",
 				"items": {"type": "string"},
-				"description": "Required capability tags for route=auto (all must match). Merged with specialty when both set"
+				"description": "Required capability tags for route=auto (all must match)"
 			},
 			"max_cost_class": {"type": "string", "description": "Optional auto-route model cost filter: low, medium, or high"},
 			"models": {
 				"type": "array",
 				"items": {"type": "string"},
-				"description": "Optional model allow-list for auto-route (bare id or provider/model)"
+				"description": "Optional model allow-list for auto-route"
 			},
-			"max_concurrent": {"type": "integer", "description": "Optional per-persona live-child limit before auto-route fallback (default 1 when routing)"},
+			"max_concurrent": {"type": "integer", "description": "Optional per-persona live-child limit before auto-route fallback"},
 			"criteria": {
 				"type": "array",
 				"items": {"type": "string"},
-				"description": "Optional acceptance criteria on the delegation lifecycle object; non-empty → completion enters review"
+				"description": "Acceptance criteria; non-empty → completion enters lifecycle review"
 			},
 			"deps": {
 				"type": "array",
 				"items": {"type": "string"},
-				"description": "Optional upstream delegation or session ids that must reach done before spawn"
+				"description": "Upstream delegation or session ids that must reach done before spawn"
 			},
 			"subscribe": {
 				"type": "array",
 				"items": {"type": "string"},
-				"description": "Optional lifecycle states to notify on: blocked|review|done|failed|canceled|working|queued"
+				"description": "Lifecycle states to notify on: blocked|review|done|failed|canceled|working|queued"
 			},
-			"assignee": {"type": "string", "description": "Optional assignee label for the delegation"},
+			"assignee": {"type": "string", "description": "Optional assignee label"},
 			"verify": {
 				"type": "array",
-				"description": "Optional independent completion gates (cmd exit 0, schema handoff validity, path exists). When set, implementer-done is not final completed until all pass; failures yield blocked + verification report",
+				"description": "Independent completion gates (cmd|schema|path). Failures yield blocked + verification report",
 				"items": {
 					"type": "object",
 					"properties": {
 						"kind": {"type": "string", "description": "Gate kind: cmd, schema, or path"},
 						"value": {"type": "string", "description": "Command, schema name (handoff), or filesystem path"},
-						"description": {"type": "string", "description": "Optional label for the verification report"}
+						"description": {"type": "string", "description": "Optional label"}
 					},
 					"required": ["kind", "value"]
 				}
 			},
 			"budget": {
 				"type": "object",
-				"description": "Optional per-child resource limits (overlay session.agentBudget defaults). Zero/omit = unlimited for that dimension. Hard exceed → child.escalated + interrupt",
+				"description": "Optional per-child resource limits (overlay session.agentBudget). Hard exceed → child.escalated",
 				"properties": {
-					"max_wall_clock_s": {"type": "integer", "description": "Max wall-clock seconds before fail"},
-					"max_tokens": {"type": "integer", "description": "Max accumulated stream tokens before fail"},
-					"max_cost_usd": {"type": "number", "description": "Max USD cost before fail (enforced when cost pricing is available; nests under session maxSessionCostUSD)"},
-					"max_tool_calls": {"type": "integer", "description": "Max tool invocations before fail"},
-					"max_dangerous_tools": {"type": "integer", "description": "Max bash/write/edit/apply_patch/notebook_edit calls before fail"},
-					"stall_after_s": {"type": "integer", "description": "Hard-escalate (block) after this many seconds without progress; soft stale signal always uses 300s default"},
-					"loop_detect_n": {"type": "integer", "description": "Hard-escalate (block) when the same tool name repeats N times; soft loop signal defaults to 6"}
+					"max_wall_clock_s": {"type": "integer"},
+					"max_tokens": {"type": "integer"},
+					"max_cost_usd": {"type": "number"},
+					"max_tool_calls": {"type": "integer"},
+					"max_dangerous_tools": {"type": "integer"},
+					"stall_after_s": {"type": "integer"},
+					"loop_detect_n": {"type": "integer"}
 				},
 				"additionalProperties": false
 			},
@@ -145,11 +137,11 @@ func (taskTool) Schema() json.RawMessage {
 			},
 			"context_bundle": {
 				"type": "object",
-				"description": "Optional sealed context package: goal, acceptance, allowed/required paths, artifact refs, constraints, items, file_pins. Child reads via context_bundle tool",
+				"description": "Sealed context: goal, acceptance, allowed/required paths, artifacts, constraints, items, file_pins",
 				"properties": {
 					"goal": {"type": "string"},
 					"acceptance": {"type": "array", "items": {"type": "string"}},
-					"allowed_paths": {"type": "array", "items": {"type": "string"}, "description": "When set, scopes child read/edit/write to these workspace-relative globs"},
+					"allowed_paths": {"type": "array", "items": {"type": "string"}},
 					"required_paths": {"type": "array", "items": {"type": "string"}},
 					"artifacts": {
 						"type": "array",
@@ -200,109 +192,37 @@ func (taskTool) Schema() json.RawMessage {
 						}
 					}
 				}
-			}
-		},
-		"required": ["prompt"]
+			},
+			"include_recent": {"type": "boolean", "description": "status: include latest_activity lines"},
+			"offset": {"type": "integer", "description": "read: 0-based start index"},
+			"limit": {"type": "integer", "description": "read: max entries (default 20, max 100)"},
+			"last": {"type": "integer", "description": "read: when > 0, return last N entries"},
+			"include_tools": {"type": "boolean", "description": "read: include tool rows (default true)"},
+			"include_reasoning": {"type": "boolean", "description": "read: include reasoning deltas"},
+			"text": {"type": "string", "description": "message: guidance for the child"},
+			"state": {
+				"type": "string",
+				"enum": ["queued", "working", "blocked", "review", "done", "failed", "canceled"],
+				"description": "transition: target lifecycle state"
+			},
+			"reason": {"type": "string", "description": "transition: optional block/cancel reason"},
+			"expected_version": {"type": "integer", "description": "transition: CAS token; omit or 0 to skip"},
+			"events": {
+				"type": "array",
+				"items": {"type": "string"},
+				"description": "wait: task.done, task.failed, task.canceled, task.blocked"
+			},
+			"timeout_seconds": {"type": "number", "description": "wait: max seconds (0 < t ≤ 300)"}
+		}
 	}`)
 }
 
-type taskArgs struct {
-	Prompt        string            `json:"prompt"`
-	Name          string            `json:"name"`
-	Agent         string            `json:"agent"`
-	Model         string            `json:"model"`
-	Effort        string            `json:"effort"`
-	Route         string            `json:"route"`
-	Specialty     string            `json:"specialty"`
-	Capabilities  []string          `json:"capabilities"`
-	MaxCostClass  string            `json:"max_cost_class"`
-	Models        []string          `json:"models"`
-	MaxConcurrent int               `json:"max_concurrent"`
-	Criteria      []string          `json:"criteria"`
-	Deps          []string          `json:"deps"`
-	Subscribe     []string          `json:"subscribe"`
-	Assignee      string            `json:"assignee"`
-	Verify        []VerifyGate      `json:"verify"`
-	Budget        AgentBudgetLimits `json:"budget"`
-	ContextBundle ContextBundle     `json:"context_bundle"`
-	ForceDelegate bool              `json:"force_delegate"`
-}
-
 func (taskTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
-	var a taskArgs
+	var a progressiveArgs
 	if err := json.Unmarshal(args, &a); err != nil {
 		return Result{}, fmt.Errorf("invalid arguments: %w", err)
 	}
-	if strings.TrimSpace(a.Prompt) == "" {
-		return Result{}, fmt.Errorf("prompt is empty")
-	}
-	gates, err := normalizeTaskVerify(a.Verify)
-	if err != nil {
-		return Result{}, err
-	}
-	bundle, err := NormalizeContextBundle(a.ContextBundle)
-	if err != nil {
-		return Result{}, err
-	}
-	if err := tc.Ask(ctx, AskRequest{Permission: "task", Patterns: []string{"*"}, Always: []string{"*"}}); err != nil {
-		return Result{}, err
-	}
-	if tc.SpawnTask == nil {
-		return Result{}, fmt.Errorf("task is not available")
-	}
-	res, err := tc.SpawnTask(ctx, TaskRequest{
-		Prompt:        a.Prompt,
-		Name:          a.Name,
-		Agent:         a.Agent,
-		Model:         a.Model,
-		Effort:        a.Effort,
-		Route:         a.Route,
-		Specialty:     a.Specialty,
-		Capabilities:  a.Capabilities,
-		MaxCostClass:  a.MaxCostClass,
-		Models:        a.Models,
-		MaxConcurrent: a.MaxConcurrent,
-		Criteria:      a.Criteria,
-		Deps:          a.Deps,
-		Subscribe:     a.Subscribe,
-		Assignee:      a.Assignee,
-		Verify:        gates,
-		Budget:        a.Budget,
-		ContextBundle: bundle,
-		ForceDelegate: a.ForceDelegate,
-	})
-	if err != nil {
-		return Result{}, err
-	}
-	out := res.Output
-	title := "task"
-	if n := strings.TrimSpace(res.Name); n != "" {
-		title = "task " + n
-	} else if res.DelegationID != "" {
-		title = "task " + res.DelegationID
-	} else if res.SessionID != "" {
-		title = "task " + shortID(res.SessionID)
-	}
-	if res.Lifecycle != "" {
-		title += " " + res.Lifecycle
-	} else if res.Status == "local" {
-		title += " local"
-	}
-	meta := taskMetadata(res)
-	switch res.Status {
-	case "started", "completed", "queued", "local":
-		return Result{Title: title, Output: out, Metadata: meta}, nil
-	case "failed", "canceled":
-		if out == "" {
-			out = "task " + res.Status
-		}
-		return Result{Title: title, Output: out, Metadata: meta}, fmt.Errorf("%s", out)
-	default:
-		if out == "" {
-			out = "task failed"
-		}
-		return Result{Title: title, Output: out, Metadata: meta}, fmt.Errorf("%s", out)
-	}
+	return executeProgressive(ctx, "task", "task", a, tc)
 }
 
 // normalizeTaskVerify validates optional completion gates at spawn time.
