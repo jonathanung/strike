@@ -1,0 +1,2 @@
+{"instance_id": "fixture__repo-1", "repo": "fixture/repo", "base_commit": "abc123", "version": "1.0", "problem_statement": "Fix the off-by-one in add().\n\nThe function add(a, b) returns a+b+1.", "FAIL_TO_PASS": "[\"test_add.py::test_add\"]", "PASS_TO_PASS": "[\"test_add.py::test_add_zero\"]"}
+{"instance_id": "fixture__repo-2", "repo": "fixture/repo", "base_commit": "def456", "version": "1.0", "problem_statement": "Make greeter return Hello.\n", "FAIL_TO_PASS": "[\"test_greet.py::test_hello\"]", "PASS_TO_PASS": "[]"}
