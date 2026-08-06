@@ -643,4 +643,29 @@ describe("App", () => {
     ));
   });
 
+  it("shows timeline inspector tab when capability is set and loads snapshot", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) {
+        return response({
+          version: "test", authRequired: false, attachOnly: false,
+          capabilities: { live: true, files: true, timeline: true, roots: false },
+          protocolOps: ["user.input"], status: { sessionId: "live", provider: "echo", busy: false },
+          agents: [{ name: "build" }], skills: [],
+        });
+      }
+      if (url.includes("/timeline") && !url.includes("export")) {
+        return response({ sessionId: "live", entries: [] });
+      }
+      if (url.includes("sessions")) return response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" });
+      return response({ ok: true });
+    }));
+    render(<App />);
+    await screen.findByText("Current");
+    expect(screen.getByRole("tab", { name: "timeline" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "timeline" }));
+    expect(await screen.findByRole("heading", { name: "Run timeline" })).toBeInTheDocument();
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/v1/sessions/live/timeline"), expect.anything()));
+  });
+
 });

@@ -202,6 +202,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/workflow-drafts/review", s.handleWorkflowDraftReview)
 	s.mux.HandleFunc("POST /v1/workflow-drafts/save", s.handleWorkflowDraftSave)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/events", s.handleSessionEvents)
+	s.mux.HandleFunc("GET /v1/sessions/{id}/timeline", s.handleSessionTimeline)
+	s.mux.HandleFunc("GET /v1/sessions/{id}/timeline/export", s.handleSessionTimelineExport)
 	s.mux.HandleFunc("GET /v1/sessions", s.handleSessions)
 	s.mux.HandleFunc("GET /v1/roots", s.handleRoots)
 	s.mux.HandleFunc("POST /v1/roots", s.handleRootCreate)
