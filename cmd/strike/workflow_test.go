@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -277,5 +278,182 @@ func TestMainUsageListsWorkflow(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "strike workflow") {
 		t.Fatalf("usage missing workflow: %q", stdout.String())
+	}
+}
+
+func TestWorkflowGenerateReviewNoSave(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+	t.Chdir(work)
+
+	prev := workflowTestCompleter
+	t.Cleanup(func() { workflowTestCompleter = prev })
+	workflowTestCompleter = func(ctx context.Context, system, user string) (string, error) {
+		return `{
+  "schemaVersion": 1,
+  "name": "cli-gen",
+  "description": "from test",
+  "phases": [
+    {
+      "name": "review",
+      "agent": "reviewer",
+      "permissions": [
+        {"permission": "write", "pattern": "*", "action": "deny"},
+        {"permission": "edit", "pattern": "*", "action": "deny"}
+      ],
+      "exit": {"type": "user"}
+    },
+    {
+      "name": "fix",
+      "agent": "build",
+      "permissions": [{"permission": "bash", "pattern": "*", "action": "allow"}],
+      "exit": {"type": "check", "command": "make test"}
+    }
+  ]
+}`, nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runWorkflowCLI([]string{"generate", "ship safely with review"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%q stdout=%q", code, stderr.String(), stdout.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"VALID",
+		"EXECUTABLE CHECK GATES",
+		"make test",
+		"EFFECTIVE PERMISSION WIDENING",
+		"draft not saved",
+		"cli-gen",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q:\n%s", want, out)
+		}
+	}
+	// No file written without --save.
+	if _, err := os.Stat(filepath.Join(work, ".strike", "workflows", "cli-gen.json")); !os.IsNotExist(err) {
+		t.Fatalf("unexpected file err=%v", err)
+	}
+}
+
+func TestWorkflowGenerateRejectionWithoutYes(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+	t.Chdir(work)
+
+	prev := workflowTestCompleter
+	t.Cleanup(func() { workflowTestCompleter = prev })
+	workflowTestCompleter = func(ctx context.Context, system, user string) (string, error) {
+		return `{"schemaVersion":1,"name":"x","phases":[{"name":"a","exit":{"type":"agent"}}]}`, nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runWorkflowCLI([]string{"generate", "--save", "--project", "intent"}, &stdout, &stderr)
+	if code != 2 || !strings.Contains(stderr.String(), "--yes") {
+		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+}
+
+func TestWorkflowGenerateInvalidStaysDraft(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+	t.Chdir(work)
+
+	prev := workflowTestCompleter
+	t.Cleanup(func() { workflowTestCompleter = prev })
+	workflowTestCompleter = func(ctx context.Context, system, user string) (string, error) {
+		return `{"schemaVersion":1,"name":"bad","phases":[]}`, nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runWorkflowCLI([]string{"generate", "--save", "--project", "--yes", "intent"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "INVALID") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "not saved") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(work, ".strike", "workflows", "bad.json")); !os.IsNotExist(err) {
+		t.Fatalf("invalid draft must not write file: %v", err)
+	}
+}
+
+func TestWorkflowGenerateAcceptedSave(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+	t.Chdir(work)
+
+	prev := workflowTestCompleter
+	t.Cleanup(func() { workflowTestCompleter = prev })
+	workflowTestCompleter = func(ctx context.Context, system, user string) (string, error) {
+		return `{"schemaVersion":1,"name":"ok-flow","phases":[{"name":"a","agent":"build","exit":{"type":"agent"}}]}`, nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runWorkflowCLI([]string{"generate", "--save", "--project", "--yes", "do the thing"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%q stdout=%q", code, stderr.String(), stdout.String())
+	}
+	path := filepath.Join(work, ".strike", "workflows", "ok-flow.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "ok-flow") || strings.Contains(string(data), `"active"`) {
+		t.Fatalf("content = %s", data)
+	}
+	if !strings.Contains(stdout.String(), "not activated") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+
+	// Overwrite without --force fails; prior preserved.
+	stdout.Reset()
+	stderr.Reset()
+	code = runWorkflowCLI([]string{"generate", "--save", "--project", "--yes", "again"}, &stdout, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "already exists") {
+		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+	data2, _ := os.ReadFile(path)
+	if string(data2) != string(data) {
+		t.Fatal("prior file changed")
+	}
+}
+
+func TestWorkflowSaveDraftCorrectionPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+	t.Chdir(work)
+
+	// Write a corrected draft file and save-draft it.
+	dir := filepath.Join(work, "tmp")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	draftPath := filepath.Join(dir, "fixed.json")
+	body := `{"schemaVersion":1,"name":"fixed","phases":[{"name":"a","agent":"build","exit":{"type":"check","command":"make vet"}}]}`
+	if err := os.WriteFile(draftPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runWorkflowCLI([]string{"save-draft", "--project", "--yes", draftPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%q stdout=%q", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "EXECUTABLE CHECK") {
+		t.Fatalf("review missing checks: %q", stdout.String())
+	}
+	outPath := filepath.Join(work, ".strike", "workflows", "fixed.json")
+	if _, err := os.Stat(outPath); err != nil {
+		t.Fatal(err)
 	}
 }

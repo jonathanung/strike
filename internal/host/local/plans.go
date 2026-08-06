@@ -102,7 +102,15 @@ func toHostPlan(p plan.Plan) host.Plan {
 	if p.Sections != nil {
 		out.Sections = make([]host.PlanSection, len(p.Sections))
 		for i, s := range p.Sections {
-			out.Sections[i] = host.PlanSection{ID: s.ID, Title: s.Title, Body: s.Body}
+			out.Sections[i] = host.PlanSection{
+				ID:                s.ID,
+				Title:             s.Title,
+				Body:              s.Body,
+				DelegateStatus:    s.DelegateStatus,
+				DelegateChildID:   s.DelegateChildID,
+				DelegateChildName: s.DelegateChildName,
+				DelegateDetail:    s.DelegateDetail,
+			}
 		}
 	}
 	return out
