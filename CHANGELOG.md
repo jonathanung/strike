@@ -27,6 +27,7 @@ Patch release: session scratch temp, harness tool broker, and partial child hand
 ### Fixed
 
 - Fixed live sessions losing their scratch temp dir when peer `EnsureSessionTemp` ran stale cleanup after >24h idle on disk by refreshing mtime (at most hourly) on ensure hits ([#877](https://github.com/jonathanung/strike/issues/877), [#884](https://github.com/jonathanung/strike/pull/884)).
+- Fixed macOS sandbox still blocking credential-backed CLIs (Keychain / SecurityServer / trustd) after the initial Keychain allowlist ([#887](https://github.com/jonathanung/strike/pull/887)).
 
 **Full changelog:** [v0.2.0...v0.2.2](https://github.com/jonathanung/strike/compare/v0.2.0...v0.2.2)
 
