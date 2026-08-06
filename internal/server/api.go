@@ -61,6 +61,7 @@ type capabilities struct {
 	Providers      bool `json:"providers"`
 	ProjectInit    bool `json:"projectInit"`
 	MCP            bool `json:"mcp"`
+	LSP            bool `json:"lsp"`
 	Telemetry      bool `json:"telemetry"`
 	Workflows      bool `json:"workflows"`
 	WorkflowDrafts bool `json:"workflowDrafts"`
@@ -94,7 +95,7 @@ var browserProtocolOps = []string{
 
 func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	// Timeline is host-safe and derived from SessionDir JSONL (always available).
-	c := capabilities{Live: s.hasLive(), Roots: s.opts.LiveHub != nil, Sandbox: s.hasSandbox(), Diag: s.hasLive(), Timeline: true}
+	c := capabilities{Live: s.hasLive(), Roots: s.opts.LiveHub != nil, Timeline: true, Sandbox: s.hasSandbox(), Diag: s.hasLive()}
 	var skills []map[string]any
 	if h := s.opts.Services; h != nil {
 		c.Auth, c.Catalog, c.Settings, c.History = h.Auth != nil, h.Catalog != nil, h.Settings != nil, h.History != nil
@@ -102,6 +103,8 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		c.Sessions = h.Sessions != nil
 		// Workflow authoring is exposed via /v1/workflows* and /v1/workflow-drafts*.
 		c.Workflows, c.WorkflowDrafts = h.Workflows != nil, h.WorkflowDrafts != nil
+		// LSP status + diagnostics are exposed via /v1/lsp and /v1/diagnostics.
+		c.LSP = h.LSP != nil
 		// Permission explain/presets via /v1/permissions/* (#926).
 		c.Permissions = h.Permissions != nil
 		// MCP status/control is exposed via /v1/mcp*.

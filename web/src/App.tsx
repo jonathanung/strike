@@ -9,6 +9,7 @@ import { Transcript } from "./Transcript";
 import type { SandboxInfo,  ActiveRoot, Bootstrap, Capabilities, ImageAttachment, Session, Status } from "./types";
 import { MCPPanel } from "./MCP";
 import { TimelinePanel } from "./Timeline";
+import { DiagnosticsPanel } from "./Diagnostics";
 import { PlansPanel } from "./Plans";
 import {
   defaultRestoreFiles,
@@ -20,14 +21,17 @@ import {
 import { WorkflowsPanel } from "./Workflows";
 import "./styles.css";
 
-type InspectorTab = "files" | "memory" | "issues" | "plans" | "workflows" | "mcp" | "timeline";
+type InspectorTab = "files" | "memory" | "issues" | "plans" | "workflows" | "mcp" | "timeline" | "diagnostics";
 type Completion = { label: string; detail: string; insert: string };
 type ChangedFile = { path: string; added: number; deleted: number; diff: string };
 type MemoryEntry = { Key?: string; key?: string; Value?: string; value?: string; Tags?: string[]; tags?: string[] };
 type IssueEntry = { ID?: number; id?: number; Title?: string; title?: string; Body?: string; body?: string; Status?: string; status?: string };
-const inspectorTabOrder: InspectorTab[] = ["files", "memory", "issues", "plans", "workflows", "mcp", "timeline"];
+const inspectorTabOrder: InspectorTab[] = ["files", "memory", "issues", "plans", "workflows", "mcp", "timeline", "diagnostics"];
 const availableInspectorTabs = (caps?: Capabilities): InspectorTab[] =>
-  inspectorTabOrder.filter((tab) => Boolean(caps?.[tab]));
+  inspectorTabOrder.filter((tab) => {
+    if (tab === "diagnostics") return Boolean(caps?.lsp);
+    return Boolean(caps?.[tab]);
+  });
 type UndoDialogState = { preferFiles: boolean };
 const runtimeValues = { effort: ["low", "medium", "high", "xhigh"], autonomy: ["supervised", "agent", "checks", "skip-all"], permission: ["default", "plan", "soft-approve", "accept-edits", "yolo"], sandbox: ["off", "read-only", "workspace-write"] };
 
@@ -390,7 +394,7 @@ export default function App() {
       if (tab === "files") setProjectData(boot?.capabilities.files ? await request(`/v1/changed-files${selectedID ? `?root=${encodeURIComponent(selectedID)}` : ""}`).catch((error) => ({ error: error.message })) : undefined);
       if (tab === "memory") setProjectData(boot?.capabilities.memory ? await request("/v1/memory").catch((error) => ({ error: error.message })) : undefined);
       if (tab === "issues") setProjectData(boot?.capabilities.issues ? await request("/v1/issues").catch((error) => ({ error: error.message })) : undefined);
-      if (tab === "plans" || tab === "workflows" || tab === "mcp" || tab === "timeline") setProjectData(undefined);
+      if (tab === "plans" || tab === "workflows" || tab === "mcp" || tab === "timeline" || tab === "diagnostics") setProjectData(undefined);
     } finally { setProjectLoading(false); }
   };
   // Prefer files, else first capability-backed tab; hydrate data without forcing inspector open (#912 density).
@@ -703,6 +707,9 @@ function InspectorBody({ tab, boot, status, data, loading, expandedDiffs, toggle
   }
   if (tab === "timeline") {
     return <TimelinePanel available={Boolean(boot?.capabilities.timeline)} sessionID={selectedID} />;
+  }
+  if (tab === "diagnostics") {
+    return <DiagnosticsPanel available={Boolean(boot?.capabilities.lsp)} />;
   }
   if (loading) return <section className="unavailable" role="status"><strong>Loading {tab}</strong></section>;
   if (tab === "files") return <FilesPanel boot={boot} data={data} expandedDiffs={expandedDiffs} toggleDiff={toggleDiff} />;
