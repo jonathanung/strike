@@ -193,9 +193,10 @@ func (m *schedulerPresetsModal) view(width int, th theme.Theme) string {
 	} else {
 		items := make([]ui.ListItem, 0, len(m.items))
 		for _, p := range m.items {
-			mark := th.Icons.Dot
+			// [x] / [ ] so selected (added to scheduler) vs unselected is obvious.
+			mark := th.Icons.CheckboxOff
 			if m.selected[p.ID] {
-				mark = th.Icons.OK
+				mark = th.Icons.CheckboxOn
 			}
 			detail := p.Rationale
 			if n := len(p.Rules); n > 0 {

@@ -205,6 +205,63 @@ func TestSchedulerPresetsModalPreviewAndView(t *testing.T) {
 	}
 }
 
+func TestSchedulerPresetsModalCheckboxMarks(t *testing.T) {
+	// Selected presets show [x]; unselected show [ ] so scheduler membership is clear.
+	cat := newFakeSchedulerPresets()
+	cat.global.Presets = []string{"cargo"}
+	sm := newSchedulerPresetsModal(cat, theme.Default())
+	th := theme.Default().Resolve()
+	on, off := th.Icons.CheckboxOn, th.Icons.CheckboxOff
+	if on == "" || off == "" || on == off {
+		t.Fatalf("checkbox icons: on=%q off=%q", on, off)
+	}
+	// List rows carry the mark + name; skip Preview lines that only name the selection.
+	row := func(view, name string) string {
+		for _, line := range strings.Split(view, "\n") {
+			if !strings.Contains(line, name) {
+				continue
+			}
+			if strings.Contains(line, on) || strings.Contains(line, off) {
+				return line
+			}
+		}
+		return ""
+	}
+	view := ansi.Strip(sm.view(72, th))
+	// cargo is baseline-selected; cmake and npm are not (fake catalog has 3).
+	cargoLine := row(view, "Cargo")
+	cmakeLine := row(view, "CMake")
+	if cargoLine == "" || cmakeLine == "" {
+		t.Fatalf("missing preset rows:\n%s", view)
+	}
+	if !strings.Contains(cargoLine, on) {
+		t.Fatalf("selected cargo row missing %q: %q", on, cargoLine)
+	}
+	if strings.Contains(cargoLine, off) {
+		t.Fatalf("selected cargo row should not use off mark %q: %q", off, cargoLine)
+	}
+	if !strings.Contains(cmakeLine, off) {
+		t.Fatalf("unselected cmake row missing %q: %q", off, cmakeLine)
+	}
+	if strings.Contains(cmakeLine, on) {
+		t.Fatalf("unselected cmake row should not use on mark %q: %q", on, cmakeLine)
+	}
+
+	// Toggle cmake on → mark flips for that row.
+	for i, p := range sm.items {
+		if p.ID == "cmake" {
+			sm.cursor = i
+			break
+		}
+	}
+	sm.toggle()
+	view = ansi.Strip(sm.view(72, th))
+	cmakeLine = row(view, "CMake")
+	if !strings.Contains(cmakeLine, on) {
+		t.Fatalf("after toggle cmake should show %q: %q", on, cmakeLine)
+	}
+}
+
 func TestFTUESchedulerStepSkip(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	fm := newFTUEModal(m.services, "echo", "echo", m.th)

@@ -28,6 +28,8 @@ type Icons struct {
 	MeterEmpty      string // ░ context-meter empty cell
 	TreeExpanded    string // ▾ expanded tree node marker
 	TreeCollapsed   string // ▸ collapsed tree node marker
+	CheckboxOn      string // [x] multi-select checked (e.g. scheduler presets)
+	CheckboxOff     string // [ ] multi-select unchecked
 	// Sparkline is low→high bar glyphs for activity charts (one cell each).
 	// Empty falls back to DefaultIcons; ui.Sparkline indexes into runes.
 	Sparkline string
@@ -60,6 +62,7 @@ func DefaultIcons() Icons {
 		LogoTopRule: "▁", LogoBottomRule: "▔",
 		MeterFill: "█", MeterEmpty: "░",
 		TreeExpanded: "▾", TreeCollapsed: "▸",
+		CheckboxOn: "[x]", CheckboxOff: "[ ]",
 		Sparkline: "▁▂▃▄▅▆▇█",
 	}
 }
@@ -144,6 +147,12 @@ func resolveIcons(i, d Icons) Icons {
 	}
 	if i.TreeCollapsed == "" {
 		i.TreeCollapsed = d.TreeCollapsed
+	}
+	if i.CheckboxOn == "" {
+		i.CheckboxOn = d.CheckboxOn
+	}
+	if i.CheckboxOff == "" {
+		i.CheckboxOff = d.CheckboxOff
 	}
 	if i.Sparkline == "" {
 		i.Sparkline = d.Sparkline
