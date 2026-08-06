@@ -12,6 +12,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/jonathanung/strike-cli/internal/artifact"
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
@@ -791,9 +792,21 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			Files:         e.files,
 			SessionID:     e.opts.SessionID,
 			RootSessionID: e.rootSessionID(),
-			MemberName:    e.ownershipMemberName(),
-			Checkpoint:    e.checkpoints.Snapshot,
-			TurnDiff:      e.turnDiff,
+			NotifyArtifact: func(op string, a artifact.Artifact) {
+				e.emit(protocol.ArtifactUpdated{
+					Correlation: corr,
+					ID:          a.ID,
+					Type:        a.Type,
+					Version:     a.Version,
+					Scope:       a.Scope,
+					Title:       a.Title,
+					Op:          op,
+					SessionID:   a.SessionID,
+				})
+			},
+			MemberName: e.ownershipMemberName(),
+			Checkpoint: e.checkpoints.Snapshot,
+			TurnDiff:   e.turnDiff,
 			// Record successful mutations only (post-write), not pre-mutation
 			// snapshots — failed tools must not appear in handoff files_changed.
 			FileSync: func(absPath string, content string, deleted bool) {

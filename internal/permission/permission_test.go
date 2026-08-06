@@ -81,6 +81,19 @@ func TestDefaultsIncludesPlanToolsAllow(t *testing.T) {
 	}
 }
 
+func TestDefaultsIncludesArtifactToolsAllow(t *testing.T) {
+	for _, perm := range []string{"artifact_write", "artifact_read"} {
+		if got := Evaluate(perm, "*", Defaults()); got != Allow {
+			t.Errorf("Defaults %s = %q, want allow", perm, got)
+		}
+	}
+	// Config deny still works.
+	deny := Ruleset{{Permission: "artifact_write", Pattern: "*", Action: Deny}}
+	if got := Evaluate("artifact_write", "*", Defaults(), deny); got != Deny {
+		t.Errorf("artifact_write with deny = %q, want deny", got)
+	}
+}
+
 func TestDenyRuleAgentMessageBlocks(t *testing.T) {
 	// Config/agent deny must hard-block agent_message without prompting.
 	base := Defaults()
