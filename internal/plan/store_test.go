@@ -2,6 +2,7 @@ package plan
 
 import (
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -440,4 +441,199 @@ func makeXs(n int) []byte {
 		b[i] = 'x'
 	}
 	return b
+}
+
+func TestSectionDelegateConcurrentAndCAS(t *testing.T) {
+	s, err := Open(t.TempDir(), "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	p, err := s.Create("root", "Plan", []SectionInput{
+		{Title: "A", Body: "body-a"},
+		{Title: "B", Body: "body-b"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Two different sections can be in flight concurrently.
+	p, err = s.BeginSectionDelegate(p.ID, "root", "s1", "child-a", "refiner-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err = s.BeginSectionDelegate(p.ID, "root", "s2", "child-b", "refiner-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Sections[0].DelegateStatus != DelegateInFlight || p.Sections[1].DelegateStatus != DelegateInFlight {
+		t.Fatalf("want both in_flight: %#v", p.Sections)
+	}
+	if p.Sections[0].DelegateChildID != "child-a" || p.Sections[1].DelegateChildID != "child-b" {
+		t.Fatalf("child ids: %#v", p.Sections)
+	}
+
+	// Second dispatch of an in-flight section is rejected.
+	if _, err := s.BeginSectionDelegate(p.ID, "root", "s1", "child-x", ""); !errors.Is(err, ErrInFlight) {
+		t.Fatalf("second dispatch: %v", err)
+	}
+
+	// Apply s1 successfully.
+	body := "refined-a"
+	p, err = s.FinishSectionDelegate(p.ID, "root", "s1", "child-a", DelegateOutcome{
+		Status: DelegateApplied,
+		Body:   &body,
+		Detail: "ok",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Sections[0].Body != "refined-a" || p.Sections[0].DelegateStatus != DelegateApplied {
+		t.Fatalf("applied s1: %#v", p.Sections[0])
+	}
+	// s2 still in flight and unchanged.
+	if p.Sections[1].Body != "body-b" || p.Sections[1].DelegateStatus != DelegateInFlight {
+		t.Fatalf("s2: %#v", p.Sections[1])
+	}
+
+	// Intervening user edit on s2, then child tries to apply → conflict, content preserved.
+	edited := "user-edit-b"
+	p, err = s.UpdateSection(p.ID, "root", "s2", nil, &edited, p.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	childBody := "child-b-result"
+	p, err = s.FinishSectionDelegate(p.ID, "root", "s2", "child-b", DelegateOutcome{
+		Status: DelegateApplied,
+		Body:   &childBody,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Sections[1].Body != "user-edit-b" {
+		t.Fatalf("intervening edit overwritten: %q", p.Sections[1].Body)
+	}
+	if p.Sections[1].DelegateStatus != DelegateConflict {
+		t.Fatalf("status=%q want conflict", p.Sections[1].DelegateStatus)
+	}
+	if p.Sections[1].DelegateDetail == "" {
+		t.Fatal("want actionable conflict detail")
+	}
+}
+
+func TestSectionDelegateFailedCanceledMalformed(t *testing.T) {
+	s, err := Open(t.TempDir(), "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	p, err := s.Create("root", "Plan", []SectionInput{
+		{Title: "A", Body: "keep-me"},
+		{Title: "B", Body: "keep-b"},
+		{Title: "C", Body: "keep-c"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		sec    string
+		child  string
+		status string
+	}{
+		{"s1", "c1", DelegateFailed},
+		{"s2", "c2", DelegateCanceled},
+		{"s3", "c3", DelegateMalformed},
+	}
+	for _, tc := range cases {
+		if _, err := s.BeginSectionDelegate(p.ID, "root", tc.sec, tc.child, ""); err != nil {
+			t.Fatalf("begin %s: %v", tc.sec, err)
+		}
+	}
+	// Refresh version after begins.
+	cur, ok, err := s.Get(p.ID)
+	if err != nil || !ok {
+		t.Fatal(err)
+	}
+	p = cur
+
+	for _, tc := range cases {
+		got, err := s.FinishSectionDelegate(p.ID, "root", tc.sec, tc.child, DelegateOutcome{
+			Status: tc.status,
+			Detail: "reason-" + tc.status,
+		})
+		if err != nil {
+			t.Fatalf("finish %s: %v", tc.sec, err)
+		}
+		p = got
+	}
+	for i, tc := range cases {
+		sec := p.Sections[i]
+		if sec.DelegateStatus != tc.status {
+			t.Errorf("%s status=%q want %q", tc.sec, sec.DelegateStatus, tc.status)
+		}
+		if !strings.Contains(sec.DelegateDetail, tc.status) && sec.DelegateDetail == "" {
+			t.Errorf("%s detail empty", tc.sec)
+		}
+		// Prior content preserved.
+		wantBody := map[string]string{"s1": "keep-me", "s2": "keep-b", "s3": "keep-c"}[tc.sec]
+		if sec.Body != wantBody {
+			t.Errorf("%s body=%q want %q", tc.sec, sec.Body, wantBody)
+		}
+	}
+}
+
+func TestSectionDelegateMismatchAndPersist(t *testing.T) {
+	root := t.TempDir()
+	s, err := Open(root, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.Create("root", "Plan", []SectionInput{{Title: "A", Body: "b"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err = s.BeginSectionDelegate(p.ID, "root", "s1", "child-1", "alias")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.FinishSectionDelegate(p.ID, "root", "s1", "other-child", DelegateOutcome{
+		Status: DelegateApplied,
+	}); !errors.Is(err, ErrDelegateMismatch) {
+		t.Fatalf("mismatch: %v", err)
+	}
+	// Still in flight after mismatch.
+	got, ok, err := s.Get(p.ID)
+	if err != nil || !ok {
+		t.Fatal(err)
+	}
+	if got.Sections[0].DelegateStatus != DelegateInFlight {
+		t.Fatalf("status=%q", got.Sections[0].DelegateStatus)
+	}
+
+	body := "done"
+	if _, err := s.FinishSectionDelegate(p.ID, "root", "s1", "child-1", DelegateOutcome{
+		Status: DelegateApplied,
+		Body:   &body,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+
+	s2, err := Open(root, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s2.Close() })
+	reloaded, ok, err := s2.Get(p.ID)
+	if err != nil || !ok {
+		t.Fatal(err)
+	}
+	sec := reloaded.Sections[0]
+	if sec.Body != "done" || sec.DelegateStatus != DelegateApplied || sec.DelegateChildID != "child-1" {
+		t.Fatalf("persist: %#v", sec)
+	}
+	if sec.DelegateChildName != "alias" {
+		t.Fatalf("name=%q", sec.DelegateChildName)
+	}
 }

@@ -1408,6 +1408,10 @@ func eventCorrelation(t *testing.T, ev protocol.Event) protocol.Correlation {
 		return ev.Correlation
 	case protocol.PermissionDecided:
 		return ev.Correlation
+	case protocol.VerificationStarted:
+		return ev.Correlation
+	case protocol.VerificationCompleted:
+		return ev.Correlation
 	case protocol.TurnCompleted:
 		return ev.Correlation
 	case protocol.ModelSelected:

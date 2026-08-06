@@ -266,6 +266,9 @@ strike workflow scaffold --global|--project <name> [--force]
 strike workflow format [--write] <path>...
 strike workflow validate <path|dir>...
 strike workflow validate --global|--project|--all
+strike workflow generate [--name hint] [--provider p] [--model m] <intent...>
+strike workflow generate --save --yes --global|--project [--force] <intent...>
+strike workflow save-draft --yes --global|--project [--force] [path|-]
 ```
 
 - **scaffold** requires explicit `--global` or `--project`. Refuses overwrite
@@ -274,6 +277,15 @@ strike workflow validate --global|--project|--all
   `schemaVersion`). `--write` rewrites in place.
 - **validate** strict-decodes, runs structural checks, resolves agent pins
   against loaded agents, and prints short fingerprints on success.
+- **generate** asks the model for a workflow JSON draft from natural-language
+  intent, then prints a structured review (phases, context, **executable check
+  gates**, **effective permission widening**). It never saves or activates
+  unless `--save --yes` plus `--global`/`--project` is passed after review.
+  Invalid model output stays an editable draft with diagnostics (use
+  **save-draft** after correction). Overwrite requires `--force`; failed saves
+  leave the prior file intact.
+- **save-draft** validates JSON from a path or stdin and writes only with
+  `--yes`. Same no-activation and overwrite rules as generate `--save`.
 
 ### Phase fields
 
@@ -366,6 +378,23 @@ loaded definition. Sources are labeled `builtin`, `global`, `project`, or
 mutates state; invalid definitions are listed but cannot be activated. Stop
 clears phase context and phase permissions without interrupting unrelated
 session history.
+
+### Visual builder (TUI)
+
+`/workflow new [name]` and `/workflow edit <name>` open a keyboard-driven
+linear editor (command palette: **workflow new** / **workflow edit …**):
+
+- Create, reorder, and remove phases; edit agent pins, context, exit gates,
+  check commands, and permission rules through typed controls.
+- Live preview of canonical JSON, validation errors, and phase permission
+  grants (same review surface as start-preview / CLI inspect).
+- Save requires an explicit **global** or **project** scope (`g` cycles).
+  Invalid documents cannot be saved. Unsaved edits prompt on cancel
+  (discard / save / stay). Overwrite of an existing file requires confirm.
+- **Saving never starts the workflow** — activation remains `/workflow start`.
+
+Built-in definitions can be edited as drafts and saved as a project/global
+override by name (same precedence as disk loaders).
 
 Example custom file:
 

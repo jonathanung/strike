@@ -317,6 +317,16 @@ func decodeHandoffObject(raw string) (protocol.CompletionHandoff, bool) {
 	if b, ok := firstBool(m, "incomplete"); ok {
 		h.Incomplete = b
 	}
+	// Plan section refinement fields (plan_delegate / #724).
+	if title, body, found := sectionPtrs(m); found {
+		if title != nil {
+			h.SectionTitle = *title
+		}
+		if body != nil {
+			h.SectionBody = *body
+			h.SectionBodySet = true
+		}
+	}
 	return h, true
 }
 
@@ -325,6 +335,9 @@ func hasHandoffKey(m map[string]json.RawMessage) bool {
 		"summary", "files_changed", "filesChanged",
 		"verification", "findings", "blockers",
 		"recommended_next_action", "recommendedNextAction",
+		// Plan section refinement (#724).
+		"section_body", "sectionBody", "section_title", "sectionTitle",
+		"plan_section", "planSection",
 	}
 	for _, k := range keys {
 		if _, ok := m[k]; ok {

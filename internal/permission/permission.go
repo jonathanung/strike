@@ -46,7 +46,7 @@ var knownPermissions = map[string]struct{}{
 	"team_task": {},
 	"webfetch":  {}, "todowrite": {}, "todoread": {},
 	"memory_write": {}, "memory_read": {}, "issue_write": {}, "issue_read": {},
-	"plan_write": {}, "plan_read": {},
+	"plan_write": {}, "plan_read": {}, "plan_delegate": {},
 	"sleep": {}, "skill": {}, "question": {}, "toolsearch": {}, "hook": {},
 	"phase_check":     {},
 	"enter_plan_mode": {}, "exit_plan_mode": {}, "phase_done": {},
@@ -127,6 +127,8 @@ func Defaults() Ruleset {
 		// mode can revise the artifact while file mutations stay denied.
 		{Permission: "plan_write", Pattern: "*", Action: Allow},
 		{Permission: "plan_read", Pattern: "*", Action: Allow},
+		// Section refinement via existing task/team runtime (root-owned).
+		{Permission: "plan_delegate", Pattern: "*", Action: Allow},
 		{Permission: "sleep", Pattern: "*", Action: Allow},
 		{Permission: "skill", Pattern: "*", Action: Allow},
 		{Permission: "question", Pattern: "*", Action: Allow},

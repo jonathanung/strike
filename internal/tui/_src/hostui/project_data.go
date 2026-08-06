@@ -19,8 +19,8 @@ type projectDataMutatedMsg struct {
 func isProjectDataTool(name string) bool {
 	switch name {
 	case "memory_write", "memory_read", "issue_write", "issue_read",
-		// Plan tools (#721): refresh the plans pane when agents mutate artifacts.
-		"plan_write", "plan_read":
+		// Plan tools (#721/#724): refresh the plans pane when agents mutate artifacts.
+		"plan_write", "plan_read", "plan_delegate":
 		return true
 	default:
 		return false

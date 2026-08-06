@@ -48,6 +48,9 @@ type childHandle struct {
 	name      string // optional stable teammate alias
 	// gates are independent completion conditions declared at spawn.
 	gates []tool.VerifyGate
+	// planID/sectionID correlate this child to a plan section (plan_delegate).
+	planID    string
+	sectionID string
 
 	mu           sync.Mutex
 	currentTool  string
@@ -359,6 +362,8 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		prompt:    req.Prompt,
 		name:      memberName,
 		gates:     append([]tool.VerifyGate(nil), req.Verify...),
+		planID:    strings.TrimSpace(req.PlanID),
+		sectionID: strings.TrimSpace(req.SectionID),
 	}
 
 	e.childMu.Lock()
@@ -694,6 +699,8 @@ func (e *Engine) finishChild(h *childHandle, completed protocol.ChildCompleted) 
 	}
 	e.childMu.Unlock()
 	e.emitTeamRoster()
+	// Apply structured section refinement when this child was plan_delegate'd.
+	e.applyPlanSectionDelegate(h, completed)
 }
 
 // dissolveTeamIfLead clears the implicit team when this engine is the lead.
@@ -1062,134 +1069,6 @@ func toolVerification(v protocol.VerificationReport) tool.VerificationReport {
 		},
 		Summary:    v.Summary,
 		DurationMs: v.DurationMs,
-	}
-}
-
-// runChildVerification executes spawn-time gates against the claimed handoff.
-// Returns a non-nil report whenever gates were configured.
-func (e *Engine) runChildVerification(h *childHandle, child *Engine, handoff protocol.CompletionHandoff) *protocol.VerificationReport {
-	if h == nil || len(h.gates) == 0 {
-		return nil
-	}
-	gates := make([]verify.Gate, 0, len(h.gates))
-	for _, g := range h.gates {
-		gates = append(gates, verify.Gate{
-			Kind:        g.Kind,
-			Value:       g.Value,
-			Description: g.Description,
-		})
-	}
-	// Detached timeout: child context is already canceled at this point.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-	defer cancel()
-
-	workDir := ""
-	modelID := ""
-	if e != nil {
-		workDir = e.opts.WorkDir
-	}
-	if child != nil {
-		if child.opts.WorkDir != "" {
-			workDir = child.opts.WorkDir
-		}
-		modelID = strings.TrimSpace(child.model)
-		if modelID == "" {
-			modelID = strings.TrimSpace(child.opts.InitialModel)
-		}
-	}
-
-	// HasStructured: engine set Incomplete=false only when parse succeeded.
-	hv := &verify.HandoffView{
-		Summary:       handoff.Summary,
-		Incomplete:    handoff.Incomplete,
-		HasStructured: !handoff.Incomplete,
-	}
-	// If incomplete but summary is only the default, still not structured.
-	if handoff.Incomplete {
-		hv.HasStructured = false
-	}
-
-	runner := &verify.Runner{WorkDir: workDir}
-	res := runner.Run(ctx, gates, verify.Input{
-		Claimed: true,
-		Handoff: hv,
-		Env: verify.EnvMetadata{
-			WorkDir:   workDir,
-			SessionID: h.id,
-			ModelID:   modelID,
-		},
-	})
-	rep := verifyResultToProtocol(res)
-	return &rep
-}
-
-func verifyResultToProtocol(res verify.Result) protocol.VerificationReport {
-	checks := make([]protocol.VerificationCheck, 0, len(res.Checks))
-	for _, c := range res.Checks {
-		checks = append(checks, protocol.VerificationCheck{
-			Name:       c.Name,
-			Kind:       c.Kind,
-			Value:      c.Value,
-			Passed:     c.Passed,
-			ExitCode:   c.ExitCode,
-			Output:     c.Output,
-			Error:      c.Error,
-			DurationMs: c.DurationMs,
-		})
-	}
-	if checks == nil {
-		checks = []protocol.VerificationCheck{}
-	}
-	return protocol.VerificationReport{
-		Passed:   res.Passed,
-		Claimed:  res.Claimed,
-		Verified: res.Verified,
-		Checks:   checks,
-		Env: protocol.VerificationEnv{
-			WorkDir:    res.Env.WorkDir,
-			SessionID:  res.Env.SessionID,
-			WorktreeID: res.Env.WorktreeID,
-			ModelID:    res.Env.ModelID,
-			StartedAt:  res.Env.StartedAt,
-			FinishedAt: res.Env.FinishedAt,
-		},
-		Summary:    res.Summary,
-		DurationMs: res.DurationMs,
-	}
-}
-
-func protocolReportToVerifyResult(rep *protocol.VerificationReport) verify.Result {
-	if rep == nil {
-		return verify.Result{}
-	}
-	checks := make([]verify.CheckResult, 0, len(rep.Checks))
-	for _, c := range rep.Checks {
-		checks = append(checks, verify.CheckResult{
-			Name:       c.Name,
-			Kind:       c.Kind,
-			Value:      c.Value,
-			Passed:     c.Passed,
-			ExitCode:   c.ExitCode,
-			Output:     c.Output,
-			Error:      c.Error,
-			DurationMs: c.DurationMs,
-		})
-	}
-	return verify.Result{
-		Passed:   rep.Passed,
-		Claimed:  rep.Claimed,
-		Verified: rep.Verified,
-		Checks:   checks,
-		Env: verify.EnvMetadata{
-			WorkDir:    rep.Env.WorkDir,
-			SessionID:  rep.Env.SessionID,
-			WorktreeID: rep.Env.WorktreeID,
-			ModelID:    rep.Env.ModelID,
-			StartedAt:  rep.Env.StartedAt,
-			FinishedAt: rep.Env.FinishedAt,
-		},
-		Summary:    rep.Summary,
-		DurationMs: rep.DurationMs,
 	}
 }
 

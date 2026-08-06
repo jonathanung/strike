@@ -404,6 +404,65 @@ func TestPermissionAuditOnTimeline(t *testing.T) {
 	}
 }
 
+func TestBuildVerificationSpan(t *testing.T) {
+	base := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	corr := protocol.Correlation{SessionID: "s", TurnID: "t-v"}
+	events := []timeline.TimedEvent{
+		{Time: base, Event: protocol.TurnStarted{Correlation: corr}},
+		{Time: base.Add(10 * time.Millisecond), Event: protocol.VerificationStarted{
+			Correlation: corr,
+			Scope:       protocol.VerificationScopeTurn,
+			GateCount:   2,
+		}},
+		{Time: base.Add(50 * time.Millisecond), Event: protocol.VerificationCompleted{
+			Correlation: corr,
+			Scope:       protocol.VerificationScopeTurn,
+			Report: protocol.VerificationReport{
+				Passed:   false,
+				Claimed:  true,
+				Verified: false,
+				Summary:  "verification failed: unit",
+				Checks: []protocol.VerificationCheck{
+					{Name: "unit", Kind: "cmd", Passed: false, Error: "exit 1"},
+				},
+			},
+		}},
+		{Time: base.Add(60 * time.Millisecond), Event: protocol.TurnCompleted{
+			Correlation: corr,
+			StopReason:  "end_turn",
+			Verification: &protocol.VerificationReport{
+				Passed: false, Claimed: true, Verified: false, Summary: "verification failed: unit",
+			},
+		}},
+	}
+	tr := timeline.Build(events, timeline.Options{SessionID: "s"})
+	if tr.Summary.Verifies != 1 || tr.Summary.Failed < 1 {
+		t.Fatalf("summary = %+v", tr.Summary)
+	}
+	var verify *timeline.Entry
+	for i := range tr.Entries {
+		if tr.Entries[i].Kind == timeline.KindVerify {
+			verify = &tr.Entries[i]
+			break
+		}
+	}
+	if verify == nil {
+		t.Fatal("missing verify entry")
+	}
+	if verify.State != timeline.StateFailed {
+		t.Fatalf("state = %s", verify.State)
+	}
+	if verify.Name != protocol.VerificationScopeTurn {
+		t.Fatalf("name = %q", verify.Name)
+	}
+	if verify.OutputPreview == "" || verify.Error == "" {
+		t.Fatalf("preview/error empty: %+v", verify)
+	}
+	if verify.ParentID == "" {
+		t.Fatalf("expected parent turn link: %+v", verify)
+	}
+}
+
 func int64Ptr(v int64) *int64 { return &v }
 
 func itoa(i int) string {

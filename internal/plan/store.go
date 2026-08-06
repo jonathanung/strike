@@ -42,6 +42,12 @@ var (
 	ErrInvalidStatus = errors.New("plan: invalid status")
 	// ErrClosedPlan is returned when mutating content on a closed plan (use Reopen).
 	ErrClosedPlan = errors.New("plan: plan is closed")
+	// ErrInFlight is returned when dispatching a section that already has an
+	// in-flight child refinement.
+	ErrInFlight = errors.New("plan: section already has an in-flight delegate")
+	// ErrDelegateMismatch is returned when finish is called for a child that
+	// is not the correlated in-flight delegate for the section.
+	ErrDelegateMismatch = errors.New("plan: delegate child does not match section correlation")
 )
 
 type fileDoc struct {
@@ -309,6 +315,148 @@ func (s *Store) Reopen(id, actorRoot string, expectedVersion int) (Plan, error) 
 	})
 }
 
+// BeginSectionDelegate marks sectionID in_flight and records child correlation.
+// Rejects a second dispatch while status is in_flight. Owner-only. Closed plans
+// cannot start new delegations. Does not use expectedVersion — the in_flight
+// guard is the concurrency token for dispatch.
+func (s *Store) BeginSectionDelegate(id, actorRoot, sectionID, childID, childName string) (Plan, error) {
+	sectionID = strings.TrimSpace(sectionID)
+	childID = strings.TrimSpace(childID)
+	childName = strings.TrimSpace(childName)
+	if sectionID == "" {
+		return Plan{}, errEmptySectionID
+	}
+	if childID == "" {
+		return Plan{}, fmt.Errorf("plan: delegate child session id is required")
+	}
+	return s.mutate(id, actorRoot, -1, true, func(p *Plan) error {
+		idx := sectionIndex(p, sectionID)
+		if idx < 0 {
+			return ErrNotFound
+		}
+		sec := &p.Sections[idx]
+		if sec.DelegateStatus == DelegateInFlight {
+			return fmt.Errorf("%w: section %s child %s", ErrInFlight, sectionID, sec.DelegateChildID)
+		}
+		// Snapshot content for completion CAS (intervening user edit detection).
+		sec.DelegateStatus = DelegateInFlight
+		sec.DelegateChildID = childID
+		sec.DelegateChildName = childName
+		sec.DelegateBaseVersion = p.Version
+		sec.DelegateBaseTitle = sec.Title
+		sec.DelegateBaseBody = sec.Body
+		sec.DelegateDetail = ""
+		return nil
+	})
+}
+
+// FinishSectionDelegate settles an in-flight section refinement for childID.
+// Only the correlated child may finish. Applied outcomes update title/body only
+// when the section still matches the base snapshot; otherwise status becomes
+// conflict and prior content is preserved. Failed/canceled/malformed preserve
+// content and record Detail. Owner-only.
+func (s *Store) FinishSectionDelegate(id, actorRoot, sectionID, childID string, outcome DelegateOutcome) (Plan, error) {
+	sectionID = strings.TrimSpace(sectionID)
+	childID = strings.TrimSpace(childID)
+	if sectionID == "" {
+		return Plan{}, errEmptySectionID
+	}
+	if childID == "" {
+		return Plan{}, fmt.Errorf("plan: delegate child session id is required")
+	}
+	status := strings.TrimSpace(outcome.Status)
+	switch status {
+	case DelegateApplied, DelegateFailed, DelegateCanceled, DelegateConflict, DelegateMalformed:
+	default:
+		return Plan{}, fmt.Errorf("%w: finish status %q", ErrInvalidStatus, outcome.Status)
+	}
+	var newTitle *string
+	if outcome.Title != nil {
+		t := strings.TrimSpace(*outcome.Title)
+		if err := validateTitle(t); err != nil {
+			return Plan{}, err
+		}
+		newTitle = &t
+	}
+	if outcome.Body != nil {
+		if err := validateSectionBody(*outcome.Body); err != nil {
+			return Plan{}, err
+		}
+	}
+	detail := strings.TrimSpace(outcome.Detail)
+
+	return s.mutate(id, actorRoot, -1, true, func(p *Plan) error {
+		idx := sectionIndex(p, sectionID)
+		if idx < 0 {
+			return ErrNotFound
+		}
+		sec := &p.Sections[idx]
+		if sec.DelegateStatus != DelegateInFlight {
+			return fmt.Errorf("%w: section %s is not in_flight (have %q)", ErrDelegateMismatch, sectionID, sec.DelegateStatus)
+		}
+		if sec.DelegateChildID != childID {
+			return fmt.Errorf("%w: section %s expected child %s, got %s", ErrDelegateMismatch, sectionID, sec.DelegateChildID, childID)
+		}
+
+		// Content-based CAS: intervening edit of this section blocks apply.
+		if status == DelegateApplied {
+			if sec.Title != sec.DelegateBaseTitle || sec.Body != sec.DelegateBaseBody {
+				sec.DelegateStatus = DelegateConflict
+				sec.DelegateDetail = "intervening edit to this section; child result not applied"
+				if detail != "" {
+					sec.DelegateDetail = sec.DelegateDetail + ": " + detail
+				}
+				// Keep child id for audit; clear base snapshot noise optional.
+				return nil
+			}
+			if newTitle == nil && outcome.Body == nil {
+				// Applied with no payload is malformed — preserve content.
+				sec.DelegateStatus = DelegateMalformed
+				sec.DelegateDetail = "child completed without section_title/section_body"
+				return nil
+			}
+			if newTitle != nil {
+				sec.Title = *newTitle
+			}
+			if outcome.Body != nil {
+				sec.Body = *outcome.Body
+			}
+			sec.DelegateStatus = DelegateApplied
+			if detail == "" {
+				detail = "section updated from child handoff"
+			}
+			sec.DelegateDetail = detail
+			return nil
+		}
+
+		// Non-apply terminals: preserve title/body.
+		sec.DelegateStatus = status
+		if detail == "" {
+			switch status {
+			case DelegateFailed:
+				detail = "child failed; section content preserved"
+			case DelegateCanceled:
+				detail = "child canceled; section content preserved"
+			case DelegateMalformed:
+				detail = "malformed child result; section content preserved"
+			case DelegateConflict:
+				detail = "conflict; section content preserved"
+			}
+		}
+		sec.DelegateDetail = detail
+		return nil
+	})
+}
+
+func sectionIndex(p *Plan, sectionID string) int {
+	for i := range p.Sections {
+		if p.Sections[i].ID == sectionID {
+			return i
+		}
+	}
+	return -1
+}
+
 // mutate is the shared owner+CAS write path. contentMutation rejects closed plans.
 func (s *Store) mutate(id, actorRoot string, expectedVersion int, contentMutation bool, fn func(*Plan) error) (Plan, error) {
 	id = strings.TrimSpace(id)
@@ -332,7 +480,9 @@ func (s *Store) mutate(id, actorRoot string, expectedVersion int, contentMutatio
 	if p.OwnerRoot != actorRoot {
 		return Plan{}, ErrNotOwner
 	}
-	if expectedVersion != p.Version {
+	// expectedVersion < 0 skips plan-wide CAS (used by section delegate
+	// begin/finish, which gate on in_flight + content snapshot instead).
+	if expectedVersion >= 0 && expectedVersion != p.Version {
 		return Plan{}, fmt.Errorf("%w: have %d, expected %d", ErrConflict, p.Version, expectedVersion)
 	}
 	if contentMutation && p.Status == StatusClosed {

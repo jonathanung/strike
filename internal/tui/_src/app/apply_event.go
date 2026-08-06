@@ -473,6 +473,9 @@ func (m *Model) onChildCompleted(ev protocol.ChildCompleted) {
 	}
 	agent, elapsed := lookupChildMeta(m.children, ev.SessionID)
 	m.cells = appendSubagentResultCell(m.cells, ev, agent, elapsed)
+	// plan_delegate may have applied section CAS on finish — refresh plan progress
+	// without touching agents/activity focus state.
+	m.windows = refreshProjectDataWindows(m.windows)
 }
 
 func (m *Model) trimChildren() {
@@ -529,6 +532,10 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	case protocol.QuestionResolved:
 		return e.Correlation, true
 	case protocol.TurnCompleted:
+		return e.Correlation, true
+	case protocol.VerificationStarted:
+		return e.Correlation, true
+	case protocol.VerificationCompleted:
 		return e.Correlation, true
 	case protocol.HarnessProgress:
 		return e.Correlation, true

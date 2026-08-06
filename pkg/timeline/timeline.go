@@ -35,6 +35,7 @@ const (
 	KindProvider   = "provider"
 	KindChild      = "child"
 	KindPermission = "permission"
+	KindVerify     = "verify"
 )
 
 // Lifecycle states (queued → running → waiting → terminal).
@@ -98,6 +99,7 @@ type Summary struct {
 	Providers   int   `json:"providers"`
 	Children    int   `json:"children"`
 	Permissions int   `json:"permissions,omitempty"`
+	Verifies    int   `json:"verifies,omitempty"`
 	Failed      int   `json:"failed"`
 	Canceled    int   `json:"canceled"`
 	InputTok    int64 `json:"inputTokens,omitempty"`
@@ -156,6 +158,7 @@ type Builder struct {
 	providers   map[string]*Entry // providerRequestID
 	children    map[string]*Entry // child sessionID
 	permissions map[string]*Entry // requestID or synthetic id
+	verifies    map[string]*Entry // sessionID\0turnID\0scope
 
 	order []string // entry ids in first-seen order
 	byID  map[string]*Entry
@@ -174,6 +177,7 @@ func NewBuilder(opts Options) *Builder {
 		providers:   make(map[string]*Entry),
 		children:    make(map[string]*Entry),
 		permissions: make(map[string]*Entry),
+		verifies:    make(map[string]*Entry),
 		byID:        make(map[string]*Entry),
 		sessionID:   opts.SessionID,
 	}
@@ -407,6 +411,42 @@ func (b *Builder) Observe(ev protocol.Event, t time.Time) {
 			ent.OutputPreview = clip(redact.String(e.Handoff.Summary), b.opts.OutputPreviewMax)
 		}
 		b.finish(ent, t)
+	case protocol.VerificationStarted:
+		b.noteSession(e.SessionID)
+		ent := b.ensureVerify(e.SessionID, e.TurnID, e.Scope, t)
+		ent.State = StateRunning
+		ent.Name = firstNonEmpty(e.Scope, "verify")
+		if ent.StartedAt == "" {
+			ent.StartedAt = formatTime(t)
+		}
+		if e.GateCount > 0 {
+			ent.ArgsPreview = clip(fmt.Sprintf("gates=%d", e.GateCount), b.opts.ArgsPreviewMax)
+		}
+		if e.TurnID != "" {
+			if turn := b.turns[e.TurnID]; turn != nil {
+				ent.ParentID = turn.ID
+			}
+		}
+	case protocol.VerificationCompleted:
+		b.noteSession(e.SessionID)
+		ent := b.ensureVerify(e.SessionID, e.TurnID, e.Scope, t)
+		ent.Name = firstNonEmpty(e.Scope, ent.Name, "verify")
+		if e.Report.Passed {
+			ent.State = StateCompleted
+		} else {
+			ent.State = StateFailed
+			if e.Report.Summary != "" {
+				ent.Error = clip(redact.String(e.Report.Summary), b.opts.ErrorPreviewMax)
+			}
+		}
+		if e.Report.Summary != "" {
+			ent.OutputPreview = clip(redact.String(e.Report.Summary), b.opts.OutputPreviewMax)
+		}
+		if e.Report.DurationMs > 0 {
+			ms := e.Report.DurationMs
+			ent.DurationMs = &ms
+		}
+		b.finish(ent, t)
 	case protocol.SchedulerQueued:
 		b.noteSession(e.SessionID)
 		if e.TurnID != "" {
@@ -464,7 +504,7 @@ func (b *Builder) Trace() Trace {
 		SessionID:     sessionID,
 		ExportedAt:    clock(),
 		Redacted:      true,
-		Note:          "Derived harness timeline (turns/tools/provider attempts/children/permission decisions). Complements session JSONL full transcript and #774 agent roster/budget fields; does not replace either.",
+		Note:          "Derived harness timeline (turns/tools/provider attempts/children/permission decisions/verification). Complements session JSONL full transcript and #774 agent roster/budget fields; does not replace either.",
 		Summary:       summarize(entries),
 		Entries:       entries,
 	}
@@ -645,6 +685,11 @@ func formatEntryLine(e Entry) string {
 		id = shortID(e.ChildSessionID)
 	case KindPermission:
 		id = shortID(e.CallID)
+	case KindVerify:
+		id = shortID(e.TurnID)
+		if id == "-" {
+			id = shortID(e.ID)
+		}
 	}
 	state := e.State
 	if state == "" {
@@ -814,6 +859,28 @@ func (b *Builder) ensurePermission(requestID, sessionID, turnID string, t time.T
 	return ent
 }
 
+func (b *Builder) ensureVerify(sessionID, turnID, scope string, t time.Time) *Entry {
+	key := sessionID + "\x00" + turnID + "\x00" + scope
+	if turnID == "" && scope == "" {
+		key = b.nextID("verifykey")
+	}
+	if ent, ok := b.verifies[key]; ok {
+		return ent
+	}
+	ent := &Entry{
+		ID:        b.nextID("verify"),
+		Kind:      KindVerify,
+		State:     StateRunning,
+		SessionID: sessionID,
+		TurnID:    turnID,
+		Name:      scope,
+		StartedAt: formatTime(t),
+	}
+	b.verifies[key] = ent
+	b.track(ent)
+	return ent
+}
+
 func (b *Builder) finish(ent *Entry, t time.Time) {
 	if ent == nil {
 		return
@@ -873,6 +940,8 @@ func summarize(entries []Entry) Summary {
 			s.Permissions++
 		case KindChild:
 			s.Children++
+		case KindVerify:
+			s.Verifies++
 		}
 		switch e.State {
 		case StateFailed:
