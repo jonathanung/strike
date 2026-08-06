@@ -138,6 +138,21 @@ describe("App", () => {
     await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(expect.stringContaining("/v1/ops"), expect.objectContaining({ body: expect.stringContaining('"requestId":"q1"') })));
   });
 
+  it("adjusts panel width from the drag-handle separator via keyboard", async () => {
+    render(<App />);
+    await screen.findByText("Current");
+    const handle = screen.getByRole("separator", { name: "Resize agents panel" });
+    expect(handle).toHaveAttribute("aria-valuenow", "240");
+    fireEvent.keyDown(handle, { key: "ArrowRight" });
+    expect(handle).toHaveAttribute("aria-valuenow", "250");
+    fireEvent.keyDown(handle, { key: "ArrowLeft" });
+    expect(handle).toHaveAttribute("aria-valuenow", "240");
+    fireEvent.keyDown(handle, { key: "End" });
+    expect(handle).toHaveAttribute("aria-valuenow", "420");
+    fireEvent.keyDown(handle, { key: "Home" });
+    expect(handle).toHaveAttribute("aria-valuenow", "180");
+  });
+
   it("defaults inspector closed and hides empty child-agents chrome", async () => {
     render(<App />);
     await screen.findByText("Current");

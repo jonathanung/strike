@@ -200,7 +200,6 @@ function PanelResize({ label, value, min, max, onChange, side }: { label: string
   };
   return <div className={`panel-resize panel-resize-${side}`}>
     <div className="panel-resize-handle" role="separator" aria-orientation="vertical" aria-label={label} aria-valuenow={value} aria-valuemin={min} aria-valuemax={max} tabIndex={0} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} onKeyDown={onKeyDown} />
-    <input className="panel-resize-range" aria-hidden="true" tabIndex={-1} type="range" min={min} max={max} value={value} onChange={(event) => onChange(Number(event.target.value))} />
   </div>;
 }
 

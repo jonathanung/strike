@@ -396,19 +396,6 @@ main {
 .panel-resize:focus-within .panel-resize-handle {
   background: color-mix(in srgb, var(--acid) 55%, transparent);
 }
-.panel-resize-range {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-  opacity: 0;
-  pointer-events: none;
-}
 .inspector-tabs { display: flex; overflow: auto; border-bottom: 1px solid var(--rule); }
 .inspector-tabs button {
   flex: 1;
