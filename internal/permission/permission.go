@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/bmatcuk/doublestar/v4"
 
@@ -381,16 +382,20 @@ type resolvedEmission struct {
 type Service struct {
 	emit func(protocol.Event)
 
-	mu       sync.Mutex
-	base     []Ruleset
-	project  Ruleset // runtime project-scoped grants (DecisionProject)
-	agent    Ruleset // active agent profile; evaluated after project, before granted
-	granted  Ruleset // session-scoped "always" grants (DecisionAlways)
-	modeLate Ruleset // permission-mode hard-denies (plan); after granted, before phase
-	phase    Ruleset // active workflow phase profile; last ruleset, hard ceiling
-	permMode protocol.PermissionMode
-	pending  map[string]*pending
-	nextID   int
+	mu        sync.Mutex
+	base      []Ruleset
+	baseNames []string      // optional stable names parallel to base (explain)
+	project   Ruleset       // runtime project-scoped grants (DecisionProject)
+	agent     Ruleset       // active agent profile; evaluated after project, before granted
+	granted   Ruleset       // session-scoped "always" grants (DecisionAlways)
+	scoped    []scopedGrant // TTL / path / tool / command-class grants
+	modeLate  Ruleset       // permission-mode hard-denies (plan); after granted, before phase
+	phase     Ruleset       // active workflow phase profile; last ruleset, hard ceiling
+	permMode  protocol.PermissionMode
+	pending   map[string]*pending
+	nextID    int
+	nextGrant int
+	clock     func() time.Time
 
 	// persistProject, when set, is called outside the mutex after a project
 	// grant is recorded in memory. Failures are ignored so the in-session
@@ -402,7 +407,21 @@ type Service struct {
 // rulesets are evaluated in order (later wins), then project grants, the
 // active agent profile, session always grants, then the workflow phase profile.
 func New(emit func(protocol.Event), base ...Ruleset) *Service {
+	if emit == nil {
+		emit = func(protocol.Event) {}
+	}
 	return &Service{emit: emit, base: base, pending: map[string]*pending{}}
+}
+
+// SetBaseLayerNames sets optional stable names for base layers (explain/audit).
+// Extra names are ignored; missing names fall back to heuristics.
+func (s *Service) SetBaseLayerNames(names ...string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.baseNames = append([]string(nil), names...)
+	s.mu.Unlock()
 }
 
 // SetProjectPersister registers an optional hook invoked after a
@@ -450,14 +469,16 @@ func (s *Service) PhaseRules() Ruleset {
 }
 
 // BaselineLayers returns the non-phase evaluation layers in order (base,
-// project, agent, granted, modeLate). Used to compute phase widening deltas.
+// project, agent, granted, scoped grants, modeLate). Used to compute phase
+// widening deltas.
 func (s *Service) BaselineLayers() []Ruleset {
 	if s == nil {
 		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]Ruleset, 0, len(s.base)+4)
+	s.pruneExpiredLocked(s.now())
+	out := make([]Ruleset, 0, len(s.base)+5)
 	for _, layer := range s.base {
 		out = append(out, append(Ruleset(nil), layer...))
 	}
@@ -465,6 +486,7 @@ func (s *Service) BaselineLayers() []Ruleset {
 		append(Ruleset(nil), s.project...),
 		append(Ruleset(nil), s.agent...),
 		append(Ruleset(nil), s.granted...),
+		append(Ruleset(nil), s.scopedRulesLocked()...),
 		append(Ruleset(nil), s.modeLate...),
 	)
 	return out
@@ -585,6 +607,7 @@ func (s *Service) Peek(permission string, patterns ...string) Action {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.pruneExpiredLocked(s.now())
 	return s.evaluateLocked(permission, patterns)
 }
 
@@ -602,13 +625,19 @@ func (s *Service) AskWithCorrelation(ctx context.Context, req tool.AskRequest, c
 // ask is the shared implementation for Ask and AskWithCorrelation.
 func (s *Service) ask(ctx context.Context, req tool.AskRequest, corr protocol.Correlation) error {
 	s.mu.Lock()
+	s.pruneExpiredLocked(s.now())
 	action := s.evaluateLocked(req.Permission, req.Patterns)
+	ex := s.explainWorstLocked(req.Permission, req.Patterns)
 	switch action {
 	case Allow:
+		// Skip audit on synchronous allow — high-frequency tools (read/glob)
+		// would flood session JSONL. Deny, ask suspend, and user replies still
+		// emit permission.decided for the timeline audit trail.
 		s.mu.Unlock()
 		return nil
 	case Deny:
 		s.mu.Unlock()
+		s.emitDecided(corr, req, action, "", "", ex)
 		return &DeniedError{Reason: "a permission rule matched"}
 	}
 	s.nextID++
@@ -636,6 +665,8 @@ func (s *Service) ask(ctx context.Context, req tool.AskRequest, corr protocol.Co
 		Always:      req.Always,
 		Metadata:    req.Metadata,
 	})
+	// Audit: ask suspended (timeline KindPermission waiting).
+	s.emitDecided(corr, req, Ask, id, "", ex)
 
 	// Mark announced only after PermissionAsked returns. Any Reply that ran
 	// while unannounced left a deferred resolution for us to emit now.
@@ -657,6 +688,7 @@ func (s *Service) ask(ctx context.Context, req tool.AskRequest, corr protocol.Co
 			RequestID:   deferred.id,
 			Decision:    deferred.decision,
 		})
+		// PermissionDecided for deferred replies is emitted by Reply.
 	}
 
 	select {
@@ -671,6 +703,47 @@ func (s *Service) ask(ctx context.Context, req tool.AskRequest, corr protocol.Co
 		}
 		return nil
 	}
+}
+
+// explainWorstLocked returns explain for the worst-case pattern (mu held).
+func (s *Service) explainWorstLocked(permission string, patterns []string) Explanation {
+	if len(patterns) == 0 {
+		patterns = []string{"*"}
+	}
+	worst := s.explainLocked(permission, patterns[0])
+	for _, pat := range patterns[1:] {
+		ex := s.explainLocked(permission, pat)
+		if ActionRank(ex.Action) < ActionRank(worst.Action) {
+			worst = ex
+		}
+	}
+	return worst
+}
+
+func actionFromDecision(d protocol.Decision) Action {
+	if d == protocol.DecisionReject {
+		return Deny
+	}
+	return Allow
+}
+
+// emitDecided publishes a redaction-safe audit event for timeline consumers.
+func (s *Service) emitDecided(corr protocol.Correlation, req tool.AskRequest, action Action, requestID string, decision protocol.Decision, ex Explanation) {
+	ev := protocol.PermissionDecided{
+		Correlation: corr,
+		RequestID:   requestID,
+		Permission:  req.Permission,
+		Patterns:    append([]string(nil), req.Patterns...),
+		Action:      string(action),
+		Decision:    decision,
+	}
+	if ex.Matched != nil {
+		ev.Layer = ex.Matched.Layer
+		ev.RulePermission = ex.Matched.Permission
+		ev.RulePattern = ex.Matched.Pattern
+		ev.RuleAction = string(ex.Matched.Action)
+	}
+	s.emit(ev)
 }
 
 // Reply resolves a pending ask. Session (always) and project grants record
@@ -746,6 +819,17 @@ func (s *Service) Reply(r protocol.PermissionReply) {
 	for _, other := range resolved {
 		collect(other.id, other.p, resolvedReply.Decision)
 	}
+	// Snapshot explain for audit after grants applied.
+	primaryEx := s.explainWorstLocked(p.permission, p.patterns)
+	type auditPend struct {
+		id   string
+		pend *pending
+		dec  protocol.Decision
+	}
+	audits := []auditPend{{id: r.RequestID, pend: p, dec: r.Decision}}
+	for _, other := range resolved {
+		audits = append(audits, auditPend{id: other.id, pend: other.p, dec: resolvedReply.Decision})
+	}
 	s.mu.Unlock()
 
 	// Emit all announced resolutions before waking any waiter so consumers
@@ -756,6 +840,16 @@ func (s *Service) Reply(r protocol.PermissionReply) {
 			RequestID:   em.id,
 			Decision:    em.decision,
 		})
+	}
+	for _, a := range audits {
+		req := tool.AskRequest{Permission: a.pend.permission, Patterns: a.pend.patterns}
+		ex := primaryEx
+		if a.pend != p {
+			// Best-effort: use primary explain shape; layer still useful.
+			ex = primaryEx
+			ex.Permission = a.pend.permission
+		}
+		s.emitDecided(a.pend.correlation, req, actionFromDecision(a.dec), a.id, a.dec, ex)
 	}
 	if persist != nil {
 		for _, rule := range projectRules {
@@ -771,9 +865,10 @@ func (s *Service) Reply(r protocol.PermissionReply) {
 // evaluateLocked returns the worst-case action across the ask's patterns:
 // any deny denies, any ask asks, otherwise allow. Permission mode may then
 // upgrade Ask→Allow (yolo / accept-edits) without widening Deny.
+// Caller must hold mu; expired scoped grants should already be pruned.
 func (s *Service) evaluateLocked(permission string, patterns []string) Action {
 	sets := append([]Ruleset{}, s.base...)
-	sets = append(sets, s.project, s.agent, s.granted, s.modeLate, s.phase)
+	sets = append(sets, s.project, s.agent, s.granted, s.scopedRulesLocked(), s.modeLate, s.phase)
 	worst := Allow
 	if len(patterns) == 0 {
 		patterns = []string{"*"}

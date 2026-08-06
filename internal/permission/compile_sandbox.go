@@ -76,16 +76,17 @@ func CompileSandbox(mode sandbox.Mode, workDir string, sets ...Ruleset) sandbox.
 }
 
 // CompileSandbox returns the OS policy for the service's current layers
-// (base → project → agent → granted → modeLate → phase).
+// (base → project → agent → granted → scoped → modeLate → phase).
 func (s *Service) CompileSandbox(mode sandbox.Mode, workDir string) sandbox.Policy {
 	if s == nil {
 		return CompileSandbox(mode, workDir)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	sets := make([]Ruleset, 0, len(s.base)+5)
+	s.pruneExpiredLocked(s.now())
+	sets := make([]Ruleset, 0, len(s.base)+6)
 	sets = append(sets, s.base...)
-	sets = append(sets, s.project, s.agent, s.granted, s.modeLate, s.phase)
+	sets = append(sets, s.project, s.agent, s.granted, s.scopedRulesLocked(), s.modeLate, s.phase)
 	return CompileSandbox(mode, workDir, sets...)
 }
 
