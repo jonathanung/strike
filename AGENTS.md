@@ -47,7 +47,8 @@ service/theme token).
 |---|---|
 | `cmd/strike` | CLI flags + auth/exec/serve subcommands (`main.go`), composition root wiring (`wire.go`) |
 | `internal/server` | Experimental read-only HTTP attach (`strike serve`: /health, SSE events, attach page) |
-| `internal/protocol` | Ops/Events seam; JSONL envelopes |
+| `pkg/protocol` | Public Ops/Events wire schema; JSONL envelopes (semver `Version`) |
+| `internal/protocol` | Compatibility re-export of `pkg/protocol` |
 | `internal/engine` | Turn loop, tool dispatch, interrupts |
 | `internal/harness` | Function harness contract, registry, external process adapter |
 | `internal/provider` | LLM adapters (+ `base`, `echo`, anthropic, openai, xai, google, chatgpt) |
@@ -89,11 +90,12 @@ service/theme token).
   (make/CI run this first). Flattened `internal/tui/*.go` are gitignored —
   edit `_src/` only; editing flattened files is silently reverted.
 - `internal/tui` may import only `internal/protocol`, `internal/host`, and
-  `internal/tui/...` — enforced by `internal/tui/boundary_test.go`
-  (`TestArchitectureBoundaries`), which fails the build on any other
-  `internal/*` import from a TUI file. Charm paths: v1
-  `github.com/charmbracelet/…` or v2 `charm.land/…`; never
-  `github.com/charmbracelet/…/v2` (`TestCharmImportPaths`).
+  `internal/tui/...` among `internal/*` packages — enforced by
+  `internal/tui/boundary_test.go` (`TestArchitectureBoundaries`). Prefer
+  `pkg/protocol` for the public wire schema (also allowed; not under
+  `internal/`). Charm paths: v1 `github.com/charmbracelet/…` or v2
+  `charm.land/…`; never `github.com/charmbracelet/…/v2`
+  (`TestCharmImportPaths`).
 
 ## Agent process skills (`.claude/skills`)
 

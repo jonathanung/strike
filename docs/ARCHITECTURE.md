@@ -34,11 +34,12 @@ cmd/strike session_lifecycle.go (`run`) — composition root
 ```
 
 The engine never touches a terminal and the TUI never touches a model API,
-tool, or credential directly — `internal/protocol` is the only channel
-between them, and `internal/host` is the only channel from the TUI to
-anything host-side. A session transcript is fully reconstructable by
-re-reading its JSONL log, since the log is a serialized copy of the exact
-event stream the TUI rendered from (see `internal/protocol/codec.go`).
+tool, or credential directly — `pkg/protocol` (re-exported as
+`internal/protocol` for in-tree compatibility) is the only channel between
+them, and `internal/host` is the only channel from the TUI to anything
+host-side. A session transcript is fully reconstructable by re-reading its
+JSONL log, since the log is a serialized copy of the exact event stream the
+TUI rendered from (see `pkg/protocol/codec.go`).
 
 ## Packages
 
@@ -48,7 +49,8 @@ event stream the TUI rendered from (see `internal/protocol/codec.go`).
 | `internal/server` | Experimental read-only HTTP attach: `/health`, SSE session event tail, minimal attach page (`strike serve`) | `session`, `version`, `protocol` (via session JSONL), stdlib |
 | `internal/version` | Build-time Version/Commit stamped via `-ldflags` | stdlib |
 | `internal/update` | GitHub Releases self-update (check, download, sha256, atomic replace, re-exec) | `version`, stdlib, net/http |
-| `internal/protocol` | Op/Event seam between engine and frontends; the JSONL envelope (`codec.go`) is the session persistence format (includes `scheduler.queued` / `admitted` / `canceled` queue lifecycle) | stdlib only |
+| `pkg/protocol` | **Public** Op/Event wire schema between engine and frontends; JSONL envelopes (`codec.go` / `op_codec.go`) are the session persistence + transport format (includes `scheduler.queued` / `admitted` / `canceled`). Semver via `Version` | stdlib only |
+| `internal/protocol` | Compatibility re-export of `pkg/protocol` (type aliases + thin forwards). Prefer `pkg/protocol` for new code | `pkg/protocol` only |
 | `internal/engine` | Headless agent runtime: built-in turn loop, task-subagent function harnesses, tool dispatch, permission/question integration, deferred agent switch; implicit session-scoped agent **team** (lead + children roster + shared task board in `team.go` / `team_board.go`); model-stream and bash admission via shared `scheduler` | `protocol`, `provider`, `harness`, `tool`, `permission`, `question`, `memory`, `config`, `sandbox`, `scheduler` |
 | `internal/harness` | Function-harness contract and named function registry; model calls return completed responses | `provider`, stdlib |
 | `internal/harness/external` | Private JSONL subprocess adapter from configured commands to `harness.Func` | `harness`, `provider`, stdlib, os/exec |
@@ -85,8 +87,9 @@ Verbatim from the refactor spec (`.plan/refactor-agents-ui.md`):
 
 - `internal/host` (contract pkg only, not local/): stdlib imports only.
 - `internal/tui/...`: no `internal/*` imports except `protocol`, `host`,
-  `tui/...`.
+  `tui/...`. (`pkg/protocol` is also allowed — it is not under `internal/`.)
 - No backend package imports `internal/tui/...`.
+- `pkg/protocol`: stdlib only (public wire surface).
 
 These are enforced mechanically, not just by convention: `internal/tui/boundary_test.go`
 (`TestArchitectureBoundaries`) walks every non-test `.go` file in the module

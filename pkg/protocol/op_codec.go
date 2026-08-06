@@ -6,9 +6,13 @@ import (
 )
 
 // OpEnvelope wraps an Op with a type tag for WebSocket/HTTP JSON transport.
+//
+// Version is the wire schema version ([Version]) written by [WrapOp]. Empty on
+// decode means a legacy record; treat it as [LegacyVersion].
 type OpEnvelope struct {
-	Type string          `json:"type"`
-	Data json.RawMessage `json:"data,omitempty"`
+	Type    string          `json:"type"`
+	Version string          `json:"v,omitempty"`
+	Data    json.RawMessage `json:"data,omitempty"`
 }
 
 func opType(op Op) string {
@@ -54,13 +58,22 @@ func WrapOp(op Op) (OpEnvelope, error) {
 	}
 	switch op.(type) {
 	case Interrupt, InspectEffectivePrompt:
-		return OpEnvelope{Type: t}, nil
+		return OpEnvelope{Type: t, Version: Version}, nil
 	}
 	data, err := json.Marshal(op)
 	if err != nil {
 		return OpEnvelope{}, err
 	}
-	return OpEnvelope{Type: t, Data: data}, nil
+	return OpEnvelope{Type: t, Version: Version, Data: data}, nil
+}
+
+// SchemaVersion returns the op envelope's wire schema version, defaulting
+// empty (legacy) records to [LegacyVersion].
+func (e OpEnvelope) SchemaVersion() string {
+	if e.Version == "" {
+		return LegacyVersion
+	}
+	return e.Version
 }
 
 // Decode reverses WrapOp.
