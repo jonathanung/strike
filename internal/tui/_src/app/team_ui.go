@@ -128,6 +128,16 @@ func applyTeamRosterMembers(children *[]childActivity, index map[string]int, mem
 			if detail != "" {
 				ch.rosterState = detail
 			}
+			// Roster queue fields refresh when present; empty clears only when
+			// the snapshot explicitly omits them after a prior clear path.
+			if len(mem.QueuePools) > 0 || mem.QueueLabel != "" {
+				ch.queuePools = append([]string(nil), mem.QueuePools...)
+				ch.queueLabel = mem.QueueLabel
+			} else if len(ch.queuePools) > 0 && status != "" && childStatusTerminal(status) {
+				ch.queuePools = nil
+				ch.queueLabel = ""
+				ch.queueRequestID = ""
+			}
 			if ch.startedAt.IsZero() && mem.StartedAt != "" {
 				if t, err := time.Parse(time.RFC3339, mem.StartedAt); err == nil {
 					ch.startedAt = t
@@ -142,6 +152,8 @@ func applyTeamRosterMembers(children *[]childActivity, index map[string]int, mem
 			name:        mem.Name,
 			status:      status,
 			rosterState: detail,
+			queuePools:  append([]string(nil), mem.QueuePools...),
+			queueLabel:  mem.QueueLabel,
 		}
 		if ch.status == "" {
 			ch.status = "running"

@@ -56,7 +56,7 @@ func (e *Engine) harnessEnvironment(ctx context.Context, corr protocol.Correlati
 			requestCorr := corr
 			requestCorr.ProviderRequestID = rand.Text()
 			requestCorr.Attempt = attempt
-			stream, err := e.admitModelStream(ctx, req)
+			stream, err := e.admitModelStream(ctx, requestCorr, req)
 			if err == nil {
 				response := harness.ModelResponse{}
 				var text strings.Builder

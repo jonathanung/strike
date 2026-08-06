@@ -74,6 +74,8 @@ func (e *Engine) agentRoster(ctx context.Context, _ tool.AgentRosterRequest) (to
 		if h := snap.h; h != nil {
 			st := h.statusSnapshot(false)
 			entry.State = st.State
+			entry.QueuePools = append([]string(nil), st.QueuePools...)
+			entry.QueueLabel = st.QueueLabel
 			if entry.StartedAt == "" && !h.startedAt.IsZero() {
 				entry.StartedAt = h.startedAt.UTC().Format(time.RFC3339)
 			}
@@ -146,6 +148,8 @@ func (e *Engine) emitTeamRoster() {
 			StartedAt:       m.StartedAt,
 			TerminalSummary: m.TerminalSummary,
 			Role:            m.Role,
+			QueuePools:      append([]string(nil), m.QueuePools...),
+			QueueLabel:      m.QueueLabel,
 		})
 	}
 	e.emit(protocol.TeamRoster{

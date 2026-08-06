@@ -449,16 +449,20 @@ func TeamMemberStateFromChild(s ChildStatus) TeamMemberState {
 // State prefers task_status vocabulary (starting|working|needs_attention|
 // completed|failed|canceled|unknown) when the emitter has live detail;
 // otherwise terminal TeamMemberState values are used.
+// QueuePools/QueueLabel identify a constrained pool while waiting on admission
+// (no exact queue-position guarantee).
 type TeamRosterMember struct {
-	SessionID       string `json:"sessionId"`
-	Name            string `json:"name,omitempty"`
-	Agent           string `json:"agent,omitempty"`
-	State           string `json:"state"`
-	ParentSessionID string `json:"parentSessionId,omitempty"`
-	Depth           int    `json:"depth,omitempty"`
-	StartedAt       string `json:"startedAt,omitempty"` // RFC3339 when known
-	TerminalSummary string `json:"terminalSummary,omitempty"`
-	Role            string `json:"role,omitempty"` // "lead" or "member"
+	SessionID       string   `json:"sessionId"`
+	Name            string   `json:"name,omitempty"`
+	Agent           string   `json:"agent,omitempty"`
+	State           string   `json:"state"`
+	ParentSessionID string   `json:"parentSessionId,omitempty"`
+	Depth           int      `json:"depth,omitempty"`
+	StartedAt       string   `json:"startedAt,omitempty"` // RFC3339 when known
+	TerminalSummary string   `json:"terminalSummary,omitempty"`
+	Role            string   `json:"role,omitempty"` // "lead" or "member"
+	QueuePools      []string `json:"queuePools,omitempty"`
+	QueueLabel      string   `json:"queueLabel,omitempty"`
 }
 
 // TeamRoster is a full snapshot of the implicit session team roster.
@@ -782,6 +786,46 @@ type ProviderRetrying struct {
 	Message     string `json:"message,omitempty"`
 }
 
+// Scheduler cancel reasons on SchedulerCanceled.
+const (
+	SchedulerReasonCanceled = "canceled"
+	SchedulerReasonClosed   = "closed"
+)
+
+// SchedulerQueued marks that work is waiting for named pool capacity inside
+// this Strike process. RequestID correlates queued → admitted|canceled.
+// Pools lists the constrained pool names (no exact queue position — FIFO
+// order is internal and not a stable wire guarantee). Label is a short
+// human tag (e.g. "model", "bash", "bash:build").
+type SchedulerQueued struct {
+	Correlation
+	RequestID string   `json:"requestId"`
+	Pools     []string `json:"pools"`
+	Label     string   `json:"label,omitempty"`
+}
+
+// SchedulerAdmitted marks that capacity was granted for a prior or immediate
+// acquire. WaitMs is time spent waiting (0 when granted without queueing).
+// After SchedulerCanceled for the same RequestID, Admitted must not appear.
+type SchedulerAdmitted struct {
+	Correlation
+	RequestID string   `json:"requestId"`
+	Pools     []string `json:"pools"`
+	Label     string   `json:"label,omitempty"`
+	WaitMs    int64    `json:"waitMs,omitempty"`
+}
+
+// SchedulerCanceled marks that a waiter left without capacity (context cancel
+// or scheduler Close). Clears any queued UI state for RequestID.
+type SchedulerCanceled struct {
+	Correlation
+	RequestID string   `json:"requestId"`
+	Pools     []string `json:"pools"`
+	Label     string   `json:"label,omitempty"`
+	WaitMs    int64    `json:"waitMs,omitempty"`
+	Reason    string   `json:"reason,omitempty"` // canceled | closed
+}
+
 // Compaction reason labels on CompactionStarted / CompactionCompleted.
 const (
 	CompactionReasonManual    = "manual"
@@ -949,6 +993,9 @@ func (AgentMessage) isEvent()           {}
 func (TeamRoster) isEvent()             {}
 func (UsageReported) isEvent()          {}
 func (ProviderRetrying) isEvent()       {}
+func (SchedulerQueued) isEvent()        {}
+func (SchedulerAdmitted) isEvent()      {}
+func (SchedulerCanceled) isEvent()      {}
 func (CompactionStarted) isEvent()      {}
 func (CompactionCompleted) isEvent()    {}
 func (SessionMeta) isEvent()            {}

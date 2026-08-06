@@ -89,6 +89,8 @@ type TaskStatusRequest struct {
 
 // TaskStatusResult is a model-facing snapshot of a child session.
 // State is one of starting|working|needs_attention|completed|failed|canceled|unknown.
+// QueuePools/QueueLabel are set while the child is waiting on scheduler admission
+// so callers can distinguish queue wait from idle without exact queue positions.
 type TaskStatusResult struct {
 	State           string
 	Elapsed         string
@@ -96,6 +98,10 @@ type TaskStatusResult struct {
 	LatestActivity  []string
 	TerminalSummary string
 	SessionID       string
+	// QueuePools lists constrained pool names while waiting for admission.
+	QueuePools []string `json:"queue_pools,omitempty"`
+	// QueueLabel is a short human tag for the waiting work (e.g. "model").
+	QueueLabel string `json:"queue_label,omitempty"`
 }
 
 // TaskReadRequest loads a bounded transcript slice from a child session.
@@ -159,17 +165,20 @@ type AgentRosterRequest struct{}
 // AgentRosterMember is one teammate row for agent_roster.
 // State matches task_status vocabulary where possible
 // (starting|working|needs_attention|completed|failed|canceled|unknown).
+// QueuePools/QueueLabel identify a constrained pool while waiting (not idle).
 type AgentRosterMember struct {
-	SessionID       string `json:"session_id"`
-	Name            string `json:"name,omitempty"`
-	Agent           string `json:"agent,omitempty"`
-	State           string `json:"state"`
-	Role            string `json:"role,omitempty"` // lead | member
-	ParentSessionID string `json:"parent_session_id,omitempty"`
-	Depth           int    `json:"depth,omitempty"`
-	StartedAt       string `json:"started_at,omitempty"` // RFC3339
-	TerminalSummary string `json:"terminal_summary,omitempty"`
-	IsSelf          bool   `json:"is_self"`
+	SessionID       string   `json:"session_id"`
+	Name            string   `json:"name,omitempty"`
+	Agent           string   `json:"agent,omitempty"`
+	State           string   `json:"state"`
+	Role            string   `json:"role,omitempty"` // lead | member
+	ParentSessionID string   `json:"parent_session_id,omitempty"`
+	Depth           int      `json:"depth,omitempty"`
+	StartedAt       string   `json:"started_at,omitempty"` // RFC3339
+	TerminalSummary string   `json:"terminal_summary,omitempty"`
+	IsSelf          bool     `json:"is_self"`
+	QueuePools      []string `json:"queue_pools,omitempty"`
+	QueueLabel      string   `json:"queue_label,omitempty"`
 }
 
 // AgentRosterResult is the full team snapshot for agent_roster.
@@ -322,11 +331,15 @@ type Context struct {
 	// nil treats every command as general (process only). Used only when
 	// Scheduler is non-nil.
 	SchedulerPolicy *scheduler.Effective
-	Ask             func(ctx context.Context, req AskRequest) error
-	SpawnTask       func(ctx context.Context, req TaskRequest) (TaskResult, error)
-	TaskStatus      func(ctx context.Context, req TaskStatusRequest) (TaskStatusResult, error)
-	TaskRead        func(ctx context.Context, req TaskReadRequest) (TaskReadResult, error)
-	TaskMessage     func(ctx context.Context, req TaskMessageRequest) (TaskMessageResult, error)
+	// SchedulerAcquire, when non-nil, replaces direct Scheduler.Acquire so the
+	// engine can emit protocol queue lifecycle events with correlation.
+	// Signature matches engine.acquireScheduler (label + pools).
+	SchedulerAcquire func(ctx context.Context, label string, pools ...string) (*scheduler.Lease, error)
+	Ask              func(ctx context.Context, req AskRequest) error
+	SpawnTask        func(ctx context.Context, req TaskRequest) (TaskResult, error)
+	TaskStatus       func(ctx context.Context, req TaskStatusRequest) (TaskStatusResult, error)
+	TaskRead         func(ctx context.Context, req TaskReadRequest) (TaskReadResult, error)
+	TaskMessage      func(ctx context.Context, req TaskMessageRequest) (TaskMessageResult, error)
 	// TaskInterrupt cancels an owned running child by session id.
 	TaskInterrupt func(ctx context.Context, req TaskInterruptRequest) (TaskInterruptResult, error)
 	// AgentRoster lists lead + teammates on the implicit session team.

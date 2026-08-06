@@ -21,7 +21,9 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 			protocol.ChildStarted, protocol.ChildCompleted,
 			// Parent re-emits child peer mail + nested roster with child
 			// correlation; keep them for team UI (issue #614).
-			protocol.AgentMessage, protocol.TeamRoster:
+			protocol.AgentMessage, protocol.TeamRoster,
+			// Queue lifecycle for children: show constrained pool, not idle.
+			protocol.SchedulerQueued, protocol.SchedulerAdmitted, protocol.SchedulerCanceled:
 		default:
 			return nil
 		}
@@ -281,8 +283,95 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		cmd = m.broadcastAgentsState()
 	case protocol.AgentMessage:
 		m.onAgentMessage(ev)
+	case protocol.SchedulerQueued:
+		m.onSchedulerQueued(ev)
+		cmd = m.broadcastAgentsState()
+	case protocol.SchedulerAdmitted:
+		m.onSchedulerAdmitted(ev)
+		cmd = m.broadcastAgentsState()
+	case protocol.SchedulerCanceled:
+		m.onSchedulerCanceled(ev)
+		cmd = m.broadcastAgentsState()
 	}
 	return cmd
+}
+
+// onSchedulerQueued marks root or child as waiting on named pools.
+func (m *Model) onSchedulerQueued(ev protocol.SchedulerQueued) {
+	if applySchedulerQueuedToChildren(&m.children, ev) {
+		return
+	}
+	// Root / this session.
+	if ev.SessionID == "" || ev.SessionID == m.sessionID {
+		m.queueRequestID = ev.RequestID
+		m.queuePools = append([]string(nil), ev.Pools...)
+		m.queueLabel = ev.Label
+	}
+}
+
+func (m *Model) onSchedulerAdmitted(ev protocol.SchedulerAdmitted) {
+	if applySchedulerClearToChildren(&m.children, ev.RequestID, ev.SessionID) {
+		return
+	}
+	if ev.SessionID == "" || ev.SessionID == m.sessionID {
+		if m.queueRequestID == "" || m.queueRequestID == ev.RequestID {
+			m.queueRequestID = ""
+			m.queuePools = nil
+			m.queueLabel = ""
+		}
+	}
+}
+
+func (m *Model) onSchedulerCanceled(ev protocol.SchedulerCanceled) {
+	if applySchedulerClearToChildren(&m.children, ev.RequestID, ev.SessionID) {
+		return
+	}
+	if ev.SessionID == "" || ev.SessionID == m.sessionID {
+		if m.queueRequestID == "" || m.queueRequestID == ev.RequestID {
+			m.queueRequestID = ""
+			m.queuePools = nil
+			m.queueLabel = ""
+		}
+	}
+}
+
+func applySchedulerQueuedToChildren(children *[]childActivity, ev protocol.SchedulerQueued) bool {
+	if children == nil || ev.SessionID == "" {
+		return false
+	}
+	for i := range *children {
+		if (*children)[i].sessionID != ev.SessionID {
+			continue
+		}
+		(*children)[i].queueRequestID = ev.RequestID
+		(*children)[i].queuePools = append([]string(nil), ev.Pools...)
+		(*children)[i].queueLabel = ev.Label
+		// Keep status live while queued so agents filter does not drop to ready.
+		if (*children)[i].status == "" || (*children)[i].status == "running" {
+			(*children)[i].status = "running"
+		}
+		return true
+	}
+	return false
+}
+
+func applySchedulerClearToChildren(children *[]childActivity, requestID, sessionID string) bool {
+	if children == nil || sessionID == "" {
+		return false
+	}
+	for i := range *children {
+		if (*children)[i].sessionID != sessionID {
+			continue
+		}
+		ch := &(*children)[i]
+		if ch.queueRequestID == "" || ch.queueRequestID == requestID {
+			ch.queueRequestID = ""
+			ch.queuePools = nil
+			ch.queueLabel = ""
+		}
+		return true
+	}
+	return false
 }
 
 const maxChildActivity = 12
@@ -454,6 +543,24 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	case protocol.AgentMessage:
 		return e.Correlation, true
 	case protocol.TeamRoster:
+		return e.Correlation, true
+	case protocol.SchedulerQueued:
+		return e.Correlation, true
+	case protocol.SchedulerAdmitted:
+		return e.Correlation, true
+	case protocol.SchedulerCanceled:
+		return e.Correlation, true
+	case protocol.ProviderRetrying:
+		return e.Correlation, true
+	case protocol.PermissionModeSelected:
+		return e.Correlation, true
+	case protocol.FilesInvalidated:
+		return e.Correlation, true
+	case protocol.SessionMeta:
+		return e.Correlation, true
+	case protocol.SessionRewound:
+		return e.Correlation, true
+	case protocol.HookMatched:
 		return e.Correlation, true
 	default:
 		return protocol.Correlation{}, false

@@ -165,16 +165,40 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 // acquireBashLease acquires process (+ build/test when classified) pools.
 // When Scheduler is nil, returns a no-op lease (unlimited / current behavior).
 // Multi-pool grants use Scheduler.Acquire's deadlock-free atomic path (FIFO).
+// Prefer SchedulerAcquire when set so the engine can emit queue lifecycle events.
 func acquireBashLease(ctx context.Context, tc *Context, command string) (*scheduler.Lease, error) {
-	if tc == nil || tc.Scheduler == nil {
+	if tc == nil || (tc.Scheduler == nil && tc.SchedulerAcquire == nil) {
 		return nil, nil // Lease.Release is nil-safe
 	}
 	pools := bashPoolsForCommand(tc, command)
+	label := bashQueueLabel(pools)
+	if tc.SchedulerAcquire != nil {
+		lease, err := tc.SchedulerAcquire(ctx, label, pools...)
+		if err != nil {
+			return nil, fmt.Errorf("scheduler: %w", err)
+		}
+		return lease, nil
+	}
 	lease, err := tc.Scheduler.Acquire(ctx, pools...)
 	if err != nil {
 		return nil, fmt.Errorf("scheduler: %w", err)
 	}
 	return lease, nil
+}
+
+// bashQueueLabel is a short UI/protocol tag for bash admission (no argv leak).
+func bashQueueLabel(pools []string) string {
+	extra := make([]string, 0, len(pools))
+	for _, p := range pools {
+		if p == scheduler.PoolProcess {
+			continue
+		}
+		extra = append(extra, p)
+	}
+	if len(extra) == 0 {
+		return "bash"
+	}
+	return "bash:" + strings.Join(extra, ",")
 }
 
 // bashPoolsForCommand returns admission pool names for a bash command.

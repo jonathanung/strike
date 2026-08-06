@@ -52,6 +52,8 @@ type agentsRootSnap struct {
 	Title    string
 	State    theme.AgentState
 	Children []childActivity
+	// QueueLabel identifies a constrained pool while waiting (empty when not queued).
+	QueueLabel string
 }
 
 // agentsStateMsg is a snapshot of concurrent roots + subagents for the agents
@@ -427,12 +429,18 @@ func (w agentsWindow) buildNodes() []ui.TreeNode {
 			label = itoa(rootNum+1) + ") " + label
 		}
 		rootNum++
+		detail := agentsRootDetail(root.State)
+		if q := strings.TrimSpace(root.QueueLabel); q != "" {
+			detail = queueDetailLabel(q)
+		} else if len(root.Children) == 0 {
+			// keep state detail
+		}
 		node := ui.TreeNode{
 			ID:      id,
 			Label:   label,
 			Current: w.viewingID == id || (w.viewingID == "" && w.activeID == id),
 			Tone:    agentStateTone(root.State),
-			Detail:  agentsRootDetail(root.State),
+			Detail:  detail,
 		}
 		if w.viewFilter == agentsFilterRoots {
 			// Structure filter: parents only; still honor text filter.
@@ -507,9 +515,16 @@ func (w agentsWindow) filterChildTree(kids []childActivity, q string) []ui.TreeN
 		if ch.rosterState == "needs you" {
 			state = theme.AgentStateAttention
 		}
+		if len(ch.queuePools) > 0 {
+			// Queued work is live — never treat as ready/idle.
+			state = theme.AgentStateWorking
+		}
 		detail := ch.status
 		if ch.rosterState != "" {
 			detail = ch.rosterState
+		}
+		if q := childQueueDetail(ch); q != "" {
+			detail = q
 		}
 		node := ui.TreeNode{
 			ID:      ch.sessionID,
@@ -587,6 +602,28 @@ func childAgentState(status string) theme.AgentState {
 	}
 }
 
+// childQueueDetail is the agents-tree chip while waiting on a pool.
+func childQueueDetail(ch childActivity) string {
+	if label := strings.TrimSpace(ch.queueLabel); label != "" {
+		return queueDetailLabel(label)
+	}
+	if len(ch.queuePools) == 0 {
+		return ""
+	}
+	return queueDetailLabel(strings.Join(ch.queuePools, ","))
+}
+
+// queueDetailLabel formats a short "queued: <pool>" chip without promising position.
+// Uses ASCII colon (not Icons.DetailSeparator) so plain status strings stay
+// theme-free for activity/task_status projection.
+func queueDetailLabel(label string) string {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return "queued"
+	}
+	return "queued: " + label
+}
+
 func (w agentsWindow) countState(want theme.AgentState) int {
 	n := 0
 	for _, root := range w.roots {
@@ -620,16 +657,19 @@ func listableChildActivities(children []childActivity) []childActivity {
 }
 
 func childStatusTone(status string) ui.Tone {
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "running", "working", "starting":
+	s := strings.ToLower(strings.TrimSpace(status))
+	switch {
+	case strings.HasPrefix(s, "queued"):
 		return ui.ToneAccentAlt
-	case "needs you", "needs_attention":
+	case s == "running" || s == "working" || s == "starting":
+		return ui.ToneAccentAlt
+	case s == "needs you" || s == "needs_attention":
 		return ui.ToneWarning
-	case "completed", "done":
+	case s == "completed" || s == "done":
 		return ui.ToneSuccess
-	case "failed", "error":
+	case s == "failed" || s == "error":
 		return ui.ToneError
-	case "canceled", "cancelled":
+	case s == "canceled" || s == "cancelled":
 		return ui.ToneMuted
 	default:
 		return ui.ToneDefault
