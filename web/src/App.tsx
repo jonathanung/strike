@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { activateRoot, bootstrap, closeRoot, createRoot, historicalConnection, liveConnection, request, resumeRoot, roots as loadRoots, sendOp, sessions as loadSessions } from "./api";
+import { activateRoot, bootstrap, closeRoot, createRoot, historicalConnection, liveConnection, request, resumeRoot, roots as loadRoots, sendOp, sessions as loadSessions , sessionChildren} from "./api";
+import { ChildAgentsPanel } from "./ChildAgents";
 import { buildExportMarkdown, defaultExportFilename, downloadTextFile } from "./exportMarkdown";
 import { clearQueue, editQueuedText, moveQueuedAt, removeQueuedAt, type QueuedPrompt } from "./queueOps";
 import { initialState, reduceEvent } from "./reducer";
@@ -91,6 +92,7 @@ export default function App() {
   const [fast, setFast] = useState(false);
   const [runtimeOpen, setRuntimeOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [selectedChildId, setSelectedChildId] = useState<string>();
   const endRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -125,10 +127,21 @@ export default function App() {
   useEffect(() => {
     if (!selectedID) return;
     dispatch({ type: "workspace.reset", data: { sessionId: selectedID } });
+    setSelectedChildId(undefined);
     if (!selectedIsLive) return historicalConnection(selectedID, dispatch, (message) => setTransport(message));
     const live = liveConnection(selectedID, dispatch, setTransport);
     return () => live.close();
   }, [selectedID, selectedIsLive]);
+  useEffect(() => {
+    if (!selectedID || !boot?.capabilities.sessions) return;
+    let cancelled = false;
+    void sessionChildren(selectedID)
+      .then((res) => {
+        if (!cancelled) dispatch({ type: "children.seed", time: `seed:${selectedID}`, data: { sessions: res.sessions || [] } });
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [selectedID, boot?.capabilities.sessions]);
   useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, [state.items]);
   useEffect(() => {
     if (state.status.busy || !queue.length || !selectedIsLive) return;
@@ -297,6 +310,7 @@ export default function App() {
       window.alert((error as Error).message);
     }
   };
+  const openChildTranscript = (id: string) => { setSelectedChildId(undefined); void selectWorkspace(id, false); setNavTab("history"); };
   const toggleDiff = (path: string) => setExpandedDiffs((old) => { const next = new Set(old); next.has(path) ? next.delete(path) : next.add(path); return next; });
 
   return <div className="app-shell" style={shellStyle}>
@@ -309,7 +323,7 @@ export default function App() {
                     <span className="session-main"><span className="session-title">{label}</span><span className="session-meta">{root.agent || "—"}{activity ? ` · ${activity}` : ""}</span></span>
                     <span className="session-flags">{root.id === activeRootID && <small>ACTIVE</small>}<small>{root.busy ? "BUSY" : "IDLE"}</small></span>
                   </button>;
-                })}</nav>{!boot?.attachOnly && <div className="session-actions"><button type="button" onClick={() => void handleCreateWorkspace()}>+ New workspace</button><button type="button" disabled={!selectedIsLive || !selectedID} onClick={() => void handleCloseWorkspace()}>Close workspace</button></div>}</>}{navTab === "history" && <HistoryNav sessions={sessions} activeRoots={activeRoots} selectedID={selectedID} selectedIsLive={selectedIsLive} historySearch={historySearch} setHistorySearch={setHistorySearch} selectWorkspace={selectWorkspace} handleResume={handleResume} boot={boot} sessionAction={sessionAction} />}</> : <><div className="aside-heading"><span>SESSIONS</span></div><nav>{sessions.map((session) => <button key={session.id} className={session.id === selectedID ? "session active" : "session"} onClick={() => { setSelectedID(session.id); setSelectedIsLive(session.id === liveID && !boot?.attachOnly); }}><span>{session.title || session.id.slice(0, 12)}</span>{session.id === liveID && <small>LIVE</small>}</button>)}</nav>{boot?.capabilities.sessions && selectedID && <div className="session-actions" aria-label="Session actions"><SessionMenu onAction={(action) => void sessionAction(action)} /></div>}</>}{children.length > 0 && <><div className="aside-heading">CHILD AGENTS</div><div className="children" aria-label="Child agents">{children.map(([id, child]) => <div key={id}><span className={`child-state ${child.status}`} />{child.agent || id.slice(0, 8)}<small>{child.status}</small></div>)}</div></>}<details className="workspace-meta"><summary>Workspace</summary><span>ROOT</span><code>{state.status.cwd || "unavailable"}</code><span>BUILD</span><code>{boot?.version || "…"}</code></details></aside>
+                })}</nav>{!boot?.attachOnly && <div className="session-actions"><button type="button" onClick={() => void handleCreateWorkspace()}>+ New workspace</button><button type="button" disabled={!selectedIsLive || !selectedID} onClick={() => void handleCloseWorkspace()}>Close workspace</button></div>}</>}{navTab === "history" && <HistoryNav sessions={sessions} activeRoots={activeRoots} selectedID={selectedID} selectedIsLive={selectedIsLive} historySearch={historySearch} setHistorySearch={setHistorySearch} selectWorkspace={selectWorkspace} handleResume={handleResume} boot={boot} sessionAction={sessionAction} />}</> : <><div className="aside-heading"><span>SESSIONS</span></div><nav>{sessions.map((session) => <button key={session.id} className={session.id === selectedID ? "session active" : "session"} onClick={() => { setSelectedID(session.id); setSelectedIsLive(session.id === liveID && !boot?.attachOnly); }}><span>{session.title || session.id.slice(0, 12)}</span>{session.id === liveID && <small>LIVE</small>}</button>)}</nav>{boot?.capabilities.sessions && selectedID && <div className="session-actions" aria-label="Session actions"><SessionMenu onAction={(action) => void sessionAction(action)} /></div>}</>}<ChildAgentsPanel children={children} selectedId={selectedChildId} onSelect={setSelectedChildId} onOpenTranscript={openChildTranscript} /><details className="workspace-meta"><summary>Workspace</summary><span>ROOT</span><code>{state.status.cwd || "unavailable"}</code><span>BUILD</span><code>{boot?.version || "…"}</code></details></aside>
     <main>
       <section className="runtime" aria-label="Runtime controls">
         <Field label="Provider" value={state.status.provider} values={providers.length ? providers : state.status.provider ? [state.status.provider] : []} disabled={runtimeBusy || !boot?.capabilities.auth} onChange={(name) => void selectProvider(name)} />
