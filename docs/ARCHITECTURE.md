@@ -330,7 +330,10 @@ branch in `internal/tui/view.go` for the pattern.
    Prefer also implementing `Contract() tool.Contract` (side-effect class +
    idempotency; see `internal/tool/contract.go`). Registry helpers
    `Contract`/`Contracts` document these fields; tools without `Contract`
-   default to `external` + `conditional`.
+   default to `external` + `conditional`. The engine applies
+   `tool.DecideRetry` (error code × idempotency) so only `safe-retry` tools
+   auto-retry on `transient`/`timeout`; mutative tools never double-apply
+   (`internal/tool/retry.go`, config `toolRetry`).
 2. Register it in the `tool.NewRegistry(...)` call in `cmd/strike/assemble_tools.go`.
   3. If it mutates state or has side effects, call
      `tc.Ask(ctx, tool.AskRequest{Permission: "yourperm", Patterns: []string{...}})`

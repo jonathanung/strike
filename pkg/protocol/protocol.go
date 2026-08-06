@@ -1253,6 +1253,31 @@ type ProviderRetrying struct {
 	Message     string `json:"message,omitempty"`
 }
 
+// ToolRetrying announces that a transient tool failure will be retried under
+// the harness retry policy (safe-retry + transient/timeout only). Correlation
+// and CallID identify the in-flight tool call; NextAttempt is 1-based.
+// Mutative/unsafe tools never emit this event for auto-retry.
+type ToolRetrying struct {
+	Correlation
+	CallID      string `json:"callId"`
+	Name        string `json:"name"`
+	NextAttempt int    `json:"nextAttempt"`
+	DelayMs     int    `json:"delayMs,omitempty"`
+	ErrorCode   string `json:"errorCode,omitempty"`
+	Message     string `json:"message,omitempty"`
+}
+
+// ToolLoopDetected marks that the harness stopped the turn/agent path because
+// the model repeated identical failing tool+args or oscillated between two
+// failing calls. Reason is identical_calls | oscillating_failures.
+type ToolLoopDetected struct {
+	Correlation
+	Reason   string `json:"reason"`
+	ToolName string `json:"toolName,omitempty"`
+	Count    int    `json:"count,omitempty"`
+	Message  string `json:"message,omitempty"`
+}
+
 // Scheduler cancel reasons on SchedulerCanceled.
 const (
 	SchedulerReasonCanceled = "canceled"
@@ -1550,6 +1575,8 @@ func (AgentContractTimeout) isEvent()   {}
 func (TeamRoster) isEvent()             {}
 func (UsageReported) isEvent()          {}
 func (ProviderRetrying) isEvent()       {}
+func (ToolRetrying) isEvent()           {}
+func (ToolLoopDetected) isEvent()       {}
 func (SchedulerQueued) isEvent()        {}
 func (SchedulerAdmitted) isEvent()      {}
 func (SchedulerCanceled) isEvent()      {}

@@ -597,9 +597,12 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 				// Background context: document sync must not be canceled with the tool call.
 				lspMgr.NotifyFile(context.Background(), absPath, content, deleted)
 			},
-			CollectDiagnostics: makeLSPCollectDiagnostics(lspMgr, toolDir, cfg.LSP),
-			MaxChildDepth:      cfg.MaxChildDepth,
-			OverlapPolicy:      cfg.Session.OverlapPolicy,
+			CollectDiagnostics:   makeLSPCollectDiagnostics(lspMgr, toolDir, cfg.LSP),
+			MaxChildDepth:        cfg.MaxChildDepth,
+			MaxToolRetryAttempts: cfg.ToolRetry.MaxAttempts,
+			ToolLoopThreshold:    cfg.ToolRetry.LoopThreshold,
+			ToolRetryBackoff:     toolRetryBackoffFromConfig(cfg.ToolRetry),
+			OverlapPolicy:        cfg.Session.OverlapPolicy,
 			DefaultChildBudget: tool.AgentBudgetLimits{
 				MaxWallClockS:     cfg.Session.AgentBudget.MaxWallClockS,
 				MaxTokens:         cfg.Session.AgentBudget.MaxTokens,
@@ -1028,5 +1031,18 @@ func optionalBearer(name string, store *auth.Store, envName string) openaicompat
 			return key, nil
 		}
 		return "", nil
+	}
+}
+
+// toolRetryBackoffFromConfig builds the engine backoff func from config delays.
+// nil when both delays are zero (engine default jittered backoff).
+func toolRetryBackoffFromConfig(tr config.ToolRetryConfig) func(int) time.Duration {
+	if tr.BaseDelayMs == 0 && tr.MaxDelayMs == 0 {
+		return nil
+	}
+	base := time.Duration(tr.BaseDelayMs) * time.Millisecond
+	max := time.Duration(tr.MaxDelayMs) * time.Millisecond
+	return func(nextAttempt int) time.Duration {
+		return tool.ToolRetryDelay(nextAttempt, base, max)
 	}
 }

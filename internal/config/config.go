@@ -164,6 +164,28 @@ type Config struct {
 	// project; presets expand before user rules). Last match wins. See
 	// docs/config.md.
 	Scheduler SchedulerConfig `json:"scheduler,omitempty"`
+	// ToolRetry is the harness error-recovery / retry policy for tool
+	// dispatch (error code × idempotency). See docs/config.md.
+	ToolRetry ToolRetryConfig `json:"toolRetry,omitempty"`
+}
+
+// ToolRetryConfig is the JSON "toolRetry" object — auto-retry and loop
+// detection knobs for tool dispatch. Provider stream retries stay under
+// engine MaxStreamAttempts (not configured here).
+type ToolRetryConfig struct {
+	// MaxAttempts bounds auto-retries for one tool call including the first
+	// try. Zero means engine default (3). Set to 1 to disable tool auto-retry.
+	// Only safe-retry tools retry on transient/timeout; mutative/unsafe never
+	// auto-retry.
+	MaxAttempts int `json:"maxAttempts,omitempty"`
+	// BaseDelayMs is the first backoff step in milliseconds before attempt 2.
+	// Zero means engine default (200). Negatives clamp to 0 (instant).
+	BaseDelayMs int `json:"baseDelayMs,omitempty"`
+	// MaxDelayMs caps exponential backoff. Zero means engine default (2000).
+	MaxDelayMs int `json:"maxDelayMs,omitempty"`
+	// LoopThreshold is how many identical consecutive failing tool+args stop
+	// the turn. Zero means engine default (3).
+	LoopThreshold int `json:"loopThreshold,omitempty"`
 }
 
 // NetworkConfig is the JSON "network" object — shared allowlist shape for
@@ -672,6 +694,7 @@ func read(path string) (Config, error) {
 	c.PermissionAutoApproveSeconds = ClampPermissionAutoApproveSeconds(c.PermissionAutoApproveSeconds)
 	c.PermissionAutoApproveExclude = normalizePermissionAutoApproveExclude(c.PermissionAutoApproveExclude)
 	c.MaxChildDepth = ClampMaxChildDepth(c.MaxChildDepth)
+	c.ToolRetry = normalizeToolRetry(c.ToolRetry)
 	if c.PermissionMode != "" {
 		mode, ok := protocol.ParsePermissionMode(string(c.PermissionMode))
 		if !ok {
@@ -778,6 +801,22 @@ func ClampPermissionAutoApproveSeconds(n int) int {
 		return 60
 	}
 	return n
+}
+
+func normalizeToolRetry(tr ToolRetryConfig) ToolRetryConfig {
+	if tr.MaxAttempts < 0 {
+		tr.MaxAttempts = 0
+	}
+	if tr.BaseDelayMs < 0 {
+		tr.BaseDelayMs = 0
+	}
+	if tr.MaxDelayMs < 0 {
+		tr.MaxDelayMs = 0
+	}
+	if tr.LoopThreshold < 0 {
+		tr.LoopThreshold = 0
+	}
+	return tr
 }
 
 // mergeAgentBudgetConfig overlays non-zero layer fields onto base.
@@ -1123,12 +1162,30 @@ func merge(base, layer Config) Config {
 	base.LSP = mergeLSP(base.LSP, layer.LSP)
 	base.Harnesses = mergeHarnesses(base.Harnesses, layer.Harnesses)
 	base.Scheduler = mergeScheduler(base.Scheduler, layer.Scheduler)
+	base.ToolRetry = mergeToolRetry(base.ToolRetry, layer.ToolRetry)
 	if layer.disableDefaultProvidersSet {
 		base.DisableDefaultProviders = layer.DisableDefaultProviders
 		base.disableDefaultProvidersSet = true
 	}
 	if len(layer.DisableDefaultPer) > 0 {
 		base.DisableDefaultPer = mergeDisableDefaultPer(base.DisableDefaultPer, layer.DisableDefaultPer)
+	}
+	return base
+}
+
+// mergeToolRetry overlays non-zero tool-retry knobs from layer onto base.
+func mergeToolRetry(base, layer ToolRetryConfig) ToolRetryConfig {
+	if layer.MaxAttempts != 0 {
+		base.MaxAttempts = layer.MaxAttempts
+	}
+	if layer.BaseDelayMs != 0 {
+		base.BaseDelayMs = layer.BaseDelayMs
+	}
+	if layer.MaxDelayMs != 0 {
+		base.MaxDelayMs = layer.MaxDelayMs
+	}
+	if layer.LoopThreshold != 0 {
+		base.LoopThreshold = layer.LoopThreshold
 	}
 	return base
 }

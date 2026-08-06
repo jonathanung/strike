@@ -66,6 +66,12 @@ write this file. Manual `/ftue` remains available after acknowledgement.
   "permissionAutoApproveSeconds": 0,
   "permissionAutoApproveExclude": ["bash"],
   "maxChildDepth": 0,
+  "toolRetry": {
+    "maxAttempts": 3,
+    "baseDelayMs": 200,
+    "maxDelayMs": 2000,
+    "loopThreshold": 3
+  },
   "compactionStrategy": "trim",
   "compactionModel": "",
   "compactionThreshold": 0.70,
@@ -250,6 +256,32 @@ depth 0). Zero/unset means the engine default (**1**: children cannot spawn
 further tasks). Values above **8** clamp to 8. Editable under `/settings` →
 Defaults; takes effect for **new** sessions (already-running engines keep their
 bound).
+
+**Tool retry / error recovery:** `toolRetry` controls harness auto-retry and
+loop detection for tool dispatch (issue #795). Policy is **error code ×
+idempotency** (see `internal/tool/retry.go`):
+
+| | `safe-retry` | `conditional` | `unsafe` |
+|---|---|---|---|
+| `transient` / `timeout` | auto-retry + backoff | fail (no blind mutation retry) | fail |
+| `precondition_failed` | recover hint | recover hint | fail |
+| other codes | fail | fail | fail |
+
+Mutative tools (`edit` / `write` / `apply_patch` / `bash` / …) never
+auto-retry on generic or transient failure — that prevents double-apply.
+Provider stream retries remain separate (`MaxStreamAttempts` in the engine).
+
+| Key | Meaning | Default |
+|---|---|---|
+| `toolRetry.maxAttempts` | attempts per tool call including the first; `1` disables auto-retry | `3` |
+| `toolRetry.baseDelayMs` | first backoff step (full jitter applied) | `200` |
+| `toolRetry.maxDelayMs` | backoff cap | `2000` |
+| `toolRetry.loopThreshold` | identical consecutive failing tool+args before the turn stops with `loop_detected` | `3` |
+
+When the loop detector trips the engine emits `tool.loop_detected`, settles the
+tool as blocked, and ends the turn (`stopReason: loop_detected`). Auto-retries
+emit `tool.retrying` (timeline) before each backoff sleep.
+
 
 ## Desktop notifications (`notify`)
 

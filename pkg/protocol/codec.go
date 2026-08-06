@@ -104,6 +104,10 @@ func eventType(ev Event) string {
 		return "usage.reported"
 	case ProviderRetrying:
 		return "provider.retrying"
+	case ToolRetrying:
+		return "tool.retrying"
+	case ToolLoopDetected:
+		return "tool.loop_detected"
 	case SchedulerQueued:
 		return "scheduler.queued"
 	case SchedulerAdmitted:
@@ -239,6 +243,10 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &UsageReported{}
 	case "provider.retrying":
 		ev = &ProviderRetrying{}
+	case "tool.retrying":
+		ev = &ToolRetrying{}
+	case "tool.loop_detected":
+		ev = &ToolLoopDetected{}
 	case "scheduler.queued":
 		ev = &SchedulerQueued{}
 	case "scheduler.admitted":
@@ -353,6 +361,10 @@ func deref(ev Event) Event {
 	case *UsageReported:
 		return *v
 	case *ProviderRetrying:
+		return *v
+	case *ToolRetrying:
+		return *v
+	case *ToolLoopDetected:
 		return *v
 	case *SchedulerQueued:
 		return *v

@@ -606,6 +606,10 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 		return e.Correlation, true
 	case protocol.ProviderRetrying:
 		return e.Correlation, true
+	case protocol.ToolRetrying:
+		return e.Correlation, true
+	case protocol.ToolLoopDetected:
+		return e.Correlation, true
 	case protocol.PermissionModeSelected:
 		return e.Correlation, true
 	case protocol.FilesInvalidated:

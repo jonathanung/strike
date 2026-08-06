@@ -898,6 +898,10 @@ func eventSessionID(ev protocol.Event) (string, bool) {
 		return e.SessionID, true
 	case protocol.ProviderRetrying:
 		return e.SessionID, true
+	case protocol.ToolRetrying:
+		return e.SessionID, true
+	case protocol.ToolLoopDetected:
+		return e.SessionID, true
 	case protocol.CompactionStarted:
 		return e.SessionID, true
 	case protocol.CompactionCompleted:
