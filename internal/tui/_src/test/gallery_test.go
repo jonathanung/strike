@@ -10,6 +10,7 @@ import (
 
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
 
 // TestGallery renders representative full-screen views to the test log for
@@ -69,6 +70,47 @@ func TestGallery(t *testing.T) {
 			m.windows = reg
 		}
 		m.windows, _ = m.windows.broadcast(m.visualizerStateSnapshot())
+	})
+	render("80x24 visualizer child detail", 80, 24, func(m *Model) {
+		m.focus = focusRight
+		m.sessionID = "gallery-root"
+		if reg, ok := m.windows.activate(visualizerWindowID); ok {
+			m.windows = reg
+		}
+		// Direct snapshot: detail render is VIZ.2; roster plumbing is VIZ.1 (#922).
+		m.windows, _ = m.windows.broadcast(visualizerStateMsg{
+			SessionID:   "gallery-child",
+			Label:       "scout",
+			Kind:        "child",
+			State:       theme.AgentStateAttention,
+			StatusLabel: "needs you",
+			Objective:   "map auth entrypoints",
+			LastAction:  "grep HandleLogin",
+			BlockReason: "permission: bash",
+			FilesTouched: []string{
+				"internal/auth/store.go",
+				"internal/auth/oauth.go",
+				"cmd/strike/main.go",
+			},
+		})
+	})
+	render("24x20 narrow visualizer child", 24, 20, func(m *Model) {
+		m.focus = focusRight
+		m.sessionID = "gallery-root"
+		if reg, ok := m.windows.activate(visualizerWindowID); ok {
+			m.windows = reg
+		}
+		m.windows, _ = m.windows.broadcast(visualizerStateMsg{
+			SessionID:    "gallery-child",
+			Label:        "scout",
+			Kind:         "child",
+			State:        theme.AgentStateAttention,
+			StatusLabel:  "needs you",
+			Objective:    "very long objective text for narrow pane truncation checks",
+			LastAction:   "tool-with-a-long-name",
+			BlockReason:  "waiting on a lengthy approval reason",
+			FilesTouched: []string{"path/to/some/deeply/nested/file.go"},
+		})
 	})
 	render("93x40 split canonical (left=60 gutter=1 right=32)", 93, 40, func(m *Model) {})
 	render("93x19 constrained split", 93, 19, func(m *Model) { m.focus = focusRight })

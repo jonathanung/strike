@@ -36,4 +36,79 @@ describe("reduceEvent", () => {
     expect(next.items).toEqual(base.items);
     expect(next.seen.size).toBe(base.seen.size + 1);
   });
+
+  it("appends local.system notices without touching seen", () => {
+    const base = initialState();
+    const next = reduceEvent(base, {
+      type: "local.system",
+      time: "1",
+      data: { title: "Help", text: "/export downloads markdown" },
+    });
+    expect(next.items).toHaveLength(1);
+    expect(next.items[0]).toMatchObject({ kind: "system", title: "Help", text: "/export downloads markdown" });
+    expect(next.seen.size).toBe(0);
+  });
+
+  it("stacks undo preview from turn.completed and pops on session.rewound", () => {
+    let state = reduceEvent(initialState(), {
+      type: "turn.completed",
+      time: "1",
+      data: {
+        files: [{ path: "a.go", kind: "update" }],
+        checkpointSkipped: 1,
+        uncovered: ["bash"],
+      },
+    });
+    expect(state.status.busy).toBe(false);
+    expect(state.undoStack).toHaveLength(1);
+    expect(state.undoStack[0]).toEqual({
+      files: [{ path: "a.go", kind: "update" }],
+      skipped: 1,
+      uncovered: ["bash"],
+    });
+
+    state = reduceEvent(state, {
+      type: "turn.completed",
+      time: "2",
+      data: { files: [{ path: "b.go", kind: "create" }] },
+    });
+    expect(state.undoStack).toHaveLength(2);
+    expect(state.undoStack.at(-1)?.files[0]?.path).toBe("b.go");
+
+    state = reduceEvent(state, { type: "session.rewound", time: "3", data: { removed: 2 } });
+    expect(state.undoStack).toHaveLength(1);
+    expect(state.undoStack[0].files[0]?.path).toBe("a.go");
+
+    state = reduceEvent(state, { type: "session.rewound", time: "4", data: {} });
+    expect(state.undoStack).toHaveLength(0);
+    // Extra pop is a no-op.
+    state = reduceEvent(state, { type: "session.rewound", time: "5", data: {} });
+    expect(state.undoStack).toHaveLength(0);
+  });
+
+  it("ignores child-lineage turn.completed for undo stack", () => {
+    let state = reduceEvent(initialState(), {
+      type: "turn.completed",
+      time: "1",
+      data: { parentSessionId: "parent", files: [{ path: "child.go", kind: "update" }] },
+    });
+    expect(state.undoStack).toHaveLength(0);
+    state = reduceEvent(state, {
+      type: "turn.completed",
+      time: "2",
+      data: { depth: 1, files: [{ path: "nested.go", kind: "update" }] },
+    });
+    expect(state.undoStack).toHaveLength(0);
+  });
+
+  it("clears undo stack on workspace reset", () => {
+    let state = reduceEvent(initialState(), {
+      type: "turn.completed",
+      time: "1",
+      data: { files: [{ path: "a.go", kind: "update" }] },
+    });
+    state = reduceEvent(state, { type: "workspace.reset", data: { sessionId: "other" } });
+    expect(state.undoStack).toEqual([]);
+    expect(state.status.sessionId).toBe("other");
+  });
 });
