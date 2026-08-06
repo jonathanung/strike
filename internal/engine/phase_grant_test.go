@@ -519,6 +519,101 @@ func TestChildInheritsPhaseCeilingCannotWiden(t *testing.T) {
 	}
 }
 
+func TestChildPhaseCannotWidenParentDenyEvenWithAuto(t *testing.T) {
+	// Parent config denies bash. Child with --auto enters a phase that allows
+	// bash — filtered ceiling must keep bash denied (no Deny→Allow on children).
+	dir := t.TempDir()
+	childWF := config.Workflow{
+		SchemaVersion: config.WorkflowSchemaVersion,
+		Name:          "child-widen",
+		Phases: []config.Phase{{
+			Name:  "open",
+			Agent: "build",
+			Permissions: permission.Ruleset{
+				{Permission: "bash", Pattern: "*", Action: permission.Allow},
+			},
+			Exit: config.ExitGate{Type: config.GateAgent},
+		}},
+	}
+	childWF.Fingerprint = config.MustWorkflowFingerprint(childWF)
+
+	const childPrompt = "enter widen phase"
+	// Child calls enter_plan_mode equivalent via phase: we seed InitialPhase on child
+	// by having the child engine created with the workflow — use task + child Initial*
+	// is internal. Instead spawn child and have it try bash after parent already
+	// applied phase deny via Rules.
+	//
+	// Simpler unit-style: parent Rules deny bash; child Depth=1 with auto + phase allow.
+	// Use engine.New directly as a depth-1 engine (simulates spawned child).
+	denyBash := permission.Ruleset{
+		{Permission: "bash", Pattern: "*", Action: permission.Deny},
+	}
+	// Parent layers as child would receive them (config deny in base).
+	childRules := permission.DeriveChildRules(
+		[]permission.Ruleset{permission.Defaults(), denyBash},
+		true,
+	)
+	bashArgs, _ := json.Marshal(map[string]any{"command": "echo pwned"})
+	bashCall := provider.ToolCall{ID: "bash-child", Name: "bash", Args: bashArgs}
+	prov := newScriptedProvider(
+		toolCallStep(bashCall),
+		completedStep("after bash"),
+	)
+	eng := engine.New(engine.Options{
+		SessionID:                  "child-depth-1",
+		ParentSessionID:            "parent",
+		Depth:                      1,
+		MaxChildDepth:              1,
+		Select:                     func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider:            "scripted",
+		Registry:                   tool.NewRegistry(tool.NewBash()),
+		WorkDir:                    dir,
+		Rules:                      childRules,
+		Agents:                     []engine.Agent{{Name: "build"}},
+		Workflows:                  []config.Workflow{childWF},
+		InitialPhaseWorkflow:       childWF.Name,
+		InitialPhaseIndex:          0,
+		DangerouslySkipPermissions: true,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	// Phase may apply (filtered) without grant prompt; bash must stay denied.
+	waitForEvent(t, eng, func(ev protocol.Event) bool {
+		_, ok := ev.(protocol.AgentSelected)
+		return ok
+	})
+
+	eng.Ops() <- protocol.UserInput{Text: "run bash"}
+	var end protocol.ToolCallEnd
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("timed out")
+		case ev := <-eng.Events():
+			switch e := ev.(type) {
+			case protocol.PermissionAsked:
+				if e.Permission == "bash" {
+					t.Fatalf("bash should be hard-denied, not asked: %#v", e)
+				}
+				eng.Ops() <- protocol.PermissionReply{RequestID: e.RequestID, Decision: protocol.DecisionReject}
+			case protocol.ToolCallEnd:
+				if e.CallID == "bash-child" {
+					end = e
+					goto done
+				}
+			}
+		}
+	}
+done:
+	if !end.IsError {
+		t.Fatalf("child bash must fail under parent deny ceiling: %#v", end)
+	}
+	_ = childPrompt
+}
+
 func TestRestorePhaseGrantApproved(t *testing.T) {
 	corr := protocol.Correlation{SessionID: "s1"}
 	events := []protocol.Event{

@@ -73,7 +73,14 @@ func (e *Engine) enterPhaseOpts(ctx context.Context, w config.Workflow, index in
 		return fmt.Errorf("workflow %q: phase index %d out of range", w.Name, index)
 	}
 	phase := w.Phases[index]
-	delta := e.perms.WideningFromPhase(phase.Permissions)
+	// Children inherit the parent ceiling (opts.Rules includes parent phase).
+	// Filter phase Allows that would override a parent Deny (AG3); denies always
+	// apply. Root engines keep authored phase rules and review true widenings.
+	phasePerms := phase.Permissions
+	if e.opts.Depth > 0 {
+		phasePerms = permission.ChildAgentRules(e.perms.BaselineLayers(), phase.Permissions)
+	}
+	delta := e.perms.WideningFromPhase(phasePerms)
 	if len(delta) > 0 {
 		if err := e.approvePhaseWidening(ctx, w, phase, index, delta); err != nil {
 			return err
@@ -93,7 +100,7 @@ func (e *Engine) enterPhaseOpts(ctx context.Context, w config.Workflow, index in
 	} else {
 		e.phaseGrantApproval = PhaseGrantApproval{}
 	}
-	e.perms.SetPhaseRules(phase.Permissions)
+	e.perms.SetPhaseRules(phasePerms)
 
 	e.emitSelected(protocol.PhaseChanged{
 		Correlation: e.sessionCorr(),
