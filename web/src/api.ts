@@ -42,7 +42,19 @@ export function liveConnection(rootID: string, onEvent: (event: Envelope) => voi
     socket.onclose = () => { if (!closed) { onState("reconnecting"); setTimeout(connect, Math.min(500 * 2 ** retry++, 8000)); } };
   };
   connect();
-  return { send: (type: string, data?: unknown) => socket?.readyState === WebSocket.OPEN && socket.send(JSON.stringify({ type, ...(data === undefined ? {} : { data }) })), close: () => { closed = true; socket?.close(); } };
+  return {
+    send: (type: string, data?: unknown) => socket?.readyState === WebSocket.OPEN && socket.send(JSON.stringify({ type, ...(data === undefined ? {} : { data }) })),
+    close: () => {
+      closed = true;
+      if (socket) {
+        // Drop handlers so in-flight frames cannot update a workspace after switch.
+        socket.onmessage = null;
+        socket.onerror = null;
+        socket.onclose = null;
+        socket.close();
+      }
+    },
+  };
 }
 
 export function historicalConnection(id: string, onEvent: (event: Envelope) => void, onError: (message: string) => void = () => {}) {

@@ -23,6 +23,19 @@ export type WorkspaceState = {
   children: Record<string, { agent?: string; status: string; summary?: string }>;
   changedFiles: string[];
 };
+/** Per-workspace composer + runtime mirrors kept while switching roots. */
+export type WorkspaceComposer = {
+  draft: string;
+  queue: Array<{ text: string; images: ImageAttachment[] }>;
+  images: ImageAttachment[];
+  fast: boolean;
+};
+export type WorkspaceSlice = WorkspaceState & WorkspaceComposer;
+/** Client cache keyed by workspace/root (or historical session) id. */
+export type ClientState = {
+  selectedID: string;
+  byID: Record<string, WorkspaceSlice>;
+};
 export type ActiveRoot = {
   id: string; title?: string; agent?: string; busy: boolean;
   activeAt?: number; createdAt?: number; hasRecentEvent?: boolean;

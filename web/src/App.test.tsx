@@ -133,4 +133,87 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(expect.stringContaining("/v1/ops"), expect.objectContaining({ body: expect.stringContaining('"requestId":"q1"') })));
   });
+
+  it("isolates drafts, queues, permissions, and transcripts across workspace switches", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) {
+        return response({
+          version: "test", authRequired: false, attachOnly: false,
+          capabilities: { live: true, roots: true, sessions: true },
+          protocolOps: ["user.input", "permission.reply"],
+          status: { sessionId: "root-a", provider: "echo", busy: false },
+          agents: [{ name: "build" }], skills: [],
+        });
+      }
+      if (url.includes("/v1/roots") && (!init || !init.method || init.method === "GET")) {
+        return response({
+          roots: [
+            { id: "root-a", agent: "AgentA", busy: false },
+            { id: "root-b", agent: "AgentB", busy: false },
+          ],
+          activeId: "root-a",
+        });
+      }
+      if (url.includes("sessions")) {
+        return response({
+          sessions: [{ id: "root-a", title: "A" }, { id: "root-b", title: "B" }],
+          liveId: "root-a",
+        });
+      }
+      return response({ ok: true });
+    }));
+
+    render(<App />);
+    await screen.findByText("AgentA");
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThanOrEqual(1));
+    const wsA = FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
+    expect(wsA.url).toContain("root=root-a");
+
+    fireEvent.change(screen.getByLabelText("Instruction"), { target: { value: "draft for A" } });
+    wsA.onmessage?.({ data: JSON.stringify({ type: "turn.started", time: "t1", data: { turnId: "ta" } }) } as MessageEvent);
+    fireEvent.change(screen.getByLabelText(/Instruction/), { target: { value: "queued on A" } });
+    fireEvent.submit(screen.getByLabelText(/Instruction/).closest("form")!);
+    expect(screen.getByRole("list", { name: "Queued prompts" })).toHaveTextContent("queued on A");
+    fireEvent.change(screen.getByLabelText("Instruction"), { target: { value: "still drafting A" } });
+    wsA.onmessage?.({ data: JSON.stringify({ type: "user.message", time: "t2", data: { text: "hello A", turnId: "ta" } }) } as MessageEvent);
+    wsA.onmessage?.({ data: JSON.stringify({ type: "permission.asked", time: "t3", data: { requestId: "pa", tool: "bash" } }) } as MessageEvent);
+    expect(await screen.findByRole("dialog", { name: "Permission required" })).toBeInTheDocument();
+    expect(screen.getByText("hello A")).toBeInTheDocument();
+
+    const socketsBeforeB = FakeWebSocket.instances.length;
+    fireEvent.click(screen.getByText("AgentB"));
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(socketsBeforeB));
+    const wsB = FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
+    expect(wsB.url).toContain("root=root-b");
+    expect(wsA.close).toHaveBeenCalled();
+
+    // B starts clean: no A's draft, queue, permission, or transcript.
+    expect(screen.queryByRole("dialog", { name: "Permission required" })).not.toBeInTheDocument();
+    expect(screen.queryByText("hello A")).not.toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Queued prompts" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Instruction")).toHaveValue("");
+
+    fireEvent.change(screen.getByLabelText("Instruction"), { target: { value: "draft for B" } });
+    wsB.onmessage?.({ data: JSON.stringify({ type: "user.message", time: "tb1", data: { text: "hello B", turnId: "tb" } }) } as MessageEvent);
+    expect(await screen.findByText("hello B")).toBeInTheDocument();
+
+    // Late event on closed A socket must not interleave into B's transcript.
+    wsA.onmessage?.({ data: JSON.stringify({ type: "user.message", time: "late", data: { text: "late A leak", turnId: "ta2" } }) } as MessageEvent);
+    expect(screen.queryByText("late A leak")).not.toBeInTheDocument();
+    expect(screen.getByText("hello B")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("AgentA"));
+    await waitFor(() => expect(screen.getByLabelText("Instruction")).toHaveValue("still drafting A"));
+    expect(screen.getByRole("list", { name: "Queued prompts" })).toHaveTextContent("queued on A");
+    expect(screen.getByText("hello A")).toBeInTheDocument();
+    expect(screen.queryByText("hello B")).not.toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Permission required" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/v1/ops?root=root-a"),
+      expect.objectContaining({ body: expect.stringContaining("permission.reply") }),
+    ));
+  });
 });
