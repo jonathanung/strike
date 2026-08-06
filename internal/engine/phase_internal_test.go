@@ -530,7 +530,7 @@ func waitPhaseChanged(t *testing.T, e *Engine, wantPhase string) protocol.PhaseC
 	}
 }
 
-func TestPlanConvenienceAgentSyncPreserved(t *testing.T) {
+func TestPlanConvenienceAgentSyncAbandonsWithoutHandoff(t *testing.T) {
 	e := New(Options{
 		SessionID: "plan-sync",
 		Rules:     []permission.Ruleset{permission.Defaults()},
@@ -543,11 +543,30 @@ func TestPlanConvenienceAgentSyncPreserved(t *testing.T) {
 	if p.Workflow != "plan-implement" {
 		t.Fatalf("plan enter = %#v", p)
 	}
-	// build leaves plan → implement without clearing.
+	// Without handoff, build abandons plan workflow (does not enter implement).
 	e.syncPhaseWithAgent("build")
-	p = waitPhaseChanged(t, e, "implement")
+	p = waitPhaseChanged(t, e, "")
+	if p.Phase != "" {
+		t.Fatalf("want cleared phase without handoff, got %#v", p)
+	}
+}
+
+func TestPlanConvenienceAgentSyncImplementAfterHandoff(t *testing.T) {
+	e := New(Options{
+		SessionID: "plan-sync-handoff",
+		Rules:     []permission.Ruleset{permission.Defaults()},
+		Workflows: []config.Workflow{config.BuiltinPlanImplement()},
+		Agents:    []Agent{{Name: "plan"}, {Name: "build"}, {Name: "orchestrator"}},
+	})
+	e.agent = Agent{Name: "build"}
+	e.syncPhaseWithAgent("plan")
+	_ = waitPhaseChanged(t, e, "plan")
+	e.planHandoff = PlanHandoffState{Active: true, PlanID: "p1", Version: 1, ApprovalSource: protocol.PlanApprovalUser}
+	// After handoff, build may align to implement without re-pinning.
+	e.syncPhaseWithAgent("build")
+	p := waitPhaseChanged(t, e, "implement")
 	if p.Phase != "implement" {
-		t.Fatalf("plan leave = %#v", p)
+		t.Fatalf("plan leave after handoff = %#v", p)
 	}
 }
 

@@ -262,7 +262,7 @@ func TestBuiltinShortPurposesCoversCoreTools(t *testing.T) {
 		"notebook_edit", "sleep", "skill",
 		"toolsearch", "question", "apply_patch", "enter_plan_mode",
 		"exit_plan_mode", "phase_done", "task",
-		"task_status", "task_read", "task_message", "task_interrupt", "wait",
+		"task_status", "task_read", "task_message", "task_interrupt", "delegate", "wait",
 		"agent_roster", "agent_ownership", "agent_message", "agent_broadcast", "team_task",
 	}
 	m := BuiltinShortPurposes()

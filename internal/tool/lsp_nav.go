@@ -34,6 +34,10 @@ func NewDefinition(nav LSPNavigator) Tool {
 
 func (t *definitionTool) Name() string { return "definition" }
 
+func (t *definitionTool) Contract() Contract {
+	return staticContract(SideEffectRead, IdempotencySafeRetry)
+}
+
 func (t *definitionTool) Description() string {
 	return `Go to definition of the symbol at a file position via the language server.
 
@@ -120,6 +124,10 @@ func NewReferences(nav LSPNavigator) Tool {
 
 func (t *referencesTool) Name() string { return "references" }
 
+func (t *referencesTool) Contract() Contract {
+	return staticContract(SideEffectRead, IdempotencySafeRetry)
+}
+
 func (t *referencesTool) Description() string {
 	return `Find references to the symbol at a file position via the language server.
 
@@ -199,6 +207,10 @@ func NewSymbols(nav LSPNavigator) Tool {
 }
 
 func (t *symbolsTool) Name() string { return "symbols" }
+
+func (t *symbolsTool) Contract() Contract {
+	return staticContract(SideEffectRead, IdempotencySafeRetry)
+}
 
 func (t *symbolsTool) Description() string {
 	return `List symbols via the language server (document or workspace).

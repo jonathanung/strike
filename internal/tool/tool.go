@@ -1,5 +1,6 @@
 // Package tool defines the tool contract and the built-in tool set
 // (read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/
+// task_message/task_interrupt/delegate/agent_roster/agent_ownership/agent_message/agent_broadcast/
 // task_message/task_interrupt/wait/agent_roster/agent_ownership/agent_message/agent_broadcast/
 // team_task/webfetch/todowrite/todoread/
 // memory_write/memory_read/issue_write/issue_read/plan_write/plan_read/notebook_edit/sleep/skill/question/enter_plan_mode/
@@ -86,6 +87,19 @@ type TaskRequest struct {
 	// (off|low|medium|high|xhigh|max). Empty inherits the parent's dial
 	// (subject to agent effort pins). When set, it wins over agent pins.
 	Effort string
+	// Criteria are optional acceptance criteria recorded on the delegation
+	// lifecycle object. When non-empty, successful child completion enters
+	// lifecycle state "review" instead of "done" (verification gates / #780).
+	Criteria []string
+	// Deps lists upstream delegation ids (or linked session ids) that must
+	// reach lifecycle "done" before this task spawns. Unmet deps leave the
+	// delegation queued without starting a child.
+	Deps []string
+	// Subscribe lists lifecycle states that should notify the owner/lead
+	// (blocked|review|done|failed|canceled|working|queued).
+	Subscribe []string
+	// Assignee is an optional display label for the intended worker.
+	Assignee string
 	// Verify declares independent completion gates. When non-empty, implementer
 	// completion alone does not yield final completed status — the harness runs
 	// these gates and only promotes to completed on pass (else blocked).
@@ -93,15 +107,20 @@ type TaskRequest struct {
 }
 
 // TaskResult is the outcome of spawning a child session.
-// Status is one of "started", "completed", "failed", or "canceled".
-// Non-blocking spawns return "started" with SessionID set; terminal statuses
-// are retained for callers that still wait on completion.
+// Status is one of "started", "queued", "completed", "failed", or "canceled".
+// Non-blocking spawns return "started" with SessionID set; "queued" means the
+// delegation was created but is waiting on dependencies (no child yet).
+// Terminal statuses are retained for callers that still wait on completion.
 type TaskResult struct {
 	Output    string
 	Status    string
 	SessionID string
 	// Name is the stable alias assigned at spawn when requested (may be empty).
 	Name string
+	// DelegationID is the lifecycle object id (d1, d2, …) when tracked.
+	DelegationID string
+	// Lifecycle is the delegation state (queued|working|blocked|review|done|…).
+	Lifecycle string
 }
 
 // Task control request/result types for parent inspection of owned children.
@@ -159,7 +178,8 @@ type VerificationEnv struct {
 }
 
 // TaskStatusResult is a model-facing snapshot of a child session.
-// State is one of starting|working|needs_attention|completed|failed|canceled|blocked|unknown.
+// State is one of starting|working|needs_attention|completed|failed|canceled|blocked|unknown
+// (or "queued" when a delegation exists but no child has started).
 // QueuePools/QueueLabel are set while the child is waiting on scheduler admission
 // so callers can distinguish queue wait from idle without exact queue positions.
 type TaskStatusResult struct {
@@ -181,6 +201,14 @@ type TaskStatusResult struct {
 	QueuePools []string `json:"queue_pools,omitempty"`
 	// QueueLabel is a short human tag for the waiting work (e.g. "model").
 	QueueLabel string `json:"queue_label,omitempty"`
+	// DelegationID / Lifecycle / Criteria expose the orchestration object when
+	// this child (or queued ref) is tracked as a first-class delegation.
+	DelegationID string   `json:"delegation_id,omitempty"`
+	Lifecycle    string   `json:"lifecycle,omitempty"`
+	Criteria     []string `json:"criteria,omitempty"`
+	Deps         []string `json:"deps,omitempty"`
+	Version      int      `json:"version,omitempty"`
+	BlockReason  string   `json:"block_reason,omitempty"`
 }
 
 // TaskReadRequest loads a bounded transcript slice from a child session.
@@ -343,6 +371,63 @@ type TeamTaskRequest struct {
 	ExpectedVersion int // 0 = skip CAS version check
 }
 
+// DelegateRequest mutates or inspects first-class delegation lifecycle objects.
+// Action is create|get|list|transition.
+// Create mirrors task spawn fields (prompt/agent/…) plus criteria/deps/subscribe.
+// Transition moves state with optional expected_version CAS.
+type DelegateRequest struct {
+	Action          string
+	ID              string
+	Prompt          string
+	Name            string
+	Agent           string
+	Model           string
+	Effort          string
+	Assignee        string
+	Criteria        []string
+	Deps            []string
+	Subscribe       []string
+	Verify          []VerifyGate
+	State           string // target lifecycle state for transition
+	Reason          string
+	ExpectedVersion int // 0 = skip CAS
+}
+
+// DelegationItem is one lifecycle row for the delegate tool.
+type DelegationItem struct {
+	ID             string   `json:"id"`
+	Prompt         string   `json:"prompt,omitempty"`
+	Criteria       []string `json:"criteria,omitempty"`
+	Deps           []string `json:"deps,omitempty"`
+	Subscribe      []string `json:"subscribe,omitempty"`
+	OwnerSessionID string   `json:"owner_session_id,omitempty"`
+	Assignee       string   `json:"assignee,omitempty"`
+	Agent          string   `json:"agent,omitempty"`
+	Model          string   `json:"model,omitempty"`
+	Effort         string   `json:"effort,omitempty"`
+	Name           string   `json:"name,omitempty"`
+	SessionID      string   `json:"session_id,omitempty"`
+	State          string   `json:"state"`
+	Version        int      `json:"version"`
+	BlockReason    string   `json:"block_reason,omitempty"`
+	SpawnPending   bool     `json:"spawn_pending,omitempty"`
+	CreatedAt      string   `json:"created_at,omitempty"` // RFC3339
+	UpdatedAt      string   `json:"updated_at,omitempty"`
+}
+
+// DelegateResult is the delegate tool payload.
+type DelegateResult struct {
+	LeadID   string           `json:"lead_id,omitempty"`
+	Action   string           `json:"action,omitempty"`
+	Item     *DelegationItem  `json:"item,omitempty"`
+	Items    []DelegationItem `json:"items,omitempty"`
+	Conflict bool             `json:"conflict,omitempty"`
+	Detail   string           `json:"detail,omitempty"`
+	// Spawn fields when create starts a child immediately.
+	SessionID string `json:"session_id,omitempty"`
+	Status    string `json:"status,omitempty"` // started|queued
+}
+
 // TeamTaskItem is one board row for team_task.
 type TeamTaskItem struct {
 	ID        string `json:"id"`
@@ -407,10 +492,13 @@ type SessionPR struct {
 // AgentRoster, when non-nil, lists the implicit session team (lead + peers).
 // AgentMessage/AgentBroadcast, when non-nil, send peer mail on the team.
 // TeamTask, when non-nil, mutates the shared lead-scoped team task board.
+// Delegate, when non-nil, creates/lists/transitions first-class delegations.
 // AskUser, when non-nil, blocks until the user answers a question batch.
 // SwitchAgent, when non-nil, queues an agent switch applied when the turn ends.
 // EnterPlanPhase starts the built-in plan→implement workflow at plan.
 // AdvancePhase runs the active phase exit gate and loads the next phase.
+// HandoffPlan is the unified plan approval + handoff used by exit_plan_mode
+// (canonical plan id/version or bounded legacy text; records approval source).
 // ReportOutput, when non-nil, streams partial stdout/stderr to the UI while
 // Execute is still running (e.g. live bash output).
 // Process, when set, receives subprocess lifecycle from RunProcess (engine
@@ -462,7 +550,9 @@ type Context struct {
 	// AgentBroadcast sends a peer mailbox message to all other teammates.
 	AgentBroadcast func(ctx context.Context, req AgentBroadcastRequest) (AgentBroadcastResult, error)
 	// TeamTask creates/lists/updates/claims/completes shared team board items.
-	TeamTask    func(ctx context.Context, req TeamTaskRequest) (TeamTaskResult, error)
+	TeamTask func(ctx context.Context, req TeamTaskRequest) (TeamTaskResult, error)
+	// Delegate creates/lists/transitions first-class delegation lifecycle objects.
+	Delegate    func(ctx context.Context, req DelegateRequest) (DelegateResult, error)
 	AskUser     func(ctx context.Context, req QuestionRequest) (QuestionResponse, error)
 	SwitchAgent func(name string) error
 	// EnterPlanPhase starts the default plan-implement workflow at the plan phase
@@ -474,6 +564,11 @@ type Context struct {
 	StopWorkflow func() error
 	// AdvancePhase clears the current phase exit gate and advances (or ends).
 	AdvancePhase func(ctx context.Context) error
+	// HandoffPlan is the unified plan-mode approval + handoff path used by
+	// exit_plan_mode. It validates the canonical (or legacy) plan, runs the
+	// autonomy gate once, records approval source + plan identity, advances
+	// the plan→implement workflow, and routes to build/orchestrator.
+	HandoffPlan func(ctx context.Context, req PlanHandoffRequest) (PlanHandoffResult, error)
 	// ReportOutput streams retained output chunks (already size-capped by the
 	// tool) for live UI. Nil disables streaming; tools must still return the
 	// full Result.Output at the end.

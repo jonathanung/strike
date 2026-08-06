@@ -20,7 +20,7 @@ func (phaseDoneTool) Contract() Contract {
 func (phaseDoneTool) Description() string {
 	return `Signal that the current workflow phase is complete and advance to the next phase (or end the workflow).
 
-Honors the session autonomy dial (not the workflow's authored exit type): supervised asks the user, agent treats this call as self-affirmation, checks runs the phase check command, skip-all advances without approval. Prefer exit_plan_mode when leaving the built-in plan phase after presenting a plan.`
+Honors the session autonomy dial (not the workflow's authored exit type): supervised asks the user, agent treats this call as self-affirmation, checks runs the phase check command, skip-all advances without approval. Cannot leave the built-in plan phase — use exit_plan_mode with plan_id/expected_version for the unified plan approval and handoff.`
 }
 
 func (phaseDoneTool) Schema() json.RawMessage {

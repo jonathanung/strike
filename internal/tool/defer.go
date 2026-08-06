@@ -10,6 +10,7 @@ var coreToolNames = map[string]struct{}{
 	"edit": {}, "write": {}, "apply_patch": {},
 	"bash": {},
 	"task": {}, "task_status": {}, "task_read": {}, "task_message": {}, "task_interrupt": {},
+	"delegate":        {},
 	"wait":            {},
 	"agent_roster":    {},
 	"agent_ownership": {},

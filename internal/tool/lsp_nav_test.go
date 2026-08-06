@@ -233,6 +233,18 @@ func TestSymbolsToolRequiresArg(t *testing.T) {
 	}
 }
 
+func TestNavToolContracts(t *testing.T) {
+	for _, tl := range []Tool{NewDefinition(nil), NewReferences(nil), NewSymbols(nil)} {
+		c := LookupContract(tl)
+		if err := c.Validate(); err != nil {
+			t.Errorf("%s: %v", tl.Name(), err)
+		}
+		if c.SideEffect != SideEffectRead || c.Idempotency != IdempotencySafeRetry {
+			t.Errorf("%s contract = %+v, want read/safe-retry", tl.Name(), c)
+		}
+	}
+}
+
 func TestNavToolsDeferred(t *testing.T) {
 	reg := NewRegistry(NewRead(), NewDefinition(nil), NewReferences(nil), NewSymbols(nil))
 	reg.Register(NewToolSearch(reg))

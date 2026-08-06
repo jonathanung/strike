@@ -25,11 +25,12 @@ var shortPurposes = map[string]string{
 	"write":           "create or overwrite a file",
 	"apply_patch":     "coordinated multi-file patch",
 	"bash":            "run a shell command",
-	"task":            "delegate a bounded subtask to a child agent (optional agent/model)",
+	"task":            "delegate a bounded subtask to a child agent (optional agent/model/criteria/deps)",
 	"task_status":     "check status of a delegated child task",
 	"task_read":       "read a bounded child transcript slice",
 	"task_message":    "send guidance to a running child task",
 	"task_interrupt":  "cancel a running child task",
+	"delegate":        "first-class delegation lifecycle (create/get/list/transition)",
 	"wait":            "wait for owned child task events (done/blocked) with timeout",
 	"agent_roster":    "list lead and teammate agents on the session team",
 	"agent_ownership": "query path ownership/overlaps; lease path prefixes",
@@ -256,11 +257,13 @@ func recommendedGuidance(entries []GuidanceEntry) string {
 	add(has("question"),
 		"Use `question` when a decision genuinely belongs to the user.")
 	add(has("task") && has("task_status", "task_read") && has("wait"),
-		"Use `task` for bounded non-blocking delegation (optional `agent`/`model`/`name`). Do not busy-poll `task_status` — prefer `wait` (task.done/task.blocked/…) with timeout, `[child.completed]` structured handoff JSON (summary, files_changed, verification, findings, blockers, recommended_next_action), and the peer inbox. One-off `task_status`/`task_read` only when needed (`task_status` also returns `handoff` when terminal). `task_message` steers owned children; `task_interrupt` cancels. Bound fan-out (MaxChildDepth).")
+		"Use `task` for bounded non-blocking delegation (optional `agent`/`model`/`name`/`criteria`/`deps`/`subscribe`). Do not busy-poll `task_status` — prefer `wait` (task.done/task.blocked/…) with timeout, `[child.completed]` structured handoff JSON (summary, files_changed, verification, findings, blockers, recommended_next_action), and the peer inbox. One-off `task_status`/`task_read` only when needed (`task_status` also returns `handoff` + lifecycle fields when tracked). `task_message` steers owned children; `task_interrupt` cancels. Bound fan-out (MaxChildDepth).")
 	add(has("task") && has("task_status", "task_read") && !has("wait"),
-		"Use `task` for bounded non-blocking delegation (optional `agent`/`model`/`name`). Do not busy-poll `task_status` — prefer `[child.completed]` structured handoff JSON (summary, files_changed, verification, findings, blockers, recommended_next_action) and the peer inbox. One-off `task_status`/`task_read` only when needed (`task_status` also returns `handoff` when terminal). `task_message` steers owned children; `task_interrupt` cancels. Bound fan-out (MaxChildDepth).")
+		"Use `task` for bounded non-blocking delegation (optional `agent`/`model`/`name`/`criteria`/`deps`/`subscribe`). Do not busy-poll `task_status` — prefer `[child.completed]` structured handoff JSON (summary, files_changed, verification, findings, blockers, recommended_next_action) and the peer inbox. One-off `task_status`/`task_read` only when needed (`task_status` also returns `handoff` + lifecycle fields when tracked). `task_message` steers owned children; `task_interrupt` cancels. Bound fan-out (MaxChildDepth).")
 	add(has("task") && !has("task_status", "task_read"),
 		"Use `task` for bounded non-blocking delegation (self-contained prompt). A later `[child.completed]` delivers a structured handoff JSON — never sleep-poll for task completion.")
+	add(has("delegate"),
+		"Use `delegate` for first-class lifecycle control (create/get/list/transition) with acceptance criteria, deps, subscriptions, and CAS `expected_version`. States: queued→working→blocked→review→done (+failed/canceled). Plain `task` remains a thin compatible spawn path.")
 	add(has("wait"),
 		"Prefer `wait` over sleep-polling `task_status` when you must synchronize on owned child completion or blockers (`task.done`/`task.failed`/`task.canceled`/`task.blocked` with timeout). Structured outcomes: matched|timeout|canceled.")
 	add(has("agent_roster"),
