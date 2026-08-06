@@ -65,6 +65,50 @@ func TestTaskStatusSuccess(t *testing.T) {
 	}
 }
 
+func TestTaskStatusVerificationReport(t *testing.T) {
+	tc := allowAll(t.TempDir())
+	tc.TaskStatus = func(_ context.Context, req TaskStatusRequest) (TaskStatusResult, error) {
+		return TaskStatusResult{
+			SessionID:       req.SessionID,
+			State:           "blocked",
+			Elapsed:         "1s",
+			TerminalSummary: "verification failed",
+			HasHandoff:      true,
+			Handoff: CompletionHandoff{
+				Summary:  "claimed done",
+				Blockers: []string{"cmd failed"},
+			},
+			HasVerification: true,
+			Verification: VerificationReport{
+				Passed:   false,
+				Claimed:  true,
+				Verified: false,
+				Summary:  "verification failed: unit",
+				Checks: []VerificationCheck{{
+					Name:   "unit",
+					Kind:   "cmd",
+					Value:  "false",
+					Passed: false,
+					Error:  "exit 1",
+				}},
+				Env: VerificationEnv{SessionID: req.SessionID, WorkDir: "/tmp"},
+			},
+		}, nil
+	}
+	res, err := NewTaskStatus().Execute(context.Background(), mustJSON(t, map[string]any{
+		"session_id": "child-1",
+	}), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Output, `"verification"`) || !strings.Contains(res.Output, `"claimed":true`) {
+		t.Fatalf("output missing verification: %s", res.Output)
+	}
+	if !strings.Contains(res.Output, `"state":"blocked"`) {
+		t.Fatalf("output = %s", res.Output)
+	}
+}
+
 func TestTaskStatusTerminalHandoff(t *testing.T) {
 	tc := allowAll(t.TempDir())
 	tc.TaskStatus = func(_ context.Context, req TaskStatusRequest) (TaskStatusResult, error) {

@@ -241,6 +241,8 @@ func visualizerStateGlyph(th theme.Theme, state theme.AgentState, status string)
 			return ic.Err
 		case string(protocol.ChildStatusCanceled):
 			return ic.Info
+		case string(protocol.ChildStatusBlocked):
+			return ic.Info
 		case "running":
 			return ic.Ellipsis
 		default:
