@@ -399,6 +399,18 @@ func (e *Engine) applyPermissionMode(mode protocol.PermissionMode, alignPlan boo
 		})
 		return
 	}
+	// Managed/MDM lock: user dial and resume cannot leave the enforced mode.
+	// Startup (alignPlan=false) still applies InitialPermissionMode once.
+	if alignPlan && e.opts.LockPermissionMode {
+		locked := e.opts.InitialPermissionMode.Normalize()
+		if parsed.Normalize() != locked {
+			e.emit(protocol.EngineError{
+				Correlation: e.sessionCorr(),
+				Message:     fmt.Sprintf("permission mode is locked by managed config (%s)", locked),
+			})
+			return
+		}
+	}
 	if err := sandbox.CheckYoloSandbox(string(parsed), e.opts.SandboxMode, e.opts.AllowYoloWithoutSandbox); err != nil {
 		e.emit(protocol.EngineError{
 			Correlation: e.sessionCorr(),

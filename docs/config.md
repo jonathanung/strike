@@ -1,10 +1,19 @@
 # Config
 
-`~/.strike/config` (global) merged with `./.strike/config` (project). Both
+`~/.strike/config` (global) merged with `./.strike/config` (project), then
+optional **managed/MDM** system config (highest). User and project files
 accept **JSON or JSONC** (`//` line comments and `/* block comments */`, same
 stripper as `mcp.jsonc` / `providers.jsonc` / `keybinds.jsonc`). An optional
 top-level `"$schema"` key is **ignored** at load (editor autocomplete only;
 Strike does not ship or fetch a schema URL).
+
+**Load order (later wins for scalars; permission rules concatenate):**
+
+1. Built-in defaults
+2. Global `~/.strike/config` (+ `mcp.jsonc` / `providers.jsonc` / `keybinds.jsonc`)
+3. Project `./.strike/config` (+ same sidecar files)
+4. **Managed/MDM** system `managed-config` (+ `managed-config.d/`) — see
+   [Managed / MDM config](#managed--mdm-config-enterprise) below
 
 **Round-trip / save policy:** hand-edited comments and `$schema` are kept on
 disk until a **programmatic write** runs (`SetGlobalDefaults`, theme /
@@ -12,13 +21,76 @@ presentation / dials / scheduler presets, custom provider upsert/remove,
 `AppendProjectPermission`, etc.). Those paths read JSONC, then rewrite
 **pretty-printed pure JSON** via `encoding/json` — comments and `$schema` are
 dropped. Prefer keeping durable commentary in a sibling note, or avoid
-`/settings`-style writers if you need comments to survive.
+`/settings`-style writers if you need comments to survive. Programmatic
+saves only touch user/project paths — they never write managed files.
 
 **Symlinks:** `~/.strike` and `<project>/.strike` may be directory symlinks
 (state lives elsewhere). Strike resolves them before opening history/memory/
 issues and before writing config. A file symlink at `~/.strike/config` (for
 example stow/dotfiles) is preserved on save — the referent is updated, not
 replaced by a plain file.
+
+## Managed / MDM config (enterprise)
+
+For organizations that need centralized policy users cannot override, Strike
+loads a **managed** config layer from a system directory (file-based MDM,
+same idea as Claude Code `managed-settings.json`). This is **out of scope for
+casual users** — leave the directory empty and Strike behaves as before.
+
+### Paths
+
+| Platform | Directory |
+|---|---|
+| Linux / other Unix | `/etc/strike/` |
+| macOS | `/Library/Application Support/Strike/` |
+| Windows | `%ProgramFiles%\Strike\` (usually `C:\Program Files\Strike\`) |
+
+Files under that root:
+
+| File | Role |
+|---|---|
+| `managed-config` / `managed-config.json` / `managed-config.jsonc` | Primary policy (first existing extension wins) |
+| `managed-config.d/*.json` and `*.jsonc` | Drop-in fragments, sorted by filename, merged after the primary file |
+
+Hidden drop-ins (names starting with `.`) are ignored. Use numeric prefixes to
+control order (`10-sandbox.json`, `20-permissions.json`).
+
+**Test / custom deploy root:** set `STRIKE_MANAGED_ROOT` to an absolute
+directory; system defaults are skipped when the env var is set.
+
+Managed files use the **same JSON/JSONC schema** as user config. Typical
+enterprise keys:
+
+```jsonc
+// /etc/strike/managed-config.jsonc
+{
+  "sandbox": "read-only",
+  "permissionMode": "default",
+  "permissionPreset": "dev",
+  "permissions": [
+    { "permission": "bash", "pattern": "rm -rf *", "action": "deny" },
+    { "permission": "write", "pattern": "**/.env", "action": "deny" },
+    { "permission": "webfetch", "pattern": "*", "action": "deny" }
+  ]
+}
+```
+
+### What is enforceable
+
+| Control | Behavior when set in managed |
+|---|---|
+| `sandbox` | Wins over global/project. **CLI `--sandbox` is ignored** so operators cannot loosen OS isolation from the command line. |
+| `permissionMode` | Wins over global/project and **session resume**. Mid-session `/mode` / Shift+Tab is **rejected** while locked. |
+| `permissionPreset` | Wins over user/project preset selection. |
+| `permissions[]` | Concatenated after user/project rules (last-match in the config layer). **Deny** rules are also installed as a late evaluation **ceiling** so session always-grants, scoped grants, `--auto` / `--dangerously-skip-permissions`, and workflow phase widens cannot re-allow a managed deny. |
+
+Other managed keys (theme, model, MCP, …) merge with normal last-wins
+semantics; only the security dials above are hard-locked against CLI/session
+override. Invalid managed files **fail Load** (fail closed) so a broken MDM
+push is visible at startup rather than silently dropped.
+
+Strike never writes managed paths. Deploy with your OS package manager, MDM
+profile, or configuration management (Ansible, Puppet, …).
 
 ## First-time onboarding state
 
@@ -124,14 +196,17 @@ write this file. Manual `/ftue` remains available after acknowledgement.
 ```
 
 Rules concatenate across layers; the last matching rule wins, so project
-config overrides global, and session "always" grants override both.
+config overrides global, managed overrides both for rules present there, and
+session "always" grants override user/project — but **not** managed denies
+(see evaluation order).
 
 **Evaluation order (last-match-wins):** defaults → optional
-`permissionPreset` → `permissions[]` (global then project) → optional
-`--dangerously-skip-permissions` allow-all → project runtime grants → active
-agent profile → session always grants → scoped TTL grants → permission-mode
-late denies (plan) → workflow phase profile → mode ask-upgrade (yolo /
-accept-edits only upgrade remaining Ask→Allow; never widen Deny).
+`permissionPreset` → `permissions[]` (global then project then managed) →
+optional `--dangerously-skip-permissions` allow-all → project runtime grants
+→ active agent profile → session always grants → scoped TTL grants →
+permission-mode late denies (plan) → workflow phase profile → **managed deny
+ceiling** → mode ask-upgrade (yolo / accept-edits only upgrade remaining
+Ask→Allow; never widen Deny).
 
 **Permission presets (`permissionPreset`):** shipped named rulesets inserted
 after defaults and before `permissions[]`. Empty means no preset layer.
