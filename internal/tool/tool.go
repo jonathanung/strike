@@ -1,6 +1,6 @@
 // Package tool defines the tool contract and the built-in tool set
 // (read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/
-// task_message/task_interrupt/agent_roster/agent_ownership/agent_message/agent_broadcast/
+// task_message/task_interrupt/wait/agent_roster/agent_ownership/agent_message/agent_broadcast/
 // team_task/webfetch/todowrite/todoread/
 // memory_write/memory_read/issue_write/issue_read/plan_write/plan_read/notebook_edit/sleep/skill/question/enter_plan_mode/
 // exit_plan_mode/phase_done/toolsearch).
@@ -238,6 +238,32 @@ type TaskInterruptResult struct {
 	Detail    string
 }
 
+// WaitRequest blocks until an owned-child orchestration event matches.
+// Events are canonical kinds: task.done, task.failed, task.canceled, task.blocked
+// (aliases accepted by the tool). SessionID filters to one child (id or name);
+// empty waits on any owned child (wait-any). TimeoutSeconds is required.
+type WaitRequest struct {
+	Events         []string
+	SessionID      string
+	TimeoutSeconds float64
+}
+
+// WaitResult is the structured outcome of a wait.
+// Outcome is matched|timeout|canceled.
+type WaitResult struct {
+	Outcome        string            `json:"outcome"`
+	Event          string            `json:"event,omitempty"`
+	SessionID      string            `json:"session_id,omitempty"`
+	Name           string            `json:"name,omitempty"`
+	Status         string            `json:"status,omitempty"`
+	Summary        string            `json:"summary,omitempty"`
+	Handoff        CompletionHandoff `json:"handoff,omitempty"`
+	HasHandoff     bool              `json:"has_handoff,omitempty"`
+	WaitID         string            `json:"wait_id,omitempty"`
+	TimeoutSeconds float64           `json:"timeout_seconds,omitempty"`
+	Detail         string            `json:"detail,omitempty"`
+}
+
 // AgentRosterRequest lists the implicit session team (no filters today).
 type AgentRosterRequest struct{}
 
@@ -377,6 +403,7 @@ type SessionPR struct {
 // SpawnTask, when non-nil, starts a child session (non-blocking for the parent).
 // TaskStatus/TaskRead/TaskMessage/TaskInterrupt, when non-nil, inspect or
 // control owned descendant sessions (never arbitrary sessions).
+// Wait, when non-nil, blocks until an owned-child event matches (or timeout).
 // AgentRoster, when non-nil, lists the implicit session team (lead + peers).
 // AgentMessage/AgentBroadcast, when non-nil, send peer mail on the team.
 // TeamTask, when non-nil, mutates the shared lead-scoped team task board.
@@ -425,6 +452,9 @@ type Context struct {
 	TaskMessage      func(ctx context.Context, req TaskMessageRequest) (TaskMessageResult, error)
 	// TaskInterrupt cancels an owned running child by session id.
 	TaskInterrupt func(ctx context.Context, req TaskInterruptRequest) (TaskInterruptResult, error)
+	// Wait blocks until an owned-child orchestration event matches, times out,
+	// or the tool context is canceled. Emits wait.started / wait.resolved.
+	Wait func(ctx context.Context, req WaitRequest) (WaitResult, error)
 	// AgentRoster lists lead + teammates on the implicit session team.
 	AgentRoster func(ctx context.Context, req AgentRosterRequest) (AgentRosterResult, error)
 	// AgentMessage sends a peer mailbox message to one teammate.

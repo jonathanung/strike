@@ -27,7 +27,7 @@ const childActivityCap = 12
 // team_task) must NOT be listed here — depth-capped leaves still coordinate.
 // task_message is parent-control and is stripped with the other task_* tools.
 var leafTaskTools = []string{
-	"task", "task_status", "task_read", "task_message", "task_interrupt",
+	"task", "task_status", "task_read", "task_message", "task_interrupt", "wait",
 }
 
 // childHandle tracks one non-blocking child engine while it runs.
@@ -327,10 +327,12 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 			switch ev := ev.(type) {
 			case protocol.PermissionAsked:
 				e.emit(ev)
+				e.notifyWaitersBlocked(childID, memberName)
 			case protocol.PermissionResolved:
 				e.emit(ev)
 			case protocol.QuestionAsked:
 				e.emit(ev)
+				e.notifyWaitersBlocked(childID, memberName)
 			case protocol.QuestionResolved:
 				e.emit(ev)
 			case protocol.ChildStarted:
@@ -472,6 +474,9 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		e.persistChildEvent(childID, completed)
 		h.noteEvent(completed)
 		e.finishChild(h, completed)
+		// Wake wait-tool subscribers before the model-facing notice path so
+		// mid-turn wait + complete races resolve without busy-polling.
+		e.notifyWaitersFromCompleted(completed)
 		// Wake Run so the parent can inject a model-visible summary (and
 		// auto-nudge when idle). Non-blocking: drop if Run is shutting down.
 		select {

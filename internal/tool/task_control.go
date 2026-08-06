@@ -34,9 +34,9 @@ func (taskStatusTool) Description() string {
   and a structured handoff object on terminal states (summary, files_changed,
   verification, findings, blockers, recommended_next_action; incomplete may be true
   when the child did not supply structured fields).
-- One-off pulse only — do not busy-poll. Prefer [child.completed] handoff JSON for
-  finished work and the peer inbox (agent_message) for mid-flight updates.
-  agent_roster lists who is live.
+- One-off pulse only — do not busy-poll. Prefer wait (task.done/task.blocked/…) or
+  [child.completed] handoff JSON for finished work and the peer inbox (agent_message)
+  for mid-flight updates. agent_roster lists who is live.
 - Cannot access sessions you do not own (parent→child ownership). For peer chat use
   agent_message / agent_broadcast.`
 }
