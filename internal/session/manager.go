@@ -870,6 +870,8 @@ func eventSessionID(ev protocol.Event) (string, bool) {
 		return e.SessionID, true
 	case protocol.ChildCompleted:
 		return e.SessionID, true
+	case protocol.ChildEscalated:
+		return e.SessionID, true
 	case protocol.WaitStarted:
 		return e.SessionID, true
 	case protocol.WaitResolved:

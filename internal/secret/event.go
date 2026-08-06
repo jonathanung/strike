@@ -71,6 +71,14 @@ func RedactEvent(ev protocol.Event) protocol.Event {
 	case protocol.VerificationCompleted:
 		e.Report = redactVerification(e.Report)
 		return e
+	case protocol.ChildEscalated:
+		e.Reason = redact.String(e.Reason)
+		if e.Budget != nil && e.Budget.EscalateReason != "" {
+			cp := *e.Budget
+			cp.EscalateReason = redact.String(cp.EscalateReason)
+			e.Budget = &cp
+		}
+		return e
 	case protocol.CompactionCompleted:
 		e.Summary = redact.String(e.Summary)
 		return e

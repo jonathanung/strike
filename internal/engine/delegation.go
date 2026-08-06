@@ -46,9 +46,11 @@ type Delegation struct {
 	// start the child (or a deferred release is in flight).
 	SpawnPending bool `json:"spawn_pending,omitempty"`
 	// Verify holds independent completion gates declared at create (for deferred spawn).
-	Verify    []tool.VerifyGate `json:"verify,omitempty"`
-	CreatedAt time.Time         `json:"created_at,omitempty"`
-	UpdatedAt time.Time         `json:"updated_at,omitempty"`
+	Verify []tool.VerifyGate `json:"verify,omitempty"`
+	// Budget is the per-child limit snapshot captured at create (for deferred spawn).
+	Budget    tool.AgentBudgetLimits `json:"budget,omitempty"`
+	CreatedAt time.Time              `json:"created_at,omitempty"`
+	UpdatedAt time.Time              `json:"updated_at,omitempty"`
 }
 
 // DelegationConflictError is returned when CAS version or ownership fails.
@@ -223,6 +225,8 @@ type CreateDelegationSpec struct {
 	StartState protocol.DelegationState
 	// Verify gates to attach when the child eventually spawns.
 	Verify []tool.VerifyGate
+	// Budget is the merged per-child limit for deferred spawn.
+	Budget tool.AgentBudgetLimits
 }
 
 // CreateDelegation appends a new lifecycle object. Initial state is queued when
@@ -322,6 +326,7 @@ func (t *Team) CreateDelegation(spec CreateDelegationSpec) (Delegation, error) {
 		Version:        1,
 		SpawnPending:   spawnPending,
 		Verify:         append([]tool.VerifyGate(nil), spec.Verify...),
+		Budget:         NormalizeAgentBudget(spec.Budget),
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}

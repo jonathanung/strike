@@ -610,7 +610,7 @@ func seedFromReplay(m *Model, events []protocol.Event) {
 			// Team roster/messages may carry child correlation when re-emitted
 			// from nested engines; still applied above via dedicated helpers.
 			switch ev.(type) {
-			case protocol.TeamRoster, protocol.AgentMessage:
+			case protocol.TeamRoster, protocol.AgentMessage, protocol.AgentContractTimeout:
 			default:
 				continue
 			}
