@@ -93,6 +93,23 @@ func TestPanesListStaticAndCollision(t *testing.T) {
 	}
 }
 
+func TestResolvePaneEnvSecretRefs(t *testing.T) {
+	t.Setenv("STRIKE_PANE_TEST_SECRET", "s3cr3t-value")
+	out, err := resolvePaneEnv(map[string]string{
+		"TOK":   "secret://env/STRIKE_PANE_TEST_SECRET",
+		"PLAIN": "ok",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out["TOK"] != "s3cr3t-value" || out["PLAIN"] != "ok" {
+		t.Fatalf("out=%v", out)
+	}
+	if _, err := resolvePaneEnv(map[string]string{"X": "secret://env/MISSING_PANE_SECRET_XYZ"}); err == nil {
+		t.Fatal("expected missing secret fail-closed")
+	}
+}
+
 func TestPanesListSkipsDisabled(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

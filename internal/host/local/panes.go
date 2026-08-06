@@ -2,11 +2,13 @@ package local
 
 import (
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/plugin"
+	"github.com/jonathanung/strike-cli/internal/secret"
 	"github.com/jonathanung/strike-cli/internal/version"
 )
 
@@ -103,6 +105,15 @@ func (a panesAdapter) List() ([]host.PaneInfo, error) {
 				if !paneTrusted && loadErr == "" {
 					loadErr = "process pane blocked until plugin trust is granted"
 				}
+				// Resolve secret refs at host boundary (TUI must not import secret).
+				if resolved, err := resolvePaneEnv(def.Env); err != nil {
+					if loadErr == "" {
+						loadErr = err.Error()
+					}
+					paneTrusted = false
+				} else {
+					def.Env = resolved
+				}
 			}
 			defJSON, err := json.Marshal(def)
 			if err != nil {
@@ -172,5 +183,30 @@ func (a panesAdapter) List() ([]host.PaneInfo, error) {
 		}
 		return out[i].ID < out[j].ID
 	})
+	return out, nil
+}
+
+// resolvePaneEnv expands secret:// refs in process pane env maps. Literals pass
+// through. Fail closed on unresolved refs so panes never start with a ref string.
+func resolvePaneEnv(in map[string]string) (map[string]string, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		k = strings.TrimSpace(k)
+		if k == "" {
+			continue
+		}
+		if ref, ok := secret.ParseRef(v); ok {
+			val, err := secret.Resolve(ref)
+			if err != nil {
+				return nil, fmt.Errorf("pane env %q: %w", k, err)
+			}
+			out[k] = val
+			continue
+		}
+		out[k] = v
+	}
 	return out, nil
 }

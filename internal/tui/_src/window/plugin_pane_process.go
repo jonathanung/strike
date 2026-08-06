@@ -525,13 +525,15 @@ func (rt *pluginPaneRuntime) cleanupProcLocked() {
 	rt.cmd = nil
 }
 
-// shutdown requests a clean stop.
+// shutdown requests a clean stop without blocking the TUI event loop.
+// waitProc owns Wait(); a background timer force-kills after ShutdownMs.
 func (rt *pluginPaneRuntime) shutdown(reason string) {
 	rt.mu.Lock()
 	if rt.cmd == nil {
 		rt.stopping = true
 		rt.dead.Store(true)
 		rt.mu.Unlock()
+		rt.signal()
 		return
 	}
 	_ = rt.writeMsgLocked(map[string]any{
@@ -545,30 +547,25 @@ func (rt *pluginPaneRuntime) shutdown(reason string) {
 	cmd := rt.cmd
 	rt.mu.Unlock()
 
-	// Give the process a grace period, then force-kill. waitProc owns Wait().
-	done := make(chan struct{})
 	go func() {
-		// Poll dead flag set by waitProc after Wait returns.
 		deadline := time.Now().Add(timeout)
 		for time.Now().Before(deadline) {
 			if rt.dead.Load() {
-				close(done)
+				rt.signal()
 				return
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
-		close(done)
-	}()
-	<-done
-	if !rt.dead.Load() {
-		rt.mu.Lock()
-		if rt.cmd == cmd {
-			rt.cleanupProcLocked()
+		if !rt.dead.Load() {
+			rt.mu.Lock()
+			if rt.cmd == cmd {
+				rt.cleanupProcLocked()
+			}
+			rt.dead.Store(true)
+			rt.mu.Unlock()
 		}
-		rt.dead.Store(true)
-		rt.mu.Unlock()
-	}
-	rt.signal()
+		rt.signal()
+	}()
 }
 
 func (rt *pluginPaneRuntime) sendResize(w, h int) {
