@@ -281,6 +281,10 @@ func (m *Manager) Open(id string) (Info, error) {
 		}
 		return Info{}, err
 	}
+	// Fail closed on unsupported newer log schema before opening for append.
+	if _, err := InspectSchemaVersion(path); err != nil {
+		return Info{}, err
+	}
 	store, err := Open(m.dir, id)
 	if err != nil {
 		return Info{}, err
@@ -599,6 +603,38 @@ func (m *Manager) ReplayLast(id string, n int) ([]protocol.Event, int, error) {
 	}
 	m.mu.Unlock()
 	return ReplayLast(LogPath(m.dir, id), n)
+}
+
+// Export writes a redacted portable session package for id to path.
+// See Package / ExportPackage. Complements markdown /export (#221).
+func (m *Manager) Export(id, path string) error {
+	id = strings.TrimSpace(id)
+	if err := validateID(id); err != nil {
+		return err
+	}
+	// Flush open store so the package includes the latest appends.
+	m.mu.Lock()
+	if e, ok := m.sessions[id]; ok && e.store != nil {
+		_ = e.store.Sync()
+	}
+	m.mu.Unlock()
+	pkg, err := ExportPackage(m.dir, id)
+	if err != nil {
+		return err
+	}
+	return WritePackage(path, pkg)
+}
+
+// Import creates a new session from a portable package at path.
+// See ImportPackage. The new session id is independent of SourceID.
+func (m *Manager) Import(path string) (Info, error) {
+	pkg, err := ReadPackage(path)
+	if err != nil {
+		return Info{}, err
+	}
+	// Import into this manager's directory (not a throwaway Manager) so the
+	// session is tracked if left open — ImportPackage closes after write.
+	return importPackageInto(m, pkg)
 }
 
 // Fork copies sourceID's full event log into a new root session. The parent

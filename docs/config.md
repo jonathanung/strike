@@ -78,7 +78,12 @@ write this file. Manual `/ftue` remains available after acknowledgement.
   "session": {
     "worktree": "off",
     "worktreeCleanup": "keep",
-    "overlapPolicy": "warn"
+    "overlapPolicy": "warn",
+    // Optional durability retention hooks (#803). Zero / omitted = unlimited.
+    // Applied via session.ApplyRetention (not automatic on every launch).
+    "retentionMaxSessions": 0,
+    "retentionMaxAgeDays": 0,
+    "retentionMaxBytes": 0
   },
   "scheduler": {
     "presets": ["cargo", "npm"],
@@ -409,6 +414,30 @@ shared ownership map. When two **active** agents claim the same path:
 | `warn` (default) | write proceeds; tool output gets a warning; engine emits `path.overlap` |
 | `block` | conflicting write is refused |
 | `off` | track only (no warning/event) |
+
+### Session log durability and retention
+
+Session transcripts are JSONL under `~/.strike/sessions/<id>.jsonl` with a
+sidecar `<id>.meta.json`. New logs start with a `session.header` line carrying
+`schemaVersion` (currently `1`). Each event append writes a full JSON line and
+`fsync`s so a crash cannot leave an unreadable half-record; resume skips a
+trailing torn line and fails with an actionable error on interior corruption or
+an unsupported newer schema (upgrade strike). Secrets are scrubbed on append
+via `secret.RedactEvent` (see [secrets.md](secrets.md)).
+
+Portable **session packages** (`format: strike.session`) export/import the
+redacted event sequence + meta for support bundles — distinct from the
+human-readable markdown transcript (`/export`, #221) and from checkpoint stack
+persistence across `--continue` (#573). Live `/fork` / `/rewind` copy into a new
+id with `meta.forkedFrom` lineage.
+
+| `session.retentionMaxSessions` | Cap closed sessions retained (0 = unlimited) |
+| `session.retentionMaxAgeDays` | Drop closed sessions older than N days (0 = off) |
+| `session.retentionMaxBytes` | Cap total closed log+meta bytes (0 = off) |
+
+Build a policy with `session.RetentionFromConfig` and run
+`Manager.ApplyRetention` from tooling or a maintenance path. Open sessions are
+never deleted. Project config overrides global per field when non-zero.
 
 Lead and children can query the map with `agent_ownership` (`list`), and claim
 path prefixes with `lease` / `release` (exclusive or shared). Finished children

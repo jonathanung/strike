@@ -266,6 +266,14 @@ type SessionConfig struct {
 	// (default warn). warn surfaces tool warnings + path.overlap events;
 	// block refuses conflicting writes; off tracks without signaling.
 	OverlapPolicy string `json:"overlapPolicy,omitempty"`
+	// RetentionMaxSessions caps closed durable sessions under
+	// ~/.strike/sessions (0 = unlimited). Applied via session.ApplyRetention
+	// / RetentionFromConfig — not automatic on every launch.
+	RetentionMaxSessions int `json:"retentionMaxSessions,omitempty"`
+	// RetentionMaxAgeDays deletes closed sessions older than N days (0 = off).
+	RetentionMaxAgeDays int `json:"retentionMaxAgeDays,omitempty"`
+	// RetentionMaxBytes caps total closed session log+meta bytes (0 = off).
+	RetentionMaxBytes int64 `json:"retentionMaxBytes,omitempty"`
 }
 
 // Hook is one lifecycle hook entry. Exactly one of Action or Command should
@@ -1053,6 +1061,15 @@ func merge(base, layer Config) Config {
 	}
 	if layer.Session.OverlapPolicy != "" {
 		base.Session.OverlapPolicy = layer.Session.OverlapPolicy
+	}
+	if layer.Session.RetentionMaxSessions != 0 {
+		base.Session.RetentionMaxSessions = layer.Session.RetentionMaxSessions
+	}
+	if layer.Session.RetentionMaxAgeDays != 0 {
+		base.Session.RetentionMaxAgeDays = layer.Session.RetentionMaxAgeDays
+	}
+	if layer.Session.RetentionMaxBytes != 0 {
+		base.Session.RetentionMaxBytes = layer.Session.RetentionMaxBytes
 	}
 	base.Permissions = append(base.Permissions, layer.Permissions...)
 	base.Hooks = append(base.Hooks, layer.Hooks...)
