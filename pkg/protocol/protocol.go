@@ -537,6 +537,18 @@ type ChildStarted struct {
 	Name string `json:"name,omitempty"`
 }
 
+// ArtifactRef points at a shared typed artifact (id + optional CAS version/type).
+// Used on completion handoffs and task/agent messages so peers can fetch
+// "findings:v3" without inlining prose. See internal/artifact.
+type ArtifactRef struct {
+	// ID is the artifact store id (required).
+	ID string `json:"id"`
+	// Version is the CAS version when pinned; 0 means "latest at read time".
+	Version int `json:"version,omitempty"`
+	// Type is an optional hint (findings|patch|test_report|contract|plan).
+	Type string `json:"type,omitempty"`
+}
+
 // CompletionHandoff is the structured work product for a delegated child at
 // terminal status. Always present on ChildCompleted (empty slices/strings are
 // honest). Success fills the full schema; failure/cancel may leave
@@ -558,9 +570,26 @@ type CompletionHandoff struct {
 	Blockers []string `json:"blockers,omitempty"`
 	// RecommendedNextAction is a concrete next step for the lead or peers.
 	RecommendedNextAction string `json:"recommendedNextAction,omitempty"`
+	// ArtifactRefs points at shared typed artifacts (findings/patch/test_report/…).
+	// Prefer refs over inlining large bodies; peers fetch via artifact_read.
+	ArtifactRefs []ArtifactRef `json:"artifactRefs,omitempty"`
 	// Incomplete is true when the engine could not parse a model-supplied
 	// structured handoff and filled defaults + tracked files only.
 	Incomplete bool `json:"incomplete,omitempty"`
+}
+
+// ArtifactUpdated is emitted after a successful artifact_write create/update so
+// session JSONL and attach clients observe shared typed artifact mutations.
+// Content is omitted (fetch via tools); id+version+type identify the object.
+type ArtifactUpdated struct {
+	Correlation
+	ID        string `json:"id"`
+	Type      string `json:"type"`
+	Version   int    `json:"version"`
+	Scope     string `json:"scope,omitempty"`
+	Title     string `json:"title,omitempty"`
+	Op        string `json:"op"` // create | update
+	SessionID string `json:"sessionId,omitempty"`
 }
 
 // VerificationCheck is one independent gate outcome inside a VerificationReport.
@@ -1293,6 +1322,7 @@ func (ModelSelected) isEvent()          {}
 func (AgentSelected) isEvent()          {}
 func (PhaseChanged) isEvent()           {}
 func (PlanHandoff) isEvent()            {}
+func (ArtifactUpdated) isEvent()        {}
 func (PhaseGrantApproved) isEvent()     {}
 func (EffortSelected) isEvent()         {}
 func (AutonomySelected) isEvent()       {}

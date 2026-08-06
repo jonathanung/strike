@@ -3,7 +3,8 @@
 // task_message/task_interrupt/delegate/agent_roster/agent_ownership/agent_message/agent_broadcast/
 // task_message/task_interrupt/wait/agent_roster/agent_ownership/agent_message/agent_broadcast/
 // team_task/webfetch/todowrite/todoread/
-// memory_write/memory_read/issue_write/issue_read/plan_write/plan_read/notebook_edit/sleep/skill/question/enter_plan_mode/
+// memory_write/memory_read/issue_write/issue_read/plan_write/plan_read/
+// artifact_write/artifact_read/notebook_edit/sleep/skill/question/enter_plan_mode/
 // exit_plan_mode/phase_done/toolsearch/definition/references/symbols).
 // Used by internal/engine (dispatch), internal/permission (AskRequest, for the
 // Context.Ask signature), and cmd/strike (registry construction); internal/tui
@@ -589,8 +590,13 @@ type Context struct {
 	// ancestor). Plan tools use it as the plan owner identity; mutations
 	// require SessionID == RootSessionID so children cannot mutate without
 	// later delegated authority. Empty falls back to SessionID when the
-	// caller is itself a root.
+	// caller is itself a root. Artifact tools use it as the team boundary
+	// (access=team shares within the same root lineage).
 	RootSessionID string
+	// NotifyArtifact, when non-nil, is invoked after a successful artifact
+	// create/update so the engine can emit protocol.ArtifactUpdated.
+	// op is "create" or "update". Nil disables the event.
+	NotifyArtifact ArtifactNotify
 	// MemberName is an optional stable teammate alias for ownership messages.
 	MemberName string
 	// OnOverlap is invoked when ClaimWrite/lease detects an active conflict

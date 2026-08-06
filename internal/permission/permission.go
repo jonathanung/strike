@@ -46,6 +46,7 @@ var knownPermissions = map[string]struct{}{
 	"webfetch":  {}, "todowrite": {}, "todoread": {},
 	"memory_write": {}, "memory_read": {}, "issue_write": {}, "issue_read": {},
 	"plan_write": {}, "plan_read": {},
+	"artifact_write": {}, "artifact_read": {},
 	"sleep": {}, "skill": {}, "question": {}, "toolsearch": {}, "hook": {},
 	"phase_check":     {},
 	"enter_plan_mode": {}, "exit_plan_mode": {}, "phase_done": {},
@@ -126,6 +127,10 @@ func Defaults() Ruleset {
 		// mode can revise the artifact while file mutations stay denied.
 		{Permission: "plan_write", Pattern: "*", Action: Allow},
 		{Permission: "plan_read", Pattern: "*", Action: Allow},
+		// Shared typed artifacts (findings/patch/test_report/…); store enforces
+		// owner vs team access separately from these permission rules.
+		{Permission: "artifact_write", Pattern: "*", Action: Allow},
+		{Permission: "artifact_read", Pattern: "*", Action: Allow},
 		{Permission: "sleep", Pattern: "*", Action: Allow},
 		{Permission: "skill", Pattern: "*", Action: Allow},
 		{Permission: "question", Pattern: "*", Action: Allow},

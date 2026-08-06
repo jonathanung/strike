@@ -392,6 +392,11 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 					out = err
 				}
 			}
+			if a.artifactsClose != nil {
+				if err := a.artifactsClose(); err != nil && out == nil {
+					out = err
+				}
+			}
 			if a.goalsClose != nil {
 				if err := a.goalsClose(); err != nil && out == nil {
 					out = err

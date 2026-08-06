@@ -379,6 +379,65 @@ func TestChildCompletedHandoffRoundTrip(t *testing.T) {
 	}
 }
 
+func TestArtifactUpdatedAndHandoffRefsRoundTrip(t *testing.T) {
+	want := ArtifactUpdated{
+		Correlation: Correlation{SessionID: "s1"},
+		ID:          "ab12cd34",
+		Type:        "findings",
+		Version:     2,
+		Scope:       "project",
+		Title:       "Review",
+		Op:          "update",
+		SessionID:   "s1",
+	}
+	env, err := Wrap(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.Type != "artifact.updated" {
+		t.Fatalf("type = %q", env.Type)
+	}
+	gotEv, err := env.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := gotEv.(ArtifactUpdated)
+	if !ok {
+		t.Fatalf("type %T", gotEv)
+	}
+	if got.ID != want.ID || got.Version != 2 || got.Op != "update" {
+		t.Fatalf("got = %#v", got)
+	}
+
+	// CompletionHandoff.artifactRefs on the wire.
+	cc := ChildCompleted{
+		Correlation: Correlation{SessionID: "c1"},
+		Status:      ChildStatusCompleted,
+		Handoff: CompletionHandoff{
+			Summary: "done",
+			ArtifactRefs: []ArtifactRef{
+				{ID: "ab12cd34", Version: 2, Type: "findings"},
+			},
+		},
+	}
+	env2, err := Wrap(cc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got2, err := env2.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cc2 := got2.(ChildCompleted)
+	if len(cc2.Handoff.ArtifactRefs) != 1 || cc2.Handoff.ArtifactRefs[0].ID != "ab12cd34" {
+		t.Fatalf("refs = %#v", cc2.Handoff.ArtifactRefs)
+	}
+	raw, _ := json.Marshal(cc2.Handoff)
+	if !strings.Contains(string(raw), `"artifactRefs"`) {
+		t.Fatalf("wire missing artifactRefs: %s", raw)
+	}
+}
+
 func TestDecodeLiteralLegacyEnvelopeHasEmptyCorrelation(t *testing.T) {
 	literal := `{"type":"permission.asked","time":"2020-01-01T00:00:00Z","data":{"requestId":"perm_7","permission":"bash","patterns":["echo hi"]}}`
 	var env Envelope
@@ -514,6 +573,7 @@ func TestEventTypeCoverage(t *testing.T) {
 		"agent.selected":       AgentSelected{},
 		"phase.changed":        PhaseChanged{},
 		"plan.handoff":         PlanHandoff{},
+		"artifact.updated":     ArtifactUpdated{ID: "a1", Type: "findings", Version: 1, Op: "create"},
 		"phase.grant_approved": PhaseGrantApproved{},
 		"effort.selected":      EffortSelected{},
 		"autonomy.selected":    AutonomySelected{},
