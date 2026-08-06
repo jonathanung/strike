@@ -158,7 +158,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandPlan, Name: "/plan", Description: "browse and edit root-owned structured plans", ArgsHint: "[list|create|get|approve|close|reopen] ...", Source: commandSourceBuiltin},
 	{ID: commandGoal, Name: "/goal", Description: "loop harness: set, run, status, pause, resume, abort, log, list", ArgsHint: "[set|run|status|pause|resume|abort|log|list] ...", Source: commandSourceBuiltin},
 	{ID: commandLoop, Name: "/loop", Description: "schedule a recurring LLM job (session-only)", ArgsHint: "[interval job|list|stop [id]]", Source: commandSourceBuiltin},
-	{ID: commandWorkflow, Name: "/workflow", Description: "list, inspect, start, or stop loaded workflows", ArgsHint: "[list|inspect|start|stop] ...", Source: commandSourceBuiltin},
+	{ID: commandWorkflow, Name: "/workflow", Description: "list, inspect, start, stop, or edit workflows", ArgsHint: "[list|inspect|start|stop|new|edit] ...", Source: commandSourceBuiltin},
 	{ID: commandContext, Name: "/context", Description: "context doctor; pin/exclude layer kinds", ArgsHint: "[pin|unpin|exclude|include|clear] [kind]", Source: commandSourceBuiltin},
 	{ID: commandEffectivePrompt, Name: "/effective-prompt", Description: "context doctor (alias of /context)", Source: commandSourceBuiltin},
 	{ID: commandCost, Name: "/cost", Description: "session token and cost totals", Source: commandSourceBuiltin},

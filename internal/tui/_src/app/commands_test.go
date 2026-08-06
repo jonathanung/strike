@@ -65,7 +65,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/plan":             {"browse and edit root-owned structured plans", "[list|create|get|approve|close|reopen] ...", commandSourceBuiltin},
 		"/goal":             {"loop harness: set, run, status, pause, resume, abort, log, list", "[set|run|status|pause|resume|abort|log|list] ...", commandSourceBuiltin},
 		"/loop":             {"schedule a recurring LLM job (session-only)", "[interval job|list|stop [id]]", commandSourceBuiltin},
-		"/workflow":         {"list, inspect, start, or stop loaded workflows", "[list|inspect|start|stop] ...", commandSourceBuiltin},
+		"/workflow":         {"list, inspect, start, stop, or edit workflows", "[list|inspect|start|stop|new|edit] ...", commandSourceBuiltin},
 		"/context":          {"context doctor; pin/exclude layer kinds", "[pin|unpin|exclude|include|clear] [kind]", commandSourceBuiltin},
 		"/effective-prompt": {"context doctor (alias of /context)", "", commandSourceBuiltin},
 		"/cost":             {"session token and cost totals", "", commandSourceBuiltin},

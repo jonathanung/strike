@@ -69,6 +69,7 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		{ID: "command:goal", Label: "/goal", Description: "loop harness: set, run, status, pause, resume, abort, log, list", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/goal"}},
 		{ID: "command:loop", Label: "/loop", Description: "schedule a recurring LLM job (session-only)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/loop"}},
 		{ID: "workflow:list", Label: "/workflow list", Description: "list loaded workflows by source", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/workflow list"}},
+		{ID: "workflow:new", Label: "/workflow new", Description: "open visual builder to create a workflow (save does not start)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/workflow new"}},
 		{ID: "command:context", Label: "/context", Description: "context doctor; pin/exclude layer kinds", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/context"}},
 		{ID: "command:effective-prompt", Label: "/effective-prompt", Description: "context doctor (alias of /context)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/effective-prompt"}},
 		{ID: "command:cost", Label: "/cost", Description: "session token and cost totals", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/cost"}},
@@ -509,7 +510,7 @@ func TestWorkflowPaletteEntriesExpandCatalog(t *testing.T) {
 		}
 	}
 	joined := strings.Join(ids, ",")
-	for _, want := range []string{"workflow:list", "workflow:stop", "workflow:start:plan-implement", "workflow:inspect:plan-implement", "workflow:start:broken"} {
+	for _, want := range []string{"workflow:list", "workflow:new", "workflow:stop", "workflow:start:plan-implement", "workflow:inspect:plan-implement", "workflow:edit:plan-implement", "workflow:start:broken"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("missing %s in %s", want, joined)
 		}
