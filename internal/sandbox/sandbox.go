@@ -123,6 +123,11 @@ type Policy struct {
 	// false preserves --unshare-net / no network-* (current product default).
 	// Compiled from webfetch/mcp permission Allow on "*".
 	Network bool
+	// NetworkAllow is an optional host/CIDR allowlist for application-layer
+	// egress (webfetch). Empty means unrestricted public hosts (SSRF blocks
+	// still apply). Populated from config network.allow — not enforced by
+	// OS bash networking (Policy.Network remains all-or-nothing).
+	NetworkAllow []string
 }
 
 // WorkspaceWritable reports whether the policy grants a writable workspace bind.
@@ -137,6 +142,11 @@ func Explain(p Policy) string {
 	fmt.Fprintf(&b, "sandbox mode: %s\n", p.Mode)
 	if wd := strings.TrimSpace(p.WorkDir); wd != "" {
 		fmt.Fprintf(&b, "workdir: %s\n", wd)
+	}
+	if len(p.NetworkAllow) > 0 {
+		fmt.Fprintf(&b, "network allowlist: %s\n", strings.Join(p.NetworkAllow, ", "))
+	} else {
+		b.WriteString("network allowlist: (none — unrestricted public)\n")
 	}
 	if p.Mode == ModeOff {
 		b.WriteString("OS isolation: disabled\n")

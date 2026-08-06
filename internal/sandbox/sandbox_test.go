@@ -241,13 +241,24 @@ func TestExplainAndProfileText(t *testing.T) {
 	text := Explain(Policy{
 		Mode:           ModeWorkspaceWrite,
 		WorkDir:        wd,
-		DenyWriteGlobs: []string{"**/*.env"},
 		Network:        false,
+		NetworkAllow:   []string{"api.github.com", "10.0.0.0/8"},
+		DenyWriteGlobs: []string{"**/*.env"},
 	})
-	for _, want := range []string{"sandbox mode: workspace-write", "network: false", "deny-write globs: **/*.env", "profile:"} {
+	for _, want := range []string{
+		"sandbox mode: workspace-write",
+		"network: false",
+		"network allowlist: api.github.com, 10.0.0.0/8",
+		"deny-write globs: **/*.env",
+		"profile:",
+	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("Explain missing %q:\n%s", want, text)
 		}
+	}
+	unrestricted := Explain(Policy{Mode: ModeReadOnly, WorkDir: wd, Network: true})
+	if !strings.Contains(unrestricted, "network allowlist: (none — unrestricted public)") {
+		t.Errorf("Explain unrestricted allowlist:\n%s", unrestricted)
 	}
 	off := Explain(Policy{Mode: ModeOff})
 	if !strings.Contains(off, "disabled") {

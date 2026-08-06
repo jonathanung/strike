@@ -79,6 +79,10 @@ type Options struct {
 	// (off|read-only|workspace-write). Empty means workspace-write.
 	// Distinct from InitialPermissionMode (when the agent is asked).
 	SandboxMode string
+	// NetworkAllow is the config network.allow host/CIDR list for webfetch.
+	// Empty means unrestricted public hosts. Copied onto tool.Context and
+	// sandbox.Policy.NetworkAllow for /sandbox explain.
+	NetworkAllow []string
 	// AllowYoloWithoutSandbox permits permissionMode yolo when SandboxMode is
 	// off. Set only from CLI --i-know after an explicit operator override.
 	AllowYoloWithoutSandbox bool

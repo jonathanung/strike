@@ -231,6 +231,81 @@ func TestLoadMerge(t *testing.T) {
 	}
 }
 
+func TestLoadNetworkAllow(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(global, []byte(`{
+		"network": {"allow": ["API.GitHub.com", "10.0.0.1/8", "*.npmjs.org"]}
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"*.npmjs.org", "10.0.0.0/8", "api.github.com"}
+	if len(cfg.Network.Allow) != len(want) {
+		t.Fatalf("allow = %#v, want %#v", cfg.Network.Allow, want)
+	}
+	for i := range want {
+		if cfg.Network.Allow[i] != want[i] {
+			t.Fatalf("allow = %#v, want %#v", cfg.Network.Allow, want)
+		}
+	}
+
+	// Project replaces global when allow is set (including tightening).
+	project := filepath.Join(work, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(project), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(project, []byte(`{
+		"network": {"allow": ["docs.example.com"]}
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Network.Allow) != 1 || cfg.Network.Allow[0] != "docs.example.com" {
+		t.Fatalf("project replace: %#v", cfg.Network.Allow)
+	}
+
+	// Explicit empty allow clears the list (unrestricted).
+	if err := os.WriteFile(project, []byte(`{"network": {"allow": []}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Network.Allow == nil || len(cfg.Network.Allow) != 0 {
+		t.Fatalf("empty allow clear: %#v", cfg.Network.Allow)
+	}
+}
+
+func TestLoadNetworkAllowRejectsInvalid(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(global, []byte(`{"network": {"allow": ["*"]}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(t.TempDir()); err == nil {
+		t.Fatal("want invalid allow entry error")
+	}
+}
+
 func TestLoadSurfacePresentationMerge(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

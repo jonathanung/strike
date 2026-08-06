@@ -197,6 +197,7 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		InitialEffort:           childEffort,
 		InitialTitled:           title != "",
 		SandboxMode:             e.opts.SandboxMode,
+		NetworkAllow:            e.opts.NetworkAllow,
 		AllowYoloWithoutSandbox: e.opts.AllowYoloWithoutSandbox,
 		MaxTokens:               e.opts.MaxTokens,
 		MaxStreamAttempts:       e.opts.MaxStreamAttempts,
