@@ -55,6 +55,12 @@ type ToolResult struct {
 	CallID  string
 	Output  string
 	IsError bool
+	// ErrorCode is a stable machine code when IsError (e.g. permission_denied).
+	// Empty when unknown or on success. Adapters that only send text should
+	// still include Output; orchestrators may read ErrorCode directly.
+	ErrorCode string
+	// Retryable is meaningful when IsError and ErrorCode is set.
+	Retryable bool
 }
 
 // ToolSchema is the model-facing declaration of a tool.

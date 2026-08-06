@@ -19,6 +19,7 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 		ToolCallBegin{Correlation: corr, CallID: "c1", Name: "bash", Args: json.RawMessage(`{"command":"echo"}`)},
 		ToolCallOutput{Correlation: corr, CallID: "c1", Data: "ok\n"},
 		ToolCallEnd{Correlation: corr, CallID: "c1", Title: "echo", Output: "ok", IsError: false, Metadata: json.RawMessage(`{"exitCode":0}`)},
+		ToolCallEnd{Correlation: corr, CallID: "c2", Title: "edit", Output: "Permission denied.", IsError: true, Error: &ToolResultError{Code: "permission_denied", Retryable: false}},
 		ProcessStarted{Correlation: corr, ProcessID: "p1", CallID: "c1", Argv: []string{"bash", "-c", "echo"}, Cwd: "/tmp"},
 		ProcessOutput{Correlation: corr, ProcessID: "p1", Stream: ProcessStreamStdout, Data: "ok\n"},
 		ProcessExited{Correlation: corr, ProcessID: "p1", ExitCode: 0, Status: ProcessStatusExited},

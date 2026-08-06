@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode"
@@ -86,9 +87,18 @@ func (t *bridgeTool) Schema() json.RawMessage {
 	return t.schema
 }
 
+func (t *bridgeTool) Contract() tool.Contract {
+	// MCP tools are external processes/servers; retry safety is unknown.
+	return tool.Contract{
+		Version:     tool.ContractVersion,
+		SideEffect:  tool.SideEffectExternal,
+		Idempotency: tool.IdempotencyConditional,
+	}
+}
+
 func (t *bridgeTool) Execute(ctx context.Context, args json.RawMessage, tc *tool.Context) (tool.Result, error) {
 	if tc == nil || tc.Ask == nil {
-		return tool.Result{}, fmt.Errorf("mcp: permission ask unavailable")
+		return tool.Result{}, tool.ErrInternal("mcp: permission ask unavailable")
 	}
 	pattern := t.server + "/" + t.mcpName
 	if err := tc.Ask(ctx, tool.AskRequest{
@@ -100,7 +110,7 @@ func (t *bridgeTool) Execute(ctx context.Context, args json.RawMessage, tc *tool
 	}
 
 	if t.client.Closed() {
-		return tool.Result{}, t.client.deadErr()
+		return tool.Result{}, mapMCPError(t.client.deadErr())
 	}
 
 	callCtx, cancel := context.WithTimeout(ctx, defaultCallTimeout)
@@ -108,7 +118,7 @@ func (t *bridgeTool) Execute(ctx context.Context, args json.RawMessage, tc *tool
 
 	res, err := t.client.CallTool(callCtx, t.mcpName, args)
 	if err != nil {
-		return tool.Result{}, err
+		return tool.Result{}, mapMCPError(err)
 	}
 
 	out := formatContent(res.Content)
@@ -116,7 +126,8 @@ func (t *bridgeTool) Execute(ctx context.Context, args json.RawMessage, tc *tool
 		if out == "" {
 			out = "MCP tool returned an error"
 		}
-		return tool.Result{}, fmt.Errorf("%s", out)
+		// MCP isError payloads are free-text; map to internal fallback code.
+		return tool.Result{}, mapMCPToolError(out)
 	}
 	meta, _ := json.Marshal(map[string]any{
 		"mcpServer": t.server,
@@ -156,4 +167,57 @@ func formatContent(blocks []contentBlock) string {
 		}
 	}
 	return strings.Join(parts, "\n")
+}
+
+// mapMCPError maps transport/client failures onto stable tool.Error codes.
+// Unknown errors become CodeInternal without panicking.
+func mapMCPError(err error) error {
+	if err == nil {
+		return nil
+	}
+	// Already structured (e.g. permission deny from Ask) — pass through.
+	var te *tool.Error
+	if errors.As(err, &te) && te != nil {
+		return te
+	}
+	if errors.Is(err, context.Canceled) {
+		return tool.ErrCanceled(err.Error())
+	}
+	if errors.Is(err, context.DeadlineExceeded) || tool.IsTimeout(err) {
+		return tool.ErrTimeout(err.Error())
+	}
+	msg := err.Error()
+	lower := strings.ToLower(msg)
+	// Dead/disconnected MCP sessions are often worth a single retry after reconnect.
+	if strings.Contains(lower, "not connected") ||
+		strings.Contains(lower, "closed") ||
+		strings.Contains(lower, "eof") ||
+		strings.Contains(lower, "broken pipe") ||
+		strings.Contains(lower, "connection reset") {
+		return tool.ErrTransient(msg)
+	}
+	// Fallback: never panic; unknown MCP failures are internal.
+	return tool.ErrInternal(msg)
+}
+
+// mapMCPToolError maps an MCP tools/call isError payload to a structured error.
+// Free-text server errors have no stable vocabulary — use internal fallback.
+func mapMCPToolError(message string) error {
+	msg := strings.TrimSpace(message)
+	if msg == "" {
+		msg = "MCP tool returned an error"
+	}
+	lower := strings.ToLower(msg)
+	switch {
+	case strings.Contains(lower, "permission") && strings.Contains(lower, "denied"):
+		return tool.ErrPermissionDenied(msg)
+	case strings.Contains(lower, "invalid") && (strings.Contains(lower, "arg") || strings.Contains(lower, "param") || strings.Contains(lower, "input")):
+		return tool.ErrInvalidArgs(msg)
+	case strings.Contains(lower, "timed out") || strings.Contains(lower, "timeout") || strings.Contains(lower, "deadline"):
+		return tool.ErrTimeout(msg)
+	case strings.Contains(lower, "temporarily") || strings.Contains(lower, "try again") || strings.Contains(lower, "rate limit"):
+		return tool.ErrTransient(msg)
+	default:
+		return tool.ErrInternal(msg)
+	}
 }

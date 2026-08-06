@@ -15,6 +15,10 @@ func NewSleep() Tool { return sleepTool{} }
 
 func (sleepTool) Name() string { return "sleep" }
 
+func (sleepTool) Contract() Contract {
+	return staticContract(SideEffectNone, IdempotencySafeRetry)
+}
+
 func (sleepTool) Description() string {
 	return `Pauses execution for a given number of seconds.
 

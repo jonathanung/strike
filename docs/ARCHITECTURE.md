@@ -266,6 +266,10 @@ branch in `internal/tui/view.go` for the pattern.
 1. Implement `tool.Tool` (`Name`, `Description`, `Schema`, `Execute`) in a new
    file under `internal/tool/` — `internal/tool/glob.go` is a minimal
    example; `edit.go`/`write.go`/`bash.go` show the permission-ask pattern.
+   Prefer also implementing `Contract() tool.Contract` (side-effect class +
+   idempotency; see `internal/tool/contract.go`). Registry helpers
+   `Contract`/`Contracts` document these fields; tools without `Contract`
+   default to `external` + `conditional`.
 2. Register it in the `tool.NewRegistry(...)` call in `cmd/strike/assemble_tools.go`.
   3. If it mutates state or has side effects, call
      `tc.Ask(ctx, tool.AskRequest{Permission: "yourperm", Patterns: []string{...}})`
@@ -273,6 +277,10 @@ branch in `internal/tui/view.go` for the pattern.
      `permission.Defaults()` in `internal/permission/permission.go` (Allow for
      read-only, Ask for anything mutating — see the existing defaults; reuse
      `edit`/`write`/`bash` when the new tool is the same class of action).
+     Prefer structured failures via `tool.ErrInvalidArgs` /
+     `tool.ErrPrecondition` / … so the engine can settle stable
+     `protocol.ToolResultError` codes on `ToolCallEnd` and
+     `provider.ToolResult.ErrorCode`.
   4. No `internal/tui` change is needed for a generic tool: tool calls render
     from `protocol.ToolCallBegin`/`ToolCallEnd` via `toolCell` in
     `internal/tui/cells.go` (name, title, output preview, ok/err glyph).

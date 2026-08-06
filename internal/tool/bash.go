@@ -27,6 +27,10 @@ func NewBash() Tool { return bashTool{} }
 
 func (bashTool) Name() string { return "bash" }
 
+func (bashTool) Contract() Contract {
+	return staticContract(SideEffectProcess, IdempotencyUnsafe)
+}
+
 func (bashTool) Description() string {
 	return `Executes a shell command with bash in the session working directory. Returns combined stdout/stderr.
 
@@ -59,10 +63,10 @@ type bashArgs struct {
 func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
 	var a bashArgs
 	if err := json.Unmarshal(args, &a); err != nil {
-		return Result{}, fmt.Errorf("invalid arguments: %w", err)
+		return Result{}, ErrInvalidArgs(fmt.Sprintf("invalid arguments: %v", err))
 	}
 	if strings.TrimSpace(a.Command) == "" {
-		return Result{}, fmt.Errorf("command is empty")
+		return Result{}, ErrInvalidArgs("command is empty")
 	}
 	// An "always" grant covers the command's first word as a prefix class
 	// (e.g. approving "git status" always also covers "git pull").

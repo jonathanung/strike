@@ -604,12 +604,23 @@ type ToolCallBegin struct {
 	Args   json.RawMessage `json:"args"`
 }
 
+// ToolResultError is the stable structured failure on a tool result path
+// (timeline ToolCallEnd and model-facing settlement). Code values match
+// internal/tool.ErrorCode (permission_denied, invalid_args, …).
+type ToolResultError struct {
+	Code      string          `json:"code"`
+	Retryable bool            `json:"retryable"`
+	Details   json.RawMessage `json:"details,omitempty"`
+}
+
 type ToolCallEnd struct {
 	Correlation
 	CallID  string `json:"callId"`
 	Title   string `json:"title"`
 	Output  string `json:"output"`
 	IsError bool   `json:"isError,omitempty"`
+	// Error is set when IsError and a stable code is known (additive; omitempty).
+	Error *ToolResultError `json:"error,omitempty"`
 	// Metadata is tool-specific data for rich UI rendering, independent of
 	// the model-facing Output.
 	Metadata json.RawMessage `json:"metadata,omitempty"`

@@ -103,6 +103,7 @@ type (
 	ReasoningDelta         = pub.ReasoningDelta
 	ToolCallBegin          = pub.ToolCallBegin
 	ToolCallEnd            = pub.ToolCallEnd
+	ToolResultError        = pub.ToolResultError
 	ToolCallOutput         = pub.ToolCallOutput
 	ProcessStarted         = pub.ProcessStarted
 	ProcessOutput          = pub.ProcessOutput

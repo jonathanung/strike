@@ -29,6 +29,10 @@ func NewMemoryWrite(store MemoryStore) Tool {
 
 func (t *memoryWriteTool) Name() string { return "memory_write" }
 
+func (t *memoryWriteTool) Contract() Contract {
+	return staticContract(SideEffectExternal, IdempotencyConditional)
+}
+
 func (t *memoryWriteTool) Description() string {
 	return `Write a project-local memory entry that persists across sessions.
 
@@ -144,6 +148,10 @@ func NewMemoryRead(store MemoryStore) Tool {
 }
 
 func (t *memoryReadTool) Name() string { return "memory_read" }
+
+func (t *memoryReadTool) Contract() Contract {
+	return staticContract(SideEffectRead, IdempotencySafeRetry)
+}
 
 func (t *memoryReadTool) Description() string {
 	return `Read project-local memory entries that persist across sessions.

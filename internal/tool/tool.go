@@ -476,6 +476,9 @@ func (tc *Context) AppendDiagnostics(ctx context.Context, res Result, absPaths .
 	return out
 }
 
+// Tool is the executable unit registered for model tool-calls.
+// Optional Contractor (Contract method) declares side-effect and idempotency;
+// LookupContract falls back to DefaultContract when omitted.
 type Tool interface {
 	Name() string
 	Description() string

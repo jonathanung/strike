@@ -13,6 +13,10 @@ func NewWrite() Tool { return writeTool{} }
 
 func (writeTool) Name() string { return "write" }
 
+func (writeTool) Contract() Contract {
+	return staticContract(SideEffectWorkspaceMutative, IdempotencyConditional)
+}
+
 func (writeTool) Description() string {
 	return `Writes a file to the local filesystem.
 
@@ -43,7 +47,7 @@ type writeArgs struct {
 func (writeTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
 	var a writeArgs
 	if err := json.Unmarshal(args, &a); err != nil {
-		return Result{}, fmt.Errorf("invalid arguments: %w", err)
+		return Result{}, ErrInvalidArgs(fmt.Sprintf("invalid arguments: %v", err))
 	}
 	path, rel, err := resolveInWorkspace(tc.WorkDir, a.FilePath)
 	if err != nil {

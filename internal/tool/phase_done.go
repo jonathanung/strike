@@ -13,6 +13,10 @@ func NewPhaseDone() Tool { return phaseDoneTool{} }
 
 func (phaseDoneTool) Name() string { return "phase_done" }
 
+func (phaseDoneTool) Contract() Contract {
+	return staticContract(SideEffectNone, IdempotencyConditional)
+}
+
 func (phaseDoneTool) Description() string {
 	return `Signal that the current workflow phase is complete and advance to the next phase (or end the workflow).
 
