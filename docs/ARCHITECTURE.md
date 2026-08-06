@@ -71,6 +71,7 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `internal/issue` | Project-scoped durable issues (JSON under `~/.strike/issues/`) | stdlib |
 | `internal/goal` | Loop harness: goals, JSONL iterations/events, guards, critic, hooks | stdlib |
 | `internal/plan` | Project-scoped root-session-owned structured plans (sections, lifecycle, CAS versions; JSON under `~/.strike/plans/`) | stdlib |
+| `internal/verify` | Independent completion gates (cmd/schema/path) and claim-vs-verified result type shared by delegation (#780) and solo/harness paths (#806); implementer cannot self-certify | stdlib |
 | `internal/question` | User-question ask service: suspends a tool call until `QuestionReply` (1–4 prompts per batch; TUI walks them, one reply with all answers) | `protocol`, stdlib |
 | `internal/permission` | Ordered allow/ask/deny rulesets, last-match-wins; the ask service that suspends a tool call for user input; `CompileSandbox` maps write/edit denials + webfetch/mcp network posture into `sandbox.Policy` | `protocol`, `tool` (for `AskRequest`), `sandbox`, stdlib |
 | `internal/session` | JSONL event-log persistence (append/replay) + concurrent Manager (multi-session open, durable list, event mux). Sidecar `*.meta.json` stores `projectKey` (workspace folder) first for `/session` scoping | `protocol`, stdlib |
