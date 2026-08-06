@@ -68,7 +68,7 @@ enterprise keys:
   "permissionMode": "default",
   "permissionPreset": "dev",
   "permissions": [
-    { "permission": "bash", "pattern": "curl *", "action": "deny" },
+    { "permission": "bash", "pattern": "rm -rf *", "action": "deny" },
     { "permission": "write", "pattern": "**/.env", "action": "deny" },
     { "permission": "webfetch", "pattern": "*", "action": "deny" }
   ]

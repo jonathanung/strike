@@ -323,37 +323,41 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 	if scope := bundlePathScopeRules(childBundle.AllowedPaths); len(scope) > 0 {
 		parentLayers = append(parentLayers, scope)
 	}
+	// Only pin InitialPermissionMode when MDM locked the dial; otherwise leave
+	// empty so children keep the historical default posture at startup.
+	var childPermMode protocol.PermissionMode
+	if e.opts.LockPermissionMode {
+		childPermMode = e.opts.InitialPermissionMode
+	}
 	child := New(Options{
-		SessionID:          childID,
-		ParentSessionID:    e.opts.SessionID,
-		RootSessionID:      e.rootSessionID(),
-		Depth:              childDepth,
-		MaxChildDepth:      maxDepth,
-		TaskOneShot:        true,
-		ContextBundle:      childBundle,
-		Team:               e.team, // share lead roster; nested enrolls on same team
-		Select:             e.opts.Select,
-		Registry:           childReg,
-		WorkDir:            e.opts.WorkDir,
-		ProjectRoot:        e.opts.ProjectRoot,
-		Instructions:       e.opts.Instructions,
-		Memory:             e.opts.Memory,
-		Ledger:             e.opts.Ledger,
-		SystemPrompt:       e.opts.SystemPrompt,
-		LeanCode:           e.opts.LeanCode,
-		HarnessRegistry:    e.opts.HarnessRegistry,
-		Scheduler:          e.opts.Scheduler,          // share process-local pools
-		SchedulerPolicy:    e.opts.SchedulerPolicy,    // bash classification rules
-		FileSync:           e.opts.FileSync,           // share LSP document sync
-		CollectDiagnostics: e.opts.CollectDiagnostics, // share LSP result injection
-		Agents:             e.opts.Agents,
-		InitialAgent:       agentName,
-		InitialProvider:    e.provName,
-		InitialModel:       e.model,
-		InitialEffort:      childEffort,
-		InitialTitled:      title != "",
-		// Inherit live posture; when MDM locks the dial, keep the managed mode.
-		InitialPermissionMode:      e.permMode,
+		SessionID:                  childID,
+		ParentSessionID:            e.opts.SessionID,
+		RootSessionID:              e.rootSessionID(),
+		Depth:                      childDepth,
+		MaxChildDepth:              maxDepth,
+		TaskOneShot:                true,
+		ContextBundle:              childBundle,
+		Team:                       e.team, // share lead roster; nested enrolls on same team
+		Select:                     e.opts.Select,
+		Registry:                   childReg,
+		WorkDir:                    e.opts.WorkDir,
+		ProjectRoot:                e.opts.ProjectRoot,
+		Instructions:               e.opts.Instructions,
+		Memory:                     e.opts.Memory,
+		Ledger:                     e.opts.Ledger,
+		SystemPrompt:               e.opts.SystemPrompt,
+		LeanCode:                   e.opts.LeanCode,
+		HarnessRegistry:            e.opts.HarnessRegistry,
+		Scheduler:                  e.opts.Scheduler,          // share process-local pools
+		SchedulerPolicy:            e.opts.SchedulerPolicy,    // bash classification rules
+		FileSync:                   e.opts.FileSync,           // share LSP document sync
+		CollectDiagnostics:         e.opts.CollectDiagnostics, // share LSP result injection
+		Agents:                     e.opts.Agents,
+		InitialAgent:               agentName,
+		InitialProvider:            e.provName,
+		InitialModel:               e.model,
+		InitialEffort:              childEffort,
+		InitialTitled:              title != "",
 		SandboxMode:                e.opts.SandboxMode,
 		NetworkAllow:               e.opts.NetworkAllow,
 		AllowYoloWithoutSandbox:    e.opts.AllowYoloWithoutSandbox,
@@ -380,6 +384,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		Rules:                      permission.DeriveChildRules(parentLayers, childDepth >= maxDepth, childAgent.Permissions),
 		ManagedRules:               append(permission.Ruleset(nil), e.opts.ManagedRules...),
 		LockPermissionMode:         e.opts.LockPermissionMode,
+		InitialPermissionMode:      childPermMode,
 		Hooks:                      e.opts.Hooks,
 		HookRules:                  e.opts.HookRules,
 		PersistProjectRule:         e.opts.PersistProjectRule,
