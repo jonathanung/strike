@@ -1,10 +1,13 @@
 // Package config loads strike configuration and user extensions. Layers:
 // defaults, then global (~/.strike/config), then project (./.strike/config)
-// — all JSON. Scalar fields override; permission rules concatenate so later
-// layers win under last-match-wins evaluation. The same two .strike roots
-// also hold agents/ and skills/ folders (see agents.go). Loaded by
+// — JSON or JSONC (// and /* */ comments). Optional "$schema" is ignored
+// (editor DX only). Scalar fields override; permission rules concatenate so
+// later layers win under last-match-wins evaluation. The same two .strike
+// roots also hold agents/ and skills/ folders (see agents.go). Loaded by
 // cmd/strike at startup and wrapped by internal/host/local (Settings, and
 // the agent/skill listings); internal/tui never imports it directly.
+// Programmatic saves (SetGlobal*, AppendProjectPermission) rewrite pure
+// JSON and drop comments / $schema — see docs/config.md.
 package config
 
 import (
@@ -384,7 +387,7 @@ func GlobalRoot() string {
 	return resolveExisting(filepath.Join(home, ".strike"))
 }
 
-// GlobalPath is the global config file, ~/.strike/config (JSON).
+// GlobalPath is the global config file, ~/.strike/config (JSON or JSONC).
 func GlobalPath() string {
 	root := GlobalRoot()
 	if root == "" {
@@ -551,13 +554,18 @@ func read(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	stripped, err := stripJSONC(data)
+	if err != nil {
+		return Config{}, fmt.Errorf("%s: %w", path, err)
+	}
 	var c Config
-	if err := json.Unmarshal(data, &c); err != nil {
+	if err := json.Unmarshal(stripped, &c); err != nil {
 		return Config{}, err
 	}
 	c.Provider = CanonicalProviderID(c.Provider)
 	// disable-default-* top-level keys (same names as providers.jsonc).
-	if all, per, err := parseDisableDefaultFlags(data); err != nil {
+	// "$schema" and other unknown keys are ignored by encoding/json.
+	if all, per, err := parseDisableDefaultFlags(stripped); err != nil {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
 	} else {
 		if all != nil {
