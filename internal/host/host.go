@@ -1,7 +1,7 @@
 // Package host defines the services a strike frontend needs from its host
 // process, beyond the engine protocol: credentials, model catalog, saved
-// defaults, prompt history, project memory/issues, local telemetry, and static
-// agent/skill listings. Contract only:
+// defaults, prompt history, project memory/issues/plans, local telemetry, and
+// static agent/skill listings. Contract only:
 // this package imports nothing outside the standard library so frontends
 // can be developed and tested against fakes. Implementations live in
 // internal/host/local.
@@ -161,10 +161,16 @@ type UserDefaults struct {
 	DeferTools string
 	// SessionWorktree is session.worktree: off|auto|always.
 	SessionWorktree string
-	Theme           string
-	VimMode         string
-	NanoMode        string
-	MdReadMode      string
+	// PermissionAutoApproveSeconds is the permission-modal countdown (0 = off).
+	PermissionAutoApproveSeconds int
+	// PermissionAutoApproveExclude lists permission names that never auto-allow.
+	PermissionAutoApproveExclude []string
+	// MaxChildDepth bounds nested task spawns (0 = engine default).
+	MaxChildDepth int
+	Theme         string
+	VimMode       string
+	NanoMode      string
+	MdReadMode    string
 }
 
 // Settings persists user-chosen defaults. Empty fields mean "leave as is".
@@ -191,6 +197,12 @@ type Settings interface {
 	// and sessionWorktree (off|auto|always). Empty leaves the stored value
 	// unchanged; unknown values are rejected.
 	SaveConfigDials(sandbox, notify, leanCode, deferTools, sessionWorktree string) error
+	// SaveAutoApproveDials persists permissionAutoApproveSeconds, optional
+	// exclude list, and maxChildDepth. Empty scalar strings leave the
+	// corresponding field unchanged. exclude nil leaves the list unchanged; a
+	// non-nil pointer (including to an empty slice) replaces it.
+	// seconds: off|0|1-60; maxChildDepth: default|0|1-8. Unknown values error.
+	SaveAutoApproveDials(seconds string, exclude *[]string, maxChildDepth string) error
 	// SaveKeybinds persists binding-id overrides to ~/.strike/keybinds.jsonc.
 	// Unknown ids are silently dropped; callers should pre-filter. A nil
 	// map deletes the file (reset to defaults).
@@ -474,6 +486,41 @@ type MCP interface {
 	Disable(name string) error
 }
 
+// LSPServerStatus is one configured language server for /lsp.
+type LSPServerStatus struct {
+	Name       string
+	Command    string
+	State      string // "up", "down", "error", "disabled"
+	Extensions []string
+	Error      string
+	OpenDocs   int
+}
+
+// Diagnostic is one language-server finding for the diagnostics right pane.
+// Line and Character are 1-based for display (LSP wire is 0-based).
+type Diagnostic struct {
+	Path      string
+	Line      int
+	Character int
+	Severity  string // error|warning|info|hint
+	Source    string
+	Code      string
+	Message   string
+}
+
+// LSP reports language server status, control, and collected diagnostics.
+// Nil means the capability is absent; frontends must degrade gracefully.
+type LSP interface {
+	// Statuses returns configured servers in stable order.
+	Statuses() []LSPServerStatus
+	// Retry reconnects name (or every non-up server when name is empty).
+	Retry(name string) error
+	// Disable stops name.
+	Disable(name string) error
+	// Diagnostics returns a stable-ordered snapshot of live-server findings.
+	Diagnostics() []Diagnostic
+}
+
 // TelemetrySample is one local host resource snapshot for the system pane.
 // OK flags distinguish measured zeros from unavailable values — frontends
 // must never render missing metrics as zero.
@@ -552,6 +599,62 @@ type GoalIteration struct {
 	CostUSD   float64
 	// Summary is a short human-readable line (criteria matrix + action count).
 	Summary string
+}
+
+// PlanSection is one ordered block inside a host.Plan.
+type PlanSection struct {
+	ID    string
+	Title string
+	Body  string
+}
+
+// Plan is a root-session-owned structured planning artifact.
+type Plan struct {
+	ID        string
+	OwnerRoot string // owning root session id
+	Title     string
+	Status    string // draft|approved|closed
+	Sections  []PlanSection
+	Version   int // CAS token; increments on every accepted mutation
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// PlanMeta is project-index metadata (no section bodies) visible to every root.
+type PlanMeta struct {
+	ID           string
+	OwnerRoot    string
+	Title        string
+	Status       string
+	Version      int
+	SectionCount int
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+// Plans is project-scoped durable structured plans for the plan window and tools.
+// Nil means the capability is absent; frontends must degrade gracefully.
+// Mutations require the owning root session id and an expected Version for CAS.
+// List returns index metadata for the whole project; Get returns full bodies.
+type Plans interface {
+	// List returns project-wide index metadata newest-UpdatedAt first.
+	List() ([]PlanMeta, error)
+	// Get returns one full plan by id (deep copy).
+	Get(id string) (Plan, bool, error)
+	// Create inserts a draft plan owned by ownerRoot. Section IDs are assigned.
+	Create(ownerRoot, title string, sections []PlanSection) (Plan, error)
+	// UpdateTitle CAS-updates the title. Only the owning root may mutate.
+	UpdateTitle(id, ownerRoot, title string, expectedVersion int) (Plan, error)
+	// UpdateSection CAS-updates one section by stable id. Nil pointers leave
+	// fields unchanged. Only the owning root may mutate.
+	UpdateSection(id, ownerRoot, sectionID string, title, body *string, expectedVersion int) (Plan, error)
+	// AddSection appends a section with a new stable id. Owner + CAS.
+	AddSection(id, ownerRoot, title, body string, expectedVersion int) (Plan, error)
+	// SetStatus CAS-transitions lifecycle (draft↔approved, either→closed).
+	// Closed plans reopen only via Reopen.
+	SetStatus(id, ownerRoot, status string, expectedVersion int) (Plan, error)
+	// Reopen CAS-moves a closed plan back to draft. Owner-only.
+	Reopen(id, ownerRoot string, expectedVersion int) (Plan, error)
 }
 
 // Goals is project-scoped loop-harness control for /goal.
@@ -661,12 +764,14 @@ type Services struct {
 	Shell      Shell // composer ! bang; nil when unsupported
 	Memory     Memory
 	Issues     Issues
+	Plans      Plans     // structured root-owned plans; nil when unsupported
 	Goals      Goals     // loop harness; nil when unsupported
 	Sessions   Sessions  // durable session list/replay; nil when unsupported
 	Roots      Roots     // concurrent parent sessions; nil when single-root only
 	Providers  Providers // custom/self-hosted provider CRUD; nil when unsupported
 	Init       ProjectInit
 	MCP        MCP       // external MCP server status; nil when unsupported
+	LSP        LSP       // language server status + diagnostics; nil when unsupported
 	Telemetry  Telemetry // local CPU/RAM/disk; nil when unsupported
 	// SchedulerPresets is the shipped build-system preset catalog and global
 	// apply surface (FTUE #705).
