@@ -56,7 +56,8 @@ later discovery roots.
 | `review-fix` | review (`reviewer`, user gate) → fix (`build`, `make test` check) |
 
 `enter_plan_mode` / `exit_plan_mode` drive the default plan workflow. Custom
-and extra builtins load from `~/.strike/workflows` and `./.strike/workflows`.
+workflows load from `~/.strike/workflows` and `./.strike/workflows` (schema
+v1; `strike workflow scaffold|format|validate`). Scaffolding never activates.
 
 ## Hooks alignment
 
