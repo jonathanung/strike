@@ -84,6 +84,8 @@ func TestMutativeToolContracts(t *testing.T) {
 		{NewEdit(), SideEffectWorkspaceMutative, IdempotencyConditional},
 		{NewWrite(), SideEffectWorkspaceMutative, IdempotencyConditional},
 		{NewApplyPatch(), SideEffectWorkspaceMutative, IdempotencyConditional},
+		{NewMove(), SideEffectWorkspaceMutative, IdempotencyConditional},
+		{NewDelete(), SideEffectWorkspaceMutative, IdempotencyConditional},
 		{NewBash(), SideEffectProcess, IdempotencyUnsafe},
 		{NewNotebookEdit(), SideEffectWorkspaceMutative, IdempotencyConditional},
 	}

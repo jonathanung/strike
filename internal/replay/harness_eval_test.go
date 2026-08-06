@@ -232,6 +232,8 @@ func scenarioToolContracts(t *testing.T) string {
 		{tool.NewBash(), tool.SideEffectProcess, tool.IdempotencyUnsafe},
 		{tool.NewEdit(), tool.SideEffectWorkspaceMutative, tool.IdempotencyConditional},
 		{tool.NewWrite(), tool.SideEffectWorkspaceMutative, tool.IdempotencyConditional},
+		{tool.NewMove(), tool.SideEffectWorkspaceMutative, tool.IdempotencyConditional},
+		{tool.NewDelete(), tool.SideEffectWorkspaceMutative, tool.IdempotencyConditional},
 		{tool.NewRead(), tool.SideEffectRead, tool.IdempotencySafeRetry},
 	}
 	for _, tc := range cases {
@@ -423,7 +425,7 @@ func scenarioCancelErrorCode(t *testing.T) string {
 func scenarioNoMutativeDoubleRetry(t *testing.T) string {
 	t.Helper()
 	mutative := []tool.Tool{
-		tool.NewEdit(), tool.NewWrite(), tool.NewApplyPatch(), tool.NewBash(),
+		tool.NewEdit(), tool.NewWrite(), tool.NewApplyPatch(), tool.NewMove(), tool.NewDelete(), tool.NewBash(),
 	}
 	for _, tl := range mutative {
 		c := tool.LookupContract(tl)
