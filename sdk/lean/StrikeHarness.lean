@@ -9,12 +9,11 @@ structure Input where
 
 structure Provider where
   call : Json → IO Json
-
-structure Tools where
-  execute : Json → IO Json
+  /-- Brokered tool execution through Strike (additive; unused by provider-only harnesses). -/
+  executeTool : Json → IO Json
 
 abbrev Emit := Json → IO Unit
-abbrev Harness := Input → Provider → Tools → Emit → IO Json
+abbrev Harness := Input → Provider → Emit → IO Json
 
 private def field (message : Json) (name : String) : IO Json :=
   IO.ofExcept (message.getObjVal? name)
@@ -88,7 +87,7 @@ def runHarness (harness : Harness) : IO Unit := do
       ("request", request)
     ])
     awaitResult stdin invocationId callId "provider.result"
-  let execute := fun toolCall => do
+  let executeTool := fun toolCall => do
     let current := (← sequence.get) + 1
     sequence.set current
     let callId := s!"tool-{current}"
@@ -105,7 +104,7 @@ def runHarness (harness : Harness) : IO Unit := do
   let emit := fun payload =>
     send stdout (message invocationId "progress.emit" [("payload", payload)])
   try
-    let result ← harness { request } { call } { execute } emit
+    let result ← harness { request } { call, executeTool } emit
     send stdout (message invocationId "harness.complete" [
       ("text", result.getObjValD "text"),
       ("reasoning", result.getObjValD "reasoning"),

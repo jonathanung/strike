@@ -310,7 +310,7 @@ The harness requests brokered execution of one tool exposed in
   "callId": "tool-1",
   "toolCallId": "optional-event-id",
   "name": "read",
-  "arguments": {"path": "README.md"}
+  "arguments": {"filePath": "README.md"}
 }
 ```
 
