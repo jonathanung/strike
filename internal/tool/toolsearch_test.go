@@ -4,9 +4,44 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestSplitQuery(t *testing.T) {
+	tests := []struct {
+		name   string
+		query  string
+		expect []string
+	}{
+		{name: "single word", query: "read", expect: []string{"read"}},
+		{name: "two words", query: "read file", expect: []string{"read", "file"}},
+		{name: "quoted phrase only", query: `"read file"`, expect: []string{"read file"}},
+		{name: "quoted phrase + word", query: `"read file" write`, expect: []string{"read file", "write"}},
+		{name: "word + quoted phrase", query: `write "read file"`, expect: []string{"write", "read file"}},
+		{name: "multiple quoted", query: `"glob pattern" "regex search"`, expect: []string{"glob pattern", "regex search"}},
+		{name: "mixed with extra spaces", query: `  "read  file"   write  `, expect: []string{"read  file", "write"}},
+		{name: "empty quoted", query: `""`, expect: nil},
+		{name: "empty quoted with words", query: `"" read`, expect: []string{"read"}},
+		{name: "unmatched quote", query: `"read file`, expect: []string{"read file"}},
+		{name: "empty string", query: "", expect: nil},
+		{name: "tab separator", query: "read\tfile", expect: []string{"read", "file"}},
+		{name: "newline separator", query: "read\nfile", expect: []string{"read", "file"}},
+		{name: "cr separator", query: "read\rfile", expect: []string{"read", "file"}},
+		{name: "crlf separator", query: "read\r\nfile", expect: []string{"read", "file"}},
+		{name: "mixed whitespace", query: "read \t\n\r file", expect: []string{"read", "file"}},
+		{name: "quoted with surrounding newlines", query: "\n\"read file\"\nwrite\n", expect: []string{"read file", "write"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := splitQuery(tt.query)
+			if !reflect.DeepEqual(got, tt.expect) {
+				t.Errorf("splitQuery(%q) = %v, want %v", tt.query, got, tt.expect)
+			}
+		})
+	}
+}
 
 func TestToolSearchHits(t *testing.T) {
 	reg := NewRegistry(NewRead(), NewBash())
@@ -102,6 +137,34 @@ func TestToolSearchMultiToken(t *testing.T) {
 		if strings.Contains(res.Output, "- bash:") && strings.Contains(res.Output, "- glob:") {
 			t.Errorf("multi-token AND should not return both separately: %q", res.Output)
 		}
+	}
+}
+
+func TestToolSearchQuotedPhrase(t *testing.T) {
+	reg := NewRegistry(NewRead(), NewBash(), NewGlob(), NewGrep())
+	ts := NewToolSearch(reg)
+	reg.Register(ts)
+
+	// Quoted phrase with space — should match grep's description which contains "file contents".
+	res, err := ts.Execute(context.Background(), mustJSON(t, map[string]any{
+		"query": `"file contents"`,
+	}), allowAll(t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Output, "- grep:") {
+		t.Errorf("expected grep match for quoted phrase, got %q", res.Output)
+	}
+
+	// Quoted phrase that is not a contiguous substring in any tool.
+	res, err = ts.Execute(context.Background(), mustJSON(t, map[string]any{
+		"query": `"no such tool exists"`,
+	}), allowAll(t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Output, "No tools matched") {
+		t.Errorf("expected no match for non-existent phrase: %q", res.Output)
 	}
 }
 
