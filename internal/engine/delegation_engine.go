@@ -53,6 +53,7 @@ func (e *Engine) delegate(ctx context.Context, req tool.DelegateRequest) (tool.D
 			Deps:      req.Deps,
 			Subscribe: req.Subscribe,
 			Assignee:  req.Assignee,
+			Verify:    req.Verify,
 		})
 		if err != nil {
 			return tool.DelegateResult{}, err
@@ -69,11 +70,15 @@ func (e *Engine) delegate(ctx context.Context, req tool.DelegateRequest) (tool.D
 
 	case "transition":
 		to := protocol.DelegationState(strings.ToLower(strings.TrimSpace(req.State)))
+		prev := protocol.DelegationState("")
+		if cur, ok := e.team.GetDelegation(req.ID); ok {
+			prev = cur.State
+		}
 		item, err := e.team.TransitionDelegation(req.ID, actor, to, req.Reason, req.ExpectedVersion)
 		if err != nil {
 			return delegationConflictResult(out, err)
 		}
-		e.emitDelegationChanged(item, "", req.Reason)
+		e.emitDelegationChanged(item, prev, req.Reason)
 		// If transition requested working with spawn pending, try to start.
 		if item.SpawnPending && item.SessionID == "" && to == protocol.DelegationWorking {
 			if spawned, err := e.spawnPendingDelegation(ctx, item); err != nil {

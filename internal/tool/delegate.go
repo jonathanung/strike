@@ -71,6 +71,19 @@ func (delegateTool) Schema() json.RawMessage {
 				"items": {"type": "string"},
 				"description": "Notify owner on these states: blocked|review|done|failed|canceled|working|queued"
 			},
+			"verify": {
+				"type": "array",
+				"description": "Optional independent completion gates (cmd|schema|path), same as task.verify",
+				"items": {
+					"type": "object",
+					"properties": {
+						"kind": {"type": "string"},
+						"value": {"type": "string"},
+						"description": {"type": "string"}
+					},
+					"required": ["kind", "value"]
+				}
+			},
 			"state": {
 				"type": "string",
 				"enum": ["queued", "working", "blocked", "review", "done", "failed", "canceled"],
@@ -88,20 +101,21 @@ func (delegateTool) Schema() json.RawMessage {
 
 func (delegateTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
 	var a struct {
-		Action          string   `json:"action"`
-		ID              string   `json:"id"`
-		Prompt          string   `json:"prompt"`
-		Name            string   `json:"name"`
-		Agent           string   `json:"agent"`
-		Model           string   `json:"model"`
-		Effort          string   `json:"effort"`
-		Assignee        string   `json:"assignee"`
-		Criteria        []string `json:"criteria"`
-		Deps            []string `json:"deps"`
-		Subscribe       []string `json:"subscribe"`
-		State           string   `json:"state"`
-		Reason          string   `json:"reason"`
-		ExpectedVersion int      `json:"expected_version"`
+		Action          string       `json:"action"`
+		ID              string       `json:"id"`
+		Prompt          string       `json:"prompt"`
+		Name            string       `json:"name"`
+		Agent           string       `json:"agent"`
+		Model           string       `json:"model"`
+		Effort          string       `json:"effort"`
+		Assignee        string       `json:"assignee"`
+		Criteria        []string     `json:"criteria"`
+		Deps            []string     `json:"deps"`
+		Subscribe       []string     `json:"subscribe"`
+		Verify          []VerifyGate `json:"verify"`
+		State           string       `json:"state"`
+		Reason          string       `json:"reason"`
+		ExpectedVersion int          `json:"expected_version"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return Result{}, fmt.Errorf("invalid arguments: %w", err)
@@ -109,6 +123,10 @@ func (delegateTool) Execute(ctx context.Context, args json.RawMessage, tc *Conte
 	action := strings.ToLower(strings.TrimSpace(a.Action))
 	if action == "" {
 		return Result{}, fmt.Errorf("action is required")
+	}
+	gates, err := normalizeTaskVerify(a.Verify)
+	if err != nil {
+		return Result{}, err
 	}
 	req := DelegateRequest{
 		Action:          action,
@@ -122,6 +140,7 @@ func (delegateTool) Execute(ctx context.Context, args json.RawMessage, tc *Conte
 		Criteria:        a.Criteria,
 		Deps:            a.Deps,
 		Subscribe:       a.Subscribe,
+		Verify:          gates,
 		State:           strings.TrimSpace(a.State),
 		Reason:          a.Reason,
 		ExpectedVersion: a.ExpectedVersion,

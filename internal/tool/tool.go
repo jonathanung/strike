@@ -360,6 +360,7 @@ type DelegateRequest struct {
 	Criteria        []string
 	Deps            []string
 	Subscribe       []string
+	Verify          []VerifyGate
 	State           string // target lifecycle state for transition
 	Reason          string
 	ExpectedVersion int // 0 = skip CAS
