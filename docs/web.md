@@ -120,7 +120,7 @@ JSON objects with a `type` and optional `data`:
 | `select.agent` | `{ "name": "build" }` |
 | `select.model` | `{ "provider", "model?" }` |
 | `set.permission_mode` | `{ "mode": "default\|plan\|accept-edits\|yolo" }` |
-| `set.autonomy` | `{ "mode": "supervised\|agent\|checks" }` |
+| `set.autonomy` | `{ "mode": "supervised\|agent\|checks\|skip-all" }` |
 | `set.effort` | `{ "level": "..." }` |
 
 Events use the same envelopes as session JSONL (`type` + `time` + `data`).

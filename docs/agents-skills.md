@@ -244,14 +244,28 @@ overrides global by name). Strike ships built-in workflows that may be
 overridden by the same name.
 
 Each phase may pin an agent, extra prompt context, a permission ruleset, and
-an exit gate. Phase agent pins change persona/permissions only — the session
-provider/model stays put (see Agents above).
+an exit gate (authored default / check command). Phase agent pins change
+persona/permissions only — the session provider/model stays put (see Agents
+above).
 
-| Gate `type` | Clears when |
+**Runtime exit policy** is the session `/autonomy` dial (authoritative for
+`phase_done` and `exit_plan_mode`), not the phase's authored `exit.type`:
+
+| Autonomy | Clears when |
 |---|---|
-| `agent` (default) | the model calls `phase_done` |
-| `user` | the user approves (e.g. leave plan mode) |
-| `check` | `command` exits 0 |
+| `supervised` (default) | the user approves |
+| `agent` | the model calls `phase_done` / `exit_plan_mode` |
+| `checks` | phase `exit.command` exits 0 (permission `phase_check`) |
+| `skip-all` | immediately (workflow/plan approval only; tool perms unchanged) |
+
+Authored gate types remain useful documentation and supply `command` for
+checks mode:
+
+| Gate `type` (authored) | Meaning |
+|---|---|
+| `agent` (default) | intended model self-affirmation |
+| `user` | intended human approval |
+| `check` | intended command gate (`command` required) |
 
 Built-in `plan-implement`:
 

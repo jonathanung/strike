@@ -29,7 +29,7 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		{ID: "command:provider", Label: "/provider", Description: "select a provider and model", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/provider"}},
 		{ID: "command:model", Label: "/model", Description: "select a model from authenticated providers", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/model"}},
 		{ID: "command:effort", Label: "/effort", Description: "set how much reasoning the model spends", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/effort"}},
-		{ID: "command:autonomy", Label: "/autonomy", Description: "set exit-gate policy (supervised/agent/checks)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/autonomy"}},
+		{ID: "command:autonomy", Label: "/autonomy", Description: "set exit-gate policy (supervised/agent/checks/skip-all)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/autonomy"}},
 		{ID: "command:mode", Label: "/mode", Description: "set permission posture (default/plan/accept-edits/yolo)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/mode"}},
 		{ID: "command:sandbox", Label: "/sandbox", Description: "show OS sandbox policy; /sandbox explain for generated profile", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/sandbox"}},
 		{ID: "command:auth", Label: "/auth", Description: "manage provider authentication", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/auth"}},

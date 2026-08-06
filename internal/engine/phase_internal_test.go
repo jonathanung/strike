@@ -1,7 +1,10 @@
 package engine
 
 import (
+	"context"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/permission"
@@ -61,5 +64,79 @@ func TestClearPhaseDropsWorkflowAndEmits(t *testing.T) {
 	case ev := <-e.Events():
 		t.Fatalf("second clearPhase emitted %#v", ev)
 	default:
+	}
+}
+
+func TestEffectiveGateLabelFollowsAutonomy(t *testing.T) {
+	e := New(Options{SessionID: "gate-label"})
+	cases := []struct {
+		mode protocol.Autonomy
+		want string
+	}{
+		{protocol.AutonomySupervised, "user"},
+		{protocol.AutonomyAgent, "agent"},
+		{protocol.AutonomyChecks, "check"},
+		{protocol.AutonomySkipAll, "skip"},
+		{"", "user"},
+	}
+	for _, tc := range cases {
+		e.autonomy = tc.mode
+		if got := e.effectiveGateLabel(); got != tc.want {
+			t.Errorf("autonomy %q gate = %q, want %q", tc.mode, got, tc.want)
+		}
+	}
+}
+
+func TestSupervisedFailsClosedWithoutQuestionService(t *testing.T) {
+	e := New(Options{
+		SessionID: "sup-no-q",
+		Rules:     []permission.Ruleset{permission.Defaults()},
+	})
+	e.autonomy = protocol.AutonomySupervised
+	e.questions = nil
+	err := e.runExitGate(context.Background(), config.Phase{Name: "plan"})
+	if err == nil {
+		t.Fatal("supervised without questions should fail closed")
+	}
+	if !strings.Contains(err.Error(), "question service") {
+		t.Fatalf("error = %q, want question service", err.Error())
+	}
+}
+
+func TestSetAutonomyReemitsPhaseGate(t *testing.T) {
+	e := New(Options{
+		SessionID: "auto-reemit",
+		Rules:     []permission.Ruleset{permission.Defaults()},
+	})
+	// Default autonomy is empty until setAutonomy; treat as supervised label.
+	w := config.BuiltinPlanImplement()
+	if err := e.enterPhase(w, 0); err != nil {
+		t.Fatal(err)
+	}
+	ev := <-e.Events()
+	entered, ok := ev.(protocol.PhaseChanged)
+	if !ok || entered.Gate != "user" {
+		t.Fatalf("enter = %#v, want gate user", ev)
+	}
+
+	e.setAutonomy(protocol.AutonomySkipAll)
+	var sawAuto, sawPhase bool
+	deadline := time.After(2 * time.Second)
+	for !sawAuto || !sawPhase {
+		select {
+		case <-deadline:
+			t.Fatalf("timeout auto=%v phase=%v", sawAuto, sawPhase)
+		case ev := <-e.Events():
+			switch e := ev.(type) {
+			case protocol.AutonomySelected:
+				if e.Mode == protocol.AutonomySkipAll {
+					sawAuto = true
+				}
+			case protocol.PhaseChanged:
+				if e.Phase == "plan" && e.Gate == "skip" {
+					sawPhase = true
+				}
+			}
+		}
 	}
 }
