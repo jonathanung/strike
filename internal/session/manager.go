@@ -807,6 +807,10 @@ func eventSessionID(ev protocol.Event) (string, bool) {
 		return e.SessionID, true
 	case protocol.TurnCompleted:
 		return e.SessionID, true
+	case protocol.VerificationStarted:
+		return e.SessionID, true
+	case protocol.VerificationCompleted:
+		return e.SessionID, true
 	case protocol.TextDelta:
 		return e.SessionID, true
 	case protocol.ToolCallBegin:
