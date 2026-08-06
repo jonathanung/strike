@@ -92,6 +92,11 @@ ssh -L 8787:127.0.0.1:8787 user@strike-host
 | `GET` | `/v1/agents` | **yes** | Selectable agent names |
 | `GET` | `/v1/sessions` | **yes** | Session list + `liveId` |
 | `GET` | `/v1/sessions/{id}/events` | **yes** | SSE tail of a session JSONL log |
+| `GET` | `/v1/roots` | **yes** | Active live roots + `activeId` (503 without LiveHub) |
+| `POST` | `/v1/roots` | **yes** | Create empty live workspace; becomes active |
+| `POST` | `/v1/roots/{id}/activate` | **yes** | Set hub active root (must already be live) |
+| `POST` | `/v1/roots/{id}/resume` | **yes** | Resume durable root as live workspace |
+| `DELETE` | `/v1/roots/{id}` | **yes** | Close/stop a live workspace (hub remove) |
 | `GET` | `/v1/workflows` | **yes** | Workflow catalog (host-safe summaries) |
 | `GET` | `/v1/workflows/{name}` | **yes** | One catalog entry |
 | `GET` | `/v1/workflows/{name}/document` | **yes** | Editable document for builder |
