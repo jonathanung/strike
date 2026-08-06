@@ -171,6 +171,8 @@ type Options struct {
 	LeanCode string
 	// Rules are permission ruleset layers, earliest first (later wins).
 	Rules []permission.Ruleset
+	// RuleLayerNames are optional stable names parallel to Rules (explain/audit).
+	RuleLayerNames []string
 	// Hooks are shell-command lifecycle hooks (pre/post tool use). Empty disables.
 	Hooks []tool.HookDef
 	// HookRules are declarative config rules (event matcher → log/block/notify).
@@ -515,11 +517,32 @@ func New(opts Options) *Engine {
 		e.messages = append([]provider.Message(nil), opts.InitialMessages...)
 	}
 	e.perms = permission.New(e.emit, opts.Rules...)
+	if len(opts.RuleLayerNames) > 0 {
+		e.perms.SetBaseLayerNames(opts.RuleLayerNames...)
+	}
 	if opts.PersistProjectRule != nil {
 		e.perms.SetProjectPersister(opts.PersistProjectRule)
 	}
 	e.questions = question.New(e.emit)
 	return e
+}
+
+// ExplainPermission returns last-match-wins detail for a sample tool call
+// against the live permission service (agent/phase/session grants included).
+func (e *Engine) ExplainPermission(permissionName, pattern string) permission.Explanation {
+	if e == nil || e.perms == nil {
+		return permission.Explain(permissionName, pattern)
+	}
+	return e.perms.Explain(permissionName, pattern)
+}
+
+// PermissionService exposes the live ask service for host adapters (explain,
+// scoped grants). Callers must not replace the service.
+func (e *Engine) PermissionService() *permission.Service {
+	if e == nil {
+		return nil
+	}
+	return e.perms
 }
 
 // Team returns the implicit session-scoped agent team (may be nil on

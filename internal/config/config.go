@@ -80,6 +80,10 @@ type Config struct {
 	// Distinct from Sandbox Network on/off (bash OS profile). See docs/config.md.
 	Network     NetworkConfig      `json:"network,omitempty"`
 	Permissions permission.Ruleset `json:"permissions,omitempty"`
+	// PermissionPreset selects a shipped named ruleset (read-only|dev|
+	// yolo-with-sandbox) inserted after defaults and before permissions[].
+	// Empty means no preset layer. See permission.Presets / docs/config.md.
+	PermissionPreset string `json:"permissionPreset,omitempty"`
 	// Hooks mixes declarative rules (action) and shell commands (command).
 	// Global then project layers concatenate. Invalid entries are dropped.
 	Hooks []Hook `json:"hooks,omitempty"`
@@ -654,6 +658,12 @@ func read(path string) (Config, error) {
 		}
 		c.PermissionMode = mode
 	}
+	if c.PermissionPreset != "" {
+		c.PermissionPreset = strings.ToLower(strings.TrimSpace(c.PermissionPreset))
+		if !permission.ValidPresetID(c.PermissionPreset) {
+			return Config{}, fmt.Errorf("%s: unknown permissionPreset %q (want read-only|dev|yolo-with-sandbox)", path, c.PermissionPreset)
+		}
+	}
 	if strings.TrimSpace(c.Sandbox) != "" {
 		mode, ok := sandbox.ParseMode(c.Sandbox)
 		if !ok {
@@ -1004,6 +1014,9 @@ func merge(base, layer Config) Config {
 	}
 	if layer.PermissionMode != "" {
 		base.PermissionMode = layer.PermissionMode
+	}
+	if layer.PermissionPreset != "" {
+		base.PermissionPreset = layer.PermissionPreset
 	}
 	if layer.Sandbox != "" {
 		base.Sandbox = layer.Sandbox

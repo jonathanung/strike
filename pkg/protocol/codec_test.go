@@ -506,6 +506,7 @@ func TestEventTypeCoverage(t *testing.T) {
 		"process.exited":       ProcessExited{},
 		"permission.asked":     PermissionAsked{},
 		"permission.resolved":  PermissionResolved{},
+		"permission.decided":   PermissionDecided{},
 		"question.asked":       QuestionAsked{},
 		"question.resolved":    QuestionResolved{},
 		"turn.completed":       TurnCompleted{},

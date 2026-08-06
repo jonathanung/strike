@@ -130,6 +130,8 @@ strike launches without any provider configured. Pick one inside the TUI:
 /edit-prompt                   # external editor for prompt (ctrl+e)
 /agent-next                    # cycle agent persona (tab)
 /mode-next                     # cycle permission mode (shift+tab)
+/permission explain bash ls    # why allow/ask/deny (matched rule + layer)
+/permission presets            # shipped permissionPreset catalog
 /tool-prev /tool-next          # select tool cells (alt+[ / alt+])
 /tool-expand /tool-copy        # expand or copy selected cell
 /tool-review /tool-apply       # review/apply selected edit
@@ -151,7 +153,8 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/undo` | undo last turn in place (idle only); bare opens picker; `chat` keeps disk; `files` restores per-file checkpoints from that turn (never `git reset --hard`) |
 | `/rewind` | fork a **new** session from a completed turn (idle only); original session stays listable; bare opens turn picker; `/rewind n` keeps turns 1..n. Workspace file revert is not part of rewind (use `/undo files` on the live session) |
 | `/export` | dump the visible transcript to markdown (user/assistant/tool summaries); redacts credentials via `pkg/redact` (see [secrets.md](secrets.md)); default path under `.strike/exports/` or tmp; `--open` launches `$EDITOR` |
-| `/timeline` | collapsed structured run timeline (turns/tools/provider attempts/children with durations); `/timeline export [path]` writes versioned redacted JSON (or `.jsonl`). Complements session JSONL and agent roster/budget fields — not a second full transcript |
+| `/timeline` | collapsed structured run timeline (turns/tools/provider attempts/children/**permission decisions** with durations); `/timeline export [path]` writes versioned redacted JSON (or `.jsonl`). Complements session JSONL and agent roster/budget fields — not a second full transcript |
+| `/permission` | explain why a tool call is allow/ask/deny, or list shipped presets. `/permission explain bash "git status"` shows matched rule + layer; `/permission presets` documents `read-only` vs `dev` vs `yolo-with-sandbox` (config `permissionPreset`). See [config.md](config.md) |
 | `/copy` | copy plain text of the last assistant response (not tool output) to the system clipboard via OSC52; same as `alt+y`; notice on success/failure |
 | `/compact` | ask the engine to compact model history |
 | `/memory` | bare = list browser (focuses memory pane); `list [tag]`, `get <key>`, `set <key> <value>`, `rm <key>`, `export [path]`, `import <path> [--replace]` (portable JSON; relative paths stay under project root) |

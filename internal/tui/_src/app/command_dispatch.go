@@ -121,6 +121,8 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		}
 		m.setNotice(m.sandboxStatusNotice(), false)
 		return m, nil
+	case "/permission", "/permissions":
+		return m.handlePermissionCommand(fields[1:])
 	case "/auth":
 		m.resetComposer()
 		return m.handleAuth(fields[1:])
@@ -1623,4 +1625,71 @@ func (m Model) sandboxExplainNotice() string {
 	}
 	note := "\n(note: config/base layers; active agent/phase/session layers apply at bash exec)"
 	return text + note
+}
+
+// handlePermissionCommand implements /permission [explain|presets].
+func (m *Model) handlePermissionCommand(args []string) (tea.Model, tea.Cmd) {
+	m.resetComposer()
+	m.clearNotice()
+	if m.services.Permissions == nil {
+		m.setNotice("permission explain unavailable", true)
+		return m, nil
+	}
+	if len(args) == 0 {
+		m.setNotice("usage: /permission explain <tool> [pattern] | /permission presets", true)
+		return m, nil
+	}
+	switch strings.ToLower(args[0]) {
+	case "presets", "preset", "list":
+		list := m.services.Permissions.Presets()
+		if len(list) == 0 {
+			m.setNotice("no permission presets shipped", true)
+			return m, nil
+		}
+		var b strings.Builder
+		b.WriteString("permission presets (config permissionPreset):")
+		for _, p := range list {
+			fmt.Fprintf(&b, "\n  %s — %s\n    %s", p.ID, p.Name, p.Description)
+		}
+		m.setNotice(b.String(), false)
+		return m, nil
+	case "explain", "why":
+		if len(args) < 2 {
+			m.setNotice("usage: /permission explain <tool> [pattern]", true)
+			return m, nil
+		}
+		toolName := args[1]
+		pattern := "*"
+		if len(args) >= 3 {
+			// Join remaining fields so patterns with spaces work when quoted by shell-ish input.
+			pattern = strings.TrimSpace(strings.Join(args[2:], " "))
+			if pattern == "" {
+				pattern = "*"
+			}
+		}
+		ex := m.services.Permissions.Explain(toolName, pattern)
+		if strings.TrimSpace(ex.Summary) == "" {
+			m.setNotice(fmt.Sprintf("%s %s → %s", toolName, pattern, ex.Action), false)
+			return m, nil
+		}
+		m.setNotice(ex.Summary, false)
+		return m, nil
+	default:
+		// Bare "/permission bash ls" as shorthand for explain.
+		toolName := args[0]
+		pattern := "*"
+		if len(args) >= 2 {
+			pattern = strings.TrimSpace(strings.Join(args[1:], " "))
+			if pattern == "" {
+				pattern = "*"
+			}
+		}
+		ex := m.services.Permissions.Explain(toolName, pattern)
+		if strings.TrimSpace(ex.Summary) == "" {
+			m.setNotice(fmt.Sprintf("%s %s → %s", toolName, pattern, ex.Action), false)
+			return m, nil
+		}
+		m.setNotice(ex.Summary, false)
+		return m, nil
+	}
 }

@@ -95,6 +95,7 @@ write this file. Manual `/ftue` remains available after acknowledgement.
       { "pattern": "make *", "class": "build" }
     ]
   },
+  "permissionPreset": "dev",
   "permissions": [
     { "permission": "bash", "pattern": "go *", "action": "allow" },
     { "permission": "write", "pattern": "**/*.env", "action": "deny" }
@@ -104,6 +105,38 @@ write this file. Manual `/ftue` remains available after acknowledgement.
 
 Rules concatenate across layers; the last matching rule wins, so project
 config overrides global, and session "always" grants override both.
+
+**Evaluation order (last-match-wins):** defaults → optional
+`permissionPreset` → `permissions[]` (global then project) → optional
+`--dangerously-skip-permissions` allow-all → project runtime grants → active
+agent profile → session always grants → scoped TTL grants → permission-mode
+late denies (plan) → workflow phase profile → mode ask-upgrade (yolo /
+accept-edits only upgrade remaining Ask→Allow; never widen Deny).
+
+**Permission presets (`permissionPreset`):** shipped named rulesets inserted
+after defaults and before `permissions[]`. Empty means no preset layer.
+Inspect with `/permission presets`.
+
+| ID | Behavior |
+|---|---|
+| `read-only` | Allow read/search/LSP; **deny** write, edit, bash, webfetch, mcp, hooks |
+| `dev` | Allow common local-dev bash (`go *`, `git status/diff/log/show`, `make test*`); deny force-push and `.env` writes; other mutations stay ask |
+| `yolo-with-sandbox` | Rule-level allow-all (`* *` allow). Does **not** turn off OS sandbox — keep `sandbox` at `workspace-write` or `read-only`. Later deny rules still win. Distinct from `permissionMode: yolo` |
+
+**Explain:** `/permission explain <tool> [pattern]` (or the
+`permission.Explain` / `Service.Explain` API) returns the effective action,
+matched rule, layer name, and match trail for a sample tool call.
+
+**Scoped approvals:** runtime grants may be bounded by scope and optional
+wall-clock TTL (`session`, `path-prefix`, `tool`, `command-class`). A scoped
+grant that would override a parent **Deny** is rejected (does not silently
+widen). Session always / project decisions remain the TUI reply path;
+programmatic `Service.Grant` is the scoped+TTL API.
+
+**Audit trail:** every allow/deny/ask outcome emits `permission.decided`
+(plus `permission.asked` / `permission.resolved` when the user is prompted).
+`/timeline` folds these into `kind: permission` entries with redacted
+patterns (see [secrets.md](secrets.md) / `pkg/redact`).
 
 **Two-dial model (Codex mental model):**
 

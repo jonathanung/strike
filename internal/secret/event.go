@@ -50,6 +50,13 @@ func RedactEvent(ev protocol.Event) protocol.Event {
 		e.Always = redactStrings(e.Always)
 		e.Metadata = redact.JSON(e.Metadata)
 		return e
+	case protocol.PermissionDecided:
+		e.Patterns = redactStrings(e.Patterns)
+		e.RulePattern = redact.String(e.RulePattern)
+		e.Layer = redact.String(e.Layer)
+		e.RulePermission = redact.String(e.RulePermission)
+		e.RuleAction = redact.String(e.RuleAction)
+		return e
 	case protocol.AgentMessage:
 		e.Body = redact.String(e.Body)
 		e.Summary = redact.String(e.Summary)
