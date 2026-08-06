@@ -2,6 +2,8 @@ package update
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
@@ -232,5 +234,52 @@ func TestNotifyMessage(t *testing.T) {
 	got = notifyMessage("dev", "v1.0.0", InstallInfo{Kind: InstallNix})
 	if !strings.Contains(got, "Nix") {
 		t.Fatalf("%q", got)
+	}
+}
+
+func TestStartupProbeAutoInstalls(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "strike")
+	if err := os.WriteFile(exe, []byte("old-binary-content!!"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	newPayload := []byte("new-binary-payload-xyz")
+	assetName := AssetName("v0.2.0", "linux", "amd64")
+	archive := mustTarGz(t, "strike", newPayload)
+	sumArr := sha256.Sum256(archive)
+	sums := hex.EncodeToString(sumArr[:]) + "  " + assetName + "\n"
+	srv := newReleaseServer(t, "v0.2.0", map[string][]byte{
+		assetName:     archive,
+		checksumsName: []byte(sums),
+	})
+	defer srv.Close()
+
+	install := InstallInfo{Kind: InstallWritable, CanReplace: true, Executable: exe}
+	res, err := StartupProbe(context.Background(), ProbeOptions{
+		Mode:      "auto",
+		CacheFile: filepath.Join(t.TempDir(), "c.json"),
+		Install:   &install,
+		Options: Options{
+			APIBase:    srv.URL,
+			HTTPClient: srv.Client(),
+			Current:    "v0.1.0",
+			GOOS:       "linux",
+			GOARCH:     "amd64",
+			Executable: exe,
+			NoExec:     true,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.AutoInstalled || !strings.Contains(res.Message, "auto-updated") {
+		t.Fatalf("%+v", res)
+	}
+	got, err := os.ReadFile(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(newPayload) {
+		t.Fatalf("binary not replaced")
 	}
 }

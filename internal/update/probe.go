@@ -265,10 +265,20 @@ func finishProbe(ctx context.Context, opts Options, mode string, install Install
 	}
 
 	if ShouldAutoInstall(mode) && install.CanReplace {
+		// Download can exceed the short startup probe budget; use a separate
+		// timeout so auto is not stuck forever and is not clipped to ~5s.
+		upCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+		defer cancel()
 		upOpts := opts
 		upOpts.NoExec = true
 		upOpts.Stdout = opts.Stdout
-		upRes, err := Upgrade(ctx, upOpts)
+		// Prefer a client timeout that matches the auto budget when unset/default.
+		if upOpts.HTTPClient != nil && upOpts.HTTPClient.Timeout > 0 && upOpts.HTTPClient.Timeout < 2*time.Minute {
+			c := *upOpts.HTTPClient
+			c.Timeout = 2 * time.Minute
+			upOpts.HTTPClient = &c
+		}
+		upRes, err := Upgrade(upCtx, upOpts)
 		if err != nil {
 			// Fall back to notify messaging; do not fail startup.
 			res.Message = notifyMessage(opts.Current, latest, install)
