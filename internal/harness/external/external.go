@@ -252,8 +252,8 @@ func (e *runner) run(input harness.Input, p harness.Provider, emit harness.Emit)
 		if t.err == nil && waitErr != nil && !forced {
 			t.err = fmt.Errorf("external harness exit: %w", waitErr)
 		} else if t.err != nil && waitErr != nil && !forced {
-			// Prefer exit status when the scanner only saw pipe close/read
-			// errors (process-group kill can surface "file already closed").
+			// Prefer nonzero exit when the scanner only saw pipe teardown
+			// (process-group kill can surface "file already closed").
 			msg := t.err.Error()
 			if strings.Contains(msg, "exited without harness.complete") ||
 				strings.Contains(msg, "file already closed") ||
