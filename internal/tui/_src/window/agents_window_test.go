@@ -459,7 +459,7 @@ func loadAgentsFixture(t *testing.T) agentsWindow {
 }
 
 func agentsVisibleIDs(w agentsWindow) []string {
-	w.nodes = w.buildNodes()
+	w.nodes = w.buildNodes(theme.Default())
 	rows := ui.FlattenTree(w.nodes)
 	out := make([]string, len(rows))
 	for i, r := range rows {
@@ -575,7 +575,7 @@ func TestAgentsWindowFilterEmptyStates(t *testing.T) {
 	}
 	for _, tt := range cases {
 		w.viewFilter = tt.filter
-		w.nodes = w.buildNodes()
+		w.nodes = w.buildNodes(theme.Default())
 		plain := ansi.Strip(w.view(theme.Default()))
 		if !strings.Contains(plain, tt.want) {
 			t.Errorf("filter %s empty = %q, want %q", tt.filter.label(), plain, tt.want)
@@ -584,7 +584,7 @@ func TestAgentsWindowFilterEmptyStates(t *testing.T) {
 
 	w.viewFilter = agentsFilterAll
 	w.textFilter = "zzz-nope"
-	w.nodes = w.buildNodes()
+	w.nodes = w.buildNodes(theme.Default())
 	plain := ansi.Strip(w.view(theme.Default()))
 	if !strings.Contains(plain, "no matches") {
 		t.Errorf("text filter empty = %q", plain)
@@ -939,5 +939,205 @@ func TestAgentsHideUnhideOnActivate(t *testing.T) {
 	}
 	if m.isAgentHidden("root-b") {
 		t.Fatal("activated root should unhide")
+	}
+}
+
+func TestAgentsOrchChipsBlockedConflictBudgetVerify(t *testing.T) {
+	th := theme.Default().Resolve()
+	// Blocked child.
+	blocked := childActivity{
+		sessionID:   "b1",
+		status:      string(protocol.ChildStatusBlocked),
+		blockReason: "permission",
+	}
+	suf := ansi.Strip(agentsOrchSuffix(th, blocked))
+	if !strings.Contains(suf, "blocked") {
+		t.Fatalf("blocked chip missing: %q", suf)
+	}
+
+	// Conflict.
+	conflict := childActivity{
+		sessionID: "c1",
+		status:    "running",
+		pathOverlaps: []childPathOverlap{
+			{path: "a.go", policy: "block", blocked: true},
+		},
+	}
+	suf = ansi.Strip(agentsOrchSuffix(th, conflict))
+	if !strings.Contains(suf, "conflict") {
+		t.Fatalf("conflict chip missing: %q", suf)
+	}
+
+	// Escalated / over-budget.
+	esc := childActivity{
+		sessionID:    "e1",
+		status:       "running",
+		escalateKind: "tool_calls",
+	}
+	suf = ansi.Strip(agentsOrchSuffix(th, esc))
+	if !strings.Contains(suf, "escalated") {
+		t.Fatalf("escalated chip missing: %q", suf)
+	}
+	over := childActivity{
+		sessionID: "o1",
+		status:    "running",
+		budget:    &protocol.AgentBudgetView{MaxToolCalls: 3, ToolCalls: 3},
+	}
+	suf = ansi.Strip(agentsOrchSuffix(th, over))
+	if !strings.Contains(suf, "over budget") {
+		t.Fatalf("over budget chip missing: %q", suf)
+	}
+
+	// Claimed / unverified (terminal verification).
+	claimed := childActivity{
+		sessionID: "v1",
+		status:    string(protocol.ChildStatusCompleted),
+		verification: &childVerificationSummary{
+			claimed: true, verified: false, passed: false,
+		},
+	}
+	suf = ansi.Strip(agentsOrchSuffix(th, claimed))
+	if !strings.Contains(suf, "claimed") {
+		t.Fatalf("claimed chip missing: %q", suf)
+	}
+	// Verified success stays quiet.
+	ok := childActivity{
+		sessionID: "v2",
+		status:    string(protocol.ChildStatusCompleted),
+		verification: &childVerificationSummary{
+			claimed: true, verified: true, passed: true,
+		},
+	}
+	if got := agentsOrchSuffix(th, ok); got != "" {
+		t.Fatalf("verified success should be quiet, got %q", ansi.Strip(got))
+	}
+	// No report → no chip.
+	if got := agentsOrchSuffix(th, childActivity{sessionID: "n", status: "completed"}); got != "" {
+		t.Fatalf("no-report should be quiet, got %q", ansi.Strip(got))
+	}
+}
+
+func TestAgentsOrchChipsInTreeView(t *testing.T) {
+	w := newAgentsWindow().resize(64, 12).(agentsWindow)
+	next, _ := w.update(agentsStateMsg{
+		activeID:  "root",
+		viewingID: "root",
+		roots: []agentsRootSnap{
+			{
+				ID:    "root",
+				Title: "lead",
+				State: theme.AgentStateWorking,
+				Children: []childActivity{
+					{
+						sessionID:   "child-block",
+						parentID:    "root",
+						agent:       "build",
+						status:      string(protocol.ChildStatusBlocked),
+						blockReason: "ask",
+						pathOverlaps: []childPathOverlap{
+							{path: "x.go", policy: "warn"},
+						},
+					},
+					{
+						sessionID: "child-plain",
+						parentID:  "root",
+						agent:     "explore",
+						status:    "running",
+					},
+				},
+			},
+		},
+	})
+	w = next.(agentsWindow)
+	plain := ansi.Strip(w.view(theme.Default()))
+	if !strings.Contains(plain, "blocked") {
+		t.Fatalf("tree missing blocked chip:\n%s", plain)
+	}
+	if !strings.Contains(plain, "conflict") {
+		t.Fatalf("tree missing conflict chip:\n%s", plain)
+	}
+	// Plain running child has no orch chips.
+	// Filters still work.
+	w.viewFilter = agentsFilterWorking
+	w.nodes = w.buildNodes(theme.Default())
+	ids := agentsVisibleIDs(w)
+	// blocked maps to attention-ish; working filter may exclude blocked
+	// Ensure cycle still functions.
+	w.viewFilter = agentsFilterAll
+	w.nodes = w.buildNodes(theme.Default())
+	ids = agentsVisibleIDs(w)
+	found := false
+	for _, id := range ids {
+		if id == "child-block" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("child-block missing under all filter: %v", ids)
+	}
+}
+
+func TestAgentsOrchChipsDropOnNarrowWidth(t *testing.T) {
+	// Tree drops suffix when it cannot fit; row must stay width-safe.
+	msg := agentsStateMsg{
+		activeID:  "root",
+		viewingID: "root",
+		roots: []agentsRootSnap{
+			{
+				ID:    "root",
+				Title: "lead-with-a-long-title",
+				State: theme.AgentStateWorking,
+				Children: []childActivity{
+					{
+						sessionID:    "child",
+						parentID:     "root",
+						agent:        "implementer-with-long-name",
+						status:       string(protocol.ChildStatusBlocked),
+						blockReason:  "permission",
+						escalateKind: "stall",
+						pathOverlaps: []childPathOverlap{{path: "a.go", blocked: true, policy: "block"}},
+						verification: &childVerificationSummary{claimed: true, verified: false, passed: false},
+					},
+				},
+			},
+		},
+	}
+	for _, width := range []int{12, 20, 32, 48, 80} {
+		w := newAgentsWindow().resize(width, 10).(agentsWindow)
+		next, _ := w.update(msg)
+		view := next.view(theme.Default())
+		for i, line := range strings.Split(view, "\n") {
+			if got := lipgloss.Width(line); got > width {
+				t.Errorf("width %d line %d width %d: %q", width, i, got, ansi.Strip(line))
+			}
+		}
+	}
+}
+
+func TestAgentsOrchChipBound(t *testing.T) {
+	th := theme.Default().Resolve()
+	// All four flags → at most agentsMaxOrchChips badges.
+	ch := childActivity{
+		sessionID:    "x",
+		status:       string(protocol.ChildStatusBlocked),
+		blockReason:  "ask",
+		escalateKind: "loop",
+		pathOverlaps: []childPathOverlap{{path: "a.go", blocked: true}},
+		verification: &childVerificationSummary{claimed: true, verified: false, passed: false},
+	}
+	suf := agentsOrchSuffix(th, ch)
+	// Count badge-ish tokens by label presence; max 3 of the 4.
+	n := 0
+	plain := ansi.Strip(suf)
+	for _, label := range []string{"blocked", "conflict", "loop", "escalated", "claimed", "unverified", "over budget", "stall"} {
+		if strings.Contains(plain, label) {
+			n++
+		}
+	}
+	if n > agentsMaxOrchChips {
+		t.Fatalf("chip count %d > max %d: %q", n, agentsMaxOrchChips, plain)
+	}
+	if n < 1 {
+		t.Fatalf("expected some chips, got %q", plain)
 	}
 }
