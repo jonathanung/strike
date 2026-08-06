@@ -216,6 +216,42 @@ func TestNoteMutatedPathRelative(t *testing.T) {
 	}
 }
 
+func TestNoteMutatedPathViaFileSyncOnlyOnSuccess(t *testing.T) {
+	// Mirrors turn wiring: FileSync records paths; Checkpoint alone must not.
+	dir := t.TempDir()
+	var outer []string
+	eng := New(Options{
+		WorkDir:   dir,
+		SessionID: "s-fsync",
+		FileSync: func(abs string, _ string, _ bool) {
+			outer = append(outer, abs)
+		},
+	})
+	abs := filepath.Join(dir, "ok.txt")
+	// Simulate tool Context FileSync wrapper used in turn.go.
+	sync := func(absPath string, content string, deleted bool) {
+		eng.noteMutatedPath(absPath)
+		if eng.opts.FileSync != nil {
+			eng.opts.FileSync(absPath, content, deleted)
+		}
+	}
+	// Checkpoint-only (failed write path) — no handoff entry.
+	eng.checkpoints.BeginTurn("t1")
+	eng.checkpoints.Snapshot(abs)
+	if got := eng.mutatedPathsSnapshot(); len(got) != 0 {
+		t.Fatalf("checkpoint alone should not track: %#v", got)
+	}
+	// Successful mutation notifies FileSync.
+	sync(abs, "hi", false)
+	got := eng.mutatedPathsSnapshot()
+	if len(got) != 1 || got[0] != "ok.txt" {
+		t.Fatalf("paths = %#v", got)
+	}
+	if len(outer) != 1 {
+		t.Fatalf("outer FileSync calls = %d", len(outer))
+	}
+}
+
 func TestMergeUniquePaths(t *testing.T) {
 	got := mergeUniquePaths([]string{"b.go", "a.go"}, []string{"a.go", " c.go "})
 	want := []string{"a.go", "b.go", "c.go"}

@@ -382,36 +382,47 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 
 		// If parent engine life ended without a child turn terminal, treat as cancel.
 		assistantText := lastAssistantText(child.messages)
-		summary := assistantText
 		var status protocol.ChildStatus
+		var errText string
 		switch {
 		case (childCtx.Err() != nil && !gotStop) || (gotStop && stopReason == "interrupted"):
 			status = protocol.ChildStatusCanceled
-			if summary == "" {
-				summary = "task canceled"
-			}
 		case !gotStop || stopReason == "error":
 			status = protocol.ChildStatusFailed
 			failMu.Lock()
-			errText := failMsg
+			errText = failMsg
 			failMu.Unlock()
-			switch {
-			case errText != "" && summary != "":
-				summary = summary + "\n\nError: " + errText
-			case errText != "":
-				summary = errText
-			case summary == "":
-				summary = "task failed"
-			}
 		default:
 			status = protocol.ChildStatusCompleted
-			if summary == "" {
-				summary = "task completed"
+		}
+		// Structured handoff: parse model JSON from assistant text first (before
+		// appending engine error suffixes), then merge engine file tracking.
+		handoff := buildCompletionHandoff(status, assistantText, child.mutatedPathsSnapshot())
+		if errText != "" {
+			if strings.TrimSpace(handoff.Summary) == "" || handoff.Summary == defaultHandoffSummary(status) {
+				handoff.Summary = errText
+			} else if !strings.Contains(handoff.Summary, errText) {
+				handoff.Summary = handoff.Summary + "\n\nError: " + errText
+			}
+			if len(handoff.Blockers) == 0 {
+				handoff.Blockers = []string{errText}
+			} else {
+				// Keep model blockers; ensure error is visible.
+				found := false
+				for _, b := range handoff.Blockers {
+					if strings.Contains(b, errText) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					handoff.Blockers = append(handoff.Blockers, errText)
+				}
 			}
 		}
-		// Structured handoff: merge model JSON (when present) with engine
-		// file-mutation tracking. Summary field stays backward-compatible.
-		handoff := buildCompletionHandoff(status, summary, child.mutatedPathsSnapshot())
+		if strings.TrimSpace(handoff.Summary) == "" {
+			handoff.Summary = defaultHandoffSummary(status)
+		}
 		completed := protocol.ChildCompleted{
 			Correlation: childCorr,
 			Status:      status,
