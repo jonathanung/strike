@@ -124,14 +124,34 @@ func idCreatedAt(id string) (time.Time, bool) {
 	return t.UTC(), true
 }
 
+// TimedEvent pairs a decoded protocol event with its JSONL envelope timestamp.
+// Used by timeline export so durations are derived from durable log times.
+type TimedEvent struct {
+	Time  time.Time
+	Event protocol.Event
+}
+
 // Replay reads all events back from a session log.
 func Replay(path string) ([]protocol.Event, error) {
+	timed, err := ReplayTimed(path)
+	if err != nil {
+		return nil, err
+	}
+	events := make([]protocol.Event, len(timed))
+	for i, te := range timed {
+		events[i] = te.Event
+	}
+	return events, nil
+}
+
+// ReplayTimed reads all events with envelope timestamps from a session log.
+func ReplayTimed(path string) ([]TimedEvent, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	var events []protocol.Event
+	var events []TimedEvent
 	scanner := bufio.NewScanner(f)
 	// Multimodal user.message lines can carry multi-MiB base64 images.
 	scanner.Buffer(make([]byte, 0, 64*1024), 32<<20)
@@ -146,7 +166,7 @@ func Replay(path string) ([]protocol.Event, error) {
 		if err != nil {
 			return nil, fmt.Errorf("line %d: %w", line, err)
 		}
-		events = append(events, ev)
+		events = append(events, TimedEvent{Time: env.Time.UTC(), Event: ev})
 	}
 	return events, scanner.Err()
 }

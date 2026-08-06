@@ -18,6 +18,7 @@ func TestPaneSlashCommandsFocusNamedWindows(t *testing.T) {
 		{"/diagnostics", diagnosticsWindowID},
 		{"/visualizer", visualizerWindowID},
 		{"/system", telemetryWindowID},
+		{"/pets", petsWindowID},
 	}
 	for _, tt := range tests {
 		t.Run(tt.command, func(t *testing.T) {
