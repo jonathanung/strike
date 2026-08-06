@@ -29,6 +29,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jonathanung/strike-cli/internal/fault"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/secret"
 )
@@ -142,10 +143,19 @@ func (s *Store) writeHeaderLocked() error {
 	if _, err := s.f.Write(line); err != nil {
 		return fmt.Errorf("write session header: %w", err)
 	}
-	if err := s.f.Sync(); err != nil {
+	if err := s.fsyncLocked(); err != nil {
 		return fmt.Errorf("sync session header: %w", err)
 	}
 	return nil
+}
+
+// fsyncLocked durability-flushes the open log. fault.SessionSync may inject
+// failures for chaos tests (see docs/chaos.md).
+func (s *Store) fsyncLocked() error {
+	if err := fault.Check(fault.SessionSync); err != nil {
+		return err
+	}
+	return s.f.Sync()
 }
 
 func (s *Store) Path() string {
@@ -187,7 +197,7 @@ func (s *Store) Append(ev protocol.Event) error {
 		return fmt.Errorf("session append: %w", io.ErrShortWrite)
 	}
 	// fsync so a crash cannot leave a torn last record on stable storage.
-	if err := s.f.Sync(); err != nil {
+	if err := s.fsyncLocked(); err != nil {
 		return fmt.Errorf("session sync: %w", err)
 	}
 	return nil
@@ -201,7 +211,7 @@ func (s *Store) Sync() error {
 	if s.f == nil {
 		return nil
 	}
-	return s.f.Sync()
+	return s.fsyncLocked()
 }
 
 func (s *Store) Close() error {

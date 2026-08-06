@@ -1,4 +1,4 @@
-.PHONY: build run run-echo serve serve-expose web-build web-test web-check test vet cover cover-check clean setup restore tui-gen prompt-reg harness-eval
+.PHONY: build run run-echo serve serve-expose web-build web-test web-check test vet cover cover-check clean setup restore tui-gen prompt-reg chaos harness-eval
 
 # Overall statement-coverage floor for `make cover-check` (local / optional CI).
 # Soft baseline ~77%; keep below measured total so the gate does not flake.
@@ -59,6 +59,12 @@ web-check:
 
 test: tui-gen
 	go test ./...
+
+# Failure-injection / chaos suite (#808). Also covered by `make test`.
+# See docs/chaos.md.
+chaos:
+	go test ./internal/fault/ ./internal/session/ ./internal/tool/ ./internal/engine/ \
+		-run 'Chaos|TestArm|TestCatalog|TestCheck|TestDisarm|TestConcurrent' -count=1
 
 # E3.2 prompt regression report (also runs under `make test` via go test).
 # Non-blocking metric deltas by default. After prompt.go / prompt_tools.go /
