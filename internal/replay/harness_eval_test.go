@@ -388,34 +388,32 @@ func scenarioSandboxCapabilityReport(t *testing.T) string {
 func scenarioCancelErrorCode(t *testing.T) string {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	dir := t.TempDir()
 	tc := &tool.Context{
-		WorkDir: dir,
+		WorkDir: t.TempDir(),
 		Ask:     func(context.Context, tool.AskRequest) error { return nil },
 	}
-	errCh := make(chan error, 1)
-	resCh := make(chan tool.Result, 1)
+	// Print then sleep so cancel is observed after the process starts
+	// (matches internal/tool TestBashCancelPreservesPartialOutput).
+	done := make(chan tool.Result, 1)
+	errc := make(chan error, 1)
 	go func() {
 		res, err := tool.NewBash().Execute(ctx, mustJSON(t, map[string]any{
-			"command": "sleep 30",
+			"command": "printf 'harness-eval-cancel\\n'; sleep 30",
 		}), tc)
-		resCh <- res
-		errCh <- err
+		done <- res
+		errc <- err
 	}()
-	// Give the process a moment to start, then cancel.
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 	cancel()
 	select {
-	case err := <-errCh:
-		res := <-resCh
-		// Bash returns Result with ErrorCode canceled (and often nil error).
-		if res.ErrorCode != tool.ErrorCodeCanceled {
-			// Some paths surface via error only.
-			if tool.CodeOf(err) != string(tool.CodeCanceled) && !errors.Is(err, context.Canceled) {
-				t.Fatalf("cancel: ErrorCode=%q err=%v", res.ErrorCode, err)
-			}
+	case res := <-done:
+		if err := <-errc; err != nil {
+			t.Fatalf("err = %v", err)
 		}
-		return "bash cancel → canceled error code"
+		if res.ErrorCode != tool.ErrorCodeCanceled {
+			t.Fatalf("ErrorCode = %q, want %q", res.ErrorCode, tool.ErrorCodeCanceled)
+		}
+		return "bash cancel → ErrorCode canceled"
 	case <-time.After(5 * time.Second):
 		t.Fatal("bash did not return after cancel")
 		return ""
@@ -545,9 +543,9 @@ func scenarioBudgetAndEchoTokens(t *testing.T) string {
 	if m.Turns != 1 {
 		t.Fatalf("turns = %d", m.Turns)
 	}
-	// Echo estimates tokens; used/input should be non-negative and typically >0.
-	if m.UsedTokens < 0 || m.InputTokens < 0 {
-		t.Fatalf("token metrics negative: %+v", m)
+	// Echo estimates tokens; require a positive usage signal for cost tracking.
+	if m.UsedTokens <= 0 && m.InputTokens <= 0 && m.OutputTokens <= 0 {
+		t.Fatalf("token metrics missing/zero: %+v", m)
 	}
 	return "AgentBudgetView cost fields + echo CollectMetrics tokens present"
 }
