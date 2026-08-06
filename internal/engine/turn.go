@@ -1072,12 +1072,25 @@ func (e *Engine) failTurn(err error, corr protocol.Correlation, finishing chan s
 // Any remaining tool-queued agent switch is applied after TurnCompleted so
 // Run's join on turnDone observes the new agent (belt-and-suspenders with the
 // post-tool-batch apply in runTurn).
+//
+// When Options.Verify is set and the model claimed a successful completion
+// (stopReason end_turn), independent gates run before TurnCompleted so the
+// report attaches on the same terminal event (claim ≠ verified).
 func (e *Engine) completeTurn(finishing chan struct{}, corr protocol.Correlation, stopReason string) {
 	close(finishing)
 	files := turnFileChanges(e.turnDiff.Snapshot())
 	e.checkpoints.CommitTurn()
 	e.fireHookRules(corr, permission.HookEventTurnEnd, "", "")
-	e.emit(protocol.TurnCompleted{Correlation: corr, StopReason: stopReason, Files: files})
+	var verification *protocol.VerificationReport
+	if stopReason == "end_turn" && len(e.opts.Verify) > 0 {
+		verification = e.runSoloVerification(corr)
+	}
+	e.emit(protocol.TurnCompleted{
+		Correlation:  corr,
+		StopReason:   stopReason,
+		Files:        files,
+		Verification: verification,
+	})
 	e.applyPendingAgent()
 }
 
