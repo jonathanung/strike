@@ -242,6 +242,35 @@ func TestVisualizerBlockReasonAndEmptyPlaceholders(t *testing.T) {
 	}
 }
 
+func TestVisualizerFailedChildOmitsEmptyBlockRow(t *testing.T) {
+	// Failed/error without blockReason must not look "blocked".
+	w := newVisualizerWindow().resize(32, 16).(visualizerWindow)
+	updated, _ := w.update(visualizerStateMsg{
+		SessionID:   "c",
+		Label:       "x",
+		Kind:        "child",
+		State:       theme.AgentStateError,
+		StatusLabel: "failed",
+	})
+	plain := ansi.Strip(updated.view(theme.Default()))
+	if strings.Contains(plain, "blocked") {
+		t.Fatalf("failed child should not show empty blocked row:\n%s", plain)
+	}
+	// Explicit reason still surfaces even on failed.
+	updated, _ = w.update(visualizerStateMsg{
+		SessionID:   "c",
+		Label:       "x",
+		Kind:        "child",
+		State:       theme.AgentStateError,
+		StatusLabel: "failed",
+		BlockReason: "verifier rejected",
+	})
+	plain = ansi.Strip(updated.view(theme.Default()))
+	if !strings.Contains(plain, "blocked") || !strings.Contains(plain, "verifier rejected") {
+		t.Fatalf("explicit blockReason missing on failed child:\n%s", plain)
+	}
+}
+
 func TestVisualizerLastActionFallsBackToTool(t *testing.T) {
 	w := newVisualizerWindow().resize(32, 16).(visualizerWindow)
 	updated, _ := w.update(visualizerStateMsg{

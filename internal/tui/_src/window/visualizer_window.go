@@ -273,7 +273,9 @@ func visualizerBlockLine(th theme.Theme, width int, s visualizerStateMsg, dash s
 }
 
 func visualizerNeedsBlockRow(s visualizerStateMsg) bool {
-	if s.State == theme.AgentStateAttention || s.State == theme.AgentStateError {
+	// Attention (needs you) always gets a block/reason row. Plain Error/failed
+	// without a reason does not — a failed child is not "blocked".
+	if s.State == theme.AgentStateAttention {
 		return true
 	}
 	switch strings.ToLower(strings.TrimSpace(s.StatusLabel)) {
