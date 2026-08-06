@@ -899,6 +899,38 @@ type TurnCompleted struct {
 	// Files lists harness edit/write/apply_patch/notebook_edit paths touched
 	// this turn with change kind. Omitempty keeps legacy readers happy.
 	Files []TurnFileChange `json:"files,omitempty"`
+	// Verification is set when solo/harness Options.Verify gates ran for this
+	// turn. Claimed reflects a successful model claim (typically stopReason
+	// end_turn); Verified/Passed are harness-owned and independent of model
+	// prose. Absent when no gates were configured (#806).
+	Verification *VerificationReport `json:"verification,omitempty"`
+}
+
+// Verification scope labels on VerificationStarted / VerificationCompleted.
+const (
+	// VerificationScopeTurn is a solo/root (or harness) turn without a child
+	// delegation object.
+	VerificationScopeTurn = "turn"
+	// VerificationScopeChild is a delegated child/subagent completion (#780).
+	VerificationScopeChild = "child"
+)
+
+// VerificationStarted marks the beginning of independent completion gates.
+// Emitted before gates run so timeline/session audit can span start→end (#790).
+// Scope is VerificationScopeTurn or VerificationScopeChild.
+type VerificationStarted struct {
+	Correlation
+	Scope     string `json:"scope,omitempty"`
+	GateCount int    `json:"gateCount,omitempty"`
+}
+
+// VerificationCompleted is the harness-owned outcome of independent gates.
+// Report.Claimed vs Report.Verified is the wire distinction between
+// claimed_done and verified_done; model self-report text is never evidence.
+type VerificationCompleted struct {
+	Correlation
+	Scope  string             `json:"scope,omitempty"`
+	Report VerificationReport `json:"report"`
 }
 
 // HarnessProgress is emitted by a custom harness to report intermediate state
@@ -1350,6 +1382,8 @@ func (PermissionResolved) isEvent()      {}
 func (QuestionAsked) isEvent()           {}
 func (QuestionResolved) isEvent()        {}
 func (TurnCompleted) isEvent()           {}
+func (VerificationStarted) isEvent()     {}
+func (VerificationCompleted) isEvent()   {}
 func (HarnessProgress) isEvent()         {}
 func (ModelSelected) isEvent()           {}
 func (AgentSelected) isEvent()           {}

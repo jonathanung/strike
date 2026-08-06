@@ -63,6 +63,13 @@ type Options struct {
 	Select    SelectFunc
 	Registry  *tool.Registry
 	WorkDir   string
+	// Verify declares independent completion gates for solo/root turns (and
+	// custom harness paths that use the built-in turn loop). When non-empty, a
+	// successful claim (stopReason end_turn) runs gates via internal/verify,
+	// emits verification.started/completed, and attaches the report on
+	// TurnCompleted. Distinct from task/delegate child gates (#780). Model
+	// self-report cannot pass a configured gate (#806).
+	Verify []tool.VerifyGate
 	// InitialProvider/InitialModel are tried once at startup; failure is
 	// silent (the user selects interactively later).
 	InitialProvider string
