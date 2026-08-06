@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +21,20 @@ import (
 	"github.com/jonathanung/strike-cli/internal/scheduler"
 	"github.com/jonathanung/strike-cli/internal/tool"
 )
+
+// sessionTemp holds the absolute private scratch dir for this engine session
+// (os.TempDir()/strike/<session-id>/). Lazily allocated on first use. Cleaned
+// up when Run returns.
+type sessionTempState struct {
+	dir string
+	// owned is true when this engine created/ensured the dir and should remove it.
+	owned bool
+	// failed is true after a permanent allocation failure (do not retry).
+	failed bool
+	// lastTouch is the last mtime refresh (keeps long-lived sessions off the
+	// peer stale-cleanup list).
+	lastTouch time.Time
+}
 
 // defaultMaxStreamAttempts is how many times one logical model request may
 // call Provider.Stream on retryable failure before the turn fails.
@@ -510,6 +525,10 @@ type Engine struct {
 	// (allow escalate warn→critical only).
 	fitWarnedTurnID string
 	fitWarnedLevel  string
+
+	// sessionTemp is the private OS temp scratch dir for path tools.
+	sessionTempMu sync.Mutex
+	sessionTemp   sessionTempState
 }
 
 func New(opts Options) *Engine {
@@ -597,6 +616,73 @@ func New(opts Options) *Engine {
 	}
 	e.questions = question.New(e.emit)
 	return e
+}
+
+// SessionTempDir returns the absolute session scratch directory, allocating it
+// on first use. Empty when allocation fails or session id is unset. Failure is
+// non-fatal: path tools keep the workspace-only boundary.
+func (e *Engine) SessionTempDir() string {
+	if e == nil {
+		return ""
+	}
+	return e.ensureSessionTemp()
+}
+
+// ensureSessionTemp lazily creates os.TempDir()/strike/<session-id>/ once.
+// Safe for concurrent first-use from tool dispatch and prompt composition.
+// Refreshes directory mtime periodically so peer stale-cleanup cannot reap a
+// still-running session after defaultStaleSessionTempAge.
+func (e *Engine) ensureSessionTemp() string {
+	if e == nil {
+		return ""
+	}
+	e.sessionTempMu.Lock()
+	defer e.sessionTempMu.Unlock()
+	if e.sessionTemp.failed {
+		return ""
+	}
+	if e.sessionTemp.dir != "" {
+		e.touchSessionTempLocked()
+		return e.sessionTemp.dir
+	}
+	dir, err := tool.EnsureSessionTemp(e.opts.SessionID)
+	if err != nil || dir == "" {
+		e.sessionTemp.failed = true
+		return ""
+	}
+	e.sessionTemp = sessionTempState{dir: dir, owned: true, lastTouch: time.Now()}
+	return dir
+}
+
+// touchSessionTempLocked refreshes the scratch dir mtime at most once per hour.
+// Caller must hold sessionTempMu.
+func (e *Engine) touchSessionTempLocked() {
+	const touchEvery = time.Hour
+	dir := e.sessionTemp.dir
+	if dir == "" {
+		return
+	}
+	now := time.Now()
+	if !e.sessionTemp.lastTouch.IsZero() && now.Sub(e.sessionTemp.lastTouch) < touchEvery {
+		return
+	}
+	_ = os.Chtimes(dir, now, now)
+	e.sessionTemp.lastTouch = now
+}
+
+func (e *Engine) cleanupSessionTemp() {
+	if e == nil {
+		return
+	}
+	e.sessionTempMu.Lock()
+	owned := e.sessionTemp.owned
+	sid := e.opts.SessionID
+	e.sessionTemp = sessionTempState{}
+	e.sessionTempMu.Unlock()
+	if !owned {
+		return
+	}
+	_ = tool.CleanupSessionTemp(sid)
 }
 
 // ExplainPermission returns last-match-wins detail for a sample tool call
@@ -713,6 +799,7 @@ func (e *Engine) Run(ctx context.Context) {
 	defer e.dissolveTeamIfLead()
 	defer e.detachMailbox()
 	defer e.shutdownChildren()
+	defer e.cleanupSessionTemp()
 	if e.team != nil {
 		e.team.AttachMailbox(e)
 	}

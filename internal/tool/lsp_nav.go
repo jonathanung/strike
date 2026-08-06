@@ -357,11 +357,13 @@ func parseNavPosArgs(args json.RawMessage, tc *Context) (abs, rel string, line0,
 
 func resolveNavPath(tc *Context, filePath string) (abs, rel string, err error) {
 	workDir := ""
+	tempDir := ""
 	if tc != nil {
 		workDir = tc.WorkDir
+		tempDir = tc.SessionTempDir
 	}
-	if workDir != "" {
-		resolved, relPath, rerr := resolveInWorkspace(workDir, filePath)
+	if workDir != "" || tempDir != "" {
+		resolved, relPath, rerr := resolveAllowedPath(workDir, tempDir, filePath)
 		if rerr != nil {
 			return "", "", rerr
 		}

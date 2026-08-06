@@ -26,6 +26,7 @@ Usage:
 - When editing text from read tool output, preserve exact indentation. Match the file content only — never include the line-number prefix from read output in oldString or newString.
 - ALWAYS prefer editing existing files. NEVER write new files unless explicitly required.
 - Only use emojis if the user explicitly requests it.
+- Paths must stay inside the workspace root, or inside the session temporary directory shown in the environment block (absolute paths only for temp).
 - Fails if oldString is not found, or if it matches multiple locations and replaceAll is false. Provide more surrounding context to make the match unique, or set replaceAll.
 - Use replaceAll when renaming a symbol or replacing every occurrence in the file.
 - Optional baseHash (sha256 hex of the full file at plan time) fails closed with precondition_failed if the file changed.`
@@ -61,7 +62,11 @@ func (editTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	if a.OldString == a.NewString {
 		return Result{}, ErrInvalidArgs("oldString and newString are identical")
 	}
-	path, rel, err := resolveInWorkspace(tc.WorkDir, a.FilePath)
+	tempDir := ""
+	if tc != nil {
+		tempDir = tc.SessionTempDir
+	}
+	path, rel, err := resolveAllowedPath(tc.WorkDir, tempDir, a.FilePath)
 	if err != nil {
 		return Result{}, err
 	}
@@ -112,10 +117,10 @@ func (editTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	existed := FileExisted(path)
 	tc.SnapshotPath(path)
 	// Re-validate + atomic temp/rename at exec time.
-	if err := workspaceWriteFile(tc.WorkDir, a.FilePath, []byte(updated)); err != nil {
+	if err := allowedWriteFile(tc.WorkDir, tempDir, a.FilePath, []byte(updated)); err != nil {
 		return Result{}, err
 	}
-	path, _, err = resolveInWorkspace(tc.WorkDir, a.FilePath)
+	path, _, err = resolveAllowedPath(tc.WorkDir, tempDir, a.FilePath)
 	if err != nil {
 		return Result{}, err
 	}

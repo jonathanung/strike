@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -119,13 +120,64 @@ func resolveDanglingSymlink(rootReal, userPath, candidate string) (resolved, rel
 	return absTarget, filepath.ToSlash(rel), nil
 }
 
+// resolveAllowedPath resolves path under the session workspace root, or — when
+// path is absolute — under the optional session temporary directory. Relative
+// paths always resolve against workDir only so agents must use the exposed
+// absolute session temp path (never a silent second relative root).
+//
+// display is workspace-relative when under workDir; for session-temp hits it is
+// the absolute resolved path (session-scoped; no unrelated host paths).
+func resolveAllowedPath(workDir, tempDir, path string) (resolved, display string, err error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", "", fmt.Errorf("path is empty")
+	}
+
+	// Prefer workspace so a path that somehow lies under both stays workspace-scoped.
+	resolved, rel, err := resolveInWorkspace(workDir, path)
+	if err == nil {
+		return resolved, rel, nil
+	}
+	workspaceErr := err
+	var esc *WorkspaceEscapeError
+	// Non-escape failures (empty workdir, resolve errors) are fatal as-is when
+	// the path is not an absolute temp candidate.
+	if !errors.As(err, &esc) {
+		// Still allow absolute temp paths when workDir is misconfigured empty
+		// only if we have a temp root — otherwise return the original error.
+		if strings.TrimSpace(workDir) != "" || !filepath.IsAbs(path) {
+			return "", "", err
+		}
+	}
+
+	tempDir = strings.TrimSpace(tempDir)
+	if tempDir == "" || !filepath.IsAbs(path) {
+		return "", "", workspaceErr
+	}
+
+	resolved, _, err = resolveInWorkspace(tempDir, path)
+	if err != nil {
+		// Keep the workspace escape message for arbitrary outside paths so
+		// callers still see "escapes workspace root" rather than a temp-root
+		// message that could confuse agents.
+		return "", "", workspaceErr
+	}
+	// Audit/display: absolute path under the session temp dir only.
+	return resolved, resolved, nil
+}
+
 // workspaceWriteFile re-validates path under root immediately before writing,
 // refuses a symlink leaf, and commits via temp+rename (atomic on local POSIX)
 // so readers never see a partial file. Pair with resolveInWorkspace so a
 // symlink planted after the initial resolve cannot redirect the write outside
 // the workspace.
 func workspaceWriteFile(root, path string, data []byte) error {
-	resolved, _, err := resolveInWorkspace(root, path)
+	return allowedWriteFile(root, "", path, data)
+}
+
+// allowedWriteFile is workspaceWriteFile plus the optional session temp root.
+func allowedWriteFile(workDir, tempDir, path string, data []byte) error {
+	resolved, _, err := resolveAllowedPath(workDir, tempDir, path)
 	if err != nil {
 		return err
 	}
@@ -134,13 +186,19 @@ func workspaceWriteFile(root, path string, data []byte) error {
 		return err
 	}
 	// MkdirAll can race with a parent→symlink swap; re-resolve before open.
-	resolved, _, err = resolveInWorkspace(root, path)
+	resolved, _, err = resolveAllowedPath(workDir, tempDir, path)
 	if err != nil {
 		return err
 	}
 	// If the leaf is still a symlink after resolve (should not happen when
 	// resolve returns the target), refuse rather than follow.
 	if fi, lerr := os.Lstat(resolved); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
+		root := workDir
+		if tempDir != "" {
+			if _, _, tErr := resolveInWorkspace(tempDir, path); tErr == nil {
+				root = tempDir
+			}
+		}
 		return &WorkspaceEscapeError{Path: path, Root: root}
 	}
 	return atomicWriteFile(resolved, data, 0o644)
