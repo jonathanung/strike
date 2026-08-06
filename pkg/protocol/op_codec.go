@@ -37,6 +37,10 @@ func opType(op Op) string {
 		return "set.permission_mode"
 	case SetFast:
 		return "set.fast"
+	case StartWorkflow:
+		return "workflow.start"
+	case StopWorkflow:
+		return "workflow.stop"
 	case FilesChanged:
 		return "files.changed"
 	case Compact:
@@ -57,7 +61,7 @@ func WrapOp(op Op) (OpEnvelope, error) {
 		return OpEnvelope{}, fmt.Errorf("protocol: unknown op type %T", op)
 	}
 	switch op.(type) {
-	case Interrupt, InspectEffectivePrompt:
+	case Interrupt, InspectEffectivePrompt, StopWorkflow:
 		return OpEnvelope{Type: t, Version: Version}, nil
 	}
 	data, err := json.Marshal(op)
@@ -100,6 +104,10 @@ func (e OpEnvelope) Decode() (Op, error) {
 		op = &SetPermissionMode{}
 	case "set.fast":
 		op = &SetFast{}
+	case "workflow.start":
+		op = &StartWorkflow{}
+	case "workflow.stop":
+		return StopWorkflow{}, nil
 	case "files.changed":
 		op = &FilesChanged{}
 	case "compact":
@@ -139,6 +147,8 @@ func derefOp(op Op) Op {
 	case *SetPermissionMode:
 		return *v
 	case *SetFast:
+		return *v
+	case *StartWorkflow:
 		return *v
 	case *FilesChanged:
 		return *v

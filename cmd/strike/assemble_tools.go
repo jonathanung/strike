@@ -328,6 +328,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tool.NewMemoryRead(memoryStore),
 		tool.NewIssueWrite(issueStore),
 		tool.NewIssueRead(issueStore),
+		tool.NewPlanWrite(planStore),
+		tool.NewPlanRead(planStore),
 		tool.NewNotebookEdit(),
 		tool.NewSleep(),
 		tool.NewSkill(skillInfos),
@@ -482,6 +484,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			initialPermMode   = cfg.PermissionMode
 			initialPhaseWF    string
 			initialPhaseIndex int
+			initialPhaseName  string
+			initialPhaseFP    string
 			initialAlways     permission.Ruleset
 			quietStartup      bool
 			resuming          bool
@@ -504,6 +508,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			initialPermMode = restored.PermissionMode
 			initialPhaseWF = restored.PhaseWorkflow
 			initialPhaseIndex = restored.PhaseIndex
+			initialPhaseName = restored.PhaseName
+			initialPhaseFP = restored.PhaseFingerprint
 			initialAlways = restored.AlwaysGrants
 			if !(applyCLI && opts.providerSet) && restored.Provider != "" {
 				initialProvider = restored.Provider
@@ -596,6 +602,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			InitialTitled:           initialTitled,
 			InitialPhaseWorkflow:    initialPhaseWF,
 			InitialPhaseIndex:       initialPhaseIndex,
+			InitialPhaseName:        initialPhaseName,
+			InitialPhaseFingerprint: initialPhaseFP,
 			InitialAlwaysGrants:     initialAlways,
 			QuietStartup:            quietStartup,
 			Workflows:               workflows,

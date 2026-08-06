@@ -33,6 +33,12 @@ const (
 	AutonomySkipAll    = pub.AutonomySkipAll
 )
 
+// Phase resume recovery statuses.
+const (
+	PhaseStatusMissing  = pub.PhaseStatusMissing
+	PhaseStatusMismatch = pub.PhaseStatusMismatch
+)
+
 // Permission posture dial.
 type PermissionMode = pub.PermissionMode
 
@@ -92,6 +98,8 @@ type (
 	SetAutonomy            = pub.SetAutonomy
 	SetPermissionMode      = pub.SetPermissionMode
 	SetFast                = pub.SetFast
+	StartWorkflow          = pub.StartWorkflow
+	StopWorkflow           = pub.StopWorkflow
 	FilesChanged           = pub.FilesChanged
 	Compact                = pub.Compact
 	InspectEffectivePrompt = pub.InspectEffectivePrompt
@@ -107,7 +115,6 @@ type (
 	ReasoningDelta         = pub.ReasoningDelta
 	ToolCallBegin          = pub.ToolCallBegin
 	ToolCallEnd            = pub.ToolCallEnd
-	ToolResultError        = pub.ToolResultError
 	ToolCallOutput         = pub.ToolCallOutput
 	ProcessStarted         = pub.ProcessStarted
 	ProcessOutput          = pub.ProcessOutput
@@ -224,5 +231,21 @@ func ToolFeedbackUserRejected(feedback string) string {
 }
 func ToolFeedbackBlocked(reason string) string { return pub.ToolFeedbackBlocked(reason) }
 func ToolFeedbackCanceled() string             { return pub.ToolFeedbackCanceled() }
+func ToolFeedbackCanceledPartial(partial string) string {
+	return pub.ToolFeedbackCanceledPartial(partial)
+}
+func ToolFeedbackTimeout(detail string) string { return pub.ToolFeedbackTimeout(detail) }
 func ToolFeedbackUnstarted() string            { return pub.ToolFeedbackUnstarted() }
 func ToolFeedbackError(msg string) string      { return pub.ToolFeedbackError(msg) }
+
+const (
+	ErrorCodePermissionDenied   = pub.ErrorCodePermissionDenied
+	ErrorCodeInvalidArgs        = pub.ErrorCodeInvalidArgs
+	ErrorCodePreconditionFailed = pub.ErrorCodePreconditionFailed
+	ErrorCodeCanceled           = pub.ErrorCodeCanceled
+	ErrorCodeTimeout            = pub.ErrorCodeTimeout
+	ErrorCodeTransient          = pub.ErrorCodeTransient
+	ErrorCodeInternal           = pub.ErrorCodeInternal
+	ErrorCodeBlocked            = pub.ErrorCodeBlocked
+	ErrorCodeQueueFull          = pub.ErrorCodeQueueFull
+)

@@ -6,7 +6,6 @@ import (
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
-	"github.com/jonathanung/strike-cli/internal/tool"
 )
 
 // Restored is model-usable runtime state reduced from a session event log.
@@ -25,11 +24,15 @@ type Restored struct {
 	// PermissionMode is the last PermissionModeSelected posture; empty means
 	// unset (caller keeps default).
 	PermissionMode protocol.PermissionMode
-	// Phase* capture the last PhaseChanged with a non-empty Phase. Empty
-	// PhaseName means no workflow phase was active at end of log.
-	PhaseWorkflow string
-	PhaseName     string
-	PhaseIndex    int
+	// Phase* capture the last PhaseChanged with a non-empty Phase (or a
+	// non-empty recovery Status). Empty PhaseName and empty PhaseStatus means
+	// no workflow phase was active at end of log.
+	PhaseWorkflow    string
+	PhaseName        string
+	PhaseIndex       int
+	PhaseSource      string
+	PhaseFingerprint string
+	PhaseStatus      string // empty | missing | mismatch
 	// AlwaysGrants are session DecisionAlways rules still in force after the
 	// last agent switch (SetAgentRules clears grants).
 	AlwaysGrants permission.Ruleset
@@ -86,7 +89,7 @@ func Restore(events []protocol.Event) Restored {
 					end = toolEnd{
 						output:    unstartedToolOutput,
 						isError:   true,
-						errorCode: string(tool.CodeCanceled),
+						errorCode: protocol.ErrorCodeCanceled,
 					}
 				}
 				tr := &provider.ToolResult{CallID: c.ID, Output: end.output, IsError: end.isError}
@@ -139,12 +142,11 @@ func Restore(events []protocol.Event) Restored {
 			})
 		case protocol.ToolCallEnd:
 			ensure(e.ProviderRequestID)
-			te := toolEnd{output: e.Output, isError: e.IsError}
-			if e.Error != nil {
-				te.errorCode = e.Error.Code
-				te.retryable = e.Error.Retryable
+			cur.results[e.CallID] = toolEnd{
+				output:    e.Output,
+				isError:   e.IsError,
+				errorCode: e.ErrorCode,
 			}
-			cur.results[e.CallID] = te
 		case protocol.TurnCompleted, protocol.EngineError:
 			flush()
 		case protocol.CompactionCompleted:
@@ -173,9 +175,15 @@ func Restore(events []protocol.Event) Restored {
 			r.PhaseWorkflow = e.Workflow
 			r.PhaseName = e.Phase
 			r.PhaseIndex = e.Index
-			if e.Phase == "" {
+			r.PhaseSource = e.Source
+			r.PhaseFingerprint = e.Fingerprint
+			r.PhaseStatus = e.Status
+			if e.Phase == "" && e.Status == "" {
 				r.PhaseWorkflow = ""
 				r.PhaseIndex = 0
+				r.PhaseSource = ""
+				r.PhaseFingerprint = ""
+				r.PhaseStatus = ""
 			}
 		case protocol.SessionTitled:
 			if e.Title != "" {

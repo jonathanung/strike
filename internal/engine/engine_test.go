@@ -383,8 +383,8 @@ func TestHardDenyFeedsBackToModel(t *testing.T) {
 				if end.CallID != call.ID || !end.IsError || end.Output != want {
 					t.Errorf("ToolCallEnd = %#v, want call %q IsError output %q", end, call.ID, want)
 				}
-				if end.Error == nil || end.Error.Code != "permission_denied" || end.Error.Retryable {
-					t.Errorf("ToolCallEnd.Error = %#v, want permission_denied non-retryable", end.Error)
+				if end.ErrorCode != "permission_denied" {
+					t.Errorf("ToolCallEnd.ErrorCode = %q, want permission_denied", end.ErrorCode)
 				}
 				return
 			case protocol.EngineError:
@@ -445,7 +445,7 @@ func TestInvalidArgsErrorCodeDistinctFromPermissionDenied(t *testing.T) {
 				if ev.CallID != call.ID {
 					continue
 				}
-				if !ev.IsError || ev.Error == nil || ev.Error.Code != "invalid_args" {
+				if !ev.IsError || ev.ErrorCode != "invalid_args" {
 					t.Fatalf("ToolCallEnd = %#v, want invalid_args", ev)
 				}
 			case protocol.TurnCompleted:

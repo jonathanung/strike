@@ -130,15 +130,18 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 		output += fmt.Sprintf("\n… (output truncated, %d bytes total)", proc.BytesSeen)
 	}
 	exitCode := proc.ExitCode
+	var errCode string
 	switch proc.Status {
 	case ProcessStatusTimeout:
 		output += fmt.Sprintf("\n(command timed out after %s)", timeout)
 		output += fmt.Sprintf("\n(exit code %d)", exitCode)
+		errCode = ErrorCodeTimeout
 	case ProcessStatusCanceled:
-		// Engine normalizes cancel after Execute; keep exit suffix if any output.
+		// Preserve partial stdout/stderr; engine stamps canceled code + incomplete marker.
 		if exitCode != 0 {
 			output += fmt.Sprintf("\n(exit code %d)", exitCode)
 		}
+		errCode = ErrorCodeCanceled
 	default:
 		if exitCode != 0 {
 			output += fmt.Sprintf("\n(exit code %d)", exitCode)
@@ -148,7 +151,11 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 		output = "(no output)"
 	}
 	metaFields := map[string]any{"exitCode": exitCode}
-	if exitCode == 0 {
+	if errCode != "" {
+		metaFields["errorCode"] = errCode
+		metaFields["incomplete"] = true
+	}
+	if exitCode == 0 && errCode == "" {
 		if pr, ok := extractSessionPR(a.Command, output); ok {
 			metaFields["prUrl"] = pr.URL
 			if pr.Number > 0 {
@@ -163,7 +170,7 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 		}
 	}
 	meta, _ := json.Marshal(metaFields)
-	return Result{Title: a.Command, Output: output, Metadata: meta}, nil
+	return Result{Title: a.Command, Output: output, Metadata: meta, ErrorCode: errCode}, nil
 }
 
 // acquireBashLease acquires process (+ build/test when classified) pools.

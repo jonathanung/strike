@@ -180,6 +180,7 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 	child := New(Options{
 		SessionID:               childID,
 		ParentSessionID:         e.opts.SessionID,
+		RootSessionID:           e.rootSessionID(),
 		Depth:                   childDepth,
 		MaxChildDepth:           maxDepth,
 		TaskOneShot:             true,

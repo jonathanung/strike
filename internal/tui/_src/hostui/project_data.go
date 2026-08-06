@@ -16,7 +16,7 @@ type projectDataMutatedMsg struct {
 
 func isProjectDataTool(name string) bool {
 	switch name {
-	case "memory_write", "memory_read", "issue_write", "issue_read":
+	case "memory_write", "memory_read", "issue_write", "issue_read", "plan_write", "plan_read":
 		return true
 	default:
 		return false
