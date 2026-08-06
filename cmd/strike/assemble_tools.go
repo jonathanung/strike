@@ -769,10 +769,6 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	}, nil
 }
 
-// buildCustomProvider maps a config custom provider onto the openaicompat or
-// anthropic adapter with the declared base URL and auth-store credentials.
-// Env placeholders in baseURL/headers/apiKeyEnv are expanded from the process env.
-// When apiKeyEnv is set, a missing key fails clearly at select time.
 // makeLSPCollectDiagnostics wires Manager.CollectForPaths into tool.Context
 // using config severity / max-chars / wait knobs. Nil manager → nil callback.
 func makeLSPCollectDiagnostics(mgr *lsp.Manager, workDir string, cfg config.LSPConfig) func(context.Context, []string) string {
@@ -796,6 +792,10 @@ func makeLSPCollectDiagnostics(mgr *lsp.Manager, workDir string, cfg config.LSPC
 	}
 }
 
+// buildCustomProvider maps a config custom provider onto the openaicompat or
+// anthropic adapter with the declared base URL and auth-store credentials.
+// Env placeholders in baseURL/headers/apiKeyEnv are expanded from the process env.
+// When apiKeyEnv is set, a missing key fails clearly at select time.
 func buildCustomProvider(cp config.CustomProvider, store *auth.Store) (provider.Provider, string, error) {
 	cp = config.ResolveCustom(cp)
 	if err := config.ValidateBaseURL(cp.BaseURL); err != nil {

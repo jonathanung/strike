@@ -162,18 +162,6 @@ func (m *Manager) anyPending(paths []string) bool {
 	return false
 }
 
-func (m *Manager) markPending(absPath string) {
-	if absPath == "" {
-		return
-	}
-	m.diagMu.Lock()
-	if m.pending == nil {
-		m.pending = make(map[string]struct{})
-	}
-	m.pending[absPath] = struct{}{}
-	m.diagMu.Unlock()
-}
-
 func (m *Manager) clearPending(absPath string) {
 	if absPath == "" {
 		return
