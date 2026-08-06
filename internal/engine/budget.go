@@ -106,6 +106,11 @@ type childBudget struct {
 	reason    string
 	// terminal overrides ChildCompleted status when budget kill races interrupt.
 	terminal protocol.ChildStatus
+
+	// Soft-budget finalization (#879): one reserved handoff turn before hard stop.
+	finalizing          bool
+	finalizationDone    bool
+	finalizationOutcome string // succeeded|failed|skipped_hard|none
 }
 
 func newChildBudget(limits tool.AgentBudgetLimits, objective string, now time.Time) *childBudget {
@@ -388,7 +393,8 @@ func (e *Engine) pollChildBudget(h *childHandle, now time.Time) {
 }
 
 // escalateChildBudget emits child.escalated, notifies the lead, marks
-// delegation, and interrupts the child. Safe to call once per handle.
+// delegation, and either starts soft finalization or hard-interrupts the child.
+// Safe to call once per handle (escalated flag is set by the caller).
 func (e *Engine) escalateChildBudget(id, name, kind, reason string, terminal protocol.ChildStatus, snap tool.AgentBudgetSnapshot, h *childHandle) {
 	if e == nil || id == "" {
 		return
@@ -397,6 +403,35 @@ func (e *Engine) escalateChildBudget(id, name, kind, reason string, terminal pro
 	if h != nil && h.eng != nil {
 		depth = h.eng.opts.Depth
 	}
+
+	// Soft budgets: one reserved finalization turn when the child engine can
+	// still accept ops. Hard path when finalization is unsafe/impossible.
+	tryFinalize := softBudgetAllowsFinalization(kind) &&
+		h != nil && h.eng != nil && h.ops != nil
+	if tryFinalize {
+		// Parent life already ending → hard skip (no extra model call).
+		if e.runCtx != nil && e.runCtx.Err() != nil {
+			tryFinalize = false
+		}
+	}
+
+	action := protocol.EscalateActionInterrupted
+	if tryFinalize {
+		action = protocol.EscalateActionFinalizing
+		h.mu.Lock()
+		if h.budget != nil {
+			h.budget.finalizing = true
+			h.budget.finalizationOutcome = "" // pending
+		}
+		h.mu.Unlock()
+	} else if h != nil {
+		h.mu.Lock()
+		if h.budget != nil {
+			h.budget.finalizationOutcome = protocol.FinalizationSkippedHard
+		}
+		h.mu.Unlock()
+	}
+
 	view := budgetSnapshotToProtocol(snap)
 	ev := protocol.ChildEscalated{
 		Correlation: protocol.Correlation{
@@ -407,7 +442,7 @@ func (e *Engine) escalateChildBudget(id, name, kind, reason string, terminal pro
 		Name:           name,
 		Kind:           kind,
 		Reason:         reason,
-		Action:         "interrupted",
+		Action:         action,
 		TerminalStatus: terminal,
 		Budget:         view,
 	}
@@ -416,13 +451,13 @@ func (e *Engine) escalateChildBudget(id, name, kind, reason string, terminal pro
 
 	// Structured lead/owner notify (not silent kill).
 	body := fmt.Sprintf(
-		"[child.escalated] session=%s kind=%s action=interrupted\n%s",
-		id, kind, reason,
+		"[child.escalated] session=%s kind=%s action=%s\n%s",
+		id, kind, action, reason,
 	)
 	if name != "" {
 		body = fmt.Sprintf(
-			"[child.escalated] session=%s name=%s kind=%s action=interrupted\n%s",
-			id, name, kind, reason,
+			"[child.escalated] session=%s name=%s kind=%s action=%s\n%s",
+			id, name, kind, action, reason,
 		)
 	}
 	if e.team != nil {
@@ -448,8 +483,10 @@ func (e *Engine) escalateChildBudget(id, name, kind, reason string, terminal pro
 		}
 	}
 
-	// Interrupt child (cancel + Interrupt op).
-	if h != nil {
+	if tryFinalize {
+		e.startBudgetFinalization(h, kind, reason)
+	} else if h != nil {
+		// Hard interrupt child (cancel + Interrupt op).
 		h.cancel()
 		select {
 		case h.ops <- protocol.Interrupt{}:
@@ -457,6 +494,99 @@ func (e *Engine) escalateChildBudget(id, name, kind, reason string, terminal pro
 		}
 	}
 	e.emitTeamRoster()
+}
+
+// startBudgetFinalization interrupts the in-flight turn, injects a no-tools
+// handoff prompt, and arms a reserve watchdog. Does not cancel childCtx until
+// finalization completes or the reserve elapses (#879).
+func (e *Engine) startBudgetFinalization(h *childHandle, kind, reason string) {
+	if e == nil || h == nil || h.eng == nil {
+		return
+	}
+	// Stop tools mid-turn; pending UserInput survives Interrupt.
+	select {
+	case h.ops <- protocol.Interrupt{}:
+	default:
+	}
+	h.eng.enterBudgetFinalization(kind, reason)
+	prompt := budgetFinalizationPrompt(kind, reason)
+	select {
+	case h.ops <- protocol.UserInput{Text: prompt}:
+	default:
+		// Ops blocked — fall back to hard stop.
+		h.mu.Lock()
+		if h.budget != nil {
+			h.budget.finalizing = false
+			h.budget.finalizationDone = true
+			h.budget.finalizationOutcome = protocol.FinalizationFailed
+		}
+		h.mu.Unlock()
+		h.cancel()
+		return
+	}
+	go e.watchBudgetFinalization(h)
+}
+
+// watchBudgetFinalization hard-stops the child when the finalization reserve
+// elapses or the child engine reports the finalization turn finished.
+func (e *Engine) watchBudgetFinalization(h *childHandle) {
+	if e == nil || h == nil {
+		return
+	}
+	deadline := time.NewTimer(budgetFinalizationReserve)
+	defer deadline.Stop()
+	tick := time.NewTicker(50 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case <-h.done:
+			return
+		case <-deadline.C:
+			h.mu.Lock()
+			if h.budget != nil && !h.budget.finalizationDone {
+				h.budget.finalizationDone = true
+				h.budget.finalizing = false
+				if h.budget.finalizationOutcome == "" {
+					h.budget.finalizationOutcome = protocol.FinalizationFailed
+				}
+			}
+			h.mu.Unlock()
+			if h.eng != nil {
+				h.eng.leaveBudgetFinalization()
+			}
+			h.cancel()
+			select {
+			case h.ops <- protocol.Interrupt{}:
+			default:
+			}
+			return
+		case <-tick.C:
+			if h.eng == nil {
+				continue
+			}
+			if !h.eng.budgetFinalizationTurnDone() {
+				continue
+			}
+			// Finalization turn finished — end the child (TaskOneShot may
+			// already be exiting; cancel ensures drain completes).
+			h.mu.Lock()
+			if h.budget != nil && !h.budget.finalizationDone {
+				h.budget.finalizationDone = true
+				h.budget.finalizing = false
+				// Outcome refined at ChildCompleted from parse result when empty.
+				if h.budget.finalizationOutcome == "" {
+					h.budget.finalizationOutcome = protocol.FinalizationFailed
+				}
+			}
+			h.mu.Unlock()
+			h.cancel()
+			select {
+			case h.ops <- protocol.Interrupt{}:
+			default:
+			}
+			return
+		}
+	}
 }
 
 func (h *childHandle) budgetTerminal() (protocol.ChildStatus, string) {
@@ -469,6 +599,43 @@ func (h *childHandle) budgetTerminal() (protocol.ChildStatus, string) {
 		return "", ""
 	}
 	return h.budget.terminal, h.budget.reason
+}
+
+// budgetTerminalMeta returns budget kind + finalization outcome for ChildCompleted.
+func (h *childHandle) budgetTerminalMeta() (kind, finalization string) {
+	if h == nil {
+		return "", ""
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.budget == nil || !h.budget.escalated {
+		return "", ""
+	}
+	kind = h.budget.kind
+	finalization = h.budget.finalizationOutcome
+	if finalization == "" {
+		if h.budget.finalizing || h.budget.finalizationDone {
+			finalization = protocol.FinalizationFailed
+		} else {
+			finalization = protocol.FinalizationSkippedHard
+		}
+	}
+	return kind, finalization
+}
+
+// markFinalizationOutcomeLocked records whether the reserved handoff parse succeeded.
+// Caller holds childHandle.mu.
+func (b *childBudget) markFinalizationOutcomeLocked(outcome string) {
+	if b == nil {
+		return
+	}
+	outcome = strings.TrimSpace(outcome)
+	if outcome == "" {
+		return
+	}
+	b.finalizationOutcome = outcome
+	b.finalizationDone = true
+	b.finalizing = false
 }
 
 func (e *Engine) childFilesTouched(sessionID string) []string {

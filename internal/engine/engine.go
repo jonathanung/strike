@@ -510,6 +510,100 @@ type Engine struct {
 	// (allow escalate warn→critical only).
 	fitWarnedTurnID string
 	fitWarnedLevel  string
+
+	// budgetFinalMu guards soft-budget finalization state on child engines (#879).
+	// armed: waiting for the next turn to become the handoff turn (current
+	// interrupted turn must not count). active: handoff turn in progress
+	// (tools blocked). turnDone: handoff turn finished for parent watchdog.
+	budgetFinalMu       sync.Mutex
+	budgetFinalArmed    bool
+	budgetFinalActive   bool
+	budgetFinalKind     string
+	budgetFinalTurnDone bool
+}
+
+// enterBudgetFinalization arms a tools-disabled handoff turn after soft budget trip.
+// The in-flight interrupted turn is not the finalization turn.
+func (e *Engine) enterBudgetFinalization(kind, reason string) {
+	if e == nil {
+		return
+	}
+	e.budgetFinalMu.Lock()
+	defer e.budgetFinalMu.Unlock()
+	e.budgetFinalArmed = true
+	e.budgetFinalActive = false
+	e.budgetFinalKind = strings.TrimSpace(kind)
+	e.budgetFinalTurnDone = false
+	_ = reason
+}
+
+// leaveBudgetFinalization clears finalization mode (hard stop / timeout).
+func (e *Engine) leaveBudgetFinalization() {
+	if e == nil {
+		return
+	}
+	e.budgetFinalMu.Lock()
+	defer e.budgetFinalMu.Unlock()
+	e.budgetFinalArmed = false
+	e.budgetFinalActive = false
+	e.budgetFinalKind = ""
+}
+
+// isBudgetFinalizing reports whether the active turn is the handoff-only turn.
+func (e *Engine) isBudgetFinalizing() bool {
+	if e == nil {
+		return false
+	}
+	e.budgetFinalMu.Lock()
+	defer e.budgetFinalMu.Unlock()
+	return e.budgetFinalActive
+}
+
+// noteBudgetFinalizationTurnStart promotes armed → active when a new turn begins.
+func (e *Engine) noteBudgetFinalizationTurnStart() {
+	if e == nil {
+		return
+	}
+	e.budgetFinalMu.Lock()
+	defer e.budgetFinalMu.Unlock()
+	if e.budgetFinalArmed {
+		e.budgetFinalArmed = false
+		e.budgetFinalActive = true
+	}
+}
+
+// noteBudgetFinalizationTurnDone marks the reserved handoff turn finished.
+// No-op when the completed turn was not the finalization turn.
+func (e *Engine) noteBudgetFinalizationTurnDone() {
+	if e == nil {
+		return
+	}
+	e.budgetFinalMu.Lock()
+	defer e.budgetFinalMu.Unlock()
+	if e.budgetFinalActive {
+		e.budgetFinalActive = false
+		e.budgetFinalTurnDone = true
+	}
+}
+
+// budgetFinalizationTurnDone reports whether the reserved handoff turn completed.
+func (e *Engine) budgetFinalizationTurnDone() bool {
+	if e == nil {
+		return false
+	}
+	e.budgetFinalMu.Lock()
+	defer e.budgetFinalMu.Unlock()
+	return e.budgetFinalTurnDone
+}
+
+// budgetFinalizationPending reports armed or active finalization (oneshot must wait).
+func (e *Engine) budgetFinalizationPending() bool {
+	if e == nil {
+		return false
+	}
+	e.budgetFinalMu.Lock()
+	defer e.budgetFinalMu.Unlock()
+	return e.budgetFinalArmed || e.budgetFinalActive
 }
 
 func New(opts Options) *Engine {
@@ -809,6 +903,8 @@ func (e *Engine) Run(ctx context.Context) {
 			}
 		case <-turnDone:
 			oneshotTurnSeen = true
+			// Soft-budget finalization turn finished — signal parent watchdog (#879).
+			e.noteBudgetFinalizationTurnDone()
 			e.reapTurn()
 			e.drainIdleFollowups(ctx)
 			if e.taskOneShotIdle(oneshotTurnSeen) {
@@ -830,6 +926,10 @@ func (e *Engine) detachMailbox() {
 // queued follow-ups (child notices or pending user inputs).
 func (e *Engine) taskOneShotIdle(turnSeen bool) bool {
 	if !e.opts.TaskOneShot || !turnSeen {
+		return false
+	}
+	// Soft-budget finalization still needs its reserved handoff turn (#879).
+	if e.budgetFinalizationPending() {
 		return false
 	}
 	if e.turnActive() || e.hasPendingChildNotices() || e.hasPendingMailbox() || len(e.pendingUserInputs) > 0 {

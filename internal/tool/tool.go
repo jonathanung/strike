@@ -219,6 +219,8 @@ type CompletionHandoff struct {
 	MissingContext        []MissingContextEntry `json:"missing_context,omitempty"`
 	Provenance            []string              `json:"provenance,omitempty"`
 	Incomplete            bool                  `json:"incomplete,omitempty"`
+	// Quality is complete|partial|unavailable when set (#879).
+	Quality string `json:"quality,omitempty"`
 }
 
 // VerificationReport is the harness gate report on task_status (snake_case).

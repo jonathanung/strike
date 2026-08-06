@@ -59,13 +59,20 @@ func (e *Engine) mutatedPathsSnapshot() []string {
 // buildCompletionHandoff merges model-supplied structured fields with engine
 // file tracking. Always returns a usable handoff (empty slices allowed).
 func buildCompletionHandoff(status protocol.ChildStatus, assistantText string, trackedFiles []string) protocol.CompletionHandoff {
+	h, _ := buildCompletionHandoffParsed(status, assistantText, trackedFiles)
+	return h
+}
+
+// buildCompletionHandoffParsed is buildCompletionHandoff plus whether model JSON
+// was decoded (for quality / finalization outcome #879).
+func buildCompletionHandoffParsed(status protocol.ChildStatus, assistantText string, trackedFiles []string) (protocol.CompletionHandoff, bool) {
 	assistantText = strings.TrimSpace(assistantText)
 	parsed, ok := parseCompletionHandoff(assistantText)
 
 	var h protocol.CompletionHandoff
 	if ok {
 		h = parsed
-		h.Incomplete = false
+		// Keep model incomplete flag when set; otherwise structured parse is complete.
 	} else {
 		h.Incomplete = true
 	}
@@ -100,7 +107,8 @@ func buildCompletionHandoff(status protocol.ChildStatus, assistantText string, t
 		}
 	}
 
-	return h
+	applyHandoffQuality(&h, ok)
+	return h, ok
 }
 
 func defaultHandoffSummary(status protocol.ChildStatus) string {
@@ -564,6 +572,7 @@ type handoffModelView struct {
 	MissingContext        []handoffMissingContextView `json:"missing_context,omitempty"`
 	Provenance            []string                    `json:"provenance,omitempty"`
 	Incomplete            bool                        `json:"incomplete,omitempty"`
+	Quality               string                      `json:"quality,omitempty"`
 }
 
 type handoffArtifactRefView struct {
@@ -634,6 +643,7 @@ func handoffToModelView(h protocol.CompletionHandoff) handoffModelView {
 		MissingContext:        missing,
 		Provenance:            append([]string(nil), h.Provenance...),
 		Incomplete:            h.Incomplete,
+		Quality:               h.Quality,
 	}
 }
 

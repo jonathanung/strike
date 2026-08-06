@@ -484,6 +484,45 @@ func TestChildCompletedHandoffRoundTrip(t *testing.T) {
 	}
 }
 
+func TestChildCompletedBudgetFinalizationRoundTrip(t *testing.T) {
+	// #879 wire fields on ChildCompleted + handoff quality.
+	want := ChildCompleted{
+		Correlation: Correlation{SessionID: "c2", ParentSessionID: "p1", Depth: 1},
+		Status:      ChildStatusFailed,
+		Summary:     "partial",
+		Handoff: CompletionHandoff{
+			Summary:    "partial",
+			Findings:   []string{"note"},
+			Incomplete: true,
+			Quality:    HandoffQualityPartial,
+		},
+		BudgetKind:   "tool_calls",
+		Finalization: FinalizationSucceeded,
+	}
+	env, err := Wrap(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotEv, err := env.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := gotEv.(ChildCompleted)
+	if !ok {
+		t.Fatalf("type %T", gotEv)
+	}
+	if got.BudgetKind != "tool_calls" || got.Finalization != FinalizationSucceeded {
+		t.Fatalf("budget meta = %#v", got)
+	}
+	if got.Handoff.Quality != HandoffQualityPartial {
+		t.Fatalf("quality = %q", got.Handoff.Quality)
+	}
+	raw, _ := json.Marshal(got)
+	if !strings.Contains(string(raw), `"budgetKind"`) || !strings.Contains(string(raw), `"finalization"`) {
+		t.Fatalf("wire missing fields: %s", raw)
+	}
+}
+
 func TestChildEscalatedRoundTrip(t *testing.T) {
 	rem := 3
 	want := ChildEscalated{
@@ -491,7 +530,7 @@ func TestChildEscalatedRoundTrip(t *testing.T) {
 		Name:           "worker",
 		Kind:           "tool_calls",
 		Reason:         "tool-call budget exhausted (3/3)",
-		Action:         "interrupted",
+		Action:         EscalateActionFinalizing,
 		TerminalStatus: ChildStatusFailed,
 		Budget: &AgentBudgetView{
 			MaxToolCalls:       3,
@@ -516,7 +555,7 @@ func TestChildEscalatedRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatalf("type %T", gotEv)
 	}
-	if got.Kind != "tool_calls" || got.Action != "interrupted" || got.Name != "worker" {
+	if got.Kind != "tool_calls" || got.Action != EscalateActionFinalizing || got.Name != "worker" {
 		t.Fatalf("got %#v", got)
 	}
 	if got.Budget == nil || got.Budget.MaxToolCalls != 3 || !got.Budget.Escalated {

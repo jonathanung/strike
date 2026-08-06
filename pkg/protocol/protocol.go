@@ -721,6 +721,28 @@ type MissingContextEntry struct {
 	Detail string `json:"detail,omitempty"`
 }
 
+// Handoff quality values for CompletionHandoff.Quality (#879).
+const (
+	HandoffQualityComplete    = "complete"    // model-supplied structured handoff parsed
+	HandoffQualityPartial     = "partial"     // engine recovered some substance without full schema
+	HandoffQualityUnavailable = "unavailable" // no usable findings beyond generic failure text
+)
+
+// Budget finalization outcomes on ChildCompleted / CompletionHandoff (#879).
+const (
+	FinalizationNone        = "none"         // not budget-driven (or legacy)
+	FinalizationSucceeded   = "succeeded"    // soft budget reserved a finalization turn that produced structured handoff
+	FinalizationFailed      = "failed"       // finalization attempted but model/timeout produced no structured handoff
+	FinalizationSkippedHard = "skipped_hard" // hard cancel / trust-boundary / session ceiling — no model call
+)
+
+// ChildEscalated.Action values.
+const (
+	EscalateActionInterrupted = "interrupted" // hard stop in flight
+	EscalateActionFinalizing  = "finalizing"  // soft budget: one reserved handoff turn before stop
+	EscalateActionSignaled    = "signaled"    // soft observability only (unused in hard path)
+)
+
 // CompletionHandoff is the structured work product for a delegated child at
 // terminal status. Always present on ChildCompleted (empty slices/strings are
 // honest). Success fills the full schema; failure/cancel may leave
@@ -755,6 +777,9 @@ type CompletionHandoff struct {
 	// Incomplete is true when the engine could not parse a model-supplied
 	// structured handoff and filled defaults + tracked files only.
 	Incomplete bool `json:"incomplete,omitempty"`
+	// Quality is complete|partial|unavailable (#879). Empty means legacy
+	// unspecified (consumers may derive from Incomplete).
+	Quality string `json:"quality,omitempty"`
 	// SectionTitle/SectionBody are optional plan-section refinement fields
 	// (plan_delegate). Present when the child refined a correlated section.
 	// SectionBodySet distinguishes omitted body from explicit empty string.
@@ -848,16 +873,26 @@ type ChildCompleted struct {
 	// were configured, Status is completed only if Verification.Passed;
 	// otherwise Status is blocked (gate failure) with this report attached.
 	Verification *VerificationReport `json:"verification,omitempty"`
+	// BudgetKind is the exceeded per-child budget dimension when termination
+	// was budget-driven (wall_clock|tokens|cost_usd|tool_calls|dangerous_tools|
+	// stall|loop). Empty when not budget-driven (#879 / #774).
+	BudgetKind string `json:"budgetKind,omitempty"`
+	// Finalization records whether a soft-budget reserved handoff turn ran
+	// (none|succeeded|failed|skipped_hard). See Finalization* constants (#879).
+	Finalization string `json:"finalization,omitempty"`
 }
 
-// ChildEscalated reports a per-child budget/stall/loop trip (#774).
-// Emitted on the parent stream before interrupt. Action is "interrupted"
-// (hard kill in flight) or "signaled" (soft observability only — unused in v1
-// hard path). Kind is wall_clock|tokens|cost_usd|tool_calls|dangerous_tools|
-// stall|loop. Correlation is the child session.
+// ChildEscalated reports a per-child budget/stall/loop trip (#774 / #879).
+// Emitted on the parent stream before interrupt or finalization. Action is
+// "finalizing" (soft budget: one reserved structured-handoff turn),
+// "interrupted" (hard kill in flight), or "signaled" (soft observability only
+// — unused in hard path). Kind is wall_clock|tokens|cost_usd|tool_calls|
+// dangerous_tools|stall|loop. Correlation is the child session.
 //
 // Soft stall/loop flags also appear on task_status / team.roster without this
-// event; hard limits always emit ChildEscalated and stop the child.
+// event; hard limits always emit ChildEscalated. Soft resource budgets attempt
+// finalization before stop; hard cancel / trust-boundary / session ceilings
+// skip finalization (Action=interrupted).
 // Stale-child detection (#517) is the stall kind, not a separate mechanism.
 type ChildEscalated struct {
 	Correlation
@@ -867,7 +902,7 @@ type ChildEscalated struct {
 	Kind string `json:"kind"`
 	// Reason is a human/agent-readable explanation.
 	Reason string `json:"reason"`
-	// Action is interrupted|signaled.
+	// Action is interrupted|finalizing|signaled.
 	Action string `json:"action"`
 	// TerminalStatus is the intended ChildCompleted status after shutdown
 	// (failed for hard resource budgets, blocked for stall/loop).

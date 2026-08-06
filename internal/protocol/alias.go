@@ -204,6 +204,18 @@ const (
 	ChildStatusCanceled  = pub.ChildStatusCanceled
 	ChildStatusBlocked   = pub.ChildStatusBlocked
 
+	// Handoff quality + budget finalization (#879).
+	HandoffQualityComplete    = pub.HandoffQualityComplete
+	HandoffQualityPartial     = pub.HandoffQualityPartial
+	HandoffQualityUnavailable = pub.HandoffQualityUnavailable
+	FinalizationNone          = pub.FinalizationNone
+	FinalizationSucceeded     = pub.FinalizationSucceeded
+	FinalizationFailed        = pub.FinalizationFailed
+	FinalizationSkippedHard   = pub.FinalizationSkippedHard
+	EscalateActionInterrupted = pub.EscalateActionInterrupted
+	EscalateActionFinalizing  = pub.EscalateActionFinalizing
+	EscalateActionSignaled    = pub.EscalateActionSignaled
+
 	VerificationScopeTurn  = pub.VerificationScopeTurn
 	VerificationScopeChild = pub.VerificationScopeChild
 
