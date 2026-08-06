@@ -9,7 +9,7 @@ private def candidateRequest (request : Json) (number : Nat) : Json :=
     ("text", s!"Generate candidate {number}")
   ])))
 
-private def chooseBest (input : Input) (provider : Provider) (emit : Emit) : IO Json := do
+private def chooseBest (input : Input) (provider : Provider) (_tools : Tools) (emit : Emit) : IO Json := do
   let mut best := ""
   for number in [1, 2, 3] do
     let response ← provider.call (candidateRequest input.request number)

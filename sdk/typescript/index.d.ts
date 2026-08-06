@@ -16,11 +16,30 @@ export interface ModelResponse {
   usage?: unknown;
 }
 
+export interface ToolCall {
+  id?: string;
+  name: string;
+  arguments?: unknown;
+}
+
+export interface ToolResult {
+  callId?: string;
+  output?: string;
+  isError?: boolean;
+  errorCode?: string;
+  retryable?: boolean;
+}
+
 export interface HarnessResult extends ModelResponse {}
+
+export interface Tools {
+  execute(call: ToolCall): Promise<ToolResult>;
+}
 
 export interface HarnessInput {
   request: ProviderRequest;
   signal: AbortSignal;
+  tools: Tools;
 }
 
 export interface Provider {

@@ -3,6 +3,8 @@ package harness
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -88,6 +90,84 @@ func TestServeProviderProgressAndComplete(t *testing.T) {
 			}
 			if providerCalls != 2 || progress != 1 {
 				t.Fatalf("provider calls = %d, progress = %d", providerCalls, progress)
+			}
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+			return
+		}
+	}
+	t.Fatalf("output ended before harness.complete: %v", scanner.Err())
+}
+
+func TestServeToolExecuteAndComplete(t *testing.T) {
+	stdin, writeInput := io.Pipe()
+	defer writeInput.Close()
+	readOutput, stdout := io.Pipe()
+	done := make(chan error, 1)
+	go func() {
+		done <- serve(stdin, stdout, func(input Input, _ Provider, emit Emit) (Result, error) {
+			if input.Tools == nil {
+				return Result{}, errors.New("tools unavailable")
+			}
+			res, err := input.Tools.Execute(ToolCall{
+				ID:        "call-1",
+				Name:      "read",
+				Arguments: json.RawMessage(`{"filePath":"a"}`),
+			})
+			if err != nil {
+				return Result{}, err
+			}
+			if res.IsError {
+				return Result{}, fmt.Errorf("tool error: %s", res.Output)
+			}
+			if err := emit(map[string]any{"tool": true}); err != nil {
+				return Result{}, err
+			}
+			return Result{Text: res.Output, StopReason: "end_turn"}, nil
+		})
+	}()
+
+	writeJSONLine(t, writeInput, map[string]any{
+		"version": 1, "type": "harness.start", "invocationId": "inv-tool",
+		"request":      map[string]any{"model": "fixture", "messages": []any{}},
+		"capabilities": []string{"provider.call", "tool.execute", "progress.emit", "harness.cancel"},
+	})
+	scanner := bufio.NewScanner(readOutput)
+	for scanner.Scan() {
+		var message map[string]json.RawMessage
+		if err := json.Unmarshal(scanner.Bytes(), &message); err != nil {
+			t.Fatal(err)
+		}
+		var messageType string
+		if err := json.Unmarshal(message["type"], &messageType); err != nil {
+			t.Fatal(err)
+		}
+		switch messageType {
+		case "tool.execute":
+			var callID, name string
+			if err := json.Unmarshal(message["callId"], &callID); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(message["name"], &name); err != nil {
+				t.Fatal(err)
+			}
+			if name != "read" {
+				t.Fatalf("name = %q", name)
+			}
+			writeJSONLine(t, writeInput, map[string]any{
+				"version": 1, "type": "tool.result", "invocationId": "inv-tool",
+				"callId": callID, "output": "file-a", "isError": false,
+			})
+		case "progress.emit":
+			// ok
+		case "harness.complete":
+			var text string
+			if err := json.Unmarshal(message["text"], &text); err != nil {
+				t.Fatal(err)
+			}
+			if text != "file-a" {
+				t.Fatalf("complete text = %q", text)
 			}
 			if err := <-done; err != nil {
 				t.Fatal(err)

@@ -34,6 +34,24 @@ export function runHarness(harness) {
       else waiter.resolve(message);
       return;
     }
+    if (message.type === "tool.result") {
+      const waiter = waiters.get(message.callId);
+      if (!waiter) return;
+      waiters.delete(message.callId);
+      // Transport-level failure only when error is set without a tool outcome.
+      if (message.error && message.output == null && !message.isError) {
+        waiter.reject(new Error(message.error));
+        return;
+      }
+      waiter.resolve({
+        callId: message.callId,
+        output: message.output ?? message.error ?? "",
+        isError: Boolean(message.isError || message.error),
+        errorCode: message.errorCode,
+        retryable: message.retryable,
+      });
+      return;
+    }
     if (message.type === "harness.cancel") {
       const error = new Error(message.reason || "harness canceled");
       controller?.abort(error);
@@ -46,15 +64,30 @@ export function runHarness(harness) {
 
     controller = new AbortController();
     const base = { version: 1, invocationId: message.invocationId };
-    const input = {
-      request: message.request,
-      signal: controller.signal,
-    };
     const provider = {
       call(request) {
         const callId = `provider-${++sequence}`;
         return requestResponse(callId, { ...base, type: "provider.call", callId, request });
       },
+    };
+    const tools = {
+      execute(call = {}) {
+        const callId = `tool-${++sequence}`;
+        const toolCallId = call.id || callId;
+        return requestResponse(callId, {
+          ...base,
+          type: "tool.execute",
+          callId,
+          toolCallId,
+          name: call.name,
+          arguments: call.arguments ?? {},
+        });
+      },
+    };
+    const input = {
+      request: message.request,
+      signal: controller.signal,
+      tools,
     };
     const emit = (payload) => send({ ...base, type: "progress.emit", payload });
 

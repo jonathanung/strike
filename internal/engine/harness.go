@@ -31,10 +31,13 @@ func (e *Engine) resolveHarness(agent Agent) (harness.Func, string, error) {
 	return fn, name, nil
 }
 
-// harnessEnvironment creates the provider object and progress callback passed
-// to one complete harness function call.
+// harnessEnvironment creates the provider object, tools broker, and progress
+// callback passed to one complete harness function call.
 func (e *Engine) harnessEnvironment(ctx context.Context, corr protocol.Correlation, name string) (harness.Input, harness.Provider, harness.Emit) {
 	var callbackMu sync.Mutex
+	// Serialize tool execution: execToolCall shares engine state with the
+	// built-in sequential tool loop and is not safe for overlapping runs.
+	var toolMu sync.Mutex
 	emit := func(payload json.RawMessage) {
 		e.emit(protocol.HarnessProgress{
 			Correlation: corr,
@@ -103,6 +106,41 @@ func (e *Engine) harnessEnvironment(ctx context.Context, corr protocol.Correlati
 		return harness.ModelResponse{}, provider.ErrIncompleteStream
 	}
 
+	executeTool := func(call provider.ToolCall) (provider.ToolResult, error) {
+		if err := validateHarnessToolCall(call); err != nil {
+			id := call.ID
+			if id == "" {
+				id = rand.Text()
+			}
+			return provider.ToolResult{
+				CallID:    id,
+				Output:    err.Error(),
+				IsError:   true,
+				ErrorCode: protocol.ErrorCodeInvalidArgs,
+			}, nil
+		}
+		if call.ID == "" {
+			call.ID = rand.Text()
+		}
+		if call.Args == nil {
+			call.Args = json.RawMessage(`{}`)
+		}
+		toolMu.Lock()
+		defer toolMu.Unlock()
+		// Same path as the built-in loop: permissions, hooks, sandbox, events.
+		// Result is returned to the harness only — not appended to e.messages.
+		msg := e.execToolCall(ctx, call, corr)
+		if msg.ToolResult == nil {
+			return provider.ToolResult{
+				CallID:    call.ID,
+				Output:    "tool execution produced no result",
+				IsError:   true,
+				ErrorCode: protocol.ErrorCodeInternal,
+			}, nil
+		}
+		return *msg.ToolResult, nil
+	}
+
 	input := harness.Input{
 		Context: ctx,
 		Request: provider.Request{
@@ -111,6 +149,23 @@ func (e *Engine) harnessEnvironment(ctx context.Context, corr protocol.Correlati
 			Tools:     func() []provider.ToolSchema { tools, _ := e.effectiveToolSchemas(); return tools }(),
 			MaxTokens: e.opts.MaxTokens, Effort: providerEffort(e.effort), Priority: e.priority,
 		},
+		Tools: harness.Tools{Execute: executeTool},
 	}
 	return input, harness.Provider{Call: providerCall}, emit
+}
+
+// validateHarnessToolCall rejects malformed brokered tool requests before they
+// enter execToolCall. Empty ID is allowed (host assigns one).
+func validateHarnessToolCall(call provider.ToolCall) error {
+	name := strings.TrimSpace(call.Name)
+	if name == "" {
+		return fmt.Errorf("tool name is required")
+	}
+	if call.Name != name {
+		return fmt.Errorf("tool name %q has leading or trailing whitespace", call.Name)
+	}
+	if len(call.Args) > 0 && !json.Valid(call.Args) {
+		return fmt.Errorf("tool arguments are not valid JSON")
+	}
+	return nil
 }

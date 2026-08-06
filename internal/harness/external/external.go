@@ -52,6 +52,11 @@ type envelope struct {
 	Reasoning    []json.RawMessage `json:"reasoning,omitempty"`
 	ToolCalls    []wireToolCall    `json:"toolCalls,omitempty"`
 	StopReason   string            `json:"stopReason,omitempty"`
+	// tool.execute fields (additive ABI)
+	Name      string          `json:"name,omitempty"`
+	Arguments json.RawMessage `json:"arguments,omitempty"`
+	// Optional tool-call id for protocol events; defaults to callId.
+	ToolCallID string `json:"toolCallId,omitempty"`
 }
 
 type wireRequest struct {
@@ -150,7 +155,7 @@ func (e *runner) run(input harness.Input, p harness.Provider, emit harness.Emit)
 		InvocationID string      `json:"invocationId"`
 		Request      wireRequest `json:"request"`
 		Capabilities []string    `json:"capabilities"`
-	}{1, "harness.start", invocationID, toWire(input.Request), []string{"provider.call", "progress.emit", "harness.cancel"}}
+	}{1, "harness.start", invocationID, toWire(input.Request), []string{"provider.call", "tool.execute", "progress.emit", "harness.cancel"}}
 	if err := write(start); err != nil {
 		_ = pipe.Kill()
 		<-processDone
@@ -195,6 +200,27 @@ func (e *runner) run(input harness.Input, p harness.Provider, emit harness.Emit)
 				ids[m.CallID] = m.Type
 				go func() {
 					relayProvider(ctx, p.Call, invocationID, m.CallID, m.Request.providerRequest(), write)
+				}()
+			case "tool.execute":
+				if m.CallID == "" {
+					done <- terminal{err: errors.New("external harness: tool.execute requires callId")}
+					return
+				}
+				if previous := ids[m.CallID]; previous != "" {
+					done <- terminal{err: fmt.Errorf("external harness: duplicate request ID %q (already used by %s)", m.CallID, previous)}
+					return
+				}
+				ids[m.CallID] = m.Type
+				call := provider.ToolCall{
+					ID:   m.ToolCallID,
+					Name: m.Name,
+					Args: m.Arguments,
+				}
+				if call.ID == "" {
+					call.ID = m.CallID
+				}
+				go func() {
+					relayTool(ctx, input.Tools.Execute, invocationID, m.CallID, call, write)
 				}()
 			case "progress.emit":
 				p := m.Payload
@@ -321,5 +347,44 @@ func relayProvider(ctx context.Context, call func(provider.Request) (harness.Mod
 	for _, call := range result.Calls {
 		out.ToolCalls = append(out.ToolCalls, wireToolCall{ID: call.ID, Name: call.Name, Args: call.Args})
 	}
+	_ = write(out)
+}
+
+func relayTool(ctx context.Context, execute func(provider.ToolCall) (provider.ToolResult, error), invocationID, callID string, call provider.ToolCall, write func(any) error) {
+	out := struct {
+		Version      int    `json:"version"`
+		Type         string `json:"type"`
+		InvocationID string `json:"invocationId"`
+		CallID       string `json:"callId"`
+		Output       string `json:"output,omitempty"`
+		IsError      bool   `json:"isError,omitempty"`
+		ErrorCode    string `json:"errorCode,omitempty"`
+		Retryable    bool   `json:"retryable,omitempty"`
+		Error        string `json:"error,omitempty"`
+	}{Version: 1, Type: "tool.result", InvocationID: invocationID, CallID: callID}
+	if execute == nil {
+		out.Error = "tool.execute callback unavailable"
+		out.IsError = true
+		out.ErrorCode = "internal"
+		out.Output = out.Error
+		_ = write(out)
+		return
+	}
+	if ctx.Err() != nil {
+		return
+	}
+	result, err := execute(call)
+	if err != nil {
+		out.Error = err.Error()
+		out.IsError = true
+		out.ErrorCode = "internal"
+		out.Output = err.Error()
+		_ = write(out)
+		return
+	}
+	out.Output = result.Output
+	out.IsError = result.IsError
+	out.ErrorCode = result.ErrorCode
+	out.Retryable = result.Retryable
 	_ = write(out)
 }
