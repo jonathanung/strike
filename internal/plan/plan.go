@@ -1,7 +1,7 @@
 // Package plan stores root-session-owned structured plans with ordered
 // stable-ID sections, lifecycle, and compare-and-swap versions.
 // cmd/strike opens the store at startup; internal/host/local wraps it for
-// frontends. Agent tools land in a later issue — this package is the domain.
+// frontends; internal/tool plan_read/plan_write are the agent surface.
 package plan
 
 import (

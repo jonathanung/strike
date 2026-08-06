@@ -504,7 +504,7 @@ func layerPreview(text string) string {
 }
 
 // RedactSecrets replaces credential-shaped substrings with a placeholder.
-// Delegates to pkg/redact (shared with timeline export and markdown dump).
+// Delegates to pkg/redact (shared with timeline export, session scrub, #796).
 // Exported for tests.
 func RedactSecrets(s string) string {
 	return redact.String(s)

@@ -43,6 +43,8 @@ var shortPurposes = map[string]string{
 	"memory_read":     "read durable project memory",
 	"issue_write":     "create or update a project issue",
 	"issue_read":      "read project issues",
+	"plan_write":      "create or revise a structured plan",
+	"plan_read":       "read structured plans",
 	"notebook_edit":   "edit a Jupyter notebook cell",
 	"sleep":           "pause for a number of seconds",
 	"skill":           "load a named skill into context",
@@ -280,6 +282,10 @@ func recommendedGuidance(entries []GuidanceEntry) string {
 		"Use `issue_write`/`issue_read` for project-local tracked issues on demand (never auto-injected).")
 	add(has("issue_read") && !has("issue_write"),
 		"Use `issue_read` for project-local tracked issues on demand.")
+	add(hasAll("plan_write", "plan_read"),
+		"Use `plan_write`/`plan_read` for the root-owned structured plan artifact (section CAS via expected_version). Prefer over workspace files while planning; write/edit may stay denied.")
+	add(has("plan_read") && !has("plan_write"),
+		"Use `plan_read` for root-owned structured plans (list meta or full plan by id).")
 	add(has("todowrite", "todoread") && has("team_task"),
 		"Use `todowrite`/`todoread` for solo multi-step tracking (full list on each write). Use `team_task` when teammates must claim shared work items.")
 	add(has("todowrite", "todoread") && !has("team_task"),

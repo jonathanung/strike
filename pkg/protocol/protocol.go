@@ -375,6 +375,17 @@ type SetFast struct {
 	Enabled bool `json:"enabled"`
 }
 
+// StartWorkflow activates a loaded workflow at phase index 0. Exactly one
+// workflow may be active per root session; starting replaces any prior active
+// workflow after the target is validated. Rejected while a turn is running.
+type StartWorkflow struct {
+	Name string `json:"name"`
+}
+
+// StopWorkflow clears the active workflow phase, context, and phase permission
+// profile. No-op when none is active. Rejected while a turn is running.
+type StopWorkflow struct{}
+
 // FilesChanged reports paths the user edited outside the agent (for example
 // via /vim). The engine invalidates any prior read snapshots for those paths
 // so a subsequent edit/write fails until the model re-reads.
@@ -415,6 +426,8 @@ func (SetEffort) isOp()              {}
 func (SetAutonomy) isOp()            {}
 func (SetPermissionMode) isOp()      {}
 func (SetFast) isOp()                {}
+func (StartWorkflow) isOp()          {}
+func (StopWorkflow) isOp()           {}
 func (FilesChanged) isOp()           {}
 func (Compact) isOp()                {}
 func (InspectEffectivePrompt) isOp() {}
@@ -852,14 +865,33 @@ type AgentSelected struct {
 	Name string `json:"name"`
 }
 
+// Phase recovery statuses on PhaseChanged.Status. Empty Status means the
+// phase is active and enforced. Non-empty values are fail-closed resume
+// recovery: permissions/context are not applied until stop or restart.
+const (
+	// PhaseStatusMissing: recorded workflow name is not in the loaded catalog.
+	PhaseStatusMissing = "missing"
+	// PhaseStatusMismatch: loaded definition fingerprint (or phase identity)
+	// does not match the session record.
+	PhaseStatusMismatch = "mismatch"
+)
+
 // PhaseChanged reports the active workflow phase (permission profile +
 // context). Empty Phase means no workflow phase is active.
+//
+// Source and Fingerprint bind enforcement to the same definition that was
+// started (resume fail-closed when the catalog entry is missing or changed).
+// Status is empty while healthy; PhaseStatusMissing / PhaseStatusMismatch
+// surface recovery without applying phase permissions.
 type PhaseChanged struct {
 	Correlation
-	Workflow string `json:"workflow,omitempty"`
-	Phase    string `json:"phase,omitempty"`
-	Index    int    `json:"index,omitempty"`
-	Gate     string `json:"gate,omitempty"` // agent | check | user | skip (effective; from autonomy)
+	Workflow    string `json:"workflow,omitempty"`
+	Phase       string `json:"phase,omitempty"`
+	Index       int    `json:"index,omitempty"`
+	Gate        string `json:"gate,omitempty"`        // agent | check | user | skip (effective; from autonomy)
+	Source      string `json:"source,omitempty"`      // builtin | global | project
+	Fingerprint string `json:"fingerprint,omitempty"` // canonical SHA-256 of formatted def
+	Status      string `json:"status,omitempty"`      // empty | missing | mismatch
 }
 
 // EffortSelected confirms the active reasoning level, at startup and after

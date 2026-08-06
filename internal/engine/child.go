@@ -269,6 +269,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 	child := New(Options{
 		SessionID:               childID,
 		ParentSessionID:         e.opts.SessionID,
+		RootSessionID:           e.rootSessionID(),
 		Depth:                   childDepth,
 		MaxChildDepth:           maxDepth,
 		TaskOneShot:             true,
