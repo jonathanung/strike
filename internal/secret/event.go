@@ -57,6 +57,19 @@ func RedactEvent(ev protocol.Event) protocol.Event {
 	case protocol.ChildCompleted:
 		e.Summary = redact.String(e.Summary)
 		e.Handoff = redactHandoff(e.Handoff)
+		if e.Verification != nil {
+			rep := redactVerification(*e.Verification)
+			e.Verification = &rep
+		}
+		return e
+	case protocol.TurnCompleted:
+		if e.Verification != nil {
+			rep := redactVerification(*e.Verification)
+			e.Verification = &rep
+		}
+		return e
+	case protocol.VerificationCompleted:
+		e.Report = redactVerification(e.Report)
 		return e
 	case protocol.CompactionCompleted:
 		e.Summary = redact.String(e.Summary)
@@ -114,6 +127,23 @@ func redactHandoff(h protocol.CompletionHandoff) protocol.CompletionHandoff {
 	h.Blockers = redactStrings(h.Blockers)
 	h.FilesChanged = redactStrings(h.FilesChanged)
 	return h
+}
+
+func redactVerification(r protocol.VerificationReport) protocol.VerificationReport {
+	r.Summary = redact.String(r.Summary)
+	if len(r.Checks) == 0 {
+		return r
+	}
+	checks := make([]protocol.VerificationCheck, len(r.Checks))
+	copy(checks, r.Checks)
+	for i := range checks {
+		checks[i].Output = redact.ScrubToolOutput(checks[i].Output)
+		checks[i].Error = redact.String(checks[i].Error)
+		checks[i].Name = redact.String(checks[i].Name)
+		checks[i].Value = redact.String(checks[i].Value)
+	}
+	r.Checks = checks
+	return r
 }
 
 func redactStrings(in []string) []string {

@@ -140,6 +140,8 @@ type (
 	QuestionResolved       = pub.QuestionResolved
 	TurnCompleted          = pub.TurnCompleted
 	TurnFileChange         = pub.TurnFileChange
+	VerificationStarted    = pub.VerificationStarted
+	VerificationCompleted  = pub.VerificationCompleted
 	HarnessProgress        = pub.HarnessProgress
 	ModelSelected          = pub.ModelSelected
 	AgentSelected          = pub.AgentSelected
@@ -182,6 +184,9 @@ const (
 	ChildStatusFailed    = pub.ChildStatusFailed
 	ChildStatusCanceled  = pub.ChildStatusCanceled
 	ChildStatusBlocked   = pub.ChildStatusBlocked
+
+	VerificationScopeTurn  = pub.VerificationScopeTurn
+	VerificationScopeChild = pub.VerificationScopeChild
 
 	DelegationQueued    = pub.DelegationQueued
 	DelegationWorking   = pub.DelegationWorking
