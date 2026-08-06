@@ -72,10 +72,10 @@ func diagnosticsPollCmd(r windowRegistry) tea.Cmd {
 	return diagnosticsRefreshCmd()
 }
 
-// rightPanePollCmd arms idle polls for active right-pane windows (files +
-// diagnostics). Nil when neither needs a tick.
+// rightPanePollCmd arms idle polls/ticks for active right-pane windows
+// (files, diagnostics, pets). Nil when none need a tick.
 func rightPanePollCmd(r windowRegistry) tea.Cmd {
-	return tea.Batch(filesPollCmd(r), diagnosticsPollCmd(r))
+	return tea.Batch(filesPollCmd(r), diagnosticsPollCmd(r), petsAnimCmd(r))
 }
 
 func (w diagnosticsWindow) update(msg tea.Msg) (window, tea.Cmd) {
