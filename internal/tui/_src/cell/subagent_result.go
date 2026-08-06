@@ -48,7 +48,8 @@ func (c *subagentResultCell) isError() bool {
 		return false
 	}
 	return c.status == string(protocol.ChildStatusFailed) ||
-		c.status == string(protocol.ChildStatusCanceled)
+		c.status == string(protocol.ChildStatusCanceled) ||
+		c.status == string(protocol.ChildStatusBlocked)
 }
 
 func (c *subagentResultCell) render(width int, th theme.Theme) string {
@@ -115,7 +116,7 @@ func (c *subagentResultCell) render(width int, th theme.Theme) string {
 	switch c.status {
 	case string(protocol.ChildStatusFailed):
 		bodyStyle = st.Error
-	case string(protocol.ChildStatusCanceled):
+	case string(protocol.ChildStatusCanceled), string(protocol.ChildStatusBlocked):
 		bodyStyle = st.Warning
 	}
 	return out + "\n" + indent(renderCellText(bodyStyle, body, bodyWidth), indentPrefix)
@@ -131,6 +132,8 @@ func subagentStatusStyle(th theme.Theme, status string) (label string, style lip
 		return string(protocol.ChildStatusFailed), st.Error
 	case string(protocol.ChildStatusCanceled):
 		return string(protocol.ChildStatusCanceled), st.Warning
+	case string(protocol.ChildStatusBlocked):
+		return string(protocol.ChildStatusBlocked), st.Warning
 	default:
 		if status == "" {
 			status = "unknown"

@@ -231,6 +231,7 @@ func TestTeamMemberStateFromChild(t *testing.T) {
 		{protocol.ChildStatusCompleted, protocol.TeamMemberCompleted},
 		{protocol.ChildStatusFailed, protocol.TeamMemberFailed},
 		{protocol.ChildStatusCanceled, protocol.TeamMemberCanceled},
+		{protocol.ChildStatusBlocked, protocol.TeamMemberBlocked},
 		{protocol.ChildStatus("nope"), protocol.TeamMemberFailed},
 	}
 	for _, tc := range cases {
