@@ -17,7 +17,10 @@ import (
 // Mapping:
 //   - write/edit deny "*" → NoWorkspaceWrite (no writable workspace bind)
 //   - write/edit deny globs → DenyWriteGlobs + expanded DenyWritePaths
-//   - webfetch or mcp Allow on "*" → Network true (else network stays off)
+//   - Network on by default (webfetch/mcp Ask or Allow on "*") so bash can
+//     run gh/git/npm/etc. Network off only when both webfetch and mcp are
+//     hard-Deny on "*" (patterned rules do not flip full-network posture).
+//     Host/CIDR allowlists remain #527.
 //
 // Mode upgrades (yolo / accept-edits) are not applied: the OS boundary is
 // independent of ask-prompt posture. ModeOff returns a minimal policy.
@@ -30,9 +33,12 @@ func CompileSandbox(mode sandbox.Mode, workDir string, sets ...Ruleset) sandbox.
 		return p
 	}
 
-	if Evaluate("webfetch", "*", sets...) == Allow || Evaluate("mcp", "*", sets...) == Allow {
-		p.Network = true
-	}
+	// Default Ask keeps host networking so coding workflows (gh, git push,
+	// package managers) work under workspace-write. Opt into --unshare-net
+	// only with an explicit dual deny on the network-capable tool families.
+	wf := Evaluate("webfetch", "*", sets...)
+	mcp := Evaluate("mcp", "*", sets...)
+	p.Network = wf != Deny || mcp != Deny
 
 	if Evaluate("write", "*", sets...) == Deny || Evaluate("edit", "*", sets...) == Deny {
 		p.NoWorkspaceWrite = true

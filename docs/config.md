@@ -109,10 +109,12 @@ rules.
 into OS filesystem denials inside the bash sandbox (globs become seatbelt
 regexes and, when paths exist, bwrap `--ro-bind` remounts). A deny on
 `write`/`edit` `*` (including plan mode) suppresses the writable workspace
-bind. Network inside the sandbox stays off unless `webfetch` or `mcp` is
-effectively **allow** on `*` (patterned allows do not open full bash network).
-Ask/yolo posture does not widen the OS profile. Composer `!` uses the
-config-layer compile; agent bash uses live layers (agent/phase/session).
+bind. Network inside the sandbox stays **on** by default (so bash can run
+`gh`, `git`, package managers, etc.). It turns **off** only when both
+`webfetch` and `mcp` are hard-**deny** on `*` (patterned rules do not flip
+full-network posture). Host/CIDR allowlists are tracked in #527. Ask/yolo
+posture does not widen the OS profile. Composer `!` uses the config-layer
+compile; agent bash uses live layers (agent/phase/session).
 
 **Yolo + sandbox off:** `permissionMode: yolo` (or a resumed session in yolo)
 combined with `sandbox: off` **refuses to start** unless you pass `--i-know`.
