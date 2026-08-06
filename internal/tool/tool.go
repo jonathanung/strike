@@ -3,7 +3,7 @@
 // task_message/task_interrupt/wait/agent_roster/agent_ownership/agent_message/agent_broadcast/
 // team_task/webfetch/todowrite/todoread/
 // memory_write/memory_read/issue_write/issue_read/plan_write/plan_read/notebook_edit/sleep/skill/question/enter_plan_mode/
-// exit_plan_mode/phase_done/toolsearch).
+// exit_plan_mode/phase_done/toolsearch/definition/references/symbols).
 // Used by internal/engine (dispatch), internal/permission (AskRequest, for the
 // Context.Ask signature), and cmd/strike (registry construction); internal/tui
 // never imports it — tool calls reach the frontend only as

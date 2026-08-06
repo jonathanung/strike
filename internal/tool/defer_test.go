@@ -25,6 +25,7 @@ func TestIsCoreTool(t *testing.T) {
 	for _, name := range []string{
 		"webfetch", "sleep", "skill", "todowrite", "memory_read",
 		"issue_write", "notebook_edit", "mcp_demo_ping",
+		"definition", "references", "symbols",
 	} {
 		if IsCoreTool(name) {
 			t.Errorf("IsCoreTool(%q) = true, want false", name)

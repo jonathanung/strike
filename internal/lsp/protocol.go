@@ -1,7 +1,8 @@
 // Package lsp is a Language Server Protocol client: JSON-RPC 2.0 over stdio
-// (Content-Length framing), initialize handshake, document sync, and
-// publishDiagnostics collection. Crash isolation mirrors internal/mcp — a
-// dead language server degrades to no diagnostics and never takes down the
+// (Content-Length framing), initialize handshake, document sync,
+// publishDiagnostics collection, and optional navigation requests
+// (definition / references / symbols). Crash isolation mirrors internal/mcp —
+// a dead language server degrades to empty results and never takes down the
 // session.
 package lsp
 
@@ -136,6 +137,10 @@ type didCloseParams struct {
 	TextDocument textDocumentIdentifier `json:"textDocument"`
 }
 
+type documentSymbolParams struct {
+	TextDocument textDocumentIdentifier `json:"textDocument"`
+}
+
 // --- diagnostics ---
 
 // DiagnosticSeverity matches LSP severity values.
@@ -171,4 +176,95 @@ type publishDiagnosticsParams struct {
 	URI         string       `json:"uri"`
 	Version     *int         `json:"version,omitempty"`
 	Diagnostics []Diagnostic `json:"diagnostics"`
+}
+
+// --- navigation (definition / references / symbols) ---
+
+type textDocumentPositionParams struct {
+	TextDocument textDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+}
+
+type referenceParams struct {
+	TextDocument textDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+	Context      referenceContext       `json:"context"`
+}
+
+type referenceContext struct {
+	IncludeDeclaration bool `json:"includeDeclaration"`
+}
+
+type workspaceSymbolParams struct {
+	Query string `json:"query"`
+}
+
+// Location is a file range (public for navigation tools).
+type Location struct {
+	URI   string `json:"uri"`
+	Range Range  `json:"range"`
+}
+
+// locationLink is LSP LocationLink (definition may return these).
+type locationLink struct {
+	TargetURI            string `json:"targetUri"`
+	TargetRange          Range  `json:"targetRange"`
+	TargetSelectionRange Range  `json:"targetSelectionRange"`
+}
+
+// SymbolKind matches LSP symbol kind values (1–26).
+const (
+	SymbolKindFile          = 1
+	SymbolKindModule        = 2
+	SymbolKindNamespace     = 3
+	SymbolKindPackage       = 4
+	SymbolKindClass         = 5
+	SymbolKindMethod        = 6
+	SymbolKindProperty      = 7
+	SymbolKindField         = 8
+	SymbolKindConstructor   = 9
+	SymbolKindEnum          = 10
+	SymbolKindInterface     = 11
+	SymbolKindFunction      = 12
+	SymbolKindVariable      = 13
+	SymbolKindConstant      = 14
+	SymbolKindString        = 15
+	SymbolKindNumber        = 16
+	SymbolKindBoolean       = 17
+	SymbolKindArray         = 18
+	SymbolKindObject        = 19
+	SymbolKindKey           = 20
+	SymbolKindNull          = 21
+	SymbolKindEnumMember    = 22
+	SymbolKindStruct        = 23
+	SymbolKindEvent         = 24
+	SymbolKindOperator      = 25
+	SymbolKindTypeParameter = 26
+)
+
+// Symbol is one document or workspace symbol (public for navigation tools).
+type Symbol struct {
+	Name          string
+	Kind          int
+	Path          string // absolute filesystem path when URI is file://
+	Range         Range
+	ContainerName string
+}
+
+// symbolInformation is the flat LSP SymbolInformation shape.
+type symbolInformation struct {
+	Name          string   `json:"name"`
+	Kind          int      `json:"kind"`
+	Location      Location `json:"location"`
+	ContainerName string   `json:"containerName,omitempty"`
+}
+
+// documentSymbol is the hierarchical LSP DocumentSymbol shape.
+type documentSymbol struct {
+	Name           string           `json:"name"`
+	Detail         string           `json:"detail,omitempty"`
+	Kind           int              `json:"kind"`
+	Range          Range            `json:"range"`
+	SelectionRange Range            `json:"selectionRange"`
+	Children       []documentSymbol `json:"children,omitempty"`
 }
