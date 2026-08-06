@@ -38,8 +38,11 @@ presentation / dials / scheduler presets, custom provider upsert/remove,
 `AppendProjectPermission`, etc.). Those paths read JSONC, then rewrite
 **pretty-printed pure JSON** via `encoding/json` — comments and `$schema` are
 dropped. Prefer keeping durable commentary in a sibling note, or avoid
-`/settings`-style writers if you need comments to survive. Programmatic
-saves only touch user/project paths — they never write managed files.
+`/settings`-style writers if you need comments to survive. For raw
+comment-preserving edits, use **`/config`** (picker opens `~/.strike` /
+`./.strike` files in the embedded editor without a JSON round-trip on close).
+Programmatic saves only touch user/project paths — they never write managed
+files.
 
 **Symlinks:** `~/.strike` and `<project>/.strike` may be directory symlinks
 (state lives elsewhere). Strike resolves them before opening history/memory/
@@ -806,6 +809,10 @@ sandbox, leanCode, deferTools, session.worktree, autoupdate, and maxChildDepth
 affect **new** sessions (use `/mode` / Shift+Tab for the live permission dial,
 and `/sandbox` to inspect the OS dial already bound for this process).
 Autoupdate probes run at process start from the config loaded at launch.
+Programmatic `/settings` saves drop JSONC comments; use **`/config`** (or
+Settings → **Open config files…**) for hand-edited files and sidecars
+(`mcp.jsonc`, `providers.jsonc`, `keybinds.jsonc`, agents/skills/themes/
+workflows).
 
 **/settings Compaction**: editor for history compaction and continuous prune
 dials (`compactionStrategy`, `compactionModel`, `compactionThreshold`,

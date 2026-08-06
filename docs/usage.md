@@ -52,6 +52,8 @@ strike launches without any provider configured. Pick one inside the TUI:
 /auth status                   # anthropic: none · openai: oauth+key · …
 /auth logout <provider>
 /settings                      # defaults, compaction/prune dials, custom providers
+/config                        # open .strike config files in embedded editor
+                               # (picker; optional: nano, global|project, slot)
 /theme                         # centered color-theme picker (bundled +
                                # ~/.strike/themes + ./.strike/themes)
 /theme <id>                    # apply a theme by id

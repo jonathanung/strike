@@ -1,5 +1,5 @@
 // Command strike is the CLI entry point. This file owns argument parsing,
-// usage text, and the auth/exec/rpc/acp/serve subcommand dispatch only; the
+// usage text, and the auth/exec/rpc/acp/serve/eval subcommand dispatch only; the
 // composition root that assembles the engine, host services, and TUI lives in
 // wire.go.
 package main
@@ -176,6 +176,9 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "plugin" {
 		return runPluginCLI(args[1:], stdout, stderr)
 	}
+	if len(args) > 0 && args[0] == "eval" {
+		return runEvalCLI(args[1:], stdout, stderr)
+	}
 	if len(args) > 0 && (args[0] == "version" || args[0] == "--version" || args[0] == "-version") {
 		fmt.Fprintln(stdout, version.String())
 		return 0
@@ -336,6 +339,7 @@ func writeUsage(w io.Writer) {
 	fmt.Fprintln(w, "  strike mcp-serve [options]")
 	fmt.Fprintln(w, "  strike auth <command> [arguments]")
 	fmt.Fprintln(w, "  strike plugin <command> [arguments]")
+	fmt.Fprintln(w, "  strike eval <command> [arguments]")
 	fmt.Fprintln(w, "  strike restore [options]")
 	fmt.Fprintln(w, "  strike workflow <command> [arguments]")
 	fmt.Fprintln(w, "  strike version")

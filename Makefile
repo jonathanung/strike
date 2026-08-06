@@ -1,4 +1,4 @@
-.PHONY: build run run-echo serve serve-expose web-build web-test web-check test vet cover cover-check clean setup restore tui-gen prompt-reg chaos harness-eval
+.PHONY: build run run-echo serve serve-expose web-build web-test web-check test vet cover cover-check clean setup restore tui-gen prompt-reg chaos harness-eval swebench-eval
 
 # Overall statement-coverage floor for `make cover-check` (local / optional CI).
 # Soft baseline ~77%; keep below measured total so the gate does not flake.
@@ -84,6 +84,14 @@ prompt-reg:
 #   UPDATE_HARNESS_EVAL=1 make harness-eval      # refresh testdata sample
 harness-eval:
 	go test ./internal/replay/ -run 'TestHarnessEvalSuite|TestBuildEvalReport' -v -count=1
+
+# E3.3 SWE-bench Verified subset runner (#561). Offline unit tests always;
+# full Docker+model runs are manual / nightly (large images, API cost).
+#   make swebench-eval                    # package tests
+#   ./strike eval swebench --dry-run ...  # wiring check
+#   ./strike eval swebench --provider …   # real subset run → evals/swebench/results/
+swebench-eval:
+	go test ./internal/eval/swebench/ ./cmd/strike/ -run 'SWEBench|Subset|EvalSWE|EvalCLI' -count=1
 
 vet: tui-gen
 	go vet ./...

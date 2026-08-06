@@ -23,6 +23,12 @@ materially affect the shipped product.
   confirmation. Executable trust review names commands and contribution types;
   no secret or env values are rendered; failed ops preserve prior state
   ([#730](https://github.com/jonathanung/strike/issues/730)).
+- **SWE-bench Verified subset runner (E3.3)** — `strike eval swebench` runs a
+  fixed 50-instance internal regression subset with Docker per instance and
+  `strike exec --json`, recording pass rate, tokens, cost, and wall-clock to
+  versioned `report.json` / predictions JSONL under `evals/swebench/results/`.
+  Internal signal only — do not publish pass rates in the README
+  ([#561](https://github.com/jonathanung/strike/issues/561)).
 - **Plugin catalog and updates** — remote catalog format (`catalog.json`),
   `strike plugin search` / `install catalog:pkg[@ver] --registry` / `outdated` /
   `update --yes`. Installs pin immutable version + verified artifact digest;

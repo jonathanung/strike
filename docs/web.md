@@ -88,9 +88,13 @@ ssh -L 8787:127.0.0.1:8787 user@strike-host
 | `GET` | `/v1/ws` | mode | WebSocket: ops in, event envelopes out |
 | `POST` | `/v1/ops` | **yes** | Submit one op envelope (JSON) |
 | `GET` | `/v1/live/events` | **yes** | SSE of live engine events (+ JSONL backlog) |
-| `GET` | `/v1/status` | **yes** | Live status (model, agent, mode, cwd, busy, …) |
+| `GET` | `/v1/status` | **yes** | Live status (model, agent, mode, sandbox, cwd, busy, …) |
+| `GET` | `/v1/sandbox` | **yes** | Active OS sandbox dial, backend, network.allow summary, explain profile |
+| `PATCH` | `/v1/sandbox` | **yes** | Persist sandbox default (`mode`, optional `iKnow`); new sessions only |
 | `GET` | `/v1/agents` | **yes** | Selectable agent names |
 | `GET` | `/v1/sessions` | **yes** | Durable session list (roots only) + `liveId` |
+| `GET`/`POST` | `/v1/diag` | **yes** | Redacted prompt/config diagnostic bundle (JSON download; live only; `?root=` when multi-root). Bootstrap capability `diag`. **503** when unsupported (attach-only / no live). |
+| `GET` | `/v1/sessions` | **yes** | Session list + `liveId` |
 | `GET` | `/v1/sessions/{id}/events` | **yes** | SSE tail of a session JSONL log |
 | `GET` | `/v1/sessions/{id}/children` | **yes** | Child/subagent sessions under a root |
 | `POST` | `/v1/sessions/{id}/fork` | **yes** | Fork durable session → new id |
@@ -101,6 +105,13 @@ ssh -L 8787:127.0.0.1:8787 user@strike-host
 | `POST` | `/v1/roots/{id}/activate` | **yes** | Set hub active root (must already be live) |
 | `POST` | `/v1/roots/{id}/resume` | **yes** | Resume durable root as live workspace |
 | `DELETE` | `/v1/roots/{id}` | **yes** | Close/stop a live workspace (hub remove) |
+| `GET` | `/v1/mcp` | **yes** | MCP server status list (`{servers:[…]}`) |
+| `POST` | `/v1/mcp/retry` | **yes** | Retry one server (`{name?}`) or all non-up |
+| `POST` | `/v1/mcp/disable` | **yes** | Disable server and unregister tools (`{name}`) |
+| `GET` | `/v1/permissions/explain` | **yes** | Last-match-wins explain (`permission`, optional `pattern`) |
+| `GET` | `/v1/permissions/presets` | **yes** | Shipped permission preset catalog |
+| `GET` | `/v1/sessions/{id}/timeline` | **yes** | Redacted structured run timeline (JSON snapshot) |
+| `GET` | `/v1/sessions/{id}/timeline/export` | **yes** | Download redacted timeline (`format=json\|jsonl`) |
 | `GET` | `/v1/workflows` | **yes** | Workflow catalog (host-safe summaries) |
 | `GET` | `/v1/workflows/{name}` | **yes** | One catalog entry |
 | `GET` | `/v1/workflows/{name}/document` | **yes** | Editable document for builder |
@@ -142,6 +153,19 @@ JSON objects with a `type` and optional `data`:
 | `select.model` | `{ "provider", "model?" }` |
 | `set.permission_mode` | `{ "mode": "default\|plan\|accept-edits\|yolo" }` |
 | `set.autonomy` | `{ "mode": "supervised\|agent\|checks\|skip-all" }` |
+
+### OS sandbox (web parity)
+
+Bootstrap capability `sandbox` is true for live `strike serve` (not attach-only).
+Status includes `sandbox`, `sandboxBackend`, `sandboxAvailable`, and `networkAllow`.
+
+| Method | Path | Body | Notes |
+|---|---|---|---|
+| `GET` | `/v1/sandbox` | — | Active mode + compiled explain text (no browser shell-out) |
+| `PATCH` | `/v1/sandbox` | `{ "mode", "iKnow?" }` | Saves **default** via `host.Settings.SaveConfigDials` (TUI `/settings` parity). Active session dial is fixed at start. |
+| `PATCH` | `/v1/settings` | `…, "sandbox", "iKnow?"` | Same default write path when `sandbox` is non-empty |
+
+Safety gate: `mode=off` while live or default `permissionMode` is `yolo` requires `iKnow: true` (CLI `--i-know` equivalent). Invalid modes return 400. Missing capability returns 501.
 | `set.effort` | `{ "level": "..." }` |
 | `set.fast` | `{ "enabled": true\|false }` |
 | `compact` | `{ "strategy": "summarize" }` |
@@ -173,6 +197,15 @@ Queue state is UI-local (same as TUI input buffer) — not a server queue API.
 **Markdown export** is client-side from the in-memory transcript (header + You /
 Strike / tools). No separate export HTTP endpoint.
 
+### MCP status and control
+
+Bootstrap capability `mcp` is true when the host exposes `Services.MCP`. The
+cockpit inspector **mcp** tab lists configured servers (state, transport,
+endpoint label, tools, non-secret errors) and offers **Retry** / **Disable**
+actions matching TUI `/mcp`. Empty configuration still reports the capability
+when the host service is present; the panel shows a configure hint. Secrets
+(headers/env) are never returned on the wire.
+
 ### Workflow authoring (web parity)
 
 Bootstrap capabilities `workflows` / `workflowDrafts` are true when the host
@@ -184,6 +217,26 @@ and saves to an explicit `global` or `project` scope. **Save never activates.**
 Start requires a grant-review dialog and `POST .../start` with
 `{"confirm":true}`. Invalid catalog entries cannot be activated (422). The web
 surface uses only host-safe JSON DTOs — no TUI types cross the boundary.
+
+### Diagnostic bundle export
+
+When bootstrap capability `diag` is true (live engine present), the cockpit
+**context** inspector and **settings** dialog expose **Download diagnostics**.
+That calls `GET /v1/diag` (optional `?root=<id>`), which submits
+`inspect.diagnostic` to the live engine, re-scrubs the payload with `pkg/diag`
+(same redaction as TUI `/diag`), and returns pretty JSON with
+`Content-Disposition: attachment`. Attach-only / no-live hosts return **503**
+and leave the control disabled. Complements timeline export (WEB.4); not a full
+transcript dump.
+### Run timeline (web)
+
+Bootstrap capability `timeline` is always true. The inspector **timeline** tab
+loads a collapsed, secret-redacted harness span list for the selected session
+(`GET /v1/sessions/{id}/timeline`) and can download JSON or JSONL exports
+(`…/timeline/export?format=json|jsonl`). The timeline is derived from durable
+session JSONL via `pkg/timeline` — it complements the transcript, it does not
+replace it. Field-level scrubbing uses `pkg/redact` (same path as TUI
+`/timeline export`).
 
 Events use the same envelopes as session JSONL (`type` + `time` + `data`).
 
@@ -200,7 +253,12 @@ curl -s -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
 ```
 
 Permission asks appear as `permission.asked` events; resolve with
-`permission.reply` (UI modal or `POST /v1/ops`).
+`permission.reply` (UI modal or `POST /v1/ops`). The cockpit modal offers all
+four wire decisions (`once` | `always` | `project` | `reject`), shows the tool
+name and patterns (not raw JSON), and — when bootstrap capability
+`permissions` is true — can load host explain via
+`GET /v1/permissions/explain?permission=…&pattern=…`. Attach-only hosts without
+`Services.Permissions` keep the capability false and omit the explain control.
 
 ## Multi-session UX contract
 
