@@ -55,6 +55,7 @@ describe("App", () => {
     expect(screen.getByRole("tab", { name: "memory" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "issues" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "workflows" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "mcp" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "activity" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "project" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "capabilities" })).not.toBeInTheDocument();
@@ -66,6 +67,8 @@ describe("App", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Issues unavailable");
     fireEvent.click(screen.getByRole("tab", { name: "workflows" }));
     expect(screen.getByRole("status")).toHaveTextContent("Workflows unavailable");
+    fireEvent.click(screen.getByRole("tab", { name: "mcp" }));
+    expect(screen.getByRole("status")).toHaveTextContent("MCP unavailable");
   });
 
   it("uses historical SSE in attach-only mode", async () => {

@@ -504,15 +504,15 @@ type Roots interface {
 	WorkDir(id string) string
 }
 
-// MCPServerStatus is one configured external MCP server for /mcp.
+// MCPServerStatus is one configured external MCP server for /mcp and web.
 type MCPServerStatus struct {
-	Name      string
-	Command   string // non-secret endpoint label (command or URL)
-	Transport string // stdio|http
-	State     string // "up", "down", "error", "disabled"
-	ToolCount int
-	Error     string
-	Tools     []string
+	Name      string   `json:"name"`
+	Command   string   `json:"command,omitempty"`   // non-secret endpoint label (command or URL)
+	Transport string   `json:"transport,omitempty"` // stdio|http
+	State     string   `json:"state"`               // "up", "down", "error", "disabled"
+	ToolCount int      `json:"toolCount"`
+	Error     string   `json:"error,omitempty"`
+	Tools     []string `json:"tools,omitempty"`
 }
 
 // MCP reports external Model Context Protocol server status and control.

@@ -92,6 +92,9 @@ ssh -L 8787:127.0.0.1:8787 user@strike-host
 | `GET` | `/v1/agents` | **yes** | Selectable agent names |
 | `GET` | `/v1/sessions` | **yes** | Session list + `liveId` |
 | `GET` | `/v1/sessions/{id}/events` | **yes** | SSE tail of a session JSONL log |
+| `GET` | `/v1/mcp` | **yes** | MCP server status list (`{servers:[…]}`) |
+| `POST` | `/v1/mcp/retry` | **yes** | Retry one server (`{name?}`) or all non-up |
+| `POST` | `/v1/mcp/disable` | **yes** | Disable server and unregister tools (`{name}`) |
 | `GET` | `/v1/workflows` | **yes** | Workflow catalog (host-safe summaries) |
 | `GET` | `/v1/workflows/{name}` | **yes** | One catalog entry |
 | `GET` | `/v1/workflows/{name}/document` | **yes** | Editable document for builder |
@@ -136,6 +139,15 @@ JSON objects with a `type` and optional `data`:
 | `set.effort` | `{ "level": "..." }` |
 | `workflow.start` | `{ "name": "plan-implement" }` (prefer REST start after grant review) |
 | `workflow.stop` | _(empty)_ |
+
+### MCP status and control
+
+Bootstrap capability `mcp` is true when the host exposes `Services.MCP`. The
+cockpit inspector **mcp** tab lists configured servers (state, transport,
+endpoint label, tools, non-secret errors) and offers **Retry** / **Disable**
+actions matching TUI `/mcp`. Empty configuration still reports the capability
+when the host service is present; the panel shows a configure hint. Secrets
+(headers/env) are never returned on the wire.
 
 ### Workflow authoring (web parity)
 
