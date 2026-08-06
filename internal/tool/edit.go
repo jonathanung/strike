@@ -23,7 +23,8 @@ Usage:
 - ALWAYS prefer editing existing files. NEVER write new files unless explicitly required.
 - Only use emojis if the user explicitly requests it.
 - Fails if oldString is not found, or if it matches multiple locations and replaceAll is false. Provide more surrounding context to make the match unique, or set replaceAll.
-- Use replaceAll when renaming a symbol or replacing every occurrence in the file.`
+- Use replaceAll when renaming a symbol or replacing every occurrence in the file.
+- Optional baseHash (sha256 hex of the full file at plan time) fails closed with precondition_failed if the file changed.`
 }
 
 func (editTool) Schema() json.RawMessage {
@@ -33,7 +34,8 @@ func (editTool) Schema() json.RawMessage {
 			"filePath": {"type": "string", "description": "Path to the file to modify"},
 			"oldString": {"type": "string", "description": "Exact text to replace"},
 			"newString": {"type": "string", "description": "Replacement text"},
-			"replaceAll": {"type": "boolean", "description": "Replace every occurrence (default false)"}
+			"replaceAll": {"type": "boolean", "description": "Replace every occurrence (default false)"},
+			"baseHash": {"type": "string", "description": "Optional sha256 hex of expected current file content; fails with precondition_failed on mismatch"}
 		},
 		"required": ["filePath", "oldString", "newString"]
 	}`)
@@ -44,6 +46,7 @@ type editArgs struct {
 	OldString  string `json:"oldString"`
 	NewString  string `json:"newString"`
 	ReplaceAll bool   `json:"replaceAll"`
+	BaseHash   string `json:"baseHash"`
 }
 
 func (editTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
@@ -59,6 +62,9 @@ func (editTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 		return Result{}, err
 	}
 	if err := tc.Files.CheckFresh(path, rel); err != nil {
+		return Result{}, err
+	}
+	if err := CheckBaseHash(path, a.BaseHash, rel); err != nil {
 		return Result{}, err
 	}
 	data, err := os.ReadFile(path)
@@ -92,8 +98,16 @@ func (editTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	} else {
 		updated = strings.Replace(content, a.OldString, a.NewString, 1)
 	}
+	// Close the race between plan-time read and commit.
+	if err := CheckContentUnchanged(path, data, rel); err != nil {
+		return Result{}, err
+	}
+	if err := tc.Files.CheckFresh(path, rel); err != nil {
+		return Result{}, err
+	}
+	existed := FileExisted(path)
 	tc.SnapshotPath(path)
-	// Re-validate + O_NOFOLLOW at exec time (TOCTOU: symlink planted after resolve).
+	// Re-validate + atomic temp/rename at exec time.
 	if err := workspaceWriteFile(tc.WorkDir, a.FilePath, []byte(updated)); err != nil {
 		return Result{}, err
 	}
@@ -102,8 +116,9 @@ func (editTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 		return Result{}, err
 	}
 	if info, statErr := os.Stat(path); statErr == nil {
-		tc.Files.Record(path, info)
+		tc.Files.RecordBytes(path, info, []byte(updated))
 	}
+	tc.NoteTurnChange(path, existed, false)
 	tc.NotifyFileSync(path, updated, false)
 	out := fmt.Sprintf("Edited %s (%d replacement(s))", rel, replaced)
 	out = AppendOverlapWarning(out, overlapWarn)
