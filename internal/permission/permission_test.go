@@ -94,6 +94,16 @@ func TestDefaultsIncludesArtifactToolsAllow(t *testing.T) {
 	}
 }
 
+func TestDefaultsIncludesPatchCollabAllow(t *testing.T) {
+	if got := Evaluate("patch_collab", "*", Defaults()); got != Allow {
+		t.Errorf("Defaults patch_collab = %q, want allow", got)
+	}
+	deny := Ruleset{{Permission: "patch_collab", Pattern: "*", Action: Deny}}
+	if got := Evaluate("patch_collab", "submit", Defaults(), deny); got != Deny {
+		t.Errorf("patch_collab with deny = %q, want deny", got)
+	}
+}
+
 func TestDenyRuleAgentMessageBlocks(t *testing.T) {
 	// Config/agent deny must hard-block agent_message without prompting.
 	base := Defaults()

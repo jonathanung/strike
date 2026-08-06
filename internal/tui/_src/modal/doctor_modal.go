@@ -142,6 +142,16 @@ func (m *doctorModal) bodyLines(th theme.Theme) []string {
 		}
 	}
 
+	if len(ev.ExcludedKinds) > 0 {
+		lines = append(lines, costKV(th, "excluded", strings.Join(ev.ExcludedKinds, ", ")))
+	}
+	if len(ev.PinnedKinds) > 0 {
+		lines = append(lines, costKV(th, "pinned", strings.Join(ev.PinnedKinds, ", ")))
+	}
+	if len(ev.ShedKinds) > 0 {
+		lines = append(lines, costKV(th, "shed", strings.Join(ev.ShedKinds, ", ")))
+	}
+
 	for _, w := range m.warnings(th) {
 		lines = append(lines, w)
 	}
@@ -162,8 +172,18 @@ func (m *doctorModal) bodyLines(th theme.Theme) []string {
 			source := sanitizeDisplayData(layer.Source)
 			mode := sanitizeDisplayData(layer.Mode)
 			head := fmt.Sprintf("%d. %s [%s]", i+1, kind, mode)
+			if layer.Pinned {
+				head += " pin"
+			}
 			lines = append(lines, st.Text.Render(head))
+			est := layer.EstTokens
+			if est <= 0 && layer.Chars > 0 {
+				est = (layer.Chars + doctorCharsPerTokenEst - 1) / doctorCharsPerTokenEst
+			}
 			parts := []string{source, fmt.Sprintf("%d chars", layer.Chars)}
+			if est > 0 {
+				parts = append(parts, fmt.Sprintf("~%s tok", ui.FormatTokens(est)))
+			}
 			if total > 0 && layer.Chars > 0 {
 				parts = append(parts, fmt.Sprintf("%d%%", (layer.Chars*100)/total))
 			}

@@ -669,8 +669,10 @@ Success schema (empty arrays/strings allowed when honest):
 Prefer artifact_refs (from artifact_write) over inlining large findings/patches/
 test reports. Cite context_bundle item ids in provenance when conclusions rest
 on sealed context. If you lack required context, set missing_context (non-empty
-→ blocked) instead of guessing. On failure or cancel, still return summary,
-blockers, partial files_changed, and recommended_next_action when known. Prefer
-this JSON over free-form prose alone — the lead reads [child.completed] handoff
-JSON, not only chat text.
+→ blocked) instead of guessing. For parallel writers, prefer patch_collab submit
+(apply_patch envelope) plus artifact_refs type=patch so the lead can
+preview/reject/apply instead of editing the shared tree in place. On failure or
+cancel, still return summary, blockers, partial files_changed, and
+recommended_next_action when known. Prefer this JSON over free-form prose alone
+— the lead reads [child.completed] handoff JSON, not only chat text.
 `

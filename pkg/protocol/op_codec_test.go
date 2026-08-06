@@ -21,6 +21,12 @@ func TestWrapOpDecodeRoundTrip(t *testing.T) {
 		StopWorkflow{},
 		Compact{Strategy: "trim"},
 		InspectEffectivePrompt{},
+		SetContextControls{
+			ExcludeKinds: []string{PromptLayerMemory},
+			SetExclude:   true,
+			PinKinds:     []string{PromptLayerPersona},
+			SetPin:       true,
+		},
 		InspectDiagnosticBundle{},
 		Rewind{RestoreFiles: true},
 	}

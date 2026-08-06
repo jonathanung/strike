@@ -47,6 +47,8 @@ func opType(op Op) string {
 		return "compact"
 	case InspectEffectivePrompt:
 		return "inspect.prompt"
+	case SetContextControls:
+		return "context.controls"
 	case InspectDiagnosticBundle:
 		return "inspect.diagnostic"
 	case Rewind:
@@ -116,6 +118,8 @@ func (e OpEnvelope) Decode() (Op, error) {
 		op = &Compact{}
 	case "inspect.prompt":
 		return InspectEffectivePrompt{}, nil
+	case "context.controls":
+		op = &SetContextControls{}
 	case "inspect.diagnostic":
 		return InspectDiagnosticBundle{}, nil
 	case "rewind":
@@ -157,6 +161,8 @@ func derefOp(op Op) Op {
 	case *FilesChanged:
 		return *v
 	case *Compact:
+		return *v
+	case *SetContextControls:
 		return *v
 	case *Rewind:
 		return *v

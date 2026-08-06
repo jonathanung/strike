@@ -342,6 +342,10 @@ type Model struct {
 	modelAttachmentKnown bool
 	// pendingContextDoctor opens the doctor modal on the next EffectivePrompt.
 	pendingContextDoctor bool
+	// contextExcluded / contextPinned mirror session SetContextControls state
+	// for /context pin|exclude merge commands.
+	contextExcluded []string
+	contextPinned   []string
 	// pendingDiagExportPath, when set, writes the next DiagnosticBundle event
 	// to that path (from /diag or /diag export).
 	pendingDiagExportPath string
