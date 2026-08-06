@@ -21,7 +21,7 @@ func TestChildBudgetToolCallsEscalatesAndStatus(t *testing.T) {
 		childPrompt  = "budget-child-tools"
 		parentPrompt = "spawn budget child"
 	)
-	// Spawn with max_tool_calls=2; child will call channel thrice.
+	// Spawn with max_tool_calls=2; child will call channel thrice (3rd trips).
 	taskArgs, _ := json.Marshal(map[string]any{
 		"prompt": childPrompt,
 		"budget": map[string]any{"max_tool_calls": 2},

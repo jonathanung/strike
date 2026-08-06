@@ -32,11 +32,13 @@ func TestChildBudgetToolCallTrip(t *testing.T) {
 	b := newChildBudget(tool.AgentBudgetLimits{MaxToolCalls: 3}, "do work", now)
 	b.noteTool("read", now)
 	b.noteTool("read", now.Add(time.Second))
-	if trip, _, _, _ := b.evaluate(now.Add(2*time.Second), now); trip {
-		t.Fatal("should not trip before limit")
-	}
 	b.noteTool("bash", now.Add(3*time.Second))
-	trip, kind, reason, terminal := b.evaluate(now.Add(4*time.Second), now)
+	// Max 3 allows three calls; no trip yet.
+	if trip, _, _, _ := b.evaluate(now.Add(2*time.Second), now); trip {
+		t.Fatal("should not trip at exactly max")
+	}
+	b.noteTool("grep", now.Add(4*time.Second))
+	trip, kind, reason, terminal := b.evaluate(now.Add(5*time.Second), now)
 	if !trip || kind != "tool_calls" {
 		t.Fatalf("trip=%v kind=%q want tool_calls", trip, kind)
 	}
@@ -59,10 +61,11 @@ func TestChildBudgetDangerousTools(t *testing.T) {
 	b := newChildBudget(tool.AgentBudgetLimits{MaxDangerousTools: 2}, "x", now)
 	b.noteTool("read", now) // not dangerous
 	b.noteTool("bash", now)
-	if trip, _, _, _ := b.evaluate(now, now); trip {
-		t.Fatal("one dangerous should not trip")
-	}
 	b.noteTool("edit", now)
+	if trip, _, _, _ := b.evaluate(now, now); trip {
+		t.Fatal("exactly max dangerous should not trip")
+	}
+	b.noteTool("write", now)
 	trip, kind, _, _ := b.evaluate(now, now)
 	if !trip || kind != "dangerous_tools" {
 		t.Fatalf("trip=%v kind=%q", trip, kind)

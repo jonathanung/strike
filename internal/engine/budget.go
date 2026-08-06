@@ -152,6 +152,8 @@ func (b *childBudget) noteUsage(tokens int, now time.Time) {
 	if b == nil || tokens <= 0 {
 		return
 	}
+	// Sum per-stream Used (input+cache+output for that request). Matches
+	// vendor billing (full prompt tokens each turn), not unique context size.
 	b.tokensUsed += tokens
 	b.noteProgress(now, b.lastAction)
 }
@@ -239,12 +241,13 @@ func (b *childBudget) evaluate(now time.Time, startedAt time.Time) (trip bool, k
 			fmt.Sprintf("cost budget exhausted (%.4f/%.4f USD)", b.costUSD, b.limits.MaxCostUSD),
 			protocol.ChildStatusFailed
 	}
-	if b.limits.MaxToolCalls > 0 && b.toolCalls >= b.limits.MaxToolCalls {
+	// Count limits: Max N means N complete calls are allowed; trip on the (N+1)th.
+	if b.limits.MaxToolCalls > 0 && b.toolCalls > b.limits.MaxToolCalls {
 		return true, "tool_calls",
 			fmt.Sprintf("tool-call budget exhausted (%d/%d)", b.toolCalls, b.limits.MaxToolCalls),
 			protocol.ChildStatusFailed
 	}
-	if b.limits.MaxDangerousTools > 0 && b.dangerousTools >= b.limits.MaxDangerousTools {
+	if b.limits.MaxDangerousTools > 0 && b.dangerousTools > b.limits.MaxDangerousTools {
 		return true, "dangerous_tools",
 			fmt.Sprintf("dangerous-tool budget exhausted (%d/%d)", b.dangerousTools, b.limits.MaxDangerousTools),
 			protocol.ChildStatusFailed
