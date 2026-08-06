@@ -5,7 +5,32 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jonathanung/strike-cli/internal/sandbox"
 )
+
+// guardOutsideDir creates a real directory outside the workspace that is not
+// under shared writable roots (/tmp, ~/.cache, …). t.TempDir() is usually
+// under /tmp and would be allowlisted.
+func guardOutsideDir(t *testing.T) string {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		t.Skip("no home dir for outside-workspace fixture")
+	}
+	if sandbox.IsSharedWritablePath(home) {
+		t.Skipf("home %q is shared-writable; cannot place outside fixture", home)
+	}
+	dir, err := os.MkdirTemp(home, ".strike-guard-test-")
+	if err != nil {
+		t.Fatalf("mkdir outside fixture: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	if sandbox.IsSharedWritablePath(dir) {
+		t.Skipf("outside fixture %q landed in shared-writable", dir)
+	}
+	return dir
+}
 
 func TestCheckBashWorkspaceBoundaryAllowsInside(t *testing.T) {
 	root := t.TempDir()
@@ -47,6 +72,13 @@ func TestCheckBashWorkspaceBoundaryAllowsInside(t *testing.T) {
 		"find build -exec rm {} ;",
 		"echo $(echo hi)",
 		"echo `echo hi`",
+		// Shared scratch / devices — normal shell idioms.
+		"ls 2>/dev/null",
+		"echo hi >/dev/null",
+		"echo hi 2>/dev/null",
+		"find /tmp -type f 2>/dev/null | head -5",
+		"echo x > /tmp/strike-guard-allow-test-out",
+		"rm -f /tmp/strike-guard-allow-test-out",
 	}
 	for _, c := range cmds {
 		if err := checkBashWorkspaceBoundary(c, root); err != nil {
@@ -55,9 +87,31 @@ func TestCheckBashWorkspaceBoundaryAllowsInside(t *testing.T) {
 	}
 }
 
+func TestCheckBashWorkspaceBoundaryAllowsSharedWritable(t *testing.T) {
+	root := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cache := filepath.Join(home, ".cache")
+	if err := os.MkdirAll(filepath.Join(cache, "go-build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmds := []string{
+		"rm -rf /tmp/outside-workspace-strike-test",
+		"cd /tmp && rm -rf outside-workspace-strike-test",
+		"rm -rf " + filepath.Join(cache, "go-build", "trim"),
+		"echo hi > " + filepath.Join(cache, "out.txt"),
+		"ls " + cache + " 2>/dev/null",
+	}
+	for _, c := range cmds {
+		if err := checkBashWorkspaceBoundary(c, root); err != nil {
+			t.Fatalf("check(%q) = %v, want nil (shared writable)", c, err)
+		}
+	}
+}
+
 func TestCheckBashWorkspaceBoundaryBlocksOutside(t *testing.T) {
 	root := t.TempDir()
-	outside := t.TempDir()
+	outside := guardOutsideDir(t)
 	secret := filepath.Join(outside, "secret.txt")
 	if err := os.WriteFile(secret, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
@@ -68,7 +122,6 @@ func TestCheckBashWorkspaceBoundaryBlocksOutside(t *testing.T) {
 		"rm -rf " + secret,
 		"rm " + secret,
 		"/bin/rm -rf " + outside,
-		"rm -rf /tmp/outside-workspace-strike-test",
 		"rm -rf /home",
 		"rm -rf /",
 		"rm -rf /*",
@@ -80,8 +133,8 @@ func TestCheckBashWorkspaceBoundaryBlocksOutside(t *testing.T) {
 		"unlink " + secret,
 		"shred " + secret,
 		"cd " + outside + " && rm -rf secret.txt",
-		"cd /tmp && rm -rf outside-workspace-strike-test",
-		"rm -rf ../" + filepath.Base(outside),
+		// Non-shared path under /var (not /var/tmp).
+		"rm -rf /var/lib/strike-guard-no-such-path/secret",
 	}
 	for _, c := range cmds {
 		err := checkBashWorkspaceBoundary(c, root)
@@ -98,7 +151,7 @@ func TestCheckBashWorkspaceBoundaryBlocksOutside(t *testing.T) {
 
 func TestCheckBashWorkspaceBoundaryBlocksSymlinkEscape(t *testing.T) {
 	root := t.TempDir()
-	outside := t.TempDir()
+	outside := guardOutsideDir(t)
 	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +183,7 @@ func TestCheckBashWorkspaceBoundaryYoloStillBlocked(t *testing.T) {
 	// the tool layer; the static path guard still runs before execution for
 	// known destructive forms (incomplete — not a security boundary).
 	root := t.TempDir()
-	outside := t.TempDir()
+	outside := guardOutsideDir(t)
 	marker := filepath.Join(outside, "keep-me")
 	if err := os.WriteFile(marker, []byte("safe"), 0o644); err != nil {
 		t.Fatal(err)
@@ -200,7 +253,7 @@ func TestIsDangerousRemovalPath(t *testing.T) {
 
 func TestCheckBashGuardRedirections(t *testing.T) {
 	root := t.TempDir()
-	outside := t.TempDir()
+	outside := guardOutsideDir(t)
 	outFile := filepath.Join(outside, "out.txt")
 
 	block := []string{
@@ -228,11 +281,22 @@ func TestCheckBashGuardRedirections(t *testing.T) {
 	if err := checkBashWorkspaceBoundary("echo hi > out.txt 2>&1", root); err != nil {
 		t.Fatalf("in-workspace redir + fd dup: %v", err)
 	}
+	// /dev/null and temp redirections are shared-writable.
+	for _, c := range []string{
+		"echo hi >/dev/null",
+		"echo hi 2>/dev/null",
+		"ls 2>/dev/null",
+		"echo hi > /tmp/strike-redir-allow",
+	} {
+		if err := checkBashWorkspaceBoundary(c, root); err != nil {
+			t.Fatalf("shared redir %q: %v", c, err)
+		}
+	}
 }
 
 func TestCheckBashGuardNewDestructiveCmds(t *testing.T) {
 	root := t.TempDir()
-	outside := t.TempDir()
+	outside := guardOutsideDir(t)
 	secret := filepath.Join(outside, "secret.txt")
 
 	block := []string{
@@ -269,7 +333,7 @@ func TestCheckBashGuardNewDestructiveCmds(t *testing.T) {
 
 func TestCheckBashGuardWrappers(t *testing.T) {
 	root := t.TempDir()
-	outside := t.TempDir()
+	outside := guardOutsideDir(t)
 	secret := filepath.Join(outside, "secret.txt")
 
 	block := []string{
@@ -303,7 +367,7 @@ func TestCheckBashGuardWrappers(t *testing.T) {
 
 func TestCheckBashGuardFind(t *testing.T) {
 	root := t.TempDir()
-	outside := t.TempDir()
+	outside := guardOutsideDir(t)
 
 	block := []string{
 		"find " + outside + " -delete",
@@ -322,6 +386,10 @@ func TestCheckBashGuardFind(t *testing.T) {
 	// find without destructive action is allowed even outside (read-only scan).
 	if err := checkBashWorkspaceBoundary("find "+outside+" -name '*.txt' -print", root); err != nil {
 		t.Fatalf("find -print outside should pass: %v", err)
+	}
+	// find with 2>/dev/null must not trip the redirection guard.
+	if err := checkBashWorkspaceBoundary("find /tmp -type f 2>/dev/null | head -5", root); err != nil {
+		t.Fatalf("find + /dev/null: %v", err)
 	}
 	if err := checkBashWorkspaceBoundary("find . -name '*.o' -delete", root); err != nil {
 		t.Fatalf("find -delete inside: %v", err)
@@ -361,7 +429,7 @@ func TestCheckBashGuardInterpreterOneLiners(t *testing.T) {
 
 func TestCheckBashGuardCommandSubstitution(t *testing.T) {
 	root := t.TempDir()
-	outside := t.TempDir()
+	outside := guardOutsideDir(t)
 	secret := filepath.Join(outside, "secret.txt")
 
 	block := []string{
@@ -432,7 +500,7 @@ func TestCheckBashGuardSubshellCdDoesNotPoisonParentCwd(t *testing.T) {
 	// Command substitutions run in a subshell; a cd inside must not make a
 	// later parent-statement relative path resolve under the subshell cwd.
 	root := t.TempDir()
-	outside := t.TempDir()
+	outside := guardOutsideDir(t)
 	// After real `cd outside`, `rm secret.txt` would delete outside/secret.txt.
 	// A poisoned cwd pointing back at root would false-allow that rm.
 	cmd := "cd " + outside + "; echo $(cd " + root + " && echo hi); rm secret.txt"

@@ -21,6 +21,11 @@ type applyDiffModal struct {
 	summary    string // short description for the dialog body
 	choice     int    // 0 = apply, 1 = cancel
 	decided    bool
+	// diffOffset scrolls the DiffPreview body when the hunk exceeds MaxLines.
+	// When diffScrolled is false, Offset 0 keeps change-preferring trim; the
+	// first scroll snaps to DiffWindowStart then applies the delta.
+	diffOffset   int
+	diffScrolled bool
 }
 
 func newApplyDiffModalEdit(files host.Files, path, oldString, newString string, replaceAll bool) *applyDiffModal {
@@ -57,10 +62,27 @@ func (m *applyDiffModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 		return nil, func() tea.Msg { return applyDiffResultMsg{canceled: true} }
 	}
 	switch msg.String() {
-	case "left", "h", "shift+tab", "up", "k":
+	case "left", "h", "shift+tab":
 		m.choice = 0
-	case "right", "l", "tab", "down", "j":
+	case "right", "l", "tab":
 		m.choice = 1
+	case "up", "k":
+		// Prefer scrolling a tall diff; otherwise move choice to apply.
+		if m.scrollDiff(-1) {
+			return m, nil
+		}
+		m.choice = 0
+	case "down", "j":
+		if m.scrollDiff(1) {
+			return m, nil
+		}
+		m.choice = 1
+	case "pgup", "ctrl+u":
+		m.scrollDiff(-diffPreviewMaxLinesModal)
+		return m, nil
+	case "pgdown", "ctrl+d":
+		m.scrollDiff(diffPreviewMaxLinesModal)
+		return m, nil
 	case "y", "1", "a":
 		return m.confirmApply()
 	case "n", "2":
@@ -74,6 +96,34 @@ func (m *applyDiffModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 		return nil, func() tea.Msg { return applyDiffResultMsg{canceled: true} }
 	}
 	return m, nil
+}
+
+// scrollDiff moves the diff window by delta lines. Returns false when the
+// hunk fits in MaxLines (so callers can fall back to choice navigation).
+func (m *applyDiffModal) scrollDiff(delta int) bool {
+	if m.patch != "" || (m.oldString == "" && m.newString == "") {
+		return false
+	}
+	maxOff := ui.DiffMaxOffset(m.oldString, m.newString, diffPreviewMaxLinesModal)
+	if maxOff <= 0 {
+		return false
+	}
+	cur := m.diffOffset
+	if !m.diffScrolled {
+		// Snap from change-preferring auto window to an absolute offset so the
+		// first ↓/↑ continues from what the user already sees.
+		cur = ui.DiffWindowStart(m.oldString, m.newString, diffPreviewMaxLinesModal)
+		m.diffScrolled = true
+	}
+	next := cur + delta
+	if next < 0 {
+		next = 0
+	}
+	if next > maxOff {
+		next = maxOff
+	}
+	m.diffOffset = next
+	return true
 }
 
 func (m *applyDiffModal) confirmApply() (modal, tea.Cmd) {
@@ -119,7 +169,17 @@ func (m *applyDiffModal) view(width int, th theme.Theme) string {
 	heading := wrapToWidth(st.WarningStrong.Render("Apply patch to worktree?"), inner)
 	detail := wrapToWidth(st.Text.Render(m.summary), inner)
 	var diffSection string
+	scrollable := false
 	if m.patch == "" && (m.oldString != "" || m.newString != "") {
+		moreHint := ""
+		if ui.DiffExceeds(m.oldString, m.newString, diffPreviewMaxLinesModal) {
+			scrollable = true
+			moreHint = "↑/↓ scroll"
+		}
+		// Clamp offset if the hunk shrank (should not happen mid-modal).
+		if maxOff := ui.DiffMaxOffset(m.oldString, m.newString, diffPreviewMaxLinesModal); m.diffOffset > maxOff {
+			m.diffOffset = maxOff
+		}
 		diffBlock := ui.DiffPreview(th, ui.DiffPreviewOpts{
 			Path:      "",
 			Old:       m.oldString,
@@ -127,6 +187,8 @@ func (m *applyDiffModal) view(width int, th theme.Theme) string {
 			MaxLines:  diffPreviewMaxLinesModal,
 			Width:     inner,
 			ShowStats: true,
+			Offset:    m.diffOffset,
+			MoreHint:  moreHint,
 		})
 		if diffBlock != "" {
 			diffSection = "\n" + diffBlock
@@ -149,9 +211,13 @@ func (m *applyDiffModal) view(width int, th theme.Theme) string {
 	}
 	sep := themedSpace(th.Spacing.SM)
 	body := heading + "\n" + detail + diffSection + strings.Repeat("\n", max(1, th.Spacing.SM)) + strings.Join(parts, sep)
+	hints := []string{"←/→ select", "enter confirm", "esc cancel"}
+	if scrollable {
+		hints = []string{"↑/↓ scroll", "←/→ select", "enter confirm", "esc cancel"}
+	}
 	return ui.Dialog(th, ui.DialogOpts{
 		Title: "apply patch",
-		Hint:  dotJoin(th, "←/→ select", "enter confirm", "esc cancel"),
+		Hint:  dotJoin(th, hints...),
 		Width: width,
 		Tone:  ui.ToneWarning,
 	}, body)
