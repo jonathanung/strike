@@ -6,6 +6,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
+	"github.com/jonathanung/strike-cli/internal/tool"
 )
 
 // Restored is model-usable runtime state reduced from a session event log.
@@ -44,8 +45,10 @@ type reqAccum struct {
 }
 
 type toolEnd struct {
-	output  string
-	isError bool
+	output    string
+	isError   bool
+	errorCode string
+	retryable bool
 }
 
 // pendingAsk remembers PermissionAsked fields until PermissionResolved.
@@ -80,11 +83,20 @@ func Restore(events []protocol.Event) Restored {
 			for _, c := range cur.calls {
 				end, ok := cur.results[c.ID]
 				if !ok {
-					end = toolEnd{output: unstartedToolOutput, isError: true}
+					end = toolEnd{
+						output:    unstartedToolOutput,
+						isError:   true,
+						errorCode: string(tool.CodeCanceled),
+					}
+				}
+				tr := &provider.ToolResult{CallID: c.ID, Output: end.output, IsError: end.isError}
+				if end.isError && end.errorCode != "" {
+					tr.ErrorCode = end.errorCode
+					tr.Retryable = end.retryable
 				}
 				msgs = append(msgs, provider.Message{
 					Role:       provider.RoleTool,
-					ToolResult: &provider.ToolResult{CallID: c.ID, Output: end.output, IsError: end.isError},
+					ToolResult: tr,
 				})
 			}
 		}
@@ -127,7 +139,12 @@ func Restore(events []protocol.Event) Restored {
 			})
 		case protocol.ToolCallEnd:
 			ensure(e.ProviderRequestID)
-			cur.results[e.CallID] = toolEnd{output: e.Output, isError: e.IsError}
+			te := toolEnd{output: e.Output, isError: e.IsError}
+			if e.Error != nil {
+				te.errorCode = e.Error.Code
+				te.retryable = e.Error.Retryable
+			}
+			cur.results[e.CallID] = te
 		case protocol.TurnCompleted, protocol.EngineError:
 			flush()
 		case protocol.CompactionCompleted:
