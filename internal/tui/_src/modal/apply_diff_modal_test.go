@@ -123,12 +123,17 @@ func TestApplyDiffModalScrollsTallDiff(t *testing.T) {
 		t.Fatalf("initial window should show start: %q", plain0)
 	}
 
+	// First down snaps from change-preferring auto window, then +1.
+	start := m.diffOffset // 0 = auto
 	next, cmd := m.update(tea.KeyPressMsg{Code: tea.KeyDown})
 	if next != m || cmd != nil {
 		t.Fatalf("scroll down next=%T cmd=%v", next, cmd != nil)
 	}
-	if m.diffOffset < 1 {
-		t.Fatalf("diffOffset after down = %d, want >= 1", m.diffOffset)
+	if !m.diffScrolled {
+		t.Fatal("first scroll should mark diffScrolled")
+	}
+	if m.diffOffset < start {
+		t.Fatalf("diffOffset after down = %d, want >= auto start", m.diffOffset)
 	}
 	plain1 := ansi.Strip(m.view(72, theme.Default()))
 	if strings.Contains(plain1, "old-line-0") && m.diffOffset >= diffPreviewMaxLinesModal {

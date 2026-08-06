@@ -507,6 +507,23 @@ func TestDiffPreviewMultiHunkLCS(t *testing.T) {
 	}
 }
 
+func TestDiffWindowStartPrefersChange(t *testing.T) {
+	var ctx strings.Builder
+	for i := 0; i < 9; i++ {
+		fmt.Fprintf(&ctx, "context-%d\n", i)
+	}
+	prefix := ctx.String()
+	oldS := prefix + "OLD"
+	newS := prefix + "NEW"
+	// 9 equal + del + ins = 11; MaxLines 8 drops 3 leading equal → start 3
+	if got := DiffWindowStart(oldS, newS, 8); got != 3 {
+		t.Errorf("DiffWindowStart = %d, want 3", got)
+	}
+	if got := DiffWindowStart("a", "b", 8); got != 0 {
+		t.Errorf("short DiffWindowStart = %d, want 0", got)
+	}
+}
+
 func TestDiffPreviewOffsetScroll(t *testing.T) {
 	th := theme.Default()
 	var oldB, newB strings.Builder

@@ -78,6 +78,18 @@ func DiffMaxOffset(oldStr, newStr string, maxLines int) int {
 	return n - maxLines
 }
 
+// DiffWindowStart returns the body offset used when Offset is 0 (change-
+// preferring trim). Scroll handlers should snap to this before applying a
+// delta so the first ↓ does not jump from the change region to line 0.
+func DiffWindowStart(oldStr, newStr string, maxLines int) int {
+	if maxLines <= 0 {
+		maxLines = defaultDiffMaxLines
+	}
+	lines := lineDiff(oldStr, newStr)
+	start, _ := preferredWindow(lines, maxLines)
+	return start
+}
+
 type diffOp int
 
 const (
@@ -291,19 +303,9 @@ func renderDiffContent(th theme.Theme, base, strong lipgloss.Style, dl diffLine,
 
 // paintTruncatedSpans renders spans clipped to the already-truncated plain
 // string (which may end in an ellipsis glyph).
-func paintTruncatedSpans(base, strong lipgloss.Style, spans []hlSpan, trunc string, op diffOp) string {
-	// Walk spans consuming runes until we have painted trunc's content.
-	// Simpler path: if any span is changed, still try; on mismatch fall back
-	// to a single base-styled trunc.
-	ell := ""
-	body := trunc
-	// Detect trailing ellipsis from ansi.Truncate (single rune typically).
-	if r, size := utf8.DecodeLastRuneInString(trunc); r != utf8.RuneError && size > 0 {
-		// Keep whole trunc under base when mapping is ambiguous.
-		_ = r
-	}
+func paintTruncatedSpans(base, strong lipgloss.Style, spans []hlSpan, trunc string, _ diffOp) string {
 	var b strings.Builder
-	remain := body
+	remain := trunc
 	for _, sp := range spans {
 		if remain == "" {
 			break
@@ -317,7 +319,7 @@ func paintTruncatedSpans(base, strong lipgloss.Style, spans []hlSpan, trunc stri
 			remain = remain[len(sp.text):]
 			continue
 		}
-		// Partial span or ellipsis tail — paint rest with base and stop.
+		// Partial span or ellipsis tail — paint rest with current style and stop.
 		b.WriteString(style.Render(remain))
 		remain = ""
 		break
@@ -325,13 +327,10 @@ func paintTruncatedSpans(base, strong lipgloss.Style, spans []hlSpan, trunc stri
 	if remain != "" {
 		b.WriteString(base.Render(remain))
 	}
-	out := b.String()
-	if out == "" {
-		out = base.Render(trunc)
+	if b.Len() == 0 {
+		return base.Render(trunc)
 	}
-	_ = ell
-	_ = op
-	return out
+	return b.String()
 }
 
 func padLeftNum(n, width int) string {
@@ -384,20 +383,27 @@ func windowDiffBody(lines []diffLine, maxLines, offset int) (body []diffLine, ov
 	}
 
 	// Offset 0: prefer the changed region (drop leading/trailing equal first).
-	start := 0
+	start, end := preferredWindow(lines, maxLines)
+	return lines[start:end], start, len(lines) - end
+}
+
+// preferredWindow returns the [start,end) body range for change-preferring trim.
+func preferredWindow(lines []diffLine, maxLines int) (start, end int) {
+	if maxLines <= 0 || len(lines) <= maxLines {
+		return 0, len(lines)
+	}
+	start = 0
 	for len(lines)-start > maxLines && start < len(lines) && lines[start].op == diffEqual {
 		start++
 	}
-	end := len(lines)
+	end = len(lines)
 	for end-start > maxLines && end > start && lines[end-1].op == diffEqual {
 		end--
 	}
-	body = lines[start:end]
-	if len(body) > maxLines {
-		body = body[:maxLines]
+	if end-start > maxLines {
 		end = start + maxLines
 	}
-	return body, start, len(lines) - end
+	return start, end
 }
 
 // trimDiffBody prefers the changed region when truncating to maxLines.

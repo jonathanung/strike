@@ -22,7 +22,10 @@ type applyDiffModal struct {
 	choice     int    // 0 = apply, 1 = cancel
 	decided    bool
 	// diffOffset scrolls the DiffPreview body when the hunk exceeds MaxLines.
-	diffOffset int
+	// When diffScrolled is false, Offset 0 keeps change-preferring trim; the
+	// first scroll snaps to DiffWindowStart then applies the delta.
+	diffOffset   int
+	diffScrolled bool
 }
 
 func newApplyDiffModalEdit(files host.Files, path, oldString, newString string, replaceAll bool) *applyDiffModal {
@@ -105,7 +108,14 @@ func (m *applyDiffModal) scrollDiff(delta int) bool {
 	if maxOff <= 0 {
 		return false
 	}
-	next := m.diffOffset + delta
+	cur := m.diffOffset
+	if !m.diffScrolled {
+		// Snap from change-preferring auto window to an absolute offset so the
+		// first ↓/↑ continues from what the user already sees.
+		cur = ui.DiffWindowStart(m.oldString, m.newString, diffPreviewMaxLinesModal)
+		m.diffScrolled = true
+	}
+	next := cur + delta
 	if next < 0 {
 		next = 0
 	}
