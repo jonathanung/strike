@@ -237,6 +237,8 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		m.recordUsage(ev)
 		cmd = m.broadcastContextState()
 	case protocol.EffectivePrompt:
+		m.contextExcluded = append([]string(nil), ev.ExcludedKinds...)
+		m.contextPinned = append([]string(nil), ev.PinnedKinds...)
 		if m.pendingContextDoctor {
 			m.pendingContextDoctor = false
 			m.modal = newDoctorModal(ev, m.contextLimit, m.contextLimitKnown)
@@ -244,6 +246,36 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		} else {
 			m.cells = append(m.cells, &infoCell{text: formatEffectivePrompt(ev)})
 		}
+	case protocol.ContextControlsSelected:
+		m.contextExcluded = append([]string(nil), ev.ExcludedKinds...)
+		m.contextPinned = append([]string(nil), ev.PinnedKinds...)
+		parts := make([]string, 0, 2)
+		if len(ev.ExcludedKinds) > 0 {
+			parts = append(parts, "exclude "+strings.Join(ev.ExcludedKinds, ","))
+		} else {
+			parts = append(parts, "exclude none")
+		}
+		if len(ev.PinnedKinds) > 0 {
+			parts = append(parts, "pin "+strings.Join(ev.PinnedKinds, ","))
+		} else {
+			parts = append(parts, "pin none")
+		}
+		sep := m.th.Resolve().Icons.DetailSeparator
+		if sep == "" {
+			sep = " "
+		}
+		m.setNotice("context controls: "+strings.Join(parts, " "+sep+" "), false)
+	case protocol.ContextFitWarning:
+		msg := ev.Message
+		if msg == "" {
+			msg = fmt.Sprintf("context fit %s: ~%d / %d tok", ev.Level, ev.EstimatedTokens, ev.ContextLimit)
+		}
+		if m.turnRunning {
+			m.cells = append(m.cells, &errorCell{text: msg})
+		} else {
+			m.setNotice(msg, ev.Level == protocol.ContextFitCritical)
+		}
+		cmd = m.broadcastContextState()
 	case protocol.CompactionCompleted:
 		strategy := ev.Strategy
 		if strategy == "" {
@@ -552,6 +584,10 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 		return e.Correlation, true
 	case protocol.EffectivePrompt:
 		return e.Correlation, true
+	case protocol.ContextFitWarning:
+		return e.Correlation, true
+	case protocol.ContextControlsSelected:
+		return e.Correlation, true
 	case protocol.EngineError:
 		return e.Correlation, true
 	case protocol.ChildStarted:
@@ -612,6 +648,15 @@ func formatEffectivePrompt(ev protocol.EffectivePrompt) string {
 			formatAttrTok(a.Total),
 		)
 	}
+	if len(ev.ExcludedKinds) > 0 {
+		fmt.Fprintf(&b, "\n  excluded: %s", strings.Join(ev.ExcludedKinds, ", "))
+	}
+	if len(ev.PinnedKinds) > 0 {
+		fmt.Fprintf(&b, "\n  pinned: %s", strings.Join(ev.PinnedKinds, ", "))
+	}
+	if len(ev.ShedKinds) > 0 {
+		fmt.Fprintf(&b, "\n  shed: %s", strings.Join(ev.ShedKinds, ", "))
+	}
 	if len(ev.Layers) == 0 {
 		b.WriteString("\n  (no layers)")
 		return b.String()
@@ -620,8 +665,18 @@ func formatEffectivePrompt(ev protocol.EffectivePrompt) string {
 		kind := sanitizeDisplayData(layer.Kind)
 		source := sanitizeDisplayData(layer.Source)
 		mode := sanitizeDisplayData(layer.Mode)
-		fmt.Fprintf(&b, "\n  %d. %s [%s] %s - %d chars",
-			i+1, kind, mode, source, layer.Chars)
+		pin := ""
+		if layer.Pinned {
+			pin = " pin"
+		}
+		est := layer.EstTokens
+		if est > 0 {
+			fmt.Fprintf(&b, "\n  %d. %s [%s]%s %s - %d chars ~%d tok",
+				i+1, kind, mode, pin, source, layer.Chars, est)
+		} else {
+			fmt.Fprintf(&b, "\n  %d. %s [%s]%s %s - %d chars",
+				i+1, kind, mode, pin, source, layer.Chars)
+		}
 	}
 	return b.String()
 }

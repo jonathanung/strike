@@ -100,8 +100,11 @@ strike launches without any provider configured. Pick one inside the TUI:
 /workflow inspect <name>       # phases, gates, fingerprint, grants
 /workflow start <name>         # preview phase grants, then activate
 /workflow stop                 # clear active phase (keeps session history)
-/context                       # context doctor (layers + request token slices)
-/effective-prompt              # alias of /context
+/context                       # context doctor (layers + ~tok by source)
+/context pin|exclude <kind>    # pin or exclude a system-prompt layer kind
+/context include|unpin <kind>  # undo exclude/pin
+/context clear                 # clear pin/exclude sets
+/effective-prompt              # alias of bare /context
 /cost                          # session token totals and estimated USD cost
 /keys                          # filterable keybind cheatsheet (also f1)
 /legend                        # UI icons, status glyphs, and chrome meanings
@@ -161,7 +164,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/telemetry [on\|off\|status]` | local system metrics pane (CPU/RAM/disk); **on by default** (~1 Hz sampler). Disable with `/telemetry off` |
 | `/loop` | schedule a recurring prompt (`15m`, `2h`, …); session-only; `/loop list`, `/loop stop [id]` — see [loop.md](loop.md). Distinct from [`/goal`](goal.md) |
 | `/workflow` | list/inspect/start/stop loaded workflows; start previews phase permission grants; palette expands actions |
-| `/context` | context doctor modal: system-prompt layer sizes, history msg count, **request token attribution** (system / tools / messages / tool_results; local ~4 chars/token estimate, labeled `estimated`), oversized warnings (previews redacted) |
+| `/context` | context doctor modal: system-prompt layers with **per-source ~token estimates**, history msg count, request token attribution (system / tools / messages / tool_results; local ~4 chars/token, labeled `estimated`), pin/exclude/shed state, oversized warnings (previews redacted). Subcommands: `pin`/`unpin`/`exclude`/`include` `<kind>`, `clear`. Fit warnings also appear on the timeline before hard overflow when the window is known. Kind examples: `project_memory`, `lean_code`, `instruction`, `persona` |
 | `/cost` | session input/output/cache totals from usage events; est. USD when catalog rates known; unknown stays explicit |
 | `/init` | light local scan → write `AGENTS.md`; confirms before overwrite |
 | `/ftue` | setup wizard composing provider connect, model pick, optional `/init`, a skippable feature tour (panes, agents, permissions, autonomy, keys, commands), optional scheduler build-system presets (checkbox catalog with rule/limit preview; apply writes global `scheduler.presets` atomically and preserves custom limits/rules), and first-prompt guidance; opening does not change settings; tour copy uses live keybinds and omits unavailable surfaces; Finish focuses the composer; esc dismisses. Finish/dismiss acknowledge global onboarding so auto-open does not repeat; manual `/ftue` stays available. Child pickers/tour/presets return to the same wizard step |

@@ -133,12 +133,14 @@ func TestCostModalUnknownWhenNoUsage(t *testing.T) {
 func TestDoctorModalLayerBreakdownAndRedactedPreview(t *testing.T) {
 	ev := protocol.EffectivePrompt{
 		Layers: []protocol.PromptLayerInfo{
-			{Kind: protocol.PromptLayerShared, Source: "builtin:shared", Mode: protocol.PromptLayerAppend, Chars: 4000, Preview: "You are strike"},
-			{Kind: protocol.PromptLayerMemory, Source: "memory:keys", Mode: protocol.PromptLayerAppend, Chars: 8000, Preview: "token=[REDACTED] keep"},
+			{Kind: protocol.PromptLayerShared, Source: "builtin:shared", Mode: protocol.PromptLayerAppend, Chars: 4000, EstTokens: 1000, Preview: "You are strike"},
+			{Kind: protocol.PromptLayerMemory, Source: "memory:keys", Mode: protocol.PromptLayerAppend, Chars: 8000, EstTokens: 2000, Pinned: true, Preview: "token=[REDACTED] keep"},
 		},
 		SystemChars:    12000,
 		MessageCount:   4,
 		FromLastStream: true,
+		ExcludedKinds:  []string{protocol.PromptLayerLean},
+		PinnedKinds:    []string{protocol.PromptLayerMemory},
 		Attribution: protocol.RequestTokenAttribution{
 			System:      protocol.KnownTokens(3000),
 			Tools:       protocol.KnownTokens(1200),
@@ -160,9 +162,9 @@ func TestDoctorModalLayerBreakdownAndRedactedPreview(t *testing.T) {
 	for _, want := range []string{
 		"Context doctor", "last request", "12000 chars", "4 msgs",
 		"shared", "project_memory", "memory:keys", "[REDACTED]",
-		"~tok", "warning",
+		"~tok", "warning", "pin", "excluded", "lean_code", "pinned",
 		"Request input", "tool_results", "estimated", "not provider-measured",
-		"~3k", "~1.2k",
+		"~3k", "~1.2k", "~2k",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("doctor missing %q:\n%s", want, got)

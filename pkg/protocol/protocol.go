@@ -407,6 +407,22 @@ type Compact struct {
 // carries raw API keys — previews are redacted by the engine.
 type InspectEffectivePrompt struct{}
 
+// SetContextControls updates session pin/exclude sets for system-prompt
+// layer kinds. Empty slices clear that set when the corresponding Clear*
+// flag is set; otherwise empty means no change for that set.
+//
+// ExcludeKinds are omitted from composition. PinKinds are retained when the
+// engine auto-sheds optional layers under fit/compaction pressure.
+// Kind values match PromptLayer* constants (e.g. "project_memory", "lean_code").
+type SetContextControls struct {
+	// ExcludeKinds replaces the session exclude set when SetExclude is true.
+	ExcludeKinds []string `json:"excludeKinds,omitempty"`
+	SetExclude   bool     `json:"setExclude,omitempty"`
+	// PinKinds replaces the session pin set when SetPin is true.
+	PinKinds []string `json:"pinKinds,omitempty"`
+	SetPin   bool     `json:"setPin,omitempty"`
+}
+
 // Rewind removes the last completed user↔assistant turn from model-facing
 // history. When RestoreFiles is true, also restores per-file checkpoints
 // captured before mutating tools in that turn (never git reset --hard).
@@ -431,6 +447,7 @@ func (StopWorkflow) isOp()           {}
 func (FilesChanged) isOp()           {}
 func (Compact) isOp()                {}
 func (InspectEffectivePrompt) isOp() {}
+func (SetContextControls) isOp()     {}
 func (Rewind) isOp()                 {}
 
 // Event is an engine -> client notification.
@@ -1236,12 +1253,17 @@ const (
 // PromptLayerInfo is one ordered system-prompt segment with provenance.
 // Text content is not included — only kind/source/mode/size and an optional
 // redacted preview suitable for logs and the TUI.
+//
+// EstTokens is a local ~4 chars/token estimate (never provider-measured).
+// Pinned is true when the layer kind is in the session pin set.
 type PromptLayerInfo struct {
-	Kind    string `json:"kind"`
-	Source  string `json:"source"`
-	Mode    string `json:"mode"` // append | replace
-	Chars   int    `json:"chars"`
-	Preview string `json:"preview,omitempty"`
+	Kind      string `json:"kind"`
+	Source    string `json:"source"`
+	Mode      string `json:"mode"` // append | replace
+	Chars     int    `json:"chars"`
+	EstTokens int    `json:"estTokens,omitempty"`
+	Pinned    bool   `json:"pinned,omitempty"`
+	Preview   string `json:"preview,omitempty"`
 }
 
 // RequestTokenAttribution breaks model-facing input into slices for one
@@ -1259,6 +1281,33 @@ type RequestTokenAttribution struct {
 	Source      string     `json:"source,omitempty"` // actual | estimated
 }
 
+// Context fit warning levels on ContextFitWarning.
+const (
+	ContextFitWarn     = "warn"
+	ContextFitCritical = "critical"
+)
+
+// ContextFitWarning signals projected prompt occupancy is approaching or
+// exceeding the model context window (soft budget). Emitted before Stream
+// when possible so UIs can warn ahead of hard provider failure. Estimates
+// use the local ~4 chars/token heuristic unless Source says otherwise.
+type ContextFitWarning struct {
+	Correlation
+	EstimatedTokens int    `json:"estimatedTokens"`
+	ContextLimit    int    `json:"contextLimit"`
+	Level           string `json:"level"` // warn | critical
+	Message         string `json:"message"`
+	Source          string `json:"source,omitempty"` // actual | estimated
+}
+
+// ContextControlsSelected confirms the session pin/exclude sets after
+// SetContextControls (and is echoed on EffectivePrompt for inspect).
+type ContextControlsSelected struct {
+	Correlation
+	ExcludedKinds []string `json:"excludedKinds,omitempty"`
+	PinnedKinds   []string `json:"pinnedKinds,omitempty"`
+}
+
 // EffectivePrompt is the inspectable composition of the system prompt for the
 // last Stream (or the current composition when no stream has run yet).
 type EffectivePrompt struct {
@@ -1270,52 +1319,61 @@ type EffectivePrompt struct {
 	// Attribution is the estimate-labeled request-slice token breakdown
 	// (system / tools / messages / tool_results) for the same scope.
 	Attribution RequestTokenAttribution `json:"attribution"`
+	// ExcludedKinds are user-excluded layer kinds (omitted from Layers).
+	ExcludedKinds []string `json:"excludedKinds,omitempty"`
+	// PinnedKinds are user-pinned layer kinds (retained under fit pressure).
+	PinnedKinds []string `json:"pinnedKinds,omitempty"`
+	// ShedKinds are optional layers auto-dropped under fit pressure for this
+	// composition (not user-excluded; pinned kinds never appear here).
+	ShedKinds []string `json:"shedKinds,omitempty"`
 }
 
-func (UserMessage) isEvent()            {}
-func (SessionTitled) isEvent()          {}
-func (TurnStarted) isEvent()            {}
-func (TextDelta) isEvent()              {}
-func (ReasoningDelta) isEvent()         {}
-func (ToolCallBegin) isEvent()          {}
-func (ToolCallEnd) isEvent()            {}
-func (ToolCallOutput) isEvent()         {}
-func (ProcessStarted) isEvent()         {}
-func (ProcessOutput) isEvent()          {}
-func (ProcessExited) isEvent()          {}
-func (PermissionAsked) isEvent()        {}
-func (PermissionResolved) isEvent()     {}
-func (QuestionAsked) isEvent()          {}
-func (QuestionResolved) isEvent()       {}
-func (TurnCompleted) isEvent()          {}
-func (HarnessProgress) isEvent()        {}
-func (ModelSelected) isEvent()          {}
-func (AgentSelected) isEvent()          {}
-func (PhaseChanged) isEvent()           {}
-func (PlanHandoff) isEvent()            {}
-func (PhaseGrantApproved) isEvent()     {}
-func (EffortSelected) isEvent()         {}
-func (AutonomySelected) isEvent()       {}
-func (PermissionModeSelected) isEvent() {}
-func (FastSelected) isEvent()           {}
-func (FilesInvalidated) isEvent()       {}
-func (PathOverlap) isEvent()            {}
-func (EngineError) isEvent()            {}
-func (ChildStarted) isEvent()           {}
-func (ChildCompleted) isEvent()         {}
-func (DelegationChanged) isEvent()      {}
-func (WaitStarted) isEvent()            {}
-func (WaitResolved) isEvent()           {}
-func (AgentMessage) isEvent()           {}
-func (TeamRoster) isEvent()             {}
-func (UsageReported) isEvent()          {}
-func (ProviderRetrying) isEvent()       {}
-func (SchedulerQueued) isEvent()        {}
-func (SchedulerAdmitted) isEvent()      {}
-func (SchedulerCanceled) isEvent()      {}
-func (CompactionStarted) isEvent()      {}
-func (CompactionCompleted) isEvent()    {}
-func (SessionMeta) isEvent()            {}
-func (SessionRewound) isEvent()         {}
-func (HookMatched) isEvent()            {}
-func (EffectivePrompt) isEvent()        {}
+func (UserMessage) isEvent()             {}
+func (SessionTitled) isEvent()           {}
+func (TurnStarted) isEvent()             {}
+func (TextDelta) isEvent()               {}
+func (ReasoningDelta) isEvent()          {}
+func (ToolCallBegin) isEvent()           {}
+func (ToolCallEnd) isEvent()             {}
+func (ToolCallOutput) isEvent()          {}
+func (ProcessStarted) isEvent()          {}
+func (ProcessOutput) isEvent()           {}
+func (ProcessExited) isEvent()           {}
+func (PermissionAsked) isEvent()         {}
+func (PermissionResolved) isEvent()      {}
+func (QuestionAsked) isEvent()           {}
+func (QuestionResolved) isEvent()        {}
+func (TurnCompleted) isEvent()           {}
+func (HarnessProgress) isEvent()         {}
+func (ModelSelected) isEvent()           {}
+func (AgentSelected) isEvent()           {}
+func (PhaseChanged) isEvent()            {}
+func (PlanHandoff) isEvent()             {}
+func (PhaseGrantApproved) isEvent()      {}
+func (EffortSelected) isEvent()          {}
+func (AutonomySelected) isEvent()        {}
+func (PermissionModeSelected) isEvent()  {}
+func (FastSelected) isEvent()            {}
+func (FilesInvalidated) isEvent()        {}
+func (PathOverlap) isEvent()             {}
+func (EngineError) isEvent()             {}
+func (ChildStarted) isEvent()            {}
+func (ChildCompleted) isEvent()          {}
+func (DelegationChanged) isEvent()       {}
+func (WaitStarted) isEvent()             {}
+func (WaitResolved) isEvent()            {}
+func (AgentMessage) isEvent()            {}
+func (TeamRoster) isEvent()              {}
+func (UsageReported) isEvent()           {}
+func (ProviderRetrying) isEvent()        {}
+func (SchedulerQueued) isEvent()         {}
+func (SchedulerAdmitted) isEvent()       {}
+func (SchedulerCanceled) isEvent()       {}
+func (CompactionStarted) isEvent()       {}
+func (CompactionCompleted) isEvent()     {}
+func (SessionMeta) isEvent()             {}
+func (SessionRewound) isEvent()          {}
+func (HookMatched) isEvent()             {}
+func (EffectivePrompt) isEvent()         {}
+func (ContextFitWarning) isEvent()       {}
+func (ContextControlsSelected) isEvent() {}

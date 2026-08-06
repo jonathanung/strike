@@ -342,6 +342,11 @@ type Model struct {
 	modelAttachmentKnown bool
 	// pendingContextDoctor opens the doctor modal on the next EffectivePrompt.
 	pendingContextDoctor bool
+	// contextExcluded / contextPinned mirror session SetContextControls state
+	// for /context pin|exclude merge commands.
+	contextExcluded []string
+	contextPinned   []string
+
 	// vizFocusID is the agents-tree node the visualizer follows (cursor or
 	// last open). Empty falls back to viewingID / sessionID.
 	vizFocusID string

@@ -112,6 +112,8 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 		e.handleCompact(ctx, op)
 	case protocol.InspectEffectivePrompt:
 		e.handleInspectEffectivePrompt()
+	case protocol.SetContextControls:
+		e.handleSetContextControls(op)
 	case protocol.Rewind:
 		e.handleRewind(op)
 	}
@@ -128,6 +130,9 @@ func (e *Engine) handleInspectEffectivePrompt() {
 		MessageCount:   snap.MessageCount,
 		FromLastStream: snap.FromLastStream,
 		Attribution:    snap.Attribution,
+		ExcludedKinds:  snap.ExcludedKinds,
+		PinnedKinds:    snap.PinnedKinds,
+		ShedKinds:      snap.ShedKinds,
 	})
 }
 

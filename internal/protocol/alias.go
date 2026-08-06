@@ -112,61 +112,64 @@ type (
 	FilesChanged           = pub.FilesChanged
 	Compact                = pub.Compact
 	InspectEffectivePrompt = pub.InspectEffectivePrompt
+	SetContextControls     = pub.SetContextControls
 	Rewind                 = pub.Rewind
 )
 
 // Events.
 type (
-	UserMessage            = pub.UserMessage
-	SessionTitled          = pub.SessionTitled
-	TurnStarted            = pub.TurnStarted
-	TextDelta              = pub.TextDelta
-	ReasoningDelta         = pub.ReasoningDelta
-	ToolCallBegin          = pub.ToolCallBegin
-	ToolCallEnd            = pub.ToolCallEnd
-	ToolCallOutput         = pub.ToolCallOutput
-	ProcessStarted         = pub.ProcessStarted
-	ProcessOutput          = pub.ProcessOutput
-	ProcessExited          = pub.ProcessExited
-	PermissionAsked        = pub.PermissionAsked
-	PermissionResolved     = pub.PermissionResolved
-	QuestionAsked          = pub.QuestionAsked
-	QuestionResolved       = pub.QuestionResolved
-	TurnCompleted          = pub.TurnCompleted
-	TurnFileChange         = pub.TurnFileChange
-	HarnessProgress        = pub.HarnessProgress
-	ModelSelected          = pub.ModelSelected
-	AgentSelected          = pub.AgentSelected
-	PhaseChanged           = pub.PhaseChanged
-	PlanHandoff            = pub.PlanHandoff
-	PhaseGrantApproved     = pub.PhaseGrantApproved
-	PhaseGrantRule         = pub.PhaseGrantRule
-	EffortSelected         = pub.EffortSelected
-	AutonomySelected       = pub.AutonomySelected
-	PermissionModeSelected = pub.PermissionModeSelected
-	FastSelected           = pub.FastSelected
-	FilesInvalidated       = pub.FilesInvalidated
-	PathOverlap            = pub.PathOverlap
-	PathOverlapHolder      = pub.PathOverlapHolder
-	EngineError            = pub.EngineError
-	ChildStarted           = pub.ChildStarted
-	ChildCompleted         = pub.ChildCompleted
-	DelegationChanged      = pub.DelegationChanged
-	WaitStarted            = pub.WaitStarted
-	WaitResolved           = pub.WaitResolved
-	AgentMessage           = pub.AgentMessage
-	TeamRoster             = pub.TeamRoster
-	UsageReported          = pub.UsageReported
-	ProviderRetrying       = pub.ProviderRetrying
-	SchedulerQueued        = pub.SchedulerQueued
-	SchedulerAdmitted      = pub.SchedulerAdmitted
-	SchedulerCanceled      = pub.SchedulerCanceled
-	CompactionStarted      = pub.CompactionStarted
-	CompactionCompleted    = pub.CompactionCompleted
-	SessionMeta            = pub.SessionMeta
-	SessionRewound         = pub.SessionRewound
-	HookMatched            = pub.HookMatched
-	EffectivePrompt        = pub.EffectivePrompt
+	UserMessage             = pub.UserMessage
+	SessionTitled           = pub.SessionTitled
+	TurnStarted             = pub.TurnStarted
+	TextDelta               = pub.TextDelta
+	ReasoningDelta          = pub.ReasoningDelta
+	ToolCallBegin           = pub.ToolCallBegin
+	ToolCallEnd             = pub.ToolCallEnd
+	ToolCallOutput          = pub.ToolCallOutput
+	ProcessStarted          = pub.ProcessStarted
+	ProcessOutput           = pub.ProcessOutput
+	ProcessExited           = pub.ProcessExited
+	PermissionAsked         = pub.PermissionAsked
+	PermissionResolved      = pub.PermissionResolved
+	QuestionAsked           = pub.QuestionAsked
+	QuestionResolved        = pub.QuestionResolved
+	TurnCompleted           = pub.TurnCompleted
+	TurnFileChange          = pub.TurnFileChange
+	HarnessProgress         = pub.HarnessProgress
+	ModelSelected           = pub.ModelSelected
+	AgentSelected           = pub.AgentSelected
+	PhaseChanged            = pub.PhaseChanged
+	PlanHandoff             = pub.PlanHandoff
+	PhaseGrantApproved      = pub.PhaseGrantApproved
+	PhaseGrantRule          = pub.PhaseGrantRule
+	EffortSelected          = pub.EffortSelected
+	AutonomySelected        = pub.AutonomySelected
+	PermissionModeSelected  = pub.PermissionModeSelected
+	FastSelected            = pub.FastSelected
+	FilesInvalidated        = pub.FilesInvalidated
+	PathOverlap             = pub.PathOverlap
+	PathOverlapHolder       = pub.PathOverlapHolder
+	EngineError             = pub.EngineError
+	ChildStarted            = pub.ChildStarted
+	ChildCompleted          = pub.ChildCompleted
+	DelegationChanged       = pub.DelegationChanged
+	WaitStarted             = pub.WaitStarted
+	WaitResolved            = pub.WaitResolved
+	AgentMessage            = pub.AgentMessage
+	TeamRoster              = pub.TeamRoster
+	UsageReported           = pub.UsageReported
+	ProviderRetrying        = pub.ProviderRetrying
+	SchedulerQueued         = pub.SchedulerQueued
+	SchedulerAdmitted       = pub.SchedulerAdmitted
+	SchedulerCanceled       = pub.SchedulerCanceled
+	CompactionStarted       = pub.CompactionStarted
+	CompactionCompleted     = pub.CompactionCompleted
+	SessionMeta             = pub.SessionMeta
+	SessionRewound          = pub.SessionRewound
+	HookMatched             = pub.HookMatched
+	EffectivePrompt         = pub.EffectivePrompt
+	ContextFitWarning       = pub.ContextFitWarning
+	ContextControlsSelected = pub.ContextControlsSelected
 )
 
 // Status / label constants.
@@ -203,6 +206,9 @@ const (
 
 	UsageSourceActual    = pub.UsageSourceActual
 	UsageSourceEstimated = pub.UsageSourceEstimated
+
+	ContextFitWarn     = pub.ContextFitWarn
+	ContextFitCritical = pub.ContextFitCritical
 
 	SchedulerReasonCanceled = pub.SchedulerReasonCanceled
 	SchedulerReasonClosed   = pub.SchedulerReasonClosed

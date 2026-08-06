@@ -315,26 +315,23 @@ func TestForegroundTaskIndependentHistory(t *testing.T) {
 	var childReq, parentFinal *provider.Request
 	for i := range reqs {
 		r := &reqs[i]
-		// Skip auto-nudge streams (they also contain prior tool results).
-		isNudge := false
-		for _, msg := range r.Messages {
-			if msg.Role == provider.RoleUser && strings.Contains(msg.Text, "[child.completed") {
-				isNudge = true
-				break
-			}
-		}
-		if isNudge {
-			continue
-		}
 		if len(r.Messages) > 0 && r.Messages[0].Role == provider.RoleUser && r.Messages[0].Text == taskPrompt {
 			childReq = r
 			continue
 		}
 		// Parent final includes the original user turn plus a tool result.
+		// Prefer that even when mid-turn inject already appended [child.completed]
+		// into the same Stream (not a pure idle auto-nudge).
+		hasTaskResult := false
 		for _, msg := range r.Messages {
 			if msg.Role == provider.RoleTool && msg.ToolResult != nil && msg.ToolResult.CallID == "task-1" {
-				parentFinal = r
+				hasTaskResult = true
+				break
 			}
+		}
+		if hasTaskResult {
+			parentFinal = r
+			continue
 		}
 	}
 	if childReq == nil {
@@ -353,16 +350,25 @@ func TestForegroundTaskIndependentHistory(t *testing.T) {
 		t.Fatalf("missing parent final stream with task tool result; reqs=%#v", reqs)
 	}
 	userTurns := 0
+	sawParentPrompt := false
 	for _, msg := range parentFinal.Messages {
 		if msg.Role == provider.RoleUser {
 			userTurns++
+			if msg.Text == parentPrompt {
+				sawParentPrompt = true
+			}
 			if msg.Text == taskPrompt {
 				t.Errorf("parent history has child prompt as user turn: %#v", parentFinal.Messages)
 			}
 		}
 	}
-	if userTurns != 1 {
-		t.Errorf("parent final user turns = %d, want 1; messages=%#v", userTurns, parentFinal.Messages)
+	if !sawParentPrompt {
+		t.Errorf("parent final missing original user turn; messages=%#v", parentFinal.Messages)
+	}
+	// userTurns may be >1 when [child.completed] was injected before the
+	// post-tool Stream (mid-turn inject); that is still the parent final.
+	if userTurns < 1 {
+		t.Errorf("parent final user turns = %d, want >= 1; messages=%#v", userTurns, parentFinal.Messages)
 	}
 	var sawToolResult bool
 	for _, msg := range parentFinal.Messages {
