@@ -75,6 +75,8 @@ func TestPermissionName(t *testing.T) {
 		"edit":          "edit",
 		"apply_patch":   "edit",
 		"notebook_edit": "edit",
+		"move":          "edit",
+		"delete":        "edit",
 		"mcp_foo_bar":   "mcp",
 		"task":          "task",
 	}
@@ -265,7 +267,7 @@ func TestBuildGuidanceDeterministic(t *testing.T) {
 
 func TestBuiltinShortPurposesCoversCoreTools(t *testing.T) {
 	core := []string{
-		"read", "write", "edit", "glob", "grep", "bash", "webfetch",
+		"read", "write", "edit", "move", "delete", "glob", "grep", "bash", "webfetch",
 		"todowrite", "todoread", "memory_write", "memory_read",
 		"issue_write", "issue_read", "plan_write", "plan_read", "plan_delegate",
 		"notebook_edit", "sleep", "skill",

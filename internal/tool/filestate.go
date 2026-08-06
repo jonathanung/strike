@@ -76,6 +76,18 @@ func (s *FileState) RecordBytes(path string, info os.FileInfo, data []byte) {
 	delete(s.dirty, path)
 }
 
+// Forget drops any snapshot and dirty flag for path (e.g. after delete/move
+// of the source). No-op when s is nil or path is empty.
+func (s *FileState) Forget(path string) {
+	if s == nil || path == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.reads, path)
+	delete(s.dirty, path)
+}
+
 // MarkDirty flags paths as externally changed. A subsequent edit/write of a
 // previously-read path fails until Record (re-read) clears the flag. Paths
 // that were never read are unaffected.
