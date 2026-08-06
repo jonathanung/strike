@@ -802,3 +802,94 @@ dialog fieldset small { color: var(--muted); }
   .perm-row { grid-template-columns: 1fr; }
   .workflow-dialog.wide { width: calc(100vw - 16px); }
 }
+
+/* Run timeline inspector tab */
+.timeline-panel { display: grid; gap: 10px; }
+.timeline-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.timeline-head h2 { margin: 0; font-size: 13px; }
+.timeline-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.timeline-actions button {
+  font-size: 10px;
+  padding: 4px 8px;
+}
+.timeline-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+.timeline-summary div {
+  border: 1px solid var(--rule);
+  background: var(--surface-muted);
+  padding: 8px;
+}
+.timeline-summary dt {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 8px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.timeline-summary dd { margin: 0; font-size: 12px; }
+.timeline-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  max-height: min(60vh, 480px);
+  overflow: auto;
+}
+.timeline-entry {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1.4fr) 72px 48px;
+  gap: 6px 8px;
+  align-items: baseline;
+  border: 1px solid var(--border-muted);
+  background: var(--surface-muted);
+  padding: 6px 8px;
+  font-size: 10px;
+}
+.timeline-state {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--muted);
+}
+.timeline-state.state-completed { color: var(--success); }
+.timeline-state.state-failed { color: var(--signal); }
+.timeline-state.state-canceled { color: var(--warning); }
+.timeline-state.state-running,
+.timeline-state.state-waiting,
+.timeline-state.state-queued { color: var(--accent-alt); }
+.timeline-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+.timeline-id {
+  color: var(--muted);
+  font-size: 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.timeline-dur { color: var(--muted); text-align: right; }
+.timeline-code {
+  grid-column: 1 / -1;
+  color: var(--warning);
+  font-size: 9px;
+}
+.timeline-err {
+  grid-column: 1 / -1;
+  color: var(--signal);
+  font-size: 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
