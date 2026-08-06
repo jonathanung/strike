@@ -19,7 +19,7 @@ strike launches without any provider configured. Pick one inside the TUI:
                                # (active level shows on the top status bar)
 /effort xhigh                  # off | low | medium | high | xhigh | max
 /autonomy                      # exit-gate policy picker
-/autonomy supervised           # supervised | agent | checks
+/autonomy supervised           # supervised | agent | checks | skip-all
 /mode                          # permission posture picker (Shift+Tab cycles)
 /mode soft-approve             # default | plan | soft-approve | accept-edits | yolo
 /agent                         # centered agent picker
@@ -31,6 +31,8 @@ strike launches without any provider configured. Pick one inside the TUI:
 /system                        # focus the system right pane (needs telemetry on)
 /telemetry                     # toggle local system metrics pane (CPU/RAM/disk)
 /telemetry on|off|status       # show/hide or report; on by default (also --telemetry)
+/pets                          # focus the pets right pane (ASCII companions)
+/pets cat|dog|panda|fish       # pick a pet and focus the pane
 /session                       # browse past root sessions for this workspace
                                # (auto-titles); ctrl+a shows all workspaces
 /session <id>                  # resume a specific session by id (any workspace)
@@ -104,7 +106,9 @@ strike launches without any provider configured. Pick one inside the TUI:
  /ftue                          # setup wizard: provider, model, optional
                                # /init, feature tour, scheduler presets,
                                # first prompt (manual)
-/mcp                           # MCP status; retry/disable servers
+ /mcp                           # MCP status; retry/disable servers
+ /lsp                           # language server status; retry/disable
+ /diagnostics                   # focus the diagnostics right pane
 /exit                          # quit strike (same as ctrl+c)
 /quit                          # alias of /exit
 # Keybind mirrors (same actions as chords; see keybinds.md and /keys):
@@ -146,7 +150,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/memory` | bare = list browser (focuses memory pane); `list [tag]`, `get <key>`, `set <key> <value>`, `rm <key>`, `export [path]`, `import <path> [--replace]` (portable JSON; relative paths stay under project root) |
 | `/queue` | browse prompts buffered while a turn runs: reorder (`shift+↑/↓` or `K`/`J`), promote (`p`), in-place edit (`enter`), load into composer (`e`), delete (`d`), clear (`c`), or interrupt and run the FIFO head next (`x`). Empty-composer `bksp` still pops the last item; idle `esc` clears the whole queue |
 | `/issues` | bare = list browser (focuses issues pane); `list [open\|closed]`, `add <title>`, `get <id>`, `close <id>`, `export [path]`, `import <path> [--replace]` (same portable rules as memory) |
-| `/agents` `/activity` `/files` `/visualizer` `/system` | jump focus to the named right pane (`/agent` remains persona select; `/system` needs telemetry on) |
+| `/agents` `/activity` `/files` `/diagnostics` `/visualizer` `/system` `/pets` | jump focus to the named right pane (`/agent` remains persona select; `/system` needs telemetry on; `/pets [name]` picks cat/dog/panda/fish) |
 | `/telemetry [on\|off\|status]` | local system metrics pane (CPU/RAM/disk); **on by default** (~1 Hz sampler). Disable with `/telemetry off` |
 | `/loop` | schedule a recurring prompt (`15m`, `2h`, …); session-only; `/loop list`, `/loop stop [id]` — see [loop.md](loop.md). Distinct from [`/goal`](goal.md) |
 | `/context` | context doctor modal: system-prompt layer sizes, history msg count, **request token attribution** (system / tools / messages / tool_results; local ~4 chars/token estimate, labeled `estimated`), oversized warnings (previews redacted) |
@@ -154,6 +158,8 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/init` | light local scan → write `AGENTS.md`; confirms before overwrite |
 | `/ftue` | setup wizard composing provider connect, model pick, optional `/init`, a skippable feature tour (panes, agents, permissions, autonomy, keys, commands), optional scheduler build-system presets (checkbox catalog with rule/limit preview; apply writes global `scheduler.presets` atomically and preserves custom limits/rules), and first-prompt guidance; opening does not change settings; tour copy uses live keybinds and omits unavailable surfaces; Finish focuses the composer; esc dismisses. Finish/dismiss acknowledge global onboarding so auto-open does not repeat; manual `/ftue` stays available. Child pickers/tour/presets return to the same wizard step |
 | `/mcp` | MCP status (`up`/`down`/`error`/`disabled`); `/mcp retry [name]`, `/mcp disable <name>` (see [config.md](config.md#mcp-servers-stdio--http)) |
+| `/lsp` | language server status; `/lsp retry [name]`, `/lsp disable <name>` (see [config.md](config.md#language-servers-lsp)) |
+| `/diagnostics` | focus the diagnostics right pane (live language-server findings) |
 
 ### Agent teams
 
@@ -187,13 +193,16 @@ Full coordination semantics: [agents-skills.md](agents-skills.md#agent-teams).
 ### Autonomy & workflows
 
 `/autonomy` sets the session exit-gate policy for multi-phase workflows
-(see [agents-skills.md](agents-skills.md)):
+(see [agents-skills.md](agents-skills.md)). The dial is **authoritative** for
+every phase exit (`phase_done`, `exit_plan_mode`); workflow-authored exit
+types are not. Distinct from `/mode` (tool permissions) and from `--auto`.
 
 | Mode | Behavior |
 |---|---|
-| `supervised` (default) | you approve phase gates |
-| `agent` | model clears gates via `phase_done` |
-| `checks` | configured check commands must exit 0 |
+| `supervised` (default) | you approve every phase exit |
+| `agent` | model clears gates via `phase_done` / `exit_plan_mode` |
+| `checks` | phase check commands must exit 0 (trust-gated `phase_check`) |
+| `skip-all` | bypass workflow/plan approval only — tool permissions unchanged |
 
 ### Permission mode dial
 

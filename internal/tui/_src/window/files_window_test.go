@@ -498,7 +498,7 @@ func TestOpenFilesExplorerPathRoutes(t *testing.T) {
 		"doc.MD": []byte("# Hi"),
 	}}
 
-	updated, cmd := m.openFilesExplorerPath("doc.MD")
+	updated, cmd := m.openFilesExplorerPath("doc.MD", 0)
 	mm := updated.(Model)
 	if cmd != nil {
 		runAppCmd(t, cmd)
@@ -510,13 +510,13 @@ func TestOpenFilesExplorerPathRoutes(t *testing.T) {
 	t.Setenv("VISUAL", "")
 	t.Setenv("EDITOR", "")
 	t.Setenv("PATH", t.TempDir())
-	updated, _ = m.openFilesExplorerPath("lib/x.go")
+	updated, _ = m.openFilesExplorerPath("lib/x.go", 0)
 	mm = updated.(Model)
 	if !mm.noticeErr || !strings.Contains(mm.notice, "no editor found") {
 		t.Fatalf("want editor notice for code file, got err=%v notice=%q", mm.noticeErr, mm.notice)
 	}
 
-	updated, cmd = m.openFilesExplorerPath("  ")
+	updated, cmd = m.openFilesExplorerPath("  ", 0)
 	if cmd != nil {
 		t.Fatal("blank path should not emit cmd")
 	}

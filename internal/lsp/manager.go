@@ -660,7 +660,7 @@ func redactErr(err error) string {
 	return msg
 }
 
-// FormatStatuses is a multi-line human summary for /lsp (E2.3).
+// FormatStatuses is a multi-line human summary for /lsp.
 func FormatStatuses(statuses []Status) string {
 	if len(statuses) == 0 {
 		return "no language servers configured (add lsp.servers in config)"
@@ -681,5 +681,6 @@ func FormatStatuses(statuses []Status) string {
 			fmt.Fprintf(&b, "  (%s)", st.Error)
 		}
 	}
+	b.WriteString("\n(/lsp retry [name]  |  /lsp disable <name>  |  /diagnostics)")
 	return b.String()
 }

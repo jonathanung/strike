@@ -439,7 +439,7 @@ func (m *tourModal) autonomyBody(st theme.Styles) string {
 	var b strings.Builder
 	b.WriteString(st.Text.Render("Autonomy is the exit-gate policy for when the agent may stop or keep going."))
 	b.WriteString("\n")
-	b.WriteString(st.Muted.Render("Open /autonomy to pick supervised, agent, or checks. This tour does not change the setting."))
+	b.WriteString(st.Muted.Render("Open /autonomy to pick supervised, agent, checks, or skip-all. This tour does not change the setting."))
 	if a := strings.TrimSpace(m.ctx.autonomy); a != "" {
 		b.WriteString("\n")
 		b.WriteString(st.Muted.Render("Current autonomy: " + a + "."))
