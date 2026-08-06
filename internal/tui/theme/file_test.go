@@ -172,6 +172,51 @@ func TestLookupMiss(t *testing.T) {
 	}
 }
 
+func TestCatalogPluginThemes(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	plug := filepath.Join(work, ".strike", "plugins", "acme.themes")
+	if err := os.MkdirAll(filepath.Join(plug, "themes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+  "schemaVersion": 1,
+  "id": "acme.themes",
+  "version": "1.0.0",
+  "name": "Themes",
+  "strike": { "min": "0.1.0" },
+  "contributions": { "themes": [{ "path": "themes/plug.json" }] }
+}`
+	if err := os.WriteFile(filepath.Join(plug, "plugin.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	themeBody := `{"name":"Plug Theme","id":"plug-theme","colors":{"accent":"#123456"}}`
+	if err := os.WriteFile(filepath.Join(plug, "themes", "plug.json"), []byte(themeBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cat := Catalog(work)
+	e, ok := Lookup(cat, "plug-theme")
+	if !ok {
+		t.Fatal("plugin theme missing from catalog")
+	}
+	if e.Source != "plugin" || e.Name != "Plug Theme" {
+		t.Fatalf("entry=%+v", e)
+	}
+
+	// Disable and ensure it disappears on next catalog (no process cache in theme).
+	lock := `{"schemaVersion":1,"plugins":{"acme.themes":{"enabled":false}}}`
+	if err := os.WriteFile(filepath.Join(work, ".strike", "plugins.lock.json"), []byte(lock), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cat2 := Catalog(work)
+	if _, ok := Lookup(cat2, "plug-theme"); ok {
+		t.Fatal("disabled plugin theme must not appear")
+	}
+}
+
 func TestUserThemesDirResolvesStrikeDirSymlink(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
