@@ -52,6 +52,8 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `internal/version` | Build-time Version/Commit stamped via `-ldflags` | stdlib |
 | `internal/update` | GitHub Releases self-update (check, download, sha256, atomic replace, re-exec) | `version`, stdlib, net/http |
 | `pkg/protocol` | **Public** Op/Event wire schema between engine and frontends; JSONL envelopes (`codec.go` / `op_codec.go`) are the session persistence + transport format (includes `scheduler.queued` / `admitted` / `canceled`). Semver via `Version` | stdlib only |
+| `pkg/redact` | **Public** shared credential-shaped string scrubbing for exports, inspect, and timeline traces (coordinate with secret-handling #796) | stdlib only |
+| `pkg/timeline` | **Public** structured run timeline builder + versioned redacted JSON/JSONL export derived from protocol events (complements session JSONL and #774 roster/budget; not a second transcript) | `pkg/protocol`, `pkg/redact`, stdlib |
 | `pkg/sdk` | **Public** thin Go client over `pkg/protocol`: in-process channel client, JSONL encode/decode, `RunTurn`, session JSONL replay. Does not embed the engine (engine stays `internal/`). Consumer docs: [sdk.md](sdk.md) | `pkg/protocol`, stdlib only |
 | `internal/protocol` | Compatibility re-export of `pkg/protocol` (type aliases + thin forwards). Prefer `pkg/protocol` for new code | `pkg/protocol` only |
 | `internal/engine` | Headless agent runtime: built-in turn loop, task-subagent function harnesses, tool dispatch, permission/question integration, deferred agent switch; implicit session-scoped agent **team** (lead + children roster + shared task board + path ownership/overlap in `team.go` / `team_board.go` / `ownership.go`); model-stream and bash admission via shared `scheduler` | `protocol`, `provider`, `harness`, `tool`, `permission`, `question`, `memory`, `config`, `sandbox`, `scheduler` |
@@ -95,6 +97,8 @@ Verbatim from the refactor spec (`.plan/refactor-agents-ui.md`):
   `tui/...`. (`pkg/protocol` is also allowed — it is not under `internal/`.)
 - No backend package imports `internal/tui/...`.
 - `pkg/protocol`: stdlib only (public wire surface).
+- `pkg/redact`: stdlib only (public scrubbing helper).
+- `pkg/timeline`: stdlib + `pkg/protocol` + `pkg/redact` only.
 - `pkg/sdk`: stdlib + `pkg/protocol` only (public client over the wire schema).
 
 These are enforced mechanically, not just by convention: `internal/tui/boundary_test.go`
@@ -301,7 +305,7 @@ Two different mechanisms, depending on whether it needs Go code:
    `autonomy`, `auth`, `settings`, `agent`, `agents`, `activity`, `files`,
    `visualizer`, `system`, `telemetry`, `pets`, `fast`, `vim`, `nano`, `md-read`,
    `theme`, `layout`, `split`, `compact`, `fork`, `undo`, `rewind`, `session`,
-   `export`, `copy`, `help`, `keys`, `legend`, `memory`, `issues`, `goal`, `loop`, `context`,
+   `export`, `timeline`, `copy`, `help`, `keys`, `legend`, `memory`, `issues`, `goal`, `loop`, `context`,
    `effective-prompt`, `cost`, `upgrade`, `init`, `ftue`, `mcp`, `exit`, `quit`, and
    keybind-backed action mirrors such as `focus-left`, `palette`,
    `interrupt`, `agent-next`, `tool-copy`, `subagent`, `root-new`, …) are
