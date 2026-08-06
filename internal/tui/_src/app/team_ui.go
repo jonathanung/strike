@@ -313,11 +313,39 @@ func pathOverlapEntry(ev protocol.PathOverlap) (childPathOverlap, bool) {
 		policy:  strings.TrimSpace(ev.Policy),
 		blocked: ev.Blocked,
 		warning: truncateRunes(strings.TrimSpace(ev.Warning), maxChildObsWarningRunes),
+		holders: pathOverlapHolderLabels(ev.Holders),
 	}
 	if entry.path == "" && entry.warning == "" {
 		return childPathOverlap{}, false
 	}
 	return entry, true
+}
+
+// pathOverlapHolderLabels extracts bounded display labels from wire holders.
+const maxPathOverlapHolders = 6
+
+func pathOverlapHolderLabels(holders []protocol.PathOverlapHolder) []string {
+	if len(holders) == 0 {
+		return nil
+	}
+	out := make([]string, 0, min(len(holders), maxPathOverlapHolders))
+	for _, h := range holders {
+		if len(out) >= maxPathOverlapHolders {
+			break
+		}
+		label := strings.TrimSpace(h.Name)
+		if label == "" {
+			label = shortSessionID(strings.TrimSpace(h.SessionID))
+		}
+		if label == "" {
+			continue
+		}
+		out = append(out, truncateRunes(label, 48))
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // applyPathOverlapToChildren retains a bounded path-overlap warning on the

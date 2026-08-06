@@ -25,12 +25,20 @@ type visualizerTool struct {
 // Remaining count is summarized as "+N more" so layout stays width-safe.
 const visualizerMaxFilesShown = 5
 
+// visualizerMaxOverlapsShown caps path-overlap rows in the detail list.
+const visualizerMaxOverlapsShown = 4
+
+// visualizerMaxOverlapHolders caps holder names shown per overlap row.
+const visualizerMaxOverlapHolders = 3
+
 // visualizerPathOverlap is one path-overlap warning on a selected node.
 type visualizerPathOverlap struct {
 	Path    string
 	Policy  string
 	Blocked bool
 	Warning string
+	// Holders are other claimants (names or short ids); empty when unknown.
+	Holders []string
 }
 
 // visualizerVerification is claim-vs-verified state when a report was observed.
@@ -155,6 +163,11 @@ func (w visualizerWindow) view(th theme.Theme) string {
 	// surface non-empty detail so the token stack stays primary.
 	lines = append(lines, visualizerDetailLines(th, w.width, s, dash)...)
 
+	// Verification + path-conflict signals (#925). Omit when no report / no
+	// overlaps — never invent a verified badge.
+	lines = append(lines, visualizerVerificationLines(th, w.width, s, dash)...)
+	lines = append(lines, visualizerConflictLines(th, w.width, s, dash)...)
+
 	// Root-oriented usage stack. Children keep unknown tokens as dashes.
 	// Tokens: never print measured zero for unknown sides.
 	inStr := formatTokenCount(s.Input, dash)
@@ -223,6 +236,186 @@ func (w visualizerWindow) view(th theme.Theme) string {
 	}
 
 	return visualizerFit(lines, w.height)
+}
+
+// visualizerVerificationLines renders claim-vs-verified chrome when a report
+// exists. Nil Verification ⇒ no badge (unknown stays unknown).
+func visualizerVerificationLines(th theme.Theme, width int, s visualizerStateMsg, dash string) []string {
+	th = th.Resolve()
+	st := th.S()
+	v := s.Verification
+	if v == nil {
+		return nil
+	}
+	label, tone, ok := visualizerVerificationLabel(v)
+	if !ok {
+		return nil
+	}
+	badge := ui.Badge(th, tone, label)
+	summary := strings.TrimSpace(v.Summary)
+	val := badge
+	if summary != "" && !strings.EqualFold(summary, label) {
+		// Distinct claimed vs verified: badge carries vocabulary; summary elaborates.
+		sumStyle := st.Text
+		switch tone {
+		case ui.ToneWarning:
+			sumStyle = st.Warning
+		case ui.ToneError:
+			sumStyle = st.Error
+		case ui.ToneSuccess:
+			sumStyle = st.Success
+		}
+		val = badge + themedSpace(th.Spacing.XS) + sumStyle.Render(sanitizeDisplayData(summary))
+	}
+	return []string{contextKVLine(th, width, "verify", val)}
+}
+
+// visualizerVerificationLabel mirrors header chip vocabulary (#809):
+// verified / claimed / unverified. ok false when nothing should render.
+func visualizerVerificationLabel(v *visualizerVerification) (label string, tone ui.Tone, ok bool) {
+	if v == nil {
+		return "", ui.ToneMuted, false
+	}
+	// Same precedence as verificationBadgeLabel (harness_trust.go).
+	switch {
+	case v.Verified && v.Passed:
+		return "verified", ui.ToneSuccess, true
+	case v.Claimed && !v.Verified:
+		return "claimed", ui.ToneWarning, true
+	case !v.Passed:
+		return "unverified", ui.ToneError, true
+	case v.Passed:
+		return "verified", ui.ToneSuccess, true
+	default:
+		// Report observed but no decisive flags — still surface as unverified
+		// so a present pointer never looks like silent success.
+		return "unverified", ui.ToneError, true
+	}
+}
+
+// visualizerConflictLines renders latest path overlaps with policy + holders.
+// Conflicting state uses warn/error tokens; omitted when no overlaps.
+func visualizerConflictLines(th theme.Theme, width int, s visualizerStateMsg, dash string) []string {
+	th = th.Resolve()
+	st := th.S()
+	list := s.PathOverlaps
+	if len(list) == 0 {
+		return nil
+	}
+	total := len(list)
+	show := list
+	extra := 0
+	if total > visualizerMaxOverlapsShown {
+		show = list[:visualizerMaxOverlapsShown]
+		extra = total - visualizerMaxOverlapsShown
+	}
+
+	// Header badge: blocked (error) when any overlap blocked, else warn.
+	anyBlocked := false
+	for _, po := range list {
+		if po.Blocked || strings.EqualFold(strings.TrimSpace(po.Policy), "block") {
+			anyBlocked = true
+			break
+		}
+	}
+	headerTone := ui.ToneWarning
+	headerLabel := "conflict"
+	if anyBlocked {
+		headerTone = ui.ToneError
+		headerLabel = "blocked"
+	}
+	header := "conflicts"
+	if total > 1 {
+		header = "conflicts (" + strconv.Itoa(total) + ")"
+	}
+	lines := []string{
+		wrapWindowText(
+			st.Muted.Render(header)+themedSpace(th.Spacing.XS)+ui.Badge(th, headerTone, headerLabel),
+			width,
+		),
+	}
+	for _, po := range show {
+		lines = append(lines, visualizerConflictRow(th, width, po, dash)...)
+	}
+	if extra > 0 {
+		more := dash + " +" + strconv.Itoa(extra) + " more"
+		lines = append(lines, wrapWindowText(st.Muted.Render(more), width))
+	}
+	return lines
+}
+
+func visualizerConflictRow(th theme.Theme, width int, po visualizerPathOverlap, dash string) []string {
+	th = th.Resolve()
+	st := th.S()
+	pathStyle := st.Warning
+	policyTone := ui.ToneWarning
+	policyLabel := strings.TrimSpace(po.Policy)
+	if policyLabel == "" {
+		if po.Blocked {
+			policyLabel = "block"
+		} else {
+			policyLabel = "warn"
+		}
+	}
+	if po.Blocked || strings.EqualFold(policyLabel, "block") {
+		pathStyle = st.Error
+		policyTone = ui.ToneError
+	}
+	path := strings.TrimSpace(po.Path)
+	if path == "" {
+		path = dash
+	} else {
+		path = sanitizeDisplayData(path)
+	}
+	prefix := themedSpace(th.Spacing.SM)
+	badge := ui.Badge(th, policyTone, policyLabel)
+	// path + policy badge on one row; truncate path to fit.
+	suffix := themedSpace(th.Spacing.XS) + badge
+	budget := max(0, width-ansi.StringWidth(prefix)-ansi.StringWidth(suffix))
+	pathShown := welcomeTruncate(path, budget, th.Icons.Ellipsis)
+	row := st.Text.Render(prefix) + pathStyle.Render(pathShown) + suffix
+	lines := []string{wrapWindowText(row, width)}
+
+	// Holders (or count) on a muted sub-row when present.
+	if holders := visualizerHolderSummary(po.Holders); holders != "" {
+		hPrefix := themedSpace(th.Spacing.MD)
+		hBudget := max(0, width-ansi.StringWidth(hPrefix))
+		hText := welcomeTruncate("holders "+holders, hBudget, th.Icons.Ellipsis)
+		lines = append(lines, wrapWindowText(st.Muted.Render(hPrefix+hText), width))
+	} else if w := strings.TrimSpace(po.Warning); w != "" {
+		// Fall back to warning text when holders unknown.
+		hPrefix := themedSpace(th.Spacing.MD)
+		hBudget := max(0, width-ansi.StringWidth(hPrefix))
+		hText := welcomeTruncate(sanitizeDisplayData(w), hBudget, th.Icons.Ellipsis)
+		lines = append(lines, wrapWindowText(st.Muted.Render(hPrefix+hText), width))
+	}
+	return lines
+}
+
+// visualizerHolderSummary formats holder names (bounded) or a count.
+func visualizerHolderSummary(holders []string) string {
+	clean := make([]string, 0, len(holders))
+	for _, h := range holders {
+		h = strings.TrimSpace(h)
+		if h == "" {
+			continue
+		}
+		clean = append(clean, sanitizeDisplayData(h))
+	}
+	if len(clean) == 0 {
+		return ""
+	}
+	show := clean
+	extra := 0
+	if len(clean) > visualizerMaxOverlapHolders {
+		show = clean[:visualizerMaxOverlapHolders]
+		extra = len(clean) - visualizerMaxOverlapHolders
+	}
+	out := strings.Join(show, ", ")
+	if extra > 0 {
+		out += " +" + strconv.Itoa(extra)
+	}
+	return out
 }
 
 // visualizerDetailLines renders objective / last action / block / files rows.
