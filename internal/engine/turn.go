@@ -973,11 +973,12 @@ func (e *Engine) toolNames() string {
 }
 
 // bashSandboxPolicy compiles the live permission layers into an OS sandbox
-// Policy for bash (write denials, network from webfetch/mcp, plan hard-denies).
+// Policy for bash (write denials, network posture, plan hard-denies).
 func (e *Engine) bashSandboxPolicy() sandbox.Policy {
 	mode := sandbox.ResolveMode(e.opts.SandboxMode)
 	if e.perms == nil {
-		return sandbox.Policy{Mode: mode, WorkDir: e.opts.WorkDir}
+		// No permission service: keep host networking (same as Defaults Ask).
+		return sandbox.Policy{Mode: mode, WorkDir: e.opts.WorkDir, Network: true}
 	}
 	return e.perms.CompileSandbox(mode, e.opts.WorkDir)
 }
