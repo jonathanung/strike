@@ -270,9 +270,9 @@ type Options struct {
 	// session maxSessionCostUSD (#577) outer envelope.
 	DefaultChildBudget tool.AgentBudgetLimits
 	// DelegationPolicy is the pre-spawn worthiness gate (#876). Empty mode
-	// defaults to enforce. Soft "local" decisions refuse bare tiny/overlap
-	// spawns unless force_delegate; hard ceilings (depth, live children,
-	// delegation count, session budget) never override.
+	// stays off (legacy always-spawn for tests/embedders); the CLI sets
+	// enforce when config omits the block. Soft "local" refuses bare
+	// tiny/overlap spawns unless force_delegate; hard ceilings never override.
 	DelegationPolicy DelegationPolicyConfig
 	// SessionBudgetExhausted, when set, is consulted by the delegation policy
 	// hard ceiling (budget_exhausted). Intended for session cost envelope

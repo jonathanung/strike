@@ -339,7 +339,9 @@ type SessionConfig struct {
 
 // DelegationPolicyConfig is JSON for session.delegationPolicy (camelCase).
 type DelegationPolicyConfig struct {
-	// Mode is off|advise|enforce (empty → enforce).
+	// Mode is off|advise|enforce. Empty is treated as off inside the engine
+	// Options zero-value; the CLI composition root defaults omitted config to
+	// enforce (product default).
 	// off: always allow spawn. advise: record preferred action but spawn.
 	// enforce: soft-local returns status local; hard ceilings deny.
 	Mode string `json:"mode,omitempty"`

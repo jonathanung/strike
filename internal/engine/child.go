@@ -148,7 +148,8 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 	}
 
 	// Delegation-worthiness policy (#876): decide whether fan-out is worthwhile
-	// before routing/spawn. Deferred spawns already passed policy at create.
+	// before routing/spawn. Deferred spawns already passed soft heuristics at
+	// create — re-check hard ceilings only (live children / budget may change).
 	var policyDec PolicyDecision
 	if existingDelegationID == "" {
 		policyDec = e.evaluateDelegationPolicy(req)
@@ -165,6 +166,11 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 				Status:       "local",
 				PolicyReason: policyDec.Reason,
 			}, nil
+		}
+	} else {
+		policyDec = e.evaluateDelegationPolicyHard(req)
+		if policyDec.Action == PolicyActionDeny {
+			return tool.TaskResult{}, fmt.Errorf("delegation denied: %s", policyDec.Reason)
 		}
 	}
 

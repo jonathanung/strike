@@ -281,6 +281,52 @@ func TestSpawnChildPolicyLiveCeiling(t *testing.T) {
 	}
 }
 
+func TestSpawnChildPolicyDeferredHardCeiling(t *testing.T) {
+	eng := New(Options{
+		SessionID: "pol-deferred-hard",
+		Agents:    []Agent{{Name: "build"}, {Name: "general"}},
+		DelegationPolicy: DelegationPolicyConfig{
+			Mode:            PolicyEnforce,
+			MaxLiveChildren: 1,
+		},
+	})
+	fakeDone := make(chan struct{})
+	eng.childMu.Lock()
+	if eng.children == nil {
+		eng.children = map[string]*childHandle{}
+	}
+	eng.children["fake-live"] = &childHandle{
+		id:    "fake-live",
+		agent: "general",
+		done:  fakeDone,
+	}
+	eng.childMu.Unlock()
+	defer close(fakeDone)
+
+	if eng.team == nil {
+		t.Fatal("team")
+	}
+	item, err := eng.team.CreateDelegation(CreateDelegationSpec{
+		Prompt:         "queued work",
+		OwnerSessionID: eng.opts.SessionID,
+		Agent:          "general",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Deferred spawn path (existingDelegationID set → hard ceilings only).
+	_, err = eng.spawnChildInner(context.Background(), tool.TaskRequest{
+		Prompt: item.Prompt,
+		Agent:  item.Agent,
+	}, item.ID)
+	if err == nil {
+		t.Fatal("expected hard deny on deferred spawn at live ceiling")
+	}
+	if !strings.Contains(err.Error(), "delegation denied") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestSpawnChildPolicyOverlapLocal(t *testing.T) {
 	dir := t.TempDir()
 	eng := New(Options{

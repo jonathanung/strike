@@ -543,20 +543,44 @@ func (e *Engine) PolicyMetricsSnapshot() (delegate, local, deny, override, advis
 
 // evaluateDelegationPolicy builds input from the engine + request and records metrics.
 func (e *Engine) evaluateDelegationPolicy(req tool.TaskRequest) PolicyDecision {
+	dec := EvaluateDelegationPolicy(e.policyInput(req))
+	if e != nil {
+		mode := NormalizeDelegationPolicy(e.opts.DelegationPolicy).Mode
+		e.policyMetrics.record(dec, mode)
+	}
+	return dec
+}
+
+// evaluateDelegationPolicyHard re-checks only hard ceilings (used at deferred
+// spawn after soft heuristics already passed at create). Soft rules are skipped
+// by evaluating with mode=off after the hard-ceiling block.
+func (e *Engine) evaluateDelegationPolicyHard(req tool.TaskRequest) PolicyDecision {
+	in := e.policyInput(req)
+	// Preserve configured ceilings (max live children) but skip soft heuristics.
+	cfg := NormalizeDelegationPolicy(in.Config)
+	cfg.Mode = PolicyOff
+	in.Config = cfg
+	dec := EvaluateDelegationPolicy(in)
+	if e != nil && dec.Action == PolicyActionDeny {
+		e.policyMetrics.record(dec, NormalizeDelegationPolicy(e.opts.DelegationPolicy).Mode)
+	}
+	// Annotate deferred hard re-check in the reason for observability.
+	if dec.Action == PolicyActionDelegate && !strings.Contains(dec.Reason, "deferred") {
+		dec.Reason = strings.TrimSpace(dec.Reason) + " deferred_hard_ok"
+	}
+	return dec
+}
+
+func (e *Engine) policyInput(req tool.TaskRequest) PolicyInput {
 	if e == nil {
-		return PolicyDecision{
-			Action:    PolicyActionDelegate,
-			Preferred: PolicyActionDelegate,
-			Reason:    "policy=off action=delegate reason=no_engine",
-			Codes:     []string{"off"},
-		}
+		return PolicyInput{Config: DelegationPolicyConfig{Mode: PolicyOff}}
 	}
 	paths := policyPathsFromRequest(req)
 	maxDepth := e.opts.MaxChildDepth
 	if maxDepth == 0 {
 		maxDepth = 1
 	}
-	in := PolicyInput{
+	return PolicyInput{
 		Config:           e.opts.DelegationPolicy,
 		Force:            req.ForceDelegate,
 		Prompt:           req.Prompt,
@@ -575,8 +599,4 @@ func (e *Engine) evaluateDelegationPolicy(req tool.TaskRequest) PolicyDecision {
 		OverlapPaths:     e.overlapPathsForPolicy(paths),
 		BudgetExhausted:  e.sessionBudgetExhausted(),
 	}
-	dec := EvaluateDelegationPolicy(in)
-	mode := NormalizeDelegationPolicy(e.opts.DelegationPolicy).Mode
-	e.policyMetrics.record(dec, mode)
-	return dec
 }
